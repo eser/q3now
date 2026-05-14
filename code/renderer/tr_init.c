@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_init.c -- functions that are not called every frame
 
 #include "tr_local.h"
@@ -85,14 +72,14 @@ cvar_t	*r_vbo;
 cvar_t	*r_fbo;
 cvar_t	*r_hdr;
 cvar_t	*r_bloom;
-cvar_t	*r_bloom_threshold;
-cvar_t	*r_bloom_threshold_mode;
-cvar_t	*r_bloom_modulate;
-cvar_t	*r_bloom_passes;
-cvar_t	*r_bloom_blend_base;
-cvar_t	*r_bloom_intensity;
-cvar_t	*r_bloom_filter_size;
-cvar_t	*r_bloom_reflection;
+cvar_t	*r_bloomThreshold;
+cvar_t	*r_bloomThresholdMode;
+cvar_t	*r_bloomModulate;
+cvar_t	*r_bloomPasses;
+cvar_t	*r_bloomBlendBase;
+cvar_t	*r_bloomIntensity;
+cvar_t	*r_bloomFilterSize;
+cvar_t	*r_bloomReflection;
 
 cvar_t	*r_renderWidth;
 cvar_t	*r_renderHeight;
@@ -105,14 +92,14 @@ cvar_t	*r_lodbias;
 cvar_t	*r_lodscale;
 
 cvar_t	*r_norefresh;
-cvar_t	*r_drawentities;
-cvar_t	*r_drawworld;
+cvar_t	*r_drawEntities;
+cvar_t	*r_drawWorld;
 cvar_t	*r_speeds;
 cvar_t	*r_fullbright;
 cvar_t	*r_novis;
 cvar_t	*r_nocull;
 cvar_t	*r_facePlaneCull;
-cvar_t	*r_showcluster;
+cvar_t	*r_showCluster;
 cvar_t	*r_nocurves;
 
 cvar_t	*r_allowExtensions;
@@ -126,8 +113,8 @@ cvar_t	*r_ext_max_anisotropy;
 
 cvar_t	*r_ignoreGLErrors;
 
-//cvar_t	*r_stencilbits;
-cvar_t	*r_texturebits;
+//cvar_t	*r_stencilBits;
+cvar_t	*r_textureBits;
 
 #ifdef USE_FBO
 cvar_t	*r_ext_multisample;
@@ -145,9 +132,9 @@ cvar_t	*r_roundImagesDown;
 cvar_t	*r_colorMipLevels;
 cvar_t	*r_picmip;
 cvar_t	*r_nomip;
-cvar_t	*r_showtris;
-cvar_t	*r_showsky;
-cvar_t	*r_shownormals;
+cvar_t	*r_showTris;
+cvar_t	*r_showSky;
+cvar_t	*r_showNormals;
 cvar_t	*r_finish;
 cvar_t	*r_clear;
 cvar_t	*r_textureMode;
@@ -1045,9 +1032,9 @@ static void R_ScreenshotFilename( char *fileName, const char *fileExt ) {
 	ms = ri.Milliseconds() % 1000;
 	if ( ms < 0 ) ms = 0;
 
-	/* CNQ3 backport: YYYY_MM_DD-HH_MM_SS-TTT filename format — the
-	   millisecond suffix removes the need to scan the directory when
-	   capturing screenshots in quick succession. */
+	/* YYYY_MM_DD-HH_MM_SS-TTT filename format — the millisecond
+	 * suffix removes the need to scan the directory when capturing
+	 * screenshots in quick succession. */
 	Com_sprintf( fileName, MAX_OSPATH,
 		"screenshots/%04d_%02d_%02d-%02d_%02d_%02d-%03d.%s",
 		1900 + t.tm_year, 1 + t.tm_mon, t.tm_mday,
@@ -1472,7 +1459,7 @@ static void VarInfo( void )
 	}
 
 	ri.Log( SEV_INFO, "texturemode: %s\n", r_textureMode->string );
-	ri.Log( SEV_INFO, "texture bits: %d\n", r_texturebits->integer ? r_texturebits->integer : 32 );
+	ri.Log( SEV_INFO, "texture bits: %d\n", r_textureBits->integer ? r_textureBits->integer : 32 );
 	ri.Log( SEV_INFO, "picmip: %d%s\n", r_picmip->integer, r_nomip->integer ? ", worldspawn only" : "" );
 
 	if ( r_vertexLight->integer || glConfig.hardwareType == GLHW_PERMEDIA2 ) {
@@ -1562,16 +1549,16 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_colorMipLevels, "Debugging tool to artificially color different mipmap levels so that they are more apparent." );
 	r_detailTextures = ri.Cvar_Get( "r_detailtextures", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_detailTextures, "Enables usage of shader stages flagged as detail." );
-	r_texturebits = ri.Cvar_Get( "r_texturebits", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_texturebits, "Number of texture bits per texture." );
+	r_textureBits = ri.Cvar_Get( "r_textureBits", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	ri.Cvar_SetDescription( r_textureBits, "Number of texture bits per texture." );
 
 	r_mergeLightmaps = ri.Cvar_Get( "r_mergeLightmaps", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_mergeLightmaps, "Merge built-in small lightmaps into bigger lightmaps (atlases)." );
 
-	// CNQ3 lightmap atlas optimization: register an alias so users coming
-	// from CNQ3 can use the familiar cvar name. The atlas pack itself is
-	// implemented by R_LoadMergedLightmaps(); both cvars must be non-zero
-	// for the atlas to be built, and both default to 1.
+	// lightmap atlas optimization
+	// The atlas pack itself is implemented by R_LoadMergedLightmaps();
+	// both cvars must be non-zero for the atlas to be built, and both
+	// default to 1.
 	r_lightmapAtlas = ri.Cvar_Get( "r_lightmapAtlas", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_lightmapAtlas,
 		"Pack individual BSP lightmaps into larger atlas textures.\n"
@@ -1579,8 +1566,8 @@ static void R_Register( void )
 		" 0: one texture per lightmap (legacy behaviour)\n"
 		" Works together with r_mergeLightmaps; setting either to 0 disables atlases." );
 
-	// CNQ3 port: while a map is loading, throttle buffer swaps so the
-	// render thread does not steal CPU/GPU time from BSP parse, lightmap
+	// while a map is loading, throttle buffer swaps so the render
+	// thread does not steal CPU/GPU time from BSP parse, lightmap
 	// upload and shader compile.
 	r_loadingFpsCap = ri.Cvar_Get( "r_loadingFpsCap", "10", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_CheckRange( r_loadingFpsCap, "0", "60", CV_INTEGER );
@@ -1671,32 +1658,32 @@ static void R_Register( void )
 	r_bloom = ri.Cvar_Get( "r_bloom", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	r_bloom->flags &= ~CVAR_LATCH; // If we were running renderervk before, we need to remove latch
 	ri.Cvar_SetDescription(r_bloom, "Enables bloom post-processing effect. Requires \\r_fbo 1.");
-	r_bloom_threshold = ri.Cvar_Get( "r_bloom_threshold", "0.6", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription(r_bloom_threshold, "Color level to extract to bloom texture, default is 0.6.");
-	ri.Cvar_SetGroup( r_bloom_threshold, CVG_RENDERER );
-	r_bloom_threshold_mode = ri.Cvar_Get( "r_bloom_threshold_mode", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_bloom_threshold_mode, "Color extraction mode:\n 0: (r|g|b) >= threshold\n 1: (r + g + b ) / 3 >= threshold\n 2: luma(r, g, b) >= threshold" );
-	ri.Cvar_SetGroup( r_bloom_threshold_mode, CVG_RENDERER );
-	r_bloom_intensity = ri.Cvar_Get( "r_bloom_intensity", "0.5", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_bloom_intensity, "Final bloom blend factor, default is 0.5." );
-	r_bloom_passes = ri.Cvar_Get( "r_bloom_passes", "5", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_CheckRange( r_bloom_passes, "3", XSTRING( MAX_BLUR_PASSES ), CV_INTEGER );
-	ri.Cvar_SetDescription( r_bloom_passes, "Count of downsampled passes (framebuffers) to blend on final bloom image, default is 5." );
-	r_bloom_blend_base = ri.Cvar_Get( "r_bloom_blend_base", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_CheckRange( r_bloom_blend_base, "0", va("%i", r_bloom_passes->integer-1), CV_INTEGER );
-	ri.Cvar_SetDescription( r_bloom_blend_base, "0-based, topmost downsampled framebuffer to use for final image, high values can be used for stronger haze effect, results in overall weaker intensity." );
-	ri.Cvar_SetGroup( r_bloom_blend_base, CVG_RENDERER );
-	r_bloom_modulate = ri.Cvar_Get( "r_bloom_modulate", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_SetDescription( r_bloom_modulate, "Modulate extracted color:\n 0: off (color = color, i.e. no changes)\n 1: by itself (color = color * color)\n 2: by intensity (color = color * luma(color))" );
-	ri.Cvar_SetGroup( r_bloom_modulate, CVG_RENDERER );
-	r_bloom_filter_size = ri.Cvar_Get( "r_bloom_filter_size", "6", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_CheckRange( r_bloom_filter_size, XSTRING( MIN_FILTER_SIZE ), XSTRING( MAX_FILTER_SIZE ), CV_INTEGER );
-	ri.Cvar_SetDescription( r_bloom_filter_size, "Filter size of Gaussian Blur effect for each pass, bigger filter size means stronger and wider blur, lower values are faster, default is 6." );
-	ri.Cvar_SetGroup( r_bloom_filter_size, CVG_RENDERER );
+	r_bloomThreshold = ri.Cvar_Get( "r_bloomThreshold", "0.6", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_SetDescription(r_bloomThreshold, "Color level to extract to bloom texture, default is 0.6.");
+	ri.Cvar_SetGroup( r_bloomThreshold, CVG_RENDERER );
+	r_bloomThresholdMode = ri.Cvar_Get( "r_bloomThresholdMode", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_SetDescription( r_bloomThresholdMode, "Color extraction mode:\n 0: (r|g|b) >= threshold\n 1: (r + g + b ) / 3 >= threshold\n 2: luma(r, g, b) >= threshold" );
+	ri.Cvar_SetGroup( r_bloomThresholdMode, CVG_RENDERER );
+	r_bloomIntensity = ri.Cvar_Get( "r_bloomIntensity", "0.5", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_SetDescription( r_bloomIntensity, "Final bloom blend factor, default is 0.5." );
+	r_bloomPasses = ri.Cvar_Get( "r_bloomPasses", "5", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_bloomPasses, "3", XSTRING( MAX_BLUR_PASSES ), CV_INTEGER );
+	ri.Cvar_SetDescription( r_bloomPasses, "Count of downsampled passes (framebuffers) to blend on final bloom image, default is 5." );
+	r_bloomBlendBase = ri.Cvar_Get( "r_bloomBlendBase", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_bloomBlendBase, "0", va("%i", r_bloomPasses->integer-1), CV_INTEGER );
+	ri.Cvar_SetDescription( r_bloomBlendBase, "0-based, topmost downsampled framebuffer to use for final image, high values can be used for stronger haze effect, results in overall weaker intensity." );
+	ri.Cvar_SetGroup( r_bloomBlendBase, CVG_RENDERER );
+	r_bloomModulate = ri.Cvar_Get( "r_bloomModulate", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_SetDescription( r_bloomModulate, "Modulate extracted color:\n 0: off (color = color, i.e. no changes)\n 1: by itself (color = color * color)\n 2: by intensity (color = color * luma(color))" );
+	ri.Cvar_SetGroup( r_bloomModulate, CVG_RENDERER );
+	r_bloomFilterSize = ri.Cvar_Get( "r_bloomFilterSize", "6", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_bloomFilterSize, XSTRING( MIN_FILTER_SIZE ), XSTRING( MAX_FILTER_SIZE ), CV_INTEGER );
+	ri.Cvar_SetDescription( r_bloomFilterSize, "Filter size of Gaussian Blur effect for each pass, bigger filter size means stronger and wider blur, lower values are faster, default is 6." );
+	ri.Cvar_SetGroup( r_bloomFilterSize, CVG_RENDERER );
 
-	r_bloom_reflection = ri.Cvar_Get( "r_bloom_reflection", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
-	ri.Cvar_CheckRange( r_bloom_reflection, "-4", "4", CV_FLOAT );
-	ri.Cvar_SetDescription( r_bloom_reflection, "Bloom lens reflection effect, value is an intensity factor of the effect, negative value means blend only reflection and skip main bloom texture." );
+	r_bloomReflection = ri.Cvar_Get( "r_bloomReflection", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	ri.Cvar_CheckRange( r_bloomReflection, "-4", "4", CV_FLOAT );
+	ri.Cvar_SetDescription( r_bloomReflection, "Bloom lens reflection effect, value is an intensity factor of the effect, negative value means blend only reflection and skip main bloom texture." );
 #endif // USE_FBO
 
 	r_dlightBacks = ri.Cvar_Get( "r_dlightBacks", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
@@ -1736,7 +1723,7 @@ static void R_Register( void )
 	r_showImages = ri.Cvar_Get( "r_showImages", "0", CVAR_TEMP );
 	ri.Cvar_SetDescription( r_showImages, "Draw all images currently loaded into memory:\n 0: Disabled\n 1: Show images set to uniform size\n 2: Show images with scaled relative to largest image" );
 
-	r_debugLight = ri.Cvar_Get( "r_debuglight", "0", CVAR_TEMP );
+	r_debugLight = ri.Cvar_Get( "r_debugLight", "0", CVAR_TEMP );
 	ri.Cvar_SetDescription( r_debugLight, "Debugging tool to print ambient and directed lighting information." );
 	r_debugSort = ri.Cvar_Get( "r_debugSort", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_debugSort, "Debugging tool to filter out shaders with depth sorting order values higher than the set value." );
@@ -1746,8 +1733,8 @@ static void R_Register( void )
 
 	r_nocurves = ri.Cvar_Get ("r_nocurves", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_nocurves, "Set to 1 to disable drawing world bezier curves. Set to 0 to enable." );
-	r_drawworld = ri.Cvar_Get ("r_drawworld", "1", CVAR_CHEAT );
-	ri.Cvar_SetDescription( r_drawworld, "Set to 0 to disable drawing the world. Set to 1 to enable." );
+	r_drawWorld = ri.Cvar_Get ("r_drawWorld", "1", CVAR_CHEAT );
+	ri.Cvar_SetDescription( r_drawWorld, "Set to 0 to disable drawing the world. Set to 1 to enable." );
 	r_lightmap = ri.Cvar_Get ("r_lightmap", "0", 0 );
 	ri.Cvar_SetDescription( r_lightmap, "Show only lightmaps on all world surfaces." );
 	r_portalOnly = ri.Cvar_Get ("r_portalOnly", "0", CVAR_CHEAT );
@@ -1782,26 +1769,26 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_lodscale, "Set scale for level of detail adjustment." );
 	r_norefresh = ri.Cvar_Get ("r_norefresh", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_norefresh, "Bypasses refreshing of the rendered scene." );
-	r_drawentities = ri.Cvar_Get ("r_drawentities", "1", CVAR_CHEAT );
-	ri.Cvar_SetDescription( r_drawentities, "Draw all world entities." );
+	r_drawEntities = ri.Cvar_Get ("r_drawEntities", "1", CVAR_CHEAT );
+	ri.Cvar_SetDescription( r_drawEntities, "Draw all world entities." );
 	r_nocull = ri.Cvar_Get ("r_nocull", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_nocull, "Draw all culled objects." );
 	r_novis = ri.Cvar_Get ("r_novis", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_novis, "Disables usage of PVS." );
-	r_showcluster = ri.Cvar_Get ("r_showcluster", "0", CVAR_CHEAT);
-	ri.Cvar_SetDescription( r_showcluster, "Shows current cluster index." );
+	r_showCluster = ri.Cvar_Get ("r_showCluster", "0", CVAR_CHEAT);
+	ri.Cvar_SetDescription( r_showCluster, "Shows current cluster index." );
 	r_speeds = ri.Cvar_Get ("r_speeds", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_speeds, "Prints out various debugging stats from PVS:\n 0: Disabled\n 1: Backend BSP\n 2: Frontend grid culling\n 3: Current view cluster index\n 4: Dynamic lighting\n 5: zFar clipping\n 6: Flares" );
 	r_debugSurface = ri.Cvar_Get ("r_debugSurface", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_debugSurface, "Backend visual debugging tool for bezier mesh surfaces." );
 	r_nobind = ri.Cvar_Get ("r_nobind", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_nobind, "Backend debugging tool: Disables texture binding." );
-	r_showtris = ri.Cvar_Get ("r_showtris", "0", CVAR_CHEAT);
-	ri.Cvar_SetDescription( r_showtris, "Debugging tool: Wireframe rendering of polygon triangles in the world." );
-	r_showsky = ri.Cvar_Get( "r_showsky", "0", 0 );
-	ri.Cvar_SetDescription( r_showsky, "Forces sky in front of all surfaces." );
-	r_shownormals = ri.Cvar_Get ("r_shownormals", "0", CVAR_CHEAT);
-	ri.Cvar_SetDescription( r_shownormals, "Debugging tool: Show wireframe surface normals." );
+	r_showTris = ri.Cvar_Get ("r_showTris", "0", CVAR_CHEAT);
+	ri.Cvar_SetDescription( r_showTris, "Debugging tool: Wireframe rendering of polygon triangles in the world." );
+	r_showSky = ri.Cvar_Get( "r_showSky", "0", 0 );
+	ri.Cvar_SetDescription( r_showSky, "Forces sky in front of all surfaces." );
+	r_showNormals = ri.Cvar_Get ("r_showNormals", "0", CVAR_CHEAT);
+	ri.Cvar_SetDescription( r_showNormals, "Debugging tool: Show wireframe surface normals." );
 	r_clear = ri.Cvar_Get( "r_clear", "0", 0 );
 	ri.Cvar_SetDescription( r_clear, "Forces screen buffer clearing every frame, removing any hall of mirrors effect in void.\n Use \\r_clearColor to set color." );
 	r_offsetFactor = ri.Cvar_Get( "r_offsetFactor", "-1", CVAR_CHEAT );
@@ -1819,9 +1806,9 @@ static void R_Register( void )
 	r_marksOnTriangleMeshes = ri.Cvar_Get("r_marksOnTriangleMeshes", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_marksOnTriangleMeshes, "Enables impact marks on triangle mesh surfaces (ie: MD3 models.) Requires impact marks to be enabled in the game code." );
 
-	r_aviMotionJpegQuality = ri.Cvar_Get( "r_aviMotionJpegQuality", "90", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	r_aviMotionJpegQuality = ri.Cvar_Get( "r_aviMotionJpegQuality", "100", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_aviMotionJpegQuality, "Controls quality of Jpeg video capture when \\cl_aviMotionJpeg 1." );
-	r_screenshotJpegQuality = ri.Cvar_Get( "r_screenshotJpegQuality", "90", CVAR_ARCHIVE | CVAR_NODEFAULT );
+	r_screenshotJpegQuality = ri.Cvar_Get( "r_screenshotJpegQuality", "100", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_screenshotJpegQuality, "Controls quality of Jpeg screenshots when using screenshotJpeg." );
 
 	if ( glConfig.vidWidth )
@@ -1849,7 +1836,7 @@ static void R_Register( void )
 	ri.Cvar_CheckRange( r_ext_max_anisotropy, "1", NULL, CV_INTEGER );
 	ri.Cvar_SetDescription( r_ext_max_anisotropy, "Sets maximum anisotropic level for your graphics driver. Requires \\r_ext_texture_filter_anisotropic." );
 
-	//r_stencilbits = ri.Cvar_Get( "r_stencilbits", "8", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	//r_stencilBits = ri.Cvar_Get( "r_stencilBits", "8", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	r_ignorehwgamma = ri.Cvar_Get( "r_ignorehwgamma", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_ignorehwgamma, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_ignorehwgamma, "Overrides hardware gamma capabilities." );

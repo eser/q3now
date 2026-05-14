@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #version 450
 
 layout(set = 0, binding = 0) uniform UBO {
@@ -26,6 +30,29 @@ layout(location = 4) in vec2 fog_tex_coord;
 layout(location = 0) out vec4 out_color;
 
 //layout(constant_id = 0) const int alpha_test_func = 0;
+
+// Phase 6B3'-d4-m4: precise piecewise sRGB <-> linear conversion.
+// Duplicated in every fragment shader per the engine-wide
+// unconditional linear migration; compile.mjs lacks #include
+// support. Matches m1/m2/m3 verbatim. Both helpers are unused in
+// fog.frag — fogColor arrives linear (host-decoded in VK_SetFogParams)
+// and fog_texture is a non-colour density ramp — so the driver DCEs
+// them; kept for migration symmetry / future use.
+vec3 sRGBToLinear( vec3 c ) {
+	c = max( c, vec3( 0.0 ) );
+	bvec3 cutoff = lessThanEqual( c, vec3( 0.04045 ) );
+	vec3 lo = c / 12.92;
+	vec3 hi = pow( ( c + vec3( 0.055 ) ) / 1.055, vec3( 2.4 ) );
+	return mix( hi, lo, vec3( cutoff ) );
+}
+
+vec3 linearToSRGB( vec3 c ) {
+	c = max( c, vec3( 0.0 ) );
+	bvec3 cutoff = lessThanEqual( c, vec3( 0.0031308 ) );
+	vec3 lo = c * 12.92;
+	vec3 hi = pow( c, vec3( 1.0 / 2.4 ) ) * 1.055 - 0.055;
+	return mix( hi, lo, vec3( cutoff ) );
+}
 
 void main() {
     //vec4 base = frag_color * texture(texture0, frag_tex_coord0);

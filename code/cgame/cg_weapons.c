@@ -1,24 +1,6 @@
-﻿/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-
-This file is part of Quake III Arena source code.
-
-Quake III Arena source code is free software; you can redistribute it
-and/or modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
-
-Quake III Arena source code is distributed in the hope that it will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Quake III Arena source code; if not, write to the Free Software
-Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-===========================================================================
-*/
+﻿// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
 // cg_weapons.c -- events and effects dealing with weapons
 #include "cg_local.h"
@@ -806,6 +788,20 @@ static void CG_RocketTrail( centity_t *ent, const weaponInfo_t *wi ) {
 	lastContents = CG_PointContents( lastPos, -1 );
 
 	ent->trailTime = cg.time;
+
+	// Phase 6.5.3: rocket/grenade pierced a water surface this frame → splash
+	// at the crossing point (Q1 maps only). Re-trace the just-travelled segment
+	// with a CONTENTS_WATER-only mask to recover the surface intersection —
+	// forward when entering, reversed when exiting (the entering side is solid
+	// for that mask, so the reverse trace gives the surface on exit).
+	if ( cgs.q1Map && ( ( contents ^ lastContents ) & CONTENTS_WATER ) ) {
+		trace_t wtr;
+		if ( contents & CONTENTS_WATER )
+			trap_CM_BoxTrace( &wtr, lastPos, origin, NULL, NULL, 0, CONTENTS_WATER );	// entering
+		else
+			trap_CM_BoxTrace( &wtr, origin, lastPos, NULL, NULL, 0, CONTENTS_WATER );	// exiting
+		CG_WaterSplash( wtr.endpos );
+	}
 
 	if ( contents & ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) {
 		if ( contents & lastContents & CONTENTS_WATER ) {
@@ -2419,12 +2415,22 @@ void CG_MissileHitWall( int pType, int clientNum, vec3_t origin, vec3_t dir, imp
 	isSprite = qfalse;
 	duration = 600;
 
-	// hitscan impacts at a liquid surface: show a splash and skip the wall mark.
+	// hitscan impact inside a liquid: skip the dust/ricochet wall mark.
 	// explosive projectiles (grenade, rocket, etc.) detonate normally underwater.
 	if ( pType == PROJ_NONE ) {
 		int hitContents = CG_PointContents( origin, 0 );
 		if ( hitContents & ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) {
-			CG_BubbleTrail( origin, origin, 32 );
+			// Phase 6.5.3: replace the old degenerate CG_BubbleTrail(origin,origin,32)
+			// (zero-length → spawned nothing) with a small rising bubble burst at the
+			// underwater impact. Q1-map gated; Q3 maps keep the previous no-op.
+			if ( cgs.q1Map ) {
+				vec3_t burstTop;
+				VectorCopy( origin, burstTop );
+				burstTop[2] += 24.0f;
+				CG_BubbleTrail( origin, burstTop, 6 );
+			} else {
+				CG_BubbleTrail( origin, origin, 32 );
+			}
 			return;
 		}
 	}
@@ -2816,6 +2822,16 @@ static void CG_ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, int othe
 		CG_ShotgunPellet( origin, end, otherEntNum );
 	}
 #endif
+	// Phase 6.5.3: one water-crossing splash for the whole blast — trace the
+	// centre line (per-pellet splashes would be far too noisy). Q1-map gated
+	// inside CG_WaterCrossingSplashes.
+	{
+		vec3_t  centerEnd;
+		trace_t ctr;
+		VectorMA( origin, 8192 * 16, forward, centerEnd );
+		CG_Trace( &ctr, origin, NULL, NULL, centerEnd, otherEntNum, MASK_SHOT );
+		CG_WaterCrossingSplashes( origin, ctr.endpos );
+	}
 }
 
 /*
@@ -2891,6 +2907,14 @@ static void CG_ShotgunPatternSpread( vec3_t origin, vec3_t origin2, int seed, in
 		CG_ShotgunPellet( origin, end, otherEntNum );
 	}
 #endif
+	// Phase 6.5.3: one water-crossing splash for the whole blast (centre line).
+	{
+		vec3_t  centerEnd;
+		trace_t ctr;
+		VectorMA( origin, 8192 * 16, forward, centerEnd );
+		CG_Trace( &ctr, origin, NULL, NULL, centerEnd, otherEntNum, MASK_SHOT );
+		CG_WaterCrossingSplashes( origin, ctr.endpos );
+	}
 }
 
 /*
@@ -3059,9 +3083,14 @@ void CG_Bullet( vec3_t end, int sourceEntityNum, vec3_t normal, qboolean flesh, 
 	int sourceContentType, destContentType;
 	vec3_t		start;
 
-	// if the shooter is currently valid, calc a source point and possibly
-	// do trail effects
-	if ( sourceEntityNum >= 0 && cg_tracerChance.value > 0 ) {
+	// if the shooter is currently valid, calc a source point and do the
+	// underwater trail / water-crossing effects.
+	// Phase 6.5.3: this block used to be gated by `cg_tracerChance.value > 0`
+	// as well — that was a plain bug (water bubble trails have nothing to do
+	// with tracers; a player with `cg_tracerChance 0` should still see bubbles
+	// when a bullet crosses water, on Q3 maps too). Un-gated here; only the
+	// tracer-draw at the bottom keeps the cg_tracerChance check.
+	if ( sourceEntityNum >= 0 ) {
 		if ( CG_CalcMuzzlePoint( sourceEntityNum, start ) ) {
 			sourceContentType = CG_PointContents( start, 0 );
 			destContentType = CG_PointContents( end, 0 );
@@ -3088,12 +3117,18 @@ void CG_Bullet( vec3_t end, int sourceEntityNum, vec3_t normal, qboolean flesh, 
 				}
 			}
 
+			// Phase 6.5.3: splash sprite + sound where the bullet pierces a
+			// liquid surface (Q1 maps only — internal cgs.q1Map gate).
+			CG_WaterCrossingSplashes( start, end );
+
 			// draw a tracer
-			if ( sourceEntityNum == cg.snap->ps.clientNum && cg.predictedPlayerState.burstRoundsRemaining > 0 ) {
-				// burst mode: always show tracer for visual distinction
-				CG_Tracer( start, end );
-			} else if ( random() < cg_tracerChance.value ) {
-				CG_Tracer( start, end );
+			if ( cg_tracerChance.value > 0 || ( sourceEntityNum == cg.snap->ps.clientNum && cg.predictedPlayerState.burstRoundsRemaining > 0 ) ) {
+				if ( sourceEntityNum == cg.snap->ps.clientNum && cg.predictedPlayerState.burstRoundsRemaining > 0 ) {
+					// burst mode: always show tracer for visual distinction
+					CG_Tracer( start, end );
+				} else if ( random() < cg_tracerChance.value ) {
+					CG_Tracer( start, end );
+				}
 			}
 		}
 	}

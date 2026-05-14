@@ -1,11 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2010-2019 Zack Middleton & Spearmint contributors
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
-===========================================================================
-Copyright (C) 2026 Wired engine contributors.
-
-This file is part of the Wired engine and is distributed under the terms of the
-GNU General Public License version 2 or (at your option) any later version.
-
-tr_spearmint.c — Phase 5 Spearmint feature adaptation.
+tr_spearmint.c — Spearmint feature adaptation.
 
 Adds:
   * Enhanced fog system (FT_LINEAR, FT_EXP, FT_EXP2) with front-end accessors
@@ -19,7 +17,6 @@ empty translation units when the flags are 0.
 
 Every entry point here is gated behind its feature flag so the file
 compiles cleanly into a renderer build that opts out of any subset.
-===========================================================================
 */
 
 #include "tr_local.h"

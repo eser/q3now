@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /* cl_wired_hud_elem_score.c -- Score display HUD elements (OWN / NME / MAX)
    Uses numeric team IDs (0=free, 1=red, 2=blue, 3=spectator) and
    pre-computed bridge fields to avoid game enum dependencies. */

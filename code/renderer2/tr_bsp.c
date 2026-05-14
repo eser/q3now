@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_map.c
 
 #include "tr_local.h"
@@ -224,8 +211,8 @@ static	void R_LoadLightmaps( const lump_t *l, const lump_t *surfs ) {
 	int			numLightmapsPerPage = 16;
 	float maxIntensity = 0;
 	double sumIntensity = 0;
-	// CNQ3 lightmap atlas port: either r_mergeLightmaps or r_lightmapAtlas
-	// being 0 disables atlases. Both default to 1.
+	// lightmap atlas port: either r_mergeLightmaps or r_lightmapAtlas being 0
+	// disables atlases. Both default to 1.
 	const int atlasEnabled = ( r_mergeLightmaps->integer && r_lightmapAtlas->integer ) ? 1 : 0;
 
 	// if we are in r_vertexLight mode, we don't need the lightmaps at all
@@ -2770,7 +2757,7 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 		ri.Cvar_Set( "com_mapBspVersion", va( "%d", bsp->version ) );
 	}
 
-	// CNQ3 port: clear any stale loading flag from a previous errored load
+	// clear any stale loading flag from a previous errored load
 	tr.mapLoading = qfalse;
 
 	// set default map light scale
@@ -2804,7 +2791,7 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 		ri.Terminate( TERM_CLIENT_DROP, "%s: %s has no raw BSP data", __func__, name );
 	}
 
-	tr.mapLoading = qtrue;		// CNQ3: signal backend to throttle swaps during load
+	tr.mapLoading = qtrue;		// signal backend to throttle swaps during load
 
 	// clear tr.world so if the level fails to load, the next
 	// try will not look at the partially loaded version
@@ -3074,5 +3061,5 @@ void RE_LoadWorldMap( const bspFile_t *bsp ) {
 		R_RenderMissingCubemaps();
 	}
 
-	tr.mapLoading = qfalse;		// CNQ3: loading complete, resume normal swaps
+	tr.mapLoading = qfalse;		// loading complete, resume normal swaps
 }

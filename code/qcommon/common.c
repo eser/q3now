@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // common.c -- misc functions used in client and server
 
 #include "q_shared.h"
@@ -3106,7 +3093,7 @@ void Com_Init( char *commandLine ) {
 		static const cvarDesc_t d = CVAR_INT( "com_maxfpsMinimized", "5", CVAR_ARCHIVE | CVAR_NODEFAULT,
 			"Sets maximum frames per second while the game window is minimized.\n"
 			" Lower values reduce CPU/GPU use when the user is not looking at the game.\n"
-			" Takes precedence over com_maxfpsUnfocused when minimized (CNQ3 port).", 1, 30 );
+			" Takes precedence over com_maxfpsUnfocused when minimized.", 1, 30 );
 		com_maxfpsMinimized = Cvar_Register( &d );
 	}
 	{
@@ -3544,7 +3531,7 @@ void Com_Frame( qboolean noDelay ) {
 		} else {
 			int targetUsec;
 			int elapsedUsec;
-			// Frame pacing priority (CNQ3 port):
+			// Frame pacing priority:
 			//   1. Window minimized     -> com_maxfpsMinimized (default 5)
 			//   2. Window unfocused     -> com_maxfpsUnfocused (default 60)
 			//   3. Normal / focused     -> com_maxfps
@@ -3573,7 +3560,7 @@ void Com_Frame( qboolean noDelay ) {
 
 	// waiting for incoming packets
 	//
-	// Frame limiter strategy, controlled by com_busyWait (CNQ3 port):
+	// Frame limiter strategy, controlled by com_busyWait:
 	//   0: hybrid — sleep for (timeValUsec-2000) µs, busy-wait the final 2 ms
 	//   1: pure busy-wait (highest precision, pegs a core)
 	// Busy-wait mode overrides com_yieldCPU because the whole point is to
@@ -3790,8 +3777,8 @@ void Field_Clear( field_t *edit ) {
 	memset( edit->buffer, 0, sizeof( edit->buffer ) );
 	edit->cursor = 0;
 	edit->scroll = 0;
-	/* CNQ3 backport Phase 6: clearing the buffer also invalidates any
-	 * active cycling-completion state. */
+	/* Clearing the buffer also invalidates any active cycling-completion
+	 * state. */
 	edit->acOffset = 0;
 	edit->acLength = 0;
 	edit->acMatchIndex = 0;
@@ -3804,9 +3791,9 @@ static int	matchCount;
 // field we are working on, passed to Field_AutoComplete(&g_consoleCommand for instance)
 static field_t *completionField;
 
-/* CNQ3 backport Phase 6: match list for cycling auto-completion
- * (con_completionStyle 1).  Populated on the first Tab of a cycle,
- * indexed through on each subsequent Tab until the input line changes.
+/* Match list for cycling auto-completion (con_completionStyle 1).
+ * Populated on the first Tab of a cycle, indexed through on each
+ * subsequent Tab until the input line changes.
  * Each entry stores a cvar or command name so MAX_CYCLE_TOKEN is plenty. */
 #define MAX_CYCLE_MATCHES 2048
 #define MAX_CYCLE_TOKEN   128
@@ -3828,9 +3815,9 @@ static void FindMatches( const char *s ) {
 		return;
 	}
 
-	/* CNQ3 backport Phase 6: during a cycling-completion pass we also
-	 * accumulate every matching string so the Tab handler can step
-	 * through them on subsequent presses. */
+	/* during a cycling-completion pass we also accumulate every
+	 * matching string so the Tab handler can step through them on
+	 * subsequent presses. */
 	if ( cycleCollecting && cycleMatchCount < MAX_CYCLE_MATCHES ) {
 		Q_strncpyz( cycleMatches[cycleMatchCount], s, sizeof( cycleMatches[0] ) );
 		cycleMatchCount++;
@@ -3967,8 +3954,8 @@ static qboolean Field_Complete( void )
 ===============
 Field_AdvanceCycle
 
-CNQ3 backport Phase 6: replaces the currently cycling token with the next
-entry from the match list.  Returns qtrue when a cycle step was performed.
+Replaces the currently cycling token with the next entry from the
+match list.  Returns qtrue when a cycle step was performed.
 ===============
 */
 static qboolean Field_AdvanceCycle( field_t *field )
@@ -4024,9 +4011,9 @@ void Field_CompleteKeyname( void )
 ===============
 Field_CompleteList
 
-CNQ3 backport Phase 6: completes the current argument against an arbitrary
-list produced by an enumeration callback.  The enumeration function must
-call the supplied callback once per candidate string.
+Completes the current argument against an arbitrary list produced by
+an enumeration callback.  The enumeration function must call the
+supplied callback once per candidate string.
 ===============
 */
 void Field_CompleteList( void (*enumerate)( void (*cb)( const char *s ) ) )
@@ -4251,9 +4238,9 @@ void Field_CompleteCommand( const char *cmd, qboolean doCommands, qboolean doCva
 ===============
 Field_ResetCompletionCycle
 
-CNQ3 backport Phase 6: drop any cached cycling-completion state on the
-field so the next Tab starts a new match list.  Called by the key event
-handler whenever a non-Tab key is pressed.
+Drop any cached cycling-completion state on the field so the next Tab
+starts a new match list.  Called by the key event handler whenever a
+non-Tab key is pressed.
 ===============
 */
 void Field_ResetCompletionCycle( field_t *field )
@@ -4281,8 +4268,8 @@ void Field_AutoComplete( field_t *field )
 
 	completionField = field;
 
-	/* CNQ3 backport Phase 6: lazily register con_completionStyle so the
-	 * cvar is available the very first time the user hits Tab. */
+	/* lazily register con_completionStyle so the cvar is available
+	 * the very first time the user hits Tab. */
 	if ( con_completionStyle == NULL ) {
 		static const cvarDesc_t d = CVAR_INT( "con_completionStyle", "0", CVAR_ARCHIVE,
 			"Console auto-completion behaviour:\n"

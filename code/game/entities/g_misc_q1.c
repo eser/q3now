@@ -1,19 +1,5 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 // Q1 misc / ambient entities
 
@@ -240,6 +226,40 @@ static void q1_misc_explobox_die( gentity_t *self, gentity_t *inflictor, gentity
 
 /*
 =================
+Q1_DropToFloor
+
+Phase 6.5.3 (Bug 5): snap a freshly-spawned point entity down onto
+whatever world geometry is below it (within 4096 units) and record the
+floor entity so it rides movers — mirrors FinishSpawningItem
+(g_items.c). Q1's `misc_explobox` does the same (`origin_z += 2;
+droptofloor();` in misc.qc) so a barrel placed anywhere above a floor
+settles onto it. If the entity spawned inside solid, or there is no
+floor below it, it is left at the authored origin (mapper intent — a
+barrel placed mid-air or buried in geometry is neither relocated nor
+deleted, unlike a suspended item). MASK_SOLID (not MASK_PLAYERSOLID):
+the barrel rests on real world brushes, not player-clip volumes.
+=================
+*/
+static void Q1_DropToFloor( gentity_t *ent ) {
+	trace_t tr;
+	vec3_t  end;
+
+	VectorCopy( ent->s.origin, end );
+	end[2] -= 4096.0f;
+	trap_Trace( &tr, ent->s.origin, ent->r.mins, ent->r.maxs, end, ent->s.number, MASK_SOLID );
+	if ( tr.startsolid || tr.fraction >= 1.0f )
+		return;	// spawned in solid, or nothing below within 4096u — leave at authored origin
+
+	Com_Log( SEV_DEBUG, LOG_CH(ch_game), "%s: drop-to-floor %.1f units (onto entity %d)\n",
+	         ent->classname, ent->s.origin[2] - tr.endpos[2], (int)tr.entityNum );
+
+	VectorCopy( tr.endpos, ent->s.origin );		// keep s.origin in sync (explosion pos, etc.)
+	G_SetOrigin( ent, tr.endpos );			// trBase / currentOrigin / TR_STATIONARY
+	ent->s.groundEntityNum = tr.entityNum;		// allow riding movers
+}
+
+/*
+=================
 SP_q1_misc_explobox
 
 Q1 explosive crate — takes damage, explodes on death.
@@ -276,6 +296,7 @@ void SP_q1_misc_explobox( gentity_t *ent ) {
 	VectorSet( ent->r.mins,  0.0f,  0.0f,  0.0f );
 	VectorSet( ent->r.maxs, 32.0f, 32.0f, 64.0f );
 	VectorCopy( ent->s.origin, ent->r.currentOrigin );
+	Q1_DropToFloor( ent );	// Phase 6.5.3 (Bug 5): settle onto the floor like Q1 misc.qc droptofloor()
 	trap_LinkEntity( ent );
 }
 
@@ -309,6 +330,7 @@ void SP_q1_misc_explobox2( gentity_t *ent ) {
 	VectorSet( ent->r.mins,  0.0f,  0.0f,  0.0f );
 	VectorSet( ent->r.maxs, 32.0f, 32.0f, 64.0f );
 	VectorCopy( ent->s.origin, ent->r.currentOrigin );
+	Q1_DropToFloor( ent );	// Phase 6.5.3 (Bug 5): settle onto the floor like Q1 misc.qc droptofloor()
 	trap_LinkEntity( ent );
 }
 

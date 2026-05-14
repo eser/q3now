@@ -1,19 +1,5 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 // meta.h -- unified per-map metadata and asset-remap, replacing the legacy
 // scripts/<map>.arena + scripts/arenas.txt machinery.
@@ -41,6 +27,7 @@ repository root.
 #define META_MAX_GAMETYPES   8
 #define META_MAX_REMAPS      256
 #define META_MAX_MAPS        1024
+#define META_REMAP_BUCKETS   64   // power-of-two; remap_table_s::buckets[] size
 #define META_GAMETYPE_LEN    16
 #define META_ARCHETYPE_LEN   16
 #define META_WEAPON_LEN      8
@@ -64,7 +51,7 @@ typedef struct remap_entry_s {
 } remap_entry_t;
 
 typedef struct remap_table_s {
-	remap_entry_t *buckets[64];   // power-of-two; collision chain
+	remap_entry_t *buckets[META_REMAP_BUCKETS];   // collision chain
 	int            count;
 } remap_table_t;
 

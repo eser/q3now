@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
 #include "tr_fbo.h"
 #include "tr_dsa.h"
@@ -1618,9 +1605,9 @@ static const void	*RB_SwapBuffers( const void *data ) {
 
 //	GLimp_LogComment( "***************** RB_SwapBuffers *****************\n\n\n" );
 
-	// CNQ3 port: throttle presentation while a map is loading so the
-	// renderer does not starve the loader thread. r_loadingFpsCap sets
-	// the maximum present rate (0 disables the throttle, default 10).
+	// throttle presentation while a map is loading so the renderer does
+	// not starve the loader thread. r_loadingFpsCap sets the maximum
+	// present rate (0 disables the throttle, default 10).
 	{
 		qboolean skipSwap = qfalse;
 		if ( tr.mapLoading && r_loadingFpsCap->integer > 0 ) {

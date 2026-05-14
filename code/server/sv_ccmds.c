@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "server.h"
 #include "../qcommon/cm_local.h"
@@ -1436,9 +1423,9 @@ static void SV_CompleteMapName( const char *args, int argNum ) {
 ==================
 SV_ClientNameCompletion
 
-CNQ3 backport Phase 6: enumerates the names of every connected client and
-invokes the supplied callback once per name.  Used by the tab-completion
-handler of admin commands like kick, banUser, dumpuser and clientkick.
+Enumerates the names of every connected client and invokes the supplied
+callback once per name.  Used by the tab-completion handler of admin
+commands like kick, banUser, dumpuser and clientkick.
 ==================*/
 static void SV_ClientNameCompletion( void (*callback)( const char *s ) ) {
 	if ( callback == NULL ) {
@@ -1483,8 +1470,8 @@ static void SV_ClientNameCompletion( void (*callback)( const char *s ) ) {
 ==================
 SV_CompleteClientName
 
-CNQ3 backport Phase 6: tab completion handler for admin commands that take
-a connected client's name as the first argument.
+Tab completion handler for admin commands that take a connected client's
+name as the first argument.
 ==================
 */
 static void SV_CompleteClientName( const char *args, int argNum ) {
@@ -2000,7 +1987,7 @@ void SV_AddOperatorCommands( void ) {
 
 	Cmd_AddCommand ("heartbeat", SV_Heartbeat_f);
 	Cmd_AddCommand ("kick", SV_Kick_f);
-	/* CNQ3 backport Phase 6: client-name aware auto-completion */
+	/* client-name aware auto-completion */
 	Cmd_SetCommandCompletionFunc( "kick", SV_CompleteClientName );
 #ifndef STANDALONE
 #ifdef USE_BANS

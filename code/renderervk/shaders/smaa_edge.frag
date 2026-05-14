@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2013 Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro, Diego Gutierrez
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #version 450
 // SMAA Pass 1: Luma Edge Detection — Fragment Shader
 // Ported from the canonical SMAA by Jorge Jimenez et al.
@@ -18,6 +22,12 @@ layout(location = 0) out vec2 out_edges;
 const float SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR = 2.0;
 const vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);
 
+// Phase 6B4: relative-luma delta uses center luma as denominator,
+// guarded against zero by a small epsilon. Empirically chosen
+// to avoid amplifying noise in near-black pixels without
+// distorting the threshold semantic for non-trivial radiance.
+const float SMAA_LUMA_EPSILON = 1e-4;
+
 void main() {
 	vec2 threshold = vec2(SMAA_THRESHOLD);
 
@@ -26,10 +36,25 @@ void main() {
 	float Lleft  = dot(texture(colorTex, offset[0].xy).rgb, lumaWeights);
 	float Ltop   = dot(texture(colorTex, offset[0].zw).rgb, lumaWeights);
 
-	// Threshold check
+	// Threshold check — relative luma delta (HDR-aware).
+	// Phase 6B4: divide neighbour delta by center luma so the
+	// threshold reads as "percentage deviation" instead of an
+	// absolute luma difference. Under r_hdr 1 (SFLOAT), absolute
+	// deltas over-trigger in bright regions and under-trigger
+	// in shadow regions; the relative form keeps the published
+	// SMAA quality presets meaningful at any input magnitude.
+	// Threshold 0.10 = "neighbour must differ by >=10% of L".
+	// Phase 6B3'-d4-m11: the m1-m_final linear-pipeline migration
+	// makes colorTex (= vk.color_image) hold linear radiance; this
+	// relative-luma form already absorbs that domain shift (the
+	// ratio delta/L is unitless), so no threshold re-tune was
+	// needed — the local-contrast-adaptation step below uses an
+	// absolute-delta ratio (finalDelta vs delta.xy), also scale-
+	// invariant. Verification only; no math change.
 	vec4 delta;
 	delta.xy = abs(L - vec2(Lleft, Ltop));
-	vec2 edges = step(threshold, delta.xy);
+	vec2 relDelta = delta.xy / max(L, SMAA_LUMA_EPSILON);
+	vec2 edges = step(threshold, relDelta);
 
 	// Discard if no edge
 	if (dot(edges, vec2(1.0)) == 0.0)

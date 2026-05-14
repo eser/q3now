@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // cvar.c -- dynamic variable tracking
 
 #include "q_shared.h"
@@ -446,8 +433,8 @@ cvar_t *Cvar_Get( const char *var_name, const char *var_value, int flags ) {
 				Z_Free( s );
 			}
 
-			// CNQ3 fix (Phase 5.8): when registering an already-existing
-			// cvar with CVAR_ROM, PRESERVE its current runtime value.
+			// when registering an already-existing cvar with CVAR_ROM,
+			// PRESERVE its current runtime value.
 			// Re-registration must NOT reset it back to var_value, otherwise
 			// engine-managed cvars like `mapname` get clobbered to their
 			// default the moment any code path re-registers them.
@@ -2534,7 +2521,7 @@ void Cvar_Init (void)
 	Cmd_AddCommand ("cvarlist", Cvar_List_f);
 	Cmd_AddCommand ("cvar_modified", Cvar_ListModified_f);
 	Cmd_AddCommand ("cvar_restart", Cvar_Restart_f);
-	/* CNQ3 backport Phase 6: cvar_restart takes a cvar name (optionally) */
+	/* cvar_restart takes a cvar name (optionally) */
 	Cmd_SetCommandCompletionFunc( "cvar_restart", Cvar_CompleteCvarName );
 	Cmd_AddCommand ("cvar_trim", Cvar_Trim_f);
 

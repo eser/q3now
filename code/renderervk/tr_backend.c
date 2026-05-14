@@ -1,21 +1,29 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
 #include "../qcommon/q_feats.h"
+
+// Phase 6B3'-d4 — TEMPORARY RenderDoc capture trigger (REMOVE in the fix
+// turn, together with the WN_RDOC_CAPTURE block at the end of RB_SwapBuffers
+// and code/renderervk/renderdoc_app.h). Gated on WN_RDOC_CAPTURE.
+// Phase 6B3'-d8: armed (1) to support tools/visual_regression/vr_check.py,
+// which launches via `renderdoccmd capture` and relies on the in-app
+// TriggerCapture()+quit here. A normal launch (renderdoc.dll not in the
+// process) just logs one line and continues — it does NOT auto-quit
+// (the trigger/quit are gated on `s_rdoc != NULL`). Revert to 0 (or
+// remove the block) when the vr/RenderDoc work is done.
+#ifndef WN_RDOC_CAPTURE
+#define WN_RDOC_CAPTURE 1
+#endif
+#if WN_RDOC_CAPTURE
+#if defined( _WIN32 )
+#include <windows.h>
+#endif
+#include <stdbool.h>
+#include <stdint.h>
+#include "renderdoc_app.h"
+#endif
 
 backEndData_t	*backEndData;
 backEndState_t	backEnd;
@@ -1176,6 +1184,103 @@ static const void *RB_SetColor( const void *data ) {
 }
 
 
+#ifdef USE_VULKAN
+/*
+=============
+RB_FrameHasDrawSurfs — Block 8 (Delta 2)
+
+"Does this frame render a 3D scene?" Walked once per frame at the top of
+RB_ExecuteRenderCommands and cached in rb_frameHas3D. The 3D→2D transition
+(RB_TransitionToUI) needs this BEFORE the first 2D draw, so it can tell a
+pure-2D frame (open render_pass.ui_clear straight away, no tonemap) apart
+from a gameplay frame whose 2D HUD content was queued before the scene
+(cgame's CG_TileClear letterbox fills) — there backEnd.doneSurfaces is
+still qfalse at the first 2D draw, so it alone can't make the call.
+
+Mirrors RB_ExecuteRenderCommands's command dispatch: every command type it
+advances past, we advance past identically; if a new RC_* is added to that
+switch it must be added here too. Conservative on the unknown / truncated
+case (returns "no DRAW_SURFS seen" → reads as pure-2D → just falls back to
+the vk_end_frame !doneUIPass path, which still tonemaps the content).
+=============
+*/
+static qboolean RB_FrameHasDrawSurfs( const void *data )
+{
+	for ( ;; ) {
+		data = PADP( data, sizeof(void *) );
+		switch ( *(const int *)data ) {
+			case RC_SET_COLOR:        data = (const void *)( (const setColorCommand_t       *)data + 1 ); break;
+			case RC_STRETCH_PIC:      data = (const void *)( (const stretchPicCommand_t     *)data + 1 ); break;
+			case RC_ROTATED_PIC:      data = (const void *)( (const rotatedPicCommand_t     *)data + 1 ); break;
+			case RC_SET_CLIP_REGION:  data = (const void *)( (const setClipRegionCommand_t  *)data + 1 ); break;
+			case RC_DRAW_LINE:        data = (const void *)( (const drawLineCommand_t       *)data + 1 ); break;
+			case RC_DRAW_BUFFER:      data = (const void *)( (const drawBufferCommand_t     *)data + 1 ); break;
+			case RC_SWAP_BUFFERS:     data = (const void *)( (const swapBuffersCommand_t    *)data + 1 ); break;
+			case RC_FINISHBLOOM:      data = (const void *)( (const finishBloomCommand_t    *)data + 1 ); break;
+			case RC_COLORMASK:        data = (const void *)( (const colorMaskCommand_t      *)data + 1 ); break;
+			case RC_CLEARDEPTH:       data = (const void *)( (const clearDepthCommand_t     *)data + 1 ); break;
+			case RC_CLEARCOLOR:       data = (const void *)( (const clearColorCommand_t     *)data + 1 ); break;
+			case RC_SET_MSDF_OUTLINE: data = (const void *)( (const setMsdfOutlineCommand_t *)data + 1 ); break;
+			case RC_SET_MSDF_SHADOW:  data = (const void *)( (const setMsdfShadowCommand_t  *)data + 1 ); break;
+			case RC_DRAW_SURFS:       return qtrue;
+			case RC_END_OF_LIST:
+			default:                  return qfalse;
+		}
+	}
+}
+
+static qboolean rb_frameHas3D = qfalse;
+
+/*
+=============
+RB_TransitionToUI — Block 8 (Delta 2)
+
+3D→2D handoff, called from every transition site (RB_StretchPic /
+RB_RotatedPic / RB_DrawLine / RB_FinishBloom). Decoupled tonemap
+(vk_tonemap, UI-agnostic) + UI pass (vk_open_ui_pass) + SMAA. Once-guarded
+by backEnd.doneUIPass — the single "the orchestrator already ran this
+frame" flag (replaces the old doneTonemap once-guard).
+=============
+*/
+static void RB_TransitionToUI( void )
+{
+	if ( !vk.fboActive || backEnd.doneUIPass )
+		return;
+
+	if ( !rb_frameHas3D ) {
+		// Pure-2D frame (menu / loading screen): no scene this frame, so
+		// skip tonemap entirely — draw the 2D straight into a freshly-
+		// cleared img 265 (render_pass.ui_clear). render_pass.main (img
+		// 264) held only its CLEAR; vk_open_ui_pass(qtrue) ends it and
+		// that clear is discarded.
+		vk_open_ui_pass( qtrue );
+		backEnd.doneUIPass = qtrue;
+		return;
+	}
+
+	if ( !backEnd.doneSurfaces ) {
+		// Gameplay frame, but this 2D draw arrived BEFORE RB_DrawSurfs
+		// (cgame queues CG_TileClear letterbox fills ahead of the scene).
+		// Let it land in render_pass.main (img 264) — the scene composites
+		// over it correctly there — and wait. The post-scene HUD draws (or
+		// RB_FinishBloom) hit this again with doneSurfaces set.
+		return;
+	}
+
+	// Gameplay frame, scene finished: bloom → tonemap → SMAA → open the
+	// LOAD-mode UI pass on img 265 so the HUD blends on top of the
+	// tonemapped (+ anti-aliased) scene.
+	if ( r_bloom->integer )
+		vk_bloom();
+	vk_tonemap();
+	if ( r_smaa->integer > 0 )
+		vk_smaa();
+	vk_open_ui_pass( qfalse );
+	backEnd.doneUIPass = qtrue;
+}
+#endif // USE_VULKAN
+
+
 /*
 =============
 RB_StretchPic
@@ -1202,9 +1307,7 @@ static const void *RB_StretchPic( const void *data ) {
 	RB_SetGL2D();
 
 #ifdef USE_VULKAN
-	if ( r_bloom->integer ) {
-		vk_bloom();
-	}
+	RB_TransitionToUI();
 #endif
 
 	RB_AddQuadStamp2( cmd->x, cmd->y, cmd->w, cmd->h, cmd->s1, cmd->t1, cmd->s2, cmd->t2, backEnd.color2D );
@@ -1238,9 +1341,7 @@ static const void *RB_RotatedPic( const void *data ) {
 	RB_SetGL2D();
 
 #ifdef USE_VULKAN
-	if ( r_bloom->integer ) {
-		vk_bloom();
-	}
+	RB_TransitionToUI();
 #endif
 
 #ifdef USE_VBO
@@ -1387,9 +1488,7 @@ static const void *RB_DrawLine( const void *data ) {
 	}
 
 #ifdef USE_VULKAN
-	if ( r_bloom->integer ) {
-		vk_bloom();
-	}
+	RB_TransitionToUI();
 #endif
 
 	halfWidth = cmd->width * 0.5f;
@@ -1484,17 +1583,18 @@ static void RB_LightingPass( void )
 
 	tess.dlightPass = qtrue;
 
+	// Phase 6.5.4d1-fix-A: the sun shadow cascades are now rendered once per
+	// frame as a pre-pass in vk_begin_frame (before any render pass opens), not
+	// from here. The 6.5.4a placement called vk_render_shadow_map() mid-frame
+	// inside the open main pass and bracketed it with vk_end/begin_main_render
+	// — and the re-begin re-clears the main FBO, wiping the opaque scene
+	// whenever a dynamic light was visible (the d1 black-screen regression).
+
 	for ( int i = 0; i < backEnd.viewParms.num_dlights; i++ )
 	{
 		dl = &backEnd.viewParms.dlights[i];
 		if ( dl->head )
 		{
-#if FEAT_SHADOW_MAPPING
-			// Render shadow map for this light before the lit pass
-			if ( vk.shadowMap.active ) {
-				vk_render_shadow_map( dl );
-			}
-#endif
 			tess.light = dl;
 			RB_RenderLitSurfList( dl );
 		}
@@ -1574,8 +1674,9 @@ static void RB_DebugPolygon( int color, int numPoints, float *points ) {
 	vk_bind_geometry( TESS_XYZ | TESS_RGBA0 | TESS_ST0 );
 	vk_draw_geometry( DEPTH_RANGE_NORMAL, qtrue );
 
-	// Outline.
-	memset( tess.svars.colors[0], tr.identityLightByte, numPoints * 2 * sizeof( color4ub_t ) );
+	// Outline. Phase 6B3'-a: was identityLightByte (= 128 under
+	// legacy obScale=2); linear pipeline writes full-bright 255.
+	memset( tess.svars.colors[0], 255, numPoints * 2 * sizeof( color4ub_t ) );
 
 	for ( int i = 0; i < numPoints; i++ ) {
 		VectorCopy( &points[3*i], tess.xyz[2*i] );
@@ -1711,9 +1812,8 @@ static const void *RB_DrawSurfs( const void *data ) {
 
 #ifdef USE_VULKAN
 	if ( cmd->refdef.switchRenderPass ) {
-#if FEAT_FBO_DEBUG
-		ri.Log( SEV_INFO, "^3[FBO_DEBUG] Switching: screenmap → main render pass\n" );
-#endif
+		ri.Log( SEV_DEBUG, "[FBO_DEBUG] Switching: screenmap → main render pass\n" );
+
 		vk_end_render_pass();
 		vk_begin_main_render_pass();
 		backEnd.screenMapDone = qtrue;
@@ -1980,9 +2080,7 @@ static const void *RB_FinishBloom( const void *data )
 	RB_EndSurface();
 
 #ifdef USE_VULKAN
-	if ( r_bloom->integer ) {
-		vk_bloom();
-	}
+	RB_TransitionToUI();
 #endif
 
 	// texture swapping test
@@ -2057,9 +2155,9 @@ static const void *RB_SwapBuffers( const void *data ) {
 		backEnd.screenshotMask = 0;
 	}
 
-	// CNQ3 port: throttle presentation while a map is loading so the
-	// renderer does not starve the loader thread. r_loadingFpsCap sets
-	// the maximum present rate (0 disables the throttle, default 10).
+	// throttle presentation while a map is loading so the renderer does
+	// not starve the loader thread. r_loadingFpsCap sets the maximum
+	// present rate (0 disables the throttle, default 10).
 	{
 		qboolean skipSwap = qfalse;
 		if ( tr.mapLoading && r_loadingFpsCap->integer > 0 ) {
@@ -2088,6 +2186,49 @@ static const void *RB_SwapBuffers( const void *data ) {
 	backEnd.drawConsole = qfalse;
 #ifdef USE_VULKAN
 	backEnd.doneBloom = qfalse;
+	backEnd.doneUIPass = qfalse;
+#endif
+
+#if WN_RDOC_CAPTURE
+	// Phase 6B3'-d4 — TEMPORARY: drive a single RenderDoc frame capture, then
+	// quit. We launch the engine via `renderdoccmd capture …`, so renderdoc.dll
+	// is already injected (and hooked the Vulkan instance before vkCreateInstance);
+	// here we just grab the in-app API and TriggerCapture() on a fixed frame so
+	// the .rdc lands deterministically with no GUI / keypress. REMOVE in the fix turn.
+	{
+		static int                   s_rdocState = 0;   // 0 init, 1 armed, 2 triggered, 3 quitting
+		static int                   s_rdocFrame = 0;
+		static RENDERDOC_API_1_0_0  *s_rdoc      = NULL;
+		s_rdocFrame++;
+		if ( s_rdocState == 0 ) {
+#if defined( _WIN32 )
+			HMODULE mod = GetModuleHandleA( "renderdoc.dll" );
+			if ( mod != NULL ) {
+				pRENDERDOC_GetAPI getApi = (pRENDERDOC_GetAPI)GetProcAddress( mod, "RENDERDOC_GetAPI" );
+				if ( getApi != NULL && getApi( eRENDERDOC_API_Version_1_4_2, (void **)&s_rdoc ) == 1 && s_rdoc != NULL ) {
+					ri.Log( SEV_INFO, "[WN_RDOC] in-app API acquired\n" );
+				} else {
+					s_rdoc = NULL;
+					ri.Log( SEV_INFO, "[WN_RDOC] RENDERDOC_GetAPI unavailable\n" );
+				}
+			} else {
+				ri.Log( SEV_INFO, "[WN_RDOC] renderdoc.dll not in process (launch via renderdoccmd capture)\n" );
+			}
+#endif
+			s_rdocState = 1;
+		}
+		if ( s_rdocState == 1 && s_rdoc != NULL && s_rdocFrame >= 120 ) {
+			s_rdoc->SetCaptureFilePathTemplate( "wn_capture" );  // relative to engine cwd (renderdoccmd -d sets it to build/debug)
+			s_rdoc->TriggerCapture();
+			ri.Log( SEV_INFO, "[WN_RDOC] TriggerCapture() at frame %d\n", s_rdocFrame );
+			s_rdocState = 2;
+		}
+		if ( s_rdocState == 2 && s_rdocFrame >= 120 + 90 ) {
+			ri.Log( SEV_INFO, "[WN_RDOC] capture window elapsed; quitting\n" );
+			ri.Cmd_ExecuteText( EXEC_APPEND, "quit\n" );
+			s_rdocState = 3;
+		}
+	}
 #endif
 
 	return (const void *)(cmd + 1);
@@ -2102,6 +2243,13 @@ RB_ExecuteRenderCommands
 void RB_ExecuteRenderCommands( const void *data ) {
 
 	backEnd.pc.msec = ri.Milliseconds();
+
+#ifdef USE_VULKAN
+	// Block 8 (Delta 2): pre-scan the command stream so the 3D→2D
+	// transition (RB_TransitionToUI) knows up-front whether this is a
+	// gameplay frame or a pure-2D frame.
+	rb_frameHas3D = RB_FrameHasDrawSurfs( data );
+#endif
 
 	while ( 1 ) {
 		data = PADP(data, sizeof(void *));

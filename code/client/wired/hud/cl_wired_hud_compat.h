@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
 cl_wired_hud_compat.h — Compatibility shim for ModernHUD element migration
 */

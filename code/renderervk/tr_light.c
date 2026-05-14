@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_light.c
 
 #include "tr_local.h"
@@ -312,19 +299,26 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 		&& tr.world->lightGridData ) {
 		R_SetupEntityLightingGrid( ent );
 	} else {
+		/* Phase 6B3'-a: tr.identityLight was 0.5 under legacy
+		 * obScale=2 — i.e. the no-world-model ambient/directed
+		 * defaults intended to land at byte 75 (= 0.5 * 150),
+		 * compensating for the in-shader doubling. In the linear
+		 * pipeline tr.identityLight is implicitly 1.0, so the
+		 * constants pass through unchanged. */
 		ent->ambientLight[0] = ent->ambientLight[1] =
-			ent->ambientLight[2] = tr.identityLight * 150;
+			ent->ambientLight[2] = 150;
 		ent->directedLight[0] = ent->directedLight[1] =
-			ent->directedLight[2] = tr.identityLight * 150;
+			ent->directedLight[2] = 150;
 		VectorCopy( tr.sunDirection, ent->lightDir );
 	}
 
 	// bonus items and view weapons have a fixed minimum add
 	if ( 1 /* ent->e.renderfx & RF_MINLIGHT */ ) {
-		// give everything a minimum light add
-		ent->ambientLight[0] += tr.identityLight * 32;
-		ent->ambientLight[1] += tr.identityLight * 32;
-		ent->ambientLight[2] += tr.identityLight * 32;
+		/* Phase 6B3'-a: identityLight factor dropped (was 0.5 under
+		 * legacy obScale=2). Linear pipeline adds the constant 32. */
+		ent->ambientLight[0] += 32;
+		ent->ambientLight[1] += 32;
+		ent->ambientLight[2] += 32;
 	}
 
 	//
@@ -371,10 +365,12 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 	}
 
 	// clamp ambient
+	// Phase 6B3'-a: was clamped to identityLightByte (= 128 under
+	// legacy obScale=2); linear pipeline clamps to full-range 255.
 	// NOLINTNEXTLINE(readability-misleading-indentation) — preceding else without braces is a Q3 idiom; this statement is at function scope
 	for ( i = 0 ; i < 3 ; i++ ) {
-		if ( ent->ambientLight[i] > tr.identityLightByte ) {
-			ent->ambientLight[i] = tr.identityLightByte;
+		if ( ent->ambientLight[i] > 255 ) {
+			ent->ambientLight[i] = 255;
 		}
 	}
 

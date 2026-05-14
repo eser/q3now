@@ -1,11 +1,5 @@
-/*
-===========================================================================
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of Quake III Arena source code.
-Released under GPLv2 — see meta.h for the full notice.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 // meta_write.c -- canonical .meta file serializer.
 //
@@ -57,13 +51,13 @@ static int RemapTable_FlattenSorted( const remap_table_t *t,
                                      const remap_entry_t **out, int cap ) {
 	if ( !t || cap <= 0 ) return 0;
 	int n = 0;
-	for ( int b = 0; b < (int)ARRAY_LEN( t->buckets ); b++ ) {
+	for ( int b = 0; b < META_REMAP_BUCKETS; b++ ) {
 		for ( const remap_entry_t *e = t->buckets[b]; e; e = e->next ) {
 			if ( n >= cap ) return n;   // truncate gracefully
 			out[n++] = e;
 		}
 	}
-	qsort( out, n, sizeof( out[0] ), RemapEntryCompare );
+	qsort( out, n, sizeof( const remap_entry_t * ), RemapEntryCompare );
 	return n;
 }
 
@@ -83,7 +77,7 @@ static void WriteRemapKindBlock( fileHandle_t f, remap_kind_t kind, const remap_
 	if ( !kw ) return;
 
 	const remap_entry_t *entries[META_MAX_REMAPS];
-	int n = RemapTable_FlattenSorted( t, entries, (int)ARRAY_LEN( entries ) );
+	int n = RemapTable_FlattenSorted( t, entries, META_MAX_REMAPS );
 	if ( n <= 0 ) return;
 
 	FS_Printf( f, "\t\t%s {\n", kw );

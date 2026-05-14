@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
 cl_wired_layout.h — Wired UI: resolution-independent coordinate types
 */
@@ -154,6 +157,12 @@ struct wiredItemDef_s;
 // Resolve all items in a menu to pixel rects. Call once per frame.
 // Populates resolvedRect on the menu and every item.
 void WUI_LayoutMenu( struct wiredMenuDef_s *menu, float vpWidth, float vpHeight );
+
+// Visual-regression instrumentation: dump every named item's resolved
+// pixel rect + authored colours to layoutdump.jsonl when the r_layoutDump
+// cvar is non-zero. No-op (a single cvar lookup) when disabled. Invoked at
+// the tail of WUI_LayoutMenu. Defined in cl_wired_layout_dump.c.
+void WUI_DumpLayout( const struct wiredMenuDef_s *menu );
 
 // Resolve a single item and its children recursively.
 void WUI_LayoutItem( struct wiredItemDef_s *item, const wuiPixelRect_t *parent,

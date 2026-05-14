@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
 // cg_main.c -- initialization and primary entry point for cgame
 #include "cg_local.h"
@@ -581,6 +568,12 @@ static void CG_RegisterSounds( void ) {
 #if FEAT_EARTHQUAKE_SYSTEM
 	cgs.media.earthquakeSound = trap_S_RegisterSound( "sound/world/earthquake.wav", qfalse );
 #endif
+	// Phase 6.5.3: water-surface crossing FX (Q1-map gated at use sites). Prefer
+	// Quake's misc/h2ohit1.wav; fall back to Q3's player/watr_in.wav; 0 (silent
+	// splash, no crash) if neither asset is present.
+	cgs.media.waterSplashSound = trap_S_RegisterSound( "sound/misc/h2ohit1.wav", qfalse );
+	if ( !cgs.media.waterSplashSound )
+		cgs.media.waterSplashSound = trap_S_RegisterSound( "sound/player/watr_in.wav", qfalse );
 
 	if ( cgs.gametypeIsTeamGame || cg_buildScript.integer ) {
 
@@ -1184,8 +1177,17 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	cgs.processedSnapshotNum = serverMessageNum;
 	cgs.serverCommandSequence = serverCommandSequence;
 
+	// Phase 6.5.3: detect a Quake-1 BSP (com_mapBspVersion == 29 — same
+	// signal the game module uses to gate Q1_LinkDoors). Gates the
+	// Q1-fidelity water-surface FX in cg_weapons.c / cg_effects.c.
+	{
+		char bspVer[16];
+		trap_Cvar_VariableStringBuffer( "com_mapBspVersion", bspVer, sizeof( bspVer ) );
+		cgs.q1Map = ( atoi( bspVer ) == 29 );
+	}
+
 	// load a few needed things before we do any screen updates
-	cgs.media.whiteShader		= trap_R_RegisterShader( "white" );
+	cgs.media.whiteShader		= trap_R_RegisterShader( "*white" );
 
 	CG_RegisterCvars();
 

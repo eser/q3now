@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #ifndef G_BOT_SCRIPTS_SHARED_H
 #define G_BOT_SCRIPTS_SHARED_H
 

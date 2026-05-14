@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2013 Jorge Jimenez (jorge@iryoku.com)
+// SPDX-FileCopyrightText: 2013 Jose I. Echevarria (joseignacioechevarria@gmail.com)
+// SPDX-FileCopyrightText: 2013 Belen Masia (bmasia@unizar.es)
+// SPDX-FileCopyrightText: 2013 Fernando Navarro (fernandn@microsoft.com)
+// SPDX-FileCopyrightText: 2013 Diego Gutierrez (diegog@unizar.es)
+
 /**
  * Copyright (C) 2013 Jorge Jimenez (jorge@iryoku.com)
  * Copyright (C) 2013 Jose I. Echevarria (joseignacioechevarria@gmail.com)

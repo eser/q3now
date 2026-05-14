@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: LicenseRef-CWI
+// SPDX-FileCopyrightText: 1992 Stichting Mathematisch Centrum, Amsterdam, The Netherlands
+
 /***********************************************************
 Copyright 1992 by Stichting Mathematisch Centrum, Amsterdam, The
 Netherlands.

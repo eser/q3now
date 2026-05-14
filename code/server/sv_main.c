@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "server.h"
 #include "../qcommon/q_feats.h"
@@ -59,7 +46,7 @@ cvar_t *sv_filter;
 cvar_t *sv_minRestartDelay;
 cvar_t *sv_snapshotTransport;
 
-// Scheduled server restart state (CNQ3 port).
+// Scheduled server restart state
 // sv_startRealTime is Sys_Milliseconds() at the moment the server first came
 // up; used to measure uptime regardless of level resets. sv_restartPending is
 // set when the configured delay elapses, and we defer the actual restart
@@ -963,7 +950,7 @@ static void SV_CheckTimeouts( void ) {
 		if ( cl->state == CS_FREE ) {
 			continue;
 		}
-		// CNQ3 bot-timeout fix: bots never send packets over the network
+		// bot-timeout fix: bots never send packets over the network
 		// and therefore have stale lastPacketTime. Skip them entirely so a
 		// long-running server never times out its own AI clients.
 		if ( cl->netchan.remoteAddress.type == NA_BOT ) {
@@ -1222,7 +1209,7 @@ void SV_Frame( int msec ) {
 		}
 	}
 
-	// CNQ3: scheduled server process restart after sv_minRestartDelay hours.
+	// scheduled server process restart after sv_minRestartDelay hours.
 	// Mark the pending flag once the delay has elapsed, then wait for all
 	// human clients to drop before quitting (the parent watchdog will
 	// relaunch us — see Sys_InstallHardRebootWatchdog).

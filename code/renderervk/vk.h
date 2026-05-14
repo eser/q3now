@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #pragma once
 
 #include "../renderercommon/vulkan/vulkan.h"
@@ -13,6 +17,19 @@
 
 #define MAX_VK_SAMPLERS 32
 #define MAX_VK_PIPELINES ((1024 + 128)*2)
+
+#define SHADOWMAP_MAX_CASCADES 4   // CSM cascade count (Phase 6.5.4b/c) — also sizes the lighting-UBO cascadeMVP[] array
+
+#if FEAT_SHADOW_MAPPING
+// Phase 6.5.4d2: per-inline-brush-model slice into the shared bmodel shadow-caster
+// buffer (absolute indices into that buffer's vertex region, so vertexOffset == 0
+// at draw time). Index k matches tr.world->bmodels[k] (slot 0 = worldspawn, unused —
+// the worldspawn casters live in vk.shadowMap.casterBuf).
+typedef struct {
+	uint32_t firstIndex;   // first index of this bmodel's geometry in the shared index region
+	uint32_t indexCount;   // index count (0 = no opaque casters / not a real bmodel slot)
+} vkBmodelCasterRange_t;
+#endif
 
 #define VERTEX_BUFFER_SIZE     (4 * 1024 * 1024)  /* by default */
 #define VERTEX_BUFFER_SIZE_HI  (8 * 1024 * 1024)
@@ -208,6 +225,25 @@ typedef struct {
 	int abs_light;
 	int allow_discard;
 	int acff; // none, rgb, rgba, alpha
+	// Phase 6B3'-d4-m_final (Block 1): the A3 `srgb` cache-key field is
+	// retired — colour-texel sRGB->linear decode is unconditional in
+	// gen_frag.tmpl / light_frag.tmpl now, so there is no per-pipeline
+	// variant.
+	// Block 5d: per-slot colour-domain bitmask (bit N = texture slot N is
+	// CD_LINEAR → raw fetch in gen_frag.tmpl / light_frag.tmpl). Filled from
+	// each stage's bundle images at the def-build site; wired to fragment
+	// spec constant id 4 (gen_frag.tmpl / light_frag.tmpl / water.frag all
+	// declare `tex_domain` as constant_id 4).
+	int tex_domain;
+	// Phase 6.5.2: tangent-space normal-map encoding for the PARALLAX
+	// lighting variants. 0 = RGB (BC1/BC3/uncompressed RGBA — all 3 channels,
+	// unpack *2-1); 1 = BC5 UNORM (ATI2N/3Dc — R=X G=Y, reconstruct
+	// Z = sqrt(1-x²-y²)); 2 = BC5 SNORM (R=X G=Y already signed, reconstruct
+	// Z). Set at the parallax pipeline-swap site from bundle[2].image[0]->
+	// internalFormat; wired to light_frag.tmpl fragment spec constant id 15
+	// (a hole left by the retired A3/A4 `srgb` constant). Ignored by every
+	// non-parallax shader (they don't declare id 15).
+	int normal_format;
 	struct {
 		byte rgb;
 		byte alpha;
@@ -217,6 +253,10 @@ typedef struct {
 typedef struct VK_Pipeline {
 	Vk_Pipeline_Def def;
 	VkPipeline handle[ RENDER_PASS_COUNT ];
+	// Phase 7.4c-pipeline — sibling ralPipeline_t * created when
+	// r_useRALPipelines=1. NULL when the flag is off OR when RAL creation
+	// failed for this variant. Rendering still uses .handle[] until 7.4c-cmd.
+	struct ralPipeline_s *ral_handle[ RENDER_PASS_COUNT ];
 } VK_Pipeline_t;
 
 // this structure must be in sync with shader uniforms!
@@ -240,6 +280,20 @@ typedef struct vkUniform_s {
 	vec4_t fogColor;			// fragment
 	// lightstyle per-surface blend weights (x=slot0, y=slot1, z=slot2, w=slot3)
 	vec4_t q1StyleIntensities;
+#if FEAT_SHADOW_MAPPING
+	// Phase 6.5.4c: CSM cascade matrices + split distances. Appended at the end
+	// (std140 offset 144) so existing field offsets are untouched — the lit
+	// shader's USE_SHADOWMAP UBO declares these at explicit layout(offset=)s
+	// (144 / 400 / 416). Replaces the 6.5.4a single-sunMVP-aliased-over-fog hack.
+	float  cascadeMVP[SHADOWMAP_MAX_CASCADES][16];   // offset 144, 256 B — per-cascade light view-proj (column-major)
+	vec4_t cascadeSplits;                            // offset 400, 16 B  — view-space Z for splits 1..4 (split 0 = near is implicit)
+	// Phase 6.5.4d2: caster/receiver model->world transform — identity for
+	// worldspawn surfaces, the entity's [axis|origin] for entity/brush-model
+	// surfaces. light_vert.tmpl maps in_position through it so the fragment's
+	// shadow-map lookup uses the WORLD position (in_position is object-space
+	// for entity surfaces / rest-space for moved brush models).
+	float  modelMatrix[16];                          // offset 416, 64 B  — column-major
+#endif
 } vkUniform_t;
 
 #define TESS_XYZ   (1)
@@ -277,8 +331,21 @@ void vk_wait_idle( void );
 void vk_queue_wait_idle( void );
 
 #if FEAT_SHADOW_MAPPING
-struct dlight_s;
-void vk_render_shadow_map( const struct dlight_s *dl );
+// Phase 6.5.4a/b: sun-driven shadow map (4-layer cascade array; 6.5.4b
+// populates cascade 0 with world casters). vk_render_shadow_map() runs once
+// per RB_LightingPass; vk_build_shadow_caster() builds the world caster
+// geometry once per map load (also lazily re-entrant from vk_render_shadow_map).
+void vk_render_shadow_map( void );
+void vk_build_shadow_caster( void );
+// Phase 6.5.4d2-followup: hooked from RB_SurfaceMesh / RB_IQMSurfaceAnim (CPU
+// path) right after the main pass deforms a mesh surface into
+// tess.xyz[firstVert..numVerts] / tess.indexes[firstIdx..numIdx]; snapshots the
+// model-space verts (w=1) + 0-based indices + the current entity's [axis|origin]
+// into the shadowMeshSnap* CPU arrays for next frame's shadow pass to draw.
+// Cheap early-out when shadow mapping is off / not an opaque caster / viewmodel
+// / depth-hacked / RF_NOSHADOW. (GPU-skinned IQM never reaches this — it returns
+// before tess.xyz is touched; that's d2-followup-2.)
+void vk_shadow_capture_mesh( int firstVert, int numVerts, int firstIdx, int numIdx );
 #endif
 
 //
@@ -286,6 +353,35 @@ void vk_render_shadow_map( const struct dlight_s *dl );
 //
 void vk_create_image( image_t *image, int width, int height, int mip_levels );
 void vk_upload_image_data( image_t *image, int x, int y, int width, int height, int miplevels, byte *pixels, int size, qboolean update, uint32_t baseArrayLayer );
+
+// Phase 6.5: BC* compressed mip-chain upload. Caller passes the full
+// concatenated mip data (as returned by R_LoadDDS) and the format /
+// extents declared by the DDS header; this helper computes per-mip
+// block byte sizes and dispatches vkCmdCopyBufferToImage with one
+// region per mip level. image->internalFormat must be set to the
+// matching VK_FORMAT_BC* before calling vk_create_image.
+// Phase 6.5.1: when image->texType == TEXTYPE_CUBE the data is six
+// face-major mip chains (+X,-X,+Y,-Y,+Z,-Z) and the upload targets
+// all 6 array layers.
+void vk_upload_image_data_compressed( image_t *image, int width, int height, int mipLevels, byte *data, int dataSize );
+
+// Phase 6.5.1: uncompressed volume (3D) mip-chain upload — one z-slab
+// per mip, depth halving each level. Used for VK_FORMAT_R8G8B8A8_(UNORM|SRGB)
+// .dds volume textures. image->texType must be TEXTYPE_3D and image->depth
+// the base slice count before vk_create_image is called.
+void vk_upload_image_data_3d( image_t *image, int width, int height, int depth, int mipLevels, byte *data, int dataSize );
+
+// Phase 6.5.1: dispatch a DDS image to the right upload path based on its
+// format and texType (BC* / uncompressed 2D / volume / cubemap). Call after
+// vk_create_image with image->internalFormat / texType / depth / layerCount
+// already populated from the .dds header.
+void vk_upload_dds_image_data( image_t *image, int width, int height, int depth, int mipLevels, byte *data, int dataSize );
+
+qboolean vk_bc_format_supported( VkFormat format );
+// Phase 6.5.1: is `format` something R_CreateImageDDS can actually upload?
+// True for any supported BC* block format, plus the uncompressed carriers
+// used by cube/volume DDS assets (RGBA8 UNORM/SRGB, RGBA16F).
+qboolean vk_dds_format_uploadable( VkFormat format );
 void vk_update_descriptor_set( image_t *image, qboolean mipmap );
 void vk_destroy_image_resources( VkImage *image, VkImageView *imageView );
 void vk_update_attachment_descriptors( void );
@@ -322,6 +418,35 @@ void vk_draw_dot( uint32_t storage_offset );
 
 void vk_read_pixels( byte* buffer, uint32_t width, uint32_t height ); // screenshots
 qboolean vk_bloom( void );
+
+// Block 8 (Delta 2): tonemap and the UI compositing pass are fully
+// decoupled. vk_tonemap() knows nothing about UI; vk_open_ui_pass()
+// knows nothing about tonemap. The 3D→2D transition (RB_*, tr_backend.c)
+// orchestrates them.
+//
+// vk_tonemap()        — ends the open scene pass (render_pass.main or
+//                       post_bloom), runs the tonemap pass reading
+//                       img 264 → writing img 265, then ends
+//                       render_pass.tonemap. On return: no render pass
+//                       open; img 265 is in SHADER_READ_ONLY_OPTIMAL.
+//                       No-op if !fboActive or during the screenmap pass.
+//
+// vk_open_ui_pass(clear) — opens render_pass.ui_clear (clear==qtrue,
+//                       pure-2D path: ends the open render_pass.main first)
+//                       or render_pass.ui (clear==qfalse, gameplay path:
+//                       expects NO pass open — vk_tonemap()/vk_smaa()
+//                       already left a clean state) on img 265. On return:
+//                       a UI pass is open; renderPassIndex = RENDER_PASS_MAIN
+//                       (render_pass.ui[_clear] is pipeline-compatible
+//                       with render_pass.main per Vulkan §8.2).
+//
+// vk_smaa()           — self-gated on r_smaa; precondition and
+//                       postcondition: no render pass open. Reads/writes
+//                       img 265. Dispatched only from the transition
+//                       gameplay branch, between vk_tonemap() and
+//                       vk_open_ui_pass(qfalse).
+void vk_tonemap( void );
+void vk_open_ui_pass( qboolean clear );
 
 qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size );
 void vk_update_mvp( const float *m );
@@ -384,13 +509,26 @@ void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
 typedef struct vk_tess_s {
 	VkCommandBuffer command_buffer;
 
+	// Phase 7.4c-cmd — parallel-paths adoption. Created at vk_begin_frame
+	// (immediately after qvkBeginCommandBuffer) via Ral_AcquireBegunCommandBuffer
+	// (ownsBuffer = qfalse), destroyed at vk_end_frame after
+	// qvkEndCommandBuffer. Lifetime matches command_buffer's per-frame
+	// reuse cycle; the underlying VkCommandBuffer stays in the renderer's
+	// existing pool. Used as the first arg of every Ral_Cmd*Vk parallel-path
+	// call site. NULL when RAL backend isn't up (r_useRAL* all 0 or imported-
+	// mode init failed) — Ral_Cmd*Vk shims are NULL-safe.
+	struct ralCommandBuffer_s *ral_cmd;
+
 	VkSemaphore image_acquired;
+	struct ralSemaphore_s *ral_image_acquired;  // Phase 7.4c-submit-followup-present-1 — adopted sibling for typed Ral_AcquireNextImage's signalSem arg (consumed in -2 atomic switchover)
 	uint32_t	swapchain_image_index;
 	qboolean	swapchain_image_acquired;
 #ifdef USE_UPLOAD_QUEUE
 	VkSemaphore rendering_finished2;
+	struct ralSemaphore_s *ral_rendering_finished2;  // Phase 7.4c-submit-followup-staging — adopted sibling fed into ralSubmitInfo_t at vk_flush_staging_buffer's submit
 #endif
 	VkFence rendering_finished_fence;
+	struct ralFence_s *ral_rendering_finished_fence;   // Phase 7.4c-submit-BC-C-final — adopted sibling fed into ralSubmitInfo_t.signalFence at the per-frame Ral_Submit call site (qvkQueueSubmit retired this turn)
 	qboolean waitForFence;
 
 	VkBuffer vertex_buffer;
@@ -409,6 +547,16 @@ typedef struct vk_tess_s {
 		uint32_t		start, end;
 		VkDescriptorSet	current[VK_DESC_COUNT + 1]; // 0:uniform, 1:color0, 2:color1, 3:color2, 4:fog, 5:depth_fade, 6:normalmap/Q1-anim-next
 		uint32_t		offset[1]; // 0 (uniform)
+		// Phase 7.4c-cmd — per-frame ring adoption mirror of current[].
+		// Each slot holds a ralBindGroup_t wrapper (ownsSet=qfalse) for the
+		// VkDescriptorSet currently parked in current[]. Updated by
+		// vk_update_descriptor / vk_reset_descriptor as the per-shader-type
+		// rotation walks fresh VkDescriptorSets in; the old wrapper is
+		// destroyed before the new one is adopted (no leak across rotation).
+		// Read by vk_ral_parallel_bind_descriptor_sets at bind-side call
+		// sites; when adopted, the lookup succeeds without falling through
+		// to the boot-time s_adopted_bgs registry scan.
+		struct ralBindGroup_s *current_ral[VK_DESC_COUNT + 1];
 	} descriptor_set;
 
 	Vk_Depth_Range		depth_range;
@@ -425,6 +573,18 @@ typedef struct vk_tess_s {
 	uint32_t num_indexes; // value from most recent vk_bind_index() call
 
 	VkRect2D scissor_rect;
+
+#if FEAT_SHADOW_MAPPING
+	// Phase 6.5.4d2-followup: per-command-buffer-slot host-coherent buffer that
+	// the previous frame's deformed-mesh shadow-caster snapshot is staged into by
+	// vk_render_shadow_map() (verts then 0-based indices); the per-cascade
+	// animated-mesh draw loop reads it (Part 2 — not yet drawn). Lazily
+	// (re)created on growth; destroyed in vk_shutdown.
+	VkBuffer        shadowSnapBuf;
+	VkDeviceMemory  shadowSnapMem;
+	void           *shadowSnapMapped;
+	VkDeviceSize    shadowSnapSize;
+#endif
 } vk_tess_t;
 
 
@@ -576,7 +736,9 @@ typedef struct {
 	vec4_t   velocityBiasJitter;     // 368..383; .xyz = symmetric crandom() per-axis jitter
 	float    speedJitter;            // 384..387; axialSpeed scatter, picked at emit
 	float    sizeJitter;             // 388..391; sizeStart scatter, picked at emit
-	uint32_t pad4;                   // 392..395
+	uint32_t colorDomain;            // 392..395; Block 5d-followup: was pad4 — CD_SRGB(0) | CD_LINEAR(1)
+	                                 //           of the class's resolved stage-0 image; the vertex
+	                                 //           shader packs it into bit 31 of particleClassHandle.
 	uint32_t pad5;                   // 396..399; total stride 400 B (= 25 * vec4)
 } particleClassGPU_t;
 
@@ -623,23 +785,17 @@ typedef struct {
 //                                           which now runs from
 //                                           vk_begin_frame BEFORE the
 //                                           main render pass opens.
-//   shared region  (bytes 128..143,  16 B): identityLight + pad.
-//                                           tr.identityLight (CGEN_VERTEX
-//                                           halving factor; 1/2^overbrightBits).
-//                                           Read by particle.frag to
-//                                           match the engine's
-//                                           half-bright vertex-color
-//                                           convention. Written from
-//                                           RB_RunParticleCompute (the
-//                                           earliest per-frame UBO
-//                                           touch, runs before any
-//                                           render-pass open). Updated
-//                                           live when r_brightness or
-//                                           r_mapBrightness changes;
-//                                           the cvar onChange callback
-//                                           updates tr.identityLight
-//                                           and the next frame's UBO
-//                                           write picks it up.
+//   shared region  (bytes 128..143,  16 B): reserved padding. Word 0
+//                                           (offset 128) was the legacy
+//                                           `identityLight` halving
+//                                           factor — dropped in Phase
+//                                           6B3'-a (the linear pipeline
+//                                           has no overbright halve) and
+//                                           the field removed entirely
+//                                           in the Block 9 sweep; now
+//                                           just std140 vec4-stride pad
+//                                           keeping the 144 B (9×vec4)
+//                                           stride byte-stable.
 // Regions are contiguous and disjoint; do NOT memcpy the entire struct
 // from either site — that races / overwrites the other site's fields.
 typedef struct {
@@ -653,35 +809,42 @@ typedef struct {
 	uint32_t poolSize;       // 116..119
 	uint32_t numClasses;     // 120..123
 	uint32_t pingPongRead;   // 124..127
-	// ── shared region (filled in RB_RunParticleCompute) ─────────
-	float    identityLight;  // 128..131  tr.identityLight; consumed by particle.frag
-	float    pad0;           // 132..135  std140 vec4-stride pad
-	float    pad1;           // 136..139
-	float    pad2;           // 140..143  total stride 144 B (= 9 * vec4)
+	// ── shared region: reserved padding (was the identityLight slot) ─
+	float    pad0;           // 128..131
+	float    pad1;           // 132..135
+	float    pad2;           // 136..139
+	float    pad3;           // 140..143  total stride 144 B (= 9 * vec4)
 } particleFrame_t;
 
 
 // Vk_Instance contains engine-specific vulkan resources that persist entire renderer lifetime.
 // This structure is initialized/deinitialized by vk_initialize/vk_shutdown functions correspondingly.
 typedef struct {
+	VkInstance instance;                   // Phase 7.4c-pre: mirror of the file-static vk_instance, exposed for RAL imported-mode bringup
 	VkPhysicalDevice physical_device;
 	VkSurfaceFormatKHR base_format;
 	VkSurfaceFormatKHR present_format;
 
-	uint32_t queue_family_index;
+	uint32_t queue_family_index;           // graphics + presentation
+	uint32_t queue_family_compute;         // dedicated async-compute, or == queue_family_index
+	uint32_t queue_family_transfer;        // dedicated async-transfer (DMA), or == queue_family_index
+	uint32_t instance_api_version;         // Phase 7.4c-pre: VK_API_VERSION_1_2+ (gated at create_instance)
 	VkDevice device;
 	VkQueue queue;
 
 	VkSwapchainKHR swapchain;
+	struct ralSwapchain_s *ral_swapchain;  // Phase 7.4c-submit-followup-present-1 — RAL-owned parallel swapchain wrapper. NULL this turn (Cluster D.5 deferred to -2 due to multi-swapchain-per-surface hazard); the field exists so -2's atomic switchover has a sibling slot ready.
 	uint32_t swapchain_image_count;
 	VkImage swapchain_images[MAX_SWAPCHAIN_IMAGES];
 	VkImageView swapchain_image_views[MAX_SWAPCHAIN_IMAGES];
 	VkSemaphore swapchain_rendering_finished[MAX_SWAPCHAIN_IMAGES];
+	struct ralSemaphore_s *ral_swapchain_rendering_finished[MAX_SWAPCHAIN_IMAGES];  // Phase 7.4c-submit-followup-present-1 — adopted per-swapchain-image siblings for typed ralPresentInfo_t.waitSemaphores[] (consumed in -2)
 	//uint32_t swapchain_image_index;
 
 	VkCommandPool command_pool;
 #ifdef USE_UPLOAD_QUEUE
-	VkCommandBuffer staging_command_buffer;
+	VkCommandBuffer staging_command_buffer;        // alias — populated from Ral_GetCommandBufferHandle(ral_staging_cmd) at acquisition; the 30+ qvkBegin/End/Reset/Cmd* legacy sites on this field operate on the RAL-allocated underlying VkCommandBuffer transparently
+	struct ralCommandBuffer_s *ral_staging_cmd;     // Phase 7.4c-submit-followup-staging — persistent acquire-once-at-init staging cb (RAL-owned via Ral_AcquireCommandBuffer; ownsBuffer=qtrue); submitted via Ral_Submit at vk_flush_staging_buffer
 #endif
 
 	VkDeviceMemory image_memory[ MAX_ATTACHMENTS_IN_POOL ];
@@ -690,6 +853,9 @@ typedef struct {
 	struct {
 		VkRenderPass main;
 		VkRenderPass screenmap;
+		VkRenderPass tonemap;  // Phase 6B3'-c1: scene-radiance pass, writes tonemapped_image
+		VkRenderPass ui;       // Phase 6B3'-d4-Block-5b: 2D UI compositing pass — LOADs img 265 (tonemap+SMAA output), 2D draws blend in, gamma+capture read result. Gameplay path.
+		VkRenderPass ui_clear; // Block 8 (Delta 2): same as render_pass.ui but loadOp=CLEAR on the colour attachment — pure-2D frames (menu/loading) skip tonemap entirely and draw 2D straight into a cleared img 265.
 		VkRenderPass gamma;
 		VkRenderPass capture;
 		VkRenderPass bloom_extract;
@@ -701,10 +867,44 @@ typedef struct {
 		VkRenderPass smaa_resolve;	// SMAA resolve (writes to color_image)
 	} render_pass;
 
+	// Phase 7.4c-submit-A3 — ralRenderPass_t siblings adopted via
+	// Ral_AdoptRenderPass at each qvkCreateRenderPass site; consumed by
+	// Ral_CmdBeginRenderPass + the externalRenderPass field of
+	// ralGraphicsPipelineCreateInfo_t (RAL siblings created with legacy
+	// VkRenderPass so the parallel buffer's vkCmdDraw is render-pass-
+	// compatible with the bound pass).
+	struct {
+		struct ralRenderPass_s *main;
+		struct ralRenderPass_s *screenmap;
+		struct ralRenderPass_s *tonemap;
+		struct ralRenderPass_s *ui;
+		struct ralRenderPass_s *ui_clear;
+		struct ralRenderPass_s *gamma;
+		struct ralRenderPass_s *capture;
+		struct ralRenderPass_s *bloom_extract;
+		struct ralRenderPass_s *blur[VK_NUM_BLOOM_PASSES*2];
+		struct ralRenderPass_s *post_bloom;
+		struct ralRenderPass_s *depth_fade;
+		struct ralRenderPass_s *smaa_edge;
+		struct ralRenderPass_s *smaa_blend;
+		struct ralRenderPass_s *smaa_resolve;
+	} ral_render_pass;
+
 	VkDescriptorPool descriptor_pool;
 	VkDescriptorSetLayout set_layout_sampler;	// combined image sampler
 	VkDescriptorSetLayout set_layout_uniform;	// dynamic uniform buffer
 	VkDescriptorSetLayout set_layout_storage;	// feedback buffer
+
+	// Phase 7.4c-bindgroup-pre — RAL wrappers over the three descriptor set
+	// layouts above, populated via Ral_AdoptBindGroupLayout when the RAL
+	// backend is live + r_useRALPipelines is on. NULL otherwise. Consumed by
+	// vk_ral_create_pipeline_from_def so RAL pipelines declare matching
+	// VkPipelineLayouts. The underlying VkDescriptorSetLayouts are still
+	// owned + destroyed by the legacy path; the adopted wrappers are freed
+	// by Ral_DestroyBindGroupLayout at vk_shutdown.
+	struct ralBindGroupLayout_s *ral_bgl_sampler;
+	struct ralBindGroupLayout_s *ral_bgl_uniform;
+	struct ralBindGroupLayout_s *ral_bgl_storage;
 
 	VkPipelineLayout pipeline_layout;			// default shaders
 	VkPipelineLayout pipeline_layout_storage;	// flare test shader layout
@@ -712,6 +912,15 @@ typedef struct {
 	VkPipelineLayout pipeline_layout_smaa;		// SMAA (push constants + 3 samplers)
 	VkPipelineLayout pipeline_layout_blend;		// post-processing
 	VkPipelineLayout pipeline_layout_msdf;		// MSDF text (112-byte push constant range)
+	// Phase 7.4c-submit-A2 — typed RAL siblings (Ral_AdoptPipelineLayout wrappers).
+	// Populated at the matching qvkCreatePipelineLayout call site; consumed by
+	// the typed Ral_CmdPushConstants/Ral_CmdBind* surface via vk_ral_lookup_pipeline_layout.
+	struct ralPipelineLayout_s *ral_pipeline_layout;
+	struct ralPipelineLayout_s *ral_pipeline_layout_storage;
+	struct ralPipelineLayout_s *ral_pipeline_layout_post_process;
+	struct ralPipelineLayout_s *ral_pipeline_layout_smaa;
+	struct ralPipelineLayout_s *ral_pipeline_layout_blend;
+	struct ralPipelineLayout_s *ral_pipeline_layout_msdf;
 
 	// ── primitive ribbon infrastructure ──────────────────────────────
 	//
@@ -737,9 +946,13 @@ typedef struct {
 	struct {
 		// pipeline + layouts + shader-bound state
 		VkDescriptorSetLayout	set_layout;          // 2 SSBOs: points, headers
+		struct ralBindGroupLayout_s *ral_bgl;        // Phase 7.4c-pipeline-followup — adopted wrapper for set_layout
 		VkPipelineLayout		pipeline_layout;     // push(mvp+eyeWorld) + set0(SSBOs)
+		struct ralPipelineLayout_s *ral_pipeline_layout;  // Phase 7.4c-submit-A2 — typed sibling
 		VkPipeline				pipeline_alpha;      // SRC_ALPHA / ONE_MINUS_SRC_ALPHA
+		struct ralPipeline_s   *ral_pipeline_alpha;
 		VkPipeline				pipeline_additive;   // SRC_ALPHA / ONE
+		struct ralPipeline_s   *ral_pipeline_additive;
 		// per-frame staging (host-coherent, mapped)
 		VkBuffer				points_buffer  [NUM_COMMAND_BUFFERS];
 		VkDeviceMemory			points_memory  [NUM_COMMAND_BUFFERS];
@@ -785,8 +998,11 @@ typedef struct {
 	struct {
 		// pipeline + layouts + shader-bound state
 		VkDescriptorSetLayout	set_layout;            // 4 bindings: headers SSBO, image array, stages SSBO, stage-counts SSBO
+		struct ralBindGroupLayout_s *ral_bgl;
 		VkPipelineLayout		pipeline_layout;       // push(mvp+eyeWorld+frameParams+stageParams) + set0
+		struct ralPipelineLayout_s *ral_pipeline_layout;  // Phase 7.4c-submit-A2 — typed sibling
 		VkPipeline				pipeline;              // single ONE/ONE additive pipeline
+		struct ralPipeline_s   *ral_pipeline;
 		// Phase 5J: dedicated REPEAT-mode sampler for beam binding 1.
 		// Beam UV scrolling produces large out-of-range UVs; REPEAT
 		// wraps natively. Ribbon/sprite/particle continue to share
@@ -875,9 +1091,13 @@ typedef struct {
 	struct {
 		// pipeline + layouts + shader-bound state
 		VkDescriptorSetLayout	set_layout;          // 1 SSBO: headers
+		struct ralBindGroupLayout_s *ral_bgl;
 		VkPipelineLayout		pipeline_layout;     // push(mvp+viewLeft+viewUp) + set0(SSBO)
+		struct ralPipelineLayout_s *ral_pipeline_layout;  // Phase 7.4c-submit-A2 — typed sibling
 		VkPipeline				pipeline_alpha;      // SRC_ALPHA / ONE_MINUS_SRC_ALPHA
+		struct ralPipeline_s   *ral_pipeline_alpha;
 		VkPipeline				pipeline_additive;   // SRC_ALPHA / ONE
+		struct ralPipeline_s   *ral_pipeline_additive;
 		// per-frame staging (host-coherent, mapped)
 		VkBuffer				headers_buffer [NUM_COMMAND_BUFFERS];
 		VkDeviceMemory			headers_memory [NUM_COMMAND_BUFFERS];
@@ -918,12 +1138,24 @@ typedef struct {
 	struct {
 		// pipeline state
 		VkDescriptorSetLayout	compute_set_layout;  // 4 bindings: UBO + 3 SSBOs
+		struct ralBindGroupLayout_s *ral_bgl_compute;
 		VkDescriptorSetLayout	render_set_layout;   // 3 bindings: UBO + 2 SSBOs
+		struct ralBindGroupLayout_s *ral_bgl_render;
 		VkPipelineLayout		compute_pipeline_layout;
 		VkPipelineLayout		render_pipeline_layout;
+		// Phase 7.4c-submit-A2 — typed siblings.
+		struct ralPipelineLayout_s *ral_compute_pipeline_layout;
+		struct ralPipelineLayout_s *ral_render_pipeline_layout;
 		VkPipeline				compute_pipeline;
+		struct ralPipeline_s   *ral_compute_pipeline;     // Phase 7.4c-pipeline PART F
 		VkPipeline				render_pipeline_alpha;
+		struct ralPipeline_s   *ral_render_pipeline_alpha;
 		VkPipeline				render_pipeline_additive;
+		struct ralPipeline_s   *ral_render_pipeline_additive;
+		// PART E sibling fields for the 15 graphics special-case pipelines
+		// remain at NULL in this turn — per-site parallel creation lands in
+		// 7.4c-pipeline-followup. Their teardown still pairs with
+		// qvkDestroyPipeline; no code path leaks a non-NULL ralPipeline_t *.
 
 		// ping-pong particle pool (host-coherent for emit-time CPU
 		// writes in phase 3). Indexed by ping-pong bit, NOT by
@@ -991,8 +1223,11 @@ typedef struct {
 	//
 	struct {
 		VkDescriptorSetLayout	set_layout_bones;	// bone matrix UBO (set 0)
+		struct ralBindGroupLayout_s *ral_bgl_bones;
 		VkPipelineLayout		pipeline_layout;	// push(mvp) + set0(bones) + set1(texture)
+		struct ralPipelineLayout_s *ral_pipeline_layout;  // Phase 7.4c-submit-A2 — typed sibling
 		VkPipeline				pipeline;			// graphics pipeline
+		struct ralPipeline_s   *ral_pipeline;
 		VkBuffer				bone_buffer[NUM_COMMAND_BUFFERS]; // per-frame bone UBOs
 		VkDeviceMemory			bone_memory[NUM_COMMAND_BUFFERS];
 		byte					*bone_ptr[NUM_COMMAND_BUFFERS];   // mapped pointers
@@ -1003,8 +1238,18 @@ typedef struct {
 
 	VkDescriptorSet color_descriptor;
 
+	// Phase 6B3'-c1: LDR-linear scene image, written by tonemap pass,
+	// sampled by the gamma/capture passes downstream. Format is
+	// R8G8B8A8_UNORM (sRGB encoding lives in gamma.frag; 6B3'-d may
+	// switch to an sRGB swapchain and drop manual encoding).
+	VkImage         tonemapped_image;
+	VkImageView     tonemapped_image_view;
+	VkDescriptorSet tonemapped_descriptor;
+	struct ralTexture_s *ral_tonemapped_image;  // Phase 7.4c-submit-A4 — adopted typed sibling for typed Ral_Cmd{PipelineBarrierFull,CopyImage}
+
 	VkImage color_image;
 	VkImageView color_image_view;
+	struct ralTexture_s *ral_color_image;       // Phase 7.4c-submit-A4 — adopted typed sibling
 
 	VkImage bloom_image[1+VK_NUM_BLOOM_PASSES*2];
 	VkImageView bloom_image_view[1+VK_NUM_BLOOM_PASSES*2];
@@ -1013,6 +1258,7 @@ typedef struct {
 
 	VkImage depth_image;
 	VkImageView depth_image_view;
+	struct ralTexture_s *ral_depth_image;       // Phase 7.4c-submit-A4 — adopted typed sibling
 
 	// depth fade (soft particles)
 	struct {
@@ -1023,22 +1269,53 @@ typedef struct {
 		VkDescriptorSet descriptor;
 		qboolean        active;
 		qboolean        copied;		// depth was copied this frame
+		struct ralTexture_s *ral_image;  // Phase 7.4c-submit-BC-Pre — adopted typed sibling for typed Ral_Cmd{PipelineBarrierFull,CopyImage} (closes the A4 lookup-miss gap at vk.c:18411/18448/...)
 	} depthFade;
 
 #if FEAT_SHADOW_MAPPING
-	// Shadow mapping
+	// Shadow mapping. Phase 6.5.4b/c: the depth target is a 4-layer 2D array
+	// (one layer per CSM cascade). 6.5.4c renders the world casters into every
+	// cascade using a per-cascade light view-proj fit (Practical Split + stable
+	// texel snap). The sampling view is 2D_ARRAY; each framebuffer wraps a
+	// single-layer 2D view of one cascade. (SHADOWMAP_MAX_CASCADES is defined
+	// at file scope above — it also sizes vkUniform_t.cascadeMVP[].)
 	struct {
-		VkImage         image;
-		VkImageView     view;
-		VkDeviceMemory  memory;
-		VkSampler       sampler;
-		VkDescriptorSet descriptor;
-		VkRenderPass    renderPass;
-		VkFramebuffer   framebuffer;
-		VkPipeline      depthPipeline;   // depth-only rendering pipeline
-		VkPipelineLayout depthLayout;    // push constants only (lightMVP)
-		qboolean        active;
-		uint32_t        size;            // shadow map resolution (default 512)
+		VkImage          image;
+		VkImageView      view;                                // 2D_ARRAY — bound to descriptor set 3 (sampler2DArray)
+		VkImageView      layerView[SHADOWMAP_MAX_CASCADES];   // per-cascade 2D views — framebuffer attachments
+		VkDeviceMemory   memory;
+		VkSampler        sampler;
+		VkDescriptorSet  descriptor;
+		VkRenderPass     renderPass;                          // depth-only, reused for all cascades
+		struct ralRenderPass_s *ral_renderPass;                // Phase 7.4c-submit-A3 — typed sibling
+		VkFramebuffer    framebuffer[SHADOWMAP_MAX_CASCADES];
+		VkPipeline       depthPipeline;   // depth-only caster pipeline (created against renderPass)
+		struct ralPipeline_s *ral_depthPipeline;   // Phase 7.4c-pipeline-followup
+		VkPipelineLayout depthLayout;     // push constants only (per-cascade MVP)
+		struct ralPipelineLayout_s *ral_depthLayout;  // Phase 7.4c-submit-A2 — typed sibling
+		qboolean         active;
+		uint32_t         size;            // shadow map resolution per cascade (default 2048)
+		float            cascadeMVP[SHADOWMAP_MAX_CASCADES][16]; // Phase 6.5.4c: per-cascade light view-proj (column-major), recomputed per frame
+		float            cascadeSplits[4];                        // view-space Z for splits 1..4 (split 0 = near is implicit)
+		// world caster geometry (worldspawn / model 0 only) — position-only,
+		// built lazily once per map load
+		VkBuffer         casterBuf;       // [vec4 positions][uint32 indices], device-local
+		VkDeviceMemory   casterMem;
+		uint32_t         casterVtxBytes;  // byte offset where the index data begins
+		uint32_t         casterIndexCount;
+		const void      *casterBuiltSurfaces; // tr.world->surfaces value the buffer was built for (NULL = none)
+		// Phase 6.5.4d2: inline-brush-model casters. One shared device-local
+		// buffer holding every bmodel's opaque geometry concatenated
+		// ([vec4 positions][uint32 indices]); per-bmodel slices in bmodelRanges[k]
+		// (k matches tr.world->bmodels). Drawn per visible MOD_BRUSH entity in the
+		// shadow pre-pass with that entity's [axis|origin] model matrix. Built /
+		// freed alongside casterBuf (same casterBuiltSurfaces gate — bmodels are
+		// static for a map's lifetime).
+		VkBuffer                casterBmodelBuf;     // shared bmodel geometry
+		VkDeviceMemory          casterBmodelMem;
+		uint32_t                casterBmodelVtxBytes;// byte offset where the index region begins
+		vkBmodelCasterRange_t  *bmodelRanges;        // ri.Malloc'd, length = numBmodelRanges (== tr.world->numBModels); NULL if none
+		int                     numBmodelRanges;
 	} shadowMap;
 #endif
 
@@ -1058,34 +1335,39 @@ typedef struct {
 		VkDeviceMemory  search_memory;
 		VkDescriptorSet search_descriptor;
 
-		// intermediate textures (resolution-dependent)
+		// intermediate textures (resolution-dependent). Phase 6B3'-f
+		// split-A3: each image owns its VkDeviceMemory (was attachment
+		// pool). The dedicated layout is load-bearing for the live
+		// release path — see vk_smaa_release_resources. Do not move
+		// these back into the shared pool unless you also rebuild the
+		// pool on r_smaa toggle.
 		VkImage         edges_image;    // R8G8
 		VkImageView     edges_view;
+		VkDeviceMemory  edges_memory;
 		VkDescriptorSet edges_descriptor;
+		struct ralTexture_s *ral_edges_image;  // Phase 7.4c-submit-A4 — adopted typed sibling
 
 		VkImage         blend_image;    // RGBA8
 		VkImageView     blend_view;
+		VkDeviceMemory  blend_memory;
 		VkDescriptorSet blend_descriptor;
+		struct ralTexture_s *ral_blend_image;  // Phase 7.4c-submit-A4 — adopted typed sibling
 
 		VkImage         input_image;    // color_format (copy of color_image)
 		VkImageView     input_view;
+		VkDeviceMemory  input_memory;
 		VkDescriptorSet input_descriptor;
+		struct ralTexture_s *ral_input_image;  // Phase 7.4c-submit-A4 — adopted typed sibling
 
 		VkSampler       point_sampler;
 		VkSampler       linear_sampler;
 	} smaa;
-
-	VkImage msaa_image;
-	VkImageView msaa_image_view;
 
 	// screenMap
 	struct {
 		VkDescriptorSet color_descriptor;
 		VkImage color_image;
 		VkImageView color_image_view;
-
-		VkImage color_image_msaa;
-		VkImageView color_image_view_msaa;
 
 		VkImage depth_image;
 		VkImageView depth_image_view;
@@ -1101,6 +1383,9 @@ typedef struct {
 		VkFramebuffer blur[VK_NUM_BLOOM_PASSES*2];
 		VkFramebuffer bloom_extract;
 		VkFramebuffer main[MAX_SWAPCHAIN_IMAGES];
+		VkFramebuffer tonemap;  // Phase 6B3'-c1: single, writes to tonemapped_image
+		VkFramebuffer ui;       // Phase 6B3'-d4-Block-5b: 2D UI pass framebuffer (tonemapped_image + depth_image) — render_pass.ui (LOAD)
+		VkFramebuffer ui_clear; // Block 8 (Delta 2): same attachments, render_pass.ui_clear (CLEAR)
 		VkFramebuffer gamma[MAX_SWAPCHAIN_IMAGES];
 		VkFramebuffer screenmap;
 		VkFramebuffer capture;
@@ -1109,10 +1394,30 @@ typedef struct {
 		VkFramebuffer smaa_resolve;
 	} framebuffers;
 
+	// Phase 7.4c-submit-A3 — ralFramebuffer_t siblings, adopted at each
+	// qvkCreateFramebuffer site, consumed by Ral_CmdBeginRenderPass.
+	struct {
+		struct ralFramebuffer_s *blur[VK_NUM_BLOOM_PASSES*2];
+		struct ralFramebuffer_s *bloom_extract;
+		struct ralFramebuffer_s *main[MAX_SWAPCHAIN_IMAGES];
+		struct ralFramebuffer_s *tonemap;
+		struct ralFramebuffer_s *ui;
+		struct ralFramebuffer_s *ui_clear;
+		struct ralFramebuffer_s *gamma[MAX_SWAPCHAIN_IMAGES];
+		struct ralFramebuffer_s *screenmap;
+		struct ralFramebuffer_s *capture;
+		struct ralFramebuffer_s *smaa_edge;
+		struct ralFramebuffer_s *smaa_blend;
+		struct ralFramebuffer_s *smaa_resolve;
+	} ral_framebuffers;
+
 #ifdef USE_UPLOAD_QUEUE
 	VkSemaphore rendering_finished;	// reference to vk.cmd->rendering_finished2
+	struct ralSemaphore_s *ral_rendering_finished;  // Phase 7.4c-submit-followup-staging — parallel-RAL alias of vk.cmd->ral_rendering_finished2; flips NULL/non-NULL alongside the legacy alias
 	VkSemaphore image_uploaded2;
+	struct ralSemaphore_s *ral_image_uploaded2;     // Phase 7.4c-submit-followup-staging — adopted sibling of image_uploaded2
 	VkSemaphore image_uploaded;		// reference to vk.image_uploaded2
+	struct ralSemaphore_s *ral_image_uploaded;      // Phase 7.4c-submit-followup-staging — parallel-RAL alias of vk.ral_image_uploaded2; flips NULL/non-NULL alongside the legacy alias
 #endif
 
 	vk_tess_t tess[ NUM_COMMAND_BUFFERS ], *cmd;
@@ -1189,13 +1494,14 @@ typedef struct {
 		VkShaderModule blur_fs;
 		VkShaderModule blend_fs;
 
-		// Phase 9D (6B3a): post-main HDR boost pass — applies obScale
-		// to vk.color_image before bloom-extract reads it. Scaffolded
-		// here; dispatch wiring lands in 6B3b.
-		VkShaderModule boost_fs;
-
 		VkShaderModule gamma_fs;
 		VkShaderModule gamma_vs;
+
+		// Phase 6B3'-c1: scene-radiance post-process pass. tonemap.frag
+		// owns exposure bias, SSAO, godrays, tonemap operator, colour
+		// grading, saturation. Reuses gamma_vs (generic fullscreen
+		// quad) — no separate tonemap_vs.
+		VkShaderModule tonemap_fs;
 
 		VkShaderModule fog_fs;
 		VkShaderModule fog_vs;
@@ -1312,31 +1618,52 @@ typedef struct {
 	uint32_t q1ls_array_pipeline;	// Q1 4-style lightmap blend, texture array animation
 
 	VkPipeline gamma_pipeline;
+	struct ralPipeline_s *ral_gamma_pipeline;   // Phase 7.4c-pipeline-followup
 
-	// Post-process gamma variants (combinatorial, indexed by feature bitmask)
-	// Bit 0 = SSAO, Bit 1 = TONEMAP, Bit 2 = COLOR_GRADING, Bit 3 = FXAA
-#define GAMMA_VAR_SSAO    1
-#define GAMMA_VAR_TONEMAP 2
-#define GAMMA_VAR_CG      4
-#define GAMMA_VAR_FXAA    8
-#define GAMMA_VAR_GODRAYS 16
-#define GAMMA_VAR_COUNT   32
-	VkPipeline gamma_variants[GAMMA_VAR_COUNT];
-	VkShaderModule gamma_variant_fs[GAMMA_VAR_COUNT];
+	// Phase 6B3'-c1: tonemap pass is the new home of scene-radiance
+	// post-process effects. gamma_pipeline is now a thin display-encode
+	// (sRGB + dither) pass with no variants. tonemap_pipeline is the
+	// passthrough/default tonemap (no feature defines set); tonemap_variants[]
+	// holds the feature-combinatorial pipelines indexed by TONEMAP_VAR_*
+	// bits.
+	// Phase 6B3'-e: FXAA (was bit 3) was removed; SMAA is the AA path
+	// going forward. GODRAYS renumbered down from bit 4 to bit 3 to
+	// keep the bitmap contiguous and shrink the variant array by half.
+	// Phase 6B3'-f split-A3: GAMMA_VAR_* renamed to TONEMAP_VAR_* to
+	// reflect that the variant bits gate features in tonemap.frag, not
+	// gamma.frag. GAMMA_VAR_TONEMAP became TONEMAP_VAR_BASE per the
+	// rename spec (represents the base USE_TONEMAP variant).
+	// Bit 0 = SSAO, Bit 1 = TONEMAP (BASE), Bit 2 = COLOR_GRADING, Bit 3 = GODRAYS
+#define TONEMAP_VAR_SSAO    1
+#define TONEMAP_VAR_BASE    2
+#define TONEMAP_VAR_CG      4
+#define TONEMAP_VAR_GODRAYS 8
+#define TONEMAP_VAR_COUNT   16
+	VkPipeline tonemap_pipeline;
+	struct ralPipeline_s *ral_tonemap_pipeline;       // Phase 7.4c-pipeline-followup
+	VkPipeline tonemap_variants[TONEMAP_VAR_COUNT];
+	struct ralPipeline_s *ral_tonemap_variants[TONEMAP_VAR_COUNT];
+	VkShaderModule tonemap_variant_fs[TONEMAP_VAR_COUNT];
 	VkPipelineLayout pipeline_layout_ssao;    // 2 samplers: color + depth (SSAO without godrays)
 	VkPipelineLayout pipeline_layout_godrays; // 2 samplers + push constants (godrays sun position)
+	// Phase 7.4c-submit-A2 — typed RAL siblings.
+	struct ralPipelineLayout_s *ral_pipeline_layout_ssao;
+	struct ralPipelineLayout_s *ral_pipeline_layout_godrays;
 	VkPipeline capture_pipeline;
+	struct ralPipeline_s *ral_capture_pipeline;
 	VkPipeline bloom_extract_pipeline;
+	struct ralPipeline_s *ral_bloom_extract_pipeline;
 	VkPipeline blur_pipeline[VK_NUM_BLOOM_PASSES*2]; // horizontal & vertical pairs
+	struct ralPipeline_s *ral_blur_pipeline[VK_NUM_BLOOM_PASSES*2];
 	VkPipeline bloom_blend_pipeline;
+	struct ralPipeline_s *ral_bloom_blend_pipeline;
 
-	// Phase 9D (6B3a): boost pipeline — post-main HDR multiply.
-	// Created via vk_create_post_process_pipeline case 4; not bound
-	// to any dispatch this phase (6B3b wires the draw + render pass).
-	VkPipeline boost_pipeline;
 	VkPipeline smaa_edge_pipeline;
+	struct ralPipeline_s *ral_smaa_edge_pipeline;
 	VkPipeline smaa_blend_pipeline;
+	struct ralPipeline_s *ral_smaa_blend_pipeline;
 	VkPipeline smaa_resolve_pipeline;
+	struct ralPipeline_s *ral_smaa_resolve_pipeline;
 
 	uint32_t frame_count;
 	qboolean active;
@@ -1353,6 +1680,28 @@ typedef struct {
 	VkFormat capture_format;
 	VkFormat depth_format;
 	VkFormat bloom_format;
+
+	// Phase 6.5: per-GPU BCn texture format support. Populated at
+	// device-init time via vkGetPhysicalDeviceFormatProperties. DDS
+	// loader queries this to fail fast when an asset uses a format
+	// the local GPU rejects (BC1-BC5 are near-universal on desktop;
+	// BC7 + BC6H wider on modern hardware; ARM/MoltenVK variable).
+	struct {
+		qboolean bc1_unorm;
+		qboolean bc1_srgb;
+		qboolean bc2_unorm;
+		qboolean bc2_srgb;
+		qboolean bc3_unorm;
+		qboolean bc3_srgb;
+		qboolean bc4_unorm;
+		qboolean bc4_snorm;
+		qboolean bc5_unorm;
+		qboolean bc5_snorm;
+		qboolean bc6h_ufloat;
+		qboolean bc6h_sfloat;
+		qboolean bc7_unorm;
+		qboolean bc7_srgb;
+	} bc_formats_supported;
 
 	VkImageLayout initSwapchainLayout;
 
@@ -1386,6 +1735,7 @@ typedef struct {
 
 #ifdef USE_UPLOAD_QUEUE
 	VkFence aux_fence;
+	struct ralFence_s *ral_aux_fence;  // Phase 7.4c-submit-followup-staging — adopted sibling fed into ralSubmitInfo_t.signalFence at vk_flush_staging_buffer's submit + waited via Ral_WaitFence in vk_wait_staging_buffer
 	qboolean aux_fence_wait;
 #endif
 

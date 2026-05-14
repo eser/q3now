@@ -1,8 +1,5 @@
-/*
-===========================================================================
-Copyright (C) 2024-2026 Wired engine contributors. GPLv2.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 // r_image_probe.c — offline image asset availability check.
 //

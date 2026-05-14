@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+//
 // shaders.manifest.mjs
 //
 // Single source of truth for shader compilation. Edit this
@@ -36,17 +39,12 @@ export default [
 	{ stage: 'frag', source: 'blend.frag',        output: 'blend_frag_spv'        },
 	{ stage: 'frag', source: 'bloom.frag',        output: 'bloom_frag_spv'        },
 	{ stage: 'frag', source: 'blur.frag',         output: 'blur_frag_spv'         },
-	{ stage: 'frag', source: 'boost.frag',        output: 'boost_frag_spv'        },
 	{ stage: 'frag', source: 'color.frag',        output: 'color_frag_spv'        },
 	{ stage: 'frag', source: 'dot.frag',          output: 'dot_frag_spv'          },
 	{ stage: 'frag', source: 'fog.frag',          output: 'fog_frag_spv'          },
-	// fxaa.frag is built standalone here for parity with the legacy
-	// compile.sh, but vk.c does not reference fxaa_frag_spv directly —
-	// FXAA is reached via the gamma_fxaa_* variants below. Kept for
-	// byte-identity with the legacy output; safe to drop in a future
-	// cleanup if confirmed unused.
-	{ stage: 'frag', source: 'fxaa.frag',         output: 'fxaa_frag_spv'         },
+	// Phase 6B3'-e: fxaa.frag removed (SMAA replaces it).
 	{ stage: 'frag', source: 'gamma.frag',        output: 'gamma_frag_spv'        },
+	{ stage: 'frag', source: 'tonemap.frag',      output: 'tonemap_frag_spv'      },
 	{ stage: 'frag', source: 'q1_ls.frag',        output: 'q1_ls_frag_spv'        },
 	{ stage: 'frag', source: 'q1_ls_array.frag',  output: 'q1_ls_array_frag_spv'  },
 	{ stage: 'frag', source: 'shadow_depth.frag', output: 'shadow_depth_frag_spv' },
@@ -57,20 +55,23 @@ export default [
 	{ stage: 'frag', source: 'particle.frag',     output: 'particle_frag_spv'     },
 	{ stage: 'comp', source: 'particle_integrate.comp', output: 'particle_integrate_comp_spv' },
 
-	// ── Gamma post-process variants ───────────────────────────
-	{ stage: 'frag', source: 'gamma.frag', defines: ['USE_SSAO'],                                                output: 'gamma_ssao_frag_spv'           },
-	{ stage: 'frag', source: 'gamma.frag', defines: ['USE_TONEMAP'],                                             output: 'gamma_tonemap_frag_spv'        },
-	{ stage: 'frag', source: 'gamma.frag', defines: ['USE_COLOR_GRADING'],                                       output: 'gamma_colorgrade_frag_spv'     },
-	{ stage: 'frag', source: 'gamma.frag', defines: ['USE_SSAO', 'USE_TONEMAP'],                                 output: 'gamma_ssao_tonemap_frag_spv'   },
-	{ stage: 'frag', source: 'gamma.frag', defines: ['USE_SSAO', 'USE_TONEMAP', 'USE_COLOR_GRADING'],            output: 'gamma_full_frag_spv'           },
-	{ stage: 'frag', source: 'gamma.frag', defines: ['USE_TONEMAP', 'USE_COLOR_GRADING'],                        output: 'gamma_tonemap_cg_frag_spv'     },
-	{ stage: 'frag', source: 'gamma.frag', defines: ['USE_FXAA'],                                                output: 'gamma_fxaa_frag_spv'           },
-	{ stage: 'frag', source: 'gamma.frag', defines: ['USE_FXAA', 'USE_SSAO'],                                    output: 'gamma_fxaa_ssao_frag_spv'      },
-	{ stage: 'frag', source: 'gamma.frag', defines: ['USE_FXAA', 'USE_SSAO', 'USE_TONEMAP', 'USE_COLOR_GRADING'], output: 'gamma_all_frag_spv'           },
-	{ stage: 'frag', source: 'gamma.frag', defines: ['USE_GODRAYS'],                                             output: 'gamma_godrays_frag_spv'        },
-	{ stage: 'frag', source: 'gamma.frag', defines: ['USE_SSAO', 'USE_GODRAYS'],                                 output: 'gamma_ssao_godrays_frag_spv'   },
-	{ stage: 'frag', source: 'gamma.frag', defines: ['USE_SSAO', 'USE_GODRAYS', 'USE_TONEMAP'],                  output: 'gamma_ssao_godrays_tm_frag_spv'},
-	{ stage: 'frag', source: 'gamma.frag', defines: ['USE_FXAA', 'USE_SSAO', 'USE_GODRAYS', 'USE_TONEMAP', 'USE_COLOR_GRADING'], output: 'gamma_ultimate_frag_spv' },
+	// ── Tonemap post-process variants ─────────────────────────
+	// Phase 6B3'-c1: scene-radiance effects (SSAO, tonemap operator,
+	// colour grading, godrays) live on tonemap.frag now.
+	// gamma.frag is the thin display-encoding pass.
+	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_SSAO'],                                                output: 'tonemap_ssao_frag_spv'           },
+	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_TONEMAP'],                                             output: 'tonemap_tonemap_frag_spv'        },
+	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_COLOR_GRADING'],                                       output: 'tonemap_colorgrade_frag_spv'     },
+	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_SSAO', 'USE_TONEMAP'],                                 output: 'tonemap_ssao_tonemap_frag_spv'   },
+	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_SSAO', 'USE_TONEMAP', 'USE_COLOR_GRADING'],            output: 'tonemap_full_frag_spv'           },
+	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_TONEMAP', 'USE_COLOR_GRADING'],                        output: 'tonemap_tonemap_cg_frag_spv'     },
+	// Phase 6B3'-e: USE_FXAA variants removed (tonemap_fxaa, tonemap_fxaa_ssao,
+	// tonemap_all, tonemap_ultimate were all FXAA-combined). The "ultimate"
+	// 4-feature stack now means SSAO+GODRAYS+TONEMAP+COLOR_GRADING (no FXAA).
+	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_GODRAYS'],                                             output: 'tonemap_godrays_frag_spv'        },
+	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_SSAO', 'USE_GODRAYS'],                                 output: 'tonemap_ssao_godrays_frag_spv'   },
+	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_SSAO', 'USE_GODRAYS', 'USE_TONEMAP'],                  output: 'tonemap_ssao_godrays_tm_frag_spv'},
+	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_SSAO', 'USE_GODRAYS', 'USE_TONEMAP', 'USE_COLOR_GRADING'], output: 'tonemap_ultimate_frag_spv' },
 
 	// ── Lighting template variants (light_vert.tmpl, light_frag.tmpl) ──
 	{ stage: 'vert', source: 'light_vert.tmpl',                                                  output: 'vert_light'                       },

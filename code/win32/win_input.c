@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // win_input.c -- win32 mouse and joystick code
 // 02/21/97 JCB Added extended DirectInput code to support external controllers.
 
@@ -189,27 +176,55 @@ void IN_UpdateWindow( RECT *window_rect, qboolean updateClipRegion )
 /*
 ================
 IN_CaptureMouse
+
+PART B (no-warp fix): does NOT call SetCursorPos. The cursor stays
+wherever it was when activation began; ClipCursor confines it to the
+window rect; ShowCursor hides it. Raw input provides relative deltas
+via WM_INPUT independent of cursor position, so no warping is needed.
+
+PART A defensive change: the prior `ci.flags == CURSOR_SHOWING` guard
+skipped the hide loop when GetCursorInfo reported the cursor as
+already hidden, even if the internal ShowCursor counter had drifted
+above zero (e.g., from an external ShowCursor(TRUE) call). The loop
+is now unconditional — it always decrements the counter to -1.
 ================
 */
 static void IN_CaptureMouse( const RECT *clipRect )
 {
-	CURSORINFO ci;
+	BOOL clipOk;
+	HWND captureBefore;
+	HWND captureAfter;
+	int  showCount;
 
-	ClipCursor( clipRect );
-	SetCursorPos( window_center.x, window_center.y );
-	SetCapture( g_wv.hWnd );
-
-	memset( &ci, 0, sizeof( ci ) );
-	ci.cbSize = sizeof( CURSORINFO );
-	if ( GetCursorInfo( &ci ) ) {
-		if ( ci.flags == CURSOR_SHOWING ) {
-			while ( ShowCursor( FALSE ) >= 0 )
-				;
-		}
-	} else {
-		while ( ShowCursor( FALSE ) >= 0 )
-			;
+	clipOk = ClipCursor( clipRect );
+	if ( !clipOk ) {
+		COM_WARN( LOG_CH(ch_system), "IN_CaptureMouse: ClipCursor failed (err=%lu)\n", GetLastError() );
 	}
+
+	captureBefore = GetCapture();
+	SetCapture( g_wv.hWnd );
+	captureAfter = GetCapture();
+	if ( captureAfter != g_wv.hWnd ) {
+		COM_WARN( LOG_CH(ch_system), "IN_CaptureMouse: SetCapture failed (before=%p after=%p hWnd=%p err=%lu)\n",
+				(void*)captureBefore, (void*)captureAfter, (void*)g_wv.hWnd, GetLastError() );
+	}
+
+	// Unconditional decrement to -1. ShowCursor(FALSE) returns the new
+	// counter; loop until it goes < 0. Safe regardless of the prior
+	// counter value (already-hidden state stays hidden, the counter just
+	// goes more negative).
+	showCount = 0;
+	while ( ShowCursor( FALSE ) >= 0 ) {
+		showCount++;
+		if ( showCount > 32 ) {
+			break; // sanity guard against runaway counter
+		}
+	}
+
+	Com_Log( SEV_TRACE, LOG_CH(ch_system),
+		"IN_CaptureMouse: clipOk=%d capture=%p hWnd=%p hideIters=%d clipRect=(%ld,%ld %ld,%ld)\n",
+		clipOk, (void*)captureAfter, (void*)g_wv.hWnd, showCount,
+		clipRect->left, clipRect->top, clipRect->right, clipRect->bottom );
 }
 
 
@@ -229,31 +244,41 @@ static void IN_ActivateWin32Mouse( void )
 /*
 ================
 IN_DeactivateWin32Mouse
+
+PART B (no-warp fix): does NOT call SetCursorPos. The cursor stays
+wherever it was when deactivation began (it becomes visible because
+ShowCursor reveals it and ClipCursor(NULL) unconfines it).
+
+PART A defensive change: the prior `ci.flags == 0` guard skipped the
+show loop when GetCursorInfo reported the cursor as already visible,
+which left the counter below zero if anything decremented it again.
+The loop is now unconditional — always increments the counter to 0.
 ================
 */
 static void IN_DeactivateWin32Mouse( void )
 {
-	CURSORINFO ci;
+	int showCount;
 
 	if ( !gw_minimized ) {
 		IN_UpdateWindow( NULL, qfalse );
-		SetCursorPos( window_center.x, window_center.y );
 	}
 
 	ReleaseCapture();
 	ClipCursor( NULL );
 
-	memset( &ci, 0, sizeof( ci ) );
-	ci.cbSize = sizeof( CURSORINFO );
-	if ( GetCursorInfo( &ci ) ) {
-		if ( ci.flags == 0 ) {
-			while ( ShowCursor( TRUE ) < 0 )
-				;
+	// Unconditional increment to 0. ShowCursor(TRUE) returns the new
+	// counter; loop until it reaches 0. Safe regardless of prior state.
+	showCount = 0;
+	while ( ShowCursor( TRUE ) < 0 ) {
+		showCount++;
+		if ( showCount > 32 ) {
+			break; // sanity guard against runaway counter
 		}
-	} else {
-		while ( ShowCursor( TRUE ) < 0 )
-			;
 	}
+
+	Com_Log( SEV_TRACE, LOG_CH(ch_system),
+		"IN_DeactivateWin32Mouse: showIters=%d gw_minimized=%d\n",
+		showCount, gw_minimized );
 }
 
 
@@ -352,6 +377,10 @@ static void IN_ActivateRawMouse( void )
 	UINT num;
 	int cnt;
 
+	Com_Log( SEV_TRACE, LOG_CH(ch_system),
+		"IN_ActivateRawMouse: enter raw_activated=%d hWnd=%p\n",
+		raw_activated, (void*)g_wv.hWnd );
+
 	if ( raw_activated )
 	{
 		return; // already activated
@@ -361,7 +390,8 @@ static void IN_ActivateRawMouse( void )
 	cnt = GRRID( &Rid, &num, sizeof( Rid ) );
 	if ( cnt < 0 || !g_wv.hWnd )
 	{
-		COM_WARN( LOG_CH(ch_system), "Error getting registered raw input devices\n" );
+		COM_WARN( LOG_CH(ch_system), "Error getting registered raw input devices (cnt=%d hWnd=%p)\n",
+			cnt, (void*)g_wv.hWnd );
 		return; // error getting registered raw input devices
 	}
 
@@ -370,6 +400,9 @@ static void IN_ActivateRawMouse( void )
 	if ( cnt >= 1 && Rid.hwndTarget == g_wv.hWnd )
 	{
 		// device already exists?
+		Com_Log( SEV_TRACE, LOG_CH(ch_system),
+			"IN_ActivateRawMouse: raw device already registered against hWnd=%p\n",
+			(void*)g_wv.hWnd );
 	}
 	else
 	{
@@ -380,7 +413,8 @@ static void IN_ActivateRawMouse( void )
 
 		if( !RRID( &Rid, 1, sizeof( Rid ) ) )
 		{
-			COM_WARN( LOG_CH(ch_system), "Error registering raw input device\n" );
+			COM_WARN( LOG_CH(ch_system), "Error registering raw input device (err=%lu)\n",
+				GetLastError() );
 			return;
 		}
 	}
@@ -398,6 +432,9 @@ IN_DeactivateRawMouse
 */
 static void IN_DeactivateRawMouse( void )
 {
+	Com_Log( SEV_TRACE, LOG_CH(ch_system),
+		"IN_DeactivateRawMouse: enter raw_activated=%d\n", raw_activated );
+
 	if ( raw_activated )
 	{
 		RAWINPUTDEVICE Rid;
@@ -408,7 +445,8 @@ static void IN_DeactivateRawMouse( void )
 		Rid.hwndTarget = NULL;
 		if ( !RRID( &Rid, 1, sizeof( Rid ) ) )
 		{
-			COM_WARN( LOG_CH(ch_system), "Error removing raw input device\n" );
+			COM_WARN( LOG_CH(ch_system), "Error removing raw input device (err=%lu)\n",
+				GetLastError() );
 			return;
 		}
 	}
@@ -743,16 +781,25 @@ Called when the window gains focus or changes in some way
 */
 static void IN_ActivateMouse( void )
 {
-	if ( !s_wmv.mouseInitialized )
+	if ( !s_wmv.mouseInitialized ) {
+		Com_Log( SEV_TRACE, LOG_CH(ch_system),
+			"IN_ActivateMouse: skip — mouseInitialized=0\n" );
 		return;
+	}
 
 	if ( !in_mouse->integer ) {
+		Com_Log( SEV_TRACE, LOG_CH(ch_system),
+			"IN_ActivateMouse: in_mouse=0 — clearing mouseActive\n" );
 		s_wmv.mouseActive = qfalse;
 		return;
 	}
 
 	if ( s_wmv.mouseActive )
-		return;
+		return; // already active, silent — IN_Frame polls every tick
+
+	Com_Log( SEV_TRACE, LOG_CH(ch_system),
+		"IN_ActivateMouse: ACTIVATING in_mouse=%d raw_inited=%d\n",
+		in_mouse->integer, raw_inited );
 
 	s_wmv.mouseActive = qtrue;
 
@@ -777,10 +824,14 @@ Called when the window loses focus
 static void IN_DeactivateMouse( void )
 {
 	if ( !s_wmv.mouseActive )
-		return;
+		return; // already inactive, silent — IN_Frame polls every tick
 
 	if ( !s_wmv.mouseInitialized )
 		return;
+
+	Com_Log( SEV_TRACE, LOG_CH(ch_system),
+		"IN_DeactivateMouse: DEACTIVATING in_mouse=%d raw_activated=%d\n",
+		in_mouse->integer, raw_activated );
 
 	s_wmv.oldButtonState = 0;
 	s_wmv.mouseActive = qfalse;
@@ -816,17 +867,24 @@ static void IN_StartupMouse( void )
 		if ( IN_InitRawMouse() ) {
 			s_wmv.mouseInitialized = qtrue;
 			Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Raw mouse input initialized.\n" );
+			Com_Log( SEV_TRACE, LOG_CH(ch_system),
+				"IN_StartupMouse: backend=raw hWnd=%p\n", (void*)g_wv.hWnd );
 			return;
 		}
 
 		if ( IN_InitDIMouse() ) {
 			s_wmv.mouseInitialized = qtrue;
+			Com_Log( SEV_TRACE, LOG_CH(ch_system),
+				"IN_StartupMouse: backend=directinput hWnd=%p\n", (void*)g_wv.hWnd );
 			return;
 		}
 		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Falling back to Win32 mouse support...\n" );
 	}
 
 	s_wmv.mouseInitialized = qtrue;
+	Com_Log( SEV_TRACE, LOG_CH(ch_system),
+		"IN_StartupMouse: backend=win32 hWnd=%p in_mouse=%d\n",
+		(void*)g_wv.hWnd, in_mouse->integer );
 }
 
 
@@ -1106,6 +1164,8 @@ void IN_Restart_f( void );
 
 void IN_Init( void ) {
 
+	Com_Log( SEV_TRACE, LOG_CH(ch_system), "IN_Init: enter\n" );
+
 #ifdef USE_MIDI
 	// MIDI input controler variables
 	in_midi = Cvar_Get( "in_midi", "0", CVAR_ARCHIVE );
@@ -1152,6 +1212,10 @@ void IN_Init( void ) {
 
 	IN_GetHotkey( in_minimize, &HotKey );
 
+	Com_Log( SEV_TRACE, LOG_CH(ch_system),
+		"IN_Init: in_mouse=%d in_nograb=%d hWnd=%p\n",
+		in_mouse->integer, in_nograb->integer, (void*)g_wv.hWnd );
+
 	IN_Startup();
 }
 
@@ -1167,6 +1231,9 @@ between a deactivate and an activate.
 */
 void IN_Activate( qboolean active ) {
 
+	Com_Log( SEV_TRACE, LOG_CH(ch_system),
+		"IN_Activate: active=%d (lazy-activate via IN_Frame poll if true)\n", active );
+
 	if ( !active ) {
 		IN_DeactivateMouse();
 	}
@@ -1177,23 +1244,52 @@ void IN_Activate( qboolean active ) {
 ==================
 IN_Frame
 
-Called every frame, even if not generating commands
+Called every frame, even if not generating commands.
+
+Mouse activation is lazy-polled here every frame. Gate transitions
+are TRACE-logged (only on change) so the user's interactive smoke
+produces a timeline of why mouse capture moved between active and
+inactive states.
 ==================
 */
 void IN_Frame( void ) {
+	// Last-logged gate decision. Encoded as a small int so we can detect
+	// transitions without spamming the log every frame.
+	//   0 = uninitialized / not yet logged
+	//   1 = early-out: !mouseInitialized
+	//   2 = CNQ3 path: console open + (windowed || multi-monitor)
+	//   3 = inactive: !gw_active || gw_minimized || in_nograb
+	//   4 = active path
+	static int s_lastGate = 0;
+	int gate;
+
 	// post joystick events
 #ifdef USE_JOYSTICK
 	IN_JoyMove();
 #endif
 
 	if ( !s_wmv.mouseInitialized ) {
+		gate = 1;
+		if ( gate != s_lastGate ) {
+			Com_Log( SEV_TRACE, LOG_CH(ch_system),
+				"IN_Frame gate: !mouseInitialized (prev=%d)\n", s_lastGate );
+			s_lastGate = gate;
+		}
 		return;
 	}
 
 	if ( Key_GetCatcher() & KEYCATCH_CONSOLE ) {
 		// temporarily deactivate if not in the game and
-		// running on the desktop with multimonitor configuration
+		// running on the desktop with multimonitor configuration.
+		// CNQ3-lineage console-open-releases-mouse path — intentional.
 		if ( !glw_state.cdsFullscreen || glw_state.monitorCount > 1 ) {
+			gate = 2;
+			if ( gate != s_lastGate ) {
+				Com_Log( SEV_TRACE, LOG_CH(ch_system),
+					"IN_Frame gate: CNQ3 console-releases-mouse (prev=%d cdsFullscreen=%d monitorCount=%d)\n",
+					s_lastGate, glw_state.cdsFullscreen, glw_state.monitorCount );
+				s_lastGate = gate;
+			}
 			IN_DeactivateMouse();
 			//WIN_EnableAltTab();
 			//WIN_DisableHook();
@@ -1202,8 +1298,24 @@ void IN_Frame( void ) {
 	}
 
 	if ( !gw_active || gw_minimized || in_nograb->integer ) {
+		gate = 3;
+		if ( gate != s_lastGate ) {
+			Com_Log( SEV_TRACE, LOG_CH(ch_system),
+				"IN_Frame gate: inactive (prev=%d gw_active=%d gw_minimized=%d in_nograb=%d KEYCATCH=0x%x)\n",
+				s_lastGate, gw_active, gw_minimized, in_nograb->integer, Key_GetCatcher() );
+			s_lastGate = gate;
+		}
 		IN_DeactivateMouse();
 		return;
+	}
+
+	gate = 4;
+	if ( gate != s_lastGate ) {
+		Com_Log( SEV_TRACE, LOG_CH(ch_system),
+			"IN_Frame gate: ACTIVE-PATH (prev=%d gw_active=%d gw_minimized=%d KEYCATCH=0x%x cdsFullscreen=%d monitorCount=%d)\n",
+			s_lastGate, gw_active, gw_minimized, Key_GetCatcher(),
+			glw_state.cdsFullscreen, glw_state.monitorCount );
+		s_lastGate = gate;
 	}
 
 	IN_ActivateMouse();

@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // cl_main.c  -- client main loop
 
 #include "client.h"
@@ -74,7 +61,7 @@ cvar_t	*cl_dlURL;
 
 cvar_t	*cl_reconnectArgs;
 
-/* CNQ3 backport: cl_matchAlerts
+/* cl_matchAlerts
  *   Bit 1 = trigger alert even when the window is merely unfocused
  *           (without the bit, alerts fire only while minimized)
  *   Bit 2 = flash the taskbar / dock / window manager
@@ -589,7 +576,7 @@ static void CL_Record_f( void ) {
 	} else {
 		qtime_t t;
 		Com_RealTime( &t );
-		/* CNQ3 backport: use YYYY_MM_DD-HH_MM_SS filename format so
+		/* use YYYY_MM_DD-HH_MM_SS filename format so
 		   timestamped demos sort lexicographically. */
 		Com_sprintf( name, sizeof( name ), "demos/%04d_%02d_%02d-%02d_%02d_%02d",
 			1900 + t.tm_year, 1 + t.tm_mon, t.tm_mday,
@@ -2820,9 +2807,8 @@ static void CL_CheckUserinfo( void ) {
 ==================
 CL_CheckMatchAlerts
 
-CNQ3 backport: raise OS-level attention (taskbar flash, beep, audio
-unmute) when a match is about to start while the window is unfocused
-or minimized.
+raise OS-level attention (taskbar flash, beep, audio unmute) when a match
+is about to start while the window is unfocused or minimized.
 
 We detect the transition by polling the CS_WARMUP configstring:
   - warmup > 0   : countdown running
@@ -3173,7 +3159,7 @@ static void CL_InitRenderer( void ) {
 	re.BeginRegistration( &cls.glconfig );
 
 	// load character sets
-	cls.whiteShader = re.RegisterShader( "white" );
+	cls.whiteShader = re.RegisterShader( "*white" );
 	cls.consoleShader = re.RegisterShader( "console" );
 
 	Con_CheckResize();
@@ -3756,8 +3742,8 @@ static const cvarDesc_t glimpDescs[] = {
 	/* 8  */ CVAR_INT(    "r_customWidth",       "1600",            CVAR_ARCHIVE | CVAR_LATCH,     "Custom width to use with \\r_mode -1.", 0, 0 ),
 	/* 9  */ CVAR_INT(    "r_customHeight",      "1024",            CVAR_ARCHIVE | CVAR_LATCH,     "Custom height to use with \\r_mode -1.", 0, 0 ),
 	/* 10 */ CVAR_INT(    "r_colorbits",         "0",               CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH,  "Sets color bit depth, set to 0 to use desktop settings.", 0, 32 ),
-	/* 11 */ CVAR_INT(    "r_stencilbits",       "8",               CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH,  "Stencil buffer size, required to be 8 for stencil shadows.", 0, 8 ),
-	/* 12 */ CVAR_INT(    "r_depthbits",         "0",               CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH,  "Sets precision of Z-buffer.", 0, 32 ),
+	/* 11 */ CVAR_INT(    "r_stencilBits",       "8",               CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH,  "Stencil buffer size, required to be 8 for stencil shadows.", 0, 8 ),
+	/* 12 */ CVAR_INT(    "r_depthBits",         "0",               CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH,  "Sets precision of Z-buffer.", 0, 32 ),
 	/* 13 */ CVAR_STRING( "r_drawBuffer",        "GL_BACK",         CVAR_CHEAT,                    "Specifies buffer to draw from: GL_FRONT or GL_BACK." ),
 };
 
@@ -3891,6 +3877,84 @@ enum {
 
 _Static_assert( ARRAY_LEN( clInitDescs ) == CLI_CVAR_COUNT, "clInitDescs/enum mismatch" );
 static cvar_t *clInitHandles[CLI_CVAR_COUNT];
+
+
+/*
+====================
+CL_RalDump_f
+
+Phase 7 — "\ral_dump": dump the renderer's GPU Renderer Abstraction Layer
+state (backend probe, capabilities, memory budget). The RAL lives inside the
+renderer DLL; resolve and call its exported Ral_Dump(). Developer diagnostic;
+prints a note and does nothing if the loaded renderer has no RAL backend
+(e.g. the OpenGL renderers, which export no Ral_Dump).
+====================
+*/
+static void CL_RalDump_f( void ) {
+#ifdef USE_RENDERER_DLOPEN
+	void ( *ralDump )( void );
+	const char *sub;
+
+	if ( !rendererLib ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "ral_dump: no renderer module loaded\n" );
+		return;
+	}
+
+	// Phase 7.4c-pre: "\ral_dump live" inspects the renderer's OWN backend
+	// (the imported-mode one shared with vk.device) rather than creating a
+	// throwaway. Falls through to the standard Ral_Dump when no subcmd or
+	// when the renderer's that old.
+	sub = Cmd_Argv( 1 );
+	if ( sub && Q_stricmp( sub, "live" ) == 0 ) {
+		ralDump = Sys_LoadFunction( rendererLib, "Ral_DumpLive" );
+		if ( !ralDump ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "ral_dump live: the loaded renderer module exports no Ral_DumpLive (pre-7.4c-pre build?)\n" );
+			return;
+		}
+		ralDump();
+		return;
+	}
+
+	ralDump = Sys_LoadFunction( rendererLib, "Ral_Dump" );
+	if ( !ralDump ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "ral_dump: the loaded renderer module exports no RAL backend (try \"cl_renderer vulkan\")\n" );
+		return;
+	}
+	ralDump();
+#else
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "ral_dump: not available -- renderer is statically linked (rebuild with USE_RENDERER_DLOPEN)\n" );
+#endif
+}
+
+
+/*
+====================
+CL_RalPipelineTest_f
+
+Phase 7.4c-pipeline-followup-4 — "\ral_pipeline_test": walk the 19 §17.7
+fixtures and report PASS/FAIL per fixture. Resolves Ral_PipelineTest in
+the renderer DLL; if the loaded renderer doesn't export it (e.g. OpenGL),
+prints a note and returns.
+====================
+*/
+static void CL_RalPipelineTest_f( void ) {
+#ifdef USE_RENDERER_DLOPEN
+	void ( *ralPipelineTest )( void );
+
+	if ( !rendererLib ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "ral_pipeline_test: no renderer module loaded\n" );
+		return;
+	}
+	ralPipelineTest = Sys_LoadFunction( rendererLib, "Ral_PipelineTest" );
+	if ( !ralPipelineTest ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "ral_pipeline_test: the loaded renderer module exports no Ral_PipelineTest (try \"cl_renderer vulkan\")\n" );
+		return;
+	}
+	ralPipelineTest();
+#else
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "ral_pipeline_test: not available -- renderer is statically linked (rebuild with USE_RENDERER_DLOPEN)\n" );
+#endif
+}
 
 
 /*
@@ -4051,6 +4115,8 @@ void CL_Init( void ) {
 	Cmd_AddCommand( "dlmap", CL_Download_f );
 #endif
 	Cmd_AddCommand( "modelist", CL_ModeList_f );
+	Cmd_AddCommand( "ral_dump", CL_RalDump_f );          // Phase 7: dump renderer RAL backend probe / caps / memory budget
+	Cmd_AddCommand( "ral_pipeline_test", CL_RalPipelineTest_f ); // Phase 7.4c-pipeline-followup-4: walk 19 §17.7 pipeline fixtures
 
 #ifndef NDEBUG
 	Cmd_AddCommand( "wui_testerror", CL_WuiTestError_f );

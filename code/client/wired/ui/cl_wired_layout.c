@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
 cl_wired_layout.c — Wired UI: resolution-independent coordinate resolver
 */
@@ -470,6 +473,9 @@ void WUI_LayoutMenu( wiredMenuDef_t *menu, float vpWidth, float vpHeight ) {
 			}
 		}
 	}
+
+	// Visual-regression instrumentation — no-op unless r_layoutDump != 0.
+	WUI_DumpLayout( menu );
 }
 
 // ── Layer 5: Animation/Transition system ─────────────────────────────

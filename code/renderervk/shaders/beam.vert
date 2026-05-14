@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #version 450
 
 /*
@@ -28,8 +31,11 @@ Layout matches the host beamHeaderGPU_t in renderervk/vk.h.
 layout(push_constant) uniform Push {
 	mat4 mvp;
 	vec4 eyeWorld;     // .xyz = camera position in world space; .w = pad
-	vec4 frameParams;  // .x = identityLight (unused by beam, kept for
-	                   //      ribbon symmetry),
+	vec4 frameParams;  // .x = reserved/unused — was the legacy
+	                   //      identityLight halving factor (dropped
+	                   //      Phase 6B3'-a, field removed Block 9);
+	                   //      the word stays for push-range byte-compat
+	                   //      with the other primitive shaders.
 	                   // .y = currentTime (tr.refdef.floatTime). For
 	                   //      transient beams (PRIM_FLAG_TRANSIENT
 	                   //      set) this IS the uvScroll reference;
@@ -100,6 +106,11 @@ layout(location = 2) flat out uint fragShaderHandle;
 // for the current stage so the fragment shader can sample the right
 // image when stage>0 uses a different image than stage 0. For LG
 // (both stages share lightningbolt.jpg) this equals fragShaderHandle.
+//
+// Block 5d-followup: bits 0..30 = registry slot; bit 31 = that slot
+// image's colour domain (host packs it into PrimitiveStageGPU.imageSlot
+// in RE_RegisterPrimitiveShader). This stage just passes stage.imageSlot
+// through; beam.frag masks the slot and reads the domain bit.
 layout(location = 3) flat out uint fragImageSlot;
 
 out gl_PerVertex {

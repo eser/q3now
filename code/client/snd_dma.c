@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 /*****************************************************************************
  * name:		snd_dma.c
@@ -54,8 +41,8 @@ byte			*dma_buffer2;
 
 #define		SOUND_ATTENUATE		0.0008f
 
-// CNQ3 linear fall-off: sounds fade linearly from full volume at 0 to
-// silence at SOUND_MAX_DIST. Enabled when s_linearFalloff is non-zero.
+// linear fall-off: sounds fade linearly from full volume at 0 to silence
+// at SOUND_MAX_DIST. Enabled when s_linearFalloff is non-zero.
 #define		SOUND_MAX_DIST		1250.0f
 
 #define		MASTER_VOL			127
@@ -419,8 +406,8 @@ static void S_SpatializeOrigin( const vec3_t origin, int master_vol, int *left_v
 	dist = VectorNormalize(source_vec);
 
 	if ( linearFalloff ) {
-		// CNQ3 linear fall-off: culls completely beyond SOUND_MAX_DIST,
-		// then scales master_vol linearly with normalized distance.
+		// linear fall-off: culls completely beyond SOUND_MAX_DIST, then
+		// scales master_vol linearly with normalized distance.
 		if ( dist >= SOUND_MAX_DIST ) {
 			*left_vol = 0;
 			*right_vol = 0;
@@ -553,7 +540,6 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 		Com_Log( SEV_INFO, LOG_CH(ch_sound), "%i : %s\n", s_paintedtime, sfx->soundName );
 	}
 
-	// borrowed from cnq3
 	// a UNIQUE entity starting the same sound twice in a frame is either a bug,
 	// a timedemo, or a shitmap (eg q3ctf4) giving multiple items on spawn.
 	// even if you can create a case where it IS "valid", it's still pointless
@@ -1558,7 +1544,7 @@ static const cvarDesc_t sndDmaDescs[] = {
 	/* 1 */ CVAR_FLOAT(  "s_mixAhead",     "0.2", CVAR_ARCHIVE | CVAR_NODEFAULT,                  "Amount of time to pre-mix sound data to avoid potential skips/stuttering in case of unstable framerate. Higher values add more CPU usage.", 0.001f, 0.5f ),
 	/* 2 */ CVAR_FLOAT(  "s_mixOffset",    "0",   CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_CHEAT, NULL, 0, 0.5f ),
 	/* 3 */ CVAR_BOOL(   "s_linearFalloff","1",   CVAR_ARCHIVE | CVAR_NODEFAULT,
-		"Distance-based sound attenuation model (CNQ3 port).\n"
+		"Distance-based sound attenuation model.\n"
 		" 0: classic Q3 falloff (full volume within SOUND_FULLVOLUME, then exponential decay)\n"
 		" 1: linear falloff from listener to SOUND_MAX_DIST (default)" ),
 	/* 4 */ CVAR_BOOL(   "s_show",         "0",   CVAR_CHEAT,                       "Debugging output (used sound files)." ),

@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
 #include "../qcommon/maps/meta.h"
 
@@ -574,9 +561,19 @@ static qboolean ParseStage( ComParser *parser, shaderStage_t *stage, const char 
 			break;
 		}
 		//
-		// map <name>
+		// map <name>  /  Block 5d: linearMap / srgbMap / gammaMap <name>
+		//   linearMap forces CD_LINEAR (raw fetch) for this stage's texture;
+		//   srgbMap / gammaMap force CD_SRGB (sRGB->linear decode at sample).
+		//   When plain `map` is used, R_CreateImage auto-classifies by suffix.
 		//
-		if ( !Q_stricmp( token, "map" ) ) {
+		if ( !Q_stricmp( token, "map" ) || !Q_stricmp( token, "linearMap" )
+		  || !Q_stricmp( token, "srgbMap" ) || !Q_stricmp( token, "gammaMap" ) ) {
+			imgFlags_t domainFlag = IMGFLAG_NONE;
+			if ( !Q_stricmp( token, "linearMap" ) )
+				domainFlag = IMGFLAG_DOMAIN_LINEAR;
+			else if ( !Q_stricmp( token, "srgbMap" ) || !Q_stricmp( token, "gammaMap" ) )
+				domainFlag = IMGFLAG_DOMAIN_SRGB;
+
 			token = COM_ParseExt( parser, text, qfalse );
 			if ( !token[0] ) {
 				ri.Log( SEV_WARN, "WARNING: missing parameter for 'map' keyword in shader '%s'\n", shader.name );
@@ -606,7 +603,7 @@ static qboolean ParseStage( ComParser *parser, shaderStage_t *stage, const char 
 				}
 				continue;
 			}
-			imgFlags_t flags = IMGFLAG_NONE;
+			imgFlags_t flags = IMGFLAG_NONE | domainFlag;	// Block 5d: linear/srgb override
 
 			if ( !shader.noMipMaps )
 				flags |= IMGFLAG_MIPMAP;
@@ -663,6 +660,52 @@ static qboolean ParseStage( ComParser *parser, shaderStage_t *stage, const char 
 				return qfalse;
 			}
 		}
+		//
+		// Phase 6.5.1: cubeMap <name> / volumeMap <name>
+		//   Loads a .dds cubemap (6 faces) or volume (3D) texture and stores it
+		//   in bundle[0].image[0]; image->texType distinguishes it. The DDS
+		//   loader classifies by header, so a plain `.dds` path works — the
+		//   keyword only records intent (and warns on a mismatch). Shader-side
+		//   samplerCube / sampler3D sampling lands with the IBL work (6C2);
+		//   until then this is the asset-pipeline half of the feature — a
+		//   surface that actually renders with a cube/3D texture bound to a
+		//   sampler2D slot will trip a validation-layer view-type mismatch.
+		//
+		else if ( !Q_stricmp( token, "cubeMap" ) || !Q_stricmp( token, "volumeMap" ) ) {
+			qboolean   wantCube = (qboolean)( !Q_stricmp( token, "cubeMap" ) );
+			imgFlags_t flags    = wantCube ? IMGFLAG_CUBEMAP : IMGFLAG_NONE;
+			const char *kw      = wantCube ? "cubeMap" : "volumeMap";
+
+			token = COM_ParseExt( parser, text, qfalse );
+			if ( !token[0] ) {
+				ri.Log( SEV_WARN, "WARNING: missing parameter for '%s' keyword in shader '%s'\n", kw, shader.name );
+				return qfalse;
+			}
+
+			if ( !shader.noMipMaps )
+				flags |= IMGFLAG_MIPMAP;
+			if ( !shader.noPicMip )
+				flags |= IMGFLAG_PICMIP;
+			if ( shader.noLightScale )
+				flags |= IMGFLAG_NOLIGHTSCALE;
+
+			stage->bundle[0].image[0] = R_FindImageFile( token, flags );
+			if ( !stage->bundle[0].image[0] ) {
+				ri.Log( SEV_WARN, "WARNING: R_FindImageFile could not find '%s' in shader '%s'\n", token, shader.name );
+				return qfalse;
+			}
+
+			{
+				texType_t got = stage->bundle[0].image[0]->texType;
+				texType_t exp = wantCube ? TEXTYPE_CUBE : TEXTYPE_3D;
+				if ( got != exp )
+					ri.Log( SEV_WARN, "WARNING: '%s %s' in shader '%s': file is texType %d, expected %d\n",
+						kw, token, shader.name, (int)got, (int)exp );
+				else
+					ri.Log( SEV_DEBUG, "%s '%s' loaded (texType %s) for shader '%s' — shader-side cube/volume sampling lands with IBL (6C2)\n",
+						kw, token, wantCube ? "CUBE" : "3D", shader.name );
+			}
+		}
 #if FEAT_PARALLAX_MAPPING
 		//
 		// normalMap <name> — store in bundle[2] for parallax/normal mapping
@@ -683,7 +726,23 @@ static qboolean ParseStage( ComParser *parser, shaderStage_t *stage, const char 
 #endif
 #if FEAT_PBR
 		//
-		// pbrMap <name> — R=roughness, G=metalness (glTF ORM convention)
+		// pbrMap <name> — glTF 2.0 ORM packing:
+		//   R = ambient occlusion (linear)
+		//   G = roughness (linear)
+		//   B = metalness (linear)
+		//
+		// The keywords pbrMap, roughnessMap, metalnessMap all
+		// target the same bundle[3] slot — they expect a single
+		// packed ORM texture, not separate per-channel images.
+		// Authors using Substance, Blender, Godot, UE5 glTF
+		// export get this packing by default.
+		//
+		// IMGFLAG_NOLIGHTSCALE: linear data, must skip the
+		//   r_intensity LUT bake (texture upload-time multiply).
+		// IMGFLAG_NO_COMPRESSION: BC1/BC3 compression destroys
+		//   the per-channel scalar precision required by PBR
+		//   shading. The 4×4 block quantization produces
+		//   visible roughness/metalness banding.
 		//
 		else if ( !Q_stricmp( token, "pbrMap" ) || !Q_stricmp( token, "roughnessMap" ) ||
 				  !Q_stricmp( token, "metalnessMap" ) ) {
@@ -694,7 +753,8 @@ static qboolean ParseStage( ComParser *parser, shaderStage_t *stage, const char 
 				return qfalse;
 			}
 
-			stage->bundle[bundleIdx].image[0] = R_FindImageFile( token, IMGFLAG_MIPMAP | IMGFLAG_NOLIGHTSCALE );
+			stage->bundle[bundleIdx].image[0] = R_FindImageFile( token,
+				IMGFLAG_MIPMAP | IMGFLAG_NOLIGHTSCALE | IMGFLAG_NO_COMPRESSION );
 			if ( !stage->bundle[bundleIdx].image[0] ) {
 				ri.Log( SEV_WARN, "WARNING: R_FindImageFile could not find pbrMap '%s' in shader '%s'\n", token,
 						shader.name );
@@ -3360,8 +3420,19 @@ static shader_t *FinishShader( void ) {
 
 		for ( i = 0; i < stage; i++ ) {
 			int env_mask;
+			int b;
 			shaderStage_t *pStage = &stages[i];
 			def.state_bits = pStage->stateBits;
+
+			// Block 5d: per-slot colour-domain bitmask (bit N = bundle N's
+			// texture is CD_LINEAR → raw fetch in gen_frag.tmpl). slot N <->
+			// bundle N <-> textureN. Wired to fragment spec constant id 4.
+			def.tex_domain = 0;
+			for ( b = 0; b < NUM_TEXTURE_BUNDLES && b < 3; b++ ) {
+				if ( pStage->bundle[b].image[0] != NULL
+				  && pStage->bundle[b].image[0]->colorDomain == CD_LINEAR )
+					def.tex_domain |= ( 1 << b );
+			}
 
 			if ( pStage->mtEnv3 ) {
 				switch ( pStage->mtEnv3 ) {
@@ -3427,8 +3498,9 @@ static shader_t *FinishShader( void ) {
 							if ( pStage->bundle[0].alphaGen == AGEN_SKIP || pStage->bundle[0].alphaGen == AGEN_IDENTITY ) {
 								pStage->tessFlags = TESS_ST0 | TESS_ST1;
 								def.shader_type = TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR;
-								def.color.rgb = tr.identityLightByte;
-								def.color.alpha = pStage->bundle[0].alphaGen == AGEN_IDENTITY ? 255 : tr.identityLightByte;
+								/* Phase 6B3'-a: identityLightByte → 255 (linear). */
+								def.color.rgb = 255;
+								def.color.alpha = 255;
 							}
 						}
 					}
@@ -3447,8 +3519,9 @@ static shader_t *FinishShader( void ) {
 							if ( pStage->bundle[0].alphaGen == AGEN_SKIP || pStage->bundle[0].alphaGen == AGEN_IDENTITY ) {
 								pStage->tessFlags = TESS_ST0 | TESS_ST1;
 								def.shader_type = TYPE_MULTI_TEXTURE_ADD2_FIXED_COLOR;
-								def.color.rgb = tr.identityLightByte;
-								def.color.alpha = pStage->bundle[0].alphaGen == AGEN_IDENTITY ? 255 : tr.identityLightByte;
+								/* Phase 6B3'-a: identityLightByte → 255 (linear). */
+								def.color.rgb = 255;
+								def.color.alpha = 255;
 							}
 						}
 					}
@@ -3467,8 +3540,9 @@ static shader_t *FinishShader( void ) {
 							if ( pStage->bundle[0].alphaGen == AGEN_SKIP || pStage->bundle[0].alphaGen == AGEN_IDENTITY ) {
 								pStage->tessFlags = TESS_ST0 | TESS_ST1;
 								def.shader_type = TYPE_MULTI_TEXTURE_ADD2_FIXED_COLOR;
-								def.color.rgb = tr.identityLightByte;
-								def.color.alpha = pStage->bundle[0].alphaGen == AGEN_IDENTITY ? 255 : tr.identityLightByte;
+								/* Phase 6B3'-a: identityLightByte → 255 (linear). */
+								def.color.rgb = 255;
+								def.color.alpha = 255;
 							}
 						}
 					}
@@ -3517,8 +3591,9 @@ static shader_t *FinishShader( void ) {
 							if ( pStage->bundle[0].alphaGen == AGEN_SKIP || pStage->bundle[0].alphaGen == AGEN_IDENTITY ) {
 								pStage->tessFlags = TESS_ST0;
 								def.shader_type = TYPE_SINGLE_TEXTURE_FIXED_COLOR;
-								def.color.rgb = tr.identityLightByte;
-								def.color.alpha = pStage->bundle[0].alphaGen == AGEN_IDENTITY ? 255 : tr.identityLightByte;
+								/* Phase 6B3'-a: identityLightByte → 255 (linear). */
+								def.color.rgb = 255;
+								def.color.alpha = 255;
 							}
 						}
 						else if ( pStage->bundle[0].rgbGen == CGEN_ENTITY ) {
@@ -4036,6 +4111,17 @@ qhandle_t RE_RegisterShader( const char *name ) {
 		return 0;
 	}
 
+	// "*white" resolves to the engine built-in <white> shader (real-white
+	// texel + CGEN_EXACT_VERTEX → TYPE_SIGNLE_TEXTURE). The generic 2D
+	// fallback path produces a TYPE_SINGLE_TEXTURE_IDENTITY/FIXED_COLOR
+	// stage that samples tr.defaultImage and ignores per-quad vertex
+	// color, which turned every UI re.SetColor()+DrawStretchPic fill into
+	// pure white. Mirrors the "*white" name tr.whiteImage is registered
+	// under in tr_image.c.
+	if ( tr.whiteShader && !Q_stricmp( name, "*white" ) ) {
+		return tr.whiteShader->index;
+	}
+
 	sh = R_FindShader( name, LIGHTMAP_2D, qtrue );
 
 	// we want to return 0 if the shader failed to
@@ -4458,7 +4544,14 @@ qhandle_t RE_RegisterPrimitiveShader( const char *name )
 					+ (size_t)primSlot * PRIMITIVE_STAGE_MAX
 					+ (size_t)logicalStageOut;
 
-				dst->imageSlot   = (uint32_t)imageSlot;
+				// Block 5d-followup: bits 0..30 carry the registry slot;
+				// bit 31 the bundle image's colour domain (CD_LINEAR →
+				// beam.frag samples raw). beam.vert passes imageSlot
+				// through as fragImageSlot; beam.frag masks the slot
+				// before the range clamp. Every primitive image is
+				// CD_SRGB today → bit 31 is 0 → no behaviour change.
+				dst->imageSlot   = (uint32_t)imageSlot
+				                 | ( bundleImage->colorDomain == CD_LINEAR ? 0x80000000u : 0u );
 				dst->blendPacked = ( (uint32_t)srcBlend << 16 ) | (uint32_t)dstBlend;
 				dst->rgbGen      = (uint32_t)prim_rgbGen_from_shader  ( bundle->rgbGen );
 				dst->alphaGen    = (uint32_t)prim_alphaGen_from_shader( bundle->alphaGen );

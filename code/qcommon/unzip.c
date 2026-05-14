@@ -1,7 +1,10 @@
+// SPDX-License-Identifier: Zlib
+// SPDX-FileCopyrightText: 1998 Gilles Vollant
+
 /*****************************************************************************
  * name:		unzip.c
  *
- * desc:		IO on .zip files using portions of zlib 
+ * desc:		IO on .zip files using portions of zlib
  *
  * $Archive: /MissionPack/code/qcommon/unzip.c $
  *

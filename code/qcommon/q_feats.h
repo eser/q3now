@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #ifndef _Q_FEATS_H
 #define _Q_FEATS_H
 //
@@ -82,11 +85,14 @@
 #define FEAT_WIREDNET_OBSERVER            1   // HTTP observer: /status.json, JSON event ring, static web UI
 #define FEAT_WIREDNET_CONTROL             1   // MCP/JSON-RPC control channel over QUIC + HTTP POST /mcp
 #define FEAT_MEMSTATS                     1   // per-subsystem allocation accounting + meminfo commands
+#ifndef FEAT_RAL
+#define FEAT_RAL                          0   // Phase 7: GPU Renderer Abstraction Layer (code/renderer/ral*). Off until the renderer is migrated onto it; the Vulkan backend skeleton (code/renderer/ral_vulkan/) always builds + links into wired_vulkan_* so the surface stays validated, but renderervk does not include ral/*.h while this is 0. Renderer-DLL-internal — no ABI impact.
+#endif
 
 // ── model formats ────────────────────────────────────────────────────
 #define FEAT_IQM                          1   // IQM (Inter-Quake Model) skeletal mesh format
 
-// ── renderer (from CNQ3) ───────────────────────────────────────────────
+// ── renderer ───────────────────────────────────────────────────────────
 #define FEAT_FOG_SYSTEM                   0   // Enhanced fog types (linear, exp, exp2)
 #define FEAT_CORONA                       0   // Corona/lens flare entities via flare pipeline
 #define FEAT_HEADLESS_RENDERER            0   // Dedicated server renderer stub (sv_ref.c)
@@ -96,14 +102,11 @@
 #define FEAT_SSAO                         0   // screen-space ambient occlusion (embedded in gamma pass)
 #define FEAT_TONEMAP                      1   // HDR tone mapping (Reinhard/ACES/Uncharted2)
 #define FEAT_COLOR_GRADING                0   // color tint, saturation, contrast
-#define FEAT_FXAA                         0   // fast approximate anti-aliasing (embedded in gamma pass)
 #define FEAT_GODRAYS                      0   // screen-space crepuscular rays (depth-based sky detection)
 #define FEAT_ADVANCED_WATER               0   // screen-space refraction + Fresnel + ripple noise for water
-#define FEAT_SHADOW_MAPPING               0   // per-light shadow maps with PCF (1/5/9 samples)
+#define FEAT_SHADOW_MAPPING               1   // Phase 6.5.4a: directional-sun shadow map (single map; CSM cascades land in 6.5.4b-d). Renderer-DLL-only flag — no ABI impact (not referenced outside code/renderervk/).
 #define FEAT_PBR                          0   // physically based rendering (GGX/Schlick/Smith BRDF)
-#define FEAT_SMAA                         0   // sub-pixel morphological anti-aliasing (deferred)
 #define FEAT_FORCE_ENTITY_VERTEX_ALPHA    0   // per-entity alpha override + dynamic pipeline swap
-#define FEAT_FBO_DEBUG                    0   // verbose FBO pipeline diagnostics (format, layout, passes)
 
 // ── missionpack (Team Arena features, individually toggleable) ────────
 #ifdef MISSIONPACK

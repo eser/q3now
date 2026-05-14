@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_image.c
 #include "tr_local.h"
 
@@ -539,11 +526,11 @@ static GLint RawImage_GetInternalFormat( const byte *scan, int numPixels, qboole
 
 	if ( RawImage_HasAlpha( scan, numPixels ) )
 	{
-		if ( r_texturebits->integer == 16 )
+		if ( r_textureBits->integer == 16 )
 		{
 			internalFormat = GL_RGBA4;
 		}
-		else if ( r_texturebits->integer == 32 )
+		else if ( r_textureBits->integer == 32 )
 		{
 			internalFormat = GL_RGBA8;
 		}
@@ -562,11 +549,11 @@ static GLint RawImage_GetInternalFormat( const byte *scan, int numPixels, qboole
 		{
 			internalFormat = GL_RGB4_S3TC;
 		}
-		else if ( r_texturebits->integer == 16 )
+		else if ( r_textureBits->integer == 16 )
 		{
 			internalFormat = GL_RGB5;
 		}
-		else if ( r_texturebits->integer == 32 )
+		else if ( r_textureBits->integer == 32 )
 		{
 			internalFormat = GL_RGB8;
 		}
@@ -1403,7 +1390,7 @@ void R_SetColorMappings( void ) {
 		return;
 	}
 
-	// Float-based brightness (CNQ3-style rework).
+	// Float-based brightness
     // log2(brightness) → integer overbright-bits shift.
     brightness = Com_Clamp( 0.25f, 32.0f, r_brightness->value );
     tr.overbrightBits = (int)( logf( brightness ) / logf( 2.0f ) + 0.5f );

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 // sv_bot_awareness.c — bot peripheral awareness: WCE subscriber + per-bot sound ring
 
 #include "server.h"

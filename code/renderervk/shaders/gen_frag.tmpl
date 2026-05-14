@@ -52,14 +52,16 @@ layout (constant_id = 11) const float depth_fade_scale = 2.0;
 #if defined (USE_FIXED_COLOR) || defined(USE_ENT_COLOR)
 // use fixed color from spec.constant.8 or entColor[0..2]
 #else
-layout(location = 0) in vec4 frag_color0;
+// Phase 6B3'-d4-m8: the rgbGen vertex colour arrives display-domain;
+// main() decodes it into a linear local `frag_color0` (see below).
+layout(location = 0) in vec4 frag_color0In;
 #endif
 
 #ifdef USE_CL1
-layout(location = 5) in vec4 frag_color1;
+layout(location = 5) in vec4 frag_color1In;   // m8: decoded to `frag_color1` in main()
 #endif
 #ifdef USE_CL2
-layout(location = 6) in vec4 frag_color2;
+layout(location = 6) in vec4 frag_color2In;   // m8: decoded to `frag_color2` in main()
 #endif
 #endif
 
@@ -89,12 +91,39 @@ layout (constant_id = 2) const float depth_fragment = 0.85;
 #endif
 
 layout (constant_id = 3) const int alpha_to_coverage = 0;
-//layout (constant_id = 4) const int color_mode = 0;
+// Block 5d: per-slot colour-domain bitmask. Bit N set => texture slot N is
+// CD_LINEAR and is fetched raw; bit N clear => CD_SRGB, decoded via
+// sRGBToLinear at sample time. Host-filled from each stage's bundle images
+// (Vk_Pipeline_Def.tex_domain). Reuses spec-constant id 4 (the ex-color_mode
+// slot, which color.frag still uses for its own white/green/red mode — a
+// pipeline is exactly one shader type, so the id is unambiguous).
+layout (constant_id = 4) const int tex_domain = 0;
 //layout (constant_id = 5) const int abs_light = 0;
 #if defined (USE_TX1) || defined(USE_TX2)
 layout (constant_id = 6) const int tex_mode = 0; // modulate, add (identity), add(non-identity) etc
 #endif
 layout (constant_id = 7) const int discard_mode = 0;
+
+// Phase 6B3'-d4-m_final (Block 1): the A3-era per-map `srgb` spec
+// constant (id 15) and the worldLinearize* opt-in are retired. The
+// engine is now self-consistently linear end-to-end: sampleColorTex
+// below decodes every colour texel unconditionally, and LIGHTMAP_BOOST
+// is applied unconditionally. Spec-constant id 15 is left a hole (ids
+// are not required contiguous; renumbering would risk drift in the
+// host-side map).
+
+// Phase 6B3'-d4-A5 / m_final: linear-domain lightmap boost. q3map2
+// emits lightmap bytes at half-intensity expecting an engine-side
+// doubling. The byte-space `<< 1` (R_ColorShiftLightingBytes) was
+// incorrect in sRGB (byte 128 doubled to 255 is ~4× linear light,
+// not 2×); the lightmap-texel call sites now store the byte verbatim
+// and the ×2.0 happens here, in linear domain, on color1 (the
+// lightmap in the modulate-default MUL2/MUL3 collapse: bundle[0]=
+// diffuse, bundle[1]=lightmap, bundle[2]=third stage — verified in
+// tr_shader.c CollapseMultitexture), AFTER sampleColorTex's
+// sRGB → linear decode. Only the modulate-default branches: add/mix/
+// blend branches don't have a lightmap in color1.
+const float LIGHTMAP_BOOST = 2.0;
 
 #ifdef USE_FIXED_COLOR
 layout (constant_id = 8) const float identity_color = 1.0;
@@ -120,20 +149,124 @@ float CorrectAlpha(float threshold, float alpha, vec2 tc)
 #endif
 #endif
 
+// Phase 6B3'-d4-A2/A3 / m_final: precise piecewise sRGB <-> linear
+// conversion (sRGB EOTF / OETF). Matches RBDOOM-3-BFG and Daemon
+// Engine convention and the renderer's CPU-side mipmap LUTs (Phase
+// 6B3'-d3-C) — the pow(x, 2.2) approximation is rejected so the
+// colour-space pipeline stays precise end-to-end. The defensive
+// max(c, 0.0) guards against negatives that could reach these from a
+// float-FBO read in future use (a UNORM texture sample is already
+// non-negative). Duplicated in light_frag.tmpl because compile.mjs
+// has no #include support — if a third consumer appears, revisit
+// build-infra.
+vec3 sRGBToLinear( vec3 c ) {
+	c = max( c, vec3( 0.0 ) );
+	bvec3 cutoff = lessThanEqual( c, vec3( 0.04045 ) );
+	vec3 lo = c / 12.92;
+	vec3 hi = pow( ( c + vec3( 0.055 ) ) / 1.055, vec3( 2.4 ) );
+	return mix( hi, lo, vec3( cutoff ) );
+}
+
+vec3 linearToSRGB( vec3 c ) {
+	c = max( c, vec3( 0.0 ) );
+	bvec3 cutoff = lessThanEqual( c, vec3( 0.0031308 ) );
+	vec3 lo = c * 12.92;
+	vec3 hi = pow( c, vec3( 1.0 / 2.4 ) ) * 1.055 - 0.055;
+	return mix( hi, lo, vec3( cutoff ) );
+}
+
+// Block 5d: domain-aware colour-texture fetch. Each texture slot carries a
+// colour-domain bit in the `tex_domain` spec constant (host-filled from
+// image_t.colorDomain — auto-classified by filename suffix, overridable via
+// the linearMap / srgbMap / gammaMap shader keywords). CD_SRGB texels (the
+// default — normal diffuse/albedo/colour content) are sRGB display data and
+// get decoded sRGB->linear here, before the call-site vertex/entity-colour
+// multiply (which is itself linear). CD_LINEAR texels (normal/spec/roughness/
+// metallic/AO/height masks, framebuffer reads) are linear data and are
+// fetched raw — this replaces the Block-5c sampleColorTexRaw special case
+// (tex_mode 7 spec masks) with a universal mechanism. Alpha is never an sRGB
+// quantity; it always passes through unchanged.
+vec4 sampleColorTex( sampler2D s, vec2 uv, int slot ) {
+	vec4 c = texture( s, uv );
+	if ( ( tex_domain & ( 1 << slot ) ) != 0 )
+		return c;	// CD_LINEAR — raw
+	c.rgb = sRGBToLinear( c.rgb );
+	return c;		// CD_SRGB — decoded
+}
+
 void main() {
 #ifdef USE_FOG
 	vec4 fog = texture(fog_texture, fog_tex_coord);
 #endif
 
+	// Phase 6B3'-d4-m8: decode the rgbGen vertex colours (loc 0/5/6) to
+	// linear domain. They are display-domain byte streams; every blend
+	// below (modulate / add / mix / premultiplied-alpha) expects linear
+	// operands — the texels are already linear via sampleColorTex (A3),
+	// so the vertex multiplier must match. Alpha is per-stage state
+	// (alphaGen), never sRGB-encoded — left raw. (USE_FIXED_COLOR's
+	// identity_color/identity_alpha and USE_ENT_COLOR's ent_color* are
+	// handled elsewhere: the former is the per-pipeline fixed RGBA from
+	// def->color (constant_id 8/9 — vk_create_pipeline writes
+	// def->color.rgb/255 and def->color.alpha/255 into them), used in
+	// the USE_FIXED_COLOR path; it is NOT 1.0 and must NOT be replaced
+	// with a literal. The latter is decoded host-side at the UBO fill
+	// site.)
+#if !defined (USE_CLX_IDENT)
+#if !( defined (USE_FIXED_COLOR) || defined (USE_ENT_COLOR) )
+	vec4 frag_color0 = vec4( sRGBToLinear( frag_color0In.rgb ), frag_color0In.a );
+#endif
+#ifdef USE_CL1
+	vec4 frag_color1 = vec4( sRGBToLinear( frag_color1In.rgb ), frag_color1In.a );
+#endif
+#ifdef USE_CL2
+	vec4 frag_color2 = vec4( sRGBToLinear( frag_color2In.rgb ), frag_color2In.a );
+#endif
+#endif
+
+	// Phase 6B3'-d4-m8: tex_mode blend contracts (spec constant id 6).
+	// All branches were authored with domain-agnostic math; once the
+	// texel (sampleColorTex) and vertex/entity colour operands are
+	// linear they become colorimetrically correct:
+	//   0  modulate  — diffuse × lightmap[× detail], plus LIGHTMAP_BOOST
+	//                  (×2.0) on the lightmap term (color1) — unconditional
+	//                  (m_final; was srgb-gated under A5). The ONLY branch
+	//                  that consumes a lightmap — add/mix/blend branches
+	//                  collapse non-lightmap stages.
+	//   1/2 add       — Σ colorN.rgb : linear radiance sum (physical).
+	//   3  mod-by-a   — Σ (colorN × colorN.a) : premultiplied-alpha sum.
+	//   4  mod-by-1-a — Σ (colorN × (1-colorN.a)).
+	//   5  mix-by-a   — nested mix() : linear-domain alpha blend.
+	//   6  mix-by-1-a — nested mix(), reversed.
+	//   7  exact emulation of the fixed-function blend chain
+	//      GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_SRC_ALPHA: for each stage N,
+	//      fb' = (texN·colN)·fb + fb·(texN·colN).a = fb·((texN·colN)+(texN·colN).a),
+	//      so the collapsed product is  color0 · Π_N (colorN + colorN.a)
+	//      (the GLSL vec4+scalar broadcast also reproduces the blend's alpha,
+	//      fb'.a = 2·src.a·fb.a). Domain-agnostic — correct in linear now that
+	//      the operands are linear, just as it was correct in gamma when they
+	//      were gamma; nothing here was "tuned" against any pipeline. Used by
+	//      Team Arena "shiny/specular" stages (blendFunc GL_DST_COLOR GL_SRC_ALPHA
+	//      + alphaGen lightingSpecular over a base/$lightmap stage) and a few
+	//      liquid/effect surfaces — NOT detail maps, NOT a lightmap. The
+	//      greyscale spec-mask texels in colorN are not sRGB-decoded —
+	//      R_ClassifyColorDomain flags _spec/_shiny/_s/etc. textures CD_LINEAR
+	//      (or a `linearMap` shader keyword forces it), so sampleColorTex
+	//      fetches them raw via the tex_domain bit — because the artist
+	//      authored them in gamma space co-tuned with the linear
+	//      lightingSpecular alpha term (Block 5d; was the 5c sampleColorTexRaw
+	//      special case, now the universal per-texture domain mechanism).
+	// No structural math change in m8 — only the operand decodes above.
+
 #if defined (USE_CLX_IDENT)
-	vec4 color0 = texture(texture0, frag_tex_coord0);
+	vec4 color0 = sampleColorTex(texture0, frag_tex_coord0, 0);
 #elif defined (USE_FIXED_COLOR)
 	const vec4 frag_color = vec4(identity_color, identity_color,identity_color, identity_alpha);
-	vec4 color0 = texture(texture0, frag_tex_coord0) * frag_color;
+	vec4 color0 = sampleColorTex(texture0, frag_tex_coord0, 0) * frag_color;
 #elif defined (USE_ENT_COLOR)
-	vec4 color0 = texture(texture0, frag_tex_coord0) * ent_color0;
+	vec4 color0 = sampleColorTex(texture0, frag_tex_coord0, 0) * ent_color0;
 #else
-	vec4 color0 = texture(texture0, frag_tex_coord0) * frag_color0;
+	vec4 color0 = sampleColorTex(texture0, frag_tex_coord0, 0) * frag_color0;
 #endif
 	vec4 base;
 
@@ -145,17 +278,17 @@ void main() {
 	{
 		// add
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
-		vec4 color2 = texture(texture2, frag_tex_coord2);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * ent_color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * ent_color2;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color2;
 #endif
 
 		base = vec4( color0.rgb + color1.rgb + color2.rgb, color0.a * color1.a * color2.a );
@@ -164,17 +297,17 @@ void main() {
 	{
 		// modulate by alpha
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
-		vec4 color2 = texture(texture2, frag_tex_coord2);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * ent_color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * ent_color2;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color2;
 #endif
 		color0 *= color0.a;
 		color1 *= color1.a;
@@ -185,17 +318,17 @@ void main() {
 	{
 		// modulate by 1.0-alpha
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
-		vec4 color2 = texture(texture2, frag_tex_coord2);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * ent_color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * ent_color2;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color2;
 #endif
 		color0 *= 1.0-color0.a;
 		color1 *= 1.0-color1.a;
@@ -206,17 +339,17 @@ void main() {
 	{
 		// mix by src alpha
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
-		vec4 color2 = texture(texture2, frag_tex_coord2);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * ent_color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * ent_color2;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color2;
 #endif
 		//base = mix( color0, color1, color1.a );
 		//base = mix( base, color2, color2.a );
@@ -226,36 +359,39 @@ void main() {
 	{
 		// mix by 1-src alpha
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
-		vec4 color2 = texture(texture2, frag_tex_coord2);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * ent_color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * ent_color2;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color2;
 #endif
 		//base = mix( color1, color0, color1.a );
 		//base = mix( color2, base, color2.a );
 		base = mix( color2, mix( color1, color0, color1.a ), color2.a );
 	}
-	else if ( tex_mode == 7 ) // 0 + 2x GLS_DSTBLEND_SRC_ALPHA | GLS_SRCBLEND_DST_COLOR
+	else if ( tex_mode == 7 ) // tex_mode 7: 3-stage GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_SRC_ALPHA chain
 	{
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
-		vec4 color2 = texture(texture2, frag_tex_coord2);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * ent_color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * ent_color2;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color2;
+		// tex_mode 7: spec-mask modulator texels fetched raw (no sRGB
+		// decode) — artist-authored in gamma space, co-tuned with the
+		// linear lightingSpecular alpha carried in frag_color1/2.
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color2;
 #endif
 		base = (color2 + color2.a) * (color1 + color1.a) * color0;
 	}
@@ -263,53 +399,63 @@ void main() {
 	{
 		// default case, modulate
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
-		vec4 color2 = texture(texture2, frag_tex_coord2);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * ent_color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * ent_color2;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color2;
 #endif
-		base = color0 * color1 * color2;
+		// Phase 6B3'-d4-A5 / m_final: lightmap boost on color1 only (MUL3
+		// collapse — color1 = lightmap, color2 = third stage). The
+		// lightmap texel is stored byte-verbatim now (R_ColorShiftLightingBytes
+		// no longer << 1's it); the ×2.0 happens here, in linear domain.
+		base.rgb = color0.rgb * color1.rgb * color2.rgb * LIGHTMAP_BOOST;
+		base.a   = color0.a * color1.a * color2.a;
 	}
 #else // !USE_CL2
 	// triple-texture with identity colors (1.0) in color1 and color2
 	if ( tex_mode == 1 )
 	{
 		// add (identity color0 == 1.0)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
-		vec4 color2 = texture(texture2, frag_tex_coord2);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2);
 		base = vec4(color0.rgb + color1.rgb + color2.rgb, color0.a * color1.a * color2.a);
 	}
 	else if ( tex_mode == 2 )
 	{
 		// add (color0 != 1.0)
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
-		vec4 color2 = texture(texture2, frag_tex_coord2);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * ent_color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * ent_color2;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color0;
-		vec4 color2 = texture(texture2, frag_tex_coord2) * frag_color0;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color0;
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2) * frag_color0;
 #endif
 		base = vec4(color0.rgb + color1.rgb + color2.rgb, color0.a * color1.a * color2.a);
 	}
-	else 
+	else
 	{
 		// default case, modulate
-		vec4 color1 = texture(texture1, frag_tex_coord1);
-		vec4 color2 = texture(texture2, frag_tex_coord2);
-		base = color0 * color1 * color2;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
+		vec4 color2 = sampleColorTex(texture2, frag_tex_coord2, 2);
+		// Phase 6B3'-d4-A5 / m_final: lightmap boost on color1 only (MUL3
+		// collapse — color1 = lightmap, color2 = third stage). The
+		// lightmap texel is stored byte-verbatim now (R_ColorShiftLightingBytes
+		// no longer << 1's it); the ×2.0 happens here, in linear domain.
+		base.rgb = color0.rgb * color1.rgb * color2.rgb * LIGHTMAP_BOOST;
+		base.a   = color0.a * color1.a * color2.a;
 	}
 #endif // !USE_TX2
 #elif defined(USE_TX1)
@@ -320,13 +466,13 @@ void main() {
 	{
 		// add
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color1;
 #endif
 		base = vec4( color0.rgb + color1.rgb, color0.a * color1.a );
 	}
@@ -334,13 +480,13 @@ void main() {
 	{
 		// modulate by alpha
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color1;
 #endif
 		color0 *= color0.a;
 		color1 *= color1.a;
@@ -350,13 +496,13 @@ void main() {
 	{
 		// modulate by 1.0-alpha
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color1;
 #endif
 		color0 *= 1.0-color0.a;
 		color1 *= 1.0-color1.a;
@@ -366,13 +512,13 @@ void main() {
 	{
 		// mix by src alpha
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color1;
 #endif
 		base = mix( color0, color1, color1.a );
 	}
@@ -380,28 +526,31 @@ void main() {
 	{
 		// mix by 1-src alpha
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color1;
 #endif
 		base = mix( color1, color0, color1.a );
 	}
-	else if ( tex_mode == 7 ) // 0 + GLS_DSTBLEND_SRC_ALPHA | GLS_SRCBLEND_DST_COLOR
+	else if ( tex_mode == 7 ) // tex_mode 7: 2-stage GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_SRC_ALPHA chain
 	{
-		// modulate color1 by color0
-		// moduleta color0 by color1.alpha
+		// tex_mode 7: fb = color0·(color1 + color1.a)
+		//   — DST_COLOR|SRC_ALPHA blend of stage 1 over stage 0
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
+		// tex_mode 7: spec-mask modulator texel fetched raw (no sRGB
+		// decode) — artist-authored in gamma space, co-tuned with the
+		// linear lightingSpecular alpha carried in frag_color1.
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color1;
 #endif
 		base = (color1 + color1.a) * color0;
 	}
@@ -409,35 +558,40 @@ void main() {
 	{
 		// default case, modulate
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color1;
 #endif
-		base = color0 * color1;
+		// Phase 6B3'-d4-A5 / m_final: lightmap boost on color1 in linear
+		// domain. The lightmap texel is stored byte-verbatim now
+		// (R_ColorShiftLightingBytes no longer << 1's it); the ×2.0 happens
+		// here, after sampleColorTex's sRGB → linear decode.
+		base.rgb = color0.rgb * color1.rgb * LIGHTMAP_BOOST;
+		base.a   = color0.a * color1.a;
 	}
 #else
 	// double-texture with identity colors (1.0) in color1
 	if ( tex_mode == 1 )
 	{
 		// add (identity)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
 		base = vec4(color0.rgb + color1.rgb, color0.a * color1.a);
 	}
 	else if ( tex_mode == 2 )
 	{
 		// add
 #if defined (USE_CLX_IDENT)
-		vec4 color1 = texture(texture1, frag_tex_coord1);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
 #elif defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color0;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color0;
 #endif
 		base = vec4(color0.rgb + color1.rgb, color0.a * color1.a);
 	}
@@ -445,13 +599,18 @@ void main() {
 	{
 		// modulate
 #if defined (USE_FIXED_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * frag_color;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * frag_color;
 #elif defined (USE_ENT_COLOR)
-		vec4 color1 = texture(texture1, frag_tex_coord1) * ent_color1;
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1) * ent_color1;
 #else
-		vec4 color1 = texture(texture1, frag_tex_coord1);
+		vec4 color1 = sampleColorTex(texture1, frag_tex_coord1, 1);
 #endif
-		base = color0 * color1;
+		// Phase 6B3'-d4-A5 / m_final: lightmap boost on color1 in linear
+		// domain. The lightmap texel is stored byte-verbatim now
+		// (R_ColorShiftLightingBytes no longer << 1's it); the ×2.0 happens
+		// here, after sampleColorTex's sRGB → linear decode.
+		base.rgb = color0.rgb * color1.rgb * LIGHTMAP_BOOST;
+		base.a   = color0.a * color1.a;
 	}
 #endif // !USE_CL1
 #endif // !USE_TX1
@@ -487,6 +646,11 @@ void main() {
 #endif
 
 #ifdef USE_FOG
+	// Phase 6B3'-d4-m4: fogColor is host-decoded to linear domain
+	// (VK_SetFogParams — the single UBO fill site). `fog` (sampled from
+	// fog_texture at the top of main) is a non-colour density ramp, not
+	// decoded. The blend math below is unchanged; it now operates on
+	// linear inputs.
 	if ( acff == 1 ) {
 		// ACFF_RGB
 		base.rgb = base.rgb * (1.0 - fog.w);

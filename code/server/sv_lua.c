@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #include "server.h"
 #include "sv_lua.h"
 #include "../qcommon/wired/core/scripting/user_vm.h"

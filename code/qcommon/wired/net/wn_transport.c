@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
 ===========================================================================
 wn_transport.c — WiredNet game transport over QUIC
@@ -471,7 +474,7 @@ static qboolean TLV_Read( const byte *data, int len,
 
 
 // ═══════════════════════════════════════════════════════════════════
-// Game conn lifecycle  (was wn_transport.c)
+// Game conn lifecycle
 // ═══════════════════════════════════════════════════════════════════
 
 wn_game_conn_t *WN_GameAllocConn( wn_connection_t *conn )
@@ -519,7 +522,7 @@ void WN_GameFreeConn( wn_game_conn_t *gc )
 
 
 // ═══════════════════════════════════════════════════════════════════
-// Datagram handling  (was wn_transport.c)
+// Datagram handling
 // ═══════════════════════════════════════════════════════════════════
 
 void WN_GameHandleDatagram( wn_connection_t *conn, const byte *data, int len )
@@ -693,7 +696,7 @@ void WN_GameHandleReliable( wn_connection_t *conn, uint64_t stream_id,
 
 
 // ═══════════════════════════════════════════════════════════════════
-// Public game packet API  (was wn_transport.c)
+// Public game packet API
 // ═══════════════════════════════════════════════════════════════════
 
 void WN_SendGamePacketToAddr( const netadr_t *to, const void *data, int length )

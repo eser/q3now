@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 
 /*
@@ -37,9 +24,9 @@ When working on audio:
 void S_Init( void );
 void S_Shutdown( void );
 
-/* CNQ3 backport: temporarily override s_autoMute.  When enabled=qtrue,
- * the sound system will mix audio regardless of the s_autoMute state
- * (used by the match-alert bit 8 to make the alert audible even if the
+/* temporarily override s_autoMute.  When enabled=qtrue, the sound
+ * system will mix audio regardless of the s_autoMute state (used by
+ * the match-alert bit 8 to make the alert audible even if the
  * window is unfocused). */
 void S_SetMuteOverride( qboolean enabled );
 

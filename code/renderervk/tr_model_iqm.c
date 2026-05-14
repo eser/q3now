@@ -1,20 +1,8 @@
-/*
-===========================================================================
-Copyright (C) 2011 Thilo Schulz <thilo@tjps.eu>
-Copyright (C) 2011 Matthias Bentrup <matthias.bentrup@googlemail.com>
-Copyright (C) 2011-2019 Zack Middleton <zturtleman@gmail.com>
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 2011 Thilo Schulz <thilo@tjps.eu>
+// SPDX-FileCopyrightText: 2011 Matthias Bentrup <matthias.bentrup@googlemail.com>
+// SPDX-FileCopyrightText: 2011-2019 Zack Middleton <zturtleman@gmail.com>
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "tr_local.h"
 
@@ -1692,6 +1680,15 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 
 	tess.numIndexes += 3 * surf->num_triangles;
 	tess.numVertexes += surf->num_vertexes;
+
+#if FEAT_SHADOW_MAPPING
+	// Phase 6.5.4d2-followup: snapshot this CPU-skinned IQM surface for next
+	// frame's shadow pass. (The GPU-skinning branch above returns before tess.xyz
+	// is touched, so it never reaches here — that path is d2-followup-2.) No-op if
+	// the entity isn't an opaque caster / shadow mapping off.
+	vk_shadow_capture_mesh( tess.numVertexes - surf->num_vertexes, surf->num_vertexes,
+	                        tess.numIndexes - 3 * surf->num_triangles, 3 * surf->num_triangles );
+#endif
 }
 
 int R_IQMLerpTag( orientation_t *tag, iqmData_t *data,

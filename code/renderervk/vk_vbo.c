@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "tr_local.h"
 #include "vk.h"
@@ -95,12 +82,12 @@ static qboolean isStaticRGBgen( colorGen_t cgen )
 	switch ( cgen )
 	{
 		case CGEN_BAD:
-		case CGEN_IDENTITY_LIGHTING:	// tr.identityLight
+		case CGEN_IDENTITY_LIGHTING:	// full white (linear pipeline; was 0.5×white pre-6B3'-a)
 		case CGEN_IDENTITY:				// always (1,1,1,1)
 		case CGEN_ENTITY:				// grabbed from entity's modulate field
 		case CGEN_ONE_MINUS_ENTITY:		// grabbed from 1 - entity.modulate
 		case CGEN_EXACT_VERTEX:			// tess.vertexColors
-		case CGEN_VERTEX:				// tess.vertexColors * tr.identityLight
+		case CGEN_VERTEX:				// tess.vertexColors (verbatim; was halved pre-6B3'-a)
 		case CGEN_ONE_MINUS_VERTEX:
 		// case CGEN_WAVEFORM:			// programmatically generated
 		case CGEN_LIGHTING_DIFFUSE:

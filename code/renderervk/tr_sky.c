@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_sky.c
 #include "tr_local.h"
 
@@ -456,7 +443,7 @@ static void DrawSkySide( image_t *image, const int mins[2], const int maxs[2] )
 		vk_bind_pipeline( vk.skybox_pipeline );
 		vk_bind_index();
 		vk_bind_geometry( TESS_XYZ | TESS_ST0 );
-		vk_draw_geometry( r_showsky->integer ? DEPTH_RANGE_ZERO : DEPTH_RANGE_ONE, qtrue );
+		vk_draw_geometry( r_showSky->integer ? DEPTH_RANGE_ZERO : DEPTH_RANGE_ONE, qtrue );
 #else
 		qglVertexPointer( 3, GL_FLOAT, 16, tess.xyz );
 		qglTexCoordPointer( 2, GL_FLOAT, 0, tess.texCoords[0] );
@@ -834,18 +821,18 @@ void RB_StageIteratorSky( void ) {
 	// to be drawn
 	RB_ClipSkyPolygons( &tess );
 
-	// r_showsky will let all the sky blocks be drawn in
+	// r_showSky will let all the sky blocks be drawn in
 	// front of everything to allow developers to see how
 	// much sky is getting sucked in
 
 #ifdef USE_VULKAN
-	if ( r_showsky->integer ) {
+	if ( r_showSky->integer ) {
 		tess.depthRange = DEPTH_RANGE_ZERO;
 	} else {
 		tess.depthRange = DEPTH_RANGE_ONE;
 	}
 #else
-	if ( r_showsky->integer ) {
+	if ( r_showSky->integer ) {
 		qglDepthRange( 0.0, 0.0 );
 	} else {
 		qglDepthRange( sky_min_depth, 1.0 );
@@ -860,7 +847,8 @@ void RB_StageIteratorSky( void ) {
 		GL_ClientState( 1, CLS_NONE );
 		GL_ClientState( 0, CLS_TEXCOORD_ARRAY );
 
-		qglColor4f( tr.identityLight, tr.identityLight, tr.identityLight, 1.0 );
+		/* Phase 6B3'-a: full-white sky color in the linear pipeline. */
+		qglColor4f( 1.0, 1.0, 1.0, 1.0 );
 
 		GL_State( 0 );
 		GL_Cull( CT_FRONT_SIDED );

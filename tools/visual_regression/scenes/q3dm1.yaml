@@ -1,0 +1,44 @@
+# q3dm1.yaml — in-game HUD over q3dm1 (a Q3 map). STARTER SCENE.
+#
+# Same shape as arena1.yaml — the HUD overlay is identity-encoded
+# (bypasses tonemap). Loading q3dm1 (vs arena1) exercises a different
+# lightmapped world behind the HUD, which matters once the per-region
+# tolerances need to absorb scene bleed-through for alpha-blended HUD bits.
+#
+# NOTE: world-surface colour checks (the "blue tint on legacy Q3 maps"
+# symptom) are NOT covered here — the layout-dump instrumentation only
+# emits Wired UI item rects, not world geometry. Catching world-surface
+# regressions would need a different sample-point source (e.g. fixed screen
+# coords for a known wall, or a debug overlay). For now this scene checks
+# the same HUD regions as arena1, over a different map.
+#
+# STATUS: template. The `region` names must match `name` tags on the HUD
+# items (see arena1.yaml's notes).
+
+name: q3dm1
+
+operator: identity
+
+cvars:
+  s_initsound: 0
+  r_brightness: 1
+  r_tonemap: 1
+
+map: q3dm1
+
+capture_frame: 600
+
+texture: backbuffer
+
+expected_regions:
+  - region: hud.accent
+    source: { macro: WCOLOR_ACCENT }
+
+  - region: hud.separator
+    source: { macro: WCOLOR_SEPARATOR }
+    tolerance: 8
+
+  # Add map-specific or world-surface checks here once a sample-point source
+  # for non-UI pixels exists. e.g. a fixed-coordinate readback of a known
+  # wall texel could assert "not blue-tinted":
+  #  - region: world.q3dm1_wall   (would need vr_check.py support for raw screen coords)

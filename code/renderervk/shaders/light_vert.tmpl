@@ -18,8 +18,25 @@ layout(set = 0, binding = 0) uniform UBO {
 	vec4 fogEyeT;				// vertex
 	vec4 fogColor;				// fragment
 #endif
+	// Phase 6.5.4c: the CSM cascade matrices / split distances live further on
+	// in this UBO (std140 offsets 144 / 400) and are only consumed by the
+	// fragment stage, so the vertex stage doesn't declare them here (a std140
+	// prefix is fine).
 #ifdef USE_SHADOWMAP
-	mat4 shadowMVP;				// light view-projection matrix
+	// Phase 6.5.4d2: caster/receiver model→world transform (identity for
+	// worldspawn, the entity's [axis|origin] for entity/brush-model surfaces) —
+	// used below to put shadowData.xyz in WORLD space. Host offset 416 (see
+	// code/renderervk/vk.h vkUniform_t.modelMatrix). Phase 7.3b-followup:
+	// explicit `layout(offset=)` replaced with natural std140 padding so the
+	// block translates under every backend (the frag stage's cascadeMVP[4] +
+	// cascadeSplits cover 144..416 in the host struct — the vert stage doesn't
+	// reference them, just pads over them).
+#ifdef USE_FOG
+	vec4 _pad_to_modelMatrix[18];   //  128 → 416 (288 bytes, after fogColor)
+#else
+	vec4 _pad_to_modelMatrix[22];   //   64 → 416 (352 bytes, after lightVector)
+#endif
+	mat4 modelMatrix;               // offset 416, 64 bytes
 #endif
 };
 
@@ -39,7 +56,7 @@ layout(location = 4) out vec2 fog_tex_coord;
 layout(location = 5) out vec3 frag_position; // object-space position for TBN
 #endif
 #ifdef USE_SHADOWMAP
-layout(location = 6) out vec4 shadowCoord;   // light-space position
+layout(location = 6) out vec4 shadowData;     // xyz = object/world position, w = view-space depth (gl_Position.w)
 #endif
 
 out gl_PerVertex {
@@ -57,7 +74,13 @@ void main() {
 	frag_position = in_position;
 #endif
 #ifdef USE_SHADOWMAP
-	shadowCoord = shadowMVP * vec4( in_position, 1.0 );
+	// World-space fragment position (for the fragment's per-cascade light-space
+	// transform) + view-space depth (== gl_Position.w for a perspective
+	// projection) for the cascade selector. Phase 6.5.4d2: in_position is
+	// object-space for entity surfaces / rest-space for moved brush models, so
+	// it's mapped through modelMatrix here — worldspawn surfaces get an identity
+	// modelMatrix, so this is a no-op for them. Closes the 6.5.4c caveat.
+	shadowData = vec4( ( modelMatrix * vec4( in_position, 1.0 ) ).xyz, gl_Position.w );
 #endif
 
 #ifdef USE_FOG

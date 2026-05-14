@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
 // cg_effects.c -- these functions generate localentities, usually as a result
 // of event processing
@@ -86,6 +73,108 @@ void CG_BubbleTrail( vec3_t start, vec3_t end, float spacing ) {
 
 		VectorAdd (move, vec, move);
 	}
+}
+
+/*
+==================
+CG_WaterSplash  (Phase 6.5.3)
+
+A short burst of spray droplets + the water-hit sound at a point on a
+liquid surface. Quake 3 ships no dedicated splash sprite, so we re-use
+cgs.media.waterBubbleShader at a larger radius and launch the droplets on
+a gravity arc (up then fall) — reads as a small crown of water. The sound
+is Q1's misc/h2ohit1 (or Q3's player/watr_in fallback; silent if neither
+asset is present). Pure helper: callers gate on cgs.q1Map.
+==================
+*/
+void CG_WaterSplash( vec3_t point ) {
+	int n;
+
+	if ( cg_noProjectileTrail.integer ) {
+		return;
+	}
+
+	for ( n = 0; n < 6; n++ ) {
+		localEntity_t	*le;
+		refEntity_t		*re;
+
+		le = CG_AllocLocalEntity();
+		le->leFlags   = LEF_PUFF_DONT_SCALE;
+		le->leType    = LE_MOVE_SCALE_FADE;
+		le->startTime = cg.time;
+		le->endTime   = cg.time + 300 + random() * 200;
+		le->lifeRate  = 1.0f / ( le->endTime - le->startTime );
+
+		re = &le->refEntity;
+		re->shaderTime.f = cg.time / 1000.0f;
+		re->reType       = RT_SPRITE;
+		re->rotation     = 0;
+		re->radius       = 5.0f + random() * 3.0f;	// bigger than a trail bubble
+		re->customShader = cgs.media.waterBubbleShader;
+		re->shader.rgba[0] = re->shader.rgba[1] = re->shader.rgba[2] = re->shader.rgba[3] = 0xff;
+		le->color[3] = 1.0f;
+
+		le->pos.trType = TR_GRAVITY;			// droplets arc up then fall back
+		le->pos.trTime = cg.time;
+		VectorCopy( point, le->pos.trBase );
+		le->pos.trDelta[0] = crandom() * 40.0f;
+		le->pos.trDelta[1] = crandom() * 40.0f;
+		le->pos.trDelta[2] = 50.0f + random() * 50.0f;
+	}
+
+	if ( cgs.media.waterSplashSound ) {
+		trap_S_StartSound( point, ENTITYNUM_WORLD, CHAN_AUTO, cgs.media.waterSplashSound );
+	}
+}
+
+/*
+==================
+CG_WaterCrossingSplashes  (Phase 6.5.3)
+
+Given a hitscan segment [start,end], emit CG_WaterSplash() at wherever
+the shot pierces a liquid surface — once at the entry point and, when the
+shot ends in air on the far side, once at the exit point. Recovers the
+surface intersection with a CONTENTS_WATER-only re-trace against the world
+(Q1 maps carry synthesized AABB water brushes with CONTENTS_WATER; Q3 maps
+have water/fog brushes) — the same recovery pattern CG_Bullet /
+CG_ShotgunPellet already use for the submerged bubble trail. No-op on Q3
+maps (cgs.q1Map gate) so Q3 visuals are unchanged.
+==================
+*/
+void CG_WaterCrossingSplashes( vec3_t start, vec3_t end ) {
+	int		sc, ec;
+	trace_t	wtr;
+
+	if ( !cgs.q1Map ) {
+		return;
+	}
+
+	sc = CG_PointContents( start, 0 );
+	ec = CG_PointContents( end,   0 );
+
+	if ( ( sc & CONTENTS_WATER ) && ( ec & CONTENTS_WATER ) ) {
+		return;	// fully submerged — no surface crossing
+	}
+	if ( sc & CONTENTS_WATER ) {
+		// shooter underwater, shot ends in air: one exit crossing
+		trap_CM_BoxTrace( &wtr, end, start, NULL, NULL, 0, CONTENTS_WATER );
+		CG_WaterSplash( wtr.endpos );
+		return;
+	}
+	if ( ec & CONTENTS_WATER ) {
+		// shot starts in air, ends underwater: one entry crossing
+		trap_CM_BoxTrace( &wtr, start, end, NULL, NULL, 0, CONTENTS_WATER );
+		CG_WaterSplash( wtr.endpos );
+		return;
+	}
+	// air -> (water volume) -> air: entry at the forward re-trace, exit at the reverse one
+	trap_CM_BoxTrace( &wtr, start, end, NULL, NULL, 0, CONTENTS_WATER );
+	if ( wtr.fraction >= 1.0f ) {
+		return;	// the segment never touched a water volume
+	}
+	CG_WaterSplash( wtr.endpos );							// entry
+	trap_CM_BoxTrace( &wtr, end, start, NULL, NULL, 0, CONTENTS_WATER );
+	CG_WaterSplash( wtr.endpos );							// exit
 }
 
 /*

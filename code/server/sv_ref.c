@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
-===========================================================================
-Copyright (C) 2026 Wired engine contributors.
-
-This file is part of the Wired engine and is distributed under the terms of the
-GNU General Public License version 2 or (at your option) any later version.
-
 sv_ref.c — Dedicated server headless renderer (FEAT_HEADLESS_RENDERER)
 
 Provides a refexport_t implementation for dedicated-server builds that
@@ -33,7 +30,6 @@ Activation:
   * FEAT_HEADLESS_RENDERER enables this implementation.
   * Integration point: a dedicated build can call GetRefAPI_Headless()
     and populate its shared `re` export with the returned vtable.
-===========================================================================
 */
 
 #include "../qcommon/q_shared.h"

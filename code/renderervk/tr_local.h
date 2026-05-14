@@ -1,19 +1,6 @@
-/*
-===========================================================================
-Copyright (C) 1999-2005 Id Software, Inc.
-Copyright (C) 2024 Wired engine contributors
-
-This file is part of the Wired Engine (derived from idTech 3 & 4 source
-code and community around it). It is free software released under the terms
-of the GNU General Public License version 2 or (at your option) any later
-version.
-
-Quake III Arena, q3now, Wired Engine and the rest are licensed under the
-**GNU General Public License, version 2 or later (GPL-2.0-or-later)**.
-The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
-repository root.
-===========================================================================
-*/
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #ifndef TR_LOCAL_H
 #define TR_LOCAL_H
@@ -241,12 +228,12 @@ typedef enum {
 
 typedef enum {
 	CGEN_BAD,
-	CGEN_IDENTITY_LIGHTING,	// tr.identityLight
+	CGEN_IDENTITY_LIGHTING,	// full white (linear pipeline; was 0.5×white pre-6B3'-a)
 	CGEN_IDENTITY,			// always (1,1,1,1)
 	CGEN_ENTITY,			// grabbed from entity's modulate field
 	CGEN_ONE_MINUS_ENTITY,	// grabbed from 1 - entity.modulate
 	CGEN_EXACT_VERTEX,		// tess.vertexColors
-	CGEN_VERTEX,			// tess.vertexColors * tr.identityLight
+	CGEN_VERTEX,			// tess.vertexColors (verbatim; was halved pre-6B3'-a)
 	CGEN_ONE_MINUS_VERTEX,
 	CGEN_WAVEFORM,			// programmatically generated
 	CGEN_LIGHTING_DIFFUSE,
@@ -585,6 +572,16 @@ typedef struct {
 } trRefdef_t;
 
 
+// Block 5d: per-texture colour domain. CD_SRGB texels are sRGB display
+// content and get decoded (sRGBToLinear) at sample time; CD_LINEAR texels
+// are linear data (normal/spec/roughness/metal/AO/height masks, framebuffer
+// reads, etc.) and are fetched raw. Auto-classified by filename suffix in
+// R_CreateImage; overridable per shader stage via linearMap/srgbMap/gammaMap.
+typedef enum {
+	CD_SRGB   = 0,
+	CD_LINEAR = 1,
+} colorDomain_t;
+
 typedef struct image_s {
 	char		*imgName;			// image path, including extension
 	char		*imgName2;			// image path with real file extension
@@ -593,7 +590,10 @@ typedef struct image_s {
 	int			uploadWidth;		// after power of two and picmip but not including clamp to MAX_TEXTURE_SIZE
 	int			uploadHeight;
 	imgFlags_t	flags;
-	uint32_t	layerCount;			/* 1 for 2D, N for VK_IMAGE_VIEW_TYPE_2D_ARRAY */
+	colorDomain_t colorDomain;		// Block 5d: CD_SRGB (decode at sample) | CD_LINEAR (raw fetch)
+	uint32_t	layerCount;			/* 1 for 2D, 6 for cube, N for VK_IMAGE_VIEW_TYPE_2D_ARRAY */
+	texType_t	texType;			// Phase 6.5.1: TEXTYPE_2D (default) | _CUBE | _3D — drives VkImageType / view type
+	int			depth;				// Phase 6.5.1: volume slice count (extent.depth); 1 for 2D / cube
 	int			frameUsed;			// for texture usage in frame statistics
 
 #ifdef USE_VULKAN
@@ -605,6 +605,13 @@ typedef struct image_s {
 	// Descriptor set that contains single descriptor used to access the given image.
 	// It is updated only once during image initialization.
 	VkDescriptorSet descriptor;
+	// Phase 7.4a (texture migration): when r_useRALTextures=1, a parallel RAL
+	// texture is created alongside the legacy VkImage above. The legacy handle
+	// drives the renderer's descriptor binding / blits / screenshots; the RAL
+	// texture populates the bindless BindGroup for 7.4c. NULL when
+	// r_useRALTextures=0 or when the RAL backend init failed.
+	struct ralTexture_s *ral;
+	int		ralBindlessSlot;       // index into ral_bindless_set (-1 when not registered)
 #else
 	GLuint		texnum;				// gl texture binding
 	GLint		internalFormat;
@@ -996,6 +1003,7 @@ typedef struct {
 	int			numShaders;
 	dshader_t	*shaders;
 
+	int			numBModels;		// inline submodel count; bmodels[0] = worldspawn
 	bmodel_t	*bmodels;
 
 	int			numplanes;
@@ -1233,9 +1241,10 @@ typedef struct {
 
 	qboolean screenMapDone;
 	qboolean doneBloom;
+	qboolean doneUIPass;	// Block 8 (Delta 2): single source of truth for "the 3D→2D transition orchestrator already ran this frame" — set when render_pass.ui (gameplay: after bloom/tonemap/SMAA) or render_pass.ui_clear (pure-2D) was opened on img 265. Subsequent transition-site calls in the same frame are no-ops. Resets per frame next to doneBloom. (Replaces the old doneTonemap once-guard.)
 
-	// CNQ3 loading throttle: last time a buffer swap actually presented
-	// while tr.mapLoading was set. Used with r_loadingFpsCap.
+	// loading throttle: last time a buffer swap actually presented while
+	// tr.mapLoading was set. Used with r_loadingFpsCap.
 	int		lastLoadingSwapMsec;
 
 } backEndState_t;
@@ -1277,7 +1286,7 @@ typedef struct {
 	image_t					*flareImage;
 	image_t					*blackImage;
 	image_t					*whiteImage;			// full of 0xff
-	image_t					*identityLightImage;	// full of tr.identityLightByte
+	image_t					*identityLightImage;	// full white 8x8 (linear pipeline; was 0.5×white pre-6B3'-a)
 
 	shader_t				*defaultShader;
 	shader_t				*whiteShader;
@@ -1313,10 +1322,19 @@ typedef struct {
 
 	viewParms_t				viewParms;
 
-	float					identityLight;		// 1.0 / ( 1 << overbrightBits )
-	int						identityLightByte;	// identityLight * 255
-	int						overbrightBits;		// based on r_brightness->value, but set to 0 if no hw gamma
-	int                     mapOverbrightBits;  // based on r_mapBrightness->value
+	// Phase 6B3'-a: tr.identityLight, tr.identityLightByte, and
+	// tr.overbrightBits removed — linear-pipeline migration. Sites
+	// that referenced them now use literal 1.0f / 255 / 0. r_brightness
+	// drives the pre-tonemap exposure_bias spec constant (vk.c).
+	// Phase 6B3'-d4-m_final (Block 1): the A1-era per-map worldLinearize*
+	// opt-in (Daemon `_q3map2_cmdline` convention) is retired — the
+	// engine is now self-consistently linear end-to-end, so colour
+	// texels are sRGB-decoded unconditionally in the world fragment
+	// shaders and the lightmap-texel call sites of R_ColorShiftLightingBytes
+	// store the byte verbatim (the ×2 q3map2-overbright doubling moved to
+	// the shader's LIGHTMAP_BOOST). Vertex-light / light-grid call sites
+	// still use the byte-space << 1 — a separate model-lighting boost
+	// migration retires that.
 
 	orientationr_t			or;					// for current entity
 
@@ -1427,12 +1445,12 @@ extern cvar_t	*r_lodscale;
 extern cvar_t	*r_teleporterFlash;		// teleport hyperspace visual
 
 extern cvar_t	*r_fastsky;				// controls whether sky should be cleared or drawn
-extern cvar_t	*r_neatsky;				// nomip and nopicmip for skyboxes, cnq3 like look
+extern cvar_t	*r_neatsky;				// nomip and nopicmip for skyboxes
 extern cvar_t	*r_drawSun;				// controls drawing of sun quad
 extern cvar_t	*r_dynamiclight;		// dynamic lights enabled/disabled
 extern cvar_t	*r_mergeLightmaps;
-extern cvar_t	*r_lightmapAtlas;	// CNQ3 alias for r_mergeLightmaps
-extern cvar_t	*r_loadingFpsCap;	// CNQ3 swap throttle during map loads
+extern cvar_t	*r_lightmapAtlas;	// alias for r_mergeLightmaps
+extern cvar_t	*r_loadingFpsCap;	// swap throttle during map loads
 #ifdef USE_PMLIGHT
 extern cvar_t	*r_dlightMode;			// 0 - vq3, 1 - pmlight
 //extern cvar_t	*r_dlightSpecPower;		// 1 - 32
@@ -1448,16 +1466,20 @@ extern cvar_t	*r_vbo;
 #endif
 extern cvar_t	*r_fbo;
 extern cvar_t	*r_hdr;
+extern cvar_t	*r_hdrDisplay;        // Phase 6B3'-d8: HDR10 swapchain colorspace
+extern cvar_t	*r_hdrPeakLuminance;  // HDR10 display peak (nits)
+extern cvar_t	*r_hdrMinLuminance;   // HDR10 display min (nits)
+#if FEAT_PBR
+extern cvar_t	*r_pbr;
+#endif
 extern cvar_t	*r_bloom;
-extern cvar_t	*r_bloom_passes;
+extern cvar_t	*r_bloomPasses;
 #ifdef __APPLE__
 extern cvar_t	*r_vkApplePinkBarrier;
 #endif
-extern cvar_t	*r_bloom_threshold;
-extern cvar_t	*r_bloom_intensity;
-extern cvar_t	*r_bloom_threshold_mode;
-extern cvar_t	*r_bloom_modulate;
-extern cvar_t	*r_ext_multisample;
+extern cvar_t	*r_bloomThreshold;
+extern cvar_t	*r_bloomIntensity;
+extern cvar_t	*r_bloomThresholdMode;
 extern cvar_t	*r_ext_supersample;
 //extern cvar_t	*r_ext_alpha_to_coverage;
 extern cvar_t	*r_renderWidth;
@@ -1473,12 +1495,19 @@ extern cvar_t	*r_ssao;
 #if FEAT_TONEMAP
 extern cvar_t	*r_tonemap;
 extern cvar_t	*r_tonemapExposure;
+extern cvar_t	*r_lottes_contrast;
+extern cvar_t	*r_lottes_shoulder;
+extern cvar_t	*r_lottes_mid_in;
+extern cvar_t	*r_lottes_mid_out;
+extern cvar_t	*r_lottes_hdr_max;
 #endif
 #if FEAT_COLOR_GRADING
 extern cvar_t	*r_colorGrading;
-#endif
-#if FEAT_FXAA
-extern cvar_t	*r_fxaa;
+extern cvar_t	*r_grade_tint_r;
+extern cvar_t	*r_grade_tint_g;
+extern cvar_t	*r_grade_tint_b;
+extern cvar_t	*r_grade_saturation;
+extern cvar_t	*r_grade_contrast;
 #endif
 #if FEAT_GODRAYS
 extern cvar_t	*r_godRays;
@@ -1486,14 +1515,15 @@ extern cvar_t	*r_sunX;
 extern cvar_t	*r_sunY;
 #endif
 extern cvar_t	*r_smaa;
+extern cvar_t	*r_smaa_threshold;
 extern cvar_t	*r_lerpLightstyles;		// 0=10Hz stepped, 1=smooth lerp between pattern chars
 #endif
 
 extern cvar_t	*r_dlightBacks;			// dlight non-facing surfaces for continuity
 
 extern	cvar_t	*r_norefresh;			// bypasses the ref rendering
-extern	cvar_t	*r_drawentities;		// disable/enable entity rendering
-extern	cvar_t	*r_drawworld;			// disable/enable world rendering
+extern	cvar_t	*r_drawEntities;		// disable/enable entity rendering
+extern	cvar_t	*r_drawWorld;			// disable/enable world rendering
 extern	cvar_t	*r_speeds;				// various levels of information display
 extern	cvar_t	*r_gpuSpeeds;			// per-pass GPU timestamp report
 extern	cvar_t	*r_vkDebugTiming;		// 200-frame Vulkan host-side timing averages
@@ -1503,7 +1533,7 @@ extern	cvar_t	*r_novis;				// disable/enable usage of PVS
 extern	cvar_t	*r_nocull;
 extern	cvar_t	*r_facePlaneCull;		// enables culling of planar surfaces with back side test
 extern	cvar_t	*r_nocurves;
-extern	cvar_t	*r_showcluster;
+extern	cvar_t	*r_showCluster;
 
 extern cvar_t	*r_gamma;
 
@@ -1522,9 +1552,9 @@ extern	cvar_t	*r_fullbright;					// avoid lightmap pass
 extern	cvar_t	*r_lightmap;					// render lightmaps only
 extern	cvar_t	*r_vertexLight;					// vertex lighting mode for better performance
 
-extern	cvar_t	*r_showtris;					// enables wireframe rendering of the world
-extern	cvar_t	*r_showsky;						// forces sky in front of all surfaces
-extern	cvar_t	*r_shownormals;					// draws wireframe normals
+extern	cvar_t	*r_showTris;					// enables wireframe rendering of the world
+extern	cvar_t	*r_showSky;						// forces sky in front of all surfaces
+extern	cvar_t	*r_showNormals;					// draws wireframe normals
 extern	cvar_t	*r_clear;						// force screen clear every frame
 
 extern	cvar_t	*r_shadows;						// controls shadows: 0 = none, 1 = blur, 2 = stencil, 3 = black planar projection
@@ -1556,7 +1586,6 @@ extern	cvar_t	*r_depthClamp;
 extern	cvar_t	*r_ignoreGLErrors;
 
 extern	cvar_t	*r_brightness;
-extern	cvar_t	*r_mapBrightness;
 extern	cvar_t	*r_mapSaturation;
 extern	cvar_t	*r_lightmapSaturation;
 
@@ -1682,9 +1711,14 @@ void		R_Init( void );
 
 void		R_SetColorMappings( void );
 void		R_GammaCorrect( byte *buffer, int bufSize );
-void		R_ColorShiftLightingBytes( const byte in[4], byte out[4], qboolean hasAlpha );
+void		R_ColorShiftLightingBytes( const byte in[4], byte out[4], qboolean hasAlpha, qboolean linearLightmap );
+
+// Phase 6B3'-d4-m2: precise piecewise sRGB EOTF/OETF for host-side colour decodes.
+float		R_SRGBToLinear( float c );
+float		R_LinearToSRGB( float c );
 
 void	R_ImageList_f( void );
+void	R_TestDDS_f( void );	// Phase 6.5.1: `testdds <path>` — load + classify a .dds, print texType / layers / format
 void	R_SkinList_f( void );
 void	Cmd_BSPDump_f( void );
 

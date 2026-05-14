@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2013 Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro, Diego Gutierrez
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #version 450
 // SMAA Pass 3: Neighborhood Blending — Fragment Shader
 // Ported from the canonical SMAA by Jorge Jimenez et al.
@@ -15,6 +19,15 @@ layout(location = 1) in vec4 offset;
 layout(location = 0) out vec4 out_color;
 
 void main() {
+	// Phase 6B3'-d4-m11: this pass does a weight-normalised bilinear
+	// blend of colorTex (= vk.color_image) samples. Post the m1-m_final
+	// linear-pipeline migration colorTex holds linear radiance, so the
+	// blend is now colorimetrically correct (a weighted blend of
+	// sRGB-encoded values — the pre-migration state — gave the wrong
+	// midpoint). blendTex carries SMAA blend weights (geometry data),
+	// never decoded. No shader change in m11 — correctness improved for
+	// free by the upstream domain change.
+
 	// Fetch the blending weights for current pixel:
 	//   a.x = right   (from offset.xy)
 	//   a.y = top      (from offset.zw)

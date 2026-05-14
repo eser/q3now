@@ -1,0 +1,67 @@
+# menu_main.yaml — main menu, no map loaded.
+#
+# This is the canonical regression scene: it pins the authored "menu blue"
+# panel colour (0.08 0.08 0.12 0.92, from the `main` menuDef's backcolor in
+# modfiles/ui/main.wmenu) against the swapchain readback. That single value
+# is what the 2026-05-11 diagnose cascade ([0,0,3] -> [222,222,222] -> ...)
+# was about — once a regression scene catches it, those manual RenderDoc
+# turns become a 1-minute automated check.
+
+name: menu_main
+
+# Wired UI fullscreen overlays (menu / HUD / console) bypass the tonemap
+# operator by design (post-Block-5b: UI renders into the post-tonemap LDR
+# intermediate, gets only the final sRGB encode). So the predicted swapchain
+# byte == round(authored * 255) to float precision. If the engine instead
+# routes the menu *through* the tonemap operator (the "darker menu"
+# regression — "5b-fix two-mode" pushing the fullscreen menu through
+# tonemap), this scene FAILs automatically: PBR Neutral crushes 0.08 sRGB
+# down to ~byte 1. Set `operator: pbr_neutral` to assert that broken state
+# instead, or pass `--operator` on the vr_check.py CLI for a one-off
+# "what would this look like through tonemap" diagnostic.
+operator: identity
+
+cvars:
+  s_initsound: 0
+  r_brightness: 1       # representative readback (matches the project's smoke convention)
+  r_tonemap: 1          # PBR Neutral (the default) — what the menu *would* get if it wrongly flowed through tonemap
+
+no_map: true            # stay on the main menu — no `+map`
+
+# Informational only: the WN_RDOC_CAPTURE build hard-codes the captured
+# frame (currently 600 — see code/renderervk/tr_backend.c). The menu is
+# static frame-to-frame, so the exact frame is immaterial.
+capture_frame: 600
+
+texture: backbuffer     # read the final swapchain image (the screenshot byte)
+
+expected_regions:
+  # ── the main-menu panel background ───────────────────────────────────
+  # menuDef "main" in modfiles/ui/main.wmenu: `backcolor 0.08 0.08 0.12 0.92`.
+  # `element` defaults to the region name, so this could also be written
+  #   - region: main
+  #     source: { wmenu: modfiles/ui/main.wmenu }
+  - region: main
+    source:
+      wmenu: modfiles/ui/main.wmenu
+      element: main
+      channel: backcolor
+    # tolerance comes from tolerance.yaml (`regions.main: 10`) to allow the
+    # ~8% bleed-through of the alpha-0.92 panel over WFULLSCREEN_BACKGROUND.
+    # Override here if needed: `tolerance: 8`
+
+  # ── more regions, once the .wmenu author adds `name` tags ────────────
+  # main.wmenu's title / subtitle / separators / buttons aren't `name`-tagged
+  # yet, so they don't appear in layoutdump.jsonl. To check them, add a
+  # `name "..."` to the relevant itemDef in main.wmenu, then add an entry
+  # here. Examples (commented — uncomment after tagging):
+  #
+  #  - region: main.title              # itemDef { name "main.title" text "q3now" forecolor WCOLOR_TEXT ... }
+  #    source: { wmenu: modfiles/ui/main.wmenu, element: main.title, channel: forecolor }
+  #
+  #  - region: main.separator          # one of the WSEPARATOR() lines, re-spelled as a plain
+  #    source: { macro: WCOLOR_SEPARATOR }   # itemDef { name "main.separator" style 1 backcolor WCOLOR_SEPARATOR ... }
+  #
+  #  - region: main.play               # the "Play" button (forecolor WCOLOR_ACCENT)
+  #    source: { macro: WCOLOR_ACCENT }
+  #    tolerance: 8

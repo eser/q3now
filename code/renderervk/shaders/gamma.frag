@@ -1,65 +1,45 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #version 450
 
+// gamma.frag — Phase 6B3'-c1: thin display-encoding pass.
+//
+// Reads vk.tonemapped_image (LDR linear), writes the swapchain
+// image. All scene-radiance work (exposure, tonemap, SSAO, godrays,
+// colour grading, saturation) moved to tonemap.frag in
+// Phase 6B3'-c1. This pass only does:
+//   * gamma encoding (linear -> sRGB) via r_gamma
+//   * framebuffer-bit-depth dither (r_dither)
+
 layout(set = 0, binding = 0) uniform sampler2D texture0;
-#if defined(USE_SSAO) || defined(USE_GODRAYS)
-layout(set = 1, binding = 0) uniform sampler2D depthMap;
-#endif
 
 layout(location = 0) in vec2 frag_tex_coord;
 
 layout(location = 0) out vec4 out_color;
 
 layout(constant_id = 0) const float gamma = 1.0;
-layout(constant_id = 1) const float obScale = 2.0;
-// saturation = 1.0 is identity; below desaturates toward
-// luma, above super-saturates. Wired from r_saturation->value.
-// Under r_hdr 0 / 1 the framebuffer clamps any pixel exceeding
-// [0, 1] after the mix; super-saturation may visibly clip.
-// Under r_hdr 2 (SFLOAT) values >1.0 pass through; the visible
-// clip happens at tonemap time (ACES clamp inside applyTonemap)
-// or at swapchain present (display SDR mapping).
-layout(constant_id = 2) const float saturation = 1.0;
-//
 layout(constant_id = 7) const int ditherMode = 0; // 0 - disabled, 1 - ordered
 layout(constant_id = 8) const int depth_r = 255;
 layout(constant_id = 9) const int depth_g = 255;
 layout(constant_id = 10) const int depth_b = 255;
-#ifdef USE_SSAO
-layout(constant_id = 14) const float ssao_intensity = 1.0;
-layout(constant_id = 15) const float zNear = 4.0;
-layout(constant_id = 16) const float zFar = 4096.0;
-#endif
-#ifdef USE_TONEMAP
-// tonemap_mode is wired from r_tonemap->integer host-side. Mode 0
-// disables the tonemap pipeline variant entirely (varIdx bit unset
-// in vk.c), so this shader path only runs for modes 1..3.
-//   1 = Reinhard, 2 = ACES filmic, 3 = Uncharted 2.
-layout(constant_id = 17) const int tonemap_mode = 1;
-// tonemap_exposure is wired from r_tonemapExposure->value host-side.
-layout(constant_id = 18) const float tonemap_exposure = 1.0;
-#endif
-#ifdef USE_COLOR_GRADING
-layout(constant_id = 19) const float cg_tint_r = 1.0;
-layout(constant_id = 20) const float cg_tint_g = 1.0;
-layout(constant_id = 21) const float cg_tint_b = 1.0;
-layout(constant_id = 22) const float cg_saturation = 1.0;
-layout(constant_id = 23) const float cg_contrast = 1.0;
-#endif
-#ifdef USE_FXAA
-layout(constant_id = 24) const float fxaa_subpix = 0.75;
-layout(constant_id = 25) const float fxaa_edgeThreshold = 0.125;
-#endif
-#ifdef USE_GODRAYS
-layout(constant_id = 26) const int godrays_samples = 64;
-layout(constant_id = 27) const float godrays_density = 1.0;
-layout(push_constant) uniform GodRayParams {
-	vec2 sunScreenPos;   // sun position in UV space (0-1)
-	float intensity;     // ray brightness
-	float decay;         // falloff per sample
-} godray;
-#endif
-
-const vec3 sRGB = { 0.2126, 0.7152, 0.0722 };
+// Phase 6B3'-d: srgb_swapchain == 1 when the swapchain image format is
+// VK_FORMAT_*_SRGB and the hardware applies sRGB encoding on present.
+// In that mode the shader writes pre-encode values so the user-side
+// r_gamma curve still bends the output, but the natural linear -> sRGB
+// step lives in hardware (replacing the legacy shader pow encode under
+// the UNORM swapchain path).
+layout(constant_id = 11) const int srgb_swapchain = 0;
+// Phase 6B3'-d8: hdr_mode == 1 when the swapchain colorspace is
+// VK_COLOR_SPACE_HDR10_ST2084_EXT — the shader BT.709->BT.2020 + PQ
+// (ST.2084) encodes instead of sRGB. hdr_peak_norm is the display peak
+// in "graphics-white" units (= r_hdrPeakLuminance / 100); graphics
+// white (the value 1.0, e.g. tonemapped diffuse white / UI) maps to
+// GRAPHICS_WHITE_NITS, scene highlights up to hdr_peak_norm map up to
+// hdr_peak_norm * GRAPHICS_WHITE_NITS = r_hdrPeakLuminance nits.
+layout(constant_id = 12) const int   hdr_mode      = 0;
+layout(constant_id = 13) const float hdr_peak_norm = 10.0;
 
 const int bayerSize = 8;
 const float bayerMatrix[bayerSize * bayerSize] = {
@@ -90,229 +70,68 @@ vec3 dither(vec3 color) {
 	return cDithered / depth;
 }
 
-#ifdef USE_SSAO
-// Reconstruct linear depth from Z-buffer value
-float linearDepth( float z ) {
-	return zNear * zFar / ( zFar - z * ( zFar - zNear ) );
+// Phase 6B3'-d8: SMPTE ST.2084 (PQ) EOTF^-1, per Rec. ITU-R BT.2100.
+// Input L is luminance normalised to the 10000-nit PQ range, clamped
+// to [0,1]; output is the PQ-encoded code value in [0,1].
+const float PQ_c1 = 0.8359375;        // 3424 / 4096
+const float PQ_c2 = 18.8515625;       // 2413 / 128
+const float PQ_c3 = 18.6875;          // 2392 / 128
+const float PQ_m1 = 0.1593017578125;  // 2610 / 16384
+const float PQ_m2 = 78.84375;         // 2523 / 32
+vec3 pqEncode( vec3 L ) {
+	L = clamp( L, vec3(0.0), vec3(1.0) );
+	vec3 Lm1 = pow( L, vec3(PQ_m1) );
+	return pow( ( PQ_c1 + PQ_c2 * Lm1 ) / ( 1.0 + PQ_c3 * Lm1 ), vec3(PQ_m2) );
 }
-
-// Screen-space ambient occlusion — 8-sample hemisphere kernel
-float computeSSAO() {
-	vec2 texelSize = 1.0 / vec2( textureSize( depthMap, 0 ) );
-	float centerDepth = linearDepth( texture( depthMap, frag_tex_coord ).r );
-
-	// Poisson disc samples scaled by kernel radius (in texels)
-	const float radius = 5.0;
-	const vec2 samples[8] = vec2[8](
-		vec2( -0.94201,  -0.39906 ),
-		vec2(  0.94558,  -0.76890 ),
-		vec2( -0.09418,  -0.92938 ),
-		vec2(  0.34495,   0.29387 ),
-		vec2( -0.91588,   0.45771 ),
-		vec2( -0.81544,  -0.87912 ),
-		vec2(  0.19984,   0.78641 ),
-		vec2(  0.44323,  -0.97511 )
-	);
-
-	// Per-pixel random rotation from fragment position
-	float angle = fract( sin( dot( gl_FragCoord.xy, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );
-	float ca = cos( angle * 6.283 );
-	float sa = sin( angle * 6.283 );
-	mat2 rot = mat2( ca, sa, -sa, ca );
-
-	float occlusion = 0.0;
-	for ( int i = 0; i < 8; i++ ) {
-		vec2 offset = rot * samples[i] * radius * texelSize;
-		float sampleDepth = linearDepth( texture( depthMap, frag_tex_coord + offset ).r );
-
-		// Depth difference: positive = sample is behind center (occluded)
-		float diff = centerDepth - sampleDepth;
-
-		// Only count occlusion for nearby geometry (avoid halos at depth edges)
-		float rangeCheck = smoothstep( 0.0, 1.0, radius * 2.0 / abs( diff ) );
-		occlusion += step( 0.5, diff ) * rangeCheck;
-	}
-
-	return 1.0 - ( occlusion / 8.0 ) * ssao_intensity;
-}
-#endif
-
-#ifdef USE_TONEMAP
-// Reinhard tone mapping
-vec3 tonemapReinhard( vec3 color ) {
-	return color / ( 1.0 + color );
-}
-
-// ACES filmic (Krzysztof Narkowicz approximation)
-vec3 tonemapACES( vec3 color ) {
-	const float a = 2.51;
-	const float b = 0.03;
-	const float c = 2.43;
-	const float d = 0.59;
-	const float e = 0.14;
-	return clamp( ( color * ( a * color + b ) ) / ( color * ( c * color + d ) + e ), 0.0, 1.0 );
-}
-
-// Uncharted 2 filmic (John Hable)
-vec3 unchartedMap( vec3 x ) {
-	const float A = 0.15, B = 0.50, C = 0.10, D = 0.20, E = 0.02, F = 0.30;
-	return ( ( x * ( A * x + C * B ) + D * E ) / ( x * ( A * x + B ) + D * F ) ) - E / F;
-}
-vec3 tonemapUncharted2( vec3 color ) {
-	const float W = 11.2; // linear white point
-	return unchartedMap( color ) / unchartedMap( vec3( W ) );
-}
-
-vec3 applyTonemap( vec3 color ) {
-	color *= tonemap_exposure;
-	if ( tonemap_mode == 2 )
-		return tonemapACES( color );
-	else if ( tonemap_mode == 3 )
-		return tonemapUncharted2( color );
-	else
-		return tonemapReinhard( color );  // mode == 1
-}
-#endif
-
-#ifdef USE_COLOR_GRADING
-vec3 applyColorGrading( vec3 color ) {
-	// Tint
-	color *= vec3( cg_tint_r, cg_tint_g, cg_tint_b );
-
-	// Saturation
-	float luma = dot( color, vec3( 0.2126, 0.7152, 0.0722 ) );
-	color = mix( vec3( luma ), color, cg_saturation );
-
-	// Contrast (around midpoint 0.5)
-	color = ( color - 0.5 ) * cg_contrast + 0.5;
-
-	return clamp( color, 0.0, 1.0 );
-}
-#endif
-
-#ifdef USE_GODRAYS
-// Screen-space crepuscular rays via depth-based sky detection
-vec3 computeGodRays() {
-	vec2 deltaUV = ( frag_tex_coord - godray.sunScreenPos ) * godrays_density / float( godrays_samples );
-	vec2 uv = frag_tex_coord;
-	float illumination = 0.0;
-	float weight = 1.0;
-
-	for ( int i = 0; i < godrays_samples; i++ ) {
-		uv -= deltaUV;
-
-		// Clamp to screen bounds
-		if ( uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 )
-			break;
-
-		// Sample depth — sky is at max depth (reversed depth: 0.0, normal: 1.0)
-		float depth = texture( depthMap, uv ).r;
-#ifdef USE_REVERSED_DEPTH
-		float isSky = step( depth, 0.001 );
-#else
-		float isSky = step( 0.999, depth );
-#endif
-
-		// Accumulate sky samples with decay falloff
-		illumination += isSky * weight;
-		weight *= godray.decay;
-	}
-
-	illumination /= float( godrays_samples );
-	return vec3( illumination * godray.intensity );
-}
-#endif
-
-#ifdef USE_FXAA
-vec3 applyFXAA() {
-	vec2 texelSize = 1.0 / vec2( textureSize( texture0, 0 ) );
-	const vec3 lumaW = vec3( 0.299, 0.587, 0.114 );
-
-	vec3 rgbM  = texture( texture0, frag_tex_coord ).rgb;
-	vec3 rgbNW = texture( texture0, frag_tex_coord + vec2( -1.0, -1.0 ) * texelSize ).rgb;
-	vec3 rgbNE = texture( texture0, frag_tex_coord + vec2(  1.0, -1.0 ) * texelSize ).rgb;
-	vec3 rgbSW = texture( texture0, frag_tex_coord + vec2( -1.0,  1.0 ) * texelSize ).rgb;
-	vec3 rgbSE = texture( texture0, frag_tex_coord + vec2(  1.0,  1.0 ) * texelSize ).rgb;
-
-	float lumaNW = dot( rgbNW, lumaW );
-	float lumaNE = dot( rgbNE, lumaW );
-	float lumaSW = dot( rgbSW, lumaW );
-	float lumaSE = dot( rgbSE, lumaW );
-	float lumaM  = dot( rgbM,  lumaW );
-
-	float lumaMin = min( lumaM, min( min( lumaNW, lumaNE ), min( lumaSW, lumaSE ) ) );
-	float lumaMax = max( lumaM, max( max( lumaNW, lumaNE ), max( lumaSW, lumaSE ) ) );
-	float lumaRange = lumaMax - lumaMin;
-
-	if ( lumaRange < max( 0.0625, lumaMax * fxaa_edgeThreshold ) )
-		return rgbM;
-
-	vec2 dir;
-	dir.x = -( ( lumaNW + lumaNE ) - ( lumaSW + lumaSE ) );
-	dir.y =  ( ( lumaNW + lumaSW ) - ( lumaNE + lumaSE ) );
-	float dirReduce = max( ( lumaNW + lumaNE + lumaSW + lumaSE ) * 0.125, 1.0 / 128.0 );
-	float rcpDirMin = 1.0 / ( min( abs( dir.x ), abs( dir.y ) ) + dirReduce );
-	dir = clamp( dir * rcpDirMin, -8.0, 8.0 ) * texelSize;
-
-	vec3 rgbA = 0.5 * (
-		texture( texture0, frag_tex_coord + dir * ( 1.0 / 3.0 - 0.5 ) ).rgb +
-		texture( texture0, frag_tex_coord + dir * ( 2.0 / 3.0 - 0.5 ) ).rgb );
-	vec3 rgbB = rgbA * 0.5 + 0.25 * (
-		texture( texture0, frag_tex_coord - dir * 0.5 ).rgb +
-		texture( texture0, frag_tex_coord + dir * 0.5 ).rgb );
-
-	float lumaB = dot( rgbB, lumaW );
-	vec3 result = ( lumaB < lumaMin || lumaB > lumaMax ) ? rgbA : rgbB;
-
-	// Subpixel blending
-	float lumaL = ( lumaNW + lumaNE + lumaSW + lumaSE ) * 0.25;
-	float blendL = clamp( ( abs( lumaL - lumaM ) / lumaRange - 0.25 ) * ( 1.0 / 0.75 ), 0.0, 1.0 ) * fxaa_subpix;
-	return mix( result, ( rgbNW + rgbNE + rgbSW + rgbSE + rgbM ) * 0.2, blendL );
-}
-#endif
+// BT.709 -> BT.2020 primary conversion (linear light, D65). BT.709's
+// gamut is a subset of BT.2020's, so this never produces out-of-[0,L]
+// values. Column-major per GLSL.
+const mat3 bt709_to_bt2020 = mat3(
+	0.627403895934699,  0.069097289358232, 0.016391438875150,  // col 0
+	0.329283038377884,  0.919540395075459, 0.088013307877226,  // col 1
+	0.043313065687417,  0.011362315566309, 0.895595253247624   // col 2
+);
+const float GRAPHICS_WHITE_NITS = 100.0;
 
 void main() {
-	// Sample color — FXAA replaces point sample with edge-aware multi-sample
-#ifdef USE_FXAA
-	vec3 base = applyFXAA();
-#else
 	vec3 base = texture(texture0, frag_tex_coord).rgb;
-#endif
 
-#ifdef USE_SSAO
-	base *= computeSSAO();
-#endif
-
-#ifdef USE_GODRAYS
-	base += computeGodRays();
-#endif
-
-#ifdef USE_TONEMAP
-	base = applyTonemap( base );
-#endif
-
-#ifdef USE_COLOR_GRADING
-	base = applyColorGrading( base );
-#endif
-
-	if ( saturation != 1.0 )
-	{
-		vec3 luma = vec3(dot(base, sRGB));
-		// mix(luma, base, saturation):
-		//   saturation = 0 → luma   (grayscale)
-		//   saturation = 1 → base   (identity, branch skipped above)
-		//   saturation > 1 → luma + saturation * (base - luma)
-		//                  → super-saturated; clamps on 8-bit fb.
-		base = mix(luma, base, saturation);
+	if ( hdr_mode == 1 ) {
+		// HDR10 (BT.2020 + PQ). tonemap.frag produced scene-referred
+		// linear in roughly [0, hdr_peak_norm] (graphics white = 1.0;
+		// the 2D/HUD pass composited at [0,1]). r_gamma stays a user-side
+		// linear curve adjustment. Scale graphics-white to ~100 nits and
+		// the peak to r_hdrPeakLuminance nits, convert to BT.2020, PQ-
+		// encode. Dither below would clamp the [0,1] PQ code to the
+		// swapchain bit depth (10bpc → depth_r/g/b = 1023).
+		vec3 lin  = ( gamma != 1.0 ) ? pow( max( base, vec3(0.0) ), vec3(gamma) ) : max( base, vec3(0.0) );
+		vec3 nits = lin * GRAPHICS_WHITE_NITS;                 // graphics-white = 1.0 → 100 nits
+		nits = bt709_to_bt2020 * nits;                          // primaries (linear)
+		out_color = vec4( pqEncode( nits / 10000.0 ), 1.0 );    // PQ EOTF^-1 (normalised to 10000 nit)
 	}
-
-	if ( gamma != 1.0 )
-	{
-		out_color = vec4(pow(base, vec3(gamma)) * obScale, 1);
-	}
-	else
-	{
-		out_color = vec4(base * obScale, 1);
+	else if ( srgb_swapchain == 1 ) {
+		// Hardware encodes sRGB on present. r_gamma is a user-side
+		// curve adjustment in linear space; the spec constant value
+		// is 1.0 / r_gamma (vk.c FragSpecData fill), so the same
+		// pow(base, gamma) shape used on the UNORM path also brightens
+		// midtones as r_gamma rises here. Identity r_gamma -> linear
+		// passthrough -> hardware does the encode.
+		if ( gamma != 1.0 ) {
+			out_color = vec4(pow(base, vec3(gamma)), 1);
+		} else {
+			out_color = vec4(base, 1);
+		}
+	} else {
+		// Phase 6B3'-d3 fix B: explicit sRGB OETF for the UNORM
+		// swapchain path. The hardware does not encode sRGB on UNORM
+		// swapchains; the shader must do it itself. Apply the user-
+		// gamma curve first, then sRGB-encode the result for display.
+		// pow(x, 1/2.2) is the simplified sRGB OETF; the piecewise-
+		// precise OETF is more accurate near black but adds ~5 lines
+		// for marginal benefit. max() clamp guards against negatives
+		// that would NaN under fractional pow.
+		vec3 curved = (gamma != 1.0) ? pow(base, vec3(gamma)) : base;
+		out_color = vec4(pow(max(curved, vec3(0.0)), vec3(1.0 / 2.2)), 1);
 	}
 
 	if ( ditherMode == 1 ) {

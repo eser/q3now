@@ -1,0 +1,2 @@
+# build artifacts from regen.sh — the canonical form is pipeline_test_spv.h in the parent dir.
+*.spv

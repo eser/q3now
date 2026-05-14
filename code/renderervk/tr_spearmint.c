@@ -1,11 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2010-2019 Zack Middleton & Spearmint contributors
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 /*
-===========================================================================
-Copyright (C) 2026 Wired engine contributors.
-
-This file is part of the Wired engine and is distributed under the terms of the
-GNU General Public License version 2 or (at your option) any later version.
-
-tr_spearmint.c — Phase 5 Spearmint feature adaptation (Vulkan renderer).
+tr_spearmint.c — Spearmint feature adaptation (Vulkan renderer).
 
 Adds:
   * Enhanced fog system — fogType_t + real push-constant upload via
@@ -15,7 +13,6 @@ Adds:
   * DrawRotatedPic / SetClipRegion 2D-rendering entry points.
 
 All functionality is gated on FEAT_FOG_SYSTEM / FEAT_CORONA.
-===========================================================================
 */
 
 #include "tr_local.h"

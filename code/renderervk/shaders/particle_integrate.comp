@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #version 450
 
 /*
@@ -70,7 +73,7 @@ struct ParticleClassGPU {
 	vec4  velocityBiasJitter;
 	float speedJitter;
 	float sizeJitter;
-	uint  pad4;
+	uint  colorDomain;   // Block 5d-followup: was pad4 — CD_SRGB(0)|CD_LINEAR(1); compute does not consume it.
 	uint  pad5;
 };
 
@@ -83,14 +86,15 @@ layout(set = 0, binding = 0) uniform ParticleFrame {
 	uint  poolSize;
 	uint  numClasses;
 	uint  pingPongRead;
-	// Compute does not consume identityLight; the field is present
-	// here only so the std140 layout matches host particleFrame_t and
-	// the particle.vert / particle.frag mirrors. UBO indexing would
-	// drift otherwise.
-	float identityLight;
+	// 16 B of std140 vec4-stride padding so the layout matches host
+	// particleFrame_t and the particle.vert / particle.frag mirrors;
+	// compute consumes none of it. pad0 (offset 128) was the legacy
+	// `identityLight` halving factor — dropped Phase 6B3'-a, field
+	// removed in the Block 9 sweep.
 	float pad0;
 	float pad1;
 	float pad2;
+	float pad3;
 };
 
 layout(std430, set = 0, binding = 1) readonly buffer ReadPool {

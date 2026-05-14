@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 // bg_gametypes.c -- gametype definition table (shared by cgame, game, ui)
 
 #include "../qcommon/q_shared.h"

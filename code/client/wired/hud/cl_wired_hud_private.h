@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #ifndef CL_WIRED_HUD_PRIVATE_H
 #define CL_WIRED_HUD_PRIVATE_H
 

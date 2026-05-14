@@ -645,6 +645,132 @@ AUX_SOURCE_DIRECTORY(code/renderer RENDERER_GL_SRCS)
 AUX_SOURCE_DIRECTORY(code/renderer2 RENDERER_GL2_SRCS)
 AUX_SOURCE_DIRECTORY(code/renderervk RENDERER_VK_SRCS)
 
+# ── Phase 7 RAL — Vulkan backend skeleton ──────────────────────────────────
+# code/renderer/ral/        — public RAL surface (headers only)
+# code/renderer/ral_vulkan/ — the Vulkan backend (skeleton in Phase 7.1)
+# Built as a static lib and linked into the Vulkan renderer DLL alongside the
+# renderervk objects (it references the DLL's `ri` global, defined in
+# code/renderervk/tr_init.c, so it must only link into a target that also has
+# renderervk). FEAT_RAL (default 0; pass -DFEAT_RAL=1 to flip) gates whether
+# the *renderer* uses the RAL; the static lib is always built so the surface
+# stays link-validated. No file under code/renderervk/ includes ral/*.h while
+# FEAT_RAL is 0. The RAL's Ral_Dump() entry point is exported (Q_EXPORT) and
+# resolved by the client's "\ral_dump" command via Sys_LoadFunction.
+SET(RAL_VK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral_vulkan")
+SET(RAL_VK_SRCS
+	${RAL_VK_DIR}/ral_vulkan_backend.c
+	${RAL_VK_DIR}/ral_vulkan_caps.c
+	${RAL_VK_DIR}/ral_vulkan_memory.c
+	${RAL_VK_DIR}/ral_vulkan_resource.c
+	${RAL_VK_DIR}/ral_vulkan_pipeline.c
+	${RAL_VK_DIR}/ral_vulkan_command.c
+	${RAL_VK_DIR}/ral_vulkan_sync.c
+	${RAL_VK_DIR}/ral_vulkan_swapchain.c
+	${RAL_VK_DIR}/ral_vulkan_query.c
+)
+ADD_LIBRARY(ral_vulkan STATIC ${RAL_VK_SRCS})
+TARGET_INCLUDE_DIRECTORIES(ral_vulkan PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral
+	${CMAKE_CURRENT_SOURCE_DIR}/code/renderercommon
+	${CMAKE_CURRENT_SOURCE_DIR}/code/qcommon)
+IF(USE_RENDERER_DLOPEN)
+	TARGET_COMPILE_DEFINITIONS(ral_vulkan PRIVATE USE_RENDERER_DLOPEN)
+ENDIF()
+IF(WIN32 AND NOT MSVC)
+	# match the relaxation the renderer DLLs get (legacy const-correctness patterns)
+	TARGET_COMPILE_OPTIONS(ral_vulkan PRIVATE -Wno-error=incompatible-pointer-types -Wno-error=int-conversion)
+ENDIF()
+IF(UNIX)
+	FIND_PACKAGE(Threads)
+	IF(Threads_FOUND)
+		TARGET_LINK_LIBRARIES(ral_vulkan Threads::Threads)
+	ENDIF()
+ENDIF()
+
+# Link ral_vulkan into a renderer target. --whole-archive forces every object
+# into the link so Ral_Dump (which nothing else references) is exported from
+# the DLL; also puts code/renderer/ral/ on the target's include path.
+FUNCTION(WIRED_LINK_RAL_VULKAN _target)
+	TARGET_INCLUDE_DIRECTORIES(${_target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral)
+	IF(MSVC)
+		TARGET_LINK_LIBRARIES(${_target} ral_vulkan)
+		TARGET_LINK_OPTIONS(${_target} PRIVATE "/WHOLEARCHIVE:ral_vulkan")
+	ELSE()
+		TARGET_LINK_LIBRARIES(${_target} -Wl,--whole-archive ral_vulkan -Wl,--no-whole-archive)
+	ENDIF()
+ENDFUNCTION()
+
+# ── Phase 7.3b — shader translation toolchain ──────────────────────────────
+# Offline tool: shader_xlate. Reads SPIR-V, emits MSL / GLSL 4.30 / GLSL ES 300
+# via the SPIRV-Cross C++ API (submodule at src/libs/SPIRV-Cross/, tagged
+# vulkan-sdk-1.4.341.0 to match the engine's pinned Vulkan SDK 1.4.341.1) and
+# WGSL via shelling out to the `naga` CLI (the "Option B2" build-time-tool
+# model per docs/phase-7-ral-design.md §16.2 — no Rust links into the engine
+# at runtime). Build-time only; the translated outputs aren't consumed yet
+# (Phase 7.3c integrates RAL pipeline creation with them).
+#
+# Default OFF in mainline builds (don't slow renderer-only iteration);
+# auto-enabled when FEAT_RAL is on; explicit:
+#   cmake -DWIRED_BUILD_SHADER_XLATE=ON -B build/debug
+#   ninja -C build/debug shader_xlate
+OPTION(WIRED_BUILD_SHADER_XLATE
+	"Build the offline GLSL → SPIR-V → {MSL, GLSL, GLSL ES, WGSL} translator (needs src/libs/SPIRV-Cross submodule; WGSL needs the `naga` CLI on PATH — see BUILD-RUST.md)"
+	OFF)
+IF(FEAT_RAL)
+	SET(WIRED_BUILD_SHADER_XLATE ON CACHE BOOL "" FORCE)
+ENDIF()
+
+IF(WIRED_BUILD_SHADER_XLATE)
+	SET(SPIRV_CROSS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/libs/SPIRV-Cross")
+	IF(NOT EXISTS "${SPIRV_CROSS_DIR}/CMakeLists.txt")
+		MESSAGE(WARNING
+			"shader_xlate requested but src/libs/SPIRV-Cross is not populated. Run:\n"
+			"  git submodule add https://github.com/KhronosGroup/SPIRV-Cross.git src/libs/SPIRV-Cross\n"
+			"  cd src/libs/SPIRV-Cross && git checkout vulkan-sdk-1.4.341.0 && cd ../../..\n"
+			"  git add .gitmodules src/libs/SPIRV-Cross && git commit\n"
+			"shader_xlate target skipped this configure.")
+	ELSE()
+		# CMake 4.x: SPIRV-Cross still declares cmake_minimum_required(VERSION 3.10);
+		# pin the policy floor so the build is quiet.
+		SET(CMAKE_POLICY_VERSION_MINIMUM 3.10 CACHE STRING "" FORCE)
+		# Trim SPIRV-Cross to the three backends the tool uses.
+		SET(SPIRV_CROSS_CLI               OFF CACHE BOOL "" FORCE)
+		SET(SPIRV_CROSS_ENABLE_TESTS      OFF CACHE BOOL "" FORCE)
+		SET(SPIRV_CROSS_ENABLE_HLSL       OFF CACHE BOOL "" FORCE)
+		SET(SPIRV_CROSS_ENABLE_CPP        OFF CACHE BOOL "" FORCE)
+		SET(SPIRV_CROSS_ENABLE_REFLECT    OFF CACHE BOOL "" FORCE)
+		SET(SPIRV_CROSS_ENABLE_C_API      OFF CACHE BOOL "" FORCE)
+		SET(SPIRV_CROSS_ENABLE_UTIL       OFF CACHE BOOL "" FORCE)
+		SET(SPIRV_CROSS_ENABLE_GLSL       ON  CACHE BOOL "" FORCE)
+		SET(SPIRV_CROSS_ENABLE_MSL        ON  CACHE BOOL "" FORCE)
+		SET(SPIRV_CROSS_SKIP_INSTALL      ON  CACHE BOOL "" FORCE)
+		SET(SPIRV_CROSS_FORCE_PIC         ON  CACHE BOOL "" FORCE)
+		SET(SPIRV_CROSS_SHARED            OFF CACHE BOOL "" FORCE)
+		SET(SPIRV_CROSS_STATIC            ON  CACHE BOOL "" FORCE)
+		ADD_SUBDIRECTORY("${SPIRV_CROSS_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/spirv-cross" EXCLUDE_FROM_ALL)
+
+		ADD_EXECUTABLE(shader_xlate code/tools/shader_xlate/main.cpp)
+		TARGET_LINK_LIBRARIES(shader_xlate spirv-cross-msl spirv-cross-glsl spirv-cross-core)
+		TARGET_INCLUDE_DIRECTORIES(shader_xlate PRIVATE "${SPIRV_CROSS_DIR}")
+		SET_TARGET_PROPERTIES(shader_xlate PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+		IF(MSVC)
+			TARGET_COMPILE_OPTIONS(shader_xlate PRIVATE /EHsc)
+		ENDIF()
+
+		# Build artefacts: build/translated_shaders/ is where compile_xlate.mjs
+		# (Phase 7.3c — runtime integration) will land the per-backend outputs.
+		FILE(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/translated_shaders")
+
+		# naga detection — informational at configure time, runtime-checked by the tool.
+		FIND_PROGRAM(NAGA_EXECUTABLE NAMES naga)
+		IF(NAGA_EXECUTABLE)
+			MESSAGE(STATUS "shader_xlate: naga CLI found at ${NAGA_EXECUTABLE} -- WGSL output enabled")
+		ELSE()
+			MESSAGE(STATUS "shader_xlate: naga CLI not on PATH -- WGSL skipped (Rust + naga-cli setup: see BUILD-RUST.md)")
+		ENDIF()
+	ENDIF()
+ENDIF()
+
 # GL2: stringify is a host tool, not a library source — remove it from the list
 LIST(REMOVE_ITEM RENDERER_GL2_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/renderer2/stringify.c)
 
@@ -696,6 +822,8 @@ IF(USE_RENDERER_DLOPEN)
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
 	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE code/qcommon)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_vulkan${RENDEXT} PROPERTIES PREFIX "")
+	# Phase 7: pull in the (dormant, FEAT_RAL-gated) RAL Vulkan backend skeleton
+	WIRED_LINK_RAL_VULKAN(${RENDERER_PREFIX}_vulkan${RENDEXT})
 
 	# Linux: renderer shared libs need libm for math functions (powf etc.)
 	# and are dlopen'd at runtime, so allow host-process symbols to remain undefined.

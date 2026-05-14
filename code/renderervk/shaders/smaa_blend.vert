@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2013 Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro, Diego Gutierrez
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 #version 450
 // SMAA Pass 2: Blending Weight Calculation — Vertex Shader
 

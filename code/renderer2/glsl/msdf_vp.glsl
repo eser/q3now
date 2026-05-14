@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
 attribute vec3 attr_Position;
 attribute vec4 attr_TexCoord0;
 attribute vec4 attr_Color;
