@@ -17,7 +17,10 @@
 # ── Stage 1: Builder ────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS builder
 
-ARG WASI_SDK_VERSION=32
+# wasi-sdk version is single-sourced from .wasi-sdk-version at the repo root —
+# CI, this Dockerfile and the docs all read the same pin (they had drifted:
+# this file and CI said 32 while the docs pinned 33).
+COPY .wasi-sdk-version /tmp/wasi-sdk-version
 
 # libsdl3-dev: required at cmake configure time — the CMakeLists.txt always
 # processes the client/window-system target definitions which call
@@ -37,7 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install wasi-sdk for WASM game module compilation
 # Detect host architecture for correct wasi-sdk variant
-RUN ARCH=$(uname -m) && \
+RUN WASI_SDK_VERSION=$(cat /tmp/wasi-sdk-version) && \
+    ARCH=$(uname -m) && \
     case "$ARCH" in \
       x86_64)  WASI_ARCH="x86_64" ;; \
       aarch64) WASI_ARCH="arm64" ;; \

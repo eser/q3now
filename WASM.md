@@ -33,14 +33,16 @@ If `.wasm` is not found, it silently falls back to `.qvm`.
 ### Prerequisites
 
 - **wasi-sdk** for compiling game modules to WASM. **Pinned version: 33.0**
-  (released 2026-04-30, clang 22.1.0, target `wasm32-unknown-wasip1`). When
-  bumping, update this section and `docs/health.md` "WASM module compilation"
-  entry together.
+  (released 2026-04-30, clang 22.1.0, target `wasm32-unknown-wasip1`) — the
+  latest stable release as of 2026-08-10; 34 exists only as release candidates.
 
-  33 is the latest *stable* release as of 2026-08-10; 34 exists only as release
-  candidates. Note that `.github/workflows/build.yml` still pins `32`, so CI and
-  developer machines currently emit different module bytes — relevant whenever a
-  `.wasm` size is used as evidence that a build actually changed.
+  The pin is single-sourced in **`.wasi-sdk-version`** at the repo root: CI's
+  three install steps and the Dockerfile all read that file (they used to carry
+  independent copies, and had drifted to 32 while this document said 33 —
+  meaning CI and developer machines emitted different module bytes, which
+  matters whenever a `.wasm` byte-size is used as evidence that a build
+  changed). When bumping: edit `.wasi-sdk-version`, update this section's
+  version line, and update `docs/health.md`'s "WASM module compilation" entry.
 
   A cross-compiler toolchain is per-developer state, not system state, so the
   install below needs no `sudo`. CMake auto-detects, in order:
