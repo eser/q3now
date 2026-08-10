@@ -186,7 +186,7 @@ void        BotDirective_IssueToDirect( struct bot_state_s *bs,
                                          int issuer_client,
                                          directiveType_t type,
                                          int target_client,
-                                         vec3_t area_origin );
+                                         const vec3_t area_origin );
 
 /* chat parsing — call at end of BotMatchMessage for unhandled messages */
 void        BotDirective_ParseChatOrder( struct bot_state_s *bs,
