@@ -3272,6 +3272,9 @@ qboolean WiredUI_SafeReload( void ) {
 	// phase 1: save current state
 	memcpy( wired_backup->pool, wui_menuPool, wui_menuPoolUsed );
 	wired_backup->poolUsed = wui_menuPoolUsed;
+	// sizeof(pointer) is the point: this copies the menu POINTER table, not
+	// the menu definitions the pointers reference.
+	// NOLINTNEXTLINE(bugprone-sizeof-expression)
 	memcpy( wired_backup->menus, wui_menus, sizeof( wui_menus[0] ) * wui_menuCount );
 	wired_backup->menuCount = wui_menuCount;
 	wired_backup->assetGlobals = *WiredUI_GetAssetGlobals();
@@ -3294,6 +3297,7 @@ qboolean WiredUI_SafeReload( void ) {
 		COM_WARN( LOG_CH(ch_ui), "Menu reload failed — keeping old menus.\n" );
 		memcpy( wui_menuPool, wired_backup->pool, wired_backup->poolUsed );
 		wui_menuPoolUsed = wired_backup->poolUsed;
+		// NOLINTNEXTLINE(bugprone-sizeof-expression) — pointer-table copy, same as the backup above
 		memcpy( wui_menus, wired_backup->menus, sizeof( wui_menus[0] ) * wired_backup->menuCount );
 		wui_menuCount = wired_backup->menuCount;
 		*WiredUI_GetAssetGlobals() = wired_backup->assetGlobals;
