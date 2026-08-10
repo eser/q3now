@@ -25,6 +25,7 @@ hand-rolled tokenizer that handles the JSON-RPC envelope.
 ===========================================================================
 */
 #include "wn_local.h"
+#include "../wired_build_stamp.h"    // WIRED_ENGINE_VERSION reported in the MCP handshake
 #include "../../../server/server.h"  // for svs, sv, client_t, SV_GentityNum, sharedEntity_t
 #include "../protocol.h"             // for bg_itemlist, ET_ITEM, gitem_t
 

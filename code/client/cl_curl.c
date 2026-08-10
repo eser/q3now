@@ -4,6 +4,7 @@
 
 #ifdef USE_CURL
 #include "client.h"
+#include "../qcommon/wired/wired_build_stamp.h"  // WIRED_ENGINE_VERSION for the UserAgent
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 cvar_t *cl_cURLLib;
 

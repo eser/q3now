@@ -44,4 +44,26 @@
 #define WIRED_BUILD_STR(x)   WIRED_BUILD_STR2(x)
 #define WIRED_BUILD_ID_STR   WIRED_BUILD_STR(WIRED_BUILD_ID)
 
+// Engine identity, composed from parts so consumers pick the granularity they
+// need without re-deriving it:
+//   BASE_TITLE   "Wired"                 human-authored product name
+//   BASE_VERSION "0.80"                  human-authored version
+//   BUILD_ID     "2231"                  automatic per-build stamp (above)
+//   VERSION      BASE_VERSION "." BUILD_ID   → "0.80.2231"  (DOT: one semver-like token)
+//   TITLE        BASE_TITLE " " VERSION      → "Wired 0.80.2231" (name + version token)
+// The two separators differ on purpose: a DOT binds version to build-id into a
+// single copyable/UserAgent-clean token; a SPACE keeps the product name apart.
+//
+// Lives HERE (not q_shared.h) so only the TUs that actually embed the identity
+// depend on the generated stamp — q_shared.h reaches ~everything, and carrying
+// this there made every stamp bump a near-full rebuild.
+#define WIRED_ENGINE_BASE_TITLE   "Wired"
+#define WIRED_ENGINE_BASE_VERSION "0.80"
+#define WIRED_ENGINE_BUILD_ID     WIRED_BUILD_ID_STR
+#define WIRED_ENGINE_VERSION      WIRED_ENGINE_BASE_VERSION "." WIRED_ENGINE_BUILD_ID
+#define WIRED_ENGINE_TITLE        WIRED_ENGINE_BASE_TITLE " " WIRED_ENGINE_VERSION
+#ifndef WIRED_ENGINE_RELEASE_VERSION
+  #define WIRED_ENGINE_RELEASE_VERSION WIRED_ENGINE_TITLE
+#endif
+
 #endif // WIRED_BUILD_STAMP_H

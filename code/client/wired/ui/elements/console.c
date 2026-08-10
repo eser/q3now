@@ -23,6 +23,7 @@
  */
 
 #include "../../../client.h"
+#include "../../../../qcommon/wired/wired_build_stamp.h"  // WIRED_ENGINE_TITLE banner
 #include "../panels/console_private.h"
 #include "../../../../qcommon/wired/core/console/con_public.h"
 #include <time.h>
