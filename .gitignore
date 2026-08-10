@@ -42,3 +42,4 @@ __pycache__/
 *.pyc
 tools/visual_regression/__pycache__/
 .scratch/
+tools/png2raw/png2raw
