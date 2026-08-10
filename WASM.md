@@ -37,22 +37,36 @@ If `.wasm` is not found, it silently falls back to `.qvm`.
   bumping, update this section and `docs/health.md` "WASM module compilation"
   entry together.
 
+  33 is the latest *stable* release as of 2026-08-10; 34 exists only as release
+  candidates. Note that `.github/workflows/build.yml` still pins `32`, so CI and
+  developer machines currently emit different module bytes — relevant whenever a
+  `.wasm` size is used as evidence that a build actually changed.
+
+  A cross-compiler toolchain is per-developer state, not system state, so the
+  install below needs no `sudo`. CMake auto-detects, in order:
+  `$HOME/.local/opt/wasi-sdk`, then `/opt/wasi-sdk` (plus
+  `C:/msys64/opt/wasi-sdk` on Windows). An explicit `WASI_SDK_PATH` — env var or
+  `-D` — overrides all of them. See `cmake/utils/wasm_tools.cmake`.
+
   **macOS (arm64):**
   ```bash
-  cd /tmp
+  mkdir -p ~/.local/opt && cd /tmp
   curl -LO https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sdk-33.0-arm64-macos.tar.gz
-  sudo tar xf wasi-sdk-33.0-arm64-macos.tar.gz -C /opt/
-  sudo ln -sf /opt/wasi-sdk-33.0-arm64-macos /opt/wasi-sdk
+  tar xf wasi-sdk-33.0-arm64-macos.tar.gz -C ~/.local/opt/
+  ln -sfn ~/.local/opt/wasi-sdk-33.0-arm64-macos ~/.local/opt/wasi-sdk
+  ~/.local/opt/wasi-sdk/bin/clang --version     # expect clang 22.1.0-wasi-sdk
   ```
 
   **Linux (x86_64), e.g., Ubuntu/Debian:**
   ```bash
-  cd /tmp
+  mkdir -p ~/.local/opt && cd /tmp
   curl -LO https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sdk-33.0-x86_64-linux.tar.gz
-  sudo tar xf wasi-sdk-33.0-x86_64-linux.tar.gz -C /opt/
-  sudo ln -sf /opt/wasi-sdk-33.0-x86_64-linux /opt/wasi-sdk
+  tar xf wasi-sdk-33.0-x86_64-linux.tar.gz -C ~/.local/opt/
+  ln -sfn ~/.local/opt/wasi-sdk-33.0-x86_64-linux ~/.local/opt/wasi-sdk
   ```
-  CMake auto-detects `/opt/wasi-sdk` on Linux/macOS; no env var needed.
+
+  A system-wide install under `/opt/wasi-sdk` still works if you prefer it —
+  same commands with `sudo` and `-C /opt/`. Existing setups are unaffected.
 
   **Windows (MSYS2 MINGW64):** `pacman` does not package wasi-sdk (only
   `wasi-libc`, which is just headers). Manual install required:

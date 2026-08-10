@@ -8,7 +8,18 @@ After cloning, initialize submodules:
 git submodule update --init --recursive
 ```
 
-This pulls in `src/libs/luajit`, `src/libs/mpack`, `src/libs/picoquic`, and `src/libs/picotls`. Skip this and the build will fail with missing headers.
+This pulls in all eight vendored libraries — `luajit`, `mpack`, `picoquic`, `picotls`, `zlib-ng`, `libjpeg-turbo`, `recastnavigation`, and `tools/msdf-atlas-gen`. Skip this and the build will fail with missing headers.
+
+Some of those submodules carry Wired-specific changes that are **not** upstream. They are kept as patch files under `patches/` and applied automatically at CMake configure time — you do not run anything by hand. If you ever need to edit a file under `src/libs/`, read [SUBMODULE-PATCHES.md](SUBMODULE-PATCHES.md) first: a superproject records only a submodule's *commit*, never its *content*, so edits made in place are invisible to `git add -A` and are lost on the next clone.
+
+Two toolchain pieces are needed beyond a C/C++ compiler on every platform:
+
+* **CMake ≥ 3.14 and Ninja** — `make` is a thin wrapper around them, not a standalone build.
+* **wasi-sdk** — the deployable mod pack (`pax21.sw3z`) always ships the WASM game modules: `Makefile`'s `PAK_VM_MODULES` lists `gamesv.wasm` / `gamecl.wasm` as unconditional prerequisites. Without wasi-sdk every `make` target fails with `No rule to make target .../gamesv.wasm`.
+
+  Turning WASM off is not a way around this. `USE_WASM` gates *both* the WAMR runtime backend and the compilation of the `.wasm` modules themselves (`cmake/utils/wasm_tools.cmake` returns early when it is off), while the pack's requirement for those files stays unconditional — so `USE_WASM=0` does not drop the requirement, it makes it unsatisfiable. Note also that the CMake option defaults to `OFF` (`CMakeLists.txt`) but the Makefile defaults it to `1`, so the normal `make` path always has it on.
+
+  See [WASM.md](WASM.md) for the pinned version and install locations.
 
 ---
 
@@ -106,12 +117,53 @@ Copy the resulting binaries from created `build` directory or use command:
 
 ### macos
 
-* `brew install sdl3 molten-vk` (SDL3 required; MoltenVK needed for Vulkan renderer)
-* `git submodule update --init --recursive` (required on first clone)
+Apple Silicon (arm64) is the profile these steps were walked through on: macOS 26.6, Xcode command-line toolchain (Apple clang 21), Homebrew at `/opt/homebrew`. Intel Macs are not currently verified.
 
-Build with: `make`
+**1 — Toolchain and libraries**
 
-Copy the resulting binaries from created `build` directory
+```
+brew install cmake ninja pkg-config sdl3 molten-vk openssl@3 opus opusfile
+```
+
+`openssl@3` is a hard configure requirement (`FIND_PACKAGE(OpenSSL REQUIRED)` — picoquic's TLS backend); it is easy to miss because CI's macOS runners preinstall it.
+
+`SDL3` is the only library CMake resolves from the system (`find_package(SDL3 REQUIRED)`); everything else heavy — zlib-ng, libjpeg-turbo, LuaJIT, picoquic/picotls, Recast/Detour — is a submodule built in-tree. MoltenVK is a *runtime* dependency of the Vulkan renderer: `code/sdl/sdl_glimp.c` points SDL at a MoltenVK dylib before `SDL_Init`, preferring the copy next to the binary (`make copy-libs` places it there via `otool -L` discovery) and falling back to the Homebrew one. There is no `libvulkan.dylib` loader in this setup and none is needed.
+
+**2 — Submodules**
+
+```
+git submodule update --init --recursive
+```
+
+**3 — wasi-sdk** (required — see *First-time setup* above)
+
+Install the pinned release for `arm64-macos` under `/opt/wasi-sdk`, or point `WASI_SDK_PATH` at it. Verify with `/opt/wasi-sdk/bin/clang --version`.
+
+**4 — Build**
+
+```
+make
+```
+
+`make` wraps `cmake` + `ninja`. On macOS CMake assembles a single product bundle rather than loose binaries:
+
+```
+build/release/q3now-preview.arm64.app/Contents/MacOS/{wired.arm64, wired-headless.arm64}
+build/release/wired_{opengl,vulkan}_arm64.dylib
+build/release/base/pax21.sw3z
+```
+
+**Verifying the build actually succeeded.** `make`'s exit status is not a reliable health signal — a failing `ninja` sub-command can still leave a zero exit at the top of a pipeline. Check for the artefacts instead:
+
+```
+test -x build/release/q3now-preview.arm64.app/Contents/MacOS/wired.arm64 && echo OK
+```
+
+To collect *all* compile errors rather than stopping at the first, run `ninja -k 0` inside `build/release/`.
+
+**Per-user state.** Config, screenshots and the `qconsole.jsonl` structured log live under `~/wired/<PRODUCT_NAME><CHANNEL_SUFFIX>/` — by default `~/wired/q3now-preview/`. The names come from `PRODUCT_NAME` / `CHANNEL_SUFFIX` at the top of `CMakeLists.txt`.
+
+**Running the test harness.** Several scripts under `tests/` call GNU `timeout` and use `mapfile`, neither of which exists in the macOS base system (BSD userland, bash 3.2). Install `brew install coreutils bash` and put `/opt/homebrew/opt/coreutils/libexec/gnubin` ahead of `/usr/bin` on `PATH`.
 
 ---
 
