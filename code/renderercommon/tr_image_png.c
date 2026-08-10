@@ -6,6 +6,9 @@
 #include "../qcommon/q_shared.h"
 #include "../renderercommon/tr_public.h"
 #include "../qcommon/puff.h"
+#include "r_log.h"                       // rilog-channel-mechanism Turn B — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 // we could limit the png size to a lower value here
 #ifndef INT_MAX
@@ -508,10 +511,27 @@ static uint32_t DecompressIDATs(struct BufferedFile *BF, uint8_t **Buffer)
 	uint32_t  puffSrcLen;
 
 	/*
-	 *  input verification
+	 *  input verification + establish the out-param contract.
+	 *
+	 *  Every failure return below this point must leave *Buffer = NULL so the
+	 *  caller can rely on a single (length==0 || *Buffer==NULL) check. The
+	 *  pre-existing `if (!(BF && Buffer)) return -1;` collapsed both NULL
+	 *  conditions into one early-out that returned without writing *Buffer
+	 *  when BF was NULL but Buffer was non-NULL — leaving the caller's
+	 *  stack-allocated pointer (declared without initializer in R_LoadPNG)
+	 *  holding garbage that later ri.Free paths would trip Z_Free's ZONEID
+	 *  guard on. Split the check so *Buffer is zeroed before any failure
+	 *  path beyond the Buffer-NULL guard can run.
 	 */
 
-	if(!(BF && Buffer))
+	if (!Buffer)
+	{
+		return((unsigned)-1);
+	}
+
+	*Buffer = NULL;
+
+	if (!BF)
 	{
 		return((unsigned)-1);
 	}
@@ -522,7 +542,6 @@ static uint32_t DecompressIDATs(struct BufferedFile *BF, uint8_t **Buffer)
 
 	DecompressedData = NULL;
 	DecompressedDataLength = 0;
-	*Buffer = DecompressedData;
 
 	CompressedData = NULL;
 	CompressedDataLength = 0;
@@ -626,7 +645,7 @@ static uint32_t DecompressIDATs(struct BufferedFile *BF, uint8_t **Buffer)
 		CH = BufferedFileRead(BF, PNG_ChunkHeader_Size);
 		if(!CH)
 		{
-			ri.Free(CompressedData); 
+			ri.Free(CompressedData);
 
 			return((unsigned)-1);
 		}
@@ -644,7 +663,7 @@ static uint32_t DecompressIDATs(struct BufferedFile *BF, uint8_t **Buffer)
 
 		if(!(Type == PNG_ChunkType_IDAT))
 		{
-			BufferedFileRewind(BF, PNG_ChunkHeader_Size); 
+			BufferedFileRewind(BF, PNG_ChunkHeader_Size);
 
 			break;
 		}
@@ -660,14 +679,14 @@ static uint32_t DecompressIDATs(struct BufferedFile *BF, uint8_t **Buffer)
 			OrigCompressedData = BufferedFileRead(BF, Length);
 			if(!OrigCompressedData)
 			{
-				ri.Free(CompressedData); 
+				ri.Free(CompressedData);
 
 				return((unsigned)-1);
 			}
 
 			if(!BufferedFileSkip(BF, PNG_ChunkCRC_Size))
 			{
-				ri.Free(CompressedData); 
+				ri.Free(CompressedData);
 
 				return((unsigned)-1);
 			}
@@ -2044,7 +2063,7 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 	{
 		CloseBufferedFile(ThePNG);
 
-		ri.Log( SEV_WARN, "%s: invalid image size\n", name );
+		R_LOG( rch_assets, SEV_WARN, "%s: invalid image size\n", name );
 
 		return; 
 	}
@@ -2382,13 +2401,13 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 	 *  Allocate output buffer.
 	 */
 
-	OutBuffer = ri.Malloc(IHDR_Width * IHDR_Height * Q3IMAGE_BYTESPERPIXEL); 
+	OutBuffer = ri.Malloc(IHDR_Width * IHDR_Height * Q3IMAGE_BYTESPERPIXEL);
 	if(!OutBuffer)
 	{
-		ri.Free(DecompressedData); 
+		ri.Free(DecompressedData);
 		CloseBufferedFile(ThePNG);
 
-		return;  
+		return;
 	}
 
 	/*
@@ -2401,8 +2420,8 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 		{
 			if(!DecodeImageNonInterlaced(IHDR, OutBuffer, DecompressedData, DecompressedDataLength, HasTransparentColour, TransparentColour, OutPal))
 			{
-				ri.Free(OutBuffer); 
-				ri.Free(DecompressedData); 
+				ri.Free(OutBuffer);
+				ri.Free(DecompressedData);
 				CloseBufferedFile(ThePNG);
 
 				return;
@@ -2415,8 +2434,8 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 		{
 			if(!DecodeImageInterlaced(IHDR, OutBuffer, DecompressedData, DecompressedDataLength, HasTransparentColour, TransparentColour, OutPal))
 			{
-				ri.Free(OutBuffer); 
-				ri.Free(DecompressedData); 
+				ri.Free(OutBuffer);
+				ri.Free(DecompressedData);
 				CloseBufferedFile(ThePNG);
 
 				return;
@@ -2427,8 +2446,8 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 
 		default :
 		{
-			ri.Free(OutBuffer); 
-			ri.Free(DecompressedData); 
+			ri.Free(OutBuffer);
+			ri.Free(DecompressedData);
 			CloseBufferedFile(ThePNG);
 
 			return;
@@ -2459,7 +2478,7 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 	 *  DecompressedData is not needed anymore.
 	 */
 
-	ri.Free(DecompressedData); 
+	ri.Free(DecompressedData);
 
 	/*
 	 *  We have all data, so close the file.

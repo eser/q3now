@@ -4,6 +4,9 @@
 // tr_light.c
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn B — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 #define	DLIGHT_AT_RADIUS		16
 // at the edge of a dlight's influence, this amount of light will be added
@@ -38,62 +41,6 @@ void R_TransformDlights( int count, dlight_t *dl, orientationr_t *or) {
 		}
 	}
 }
-
-
-#ifdef USE_LEGACY_DLIGHTS
-/*
-=============
-R_DlightBmodel
-
-Determine which dynamic lights may effect this bmodel
-=============
-*/
-void R_DlightBmodel( bmodel_t *bmodel ) {
-	int			i, j;
-	const dlight_t	*dl;
-	int			mask;
-	msurface_t	*surf;
-
-	// transform all the lights
-	R_TransformDlights( tr.refdef.num_dlights, tr.refdef.dlights, &tr.or );
-
-	mask = 0;
-	for ( i = 0; i < tr.refdef.num_dlights; i++ ) {
-		dl = &tr.refdef.dlights[i];
-
-		// see if the point is close enough to the bounds to matter
-		for ( j = 0 ; j < 3 ; j++ ) {
-			if ( dl->transformed[j] - bmodel->bounds[1][j] > dl->radius ) {
-				break;
-			}
-			if ( bmodel->bounds[0][j] - dl->transformed[j] > dl->radius ) {
-				break;
-			}
-		}
-		if ( j < 3 ) {
-			continue;
-		}
-
-		// we need to check this light
-		mask |= 1 << i;
-	}
-
-	tr.currentEntity->needDlights = (mask != 0) ? 1 : 0;
-
-	// set the dlight bits in all the surfaces
-	for ( i = 0 ; i < bmodel->numSurfaces ; i++ ) {
-		surf = bmodel->firstSurface + i;
-
-		if ( *surf->data == SF_FACE ) {
-			((srfSurfaceFace_t *)surf->data)->dlightBits = mask;
-		} else if ( *surf->data == SF_GRID ) {
-			((srfGridMesh_t *)surf->data)->dlightBits = mask;
-		} else if ( *surf->data == SF_TRIANGLES ) {
-			((srfTriangles_t *)surf->data)->dlightBits = mask;
-		}
-	}
-}
-#endif // USE_LEGACY_DLIGHTS
 
 
 /*
@@ -252,7 +199,7 @@ static void LogLight( const trRefEntity_t *ent ) {
 		max2 = ent->directedLight[2];
 	}
 
-	ri.Log( SEV_INFO, "amb:%i  dir:%i\n", max1, max2 );
+	R_LOG( rch_assets, SEV_INFO, "amb:%i  dir:%i\n", max1, max2 );
 }
 
 
@@ -299,7 +246,7 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 		&& tr.world->lightGridData ) {
 		R_SetupEntityLightingGrid( ent );
 	} else {
-		/* Phase 6B3'-a: tr.identityLight was 0.5 under legacy
+		/* tr.identityLight was 0.5 under legacy
 		 * obScale=2 — i.e. the no-world-model ambient/directed
 		 * defaults intended to land at byte 75 (= 0.5 * 150),
 		 * compensating for the in-shader doubling. In the linear
@@ -314,7 +261,7 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 
 	// bonus items and view weapons have a fixed minimum add
 	if ( 1 /* ent->e.renderfx & RF_MINLIGHT */ ) {
-		/* Phase 6B3'-a: identityLight factor dropped (was 0.5 under
+		/* identityLight factor dropped (was 0.5 under
 		 * legacy obScale=2). Linear pipeline adds the constant 32. */
 		ent->ambientLight[0] += 32;
 		ent->ambientLight[1] += 32;
@@ -327,26 +274,14 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 	d = VectorLength( ent->directedLight );
 	VectorScale( ent->lightDir, d, lightDir );
 #ifdef USE_PMLIGHT
-	if ( r_dlightMode->integer == 2 ) {
+	if ( r_dynamiclight->integer == 2 ) {
 		// only direct lights
 		// but we need to deal with shadow light direction
 		VectorCopy( lightDir, shadowLightDir );
-		if ( r_shadows->integer == 2 ) {
-			for ( i = 0 ; i < refdef->num_dlights ; i++ ) {
-				dl = &refdef->dlights[i];
-				if ( dl->linear ) // no support for linear lights atm
-					continue;
-				VectorSubtract( dl->origin, lightOrigin, dir );
-				d = VectorNormalize( dir );
-				power = DLIGHT_AT_RADIUS * ( dl->radius * dl->radius );
-				if ( d < DLIGHT_MINIMUM_RADIUS ) {
-					d = DLIGHT_MINIMUM_RADIUS;
-				}
-				d = power / ( d * d );
-				VectorMA( shadowLightDir, d, dir, shadowLightDir );
-			}
-		} // if ( r_shadows->integer == 2 )
-	}  // if ( r_dlightMode->integer == 2 )
+		// the stencil-shadow light direction accumulation is
+		// retired with the stencil volume system (its only consumer); shadowLightDir
+		// stays the plain lightDir copy above.
+	}  // if ( r_dynamiclight->integer == 2 )
 	else
 #endif
 	for ( i = 0 ; i < refdef->num_dlights ; i++ ) {
@@ -365,7 +300,7 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 	}
 
 	// clamp ambient
-	// Phase 6B3'-a: was clamped to identityLightByte (= 128 under
+	// was clamped to identityLightByte (= 128 under
 	// legacy obScale=2); linear pipeline clamps to full-range 255.
 	// NOLINTNEXTLINE(readability-misleading-indentation) — preceding else without braces is a Q3 idiom; this statement is at function scope
 	for ( i = 0 ; i < 3 ; i++ ) {
@@ -391,12 +326,9 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 	ent->lightDir[2] = DotProduct( lightDir, ent->e.axis[2] );
 
 #ifdef USE_PMLIGHT
-	if ( r_shadows->integer == 2 && r_dlightMode->integer == 2 ) {
-		VectorNormalize( shadowLightDir );
-		ent->shadowLightDir[0] = DotProduct( shadowLightDir, ent->e.axis[0] );
-		ent->shadowLightDir[1] = DotProduct( shadowLightDir, ent->e.axis[1] );
-		ent->shadowLightDir[2] = DotProduct( shadowLightDir, ent->e.axis[2] );
-	}
+	// ent->shadowLightDir was consumed only by the retired
+	// stencil/projection model-shadow systems; no longer computed.
+	(void)shadowLightDir;
 #endif
 }
 

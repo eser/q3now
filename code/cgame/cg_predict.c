@@ -8,7 +8,6 @@
 // It also handles local physics interaction, like fragments bouncing off walls
 
 #include "cg_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 static	pmove_t		cg_pmove;
@@ -615,11 +614,17 @@ void CG_PredictPlayerState( void ) {
 	// fire events and other transition triggered things
 	CG_TransitionPlayerState( &cg.predictedPlayerState, &oldPlayerState );
 
-	if ( cg_showmiss.integer ) {
-		if (cg.eventSequence > cg.predictedPlayerState.eventSequence) {
-			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "WARNING: double event\n");
-			cg.eventSequence = cg.predictedPlayerState.eventSequence;
+	// If our local event counter ran ahead of the transitioned predicted state,
+	// clamp it back down — otherwise a predicted player event (a footstep / jump /
+	// land sound) that was already fired can fire a SECOND time on the next
+	// transition (cosmetic double-audio on a misprediction). This clamp is
+	// correctness, so it runs unconditionally; only the diagnostic log is gated
+	// behind cg_showmiss.
+	if ( cg.eventSequence > cg.predictedPlayerState.eventSequence ) {
+		if ( cg_showmiss.integer ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "WARNING: double event\n" );
 		}
+		cg.eventSequence = cg.predictedPlayerState.eventSequence;
 	}
 
 	/* Stair-descent z-delta tracking.

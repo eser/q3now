@@ -5,7 +5,7 @@
 ===========================================================================
 cl_wired_store.c — Wired UI Store: generic key-value state bridge
 
-Phase 4: Game-agnostic state store replacing monolithic wiredHudState_t.
+Game-agnostic state store replacing monolithic wiredHudState_t.
 cgame writes via staging buffer + batch syscall, client reads at render time.
 ===========================================================================
 */
@@ -15,7 +15,6 @@ cgame writes via staging buffer + batch syscall, client reads at render time.
 
 #include <ctype.h>
 #include <stdlib.h>
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 #if FEAT_WIRED_UI
@@ -174,6 +173,94 @@ void WiredStore_BeginFrame( void ) {
 
 		e->flags &= ~WUI_STORE_FLAG_DIRTY;
 	}
+
+	/* WA-2a: marker lists are frame-transient — zero every list's count so a
+	 * listKey that cgame does NOT push this frame draws nothing (no stale
+	 * markers). The slot (and its key) is retained for cheap re-fill; only the
+	 * count is reset. A PushMarkerList this frame overwrites count + markers. */
+	for ( int i = 0; i < WUI_MAX_MARKER_LISTS; i++ ) {
+		wired_store.markerLists[i].count = 0;
+	}
+}
+
+/*
+==================
+WiredStore_SetMarkerList
+
+WA-2a: REPLACE the listKey's marker list for this frame. Find-or-alloc the named
+slot, copy up to WUI_MAX_MARKERS_PER_LIST markers (logged drop on overflow).
+==================
+*/
+void WiredStore_SetMarkerList( const char *listKey, const wuiMarker_t *markers, int count ) {
+	wuiMarkerList_t *list = NULL;
+	int i, free = -1;
+
+	if ( !listKey || !listKey[0] ) {
+		return;
+	}
+
+	/* find existing slot for this key, remembering the first free one */
+	for ( i = 0; i < WUI_MAX_MARKER_LISTS; i++ ) {
+		if ( wired_store.markerLists[i].key[0] == '\0' ) {
+			if ( free < 0 ) free = i;
+			continue;
+		}
+		if ( Q_stricmp( wired_store.markerLists[i].key, listKey ) == 0 ) {
+			list = &wired_store.markerLists[i];
+			break;
+		}
+	}
+
+	if ( !list ) {
+		if ( free < 0 ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_client),
+				"WiredStore: WARNING — marker-list slots full (%d), dropping list '%s'\n",
+				WUI_MAX_MARKER_LISTS, listKey );
+			return;
+		}
+		list = &wired_store.markerLists[free];
+		Q_strncpyz( list->key, listKey, sizeof( list->key ) );
+	}
+
+	if ( count < 0 ) count = 0;
+	if ( count > WUI_MAX_MARKERS_PER_LIST ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client),
+			"WiredStore: WARNING — marker list '%s' over cap (%d > %d), truncating\n",
+			listKey, count, WUI_MAX_MARKERS_PER_LIST );
+		count = WUI_MAX_MARKERS_PER_LIST;
+	}
+
+	if ( count > 0 && markers ) {
+		memcpy( list->markers, markers, count * sizeof( wuiMarker_t ) );
+	}
+	list->count = count;
+}
+
+/*
+==================
+WiredStore_GetMarkerList
+
+WA-2a: return the marker array for listKey (NULL + *outCount=0 if absent/empty).
+The text element iterates this each frame (stateless — no per-marker cache).
+==================
+*/
+const wuiMarker_t *WiredStore_GetMarkerList( const char *listKey, int *outCount ) {
+	int i;
+	if ( outCount ) *outCount = 0;
+	if ( !listKey || !listKey[0] ) {
+		return NULL;
+	}
+	for ( i = 0; i < WUI_MAX_MARKER_LISTS; i++ ) {
+		if ( wired_store.markerLists[i].key[0] &&
+		     Q_stricmp( wired_store.markerLists[i].key, listKey ) == 0 ) {
+			if ( wired_store.markerLists[i].count <= 0 ) {
+				return NULL;
+			}
+			if ( outCount ) *outCount = wired_store.markerLists[i].count;
+			return wired_store.markerLists[i].markers;
+		}
+	}
+	return NULL;
 }
 
 /*

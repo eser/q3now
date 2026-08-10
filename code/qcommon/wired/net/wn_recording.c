@@ -17,14 +17,13 @@ File format:
 
 Recording is controlled by the `sv_wirednetRecord` cvar:
   0 = disabled (default)
-  1 = record all events to baseq3/recordings/
+  1 = record all events to base/recordings/
 
 On disk-full or write error, recording stops silently and a warning
 is printed to the server console. Events continue to stream over QUIC.
 ===========================================================================
 */
 #include "wn_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_network, "network" );
 
 #if FEAT_WIREDNET_OBSERVER

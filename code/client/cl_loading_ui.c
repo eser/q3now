@@ -10,7 +10,8 @@
 #include "client.h"
 #include "wired/ui/cl_wired_text.h"
 #include "wired/ui/cl_wired_background.h"
-/* Phase 5: log channels */
+#include "wired/ui/cl_wired_customdraw.h"   /* unified registry */
+#include "wired/store/cl_wired_store.h"     /* loading.overall publisher */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 // Viewport-relative font sizes
@@ -103,7 +104,7 @@ static void Loading_SetColor( const float *rgba ) {
 ================
 Loading_FillRect
 
-Fade-aware SCR_FillRect. Multiplies alpha by fade factor.
+Fade-aware filled rect. Multiplies alpha by fade factor.
 ================
 */
 static void Loading_FillRect( float x, float y, float w, float h, const float *rgba ) {
@@ -182,7 +183,7 @@ Loading_DrawRadialGlow
 
 Draws a radial glow using a pre-baked falloff texture
 (gfx/ui/glow_radial — white center, transparent edge).
-Color-modulated via re.SetColor, drawn with SCR_DrawPic.
+Color-modulated via re.SetColor, drawn with re.DrawStretchPic.
 Single draw call per glow.
 ================
 */
@@ -228,53 +229,6 @@ Loading_DrawBackground
 All coordinates are viewport-relative (real screen pixels).
 ================
 */
-static void Loading_DrawBackground( void ) {
-	float vpW = (float)cls.glconfig.vidWidth;
-	float vpH = (float)cls.glconfig.vidHeight;
-	vec4_t gridLine;
-	// Exact spec colors — no amplification
-	static const float rightGlowRGB[3] = {
-		110.0f / 255.0f, 26.0f / 255.0f, 26.0f / 255.0f   // #6e1a1a
-	};
-
-	// Re-register every frame — Hunk_ClearLevel between maps invalidates
-	// cached handles, and RegisterShaderNoMip is a fast hash lookup
-	// when the shader is already loaded.
-	s_glowShader = re.RegisterShaderNoMip( "gfx/ui/glow_radial" );
-
-	// --- 1. Full-screen dark background ---
-	Loading_FillRect( 0, 0, vpW, vpH, cl_loadingTheme.bgColor );
-
-	// --- 2. Radial glow overlays ---
-	// "Size" = total quad dimensions, radius = half-size
-	// Left-center glow: brighter blue #1a3a6e, alpha 0.6
-	{
-		static const float leftGlow[3] = {
-			26.0f / 255.0f, 58.0f / 255.0f, 110.0f / 255.0f   // #1a3a6e
-		};
-		Loading_DrawRadialGlow( vpW * 0.266f, vpH * 0.5f, vpH * 0.3125f,
-								leftGlow, 0.60f );
-	}
-
-	// Right-center glow: #6e1a1a, alpha 0.18
-	Loading_DrawRadialGlow( vpW * 0.797f, vpH * 0.5f, vpH * 0.28125f,
-							rightGlowRGB, 0.18f );
-
-	// --- 3. Horizontal grid lines at ~4% viewport height spacing ---
-	// Subtle texture: #1e3a4a at 8% alpha — barely visible
-	gridLine[0] = 0.118f;  // 0x1e / 255
-	gridLine[1] = 0.227f;  // 0x3a / 255
-	gridLine[2] = 0.290f;  // 0x4a / 255
-	gridLine[3] = 0.08f;
-
-	{
-		float spacing = vpH * 0.04f;
-		// NOLINTNEXTLINE(bugprone-float-loop-counter,clang-analyzer-security.FloatLoopCounter) — viewport-relative grid step; small float increment, drift acceptable for visual gridlines
-		for ( float y = 0; y < vpH; y += spacing ) {
-			Loading_FillRect( 0, y, vpW, 1, gridLine );
-		}
-	}
-}
 
 /*
 ================
@@ -287,20 +241,25 @@ Middle: gametype · scorelimit · timelimit.
 Right: bot difficulty dots if g_autoBots is active.
 ================
 */
-static void Loading_DrawTopBar( void ) {
+static void Loading_DrawTopBar( float rx, float ry, float rw, float rh ) {
+	/* Positions come from the passed rect (legacy fractions were
+	 * `0, 0, vpW, vpH*0.058` — call sites pass these explicitly now).
+	 * vpW/vpH stay for vp-relative font sizing + small absolute padding
+	 * (LOADING_FONT_LABEL = vpH * 0.013) so the visual size stays
+	 * consistent across resolutions, matching legacy byte-for-byte. */
 	float vpW = (float)cls.glconfig.vidWidth;
 	float vpH = (float)cls.glconfig.vidHeight;
-	float barH = vpH * 0.058f;           // ~28/480
-	float pad  = vpW * 0.0125f;          // ~8/640
+	float pad  = vpW * 0.0125f;          // vp-relative pad (~8/640)
 	float fontSize = LOADING_FONT_LABEL;
 	vec4_t barColor = { 0.05f, 0.05f, 0.08f, 0.8f };
 	vec4_t white = { 1.0f, 1.0f, 1.0f, 0.8f };
 	vec4_t muted = { 1.0f, 1.0f, 1.0f, 0.5f };
 	char info[256];
-	const char *serverInfo = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SERVERINFO];
+	const char *serverInfo = clientActiveApp->cl.gameState.stringData + clientActiveApp->cl.gameState.stringOffsets[CS_SERVERINFO];
+	(void) vpH;                          // reserved for vp-relative absolute layout sizing
 
-	// Dark semi-transparent bar
-	Loading_FillRect( 0, 0, vpW, barH, barColor );
+	// Dark semi-transparent bar (covers the supplied rect)
+	Loading_FillRect( rx, ry, rw, rh, barColor );
 
 	// Game name in accent color, left side. Sourced from cl_gamename, populated
 	// by cgame at init from bg_public.h's GAMENAME_FOR_MASTER. Falls back to
@@ -308,7 +267,7 @@ static void Loading_DrawTopBar( void ) {
 	{
 		const char *brand = Cvar_VariableString( "cl_gamename" );
 		if ( !*brand ) brand = "Wired";
-		Loading_DrawStringFaded( (int)pad, (int)pad, fontSize, brand,
+		Loading_DrawStringFaded( (int)( rx + pad ), (int)( ry + pad ), fontSize, brand,
 						   cl_loadingTheme.accentColor );
 	}
 
@@ -338,8 +297,8 @@ static void Loading_DrawTopBar( void ) {
 
 	// Draw info string after the brand label (assume ~5 chars; longer game
 	// names will overlap with the info string until the layout is generalized).
-	float px = pad + 5 * fontSize + vpW * 0.006f;  // after brand label + small gap
-	Loading_DrawStringFaded( (int)px, (int)pad, fontSize, info, muted );
+	float px = rx + pad + 5 * fontSize + vpW * 0.006f;  // after brand label + small gap
+	Loading_DrawStringFaded( (int)px, (int)( ry + pad ), fontSize, info, muted );
 
 	// // Bot difficulty dots (right side) — if g_autoBots is set
 	// {
@@ -376,69 +335,33 @@ Three segments: top (#1e3a4a, 50% alpha), accent center (#00b4d8,
 90% alpha), bottom (#1e3a4a, 50% alpha).
 ================
 */
-static void Loading_DrawDivider( void ) {
-	float vpW = (float)cls.glconfig.vidWidth;
-	float vpH = (float)cls.glconfig.vidHeight;
-	vec4_t segColor;
-	vec4_t accentColor;
-	float x = vpW * 0.522f;  // 52.2% of viewport (was 334/640)
-	float yTop    = vpH * 0.1417f;  // was 68/480
-	float yMid1   = vpH * 0.4792f;  // was 230/480
-	float yMid2   = vpH * 0.5208f;  // was 250/480
-	float yBottom = vpH * 0.8583f;  // was 412/480
-
-#if LOADING_DIAG
-	if ( s_diagFrames < 3 ) {
-		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "DIAG Divider: x=%.0f yTop=%.0f yMid=%.0f yBot=%.0f\n",
-			x, yTop, yMid1, yBottom );
-	}
-#endif
-	// Use Loading_DrawLine for sub-pixel precision on high-DPI displays.
-	// SCR_FillRect with 1px width can round to zero at some resolutions.
-	segColor[0] = 0x1e / 255.0f;
-	segColor[1] = 0x3a / 255.0f;
-	segColor[2] = 0x4a / 255.0f;
-	segColor[3] = 0.6f;
-
-	accentColor[0] = 0x00 / 255.0f;
-	accentColor[1] = 0xb4 / 255.0f;
-	accentColor[2] = 0xd8 / 255.0f;
-	accentColor[3] = 1.0f;
-
-	// Top segment
-	Loading_SetColor( segColor );
-	Loading_DrawLine( x, yTop, x, yMid1, 1.0f, cls.whiteShader );
-	// Accent center
-	Loading_SetColor( accentColor );
-	Loading_DrawLine( x, yMid1, x, yMid2, 1.5f, cls.whiteShader );
-	// Bottom segment
-	Loading_SetColor( segColor );
-	Loading_DrawLine( x, yMid2, x, yBottom, 1.0f, cls.whiteShader );
-	Loading_SetColor( NULL );
-}
 
 /*
 ================
 Loading_DrawWireframe
 
 Left panel (52% of viewport width):
-If cl_bspPreview.valid, draw all edges using lines in accent color.
+If cl_mapPreview.valid, draw all edges using lines in accent color.
 Scale edges to fit within a centered area in the panel.
 Entity markers: spawn=diamond, item=filled square, flag=outlined square.
 Animated: 2D rotation (360deg/12s) and gentle Y float.
 Legend at bottom-left.
 ================
 */
-static void Loading_DrawWireframe( void ) {
+static void Loading_DrawWireframe( float rx, float ry, float rw, float rh ) {
+	/* rect = left panel area (legacy `0, vpH*0.075, vpW*0.519,
+	 * vpH*0.875`). Helper computes a centered fit area inside the
+	 * supplied rect — sub-region math is rect-relative. fitSize stays
+	 * vp-relative for consistent absolute size across resolutions
+	 * (legacy used vpH*0.583). */
 	float vpW = (float)cls.glconfig.vidWidth;
 	float vpH = (float)cls.glconfig.vidHeight;
-	// Left panel occupies 0..52% of viewport
-	const float panelW = vpW * 0.519f;    // was 332/640
-	const float panelH = vpH * 0.875f;    // was 420/480
-	const float panelY = vpH * 0.075f;    // was 36/480
-	// Center a fit area in the left panel (~58% of viewport height)
-	const float fitSize = vpH * 0.583f;   // was 280/480
-	const float fitX = ( panelW - fitSize ) * 0.5f;
+	const float panelW = rw;
+	const float panelH = rh;
+	const float panelY = ry;
+	// Center a fit area in the panel (~58% of viewport height)
+	const float fitSize = vpH * 0.583f;   // vp-relative, ~280/480
+	const float fitX = rx + ( panelW - fitSize ) * 0.5f;
 	const float fitY = panelY + ( panelH - fitSize ) * 0.5f;
 	float scaleX, scaleY, scale, offX, offY;
 	float rangeX, rangeY;
@@ -461,23 +384,23 @@ static void Loading_DrawWireframe( void ) {
 	if ( s_diagFrames < 3 )
 		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "DIAG Wireframe: valid=%d edges=%d markers=%d surfaces=%d "
 			"bounds=(%.0f,%.0f)-(%.0f,%.0f)\n",
-			cl_bspPreview.valid, cl_bspPreview.numEdges, cl_bspPreview.numMarkers,
-			cl_bspPreview.numSurfaces,
-			cl_bspPreview.minX, cl_bspPreview.minY,
-			cl_bspPreview.maxX, cl_bspPreview.maxY );
+			cl_mapPreview.valid, cl_mapPreview.numEdges, cl_mapPreview.numMarkers,
+			cl_mapPreview.numSurfaces,
+			cl_mapPreview.minX, cl_mapPreview.minY,
+			cl_mapPreview.maxX, cl_mapPreview.maxY );
 #endif
-	if ( !cl_bspPreview.valid || cl_bspPreview.numEdges == 0 ) {
+	if ( !cl_mapPreview.valid || cl_mapPreview.numEdges == 0 ) {
 		// No preview data — draw placeholder text
 		vec4_t muted = { 1.0f, 1.0f, 1.0f, 0.25f };
-		Loading_DrawStringFaded( (int)( panelW * 0.5f - vpW * 0.0625f ),
+		Loading_DrawStringFaded( (int)( rx + panelW * 0.5f - vpW * 0.0625f ),
 						   (int)( panelY + panelH * 0.5f ),
 						   LOADING_FONT_LABEL, "loading...", muted );
 		return;
 	}
 
 	// Compute scale to fit BSP bounds into the fit area
-	rangeX = cl_bspPreview.maxX - cl_bspPreview.minX;
-	rangeY = cl_bspPreview.maxY - cl_bspPreview.minY;
+	rangeX = cl_mapPreview.maxX - cl_mapPreview.minX;
+	rangeY = cl_mapPreview.maxY - cl_mapPreview.minY;
 	if ( rangeX < 1.0f ) rangeX = 1.0f;
 	if ( rangeY < 1.0f ) rangeY = 1.0f;
 
@@ -492,27 +415,27 @@ static void Loading_DrawWireframe( void ) {
 	// Height coloring: lerp per-edge color based on average Z
 	// t=0.0 (floor): #1a3a5a  →  t=0.5 (mid): #00b4d8  →  t=1.0 (top): #80e0f0
 	{
-		float zRange = cl_bspPreview.maxZ - cl_bspPreview.minZ;
+		float zRange = cl_mapPreview.maxZ - cl_mapPreview.minZ;
 		int edgeStep = 1;
 		if ( zRange < 1.0f ) zRange = 1.0f;
-		if ( cl_bspPreview.numEdges > LOADING_WIREFRAME_MAX_DRAW_EDGES ) {
-			edgeStep = ( cl_bspPreview.numEdges + LOADING_WIREFRAME_MAX_DRAW_EDGES - 1 ) /
+		if ( cl_mapPreview.numEdges > LOADING_WIREFRAME_MAX_DRAW_EDGES ) {
+			edgeStep = ( cl_mapPreview.numEdges + LOADING_WIREFRAME_MAX_DRAW_EDGES - 1 ) /
 				LOADING_WIREFRAME_MAX_DRAW_EDGES;
 		}
 
-		for ( int i = 0; i < cl_bspPreview.numEdges; i += edgeStep ) {
-			const bspPreviewEdge_t *e = &cl_bspPreview.edges[i];
-			float ex1 = offX + ( e->x1 - cl_bspPreview.minX ) * scale;
-			float ey1 = offY + ( e->y1 - cl_bspPreview.minY ) * scale;
-			float ex2 = offX + ( e->x2 - cl_bspPreview.minX ) * scale;
-			float ey2 = offY + ( e->y2 - cl_bspPreview.minY ) * scale;
+		for ( int i = 0; i < cl_mapPreview.numEdges; i += edgeStep ) {
+			const mapPreviewEdge_t *e = &cl_mapPreview.edges[i];
+			float ex1 = offX + ( e->x1 - cl_mapPreview.minX ) * scale;
+			float ey1 = offY + ( e->y1 - cl_mapPreview.minY ) * scale;
+			float ex2 = offX + ( e->x2 - cl_mapPreview.minX ) * scale;
+			float ey2 = offY + ( e->y2 - cl_mapPreview.minY ) * scale;
 			float rx1 = pivotX + ( ex1 - pivotX ) * cosA - ( ey1 - pivotY ) * sinA;
 			float ry1 = pivotY + ( ex1 - pivotX ) * sinA + ( ey1 - pivotY ) * cosA + floatY;
 			float rx2 = pivotX + ( ex2 - pivotX ) * cosA - ( ey2 - pivotY ) * sinA;
 			float ry2 = pivotY + ( ex2 - pivotX ) * sinA + ( ey2 - pivotY ) * cosA + floatY;
 			// Height parameter from average Z of both vertices
 			float avgZ = ( e->z1 + e->z2 ) * 0.5f;
-			float t = ( avgZ - cl_bspPreview.minZ ) / zRange;
+			float t = ( avgZ - cl_mapPreview.minZ ) / zRange;
 			vec4_t edgeColor;
 
 			// 3-stop gradient: floor → mid → top
@@ -541,14 +464,14 @@ static void Loading_DrawWireframe( void ) {
 	float markerR1 = vpH * 0.0083f;  // spawn circle radius (was 4/480)
 	float markerR2 = vpH * 0.00625f; // item circle radius (was 3/480)
 	float markerS  = vpH * 0.0083f;  // flag half-size (was 4/480)
-	if ( cl_bspPreview.numMarkers > LOADING_WIREFRAME_MAX_DRAW_MARKERS ) {
-		markerStep = ( cl_bspPreview.numMarkers + LOADING_WIREFRAME_MAX_DRAW_MARKERS - 1 ) /
+	if ( cl_mapPreview.numMarkers > LOADING_WIREFRAME_MAX_DRAW_MARKERS ) {
+		markerStep = ( cl_mapPreview.numMarkers + LOADING_WIREFRAME_MAX_DRAW_MARKERS - 1 ) /
 			LOADING_WIREFRAME_MAX_DRAW_MARKERS;
 	}
-	for ( int i = 0; i < cl_bspPreview.numMarkers; i += markerStep ) {
-		const bspPreviewMarker_t *m = &cl_bspPreview.markers[i];
-		float rawX = offX + ( m->x - cl_bspPreview.minX ) * scale;
-		float rawY = offY + ( m->y - cl_bspPreview.minY ) * scale;
+	for ( int i = 0; i < cl_mapPreview.numMarkers; i += markerStep ) {
+		const mapPreviewMarker_t *m = &cl_mapPreview.markers[i];
+		float rawX = offX + ( m->x - cl_mapPreview.minX ) * scale;
+		float rawY = offY + ( m->y - cl_mapPreview.minY ) * scale;
 		float mx = pivotX + ( rawX - pivotX ) * cosA - ( rawY - pivotY ) * sinA;
 		float my = pivotY + ( rawX - pivotX ) * sinA + ( rawY - pivotY ) * cosA + floatY;
 
@@ -601,7 +524,7 @@ static void Loading_DrawWireframe( void ) {
 		float legendS  = vpH * 0.0083f;   // flag half-size
 		float legendGap = vpW * 0.025f;   // gap between icon and text
 		float ly = panelY + panelH + vpH * 0.033f;
-		float lx = vpW * 0.019f;
+		float lx = rx + vpW * 0.019f;   /* anchor at panel's rx */
 
 		// Spawn: yellow circle
 		Loading_SetColor( spawnYellow );
@@ -620,9 +543,14 @@ static void Loading_DrawWireframe( void ) {
 		lx += vpW * 0.125f;
 		Loading_SetColor( itemRed );
 		{
+			/* 3 concentric rings. An int counter (not a float decrement)
+			 * makes the iteration count exact and impossible to hang: with a
+			 * float loop, a zero legendR2 gives ringStep 0 and `r -= 0` never
+			 * terminates. legendR2 can be 0 for a degenerate rect, so guard by
+			 * construction rather than trusting the radius. */
 			float ringStep = legendR2 / 3.0f;
-			// NOLINTNEXTLINE(bugprone-float-loop-counter,clang-analyzer-security.FloatLoopCounter) — concentric-ring loop; 3 iterations exactly, float drift not material
-			for ( float r = legendR2; r >= ringStep; r -= ringStep ) {
+			for ( int ring = 0; ring < 3; ring++ ) {
+				float r = legendR2 - (float) ring * ringStep;
 				for ( int seg = 0; seg < 12; seg++ ) {
 					float a0 = ( M_PI * 2.0f / 12 ) * seg;
 					float a1 = ( M_PI * 2.0f / 12 ) * ( seg + 1 );
@@ -651,11 +579,15 @@ static void Loading_DrawWireframe( void ) {
 	// Console diagnostic: print once per map load
 	if ( !s_wireframeDiagPrinted ) {
 		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "WIREFRAME: %d surfaces, %d segments, %d markers\n",
-			cl_bspPreview.numSurfaces, cl_bspPreview.numEdges,
-			cl_bspPreview.numMarkers );
+			cl_mapPreview.numSurfaces, cl_mapPreview.numEdges,
+			cl_mapPreview.numMarkers );
 		s_wireframeDiagPrinted = qtrue;
 	}
 }
+
+/* forward declaration for the stats-grid helper extracted
+ * out of Loading_DrawMapInfo. Definition follows Loading_DrawMapInfo. */
+void Loading_DrawMapInfoStatsGrid( float rx, float y, float rw, float cellH );
 
 /*
 ================
@@ -666,14 +598,17 @@ Archetype tag, large map name, author+year, flavor quote,
 3-cell stats grid.
 ================
 */
-static void Loading_DrawMapInfo( void ) {
-	float vpW = (float)cls.glconfig.vidWidth;
+static void Loading_DrawMapInfo( float rx, float ry, float rw, float rh ) {
+	/* rect = right panel block area (legacy `vpW*0.542,
+	 * vpH*0.1, vpW*0.436, ~vpH*0.25`). Helper stacks title/author/
+	 * flavor-quote downward starting at ry. Sub-region math
+	 * (font tiers, padding, line spacing) stays vp-relative for
+	 * resolution-consistent absolute sizing. */
 	float vpH = (float)cls.glconfig.vidHeight;
-	const float rx = vpW * 0.542f;     // right panel x start (was 347/640)
-	const float rw = vpW * 0.436f;     // right panel usable width (was 279/640)
-	float y = vpH * 0.1f;              // was 48/480
-	float pad = vpH * 0.0167f;         // general padding (~8/480)
-	const char *info = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SERVERINFO];
+	float y = ry;
+	float pad = vpH * 0.0167f;         // general padding (~8/480) — vp-relative
+	(void) rh;                         // helper draws what fits; rect height is a max-extent hint
+	const char *info = clientActiveApp->cl.gameState.stringData + clientActiveApp->cl.gameState.stringOffsets[CS_SERVERINFO];
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 ) {
 		const char *mapCvar = Info_ValueForKey( info, "mapname" );
@@ -717,7 +652,7 @@ static void Loading_DrawMapInfo( void ) {
 
 	// --- Map name (large text, near-white) ---
 	// Use mapname cvar, uppercase. Progressive scaling.
-	y = vpH * 0.129f;  // was 62/480
+	y = ry + vpH * 0.029f;  // was `vpH*0.129` absolute; ry+0.029 preserves byte-identical at legacy ry=vpH*0.1
 	{
 		char mapUp[128];
 		char shortUp[64];
@@ -763,7 +698,7 @@ static void Loading_DrawMapInfo( void ) {
 	}
 
 	// --- Flavor quote (with 2px left border) ---
-	y = vpH * 0.2167f;  // was 104/480
+	y = ry + vpH * 0.1167f;  // was `vpH*0.2167` absolute; ry+0.1167 preserves byte-identical at legacy ry=vpH*0.1
 	if ( cl_mapInfo.quote[0] ) {
 		char line1[128], line2[128];
 		float quoteIndent = pad;
@@ -771,6 +706,17 @@ static void Loading_DrawMapInfo( void ) {
 		float charW = LOADING_FONT_SMALL;  // approximate char width at small scale
 		int maxChars = (int)( ( rw - quoteIndent - 2 ) / charW );
 		int len = (int)strlen( cl_mapInfo.quote );
+
+		// Clamp the wrap column to the line buffer: maxChars is derived from
+		// panel width / font size and can exceed sizeof(line1)-1 on wide aspect
+		// ratios, which would let Q_strncpyz(line1, quote, splitAt+1) write past
+		// line1[128] (splitAt is bounded only by maxChars below).
+		if ( maxChars > (int)sizeof( line1 ) - 1 ) {
+			maxChars = (int)sizeof( line1 ) - 1;
+		}
+		if ( maxChars < 1 ) {
+			maxChars = 1;
+		}
 
 		// Word-wrap: split at last space before maxChars
 		if ( len > maxChars ) {
@@ -797,77 +743,95 @@ static void Loading_DrawMapInfo( void ) {
 	}
 
 	// --- Stats grid (3 equal columns with per-column accent) ---
+	// extracted into Loading_DrawMapInfoStatsGrid so the
+	// custom:loading_mapinfo_stats compositor entry can wrap the same
+	// rendering. Inline call preserved here so the legacy SCR path
+	// continues drawing identical output. This whole file
+	// retires once the legacy path is removed.
 	y += vpH * 0.0125f;
-	if ( y < vpH * 0.2958f ) y = vpH * 0.2958f;  // was 142/480
-	{
-		float cellW = rw / 3.0f;
-		float cellH = vpH * 0.1f;  // was 48/480
-		char stat[32];
+	if ( y < ry + vpH * 0.1958f ) y = ry + vpH * 0.1958f;  // was `vpH*0.2958` absolute
+	Loading_DrawMapInfoStatsGrid( rx, y, rw, vpH * 0.1f );
+}
 
-		// Per-column accent colors (border at 15% alpha, bg at 6% alpha)
-		vec4_t colBorder[3] = {
-			{ 0.00f, 0.706f, 0.847f, 0.15f },  // cyan — PLAYERS
-			{ 0.90f, 0.22f, 0.27f, 0.15f },     // red — WEAPON
-			{ 1.00f, 0.84f, 0.04f, 0.15f }      // yellow — ITEMS
-		};
-		vec4_t colBg[3] = {
-			{ 0.00f, 0.706f, 0.847f, 0.06f },
-			{ 0.90f, 0.22f, 0.27f, 0.06f },
-			{ 1.00f, 0.84f, 0.04f, 0.06f }
-		};
+/*
+================
+Loading_DrawMapInfoStatsGrid
 
-		const char *labels[3] = { "PLAYERS", "WEAPON", "ITEMS" };
-		const char *values[3];
-		char statBufs[3][32];
+Extracted from Loading_DrawMapInfo. Renders the 3-cell
+stats grid (PLAYERS / WEAPON / ITEMS) inside the given rect with per-
+column accent colours. Pure draw — reads cl_mapInfo + clientActiveApp->cl.gameState
+state internally; no per-frame parameters beyond the rect.
 
-		// Build value strings
-		if ( cl_mapInfo.playersMin > 0 || cl_mapInfo.playersMax > 0 ) {
-			Com_sprintf( statBufs[0], sizeof(statBufs[0]), "%d-%d",
-						 cl_mapInfo.playersMin, cl_mapInfo.playersMax );
-		} else {
-			Q_strncpyz( statBufs[0], "--", sizeof(statBufs[0]) );
-		}
-		values[0] = statBufs[0];
+Wrapped by the custom:loading_mapinfo_stats unified-registry entry.
+*/
+void Loading_DrawMapInfoStatsGrid( float rx, float y, float rw, float cellH )
+{
+	float vpH    = (float) cls.glconfig.vidHeight;
+	float pad    = vpH * 0.0167f;
+	float cellW  = rw / 3.0f;
 
-		if ( cl_mapInfo.metaWeapon[0] ) {
-			Q_strncpyz( statBufs[1], cl_mapInfo.metaWeapon, sizeof(statBufs[1]) );
-		} else {
-			Q_strncpyz( statBufs[1], "--", sizeof(statBufs[1]) );
-		}
-		values[1] = statBufs[1];
+	vec4_t nameWhite   = { 0.91f, 0.96f, 0.99f, 1.00f };
+	vec4_t labelMuted  = { 0.29f, 0.42f, 0.53f, 1.00f };
+	vec4_t colBorder[3] = {
+		{ 0.00f, 0.706f, 0.847f, 0.15f },  // cyan — PLAYERS
+		{ 0.90f, 0.22f, 0.27f, 0.15f },    // red — WEAPON
+		{ 1.00f, 0.84f, 0.04f, 0.15f }     // yellow — ITEMS
+	};
+	vec4_t colBg[3] = {
+		{ 0.00f, 0.706f, 0.847f, 0.06f },
+		{ 0.90f, 0.22f, 0.27f, 0.06f },
+		{ 1.00f, 0.84f, 0.04f, 0.06f }
+	};
 
-		if ( cl_mapInfo.itemNodes > 0 ) {
-			Com_sprintf( statBufs[2], sizeof(statBufs[2]), "%d", cl_mapInfo.itemNodes );
-		} else {
-			Q_strncpyz( statBufs[2], "--", sizeof(statBufs[2]) );
-		}
-		values[2] = statBufs[2];
+	const char *info     = clientActiveApp->cl.gameState.stringData + clientActiveApp->cl.gameState.stringOffsets[ CS_SERVERINFO ];
+	const char *labels[3] = { "PLAYERS", "WEAPON", "ITEMS" };
+	const char *values[3];
+	char        statBufs[3][32];
 
-		// Draw each cell
-		for ( int col = 0; col < 3; col++ ) {
-			float cx = rx + col * cellW;
-			int valLen = (int)strlen( values[col] );
-			int lblLen = (int)strlen( labels[col] );
+	(void) info;  /* reserved for future stats — unused after extraction */
 
-			// Background tint
-			Loading_FillRect( cx, y, cellW, cellH, colBg[col] );
+	if ( cl_mapInfo.playersMin > 0 || cl_mapInfo.playersMax > 0 ) {
+		Com_sprintf( statBufs[0], sizeof( statBufs[0] ), "%d-%d",
+		             cl_mapInfo.playersMin, cl_mapInfo.playersMax );
+	} else {
+		Q_strncpyz( statBufs[0], "--", sizeof( statBufs[0] ) );
+	}
+	values[0] = statBufs[0];
 
-			// Cell border (top, bottom, left, right)
-			Loading_FillRect( cx, y, cellW, 1, colBorder[col] );
-			Loading_FillRect( cx, y + cellH - 1, cellW, 1, colBorder[col] );
-			Loading_FillRect( cx, y, 1, cellH, colBorder[col] );
-			Loading_FillRect( cx + cellW - 1, y, 1, cellH, colBorder[col] );
+	if ( cl_mapInfo.metaWeapon[0] ) {
+		Q_strncpyz( statBufs[1], cl_mapInfo.metaWeapon, sizeof( statBufs[1] ) );
+	} else {
+		Q_strncpyz( statBufs[1], "--", sizeof( statBufs[1] ) );
+	}
+	values[1] = statBufs[1];
 
-			// Value: centered horizontally, padded from top
-			Loading_DrawStringFaded( (int)( cx + cellW * 0.5f - valLen * LOADING_FONT_TITLE * 0.375f ),
-							   (int)( y + pad ), LOADING_FONT_TITLE * 0.75f,
-							   values[col], nameWhite );
+	if ( cl_mapInfo.itemNodes > 0 ) {
+		Com_sprintf( statBufs[2], sizeof( statBufs[2] ), "%d", cl_mapInfo.itemNodes );
+	} else {
+		Q_strncpyz( statBufs[2], "--", sizeof( statBufs[2] ) );
+	}
+	values[2] = statBufs[2];
 
-			// Label: centered horizontally, padded from bottom
-			Loading_DrawStringFaded( (int)( cx + cellW * 0.5f - lblLen * LOADING_FONT_LABEL * 0.5f ),
-							   (int)( y + cellH - pad - LOADING_FONT_LABEL ), LOADING_FONT_LABEL,
-							   labels[col], labelMuted );
-		}
+	for ( int col = 0; col < 3; col++ ) {
+		float cx     = rx + col * cellW;
+		int   valLen = (int) strlen( values[ col ] );
+		int   lblLen = (int) strlen( labels[ col ] );
+
+		Loading_FillRect( cx, y, cellW, cellH, colBg[ col ] );
+		Loading_FillRect( cx, y, cellW, 1, colBorder[ col ] );
+		Loading_FillRect( cx, y + cellH - 1, cellW, 1, colBorder[ col ] );
+		Loading_FillRect( cx, y, 1, cellH, colBorder[ col ] );
+		Loading_FillRect( cx + cellW - 1, y, 1, cellH, colBorder[ col ] );
+
+		Loading_DrawStringFaded( (int)( cx + cellW * 0.5f - valLen * LOADING_FONT_TITLE * 0.375f ),
+		                         (int)( y + pad ),
+		                         LOADING_FONT_TITLE * 0.75f,
+		                         values[ col ], nameWhite );
+
+		Loading_DrawStringFaded( (int)( cx + cellW * 0.5f - lblLen * LOADING_FONT_LABEL * 0.5f ),
+		                         (int)( y + cellH - pad - LOADING_FONT_LABEL ),
+		                         LOADING_FONT_LABEL,
+		                         labels[ col ], labelMuted );
 	}
 }
 
@@ -918,13 +882,15 @@ Four asset label rows in the right panel, starting at y=210.
 Spaced 22px apart with lerp interpolation.
 ================
 */
-static void Loading_DrawStreamingRows( void ) {
-	float vpW = (float)cls.glconfig.vidWidth;
+static void Loading_DrawStreamingRows( float rx, float ry, float rw, float rh ) {
+	/* rect = right panel area for 4 progress rows (legacy
+	 * `vpW*0.542, vpH*0.4375, vpW*0.436, vpH*0.137`). Row spacing
+	 * stays vp-relative so line-height consistency matches legacy
+	 * across resolutions. */
 	float vpH = (float)cls.glconfig.vidHeight;
-	const float rx = vpW * 0.542f;     // was 347/640
-	const float rw = vpW * 0.436f;     // was 279/640
-	float y = vpH * 0.4375f;           // was 210/480
-	float rowSpacing = vpH * 0.0458f;  // was 22/480
+	float y = ry;
+	float rowSpacing = vpH * 0.0458f;  // ~22/480 — vp-relative
+	(void) rh;                         // helper draws 4 rows with vp-relative spacing
 
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 )
@@ -952,51 +918,6 @@ static void Loading_DrawStreamingRows( void ) {
 
 /*
 ================
-Loading_DrawOverallBar
-
-Phase label in the right panel bottom area (y~370),
-followed by a 3px overall progress bar.
-================
-*/
-static void Loading_DrawOverallBar( void ) {
-	float vpW = (float)cls.glconfig.vidWidth;
-	float vpH = (float)cls.glconfig.vidHeight;
-	const float rx = vpW * 0.542f;     // was 347/640
-	const float rw = vpW * 0.436f;     // was 279/640
-	const float by = vpH * 0.7708f;    // was 370/480
-#if LOADING_DIAG
-	if ( s_diagFrames < 3 )
-		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "DIAG OverallBar: overall=%.3f phase=\"%s\" rx=%.0f by=%.0f\n",
-			cl_loadProgress.overall,
-			cl_loadProgress.phase ? cl_loadProgress.phase : "(null)",
-			rx, by );
-#endif
-	vec4_t phaseColor = { 0.16f, 0.29f, 0.41f, 1.00f };  // #2a4a68
-	vec4_t barBg      = { 1.00f, 1.00f, 1.00f, 0.04f };   // rgba(1,1,1,0.04)
-	vec4_t barFg      = { 0.00f, 0.71f, 0.85f, 1.00f };   // #00b4d8
-
-	// Phase label
-	if ( cl_loadProgress.phase && cl_loadProgress.phase[0] ) {
-		Loading_DrawStringFaded( (int)rx, (int)by, LOADING_FONT_LABEL,
-						   cl_loadProgress.phase, phaseColor );
-	}
-
-	// Lerp overall toward actual
-	s_dispOverall = Loading_LerpValue( s_dispOverall, cl_loadProgress.overall );
-
-	// 3px overall progress bar below the phase label
-	float barY = by + vpH * 0.029f;
-	Loading_FillRect( rx, barY, rw, 3, barBg );
-	float fgWidth = s_dispOverall * rw;
-	if ( fgWidth > 0.5f ) {
-		Loading_FillRect( rx, barY, fgWidth, 3, barFg );
-	}
-
-	// Keep pulse timer alive using real clock (cls.frametime frozen during loading)
-	s_pulsePhase = Sys_Milliseconds() % 2000;
-}
-
-/*
 ================
 Loading_DrawVulkanBadge
 
@@ -1004,12 +925,13 @@ Small cyan dot + Vulkan version string at bottom of right panel (~y=400).
 No background badge — just the dot and text.
 ================
 */
-static void Loading_DrawVulkanBadge( void ) {
-	float vpW = (float)cls.glconfig.vidWidth;
+static void Loading_DrawVulkanBadge( float rx, float ry, float rw, float rh ) {
+	/* rx/ry are the badge anchor (legacy `vpW*0.542, vpH*0.833`).
+	 * dotSize stays vp-relative for resolution-consistent legibility. */
 	float vpH = (float)cls.glconfig.vidHeight;
-	const float rx = vpW * 0.542f;     // was 347/640
-	const float by = vpH * 0.833f;     // was 400/480
-	float dotSize = vpH * 0.0125f;     // was 6/480
+	const float by = ry;
+	float dotSize = vpH * 0.0125f;     // ~6/480 — vp-relative for legibility
+	(void) rw; (void) rh;              // helper draws fixed-size content within
 #if LOADING_DIAG
 	if ( s_diagFrames < 3 )
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "DIAG VulkanBadge: version=\"%s\" rx=%.0f by=%.0f\n",
@@ -1043,23 +965,24 @@ Skipped for localhost/LAN/listen servers.
 Placed in the right panel between streaming rows and the overall bar.
 ================
 */
-static void Loading_DrawServerInfoStrip( void ) {
-	float vpW = (float)cls.glconfig.vidWidth;
-	float vpH = (float)cls.glconfig.vidHeight;
-	const float rx = vpW * 0.542f;     // right panel x (matches other right-panel helpers)
-	const float rw = vpW * 0.436f;     // right panel usable width
-	float y = vpH * 0.63f;
+static void Loading_DrawServerInfoStrip( float rx, float ry, float rw, float rh ) {
+	/* rect carries the right-panel mid-section (legacy
+	 * `vpW*0.542, vpH*0.63, vpW*0.436, dynamic`). Helper still uses
+	 * vp-relative font sizes (legacy line-spacing math against the
+	 * font macros, which depend on cls.glconfig). */
+	float y = ry;
+	(void) rh;                         // helper stacks until conditional content ends
 	vec4_t hostColor = { 0.91f, 0.96f, 0.99f, 0.70f };   // near-white @ 70%
 	vec4_t pureColor = { 0.00f, 0.71f, 0.85f, 0.80f };   // cyan accent
 	vec4_t motdColor = { 0.29f, 0.42f, 0.53f, 0.80f };   // muted blue
 
-	if ( !Q_stricmp( cls.servername, "localhost" ) ) {
+	if ( !Q_stricmp( clientActiveApp->servername, "localhost" ) ) {
 		return;
 	}
 
-	const char *info    = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SERVERINFO];
-	const char *sysInfo = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SYSTEMINFO];
-	const char *motd    = cl.gameState.stringData + cl.gameState.stringOffsets[CS_MOTD];
+	const char *info    = clientActiveApp->cl.gameState.stringData + clientActiveApp->cl.gameState.stringOffsets[CS_SERVERINFO];
+	const char *sysInfo = clientActiveApp->cl.gameState.stringData + clientActiveApp->cl.gameState.stringOffsets[CS_SYSTEMINFO];
+	const char *motd    = clientActiveApp->cl.gameState.stringData + clientActiveApp->cl.gameState.stringOffsets[CS_MOTD];
 
 	const char *hostname = Info_ValueForKey( info, "sv_hostname" );
 	if ( hostname && hostname[0] ) {
@@ -1077,11 +1000,25 @@ static void Loading_DrawServerInfoStrip( void ) {
 	}
 
 	if ( motd && motd[0] ) {
+		char line1[256], line2[256];
 		int maxChars = (int)( rw / LOADING_FONT_SMALL );
 		int len = (int)strlen( motd );
 
+		// Clamp the wrap column to the line buffers: maxChars is derived from
+		// panel width / font size and is NOT otherwise bounded, so on extreme
+		// aspect ratios it can exceed sizeof(line1)-1 and let the line1 copy
+		// and the line2[maxChars] truncation writes overflow the 256-byte
+		// stack buffers on untrusted (server CS_MOTD) data. Cap at 252 so the
+		// `maxChars` index and the `maxChars-3..maxChars` ellipsis writes all
+		// stay in bounds.
+		if ( maxChars > (int)sizeof( line1 ) - 4 ) {
+			maxChars = (int)sizeof( line1 ) - 4;
+		}
+		if ( maxChars < 1 ) {
+			maxChars = 1;
+		}
+
 		if ( len > maxChars ) {
-			char line1[256], line2[256];
 			int splitAt = maxChars;
 			while ( splitAt > 0 && motd[splitAt] != ' ' ) {
 				splitAt--;
@@ -1092,7 +1029,6 @@ static void Loading_DrawServerInfoStrip( void ) {
 			Q_strncpyz( line1, motd, splitAt + 1 );
 			Q_strncpyz( line2, motd + splitAt + 1, sizeof( line2 ) );
 			if ( (int)strlen( line2 ) > maxChars ) {
-				// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — guarded by `> maxChars`; maxChars is a sane positive constant earlier in this function
 				line2[maxChars - 3] = '.';
 				line2[maxChars - 2] = '.';
 				line2[maxChars - 1] = '.';
@@ -1132,44 +1068,190 @@ void CL_LoadingScreenFinished( void ) {
 
 /*
 ================
-CL_DrawLoadingScreen
+CL_PublishLoadingState
 
-Main loading screen renderer, called from SCR_DrawScreenField during
-CA_LOADING state. Renders in real screen pixel coordinates (viewport-relative).
+Extracted per-frame publisher (was inline at the top
+of CL_DrawLoadingScreen). Fires from CL_Frame BEFORE SCR_UpdateScreen
+runs the compositor emit walk, so storeBind / bindwidth reads see
+current-frame values (eliminates the one-frame lag the render-time
+publisher had).
+
+Gated on clientActiveApp->state range matching the legacy CL_DrawLoadingScreen
+invocation conditions (CA_CONNECTING through CA_PRIMED): outside that
+range the function no-ops, preserving legacy behavior of "store keys
+untouched when not loading." Eventually CL_DrawLoadingScreen
+retires, publisher stays.
 ================
 */
-void CL_DrawLoadingScreen( void ) {
-	// Suppress console notify text during loading
-	if ( s_savedNotifyTime == -1 ) {
-		s_savedNotifyTime = Cvar_VariableIntegerValue( "con_notifytime" );
-		Cvar_Set( "con_notifytime", "0" );
+void CL_PublishLoadingState( void ) {
+	wuiStoreEntry_t *e;
+
+	/* (2026-06-10) the only caller of CL_LoadingScreenFinished was lost
+	 * when the legacy load screen retired, so cl_loadProgress.startTime never
+	 * reset to 0 once gameplay began — which permanently suppressed the
+	 * console notify overlay (Con_DrawNotify bails while startTime > 0). Fire
+	 * the finish hook once the load completes (the loading bar is still
+	 * flagged up but the client has reached CA_ACTIVE). Idempotent: the hook
+	 * zeroes startTime, so the guard does not re-trigger on later frames. This
+	 * runs every frame from CL_Frame (before the loading-range gate below),
+	 * which is the closest always-on hook this file owns to the CA_ACTIVE
+	 * transition. */
+	if ( cl_loadProgress.startTime > 0 && clientActiveApp->state == CA_ACTIVE ) {
+		CL_LoadingScreenFinished();
 	}
 
-	// Background with theme colors, grid overlay
-	Loading_DrawBackground();
+	if ( clientActiveApp->state < CA_CONNECTING || clientActiveApp->state > CA_PRIMED ) {
+		return;
+	}
 
-	// Top bar with game info
-	Loading_DrawTopBar();
+	e = WiredStore_Set( "loading.overall" );
+	if ( e ) e->value = cl_loadProgress.overall;
+	e = WiredStore_Set( "loading.geometry" );
+	if ( e ) e->value = cl_loadProgress.geometry;
+	e = WiredStore_Set( "loading.shaders" );
+	if ( e ) e->value = cl_loadProgress.shaders;
+	e = WiredStore_Set( "loading.audio" );
+	if ( e ) e->value = cl_loadProgress.audio;
+	e = WiredStore_Set( "loading.download" );
+	if ( e ) e->value = cl_loadProgress.download;
+	e = WiredStore_Set( "loading.phase" );
+	if ( e ) Q_strncpyz( e->text,
+		cl_loadProgress.phase ? cl_loadProgress.phase : "",
+		sizeof( e->text ) );
+}
 
-	// Vertical divider between panels
-	Loading_DrawDivider();
+/* CL_DrawLoadingScreen retired. Compositor is the sole loading-
+ * screen renderer via loading_screen.wmenu: 7 custom-draws (wireframe,
+ * streaming_rows, mapinfo_stats, topbar, maptitle_block, vulkan_badge,
+ * server_info_strip) + 2 bindwidth bar items + 1 storeBind phase text +
+ * 1 static footer strip. Per-frame state published from CL_Frame via
+ * CL_PublishLoadingState. Helper functions
+ * (Loading_DrawTopBar/Wireframe/etc) STAY — sole callers are the
+ * Loading_CustomDraw_* wrappers (which parameterized them).
+ *
+ * Loading_DrawBackground / Loading_DrawDivider retired with this fn —
+ * the wmenu's `backcolor 0.04 0.06 0.10 1` + `loading_divider` itemDef
+ * cover both. Loading_DrawOverallBar retired separately below — wmenu's
+ * bindwidth bar items + storeBind phase text replace it. */
 
-	// Left panel: BSP wireframe with rotation and float animation
-	Loading_DrawWireframe();
+/* ── unified custom-draw wrappers ──────────────────────
+ * Stateless adapters wrapping the existing Loading_Draw* helpers so the
+ * compositor's CUSTOM dispatch can render the loading screen segments
+ * declaratively from loading_screen.wmenu. The legacy CL_DrawLoadingScreen
+ * path stays intact (cl_scrn.c CA_LOADING branch); both fire during the
+ * transitional double-dispatch cycle. Whole file retires once the legacy path is removed.
+ *
+ * The wrappers ignore the (x, y, w, h) parameters — the underlying
+ * Loading_Draw* helpers compute their own coords from cls.glconfig and
+ * fixed normalized layout. The wmenu item's rect drives the COMPOSITOR's
+ * dispatch bounding box (which is what the rect-binding emits), but the
+ * draw itself uses the original coordinate scheme. This preserves
+ * pixel-exact parity with the legacy path during the transition.
+ */
 
-	// Right panel: map info, stats grid
-	Loading_DrawMapInfo();
+static void Loading_CustomDraw_Wireframe( float x, float y, float w, float h, vec4_t color )
+{
+	( void ) color;
+	Loading_DrawWireframe( x, y, w, h );
+}
 
-	// Right panel: streaming progress rows
-	Loading_DrawStreamingRows();
+static void Loading_CustomDraw_StreamingRows( float x, float y, float w, float h, vec4_t color )
+{
+	( void ) color;
+	Loading_DrawStreamingRows( x, y, w, h );
+}
 
-	// Right panel: server info strip (remote connections only)
-	Loading_DrawServerInfoStrip();
+static void Loading_CustomDraw_MapInfoStats( float x, float y, float w, float h, vec4_t color )
+{
+	( void ) color;
+	/* Use the wmenu-author-supplied rect directly — the extracted helper
+	 * is fully parameterised (unlike the other two wrappers which still
+	 * use legacy fixed-layout coords). A later cleanup pass will likely
+	 * parameterise Wireframe + StreamingRows similarly. */
+	Loading_DrawMapInfoStatsGrid( x, y, w, h );
+}
 
-	// Right panel: overall bar with phase label and pulse dot
-	Loading_DrawOverallBar();
+/* parameterized thin wrappers — the wmenu-
+ * author-supplied rect (resolved to pixels by the compositor) flows
+ * through into the legacy helper. Each helper now accepts (rx, ry,
+ * rw, rh) and uses them for positions; vp-relative font/padding stays
+ * absolute for resolution-consistent legibility. Eventually helpers +
+ * wrappers stay; the legacy CL_DrawLoadingScreen
+ * call chain retires. */
+static void Loading_CustomDraw_TopBar( float x, float y, float w, float h, vec4_t color )
+{
+	( void ) color;
+	Loading_DrawTopBar( x, y, w, h );
+}
 
-#if LOADING_DIAG
-	s_diagFrames++;
-#endif
+static void Loading_CustomDraw_MapTitleBlock( float x, float y, float w, float h, vec4_t color )
+{
+	( void ) color;
+	/* Loading_DrawMapInfo emits the cohesive block: map title (progressive
+	 * font tiers) + author/year + flavor quote (word-wrapped 1-2 lines
+	 * with the 2px left-border accent). Composition + wrap stay in the
+	 * legacy helper — see 7.30 dispatch Option C rationale. */
+	Loading_DrawMapInfo( x, y, w, h );
+}
+
+static void Loading_CustomDraw_VulkanBadge( float x, float y, float w, float h, vec4_t color )
+{
+	( void ) color;
+	Loading_DrawVulkanBadge( x, y, w, h );
+}
+
+static void Loading_CustomDraw_ServerInfoStrip( float x, float y, float w, float h, vec4_t color )
+{
+	( void ) color;
+	/* Skips for localhost; conditional sub-elements (hostname / PURE badge /
+	 * MOTD word-wrap) all gated inside the legacy helper. */
+	Loading_DrawServerInfoStrip( x, y, w, h );
+}
+
+void WiredLoadingCustomDraws_RegisterAll( void )
+{
+	wuiCustomDrawDef_t def;
+
+	memset( &def, 0, sizeof( def ) );
+	Q_strncpyz( def.name, "custom:loading_wireframe", sizeof( def.name ) );
+	def.isStateful        = qfalse;
+	def.routine.stateless = Loading_CustomDraw_Wireframe;
+	WiredUI_RegisterCustomDraw( &def );
+
+	memset( &def, 0, sizeof( def ) );
+	Q_strncpyz( def.name, "custom:loading_streaming_rows", sizeof( def.name ) );
+	def.isStateful        = qfalse;
+	def.routine.stateless = Loading_CustomDraw_StreamingRows;
+	WiredUI_RegisterCustomDraw( &def );
+
+	memset( &def, 0, sizeof( def ) );
+	Q_strncpyz( def.name, "custom:loading_mapinfo_stats", sizeof( def.name ) );
+	def.isStateful        = qfalse;
+	def.routine.stateless = Loading_CustomDraw_MapInfoStats;
+	WiredUI_RegisterCustomDraw( &def );
+
+	/* 7.30 Option C: 4 additional wrappers for the remaining legacy regions */
+	memset( &def, 0, sizeof( def ) );
+	Q_strncpyz( def.name, "custom:loading_topbar", sizeof( def.name ) );
+	def.isStateful        = qfalse;
+	def.routine.stateless = Loading_CustomDraw_TopBar;
+	WiredUI_RegisterCustomDraw( &def );
+
+	memset( &def, 0, sizeof( def ) );
+	Q_strncpyz( def.name, "custom:loading_maptitle_block", sizeof( def.name ) );
+	def.isStateful        = qfalse;
+	def.routine.stateless = Loading_CustomDraw_MapTitleBlock;
+	WiredUI_RegisterCustomDraw( &def );
+
+	memset( &def, 0, sizeof( def ) );
+	Q_strncpyz( def.name, "custom:loading_vulkan_badge", sizeof( def.name ) );
+	def.isStateful        = qfalse;
+	def.routine.stateless = Loading_CustomDraw_VulkanBadge;
+	WiredUI_RegisterCustomDraw( &def );
+
+	memset( &def, 0, sizeof( def ) );
+	Q_strncpyz( def.name, "custom:loading_server_info_strip", sizeof( def.name ) );
+	def.isStateful        = qfalse;
+	def.routine.stateless = Loading_CustomDraw_ServerInfoStrip;
+	WiredUI_RegisterCustomDraw( &def );
 }

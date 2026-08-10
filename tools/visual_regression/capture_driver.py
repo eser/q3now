@@ -65,12 +65,14 @@ def find_exe(explicit, default, name):
 
 
 def detect_wn_rdoc_capture(binary_path):
-    """Best-effort: scan the engine binaries for the WN_RDOC marker the
-    capture-trigger block logs ("[WN_RDOC]"). The trigger lives in the
-    renderer DLL (tr_backend.c -> wired_<api>_*.dll), not the client exe,
-    so this scans the .dll/.exe files alongside `binary_path`. Returns
-    True/False/None (None = couldn't tell). Not authoritative — the real
-    proof is whether a .rdc appears after a capture run."""
+    """Best-effort: scan the engine binaries for the WN_RDOC capture-trigger
+    marker. The trigger lives in the renderer DLL (tr_backend.c ->
+    wired_<api>_*.dll), not the client exe, so this scans the .dll/.exe files
+    alongside `binary_path`. The stable marker is the capture-file template
+    "wn_capture" (SetCaptureFilePathTemplate, == the .rdc basename); the trigger
+    also emits "TriggerCapture" / "capture window" / "renderer.rdoc". Returns
+    True/False/None (None = couldn't tell). Not authoritative — the real proof
+    is whether a .rdc appears after a capture run."""
     if not binary_path:
         return None
     bdir = os.path.dirname(os.path.abspath(binary_path))
@@ -78,6 +80,7 @@ def detect_wn_rdoc_capture(binary_path):
     # renderer DLLs first (most likely host of the trigger), then the exe
     for pat in ("wired_*x86_64.dll", "wired_*.dll", os.path.basename(binary_path)):
         candidates += glob.glob(os.path.join(bdir, pat))
+    markers = (b"wn_capture", b"TriggerCapture", b"renderer.rdoc")
     seen = set()
     found_any_file = False
     for c in candidates:
@@ -87,8 +90,9 @@ def detect_wn_rdoc_capture(binary_path):
         found_any_file = True
         try:
             with open(c, "rb") as fh:
-                if b"[WN_RDOC]" in fh.read():
-                    return True
+                blob = fh.read()
+            if any(m in blob for m in markers):
+                return True
         except OSError:
             continue
     return False if found_any_file else None
@@ -150,7 +154,17 @@ def run_capture(scene_cfg, *, binary=None, workdir=None, renderdoccmd=None,
     # `renderdoccmd capture` injects renderdoc.dll, then execs the target.
     # --working-dir sets the CWD the engine sees (so the in-app trigger's
     # "wn_capture" template and our layoutdump land in `workdir`).
-    cmd = [rdcmd, "capture", "--working-dir", workdir, "--", binary, *engine_args]
+    #
+    # renderdoccmd v1.x arg-parsing notes (verified on v1.44):
+    #   * NO "--" separator before the executable. renderdoccmd parses the
+    #     first non-option token as the target; a literal "--" is taken AS the
+    #     executable name ("Launching '--' ... Failed to launch process", rc=4).
+    #   * --wait-for-exit is REQUIRED. Without it renderdoccmd launches the
+    #     target and returns immediately (rc=8) before the in-app trigger has
+    #     fired — no .rdc. With it, renderdoccmd blocks until the engine
+    #     self-quits (the WN_RDOC trigger quits after the capture window), so
+    #     the .rdc is on disk when this returns.
+    cmd = [rdcmd, "capture", "--wait-for-exit", "--working-dir", workdir, binary, *engine_args]
     if verbose:
         sys.stderr.write("capture_driver: " + " ".join(cmd) + "\n")
 

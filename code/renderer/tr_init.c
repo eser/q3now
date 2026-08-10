@@ -4,6 +4,11 @@
 // tr_init.c -- functions that are not called every frame
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.init / .gl / .cmd
+
+R_LOG_DECLARE_CHANNEL( rch_init, "renderer.init" );
+R_LOG_DECLARE_CHANNEL( rch_gl,   "renderer.gl"   );
+R_LOG_DECLARE_CHANNEL( rch_cmd,  "renderer.cmd"  );
 
 glconfig_t	glConfig;
 qboolean	nonPowerOfTwoTextures;
@@ -258,7 +263,7 @@ void QDECL Com_Log_Impl( log_severity_t severity, int channel, const char *fmt, 
 	va_start( argptr, fmt );
 	vsnprintf( buf, sizeof( buf ), fmt, argptr );
 	va_end( argptr );
-	ri.Log( severity, "%s", buf );
+	R_LOG( rch_init,severity, "%s", buf );
 }
 
 // Stub for q_shared.c's LOG_CH expansion. The renderer DLL has no access
@@ -357,18 +362,18 @@ static void R_InitExtensions( void )
 
 	if ( !r_allowExtensions->integer )
 	{
-		ri.Log( SEV_INFO, "*** IGNORING OPENGL EXTENSIONS ***\n" );
+		R_LOG( rch_init, SEV_INFO, "*** IGNORING OPENGL EXTENSIONS ***\n" );
 		return;
 	}
 
-	ri.Log( SEV_INFO, "Initializing OpenGL extensions\n" );
+	R_LOG( rch_init, SEV_INFO, "Initializing OpenGL extensions\n" );
 
 	if ( R_HaveExtension( "GL_EXT_texture_edge_clamp" ) || R_HaveExtension( "GL_SGIS_texture_edge_clamp" ) ) {
 		gl_clamp_mode = GL_CLAMP_TO_EDGE;
-		ri.Log( SEV_INFO, "...using GL_EXT_texture_edge_clamp\n" );
+		R_LOG( rch_init, SEV_INFO, "...using GL_EXT_texture_edge_clamp\n" );
 	} else {
-		ri.Log( SEV_INFO, "...GL_EXT_texture_edge_clamp not found\n" );
-		ri.Log( SEV_INFO, S_COLOR_YELLOW "...Degraded texture support likely!\n" );
+		R_LOG( rch_init, SEV_INFO, "...GL_EXT_texture_edge_clamp not found\n" );
+		R_LOG( rch_init, SEV_INFO, S_COLOR_YELLOW "...Degraded texture support likely!\n" );
 	}
 
 	// GL_EXT_texture_compression_s3tc
@@ -377,12 +382,12 @@ static void R_InitExtensions( void )
 	{
 		if ( r_ext_compressed_textures->integer ){
 			glConfig.textureCompression = TC_S3TC_ARB;
-			ri.Log( SEV_INFO, "...using GL_EXT_texture_compression_s3tc\n" );
+			R_LOG( rch_init, SEV_INFO, "...using GL_EXT_texture_compression_s3tc\n" );
 		} else {
-			ri.Log( SEV_INFO, "...ignoring GL_EXT_texture_compression_s3tc\n" );
+			R_LOG( rch_init, SEV_INFO, "...ignoring GL_EXT_texture_compression_s3tc\n" );
 		}
 	} else {
-		ri.Log( SEV_INFO, "...GL_EXT_texture_compression_s3tc not found\n" );
+		R_LOG( rch_init, SEV_INFO, "...GL_EXT_texture_compression_s3tc not found\n" );
 	}
 
 	// GL_S3_s3tc
@@ -390,13 +395,13 @@ static void R_InitExtensions( void )
 		if ( R_HaveExtension( "GL_S3_s3tc" ) ) {
 			if ( r_ext_compressed_textures->integer ) {
 				glConfig.textureCompression = TC_S3TC;
-				ri.Log( SEV_INFO, "...using GL_S3_s3tc\n" );
+				R_LOG( rch_init, SEV_INFO, "...using GL_S3_s3tc\n" );
 			} else {
 				glConfig.textureCompression = TC_NONE;
-				ri.Log( SEV_INFO, "...ignoring GL_S3_s3tc\n" );
+				R_LOG( rch_init, SEV_INFO, "...ignoring GL_S3_s3tc\n" );
 			}
 		} else {
-			ri.Log( SEV_INFO, "...GL_S3_s3tc not found\n" );
+			R_LOG( rch_init, SEV_INFO, "...GL_S3_s3tc not found\n" );
 		}
 	}
 
@@ -404,21 +409,21 @@ static void R_InitExtensions( void )
 	if ( R_HaveExtension( "EXT_texture_env_add" ) ) {
 		if ( r_ext_texture_env_add->integer ) {
 			glConfig.textureEnvAddAvailable = qtrue;
-			ri.Log( SEV_INFO, "...using GL_EXT_texture_env_add\n" );
+			R_LOG( rch_init, SEV_INFO, "...using GL_EXT_texture_env_add\n" );
 		} else {
 			glConfig.textureEnvAddAvailable = qfalse;
-			ri.Log( SEV_INFO, "...ignoring GL_EXT_texture_env_add\n" );
+			R_LOG( rch_init, SEV_INFO, "...ignoring GL_EXT_texture_env_add\n" );
 		}
 	} else {
-		ri.Log( SEV_INFO, "...GL_EXT_texture_env_add not found\n" );
+		R_LOG( rch_init, SEV_INFO, "...GL_EXT_texture_env_add not found\n" );
 	}
 
 	// GL_ARB_texture_border_clamp
 	if ( R_HaveExtension( "GL_ARB_texture_border_clamp" ) ) {
 		textureBorderClampAvailable = qtrue;
-		ri.Log( SEV_INFO, "...using GL_ARB_texture_border_clamp\n" );
+		R_LOG( rch_init, SEV_INFO, "...using GL_ARB_texture_border_clamp\n" );
 	} else {
-		ri.Log( SEV_INFO, "...GL_ARB_texture_border_clamp not found\n" );
+		R_LOG( rch_init, SEV_INFO, "...GL_ARB_texture_border_clamp not found\n" );
 	}
 
 	// GL_ARB_multitexture
@@ -450,25 +455,25 @@ static void R_InitExtensions( void )
 						max_bind_units = MAX_TEXTURE_UNITS;
 
 					glConfig.numTextureUnits = MAX( textureUnits, max_bind_units );
-					ri.Log( SEV_INFO, "...using GL_ARB_multitexture\n" );
+					R_LOG( rch_init, SEV_INFO, "...using GL_ARB_multitexture\n" );
 				}
 				else
 				{
 					qglMultiTexCoord2fARB = NULL;
 					qglActiveTextureARB = NULL;
 					qglClientActiveTextureARB = NULL;
-					ri.Log( SEV_INFO, "...not using GL_ARB_multitexture, < 2 texture units\n" );
+					R_LOG( rch_init, SEV_INFO, "...not using GL_ARB_multitexture, < 2 texture units\n" );
 				}
 			}
 		}
 		else
 		{
-			ri.Log( SEV_INFO, "...ignoring GL_ARB_multitexture\n" );
+			R_LOG( rch_init, SEV_INFO, "...ignoring GL_ARB_multitexture\n" );
 		}
 	}
 	else
 	{
-		ri.Log( SEV_INFO, "...GL_ARB_multitexture not found\n" );
+		R_LOG( rch_init, SEV_INFO, "...GL_ARB_multitexture not found\n" );
 	}
 
 	// GL_EXT_compiled_vertex_array
@@ -476,7 +481,7 @@ static void R_InitExtensions( void )
 	{
 		if ( r_ext_compiled_vertex_array->integer )
 		{
-			ri.Log( SEV_INFO, "...using GL_EXT_compiled_vertex_array\n" );
+			R_LOG( rch_init, SEV_INFO, "...using GL_EXT_compiled_vertex_array\n" );
 			qglLockArraysEXT = ri.GL_GetProcAddress( "glLockArraysEXT" );
 			qglUnlockArraysEXT = ri.GL_GetProcAddress( "glUnlockArraysEXT" );
 			if ( !qglLockArraysEXT || !qglUnlockArraysEXT ) {
@@ -485,12 +490,12 @@ static void R_InitExtensions( void )
 		}
 		else
 		{
-			ri.Log( SEV_INFO, "...ignoring GL_EXT_compiled_vertex_array\n" );
+			R_LOG( rch_init, SEV_INFO, "...ignoring GL_EXT_compiled_vertex_array\n" );
 		}
 	}
 	else
 	{
-		ri.Log( SEV_INFO, "...GL_EXT_compiled_vertex_array not found\n" );
+		R_LOG( rch_init, SEV_INFO, "...GL_EXT_compiled_vertex_array not found\n" );
 	}
 
 	if ( R_HaveExtension( "GL_EXT_texture_filter_anisotropic" ) )
@@ -498,24 +503,24 @@ static void R_InitExtensions( void )
 		if ( r_ext_texture_filter_anisotropic->integer ) {
 			qglGetIntegerv( GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAnisotropy );
 			if ( maxAnisotropy <= 0 ) {
-				ri.Log( SEV_INFO, "...GL_EXT_texture_filter_anisotropic not properly supported!\n" );
+				R_LOG( rch_init, SEV_INFO, "...GL_EXT_texture_filter_anisotropic not properly supported!\n" );
 				maxAnisotropy = 0;
 			}
 			else
 			{
-				ri.Log( SEV_INFO, "...using GL_EXT_texture_filter_anisotropic (max: %i)\n", maxAnisotropy );
+				R_LOG( rch_init, SEV_INFO, "...using GL_EXT_texture_filter_anisotropic (max: %i)\n", maxAnisotropy );
 				textureFilterAnisotropic = qtrue;
 				maxAnisotropy = MIN( r_ext_max_anisotropy->integer, maxAnisotropy );
 			}
 		}
 		else
 		{
-			ri.Log( SEV_INFO, "...ignoring GL_EXT_texture_filter_anisotropic\n" );
+			R_LOG( rch_init, SEV_INFO, "...ignoring GL_EXT_texture_filter_anisotropic\n" );
 		}
 	}
 	else
 	{
-		ri.Log( SEV_INFO, "...GL_EXT_texture_filter_anisotropic not found\n" );
+		R_LOG( rch_init, SEV_INFO, "...GL_EXT_texture_filter_anisotropic not found\n" );
 	}
 
 	if ( R_HaveExtension( "GL_ARB_vertex_program" ) && R_HaveExtension( "GL_ARB_fragment_program" ) )
@@ -523,12 +528,12 @@ static void R_InitExtensions( void )
 		err = R_ResolveSymbols( arb_procs, ARRAY_LEN( arb_procs ) );
 		if ( err )
 		{
-			ri.Log( SEV_WARN, "Error resolving ARB program function '%s'\n", err );
+			R_LOG( rch_init, SEV_WARN, "Error resolving ARB program function '%s'\n", err );
 			qglGenProgramsARB = NULL; // indicates presence of ARB shaders functionality
 		}
 		else
 		{
-			ri.Log( SEV_INFO, "...using ARB vertex/fragment programs\n" );
+			R_LOG( rch_init, SEV_INFO, "...using ARB vertex/fragment programs\n" );
 		}
 	}
 
@@ -544,12 +549,12 @@ static void R_InitExtensions( void )
 		err = R_ResolveSymbols( vbo_procs, ARRAY_LEN( vbo_procs ) );
 		if ( err )
 		{
-			ri.Log( SEV_WARN, "Error resolving VBO function '%s'\n", err );
+			R_LOG( rch_init, SEV_WARN, "Error resolving VBO function '%s'\n", err );
 			qglBindBufferARB = NULL; // indicates presence of VBO functionality
 		}
 		else
 		{
-			ri.Log( SEV_INFO, "...using ARB vertex buffer objects\n" );
+			R_LOG( rch_init, SEV_INFO, "...using ARB vertex buffer objects\n" );
 		}
 	}
 #endif // USE_VBO
@@ -560,7 +565,7 @@ static void R_InitExtensions( void )
 		err = R_ResolveSymbols( fbo_procs, ARRAY_LEN( fbo_procs ) );
 		if ( err )
 		{
-			ri.Log( SEV_WARN, "Error resolving FBO function '%s'\n", err );
+			R_LOG( rch_init, SEV_WARN, "Error resolving FBO function '%s'\n", err );
 			qglGenFramebuffers = NULL; // indicates presence of FBO functionality
 		}
 		else
@@ -575,7 +580,7 @@ static void R_InitExtensions( void )
 #ifdef USE_PMLIGHT
 	if (r_dlightMode->integer && !qglGenProgramsARB)
 	{
-			ri.Log( SEV_INFO, "...Per-pixel dynamic lights disabled. Missing ARB shader support\n" );
+			R_LOG( rch_init, SEV_INFO, "...Per-pixel dynamic lights disabled. Missing ARB shader support\n" );
 	}
 #endif
 }
@@ -752,10 +757,10 @@ void GL_CheckErrors( void ) {
 NOTE TTimo
 some thoughts about the screenshots system:
 screenshots get written in fs_homepath + fs_gamedir
-vanilla q3 .. baseq3/screenshots/ *.tga
-team arena .. missionpack/screenshots/ *.tga
+q3now .. base/screenshots/ *.png
 
-two commands: "screenshot" and "screenshotJPEG"
+one command: "screenshot" (see renderercommon/tr_screenshot.c for the
+token grammar — png|jpg|bmp|tga|clipboard|silent|levelshot|<filename>)
 we use statics to store a count and start writing the first screenshot/screenshot????.tga (.jpg) available
 (with FS_FileExists / FS_FOpenFileWrite calls)
 FIXME: the statics don't get a reinit between fs_game changes
@@ -1019,33 +1024,55 @@ void RB_TakeScreenshotBMP( int x, int y, int width, int height, const char *file
 
 /*
 ==================
-R_ScreenshotFilename
+RB_TakeScreenshotPNG
+
+PNG encoder via renderercommon/tr_image_png_write.c. Inputs follow the
+RB_ReadPixels convention (bottom-up RGB, no padding). When clipboardOnly
+is non-zero the encoded PNG bytes go to ri.Sys_SetClipboardImagePNG
+instead of FS_WriteFile.
 ==================
 */
-static void R_ScreenshotFilename( char *fileName, const char *fileExt ) {
-	qtime_t t;
-	int count;
-	int ms;
+void RB_TakeScreenshotPNG( int x, int y, int width, int height, const char *fileName, int clipboardOnly )
+{
+	byte	*allbuf;
+	byte	*buffer;
+	byte	*pngBytes = NULL;
+	int		 pngLen = 0;
+	size_t	 offset = 0;
+	int		 padlen;
 
-	count = 0;
-	ri.Com_RealTime( &t );
-	ms = ri.Milliseconds() % 1000;
-	if ( ms < 0 ) ms = 0;
+	allbuf = RB_ReadPixels( x, y, width, height, &offset, &padlen, 0 );
+	buffer = allbuf + offset;
 
-	/* YYYY_MM_DD-HH_MM_SS-TTT filename format — the millisecond
-	 * suffix removes the need to scan the directory when capturing
-	 * screenshots in quick succession. */
-	Com_sprintf( fileName, MAX_OSPATH,
-		"screenshots/%04d_%02d_%02d-%02d_%02d_%02d-%03d.%s",
-		1900 + t.tm_year, 1 + t.tm_mon, t.tm_mday,
-		t.tm_hour, t.tm_min, t.tm_sec, ms, fileExt );
-
-	while (	ri.FS_FileExists( fileName ) && ++count < 1000 ) {
-		Com_sprintf( fileName, MAX_OSPATH,
-			"screenshots/%04d_%02d_%02d-%02d_%02d_%02d-%03d_%d.%s",
-			1900 + t.tm_year, 1 + t.tm_mon, t.tm_mday,
-			t.tm_hour, t.tm_min, t.tm_sec, ms, count, fileExt );
+	// compact away any line padding the GL path introduced
+	if ( padlen != 0 ) {
+		byte *src = buffer;
+		byte *dst = buffer;
+		int  i;
+		for ( i = 0; i < height; i++ ) {
+			if ( src != dst ) memmove( dst, src, width * 3 );
+			src += width * 3 + padlen;
+			dst += width * 3;
+		}
 	}
+
+	// gamma correction (matches existing TGA/BMP path)
+	R_GammaCorrect( buffer, (size_t)width * 3 * height );
+
+	if ( !R_EncodePNG( buffer, width, height, &pngBytes, &pngLen ) ) {
+		R_LOG( rch_cmd, SEV_WARN, "RB_TakeScreenshotPNG: encode failed\n" );
+		ri.Hunk_FreeTempMemory( allbuf );
+		return;
+	}
+
+	if ( clipboardOnly ) {
+		ri.Sys_SetClipboardImagePNG( pngBytes, pngLen );
+	} else {
+		ri.FS_WriteFile( fileName, pngBytes, pngLen );
+	}
+
+	ri.Free( pngBytes );
+	ri.Hunk_FreeTempMemory( allbuf );
 }
 
 
@@ -1055,9 +1082,12 @@ R_LevelShot
 
 levelshots are specialized 128*128 thumbnails for
 the menu system, sampled down from full screen distorted images
+
+Non-static — called by the shared screenshot grammar (renderercommon/
+tr_screenshot.c) via the R_LevelShot hook.
 ====================
 */
-static void R_LevelShot( void ) {
+void R_LevelShot( void ) {
 	char		checkname[MAX_OSPATH];
 	byte		*buffer;
 	byte		*source, *allsource;
@@ -1111,87 +1141,46 @@ static void R_LevelShot( void ) {
 	ri.Hunk_FreeTempMemory(buffer);
 	ri.Hunk_FreeTempMemory(allsource);
 
-	ri.Log( SEV_INFO, "Wrote %s\n", checkname );
+	R_LOG( rch_cmd, SEV_INFO, "Wrote %s\n", checkname );
 }
 
 
 /*
 ==================
-R_ScreenShot_f
+RB_ScheduleScreenshot
 
-screenshot
-screenshot [silent]
-screenshot [levelshot]
-screenshot [filename]
-
-Doesn't print the pacifier message if there is a second arg
+Screenshot grammar hook (see renderercommon/tr_screenshot.h). The shared
+grammar resolves (typeMask, fileName, silent); this schedules the capture
+in the GL backend via the screenshotMask model — the actual write happens
+at end of RE_EndFrame. Returns qfalse when the screenshot cannot be taken
+(minimized with no FBO) or is already scheduled for that format.
 ==================
 */
-static void R_ScreenShot_f( void ) {
-	char		checkname[MAX_OSPATH];
-	qboolean	silent;
-	int			typeMask;
-	const char	*ext;
-
+qboolean RB_ScheduleScreenshot( int typeMask, const char *fileName, qboolean silent ) {
 	if ( ri.CL_IsMinimized() && !RE_CanMinimize() ) {
-		ri.Log( SEV_WARN, "WARNING: unable to take screenshot when minimized because FBO is not available/enabled.\n" );
-		return;
+		R_LOG( rch_cmd, SEV_WARN, "WARNING: unable to take screenshot when minimized because FBO is not available/enabled.\n" );
+		return qfalse;
 	}
 
-	if ( !strcmp( ri.Cmd_Argv(1), "levelshot" ) ) {
-		R_LevelShot();
-		return;
-	}
+	// already-scheduled gate (per-format)
+	if ( backEnd.screenshotMask & ( typeMask & ( SCREENSHOT_TGA | SCREENSHOT_JPG | SCREENSHOT_BMP | SCREENSHOT_PNG ) ) )
+		return qfalse;
 
-	if ( Q_stricmp( ri.Cmd_Argv(0), "screenshotJPEG" ) == 0 ) {
-		typeMask = SCREENSHOT_JPG;
-		ext = "jpg";
-	} else if ( Q_stricmp( ri.Cmd_Argv(0), "screenshotBMP" ) == 0 ) {
-		typeMask = SCREENSHOT_BMP;
-		ext = "bmp";
-	} else {
-		typeMask = SCREENSHOT_TGA;
-		ext = "tga";
-	}
-
-	// check if already scheduled
-	if ( backEnd.screenshotMask & typeMask )
-		return;
-
-	if ( !strcmp( ri.Cmd_Argv(1), "silent" ) ) {
-		silent = qtrue;
-	} else if ( typeMask == SCREENSHOT_BMP && !strcmp( ri.Cmd_Argv(1), "clipboard" ) ) {
-		backEnd.screenshotMask |= SCREENSHOT_BMP_CLIPBOARD;
-		silent = qtrue;
-	} else {
-		silent = qfalse;
-	}
-
-	if ( ri.Cmd_Argc() == 2 && !silent ) {
-		// explicit filename
-		Com_sprintf( checkname, MAX_OSPATH, "screenshots/%s.%s", ri.Cmd_Argv( 1 ), ext );
-	} else {
-		if ( backEnd.screenshotMask & SCREENSHOT_BMP_CLIPBOARD ) {
-			// no need for filename, copy to system buffer
-			checkname[0] = '\0';
-		} else {
-			// scan for a free filename
-			R_ScreenshotFilename( checkname, ext );
-		}
-	}
-
-	// we will make screenshot right at the end of RE_EndFrame()
 	backEnd.screenshotMask |= typeMask;
-	if ( typeMask == SCREENSHOT_JPG ) {
+	if ( typeMask & SCREENSHOT_JPG ) {
 		backEnd.screenShotJPGsilent = silent;
-		Q_strncpyz( backEnd.screenshotJPG, checkname, sizeof( backEnd.screenshotJPG ) );
-	} else if ( typeMask == SCREENSHOT_BMP ) {
+		Q_strncpyz( backEnd.screenshotJPG, fileName, sizeof( backEnd.screenshotJPG ) );
+	} else if ( typeMask & SCREENSHOT_BMP ) {
 		backEnd.screenShotBMPsilent = silent;
-		Q_strncpyz( backEnd.screenshotBMP, checkname, sizeof( backEnd.screenshotBMP ) );
+		Q_strncpyz( backEnd.screenshotBMP, fileName, sizeof( backEnd.screenshotBMP ) );
+	} else if ( typeMask & SCREENSHOT_PNG ) {
+		backEnd.screenShotPNGsilent = silent;
+		Q_strncpyz( backEnd.screenshotPNG, fileName, sizeof( backEnd.screenshotPNG ) );
 	} else {
 		backEnd.screenShotTGAsilent = silent;
-		Q_strncpyz( backEnd.screenshotTGA, checkname, sizeof( backEnd.screenshotTGA ) );
+		Q_strncpyz( backEnd.screenshotTGA, fileName, sizeof( backEnd.screenshotTGA ) );
 	}
+	return qtrue;
 }
 
 
@@ -1370,7 +1359,7 @@ static void R_PrintLongString(const char *string) {
 	while(size > 0)
 	{
 		Q_strncpyz(buffer, p, sizeof (buffer) );
-		ri.Log( SEV_DEBUG, "%s", buffer );
+		R_LOG( rch_init, SEV_DEBUG, "%s", buffer );
 		p += 1023;
 		size -= 1023;
 	}
@@ -1391,17 +1380,17 @@ static void GfxInfo( void )
 	const char *fs;
 	int mode;
 
-	ri.Log( SEV_INFO, "\n" );
-	ri.Log( SEV_INFO, "GL_VENDOR: %s\n", glConfig.vendor_string );
-	ri.Log( SEV_INFO, "GL_RENDERER: %s\n", glConfig.renderer_string );
-	ri.Log( SEV_INFO, "GL_VERSION: %s\n", glConfig.version_string );
-	ri.Log( SEV_DEBUG, "GL_EXTENSIONS: " );
+	R_LOG( rch_init, SEV_INFO, "\n" );
+	R_LOG( rch_init, SEV_INFO, "GL_VENDOR: %s\n", glConfig.vendor_string );
+	R_LOG( rch_init, SEV_INFO, "GL_RENDERER: %s\n", glConfig.renderer_string );
+	R_LOG( rch_init, SEV_INFO, "GL_VERSION: %s\n", glConfig.version_string );
+	R_LOG( rch_init, SEV_DEBUG, "GL_EXTENSIONS: " );
 	R_PrintLongString( glConfig.extensions_string );
-	ri.Log( SEV_INFO, "\n" );
-	ri.Log( SEV_INFO, "GL_MAX_TEXTURE_SIZE: %d\n", glConfig.maxTextureSize );
-	ri.Log( SEV_INFO, "GL_MAX_TEXTURE_UNITS_ARB: %d\n", glConfig.numTextureUnits );
-	ri.Log( SEV_INFO, "\n" );
-	ri.Log( SEV_INFO, "PIXELFORMAT: color(%d-bits) Z(%d-bit) stencil(%d-bits)\n", glConfig.colorBits, glConfig.depthBits, glConfig.stencilBits );
+	R_LOG( rch_init, SEV_INFO, "\n" );
+	R_LOG( rch_init, SEV_INFO, "GL_MAX_TEXTURE_SIZE: %d\n", glConfig.maxTextureSize );
+	R_LOG( rch_init, SEV_INFO, "GL_MAX_TEXTURE_UNITS_ARB: %d\n", glConfig.numTextureUnits );
+	R_LOG( rch_init, SEV_INFO, "\n" );
+	R_LOG( rch_init, SEV_INFO, "PIXELFORMAT: color(%d-bits) Z(%d-bit) stencil(%d-bits)\n", glConfig.colorBits, glConfig.depthBits, glConfig.stencilBits );
 
 	if ( glConfig.isFullscreen )
 	{
@@ -1420,26 +1409,26 @@ static void GfxInfo( void )
 
 	if ( glConfig.vidWidth != gls.windowWidth || glConfig.vidHeight != gls.windowHeight )
 	{
-		ri.Log( SEV_INFO, "RENDER: %d x %d, MODE: %d, %d x %d %s hz:", glConfig.vidWidth, glConfig.vidHeight, mode, gls.windowWidth, gls.windowHeight, fs );
+		R_LOG( rch_init, SEV_INFO, "RENDER: %d x %d, MODE: %d, %d x %d %s hz:", glConfig.vidWidth, glConfig.vidHeight, mode, gls.windowWidth, gls.windowHeight, fs );
 	}
 	else
 	{
-		ri.Log( SEV_INFO, "MODE: %d, %d x %d %s hz:", mode, gls.windowWidth, gls.windowHeight, fs );
+		R_LOG( rch_init, SEV_INFO, "MODE: %d, %d x %d %s hz:", mode, gls.windowWidth, gls.windowHeight, fs );
 	}
 
 	if ( glConfig.displayFrequency )
 	{
-		ri.Log( SEV_INFO, "%d\n", glConfig.displayFrequency );
+		R_LOG( rch_init, SEV_INFO, "%d\n", glConfig.displayFrequency );
 	}
 	else
 	{
-		ri.Log( SEV_INFO, "N/A\n" );
+		R_LOG( rch_init, SEV_INFO, "N/A\n" );
 	}
 
-	ri.Log( SEV_INFO, "multitexture: %s\n", enablestrings[qglActiveTextureARB != 0] );
-	ri.Log( SEV_INFO, "compiled vertex arrays: %s\n", enablestrings[qglLockArraysEXT != 0 ] );
-	ri.Log( SEV_INFO, "texenv add: %s\n", enablestrings[glConfig.textureEnvAddAvailable != 0] );
-	ri.Log( SEV_INFO, "compressed textures: %s\n", enablestrings[glConfig.textureCompression!=TC_NONE] );
+	R_LOG( rch_init, SEV_INFO, "multitexture: %s\n", enablestrings[qglActiveTextureARB != 0] );
+	R_LOG( rch_init, SEV_INFO, "compiled vertex arrays: %s\n", enablestrings[qglLockArraysEXT != 0 ] );
+	R_LOG( rch_init, SEV_INFO, "texenv add: %s\n", enablestrings[glConfig.textureEnvAddAvailable != 0] );
+	R_LOG( rch_init, SEV_INFO, "compressed textures: %s\n", enablestrings[glConfig.textureCompression!=TC_NONE] );
 }
 
 
@@ -1453,25 +1442,25 @@ Prints info that may change every R_Init() call
 static void VarInfo( void )
 {
 	if ( glConfig.deviceSupportsGamma ) {
-		ri.Log( SEV_DEBUG, "GAMMA: hardware w/ %d overbright bits\n", tr.overbrightBits );
+		R_LOG( rch_init, SEV_DEBUG, "GAMMA: hardware w/ %d overbright bits\n", tr.overbrightBits );
 	} else {
-		ri.Log( SEV_DEBUG, "GAMMA: software w/ %d overbright bits\n", tr.overbrightBits );
+		R_LOG( rch_init, SEV_DEBUG, "GAMMA: software w/ %d overbright bits\n", tr.overbrightBits );
 	}
 
-	ri.Log( SEV_INFO, "texturemode: %s\n", r_textureMode->string );
-	ri.Log( SEV_INFO, "texture bits: %d\n", r_textureBits->integer ? r_textureBits->integer : 32 );
-	ri.Log( SEV_INFO, "picmip: %d%s\n", r_picmip->integer, r_nomip->integer ? ", worldspawn only" : "" );
+	R_LOG( rch_init, SEV_INFO, "texturemode: %s\n", r_textureMode->string );
+	R_LOG( rch_init, SEV_INFO, "texture bits: %d\n", r_textureBits->integer ? r_textureBits->integer : 32 );
+	R_LOG( rch_init, SEV_INFO, "picmip: %d%s\n", r_picmip->integer, r_nomip->integer ? ", worldspawn only" : "" );
 
 	if ( r_vertexLight->integer || glConfig.hardwareType == GLHW_PERMEDIA2 ) {
-		ri.Log( SEV_INFO, "HACK: using vertex lightmap approximation\n" );
+		R_LOG( rch_init, SEV_INFO, "HACK: using vertex lightmap approximation\n" );
 	} else if ( glConfig.hardwareType == GLHW_RAGEPRO ) {
-		ri.Log( SEV_INFO, "HACK: ragePro approximations\n" );
+		R_LOG( rch_init, SEV_INFO, "HACK: ragePro approximations\n" );
 	} else if ( glConfig.hardwareType == GLHW_RIVA128 ) {
-		ri.Log( SEV_INFO, "HACK: riva128 approximations\n" );
+		R_LOG( rch_init, SEV_INFO, "HACK: riva128 approximations\n" );
 	}
 
 	if ( r_finish->integer ) {
-		ri.Log( SEV_INFO, "Forcing glFinish\n" );
+		R_LOG( rch_init, SEV_INFO, "Forcing glFinish\n" );
 	}
 }
 
@@ -1500,9 +1489,6 @@ static void R_Register( void )
 	ri.Cmd_AddCommand( "shaderlist", R_ShaderList_f );
 	ri.Cmd_AddCommand( "skinlist", R_SkinList_f );
 	ri.Cmd_AddCommand( "modellist", R_Modellist_f );
-	ri.Cmd_AddCommand( "screenshot", R_ScreenShot_f );
-	ri.Cmd_AddCommand( "screenshotJPEG", R_ScreenShot_f );
-	ri.Cmd_AddCommand( "screenshotBMP", R_ScreenShot_f );
 	ri.Cmd_AddCommand( "gfxinfo", GfxInfo_f );
 
 	//
@@ -1666,7 +1652,7 @@ static void R_Register( void )
 	ri.Cvar_SetGroup( r_bloomThresholdMode, CVG_RENDERER );
 	r_bloomIntensity = ri.Cvar_Get( "r_bloomIntensity", "0.5", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_bloomIntensity, "Final bloom blend factor, default is 0.5." );
-	r_bloomPasses = ri.Cvar_Get( "r_bloomPasses", "5", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	r_bloomPasses = ri.Cvar_Get( "r_bloomPasses", "2", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloomPasses, "3", XSTRING( MAX_BLUR_PASSES ), CV_INTEGER );
 	ri.Cvar_SetDescription( r_bloomPasses, "Count of downsampled passes (framebuffers) to blend on final bloom image, default is 5." );
 	r_bloomBlendBase = ri.Cvar_Get( "r_bloomBlendBase", "1", CVAR_ARCHIVE | CVAR_NODEFAULT );
@@ -1801,7 +1787,14 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_lockpvs, "Debugging tool: Locks to current potentially visible set. Useful for testing vis-culling in maps." );
 	r_noportals = ri.Cvar_Get( "r_noportals", "0", 0 );
 	ri.Cvar_SetDescription(r_noportals, "Disables in-game portals, valid values: 0: Portals enabled\n 1: Portals disabled\n 2: Portals and mirrors disabled" );
-	r_shadows = ri.Cvar_Get( "cg_shadows", "1", 0 );
+	// cg_shadows is a single archived cvar shared with the Vulkan renderer, where it is
+	// the unified shadow level (0=off, 1=contact/blob, 2=cast, 3=all) and defaults to 2.
+	// This legacy GL path keeps its own 0=none/1=blur/2=stencil/3=projection semantics, so
+	// the default is aligned to 2 to match the shared value a Vulkan session archives — a
+	// 2 here selects this renderer's stencil shadows (legacy, no crash) rather than a
+	// surprise off/blur. GL shadow semantics are otherwise unchanged; Vulkan is the
+	// shipped path.
+	r_shadows = ri.Cvar_Get( "cg_shadows", "2", 0 );
 
 	r_marksOnTriangleMeshes = ri.Cvar_Get("r_marksOnTriangleMeshes", "0", CVAR_ARCHIVE | CVAR_NODEFAULT );
 	ri.Cvar_SetDescription( r_marksOnTriangleMeshes, "Enables impact marks on triangle mesh surfaces (ie: MD3 models.) Requires impact marks to be enabled in the game code." );
@@ -1842,7 +1835,7 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_ignorehwgamma, "Overrides hardware gamma capabilities." );
 
 	r_flares = ri.Cvar_Get( "r_flares", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_flares, "Enables corona effects on light sources." );
+	ri.Cvar_SetDescription( r_flares, "Enables halo effects on light sources." );
 
 #ifdef USE_FBO
 	r_fbo = ri.Cvar_Get( "r_fbo", "1", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
@@ -1882,7 +1875,7 @@ void R_Init( void ) {
 	int i;
 	byte *ptr;
 
-	ri.Log( SEV_INFO, "----- R_Init -----\n" );
+	R_LOG( rch_init, SEV_INFO, "----- R_Init -----\n" );
 
 	// clear all our internal state
 	memset( &tr, 0, sizeof( tr ) );
@@ -1890,11 +1883,16 @@ void R_Init( void ) {
 	memset( &tess, 0, sizeof( tess ) );
 	memset( &glState, 0, sizeof( glState ) );
 
-	if ( sizeof( glconfig_t ) != 11332 )
-		ri.Terminate( TERM_UNRECOVERABLE, "Mod ABI incompatible: sizeof(glconfig_t) == %u != 11332", (unsigned int) sizeof( glconfig_t ) );
+	// glconfig_t ABI tripwire. Was 11332; bumped to 11340 when vidWidthLogical/
+	// vidHeightLogical (2 ints, +8 bytes) were appended for HiDPI font scaling.
+	// All native modules (engine + renderer DLLs + gamecl/gamesv) are rebuilt
+	// from the same tr_types.h, so they agree on the new size; this constant is
+	// the human tripwire that forces that coordinated rebuild.
+	if ( sizeof( glconfig_t ) != 11340 )
+		ri.Terminate( TERM_UNRECOVERABLE, "Mod ABI incompatible: sizeof(glconfig_t) == %u != 11340", (unsigned int) sizeof( glconfig_t ) );
 
 	if ( (intptr_t)tess.xyz & 15 ) {
-		ri.Log( SEV_WARN, "tess.xyz not 16 byte aligned\n" );
+		R_LOG( rch_init, SEV_WARN, "tess.xyz not 16 byte aligned\n" );
 	}
 	memset( tess.constantColor255, 255, sizeof( tess.constantColor255 ) );
 
@@ -1957,9 +1955,9 @@ void R_Init( void ) {
 
 	err = qglGetError();
 	if ( err != GL_NO_ERROR )
-		ri.Log( SEV_WARN, "glGetError() = 0x%x\n", err );
+		R_LOG( rch_gl, SEV_WARN, "glGetError() = 0x%x\n", err );
 
-	ri.Log( SEV_INFO, "----- finished R_Init -----\n" );
+	R_LOG( rch_init, SEV_INFO, "----- finished R_Init -----\n" );
 }
 
 
@@ -1970,12 +1968,14 @@ RE_Shutdown
 */
 static void RE_Shutdown( refShutdownCode_t code ) {
 
-	ri.Log( SEV_INFO, "RE_Shutdown( %i )\n", code );
+	R_LOG( rch_init, SEV_INFO, "RE_Shutdown( %i )\n", code );
 
 	ri.Cmd_RemoveCommand( "modellist" );
-	ri.Cmd_RemoveCommand( "screenshotBMP" );
-	ri.Cmd_RemoveCommand( "screenshotJPEG" );
-	ri.Cmd_RemoveCommand( "screenshot" );
+	// `screenshot` is registered persistently from GetRefAPI so it survives
+	// map transitions; only deregister it on an actual DLL unload.
+	if ( code != REF_LEVEL_ONLY ) {
+		R_ScreenshotUnregisterCommands();
+	}
 	ri.Cmd_RemoveCommand( "imagelist" );
 	ri.Cmd_RemoveCommand( "shaderlist" );
 	ri.Cmd_RemoveCommand( "skinlist" );
@@ -1990,7 +1990,7 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	R_DoneFreeType();
 
 	// shut down platform specific OpenGL stuff
-	if ( code != REF_KEEP_CONTEXT ) {
+	if ( code != REF_LEVEL_ONLY ) {
 
 		QGL_DoneARB();
 
@@ -2051,7 +2051,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	memset( &re, 0, sizeof( re ) );
 
 	if ( apiVersion != REF_API_VERSION ) {
-		ri.Log( SEV_INFO, "Mismatched REF_API_VERSION: expected %i, got %i\n",
+		R_LOG( rch_init, SEV_INFO, "Mismatched REF_API_VERSION: expected %i, got %i\n",
 			REF_API_VERSION, apiVersion );
 		return NULL;
 	}
@@ -2087,15 +2087,18 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.AddLinearLightToScene = RE_AddLinearLightToScene;
 	re.AddRibbonToScene = RE_AddRibbonToScene;
 	re.AddBeamToScene = RE_AddBeamToScene;
+	re.AddRailRibbonToScene = RE_AddRailRibbonToScene;
 	re.AddSpriteToScene = RE_AddSpriteToScene;
 	re.EmitParticles = RE_EmitParticles;
 	re.AddDecalToScene = RE_AddDecalToScene;
+	re.AddLensSourceToScene = RE_AddLensSourceToScene;
+	re.GetLensVisibility = RE_GetLensVisibility;
 	re.RegisterParticleClass = RE_RegisterParticleClass;
 
 	re.RenderScene = RE_RenderScene;
 
-#if FEAT_CORONA
-	re.AddCoronaToScene = RE_AddCoronaToScene;
+#if FEAT_HALO
+	re.AddHaloToScene = RE_AddHaloToScene;
 #endif
 #if FEAT_FOG_SYSTEM
 	re.GetGlobalFog = RE_GetGlobalFog;
@@ -2129,6 +2132,11 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 #if FEAT_IQM
 	re.GetIQMAnimations = R_GetIQMAnimations;
 #endif // FEAT_IQM
+
+	// `screenshot` grammar (renderercommon/tr_screenshot.c) is registered
+	// once per DLL load so it persists across map transitions — R_Register
+	// commands are torn down on every REF_LEVEL_ONLY shutdown.
+	R_ScreenshotRegisterCommands();
 
 	return &re;
 }

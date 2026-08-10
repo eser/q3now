@@ -1,0 +1,42 @@
+// primitive_display_text.wui — DisplayText v2 primitive demo.
+// Large headline rendered through $font_sans (Oxanium) — the v2 design's
+// DisplayText pattern. Bone-colored on dark ink; accent secondary line
+// for typographic hierarchy demo.
+
+menuDef {
+	name "primitive_display_text"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor $ink
+
+	itemDef {
+		name "display_text_hero_a"
+		rect 0.10 0.32 0.80 0.16
+		text "QUAKE"
+		font $font_sans 96
+		forecolor $bone
+		visible 1
+		decoration
+	}
+	itemDef {
+		name "display_text_hero_b"
+		rect 0.10 0.46 0.80 0.16
+		text "WIRED"
+		font $font_sans 96
+		forecolor $accent
+		visible 1
+		decoration
+	}
+	itemDef {
+		name "display_text_caption"
+		rect 0.10 0.66 0.80 0.04
+		text "DisplayText · oxanium @ 96 · bone + accent"
+		font $font_mono 11
+		forecolor $boneDim
+		visible 1
+		decoration
+	}
+}

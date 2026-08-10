@@ -1,0 +1,113 @@
+// demos.wui -- q3now Demo Browser (Phase 5d canonical)
+//
+// ListBox panel (§7.1 pattern). Top bar + header + subheader +
+// 1-column ListBox over FEEDER_DEMOS + Play/Back footer.
+// Double-click plays. Reached from main menu → Demos.
+
+menuDef {
+	name "demos"
+	layer "menu"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "browser_root"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		background "layered" effects "base+glow+noise+vignette"
+
+		itemDef {
+			name "top_bar"
+			type container
+			rect 0 0 1 $top_bar_height
+			direction row
+			padding 0.005 0.02
+			alignY center
+			background $panel
+			borderY 1px $line
+
+			itemDef { name "brand" type 0 rect 0 0 0.22 0.04 height FIT text "q3now / Demos" textalign 0 font $font_sans_bold 14 forecolor $accent decoration visible 1 grow 0 }
+			itemDef { name "top_bar_spacer" type container rect 0 0 0 0 grow 1 }
+			itemDef { name "hint" type 0 rect 0 0 0.2 0.04 height FIT text "double-click to play" textalign 2 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+		}
+
+		itemDef {
+			name "browser_content"
+			type container
+			rect 0 0 1 0.83
+			direction column
+			padding $content_padding_y $content_padding_x
+			gap $spacing_md
+			grow 1
+			height GROW
+
+			itemDef { name "header"    type 0 rect 0 0 1 0.06 height FIT text "Saved Demos" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
+			itemDef { name "subheader" type 0 rect 0 0 1 0.03 height FIT text "Recorded matches available for playback." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+
+			itemDef {
+				name "list_header"
+				type container
+				rect 0 0 1 0.04
+				direction row
+				gap $spacing_xs
+				height FIT
+				background $panel
+				borderY 0 1px $line
+				padding 0.005 0.01
+
+				itemDef { name "h_demo" type 0 rect 0 0 1.0 0.03 height FIT width PERCENT 1.0 text "DEMO FILE" textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+			}
+
+			itemDef {
+				name "demolist"
+				type 6
+				rect 0 0 1 0.6
+				width PERCENT 1.0
+				height GROW
+				font $font_sans 12
+				forecolor $bone
+				backcolor $panelDeep
+				style 1
+				feeder "demos"
+				elementheight 24
+				columns 1 0 1000 32
+				visible 1
+				doubleclick { rundemo }
+			}
+
+			itemDef {
+				name "browser_footer"
+				type container
+				rect 0 0 1 0.05
+				direction row
+				gap $spacing_md
+				alignX end
+				alignY center
+				height FIT
+				padding 0.005 0
+
+				itemDef { type 1 rect 0 0 0.14 0.04 height FIT text "Back" textalign 1 font $font_sans 13       forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+				itemDef { type 1 rect 0 0 0.14 0.04 height FIT text "Play" textalign 1 font $font_sans_bold 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { rundemo } }
+			}
+		}
+
+		itemDef {
+			name "bottom_bar"
+			type container
+			rect 0 0 1 $bottom_bar_height
+			direction row
+			padding 0 0.02
+			alignY center
+			alignX end
+			gap $spacing_md
+
+			itemDef { name "hint_back" type 0 rect 0 0 0.1 0.025 height FIT text "ESC back" textalign 2 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+		}
+	}
+
+	onESC { close }
+}

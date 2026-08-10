@@ -58,4 +58,26 @@ qboolean UserVM_IsAdminContext ( void );
    Returns qtrue on success, qfalse on Lua error (error string in outBuf). */
 qboolean UserVM_RconExecute( const char *code, char *outBuf, int outBufSize );
 
+/* ---- Chunk compile + cache (WiredUI compositor) -----------
+ *
+ * Mirror of WiredScript_*Chunk* (wired_scripting.h) but against the User
+ * VM lua_State. Shares the WIRED_CHUNK_NOREF=0 sentinel. Used when a
+ * wiredMenuDef_t carries `vm "user"`. Refs are positive integers,
+ * symmetric with the System VM ref space (each VM has its own registry).
+ *
+ * Errors logged at SEV_WARN via Com_Log. */
+int      UserVM_CompileChunk             ( const char *text, const char *chunkName );
+void     UserVM_ReleaseChunk             ( int chunkRef );
+
+int      UserVM_CallChunkArrayLen        ( int chunkRef );
+qboolean UserVM_ChunkArrayItemAsString   ( int index, char *out, size_t outSize );
+qboolean UserVM_ChunkArrayItemAsNumber   ( int index, double *out );
+qboolean UserVM_ChunkArrayItemFieldAsString( int index, const char *field,
+                                              char *out, size_t outSize );
+void     UserVM_ChunkArrayRelease        ( void );
+
+qboolean UserVM_CallChunkBool            ( int chunkRef, qboolean defaultVal );
+qboolean UserVM_CallChunkString          ( int chunkRef, char *out, size_t outSize );
+qboolean UserVM_CallChunkNumber          ( int chunkRef, double *out );
+
 #endif /* USER_VM_H */

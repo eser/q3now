@@ -99,10 +99,25 @@ static const fontFace_t *Text_ResolveFace( int fontId )
 		break;
 	}
 
+	/* Load a lazy face's atlas on first use (block-until-resident) so the Text_Draw*
+	 * consumers, which use face->atlas directly, never see a NULL atlas for a lazy
+	 * face and draw correct glyphs on the first frame. */
+	if ( face ) WiredFont_EnsureAtlas( face );
+
 	if ( fontId >= 0 && fontId < TEXT_FACE_CACHE_SIZE && face ) {
 		wui_faceCache[fontId] = face;
 	}
 	return face;
+}
+
+/* Read-only accessor for the file-static cl_wiredTextShadow cvar. The
+ * compositor dispatch path (cl_wired_clay.c) calls this to gate its
+ * SetMSDFShadow push/pop the same way legacy Text_Draw / Text_DrawClipped
+ * gate theirs (lines 131, 144, 171, 196). Returns qfalse if the cvar
+ * hasn't been registered yet (Text_Init not called) — safe default. */
+qboolean Text_ShadowEnabled( void )
+{
+	return ( cl_wiredTextShadow && cl_wiredTextShadow->integer ) ? qtrue : qfalse;
 }
 
 /* ── Text_Draw ─────────────────────────────────────────────────────── */

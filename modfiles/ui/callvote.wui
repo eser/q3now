@@ -1,0 +1,200 @@
+// callvote.wui -- q3now Call Vote dialog (full vote-initiation menu)
+//
+// In-game cluster popup (§7.4). Centered overlay sharing the
+// addbots / serverinfo shape: header + subheader + grouped, scrollable
+// vote-action body + footer.
+//
+// Vote command grounding (verified against q3now game code, NOT copied
+// from Team Arena):
+//   Cmd_CallVote_f  (code/game/g_cmds.c:1441) accepts:
+//     map_restart · nextmap · map <name> · g_gametype <n> · kick <player>
+//     · clientkick <n> · g_minPlayers · g_scorelimit · g_timelimit
+//     · shuffle · g_unlagged · (weather, FEAT_ATMOSPHERIC)
+//   Cmd_TeamVote_f  (code/game/g_cmds.c:1818) accepts:
+//     callteamvote leader <player>
+//
+// Layout mirrors TA ingame_callvote's vote families as grouped sections
+// (quick / parameter / gametype / kick / map / leader) instead of TA's
+// sub-tab switcher. Quick + gametype votes dispatch a LITERAL callvote
+// subcommand (fully wired). The kick/map/leader votes pair a feeder
+// ListBox with a submit button following the same convention the existing
+// parameter-vote submit buttons use.
+//
+// SKIPPED (report): "Do Warmup" — TA fires `callvote g_doWarmup 1`, but
+// q3now's Cmd_CallVote_f has no g_doWarmup case (Invalid vote string).
+// No warmup vote exists in q3now's game code, so the button is omitted.
+
+menuDef {
+	name "callvote"
+	layer "popup"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+	modal
+
+	itemDef {
+		name "popup_overlay"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		alignX center
+		alignY center
+		background "layered" effects "vignette"
+
+		itemDef {
+			name "callvote_root"
+			type container
+			rect 0 0 0.46 0.86
+			direction column
+			padding $popup_padding
+			gap $spacing_md
+			background $panel
+			border 1px $line_strong
+			radius $radius_md
+			width PERCENT 0.46
+			height PERCENT 0.86
+
+			itemDef { name "header" type 0 rect 0 0 1 0.06 height FIT text "Call Vote" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
+			itemDef { name "subheader" type 0 rect 0 0 1 0.03 height FIT text "Propose a server-wide vote. Active players must agree to pass." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+
+			// Scrollable vote body. `grow 1` + `height GROW` make this box fill
+			// the popup height left after the pinned header/subheader (top) and
+			// the pinned footer (bottom); `scroll` turns that bounded box into a
+			// vertical clip viewport (mouse-wheel + fading scrollbar), so the long
+			// vote list scrolls inside instead of pushing the popup off-screen.
+			// Same recipe as the settings tabs' scrollable body (video.wui
+			// panel_content) — the header/footer live OUTSIDE this container and
+			// stay visible without scrolling.
+			itemDef {
+				name "form_content"
+				type container
+				rect 0 0 1 0.7
+				direction column
+				gap $spacing_sm
+				grow 1
+				height GROW
+				scroll
+				alignY start
+				padding 0.005 0.01
+
+				// ── Quick votes (no parameter, fire-and-close) ─────────────
+				itemDef { name "cat_quick_label" type 0 rect 0 0 1 0.025 height FIT text "QUICK VOTES" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Restart Map" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote map_restart" ; close } }
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Next Map" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote nextmap" ; close } }
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Shuffle Teams" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote shuffle" ; close } }
+
+				// ── Parameter votes (spinner picks value, button submits) ──
+				itemDef { name "cat_param_label" type 0 rect 0 0 1 0.025 height FIT text "PARAMETER VOTES" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+
+				itemDef { name "row_timelimit" type spinner rect 0.005 0 0.95 0.035 height FIXED 36px width PERCENT 0.95 text "Timelimit" textalign 0 font $font_sans 13 forecolor $bone cvarSpinner "ui_voteTimelimit" 5 5 30 5 visible 1 grow 0 }
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 32px width PERCENT 0.95 text "Vote Timelimit" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "callvote g_timelimit $ui_voteTimelimit" ; close } }
+
+				itemDef { name "row_scorelimit" type spinner rect 0.005 0 0.95 0.035 height FIXED 36px width PERCENT 0.95 text "Scorelimit" textalign 0 font $font_sans 13 forecolor $bone cvarSpinner "ui_voteScorelimit" 10 10 100 10 visible 1 grow 0 }
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 32px width PERCENT 0.95 text "Vote Scorelimit" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "callvote g_scorelimit $ui_voteScorelimit" ; close } }
+
+				// ── Gametype vote — one literal callvote per type (fully wired)
+				// Numbers/names track startserver's ui_netGameType list (0-5).
+				// callvote g_gametype <n> is validated in Cmd_CallVote_f:1537.
+				itemDef { name "cat_gametype_label" type 0 rect 0 0 1 0.025 height FIT text "GAMETYPE VOTE" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Deathmatch" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 0" ; close } }
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Duel" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 1" ; close } }
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "King of the Hill" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 2" ; close } }
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Last Man Standing" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 3" ; close } }
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Team Deathmatch" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 4" ; close } }
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Capture the Flag" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 5" ; close } }
+
+				// ── Kick vote — connected-player feeder + submit ───────────
+				// feeder 7 = FEEDER_PLAYER_LIST (same as removebots.wui). The
+				// submit button issues `callvote kick <player>`, matching the
+				// ListBox-selection → command convention already used by the
+				// parameter-vote submit buttons above.
+				itemDef { name "cat_kick_label" type 0 rect 0 0 1 0.025 height FIT text "KICK VOTE" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+
+				itemDef {
+					name "kicklist"
+					type 6
+					rect 0 0 0.95 0.18
+					width PERCENT 0.95
+					height FIXED 96px
+					font $font_sans 12
+					forecolor $bone
+					backcolor $panelDeep
+					style 1
+					feeder 7
+					elementheight 22
+					columns 1 0 420 32
+					visible 1
+					grow 0
+				}
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 32px width PERCENT 0.95 text "Vote Kick Selected" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { voteKick ; close } }
+
+				// ── Map vote — allmaps feeder + submit ─────────────────────
+				// feeder "allmaps" is the same map feeder startserver.wui uses.
+				// callvote map <name> is validated (G_MapExist) in Cmd_CallVote_f:1494.
+				itemDef { name "cat_map_label" type 0 rect 0 0 1 0.025 height FIT text "MAP VOTE" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+
+				itemDef {
+					name "maplist"
+					type 6
+					rect 0 0 0.95 0.20
+					width PERCENT 0.95
+					height FIXED 120px
+					font $font_mono 12
+					forecolor $bone
+					backcolor $panelDeep
+					style 1
+					feeder "allmaps"
+					elementheight 20
+					columns 4 0 24 0 24 140 0 164 150 0 338 20 0
+					columnHeaders { 0 "#" 1 "Map" 2 "Name" 3 "*" }
+					columnSort "MapSort"
+					visible 1
+					grow 0
+				}
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 32px width PERCENT 0.95 text "Vote Map Selected" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { voteMap ; close } }
+
+				// ── Leader vote (team games) — team-player feeder + submit ─
+				// Uses the TEAM vote path: `callteamvote leader <player>`
+				// (Cmd_TeamVote_f, code/game/g_cmds.c:1736). Only meaningful in
+				// team gametypes; the engine rejects it in non-team modes.
+				itemDef { name "cat_leader_label" type 0 rect 0 0 1 0.025 height FIT text "LEADER VOTE (team games)" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+
+				itemDef {
+					name "leaderlist"
+					type 6
+					rect 0 0 0.95 0.18
+					width PERCENT 0.95
+					height FIXED 96px
+					font $font_sans 12
+					forecolor $bone
+					backcolor $panelDeep
+					style 1
+					feeder 7
+					elementheight 22
+					columns 1 0 420 32
+					visible 1
+					grow 0
+				}
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 32px width PERCENT 0.95 text "Vote Leader Selected" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { voteLeader ; close } }
+			}
+
+			itemDef {
+				name "popup_footer"
+				type container
+				rect 0 0 1 0.05
+				direction row
+				gap $spacing_md
+				alignX end
+				height FIT
+
+				itemDef { type 1 rect 0 0 0.14 0.04 height FIT text "Cancel" textalign 1 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+			}
+		}
+	}
+
+	onESC { close }
+}

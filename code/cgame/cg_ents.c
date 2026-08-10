@@ -5,7 +5,6 @@
 // cg_ents.c -- present snapshot entities, happens every single frame
 
 #include "cg_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 
@@ -155,11 +154,22 @@ static void CG_General( centity_t *cent ) {
 
 	memset (&ent, 0, sizeof(ent));
 
-	// set frame
-
-	ent.frame = s1->frame;
-	ent.oldframe = ent.frame;
-	ent.backlerp = 0;
+	// set frame — a Q1 monster (a model with a derived monster anim table) is
+	// driven from its entityState.legsAnim code (client-side tick + lerp, smooth);
+	// any other generic entity uses its server-set s.frame directly (snap).
+	{
+		int   mframe, moldframe;
+		float mbacklerp;
+		if ( CG_MonsterAnimation( cent, &mframe, &moldframe, &mbacklerp ) ) {
+			ent.frame = mframe;
+			ent.oldframe = moldframe;
+			ent.backlerp = mbacklerp;
+		} else {
+			ent.frame = s1->frame;
+			ent.oldframe = ent.frame;
+			ent.backlerp = 0;
+		}
+	}
 
 	VectorCopy( cent->lerpOrigin, ent.origin);
 	VectorCopy( cent->lerpOrigin, ent.oldorigin);
@@ -368,7 +378,6 @@ static void CG_Item( centity_t *cent ) {
 		barrel.hModel = wi->barrelModel;
 
 		VectorCopy( ent.lightingOrigin, barrel.lightingOrigin );
-		barrel.shadowPlane = ent.shadowPlane;
 		barrel.renderfx = ent.renderfx;
 
 		angles[YAW] = 0;
@@ -1056,7 +1065,18 @@ static void CG_AddCEntity( centity_t *cent ) {
 	case ET_TELEPORT_TRIGGER:
 		break;
 	case ET_GENERAL:
-		CG_General( cent );
+#if FEAT_IQM
+		// A behavior monster (a Q1 monster model) that names a loadable character
+		// renders as that character through the single-mesh body path; anything else —
+		// a plain generic entity, or a monster with no loadable character body — renders
+		// through CG_General (which keeps the .mdl fallback for such monsters).
+		if ( CG_IsMonsterModel( cent->currentState.modelindex ) && CG_CreatureRenders( cent ) ) {
+			CG_Creature( cent );
+		} else
+#endif
+		{
+			CG_General( cent );
+		}
 		break;
 	case ET_PLAYER:
 		CG_Player( cent );

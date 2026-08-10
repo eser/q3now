@@ -4,8 +4,12 @@
 // tr_shade.c
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn B — renderer.cmd
 #include "../renderercommon/r_q1_texture.h"
 #include "../qcommon/q_feats.h"
+
+R_LOG_DECLARE_CHANNEL( rch_cmd,       "renderer.cmd"       );
+R_LOG_DECLARE_CHANNEL( rch_assets_q1, "renderer.assets.q1" );
 
 /*
 
@@ -58,8 +62,9 @@ static void R_BindAnimatedImage( const textureBundle_t *bundle ) {
 	if ( bundle->isScreenMap /*&& backEnd.viewParms.frameSceneNum == 1*/ ) {
 		if ( !backEnd.screenMapDone )
 			GL_Bind( tr.blackImage );
-		else
-			vk_update_descriptor( glState.currenttmu + VK_DESC_TEXTURE_BASE, vk.screenMap.color_descriptor );
+		// legacy-mainpath-retire STEP 2 — the per-image legacy descriptor-set
+		// ring write for sets 1-6 retired with the rotating-set machinery.
+		// Bindless-side screenmap routing lands separately.
 		return;
 	}
 
@@ -133,6 +138,7 @@ static void DrawTris( const shaderCommands_t *input ) {
 	}
 
 	vk_bind_pipeline( pipeline );
+	VK_PushUniformScratch();
 	vk_draw_geometry( DEPTH_RANGE_ZERO, qtrue );
 
 #else
@@ -191,7 +197,7 @@ static void DrawNormals( const shaderCommands_t *input ) {
 		tess.numIndexes += 2;
 	}
 	tess.numVertexes *= 2;
-	/* Phase 6B3'-a: full-white initialization (was identityLightByte
+	/* full-white initialization (was identityLightByte
 	 * = 0.5*255 in the legacy LDR pipeline). Normals-debug overlay
 	 * inherits linear-pipeline color authoring. */
 	memset( tess.svars.colors[0][0].rgba, 255, tess.numVertexes * sizeof( color4ub_t ) );
@@ -199,6 +205,7 @@ static void DrawNormals( const shaderCommands_t *input ) {
 	vk_bind_pipeline( vk.normals_debug_pipeline );
 	vk_bind_index();
 	vk_bind_geometry( TESS_XYZ | TESS_ST0 | TESS_RGBA0 );
+	VK_PushUniformScratch();
 	vk_draw_geometry( DEPTH_RANGE_ZERO, qtrue );
 #else
 	GL_ClientState( 0, CLS_NONE );
@@ -269,7 +276,7 @@ void RB_BeginSurface( shader_t *shader, int fogNum ) {
 
 #ifdef USE_TESS_NEEDS_NORMAL
 #ifdef USE_PMLIGHT
-	tess.needsNormal = state->needsNormal || tess.dlightPass || r_showNormals->integer;
+	tess.needsNormal = state->needsNormal || tess.dlightPass || tess.forwardPlusPass || r_showNormals->integer;
 #else
 	tess.needsNormal = state->needsNormal || r_showNormals->integer;
 #endif
@@ -284,9 +291,6 @@ void RB_BeginSurface( shader_t *shader, int fogNum ) {
 	tess.shader = state;
 	tess.fogNum = fogNum;
 
-#ifdef USE_LEGACY_DLIGHTS
-	tess.dlightBits = 0;		// will be OR'd in by surface functions
-#endif
 	tess.xstages = state->stages;
 	tess.numPasses = state->numUnfoggedPasses;
 
@@ -360,184 +364,6 @@ static void DrawMultitextured( const shaderCommands_t *input, int stage ) {
 #endif
 
 
-#ifdef USE_LEGACY_DLIGHTS
-/*
-===================
-ProjectDlightTexture
-
-Perform dynamic lighting with another rendering pass
-===================
-*/
-#ifdef USE_VULKAN
-static qboolean ProjectDlightTexture( void ) {
-#else
-static void ProjectDlightTexture( void ) {
-#endif
-	int		i, l;
-	vec3_t	origin;
-	float	*texCoords;
-	byte	*colors;
-	byte	clipBits[SHADER_MAX_VERTEXES];
-#ifdef USE_VULKAN
-	uint32_t pipeline;
-	qboolean rebindIndex = qfalse;
-#else
-	float	texCoordsArray[SHADER_MAX_VERTEXES][2];
-	byte	colorArray[SHADER_MAX_VERTEXES][4];
-#endif
-	glIndex_t hitIndexes[SHADER_MAX_INDEXES];
-	int		numIndexes;
-	float	scale;
-	float	radius;
-	float	modulate = 0.0f;
-	const dlight_t *dl;
-
-	if ( !backEnd.refdef.num_dlights ) {
-#ifdef USE_VULKAN
-		return rebindIndex;
-#else
-		return;
-#endif
-	}
-
-	for ( l = 0 ; l < backEnd.refdef.num_dlights ; l++ ) {
-
-		if ( !( tess.dlightBits & ( 1 << l ) ) ) {
-			continue;	// this surface definitely doesn't have any of this light
-		}
-
-#ifdef USE_VULKAN
-		texCoords = (float*)&tess.svars.texcoords[0][0];
-		tess.svars.texcoordPtr[0] = tess.svars.texcoords[0];
-		colors = tess.svars.colors[0][0].rgba;
-#else
-		texCoords = texCoordsArray[0];
-		colors = colorArray[0];
-#endif
-
-		dl = &backEnd.refdef.dlights[l];
-		VectorCopy( dl->transformed, origin );
-		radius = dl->radius;
-		scale = 1.0f / radius;
-
-		for ( i = 0 ; i < tess.numVertexes ; i++, texCoords += 2, colors += 4 ) {
-			int		clip = 0;
-			vec3_t	dist;
-
-			VectorSubtract( origin, tess.xyz[i], dist );
-
-			backEnd.pc.c_dlightVertexes++;
-
-			texCoords[0] = 0.5f + dist[0] * scale;
-			texCoords[1] = 0.5f + dist[1] * scale;
-
-			if ( !r_dlightBacks->integer &&
-					// dist . tess.normal[i]
-					( dist[0] * tess.normal[i][0] +
-					dist[1] * tess.normal[i][1] +
-					dist[2] * tess.normal[i][2] ) < 0.0f ) {
-				clip = 63;
-			} else {
-				if ( texCoords[0] < 0.0f ) {
-					clip |= 1;
-				} else if ( texCoords[0] > 1.0f ) {
-					clip |= 2;
-				}
-				if ( texCoords[1] < 0.0f ) {
-					clip |= 4;
-				} else if ( texCoords[1] > 1.0f ) {
-					clip |= 8;
-				}
-
-				// modulate the strength based on the height and color
-				if ( dist[2] > radius ) {
-					clip |= 16;
-					modulate = 0.0f;
-				} else if ( dist[2] < -radius ) {
-					clip |= 32;
-					modulate = 0.0f;
-				} else {
-					//*((int*)&dist[2]) &= 0x7FFFFFFF;
-					dist[2] = fabsf( dist[2] );
-					if ( dist[2] < radius * 0.5f ) {
-						modulate = 1.0 * 255.0;
-					} else {
-						modulate = 2.0f * (radius - dist[2]) * scale * 255.0;
-					}
-				}
-			}
-			clipBits[i] = clip;
-			// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — index bounded by upstream invariant (sun-shadow cascades, surfaceIndexSets count, dlight pipeline count); analyzer doesn't see the bound
-			colors[0] = dl->color[0] * modulate;
-			colors[1] = dl->color[1] * modulate;
-			colors[2] = dl->color[2] * modulate;
-			colors[3] = 255;
-		}
-
-		// build a list of triangles that need light
-		numIndexes = 0;
-		for ( i = 0 ; i < tess.numIndexes ; i += 3 ) {
-			glIndex_t a, b, c;
-
-			a = tess.indexes[i];
-			b = tess.indexes[i+1];
-			c = tess.indexes[i+2];
-			if ( clipBits[a] & clipBits[b] & clipBits[c] ) {
-				continue;	// not lighted
-			}
-			hitIndexes[numIndexes] = a;
-			hitIndexes[numIndexes+1] = b;
-			hitIndexes[numIndexes+2] = c;
-			numIndexes += 3;
-		}
-
-		if ( numIndexes == 0 ) {
-			continue;
-		}
-
-#ifndef USE_VULKAN
-		GL_ClientState( 1, CLS_NONE );
-		GL_ClientState( 0, CLS_TEXCOORD_ARRAY | CLS_COLOR_ARRAY );
-
-		qglTexCoordPointer( 2, GL_FLOAT, 0, texCoordsArray[0] );
-		qglColorPointer( 4, GL_UNSIGNED_BYTE, 0, colorArray );
-#endif
-
-		GL_Bind( tr.dlightImage );
-
-#ifdef USE_VULKAN
-		if ( numIndexes != tess.numIndexes ) {
-			// re-bind index buffer for later fog pass
-			rebindIndex = qtrue;
-		}
-		pipeline = vk.dlight_pipelines[dl->additive > 0 ? 1 : 0][tess.shader->cullType][tess.shader->polygonOffset];
-		vk_bind_pipeline( pipeline );
-		vk_bind_index_ext( numIndexes, hitIndexes );
-		vk_bind_geometry( TESS_RGBA0 | TESS_ST0 );
-		vk_draw_geometry( DEPTH_RANGE_NORMAL, qtrue );
-#else
-		// include GLS_DEPTHFUNC_EQUAL so alpha tested surfaces don't add light
-		// where they aren't rendered
-
-		if ( dl->additive ) {
-			GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_EQUAL );
-		} else {
-			GL_State( GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_EQUAL );
-		}
-
-		R_DrawElements( numIndexes, hitIndexes );
-#endif
-		backEnd.pc.c_totalIndexes += numIndexes;
-		backEnd.pc.c_dlightIndexes += numIndexes;
-	}
-
-#ifdef USE_VULKAN
-	return rebindIndex;
-#endif
-}
-
-#endif // USE_LEGACY_DLIGHTS
-
 uint32_t VK_PushUniform( const vkUniform_t *uniform );
 void VK_SetFogParams( vkUniform_t *uniform, int *fogStage );
 static vkUniform_t uniform;
@@ -562,7 +388,14 @@ static void RB_FogPass( qboolean rebindIndex ) {
 	}
 	VK_SetFogParams( &uniform, &fog_stage );
 	VK_PushUniform( &uniform );
-	vk_update_descriptor( VK_DESC_FOG_ONLY, tr.fogImage->descriptor );
+	// publish tr.fogImage into role 3 (the
+	// fog role per gen_frag.tmpl's role convention). vk_push_bindless_indices
+	// (called per-draw downstream) folds the slot into the existing FS push
+	// range at offset 96 of vk.pipeline_layout, which fog.frag now samples
+	// instead of the retired legacy set=2 ring binding. Restores the density
+	// ramp; STEP 2 had silently degraded fog to flat colour by leaving role
+	// 3 unset → vk.whiteImage substituted.
+	vk_bindless_track( 3 /* role: fog */, tr.fogImage );
 	vk_draw_geometry( DEPTH_RANGE_NORMAL, qtrue );
 #else
 	const fog_t	*fog = tr.world->fogs + tess.fogNum;
@@ -632,7 +465,7 @@ void R_ComputeColors( const int b, color4ub_t *dest, const shaderStage_t *pStage
 			break;
 		default:
 		case CGEN_IDENTITY_LIGHTING:
-			/* Phase 6B3'-a: identityLightByte (= 128 under legacy
+			/* identityLightByte (= 128 under legacy
 			 * obScale=2) collapses to full-white 255 in the linear
 			 * pipeline. CGEN_IDENTITY_LIGHTING is functionally
 			 * indistinguishable from CGEN_IDENTITY post-migration;
@@ -651,14 +484,14 @@ void R_ComputeColors( const int b, color4ub_t *dest, const shaderStage_t *pStage
 			}
 			break;
 		case CGEN_VERTEX:
-			/* Phase 6B3'-a: linear-pipeline migration drops the
+			/* linear-pipeline migration drops the
 			 * `* tr.identityLight` halving; vertex colors pass
 			 * through verbatim. The two-branch slow/fast path
 			 * collapses to the original memcpy. */
 			memcpy( dest, tess.vertexColors, tess.numVertexes * sizeof( tess.vertexColors[0] ) );
 			break;
 		case CGEN_ONE_MINUS_VERTEX:
-			/* Phase 6B3'-a: same as CGEN_VERTEX above — no
+			/* same as CGEN_VERTEX above — no
 			 * identityLight halving in the linear pipeline. */
 			for ( i = 0; i < tess.numVertexes; i++ )
 			{
@@ -695,8 +528,8 @@ void R_ComputeColors( const int b, color4ub_t *dest, const shaderStage_t *pStage
 	case AGEN_SKIP:
 		break;
 	case AGEN_IDENTITY:
-		/* CGEN_VERTEX halving removed in 6B3'-a linear migration;
-		 * previously triggered CPU path on r_brightness > 1. */
+		/* Force alpha to opaque, except for vertex-color stages
+		 * (CGEN_VERTEX) which carry their own alpha. */
 		if ( pStage->bundle[b].rgbGen != CGEN_VERTEX ) {
 			for ( i = 0; i < tess.numVertexes; i++ ) {
 				dest[i].rgba[3] = 255;
@@ -983,7 +816,8 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 	if ( fogCollapse ) {
 		VK_SetFogParams( &uniform, &fog_stage );
 		VectorCopy( backEnd.or.viewOrigin, uniform.eyePos );
-		vk_update_descriptor( VK_DESC_FOG_COLLAPSE, tr.fogImage->descriptor );
+		// legacy-mainpath-retire STEP 2 — legacy ring write retired; bindless track stays.
+		vk_bindless_track( 3 /* role: fog */, tr.fogImage );
 		pushUniform = qtrue;
 	} else
 #endif
@@ -1034,7 +868,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 #endif
 				}
 				if ( tess_flags & (TESS_ENT0 << i) && backEnd.currentEntity ) {
-					// Phase 6B3'-d4-m8: decode the entity colour to linear domain
+					// decode the entity colour to linear domain
 					// at the UBO fill site. gen_frag.tmpl's USE_ENT_COLOR variants
 					// multiply this against the (sampleColorTex-decoded) texel in
 					// linear domain. shaderRGBA is a display-domain byte triple;
@@ -1059,16 +893,43 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			}
 		}
 
-		if ( pushUniform ) {
-			pushUniform = qfalse;
-			VK_PushUniform( &uniform );
-		}
+		// Always push a per-draw UBO ring item: gen_vert now reads the MVP from
+		// the UBO (ubo.mvp), so every base-pass draw needs a bound uniform — not
+		// just the fog/env/ent cases that historically set pushUniform. The mvp is
+		// filled by VK_PushUniform from the vk_update_mvp stash; the fog/env/ent
+		// fields are written above when relevant and unread otherwise. (pushUniform
+		// still gates whether those OTHER fields were freshly set this stage; the
+		// push itself is unconditional.)
+		(void)pushUniform;
+		pushUniform = qfalse;
+		VK_PushUniform( &uniform );
 
 		GL_SelectTexture( 0 );
 
-		if ( r_lightmap->integer && pStage->bundle[1].lightmap != LIGHTMAP_INDEX_NONE ) {
-			//GL_SelectTexture( 0 );
-			GL_Bind( tr.whiteImage ); // replace diffuse texture with a white one thus effectively render only lightmap
+		if ( r_lightmap->integer ) {
+			if ( pStage->bundle[1].lightmap != LIGHTMAP_INDEX_NONE ) {
+				// collapsed-lightmap surface: lightmap in bundle[1], replace the
+				// bundle[0] diffuse with white so only the lightmap shows.
+				//GL_SelectTexture( 0 );
+				GL_Bind( tr.whiteImage );
+			} else if ( tess.shader->separateLightmapPass ) {
+				// Shader whose lightmap is a separate trailing pass (lightmap in
+				// bundle[0] of its own stage). For a NON-lightmap (diffuse) stage,
+				// white-replace every diffuse operand so it contributes white; the
+				// lightmap stage (bundle[0] is the lightmap) draws unchanged. The
+				// trailing lightmap pass then modulates against white = lightmap-only,
+				// matching the collapsed-lightmap path above.
+				if ( pStage->bundle[0].lightmap == LIGHTMAP_INDEX_NONE ) {
+					for ( i = 0; i < pStage->numTexBundles; i++ ) {
+						if ( pStage->bundle[i].lightmap == LIGHTMAP_INDEX_NONE &&
+						     pStage->bundle[i].image[0] != NULL ) {
+							GL_SelectTexture( i );
+							GL_Bind( tr.whiteImage );
+						}
+					}
+					GL_SelectTexture( 0 );
+				}
+			}
 		}
 
 		if ( backEnd.viewParms.portalView == PV_MIRROR ) {
@@ -1077,7 +938,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			pipeline = pStage->vk_pipeline[fog_stage];
 		}
 
-		// Phase 6B3'-d4-m_final (Block 1): the A3 per-map srgb-variant
+		// The per-map srgb-variant
 		// swap is gone — gen_frag.tmpl decodes colour texels
 		// unconditionally now, so there is no second variant to pick.
 
@@ -1116,7 +977,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			static int q1ls_log_count = 0;
 			if ( q1ls_log_count < 20 ) {
 				q1ls_log_count++;
-				ri.Log( SEV_TRACE, "[Q1LS] gate check sh='%s' b1lm=%d q1ls_pipeline=%d lightStyles=%s\n",
+				R_LOG( rch_assets_q1, SEV_TRACE, "gate check sh='%s' b1lm=%d q1ls_pipeline=%d lightStyles=%s\n",
 				        tess.shader->name, pStage->bundle[1].lightmap,
 				        (int)vk.q1ls_pipeline, ( tr.world && tr.world->lightStyles ) ? "yes" : "no" );
 			}
@@ -1131,86 +992,201 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			uniform.q1StyleIntensities[2] = s[2] < 64 ? tr.lightstyleValues[s[2]] : 0.0f;
 			uniform.q1StyleIntensities[3] = s[3] < 64 ? tr.lightstyleValues[s[3]] : 0.0f;
 
+			// resolve the four style lightmaps the q1_ls/q1_ls_array
+			// fragment shaders sample at bindless roles 2..5. Style 0 lives in
+			// tr.lightmaps[] (or tr.propLightmaps[] for prop-BSP lightmap pages);
+			// styles 1..3 live in tr.lightmapsStyle[0..2][] (R_LoadQ1StyledLightmaps).
+			// All four are image_t entries with bindless slots already allocated
+			// at R_CreateImage time, so vk_bindless_track packs them per-draw the
+			// same way fog (role 3) and the water surface (role 0) ride. Missing
+			// per-style atlases (Q1 maps that only author style 0) degrade to
+			// tr.whiteImage — the shader still produces tStyle*intensity, and an
+			// intensity of zero (s[k] >= 64) makes the sample irrelevant anyway.
+			image_t *lmImgs[4] = { tr.whiteImage, tr.whiteImage, tr.whiteImage, tr.whiteImage };
+			if ( lmIdx >= LIGHTMAP_PROP_OFFSET ) {
+				int pi = lmIdx - LIGHTMAP_PROP_OFFSET;
+				if ( tr.propLightmaps && pi < tr.numPropLightmaps && tr.propLightmaps[pi] )
+					lmImgs[0] = tr.propLightmaps[pi];
+				/* Prop BSPs author only style 0; lmImgs[1..3] stay whiteImage. */
+			} else if ( tr.lightmaps && lmIdx >= 0 && lmIdx < tr.numLightmaps ) {
+				if ( tr.lightmaps[lmIdx] )
+					lmImgs[0] = tr.lightmaps[lmIdx];
+				for ( int k = 0; k < 3; k++ ) {
+					if ( tr.lightmapsStyle[k] && lmIdx < tr.numLightmapsStyle && tr.lightmapsStyle[k][lmIdx] )
+						lmImgs[k + 1] = tr.lightmapsStyle[k][lmIdx];
+				}
+			}
+
 			if ( tess.shader->q1AnimArray && vk.q1ls_array_pipeline != 0 ) {
 				/* GPU texture array path — shader computes frame from tr.refdef.time */
-				image_t *lmImg;
 				{
 					static int q1arr_log_count = 0;
 					if ( q1arr_log_count < 10 ) {
 						q1arr_log_count++;
-						ri.Log( SEV_DEBUG, "[Q1ARR] array path sh='%s' numFrames=%d animArray=%p\n",
+						R_LOG( rch_assets_q1, SEV_DEBUG, "array path sh='%s' numFrames=%d animArray=%p\n",
 						        tess.shader->name, tess.shader->q1NumAnimFrames,
 						        (void *)tess.shader->q1AnimArray );
 					}
 				}
 				uniform.light.pos[0] = (float)tr.refdef.time;
 				uniform.light.pos[1] = (float)tess.shader->q1NumAnimFrames;
-				vk_update_descriptor( VK_DESC_TEXTURE0, tess.shader->q1AnimArray->descriptor );
 				VK_PushUniform( &uniform );
-				// bind primary lightmap (style 0) to set=2
-				if ( lmIdx >= LIGHTMAP_PROP_OFFSET ) {
-					int pi = lmIdx - LIGHTMAP_PROP_OFFSET;
-					lmImg = ( tr.propLightmaps && pi < tr.numPropLightmaps )
-					        ? tr.propLightmaps[pi] : tr.whiteImage;
-				} else if ( tr.lightmaps && lmIdx >= 0 && lmIdx < tr.numLightmaps ) {
-					lmImg = tr.lightmaps[lmIdx];
-				} else {
-					lmImg = tr.whiteImage;
+				// publish the four style lightmaps at
+				// roles 2..5 AND the animArray 2DArray at role 0 for
+				// q1_ls_array.frag. The bundle iteration above (lines 1023-1026)
+				// already wrote roles 0 and 1 with bundle[0].image[idx] /
+				// bundle[1].image[0] (the 2D albedo + 2D lightmap from
+				// R_BindAnimatedImage); we overwrite role 0 here with the
+				// q1AnimArray image_t — that image_t carries a 2DArray
+				// VkImageView and its ralBindlessSlot indexes the SAMPLED_IMAGE
+				// binding at WIRED_BINDLESS_BIND_ARRAY_IMAGES (set 7, binding 2,
+				// disjoint slot space from the 2D binding). vk_push_bindless_
+				// indices packs the same way; the shader's
+				// WIRED_BINDLESS_TEX_ARRAY macro picks the right binding.
+				// Role 1 stays whatever the bundle loop wrote — harmless,
+				// q1_ls_array.frag never samples role 1.
+				if ( tess.shader->q1AnimArray ) {
+					vk_bindless_track( 0 /* role: animArray (2DArray) */, tess.shader->q1AnimArray );
 				}
-				vk_update_descriptor( VK_DESC_TEXTURE1, lmImg->descriptor );
-				// bind style slot 1/2/3 lightmaps to sets 3/4/5
-				if ( tr.lightmapsStyle[0] && lmIdx >= 0 && lmIdx < tr.numLightmapsStyle )
-					vk_update_descriptor( VK_DESC_TEXTURE2, tr.lightmapsStyle[0][lmIdx]->descriptor );
-				else
-					vk_update_descriptor( VK_DESC_TEXTURE2, tr.whiteImage->descriptor );
-				if ( tr.lightmapsStyle[1] && lmIdx >= 0 && lmIdx < tr.numLightmapsStyle )
-					vk_update_descriptor( VK_DESC_FOG_COLLAPSE, tr.lightmapsStyle[1][lmIdx]->descriptor );
-				else
-					vk_update_descriptor( VK_DESC_FOG_COLLAPSE, tr.whiteImage->descriptor );
-				if ( tr.lightmapsStyle[2] && lmIdx >= 0 && lmIdx < tr.numLightmapsStyle )
-					vk_update_descriptor( VK_DESC_DEPTH_FADE, tr.lightmapsStyle[2][lmIdx]->descriptor );
-				else
-					vk_update_descriptor( VK_DESC_DEPTH_FADE, tr.whiteImage->descriptor );
-				// set=6 unused by array shader; bind white as dummy so the slot is valid
-				vk_update_descriptor( VK_DESC_NORMALMAP, tr.whiteImage->descriptor );
+				vk_bindless_track( 2 /* role: lm0 */, lmImgs[0] );
+				vk_bindless_track( 3 /* role: lm1 */, lmImgs[1] );
+				vk_bindless_track( 4 /* role: lm2 */, lmImgs[2] );
+				vk_bindless_track( 5 /* role: lm3 */, lmImgs[3] );
 				pipeline = vk.q1ls_array_pipeline;
 			} else {
-				/* Non-animated single-frame Q1 surface */
-				image_t *lmImg;
+				/* Non-animated single-frame Q1 surface — or a per-frame anim chain
+				 * driven by tess.shaderTime (R_BindAnimatedImage semantics). */
 				uniform.light.pos[0] = 0.0f;
 				VK_PushUniform( &uniform );
-				// bind primary (style 0) lightmap to lm0 — VK_DESC_TEXTURE1 = set=2 in q1_ls.frag.
-				// Prop surfaces use tr.propLightmaps[] (lmIdx >= LIGHTMAP_PROP_OFFSET);
-				// world surfaces use tr.lightmaps[] (lmIdx in [0, numLightmaps)).
-				if ( lmIdx >= LIGHTMAP_PROP_OFFSET ) {
-					int pi = lmIdx - LIGHTMAP_PROP_OFFSET;
-					lmImg = ( tr.propLightmaps && pi < tr.numPropLightmaps )
-					        ? tr.propLightmaps[pi] : tr.whiteImage;
-				} else if ( tr.lightmaps && lmIdx >= 0 && lmIdx < tr.numLightmaps ) {
-					lmImg = tr.lightmaps[lmIdx];
+
+				// resolve current + next anim frame from
+				// pStage->bundle[0] for q1_ls.frag's diffuseMap / diffuseMapNext
+				// cross-fade. Mirrors R_BindAnimatedImage's index math; the
+				// non-array dispatch keeps animBlend=_animPad.x at its prior
+				// (uniform-zero) value, so the cross-fade collapses to
+				// diffuseMap on the static-content branch — diffuseMapNext is
+				// still published to silence the NULL-gap whiteImage fallback.
+				const textureBundle_t *b = &pStage->bundle[0];
+				image_t *curImg, *nextImg;
+				if ( b->numImageAnimations <= 1 ) {
+					curImg  = b->image[0] ? b->image[0] : tr.whiteImage;
+					nextImg = curImg;
 				} else {
-					lmImg = tr.whiteImage;
+					int64_t idx = (int64_t)( tess.shaderTime * b->imageAnimationSpeed );
+					if ( idx < 0 )
+						idx = 0;
+					if ( b->loopingImageAnim || b->numImageAnimations == 0 ) {
+						idx %= b->numImageAnimations;
+					} else if ( idx >= b->numImageAnimations ) {
+						idx = b->numImageAnimations - 1;
+					}
+					int64_t nextIdx = ( idx + 1 ) % b->numImageAnimations;
+					curImg  = b->image[ idx ]     ? b->image[ idx ]     : tr.whiteImage;
+					nextImg = b->image[ nextIdx ] ? b->image[ nextIdx ] : tr.whiteImage;
 				}
-				vk_update_descriptor( VK_DESC_TEXTURE1, lmImg->descriptor );
-				// bind style slot 1/2/3 LMs to descriptor sets 3/4/5 (fog_collapse/depth_fade slots)
-				if ( tr.lightmapsStyle[0] && lmIdx >= 0 && lmIdx < tr.numLightmapsStyle )
-					vk_update_descriptor( VK_DESC_TEXTURE2, tr.lightmapsStyle[0][lmIdx]->descriptor );
-				else
-					vk_update_descriptor( VK_DESC_TEXTURE2, tr.whiteImage->descriptor );
-				if ( tr.lightmapsStyle[1] && lmIdx >= 0 && lmIdx < tr.numLightmapsStyle )
-					vk_update_descriptor( VK_DESC_FOG_COLLAPSE, tr.lightmapsStyle[1][lmIdx]->descriptor );
-				else
-					vk_update_descriptor( VK_DESC_FOG_COLLAPSE, tr.whiteImage->descriptor );
-				if ( tr.lightmapsStyle[2] && lmIdx >= 0 && lmIdx < tr.numLightmapsStyle )
-					vk_update_descriptor( VK_DESC_DEPTH_FADE, tr.lightmapsStyle[2][lmIdx]->descriptor );
-				else
-					vk_update_descriptor( VK_DESC_DEPTH_FADE, tr.whiteImage->descriptor );
-				/* set=6 blend is 0.0 so diffuseMapNext is never sampled; bind white to satisfy validation */
-				vk_update_descriptor( VK_DESC_NORMALMAP, tr.whiteImage->descriptor );
+				vk_bindless_track( 0 /* role: diffuseMap     */, curImg );
+				vk_bindless_track( 1 /* role: diffuseMapNext */, nextImg );
+				vk_bindless_track( 2 /* role: lm0            */, lmImgs[0] );
+				vk_bindless_track( 3 /* role: lm1            */, lmImgs[1] );
+				vk_bindless_track( 4 /* role: lm2            */, lmImgs[2] );
+				vk_bindless_track( 5 /* role: lm3            */, lmImgs[3] );
 				pipeline = vk.q1ls_pipeline;
 			}
 		}
 
+#if FEAT_PBR
+		// Base-pass IBL ambient swap. For a WORLDSPAWN lightmap-modulate surface
+		// carrying a pbrMap under r_pbr, route the draw through the USE_IBL gen
+		// variant: it adds the light-independent analytic-sky environment ambient
+		// (the probe cubes + split-sum LUT on set 2) on top of the baked lightmap.
+		// Mirrors the sun-shadow swap idiom directly below. Tightly gated so the
+		// hot base pass is byte-identical on every non-pbrMap / r_pbr-0 / entity
+		// surface. Entities are excluded (worldspawn-only — they keep the
+		// lightgrid path); the IBL needs the world normal, so TESS_NNN is OR'd in.
+		if ( r_pbr->integer && pStage->bundle[3].image[0] != NULL
+		     && backEnd.currentEntity == &tr.worldEntity ) {
+			Vk_Pipeline_Def idef;
+			Vk_Shader_Type  ibase;
+			vk_get_pipeline_def( pipeline, &idef );
+			ibase = idef.shader_type;
+			switch ( ibase ) {
+				case TYPE_MULTI_TEXTURE_MUL2: idef.shader_type = TYPE_MULTI_TEXTURE_MUL2_IBL; break;
+				case TYPE_BLEND2_MUL:         idef.shader_type = TYPE_BLEND2_MUL_IBL;         break;
+				case TYPE_MULTI_TEXTURE_MUL3: idef.shader_type = TYPE_MULTI_TEXTURE_MUL3_IBL; break;
+				case TYPE_BLEND3_MUL:         idef.shader_type = TYPE_BLEND3_MUL_IBL;         break;
+				default: break;   // _ENV / identity / fixed / non-lightmap — no IBL variant for these
+			}
+			if ( idef.shader_type != ibase ) {
+				idef.ibl_enabled = 1;
+				pipeline = vk_find_pipeline_ext( 0, &idef, qtrue );
+				// pbrMap (ORM) at bindless role 8 — distinct from the light-pass
+				// pbrMap (role 3); the base pass and PMLIGHT pass reset bindless
+				// tracking independently, so no collision.
+				vk_bindless_track( 8 /* role: pbrMap */, pStage->bundle[3].image[0] );
+				// The IBL gen pipeline binds the world normal at location 5; make
+				// sure the normal vertex stream is computed + bound for this draw.
+				tess_flags |= TESS_NNN;
+			}
+		}
+#endif
+
+#if FEAT_SHADOW_MAPPING
+		// sun-shadow receiver swap. For a lightmapped
+		// world-modulate surface with r_shadows on, route the draw
+		// through the USE_SHADOWMAP gen variant: it samples the load-time
+		// sun-mask atlas (bindless role 7) and modulates the baked lightmap by
+		// the runtime CSM sun term. Mirrors the PBR swap idiom. Q1-lightstyle
+		// surfaces fall through the switch default (pipeline is q1ls here);
+		// bmodel / non-merged-map lightmap surfaces sample a zero sun-mask
+		// (the sun-mask is baked for merged-lightmap worldspawn surfaces only) so
+		// wired_apply_sun_shadow is a no-op there — correct by construction.
+		// Sun-shadow receiver swap. The lightmap may be the operand in bundle[1] (the
+		// collapsed-lightmap MUL2/MUL3 case) OR bundle[0] of a lone single-texture pass
+		// (a separate-lightmap-pass surface — the inset/circuit floor, shader.separate-
+		// LightmapPass). Gate on the lightmap OPERAND being present in this stage, not
+		// bundle[1] only, so the inset's lightmap stage also becomes a receiver — the
+		// operand-keyed apply (gen_frag wired_apply_sun_shadow_operand, lightmap_slot)
+		// then samples the sun shadow on whichever slot is the lightmap. Mirrors the
+		// #215 operand-is-lightmap unification (whiten + boost + sun shadow, one path).
+		if ( r_shadows->integer == 1 && vk.shadowMap.active
+		     && tr.sunMaskAtlas != NULL
+		     && ( pStage->bundle[0].lightmap != LIGHTMAP_INDEX_NONE
+		          || pStage->bundle[1].lightmap != LIGHTMAP_INDEX_NONE ) ) {
+			Vk_Pipeline_Def sdef;
+			Vk_Shader_Type  sbase;
+			vk_get_pipeline_def( pipeline, &sdef );
+			sbase = sdef.shader_type;
+			switch ( sbase ) {
+				case TYPE_MULTI_TEXTURE_MUL2: sdef.shader_type = TYPE_MULTI_TEXTURE_MUL2_SHADOW; break;
+				case TYPE_MULTI_TEXTURE_MUL3: sdef.shader_type = TYPE_MULTI_TEXTURE_MUL3_SHADOW; break;
+				case TYPE_BLEND2_MUL:         sdef.shader_type = TYPE_BLEND2_MUL_SHADOW;         break;
+				case TYPE_BLEND3_MUL:         sdef.shader_type = TYPE_BLEND3_MUL_SHADOW;         break;
+				// Path PA Fault 2 — rgbGen identity / identityLighting collapse
+				// to these colour-mode variants (the common vanilla-Q3 case).
+				case TYPE_MULTI_TEXTURE_MUL2_IDENTITY:    sdef.shader_type = TYPE_MULTI_TEXTURE_MUL2_IDENTITY_SHADOW;    break;
+				case TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR: sdef.shader_type = TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR_SHADOW; break;
+				// Shadow-Unification Part 1 — single-texture lightmap stage of a
+				// separate-lightmap-pass surface (lightmap in bundle[0]).
+				case TYPE_SIGNLE_TEXTURE:               sdef.shader_type = TYPE_SINGLE_TEXTURE_SHADOW;             break;
+				case TYPE_SINGLE_TEXTURE_IDENTITY:      sdef.shader_type = TYPE_SINGLE_TEXTURE_IDENTITY_SHADOW;    break;
+				case TYPE_SINGLE_TEXTURE_FIXED_COLOR:   sdef.shader_type = TYPE_SINGLE_TEXTURE_FIXED_COLOR_SHADOW; break;
+				default: break;   // _ENV / MUL3-variant lightmap types — no shadow-receiver variant for these
+			}
+			if ( sdef.shader_type != sbase ) {
+				const int smPage = tess.shader->lightmapIndex;
+				pipeline = vk_find_pipeline_ext( 0, &sdef, qtrue );
+				// F-1 — publish the sun-mask atlas page at bindless role 7.
+				if ( smPage >= 0 && smPage < tr.numLightmaps && tr.sunMaskAtlas[smPage] != NULL )
+					vk_bindless_track( 7 /* role: sun-mask */, tr.sunMaskAtlas[smPage] );
+				// F-2 — the main world pass never populates the CSM cascades
+				// (only VK_LightingPass does, ~tr_shade.c:1452); copy them into
+				// the UBO here and push so gen_frag's sampleShadow reads them.
+				memcpy( uniform.cascadeMVP, vk.shadowMap.cascadeMVP, sizeof( uniform.cascadeMVP ) );
+				Vector4Copy( vk.shadowMap.cascadeSplits, uniform.cascadeSplits );
+				VK_PushUniform( &uniform );
+			}
+		}
+#endif
 		vk_bind_pipeline( pipeline );
 		vk_bind_geometry( tess_flags );
 		vk_draw_geometry( tess.depthRange, qtrue );
@@ -1296,7 +1272,7 @@ void VK_SetFogParams( vkUniform_t *uniform, int *fogStage )
 			uniform->fogEyeT[1] = 1.0; // fog eye in
 		}
 		// fragment data
-		// Phase 6B3'-d4-m4: decode fogColor to linear domain at the
+		// decode fogColor to linear domain at the
 		// (single) UBO fill site. fog.frag and gen_frag.tmpl's USE_FOG
 		// branch consume this in linear-domain math now; light_frag.tmpl's
 		// USE_FOG branch reads only the fog-texture alpha, so it's
@@ -1325,7 +1301,7 @@ static void VK_SetLightParams( vkUniform_t *uniform, const dlight_t *dl ) {
 #endif
 		VectorScale( dl->color, 2 * powf( r_intensity->value, r_gamma->value ), uniform->light.color);
 	else {
-		// Phase 6B3'-d4-m7: decode the dlight colour to linear domain.
+		// decode the dlight colour to linear domain.
 		// light_frag.tmpl's BRDF (classic Phong + the GGX/Schlick/Smith
 		// Cook-Torrance path) needs linear-radiance light values for
 		// colorimetrically correct math; light.color[3] (1/r^2 falloff)
@@ -1343,7 +1319,7 @@ static void VK_SetLightParams( vkUniform_t *uniform, const dlight_t *dl ) {
 	// vertex data
 	VectorCopy( backEnd.or.viewOrigin, uniform->eyePos ); uniform->eyePos[3] = 0.0f;
 #if FEAT_SHADOW_MAPPING
-	// Phase 6.5.4d1: repurpose the unused eyePos.w slot as the live
+	// repurpose the unused eyePos.w slot as the live
 	// r_csmShowCascades debug flag (light_frag.tmpl tints by sampled cascade).
 	// The vertex stage's V = eyePos - vec4(in_position,1) only uses V.xyz, so
 	// V.w changing 0→? is harmless; no UBO layout change, no spec constant.
@@ -1369,11 +1345,45 @@ static void VK_SetLightParams( vkUniform_t *uniform, const dlight_t *dl ) {
 uint32_t VK_PushUniform( const vkUniform_t *uniform ) {
 	const uint32_t offset = vk.cmd->uniform_read_offset = PAD( vk.cmd->vertex_buffer_offset, vk.uniform_alignment );
 
-	if ( offset + vk.uniform_item_size > vk.geometry_buffer_size )
+	if ( offset + vk.uniform_item_size > vk.geometry_buffer_size ) {
+		// Ring overflow this frame: no item was written. Mark the read offset
+		// invalid so vk_push_bindless_indices skips its packed_indices write
+		// (the offset would be out of bounds) — the bindless table moved into
+		// this ring item in the push→UBO migration, so an unbounded write here
+		// is no longer harmless the way the old push-constant write was.
+		vk.cmd->uniform_read_offset = ~0U;
 		return ~0U;
+	}
 
 	// push uniform
 	memcpy( vk.cmd->vertex_buffer_ptr + offset, uniform, sizeof( *uniform ) );
+	// Overwrite the mvp field with the latest stashed MVP (vk_update_mvp keeps it
+	// current per-entity) so the main-path vertex shaders read it from the UBO
+	// rather than the push constant — independent of whether the caller's local
+	// uniform happened to fill it. Same byte value as the pushed MVP.
+	memcpy( ( (vkUniform_t *)( vk.cmd->vertex_buffer_ptr + offset ) )->mvp, vk_world.mvp,
+		sizeof( vk_world.mvp ) );
+	// World-lighting globals are the same value in every ring item, so stamp them
+	// here at the single push choke point rather than threading them through every
+	// caller's local uniform. .x = r_lightmapBoost (the base-pass lightmap overbright
+	// the modulate branches read live from the set-0 UBO). Live: a cvar change shows
+	// next frame with no pipeline rebuild.
+	// r_unbakeStaticLights dims the baked lightmap by the map's tuned factor to bound
+	// the additive double-count from the extracted static lights. When off (or no
+	// static lights), unbakeDim is exactly 1.0f → the UBO bytes are identical to today
+	// (byte-identical OFF path). staticLightDim is 1.0f unless extraction ran.
+	{
+		float unbakeDim = 1.0f;
+		if ( r_unbakeStaticLights && r_unbakeStaticLights->integer && tr.world )
+			unbakeDim = tr.world->staticLightDim;
+		( (vkUniform_t *)( vk.cmd->vertex_buffer_ptr + offset ) )->worldLightParams[0] =
+			( r_lightmapBoost ? r_lightmapBoost->value : 4.6f ) * unbakeDim;
+	}
+	// (The bindless packed_indices field is filled later by vk_push_bindless_indices
+	// in vk_draw_geometry — which runs AFTER this, at the actual draw, with this
+	// draw's per-role images resolved — writing directly into this ring item at
+	// vk.cmd->uniform_read_offset. It is NOT copied here: a copy here would carry
+	// the previous draw's indices.)
 	vk.cmd->vertex_buffer_offset = offset + vk.uniform_item_size;
 
 	vk_reset_descriptor( VK_DESC_UNIFORM );
@@ -1381,6 +1391,25 @@ uint32_t VK_PushUniform( const vkUniform_t *uniform ) {
 	vk_update_descriptor_offset( VK_DESC_UNIFORM, vk.cmd->uniform_read_offset );
 
 	return offset;
+}
+
+
+uint32_t VK_PushUniformScratch( void ) {
+	// Allocate a per-draw UBO ring item for a draw path that has no light/fog/
+	// shadow inputs of its own (sky, beam, the legacy projected-dlight blend,
+	// the debug-tris/normals/show-images overlays, shadow volumes). These paths
+	// take their MVP from the vertex push constant and their fragment shaders do
+	// not read the bindless index table — but vk_draw_geometry still calls
+	// vk_push_bindless_indices, which writes 48 B at vk.cmd->uniform_read_offset.
+	// Without a ring item of their own they would inherit the previous draw's
+	// offset and overwrite a still-in-flight bindless draw's index table (the GPU
+	// reads the ring at execution time, not at record time). A scratch item gives
+	// them their own slot so the write is harmless. mvp is stamped from the
+	// vk_update_mvp stash (unread by these push-MVP shaders); everything else is
+	// zero.
+	vkUniform_t scratch;
+	memset( &scratch, 0, sizeof( scratch ) );
+	return VK_PushUniform( &scratch );
 }
 
 
@@ -1406,35 +1435,47 @@ void VK_LightingPass( void )
 		// light parameters
 		VK_SetLightParams( &uniform, tess.light );
 
-#if FEAT_SHADOW_MAPPING
-		// Phase 6.5.4c: feed the 4 per-cascade light matrices + split distances
-		// to the lit shader. These live in proper UBO fields appended at the end
-		// of vkUniform_t (std140 offset 144 / 400 / 416) — the lit shader's
-		// USE_SHADOWMAP block declares them at matching layout(offset=)s. (No
-		// effect when shadow mapping is inactive, or on surfaces that keep a
-		// non-shadow pipeline — those just don't read the tail of the UBO.)
-		if ( vk.shadowMap.active ) {
-			const orientationr_t *o = &backEnd.or;
-			memcpy( uniform.cascadeMVP, vk.shadowMap.cascadeMVP, sizeof( uniform.cascadeMVP ) );
-			Vector4Copy( vk.shadowMap.cascadeSplits, uniform.cascadeSplits );
-			// Phase 6.5.4d2: model->world for this surface so light_vert.tmpl can
-			// put shadowData.xyz in world space. backEnd.or is set per surface by
-			// R_RotateForEntity — identity (axis = identity, origin = 0) for the
-			// worldspawn, the entity's [axis|origin] for entity / brush-model
-			// surfaces. Column-major, same convention as cascadeMVP / the caster
-			// push constant. (Matches the matrix R_RotateForEntity builds before
-			// composing with the world->view matrix.)
-			uniform.modelMatrix[ 0] = o->axis[0][0]; uniform.modelMatrix[ 4] = o->axis[1][0]; uniform.modelMatrix[ 8] = o->axis[2][0]; uniform.modelMatrix[12] = o->origin[0];
-			uniform.modelMatrix[ 1] = o->axis[0][1]; uniform.modelMatrix[ 5] = o->axis[1][1]; uniform.modelMatrix[ 9] = o->axis[2][1]; uniform.modelMatrix[13] = o->origin[1];
-			uniform.modelMatrix[ 2] = o->axis[0][2]; uniform.modelMatrix[ 6] = o->axis[1][2]; uniform.modelMatrix[10] = o->axis[2][2]; uniform.modelMatrix[14] = o->origin[2];
-			uniform.modelMatrix[ 3] = 0.0f;          uniform.modelMatrix[ 7] = 0.0f;          uniform.modelMatrix[11] = 0.0f;          uniform.modelMatrix[15] = 1.0f;
-		}
-#endif
-
-		uniform_offset = VK_PushUniform( &uniform );
-
 		tess.dlightUpdateParams = qfalse;
 	}
+
+#if FEAT_SHADOW_MAPPING
+	// feed the 4 per-cascade light matrices + split distances to
+	// the lit shader. These live in proper UBO fields appended at the end of
+	// vkUniform_t (std140 offset 144 / 400 / 416) — the lit shader's
+	// USE_SHADOWMAP block declares them at matching layout(offset=)s. (No effect
+	// when shadow mapping is inactive, or on surfaces that keep a non-shadow
+	// pipeline — those just don't read the tail of the UBO.) The cascade matrices
+	// are per-light (constant across this light's surfaces); modelMatrix is
+	// per-surface (backEnd.or changes per surface) and so is refreshed below on
+	// every call, not just on the per-light param update.
+	if ( vk.shadowMap.active ) {
+		const orientationr_t *o = &backEnd.or;
+		memcpy( uniform.cascadeMVP, vk.shadowMap.cascadeMVP, sizeof( uniform.cascadeMVP ) );
+		Vector4Copy( vk.shadowMap.cascadeSplits, uniform.cascadeSplits );
+		// model->world for this surface so light_vert.tmpl can
+		// put shadowData.xyz in world space. backEnd.or is set per surface by
+		// R_RotateForEntity — identity (axis = identity, origin = 0) for the
+		// worldspawn, the entity's [axis|origin] for entity / brush-model
+		// surfaces. Column-major, same convention as cascadeMVP / the caster
+		// push constant. (Matches the matrix R_RotateForEntity builds before
+		// composing with the world->view matrix.)
+		uniform.modelMatrix[ 0] = o->axis[0][0]; uniform.modelMatrix[ 4] = o->axis[1][0]; uniform.modelMatrix[ 8] = o->axis[2][0]; uniform.modelMatrix[12] = o->origin[0];
+		uniform.modelMatrix[ 1] = o->axis[0][1]; uniform.modelMatrix[ 5] = o->axis[1][1]; uniform.modelMatrix[ 9] = o->axis[2][1]; uniform.modelMatrix[13] = o->origin[1];
+		uniform.modelMatrix[ 2] = o->axis[0][2]; uniform.modelMatrix[ 6] = o->axis[1][2]; uniform.modelMatrix[10] = o->axis[2][2]; uniform.modelMatrix[14] = o->origin[2];
+		uniform.modelMatrix[ 3] = 0.0f;          uniform.modelMatrix[ 7] = 0.0f;          uniform.modelMatrix[11] = 0.0f;          uniform.modelMatrix[15] = 1.0f;
+	}
+#endif
+
+	// Push a fresh per-draw ring item for EVERY lit surface. light_vert reads the
+	// MVP from the UBO (ubo.mvp, filled by VK_PushUniform from the per-entity
+	// vk_update_mvp stash), and modelMatrix above is per-surface — so reusing one
+	// ring item across a light's surfaces (the previous "push only on param
+	// change" behaviour) made the 2nd+ entity/brush-model surface read the first
+	// surface's stale transform. It also gives each draw its own slot for the
+	// bindless index write in vk_draw_geometry. The light/fog/cascade fields
+	// persist in the static `uniform` across calls (recomputed only on a light/fog
+	// transition above), so re-pushing them per surface is the same byte values.
+	uniform_offset = VK_PushUniform( &uniform );
 
 	if ( uniform_offset == ~0 )
 		return; // no space left...
@@ -1450,8 +1491,10 @@ void VK_LightingPass( void )
 
 	int abs_light = /* (pStage->stateBits & GLS_ATEST_BITS) && */ (cull == CT_TWO_SIDED) ? 1 : 0;
 
-	if ( fog_stage )
-		vk_update_descriptor( VK_DESC_FOG_DLIGHT, tr.fogImage->descriptor );
+	if ( fog_stage ) {
+		// legacy-mainpath-retire STEP 2 — legacy ring write retired; bindless track stays.
+		vk_bindless_track( 1 /* role: fog (FOG_DLIGHT slot, was set 2) */, tr.fogImage );
+	}
 
 	if ( tess.light->linear )
 		// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — index bounded by upstream invariant (sun-shadow cascades, surfaceIndexSets count, dlight pipeline count); analyzer doesn't see the bound
@@ -1460,13 +1503,13 @@ void VK_LightingPass( void )
 		// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — index bounded by upstream invariant (sun-shadow cascades, surfaceIndexSets count, dlight pipeline count); analyzer doesn't see the bound
 		pipeline = vk.dlight_pipelines_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
 
-	// Phase 6B3'-d4-m_final (Block 1): the A4 per-map srgb-variant swap
+	// the per-map srgb-variant swap
 	// is gone — light_frag.tmpl decodes the albedo texel unconditionally
 	// now. (The PBR/shadow/parallax swaps below are unaffected.)
 
 #if FEAT_PBR
 	// Swap to PBR pipeline when surface has a pbrMap. r_pbr is the
-	// runtime gate (Phase 6B3'-f live conversion); the pipeline cache
+	// runtime gate (live conversion); the pipeline cache
 	// (vk_find_pipeline_ext) holds both PBR and non-PBR variants so
 	// flipping r_pbr selects between cached pipelines per draw with
 	// no rebuild.
@@ -1478,24 +1521,51 @@ void VK_LightingPass( void )
 		else if ( def.shader_type == TYPE_SINGLE_TEXTURE_LIGHTING_LINEAR )
 			def.shader_type = TYPE_SINGLE_TEXTURE_LIGHTING_PBR_LINEAR;
 		pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
-		// bind pbrMap to set 4 (fog_collapse slot, unused during dlight pass)
-		vk_update_descriptor( VK_DESC_FOG_COLLAPSE, pStage->bundle[3].image[0]->descriptor );
+		// legacy-mainpath-retire STEP 2 — legacy ring write retired; bindless track stays.
+		vk_bindless_track( 3 /* role: pbrMap (FOG_COLLAPSE slot, was set 4) */, pStage->bundle[3].image[0] );
 	}
 #endif
 
 #if FEAT_SHADOW_MAPPING
-	// Swap to shadow-mapped pipeline when shadow mapping is active
-	if ( vk.shadowMap.active ) {
-		Vk_Pipeline_Def def;
-		vk_get_pipeline_def( pipeline, &def );
-		if ( def.shader_type == TYPE_SINGLE_TEXTURE_LIGHTING )
-			def.shader_type = TYPE_SINGLE_TEXTURE_LIGHTING_SHADOW;
-		else if ( def.shader_type == TYPE_SINGLE_TEXTURE_LIGHTING_LINEAR )
-			def.shader_type = TYPE_SINGLE_TEXTURE_LIGHTING_SHADOW_LINEAR;
-		pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
-		// bind shadow map to set 3 (blend texture slot)
-		vk_update_descriptor( VK_DESC_TEXTURE2, vk.shadowMap.descriptor );
-	}
+	// dlight-diagnose-and-fix — the SHADOW pipeline swap is RETIRED for
+	// VK_LightingPass. The previous code swapped the per-light pipeline
+	// to TYPE_SINGLE_TEXTURE_LIGHTING_SHADOW whenever vk.shadowMap.active,
+	// which routed dlight draws through the USE_SHADOWMAP variant of
+	// light_frag.tmpl. That variant ends with
+	//     intens *= sampleShadow( shadowData.xyz, shadowData.w, ... );  // line ~440
+	// — i.e. the SUN's CSM shadow factor multiplies the per-light intens.
+	// Dlights (rocket-in-flight glow, explosion light, muzzle-flash) are
+	// independent point lights; the SUN's shadow map has nothing to do
+	// with whether a given fragment is illuminated by a rocket. For any
+	// fragment that lands in sun shadow (most floor/wall geometry hit by
+	// a rocket explosion indoors), sampleShadow returns ~0 and the entire
+	// dlight contribution gets multiplied to zero → invisible dlights.
+	// This is the regression that survived the original
+	// dlight-shadowmap-rebind and dlight-lightingpass-rebind
+	// fix attempts: every previous fix correctly ensured the shadowMap
+	// descriptor was bound for the shader to sample, but the sampling
+	// itself was the bug.
+	//
+	// Diagnosed end-to-end by the dlight-render-path-diagnostic build:
+	// probes A/B/B'/D/E/F all confirmed the renderer-side dlight path was
+	// complete (dlights created, VK_LightingPass entered, set 8 bound,
+	// shader variant SHADOW selected, uniform inputs valid); JPEG
+	// before/after captures of bot-fired rocket explosions on arena17
+	// showed dlights invisible with r_shadows 1 and visible with
+	// r_shadows 0. The probe data named line 440 of light_frag as
+	// the lost-contribution site.
+	//
+	// Retiring the swap leaves dlight draws on the LIGHTING variant
+	// (shader_type=7) under both r_shadows settings — matching the
+	// working r_shadows 0 case exactly. The dlight-lightingpass-
+	// rebind's vk_update_descriptor(WIRED_ENGINE_RES_SET, ...) is also
+	// retired here: with no SHADOW variant in this pass, set 8 binding 0
+	// is no longer sampled, and the main-pass fold continues to handle
+	// set 8 binding 1 (water.frag's screenmap). The SHADOW pipeline
+	// variant itself stays compiled (it's still listed in
+	// shaders.manifest.mjs and vk_create_pipeline) for future use if a
+	// world-shadow main-pass path lands — but until then nothing in
+	// renderervk requests it via vk_find_pipeline_ext.
 #endif
 
 #if FEAT_ADVANCED_WATER
@@ -1505,8 +1575,14 @@ void VK_LightingPass( void )
 		vk_get_pipeline_def( pipeline, &def );
 		def.shader_type = TYPE_WATER;
 		pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
-		// bind screenMap to set 2 (lightmap slot) for refraction sampling
-		vk_update_descriptor( VK_DESC_TEXTURE1, vk.screenMap.color_descriptor );
+		// the screenmap publish via
+		// vk_bindless_track(4, vk_get_screenmap_bindless_image()) is
+		// retired. The screenmap now lives in the engine-resources
+		// descriptor set (set 8, binding 1) and is bound per-draw via
+		// the same fold pattern as set 7 — no per-water-draw publish
+		// needed here. The water surface texture (bindless role 0) is
+		// still published automatically by GL_Bind→vk_bindless_track at
+		// tmu 0 below.
 	}
 #endif
 
@@ -1519,7 +1595,7 @@ void VK_LightingPass( void )
 			def.shader_type = TYPE_SINGLE_TEXTURE_LIGHTING_PARALLAX;
 		else if ( def.shader_type == TYPE_SINGLE_TEXTURE_LIGHTING_LINEAR )
 			def.shader_type = TYPE_SINGLE_TEXTURE_LIGHTING_PARALLAX_LINEAR;
-		// Phase 6.5.2: a BC5 (2-channel ATI2N/3Dc) normal map only stores
+		// a BC5 (2-channel ATI2N/3Dc) normal map only stores
 		// X+Y — the shader reconstructs Z. RGB-encoded normal maps (BC1 /
 		// BC3 / uncompressed) keep the legacy all-3-channels path. Keys the
 		// parallax pipeline variant so the two don't share a pipeline.
@@ -1529,8 +1605,8 @@ void VK_LightingPass( void )
 			default:                        def.normal_format = 0; break;
 		}
 		pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
-		// bind normalmap to descriptor set 6
-		vk_update_descriptor( VK_DESC_NORMALMAP, pStage->bundle[2].image[0]->descriptor );
+		// legacy-mainpath-retire STEP 2 — legacy ring write retired; bindless track stays.
+		vk_bindless_track( 5 /* role: normalmap (NORMALMAP slot, was set 6) */, pStage->bundle[2].image[0] );
 	}
 #endif
 
@@ -1548,6 +1624,68 @@ void VK_LightingPass( void )
 	vk_bind_index();
 	vk_bind_lighting( tess.shader->lightingStage, tess.shader->lightingBundle );
 	vk_draw_geometry( tess.depthRange, qtrue );
+}
+
+/*
+===================
+VK_ForwardPlusPass — the Forward+ tile-sum lit pass (sibling of VK_LightingPass).
+
+Draws ONE plain classic-Phong lit surface through the fp pipeline: the fragment
+reads its screen tile's light list (the tile-classification compute's SSBO) and
+sums the tile's lights — replacing the per-light additive accumulation with a
+single pass. NO per-light params (VK_SetLightParams) — the lights ride the dlight
+SSBO in world space; the only per-draw state is the model->world matrix (so the VS
+can emit world_pos/world_normal, H1) + the diffuse (role 0, bindless). The per-draw
+UBO ring item is pushed fresh per surface (H1 — a stale ring write = wrong-place
+lighting). Only reached for surfaces R_LitSurfIsPlain() routed to the union
+(variant surfaces stay on VK_LightingPass).
+===================
+*/
+void VK_ForwardPlusPass( void )
+{
+	static vkUniform_t uniform;
+	const shaderStage_t *pStage;
+	const orientationr_t *o = &backEnd.or;
+	uint32_t uniform_offset;
+
+	if ( tess.shader->lightingStage < 0 )
+		return;
+	pStage = tess.xstages[ tess.shader->lightingStage ];
+
+	// per-draw model->world (identity for worldspawn, the entity's [axis|origin] for
+	// models) — the fp VS reads ubo.modelMatrix@416 to put world_pos/world_normal in
+	// world space. backEnd.or is set per surface by R_RotateForEntity in the union
+	// walk. Column-major, same convention as VK_LightingPass's shadow modelMatrix.
+	memset( &uniform, 0, sizeof( uniform ) );
+	uniform.modelMatrix[ 0] = o->axis[0][0]; uniform.modelMatrix[ 4] = o->axis[1][0]; uniform.modelMatrix[ 8] = o->axis[2][0]; uniform.modelMatrix[12] = o->origin[0];
+	uniform.modelMatrix[ 1] = o->axis[0][1]; uniform.modelMatrix[ 5] = o->axis[1][1]; uniform.modelMatrix[ 9] = o->axis[2][1]; uniform.modelMatrix[13] = o->origin[1];
+	uniform.modelMatrix[ 2] = o->axis[0][2]; uniform.modelMatrix[ 6] = o->axis[1][2]; uniform.modelMatrix[10] = o->axis[2][2]; uniform.modelMatrix[14] = o->origin[2];
+	uniform.modelMatrix[ 3] = 0.0f;          uniform.modelMatrix[ 7] = 0.0f;          uniform.modelMatrix[11] = 0.0f;          uniform.modelMatrix[15] = 1.0f;
+	// eyePos for the VS world-view vector (world-space eye).
+	VectorCopy( backEnd.viewParms.or.origin, uniform.eyePos );
+
+	// diffuse → bindless role 0 (the fp frag reads texture0 == role 0, same as
+	// light_frag). GL_Bind (via R_BindAnimatedImage) tracks the role-0 slot.
+	GL_SelectTexture( 0 );
+	R_BindAnimatedImage( &pStage->bundle[ tess.shader->lightingBundle ] );
+#ifdef USE_VBO
+	if ( tess.vboIndex == 0 )
+#endif
+	{
+		R_ComputeTexCoords( tess.shader->lightingBundle, &pStage->bundle[ tess.shader->lightingBundle ] );
+	}
+
+	// push a fresh ring item for THIS draw (mvp from the per-entity vk_update_mvp
+	// stash filled in the union walk; modelMatrix above), then bind the fp pipeline
+	// + set 2 (tile lights) + geometry + draw. vk_draw_forwardplus is the vk.c helper
+	// that binds ral_fpLitPipeline + the fp set-2 descriptor at draw time.
+	uniform_offset = VK_PushUniform( &uniform );
+	if ( uniform_offset == ~0u )
+		return;
+
+	vk_bind_index();
+	vk_bind_lighting( tess.shader->lightingStage, tess.shader->lightingBundle );
+	vk_draw_forwardplus( tess.depthRange );
 }
 #endif // USE_PMLIGHT
 
@@ -1571,11 +1709,29 @@ void RB_StageIteratorGeneric( void )
 
 #ifdef USE_PMLIGHT
 	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if / preprocessor-conditional idiom; statement is at correct enclosing scope
+	if ( tess.forwardPlusPass ) {
+		VK_ForwardPlusPass();
+		return;
+	}
+	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if / preprocessor-conditional idiom; statement is at correct enclosing scope
 	if ( tess.dlightPass ) {
 		VK_LightingPass();
 		return;
 	}
 #endif
+
+	// Q1 sky surfaces route here: Q1TC_SKY shaders drop
+	// shader.isSky, so ComputeStageIteratorFunc picks the generic
+	// iterator. The dlightPass early-return above means this only runs
+	// for a real sky-surface draw. r_drawSky gates the sky pass
+	// uniformly with Q3 (RB_StageIteratorSky); backEnd.skyRenderedThisView
+	// restores RB_DrawSun's gate — RB_StageIteratorSky was the only
+	// writer of that flag, and Q1 sky no longer routes there.
+	if ( tess.shader->surfaceFlags & SURF_SKY ) {
+		if ( !r_drawSky->integer )
+			return;
+		backEnd.skyRenderedThisView = qtrue;
+	}
 
 #ifdef USE_FOG_COLLAPSE
 	fogCollapse = tess.fogNum && tess.shader->fogPass && tess.shader->fogCollapse;
@@ -1606,22 +1762,9 @@ void RB_StageIteratorGeneric( void )
 	// call shader function
 	RB_IterateStagesGeneric( &tess, fogCollapse );
 
-	// now do any dynamic lighting needed
-#ifdef USE_LEGACY_DLIGHTS
-#ifdef USE_PMLIGHT
-	if ( r_dlightMode->integer == 0 )
-#endif
-	if ( tess.dlightBits && tess.shader->sort <= SS_OPAQUE && !(tess.shader->surfaceFlags & (SURF_NODLIGHT | SURF_SKY) ) ) {
-		if ( !fogCollapse ) {
-// NOLINTNEXTLINE(readability-redundant-preprocessor) — branch retained for portability with non-Vulkan derivatives
-#ifdef USE_VULKAN
-			rebindIndex = ProjectDlightTexture();
-#else
-			ProjectDlightTexture();
-#endif
-		}
-	}
-#endif // USE_LEGACY_DLIGHTS
+	// (The legacy fake-dlight extra pass is retired — per-pixel dynamic lights are
+	// added in the dedicated lit pass, not as a per-surface texture-projection pass
+	// here. rebindIndex stays qfalse: there is no legacy dlight pass to rebind after.)
 
 	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if / preprocessor-conditional idiom; statement is at correct enclosing scope
 	// now do fog

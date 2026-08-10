@@ -8,7 +8,6 @@
 
 // for the voice chats
 #include "../qcommon/menudef.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 //==========================================================================
 
@@ -190,8 +189,10 @@ static void CG_Obituary( entityState_t *ent ) {
 	if (message) {
 		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "%s %s.\n", CG_ClientNameByNum( target ), message);
 #if FEAT_WIRED_UI
+		/* push the name-resolved obituary line (the client
+		 * UI has no clientinfo to resolve raw IDs); same text as the log. */
 		trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
-			va( "%d|%d|%d|%d", attacker, target, mod, 0 ) );
+			va( "%s %s", CG_ClientNameByNum( target ), message ) );
 #endif
 		return;
 	}
@@ -304,8 +305,10 @@ static void CG_Obituary( entityState_t *ent ) {
 			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "%s %s %s%s\n",
 				CG_ClientNameByNum( target ), message, CG_ClientNameByNum( attacker ), message2);
 #if FEAT_WIRED_UI
+			/* name-resolved obituary line (same as the log). */
 			trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
-				va( "%d|%d|%d|%d", attacker, target, mod, 0 ) );
+				va( "%s %s %s%s", CG_ClientNameByNum( target ), message,
+					CG_ClientNameByNum( attacker ), message2 ) );
 #endif
 			return;
 		}
@@ -314,8 +317,9 @@ static void CG_Obituary( entityState_t *ent ) {
 	// we don't know what it was
 	Com_Log( SEV_INFO, LOG_CH(ch_cgame), "%s died.\n", CG_ClientNameByNum( target ) );
 #if FEAT_WIRED_UI
+	/* name-resolved obituary line (same as the log). */
 	trap_WiredUI_PushEvent( WIRED_EVENT_OBITUARY,
-		va( "%d|%d|%d|%d", ENTITYNUM_WORLD, target, mod, 0 ) );
+		va( "%s died", CG_ClientNameByNum( target ) ) );
 #endif
 }
 
@@ -668,7 +672,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 			trap_S_StartSound (NULL, es->number, CHAN_VOICE, ci_jp->sounds[CSOUND_JUMP] );
 		}
 
-		// Phase 5T: PTRAIL_PUSH trigger for jumppad launch. Trail is
+		// PTRAIL_PUSH trigger for jumppad launch. Trail is
 		// anchored behind the launched player along their negative
 		// velocity vector by CG_RenderOnePlayerTrail; no pad origin
 		// needed here. `es->number` is the launched player's
@@ -1041,6 +1045,13 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		CG_MissileHitWall( es->pType, 0, position, dir, IMPACTSOUND_METAL, es->number );
 		break;
 
+	case EV_EMIT_DEBRIS:
+		DEBUGNAME("EV_EMIT_DEBRIS");
+		// func_breakable shattered: spray eventParm debris chunks from the break
+		// center (the break sound, if any, arrives as a separate EV_GENERAL_SOUND)
+		CG_Debris( position, es->eventParm );
+		break;
+
 	case EV_RAILTRAIL:
 		DEBUGNAME("EV_RAILTRAIL");
 		cent->currentState.weapon = WP_RAILGUN;
@@ -1302,7 +1313,22 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 		if ( !(es->eFlags & EF_KAMIKAZE) ) {
 			trap_S_StartSound( NULL, es->number, CHAN_BODY, ci->effects.gibSound );
 		}
-		CG_GibPlayer( cent->lerpOrigin );
+		// gibs inherit the body's velocity and launch from its (possibly prone)
+		// death-animation pose. For our own corpse es->pos.trDelta hasn't yet
+		// picked up the killing knockback, so use the predicted velocity/torso.
+		// es->damageDir biases the parts along the killing-blow direction;
+		// es->eventParm carries the quantized knockback speed and also seeds the
+		// per-part RNG so the scatter is identical on every client.
+		if ( es->number == cg.snap->ps.clientNum ) {
+			CG_GibPlayer( cent->lerpOrigin, cent->lerpAngles,
+				cg.predictedPlayerState.velocity,
+				&cg.predictedPlayerEntity.pe.torso,
+				es->damageDir, es->eventParm );
+		} else {
+			CG_GibPlayer( cent->lerpOrigin, cent->lerpAngles,
+				es->pos.trDelta, &cent->pe.torso,
+				es->damageDir, es->eventParm );
+		}
 		break;
 
 	case EV_STOPLOOPINGSOUND:

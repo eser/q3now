@@ -1,0 +1,240 @@
+// _tokens.wui -- Wired UI design token table
+//
+// Phase 2 (2026-05-25) WUI Flexbox Authoring Migration spec §5 — canonical
+// initial token set. Loaded implicitly at the entry of every .wui parse;
+// modders may OVERRIDE these values but may NOT introduce new top-level
+// keys (spec §3 — `WiredToken_Set( allowNew=qfalse )` for mod variants).
+//
+// Reference syntax:
+//   forecolor $primary_cyan
+//   gap       $spacing_md
+//   font      "oxanium" $text_md_size
+
+// ── Primary palette ─────────────────────────────────────────────────
+token primary_cyan      "#00b4d8"     // accent / active states / titles / borders
+token primary_red       "#e63946"     // alert / quit / dangerous action
+token primary_yellow    "#ffd60a"     // warning / loading / energy
+token primary_green     "#06d6a0"     // success / online / health full
+
+// ── Background ──────────────────────────────────────────────────────
+token bg                "#080c10"               // app base; opaque
+token bg_overlay        "rgba(8,12,16,0.85)"    // modal/popup backdrop
+token bg_card           "rgba(8,12,16,0.85)"    // card surface (deep navy); Phase 3e FU-12: was rgba(0,180,216,0.05) which blended into $primary_cyan card titles
+
+// ── Text ────────────────────────────────────────────────────────────
+token text              "#e8f4fd"                       // primary text
+token text_dim_1        "rgba(232,244,253,0.80)"
+token text_dim_2        "rgba(232,244,253,0.60)"
+token text_dim_3        "rgba(232,244,253,0.40)"
+token text_dim_4        "rgba(232,244,253,0.20)"
+token text_dim_5        "rgba(232,244,253,0.10)"
+
+// ── Line / divider ──────────────────────────────────────────────────
+token line_subtle       "rgba(0,180,216,0.10)"
+token line_med          "rgba(0,180,216,0.18)"
+token line_strong       "rgba(0,180,216,0.30)"
+
+// ── Opacity scale ───────────────────────────────────────────────────
+token opacity_subtle    0.10
+token opacity_low       0.20
+token opacity_med       0.40
+token opacity_high      0.60
+token opacity_solid     0.85
+
+// ── Spacing scale (normalized) ──────────────────────────────────────
+// Dispatch 5.11 S3 catastrophic regression: hybrid token set (Layer A grid + Layer B
+// semantic) clean-swap produced same multi-semantic breakage observed in dispatch 5.9
+// $spacing_* migration attempt. Reverted to dispatch 5.8 NORM values pending
+// architectural rethink (per-use inline rewrite vs token semantic) for dispatch 5.12.
+// Dispatch 5.11 Layer B mockup-canonical tokens preserved below for future use.
+token spacing_xxs       0.0025
+token spacing_xs        0.005
+token spacing_sm        0.01
+token spacing_md        0.02
+token spacing_lg        0.04
+token spacing_xl        0.06
+token spacing_xxl       0.10
+
+// Layer B mockup-canonical semantic tokens (dispatch 5.11 add; not adopted by V1_Monolith
+// widgets this dispatch due to S3 HALT-fork revert; available for explicit per-use opt-in
+// without affecting cross-artboard widgets):
+token spacing_none                    0
+token spacing_card_padding_v          1.78vh
+token spacing_card_padding_h          1.11vw
+token spacing_card_gap                1.56vh
+token spacing_menu_row_padding_v      1.33vh
+token spacing_menu_row_padding_h      1.11vw
+
+// ── Typography ──────────────────────────────────────────────────────
+// Font registries — MSDF atlas slot names (build-time tools/msdf/ compiled).
+// FIX 2026-07-03 (Eser): three tokens pointed at NON-EXISTENT atlases and fell
+// back silently to sansman, so every menu using them rendered the wrong face.
+// Repoint at real atlases (registered in scripts/msdf_fonts.shader) at the TOKEN
+// level so all ~30 consumers are corrected at once — no per-menu edits.
+//   font_sans_bold  : "oxanium_bold"   → no atlas → "sansman-bold" (real heavy display)
+//   font_sans_medium: "oxanium_medium" → name/atlas mismatch (atlas is oxanium-medium, hyphen) → fix the hyphen
+//   font_accent     : "enter_sansman"  → no atlas → "sansman-bold" (real heavy face)
+token font_sans         "oxanium"           // primary UI sans (display + body)
+token font_sans_bold    "sansman-bold"      // headings (was dangling "oxanium_bold")
+token font_sans_medium  "oxanium-medium"    // subheadings (was "oxanium_medium" — atlas uses a hyphen)
+token font_mono         "jetbrainsmono"     // monospace — JetBrains Mono (v2 design Mono primitive canonical)
+token font_accent       "sansman-bold"      // decorative accent (was dangling "enter_sansman")
+token font_icon         "wui_icons"         // Phase 3e MSDF icon font (PUA U+E000-U+E007)
+
+// Sizes (normalized; UI scales with viewport height)
+token text_xs_size      0.014
+token text_sm_size      0.018
+token text_md_size      0.022
+token text_lg_size      0.028
+token text_xl_size      0.038
+token text_xxl_size     0.054
+token text_hero_size    0.082    // title hero (main menu "q3now")
+
+// ── Decoration ──────────────────────────────────────────────────────
+token radius_sm         0.004
+token radius_md         0.008
+token radius_lg         0.012
+
+token border_thin       1px
+token border_med        2px
+token border_thick      3px
+
+// Horizontal gap inserted between adjacent listbox columns (# / Map /
+// Name / …) in the vertical-list body. Authored in logical px (like the
+// per-column `columns` widths); the emit path scales it by dpiScale so it
+// stays consistent on HiDPI. Modders override this one knob to loosen or
+// tighten column spacing.
+token listbox_col_gap   6px
+
+// ── Phase 3a additions ──────────────────────────────────────────────
+// Card pattern (q3now Main Menu RIGHT region 3-card stack)
+token card_width            0.30
+token card_min_height       0.18
+token card_padding          0.018
+token card_gap_internal     0.008
+
+// Marquee strip (bottom accent on main menu)
+token marquee_height        0.04
+token marquee_speed         0.5
+
+// Popup pattern canonical (FU-1 — popup_message + future variants)
+token popup_width           0.5
+token popup_padding         0.02
+token popup_button_gap      0.015
+
+// Active menu item highlight accent — alias for primary_cyan so
+// future themes can override one knob without touching every menuDef.
+token active_accent         "#00b4d8"
+
+// Main menu structural tokens (`top bar` / `bottom bar` heights +
+// content-row padding; tied to spacing_lg + spacing_md from §5)
+token top_bar_height        0.04
+token bottom_bar_height     0.03
+token content_padding_x     0.06
+token content_padding_y     0.04
+
+// Settings-cluster footer action button (Apply / Cancel / Test / Reset);
+// shared by ui/widgets/qw_settings_chrome.wui so all 7 tabs size buttons alike.
+token footer_button_w   0.14
+
+// ── v2 palette tokens (mode × accent overlay driver) ────────────────
+// Declared here at base-load so the cl_wired_palette overlay chain
+// (ui/themes/<mode>/_tokens.wui + ui/themes/<accent>/_tokens.wui) only
+// needs to OVERRIDE values — the token mod-override gate runs
+// allowNew=qfalse after the base latch and would otherwise reject these
+// names. Default values are dark mode + amber accent (the engine
+// boots into that state until ui_palette_mode / ui_palette_accent
+// drive a swap).
+
+// Mode tokens — surface colours
+token ink                   "#0a0908"
+token panel                 "#14110e40"
+token panelDeep             "#1a161240"
+token line                  "#2a2520"
+token lineBright            "#3a322a"
+token bone                  "#e8dfd0"
+token boneDim               "#8a7560"
+
+// V2_HUD_Active panel surface (dispatch 5.21): warm-dark translucent HUD
+// panel fill (qw-screens.jsx ScreenHUD rgba(10,5,2,0.72)); recurs across
+// health + armor panels (and later holdables / weapon_carousel / scoreboard
+// overlay). Mode token so a future light-theme overlay can override it
+// (light-mode override deferred to the dispatch-5.25 5-config matrix).
+// HUD redesign (Eser, 2026-06-29): in-game panel fill dropped 0.72 → 0.34.
+// At 0.72 the BL vitals + BR ammo panels read as near-opaque black blocks that
+// occluded the scene behind them (Eser: "overlay backgroundları opaque, görüşü
+// engelliyor"). 0.34 keeps a subtle dark backing for digit legibility without
+// blocking the view. (Menus that want a stronger fill use their own token.)
+token hud_panel_bg          "rgba(10,5,2,0.34)"
+// HUD redesign (Eser, 2026-06-30): vitals (BL) + ammo (BR) panel fill.
+// Dedicated token — the shared hud_panel_bg (0.34) stays put so the always-on
+// scoreboard_bar strip + the TAB-hold full-table scoreboard menus do NOT over-darken.
+// Repoint ONLY health/armor/ammo panel backgrounds here.
+// Transparency tuning (runtime-pinned + automated A/B verified):
+//  - Stage 1 (2026-06-30 AM): the 0.45 alpha DOES reach the GPU (one translucent
+//    draw per panel, no double-draw — confirmed). The near-black fill (10,5,2)
+//    blended in LINEAR space (r_hdr 1) read as opaque, so it was lightened to a
+//    mid charcoal (34,28,24) and alpha dropped to 0.40.
+//  - Stage 2 (2026-06-30 PM): the separate RB_TransitionToUI root-fix (UI 2D pass
+//    now LOADs the tonemapped world instead of CLEARing img265 to black) was
+//    landed; an automated bright/dark A/B then MEASURED the panel fill at ~0.50
+//    effective opacity (world bleeds through, NOT over black). BUT Eser live still
+//    read it as opaque — a 0.40 charcoal tint, inflated by HDR-linear blending,
+//    is genuinely too dense to *look* see-through. So drop alpha hard to 0.18 and
+//    lighten the tint to a neutral mid-grey: the panel becomes a faint scrim that
+//    keeps the digits legible while the world clearly reads through it. (Token keeps
+//    the …60 name for continuity.) Re-tune here, not per-widget.
+token hud_panel_bg60        "rgba(12,10,9,0.50)"
+
+// Mode tokens — DemoBackdrop scene (arena ruin atmosphere)
+token demoBg                "#0a0403"
+token demoSky1              "#3a1808"
+token demoSky2              "#1a0905"
+token demoFog               "#1a0c06"
+token demoFloor             "#2a1208"
+token demoTowerA            "#0a0605"
+token demoTowerB            "#0e0706"
+token demoArchA             "rgba(20,9,6,0.5)"
+token demoArchB             "rgba(26,12,8,0.5)"
+
+// Mode tokens — atmospheric effects
+token vignette              "rgba(0,0,0,0.55)"
+token vignetteHard          "rgba(0,0,0,0.85)"
+token grain                 "rgba(0,0,0,0.25)"
+
+// Accent tokens (3 levels per accent — main / dim / soft)
+token accent                "#f4a03a"
+token accentDim             "#8a6230"
+token accentSoft            "#c87a2a"
+// Low-alpha accent wash — equipped weapon-carousel slot FILL (boot default; each
+// ui/themes/<accent>/_tokens.wui overrides it). Solid accent under sparse weapon
+// line-art reads as a bright "empty box"; this wash lets the icon dominate while
+// the full-opacity accent border still marks the equipped slot.
+token accentWash            "rgba(244,160,58,0.34)"
+
+// ── Attract-poster + team-scoreboard tokens (dispatch: literal→token migration) ──
+// Single-source the values that the .wui menus previously scattered as inline
+// float-quads. The parser substitutes $ref at parse time, so a theme override of
+// these token lines re-colours every consumer at once.
+//
+// poster_red — the Brutalist-Poster accent used across the three attract screens
+// (spine / index numbers / INSERT COIN / TIMES header / REC strip border). This
+// red is DELIBERATELY accent-INDEPENDENT (the poster reads aggressive-red no
+// matter the active accent palette) — the header comments in attract_*.wui say so.
+// Tokenising it does not change that intent; it just makes it ONE knob instead of
+// ~13 copies. #e6332b == float triple 0.9 0.2 0.17 (round(0.9*255)=230=0xe6 etc).
+token poster_red            "#e6332b"
+
+// Attract poster ink tints — the two warm bone-grey shades used for stamps,
+// captions, tags, times and secondary labels in the attract screens.
+token attract_ink_hi        "#c9c2b5"   // 0.79 0.76 0.71 1  (brighter secondary text)
+token attract_ink_lo        "#8a827a"   // 0.54 0.51 0.48 1  (dimmer tertiary text)
+
+// Team name tints on CTF/TDM scoreboards. Alpha (0.95) is baked in via rgba()
+// because the color parser reads a $ref-color as a single standalone token and
+// does NOT accept a trailing alpha float after it (cl_wired_parse.c WiredPC_Color).
+token team_red_text         "rgba(1.0,0.85,0.85,0.95)"   // red-team player name tint
+token team_blue_text        "rgba(0.85,0.85,1.0,0.95)"   // blue-team player name tint
+
+// Loading-screen background grid rows (faint cyan-family rules, ~23×).
+token loading_grid_line     "rgba(0.12,0.22,0.30,0.18)"

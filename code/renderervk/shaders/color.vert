@@ -4,10 +4,14 @@
 
 #version 450
 
-// 64 bytes
-layout(push_constant) uniform Transform {
-	mat4 mvp;
-};
+// mvp rides in the set-0 vkUniform_t ring (filled by VK_PushUniform /
+// VK_PushUniformScratch, which stamp mvp from vk_world.mvp), not a VS push constant.
+// mvp lands at host offset 480 (FEAT_SHADOW_MAPPING build); pad the std140 prefix to
+// it. color.vert reads only mvp, so the prefix is opaque padding.
+layout(set = 0, binding = 0) uniform UBO {
+	vec4 _pad_to_mvp[30];   // 0 -> 480 (480 bytes)
+	mat4 mvp;               // host offset 480
+} ubo;
 
 layout(location = 0) in vec3 in_position;
 //layout(location = 1) in vec4 in_color;
@@ -23,7 +27,7 @@ out gl_PerVertex {
 };
 
 void main() {
-	gl_Position = mvp * vec4(in_position, 1.0);
+	gl_Position = ubo.mvp * vec4(in_position, 1.0);
 
 	//frag_color = in_color;
 	//frag_tex_coord0 = in_tex_coord0;

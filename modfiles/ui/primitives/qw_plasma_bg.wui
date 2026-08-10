@@ -1,0 +1,37 @@
+// qw_plasma_bg.wui — 9th v2 primitive (deferred from 15.3, bundled
+// with the GLOW_PLASMA layer in 15.6). Modder usage pattern:
+//
+//   itemDef {
+//       type container
+//       rect 0 0 1 1
+//       background "layered"
+//       effects "plasma+grid+vignette+scanlines+animated"
+//   }
+//
+// Tokens consumed: $ink (root backcolor), $accent (plasma tint baked
+// into WUI_BG_V2_PLASMA_HOT defaults — future palette-aware extension
+// would resolve from the live token table). The ANIMATED modifier
+// engages the radial core pulse via the bg parallax LOOP_LINEAR
+// timer; omit it for a static glow. This file ships as a reference;
+// the engine reads only its inner itemDef pattern when copied into
+// a host menu.
+
+menuDef {
+	name "qw_plasma_bg"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 0
+	style 1
+	backcolor $ink
+
+	itemDef {
+		name "qw_plasma_bg_root"
+		type container
+		rect 0 0 1 1
+		background "layered"
+		effects "plasma+grid+vignette+scanlines+animated"
+		visible 1
+		decoration
+	}
+}

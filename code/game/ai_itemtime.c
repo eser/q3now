@@ -27,6 +27,7 @@ Skill scaling: only skill 4+ actively times items.
 #include "../botlib/be_ai_weap.h"
 //
 #include "ai_main.h"
+#include "ai_dmq3.h"
 #include "ai_itemtime.h"
 #include "wired/bots/g_bot_scripts.h"
 
@@ -108,7 +109,7 @@ void BotItemTimeInit( struct bot_state_s *bs )
 		bs->timed_items[bs->num_timed_items].ent.eType = ET_ITEM;
 		bs->timed_items[bs->num_timed_items].itemType = ent->item->giType;
 		VectorCopy( ent->r.currentOrigin, bs->timed_items[bs->num_timed_items].origin );
-		bs->timed_items[bs->num_timed_items].areaNum = trap_AAS_PointAreaNum( ent->r.currentOrigin );
+		bs->timed_items[bs->num_timed_items].areaNum = BotPointAreaNum( ent->r.currentOrigin );
 		bs->timed_items[bs->num_timed_items].respawnTime = BotItemRespawnTime( ent->item );
 		bs->timed_items[bs->num_timed_items].pickupTime = 0; // available
 		bs->num_timed_items++;
@@ -170,7 +171,7 @@ qboolean BotItemTimingGoal( struct bot_state_s *bs )
 	int timeUntilRespawn;
 	bot_itemtime_t *ti;
 
-	if ( WiredBots_EffectiveSkill( bs ) < 4.0f ) return qfalse; // only skill 4+ times items
+	if ( WiredIntel_EffectiveSkill( bs ) < 4.0f ) return qfalse; // only skill 4+ times items
 
 	bestItem = -1;
 	bestValue = 0;

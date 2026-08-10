@@ -1,0 +1,34 @@
+// qw_hud_telemetry — V2_HUD_Active top-right FPS / MS readout
+// Interface: #include once into the qw_hud_active composer menuDef body.
+// Source: docs/wui-claude-design-canonical-v2/project/qw-screens.jsx:1132-1142
+//   (top:18 right:24; FPS block [amber] + MS block [toxic], number over label).
+//
+// ABI: both values come from EXISTING registered hudElements — `fps`
+// (cl_wired_ui_hud_register.c:93) and `netstats` (register :197; FEAT_UNLAGGED).
+//
+// HUD redesign (Eser) Phase F polish — orphan-label fix:
+//   The fps renderer ALREADY emits an inline suffix: with no `style`, it draws
+//   "%ifps" → "120fps" as ONE text node (cl_wired_hud_elem_fps.c:65). So the
+//   label travels WITH the number — when the number is gated off (intermission/
+//   spectator/dead) the suffix vanishes too. No separate static "FPS" caption is
+//   needed (the old one was a position-absolute orphan with no SE_ gate, left
+//   hanging when the number hid). Dropping `style` here restores the inline form.
+//   netstats stays `style 1` (compact ping number) — its non-compact form is the
+//   verbose "%ims delag:%ims" which is too busy for the minimalist HUD; the "ms"
+//   sense is carried by a single small static suffix kept on the SAME line, so it
+//   reads as one "8 ms" unit. (Only netstats keeps a static suffix; it is the one
+//   element whose renderer has no short inline-ms form.)
+// Tokens: $accent (fps) $primary_green (ms) $boneDim (ms suffix) $font_sans $font_mono.
+
+itemDef { hudElement "fps"      anchor TOP_RIGHT rect 0.940 0.020 0 0 font $font_sans fontsize 20 22 textalign 2 forecolor $accent decoration visible 1 }
+// netstats ping number (right-aligned). The "ms" sense is carried by a small
+// static suffix to its LEFT (right 2.6vw), reading "ms 8" — a common compact
+// telemetry form (cf. "ping 8"). Keeping the suffix clearly left of the digits
+// avoids the digits-overlapping-suffix glitch that a right-side suffix hit when
+// the ping is single/double digit (variable number width). The label is static
+// so it shows even when the ping number is gated in intermission — a minor,
+// accepted edge (vs the old TWO orphan captions). fps needs no caption — its
+// renderer self-labels "120fps" inline.
+itemDef { hudElement "netstats" style 1 anchor TOP_RIGHT rect 0.978 0.020 0 0 font $font_sans fontsize 20 22 textalign 2 forecolor $primary_green decoration visible 1 }
+
+itemDef { name "tele_ms_suffix" type 0 position absolute top 2.0vh right 2.6vw width 3vw height 1.6vh text "ms" textalign 2 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }

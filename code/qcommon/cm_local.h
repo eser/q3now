@@ -90,6 +90,12 @@ typedef struct sphere_s sphere_t;
 #define MAX_Q1_HULLS  4
 
 typedef struct {
+	// Format identity carried from the loader: qtrue once the Q1 BSP loader has
+	// stored this map's clipnodes (see CMQ1_StoreClipnodes). This is the explicit
+	// "the loaded map is Q1" fact — the canonical build keys on it instead of
+	// inferring the format from a tracer function-pointer's address. Cleared by the
+	// per-load memset of cm and by CMQ1_FreeData.
+	qboolean           isQ1Format;
 	int                numClipnodes;
 	q1_dclipnode_t    *clipnodes;
 	int                numSubmodelRoots;
@@ -99,7 +105,11 @@ typedef struct {
 	int               *leafContents;   // Q3 CONTENTS_* per BSP leaf
 } cmQ1Data_t;
 
-typedef struct {
+// Named tag (cmTracer_s) so the maps layer can forward-declare it opaquely in
+// cm_public.h and a map format can declare its collision tracer without seeing
+// this layout. Stateless vtable (name + fn-pointers, no per-instance state), so
+// one instance is safely shareable by many formats (N:1 reuse).
+typedef struct cmTracer_s {
 	const char *name;
 	void (*Trace)( trace_t *results, const vec3_t start, const vec3_t end,
 	               const vec3_t mins, const vec3_t maxs, clipHandle_t model,
@@ -207,7 +217,40 @@ typedef struct {
 
 	cmQ1Data_t          q1;
 	const cmTracer_t   *tracer;
+
+	// World-trace geometry source (model 0). On a Q3 map this aliases the loaded
+	// cm.* arrays. On a Q1 map, adopt-at-load installs the canonical(+clip) arrays
+	// here once at load — the world trace reads THESE, never the loaded cm.* hull-1
+	// arrays (which stay as the SUBMODEL source: doors/plats keep their original
+	// base-relative leafbrush offsets and raw side/plane pointers). Set once at
+	// load; never mutated per-trace (the old per-trace Canon_SwapIn/Out is retired).
+	struct {
+		int           numNodes;       cNode_t      *nodes;
+		int           numLeafs;       cLeaf_t      *leafs;
+		int           numLeafBrushes; int          *leafbrushes;
+		int           numBrushes;     cbrush_t     *brushes;
+		int           numBrushSides;  cbrushside_t *brushsides;
+		int           numPlanes;      cplane_t     *planes;
+	} world;
 } clipMap_t;
+
+// Per-trace geometry view + thread-local visit-marker context. The world trace
+// (model 0) points its arrays at cm.world; a submodel trace points them at the
+// loaded cm.* arrays. Visit-markers live in a thread-local epoch + per-thread
+// marker arrays (NOT on the shared cbrush_t/cPatch_t), so concurrent traces from
+// different threads never write shared state — the trace path is thread-legal with
+// zero locks in the per-brush loop and an epoch-bump (not an array clear) reset.
+typedef struct cmTraceCtx_s {
+	// visit-marker epoch (thread-local, bumped once per trace)
+	int          epoch;
+	// per-thread marker arrays, indexed by brush / patch number; sized to the
+	// map's brush/patch counts at first use, versioned so a map change re-sizes.
+	int         *brushMarks;
+	int         *patchMarks;
+	int          numBrushMarks;
+	int          numPatchMarks;
+	unsigned int mapChecksum;   // marks were sized for this map
+} cmTraceCtx_t;
 
 
 // keep 1/8 unit away to keep the position valid before network snapping
@@ -222,13 +265,19 @@ extern	cvar_t		*cm_noCurves;
 extern	cvar_t		*cm_playerCurveClip;
 
 extern cmTracer_t cmTracer_q3;
-extern cmTracer_t cmTracer_q1;
+extern cmTracer_t cmTracer_q1canon;   // live canonical(+clip) collision dispatch (Q1 maps)
 
 // cm_q1.c — Q1 hull data management called from bsp_q1.c during load
 void CMQ1_StoreClipnodes( const q1_dclipnode_t *cn, int numCn,
                           const int *hull1Roots, const int *hull0Roots, int numSubmodels );
 void CMQ1_StoreLeafContents( const int *contents, int numLeafs );
 void CMQ1_FreeData( void );
+
+// cm_q1.c — canonical collision model (Q1 hull-0 clipnode-to-brush conversion).
+// The single live Q1 collision representation, built at load. A no-op on non-Q1
+// maps and idempotent; on a Q1 map that cannot build it hard-fails the load.
+void CMQ1_BuildCanonicalModel( void );
+void CMQ1_FreeCanonicalModel( void );
 
 // cm_trace.c — internal Q3 trace (used by cmTracer_q3 vtable entry and Q1 fallback)
 void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end,
@@ -275,6 +324,19 @@ typedef struct {
 	traceType_t	type;		// replaces sphere.use boolean
 	biSphere_t	biSphere;	// for TT_BISPHERE
 	qboolean	testLateralCollision;
+
+	// Geometry source for THIS trace (resolved once at entry): world traces read
+	// cm.world (canonical on Q1); submodel traces read the loaded cm.* arrays. The
+	// hot loops read tw->leafbrushes/tw->brushes/... — same cost as the old global
+	// read, thread-safe because it never mutates a global.
+	cLeaf_t      *leafs;
+	cNode_t      *nodes;
+	int          *leafbrushes;
+	cbrush_t     *brushes;
+	cPatch_t    **surfaces;
+	int          *leafsurfaces;
+	// Thread-local visit-marker context (epoch + per-thread marker arrays).
+	struct cmTraceCtx_s *ctx;
 } traceWork_t;
 
 typedef struct leafList_s {

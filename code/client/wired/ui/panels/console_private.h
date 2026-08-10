@@ -2,68 +2,26 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 /*
- * cl_console_private.h — Shared internal interface between cl_console.c
- * and wired/ui/panels/console.c.
+ * console_private.h — UI-tier private interface for the console projection
+ * (code/client/wired/ui/elements/console.c).
  *
- * NOT for inclusion outside those two translation units.
+ * TURN 3 V-20: console_t + the compile-time constants moved to the core
+ * header code/qcommon/wired/core/console/con_private.h (presentation-agnostic,
+ * joins the headless build). This header now carries only the UI-tier render
+ * surface: text metrics, the per-element color backing vecs, the UI-consumed
+ * cvar pointers, and the chat externs. The elements/console.c projection reads
+ * buffer state through the con_public.h accessors — NOT through the `con`
+ * macro — so the include below is for the metrics/cvars, not for buffer reads.
+ *
+ * NOT for inclusion outside the console projection.
  */
 #pragma once
 
-/* ── Compile-time constants ─────────────────────────────────────────── */
-#define  DEFAULT_CONSOLE_WIDTH  78
-#define  CON_LINEBUF_SIZE       513
-#define  NUM_CON_TIMES          17
-#define  CON_TEXTSIZE           65536
-#define  CONSOLE_ARENA_SIZE     ( sizeof(console_t) + 4096 )
+/* core data-model + constants (console_t, DEFAULT_CONSOLE_WIDTH, CON_TEXTSIZE,
+ * CON_LINEBUF_SIZE, NUM_CON_TIMES, CONSOLE_ARENA_SIZE, the `con` macro). */
+#include "../../../../qcommon/wired/core/console/con_private.h"
 
-/* ── console_t — the full console state (data model + render state) ── */
-typedef struct {
-	qboolean	initialized;
-
-	short		text[CON_TEXTSIZE];
-	int			current;
-	int			x;
-	int			display;
-
-	int			linewidth;
-	int			totallines;
-
-	float		xadjust;
-
-	float		displayFrac;
-	float		finalFrac;
-
-	int			vislines;
-
-	int			times[NUM_CON_TIMES];
-	vec4_t		color;
-
-	int			viswidth;
-	int			vispage;
-
-	qboolean	newline;
-
-	/* search state */
-	qboolean	searchActive;
-	char		searchPattern[256];
-	int			searchCursor;
-	int			searchLine;
-	int			searchMatchCount;
-
-	/* mark (selection) state */
-	qboolean	markActive;
-	int			markStartLine;
-	int			markStartCol;
-	int			markEndLine;
-	int			markEndCol;
-
-} console_t;
-
-/* ── Backing pointer + accessor macro ───────────────────────────────── */
-extern console_t *s_con;
-#define con (*s_con)
-
-/* ── Render metrics (written by Con_UpdateTextMetrics) ──────────────── */
+/* ── Render metrics (written by Con_UpdateTextMetrics, in console.c) ──── */
 extern float con_textPointSize;
 extern float con_lineAdvance;
 extern float con_textCharWidth;
@@ -77,7 +35,7 @@ extern vec4_t con_cvarColor;
 extern vec4_t con_cmdColor;
 extern vec4_t con_valueColor;
 
-/* ── Cvar pointers (registered in Con_Init) ─────────────────────────── */
+/* ── Cvar pointers (registered in Con_Init, externed here for the UI) ── */
 extern cvar_t *con_lineheight;
 extern cvar_t *con_conspeed;
 extern cvar_t *con_autoclear;
@@ -98,10 +56,15 @@ extern cvar_t *con_colCVar;
 extern cvar_t *con_colCmd;
 extern cvar_t *con_colValue;
 
-/* ── Chat state (defined in cl_cin.c / cl_main.c) ─────────────────── */
+/* ── Chat state (defined in cl_keys.c / cl_main.c) ─────────────────── */
 extern qboolean chat_team;
 extern int      chat_playerNum;
 
-/* ── Internal functions in cl_console.c called by the draw layer ─────── */
+/* ── Internal functions in console.c called by the draw layer ────────── */
 void		Con_UpdateColors( void );
-qboolean	Con_MarkCellIsSelected( int row, int col );
+
+/* UI lifecycle: register the presentation-only commands + color parse +
+ * close hook (Con_InitProjection), tear them down (Con_ShutdownProjection).
+ * Called from the client init/shutdown path right after Con_Init/Con_Shutdown. */
+void		Con_InitProjection( void );
+void		Con_ShutdownProjection( void );

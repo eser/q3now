@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+//
+// layer_popup.wmenu — Phase 3b1 visual z-order fixture.
+// Centered yellow panel marking the POPUP layer; second-from-front of the
+// 6-layer stack. Pushed via WiredUI_PushPopup by wui_layer_test_single popup
+// / wui_layer_test_stack — POPUP activation requires a non-empty queue, so
+// the dev command performs an explicit push in addition to flipping the
+// override bit.
+
+menuDef {
+	name "layer_popup"
+	rect 0.35 0.375 0.30 0.25
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.75 0.70 0.15 0.95
+	layer "popup"
+
+	itemDef {
+		type 0
+		rect 0 0.40 1 0.20
+		textalign 1
+		font "oxanium" 20
+		forecolor 0.1 0.1 0.1 1
+		text "LAYER POPUP"
+		decoration
+		visible 1
+	}
+}

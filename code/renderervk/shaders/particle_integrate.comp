@@ -75,6 +75,14 @@ struct ParticleClassGPU {
 	float sizeJitter;
 	uint  colorDomain;   // Block 5d-followup: was pad4 — CD_SRGB(0)|CD_LINEAR(1); compute does not consume it.
 	uint  pad5;
+	// Sprite-frame (flipbook) animation — compute does not consume these;
+	// present so the std430 layout matches host particleClassGPU_t and
+	// the particle.vert mirror (classes[] SSBO stride would drift otherwise).
+	uint  frameSlots[16];
+	uint  frameCount;
+	uint  frameBlend;
+	uint  framePad0;
+	uint  framePad1;
 };
 
 layout(set = 0, binding = 0) uniform ParticleFrame {
@@ -89,8 +97,8 @@ layout(set = 0, binding = 0) uniform ParticleFrame {
 	// 16 B of std140 vec4-stride padding so the layout matches host
 	// particleFrame_t and the particle.vert / particle.frag mirrors;
 	// compute consumes none of it. pad0 (offset 128) was the legacy
-	// `identityLight` halving factor — dropped Phase 6B3'-a, field
-	// removed in the Block 9 sweep.
+	// `identityLight` halving factor — since dropped, the field
+	// removed in a later cleanup sweep.
 	float pad0;
 	float pad1;
 	float pad2;

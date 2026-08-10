@@ -32,7 +32,7 @@ hand-rolled tokenizer that handles the JSON-RPC envelope.
 
 #define MCP_PROTOCOL_VERSION  "2025-03-26"
 #define MCP_SERVER_NAME       "wired-mcp"
-#define MCP_SERVER_VERSION    WIRED_ENGINE_VERSION
+#define MCP_SERVER_VERSION    WIRED_ENGINE_TITLE
 #define MCP_MAX_RESPONSE      (32 * 1024)  // 32KB max response
 
 // ── Minimal JSON helpers ─────────────────────────────────────────
@@ -125,6 +125,84 @@ static void WN_SanitizeMsg( const char *in, char *out, int out_size )
 	out[j] = '\0';
 }
 
+/*
+====================
+WN_McpBotDirectiveStatus
+
+Render one bot's directive state for a per-client status line, and report
+whether that bot still needs orders.
+
+The CS_BOTDIRECTIVES configstring is written by the game module as
+
+    type\displayname\ltgtype\seqactive\locked
+
+and this reads that same vocabulary rather than inventing names for it. The
+first two fields are positional and predate the rest; a string carrying only
+those two is still valid and renders with the trailing fields omitted.
+
+*needsOrders keeps its long-standing meaning EXACTLY: a live bot whose slot is
+empty. That emptiness test is the contract other tools act on, so it is
+deliberately computed from the raw string before any parsing, and parsing can
+never change it.
+
+Returns the number of characters written into out (0 when there is nothing to
+add), so callers can append it to an existing line.
+====================
+*/
+static int WN_McpBotDirectiveStatus( int clientNum, qboolean isBot, qboolean alive,
+                                     qboolean *needsOrders, char *out, int out_size )
+{
+	const char *cs;
+	const char *p;
+	int         type, ltgtype, seqactive, locked;
+	char        name[64];
+	int         i;
+
+	out[0] = '\0';
+	*needsOrders = qfalse;
+
+	if ( !isBot || !alive ) {
+		return 0;
+	}
+
+	cs = sv.configstrings[CS_BOTDIRECTIVES + clientNum];
+
+	/* The contract, unchanged: empty slot means the bot wants orders. */
+	*needsOrders = ( !cs || !cs[0] ) ? qtrue : qfalse;
+	if ( *needsOrders ) {
+		return 0;
+	}
+
+	/* field 1: directive type */
+	type = atoi( cs );
+
+	/* field 2: display name, bounded at the next separator */
+	name[0] = '\0';
+	p = strchr( cs, '\\' );
+	if ( p ) {
+		const char *end = strchr( ++p, '\\' );
+		int         len = end ? (int)( end - p ) : (int)strlen( p );
+		if ( len >= (int)sizeof( name ) ) len = (int)sizeof( name ) - 1;
+		for ( i = 0; i < len; i++ ) name[i] = p[i];
+		name[len] = '\0';
+		p = end;
+	}
+
+	/* fields 3-5: ltgtype, sequenced-goal active, directive locked.
+	   Absent on a two-field string, which stays legal. */
+	ltgtype = seqactive = locked = -1;
+	if ( p ) { ltgtype   = atoi( ++p ); p = strchr( p, '\\' ); }
+	if ( p ) { seqactive = atoi( ++p ); p = strchr( p, '\\' ); }
+	if ( p ) { locked    = atoi( ++p ); }
+
+	if ( ltgtype < 0 ) {
+		return Com_sprintf( out, out_size, " dir=%d%s%s",
+			type, name[0] ? ":" : "", name );
+	}
+	return Com_sprintf( out, out_size, " dir=%d%s%s ltg=%d seq=%d locked=%d",
+		type, name[0] ? ":" : "", name, ltgtype, seqactive, locked );
+}
+
 
 /*
 ====================
@@ -206,7 +284,7 @@ static void WN_McpHandleToolsList_Buf( char *out, int out_size, int req_id )
 		"\"id\":{\"type\":\"integer\",\"description\":\"Bot client slot ID.\"},"
 		"\"level\":{\"type\":\"integer\",\"description\":\"Skill level x10 (10=1.0, 50=5.0).\"}},\"required\":[\"id\",\"level\"]}},"
 		"{\"name\":\"bot.command\","
-		"\"description\":\"Send a WiredBots directive with console authority (senderClient=-1, bypasses team/leader checks). "
+		"\"description\":\"Send a WiredIntel directive with console authority (senderClient=-1, bypasses team/leader checks). "
 		"Examples: '@visor kill Laroux', '@all rush', '@visor get Heavy Armor'. "
 		"Use item pickup names from game.items (the 'name' field). Accepts both pickup name and entity name.\","
 		"\"inputSchema\":{\"type\":\"object\",\"properties\":{"
@@ -779,10 +857,10 @@ AND coaching.tick bot_command entries).  One function, one code path.
 
 Sanitizes the message, validates "get <item>" pickup names when the
 message starts with "get " (bare form), then dispatches via bot_say_console
-→ WiredBots_ProcessChat(-1, ...) with console authority.
+→ WiredIntel_ProcessChat(-1, ...) with console authority.
 
 @mention form (@visor get Heavy Armor) is passed through without item
-validation — the parser in WiredBots_ProcessChat handles it.
+validation — the parser in WiredIntel_ProcessChat handles it.
 
 Returns qtrue and writes the dispatched safe message into safe[safe_size]
 on success.  Returns qfalse and writes a human-readable error into
@@ -810,7 +888,7 @@ static qboolean WN_DispatchBotCmd( const char *message,
 		}
 	}
 
-	/* Dispatch: bot_say_console → ConsoleCommand → WiredBots_ProcessChat(-1, ...).
+	/* Dispatch: bot_say_console → ConsoleCommand → WiredIntel_ProcessChat(-1, ...).
 	   EXEC_NOW calls Cmd_ExecuteString synchronously so trap_Cvar_Set("wiredbot_ack",...)
 	   inside the game DLL completes before we return — ACK cvar is readable immediately. */
 	Cvar_Set( "wiredbot_ack", "" );
@@ -823,7 +901,7 @@ static qboolean WN_DispatchBotCmd( const char *message,
 ====================
 WN_McpHandleBotCommand_Buf
 
-Route a chat command to the WiredBots system with console authority
+Route a chat command to the WiredIntel system with console authority
 (senderClient = -1, bypasses team checks).  Uses WN_DispatchBotCmd —
 the same single dispatch path as coaching.tick bot_command entries.
 ====================
@@ -1388,6 +1466,7 @@ static void WN_McpHandleStartCoaching_Buf( char *out, int out_size, int req_id )
 			int            hp, arm, wpn, sc, dt, tm;
 			qboolean       alive, isBot, needsOrders;
 			const char    *wpname;
+			char           dirbuf[96];
 
 			if ( cl->state < CS_CONNECTED ) continue;
 			ps    = ( cl->state >= CS_ACTIVE && sv.gameClients ) ? SV_GameClientNum( i ) : NULL;
@@ -1399,22 +1478,21 @@ static void WN_McpHandleStartCoaching_Buf( char *out, int out_size, int req_id )
 			tm    = ps ? ps->persistant[PERS_TEAM]   : 0;
 			alive = ( ps && ps->pm_type != PM_DEAD ) ? qtrue : qfalse;
 			isBot = ( cl->gentity && (cl->gentity->r.svFlags & SVF_BOT) ) ? qtrue : qfalse;
-			/* needsOrders: bot alive with no active locked directive */
-			if ( isBot && alive ) {
-				const char *dir_cs = sv.configstrings[CS_BOTDIRECTIVES + i];
-				needsOrders = ( !dir_cs || !dir_cs[0] ) ? qtrue : qfalse;
-			} else {
-				needsOrders = qfalse;
-			}
+			/* needsOrders: bot alive with no active locked directive.
+			   Same helper as the coaching.tick status line, so the two cannot
+			   drift apart. */
+			WN_McpBotDirectiveStatus( i, isBot, alive, &needsOrders,
+										dirbuf, sizeof( dirbuf ) );
 			wpname = ( wpn > 0 && wpn < WP_NUM_WEAPONS )
 				? bg_weaponlist[wpn].name : "unknown";
 			n = Com_sprintf( p, rem,
-				"  [%d] %-14s hp=%3d arm=%3d wp=%-20s score=%d deaths=%d team=%d %s %s%s\n",
+				"  [%d] %-14s hp=%3d arm=%3d wp=%-20s score=%d deaths=%d team=%d %s %s%s%s\n",
 				i, cl->name[0] ? cl->name : "?",
 				hp, arm, wpname, sc, dt, tm,
 				alive ? "alive" : "DEAD",
 				isBot ? "bot" : "human",
-				needsOrders ? " NEEDS_ORDERS" : "" );
+				needsOrders ? " NEEDS_ORDERS" : "",
+				dirbuf );
 			p += n; rem -= n;
 		}
 
@@ -2018,6 +2096,7 @@ static void WN_McpHandleCoachingTick_Buf( char *out, int out_size, int req_id,
 		int            health, armor, weapon, score, deaths, team;
 		qboolean       alive, isBot, needsOrders;
 		const char    *wpname;
+		char           dirbuf[96];
 
 		if ( cl->state < CS_CONNECTED ) {
 			if ( i < MAX_CLIENTS ) prev_alive[i] = 0;
@@ -2033,24 +2112,23 @@ static void WN_McpHandleCoachingTick_Buf( char *out, int out_size, int req_id,
 		team   = ps ? ps->persistant[PERS_TEAM]   : 0;
 		alive  = ( ps && ps->pm_type != PM_DEAD ) ? qtrue : qfalse;
 		isBot  = ( cl->gentity && (cl->gentity->r.svFlags & SVF_BOT) ) ? qtrue : qfalse;
-		/* needsOrders: bot alive with no active locked directive */
-		if ( isBot && alive ) {
-			const char *dir_cs = sv.configstrings[CS_BOTDIRECTIVES + i];
-			needsOrders = ( !dir_cs || !dir_cs[0] ) ? qtrue : qfalse;
-		} else {
-			needsOrders = qfalse;
-		}
+		/* needsOrders: bot alive with no active locked directive.
+		   Same helper as the game_status status line, so the two cannot
+		   drift apart. */
+		WN_McpBotDirectiveStatus( i, isBot, alive, &needsOrders,
+									dirbuf, sizeof( dirbuf ) );
 
 		wpname = ( weapon > 0 && weapon < WP_NUM_WEAPONS )
 			? bg_weaponlist[weapon].name : "unknown";
 
 		n = Com_sprintf( p, rem,
-			"  [%d] %-14s hp=%3d arm=%3d wp=%-20s score=%d deaths=%d team=%d %s %s%s\n",
+			"  [%d] %-14s hp=%3d arm=%3d wp=%-20s score=%d deaths=%d team=%d %s %s%s%s\n",
 			i, cl->name[0] ? cl->name : "?",
 			health, armor, wpname, score, deaths, team,
 			alive ? "alive" : "DEAD",
 			isBot ? "bot" : "human",
-			needsOrders ? " NEEDS_ORDERS" : "" );
+			needsOrders ? " NEEDS_ORDERS" : "",
+			dirbuf );
 		p += n; rem -= n;
 	}
 

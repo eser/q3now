@@ -1,0 +1,37 @@
+// bg_plasma_primitive.wui — qw_plasma_bg primitive PoC (9th v2 primitive).
+//
+// The composite plasma layer + grid + vignette + scanlines stack. The
+// ANIMATED modifier engages the radial core pulse (re-uses the bg
+// parallax LOOP_LINEAR timer rather than registering an additional
+// 18 s sine slot — single-curve composition keeps the wuiAnim pool
+// modest).
+
+menuDef {
+	name "bg_plasma_primitive"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor $ink
+
+	itemDef {
+		name "bg_plasma_root"
+		type container
+		rect 0 0 1 1
+		background "layered"
+		effects "base+plasma+grid+vignette+scanlines+animated"
+		visible 1
+		decoration
+	}
+
+	itemDef {
+		name "bg_plasma_label"
+		rect 0.10 0.04 0.80 0.04
+		text "PlasmaBG · plasma+grid+vignette+scanlines · animated"
+		font $font_mono 12
+		forecolor $bone
+		visible 1
+		decoration
+	}
+}

@@ -1,0 +1,77 @@
+// qw_hud_active.wui — q3now V2_HUD_Active in-game HUD composer (skeleton)
+//
+// Activated by the `hud` cvar: `set hud qw_hud_active` loads this file in
+// place of ui/default.wui (the legacy Q3-style HUD). default.wui stays the
+// shipped default and coexists; the V2 chain (dispatches 5.21-5.25) builds
+// this composer up widget-by-widget, then the dispatch-5.25 cleanup decides
+// the retire/swap of default.wui.
+//
+// Dispatch 5.21 (P1): health + armor + ammo + crosshair.
+// Dispatch 5.23 (P2): qw_hud_weapon_carousel (weaponlist hudElement).
+// Dispatch 5.24 (P2 complete): qw_hud_scoreboard_bar via the rank-sorted
+//   game.scores.<si>.* WiredStore keys (0 engine LoC; un-HALTs 5.23 S3) +
+//   carousel selected-slot outline (border ItemToConfig mapping).
+// Dispatch 5.25 (P3): qw_hud_telemetry (fps + netstats) + qw_hud_holdables_strip
+//   (holdablelist) + qw_hud_weapon_placeholder (static panel).
+// Dispatch 5.26 (P4): qw_hud_scoreboard_overlay (scorelist_widget) + ammo
+//   weapon-name label via player.weapon.name.
+// Dispatch 5.27: qw_hud_kill_feed — cgame now pushes name-resolved obituary
+//   lines (cg_event.c), the client stages hud.feed.<N>.text, the widget binds
+//   them. ALL 11 HUD elements present. V2 LANDED gating is dispatch 5.28.
+//
+// Layer "hud": the compositor's WUI_LAYER_HUD walk emits every itemDef each
+// frame; hudElement leaves dispatch through the unified custom-draw registry.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "hud_active"
+	rect 0 0 1 1
+	fullScreen 0
+	visible 1
+	layer "hud"
+	// Draw the HUD in display/sRGB space (after the gamma pass) so panel
+	// translucency reads light-independently — legible over both bright and
+	// dark scenes, while still feeling part of the player's heads-up view.
+	composite overlay
+
+	#include "ui/widgets/qw_hud_scoreboard_bar.wui"
+	#include "ui/widgets/qw_hud_kill_feed.wui"
+	#include "ui/widgets/qw_hud_telemetry.wui"
+	#include "ui/widgets/qw_hud_health_panel.wui"
+	#include "ui/widgets/qw_hud_armor_panel.wui"
+	#include "ui/widgets/qw_hud_ammo_readout.wui"
+	#include "ui/widgets/qw_hud_weapon_carousel.wui"
+	#include "ui/widgets/qw_hud_holdables_strip.wui"
+	// HUD redesign (Eser, minimalist): the weapon-viewmodel PLACEHOLDER box is
+	// removed. The real 3D viewmodel already renders in that region; the empty
+	// dark panel only added clutter and ate field-of-view. Bottom-right is now
+	// free for the ammo readout (moved there — weapon-hand side).
+	// #include "ui/widgets/qw_hud_weapon_placeholder.wui"
+	// Scoreboard occlusion fix (chain 6.x S1): qw_hud_scoreboard_overlay was
+	// always-on (an itemDef nested in this always-visible hud_active menu), so
+	// its scorelist_widget covered screen-centre during normal play. The
+	// showScores gate is an ENGINE-side menu-level flip keyed by menu NAME
+	// (cl_wired_ui_hud_state.c:561-610 toggles menu->visible on the standalone
+	// ingame_scoreboard_{ffa,duel,tdm,ctf} / end_scoreboard_* menus). A nested
+	// itemDef cannot receive that flip. The standalone ingame_scoreboard_*
+	// menus (loaded in scripts/menus.lua:80-87) ALREADY render the same
+	// scorelist_widget + feeder "scoreboard" and are already shown ONLY on
+	// +scores / TAB-hold. So this always-on duplicate is removed — the
+	// engine-gated ingame_scoreboard_* is now the sole scoreboard, shown only
+	// when wiredHud->showScores (the canonical gate, mirrored by deferring to
+	// the widget that already has it).
+	// #include "ui/widgets/qw_hud_scoreboard_overlay.wui"
+	// HUD redesign (Eser) Phase C — feedback + status layers:
+	#include "ui/widgets/qw_hud_msgqueue.wui"   // pickup / centerprint / FIGHT, top-center
+	#include "ui/widgets/qw_hud_powerups.wui"   // quad/haste/regen timers, mid-right stack
+	// HUD redesign (Eser) Phase D — status: medals + relocated holdables:
+	#include "ui/widgets/qw_hud_rewards.wui"    // Excellent/Impressive medals, top-center below msgqueue
+	// HUD redesign (Eser) Phase E — overlay (CTF-less scope): vote/follow/spec + warmup countdown
+	#include "ui/widgets/qw_hud_overlay_messages.wui" // vote + following + spectator, top-left
+	#include "ui/widgets/qw_hud_warmup.wui"           // "Starts in: N" countdown, top-center
+	#include "ui/widgets/qw_hud_crosshair.wui"
+	#include "ui/widgets/qw_hud_markers.wui"
+	#include "ui/widgets/qw_hud_subtitle.wui"    // localized cinematic subtitle (survives HUD-suppress)
+	#include "ui/widgets/qw_hud_objectives.wui"  // localized mission objectives (standard HUD gate)
+}

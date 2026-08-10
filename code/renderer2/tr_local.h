@@ -11,6 +11,7 @@
 #include "../qcommon/qcommon.h"
 #include "../renderercommon/tr_public.h"
 #include "tr_common.h"
+#include "../renderercommon/tr_screenshot.h"
 #include "tr_extratypes.h"
 #include "tr_extramath.h"
 #include "tr_fbo.h"
@@ -817,10 +818,10 @@ typedef struct {
 	float		surface[4];
 } fog_t;
 
-#if FEAT_CORONA
-#define MAX_CORONAS 32
+#if FEAT_HALO
+#define MAX_HALOS 32
 
-typedef struct corona_s {
+typedef struct halo_s {
 	vec3_t				origin;
 	vec3_t				color;
 	vec3_t				transformed;
@@ -828,7 +829,7 @@ typedef struct corona_s {
 	int					id;
 	qboolean			visible;
 	struct shader_s		*shader;
-} corona_t;
+} halo_t;
 #endif
 
 typedef enum {
@@ -1727,8 +1728,8 @@ typedef struct {
 	fogType_t				fogTypeCurrent;
 #endif
 
-#if FEAT_CORONA
-	int						coronaShader;
+#if FEAT_HALO
+	int						haloShader;
 #endif
 
 	float					msdfOutlineWidth;
@@ -2029,7 +2030,7 @@ void	RE_UploadCinematic( int w, int h, int cols, int rows, byte *data, int clien
 
 void		RE_BeginFrame( stereoFrame_t stereoFrame );
 void		RE_BeginRegistration( glconfig_t *glconfig );
-void		RE_LoadWorldMap( const bspFile_t *bsp );
+void		RE_LoadWorldMap( const mapFile_t *bsp, int worldIndex );
 void		RE_SetWorldVisData( const byte *vis );
 qhandle_t	RE_RegisterModel( const char *name );
 qhandle_t	RE_RegisterSkin( const char *name );
@@ -2329,14 +2330,17 @@ void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, fl
 void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddRibbonToScene( const ribbonDesc_t *desc );
 void RE_AddBeamToScene( const beamDesc_t *desc );
+void RE_AddRailRibbonToScene( const railRibbonDesc_t *desc );
 void RE_AddSpriteToScene( const spriteDesc_t *desc );
 void RE_EmitParticles( const emitterDesc_t *desc );
 void RE_AddDecalToScene( const decalDesc_t *desc );
+void RE_AddLensSourceToScene( const lensSourceDesc_t *desc );
+qboolean RE_GetLensVisibility( int id, float *outVis );
 void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass_t *cls );
-#if FEAT_CORONA
-void RE_AddCoronaToScene( const vec3_t org, float r, float g, float b, float scale, int id, qboolean visible );
-void RB_AddCoronaFlares( void );
-void R_ClearCoronas( void );
+#if FEAT_HALO
+void RE_AddHaloToScene( const vec3_t org, float r, float g, float b, float scale, int id, qboolean visible );
+void RB_AddHaloFlares( void );
+void R_ClearHalos( void );
 #endif
 #if FEAT_FOG_SYSTEM
 void RE_GetGlobalFog( refFogType_t *type, vec3_t color, float *depthForOpaque, float *density );
@@ -2349,7 +2353,7 @@ int  R_BoundsFogNum( const vec3_t mins, const vec3_t maxs );
 qboolean R_IsGlobalFog( int fogNum );
 #endif
 void RE_BeginScene( const refdef_t *fd );
-void RE_RenderScene( const refdef_t *fd );
+void RE_RenderScene( const refdef_t *fd, int worldIndex );
 void RE_EndScene( void );
 
 /*
@@ -2498,7 +2502,8 @@ typedef struct {
 	int width;
 	int height;
 	const char *fileName;
-	qboolean jpeg;
+	int typeMask;       // SCREENSHOT_* value
+	qboolean silent;
 } screenshotCommand_t;
 
 typedef struct {
@@ -2598,8 +2603,8 @@ typedef struct {
 	srfPoly_t	*polys;//[MAX_POLYS];
 	polyVert_t	*polyVerts;//[MAX_POLYVERTS];
 	pshadow_t pshadows[MAX_CALC_PSHADOWS];
-#if FEAT_CORONA
-	corona_t	coronas[MAX_CORONAS];
+#if FEAT_HALO
+	halo_t	halos[MAX_HALOS];
 #endif
 	renderCommandList_t	commands;
 } backEndData_t;

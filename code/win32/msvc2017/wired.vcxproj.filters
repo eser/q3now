@@ -124,9 +124,6 @@
     <ClCompile Include="..\..\client\snd_mem.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\client\snd_mix.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\client\snd_wavelet.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -320,9 +317,6 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="..\..\asm\snd_mix_x64.asm">
-      <Filter>Source Files</Filter>
-    </CustomBuild>
     <CustomBuild Include="..\..\asm\common_x64.asm">
       <Filter>Source Files</Filter>
     </CustomBuild>

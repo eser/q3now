@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>solid_test</title>
+<style>
+  html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; }
+</style>
+</head>
+<body>
+<script>
+  const qs = new URLSearchParams(location.search);
+  const c = qs.get('color') || '000000';
+  document.body.style.background = '#' + c;
+</script>
+</body>
+</html>

@@ -103,3 +103,20 @@ the renderers find them via R_FindShader after upload.
 qboolean MDL_BuildMD3Buffer( const void *buffer, int filesize,
                               const char *modName,
                               void **outBuf, int *outSize );
+
+/*
+MDL_DeriveAnimRanges — pure prefix-grouping of frame names into animation ranges.
+
+Given the per-frame names carried from the Q1 .mdl (via md3Frame_t.name), derive
+one range per contiguous run of frames whose name shares the same label (the name
+with its trailing digits stripped: "walk1".."walk8" -> label "walk"). This is the
+Q1-animation-range derivation the renderer's GetMDLAnimations query returns and the
+cgame CG_ParseMDLAnimations consumes. Kept pure (frame-name array in, range array
+out — no renderer state) so it is directly unit-testable.
+
+  frameNames : numFrames entries of char[16] (the md3Frame_t.name values)
+  out        : filled with up to maxOut { label, first_frame, num_frames }
+  returns    : the number of ranges written.
+*/
+int MDL_DeriveAnimRanges( const char (*frameNames)[16], int numFrames,
+                          mdlAnimRange_t *out, int maxOut );

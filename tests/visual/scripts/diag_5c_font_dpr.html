@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>dispatch-5c S4 diag</title>
+<link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin:0; padding:0; background:#0a0908; color:#e8dfd0; font-family:'Oxanium',system-ui,sans-serif; overflow:hidden; }
+  #root { width:1440px; height:900px; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" src="../../../docs/wui-claude-design-canonical-v2/project/qw-shared.jsx"></script>
+<script type="text/babel" src="../../../docs/wui-claude-design-canonical-v2/project/qw-variants.jsx"></script>
+<script type="text/babel">
+  const qs = new URLSearchParams(location.search);
+  const mode = qs.get('mode') || 'dark';
+  const accent = qs.get('accent') || 'cyan';
+  setQWTheme(mode, accent);
+  ReactDOM.createRoot(document.getElementById('root')).render(<V1_Monolith />);
+</script>
+<script>
+async function emitDiag() {
+  await document.fonts.ready;
+  const body = document.body;
+  const bodyStyle = getComputedStyle(body);
+  let heroFontFamily = '';
+  let heroFontSize = '';
+  let heroNode = null;
+  // Heuristic: largest font-size element inside #root
+  const root = document.getElementById('root');
+  let maxFS = 0;
+  for (const el of root.querySelectorAll('*')) {
+    const cs = getComputedStyle(el);
+    const fs = parseFloat(cs.fontSize);
+    if (fs > maxFS) { maxFS = fs; heroNode = el; heroFontFamily = cs.fontFamily; heroFontSize = cs.fontSize; }
+  }
+  const diag = {
+    fonts_check_jbmono_16:    document.fonts.check('16px "JetBrains Mono"'),
+    fonts_check_oxanium_16:   document.fonts.check('16px Oxanium'),
+    devicePixelRatio:         window.devicePixelRatio,
+    body_fontFamily:          bodyStyle.fontFamily,
+    body_color:               bodyStyle.color,
+    body_backgroundColor:     bodyStyle.backgroundColor,
+    hero_max_fontSize_px:     maxFS,
+    hero_fontFamily:          heroFontFamily,
+    hero_fontSize:            heroFontSize,
+    window_innerWidth:        window.innerWidth,
+    window_innerHeight:       window.innerHeight,
+    root_offsetWidth:         root.offsetWidth,
+    root_offsetHeight:        root.offsetHeight,
+    root_boundingClientRect:  root.getBoundingClientRect().toJSON ? root.getBoundingClientRect().toJSON() : {
+      x: root.getBoundingClientRect().x,
+      y: root.getBoundingClientRect().y,
+      width: root.getBoundingClientRect().width,
+      height: root.getBoundingClientRect().height,
+    },
+  };
+  const tag = document.createElement('script');
+  tag.id = 'qw_diag';
+  tag.type = 'application/json';
+  tag.textContent = JSON.stringify(diag, null, 2);
+  document.body.appendChild(tag);
+}
+setTimeout(emitDiag, 2500);
+</script>
+</body>
+</html>

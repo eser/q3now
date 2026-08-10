@@ -1,0 +1,86 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+hdr_histogram.comp — wired-render HDR auto-exposure luminance histogram.
+
+Reads the HDR scene image (color_image, still linear-light, pre-tonemap) and
+builds a 256-bin histogram of log2 luminance into a device-local SSBO. Each
+thread handles one pixel indexed by gl_GlobalInvocationID.xy; dispatch
+ceil(width/16) x ceil(height/16). A later reduce step turns this histogram
+into an exposure value — this shader only PRODUCES the histogram.
+
+Binning: luminance is Rec.709 luma (0.2126 R + 0.7152 G + 0.0722 B). The bin
+axis is log2(luma) clamped to a fixed exposure-value window of [-10, +2] EV
+(12 EV of dynamic range), mapped linearly across the 256 bins. Pixels at or
+below a tiny epsilon (true black) are routed to bin 0 rather than -inf.
+
+Per-pixel weight: a center-weighted radial falloff so the metered exposure
+tracks what the player is looking at (screen centre) more than the periphery.
+Weights are accumulated as fixed-point (weight * 1024, rounded) via atomicAdd
+on the uint SSBO so the reduce step reads integer counts.
+
+The colour image is bound as a separate sampled image + sampler (RAL's
+SAMPLED_TEXTURE descriptor is a SAMPLED_IMAGE, not a combined sampler);
+texelFetch ignores the sampler's filtering but Vulkan GLSL needs the combined
+expression. Set 0: binding 0 = sampled colour, binding 1 = sampler, binding 2
+= the histogram SSBO. Image dimensions arrive via push constant.
+*/
+
+#define HISTOGRAM_BINS 256
+
+// EV metering window — hardcoded (FORK-3 ratified). log2(luma) below EV_MIN
+// floors into bin 0; at/above EV_MAX saturates the top bin.
+const float EV_MIN = -10.0;
+const float EV_MAX =  2.0;
+
+// Fixed-point scale for the center-weight so atomicAdd works on uints.
+const float WEIGHT_FIXED_SCALE = 1024.0;
+
+// Below this luminance a pixel is treated as black → bin 0 (avoids log2(0)).
+const float LUMA_EPSILON = 1e-5;
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform texture2D colorImage;
+layout(set = 0, binding = 1) uniform sampler   colorSampler;
+
+layout(std430, set = 0, binding = 2) buffer Histogram {
+	uint bins[HISTOGRAM_BINS];
+};
+
+layout(push_constant) uniform Dims {
+	uvec2 imageSize;   // color_image width, height in texels
+};
+
+void main() {
+	uvec2 coord = gl_GlobalInvocationID.xy;
+	if (coord.x >= imageSize.x || coord.y >= imageSize.y)
+		return;
+
+	vec3 hdr = texelFetch(sampler2D(colorImage, colorSampler), ivec2(coord), 0).rgb;
+	float luma = dot(hdr, vec3(0.2126, 0.7152, 0.0722));
+
+	// Center-weight: 1.0 at screen centre, falling off toward the edges.
+	// Normalised pixel distance from centre (range ~0..~0.707 at corners);
+	// a smooth 1 - d² keeps the centre flat and the periphery contributing.
+	vec2  uv     = (vec2(coord) + 0.5) / vec2(imageSize);
+	vec2  fromC  = uv - vec2(0.5);
+	float dist2  = dot(fromC, fromC);              // 0 at centre, 0.5 at corners
+	float weight = clamp(1.0 - 2.0 * dist2, 0.0, 1.0);
+
+	uint bin;
+	if (luma <= LUMA_EPSILON) {
+		bin = 0u;
+	} else {
+		float ev   = log2(luma);
+		float norm = clamp((ev - EV_MIN) / (EV_MAX - EV_MIN), 0.0, 1.0);
+		bin = uint(norm * float(HISTOGRAM_BINS - 1) + 0.5);
+	}
+
+	uint fixedWeight = uint(weight * WEIGHT_FIXED_SCALE + 0.5);
+	if (fixedWeight > 0u)
+		atomicAdd(bins[bin], fixedWeight);
+}

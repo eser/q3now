@@ -109,6 +109,13 @@ static const shotgunPelletDef_t bg_shotgunPattern[DEFAULT_SHOTGUN_COUNT] = {
 #define CROUCH_VIEWHEIGHT	12
 #define DEAD_MAXS_Z			-8
 #define	DEAD_VIEWHEIGHT		-16
+
+// Divisor quantizing the scalar knockback into the 8-bit gib EV_GIB_PLAYER
+// eventParm: a parm of 0..255 maps to 0..255*WIRED_GIB_KNOCKBACK_DIVISOR
+// knockback-speed units for the directional gib launch. The game encodes
+// (knockback / DIVISOR) into the parm; the cgame decodes (parm * DIVISOR).
+// Shared so both sides agree on the scale.
+#define WIRED_GIB_KNOCKBACK_DIVISOR		8
 #define INVUL_RADIUS		42
 
 #define TA_OBELISK_HEALTH        2500
@@ -457,6 +464,9 @@ typedef enum {
 	EV_EARTHQUAKE,
 #endif
 
+	EV_EMIT_DEBRIS,			// func_breakable shattered: spawn debris chunks
+							// (eventParm = chunk count); origin = break center
+
 	EV_NUM_ENTITY_EVENTS	// must be last — used by BUILD_ASSERT in bg_misc.c
 } entity_event_t;
 
@@ -533,6 +543,22 @@ typedef enum {
 	MAX_TOTALANIMATIONS
 } animNumber_t;
 
+// Q1 monster animation codes. A monster is single-mesh (one animation axis), so
+// this is a small independent enum, NOT the player's torso/legs animNumber_t. The
+// server sets one of these into entityState_t.legsAnim from the behaviorState FSM;
+// the CLIENT (cgame) resolves the code to a frame range (derived from the Q1 .mdl
+// frame names via the MDL-anim query) and ticks + lerps it — mirroring the IQM
+// named-animation path. Keep the order stable (it is the wire value).
+typedef enum {
+	MANIM_STAND = 0,   // idle / at-rest
+	MANIM_WALK,        // slow locomotion (hunt/alert approach)
+	MANIM_RUN,         // fast locomotion (flee / take-cover / charge)
+	MANIM_ATTACK,      // in-range attack
+	MANIM_PAIN,        // hit reaction
+	MANIM_DEATH,       // death (plays once, no loop)
+	MANIM_COUNT
+} monsterAnim_t;
+
 
 typedef struct animation_s {
 	int		firstFrame;
@@ -579,6 +605,30 @@ void BG_GetColorForAmount( int amount, vec4_t hcolor );
 // itemType_t, gitem_t, bg_itemlist[], bg_numItems live in wired/protocol.h.
 
 // attackType_t and gattack_t live in wired/protocol.h.
+
+// ── Recoil/spread model (RS-1 foundation) ───────────────────────────────────
+// Deterministic SHARED spread magnitude: the server uses it for the authoritative
+// bullet-cone size and the client uses it for the crosshair fire-spread, from the
+// SAME synced inputs (predictedPlayerState) — zero networked recoil. Mirrors the
+// gauntlet-charge pattern: a synced serverTime anchor (ps->fireRampStartTime) +
+// a pure formula → both sides derive the same value with no extra bandwidth.
+// PURE + deterministic: reads only synced ps fields + the shared bg_attacklist
+// table; no RNG (the per-pellet direction RNG stays server-side — this returns
+// the MAGNITUDE only). 0 for attacks with no cone.
+//
+// RS-3: the SERVER bullet cone (g_machinegun.c MG primary+burst, g_shotgun.c
+// shotgun bloom) is now wired to this. `attackIdx` selects the ACTIVE attack row
+// (ATT_MACHINEGUN_PRIMARY / ATT_MACHINEGUN_BURST / ATT_SHOTGUN_PRIMARY) so the
+// burst uses its own {20,80,…} curve, not the weapon's primary. RS-5 wires the
+// crosshair (still Lua recoil=0.0 today). Anchor lifecycle = RS-2/RS-3 PM_Weapon.
+float BG_CalcWeaponSpread( const playerState_t *ps, int attackIdx, int time );
+// Normalized 0..1 ramp position = (current-base)/(ceiling-base); the crosshair
+// (RS-5) consumes this. Returns 0 when the attack has no ramp (ceiling==base).
+float BG_CalcWeaponSpreadNormalized( const playerState_t *ps, int attackIdx, int time );
+// At-rest cone for an attack (== BG_CalcWeaponSpread with no anchor / zeroed ps).
+// SSOT accessor for callers without a playerState (e.g. legacy bot-weapon-info).
+// RS-3-flag.
+float BG_AttackSpreadBase( int attackIdx );
 
 // MG burst alt-fire callbacks (implemented in bg_pmove.c)
 qboolean PM_MG_Burst_Start( pmove_t *pm );
@@ -683,6 +733,7 @@ float	BG_GetGroundHeightAtPoint( vec3_t pos );
 void	BG_GenerateTracemap( vec3_t world_mins, vec3_t world_maxs,
 			void (*trace)( trace_t *, const vec3_t, const vec3_t, const vec3_t, const vec3_t, int, int ) );
 qboolean BG_TracemapLoaded( void );
+const float *BG_GetTracemapGround( vec2_t out_mins, vec2_t out_maxs, int *out_size );
 #endif
 
 #endif // _BG_PUBLIC_H

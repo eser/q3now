@@ -2,6 +2,74 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "cm_local.h"
+#include "q_platform.h"   /* QDECL_TLS — thread-local trace context */
+
+// ===========================================================================
+//  Per-thread trace context (thread-safety mechanism)
+//
+//  The visit-marker dedup ("did I already test this brush in another leaf?") used
+//  to write cm.checkcount++ and a matching ->checkcount onto every shared
+//  cbrush_t/cPatch_t — illegal from a non-main thread (two threads race on the
+//  shared marker). It is replaced by a THREAD-LOCAL context: a per-thread epoch
+//  (bumped once per trace) plus per-thread marker arrays indexed by brush/patch
+//  number. The hot per-brush loop reads/writes ctx->brushMarks[n] vs ctx->epoch —
+//  the same two memory accesses as before, but thread-local, so no shared write
+//  and no lock. Reset is an epoch bump, never an array clear. Arrays are allocated
+//  once per thread and re-sized only when the map changes (keyed on cm.checksum).
+// ===========================================================================
+static QDECL_TLS cmTraceCtx_t tls_traceCtx;
+
+// Return this thread's trace context, marker arrays sized to the current map and
+// the epoch bumped for a fresh trace. Zero allocations on the steady-state path
+// (arrays persist across traces; only a map change or first use allocates).
+static cmTraceCtx_t *CM_ThreadTraceCtx( void ) {
+	cmTraceCtx_t *ctx = &tls_traceCtx;
+	// Size to the LARGER of the loaded (submodel) and world (canonical on Q1) brush
+	// counts: a world trace indexes by canonical brush number (up to
+	// cm.world.numBrushes, which on Q1 exceeds cm.numBrushes); a submodel trace by
+	// loaded brush number. One marker array serves both views.
+	int maxBrush  = ( cm.world.numBrushes > cm.numBrushes ) ? cm.world.numBrushes : cm.numBrushes;
+	int needBrush = maxBrush + 1;          // +1: brush index range is [0..count)
+	int needPatch = cm.numSurfaces + 1;
+	if ( ctx->mapChecksum != cm.checksum
+	     || ctx->numBrushMarks < needBrush || ctx->numPatchMarks < needPatch ) {
+		if ( ctx->brushMarks ) { Z_Free( ctx->brushMarks ); ctx->brushMarks = NULL; }
+		if ( ctx->patchMarks ) { Z_Free( ctx->patchMarks ); ctx->patchMarks = NULL; }
+		ctx->brushMarks = (int *)Z_Malloc( needBrush * sizeof(int) );
+		ctx->patchMarks = (int *)Z_Malloc( needPatch * sizeof(int) );
+		memset( ctx->brushMarks, 0, needBrush * sizeof(int) );
+		memset( ctx->patchMarks, 0, needPatch * sizeof(int) );
+		ctx->numBrushMarks = needBrush;
+		ctx->numPatchMarks = needPatch;
+		ctx->mapChecksum   = cm.checksum;
+		ctx->epoch         = 0;
+	}
+	ctx->epoch++;   // fresh visit epoch for this trace (bump, not clear)
+	return ctx;
+}
+
+// Point a traceWork_t's geometry source at the WORLD arrays (cm.world — canonical
+// on Q1, the loaded arrays on Q3). Used for model-0 traces.
+static void CM_TraceViewWorld( traceWork_t *tw ) {
+	tw->nodes        = cm.world.nodes;
+	tw->leafs        = cm.world.leafs;
+	tw->leafbrushes  = cm.world.leafbrushes;
+	tw->brushes      = cm.world.brushes;
+	tw->surfaces     = cm.surfaces;        // patches: Q1 world has none; Q3 world uses cm.surfaces
+	tw->leafsurfaces = cm.leafsurfaces;
+}
+
+// Point a traceWork_t's geometry source at the LOADED cm.* arrays. Used for
+// submodel traces (doors/plats), whose leaf offsets and side/plane pointers were
+// baked against these arrays at load and must not be repointed.
+static void CM_TraceViewLoaded( traceWork_t *tw ) {
+	tw->nodes        = cm.nodes;
+	tw->leafs        = cm.leafs;
+	tw->leafbrushes  = cm.leafbrushes;
+	tw->brushes      = cm.brushes;
+	tw->surfaces     = cm.surfaces;
+	tw->leafsurfaces = cm.leafsurfaces;
+}
 
 // always use bbox vs. bbox collision and never capsule vs. bbox or vice versa
 //#define ALWAYS_BBOX_VS_BBOX
@@ -228,12 +296,12 @@ CM_TestInLeaf
 static void CM_TestInLeaf( traceWork_t *tw, const cLeaf_t *leaf ) {
 	// test box position against all brushes in the leaf
 	for (int k=0 ; k<leaf->numLeafBrushes ; k++) {
-		int brushnum = cm.leafbrushes[leaf->firstLeafBrush+k];
-		cbrush_t *b = &cm.brushes[brushnum];
-		if (b->checkcount == cm.checkcount) {
+		int brushnum = tw->leafbrushes[leaf->firstLeafBrush+k];
+		cbrush_t *b = &tw->brushes[brushnum];
+		if (tw->ctx->brushMarks[brushnum] == tw->ctx->epoch) {
 			continue;	// already checked this brush in another leaf
 		}
-		b->checkcount = cm.checkcount;
+		tw->ctx->brushMarks[brushnum] = tw->ctx->epoch;
 
 		if ( !(b->contents & tw->contents)) {
 			continue;
@@ -252,14 +320,15 @@ static void CM_TestInLeaf( traceWork_t *tw, const cLeaf_t *leaf ) {
 	if ( !cm_noCurves->integer ) {
 #endif //BSPC
 		for ( int k = 0 ; k < leaf->numLeafSurfaces ; k++ ) {
-			cPatch_t *patch = cm.surfaces[ cm.leafsurfaces[ leaf->firstLeafSurface + k ] ];
+			int patchnum = tw->leafsurfaces[ leaf->firstLeafSurface + k ];
+			cPatch_t *patch = tw->surfaces[ patchnum ];
 			if ( !patch ) {
 				continue;
 			}
-			if ( patch->checkcount == cm.checkcount ) {
-				continue;	// already checked this brush in another leaf
+			if ( tw->ctx->patchMarks[patchnum] == tw->ctx->epoch ) {
+				continue;	// already checked this patch in another leaf
 			}
-			patch->checkcount = cm.checkcount;
+			tw->ctx->patchMarks[patchnum] = tw->ctx->epoch;
 
 			if ( !(patch->contents & tw->contents)) {
 				continue;
@@ -408,16 +477,14 @@ static void CM_PositionTest( traceWork_t *tw ) {
 	ll.lastLeaf = 0;
 	ll.overflowed = qfalse;
 
-	cm.checkcount++;
-
+	// CM_StoreLeafs stores leaf numbers only (no per-brush visit marker), so the
+	// leaf enumeration needs no epoch; CM_TestInLeaf below uses tw->ctx's epoch,
+	// already bumped once at trace entry, to dedup brushes across the touched leaves.
 	CM_BoxLeafnums_r( &ll, 0 );
 
-
-	cm.checkcount++;
-
-	// test the contents of the leafs
+	// test the contents of the leafs (world model — cm.world leaves)
 	for (int i=0 ; i < ll.count ; i++) {
-		CM_TestInLeaf( tw, &cm.leafs[leafs[i]] );
+		CM_TestInLeaf( tw, &cm.world.leafs[leafs[i]] );
 		if ( tw->trace.allsolid ) {
 			break;
 		}
@@ -700,13 +767,13 @@ CM_TraceThroughLeaf
 static void CM_TraceThroughLeaf( traceWork_t *tw, const cLeaf_t *leaf ) {
 	// trace line against all brushes in the leaf
 	for ( int k = 0 ; k < leaf->numLeafBrushes ; k++ ) {
-		int brushnum = cm.leafbrushes[leaf->firstLeafBrush+k];
+		int brushnum = tw->leafbrushes[leaf->firstLeafBrush+k];
 
-		cbrush_t *b = &cm.brushes[brushnum];
-		if ( b->checkcount == cm.checkcount ) {
+		cbrush_t *b = &tw->brushes[brushnum];
+		if ( tw->ctx->brushMarks[brushnum] == tw->ctx->epoch ) {
 			continue;	// already checked this brush in another leaf
 		}
-		b->checkcount = cm.checkcount;
+		tw->ctx->brushMarks[brushnum] = tw->ctx->epoch;
 
 		if ( !(b->contents & tw->contents) ) {
 			continue;
@@ -735,14 +802,15 @@ static void CM_TraceThroughLeaf( traceWork_t *tw, const cLeaf_t *leaf ) {
 	if ( !cm_noCurves->integer && tw->type != TT_BISPHERE ) {
 #endif
 		for ( int k = 0 ; k < leaf->numLeafSurfaces ; k++ ) {
-			cPatch_t *patch = cm.surfaces[ cm.leafsurfaces[ leaf->firstLeafSurface + k ] ];
+			int patchnum = tw->leafsurfaces[ leaf->firstLeafSurface + k ];
+			cPatch_t *patch = tw->surfaces[ patchnum ];
 			if ( !patch ) {
 				continue;
 			}
-			if ( patch->checkcount == cm.checkcount ) {
+			if ( tw->ctx->patchMarks[patchnum] == tw->ctx->epoch ) {
 				continue;	// already checked this patch in another leaf
 			}
-			patch->checkcount = cm.checkcount;
+			tw->ctx->patchMarks[patchnum] = tw->ctx->epoch;
 
 			if ( !(patch->contents & tw->contents) ) {
 				continue;
@@ -1066,7 +1134,7 @@ static void CM_TraceThroughTree( traceWork_t *tw, int num, float p1f, float p2f,
 
 	// if < 0, we are in a leaf node
 	if (num < 0) {
-		CM_TraceThroughLeaf( tw, &cm.leafs[-1-num] );
+		CM_TraceThroughLeaf( tw, &tw->leafs[-1-num] );
 		return;
 	}
 
@@ -1074,7 +1142,7 @@ static void CM_TraceThroughTree( traceWork_t *tw, int num, float p1f, float p2f,
 	// find the point distances to the separating plane
 	// and the offset for the size of the box
 	//
-	cNode_t *node = cm.nodes + num;
+	cNode_t *node = tw->nodes + num;
 	cplane_t *plane = node->plane;
 	double		t1, t2, offset;
 	float		frac, frac2;
@@ -1173,14 +1241,19 @@ void CM_Trace( trace_t *results, const vec3_t start, const vec3_t end, const vec
 
 	cmod = CM_ClipHandleToModel( model );
 
-	cm.checkcount++;		// for multi-check avoidance
-
 	c_traces++;				// for statistics, may be zeroed
 
 	// fill in a default trace
 	memset( &tw, 0, sizeof(tw) );
 	tw.trace.fraction = 1;	// assume it goes the entire distance until shown otherwise
 	VectorCopy(origin, tw.modelOrigin);
+
+	// Thread-local visit-marker context (replaces cm.checkcount++ / ->checkcount).
+	tw.ctx = CM_ThreadTraceCtx();
+	// Geometry source: model 0 = world (cm.world, canonical on Q1); any submodel =
+	// the loaded cm.* arrays its leaf offsets were baked against.
+	if ( model == 0 ) CM_TraceViewWorld( &tw );
+	else              CM_TraceViewLoaded( &tw );
 
 	if (!cm.numNodes) {
 		*results = tw.trace;
@@ -1556,13 +1629,17 @@ void CMQ3_BiSphereTrace( trace_t *results, const vec3_t start, const vec3_t end,
 
 	cmod = CM_ClipHandleToModel( model );
 
-	cm.checkcount++;		// for multi-check avoidance
 	c_traces++;				// for statistics, may be zeroed
 
 	memset( &tw, 0, sizeof( tw ) );
 	tw.trace.fraction = 1.0f;
 	VectorCopy( vec3_origin, tw.modelOrigin );
 	tw.type = TT_BISPHERE;
+
+	// Thread-local visit-marker context + geometry source (see CM_Trace).
+	tw.ctx = CM_ThreadTraceCtx();
+	if ( model == 0 ) CM_TraceViewWorld( &tw );
+	else              CM_TraceViewLoaded( &tw );
 
 	if ( !cm.numNodes ) {
 		*results = tw.trace;

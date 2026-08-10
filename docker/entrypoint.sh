@@ -1,11 +1,13 @@
 #!/bin/sh
 set -e
 
-# ── q3now dedicated server entrypoint ─────────────────────────────────────────
+# ── q3now headless server entrypoint ─────────────────────────────────────────
 # Maps Docker environment variables to engine cvars.
 # Unset variables are simply omitted — engine defaults apply.
 
-ARGS="+set dedicated 2"
+# 'dedicated' was retired: a server is started by the 'map' command (below)
+# and announces itself to the master servers via 'sv_hostListed 1'.
+ARGS="+set sv_hostListed 1"
 ARGS="$ARGS +set fs_installpath /opt/wired"
 ARGS="$ARGS +set fs_homepath /home/wired"
 ARGS="$ARGS +set sv_allowDownload 1"
@@ -58,6 +60,17 @@ fi
 # Escape hatch: pass arbitrary engine arguments
 [ -n "$WIRED_EXTRA_ARGS" ]   && ARGS="$ARGS $WIRED_EXTRA_ARGS"
 
+# Start the server: 'dedicated' is retired, so the 'map' command is what
+# brings the server up. The engine already runs "map <value>" when WIRED_MAP
+# is set (executed after full init), so only inject a default +map when the
+# caller supplied neither WIRED_MAP nor an explicit +map via CMD args ("$@").
+if [ -z "$WIRED_MAP" ]; then
+    case " $* " in
+        *" +map "*) ;;                              # explicit +map in CMD args
+        *) ARGS="$ARGS +map arena7" ;;              # default boot map
+    esac
+fi
+
 # CMD args (e.g., +map arena7) are appended via "$@"
 # exec replaces shell so the engine is PID 1 (receives SIGTERM on docker stop)
-exec /opt/wired/wired-ded $ARGS "$@"
+exec /opt/wired/wired-headless $ARGS "$@"

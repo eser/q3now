@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Weapon sg — shotgun (twin barrel) -->
+  <path d="M 12 46 L 71 46 L 71 58 L 12 58 Z M 12 58 L 71 58 L 71 71 L 12 71 Z M 71 46 L 92 46 L 92 71 L 71 71 Z M 33 71 L 33 88 L 46 88 L 46 71 Z" fill="black" fill-rule="evenodd"/>
+</svg>

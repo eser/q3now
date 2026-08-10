@@ -1,0 +1,564 @@
+// startserver.wui -- q3now Start Server panel (flexbox-first §6.1 canonical)
+//
+// Replaces the legacy Q3 startserver.menu 1:1 coordinate port with the
+// settings cluster §6.1 shell adapted for the create-server UX:
+//   - top_bar (brand)
+//   - settings_content row split [LEFT map browser | RIGHT server config]
+//   - footer (Back / Add Bots / Start Server)
+//
+// LEFT region: levelshot preview + map list column headers + scrollable
+// map list (feeder "allmaps") + pool management button row + status line.
+// RIGHT region: game-type / bot count / skill row at the top, then the
+// server settings stack (hostname / max players / score limit / time limit
+// / pure / dedicated / auto download), then the CTF/TDM team settings
+// (cvarTest gated to ui_netGameType ∈ {4,5}), then auto-bots / min-players.
+//
+// All cvar bindings preserved verbatim from the legacy file — the engine
+// dispatcher reads them through the same widget types (1 button, 4
+// editfield, 6 listbox, 11 yesno toggle, 12 dropdown). The Q3-legacy
+// macros (WSEPARATOR / WEDITFIELD / WBUTTON) are inlined as direct
+// itemDef bodies to keep the structure self-contained.
+//
+// Chrome refactor (2026-07-05): the ad-hoc top bar and the 3 footer text-links
+// were replaced with the shared WiredUI widget library (QW_TOPBAR breadcrumb +
+// QW_BUTTON bordered pills), so this screen reads in the same visual language as
+// the 7 settings tabs. All cvar bindings + actions are unchanged.
+
+#include "ui/widgets/qw_chrome.wui"
+#include "ui/widgets/qw_button.wui"
+
+menuDef {
+	name "startserver"
+	layer "menu"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	onESC  { close }
+	onOpen { UpdateGameType }
+
+	itemDef {
+		name "settings_root"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		background "layered" effects "base+glow+noise+vignette"
+
+		// ── Top bar ────────────────────────────────────────────────
+		QW_TOPBAR("q3now / Multiplayer / Start Server")
+
+		// ── Settings content row (LEFT map browser + RIGHT config) ─
+		itemDef {
+			name "settings_content"
+			type container
+			rect 0 0 1 0.85
+			direction row
+			padding $content_padding_y $content_padding_x
+			gap $spacing_lg
+			grow 1
+			height GROW
+
+			// ── LEFT: Map browser ─────────────────────────────
+			itemDef {
+				name "startserver_left_root"
+				type container
+				rect 0 0 0.40 1
+				direction column
+				gap $spacing_sm
+
+				// Scene-content MAP panel: levelshot preview (via the
+				// net_map_preview ownerdraw, with a graceful NO-PREVIEW
+				// placeholder) + map name / gametype / pool status. Sits on the
+				// SCENE parallax backdrop (startserver is opened `scene`); the
+				// panel's opaque $panelDeep backing keeps the info legible.
+				#include "ui/widgets/qw_map_panel.wui"
+
+				// Scrollable map list (feeder "allmaps")
+				//
+				// The column HEADER (#/Map/Name/*) is drawn by the ENGINE as a
+				// header band on this same listbox (columnHeaders + columnSort),
+				// so header cells and body cells share ONE column model
+				// (wui_listbox_column_geom) and always line up. Clicking a header
+				// column fires "MapSort <col>" to sort by it (^/v indicator sits
+				// in the active column). The previously hand-authored
+				// maplist_header_row was removed — its PERCENT widths never
+				// matched the listbox `columns` pixel widths, so it misaligned.
+				itemDef {
+					name "maplist"
+					type 6
+					rect 0 0 1 0.50
+					height GROW
+					font $font_mono 12
+					forecolor $bone
+					backcolor $panelDeep
+					style 1
+					feeder "allmaps"
+					elementheight 20
+					columns 4 0 24 0 24 140 0 164 150 0 338 20 0
+					columnHeaders { 0 "#" 1 "Map" 2 "Name" 3 "*" }
+					columnSort "MapSort"
+					visible 1
+					grow 1
+					doubleClick { ToggleMapPool }
+				}
+
+				// Vertical gap so the pool button row doesn't touch the map list.
+				itemDef { name "pool_gap" type container rect 0 0 1 0 height FIXED 8px grow 0 visible 1 }
+
+				// Pool management buttons (cvarTest-gated pairs: Add/Remove share a
+				// slot, Favorite/Unfavorite share a slot — only ~3 show at once).
+				// Same bordered-pill chrome as QW_BUTTON ($panelDeep fill + $line
+				// border + $radius_md + $accent hover), inlined so the cvarTest /
+				// showCvar gating is preserved (the macro has no cvarTest slot).
+				// type 1 + height FIXED 32px keeps the drawn box == the hit-box.
+				itemDef {
+					name "pool_buttons_row"
+					type container
+					rect 0 0 1 0.04
+					direction row
+					gap $spacing_sm
+					height FIXED 34px
+
+					itemDef {
+						type 1
+						rect 0 0 0.30 0
+						height FIXED 32px
+						alignX center alignY center
+						padding 0 $spacing_sm
+						text "Add to Pool"
+						textalign 1
+						font $font_sans 12
+						forecolor $accent
+						forecolor.active $accent
+						backcolor $panelDeep
+						backcolor.active $accentWash
+						border 1px $line
+						bordercolor.active $accent
+						radius $radius_md
+						grow 0
+						visible 1
+						cvarTest "ui_mapPoolAction"
+						showCvar { "Add to Pool" }
+						action { ToggleMapPool }
+					}
+					itemDef {
+						type 1
+						rect 0 0 0.30 0
+						height FIXED 32px
+						alignX center alignY center
+						padding 0 $spacing_sm
+						text "Remove from Pool"
+						textalign 1
+						font $font_sans 12
+						forecolor $boneDim
+						forecolor.active $accent
+						backcolor $panelDeep
+						backcolor.active $accentWash
+						border 1px $line
+						bordercolor.active $accent
+						radius $radius_md
+						grow 0
+						visible 1
+						cvarTest "ui_mapPoolAction"
+						showCvar { "Remove from Pool" }
+						action { ToggleMapPool }
+					}
+					itemDef {
+						type 1
+						rect 0 0 0.22 0
+						height FIXED 32px
+						alignX center alignY center
+						padding 0 $spacing_sm
+						text "Clear Pool"
+						textalign 1
+						font $font_sans 12
+						forecolor $boneDim
+						forecolor.active $accent
+						backcolor $panelDeep
+						backcolor.active $accentWash
+						border 1px $line
+						bordercolor.active $accent
+						radius $radius_md
+						grow 0
+						visible 1
+						action { ClearMapPool }
+					}
+					itemDef {
+						type 1
+						rect 0 0 0.20 0
+						height FIXED 32px
+						alignX center alignY center
+						padding 0 $spacing_sm
+						text "Favorite"
+						textalign 1
+						font $font_sans 12
+						forecolor $accent
+						forecolor.active $accentSoft
+						backcolor $panelDeep
+						backcolor.active $accentWash
+						border 1px $line
+						bordercolor.active $accent
+						radius $radius_md
+						grow 0
+						visible 1
+						cvarTest "ui_favMapAction"
+						showCvar { "Favorite" }
+						action { ToggleFavorite }
+					}
+					itemDef {
+						type 1
+						rect 0 0 0.20 0
+						height FIXED 32px
+						alignX center alignY center
+						padding 0 $spacing_sm
+						text "Unfavorite"
+						textalign 1
+						font $font_sans 12
+						forecolor $boneDim
+						forecolor.active $accent
+						backcolor $panelDeep
+						backcolor.active $accentWash
+						border 1px $line
+						bordercolor.active $accent
+						radius $radius_md
+						grow 0
+						visible 1
+						cvarTest "ui_favMapAction"
+						showCvar { "Unfavorite" }
+						action { ToggleFavorite }
+					}
+				}
+
+				// Pool status line (cvar bound)
+				itemDef {
+					name "pool_status"
+					type 0
+					rect 0 0 1 0.025
+					height FIT
+					font $font_sans 10
+					textalign 0
+					forecolor $boneDim
+					cvar "ui_mapPoolStatus"
+					decoration
+					visible 1
+					grow 0
+				}
+			}
+
+			// ── RIGHT: Server config ──────────────────────────
+			itemDef {
+				name "startserver_right_root"
+				type container
+				rect 0 0 0.58 1
+				direction column
+				padding $card_padding
+				gap $card_gap_internal
+				background $panel
+				border 1px $line
+				radius $radius_md
+				grow 1
+				width GROW
+
+				itemDef {
+					name "panel_header"
+					type 0
+					rect 0 0 1 0.04
+					height FIT
+					text "Server Settings"
+					textalign 0
+					font $font_sans_bold 16
+					forecolor $accent
+					decoration
+					visible 1
+					grow 0
+				}
+
+				// Game-type / bots / skill (one row each)
+				itemDef {
+					name "row_gametype"
+					type 12
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Type"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvar "ui_netGameType"
+					cvarFloatList { "Deathmatch" 0 "Duel" 1 "King of the Hill" 2 "Last Man Standing" 3 "Team Deathmatch" 4 "Capture the Flag" 5 }
+					visible 1
+					grow 0
+					action { UpdateGameType }
+				}
+				itemDef {
+					name "row_bots"
+					type spinner
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Bots"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvarSpinner "ui_botCount" 0 0 7 1
+					visible 1
+					grow 0
+				}
+				itemDef {
+					name "row_skill"
+					type 12
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Skill"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvar "g_skill"
+					cvarFloatList { "Beginner" 1 "Casual" 2 "Competitive" 3 "Pro" 4 "Nightmare" 5 }
+					visible 1
+					grow 0
+				}
+
+				// Hostname editfield
+				itemDef {
+					name "row_hostname"
+					type 4
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Hostname"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvar "sv_hostname"
+					maxchars 14
+					visible 1
+					grow 0
+				}
+
+				// Max players / score / time limit
+				itemDef {
+					name "row_maxclients"
+					type spinner
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Max Players"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvarSpinner "sv_maxclients" 8 2 32 2
+					visible 1
+					grow 0
+				}
+				itemDef {
+					name "row_scorelimit"
+					type spinner
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Score Limit"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvarSpinner "g_scorelimit" 0 0 100 10
+					visible 1
+					grow 0
+				}
+				itemDef {
+					name "row_timelimit"
+					type spinner
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Time Limit"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvarSpinner "g_timelimit" 0 0 30 5
+					visible 1
+					grow 0
+				}
+
+				// Pure / dedicated / auto download
+				itemDef {
+					name "row_pure"
+					type checkbox
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Pure"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvar "sv_pure"
+					visible 1
+					grow 0
+				}
+				itemDef {
+					name "row_dedicated"
+					type segmented
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Server Listing"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvar "ui_hostListed"
+					cvarFloatList { "Private" 0 "Public" 1 }
+					visible 1
+					grow 0
+				}
+				itemDef {
+					name "row_autodownload"
+					type checkbox
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Auto Download"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvar "sv_allowDownload"
+					visible 1
+					grow 0
+				}
+
+				// Team settings header (conditional on team modes 4/5)
+				itemDef {
+					name "panel_team_header"
+					type 0
+					rect 0 0 1 0.03
+					height FIT
+					text "Team Settings"
+					textalign 0
+					font $font_mono 11
+					forecolor $boneDim
+					decoration
+					cvarTest "ui_netGameType"
+					showCvar { "4" "5" }
+					visible 1
+					grow 0
+				}
+				itemDef {
+					name "row_friendlyfire"
+					type checkbox
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Friendly Fire"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvar "g_friendlyfire"
+					cvarTest "ui_netGameType"
+					showCvar { "4" "5" }
+					visible 1
+					grow 0
+				}
+				itemDef {
+					name "row_balance"
+					type checkbox
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Force Team Balance"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvar "g_teamForceBalance"
+					cvarTest "ui_netGameType"
+					showCvar { "4" "5" }
+					visible 1
+					grow 0
+				}
+				itemDef {
+					name "row_allowvote"
+					type checkbox
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Allow Vote"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvar "g_allowvote"
+					cvarTest "ui_netGameType"
+					showCvar { "4" "5" }
+					visible 1
+					grow 0
+				}
+				itemDef {
+					name "row_myteam"
+					type segmented
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "My Team"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvar "g_localTeamPref"
+					cvarFloatList { "Auto" 0 "Red" 1 "Blue" 2 }
+					cvarTest "ui_netGameType"
+					showCvar { "4" "5" }
+					visible 1
+					grow 0
+				}
+
+				// Bot density (autobot toggle + min players dropdown)
+				itemDef {
+					name "row_autobots"
+					type checkbox
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Auto Bots"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvar "g_autoBots"
+					visible 1
+					grow 0
+				}
+				itemDef {
+					name "row_minplayers"
+					type spinner
+					rect 0 0 1 0.035
+					height FIXED 28px
+					width PERCENT 0.98
+					text "Min Players"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvarSpinner "g_minPlayers" 2 2 8 1
+					visible 1
+					grow 0
+				}
+			}
+		}
+
+		// ── Footer (Back left · Add Bots + Start Server right) ──────
+		// One row: Back pinned far-left, the action cluster pushed right by the
+		// grow spacer — same pattern as the settings footer (Back … Apply).
+		itemDef {
+			name "panel_footer"
+			type container
+			rect 0 0 1 0.05
+			direction row
+			padding 0.005 $content_padding_x
+			gap $spacing_md
+			alignY center
+			height FIT
+
+			QW_BUTTON("btn_back", "Back", $boneDim, { close }, 0.12)
+			QW_FOOTER_SPACER
+			QW_BUTTON("btn_add_bots", "Add Bots", $bone, { open "addbots" scene }, 0.14)
+			QW_BUTTON("btn_start", "Start Server", $accent, { uiScript StartServer }, 0.16)
+		}
+	}
+}

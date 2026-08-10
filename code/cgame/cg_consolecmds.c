@@ -6,7 +6,6 @@
 // executed by a key binding
 
 #include "cg_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 
@@ -29,13 +28,97 @@ void CG_TargetCommand_f( void ) {
 =============
 CG_Viewpos_f
 
-Debugging command to print the current position
+Debugging command to print the current camera position + look angles.
+
+The value line is the bare tuple "x y z yaw pitch" (five space-separated numbers,
+no parens/colon/prefix) — exactly the argument order Cmd_SetViewpos_f parses
+(arg1-3 = origin, arg4 = yaw, arg5 = pitch). So the printed line feeds straight
+into `setviewpos` by copy-paste, and is positionally indexable for scripting
+(viewpos[0..4]).
 =============
 */
 static void CG_Viewpos_f (void) {
-	Com_Log( SEV_INFO, LOG_CH(ch_cgame), "(%i %i %i) : %i\n", (int)cg.refdef.vieworg[0],
-		(int)cg.refdef.vieworg[1], (int)cg.refdef.vieworg[2],
-		(int)cg.refdefViewAngles[YAW]);
+	Com_Log( SEV_INFO, LOG_CH(ch_cgame), "%i %i %i %i %i\n",
+		(int)cg.refdef.vieworg[0],
+		(int)cg.refdef.vieworg[1],
+		(int)cg.refdef.vieworg[2],
+		(int)cg.refdefViewAngles[YAW],
+		(int)cg.refdefViewAngles[PITCH] );
+}
+
+/*
+=================
+CG_SceneLoadAndStart
+
+Shared cinematic-scene start sequence, invoked by the sceneplay command (and its
+testscene dev alias). `path` is the resolved scripts/scene/<name>.lua path.
+Loads the .lua engine-side and POD-ships the parsed wiredScene_t into
+cg.sceneDef (trap ships a CLEAN copy every call — re-playing is safe), then
+Starts playback on the cg.time clock. Start is destructive (reparameterizes the
+eye path in place), so the fresh copy each call keeps it the single Start.
+=================
+*/
+// `actorEntityNums`/`nActors` bind live entities to the scene's look-at target
+// slots (positional: actor i -> target slot i); pass NULL/0 for a plain scene
+// (byte-identical). Non-static so the "scene" server-command crossing shares it.
+void CG_SceneLoadAndStart( const char *path, const int *actorEntityNums, int nActors ) {
+	if ( !trap_WiredSceneLoad( path, &cg.sceneDef ) ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_cgame), "scene: failed to load '%s'\n", path );
+		return;
+	}
+
+	// Start on the same cg.time clock the per-frame Eval samples (elapsed =
+	// nowMs - startMs). The freshly-shipped sceneDef is a clean copy.
+	WiredScenePlayback_Start( &cg.scenePlayback, &cg.sceneDef, cg.time );
+	if ( actorEntityNums && nActors > 0 ) {
+		WiredScenePlayback_BindActors( &cg.scenePlayback, actorEntityNums, nActors );
+	}
+	Com_Log( SEV_INFO, LOG_CH(ch_cgame),
+		"scene: playing '%s' (%d knots, %.1fs, %d events, %d actors)\n",
+		path, cg.sceneDef.eyePath.numKnots, cg.sceneDef.totalTimeSec, cg.sceneDef.numEvents, nActors );
+}
+
+/*
+=================
+CG_ScenePlay_f  (sceneplay <path>)
+
+The cgame target of the scene.play(name) Lua trigger. Receives the already-resolved
+scripts/scene/<name>.lua path (the scene binding builds it). Also reachable as the
+testscene dev alias.
+=================
+*/
+static void CG_ScenePlay_f( void ) {
+	if ( trap_Argc() < 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "usage: sceneplay <path>\n" );
+		return;
+	}
+	CG_SceneLoadAndStart( CG_Argv( 1 ), NULL, 0 );   /* console play: no actor binding */
+}
+
+/*
+=================
+CG_SceneStop_f  (scenestop)
+
+The cgame target of scene.stop(). Ends the cinematic now by clearing the gate
+CG_SceneActive reads; the normal player view resumes next frame. Hard cut.
+=================
+*/
+static void CG_SceneStop_f( void ) {
+	cg.scenePlayback.active = 0;
+}
+
+/*
+=================
+CG_SceneSkip_f  (sceneskip)
+
+The cgame target of scene.skip(). Hard cut today (identical to scenestop) — the
+authored end-transition signals are logged-only, so a soft skip has no
+observable effect yet. Kept a DISTINCT command so a later upgrade (advance the
+clock past the path end to fire the authored end path) is a body-only change.
+=================
+*/
+static void CG_SceneSkip_f( void ) {
+	cg.scenePlayback.active = 0;
 }
 
 
@@ -350,6 +433,10 @@ static consoleCommand_t	commands[] = {
 	{ "nextskin", CG_TestModelNextSkin_f },
 	{ "prevskin", CG_TestModelPrevSkin_f },
 	{ "viewpos", CG_Viewpos_f },
+	{ "sceneplay", CG_ScenePlay_f },
+	{ "scenestop", CG_SceneStop_f },
+	{ "sceneskip", CG_SceneSkip_f },
+	{ "testscene", CG_ScenePlay_f },   // dev alias for sceneplay (takes a full path)
 	{ "+scores", CG_ScoresDown_f },
 	{ "-scores", CG_ScoresUp_f },
 	{ "+zoom", CG_ZoomDown_f },

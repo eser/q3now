@@ -1,0 +1,6 @@
+// Cyan accent overlay — qw-shared.jsx QW_ACCENTS.cyan.
+token accent                "#46c4d8"
+token accentDim             "#2a6a78"
+token accentSoft            "#308898"
+// Low-alpha accent wash — equipped weapon-carousel slot FILL (see amber/_tokens.wui).
+token accentWash            "rgba(70,196,216,0.34)"

@@ -1,0 +1,106 @@
+// popup_message.wui -- Phase 3a canonical popup pattern (FU-1)
+//
+// WUI Flexbox Authoring Migration spec §10 + Phase 3a FU-1 follow-up.
+// Authored with the new spec keywords:
+//   - implicit `_tokens.wui` include + `$ref` substitution
+//   - `type container` itemDef
+//   - sizing + visual keywords (background / border / radius)
+//   - flex layout (direction / padding / gap)
+//
+// Position absolute on the root container is a charter-§UI-declarative-
+// format-unification "justified absolute override" — the popup layer
+// expects viewport-anchored placement, so this is the documented
+// exception to the flexbox-first authoring rule.
+//
+// Phase 3a (2026-05-26) restored the Cancel button next to OK (it was
+// dropped during the Phase 2b refine pass); the canonical 7-item
+// multimodal verification expects both.
+//
+// Triggered via `+wui_popup_test popup_message` in DEBUG builds.
+
+menuDef {
+	name "popup_message"
+	layer "popup"
+	rect 0 0 1 1
+	fullScreen 0
+	visible 1
+	popup
+	modal
+
+	itemDef {
+		name "popup_root"
+		position absolute
+		rect 0.25 0.39 $popup_width 0.22
+		type container
+		direction column
+		padding $popup_padding
+		gap $spacing_md
+		background $panel
+		border 1px $line_strong
+		radius $radius_md
+
+		itemDef {
+			name "popup_title"
+			type 0
+			rect 0 0 1 0.04
+			text "Wired UI Phase 3a canary"
+			textalign 1
+			font $font_sans_bold 16
+			forecolor $accent
+			decoration
+			visible 1
+			grow 0
+		}
+
+		itemDef {
+			name "popup_body"
+			type 0
+			rect 0 0 1 0.06
+			text "Canonical popup pattern — OK + Cancel button row."
+			textalign 1
+			font $font_sans 12
+			forecolor $bone
+			decoration
+			visible 1
+			grow 1
+		}
+
+		itemDef {
+			name "popup_buttons"
+			type container
+			rect 0 0 1.0 0.05
+			direction row
+			gap $popup_button_gap
+			alignX end
+
+			itemDef {
+				name "popup_ok"
+				type 1
+				rect 0 0 0.12 0.04
+				text "OK"
+				textalign 1
+				font $font_sans 12
+				forecolor $accent
+				forecolor.active $accent
+				visible 1
+				grow 0
+				defaultButton
+				action { close }
+			}
+
+			itemDef {
+				name "popup_cancel"
+				type 1
+				rect 0 0 0.12 0.04
+				text "Cancel"
+				textalign 1
+				font $font_sans 12
+				forecolor $boneDim
+				forecolor.active $accent
+				visible 1
+				grow 0
+				action { close }
+			}
+		}
+	}
+}

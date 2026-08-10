@@ -4,7 +4,6 @@
 //
 
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
@@ -63,12 +62,71 @@ void P_DamageFeedback( gentity_t *player ) {
 
 	client->ps.damageCount = count;
 
-	//
-	// clear totals
-	//
-	client->damage_blood = 0;
-	client->damage_armor = 0;
-	client->damage_knockback = 0;
+	// The accumulated damage totals (blood/armor/knockback) are NOT cleared here
+	// anymore: this function early-returns above when no blood/armor damage was
+	// taken, which would leave a knockback-only frame's value uncleared, and the
+	// PM_DEAD early-return would clear it before GibEntity (run earlier in the
+	// frame) can read it for the directional gib. The reset is relocated to
+	// ClientEndFrame, after the gib event has already been emitted.
+}
+
+
+/*
+==============
+P_KnockbackFlush
+
+Apply the frame-local knockback impulse buckets (accumulated per momentum source
+in G_Damage) to ps.velocity, once, and clear them. Runs unconditionally at frame
+end — separate from P_DamageFeedback, which early-returns when no health/armor
+damage was taken this frame (knockback can apply with zero net damage, e.g. fully
+armor-absorbed or self-knockback). Frame ordering: every client's pmove runs in
+G_RunFrame's first loop, ClientEndFrame in the second, so this flush lands on
+ps.velocity after this frame's movement and is consumed by the next frame's pmove
+— the same one-frame deferral the damage_knockback view-kick already uses.
+==============
+*/
+void P_KnockbackFlush( gentity_t *player ) {
+	gclient_t	*client = player->client;
+	int			i;
+
+	for ( i = 0; i < client->numKnockbackSources; i++ ) {
+		knockbackSource_t	*src = &client->knockbackSources[i];
+
+		// Cap-of-sum: a multi-pellet shot carries a per-source momentum budget.
+		// Scale the summed impulse down to that magnitude before applying it, so
+		// a point-blank cluster of near-parallel pellets delivers one shell's
+		// worth of shove instead of N. Direction is preserved (uniform scale),
+		// so this conserves momentum direction; it never adds energy, only
+		// clamps the resultant. At range the pellets diverge, the sum already
+		// sits under budget, and the cap is idle — leaving the spread feel
+		// intact. budget == 0 means uncapped (single-hit weapons).
+		//
+		// Skipped under g_excessive: extreme-physics mode already lifts the
+		// per-hit knockback cap (g_combat.c), so lift the per-source cap too —
+		// both safeties off means full uncapped chaos, symmetric with the rest
+		// of g_excessive.
+		if ( !g_excessive.integer && src->budget > 0.0f ) {
+			float len = VectorLength( src->impulse );
+			if ( len > src->budget ) {
+				VectorScale( src->impulse, src->budget / len, src->impulse );
+			}
+		}
+
+		VectorAdd( client->ps.velocity,
+		           src->impulse,
+		           client->ps.velocity );
+	}
+
+	// Clear for next frame. The bucket slots are reused; resetting the count is
+	// enough (G_Damage re-clears each slot's impulse when it claims it), but
+	// blank the keys too so a stale (attacker,mod) can't alias a new source.
+	for ( i = 0; i < client->numKnockbackSources; i++ ) {
+		client->knockbackSources[i].srcKey = -1;
+		client->knockbackSources[i].mod    = 0;
+		client->knockbackSources[i].budget = 0.0f;
+		VectorClear( client->knockbackSources[i].impulse );
+	}
+	client->numKnockbackSources = 0;
 }
 
 
@@ -888,7 +946,7 @@ void ClientThink_real( gentity_t *ent ) {
 		return;
 	}
 
-	// check for inactivity timer, but never drop the local client of a non-dedicated server
+	// check for inactivity timer, but never drop the local client of a non-headless server
 	if ( !ClientInactivityTimer( client ) ) {
 		return;
 	}
@@ -912,6 +970,11 @@ void ClientThink_real( gentity_t *ent ) {
 #endif
 
 	client->ps.gravity = g_envGravity.value;
+	// target_gravity persistent override — applied after the per-frame default so
+	// it survives the recompute (sentinel 0 = no override).
+	if ( client->gravityOverride ) {
+		client->ps.gravity = client->gravityOverride;
+	}
 
 	// set speed
 	if (g_excessive.integer) {
@@ -931,6 +994,17 @@ void ClientThink_real( gentity_t *ent ) {
 		client->ps.speed *= 1.3;
 	}
 
+	// target_playerspeed persistent override — the final word on speed so it
+	// survives the per-frame recompute above. speedOverride > 0 forces a speed;
+	// speedOverride == -1 freezes the player (PM_FREEZE); 0 = no override.
+	if ( client->speedOverride == -1 ) {
+		if ( client->ps.pm_type == PM_NORMAL ) {
+			client->ps.pm_type = PM_FREEZE;
+		}
+	} else if ( client->speedOverride > 0 ) {
+		client->ps.speed = client->speedOverride;
+	}
+
 	// set up for pmove
 	oldEventSequence = client->ps.eventSequence;
 
@@ -940,7 +1014,14 @@ void ClientThink_real( gentity_t *ent ) {
 	// go through as an attack unless it actually hits something
 	if ( client->ps.weapon == WP_GAUNTLET && !( ucmd->buttons & BUTTON_TALK ) &&
 		( ucmd->buttons & BUTTON_ATTACK_PRI || ucmd->buttons & BUTTON_ATTACK_SEC ) && client->ps.weaponTime <= 0 ) {
+		// Unlagged U3: rewind other clients to the shooter's command time so the
+		// gauntlet primary trace hits the box where the shooter saw it — parity with
+		// the already-bracketed lunge (g_weapon.c) and the hitscan weapons. Wraps
+		// ONLY the trace; G_DoTimeShiftFor/Undo are FEAT_UNLAGGED + g_unlagged guarded
+		// and bot-skipping internally, so this is a guarded no-op when unlagged is off.
+		G_DoTimeShiftFor( ent );
 		pm.gauntletHit = CheckGauntletAttack( ent );
+		G_UndoTimeShiftFor( ent );
 	}
 
 	if ( ent->flags & FL_FORCE_GESTURE ) {
@@ -1030,10 +1111,10 @@ void ClientThink_real( gentity_t *ent ) {
 
     // eser - offhand grapple
     if (g_grapple.integer) {
-        if ((pm.cmd.buttons & BUTTON_AFFIRMATIVE) && ent->client->ps.pm_type != PM_DEAD && !ent->client->hookhasbeenfired) {
+        if ((pm.cmd.buttons & BUTTON_GRAPPLE) && ent->client->ps.pm_type != PM_DEAD && !ent->client->hookhasbeenfired) {
             Offhand_Grapple_Fire(ent);
         }
-        if (!(pm.cmd.buttons & BUTTON_AFFIRMATIVE) && ent->client->ps.pm_type != PM_DEAD && ent->client->hookhasbeenfired && ent->client->fireHeld) {
+        if (!(pm.cmd.buttons & BUTTON_GRAPPLE) && ent->client->ps.pm_type != PM_DEAD && ent->client->hookhasbeenfired && ent->client->fireHeld) {
             ent->client->fireHeld = qfalse;
             ent->client->hookhasbeenfired = qfalse;
         }
@@ -1155,7 +1236,27 @@ void ClientThink( int clientNum ) {
 	gentity_t *ent;
 
 	ent = g_entities + clientNum;
-	trap_GetUsercmd( clientNum, &ent->client->pers.cmd );
+
+	// AUTOPILOT — do not "fix" this back to an unconditional read.
+	//
+	// ClientThink and G_RunClient are a strict PARTITION, not two options: their
+	// guards (!SVF_BOT && !g_synchronousClients) and (SVF_BOT || g_synchronousClients)
+	// are exact complements, so every client reaches ClientThink_real through
+	// exactly one of them, and a human always arrives here.
+	//
+	// The bot brain injects its usercmd via trap_BotUserCommand -> BOTLIB_USER_COMMAND
+	// -> SV_ClientThink -> GAME_CLIENT_THINK, which re-enters THIS function. That
+	// injection point is upstream of both paths, so autopilot needs no new call
+	// site — but the read below would immediately overwrite the injected command
+	// with the human's own input, and the human would win every frame. Skipping the
+	// read is what lets the injected command survive into ClientThink_real:
+	// SV_ClientThink already stored it in pers.cmd, which is persistent by design
+	// ("we would lose angles if not persistant").
+	//
+	// Inert while autopilot is off, which is every client until the command sets it.
+	if ( !ent->client->pers.autopilot ) {
+		trap_GetUsercmd( clientNum, &ent->client->pers.cmd );
+	}
 
 	// mark the time we got info, so we can display the
 	// phone jack if they don't get any for a while
@@ -1336,6 +1437,17 @@ void ClientEndFrame( gentity_t *ent ) {
 	// apply all the damage taken this frame
 	P_DamageFeedback (ent);
 
+	// apply this frame's accumulated knockback impulses to ps.velocity, once
+	P_KnockbackFlush (ent);
+
+	// Clear the per-frame damage totals here (relocated from P_DamageFeedback):
+	// this runs after the gib event for a dying player has already read
+	// damage_knockback/damage_from, and unconditionally for live players so a
+	// knockback-only frame does not leak its value into the next one.
+	ent->client->damage_blood = 0;
+	ent->client->damage_armor = 0;
+	ent->client->damage_knockback = 0;
+
 	if ( ent->flags & FL_CLOAK ) {
 		ent->client->ps.eFlags |= EF_CLOAK;
 	} else {
@@ -1374,6 +1486,5 @@ void ClientEndFrame( gentity_t *ent ) {
 	}
 
 	// set the bit for the reachability area the client is currently in
-//	i = trap_AAS_PointReachabilityAreaIndex( ent->client->ps.origin );
 //	ent->client->areabits[i >> 3] |= 1 << (i & 7);
 }

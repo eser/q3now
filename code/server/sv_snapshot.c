@@ -4,8 +4,8 @@
 
 #include "server.h"
 #include "../qcommon/wired/net/wn_public.h"  /* WN_DATAGRAM_MTU, WN_FRAG_PAYLOAD, sv_snapshotTransport */
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_server, "server" );
+LOG_DECLARE_CHANNEL( ch_network_server, "network.server" );
 
 
 /*
@@ -105,7 +105,7 @@ static void SV_WriteSnapshotToClient( const client_t *client, msg_t *msg ) {
 	// this is the snapshot we are creating
 	const clientSnapshot_t *frame = &client->frames[ client->wn_outgoing_sequence & PACKET_MASK ];
 
-	Com_Log( SEV_TRACE, LOG_CH(ch_server), "[WiredNet] snapshot send: client=%s wn_outgoing=%u deltaMsg=%d msgAck=%d\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_network_server), "snapshot send: client=%s wn_outgoing=%u deltaMsg=%d msgAck=%d\n",
 		client->name, client->wn_outgoing_sequence,
 		client->deltaMessage, client->messageAcknowledge );
 
@@ -119,7 +119,7 @@ static void SV_WriteSnapshotToClient( const client_t *client, msg_t *msg ) {
 	} else if ( client->wn_outgoing_sequence - client->deltaMessage >= (PACKET_BACKUP - 3) ) {
 		// client hasn't gotten a good message through in a long time
 		if ( client->deltaMessage != client->wn_outgoing_sequence - ( PACKET_BACKUP + 1 ) ) {
-			Com_Log( SEV_DEBUG, LOG_CH(ch_server), "[WiredNet] delta request from out of date packet REJECT: name=%s, oldMsgNum=%d wn_outgoing=%u delta=%d\n",
+			Com_Log( SEV_DEBUG, LOG_CH(ch_network_server), "delta request from out of date packet REJECT: name=%s, oldMsgNum=%d wn_outgoing=%u delta=%d\n",
 				client->name,
 				client->deltaMessage + 1, client->wn_outgoing_sequence,
 				client->deltaMessage );
@@ -652,27 +652,30 @@ void SV_SendMessageToClient( msg_t *msg, client_t *client )
 
 	/* For QUIC game clients: skip netchan, prepend tick header and send.
 	 *
-	 * Single-datagram format (fits in WN_DATAGRAM_MTU):
-	 *   [wn_sequence:u32le] [delta_base:u32le] [snapshot_data...]
+	 * Wire format v2 (see docs/GAME_TRANSPORT.md):
 	 *
-	 * Fragmented datagram format (oversize, mode 0):
-	 *   [wn_sequence:u32le] [delta_base|0x80000000:u32le] [frag_total:u8] [frag_index:u8] [fragment_data...]
-	 *   High bit of delta_base is the fragment flag; actual value uses low 31 bits.
+	 * Tier-1 single datagram (fits in WN_DATAGRAM_MTU):
+	 *   [wn_sequence:u32le] [delta_base:u32le] [flags:u8] [snapshot_data...]
+	 *   9-byte header; flags bit 0 = 0 (is_fragment=false).
 	 *
-	 * Reliable stream format (oversize, mode 1 or >8 fragments):
-	 *   Same as single-datagram layout, sent on CHAN_SNAPSHOT_RELIABLE. */
+	 * Tier-2 fragmented datagram (oversize, mode 0):
+	 *   [wn_sequence:u32le] [delta_base:u32le] [flags:u8] [frag_total:u8] [frag_index:u8] [fragment_data...]
+	 *   11-byte header; flags bit 0 = 1 (is_fragment=true). flags bits 1..7 reserved (must be 0 on send).
+	 *
+	 * Tier-3 reliable stream (oversize, mode 1 or >8 fragments):
+	 *   Same header shape as tier-1 (9 bytes); flags bit 0 = 0. Sent on CHAN_SNAPSHOT_RELIABLE.
+	 *
+	 * delta_base is a pure u32 in v2 — no bit-multiplexing. The bit-31 collision
+	 * hazard is structurally fixed by the dedicated flags byte. */
 	if ( client->quic_conn != CONN_INVALID && transport ) {
 		conn_handle_t conn = client->quic_conn;
 		{
 			uint32_t srv_tick  = (uint32_t)client->wn_outgoing_sequence;
-			/* Bit 31 of base_tick is reserved as the wire fragment flag (0x80000000).
-			 * SV_ClientEnterWorld initialises deltaMessage = 0 for QUIC clients to
-			 * prevent a negative int from setting that bit on cast to uint32. */
 			uint32_t base_tick = (uint32_t)client->deltaMessage;
 			int      snap_len  = msg->cursize;
 
-			if ( snap_len + 8 <= WN_DATAGRAM_MTU ) {
-				/* Fast path: fits in one datagram — zero overhead. */
+			if ( snap_len + 9 <= WN_DATAGRAM_MTU ) {
+				/* Tier 1 — fast path: fits in one datagram. */
 				byte dgbuf[WN_DATAGRAM_MTU];
 				dgbuf[0] = (byte)( srv_tick          & 0xFF );
 				dgbuf[1] = (byte)( (srv_tick >>  8)  & 0xFF );
@@ -682,15 +685,16 @@ void SV_SendMessageToClient( msg_t *msg, client_t *client )
 				dgbuf[5] = (byte)( (base_tick >>  8)  & 0xFF );
 				dgbuf[6] = (byte)( (base_tick >> 16)  & 0xFF );
 				dgbuf[7] = (byte)( (base_tick >> 24)  & 0xFF );
-				memcpy( dgbuf + 8, msg->data, snap_len );
-				transport->send_unreliable( conn, dgbuf, 8 + snap_len );
+				dgbuf[8] = 0x00;  /* flags: is_fragment=0 */
+				memcpy( dgbuf + 9, msg->data, snap_len );
+				transport_for_handle( conn )->send_unreliable( conn, dgbuf, 9 + snap_len );
 			} else {
 				/* Snapshot exceeds single-datagram MTU. */
 				int frag_total = ( snap_len + WN_FRAG_PAYLOAD - 1 ) / WN_FRAG_PAYLOAD;
 
 				if ( sv_snapshotTransport->integer == 1 || frag_total > 8 ) {
-					/* Reliable stream — QUIC handles fragmentation and retransmit. */
-					byte rbuf[8 + MAX_MSGLEN];
+					/* Tier 3 — reliable stream; QUIC handles fragmentation and retransmit. */
+					byte rbuf[9 + MAX_MSGLEN];
 					if ( frag_total > 8 ) {
 						Com_Log( SEV_DEBUG, LOG_CH(ch_server), "QUIC: snapshot %d bytes needs %d frags (>8) for client %d — using reliable stream\n",
 							snap_len, frag_total, (int)(client - svs.clients) );
@@ -703,30 +707,31 @@ void SV_SendMessageToClient( msg_t *msg, client_t *client )
 					rbuf[5] = (byte)( (base_tick >>  8)  & 0xFF );
 					rbuf[6] = (byte)( (base_tick >> 16)  & 0xFF );
 					rbuf[7] = (byte)( (base_tick >> 24)  & 0xFF );
-					memcpy( rbuf + 8, msg->data, snap_len );
-					transport->send_reliable( conn, CHAN_SNAPSHOT_RELIABLE, rbuf, 8 + snap_len );
+					rbuf[8] = 0x00;  /* flags: tier-3 reliable never carries fragments */
+					memcpy( rbuf + 9, msg->data, snap_len );
+					transport_for_handle( conn )->send_reliable( conn, CHAN_SNAPSHOT_RELIABLE, rbuf, 9 + snap_len );
 				} else {
-					/* App-level datagram fragmentation (default, mode 0). */
+					/* Tier 2 — app-level datagram fragmentation (default, mode 0). */
 					Com_Log( SEV_DEBUG, LOG_CH(ch_server), "QUIC: snapshot %d bytes → %d frags for client %d\n",
 						snap_len, frag_total, (int)(client - svs.clients) );
 					for ( int i = 0; i < frag_total; i++ ) {
-						int      offset      = i * WN_FRAG_PAYLOAD;
-						int      frag_len    = snap_len - offset;
-						uint32_t flagged_base = base_tick | 0x80000000u;
+						int      offset   = i * WN_FRAG_PAYLOAD;
+						int      frag_len = snap_len - offset;
 						byte     fbuf[WN_DATAGRAM_MTU];
 						if ( frag_len > WN_FRAG_PAYLOAD ) frag_len = WN_FRAG_PAYLOAD;
-						fbuf[0] = (byte)( srv_tick           & 0xFF );
-						fbuf[1] = (byte)( (srv_tick >>  8)   & 0xFF );
-						fbuf[2] = (byte)( (srv_tick >> 16)   & 0xFF );
-						fbuf[3] = (byte)( (srv_tick >> 24)   & 0xFF );
-						fbuf[4] = (byte)( flagged_base        & 0xFF );
-						fbuf[5] = (byte)( (flagged_base >>  8) & 0xFF );
-						fbuf[6] = (byte)( (flagged_base >> 16) & 0xFF );
-						fbuf[7] = (byte)( (flagged_base >> 24) & 0xFF );
-						fbuf[8] = (byte)frag_total;
-						fbuf[9] = (byte)i;
-						memcpy( fbuf + 10, msg->data + offset, frag_len );
-						transport->send_unreliable( conn, fbuf, 10 + frag_len );
+						fbuf[0]  = (byte)( srv_tick           & 0xFF );
+						fbuf[1]  = (byte)( (srv_tick >>  8)   & 0xFF );
+						fbuf[2]  = (byte)( (srv_tick >> 16)   & 0xFF );
+						fbuf[3]  = (byte)( (srv_tick >> 24)   & 0xFF );
+						fbuf[4]  = (byte)( base_tick          & 0xFF );
+						fbuf[5]  = (byte)( (base_tick >>  8)  & 0xFF );
+						fbuf[6]  = (byte)( (base_tick >> 16)  & 0xFF );
+						fbuf[7]  = (byte)( (base_tick >> 24)  & 0xFF );
+						fbuf[8]  = 0x01;  /* flags: is_fragment=1 */
+						fbuf[9]  = (byte)frag_total;
+						fbuf[10] = (byte)i;
+						memcpy( fbuf + 11, msg->data + offset, frag_len );
+						transport_for_handle( conn )->send_unreliable( conn, fbuf, 11 + frag_len );
 					}
 				}
 			}
@@ -824,7 +829,7 @@ void SV_SendClientMessages( void )
 		if ( svs.time - c->lastSnapshotTime < c->snapshotMsec * com_timescale->value )
 			continue;		// It's not time yet
 
-		/* Phase D: netchan fragment queue removed — QUIC handles flow control */
+		/* netchan fragment queue removed — QUIC handles flow control */
 
 		// generate and send a new message
 		SV_SendClientSnapshot( c );

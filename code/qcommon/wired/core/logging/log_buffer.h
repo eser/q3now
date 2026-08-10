@@ -37,7 +37,7 @@ typedef struct {
     char            ts_wall[40];                    // ISO 8601 wall-clock of first occurrence
     char            ts_wall_last[40];               // ISO 8601 wall-clock of last occurrence
     log_severity_t  severity;
-    int             channel;        // index into log_channels[] (Phase 2+)
+    int             channel;        // index into log_channels[]
     char            body[LOG_BUFFER_SLOT_MSG_SIZE]; // truncated to slot size
     uint32_t        body_len;                       // bytes in body (<=MSG_SIZE)
     qboolean        truncated;                      // true if body was cut (slot or Com_Logv)

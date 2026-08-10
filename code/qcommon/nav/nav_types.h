@@ -31,6 +31,14 @@ typedef enum {
 	NAV_AGENT_COUNT
 } navAgentType_t;
 
+/* How many agent sizes are actually baked at map load. Only PLAYER is used by any
+ * production consumer (bots + the behavior FSM + map-placed monsters all path on agent
+ * 0); SMALL/LARGE are reserved and consumed by nothing, and an unbuilt size cleanly
+ * falls back to the player mesh (Nav_QueryForAgent). Baking all NAV_AGENT_COUNT sizes at
+ * load tripled the (multi-second) bake for zero benefit, so only the live sizes are baked
+ * — the reserved sizes stay defined and buildable on demand, just not at every load. */
+#define NAV_AGENT_LIVE_COUNT 1
+
 /* Per-agent movement parameters used when querying path corridors. */
 typedef struct {
 	float radius;           /* capsule half-width in Q3 units */
@@ -55,6 +63,55 @@ typedef struct {
 #define NAV_PATHFLAG_END            0x02   /* DT_STRAIGHTPATH_END */
 #define NAV_PATHFLAG_OFFMESH_CON    0x04   /* DT_STRAIGHTPATH_OFFMESH_CONNECTION */
 
+/* Encoding of the Nav_FindPath / trap_Nav_FindPath scalar return value.
+ *
+ * The return is the waypoint count in its low bits (0..NAV_MAX_PATH_POINTS, so it
+ * never exceeds 256), OR-ed with NAV_FINDPATH_PARTIAL in a high bit when Detour
+ * reported the corridor did NOT reach the goal (DT_PARTIAL_RESULT: the goal poly is
+ * unreachable, or the corridor was truncated at NAV_MAX_PATH_POINTS). A return of 0
+ * still means "no corridor at all". This packs the reach-status into the existing
+ * scalar return, keeping navPath_t layout and the trap signature unchanged (the
+ * struct crosses the WASM/native boundary, so no field may be added). Consumers that
+ * only care about "any corridor" keep testing `ret <= 0`; the partial bit sits well
+ * above the count so a partial result is still a positive value that those consumers
+ * follow exactly as before. NAV_FINDPATH_COUNT() recovers the waypoint count. */
+#define NAV_FINDPATH_PARTIAL        (1 << 16)
+#define NAV_FINDPATH_COUNT(ret)     ((ret) & (NAV_FINDPATH_PARTIAL - 1))
+
+/* Off-mesh-connection TRAVERSAL MODE — how the FOLLOWER must physically cross a
+ * link.  Mode is NOT derivable from geometry (jump-pad, door-gap and flat-plat are
+ * byte-identical in {area, Δz, length}) and OmcClassify only distinguishes the
+ * mechanism KIND, not the follower actuation.  So each PRODUCER stamps this byte at
+ * emission (it knows its own class), and it rides the waypoint to the follower.
+ *   BALLISTIC — jump-pad / target-push / teleporter: the pad's own velocity or an
+ *               instant teleport carries the bot; the follower suppresses its move
+ *               for the whole transit (the one class the pre-mode code got right).
+ *   FALL      — hatch-descent / physics-gen DROP: a gravity fall off a lip; the
+ *               follower drives off the edge (phase A) then suppresses while airborne
+ *               (phase B) so gravity lands it.
+ *   WALK      — door-gap / water-edge wade / FLAT func_plat: a level crossing no
+ *               launch carries; the follower WALKS to the destination.
+ *   RIDE      — func_plat that MOVES the rider vertically: board, then hold while the
+ *               plat mover translates the standing rider, step off at the top.
+ *   CLIMB     — physics-gen up-jump (dest above start): a run-jump the follower
+ *               times (heading alignment, run-momentum gate, one-shot jump at the
+ *               step base).  The actuation IS implemented — g_bot_nav.c's CLIMB case.
+ * 0 (NONE) is a non-OMC waypoint.
+ *
+ * These modes are stamped ONCE per link, from the baked start->end rise, but a mesh
+ * off-mesh connection is BIDIRECTIONAL.  The gravity-relative pair therefore depends
+ * on which way the link is being walked: CLIMB one way is FALL the other.  The path
+ * query resolves that per traversal (see the direction-aware lookup in Nav_FindPath);
+ * WALK, RIDE and BALLISTIC are direction-symmetric and need no flip. */
+typedef enum {
+	NAV_TM_NONE      = 0,
+	NAV_TM_BALLISTIC = 1,
+	NAV_TM_FALL      = 2,
+	NAV_TM_WALK      = 3,
+	NAV_TM_RIDE      = 4,
+	NAV_TM_CLIMB     = 5,
+} navTraversalMode_t;
+
 /* Result of a path query.  positions[] are in Quake world-space. */
 typedef struct {
 	float         positions[NAV_MAX_PATH_POINTS][3];  /* waypoints in Q3 units */
@@ -67,6 +124,10 @@ typedef struct {
 	 * Guarded to avoid 1 KB overhead per slot in AAS builds (64 KB total
 	 * at MAX_CLIENTS=64 avoided when FEAT_RECAST_NAVMESH=0). */
 	navPolyRef_t  polyrefs[NAV_MAX_PATH_POINTS];
+	/* Per-waypoint OMC traversal mode (navTraversalMode_t); NAV_TM_NONE on a
+	 * non-OMC waypoint.  Producer-stamped at bake, resurfaced by Nav_FindPath from
+	 * the OMC userId side-table.  Mirrors polyrefs[] (same WASM-boundary rebuild). */
+	unsigned char traversalMode[NAV_MAX_PATH_POINTS];
 #endif
 } navPath_t;
 
@@ -89,7 +150,7 @@ typedef enum {
 	NAVAREA_TELEPORT      = 5,   /* off-mesh connection: teleporter endpoint */
 	NAVAREA_LAVA          = 6,   /* lava or slime (walkable with damage cost) */
 	NAVAREA_LOW_CEILING   = 7,   /* crouch required (clearance < standing height) */
-	/* Reserved for monster AI framework (Phase 2–5 of AI task): */
+	/* Reserved for monster AI framework: */
 	NAVAREA_PATROL_NODE   = 8,
 	NAVAREA_COVER_NODE    = 9,
 	NAVAREA_FLEE_NODE     = 10,
@@ -101,19 +162,26 @@ typedef enum {
  * per-polygon flags field.  Flags are a BITFIELD — multiple may be set
  * simultaneously (e.g., NAVPOLY_WALKABLE | NAVPOLY_DOOR).
  *
- * NAVPOLY_BLOCKED is the only runtime-mutable flag (set/cleared when a
- * door opens or closes via trap_Nav_SetPolyFlags).
+ * Two flags are runtime-mutable (set/cleared via trap_Nav_SetPolyFlagsForDoor
+ * when a mover changes state): NAVPOLY_BLOCKED and NAVPOLY_OPENABLE_CLOSED.
+ * BLOCKED means "not traversable" (the query filter excludes it) — used for
+ * permanent obstacles (finalize-disabled lying polys) and, historically, closed
+ * doors. OPENABLE_CLOSED means "closed now but the bot can open it" — a door the
+ * path should plan THROUGH at high cost rather than route around; the query
+ * filter includes it. Both are runtime-only: neither participates in the bake,
+ * the cache serialization, or the param hash.
  */
 typedef enum {
-	NAVPOLY_WALKABLE     = (1 << 0),  /* standard walkable (default for all passable polys) */
-	NAVPOLY_WATER        = (1 << 1),  /* water volume */
-	NAVPOLY_DOOR         = (1 << 2),  /* near door entity */
-	NAVPOLY_OFFMESH      = (1 << 3),  /* off-mesh connection endpoint */
-	NAVPOLY_BLOCKED      = (1 << 4),  /* runtime obstacle (door closed, etc.) */
-	NAVPOLY_LAVA         = (1 << 5),  /* lava or slime */
-	NAVPOLY_COVER        = (1 << 6),  /* cover node (monster AI) */
-	NAVPOLY_PATROL       = (1 << 7),  /* patrol waypoint (monster AI) */
-	NAVPOLY_LOW_CEILING  = (1 << 8),  /* crouch required */
+	NAVPOLY_WALKABLE        = (1 << 0),  /* standard walkable (default for all passable polys) */
+	NAVPOLY_WATER           = (1 << 1),  /* water volume */
+	NAVPOLY_DOOR            = (1 << 2),  /* near door entity */
+	NAVPOLY_OFFMESH         = (1 << 3),  /* off-mesh connection endpoint */
+	NAVPOLY_BLOCKED         = (1 << 4),  /* runtime obstacle: not traversable (filter excludes) */
+	NAVPOLY_LAVA            = (1 << 5),  /* lava or slime */
+	NAVPOLY_COVER           = (1 << 6),  /* cover node (monster AI) */
+	NAVPOLY_PATROL          = (1 << 7),  /* patrol waypoint (monster AI) */
+	NAVPOLY_LOW_CEILING     = (1 << 8),  /* crouch required */
+	NAVPOLY_OPENABLE_CLOSED = (1 << 9),  /* closed door the bot can open: plan through at high cost */
 } navPolyFlags_t;
 
 #endif /* NAV_TYPES_H */

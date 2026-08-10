@@ -5,7 +5,7 @@
 ===========================================================================
 cg_wired_store.c -- Wired Store: cgame staging buffer
 
-Phase 4: cgame writes game state to the Wired Store via a staging buffer.
+cgame writes game state to the Wired Store via a staging buffer.
 WUI_Stage_Set* helpers accumulate changes. WUI_Stage_Flush sends a single
 CG_WUI_STORE_PUSH_BATCH syscall per frame. Deduplicates: multiple writes
 to the same key within one frame merge into one staged entry.
@@ -13,7 +13,6 @@ to the same key within one frame merge into one staged entry.
 */
 
 #include "cg_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 #if FEAT_WIRED_UI
@@ -109,6 +108,46 @@ void WUI_Stage_Flush( void ) {
 
 void WUI_Stage_Clear( void ) {
 	wui_stageCount = 0;
+}
+
+/* ---- world-anchored marker-list staging (WA-2a) ---------------------- */
+/* A single fixed scratch list: Begin(listKey) starts a fresh list, Push appends
+ * a marker (real-pixel x/y + color + short text), Flush sends it via the marker
+ * channel syscall (REPLACES the listKey's prior-frame list client-side). Separate
+ * from the scalar dedup store. One list is staged+flushed at a time per frame. */
+
+static wuiMarker_t wui_markerScratch[WUI_MAX_MARKERS_PER_LIST];
+static int         wui_markerCount = 0;
+static char        wui_markerListKey[64];
+
+void WUI_StageMarkers_Begin( const char *listKey ) {
+	Q_strncpyz( wui_markerListKey, listKey ? listKey : "", sizeof( wui_markerListKey ) );
+	wui_markerCount = 0;
+}
+
+void WUI_StageMarkers_Push( float x, float y, const vec4_t color, const char *text ) {
+	wuiMarker_t *m;
+	if ( wui_markerCount >= WUI_MAX_MARKERS_PER_LIST ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame),
+			"WARNING: WUI marker list '%s' full (%d), dropping marker\n",
+			wui_markerListKey, WUI_MAX_MARKERS_PER_LIST );
+		return;
+	}
+	m = &wui_markerScratch[wui_markerCount++];
+	m->x = x;
+	m->y = y;
+	Vector4Copy( color, m->color );
+	Q_strncpyz( m->text, text ? text : "", sizeof( m->text ) );
+}
+
+void WUI_StageMarkers_Flush( void ) {
+	if ( !wui_markerListKey[0] ) {
+		return;
+	}
+	/* Always push (even count 0) so an emptied list clears client-side this frame. */
+	trap_WiredStore_PushMarkerList( wui_markerListKey, wui_markerScratch, wui_markerCount );
+	wui_markerCount = 0;
+	wui_markerListKey[0] = '\0';
 }
 
 /* ---- immediate operations (not staged) ------------------------------- */

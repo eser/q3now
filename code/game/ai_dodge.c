@@ -94,7 +94,7 @@ void BotScanMissiles( struct bot_state_s *bs )
 	vec3_t		toMissile, forward;
 
 	bs->num_missiles = 0;
-	skill = WiredBots_EffectiveSkill( bs );
+	skill = WiredIntel_EffectiveSkill( bs );
 
 	// skill 1-2: narrow detection FOV
 	detectFov = ( skill >= 3 ) ? 0.0f : 0.5f; // 0 = 180° fov, 0.5 = ~120° fov
@@ -158,7 +158,7 @@ void BotDodgeMovement( struct bot_state_s *bs )
 		return;
 	}
 
-	skill = WiredBots_EffectiveSkill( bs );
+	skill = WiredIntel_EffectiveSkill( bs );
 
 	// build candidate directions in world space
 	AngleVectors( bs->viewangles, forward, right, NULL );

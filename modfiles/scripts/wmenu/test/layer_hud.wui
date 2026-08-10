@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+//
+// layer_hud.wmenu — Phase 3b1 visual z-order fixture.
+// Bottom red strip marking the HUD layer; third from back of the 6-layer
+// stack. Driven by the force-override mask via wui_layer_test_*.
+
+menuDef {
+	name "layer_hud"
+	rect 0 0.85 1 0.15
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.60 0.15 0.15 0.85
+	layer "hud"
+
+	itemDef {
+		type 0
+		rect 0 0.3 1 0.4
+		textalign 1
+		font "oxanium" 26
+		forecolor 1 1 1 1
+		text "LAYER HUD"
+		decoration
+		visible 1
+	}
+}

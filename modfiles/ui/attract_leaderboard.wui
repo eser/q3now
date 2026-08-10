@@ -1,0 +1,153 @@
+// attract_leaderboard.wui — attract-mode Top-Times splash (Brutalist Poster)
+//
+// REBUILT 2026-07-03. The old version authored every row as `rect 0 0 1.0 X`
+// inside nested flex containers with no width/height sizing, so Clay collapsed
+// the whole list to a (0,0) top-left pile (Eser: "ekranlar boktan"). This
+// rebuild uses the shipped hero idiom — position absolute + explicit vw/vh +
+// text leaves with `height FIT` + a real width — so nothing collapses.
+//
+// Design: the top-times list read as a fight card. Shared red spine on the left,
+// a huge TOP / TIMES header (bone + red), then rows where each rank is an
+// oversized red index, the name is big bone, and the time is right-set mono.
+// Red is $poster_red #e6332b (accent-independent). Tokens: $ink $bone $boneDim
+// $line $font_mono $poster_red; wordmark font $font_sans_bold.
+
+menuDef {
+	name "attract_leaderboard"
+	layer "bg_attract"
+	rect 0 0 1.0 1.0
+	fullScreen 1
+	visible 0
+	backcolor $ink   // $ink
+
+	// ── red spine (shared signature) ─────────────────────────────────
+	itemDef {
+		name "lb_spine"
+		type 0
+		position absolute
+		left 0
+		top 0
+		width 0.9vw
+		height 100vh
+		style 1
+		backcolor $poster_red
+		decoration
+		visible 1
+	}
+
+	// ── header: TOP / TIMES (offset-stacked) + map stamp ─────────────
+	itemDef {
+		name "lb_header"
+		type container
+		position absolute
+		top 8vh
+		left 6vw
+		width 50vw
+		height 22vh
+		direction column
+		gap 0.2vh
+		grow 0
+
+		itemDef { name "lb_top"  type 0 rect 0 0 1 9vh height FIT width PERCENT 1 text "TOP"   textalign 0 font $font_sans_bold 92 forecolor $bone       decoration visible 1 grow 0 }
+		itemDef { name "lb_time" type 0 rect 0 0 1 9vh height FIT width PERCENT 1 text "TIMES" textalign 0 font $font_sans_bold 92 forecolor $poster_red decoration visible 1 grow 0 }
+	}
+	itemDef {
+		name "lb_stamp"
+		type 0
+		position absolute
+		right 5vw
+		top 10vh
+		width 30vw
+		height 4vh
+		text "RAILYARD · ARENA RECORDS"
+		textalign 2
+		font $font_mono 15
+		forecolor $attract_ink_lo
+		decoration
+		visible 1
+	}
+
+	// ── rows (fight-card: red index + bone name + mono time) ─────────
+	// Each row is one absolute container with three sized leaves. A top border
+	// rule gives the poster grid. No nested flex without sizing → no collapse.
+	itemDef {
+		name "lb_row1"
+		type container
+		position absolute
+		left 6vw
+		top 36vh
+		width 88vw
+		height 11vh
+		direction row
+		alignY center
+		borderTop 1px $line
+		grow 0
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 8vw  text "01"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 46vw text "RANGER" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 24vw text "12:34.5" textalign 2 font $font_mono 26     forecolor $attract_ink_hi decoration visible 1 grow 0 }
+	}
+	itemDef {
+		name "lb_row2"
+		type container
+		position absolute
+		left 6vw
+		top 47vh
+		width 88vw
+		height 11vh
+		direction row
+		alignY center
+		borderTop 1px $line
+		grow 0
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 8vw  text "02"    textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 46vw text "KEEL"  textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 24vw text "13:01.2" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+	}
+	itemDef {
+		name "lb_row3"
+		type container
+		position absolute
+		left 6vw
+		top 58vh
+		width 88vw
+		height 11vh
+		direction row
+		alignY center
+		borderTop 1px $line
+		grow 0
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 8vw  text "03"    textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 46vw text "SLASH" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 24vw text "13:48.8" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+	}
+	itemDef {
+		name "lb_row4"
+		type container
+		position absolute
+		left 6vw
+		top 69vh
+		width 88vw
+		height 11vh
+		direction row
+		alignY center
+		borderTop 1px $line
+		grow 0
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 8vw  text "04"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 46vw text "ANARKI" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 24vw text "14:12.1" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+	}
+	itemDef {
+		name "lb_row5"
+		type container
+		position absolute
+		left 6vw
+		top 80vh
+		width 88vw
+		height 11vh
+		direction row
+		alignY center
+		borderTop 1px $line
+		grow 0
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 8vw  text "05"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 46vw text "SORLAG" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+		itemDef { type 0 rect 0 0 1 8vh height FIT width 24vw text "14:59.3" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+	}
+}

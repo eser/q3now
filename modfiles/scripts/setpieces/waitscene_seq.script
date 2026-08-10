@@ -1,0 +1,10 @@
+// waitscene_seq.script — proves the waitscene blocking verb (Fork-1 refinement).
+// playscene stamps sceneStartTime; waitscene 3000 suspends (qfalse each frame)
+// until 3s have elapsed, then the cursor advances and prints. The DEBUG trace
+// shows the print landing ~3s after the playscene, proving the timer-block.
+spawn {
+    print waitscene-begin
+    playscene boss_intro self
+    waitscene 3000
+    print cutscene-done
+}

@@ -4,7 +4,9 @@
 // tr_shade_calc.c
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.cmd
 
+R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
 // NOLINTNEXTLINE(bugprone-macro-parentheses) — `table` is always a static float[] array, never a complex expression
 #define	WAVEVALUE( table, base, amplitude, phase, freq )  ((base) + table[ (int64_t)( ( ( (phase) + tess.shaderTime * (freq) ) * FUNCTABLE_SIZE ) ) & FUNCTABLE_MASK ] * (amplitude))
@@ -351,10 +353,10 @@ static void AutospriteDeform( void ) {
 	vec3_t	leftDir, upDir;
 
 	if ( tess.numVertexes & 3 ) {
-		ri.Log( SEV_WARN, "Autosprite shader %s had odd vertex count\n", tess.shader->name );
+		R_LOG( rch_cmd, SEV_WARN, "Autosprite shader %s had odd vertex count\n", tess.shader->name );
 	}
 	if ( tess.numIndexes != ( tess.numVertexes >> 2 ) * 6 ) {
-		ri.Log( SEV_WARN, "Autosprite shader %s had odd index count\n", tess.shader->name );
+		R_LOG( rch_cmd, SEV_WARN, "Autosprite shader %s had odd index count\n", tess.shader->name );
 	}
 
 	oldVerts = tess.numVertexes;
@@ -431,10 +433,10 @@ static void Autosprite2Deform( void ) {
 	vec3_t	forward;
 
 	if ( tess.numVertexes & 3 ) {
-		ri.Log( SEV_WARN, "Autosprite2 shader %s had odd vertex count\n", tess.shader->name );
+		R_LOG( rch_cmd, SEV_WARN, "Autosprite2 shader %s had odd vertex count\n", tess.shader->name );
 	}
 	if ( tess.numIndexes != ( tess.numVertexes >> 2 ) * 6 ) {
-		ri.Log( SEV_WARN, "Autosprite2 shader %s had odd index count\n", tess.shader->name );
+		R_LOG( rch_cmd, SEV_WARN, "Autosprite2 shader %s had odd index count\n", tess.shader->name );
 	}
 
 	if ( backEnd.currentEntity != &tr.worldEntity ) {

@@ -11,7 +11,9 @@ layout(set = 0, binding = 0) uniform sampler2D edgesTex;
 layout(set = 1, binding = 0) uniform sampler2D areaTex;
 layout(set = 2, binding = 0) uniform sampler2D searchTex;
 
-layout(push_constant) uniform PushConstants {
+// rtMetrics rides in a per-frame UBO at set 3 of the shared SMAA pipeline layout,
+// not a VS|FS push. Anonymous block keeps the read sites.
+layout(set = 3, binding = 0, std140) uniform RtMetrics {
 	vec4 rtMetrics; // { 1/w, 1/h, w, h }
 };
 

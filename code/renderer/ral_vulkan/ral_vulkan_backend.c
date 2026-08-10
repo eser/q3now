@@ -3,7 +3,7 @@
 //
 // ral_vulkan_backend.c — Vulkan RAL backend: instance / physical-device /
 // device / queue creation + teardown, the availability probe, and the
-// "\ral_dump" developer command entry point. Phase 7.1 skeleton: no command
+// "\ral_dump" developer command entry point. Skeleton: no command
 // buffers / pipelines / resources yet (those are stubs in the sibling TUs).
 //
 // This backend owns its own VkInstance / VkDevice / VkQueues — it never
@@ -11,6 +11,8 @@
 // the engine's platform loader (ri.VK_GetInstanceProcAddr) and vkGetDeviceProcAddr.
 
 #include "ral_vulkan_internal.h"
+
+R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
 
 #include <string.h>
 
@@ -32,42 +34,83 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL ralVk_DebugCallback(
 		const VkDebugUtilsMessengerCallbackDataEXT *data,
 		void                                       *user ) {
 	const char *msg = ( data && data->pMessage ) ? data->pMessage : "(null)";
-	ri.Log( ( severity & ( VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT ) )
+	R_LOG( rch_ral,( severity & ( VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT ) )
 	            ? SEV_WARN : SEV_DEBUG,
-	        "[RAL][VK] %s\n", msg );
+	        "%s\n", msg );
 	(void)types; (void)user;
 	return VK_FALSE;   // don't abort the offending call
 }
 
 // ── teardown (shared by Ral_DestroyBackend and the failure paths) ───────
-// Imported-mode (b->ownsHandles == qfalse): RAL still owns frame/resource/
-// pipeline layer state allocated against the caller's VkDevice, so we still
-// drain & shut those down. We do NOT call vkDestroyDevice/Instance — the
-// caller (renderervk) owns them. We skip DeviceWaitIdle too: the caller will
-// already have called it before its own shutdown, and double-call is fine
-// but redundant; gating on ownsHandles makes the intent explicit.
+// Fine-grained ownership: ownsDevice gates device
+// teardown, ownsInstance gates instance + messenger + surface teardown.
+// Surface destroy MUST run before instance destroy (uses instance handle).
+// Imported-mode (both flags qfalse): RAL still owns frame/resource/pipeline
+// layer state allocated against the caller's VkDevice, so it still drains
+// + shuts those down.
 static void ralVk_DestroyBackendInternal( ralBackend_t *b ) {
 	if ( !b ) return;
-	// Drain GPU work on this device before destroying our cmd pools / fences
-	// / descriptor pool. Safe in both modes: the call is idempotent and
-	// vkDeviceWaitIdle on a shared device only blocks until all of RAL's +
-	// the renderer's submissions complete — the renderer will also issue
-	// its own wait in vk_shutdown, but a redundant pair is cheap.
+	// Drain GPU work on this device before destroying cmd pools / fences /
+	// descriptor pool. Idempotent and cheap.
 	if ( b->device != VK_NULL_HANDLE && b->vk.DeviceWaitIdle )
 		b->vk.DeviceWaitIdle( b->device );
 	ralVk_DrainPendingDestroy( b, ~0ull );   // drain everything still queued
-	ralVk_ShutdownPipelineLayer( b );        // VkPipelineCache + layout cache (Phase 7.3c)
+	ralVk_ShutdownPipelineLayer( b );        // VkPipelineCache + layout cache
 	ralVk_ShutdownResourceLayer( b );        // descriptor pool / live allocations
 	ralVk_ShutdownFrameLayer( b );           // cmd pools / queue mutexes / frame fences / pending-destroy ring
-	if ( b->ownsHandles ) {
+	if ( b->ownsDevice ) {
 		if ( b->device != VK_NULL_HANDLE && b->vk.DestroyDevice )
 			b->vk.DestroyDevice( b->device, NULL );
+	}
+	if ( b->ownsInstance ) {
+		if ( b->surface != VK_NULL_HANDLE && b->vk.DestroySurfaceKHR )
+			b->vk.DestroySurfaceKHR( b->instance, b->surface, NULL );
 		if ( b->debugMessenger != VK_NULL_HANDLE && b->vk.DestroyDebugUtilsMessengerEXT )
 			b->vk.DestroyDebugUtilsMessengerEXT( b->instance, b->debugMessenger, NULL );
 		if ( b->instance != VK_NULL_HANDLE && b->vk.DestroyInstance )
 			b->vk.DestroyInstance( b->instance, NULL );
 	}
+	// Free the enabled-ext pointer array (strings
+	// themselves are caller-owned literals; we only free our pointer table).
+	if ( b->enabledDeviceExtensions ) {
+		free( (void *)b->enabledDeviceExtensions );
+		b->enabledDeviceExtensions     = NULL;
+		b->enabledDeviceExtensionCount = 0;
+	}
 	free( b );
+}
+
+// ── handle accessors ─────────────────────
+void *Ral_GetInstanceHandle      ( const ralBackend_t *b ) { return b ? (void *)b->instance       : NULL; }
+void *Ral_GetPhysicalDeviceHandle( const ralBackend_t *b ) { return b ? (void *)b->physicalDevice : NULL; }
+void *Ral_GetSurfaceHandle       ( const ralBackend_t *b ) { return b ? (void *)b->surface        : NULL; }
+void *Ral_GetDeviceHandle        ( const ralBackend_t *b ) { return b ? (void *)b->device         : NULL; }
+
+void *Ral_GetQueueHandle( const ralBackend_t *b, ralQueueType_t q ) {
+	if ( !b ) return NULL;
+	switch ( q ) {
+		case RAL_QUEUE_GRAPHICS: return (void *)b->graphicsQueue;
+		case RAL_QUEUE_COMPUTE:  return (void *)b->computeQueue;
+		case RAL_QUEUE_TRANSFER: return (void *)b->transferQueue;
+	}
+	return NULL;
+}
+
+uint32_t Ral_GetQueueFamily( const ralBackend_t *b, ralQueueType_t q ) {
+	if ( !b ) return UINT32_MAX;
+	switch ( q ) {
+		case RAL_QUEUE_GRAPHICS: return b->graphicsFamily;
+		case RAL_QUEUE_COMPUTE:  return b->computeFamily;
+		case RAL_QUEUE_TRANSFER: return b->transferFamily;
+	}
+	return UINT32_MAX;
+}
+
+void Ral_GetEnabledDeviceExtensions( const ralBackend_t *b,
+                                     const char *const **out,
+                                     uint32_t           *outCount ) {
+	if ( out      ) *out      = b ? (const char *const *)b->enabledDeviceExtensions : NULL;
+	if ( outCount ) *outCount = b ? b->enabledDeviceExtensionCount : 0u;
 }
 
 // ── instance-level entry-point loader ───────────────────────────────────
@@ -76,7 +119,7 @@ static void ralVk_DestroyBackendInternal( ralBackend_t *b ) {
 static qboolean ralVk_LoadInstanceFuncs( ralBackend_t *b ) {
 	#define LOAD_REQ( field, sym ) \
 		b->vk.field = (PFN_##sym)RAL_GIPA( b->instance, #sym ); \
-		if ( !b->vk.field ) { ri.Log( SEV_WARN, "[RAL] Vulkan: missing instance entry point %s\n", #sym ); return qfalse; }
+		if ( !b->vk.field ) { R_LOG( rch_ral, SEV_WARN, "Vulkan: missing instance entry point %s\n", #sym ); return qfalse; }
 	#define LOAD_OPT( field, sym ) \
 		b->vk.field = (PFN_##sym)RAL_GIPA( b->instance, #sym );
 
@@ -98,6 +141,9 @@ static qboolean ralVk_LoadInstanceFuncs( ralBackend_t *b ) {
 	LOAD_OPT( SetDebugUtilsObjectNameEXT,             vkSetDebugUtilsObjectNameEXT )
 	LOAD_OPT( CmdBeginDebugUtilsLabelEXT,             vkCmdBeginDebugUtilsLabelEXT )
 	LOAD_OPT( CmdEndDebugUtilsLabelEXT,               vkCmdEndDebugUtilsLabelEXT )
+	// surface PFNs (instance-level)
+	LOAD_REQ( DestroySurfaceKHR,                      vkDestroySurfaceKHR )
+	LOAD_REQ( GetPhysicalDeviceSurfaceSupportKHR,     vkGetPhysicalDeviceSurfaceSupportKHR )
 	return qtrue;
 	#undef LOAD_REQ
 	#undef LOAD_OPT
@@ -106,14 +152,14 @@ static qboolean ralVk_LoadInstanceFuncs( ralBackend_t *b ) {
 static qboolean ralVk_LoadDeviceFuncs( ralBackend_t *b ) {
 	#define LOAD_DEV( field, sym ) \
 		b->vk.field = (PFN_##sym)b->vk.GetDeviceProcAddr( b->device, #sym ); \
-		if ( !b->vk.field ) { ri.Log( SEV_WARN, "[RAL] Vulkan: missing device entry point %s\n", #sym ); return qfalse; }
+		if ( !b->vk.field ) { R_LOG( rch_ral, SEV_WARN, "Vulkan: missing device entry point %s\n", #sym ); return qfalse; }
 	#define LOAD_DEV_OPT( field, sym ) \
 		b->vk.field = (PFN_##sym)b->vk.GetDeviceProcAddr( b->device, #sym );
 	// core lifecycle
 	LOAD_DEV( DestroyDevice,                  vkDestroyDevice )
 	LOAD_DEV( GetDeviceQueue,                 vkGetDeviceQueue )
 	LOAD_DEV( DeviceWaitIdle,                 vkDeviceWaitIdle )
-	LOAD_DEV( QueueWaitIdle,                  vkQueueWaitIdle )     // Phase 7.4c-submit-followup-present-1: Ral_WaitQueueIdle body
+	LOAD_DEV( QueueWaitIdle,                  vkQueueWaitIdle )     // Ral_WaitQueueIdle body
 	LOAD_DEV( QueueSubmit,                    vkQueueSubmit )
 	LOAD_DEV( QueueSubmit2,                   vkQueueSubmit2 )      // synchronization2 (core 1.3)
 	// memory
@@ -179,7 +225,7 @@ static qboolean ralVk_LoadDeviceFuncs( ralBackend_t *b ) {
 	LOAD_DEV( DestroyQueryPool,               vkDestroyQueryPool )
 	LOAD_DEV( ResetQueryPool,                 vkResetQueryPool )       // host-side reset (core 1.2)
 	LOAD_DEV( GetQueryPoolResults,            vkGetQueryPoolResults )
-	// pipelines (Phase 7.3c)
+	// pipelines
 	LOAD_DEV( CreateShaderModule,             vkCreateShaderModule )
 	LOAD_DEV( DestroyShaderModule,            vkDestroyShaderModule )
 	LOAD_DEV( CreatePipelineLayout,           vkCreatePipelineLayout )
@@ -190,7 +236,7 @@ static qboolean ralVk_LoadDeviceFuncs( ralBackend_t *b ) {
 	LOAD_DEV( CreatePipelineCache,            vkCreatePipelineCache )
 	LOAD_DEV( DestroyPipelineCache,           vkDestroyPipelineCache )
 	LOAD_DEV( GetPipelineCacheData,           vkGetPipelineCacheData )
-	// pipeline-dependent cmd ops (Phase 7.3c)
+	// pipeline-dependent cmd ops
 	LOAD_DEV( CmdBindPipeline,                vkCmdBindPipeline )
 	LOAD_DEV( CmdBindDescriptorSets,          vkCmdBindDescriptorSets )
 	LOAD_DEV( CmdBindVertexBuffers,           vkCmdBindVertexBuffers )
@@ -205,7 +251,7 @@ static qboolean ralVk_LoadDeviceFuncs( ralBackend_t *b ) {
 	LOAD_DEV( CmdBeginRendering,              vkCmdBeginRendering )    // core 1.3 (dynamic rendering)
 	LOAD_DEV( CmdEndRendering,                vkCmdEndRendering )
 
-	// Phase 7.4c-cmd — Vk-typed parallel-paths cmd forwarders (see header).
+	// Vk-typed parallel-paths cmd forwarders (see header).
 	LOAD_DEV( CmdBeginRenderPass,             vkCmdBeginRenderPass )
 	LOAD_DEV( CmdEndRenderPass,               vkCmdEndRenderPass )
 	LOAD_DEV( CmdNextSubpass,                 vkCmdNextSubpass )
@@ -213,20 +259,68 @@ static qboolean ralVk_LoadDeviceFuncs( ralBackend_t *b ) {
 	LOAD_DEV( CmdClearAttachments,            vkCmdClearAttachments )
 	LOAD_DEV( CmdWriteTimestamp,              vkCmdWriteTimestamp )
 
-	// Phase 7.4c-submit-followup-present-1 — swapchain + HDR-metadata function
+	// swapchain + HDR-metadata function
 	// pointers. VK_KHR_swapchain device extension already enabled by renderer
 	// (imported-mode RAL inherits). VK_EXT_hdr_metadata is optional —
 	// SetHdrMetadataEXT loaded via LOAD_DEV_OPT (NULL OK on drivers lacking
 	// the extension; caller null-checks before invocation).
-	LOAD_DEV( CreateSwapchainKHR,             vkCreateSwapchainKHR )
-	LOAD_DEV( DestroySwapchainKHR,            vkDestroySwapchainKHR )
-	LOAD_DEV( GetSwapchainImagesKHR,          vkGetSwapchainImagesKHR )
-	LOAD_DEV( AcquireNextImageKHR,            vkAcquireNextImageKHR )
-	LOAD_DEV( QueuePresentKHR,                vkQueuePresentKHR )
+	//
+	// guard the swapchain function group. vkGetDeviceProcAddr returns
+	// NULL for these when VK_KHR_swapchain was NOT enabled on the device
+	// (owned-device path HARD-REQUIRES it; imported mode inherits the renderer's
+	// enable). Load them as OPT and, if ANY is NULL, decline with a PRECISE
+	// reason (device cannot present) instead of either the generic "missing
+	// device entry point" warning OR — worse — storing a NULL PFN that a later
+	// swapchain create/acquire/present would deref. This makes the no-swapchain
+	// case a graceful backend-creation decline (caller's R_DeclineInit-style
+	// fallback), never a null call.
+	LOAD_DEV_OPT( CreateSwapchainKHR,         vkCreateSwapchainKHR )
+	LOAD_DEV_OPT( DestroySwapchainKHR,        vkDestroySwapchainKHR )
+	LOAD_DEV_OPT( GetSwapchainImagesKHR,      vkGetSwapchainImagesKHR )
+	LOAD_DEV_OPT( AcquireNextImageKHR,        vkAcquireNextImageKHR )
+	LOAD_DEV_OPT( QueuePresentKHR,            vkQueuePresentKHR )
+	if ( !b->vk.CreateSwapchainKHR || !b->vk.DestroySwapchainKHR || !b->vk.GetSwapchainImagesKHR
+	  || !b->vk.AcquireNextImageKHR || !b->vk.QueuePresentKHR ) {
+		R_LOG( rch_ral, SEV_WARN, "Vulkan: VK_KHR_swapchain device functions unavailable (extension not enabled on this device) — device cannot present\n" );
+		return qfalse;
+	}
 	LOAD_DEV_OPT( SetHdrMetadataEXT,          vkSetHdrMetadataEXT )   // VK_EXT_hdr_metadata; NULL when extension not enabled
 	return qtrue;
 	#undef LOAD_DEV
 	#undef LOAD_DEV_OPT
+}
+
+// multi-device retry predicate. Returns qtrue iff `pd` advertises at
+// least one queue family that supports BOTH graphics and presentation to
+// b->surface. This is the same predicate the legacy vk.c multi-device retry
+// loop (origin/main vk.c:2286-2295) used to skip compute-only / non-present
+// adapters enumerated ahead of the real GPU on hybrid systems. b->instance
+// + b->surface must be valid (they are by the time the device picker runs).
+static qboolean ralVk_DeviceCanPresent( ralBackend_t *b, VkPhysicalDevice pd ) {
+	VkQueueFamilyProperties *qfp;
+	uint32_t                 nqf = 0, i;
+	qboolean                 ok = qfalse;
+
+	if ( pd == VK_NULL_HANDLE || b->surface == VK_NULL_HANDLE )
+		return qfalse;
+
+	b->vk.GetPhysicalDeviceQueueFamilyProperties( pd, &nqf, NULL );
+	if ( nqf == 0 )
+		return qfalse;
+	qfp = (VkQueueFamilyProperties *)malloc( nqf * sizeof( *qfp ) );
+	if ( !qfp )
+		return qfalse;
+	b->vk.GetPhysicalDeviceQueueFamilyProperties( pd, &nqf, qfp );
+
+	for ( i = 0; i < nqf; i++ ) {
+		VkBool32 presentOK = VK_FALSE;
+		if ( ( qfp[i].queueFlags & VK_QUEUE_GRAPHICS_BIT ) == 0 )
+			continue;
+		b->vk.GetPhysicalDeviceSurfaceSupportKHR( pd, i, b->surface, &presentOK );
+		if ( presentOK ) { ok = qtrue; break; }
+	}
+	free( qfp );
+	return ok;
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -240,11 +334,11 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 
 	if ( !ci ) return NULL;
 	if ( ci->type != RAL_BACKEND_VULKAN ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend: only RAL_BACKEND_VULKAN implemented in this build (requested %d)\n", (int)ci->type );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: only RAL_BACKEND_VULKAN implemented in this build (requested %d)\n", (int)ci->type );
 		return NULL;
 	}
 	if ( !ri.VK_GetInstanceProcAddr ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend: platform Vulkan loader (ri.VK_GetInstanceProcAddr) unavailable\n" );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: platform Vulkan loader (ri.VK_GetInstanceProcAddr) unavailable\n" );
 		return NULL;
 	}
 
@@ -261,28 +355,616 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 	b->computeFamily   = RAL_VK_INVALID_FAMILY;
 	b->transferFamily  = RAL_VK_INVALID_FAMILY;
 	b->lastPressureLevel = RAL_PRESSURE_NORMAL;
-	b->ownsHandles     = qtrue;   // default: standalone mode owns instance/device; imported branch flips this to qfalse
+	// Fine-grained ownership flags. Default-true for
+	// the standalone path (creates everything). Imported branch flips both
+	// to qfalse. Owned-instance branch sets ownsInstance=qtrue + ownsDevice=
+	// qfalse (RAL owns instance/messenger/surface; renderer's vk_create_
+	// device + Ral_AdoptDeviceAndQueues handle the device portion).
+	b->ownsInstance    = qtrue;
+	b->ownsDevice      = qtrue;
 
 	// ── global entry points ────────────────────────────────────────────
 	b->vk.EnumerateInstanceVersion             = (PFN_vkEnumerateInstanceVersion)            RAL_GIPA( VK_NULL_HANDLE, "vkEnumerateInstanceVersion" );
 	b->vk.EnumerateInstanceExtensionProperties = (PFN_vkEnumerateInstanceExtensionProperties)RAL_GIPA( VK_NULL_HANDLE, "vkEnumerateInstanceExtensionProperties" );
 	b->vk.CreateInstance                       = (PFN_vkCreateInstance)                      RAL_GIPA( VK_NULL_HANDLE, "vkCreateInstance" );
 	if ( !b->vk.CreateInstance || !b->vk.EnumerateInstanceExtensionProperties ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend: Vulkan loader did not yield vkCreateInstance\n" );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: Vulkan loader did not yield vkCreateInstance\n" );
 		free( b );
 		return NULL;
 	}
 	if ( b->vk.EnumerateInstanceVersion )
 		b->vk.EnumerateInstanceVersion( &loaderVer );
 	if ( VK_API_VERSION_MAJOR( loaderVer ) == 1 && VK_API_VERSION_MINOR( loaderVer ) < 1 ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend: Vulkan loader reports %u.%u; RAL requires 1.1+\n",
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: Vulkan loader reports %u.%u; RAL requires 1.1+\n",
 		        VK_API_VERSION_MAJOR( loaderVer ), VK_API_VERSION_MINOR( loaderVer ) );
 		free( b );
 		return NULL;
 	}
 	b->instanceApiVersion = loaderVer;
 
-	// ── Phase 7.4c-pre: imported-mode branch ────────────────────────────
+	// ── owned-instance (+ owned-device) branch ──
+	// RAL creates VkInstance + debug messenger + VkSurfaceKHR + picks
+	// physical device internally. When letBackendOwnDevice=qtrue
+	// it also resolves queue families, builds the device-extension
+	// allow-list, enables requested features, creates the VkDevice, and
+	// brings up the frame/resource/pipeline layers.
+	if ( ci->letBackendOwnInstance ) {
+		// Default to owned-device; flipped qfalse at end of branch only when
+		// letBackendOwnDevice=qfalse (legacy instance-only path, no current caller).
+		b->ownsDevice = ci->letBackendOwnDevice ? qtrue : qfalse;
+
+		// Vulkan 1.3+ loader check (mirrors vk.c create_instance:1969-1974).
+		if ( VK_API_VERSION_MAJOR( loaderVer ) < 1u
+		  || ( VK_API_VERSION_MAJOR( loaderVer ) == 1u && VK_API_VERSION_MINOR( loaderVer ) < 3u ) ) {
+			R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBackend: Vulkan loader reports %u.%u; Wired requires 1.3+\n",
+			        VK_API_VERSION_MAJOR( loaderVer ), VK_API_VERSION_MINOR( loaderVer ) );
+			free( b );
+			return NULL;
+		}
+
+		// Build instance extension allow-list (mirrors renderer's
+		// used_instance_extension at vk.c:1858-1895).
+		{
+			VkExtensionProperties *extProps;
+			const char           **enabledExts;
+			uint32_t               nExt = 0, nEnabled = 0, i;
+			VkInstanceCreateFlags  iFlags = 0;
+			VkApplicationInfo      appInfo;
+			VkInstanceCreateInfo   ici;
+			VkResult               r2;
+			static const char     *kLayerLunarg  = "VK_LAYER_LUNARG_standard_validation";
+			static const char     *kLayerKhronos = "VK_LAYER_KHRONOS_validation";
+
+			b->vk.EnumerateInstanceExtensionProperties( NULL, &nExt, NULL );
+			extProps    = nExt ? (VkExtensionProperties *)malloc( nExt * sizeof( *extProps ) ) : NULL;
+			enabledExts = nExt ? (const char **)malloc( nExt * sizeof( *enabledExts ) )         : NULL;
+			if ( nExt && ( !extProps || !enabledExts ) ) {
+				if ( extProps ) free( extProps );
+				if ( enabledExts ) free( (void *)enabledExts );
+				R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBackend: oom enumerating instance extensions\n" );
+				free( b );
+				return NULL;
+			}
+			if ( nExt )
+				b->vk.EnumerateInstanceExtensionProperties( NULL, &nExt, extProps );
+			for ( i = 0; i < nExt; i++ ) {
+				const char *ext = extProps[i].extensionName;
+				const char *u   = strrchr( ext, '_' );
+				qboolean    use = qfalse;
+				if ( u && Q_stricmp( u + 1, "surface" ) == 0 ) use = qtrue;
+				else if ( Q_stricmp( ext, VK_KHR_DISPLAY_EXTENSION_NAME )                       == 0 ) use = qtrue;
+				else if ( Q_stricmp( ext, VK_KHR_SWAPCHAIN_EXTENSION_NAME )                     == 0 ) use = qtrue;
+				else if ( Q_stricmp( ext, VK_EXT_DEBUG_UTILS_EXTENSION_NAME )                   == 0 ) use = qtrue;
+				else if ( Q_stricmp( ext, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME ) == 0 ) use = qtrue;
+				else if ( Q_stricmp( ext, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME )       == 0 ) use = qtrue;
+				else if ( Q_stricmp( ext, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME )         == 0 ) use = qtrue;
+				else if ( Q_stricmp( ext, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME )    == 0 ) use = qtrue;
+				if ( !use ) continue;
+				enabledExts[ nEnabled++ ] = ext;
+				if ( Q_stricmp( ext, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME ) == 0 )
+					iFlags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+			}
+			b->haveDebugUtils = qfalse;
+			for ( i = 0; i < nEnabled; i++ ) {
+				if ( Q_stricmp( enabledExts[i], VK_EXT_DEBUG_UTILS_EXTENSION_NAME ) == 0 ) { b->haveDebugUtils = qtrue; break; }
+			}
+
+			memset( &appInfo, 0, sizeof( appInfo ) );
+			appInfo.sType      = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+			appInfo.apiVersion = VK_API_VERSION_1_3;
+
+			memset( &ici, 0, sizeof( ici ) );
+			ici.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+			ici.flags                   = iFlags;
+			ici.pApplicationInfo        = &appInfo;
+			ici.enabledExtensionCount   = nEnabled;
+			ici.ppEnabledExtensionNames = nEnabled ? enabledExts : NULL;
+
+			// Validation-layer fallback chain (mirrors vk.c:1987-2016).
+			r2 = VK_ERROR_LAYER_NOT_PRESENT;
+			if ( ci->enableValidation ) {
+				ici.enabledLayerCount   = 1;
+				ici.ppEnabledLayerNames = &kLayerLunarg;
+				r2 = b->vk.CreateInstance( &ici, NULL, &b->instance );
+				if ( r2 == VK_ERROR_LAYER_NOT_PRESENT ) {
+					ici.ppEnabledLayerNames = &kLayerKhronos;
+					r2 = b->vk.CreateInstance( &ici, NULL, &b->instance );
+				}
+				if ( r2 == VK_ERROR_LAYER_NOT_PRESENT ) {
+					R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: validation layer not available\n" );
+					ici.enabledLayerCount   = 0;
+					ici.ppEnabledLayerNames = NULL;
+					r2 = b->vk.CreateInstance( &ici, NULL, &b->instance );
+				}
+			} else {
+				ici.enabledLayerCount   = 0;
+				ici.ppEnabledLayerNames = NULL;
+				r2 = b->vk.CreateInstance( &ici, NULL, &b->instance );
+			}
+
+			if ( enabledExts ) free( (void *)enabledExts );
+			if ( extProps    ) free( extProps );
+
+			if ( r2 != VK_SUCCESS || b->instance == VK_NULL_HANDLE ) {
+				R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBackend: vkCreateInstance failed (VkResult %d)\n", (int)r2 );
+				free( b );
+				return NULL;
+			}
+		}
+
+		// Load instance-level entry points (now that b->instance exists).
+		if ( !ralVk_LoadInstanceFuncs( b ) ) {
+			b->vk.DestroyInstance( b->instance, NULL );
+			b->instance = VK_NULL_HANDLE;
+			free( b );
+			return NULL;
+		}
+
+		// Only create a messenger if BOTH create and destroy are resolved —
+		// otherwise teardown (ralVk_DestroyBackendInternal) can't destroy it and
+		// it leaks across device lifetime (validation reports at vkDestroyInstance).
+		// Mirrors the hardening on the other instance-create path.
+		if ( !b->vk.CreateDebugUtilsMessengerEXT || !b->vk.DestroyDebugUtilsMessengerEXT )
+			b->haveDebugUtils = qfalse;
+
+		// Debug messenger (best effort; honor enableValidation gate).
+		if ( ci->enableValidation && b->haveDebugUtils && b->vk.CreateDebugUtilsMessengerEXT ) {
+			VkDebugUtilsMessengerCreateInfoEXT dci;
+			memset( &dci, 0, sizeof( dci ) );
+			dci.sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+			dci.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+			                    | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+			dci.messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
+			                    | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
+			                    | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+			dci.pfnUserCallback = ralVk_DebugCallback;
+			dci.pUserData       = b;
+			if ( b->vk.CreateDebugUtilsMessengerEXT( b->instance, &dci, NULL, &b->debugMessenger ) != VK_SUCCESS )
+				b->debugMessenger = VK_NULL_HANDLE;   // non-fatal
+		}
+
+		// Platform surface (via engine's existing ri.VK_CreateSurface callback;
+		// works on win32/linux/SDL transparently — same surface contract).
+		if ( !ri.VK_CreateSurface ) {
+			R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBackend: ri.VK_CreateSurface unavailable\n" );
+			goto fail_after_instance;
+		}
+		{
+			VkSurfaceKHR surfaceLocal = VK_NULL_HANDLE;
+			if ( !ri.VK_CreateSurface( b->instance, &surfaceLocal ) || surfaceLocal == VK_NULL_HANDLE ) {
+				R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBackend: ri.VK_CreateSurface failed\n" );
+				goto fail_after_instance;
+			}
+			b->surface = surfaceLocal;
+		}
+
+		// Physical device enumeration + r_device-style picker.
+		//
+		// multi-device retry. The legacy vk.c device pick (origin/main
+		// vk.c:2286-2295) iterated EVERY physical device until one could
+		// present to the surface and complete device bringup; the single-device
+		// rewrite dropped that, so on hybrid-GPU systems (PRIME offload, a
+		// compute-only adapter enumerated first) or older drivers the renderer
+		// hard-failed where it used to fall back. Restored here: we build an
+		// ORDERED candidate list (preferred device first, then the rest), all
+		// filtered to those that advertise both a graphics queue family AND
+		// presentation to b->surface, then attempt owned-device bringup against
+		// each in turn, falling through to the next on a device-specific
+		// failure. preferredDeviceIndex is honoured as the first entry.
+		uint32_t          nCand = 0;
+		VkPhysicalDevice  candList[ 16 ];
+		uint32_t          candIdx;
+		{
+			uint32_t          nDev = 0;
+			VkPhysicalDevice *devs;
+			int               devIdx = ci->preferredDeviceIndex;
+			uint32_t          i;
+			int               preferredPick = -1;
+
+			b->vk.EnumeratePhysicalDevices( b->instance, &nDev, NULL );
+			if ( nDev == 0 ) {
+				R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBackend: no Vulkan physical devices\n" );
+				goto fail_after_instance;
+			}
+			devs = (VkPhysicalDevice *)malloc( nDev * sizeof( *devs ) );
+			if ( !devs ) goto fail_after_instance;
+			b->vk.EnumeratePhysicalDevices( b->instance, &nDev, devs );
+
+			// preferredDeviceIndex semantics: -1 = first DISCRETE_GPU (or fall
+			// through to first available); -2 = first INTEGRATED_GPU; N ≥ 0 =
+			// explicit index. Matches r_device cvar at vk.c:3296+.
+			if ( devIdx == -1 ) {
+				for ( i = 0; i < nDev; i++ ) {
+					VkPhysicalDeviceProperties p;
+					b->vk.GetPhysicalDeviceProperties( devs[i], &p );
+					if ( p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ) { preferredPick = (int)i; break; }
+				}
+			} else if ( devIdx == -2 ) {
+				for ( i = 0; i < nDev; i++ ) {
+					VkPhysicalDeviceProperties p;
+					b->vk.GetPhysicalDeviceProperties( devs[i], &p );
+					if ( p.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ) { preferredPick = (int)i; break; }
+				}
+			} else if ( devIdx >= 0 && (uint32_t)devIdx < nDev ) {
+				preferredPick = devIdx;
+			}
+
+			// Build the ordered candidate list: the preferred device first (if
+			// it presents), then every other present-capable device in
+			// enumeration order. ralVk_DeviceCanPresent returns qtrue only when
+			// the device has a graphics queue family that supports presentation
+			// to b->surface — exactly the legacy retry-loop predicate.
+			if ( preferredPick >= 0 && ralVk_DeviceCanPresent( b, devs[ preferredPick ] ) )
+				candList[ nCand++ ] = devs[ preferredPick ];
+			for ( i = 0; i < nDev && nCand < (uint32_t)ARRAY_LEN( candList ); i++ ) {
+				if ( (int)i == preferredPick ) continue;
+				if ( ralVk_DeviceCanPresent( b, devs[i] ) )
+					candList[ nCand++ ] = devs[i];
+			}
+			// Last-resort: if NO device advertised present support (e.g. a
+			// headless / loader quirk), fall back to the preferred (or first)
+			// device so behaviour is no worse than the single-device pick.
+			if ( nCand == 0 ) {
+				candList[ nCand++ ] = devs[ ( preferredPick >= 0 ) ? (uint32_t)preferredPick : 0u ];
+			}
+			free( devs );
+		}
+
+		// owned-instance-only contract: return here
+		// with device == VK_NULL_HANDLE. No current caller uses this path;
+		// preserved for hypothetical re-use. (Single device — the
+		// retry loop below is owned-device-only.)
+		if ( !ci->letBackendOwnDevice ) {
+			b->physicalDevice = candList[ 0 ];
+			b->vk.GetPhysicalDeviceProperties( b->physicalDevice, &b->physProps );
+			b->vk.GetPhysicalDeviceMemoryProperties( b->physicalDevice, &b->memProps );
+			return b;
+		}
+
+		// ── owned-device bringup ────────────────────
+		// Absorbs vk.c::vk_create_device sections B-F (queue family resolve,
+		// device-extension allow-list, feature query, paired-bundle enable,
+		// vkCreateDevice). Surface invariant: b->surface populated above
+		// before queue picker runs.
+		//
+		// retry each candidate device until one completes bringup. The
+		// device-specific failure labels (fail_after_device / fail_after_devexts)
+		// now fall through to the end of this loop body, advancing to the next
+		// candidate; only after every candidate fails do we fall to
+		// fail_after_instance below the loop.
+		for ( candIdx = 0; candIdx < nCand; candIdx++ )
+		{
+			b->physicalDevice = candList[ candIdx ];
+			b->vk.GetPhysicalDeviceProperties( b->physicalDevice, &b->physProps );
+			b->vk.GetPhysicalDeviceMemoryProperties( b->physicalDevice, &b->memProps );
+			VkPhysicalDeviceFeatures2                 f2support, f2enable;
+			VkPhysicalDeviceVulkan12Features          v12support, v12enable;
+			VkPhysicalDeviceSynchronization2Features  s2support,  s2enable;
+			VkPhysicalDeviceDynamicRenderingFeatures  drsupport,  drenable;
+			VkPhysicalDeviceFragmentShadingRateFeaturesKHR vrssupport, vrsenable;
+			qboolean                                  fragmentShadingRateExtEnabled = qfalse;
+			VkExtensionProperties                    *devExts = NULL;
+			uint32_t                                  nDevExts = 0, i;
+			VkDeviceQueueCreateInfo                   queueInfos[3];
+			uint32_t                                  nQueueInfos = 0;
+			const float                               priority = 1.0f;
+			VkDeviceCreateInfo                        dci;
+			VkResult                                  r2;
+
+			// ── queue family resolve (Section B) ────────────────────────────
+			{
+				VkQueueFamilyProperties *qfp;
+				uint32_t                 nqf = 0;
+
+				b->vk.GetPhysicalDeviceQueueFamilyProperties( b->physicalDevice, &nqf, NULL );
+				if ( nqf == 0 ) {
+					R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBackend: device reports zero queue families\n" );
+					goto fail_after_instance;
+				}
+				qfp = (VkQueueFamilyProperties *)malloc( nqf * sizeof( *qfp ) );
+				if ( !qfp ) goto fail_after_instance;
+				b->vk.GetPhysicalDeviceQueueFamilyProperties( b->physicalDevice, &nqf, qfp );
+
+				b->graphicsFamily = ~0U;
+				b->computeFamily  = ~0U;
+				b->transferFamily = ~0U;
+				for ( i = 0; i < nqf; i++ ) {
+					VkBool32 presentOK = VK_FALSE;
+					b->vk.GetPhysicalDeviceSurfaceSupportKHR( b->physicalDevice, i, b->surface, &presentOK );
+					if ( presentOK && ( qfp[i].queueFlags & VK_QUEUE_GRAPHICS_BIT ) != 0 ) {
+						b->graphicsFamily = i;
+						break;
+					}
+				}
+				if ( b->graphicsFamily == ~0U ) {
+					free( qfp );
+					R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBackend: no graphics+present queue family found\n" );
+					goto fail_after_instance;
+				}
+				for ( i = 0; i < nqf; i++ ) {
+					VkQueueFlags f = qfp[i].queueFlags;
+					if ( ( f & VK_QUEUE_COMPUTE_BIT ) && !( f & VK_QUEUE_GRAPHICS_BIT ) ) {
+						b->computeFamily = i; break;
+					}
+				}
+				for ( i = 0; i < nqf; i++ ) {
+					VkQueueFlags f = qfp[i].queueFlags;
+					if ( ( f & VK_QUEUE_TRANSFER_BIT ) && !( f & ( VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT ) ) ) {
+						b->transferFamily = i; break;
+					}
+				}
+				if ( b->computeFamily  == ~0U ) b->computeFamily  = b->graphicsFamily;
+				if ( b->transferFamily == ~0U ) b->transferFamily = b->graphicsFamily;
+				free( qfp );
+				R_LOG( rch_ral, SEV_INFO, "queue families: graphics=%u compute=%u transfer=%u%s%s\n",
+				        b->graphicsFamily, b->computeFamily, b->transferFamily,
+				        b->computeFamily  == b->graphicsFamily ? " (compute aliases graphics)"  : "",
+				        b->transferFamily == b->graphicsFamily ? " (transfer aliases graphics)" : "" );
+			}
+
+			// ── device extension allow-list (Sections C+D absorbed) ─────────
+			b->vk.EnumerateDeviceExtensionProperties( b->physicalDevice, NULL, &nDevExts, NULL );
+			if ( nDevExts ) {
+				devExts = (VkExtensionProperties *)malloc( nDevExts * sizeof( *devExts ) );
+				if ( !devExts ) goto fail_after_instance;
+				b->vk.EnumerateDeviceExtensionProperties( b->physicalDevice, NULL, &nDevExts, devExts );
+			}
+
+			if ( !ralVk_HasExtension( devExts, nDevExts, VK_KHR_SWAPCHAIN_EXTENSION_NAME ) ) {
+				if ( devExts ) free( devExts );
+				R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBackend: VK_KHR_swapchain not advertised — HARD-REQUIRED\n" );
+				goto fail_after_instance;
+			}
+
+			// Build enabled list: caller-supplied (intersected with availability) + RAL-internal additions.
+			// Max size = bci.platformDeviceExtensionCount + 2 (swapchain + memory_budget).
+			{
+				uint32_t  cap = ci->platformDeviceExtensionCount + 2u;
+				uint32_t  k;
+				static const char *const kSwap   = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+				static const char *const kMemBud = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;
+
+				b->enabledDeviceExtensions      = (const char **)malloc( cap * sizeof( *b->enabledDeviceExtensions ) );
+				b->enabledDeviceExtensionCount  = 0;
+				if ( !b->enabledDeviceExtensions ) { free( devExts ); goto fail_after_instance; }
+
+				b->enabledDeviceExtensions[ b->enabledDeviceExtensionCount++ ] = kSwap;
+				b->haveMemoryBudget = ralVk_HasExtension( devExts, nDevExts, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME );
+				if ( b->haveMemoryBudget )
+					b->enabledDeviceExtensions[ b->enabledDeviceExtensionCount++ ] = kMemBud;
+				for ( k = 0; k < ci->platformDeviceExtensionCount; k++ ) {
+					const char *want = ci->platformDeviceExtensions[k];
+					if ( !want ) continue;
+					if ( Q_stricmp( want, VK_KHR_SWAPCHAIN_EXTENSION_NAME )      == 0 ) continue;   // already added
+					if ( Q_stricmp( want, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME )  == 0 ) continue;   // already added
+					if ( !ralVk_HasExtension( devExts, nDevExts, want ) )            continue;
+					// Note whether the fragment-shading-rate extension made it into the
+					// enabled list — the feature can only be enabled (below) when the
+					// extension is actually being enabled on this device.
+					if ( Q_stricmp( want, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME ) == 0 )
+						fragmentShadingRateExtEnabled = qtrue;
+					b->enabledDeviceExtensions[ b->enabledDeviceExtensionCount++ ] = want;
+				}
+			}
+			if ( devExts ) { free( devExts ); devExts = NULL; }
+
+			// ── features query (Section E start) ────────────────────────────
+			memset( &v12support, 0, sizeof( v12support ) ); v12support.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+			memset( &s2support,  0, sizeof( s2support  ) ); s2support.sType  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
+			memset( &drsupport,  0, sizeof( drsupport  ) ); drsupport.sType  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+			memset( &vrssupport, 0, sizeof( vrssupport ) ); vrssupport.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR;
+			v12support.pNext = &s2support;  s2support.pNext = &drsupport;
+			// Only chain the VRS query when the extension is actually being enabled —
+			// querying a struct whose extension isn't enabled is harmless but pointless,
+			// and keeping it off the chain when absent avoids a confusing all-zero report.
+			if ( fragmentShadingRateExtEnabled ) { drsupport.pNext = &vrssupport; vrssupport.pNext = NULL; }
+			else                                 { drsupport.pNext = NULL; }
+			memset( &f2support, 0, sizeof( f2support ) );  f2support.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+			f2support.pNext = &v12support;
+			b->vk.GetPhysicalDeviceFeatures2( b->physicalDevice, &f2support );
+
+			// HARD-REQUIRED enforcement (K15).
+			if ( f2support.features.fillModeNonSolid != VK_TRUE ) {
+				R_LOG( rch_ral, SEV_ERROR, "device lacks HARD-REQUIRED feature fillModeNonSolid\n" );
+				goto fail_after_devexts;
+			}
+			if ( s2support.synchronization2 != VK_TRUE
+			  || v12support.timelineSemaphore != VK_TRUE
+			  || drsupport.dynamicRendering   != VK_TRUE ) {
+				R_LOG( rch_ral, SEV_ERROR, "device lacks HARD-REQUIRED features: sync2=%d timelineSemaphore=%d dynamicRendering=%d — Wired requires a Vulkan 1.3-class GPU\n",
+				        (int)s2support.synchronization2, (int)v12support.timelineSemaphore, (int)drsupport.dynamicRendering );
+				goto fail_after_devexts;
+			}
+
+			// ── feature enable chain (K14 paired-bundle AND-gate logic) ────
+			memset( &f2enable,  0, sizeof( f2enable  ) ); f2enable.sType  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+			memset( &v12enable, 0, sizeof( v12enable ) ); v12enable.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+			memset( &s2enable,  0, sizeof( s2enable  ) ); s2enable.sType  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
+			memset( &drenable,  0, sizeof( drenable  ) ); drenable.sType  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+			memset( &vrsenable, 0, sizeof( vrsenable ) ); vrsenable.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR;
+			f2enable.pNext = &v12enable;  v12enable.pNext = &s2enable;  s2enable.pNext = &drenable;  drenable.pNext = NULL;
+
+			// HARD-REQUIRED enables (always-on after the gate above).
+			f2enable.features.fillModeNonSolid = VK_TRUE;
+			s2enable.synchronization2          = VK_TRUE;
+			v12enable.timelineSemaphore        = VK_TRUE;
+			drenable.dynamicRendering          = VK_TRUE;
+
+			// Variable-rate shading (pipeline rate): enable ONLY when the renderer
+			// requested it, the extension is being enabled, and the device reports the
+			// pipelineFragmentShadingRate feature. b->haveFragmentShadingRate (mirrored
+			// below) is the single source of truth the caps query reads — so the
+			// variableRateShading cap is true ONLY when vkCreateGraphicsPipelines with a
+			// VkPipelineFragmentShadingRateStateCreateInfoKHR is legal. (Chained onto
+			// drenable so it reaches vkCreateDevice's pNext.)
+			b->haveFragmentShadingRate = qfalse;
+			if ( ci->requestFeatures.wantFragmentShadingRate
+			  && fragmentShadingRateExtEnabled
+			  && vrssupport.pipelineFragmentShadingRate == VK_TRUE ) {
+				vrsenable.pipelineFragmentShadingRate = VK_TRUE;
+				drenable.pNext = &vrsenable;  vrsenable.pNext = NULL;
+				b->haveFragmentShadingRate = qtrue;
+			}
+
+			// RENDERER-WANTS-IF-AVAILABLE single-bit wants.
+			if ( ci->requestFeatures.wantShaderInt64 && f2support.features.shaderInt64 )
+				f2enable.features.shaderInt64 = VK_TRUE;
+			if ( ci->requestFeatures.wantWideLines && f2support.features.wideLines )
+				f2enable.features.wideLines = VK_TRUE;
+			if ( ci->requestFeatures.wantDepthClamp && f2support.features.depthClamp )
+				f2enable.features.depthClamp = VK_TRUE;
+			if ( ci->requestFeatures.wantSamplerAnisotropy && f2support.features.samplerAnisotropy )
+				f2enable.features.samplerAnisotropy = VK_TRUE;
+			if ( ci->requestFeatures.wantHostQueryReset && v12support.hostQueryReset )
+				v12enable.hostQueryReset = VK_TRUE;
+			if ( ci->requestFeatures.wantDrawIndirectCount && v12support.drawIndirectCount )
+				v12enable.drawIndirectCount = VK_TRUE;
+			if ( ci->requestFeatures.wantBufferDeviceAddress && v12support.bufferDeviceAddress )
+				v12enable.bufferDeviceAddress = VK_TRUE;
+
+			// PAIRED: vertex+fragment stores
+			if ( ci->requestFeatures.wantVertexFragmentStores
+			  && f2support.features.vertexPipelineStoresAndAtomics
+			  && f2support.features.fragmentStoresAndAtomics ) {
+				f2enable.features.vertexPipelineStoresAndAtomics = VK_TRUE;
+				f2enable.features.fragmentStoresAndAtomics       = VK_TRUE;
+			}
+			// PAIRED 4-bundle + 2 mirror: descriptor indexing
+			if ( ci->requestFeatures.wantDescriptorIndexing
+			  && v12support.shaderSampledImageArrayNonUniformIndexing
+			  && v12support.runtimeDescriptorArray
+			  && v12support.descriptorBindingPartiallyBound
+			  && v12support.descriptorBindingSampledImageUpdateAfterBind ) {
+				v12enable.shaderSampledImageArrayNonUniformIndexing    = VK_TRUE;
+				v12enable.runtimeDescriptorArray                       = VK_TRUE;
+				v12enable.descriptorBindingPartiallyBound              = VK_TRUE;
+				v12enable.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+				if ( v12support.descriptorBindingUpdateUnusedWhilePending )
+					v12enable.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
+				if ( v12support.descriptorBindingVariableDescriptorCount )
+					v12enable.descriptorBindingVariableDescriptorCount = VK_TRUE;
+			}
+			// PAIRED: vulkan memory model + scope
+			if ( ci->requestFeatures.wantVulkanMemoryModel
+			  && v12support.vulkanMemoryModel
+			  && v12support.vulkanMemoryModelDeviceScope ) {
+				v12enable.vulkanMemoryModel            = VK_TRUE;
+				v12enable.vulkanMemoryModelDeviceScope = VK_TRUE;
+			}
+			// PAIRED: 8-bit storage
+			if ( ci->requestFeatures.want8BitStorage
+			  && v12support.storageBuffer8BitAccess
+			  && v12support.uniformAndStorageBuffer8BitAccess ) {
+				v12enable.storageBuffer8BitAccess            = VK_TRUE;
+				v12enable.uniformAndStorageBuffer8BitAccess  = VK_TRUE;
+			}
+
+			// Mirror enabled state into b->have* flags + ralCaps_t feature mirrors.
+			b->haveSync2              = qtrue;
+			b->haveTimelineSemaphore  = qtrue;
+			b->haveSamplerAnisotropy  = ( f2enable.features.samplerAnisotropy == VK_TRUE ) ? qtrue : qfalse;
+			b->haveHostQueryReset     = ( v12enable.hostQueryReset    == VK_TRUE ) ? qtrue : qfalse;
+			b->haveDrawIndirectCount  = ( v12enable.drawIndirectCount == VK_TRUE ) ? qtrue : qfalse;
+			b->haveDescriptorIndexing = ( v12enable.shaderSampledImageArrayNonUniformIndexing == VK_TRUE
+			                           && v12enable.runtimeDescriptorArray                    == VK_TRUE
+			                           && v12enable.descriptorBindingPartiallyBound           == VK_TRUE
+			                           && v12enable.descriptorBindingSampledImageUpdateAfterBind == VK_TRUE ) ? qtrue : qfalse;
+			// Feature caps go through b->have* flags, NOT b->caps.* directly:
+			// ralVk_FillCaps memset-clears the whole caps struct AFTER this block and
+			// then copies each have-flag back into c->* — so a direct b->caps.* write
+			// here would be silently wiped (the latent bug that left wideLines /
+			// vertexFragmentStores / samplerAnisotropyEnabled reading false). The
+			// have-flag is what survives to the renderer's caps read.
+			b->haveWideLines                  = ( f2enable.features.wideLines == VK_TRUE ) ? qtrue : qfalse;
+			b->haveDepthClamp                 = ( f2enable.features.depthClamp == VK_TRUE ) ? qtrue : qfalse;
+			b->haveVertexFragmentStores       = ( f2enable.features.vertexPipelineStoresAndAtomics == VK_TRUE
+			                                  &&  f2enable.features.fragmentStoresAndAtomics       == VK_TRUE ) ? qtrue : qfalse;
+			// (b->haveSamplerAnisotropy is already set above from f2enable.samplerAnisotropy.)
+
+			// ── queue create infos ──────────────────────────────────────────
+			memset( queueInfos, 0, sizeof( queueInfos ) );
+			queueInfos[ nQueueInfos ].sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+			queueInfos[ nQueueInfos ].queueFamilyIndex = b->graphicsFamily;
+			queueInfos[ nQueueInfos ].queueCount       = 1;
+			queueInfos[ nQueueInfos ].pQueuePriorities = &priority;
+			nQueueInfos++;
+			if ( b->computeFamily != b->graphicsFamily ) {
+				queueInfos[ nQueueInfos ].sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+				queueInfos[ nQueueInfos ].queueFamilyIndex = b->computeFamily;
+				queueInfos[ nQueueInfos ].queueCount       = 1;
+				queueInfos[ nQueueInfos ].pQueuePriorities = &priority;
+				nQueueInfos++;
+			}
+			if ( b->transferFamily != b->graphicsFamily && b->transferFamily != b->computeFamily ) {
+				queueInfos[ nQueueInfos ].sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+				queueInfos[ nQueueInfos ].queueFamilyIndex = b->transferFamily;
+				queueInfos[ nQueueInfos ].queueCount       = 1;
+				queueInfos[ nQueueInfos ].pQueuePriorities = &priority;
+				nQueueInfos++;
+			}
+
+			// ── vkCreateDevice (Section F) ──────────────────────────────────
+			memset( &dci, 0, sizeof( dci ) );
+			dci.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+			dci.pNext                   = &f2enable;
+			dci.queueCreateInfoCount    = nQueueInfos;
+			dci.pQueueCreateInfos       = queueInfos;
+			dci.enabledExtensionCount   = b->enabledDeviceExtensionCount;
+			dci.ppEnabledExtensionNames = b->enabledDeviceExtensions;
+			dci.pEnabledFeatures        = NULL;   // features passed via f2enable.features
+
+			r2 = b->vk.CreateDevice( b->physicalDevice, &dci, NULL, &b->device );
+			if ( r2 != VK_SUCCESS || b->device == VK_NULL_HANDLE ) {
+				R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBackend: vkCreateDevice failed (VkResult %d)\n", (int)r2 );
+				goto fail_after_devexts;
+			}
+
+			if ( ci->externalApiVersion ) {
+				b->instanceApiVersion = ci->externalApiVersion;
+			} else {
+				b->instanceApiVersion = VK_API_VERSION_1_3;
+			}
+
+			if ( !ralVk_LoadDeviceFuncs( b ) ) {
+				R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBackend: ralVk_LoadDeviceFuncs failed\n" );
+				goto fail_after_device;
+			}
+
+			goto initSharedLayers;   // success — exits the candidate loop
+
+		fail_after_device:
+			if ( b->device != VK_NULL_HANDLE && b->vk.DestroyDevice )
+				b->vk.DestroyDevice( b->device, NULL );
+			b->device = VK_NULL_HANDLE;
+		fail_after_devexts:
+			if ( b->enabledDeviceExtensions ) {
+				free( (void *)b->enabledDeviceExtensions );
+				b->enabledDeviceExtensions     = NULL;
+				b->enabledDeviceExtensionCount = 0;
+			}
+			if ( devExts ) { free( devExts ); devExts = NULL; }
+			// device-specific bringup failure: reset the per-device
+			// feature/queue state and retry the NEXT candidate device instead
+			// of tearing down the instance. b->graphics/compute/transferFamily
+			// are recomputed at the top of the next iteration's queue resolve.
+			R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: device candidate %u/%u failed bringup — trying next\n",
+			        candIdx + 1u, nCand );
+		}   // end candidate-device retry loop
+
+		// Every present-capable candidate device failed owned-device bringup.
+		R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBackend: no candidate device completed owned-device bringup (%u tried)\n", nCand );
+		goto fail_after_instance;
+
+	fail_after_instance:
+		if ( b->surface != VK_NULL_HANDLE )           b->vk.DestroySurfaceKHR( b->instance, b->surface, NULL );
+		if ( b->debugMessenger != VK_NULL_HANDLE && b->vk.DestroyDebugUtilsMessengerEXT )
+			b->vk.DestroyDebugUtilsMessengerEXT( b->instance, b->debugMessenger, NULL );
+		b->vk.DestroyInstance( b->instance, NULL );
+		free( b );
+		return NULL;
+	}
+
+	// ── imported-mode branch ────────────────────────────
 	// Caller created its own VkInstance/VkPhysicalDevice/VkDevice (renderervk
 	// owns vk.instance / vk.device after vk_initialize) and hands them to RAL
 	// here. Skip our own instance/device/queue creation; load entry points
@@ -295,7 +977,8 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		VkPhysicalDeviceSynchronization2Features  s2s;
 		VkPhysicalDeviceDynamicRenderingFeatures  drs;
 
-		b->ownsHandles    = qfalse;
+		b->ownsInstance   = qfalse;
+		b->ownsDevice     = qfalse;
 		b->instance       = (VkInstance)        ci->externalInstance;
 		b->physicalDevice = (VkPhysicalDevice)  ci->externalPhysicalDevice;
 		b->device         = (VkDevice)          ci->externalDevice;
@@ -306,7 +989,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 			b->instanceApiVersion = ci->externalApiVersion;
 		}
 		if ( b->instance == VK_NULL_HANDLE || b->physicalDevice == VK_NULL_HANDLE || b->device == VK_NULL_HANDLE ) {
-			ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend (imported): caller passed NULL instance/physicalDevice/device handle\n" );
+			R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend (imported): caller passed NULL instance/physicalDevice/device handle\n" );
 			free( b );
 			return NULL;
 		}
@@ -316,7 +999,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		}
 		// Caller may or may not have set up debug-utils on their instance; we
 		// don't create our own messenger in imported mode (would double-fire).
-		// Phase 7.4c-pipeline fix: infer haveDebugUtils from entry-point
+		// Infer haveDebugUtils from entry-point
 		// availability — renderervk now enables VK_EXT_debug_utils
 		// unconditionally so the function pointers resolve, and RAL pipeline
 		// debug labels (via SetDebugUtilsObjectNameEXT etc.) work.
@@ -334,7 +1017,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		b->vk.GetPhysicalDeviceFeatures2( b->physicalDevice, &f2q );
 
 		if ( s2s.synchronization2 != VK_TRUE || v12s.timelineSemaphore != VK_TRUE || drs.dynamicRendering != VK_TRUE ) {
-			ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend (imported): caller's device lacks synchronization2 (%d) / timelineSemaphore (%d) / dynamicRendering (%d) — Wired requires a Vulkan 1.3-class GPU\n",
+			R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend (imported): caller's device lacks synchronization2 (%d) / timelineSemaphore (%d) / dynamicRendering (%d) — Wired requires a Vulkan 1.3-class GPU\n",
 			        (int)s2s.synchronization2, (int)v12s.timelineSemaphore, (int)drs.dynamicRendering );
 			free( b );
 			return NULL;
@@ -342,13 +1025,19 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		b->haveSync2              = qtrue;
 		b->haveTimelineSemaphore  = qtrue;
 		b->haveSamplerAnisotropy  = ( f2q.features.samplerAnisotropy == VK_TRUE ) ? qtrue : qfalse;
+		// Imported-adopt path: we don't create the device, only observe what the
+		// caller enabled. Report wideLines / vertex+fragment-stores from the device
+		// feature query so the have-flags (→ caps via ralVk_FillCaps) are accurate.
+		b->haveWideLines          = ( f2q.features.wideLines == VK_TRUE ) ? qtrue : qfalse;
+		b->haveVertexFragmentStores = ( f2q.features.vertexPipelineStoresAndAtomics == VK_TRUE
+		                            &&  f2q.features.fragmentStoresAndAtomics       == VK_TRUE ) ? qtrue : qfalse;
 		b->haveHostQueryReset     = ( v12s.hostQueryReset == VK_TRUE ) ? qtrue : qfalse;
 		b->haveDrawIndirectCount  = ( v12s.drawIndirectCount == VK_TRUE ) ? qtrue : qfalse;
 		b->haveDescriptorIndexing = ( v12s.shaderSampledImageArrayNonUniformIndexing == VK_TRUE
 		                           && v12s.runtimeDescriptorArray                    == VK_TRUE
 		                           && v12s.descriptorBindingPartiallyBound           == VK_TRUE
 		                           && v12s.descriptorBindingSampledImageUpdateAfterBind == VK_TRUE ) ? qtrue : qfalse;
-		// Phase 7.4c-pipeline: renderervk now enables VK_EXT_memory_budget
+		// renderervk now enables VK_EXT_memory_budget
 		// when the device supports it. We can't know directly which device
 		// extensions the caller enabled, so scan the device's supported set
 		// — if it advertises the extension, renderervk's vk_create_device
@@ -362,7 +1051,14 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 			b->vk.EnumerateDeviceExtensionProperties( b->physicalDevice, NULL, &nDevExt, NULL );
 			if ( nDevExt ) {
 				devExtProps = (VkExtensionProperties *)malloc( nDevExt * sizeof( *devExtProps ) );
-				b->vk.EnumerateDeviceExtensionProperties( b->physicalDevice, NULL, &nDevExt, devExtProps );
+				if ( devExtProps ) {
+					b->vk.EnumerateDeviceExtensionProperties( b->physicalDevice, NULL, &nDevExt, devExtProps );
+				} else {
+					// malloc failed — don't hand a NULL buffer to the driver
+					// (it would write nDevExt entries into it). Treat as "no
+					// extensions enumerated" for the budget probe.
+					nDevExt = 0;
+				}
 			}
 			b->haveMemoryBudget = ralVk_HasExtension( devExtProps, nDevExt, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME );
 			if ( devExtProps ) free( devExtProps );
@@ -379,7 +1075,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 	{
 		uint32_t                nInstExt = 0;
 		VkExtensionProperties  *instExtProps = NULL;
-		qboolean                wantDebugUtils = ( b->flags & ( RAL_FLAG_VALIDATION | RAL_FLAG_DEBUG_LABELS ) ) != 0;
+		qboolean                wantDebugUtils = ci->enableValidation || ( b->flags & RAL_FLAG_DEBUG_LABELS ) != 0;
 		const char             *enabledExts[4];
 		uint32_t                nEnabledExts = 0;
 		const char             *enabledLayers[2];
@@ -396,7 +1092,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 
 		if ( wantDebugUtils && b->haveDebugUtils )
 			enabledExts[ nEnabledExts++ ] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
-		if ( ( b->flags & RAL_FLAG_VALIDATION ) )
+		if ( ci->enableValidation )
 			enabledLayers[ nEnabledLayers++ ] = "VK_LAYER_KHRONOS_validation";
 
 		memset( &ai, 0, sizeof( ai ) );
@@ -419,7 +1115,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		if ( r != VK_SUCCESS ) {
 			// Retry with a bare instance (no layers, no extensions) — handles
 			// missing validation layer / debug-utils gracefully.
-			ri.Log( SEV_DEBUG, "[RAL] vkCreateInstance with layers/extensions failed (VkResult %d); retrying bare\n", (int)r );
+			R_LOG( rch_ral, SEV_DEBUG, "vkCreateInstance with layers/extensions failed (VkResult %d); retrying bare\n", (int)r );
 			b->haveDebugUtils       = qfalse;
 			ici.enabledLayerCount   = 0; ici.ppEnabledLayerNames     = NULL;
 			ici.enabledExtensionCount = 0; ici.ppEnabledExtensionNames = NULL;
@@ -427,7 +1123,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		}
 		if ( instExtProps ) free( instExtProps );
 		if ( r != VK_SUCCESS || b->instance == VK_NULL_HANDLE ) {
-			ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend: vkCreateInstance failed (VkResult %d)\n", (int)r );
+			R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: vkCreateInstance failed (VkResult %d)\n", (int)r );
 			free( b );
 			return NULL;
 		}
@@ -460,7 +1156,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		VkPhysicalDevice *devs;
 		b->vk.EnumeratePhysicalDevices( b->instance, &nDev, NULL );
 		if ( nDev == 0 ) {
-			ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend: no Vulkan physical devices\n" );
+			R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: no Vulkan physical devices\n" );
 			goto fail;
 		}
 		devs = (VkPhysicalDevice *)malloc( nDev * sizeof( *devs ) );
@@ -481,7 +1177,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		uint32_t                 nq = 0;
 		VkQueueFamilyProperties *qf;
 		b->vk.GetPhysicalDeviceQueueFamilyProperties( b->physicalDevice, &nq, NULL );
-		if ( nq == 0 ) { ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend: device has no queue families\n" ); goto fail; }
+		if ( nq == 0 ) { R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: device has no queue families\n" ); goto fail; }
 		qf = (VkQueueFamilyProperties *)malloc( nq * sizeof( *qf ) );
 		b->vk.GetPhysicalDeviceQueueFamilyProperties( b->physicalDevice, &nq, qf );
 		for ( i = 0; i < nq; i++ ) {
@@ -495,7 +1191,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		}
 		free( qf );
 		if ( b->graphicsFamily == RAL_VK_INVALID_FAMILY ) {
-			ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend: device has no graphics queue family\n" );
+			R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: device has no graphics queue family\n" );
 			goto fail;
 		}
 		if ( b->computeFamily  == RAL_VK_INVALID_FAMILY ) b->computeFamily  = b->graphicsFamily;
@@ -512,7 +1208,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		VkDeviceQueueCreateInfo qcis[3];
 		uint32_t                nQci = 0;
 		VkDeviceCreateInfo      dci;
-		// Phase 7.4-pre: the 1.2-promoted features (descriptor indexing, timeline
+		// The 1.2-promoted features (descriptor indexing, timeline
 		// semaphore, host query reset, drawIndirectCount, …) live in the
 		// VkPhysicalDeviceVulkan12Features umbrella struct. The spec
 		// (VUID-VkDeviceCreateInfo-pNext-02831) forbids passing the individual
@@ -544,10 +1240,10 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		memset( &f2query, 0, sizeof( f2query ) );  f2query.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;  f2query.pNext = &v12support;
 		b->vk.GetPhysicalDeviceFeatures2( b->physicalDevice, &f2query );
 
-		// synchronization2 + timelineSemaphore + dynamicRendering are required by 7.3+:
+		// synchronization2 + timelineSemaphore + dynamicRendering are required:
 		// vkQueueSubmit2, vkCmdWriteTimestamp2, timeline ops, vkCmdBeginRendering.
 		if ( s2Support.synchronization2 != VK_TRUE || v12support.timelineSemaphore != VK_TRUE || drSupport.dynamicRendering != VK_TRUE ) {
-			ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend: device lacks synchronization2 (%d) / timelineSemaphore (%d) / dynamicRendering (%d) — required since Phase 7.3\n",
+			R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: device lacks synchronization2 (%d) / timelineSemaphore (%d) / dynamicRendering (%d) — required since Phase 7.3\n",
 			        (int)s2Support.synchronization2, (int)v12support.timelineSemaphore, (int)drSupport.dynamicRendering );
 			goto fail;
 		}
@@ -576,10 +1272,28 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 		}
 		v12enable.timelineSemaphore = VK_TRUE;
 		v12enable.hostQueryReset    = b->haveHostQueryReset    ? VK_TRUE : VK_FALSE;
-		v12enable.drawIndirectCount = b->haveDrawIndirectCount ? VK_TRUE : VK_FALSE;   // Phase 7.4-pre
+		v12enable.drawIndirectCount = b->haveDrawIndirectCount ? VK_TRUE : VK_FALSE;
 		s2Enable.synchronization2   = VK_TRUE;
 		drEnable.dynamicRendering   = VK_TRUE;
 		if ( b->haveSamplerAnisotropy ) f2enable.features.samplerAnisotropy = VK_TRUE;
+		// The imported path has no want-bits, so enable these raster/shader features
+		// from the device query directly (mirrors samplerAnisotropy). Each have-flag is
+		// copied into caps.* by ralVk_FillCaps so a pipeline built on this backend may
+		// legally use the feature.
+		if ( f2query.features.depthClamp == VK_TRUE ) {
+			f2enable.features.depthClamp = VK_TRUE;
+			b->haveDepthClamp = qtrue;
+		}
+		if ( f2query.features.wideLines == VK_TRUE ) {
+			f2enable.features.wideLines = VK_TRUE;
+			b->haveWideLines = qtrue;
+		}
+		if ( f2query.features.vertexPipelineStoresAndAtomics == VK_TRUE
+		  && f2query.features.fragmentStoresAndAtomics       == VK_TRUE ) {
+			f2enable.features.vertexPipelineStoresAndAtomics = VK_TRUE;
+			f2enable.features.fragmentStoresAndAtomics       = VK_TRUE;
+			b->haveVertexFragmentStores = qtrue;
+		}
 		f2enable.pNext = &v12enable;  v12enable.pNext = &s2Enable;  s2Enable.pNext = &drEnable;  drEnable.pNext = NULL;
 
 		// one queue per distinct family we resolved
@@ -615,7 +1329,7 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 
 		r = b->vk.CreateDevice( b->physicalDevice, &dci, NULL, &b->device );
 		if ( r != VK_SUCCESS || b->device == VK_NULL_HANDLE ) {
-			ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend: vkCreateDevice failed (VkResult %d)\n", (int)r );
+			R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: vkCreateDevice failed (VkResult %d)\n", (int)r );
 			b->device = VK_NULL_HANDLE;
 			goto fail;
 		}
@@ -639,19 +1353,19 @@ initSharedLayers:
 	ralVk_FillCaps( b );
 
 	if ( !ralVk_InitFrameLayer( b ) ) {     // per-queue cmd pools, queue mutexes, frame fences, deferred-destroy ring
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend: frame layer init failed\n" );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: frame layer init failed\n" );
 		goto fail;
 	}
 	if ( !ralVk_InitResourceLayer( b ) ) {  // descriptor pool, format-blit cache
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend: resource layer init failed\n" );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: resource layer init failed\n" );
 		goto fail;
 	}
-	if ( !ralVk_InitPipelineLayer( b ) ) {  // empty VkPipelineCache + layout cache (Phase 7.3c)
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateBackend: pipeline layer init failed\n" );
+	if ( !ralVk_InitPipelineLayer( b ) ) {  // empty VkPipelineCache + layout cache
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend: pipeline layer init failed\n" );
 		goto fail;
 	}
 
-	ri.Log( SEV_INFO, "[RAL] Vulkan backend ready: %s [%s] (queue families gfx/cmp/xfer = %u/%u/%u; debugUtils=%s memBudget=%s descriptorIndexing=%s sync2=%s timeline=%s drawIndirectCount=%s anisotropy=%.0fx)\n",
+	R_LOG( rch_ral, SEV_INFO, "Vulkan backend ready: %s [%s] (queue families gfx/cmp/xfer = %u/%u/%u; debugUtils=%s memBudget=%s descriptorIndexing=%s sync2=%s timeline=%s drawIndirectCount=%s anisotropy=%.0fx)\n",
 	        b->physProps.deviceName, b->caps.apiVersion,
 	        b->graphicsFamily, b->computeFamily, b->transferFamily,
 	        b->haveDebugUtils ? "yes" : "no", b->haveMemoryBudget ? "yes" : "no", b->haveDescriptorIndexing ? "yes" : "no",
@@ -676,13 +1390,18 @@ void Ral_DestroyBackend( ralBackend_t *b ) {
 	ralVk_DestroyBackendInternal( b );
 }
 
+// Ral_AdoptDeviceAndQueues retired. Its body
+// folded into Ral_CreateBackend's owned-device branch (gated by
+// letBackendOwnDevice=qtrue). The renderer no longer needs the two-
+// step bringup contract that earlier split instance and device creation.
+
 const ralCaps_t *Ral_GetCaps( ralBackend_t *b ) {
 	return b ? &b->caps : NULL;
 }
 
 // ════════════════════════════════════════════════════════════════════════
 // Frame layer: per-queue command pools, queue mutexes, frame fences,
-// deferred-destroy ring. (Phase 7.3)
+// deferred-destroy ring.
 // ════════════════════════════════════════════════════════════════════════
 qboolean ralVk_InitFrameLayer( ralBackend_t *b ) {
 	VkCommandPoolCreateInfo cpi;
@@ -690,7 +1409,7 @@ qboolean ralVk_InitFrameLayer( ralBackend_t *b ) {
 	uint32_t                q, i;
 
 	if ( !ralVk_InitQueueMutexes( b ) ) {
-		ri.Log( SEV_WARN, "[RAL] ralVk_InitFrameLayer: queue mutex creation failed\n" );
+		R_LOG( rch_ral, SEV_WARN, "ralVk_InitFrameLayer: queue mutex creation failed\n" );
 		return qfalse;
 	}
 	for ( q = 0; q < 3; q++ ) {
@@ -699,7 +1418,7 @@ qboolean ralVk_InitFrameLayer( ralBackend_t *b ) {
 		cpi.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
 		cpi.queueFamilyIndex = b->queueFamily[q];
 		if ( b->vk.CreateCommandPool( b->device, &cpi, NULL, &b->cmdPools[q] ) != VK_SUCCESS ) {
-			ri.Log( SEV_WARN, "[RAL] ralVk_InitFrameLayer: vkCreateCommandPool (queue %u) failed\n", q );
+			R_LOG( rch_ral, SEV_WARN, "ralVk_InitFrameLayer: vkCreateCommandPool (queue %u) failed\n", q );
 			return qfalse;
 		}
 	}
@@ -708,7 +1427,7 @@ qboolean ralVk_InitFrameLayer( ralBackend_t *b ) {
 	fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;   // first Ral_BeginFrame must not block
 	for ( i = 0; i < RAL_VK_MAX_FRAMES_IN_FLIGHT; i++ )
 		if ( b->vk.CreateFence( b->device, &fi, NULL, &b->frameFences[i] ) != VK_SUCCESS ) {
-			ri.Log( SEV_WARN, "[RAL] ralVk_InitFrameLayer: frame fence %u creation failed\n", i );
+			R_LOG( rch_ral, SEV_WARN, "ralVk_InitFrameLayer: frame fence %u creation failed\n", i );
 			return qfalse;
 		}
 	b->pendingDestroy = (ralVkPendingDestroy_t *)malloc( RAL_VK_PENDING_DESTROY_MAX * sizeof( ralVkPendingDestroy_t ) );
@@ -746,6 +1465,8 @@ static void ralVk_DoDestroyEntry( ralBackend_t *b, const ralVkPendingDestroy_t *
 	case RAL_RES_QUERY_POOL:      b->vk.DestroyQueryPool( b->device, RAL_VK_U2H( VkQueryPool, e->h1 ), NULL ); break;
 	case RAL_RES_PIPELINE:        b->vk.DestroyPipeline( b->device, RAL_VK_U2H( VkPipeline, e->h1 ), NULL ); break;
 	case RAL_RES_PIPELINE_LAYOUT: b->vk.DestroyPipelineLayout( b->device, RAL_VK_U2H( VkPipelineLayout, e->h1 ), NULL ); break;
+	case RAL_RES_CMD_BUFFER:      { VkCommandBuffer cb = RAL_VK_U2H( VkCommandBuffer, e->h1 ); ralQueueType_t q = (ralQueueType_t)e->h2;
+	                                ralVk_QueueLock( b, q ); b->vk.FreeCommandBuffers( b->device, b->cmdPools[q], 1, &cb ); ralVk_QueueUnlock( b, q ); break; }
 	default: break;
 	}
 	if ( e->alloc ) ralVk_Free( b, e->alloc );
@@ -798,14 +1519,31 @@ void Ral_BeginFrame( ralBackend_t *b ) {
 	                              ? ( b->currentFrame - RAL_VK_MAX_FRAMES_IN_FLIGHT + 1 ) : 1ull );
 }
 
+// Ral_DrainDeferred — renderer-driven per-frame drain (see ral_command.h). The
+// renderer owns its own render loop + per-frame fence wait, so it cannot use
+// Ral_BeginFrame's fence-wait / Ral_EndFrame's empty stand-in submit (those
+// would collide with the renderer's real swapchain submission). This advances
+// the deferred-destroy frame counter and reclaims entries past the in-flight
+// window using the SAME drainBeforeFrame arithmetic as Ral_BeginFrame, but
+// touches neither b->frameFences[] nor the queue. Resources queued at frame F
+// are freed once currentFrame has advanced more than RAL_VK_MAX_FRAMES_IN_
+// FLIGHT past F — the renderer's caller must have already waited the matching
+// frame fence so that work is complete.
+void Ral_DrainDeferred( ralBackend_t *b ) {
+	if ( !b || !b->pendingDestroy ) return;
+	b->currentFrame++;
+	ralVk_DrainPendingDestroy( b, ( b->currentFrame > RAL_VK_MAX_FRAMES_IN_FLIGHT )
+	                              ? ( b->currentFrame - RAL_VK_MAX_FRAMES_IN_FLIGHT + 1 ) : 1ull );
+}
+
 void Ral_EndFrame( ralBackend_t *b ) {
 	uint32_t idx;
 	VkSubmitInfo2 si2;
 	if ( !b || !b->pendingDestroy ) return;
 	idx = (uint32_t)( b->currentFrame % RAL_VK_MAX_FRAMES_IN_FLIGHT );
 	// Empty submit on the graphics queue just to signal the frame fence (in a
-	// full render loop the frame's real submission carries the fence; 7.3 has
-	// no render loop, so this stand-in keeps the BeginFrame wait/reset cycle
+	// full render loop the frame's real submission carries the fence; the dump
+	// path has no render loop, so this stand-in keeps the BeginFrame wait/reset cycle
 	// from deadlocking). Full integration with swapchain present is 7.8b.
 	RAL_ZERO( si2 );
 	si2.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
@@ -884,8 +1622,8 @@ uint32_t Ral_ProbeBackends( ralBackendAvailability_t *out, uint32_t maxOut ) {
 // ════════════════════════════════════════════════════════════════════════
 Q_EXPORT void Ral_Dump( void ) {
 #if !defined( FEAT_RAL ) || !FEAT_RAL
-	if ( ri.Cvar_VariableIntegerValue( "developer" ) <= 0 ) {
-		ri.Log( SEV_INFO, "ral_dump: needs 'developer 1' (or a FEAT_RAL build).\n" );
+	if ( ri.Cvar_VariableIntegerValue( "r_vkValidate" ) <= 0 ) {
+		R_LOG( rch_ral, SEV_INFO, "ral_dump: needs 'r_vkValidate 1' (or a FEAT_RAL build).\n" );
 		return;
 	}
 #endif
@@ -897,12 +1635,12 @@ Q_EXPORT void Ral_Dump( void ) {
 		ralMemoryBudget_t        mb;
 		uint32_t                 n, i;
 
-		ri.Log( SEV_INFO, "===== RAL dump (Phase 7.3c Vulkan: instance/device/resources/async/pipeline) =====\n" );
+		R_LOG( rch_ral, SEV_INFO, "===== RAL dump (Phase 7.3c Vulkan: instance/device/resources/async/pipeline) =====\n" );
 
 		n = Ral_ProbeBackends( avail, 4 );
-		ri.Log( SEV_INFO, "Ral_ProbeBackends -> %u backend(s)\n", n );
+		R_LOG( rch_ral, SEV_INFO, "Ral_ProbeBackends -> %u backend(s)\n", n );
 		for ( i = 0; i < n; i++ ) {
-			ri.Log( SEV_INFO, "  [%u] %-12s available=%-3s device=\"%s\"%s%s\n",
+			R_LOG( rch_ral, SEV_INFO, "  [%u] %-12s available=%-3s device=\"%s\"%s%s\n",
 			        i, avail[i].name ? avail[i].name : "?",
 			        avail[i].available ? "yes" : "no",
 			        avail[i].deviceName ? avail[i].deviceName : "-",
@@ -910,51 +1648,52 @@ Q_EXPORT void Ral_Dump( void ) {
 		}
 
 		memset( &ci, 0, sizeof( ci ) );
-		ci.type          = RAL_BACKEND_VULKAN;
-		ci.platformHandle = NULL;                       // offscreen — no swapchain in 7.1
-		ci.flags          = RAL_FLAG_DEBUG_LABELS | ( ri.Cvar_VariableIntegerValue( "developer" ) >= 2 ? RAL_FLAG_VALIDATION : 0u );
+		ci.type             = RAL_BACKEND_VULKAN;
+		ci.platformHandle   = NULL;                     // offscreen — no swapchain in the dump path
+		ci.flags            = RAL_FLAG_DEBUG_LABELS;
+		ci.enableValidation = ( ri.Cvar_VariableIntegerValue( "r_vkValidate" ) != 0 ) ? qtrue : qfalse;
 		b = Ral_CreateBackend( &ci );
 		if ( !b ) {
-			ri.Log( SEV_WARN, "Ral_CreateBackend failed (see [RAL] warnings above)\n" );
-			ri.Log( SEV_INFO, "===== end RAL dump =====\n" );
+			R_LOG( rch_ral, SEV_WARN, "Ral_CreateBackend failed (see [RAL] warnings above)\n" );
+			R_LOG( rch_ral, SEV_INFO, "===== end RAL dump =====\n" );
 			return;
 		}
 
 		c = Ral_GetCaps( b );
-		ri.Log( SEV_INFO, "Ral_GetCaps:\n" );
-		ri.Log( SEV_INFO, "  device                   : %s\n", c->deviceName );
-		ri.Log( SEV_INFO, "  apiVersion               : %s\n", c->apiVersion );
-		ri.Log( SEV_INFO, "  bindlessTextures         : %s (max %u)\n", c->bindlessTextures ? "yes" : "no", c->maxBindlessTextures );
-		ri.Log( SEV_INFO, "  dynamicRendering         : %s\n", c->dynamicRendering ? "yes" : "no" );
-		ri.Log( SEV_INFO, "  timelineSemaphores       : %s\n", c->timelineSemaphores ? "yes" : "no" );
-		ri.Log( SEV_INFO, "  asyncCompute             : %s\n", c->asyncCompute ? "yes" : "no" );
-		ri.Log( SEV_INFO, "  asyncTransfer            : %s\n", c->asyncTransfer ? "yes" : "no" );
-		ri.Log( SEV_INFO, "  variableRateShading      : %s\n", c->variableRateShading ? "yes" : "no" );
-		ri.Log( SEV_INFO, "  hdr10Swapchain           : %s\n", c->hdr10Swapchain ? "yes" : "no" );
-		ri.Log( SEV_INFO, "  scRGBSwapchain           : %s\n", c->scRGBSwapchain ? "yes" : "no" );
-		ri.Log( SEV_INFO, "  debugUtils               : %s\n", c->debugUtils ? "yes" : "no" );
-		ri.Log( SEV_INFO, "  memoryBudget             : %s\n", c->memoryBudget ? "yes" : "no" );
-		ri.Log( SEV_INFO, "  drawIndirectCount        : %s\n", c->drawIndirectCount ? "yes" : "no" );
-		ri.Log( SEV_INFO, "  maxColorAttachments      : %u\n", c->maxColorAttachments );
-		ri.Log( SEV_INFO, "  maxComputeWorkgroupSize  : %u\n", c->maxComputeWorkgroupSize );
-		ri.Log( SEV_INFO, "  maxTextureDimension2D/3D : %u / %u\n", c->maxTextureDimension2D, c->maxTextureDimension3D );
-		ri.Log( SEV_INFO, "  maxTextureArrayLayers    : %u\n", c->maxTextureArrayLayers );
-		ri.Log( SEV_INFO, "  maxPushConstantSize      : %u bytes\n", c->maxPushConstantSize );
-		ri.Log( SEV_INFO, "  minUBO / minSSBO align   : %u / %u bytes\n", (unsigned)c->minUniformBufferAlignment, (unsigned)c->minStorageBufferAlignment );
-		ri.Log( SEV_INFO, "  timestampPeriod          : %.3f ns/tick\n", c->timestampPeriodNs );
+		R_LOG( rch_ral, SEV_INFO, "Ral_GetCaps:\n" );
+		R_LOG( rch_ral, SEV_INFO, "  device                   : %s\n", c->deviceName );
+		R_LOG( rch_ral, SEV_INFO, "  apiVersion               : %s\n", c->apiVersion );
+		R_LOG( rch_ral, SEV_INFO, "  bindlessTextures         : %s (max %u)\n", c->bindlessTextures ? "yes" : "no", c->maxBindlessTextures );
+		R_LOG( rch_ral, SEV_INFO, "  dynamicRendering         : %s\n", c->dynamicRendering ? "yes" : "no" );
+		R_LOG( rch_ral, SEV_INFO, "  timelineSemaphores       : %s\n", c->timelineSemaphores ? "yes" : "no" );
+		R_LOG( rch_ral, SEV_INFO, "  asyncCompute             : %s\n", c->asyncCompute ? "yes" : "no" );
+		R_LOG( rch_ral, SEV_INFO, "  asyncTransfer            : %s\n", c->asyncTransfer ? "yes" : "no" );
+		R_LOG( rch_ral, SEV_INFO, "  variableRateShading      : %s\n", c->variableRateShading ? "yes" : "no" );
+		R_LOG( rch_ral, SEV_INFO, "  hdr10Swapchain           : %s\n", c->hdr10Swapchain ? "yes" : "no" );
+		R_LOG( rch_ral, SEV_INFO, "  scRGBSwapchain           : %s\n", c->scRGBSwapchain ? "yes" : "no" );
+		R_LOG( rch_ral, SEV_INFO, "  debugUtils               : %s\n", c->debugUtils ? "yes" : "no" );
+		R_LOG( rch_ral, SEV_INFO, "  memoryBudget             : %s\n", c->memoryBudget ? "yes" : "no" );
+		R_LOG( rch_ral, SEV_INFO, "  drawIndirectCount        : %s\n", c->drawIndirectCount ? "yes" : "no" );
+		R_LOG( rch_ral, SEV_INFO, "  maxColorAttachments      : %u\n", c->maxColorAttachments );
+		R_LOG( rch_ral, SEV_INFO, "  maxComputeWorkgroupSize  : %u\n", c->maxComputeWorkgroupSize );
+		R_LOG( rch_ral, SEV_INFO, "  maxTextureDimension2D/3D : %u / %u\n", c->maxTextureDimension2D, c->maxTextureDimension3D );
+		R_LOG( rch_ral, SEV_INFO, "  maxTextureArrayLayers    : %u\n", c->maxTextureArrayLayers );
+		R_LOG( rch_ral, SEV_INFO, "  maxPushConstantSize      : %u bytes\n", c->maxPushConstantSize );
+		R_LOG( rch_ral, SEV_INFO, "  minUBO / minSSBO align   : %u / %u bytes\n", (unsigned)c->minUniformBufferAlignment, (unsigned)c->minStorageBufferAlignment );
+		R_LOG( rch_ral, SEV_INFO, "  timestampPeriod          : %.3f ns/tick\n", c->timestampPeriodNs );
 
 		Ral_QueryMemoryBudget( b, &mb );
-		ri.Log( SEV_INFO, "Ral_QueryMemoryBudget:\n" );
-		ri.Log( SEV_INFO, "  device-local : %u / %u MiB used\n", (unsigned)( mb.deviceLocalUsed >> 20 ), (unsigned)( mb.deviceLocalBudget >> 20 ) );
-		ri.Log( SEV_INFO, "  host-visible : %u / %u MiB used\n", (unsigned)( mb.hostVisibleUsed >> 20 ), (unsigned)( mb.hostVisibleBudget >> 20 ) );
-		ri.Log( SEV_INFO, "  underPressure: %s\n", mb.underPressure ? "yes" : "no" );
-		ri.Log( SEV_INFO, "  RAL footprint: %u KiB device-local / %u KiB host-visible across %u allocation(s)\n",
+		R_LOG( rch_ral, SEV_INFO, "Ral_QueryMemoryBudget:\n" );
+		R_LOG( rch_ral, SEV_INFO, "  device-local : %u / %u MiB used\n", (unsigned)( mb.deviceLocalUsed >> 20 ), (unsigned)( mb.deviceLocalBudget >> 20 ) );
+		R_LOG( rch_ral, SEV_INFO, "  host-visible : %u / %u MiB used\n", (unsigned)( mb.hostVisibleUsed >> 20 ), (unsigned)( mb.hostVisibleBudget >> 20 ) );
+		R_LOG( rch_ral, SEV_INFO, "  underPressure: %s\n", mb.underPressure ? "yes" : "no" );
+		R_LOG( rch_ral, SEV_INFO, "  RAL footprint: %u KiB device-local / %u KiB host-visible across %u allocation(s)\n",
 		        (unsigned)( b->ralDeviceLocalBytes >> 10 ), (unsigned)( b->ralHostVisibleBytes >> 10 ), b->numAllocations );
 
 		// "\ral_dump <sub>" runs an extra exercise on the live backend:
-		//   resource | test  → Phase 7.2 resource layer (texture/upload/mip-gen/bindless/budget/teardown)
-		//   async            → Phase 7.3 queue/cmd/sync/query/deferred-destroy
-		//   pipeline         → Phase 7.3c pipeline/cache/layout-cache/draw/dispatch
+		//   resource | test  → resource layer (texture/upload/mip-gen/bindless/budget/teardown)
+		//   async            → queue/cmd/sync/query/deferred-destroy
+		//   pipeline         → pipeline/cache/layout-cache/draw/dispatch
 		//   all              → all of the above
 		if ( ri.Cmd_Argc() > 1 ) {
 			const char *sub = ri.Cmd_Argv( 1 );
@@ -962,11 +1701,11 @@ Q_EXPORT void Ral_Dump( void ) {
 			else if ( Q_stricmp( sub, "async" ) == 0 )                                     ralVk_RunAsyncTest( b );
 			else if ( Q_stricmp( sub, "pipeline" ) == 0 )                                  ralVk_RunPipelineTest( b );
 			else if ( Q_stricmp( sub, "all" ) == 0 )                                     { ralVk_RunResourceTest( b ); ralVk_RunAsyncTest( b ); ralVk_RunPipelineTest( b ); }
-			else ri.Log( SEV_INFO, "  (unknown \\ral_dump subcommand \"%s\" — try: resource | async | pipeline | all)\n", sub );
+			else R_LOG( rch_ral, SEV_INFO, "  (unknown \\ral_dump subcommand \"%s\" — try: resource | async | pipeline | all)\n", sub );
 		}
 
 		Ral_DestroyBackend( b );
-		ri.Log( SEV_INFO, "Ral_DestroyBackend: ok\n" );
-		ri.Log( SEV_INFO, "===== end RAL dump =====\n" );
+		R_LOG( rch_ral, SEV_INFO, "Ral_DestroyBackend: ok\n" );
+		R_LOG( rch_ral, SEV_INFO, "===== end RAL dump =====\n" );
 	}
 }

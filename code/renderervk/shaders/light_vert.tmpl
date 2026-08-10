@@ -1,10 +1,7 @@
 #version 450
 
-// 64 bytes
-layout(push_constant) uniform Transform {
-	mat4 mvp;
-};
-
+// MVP now lives in the set-0 UBO (host vkUniform_t.mvp @ offset 480) — migrating
+// off the push-constant block (at the 128 B Vulkan ceiling). Read as ubo.mvp.
 layout(set = 0, binding = 0) uniform UBO {
 	// light/env parameters:
 	vec4 eyePos;				// vertex
@@ -18,26 +15,53 @@ layout(set = 0, binding = 0) uniform UBO {
 	vec4 fogEyeT;				// vertex
 	vec4 fogColor;				// fragment
 #endif
-	// Phase 6.5.4c: the CSM cascade matrices / split distances live further on
-	// in this UBO (std140 offsets 144 / 400) and are only consumed by the
-	// fragment stage, so the vertex stage doesn't declare them here (a std140
-	// prefix is fine).
+	// The CSM cascade matrices / split distances live further on in this UBO
+	// (std140 offsets 144 / 400) and are only consumed by the fragment stage, so
+	// the vertex stage just pads over them via the std140 prefix below.
 #ifdef USE_SHADOWMAP
-	// Phase 6.5.4d2: caster/receiver model→world transform (identity for
-	// worldspawn, the entity's [axis|origin] for entity/brush-model surfaces) —
-	// used below to put shadowData.xyz in WORLD space. Host offset 416 (see
-	// code/renderervk/vk.h vkUniform_t.modelMatrix). Phase 7.3b-followup:
-	// explicit `layout(offset=)` replaced with natural std140 padding so the
-	// block translates under every backend (the frag stage's cascadeMVP[4] +
-	// cascadeSplits cover 144..416 in the host struct — the vert stage doesn't
-	// reference them, just pads over them).
+	// caster/receiver model->world transform (identity for worldspawn, the
+	// entity's [axis|origin] for entity/brush-model surfaces) — used below to put
+	// shadowData.xyz in WORLD space. Host offset 416 (vkUniform_t.modelMatrix).
+	// Natural std140 padding (not explicit layout(offset=)) so the block
+	// translates under every backend (the frag stage's cascadeMVP[4] +
+	// cascadeSplits cover 144..416 in the host struct; the vert stage just pads).
 #ifdef USE_FOG
-	vec4 _pad_to_modelMatrix[18];   //  128 → 416 (288 bytes, after fogColor)
+	vec4 _pad_to_modelMatrix[18];   //  128 -> 416 (288 bytes, after fogColor)
 #else
-	vec4 _pad_to_modelMatrix[22];   //   64 → 416 (352 bytes, after lightVector)
+	vec4 _pad_to_modelMatrix[22];   //   64 -> 416 (352 bytes, after lightVector)
 #endif
-	mat4 modelMatrix;               // offset 416, 64 bytes
+	mat4 modelMatrix;               // offset 416, 64 bytes — then mvp at 480
+#else
+	// No shadow tail in the host struct (cascadeMVP/cascadeSplits/modelMatrix are
+	// behind FEAT_SHADOW_MAPPING). Pad straight from the prefix to mvp @ 480.
+#ifdef USE_FOG
+	vec4 _pad_to_mvp[22];           //  128 -> 480 (352 bytes, after fogColor)
+#else
+	vec4 _pad_to_mvp[26];           //   64 -> 480 (416 bytes, after lightVector)
 #endif
+#endif
+	mat4 mvp;                       // offset 480 (or 144 host no-shadow); the VS transform
+} ubo;
+
+// Per-entity transform delivery (constant id 16): when set, mvp (and modelMatrix
+// under shadows) come from a frame-wide storage buffer indexed by gl_InstanceIndex
+// (== firstInstance), bound once per frame, instead of ubo — the portable-binding
+// surface (storage buffer + instance index; no raw pointer; clone of the shadow
+// depth pass). Flat std430 mat4 array, stride 64. Under shadows 2 mat4s/entity
+// (mvp@2*i, modelMatrix@2*i+1); without shadows 1 (mvp@i). 0 = ubo → byte-identical.
+layout(constant_id = 16) const int ENTITY_SSBO = 0;
+// Per-slot mat4 stride. This MUST match the host's ENTITY_MATRIX_SLOT_BYTES, which
+// is governed by the build-wide shadow-mapping feature (always carries { mvp,
+// modelMatrix } = 2 mat4s/slot = 128 B), NOT by this pipeline variant's
+// USE_SHADOWMAP. The host writes every entity's slot at index gl_InstanceIndex*2
+// regardless of which light variant reads it, so a non-shadow variant must still
+// stride by 2 to land on its own slot's mvp — it simply never reads the second
+// (modelMatrix) mat4. Gating this on USE_SHADOWMAP made non-shadow variants stride
+// by 1, reading a foreign matrix for every slot > 0 → those surfaces collapsed to
+// a degenerate transform and rendered black.
+#define ENTITY_MATS_PER_SLOT 2
+layout(std430, set = 3, binding = 0) readonly buffer EntityMatrices {
+	mat4 entMat[];
 };
 
 layout(location = 0) in vec3 in_position;
@@ -64,30 +88,32 @@ out gl_PerVertex {
 };
 
 void main() {
+	mat4 mvp = ( ENTITY_SSBO != 0 ) ? entMat[gl_InstanceIndex * ENTITY_MATS_PER_SLOT] : ubo.mvp;
 	gl_Position = mvp * vec4(in_position, 1.0);
 
 	frag_tex_coord = in_tex_coord;
 	N = in_normal;
-	L = lightPos - vec4(in_position, 1.0);
-	V = eyePos - vec4(in_position, 1.0);
+	L = ubo.lightPos - vec4(in_position, 1.0);
+	V = ubo.eyePos - vec4(in_position, 1.0);
 #ifdef USE_PARALLAX
 	frag_position = in_position;
 #endif
 #ifdef USE_SHADOWMAP
 	// World-space fragment position (for the fragment's per-cascade light-space
 	// transform) + view-space depth (== gl_Position.w for a perspective
-	// projection) for the cascade selector. Phase 6.5.4d2: in_position is
+	// projection) for the cascade selector. in_position is
 	// object-space for entity surfaces / rest-space for moved brush models, so
 	// it's mapped through modelMatrix here — worldspawn surfaces get an identity
-	// modelMatrix, so this is a no-op for them. Closes the 6.5.4c caveat.
+	// modelMatrix, so this is a no-op for them.
+	mat4 modelMatrix = ( ENTITY_SSBO != 0 ) ? entMat[gl_InstanceIndex * ENTITY_MATS_PER_SLOT + 1] : ubo.modelMatrix;
 	shadowData = vec4( ( modelMatrix * vec4( in_position, 1.0 ) ).xyz, gl_Position.w );
 #endif
 
 #ifdef USE_FOG
-	float s = dot(in_position, fogDistanceVector.xyz) + fogDistanceVector.w;
-	float t = dot(in_position, fogDepthVector.xyz) + fogDepthVector.w;
+	float s = dot(in_position, ubo.fogDistanceVector.xyz) + ubo.fogDistanceVector.w;
+	float t = dot(in_position, ubo.fogDepthVector.xyz) + ubo.fogDepthVector.w;
 
-	if ( fogEyeT.y == 1.0 ) {
+	if ( ubo.fogEyeT.y == 1.0 ) {
 		if ( t < 0.0 ) {
 			t = 1.0 / 32.0;
 		} else {
@@ -97,7 +123,7 @@ void main() {
 		if ( t < 1.0 ) {
 			t = 1.0 / 32.0;
 		} else {
-			t = 1.0 / 32.0 + (30.0 / 32.0 * t) / ( t - fogEyeT.x );
+			t = 1.0 / 32.0 + (30.0 / 32.0 * t) / ( t - ubo.fogEyeT.x );
 		}
 	}
 

@@ -185,4 +185,36 @@ qboolean BG_TracemapLoaded( void ) {
 	return tracemap.loaded;
 }
 
+/*
+==================
+BG_GetTracemapGround
+
+Read-only accessor over the generated ground heightfield. Hands back a
+pointer to the contiguous TRACEMAP_SIZE×TRACEMAP_SIZE ground[] array
+(row-major, ground[y][x]) plus the world xy bounds and grid edge so a
+GPU consumer can sample it as an R32F heightgrid. Returns NULL (and
+leaves the out-params untouched) if no tracemap has been generated yet.
+Does not modify generation state.
+==================
+*/
+const float *BG_GetTracemapGround( vec2_t out_mins, vec2_t out_maxs, int *out_size ) {
+	if ( !tracemap.loaded ) {
+		return NULL;
+	}
+
+	if ( out_mins ) {
+		out_mins[0] = tracemap.world_mins[0];
+		out_mins[1] = tracemap.world_mins[1];
+	}
+	if ( out_maxs ) {
+		out_maxs[0] = tracemap.world_maxs[0];
+		out_maxs[1] = tracemap.world_maxs[1];
+	}
+	if ( out_size ) {
+		*out_size = TRACEMAP_SIZE;
+	}
+
+	return &tracemap.ground[0][0];
+}
+
 #endif // FEAT_ATMOSPHERIC

@@ -1,54 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
-// win_local.h: Win32-specific Quake3 header file
+// win_local.h: Win32 OS-tier header (main entry, console, shared helpers).
+//
+// The Win32 window/input/surface backend has been retired in favour of the
+// SDL3 backend (code/sdl). What remains here is the OS-syscall tier shared by
+// win_main.c, win_shared.c, win_syscon.c and win_console_attach.c: the Windows
+// headers, the WinVars_t process globals, the console API, and the few window
+// hooks that win_main.c's crash handler and frame loop still call (now provided
+// by the SDL backend).
 
-#define RAW_INPUT
-
-#define FAST_MODE_SWITCH
-
-#ifdef RAW_INPUT
-
-#ifndef HID_USAGE_GENERIC_MOUSE
-#define HID_USAGE_GENERIC_MOUSE        ((USHORT) 0x02)
-#endif
-
-#ifndef HID_USAGE_PAGE_GENERIC
-#define HID_USAGE_PAGE_GENERIC         ((USHORT) 0x01)
-#endif
-
-#endif
-
-//#if defined (_MSC_VER) && (_MSC_VER >= 1200)
-//#pragma warning(disable : 4201)
-//#pragma warning( push )
-//#endif
 #include <windows.h>
-//#if defined (_MSC_VER) && (_MSC_VER >= 1200)
-//#pragma warning( pop )
-//#endif
 
-#define HK_MOD_ALT		0x00100
-#define HK_MOD_CONTROL  0x00200
-#define HK_MOD_SHIFT	0x00400
-#define HK_MOD_WIN		0x00800
-#define HK_MOD_MASK		0x00F00
-#define HK_MOD_LALT		0x01000
-#define HK_MOD_RALT		0x02000
-#define HK_MOD_LCONTROL	0x04000
-#define HK_MOD_RCONTROL	0x08000
-#define HK_MOD_LSHIFT	0x10000
-#define HK_MOD_RSHIFT	0x20000
-#define HK_MOD_LWIN		0x40000
-#define HK_MOD_RWIN		0x80000
-#define HK_MOD_XMASK	0xFF000
-
-#define	DIRECTSOUND_VERSION	0x0300
-#define	DIRECTINPUT_VERSION	0x0300
-
-#include <mmsystem.h>
-#include <dinput.h>
-#include <dsound.h>
 #include <shlobj.h>
 
 #undef open
@@ -57,21 +20,6 @@
 #define close _close
 #undef write
 #define write _write
-
-#ifndef MK_XBUTTON1
-#define MK_XBUTTON1         0x0020
-#endif
-#ifndef MK_XBUTTON2
-#define MK_XBUTTON2         0x0040
-#endif
-
-#define	WINDOW_STYLE_NORMAL          (WS_VISIBLE|WS_CLIPCHILDREN|WS_CLIPSIBLINGS|WS_SYSMENU|WS_CAPTION|WS_MINIMIZEBOX|WS_BORDER)
-#define	WINDOW_STYLE_NORMAL_NB       (WS_VISIBLE|WS_CLIPCHILDREN|WS_CLIPSIBLINGS|WS_POPUP)
-#define	WINDOW_ESTYLE_NORMAL         (0)
-#define	WINDOW_STYLE_FULLSCREEN      (WS_VISIBLE|WS_CLIPCHILDREN|WS_CLIPSIBLINGS|WS_POPUP)
-#define	WINDOW_ESTYLE_FULLSCREEN     (0)
-#define	WINDOW_STYLE_FULLSCREEN_MIN  (WS_VISIBLE|WS_CLIPCHILDREN|WS_CLIPSIBLINGS)
-#define	WINDOW_ESTYLE_FULLSCREEN_MIN (0)
 
 #define T TEXT
 #ifdef UNICODE
@@ -82,27 +30,10 @@ const char *WtoA( const LPWSTR s );
 #define WtoA(S) (S)
 #endif
 
-qboolean IN_MouseActive( void );
-void	IN_Win32MouseEvent( int mstate );
-void	IN_RawMouseEvent( LPARAM lParam );
-
 void	Sys_CreateConsole( const char *title, int xPos, int yPos, qboolean usePos );
 void	Sys_DestroyConsole( void );
 
-// Input subsystem
-
-void	IN_Init (void);
-void	IN_Shutdown (void);
-void	IN_JoystickCommands (void);
-
-void	IN_Activate( qboolean active );
-void	IN_Frame( void );
-
-void	IN_UpdateWindow( RECT *window_rect, qboolean updateClipRegion );
-void	UpdateMonitorInfo( const RECT *target );
-
-// window procedure
-LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM  lParam );
+// window procedure / console pump
 void HandleConsoleEvents( void );
 
 // win_console_attach.c — reattach stdio to parent console (client only;
@@ -113,8 +44,6 @@ void Conbuf_AppendText( const char *msg );
 void Conbuf_BeginPrint( void );
 void Conbuf_EndPrint( void );
 
-void SNDDMA_Activate( void );
-
 typedef struct
 {
 	HINSTANCE		hInstance;
@@ -122,27 +51,25 @@ typedef struct
 
 	// Multi-monitor tracking
 	RECT			conRect;
-#ifndef DEDICATED
+#ifndef HEADLESS
 	RECT			winRect;
 	qboolean		winRectValid;
 
 	int				borderless;
 
 	// when we get a windows message, we store the time off so keyboard processing
-	// can know the exact time of an event
-	unsigned		sysMsgTime;
+	// can know the exact time of an event. NANOSECONDS (sysEvent_t.evTime is ns;
+	// Com_EventLoop divides by 1e6) — stamped from Sys_NanoTime(), so it must be
+	// 64-bit (ns overflows 32-bit in ~4s).
+	uint64_t		sysMsgTime;
 #endif
 } WinVars_t;
 
 extern WinVars_t	g_wv;
 
-void WIN_DisableHook( void );
-void WIN_EnableHook( void );
-
-void WIN_DisableAltTab( void );
-void WIN_EnableAltTab( void );
-
-void WIN_Minimize( void );
-
+// Provided by the SDL backend (code/sdl), called from win_main.c: the frame
+// loop pumps input each frame, and the crash handler restores gamma / hides the
+// fullscreen window on an unhandled exception.
+void IN_Frame( void );
 void GLW_HideFullscreenWindow( void );
 void GLW_RestoreGamma( void );

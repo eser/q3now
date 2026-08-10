@@ -45,10 +45,9 @@
 #include "linux_local.h" // bk001204
 
 #include <execinfo.h>
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 #include "../client/client.h"
 #endif
 
@@ -278,7 +277,7 @@ void NORETURN Sys_Exit( int code )
 
 void NORETURN Sys_Quit( void )
 {
-#ifndef DEDICATED
+#ifndef HEADLESS
 	CL_Shutdown( "", qtrue );
 #endif
 
@@ -316,7 +315,7 @@ void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *format, ... )
 	vsnprintf( text, sizeof( text ), format, argptr );
 	va_end( argptr );
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	CL_Shutdown( text, qtrue );
 #endif
 
@@ -385,7 +384,7 @@ static void Sys_CrashSignal( int sig, siginfo_t *info, void *ucontext )
 	reason = Sys_SignalName( sig );
 
 	/* Reset the terminal so async-signal-safe writes look right on tty
-	   dedicated servers. We use the low-level tcsetattr path directly;
+	   headless servers. We use the low-level tcsetattr path directly;
 	   tty_Hide() can touch FILE* and isn't AS-safe. */
 	if ( ttycon_on ) {
 		tcsetattr( STDIN_FILENO, TCSADRAIN, &tty_tc );
@@ -637,7 +636,7 @@ char *Sys_ConsoleInput( void )
 		}
 		return NULL;
 	}
-	else if ( stdin_active && com_dedicated->integer )
+	else if ( stdin_active && com_sv_running->integer )
 	{
 		int len;
 		fd_set fdset;
@@ -685,7 +684,7 @@ Platform-dependent event handling
 */
 void Sys_SendKeyEvents( void )
 {
-#ifndef DEDICATED
+#ifndef HEADLESS
 	HandleEvents();
 #endif
 }
@@ -732,7 +731,7 @@ void Sys_Sleep( int msec ) {
 	req.tv_nsec = ( msec % 1000 ) * 1000000;
 	nanosleep( &req, NULL );
 #else
-	if ( com_dedicated->integer && stdin_active ) {
+	if ( com_sv_running->integer && stdin_active ) {
 		FD_ZERO( &fdset );
 		FD_SET( STDIN_FILENO, &fdset );
 		timeout.tv_sec = msec / 1000;
@@ -923,8 +922,8 @@ void Sys_PrintBinVersion( const char* name )
 	const char *sep = "==============================================================";
 
 	fprintf( stdout, "\n\n%s\n", sep );
-#ifdef DEDICATED
-	fprintf( stdout, "Linux Quake3 Dedicated Server [%s %s]\n", date, time );
+#ifdef HEADLESS
+	fprintf( stdout, "Linux Quake3 Headless Server [%s %s]\n", date, time );
 #else
 	fprintf( stdout, "Linux Quake3 Full Executable  [%s %s]\n", date, time );
 #endif
@@ -999,10 +998,10 @@ static char *Sys_AppBundleRoot( char *dir )
 
 /*
 =================
-Sys_DefaultBasePath
+Sys_DefaultInstallPath
 =================
 */
-const char *Sys_DefaultBasePath( void )
+const char *Sys_DefaultInstallPath( void )
 {
 #ifdef __APPLE__
 	if ( installPath[0] != '\0' )
@@ -1082,7 +1081,7 @@ whether to stay out of the way. We can't use the cvar system here
 because it hasn't been initialised yet.
 =================
 */
-#ifdef DEDICATED
+#ifdef HEADLESS
 static qboolean Sys_ParseNoHardReboot( int argc, const char *argv[] )
 {
 	int i;
@@ -1100,10 +1099,10 @@ static qboolean Sys_ParseNoHardReboot( int argc, const char *argv[] )
 =================
 Sys_IsDedicatedArgv
 
-Scan argv to determine whether this invocation is a dedicated server.
+Scan argv to determine whether this invocation is a headless server.
 The client binary links the same unix_main.c but is built without
-DEDICATED; the dedicated binary is always dedicated regardless of
-command line, so this always returns qtrue inside #ifdef DEDICATED.
+HEADLESS; the headless binary is always headless regardless of
+command line, so this always returns qtrue inside #ifdef HEADLESS.
 =================
 */
 static qboolean Sys_IsDedicatedArgv( int argc, const char *argv[] )
@@ -1117,7 +1116,7 @@ static qboolean Sys_IsDedicatedArgv( int argc, const char *argv[] )
 =================
 Sys_RunWatchdog
 
-Two-process supervisor for dedicated servers on POSIX platforms:
+Two-process supervisor for headless servers on POSIX platforms:
 
   parent (watchdog)
     +- fork() child (actual server)
@@ -1206,7 +1205,7 @@ Sys_HardReboot
 
 Command handler for `sv_restartProcess`. Tells the child to terminate
 with the restart code so the watchdog will relaunch it. If there is no
-watchdog (com_noHardReboot 1, or non-DEDICATED) we simply exit normally.
+watchdog (com_noHardReboot 1, or non-HEADLESS) we simply exit normally.
 =================
 */
 void Sys_HardReboot( void )
@@ -1219,7 +1218,7 @@ static void Sys_HardReboot_f( void )
 {
 	Sys_HardReboot();
 }
-#endif // DEDICATED
+#endif // HEADLESS
 
 
 int main( int argc, const char* argv[] )
@@ -1243,7 +1242,7 @@ int main( int argc, const char* argv[] )
 		return 0; // print version and exit
 	}
 
-#ifdef DEDICATED
+#ifdef HEADLESS
 	// Parent watchdog loop — when it returns, we are the child and should
 	// continue normal initialisation. When the child exits the parent will
 	// either fork a new child or exit itself.
@@ -1286,13 +1285,13 @@ int main( int argc, const char* argv[] )
 
 	Com_Init( cmdline );
 
-#ifdef DEDICATED
+#ifdef HEADLESS
 	{
 		cvar_t *cv = Cvar_Get( "com_noHardReboot", "0", CVAR_INIT );
 		Cvar_CheckRange( cv, "0", "1", CV_INTEGER );
 		Cvar_SetDescription( cv,
 			"Disable the POSIX parent-watchdog that auto-relaunches the\n"
-			"dedicated server on abnormal exit or the sv_restartProcess\n"
+			"headless server on abnormal exit or the sv_restartProcess\n"
 			"command. Effective only at startup (must be set via +set on\n"
 			"the command line)." );
 		Cmd_AddCommand( "sv_restartProcess", Sys_HardReboot_f );
@@ -1320,7 +1319,7 @@ int main( int argc, const char* argv[] )
 		}
 	}
 
-#ifdef DEDICATED
+#ifdef HEADLESS
 	// init here for dedicated, as we don't have GLimp_Init
 	InitSig();
 #endif
@@ -1331,7 +1330,7 @@ int main( int argc, const char* argv[] )
 		Sys_ConfigureFPU();
 #endif
 
-#ifdef DEDICATED
+#ifdef HEADLESS
 		// run the game
 		Com_Frame( qfalse );
 #else

@@ -26,6 +26,15 @@ void      Nav_LoadMap( const char *mapname );
 void      Nav_UnloadMap( void );
 int       Nav_IsReady( void );
 
+/* A background bake is in flight (not yet ready, but will be). Lets callers defer
+ * work while baking yet give up once a bake finishes-and-fails (returns 0 then). */
+int       Nav_IsBaking( void );
+
+/* Per-frame pump — polls the background bake and, when it finishes, adopts the
+ * mesh on the main thread (query init, door tag, cache save, ready flip). Cheap
+ * no-op while no bake is in flight. Call once per server frame. */
+void      Nav_Frame( void );
+
 /* Trap dispatch — called from sv_game.c for all G_NAV_* syscalls */
 intptr_t  Nav_HandleTrap( int trap, const intptr_t *args, byte *vmBase );
 

@@ -493,8 +493,8 @@ void RB_RenderFlares (void) {
 
 //	RB_AddDlightFlares();
 
-#if FEAT_CORONA
-	RB_AddCoronaFlares();
+#if FEAT_HALO
+	RB_AddHaloFlares();
 #endif
 
 	// perform z buffer readback on each flare in this view

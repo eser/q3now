@@ -4,7 +4,7 @@
 // extract_spv.mjs — pull SPIR-V blobs out of a generated shader_data.c-style C
 // file (the `const unsigned char NAME[N] = { 0x.., ... };` arrays compile.mjs
 // emits) into standalone .spv files, so the shader_xlate_spike test exe has real
-// q3now SPIR-V to chew on. Throwaway helper for the Phase 7 spike.
+// q3now SPIR-V to chew on. Throwaway helper for the shader_xlate spike.
 //
 //   node extract_spv.mjs <shader_data.c> <outdir> [symbol ...]
 //     with no symbols: extracts every array in the file.

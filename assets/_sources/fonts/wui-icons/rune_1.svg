@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Rune 1 — diamond -->
+  <path d="M 12 50 L 50 12 L 88 50 L 50 88 Z" fill="black" fill-rule="evenodd"/>
+</svg>

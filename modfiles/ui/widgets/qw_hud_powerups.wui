@@ -1,0 +1,18 @@
+// qw_hud_powerups — V2_HUD_Active powerup-timer stack (quad / haste / regen / etc.)
+// HUD redesign (Eser): powerup countdown icons + timers stacked down the RIGHT
+// edge at mid-height (the classic Q3 CENTER_RIGHT position) — peripheral status
+// that doesn't fight the crosshair. Each powerup = an icon + a seconds-left
+// number below it; the engine (cl_wired_hud_elem_powerupN_*) fills icon/time
+// per active powerup and hides the slot when none. Ported from default.wui:521-524.
+// hudElement rects are FULL-VIEWPORT. Two slots stacked (slot 2 above slot 1).
+itemDef {
+	name "hud_active_powerups"
+	type container
+	decoration
+	visible 1
+
+	itemDef { hudElement "powerup1_icon"  anchor CENTER_RIGHT  rect 0.953 0.563 0.028 0.050  forecolor 1 1 1 1 decoration visible 1 }
+	itemDef { hudElement "powerup1_time"  anchor CENTER_RIGHT  rect 0.947 0.573 0 0  font $font_sans  fontsize 12 16  textalign 2  forecolor $accent decoration visible 1 }
+	itemDef { hudElement "powerup2_icon"  anchor CENTER_RIGHT  rect 0.953 0.479 0.028 0.050  forecolor 1 1 1 1 decoration visible 1 }
+	itemDef { hudElement "powerup2_time"  anchor CENTER_RIGHT  rect 0.947 0.490 0 0  font $font_sans  fontsize 12 16  textalign 2  forecolor $accent decoration visible 1 }
+}

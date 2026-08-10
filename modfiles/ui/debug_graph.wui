@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+//
+// debug_graph.wui — Wired UI: WUI_LAYER_DEBUG_OVERLAY debug graph panel.
+//
+// Turn 4 V-29 (debug-overlay-migration): the compositor's
+// WUI_LAYER_DEBUG_OVERLAY walk emits this panel when the layer is active
+// (wired_ui_debug != 0 — debug_overlay_policy_isActive). The lone itemDef is
+// a decoration-only custom-draw stub: the rect exists so the layer
+// participates in the policy + input-claim machinery; the actual graph render
+// happens inside WiredDebug_Graph_Draw (elements/debug_overlay.c) against the
+// full swapchain, reading the engine-owned cl_debugGraphBuffer. The graph
+// self-gates on cl_debuggraph || cl_timegraph || cl_debugMove via the feed
+// fn + graphheight (a zero height draws nothing).
+
+menuDef {
+	name "debug_graph"
+	rect 0 0 1 1
+	fullscreen 1
+	visible 1
+	layer "debug_overlay"
+
+	itemDef {
+		name "debug_graph"
+		rect 0 0 1 1
+		decoration
+		visible 1
+		custom "debug_graph"
+	}
+}

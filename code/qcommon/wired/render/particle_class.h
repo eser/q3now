@@ -104,9 +104,34 @@ typedef struct {
 
 	float           gravityScale;    // multiplier on global gravity
 	float           drag;            // velocity damping per second
+
+	// Sprite-frame (flipbook) animation. Appended at the end so prior
+	// offsets stay byte-identical; classes that do not opt in keep
+	// frameCount 0 (memset-zero) and render via `shader` exactly as
+	// before. When frameCount > 1 the ring advances through
+	// frameShaders[0..frameCount-1] by particle age:
+	//   frame = clamp( floor(age * frameCount), 0, frameCount-1 ).
+	// frameBlend 1 interpolates the two adjacent frames (silky), 0 steps.
+	// Frames are separate per-frame shader handles (no atlas); the
+	// renderer resolves them into a dedicated frame-texture pool.
+	qhandle_t       frameShaders[16];  // PARTICLE_CLASS_MAX_FRAMES
+	int             frameCount;        // 0/1 = static (use `shader`); >1 = animate
+	int             frameBlend;        // 0 = stepped; 1 = interpolate adjacent frames
 } particleClass_t;
 
+// Per-class frame-count cap (rlboom = 8, glboom = 5). Sized to MATCH the
+// GLSL frameSlots[] array — do not raise one without the other.
+#define PARTICLE_CLASS_MAX_FRAMES 16
+
 #define MAX_PARTICLE_CLASSES 64
+
+// Dedicated frame-texture pool appended to the particle sampler array.
+// The fragment sampler array holds MAX_PARTICLE_CLASSES per-class slots
+// [0..63] PLUS FRAME_POOL_SIZE flipbook-frame slots [64..95]. Class slots
+// keep their exact meaning (slot = classHandle-1); the frame pool is a
+// separate allocator filled at registration when frameCount > 1.
+#define FRAME_POOL_SIZE 32
+#define PARTICLE_SAMPLER_COUNT ( MAX_PARTICLE_CLASSES + FRAME_POOL_SIZE )
 
 // Register a class. The `name` is registry-only metadata; it does
 // NOT live inside particleClass_t. Returns a handle (>0) on success,

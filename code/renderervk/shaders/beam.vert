@@ -28,25 +28,23 @@ Layout matches the host beamHeaderGPU_t in renderervk/vk.h.
 
 #define BEAM_AXIAL_MAX 8
 
-layout(push_constant) uniform Push {
+// Migrated off the retired 112-byte VS|FS push to the shared effects per-draw UBO
+// at set 1 (UNIFORM_BUFFER_DYNAMIC, std140). Per-stage stageParams.x arrives in a
+// FRESH ring item per RB_DrawBeams stage-loop iteration; gl_InstanceIndex stays the
+// beam-header index (no firstInstance). Anonymous block keeps the read sites
+// (mvp/eyeWorld/frameParams/stageParams) unchanged.
+layout(set = 1, binding = 0, std140) uniform EffectsUBO {
 	mat4 mvp;
 	vec4 eyeWorld;     // .xyz = camera position in world space; .w = pad
-	vec4 frameParams;  // .x = reserved/unused — was the legacy
-	                   //      identityLight halving factor (dropped
-	                   //      Phase 6B3'-a, field removed Block 9);
-	                   //      the word stays for push-range byte-compat
-	                   //      with the other primitive shaders.
-	                   // .y = currentTime (tr.refdef.floatTime). For
-	                   //      transient beams (PRIM_FLAG_TRANSIENT
-	                   //      set) this IS the uvScroll reference;
-	                   //      for persistent beams the reference is
-	                   //      (currentTime - hdr.spawnTime).
-	                   // .zw = reserved.
+	vec4 frameParams;  // .y = currentTime (tr.refdef.floatTime). For transient beams
+	                   //      (PRIM_FLAG_TRANSIENT set) this IS the uvScroll reference;
+	                   //      for persistent beams it is (currentTime - hdr.spawnTime).
+	                   // .x/.zw reserved.
 	vec4 stageParams;  // .x = stageIdx (this draw's stage; cast to uint).
 	                   // .yzw reserved for future per-draw stage params.
 };
 
-// Phase 5F/5G — per-stage rendering parameters extracted from the q3
+// per-stage rendering parameters extracted from the q3
 // shader.script. Indexed [shaderHandle * 4 + stageIdx]. Layout
 // matches VkPrimitiveStageGPU in renderervk/vk.h (32 bytes).
 struct PrimitiveStageGPU {
@@ -102,7 +100,7 @@ layout(std430, set = 0, binding = 0) readonly buffer Headers {
 layout(location = 0) out vec2 fragUV;
 layout(location = 1) out vec4 fragColor;
 layout(location = 2) flat out uint fragShaderHandle;
-// Phase 5G: per-draw image slot lookup. Set from PrimitiveStageGPU.imageSlot
+// per-draw image slot lookup. Set from PrimitiveStageGPU.imageSlot
 // for the current stage so the fragment shader can sample the right
 // image when stage>0 uses a different image than stage 0. For LG
 // (both stages share lightningbolt.jpg) this equals fragShaderHandle.
@@ -135,7 +133,7 @@ void main() {
 
 	BeamHeader hdr = beams[beamIdx];
 
-	// Phase 5G: per-stage cull. RB_DrawBeams loops over PRIMITIVE_STAGE_MAX
+	// per-stage cull. RB_DrawBeams loops over PRIMITIVE_STAGE_MAX
 	// stages and dispatches one instanced draw per stage; shaders with
 	// fewer stages must drop their over-count draws, otherwise stage 1+
 	// would render with garbage stage data (the entries past stageCount
@@ -254,14 +252,14 @@ void main() {
 	} else {
 		scrollT = max(frameParams.y - hdr.spawnTime, 0.0);
 	}
-	// Phase 5G: per-stage UV transform. tcMod scale applies first
+	// per-stage UV transform. tcMod scale applies first
 	// (multiplies the base [0,1] uv), then both the stage-defined
 	// scroll (from shader.script tcMod scroll) and the cgame-set
 	// hdr.uvScroll add together times scrollT. The additive
 	// combination preserves cgame's ability to override per-frame;
-	// 5H zeroes hdr.uvScroll for LG so only the stage scroll applies.
+	// cgame zeroes hdr.uvScroll for LG so only the stage scroll applies.
 	//
-	// Phase 5J: no fract() wrap. Beam binding 1 uses a REPEAT-mode
+	// no fract() wrap. Beam binding 1 uses a REPEAT-mode
 	// sampler that wraps out-of-range UVs natively. fract() wrapping
 	// here would collapse V=1 to V=0 (per GLSL `fract(1.0) = 0.0`),
 	// flattening the quad's V axis to a single texture row and

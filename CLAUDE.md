@@ -2,8 +2,8 @@
 
 ## Engine vs. game boundary
 
-- The **engine is "Wired"**. Engine code lives in `code/qcommon`, `code/client`, `code/server`, `code/renderer*`, `code/renderercommon`, `code/sdl`, `code/unix`, `code/win32`, `code/botlib`. Built into `wired` (client) and `wired-ded` (dedicated server) binaries; renderer DLLs ship as `wired_<api>.{dll,so,dylib}`. Display name is `Wired`; version macro is `WIRED_ENGINE_VERSION`.
-- **q3now is the game** that runs on Wired. Game code lives in `code/game`, `code/cgame`. Game assets under `baseq3/`.
+- The **engine is "Wired"**. Engine code lives in `code/qcommon`, `code/client`, `code/server`, `code/renderer*`, `code/renderercommon`, `code/sdl`, `code/unix`, `code/win32`, `code/botlib`. Built into `wired` (client) and `wired-headless` (headless server) binaries; renderer DLLs ship as `wired_<api>.{dll,so,dylib}`. Display name is `Wired`; version macro is `WIRED_ENGINE_VERSION`.
+- **q3now is the game** that runs on Wired. Game code lives in `code/game`, `code/cgame`. Game assets under `base/`.
 
 ## Hard architectural rule
 
@@ -24,7 +24,7 @@ Engine code (`qcommon`, `client`, `server`, `renderer*`, `sdl`, `unix`, `win32`)
 | Code dirs | `wired/` (lowercase) | `code/qcommon/wired/` |
 | Env vars | `WIRED_*` | `WIRED_SV_HOSTNAME`, `WIRED_MAP` |
 | Metrics (Prometheus) | `wired_*` | `wired_quic_connections_active` |
-| Binaries | `wired`, `wired-ded` | |
+| Binaries | `wired`, `wired-headless` | |
 | Renderer DLLs | `wired_<api>` | `wired_vulkan` |
 | User-visible name | `Wired` (capitalized) | window title, console banner |
 
@@ -65,7 +65,7 @@ and `LICENSES/`; every third-party component is catalogued in
 
 ## Filesystem layout (per-user state)
 
-Engine state lives under `<home>/wired/<basegame>/` (e.g. `~/wired/baseq3/`).
+Engine state lives under `<home>/wired/<basegame>/` (e.g. `~/wired/base/`).
 
 ## Migration & maintenance
 

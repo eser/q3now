@@ -1,0 +1,25 @@
+// primitive_runes.wui — Rune × 10 grid demo (U+EA..U+F3).
+// Two-row 5-column grid + labels per cell to map glyph → codepoint.
+
+menuDef {
+	name "primitive_runes"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor $ink
+
+	itemDef { name "rune_0_g" rect 0.10 0.30 0.06 0.10 iconText "rune_0" font $font_icon 72 forecolor $accent visible 1 decoration }
+	itemDef { name "rune_1_g" rect 0.26 0.30 0.06 0.10 iconText "rune_1" font $font_icon 72 forecolor $accent visible 1 decoration }
+	itemDef { name "rune_2_g" rect 0.42 0.30 0.06 0.10 iconText "rune_2" font $font_icon 72 forecolor $accent visible 1 decoration }
+	itemDef { name "rune_3_g" rect 0.58 0.30 0.06 0.10 iconText "rune_3" font $font_icon 72 forecolor $accent visible 1 decoration }
+	itemDef { name "rune_4_g" rect 0.74 0.30 0.06 0.10 iconText "rune_4" font $font_icon 72 forecolor $accent visible 1 decoration }
+	itemDef { name "rune_5_g" rect 0.10 0.55 0.06 0.10 iconText "rune_5" font $font_icon 72 forecolor $accent visible 1 decoration }
+	itemDef { name "rune_6_g" rect 0.26 0.55 0.06 0.10 iconText "rune_6" font $font_icon 72 forecolor $accent visible 1 decoration }
+	itemDef { name "rune_7_g" rect 0.42 0.55 0.06 0.10 iconText "rune_7" font $font_icon 72 forecolor $accent visible 1 decoration }
+	itemDef { name "rune_8_g" rect 0.58 0.55 0.06 0.10 iconText "rune_8" font $font_icon 72 forecolor $accent visible 1 decoration }
+	itemDef { name "rune_9_g" rect 0.74 0.55 0.06 0.10 iconText "rune_9" font $font_icon 72 forecolor $accent visible 1 decoration }
+
+	itemDef { name "runes_caption" rect 0.10 0.72 0.80 0.04 text "Rune × 10 · U+EA — U+F3" font $font_mono 12 forecolor $boneDim textalign 1 visible 1 decoration }
+}

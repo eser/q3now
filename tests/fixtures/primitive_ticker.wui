@@ -1,0 +1,49 @@
+// primitive_ticker.wui — Ticker primitive demo (repeat + scroll-x).
+// Renders a horizontal strip of telemetry strings via the repeat
+// machinery from 14.2/14.6 — text leaves stack horizontally (one
+// itemDef per row) and the scroll-x built-in slides the strip.
+//
+// The repeat consumer reads `test.ticker.<i>.label` + `test.ticker.count`
+// from the WiredStore; `wui_test_primitive_ticker` populates these
+// before pushing this menu.
+
+menuDef {
+	name "primitive_ticker"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor $ink
+
+	itemDef {
+		name "ticker_label"
+		rect 0.05 0.40 0.90 0.04
+		text "TICKER · scroll-x"
+		font $font_mono 11
+		forecolor $boneDim
+		visible 1
+		decoration
+	}
+	itemDef {
+		name "ticker_strip"
+		type container
+		rect 0.05 0.48 0.90 0.05
+		direction row
+		decoration
+		visible 1
+		repeat {
+			source "test.ticker"
+			countbind "test.ticker.count"
+			as "row"
+			itemDef {
+				name "ticker_row"
+				text "{{ row.label }}   ◆   "
+				font $font_mono 14
+				forecolor $accent
+				animation "scroll-x"
+				visible 1
+			}
+		}
+	}
+}

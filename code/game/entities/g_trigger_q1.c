@@ -4,8 +4,8 @@
 // g_trigger_q1.c -- Q1 trigger entity spawn functions
 
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
+LOG_DECLARE_CHANNEL( ch_botai, "botlib.ai" );   /* shared bot-nav telemetry stream */
 
 void Q3_InitTrigger( gentity_t *self );
 
@@ -236,6 +236,13 @@ static void q1_trigger_changelevel_touch( gentity_t *self, gentity_t *other, tra
 	self->touch    = NULL;
 	self->nextthink = level.time + FRAMETIME;
 	self->think    = G_FreeEntity;
+
+	// Level-completion telemetry on the shared bot-nav stream, attributed to the
+	// toucher (guaranteed a client by the early-return above) — unambiguous vs.
+	// scraping the shared "map" console command. Emitted before the map change.
+	Com_Log( SEV_INFO, LOG_CH(ch_botai),
+		"exit reached: bot=%d -> map=%s\n",
+		(int)( other - g_entities ), self->target ? self->target : "?" );
 
 	trap_SendConsoleCommand( EXEC_APPEND, va( "map %s\n", self->target ) );
 }
@@ -686,3 +693,13 @@ void SP_q1_trigger_onlyregistered( gentity_t *ent ) {
 	Q3_InitTrigger( ent );
 	trap_LinkEntity( ent );
 }
+
+// ── savegame callback registry — TIER 2 file-local sub-list ──────────────────
+// The file-static callbacks defined above, published to the resolver through
+// SG_Register_g_trigger_q1(). The name list is single-sourced in g_save_localcbs.h
+// (SG_LOCAL_CB_g_trigger_q1); this expands it into the sub-table + hook here,
+// where the statics are visible. See g_save_funcs.h.
+#include "g_save_funcs.h"
+#include "g_save_localcbs.h"
+
+SG_DEFINE_LOCAL_REGISTRY( SG_LOCAL_CB_g_trigger_q1, SG_Register_g_trigger_q1 )

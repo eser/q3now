@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Weapon gl — grenade launcher (drum + barrel) -->
+  <path d="M 17 38 L 58 38 L 58 58 L 17 58 Z M 58 46 L 92 46 L 92 67 L 58 67 Z M 33 21 L 33 38 L 46 38 L 46 21 Z" fill="black" fill-rule="evenodd"/>
+</svg>

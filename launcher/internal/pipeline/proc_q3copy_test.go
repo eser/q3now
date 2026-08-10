@@ -210,3 +210,84 @@ func TestQ3CopyProcessor_Finalize(t *testing.T) {
 		t.Errorf("expected 0 synthetic entries, got %d", len(entries))
 	}
 }
+
+// TestQ3CopyProcessor_OneSourceManyTargets is the regression test for the Q1
+// monster invisibility fix: a single source (progs/dog.mdl) declared by two
+// entries (creatures/dog/dog.mdl + characters/dog/models/body.mdl) must emit
+// BOTH outputs, not just one. Before the fix, byPackIndex was source→one-key and
+// the second entry silently overwrote the first, so one of the two was dropped.
+func TestQ3CopyProcessor_OneSourceManyTargets(t *testing.T) {
+	proc := &Q3CopyProcessor{
+		Entries: map[string]ProcessorEntry{
+			"creatures/dog/dog.mdl":          {Pack: "id1/pak0.pak", PackIndex: "progs/dog.mdl"},
+			"characters/dog/models/body.mdl": {Pack: "id1/pak0.pak", PackIndex: "progs/dog.mdl"},
+		},
+	}
+
+	// One scan of the single source progs/dog.mdl (as it appears once in pak0).
+	entry := AssetEntry{
+		Origin:      "q1_base",
+		Path:        "progs/dog.mdl",
+		SourcePak:   "id1/pak0.pak",
+		SourceIndex: 42,
+		UncompSize:  1234,
+	}
+	decision, err := proc.Process(entry, nil)
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if decision.Action != Include {
+		t.Fatalf("expected Include for the returned decision, got %d", decision.Action)
+	}
+
+	// Collect every output path emitted for this one source: the returned
+	// decision plus everything Finalize() stashed.
+	got := map[string]bool{}
+	if decision.DestPath != "" {
+		got[decision.DestPath] = true
+	}
+	fanout, err := proc.Finalize()
+	if err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	for _, oe := range fanout {
+		got[oe.OutputPath] = true
+		// Fan-out copies must carry the source slot so process.go reads the bytes.
+		if oe.Data != nil {
+			t.Errorf("fan-out copy %q unexpectedly synthetic (Data set)", oe.OutputPath)
+		}
+		if oe.SourcePak != entry.SourcePak || oe.SourceIndex != entry.SourceIndex {
+			t.Errorf("fan-out %q: source slot = (%q,%d), want (%q,%d)",
+				oe.OutputPath, oe.SourcePak, oe.SourceIndex, entry.SourcePak, entry.SourceIndex)
+		}
+	}
+
+	for _, want := range []string{"creatures/dog/dog.mdl", "characters/dog/models/body.mdl"} {
+		if !got[want] {
+			t.Errorf("output %q was not emitted from the single progs/dog.mdl scan", want)
+		}
+	}
+	if len(got) != 2 {
+		t.Errorf("expected exactly 2 outputs from one source, got %d: %v", len(got), got)
+	}
+}
+
+// TestQ3CopyProcessor_FanoutMatchedNoFalseMissing verifies that BOTH entries of a
+// shared source are marked matched by the single scan, so Finalize()'s
+// missing-entry hard-error does not fire (acceptance criterion 4).
+func TestQ3CopyProcessor_FanoutMatchedNoFalseMissing(t *testing.T) {
+	proc := &Q3CopyProcessor{
+		Entries: map[string]ProcessorEntry{
+			"creatures/dog/dog.mdl":          {Pack: "id1/pak0.pak", PackIndex: "progs/dog.mdl"},
+			"characters/dog/models/body.mdl": {Pack: "id1/pak0.pak", PackIndex: "progs/dog.mdl"},
+		},
+	}
+	entry := AssetEntry{Origin: "q1_base", Path: "progs/dog.mdl", SourcePak: "id1/pak0.pak", SourceIndex: 1}
+	if _, err := proc.Process(entry, nil); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	// Both entries were fulfilled by the one scan → Finalize must not error.
+	if _, err := proc.Finalize(); err != nil {
+		t.Fatalf("Finalize reported false missing entry after fan-out: %v", err)
+	}
+}

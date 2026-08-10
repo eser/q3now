@@ -29,7 +29,7 @@
 #include "ai_cmd.h"
 #include "ai_dmnet.h"
 #include "ai_team.h"
-#include "wired/bots/g_wiredbots.h"
+#include "wired/bots/g_wiredintel.h"
 //
 #include "chars.h"				//characteristics
 #include "inv.h"				//indexes into the inventory
@@ -564,6 +564,19 @@ void BotMatch_HelpAccompany(bot_state_t *bs, bot_match_t *match) {
 	}
 	else {
 		bs->ltgtype = LTG_TEAMACCOMPANY;
+		// ACCOMPANY LIFECYCLE — one of TWO, and the difference is deliberate.
+		//
+		// This is the CHAT entry point: a fire-and-forget order. Nobody
+		// re-asserts it after this call, so it carries its own budget and
+		// expires on its own — the sender's explicit time if the message
+		// supplied one, otherwise TEAM_ACCOMPANY_TIME. BotLongTermGoal drops
+		// the goal when that budget runs out.
+		//
+		// The other entry point is the DIRECTIVE path in
+		// g_wiredintel.c (BotDirective_ApplyToLtg, DIR_FOLLOW), which sets a
+		// short expiry refreshed every frame — a heartbeat, not a budget.
+		// Do NOT unify the two: a fire-and-forget order and a continuously
+		// re-asserted directive want opposite persistence semantics.
 		if (!bs->teamgoal_time) bs->teamgoal_time = FloatTime() + TEAM_ACCOMPANY_TIME;
 		bs->formation_dist = 3.5 * 32;		//3.5 meter
 		bs->arrive_time = 0;
@@ -1536,8 +1549,8 @@ void BotMatch_WhereAreYou(bot_state_t *bs, bot_match_t *match) {
 	}
 	if (bestitem != -1) {
 		if (gametype == GT_CTF || gametype == GT_1FCTF) {
-			redtt = trap_AAS_AreaTravelTimeToGoalArea(bs->areanum, bs->origin, ctf_redflag.areanum, TFL_DEFAULT);
-			bluett = trap_AAS_AreaTravelTimeToGoalArea(bs->areanum, bs->origin, ctf_blueflag.areanum, TFL_DEFAULT);
+			redtt = BotAASTravelTimeProxy(bs->origin, ctf_redflag.origin);
+			bluett = BotAASTravelTimeProxy(bs->origin, ctf_blueflag.origin);
 			if (redtt < (redtt + bluett) * 0.4) {
 				BotAI_BotInitialChat(bs, "teamlocation", nearbyitems[bestitem], "red", NULL);
 			}
@@ -1550,8 +1563,8 @@ void BotMatch_WhereAreYou(bot_state_t *bs, bot_match_t *match) {
 		}
 #if FEAT_OVERLOAD || FEAT_HARVESTER
 		else if (gametype == GT_OBELISK || gametype == GT_HARVESTER) {
-			redtt = trap_AAS_AreaTravelTimeToGoalArea(bs->areanum, bs->origin, redobelisk.areanum, TFL_DEFAULT);
-			bluett = trap_AAS_AreaTravelTimeToGoalArea(bs->areanum, bs->origin, blueobelisk.areanum, TFL_DEFAULT);
+			redtt = BotAASTravelTimeProxy(bs->origin, redobelisk.origin);
+			bluett = BotAASTravelTimeProxy(bs->origin, blueobelisk.origin);
 			if (redtt < (redtt + bluett) * 0.4) {
 				BotAI_BotInitialChat(bs, "teamlocation", nearbyitems[bestitem], "red", NULL);
 			}

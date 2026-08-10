@@ -1,0 +1,6 @@
+// Violet accent overlay — qw-shared.jsx QW_ACCENTS.violet.
+token accent                "#b070ff"
+token accentDim             "#604080"
+token accentSoft            "#8050c8"
+// Low-alpha accent wash — equipped weapon-carousel slot FILL (see amber/_tokens.wui).
+token accentWash            "rgba(176,112,255,0.34)"

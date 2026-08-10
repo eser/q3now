@@ -1,0 +1,21 @@
+// boss_events.script — event-keyed set-piece proving the block model end-to-end.
+// spawn: walk to a marker + hold. enemysight: attack the player it just saw.
+// pain: bark. death: fire a downstream trigger a second monster reacts to.
+spawn {
+    print boss-spawned
+    gotomarker script_marker_a
+    hold
+    print boss-in-position
+}
+enemysight {
+    print boss-sees-player
+    attack
+}
+pain {
+    print boss-hit
+    accum 0 inc 1
+}
+death {
+    print boss-dying
+    trigger boss_dead
+}

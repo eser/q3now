@@ -2,6 +2,9 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.cmd
+
+R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
 backEndData_t	*backEndData;
 backEndState_t	backEnd;
@@ -29,7 +32,7 @@ void GL_Bind( image_t *image ) {
 	GLuint texnum;
 
 	if ( !image ) {
-		ri.Log( SEV_WARN, "GL_Bind: NULL image\n" );
+		R_LOG( rch_cmd, SEV_WARN, "GL_Bind: NULL image\n" );
 		texnum = tr.defaultImage->texnum;
 	} else {
 		texnum = image->texnum;
@@ -1006,7 +1009,7 @@ void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, byte *data, 
 
 	if ( r_speeds->integer ) {
 		end = ri.Milliseconds();
-		ri.Log( SEV_INFO, "qglTexSubImage2D %i, %i: %i msec\n", cols, rows, end - start );
+		R_LOG( rch_cmd, SEV_INFO, "qglTexSubImage2D %i, %i: %i msec\n", cols, rows, end - start );
 	}
 
 	tr.cinematicShader->stages[0]->bundle[0].image[0] = tr.scratchImage[client];
@@ -1616,7 +1619,7 @@ void RB_ShowImages( void ) {
 	qglFinish();
 
 	end = ri.Milliseconds();
-	ri.Log( SEV_INFO, "%i msec to draw all images\n", end - start );
+	R_LOG( rch_cmd, SEV_INFO, "%i msec to draw all images\n", end - start );
 }
 
 
@@ -1774,19 +1777,25 @@ static const void *RB_SwapBuffers( const void *data ) {
 		if ( backEnd.screenshotMask & SCREENSHOT_TGA && backEnd.screenshotTGA[0] ) {
 			RB_TakeScreenshot( 0, 0, gls.captureWidth, gls.captureHeight, backEnd.screenshotTGA );
 			if ( !backEnd.screenShotTGAsilent ) {
-				ri.Log( SEV_INFO, "Wrote %s\n", backEnd.screenshotTGA );
+				R_ScreenshotPrintSaved( backEnd.screenshotTGA );
 			}
 		}
 		if ( backEnd.screenshotMask & SCREENSHOT_JPG && backEnd.screenshotJPG[0] ) {
 			RB_TakeScreenshotJPEG( 0, 0, gls.captureWidth, gls.captureHeight, backEnd.screenshotJPG );
 			if ( !backEnd.screenShotJPGsilent ) {
-				ri.Log( SEV_INFO, "Wrote %s\n", backEnd.screenshotJPG );
+				R_ScreenshotPrintSaved( backEnd.screenshotJPG );
 			}
 		}
 		if ( backEnd.screenshotMask & SCREENSHOT_BMP && ( backEnd.screenshotBMP[0] || ( backEnd.screenshotMask & SCREENSHOT_BMP_CLIPBOARD ) ) ) {
 			RB_TakeScreenshotBMP( 0, 0, gls.captureWidth, gls.captureHeight, backEnd.screenshotBMP, backEnd.screenshotMask & SCREENSHOT_BMP_CLIPBOARD );
 			if ( !backEnd.screenShotBMPsilent ) {
-				ri.Log( SEV_INFO, "Wrote %s\n", backEnd.screenshotBMP );
+				R_ScreenshotPrintSaved( backEnd.screenshotBMP );
+			}
+		}
+		if ( backEnd.screenshotMask & SCREENSHOT_PNG && ( backEnd.screenshotPNG[0] || ( backEnd.screenshotMask & SCREENSHOT_PNG_CLIPBOARD ) ) ) {
+			RB_TakeScreenshotPNG( 0, 0, gls.captureWidth, gls.captureHeight, backEnd.screenshotPNG, backEnd.screenshotMask & SCREENSHOT_PNG_CLIPBOARD );
+			if ( !backEnd.screenShotPNGsilent ) {
+				R_ScreenshotPrintSaved( backEnd.screenshotPNG );
 			}
 		}
 		if ( backEnd.screenshotMask & SCREENSHOT_AVI ) {
@@ -1796,6 +1805,7 @@ static const void *RB_SwapBuffers( const void *data ) {
 		backEnd.screenshotJPG[0] = '\0';
 		backEnd.screenshotTGA[0] = '\0';
 		backEnd.screenshotBMP[0] = '\0';
+		backEnd.screenshotPNG[0] = '\0';
 		backEnd.screenshotMask = 0;
 	}
 

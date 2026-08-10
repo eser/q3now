@@ -4,6 +4,9 @@
 // tr_main.c -- main control flow for each frame
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.cmd
+
+R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
 #include <string.h> // memcpy
 
@@ -845,7 +848,7 @@ static qboolean R_GetPortalOrientations( const drawSurf_t *drawSurf, int entityN
 	// to see a surface before the server has communicated the matching
 	// portal surface entity, so we don't want to print anything here...
 
-	//ri.Log( SEV_INFO, "Portal surface without a portal entity\n" );
+	//R_LOG( rch_cmd, SEV_INFO, "Portal surface without a portal entity\n" );
 
 	return qfalse;
 }
@@ -1100,7 +1103,7 @@ static qboolean R_MirrorViewBySurface( const drawSurf_t *drawSurf, int entityNum
 
 	// don't recursively mirror
 	if ( tr.viewParms.portalView != PV_NONE ) {
-		ri.Log( SEV_DEBUG, "WARNING: recursive mirror/portal found\n" );
+		R_LOG( rch_cmd, SEV_DEBUG, "WARNING: recursive mirror/portal found\n" );
 		return qfalse;
 	}
 

@@ -5,7 +5,6 @@
 #include "server.h"
 #include "../qcommon/cm_local.h"
 #include "../qcommon/wired/protocol.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 static int s_sv_reload_mod = -1;
@@ -337,7 +336,7 @@ static void SV_Kick_f( void ) {
 				if ( iter->state < CS_CONNECTED ) {
 					continue;
 				}
-				if ( iter->netchan.remoteAddress.type == NA_LOOPBACK ) {
+				if ( SV_IsHostClient( iter ) ) {
 					continue;
 				}
 				SV_DropClient( iter, "was kicked" );
@@ -359,7 +358,7 @@ static void SV_Kick_f( void ) {
 		}
 		return;
 	}
-	if ( cl->netchan.remoteAddress.type == NA_LOOPBACK ) {
+	if ( SV_IsHostClient( cl ) ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "Cannot kick host player\n" );
 		return;
 	}
@@ -416,7 +415,7 @@ static void SV_KickAll_f( void ) {
 			continue;
 		}
 
-		if ( cl->netchan.remoteAddress.type == NA_LOOPBACK ) {
+		if ( SV_IsHostClient( cl ) ) {
 			continue;
 		}
 
@@ -450,7 +449,7 @@ static void SV_KickNum_f( void ) {
 	if ( !cl ) {
 		return;
 	}
-	if ( cl->netchan.remoteAddress.type == NA_LOOPBACK ) {
+	if ( SV_IsHostClient( cl ) ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "Cannot kick host player\n");
 		return;
 	}
@@ -491,12 +490,12 @@ static void SV_Ban_f( void ) {
 		return;
 	}
 
-	if( cl->netchan.remoteAddress.type == NA_LOOPBACK ) {
+	if( SV_IsHostClient( cl ) ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "Cannot kick host player\n");
 		return;
 	}
 
-	// Phase 6.4: id authorize server is gone — these legacy banUser/banClient
+	// id authorize server is gone — these legacy banUser/banClient
 	// commands are dead. Use SV_AddBanToList()/SV_RehashBans_f() (also gated
 	// behind USE_BANS) for local file-based banning instead.
 	Com_Log( SEV_INFO, LOG_CH(ch_server), "banUser is deprecated; use SV_RehashBans/SV_BanAddr instead\n" );
@@ -528,12 +527,12 @@ static void SV_BanNum_f( void ) {
 	if ( !cl ) {
 		return;
 	}
-	if( cl->netchan.remoteAddress.type == NA_LOOPBACK ) {
+	if( SV_IsHostClient( cl ) ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "Cannot kick host player\n");
 		return;
 	}
 
-	// Phase 6.4: id authorize server is gone — see SV_Ban_f for details.
+	// id authorize server is gone — see SV_Ban_f for details.
 	Com_Log( SEV_INFO, LOG_CH(ch_server), "banClient is deprecated; use SV_RehashBans/SV_BanAddr instead\n" );
 }
 
@@ -1372,11 +1371,19 @@ static void SV_DumpUser_f( void ) {
 
 /*
 =================
-SV_KillServer
+SV_StopServer
+
+Command-driven lifecycle: explicitly stop the running server
+subsystem. The client (if any) is detached by SV_Shutdown's own teardown;
+this is the server-side counterpart to the client-only 'disconnect'.
 =================
 */
-static void SV_KillServer_f( void ) {
-	SV_Shutdown( "killserver" );
+static void SV_StopServer_f( void ) {
+	if ( !com_sv_running->integer ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
+		return;
+	}
+	SV_Shutdown( "stopserver" );
 }
 
 
@@ -2021,7 +2028,7 @@ void SV_AddOperatorCommands( void ) {
 	Cmd_AddCommand ("sectorlist", SV_SectorList_f);
 	Cmd_AddCommand ("map", SV_Map_f);
 	Cmd_SetCommandCompletionFunc( "map", SV_CompleteMapName );
-	Cmd_AddCommand ("killserver", SV_KillServer_f);
+	Cmd_AddCommand ("stopserver", SV_StopServer_f);
 #ifdef USE_BANS
 	Cmd_AddCommand("rehashbans", SV_RehashBans_f);
 	Cmd_AddCommand("listbans", SV_ListBans_f);

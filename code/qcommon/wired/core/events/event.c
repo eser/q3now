@@ -13,7 +13,6 @@ once-only debug log entry and returns a no-op value.
 #include "q_shared.h"
 #include "qcommon.h"
 #include "event.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 void Event_RegisterType( event_type_t type )
@@ -199,7 +198,7 @@ void WiredCoreEvents_DispatchWithText( wce_event_type_t type, int clientNum, con
 
 
 // =========================================================================
-// Q3 event queue — extracted from common.c Phase 1 Group 2
+// Q3 event queue — extracted from common.c
 // =========================================================================
 
 #define MAX_PUSHED_EVENTS   256
@@ -231,17 +230,19 @@ static const char *Sys_EventName( sysEventType_t evType ) {
 	return evNames[evType];
 }
 
-void Sys_QueEvent( int evTime, sysEventType_t evType, int value, int value2, int ptrLength, void *ptr ) {
+void Sys_QueEvent( uint64_t evTime, sysEventType_t evType, int value, int value2, int ptrLength, void *ptr ) {
 	sysEvent_t	*ev;
 
 	if ( evTime == 0 ) {
-		evTime = Sys_Milliseconds();
+		evTime = (uint64_t)Sys_NanoTime();   // ns timestamp (see sysEvent_t.evTime)
 	}
 
-	// try to combine all sequential mouse moves in one event
+	// try to combine all sequential mouse moves in one event. SE_MOUSE carries
+	// dx/dy as bit-cast float, so the merge must sum in float — an integer +=
+	// would add the float bit patterns and corrupt the delta.
 	if ( evType == SE_MOUSE && lastEvent->evType == SE_MOUSE && eventHead != eventTail ) {
-		lastEvent->evValue += value;
-		lastEvent->evValue2 += value2;
+		lastEvent->evValue  = SE_MouseEnc( SE_MouseDec( lastEvent->evValue )  + SE_MouseDec( value ) );
+		lastEvent->evValue2 = SE_MouseEnc( SE_MouseDec( lastEvent->evValue2 ) + SE_MouseDec( value2 ) );
 		lastEvent->evTime = evTime;
 		return;
 	}
@@ -249,7 +250,7 @@ void Sys_QueEvent( int evTime, sysEventType_t evType, int value, int value2, int
 	ev = &eventQue[ eventHead & MASK_QUED_EVENTS ];
 
 	if ( eventHead - eventTail >= MAX_QUED_EVENTS ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_system), "%s(type=%s,keys=(%i,%i),time=%i): overflow\n", __func__, Sys_EventName( evType ), value, value2, evTime );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "%s(type=%s,keys=(%i,%i),time=%llu): overflow\n", __func__, Sys_EventName( evType ), value, value2, (unsigned long long)evTime );
 		// we are discarding an event, but don't leak memory
 		if ( ev->evPtr ) {
 			Z_Free( ev->evPtr );
@@ -272,7 +273,7 @@ void Sys_QueEvent( int evTime, sysEventType_t evType, int value, int value2, int
 static sysEvent_t Com_GetSystemEvent( void ) {
 	sysEvent_t  ev;
 	const char	*s;
-	int			evTime;
+	uint64_t	evTime;
 
 	// return if we have data
 	if ( eventHead - eventTail > 0 )
@@ -280,7 +281,7 @@ static sysEvent_t Com_GetSystemEvent( void ) {
 
 	Sys_SendKeyEvents();
 
-	evTime = Sys_Milliseconds();
+	evTime = (uint64_t)Sys_NanoTime();   // ns timestamp (see sysEvent_t.evTime)
 
 	// check for console commands
 	s = Sys_ConsoleInput();
@@ -410,12 +411,12 @@ void Com_RunAndTimeServerPacket( const netadr_t *evFrom, msg_t *buf ) {
 int Com_EventLoop( void ) {
 	sysEvent_t	ev;
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	byte		bufData[ MAX_MSGLEN_BUF ];
 	msg_t		buf;
 
 	MSG_Init( &buf, bufData, MAX_MSGLEN );
-#endif // !DEDICATED
+#endif // !HEADLESS
 
 	while ( 1 ) {
 		ev = Com_GetEvent();
@@ -423,7 +424,7 @@ int Com_EventLoop( void ) {
 		// if no more events are available
 		if ( ev.evType == SE_NONE ) {
 			// manually send packet events for the loopback channel
-#ifndef DEDICATED
+#ifndef HEADLESS
 			netadr_t evFrom;
 			while ( NET_GetLoopPacket( NS_CLIENT, &evFrom, &buf ) ) {
 				CL_PacketEvent( &evFrom, &buf );
@@ -434,25 +435,29 @@ int Com_EventLoop( void ) {
 					Com_RunAndTimeServerPacket( &evFrom, &buf );
 				}
 			}
-#endif // !DEDICATED
-			return ev.evTime;
+#endif // !HEADLESS
+			// Com_EventLoop's contract is ms; evTime is stored ns — convert.
+			return (int)( ev.evTime / 1000000ULL );
 		}
 
 		switch ( ev.evType ) {
-#ifndef DEDICATED
+#ifndef HEADLESS
 		case SE_KEY:
-			CL_KeyEvent( ev.evValue, ev.evValue2, ev.evTime );
+			// CL_KeyEvent expects ms; evTime is ns — convert at the boundary.
+			CL_KeyEvent( ev.evValue, ev.evValue2, (unsigned)( ev.evTime / 1000000ULL ) );
 			break;
 		case SE_CHAR:
 			CL_CharEvent( ev.evValue );
 			break;
 		case SE_MOUSE:
-			CL_MouseEvent( ev.evValue, ev.evValue2 );
+			// SE_MOUSE dx/dy are bit-cast float — decode before dispatch.
+			CL_MouseEvent( SE_MouseDec( ev.evValue ), SE_MouseDec( ev.evValue2 ) );
 			break;
 		case SE_JOYSTICK_AXIS:
-			CL_JoystickEvent( ev.evValue, ev.evValue2, ev.evTime );
+			// CL_JoystickEvent expects ms; evTime is ns — convert at the boundary.
+			CL_JoystickEvent( ev.evValue, ev.evValue2, (int)( ev.evTime / 1000000ULL ) );
 			break;
-#endif // !DEDICATED
+#endif // !HEADLESS
 		case SE_CONSOLE:
 			Cbuf_AddText( (char *)ev.evPtr );
 			Cbuf_AddText( "\n" );
@@ -484,5 +489,6 @@ int Com_Milliseconds( void ) {
 		}
 	} while ( ev.evType != SE_NONE );
 
-	return ev.evTime;
+	// Com_Milliseconds returns ms; evTime is stored ns — convert.
+	return (int)( ev.evTime / 1000000ULL );
 }

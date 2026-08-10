@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Weapon rl — rocket launcher (cylinder + fins) -->
+  <path d="M 12 42 L 58 42 L 67 33 L 92 33 L 92 67 L 67 67 L 58 58 L 12 58 Z M 29 58 L 29 75 L 42 75 L 42 58 Z" fill="black" fill-rule="evenodd"/>
+</svg>

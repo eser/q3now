@@ -2,6 +2,9 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn B — renderer.cmd
+
+R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
 // Per-frame shadow of the last-emitted 2D color and MSDF outline state.
 // Sentinel value -1.0 is never a valid color float; reset each frame.
@@ -23,32 +26,32 @@ static void R_PerformanceCounters( void ) {
 	}
 
 	if (r_speeds->integer == 1) {
-		ri.Log( SEV_INFO, "%i/%i shaders/surfs %i leafs %i verts %i/%i tris %.2f mtex\n",
+		R_LOG( rch_cmd, SEV_INFO, "%i/%i shaders/surfs %i leafs %i verts %i/%i tris %.2f mtex\n",
 			backEnd.pc.c_shaders, backEnd.pc.c_surfaces, tr.pc.c_leafs, backEnd.pc.c_vertexes,
 			backEnd.pc.c_indexes/3, backEnd.pc.c_totalIndexes/3, R_SumOfUsedImages()/1000000.0);
 	} else if (r_speeds->integer == 2) {
-		ri.Log( SEV_INFO, "(patch) %i sin %i sclip  %i sout %i bin %i bclip %i bout\n",
+		R_LOG( rch_cmd, SEV_INFO, "(patch) %i sin %i sclip  %i sout %i bin %i bclip %i bout\n",
 			tr.pc.c_sphere_cull_patch_in, tr.pc.c_sphere_cull_patch_clip, tr.pc.c_sphere_cull_patch_out,
 			tr.pc.c_box_cull_patch_in, tr.pc.c_box_cull_patch_clip, tr.pc.c_box_cull_patch_out );
-		ri.Log( SEV_INFO, "(md3) %i sin %i sclip  %i sout %i bin %i bclip %i bout\n",
+		R_LOG( rch_cmd, SEV_INFO, "(md3) %i sin %i sclip  %i sout %i bin %i bclip %i bout\n",
 			tr.pc.c_sphere_cull_md3_in, tr.pc.c_sphere_cull_md3_clip, tr.pc.c_sphere_cull_md3_out,
 			tr.pc.c_box_cull_md3_in, tr.pc.c_box_cull_md3_clip, tr.pc.c_box_cull_md3_out );
 	} else if (r_speeds->integer == 3) {
-		ri.Log( SEV_INFO, "viewcluster: %i\n", tr.viewCluster );
+		R_LOG( rch_cmd, SEV_INFO, "viewcluster: %i\n", tr.viewCluster );
 	} else if (r_speeds->integer == 4) {
 		if ( backEnd.pc.c_dlightVertexes ) {
-			ri.Log( SEV_INFO, "dlight srf:%i  culled:%i  verts:%i  tris:%i\n",
+			R_LOG( rch_cmd, SEV_INFO, "dlight srf:%i  culled:%i  verts:%i  tris:%i\n",
 				tr.pc.c_dlightSurfaces, tr.pc.c_dlightSurfacesCulled,
 				backEnd.pc.c_dlightVertexes, backEnd.pc.c_dlightIndexes / 3 );
 		}
 	}
 	else if (r_speeds->integer == 5 )
 	{
-		ri.Log( SEV_INFO, "zFar: %.0f\n", tr.viewParms.zFar );
+		R_LOG( rch_cmd, SEV_INFO, "zFar: %.0f\n", tr.viewParms.zFar );
 	}
 	else if (r_speeds->integer == 6 )
 	{
-		ri.Log( SEV_INFO, "flare adds:%i tests:%i renders:%i\n",
+		R_LOG( rch_cmd, SEV_INFO, "flare adds:%i tests:%i renders:%i\n",
 			backEnd.pc.c_flareAdds, backEnd.pc.c_flareTests, backEnd.pc.c_flareRenders );
 	}
 
@@ -162,6 +165,14 @@ void R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	if ( tr.drawSurfCmd == NULL ) {
 		tr.drawSurfCmd = cmd;
 	}
+	// HUD-translucency fix (2026-06-30): mark this as a frame that renders a
+	// real world scene, so RB_TransitionToUI keeps (LOADs) the tonemapped
+	// scene as the destination for the 2D UI pass. RDF_NOWORLDMODEL views
+	// (UI 3D model previews — rotating weapon/player in menus) are NOT a
+	// world scene; they must not flip a pure-2D menu into the LOAD branch.
+	if ( !( cmd->refdef.rdflags & RDF_NOWORLDMODEL ) ) {
+		backEnd.sceneRenderedThisFrame = qtrue;
+	}
 #endif
 }
 
@@ -212,6 +223,72 @@ void RE_StretchPic( float x, float y, float w, float h,
 		return;
 	}
 	cmd->commandId = RC_STRETCH_PIC;
+	cmd->shader = R_GetShaderByHandle( hShader );
+	cmd->x = x;
+	cmd->y = y;
+	cmd->w = w;
+	cmd->h = h;
+	cmd->s1 = s1;
+	cmd->t1 = t1;
+	cmd->s2 = s2;
+	cmd->t2 = t2;
+}
+
+
+/*
+=============
+RE_DrawMenuBackdrop
+
+Records a RC_MENU_BACKDROP command: a blended full-viewport procedural backdrop
+(menubg.frag) drawn into the currently-open 2D UI pass. The backend writes the
+per-frame MenuBgBlock UBO and issues a RAL fullscreen-quad draw as the backmost
+UI layer; the menu content queued after it composites on top.
+=============
+*/
+void RE_DrawMenuBackdrop( float x, float y, float w, float h,
+					float time, float mouseX, float mouseY, float transition ) {
+	menuBackdropCommand_t	*cmd;
+
+	if ( !tr.registered ) {
+		return;
+	}
+	cmd = R_GetCommandBuffer( sizeof( *cmd ) );
+	if ( !cmd ) {
+		return;
+	}
+	cmd->commandId  = RC_MENU_BACKDROP;
+	cmd->x = x;
+	cmd->y = y;
+	cmd->w = w;
+	cmd->h = h;
+	cmd->time       = time;
+	cmd->mouseX     = mouseX;
+	cmd->mouseY     = mouseY;
+	cmd->transition = transition;
+}
+
+
+/*
+=============
+RE_StretchPicOverlay
+
+Same as RE_StretchPic but tags the quad RC_STRETCH_PIC_OVERLAY so the backend
+defers it to the post-gamma present pass (display/sRGB space) instead of the
+linear-HDR UI pass. Used by widgets flagged `composite overlay`.
+=============
+*/
+void RE_StretchPicOverlay( float x, float y, float w, float h,
+					float s1, float t1, float s2, float t2, qhandle_t hShader ) {
+	stretchPicCommand_t	*cmd;
+
+	if ( !tr.registered ) {
+		return;
+	}
+	cmd = R_GetCommandBuffer( sizeof( *cmd ) );
+	if ( !cmd ) {
+		return;
+	}
+	cmd->commandId = RC_STRETCH_PIC_OVERLAY;
 	cmd->shader = R_GetShaderByHandle( hShader );
 	cmd->x = x;
 	cmd->y = y;
@@ -314,6 +391,8 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 #ifdef USE_VULKAN
 	backEnd.doneBloom = qfalse;
 	backEnd.doneUIPass = qfalse;
+	backEnd.sceneRenderedThisFrame = qfalse;	// HUD-translucency fix: cleared each frame; R_AddDrawSurfCmd sets it when a real world scene is queued.
+	backEnd.numOverlayQuads = 0;	// composite-overlay quads accumulate per frame; gamma present pass consumes + this clears for the next.
 #endif
 
 	backEnd.color2D.u32 = ~0U;

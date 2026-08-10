@@ -2,6 +2,9 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 
 
@@ -674,7 +677,7 @@ static void R_MarkLeaves (void) {
 		{
 			if(tr.visClusters[i] != tr.visClusters[tr.visIndex] && r_showCluster->integer)
 			{
-				ri.Log( SEV_INFO, "found cluster:%i  area:%i  index:%i\n", cluster, leaf->area, i);
+				R_LOG( rch_assets, SEV_INFO, "found cluster:%i  area:%i  index:%i\n", cluster, leaf->area, i);
 			}
 			tr.visIndex = i;
 			return;
@@ -688,7 +691,7 @@ static void R_MarkLeaves (void) {
 	if ( showcluster_changed || r_showCluster->integer ) {
 		s_showcluster_mod = r_showCluster->modificationCount;
 		if ( r_showCluster->integer ) {
-			ri.Log( SEV_INFO, "cluster:%i  area:%i\n", cluster, leaf->area );
+			R_LOG( rch_assets, SEV_INFO, "cluster:%i  area:%i\n", cluster, leaf->area );
 		}
 	}
 

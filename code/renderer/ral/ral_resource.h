@@ -43,6 +43,20 @@ typedef struct {
 ralBuffer_t *Ral_CreateBuffer ( ralBackend_t *b, const ralBufferCreateInfo_t *ci );
 void         Ral_DestroyBuffer( ralBuffer_t *buf );
 
+// Adopt an existing engine-owned VkBuffer into a RAL handle without taking
+// ownership of its memory (ownsBuffer=false) — symmetric with Ral_AdoptBindGroup
+// / Ral_AdoptTexture / Ral_AdoptPipelineLayout. Ral_DestroyBuffer frees only the
+// wrapper, never the underlying VkBuffer/VkDeviceMemory. The VkBuffer is passed
+// as an opaque pointer-width handle to keep this header free of Vulkan types.
+ralBuffer_t *Ral_AdoptBuffer  ( ralBackend_t *b, void *vkBuffer, size_t size, const char *debugName );
+
+// Read the backend-native handle for an owned (or adopted) ralBuffer_t. On
+// Vulkan this is the VkBuffer the wrapper carries. Mirrors
+// Ral_GetTextureImageHandle / Ral_GetBindGroupHandle. Returns NULL on bad arg.
+// Consumers cast back to the platform-native handle type — used by the renderer
+// to issue a raw vkCmdFillBuffer (per-frame SSBO zeroing) on a RAL-owned buffer.
+void *Ral_GetBufferHandle( const ralBuffer_t *buf );
+
 // Mapping — host-visible memory only. Returns a persistent pointer; the
 // backend handles coherent vs. explicit flush per memory type.
 void *Ral_MapBuffer  ( ralBuffer_t *buf );
@@ -87,6 +101,20 @@ typedef struct {
 	ralTextureUsage_t usage;              // bitmask of RAL_TEXTURE_USAGE_*
 	ralMemoryType_t   memory;
 	const char       *debugName;
+	// async-compute: when qtrue, the image is created with concurrent
+	// queue sharing across the graphics + compute families (VK_SHARING_MODE_CONCURRENT
+	// on Vulkan), so a resource written by an async-compute pass and read by graphics
+	// (or vice-versa) needs only a semaphore for execution ordering — no per-frame
+	// queue-family-ownership-transfer barriers. Ignored when the device has no
+	// dedicated compute family (the backend falls back to EXCLUSIVE, single-queue).
+	// Default qfalse = EXCLUSIVE (the historical behaviour for every other texture).
+	qboolean          concurrentGraphicsCompute;
+	// async-transfer: when qtrue, the image is created with concurrent queue sharing
+	// across the graphics + transfer families, so an upload copy submitted on the
+	// transfer queue and sampled by graphics needs only a semaphore for ordering — no
+	// queue-family-ownership-transfer barrier. Ignored when there is no dedicated
+	// transfer family (the backend falls back to EXCLUSIVE). Default qfalse = EXCLUSIVE.
+	qboolean          concurrentGraphicsTransfer;
 } ralTextureCreateInfo_t;
 
 typedef struct {
@@ -99,12 +127,20 @@ typedef struct {
 	uint32_t            arrayLayerCount;   // 0 → all remaining
 } ralTextureViewCreateInfo_t;
 
-// One mip/layer slice for Ral_TextureUploadAsync.
+// One mip/layer slice for Ral_TextureUploadAsync. regionWidth/regionHeight
+// default (== 0) means "the full mip extent"; non-zero values let the caller
+// upload a sub-rectangle of the mip — used by the bindless mirror in
+// vk_upload_image_data so the per-tile merged-lightmap atlas uploads can be
+// propagated into the RAL texture without re-uploading the whole atlas.
+// Sub-region uploads (regionWidth/Height != 0) suppress the automatic GPU
+// mip-gen path; the caller is responsible for providing every mip.
 typedef struct {
 	uint32_t    mipLevel;
 	uint32_t    arrayLayer;
 	const void *data;
 	uint64_t    dataSize;
+	uint32_t    offsetX, offsetY;
+	uint32_t    regionWidth, regionHeight;
 } ralTextureUploadDesc_t;
 
 ralTexture_t     *Ral_CreateTexture     ( ralBackend_t *b, const ralTextureCreateInfo_t *ci );
@@ -113,7 +149,33 @@ ralTextureView_t *Ral_CreateTextureView ( ralBackend_t *b, const ralTextureViewC
 void              Ral_DestroyTextureView( ralTextureView_t *view );
 ralFence_t       *Ral_TextureUploadAsync( ralTexture_t *tex, const ralTextureUploadDesc_t *region );
 
-// Phase 7.4c-submit-A4 — adopt-style wrapper around an existing backend
+// Residency ticket returned by Ral_TextureUploadBegin. `fence` signals when the
+// GPU copy has completed (poll with Ral_FenceSignaled); `texture` is the upload
+// destination. `synchronous` is qtrue when the upload already completed inline
+// before this returned (the texture is resident now and `fence` is already
+// signaled) — the caller can skip the residency poll and bind immediately.
+typedef struct {
+	ralFence_t   *fence;
+	ralTexture_t *texture;
+	qboolean      synchronous;
+} ralUploadTicket_t;
+
+// Begins an upload of `region` into `tex` and returns a residency ticket. The
+// caller binds a placeholder until the ticket reports resident (synchronous ==
+// qtrue, or Ral_FenceSignaled(fence) == qtrue), then swaps the real texture in.
+// Coexists with Ral_TextureUploadAsync (which the sub-region / mip-gen / depth
+// callers keep using). The returned fence is owned by the caller (destroy it
+// once residency is observed).
+ralUploadTicket_t Ral_TextureUploadBegin( ralTexture_t *tex, const ralTextureUploadDesc_t *region );
+
+// Make a batch of async-uploaded textures visible to graphics sampling by issuing one
+// graphics-queue command buffer that transitions each to SHADER_READ_ONLY on the
+// graphics queue, then submits it. The caller must have confirmed each texture's upload
+// fence signaled (the transfer copy is complete) before calling. After this the layout
+// is visible to every subsequent graphics submit regardless of path. Renderer-internal.
+void Ral_TextureAcquireBatchToGraphics( ralBackend_t *b, ralTexture_t **textures, uint32_t count );
+
+// Adopt-style wrapper around an existing backend
 // VkImage (caller's qvkCreateImage retains lifetime ownership of the image +
 // memory + default view). Mirrors Ral_AdoptPipelineLayout / Ral_AdoptRenderPass:
 // ownsImage=qfalse so Ral_DestroyTexture frees only the wrapper struct, the
@@ -122,24 +184,68 @@ ralFence_t       *Ral_TextureUploadAsync( ralTexture_t *tex, const ralTextureUpl
 // reverse-lookup consumers can construct ralImageMemoryBarrier_t / ralImageCopy_t
 // extents without poking the Vk image). `aspect` is the VkImageAspectFlags
 // bitmask the caller's image was created with (COLOR / DEPTH / DEPTH+STENCIL) —
-// passed through to ralImageMemoryBarrier_t builders. The wrapper does NOT
-// carry an image view (defaultView = VK_NULL_HANDLE) — adopted textures are
-// referenced only by their VkImage handle in the 7.4c-submit-A4 callsite set
-// (CopyImage / PipelineBarrierFull image-memory barriers).
+// passed through to ralImageMemoryBarrier_t builders. The wrapper carries the
+// caller's VkImageView as its defaultView (NULL if the caller has none) so an
+// adopted texture can be used as a dynamic-rendering attachment, plus its RAL
+// format for pipelines/views built from the wrapper.
 //
 // Used at the 6 renderer-owned internal-image sites (depth_image, color_image,
 // tonemapped_image, smaa.input_image, smaa.edges_image, smaa.blend_image)
 // adopted into ralTexture_t* sibling fields by vk_ral_adopt_static_internal_textures.
+// `externalView` is the image's VkImageView (NULL if none) — becomes the
+// wrapper's defaultView so the adopted texture can be a dynamic-rendering
+// attachment. `fmt` is the texture's RAL format, recorded on the wrapper.
 ralTexture_t *Ral_AdoptTexture( ralBackend_t *b,
                                 void *externalImage,
+                                void *externalView,
+                                ralFormat_t fmt,
                                 uint32_t width, uint32_t height,
                                 uint32_t aspect,
                                 const char *debugName );
 
-// Phase 7.4c-submit-A4: read the backend-native VkImage from an adopted (or
+// Adopt an existing 2D-ARRAY image rendered one layer at a time via dynamic
+// rendering (the cascaded shadow map is the consumer). `externalDefaultView` is
+// the full-array sampling view (becomes defaultView); `layerViews` is a
+// caller-owned array of `layerCount` single-layer attachment views (each with
+// baseArrayLayer=i, layerCount=1 — e.g. the renderer's per-cascade shadow views).
+// VkRenderingInfo has no baseArrayLayer field, so the per-layer offset must live
+// in the bound attachment imageView: Ral_BeginRendering selects
+// layerViews[ri->depthAttachmentLayerIndex] as the depth imageView. arrayLayers
+// is set to layerCount so the whole-array layout transition covers every layer.
+// ownsImage=qfalse like Ral_AdoptTexture: the caller retains lifetime of the
+// image AND all views; Ral_DestroyTexture frees only the wrapper (never the
+// caller-owned layerViews). Single-layer callers keep using Ral_AdoptTexture
+// (unchanged).
+ralTexture_t *Ral_AdoptArrayTexture( ralBackend_t *b,
+                                     void *externalImage,
+                                     void *externalDefaultView,
+                                     const void *const *layerViews,
+                                     uint32_t layerCount,
+                                     ralFormat_t fmt,
+                                     uint32_t width, uint32_t height,
+                                     uint32_t aspect,
+                                     const char *debugName );
+
+// Read the backend-native VkImage from an adopted (or
 // owned) ralTexture_t. Mirrors Ral_GetPipelineLayoutHandle / Ral_GetBindGroupHandle.
 // Returns NULL on bad arg. Consumers cast back to VkImage.
 void *Ral_GetTextureImageHandle( const ralTexture_t *tex );
+
+// Read the backend-native VkImageView from a ralTextureView_t — for binding a
+// RAL-created view into a raw-Vulkan descriptor write (e.g. the engine-resources
+// set). Mirrors Ral_GetTextureImageHandle. Returns NULL on bad arg. Consumers
+// cast back to VkImageView.
+void *Ral_GetTextureViewHandle( const ralTextureView_t *view );
+
+// Re-sync the texture's tracked layout to a layout the consumer transitioned the
+// image to itself (e.g. an explicit pipeline barrier outside RAL). RAL uses the
+// tracked layout as the `oldLayout` for its own transitions (Ral_BeginRendering
+// etc.); without this call the tracked layout would drift from the real image
+// layout and RAL would emit a wrong or missing transition barrier. Mutates only
+// the tracked field — records no command and issues no barrier. `vkLayout` is a
+// VkImageLayout value. Required for adopted textures the renderer transitions
+// directly; harmless on RAL-owned textures.
+void Ral_SetTextureLayout( ralTexture_t *tex, uint32_t vkLayout );
 
 // ════════════════════════════════════════════════════════════════════════
 // Samplers (§3.4)
@@ -167,6 +273,19 @@ typedef struct {
 
 ralSampler_t *Ral_CreateSampler ( ralBackend_t *b, const ralSamplerCreateInfo_t *ci );
 void          Ral_DestroySampler( ralSampler_t *s );
+
+// Backend handle (VkSampler) for a RAL sampler, so a consumer that writes a raw
+// descriptor (VkDescriptorImageInfo.sampler) can use a RAL-created sampler.
+// Mirrors Ral_GetTextureViewHandle. NULL-safe.
+void *Ral_GetSamplerHandle( const ralSampler_t *s );
+
+// Adopt-style wrapper around an existing backend VkSampler (caller retains
+// lifetime ownership). Mirrors Ral_AdoptTexture: the wrapper carries
+// ownsSampler=qfalse so Ral_DestroySampler frees only the wrapper struct.
+// Used by the bindless-ral-consolidate path so the renderer-owned
+// vk.samplers[] table can populate the RAL bindless set's sampler-array
+// binding without RAL re-creating the samplers.
+ralSampler_t *Ral_AdoptSampler( ralBackend_t *b, void *externalSampler, const char *debugName );
 
 // ════════════════════════════════════════════════════════════════════════
 // BindGroupLayout / BindGroup (§3.5, §4) — the bindless-native abstraction.
@@ -196,7 +315,7 @@ typedef struct {
 
 ralBindGroupLayout_t *Ral_CreateBindGroupLayout ( ralBackend_t *b, const ralBindGroupLayoutCreateInfo_t *ci );
 
-// Phase 7.4c-bindgroup-pre — wrap a pre-existing backend descriptor-set
+// Wrap a pre-existing backend descriptor-set
 // layout (e.g. the renderer's own VkDescriptorSetLayout) in a
 // ralBindGroupLayout_t WITHOUT creating a new one. `externalLayout` is the
 // backend-specific handle cast to void* (VkDescriptorSetLayout / id<MTLBindGroupLayout>
@@ -214,12 +333,20 @@ ralBindGroupLayout_t *Ral_AdoptBindGroupLayout( ralBackend_t *b,
 
 void                  Ral_DestroyBindGroupLayout( ralBindGroupLayout_t *layout );
 
+// Read the backend-native handle for a ralBindGroupLayout_t. On Vulkan this
+// is the VkDescriptorSetLayout the wrapper carries. Mirrors
+// Ral_GetPipelineLayoutHandle / Ral_GetBindGroupHandle. Returns NULL on bad
+// arg. Consumers cast back to the platform-native handle type. Used by the
+// bindless-ral-consolidate path so the renderer can slot the RAL-owned
+// bindless layout into its shared VkPipelineLayout's set_layouts[].
+void *Ral_GetBindGroupLayoutHandle( const ralBindGroupLayout_t *layout );
+
 // ════════════════════════════════════════════════════════════════════════
-// Phase 7.4c-submit-A2 — ralPipelineLayout_t foundation.
+// ralPipelineLayout_t foundation.
 //
 // Adopt-style wrapper around an existing backend pipeline layout
-// (VkPipelineLayout on Vulkan). Mirrors the Ral_AdoptBindGroupLayout pattern
-// from 7.4c-bindgroup-pre: ownsLayout=qfalse so Ral_DestroyPipelineLayout
+// (VkPipelineLayout on Vulkan). Mirrors the Ral_AdoptBindGroupLayout pattern:
+// ownsLayout=qfalse so Ral_DestroyPipelineLayout
 // skips vkDestroyPipelineLayout (the renderer's existing qvkCreatePipelineLayout
 // site retains lifetime ownership). Wrapper carries the bind-group-layout
 // references that the layout was created with — currently informational only;
@@ -230,19 +357,19 @@ void                  Ral_DestroyBindGroupLayout( ralBindGroupLayout_t *layout )
 // qvkCreatePipelineLayout site (vk.pipeline_layout, vk.pipeline_layout_smaa,
 // vk.shadowMap.depthLayout, etc.) into a sibling ral_pipeline_layout field,
 // then passes the typed wrapper to the new Ral_CmdPushConstants / Ral_CmdBind*
-// surface added in this turn.
+// surface.
 ralPipelineLayout_t *Ral_AdoptPipelineLayout( ralBackend_t *b,
                                               void *externalLayout,
                                               const char *debugName );
 void                 Ral_DestroyPipelineLayout( ralPipelineLayout_t *pl );
 
-// Phase 7.4c-submit-A2: read the backend-native handle for a ralPipelineLayout_t.
+// Read the backend-native handle for a ralPipelineLayout_t.
 // On Vulkan this is the VkPipelineLayout the wrapper carries. Mirrors
 // Ral_GetBindGroupHandle. Returns NULL on bad arg. Consumers cast back to the
 // platform-native handle type.
 void *Ral_GetPipelineLayoutHandle( const ralPipelineLayout_t *pl );
 
-// Phase 7.4c-submit-A2 — opaque wrappers for VkRenderPass / VkFramebuffer
+// Opaque wrappers for VkRenderPass / VkFramebuffer
 // adoption. The renderer's render passes + framebuffers stay owned by the
 // existing qvkCreate{RenderPass,Framebuffer} sites; these wrappers are
 // metadata + a stable RAL handle for the typed Ral_CmdBeginRenderPass surface.
@@ -281,7 +408,7 @@ typedef struct {
 ralBindGroup_t *Ral_CreateBindGroup ( ralBackend_t *b, const ralBindGroupCreateInfo_t *ci );
 void            Ral_DestroyBindGroup( ralBindGroup_t *g );
 
-// Phase 7.4c-bindgroup: adopt an EXISTING VkDescriptorSet (or platform
+// Adopt an EXISTING VkDescriptorSet (or platform
 // equivalent) into a ralBindGroup_t wrapper. Mirrors Ral_AdoptBindGroupLayout:
 // the caller's pool retains lifetime ownership of the underlying set; the
 // wrapper carries ownsSet=qfalse, so Ral_DestroyBindGroup frees only the
@@ -294,7 +421,7 @@ ralBindGroup_t *Ral_AdoptBindGroup( ralBackend_t *b,
                                     const ralBindGroupLayout_t *layout,
                                     const char *debugName );
 
-// Phase 7.4c-bindgroup: read the backend-native handle for an adopted (or
+// Read the backend-native handle for an adopted (or
 // owned) ralBindGroup_t. On Vulkan this is the VkDescriptorSet that the
 // wrapper carries. The renderer uses this for VkDescriptorSet→ralBindGroup_t
 // reverse-lookup at parallel bind-call sites during the parallel-paths era.
@@ -305,6 +432,13 @@ void *Ral_GetBindGroupHandle( const ralBindGroup_t *g );
 // Sparse update of a bindless table — per-frame, adds a newly-resident
 // texture without recreating the BindGroup.
 void Ral_BindGroupSetTextureAt( ralBindGroup_t *g, uint32_t slot, ralTexture_t *tex );
+
+// Sparse update of a bindless sampler-array binding — written as new
+// VkSamplers enter the dedup pool. Mirrors Ral_BindGroupSetTextureAt; the
+// layout must declare a SAMPLER binding (any count) for the write to find
+// a destination. NULL sampler is a no-op clear (PARTIALLY_BOUND lets the
+// stale slot persist; explicit-null writes are invalid in Vulkan).
+void Ral_BindGroupSetSamplerAt( ralBindGroup_t *g, uint32_t slot, ralSampler_t *s );
 
 #ifdef __cplusplus
 }

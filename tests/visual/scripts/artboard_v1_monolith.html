@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>v1_monolith</title>
+<link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin:0; padding:0; background:#0a0908; color:#e8dfd0; font-family:'Oxanium',system-ui,sans-serif; overflow:hidden; }
+  #root { width:1440px; height:900px; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" src="../../../docs/wui-claude-design-canonical-v2/project/qw-shared.jsx"></script>
+<script type="text/babel" src="../../../docs/wui-claude-design-canonical-v2/project/qw-variants.jsx"></script>
+<script type="text/babel">
+  const qs = new URLSearchParams(location.search);
+  const mode = qs.get('mode') || 'dark';
+  const accent = qs.get('accent') || 'amber';
+  setQWTheme(mode, accent);
+  ReactDOM.createRoot(document.getElementById('root')).render(<V1_Monolith />);
+</script>
+<script>
+// W-17 dispatch 5b S5: DOM walker. Runs after React mount; emits a Clay-mirror
+// JSON tree (see tests/visual/README.md "DOM-Clay mapping") into a script
+// element that `--dump-dom` retrieves.
+function hexFromCss(s) {
+  if (!s) return '';
+  const m = s.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (!m) return '';
+  const h = (n) => parseInt(n).toString(16).padStart(2, '0');
+  return '#' + h(m[1]) + h(m[2]) + h(m[3]);
+}
+function classifyEl(el) {
+  if (el.tagName === 'IMG') return 'image';
+  if (el.tagName === 'SVG' || el.tagName === 'svg') return 'image';
+  const cs = getComputedStyle(el);
+  if (cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && el.children.length === 0) return 'rect';
+  if (cs.borderWidth && parseFloat(cs.borderWidth) > 0) return 'border';
+  return 'container';
+}
+function walk(el) {
+  const r = el.getBoundingClientRect();
+  const cs = getComputedStyle(el);
+  const node = {
+    node_id: el.id || '',
+    type: classifyEl(el),
+    rect: { x: r.x, y: r.y, w: r.width, h: r.height },
+    style: {
+      color: hexFromCss(cs.color),
+      bg:    hexFromCss(cs.backgroundColor),
+    },
+    children: [],
+  };
+  for (const c of el.childNodes) {
+    if (c.nodeType === Node.TEXT_NODE) {
+      const t = c.textContent.trim();
+      if (t) {
+        node.children.push({
+          node_id: '', type: 'text',
+          rect: { x: r.x, y: r.y, w: r.width, h: r.height },
+          style: { color: hexFromCss(cs.color) },
+          text: t.slice(0, 200),
+        });
+      }
+    } else if (c.nodeType === Node.ELEMENT_NODE) {
+      node.children.push(walk(c));
+    }
+  }
+  return node;
+}
+function emitDump() {
+  const tree = walk(document.getElementById('root'));
+  const tag = document.createElement('script');
+  tag.id = 'qw_dom_dump';
+  tag.type = 'application/json';
+  tag.textContent = JSON.stringify(tree);
+  document.body.appendChild(tag);
+}
+// Delay until after React mount + font load. virtual-time-budget covers it.
+setTimeout(emitDump, 2000);
+</script>
+</body>
+</html>

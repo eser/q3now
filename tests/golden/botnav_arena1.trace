@@ -1,0 +1,128 @@
+[BOTNAV] FindPath engine: 36 polys -> 9 pts
+[BOTNAV] FindPath engine: 57 polys -> 7 pts
+[BOTNAV] FindPath engine: 52 polys -> 14 pts
+[BOTNAV] FindPath engine: 58 polys -> 4 pts
+[BOTNAV] FindPath engine: 29 polys -> 4 pts
+[BOTNAV] FindPath engine: 85 polys -> 10 pts
+[BOTNAV] FindPath engine: 89 polys -> 12 pts [OMC]
+[BOTNAV] FindPath engine: 61 polys -> 9 pts
+[BOTNAV] FindPath engine: 30 polys -> 3 pts
+[BOTNAV] FindPath engine: 38 polys -> 2 pts
+[BOTNAV] FindPath engine: 83 polys -> 10 pts
+[BOTNAV] FindPath engine: 19 polys -> 4 pts
+[BOTNAV] FindPath engine: 56 polys -> 4 pts
+[BOTNAV] FindPath engine: 52 polys -> 11 pts
+[BOTNAV] FindPath engine: 54 polys -> 4 pts
+[BOTNAV] FindPath engine: 30 polys -> 4 pts
+[BOTNAV] FindPath engine: 29 polys -> 4 pts
+[BOTNAV] FindPath engine: 27 polys -> 4 pts
+[BOTNAV] FindPath engine: 30 polys -> 3 pts
+client 1 repath (reason: new) O=(1052,1432,24) -> G=(668,2096,15): 3 pts
+wp 0: (1052,1432,24) flags=0x01
+wp 1: (918,1734,27) flags=0x00
+wp 2: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+[BOTNAV] FindPath engine: 26 polys -> 3 pts
+client 1 repath (reason: new) O=(1041,1458,24) -> G=(668,2096,15): 3 pts
+wp 0: (1041,1458,24) flags=0x01
+wp 1: (918,1734,27) flags=0x00
+wp 2: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+[BOTNAV] FindPath engine: 23 polys -> 3 pts
+client 1 repath (reason: new) O=(1028,1487,47) -> G=(668,2096,15): 3 pts
+wp 0: (1028,1487,47) flags=0x01
+wp 1: (918,1734,27) flags=0x00
+wp 2: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+[BOTNAV] FindPath engine: 19 polys -> 3 pts
+client 1 repath (reason: new) O=(1015,1516,62) -> G=(668,2096,15): 3 pts
+wp 0: (1015,1516,62) flags=0x01
+wp 1: (918,1734,27) flags=0x00
+wp 2: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+[BOTNAV] FindPath engine: 19 polys -> 3 pts
+client 1 repath (reason: new) O=(1002,1545,69) -> G=(668,2096,15): 3 pts
+wp 0: (1002,1545,69) flags=0x01
+wp 1: (918,1734,27) flags=0x00
+wp 2: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+[BOTNAV] FindPath engine: 19 polys -> 3 pts
+client 1 repath (reason: new) O=(989,1575,68) -> G=(668,2096,15): 3 pts
+wp 0: (989,1575,68) flags=0x01
+wp 1: (918,1734,27) flags=0x00
+wp 2: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+[BOTNAV] FindPath engine: 18 polys -> 3 pts
+client 1 repath (reason: new) O=(976,1604,59) -> G=(668,2096,15): 3 pts
+wp 0: (976,1604,59) flags=0x01
+wp 1: (918,1734,27) flags=0x00
+wp 2: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+[BOTNAV] FindPath engine: 18 polys -> 3 pts
+client 1 repath (reason: new) O=(963,1633,42) -> G=(668,2096,15): 3 pts
+wp 0: (963,1633,42) flags=0x01
+wp 1: (918,1734,27) flags=0x00
+wp 2: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+[BOTNAV] FindPath engine: 28 polys -> 8 pts
+[BOTNAV] FindPath engine: 49 polys -> 8 pts
+[BOTNAV] FindPath engine: 38 polys -> 12 pts
+[BOTNAV] FindPath engine: 33 polys -> 6 pts
+[BOTNAV] FindPath engine: 21 polys -> 3 pts
+[BOTNAV] FindPath engine: 77 polys -> 11 pts
+[BOTNAV] FindPath engine: 81 polys -> 13 pts [OMC]
+[BOTNAV] FindPath engine: 53 polys -> 10 pts
+[BOTNAV] FindPath engine: 16 polys -> 3 pts
+[BOTNAV] FindPath engine: 30 polys -> 4 pts
+[BOTNAV] FindPath engine: 75 polys -> 11 pts
+[BOTNAV] FindPath engine: 5 polys -> 2 pts
+[BOTNAV] FindPath engine: 31 polys -> 5 pts
+[BOTNAV] FindPath engine: 38 polys -> 9 pts
+[BOTNAV] FindPath engine: 29 polys -> 4 pts
+[BOTNAV] FindPath engine: 16 polys -> 2 pts
+[BOTNAV] FindPath engine: 15 polys -> 2 pts
+[BOTNAV] FindPath engine: 13 polys -> 2 pts
+[BOTNAV] FindPath engine: 16 polys -> 3 pts
+client 1 repath (reason: timer) O=(943,1677,24) -> G=(668,2096,15): 3 pts
+wp 0: (943,1677,24) flags=0x01
+wp 1: (918,1734,27) flags=0x00
+wp 2: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+[BOTNAV] FindPath engine: 16 polys -> 3 pts
+client 1 repath (reason: new) O=(941,1681,24) -> G=(668,2096,15): 3 pts
+wp 0: (941,1681,24) flags=0x01
+wp 1: (918,1734,27) flags=0x00
+wp 2: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+[BOTNAV] FindPath engine: 15 polys -> 3 pts
+client 1 repath (reason: new) O=(930,1707,24) -> G=(668,2096,15): 3 pts
+wp 0: (930,1707,24) flags=0x01
+wp 1: (918,1734,27) flags=0x00
+wp 2: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+client 1 wp 1 reached (flags=0x00)
+[BOTNAV] FindPath engine: 13 polys -> 2 pts
+client 1 repath (reason: new) O=(922,1736,46) -> G=(668,2096,15): 2 pts
+wp 0: (922,1736,46) flags=0x01
+wp 1: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+[BOTNAV] FindPath engine: 12 polys -> 2 pts
+client 1 repath (reason: new) O=(925,1767,55) -> G=(668,2096,15): 2 pts
+wp 0: (925,1767,55) flags=0x01
+wp 1: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+[BOTNAV] FindPath engine: 12 polys -> 2 pts
+client 1 repath (reason: new) O=(928,1799,56) -> G=(668,2096,15): 2 pts
+wp 0: (928,1799,56) flags=0x01
+wp 1: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+[BOTNAV] FindPath engine: 12 polys -> 2 pts
+client 1 repath (reason: new) O=(930,1833,49) -> G=(668,2096,15): 2 pts
+wp 0: (930,1833,49) flags=0x01
+wp 1: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)
+[BOTNAV] FindPath engine: 12 polys -> 2 pts
+client 1 repath (reason: new) O=(932,1868,34) -> G=(668,2096,15): 2 pts
+wp 0: (932,1868,34) flags=0x01
+wp 1: (668,2096,15) flags=0x02
+client 1 wp 0 reached (flags=0x01)

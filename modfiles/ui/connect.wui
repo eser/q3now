@@ -1,0 +1,145 @@
+// connect.wmenu - Wired UI connection progress
+// Flex column layout -- vertical positioning handled by the layout engine.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "connect"
+	fullScreen 1
+	rect 0 0 1 1
+	style 1
+	// Transparent menu fill: connect is a progress OVERLAY on the "loading"
+	// layer, composited on top of loading_screen.wui's fullScreen backdrop
+	// (grid + glow + divider). An opaque backcolor here would fully occlude
+	// that backdrop (both menus are fullScreen on the same layer and connect
+	// registers later → emits on top). Alpha 0 → the compositor's
+	// color[3]<=0 gate drops the panel fill, so only connect's text/button
+	// items draw, over the visible backdrop. The flex-column layout
+	// (fullScreen + rect 0 0 1 1) is retained so the progress text stays
+	// centered; only the opaque fill is removed.
+	backcolor 0 0 0 0
+	layer "loading"
+	layout column
+	padding 0.05
+	gap 0.01
+
+	// spacer to push content toward center
+	itemDef {
+		type 0
+		rect 0 0 1.0 0
+		decoration
+		visible 1
+		grow 1
+	}
+
+	// "Connecting..." — hidden when com_errorMessage is set (CD1 fix:
+	// prevents two contradictory status lines when the error_popup.wmenu
+	// modal floats on top of this screen).
+	itemDef {
+		type 0
+		text "Connecting..."
+		rect 0 0 1.0 0.050
+		textalign 1
+		font $font_sans 24
+		forecolor $bone
+		decoration
+		visible 1
+		grow 0
+		cvarTest "com_errorMessage"
+		showCvar { "" }
+	}
+
+	// dimmed "Please wait" label — also hidden when error is set
+	itemDef {
+		type 0
+		text "Please wait"
+		rect 0 0 1.0 0.033
+		textalign 1
+		font $font_sans 17
+		forecolor $boneDim
+		decoration
+		visible 1
+		grow 0
+		cvarTest "com_errorMessage"
+		showCvar { "" }
+	}
+
+	itemDef {
+		type 1
+		text "Cancel"
+		rect 0 0 1.0 0.050
+		textalign 1
+		font $font_sans_bold 19
+		forecolor $accent
+		forecolor.active $accent
+		visible 1
+		grow 0
+		action { exec "disconnect" }
+	}
+
+	// spacer to push content toward center
+	itemDef {
+		type 0
+		rect 0 0 1.0 0
+		decoration
+		visible 1
+		grow 1
+	}
+
+	// ── 7.30 dynamic status lines (B+X path) ──────────────────────────
+	// Published per-frame from cl_wired_ui.c::WiredUI_DrawConnectScreen.
+	// Use `position viewport` so the rects are normalized against the
+	// viewport (not the flex column above) — legacy SCR Text_Draw uses
+	// pixel-absolute coords (200, 260+N*16 at 640×480 reference =
+	// 0.3125, 0.5417+N*0.0333 normalized). Forecolors match legacy
+	// Text_Draw color args verbatim. Legacy SCR still draws these
+	// during the C-15 transition cycle (deterministic overdraw).
+
+	itemDef {
+		name "connect_info"
+		position viewport
+		rect 0.3125 0.5417 0.5 0.0333
+		font $font_sans 8
+		forecolor $bone
+		text ""
+		bind "connect.servername"
+		decoration
+		visible 1
+	}
+
+	itemDef {
+		name "connect_status"
+		position viewport
+		rect 0.3125 0.5750 0.5 0.0333
+		font $font_sans 8
+		forecolor $boneDim
+		text ""
+		bind "connect.state"
+		decoration
+		visible 1
+	}
+
+	itemDef {
+		name "connect_error"
+		position viewport
+		rect 0.3125 0.6083 0.5 0.0333
+		font $font_sans 8
+		forecolor 1 0.45 0.35 1
+		text ""
+		bind "connect.error"
+		decoration
+		visible 1
+	}
+
+	itemDef {
+		name "connect_motd"
+		position viewport
+		rect 0.3125 0.6417 0.5 0.0333
+		font $font_sans 8
+		forecolor $boneDim
+		text ""
+		bind "connect.motd"
+		decoration
+		visible 1
+	}
+}

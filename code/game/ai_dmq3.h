@@ -108,12 +108,6 @@ void BotCheckAttack(bot_state_t *bs);
 void BotAIBlocked(bot_state_t *bs, bot_moveresult_t *moveresult, int activate);
 //AI to predict obstacles
 int BotAIPredictObstacles(bot_state_t *bs, bot_goal_t *goal);
-//enable or disable the areas the blocking entity is in
-void BotEnableActivateGoalAreas(bot_activategoal_t *activategoal, int enable);
-//pop an activate goal from the stack
-int BotPopFromActivateGoalStack(bot_state_t *bs);
-//clear the activate goal stack
-void BotClearActivateGoalStack(bot_state_t *bs);
 //returns the team the bot is in
 int BotTeam(bot_state_t *bs);
 //returns the opposite team of the bot
@@ -157,6 +151,8 @@ int ClientFromName(char *name);
 int ClientOnSameTeamFromName(bot_state_t *bs, char *name);
 //
 int BotPointAreaNum(vec3_t origin);
+//distance-based travel-time proxy (centiseconds) for the generic AAS travel-time sites
+int BotAASTravelTimeProxy(vec3_t from, vec3_t to);
 //
 void BotMapScripts(bot_state_t *bs);
 

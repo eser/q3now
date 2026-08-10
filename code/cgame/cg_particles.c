@@ -5,7 +5,6 @@
 // cg_particles.c
 
 #include "cg_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 //#define WOLF_PARTICLES

@@ -8,14 +8,14 @@ r_q1_texture.h  —  Q1 embedded miptex expansion, shared across all renderers.
 Compiled into each renderer shared library via renderercommon/.
 Only includes headers visible to renderercommon compilation:
   - code/qcommon/q_shared.h  (byte, qboolean, Q_stricmp, …)
-  - code/renderercommon/tr_public.h  (bspFile_t forward-decl, ri extern)
+  - code/renderercommon/tr_public.h  (mapFile_t forward-decl, ri extern)
 Deliberately does NOT include tr_common.h or tr_local.h (renderer-specific).
 ===========================================================================
 */
 #pragma once
 
 #include "../qcommon/q_shared.h"
-#include "tr_public.h"   /* bspFile_t forward-decl, extern refimport_t ri */
+#include "tr_public.h"   /* mapFile_t forward-decl, extern refimport_t ri */
 
 /* Renderer-agnostic image flags passed to the createImage callback.
    Each renderer's callback wrapper maps these to its own imgFlags_t values.
@@ -111,7 +111,7 @@ typedef struct image_s *(*R_Q1_CreateImageArrayFn)( const char *name,
 void               R_Q1_SetCreateImageFn( R_Q1_CreateImageFn fn );
 void               R_Q1_SetLoadImageFn( R_Q1_LoadImageFn fn );
 void               R_Q1_SetCreateImageArrayFn( R_Q1_CreateImageArrayFn fn );
-void               R_Q1_PrepareTextures( const bspFile_t *bsp );
+void               R_Q1_PrepareTextures( const mapFile_t *bsp );
 void               R_Q1_FreeTextures( void );
 const q1TexInfo_t *R_Q1_GetTexForName( const char *name );
 void               R_Q1_CacheShader( const char *name, struct shader_s *sh );

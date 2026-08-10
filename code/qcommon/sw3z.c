@@ -24,7 +24,6 @@
 
 #include <lz4.h>
 #include <lz4frame.h>
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 /* ── CRC32C (Castagnoli) ─────────────────────────────────────────────
@@ -240,7 +239,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	/* ── validate all entries and compute total name buffer size ── */
 	int numValidFiles = 0;
 	int nameLen = 0;
-	unsigned int maxCompressedSize = 0;	/* Phase 4-#2: cap for the per-pack compBuf scratch */
+	unsigned int maxCompressedSize = 0;	/* cap for the per-pack compBuf scratch */
 	for ( int i = 0; i < (int)header.entryCount; i++ ) {
 		sw3zEntry_t *e = &entries[i];
 
@@ -264,7 +263,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 			return NULL;
 		}
 
-		/* security: data range bounds check (Phase 4-#6).
+		/* security: data range bounds check.
 		 * Reject any entry whose data extent walks past the file end —
 		 * a malformed sw3z used to fseek+fread off the end at read time.
 		 * Using uint64 arithmetic to avoid 32-bit overflow on the sum. */
@@ -346,7 +345,7 @@ pack_t *SW3Z_LoadArchive( const char *filename ) {
 	pack->referenced     = 0;
 	pack->exclude        = qfalse;
 
-	/* Phase 4-#2: scratch buffer sized to the biggest entry. compScratch
+	/* scratch buffer sized to the biggest entry. compScratch
 	 * stays NULL until the first SW3Z_ReadEntry hits an LZ4 entry; from
 	 * that point on it lives until SW3Z_CloseArchive. */
 	pack->maxCompressedSize = maxCompressedSize;
@@ -497,16 +496,16 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 		 *
 		 * Pooled global LZ4F_dctx (single-threaded I/O makes this safe).
 		 * The compressed-data scratch buffer is also pooled per-pack
-		 * (Phase 4 change #2). This branch carries no Z_Malloc/Z_Free
+		 * This branch carries no Z_Malloc/Z_Free
 		 * pair on the hot path — it's the single biggest source of
-		 * allocator churn on map load before Phase 4. */
+		 * allocator churn on map load. */
 		size_t dstSize;
 
 		if ( !SW3Z_EnsureLZ4Context( pack->pakFilename ) ) {
 			return -1;
 		}
 
-		/* Per-pack reusable scratch (Phase 4-#2). On the first LZ4 read
+		/* Per-pack reusable scratch. On the first LZ4 read
 		 * we allocate up to maxCompressedSize so subsequent reads never
 		 * grow. The cache disk-load path persists maxCompressedSize so
 		 * a cache hit knows the cap without re-walking entries. If
@@ -577,7 +576,7 @@ int SW3Z_ReadEntry( pack_t *pack, int entryIndex, void *buf, int bufSize ) {
 
 	/* ── CRC32C verification ──
 	 *
-	 * Phase 4-#3 trade-off:
+	 * CRC32C trade-off:
 	 *   - SW3Z_COMP_LZ4: LZ4F's content checksum (XXH32) was already
 	 *     verified inside LZ4F_decompress on the path above. Re-running
 	 *     CRC32C here would catch only one extra threat — an attacker

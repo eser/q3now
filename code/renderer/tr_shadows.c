@@ -295,7 +295,10 @@ void RB_ProjectionShadowDeform( void ) {
 	ground[1] = backEnd.or.axis[1][2];
 	ground[2] = backEnd.or.axis[2][2];
 
-	groundDist = backEnd.or.origin[2] - backEnd.currentEntity->e.shadowPlane;
+	// refEntity_t.shadowPlane was retired; the legacy projection-shadow ground
+	// plane is now treated as 0 (this GL1 deform is unreachable — no shipped
+	// shader uses deformVertexes projectionShadow).
+	groundDist = backEnd.or.origin[2];
 
 #ifdef USE_PMLIGHT
 	if ( R_GetDlightMode() == 2 && r_shadows->integer == 2 )

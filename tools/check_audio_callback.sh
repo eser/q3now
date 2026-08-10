@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # check_audio_callback.sh
 #
-# Static analysis: ensure S_MiniaudioCallback in snd_miniaudio.c is lock-free.
-# The audio callback runs on a separate thread; it must NOT use mutexes,
-# allocators, logging, or cvar mutation. Math, memcpy/memset, and atomic
-# operations are allowed.
+# Static analysis: ensure every function that runs on the miniaudio audio
+# thread is lock-free. Those functions must NOT use mutexes, allocators,
+# logging, or cvar mutation. Math, memcpy/memset, and atomic operations are
+# allowed.
+#
+# Scanned functions: the raw-device callback (S_MiniaudioCallback) and the
+# ma_engine output tap (S_EngineProcess). Both are pulled by miniaudio on its
+# internal audio thread, so both are held to the same rule.
 #
 # Exit 0 = clean, exit 1 = forbidden token found.
 #
@@ -22,36 +26,47 @@ if [ ! -f "$SOURCE" ]; then
     exit 1
 fi
 
-# Extract S_MiniaudioCallback function body using awk.
-# Find the function definition line, then track brace depth until closing }.
-BODY=$(awk '
-    /^static void S_MiniaudioCallback/ { in_func=1 }
-    in_func {
-        line = $0
-        for (i=1; i<=length(line); i++) {
-            c = substr(line, i, 1)
-            if (c == "{") { depth++; started=1 }
-            else if (c == "}") {
-                depth--
-                if (depth == 0 && started) {
-                    print line
-                    exit
+# The audio-thread functions to scan. Each name is matched at the start of its
+# definition line (any return type). Add new audio-thread callbacks here so the
+# lock-free rule keeps its teeth.
+#
+# S_EngineProcess is ma_engine's post-mix output tap, invoked on ma_engine's
+# internal audio thread when the engine owns a device. (In read-driven capture
+# mode there is no audio thread; the tap runs on the calling main thread.)
+AUDIO_THREAD_FUNCS=(
+    "S_EngineProcess"
+)
+
+# Extract a single function body from $SOURCE by name using awk.
+# Finds the definition line (name followed by '('), then tracks brace depth
+# until the matching closing '}'.
+extract_body() {
+    local func="$1"
+    awk -v fn="$func" '
+        $0 ~ ("(^|[^_[:alnum:]])" fn "[[:space:]]*\\(") && !in_func { in_func=1 }
+        in_func {
+            line = $0
+            for (i=1; i<=length(line); i++) {
+                c = substr(line, i, 1)
+                if (c == "{") { depth++; started=1 }
+                else if (c == "}") {
+                    depth--
+                    if (depth == 0 && started) {
+                        print line
+                        exit
+                    }
                 }
             }
+            print line
         }
-        print line
-    }
-' "$SOURCE")
+    ' "$SOURCE"
+}
 
-if [ -z "$BODY" ]; then
-    echo "ERROR: could not locate S_MiniaudioCallback in $SOURCE"
-    exit 1
-fi
-
-# Strip /* ... */ block comments and // line comments so that
+# Strip /* ... */ block comments and // line comments from a body so that
 # documentation containing words like "lock-free" or "no mutex" does not
 # trigger false positives.
-BODY_NO_COMMENTS=$(printf '%s\n' "$BODY" | awk '
+strip_comments() {
+    awk '
     BEGIN { in_block_comment = 0 }
     {
         line = $0
@@ -81,7 +96,8 @@ BODY_NO_COMMENTS=$(printf '%s\n' "$BODY" | awk '
         }
         print result
     }
-')
+'
+}
 
 # Forbidden token list. Each entry is an extended regex.
 FORBIDDEN_TOKENS=(
@@ -117,24 +133,40 @@ FORBIDDEN_TOKENS=(
     "Cvar_Get"
 )
 
-VIOLATIONS=()
+TOTAL_VIOLATIONS=0
 
-for token in "${FORBIDDEN_TOKENS[@]}"; do
-    if printf '%s\n' "$BODY_NO_COMMENTS" | grep -qE -- "$token"; then
-        match=$(printf '%s\n' "$BODY_NO_COMMENTS" | grep -nE -- "$token" | head -3)
-        VIOLATIONS+=("$token")
-        echo "VIOLATION: '$token' found in S_MiniaudioCallback body"
-        printf '%s\n' "$match" | sed 's/^/    /'
+for func in "${AUDIO_THREAD_FUNCS[@]}"; do
+    BODY=$(extract_body "$func")
+    if [ -z "$BODY" ]; then
+        echo "ERROR: could not locate $func in $SOURCE"
+        exit 1
+    fi
+
+    BODY_NO_COMMENTS=$(printf '%s\n' "$BODY" | strip_comments)
+
+    func_violations=0
+    for token in "${FORBIDDEN_TOKENS[@]}"; do
+        if printf '%s\n' "$BODY_NO_COMMENTS" | grep -qE -- "$token"; then
+            match=$(printf '%s\n' "$BODY_NO_COMMENTS" | grep -nE -- "$token" | head -3)
+            func_violations=$((func_violations + 1))
+            TOTAL_VIOLATIONS=$((TOTAL_VIOLATIONS + 1))
+            echo "VIOLATION: '$token' found in $func body"
+            printf '%s\n' "$match" | sed 's/^/    /'
+        fi
+    done
+
+    if [ "$func_violations" -eq 0 ]; then
+        echo "PASS: $func is lock-free (zero forbidden tokens)."
     fi
 done
 
-if [ ${#VIOLATIONS[@]} -gt 0 ]; then
+if [ "$TOTAL_VIOLATIONS" -gt 0 ]; then
     echo ""
-    echo "FAIL: ${#VIOLATIONS[@]} forbidden token(s) found in S_MiniaudioCallback."
-    echo "The audio callback runs on a separate thread and must remain lock-free."
+    echo "FAIL: $TOTAL_VIOLATIONS forbidden token(s) found across audio-thread functions."
+    echo "These functions run on the miniaudio audio thread and must remain lock-free."
     echo "See code/client/snd_miniaudio.c header comment for the audio thread rules."
     exit 1
 fi
 
-echo "PASS: S_MiniaudioCallback is lock-free (zero forbidden tokens)."
+echo "PASS: all audio-thread functions are lock-free."
 exit 0

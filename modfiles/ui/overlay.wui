@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+//
+// overlay.wmenu — Wired UI top-layer overlay (cursor + tooltip).
+//
+// Post-C-15 the menu cursor sprite + hover tooltip render via the
+// compositor instead of imperatively from WiredUI_Refresh's body. Both
+// items are decoration-only custom-draw stubs: the .wmenu rect exists
+// only to keep the compositor walking the item; the routines themselves
+// (WiredUI_CustomDraw_Cursor / WiredUI_CustomDraw_Tooltip in
+// cl_wired_ui.c) ignore the rect and anchor to wui_cursorX/wui_cursorY
+// pixel coordinates.
+//
+// Layer "overlay" (WUI_LAYER_OVERLAY) is topmost and gated on
+// Key_GetCatcher() & KEYCATCH_UI in wui_layer_active() — so this menu
+// is emitted only while the UI catches input (main menu, in-game pause,
+// dialogs). Tooltip's own focus + delay gates live in the routine.
+
+menuDef {
+	name "overlay"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	layer "overlay"
+
+	// ── Hover tooltip ───────────────────────────────────────────────
+	// Drawn first so the cursor sprite lands above it when both
+	// activate simultaneously (rare but well-defined ordering).
+	itemDef {
+		name "wui_tooltip"
+		rect 0 0 1 1
+		decoration
+		visible 1
+		custom "wui_tooltip"
+	}
+
+	// ── Cursor sprite ───────────────────────────────────────────────
+	// 32x32 sprite anchored at wui_cursorX/wui_cursorY (post-clamp,
+	// updated by WiredUI_MouseEvent). Falls back to an orange cross
+	// when wui_cursorShader failed to register.
+	itemDef {
+		name "wui_cursor"
+		rect 0 0 1 1
+		decoration
+		visible 1
+		custom "wui_cursor"
+	}
+}

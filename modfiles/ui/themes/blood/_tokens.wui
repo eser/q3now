@@ -1,0 +1,6 @@
+// Blood accent overlay — qw-shared.jsx QW_ACCENTS.blood.
+token accent                "#ff4a30"
+token accentDim             "#8a2818"
+token accentSoft            "#c8341c"
+// Low-alpha accent wash — equipped weapon-carousel slot FILL (see amber/_tokens.wui).
+token accentWash            "rgba(255,74,48,0.34)"

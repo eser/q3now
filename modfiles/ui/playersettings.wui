@@ -1,0 +1,275 @@
+// playersettings.wui -- q3now Player settings submenu (Phase 4c canonical)
+//
+// Phase 4c settings panel pattern reuse (§6.1).
+// Player profile cluster: name + FOV + crosshair + rail color.
+// IDENTITY group now hosts the model browser: a 3D preview pane
+// (ownerdraw "player_model") beside a character picker (feeder
+// "characters") over a skin picker (feeder "skins"). The pickers
+// write the char/skin cvars; the ownerdraw reads them — coupling is
+// cvar-only, no extra glue.
+
+#include "ui/widgets/qw_settings_nav.wui"
+#include "ui/widgets/qw_settings_chrome.wui"
+
+menuDef {
+	name "playersettings"
+	layer "menu"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "settings_root"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		background "layered" effects "base+glow+noise+vignette"
+
+		QW_SETTINGS_TOPBAR("q3now / Settings / Player")
+
+		itemDef {
+			name "settings_content"
+			type container
+			rect 0 0 1 0.83
+			direction row
+			padding $content_padding_y $content_padding_x
+			gap $spacing_lg
+			grow 1
+			height GROW
+
+			itemDef {
+				name "settings_nav"
+				type container
+				rect 0 0 0.30 1
+				direction column
+				gap $spacing_sm
+
+				itemDef { name "nav_label" type 0 rect 0 0 1 0.025 height FIT text "CATEGORIES" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+				QW_SETTINGS_NAV("nav_sound",       "sound",       "Sound",       "sound")
+				QW_SETTINGS_NAV("nav_video",       "video",       "Video",       "video")
+				QW_SETTINGS_NAV("nav_display",     "display",     "Display",     "display")
+				QW_SETTINGS_NAV("nav_controls",    "controls",    "Controls",    "controls")
+				QW_SETTINGS_NAV("nav_network",     "network",     "Network",     "network")
+				QW_SETTINGS_NAV("nav_player",      "player",      "Player",      "playersettings")
+				QW_SETTINGS_NAV("nav_preferences", "preferences", "Preferences", "preferences")
+				itemDef { name "nav_spacer" type container rect 0 0 1 0 grow 1 }
+			}
+
+			itemDef {
+				name "settings_panel"
+				type container
+				rect 0 0 0.70 1
+				direction column
+				padding $card_padding
+				gap $card_gap_internal
+				grow 1
+				width GROW
+
+				itemDef { name "panel_header" type 0 rect 0 0 1 0.05 height FIT text "Player" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
+				itemDef { name "panel_subheader" type 0 rect 0 0 1 0.025 height FIT text "Profile / FOV / Crosshair / Rail" textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+
+				itemDef {
+					name "panel_content"
+					type container
+					rect 0 0 1 0.7
+					direction column
+					gap $spacing_md
+					grow 1
+					height GROW
+					scroll
+					alignY start
+					padding 0 0
+
+					// two-column grid row
+					itemDef {
+						name "grid_row_1"
+						type container
+						rect 0 0 1 0
+						height FIT
+						width PERCENT 1
+						grow 0
+						direction row
+						gap $spacing_md
+						alignY start
+						padding 0 0
+
+					// ── IDENTITY group box ─────────────────────
+					itemDef {
+						name "group_identity"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						alignY start
+
+						itemDef { name "group_identity_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "IDENTITY" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+						itemDef { name "row_name" type 4 rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Name" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_Name" maxChars 32 visible 1 grow 0 }
+						itemDef { name "row_fov" type 10 rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "FOV" textalign 0 font $font_sans 13 forecolor $bone cvarFloat "cg_fov" 100 75 130 visible 1 grow 0 }
+							// ── MODEL sub-label ────────────────────────
+							itemDef { name "model_label" type 0 rect 0 0 1 2vh height FIT text "MODEL" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+
+							// Model browser row: portrait preview pane (3D ownerdraw)
+							// on the left, character + skin pickers stacked on the right.
+							itemDef {
+								name "model_browser"
+								type container
+								rect 0 0 1 0
+								height FIXED 200px
+								width PERCENT 1
+								direction row
+								gap $spacing_md
+								alignY start
+								grow 0
+
+								// 3D player-model preview. The rect becomes a refdef
+								// sub-viewport (WiredOD_PlayerModel) — a spinning head
+								// driven by the char/skin cvars the pickers write.
+								itemDef {
+									name "model_preview"
+									type 0
+									ownerdraw "player_model"
+									rect 0 0 0 1
+									width FIXED 150px
+									height PERCENT 1
+									backcolor 0.03 0.03 0.05 1
+									border 1px $line
+									radius $radius_md
+									style 1
+									visible 1
+									grow 0
+								}
+
+								// Right column: character list over skin list.
+								itemDef {
+									name "model_pickers"
+									type container
+									rect 0 0 0 1
+									direction column
+									gap $spacing_sm
+									height PERCENT 1
+									grow 1
+									width GROW
+
+									// Character picker (FEEDER_CHARACTERS). Selection sets
+									// the `char` cvar and auto-picks a skin. Wrapped in a
+									// grow container because the listbox emits FLOATING and
+									// otherwise reserves no vertical space.
+									itemDef {
+										name "char_frame"
+										type container
+										rect 0 0 1 0
+										direction column
+										grow 1
+										height GROW
+										width PERCENT 1
+
+										itemDef {
+											name "charlist"
+											type 6
+											rect 0 0 1 1
+											width PERCENT 1
+											height GROW
+											grow 1
+											font $font_sans 12
+											forecolor $bone
+											backcolor $panelDeep
+											style 1
+											feeder "characters"
+											elementheight 22
+											columns 1 0 0 8
+											visible 1
+										}
+									}
+
+									// Skin picker (FEEDER_SKINS) — lists the selected
+									// character's skins; selection sets the `skin` cvar.
+									itemDef {
+										name "skin_frame"
+										type container
+										rect 0 0 1 0
+										direction column
+										grow 1
+										height GROW
+										width PERCENT 1
+
+										itemDef {
+											name "skinlist"
+											type 6
+											rect 0 0 1 1
+											width PERCENT 1
+											height GROW
+											grow 1
+											font $font_sans 12
+											forecolor $bone
+											backcolor $panelDeep
+											style 1
+											feeder "skins"
+											elementheight 22
+											columns 1 0 0 8
+											visible 1
+										}
+									}
+								}
+							}
+					}
+
+					// ── CROSSHAIR + RAIL group box ─────────────
+					itemDef {
+						name "group_crosshair"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						alignY start
+
+						itemDef { name "group_crosshair_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "CROSSHAIR + RAIL" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+						itemDef { name "row_crosshair" type segmented rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Crosshair" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_crosshairAlpha" cvarFloatList { "None" 0 "30%" 30 "60%" 60 "100%" 100 } visible 1 grow 0 }
+						itemDef { name "row_rail_color" type 12 rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Rail Color" textalign 0 font $font_sans 13 forecolor $bone cvar "color1" cvarFloatList { "White" 1 "Red" 2 "Green" 3 "Blue" 4 "Yellow" 5 "Cyan" 6 "Purple" 7 "Orange" 8 } visible 1 grow 0 }
+						itemDef { name "row_rail_style" type segmented rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Rail Style" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_railStyle" cvarFloatList { "Beam" 1 "Spiral" 2 } visible 1 grow 0 }
+					}
+					}
+
+				}
+
+				itemDef {
+					name "panel_footer"
+					type container
+					rect 0 0 1 0.05
+					direction row
+					gap $spacing_md
+					alignY center
+					height FIT
+
+					QW_SETTINGS_BACK_BTN
+					QW_SETTINGS_FOOTER_SPACER
+					QW_SETTINGS_FOOTER_BTN("btn_apply",  "Apply",  $accent,  { exec "writeconfig wired-overrides.cfg" })
+				}
+			}
+		}
+
+		QW_SETTINGS_BOTTOMBAR("left/right to adjust")
+	}
+
+	onOpen { setcvar "ui_settingsSection" "player" }
+	onESC  { close }
+}

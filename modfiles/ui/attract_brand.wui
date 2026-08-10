@@ -1,0 +1,179 @@
+// attract_brand.wui — attract-mode brand splash (Brutalist Poster direction)
+//
+// Static identity frame shown while the game is idle. Swiss/brutalist poster:
+// a full-height red spine on the left edge (the shared signature across all
+// three attract screens), an oversized offset QUAKE / WIRED wordmark in bone,
+// a red index caption, and a bottom rule with drop-in tags + INSERT COIN.
+//
+// Authoring discipline (avoids the (0,0) collapse that killed the old attract
+// screens): every element is position-absolute with explicit vw/vh sizing, and
+// every text leaf carries `height FIT` + a real width (PERCENT/FIT) exactly like
+// the shipped main.wui hero (main.wui:50-63). NEVER a bare `rect 0 0 1.0 X`
+// inside a flex parent.
+//
+// Red spine/index use $poster_red (#e6332b) so the poster reads aggressive-red
+// independent of the active accent palette. Font is $font_sans_bold (the heaviest
+// real display atlas). Tokens: $ink $bone $boneDim $line $font_mono $poster_red.
+
+menuDef {
+	name "attract_brand"
+	layer "bg_attract"
+	rect 0 0 1.0 1.0
+	fullScreen 1
+	visible 0
+	backcolor $ink   // $ink #0a0908
+
+	// ── red spine (shared signature; left edge, full height) ─────────
+	itemDef {
+		name "brand_spine"
+		type 0
+		position absolute
+		left 0
+		top 0
+		width 0.9vw
+		height 100vh
+		style 1
+		backcolor $poster_red     // $poster_red #e6332b (accent-independent)
+		decoration
+		visible 1
+	}
+
+	// ── top-right stamp ──────────────────────────────────────────────
+	itemDef {
+		name "brand_stamp"
+		type container
+		position absolute
+		top 8vh
+		right 5vw
+		width 20vw
+		height 8vh
+		direction column
+		grow 0
+
+		itemDef { type 0 rect 0 0 1 3vh height FIT width PERCENT 1 text "ARENA/OS" textalign 2 font $font_mono 15 forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 1 3vh height FIT width PERCENT 1 text "MMXXVI"   textalign 2 font $font_mono 15 forecolor $attract_ink_lo decoration visible 1 grow 0 }
+	}
+
+	// ── wordmark (oversized, offset-stacked QUAKE / WIRED) ───────────
+	itemDef {
+		name "brand_title"
+		type container
+		position absolute
+		top 20vh
+		left 7vw
+		width 80vw
+		height 40vh
+		direction column
+		gap 0.5vh
+		grow 0
+
+		itemDef {
+			name "brand_quake"
+			type 0
+			rect 0 0 1 16vh
+			height FIT
+			width PERCENT 1
+			text "QUAKE"
+			textalign 0
+			font $font_sans_bold 150
+			forecolor $bone
+			decoration
+			visible 1
+			grow 0
+		}
+		itemDef {
+			name "brand_wired"
+			type 0
+			rect 0 0 1 16vh
+			height FIT
+			width PERCENT 1
+			padding 0 3vw          // offset so WIRED sits indented from QUAKE
+			text "WIRED"
+			textalign 0
+			font $font_sans_bold 150
+			forecolor $bone
+			decoration
+			visible 1
+			grow 0
+		}
+	}
+
+	// ── mid rule ─────────────────────────────────────────────────────
+	itemDef {
+		name "brand_rule"
+		type 0
+		position absolute
+		left 7vw
+		top 62vh
+		width 86vw
+		height 0.3vh
+		style 1
+		backcolor 0.16 0.14 0.13 1   // $lineBright-ish warm rule
+		decoration
+		visible 1
+	}
+
+	// ── index caption + tags ─────────────────────────────────────────
+	itemDef {
+		name "brand_index"
+		type 0
+		position absolute
+		left 7vw
+		top 66vh
+		width 80vw
+		height 4vh
+		text "01 // STANDALONE VULKAN ARENA COMBAT"
+		textalign 0
+		font $font_mono 17
+		forecolor $attract_ink_hi
+		decoration
+		visible 1
+	}
+	itemDef {
+		name "brand_tags"
+		type 0
+		position absolute
+		left 7vw
+		top 73vh
+		width 80vw
+		height 4vh
+		text "NO SERVER   ·   NO WAITING   ·   DROP IN"
+		textalign 0
+		font $font_mono 15
+		forecolor $attract_ink_lo
+		decoration
+		visible 1
+	}
+
+	// ── footer: insert coin (red) + spec ─────────────────────────────
+	itemDef {
+		name "brand_coin"
+		type 0
+		position absolute
+		left 7vw
+		bottom 7vh
+		width 40vw
+		height 4vh
+		text "INSERT COIN"
+		textalign 0
+		font $font_mono 17
+		forecolor $poster_red     // poster red
+		decoration
+		visible 1
+	}
+	itemDef {
+		name "brand_spec"
+		type 0
+		position absolute
+		right 5vw
+		bottom 7vh
+		width 40vw
+		height 4vh
+		text "v0.9  ·  60 TICK  ·  DM"
+		textalign 2
+		font $font_mono 15
+		forecolor $attract_ink_lo
+		decoration
+		visible 1
+	}
+}

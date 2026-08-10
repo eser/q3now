@@ -5,6 +5,9 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn B — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 #if FEAT_IQM
 
@@ -189,7 +192,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 
 	LL( header->version );
 	if( header->version != IQM_VERSION ) {
-		ri.Log( SEV_WARN, "R_LoadIQM: %s is a unsupported IQM version (%d), only version %d is supported.\n",
+		R_LOG( rch_assets, SEV_WARN, "R_LoadIQM: %s is a unsupported IQM version (%d), only version %d is supported.\n",
 				mod_name, header->version, IQM_VERSION);
 		return qfalse;
 	}
@@ -227,7 +230,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 
 	// check ioq3 joint limit
 	if ( header->num_joints > IQM_MAX_JOINTS ) {
-		ri.Log( SEV_WARN, "R_LoadIQM: %s has more than %d joints (%d).\n",
+		R_LOG( rch_assets, SEV_WARN, "R_LoadIQM: %s has more than %d joints (%d).\n",
 				mod_name, IQM_MAX_JOINTS, header->num_joints);
 		return qfalse;
 	}
@@ -348,13 +351,13 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 
 		// check for required vertex arrays
 		if( vertexArrayFormat[IQM_POSITION] == -1 || vertexArrayFormat[IQM_NORMAL] == -1 || vertexArrayFormat[IQM_TEXCOORD] == -1 ) {
-			ri.Log( SEV_WARN, "R_LoadIQM: %s is missing IQM_POSITION, IQM_NORMAL, and/or IQM_TEXCOORD array.\n", mod_name );
+			R_LOG( rch_assets, SEV_WARN, "R_LoadIQM: %s is missing IQM_POSITION, IQM_NORMAL, and/or IQM_TEXCOORD array.\n", mod_name );
 			return qfalse;
 		}
 
 		if( header->num_joints ) {
 			if( vertexArrayFormat[IQM_BLENDINDEXES] == -1 || vertexArrayFormat[IQM_BLENDWEIGHTS] == -1 ) {
-				ri.Log( SEV_WARN, "R_LoadIQM: %s is missing IQM_BLENDINDEXES and/or IQM_BLENDWEIGHTS array.\n", mod_name );
+				R_LOG( rch_assets, SEV_WARN, "R_LoadIQM: %s is missing IQM_BLENDINDEXES and/or IQM_BLENDWEIGHTS array.\n", mod_name );
 				return qfalse;
 			}
 		} else {
@@ -406,13 +409,13 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 
 			// check IQM limits
 			if ( mesh->num_vertexes >= IQM_MAX_VERTEXES ) {
-				ri.Log( SEV_WARN, "R_LoadIQM: %s has more than %i verts on %s (%i).\n",
+				R_LOG( rch_assets, SEV_WARN, "R_LoadIQM: %s has more than %i verts on %s (%i).\n",
 					  mod_name, IQM_MAX_VERTEXES - 1, meshName[0] ? meshName : "a surface",
 					  mesh->num_vertexes );
 				return qfalse;
 			}
 			if ( mesh->num_triangles >= IQM_MAX_INDEXES / 3 ) {
-				ri.Log( SEV_WARN, "R_LoadIQM: %s has more than %i triangles on %s (%i).\n",
+				R_LOG( rch_assets, SEV_WARN, "R_LoadIQM: %s has more than %i triangles on %s (%i).\n",
 					  mod_name, ( IQM_MAX_INDEXES / 3 ) - 1, meshName[0] ? meshName : "a surface",
 					  mesh->num_triangles );
 				return qfalse;
@@ -462,7 +465,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	}
 
 	if( header->num_poses != header->num_joints && header->num_poses != 0 ) {
-		ri.Log( SEV_WARN, "R_LoadIQM: %s has %d poses and %d joints, must have the same number or 0 poses\n",
+		R_LOG( rch_assets, SEV_WARN, "R_LoadIQM: %s has %d poses and %d joints, must have the same number or 0 poses\n",
 			  mod_name, header->num_poses, header->num_joints );
 		return qfalse;
 	}
@@ -1131,7 +1134,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			iqmData->vk_total_vertexes = numVerts;
 			iqmData->vk_total_indexes = numTris * 3;
 			iqmData->vk_gpu_skinning = qtrue;
-			ri.Log( SEV_DEBUG, "IQM GPU skinning VBO: %d verts, %d tris (%s)\n",
+			R_LOG( rch_assets, SEV_DEBUG, "IQM GPU skinning VBO: %d verts, %d tris (%s)\n",
 				numVerts, numTris, mod_name );
 		}
 
@@ -1268,7 +1271,7 @@ void R_AddIQMSurfaces( trRefEntity_t *ent ) {
 	     || (ent->e.frame < 0)
 	     || (ent->e.oldframe >= data->num_frames)
 	     || (ent->e.oldframe < 0) ) {
-		ri.Log( SEV_DEBUG, "R_AddIQMSurfaces: no such frame %d to %d for '%s'\n",
+		R_LOG( rch_assets, SEV_DEBUG, "R_AddIQMSurfaces: no such frame %d to %d for '%s'\n",
 			   ent->e.oldframe, ent->e.frame,
 			   tr.currentModel->name );
 		ent->e.frame = 0;
@@ -1287,7 +1290,9 @@ void R_AddIQMSurfaces( trRefEntity_t *ent ) {
 	//
 	// set up lighting now that we know we aren't culled
 	//
-	if ( !personalModel || r_shadows->integer > 1 ) {
+	// retired stencil/projection no longer force personal-model
+	// lighting via the old `r_shadows > 1` term.
+	if ( !personalModel ) {
 		R_SetupEntityLighting( &tr.refdef, ent );
 	}
 
@@ -1316,24 +1321,8 @@ void R_AddIQMSurfaces( trRefEntity_t *ent ) {
 			shader = surface->shader;
 		}
 
-		// we will add shadows even if the main object isn't visible in the view
-
-		// stencil shadows can't do personal models unless I polyhedron clip
-		if ( !personalModel
-			&& r_shadows->integer == 2
-			&& fogNum == 0
-			&& !(ent->e.renderfx & ( RF_NOSHADOW | RF_DEPTHHACK ) )
-			&& shader->sort == SS_OPAQUE ) {
-			R_AddDrawSurf( (void *)surface, tr.shadowShader, 0, 0 );
-		}
-
-		// projection shadows work fine with personal models
-		if ( r_shadows->integer == 3
-			&& fogNum == 0
-			&& (ent->e.renderfx & RF_SHADOW_PLANE )
-			&& shader->sort == SS_OPAQUE ) {
-			R_AddDrawSurf( (void *)surface, tr.projectionShadowShader, 0, 0 );
-		}
+		// legacy stencil-volume + planar-projection model
+		// shadows RETIRED (unified r_shadows 2/3 = cast/all = CSM directional shadow).
 
 		if ( !personalModel ) {
 			R_AddDrawSurf( (void *)surface, shader, fogNum, 0 );
@@ -1495,6 +1484,24 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 			data->num_poses,
 			texDescriptor,
 			mvp );
+
+		// Shadow caster capture. This GPU-skin path returns before tess.xyz is
+		// touched, so the deformed-mesh snapshot (vk_shadow_capture_mesh) never
+		// sees it — without this, GPU-skinned IQM models (players) cast no shadow.
+		// Hand the static VBO/IBO + draw range, the bone matrices just computed
+		// (same pose as the draw above — no recompute), and this entity's
+		// model->world to the shadow pass; it skins the caster next frame via the
+		// skinned shadow VS. Skipped internally when shadow mapping is off / the
+		// entity is a viewmodel / depth-hacked / RF_NOSHADOW.
+		vk_shadow_capture_iqm(
+			data->vk_vertex_buffer,
+			data->vk_index_buffer,
+			surf->first_triangle * 3,
+			surf->num_triangles * 3,
+			boneMatsGpu,
+			data->num_poses,
+			backEnd.or.modelMatrix,
+			data->bounds ? data->bounds + 6 * frame : NULL );
 
 		return; // skip CPU tessellation
 	}
@@ -1682,9 +1689,9 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 	tess.numVertexes += surf->num_vertexes;
 
 #if FEAT_SHADOW_MAPPING
-	// Phase 6.5.4d2-followup: snapshot this CPU-skinned IQM surface for next
+	// Snapshot this CPU-skinned IQM surface for next
 	// frame's shadow pass. (The GPU-skinning branch above returns before tess.xyz
-	// is touched, so it never reaches here — that path is d2-followup-2.) No-op if
+	// is touched, so it never reaches here — that path is handled separately.) No-op if
 	// the entity isn't an opaque caster / shadow mapping off.
 	vk_shadow_capture_mesh( tess.numVertexes - surf->num_vertexes, surf->num_vertexes,
 	                        tess.numIndexes - 3 * surf->num_triangles, 3 * surf->num_triangles );

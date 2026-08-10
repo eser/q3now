@@ -443,6 +443,7 @@ static void DrawSkySide( image_t *image, const int mins[2], const int maxs[2] )
 		vk_bind_pipeline( vk.skybox_pipeline );
 		vk_bind_index();
 		vk_bind_geometry( TESS_XYZ | TESS_ST0 );
+		VK_PushUniformScratch();
 		vk_draw_geometry( r_showSky->integer ? DEPTH_RANGE_ZERO : DEPTH_RANGE_ONE, qtrue );
 #else
 		qglVertexPointer( 3, GL_FLOAT, 16, tess.xyz );
@@ -804,6 +805,15 @@ Other things could be stuck in here, like birds in the sky, etc
 */
 void RB_StageIteratorSky( void ) {
 
+	// r_drawSky gates the sky pass uniformly with the Q1
+	// generic-iterator path (RB_StageIteratorGeneric's SURF_SKY block).
+	// Returning before backEnd.skyRenderedThisView is set at the tail of
+	// this function also gates RB_DrawSun off — r_drawSky 0 → sky and
+	// sun both gone, matching the Q1 side.
+	if ( !r_drawSky->integer ) {
+		return;
+	}
+
 #if defined (USE_VULKAN) && !defined (USE_BUFFER_CLEAR)
 	if ( r_fastsky->integer && vk.clearAttachment ) {
 #else
@@ -847,7 +857,7 @@ void RB_StageIteratorSky( void ) {
 		GL_ClientState( 1, CLS_NONE );
 		GL_ClientState( 0, CLS_TEXCOORD_ARRAY );
 
-		/* Phase 6B3'-a: full-white sky color in the linear pipeline. */
+		/* full-white sky color in the linear pipeline. */
 		qglColor4f( 1.0, 1.0, 1.0, 1.0 );
 
 		GL_State( 0 );

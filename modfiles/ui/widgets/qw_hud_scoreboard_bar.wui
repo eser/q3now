@@ -1,0 +1,84 @@
+// qw_hud_scoreboard_bar — V2_HUD_Active top-center scoreboard bar
+// Interface: #include once into the qw_hud_active composer menuDef body.
+// Source: docs/wui-claude-design-canonical-v2/project/qw-screens.jsx:1108-1130
+//   (top:18, centered w:480, grid leader | 130px timer | runner-up).
+//
+// ABI (dispatch 5.24 decision): leader/runner-up bind to the EXISTING
+// rank-sorted WiredStore keys staged every frame by the bridge
+// (cg_wired_bridge.c:563-596): game.scores.<si>.name / .score, si=0=leader,
+// si=1=runner-up, game.scores.count. The `bind "<key>"` keyword sets
+// item->storeBind → the clay-emit storeBind path (cl_wired_clay.c:1968)
+// displays the store text. 0 engine LoC; NO sorted-leaderboard element
+// needed (un-HALTs dispatch 5.23 S3). The timer is the existing `gametime`
+// hudElement (anchor TOP_CENTER → lands at the centered bar's middle cell).
+//
+// Single-player (e.g. the fixed-viewpoint capture, bots off): si=0 = the
+// local player (genuinely rank-1 when alone — correct, NOT the name_own bug);
+// si=1 keys are unstaged → runner-up cells render blank (graceful).
+// Tokens: $hud_panel_bg $line $accent $bone $font_mono $font_sans.
+itemDef {
+	name "hud_active_scoreboard_bar"
+	type container
+	position absolute
+	top 2vh
+	left 33.33vw
+	width 33.33vw
+	height 4.9vh
+	direction row
+	alignY center
+	background $hud_panel_bg
+	border 1px $line
+
+	// LEADER cell (game.scores.0): name + score BOTH hug the centre (right side
+	// of this cell, adjacent to the timer). Spacer pushes the pair rightward so
+	// the name sits next to its score, not stranded at the far-left edge. Name is
+	// RIGHT-aligned so it reads flush toward the score/clock. The timer-facing
+	// (right) cell padding is ZERO so the score sits hard against the timer cell;
+	// the outer (left) padding stays for breathing room. Score box is narrow
+	// (2.6vw) so a single digit hugs the clock instead of floating in a wide box.
+	itemDef {
+		name "sb_leader_cell"
+		type container
+		rect 0 0 1 4.9vh
+		direction row
+		alignY center
+		grow 1
+		padding 0.9vh 0 0.9vh 1.11vw
+		itemDef { type container grow 1 decoration visible 1 }
+		itemDef { type 0 rect 0 0 10vw 2.5vh height FIT width PERCENT 10vw bind "game.scores.0.name"  text "" textalign 2 font $font_mono 11 forecolor $accent decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 2.6vw 3vh height FIT width PERCENT 2.6vw bind "game.scores.0.score" text "" textalign 2 font $font_sans 22 forecolor $accent decoration visible 1 grow 0 }
+	}
+
+	// TIMER cell (FIXED center gap; gametime hudElement self-centers on screen
+	// centre via its absolute rect 0.5). Narrowed 9vw → 7vw so the two adjacent
+	// scores pull symmetrically toward the centred clock (the wider 9vw pushed the
+	// runner-up score noticeably further right than the leader score sat left).
+	itemDef {
+		name "sb_timer_cell"
+		type container
+		rect 0 0 7vw 4.9vh
+		width PERCENT 7vw
+		grow 0
+		itemDef { hudElement "gametime" anchor TOP_CENTER rect 0.5 0.038 0 0 font $font_sans fontsize 20 22 textalign 1 forecolor $bone decoration visible 1 }
+	}
+
+	// RUNNER-UP cell (game.scores.1): score + name BOTH hug the centre (left side
+	// of this cell, adjacent to the timer) — mirror of the leader cell. Spacer
+	// pushes the pair leftward toward the clock; name is LEFT-aligned so it reads
+	// flush toward the score/clock, not stranded at the far-right edge. The
+	// timer-facing (left) cell padding is ZERO so the score sits hard against the
+	// timer cell (mirror of the leader's zero right-padding), making the two
+	// scores equidistant from the centre clock. Narrow (2.6vw) score box hugs.
+	itemDef {
+		name "sb_runnerup_cell"
+		type container
+		rect 0 0 1 4.9vh
+		direction row
+		alignY center
+		grow 1
+		padding 0.9vh 1.11vw 0.9vh 0
+		itemDef { type 0 rect 0 0 2.6vw 3vh height FIT width PERCENT 2.6vw bind "game.scores.1.score" text "" textalign 0 font $font_sans 22 forecolor $bone decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 10vw 2.5vh height FIT width PERCENT 10vw bind "game.scores.1.name"  text "" textalign 0 font $font_mono 11 forecolor $bone decoration visible 1 grow 0 }
+		itemDef { type container grow 1 decoration visible 1 }
+	}
+}

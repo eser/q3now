@@ -9,7 +9,14 @@
 #include "../qcommon/wired/net/wn_public.h"
 
 #include "../botlib/botlib.h"
-/* Phase 5: log channels */
+
+// Typed/versioned VM-IPC (docs/vm-typed-ipc-design.md). The hot/high-traffic game
+// syscalls are dispatched through a per-syscall descriptor + VM_UnmarshalTyped
+// (validated argc + per-arg type + VMA/bounds translation) instead of hand-written
+// VMA(x) casts. The wire is UNCHANGED (flat args[13]); un-migrated handlers keep
+// their casts and read the same args. A reserved-high id answers the ABI handshake.
+#include "../qcommon/vm_typed_syscall.h"
+
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #if FEAT_RECAST_NAVMESH
@@ -330,14 +337,27 @@ static qboolean SV_GetValue( char* value, int valueSize, const char* key )
 	if ( strncmp( key, "char:", 5 ) == 0 ) {
 		const char *after = key + 5;
 		const char *colon = strchr( after, ':' );
-		if ( colon && Q_stricmp( colon + 1, "display_name" ) == 0 ) {
+		if ( colon ) {
+			const char *field = colon + 1;
 			char charName[MAX_QPATH];
 			int nameLen = (int)( colon - after );
 			if ( nameLen >= MAX_QPATH ) nameLen = MAX_QPATH - 1;
 			memcpy( charName, after, nameLen );
 			charName[nameLen] = '\0';
-			if ( SV_Lua_GetCharacterDisplayName( charName, value, valueSize ) ) {
-				return qtrue;
+			if ( Q_stricmp( field, "display_name" ) == 0 ) {
+				return SV_Lua_GetCharacterDisplayName( charName, value, valueSize );
+			}
+			if ( Q_stricmp( field, "bbox" ) == 0 ) {
+				return SV_Lua_GetCharacterBBox( charName, value, valueSize );
+			}
+			if ( Q_stricmp( field, "movement" ) == 0 ) {
+				return SV_Lua_GetCharacterMovement( charName, value, valueSize );
+			}
+			if ( Q_stricmp( field, "attack" ) == 0 ) {
+				return SV_Lua_GetCharacterAttack( charName, value, valueSize );
+			}
+			if ( Q_stricmp( field, "can_activate" ) == 0 ) {
+				return SV_Lua_GetCharacterCanActivate( charName, value, valueSize );
 			}
 		}
 		return qfalse;
@@ -359,6 +379,566 @@ static qboolean SV_GetValue( char* value, int valueSize, const char* key )
 
 /*
 ====================
+Typed-IPC descriptor catalogue — game (docs/vm-typed-ipc-design.md, shape A)
+
+The hot/high-traffic game syscalls. Each row is { id (UNCHANGED), name, argc,
+per-arg types }. SV_GameSystemCalls unmarshals these through VM_UnmarshalTyped
+instead of hand-casting VMA(x). The catalogue grows one reviewable batch at a time;
+un-migrated syscalls keep their inline casts on the same flat wire.
+====================
+*/
+
+// G_LOG( severity:int, channel:ptr, text:ptr )
+static const vmSyscallDesc_t sv_desc_G_LOG = {
+	G_LOG, "G_LOG", 3, { VARG_INT, VARG_VMPTR, VARG_VMPTR }
+};
+// G_PRINT( text:ptr )
+static const vmSyscallDesc_t sv_desc_G_PRINT = {
+	G_PRINT, "G_PRINT", 1, { VARG_VMPTR }
+};
+// G_ERROR( text:ptr )
+static const vmSyscallDesc_t sv_desc_G_ERROR = {
+	G_ERROR, "G_ERROR", 1, { VARG_VMPTR }
+};
+// G_MILLISECONDS( void ) takes no args → no descriptor (the typed unmarshal would
+// be a no-op; the bare Sys_Milliseconds() handler stays hot-path-cheap, W-41).
+
+// ── cvar subsystem ───────────────────────────────────────────────────────────
+// G_CVAR_REGISTER( vmCvar*:ptr, varName:ptr, default:ptr, flags:int )
+//   vmCvar is a VM-memory vmCvar_t the engine writes back through; a plain VMPTR
+//   (the existing VMA(1) translation) — NULL is allowed (register-without-handle),
+//   which VM_ArgPtr maps to NULL exactly as today. The descriptor types the
+//   translation, not the direction, so a write-back ptr is just a VARG_VMPTR.
+static const vmSyscallDesc_t sv_desc_G_CVAR_REGISTER = {
+	G_CVAR_REGISTER, "G_CVAR_REGISTER", 4, { VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_INT }
+};
+// G_CVAR_UPDATE( vmCvar*:ptr ) — struct write-back ptr (same VMPTR semantics)
+static const vmSyscallDesc_t sv_desc_G_CVAR_UPDATE = {
+	G_CVAR_UPDATE, "G_CVAR_UPDATE", 1, { VARG_VMPTR }
+};
+// G_CVAR_SET( var_name:ptr, value:ptr )
+static const vmSyscallDesc_t sv_desc_G_CVAR_SET = {
+	G_CVAR_SET, "G_CVAR_SET", 2, { VARG_VMPTR, VARG_VMPTR }
+};
+// G_CVAR_VARIABLE_INTEGER_VALUE( var_name:ptr )
+static const vmSyscallDesc_t sv_desc_G_CVAR_VARIABLE_INTEGER_VALUE = {
+	G_CVAR_VARIABLE_INTEGER_VALUE, "G_CVAR_VARIABLE_INTEGER_VALUE", 1, { VARG_VMPTR }
+};
+// G_CVAR_VARIABLE_STRING_BUFFER( var_name:ptr, buffer:ptr[bufsize], bufsize:int )
+//   buffer is the FIRST sized output pointer: VARG_VMPTR_SIZED reads the following
+//   arg (bufsize) as its length and bounds-checks (offset,len) via VM_CheckBounds —
+//   exactly the VM_CHECKBOUNDS(gvm, args[2], args[3]) the handler did by hand.
+static const vmSyscallDesc_t sv_desc_G_CVAR_VARIABLE_STRING_BUFFER = {
+	G_CVAR_VARIABLE_STRING_BUFFER, "G_CVAR_VARIABLE_STRING_BUFFER", 3,
+	{ VARG_VMPTR, VARG_VMPTR_SIZED, VARG_INT }
+};
+// G_CVAR_SETDESCRIPTION( var_name:ptr, description:ptr )
+static const vmSyscallDesc_t sv_desc_G_CVAR_SETDESCRIPTION = {
+	G_CVAR_SETDESCRIPTION, "G_CVAR_SETDESCRIPTION", 2, { VARG_VMPTR, VARG_VMPTR }
+};
+
+// ── cmd / args subsystem ─────────────────────────────────────────────────────
+// G_ARGC( void ) takes no args → stays bare (no descriptor; W-41, like MILLISECONDS).
+// G_ARGV( n:int, buffer:ptr[bufferLength], bufferLength:int ) — sized output buffer
+// (VARG_VMPTR_SIZED reads the following arg as len, bounds-checks via VM_CheckBounds —
+// the same VM_CHECKBOUNDS(gvm, args[2], args[3]) the handler did by hand).
+static const vmSyscallDesc_t sv_desc_G_ARGV = {
+	G_ARGV, "G_ARGV", 3, { VARG_INT, VARG_VMPTR_SIZED, VARG_INT }
+};
+// G_SEND_CONSOLE_COMMAND( exec_when:int, text:ptr )
+static const vmSyscallDesc_t sv_desc_G_SEND_CONSOLE_COMMAND = {
+	G_SEND_CONSOLE_COMMAND, "G_SEND_CONSOLE_COMMAND", 2, { VARG_INT, VARG_VMPTR }
+};
+// G_SEND_SERVER_COMMAND( clientNum:int, text:ptr )
+static const vmSyscallDesc_t sv_desc_G_SEND_SERVER_COMMAND = {
+	G_SEND_SERVER_COMMAND, "G_SEND_SERVER_COMMAND", 2, { VARG_INT, VARG_VMPTR }
+};
+
+// ── fs subsystem ─────────────────────────────────────────────────────────────
+// G_FS_FOPEN_FILE( qpath:ptr, file:ptr, mode:int ) — `file` is a fileHandle_t the
+// engine WRITES the opened handle back through: a plain VARG_VMPTR (the descriptor
+// types the translation, not the direction — same as cvar's vmCvar_t write-back).
+static const vmSyscallDesc_t sv_desc_G_FS_FOPEN_FILE = {
+	G_FS_FOPEN_FILE, "G_FS_FOPEN_FILE", 3, { VARG_VMPTR, VARG_VMPTR, VARG_INT }
+};
+// G_FS_READ( buffer:ptr[len], len:int, f:int ) — the canonical sized buffer; the
+// VARG_VMPTR_SIZED entry reads the following arg (len) and bounds-checks via
+// VM_CheckBounds, exactly the VM_CHECKBOUNDS(gvm, args[1], args[2]) by hand.
+static const vmSyscallDesc_t sv_desc_G_FS_READ = {
+	G_FS_READ, "G_FS_READ", 3, { VARG_VMPTR_SIZED, VARG_INT, VARG_INT }
+};
+// G_FS_WRITE( buffer:ptr[len], len:int, f:int )
+static const vmSyscallDesc_t sv_desc_G_FS_WRITE = {
+	G_FS_WRITE, "G_FS_WRITE", 3, { VARG_VMPTR_SIZED, VARG_INT, VARG_INT }
+};
+// G_FS_FCLOSE_FILE( f:int ) — all-int (NOT 0-arg, so it gets a descriptor).
+static const vmSyscallDesc_t sv_desc_G_FS_FCLOSE_FILE = {
+	G_FS_FCLOSE_FILE, "G_FS_FCLOSE_FILE", 1, { VARG_INT }
+};
+// G_FS_SEEK( f:int, offset:int, origin:int ) — FS_VM_SeekFile takes `long offset`,
+// but the wire passes it as one i32 (a wasm32 `long` is 32-bit, zero-extended into
+// args[2] like the hand path did); VARG_INT reproduces that, cast to long at the
+// call. No width gap — it's an int on the wire either way.
+static const vmSyscallDesc_t sv_desc_G_FS_SEEK = {
+	G_FS_SEEK, "G_FS_SEEK", 3, { VARG_INT, VARG_INT, VARG_INT }
+};
+// G_FS_GETFILELIST( path:ptr, ext:ptr, listbuf:ptr[bufsize], bufsize:int ) — the
+// list buffer is the sized output (3rd arg, bounds-checked against bufsize=args[4]).
+static const vmSyscallDesc_t sv_desc_G_FS_GETFILELIST = {
+	G_FS_GETFILELIST, "G_FS_GETFILELIST", 4, { VARG_VMPTR, VARG_VMPTR, VARG_VMPTR_SIZED, VARG_INT }
+};
+// G_FS_RENAME( from:ptr, to:ptr ) — two string pointers, marshalled exactly like
+// G_CVAR_SET / G_CVAR_SETDESCRIPTION (2x VARG_VMPTR). Path-based (no VM handle), so
+// it calls the engine FS_Rename directly (like FS_GetFileList), not an FS_VM_* form.
+static const vmSyscallDesc_t sv_desc_G_FS_RENAME = {
+	G_FS_RENAME, "G_FS_RENAME", 2, { VARG_VMPTR, VARG_VMPTR }
+};
+
+// ── collision / spatial-query subsystem ──────────────────────────────────────
+// vec3_t args cross the boundary as VM POINTERS (const vec3_t = const float*,
+// translated via VMA), NOT 3 spread floats — so every coordinate is a VARG_VMPTR,
+// and the trace_t* result is a VARG_VMPTR the engine writes back through (the
+// fileHandle_t*/vmCvar_t precedent). No VARG_FLOAT here (no bare-float scalar args).
+// G_TRACE/G_TRACECAPSULE( results:ptr, start:ptr, mins:ptr, maxs:ptr, end:ptr, passEnt:int, mask:int )
+static const vmSyscallDesc_t sv_desc_G_TRACE = {
+	G_TRACE, "G_TRACE", 7,
+	{ VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_INT, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_G_TRACECAPSULE = {
+	G_TRACECAPSULE, "G_TRACECAPSULE", 7,
+	{ VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_INT, VARG_INT }
+};
+// G_POINT_CONTENTS( point:ptr, passEnt:int )
+static const vmSyscallDesc_t sv_desc_G_POINT_CONTENTS = {
+	G_POINT_CONTENTS, "G_POINT_CONTENTS", 2, { VARG_VMPTR, VARG_INT }
+};
+// G_ENTITY_CONTACT/CAPSULE( mins:ptr, maxs:ptr, ent:ptr )
+static const vmSyscallDesc_t sv_desc_G_ENTITY_CONTACT = {
+	G_ENTITY_CONTACT, "G_ENTITY_CONTACT", 3, { VARG_VMPTR, VARG_VMPTR, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_G_ENTITY_CONTACTCAPSULE = {
+	G_ENTITY_CONTACTCAPSULE, "G_ENTITY_CONTACTCAPSULE", 3, { VARG_VMPTR, VARG_VMPTR, VARG_VMPTR }
+};
+// G_IN_PVS/IGNORE_PORTALS( p1:ptr, p2:ptr )
+static const vmSyscallDesc_t sv_desc_G_IN_PVS = {
+	G_IN_PVS, "G_IN_PVS", 2, { VARG_VMPTR, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_G_IN_PVS_IGNORE_PORTALS = {
+	G_IN_PVS_IGNORE_PORTALS, "G_IN_PVS_IGNORE_PORTALS", 2, { VARG_VMPTR, VARG_VMPTR }
+};
+// G_AREAS_CONNECTED( area1:int, area2:int )
+static const vmSyscallDesc_t sv_desc_G_AREAS_CONNECTED = {
+	G_AREAS_CONNECTED, "G_AREAS_CONNECTED", 2, { VARG_INT, VARG_INT }
+};
+// G_SET_BRUSH_MODEL( ent:ptr, name:ptr )
+static const vmSyscallDesc_t sv_desc_G_SET_BRUSH_MODEL = {
+	G_SET_BRUSH_MODEL, "G_SET_BRUSH_MODEL", 2, { VARG_VMPTR, VARG_VMPTR }
+};
+// G_ENTITIES_IN_BOX( mins:ptr, maxs:ptr, entityList:int[maxcount], maxcount:int ) —
+// entityList is a VARG_VMPTR_COUNTED int array (count = args[4]=maxcount); the
+// VM_CheckBounds3(ptr, maxcount, sizeof(int)) bounds moves into VM_UnmarshalTyped.
+static const vmSyscallDesc_t sv_desc_G_ENTITIES_IN_BOX = {
+	G_ENTITIES_IN_BOX, "G_ENTITIES_IN_BOX", 4, { VARG_VMPTR, VARG_VMPTR, VARG_VMPTR_COUNTED, VARG_INT },
+	{ [2] = { sizeof( int ), 4 } }   // entityList: count = args[4] (maxcount)
+};
+
+// ── botlib subsystem (game-VM import) ────────────────────────────────────────
+// Only the cast-bearing syscalls (VMA pointer / VMF float / sized buffer) get a
+// descriptor + typed unpack; pure-int (args[n] only) and 0-arg botlib syscalls stay
+// bare (no cast to remove, W-41 — like G_MILLISECONDS / G_ARGC). This batch is where
+// VARG_FLOAT is first exercised: the VMF args (skill, thinktime, speed, …) become
+// VARG_FLOAT, unpacked as a bit-identical reinterpret. Float RETURNS (FloatAsInt) are
+// the return direction — outside the descriptor (untouched), like trace_t* write-back.
+// ── base 200-range ──
+static const vmSyscallDesc_t sv_desc_BOTLIB_LIBVAR_SET = {
+	BOTLIB_LIBVAR_SET, "BOTLIB_LIBVAR_SET", 2, { VARG_VMPTR, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_LIBVAR_GET = {
+	BOTLIB_LIBVAR_GET, "BOTLIB_LIBVAR_GET", 3, { VARG_VMPTR, VARG_VMPTR_SIZED, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_PC_ADD_GLOBAL_DEFINE = {
+	BOTLIB_PC_ADD_GLOBAL_DEFINE, "BOTLIB_PC_ADD_GLOBAL_DEFINE", 1, { VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_PC_LOAD_SOURCE = {
+	BOTLIB_PC_LOAD_SOURCE, "BOTLIB_PC_LOAD_SOURCE", 1, { VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_PC_SOURCE_FILE_AND_LINE = {
+	BOTLIB_PC_SOURCE_FILE_AND_LINE, "BOTLIB_PC_SOURCE_FILE_AND_LINE", 3, { VARG_INT, VARG_VMPTR, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_START_FRAME = {     // VMF(1) — first VARG_FLOAT
+	BOTLIB_START_FRAME, "BOTLIB_START_FRAME", 1, { VARG_FLOAT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_LOAD_MAP = {
+	BOTLIB_LOAD_MAP, "BOTLIB_LOAD_MAP", 1, { VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_UPDATENTITY = {
+	BOTLIB_UPDATENTITY, "BOTLIB_UPDATENTITY", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_TEST = {
+	BOTLIB_TEST, "BOTLIB_TEST", 4, { VARG_INT, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_GET_CONSOLE_MESSAGE = {
+	BOTLIB_GET_CONSOLE_MESSAGE, "BOTLIB_GET_CONSOLE_MESSAGE", 3, { VARG_INT, VARG_VMPTR_SIZED, VARG_INT }
+};
+
+// ── EA 700-range (elementary actions) ──
+static const vmSyscallDesc_t sv_desc_BOTLIB_EA_SAY = {
+	BOTLIB_EA_SAY, "BOTLIB_EA_SAY", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_EA_SAY_TEAM = {
+	BOTLIB_EA_SAY_TEAM, "BOTLIB_EA_SAY_TEAM", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_EA_COMMAND = {
+	BOTLIB_EA_COMMAND, "BOTLIB_EA_COMMAND", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_EA_MOVE = {        // VMF(3) speed
+	BOTLIB_EA_MOVE, "BOTLIB_EA_MOVE", 3, { VARG_INT, VARG_VMPTR, VARG_FLOAT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_EA_VIEW = {
+	BOTLIB_EA_VIEW, "BOTLIB_EA_VIEW", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_EA_END_REGULAR = {  // VMF(2) thinktime
+	BOTLIB_EA_END_REGULAR, "BOTLIB_EA_END_REGULAR", 2, { VARG_INT, VARG_FLOAT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_EA_GET_INPUT = {    // VMF(2) thinktime
+	BOTLIB_EA_GET_INPUT, "BOTLIB_EA_GET_INPUT", 3, { VARG_INT, VARG_FLOAT, VARG_VMPTR }
+};
+
+// ── AI 700-range ──
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_LOAD_CHARACTER = {  // VMF(2) skill
+	BOTLIB_AI_LOAD_CHARACTER, "BOTLIB_AI_LOAD_CHARACTER", 2, { VARG_VMPTR, VARG_FLOAT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_CHARACTERISTIC_BFLOAT = {  // VMF(3),VMF(4) + FloatAsInt return
+	BOTLIB_AI_CHARACTERISTIC_BFLOAT, "BOTLIB_AI_CHARACTERISTIC_BFLOAT", 4, { VARG_INT, VARG_INT, VARG_FLOAT, VARG_FLOAT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_CHARACTERISTIC_STRING = {
+	BOTLIB_AI_CHARACTERISTIC_STRING, "BOTLIB_AI_CHARACTERISTIC_STRING", 4, { VARG_INT, VARG_INT, VARG_VMPTR_SIZED, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_QUEUE_CONSOLE_MESSAGE = {
+	BOTLIB_AI_QUEUE_CONSOLE_MESSAGE, "BOTLIB_AI_QUEUE_CONSOLE_MESSAGE", 3, { VARG_INT, VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_NEXT_CONSOLE_MESSAGE = {
+	BOTLIB_AI_NEXT_CONSOLE_MESSAGE, "BOTLIB_AI_NEXT_CONSOLE_MESSAGE", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_INITIAL_CHAT = {
+	BOTLIB_AI_INITIAL_CHAT, "BOTLIB_AI_INITIAL_CHAT", 11,
+	{ VARG_INT, VARG_VMPTR, VARG_INT, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_NUM_INITIAL_CHATS = {
+	BOTLIB_AI_NUM_INITIAL_CHATS, "BOTLIB_AI_NUM_INITIAL_CHATS", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_REPLY_CHAT = {
+	BOTLIB_AI_REPLY_CHAT, "BOTLIB_AI_REPLY_CHAT", 12,
+	{ VARG_INT, VARG_VMPTR, VARG_INT, VARG_INT, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_GET_CHAT_MESSAGE = {
+	BOTLIB_AI_GET_CHAT_MESSAGE, "BOTLIB_AI_GET_CHAT_MESSAGE", 3, { VARG_INT, VARG_VMPTR_SIZED, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_STRING_CONTAINS = {
+	BOTLIB_AI_STRING_CONTAINS, "BOTLIB_AI_STRING_CONTAINS", 3, { VARG_VMPTR, VARG_VMPTR, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_FIND_MATCH = {
+	BOTLIB_AI_FIND_MATCH, "BOTLIB_AI_FIND_MATCH", 3, { VARG_VMPTR, VARG_VMPTR, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_MATCH_VARIABLE = {
+	BOTLIB_AI_MATCH_VARIABLE, "BOTLIB_AI_MATCH_VARIABLE", 4, { VARG_VMPTR, VARG_INT, VARG_VMPTR_SIZED, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_UNIFY_WHITE_SPACES = {
+	BOTLIB_AI_UNIFY_WHITE_SPACES, "BOTLIB_AI_UNIFY_WHITE_SPACES", 1, { VARG_VMPTR }
+};
+// BOTLIB_AI_REPLACE_SYNONYMS: wire args are VMA(1) + args[2]; the middle handler param
+// is the literal VM_DATA_GUARD_SIZE (not a wire arg), so the descriptor is {VMPTR, INT}.
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_REPLACE_SYNONYMS = {
+	BOTLIB_AI_REPLACE_SYNONYMS, "BOTLIB_AI_REPLACE_SYNONYMS", 2, { VARG_VMPTR, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_LOAD_CHAT_FILE = {
+	BOTLIB_AI_LOAD_CHAT_FILE, "BOTLIB_AI_LOAD_CHAT_FILE", 3, { VARG_INT, VARG_VMPTR, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_SET_CHAT_NAME = {
+	BOTLIB_AI_SET_CHAT_NAME, "BOTLIB_AI_SET_CHAT_NAME", 3, { VARG_INT, VARG_VMPTR, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_PUSH_GOAL = {
+	BOTLIB_AI_PUSH_GOAL, "BOTLIB_AI_PUSH_GOAL", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_GOAL_NAME = {
+	BOTLIB_AI_GOAL_NAME, "BOTLIB_AI_GOAL_NAME", 3, { VARG_INT, VARG_VMPTR_SIZED, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_GET_TOP_GOAL = {
+	BOTLIB_AI_GET_TOP_GOAL, "BOTLIB_AI_GET_TOP_GOAL", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_GET_SECOND_GOAL = {
+	BOTLIB_AI_GET_SECOND_GOAL, "BOTLIB_AI_GET_SECOND_GOAL", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_CHOOSE_LTG_ITEM = {
+	BOTLIB_AI_CHOOSE_LTG_ITEM, "BOTLIB_AI_CHOOSE_LTG_ITEM", 4, { VARG_INT, VARG_VMPTR, VARG_VMPTR, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_CHOOSE_NBG_ITEM = {  // VMF(6)
+	BOTLIB_AI_CHOOSE_NBG_ITEM, "BOTLIB_AI_CHOOSE_NBG_ITEM", 6, { VARG_INT, VARG_VMPTR, VARG_VMPTR, VARG_INT, VARG_VMPTR, VARG_FLOAT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_TOUCHING_GOAL = {
+	BOTLIB_AI_TOUCHING_GOAL, "BOTLIB_AI_TOUCHING_GOAL", 2, { VARG_VMPTR, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_ITEM_GOAL_IN_VIS_BUT_NOT_VISIBLE = {
+	BOTLIB_AI_ITEM_GOAL_IN_VIS_BUT_NOT_VISIBLE, "BOTLIB_AI_ITEM_GOAL_IN_VIS_BUT_NOT_VISIBLE", 4, { VARG_INT, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_GET_LEVEL_ITEM_GOAL = {
+	BOTLIB_AI_GET_LEVEL_ITEM_GOAL, "BOTLIB_AI_GET_LEVEL_ITEM_GOAL", 3, { VARG_INT, VARG_VMPTR, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_GET_NEXT_CAMP_SPOT_GOAL = {
+	BOTLIB_AI_GET_NEXT_CAMP_SPOT_GOAL, "BOTLIB_AI_GET_NEXT_CAMP_SPOT_GOAL", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_GET_MAP_LOCATION_GOAL = {
+	BOTLIB_AI_GET_MAP_LOCATION_GOAL, "BOTLIB_AI_GET_MAP_LOCATION_GOAL", 2, { VARG_VMPTR, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_SET_AVOID_GOAL_TIME = {  // VMF(3)
+	BOTLIB_AI_SET_AVOID_GOAL_TIME, "BOTLIB_AI_SET_AVOID_GOAL_TIME", 3, { VARG_INT, VARG_INT, VARG_FLOAT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_LOAD_ITEM_WEIGHTS = {
+	BOTLIB_AI_LOAD_ITEM_WEIGHTS, "BOTLIB_AI_LOAD_ITEM_WEIGHTS", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_SAVE_GOAL_FUZZY_LOGIC = {
+	BOTLIB_AI_SAVE_GOAL_FUZZY_LOGIC, "BOTLIB_AI_SAVE_GOAL_FUZZY_LOGIC", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_MUTATE_GOAL_FUZZY_LOGIC = {  // VMF(2)
+	BOTLIB_AI_MUTATE_GOAL_FUZZY_LOGIC, "BOTLIB_AI_MUTATE_GOAL_FUZZY_LOGIC", 2, { VARG_INT, VARG_FLOAT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_ADD_AVOID_SPOT = {  // VMF(3)
+	BOTLIB_AI_ADD_AVOID_SPOT, "BOTLIB_AI_ADD_AVOID_SPOT", 4, { VARG_INT, VARG_VMPTR, VARG_FLOAT, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_MOVE_TO_GOAL = {
+	BOTLIB_AI_MOVE_TO_GOAL, "BOTLIB_AI_MOVE_TO_GOAL", 4, { VARG_VMPTR, VARG_INT, VARG_VMPTR, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_MOVE_IN_DIRECTION = {  // VMF(3)
+	BOTLIB_AI_MOVE_IN_DIRECTION, "BOTLIB_AI_MOVE_IN_DIRECTION", 4, { VARG_INT, VARG_VMPTR, VARG_FLOAT, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_REACHABILITY_AREA = {
+	BOTLIB_AI_REACHABILITY_AREA, "BOTLIB_AI_REACHABILITY_AREA", 2, { VARG_VMPTR, VARG_INT }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_MOVEMENT_VIEW_TARGET = {  // VMF(4)
+	BOTLIB_AI_MOVEMENT_VIEW_TARGET, "BOTLIB_AI_MOVEMENT_VIEW_TARGET", 5, { VARG_INT, VARG_VMPTR, VARG_INT, VARG_FLOAT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_PREDICT_VISIBLE_POSITION = {
+	BOTLIB_AI_PREDICT_VISIBLE_POSITION, "BOTLIB_AI_PREDICT_VISIBLE_POSITION", 5, { VARG_VMPTR, VARG_INT, VARG_VMPTR, VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_INIT_MOVE_STATE = {
+	BOTLIB_AI_INIT_MOVE_STATE, "BOTLIB_AI_INIT_MOVE_STATE", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_CHOOSE_BEST_FIGHT_WEAPON = {
+	BOTLIB_AI_CHOOSE_BEST_FIGHT_WEAPON, "BOTLIB_AI_CHOOSE_BEST_FIGHT_WEAPON", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_GET_WEAPON_INFO = {
+	BOTLIB_AI_GET_WEAPON_INFO, "BOTLIB_AI_GET_WEAPON_INFO", 3, { VARG_INT, VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_LOAD_WEAPON_WEIGHTS = {
+	BOTLIB_AI_LOAD_WEAPON_WEIGHTS, "BOTLIB_AI_LOAD_WEAPON_WEIGHTS", 2, { VARG_INT, VARG_VMPTR }
+};
+static const vmSyscallDesc_t sv_desc_BOTLIB_AI_GENETIC_PARENTS_AND_CHILD_SELECTION = {
+	BOTLIB_AI_GENETIC_PARENTS_AND_CHILD_SELECTION, "BOTLIB_AI_GENETIC_PARENTS_AND_CHILD_SELECTION", 5,
+	{ VARG_INT, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR, VARG_VMPTR }
+};
+
+// Adapter so VM_UnmarshalTyped can call the file-static VM_ArgPtr translator.
+static void *SV_TypedArgPtr( intptr_t v ) {
+	return VM_ArgPtr( v );
+}
+
+// Unmarshal a migrated game syscall into `out` via its descriptor; a validation
+// failure (bad argc / out-of-range sized ptr) is a hard error — the module built
+// the call wrong. The shipping path uses the typed values directly.
+static void SV_UnmarshalGame( const vmSyscallDesc_t *desc, intptr_t *args, vmTypedArg_t *out ) {
+	if ( !VM_UnmarshalTyped( gvm, desc, args, SV_TypedArgPtr, out ) ) {
+		Com_Terminate( TERM_CLIENT_DROP, "%s: bad typed syscall args", desc->name );
+	}
+}
+
+// Compact per-case unmarshal for the high-volume botlib subsystem: declares the typed
+// array `t`, unmarshals via the descriptor, and runs the (Debug-only) generic parity
+// walk. Each migrated botlib case is `{ SV_BOTLIB(&sv_desc_X, N); <call with t[..]>; }`.
+#define SV_BOTLIB( descp, argc ) \
+	vmTypedArg_t t[ VM_MAX_TYPED_ARGS ]; \
+	SV_UnmarshalGame( (descp), args, t ); \
+	SV_TYPED_PARITY_WALK( (argc), args, t, (descp)->name )
+
+#if defined(_DEBUG)
+// Generic descriptor-driven parity for syscalls whose args are VARG_VMPTR (translated
+// == VMA(n)) / VARG_INT (== args[n]) / VARG_FLOAT (bit-reinterpret == VMF(n)) /
+// VARG_VMPTR_SIZED (ptr == VMA(n) + len == args[n+1]) — walks the typed args by their
+// stored type; argc is passed explicitly. Used for the collision queries and the whole
+// botlib subsystem (the VARG_FLOAT branch is botlib's skill/thinktime/speed proof).
+static void SV_TypedParityWalk( int argc, intptr_t *args, const vmTypedArg_t *t, const char *name ) {
+	int a;
+	for ( a = 0; a < argc; a++ ) {
+		const intptr_t raw = args[ a + 1 ];
+		switch ( t[a].type ) {
+		case VARG_INT:
+			if ( t[a].i != raw )
+				Com_Terminate( TERM_CLIENT_DROP, "%s typed/opaque mismatch (int arg %d)", name, a );
+			break;
+		case VARG_VMPTR:
+			if ( t[a].p != (void *)VM_ArgPtr( raw ) )
+				Com_Terminate( TERM_CLIENT_DROP, "%s typed/opaque mismatch (ptr arg %d)", name, a );
+			break;
+		case VARG_FLOAT: {
+			floatint_t fi; fi.i = (int)raw;
+			if ( t[a].f != fi.f )
+				Com_Terminate( TERM_CLIENT_DROP, "%s typed/opaque mismatch (float arg %d)", name, a );
+			break;
+		}
+		case VARG_VMPTR_SIZED:
+			if ( t[a].p != (void *)VM_ArgPtr( raw ) || t[a].len != (unsigned)args[ a + 2 ] )
+				Com_Terminate( TERM_CLIENT_DROP, "%s typed/opaque mismatch (sized arg %d)", name, a );
+			break;
+		case VARG_VMPTR_COUNTED:
+			// No descriptor in the generic walk → verify the ptr translation; the byte-
+			// length (.len == count*elemSize) parity is asserted per-syscall where elemSize
+			// is known (SV_TypedParityCheck).
+			if ( t[a].p != (void *)VM_ArgPtr( raw ) )
+				Com_Terminate( TERM_CLIENT_DROP, "%s typed/opaque mismatch (counted arg %d)", name, a );
+			break;
+		default:
+			break;
+		}
+	}
+}
+
+// Parity check (Debug only): assert the typed unmarshal reproduces the hand-written
+// VMA(x)/cast for each migrated syscall, so a conversion bug is caught immediately.
+// Compiles out entirely in Release — the shipping path is the typed unpack alone.
+static void SV_TypedParityCheck( int call, intptr_t *args, const vmTypedArg_t *t ) {
+	switch ( call ) {
+	case G_LOG:
+		if ( t[0].i != args[1] ||
+		     t[1].p != (void *)VM_ArgPtr( args[2] ) ||
+		     t[2].p != (void *)VM_ArgPtr( args[3] ) )
+			Com_Terminate( TERM_CLIENT_DROP, "G_LOG typed/opaque mismatch" );
+		break;
+	case G_PRINT:
+		if ( t[0].p != (void *)VM_ArgPtr( args[1] ) )
+			Com_Terminate( TERM_CLIENT_DROP, "G_PRINT typed/opaque mismatch" );
+		break;
+	case G_ERROR:
+		if ( t[0].p != (void *)VM_ArgPtr( args[1] ) )
+			Com_Terminate( TERM_CLIENT_DROP, "G_ERROR typed/opaque mismatch" );
+		break;
+	case G_CVAR_REGISTER:
+		if ( t[0].p != (void *)VM_ArgPtr( args[1] ) ||   // vmCvar* (may be NULL)
+		     t[1].p != (void *)VM_ArgPtr( args[2] ) ||   // varName
+		     t[2].p != (void *)VM_ArgPtr( args[3] ) ||   // default
+		     t[3].i != args[4] )                          // flags
+			Com_Terminate( TERM_CLIENT_DROP, "G_CVAR_REGISTER typed/opaque mismatch" );
+		break;
+	case G_CVAR_UPDATE:
+	case G_CVAR_VARIABLE_INTEGER_VALUE:
+		if ( t[0].p != (void *)VM_ArgPtr( args[1] ) )
+			Com_Terminate( TERM_CLIENT_DROP, "G_CVAR_* (1-ptr) typed/opaque mismatch" );
+		break;
+	case G_CVAR_SET:
+	case G_CVAR_SETDESCRIPTION:
+		if ( t[0].p != (void *)VM_ArgPtr( args[1] ) ||
+		     t[1].p != (void *)VM_ArgPtr( args[2] ) )
+			Com_Terminate( TERM_CLIENT_DROP, "G_CVAR_* (2-ptr) typed/opaque mismatch" );
+		break;
+	case G_CVAR_VARIABLE_STRING_BUFFER:
+		// var_name VMPTR, buffer VMPTR_SIZED (ptr+len), bufsize INT — the sized ptr
+		// must produce the same translated buffer AND the same length the hand path
+		// bounds-checked (args[3]).
+		if ( t[0].p != (void *)VM_ArgPtr( args[1] ) ||
+		     t[1].p != (void *)VM_ArgPtr( args[2] ) ||
+		     t[1].len != (unsigned)args[3] ||
+		     t[2].i != args[3] )
+			Com_Terminate( TERM_CLIENT_DROP, "G_CVAR_VARIABLE_STRING_BUFFER typed/opaque mismatch" );
+		break;
+	case G_ARGV:
+		// n INT, buffer VMPTR_SIZED (ptr+len), bufferLength INT.
+		if ( t[0].i != args[1] ||
+		     t[1].p != (void *)VM_ArgPtr( args[2] ) ||
+		     t[1].len != (unsigned)args[3] ||
+		     t[2].i != args[3] )
+			Com_Terminate( TERM_CLIENT_DROP, "G_ARGV typed/opaque mismatch" );
+		break;
+	case G_SEND_CONSOLE_COMMAND:
+	case G_SEND_SERVER_COMMAND:
+		// leading INT (exec_when / clientNum) + text VMPTR.
+		if ( t[0].i != args[1] ||
+		     t[1].p != (void *)VM_ArgPtr( args[2] ) )
+			Com_Terminate( TERM_CLIENT_DROP, "G_SEND_*_COMMAND typed/opaque mismatch" );
+		break;
+	case G_FS_FOPEN_FILE:
+		// qpath VMPTR, fileHandle_t* write-back VMPTR (may be NULL), mode INT.
+		if ( t[0].p != (void *)VM_ArgPtr( args[1] ) ||
+		     t[1].p != (void *)VM_ArgPtr( args[2] ) ||
+		     t[2].i != args[3] )
+			Com_Terminate( TERM_CLIENT_DROP, "G_FS_FOPEN_FILE typed/opaque mismatch" );
+		break;
+	case G_FS_READ:
+	case G_FS_WRITE:
+		// buffer VMPTR_SIZED (ptr+len at args[1]/args[2]), len INT, handle INT.
+		if ( t[0].p != (void *)VM_ArgPtr( args[1] ) ||
+		     t[0].len != (unsigned)args[2] ||
+		     t[1].i != args[2] ||
+		     t[2].i != args[3] )
+			Com_Terminate( TERM_CLIENT_DROP, "G_FS_READ/WRITE typed/opaque mismatch" );
+		break;
+	case G_FS_FCLOSE_FILE:
+		if ( t[0].i != args[1] )
+			Com_Terminate( TERM_CLIENT_DROP, "G_FS_FCLOSE_FILE typed/opaque mismatch" );
+		break;
+	case G_FS_SEEK:
+		if ( t[0].i != args[1] || t[1].i != args[2] || t[2].i != args[3] )
+			Com_Terminate( TERM_CLIENT_DROP, "G_FS_SEEK typed/opaque mismatch" );
+		break;
+	case G_FS_RENAME:
+		// from VMPTR, to VMPTR — same 2-string-ptr parity as G_CVAR_SET.
+		if ( t[0].p != (void *)VM_ArgPtr( args[1] ) ||
+		     t[1].p != (void *)VM_ArgPtr( args[2] ) )
+			Com_Terminate( TERM_CLIENT_DROP, "G_FS_RENAME typed/opaque mismatch" );
+		break;
+	case G_FS_GETFILELIST:
+		// path VMPTR, ext VMPTR, listbuf VMPTR_SIZED (ptr+len at args[3]/args[4]), bufsize INT.
+		if ( t[0].p != (void *)VM_ArgPtr( args[1] ) ||
+		     t[1].p != (void *)VM_ArgPtr( args[2] ) ||
+		     t[2].p != (void *)VM_ArgPtr( args[3] ) ||
+		     t[2].len != (unsigned)args[4] ||
+		     t[3].i != args[4] )
+			Com_Terminate( TERM_CLIENT_DROP, "G_FS_GETFILELIST typed/opaque mismatch" );
+		break;
+	// collision / spatial queries: all args are VARG_VMPTR (vec3/struct pointers,
+	// incl. the trace_t* write-back) or VARG_INT — verified by the generic walk
+	// (argc per the descriptor; t[a].type drives each per-arg check).
+	case G_TRACE:                  SV_TypedParityWalk( 7, args, t, "G_TRACE" ); break;
+	case G_TRACECAPSULE:           SV_TypedParityWalk( 7, args, t, "G_TRACECAPSULE" ); break;
+	case G_POINT_CONTENTS:         SV_TypedParityWalk( 2, args, t, "G_POINT_CONTENTS" ); break;
+	case G_ENTITY_CONTACT:         SV_TypedParityWalk( 3, args, t, "G_ENTITY_CONTACT" ); break;
+	case G_ENTITY_CONTACTCAPSULE:  SV_TypedParityWalk( 3, args, t, "G_ENTITY_CONTACTCAPSULE" ); break;
+	case G_IN_PVS:                 SV_TypedParityWalk( 2, args, t, "G_IN_PVS" ); break;
+	case G_IN_PVS_IGNORE_PORTALS:  SV_TypedParityWalk( 2, args, t, "G_IN_PVS_IGNORE_PORTALS" ); break;
+	case G_AREAS_CONNECTED:        SV_TypedParityWalk( 2, args, t, "G_AREAS_CONNECTED" ); break;
+	case G_SET_BRUSH_MODEL:        SV_TypedParityWalk( 2, args, t, "G_SET_BRUSH_MODEL" ); break;
+	case G_ENTITIES_IN_BOX:
+		// mins/maxs VMPTR, entityList VARG_VMPTR_COUNTED (int[maxcount]), maxcount INT.
+		// Verify the counted ptr translates AND .len == maxcount*sizeof(int) (== the
+		// hand-written VM_CheckBounds3(args[3], args[4], sizeof(int))).
+		if ( t[0].p != (void *)VM_ArgPtr( args[1] ) ||
+		     t[1].p != (void *)VM_ArgPtr( args[2] ) ||
+		     t[2].p != (void *)VM_ArgPtr( args[3] ) ||
+		     t[2].len != (unsigned)args[4] * sizeof( int ) ||
+		     t[3].i != args[4] )
+			Com_Terminate( TERM_CLIENT_DROP, "G_ENTITIES_IN_BOX typed/opaque mismatch" );
+		break;
+	default:
+		break;
+	}
+}
+#define SV_TYPED_PARITY( call, args, t )  SV_TypedParityCheck( (call), (args), (t) )
+#define SV_TYPED_PARITY_WALK( argc, args, t, name )  SV_TypedParityWalk( (argc), (args), (t), (name) )
+#else
+#define SV_TYPED_PARITY( call, args, t )  ((void)0)
+#define SV_TYPED_PARITY_WALK( argc, args, t, name )  ((void)0)
+#endif
+
+
+/*
+====================
 SV_GameSystemCalls
 
 The module is making a system call
@@ -375,66 +955,154 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	}
 	++gvm->syscallCount;
 
+	// ABI handshake (exact-match): a reserved-high id NOT in the G_* enum (so it
+	// shifts no existing syscall) returns the engine's game ABI version, which the
+	// module queries + exact-matches at init. See vm_typed_syscall.h.
+	if ( args[0] == VM_SYSCALL_ABI_QUERY ) {
+		return GAME_API_VERSION;
+	}
+
 	switch( args[0] ) {
-	case G_PRINT:
-		Com_Log( SEV_INFO, LOG_CH(ch_game), "%s", (const char*)VMA(1) );
+	case G_PRINT: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_PRINT, args, t );
+		SV_TYPED_PARITY( G_PRINT, args, t );
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "%s", (const char*)t[0].p );
 		return 0;
-	case G_ERROR:
-		Com_Terminate( TERM_CLIENT_DROP, "%s", (const char*)VMA(1) );
+	}
+	case G_ERROR: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_ERROR, args, t );
+		SV_TYPED_PARITY( G_ERROR, args, t );
+		Com_Terminate( TERM_CLIENT_DROP, "%s", (const char*)t[0].p );
 		return 0;
-	case G_LOG:
-		Com_Log( (log_severity_t)args[1], LOG_CH(ch_game), "%s", (const char*)VMA(2) );
+	}
+	case G_LOG: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_LOG, args, t );
+		SV_TYPED_PARITY( G_LOG, args, t );
+		Com_Log( (log_severity_t)t[0].i, Log_GetChannel( (const char*)t[1].p ), "%s", (const char*)t[2].p );
 		return 0;
+	}
 	case G_TERMINATE:
 		Com_Terminate( (terminationReason_t)args[1], "%s", (const char*)VMA(2) );
 		return 0;
 	case G_MILLISECONDS:
+		// 0-arg syscall: nothing to unmarshal/translate, so the typed path would be
+		// a no-op — the hot timing path stays a bare call (W-41: this is the
+		// highest-frequency syscall; no per-call overhead added).
 		return Sys_Milliseconds();
-	case G_CVAR_REGISTER:
-		Cvar_VM_Register( VMA(1), VMA(2), VMA(3), args[4], gvm->privateFlag );
+	case G_CVAR_REGISTER: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_CVAR_REGISTER, args, t );
+		SV_TYPED_PARITY( G_CVAR_REGISTER, args, t );
+		Cvar_VM_Register( t[0].p, t[1].p, t[2].p, (int)t[3].i, gvm->privateFlag );
 		return 0;
-	case G_CVAR_UPDATE:
-		Cvar_Update( VMA(1), gvm->privateFlag );
+	}
+	case G_CVAR_UPDATE: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_CVAR_UPDATE, args, t );
+		SV_TYPED_PARITY( G_CVAR_UPDATE, args, t );
+		Cvar_Update( t[0].p, gvm->privateFlag );
 		return 0;
-	case G_CVAR_SET:
-		Cvar_SetSafe( (const char *)VMA(1), (const char *)VMA(2) );
+	}
+	case G_CVAR_SET: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_CVAR_SET, args, t );
+		SV_TYPED_PARITY( G_CVAR_SET, args, t );
+		Cvar_SetSafe( (const char *)t[0].p, (const char *)t[1].p );
 		return 0;
-	case G_CVAR_VARIABLE_INTEGER_VALUE:
-		return Cvar_VariableIntegerValue( (const char *)VMA(1) );
-	case G_CVAR_VARIABLE_STRING_BUFFER:
-		VM_CHECKBOUNDS( gvm, args[2], args[3] );
-		Cvar_VariableStringBufferSafe( VMA(1), VMA(2), args[3], gvm->privateFlag );
+	}
+	case G_CVAR_VARIABLE_INTEGER_VALUE: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_CVAR_VARIABLE_INTEGER_VALUE, args, t );
+		SV_TYPED_PARITY( G_CVAR_VARIABLE_INTEGER_VALUE, args, t );
+		return Cvar_VariableIntegerValue( (const char *)t[0].p );
+	}
+	case G_CVAR_VARIABLE_STRING_BUFFER: {
+		// The VARG_VMPTR_SIZED unmarshal bounds-checks (buffer, bufsize) via
+		// VM_CheckBounds — the same guard the hand-written VM_CHECKBOUNDS did.
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_CVAR_VARIABLE_STRING_BUFFER, args, t );
+		SV_TYPED_PARITY( G_CVAR_VARIABLE_STRING_BUFFER, args, t );
+		Cvar_VariableStringBufferSafe( t[0].p, t[1].p, (int)t[2].i, gvm->privateFlag );
 		return 0;
+	}
 	case G_ARGC:
+		// 0-arg: nothing to unmarshal — bare call (W-41), like G_MILLISECONDS.
 		return Cmd_Argc();
-	case G_ARGV:
-		VM_CHECKBOUNDS( gvm, args[2], args[3] );
-		Cmd_ArgvBuffer( args[1], VMA(2), args[3] );
+	case G_ARGV: {
+		// VARG_VMPTR_SIZED bounds-checks (buffer, bufferLength) via VM_CheckBounds.
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_ARGV, args, t );
+		SV_TYPED_PARITY( G_ARGV, args, t );
+		Cmd_ArgvBuffer( (int)t[0].i, t[1].p, (int)t[2].i );
 		return 0;
-	case G_SEND_CONSOLE_COMMAND:
-		Cbuf_ExecuteTextSafe( args[1], VMA(2) );
+	}
+	case G_SEND_CONSOLE_COMMAND: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_SEND_CONSOLE_COMMAND, args, t );
+		SV_TYPED_PARITY( G_SEND_CONSOLE_COMMAND, args, t );
+		Cbuf_ExecuteTextSafe( (cbufExec_t)t[0].i, (const char *)t[1].p );
 		return 0;
+	}
 
-	case G_FS_FOPEN_FILE:
-		return FS_VM_OpenFile( VMA(1), VMA(2), args[3], H_QAGAME );
+	case G_FS_FOPEN_FILE: {
+		// fileHandle_t* (arg 2) is written back by the engine — plain VMPTR.
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_FS_FOPEN_FILE, args, t );
+		SV_TYPED_PARITY( G_FS_FOPEN_FILE, args, t );
+		return FS_VM_OpenFile( t[0].p, t[1].p, (fsMode_t)t[2].i, H_QAGAME );
+	}
 	case G_FS_READ:
 		if ( args[3] == 0 ) // UrT may pass this with args[2]=-1 and cause false bounds check error
-			return 0;
-		VM_CHECKBOUNDS( gvm, args[1], args[2] );
-		return FS_VM_ReadFile( VMA(1), args[2], args[3], H_QAGAME );
-	case G_FS_WRITE:
-		VM_CHECKBOUNDS( gvm, args[1], args[2] );
-		FS_VM_WriteFile( VMA(1), args[2], args[3], H_QAGAME );
+			return 0;       // MUST stay ahead of the unmarshal: VARG_VMPTR_SIZED would
+			                // bounds-check args[1]/args[2] and the args[2]=-1 case would falsely terminate.
+		{
+			// VARG_VMPTR_SIZED bounds-checks (buffer, len) via VM_CheckBounds.
+			vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+			SV_UnmarshalGame( &sv_desc_G_FS_READ, args, t );
+			SV_TYPED_PARITY( G_FS_READ, args, t );
+			return FS_VM_ReadFile( t[0].p, (int)t[1].i, (fileHandle_t)t[2].i, H_QAGAME );
+		}
+	case G_FS_WRITE: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_FS_WRITE, args, t );
+		SV_TYPED_PARITY( G_FS_WRITE, args, t );
+		FS_VM_WriteFile( t[0].p, (int)t[1].i, (fileHandle_t)t[2].i, H_QAGAME );
 		return 0;
-	case G_FS_FCLOSE_FILE:
-		FS_VM_CloseFile( args[1], H_QAGAME );
+	}
+	case G_FS_FCLOSE_FILE: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_FS_FCLOSE_FILE, args, t );
+		SV_TYPED_PARITY( G_FS_FCLOSE_FILE, args, t );
+		FS_VM_CloseFile( (fileHandle_t)t[0].i, H_QAGAME );
 		return 0;
-	case G_FS_SEEK:
-		return FS_VM_SeekFile( args[1], args[2], args[3], H_QAGAME );
+	}
+	case G_FS_SEEK: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_FS_SEEK, args, t );
+		SV_TYPED_PARITY( G_FS_SEEK, args, t );
+		return FS_VM_SeekFile( (fileHandle_t)t[0].i, (long)t[1].i, (fsOrigin_t)t[2].i, H_QAGAME );
+	}
 
-	case G_FS_GETFILELIST:
-		VM_CHECKBOUNDS( gvm, args[3], args[4] );
-		return FS_GetFileList( VMA(1), VMA(2), VMA(3), args[4] );
+	case G_FS_GETFILELIST: {
+		// listbuf (arg 3) is VARG_VMPTR_SIZED, bounds-checked against bufsize (arg 4).
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_FS_GETFILELIST, args, t );
+		SV_TYPED_PARITY( G_FS_GETFILELIST, args, t );
+		return FS_GetFileList( t[0].p, t[1].p, t[2].p, (int)t[3].i );
+	}
+	case G_FS_RENAME: {
+		// Two string args -> the engine FS_Rename (path-based, homepath-scoped, so
+		// temp+final are same-dir = a true atomic rename). Called directly (no
+		// FS_VM_* / H_QAGAME — that scoping is only for handle-based ops).
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_FS_RENAME, args, t );
+		SV_TYPED_PARITY( G_FS_RENAME, args, t );
+		FS_Rename( t[0].p, t[1].p );
+		return 0;
+	}
 
 	case G_LOCATE_GAME_DATA:
 		SV_LocateGameData( VMA(1), args[2], args[3], VMA(4), args[5] );
@@ -442,37 +1110,79 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case G_DROP_CLIENT:
 		SV_GameDropClient( args[1], VMA(2) );
 		return 0;
-	case G_SEND_SERVER_COMMAND:
-		SV_GameSendServerCommand( args[1], VMA(2) );
+	case G_SEND_SERVER_COMMAND: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_SEND_SERVER_COMMAND, args, t );
+		SV_TYPED_PARITY( G_SEND_SERVER_COMMAND, args, t );
+		SV_GameSendServerCommand( (int)t[0].i, (const char *)t[1].p );
 		return 0;
+	}
 	case G_LINKENTITY:
 		SV_LinkEntity( VMA(1) );
 		return 0;
 	case G_UNLINKENTITY:
 		SV_UnlinkEntity( VMA(1) );
 		return 0;
-	case G_ENTITIES_IN_BOX:
-		VM_CHECKBOUNDS3( gvm, args[3], args[4], sizeof( int ) );
-		return SV_AreaEntities( VMA(1), VMA(2), VMA(3), args[4] );
-	case G_ENTITY_CONTACT:
-		return SV_EntityContact( VMA(1), VMA(2), VMA(3), /*int capsule*/ qfalse );
-	case G_ENTITY_CONTACTCAPSULE:
-		return SV_EntityContact( VMA(1), VMA(2), VMA(3), /*int capsule*/ qtrue );
-	case G_TRACE:
-		SV_Trace( VMA(1), VMA(2), VMA(3), VMA(4), VMA(5), args[6], args[7], /*int capsule*/ qfalse );
+	case G_ENTITIES_IN_BOX: {
+		// entityList = VARG_VMPTR_COUNTED int[maxcount]; the VM_CheckBounds3 count×size
+		// bounds is now inside VM_UnmarshalTyped (from the descriptor's countArg/elemSize).
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_ENTITIES_IN_BOX, args, t );
+		SV_TYPED_PARITY( G_ENTITIES_IN_BOX, args, t );
+		return SV_AreaEntities( t[0].p, t[1].p, t[2].p, (int)t[3].i );
+	}
+	case G_ENTITY_CONTACT: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_ENTITY_CONTACT, args, t );
+		SV_TYPED_PARITY( G_ENTITY_CONTACT, args, t );
+		return SV_EntityContact( t[0].p, t[1].p, t[2].p, /*int capsule*/ qfalse );
+	}
+	case G_ENTITY_CONTACTCAPSULE: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_ENTITY_CONTACTCAPSULE, args, t );
+		SV_TYPED_PARITY( G_ENTITY_CONTACTCAPSULE, args, t );
+		return SV_EntityContact( t[0].p, t[1].p, t[2].p, /*int capsule*/ qtrue );
+	}
+	case G_TRACE: {
+		// trace_t* (arg 1) is the engine's write-back result; vec3s are pointers.
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_TRACE, args, t );
+		SV_TYPED_PARITY( G_TRACE, args, t );
+		SV_Trace( t[0].p, t[1].p, t[2].p, t[3].p, t[4].p, (int)t[5].i, (int)t[6].i, /*capsule*/ qfalse );
 		return 0;
-	case G_TRACECAPSULE:
-		SV_Trace( VMA(1), VMA(2), VMA(3), VMA(4), VMA(5), args[6], args[7], /*int capsule*/ qtrue );
+	}
+	case G_TRACECAPSULE: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_TRACECAPSULE, args, t );
+		SV_TYPED_PARITY( G_TRACECAPSULE, args, t );
+		SV_Trace( t[0].p, t[1].p, t[2].p, t[3].p, t[4].p, (int)t[5].i, (int)t[6].i, /*capsule*/ qtrue );
 		return 0;
-	case G_POINT_CONTENTS:
-		return SV_PointContents( VMA(1), args[2] );
-	case G_SET_BRUSH_MODEL:
-		SV_SetBrushModel( VMA(1), VMA(2) );
+	}
+	case G_POINT_CONTENTS: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_POINT_CONTENTS, args, t );
+		SV_TYPED_PARITY( G_POINT_CONTENTS, args, t );
+		return SV_PointContents( t[0].p, (int)t[1].i );
+	}
+	case G_SET_BRUSH_MODEL: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_SET_BRUSH_MODEL, args, t );
+		SV_TYPED_PARITY( G_SET_BRUSH_MODEL, args, t );
+		SV_SetBrushModel( t[0].p, (const char *)t[1].p );
 		return 0;
-	case G_IN_PVS:
-		return SV_inPVS( VMA(1), VMA(2) );
-	case G_IN_PVS_IGNORE_PORTALS:
-		return SV_inPVSIgnorePortals( VMA(1), VMA(2) );
+	}
+	case G_IN_PVS: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_IN_PVS, args, t );
+		SV_TYPED_PARITY( G_IN_PVS, args, t );
+		return SV_inPVS( t[0].p, t[1].p );
+	}
+	case G_IN_PVS_IGNORE_PORTALS: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_IN_PVS_IGNORE_PORTALS, args, t );
+		SV_TYPED_PARITY( G_IN_PVS_IGNORE_PORTALS, args, t );
+		return SV_inPVSIgnorePortals( t[0].p, t[1].p );
+	}
 
 	case G_SET_CONFIGSTRING:
 		SV_SetConfigstring( args[1], VMA(2) );
@@ -495,8 +1205,12 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case G_ADJUST_AREA_PORTAL_STATE:
 		SV_AdjustAreaPortalState( VMA(1), args[2] );
 		return 0;
-	case G_AREAS_CONNECTED:
-		return CM_AreasConnected( args[1], args[2] );
+	case G_AREAS_CONNECTED: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_AREAS_CONNECTED, args, t );
+		SV_TYPED_PARITY( G_AREAS_CONNECTED, args, t );
+		return CM_AreasConnected( (int)t[0].i, (int)t[1].i );
+	}
 
 	case G_BOT_ALLOCATE_CLIENT:
 		return SV_BotAllocateClient();
@@ -546,38 +1260,60 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		return SV_BotLibSetup();
 	case BOTLIB_SHUTDOWN:
 		return SV_BotLibShutdown();
-	case BOTLIB_LIBVAR_SET:
-		return botlib_export->BotLibVarSet( VMA(1), VMA(2) );
-	case BOTLIB_LIBVAR_GET:
-		VM_CHECKBOUNDS( gvm, args[2], args[3] );
-		return botlib_export->BotLibVarGet( VMA(1), VMA(2), args[3] );
+	case BOTLIB_LIBVAR_SET: {
+		SV_BOTLIB( &sv_desc_BOTLIB_LIBVAR_SET, 2 );
+		return botlib_export->BotLibVarSet( t[0].p, t[1].p );
+	}
+	case BOTLIB_LIBVAR_GET: {
+		// VARG_VMPTR_SIZED (arg 2) bounds-checks (buffer, args[3]) — the VM_CHECKBOUNDS
+		// the hand path did is now inside the unmarshal.
+		SV_BOTLIB( &sv_desc_BOTLIB_LIBVAR_GET, 3 );
+		return botlib_export->BotLibVarGet( t[0].p, t[1].p, (int)t[2].i );
+	}
 
-	case BOTLIB_PC_ADD_GLOBAL_DEFINE:
-		return botlib_export->PC_AddGlobalDefine( VMA(1) );
-	case BOTLIB_PC_LOAD_SOURCE:
-		return botlib_export->PC_LoadSourceHandle( VMA(1) );
+	case BOTLIB_PC_ADD_GLOBAL_DEFINE: {
+		SV_BOTLIB( &sv_desc_BOTLIB_PC_ADD_GLOBAL_DEFINE, 1 );
+		return botlib_export->PC_AddGlobalDefine( t[0].p );
+	}
+	case BOTLIB_PC_LOAD_SOURCE: {
+		SV_BOTLIB( &sv_desc_BOTLIB_PC_LOAD_SOURCE, 1 );
+		return botlib_export->PC_LoadSourceHandle( t[0].p );
+	}
 	case BOTLIB_PC_FREE_SOURCE:
 		return botlib_export->PC_FreeSourceHandle( args[1] );
 	case BOTLIB_PC_READ_TOKEN:
+		// args[2] sized by sizeof(pc_token_t) (a fixed sizeof, not a wire arg) → the
+		// VARG_VMPTR_SIZED's len-from-next-arg model doesn't fit; kept hand-written.
 		VM_CHECKBOUNDS( gvm, args[2], sizeof( pc_token_t ) );
 		return botlib_export->PC_ReadTokenHandle( args[1], VMA(2) );
-	case BOTLIB_PC_SOURCE_FILE_AND_LINE:
-		return botlib_export->PC_SourceFileAndLine( args[1], VMA(2), VMA(3) );
+	case BOTLIB_PC_SOURCE_FILE_AND_LINE: {
+		SV_BOTLIB( &sv_desc_BOTLIB_PC_SOURCE_FILE_AND_LINE, 3 );
+		return botlib_export->PC_SourceFileAndLine( (int)t[0].i, t[1].p, t[2].p );
+	}
 
-	case BOTLIB_START_FRAME:
-		return botlib_export->BotLibStartFrame( VMF(1) );
-	case BOTLIB_LOAD_MAP:
-		return botlib_export->BotLibLoadMap( VMA(1) );
-	case BOTLIB_UPDATENTITY:
-		return botlib_export->BotLibUpdateEntity( args[1], VMA(2) );
-	case BOTLIB_TEST:
-		return botlib_export->Test( args[1], VMA(2), VMA(3), VMA(4) );
+	case BOTLIB_START_FRAME: {     // VMF(1) — first VARG_FLOAT use
+		SV_BOTLIB( &sv_desc_BOTLIB_START_FRAME, 1 );
+		return botlib_export->BotLibStartFrame( t[0].f );
+	}
+	case BOTLIB_LOAD_MAP: {
+		SV_BOTLIB( &sv_desc_BOTLIB_LOAD_MAP, 1 );
+		return botlib_export->BotLibLoadMap( t[0].p );
+	}
+	case BOTLIB_UPDATENTITY: {
+		SV_BOTLIB( &sv_desc_BOTLIB_UPDATENTITY, 2 );
+		return botlib_export->BotLibUpdateEntity( (int)t[0].i, t[1].p );
+	}
+	case BOTLIB_TEST: {
+		SV_BOTLIB( &sv_desc_BOTLIB_TEST, 4 );
+		return botlib_export->Test( (int)t[0].i, t[1].p, t[2].p, t[3].p );
+	}
 
 	case BOTLIB_GET_SNAPSHOT_ENTITY:
 		return SV_BotGetSnapshotEntity( args[1], args[2] );
-	case BOTLIB_GET_CONSOLE_MESSAGE:
-		VM_CHECKBOUNDS( gvm, args[2], args[3] );
-		return SV_BotGetConsoleMessage( args[1], VMA(2), args[3] );
+	case BOTLIB_GET_CONSOLE_MESSAGE: {
+		SV_BOTLIB( &sv_desc_BOTLIB_GET_CONSOLE_MESSAGE, 3 );
+		return SV_BotGetConsoleMessage( (int)t[0].i, t[1].p, (int)t[2].i );
+	}
 	case BOTLIB_USER_COMMAND:
 		{
 			unsigned clientNum = args[1];
@@ -588,99 +1324,21 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		}
 		return 0;
 
-#if !FEAT_RECAST_NAVMESH
-	case BOTLIB_AAS_BBOX_AREAS:
-		return botlib_export->aas.AAS_BBoxAreas( VMA(1), VMA(2), VMA(3), args[4] );
-	case BOTLIB_AAS_AREA_INFO:
-		return botlib_export->aas.AAS_AreaInfo( args[1], VMA(2) );
-	case BOTLIB_AAS_ALTERNATIVE_ROUTE_GOAL:
-		return botlib_export->aas.AAS_AlternativeRouteGoals( VMA(1), args[2], VMA(3), args[4], args[5], VMA(6), args[7], args[8] );
-	case BOTLIB_AAS_ENTITY_INFO:
-		botlib_export->aas.AAS_EntityInfo( args[1], VMA(2) );
+	case BOTLIB_EA_SAY: {
+		SV_BOTLIB( &sv_desc_BOTLIB_EA_SAY, 2 );
+		botlib_export->ea.EA_Say( (int)t[0].i, t[1].p );
 		return 0;
-
-	case BOTLIB_AAS_INITIALIZED:
-		return botlib_export->aas.AAS_Initialized();
-	case BOTLIB_AAS_PRESENCE_TYPE_BOUNDING_BOX:
-		botlib_export->aas.AAS_PresenceTypeBoundingBox( args[1], VMA(2), VMA(3) );
+	}
+	case BOTLIB_EA_SAY_TEAM: {
+		SV_BOTLIB( &sv_desc_BOTLIB_EA_SAY_TEAM, 2 );
+		botlib_export->ea.EA_SayTeam( (int)t[0].i, t[1].p );
 		return 0;
-	case BOTLIB_AAS_TIME:
-		return FloatAsInt( botlib_export->aas.AAS_Time() );
-
-	case BOTLIB_AAS_POINT_AREA_NUM:
-		return botlib_export->aas.AAS_PointAreaNum( VMA(1) );
-	case BOTLIB_AAS_POINT_REACHABILITY_AREA_INDEX:
-		return botlib_export->aas.AAS_PointReachabilityAreaIndex( VMA(1) );
-	case BOTLIB_AAS_TRACE_AREAS:
-		return botlib_export->aas.AAS_TraceAreas( VMA(1), VMA(2), VMA(3), VMA(4), args[5] );
-
-	case BOTLIB_AAS_POINT_CONTENTS:
-		return botlib_export->aas.AAS_PointContents( VMA(1) );
-	case BOTLIB_AAS_NEXT_BSP_ENTITY:
-		return botlib_export->aas.AAS_NextBSPEntity( args[1] );
-	case BOTLIB_AAS_VALUE_FOR_BSP_EPAIR_KEY:
-		VM_CHECKBOUNDS( gvm, args[3], args[4] );
-		return botlib_export->aas.AAS_ValueForBSPEpairKey( args[1], VMA(2), VMA(3), args[4] );
-	case BOTLIB_AAS_VECTOR_FOR_BSP_EPAIR_KEY:
-		return botlib_export->aas.AAS_VectorForBSPEpairKey( args[1], VMA(2), VMA(3) );
-	case BOTLIB_AAS_FLOAT_FOR_BSP_EPAIR_KEY:
-		return botlib_export->aas.AAS_FloatForBSPEpairKey( args[1], VMA(2), VMA(3) );
-	case BOTLIB_AAS_INT_FOR_BSP_EPAIR_KEY:
-		return botlib_export->aas.AAS_IntForBSPEpairKey( args[1], VMA(2), VMA(3) );
-
-	case BOTLIB_AAS_AREA_REACHABILITY:
-		return botlib_export->aas.AAS_AreaReachability( args[1] );
-
-	case BOTLIB_AAS_AREA_TRAVEL_TIME_TO_GOAL_AREA:
-		return botlib_export->aas.AAS_AreaTravelTimeToGoalArea( args[1], VMA(2), args[3], args[4] );
-	case BOTLIB_AAS_ENABLE_ROUTING_AREA:
-		return botlib_export->aas.AAS_EnableRoutingArea( args[1], args[2] );
-	case BOTLIB_AAS_PREDICT_ROUTE:
-		return botlib_export->aas.AAS_PredictRoute( VMA(1), args[2], VMA(3), args[4], args[5], args[6], args[7], args[8], args[9], args[10], args[11] );
-
-	case BOTLIB_AAS_SWIMMING:
-		return botlib_export->aas.AAS_Swimming( VMA(1) );
-	case BOTLIB_AAS_PREDICT_CLIENT_MOVEMENT:
-		return botlib_export->aas.AAS_PredictClientMovement( VMA(1), args[2], VMA(3), args[4], args[5],
-			VMA(6), VMA(7), args[8], args[9], VMF(10), args[11], args[12], args[13] );
-#else  /* FEAT_RECAST_NAVMESH — AAS navigation disabled, Recast is active */
-	/* These cases exist so game code calling trap_AAS_* does not crash.
-	 * Phase 4 will route these call sites to trap_Nav_* equivalents and
-	 * remove the AAS wrappers from g_syscalls.c entirely. */
-	case BOTLIB_AAS_BBOX_AREAS:
-	case BOTLIB_AAS_AREA_INFO:
-	case BOTLIB_AAS_ALTERNATIVE_ROUTE_GOAL:
-	case BOTLIB_AAS_ENTITY_INFO:
-	case BOTLIB_AAS_INITIALIZED:
-	case BOTLIB_AAS_PRESENCE_TYPE_BOUNDING_BOX:
-	case BOTLIB_AAS_TIME:
-	case BOTLIB_AAS_POINT_AREA_NUM:
-	case BOTLIB_AAS_POINT_REACHABILITY_AREA_INDEX:
-	case BOTLIB_AAS_TRACE_AREAS:
-	case BOTLIB_AAS_POINT_CONTENTS:
-	case BOTLIB_AAS_NEXT_BSP_ENTITY:
-	case BOTLIB_AAS_VALUE_FOR_BSP_EPAIR_KEY:
-	case BOTLIB_AAS_VECTOR_FOR_BSP_EPAIR_KEY:
-	case BOTLIB_AAS_FLOAT_FOR_BSP_EPAIR_KEY:
-	case BOTLIB_AAS_INT_FOR_BSP_EPAIR_KEY:
-	case BOTLIB_AAS_AREA_REACHABILITY:
-	case BOTLIB_AAS_AREA_TRAVEL_TIME_TO_GOAL_AREA:
-	case BOTLIB_AAS_ENABLE_ROUTING_AREA:
-	case BOTLIB_AAS_PREDICT_ROUTE:
-	case BOTLIB_AAS_SWIMMING:
-	case BOTLIB_AAS_PREDICT_CLIENT_MOVEMENT:
+	}
+	case BOTLIB_EA_COMMAND: {
+		SV_BOTLIB( &sv_desc_BOTLIB_EA_COMMAND, 2 );
+		botlib_export->ea.EA_Command( (int)t[0].i, t[1].p );
 		return 0;
-#endif /* FEAT_RECAST_NAVMESH */
-
-	case BOTLIB_EA_SAY:
-		botlib_export->ea.EA_Say( args[1], VMA(2) );
-		return 0;
-	case BOTLIB_EA_SAY_TEAM:
-		botlib_export->ea.EA_SayTeam( args[1], VMA(2) );
-		return 0;
-	case BOTLIB_EA_COMMAND:
-		botlib_export->ea.EA_Command( args[1], VMA(2) );
-		return 0;
+	}
 
 	case BOTLIB_EA_ACTION:
 		botlib_export->ea.EA_Action( args[1], args[2] );
@@ -731,94 +1389,133 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case BOTLIB_EA_DELAYED_JUMP:
 		botlib_export->ea.EA_DelayedJump( args[1] );
 		return 0;
-	case BOTLIB_EA_MOVE:
-		botlib_export->ea.EA_Move( args[1], VMA(2), VMF(3) );
+	case BOTLIB_EA_MOVE: {          // VMF(3) speed — VARG_FLOAT
+		SV_BOTLIB( &sv_desc_BOTLIB_EA_MOVE, 3 );
+		botlib_export->ea.EA_Move( (int)t[0].i, t[1].p, t[2].f );
 		return 0;
-	case BOTLIB_EA_VIEW:
-		botlib_export->ea.EA_View( args[1], VMA(2) );
+	}
+	case BOTLIB_EA_VIEW: {
+		SV_BOTLIB( &sv_desc_BOTLIB_EA_VIEW, 2 );
+		botlib_export->ea.EA_View( (int)t[0].i, t[1].p );
 		return 0;
+	}
 
-	case BOTLIB_EA_END_REGULAR:
-		botlib_export->ea.EA_EndRegular( args[1], VMF(2) );
+	case BOTLIB_EA_END_REGULAR: {   // VMF(2) thinktime — VARG_FLOAT
+		SV_BOTLIB( &sv_desc_BOTLIB_EA_END_REGULAR, 2 );
+		botlib_export->ea.EA_EndRegular( (int)t[0].i, t[1].f );
 		return 0;
-	case BOTLIB_EA_GET_INPUT:
-		botlib_export->ea.EA_GetInput( args[1], VMF(2), VMA(3) );
+	}
+	case BOTLIB_EA_GET_INPUT: {     // VMF(2) thinktime — VARG_FLOAT
+		SV_BOTLIB( &sv_desc_BOTLIB_EA_GET_INPUT, 3 );
+		botlib_export->ea.EA_GetInput( (int)t[0].i, t[1].f, t[2].p );
 		return 0;
+	}
 	case BOTLIB_EA_RESET_INPUT:
 		botlib_export->ea.EA_ResetInput( args[1] );
 		return 0;
 
-	case BOTLIB_AI_LOAD_CHARACTER:
-		return botlib_export->ai.BotLoadCharacter( VMA(1), VMF(2) );
+	case BOTLIB_AI_LOAD_CHARACTER: {   // VMF(2) skill — VARG_FLOAT
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_LOAD_CHARACTER, 2 );
+		return botlib_export->ai.BotLoadCharacter( t[0].p, t[1].f );
+	}
 	case BOTLIB_AI_FREE_CHARACTER:
 		botlib_export->ai.BotFreeCharacter( args[1] );
 		return 0;
 	case BOTLIB_AI_CHARACTERISTIC_FLOAT:
 		return FloatAsInt( botlib_export->ai.Characteristic_Float( args[1], args[2] ) );
-	case BOTLIB_AI_CHARACTERISTIC_BFLOAT:
-		return FloatAsInt( botlib_export->ai.Characteristic_BFloat( args[1], args[2], VMF(3), VMF(4) ) );
+	case BOTLIB_AI_CHARACTERISTIC_BFLOAT: {  // VMF(3),VMF(4) — VARG_FLOAT; FloatAsInt return untouched
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_CHARACTERISTIC_BFLOAT, 4 );
+		return FloatAsInt( botlib_export->ai.Characteristic_BFloat( (int)t[0].i, (int)t[1].i, t[2].f, t[3].f ) );
+	}
 	case BOTLIB_AI_CHARACTERISTIC_INTEGER:
 		return botlib_export->ai.Characteristic_Integer( args[1], args[2] );
 	case BOTLIB_AI_CHARACTERISTIC_BINTEGER:
 		return botlib_export->ai.Characteristic_BInteger( args[1], args[2], args[3], args[4] );
-	case BOTLIB_AI_CHARACTERISTIC_STRING:
-		VM_CHECKBOUNDS( gvm, args[3], args[4] );
-		botlib_export->ai.Characteristic_String( args[1], args[2], VMA(3), args[4] );
+	case BOTLIB_AI_CHARACTERISTIC_STRING: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_CHARACTERISTIC_STRING, 4 );
+		botlib_export->ai.Characteristic_String( (int)t[0].i, (int)t[1].i, t[2].p, (int)t[3].i );
 		return 0;
+	}
 
 	case BOTLIB_AI_ALLOC_CHAT_STATE:
 		return botlib_export->ai.BotAllocChatState();
 	case BOTLIB_AI_FREE_CHAT_STATE:
 		botlib_export->ai.BotFreeChatState( args[1] );
 		return 0;
-	case BOTLIB_AI_QUEUE_CONSOLE_MESSAGE:
-		botlib_export->ai.BotQueueConsoleMessage( args[1], args[2], VMA(3) );
+	case BOTLIB_AI_QUEUE_CONSOLE_MESSAGE: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_QUEUE_CONSOLE_MESSAGE, 3 );
+		botlib_export->ai.BotQueueConsoleMessage( (int)t[0].i, (int)t[1].i, t[2].p );
 		return 0;
+	}
 	case BOTLIB_AI_REMOVE_CONSOLE_MESSAGE:
 		botlib_export->ai.BotRemoveConsoleMessage( args[1], args[2] );
 		return 0;
-	case BOTLIB_AI_NEXT_CONSOLE_MESSAGE:
-		return botlib_export->ai.BotNextConsoleMessage( args[1], VMA(2) );
+	case BOTLIB_AI_NEXT_CONSOLE_MESSAGE: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_NEXT_CONSOLE_MESSAGE, 2 );
+		return botlib_export->ai.BotNextConsoleMessage( (int)t[0].i, t[1].p );
+	}
 	case BOTLIB_AI_NUM_CONSOLE_MESSAGE:
 		return botlib_export->ai.BotNumConsoleMessages( args[1] );
-	case BOTLIB_AI_INITIAL_CHAT:
-		botlib_export->ai.BotInitialChat( args[1], VMA(2), args[3], VMA(4), VMA(5), VMA(6), VMA(7), VMA(8), VMA(9), VMA(10), VMA(11) );
+	case BOTLIB_AI_INITIAL_CHAT: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_INITIAL_CHAT, 11 );
+		botlib_export->ai.BotInitialChat( (int)t[0].i, t[1].p, (int)t[2].i, t[3].p, t[4].p, t[5].p, t[6].p, t[7].p, t[8].p, t[9].p, t[10].p );
 		return 0;
-	case BOTLIB_AI_NUM_INITIAL_CHATS:
-		return botlib_export->ai.BotNumInitialChats( args[1], VMA(2) );
-	case BOTLIB_AI_REPLY_CHAT:
-		return botlib_export->ai.BotReplyChat( args[1], VMA(2), args[3], args[4], VMA(5), VMA(6), VMA(7), VMA(8), VMA(9), VMA(10), VMA(11), VMA(12) );
+	}
+	case BOTLIB_AI_NUM_INITIAL_CHATS: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_NUM_INITIAL_CHATS, 2 );
+		return botlib_export->ai.BotNumInitialChats( (int)t[0].i, t[1].p );
+	}
+	case BOTLIB_AI_REPLY_CHAT: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_REPLY_CHAT, 12 );
+		return botlib_export->ai.BotReplyChat( (int)t[0].i, t[1].p, (int)t[2].i, (int)t[3].i, t[4].p, t[5].p, t[6].p, t[7].p, t[8].p, t[9].p, t[10].p, t[11].p );
+	}
 	case BOTLIB_AI_CHAT_LENGTH:
 		return botlib_export->ai.BotChatLength( args[1] );
 	case BOTLIB_AI_ENTER_CHAT:
 		botlib_export->ai.BotEnterChat( args[1], args[2], args[3] );
 		return 0;
-	case BOTLIB_AI_GET_CHAT_MESSAGE:
-		VM_CHECKBOUNDS( gvm, args[2], args[3] );
-		botlib_export->ai.BotGetChatMessage( args[1], VMA(2), args[3] );
+	case BOTLIB_AI_GET_CHAT_MESSAGE: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_GET_CHAT_MESSAGE, 3 );
+		botlib_export->ai.BotGetChatMessage( (int)t[0].i, t[1].p, (int)t[2].i );
 		return 0;
-	case BOTLIB_AI_STRING_CONTAINS:
-		return botlib_export->ai.StringContains( VMA(1), VMA(2), args[3] );
-	case BOTLIB_AI_FIND_MATCH:
-		return botlib_export->ai.BotFindMatch( VMA(1), VMA(2), args[3] );
-	case BOTLIB_AI_MATCH_VARIABLE:
-		VM_CHECKBOUNDS( gvm, args[3], args[4] );
-		botlib_export->ai.BotMatchVariable( VMA(1), args[2], VMA(3), args[4] );
+	}
+	case BOTLIB_AI_STRING_CONTAINS: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_STRING_CONTAINS, 3 );
+		return botlib_export->ai.StringContains( t[0].p, t[1].p, (int)t[2].i );
+	}
+	case BOTLIB_AI_FIND_MATCH: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_FIND_MATCH, 3 );
+		return botlib_export->ai.BotFindMatch( t[0].p, t[1].p, (int)t[2].i );
+	}
+	case BOTLIB_AI_MATCH_VARIABLE: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_MATCH_VARIABLE, 4 );
+		botlib_export->ai.BotMatchVariable( t[0].p, (int)t[1].i, t[2].p, (int)t[3].i );
 		return 0;
-	case BOTLIB_AI_UNIFY_WHITE_SPACES:
-		botlib_export->ai.UnifyWhiteSpaces( VMA(1) );
+	}
+	case BOTLIB_AI_UNIFY_WHITE_SPACES: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_UNIFY_WHITE_SPACES, 1 );
+		botlib_export->ai.UnifyWhiteSpaces( t[0].p );
 		return 0;
-	case BOTLIB_AI_REPLACE_SYNONYMS:
-		botlib_export->ai.BotReplaceSynonyms( VMA(1), VM_DATA_GUARD_SIZE, args[2] );
+	}
+	case BOTLIB_AI_REPLACE_SYNONYMS: {
+		// middle param is the literal VM_DATA_GUARD_SIZE (not a wire arg); descriptor
+		// is {VMPTR(1), INT(2)} matching the two wire args.
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_REPLACE_SYNONYMS, 2 );
+		botlib_export->ai.BotReplaceSynonyms( t[0].p, VM_DATA_GUARD_SIZE, (int)t[1].i );
 		return 0;
-	case BOTLIB_AI_LOAD_CHAT_FILE:
-		return botlib_export->ai.BotLoadChatFile( args[1], VMA(2), VMA(3) );
+	}
+	case BOTLIB_AI_LOAD_CHAT_FILE: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_LOAD_CHAT_FILE, 3 );
+		return botlib_export->ai.BotLoadChatFile( (int)t[0].i, t[1].p, t[2].p );
+	}
 	case BOTLIB_AI_SET_CHAT_GENDER:
 		botlib_export->ai.BotSetChatGender( args[1], args[2] );
 		return 0;
-	case BOTLIB_AI_SET_CHAT_NAME:
-		botlib_export->ai.BotSetChatName( args[1], VMA(2), args[3] );
+	case BOTLIB_AI_SET_CHAT_NAME: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_SET_CHAT_NAME, 3 );
+		botlib_export->ai.BotSetChatName( (int)t[0].i, t[1].p, (int)t[2].i );
 		return 0;
+	}
 
 	case BOTLIB_AI_RESET_GOAL_STATE:
 		botlib_export->ai.BotResetGoalState( args[1] );
@@ -829,9 +1526,11 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case BOTLIB_AI_REMOVE_FROM_AVOID_GOALS:
 		botlib_export->ai.BotRemoveFromAvoidGoals( args[1], args[2] );
 		return 0;
-	case BOTLIB_AI_PUSH_GOAL:
-		botlib_export->ai.BotPushGoal( args[1], VMA(2) );
+	case BOTLIB_AI_PUSH_GOAL: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_PUSH_GOAL, 2 );
+		botlib_export->ai.BotPushGoal( (int)t[0].i, t[1].p );
 		return 0;
+	}
 	case BOTLIB_AI_POP_GOAL:
 		botlib_export->ai.BotPopGoal( args[1] );
 		return 0;
@@ -844,53 +1543,80 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case BOTLIB_AI_DUMP_GOAL_STACK:
 		botlib_export->ai.BotDumpGoalStack( args[1] );
 		return 0;
-	case BOTLIB_AI_GOAL_NAME:
-		VM_CHECKBOUNDS( gvm, args[2], args[3] );
-		botlib_export->ai.BotGoalName( args[1], VMA(2), args[3] );
+	case BOTLIB_AI_GOAL_NAME: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_GOAL_NAME, 3 );
+		botlib_export->ai.BotGoalName( (int)t[0].i, t[1].p, (int)t[2].i );
 		return 0;
-	case BOTLIB_AI_GET_TOP_GOAL:
-		return botlib_export->ai.BotGetTopGoal( args[1], VMA(2) );
-	case BOTLIB_AI_GET_SECOND_GOAL:
-		return botlib_export->ai.BotGetSecondGoal( args[1], VMA(2) );
-	case BOTLIB_AI_CHOOSE_LTG_ITEM:
-		return botlib_export->ai.BotChooseLTGItem( args[1], VMA(2), VMA(3), args[4] );
-	case BOTLIB_AI_CHOOSE_NBG_ITEM:
-		return botlib_export->ai.BotChooseNBGItem( args[1], VMA(2), VMA(3), args[4], VMA(5), VMF(6) );
-	case BOTLIB_AI_TOUCHING_GOAL:
-		return botlib_export->ai.BotTouchingGoal( VMA(1), VMA(2) );
-	case BOTLIB_AI_ITEM_GOAL_IN_VIS_BUT_NOT_VISIBLE:
-		return botlib_export->ai.BotItemGoalInVisButNotVisible( args[1], VMA(2), VMA(3), VMA(4) );
-	case BOTLIB_AI_GET_LEVEL_ITEM_GOAL:
-		return botlib_export->ai.BotGetLevelItemGoal( args[1], VMA(2), VMA(3) );
-	case BOTLIB_AI_GET_NEXT_CAMP_SPOT_GOAL:
-		return botlib_export->ai.BotGetNextCampSpotGoal( args[1], VMA(2) );
-	case BOTLIB_AI_GET_MAP_LOCATION_GOAL:
-		return botlib_export->ai.BotGetMapLocationGoal( VMA(1), VMA(2) );
+	}
+	case BOTLIB_AI_GET_TOP_GOAL: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_GET_TOP_GOAL, 2 );
+		return botlib_export->ai.BotGetTopGoal( (int)t[0].i, t[1].p );
+	}
+	case BOTLIB_AI_GET_SECOND_GOAL: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_GET_SECOND_GOAL, 2 );
+		return botlib_export->ai.BotGetSecondGoal( (int)t[0].i, t[1].p );
+	}
+	case BOTLIB_AI_CHOOSE_LTG_ITEM: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_CHOOSE_LTG_ITEM, 4 );
+		return botlib_export->ai.BotChooseLTGItem( (int)t[0].i, t[1].p, t[2].p, (int)t[3].i );
+	}
+	case BOTLIB_AI_CHOOSE_NBG_ITEM: {   // VMF(6) — VARG_FLOAT
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_CHOOSE_NBG_ITEM, 6 );
+		return botlib_export->ai.BotChooseNBGItem( (int)t[0].i, t[1].p, t[2].p, (int)t[3].i, t[4].p, t[5].f );
+	}
+	case BOTLIB_AI_TOUCHING_GOAL: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_TOUCHING_GOAL, 2 );
+		return botlib_export->ai.BotTouchingGoal( t[0].p, t[1].p );
+	}
+	case BOTLIB_AI_ITEM_GOAL_IN_VIS_BUT_NOT_VISIBLE: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_ITEM_GOAL_IN_VIS_BUT_NOT_VISIBLE, 4 );
+		return botlib_export->ai.BotItemGoalInVisButNotVisible( (int)t[0].i, t[1].p, t[2].p, t[3].p );
+	}
+	case BOTLIB_AI_GET_LEVEL_ITEM_GOAL: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_GET_LEVEL_ITEM_GOAL, 3 );
+		return botlib_export->ai.BotGetLevelItemGoal( (int)t[0].i, t[1].p, t[2].p );
+	}
+	case BOTLIB_AI_GET_NEXT_CAMP_SPOT_GOAL: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_GET_NEXT_CAMP_SPOT_GOAL, 2 );
+		return botlib_export->ai.BotGetNextCampSpotGoal( (int)t[0].i, t[1].p );
+	}
+	case BOTLIB_AI_GET_MAP_LOCATION_GOAL: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_GET_MAP_LOCATION_GOAL, 2 );
+		return botlib_export->ai.BotGetMapLocationGoal( t[0].p, t[1].p );
+	}
 	case BOTLIB_AI_AVOID_GOAL_TIME:
 		return FloatAsInt( botlib_export->ai.BotAvoidGoalTime( args[1], args[2] ) );
-	case BOTLIB_AI_SET_AVOID_GOAL_TIME:
-		botlib_export->ai.BotSetAvoidGoalTime( args[1], args[2], VMF(3));
+	case BOTLIB_AI_SET_AVOID_GOAL_TIME: {   // VMF(3) — VARG_FLOAT
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_SET_AVOID_GOAL_TIME, 3 );
+		botlib_export->ai.BotSetAvoidGoalTime( (int)t[0].i, (int)t[1].i, t[2].f );
 		return 0;
+	}
 	case BOTLIB_AI_INIT_LEVEL_ITEMS:
 		botlib_export->ai.BotInitLevelItems();
 		return 0;
 	case BOTLIB_AI_UPDATE_ENTITY_ITEMS:
 		botlib_export->ai.BotUpdateEntityItems();
 		return 0;
-	case BOTLIB_AI_LOAD_ITEM_WEIGHTS:
-		return botlib_export->ai.BotLoadItemWeights( args[1], VMA(2) );
+	case BOTLIB_AI_LOAD_ITEM_WEIGHTS: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_LOAD_ITEM_WEIGHTS, 2 );
+		return botlib_export->ai.BotLoadItemWeights( (int)t[0].i, t[1].p );
+	}
 	case BOTLIB_AI_FREE_ITEM_WEIGHTS:
 		botlib_export->ai.BotFreeItemWeights( args[1] );
 		return 0;
 	case BOTLIB_AI_INTERBREED_GOAL_FUZZY_LOGIC:
 		botlib_export->ai.BotInterbreedGoalFuzzyLogic( args[1], args[2], args[3] );
 		return 0;
-	case BOTLIB_AI_SAVE_GOAL_FUZZY_LOGIC:
-		botlib_export->ai.BotSaveGoalFuzzyLogic( args[1], VMA(2) );
+	case BOTLIB_AI_SAVE_GOAL_FUZZY_LOGIC: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_SAVE_GOAL_FUZZY_LOGIC, 2 );
+		botlib_export->ai.BotSaveGoalFuzzyLogic( (int)t[0].i, t[1].p );
 		return 0;
-	case BOTLIB_AI_MUTATE_GOAL_FUZZY_LOGIC:
-		botlib_export->ai.BotMutateGoalFuzzyLogic( args[1], VMF(2) );
+	}
+	case BOTLIB_AI_MUTATE_GOAL_FUZZY_LOGIC: {   // VMF(2) — VARG_FLOAT
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_MUTATE_GOAL_FUZZY_LOGIC, 2 );
+		botlib_export->ai.BotMutateGoalFuzzyLogic( (int)t[0].i, t[1].f );
 		return 0;
+	}
 	case BOTLIB_AI_ALLOC_GOAL_STATE:
 		return botlib_export->ai.BotAllocGoalState( args[1] );
 	case BOTLIB_AI_FREE_GOAL_STATE:
@@ -900,42 +1626,62 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case BOTLIB_AI_RESET_MOVE_STATE:
 		botlib_export->ai.BotResetMoveState( args[1] );
 		return 0;
-	case BOTLIB_AI_ADD_AVOID_SPOT:
-		botlib_export->ai.BotAddAvoidSpot( args[1], VMA(2), VMF(3), args[4] );
+	case BOTLIB_AI_ADD_AVOID_SPOT: {   // VMF(3) — VARG_FLOAT
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_ADD_AVOID_SPOT, 4 );
+		botlib_export->ai.BotAddAvoidSpot( (int)t[0].i, t[1].p, t[2].f, (int)t[3].i );
 		return 0;
-	case BOTLIB_AI_MOVE_TO_GOAL:
-		botlib_export->ai.BotMoveToGoal( VMA(1), args[2], VMA(3), args[4] );
+	}
+	case BOTLIB_AI_MOVE_TO_GOAL: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_MOVE_TO_GOAL, 4 );
+		botlib_export->ai.BotMoveToGoal( t[0].p, (int)t[1].i, t[2].p, (int)t[3].i );
 		return 0;
-	case BOTLIB_AI_MOVE_IN_DIRECTION:
-		return botlib_export->ai.BotMoveInDirection( args[1], VMA(2), VMF(3), args[4] );
+	}
+	case BOTLIB_AI_MOVE_IN_DIRECTION: {   // VMF(3) — VARG_FLOAT
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_MOVE_IN_DIRECTION, 4 );
+		return botlib_export->ai.BotMoveInDirection( (int)t[0].i, t[1].p, t[2].f, (int)t[3].i );
+	}
 	case BOTLIB_AI_RESET_AVOID_REACH:
 		botlib_export->ai.BotResetAvoidReach( args[1] );
 		return 0;
 	case BOTLIB_AI_RESET_LAST_AVOID_REACH:
 		botlib_export->ai.BotResetLastAvoidReach( args[1] );
 		return 0;
-	case BOTLIB_AI_REACHABILITY_AREA:
-		return botlib_export->ai.BotReachabilityArea( VMA(1), args[2] );
-	case BOTLIB_AI_MOVEMENT_VIEW_TARGET:
-		return botlib_export->ai.BotMovementViewTarget( args[1], VMA(2), args[3], VMF(4), VMA(5) );
-	case BOTLIB_AI_PREDICT_VISIBLE_POSITION:
-		return botlib_export->ai.BotPredictVisiblePosition( VMA(1), args[2], VMA(3), args[4], VMA(5) );
+	case BOTLIB_AI_REACHABILITY_AREA: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_REACHABILITY_AREA, 2 );
+		return botlib_export->ai.BotReachabilityArea( t[0].p, (int)t[1].i );
+	}
+	case BOTLIB_AI_MOVEMENT_VIEW_TARGET: {   // VMF(4) — VARG_FLOAT
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_MOVEMENT_VIEW_TARGET, 5 );
+		return botlib_export->ai.BotMovementViewTarget( (int)t[0].i, t[1].p, (int)t[2].i, t[3].f, t[4].p );
+	}
+	case BOTLIB_AI_PREDICT_VISIBLE_POSITION: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_PREDICT_VISIBLE_POSITION, 5 );
+		return botlib_export->ai.BotPredictVisiblePosition( t[0].p, (int)t[1].i, t[2].p, (int)t[3].i, t[4].p );
+	}
 	case BOTLIB_AI_ALLOC_MOVE_STATE:
 		return botlib_export->ai.BotAllocMoveState();
 	case BOTLIB_AI_FREE_MOVE_STATE:
 		botlib_export->ai.BotFreeMoveState( args[1] );
 		return 0;
-	case BOTLIB_AI_INIT_MOVE_STATE:
-		botlib_export->ai.BotInitMoveState( args[1], VMA(2) );
+	case BOTLIB_AI_INIT_MOVE_STATE: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_INIT_MOVE_STATE, 2 );
+		botlib_export->ai.BotInitMoveState( (int)t[0].i, t[1].p );
 		return 0;
+	}
 
-	case BOTLIB_AI_CHOOSE_BEST_FIGHT_WEAPON:
-		return botlib_export->ai.BotChooseBestFightWeapon( args[1], VMA(2) );
-	case BOTLIB_AI_GET_WEAPON_INFO:
-		botlib_export->ai.BotGetWeaponInfo( args[1], args[2], VMA(3) );
+	case BOTLIB_AI_CHOOSE_BEST_FIGHT_WEAPON: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_CHOOSE_BEST_FIGHT_WEAPON, 2 );
+		return botlib_export->ai.BotChooseBestFightWeapon( (int)t[0].i, t[1].p );
+	}
+	case BOTLIB_AI_GET_WEAPON_INFO: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_GET_WEAPON_INFO, 3 );
+		botlib_export->ai.BotGetWeaponInfo( (int)t[0].i, (int)t[1].i, t[2].p );
 		return 0;
-	case BOTLIB_AI_LOAD_WEAPON_WEIGHTS:
-		return botlib_export->ai.BotLoadWeaponWeights( args[1], VMA(2) );
+	}
+	case BOTLIB_AI_LOAD_WEAPON_WEIGHTS: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_LOAD_WEAPON_WEIGHTS, 2 );
+		return botlib_export->ai.BotLoadWeaponWeights( (int)t[0].i, t[1].p );
+	}
 	case BOTLIB_AI_ALLOC_WEAPON_STATE:
 		return botlib_export->ai.BotAllocWeaponState();
 	case BOTLIB_AI_FREE_WEAPON_STATE:
@@ -945,46 +1691,48 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		botlib_export->ai.BotResetWeaponState( args[1] );
 		return 0;
 
-	case BOTLIB_AI_GENETIC_PARENTS_AND_CHILD_SELECTION:
-		return botlib_export->ai.GeneticParentsAndChildSelection(args[1], VMA(2), VMA(3), VMA(4), VMA(5));
+	case BOTLIB_AI_GENETIC_PARENTS_AND_CHILD_SELECTION: {
+		SV_BOTLIB( &sv_desc_BOTLIB_AI_GENETIC_PARENTS_AND_CHILD_SELECTION, 5 );
+		return botlib_export->ai.GeneticParentsAndChildSelection( (int)t[0].i, t[1].p, t[2].p, t[3].p, t[4].p );
+	}
 
-	case WB_LOAD_CHARACTER:
+	case WI_LOAD_CHARACTER:
 		return SV_Lua_LoadCharacter( VMA(1), VMF(2) );
-	case WB_FREE_CHARACTER:
+	case WI_FREE_CHARACTER:
 		SV_Lua_FreeCharacter( args[1] );
 		return 0;
-	case WB_CHARACTERISTIC_FLOAT:
+	case WI_CHARACTERISTIC_FLOAT:
 		return FloatAsInt( SV_Lua_CharacteristicBFloat( args[1], args[2], 0.0f, 1.0f ) );
-	case WB_CHARACTERISTIC_BFLOAT:
+	case WI_CHARACTERISTIC_BFLOAT:
 		return FloatAsInt( SV_Lua_CharacteristicBFloat( args[1], args[2], VMF(3), VMF(4) ) );
-	case WB_CHARACTERISTIC_INTEGER:
+	case WI_CHARACTERISTIC_INTEGER:
 		return (int)SV_Lua_CharacteristicBFloat( args[1], args[2], 0.0f, 1.0f );
-	case WB_CHARACTERISTIC_BINTEGER:
+	case WI_CHARACTERISTIC_BINTEGER:
 		return (int)SV_Lua_CharacteristicBFloat( args[1], args[2], (float)args[3], (float)args[4] );
-	case WB_CHARACTERISTIC_STRING:
+	case WI_CHARACTERISTIC_STRING:
 		VM_CHECKBOUNDS( gvm, args[3], args[4] );
 		SV_Lua_CharacteristicString( args[1], args[2], VMA(3), args[4] );
 		return 0;
-	case WB_BIND_BOT:
+	case WI_BIND_BOT:
 		return SV_Lua_BindBot( args[1], args[2] );
-	case WB_BOT_THINK:
+	case WI_BOT_THINK:
 		return SV_Lua_BotThink( args[1], VMF(2) );
-	case WB_BOT_PROFILE_FIELD:
+	case WI_BOT_PROFILE_FIELD:
 		return FloatAsInt( SV_Lua_BotProfileField( args[1], args[2] ) );
-	case WB_BOT_PICK_WEAPON:
+	case WI_BOT_PICK_WEAPON:
 		VM_CHECKBOUNDS( gvm, args[2], sizeof( wbCombatCtx_t ) );
 		VM_CHECKBOUNDS( gvm, args[3], args[4] );
 		return SV_Lua_BotPickWeapon( args[1], VMA(2), VMA(3), args[4] );
-	case WB_BOT_GET_ATTACK_AIM_HEIGHT:
+	case WI_BOT_GET_ATTACK_AIM_HEIGHT:
 		return FloatAsInt( SV_Lua_BotGetAttackAimHeight( args[1], args[2] ) );
-	case WB_BOT_EVAL_ITEM:
+	case WI_BOT_EVAL_ITEM:
 		VM_CHECKBOUNDS( gvm, args[2], sizeof( wbItemEvalCtx_t ) );
 		return SV_Lua_BotEvalItem( args[1], VMA(2) );
-	case WB_BOT_DECIDE:
+	case WI_BOT_DECIDE:
 		VM_CHECKBOUNDS( gvm, args[2], sizeof( wbDecideCtx_t ) );
 		VM_CHECKBOUNDS( gvm, args[3], args[4] );
 		return SV_Lua_BotDecide( args[1], VMA(2), VMA(3), args[4] );
-	case WB_BOT_ON_CHAT:
+	case WI_BOT_ON_CHAT:
 		VM_CHECKBOUNDS( gvm, args[3], sizeof( wbChatCtx_t ) );
 		VM_CHECKBOUNDS( gvm, args[4], args[5] );
 		return SV_Lua_BotOnChat( args[1], VMA(2), VMA(3), VMA(4), args[5] );
@@ -1042,9 +1790,13 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case G_TESTPRINTFLOAT:
 		return sprintf( VMA(1), "%f", VMF(2) );
 
-	case G_CVAR_SETDESCRIPTION:
-		Cvar_SetDescription2( (const char*)VMA(1), (const char*)VMA(2) );
+	case G_CVAR_SETDESCRIPTION: {
+		vmTypedArg_t t[ VM_MAX_TYPED_ARGS ];
+		SV_UnmarshalGame( &sv_desc_G_CVAR_SETDESCRIPTION, args, t );
+		SV_TYPED_PARITY( G_CVAR_SETDESCRIPTION, args, t );
+		Cvar_SetDescription2( (const char*)t[0].p, (const char*)t[1].p );
 		return 0;
+	}
 
 	case G_TRAP_GETVALUE:
 		VM_CHECKBOUNDS( gvm, args[1], args[2] );
@@ -1099,32 +1851,55 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	}
 
 	case G_WCE_GET_SOUND_EVENTS:
+		// Bound the write extent against the VM data window: the game module
+		// supplies both the destination pointer (args[2]) and the element count
+		// (args[3]), and SV_BotAwareness_GetEvents writes up to maxOut
+		// bot_sound_event_t records — VMA() only masks the base, not the extent.
+		VM_CHECKBOUNDS3( gvm, args[2], (unsigned)args[3], sizeof( bot_sound_event_t ) );
 		return SV_BotAwareness_GetEvents( (int)args[1], VMA(2), (int)args[3] );
+
+	// ── Monster-Lua behavior traps (parallel to WI_BOT_* above) ──────────
+	// Entity-keyed, distinct from the client-slot bot traps; the handlers
+	// guard entityNum internally.
+	case G_MONSTER_LUA_BIND:
+		return SV_Lua_MonsterBind( args[1], args[2] );
+	case G_MONSTER_LUA_UNBIND:
+		SV_Lua_MonsterUnbind( args[1] );
+		return 0;
+	case G_MONSTER_LUA_DECIDE:
+		VM_CHECKBOUNDS( gvm, args[2], sizeof( wbDecideCtx_t ) );
+		VM_CHECKBOUNDS( gvm, args[3], args[4] );
+		return SV_Lua_MonsterDecide( args[1], VMA(2), VMA(3), args[4] );
+	case G_MONSTER_LUA_PROFILE_FIELD:
+		return FloatAsInt( SV_Lua_MonsterProfileField( args[1], args[2] ) );
 
 	case G_WIREDNET_GET_PING:
 		if ( args[1] >= 0 && args[1] < sv_maxclients->integer ) {
-			conn_handle_t conn = WN_GetConnHandleByAddr(
-				&svs.clients[ args[1] ].netchan.remoteAddress );
+			conn_handle_t conn = ( transport && transport->lookup_by_addr )
+				? transport->lookup_by_addr( &svs.clients[ args[1] ].netchan.remoteAddress )
+				: CONN_INVALID;
 			if ( conn != CONN_INVALID )
-				return transport ? transport->get_ping( conn ) : -1;
+				return transport_for_handle( conn )->get_ping( conn );
 		}
 		return -1;
 
 	case G_WIREDNET_GET_LOSS:
 		if ( args[1] >= 0 && args[1] < sv_maxclients->integer ) {
-			conn_handle_t conn = WN_GetConnHandleByAddr(
-				&svs.clients[ args[1] ].netchan.remoteAddress );
-			if ( conn != CONN_INVALID && transport )
-				return (int)( transport->get_loss( conn ) * 1000.0f );
+			conn_handle_t conn = ( transport && transport->lookup_by_addr )
+				? transport->lookup_by_addr( &svs.clients[ args[1] ].netchan.remoteAddress )
+				: CONN_INVALID;
+			if ( conn != CONN_INVALID )
+				return (int)( transport_for_handle( conn )->get_loss( conn ) * 1000.0f );
 		}
 		return 0;
 
 	case G_WIREDNET_GET_BANDWIDTH:
 		if ( args[1] >= 0 && args[1] < sv_maxclients->integer ) {
-			conn_handle_t conn = WN_GetConnHandleByAddr(
-				&svs.clients[ args[1] ].netchan.remoteAddress );
-			if ( conn != CONN_INVALID && transport )
-				return transport->get_bandwidth( conn );
+			conn_handle_t conn = ( transport && transport->lookup_by_addr )
+				? transport->lookup_by_addr( &svs.clients[ args[1] ].netchan.remoteAddress )
+				: CONN_INVALID;
+			if ( conn != CONN_INVALID )
+				return transport_for_handle( conn )->get_bandwidth( conn );
 		}
 		return 0;
 
@@ -1140,6 +1915,7 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case G_NAV_REMOVE_CROWD_AGENT:
 	case G_NAV_UPDATE_CROWD:
 	case G_NAV_IS_READY:
+	case G_NAV_IS_BAKING:
 	case G_NAV_SET_POLY_FLAGS_FOR_DOOR:
 	case G_NAV_PREDICT_ENEMY_POSITION:
 		{
@@ -1192,7 +1968,7 @@ void SV_ShutdownGameProgs( void ) {
 	VM_Call( gvm, 1, GAME_SHUTDOWN, qfalse );
 	VM_Free( gvm );
 	gvm = NULL;
-	FS_VM_CloseFiles( H_QAGAME );
+	FS_VM_CloseFiles( H_QAGAME, 0 );   // game VM is host-wide, not per-app (slot 0)
 }
 
 
@@ -1215,9 +1991,18 @@ static void SV_InitGameVM( qboolean restart ) {
 		svs.clients[i].gentity = NULL;
 	}
 
-	// use the current msec count for a random seed
-	// init for this gamestate
-	VM_Call( gvm, 3, GAME_INIT, sv.time, Com_Milliseconds(), restart );
+	// Random seed for this gamestate. Normally the wall-clock msec count, so
+	// spawn selection (and anything else driven by the game RNG) varies every
+	// launch. Setting sv_seed to a non-negative value pins the seed instead,
+	// making a headless run reproducible — used by the nav-trace regression
+	// gate to diff bot pathing against a golden. Default -1 keeps wall-clock.
+	{
+		int seed = Cvar_VariableIntegerValue( "sv_seed" );
+		if ( seed < 0 ) {
+			seed = Com_Milliseconds();
+		}
+		VM_Call( gvm, 3, GAME_INIT, sv.time, seed, restart );
+	}
 }
 
 
@@ -1266,8 +2051,11 @@ void SV_InitGameProgs( void ) {
 		bot_enable = 0;
 	}
 
-	// load the dll or bytecode
-	gvm = VM_Create( VM_GAME, SV_GameSystemCalls, SV_DllSyscall, Cvar_VariableIntegerValue( "vm_game" ) );
+	// owner = an engine-owned token for the single server game VM (VM_GAME never
+	// multiplies). Pointer identity only; NOT clc.clientNum (tier rule).
+	static char sv_gameAppPrimary;
+	// cgameInstance arg (0) is ignored for VM_GAME — the server game VM never multiplies.
+	gvm = VM_Create( VM_GAME, 0, &sv_gameAppPrimary, SV_GameSystemCalls, SV_DllSyscall, Cvar_VariableIntegerValue( "vm_game" ) );
 	if ( !gvm ) {
 		Com_Terminate( TERM_CLIENT_DROP, "VM_Create on game failed" );
 	}

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # smoke-wasm.sh — WASM VM backend smoke test
 #
-# Runs the dedicated server with WASM modules (vm_game=3) on arena7
+# Runs the headless server with WASM modules (vm_game=3) on arena7
 # (Temple of Retribution). arena7 is in the Q3 demo PAK (`demoq3/pak0.pk3`,
 # verified via launcher/internal/pipeline/proc_q3copy_entries_pax01.go:102),
 # so this smoke runs against redistributable demo assets — no full Q3
@@ -17,7 +17,7 @@
 #
 #   The launcher's q3copy pipeline converts raw demo PAKs (TGA→PNG,
 #   WAV→Opus, repackage) into q3now's SW3Z format under
-#   `<work>/wired-preview/baseq3/pax01.sw3z`. The q3now engine accepts
+#   `<work>/wired-preview/base/pax01.sw3z`. The q3now engine accepts
 #   `.sw3z` natively (code/qcommon/sw3z.c), so smoke launches against
 #   that directory as `fs_installpath`.
 #
@@ -35,25 +35,25 @@
 # Env overrides:
 #   BASEPATH=...               Skip the launcher bootstrap entirely. Must
 #                              point at a directory containing
-#                              baseq3/{pak0.pk3,*.sw3z}. Useful when you
+#                              base/{pak0.pk3,*.sw3z}. Useful when you
 #                              already have a full Q3 install or a
-#                              previously-imported q3now baseq3.
+#                              previously-imported q3now base.
 #   Q3NOW_DEMO_PAK_DIR=...     Working dir used as HOME/USERPROFILE for the
 #                              launcher invocation. Persists between runs
-#                              for idempotency. Default: <repo>/baseq3-demo.
+#                              for idempotency. Default: <repo>/base-demo.
 #   Q3NOW_LAUNCHER=...         Override the launcher binary path. Default:
 #                              auto-detect <repo>/launcher/build/bin/...
 #   Q3NOW_CHANNEL=...          Channel suffix the launcher was built with.
 #                              Default: "-preview" (matches Makefile default).
 #                              Smoke uses this to find the launcher's output
-#                              dir (HOME/wired${CHANNEL}/baseq3/).
+#                              dir (HOME/wired${CHANNEL}/base/).
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# ── Locate dedicated server binary ──────────────────────────────────────────
+# ── Locate headless server binary ──────────────────────────────────────────
 DED_OVERRIDE="${1:-}"
 MAP="${2:-arena7}"
 BASEPATH_OVERRIDE="${3:-${BASEPATH:-}}"
@@ -62,18 +62,18 @@ if [ -n "$DED_OVERRIDE" ]; then
     DED="$DED_OVERRIDE"
 else
     for candidate in \
-        "${PROJECT_DIR}/build/release/wired-ded.x86_64" \
-        "${PROJECT_DIR}/build/release/wired-ded.x64.exe" \
-        "${PROJECT_DIR}/build/Release/wired-ded.arm64" \
-        "${PROJECT_DIR}/build/release/wired-ded.aarch64" \
+        "${PROJECT_DIR}/build/release/wired-headless.x86_64" \
+        "${PROJECT_DIR}/build/release/wired-headless.x64.exe" \
+        "${PROJECT_DIR}/build/Release/wired-headless.arm64" \
+        "${PROJECT_DIR}/build/release/wired-headless.aarch64" \
     ; do
         if [ -x "$candidate" ]; then DED="$candidate"; break; fi
     done
 fi
 
 if [ -z "${DED:-}" ] || [ ! -x "$DED" ]; then
-    echo "ERROR: dedicated server not found. Tried:"
-    echo "  build/release/wired-ded.{x86_64,x64.exe,arm64,aarch64}"
+    echo "ERROR: headless server not found. Tried:"
+    echo "  build/release/wired-headless.{x86_64,x64.exe,arm64,aarch64}"
     echo "Override: bash $0 path-to-ded [map] [basepath]"
     exit 1
 fi
@@ -91,23 +91,23 @@ fi
 
 # ── Helper: does a basepath contain usable game assets? ─────────────────────
 # Engine accepts pak0.pk3 (vanilla layout) or *.sw3z (q3now/launcher layout).
-has_baseq3_assets() {
+has_basegame_assets() {
     local dir="$1"
-    [ -f "${dir}/baseq3/pak0.pk3" ] && return 0
-    if compgen -G "${dir}/baseq3/*.sw3z" > /dev/null; then return 0; fi
-    if compgen -G "${dir}/baseq3/*.pk3" > /dev/null; then return 0; fi
+    [ -f "${dir}/base/pak0.pk3" ] && return 0
+    if compgen -G "${dir}/base/*.sw3z" > /dev/null; then return 0; fi
+    if compgen -G "${dir}/base/*.pk3" > /dev/null; then return 0; fi
     return 1
 }
 
 # ── Resolve basepath: explicit override > already-imported > launcher CLI ──
-WORK_DIR="${Q3NOW_DEMO_PAK_DIR:-${PROJECT_DIR}/baseq3-demo}"
+WORK_DIR="${Q3NOW_DEMO_PAK_DIR:-${PROJECT_DIR}/base-demo}"
 CHANNEL="${Q3NOW_CHANNEL:--preview}"
 LAUNCHER_OUTPUT="${WORK_DIR}/wired${CHANNEL}"
 
-if [ -n "$BASEPATH_OVERRIDE" ] && has_baseq3_assets "$BASEPATH_OVERRIDE"; then
+if [ -n "$BASEPATH_OVERRIDE" ] && has_basegame_assets "$BASEPATH_OVERRIDE"; then
     Q3DIR="$BASEPATH_OVERRIDE"
     echo "  -- Using basepath override: $Q3DIR"
-elif has_baseq3_assets "$LAUNCHER_OUTPUT"; then
+elif has_basegame_assets "$LAUNCHER_OUTPUT"; then
     Q3DIR="$LAUNCHER_OUTPUT"
     echo "  -- Reusing previously-imported assets: $Q3DIR"
 elif [ -n "$LAUNCHER" ]; then
@@ -124,10 +124,10 @@ elif [ -n "$LAUNCHER" ]; then
     HOME="$WORK_DIR" USERPROFILE="$WORK_DIR" \
         "$LAUNCHER" assets import
 
-    if ! has_baseq3_assets "$LAUNCHER_OUTPUT"; then
-        echo "ERROR: launcher import completed but no baseq3 assets found at"
-        echo "  $LAUNCHER_OUTPUT/baseq3/"
-        ls -la "$LAUNCHER_OUTPUT/baseq3/" 2>&1 || true
+    if ! has_basegame_assets "$LAUNCHER_OUTPUT"; then
+        echo "ERROR: launcher import completed but no base assets found at"
+        echo "  $LAUNCHER_OUTPUT/base/"
+        ls -la "$LAUNCHER_OUTPUT/base/" 2>&1 || true
         exit 1
     fi
 
@@ -147,44 +147,44 @@ fi
 
 # ── Stage build artifacts into the smoke basepath ──────────────────────────
 # Two distinct artifact groups, both produced by `make` / `make create-packs`:
-#   1. WASM modules (qagame.wasm, cgame.wasm) from <build>/<config>/baseq3/vm/
-#      → engine searches fs_installpath/baseq3/vm/ at runtime
-#   2. Mod pack (pax21.sw3z) from <build>/baseq3/  — this is what ships
+#   1. WASM modules (gamesv.wasm, gamecl.wasm) from <build>/<config>/base/vm/
+#      → engine searches fs_installpath/base/vm/ at runtime
+#   2. Mod pack (pax21.sw3z) from <build>/base/  — this is what ships
 #      modfiles/default.cfg and other q3now overrides; without it the engine
 #      hard-fails with "Couldn't load default.cfg"
 WASM_BUILD_DIR=""
 for candidate in \
-    "${PROJECT_DIR}/build/release/Release/baseq3/vm" \
-    "${PROJECT_DIR}/build/release/baseq3/vm" \
+    "${PROJECT_DIR}/build/release/Release/base/vm" \
+    "${PROJECT_DIR}/build/release/base/vm" \
 ; do
-    if [ -f "${candidate}/qagame.wasm" ]; then WASM_BUILD_DIR="$candidate"; break; fi
+    if [ -f "${candidate}/gamesv.wasm" ]; then WASM_BUILD_DIR="$candidate"; break; fi
 done
 
 if [ -n "$WASM_BUILD_DIR" ]; then
-    mkdir -p "${Q3DIR}/baseq3/vm"
-    cp -f "${WASM_BUILD_DIR}/qagame.wasm" "${WASM_BUILD_DIR}/cgame.wasm" "${Q3DIR}/baseq3/vm/"
+    mkdir -p "${Q3DIR}/base/vm"
+    cp -f "${WASM_BUILD_DIR}/gamesv.wasm" "${WASM_BUILD_DIR}/gamecl.wasm" "${Q3DIR}/base/vm/"
     echo "  -- Staged WASM modules from $WASM_BUILD_DIR"
 else
     echo "  -- WARNING: no compiled .wasm found in build tree;"
     echo "     vm_game=3 test will fail unless modules are already at"
-    echo "     ${Q3DIR}/baseq3/vm/. Build with USE_WASM=ON first."
+    echo "     ${Q3DIR}/base/vm/. Build with USE_WASM=ON first."
 fi
 
 MODPACK_BUILD=""
 for candidate in \
-    "${PROJECT_DIR}/build/release/baseq3/pax21.sw3z" \
-    "${PROJECT_DIR}/build/release/baseq3/pax21.pk3" \
+    "${PROJECT_DIR}/build/release/base/pax21.sw3z" \
+    "${PROJECT_DIR}/build/release/base/pax21.pk3" \
 ; do
     if [ -f "$candidate" ]; then MODPACK_BUILD="$candidate"; break; fi
 done
 
 if [ -n "$MODPACK_BUILD" ]; then
-    mkdir -p "${Q3DIR}/baseq3"
-    cp -f "$MODPACK_BUILD" "${Q3DIR}/baseq3/"
+    mkdir -p "${Q3DIR}/base"
+    cp -f "$MODPACK_BUILD" "${Q3DIR}/base/"
     echo "  -- Staged mod pack: $(basename "$MODPACK_BUILD")"
 else
     echo "  -- ERROR: mod pack (pax21.sw3z) not found at"
-    echo "     ${PROJECT_DIR}/build/release/baseq3/pax21.{sw3z,pk3}"
+    echo "     ${PROJECT_DIR}/build/release/base/pax21.{sw3z,pk3}"
     echo "     Build it first:  make create-packs"
     echo "     Without it, the engine fails at startup with"
     echo "     'Couldn't load default.cfg' — modfiles/default.cfg ships"
@@ -199,11 +199,10 @@ echo "Map:      $MAP"
 echo ""
 
 # ── Test 1: Explicit WASM mode (vm_game=3) ──────────────────────────
-echo "[1/3] Running dedicated server with vm_game=3 (explicit WASM)..."
+echo "[1/3] Running headless server with vm_game=3 (explicit WASM)..."
 timeout 30 "$DED" \
     +set fs_installpath "$Q3DIR" \
     +set vm_game 3 \
-    +set dedicated 2 \
     +map "$MAP" \
     +addbot visor 1 \
     +wait 300 \
@@ -222,7 +221,6 @@ echo "[2/3] Running with vm_game=2 (auto-detect, should prefer .wasm)..."
 timeout 30 "$DED" \
     +set fs_installpath "$Q3DIR" \
     +set vm_game 2 \
-    +set dedicated 2 \
     +map "$MAP" \
     +wait 100 \
     +quit \
@@ -236,13 +234,12 @@ fi
 
 # ── Test 3: Fallback when no .wasm exists ────────────────────────────
 echo "[3/3] Testing QVM fallback (rename .wasm temporarily)..."
-WASM_FILE="${Q3DIR}/baseq3/vm/qagame.wasm"
+WASM_FILE="${Q3DIR}/base/vm/gamesv.wasm"
 if [ -f "$WASM_FILE" ]; then
     mv "$WASM_FILE" "${WASM_FILE}.bak"
     timeout 15 "$DED" \
         +set fs_installpath "$Q3DIR" \
         +set vm_game 2 \
-        +set dedicated 2 \
         +map "$MAP" \
         +wait 50 \
         +quit \

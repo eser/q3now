@@ -16,6 +16,13 @@
 
 #define BODY_QUEUE_SIZE		8
 
+// Shared cap on concurrent non-client monsters. Both per-monster on-demand
+// pools — the nav-movement pool (navEntityPool) and the behavior-state pool
+// (behaviorPool) — are sized to this, so a monster that both moves and thinks
+// acquires one slot from each without the caps diverging. Game-private
+// (server-side, never serialized).
+#define MAX_MONSTERS		128
+
 #if FEAT_ELIMINATION
 #define ROUND_WARMUP	0
 #define ROUND_LIVE		1
@@ -90,6 +97,29 @@ typedef struct {
 #endif
 } clientHistory_t;
 
+// maximum number of entities that can target a single target_logic AND-gate
+#define MAX_LOGIC_ENTITIES		10
+
+// How a nav-driven monster moves toward its goal. GROUND (the default) rides the
+// walkable-floor navmesh and is ground-clamped each leg; FLY/SWIM steer in a straight
+// 3D line toward the enemy with no ground-clamp (a flyer/swimmer has no floor path).
+// SWIM additionally keeps its legs inside water. Selected once at spawn from the
+// character manifest's `movement` string.
+typedef enum {
+	NAVMOVE_GROUND = 0,   // default — every existing monster
+	NAVMOVE_FLY,
+	NAVMOVE_SWIM
+} navMovement_t;
+
+// How a monster attacks in BSTATE_BATTLE. MELEE (the default) traces a short forward
+// swing and needs to be in melee range; RANGED fires a projectile aimed in full 3D from
+// any distance (it does not close). Selected once at spawn from the character manifest's
+// `attack` string. Data-flagged so a future ranged monster is pure data.
+typedef enum {
+	ATTACK_MELEE = 0,     // default — the 8 melee monsters
+	ATTACK_RANGED
+} attackMode_t;
+
 struct gentity_s {
 	entityState_t	s;				// communicated by server to clients
 	entityShared_t	r;				// shared by both the server system and game
@@ -142,8 +172,9 @@ struct gentity_s {
 	int			timestamp;		// body queue sinking, etc
 
 	char		*target;
+	char		*target2;		// secondary target group (target_relay chain)
 	char		*targetname;
-	char		*team;
+	char		*team;			// mover linkage group (map-author string) — NOT allegiance
 	char		*targetShaderName;
 	char		*targetShaderNewName;
 	gentity_t	*target_ent;
@@ -165,8 +196,14 @@ struct gentity_s {
 	int			last_move_time;
 
 	int			health;
+	int			armor;			// target_playerstats: armor value to grant
 
 	qboolean	takedamage;
+	// Set when a death gibbed but the gib was deferred to the end of a shotgun
+	// blast (see WIRED_SHOTGUN_POSTPONE_MOD); ShotgunPattern resolves it after the
+	// pellet loop. Lets the body stay solid through the rest of the blast so every
+	// pellet's knockback accrues before it gibs.
+	qboolean	gibScheduled;
 
 	int			damage;
 	int			splashDamage;	// quad will increase this without increasing radius
@@ -175,6 +212,26 @@ struct gentity_s {
 	int			splashMethodOfDeath;
 
 	int			count;
+
+	// Squad allegiance. Applies to ANY entity — clients and non-client behavior
+	// monsters alike — which is the reason it lives here and not on gclient_t:
+	// sess.sessionTeam is client-only and cannot express monster allegiance.
+	//
+	// ZERO IS THE "NO SQUAD" SENTINEL. Every entity is zero-initialised by
+	// G_InitGentity, so nothing carries a squad until something assigns one, and
+	// G_SameSquad's precedence rules make squad 0 fall through to the legacy
+	// team test unchanged. Do NOT confuse this with ->team above, which is a
+	// map-author mover-linkage string.
+	//
+	// Server-only: gentity_t lives entirely below the sharedEntity_t prefix that
+	// the server reads, and the server strides the array by the runtime-supplied
+	// sv.gentitySize, so appending here crosses no VM boundary.
+	int			squad;
+
+	// target_logic AND-gate: tracks which targeting entities (by s.number) have
+	// fired, so the output fires only once all inputs are satisfied. Game-private,
+	// no client/network visibility.
+	int			logicEntities[MAX_LOGIC_ENTITIES];
 
 	gentity_t	*chain;
 	gentity_t	*enemy;
@@ -196,6 +253,72 @@ struct gentity_s {
 	float		random;
 
 	gitem_t		*item;			// for bonus items
+
+	// target_modify: the field name to edit ("health", "count", ...) and the new
+	// value, both as map-author strings. Game-private (no client/network
+	// visibility), parsed from the "key"/"value" spawn keys.
+	char		*key;
+	char		*value;
+
+#if FEAT_RECAST_NAVMESH
+	// Nav-state carrier for a non-client entity that follows a nav path (a
+	// server-side pawn with no client slot). NULL until the entity acquires a
+	// slot from the nav-state pool (Nav_AcquireState); returned on free. Bots
+	// keep their own client-keyed nav states — this is the non-client path.
+	// Game-private, server-side, never serialized.
+	struct botNavState_s	*navState;
+
+	// A nav-driven mover (non-client): rides a mover-trajectory between nav
+	// waypoints and re-steers at each leg boundary. navFollower gates the
+	// dedicated runner in G_RunFrame; navGoal is where it walks to; navLegEnd is
+	// the level.time the current trajectory leg expires (steer again at/after
+	// it). Movement only — no AI. Game-private, all server-side.
+	qboolean	navFollower;
+	vec3_t		navGoal;
+	int			navLegEnd;
+	// Per-follower move speed override in Q3 units/sec. 0 = use the default run
+	// speed (NAV_FOLLOWER_SPEED) — every existing follower leaves it 0 and is
+	// byte-identical; a scripted walktomarker sets a slower value for a
+	// cutscene-approach gait. Trailing-appended, memset-zero-safe.
+	float		navSpeed;
+	// How this follower moves toward its goal (from the character manifest's
+	// `movement`). NAVMOVE_GROUND (0, memset-zero-safe) = the unchanged ground path;
+	// NAVMOVE_FLY/SWIM take the 3D-steer branch. Set once at spawn.
+	navMovement_t	navMovement;
+#endif
+
+#if FEAT_MONSTER_AI
+	// Gates the per-frame monster behavior tick in G_RunFrame — the decision
+	// layer that sits above the nav movement layer (aiThink decides a goal;
+	// navFollower walks there). Orthogonal to navFollower: a scripted-frozen
+	// monster may think without following, a dumb mover may follow without
+	// thinking. Default qfalse — no entity thinks until a later phase sets it.
+	// Game-private, server-side, never serialized.
+	qboolean	aiThink;
+
+	// How this monster attacks (from the character manifest's `attack`). ATTACK_MELEE
+	// (0, memset-zero-safe) = the unchanged forward-swing path; ATTACK_RANGED fires a
+	// projectile aimed in 3D. Set once at spawn. Game-private, never serialized.
+	attackMode_t	attackMode;
+
+	// Behavior-FSM state for a non-client monster (the decision layer's per-
+	// monster store). NULL until the entity acquires a slot from the behavior
+	// pool (Behavior_AcquireState); returned on release/free. Bots keep their
+	// own bot_state_t — this is the non-client carrier. Game-private, server-
+	// side, never serialized.
+	struct behaviorState_s	*behaviorState;
+#endif
+
+#if FEAT_UNLAGGED
+	// Projectile lag-compensation (U2): the server time this missile was actually
+	// fired (the shooter's backdated attackTime — a copy of s.pos.trTime that
+	// survives a bounce/teleport reset), and a flag set at spawn while the missile
+	// still owes its high-ping "missed flight" replay. needsDelag is cleared once
+	// G_MissileRunDelag has stepped the missile up to the present. Game-private —
+	// neither field crosses the entityState/playerState network boundary.
+	int			launchTime;
+	qboolean	needsDelag;
+#endif
 
 #if FEAT_TELEPORTING_MISSILES
 	int			missileTeleportCount;	// missile teleportation (2F)
@@ -266,6 +389,12 @@ typedef struct {
 	qboolean	predictItemPickup;	// based on cg_predictItems userinfo
 	qboolean	pmoveFixed;			//
 	char		netname[MAX_NETNAME];
+	// Autopilot: when set, the bot brain drives this client's entity instead of
+	// the human's own input. ZERO IS THE "OFF" SENTINEL — clientPersistant_t is
+	// zeroed on connect and cleared at ClientBegin(), so every existing client is
+	// inert until the autopilot command sets it. Deliberately NOT a cvar: this is
+	// per-client state, and the console command is its interface.
+	qboolean	autopilot;
 	int			enterTime;			// level.time the client entered the game
 	playerTeamState_t teamState;	// status in teamplay games
 	int			voteCount;			// to prevent people from constantly calling votes
@@ -284,6 +413,24 @@ typedef struct {
 #endif
 } clientPersistant_t;
 
+
+// Frame-local knockback impulse accumulator. Each hit's velocity impulse is
+// summed into the bucket keyed by its (attacker, means-of-death) this frame,
+// then flushed once to ps.velocity at frame end (P_KnockbackFlush). One bucket
+// per momentum source so a multi-pellet shotgun blast accumulates as a single
+// source (all pellets share attacker + MOD_SHOTGUN in the same frame), while a
+// rocket or a second shooter lands in its own bucket. This is the substrate the
+// per-source momentum cap (cap-of-sum) builds on; the accumulator alone is
+// motion-identical to applying each impulse immediately.
+#define MAX_KB_SOURCES 4
+
+typedef struct {
+	int     srcKey;     // attacker->s.number; -1 = empty slot
+	int     mod;        // means-of-death, to split same-attacker different-weapon
+	vec3_t  impulse;    // accumulated velocity impulse for this source this frame
+	float   budget;     // per-source momentum budget: cap on the summed impulse
+	                    // magnitude at flush; 0 = uncapped (single-hit weapons)
+} knockbackSource_t;
 
 // this structure is cleared on each ClientSpawn(),
 // except for 'client->pers' and 'client->sess'
@@ -315,6 +462,11 @@ struct gclient_s {
 	int			damage_knockback;	// impact damage
 	vec3_t		damage_from;		// origin for vector calculation
 	qboolean	damage_fromWorld;	// if true, don't use the damage_from vector
+
+	// per-(attacker,mod) frame-local velocity impulse buckets; flushed to
+	// ps.velocity once at frame end (see knockbackSource_t above).
+	knockbackSource_t	knockbackSources[MAX_KB_SOURCES];
+	int					numKnockbackSources;
 
 	int			accurateCount;		// for "impressive" reward sound
 
@@ -397,6 +549,13 @@ struct gclient_s {
     vec3_t          campOrigin;         // last recorded position for camping check (11C)
     int             campTime;           // level.time when camping started (11C)
 	// eser - camp-detection
+
+    // target_gravity / target_playerspeed persistent overrides. ps.gravity and
+    // ps.speed are recomputed every frame in ClientEndFrame, so a one-shot write
+    // would be lost; these survive on the (game-private) client and are re-applied
+    // there as the final word. Sentinel 0 = no override (use the engine default).
+    int             gravityOverride;    // 0 = none; otherwise the forced ps.gravity
+    int             speedOverride;      // 0 = none; >0 = forced ps.speed; -1 = freeze
 };
 
 
@@ -405,6 +564,22 @@ struct gclient_s {
 //
 #define	MAX_SPAWN_VARS			64
 #define	MAX_SPAWN_VARS_CHARS	4096
+
+// Mission objectives (in-memory, per-session). Each objective carries an l10n
+// key (sound-name convention, resolved to localized text on the cgame side for
+// the objectives HUD), a `required` flag (counts toward the completion gate), and
+// a `completed` flag. State lives in level_locals (reset on map load) — NOT
+// serialized / not savegame-persisted (that is the separate objectives-binding
+// work).
+#define	MAX_MISSION_OBJECTIVES	16
+#define	OBJECTIVE_KEY_LEN		64
+
+typedef struct {
+	char		key[OBJECTIVE_KEY_LEN];		// l10n key
+	qboolean	required;					// counts toward the completion gate
+	qboolean	completed;
+	qboolean	failed;						// a failed REQUIRED objective blocks the gate forever
+} missionObjective_t;
 
 typedef struct {
 	struct gclient_s	*clients;		// [maxclients]
@@ -487,6 +662,7 @@ typedef struct {
 	int			rotationIndex;			// current position in map rotation (6D)
 #endif
 	int			overtimeCount;			// number of overtime extensions applied (10D)
+	qboolean	needToCheckExitRules;	// event path armed the match-end check; runs at the frame boundary
 #if FEAT_TOURNAMENT_PAUSE
 	qboolean	paused;					// game is paused (10C)
 	int			pauseTime;				// level.time when paused (10C)
@@ -530,6 +706,24 @@ typedef struct {
 	int			q1_total_secrets;	// count of q1_trigger_secret entities in map
 	int			q1_found_secrets;	// secrets found this level
 	int			q1_nextSwitchableStyle;	// auto-assign counter for switchable lightstyle slots (starts at 32)
+
+	// Behavior-monster census (all monster creation flows through
+	// G_SpawnBehaviorMonster; every kill through Behavior_MonsterDie).
+	int			numMonstersSpawned;	// behaving monsters spawned this level
+	int			numMonstersKilled;	// behaving monsters killed this level
+
+	// Mission objectives (in-memory, per-session; reset with level on map load).
+	missionObjective_t	objectives[MAX_MISSION_OBJECTIVES];
+	int			numObjectives;
+	qboolean	objectivesComplete;	// in-session gate: all required objectives done (latched once)
+
+#if FEAT_RECAST_NAVMESH
+	// Async navmesh bake: on a cold cache the mesh lands a few seconds into the
+	// level. Door blocked-flags applied at spawn (while the mesh was baking) were
+	// no-ops, so we re-apply them once the mesh becomes ready. This latches the
+	// previous frame's readiness to fire the reconcile exactly on the transition.
+	qboolean	navWasReady;
+#endif
 } level_locals_t;
 
 
@@ -580,13 +774,25 @@ void RegisterItem( gitem_t *item );
 void SaveRegisteredItems( void );
 
 //
+// wired/bots/g_bot_scripts.c — event-driven item-goal DB maintenance.
+// Game-internal (both caller and callee are in the game module); no ABI surface.
+// The bot item-goal node SET is maintained at these two lifecycle events; item
+// availability stays query-time inside the selection path.
+//
+void WiredIntel_ClearMapGoalDb( void );          // level init: start empty
+void WiredIntel_MapGoalOnSpawn( gentity_t *gent ); // item entered world as candidate
+void WiredIntel_MapGoalOnFree( gentity_t *gent );  // item entity freed (despawn)
+
+//
 // g_utils.c
 //
 int G_ModelIndex( char *name );
 int		G_SoundIndex( char *name );
+qboolean	G_FileExists( const char *path );
 void	G_TeamCommand( team_t team, const char *cmd );
 void	G_KillBox (gentity_t *ent);
 gentity_t *G_Find (gentity_t *from, int fieldofs, const char *match);
+qboolean	G_ClassnameIs( const gentity_t *ent, const char *bareName );
 gentity_t *G_PickTarget (char *targetname);
 void	G_UseTargets (gentity_t *ent, gentity_t *activator);
 void	G_SetMovedir ( vec3_t angles, vec3_t movedir);
@@ -616,6 +822,29 @@ const char *BuildShaderStateConfig( void );
 //
 qboolean CanDamage (gentity_t *targ, vec3_t origin);
 void G_Damage (gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_t dir, vec3_t point, int damage, int dflags, int mod);
+void GibEntity( gentity_t *self, int killer );
+
+// The shotgun fires a whole pattern of pellets in one frame, each a separate
+// G_Damage call. Some death-side-effects must be deferred until AFTER every
+// pellet of the blast has landed, otherwise the killing pellet's effects make
+// the remaining pellets behave wrong:
+//   * shrinking the corpse box on death (SetDeadHeight) would let later pellets
+//     fly over the now-shorter body;
+//   * marking the body FL_NO_KNOCKBACK on death would deny the remaining pellets
+//     their share of knockback, so the corpse/gibs get pushed less than the full
+//     blast should push them;
+//   * gibbing the body immediately turns it non-solid (GibEntity clears
+//     r.contents), so later pellets pass through it and their knockback is lost.
+// We postpone all three for the shotgun mods and resolve them once in
+// ShotgunPattern / ShotgunPatternSpread after the pellet loop. The deferral is
+// keyed on the SHOTGUN mod (the only multi-G_Damage-per-frame weapon), while the
+// deferred gib itself is keyed on whether the death actually gibbed (the
+// gibScheduled flag set inside player_die / body_die's gib gate), NOT on the mod
+// — so it works for any case where a shotgun blast happens to gib (overkill, etc.).
+#define WIRED_SHOTGUN_POSTPONE_MOD( mod )  ( (mod) == MOD_SHOTGUN || (mod) == MOD_SHOTGUN_DOUBLE_BLAST )
+#define SetDeadHeight( ent )      do { (ent)->r.maxs[2] = DEAD_MAXS_Z; } while (0)
+#define SetFlNoKnockback( ent )   do { (ent)->flags |= FL_NO_KNOCKBACK; } while (0)
+
 qboolean G_RadiusDamage (vec3_t origin, gentity_t *attacker, float damage, float radius, gentity_t *ignore, int mod, qboolean underWater);
 int G_DeflectorEffect( gentity_t *targ, vec3_t dir, vec3_t point, vec3_t impactpoint, vec3_t bouncedir );
 void body_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, int meansOfDeath );
@@ -636,11 +865,16 @@ qboolean	PM_RadiusDamage(vec3_t origin, gentity_t *attacker, float damage, float
 #define DAMAGE_NO_KNOCKBACK			0x00000004	// do not affect velocity, just view angles
 #define DAMAGE_NO_PROTECTION		0x00000008  // armor, shields, deflector, and godmode have no effect
 #define DAMAGE_NO_TEAM_PROTECTION	0x00000010  // bypass team friendly-fire protection (especially for kamikaze)
+#define DAMAGE_MOMENTUM_EVENT		0x00000020  // multi-pellet shot: cap the per-source summed impulse to a momentum budget
 
 //
 // g_missile.c
 //
 void G_RunMissile( gentity_t *ent );
+#if FEAT_UNLAGGED
+void G_SetMissileLaunchTime( gentity_t *self, gentity_t *bolt );
+void G_MissileRunDelag( gentity_t *ent, int stepmsec );
+#endif
 #if FEAT_TELEPORTING_MISSILES
 void G_TeleportMissile( gentity_t *ent, trace_t *trace, gentity_t *portal );
 #endif
@@ -666,6 +900,7 @@ void Q3_Touch_DoorTrigger( gentity_t *ent, gentity_t *other, trace_t *trace );
 void Q3_trigger_teleporter_touch (gentity_t *self, gentity_t *other, trace_t *trace );
 void Q3_hurt_touch( gentity_t *self, gentity_t *other, trace_t *trace );
 void G_SetTeleporterDestinations(void);
+void Q3_FireFragDeathTriggers( gentity_t *died, gentity_t *attacker );
 
 
 //
@@ -722,6 +957,16 @@ void G_ProcessIPBans(void);
 qboolean G_FilterPacket (const char *from);
 
 //
+// g_objectives.c
+//
+qboolean	G_Objectives_Command( void );
+qboolean	G_Save_Command( const char *cmd );   // savegame/loadgame (cheat-gated, Phase-4)
+int			G_Objectives_Add( const char *key, qboolean required );	// returns index or -1
+qboolean	G_Objectives_Complete( int index );						// qtrue if it changed state
+qboolean	G_Objectives_Fail( int index );							// qtrue if it changed state
+void		G_Objectives_Clear( void );
+
+//
 // g_weapon.c
 //
 int G_DamageFalloff( int damage, vec3_t start, vec3_t end, float maxDamageDistance );
@@ -766,6 +1011,7 @@ void CheckTeamLeader( int team );
 void G_RunThink (gentity_t *ent);
 void AddTournamentQueue(gclient_t *client);
 void QDECL G_LogPrintf( const char *fmt, ... ) FORMAT_PRINTF(1, 2);
+qboolean G_ServerIsConsoleOnly( void );
 void SendScoreboardMessageToAllClients( void );
 
 //
@@ -788,6 +1034,9 @@ void G_RunClient( gentity_t *ent );
 // g_team.c
 //
 qboolean OnSameTeam( gentity_t *ent1, gentity_t *ent2 );
+// Allegiance for ANY entity pair (clients and non-client monsters). Delegates to
+// OnSameTeam when neither side carries a squad. See g_team.c for precedence.
+qboolean G_SameSquad( gentity_t *ent1, gentity_t *ent2 );
 void Team_CheckDroppedItem( gentity_t *dropped );
 qboolean CheckObeliskAttack( gentity_t *obelisk, gentity_t *attacker );
 
@@ -819,6 +1068,10 @@ void G_InitBots( qboolean restart );
 void G_CheckBotSpawn( void );
 void G_RemoveQueuedBotBegin( int clientNum );
 qboolean G_BotConnect( int clientNum, qboolean restart );
+// Hand a client's entity to the bot brain (enable) or return it to the human
+// (disable). Returns qtrue if the state changed. See g_bot.c for why disable
+// must re-anchor delta_angles.
+qboolean G_SetAutopilot( gentity_t *ent, qboolean enable );
 void Svcmd_AddBot_f( void );
 void Svcmd_BotList_f( void );
 void BotInterbreedEndMatch( void );
@@ -853,7 +1106,6 @@ extern	qboolean	g_gametypeIsTeamGame;
 
 extern	vmCvar_t	g_gametype;
 extern	vmCvar_t	g_gameflags;
-extern	vmCvar_t	g_dedicated;
 extern	vmCvar_t	g_cheats;
 extern	vmCvar_t	g_maxclients;			// allow this many total, including spectators
 extern	vmCvar_t	g_maxGameClients;		// allow this many active
@@ -874,7 +1126,7 @@ extern	vmCvar_t	g_synchronousClients;
 extern	vmCvar_t	g_motd;
 extern	vmCvar_t	g_blood;
 extern	vmCvar_t	g_allowVote;
-extern	vmCvar_t	g_teamAutoJoin;
+extern	vmCvar_t	g_autoJoin;
 extern	vmCvar_t	g_teamForceBalance;
 extern	vmCvar_t	g_banIPs;
 extern	vmCvar_t	g_filterBan;
@@ -897,6 +1149,9 @@ extern	vmCvar_t	g_kothGhosts;
 
 #if FEAT_UNLAGGED
 extern  vmCvar_t	g_unlagged;
+extern  vmCvar_t	g_unlaggedMissiles;			// master switch for per-missile flight replay
+extern  vmCvar_t	g_unlaggedMissileNudge;		// ms shaved off attackTime when backdating launch
+extern  vmCvar_t	g_unlaggedMissileMaxLatency;	// ms cap on how far back a missile may be replayed
 #endif
 #if FEAT_SPAWN_PROTECTION
 extern  vmCvar_t	g_spawnProtect;
@@ -980,8 +1235,11 @@ void	Cmd_Drop_f( gentity_t *ent );
 
 
 void	trap_Print( const char *text );
+#if defined(WASM_MODULE)
+int		trap_VM_ABI_Query( void );   // typed-IPC ABI handshake (docs/vm-typed-ipc-design.md)
+#endif
 void	trap_Error( const char *text ) NORETURN;
-void	trap_Log( log_severity_t severity, const char *text );
+void	trap_Log( log_severity_t severity, const char *channel, const char *text );
 void	NORETURN trap_Terminate( terminationReason_t reason, const char *text );
 int		trap_Milliseconds( void );
 int	trap_RealTime( qtime_t *qtime );
@@ -994,6 +1252,7 @@ void	trap_FS_Write( const void *buffer, int len, fileHandle_t f );
 void	trap_FS_FCloseFile( fileHandle_t f );
 int		trap_FS_GetFileList( const char *path, const char *extension, char *listbuf, int bufsize );
 int		trap_FS_Seek( fileHandle_t f, long offset, int origin ); // fsOrigin_t
+void	trap_FS_Rename( const char *from, const char *to );
 void	trap_SendConsoleCommand( int exec_when, const char *text );
 void	trap_Cvar_Register( vmCvar_t *cvar, const char *var_name, const char *value, int flags );
 void	trap_Cvar_Update( vmCvar_t *cvar );
@@ -1042,40 +1301,6 @@ int		trap_BotGetSnapshotEntity( int clientNum, int sequence );
 int		trap_BotGetServerCommand(int clientNum, char *message, int size);
 void	trap_BotUserCommand(int client, usercmd_t *ucmd);
 
-int		trap_AAS_BBoxAreas(vec3_t absmins, vec3_t absmaxs, int *areas, int maxareas);
-int		trap_AAS_AreaInfo( int areanum, void /* struct aas_areainfo_s */ *info );
-void	trap_AAS_EntityInfo(int entnum, void /* struct aas_entityinfo_s */ *info);
-
-int		trap_AAS_Initialized(void);
-void	trap_AAS_PresenceTypeBoundingBox(int presencetype, vec3_t mins, vec3_t maxs);
-float	trap_AAS_Time(void);
-
-int		trap_AAS_PointAreaNum(vec3_t point);
-int		trap_AAS_PointReachabilityAreaIndex(vec3_t point);
-int		trap_AAS_TraceAreas(vec3_t start, vec3_t end, int *areas, vec3_t *points, int maxareas);
-
-int		trap_AAS_PointContents(vec3_t point);
-int		trap_AAS_NextBSPEntity(int ent);
-int		trap_AAS_ValueForBSPEpairKey(int ent, char *key, char *value, int size);
-int		trap_AAS_VectorForBSPEpairKey(int ent, char *key, vec3_t v);
-int		trap_AAS_FloatForBSPEpairKey(int ent, char *key, float *value);
-int		trap_AAS_IntForBSPEpairKey(int ent, char *key, int *value);
-
-int		trap_AAS_AreaReachability(int areanum);
-
-int		trap_AAS_AreaTravelTimeToGoalArea(int areanum, vec3_t origin, int goalareanum, int travelflags);
-int		trap_AAS_EnableRoutingArea( int areanum, int enable );
-int		trap_AAS_PredictRoute(void /*struct aas_predictroute_s*/ *route, int areanum, vec3_t origin,
-							int goalareanum, int travelflags, int maxareas, int maxtime,
-							int stopevent, int stopcontents, int stoptfl, int stopareanum);
-
-int		trap_AAS_AlternativeRouteGoals(vec3_t start, int startareanum, vec3_t goal, int goalareanum, int travelflags,
-										void /*struct aas_altroutegoal_s*/ *altroutegoals, int maxaltroutegoals,
-										int type);
-int		trap_AAS_Swimming(vec3_t origin);
-int		trap_AAS_PredictClientMovement(void /* aas_clientmove_s */ *move, int entnum, vec3_t origin, int presencetype, int onground, vec3_t velocity, vec3_t cmdmove, int cmdframes, int maxframes, float frametime, int stopevent, int stopareanum, int visualize);
-
-
 void	trap_EA_Say(int client, char *str);
 void	trap_EA_SayTeam(int client, char *str);
 void	trap_EA_Command(int client, char *command);
@@ -1111,6 +1336,12 @@ float	trap_BotLuaBotGetAttackAimHeight(int client, int weaponNum);
 int		trap_BotLuaBotEvalItem(int client, const wbItemEvalCtx_t *ctx);
 int		trap_BotLuaBotDecide(int client, const wbDecideCtx_t *ctx, char *decision, int decisionSize);
 int		trap_BotLuaBotOnChat(int client, const char *eventName, const wbChatCtx_t *ctx, char *outChat, int outChatSize);
+
+// Monster-Lua behavior traps — parallel to the bot traps, keyed by entityNum.
+int		trap_MonsterLuaBind(int entityNum, int characterHandle);
+void	trap_MonsterLuaUnbind(int entityNum);
+float	trap_MonsterLuaProfileField(int entityNum, int field);
+int		trap_MonsterLuaDecide(int entityNum, const wbDecideCtx_t *ctx, char *decision, int decisionSize);
 
 
 int		trap_BotLoadCharacter(char *charfile, float skill);
@@ -1172,7 +1403,6 @@ int		trap_BotAllocGoalState(int state);
 void	trap_BotFreeGoalState(int handle);
 
 void	trap_BotResetMoveState(int movestate);
-void	trap_BotMoveToGoal(void /* struct bot_moveresult_s */ *result, int movestate, void /* struct bot_goal_s */ *goal, int travelflags);
 int		trap_BotMoveInDirection(int movestate, vec3_t dir, float speed, int type);
 void	trap_BotResetAvoidReach(int movestate);
 void	trap_BotResetLastAvoidReach(int movestate);
@@ -1206,10 +1436,104 @@ void         trap_Nav_UpdateCrowdAgent( int agentId, vec3_t desiredTarget );
 void         trap_Nav_RemoveCrowdAgent( int agentId );
 void         trap_Nav_UpdateCrowd( float deltaTime );
 qboolean     trap_Nav_IsReady( void );
+qboolean     trap_Nav_IsBaking( void );
 void         trap_Nav_SetPolyFlagsForDoor( const char *targetname, int setFlags, int clearFlags );
+/* Re-apply every func_door's blocked-flags from its live mover state. Called once
+ * when the async navmesh bake finishes (nav.ready false→true) so doors that spawned
+ * closed while the mesh was baking (a no-op then) block their polys. */
+void         G_Nav_ReconcileDoors( void );
+/* Signal that a mover transition changed the nav graph's cost/passability. The
+ * changed mover's world bounds SCOPE the invalidation: an agent whose corridor was
+ * planned against the old graph re-plans on its next step only if that corridor
+ * actually crosses these bounds, so an agent that caused the change (its corridor
+ * ends at the button; the mover that moved is the door elsewhere) is not invalidated
+ * by its own action. Declared here (base types only) so the generic mover seam
+ * reaches it without pulling in g_bot_nav.h; defined in g_bot_nav.c next to the nav
+ * states it governs. */
+void         Nav_WorldChanged( const vec3_t absmin, const vec3_t absmax );
 void         trap_Nav_PredictEnemyPosition( const vec3_t origin, const vec3_t velocity,
                                             float predictTime, vec3_t outPos );
+/* Dev-only: step a virtual point from start to goal over the client-independent
+ * steering seam (BotNav_Steer + Nav_FindPath). Returns qtrue if it reached the
+ * goal; *outSteps gets the step count. Used by the nav_walktest cheat command. */
+qboolean     BotNav_WalkTest( const vec3_t start, const vec3_t goal, int *outSteps );
+
+/* Per-entity nav-state pool (non-client path). A gentity that needs to follow a
+ * nav path acquires a pool slot (ent->navState); it is returned on release or
+ * when the entity is freed. The pool is reset each map/game-init. Nav_SteerEntity
+ * (the mover-think steer seam) lives in g_bot_nav.h — it needs the full
+ * botNavSteerResult_t, so callers include that header. */
+struct botNavState_s *Nav_AcquireState( gentity_t *ent );
+void          Nav_ReleaseState( gentity_t *ent );
+void          Nav_ResetEntityPool( void );
+/* Nav-driven mover (non-client): Nav_StartFollower turns ent into a follower
+ * heading to goal (acquires a nav-state, sets physicsObject, seeds the first
+ * trajectory leg); G_RunNavFollower advances it each frame from the G_RunFrame
+ * dispatch. Movement only, no AI. */
+qboolean      Nav_StartFollower( gentity_t *ent, const vec3_t goal, int agentType );
+void          G_RunNavFollower( gentity_t *ent );
 #endif /* FEAT_RECAST_NAVMESH */
+
+#if FEAT_MONSTER_AI
+/* Per-frame behavior tick for a non-client monster (the decision layer above
+ * nav movement). Dispatched from G_RunFrame when ent->aiThink is set. */
+void          G_RunBehavior( gentity_t *ent );
+
+/* Death callback for a behaving monster: frees the entity (returning both pool
+ * slots). A behaving entity with takedamage set MUST carry this, else G_Damage
+ * NULL-derefs ent->die when the monster is killed. */
+void          Behavior_MonsterDie( gentity_t *self, gentity_t *inflictor,
+                                    gentity_t *attacker, int damage, int mod );
+
+/* Spawn one behavior monster at origin, enemy=enemyNum, health=startHealth. If
+ * characterHandle>0, bind it to that character (the Lua-decide opt-in engages
+ * when the character defines a "decide" fn). Returns the entity or NULL. */
+struct gentity_s *G_SpawnBehaviorMonster( const vec3_t origin, int enemyNum,
+                                          int startHealth, int characterHandle,
+                                          const char *characterName );
+
+/* Per-monster behavior-state pool (mirrors the nav-state pool). A monster
+ * acquires a slot (ent->behaviorState) when it starts thinking; it is returned
+ * on release or when the entity is freed. Reset each map/game-init. */
+struct behaviorState_s *Behavior_AcquireState( gentity_t *ent );
+void          Behavior_ReleaseState( gentity_t *ent );
+void          Behavior_ResetPool( void );
+
+/* Savegame (Phase-4) pool accessors. The behaviorState pool is file-static in
+ * g_behavior.c, so the serializer cannot reach a slot directly; these thin hooks
+ * copy an entity's slot content out (save) / acquire a slot and copy content back
+ * in (load). behaviorState_t is pure data (no pointers), so the copy is verbatim.
+ * Behavior_SaveSlot: 1 + writes *out if the entity holds a slot, else 0 (no slot).
+ * Behavior_LoadSlot: acquires a slot for the entity and fills it from *in; 1 on
+ * success, 0 if the pool is exhausted. `slotBytes` must be sizeof(behaviorState_t)
+ * (the serializer asserts it via Behavior_SlotSize). */
+size_t        Behavior_SlotSize( void );
+int           Behavior_SaveSlot( gentity_t *ent, void *out, size_t slotBytes );
+int           Behavior_LoadSlot( gentity_t *ent, const void *in, size_t slotBytes );
+
+/* ── Scripted verb-dispatcher (the set-piece drive layer) ──────────────────
+ * A scripted monster (bs->scripted) is driven by a list of {verb,args} items
+ * instead of the autonomous FSM. G_RunScriptDispatcher walks that list each
+ * frame by an integer cursor: a verb returns done (advance) or not-done
+ * (suspend, re-enter next frame). No coroutine — the cursor IS the resume
+ * point. Script_ResetPool clears every script slot at map init;
+ * Script_ReleaseForEntity frees a driven monster's slot when it dies/frees. */
+void          G_RunScriptDispatcher( gentity_t *ent );
+void          Script_ResetPool( void );
+void          Script_ReleaseForEntity( gentity_t *ent );
+
+/* Load a set-piece script file (a verb list) and spawn+drive one scripted
+ * monster from it. characterName (may be NULL) binds a character archetype.
+ * Returns the driven entity, or NULL on failure. */
+struct gentity_s *Script_SpawnDriven( const char *scriptPath, const vec3_t origin,
+                                      int enemyNum, const char *characterName );
+
+/* Fire a named script event on a scripted monster (selects the matching event
+ * block + resets its cursor). A no-op for a non-scripted entity, so the game
+ * hooks (pain in G_Damage, death in the die callback) can call it
+ * unconditionally. param is the string-equal predicate (NULL/"" = always match). */
+void          Script_FireEvent( gentity_t *ent, const char *eventName, const char *param );
+#endif /* FEAT_MONSTER_AI */
 
 #if FEAT_CLAN_ARENA
 extern  vmCvar_t	g_clanArena;
@@ -1239,6 +1563,12 @@ void G_ResetHistory( gentity_t *ent );
 void G_StoreHistory( gentity_t *ent );
 void G_DoTimeShiftFor( gentity_t *ent );
 void G_UndoTimeShiftFor( gentity_t *ent );
+// Batch rewind/restore of all clients (skip==NULL rewinds everyone), used to
+// bracket the per-frame missile run so projectile impact traces reconcile
+// against rewound positions (G_RunFrame). The shooter is safely rewound too —
+// G_RunMissile's trace ignores the owner via passent=ownerNum.
+void G_TimeShiftAllClients( int time, gentity_t *skip );
+void G_UnTimeShiftAllClients( gentity_t *skip );
 #if FEAT_UNLAGGED
 void G_UnTimeShiftClient( gentity_t *ent );
 #endif

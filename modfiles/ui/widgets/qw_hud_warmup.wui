@@ -1,0 +1,30 @@
+// qw_hud_warmup — V2_HUD_Active warmup countdown ("Starts in: N" / waiting)
+// HUD redesign (Eser) Phase E — overlay layer. The pre-match warmup state:
+//   sec < 0  → waiting message from the game.warmup.message store key
+//              ("^BWaiting for Players" / "^BWaiting for Opponent" in duel).
+//   sec > 0  → "Starts in: N" countdown.
+// The engine (cl_wired_hud_elem_warmupinfo.c) self-gates: hidden once the match
+// starts AND hidden while the scoreboard is up (cg.showScores), so it won't fight
+// the TAB-hold scoreboard. The "FIGHT!" announce itself comes through msgqueue
+// (qw_hud_msgqueue.wui), so this widget is ONLY the countdown/waiting line — no
+// duplication.
+// Placement TOP_CENTER y0.34 — the empty band below the rewards medals (y0.22)
+// and above the crosshair (centre). Big, centred, $accent so it reads as the
+// "match is about to start" focal line. hudElement rect FULL-VIEWPORT.
+itemDef {
+	name "hud_active_warmup_root"
+	type container
+	decoration
+	visible 1
+
+	itemDef { hudElement "warmupinfo"
+		anchor TOP_CENTER
+		rect 0.500 0.340 0 0
+		font $font_sans
+		fontsize 26 32
+		textalign 1
+		forecolor $accent
+		decoration
+		visible 1
+	}
+}

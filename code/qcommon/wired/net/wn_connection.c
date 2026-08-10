@@ -7,7 +7,6 @@ wn_connection.c — QUIC connection lifecycle, auth, permissions
 ===========================================================================
 */
 #include "wn_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_network, "network" );
 
 /*

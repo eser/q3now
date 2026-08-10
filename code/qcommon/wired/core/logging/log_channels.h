@@ -55,20 +55,11 @@ void Log_ResolveAllChannels( void );
 // LOG_CH(var) call hits Log_GetChannel under the registry mutex; every
 // subsequent call reads the cached static int directly.
 //
-// WASM/VM modules don't have access to the engine's channel registry —
-// their Com_Log_Impl stubs ignore the channel argument and forward the
-// payload through the VM-syscall bridge to the engine, which assigns the
-// emitting category at the bridge site. Compile LOG_CH(...) to a constant
-// 0 in those builds so wasm-ld doesn't need Log_GetChannel.
-#ifdef WASM_MODULE
-
-#define LOG_DECLARE_CHANNEL(var, name_str)                                  \
-    typedef int _log_ch_unused_##var
-
-#define LOG_CH(var)  (0)
-
-#else
-
+// VM modules (cgame, game — native DLL or WASM) supply their own
+// Log_GetChannel: it interns the channel name in a small VM-local table and
+// returns an index. The VM-side Com_Log_Impl maps that index back to the
+// name and forwards it across the CG_LOG / G_LOG trap, where the engine
+// resolves it through the real channel registry.
 #define LOG_DECLARE_CHANNEL(var, name_str)                                  \
     static int        _log_ch_##var      = -1;                              \
     static const char *_log_ch_name_##var = (name_str)
@@ -77,5 +68,3 @@ void Log_ResolveAllChannels( void );
     ( _log_ch_##var >= 0                                                    \
         ? _log_ch_##var                                                     \
         : ( _log_ch_##var = Log_GetChannel( _log_ch_name_##var ) ) )
-
-#endif

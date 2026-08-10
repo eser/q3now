@@ -104,3 +104,31 @@ fonts/sharetechmono_atlas
         alphaGen vertex
     }
 }
+
+// ── JetBrains Mono ─────────────────────────────────────────────
+
+fonts/jetbrainsmono_atlas
+{
+    nopicmip
+    nomipmaps
+    {
+        map fonts/jetbrainsmono.png
+        blendFunc GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA
+        rgbGen vertex
+        alphaGen vertex
+    }
+}
+
+// ── Wired UI Icons (Phase 3e — PUA-aliased single-byte icons) ──
+
+fonts/wui_icons_atlas
+{
+    nopicmip
+    nomipmaps
+    {
+        map fonts/wui_icons.png
+        blendFunc GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA
+        rgbGen vertex
+        alphaGen vertex
+    }
+}

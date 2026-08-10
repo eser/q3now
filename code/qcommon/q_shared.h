@@ -8,9 +8,24 @@
 // q_shared.h -- included first by ALL program modules.
 // A user mod should never modify this file
 
-#define WIRED_ENGINE_VERSION  "Wired 0.80"
+#include "wired/wired_build_stamp.h"  // WIRED_BUILD_ID_STR — folded into the engine title
+
+// Engine identity, composed from parts so consumers pick the granularity they
+// need without re-deriving it:
+//   BASE_TITLE   "Wired"                 human-authored product name
+//   BASE_VERSION "0.80"                  human-authored version
+//   BUILD_ID     "2231"                  automatic per-build stamp (build-stamp header)
+//   VERSION      BASE_VERSION "." BUILD_ID   → "0.80.2231"  (DOT: one semver-like token)
+//   TITLE        BASE_TITLE " " VERSION      → "Wired 0.80.2231" (name + version token)
+// The two separators differ on purpose: a DOT binds version to build-id into a
+// single copyable/UserAgent-clean token; a SPACE keeps the product name apart.
+#define WIRED_ENGINE_BASE_TITLE   "Wired"
+#define WIRED_ENGINE_BASE_VERSION "0.80"
+#define WIRED_ENGINE_BUILD_ID     WIRED_BUILD_ID_STR
+#define WIRED_ENGINE_VERSION      WIRED_ENGINE_BASE_VERSION "." WIRED_ENGINE_BUILD_ID
+#define WIRED_ENGINE_TITLE        WIRED_ENGINE_BASE_TITLE " " WIRED_ENGINE_VERSION
 #ifndef WIRED_ENGINE_RELEASE_VERSION
-  #define WIRED_ENGINE_RELEASE_VERSION WIRED_ENGINE_VERSION
+  #define WIRED_ENGINE_RELEASE_VERSION WIRED_ENGINE_TITLE
 #endif
 // Product name (defaults to q3now). The build system overrides via
 // -DPRODUCT_NAME=<name>; this fallback covers non-CMake builds and lets the
@@ -27,9 +42,7 @@
 #endif
 // 1.32 released 7-10-2002
 
-//#define DEFAULT_GAME			"edawn"
-
-#define BASEGAME				"baseq3"
+#define BASEGAME				"base"
 
 #define MAX_NETNAME				36
 #define MAX_TEAMNAME            32

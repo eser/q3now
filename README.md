@@ -2,7 +2,7 @@
 
 [![build](../../workflows/build/badge.svg)](../../actions?query=workflow%3Abuild)
 
-This repository ships **Wired**, a modern fork of id Software's Quake III Arena engine (idTech 3), and **q3now**, the game that runs on it. Engine code lives under `code/{qcommon,client,server,renderer*,sdl,unix,win32}` and is built into the `wired` and `wired-ded` binaries; game code lives under `code/{game,cgame}` and ships its assets under `baseq3/`. The engine identifies as "Wired" in window titles, banners, and master-server traffic-tag plumbing; per-game identity (gamename, heartbeat) lives in `code/game/bg_public.h` and is published into engine cvars at game-init time.
+This repository ships **Wired**, a modern fork of id Software's Quake III Arena engine (idTech 3), and **q3now**, the game that runs on it. Engine code lives under `code/{qcommon,client,server,renderer*,sdl,unix,win32}` and is built into the `wired` and `wired-headless` binaries; game code lives under `code/{game,cgame}` and ships its assets under `base/`. The engine identifies as "Wired" in window titles, banners, and master-server traffic-tag plumbing; per-game identity (gamename, heartbeat) lives in `code/game/bg_public.h` and is published into engine cvars at game-init time.
 
 ## q3now vs Quake III Arena
 
@@ -72,8 +72,8 @@ Built on [Quake3e](https://github.com/ec-/Quake3e), with significant additions:
 
 - optimized OpenGL renderer
 - optimized Vulkan renderer
-- raw mouse input support, enabled automatically instead of
-  DirectInput(**\in_mouse 1**) if available
+- relative (raw-delta) mouse input via SDL3, enabled with **\in_mouse 1**
+  (0 disables mouse input)
 - unlagged mouse events processing, can be reverted by setting **\in_lagged 1**
 - **\in_minimize** - hotkey for minimize/restore main window (win32-only, direct
   replacement for Q3Minimizer)
@@ -186,7 +186,7 @@ git submodule update --init --recursive
 | `make release`             | Full pipeline: check + assemble + codesign + DMG/tar.gz        |
 | `make bundle-dmg`          | Package signed `q3now-<version>-<arch>.dmg` (macOS)            |
 | `make bundle-tar`          | Package `q3now-<version>-<arch>.tar.gz` (Linux)                |
-| `make bundle-docker`       | Build Docker image for dedicated server                        |
+| `make bundle-docker`       | Build Docker image for headless server                         |
 | `make bench DEMO=four`     | Timedemo benchmark                                             |
 
 **VM backend:** Set `USE_WASM=1` to compile VM game modules via WAMR.
@@ -202,22 +202,22 @@ at full speed.
 **In-game diagnostics:** type `\q3now_engine` in the server console to print
 engine version, active renderer, `vm_rtChecks`, and `com_maxfps`.
 
-## Docker Dedicated Server
+## Docker Headless Server
 
 [![Docker Hub](https://img.shields.io/docker/pulls/eserozvataf/q3now)](https://hub.docker.com/r/eserozvataf/q3now)
 
-Run a q3now dedicated server with Docker:
+Run a q3now headless server with Docker:
 
 ```bash
 docker run -d -p 27960:27960/udp \
-  -v /path/to/your/baseq3:/home/wired/baseq3 \
+  -v /path/to/your/base:/home/wired/base \
   -e WIRED_HOSTNAME="My Server" \
   -e WIRED_MAXCLIENTS=16 \
   eserozvataf/q3now +map arena7
 ```
 
 Mount your game assets (`pak0.pk3`, custom maps, `server.cfg`) into the
-`baseq3` volume. See `docker/docker-compose.yml` for a complete example with
+`base` volume. See `docker/docker-compose.yml` for a complete example with
 all available environment variables.
 
 QUIC transport is enabled by default. A self-signed TLS certificate is
@@ -250,6 +250,7 @@ Discord channel: https://discordapp.com/invite/X3Exs4C
 
 q3now contains code from;
 
+- better-gibs-mod
 - BrightArena
 - CNQ3
 - ioEF engine

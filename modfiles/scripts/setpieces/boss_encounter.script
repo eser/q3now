@@ -1,0 +1,26 @@
+// boss_encounter.script — a standalone Chthon (the boss) set-piece, testable without a
+// map. Chthon spawns already-risen, is invulnerable to the player's weapons, lobs aimed
+// lavaballs at the player, and after a demonstration window dies to a protection-piercing
+// shock (the same DAMAGE_NO_PROTECTION vehicle a map's trigger_hurt with the NO_PROTECTION
+// spawnflag delivers) — playing his death animation.
+//
+// Run with the boss character so he renders + sizes as Chthon:
+//   spawnscript scripts/setpieces/boss_encounter.script boss
+//
+// The window (wait) is long enough to shoot him and confirm he shrugs off all fire before
+// the shock lands; the ACT step keeps him throwing lavaballs the whole time (attack ->
+// BSTATE_BATTLE, and his manifest attack="ranged" fires the aimed lavaball on its timer).
+spawn {
+    print chthon-armed
+    invuln 1
+    attack
+    print chthon-throwing-and-immune
+    wait 20000
+    print chthon-shock-incoming
+    invuln 0
+    shock
+    print chthon-shocked
+}
+death {
+    print chthon-down
+}

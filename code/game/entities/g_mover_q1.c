@@ -4,7 +4,6 @@
 // Q1 mover entities (func_door, func_plat)
 
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #define DOOR_START_OPEN   1   /* Q1 spawnflag: spawn at open position */
@@ -1121,3 +1120,13 @@ See docs/deferred_q1_workstreams.md.
 void SP_q1_func_bossgate( gentity_t *ent ) {
 	G_FreeEntity( ent );
 }
+
+// ── savegame callback registry — TIER 2 file-local sub-list ──────────────────
+// The file-static callbacks defined above, published through SG_Register_g_mover_q1().
+// Includes the Q1 blocked/reached handlers (Q1_Blocked_Door, Reached_Q1Plat) that
+// the prior enumeration wrongly claimed were zero. Name list single-sourced in
+// g_save_localcbs.h (SG_LOCAL_CB_g_mover_q1). See g_save_funcs.h.
+#include "g_save_funcs.h"
+#include "g_save_localcbs.h"
+
+SG_DEFINE_LOCAL_REGISTRY( SG_LOCAL_CB_g_mover_q1, SG_Register_g_mover_q1 )

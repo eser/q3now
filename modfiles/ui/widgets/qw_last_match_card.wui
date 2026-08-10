@@ -1,0 +1,144 @@
+// qw_last_match_card — right-rail "last match" recap card widget
+// Interface (consumer): #include into the right_rail container body.
+// Tokens: $accent, $bone, $boneDim, $panelDeep, $line,
+//         $font_icon, $font_mono, $font_sans,
+//         $spacing_sm, $spacing_md, $spacing_xs, $spacing_xxs
+// Store binds (placeholder until cgame stages): last_match.title,
+//   last_match.mode, last_match.ago, last_match.result,
+//   last_match.kills, last_match.deaths, last_match.acc, last_match.dmg.
+//   Hardcoded fallback values let the widget render before cgame
+//   wires the store keys.
+// Composition: column container — header row (◆ LAST MATCH + result) +
+//   match title + meta line + 4-cell stats grid (KILLS / DEATHS /
+//   ACC / DMG arranged as label-above-value cells).
+itemDef {
+	name "card_last_match"
+	type container
+	rect 0 0 1 24vh
+	height FIT
+	direction column
+	padding $spacing_card_padding_v $spacing_card_padding_h
+	gap $spacing_xs
+	background $panelDeep
+	border 1px $line
+
+	// Header row
+	itemDef {
+		name "card_last_match_header_row"
+		type container
+		rect 0 0 1 2vh
+		height FIT
+		direction row
+		alignY center
+		gap 0.006
+
+		itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 14vw 2vh height FIT width PERCENT 14vw text "LAST MATCH" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 }
+		itemDef { type container grow 1 decoration visible 1 }
+		itemDef { type 0 rect 0 0 8vw 2vh height FIT width PERCENT 8vw text "VICTORY" textalign 2 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 }
+	}
+
+	// Match title + meta
+	itemDef { type 0 rect 0 0 1 2.6vh height FIT width PERCENT 1 text "VERTICAL VEIN" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
+	itemDef { type 0 rect 0 0 1 1.8vh height FIT width PERCENT 1 text "duel · 11m 34s ago" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+
+	// Stats grid — 4 columns (KILLS / DEATHS / ACC / DMG), label-above-value
+	itemDef {
+		name "card_last_match_stats_grid"
+		type container
+		rect 0 0 1 4.5vh
+		height FIT
+		direction row
+		gap $spacing_sm
+
+		itemDef {
+			type container
+			rect 0 0 25vw 4.5vh
+			height FIT
+			direction column
+			alignX start
+			gap 0.001
+			grow 1
+			itemDef { type 0 rect 0 0 1 1.4vh height FIT width PERCENT 1 text "KILLS" textalign 0 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { type 0 rect 0 0 1 2.6vh height FIT width PERCENT 1 text "17" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
+		}
+		itemDef {
+			type container
+			rect 0 0 25vw 4.5vh
+			height FIT
+			direction column
+			alignX start
+			gap 0.001
+			grow 1
+			itemDef { type 0 rect 0 0 1 1.4vh height FIT width PERCENT 1 text "DEATHS" textalign 0 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { type 0 rect 0 0 1 2.6vh height FIT width PERCENT 1 text "12" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
+		}
+		itemDef {
+			type container
+			rect 0 0 25vw 4.5vh
+			height FIT
+			direction column
+			alignX start
+			gap 0.001
+			grow 1
+			itemDef { type 0 rect 0 0 1 1.4vh height FIT width PERCENT 1 text "ACC" textalign 0 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { type 0 rect 0 0 1 2.6vh height FIT width PERCENT 1 text "44%" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
+		}
+		itemDef {
+			type container
+			rect 0 0 25vw 4.5vh
+			height FIT
+			direction column
+			alignX start
+			gap 0.001
+			grow 1
+			itemDef { type 0 rect 0 0 1 1.4vh height FIT width PERCENT 1 text "DMG" textalign 0 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { type 0 rect 0 0 1 2.6vh height FIT width PERCENT 1 text "2.1k" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
+		}
+	}
+
+	// Medals row — 3 iconified slots (EXCELLENT / HEADSHOT / PERFECT).
+	itemDef {
+		name "card_last_match_medals_row"
+		type container
+		rect 0 0 1 3vh
+		height FIT
+		direction row
+		gap $spacing_sm
+		alignY center
+
+		itemDef {
+			type container
+			rect 0 0 20vw 3vh
+			height FIT
+			direction row
+			alignY center
+			gap 0.004
+			grow 0
+			itemDef { type 0 rect 0 0 1.6vw 2.4vh height FIT width PERCENT 1.6vw background "ui/assets/medal_excellent" decoration visible 1 grow 0 }
+			itemDef { type 0 rect 0 0 14vw  2vh height FIT width PERCENT 14vw  text "EXCELLENT" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		}
+		itemDef {
+			type container
+			rect 0 0 20vw 3vh
+			height FIT
+			direction row
+			alignY center
+			gap 0.004
+			grow 0
+			itemDef { type 0 rect 0 0 1.6vw 2.4vh height FIT width PERCENT 1.6vw background "ui/assets/medal_accuracy" decoration visible 1 grow 0 }
+			itemDef { type 0 rect 0 0 14vw  2vh height FIT width PERCENT 14vw  text "HEADSHOT"  textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		}
+		itemDef {
+			type container
+			rect 0 0 20vw 3vh
+			height FIT
+			direction row
+			alignY center
+			gap 0.004
+			grow 0
+			itemDef { type 0 rect 0 0 1.6vw 2.4vh height FIT width PERCENT 1.6vw background "ui/assets/medal_perfect" decoration visible 1 grow 0 }
+			itemDef { type 0 rect 0 0 14vw  2vh height FIT width PERCENT 14vw  text "PERFECT"   textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		}
+	}
+}

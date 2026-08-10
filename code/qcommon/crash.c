@@ -26,7 +26,11 @@
 
 cvar_t *com_crashReport = NULL;
 
-#define CRASH_VM_COUNT ( (int)VM_COUNT )
+// Crash VM slots: the enum VMs (game + the primary cgame) keep their index
+// slots 0..VM_COUNT-1 (byte-identical to before); per-app cgame instances >0
+// (in-process-queue L7) get appended slots so N cgame VMs never collapse onto
+// one diagnostic entry. Instance 0 maps to its enum slot (VM_CGAME) unchanged.
+#define CRASH_VM_COUNT ( (int)VM_COUNT + ( MAX_LOCAL_CGAME_VMS - 1 ) )
 
 typedef struct {
 	vm_t         *vm;
@@ -39,16 +43,24 @@ typedef struct {
 
 static crashState_t s_crash;
 
+// Map (vmIndex, cgameInstance) to a crash-table slot. VM_GAME and the primary
+// cgame (instance 0) keep their enum index (byte-identical at N=1); a cgame
+// instance i>0 maps to an appended slot. Returns -1 if out of range.
+static int Crash_VMSlot( vmIndex_t vmIndex, int cgameInstance )
+{
+	if ( vmIndex == VM_CGAME && cgameInstance > 0 ) {
+		if ( cgameInstance >= MAX_LOCAL_CGAME_VMS )
+			return -1;
+		return (int)VM_COUNT + ( cgameInstance - 1 );
+	}
+	return ( vmIndex >= 0 && vmIndex < (int)VM_COUNT ) ? (int)vmIndex : -1;
+}
+
 /*
 ========================
 Crash VM state
 ========================
 */
-static qboolean Crash_IsVMIndexValid( vmIndex_t vmIndex )
-{
-	return ( vmIndex >= 0 && vmIndex < CRASH_VM_COUNT ) ? qtrue : qfalse;
-}
-
 static const char *Crash_GetVMName( vmIndex_t vmIndex )
 {
 	switch ( vmIndex ) {
@@ -58,17 +70,19 @@ static const char *Crash_GetVMName( vmIndex_t vmIndex )
 	}
 }
 
-void Crash_SaveVMPointer( vmIndex_t vmIndex, vm_t *vm )
+void Crash_SaveVMPointer( vmIndex_t vmIndex, int cgameInstance, vm_t *vm )
 {
-	if ( Crash_IsVMIndexValid( vmIndex ) ) {
-		s_crash.vm[ vmIndex ].vm = vm;
+	int slot = Crash_VMSlot( vmIndex, cgameInstance );
+	if ( slot >= 0 ) {
+		s_crash.vm[ slot ].vm = vm;
 	}
 }
 
-void Crash_SaveVMChecksum( vmIndex_t vmIndex, unsigned int crc32 )
+void Crash_SaveVMChecksum( vmIndex_t vmIndex, int cgameInstance, unsigned int crc32 )
 {
-	if ( Crash_IsVMIndexValid( vmIndex ) ) {
-		s_crash.vm[ vmIndex ].crc32 = crc32;
+	int slot = Crash_VMSlot( vmIndex, cgameInstance );
+	if ( slot >= 0 ) {
+		s_crash.vm[ slot ].crc32 = crc32;
 	}
 }
 
@@ -264,7 +278,9 @@ static void Crash_WriteVMs( void )
 
 		JSON_BeginArrayObject();
 		JSON_IntegerValue( "index", i );
-		JSON_StringValue( "name", Crash_GetVMName( (vmIndex_t)i ) );
+		// appended slots (i >= VM_COUNT) hold per-app cgame instances; name them
+		// from the stored vm's enum index so they read "cgame", not "unknown".
+		JSON_StringValue( "name", Crash_GetVMName( vm ? vm->index : (vmIndex_t)i ) );
 		JSON_BooleanValue( "loaded", vm != NULL ? qtrue : qfalse );
 		if ( crc32 ) {
 			JSON_HexValue( "crc32", (unsigned long long)crc32 );
@@ -292,7 +308,8 @@ static void Crash_WriteCvar( const char *name )
 static void Crash_WriteKeyCvars( void )
 {
 	JSON_BeginNamedObject( "cvars" );
-	Crash_WriteCvar( "com_dedicated" );
+	Crash_WriteCvar( "sv_running" );
+	Crash_WriteCvar( "sv_hostListed" );
 	Crash_WriteCvar( "fs_game" );
 	Crash_WriteCvar( "fs_installpath" );
 	Crash_WriteCvar( "mapname" );
@@ -319,12 +336,12 @@ static void Crash_WriteEngineInfo( const char *reason, const char *address, cons
 		tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
 		tm.tm_hour, tm.tm_min, tm.tm_sec );
 
-	JSON_StringValue( "engine_version", WIRED_ENGINE_VERSION );
+	JSON_StringValue( "engine_version", WIRED_ENGINE_TITLE );
 	JSON_StringValue( "engine_platform", PLATFORM_STRING );
 	JSON_StringValue( "engine_arch", ARCH_STRING );
 	JSON_StringValue( "engine_build_date", __DATE__ );
 	JSON_StringValue( "engine_build_time", __TIME__ );
-#ifdef DEDICATED
+#ifdef HEADLESS
 	JSON_BooleanValue( "engine_dedicated_server", qtrue );
 #else
 	JSON_BooleanValue( "engine_dedicated_server", qfalse );
@@ -474,7 +491,7 @@ void Crash_PrintVMStackTracesASS( int fd )
 		unsigned int crc32 = s_crash.vm[ i ].crc32;
 
 		ASS_Write( fd, "  " );
-		ASS_Write( fd, Crash_GetVMName( (vmIndex_t)i ) );
+		ASS_Write( fd, Crash_GetVMName( vm ? vm->index : (vmIndex_t)i ) );
 		ASS_Write( fd, ": " );
 		if ( vm == NULL ) {
 			ASS_Write( fd, "not loaded\r\n" );

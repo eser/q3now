@@ -1,0 +1,167 @@
+// ingame.wui -- q3now In-Game ESC menu (Phase 5d canonical)
+//
+// Reached by pressing ESC during gameplay (parent of Phase 5b
+// addbots/removebots/callvote popups). Centered overlay — header
+// + a primary action stack + an "IN-MATCH" group that reaches the
+// mid-match sub-menus (team / orders / bots / server info / player).
+// ESC closes (resumes match).
+//
+// Legibility refactor (2026-07-05): over live gameplay the flat text buttons
+// were barely visible and there was no dim backing, so the menu read as "can't
+// get into it". Fix is purely visual: a subtle full-rect dim backdrop (plain
+// semi-transparent rect — NOT corner quads; cornerRadius is unimplemented in the
+// rect backend, which is why the old vignette was removed) + the shared
+// QW_BUTTON_BLOCK pill chrome on the primary actions.
+//
+// In-match tab bar (2026-07-06): mirrors Team Arena's ingame.menu tab strip —
+// the mid-match sub-menus (team.wui / teamorders.wui / addbots.wui /
+// removebots.wui / serverinfo.wui / playersettings.wui) already exist; the ESC
+// menu just needed to reach them. `open "<menuname>"` layers the sub-menu popup
+// over this one (same verb the existing Options/Call Vote rows use); the
+// sub-menu's own Close/Cancel pops back here. These live in a secondary
+// "IN-MATCH" group under the primary stack, laid out as a 2-column grid of
+// slimmer pills so the panel does not overflow 720p.
+//
+// Gametype gating (DEFERRED — follow-up): Join Team / Team Orders only make
+// sense in a team gametype, and Team Arena disables them in FFA/Duel. The .wui
+// format supports `cvarTest "<cvar>" showCvar { ... }` gating (see
+// startserver.wui gating ui_netGameType on "4" "5"), and team gametypes are
+// g_gametype >= GT_TDM(4) .. GT_FREEZETAG(9). BUT there is no menu-readable cvar
+// for the CURRENT in-match gametype on a pure remote-connect client: the client
+// reads gametype into cgs.gametype from CS_SERVERINFO (cg_servercmds.c:191), not
+// into a local g_gametype cvar. Gating on g_gametype would work when hosting but
+// could wrongly HIDE the team buttons on a connected client where the cvar is
+// stale. Hiding a needed button is worse than showing an inert one, so both are
+// left UNCONDITIONAL for now. Proper gating is a follow-up: publish
+// wiredHud->gametype / isTeamGame to a menu-readable cvar/store key, then gate.
+// The two rows are still hand-inlined (not QW_BUTTON_BLOCK) to sit in the
+// 2-column grid; the chrome is copied from QW_BUTTON_BLOCK so the language matches.
+
+#include "ui/widgets/qw_button.wui"
+
+menuDef {
+	name "ingame"
+	layer "menu"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "popup_overlay"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		alignX center
+		alignY center
+		// Subtle full-rect dim backdrop over live gameplay so the centered panel
+		// reads as a real reachable menu. A PLAIN semi-transparent rect (0,0,0,0.55)
+		// — decoration, no border, no radius — NOT the old four corner quads
+		// (cornerRadius is unimplemented in the rect backend, which rendered them as
+		// hard opaque squares). It sits first so the panel + buttons draw over it.
+		itemDef {
+			name "dim_backdrop"
+			type 0
+			position absolute
+			rect 0 0 1 1
+			backcolor 0 0 0 0.55
+			decoration
+			visible 1
+			grow 0
+		}
+
+		// Panel hugs its content. The rect h is 0 so `height FIT` actually
+		// applies — authoring a non-zero rect h pins the box tall and makes FIT a
+		// no-op (known height-FIT trap). With h=0 the panel sizes to header +
+		// subheader + the primary stack + the IN-MATCH group, staying centered.
+		itemDef {
+			name "ingame_root"
+			type container
+			rect 0 0 0.32 0
+			direction column
+			padding 0.022 0.02
+			gap $spacing_md
+			background $panel
+			border 1px $lineBright
+			radius $radius_md
+			width PERCENT 0.30
+			height FIT
+
+			itemDef { name "header"    type 0 rect 0 0 1 0 height FIT text "PAUSED" textalign 0 font $font_sans_bold 20 forecolor $accent letterspacing 3 decoration visible 1 grow 0 }
+			itemDef { name "subheader" type 0 rect 0 0 1 0 height FIT text "Pick an action, or press ESC to resume." textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+
+			itemDef {
+				name "form_content"
+				type container
+				rect 0 0 1 0
+				direction column
+				gap $spacing_sm
+				height FIT
+				padding 0.006 0
+
+				QW_BUTTON_BLOCK("btn_resume",   "Resume",      $accent,  { close })
+				QW_BUTTON_BLOCK("btn_options",  "Options",     $bone,    { open "preferences" scene })
+				QW_BUTTON_BLOCK("btn_callvote", "Call Vote",   $bone,    { open "callvote" dim })
+				QW_BUTTON_BLOCK("btn_leave",    "Leave Match", $boneDim, { exec "disconnect" })
+				QW_BUTTON_BLOCK("btn_quit",     "Quit",        $boneDim, { exec "quit" })
+			}
+
+			// ── IN-MATCH group ──────────────────────────────────────────────────
+			// Reaches the mid-match sub-menus that already exist. Laid out as a
+			// 2-column grid of slimmer (36px) pills so six actions fit without
+			// overflowing the panel. Pill chrome copied from QW_BUTTON_BLOCK
+			// ($lineBright fill / $boneDim border / $accent on hover) so the group
+			// reads in the same visual language as the primary stack above.
+			itemDef { name "cat_inmatch" type 0 rect 0 0 1 0 height FIT text "IN-MATCH" textalign 0 font $font_mono 10 forecolor $boneDim letterspacing 2 decoration visible 1 grow 0 }
+
+			itemDef {
+				name "inmatch_content"
+				type container
+				rect 0 0 1 0
+				direction column
+				gap $spacing_sm
+				height FIT
+				padding 0.006 0
+
+				// Row 1 — team actions (unconditional; see deferred-gating note above).
+				itemDef {
+					name "inmatch_row_1"
+					type container
+					rect 0 0 1 0
+					direction row
+					gap $spacing_sm
+					height FIT
+					itemDef { name "btn_team"    type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Join Team"   textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "team" dim } }
+					itemDef { name "btn_orders"  type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Team Orders" textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "teamorders" dim } }
+				}
+
+				// Row 2 — bot management (available in every gametype).
+				itemDef {
+					name "inmatch_row_2"
+					type container
+					rect 0 0 1 0
+					direction row
+					gap $spacing_sm
+					height FIT
+					itemDef { name "btn_addbot"    type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Add Bot"    textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "addbots" dim } }
+					itemDef { name "btn_removebot" type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Remove Bot" textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "removebots" dim } }
+				}
+
+				// Row 3 — info / player (available in every gametype).
+				itemDef {
+					name "inmatch_row_3"
+					type container
+					rect 0 0 1 0
+					direction row
+					gap $spacing_sm
+					height FIT
+					itemDef { name "btn_serverinfo" type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Server Info"     textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "serverinfo" dim } }
+					itemDef { name "btn_player"     type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Player Settings" textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "playersettings" scene } }
+				}
+			}
+		}
+	}
+
+	onESC { close }
+}

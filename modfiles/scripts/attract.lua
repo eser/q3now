@@ -16,12 +16,22 @@
 
 -- ── Playlist ─────────────────────────────────────────────────────────────
 
--- Leaderboard panel: 10 seconds
-attract.add("panel", "attract_leaderboard", 10000)
+-- Brutalist-poster attract loop (Eser 2026-07-03): brand splash → leaderboard.
+-- The old idlogo.roq cinematic was dropped.
+--
+-- The gameplay-demo item is TEMPORARILY OUT of the playlist: the dummy demo
+-- recorded so far is a broken 2380-byte capture (the bot match never really
+-- ran), so it completes instantly every loop and triggers a full teardown
+-- (CA_LOADING → CL_Disconnect). Re-add once a healthy demo is recorded AND the
+-- CL_Disconnect/WiredUI state-separation fix lands so demo cycling never
+-- interrupts the console/attract layers.
+--   attract.add("demo", "attract_demo", 0)
 
--- Cinematic: shows video/idlogo.roq for 8 seconds then cuts
--- (MVP: duration_ms controls length since natural cinematic end is not wired)
-attract.add("cinematic", "video/idlogo.roq", 8000)
+-- Brand splash: 6 seconds
+attract.add("panel", "attract_brand", 6000)
+
+-- Leaderboard: 10 seconds
+attract.add("panel", "attract_leaderboard", 10000)
 
 -- ── Playback settings ────────────────────────────────────────────────────
 

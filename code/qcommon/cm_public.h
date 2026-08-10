@@ -73,3 +73,28 @@ void		CM_GetBrushSideData( int brushIdx, int sideIdx, int *planeNum, float norma
 void CMQ1_StoreClipnodes( const q1_dclipnode_t *cn, int numCn,
                           const int *hull1Roots, const int *hull0Roots, int numSubmodels );
 void CMQ1_StoreLeafContents( const int *contents, int numLeafs );
+
+// Origin-space nav geometry: the canonical-brush face soup for the current map
+// (same brushes the runtime tracer uses), Z-translated to standing-origin height;
+// XY player-radius is handled by the bake's walkableRadius erosion. Verts are
+// Quake-space; areas are navAreaId_t (GROUND/WATER/LAVA). Returns qfalse if no
+// geometry. Free with CM_FreeNavGeometry.
+qboolean CM_BuildNavGeometry( float **outVerts, int *outNumVerts,
+                              int **outTris, unsigned char **outAreas, int *outNumTris );
+void CM_FreeNavGeometry( float *verts, int *tris, unsigned char *areas );
+
+// Is p inside TRUE solid (hull-0 on Q1, native SOLID contents on Q3)? Clip and
+// liquid contents are NOT solid here. This is the same test the nav soup's
+// internal-face cull uses; the bake's ceiling-less-column guard shares it so both
+// stages agree on what "solid" means.
+qboolean CM_NavPointSolidPublic( const vec3_t p );
+
+// Collision tracer vtable instances, opaquely exposed so a map format can DECLARE
+// which collision method it uses (mapFormat_t.tracer = &cmTracer_q*) without the
+// maps layer seeing cmTracer_t's layout (struct cmTracer_s stays forward-declared
+// here; its definition lives in cm_local.h). A format just takes the address; only
+// cm_load (which includes cm_local.h) dereferences it. The pointer is shareable:
+// any future format can point at one of these instances with no new code.
+struct cmTracer_s;
+extern struct cmTracer_s cmTracer_q3;        // Q3 brush-tree collision
+extern struct cmTracer_s cmTracer_q1canon;   // Q1 canonical(+clip) brush collision

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
-// Wired RAL pipeline-test vertex shader (Phase 7.3c \ral_dump pipeline).
+// Wired RAL pipeline-test vertex shader (\ral_dump pipeline).
 // Push-constant MVP × per-vertex (pos, color) → frag_color. Tiny so the
 // resulting SPIR-V blob is small enough to embed verbatim in the test code.
 //

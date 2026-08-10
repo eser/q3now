@@ -8,11 +8,11 @@ layout(location = 0) out vec4 out_color;
 
 layout (constant_id = 4) const int color_mode = 0;
 
-// Phase 6B3'-d4-m1: precise piecewise sRGB -> linear conversion.
+// Precise piecewise sRGB -> linear conversion.
 // Duplicated in every fragment shader per the engine-wide
 // unconditional linear migration; compile.mjs lacks #include
 // support. Driver DCE removes the function from compiled
-// pipelines that don't call it. Matches A2/A3/A4's body verbatim.
+// pipelines that don't call it. Matches the other shader copies' body verbatim.
 vec3 sRGBToLinear( vec3 c ) {
 	c = max( c, vec3( 0.0 ) );
 	bvec3 cutoff = lessThanEqual( c, vec3( 0.04045 ) );
@@ -31,7 +31,7 @@ vec3 linearToSRGB( vec3 c ) {
 
 void main()
 {
-	// Phase 6B3'-d4-m1: the literals below are authored as sRGB-display
+	// The literals below are authored as sRGB-display
 	// values (classic 8-bit byte conventions); color.frag writes into
 	// the linear-HDR FBO, so each is decoded to linear radiance here.
 	// Pure 0.0 / 1.0 channels are unchanged by the transfer function;

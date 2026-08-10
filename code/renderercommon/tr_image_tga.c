@@ -5,6 +5,9 @@
 #include "../qcommon/q_shared.h"
 #include "../renderercommon/tr_public.h"
 #include "../qcommon/q_feats.h"
+#include "r_log.h"                       // rilog-channel-mechanism Turn B — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 #if FEAT_LEGACY_FORMATS_IMAGE
 
@@ -292,7 +295,7 @@ void R_LoadTGA ( const char *name, byte **pic, int *width, int *height)
 #endif
   // instead we just print a warning
   if (targa_header.attributes & 0x20) {
-    ri.Log( SEV_WARN, "WARNING: '%s' TGA file header declares top-down image, ignoring\n", name);
+    R_LOG( rch_assets, SEV_WARN, "WARNING: '%s' TGA file header declares top-down image, ignoring\n", name);
   }
 
   if (width)

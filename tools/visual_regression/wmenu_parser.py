@@ -23,7 +23,7 @@ practice. If you need a widget-macro's embedded colour, add a plain
 first and point this parser at the expanded output.
 
 Default macros path: <repo>/modfiles/ui/wmenumacros.h (the .wmenu source
-tree lives in modfiles/ui/, *not* baseq3/ui/ — build/debug/pak-staging/ui/
+tree lives in modfiles/ui/, *not* base/ui/ — build/debug/pak-staging/ui/
 holds the post-build staged copies).
 
 CLI:
@@ -46,12 +46,20 @@ DEFAULT_MACROS = os.path.join(_REPO_ROOT, "modfiles", "ui", "wmenumacros.h")
 # A token is: a quoted string, a {, a }, or a run of non-space/non-brace chars.
 _TOKEN_RE = re.compile(r'"(?:[^"\\]|\\.)*"|[{}]|[^\s{}]+')
 # #define IDENT  rest-of-line   (object-like only — reject IDENT( ... ))
-_DEFINE_RE = re.compile(r'^\s*#\s*define\s+([A-Za-z_]\w*)(?!\()\s+(.*?)\s*(?://.*)?$')
+_DEFINE_RE = re.compile(r"^\s*#\s*define\s+([A-Za-z_]\w*)(?!\()\s+(.*?)\s*(?://.*)?$")
 # A function-like-macro invocation at the start of significant content.
-_FUNC_MACRO_CALL_RE = re.compile(r'^[A-Za-z_]\w*\s*\(')
+_FUNC_MACRO_CALL_RE = re.compile(r"^[A-Za-z_]\w*\s*\(")
 
-_COLOR_KEYWORDS = ("backcolor", "forecolor", "bordercolor", "outlinecolor",
-                   "focuscolor", "color2", "fadecolor", "disablecolor")
+_COLOR_KEYWORDS = (
+    "backcolor",
+    "forecolor",
+    "bordercolor",
+    "outlinecolor",
+    "focuscolor",
+    "color2",
+    "fadecolor",
+    "disablecolor",
+)
 # Keys we surface in the per-element record (mapped to friendlier names).
 _COLOR_OUT_KEYS = {
     "backcolor": "backcolor",
@@ -218,15 +226,28 @@ def parse_wmenu(path, macros_path=None):
                         break
                     if t.startswith('"'):
                         break
-                    if tl in _COLOR_KEYWORDS or tl in ("name", "rect", "type", "text",
-                                                       "font", "visible", "decoration",
-                                                       "style", "ownerdraw", "action",
-                                                       "menudef", "itemdef", "cvar",
-                                                       "background", "textalign", "grow"):
+                    if tl in _COLOR_KEYWORDS or tl in (
+                        "name",
+                        "rect",
+                        "type",
+                        "text",
+                        "font",
+                        "visible",
+                        "decoration",
+                        "style",
+                        "ownerdraw",
+                        "action",
+                        "menudef",
+                        "itemdef",
+                        "cvar",
+                        "background",
+                        "textalign",
+                        "grow",
+                    ):
                         break
                     arg_tokens.append(t)
                     j += 1
-                    if len(arg_tokens) >= 6:   # colours never need more than this
+                    if len(arg_tokens) >= 6:  # colours never need more than this
                         break
                 rgba = _floats_from_tokens(arg_tokens, macros)
                 out_key = _COLOR_OUT_KEYS.get(low)
@@ -246,10 +267,14 @@ def resolve_macro_color(macro_name, macros_path=None):
     """Resolve a bare WCOLOR_* (or any object-like colour macro) to [r,g,b,a]."""
     macros = parse_macros(macros_path or DEFAULT_MACROS)
     if macro_name not in macros:
-        raise KeyError(f"macro {macro_name!r} not found in {macros_path or DEFAULT_MACROS}")
+        raise KeyError(
+            f"macro {macro_name!r} not found in {macros_path or DEFAULT_MACROS}"
+        )
     rgba = _floats_from_tokens([macro_name], macros)
     if rgba is None:
-        raise ValueError(f"macro {macro_name!r} = {macros[macro_name]!r} is not a colour")
+        raise ValueError(
+            f"macro {macro_name!r} = {macros[macro_name]!r} is not a colour"
+        )
     return rgba
 
 
@@ -278,13 +303,17 @@ def resolve_authored_color(source, macros_path=None):
         if elem_name is None:
             raise ValueError("wmenu source requires an 'element' (or pass region name)")
         if elem_name not in parsed["elements"]:
-            raise KeyError(f"element {elem_name!r} not found in {wm_path} "
-                           f"(have: {sorted(parsed['elements'])[:20]}...)")
+            raise KeyError(
+                f"element {elem_name!r} not found in {wm_path} "
+                f"(have: {sorted(parsed['elements'])[:20]}...)"
+            )
         channel = source.get("channel", "backcolor")
         rec = parsed["elements"][elem_name]
         if channel not in rec:
-            raise KeyError(f"element {elem_name!r} has no {channel!r} colour "
-                           f"(has: {[k for k in rec if k != 'kind']})")
+            raise KeyError(
+                f"element {elem_name!r} has no {channel!r} colour "
+                f"(has: {[k for k in rec if k != 'kind']})"
+            )
         return list(rec[channel])
     raise ValueError(f"unrecognised source spec: {source!r}")
 
@@ -293,10 +322,15 @@ def resolve_authored_color(source, macros_path=None):
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Extract authored colours from a .wmenu file.")
+    ap = argparse.ArgumentParser(
+        description="Extract authored colours from a .wmenu file."
+    )
     ap.add_argument("wmenu", help="path to a .wmenu file")
-    ap.add_argument("--macros", default=DEFAULT_MACROS,
-                    help=f"path to wmenumacros.h (default: {DEFAULT_MACROS})")
+    ap.add_argument(
+        "--macros",
+        default=DEFAULT_MACROS,
+        help=f"path to wmenumacros.h (default: {DEFAULT_MACROS})",
+    )
     ap.add_argument("--json", action="store_true", help="emit JSON")
     args = ap.parse_args(argv)
 
@@ -319,7 +353,9 @@ def main(argv=None) -> int:
         for name in sorted(result["elements"]):
             rec = result["elements"][name]
             cols = {k: v for k, v in rec.items() if k != "kind"}
-            print(f"  [{rec['kind']:4s}] {name:28s} {cols if cols else '(no colour keywords)'}")
+            print(
+                f"  [{rec['kind']:4s}] {name:28s} {cols if cols else '(no colour keywords)'}"
+            )
         if result["warnings"]:
             print("\n# warnings:")
             for w in result["warnings"]:

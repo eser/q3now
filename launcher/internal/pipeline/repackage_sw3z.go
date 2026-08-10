@@ -13,7 +13,7 @@ import (
 
 // SW3ZSink writes all output entries into a single SW3Z archive.
 type SW3ZSink struct {
-	DestDir    string // e.g., ~/.q3a/baseq3/
+	DestDir    string // e.g., ~/.q3a/base/
 	OutputName string // e.g., "pax01.sw3z"
 }
 

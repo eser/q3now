@@ -5,7 +5,6 @@
 // cg_view.c -- setup all the parameters (position, angle, etc)
 // for a 3D rendering
 #include "cg_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 
@@ -561,7 +560,17 @@ static int CG_CalcFov( void ) {
 	float	f;
 	int		inwater;
 
-	if ( cg.predictedPlayerState.pm_type == PM_INTERMISSION ) {
+	if ( cg.sceneFovActive ) {
+		// cinematic scene: use the evaluator's authored fov as fov_x, then let
+		// the aspect-adjust + underwater-warp + fov_y math below run normally.
+		fov_x = cg.sceneFov;
+		if ( fov_x < 1 ) {
+			fov_x = 1;
+		} else if ( fov_x > 160 ) {
+			fov_x = 160;
+		}
+		cg.fovCurrent = fov_x;
+	} else if ( cg.predictedPlayerState.pm_type == PM_INTERMISSION ) {
 		// if in intermission, use a fixed value
 		fov_x = 90;
 	} else {
@@ -797,6 +806,137 @@ static void AddEarthquakeTremble( earthquake_t *quake ) {
 
 /*
 ===============
+CG_SceneActive
+
+True while a loaded cinematic scene is driving the view. The scenePlayback
+struct carries its own `active` flag (set by WiredScenePlayback_Start, cleared
+when the evaluator reports the cutscene ended).
+===============
+*/
+static qboolean CG_SceneActive( void ) {
+	return (qboolean)( cg.scenePlayback.active != 0 );
+}
+
+
+/*
+===============
+CG_SceneView
+
+Drive cg.refdef from the cinematic-scene evaluator (running cgame-side on the
+embedded POD wiredScene_t). Samples at cg.time, writes vieworg / refdefViewAngles
+/ viewaxis, and stages the authored fov for CG_CalcFov. Pending host signals are
+drained (logged, not acted on — screen fade / chain-load are a later concern);
+only STOP ends the cutscene. When the evaluator reports the cutscene ended, the
+active gate is cleared so the normal view resumes next frame. Returns the fov
+inwater flag from CG_CalcFov, matching the normal + intermission view paths.
+===============
+*/
+static int CG_SceneView( void ) {
+	vec3_t origin, angles;
+	float  fov = 90.0f;
+	int    running;
+	vec3_t anchorOrigin;
+	float  anchorYaw;
+	vec3_t   actorOrigins[WIRED_MAX_SCENE_TARGETS];
+	int      actorValid[WIRED_MAX_SCENE_TARGETS];
+	qboolean haveActors;
+
+	/* Player anchor for a player-relative scene: the client's authoritative local
+	   origin + the yaw the player looks along (over-the-shoulder), read once per
+	   frame from the predicted state — no server round-trip. World scenes ignore
+	   it (the evaluator only uses it when def->cameraSpace == player). */
+	VectorCopy( cg.predictedPlayerState.origin, anchorOrigin );
+	anchorYaw = cg.predictedPlayerState.viewangles[ YAW ];
+
+	/* Actor bindings: a scene look-at target bound to a live entity follows that
+	   entity's current (interpolated) world origin. Fetch each bound slot's origin
+	   from cg_entities[]; unbound slots are left zero and ignored by the evaluator
+	   (it only reads a slot for which pb->actorEntity[slot] >= 0). No binding =>
+	   every target uses its spline, byte-identical.
+
+	   A bound entity contributes its origin ONLY when currentValid — i.e. it is in
+	   the current snapshot, so lerpOrigin is a live interpolated position. An actor
+	   outside the local player's PVS (not in the snapshot) has a stale/zero
+	   lerpOrigin, which would aim the camera at a frozen point or the world origin;
+	   for that frame we instead pass -1 in the fetched-actor map so the evaluator
+	   falls back to the target's authored spline. */
+	haveActors = qfalse;
+	{
+		int i;
+		for ( i = 0; i < WIRED_MAX_SCENE_TARGETS; i++ ) {
+			int e = cg.scenePlayback.actorEntity[i];
+			if ( e >= 0 && e < MAX_GENTITIES && cg_entities[e].currentValid ) {
+				VectorCopy( cg_entities[e].lerpOrigin, actorOrigins[i] );
+				actorValid[i] = 1;
+				haveActors = qtrue;
+			} else {
+				VectorClear( actorOrigins[i] );
+				actorValid[i] = 0;   /* not live this frame -> evaluator uses the spline */
+			}
+		}
+	}
+
+	running = WiredScene_EvalAnchored( &cg.scenePlayback, cg.time,
+		anchorOrigin, anchorYaw,
+		haveActors ? (const float(*)[3])actorOrigins : NULL,
+		haveActors ? actorValid : NULL,
+		origin, angles, &fov );
+
+	VectorCopy( origin, cg.refdef.vieworg );
+	angles[ROLL] = 0;
+	VectorCopy( angles, cg.refdefViewAngles );
+	AnglesToAxis( cg.refdefViewAngles, cg.refdef.viewaxis );
+
+	/* stage the authored fov so CG_CalcFov honors it instead of cg_fov/zoom */
+	cg.sceneFov       = fov;
+	cg.sceneFovActive = qtrue;
+
+	/* Force third-person for the scene so the player model draws + the view-weapon
+	   is suppressed (cg_weapons.c) — OVERRIDE the derived flag, never the cvar, so
+	   the next-frame re-derivation reverts it automatically on scene-end. */
+	if ( cg.scenePlayback.thirdPerson ) {
+		cg.renderingThirdPerson = qtrue;
+	}
+
+	/* Scene caption: ONCE per active-caption change (the evaluator re-derives
+	   captionFired every frame, so dedupe on the key), resolve the l10n key to
+	   localized text and hand it to the subtitle surface. A missing translation
+	   degrades to the raw key (WiredL10n_Get never returns blank). The subtitle
+	   surface renders on a scene-gated overlay that survives HUD-suppression, so
+	   the caption stays visible during a HUD-off cutscene (unlike the HUD-gated
+	   centerprint). */
+	if ( cg.scenePlayback.captionFired && cg.scenePlayback.captionKey[0]
+	  && strcmp( cg.scenePlayback.captionKey, cg.sceneLastCaption ) != 0 ) {
+		char captionText[256];
+		Q_strncpyz( cg.sceneLastCaption, cg.scenePlayback.captionKey, sizeof( cg.sceneLastCaption ) );
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "scene caption: %s\n", cg.sceneLastCaption );
+		trap_L10n_Get( cg.scenePlayback.captionKey, captionText, sizeof( captionText ) );
+		trap_WiredUI_PushEvent( WIRED_EVENT_SUBTITLE, captionText );
+	}
+
+	/* drain pending signals — this step only ends on STOP; fade/chain are later */
+	if ( cg.scenePlayback.signals ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_cgame), "cinematic signals: 0x%02x (fade=%.2f chain='%s')\n",
+			cg.scenePlayback.signals, cg.scenePlayback.fadeSeconds, cg.scenePlayback.chainName );
+		cg.scenePlayback.signals = WIRED_SCENE_SIGNAL_NONE;
+	}
+
+	if ( !running ) {
+		/* cutscene ended (STOP / path done): clear the gate so the normal view
+		   resumes NEXT frame. sceneFovActive stays true for THIS final
+		   camera-posed frame (CG_CalcViewValues resets it at the top each frame,
+		   so the next normal frame uses the player fov) — this avoids a one-frame
+		   fov pop where the last camera pose would render with the player fov. */
+		cg.scenePlayback.active = 0;
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "scene ended; normal view resumed\n" );
+	}
+
+	return CG_CalcFov();
+}
+
+
+/*
+===============
 CG_CalcViewValues
 
 Sets cg.refdef view values
@@ -807,6 +947,11 @@ static int CG_CalcViewValues( void ) {
 
 	memset( &cg.refdef, 0, sizeof( cg.refdef ) );
 
+	// Reset the cinematic-fov override each frame; the cinematic view re-arms it
+	// when it runs, so any frame that takes the normal/intermission path uses the
+	// player fov cleanly (no stale authored-fov leak after the camera ends).
+	cg.sceneFovActive = qfalse;
+
 	// strings for in game rendering
 	// Q_strncpyz( cg.refdef.text[0], "Park Ranger", sizeof(cg.refdef.text[0]) );
 	// Q_strncpyz( cg.refdef.text[1], "19", sizeof(cg.refdef.text[1]) );
@@ -815,20 +960,14 @@ static int CG_CalcViewValues( void ) {
 	CG_CalcVrect();
 
 	ps = &cg.predictedPlayerState;
-/*
-	if (cg.cameraMode) {
-		vec3_t origin, angles;
-		if (trap_getCameraInfo(cg.time, &origin, &angles)) {
-			VectorCopy(origin, cg.refdef.vieworg);
-			angles[ROLL] = 0;
-			VectorCopy(angles, cg.refdefViewAngles);
-			AnglesToAxis( cg.refdefViewAngles, cg.refdef.viewaxis );
-			return CG_CalcFov();
-		} else {
-			cg.cameraMode = qfalse;
-		}
+
+	// cinematic scene: a loaded scene fully overrides the normal view. The
+	// evaluator runs cgame-side (no per-frame trap); this early return replaces
+	// the bob/kick/third-person/AnglesToAxis path below, mirroring the
+	// intermission early-return template. Ends itself on STOP/path-done.
+	if ( CG_SceneActive() ) {
+		return CG_SceneView();
 	}
-*/
 	// intermission view
 	if ( ps->pm_type == PM_INTERMISSION ) {
 		VectorCopy( ps->origin, cg.refdef.vieworg );
@@ -973,6 +1112,13 @@ Generates and draws a game scene and status information at the given time.
 void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback ) {
 	int		inwater;
 
+	// M1: if the engine bumped its glconfig generation (resolution change /
+	// vid_restart), re-fetch glconfig and recompute screen scale/bias before
+	// anything this frame reads cgs.screenX* / cgs.glconfig.
+	if ( cgs.cachedGlconfigGeneration != trap_GetGlconfigGeneration() ) {
+		CG_RefreshScreenDims();
+	}
+
 #if FEAT_SCREENSHOT_TOOLS
 	cg.stopTime = atoi( CG_ConfigString( CS_STOPTIME ) );
 	if ( cg.stopTime ) {
@@ -1027,8 +1173,12 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	}
 #endif
 
-	// let the client system know what our weapon and zoom settings are
-	trap_SetUserCmdValue( cg.weaponSelect, cg.zoomSensitivity );
+	// let the client system know what our weapon and zoom settings are, plus
+	// whether the cinematic scene wants player input frozen (a client-side
+	// usercmd null-move — no server/pmove change). 1-frame latency is fine for a
+	// cutscene (the scene owns the view; soft freeze edges are invisible).
+	trap_SetUserCmdValue( cg.weaponSelect, cg.zoomSensitivity,
+		( CG_SceneActive() && cg.scenePlayback.playerFrozen ) ? 1 : 0 );
 
 	// this counter will be bumped for every valid scene we generate
 	cg.clientFrame++;
@@ -1094,6 +1244,21 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	// build cg.refdef
 	inwater = CG_CalcViewValues();
 
+	// Dev/visual-gate only: pin cg.time (entity-animation time) for byte-stable
+	// captures. 0 = off (snapshot/wall-clock-driven, default, byte-identical). When
+	// > 0, freeze cg.time HERE — AFTER snapshot processing + prediction + view
+	// computation (so the camera/teleport already reflect the real serverTime; the
+	// pin must NOT run before CG_ProcessSnapshots/CG_PredictPlayerState at :1023/:1044
+	// or it would stall snapshot selection and the teleport would never land), and
+	// BEFORE the render lists below — so every entity animation (flames, rotating
+	// items, dlight pulse, all reading cg.time in CG_AddPacketEntities) AND the
+	// renderer shader-wave time (cg.refdef.time = cg.time, below) see the frozen
+	// value. Takes SECONDS (→ ms) to mirror r_pinShaderTime; the two together make
+	// the captured lit frame byte-stable run-to-run. CVAR_CHEAT, never ship.
+	if ( r_pinFrameTime.value > 0.0f ) {
+		cg.time = (int)( r_pinFrameTime.value * 1000.0f );
+	}
+
 	// first person blend blobs, done after AnglesToAxis
 	if ( !cg.renderingThirdPerson ) {
 		CG_DamageBlendBlob();
@@ -1102,7 +1267,6 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
 	// build the render lists
 	if ( !cg.hyperspace ) {
 		CG_AddPacketEntities();			// adter calcViewValues, so predicted player state is correct
-		CG_AddMarks();
 		CG_AddParticles ();
 		CG_AddLocalEntities();
 		CG_AddRailTrails();

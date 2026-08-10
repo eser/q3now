@@ -5,7 +5,7 @@
 ===========================================================================
 cl_wired_theme.h — Wired UI Theme: semantic state to color mapping
 
-Phase 4: Maps state labels ("critical", "warning", "normal") to RGBA colors.
+Maps state labels ("critical", "warning", "normal") to RGBA colors.
 cgame writes state labels, UI resolves them to colors via the active theme.
 ===========================================================================
 */

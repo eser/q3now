@@ -21,7 +21,9 @@ Cvar surface (all log_* prefix):
                                        overwrite_synced
                                        append_buffered
                                        append_synced
-  log_file_severity  string, ARCHIVE      — minimum severity (default INFO)
+  log_file_severity  string, ARCHIVE      — minimum severity; empty default
+                                       (SEV_TRACE) passes everything —
+                                       per-channel `log` cmd is the filter
   log_file_path      ROM                  — display-only; fs_homepath/qconsole.jsonl
   log_file_failures  ROM                  — write-failure counter
 
@@ -32,6 +34,16 @@ at runtime has no effect until engine restart.
 #include "q_shared.h"
 #include "qcommon.h"
 #include "log.h"
+
+// FileSink_Emit's JSON header buffer. Holds
+// `{"ts":"<iso>","sev":"<sev>","cat":"<channel>","msg":"` — 34 bytes of
+// fixed decoration + a 29-byte ISO timestamp + the severity name (<=5) +
+// the channel name. A registered channel name can be up to
+// LOG_CHANNEL_NAME_MAX-1 chars, so the buffer is sized from it rather than
+// guessed: 34 + 31 + 8 + name + NUL always fits in (96 + LOG_CHANNEL_NAME_MAX).
+// (Was a literal 128 — too small: a 63-char channel name produced a 130-byte
+// header, overflowing Com_sprintf, which DebugBreaks in debug builds.)
+#define LOG_JSON_HEADER_SIZE ( 96 + LOG_CHANNEL_NAME_MAX )
 
 // -------------------------------------------------------------------------
 // State
@@ -164,7 +176,7 @@ int JsonEscapeBody( const char *body, int body_len,
 static void FileSink_Emit( const log_record_t *rec, void *ctx )
 {
     file_sink_ctx_t *c = (file_sink_ctx_t *)ctx;
-    char    header[80];
+    char    header[LOG_JSON_HEADER_SIZE];
     char    msg[LOG_FORMAT_BUFFER_SIZE + 128];
     char    footer[80];
     int     header_len, msg_len, footer_len;

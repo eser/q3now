@@ -33,11 +33,11 @@ void        Ral_WaitFence    ( ralFence_t *f, uint64_t timeoutNs );  // RAL_TIME
 void        Ral_ResetFence   ( ralFence_t *f );
 qboolean    Ral_FenceSignaled( ralFence_t *f );
 
-// Phase 7.4c-submit-BC-C-min — adopt a renderer-owned VkFence as a
+// adopt a renderer-owned VkFence as a
 // ralFence_t without taking ownership. Caller retains responsibility for
 // the underlying VkFence lifecycle. The wrapper carries ownsFence=qfalse;
 // Ral_DestroyFence on an adopted wrapper frees the wrapper struct but does
-// NOT defer-destroy the underlying VkFence. Mirrors A4's Ral_AdoptTexture
+// NOT defer-destroy the underlying VkFence. Mirrors the Ral_AdoptTexture
 // pattern. `externalFence` is the platform-native handle (VkFence on
 // Vulkan) cast to void * — the public RAL header stays platform-neutral
 // (no vulkan.h include needed). Consumers cast back to VkFence on the
@@ -55,7 +55,7 @@ void *Ral_GetFenceHandle( const ralFence_t *fen );
 ralSemaphore_t *Ral_CreateSemaphore ( ralBackend_t *b, ralSemaphoreType_t type );
 void            Ral_DestroySemaphore( ralSemaphore_t *s );
 
-// Phase 7.4c-submit-BC-C-min — adopt a renderer-owned VkSemaphore as a
+// adopt a renderer-owned VkSemaphore as a
 // ralSemaphore_t without taking ownership. Caller retains responsibility
 // for the underlying VkSemaphore lifecycle. The wrapper carries
 // ownsSemaphore=qfalse; Ral_DestroySemaphore on an adopted wrapper frees

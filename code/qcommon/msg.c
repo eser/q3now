@@ -3,7 +3,6 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "q_shared.h"
 #include "qcommon.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_network, "network" );
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
@@ -479,7 +478,7 @@ int MSG_HashKey(const char *string, int maxlen) {
 	return hash;
 }
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 extern cvar_t *cl_shownet;
 #define	LOG(x) if( cl_shownet && cl_shownet->integer == 4 ) { Com_Log( SEV_INFO, LOG_CH(ch_network), "%s ", x ); };
 #else
@@ -655,7 +654,7 @@ static const netField_t entityStateFields[] =
 { NETF(angles2[1]), 0 },
 { NETF(eType), 8 },
 { NETF(torsoAnim), 8 },
-{ NETF(eventParm), 8 },
+{ NETF(eventParm), 24 },
 { NETF(legsAnim), 8 },
 { NETF(groundEntityNum), GENTITYNUM_BITS },
 { NETF(pos.trType), 8 },
@@ -693,7 +692,10 @@ static const netField_t entityStateFields[] =
 { NETF(angles2[0]), 0 },
 { NETF(angles2[2]), 0 },
 { NETF(constantLight), 32 },
-{ NETF(frame), 16 }
+{ NETF(frame), 16 },
+{ NETF(damageDir[0]), 0 },
+{ NETF(damageDir[1]), 0 },
+{ NETF(damageDir[2]), 0 }
 };
 
 
@@ -837,7 +839,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 	if ( MSG_ReadBits( msg, 1 ) == 1 ) {
 		memset( to, 0, sizeof( *to ) );
 		to->number = MAX_GENTITIES - 1;
-#ifndef DEDICATED
+#ifndef HEADLESS
 		if ( cl_shownet && ( cl_shownet->integer >= 2 || cl_shownet->integer == -1 ) ) {
 			Com_Log( SEV_INFO, LOG_CH(ch_network), "%3i: #%-3i remove\n", msg->readcount, number );
 		}
@@ -872,7 +874,7 @@ void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *
 	to->number = number;
 
 	int print;
-#ifndef DEDICATED
+#ifndef HEADLESS
 	// shownet 2/3 will interleave with other printed info, -1 will
 	// just print the delta records
 	if ( cl_shownet && ( cl_shownet->integer >= 2 || cl_shownet->integer == -1 ) ) {
@@ -1014,7 +1016,8 @@ static const netField_t playerStateFields[] =
 { PSF(burstRoundsRemaining), 4 },
 { PSF(chargeStartTime), 32 },
 { PSF(cooldownEndTime), 32 },
-{ PSF(doubleBlastState), 4 }
+{ PSF(doubleBlastState), 4 },
+{ PSF(fireRampStartTime), 32 }	// RS-1: synced recoil/spread ramp anchor (serverTime; 32 bits like chargeStartTime)
 };
 
 /*
@@ -1180,7 +1183,7 @@ void MSG_ReadDeltaPlayerstate( msg_t *msg, const playerState_t *from, playerStat
 	}
 
 	int print;
-#ifndef DEDICATED
+#ifndef HEADLESS
 	// shownet 2/3 will interleave with other printed info, -2 will
 	// just print the delta records
 	if ( cl_shownet && ( cl_shownet->integer >= 2 || cl_shownet->integer == -2 ) ) {

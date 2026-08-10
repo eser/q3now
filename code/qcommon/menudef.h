@@ -28,14 +28,21 @@ typedef enum {
 #define ITEM_TYPE_COMBO 5                 // drop down list
 #define ITEM_TYPE_LISTBOX 6               // scrollable list
 #define ITEM_TYPE_MODEL 7                 // model
-#define ITEM_TYPE_OWNERDRAW 8             // owner draw, name specs what it is
+/* ITEM_TYPE_OWNERDRAW retired (value 8 unused, never
+ * authored in shipping content). Dispatch now keys off the unified
+ * custom-draw registry — see wiredItemDef_t.customDrawName + the
+ * `od:` sigil written by the parser's `ownerdraw` handler. */
 #define ITEM_TYPE_NUMERICFIELD 9          // editable text, associated with a cvar
 #define ITEM_TYPE_SLIDER 10               // mouse speed, volume, etc.
 #define ITEM_TYPE_YESNO 11                // yes no cvar setting
 #define ITEM_TYPE_MULTI 12                // multiple list setting, enumerated
 #define ITEM_TYPE_BIND 13		              // multiple list setting, enumerated
+#define ITEM_TYPE_SPINNER 14              // Wired UI: numeric stepper (cvar + min/max/step, up/down buttons)
 #define ITEM_TYPE_SCORELIST 20            // Wired UI: rich scoreboard list with per-cell coloring
 #define ITEM_TYPE_DUELBOARD 21            // Wired UI: duel scoreboard with two fighter panels
+#define ITEM_TYPE_VIEWPORT  22            // Wired UI: world-viewport pull-model element (V-05 2026-05-25)
+#define ITEM_TYPE_SCORELIST_WIDGET 23     // Wired UI: declarative scoreboard widget (V-13b 2026-05-25)
+#define ITEM_TYPE_CONSOLE_VIEW     24     // Wired UI: console layer element (V-20 2026-05-25)
 
 #define ITEM_ALIGN_LEFT 0                 // left alignment
 #define ITEM_ALIGN_CENTER 1               // center alignment

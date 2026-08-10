@@ -4,6 +4,11 @@
 //
 // cg_main.c -- initialization and primary entry point for cgame
 #include "cg_local.h"
+#include "wired/wired_build_stamp.h"  // WIRED_BUILD_ID / WIRED_BUILD_DATE (this VM's own stamp)
+
+#if defined(WASM_MODULE)
+LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );   // for the VM-IPC ABI handshake log line
+#endif
 
 /* TA UI display context removed -- Wired UI handles menus/HUD */
 
@@ -11,6 +16,7 @@ int forceSameCharacterModificationCount = -1;
 
 void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum );
 void CG_Shutdown( void );
+void CG_RenderViewport( int viewportKey );
 
 
 /*
@@ -43,10 +49,20 @@ Q_EXPORT intptr_t vmMain( int command, int arg0, int arg1, int arg2, int arg3, i
 		CG_KeyEvent(arg0, arg1);
 		return 0;
 	case CG_MOUSE_EVENT:
-		CG_MouseEvent(arg0, arg1);
+		{
+			// dx/dy arrive bit-cast to int (the engine's float-over-VM
+			// convention); decode back to float — sub-pixel mouse precision.
+			floatint_t dx, dy;
+			dx.i = arg0;
+			dy.i = arg1;
+			CG_MouseEvent( dx.f, dy.f );
+		}
 		return 0;
 	case CG_EVENT_HANDLING:
 		CG_EventHandling(arg0);
+		return 0;
+	case CG_RENDER_VIEWPORT:
+		CG_RenderViewport( arg0 );   /* arg0 = wuiViewportKey_t */
 		return 0;
 	default:
 		Com_Terminate( TERM_CLIENT_DROP, "vmMain: unknown command %i", command );
@@ -65,14 +81,12 @@ botDirectiveDisplay_t	cg_botDirectives[MAX_CLIENTS];
 
 
 vmCvar_t	cg_centertime;
-vmCvar_t	cg_cpuEffects;
 vmCvar_t	cg_runpitch;
 vmCvar_t	cg_runroll;
 vmCvar_t	cg_bobup;
 vmCvar_t	cg_bobpitch;
 vmCvar_t	cg_bobroll;
 vmCvar_t	cg_swingSpeed;
-vmCvar_t	cg_shadows;
 vmCvar_t	cg_gibs;
 #if FEAT_MUSIC_PLAYLIST
 vmCvar_t	cg_music;
@@ -98,12 +112,12 @@ vmCvar_t	cg_nopredict;
 vmCvar_t	cg_noPlayerAnims;
 vmCvar_t	cg_showmiss;
 vmCvar_t	cg_footsteps;
-vmCvar_t	cg_addMarks;
 vmCvar_t	cg_drawGun;
 vmCvar_t	cg_gun_frame;
 vmCvar_t	cg_gunX;
 vmCvar_t	cg_gunY;
 vmCvar_t	cg_gunZ;
+vmCvar_t	cl_splitScreen;
 vmCvar_t	cg_tracerChance;
 vmCvar_t	cg_tracerWidth;
 vmCvar_t	cg_tracerLength;
@@ -169,6 +183,7 @@ vmCvar_t	cg_envLights;
 vmCvar_t	cg_lensFlare;
 vmCvar_t	cg_missileFlare;
 vmCvar_t	cg_powerupFlares;
+vmCvar_t	cg_halo;
 #endif
 #if FEAT_SPECTATOR_OUTLINES
 vmCvar_t	cg_specOutlines;
@@ -180,6 +195,7 @@ vmCvar_t	cg_cameraOrbitDelay;
 vmCvar_t	cg_timescaleFadeEnd;
 vmCvar_t	cg_timescaleFadeSpeed;
 vmCvar_t	cg_timescale;
+vmCvar_t	r_pinFrameTime;
 vmCvar_t	cg_noTaunt;
 vmCvar_t	cg_noProjectileTrail;
 
@@ -224,7 +240,6 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_drawGun, "cg_drawGun", "1", CVAR_ARCHIVE },
 	{ &cg_zoomFov, "cg_zoomfov", "22.5", CVAR_ARCHIVE },
 	{ &cg_fov, "cg_fov", "90", CVAR_ARCHIVE },
-	{ &cg_shadows, "cg_shadows", "1", CVAR_ARCHIVE  },
 	{ &cg_gibs, "cg_gibs", "1", CVAR_ARCHIVE  },
 #if FEAT_MUSIC_PLAYLIST
 	{ &cg_music, "cg_music", "0", CVAR_ARCHIVE },
@@ -241,16 +256,15 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_crosshairHealth, "cg_crosshairHealth", "1", CVAR_ARCHIVE },
 	{ &cg_crosshairColor, "cg_crosshairColor", "white", CVAR_ARCHIVE },
 	{ &cg_simpleItems, "cg_simpleItems", "0", CVAR_ARCHIVE },
-	{ &cg_addMarks, "cg_marks", "1", CVAR_ARCHIVE },
 	{ &cg_lagometer, "cg_lagometer", "1", CVAR_ARCHIVE },
 	{ &cg_gunX, "cg_gunX", "0", CVAR_CHEAT },
 	{ &cg_gunY, "cg_gunY", "0", CVAR_CHEAT },
 	{ &cg_gunZ, "cg_gunZ", "0", CVAR_CHEAT },
+	// Couples the main_scene + camera viewports in world_main.wui: 0 =
+	// full-screen main view (camera itemDef hidden, provider dormant);
+	// 1 = 50/50 split (left main / right camera). Cheat-gated.
+	{ &cl_splitScreen, "cl_splitScreen", "0", CVAR_CHEAT },
 	{ &cg_centertime, "cg_centertime", "3", CVAR_CHEAT },
-	// A/B compare: 1 = legacy CPU poly path (trap_R_AddPolyToScene)
-	// for rail debris+sparks; 0 = GPU particle path (trap_R_EmitParticles).
-	// Helix is unaffected (always CPU poly — different geometry).
-	{ &cg_cpuEffects, "cg_cpuEffects", "0", 0 },
 	{ &cg_runpitch, "cg_runpitch", "0.002", CVAR_ARCHIVE},
 	{ &cg_runroll, "cg_runroll", "0.005", CVAR_ARCHIVE },
 	{ &cg_bobup , "cg_bobup", "0.005", CVAR_CHEAT },
@@ -326,6 +340,12 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_timescaleFadeEnd, "cg_timescaleFadeEnd", "1", 0},
 	{ &cg_timescaleFadeSpeed, "cg_timescaleFadeSpeed", "0", 0},
 	{ &cg_timescale, "timescale", "1", 0},
+	// Dev/visual-gate only: pin cg.time (entity-animation time — flames, rotating
+	// items, dlight pulse) to a fixed millisecond value for deterministic captures.
+	// 0 = off (default, wall-clock/snapshot-driven gameplay, byte-identical). The
+	// sibling of r_pinShaderTime (which pins the renderer shader-wave time); both
+	// set = a captured lit frame is byte-stable run-to-run. CVAR_CHEAT, never ship.
+	{ &r_pinFrameTime, "r_pinFrameTime", "0", CVAR_CHEAT },
 #if FEAT_DAMAGE_PLUMS
 	{ &cg_scorePlums, "cg_scorePlums", "3", CVAR_USERINFO | CVAR_ARCHIVE},
 #else
@@ -350,6 +370,7 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_lensFlare, "cg_lensFlare", "1", CVAR_ARCHIVE},
 	{ &cg_missileFlare, "cg_missileFlare", "1", CVAR_ARCHIVE},
 	{ &cg_powerupFlares, "cg_powerupFlares", "1", CVAR_ARCHIVE},
+	{ &cg_halo, "cg_halo", "0", CVAR_ARCHIVE},
 #endif
 #if FEAT_SPECTATOR_OUTLINES
 	{ &cg_specOutlines, "cg_specOutlines", "1", CVAR_ARCHIVE},
@@ -404,6 +425,14 @@ void CG_RegisterCvars( void ) {
 
 	trap_Cvar_Register(NULL, "char", DEFAULT_MODEL, CVAR_USERINFO | CVAR_ARCHIVE );
 	trap_Cvar_Register(NULL, "skin", "default", CVAR_USERINFO | CVAR_ARCHIVE );
+
+	// Per-build stamp (CVAR_ROM) — this cgame VM's OWN embedded id/date, read by
+	// the engine's `sysinfo` for the cgame row. Registered with a runtime value
+	// (not a static cvarTable entry, whose default string is fixed at compile),
+	// mirroring the char/skin registrations above. Zero-ABI cvar route (same as
+	// gamedate); a stale cgame VM self-reports an older stamp than the engine.
+	trap_Cvar_Register( NULL, "cg_buildId",   WIRED_BUILD_ID_STR, CVAR_ROM );
+	trap_Cvar_Register( NULL, "cg_buildDate", WIRED_BUILD_DATE,   CVAR_ROM );
 }
 
 /*
@@ -456,23 +485,41 @@ void NORETURN QDECL Com_Terminate( terminationReason_t reason, const char *error
 	trap_Terminate( reason, text );
 }
 
+// VM-local channel-name table. LOG_CH() interns each declared channel name
+// here (via Log_GetChannel) and caches the returned index; Com_Log_Impl maps
+// the index back to the name and forwards it across the CG_LOG bridge so the
+// engine resolves it to the real channel (cgame, cgame.player, ...).
+#define VM_LOG_MAX_CHANNELS 64
+static const char	*vm_logChannels[VM_LOG_MAX_CHANNELS];
+static int		vm_logChannelCount;
+
+int Log_GetChannel( const char *name ) {
+	int		i;
+
+	for ( i = 0; i < vm_logChannelCount; i++ ) {
+		if ( !strcmp( vm_logChannels[i], name ) ) {
+			return i;
+		}
+	}
+	if ( vm_logChannelCount >= VM_LOG_MAX_CHANNELS ) {
+		return 0;
+	}
+	vm_logChannels[vm_logChannelCount] = name;
+	return vm_logChannelCount++;
+}
+
 void QDECL Com_Log_Impl( log_severity_t severity, int channel, const char *msg, ... ) {
 	va_list		argptr;
 	char		text[MAX_STRING_CHARS];
+	const char	*channelName;
 
-	(void)channel;  // VM-side routes everything through trap_Log → "cgame"
+	channelName = ( channel >= 0 && channel < vm_logChannelCount )
+		? vm_logChannels[channel] : "";
 	va_start( argptr, msg );
 	vsnprintf( text, sizeof(text), msg, argptr );
 	va_end( argptr );
 
-	trap_Log( severity, text );
-}
-
-// Stub for the LOG_CH expansion in shared headers compiled into the native
-// cgame DLL. The VM bridge ignores the channel id, so 0 is always fine.
-int Log_GetChannel( const char *name ) {
-	(void)name;
-	return 0;
+	trap_Log( severity, channelName, text );
 }
 
 /*
@@ -568,7 +615,7 @@ static void CG_RegisterSounds( void ) {
 #if FEAT_EARTHQUAKE_SYSTEM
 	cgs.media.earthquakeSound = trap_S_RegisterSound( "sound/world/earthquake.wav", qfalse );
 #endif
-	// Phase 6.5.3: water-surface crossing FX (Q1-map gated at use sites). Prefer
+	// water-surface crossing FX (Q1-map gated at use sites). Prefer
 	// Quake's misc/h2ohit1.wav; fall back to Q3's player/watr_in.wav; 0 (silent
 	// splash, no crash) if neither asset is present.
 	cgs.media.waterSplashSound = trap_S_RegisterSound( "sound/misc/h2ohit1.wav", qfalse );
@@ -773,6 +820,10 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.waterBubbleShader = trap_R_RegisterShader( "waterBubble" );
 
 	cgs.media.tracerShader = trap_R_RegisterShader( "gfx/misc/tracer" );
+	// Same tracer art registered as a primitive shader so CG_Tracer can emit it
+	// through the beam pool (gfx/misc/tracer is `blendFunc GL_ONE GL_ONE` additive —
+	// the single blend the beam pipeline renders, so the look is preserved).
+	cgs.media.tracerShaderPrim = trap_R_RegisterPrimitiveShader( "gfx/misc/tracer" );
 	cgs.media.selectShader = trap_R_RegisterShader( "gfx/2d/select" );
 
 	cgs.media.crosshairMeleeShader = trap_R_RegisterShader( "gfx/2d/crosshairMelee" );
@@ -1016,15 +1067,18 @@ static void CG_RegisterGraphics( void ) {
 	cgs.media.lightningArcShaderPrim = trap_R_RegisterPrimitiveShader( "lightningArc" );
 	cgs.media.sfx_lightningArcLoop = trap_S_RegisterSound( "sound/weapons/lightning/lg_arc_loop.opus", qfalse );
 
-	// Phase 5T: PTRAIL_PUSH visual assets — beam shader + particle
+	// PTRAIL_PUSH visual assets — beam shader + particle
 	// class. Registered here alongside the other primitive shaders;
 	// CG_RegisterPlayerTrailDefs (called immediately below) wires
 	// these handles into the generic def table that
 	// CG_AddPlayerTrails consumes.
 	cgs.media.pushTrailShader = trap_R_RegisterPrimitiveShader( "pushTrail" );
 	CG_RegisterPushParticleClasses();
+	CG_RegisterExplosionParticleClasses();
+	CG_RegisterRocketTrailParticleClass();	// MIG-trail-1: rocket smoke GPU-ring class
+	CG_RegisterGibTrailParticleClass();	// MIG-trail-2: gib blood-trail GPU-ring class
 
-	// Phase 5T: populate per-(trail type) visual / behavioural
+	// populate per-(trail type) visual / behavioural
 	// parameters. Must run after the cgs.media.* shader and
 	// particle-class handles above are bound — defs hold
 	// pointer-to-handle, so ordering matters only for completeness
@@ -1151,56 +1205,15 @@ void CG_StartMusic( void ) {
 
 /*
 =================
-CG_Init
+CG_RefreshScreenDims
 
-Called after every level change or subsystem restart
-Will perform callbacks to make the loading info screen update.
+Re-fetches glconfig from the engine and recomputes the virtual-screen
+scale/bias factors (legacy 640x480 space and normalized 0-1 space).
+Called once from CG_Init, then again from CG_DrawActiveFrame whenever the
+engine's glconfig generation counter changes (resolution change / vid_restart).
 =================
 */
-void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
-	const char	*s;
-
-	// Publish per-game identity to engine cvars. The wired engine reads
-	// cl_gamename for master-server queries and never includes bg_public.h.
-	trap_Cvar_Set( "cl_gamename", GAMENAME_FOR_MASTER );
-
-	// clear everything
-	memset( &cgs, 0, sizeof( cgs ) );
-	memset( &cg, 0, sizeof( cg ) );
-	memset( cg_entities, 0, sizeof(cg_entities) );
-	memset( cg_weapons, 0, sizeof(cg_weapons) );
-	memset( cg_items, 0, sizeof(cg_items) );
-
-	cg.clientNum = clientNum;
-	cg.lastArcTarget = -1;
-
-	cgs.processedSnapshotNum = serverMessageNum;
-	cgs.serverCommandSequence = serverCommandSequence;
-
-	// Phase 6.5.3: detect a Quake-1 BSP (com_mapBspVersion == 29 — same
-	// signal the game module uses to gate Q1_LinkDoors). Gates the
-	// Q1-fidelity water-surface FX in cg_weapons.c / cg_effects.c.
-	{
-		char bspVer[16];
-		trap_Cvar_VariableStringBuffer( "com_mapBspVersion", bspVer, sizeof( bspVer ) );
-		cgs.q1Map = ( atoi( bspVer ) == 29 );
-	}
-
-	// load a few needed things before we do any screen updates
-	cgs.media.whiteShader		= trap_R_RegisterShader( "*white" );
-
-	CG_RegisterCvars();
-
-	CG_InitConsoleCommands();
-
-
-	cg.weaponSelect = WP_MACHINEGUN;
-
-	cgs.redflag = cgs.blueflag = -1; // For compatibily, default to unset for
-	cgs.flagStatus = -1;
-	// old servers
-
-	// get the rendering configuration from the client system
+void CG_RefreshScreenDims( void ) {
 	trap_GetGlconfig( &cgs.glconfig );
 	{
 		const float vw = 640.0f;
@@ -1233,6 +1246,214 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 		cgs.normXBias  = cgs.screenXBias / rw;
 		cgs.normYBias  = cgs.screenYBias / rh;
 	}
+
+	cgs.cachedGlconfigGeneration = trap_GetGlconfigGeneration();
+}
+
+/*
+=================
+CG_Init
+
+Called after every level change or subsystem restart
+Will perform callbacks to make the loading info screen update.
+=================
+*/
+/* The cgame-owned in-game viewport render. The engine's
+ * WUI_LAYER_WORLD_VIEWPORT walk reaches the world_main.wui viewport itemDef
+ * (id "main_scene"); that itemDef resolves to the cgame's VM-routed provider,
+ * and the engine enters here via VM_Call(cgvm, CG_RENDER_VIEWPORT, vm_key)
+ * (engine helper CL_RenderCGameViewport). The engine MUST route through the
+ * VM_Call ABI — a raw fn-ptr deref of VM-space code is invalid, which was the
+ * black-screen defect (the call "returned cleanly" but never reached this
+ * body, so world + HUD both went black).
+ *
+ * Pure-pull. This is the SOLE world-render entry. It pulls
+ * the per-frame scene context (serverTime / stereo / demoPlayback) via
+ * trap_GetSceneFrameContext (CG_GET_SCENE_FRAME_CONTEXT, slot 224 — Approach
+ * B, ratified) rather than receiving it as args. CG_DrawActiveFrame derives
+ * its viewport from the renderer/glconfig (the main scene fills the full
+ * swapchain — world_main.wui's viewport itemDef is full-rect), so the key
+ * dispatch below does not yet clip to a sub-rect; a future minimap/mirror
+ * viewport key would. */
+void CG_RenderViewport( int viewportKey )
+{
+	wuiSceneFrameCtx_t fc;
+
+	trap_GetSceneFrameContext( &fc );
+
+	switch ( viewportKey ) {
+	case WUI_VIEWPORT_KEY_MAIN_SCENE:
+		CG_DrawActiveFrame( fc.serverTime, (stereoFrame_t) fc.stereo,
+		                    (qboolean) fc.demoPlayback );
+		break;
+	case WUI_VIEWPORT_KEY_CAMERA:
+		CG_RenderCameraView();
+		break;
+	default:
+		break;
+	}
+}
+
+
+/*
+=================
+CG_RenderCameraView
+
+Render a second view of the same world from a chase camera that orbits behind
+and above the local player and looks at them. Builds its own refdef from the
+current player origin (a valid in-world position, so its PVS cluster is real)
+and issues a world scene; the engine has already published this viewport's
+on-screen sub-rect, so the scene clips into the camera panel. The main view's
+cg.refdef is rebuilt by its own viewport render, so we may use a local refdef
+here without disturbing it.
+=================
+*/
+void CG_RenderCameraView( void ) {
+	refdef_t	rd;
+	vec3_t		target, camPos, dir, angles;
+	float		fov_x, fov_y, x;
+
+	// Needs a valid snapshot to have a real player position (hence a real PVS
+	// cluster). Before the first snapshot there is nothing to observe.
+	if ( !cg.snap ) {
+		return;
+	}
+
+	memset( &rd, 0, sizeof( rd ) );
+
+	// Full-window refdef; the engine clips it to the camera viewport's sub-rect.
+	rd.width  = cgs.glconfig.vidWidth  & ~1;
+	rd.height = cgs.glconfig.vidHeight & ~1;
+	rd.x = ( cgs.glconfig.vidWidth  - rd.width ) / 2;
+	rd.y = ( cgs.glconfig.vidHeight - rd.height ) / 2;
+
+	// Look-at target = the local player; camera sits up and behind, angled down.
+	VectorCopy( cg.predictedPlayerState.origin, target );
+	target[2] += DEFAULT_VIEWHEIGHT;
+
+	VectorCopy( target, camPos );
+	camPos[2] += 96.0f;          // above
+	{
+		// Pull back along the player's facing yaw so the player is in frame.
+		float yaw = cg.predictedPlayerState.viewangles[YAW];
+		camPos[0] -= cos( DEG2RAD( yaw ) ) * 160.0f;
+		camPos[1] -= sin( DEG2RAD( yaw ) ) * 160.0f;
+	}
+
+	VectorSubtract( target, camPos, dir );
+	vectoangles( dir, angles );
+
+	VectorCopy( camPos, rd.vieworg );
+	AnglesToAxis( angles, rd.viewaxis );
+
+	// Field of view: cg_fov for x, derive y from the refdef aspect (the engine
+	// re-derives fov_y when it clips the rect, but a sane value is needed here).
+	fov_x = cg_fov.value;
+	if ( fov_x < 1 )   fov_x = 1;
+	if ( fov_x > 160 ) fov_x = 160;
+	x = rd.width / tan( fov_x / 360.0 * M_PI );
+	fov_y = atan2( rd.height, x ) * 360.0 / M_PI;
+	rd.fov_x = fov_x;
+	rd.fov_y = fov_y;
+
+	rd.time = cg.time;
+	memcpy( rd.areamask, cg.snap->areamask, sizeof( rd.areamask ) );
+
+	// the main-scene viewport (CG_DrawActiveFrame) has already issued its
+	// trap_R_RenderScene by the time the compositor dispatches this camera
+	// viewport, and RE_RenderScene advances the renderer's first-scene-entity /
+	// dlight / poly cursors to the current count at completion. The renderer's
+	// scene arrays therefore look empty to a second RenderScene. Mirror the
+	// scene-building block from CG_DrawActiveFrame to re-populate the scene
+	// (entities, effects, polys, lights) before rendering the camera pass, so it
+	// shows the same world geometry AND entities the main view does. cg.time and
+	// all the per-frame state are unchanged since the main pass (same engine
+	// frame), so re-running these Add* calls is safe and idempotent — they age
+	// nothing further and re-emit the same refEntities. The first-person view
+	// weapon is intentionally NOT re-added: it is anchored to the main view's
+	// cg.refdef and would float, detached, in this third-person chase view.
+	trap_R_ClearScene();
+	if ( !cg.hyperspace ) {
+		CG_AddPacketEntities();
+		CG_AddParticles();
+		CG_AddLocalEntities();
+		CG_AddRailTrails();
+		CG_AddPlayerTrails();
+#if FEAT_ATMOSPHERIC
+		CG_AddAtmosphericEffects();
+#endif
+#if FEAT_LENS_FLARES
+		CG_AddLensFlares();
+#endif
+#if FEAT_ENV_LIGHTS
+		CG_AddEnvironmentLights();
+#endif
+	}
+
+	trap_R_RenderScene( &rd );
+}
+
+void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
+	const char	*s;
+
+	// Publish per-game identity to engine cvars. The wired engine reads
+	// cl_gamename for master-server queries and never includes bg_public.h.
+	trap_Cvar_Set( "cl_gamename", GAMENAME_FOR_MASTER );
+
+#if defined(WASM_MODULE)
+	// Typed/versioned VM-IPC ABI handshake (decision 2 = B, exact-match): query the
+	// engine's cgame ABI version over the reserved syscall and assert it equals the
+	// version this module was built against. A mismatch is a hard error.
+	{
+		int engineAbi = trap_VM_ABI_Query();
+		if ( engineAbi != CGAME_IMPORT_API_VERSION ) {
+			trap_Error( va( "VM ABI mismatch: module built for %d, engine %d",
+			                CGAME_IMPORT_API_VERSION, engineAbi ) );
+		}
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "VM ABI handshake ok (v%d)\n", engineAbi );
+	}
+#endif
+
+	// clear everything
+	memset( &cgs, 0, sizeof( cgs ) );
+	memset( &cg, 0, sizeof( cg ) );
+	memset( cg_entities, 0, sizeof(cg_entities) );
+	memset( cg_weapons, 0, sizeof(cg_weapons) );
+	memset( cg_items, 0, sizeof(cg_items) );
+
+	cg.clientNum = clientNum;
+	cg.lastArcTarget = -1;
+
+	cgs.processedSnapshotNum = serverMessageNum;
+	cgs.serverCommandSequence = serverCommandSequence;
+
+	// detect a Quake-1 BSP (com_mapBspVersion == 29 — same
+	// signal the game module uses to gate Q1_LinkDoors). Gates the
+	// Q1-fidelity water-surface FX in cg_weapons.c / cg_effects.c.
+	{
+		char bspVer[16];
+		trap_Cvar_VariableStringBuffer( "com_mapBspVersion", bspVer, sizeof( bspVer ) );
+		cgs.q1Map = ( atoi( bspVer ) == 29 );
+	}
+
+	// load a few needed things before we do any screen updates
+	cgs.media.whiteShader		= trap_R_RegisterShader( "*white" );
+
+	CG_RegisterCvars();
+
+	CG_InitConsoleCommands();
+
+
+	cg.weaponSelect = WP_MACHINEGUN;
+
+	cgs.redflag = cgs.blueflag = -1; // For compatibily, default to unset for
+	cgs.flagStatus = -1;
+	// old servers
+
+	// get the rendering configuration from the client system and derive
+	// the virtual-screen scale/bias factors (M1: extracted into a helper so
+	// CG_DrawActiveFrame can re-run it after a resolution change)
+	CG_RefreshScreenDims();
 
 	// get the gamestate from the client system
 	trap_GetGameState( &cgs.gameState );
@@ -1275,8 +1496,6 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	CG_InitLocalEntities();
 	CG_ClearRailTrails();
 
-	CG_InitMarkPolys();
-
 	// Font loading is handled client-side by Text_Init() in WiredUI_Init().
 	// cgame uses trap_R_DrawTextNorm() -- no local font init needed.
 
@@ -1297,6 +1516,69 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 	CG_ShaderStateChanged();
 
 	trap_S_ClearLoopingSounds( qtrue );
+
+	/* Register the cgame's "main_scene" viewport
+	 * provider with the WiredUI compositor. The .wui WUI_LAYER_WORLD_
+	 * VIEWPORT panel (modfiles/ui/world_main.wui) carries a `type
+	 * viewport id "main_scene"` itemDef; the compositor's walk dispatches
+	 * for that itemDef.
+	 *
+	 * WN-BLACKFIX: this provider is VM-routed (is_vm_routed=qtrue,
+	 * render=NULL). The cgame must NOT hand the engine a raw cgame fn-ptr —
+	 * dereferencing VM-space code from the engine is invalid and silently
+	 * never reaches the cgame body (the black-screen defect). Instead the
+	 * engine resolves this provider, sees is_vm_routed, and enters the cgame
+	 * via VM_Call(cgvm, CG_RENDER_VIEWPORT, vm_key) — the proper VM ABI. The
+	 * cgame's CG_RenderViewport handler then pulls per-frame context via
+	 * trap_GetSceneFrameContext (slot 224) and issues CG_DrawActiveFrame for
+	 * WUI_VIEWPORT_KEY_MAIN_SCENE. The engine-side direct CL_CGameRendering
+	 * call (cl_wired_clay.c) is retired. */
+	{
+		static const wuiViewportProvider_t cg_main_scene_provider = {
+			.render       = NULL,            /* VM-routed: engine uses VM_Call, not this */
+			.lifetime     = WUI_VIEWPORT_LIFETIME_LEVEL,
+			.input_mode   = WUI_VIEWPORT_INPUT_MODAL_CGAME,
+			.userdata     = NULL,
+			.is_vm_routed = qtrue,
+			.vm_key       = WUI_VIEWPORT_KEY_MAIN_SCENE,
+		};
+		/* The main view appears as two cvar-gated itemDefs in world_main.wui —
+		 * a full-screen one and a half-width split one — under distinct ids.
+		 * Both bind to this one provider (the registry is id-keyed; many ids may
+		 * point at one provider), so whichever itemDef is visible for the current
+		 * cl_splitScreen value renders the main scene into its rect. The provider
+		 * fields are passed as scalars (not the struct) so the struct never
+		 * crosses the VM boundary, where wasm32/x64 pointer widths differ. */
+		trap_RegisterViewportProvider( "main_scene_full",
+			cg_main_scene_provider.lifetime, cg_main_scene_provider.input_mode,
+			cg_main_scene_provider.is_vm_routed, cg_main_scene_provider.vm_key );
+		trap_RegisterViewportProvider( "main_scene_split",
+			cg_main_scene_provider.lifetime, cg_main_scene_provider.input_mode,
+			cg_main_scene_provider.is_vm_routed, cg_main_scene_provider.vm_key );
+	}
+
+	/* Secondary camera viewport: a second view of the same world from a
+	 * fixed/chase camera, bound to the world_main.wui `id "camera"` itemDef.
+	 * VM-routed like main_scene (the engine enters the cgame via VM_Call for its
+	 * key, so this same cgame VM builds the camera refdef and renders it into
+	 * the itemDef's sub-rect). Passive: no input is routed to it. Level lifetime
+	 * so it auto-cleans on map change. */
+	{
+		static const wuiViewportProvider_t cg_camera_provider = {
+			.render       = NULL,            /* VM-routed: engine uses VM_Call, not this */
+			.lifetime     = WUI_VIEWPORT_LIFETIME_LEVEL,
+			.input_mode   = WUI_VIEWPORT_INPUT_PASSIVE_DISPLAY,
+			.userdata     = NULL,
+			.is_vm_routed = qtrue,
+			.vm_key       = WUI_VIEWPORT_KEY_CAMERA,
+		};
+		/* Scalar fields (not the struct) cross the VM boundary — see the
+		 * main-scene registration above. */
+		trap_RegisterViewportProvider( "camera",
+			cg_camera_provider.lifetime, cg_camera_provider.input_mode,
+			cg_camera_provider.is_vm_routed, cg_camera_provider.vm_key );
+	}
+
 }
 
 /*
@@ -1309,6 +1591,15 @@ Called before every level change or subsystem restart
 void CG_Shutdown( void ) {
 	// some mods may need to do cleanup work here,
 	// like closing files or archiving session data
+
+	/* Explicitly unregister the viewport providers. The registry also
+	 * auto-cleans LEVEL-lifetime providers on CL_ShutdownLevel; these calls
+	 * are the matching teardown for the CG_Init registrations and run first.
+	 * The two main-scene ids share one provider but each owns a registry
+	 * slot, so both are torn down. */
+	trap_UnregisterViewportProvider( "main_scene_full" );
+	trap_UnregisterViewportProvider( "main_scene_split" );
+	trap_UnregisterViewportProvider( "camera" );
 }
 
 
@@ -1330,6 +1621,6 @@ void CG_EventHandling(int type) {
 void CG_KeyEvent(int key, qboolean down) {
 }
 
-void CG_MouseEvent(int x, int y) {
+void CG_MouseEvent(float x, float y) {
 }
 #endif

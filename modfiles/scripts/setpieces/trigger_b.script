@@ -1,0 +1,8 @@
+// trigger_b.script — the CONSUMER half of the trigger/waitfortrigger loop.
+// Monster B holds until A fires its trigger, then attacks. Proves the blocking
+// waitfortrigger verb: it suspends (qfalse) until a_done has fired, then advances.
+print monster-b-waiting
+waitfortrigger a_done          // SUSPEND until A's trigger fires
+print monster-b-triggered
+giveweapon weapon_railgun      // name-resolved weapon (readability fix)
+attack

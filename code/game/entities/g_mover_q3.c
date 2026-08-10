@@ -4,7 +4,6 @@
 //
 
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
@@ -399,6 +398,76 @@ Pos1 is "at rest", pos2 is "activated"
 ============================================================================
 */
 
+#if FEAT_RECAST_NAVMESH
+/*
+===============
+G_Nav_ApplyDoorFlags
+
+Set/clear NAVPOLY_BLOCKED for a mover's nav polys based on its (about-to-be)
+mover state. A door blocks its polys while closed/closing and clears them while
+open/opening. Non-door movers, and movers whose name doesn't match a door entry
+built by Nav_TagDoorAreas, return silently inside the trap. Unnamed doors are
+keyed as "door_model_N" from their BSP submodel index (numeric part of
+ent->model, e.g. "*3" → "door_model_3"). No-op while the navmesh isn't ready
+(the async bake): G_Nav_ReconcileDoors re-applies these once it lands.
+===============
+*/
+static void G_Nav_ApplyDoorFlags( const gentity_t *ent, moverState_t moverState ) {
+	const char *navName = NULL;
+	char        synthName[64];
+	if ( ent->targetname ) {
+		navName = ent->targetname;
+	} else if ( ent->model && ent->model[0] == '*' ) {
+		Com_sprintf( synthName, sizeof(synthName), "door_model_%d",
+		             atoi( ent->model + 1 ) );
+		navName = synthName;
+	}
+	if ( !navName ) return;
+	switch ( moverState ) {
+	case MOVER_1TO2:   /* door started opening */
+	case MOVER_POS2:   /* door fully open (belt-and-suspenders + START_OPEN spawn) */
+		/* Open: clear the OPENABLE_CLOSED marker so the opened door is plainly
+		 * traversable at normal cost. */
+		trap_Nav_SetPolyFlagsForDoor( navName, 0, NAVPOLY_OPENABLE_CLOSED );
+		break;
+	case MOVER_2TO1:   /* door started closing */
+	case MOVER_POS1:   /* door fully closed (belt-and-suspenders + initial spawn) */
+		/* Closed: mark the crossing OPENABLE_CLOSED -- the query filter INCLUDES it at
+		 * high cost, so a bot PLANS THROUGH the closed door (committing to open it)
+		 * instead of declaring the region unreachable.  BLOCKED is NOT set for doors:
+		 * a closed door is openable, not a permanent obstacle (BLOCKED stays for
+		 * finalize-disabled lying polys / physically-untraversable links). */
+		trap_Nav_SetPolyFlagsForDoor( navName, NAVPOLY_OPENABLE_CLOSED, NAVPOLY_BLOCKED );
+		break;
+	}
+}
+
+/*
+===============
+G_Nav_ReconcileDoors
+
+Re-apply every door's blocked-flags from its current mover state. Called once
+when the async navmesh bake finishes (nav.ready false→true), because any door
+whose spawn/close ran while the mesh was still baking applied its flags into a
+not-ready mesh (a no-op). Walks all doors by their live moverState so a door left
+closed at spawn correctly blocks its polys. Matches the door class in either map
+format — a Q3 "func_door" or a Q1-prefixed "q1_func_door" — via G_ClassnameIs, so
+a target-gated Q1 door that spawned closed during the bake gets its polys blocked
+here too (the bot's gate detection recognizes exactly that door, so the two layers
+must agree). G_Nav_ApplyDoorFlags is a no-op for any non-door mover.
+===============
+*/
+void G_Nav_ReconcileDoors( void ) {
+	int i;
+	for ( i = MAX_CLIENTS; i < level.num_entities; i++ ) {
+		gentity_t *ent = &g_entities[i];
+		if ( !ent->inuse || !ent->classname ) continue;
+		if ( !G_ClassnameIs( ent, "func_door" ) ) continue;
+		G_Nav_ApplyDoorFlags( ent, ent->moverState );
+	}
+}
+#endif /* FEAT_RECAST_NAVMESH */
+
 /*
 ===============
 Q3_SetMoverState
@@ -411,33 +480,45 @@ void Q3_SetMoverState( gentity_t *ent, moverState_t moverState, int time ) {
 #if FEAT_RECAST_NAVMESH
 	/* D-19: update navpoly NAVPOLY_BLOCKED at transition-start (and on initial spawn).
 	 * Fires before ent->moverState is updated so bots see the new passability
-	 * as soon as the door starts moving, not only after it finishes.
-	 * Non-door movers return silently from Nav_SetPolyFlagsForDoor if their
-	 * name doesn't match any door entry built by Nav_TagDoorAreas.
-	 * Unnamed doors are keyed as "door_model_N" using their BSP submodel index
-	 * (the numeric part of ent->model, e.g. "*3" → "door_model_3"). */
-	{
-		const char *navName = NULL;
-		char        synthName[64];
-		if ( ent->targetname ) {
-			navName = ent->targetname;
-		} else if ( ent->model && ent->model[0] == '*' ) {
-			Com_sprintf( synthName, sizeof(synthName), "door_model_%d",
-			             atoi( ent->model + 1 ) );
-			navName = synthName;
+	 * as soon as the door starts moving, not only after it finishes. */
+	G_Nav_ApplyDoorFlags( ent, moverState );
+
+	/* The applied flags/areas above changed what the nav graph COSTS and what it
+	 * ADMITS — but nothing had been asking for a new plan, so the change went
+	 * unused: a corridor already planned under the old graph kept being followed
+	 * until the plain time interval expired, by which point a short mover `wait`
+	 * had reverted the change. Announce the transition here, at the one seam every
+	 * mover of every format passes through (door, plat, button; Q1 and Q3 movers
+	 * both route through this function), so the trigger is a property of "a mover
+	 * changed state", not of any particular entity, map or actuation class. Only a
+	 * REAL transition counts: an idempotent re-assert of the state the mover is
+	 * already in changes no cost and must not invalidate anyone's corridor.
+	 *
+	 * SCOPE the announcement with WHAT moved, not merely THAT something moved. The
+	 * bounds passed are the mover's FULL SWEPT VOLUME — the union of its extents at
+	 * both endpoints (pos1 and pos2) — because either endpoint's volume is geometry a
+	 * corridor may depend on: a door that opens VACATES its closed volume (the polys
+	 * that just became cheap lie where the leaf used to be), and one that closes
+	 * OCCUPIES it. Using only the current position would miss the half of the change
+	 * that matters. The union is direction-agnostic, so opening and closing scope
+	 * identically and no transition class is special-cased.
+	 *
+	 * This is what stops the trigger from invalidating the agent that CAUSED it: the
+	 * presser's corridor terminates at the button, which is not inside the door's
+	 * swept volume, so the presser is exonerated while an agent genuinely routed
+	 * THROUGH the door is not. */
+	if ( ent->moverState != moverState ) {
+		vec3_t	navMin, navMax;
+		int		na;
+		for ( na = 0; na < 3; na++ ) {
+			float	e1min = ent->pos1[na] + ent->r.mins[na];
+			float	e1max = ent->pos1[na] + ent->r.maxs[na];
+			float	e2min = ent->pos2[na] + ent->r.mins[na];
+			float	e2max = ent->pos2[na] + ent->r.maxs[na];
+			navMin[na] = ( e1min < e2min ) ? e1min : e2min;
+			navMax[na] = ( e1max > e2max ) ? e1max : e2max;
 		}
-		if ( navName ) {
-			switch ( moverState ) {
-			case MOVER_1TO2:   /* door started opening */
-			case MOVER_POS2:   /* door fully open (belt-and-suspenders + START_OPEN spawn) */
-				trap_Nav_SetPolyFlagsForDoor( navName, 0, NAVPOLY_BLOCKED );
-				break;
-			case MOVER_2TO1:   /* door started closing */
-			case MOVER_POS1:   /* door fully closed (belt-and-suspenders + initial spawn) */
-				trap_Nav_SetPolyFlagsForDoor( navName, NAVPOLY_BLOCKED, 0 );
-				break;
-			}
-		}
+		Nav_WorldChanged( navMin, navMax );
 	}
 #endif /* FEAT_RECAST_NAVMESH */
 
@@ -576,6 +657,39 @@ void Q3_Use_BinaryMover( gentity_t *ent, gentity_t *other, gentity_t *activator 
 	ent->activator = activator;
 
 	if ( ent->moverState == MOVER_POS1 ) {
+		/* ── PERMANENT actuation witness ────────────────────────────────────
+		   CLASS RULE: an actuation event must leave a permanent, queryable
+		   signal at the point the actuation ACTUALLY occurs — not on one of the
+		   several paths that can produce it.  A capability whose only evidence
+		   is temporary instrumentation is unverifiable once that instrumentation
+		   is removed.
+
+		   This is that point.  A press IS "a button mover leaves its rest state
+		   because something touched it", and this branch is the unique place
+		   where MOVER_POS1 -> MOVER_1TO2 happens.  EVERY actuation class funnels
+		   here regardless of how the presser arrived: walk-on touch and
+		   jump-touch both dispatch through G_TouchTriggers -> Q1_Button_Touch,
+		   shoot-to-activate through Q1_Button_Die, and any future class through
+		   its own ->use — all of them land on this one branch.  Emitting here
+		   therefore measures the CAPABILITY, not one route to it; emitting in
+		   the bot's queue-advance block measured only the walk-on-queue route
+		   and was structurally blind to the jump-touch route that actually
+		   worked.
+
+		   Scoped to func_button so this stays a rare, meaningful capability
+		   event (a press), not per-mover spam: doors/plats/trains driven by the
+		   same helper do NOT emit.  The activator client number is included so a
+		   bot press is distinguishable from a human/world one.  No cvar gate —
+		   the signal is on by default, which is the whole point: it must be
+		   queryable without first knowing to turn it on. */
+		if ( G_ClassnameIs( ent, "func_button" ) ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_game),
+				"button pressed: ent=%d activator=%d\n",
+				(int)( ent - g_entities ),
+				( activator && activator->client )
+					? (int)( activator - g_entities ) : -1 );
+		}
+
 		// start moving 50 msec later, becase if this was player
 		// triggered, level.time hasn't been advanced yet
 		Q3_MatchTeam( ent, MOVER_1TO2, level.time + 50 );
@@ -1445,6 +1559,121 @@ void SP_q3_func_static( gentity_t *ent ) {
 /*
 ===============================================================================
 
+BREAKABLE
+
+===============================================================================
+*/
+
+// number of debris chunks a breakable sprays when it has no explicit "count"
+#define BREAKABLE_DEFAULT_DEBRIS	8
+
+/*
+=================
+func_breakable_die
+
+Brush shattered: spray debris + sound toward clients, deal optional radius
+splash, fire targets, then remove. Generalizes the q1_misc_explobox barrel
+death (g_misc_q1.c) from a point-barrel to a BSP brush — same shape (splash via
+G_RadiusDamage, explosion temp-entity, G_UseTargets, G_FreeEntity), plus a debris
+event so cgame spawns the fragment chunks.
+=================
+*/
+static void func_breakable_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker,
+                                int damage, int mod ) {
+	gentity_t	*te;
+	vec3_t		center;
+	int			count;
+	int			sound;
+
+	// effects fire from the brush's world-space bounding-box center. Use absmin/
+	// absmax (absolute, origin-folded by trap_LinkEntity) not mins/maxs (which are
+	// the brush-model-local bounds) — a brush whose origin differs from its
+	// geometry would otherwise spray debris at the wrong spot. Same midpoint
+	// G_RadiusDamage itself uses for a target (g_combat.c).
+	VectorAdd( self->r.absmin, self->r.absmax, center );
+	VectorScale( center, 0.5f, center );
+
+	// stop taking damage and fire whatever the brush targets before it goes away
+	self->takedamage = qfalse;
+	G_UseTargets( self, attacker );
+
+	// snapshot the fields needed after the entity is freed
+	count = ( self->count > 0 ) ? self->count : BREAKABLE_DEFAULT_DEBRIS;
+	sound = self->soundPos2;
+
+	// optional radius splash (map "dmg"/"radius" keys); reuses the rocket-splash
+	// MOD like q1_misc_explobox rather than introducing a new means-of-death
+	if ( self->damage > 0 ) {
+		G_RadiusDamage( center, self, (float)self->damage, (float)self->splashRadius,
+		                self, MOD_ROCKET_SPLASH, qfalse );
+	}
+
+	G_FreeEntity( self );
+
+	// debris chunks (cgame spawns them via CG_LaunchGib); count rides eventParm
+	te = G_TempEntity( center, EV_EMIT_DEBRIS );
+	te->s.eventParm = count;
+
+	// break sound, if the mapper set one (reuses the generic sound event)
+	if ( sound ) {
+		te = G_TempEntity( center, EV_GENERAL_SOUND );
+		te->s.eventParm = sound;
+	}
+}
+
+/*QUAKED func_breakable (0 .5 .8) ?
+A brush that can be destroyed by damage. When its health is depleted it shatters
+into debris, plays an optional sound, deals optional radius splash damage, and
+fires its target(s).
+
+"health"	damage required to break it (default 100)
+"count"		number of debris chunks sprayed on break (default 8)
+"dmg"		radius splash damage dealt on break (default 0 = none)
+"radius"	splash damage radius (default 120, ~a rocket)
+"breaksound"	sound played on break (e.g. sound/world/breakglass.wav)
+"target"	entity group fired when broken
+"target2"	secondary entity group fired when broken
+"model2"	.md3 model to also draw
+"color"		constantLight color
+"light"		constantLight radius
+*/
+void SP_q3_func_breakable( gentity_t *ent ) {
+	char	*noise;
+
+	trap_SetBrushModel( ent, ent->model );
+
+	ent->s.eType      = ET_MOVER;	// brush bmodels render through the mover path
+	ent->s.pos.trType = TR_STATIONARY;
+	VectorCopy( ent->s.origin, ent->s.pos.trBase );
+	VectorCopy( ent->s.origin, ent->r.currentOrigin );
+	ent->r.svFlags |= SVF_USE_CURRENT_ORIGIN;
+
+	if ( ent->model2 ) {
+		ent->s.modelindex2 = G_ModelIndex( ent->model2 );
+	}
+
+	if ( !ent->health ) {
+		ent->health = 100;
+	}
+	ent->takedamage = qtrue;
+	ent->die        = func_breakable_die;
+	ent->r.contents = CONTENTS_SOLID;
+	ent->clipmask   = MASK_SOLID;
+
+	G_SpawnInt( "dmg", "0", &ent->damage );
+	G_SpawnInt( "radius", "120", &ent->splashRadius );	// rocket-equivalent default
+
+	if ( G_SpawnString( "breaksound", "", &noise ) && noise[0] ) {
+		ent->soundPos2 = G_SoundIndex( noise );
+	}
+
+	trap_LinkEntity( ent );
+}
+
+
+/*
+===============================================================================
+
 ROTATING
 
 ===============================================================================
@@ -1594,3 +1823,13 @@ void SP_q3_func_pendulum(gentity_t *ent) {
 	ent->s.apos.trType = TR_SINE;
 	ent->s.apos.trDelta[2] = speed;
 }
+
+// ── savegame callback registry — TIER 2 file-local sub-list ──────────────────
+// func_breakable_die is the one file-static callback here; the mover callbacks in
+// this file (Q3_ReturnToPos1, Q3_Use_BinaryMover, Q3_Reached_Train, …) have
+// external linkage and live in the central SG_CALLBACK_LIST instead. Name list
+// single-sourced in g_save_localcbs.h (SG_LOCAL_CB_g_mover_q3). See g_save_funcs.h.
+#include "g_save_funcs.h"
+#include "g_save_localcbs.h"
+
+SG_DEFINE_LOCAL_REGISTRY( SG_LOCAL_CB_g_mover_q3, SG_Register_g_mover_q3 )

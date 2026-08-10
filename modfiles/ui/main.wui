@@ -1,0 +1,163 @@
+// main.wui — skinny composition file.
+//
+// Layout: left hero rail (title bar + QUAKE/WIRED hero + 5-menu +
+// footer) at PERCENT 0.55 with the 4-card right rail at PERCENT 0.30
+// stacked column-wise; bottom hint strip spans the foot.
+//
+// All UI fragments live under widgets/ and compose via the botlib
+// preprocessor's #include directive (file body inlined at parse time).
+// Tokens consumed: $accent, $accentSoft, $bone, $boneDim, $ink, $line,
+// $spacing_*, $font_*.
+
+#include "ui/widgets/qw_menu_item.wui"
+
+menuDef {
+	name "main"
+	layer "menu"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "main_root"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		background "layered" effects "demo"
+
+		#include "ui/widgets/qw_title_bar.wui"
+
+		// -- LEFT region -----------------------------------
+		// Dispatch 5.5/5.8: canonical mockup declarations
+		// (qw-variants.jsx:86 `position:absolute; left:72; top:96;
+		// width:600` against 1440×900 viewport-baseline).
+		// Dispatch 5.12: removed main_content intermediate wrapper
+		// (not in mockup) + corrected `width <Nvw>` syntax (no PERCENT
+		// keyword when using vw unit).
+		itemDef {
+			name "left_region"
+			type container
+			position absolute
+			top 10.67vh
+			left 5vw
+			width 41.7vw
+			direction column
+			gap $spacing_none
+			grow 0
+
+			itemDef {
+				name "hero_quake"
+				type 0
+				rect 0 0 1 14vh
+				height FIT
+				width PERCENT 1
+				text "QUAKE"
+				textalign 0
+				font $font_sans 132
+				forecolor $bone
+				decoration
+				visible 1
+				grow 0
+			}
+			itemDef {
+				name "hero_wired"
+				type 0
+				rect 0 0 1 14vh
+				height FIT
+				width PERCENT 1
+				text "WIRED"
+				textalign 0
+				font $font_sans 132
+				forecolor $accent
+				decoration
+				visible 1
+				grow 0
+			}
+
+			itemDef {
+				name "action_menu"
+				type container
+				rect 0 0 1 32vh
+				height FIT
+				direction column
+				marginTop 5.33vh
+				gap $spacing_xxs
+				grow 0
+
+				QW_MENU_ITEM("menu_campaign", "campaign", "CAMPAIGN",     "continue the descent", { open "startserver" scene })
+				QW_MENU_ITEM("menu_join",     "join",     "JOIN BATTLE",  "2,148 live",           { open "servers" scene })
+				QW_MENU_ITEM("menu_host",     "host",     "HOST A MATCH", "configure · invite",   { open "startserver" scene })
+				QW_MENU_ITEM("menu_options",  "options",  "OPTIONS",      "configure",            { open "preferences" scene })
+				QW_MENU_ITEM("menu_quit",     "quit",     "QUIT",         "exit to shell",        { exec "quit" })
+			}
+
+			itemDef { name "left_spacer" type container grow 1 decoration visible 1 }
+
+			itemDef {
+				name "left_footer_row"
+				type container
+				rect 0 0 1 2vh
+				height FIT
+				width PERCENT 1
+				direction row
+				padding 0 $spacing_md
+				alignY center
+
+				itemDef {
+					name "left_footer"
+					type 0
+					rect 0 0 1 2vh
+					height FIT
+					width PERCENT 1
+					text "v0.1.0 · build mmxxvi"
+					textalign 0
+					font $font_mono 9
+					forecolor $boneDim
+					decoration
+					visible 1
+					grow 1
+				}
+			}
+		}
+
+		// -- RIGHT region: 4-card rail ---------------------
+		// Dispatch 5.5/5.8: canonical mockup (qw-variants.jsx:134
+		// `position:absolute; right:56; top:72; bottom:72; width:360`).
+		// Dispatch 5.12: `width <Nvw>` syntax fix + flattened from
+		// main_content intermediate.
+		itemDef {
+			name "right_region"
+			type container
+			position absolute
+			top 8vh
+			right 3.9vw
+			bottom 8vh
+			width 25vw
+			direction column
+			gap $spacing_card_gap
+			grow 0
+
+			#include "ui/widgets/qw_profile_card.wui"
+			#include "ui/widgets/qw_last_match_card.wui"
+			#include "ui/widgets/qw_global_feed_card.wui"
+			#include "ui/widgets/qw_arena_of_day_card.wui"
+		}
+
+		#include "ui/widgets/qw_bottom_hint_bar.wui"
+
+		// Bottom spacer keeps the hint bar off the screen edge.
+		itemDef { name "bottom_spacer" type container grow 0 height FIXED 20px decoration visible 1 }
+	}
+
+	// Default highlight on menu open — focus the first item (campaign).
+	// Selection is now expressed by FOCUS (single source of truth for both
+	// keyboard nav and mouse hover), so seed it directly via setfocus instead
+	// of the retired ui_currentMenuItem cvar. setfocus resolves the itemDef by
+	// name in this menu and calls wui_set_focused → the gold focus-highlight
+	// lands on CAMPAIGN, exactly as the old default did.
+	onOpen {
+		setfocus menu_campaign
+	}
+}

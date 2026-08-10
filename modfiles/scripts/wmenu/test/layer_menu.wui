@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+//
+// layer_menu_stack.wmenu — Phase 3b1 visual z-order fixture.
+// Centered green panel marking the MENU_STACK layer; mid-z of the 6-layer
+// stack. Pushed onto the stack by wui_layer_test_single menu_stack /
+// wui_layer_test_stack — MENU_STACK activation requires GetActiveMenu(), so
+// the dev command performs an explicit WiredUI_PushMenu in addition to
+// flipping the override bit.
+
+menuDef {
+	name "layer_menu_stack"
+	rect 0.25 0.30 0.50 0.40
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.15 0.55 0.20 0.90
+	layer "menu_stack"
+
+	itemDef {
+		type 0
+		rect 0 0.42 1 0.16
+		textalign 1
+		font "oxanium" 24
+		forecolor 1 1 1 1
+		text "LAYER MENU_STACK"
+		decoration
+		visible 1
+	}
+}

@@ -25,7 +25,6 @@ No trap syscall is added — this extends the existing CG_TRAP_GETVALUE path.
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 // ── Canonical sound slot names (index matches CSOUND_* defines in cg_public.h) ──
@@ -120,10 +119,11 @@ static const int s_numAnimNames = (int)(sizeof(s_animNames) / sizeof(s_animNames
 
 static const char *s_knownTopKeys[] = {
 	"name", "display_name", "nicknames", "bio", "role", "archetype",
-	"model", "sounds", "stats", NULL
+	"model", "sounds", "stats", "selectable", "movement", "attack",
+	"can_activate", NULL
 };
 static const char *s_knownModelKeys[] = {
-	"parts", "icon", "headoffset", "skins", NULL
+	"parts", "icon", "headoffset", "skins", "bbox", NULL
 };
 static const char *s_knownSoundsKeys[] = {
 	"footsteps",
@@ -370,7 +370,7 @@ static qhandle_t CL_RegisterCharacterSkin( const clParsedSkin_t *parsed ) {
 	}
 
 	int handle = ++s_characterSkinCount;
-	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "[CSK-REG] name=%s handle=%d singlePath=%d fallbackPath=%s fallbackShader=%d overrideCount=%d paintable=%d\n",
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "name=%s handle=%d singlePath=%d fallbackPath=%s fallbackShader=%d overrideCount=%d paintable=%d\n",
 		entry->skin.name, handle, entry->skin.singlePath,
 		entry->fallbackPath, entry->skin.fallbackShader,
 		entry->skin.overrideCount, entry->skin.paintable );
@@ -385,7 +385,7 @@ void CL_Characters_RegisterShaders( void ) {
 		if ( entry->skin.singlePath ) {
 			if ( entry->fallbackPath[0] )
 				entry->skin.fallbackShader = re.RegisterShaderLightMap( entry->fallbackPath, LIGHTMAP_NONE );
-			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "[CSK-RE] name=%s path=%s -> shader=%d\n",
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "name=%s path=%s -> shader=%d\n",
 				entry->skin.name, entry->fallbackPath, entry->skin.fallbackShader );
 		} else {
 			for ( j = 0; j < entry->skin.overrideCount; j++ ) {
@@ -705,6 +705,7 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 	char path[MAX_QPATH];
 	clCharacterEntry_t *entry;
 	int base;
+	qboolean selectable = qtrue;   // default: appears in the player select screen
 
 	if ( s_clCharacterCount >= CL_MAX_CHARACTERS ) {
 		COM_WARN( LOG_CH(ch_client), "CL_Characters: registry full, skipping '%s'\n", dirname );
@@ -830,6 +831,18 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 		sizeof( mf.displayName ) );
 	lua_pop( L, 1 );
 
+	// Player character-select visibility (client-only, not part of the serialized
+	// manifest). Read from the merged manifest so _base/archetype can set a default
+	// and a character can override it; absent at every layer keeps the qtrue default
+	// (so existing player characters stay selectable, byte-identical). Only an
+	// explicit boolean flips it — a non-boolean value is ignored rather than
+	// silently disabling the character.
+	lua_getfield( L, merged_idx, "selectable" );
+	if ( lua_isboolean( L, -1 ) ) {
+		selectable = lua_toboolean( L, -1 ) ? qtrue : qfalse;
+	}
+	lua_pop( L, 1 );
+
 	// ── Step 7: Extract model fields ─────────────────────────────────────
 	lua_getfield( L, merged_idx, "model" );
 	int model_idx = lua_gettop( L );
@@ -928,6 +941,7 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 	Q_strncpyz( entry->dirname, dirname, sizeof( entry->dirname ) );
 	memcpy( &entry->manifest, &mf, sizeof( mf ) );
 	entry->iconHandle = 0;   // registered lazily in CL_Characters_RegisterIcons
+	entry->selectable = selectable;
 
 	return qtrue;
 }
@@ -1067,6 +1081,35 @@ int CL_Characters_Count( void ) {
 const clCharacterEntry_t *CL_Characters_At( int index ) {
 	if ( index < 0 || index >= s_clCharacterCount ) return NULL;
 	return &s_clCharacters[index];
+}
+
+// ── Selectable-only view ──────────────────────────────────────────────────────
+//
+// The player character-select feeder must enumerate only selectable characters
+// (creatures are spawnable-by-name but hidden here). Exposing a subset count +
+// a subset-index lookup keeps the feeder's count and its per-item lookups in the
+// SAME index space by construction — there is no raw registry index for the
+// feeder to leak. Non-select consumers (render/spawn load-by-name via
+// CL_Characters_Get / CL_Characters_GetManifest) are untouched and still see
+// every character.
+
+int CL_Characters_SelectableCount( void ) {
+	int i, n = 0;
+	for ( i = 0; i < s_clCharacterCount; i++ ) {
+		if ( s_clCharacters[i].loaded && s_clCharacters[i].selectable ) n++;
+	}
+	return n;
+}
+
+const clCharacterEntry_t *CL_Characters_SelectableAt( int index ) {
+	int i, n = 0;
+	if ( index < 0 ) return NULL;
+	for ( i = 0; i < s_clCharacterCount; i++ ) {
+		if ( !s_clCharacters[i].loaded || !s_clCharacters[i].selectable ) continue;
+		if ( n == index ) return &s_clCharacters[i];
+		n++;
+	}
+	return NULL;
 }
 
 // ── Legacy trap entry point ───────────────────────────────────────────────────

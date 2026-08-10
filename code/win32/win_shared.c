@@ -12,7 +12,6 @@
 #include <io.h>
 #include <conio.h>
 #include <intrin.h>
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 /* Sys_Milliseconds → wired/core/time/time.c */

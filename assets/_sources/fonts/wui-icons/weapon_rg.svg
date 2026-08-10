@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Weapon rg — railgun (long barrel + scope) -->
+  <path d="M 12 50 L 75 50 L 92 42 L 92 62 L 75 62 L 12 62 Z M 29 62 L 29 79 L 42 79 L 42 62 Z M 50 38 L 67 38 L 67 50 L 50 50 Z" fill="black" fill-rule="evenodd"/>
+</svg>

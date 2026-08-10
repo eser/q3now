@@ -46,7 +46,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.paths = paths
 
-	// Wire up dedicated server with Wails event callbacks.
+	// Wire up headless server with Wails event callbacks.
 	a.ded = engine.NewDedServer(
 		func(line string) {
 			runtime.EventsEmit(a.ctx, "ded:log", line)
@@ -73,8 +73,8 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	// Show dialog asking what to do with the running server.
 	choice, err := runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
 		Type:          runtime.QuestionDialog,
-		Title:         "Dedicated server is running",
-		Message:       "A dedicated server is still running. What would you like to do?",
+		Title:         "Headless server is running",
+		Message:       "A headless server is still running. What would you like to do?",
 		Buttons:       []string{"Stop & Quit", "Keep Running", "Cancel"},
 		DefaultButton: "Cancel",
 	})
@@ -310,7 +310,7 @@ func (a *App) BuildGameCommand(opts map[string]interface{}) string {
 	return strings.Join(parts, " ")
 }
 
-// ── Dedicated Server ────────────────────────────────────────────────────────
+// ── Headless Server ────────────────────────────────────────────────────────
 
 func (a *App) StartDedicated(config engine.ServerConfig) error {
 	return a.ded.Start(a.paths.DedBinaryPath(), config)

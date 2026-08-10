@@ -5,7 +5,7 @@
 
 // g_public.h -- game module information visible to server
 
-#define	GAME_API_VERSION	8
+#define	GAME_API_VERSION	9
 
 // entity->svFlags
 // the server does not know how to interpret most of the values
@@ -237,32 +237,6 @@ typedef enum {
 	BOTLIB_GET_CONSOLE_MESSAGE,		// ( int client, char *message, int size );
 	BOTLIB_USER_COMMAND,			// ( int client, usercmd_t *ucmd );
 
-	BOTLIB_AAS_ENABLE_ROUTING_AREA = 300,
-	BOTLIB_AAS_BBOX_AREAS,
-	BOTLIB_AAS_AREA_INFO,
-	BOTLIB_AAS_ENTITY_INFO,
-
-	BOTLIB_AAS_INITIALIZED,
-	BOTLIB_AAS_PRESENCE_TYPE_BOUNDING_BOX,
-	BOTLIB_AAS_TIME,
-
-	BOTLIB_AAS_POINT_AREA_NUM,
-	BOTLIB_AAS_TRACE_AREAS,
-
-	BOTLIB_AAS_POINT_CONTENTS,
-	BOTLIB_AAS_NEXT_BSP_ENTITY,
-	BOTLIB_AAS_VALUE_FOR_BSP_EPAIR_KEY,
-	BOTLIB_AAS_VECTOR_FOR_BSP_EPAIR_KEY,
-	BOTLIB_AAS_FLOAT_FOR_BSP_EPAIR_KEY,
-	BOTLIB_AAS_INT_FOR_BSP_EPAIR_KEY,
-
-	BOTLIB_AAS_AREA_REACHABILITY,
-
-	BOTLIB_AAS_AREA_TRAVEL_TIME_TO_GOAL_AREA,
-
-	BOTLIB_AAS_SWIMMING,
-	BOTLIB_AAS_PREDICT_CLIENT_MOVEMENT,
-
 	BOTLIB_EA_SAY = 400,
 	BOTLIB_EA_SAY_TEAM,
 	BOTLIB_EA_COMMAND,
@@ -373,30 +347,30 @@ typedef enum {
 
 	BOTLIB_AI_SET_AVOID_GOAL_TIME,
 	BOTLIB_AI_ADD_AVOID_SPOT,
-	BOTLIB_AAS_ALTERNATIVE_ROUTE_GOAL,
-	BOTLIB_AAS_PREDICT_ROUTE,
-	BOTLIB_AAS_POINT_REACHABILITY_AREA_INDEX,
+	BOTLIB_AAS_RESERVED_1,
+	BOTLIB_AAS_RESERVED_2,
+	BOTLIB_AAS_RESERVED_3,
 
 	BOTLIB_PC_LOAD_SOURCE,
 	BOTLIB_PC_FREE_SOURCE,
 	BOTLIB_PC_READ_TOKEN,
 	BOTLIB_PC_SOURCE_FILE_AND_LINE,
 
-	WB_LOAD_CHARACTER = 710,
-	WB_FREE_CHARACTER,
-	WB_CHARACTERISTIC_FLOAT,
-	WB_CHARACTERISTIC_BFLOAT,
-	WB_CHARACTERISTIC_INTEGER,
-	WB_CHARACTERISTIC_BINTEGER,
-	WB_CHARACTERISTIC_STRING,
-	WB_BIND_BOT,
-	WB_BOT_THINK,
-	WB_BOT_PROFILE_FIELD,
-	WB_BOT_PICK_WEAPON,
-	WB_BOT_GET_ATTACK_AIM_HEIGHT,
-	WB_BOT_EVAL_ITEM,
-	WB_BOT_DECIDE,
-	WB_BOT_ON_CHAT,
+	WI_LOAD_CHARACTER = 710,
+	WI_FREE_CHARACTER,
+	WI_CHARACTERISTIC_FLOAT,
+	WI_CHARACTERISTIC_BFLOAT,
+	WI_CHARACTERISTIC_INTEGER,
+	WI_CHARACTERISTIC_BINTEGER,
+	WI_CHARACTERISTIC_STRING,
+	WI_BIND_BOT,
+	WI_BOT_THINK,
+	WI_BOT_PROFILE_FIELD,
+	WI_BOT_PICK_WEAPON,
+	WI_BOT_GET_ATTACK_AIM_HEIGHT,
+	WI_BOT_EVAL_ITEM,
+	WI_BOT_DECIDE,
+	WI_BOT_ON_CHAT,
 
 	// engine extensions
 	G_CVAR_SETDESCRIPTION,
@@ -423,7 +397,7 @@ typedef enum {
 
 	// ── Recast/Detour nav traps ────────────────────────────────────────
 	// Available only when FEAT_RECAST_NAVMESH=1.
-	// Returns -1 (int) or 0 (void/bool) until Phase 3 navmesh is ready.
+	// Returns -1 (int) or 0 (void/bool) until the navmesh is ready.
 	// See code/qcommon/nav/nav_types.h for parameter type definitions.
 	G_NAV_FIND_PATH = 900,
 	// ( vec3_t origin, vec3_t goal, int agentType, navPath_t *pathOut ) -> int pathPointCount
@@ -453,20 +427,26 @@ typedef enum {
 	// ( int agentId ) -> void
 
 	G_NAV_UPDATE_CROWD,
-	// ( float deltaTime ) -> void; advances DetourCrowd simulation (Phase 6)
+	// ( float deltaTime ) -> void; advances DetourCrowd simulation
 
 	G_NAV_IS_READY,
 	// ( void ) -> qboolean; qtrue once navmesh is loaded and queries are safe
 
 	G_NAV_SET_POLY_FLAGS_FOR_DOOR,
 	// ( const char *targetname, int setFlags, int clearFlags ) -> void
-	// D-19: set/clear poly flags for all polys belonging to named door entity.
+	// set/clear poly flags for all polys belonging to named door entity.
 	// Called at door state transition-start (open/close) from g_mover.c.
 
 	G_NAV_PREDICT_ENEMY_POSITION,
 	// ( vec3_t origin, vec3_t velocity, float predictTime, vec3_t outPos ) -> void
-	// Phase 5.5: Detour-based enemy position prediction replacing AAS physics sim.
+	// Detour-based enemy position prediction replacing AAS physics sim.
 	// Simulates enemy trajectory on navmesh surface for high-skill projectile aim.
+
+	G_NAV_IS_BAKING,
+	// ( void ) -> qboolean; qtrue while a background bake is in flight (not yet
+	// ready but will be). Lets gamecode DEFER bot fill while baking yet give up
+	// once the bake finishes-and-fails (returns qfalse then, like a no-nav map).
+	// Appended after the nav block (before the =1000 pin) so the ABI is unchanged.
 
 	// ── WiredCoreEvents generic emit ─────────────────────────────────────
 	// Single ABI entry point. Event type is encoded in the payload (arg 1).
@@ -476,8 +456,36 @@ typedef enum {
 	// ( wce_event_type_t type, int clientNum, int entityNum, vec3_t origin,
 	//   int param1, int param2, float fparam, const char *text )
 
-	G_WCE_GET_SOUND_EVENTS = 1001
+	G_WCE_GET_SOUND_EVENTS = 1001,
 	// ( int clientNum, bot_sound_event_t *out, int maxOut ) → int count
+
+	// ── Monster-Lua behavior traps (q3now behavior layer) ────────────────
+	// A PARALLEL machine to the bot-Lua traps (WI_* above), keyed by
+	// entityNum instead of client slot: a non-client monster asks the
+	// User-VM (Lua) for a behavior decision. Own numbered block (1100+),
+	// distinct from WI_* / NAV / WCE. Only functional when FEAT_MONSTER_AI
+	// is enabled; C-default (no Lua) is the floor, Lua is opt-in.
+	G_MONSTER_LUA_BIND = 1100,
+	// ( int entityNum, int characterHandle ) -> qboolean (qtrue = bound)
+
+	G_MONSTER_LUA_UNBIND,
+	// ( int entityNum ) -> void; releases the binding for this entity
+
+	G_MONSTER_LUA_DECIDE,
+	// ( int entityNum, const wbDecideCtx_t *ctx, char *decision, int decisionSize )
+	//   -> qboolean; writes a transient state-key string, C-default if no Lua fn
+
+	G_MONSTER_LUA_PROFILE_FIELD,
+	// ( int entityNum, int field ) -> float (PASSFLOAT); default if unbound
+
+	// FS family (rename): appended at the enum tail with a fresh explicit number
+	// so no existing trap is renumbered. Added in GAME_API_VERSION 9 for the
+	// savegame atomic write (temp -> validate -> rename). Thin: calls the engine's
+	// existing FS_Rename( from, to ) (homepath-scoped). Two string args, marshalled
+	// exactly like G_CVAR_SET (2x VARG_VMPTR); called directly like FS_GetFileList
+	// (path-based, no VM handle scoping).
+	G_FS_RENAME = 1200
+	// ( const char *from, const char *to ) -> void
 
 } gameImport_t;
 

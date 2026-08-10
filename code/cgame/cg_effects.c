@@ -8,7 +8,6 @@
 #include "cg_local.h"
 #include "../qcommon/wired/render/primitives.h"
 #include "../qcommon/wired/render/traps.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 
@@ -77,7 +76,7 @@ void CG_BubbleTrail( vec3_t start, vec3_t end, float spacing ) {
 
 /*
 ==================
-CG_WaterSplash  (Phase 6.5.3)
+CG_WaterSplash
 
 A short burst of spray droplets + the water-hit sound at a point on a
 liquid surface. Quake 3 ships no dedicated splash sprite, so we re-use
@@ -129,7 +128,7 @@ void CG_WaterSplash( vec3_t point ) {
 
 /*
 ==================
-CG_WaterCrossingSplashes  (Phase 6.5.3)
+CG_WaterCrossingSplashes
 
 Given a hitscan segment [start,end], emit CG_WaterSplash() at wherever
 the shot pierces a liquid surface — once at the entry point and, when the
@@ -362,7 +361,7 @@ void CG_LightningArcBeam( vec3_t start, vec3_t end ) {
 }
 
 
-// ── Phase 5T: generic player-trail infrastructure ─────────────────
+// ── generic player-trail infrastructure ─────────────────
 //
 // Multiple trail types per player can be active concurrently; each
 // (client, type) pair has its own expiry timestamp. Per-frame
@@ -932,8 +931,15 @@ void CG_PingLocation( centity_t *cent ) {
 	vec3_t			angles;
 	int				team;
 
-	// only show to teammates
-	team = cgs.clientinfo[cent->currentState.otherEntityNum].team;
+	// only show to teammates — otherEntityNum is server-controlled and can
+	// exceed MAX_CLIENTS (cgs.clientinfo[] extent), so bounds-check before use.
+	{
+		int cn = cent->currentState.otherEntityNum;
+		if ( (unsigned)cn >= MAX_CLIENTS ) {
+			return;
+		}
+		team = cgs.clientinfo[cn].team;
+	}
 	if ( team != cg.snap->ps.persistant[PERS_TEAM] ) {
 		return;
 	}
@@ -1067,24 +1073,53 @@ void CG_Bleed( vec3_t origin, int entityNum ) {
 
 
 
+// Gib-body physics tuning (modder code-level, not user cvars). The new
+// gib-body launches each part from its anatomical spot in the player's body
+// frame with its own orientation, then tumbles. GIB_PART_SPREAD is the random
+// spread magnitude per part; GIB_PART_JUMP the shared upward kick;
+// GIB_PART_BOUNCE the fragment restitution (lower than vanilla 0.6 so gibs
+// settle sooner). Named distinctly from bg_public.h's GIB_VELOCITY/GIB_JUMP to
+// avoid shadowing them (those describe the game-side gib threshold, not these
+// per-part launch values).
+#define	GIB_PART_SPREAD		250
+#define	GIB_PART_JUMP		100
+#define	GIB_PART_BOUNCE		0.4f
+// fraction the random per-part spread is scaled to when a directional knockback
+// launch is active, so parts mostly fly the damage way but still scatter
+#define	GIB_DIR_SPREAD_SCALE	0.45f
+// Better-gibs D-feel (0038): extra UPWARD launch proportional to the killing
+// knockback, added to every gib part's vertical kick. Higher-damage frags (MG/LG)
+// pop gibs higher. 🔴 This STACKS with the directional launchBias below
+// (damageDir*knockbackSpeed), which already carries knockback's VERTICAL component
+// when the damage direction points up — so this is *extra* baseline vertical pop
+// independent of damage direction (useful for near-horizontal frags where launchBias
+// contributes little Z). DEFAULT 0.0f = inert (byte-identical: the term contributes
+// nothing, no double-count). A modder dials it up only for extra vertical pop beyond
+// the directional bias. Modder-tunable code-level constant, NOT a user cvar.
+#define	GIB_VERTICAL_FROM_KNOCKBACK	0.0f
+
 /*
 ==================
 CG_LaunchGib
 ==================
 */
-void CG_LaunchGib( vec3_t origin, vec3_t velocity, qhandle_t hModel ) {
+void CG_LaunchGib( const vec3_t origin, const vec3_t angles,
+				   const vec3_t velocity, qhandle_t hModel, int *seed ) {
 	localEntity_t	*le;
 	refEntity_t		*re;
+	float			speedIsh;
+	int				i;
+	int				mainRotationAxis;
 
 	le = CG_AllocLocalEntity();
 	re = &le->refEntity;
 
 	le->leType = LE_FRAGMENT;
 	le->startTime = cg.time;
-	le->endTime = le->startTime + 5000 + random() * 3000;
+	le->endTime = le->startTime + 5000 + Q_random( seed ) * 3000;
 
 	VectorCopy( origin, re->origin );
-	AxisCopy( axisDefault, re->axis );
+	AnglesToAxis( angles, re->axis );
 	re->hModel = hModel;
 
 	le->pos.trType = TR_GRAVITY;
@@ -1092,34 +1127,170 @@ void CG_LaunchGib( vec3_t origin, vec3_t velocity, qhandle_t hModel ) {
 	VectorCopy( velocity, le->pos.trDelta );
 	le->pos.trTime = cg.time;
 
-	le->bounceFactor = 0.6f;
+	le->bounceFactor = GIB_PART_BOUNCE;
+
+	// Spin the gib as it flies. The angular velocity scales with the launch
+	// speed (Manhattan-norm approximation — cheaper than a real length and
+	// fine for randomness), with one axis dominant so the tumble reads as a
+	// natural spin rather than a uniform wobble. CG_AddFragment evaluates this
+	// trajectory each frame when LEF_TUMBLE is set. The RNG is seeded so the
+	// tumble is identical on every client (see CG_GibPlayer's seed).
+	speedIsh = fabs( velocity[0] ) + fabs( velocity[1] ) + fabs( velocity[2] );
+	mainRotationAxis = Q_rand( seed ) % 3;
+
+	le->leFlags |= LEF_TUMBLE;
+	le->angles.trType = TR_LINEAR;
+	le->angles.trTime = cg.time;
+	VectorCopy( angles, le->angles.trBase );
+	// a few degrees of starting jitter so identical parts don't align
+	le->angles.trBase[PITCH] += Q_rand( seed ) & 7;
+	le->angles.trBase[YAW]   += Q_rand( seed ) & 7;
+	le->angles.trBase[ROLL]  += Q_rand( seed ) & 7;
+	for ( i = 0; i < 3; i++ ) {
+		float axisMul = ( mainRotationAxis == i ) ? 1.0f : 0.25f;
+		le->angles.trDelta[i] = speedIsh * axisMul * 0.5f * Q_crandom( seed );
+	}
+
+	le->leFlags |= LEF_BLOOD_TRAIL;
 
 	le->leBounceSoundType = LEBS_BLOOD;
 	le->leMarkType = LEMT_BLOOD;
 }
 
 /*
+==================
+CG_GibAdjustDeathAnimation
+
+If the body is partway through a death animation, slide each gib's launch
+origin and orientation from upright toward "lying flat on the ground", so gibs
+from a settled corpse come off the prone body shape instead of a standing one.
+deathAnimationProgress: 0 = fully upright, 1 = flat.
+==================
+*/
+static void CG_GibAdjustDeathAnimation( const lerpFrame_t *anim, vec3_t origin,
+										vec3_t bodyAngles, vec3_t lookDirAngles ) {
+	float deathAnimationProgress = 0;
+
+	// anim->animation is either NULL (never set) or &ci->animations[idx], a
+	// valid element — CG_SetLerpFrameAnimation bounds-checks the index, so it is
+	// never a garbage pointer. The animations[] table is Lua-authored (see
+	// CL_Char_LoadAnimations) but memset to zero first, so an entry a character's
+	// animations.lua omits has numFrames == 0; the guard below treats that, a
+	// NULL animation, and an out-of-range frame all as "upright" — no crash.
+	if ( ( anim->animationNumber & ~ANIM_TOGGLEBIT ) <= BOTH_DEAD3 &&
+		 ( anim->animationNumber & ~ANIM_TOGGLEBIT ) >= BOTH_DEATH1 &&
+		 anim->animation &&
+		 anim->animation->numFrames > 0 ) {
+		const int frameOfAnimation = anim->frame - anim->animation->firstFrame;
+		// the body is usually grounded by ~5/8 through the animation
+		int numFramesFalling = anim->animation->numFrames * 5 / 8;
+		if ( numFramesFalling == 0 ) {
+			numFramesFalling = 1;
+		}
+
+		if ( frameOfAnimation < 0 ||
+			 frameOfAnimation >= anim->animation->numFrames ) {
+			// out of range (death animation not started yet) — treat as upright
+			deathAnimationProgress = 0;
+		} else {
+			deathAnimationProgress =
+				(float)( frameOfAnimation + 1 ) / numFramesFalling;
+		}
+		if ( deathAnimationProgress > 1 ) {
+			deathAnimationProgress = 1;
+		}
+	}
+
+	origin[2] += deathAnimationProgress * ( MINS_Z + PLAYER_WIDTH / 1.8f );
+	// rotate the body frame from upright toward facing up
+	bodyAngles[PITCH]    = 360 - deathAnimationProgress * 90;
+	lookDirAngles[PITCH] += -deathAnimationProgress * 90;
+	if ( lookDirAngles[PITCH] < 0 ) {
+		lookDirAngles[PITCH] += 360;
+	}
+}
+
+/*
 ===================
 CG_GibPlayer
 
-Generated a bunch of gibs launching out from the bodies location
+Generated a bunch of gibs launching out from the bodies location.
+
+Each gib leaves its anatomical position in the player's body frame (head high,
+legs low, arms/hands offset to the sides), carries its own launch orientation,
+inherits the player's velocity, and tumbles. If a death-animation frame is
+supplied the body frame is laid prone first.
 ===================
 */
-void CG_GibPlayer( vec3_t playerOrigin ) {
-	vec3_t	origin, velocity;
+void CG_GibPlayer( const vec3_t playerOrigin, const vec3_t playerAngles,
+				   const vec3_t playerVelocity, const lerpFrame_t *bodyAnimation,
+				   const vec3_t damageDir, int knockbackParm ) {
+	vec3_t	baseOrigin, origin, velocity;
+	vec3_t	bodyAngles, lookDirAngles, angles;
+	vec3_t	forward, right, up;
+	// player bounding box, used to spread gibs across the body
+	float	playerHeight = 32 - MINS_Z;
+	float	playerRadius = PLAYER_WIDTH;
+	float	baseRandomVelocity = GIB_PART_SPREAD;
+	float	jump = GIB_PART_JUMP;
+	// directional launch: bias every part along the damage direction at a speed
+	// proportional to the killing knockback. damageDir {0,0,1} (or a zero parm)
+	// means "no bias" — the launch then reduces to the omnidirectional scatter.
+	vec3_t	launchBias;
+	float	knockbackSpeed = (float)knockbackParm * WIRED_GIB_KNOCKBACK_DIVISOR;
+	qboolean directional;
+	// the spread is narrowed when launching directionally so parts mostly fly
+	// the damage way but still scatter; the seed makes the scatter deterministic
+	// (identical on every client), derived from the server-authored event parm.
+	int		seed = ( knockbackParm << 8 ) ^ 0x1234;
+
+	// Better-gibs D-feel (0038): fold the extra knockback-scaled vertical pop into
+	// the shared per-part jump (every velocity[2] += jump below picks it up). Inert
+	// at the default GIB_VERTICAL_FROM_KNOCKBACK 0.0f — byte-identical, no
+	// double-count with the directional launchBias's Z (see the define comment).
+	jump += GIB_VERTICAL_FROM_KNOCKBACK * knockbackSpeed;
 
 	if ( !cg_blood.integer ) {
 		return;
 	}
 
-	VectorCopy( playerOrigin, origin );
-	velocity[0] = crandom()*GIB_VELOCITY;
-	velocity[1] = crandom()*GIB_VELOCITY;
-	velocity[2] = GIB_JUMP + crandom()*GIB_VELOCITY;
-	if ( rand() & 1 ) {
-		CG_LaunchGib( origin, velocity, cgs.media.gibSkull );
+	directional = ( damageDir != NULL &&
+		( damageDir[0] != 0.0f || damageDir[1] != 0.0f || damageDir[2] != 1.0f ) &&
+		knockbackSpeed > 1.0f );
+	VectorClear( launchBias );
+	if ( directional ) {
+		VectorScale( damageDir, knockbackSpeed, launchBias );
+		// tighten the random scatter so the directional throw dominates
+		baseRandomVelocity *= GIB_DIR_SPREAD_SCALE;
+	}
+
+	// derive the body frame; lay it prone if mid death-animation
+	VectorCopy( playerOrigin, baseOrigin );
+	VectorCopy( playerAngles, lookDirAngles );
+	VectorCopy( playerAngles, bodyAngles );
+	if ( bodyAnimation ) {
+		CG_GibAdjustDeathAnimation( bodyAnimation, baseOrigin, bodyAngles, lookDirAngles );
 	} else {
-		CG_LaunchGib( origin, velocity, cgs.media.gibBrain );
+		// keep the body upright so `up` stays {0,0,1}
+		bodyAngles[PITCH] = 0;
+	}
+	AngleVectors( bodyAngles, forward, right, up );
+
+	// SKULL / BRAIN — head, high on the body, keeps the look direction
+	VectorCopy( baseOrigin, origin );
+	VectorMA( origin, MINS_Z + 0.95 * playerHeight, up, origin );
+	VectorClear( velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, forward, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, right, velocity );
+	// head never gets a downward (inward) component, so use Q_random() up
+	VectorMA( velocity, Q_random( &seed ) * baseRandomVelocity, up, velocity );
+	velocity[2] += jump;
+	VectorAdd( velocity, launchBias, velocity );
+	VectorAdd( velocity, playerVelocity, velocity );
+	if ( Q_rand( &seed ) & 1 ) {
+		CG_LaunchGib( origin, lookDirAngles, velocity, cgs.media.gibSkull, &seed );
+	} else {
+		CG_LaunchGib( origin, lookDirAngles, velocity, cgs.media.gibBrain, &seed );
 	}
 
 	// allow gibs to be turned off for speed
@@ -1127,59 +1298,200 @@ void CG_GibPlayer( vec3_t playerOrigin ) {
 		return;
 	}
 
-	VectorCopy( playerOrigin, origin );
-	velocity[0] = crandom()*GIB_VELOCITY;
-	velocity[1] = crandom()*GIB_VELOCITY;
-	velocity[2] = GIB_JUMP + crandom()*GIB_VELOCITY;
-	CG_LaunchGib( origin, velocity, cgs.media.gibAbdomen );
+	// ABDOMEN
+	VectorCopy( baseOrigin, origin );
+	VectorMA( origin, MINS_Z + 0.65 * playerHeight, up, origin );
+	VectorClear( velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, forward, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, right, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, up, velocity );
+	velocity[2] += jump;
+	VectorAdd( velocity, launchBias, velocity );
+	VectorAdd( velocity, playerVelocity, velocity );
+	CG_LaunchGib( origin, bodyAngles, velocity, cgs.media.gibAbdomen, &seed );
 
-	VectorCopy( playerOrigin, origin );
-	velocity[0] = crandom()*GIB_VELOCITY;
-	velocity[1] = crandom()*GIB_VELOCITY;
-	velocity[2] = GIB_JUMP + crandom()*GIB_VELOCITY;
-	CG_LaunchGib( origin, velocity, cgs.media.gibArm );
+	// ARM (right, upper) — pushed out to the right, never inward
+	VectorCopy( baseOrigin, origin );
+	VectorMA( origin, MINS_Z + 0.78 * playerHeight, up, origin );
+	VectorMA( origin, 0.8 * playerRadius, right, origin );
+	VectorMA( origin, -0.3 * playerRadius, forward, origin );
+	VectorClear( velocity );
+	VectorMA( velocity, +Q_random( &seed ) * baseRandomVelocity, right, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, forward, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, up, velocity );
+	velocity[2] += jump;
+	VectorAdd( velocity, launchBias, velocity );
+	VectorAdd( velocity, playerVelocity, velocity );
+	VectorCopy( bodyAngles, angles );
+	angles[ROLL]  += 70;
+	angles[PITCH] += 45;
+	CG_LaunchGib( origin, angles, velocity, cgs.media.gibArm, &seed );
 
-	VectorCopy( playerOrigin, origin );
-	velocity[0] = crandom()*GIB_VELOCITY;
-	velocity[1] = crandom()*GIB_VELOCITY;
-	velocity[2] = GIB_JUMP + crandom()*GIB_VELOCITY;
-	CG_LaunchGib( origin, velocity, cgs.media.gibChest );
+	// CHEST — central and heavier, so less random velocity
+	VectorCopy( baseOrigin, origin );
+	VectorMA( origin, MINS_Z + 0.80 * playerHeight, up, origin );
+	VectorClear( velocity );
+	velocity[0] = 0.5 * Q_crandom( &seed ) * baseRandomVelocity;
+	velocity[1] = 0.5 * Q_crandom( &seed ) * baseRandomVelocity;
+	velocity[2] = jump + 0.5 * Q_crandom( &seed ) * baseRandomVelocity;
+	VectorAdd( velocity, launchBias, velocity );
+	VectorAdd( velocity, playerVelocity, velocity );
+	CG_LaunchGib( origin, bodyAngles, velocity, cgs.media.gibChest, &seed );
 
-	VectorCopy( playerOrigin, origin );
-	velocity[0] = crandom()*GIB_VELOCITY;
-	velocity[1] = crandom()*GIB_VELOCITY;
-	velocity[2] = GIB_JUMP + crandom()*GIB_VELOCITY;
-	CG_LaunchGib( origin, velocity, cgs.media.gibFist );
+	// FIST (right hand)
+	VectorCopy( baseOrigin, origin );
+	VectorMA( origin, MINS_Z + 0.66 * playerHeight, up, origin );
+	VectorMA( origin, 0.8 * playerRadius, right, origin );
+	VectorMA( origin, 0.2 * playerRadius, forward, origin );
+	VectorClear( velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, forward, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, right, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, up, velocity );
+	velocity[2] += jump;
+	VectorAdd( velocity, launchBias, velocity );
+	VectorAdd( velocity, playerVelocity, velocity );
+	VectorCopy( bodyAngles, angles );
+	angles[PITCH] -= 80;
+	angles[YAW]   += 50;
+	CG_LaunchGib( origin, angles, velocity, cgs.media.gibFist, &seed );
 
-	VectorCopy( playerOrigin, origin );
-	velocity[0] = crandom()*GIB_VELOCITY;
-	velocity[1] = crandom()*GIB_VELOCITY;
-	velocity[2] = GIB_JUMP + crandom()*GIB_VELOCITY;
-	CG_LaunchGib( origin, velocity, cgs.media.gibFoot );
+	// FOOT (left, low)
+	VectorCopy( baseOrigin, origin );
+	VectorMA( origin, MINS_Z + 0.05 * playerHeight, up, origin );
+	VectorMA( origin, -0.5 * playerRadius, right, origin );
+	VectorMA( origin, -0.5 * playerRadius, forward, origin );
+	VectorClear( velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, forward, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, right, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, up, velocity );
+	velocity[2] += jump;
+	VectorAdd( velocity, launchBias, velocity );
+	VectorAdd( velocity, playerVelocity, velocity );
+	CG_LaunchGib( origin, bodyAngles, velocity, cgs.media.gibFoot, &seed );
 
-	VectorCopy( playerOrigin, origin );
-	velocity[0] = crandom()*GIB_VELOCITY;
-	velocity[1] = crandom()*GIB_VELOCITY;
-	velocity[2] = GIB_JUMP + crandom()*GIB_VELOCITY;
-	CG_LaunchGib( origin, velocity, cgs.media.gibForearm );
+	// FOREARM (left, lower) — pushed out to the left, never inward
+	VectorCopy( baseOrigin, origin );
+	VectorMA( origin, MINS_Z + 0.65 * playerHeight, up, origin );
+	VectorMA( origin, -0.6 * playerRadius, right, origin );
+	VectorMA( origin, +0.2 * playerRadius, forward, origin );
+	VectorClear( velocity );
+	VectorMA( velocity, -Q_random( &seed ) * baseRandomVelocity, right, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, forward, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, up, velocity );
+	velocity[2] += jump;
+	VectorAdd( velocity, launchBias, velocity );
+	VectorAdd( velocity, playerVelocity, velocity );
+	VectorCopy( bodyAngles, angles );
+	angles[ROLL]  -= 90;
+	angles[PITCH] -= 75;
+	CG_LaunchGib( origin, angles, velocity, cgs.media.gibForearm, &seed );
 
-	VectorCopy( playerOrigin, origin );
-	velocity[0] = crandom()*GIB_VELOCITY;
-	velocity[1] = crandom()*GIB_VELOCITY;
-	velocity[2] = GIB_JUMP + crandom()*GIB_VELOCITY;
-	CG_LaunchGib( origin, velocity, cgs.media.gibIntestine );
+	// INTESTINE
+	VectorCopy( baseOrigin, origin );
+	VectorMA( origin, MINS_Z + 0.57 * playerHeight, up, origin );
+	VectorClear( velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, forward, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, right, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, up, velocity );
+	velocity[2] += jump;
+	VectorAdd( velocity, launchBias, velocity );
+	VectorAdd( velocity, playerVelocity, velocity );
+	CG_LaunchGib( origin, bodyAngles, velocity, cgs.media.gibIntestine, &seed );
 
-	VectorCopy( playerOrigin, origin );
-	velocity[0] = crandom()*GIB_VELOCITY;
-	velocity[1] = crandom()*GIB_VELOCITY;
-	velocity[2] = GIB_JUMP + crandom()*GIB_VELOCITY;
-	CG_LaunchGib( origin, velocity, cgs.media.gibLeg );
+	// LEG (right)
+	VectorCopy( baseOrigin, origin );
+	VectorMA( origin, MINS_Z + 0.42 * playerHeight, up, origin );
+	VectorMA( origin, 0.5 * playerRadius, right, origin );
+	VectorMA( origin, 0.1 * playerRadius, forward, origin );
+	VectorClear( velocity );
+	VectorMA( velocity, +Q_random( &seed ) * baseRandomVelocity, right, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, forward, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, up, velocity );
+	velocity[2] += jump;
+	VectorAdd( velocity, launchBias, velocity );
+	VectorAdd( velocity, playerVelocity, velocity );
+	VectorCopy( bodyAngles, angles );
+	angles[ROLL]  -= 30;
+	angles[PITCH] -= 15;
+	CG_LaunchGib( origin, angles, velocity, cgs.media.gibLeg, &seed );
 
-	VectorCopy( playerOrigin, origin );
-	velocity[0] = crandom()*GIB_VELOCITY;
-	velocity[1] = crandom()*GIB_VELOCITY;
-	velocity[2] = GIB_JUMP + crandom()*GIB_VELOCITY;
-	CG_LaunchGib( origin, velocity, cgs.media.gibLeg );
+	// LEG (left)
+	VectorCopy( baseOrigin, origin );
+	VectorMA( origin, MINS_Z + 0.44 * playerHeight, up, origin );
+	VectorMA( origin, -0.5 * playerRadius, right, origin );
+	VectorMA( origin, -0.2 * playerRadius, forward, origin );
+	VectorClear( velocity );
+	VectorMA( velocity, -Q_random( &seed ) * baseRandomVelocity, right, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, forward, velocity );
+	VectorMA( velocity, Q_crandom( &seed ) * baseRandomVelocity, up, velocity );
+	velocity[2] += jump;
+	VectorAdd( velocity, launchBias, velocity );
+	VectorAdd( velocity, playerVelocity, velocity );
+	VectorCopy( bodyAngles, angles );
+	angles[PITCH] += 15;
+	CG_LaunchGib( origin, angles, velocity, cgs.media.gibLeg, &seed );
+}
+
+/*
+===================
+CG_Debris
+
+Spray `count` debris chunks out of a shattered func_breakable. Reuses the gib
+media (registered already) for a generic chunk look and the CG_LaunchGib
+localEntity path — the same tumble/bounce/trail fragments gibs use, NOT the GPU
+particle pipeline. Each chunk launches outward+upward with a random orientation.
+===================
+*/
+#define DEBRIS_VELOCITY		200		// outward spread speed per chunk
+#define DEBRIS_JUMP			120		// shared upward kick
+#define DEBRIS_MAX_CHUNKS	64		// sanity cap on a single break
+
+void CG_Debris( const vec3_t origin, int count ) {
+	// reused gib media as generic debris chunks (no dedicated debris asset yet)
+	static qhandle_t	*chunkModels[10];
+	int					numModels = 0;
+	int					i;
+
+	if ( !cg_blood.integer ) {
+		// the gib media are blood-gated; with blood off, skip the chunk spray
+		return;
+	}
+
+	if ( count <= 0 ) {
+		return;
+	}
+	if ( count > DEBRIS_MAX_CHUNKS ) {
+		count = DEBRIS_MAX_CHUNKS;
+	}
+
+	// build the chunk-model rotation once (handles are stable for the session)
+	chunkModels[numModels++] = &cgs.media.gibAbdomen;
+	chunkModels[numModels++] = &cgs.media.gibArm;
+	chunkModels[numModels++] = &cgs.media.gibChest;
+	chunkModels[numModels++] = &cgs.media.gibFist;
+	chunkModels[numModels++] = &cgs.media.gibFoot;
+	chunkModels[numModels++] = &cgs.media.gibForearm;
+	chunkModels[numModels++] = &cgs.media.gibIntestine;
+	chunkModels[numModels++] = &cgs.media.gibLeg;
+	chunkModels[numModels++] = &cgs.media.gibSkull;
+	chunkModels[numModels++] = &cgs.media.gibBrain;
+
+	for ( i = 0; i < count; i++ ) {
+		vec3_t		velocity, angles;
+		qhandle_t	hModel = *chunkModels[ i % numModels ];
+		// debris tumble seed (local — debris does not need cross-client determinism)
+		int			seed = cg.time + i * 0x100;
+
+		velocity[0] = crandom() * DEBRIS_VELOCITY;
+		velocity[1] = crandom() * DEBRIS_VELOCITY;
+		velocity[2] = DEBRIS_JUMP + crandom() * DEBRIS_VELOCITY;
+
+		angles[0] = crandom() * 360;
+		angles[1] = crandom() * 360;
+		angles[2] = crandom() * 360;
+
+		CG_LaunchGib( origin, angles, velocity, hModel, &seed );
+	}
 }
 
 /*
@@ -1270,20 +1582,15 @@ Direction is the surface-outward vector (sparks fly away from wall).
 ============
 */
 void CG_LightningSparks( vec3_t origin, vec3_t dir ) {
-	int				i, count, j;
-	localEntity_t	*le;
-	refEntity_t		*re;
-
 	if ( trap_CM_PointContents( origin, 0 ) & CONTENTS_WATER ) {
 		return;
 	}
 
-	// GPU path. Default. Mirrors the CPU body via the lg_sparks
-	// particle class registered in CG_RegisterLightningParticleClasses.
-	// emitter.count = 3 matches the CPU loop count below; per-frame
-	// caller (CG_LightningBolt's impact branch) drives the steady-
+	// Emit a small burst into the GPU particle pool via the lg_sparks class
+	// (registered in CG_RegisterLightningParticleClasses). count = 3; the
+	// per-frame caller (CG_LightningBolt's impact branch) drives the steady-
 	// state shower by calling once per frame held against a wall.
-	if ( !cg_cpuEffects.integer ) {
+	{
 		emitterDesc_t emitter;
 		memset( &emitter, 0, sizeof( emitter ) );
 		emitter.cls   = cgs.media.lgSparksClass;
@@ -1295,45 +1602,6 @@ void CG_LightningSparks( vec3_t origin, vec3_t dir ) {
 		emitter.colorTint[2] = 1.0f;
 		emitter.colorTint[3] = 1.0f;
 		trap_R_EmitParticles( &emitter );
-		return;
-	}
-
-	count = 3;
-	for ( i = 0; i < count; i++ ) {
-		le = CG_AllocLocalEntity();
-		le->leFlags = LEF_PUFF_DONT_SCALE;
-		le->leType = LE_MOVE_SCALE_FADE;
-		le->startTime = cg.time;
-		le->endTime = cg.time + 200 + ( rand() & 0xff );
-		le->lifeRate = 1.0f / ( le->endTime - le->startTime );
-
-		re = &le->refEntity;
-		re->reType = RT_SPRITE;
-		re->rotation = 0;
-		re->radius = 1.5f + random() * 1.5f;
-		re->customShader = cgs.media.lightningSparkShader;
-		// blue tint via rgbGen vertex
-		re->shaderRGBA[0] = 0x55;
-		re->shaderRGBA[1] = 0x99;
-		re->shaderRGBA[2] = 0xff;
-		re->shaderRGBA[3] = 0xff;
-
-		le->color[0] = 0x55 / 255.0f;
-		le->color[1] = 0x99 / 255.0f;
-		le->color[2] = 1.0f;
-		le->color[3] = 1.0f;
-
-		le->pos.trType = TR_GRAVITY;
-		le->pos.trTime = cg.time;
-		VectorCopy( origin, le->pos.trBase );
-
-		// fan around the surface normal, then push along it
-		for ( j = 0; j < 3; j++ ) {
-			le->pos.trDelta[j] = dir[j] + crandom() * 0.7f;
-		}
-		VectorNormalize( le->pos.trDelta );
-		VectorScale( le->pos.trDelta, 100.0f + random() * 200.0f, le->pos.trDelta );
-		le->pos.trDelta[2] += random() * 100.0f;
 	}
 }
 

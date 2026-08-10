@@ -42,8 +42,8 @@
 #include "chars.h"
 #include "inv.h"
 #include "syn.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_botlib, "botlib" );
+LOG_DECLARE_CHANNEL( ch_botai, "botlib.ai" );
 
 
 //bot states
@@ -87,27 +87,46 @@ BotAI_Print
 */
 void QDECL BotAI_Print(int type, char *fmt, ...) {
 	char str[2048];
+	const char *body;
 	va_list ap;
 
 	va_start(ap, fmt);
 	vsnprintf(str, sizeof(str), fmt, ap);
 	va_end(ap);
 
+	// Strip a leading "[tag] " category bracket — Path PE invariant. Bot-AI
+	// traces tag themselves (e.g. "[AimSet/nav-wp] ..."); the botlib.ai
+	// channel now carries that identity.
+	body = str;
+	if ( body[0] == '[' ) {
+		const char *rb = strchr( body, ']' );
+		if ( rb ) {
+			body = rb + 1;
+			while ( *body == ' ' ) {
+				body++;
+			}
+		}
+	}
+
 	switch(type) {
 		case PRT_MESSAGE: {
-			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "%s", str);
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "%s", body);
 			break;
 		}
 		case PRT_WARNING: {
-			Com_Log( SEV_INFO, LOG_CH(ch_botlib), S_COLOR_YELLOW "Warning: %s", str );
+			Com_Log( SEV_WARN, LOG_CH(ch_botai), "Warning: %s", body );
 			break;
 		}
 		case PRT_ERROR: {
-			Com_Log( SEV_INFO, LOG_CH(ch_botlib), S_COLOR_RED "Error: %s", str );
+			Com_Log( SEV_ERROR, LOG_CH(ch_botai), "Error: %s", body );
 			break;
 		}
 		case PRT_FATAL: {
-			Com_Log( SEV_INFO, LOG_CH(ch_botlib), S_COLOR_RED "Fatal: %s", str );
+			// botlib's PRT_FATAL guards are recoverable (out-of-range
+			// entnum/handle traces that return early); the engine log core
+			// treats SEV_FATAL as terminating (s_errorEntered "walking dead"),
+			// so map to SEV_ERROR to log loudly without aborting the server.
+			Com_Log( SEV_ERROR, LOG_CH(ch_botai), "Fatal: %s", body );
 			break;
 		}
 		case PRT_EXIT: {
@@ -115,7 +134,7 @@ void QDECL BotAI_Print(int type, char *fmt, ...) {
 			break;
 		}
 		default: {
-			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "unknown print type\n" );
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "unknown print type\n" );
 			break;
 		}
 	}
@@ -216,7 +235,7 @@ void QDECL BotAI_BotInitialChat( bot_state_t *bs, char *type, ... ) {
 	char	*vars[MAX_MATCHVARIABLES];
 
 	// Lua bots use event-driven Lua chat functions; skip legacy template pipeline entirely
-	if ( bs->wiredBotsActive ) {
+	if ( bs->wiredIntelActive ) {
 		return;
 	}
 
@@ -250,24 +269,8 @@ void BotTestAAS(vec3_t origin) {
 	trap_Cvar_Update(&bot_testsolid);
 	trap_Cvar_Update(&bot_testclusters);
 	if (bot_testsolid.integer) {
-#if !FEAT_RECAST_NAVMESH
-		if (!trap_AAS_Initialized()) return;
-		areanum = BotPointAreaNum(origin);
-		if (areanum) BotAI_Print(PRT_MESSAGE, "\rempty area");
-		else BotAI_Print(PRT_MESSAGE, "\r^1SOLID area");
-#endif
 	}
 	else if (bot_testclusters.integer) {
-#if !FEAT_RECAST_NAVMESH
-		if (!trap_AAS_Initialized()) return;
-		areanum = BotPointAreaNum(origin);
-		if (!areanum)
-			BotAI_Print(PRT_MESSAGE, "\r^1Solid!                              ");
-		else {
-			trap_AAS_AreaInfo(areanum, &info);
-			BotAI_Print(PRT_MESSAGE, "\rarea %d, cluster %d       ", areanum, info.cluster);
-		}
-#endif
 	}
 }
 
@@ -685,7 +688,6 @@ BotEntityInfo
 ==============
 */
 void BotEntityInfo(int entnum, aas_entityinfo_t *info) {
-#if FEAT_RECAST_NAVMESH
 	/* Under Recast, AAS entity tracking is not initialized (aasworld.loaded==false),
 	   so trap_AAS_EntityInfo returns zeroed data with valid=false, making BotFindEnemy
 	   skip every client.  Read live state directly from g_entities[] and level.clients[]. */
@@ -728,9 +730,6 @@ void BotEntityInfo(int entnum, aas_entityinfo_t *info) {
 			}
 		}
 	}
-#else
-	trap_AAS_EntityInfo(entnum, info);
-#endif
 }
 
 /*
@@ -814,17 +813,17 @@ void BotChangeViewAngles(bot_state_t *bs, float thinktime) {
 	// Lua bots roaming (no current enemy): sweep ideal_viewangles ±45° around the
 	// movement direction so the bot visually scans while detecting out-of-path targets.
 	// Triangle-wave period ~4 s, phase-shifted per client to avoid synchronised panning.
-	if ( bs->wiredBotsActive && bs->enemy < 0 ) {
+	if ( bs->wiredIntelActive && bs->enemy < 0 ) {
 		float sc = ( FloatTime() + bs->client * 1.3f ) * 0.25f;
 		sc -= (int)sc;  // fractional part [0, 1)
 		float scanOfs = ( sc < 0.5f ) ? ( sc * 4.0f - 1.0f ) : ( 3.0f - sc * 4.0f );
 		bs->ideal_viewangles[YAW] += scanOfs * 45.0f;
 		bs->ideal_viewangles[YAW] = AngleMod( bs->ideal_viewangles[YAW] );
 	}
-	if ( bs->wiredBotsActive && bs->enemy >= 0 && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 ) {
+	if ( bs->wiredIntelActive && bs->enemy >= 0 && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 ) {
 		static int s_viewLogTick[MAX_CLIENTS];
 		if ( ++s_viewLogTick[bs->client] % 6 == 0 ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^3[ViewAngle] c=%d view=(%.1f %.1f) ideal=(%.1f %.1f) spd=(%.1f %.1f)\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "c=%d view=(%.1f %.1f) ideal=(%.1f %.1f) spd=(%.1f %.1f)\n",
 				bs->client,
 				bs->viewangles[PITCH], bs->viewangles[YAW],
 				bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW],
@@ -832,11 +831,11 @@ void BotChangeViewAngles(bot_state_t *bs, float thinktime) {
 		}
 	}
 
-	if ( bs->wiredBotsActive && bs->enemy >= 0 && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+	if ( bs->wiredIntelActive && bs->enemy >= 0 && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
 		static int s_viewChangeTick[MAX_CLIENTS];
 		if ( ++s_viewChangeTick[bs->client] % 6 == 0 ) {
-			float dbg_skill = Com_Clamp( 0.0f, 1.0f, WiredBots_ProfileFieldOr( bs, WB_PROFILE_TRACKING, 0.5f ) );
-			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^3[ViewChange] cl=%d actual=(%.1f %.1f) ideal=(%.1f %.1f) skill=%.3f\n",
+			float dbg_skill = Com_Clamp( 0.0f, 1.0f, WiredIntel_ProfileFieldOr( bs, WI_PROFILE_TRACKING, 0.5f ) );
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d actual=(%.1f %.1f) ideal=(%.1f %.1f) skill=%.3f\n",
 				bs->client,
 				bs->viewangles[PITCH], bs->viewangles[YAW],
 				bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW],
@@ -849,17 +848,59 @@ void BotChangeViewAngles(bot_state_t *bs, float thinktime) {
 	 * No oscillation: viewanglespeed converges asymptotically to desired_speed. */
 	float aim_skill, maxvel;
 	if (bs->enemy >= 0) {
-		aim_skill = Com_Clamp( 0.0f, 1.0f, WiredBots_ProfileFieldOr( bs, WB_PROFILE_TRACKING, 0.5f ) );
+		aim_skill = Com_Clamp( 0.0f, 1.0f, WiredIntel_ProfileFieldOr( bs, WI_PROFILE_TRACKING, 0.5f ) );
 		maxvel = 180.0f + aim_skill * 1620.0f;  // 180..1800 deg/s
 	} else {
 		aim_skill = 0.05f;
 		maxvel = 261.0f;  // low-skill roam speed
 	}
-	if ( bs->wiredBotsActive ) {
-		float capDegPerSec = WiredBots_ProfileFieldOr( bs, WB_PROFILE_VIEW_MAXCHANGE, 1800.0f );  // view_maxchange deg/s; Q3 ceiling default
+	if ( bs->wiredIntelActive ) {
+		float capDegPerSec = WiredIntel_ProfileFieldOr( bs, WI_PROFILE_VIEW_MAXCHANGE, 1800.0f );  // view_maxchange deg/s; Q3 ceiling default
 		if ( maxvel > capDegPerSec ) maxvel = capDegPerSec;
 	}
 	float accel = 2.0f + aim_skill * 18.0f;  // 2..20 — reaction time feel
+
+	/* SELF-HEALING VIEW STATE.  viewanglespeed/viewangles are integrator state carried
+	 * across frames, so ONE non-finite value is permanent: NaN propagates through every
+	 * arithmetic step, and it cannot be clamped out because `>` and `<` are BOTH false
+	 * against NaN — the comparisons at the bottom of the loop silently pass it through,
+	 * AngleMod preserves it, and the bot's aim is dead for the rest of its life.
+	 * Measured on the e1m1 specimen: 3,540 of 3,540 samples reported spd=(nan nan),
+	 * NaN from the very first sample, with the bot unable to turn at all.
+	 *
+	 * The recovery is therefore a POSITIVE test, NOT another clamp: `x == x` is the one
+	 * predicate NaN answers distinctly (false only for NaN), whereas a fix built on more
+	 * `>`/`<` comparisons would repeat the exact trap that made this permanent.
+	 * Re-seeding the SPEED to zero is the neutral state — a stationary integrator — and
+	 * re-seeding a non-finite ANGLE from the ideal, which is recomputed every frame from
+	 * live aim, restores a usable heading without inventing one.  On healthy frames both
+	 * tests pass and nothing is written, so the aim curve is bit-for-bit unchanged.
+	 * (Infinities are not tested separately: an infinite speed becomes NaN on the very
+	 * next `delta` subtraction and is healed then, and no arithmetic here can produce an
+	 * infinity once thinktime is non-zero.) */
+	for (int i = 0; i < 2; i++) {
+		if ( !( bs->viewanglespeed[i] == bs->viewanglespeed[i] ) ) {
+			bs->viewanglespeed[i] = 0.0f;
+		}
+		if ( !( bs->viewangles[i] == bs->viewangles[i] ) ) {
+			bs->viewangles[i] = ( bs->ideal_viewangles[i] == bs->ideal_viewangles[i] )
+			                  ? bs->ideal_viewangles[i] : 0.0f;
+		}
+	}
+
+	/* A zero-length frame is a NO-OP, not an error case: no time has passed, so the
+	 * view cannot have changed, and there is nothing to integrate.  Computing it anyway
+	 * divides by zero — desired_speed becomes +/-inf, then inf*0 makes viewanglespeed
+	 * NaN, which the block above now heals but which should never be produced in the
+	 * first place.  Measured: elapsed_time is 0 on 9,334 of 14,000 samples (66.7%) at
+	 * this call site, so this is the COMMON path, not an edge case.  Returning here
+	 * leaves viewangles exactly as they were and still publishes them, so the frame's
+	 * usercmd carries the same view the previous frame ended with. */
+	if ( thinktime <= 0.0f ) {
+		if (bs->viewangles[PITCH] > 180) bs->viewangles[PITCH] -= 360;
+		trap_EA_View(bs->client, bs->viewangles);
+		return;
+	}
 
 	for (int i = 0; i < 2; i++) {
 		bs->viewangles[i]       = AngleMod(bs->viewangles[i]);
@@ -873,6 +914,7 @@ void BotChangeViewAngles(bot_state_t *bs, float thinktime) {
 		bs->viewangles[i] += bs->viewanglespeed[i] * thinktime;
 		bs->viewangles[i] = AngleMod(bs->viewangles[i]);
 	}
+
 	//bs->viewangles[PITCH] = 0;
 	if (bs->viewangles[PITCH] > 180) bs->viewangles[PITCH] -= 360;
 	//elementary action: view
@@ -907,12 +949,6 @@ void BotInputToUserCommand(bot_input_t *bi, usercmd_t *ucmd, int delta_angles[3]
 	if (bi->actionflags & ACTION_GESTURE) ucmd->buttons |= BUTTON_GESTURE;
 	if (bi->actionflags & ACTION_USE) ucmd->buttons |= BUTTON_USE_HOLDABLE;
 	if (bi->actionflags & ACTION_WALK) ucmd->buttons |= BUTTON_WALKING;
-	if (bi->actionflags & ACTION_AFFIRMATIVE) ucmd->buttons |= BUTTON_AFFIRMATIVE;
-	if (bi->actionflags & ACTION_NEGATIVE) ucmd->buttons |= BUTTON_NEGATIVE;
-	if (bi->actionflags & ACTION_GETFLAG) ucmd->buttons |= BUTTON_GETFLAG;
-	if (bi->actionflags & ACTION_GUARDBASE) ucmd->buttons |= BUTTON_GUARDBASE;
-	if (bi->actionflags & ACTION_PATROL) ucmd->buttons |= BUTTON_PATROL;
-	if (bi->actionflags & ACTION_FOLLOWME) ucmd->buttons |= BUTTON_FOLLOWME;
 	//
 	ucmd->weapon = bi->weapon;
 	//set the view angles
@@ -991,6 +1027,16 @@ void BotUpdateInput(bot_state_t *bs, int time, int elapsed_time) {
 	}
 	//change the bot view angles
 	BotChangeViewAngles(bs, (float) elapsed_time / 1000);
+	/* An actuation issued by a planning layer must survive to this frame's
+	   usercmd. A sequenced step runs BEFORE BotAI, whose first statement is
+	   trap_EA_ResetInput — so a step's EA_* was deleted one call after it was
+	   issued and physics never saw it. Re-assert the step's recorded actuation
+	   HERE: this is after BotAI's reset AND after BotAI's own movement logic
+	   (re-asserting at the top of BotAI does not survive that), and it is the
+	   last point before trap_EA_GetInput reads the input into the usercmd.
+	   Inert unless a step recorded an intent for the current frame — a bot with
+	   no active sequence is untouched. */
+	WiredIntel_ApplySequencedActuation(bs);
 	//retrieve the bot input
 	trap_EA_GetInput(bs->client, (float) time / 1000, &bi);
 	//respawn hack
@@ -1003,6 +1049,7 @@ void BotUpdateInput(bot_state_t *bs, int time, int elapsed_time) {
 	}
 	//convert the bot input to a usercmd
 	BotInputToUserCommand(&bi, &bs->lastucmd, bs->cur_ps.delta_angles, time);
+
 	//subtract the delta angles
 	for (j = 0; j < 3; j++) {
 		bs->viewangles[j] = AngleMod(bs->viewangles[j] - SHORT2ANGLE(bs->cur_ps.delta_angles[j]));
@@ -1016,12 +1063,6 @@ BotAIRegularUpdate
 */
 void BotAIRegularUpdate(void) {
 	if (regularupdate_time < FloatTime()) {
-#if !FEAT_RECAST_NAVMESH
-		/* Under Recast, item positions are read directly from g_entities[].
-		 * BotUpdateEntityItems() calls AAS_EntityInfo() which fatals without
-		 * an AAS file loaded. */
-		trap_BotUpdateEntityItems();
-#endif
 		regularupdate_time = FloatTime() + 0.3;
 	}
 }
@@ -1133,7 +1174,11 @@ int BotAI(int client, float thinktime) {
 	bs->eye[2] += bs->cur_ps.viewheight;
 	//get the area the bot is in
 	bs->areanum = BotPointAreaNum(bs->origin);
-	//translate active WiredBots directive into ltgtype / teamgoal before AI runs
+	//record the area into the belief store's visited-set (explored-areas
+	//producer). Bounded ring, transition-gated inside; INERT w.r.t. current
+	//decisions — nothing consumes it yet (first reader is a later landing).
+	Belief_RecordVisitedArea(bs, bs->areanum);
+	//translate active WiredIntel directive into ltgtype / teamgoal before AI runs
 	BotDirective_FrameUpdate(bs);
 
 	// Fetch processed sound events from server-side bot awareness ring
@@ -1354,17 +1399,10 @@ int BotAISetupClient(int client, struct bot_settings_s *settings, qboolean resta
 		return qfalse;
 	}
 
-#if !FEAT_RECAST_NAVMESH
-	if (!trap_AAS_Initialized()) {
-		BotAI_Print(PRT_FATAL, "AAS not initialized\n");
-		return qfalse;
-	}
-#else
 	if (!trap_Nav_IsReady()) {
 		BotAI_Print(PRT_FATAL, "Nav not ready\n");
 		return qfalse;
 	}
-#endif
 
 	//load the bot character
 	bs->character = trap_BotLoadCharacter(settings->characterfile, settings->skill);
@@ -1372,8 +1410,8 @@ int BotAISetupClient(int client, struct bot_settings_s *settings, qboolean resta
 		BotAI_Print(PRT_FATAL, "couldn't load skill %f from %s\n", settings->skill, settings->characterfile);
 		return qfalse;
 	}
-	bs->wiredBotsActive = (bs->character < 0) ? qtrue : qfalse;
-	if ( !bs->wiredBotsActive ) {
+	bs->wiredIntelActive = (bs->character < 0) ? qtrue : qfalse;
+	if ( !bs->wiredIntelActive ) {
 		BotAI_Print(PRT_FATAL, "legacy bot character backend is disabled: %s\n", settings->characterfile);
 		trap_BotFreeCharacter( bs->character );
 		return qfalse;
@@ -1421,6 +1459,8 @@ int BotAISetupClient(int client, struct bot_settings_s *settings, qboolean resta
 	bs->last_kill_time = 0.0f;
 	bs->last_streak_ack = 0.0f;
 	BotDirective_Init(&bs->directives);
+	Belief_Init(&bs->beliefStore);
+	WiredIntel_SequencedGoalReset(&bs->sequencedGoal);
 	bs->entergame_time = FloatTime();
 	bs->ms = trap_BotAllocMoveState();
 	bs->walker = 0.0f;
@@ -1465,7 +1505,7 @@ int BotAIShutdownClient(int client, qboolean restart) {
 		BotWriteSessionData(bs);
 	}
 
-	if (!bs->wiredBotsActive && BotChat_ExitGame(bs)) {
+	if (!bs->wiredIntelActive && BotChat_ExitGame(bs)) {
 		trap_BotEnterChat(bs->cs, bs->client, CHAT_ALL);
 	}
 
@@ -1481,8 +1521,6 @@ int BotAIShutdownClient(int client, qboolean restart) {
 	//
 	BotFreeWaypoints(bs->checkpoints);
 	BotFreeWaypoints(bs->patrolpoints);
-	//clear activate goal stack
-	BotClearActivateGoalStack(bs);
 	//clear the bot state
 	memset(bs, 0, sizeof(bot_state_t));
 	//set the inuse flag to qfalse
@@ -1560,9 +1598,6 @@ int BotAILoadMap( int restart ) {
 
 	if (!restart) {
 		trap_Cvar_Register( &mapname, "mapname", "", CVAR_SERVERINFO | CVAR_ROM );
-#if !FEAT_RECAST_NAVMESH
-		trap_BotLibLoadMap( mapname.string );
-#endif
 	}
 
 	for (i = 0; i < MAX_CLIENTS; i++) {
@@ -1660,79 +1695,7 @@ int BotAIStartFrame(int time) {
 	else thinktime = bot_thinktime.integer;
 
 	// update the bot library
-#if !FEAT_RECAST_NAVMESH
-	if ( botlib_residual >= thinktime ) {
-		botlib_residual -= thinktime;
-
-		trap_BotLibStartFrame((float) time / 1000);
-
-		if (!trap_AAS_Initialized()) return qfalse;
-
-		//update entities in the botlib
-		for (i = 0; i < MAX_GENTITIES; i++) {
-			ent = &g_entities[i];
-			if (!ent->inuse) {
-				trap_BotLibUpdateEntity(i, NULL);
-				continue;
-			}
-			if (!ent->r.linked) {
-				trap_BotLibUpdateEntity(i, NULL);
-				continue;
-			}
-			if (ent->r.svFlags & SVF_NOCLIENT) {
-				trap_BotLibUpdateEntity(i, NULL);
-				continue;
-			}
-			// do not update missiles
-            if (ent->s.eType == ET_MISSILE && ent->s.weapon != WP_NONE) {
-				trap_BotLibUpdateEntity(i, NULL);
-				continue;
-			}
-			// do not update event only entities
-			if (ent->s.eType > ET_EVENTS) {
-				trap_BotLibUpdateEntity(i, NULL);
-				continue;
-			}
-
-            //
-			memset(&state, 0, sizeof(bot_entitystate_t));
-			//
-			VectorCopy(ent->r.currentOrigin, state.origin);
-			if (i < MAX_CLIENTS) {
-				VectorCopy(ent->s.apos.trBase, state.angles);
-			} else {
-				VectorCopy(ent->r.currentAngles, state.angles);
-			}
-			VectorCopy(ent->s.origin2, state.old_origin);
-			VectorCopy(ent->r.mins, state.mins);
-			VectorCopy(ent->r.maxs, state.maxs);
-			state.type = ent->s.eType;
-			state.flags = ent->s.eFlags;
-			if (ent->r.bmodel) state.solid = SOLID_BSP;
-			else state.solid = SOLID_BBOX;
-			state.groundent = ent->s.groundEntityNum;
-			state.modelindex = ent->s.modelindex;
-			state.modelindex2 = ent->s.modelindex2;
-			state.frame = ent->s.frame;
-			state.event = ent->s.event;
-			state.eventParm = ent->s.eventParm;
-			state.powerups = ent->s.powerups;
-			state.legsAnim = ent->s.legsAnim;
-			state.torsoAnim = ent->s.torsoAnim;
-			state.weapon = ent->s.weapon;
-			//
-			trap_BotLibUpdateEntity(i, &state);
-		}
-
-		BotAIRegularUpdate();
-	}
-#endif /* !FEAT_RECAST_NAVMESH */
-
-#if !FEAT_RECAST_NAVMESH
-	floattime = trap_AAS_Time();
-#else
 	floattime = (float)trap_Milliseconds() * 0.001f;
-#endif
 
 	// execute scheduled bot AI
 	for( i = 0; i < MAX_CLIENTS; i++ ) {
@@ -1745,12 +1708,14 @@ int BotAIStartFrame(int time) {
 		if ( botstates[i]->botthink_residual >= thinktime ) {
 			botstates[i]->botthink_residual -= thinktime;
 
-#if !FEAT_RECAST_NAVMESH
-			if (!trap_AAS_Initialized()) return qfalse;
-#endif
-
-			if ( botstates[i]->wiredBotsActive ) {
+			if ( botstates[i]->wiredIntelActive ) {
 				trap_BotLuaBotThink( botstates[i]->client, (float)thinktime / 1000.0f );
+				/* Walk the per-brain sequenced-goal cursor before BotAI runs, so a
+				   multi-step goal projects its current step into ltgtype/teamgoal
+				   (directive-locked) for the unmodified AINode_Seek_LTG engine to
+				   drive. Inert (cheap early-return) when the brain has no active
+				   sequence — zero behavior change for a normal bot. */
+				WiredIntel_StepSequencedGoal( botstates[i] );
 			}
 
 			if (g_entities[i].client->pers.connected == CON_CONNECTED) {
@@ -1782,70 +1747,12 @@ BotInitLibrary
 ==============
 */
 int BotInitLibrary(void) {
-#if FEAT_RECAST_NAVMESH
 	char buf[16];
 	/* Minimal setup under Recast: only maxclients is needed so EA_Setup can
 	 * size the botinputs array. AAS and other subsystems are not initialised. */
 	Com_sprintf(buf, sizeof(buf), "%d", level.maxclients);
 	trap_BotLibVarSet("maxclients", buf);
 	return trap_BotLibSetup();
-#else
-	char buf[144];
-
-	//set the maxclients and maxentities library variables before calling BotSetupLibrary
-	Com_sprintf(buf, sizeof(buf), "%d", level.maxclients);
-	trap_BotLibVarSet("maxclients", buf);
-	Com_sprintf(buf, sizeof(buf), "%d", MAX_GENTITIES);
-	trap_BotLibVarSet("maxentities", buf);
-	//bsp checksum
-	trap_Cvar_VariableStringBuffer("sv_mapChecksum", buf, sizeof(buf));
-	if (strlen(buf)) trap_BotLibVarSet("sv_mapChecksum", buf);
-	//maximum number of aas links
-	trap_Cvar_VariableStringBuffer("max_aaslinks", buf, sizeof(buf));
-	if (strlen(buf)) trap_BotLibVarSet("max_aaslinks", buf);
-	//maximum number of items in a level
-	trap_Cvar_VariableStringBuffer("max_levelitems", buf, sizeof(buf));
-	if (strlen(buf)) trap_BotLibVarSet("max_levelitems", buf);
-	//game type
-	trap_Cvar_VariableStringBuffer("g_gametype", buf, sizeof(buf));
-	if (!strlen(buf)) strcpy(buf, "0");
-	trap_BotLibVarSet("g_gametype", buf);
-	//bot developer mode and log file
-	trap_BotLibVarSet("bot_developer", bot_developer.string);
-	trap_Cvar_VariableStringBuffer("log_file_enabled", buf, sizeof(buf));
-	trap_BotLibVarSet("log", buf);
-	//no chatting
-	trap_Cvar_VariableStringBuffer("bot_nochat", buf, sizeof(buf));
-	if (strlen(buf)) trap_BotLibVarSet("nochat", buf);
-	//visualize jump pads
-	trap_Cvar_VariableStringBuffer("bot_visualizejumppads", buf, sizeof(buf));
-	if (strlen(buf)) trap_BotLibVarSet("bot_visualizejumppads", buf);
-	//forced clustering calculations
-	trap_Cvar_VariableStringBuffer("bot_forceclustering", buf, sizeof(buf));
-	if (strlen(buf)) trap_BotLibVarSet("forceclustering", buf);
-	//forced reachability calculations
-	trap_Cvar_VariableStringBuffer("bot_forcereachability", buf, sizeof(buf));
-	if (strlen(buf)) trap_BotLibVarSet("forcereachability", buf);
-	//force writing of AAS to file
-	trap_Cvar_VariableStringBuffer("bot_forcewrite", buf, sizeof(buf));
-	if (strlen(buf)) trap_BotLibVarSet("forcewrite", buf);
-	//no AAS optimization
-	trap_Cvar_VariableStringBuffer("bot_aasoptimize", buf, sizeof(buf));
-	if (strlen(buf)) trap_BotLibVarSet("aasoptimize", buf);
-	//
-	trap_Cvar_VariableStringBuffer("bot_saveroutingcache", buf, sizeof(buf));
-	if (strlen(buf)) trap_BotLibVarSet("saveroutingcache", buf);
-	//reload instead of cache bot character files
-	trap_Cvar_VariableStringBuffer("bot_reloadcharacters", buf, sizeof(buf));
-	if (!strlen(buf)) strcpy(buf, "0");
-	trap_BotLibVarSet("bot_reloadcharacters", buf);
-	//game directory
-	trap_Cvar_VariableStringBuffer("fs_game", buf, sizeof(buf));
-	if (strlen(buf)) trap_BotLibVarSet("gamedir", buf);
-	//
-	//setup the bot library
-	return trap_BotLibSetup();
-#endif /* FEAT_RECAST_NAVMESH */
 }
 
 /*

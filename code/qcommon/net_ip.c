@@ -7,7 +7,6 @@
 #include "q_feats.h"
 
 #include "wired/net/wn_public.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_network, "network" );
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 // Set to qtrue when any registered demux consumed a packet — tells NET_Event to keep draining
@@ -1999,10 +1998,10 @@ static void NET_Event( const fd_set *fdr )
 					continue; // drop this packet
 			}
 
-#ifdef DEDICATED
+#ifdef HEADLESS
 			Com_RunAndTimeServerPacket( &from, &netmsg );
 #else
-			if ( com_sv_running->integer || com_dedicated->integer )
+			if ( com_sv_running->integer )
 				Com_RunAndTimeServerPacket( &from, &netmsg );
 			else
 				CL_PacketEvent( &from, &netmsg );
@@ -2020,35 +2019,38 @@ static void NET_Event( const fd_set *fdr )
 	}
 
 	/* Pump client QUIC timers (non-dedicated: drive TLS handshake + ACKs) */
-#if !defined(DEDICATED)
+#if !defined(HEADLESS)
 	CL_PROF(wnframe, WN_ClientFrame());
 	/* Poll reliable game streams (bootstrap/downloads/events) */
 	CL_PROF(relstr, CL_CheckReliableStreams());
 	/* Poll unreliable datagrams (snapshot delivery) */
 	CL_PROF(snapdg, CL_CheckSnapshotDatagrams());
 #endif
-
-	/* QUIC game packet drain — kept for compatibility; WN_GetGamePacket now
-	   always returns qfalse.  Server usercmd datagrams are consumed by
-	   SV_DrainQUICUsercmds; client snapshot datagrams by CL_CheckSnapshotDatagrams.
-	   Draining either queue here would starve the real consumer and break
-	   delta sequencing ("Delta request from out of date packet"). */
-	while ( 1 ) {
-		MSG_Init( &netmsg, bufData, MAX_MSGLEN );
-
-		if ( !WN_GetGamePacket( &from, &netmsg ) )
-			break;
-
-#ifdef DEDICATED
-		Com_RunAndTimeServerPacket( &from, &netmsg );
-#else
-		if ( com_sv_running->integer || com_dedicated->integer )
-			Com_RunAndTimeServerPacket( &from, &netmsg );
-		else
-			CL_PacketEvent( &from, &netmsg );
-#endif
-	}
 }
+
+
+#if !defined(HEADLESS)
+/*
+====================
+NET_PumpInmemClient
+
+Drive the client-side recv consumers for the in-memory host on a frame where
+select() saw no UDP activity (or there is no socket at all). The QUIC client is
+woken by NET_Event on socket readability; the in-memory host produces no UDP
+traffic, so without this its bootstrap + snapshot rings — already populated by
+the in-process server send path — would never be consumed and the client would
+hang in CA_CONNECTING. No-op (single predicate test) when no in-mem client.
+====================
+*/
+static void NET_PumpInmemClient( void )
+{
+	if ( !WN_HasInmemClient() )
+		return;
+	WN_ClientFrame();             /* lifecycle (deferred disconnect, etc.) */
+	CL_CheckReliableStreams();    /* bootstrap (gamestate) + reliable events */
+	CL_CheckSnapshotDatagrams();  /* snapshot delivery */
+}
+#endif
 
 
 /*
@@ -2090,6 +2092,12 @@ qboolean NET_Sleep( int timeout )
 
 	if ( highestfd == INVALID_SOCKET )
 	{
+#if !defined(HEADLESS)
+		/* In-process-queue: the in-memory host has no socket, so select() is
+		 * skipped entirely here — but its bootstrap/snapshot rings still need
+		 * draining every frame. Pump the client recv consumers before sleeping. */
+		NET_PumpInmemClient();
+#endif
 #ifdef _WIN32
 		// windows ain't happy when select is called without valid FDs
 		Sleep( timeout / 1000 );
@@ -2121,6 +2129,14 @@ qboolean NET_Sleep( int timeout )
 			NET_ErrorString() );
 	}
 
+#if !defined(HEADLESS)
+	/* select() timed out (no UDP activity). In listen-server mode the server's
+	 * own UDP socket keeps highestfd valid, so NET_Event above does NOT run on a
+	 * quiet frame — the in-memory host's client recv consumers would never fire.
+	 * Pump them here. Gated on WN_HasInmemClient so the QUIC path is unchanged. */
+	NET_PumpInmemClient();
+#endif
+
 	return qtrue;
 }
 
@@ -2148,7 +2164,7 @@ Packet send / loopback / OOB / DNS utilities
 LOOPBACK BUFFERS FOR LOCAL PLAYER
 =============================================================================
 */
-#ifndef DEDICATED
+#ifndef HEADLESS
 
 #define	MAX_LOOPBACK	32
 
@@ -2195,7 +2211,7 @@ static void NET_SendLoopPacket( netsrc_t sock, int length, const void *data )
 	loop->msgs[i].datalen = length;
 }
 
-#endif /* !DEDICATED */
+#endif /* !HEADLESS */
 
 /*
 =============================================================================
@@ -2250,7 +2266,7 @@ static packetQueue_t *PQ_Process( packetQueue_t *head, const int time_diff ) {
 		int now = Sys_Milliseconds();
 		if ( now - item->release >= time_diff ) {
 			packetQueue_t *next = item->next;
-#ifndef DEDICATED
+#ifndef HEADLESS
 			if ( item->to.type == NA_LOOPBACK )
 				NET_SendLoopPacket( item->sock, item->length, item->data );
 			else
@@ -2296,7 +2312,7 @@ void NET_SendPacket( netsrc_t sock, int length, const void *data, const netadr_t
 {
 	if ( to->type == NA_BOT || to->type == NA_BAD ) return;
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	if ( sock == NS_CLIENT && cl_packetdelay->integer > 0 ) {
 		NET_QueuePacket( sock, length, data, to, cl_packetdelay->integer );
 	} else
@@ -2304,7 +2320,7 @@ void NET_SendPacket( netsrc_t sock, int length, const void *data, const netadr_t
 	if ( sock == NS_SERVER && sv_packetdelay->integer > 0 ) {
 		NET_QueuePacket( sock, length, data, to, sv_packetdelay->integer );
 	}
-#ifndef DEDICATED
+#ifndef HEADLESS
 	else if ( to->type == NA_LOOPBACK ) {
 		NET_SendLoopPacket( sock, length, data );
 	}

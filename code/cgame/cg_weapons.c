@@ -7,6 +7,68 @@
 #include "../qcommon/wired/render/primitives.h"
 #include "../qcommon/wired/render/traps.h"
 
+// Ejected-brass physics tunables (modder-tunable, not user cvars). Mirror the
+// speed-scaled gib tumble idiom (cg_effects.c): a hard ejection spins faster
+// than a soft one. BRASS_TUMBLE_SCALE turns the launch speed into a deg/s spin;
+// the non-dominant axes get BRASS_TUMBLE_OFFAXIS of the dominant rate so the
+// tumble reads as a spin rather than a uniform wobble.
+#define BRASS_TUMBLE_SCALE      1.4f    // spin rate per unit launch speed
+#define BRASS_TUMBLE_OFFAXIS    0.25f   // off-axis spin fraction
+// Fraction of the firing player's velocity the brass inherits, so a strafing
+// player's shells trail their motion without shooting off at full speed.
+#define BRASS_MOMENTUM_SCALE    0.5f
+
+/*
+==================
+CG_SetBrassTumble
+
+Give a freshly-ejected brass shell a speed-scaled tumble: angular velocity
+proportional to its launch speed, with one dominant axis so it reads as a spin.
+Brass is a purely local cosmetic effect, so a plain crandom() seed is fine (no
+cross-client determinism is needed, unlike networked gib events).
+==================
+*/
+static void CG_SetBrassTumble( localEntity_t *le ) {
+	float	speedIsh;
+	int		mainAxis;
+	int		i;
+
+	speedIsh = fabs( le->pos.trDelta[0] ) + fabs( le->pos.trDelta[1] ) + fabs( le->pos.trDelta[2] );
+	mainAxis = rand() % 3;
+
+	le->angles.trType = TR_LINEAR;
+	le->angles.trTime = cg.time;
+	le->angles.trBase[0] = rand() & 31;
+	le->angles.trBase[1] = rand() & 31;
+	le->angles.trBase[2] = rand() & 31;
+	for ( i = 0; i < 3; i++ ) {
+		float axisMul = ( mainAxis == i ) ? 1.0f : BRASS_TUMBLE_OFFAXIS;
+		le->angles.trDelta[i] = speedIsh * BRASS_TUMBLE_SCALE * axisMul * crandom();
+	}
+}
+
+/*
+==================
+CG_BrassInheritMomentum
+
+Add a fraction of the firing player's world velocity to the brass so it trails
+the shooter's motion. The local player is client-side predicted, so its live
+velocity is cg.predictedPlayerState.velocity; remote players are interpolated,
+so their velocity rides currentState.pos.trDelta.
+==================
+*/
+static void CG_BrassInheritMomentum( const centity_t *cent, localEntity_t *le ) {
+	const float	*playerVel;
+
+	if ( cent->currentState.number == cg.predictedPlayerState.clientNum ) {
+		playerVel = cg.predictedPlayerState.velocity;
+	} else {
+		playerVel = cent->currentState.pos.trDelta;
+	}
+
+	VectorMA( le->pos.trDelta, BRASS_MOMENTUM_SCALE, playerVel, le->pos.trDelta );
+}
+
 /*
 ==========================
 CG_MachineGunEjectBrass
@@ -55,22 +117,19 @@ static void CG_MachineGunEjectBrass( centity_t *cent ) {
 	xvelocity[1] = velocity[0] * v[0][1] + velocity[1] * v[1][1] + velocity[2] * v[2][1];
 	xvelocity[2] = velocity[0] * v[0][2] + velocity[1] * v[1][2] + velocity[2] * v[2][2];
 	VectorScale( xvelocity, waterScale, le->pos.trDelta );
+	// inherit a fraction of the firing player's motion so brass trails a
+	// strafing shooter (S-4 momentum-inherit)
+	CG_BrassInheritMomentum( cent, le );
 
 	AxisCopy( axisDefault, re->axis );
 	re->hModel = cgs.media.machinegunBrassModel;
 
 	le->bounceFactor = 0.4 * waterScale;
 
-	le->angles.trType = TR_LINEAR;
-	le->angles.trTime = cg.time;
-	le->angles.trBase[0] = rand()&31;
-	le->angles.trBase[1] = rand()&31;
-	le->angles.trBase[2] = rand()&31;
-	le->angles.trDelta[0] = 2;
-	le->angles.trDelta[1] = 1;
-	le->angles.trDelta[2] = 0;
+	// speed-scaled tumble (replaces the vanilla flat {2,1,0} deg/s) (S-2)
+	CG_SetBrassTumble( le );
 
-	le->leFlags = LEF_TUMBLE;
+	le->leFlags = LEF_TUMBLE | LEF_BRASS;
 	le->leBounceSoundType = LEBS_BRASS;
 	le->leMarkType = LEMT_NONE;
 }
@@ -127,21 +186,17 @@ static void CG_ShotgunEjectBrass( centity_t *cent ) {
 		xvelocity[1] = velocity[0] * v[0][1] + velocity[1] * v[1][1] + velocity[2] * v[2][1];
 		xvelocity[2] = velocity[0] * v[0][2] + velocity[1] * v[1][2] + velocity[2] * v[2][2];
 		VectorScale( xvelocity, waterScale, le->pos.trDelta );
+		// inherit a fraction of the firing player's motion (S-4)
+		CG_BrassInheritMomentum( cent, le );
 
 		AxisCopy( axisDefault, re->axis );
 		re->hModel = cgs.media.shotgunBrassModel;
 		le->bounceFactor = 0.3f;
 
-		le->angles.trType = TR_LINEAR;
-		le->angles.trTime = cg.time;
-		le->angles.trBase[0] = rand()&31;
-		le->angles.trBase[1] = rand()&31;
-		le->angles.trBase[2] = rand()&31;
-		le->angles.trDelta[0] = 1;
-		le->angles.trDelta[1] = 0.5;
-		le->angles.trDelta[2] = 0;
+		// speed-scaled tumble (replaces the vanilla flat {1,0.5,0} deg/s) (S-2)
+		CG_SetBrassTumble( le );
 
-		le->leFlags = LEF_TUMBLE;
+		le->leFlags = LEF_TUMBLE | LEF_BRASS;
 		le->leBounceSoundType = LEBS_BRASS;
 		le->leMarkType = LEMT_NONE;
 	}
@@ -183,30 +238,20 @@ static void CG_ShotgunEjectBrass( centity_t *cent ) {
 CG_RailTrail — Q2-spirit modernized rail trail
 
 Architecture:
-  1. Helix ribbon: quad-per-segment batch via AddPolyToScene
-     - Beam-axis-fixed spiral (PerpendicularVector + RotatePointAroundVector)
-     - Stored in railTrail_t for per-frame fade re-submission
-  2. White debris: batched billboard quads (random scatter)
-  3. Impact sparks: surface-normal-based velocity, animated per-frame
-  4. Dynamic light: AddLinearLightToScene with HDR intensity
+  1. Helix: one GPU-resident rail-ribbon emitted ONCE at spawn via
+     trap_R_AddRailRibbonToScene; the renderer's persistent pool regenerates
+     the evolving spiral each frame from the spawn params + age (no per-frame
+     CPU rebuild)
+  2. Debris + impact sparks: GPU particle pool, emitted once at spawn via
+     trap_R_EmitParticles
+  3. Dynamic light: AddLightToScene with HDR intensity, re-submitted per frame
+     in CG_AddRailTrails (lights are per-frame, not pooled)
 
 Zero localEntities used. Zero entity pool impact.
 ==========================
 */
 
 static railTrail_t  cg_railTrails[MAX_RAIL_TRAILS];
-
-// shared temp buffer for per-frame fade submission (avoids stack pressure)
-static polyVert_t   cg_railTempVerts[MAX_RAIL_SEGMENTS * 4];
-
-// Helix GPU-ribbon scratch. Sized at MAX_RAIL_SEGMENTS = 2048 which
-// is also RIBBON_MAX_POINTS — the per-call cap on
-// trap_R_AddRibbonToScene. ~96 KB; file-static rather than a stack
-// local to avoid stack pressure on the rare deep call chain. Reused
-// across all active rail trails — only one trail's worth of points
-// are alive at any instant since trap_R_AddRibbonToScene memcpies
-// out before returning.
-static ribbonPoint_t cg_railHelixPoints[MAX_RAIL_SEGMENTS];
 
 /*
 ==========================
@@ -296,7 +341,11 @@ void CG_RailTrail( clientInfo_t *ci, vec3_t start, vec3_t end ) {
 	trail->color[2] = 255; trail->color[3] = 255;
 	VectorCopy( end, trail->impactPoint );
 
-	// ── 1. Store helix axis data (rebuilt each frame with evolving radius/spacing) ──
+	// ── 1. Store helix axis data ──
+	//
+	// The helix geometry is regenerated GPU-side each frame from these
+	// spawn-fixed axes + the trail's age; nothing about the spiral is
+	// rebuilt on the CPU after this point.
 
 	// stable perpendicular reference frame (Q2 approach)
 	VectorCopy( beamAxis, trail->beamAxis );
@@ -310,73 +359,42 @@ void CG_RailTrail( clientInfo_t *ci, vec3_t start, vec3_t end ) {
 		trail->numSegments = MAX_RAIL_SEGMENTS;
 	}
 
-	// ── 2. Build debris particles (Q2-style: 1 quad per 7.5 units along beam) ──
+	// ── 1b. Emit the GPU-resident helix ONCE ───────────────────────
 	//
-	// Q2 places one particle every 0.75 units (dec = 0.75 in CL_RailTrail).
-	// Since Q3 debris are quads instead of GL_POINTS, use a 1:10 sampling
-	// ratio — one quad every ~7.5 units. Colors map Q2 palette 0x00-0x0F
-	// (white to mid-grey) via rand()&15 normalized to [0..1].
+	// The renderer's persistent rail-ribbon pool regenerates the evolving
+	// spiral (expanding radius, unwinding spacing, per-point fade) every
+	// frame from these spawn params + (now - spawnTime) until the duration
+	// expires — the emit-and-forget pattern for animated geometry. The base
+	// colour is the turquoise the CPU builder used; the per-point unwind-
+	// fade alpha is applied GPU-side, so base alpha is 1.
 	{
-		float debrisDec = 7.5f;
-		float d = 0.0f;
-		int   idx = 0;
+		railRibbonDesc_t rr;
+		int r;
 
-		while ( d < len && idx < MAX_RAIL_DEBRIS ) {
-			// Q2 palette 0x00-0x0F: white(255) → mid-grey(128)
-			// lerp: grey = 255 - (rand()&15) * 8  →  range [255..135]
-			int greyVal = 255 - ( rand() & 15 ) * 8;
-			byte debrisColor[4];
-			debrisColor[0] = greyVal; debrisColor[1] = greyVal;
-			debrisColor[2] = greyVal; debrisColor[3] = 255;
-
-			// spawn position: along beam center + scatter ±3 (Q2: crand()*3)
-			trail->debrisOrg[idx][0] = start[0] + d * beamAxis[0] + crandom() * 3;
-			trail->debrisOrg[idx][1] = start[1] + d * beamAxis[1] + crandom() * 3;
-			trail->debrisOrg[idx][2] = start[2] + d * beamAxis[2] + crandom() * 3;
-
-			// random drift velocity (Q2: crand()*3)
-			trail->debrisDelta[idx][0] = crandom() * 3;
-			trail->debrisDelta[idx][1] = crandom() * 3;
-			trail->debrisDelta[idx][2] = crandom() * 3;
-
-			// store initial color in debris quad
-			CG_BuildBillboardQuad( &trail->debris[idx * 4], trail->debrisOrg[idx], 0.5f, debrisColor );
-
-			d += debrisDec;
-			idx++;
+		memset( &rr, 0, sizeof( rr ) );
+		VectorCopy( trail->start,    rr.start );
+		VectorCopy( trail->beamAxis, rr.beamAxis );
+		for ( r = 0; r < 36; r++ ) {
+			VectorCopy( trail->perpAxis[r], rr.perpAxis[r] );
 		}
-		trail->numDebris = idx;
+		rr.beamLen  = trail->beamLen;
+		rr.color[0] =  80.0f / 255.0f;
+		rr.color[1] = 200.0f / 255.0f;
+		rr.color[2] = 1.0f;
+		rr.color[3] = 1.0f;
+		rr.duration = RAIL_TRAILTIME / 1000.0f;   // seconds
+		rr.shader   = cgs.media.whiteShader;
+		rr.flags    = 0;
+		trap_R_AddRailRibbonToScene( &rr );
 	}
 
-	// ── 3. Build impact sparks ────────────────────────────────────
-
-	trail->numSparks = MAX_RAIL_SPARKS;
-	for ( i = 0; i < trail->numSparks; i++ ) {
-		byte sparkColor[4] = { 255, 255, 220, 255 }; // warm white
-
-		VectorCopy( end, trail->sparkOrg[i] );
-
-		// velocity: surface normal + random scatter
-		trail->sparkVel[i][0] = trail->impactNormal[0] * 80 + crandom() * 40;
-		trail->sparkVel[i][1] = trail->impactNormal[1] * 80 + crandom() * 40;
-		trail->sparkVel[i][2] = trail->impactNormal[2] * 80 + crandom() * 40;
-
-		CG_BuildBillboardQuad( &trail->sparks[i * 4], trail->sparkOrg[i], 0.3f, sparkColor );
-	}
-
-	// ── 4. GPU particle emission (default path) ────────────────────
+	// ── 2. GPU particle emission ───────────────────────────────────
 	//
-	// When cg_cpuEffects == 0 (default) the per-frame CPU debris
-	// and sparks loops in CG_AddRailTrails are skipped; instead each
-	// trail emits once at spawn into the GPU particle pool. The
+	// Each trail emits once at spawn into the GPU particle pool. The
 	// compute shader integrates each particle over its lifetime; the
-	// render shader draws billboards. Helix is unaffected — it
-	// remains on the CPU poly path regardless of this cvar.
-	//
-	// CPU spawn-time setup above (debrisOrg/Delta and spark arrays)
-	// is left intact so flipping the cvar at runtime back to 1
-	// resumes the CPU path mid-session without re-firing.
-	if ( !cg_cpuEffects.integer ) {
+	// render shader draws billboards. The helix renders separately as a
+	// GPU ribbon in CG_AddRailTrails.
+	{
 		emitterDesc_t emitter;
 
 		// Debris: along trail->start..trail->end, MAX_RAIL_DEBRIS
@@ -414,15 +432,12 @@ CG_AddRailTrails — per-frame submission with fade, animation
 ==========================
 */
 void CG_AddRailTrails( void ) {
-	int i, j;
+	int i;
+
 
 	for ( i = 0; i < MAX_RAIL_TRAILS; i++ ) {
 		railTrail_t *trail = &cg_railTrails[i];
-		float       frac, alpha, segAlpha;
-		float       elapsed;
-		int         numQuads;
-		byte        fadedColor[4];
-		qboolean    gpuHelixSubmitted = qfalse;
+		float       frac, alpha;
 
 		if ( !trail->active ) {
 			continue;
@@ -433,304 +448,21 @@ void CG_AddRailTrails( void ) {
 			trail->active = qfalse;
 			continue;
 		}
-		elapsed = ( cg.time - trail->startTime ) / 1000.0f;
 		alpha = 1.0f - frac;
 
 		// ── Helix ──
 		//
-		// cg_cpuEffects 0 (default): GPU path — one
-		//   trap_R_AddRibbonToScene per active trail with
-		//   PRIM_FLAG_CUSTOM_NORMAL. The renderer's ribbon vertex
-		//   shader uses each point's normal directly as the extrude
-		//   axis, reproducing the path-aligned twist the CPU loop
-		//   builds from cross(beamAxis, perpAxis[ring]).
-		// cg_cpuEffects 1: legacy CPU path — per-segment quads via
-		//   trap_R_AddPolyToScene (one call per segment, ~250 calls
-		//   per trail per frame). Kept for A/B compare and
-		//   regression fallback.
-		if ( cg_cpuEffects.integer ) {
-
-		// === CPU PATH (legacy; cg_cpuEffects == 1) =================
-		// Body verbatim from pre-migration; do not edit inside this
-		// block. The sprite primitive's camera-facing billboards
-		// overlapped heavily along the spiral path, saturating to
-		// white, which is why this path was kept after the sprite
-		// migration was reverted.
-		{
-			// ease-out curve: starts slow, accelerates at end
-			float easedFrac  = 1.0f - (1.0f - frac) * (1.0f - frac);
-			// radius: 2 → 4 over lifetime, spacing: 3 → 1
-			float curRadius  = 2.0f + easedFrac * 2.0f;
-			float curSpacing = RAIL_HELIX_SPACING * ( 1.0f - easedFrac * 0.667f );
-			float curWidth   = RAIL_RIBBON_WIDTH * ( 1.0f + easedFrac * 1.5f );
-			int   numSegs    = (int)( trail->beamLen / curSpacing );
-			int   step       = 1;
-			int   tempIdx    = 0;
-			int   ringJ      = 0;
-			vec3_t midpoint;
-
-			if ( numSegs > MAX_RAIL_SEGMENTS ) numSegs = MAX_RAIL_SEGMENTS;
-			if ( numSegs < 2 ) numSegs = 2;
-
-			// distance LOD
-			midpoint[0] = trail->start[0] + 0.5f * (trail->end[0] - trail->start[0]);
-			midpoint[1] = trail->start[1] + 0.5f * (trail->end[1] - trail->start[1]);
-			midpoint[2] = trail->start[2] + 0.5f * (trail->end[2] - trail->start[2]);
-			if ( Distance( cg.refdef.vieworg, midpoint ) > 1000.0f ) {
-				step = 2;
-			}
-
-			for ( j = 0; j < numSegs - 1; j += step ) {
-				// build from END backward — endpoint stays stable, muzzle recedes
-				float d0 = trail->beamLen - j * curSpacing;
-				float d1 = trail->beamLen - ( j + step ) * curSpacing;
-				int   ring0 = ringJ % 36;
-				int   ring1 = ( ringJ + RAIL_HELIX_ROTATION * step ) % 36;
-				vec3_t sp0, sp1, rn0, rn1;
-				float segPos, unwindFade;
-				byte  a;
-
-				if ( d0 < 0.0f ) d0 = 0.0f;
-				if ( d1 < 0.0f ) break; // past muzzle, stop
-
-				// spiral positions along beam (d measured from start)
-				VectorMA( trail->start, d0, trail->beamAxis, sp0 );
-				VectorMA( sp0, curRadius, trail->perpAxis[ring0], sp0 );
-				VectorMA( trail->start, d1, trail->beamAxis, sp1 );
-				VectorMA( sp1, curRadius, trail->perpAxis[ring1], sp1 );
-
-				// ribbon normals
-				CrossProduct( trail->beamAxis, trail->perpAxis[ring0], rn0 );
-				VectorNormalize( rn0 );
-				CrossProduct( trail->beamAxis, trail->perpAxis[ring1], rn1 );
-				VectorNormalize( rn1 );
-
-				// unwind fade: segments near muzzle (far from impact) fade first
-				segPos = (float)j / ( numSegs - 1 ); // 0=impact end, 1=muzzle end
-				unwindFade = 1.0f - frac * ( 1.0f + segPos );
-				if ( unwindFade < 0.0f ) unwindFade = 0.0f;
-				a = (byte)( alpha * unwindFade * 255 );
-
-				// quad verts
-				VectorMA( sp0, -curWidth, rn0, cg_railTempVerts[tempIdx + 0].xyz );
-				VectorMA( sp0,  curWidth, rn0, cg_railTempVerts[tempIdx + 1].xyz );
-				VectorMA( sp1, -curWidth, rn1, cg_railTempVerts[tempIdx + 2].xyz );
-				VectorMA( sp1,  curWidth, rn1, cg_railTempVerts[tempIdx + 3].xyz );
-
-				cg_railTempVerts[tempIdx + 0].st[0] = d0 / 64.0f; cg_railTempVerts[tempIdx + 0].st[1] = 0.0f;
-				cg_railTempVerts[tempIdx + 1].st[0] = d0 / 64.0f; cg_railTempVerts[tempIdx + 1].st[1] = 1.0f;
-				cg_railTempVerts[tempIdx + 2].st[0] = d1 / 64.0f; cg_railTempVerts[tempIdx + 2].st[1] = 0.0f;
-				cg_railTempVerts[tempIdx + 3].st[0] = d1 / 64.0f; cg_railTempVerts[tempIdx + 3].st[1] = 1.0f;
-
-				{
-					// turquoise/ocean-blue: R=80 G=200 B=255
-					for ( int v = 0; v < 4; v++ ) {
-						cg_railTempVerts[tempIdx + v].modulate.rgba[0] = 80;
-						cg_railTempVerts[tempIdx + v].modulate.rgba[1] = 200;
-						cg_railTempVerts[tempIdx + v].modulate.rgba[2] = 255;
-						cg_railTempVerts[tempIdx + v].modulate.rgba[3] = a;
-					}
-				}
-
-				tempIdx += 4;
-				ringJ += RAIL_HELIX_ROTATION * step;
-			}
-
-			if ( tempIdx > 0 ) {
-				for ( int k = 0; k < tempIdx; k += 4 ) {
-					trap_R_AddPolyToScene( cgs.media.whiteShader, 4,
-						&cg_railTempVerts[k] );
-				}
-			}
-		}
-
-		} else {
-
-		// === GPU PATH (default; cg_cpuEffects == 0) ================
-		// Builds N spiral sample positions and submits ONE ribbon
-		// with PRIM_FLAG_CUSTOM_NORMAL. Each point carries its own
-		// world-space position, half-width, RGBA, and unit extrude
-		// normal — the ribbon vertex shader reads .normal directly
-		// (no cross-product fallback). The N points form N-1 quad
-		// segments per the ribbon shader's segIdx → points[i],
-		// points[i+1] indexing.
-		//
-		// The CPU loop emits a quad per CPU iteration using sp0/sp1
-		// and rn0/rn1; equivalently, it walks N sample positions
-		// and forms N-1 segments. The migration walks the same
-		// sample positions and lets the ribbon shader form the
-		// segments. Per-segment alpha in CPU was set from the
-		// segment's start vertex; in ribbon mode each point carries
-		// its own alpha and the GPU interpolates linearly across
-		// each segment. The alpha gradient between adjacent points
-		// is small (frac is fixed for the frame; segPos changes by
-		// step/(numSegs-1) per point), so the interpolation is
-		// visually indistinguishable from the CPU's stepped values.
-		{
-			// Same evolved parameters as the CPU branch.
-			float  easedFrac  = 1.0f - (1.0f - frac) * (1.0f - frac);
-			float  curRadius  = 2.0f + easedFrac * 2.0f;
-			float  curSpacing = RAIL_HELIX_SPACING * ( 1.0f - easedFrac * 0.667f );
-			float  curWidth   = RAIL_RIBBON_WIDTH * ( 1.0f + easedFrac * 1.5f );
-			int    numSegs    = (int)( trail->beamLen / curSpacing );
-			int    step       = 1;
-			int    numPoints  = 0;
-			vec3_t midpoint;
-
-			if ( numSegs > MAX_RAIL_SEGMENTS ) numSegs = MAX_RAIL_SEGMENTS;
-			if ( numSegs < 2 ) numSegs = 2;
-
-			// Distance LOD — same threshold as CPU.
-			midpoint[0] = trail->start[0] + 0.5f * (trail->end[0] - trail->start[0]);
-			midpoint[1] = trail->start[1] + 0.5f * (trail->end[1] - trail->start[1]);
-			midpoint[2] = trail->start[2] + 0.5f * (trail->end[2] - trail->start[2]);
-			if ( Distance( cg.refdef.vieworg, midpoint ) > 1000.0f ) {
-				step = 2;
-			}
-
-			// Walk sample positions j = 0, step, 2*step, ...,
-			// up to numSegs - 1 INCLUSIVE — one more sample than
-			// the CPU loop's `j < numSegs - 1` to capture the final
-			// d1 endpoint that the CPU iteration would have used as
-			// its sp1. N samples → N-1 ribbon segments → N-1
-			// quads, matching CPU's quad count exactly when both
-			// paths use the same step.
-			for ( j = 0; j <= numSegs - 1; j += step ) {
-				float        d, segPos, unwindFade, a;
-				int          ring;
-				ribbonPoint_t *p;
-
-				d = trail->beamLen - j * curSpacing;
-				if ( d < 0.0f ) {
-					// CPU's `if (d1 < 0) break` analogue. Stops
-					// adding points past the muzzle.
-					break;
-				}
-
-				ring = ( j * RAIL_HELIX_ROTATION ) % 36;
-				if ( ring < 0 ) ring += 36; // defensive; j*RAIL_HELIX_ROTATION is non-negative in practice
-
-				p = &cg_railHelixPoints[ numPoints ];
-
-				// Position: same formula as CPU's sp0.
-				VectorMA( trail->start, d,         trail->beamAxis,        p->pos );
-				VectorMA( p->pos,       curRadius, trail->perpAxis[ring],  p->pos );
-
-				// Normal: same formula as CPU's rn0. Caller-side
-				// normalize is required by the ribbon shader's
-				// PRIM_FLAG_CUSTOM_NORMAL contract.
-				CrossProduct( trail->beamAxis, trail->perpAxis[ring], p->normal );
-				VectorNormalize( p->normal );
-				p->_pad = 0.0f;
-
-				// Half-width: uniform across the trail; written per
-				// point because ribbonPoint_t carries it per-point.
-				p->width = curWidth;
-
-				// Per-point alpha: same unwind-fade formula CPU
-				// uses for the segment-START vertex. CPU emits the
-				// quad with this alpha on all four vertices; in
-				// ribbon mode the GPU interpolates between adjacent
-				// points' alpha, producing a smoother but visually
-				// equivalent fade.
-				segPos = (float)j / ( numSegs - 1 );
-				unwindFade = 1.0f - frac * ( 1.0f + segPos );
-				if ( unwindFade < 0.0f ) unwindFade = 0.0f;
-				a = alpha * unwindFade;
-
-				// Turquoise/ocean-blue: R=80 G=200 B=255. Float
-				// [0..1] per primitives.h convention (HDR-friendly,
-				// no quantization).
-				p->rgba[0] =  80.0f / 255.0f;
-				p->rgba[1] = 200.0f / 255.0f;
-				p->rgba[2] = 1.0f;
-				// (B=255/255 → 1.0f; written explicitly so the maxed channel reads at a glance.)
-				p->rgba[3] = a;
-
-				numPoints++;
-			}
-
-			// Submit. Ribbon trap takes four scalars (not a
-			// ribbonDesc_t pointer) so the descriptor's points
-			// pointer can be VMA-translated cleanly across the
-			// WASM-VM boundary; see traps.h for rationale.
-			if ( numPoints >= 2 ) {
-				trap_R_AddRibbonToScene( cg_railHelixPoints, numPoints,
-					cgs.media.whiteShader, PRIM_FLAG_CUSTOM_NORMAL );
-			}
-		}
-
-		}
+		// The spiral is GPU-resident: it was emitted ONCE at fire time in
+		// CG_RailTrail (trap_R_AddRailRibbonToScene) and the renderer's
+		// persistent pool regenerates its evolving geometry every frame from
+		// the spawn params + age. Nothing about the helix is rebuilt here —
+		// the ~96 KB/frame CPU point rebuild is gone.
 
 		// ── Debris + impact sparks ──
 		//
-		// cg_cpuEffects == 1 → run the legacy CPU per-frame loops
-		// (trap_R_AddPolyToScene). Default 0 → skip; the GPU particle
-		// path emitted at trail spawn time in CG_RailTrail handles
-		// these effects via trap_R_EmitParticles. Helix block above
-		// runs unconditionally.
-		if ( cg_cpuEffects.integer ) {
-
-		// ── Debris (with gravity drift) ──
-
-		if ( trail->numDebris > 0 ) {
-			int tempIdx = 0;
-			for ( j = 0; j < trail->numDebris; j++ ) {
-				vec3_t pos;
-				byte a;
-				byte debrisColor[4];
-
-				VectorMA( trail->debrisOrg[j], elapsed, trail->debrisDelta[j], pos );
-
-				a = (byte)( alpha * 255 );
-				debrisColor[0] = trail->debris[j * 4].modulate.rgba[0];
-				debrisColor[1] = trail->debris[j * 4].modulate.rgba[1];
-				debrisColor[2] = trail->debris[j * 4].modulate.rgba[2];
-				debrisColor[3] = a;
-
-				CG_BuildBillboardQuad( &cg_railTempVerts[tempIdx], pos, 0.5f, debrisColor );
-				tempIdx += 4;
-			}
-
-			{
-				for ( int k = 0; k < tempIdx; k += 4 ) {
-					trap_R_AddPolyToScene( cgs.media.railRingsShader, 4,
-						&cg_railTempVerts[k] );
-				}
-			}
-		}
-
-		// ── Impact sparks (first 200ms, velocity + gravity) ──
-
-		if ( frac < 0.2f && trail->numSparks > 0 ) {
-			int tempIdx = 0;
-			float sparkAlpha = 1.0f - ( frac / 0.2f );
-			for ( j = 0; j < trail->numSparks; j++ ) {
-				vec3_t pos;
-				byte sparkColor[4];
-				byte a;
-
-				a = (byte)( sparkAlpha * 255 );
-
-				VectorMA( trail->sparkOrg[j], elapsed, trail->sparkVel[j], pos );
-				pos[2] -= 0.5f * 400.0f * elapsed * elapsed; // strong gravity on sparks
-
-				sparkColor[0] = 255; sparkColor[1] = 255;
-				sparkColor[2] = 220; sparkColor[3] = a;
-
-				CG_BuildBillboardQuad( &cg_railTempVerts[tempIdx], pos, 0.3f, sparkColor );
-				tempIdx += 4;
-			}
-
-			{
-				for ( int k = 0; k < tempIdx; k += 4 ) {
-					trap_R_AddPolyToScene( cgs.media.whiteShader, 4,
-						&cg_railTempVerts[k] );
-				}
-			}
-		}
-
-		} // end cg_cpuEffects gate
+		// The debris and impact sparks render from the GPU particle pool,
+		// emitted once at trail spawn time in CG_RailTrail via
+		// trap_R_EmitParticles; nothing is submitted per-frame here.
 
 		// ── Dynamic light (synced fade) ──
 
@@ -751,12 +483,9 @@ CG_RocketTrail
 static void CG_RocketTrail( centity_t *ent, const weaponInfo_t *wi ) {
 	int		step;
 	vec3_t	origin, lastPos;
-	int		t;
 	int		startTime, contents;
 	int		lastContents;
 	entityState_t	*es;
-	vec3_t	up;
-	localEntity_t	*smoke;
 
 	if ( cg_noProjectileTrail.integer ) {
 		return;
@@ -765,15 +494,10 @@ static void CG_RocketTrail( centity_t *ent, const weaponInfo_t *wi ) {
 	if ( cg.stopTime ) return;
 #endif
 
-	up[0] = 0;
-	up[1] = 0;
-	up[2] = 0;
-
 	step = 50;
 
 	es = &ent->currentState;
 	startTime = ent->trailTime;
-	t = step * ( (startTime + step) / step );
 
 	BG_EvaluateTrajectory( &es->pos, cg.time, origin );
 	contents = CG_PointContents( origin, -1 );
@@ -787,9 +511,7 @@ static void CG_RocketTrail( centity_t *ent, const weaponInfo_t *wi ) {
 	BG_EvaluateTrajectory( &es->pos, ent->trailTime, lastPos );
 	lastContents = CG_PointContents( lastPos, -1 );
 
-	ent->trailTime = cg.time;
-
-	// Phase 6.5.3: rocket/grenade pierced a water surface this frame → splash
+	// rocket/grenade pierced a water surface this frame → splash
 	// at the crossing point (Q1 maps only). Re-trace the just-travelled segment
 	// with a CONTENTS_WATER-only mask to recover the surface intersection —
 	// forward when entering, reversed when exiting (the entering side is solid
@@ -807,22 +529,55 @@ static void CG_RocketTrail( centity_t *ent, const weaponInfo_t *wi ) {
 		if ( contents & lastContents & CONTENTS_WATER ) {
 			CG_BubbleTrail( lastPos, origin, 8 );
 		}
+		// In liquid: no smoke. Advance the cursor to now (vanilla parity) so the
+		// next dry frame does NOT emit a burst spanning the submerged transit.
+		ent->trailTime = cg.time;
 		return;
 	}
 
-	for ( ; t <= ent->trailTime ; t += step ) {
-		BG_EvaluateTrajectory( &es->pos, t, lastPos );
+	if ( cgs.media.rocketSmokeClass ) {
+		// GPU-ring smoke (MIG-trail-1, single path — W-51 cvar gate retired):
+		// ONE EMIT_PATH per frame over the just-travelled segment instead of N
+		// legacy LE_ puffs. EMIT_PATH samples the rocket_smoke class uniformly
+		// start→end; the class carries the exact look (alpha-blend, grow 8→56,
+		// alpha 0.33→0 over 1.8s, zero velocity = hang in place), so colorTint is
+		// neutral white.
+		//
+		// FRAMERATE-INDEPENDENT EMIT (restores the vanilla accumulator the GPU
+		// port dropped): `step` is a 50 ms TIME interval (NOT a per-frame
+		// distance). ent->trailTime is a RUNNING CURSOR, not reset to cg.time each
+		// frame. Count the fixed 50 ms grid-boundaries that fall in
+		// (startTime, cg.time], emit one particle per crossed boundary along the
+		// travelled segment, and advance the cursor to the LAST crossed boundary —
+		// leaving the sub-step (< 50 ms) remainder to accumulate into the next
+		// frame. A 1000 u/s rocket crosses 20 boundaries/s → 20 puffs/s at ANY
+		// framerate (vs the old segLen/50 single-frame truncation, which rounded
+		// each ~8–33 u frame down to 0 above ~20 fps → dead trail). On a frame
+		// short enough that no boundary is crossed (count == 0) the cursor is left
+		// UNCHANGED so the remainder keeps building — this is the load-bearing fix.
+		int t     = step * ( ( startTime + step ) / step );  // first grid boundary > startTime
+		int count = 0;
+		for ( ; t <= cg.time; t += step ) count++;            // boundaries in (startTime, cg.time]
+		if ( count > 0 ) {
+			vec3_t        segStart;
+			emitterDesc_t emitter;
+			vec3_t        axis;
+			BG_EvaluateTrajectory( &es->pos, startTime, segStart );  // pos at the OLD cursor
+			memset( &emitter, 0, sizeof( emitter ) );
+			emitter.cls   = cgs.media.rocketSmokeClass;
+			emitter.count = count;
+			VectorCopy( segStart, emitter.origin );
+			VectorCopy( origin,   emitter.end );                     // origin = pos@cg.time (above)
+			VectorSubtract( origin, segStart, axis );
+			VectorNormalize( axis );
+			VectorCopy( axis, emitter.axis );
+			emitter.colorTint[0] = 1.0f; emitter.colorTint[1] = 1.0f;
+			emitter.colorTint[2] = 1.0f; emitter.colorTint[3] = 1.0f;
+			trap_R_EmitParticles( &emitter );
 
-		smoke = CG_SmokePuff( lastPos, up,
-					  wi->trailRadius,
-					  1, 1, 1, 0.33f,
-					  wi->wiTrailTime,
-					  t,
-					  0,
-					  0,
-					  cgs.media.smokePuffShader );
-		// use the optimized local entity add
-		smoke->leType = LE_SCALE_FADE;
+			ent->trailTime = t - step;   // last crossed boundary; < step remainder carries over
+		}
+		// count == 0: leave ent->trailTime unchanged (remainder accumulates).
 	}
 
 }
@@ -1054,6 +809,14 @@ void CG_RegisterWeapon( int weaponNum ) {
 	char			path[MAX_QPATH];
 	vec3_t			mins, maxs;
 	int				i;
+
+	// weaponNum is server-controlled (cent->currentState.weapon); reject an
+	// out-of-range index before it indexes cg_weapons[]. This choke-point also
+	// covers the &cg_weapons[weaponNum] deref in CG_AddPlayerWeapon, which calls
+	// CG_RegisterWeapon(weaponNum) first.
+	if ( (unsigned)weaponNum >= WP_NUM_WEAPONS ) {
+		return;
+	}
 
 	weaponInfo = &cg_weapons[weaponNum];
 
@@ -1461,7 +1224,7 @@ static void CG_LightningBolt( centity_t *cent, vec3_t origin ) {
 // eser - lightning beams
 
 	// === Beam submission =====================================
-	// Phase 5I: legacy DoRailCore + DoRailCoreTapered two-segment
+	// legacy DoRailCore + DoRailCoreTapered two-segment
 	// shape. Main body uniform width 8 from flash.origin to
 	// (trace.endpos - 64u along axis); tail tapers from width 8 to
 	// width 0 over the last 64u near the wall. Both segments use
@@ -1714,13 +1477,21 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 	weaponNum = cent->currentState.weapon;
     ci = &cgs.clientinfo[cent->currentState.clientNum];
 
+	// weaponNum is server-controlled (cent->currentState.weapon); reject an
+	// out-of-range index before the &cg_weapons[weaponNum] deref below. The
+	// CG_RegisterWeapon entry guard only protects its own internal deref — it
+	// returns early but execution still falls through to this line, so this
+	// caller-side check is required too (bug-class closure, not just the entry).
+	if ( (unsigned)weaponNum >= WP_NUM_WEAPONS ) {
+		return;
+	}
+
 	CG_RegisterWeapon( weaponNum );
 	weapon = &cg_weapons[weaponNum];
 
 	// add the weapon
 	memset( &gun, 0, sizeof( gun ) );
 	VectorCopy( parent->lightingOrigin, gun.lightingOrigin );
-	gun.shadowPlane = parent->shadowPlane;
 	gun.renderfx = parent->renderfx;
 
 	// set custom shading for railgun refire rate
@@ -1821,7 +1592,6 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 	if ( weapon->barrelModel ) {
 		memset( &barrel, 0, sizeof( barrel ) );
 		VectorCopy( parent->lightingOrigin, barrel.lightingOrigin );
-		barrel.shadowPlane = parent->shadowPlane;
 		barrel.renderfx = parent->renderfx;
 
 		barrel.hModel = weapon->barrelModel;
@@ -1863,7 +1633,6 @@ void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent
 
 	memset( &flash, 0, sizeof( flash ) );
 	VectorCopy( parent->lightingOrigin, flash.lightingOrigin );
-	flash.shadowPlane = parent->shadowPlane;
 	flash.renderfx = parent->renderfx;
 
 	flash.hModel = weapon->flashModel;
@@ -2018,9 +1787,12 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 			break;
 		}
 
-	gen_gunx = cg_gunX.value + cg_weapon_positions[ps->weapon][gun_position][0];
-	gen_guny = cg_gunY.value + cg_weapon_positions[ps->weapon][gun_position][1];
-	gen_gunz = cg_gunZ.value + cg_weapon_positions[ps->weapon][gun_position][2];
+	// ps->weapon is an 8-bit field seeded from the snapshot and never clamped in
+	// cgame; cg_weapon_positions[] only has WP_NUM_WEAPONS rows, so bound it.
+	int wpos = ( (unsigned)ps->weapon < WP_NUM_WEAPONS ) ? ps->weapon : 0;
+	gen_gunx = cg_gunX.value + cg_weapon_positions[wpos][gun_position][0];
+	gen_guny = cg_gunY.value + cg_weapon_positions[wpos][gun_position][1];
+	gen_gunz = cg_gunZ.value + cg_weapon_positions[wpos][gun_position][2];
 
 	// drop gun lower at higher fov
 	if ( cg_fov.integer > 90 ) {
@@ -2030,6 +1802,15 @@ void CG_AddViewWeapon( playerState_t *ps ) {
 	}
 
 	cent = &cg.predictedPlayerEntity;	// &cg_entities[cg.snap->ps.clientNum];
+
+	// ps->weapon is server-controlled and never clamped in cgame (same untrusted
+	// index the cg_weapon_positions[] guard above bounds). Reject an out-of-range
+	// value before it indexes cg_weapons[] — skip drawing the view weapon this
+	// frame rather than dereferencing OOB. (CG_RegisterWeapon also self-guards, but
+	// that would not stop the &cg_weapons[ps->weapon] deref on the next line.)
+	if ( (unsigned)ps->weapon >= WP_NUM_WEAPONS ) {
+		return;
+	}
 	CG_RegisterWeapon( ps->weapon );
 	weapon = &cg_weapons[ ps->weapon ];
 
@@ -2420,7 +2201,7 @@ void CG_MissileHitWall( int pType, int clientNum, vec3_t origin, vec3_t dir, imp
 	if ( pType == PROJ_NONE ) {
 		int hitContents = CG_PointContents( origin, 0 );
 		if ( hitContents & ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) {
-			// Phase 6.5.3: replace the old degenerate CG_BubbleTrail(origin,origin,32)
+			// replace the old degenerate CG_BubbleTrail(origin,origin,32)
 			// (zero-length → spawned nothing) with a small rising bubble burst at the
 			// underwater impact. Q1-map gated; Q3 maps keep the previous no-op.
 			if ( cgs.q1Map ) {
@@ -2557,14 +2338,52 @@ void CG_MissileHitWall( int pType, int clientNum, vec3_t origin, vec3_t dir, imp
 	//
 	// create the explosion
 	//
-	if ( mod ) {
+	if ( pType == PROJ_ROCKET && cgs.media.explosionFireClass ) {
+		// GPU path (single path, W-51 — cvar gate retired): the rocket
+		// fireball renders as the explosion_fire flipbook on the GPU ring
+		// instead of the legacy LE_ sprite. One BURST particle, lifted off
+		// the impact surface.
+		emitterDesc_t emitter;
+		vec3_t        emitOrigin;
+		// The billboard is camera-facing and centred on emitOrigin; the GPU
+		// particle pass depth-tests against the scene (reversed-Z, no depth
+		// write). A burst placed FLUSH on the impact surface sits at the wall's
+		// depth, so the additive billboard z-fights / depth-clips against the
+		// wall and the fireball all but vanishes. The legacy LE_ sprite avoided
+		// this by offsetting its origin 16u along the impact normal
+		// (CG_MakeExplosion, isSprite path). The GPU billboard half-extent is
+		// ~36u (cls.sizeStart), so lift it the billboard radius off the surface
+		// to clear the wall plane entirely.
+		VectorMA( origin, 36.0f, dir, emitOrigin );
+		memset( &emitter, 0, sizeof( emitter ) );
+		emitter.cls   = cgs.media.explosionFireClass;
+		emitter.count = 1;
+		VectorCopy( emitOrigin, emitter.origin );
+		VectorCopy( dir,        emitter.axis );
+		emitter.colorTint[0] = 1.0f; emitter.colorTint[1] = 1.0f;
+		emitter.colorTint[2] = 1.0f; emitter.colorTint[3] = 1.0f;
+		trap_R_EmitParticles( &emitter );
+
+		// The impact light (light=300, lightColor) rode on the LE_ sprite;
+		// preserve it with a light-only local entity — hModel 0 + shader 0
+		// makes this a light-only LE_EXPLOSION: CG_AddExplosion skips the
+		// zero-model refEntity submission (which would otherwise draw the
+		// renderer's invalid-model RGB-axis fallback) and runs only the dlight
+		// fade with the exact same formula. No feature loss; the LE_ system is
+		// untouched.
+		le = CG_MakeExplosion( origin, dir, 0, 0, duration, qfalse );
+		le->light = light;
+		VectorCopy( lightColor, le->lightColor );
+	} else if ( mod ) {
 		le = CG_MakeExplosion( origin, dir,
 							   mod,	shader,
 							   duration, isSprite );
 		le->light = light;
 		VectorCopy( lightColor, le->lightColor );
 		if ( pType == PROJ_RAILGUN ) {
-			// colorize with client color
+			// colorize with client color — clientNum is server-controlled and can
+			// exceed MAX_CLIENTS (cgs.clientinfo[] extent), so clamp before indexing.
+			if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) clientNum = 0;
 			VectorCopy( cgs.clientinfo[clientNum].color1, le->color );
 			le->refEntity.shaderRGBA[0] = le->color[0] * 0xff;
 			le->refEntity.shaderRGBA[1] = le->color[1] * 0xff;
@@ -2784,6 +2603,13 @@ static void CG_ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, int othe
 	float		r, u;
 	vec3_t		end;
 	vec3_t		forward, right, up;
+	// RS-3 mirror: `seed` is the packed EV_SHOTGUN eventParm — bits[7:0]=rotation/
+	// PRNG seed, bits[23:8]=the server's int-quantized bloom magnitude. Unpack the
+	// SAME int the server packed so the splash pattern traced here matches the
+	// server's bullet pattern exactly (no float/int requantization drift). The
+	// seed-driven pellet PATTERN is unchanged; only the scalar magnitude ramps.
+	int			seedLow = seed & 255;
+	float		spreadScale = (float)( ( seed >> 8 ) & 0xFFFF ) * 16;
 
 	// derive the right and up vectors from the forward vector, because
 	// the client won't have any other information
@@ -2793,8 +2619,7 @@ static void CG_ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, int othe
 
 #if FEAT_SHOTGUN_PATTERN
 	{
-		float rotation = ( seed / 256.0f ) * 2.0f * M_PI;
-		float spreadScale = DEFAULT_SHOTGUN_SPREAD * 16;
+		float rotation = ( seedLow / 256.0f ) * 2.0f * M_PI;
 
 		for ( i = 0; i < DEFAULT_SHOTGUN_COUNT; i++ ) {
 			float angle = bg_shotgunPattern[i].angle + rotation;
@@ -2813,8 +2638,8 @@ static void CG_ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, int othe
 #else
 	// generate the "random" spread pattern
 	for ( i = 0 ; i < DEFAULT_SHOTGUN_COUNT ; i++ ) {
-		r = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
-		u = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
+		r = Q_crandom( &seedLow ) * spreadScale;
+		u = Q_crandom( &seedLow ) * spreadScale;
 		VectorMA( origin, 8192 * 16, forward, end);
 		VectorMA (end, r, right, end);
 		VectorMA (end, u, up, end);
@@ -2822,7 +2647,7 @@ static void CG_ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, int othe
 		CG_ShotgunPellet( origin, end, otherEntNum );
 	}
 #endif
-	// Phase 6.5.3: one water-crossing splash for the whole blast — trace the
+	// one water-crossing splash for the whole blast — trace the
 	// centre line (per-pellet splashes would be far too noisy). Q1-map gated
 	// inside CG_WaterCrossingSplashes.
 	{
@@ -2907,7 +2732,7 @@ static void CG_ShotgunPatternSpread( vec3_t origin, vec3_t origin2, int seed, in
 		CG_ShotgunPellet( origin, end, otherEntNum );
 	}
 #endif
-	// Phase 6.5.3: one water-crossing splash for the whole blast (centre line).
+	// one water-crossing splash for the whole blast (centre line).
 	{
 		vec3_t  centerEnd;
 		trace_t ctr;
@@ -2958,12 +2783,11 @@ CG_Tracer
 ===============
 */
 void CG_Tracer( vec3_t source, vec3_t dest ) {
-	vec3_t		forward, right;
-	polyVert_t	verts[4];
-	vec3_t		line;
+	vec3_t		forward;
 	float		len, begin, end;
 	vec3_t		start, finish;
 	vec3_t		midpoint;
+	beamDesc_t	bd;
 
 	// tracer
 	VectorSubtract( dest, source, forward );
@@ -2981,46 +2805,29 @@ void CG_Tracer( vec3_t source, vec3_t dest ) {
 	VectorMA( source, begin, forward, start );
 	VectorMA( source, end, forward, finish );
 
-	line[0] = DotProduct( forward, cg.refdef.viewaxis[1] );
-	line[1] = DotProduct( forward, cg.refdef.viewaxis[2] );
-
-	VectorScale( cg.refdef.viewaxis[1], line[1], right );
-	VectorMA( right, -line[0], cg.refdef.viewaxis[2], right );
-	VectorNormalize( right );
-
-	VectorMA( finish, cg_tracerWidth.value, right, verts[0].xyz );
-	verts[0].st[0] = 0;
-	verts[0].st[1] = 1;
-	verts[0].modulate.rgba[0] = 255;
-	verts[0].modulate.rgba[1] = 255;
-	verts[0].modulate.rgba[2] = 255;
-	verts[0].modulate.rgba[3] = 255;
-
-	VectorMA( finish, -cg_tracerWidth.value, right, verts[1].xyz );
-	verts[1].st[0] = 1;
-	verts[1].st[1] = 0;
-	verts[1].modulate.rgba[0] = 255;
-	verts[1].modulate.rgba[1] = 255;
-	verts[1].modulate.rgba[2] = 255;
-	verts[1].modulate.rgba[3] = 255;
-
-	VectorMA( start, -cg_tracerWidth.value, right, verts[2].xyz );
-	verts[2].st[0] = 1;
-	verts[2].st[1] = 1;
-	verts[2].modulate.rgba[0] = 255;
-	verts[2].modulate.rgba[1] = 255;
-	verts[2].modulate.rgba[2] = 255;
-	verts[2].modulate.rgba[3] = 255;
-
-	VectorMA( start, cg_tracerWidth.value, right, verts[3].xyz );
-	verts[3].st[0] = 0;
-	verts[3].st[1] = 0;
-	verts[3].modulate.rgba[0] = 255;
-	verts[3].modulate.rgba[1] = 255;
-	verts[3].modulate.rgba[2] = 255;
-	verts[3].modulate.rgba[3] = 255;
-
-	trap_R_AddPolyToScene( cgs.media.tracerShader, 4, verts );
+	// Emit the tracer as a TRANSIENT beam (gpu-offload: a coarse two-endpoint
+	// descriptor, not a hand-built quad — the beam pool owns the geometry). The
+	// beam pipeline builds the same camera-facing quad start->finish the old poly
+	// did (cross(axis, toEye)), extruded ±cg_tracerWidth (per-side half-width), and
+	// renders the additive tracer art (gfx/misc/tracer = blendFunc GL_ONE GL_ONE,
+	// which is the single blend the beam pipeline uses). duration 0 = one-frame
+	// transient (re-submitted per fire, freed each frame — no persistent slot use),
+	// axialCopies 1 = a single flat quad matching the old single poly.
+	memset( &bd, 0, sizeof( bd ) );
+	VectorCopy( start,  bd.start );
+	VectorCopy( finish, bd.end );
+	bd.startWidth     = cg_tracerWidth.value;
+	bd.endWidth       = cg_tracerWidth.value;
+	bd.startColor[0] = bd.startColor[1] = bd.startColor[2] = bd.startColor[3] = 1.0f;
+	bd.endColor[0]   = bd.endColor[1]   = bd.endColor[2]   = bd.endColor[3]   = 1.0f;
+	bd.shader         = cgs.media.tracerShaderPrim;
+	bd.duration       = 0.0f;          // transient: one frame, re-emit per fire
+	bd.axialCopies    = 1;             // single flat quad (no cross pattern)
+	bd.startEntityNum = -1;            // world-static endpoints
+	bd.endEntityNum   = -1;
+	bd.uvScroll[0]    = 0.0f;          // static UV (matches the old fixed-texture quad)
+	bd.uvScroll[1]    = 0.0f;
+	trap_R_AddBeamToScene( &bd );
 
 	midpoint[0] = ( start[0] + finish[0] ) * 0.5;
 	midpoint[1] = ( start[1] + finish[1] ) * 0.5;
@@ -3037,7 +2844,7 @@ void CG_Tracer( vec3_t source, vec3_t dest ) {
 CG_CalcMuzzlePoint
 ======================
 */
-static qboolean	CG_CalcMuzzlePoint( int entityNum, vec3_t muzzle ) {
+qboolean	CG_CalcMuzzlePoint( int entityNum, vec3_t muzzle ) {
 	vec3_t		forward;
 	centity_t	*cent;
 	int			anim;
@@ -3085,7 +2892,7 @@ void CG_Bullet( vec3_t end, int sourceEntityNum, vec3_t normal, qboolean flesh, 
 
 	// if the shooter is currently valid, calc a source point and do the
 	// underwater trail / water-crossing effects.
-	// Phase 6.5.3: this block used to be gated by `cg_tracerChance.value > 0`
+	// this block used to be gated by `cg_tracerChance.value > 0`
 	// as well — that was a plain bug (water bubble trails have nothing to do
 	// with tracers; a player with `cg_tracerChance 0` should still see bubbles
 	// when a bullet crosses water, on Q3 maps too). Un-gated here; only the
@@ -3117,7 +2924,7 @@ void CG_Bullet( vec3_t end, int sourceEntityNum, vec3_t normal, qboolean flesh, 
 				}
 			}
 
-			// Phase 6.5.3: splash sprite + sound where the bullet pierces a
+			// splash sprite + sound where the bullet pierces a
 			// liquid surface (Q1 maps only — internal cgs.q1Map gate).
 			CG_WaterCrossingSplashes( start, end );
 

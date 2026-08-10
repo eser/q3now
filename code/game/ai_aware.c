@@ -61,12 +61,12 @@ void BotAwareUpdate( struct bot_state_s *bs )
 		}
 	}
 
-	if ( bs->wiredBotsActive ) {
+	if ( bs->wiredIntelActive ) {
 		// skill-1 fallback = 0.2x radius, skill-5 = 1.0x; autoskill-aware fallback
-		awareRadius = AWARE_BASE_RADIUS * WiredBots_ProfileFieldOr( bs, WB_PROFILE_ALERTNESS, WiredBots_ResolveAbility( bs, 0.2f, 1.0f ) );
+		awareRadius = AWARE_BASE_RADIUS * WiredIntel_ProfileFieldOr( bs, WI_PROFILE_ALERTNESS, WiredIntel_ResolveAbility( bs, 0.2f, 1.0f ) );
 	} else {
 		// skill-1 bot uses 0.2x base radius, skill-5 bot uses 1.0x
-		awareRadius = AWARE_BASE_RADIUS * WiredBots_ResolveAbility( bs, 0.2f, 1.0f );
+		awareRadius = AWARE_BASE_RADIUS * WiredIntel_ResolveAbility( bs, 0.2f, 1.0f );
 	}
 
 	// --- trigger 1: missile owners ---
@@ -107,13 +107,20 @@ void BotAwareTrackEntity( struct bot_state_s *bs, int entnum, float radius )
 	float dist, react;
 	vec3_t delta;
 
-	if ( entnum < 0 || entnum >= MAX_CLIENTS ) return;
+	// Range covers the whole entity array, not just the client slots: a
+	// non-client behavior monster is a trackable threat. The body below reads
+	// only r.currentOrigin, which every linked entity carries, so no
+	// client-only dereference follows.
+	if ( entnum < 0 || entnum >= MAX_GENTITIES ) return;
 
 	ent = &g_entities[entnum];
-	if ( !ent->inuse || !ent->client ) return;
+	if ( !ent->inuse ) return;
+	// A non-client candidate must be a live, damageable behavior monster;
+	// items, movers and other world entities are not threats.
+	if ( !ent->client && ( !ent->aiThink || !ent->takedamage || ent->health <= 0 ) ) return;
 
 	// must be enemy
-	if ( OnSameTeam( ent, &g_entities[bs->entitynum] ) ) return;
+	if ( G_SameSquad( ent, &g_entities[bs->entitynum] ) ) return;
 
 	// check distance
 	VectorSubtract( ent->r.currentOrigin, bs->origin, delta );
@@ -137,7 +144,7 @@ void BotAwareTrackEntity( struct bot_state_s *bs, int entnum, float radius )
 	}
 
 	// skill-1 bot waits 1.0x react time, skill-5 waits 0.2x; higher skill = faster reaction
-	react = AWARE_REACT_BASE * WiredBots_ResolveAbility( bs, 1.0f, 0.2f );
+	react = AWARE_REACT_BASE * WiredIntel_ResolveAbility( bs, 1.0f, 0.2f );
 
 	bs->aware[bs->num_aware].ent.entnum = entnum;
 	bs->aware[bs->num_aware].ent.eType = ET_PLAYER;

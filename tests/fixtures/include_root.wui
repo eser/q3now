@@ -1,0 +1,25 @@
+// include_root.wui — fixture verifying #include resolves a widget body
+// fragment inside a menuDef.
+menuDef {
+	name "include_root"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+	backcolor 0 0 0 1
+	layer "menu"
+
+	#include "tests/fixtures/include_widget.wui"
+
+	itemDef {
+		name "include_root_label"
+		type 0
+		rect 0.2 0.2 0.6 0.06
+		textalign 1
+		font "oxanium" 22
+		forecolor 1 1 1 1
+		text "ROOT BEFORE INCLUDE"
+		decoration
+		visible 1
+	}
+}

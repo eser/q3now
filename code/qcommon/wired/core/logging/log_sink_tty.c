@@ -69,10 +69,18 @@ static void TtySink_Emit( const log_record_t *rec, void *ctx )
         int         hlen = 0;
         const char *bracket;
         int         blen;
+        const char *color;
+
+        // Severity color prefix. The terminal holds color state across writes
+        // and Sys_ANSIColorify resets at each '\n', so prefixing the header
+        // carries the color through the whole logical line.
+        color = Log_SeverityColor( rec->severity );
+        while ( *color )
+            header[hlen++] = *color++;
 
         // Optional timestamp (fmt=2: "HH:MM:SS.mmm+HH:MM"), gated by con_timestamp.
         if ( c->timestamp_cvar && c->timestamp_cvar->integer ) {
-            hlen = Com_FormatTimestamp( header, sizeof( header ) - 16, 2 );
+            hlen += Com_FormatTimestamp( header + hlen, sizeof( header ) - hlen - 16, 2 );
             // Max timestamp len is 18; 16-byte guard leaves room for bracket+NUL.
             assert( hlen < (int)sizeof( header ) - 14 );
             header[hlen++] = ' ';

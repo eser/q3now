@@ -2,12 +2,12 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "client.h"
+#include "../qcommon/wired/core/console/con_public.h"
 #include "wired/ui/cl_wired_ui.h"
 #include "wired/ui/cl_wired_msdf.h"
 #include "wired/ui/cl_wired_fonts.h"
 #include "wired/ui/cl_wired_text.h"
 #include "../qcommon/wired/core/scripting/wired_scripting.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 /*
@@ -299,7 +299,7 @@ static void Field_SeekWord( field_t *edit, int direction )
 			edit->cursor--;
 		while ( edit->cursor > 0 && edit->buffer[ edit->cursor-1 ] != ' ' )
 			edit->cursor--;
-		if ( edit->cursor == 0 && ( edit->buffer[ 0 ] == '/' || edit->buffer[ 0 ] == '\\' ) )
+		if ( edit->cursor == 0 && edit->buffer[ 0 ] == '\\' )
 			edit->cursor++;
 	}
 }
@@ -700,36 +700,23 @@ static void Console_Key( int key ) {
 
 	// enter finishes the line
 	if ( key == K_ENTER || key == K_KP_ENTER ) {
-		// if not in the game explicitly prepend a slash if needed
-		if ( cls.state != CA_ACTIVE
-			&& g_consoleField.buffer[0] != '\0'
-			&& g_consoleField.buffer[0] != '\\'
-			&& g_consoleField.buffer[0] != '/' ) {
-			char	temp[MAX_EDIT_LINE-1];
-
-			Q_strncpyz( temp, g_consoleField.buffer, sizeof( temp ) );
-			Com_sprintf( g_consoleField.buffer, sizeof( g_consoleField.buffer ), "\\%s", temp );
-			g_consoleField.cursor++;
-		}
-
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "]%s\n", g_consoleField.buffer );
 
-		// leading slash is an explicit command
-		if ( g_consoleField.buffer[0] == '\\' || g_consoleField.buffer[0] == '/' ) {
-			Cbuf_AddText( g_consoleField.buffer+1 );	// valid command
+		// empty lines just scroll the console without adding to history
+		if ( !g_consoleField.buffer[0] ) {
+			return;
+		}
+
+		// A leading '\' is the opt-in escape to the legacy command/cvar
+		// path (Cbuf). Everything else — '/'-prefixed input included — is
+		// handed to the Lua console; neither '\' nor '/' is otherwise
+		// special, and the eval result is intentionally ignored (no
+		// command fallback, no chat-from-console).
+		if ( g_consoleField.buffer[0] == '\\' ) {
+			Cbuf_AddText( g_consoleField.buffer + 1 );
 			Cbuf_AddText( "\n" );
 		} else {
-			// other text will be chat messages
-			if ( !g_consoleField.buffer[0] ) {
-				return;	// empty lines just scroll the console without adding to history
-			}
-			if ( WiredScript_TryEval( g_consoleField.buffer ) ) {
-				/* Lua handled it -- skip chat dispatch */
-			} else {
-				Cbuf_AddText( "cmd say " );
-				Cbuf_AddText( g_consoleField.buffer );
-				Cbuf_AddText( "\n" );
-			}
+			WiredScript_TryEval( g_consoleField.buffer );
 		}
 
 		// copy line to history buffer
@@ -738,7 +725,7 @@ static void Console_Key( int key ) {
 		Field_Clear( &g_consoleField );
 		g_consoleField.widthInChars = g_console_field_width;
 
-		if ( cls.state == CA_DISCONNECTED ) {
+		if ( clientActiveApp->state == CA_DISCONNECTED ) {
 			SCR_UpdateScreen ();	// force an update, because the command
 		}							// may take some time
 		return;
@@ -830,7 +817,7 @@ static void Message_Key( int key ) {
 
 	if ( key == K_ENTER || key == K_KP_ENTER )
 	{
-		if ( chatField.buffer[0] && cls.state == CA_ACTIVE ) {
+		if ( chatField.buffer[0] && clientActiveApp->state == CA_ACTIVE ) {
 			if (chat_playerNum != -1 )
 
 				Com_sprintf( buffer, sizeof( buffer ), "tell %i \"%s\"\n", chat_playerNum, chatField.buffer );
@@ -841,7 +828,7 @@ static void Message_Key( int key ) {
 			else
 				Com_sprintf( buffer, sizeof( buffer ), "say \"%s\"\n", chatField.buffer );
 
-			CL_AddReliableCommand( buffer, qfalse );
+			CL_AddReliableCommand( clientActiveApp, buffer, qfalse );
 		}
 		Key_SetCatcher( Key_GetCatcher( ) & ~KEYCATCH_MESSAGE );
 		Field_Clear( &chatField );
@@ -882,6 +869,26 @@ static void CL_KeyDownEvent( int key, unsigned time )
 
 	// console key is hardcoded, so the user can never unbind it
 	if ( key == K_CONSOLE || ( keys[K_SHIFT].down && key == K_ESCAPE ) ) {
+		qboolean consoleOpen = ( Key_GetCatcher() & KEYCATCH_CONSOLE ) != 0;
+		qboolean atAttract =
+			clientActiveApp->state == CA_DISCONNECTED
+			&& !( Key_GetCatcher() & KEYCATCH_UI )
+			&& WiredUI_GetMenuStackDepth() == 0;
+
+		/* Pick the view mode when OPENING. Attract / bare-disconnected opens the
+		 * console FULL-screen (the attract <-> full-console pair); the menu,
+		 * in-game and loading screens open it HALF-screen as an overlay that
+		 * leaves the underlying state visible below. Closing keeps whatever mode
+		 * was shown (it animates away either way). */
+		if ( !consoleOpen ) {
+			Con_SetViewMode( atAttract ? CON_VIEW_FULL : CON_VIEW_HALF );
+		}
+
+		/* Closing the console over attract does NOT restart the reel: attract
+		 * kept running underneath the console the whole time (it is a separate
+		 * top layer, Eser 2026-07-03), so closing simply reveals it at the spot
+		 * it reached — no interruption. A fresh reel is only wanted when returning
+		 * to attract from the MENU (ESC), where attract was hidden, not here. */
 		Con_ToggleConsole_f();
 		Key_ClearStates();
 		return;
@@ -890,19 +897,38 @@ static void CL_KeyDownEvent( int key, unsigned time )
 	// hardcoded screenshot key
 	if ( key == K_PRINT ) {
 		if ( keys[K_SHIFT].down ) {
-			Cbuf_ExecuteText( EXEC_APPEND, "screenshotBMP\n" );
+			Cbuf_ExecuteText( EXEC_APPEND, "screenshot bmp\n" );
 		} else {
-			Cbuf_ExecuteText( EXEC_APPEND, "screenshotBMP clipboard\n" );
+			Cbuf_ExecuteText( EXEC_APPEND, "screenshot clipboard\n" );
 		}
 		return;
 	}
 
 	// keys can still be used for bound actions
-	if ( ( key < 128 || key == K_MOUSE1 ) && cls.state == CA_CINEMATIC && Key_GetCatcher() == 0 ) {
+	if ( ( key < 128 || key == K_MOUSE1 ) && clientActiveApp->state == CA_CINEMATIC && Key_GetCatcher() == 0 ) {
 		if ( Cvar_VariableIntegerValue( "com_cameraMode" ) == 0 ) {
 			Cvar_Set ("nextdemo","");
 			key = K_ESCAPE;
 		}
+	}
+
+	/* Attract-state first-input promotion. At CA_DISCONNECTED with no
+	 * catcher set the bg_attract layer is the sole visible surface; the
+	 * first discrete keypress / mouse click brings up the main menu over
+	 * it. ESC is intentionally excluded (acts as a no-op via the ESC
+	 * handler below, which falls through its !KEYCATCH_UI block for
+	 * CA_DISCONNECTED). The console key + screenshot key already
+	 * short-circuited above. Mouse motion is not routed through
+	 * CL_KeyDownEvent, so cursor wobble does not trip this. */
+	if ( key != K_ESCAPE
+	  && clientActiveApp->state == CA_DISCONNECTED
+	  && !( Key_GetCatcher() & ( KEYCATCH_UI | KEYCATCH_CONSOLE | KEYCATCH_CGAME | KEYCATCH_MESSAGE ) )
+	  && UI_VM_ACTIVE
+	  && !com_sv_running->integer ) {
+		S_StopAllSounds();
+		UI_CALL_SET_ACTIVE( UIMENU_MAIN );
+		Key_ClearStates();
+		return;
 	}
 
 	// escape is always handled special
@@ -911,7 +937,7 @@ static void CL_KeyDownEvent( int key, unsigned time )
 		// console (no KEYCATCH_UI/CGAME, no intentional ~ console open), try to
 		// bring WiredUI back. Mirrors the Con_DrawConsole fullscreen-fallback gate
 		// at cl_console.c:1386 — triggers only when the user is looking at that screen.
-		if ( cls.state == CA_DISCONNECTED
+		if ( clientActiveApp->state == CA_DISCONNECTED
 		     && !( Key_GetCatcher() & KEYCATCH_CONSOLE )
 		     && !( Key_GetCatcher() & ( KEYCATCH_UI | KEYCATCH_CGAME ) )
 		     && !WiredUI_IsHealthy() ) {
@@ -930,6 +956,16 @@ static void CL_KeyDownEvent( int key, unsigned time )
 				Con_SearchClose();
 				return;
 			}
+			/* ESC at the fullscreen console while attract owns the
+			 * screen is a no-op (no menu push, console stays open).
+			 * The user closes the console with the ~ key, which
+			 * resets attract as a side effect (see K_CONSOLE branch
+			 * earlier in this function). */
+			if ( clientActiveApp->state == CA_DISCONNECTED
+			  && !( Key_GetCatcher() & KEYCATCH_UI )
+			  && WiredUI_GetMenuStackDepth() == 0 ) {
+				return;
+			}
 			// escape always closes console
 			Con_ToggleConsole_f();
 			Key_ClearStates();
@@ -944,27 +980,22 @@ static void CL_KeyDownEvent( int key, unsigned time )
 		// escape always gets out of CGAME stuff
 		if (Key_GetCatcher( ) & KEYCATCH_CGAME) {
 			Key_SetCatcher( Key_GetCatcher( ) & ~KEYCATCH_CGAME );
-			VM_Call( cgvm, 1, CG_EVENT_HANDLING, CGAME_EVENT_NONE );
+			VM_Call( clientActiveApp->cgvm, 1, CG_EVENT_HANDLING, CGAME_EVENT_NONE );
 			return;
 		}
 
 		if ( !( Key_GetCatcher( ) & KEYCATCH_UI ) ) {
-			if ( cls.state == CA_ACTIVE && !clc.demoplaying ) {
+			if ( clientActiveApp->state == CA_ACTIVE && !clientActiveApp->clc.demoplaying ) {
 				UI_CALL_SET_ACTIVE( UIMENU_INGAME );
 			}
-			else if ( cls.state != CA_DISCONNECTED ) {
-#if 0
-				CL_Disconnect_f();
-				S_StopAllSounds();
-#else
+			else if ( clientActiveApp->state != CA_DISCONNECTED ) {
 				Cmd_Clear();
 				Com_ClearLastError();
-				if ( cls.state == CA_CINEMATIC ) {
+				if ( clientActiveApp->state == CA_CINEMATIC ) {
 					SCR_StopCinematic();
-				} else if ( !CL_Disconnect( qfalse ) ) { // restart client if not done already
+				} else if ( !CL_Disconnect( clientActiveApp, qfalse ) ) { // restart client if not done already
 					CL_FlushMemory();
 				}
-#endif
 				UI_CALL_SET_ACTIVE( UIMENU_MAIN );
 			}
 			return;
@@ -982,13 +1013,19 @@ static void CL_KeyDownEvent( int key, unsigned time )
 			UI_CALL_KEY_EVENT( key, qtrue );
 		}
 	} else if ( Key_GetCatcher( ) & KEYCATCH_CGAME ) {
-		if ( cgvm ) {
-			VM_Call( cgvm, 2, CG_KEY_EVENT, key, qtrue );
+		if ( clientActiveApp->cgvm ) {
+			VM_Call( clientActiveApp->cgvm, 2, CG_KEY_EVENT, key, qtrue );
 		}
 	} else if ( Key_GetCatcher( ) & KEYCATCH_MESSAGE ) {
 		Message_Key( key );
-	} else if ( cls.state == CA_DISCONNECTED ) {
-		Console_Key( key );
+	} else if ( clientActiveApp->state == CA_DISCONNECTED ) {
+		/* The loading screen is a passive backdrop (no KEYCATCH_UI). While it is
+		 * up, keys belong to the loading screen, not the hidden console — swallow
+		 * them rather than feed Console_Key. Without a loading bar (the bare
+		 * disconnected fallback console) keys still go to the console. */
+		if ( cl_loadProgress.startTime <= 0 ) {
+			Console_Key( key );
+		}
 	} else {
 		// send the bound action
 		Key_ParseBinding( key, qtrue, time );
@@ -1031,7 +1068,7 @@ static void CL_KeyUpEvent( int key, unsigned time )
 	// console mode and menu mode, to keep the character from continuing
 	// an action started before a mode switch.
 	//
-	if ( cls.state != CA_DISCONNECTED ) {
+	if ( clientActiveApp->state != CA_DISCONNECTED ) {
 		if ( bound || ( Key_GetCatcher() & KEYCATCH_CGAME ) ) {
 			Key_ParseBinding( key, qfalse, time );
 		}
@@ -1042,8 +1079,8 @@ static void CL_KeyUpEvent( int key, unsigned time )
 			UI_CALL_KEY_EVENT( key, qfalse );
 		}
 	} else if ( Key_GetCatcher() & KEYCATCH_CGAME ) {
-		if ( cgvm ) {
-			VM_Call( cgvm, 2, CG_KEY_EVENT, key, qfalse );
+		if ( clientActiveApp->cgvm ) {
+			VM_Call( clientActiveApp->cgvm, 2, CG_KEY_EVENT, key, qfalse );
 		}
 	}
 }
@@ -1096,7 +1133,7 @@ void CL_CharEvent( int key )
 	{
 		Field_CharEvent( &chatField, key );
 	}
-	else if ( cls.state == CA_DISCONNECTED )
+	else if ( clientActiveApp->state == CA_DISCONNECTED )
 	{
 		if ( Con_IsSearchActive() ) {
 			if ( key < 32 || key == 127 )

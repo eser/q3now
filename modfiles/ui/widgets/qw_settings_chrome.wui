@@ -1,0 +1,39 @@
+// qw_settings_chrome — shared top_bar / bottom_bar / footer-button for the settings tab cluster.
+// Keeps all 7 settings tabs byte-identical in chrome so they read as tabs, not separate screens.
+// Tokens: $top_bar_height, $bottom_bar_height, $panel, $line, $accent, $boneDim, $font_sans_bold,
+//   $font_mono, $font_sans, $spacing_md
+
+#define QW_SETTINGS_TOPBAR(BRAND_TEXT) \
+	itemDef { name "top_bar" type container rect 0 0 1 $top_bar_height direction row padding 0.005 0.02 alignY center background $panel borderY 1px $line visible 1 \
+		itemDef { name "brand" type 0 rect 0 0 0.28 0.04 height FIT text BRAND_TEXT textalign 0 font $font_sans_bold 14 forecolor $accent grow 0 decoration visible 1 } \
+		itemDef { name "top_bar_spacer" type container rect 0 0 0 0 grow 1 visible 1 } \
+		itemDef { name "version" type 0 rect 0 0 0.12 0.04 height FIT text "v0.1-dev" textalign 2 font $font_mono 10 forecolor $boneDim grow 0 decoration visible 1 } \
+		itemDef { name "connection" type 0 rect 0 0 0.10 0.04 height FIT text "OFFLINE" textalign 2 font $font_mono 10 forecolor $boneDim grow 0 decoration visible 1 } \
+	}
+
+#define QW_SETTINGS_BOTTOMBAR(HINT_TEXT) \
+	itemDef { name "bottom_bar" type container rect 0 0 1 $bottom_bar_height direction row padding 0 0.02 alignY center alignX end gap $spacing_md visible 1 \
+		itemDef { name "hint_ctx" type 0 rect 0 0 0.20 0.025 height FIT text HINT_TEXT textalign 2 font $font_mono 10 forecolor $boneDim grow 0 decoration visible 1 } \
+		itemDef { name "hint_back" type 0 rect 0 0 0.10 0.025 height FIT text "ESC back" textalign 2 font $font_mono 10 forecolor $boneDim grow 0 decoration visible 1 } \
+	}
+
+// Footer action button — a thin bordered pill so Apply / Test / Reset / Back
+// read as clickable BUTTONS, not text links. Resting state: subtle $panelDeep
+// fill + $line border + $radius_md corners. Hover/focus (empty activeCvar →
+// focus drives the `.active` variants) lifts the border/fill/label to $accent.
+// height stays FIXED 32px so the drawn box == the type-1 hit-box (prior hit-box
+// fix). Horizontal padding pads the label inside the pill without changing the
+// clickable rect.
+#define QW_SETTINGS_FOOTER_BTN(NAME, LABEL, RESTING_COLOR, ACT) \
+	itemDef { name NAME type 1 rect 0 0 $footer_button_w 0 height FIXED 32px alignX center alignY center padding 0 $spacing_md text LABEL textalign 1 font $font_sans 13 forecolor RESTING_COLOR forecolor.active $accent backcolor $panelDeep backcolor.active $accentWash border 1px $line bordercolor.active $accent radius $radius_md grow 0 visible 1 action ACT }
+
+// Back button — same pill chrome as the footer buttons, pinned to the FAR LEFT
+// of the footer row (footer = row with a grow spacer between Back and the
+// right-aligned Apply cluster). Label + action fixed ("< Back" → main menu).
+#define QW_SETTINGS_BACK_BTN \
+	itemDef { name "nav_back" type 1 rect 0 0 $footer_button_w 0 height FIXED 32px alignX center alignY center padding 0 $spacing_md text "< Back" textalign 1 font $font_sans 13 forecolor $boneDim forecolor.active $accent backcolor $panelDeep backcolor.active $accentWash border 1px $line bordercolor.active $accent radius $radius_md grow 0 visible 1 action { close } }
+
+// Grow spacer that pushes the right-aligned button cluster to the far edge,
+// leaving Back on the left of the same horizontal footer row.
+#define QW_SETTINGS_FOOTER_SPACER \
+	itemDef { name "footer_spacer" type container rect 0 0 0 0 grow 1 visible 1 }

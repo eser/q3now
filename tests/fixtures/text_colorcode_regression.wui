@@ -1,0 +1,72 @@
+// text_colorcode_regression.wui — Q3 color code path verify post-UTF-8
+// width-measurement refactor. Each line exercises one risk surface.
+
+menuDef {
+	name "text_colorcode_regression"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor $ink
+
+	itemDef {
+		name "cc_header"
+		rect 0.10 0.16 0.80 0.04
+		text "Q3 color code + UTF-8 regression"
+		font $font_mono 16
+		forecolor $bone
+		visible 1
+		decoration
+	}
+
+	itemDef {
+		name "cc_full_palette"
+		rect 0.10 0.28 0.80 0.05
+		text "^1RED ^2GREEN ^3YELLOW ^4BLUE ^5CYAN ^6MAGENTA ^7WHITE ^0BLACK"
+		font $font_sans 24
+		forecolor $bone
+		visible 1
+		decoration
+	}
+
+	itemDef {
+		name "cc_double_caret"
+		rect 0.10 0.36 0.80 0.05
+		text "literal ^^ escape (renders one ^ then space then word escape)"
+		font $font_sans 22
+		forecolor $bone
+		visible 1
+		decoration
+	}
+
+	itemDef {
+		name "cc_unicode_mixed"
+		rect 0.10 0.44 0.80 0.05
+		text "^1middle dot · ^2diamond ◆ ^3circle ● ^4en–dash ^5em—dash ^7done"
+		font $font_sans 22
+		forecolor $bone
+		visible 1
+		decoration
+	}
+
+	itemDef {
+		name "cc_mono_palette"
+		rect 0.10 0.52 0.80 0.04
+		text "^1JBMono ^2color ^3codes ^4through ^5mono ^6font ^7path"
+		font $font_mono 18
+		forecolor $bone
+		visible 1
+		decoration
+	}
+
+	itemDef {
+		name "cc_caption"
+		rect 0.10 0.68 0.80 0.04
+		text "Each ^N pair toggles color; ^^ renders one literal caret; · and ◆ stay correct."
+		font $font_mono 10
+		forecolor $boneDim
+		visible 1
+		decoration
+	}
+}

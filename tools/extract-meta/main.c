@@ -33,7 +33,7 @@ Copyright (C) 2024-2026 Wired engine contributors. GPLv2.
 #include "qcommon.h"
 
 #include "shader_index.h"
-#include "bsp_inventory.h"
+#include "map_inventory.h"
 #include "asset_resolve.h"
 #include "meta_emit.h"
 #include "ent_emit.h"
@@ -91,8 +91,8 @@ int main(int argc, char **argv) {
 	shader_index_t *idx = ShaderIndex_Build();
 
 	// 5. BSP inventory.
-	bsp_inventory_t inv;
-	if ( !BspInventory_Build( mapname, idx, &inv ) ) {
+	map_inventory_t inv;
+	if ( !MapInventory_Build( mapname, idx, &inv ) ) {
 		fprintf( stderr, "extract-meta: BSP load failed: %s\n", mapname );
 		ShaderIndex_Free( idx );
 		Tool_Shutdown();
@@ -114,7 +114,7 @@ int main(int argc, char **argv) {
 		resolutions = (resolution_t *)calloc( (size_t)inv.count, sizeof( resolution_t ) );
 		if ( !resolutions ) {
 			fprintf( stderr, "extract-meta: out of memory for resolutions[]\n" );
-			BspInventory_Free( &inv );
+			MapInventory_Free( &inv );
 			ShaderIndex_Free( idx );
 			Tool_Shutdown();
 			return 3;
@@ -140,7 +140,7 @@ int main(int argc, char **argv) {
 	if ( !MetaEmit_Write( out_dir, mapname, &inv, resolutions, res_count ) ) {
 		fprintf( stderr, "extract-meta: failed to write .meta\n" );
 		free( resolutions );
-		BspInventory_Free( &inv );
+		MapInventory_Free( &inv );
 		ShaderIndex_Free( idx );
 		Tool_Shutdown();
 		return 3;
@@ -148,7 +148,7 @@ int main(int argc, char **argv) {
 	if ( !EntEmit_Write( out_dir, mapname, &inv ) ) {
 		fprintf( stderr, "extract-meta: failed to write .ent\n" );
 		free( resolutions );
-		BspInventory_Free( &inv );
+		MapInventory_Free( &inv );
 		ShaderIndex_Free( idx );
 		Tool_Shutdown();
 		return 3;
@@ -178,7 +178,7 @@ int main(int argc, char **argv) {
 
 	// 9. Cleanup.
 	free( resolutions );
-	BspInventory_Free( &inv );
+	MapInventory_Free( &inv );
 	ShaderIndex_Free( idx );
 	Tool_Shutdown();
 

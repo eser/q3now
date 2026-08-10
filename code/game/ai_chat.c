@@ -29,7 +29,7 @@
 #include "ai_cmd.h"
 #include "ai_dmnet.h"
 #include "wired/bots/g_bot_scripts.h"
-#include "wired/bots/g_wiredbots.h"
+#include "wired/bots/g_wiredintel.h"
 //
 #include "chars.h"				//characteristics
 #include "inv.h"				//indexes into the inventory
@@ -225,7 +225,7 @@ char *BotMapTitle(void) {
 	return mapname;
 }
 
-static void WiredBots_InitChatCtx( bot_state_t *bs, wbChatCtx_t *ctx ) {
+static void WiredIntel_InitChatCtx( bot_state_t *bs, wbChatCtx_t *ctx ) {
 	if ( !ctx ) {
 		return;
 	}
@@ -395,7 +395,9 @@ int BotValidChatPosition(bot_state_t *bs) {
 	VectorCopy(bs->origin, end);
 	start[2] += 1;
 	end[2] -= 10;
-	trap_AAS_PresenceTypeBoundingBox(PRESENCE_CROUCH, mins, maxs);
+	// crouch presence bounding box (engine PRESENCE_CROUCH dimensions)
+	VectorSet(mins, -15, -15, -24);
+	VectorSet(maxs,  15,  15,   8);
 	BotAI_Trace(&trace, start, mins, maxs, end, bs->client, MASK_SOLID);
 	if (trace.ent != ENTITYNUM_WORLD) return qfalse;
 	//the bot is in a position where it can chat
@@ -411,10 +413,10 @@ int BotChat_EnterGame(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
-	if ( bs->wiredBotsActive ) {
+	if ( bs->wiredIntelActive ) {
 		wbChatCtx_t ctx;
-		WiredBots_InitChatCtx( bs, &ctx );
-		return WiredBots_Chat( bs, "game_enter", &ctx );
+		WiredIntel_InitChatCtx( bs, &ctx );
+		return WiredIntel_Chat( bs, "game_enter", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -450,10 +452,10 @@ int BotChat_ExitGame(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
-	if ( bs->wiredBotsActive ) {
+	if ( bs->wiredIntelActive ) {
 		wbChatCtx_t ctx;
-		WiredBots_InitChatCtx( bs, &ctx );
-		return WiredBots_Chat( bs, "game_exit", &ctx );
+		WiredIntel_InitChatCtx( bs, &ctx );
+		return WiredIntel_Chat( bs, "game_exit", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -489,11 +491,11 @@ int BotChat_StartLevel(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
-	if ( bs->wiredBotsActive ) {
+	if ( bs->wiredIntelActive ) {
 		wbChatCtx_t ctx;
-		WiredBots_InitChatCtx( bs, &ctx );
-		if ( TeamPlayIsOn() ) WiredBots_Announce( bs, WB_TAUNT_GENERIC, NULL );
-		return WiredBots_Chat( bs, "level_start", &ctx );
+		WiredIntel_InitChatCtx( bs, &ctx );
+		if ( TeamPlayIsOn() ) WiredIntel_Announce( bs, WI_TAUNT_GENERIC, NULL );
+		return WiredIntel_Chat( bs, "level_start", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -527,16 +529,16 @@ int BotChat_EndLevel(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
-	if ( bs->wiredBotsActive ) {
+	if ( bs->wiredIntelActive ) {
 		wbChatCtx_t ctx;
-		WiredBots_InitChatCtx( bs, &ctx );
+		WiredIntel_InitChatCtx( bs, &ctx );
 		ctx.won = BotIsFirstInRankings( bs ) ? 1 : ( BotIsLastInRankings( bs ) ? -1 : 0 );
-		if ( TeamPlayIsOn() && BotIsFirstInRankings( bs ) ) WiredBots_Announce( bs, WB_TAUNT_PRAISE, NULL );
+		if ( TeamPlayIsOn() && BotIsFirstInRankings( bs ) ) WiredIntel_Announce( bs, WI_TAUNT_PRAISE, NULL );
 		if ( ( gametype == GT_LASTMANSTANDING || gametype == GT_DUEL )
 		     && !BotIsFirstInRankings( bs ) ) {
-			return WiredBots_Chat( bs, "level_end_eliminated", &ctx );
+			return WiredIntel_Chat( bs, "level_end_eliminated", &ctx );
 		}
-		return WiredBots_Chat( bs, "level_end", &ctx );
+		return WiredIntel_Chat( bs, "level_end", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -596,22 +598,22 @@ int BotChat_Death(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
-	if ( bs->wiredBotsActive ) {
+	if ( bs->wiredIntelActive ) {
 		wbChatCtx_t ctx;
-		WiredBots_InitChatCtx( bs, &ctx );
+		WiredIntel_InitChatCtx( bs, &ctx );
 		ctx.team = ( TeamPlayIsOn() && BotSameTeam( bs, bs->lastkilledby ) ) ? 1 : 0;
 		if ( bs->lastkilledby >= 0 && bs->lastkilledby < MAX_CLIENTS ) {
 			ClientName( bs->lastkilledby, ctx.killer, sizeof( ctx.killer ) );
 		}
 		Q_strncpyz( ctx.weapon, BotLuaWeaponKeyForMOD( bs->botdeathtype ), sizeof( ctx.weapon ) );
-		if ( TeamPlayIsOn() ) WiredBots_Announce( bs, WB_TAUNT_DEATH, NULL );
+		if ( TeamPlayIsOn() ) WiredIntel_Announce( bs, WI_TAUNT_DEATH, NULL );
 		{
-			float insultRate = WiredBots_ProfileFieldOr( bs, WB_PROFILE_CHAT_INSULT, 0.0f );
+			float insultRate = WiredIntel_ProfileFieldOr( bs, WI_PROFILE_CHAT_INSULT, 0.0f );
 			if ( insultRate > 0.0f && random() < insultRate ) {
-				if ( WiredBots_Chat( bs, "death_insult", &ctx ) ) return qtrue;
+				if ( WiredIntel_Chat( bs, "death_insult", &ctx ) ) return qtrue;
 			}
 		}
-		return WiredBots_Chat( bs, "death", &ctx );
+		return WiredIntel_Chat( bs, "death", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -721,16 +723,16 @@ int BotChat_Kill(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
-	if ( bs->wiredBotsActive ) {
+	if ( bs->wiredIntelActive ) {
 		wbChatCtx_t ctx;
 		int curRank;
-		WiredBots_InitChatCtx( bs, &ctx );
+		WiredIntel_InitChatCtx( bs, &ctx );
 		ctx.team = ( TeamPlayIsOn() && BotSameTeam( bs, bs->lastkilledplayer ) ) ? 1 : 0;
 		if ( bs->lastkilledplayer >= 0 && bs->lastkilledplayer < MAX_CLIENTS ) {
 			ClientName( bs->lastkilledplayer, ctx.victim, sizeof( ctx.victim ) );
 		}
 		Q_strncpyz( ctx.weapon, BotLuaWeaponKeyForMOD( bs->enemydeathtype ), sizeof( ctx.weapon ) );
-		if ( TeamPlayIsOn() ) WiredBots_Announce( bs, WB_TAUNT_KILL, NULL );
+		if ( TeamPlayIsOn() ) WiredIntel_Announce( bs, WI_TAUNT_KILL, NULL );
 
 		// Score milestone checks — fire instead of regular kill chat when applicable.
 		// prev_rank == -1 means "not yet initialized"; skip first kill to avoid false positives.
@@ -741,46 +743,46 @@ int BotChat_Kill(bot_state_t *bs) {
 			// took first place
 			if ( curRank == 0 && bs->prev_rank != 0 ) {
 				bs->prev_rank = curRank;
-				if ( WiredBots_Chat( bs, "score_first_place", &ctx ) ) return qtrue;
+				if ( WiredIntel_Chat( bs, "score_first_place", &ctx ) ) return qtrue;
 			// lost first place
 			} else if ( curRank > 0 && bs->prev_rank == 0 ) {
 				bs->prev_rank = curRank;
-				if ( WiredBots_Chat( bs, "score_falling_back", &ctx ) ) return qtrue;
+				if ( WiredIntel_Chat( bs, "score_falling_back", &ctx ) ) return qtrue;
 			// at last place
 			} else if ( curRank == g_maxclients.integer - 1 ) {
 				bs->prev_rank = curRank;
-				if ( WiredBots_Chat( bs, "score_last_place", &ctx ) ) return qtrue;
+				if ( WiredIntel_Chat( bs, "score_last_place", &ctx ) ) return qtrue;
 			}
 		}
 		if ( curRank >= 0 ) bs->prev_rank = curRank;
 		if ( bs->num_kills > 0 && bs->num_kills % 5 == 0 ) {
 			ctx.count = bs->num_kills;
-			if ( WiredBots_Chat( bs, "score_frag_milestone", &ctx ) ) return qtrue;
+			if ( WiredIntel_Chat( bs, "score_frag_milestone", &ctx ) ) return qtrue;
 		}
 
 		// Streak events — fire instead of regular kill chat.
 		ctx.count = bs->current_streak;
 		if ( bs->current_streak >= 2 && bs->last_streak_ack > 0.0f &&
 		     (bs->last_kill_time - bs->last_streak_ack) < 2.0f ) {
-			if ( WiredBots_Chat( bs, "kill_double", &ctx ) ) return qtrue;
+			if ( WiredIntel_Chat( bs, "kill_double", &ctx ) ) return qtrue;
 		}
 		if ( bs->current_streak == 5 ) {
-			if ( WiredBots_Chat( bs, "kill_streak_5", &ctx ) ) return qtrue;
+			if ( WiredIntel_Chat( bs, "kill_streak_5", &ctx ) ) return qtrue;
 		}
 		if ( bs->current_streak == 10 ) {
-			if ( WiredBots_Chat( bs, "kill_streak_10", &ctx ) ) return qtrue;
+			if ( WiredIntel_Chat( bs, "kill_streak_10", &ctx ) ) return qtrue;
 		}
 		if ( bs->current_streak >= 15 ) {
-			if ( WiredBots_Chat( bs, "kill_rampage", &ctx ) ) return qtrue;
+			if ( WiredIntel_Chat( bs, "kill_rampage", &ctx ) ) return qtrue;
 		}
 
 		{
-			float insultRate = WiredBots_ProfileFieldOr( bs, WB_PROFILE_CHAT_INSULT, 0.0f );
+			float insultRate = WiredIntel_ProfileFieldOr( bs, WI_PROFILE_CHAT_INSULT, 0.0f );
 			if ( insultRate > 0.0f && random() < insultRate ) {
-				if ( WiredBots_Chat( bs, "kill_insult", &ctx ) ) return qtrue;
+				if ( WiredIntel_Chat( bs, "kill_insult", &ctx ) ) return qtrue;
 			}
 		}
-		return WiredBots_Chat( bs, "kill", &ctx );
+		return WiredIntel_Chat( bs, "kill", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -844,13 +846,13 @@ int BotChat_EnemySuicide(bot_state_t *bs) {
 	char name[32];
 	float rnd;
 
-	if ( bs->wiredBotsActive ) {
+	if ( bs->wiredIntelActive ) {
 		wbChatCtx_t ctx;
-		WiredBots_InitChatCtx( bs, &ctx );
+		WiredIntel_InitChatCtx( bs, &ctx );
 		if ( bs->enemy >= 0 && bs->enemy < MAX_CLIENTS ) {
 			ClientName( bs->enemy, ctx.victim, sizeof( ctx.victim ) );
 		}
-		return WiredBots_Chat( bs, "enemy_suicide", &ctx );
+		return WiredIntel_Chat( bs, "enemy_suicide", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -888,10 +890,10 @@ int BotChat_HitTalking(bot_state_t *bs) {
 	int lasthurt_client;
 	float rnd;
 
-	if ( bs->wiredBotsActive ) {
+	if ( bs->wiredIntelActive ) {
 		wbChatCtx_t ctx;
-		WiredBots_InitChatCtx( bs, &ctx );
-		return WiredBots_Chat( bs, "hit_talking", &ctx );
+		WiredIntel_InitChatCtx( bs, &ctx );
+		return WiredIntel_Chat( bs, "hit_talking", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -934,10 +936,10 @@ int BotChat_HitNoDeath(bot_state_t *bs) {
 	int lasthurt_client;
 	aas_entityinfo_t entinfo;
 
-	if ( bs->wiredBotsActive ) {
+	if ( bs->wiredIntelActive ) {
 		wbChatCtx_t ctx;
-		WiredBots_InitChatCtx( bs, &ctx );
-		return WiredBots_Chat( bs, "hit_nodeath", &ctx );
+		WiredIntel_InitChatCtx( bs, &ctx );
+		return WiredIntel_Chat( bs, "hit_nodeath", &ctx );
 	}
 
 	lasthurt_client = g_entities[bs->client].client->lasthurt_client;
@@ -984,10 +986,10 @@ int BotChat_HitNoKill(bot_state_t *bs) {
 	float rnd;
 	aas_entityinfo_t entinfo;
 
-	if ( bs->wiredBotsActive ) {
+	if ( bs->wiredIntelActive ) {
 		wbChatCtx_t ctx;
-		WiredBots_InitChatCtx( bs, &ctx );
-		return WiredBots_Chat( bs, "hit_nokill", &ctx );
+		WiredIntel_InitChatCtx( bs, &ctx );
+		return WiredIntel_Chat( bs, "hit_nokill", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -1027,39 +1029,39 @@ int BotChat_Random(bot_state_t *bs) {
 	float rnd;
 	char name[32];
 
-	if ( bs->wiredBotsActive ) {
+	if ( bs->wiredIntelActive ) {
 		wbChatCtx_t ctx;
-		WiredBots_InitChatCtx( bs, &ctx );
+		WiredIntel_InitChatCtx( bs, &ctx );
 		if ( TeamPlayIsOn() ) {
-			WiredBots_Announce( bs, WB_TAUNT_GENERIC, NULL );
+			WiredIntel_Announce( bs, WI_TAUNT_GENERIC, NULL );
 			ctx.team = 1;
 			if ( bs->lasthealth < 30 ) {
-				if ( WiredBots_Chat( bs, "team_need_health", &ctx ) ) return qtrue;
+				if ( WiredIntel_Chat( bs, "team_need_health", &ctx ) ) return qtrue;
 			}
 			{
 				int weapons = bs->cur_ps.stats[STAT_WEAPONS];
 				if ( ( weapons & ~( (1 << WP_GAUNTLET) | (1 << WP_MACHINEGUN) ) ) == 0 ) {
-					if ( WiredBots_Chat( bs, "team_need_weapon", &ctx ) ) return qtrue;
+					if ( WiredIntel_Chat( bs, "team_need_weapon", &ctx ) ) return qtrue;
 				}
 			}
 			if ( gametype == GT_CTF && BotCTFCarryingFlag( bs ) ) {
-				if ( WiredBots_Chat( bs, "team_got_flag_need_support", &ctx ) ) return qtrue;
+				if ( WiredIntel_Chat( bs, "team_got_flag_need_support", &ctx ) ) return qtrue;
 			}
 			if ( bs->ltgtype == LTG_ATTACKENEMYBASE ) {
-				if ( WiredBots_Chat( bs, "team_enemy_base_attack", &ctx ) ) return qtrue;
+				if ( WiredIntel_Chat( bs, "team_enemy_base_attack", &ctx ) ) return qtrue;
 			}
 			if ( bs->ltgtype == LTG_DEFENDKEYAREA ) {
-				if ( WiredBots_Chat( bs, "team_defending_base", &ctx ) ) return qtrue;
+				if ( WiredIntel_Chat( bs, "team_defending_base", &ctx ) ) return qtrue;
 			}
 			if ( bs->ltgtype == LTG_RUSHBASE && gametype == GT_CTF && BotCTFCarryingFlag( bs ) ) {
-				if ( WiredBots_Chat( bs, "team_follow_me", &ctx ) ) return qtrue;
+				if ( WiredIntel_Chat( bs, "team_follow_me", &ctx ) ) return qtrue;
 			}
 			if ( bs->enemy >= 0 && bs->lasthealth < 50 ) {
-				if ( WiredBots_Chat( bs, "team_cover_me", &ctx ) ) return qtrue;
+				if ( WiredIntel_Chat( bs, "team_cover_me", &ctx ) ) return qtrue;
 			}
 			ctx.team = 0;
 		}
-		return WiredBots_Chat( bs, "random", &ctx );
+		return WiredIntel_Chat( bs, "random", &ctx );
 	}
 
 	if (bot_nochat.integer) return qfalse;
@@ -1123,7 +1125,7 @@ int BotChat_Random(bot_state_t *bs) {
 ==================
 BotCTFChatEvent
 Fire a CTF chat event for one specific bot client.
-Called from g_team.c; returns without action for non-WiredBots.
+Called from g_team.c; returns without action for non-WiredIntel.
 ==================
 */
 void BotCTFChatEvent( int clientNum, const char *eventName ) {
@@ -1132,17 +1134,17 @@ void BotCTFChatEvent( int clientNum, const char *eventName ) {
 
 	if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) return;
 	bs = botstates[clientNum];
-	if ( !bs || !bs->inuse || !bs->wiredBotsActive ) return;
+	if ( !bs || !bs->inuse || !bs->wiredIntelActive ) return;
 
-	WiredBots_InitChatCtx( bs, &ctx );
+	WiredIntel_InitChatCtx( bs, &ctx );
 	ctx.team = 1;
-	WiredBots_Chat( bs, eventName, &ctx );
+	WiredIntel_Chat( bs, eventName, &ctx );
 }
 
 /*
 ==================
 BotCTFChatBroadcast
-Fire a CTF chat event for every active WiredBots bot on teamNum.
+Fire a CTF chat event for every active WiredIntel bot on teamNum.
 Pass excludeClient = -1 to broadcast to all bots on the team.
 Pass TEAM_FREE to broadcast to all bots regardless of team.
 ==================
@@ -1151,7 +1153,7 @@ void BotCTFChatBroadcast( int excludeClient, int teamNum, const char *eventName 
 	int i;
 	for ( i = 0; i < MAX_CLIENTS; i++ ) {
 		bot_state_t *bs = botstates[i];
-		if ( !bs || !bs->inuse || !bs->wiredBotsActive ) continue;
+		if ( !bs || !bs->inuse || !bs->wiredIntelActive ) continue;
 		if ( i == excludeClient ) continue;
 		if ( teamNum != TEAM_FREE ) {
 			if ( !g_entities[i].client ) continue;
@@ -1169,7 +1171,7 @@ BotChatTime
 float BotChatTime(bot_state_t *bs) {
 	//int cpm;
 
-	if ( bs->wiredBotsActive ) return 0.0f;
+	if ( bs->wiredIntelActive ) return 0.0f;
 
 	//cpm = trap_Characteristic_BInteger(bs->character, CHARACTERISTIC_CHAT_CPM, 1, 4000);
 
@@ -1187,7 +1189,7 @@ void BotChatTest(bot_state_t *bs) {
 	char *weap;
 	int num, i;
 
-	if ( bs->wiredBotsActive ) return;
+	if ( bs->wiredIntelActive ) return;
 
 	num = trap_BotNumInitialChats(bs->cs, "game_enter");
 	for (i = 0; i < num; i++)

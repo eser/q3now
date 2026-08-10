@@ -5,8 +5,7 @@
 
 #include "cm_local.h"
 #include "cm_patch.h"
-#include "maps/bsp.h"
-/* Phase 5: log channels */
+#include "maps/map_format_registry.h"
 LOG_DECLARE_CHANNEL( ch_collision, "collision" );
 LOG_DECLARE_CHANNEL( ch_loading, "loading" );
 
@@ -43,7 +42,7 @@ int			c_pointcontents;
 int			c_traces, c_brush_traces, c_patch_traces;
 
 
-static bspFile_t *cm_bsp;
+static mapFile_t *cm_bsp;
 
 #ifndef BSPC
 cvar_t		*cm_noAreas;
@@ -319,8 +318,9 @@ static void CMod_LoadLeafs( void )
 
 		firstLeafSurface = in->firstLeafSurface;
 		numLeafSurfaces = in->numLeafSurfaces;
-		if ( (uint64_t)firstLeafSurface + numLeafSurfaces > cm.numLeafSurfaces )
-			Com_Terminate( TERM_CLIENT_DROP, "%s: bad leafsurfaces", __func__ );
+		// leaf-surface range pre-validated at the Map_Load funnel
+		// (Map_ValidateNeutral checks each leaf's [first,+num) against
+		// numLeafSurfaces), so it is not re-checked here.
 
 		out->firstLeafSurface = firstLeafSurface;
 		out->numLeafSurfaces = numLeafSurfaces;
@@ -409,11 +409,12 @@ static void CMod_LoadLeafSurfaces( void )
 
 	int *out = cm.leafsurfaces;
 
+	// Indices are pre-validated at the Map_Load funnel (Map_ValidateNeutral
+	// unsigned-checks every leaf-surface index against numSurfaces, and
+	// cm.numSurfaces == cm_bsp->numSurfaces), so the per-index bound is no longer
+	// re-checked here — the neutral array is trusted.
 	for ( int i = 0; i < count; i++, in++, out++ ) {
-		unsigned j = *in;
-		if ( j >= cm.numSurfaces )
-			Com_Terminate( TERM_CLIENT_DROP, "%s: bad surface", __func__ );
-		*out = j;
+		*out = *in;
 	}
 }
 
@@ -995,16 +996,25 @@ void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 	}
 #endif
 
-	if ( !BSP_Load( name, &cm_bsp, BSP_LOAD_FLAGS_NONE ) ) {
+	if ( !Map_Load( name, &cm_bsp, MAP_LOAD_FLAGS_NONE ) ) {
 		Com_Terminate( TERM_CLIENT_DROP, "%s: couldn't load %s", __func__, name );
 	}
 
 	*checksum = cm.checksum = cm_bsp->checksum;
 
 	int bspVersion = cm_bsp->version;
-	cm.tracer = ( bspVersion == BSP_VERSION_Q1 ) ? &cmTracer_q1 : &cmTracer_q3;
+	// The loaded map's format declares its own collision tracer (see
+	// mapFormat_t.tracer), so the same detection that selected the parser also
+	// selects the tracer — no version ternary that a new format could fall
+	// through into the wrong (e.g. Q3-default) collision tree. The format slot is
+	// opaque (const void *); cm_load owns the cast back to cmTracer_t. A format
+	// that forgot to declare a tracer is a hard error, never a silent default.
+	if ( !cm_bsp->format || !cm_bsp->format->tracer ) {
+		Com_Terminate( TERM_CLIENT_DROP, "%s: map format declares no collision tracer", __func__ );
+	}
+	cm.tracer = (const cmTracer_t *)cm_bsp->format->tracer;
 
-	if ( BSP_AssetProfileForVersion( bspVersion ) == BSP_ASSET_PROFILE_LEGACY ) {
+	if ( Map_AssetProfileForVersion( bspVersion ) == MAP_ASSET_PROFILE_LEGACY ) {
 		Cvar_Set( "com_mapAssetProfile", "legacy" );
 	} else {
 		Cvar_Set( "com_mapAssetProfile", "modern" );
@@ -1029,7 +1039,7 @@ void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 	CMod_LoadVisibility();
 	CMod_LoadPatches();
 
-	BSP_Free( cm_bsp );
+	Map_Free( cm_bsp );
 	cm_bsp = NULL;
 
 	// check for cycles so we don't overflow stack
@@ -1038,6 +1048,23 @@ void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 	CM_InitBoxHull();
 
 	CM_FloodAreaConnections();
+
+	// Default world-trace view = the loaded arrays. This is the final view on a Q3
+	// map; on a Q1 map the canonical build below repoints cm.world at the canonical
+	// arrays (adopt-at-load). The world trace + PVS/area read cm.world; submodels
+	// keep reading the loaded cm.* arrays their offsets were baked against.
+	cm.world.numNodes       = cm.numNodes;       cm.world.nodes       = cm.nodes;
+	cm.world.numLeafs       = cm.numLeafs;        cm.world.leafs       = cm.leafs;
+	cm.world.numLeafBrushes = cm.numLeafBrushes;  cm.world.leafbrushes = cm.leafbrushes;
+	cm.world.numBrushes     = cm.numBrushes;      cm.world.brushes     = cm.brushes;
+	cm.world.numBrushSides  = cm.numBrushSides;   cm.world.brushsides  = cm.brushsides;
+	cm.world.numPlanes      = cm.numPlanes;       cm.world.planes      = cm.planes;
+
+	// Build the canonical collision model (Q1 hull-0 clipnode-to-brush
+	// conversion) — the single live Q1 collision representation. No-op on Q3
+	// maps. On a Q1 map that cannot build canonically this hard-fails the load
+	// (Com_Error), by design: there is no legacy fallback path.
+	CMQ1_BuildCanonicalModel();
 
 #ifndef BSPC
 #ifdef _DEBUG
@@ -1059,11 +1086,11 @@ CM_ClearMap
 */
 void CM_ClearMap( void ) {
 	// Release any stale BSP reference left by a crash-interrupted CM_LoadMap.
-	// Normally CM_LoadMap calls BSP_Free(cm_bsp) before returning; if a longjmp
-	// (Com_Error) fires between BSP_Load and that BSP_Free, cm_bsp retains a
+	// Normally CM_LoadMap calls Map_Free(cm_bsp) before returning; if a longjmp
+	// (Com_Error) fires between Map_Load and that Map_Free, cm_bsp retains a
 	// reference that would otherwise keep the BSP slot occupied indefinitely.
 	if ( cm_bsp ) {
-		BSP_Free( cm_bsp );
+		Map_Free( cm_bsp );
 		cm_bsp = NULL;
 	}
 
@@ -1137,19 +1164,23 @@ char *CM_EntityString( void ) {
 }
 
 
+// leafnum comes from CM_PointLeafnum/CM_BoxLeafnums, which walk the WORLD tree
+// (cm.world), so cluster/area read from cm.world.leafs — the canonical leaves on
+// Q1 (carrying cluster/area copied from the loaded leaves at build), the loaded
+// leaves on Q3 (where cm.world aliases cm.*).
 int CM_LeafCluster( int leafnum ) {
-	if ( leafnum < 0 || leafnum >= cm.numLeafs ) {
+	if ( leafnum < 0 || leafnum >= cm.world.numLeafs ) {
 		Com_Terminate( TERM_CLIENT_DROP, "CM_LeafCluster: bad number" );
 	}
-	return cm.leafs[leafnum].cluster;
+	return cm.world.leafs[leafnum].cluster;
 }
 
 
 int CM_LeafArea( int leafnum ) {
-	if ( leafnum < 0 || leafnum >= cm.numLeafs ) {
+	if ( leafnum < 0 || leafnum >= cm.world.numLeafs ) {
 		Com_Terminate( TERM_CLIENT_DROP, "CM_LeafArea: bad number" );
 	}
-	return cm.leafs[leafnum].area;
+	return cm.world.leafs[leafnum].area;
 }
 
 
@@ -1253,6 +1284,13 @@ CM_TempBoxModel
 To keep everything totally uniform, bounding boxes are turned into small
 BSP trees instead of being compared directly.
 Capsules are handled differently though.
+
+THREAD BOUNDARY: this mutates the shared statics box_model / box_planes /
+box_brush, so it is MAIN-THREAD-ONLY — entity-vs-box collision (box handles) is
+not thread-legal. This is deliberate and safe for the thread-safety work: the
+world-model trace path a bake thread uses (model 0) never enters here (box models
+are a distinct clipHandle), so the world path shares none of this mutable state.
+Making box models thread-legal is out of scope (no world-path consumer needs it).
 ===================
 */
 clipHandle_t CM_TempBoxModel( const vec3_t mins, const vec3_t maxs, int capsule ) {

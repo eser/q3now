@@ -23,7 +23,7 @@ docs/
 # macOS/Linux packaging support files
 misc/
 
-# Launcher (not needed for dedicated server)
+# Launcher (not needed for headless server)
 launcher/
 
 # IDE / editor

@@ -1,0 +1,48 @@
+// qw_button — general bordered-pill action button.
+//
+// Generalized from qw_settings_chrome.wui's QW_SETTINGS_FOOTER_BTN so any menu
+// (Start Server / Server Browser / in-game ESC / …) draws its actions as the
+// same clickable pills the 7 settings tabs use, instead of bare text links.
+//
+// Resting: $panelDeep fill + 1px $line border + $radius_md corners, label in
+// COLOR. Hover/focus (empty activeCvar → focus drives `.active`): fill lifts to
+// $accentWash, border + label to $accent — the whole pill reads as reachable.
+//
+// HIT-BOX INVARIANT (documented, do not change): type 1 + height FIXED 32px so
+// the drawn box == the type-1 hit-box. The explicit width param W lets callers
+// size pills independently (settings used a single $footer_button_w; menus here
+// need Back / Connect / Start Server at different widths). Horizontal padding
+// pads the label inside the pill WITHOUT changing the clickable rect.
+//
+// Tokens: $panelDeep, $line, $accent, $accentWash, $radius_md, $spacing_md,
+//   $font_sans.
+//
+//   QW_BUTTON(name, label, resting-forecolor, action, width)
+
+#define QW_BUTTON(NAME, LABEL, COLOR, ACT, W) \
+	itemDef { name NAME type 1 rect 0 0 W 0 height FIXED 32px alignX center alignY center padding 0 $spacing_md text LABEL textalign 1 font $font_sans 13 forecolor COLOR forecolor.active $accent backcolor $panelDeep backcolor.active $accentWash border 1px $line bordercolor.active $accent radius $radius_md grow 0 visible 1 action ACT }
+
+// Full-width variant for stacked button columns (e.g. the ESC menu action
+// stack): width PERCENT 1 so each pill fills its container column cross-axis
+// (GROW in a column parent drives the MAIN/height axis, not the width the box
+// needs, so it leaves the drawn box collapsed — use an explicit width fraction).
+// Same pill chrome + hit-box invariant (type 1 + height FIXED 44px). The label
+// is centered; padding pads it inside the pill without moving the hit rect.
+//
+// ESC-menu ONLY (grep: QW_BUTTON_BLOCK is expanded solely by ingame.wui — the
+// startserver/servers footers use the QW_BUTTON pill above). So the resting
+// chrome is tuned for legibility over LIVE gameplay: the fill is $lineBright
+// (#3a322a), a clear step ABOVE the $panel (#14110e) it sits on so every row
+// reads as a raised, reachable button (the old $panelDeep #1a1612 fill was a
+// near-invisible 6-value step off the panel). A brighter $line_strong border
+// frames each pill. Hover/focus (empty activeCvar → focus drives `.active`)
+// lifts the fill to $accentWash + border/label to $accent so the pointer
+// target is unmistakable. Callers pass a per-row resting label color (Resume =
+// $accent primary; destructive rows dimmed via $boneDim).
+//
+// The resting chrome stays in the warm-neutral surface family ($lineBright
+// fill + $boneDim border) so it reads the same under any accent theme (the
+// active theme only overrides the accent* tokens); the accent enters only on
+// hover + on the caller-chosen primary label color.
+#define QW_BUTTON_BLOCK(NAME, LABEL, COLOR, ACT) \
+	itemDef { name NAME type 1 rect 0 0 1 0 height FIXED 44px width PERCENT 1 alignX center alignY center padding 0 $spacing_md text LABEL textalign 1 font $font_sans_medium 15 forecolor COLOR forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action ACT }

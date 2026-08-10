@@ -12,7 +12,6 @@ See asset_load_log.h for the public API and output format.
 #include "q_shared.h"
 #include "qcommon.h"
 #include "asset_load_log.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 #define ASSET_LOG_MAX_SUBSYSTEMS	8

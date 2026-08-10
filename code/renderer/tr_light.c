@@ -4,6 +4,9 @@
 // tr_light.c
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 #define	DLIGHT_AT_RADIUS		16
 // at the edge of a dlight's influence, this amount of light will be added
@@ -252,7 +255,7 @@ static void LogLight( const trRefEntity_t *ent ) {
 		max2 = ent->directedLight[2];
 	}
 
-	ri.Log( SEV_INFO, "amb:%i  dir:%i\n", max1, max2 );
+	R_LOG( rch_assets, SEV_INFO, "amb:%i  dir:%i\n", max1, max2 );
 }
 
 

@@ -2641,6 +2641,23 @@ static int PC_ReadDollarDirective(source_t *source)
 				return dollardirectives[i].func(source);
 			} //end if
 		} //end for
+		//
+		// Wired (2026-05-25): defer unknown `$<name>` to the caller as a
+		// TT_NAME token whose string carries the leading `$`. This lets the
+		// WiredUI design-token resolver (cl_wired_parse.c) intercept refs
+		// like `$primary_cyan` without botlib treating them as errors. The
+		// behaviour change is permissive — bot scripts that used to error
+		// on unknown `$x` now see a single name token; existing
+		// `$evalint`/`$evalfloat` paths are unaffected (they matched in
+		// the loop above and returned).
+		//
+		if (strlen(token.string) + 1 < MAX_TOKEN)
+		{
+			memmove(token.string + 1, token.string, strlen(token.string) + 1);
+			token.string[0] = '$';
+			PC_UnreadSourceToken(source, &token);
+			return qtrue;
+		}
 	} //end if
 	PC_UnreadSourceToken(source, &token);
 	SourceError(source, "unknown precompiler directive %s", token.string);

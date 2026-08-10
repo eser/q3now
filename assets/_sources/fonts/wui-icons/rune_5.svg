@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Rune 5 — H-cross -->
+  <path d="M 10 22 L 90 22 L 90 32 L 10 32 Z M 10 68 L 90 68 L 90 78 L 10 78 Z M 44 10 L 56 10 L 56 90 L 44 90 Z" fill="black" fill-rule="evenodd"/>
+</svg>

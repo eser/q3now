@@ -1,0 +1,26 @@
+// Light mode overlay — v2 palette
+//
+// Loaded by cl_wired_palette when ui_palette_mode == "light". Mirrors
+// qw-shared.jsx QW_MODES.light — sunlit ruin atmosphere.
+
+token ink                   "#ece6da"
+token panel                 "#dcd4c440"
+token panelDeep             "#c4bbaa40"
+token line                  "#a89e8a"
+token lineBright            "#86796a"
+token bone                  "#1a1612"
+token boneDim               "#5a4f3e"
+
+token demoBg                "#c8b696"
+token demoSky1              "#f0d8a8"
+token demoSky2              "#d8c098"
+token demoFog               "#a08868"
+token demoFloor             "#8a6a48"
+token demoTowerA            "#6a5236"
+token demoTowerB            "#7a6244"
+token demoArchA             "rgba(90,58,32,0.5)"
+token demoArchB             "rgba(106,74,48,0.5)"
+
+token vignette              "rgba(60,40,20,0.35)"
+token vignetteHard          "rgba(40,28,12,0.55)"
+token grain                 "rgba(60,40,20,0.15)"

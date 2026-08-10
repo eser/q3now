@@ -360,7 +360,7 @@ qboolean Log_PopRedirectSink( void )
     log_redirect_frame_t *f = s_redirect_top;
 
     if ( !f ) {
-        Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Log_PopRedirectSink: stack was empty" );
+        Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Log_PopRedirectSink: stack was empty\n" );
         return qfalse;
     }
 
@@ -707,6 +707,25 @@ const char *Log_SeverityBracket( log_severity_t sev )
     }
 }
 
+// Log_SeverityColor: per-line color applied by the console + tty sinks so
+// severity reads at a glance. Only the attention-worthy severities are
+// colored; TRACE/DEBUG/INFO stay at the default. g_color_table exposes no
+// gray reachable by a ^N code (^0-^9 = black/red/green/yellow/blue/cyan/
+// magenta/white/orange/light-blue), so TRACE/DEBUG cannot be dimmed without
+// a palette addition — see docs/log-channels.md.
+const char *Log_SeverityColor( log_severity_t sev )
+{
+    switch ( sev ) {
+    case SEV_WARN:  return S_COLOR_YELLOW;  // ^3
+    case SEV_ERROR: return S_COLOR_RED;     // ^1
+    case SEV_FATAL: return S_COLOR_RED;     // ^1 (no distinct bright red in palette)
+    case SEV_TRACE:
+    case SEV_DEBUG:
+    case SEV_INFO:
+    default:        return "";
+    }
+}
+
 // -------------------------------------------------------------------------
 // Com_LastError API
 // -------------------------------------------------------------------------
@@ -744,15 +763,6 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Terminate( terminationReason_t reaso
 	static int	lastErrorTime;
 	static int	errorCount;
 	static qboolean	calledSysError = qfalse;
-
-#if defined(_WIN32) && defined(_DEBUG)
-	if ( reason != TERM_CLIENT_LEAVE ) {
-		if ( !com_noErrorInterrupt->integer ) {
-			ShowWindow( g_wv.hWnd, SW_MINIMIZE );
-			DebugBreak();
-		}
-	}
-#endif
 
 	if ( com_errorEntered ) {
 		if ( !calledSysError ) {
@@ -797,8 +807,25 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Terminate( terminationReason_t reaso
 			case TERM_CLIENT_LEAVE:
 			default:                 logSev = SEV_INFO;  break;
 		}
-		Com_Log( logSev, LOG_CH(ch_system), "%s", com_errorMessage );
+		Com_Log( logSev, LOG_CH(ch_system), "%s\n", com_errorMessage );
 	}
+
+#if defined(_WIN32) && defined(_DEBUG)
+	// Break into the debugger AFTER the fatal log has been emitted, and ONLY
+	// when a debugger is actually attached. Without IsDebuggerPresent(), the
+	// DebugBreak() raises EXCEPTION_BREAKPOINT, which ExceptionFilter
+	// (win_main.c) explicitly skips for crash-dump generation — the OS then
+	// terminates the process silently with exit code 3, swallowing the fatal.
+	// Guarding here means no-debugger runs fall through to the normal cleanup
+	// + Sys_Error path below, leaving the SEV_FATAL log + Sys_Error popup as
+	// the visible signal.
+	if ( reason != TERM_CLIENT_LEAVE ) {
+		if ( !com_noErrorInterrupt->integer && IsDebuggerPresent() ) {
+			ShowWindow( g_wv.hWnd, SW_MINIMIZE );
+			DebugBreak();
+		}
+	}
+#endif
 
 	Cbuf_Init();
 
@@ -806,8 +833,8 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Terminate( terminationReason_t reaso
 		VM_Forced_Unload_Start();
 		SV_Shutdown( "Server disconnected" );
 		Log_PopRedirectSink();
-#ifndef DEDICATED
-		CL_Disconnect( qfalse );
+#ifndef HEADLESS
+		CL_Disconnect( CL_FrameApp(), qfalse );
 		CL_FlushMemory();
 #endif
 		VM_Forced_Unload_Done();
@@ -818,11 +845,30 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Terminate( terminationReason_t reaso
 
 		// Q_longjmp maps to __builtin_longjmp on MinGW which expects void**;
 		// jmp_buf decays compatibly under GCC but clang-tidy's frontend rejects
-		// the implicit conversion. The (void **)abortframe cast is a no-op at
-		// runtime and matches the existing Q3 setjmp/longjmp pattern.
+		// the implicit conversion. The cast is a no-op at runtime and matches the
+		// existing Q3 setjmp/longjmp pattern. Recoverable errors longjmp to the
+		// FAULTING app's per-frame recovery point so a drop in one app does not
+		// abort co-resident apps; HEADLESS has no clientApps[]
+		// so it keeps the process-global abortframe.
+		//
+		// But the per-app recovery point is only valid while the engine has it
+		// armed (between its per-frame setjmp and the end of that section). A drop
+		// raised outside that window — the startup cbuf '+map <bad>' / '+demo
+		// <corrupt>' that runs in Com_Frame before the per-app setjmp, or during
+		// Com_EventLoop / init — would longjmp through a zero-initialized jmp_buf
+		// (UB / crash). When not armed, fall back to the process-global abortframe,
+		// which IS armed at the top of every Com_Frame and during init: it recovers
+		// to the frame boundary (CL_AbortFrame + return) or the init error handler.
+#ifndef HEADLESS
+		if ( CL_FrameAbortArmed() )
+			Q_longjmp( CL_FrameAppAbort(), 1 );
+		else
+			Q_longjmp( (void **)abortframe, 1 );
+#else
 		Q_longjmp( (void **)abortframe, 1 );
+#endif
 	} else if ( reason == TERM_CLIENT_DROP ) {
-#ifndef DEDICATED
+#ifndef HEADLESS
 		// Capture whether a demo was playing BEFORE CL_Disconnect clears
 		// the flag so we can honor the "nextdemo" cvar below.
 		const qboolean wasDemoPlaying = ( com_cl_running && com_cl_running->integer &&
@@ -831,8 +877,8 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Terminate( terminationReason_t reaso
 		VM_Forced_Unload_Start();
 		SV_Shutdown( va( "Server crashed: %s", com_errorMessage ) );
 		Log_PopRedirectSink();
-#ifndef DEDICATED
-		CL_Disconnect( qfalse );
+#ifndef HEADLESS
+		CL_Disconnect( CL_FrameApp(), qfalse );
 		CL_FlushMemory();
 		if ( wasDemoPlaying ) {
 			char next[ MAX_CVAR_VALUE_STRING ];
@@ -849,15 +895,25 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Terminate( terminationReason_t reaso
 		FS_PureServerSetLoadedPaks( "", "" );
 		com_errorEntered = qfalse;
 
-		// Q_longjmp maps to __builtin_longjmp on MinGW which expects void**;
-		// jmp_buf decays compatibly under GCC but clang-tidy's frontend rejects
-		// the implicit conversion. The (void **)abortframe cast is a no-op at
-		// runtime and matches the existing Q3 setjmp/longjmp pattern.
+		// Recoverable drop: longjmp to the FAULTING app's per-frame recovery point
+		// so the dropped app unwinds without aborting co-resident apps. HEADLESS
+		// keeps the process-global abortframe. When the per-app recovery point is
+		// NOT armed (a drop raised outside the engine's per-frame setjmp window —
+		// e.g. a startup '+map <bad>' / '+demo <corrupt>' or an init-time drop) the
+		// per-app jmp_buf is zero-initialized and longjmp through it is UB; fall back
+		// to the process-global abortframe (always armed during a frame / init).
+#ifndef HEADLESS
+		if ( CL_FrameAbortArmed() )
+			Q_longjmp( CL_FrameAppAbort(), 1 );
+		else
+			Q_longjmp( (void **)abortframe, 1 );
+#else
 		Q_longjmp( (void **)abortframe, 1 );
+#endif
 	} else {
 		// TERM_UNRECOVERABLE
 		VM_Forced_Unload_Start();
-#ifndef DEDICATED
+#ifndef HEADLESS
 		CL_Shutdown( va( "Server fatal crashed: %s", com_errorMessage ), qtrue );
 #endif
 		SV_Shutdown( va( "Server fatal crashed: %s", com_errorMessage ) );

@@ -1,0 +1,36 @@
+// primitive_qw_sigil.wui — QWSigil v2 primitive demo.
+// Renders the QW sigil glyph from the icon atlas, with a `pulse`
+// alpha-modulator showing the slot is "alive". (The v2 design uses
+// a 40s rotate `qwspin`; the engine ships no rotate built-in today
+// — the pulse alpha modulator is the available equivalent.)
+
+menuDef {
+	name "primitive_qw_sigil"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor $ink
+
+	itemDef {
+		name "qw_sigil_demo"
+		rect 0.46 0.40 0.08 0.14
+		iconText "qw_sigil"
+		font $font_icon 96
+		forecolor $accent
+		animation "pulse"
+		visible 1
+		decoration
+	}
+	itemDef {
+		name "qw_sigil_label"
+		rect 0.40 0.56 0.20 0.04
+		text "QWSigil · U+E9 · pulse"
+		font $font_mono 12
+		forecolor $boneDim
+		textalign 1
+		visible 1
+		decoration
+	}
+}

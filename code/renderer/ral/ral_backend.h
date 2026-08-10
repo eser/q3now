@@ -13,25 +13,64 @@
 extern "C" {
 #endif
 
+// Renderer-requested device features. Single
+// boolean per intent; RAL owns the AND-gate logic:
+//   * PAIRED bundles (vertexFragmentStores, descriptorIndexing,
+//     vulkanMemoryModel, 8BitStorage) enable ALL their bits or NONE — RAL
+//     checks every device-support bit in the bundle and only flips them
+//     when the full set is supported.
+//   * Single-bit wants AND against the matching device-support bit; the
+//     bit is enabled when both the renderer asked for it and the device
+//     reports support.
+//   * HARD-REQUIRED features (synchronization2, timelineSemaphore,
+//     dynamicRendering, fillModeNonSolid) are NOT in this struct — RAL
+//     enforces them internally and Ral_CreateBackend returns NULL with a
+//     SEV_ERROR log if any are absent.
+//   * wantSamplerAnisotropy is CVAR-GATED — renderer reads
+//     r_ext_texture_filter_anisotropic pre-Ral_CreateBackend and only
+//     sets the field qtrue when the cvar is non-zero.
+typedef struct {
+	qboolean wantShaderInt64;
+	qboolean wantWideLines;
+	qboolean wantVertexFragmentStores;       // PAIRED: vertexPipelineStores + fragmentStores
+	qboolean wantDescriptorIndexing;         // PAIRED 4-bundle + 2 mirror bits
+	qboolean wantHostQueryReset;
+	qboolean wantDrawIndirectCount;
+	qboolean wantVulkanMemoryModel;          // PAIRED: model + Scope
+	qboolean wantBufferDeviceAddress;
+	qboolean want8BitStorage;                // PAIRED: storage + uniformAndStorage
+	qboolean wantSamplerAnisotropy;          // CVAR-GATED
+	qboolean wantFragmentShadingRate;        // pipeline-rate VRS; enabled only when the
+	                                         // extension is present AND the feature query
+	                                         // reports pipelineFragmentShadingRate (else the
+	                                         // variableRateShading cap stays false)
+	qboolean wantDepthClamp;                 // rasterizer near/far depth-clamp (free raster
+	                                         // state); enabled only when the device reports
+	                                         // VkPhysicalDeviceFeatures.depthClamp (else the
+	                                         // depthClamp cap stays false → projection-tweak
+	                                         // fallback on backends without native support)
+} ralRequestedFeatures_t;
+
 // ── creation ────────────────────────────────────────────────────────────
-// Two modes:
-//   (a) Standalone — externalInstance == NULL. Ral_CreateBackend creates its
-//       own VkInstance/VkPhysicalDevice/VkDevice. Used by the throwaway
-//       \ral_dump probe and (historically) by the Phase 7.4a/b parallel-paths
-//       texture/buffer migration.
+// Three modes (gated by the letBackendOwn* flags + externalInstance):
+//   (a) Standalone — externalInstance == NULL, both letBackendOwn* qfalse.
+//       Legacy path retained for the throwaway \ral_dump probe (creates a
+//       minimum-viable instance + device for caps enumeration).
 //   (b) Imported  — externalInstance != NULL. Ral_CreateBackend adopts the
-//       caller's already-created handles. Used by Phase 7.4c-pre (Option A):
-//       renderervk creates its own 1.2-baseline VkInstance/VkDevice (see
-//       vk.c::create_instance / vk_create_device) and hands them to RAL so
-//       that resources allocated by Ral_* are usable in the same VkDevice
-//       descriptor writes the renderer already issues. The caller retains
-//       ownership: Ral_DestroyBackend will NOT destroy the imported handles.
-//       Each external* field is the matching Vk* handle cast to void* so this
-//       header stays free of vulkan/vulkan.h.
+//       caller's already-created handles. Lifetime stays with the caller
+//       (Ral_DestroyBackend does NOT destroy the imported handles). Used by
+//       the historical ral_dump probe; the renderer no longer uses this
+//       path.
+//   (c) Owned — letBackendOwnInstance=qtrue
+//       AND letBackendOwnDevice=qtrue. RAL creates everything (instance +
+//       messenger + surface + picks physical device + queue family resolve
+//       + device-extension allow-list + feature enable + VkDevice). Renderer
+//       reads handles back via Ral_Get*Handle accessors. Ral_DestroyBackend
+//       tears down everything when ownsInstance / ownsDevice are qtrue.
 typedef struct {
 	ralBackendType_t type;
 	void            *platformHandle;            // HWND / NSWindow / canvas selector / etc. (NULL = offscreen)
-	uint32_t         flags;                     // RAL_FLAG_VALIDATION | RAL_FLAG_DEBUG_LABELS
+	uint32_t         flags;                     // RAL_FLAG_DEBUG_LABELS
 
 	// imported-mode fields (set all-or-none; NULL externalInstance → standalone)
 	void            *externalInstance;          // VkInstance
@@ -39,10 +78,69 @@ typedef struct {
 	void            *externalDevice;            // VkDevice
 	uint32_t         externalQueueFamilies[3];  // [GRAPHICS, COMPUTE, TRANSFER]
 	uint32_t         externalApiVersion;        // VK_MAKE_API_VERSION(0, 1, 2, 0) or higher
+
+	// owned-instance bringup. When qtrue, RAL
+	// creates the VkInstance + debug messenger + VkSurfaceKHR + picks the
+	// physical device internally; externalInstance/externalPhysicalDevice
+	// fields are ignored.
+	qboolean         letBackendOwnInstance;
+	// owned-device bringup. When qtrue (in
+	// combination with letBackendOwnInstance=qtrue), RAL also resolves
+	// queue families, builds the device-extension allow-list, queries
+	// features, enables the requested-and-supported subset, and creates
+	// the VkDevice internally. externalDevice / externalQueueFamilies
+	// are ignored. requestFeatures + platformDeviceExtensions feed the
+	// allow-list + feature enable. The renderer reads vk.device,
+	// vk.queue_family_*, queue handles back via Ral_Get*Handle /
+	// Ral_GetQueue* accessors.
+	qboolean         letBackendOwnDevice;
+	// Mirrors `r_device` cvar semantics when letBackendOwnInstance=qtrue:
+	// -1 = first DISCRETE_GPU (default), -2 = first INTEGRATED_GPU,
+	// N ≥ 0 = explicit index into vkEnumeratePhysicalDevices' output.
+	int              preferredDeviceIndex;
+	// Compile-time USE_VK_VALIDATION reach replacement. When qtrue + the
+	// validation layer is available, RAL applies the LUNARG_standard_
+	// validation → KHRONOS_validation → none fallback chain during
+	// vkCreateInstance and creates a debug messenger.
+	qboolean         enableValidation;
+	// renderer-requested device features +
+	// platform-specific device extensions. Both feed the owned-device
+	// branch only; ignored when letBackendOwnDevice=qfalse.
+	//
+	// platformDeviceExtensions points at a caller-owned const char *const
+	// array (string-literal lifetime, outlives the backend); RAL retains
+	// the pointers without copying. RAL always adds VK_KHR_swapchain
+	// (HARD-REQUIRED) and VK_EXT_memory_budget (RAL-internal) on top of
+	// the supplied list.
+	ralRequestedFeatures_t requestFeatures;
+	const char *const *platformDeviceExtensions;
+	uint32_t           platformDeviceExtensionCount;
 } ralBackendCreateInfo_t;
 
 ralBackend_t *Ral_CreateBackend ( const ralBackendCreateInfo_t *ci );
 void          Ral_DestroyBackend( ralBackend_t *b );
+
+// alias-preserve accessors for the RAL-owned
+// handles. Renderer reads back into vk.instance / vk.physical_device /
+// vk.device aliases at boot. Mirrors the Ral_GetSwapchainHandle pattern.
+void *Ral_GetInstanceHandle      ( const ralBackend_t *b );  // VkInstance
+void *Ral_GetPhysicalDeviceHandle( const ralBackend_t *b );  // VkPhysicalDevice
+void *Ral_GetSurfaceHandle       ( const ralBackend_t *b );  // VkSurfaceKHR
+void *Ral_GetDeviceHandle        ( const ralBackend_t *b );  // VkDevice
+void *Ral_GetQueueHandle         ( const ralBackend_t *b, ralQueueType_t q );  // VkQueue
+uint32_t Ral_GetQueueFamily      ( const ralBackend_t *b, ralQueueType_t q );
+
+// read back the device-extension list RAL actually
+// enabled on the VkDevice (intersection of bci.platformDeviceExtensions[]
+// with availability, plus RAL-internal additions like VK_KHR_swapchain).
+// Renderer iterates at boot to set side-effect state (vk_fse_ext_enabled,
+// vk.debugMarkers, vk.dedicatedAllocation) and to fill
+// glConfig.extensions_string. Pointers refer to either the caller-supplied
+// strings (string-literal lifetime) or RAL-internal static literals; do
+// NOT free.
+void Ral_GetEnabledDeviceExtensions( const ralBackend_t *b,
+                                     const char *const **out,
+                                     uint32_t           *outCount );
 
 // ── capabilities ────────────────────────────────────────────────────────
 // Filled once at backend creation. Renderer reads via Ral_GetCaps() and
@@ -54,7 +152,7 @@ typedef struct {
 	qboolean dynamicRendering;          // §6 — no VkRenderPass/VkFramebuffer objects
 	qboolean asyncCompute;              // dedicated compute queue family
 	qboolean asyncTransfer;             // dedicated transfer queue family
-	qboolean variableRateShading;       // 7.13
+	qboolean variableRateShading;
 	qboolean timelineSemaphores;        // §3.8
 	qboolean hdr10Swapchain;            // RAL_COLORSPACE_HDR10_ST2084 presentable
 	qboolean scRGBSwapchain;            // RAL_COLORSPACE_EXTENDED_SRGB_LINEAR presentable
@@ -75,6 +173,20 @@ typedef struct {
 	float    timestampPeriodNs;         // ns per Ral_WriteTimestamp tick (0 = timestamps unsupported)
 	float    maxSamplerAnisotropy;      // max anisotropy a sampler may request (1 = anisotropic filtering unavailable)
 
+	// per-feature enable flags that the renderer
+	// reads back at boot to populate its sibling state (vk.wideLines,
+	// vk.fragmentStores, vk.samplerAnisotropy). Each reflects what was
+	// actually enabled on the VkDevice during the owned-device bringup
+	// (request AND device-support).
+	qboolean wideLines;
+	qboolean vertexFragmentStores;
+	qboolean samplerAnisotropyEnabled;
+	qboolean depthClamp;                // rasterizer depthClampEnable usable: the device
+	                                    // feature was requested AND supported AND enabled on
+	                                    // the VkDevice. false → the backend has no native
+	                                    // depth-clamp (WebGL2) → renderer takes the
+	                                    // near-plane projection-tweak fallback.
+
 	// identity (informational)
 	char     deviceName[256];
 	char     apiVersion[32];            // e.g. "Vulkan 1.3.290"
@@ -82,7 +194,7 @@ typedef struct {
 
 const ralCaps_t *Ral_GetCaps( ralBackend_t *b );
 
-// ── memory budget (7.14 — query ships in v1) ────────────────────────────
+// ── memory budget (query ships in v1) ────────────────────────────
 typedef struct {
 	uint64_t deviceLocalUsed;
 	uint64_t deviceLocalBudget;
@@ -130,7 +242,7 @@ uint32_t Ral_ProbeBackends( ralBackendAvailability_t *out, uint32_t maxOut );
 // and memory budget, destroys it. Not part of the rendering path.
 Q_EXPORT void Ral_Dump( void );
 
-// Phase 7.4c-pre: "\ral_dump live" dumps the *renderer-owned* backend (the
+// "\ral_dump live" dumps the *renderer-owned* backend (the
 // one vk_ral_textures.c created via Ral_CreateBackend in imported mode)
 // without creating or destroying anything. Tells you what the live shared
 // VkDevice + bindless table + RAL buffer registrations actually look like.

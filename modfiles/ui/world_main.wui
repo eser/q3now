@@ -1,0 +1,62 @@
+// world_main.wui — Wired UI: default WORLD_VIEWPORT layer panel.
+// The compositor's WUI_LAYER_WORLD_VIEWPORT walk emits this panel when the
+// engine is in a world-rendering state (CA_ACTIVE or cgvm && CA_PRIMED). Each
+// itemDef declares a viewport element bound to a provider id that CG_Init
+// registers via trap_RegisterViewportProvider.
+//
+// The main scene and camera viewports are coupled by the cl_splitScreen cvar:
+//   cl_splitScreen 0 (default) — the full-screen main view fills the screen;
+//                                 the split-view and camera itemDefs are
+//                                 cvar-hidden so their providers are never
+//                                 invoked.
+//   cl_splitScreen 1            — the half-width main view takes the left half,
+//                                 the camera the right half (50/50 split).
+// The full-screen and half-width main views are distinct ids
+// (main_scene_full / main_scene_split), both bound to the same cgame main-scene
+// provider. The cvarTest/showCvar gate culls hidden itemDefs at emit time, so
+// exactly one main view (full or split) reaches the provider per frame.
+//
+// Lifetime: the providers re-register at every level start; this panel stays
+// defined for the engine lifetime and is gated by the layer policy in
+// code/client/wired/ui/policy/world_viewport.c.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "world_main"
+	layer "world_viewport"
+	rect 0 0 1 1
+	fullscreen 1
+	visible 1
+	style 0
+
+	itemDef {
+		name "main_scene_full"
+		type viewport
+		id "main_scene_full"
+		rect 0 0 1 1
+		cvarTest "cl_splitScreen"
+		showCvar { "0" }
+		decoration
+	}
+
+	itemDef {
+		name "main_scene_split"
+		type viewport
+		id "main_scene_split"
+		rect 0 0 0.5 1
+		cvarTest "cl_splitScreen"
+		showCvar { "1" }
+		decoration
+	}
+
+	itemDef {
+		name "camera"
+		type viewport
+		id "camera"
+		rect 0.5 0 0.5 1
+		cvarTest "cl_splitScreen"
+		showCvar { "1" }
+		decoration
+	}
+}

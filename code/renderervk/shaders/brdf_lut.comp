@@ -1,0 +1,139 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+brdf_lut.comp — wired-render split-sum environment-BRDF integration LUT.
+
+Precomputes the view-dependent term of the split-sum image-based-lighting
+approximation (Karis 2013, "Real Shading in Unreal Engine 4"). For each texel
+the X axis is NdotV (the view-vs-normal cosine) and the Y axis is roughness,
+both in [0,1]. The shader Monte-Carlo importance-samples the GGX distribution
+and integrates the environment BRDF into two scalars:
+
+  R = scale applied to the surface F0    (the Fresnel-weighted reflectance)
+  G = bias added on top of F0            (the grazing-angle floor)
+
+The IBL specular term reconstructs reflectance as F0 * R + G, so this LUT is
+scene-independent constant math: it is computed once at boot and never again.
+Output is a 256x256 RG16F storage image; nothing samples it yet (the IBL term
+that consumes it lands later) — this pass only produces and barriers it.
+*/
+
+const float PI = 3.14159265358979323846;
+
+// 1024 importance samples per texel — the standard count for a smooth LUT at
+// this resolution; the whole 256x256 integration is a sub-millisecond one-shot.
+const uint SAMPLE_COUNT = 1024u;
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(rg16f, set = 0, binding = 0) uniform writeonly image2D brdfLut;
+
+// Van der Corput radical inverse — the low-discrepancy second dimension of the
+// Hammersley point set (bit-reverse of i, scaled into [0,1)).
+float radicalInverse_VdC( uint bits )
+{
+	bits = ( bits << 16u ) | ( bits >> 16u );
+	bits = ( ( bits & 0x55555555u ) << 1u ) | ( ( bits & 0xAAAAAAAAu ) >> 1u );
+	bits = ( ( bits & 0x33333333u ) << 2u ) | ( ( bits & 0xCCCCCCCCu ) >> 2u );
+	bits = ( ( bits & 0x0F0F0F0Fu ) << 4u ) | ( ( bits & 0xF0F0F0F0u ) >> 4u );
+	bits = ( ( bits & 0x00FF00FFu ) << 8u ) | ( ( bits & 0xFF00FF00u ) >> 8u );
+	return float( bits ) * 2.3283064365386963e-10; // / 0x100000000
+}
+
+vec2 hammersley( uint i, uint n )
+{
+	return vec2( float( i ) / float( n ), radicalInverse_VdC( i ) );
+}
+
+// GGX importance sample: map a 2D low-discrepancy point onto a half-vector H in
+// tangent space, distributed by the GGX NDF for the given roughness.
+vec3 importanceSampleGGX( vec2 xi, float roughness, vec3 N )
+{
+	float a = roughness * roughness;
+
+	float phi      = 2.0 * PI * xi.x;
+	float cosTheta = sqrt( ( 1.0 - xi.y ) / ( 1.0 + ( a * a - 1.0 ) * xi.y ) );
+	float sinTheta = sqrt( 1.0 - cosTheta * cosTheta );
+
+	vec3 H;
+	H.x = cos( phi ) * sinTheta;
+	H.y = sin( phi ) * sinTheta;
+	H.z = cosTheta;
+
+	// Tangent-space H → world space around N.
+	vec3 up        = abs( N.z ) < 0.999 ? vec3( 0.0, 0.0, 1.0 ) : vec3( 1.0, 0.0, 0.0 );
+	vec3 tangent   = normalize( cross( up, N ) );
+	vec3 bitangent = cross( N, tangent );
+
+	return normalize( tangent * H.x + bitangent * H.y + N * H.z );
+}
+
+// Smith geometry term with the IBL k = a*a/2 remapping (Karis): the visibility
+// masking-shadowing for the environment-BRDF integral (not the direct-light k).
+float geometrySchlickGGX_IBL( float NdotV, float roughness )
+{
+	float a = roughness;
+	float k = ( a * a ) / 2.0;
+	return NdotV / ( NdotV * ( 1.0 - k ) + k );
+}
+
+float geometrySmith_IBL( float NdotV, float NdotL, float roughness )
+{
+	return geometrySchlickGGX_IBL( NdotV, roughness )
+	     * geometrySchlickGGX_IBL( NdotL, roughness );
+}
+
+// IntegrateBRDF (Karis 2013): the environment BRDF for a given NdotV/roughness.
+vec2 integrateBRDF( float NdotV, float roughness )
+{
+	// Reconstruct a view vector with the requested NdotV; N is +Z.
+	vec3 V;
+	V.x = sqrt( 1.0 - NdotV * NdotV );
+	V.y = 0.0;
+	V.z = NdotV;
+
+	float A = 0.0;
+	float B = 0.0;
+	vec3  N = vec3( 0.0, 0.0, 1.0 );
+
+	for ( uint i = 0u; i < SAMPLE_COUNT; i++ ) {
+		vec2 xi = hammersley( i, SAMPLE_COUNT );
+		vec3 H  = importanceSampleGGX( xi, roughness, N );
+		vec3 L  = normalize( 2.0 * dot( V, H ) * H - V );
+
+		float NdotL = max( L.z, 0.0 );
+		float NdotH = max( H.z, 0.0 );
+		float VdotH = max( dot( V, H ), 0.0 );
+
+		if ( NdotL > 0.0 ) {
+			float G     = geometrySmith_IBL( NdotV, NdotL, roughness );
+			float G_Vis = ( G * VdotH ) / ( NdotH * NdotV );
+			float Fc    = pow( 1.0 - VdotH, 5.0 );  // Schlick Fresnel, F0 factored out
+
+			A += ( 1.0 - Fc ) * G_Vis;
+			B += Fc * G_Vis;
+		}
+	}
+
+	return vec2( A, B ) / float( SAMPLE_COUNT );
+}
+
+void main()
+{
+	ivec2 size  = imageSize( brdfLut );
+	ivec2 coord = ivec2( gl_GlobalInvocationID.xy );
+	if ( coord.x >= size.x || coord.y >= size.y )
+		return;
+
+	// Texel centre → (NdotV, roughness) in (0,1). NdotV is clamped off zero so
+	// the V reconstruction / G denominator stay well defined at the edge.
+	float NdotV     = ( float( coord.x ) + 0.5 ) / float( size.x );
+	float roughness = ( float( coord.y ) + 0.5 ) / float( size.y );
+	NdotV = max( NdotV, 1e-4 );
+
+	vec2 ab = integrateBRDF( NdotV, roughness );
+	imageStore( brdfLut, coord, vec4( ab, 0.0, 0.0 ) );
+}

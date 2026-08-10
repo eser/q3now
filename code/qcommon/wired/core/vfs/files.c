@@ -57,7 +57,7 @@ along with "home path" and "cd path" for game content.
 
 
 The "base game" is the directory under the paths where data comes from by default, and
-can be either "baseq3" or "demoq3".
+can be either "base".
 
 The "current game" may be the same as the base game, or it may be the name of another
 directory under the paths that should be searched for files before looking in the base game.
@@ -103,8 +103,8 @@ calls to FS_AddGameDirectory
 Additionally, we search in several subdirectories:
 current game is the current mode
 base game is a variable to allow mods based on other mods
-(such as baseq3 + missionpack content combination in a mod for instance)
-BASEGAME is the hardcoded base game ("baseq3")
+(such as base + missionpack content combination in a mod for instance)
+BASEGAME is the hardcoded base game ("base")
 
 e.g. the qpath "sound/newstuff/test.opus" would be searched for in the following places:
 
@@ -208,7 +208,6 @@ static const unsigned pak_checksums[] = {
 //#define PRE_RELEASE_TADEMO
 
 #include "files_pack.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_filesystem, "filesystem" );
 
 #define MAX_ZPATH			256
@@ -216,7 +215,7 @@ LOG_DECLARE_CHANNEL( ch_filesystem, "filesystem" );
 
 typedef struct {
 	char		*path;		// /opt/wired
-	char		*gamedir;	// baseq3
+	char		*gamedir;	// base
 } directory_t;
 
 typedef enum {
@@ -276,13 +275,20 @@ typedef struct {
 	int			zipFileLen;
 	char		name[MAX_ZPATH];
 	handleOwner_t	owner;
+	// Per-app-instance tag for H_CGAME handles: the cgame file-VM table key
+	// (H_CGAME) is shared across concurrent client apps, so with more than one app
+	// a class-only close would close every app's files. ownerAppSlot scopes the
+	// close to the owning app (the cgame VM's per-app slot at open time). 0 for the
+	// single-app case and for non-cgame owners (H_SYSTEM/H_QAGAME), so N=1 is
+	// byte-identical to the class-only key.
+	int			ownerAppSlot;
 	int			pakIndex;
 	pack_t		*pak;
 #if FEAT_SW3Z
 	byte		*sw3zData;		// decompressed file buffer (NULL if not SW3Z, or if entry decompression deferred)
 	int			sw3zSize;		// total decompressed size
 	int			sw3zPos;		// current read position
-	/* Phase 4-#4 deferred decompression hint.
+	/* deferred decompression hint.
 	 * When >= 0 *and* sw3zData == NULL, the handle is "open but not yet
 	 * decompressed". FS_ReadFile uses this to skip the intermediate
 	 * sw3zData buffer entirely — the very next FS_Read decompresses
@@ -300,7 +306,7 @@ qboolean fs_reordered;
 // Tool-mode opt-out (see qcommon.h). Default qfalse keeps engine
 // behavior identical: missing default.cfg is fatal. The extract-meta
 // tool sets this qtrue before FS_InitFilesystem so it can bring the
-// VFS up without a configured baseq3.
+// VFS up without a configured base.
 qboolean fs_skipExecDefaults = qfalse;
 
 #define MAX_REF_PAKS	MAX_STRING_TOKENS
@@ -319,7 +325,7 @@ static char		*fs_serverReferencedPakNames[MAX_REF_PAKS];	// pk3 names
 int	fs_lastPakIndex;
 
 #if FEAT_SW3Z
-/* Phase 4-#4 hint flag.
+/* hint flag.
  * Set by FS_ReadFile around its FS_FOpenFileRead call to ask
  * FS_OpenFileInSW3Z to defer decompression. Single-threaded I/O makes
  * the static safe; FS_ReadFile is responsible for clearing it on every
@@ -352,7 +358,7 @@ FS_PakIsPure
 =================
 */
 static qboolean FS_PakIsPure( const pack_t *pack ) {
-#ifndef DEDICATED
+#ifndef HEADLESS
 	if ( fs_numServerPaks ) {
 		for ( int i = 0 ; i < fs_numServerPaks ; i++ ) {
 			// FIXME: also use hashed file names
@@ -942,7 +948,7 @@ int FS_SV_FOpenFileRead( const char *filename, fileHandle_t *fp ) {
 	fd = &fsh[ f ];
 	FS_InitHandle( fd );
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	// don't let sound stutter
 	// S_ClearSoundBuffer();
 #endif
@@ -983,7 +989,7 @@ void FS_SV_Rename( const char *from, const char *to ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "Filesystem call made without initialization" );
 	}
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	// don't let sound stutter
 	// S_ClearSoundBuffer();
 #endif
@@ -1016,7 +1022,7 @@ void FS_Rename( const char *from, const char *to ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "Filesystem call made without initialization" );
 	}
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	// don't let sound stutter
 	// S_ClearSoundBuffer();
 #endif
@@ -1376,7 +1382,7 @@ fileHandle_t FS_FOpenFileAppend( const char *filename ) {
 		return FS_INVALID_HANDLE;
 	}
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	// don't let sound stutter
 	// S_ClearSoundBuffer();
 #endif
@@ -1516,7 +1522,7 @@ static qboolean FS_GeneralRef( const char *filename )
 	if ( FS_HasExt( filename, extList, ARRAY_LEN( extList ) ) )
 		return qfalse;
 
-	if ( !Q_stricmp( filename, "vm/qagame.wasm" ) )
+	if ( !Q_stricmp( filename, "vm/gamesv.wasm" ) )
 		return qfalse;
 
 	if ( strstr( filename, "levelshots" ) )
@@ -1620,7 +1626,7 @@ static int FS_OpenFileInSW3Z( fileHandle_t *file, pack_t *pak, fileInPack_t *pak
 	FS_InitHandle( f );
 
 	if ( fs_sw3z_deferOpen ) {
-		/* Phase 4-#4 deferred path: skip the Z_Malloc'd intermediate
+		/* deferred path: skip the Z_Malloc'd intermediate
 		 * sw3zData buffer entirely. FS_ReadFile will Hunk-allocate the
 		 * caller's return buffer next, and the very next FS_Read on
 		 * this handle will decompress straight into it. */
@@ -1639,6 +1645,11 @@ static int FS_OpenFileInSW3Z( fileHandle_t *file, pack_t *pak, fileInPack_t *pak
 			*file = FS_INVALID_HANDLE;
 			return -1;
 		}
+		// Record pak provenance like the deferred branch does, so f->pak is a
+		// reliable "served from a pak" signal for every SW3Z handle (consumed by
+		// FS_DescribeHandleSource). Safe at close: f->zipFile is qfalse below, so
+		// the PK3 zip-handle teardown (gated on zipFile && pak) never runs here.
+		f->pak = pak;
 	}
 
 	f->sw3zSize = size;
@@ -1674,7 +1685,7 @@ static int FS_OpenFileInPak( fileHandle_t *file, pack_t *pak, fileInPack_t *pakF
 	if ( !( pak->referenced & FS_GENERAL_REF ) && FS_GeneralRef( pakFile->name ) ) {
 		pak->referenced |= FS_GENERAL_REF;
 	}
-	if ( !( pak->referenced & FS_CGAME_REF ) && !strcmp( pakFile->name, "vm/cgame.wasm" ) ) {
+	if ( !( pak->referenced & FS_CGAME_REF ) && !strcmp( pakFile->name, "vm/gamecl.wasm" ) ) {
 		pak->referenced |= FS_CGAME_REF;
 	}
 
@@ -1754,6 +1765,10 @@ separate file or a ZIP file.
 */
 extern qboolean		com_fullyInitialized;
 
+// defined below; forward-declared so the directory-search branches can refuse to
+// serve banned config files (autoexec.cfg / WIRED_CONFIG_CFG) out of non-static dirs
+static qboolean FS_BannedPakFile( const char *filename );
+
 int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueFILE ) {
 	const searchpath_t	*search;
 	char			*netpath;
@@ -1814,6 +1829,11 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 				} while ( pakFile != NULL );
 			}
 			else if ( search->dir && search->policy != DIR_DENY ) {
+				// never serve a banned config (autoexec.cfg / WIRED_CONFIG_CFG)
+				// out of a non-static dir (e.g. a .pk3dir) — config-injection guard
+				if ( search->policy != DIR_STATIC && FS_BannedPakFile( filename ) ) {
+					continue;
+				}
 				dir = search->dir;
 				netpath = FS_BuildOSPath( dir->path, dir->gamedir, filename );
 				temp = Sys_FOpen( netpath, "rb" );
@@ -1854,6 +1874,11 @@ int FS_FOpenFileRead( const char *filename, fileHandle_t *file, qboolean uniqueF
 			} while ( pakFile != NULL );
 		}
 		else if ( search->dir && search->policy != DIR_DENY ) {
+			// never serve a banned config (autoexec.cfg / WIRED_CONFIG_CFG)
+			// out of a non-static dir (e.g. a .pk3dir) — config-injection guard
+			if ( search->policy != DIR_STATIC && FS_BannedPakFile( filename ) ) {
+				continue;
+			}
 			// check a file in the directory tree
 			dir = search->dir;
 
@@ -1924,7 +1949,7 @@ void FS_TouchFileInPak( const char *filename ) {
 					if ( !( pak->referenced & FS_GENERAL_REF ) && FS_GeneralRef( filename ) ) {
 						pak->referenced |= FS_GENERAL_REF;
 					}
-					if ( !( pak->referenced & FS_CGAME_REF ) && !strcmp( filename, "vm/cgame.wasm" ) ) {
+					if ( !( pak->referenced & FS_CGAME_REF ) && !strcmp( filename, "vm/gamecl.wasm" ) ) {
 						pak->referenced |= FS_CGAME_REF;
 					}
 					return;
@@ -2019,7 +2044,7 @@ int FS_Read( void *buffer, int len, fileHandle_t f ) {
 		return len;
 	}
 	if ( fsh[f].sw3zEntryIdx >= 0 ) {
-		/* Phase 4-#4 deferred decompression. FS_ReadFile is the only
+		/* deferred decompression. FS_ReadFile is the only
 		 * caller that triggers this state and it always reads the full
 		 * entry in one shot. Require len >= sw3zSize so we can decompress
 		 * straight into the caller's buffer; partial reads on a deferred
@@ -2044,7 +2069,7 @@ int FS_Read( void *buffer, int len, fileHandle_t f ) {
 
 	if ( !fsh[f].zipFile ) {
 		if ( !fsh[f].handleFiles.file.o ) {
-			Com_Log( SEV_DEBUG, LOG_CH(ch_filesystem), S_COLOR_YELLOW "FS_Read: NULL file pointer for handle %i (%s)\n", f, fsh[f].name );
+			Com_Log( SEV_WARN, LOG_CH(ch_filesystem), "FS_Read: NULL file pointer for handle %i (%s)\n", f, fsh[f].name );
 			return 0;
 		}
 		remaining = len;
@@ -2384,7 +2409,7 @@ int FS_ReadFile( const char *qpath, void **buffer ) {
 
 	// look for it in the filesystem or pack files
 	//
-	// Phase 4-#4: ask the SW3Z opener to defer decompression. We're
+	// ask the SW3Z opener to defer decompression. We're
 	// going to Hunk-allocate the caller's return buffer immediately
 	// after this call returns the entry size, then trigger decompression
 	// directly into that buffer via FS_Read — eliminating the Z_Malloc'd
@@ -2589,12 +2614,12 @@ static qboolean fs_cacheSynced = qtrue;
 // non-matching header will cause whole file being ignored
 static const byte cache_header[ 4 ] = {
 #if FEAT_SW3Z
-	3, //version 3 — Phase 4 adds maxCompressedSize to the SW3Z tail
+	3, //version 3 — adds maxCompressedSize to the SW3Z tail
 	   //              so disk-cache-loaded packs know the scratch
 	   //              buffer cap without re-walking entries.
-	   //          v2 was Phase 2: full SW3Z record persistence with
+	   //          v2 added full SW3Z record persistence with
 	   //              length-prefixed format tail (entries[]).
-	   //          v1 was Phase 1: packType field present but only PK3
+	   //          v1 had the packType field present but only PK3
 	   //              records on disk; SW3Z packs lived in-memory only.
 #else
 	0, //version 0 — pre-FEAT_SW3Z, no packType field
@@ -2894,7 +2919,7 @@ static qboolean FS_SavePackToFile( const pack_t *pak, FILE *f )
 		 * skip path and any future-format reader can advance past it
 		 * without knowing the layout. The runtime fields persisted are
 		 * the minimum needed for SW3Z_ReadEntry: the global data offset,
-		 * the per-pack compScratch cap (Phase 4-#2), and the per-entry
+		 * the per-pack compScratch cap, and the per-entry
 		 * compression metadata. The SW3Z stringTable is intentionally
 		 * NOT persisted — at runtime, file names live in the inline
 		 * namebuffer (already part of the common record); stringTable
@@ -3920,6 +3945,10 @@ static char **FS_ListFilteredFiles( const char *path, const char *extension, con
 			for ( i = 0; i < numSysFiles; i++ ) {
 				// unique the match
 				name = sysFiles[ i ];
+				// never list a banned config out of a non-static dir (.pk3dir) — config-injection guard
+				if ( search->policy != DIR_STATIC && FS_BannedPakFile( name ) ) {
+					continue;
+				}
 				length = strlen( name );
 				if ( fnamecallback ) {
 					// use custom filter
@@ -4067,6 +4096,8 @@ char **FS_ListDirectories( const char *path, int *numDirs ) {
 			for ( i = 0; i < numSys; i++ ) {
 				// Sys_ListFiles with "/" returns bare names; skip . and ..
 				if ( sysFiles[i][0] == '.' ) continue;
+				// never list a banned config out of a non-static dir (.pk3dir) — config-injection guard
+				if ( search->policy != DIR_STATIC && FS_BannedPakFile( sysFiles[i] ) ) continue;
 				nfiles = FS_AddFileToList( sysFiles[i], list, nfiles );
 			}
 			Sys_FreeFileList( sysFiles );
@@ -4323,7 +4354,7 @@ static void FS_SortFileList( char** list, int n ) {
 FS_GetModList
 
 Returns a list of mod directory names
-A mod directory is a peer to baseq3 with a pk3 in it
+A mod directory is a peer to base with a pk3 in it
 ================
 */
 static int FS_GetModList( char *listbuf, int bufsize ) {
@@ -4802,7 +4833,7 @@ static void FS_AddGameDirectory( const char *path, const char *dir ) {
 			search->dir->gamedir = (char*)( search->dir->path + path_len );
 			search->policy = DIR_ALLOW;
 
-			strcpy( search->dir->path, curpath );				// c:\quake3\baseq3
+			strcpy( search->dir->path, curpath );				// c:\quake3\base
 			strcpy( search->dir->gamedir, pakdirs[ pakdirsi ] );// mypak.pk3dir
 
 			search->next = fs_searchpaths;
@@ -5511,7 +5542,7 @@ static void FS_Startup( void ) {
 			"Whether or not to copy files when loading them into the game. Every file found in the cdpath will be copied over." );
 		fs_copyfiles = Cvar_Register( &d );
 	}
-	fs_installpath = Cvar_Get( "fs_installpath", Sys_DefaultBasePath(), CVAR_INIT | CVAR_PROTECTED | CVAR_PRIVATE );
+	fs_installpath = Cvar_Get( "fs_installpath", Sys_DefaultInstallPath(), CVAR_INIT | CVAR_PROTECTED | CVAR_PRIVATE );
 	Cvar_SetDescription( fs_installpath, "Write-protected CVAR specifying the path to the installation folder of the game." );
 	{
 		static const cvarDesc_t d = CVAR_STRING( "fs_basegame", BASEGAME, CVAR_INIT | CVAR_PROTECTED,
@@ -5813,7 +5844,7 @@ Returns a space separated string containing the names of all loaded pk3 files.
 Servers with sv_pure set will get this string and pass it to clients.
 =====================
 */
-#ifndef DEDICATED
+#ifndef HEADLESS
 const char *FS_LoadedPakNames( void ) {
 	static char	info[BIG_INFO_STRING];
 	const searchpath_t *search;
@@ -5989,7 +6020,7 @@ const char *FS_ReferencedPakNames( void ) {
 	qstring_t info_qs = QS_Wrap( info, sizeof( info ) );
 
 	// we want to return ALL pk3's from the fs_game path
-	// and referenced one's from baseq3
+	// and referenced one's from base
 	for ( search = fs_searchpaths ; search ; search = search->next ) {
 		// is the element a pak file?
 		if ( search->pack ) {
@@ -6424,8 +6455,14 @@ void FS_FilenameCompletion( const char *dir, const char *ext, qboolean stripExt,
 int FS_VM_OpenFile( const char *qpath, fileHandle_t *f, fsMode_t mode, handleOwner_t owner ) {
 	int r = FS_FOpenFileByMode( qpath, f, mode );
 
-	if ( f && *f != FS_INVALID_HANDLE )
+	if ( f && *f != FS_INVALID_HANDLE ) {
 		fsh[ *f ].owner = owner;
+		// Tag the owning app slot for cgame handles so a per-app close (multi-app)
+		// reaps only that app's files. The cgame VM whose syscall opened this file is
+		// the active native VM; its per-app slot is the tag. Non-cgame owners and the
+		// single-app case fall to slot 0 (byte-identical to the class-only key).
+		fsh[ *f ].ownerAppSlot = ( owner == H_CGAME ) ? VM_CgameInstance( VM_ActiveNativeVM() ) : 0;
+	}
 
 	return r;
 }
@@ -6501,11 +6538,15 @@ void FS_VM_CloseFile( fileHandle_t f, handleOwner_t owner ) {
 }
 
 
-void FS_VM_CloseFiles( handleOwner_t owner )
+// Close every VM file handle owned by `owner` AND tagged with `appSlot`. The slot
+// scopes the H_CGAME class key to one client app so a multi-app teardown reaps
+// only the freed app's files; H_QAGAME / H_SYSTEM (and the single-app cgame) tag
+// slot 0, so passing 0 there is byte-identical to the prior class-only close.
+void FS_VM_CloseFiles( handleOwner_t owner, int appSlot )
 {
 	for ( int i = 1; i < MAX_FILE_HANDLES; i++ )
 	{
-		if ( fsh[i].owner != owner )
+		if ( fsh[i].owner != owner || fsh[i].ownerAppSlot != appSlot )
 			continue;
 		COM_WARN( LOG_CH(ch_filesystem), "%s:%i:%s leaked filehandle\n",
 			FS_OwnerName( owner ), i, fsh[i].name );
@@ -6644,10 +6685,13 @@ FS_LoadLibrary
 Tries to load libraries within known searchpaths
 =================
 */
-void *FS_LoadLibrary( const char *name )
+void *FS_LoadLibrary( const char *name, char *outPath, int outLen )
 {
 	const searchpath_t *sp = fs_searchpaths;
 	void *libHandle = NULL;
+	char winningPath[ MAX_OSPATH ];
+
+	winningPath[0] = '\0';
 
 	while ( !libHandle && sp ) {
 		while ( sp && ( sp->policy != DIR_STATIC || !sp->dir ) ) {
@@ -6656,6 +6700,11 @@ void *FS_LoadLibrary( const char *name )
 		if ( sp ) {
 			const char *fn = FS_BuildOSPath( sp->dir->path, sp->dir->gamedir, name );
 			libHandle = Sys_LoadLibrary( fn );
+			if ( libHandle ) {
+				// Copy the winning path NOW: FS_BuildOSPath returns a rotating
+				// static buffer, so `fn` would be clobbered by the next call.
+				Q_strncpyz( winningPath, fn, sizeof( winningPath ) );
+			}
 			sp = sp->next;
 		}
 	}
@@ -6664,5 +6713,69 @@ void *FS_LoadLibrary( const char *name )
 		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "Sys_LoadLibrary(%s): loaded\n", name );
 	}
 
+	if ( outPath != NULL && outLen > 0 ) {
+		Q_strncpyz( outPath, winningPath, outLen );
+	}
+
 	return libHandle;
+}
+
+
+/*
+=================
+FS_DescribeHandleSource
+
+Diagnostic: describe where an open file handle's bytes physically come from.
+  - pak-backed   → "<pak-os-path> :: <internal-qpath>"
+  - loose file   → the loose OS path (re-resolved from the searchpaths)
+The handle must still be open. `out` is "" for an invalid handle.
+
+The loose OS path is not stored on the handle (only the qpath is), so it is
+re-resolved by walking the same searchpath order FS_FOpenFileRead used; the
+first directory that actually holds the file on disk is the one that served it.
+=================
+*/
+void FS_DescribeHandleSource( fileHandle_t f, char *out, int outLen )
+{
+	const fileHandleData_t *fd;
+
+	if ( out == NULL || outLen <= 0 ) {
+		return;
+	}
+	out[0] = '\0';
+
+	if ( f <= 0 || f >= MAX_FILE_HANDLES ) {
+		return;
+	}
+	fd = &fsh[ f ];
+
+	// pak-backed: full pak OS path + the internal entry qpath.
+	if ( fd->pak != NULL ) {
+		Com_sprintf( out, outLen, "%s :: %s",
+			fd->pak->pakFilename ? fd->pak->pakFilename : "?",
+			fd->name );
+		return;
+	}
+
+	// Loose file: re-resolve the qpath against the searchpaths and report the
+	// first directory that holds it on disk (the one that served this handle).
+	if ( fd->name[0] ) {
+		const searchpath_t *search;
+		for ( search = fs_searchpaths ; search ; search = search->next ) {
+			const char *netpath;
+			FILE       *temp;
+			if ( !search->dir || search->policy == DIR_DENY ) {
+				continue;
+			}
+			netpath = FS_BuildOSPath( search->dir->path, search->dir->gamedir, fd->name );
+			temp = Sys_FOpen( netpath, "rb" );
+			if ( temp ) {
+				fclose( temp );
+				Q_strncpyz( out, netpath, outLen );
+				return;
+			}
+		}
+		// Fell through (e.g. unlinked after open) — report the qpath as a hint.
+		Q_strncpyz( out, fd->name, outLen );
+	}
 }

@@ -12,7 +12,7 @@ Copyright (C) 2024-2026 Wired engine contributors. GPLv2.
 
 qboolean EntEmit_Write(const char *out_dir,
                        const char *mapname,
-                       const bsp_inventory_t *inv)
+                       const map_inventory_t *inv)
 {
 	if ( !out_dir || !mapname || !inv ) return qfalse;
 

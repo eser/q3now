@@ -27,8 +27,8 @@ typedef struct {
 	ralColorSpace_t  colorSpace;
 	ralPresentMode_t presentMode;      // FIFO / MAILBOX / IMMEDIATE
 	uint32_t         minImageCount;    // 0 → backend picks (typ. 2-3)
-	void            *externalSurface;  // Phase 7.4c-submit-followup-present-1 — VkSurfaceKHR on Vulkan; RAL adopts without taking ownership (renderer's ri.VK_CreateSurface retains lifecycle)
-	// Phase 7.4c-submit-followup-present-2 — atomic-handoff swapchain
+	void            *externalSurface;  // VkSurfaceKHR on Vulkan; RAL adopts without taking ownership (renderer's ri.VK_CreateSurface retains lifecycle)
+	// Atomic-handoff swapchain
 	// recreation hint. When non-NULL, passed into
 	// VkSwapchainCreateInfoKHR.oldSwapchain so the new swapchain is created
 	// "in place of" the old. The old VkSwapchainKHR is retired by
@@ -36,7 +36,7 @@ typedef struct {
 	// wrapper AFTER successful create (can no longer use the old handle for
 	// anything except vkDestroySwapchainKHR). NULL on initial boot create.
 	void            *oldExternalSwapchain;
-	// Phase 7.4c-submit-followup-present-2 — backend-extension pass-through
+	// Backend-extension pass-through
 	// for the swapchain create info struct's extension chain. On Vulkan, this
 	// is the VkSwapchainCreateInfoKHR.pNext pointer — used by the renderer's
 	// existing Windows-HDR full-screen-exclusive (FSE) chain at vk.c's
@@ -49,14 +49,22 @@ typedef struct {
 ralSwapchain_t *Ral_CreateSwapchain ( ralBackend_t *b, const ralSwapchainCreateInfo_t *ci );
 void            Ral_DestroySwapchain( ralSwapchain_t *sc );
 
-// Phase 7.4c-submit-followup-present-2 — accessor for the underlying
+// Accessor for the underlying
 // VkSwapchainKHR (on Vulkan). Used by the renderer to mirror its legacy
 // vk.swapchain field from the RAL-owned swapchain so the 100+ existing
 // vk.swapchain references in vk.c work transparently. Returns NULL on
 // NULL arg or pre-create state. Consumer casts back to VkSwapchainKHR.
 void *Ral_GetSwapchainHandle( const ralSwapchain_t *sc );
 
-// Phase 7.4c-submit-followup-present-1 — typed Present-info shape (mirrors
+// Cached swapchain image extent (surface currentExtent at create time = physical
+// swapchain pixels). The correct render-target size for the final present-blit
+// pass — distinct from the SDL-reported window size (half on hi-DPI) and from the
+// renderer's virtual vidWidth (diverges under render-scale / supersample). Writes
+// 0 on NULL arg / pre-create. The render-target size lives in the RAL tier; the
+// renderer asks via this accessor rather than reaching into the swapchain.
+void Ral_GetSwapchainExtent( const ralSwapchain_t *sc, uint32_t *width, uint32_t *height );
+
+// Typed Present-info shape (mirrors
 // ralSubmitInfo_t's array convention). Renderer builds in-place and passes
 // to Ral_Present. The single-swapchain case sets numSwapchains=1.
 typedef struct {
@@ -67,8 +75,8 @@ typedef struct {
 	uint32_t           numWaitSemaphores;
 } ralPresentInfo_t;
 
-// Phase 7.4c-submit-followup-present-1 — typed Acquire signature (replaces
-// Phase 7.1 stub's outAcquireSem pattern). Caller owns the signal semaphore
+// Typed Acquire signature (replaces
+// the earlier stub's outAcquireSem pattern). Caller owns the signal semaphore
 // (per-frame ring's ralSemaphore_t) — RAL signals it but doesn't manage
 // lifecycle. Returns ralSuccess on normal acquire; ralOutOfDate /
 // ralSuboptimal indicate the renderer should drive a swapchain recreate
@@ -79,13 +87,13 @@ ralResult_t Ral_AcquireNextImage( ralSwapchain_t *sc,
                                   uint32_t       *outImageIndex,
                                   ralTexture_t  **outImage );
 
-// Phase 7.4c-submit-followup-present-1 — typed Present (replaces Phase 7.1
+// Typed Present (replaces the earlier
 // stub's flat 2-arg signature). Returns ralSuccess on normal present;
 // ralOutOfDate / ralSuboptimal indicate the renderer should drive a
 // swapchain recreate.
 ralResult_t Ral_Present( ralBackend_t *b, const ralPresentInfo_t *info );
 
-// HDR static metadata for HDR10 swapchains (set per Phase 7.8b). Coordinates
+// HDR static metadata for HDR10 swapchains. Coordinates
 // are CIE 1931 xy; luminance in cd/m². No-op on SDR swapchains.
 typedef struct {
 	float displayPrimaryRed[2];

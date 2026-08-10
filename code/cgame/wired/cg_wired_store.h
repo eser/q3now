@@ -5,7 +5,7 @@
 ===========================================================================
 cg_wired_store.h -- Wired Store: cgame staging buffer
 
-Phase 4: cgame writes game state to the Wired Store via a staging buffer.
+cgame writes game state to the Wired Store via a staging buffer.
 Each frame, accumulated changes are flushed in a single batch syscall.
 ===========================================================================
 */
@@ -32,6 +32,14 @@ void WUI_Stage_SetState( const char *key, const char *state );
 /* Flush all staged entries to client in one syscall. Call once per frame.
    Clears the staging buffer after flush. */
 void WUI_Stage_Flush( void );
+
+/* World-anchored marker-list staging (WA-2a): Begin a named list, Push markers
+   (real-pixel x/y + color + short text), Flush sends it via the marker channel
+   (REPLACES the listKey's prior-frame list client-side). Separate from the
+   scalar store. wuiMarker_t / WUI_MAX_MARKERS_PER_LIST live in cg_public.h. */
+void WUI_StageMarkers_Begin( const char *listKey );
+void WUI_StageMarkers_Push( float x, float y, const vec4_t color, const char *text );
+void WUI_StageMarkers_Flush( void );
 
 /* Clear staging buffer without flushing (e.g. on map change) */
 void WUI_Stage_Clear( void );

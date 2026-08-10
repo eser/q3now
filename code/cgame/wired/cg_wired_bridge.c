@@ -7,7 +7,7 @@ cg_wired_bridge.c — Wired UI: cgame-to-client state bridge
 
 Fills wiredHudState_t from cgame globals and pushes it to the client each
 frame via trap_WiredUI_PushHudState(). This is the ONLY file that reads
-from cgame game state for HUD purposes after Phase 3 migration.
+from cgame game state for HUD purposes after the migration.
 ===========================================================================
 */
 
@@ -15,6 +15,41 @@ from cgame game state for HUD purposes after Phase 3 migration.
 #include "cg_wired_store.h"
 
 #if FEAT_WIRED_UI
+
+/* Resolve a weapon's on-disk crosshair-script directory token from its world
+ * model path, e.g. "models/weapons2/machinegun/machinegun.md3" -> "machinegun".
+ * The procedural-crosshair loader looks up base/weapons/<token>/crosshair.lua.
+ * Uses world_model[0]'s parent-directory basename — this matches the spec's
+ * file-layout convention for the authored reference weapons (machinegun,
+ * lightning). NOTE: a handful of weapons use abbreviated model dirs
+ * (rocketlauncher -> "rocketl", grenadelauncher -> "grenadel"); a future
+ * canonical short-name table would normalize those, but v1 ships only the two
+ * reference scripts, both of which resolve cleanly here. Returns "" when no
+ * model path exists (e.g. WP_NONE) so the loader falls back to the default. */
+static void CG_CrosshairWeaponToken( int weapon, char *out, int outSize ) {
+	const gitem_t *item;
+	const char    *path;
+	const char    *slash, *prev;
+
+	out[0] = '\0';
+	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) return;
+
+	item = BG_FindItemForWeapon( weapon );
+	if ( !item || !item->world_model[0] || !item->world_model[0][0] ) return;
+
+	/* parent-directory basename: scan for the last and second-to-last '/' */
+	path  = item->world_model[0];
+	slash = strrchr( path, '/' );
+	if ( !slash || slash == path ) return;
+	prev = slash - 1;
+	while ( prev > path && *prev != '/' ) prev--;
+	if ( *prev == '/' ) prev++;
+	{
+		int len = (int)( slash - prev );
+		if ( len <= 0 || len >= outSize ) return;
+		Q_strncpyz( out, prev, len + 1 );
+	}
+}
 
 void CG_WiredHudPushState( void ) {
 	wiredHudState_t state;
@@ -64,6 +99,11 @@ void CG_WiredHudPushState( void ) {
 		  ( cg.snap->ps.pm_flags & PMF_SCOREBOARD ) ) );
 	state.demoPlayback  = cg.demoPlayback;
 	state.intermission  = ( cg.snap->ps.pm_type == PM_INTERMISSION );
+	// cinematic director: hide the entire game HUD while a scene is playing with
+	// its HUD flag off (the default). Client-view-only — re-derived each frame,
+	// so the HUD returns automatically on scene-end (a 'hud' event can opt it back
+	// on mid-scene). This is the Wired-UI equivalent of the legacy 2D suppress.
+	state.sceneHudHidden = (qboolean)( cg.scenePlayback.active && !cg.scenePlayback.hudVisible );
 
 	{
 		int cmdNum;
@@ -124,19 +164,33 @@ void CG_WiredHudPushState( void ) {
 	state.crosshairClientNum  = cg.crosshairClientNum;
 	state.crosshairClientTime = cg.crosshairClientTime;
 
-	// pre-compute crosshair rendering state (client just draws)
-	if ( !cg_crosshairAlpha.integer || cg.renderingThirdPerson ||
+	// pre-compute crosshair rendering state (client just draws).
+	// WA-1: third-person no longer suppresses the Wired crosshair — it now DRAWS
+	// at a world-derived offset (computed below), replacing the retired imperative
+	// RT_SPRITE. Suppression is kept ONLY for the genuine no-crosshair cases
+	// (crosshair disabled / spectator).
+	// cg_crosshairAlpha is a float; .integer truncates a fractional alpha
+	// (0<a<1) to 0 → crosshair wrongly vanishes. Test the float value (the
+	// color path at :187 already uses .value), so any positive alpha shows.
+	if ( cg_crosshairAlpha.value <= 0.0f ||
 	     cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR ) {
 		state.crosshair.shaderIndex = -1;
 	} else {
 		vec4_t xhairColor;
 		float w, f;
 
-		int eff = BG_GetEffectiveHealth(
-			cg.snap->ps.stats[STAT_HEALTH],
-			cg.snap->ps.stats[STAT_ARMORCLASS],
-			cg.snap->ps.stats[STAT_ARMOR] );
-		BG_GetColorForAmount( eff, xhairColor );
+		// cg_crosshairHealth: health-gradient colour; else cg_crosshairColor
+		// ("R G B" 0..1; non-triplet falls back to white).
+		if ( cg_crosshairHealth.integer ) {
+			int eff = BG_GetEffectiveHealth(
+				cg.snap->ps.stats[STAT_HEALTH],
+				cg.snap->ps.stats[STAT_ARMORCLASS],
+				cg.snap->ps.stats[STAT_ARMOR] );
+			BG_GetColorForAmount( eff, xhairColor );
+		} else if ( sscanf( cg_crosshairColor.string, "%f %f %f",
+				&xhairColor[0], &xhairColor[1], &xhairColor[2] ) != 3 ) {
+			xhairColor[0] = xhairColor[1] = xhairColor[2] = 1.0f;
+		}
 
 		xhairColor[3] = Com_Clamp( 0.0f, 1.0f, cg_crosshairAlpha.value );
 		// rocket launcher helix: amber tint during alt-fire cooldown
@@ -157,8 +211,41 @@ void CG_WiredHudPushState( void ) {
 			w *= ( 1.0f + f );
 		}
 		state.crosshair.size = w;
-		state.crosshair.x = 0;
-		state.crosshair.y = 0;
+
+		/* WA-1: stage the crosshair's world-anchored screen OFFSET (from center,
+		 * real pixels) so the Wired UI element draws it where bullets land. cgame
+		 * computes WHERE; Wired UI draws WHAT (inversion of control). First-person:
+		 * camera-forward trace (impact projects to centre → offset 0,0 →
+		 * byte-identical). Third-person: muzzle-trace along ps.viewangles (the
+		 * bullet aim, not the camera) → offset to the real impact point. The trace
+		 * passes the local clientNum so the player's own body isn't hit. The
+		 * world→pixels conversion (640x480 virtual → real) lives in
+		 * CG_WorldToScreenPixels; here we subtract screen centre for the offset.
+		 * Behind-camera (aiming back at own camera in 3rd-person) → centre fallback. */
+		{
+			vec3_t  traceStart, traceDir, traceEnd;
+			trace_t tr;
+			float   xPx, yPx;
+
+			if ( cg.renderingThirdPerson ) {
+				CG_CalcMuzzlePoint( cg.snap->ps.clientNum, traceStart );
+				AngleVectors( cg.snap->ps.viewangles, traceDir, NULL, NULL );
+			} else {
+				VectorCopy( cg.refdef.vieworg, traceStart );
+				VectorCopy( cg.refdef.viewaxis[0], traceDir );
+			}
+			VectorMA( traceStart, 8192.0f, traceDir, traceEnd );
+			CG_Trace( &tr, traceStart, NULL, NULL, traceEnd,
+				cg.snap->ps.clientNum, MASK_SHOT );
+
+			if ( CG_WorldToScreenPixels( tr.endpos, &xPx, &yPx ) ) {
+				state.crosshair.x = xPx - (float)cgs.glconfig.vidWidth  * 0.5f;
+				state.crosshair.y = yPx - (float)cgs.glconfig.vidHeight * 0.5f;
+			} else {
+				state.crosshair.x = 0.0f;
+				state.crosshair.y = 0.0f;
+			}
+		}
 	}
 
 	// ── player extras ────────────────────────────────────────────────
@@ -205,7 +292,11 @@ void CG_WiredHudPushState( void ) {
 	}
 
 	// ── scoreboard scores (pre-sorted by server rank order) ─────────
-	state.numScores = cg.numScores;
+	// Clamp numScores to what the loop below actually copies (capped at
+	// WIRED_HUD_MAX_SCORES). Publishing the full cg.numScores would let a
+	// consumer that iterates `si < numScores` read scores[] entries never
+	// populated here — stale/out-of-bounds score data on a full server.
+	state.numScores = ( cg.numScores < WIRED_HUD_MAX_SCORES ) ? cg.numScores : WIRED_HUD_MAX_SCORES;
 	for ( i = 0; i < cg.numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
 		state.scores[i].client          = cg.scores[i].client;
 		state.scores[i].score           = cg.scores[i].score;
@@ -326,11 +417,15 @@ void CG_WiredHudPushState( void ) {
 		int w, weaponCount = 0;
 		int statWeapons = cg.snap->ps.stats[STAT_WEAPONS];
 		int curWeap = cg.snap->ps.weapon;
-		/* Start at WP_MACHINEGUN (skip gauntlet) */
-		for ( w = WP_MACHINEGUN; w < WP_NUM_WEAPONS && weaponCount < WIRED_MAX_WEAPONS; w++ ) {
+		/* HUD redesign (Eser): include the GAUNTLET in the carousel — it is a
+		   real weapon and its absence from the selection list read as a gap.
+		   Its ammo is -1 (infinite); the widget shows it as ∞ (see the ammo
+		   binding below for the value-based -1 → "∞" rule). */
+		for ( w = WP_GAUNTLET; w < WP_NUM_WEAPONS && weaponCount < WIRED_MAX_WEAPONS; w++ ) {
 			if ( statWeapons & ( 1 << w ) ) {
 				int ammoVal = cg.snap->ps.ammo[w];
-				if ( ammoVal < 0 ) ammoVal = 0;
+				/* Keep the infinite sentinel (-1) intact so the carousel slot can
+				   render ∞; only clamp the finite upper bound. */
 				if ( ammoVal > 999 ) ammoVal = 999;
 				state.weaponList[weaponCount].id       = w;
 				state.weaponList[weaponCount].icon      = cg_weapons[w].weaponIcon;
@@ -341,6 +436,10 @@ void CG_WiredHudPushState( void ) {
 			}
 		}
 		state.weaponListCount = weaponCount;
+		/* HUD redesign (Eser): carousel show/fade gate — the client compares
+		   wired_cg.time against this to show the list only for ~1.5s after a
+		   weapon switch, then fade it out (classic Q3 behaviour). */
+		state.weaponSelectTime = cg.weaponSelectTime;
 	}
 
 	/* ── pre-computed active powerups ────────────────────────────────── */
@@ -407,7 +506,11 @@ void CG_WiredHudPushState( void ) {
 		int hp = cg.snap->ps.stats[STAT_HEALTH];
 		int ap = cg.snap->ps.stats[STAT_ARMOR];
 		int wp = cg.snap->ps.weapon;
-		int ammoVal = cg.snap->ps.ammo[wp];
+		int ammoVal;
+		// ps.weapon is server-controlled; clamp before it indexes ps.ammo[] (and
+		// cg_weapons[] below). Out-of-range → WP_NONE (no weapon shown).
+		if ( (unsigned)wp >= WP_NUM_WEAPONS ) wp = WP_NONE;
+		ammoVal = cg.snap->ps.ammo[wp];
 
 		// health binding
 		Q_strncpyz( state.bindings[b].name, "health", sizeof( state.bindings[b].name ) );
@@ -432,14 +535,25 @@ void CG_WiredHudPushState( void ) {
 		state.bindings[b].visible = ( ap > 0 );
 		b++;
 
-		// ammo binding
+		// ammo binding — value-based ∞ for infinite weapons (mirrors the
+		// WUI_Stage path below; keep the two in sync). ammoVal < 0 = infinite.
 		Q_strncpyz( state.bindings[b].name, "ammo", sizeof( state.bindings[b].name ) );
-		Com_sprintf( state.bindings[b].text, sizeof( state.bindings[b].text ), "%d", ammoVal > 0 ? ammoVal : 0 );
-		if ( ammoVal <= 0 ) Vector4Set( state.bindings[b].color, 1, 0, 0, 1 );
+		if ( ammoVal < 0 )
+			Q_strncpyz( state.bindings[b].text, "\xE2\x88\x9E", sizeof( state.bindings[b].text ) ); /* UTF-8 ∞ */
+		else
+			Com_sprintf( state.bindings[b].text, sizeof( state.bindings[b].text ), "%d", ammoVal > 0 ? ammoVal : 0 );
+		if ( ammoVal == 0 ) Vector4Set( state.bindings[b].color, 1, 0, 0, 1 );
 		else                Vector4Set( state.bindings[b].color, 1, 1, 1, 1 );
 		state.bindings[b].icon = cg_weapons[wp].ammoIcon;
-		state.bindings[b].percent = Com_Clamp( 0.0f, 1.0f, ammoVal / 200.0f );
-		state.bindings[b].visible = ( wp != WP_NONE && wp != WP_GAUNTLET );
+		{
+			/* bar fills against the CURRENT weapon's max ammo, not a fixed 200
+			   (GL max 50 → 50/50 reads full). maxAmmunition -1 (no cap: none/
+			   gauntlet) → full bar. Keep in sync with the WUI_Stage copy below. */
+			int maxAmmo = bg_weaponlist[wp].maxAmmunition;
+			state.bindings[b].percent = ( ammoVal < 0 || maxAmmo <= 0 ) ? 1.0f
+				: Com_Clamp( 0.0f, 1.0f, (float)ammoVal / (float)maxAmmo );
+		}
+		state.bindings[b].visible = ( wp != WP_NONE );
 		b++;
 
 		state.numBindings = b;
@@ -454,6 +568,9 @@ void CG_WiredHudPushState( void ) {
 		hp = cg.snap->ps.stats[STAT_HEALTH];
 		ap = cg.snap->ps.stats[STAT_ARMOR];
 		wp = cg.snap->ps.weapon;
+		// ps.weapon is server-controlled; clamp before it indexes ps.ammo[] (and
+		// cg_weapons[] below). Out-of-range → WP_NONE (no weapon shown).
+		if ( (unsigned)wp >= WP_NUM_WEAPONS ) wp = WP_NONE;
 		ammoVal = cg.snap->ps.ammo[wp];
 
 		/* ── player.health ──────────────────────────────── */
@@ -514,13 +631,32 @@ void CG_WiredHudPushState( void ) {
 		}
 
 		/* ── player.ammo ────────────────────────────────── */
-		Com_sprintf( buf, sizeof( buf ), "%d", ammoVal > 0 ? ammoVal : 0 );
+		/* HUD redesign (Eser): infinite-ammo weapons (ammoVal < 0, e.g. the
+		   gauntlet) show the ∞ glyph instead of a number, and the readout stays
+		   VISIBLE rather than hidden. The decision is VALUE-based (ammoVal < 0),
+		   not name-based (was: wp == WP_GAUNTLET) — so any infinite weapon (a
+		   mod's infinite-ammo cvar, a future weapon) is covered with no extra
+		   code. ∞ = U+221E, present in the oxanium atlas (charset_latin.txt). */
+		if ( ammoVal < 0 ) {
+			Q_strncpyz( buf, "\xE2\x88\x9E", sizeof( buf ) ); /* UTF-8 ∞ (U+221E) */
+		} else {
+			Com_sprintf( buf, sizeof( buf ), "%d", ammoVal > 0 ? ammoVal : 0 );
+		}
 		WUI_Stage_SetString( "player.ammo.text", buf );
 		WUI_Stage_SetFloat( "player.ammo.value", (float)ammoVal );
-		WUI_Stage_SetFloat( "player.ammo.percent", Com_Clamp( 0.0f, 1.0f, ammoVal / 200.0f ) );
+		/* bar fills against the CURRENT weapon's max ammo, not a fixed 200 (GL max
+		   50 → 50/50 reads full). infinite → full bar; finite → proportional. Com_Clamp
+		   would floor the -1 sentinel to 0 (empty bar), so special-case the infinite
+		   fill (and the -1 no-cap maxAmmunition). Keep in sync with the bindings copy. */
+		{
+			int maxAmmo = bg_weaponlist[wp].maxAmmunition;
+			WUI_Stage_SetFloat( "player.ammo.percent",
+				( ammoVal < 0 || maxAmmo <= 0 ) ? 1.0f
+					: Com_Clamp( 0.0f, 1.0f, (float)ammoVal / (float)maxAmmo ) );
+		}
 
-		/* ammo color */
-		if ( ammoVal <= 0 ) {
+		/* ammo color: amber-neutral for infinite, red only for a real empty (0) */
+		if ( ammoVal == 0 ) {
 			Vector4Set( color, 1.0f, 0.0f, 0.0f, 1.0f );
 		} else {
 			Vector4Set( color, 1.0f, 1.0f, 1.0f, 1.0f );
@@ -530,11 +666,15 @@ void CG_WiredHudPushState( void ) {
 		/* ammo icon */
 		WUI_Stage_SetIcon( "player.ammo.icon", cg_weapons[wp].ammoIcon );
 
-		/* ammo semantic state + visibility */
-		if ( wp == WP_NONE || wp == WP_GAUNTLET ) {
+		/* ammo semantic state + visibility. Only a true no-weapon (WP_NONE)
+		   hides the readout now; the gauntlet (infinite) stays shown as ∞. */
+		if ( wp == WP_NONE ) {
 			WUI_Stage_SetState( "player.ammo.state", "neutral" );
 			WUI_Stage_SetString( "player.ammo.visible", "0" );
-		} else if ( ammoVal <= 0 ) {
+		} else if ( ammoVal < 0 ) {
+			WUI_Stage_SetState( "player.ammo.state", "normal" );
+			WUI_Stage_SetString( "player.ammo.visible", "1" );
+		} else if ( ammoVal == 0 ) {
 			WUI_Stage_SetState( "player.ammo.state", "critical" );
 			WUI_Stage_SetString( "player.ammo.visible", "1" );
 		} else if ( cg.lowAmmoWarning >= 1 ) {
@@ -548,6 +688,19 @@ void CG_WiredHudPushState( void ) {
 		/* ── player.weapon ──────────────────────────────── */
 		WUI_Stage_SetInt( "player.weapon.current", wp );
 		WUI_Stage_SetString( "player.weapon.name", bg_weaponlist[wp].name );
+		/* D3: short uppercase tag (e.g. "RL") for the compact bottom-right ammo
+		 * panel caption — the full .name ("Rocket Launcher") overran it. */
+		{
+			char shortUp[8];
+			int  si;
+			const char *sn = bg_weaponlist[wp].shortname;
+			for ( si = 0; si < (int)sizeof(shortUp) - 1 && sn && sn[si]; si++ ) {
+				char c = sn[si];
+				shortUp[si] = ( c >= 'a' && c <= 'z' ) ? (char)( c - 'a' + 'A' ) : c;
+			}
+			shortUp[si] = '\0';
+			WUI_Stage_SetString( "player.weapon.shortname", shortUp );
+		}
 		WUI_Stage_SetIcon( "player.weapon.icon", cg_weapons[wp].weaponIcon );
 
 		/* ── match.score ────────────────────────────────── */
@@ -706,11 +859,15 @@ void CG_WiredHudPushState( void ) {
 			int myTeam = cg.snap->ps.persistant[PERS_TEAM];
 			qboolean isTeammate = qfalse;
 			qboolean showName = qtrue;
+			qboolean targetExists = qfalse;
+			int targetArmorClass = 0;
 
 			if ( xhairClient >= 0 && xhairClient < MAX_CLIENTS &&
 			     cgs.clientinfo[xhairClient].infoValid ) {
 				int targetTeam = cgs.clientinfo[xhairClient].team;
 				isTeammate = ( targetTeam != TEAM_FREE && targetTeam == myTeam );
+				targetExists = qtrue;
+				targetArmorClass = cgs.clientinfo[xhairClient].armorClass;
 
 				/* showName: hide enemy names in team games when cvar == 2 */
 				if ( cgs.gametypeIsTeamGame && cg_drawCrosshairNames.integer == 2 ) {
@@ -722,6 +879,52 @@ void CG_WiredHudPushState( void ) {
 
 			WUI_Stage_SetInt( "crosshair.isTeammate", isTeammate ? 1 : 0 );
 			WUI_Stage_SetInt( "crosshair.showName", showName ? 1 : 0 );
+
+			/* ── procedural-crosshair state (Wired Crosshair) ──
+			 * Self-state + instantaneous trace target, staged for the
+			 * client-side Lua update(state) pipeline. recoil is DEFERRED
+			 * (real bg_ weapon model is a separate workstream) — not staged;
+			 * the pipeline defaults it to 0. */
+			{
+				int wp = cg.snap->ps.weapon;
+				char wtoken[64];
+				qboolean isCrouching =
+					( cg.predictedPlayerState.pm_flags & PMF_DUCKED ) ? qtrue : qfalse;
+
+				CG_CrosshairWeaponToken( wp, wtoken, sizeof( wtoken ) );
+
+				WUI_Stage_SetString( "crosshair.weapon", wtoken );
+				WUI_Stage_SetInt( "crosshair.weapon_status", cg.snap->ps.weaponstate );
+				WUI_Stage_SetFloat( "crosshair.speed", cg.xyspeed );
+				WUI_Stage_SetInt( "crosshair.is_firing",
+					( cg.snap->ps.weaponstate == WEAPON_FIRING ) ? 1 : 0 );
+				WUI_Stage_SetInt( "crosshair.is_crouching", isCrouching ? 1 : 0 );
+				WUI_Stage_SetFloat( "crosshair.charge", 0.0f );
+
+				/* RS-5: stage the REAL deterministic fire-cone size (0..1 normalized)
+				 * for the reticle to display — NOT a cosmetic proxy. This is the
+				 * SAME BG_CalcWeaponSpreadNormalized the RS-3 server cone derives
+				 * from, so the displayed spread matches the bullets (zero bandwidth:
+				 * recomputed client-side from the already-synced fireRampStartTime).
+				 * 🔴 Read from cg.predictedPlayerState + cg.time (the predicted ramp,
+				 * maintained by cg_predict's PM_Weapon) — NOT cg.snap->ps, which lags
+				 * the snapshot and would desync the reticle from the server cone. The
+				 * active attack is derived the way the server selects its fire fn:
+				 * a burst (burstRoundsRemaining>0) is the alt attack, else the
+				 * primary. Returns 0 for no-cone weapons → no fire-spread shown. */
+				{
+					const playerState_t *pps = &cg.predictedPlayerState;
+					int   w         = pps->weapon;
+					int   attackIdx = ( pps->burstRoundsRemaining > 0 )
+					                      ? bg_weaponlist[w].attackAlt
+					                      : bg_weaponlist[w].attack;
+					float coneN     = BG_CalcWeaponSpreadNormalized( pps, attackIdx, cg.time );
+					WUI_Stage_SetFloat( "crosshair.recoil", coneN );
+				}
+
+				WUI_Stage_SetInt( "crosshair.target.exists", targetExists ? 1 : 0 );
+				WUI_Stage_SetInt( "crosshair.target.armorClass", targetArmorClass );
+			}
 		}
 
 		/* ── spectator list ─────────────────────────────────────── */
@@ -792,6 +995,13 @@ void CG_WiredHudPushState( void ) {
 
 		/* Flush all staged entries in one batch syscall */
 		WUI_Stage_Flush();
+
+		/* WA-3: the world-anchored MARKER lists (markers.plums, markers.botdir)
+		 * are now Begin/Push/FLUSHED as atomic cycles in the scene-build phase
+		 * (CG_AddLocalEntities) — the single-list staging scratch holds one list at
+		 * a time, so two lists can't both defer to a single flush here. The marker
+		 * flush therefore moved out of this bridge (it is NOT tied to the scalar
+		 * WUI_Stage_Flush above). */
 	}
 
 	// ── per-attack stats for local player ────────────────────────────

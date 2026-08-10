@@ -1,0 +1,75 @@
+// qw_map_panel — scene-content "MAP" card: levelshot preview + map info.
+//
+// The reusable scene-content panel pattern (shared with qw_last_match_card /
+// qw_profile_card): a titled, token-driven card — an OPAQUE $panelDeep fill +
+// 1px $line border + a header eyebrow (◆ + mono label in $accent) + body. The
+// opaque backing is what keeps the text legible over the moving F2 parallax
+// scene: the scene shows at the card's EDGES, never through its text.
+//
+// Interface (consumer): #include into a SCENE menu's content column.
+// Tokens: $accent $bone $boneDim $panelDeep $line $font_icon $font_mono
+//         $font_sans $spacing_card_padding_v $spacing_card_padding_h
+//         $spacing_xs $spacing_sm
+// State (fed by cl_wired_feeders.c — real data only, no invented fields):
+//   ownerdraw "net_map_preview" reads ui_mapLevelshot (graceful "NO PREVIEW"
+//     placeholder when the levelshot is absent — see WiredOD_NetMapPreview),
+//   ui_selectedMap (map load name), ui_netGameType, ui_mapPoolStatus.
+itemDef {
+	name "card_map"
+	type container
+	rect 0 0 1 0
+	height FIT
+	direction column
+	padding $spacing_card_padding_v $spacing_card_padding_h
+	gap $spacing_xs
+	background $panelDeep
+	border 1px $line
+
+	// Header row: ◆ MAP
+	itemDef {
+		name "card_map_header_row"
+		type container
+		rect 0 0 1 2vh
+		height FIT
+		direction row
+		alignY center
+		gap 0.006
+		itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 14vw 2vh height FIT width PERCENT 14vw text "MAP" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 }
+	}
+
+	// Levelshot preview — the existing net_map_preview ownerdraw. It draws the
+	// selected map's levelshot, or a "NO PREVIEW" placeholder panel when none
+	// exists (never a broken/transparent box).
+	itemDef {
+		name "card_map_preview"
+		type 0
+		ownerdraw "net_map_preview"
+		rect 0 0 1 0
+		width PERCENT 1
+		height FIXED 150px
+		backcolor $ink
+		decoration
+		visible 1
+		grow 0
+	}
+
+	// Map name (ui_selectedMap — the load name). type-0 TEXT items display a
+	// live state value via `bind` (storeBind → clay-emit text path); the `cvar`
+	// keyword is for interactive controls, not label display, so `bind` is the
+	// right binding here. `text "—"` is the fallback until the store populates.
+	itemDef { type 0 rect 0 0 1 2.4vh height FIT width PERCENT 1 bind "ui_selectedMap" text "—" textalign 0 font $font_sans 16 forecolor $bone decoration visible 1 grow 0 }
+
+	// Meta line: gametype + pool status (both real feeder state).
+	itemDef {
+		name "card_map_meta_row"
+		type container
+		rect 0 0 1 1.8vh
+		height FIT
+		direction row
+		alignY center
+		gap $spacing_sm
+		itemDef { type 0 rect 0 0 20vw 1.8vh height FIT width PERCENT 20vw bind "ui_netGameType"   text "" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 24vw 1.8vh height FIT width PERCENT 24vw bind "ui_mapPoolStatus"  text "" textalign 2 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 1 }
+	}
+}

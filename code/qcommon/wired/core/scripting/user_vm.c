@@ -16,11 +16,11 @@ rcon-privileged bindings.
 #include "q_shared.h"
 #include "qcommon.h"
 #include "user_vm.h"
+#include "wired_scripting.h"   /* shared WIRED_CHUNK_NOREF sentinel */
 
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_scripting, "scripting" );
 
 #define MAX_BINDING_REGISTRARS  16
@@ -54,6 +54,11 @@ static int                 s_numRegistrars = 0;
 static cvar_t             *s_memoryMbCvar  = NULL;
 static cvar_t             *s_insnLimitCvar = NULL;
 
+/* Chunk-array API state (see chunk compile/cache section below). Declared
+   here so UserVM_Shutdown can reset them on teardown. */
+static int                 s_uvm_chunkArrayIdx    = 0;
+static int                 s_uvm_chunkErrorWarned = 0;
+
 /* ---- Custom allocator ------------------------------------------------ */
 
 static void *uvm_alloc( void *ud, void *ptr, size_t osize, size_t nsize ) {
@@ -73,10 +78,18 @@ static void *uvm_alloc( void *ud, void *ptr, size_t osize, size_t nsize ) {
 
     if ( nsize > osize ) {
         size_t grow = nsize - osize;
+        void  *np;
         if ( ctx->used + grow > ctx->limit ) {
             return NULL;
         }
-        ctx->used += grow;
+        /* Commit the grow to the cap counter ONLY after realloc succeeds — a
+         * NULL return (true system OOM, distinct from the cap rejection above)
+         * must not permanently inflate ctx->used for memory never allocated. */
+        np = realloc( ptr, nsize );
+        if ( np ) {
+            ctx->used += grow;
+        }
+        return np;
     } else {
         size_t shrink = osize - nsize;
         if ( ctx->used >= shrink ) {
@@ -189,6 +202,10 @@ void UserVM_Init( void ) {
     lua_pushnil( s_L ); lua_setglobal( s_L, "loadfile" );
     lua_pushnil( s_L ); lua_setglobal( s_L, "dofile" );
     lua_pushnil( s_L ); lua_setglobal( s_L, "load" );
+    /* loadstring is LuaJIT's exact alias of load() (lib_base.c) and, like load,
+     * accepts precompiled bytecode when called with no mode argument — leaving
+     * it reachable is the same sandbox escape as leaving `load`, so nil it too. */
+    lua_pushnil( s_L ); lua_setglobal( s_L, "loadstring" );
     lua_pushnil( s_L ); lua_setglobal( s_L, "debug" );
     lua_pushnil( s_L ); lua_setglobal( s_L, "package" );
     lua_pushnil( s_L ); lua_setglobal( s_L, "collectgarbage" );
@@ -224,6 +241,12 @@ void UserVM_Shutdown( void ) {
     s_adminCtx       = qfalse;
     s_capture        = NULL;
     s_numRegistrars  = 0;
+    /* Reset chunk-array static state so a VM reload starts clean. The held
+       table (if any) lived on s_L's stack, which lua_close just destroyed —
+       so we only clear the index; there is nothing to lua_pop. Likewise the
+       once-only warning gate must reset so the next VM logs its own warnings. */
+    s_uvm_chunkArrayIdx    = 0;
+    s_uvm_chunkErrorWarned = 0;
 }
 
 /* ---- VM access ------------------------------------------------------- */
@@ -324,4 +347,226 @@ qboolean UserVM_RconExecute( const char *code, char *outBuf, int outBufSize ) {
     luaL_unref( s_L, LUA_REGISTRYINDEX, co_ref );
     s_capture = NULL;
     return qtrue;
+}
+
+/* ---- Chunk compile + cache ----------
+ *
+ * Symmetric API to WiredScript_*Chunk* (wired_scripting.c). Compiles
+ * into the User VM's lua_State (s_L) registry. Refs are positive ints,
+ * with 0 reserved as WIRED_CHUNK_NOREF (matches memset-zero default).
+ * Each VM has its own registry, so System-VM and User-VM ref namespaces
+ * are independent — callers MUST route through wuiLuaVMOps_t dispatcher
+ * to use the right release/call functions for the ref's VM.
+ *
+ * Chunks compiled here are subject to the User VM's memory cap; out-of-
+ * memory at compile time returns WIRED_CHUNK_NOREF with a logged error.
+ * Execution is NOT wrapped in a coroutine (so no instruction-limit
+ * isolation per-call). The per-call insn limit is rcon-coroutine-specific;
+ * WiredUI bind chunks run in the main thread with the default Lua
+ * dynamic memory bounds, same as the System VM.
+ *
+ * NOTE: this chunk compile/cache/call API is an intentional tier-separated
+ * copy of WiredScript_*Chunk* in wired_scripting.c — that file is the trusted
+ * System VM (LuaJIT, full engine bindings); this is the untrusted User VM
+ * (memory-capped, instruction-limited, distinct lua_State). They cannot share
+ * one implementation without threading the lua_State + per-VM config through
+ * every public signature (these are dispatched via wuiLuaVMOps_t), so both are
+ * kept separate by tier rule. The s_uvm_chunkArrayIdx / s_uvm_chunkErrorWarned
+ * statics are declared in the module-state section above (so UserVM_Shutdown
+ * can reset them); they are NOT redeclared here.
+ */
+
+int UserVM_CompileChunk( const char *text, const char *chunkName ) {
+    int status;
+    int ref;
+
+    if ( !s_L ) return WIRED_CHUNK_NOREF;
+    if ( !text || !*text ) return WIRED_CHUNK_NOREF;
+
+    status = luaL_loadbuffer( s_L, text, strlen( text ),
+                              chunkName ? chunkName : "uvm-chunk" );
+    if ( status != 0 ) {
+        const char *err = lua_tostring( s_L, -1 );
+        Com_Log( SEV_WARN, LOG_CH(ch_scripting),
+            "UserVM: compile failed for '%s': %s\n",
+            chunkName ? chunkName : "?", err ? err : "(no message)" );
+        lua_pop( s_L, 1 );
+        return WIRED_CHUNK_NOREF;
+    }
+
+    ref = luaL_ref( s_L, LUA_REGISTRYINDEX );
+    if ( ref == LUA_REFNIL || ref == LUA_NOREF || ref <= 0 ) {
+        return WIRED_CHUNK_NOREF;
+    }
+    return ref;
+}
+
+void UserVM_ReleaseChunk( int chunkRef ) {
+    if ( !s_L ) return;
+    if ( chunkRef == WIRED_CHUNK_NOREF || chunkRef == LUA_NOREF || chunkRef == LUA_REFNIL || chunkRef <= 0 ) return;
+    luaL_unref( s_L, LUA_REGISTRYINDEX, chunkRef );
+}
+
+static qboolean uvm_chunk_push( int chunkRef, const char *tag ) {
+    if ( !s_L ) return qfalse;
+    if ( chunkRef == WIRED_CHUNK_NOREF || chunkRef <= 0 ) return qfalse;
+    lua_rawgeti( s_L, LUA_REGISTRYINDEX, chunkRef );
+    if ( !lua_isfunction( s_L, -1 ) ) {
+        lua_pop( s_L, 1 );
+        if ( !s_uvm_chunkErrorWarned ) {
+            Com_Log( SEV_WARN, LOG_CH(ch_scripting),
+                "UserVM: chunk ref %d (%s) is not a function\n",
+                chunkRef, tag ? tag : "?" );
+            s_uvm_chunkErrorWarned = 1;
+        }
+        return qfalse;
+    }
+    return qtrue;
+}
+
+static qboolean uvm_chunk_pcall( int nResults, const char *tag ) {
+    int status;
+    if ( !s_L ) return qfalse;
+    status = lua_pcall( s_L, 0, nResults, 0 );
+    if ( status != 0 ) {
+        const char *err = lua_tostring( s_L, -1 );
+        Com_Log( SEV_WARN, LOG_CH(ch_scripting),
+            "UserVM: chunk call failed (%s): %s\n",
+            tag ? tag : "?", err ? err : "(no message)" );
+        lua_pop( s_L, 1 );
+        return qfalse;
+    }
+    return qtrue;
+}
+
+static int uvm_chunk_array_validate( int tableIdx ) {
+    int n, i;
+    if ( !lua_istable( s_L, tableIdx ) ) return -1;
+    n = lua_objlen( s_L, tableIdx );
+    if ( n < 0 ) return -1;
+    for ( i = 1; i <= n; i++ ) {
+        lua_rawgeti( s_L, tableIdx, i );
+        if ( lua_isnil( s_L, -1 ) ) {
+            lua_pop( s_L, 1 );
+            return -1;
+        }
+        lua_pop( s_L, 1 );
+    }
+    return n;
+}
+
+int UserVM_CallChunkArrayLen( int chunkRef ) {
+    int n;
+
+    if ( s_uvm_chunkArrayIdx != 0 ) {
+        UserVM_ChunkArrayRelease();
+    }
+
+    if ( !uvm_chunk_push( chunkRef, "array-chunk" ) ) return -1;
+    if ( !uvm_chunk_pcall( 1, "array-chunk" ) ) return -1;
+
+    n = uvm_chunk_array_validate( -1 );
+    if ( n < 0 ) {
+        lua_pop( s_L, 1 );
+        if ( !s_uvm_chunkErrorWarned ) {
+            Com_Log( SEV_WARN, LOG_CH(ch_scripting),
+                "UserVM: chunk returned non-dense / non-array — Q-3=a\n" );
+            s_uvm_chunkErrorWarned = 1;
+        }
+        return -1;
+    }
+
+    if ( n == 0 ) {
+        /* Empty table: caller's `n <= 0` early-out won't Release, so pop the
+         * table here instead of leaking the stack slot / holding s_uvm_chunkArrayIdx. */
+        lua_pop( s_L, 1 );
+        s_uvm_chunkArrayIdx = 0;
+        return 0;
+    }
+
+    s_uvm_chunkArrayIdx = lua_gettop( s_L );
+    return n;
+}
+
+qboolean UserVM_ChunkArrayItemAsString( int index, char *out, size_t outSize ) {
+    const char *s;
+    if ( s_uvm_chunkArrayIdx == 0 || !out || outSize == 0 ) return qfalse;
+    lua_rawgeti( s_L, s_uvm_chunkArrayIdx, index );
+    s = lua_tostring( s_L, -1 );
+    if ( s ) Q_strncpyz( out, s, outSize );
+    lua_pop( s_L, 1 );
+    return s != NULL;
+}
+
+qboolean UserVM_ChunkArrayItemAsNumber( int index, double *out ) {
+    int        isnum;
+    lua_Number n;
+    if ( s_uvm_chunkArrayIdx == 0 || !out ) return qfalse;
+    lua_rawgeti( s_L, s_uvm_chunkArrayIdx, index );
+    isnum = lua_isnumber( s_L, -1 );
+    n = lua_tonumber( s_L, -1 );
+    lua_pop( s_L, 1 );
+    if ( isnum ) *out = (double) n;
+    return isnum ? qtrue : qfalse;
+}
+
+qboolean UserVM_ChunkArrayItemFieldAsString( int index, const char *field,
+                                              char *out, size_t outSize ) {
+    const char *s;
+    if ( s_uvm_chunkArrayIdx == 0 || !out || outSize == 0 || !field ) return qfalse;
+    lua_rawgeti( s_L, s_uvm_chunkArrayIdx, index );
+    if ( !lua_istable( s_L, -1 ) ) {
+        lua_pop( s_L, 1 );
+        return qfalse;
+    }
+    lua_getfield( s_L, -1, field );
+    s = lua_tostring( s_L, -1 );
+    if ( s ) Q_strncpyz( out, s, outSize );
+    lua_pop( s_L, 2 );
+    return s != NULL;
+}
+
+void UserVM_ChunkArrayRelease( void ) {
+    if ( s_uvm_chunkArrayIdx == 0 ) return;
+    lua_pop( s_L, 1 );
+    s_uvm_chunkArrayIdx = 0;
+}
+
+qboolean UserVM_CallChunkBool( int chunkRef, qboolean defaultVal ) {
+    qboolean result = defaultVal;
+    if ( !uvm_chunk_push( chunkRef, "bool-chunk" ) ) return defaultVal;
+    if ( !uvm_chunk_pcall( 1, "bool-chunk" ) ) return defaultVal;
+    if ( lua_isboolean( s_L, -1 ) ) {
+        result = lua_toboolean( s_L, -1 ) ? qtrue : qfalse;
+    } else if ( !lua_isnil( s_L, -1 ) ) {
+        result = qtrue;
+    } else {
+        result = qfalse;
+    }
+    lua_pop( s_L, 1 );
+    return result;
+}
+
+qboolean UserVM_CallChunkString( int chunkRef, char *out, size_t outSize ) {
+    const char *s;
+    if ( !out || outSize == 0 ) return qfalse;
+    if ( !uvm_chunk_push( chunkRef, "string-chunk" ) ) return qfalse;
+    if ( !uvm_chunk_pcall( 1, "string-chunk" ) ) return qfalse;
+    s = lua_tostring( s_L, -1 );
+    if ( s ) Q_strncpyz( out, s, outSize );
+    lua_pop( s_L, 1 );
+    return s != NULL;
+}
+
+qboolean UserVM_CallChunkNumber( int chunkRef, double *out ) {
+    int        isnum;
+    lua_Number n;
+    if ( !out ) return qfalse;
+    if ( !uvm_chunk_push( chunkRef, "number-chunk" ) ) return qfalse;
+    if ( !uvm_chunk_pcall( 1, "number-chunk" ) ) return qfalse;
+    isnum = lua_isnumber( s_L, -1 );
+    n = lua_tonumber( s_L, -1 );
+    lua_pop( s_L, 1 );
+    if ( isnum ) *out = (double) n;
+    return isnum ? qtrue : qfalse;
 }

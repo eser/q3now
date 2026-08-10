@@ -1,0 +1,141 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+cull.comp — wired-render GPU world-surface cull.
+
+Reproduces the frontend per-surface visibility decision over the FULL static
+world surface set, in parallel on the GPU, and compacts the survivors into a
+visible-id list. This is the cull half of GPU-driven rendering; it lands
+as VERIFICATION-ONLY (the CPU draw is unchanged), proving the GPU set matches the
+independently-produced CPU drawSurfs[] set.
+
+Per surface i, visible iff ALL of:
+  - PVS-reached: the CPU set surfReached[i] this frame. The frontend's recursive
+    BSP walk (R_RecursiveWorldNode) marks each surface reached by a PVS+leaf-
+    frustum-visible leaf (surf->viewCount == tr.viewCount, set in
+    R_AddWorldSurface BEFORE the per-surface backface cull). PVS is a BSP graph
+    walk — left on the CPU and fed in as a bit; the GPU does the parallel
+    bounds/plane work.
+  - per-surface frustum: the surface AABB is inside all 4 view frustum planes
+    (BoxOnPlaneSide). NOTE this is FINER than the frontend's leaf-level frustum;
+    the host-side path (vk.c vk_cull_host_derive_visible) applies the same
+    per-surface AABB test so the two stay in agreement.
+  - not backface: for SF_FACE single-sided faces, the same plane dot-test as
+    R_CullSurface (CT_FRONT_SIDED: cull if viewOrigin behind plane-8; CT_BACK_SIDED
+    mirrored; CT_TWO_SIDED never culls). SF_GRID/SF_TRIANGLES are never backface-
+    culled here (the frontend uses bounds culling for those, already folded into
+    the AABB frustum test + PVS-reached).
+
+Two-phase compute→compact (WebGPU-portable): phase here writes a per-surface
+visible flag AND atomically appends the surface id into a compacted list with a
+counter at visible[0]. Fixed-max draw count = cullSurfaceCount (the list can hold
+every surface); no IndirectCount needed — that GPU-side count feedback is a
+Vulkan-only fast-path a later SL may add behind caps.drawIndirectCount.
+
+Bindings (set 0, all COMPUTE):
+  0: AABB SSBO (read)     — per-surface {vec4 mins, vec4 maxs, vec4 plane, uvec4 meta}
+                            meta.x = cullType (0 FRONT,1 BACK,2 TWO_SIDED), meta.y = surfaceType
+  1: reached SSBO (read)  — uint reached[ceil(N/32)] PVS-reached bitset (1 bit/surface)
+  2: visible SSBO (write) — uint[0] = count; uint[1..N] = compacted surface ids;
+                            uint[N+1 .. 2N] = per-surface visible flag (for the verify compare)
+Push: vec4 frustum[4] (4 view planes: xyz=normal, w=dist) + vec4 viewOrigin (xyz)
+      + uvec4 params (x = surfaceCount, y = doFacePlaneCull, z = doFrustumCull).
+*/
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct SurfAABB {
+	vec4 mins;   // xyz = world-space min, w unused
+	vec4 maxs;   // xyz = world-space max, w unused
+	vec4 plane;  // xyz = normal, w = dist  (SF_FACE only; else ignored)
+	uvec4 meta;  // x = cullType, y = surfaceType, z/w reserved
+};
+
+layout(std430, set = 0, binding = 0) readonly buffer Aabb {
+	SurfAABB surfaces[];
+};
+
+layout(std430, set = 0, binding = 1) readonly buffer Reached {
+	uint reached[];   // bitset, 1 bit per surface
+};
+
+layout(std430, set = 0, binding = 2) buffer Visible {
+	uint visible[];   // [0]=count, [1..N]=compacted ids, [N+1..2N]=flags
+};
+
+layout(push_constant) uniform Push {
+	vec4 frustum[4];   // view frustum planes (normal.xyz, dist.w)
+	vec4 viewOrigin;   // xyz
+	uvec4 params;      // x=surfaceCount, y=doFacePlaneCull, z=doFrustumCull
+};
+
+// cullType_t (q_shared.h): CT_FRONT_SIDED=0, CT_BACK_SIDED=1, CT_TWO_SIDED=2
+const uint CT_FRONT_SIDED = 0u;
+const uint CT_BACK_SIDED  = 1u;
+const uint CT_TWO_SIDED   = 2u;
+
+// surfaceType_t: only SF_FACE gets the plane backface test. SF_FACE value is
+// supplied by the host as meta.y; we compare against the host-provided constant
+// pushed implicitly — here we test cullType + a finite plane (w!=0 sentinel not
+// needed; the host sets cullType=CT_TWO_SIDED for non-face surfaces so they skip).
+
+// BoxOnPlaneSide: returns true if the AABB is entirely on the BACK side of the
+// plane (fully outside → cull). Matches the r==2 "culled" result in
+// R_RecursiveWorldNode (BoxOnPlaneSide == 2). We pick the box corner nearest the
+// plane's positive side (the "n-vertex") and test it.
+bool boxFullyBehind(vec3 mins, vec3 maxs, vec4 plane) {
+	// nearest corner to the plane in the +normal direction
+	vec3 n = plane.xyz;
+	vec3 p; // positive vertex (farthest along +n)
+	p.x = (n.x >= 0.0) ? maxs.x : mins.x;
+	p.y = (n.y >= 0.0) ? maxs.y : mins.y;
+	p.z = (n.z >= 0.0) ? maxs.z : mins.z;
+	// if even the positive vertex is behind the plane, the whole box is behind
+	return (dot(n, p) - plane.w) < 0.0;
+}
+
+bool reachedBit(uint i) {
+	return (reached[i >> 5u] & (1u << (i & 31u))) != 0u;
+}
+
+void main() {
+	uint i = gl_GlobalInvocationID.x;
+	uint count = params.x;
+	if (i >= count) return;
+
+	uint flagBase = count + 1u;   // visible[count+1 + i] = per-surface flag
+
+	bool vis = reachedBit(i);
+
+	if (vis && params.z != 0u) {   // doFrustumCull
+		vec3 mn = surfaces[i].mins.xyz;
+		vec3 mx = surfaces[i].maxs.xyz;
+		for (int p = 0; p < 4; p++) {
+			if (boxFullyBehind(mn, mx, frustum[p])) { vis = false; break; }
+		}
+	}
+
+	if (vis && params.y != 0u) {   // doFacePlaneCull (SF_FACE backface)
+		uint ct = surfaces[i].meta.x;
+		if (ct != CT_TWO_SIDED) {
+			vec4 pl = surfaces[i].plane;
+			float d = dot(viewOrigin.xyz, pl.xyz);
+			// mirror R_CullSurface: CT_FRONT_SIDED cull if d < dist-8; CT_BACK_SIDED cull if d > dist+8
+			if (ct == CT_FRONT_SIDED) {
+				if (d < pl.w - 8.0) vis = false;
+			} else { // CT_BACK_SIDED
+				if (d > pl.w + 8.0) vis = false;
+			}
+		}
+	}
+
+	visible[flagBase + i] = vis ? 1u : 0u;
+	if (vis) {
+		uint slot = atomicAdd(visible[0], 1u);
+		if (slot + 1u <= count)
+			visible[1u + slot] = i;
+	}
+}

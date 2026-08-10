@@ -2,24 +2,26 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
 // ral_vulkan_resource.c — Vulkan backend: buffers, textures, samplers, bind
-// groups (phase-7-ral-design.md §3.2-§3.5, §7). Phase 7.2:
+// groups (phase-7-ral-design.md §3.2-§3.5, §7). Current state:
 //   * resources are real (VkBuffer / VkImage / VkImageView / VkSampler /
 //     VkDescriptorSetLayout / VkDescriptorSet), backed by the suballocator;
 //   * GPU mipmap generation via vkCmdBlitImage is a core Texture-upload
 //     feature (Ral_TextureUploadAsync);
 //   * uploads are SYNCHRONOUS (transient staging buffer + one-shot command +
 //     fence wait) — they return an already-signaled fence. The async transfer
-//     queue lands in Phase 7.3;
+//     queue lands later;
 //   * Ral_Destroy* does vkDeviceWaitIdle + immediate destroy — the deferred-
-//     destroy queue (§7.2) lands in Phase 7.3;
+//     destroy queue (§7.2) lands later;
 //   * descriptor sets come from one big backend-owned pool and are not freed
-//     individually — Ral_DestroyBindGroup is a no-op until 7.3.
+//     individually — Ral_DestroyBindGroup is a no-op for now.
 
 #include "ral_vulkan_internal.h"
 
+R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
+
 // Practical bindless-array size used for layouts whose entry count is 0
 // (unbounded). The device cap (caps.maxBindlessTextures) can be far larger;
-// 7.2 picks a portable fixed size. The descriptor pool is sized to match.
+// this picks a portable fixed size. The descriptor pool is sized to match.
 #define RAL_VK_BINDLESS_LAYOUT_COUNT  4096u
 #define RAL_VK_BINDLESS_POOL_SETS     4u
 
@@ -40,18 +42,26 @@ VkFormat ralVk_TranslateFormat( ralFormat_t f ) {
 	case RAL_FORMAT_B8G8R8A8_UNORM:       return VK_FORMAT_B8G8R8A8_UNORM;
 	case RAL_FORMAT_B8G8R8A8_SRGB:        return VK_FORMAT_B8G8R8A8_SRGB;
 	case RAL_FORMAT_A2B10G10R10_UNORM:    return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+	case RAL_FORMAT_A2R10G10B10_UNORM:    return VK_FORMAT_A2R10G10B10_UNORM_PACK32;
+	case RAL_FORMAT_B5G6R5_UNORM:         return VK_FORMAT_B5G6R5_UNORM_PACK16;
+	case RAL_FORMAT_R5G6B5_UNORM:         return VK_FORMAT_R5G6B5_UNORM_PACK16;
 	case RAL_FORMAT_R16_UNORM:            return VK_FORMAT_R16_UNORM;
 	case RAL_FORMAT_R16_SFLOAT:           return VK_FORMAT_R16_SFLOAT;
 	case RAL_FORMAT_R16G16_SFLOAT:        return VK_FORMAT_R16G16_SFLOAT;
 	case RAL_FORMAT_R16G16B16A16_SFLOAT:  return VK_FORMAT_R16G16B16A16_SFLOAT;
+	case RAL_FORMAT_R16G16B16A16_UNORM:   return VK_FORMAT_R16G16B16A16_UNORM;
 	case RAL_FORMAT_R11G11B10_UFLOAT:     return VK_FORMAT_B10G11R11_UFLOAT_PACK32;
 	case RAL_FORMAT_R32_SFLOAT:           return VK_FORMAT_R32_SFLOAT;
+	case RAL_FORMAT_R32G32_SFLOAT:        return VK_FORMAT_R32G32_SFLOAT;
 	case RAL_FORMAT_R32G32B32_SFLOAT:     return VK_FORMAT_R32G32B32_SFLOAT;
 	case RAL_FORMAT_R32G32B32A32_SFLOAT:  return VK_FORMAT_R32G32B32A32_SFLOAT;
+	case RAL_FORMAT_R8G8B8A8_UINT:        return VK_FORMAT_R8G8B8A8_UINT;
 	case RAL_FORMAT_D16_UNORM:            return VK_FORMAT_D16_UNORM;
 	case RAL_FORMAT_D24_UNORM_S8_UINT:    return VK_FORMAT_D24_UNORM_S8_UINT;
 	case RAL_FORMAT_D32_SFLOAT:           return VK_FORMAT_D32_SFLOAT;
 	case RAL_FORMAT_D32_SFLOAT_S8_UINT:   return VK_FORMAT_D32_SFLOAT_S8_UINT;
+	case RAL_FORMAT_D16_UNORM_S8_UINT:    return VK_FORMAT_D16_UNORM_S8_UINT;
+	case RAL_FORMAT_X8_D24_UNORM:         return VK_FORMAT_X8_D24_UNORM_PACK32;
 	case RAL_FORMAT_BC1_RGBA_UNORM:       return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
 	case RAL_FORMAT_BC1_RGBA_SRGB:        return VK_FORMAT_BC1_RGBA_SRGB_BLOCK;
 	case RAL_FORMAT_BC3_UNORM:            return VK_FORMAT_BC3_UNORM_BLOCK;
@@ -72,8 +82,10 @@ VkFormat ralVk_TranslateFormat( ralFormat_t f ) {
 static VkImageAspectFlags ralVk_FormatAspect( ralFormat_t f ) {
 	switch ( f ) {
 	case RAL_FORMAT_D16_UNORM:
+	case RAL_FORMAT_X8_D24_UNORM:         // X8 padding is NOT a stencil aspect → depth-only
 	case RAL_FORMAT_D32_SFLOAT:           return VK_IMAGE_ASPECT_DEPTH_BIT;
 	case RAL_FORMAT_D24_UNORM_S8_UINT:
+	case RAL_FORMAT_D16_UNORM_S8_UINT:
 	case RAL_FORMAT_D32_SFLOAT_S8_UINT:   return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
 	default:                              return VK_IMAGE_ASPECT_COLOR_BIT;
 	}
@@ -83,6 +95,7 @@ static qboolean ralVk_FormatIsDepthOrInteger( ralFormat_t f ) {
 	switch ( f ) {
 	case RAL_FORMAT_D16_UNORM: case RAL_FORMAT_D24_UNORM_S8_UINT:
 	case RAL_FORMAT_D32_SFLOAT: case RAL_FORMAT_D32_SFLOAT_S8_UINT:
+	case RAL_FORMAT_D16_UNORM_S8_UINT: case RAL_FORMAT_X8_D24_UNORM:
 		return qtrue;
 	default:
 		return qfalse;
@@ -93,12 +106,13 @@ static uint32_t ralVk_FormatBPP( ralFormat_t f ) {   // uncompressed only; bytes
 	switch ( f ) {
 	case RAL_FORMAT_R8_UNORM:                                  return 1;
 	case RAL_FORMAT_R8G8_UNORM: case RAL_FORMAT_R16_UNORM: case RAL_FORMAT_R16_SFLOAT: case RAL_FORMAT_D16_UNORM:
+	case RAL_FORMAT_B5G6R5_UNORM: case RAL_FORMAT_R5G6B5_UNORM:
 		return 2;
 	case RAL_FORMAT_R8G8B8A8_UNORM: case RAL_FORMAT_R8G8B8A8_SRGB: case RAL_FORMAT_B8G8R8A8_UNORM:
-	case RAL_FORMAT_B8G8R8A8_SRGB: case RAL_FORMAT_A2B10G10R10_UNORM: case RAL_FORMAT_R16G16_SFLOAT:
+	case RAL_FORMAT_B8G8R8A8_SRGB: case RAL_FORMAT_A2B10G10R10_UNORM: case RAL_FORMAT_A2R10G10B10_UNORM: case RAL_FORMAT_R16G16_SFLOAT:
 	case RAL_FORMAT_R11G11B10_UFLOAT: case RAL_FORMAT_R32_SFLOAT: case RAL_FORMAT_D32_SFLOAT: case RAL_FORMAT_D24_UNORM_S8_UINT:
 		return 4;
-	case RAL_FORMAT_R16G16B16A16_SFLOAT:                       return 8;
+	case RAL_FORMAT_R16G16B16A16_SFLOAT: case RAL_FORMAT_R16G16B16A16_UNORM:  return 8;
 	case RAL_FORMAT_R32G32B32_SFLOAT:                          return 12;   // vec3 — vertex-attribute-only on most hw (no optimal-tiling colour rendering)
 	case RAL_FORMAT_R32G32B32A32_SFLOAT:                       return 16;
 	default:                                                   return 4;   // best-effort fallback
@@ -210,7 +224,7 @@ void ralVk_SetObjectName( ralBackend_t *b, uint64_t handle, VkObjectType type, c
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// one-shot upload command helpers (Phase 7.3: per-queue, vkQueueSubmit2)
+// one-shot upload command helpers (per-queue, vkQueueSubmit2)
 // ════════════════════════════════════════════════════════════════════════
 static qboolean ralVk_BeginUploadCmd( ralBackend_t *b, ralQueueType_t q, VkCommandBuffer *out ) {
 	VkCommandBufferAllocateInfo  ai;
@@ -257,10 +271,32 @@ static void ralVk_SubmitUploadCmdAndWait( ralBackend_t *b, ralQueueType_t q, VkC
 	else if ( fence != VK_NULL_HANDLE ) b->vk.DestroyFence( b->device, fence, NULL );
 }
 
+// Ends + submits `cb` on queue `q` with a fresh fence and returns WITHOUT waiting.
+// The fence (in-flight) is written to *outFence for the caller to poll. The command
+// buffer is registered for deferred free at the next frame boundary; by the time the
+// frame-in-flight window has elapsed the submission has completed, so freeing it then
+// is safe. Used by the async-transfer upload path (no blocking wait on submit).
+static void ralVk_SubmitUploadCmdNoWait( ralBackend_t *b, ralQueueType_t q, VkCommandBuffer cb, VkFence *outFence ) {
+	VkCommandBufferSubmitInfo cbi;
+	VkSubmitInfo2             si2;
+	VkFenceCreateInfo         fi;
+	VkFence                   fence = VK_NULL_HANDLE;
+	b->vk.EndCommandBuffer( cb );
+	RAL_ZERO( fi ); fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	b->vk.CreateFence( b->device, &fi, NULL, &fence );
+	RAL_ZERO( cbi ); cbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO; cbi.commandBuffer = cb;
+	RAL_ZERO( si2 ); si2.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2; si2.commandBufferInfoCount = 1; si2.pCommandBufferInfos = &cbi;
+	ralVk_QueueSubmit2( b, q, &si2, fence );
+	// Defer the command-buffer free to the frame-in-flight boundary; the submission
+	// is complete well within that window, so this never frees an in-flight buffer.
+	ralVk_DeferDestroy( b, RAL_RES_CMD_BUFFER, RAL_VK_H2U( cb ), (uint64_t)q, NULL );
+	if ( outFence ) *outFence = fence;
+}
+
 // Wraps a (real) VkFence in a ralFence_t the caller owns. fence may be
 // VK_NULL_HANDLE (fence creation failed) → reports signaled.
 //
-// Phase 7.4c-submit-followup-present-2-fix3 — set ownsFence=qtrue. Both
+// Set ownsFence=qtrue. Both
 // callers (Ral_BufferUploadAsync at line 403, Ral_TextureUploadAsync at
 // line 719) pass a VkFence that was just created by
 // ralVk_SubmitUploadCmdAndWait's CreateFence call + handed back via the
@@ -333,20 +369,54 @@ ralBuffer_t *Ral_CreateBuffer( ralBackend_t *b, const ralBufferCreateInfo_t *ci 
 	bci.usage       = ralVk_BufferUsage( ci->usage );
 	bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	if ( b->vk.CreateBuffer( b->device, &bci, NULL, &buf->buffer ) != VK_SUCCESS ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateBuffer: vkCreateBuffer failed (%llu bytes)\n", (unsigned long long)ci->size );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBuffer: vkCreateBuffer failed (%llu bytes)\n", (unsigned long long)ci->size );
 		free( buf ); return NULL;
 	}
 	b->vk.GetBufferMemoryRequirements( b->device, buf->buffer, &req );
 	buf->alloc = ralVk_Alloc( b, req, ralVk_MemProps( ci->memory ) );
 	if ( !buf->alloc ) { b->vk.DestroyBuffer( b->device, buf->buffer, NULL ); free( buf ); return NULL; }
 	if ( b->vk.BindBufferMemory( b->device, buf->buffer, buf->alloc->memory, 0 ) != VK_SUCCESS ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateBuffer: vkBindBufferMemory failed\n" );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBuffer: vkBindBufferMemory failed\n" );
 		ralVk_Free( b, buf->alloc ); b->vk.DestroyBuffer( b->device, buf->buffer, NULL ); free( buf ); return NULL;
 	}
 	buf->hostVisible = ( buf->alloc->propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT  ) ? qtrue : qfalse;
 	buf->coherent    = ( buf->alloc->propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ) ? qtrue : qfalse;
+	buf->ownsBuffer  = qtrue;   // RAL created the VkBuffer; RAL destroys it.
 	ralVk_SetObjectName( b, (uint64_t)buf->buffer, VK_OBJECT_TYPE_BUFFER, ci->debugName );
 	return buf;
+}
+
+// Wrap an existing engine-owned VkBuffer in a RAL handle without taking
+// ownership of its memory — symmetric with Ral_AdoptBindGroup / Ral_AdoptTexture.
+// ownsBuffer=qfalse, alloc=NULL: Ral_DestroyBuffer frees only this wrapper, never
+// the VkBuffer/VkDeviceMemory (the engine retains that). Used to bring a raw
+// renderer buffer (e.g. the per-frame exposure UBO) into the RAL bind path
+// without re-creating it. The buffer is treated as host-visible+coherent (the
+// renderer maps it directly); RAL mapping/flush are not used on adopted buffers.
+ralBuffer_t *Ral_AdoptBuffer( ralBackend_t *b, void *vkBuffer, size_t size, const char *debugName ) {
+	ralBuffer_t *buf;
+	if ( !b || vkBuffer == NULL ) {
+		R_LOG( rch_ral, SEV_WARN, "Ral_AdoptBuffer: bad args (b=%p, vkBuffer=%p)\n",
+		        (void *)b, vkBuffer );
+		return NULL;
+	}
+	buf = (ralBuffer_t *)malloc( sizeof( *buf ) );
+	if ( !buf ) return NULL;
+	RAL_ZERO( *buf );
+	buf->header.refCount = 1;
+	buf->backend         = b;
+	buf->buffer          = (VkBuffer)vkBuffer;
+	buf->alloc           = NULL;          // engine-owned memory; RAL never frees it
+	buf->size            = (VkDeviceSize)size;
+	buf->ownsBuffer      = qfalse;
+	if ( debugName ) {
+		ralVk_SetObjectName( b, (uint64_t)buf->buffer, VK_OBJECT_TYPE_BUFFER, debugName );
+	}
+	return buf;
+}
+
+void *Ral_GetBufferHandle( const ralBuffer_t *buf ) {
+	return buf ? (void *)buf->buffer : NULL;
 }
 
 void Ral_DestroyBuffer( ralBuffer_t *buf ) {
@@ -354,13 +424,17 @@ void Ral_DestroyBuffer( ralBuffer_t *buf ) {
 	if ( !buf ) return;
 	if ( buf->header.refCount > 1 ) { buf->header.refCount--; return; }
 	b = buf->backend;
-	ralVk_DeferDestroy( b, RAL_RES_BUFFER, RAL_VK_H2U( buf->buffer ), 0, buf->alloc );
+	// Adopted buffers (ownsBuffer=qfalse) are engine-owned: free only the
+	// wrapper, never the VkBuffer/memory.
+	if ( buf->ownsBuffer ) {
+		ralVk_DeferDestroy( b, RAL_RES_BUFFER, RAL_VK_H2U( buf->buffer ), 0, buf->alloc );
+	}
 	free( buf );
 }
 
 void *Ral_MapBuffer( ralBuffer_t *buf ) {
 	if ( !buf ) return NULL;
-	if ( !buf->hostVisible ) { ri.Log( SEV_WARN, "[RAL] Ral_MapBuffer: buffer is not host-visible\n" ); return NULL; }
+	if ( !buf->hostVisible ) { R_LOG( rch_ral, SEV_WARN, "Ral_MapBuffer: buffer is not host-visible\n" ); return NULL; }
 	return ralVk_Map( buf->alloc );
 }
 void Ral_UnmapBuffer( ralBuffer_t *buf ) { if ( buf ) ralVk_Unmap( buf->alloc ); }
@@ -381,7 +455,7 @@ ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buf, uint64_t offset, const void
 	if ( !buf || !data || size == 0 ) return NULL;
 	b = buf->backend;
 	q = ralVk_UploadQueue( b );
-	RAL_NOTE_ONCE( "[RAL] Ral_BufferUploadAsync runs on the transfer queue when available but still waits internally before returning -- async streaming (no internal wait) is Phase 7.15\n" );
+	RAL_NOTE_ONCE( "Ral_BufferUploadAsync runs on the transfer queue when available but still waits internally before returning -- async streaming (no internal wait) is Phase 7.15\n" );
 
 	RAL_ZERO( sci ); sci.size = size; sci.usage = RAL_BUFFER_TRANSFER_SRC; sci.memory = RAL_MEMORY_HOST_COHERENT; sci.debugName = "ral-staging-buf-upload";
 	staging = Ral_CreateBuffer( b, &sci );
@@ -396,7 +470,7 @@ ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buf, uint64_t offset, const void
 	b->vk.CmdCopyBuffer( cb, staging->buffer, buf->buffer, 1, &region );
 	// Queue-ownership release: if this ran on a dedicated transfer family, hand
 	// `buf` to the graphics family. The matching acquire is the consumer's job
-	// (renderer migration, Phase 7.4+) — until then nothing uses RAL buffers on
+	// (renderer migration, future) — until then nothing uses RAL buffers on
 	// the graphics queue, so the unacquired release is harmless.
 	if ( q == RAL_QUEUE_TRANSFER && b->queueFamily[RAL_QUEUE_TRANSFER] != b->queueFamily[RAL_QUEUE_GRAPHICS] ) {
 		VkBufferMemoryBarrier bar;
@@ -425,6 +499,8 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 	VkMemoryRequirements  req;
 	ralTexture_t         *tex;
 	uint32_t              layers, depth3d, mips;
+	uint32_t              qfamShare[3];   // concurrent-sharing family list (function-scoped for pQueueFamilyIndices validity)
+	uint32_t              qfamShareCount;
 	if ( !b || !ci || ci->width == 0 ) return NULL;
 
 	switch ( ci->type ) {
@@ -452,9 +528,9 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 	tex->sampleCount          = ci->sampleCount ? ci->sampleCount : 1;
 	tex->aspect               = ralVk_FormatAspect( ci->format );
 	tex->currentLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
-	tex->ownsImage            = qtrue;   // Phase 7.4c-submit-A4: native RAL allocation owns the VkImage; Ral_AdoptTexture flips this to qfalse for adopted handles.
+	tex->ownsImage            = qtrue;   // native RAL allocation owns the VkImage; Ral_AdoptTexture flips this to qfalse for adopted handles.
 	if ( tex->vkFormat == VK_FORMAT_UNDEFINED ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateTexture: unsupported ralFormat %d\n", (int)ci->format );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateTexture: unsupported ralFormat %d\n", (int)ci->format );
 		free( tex ); return NULL;
 	}
 
@@ -472,16 +548,41 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 	ici.tiling        = VK_IMAGE_TILING_OPTIMAL;
 	ici.usage         = ralVk_TextureUsage( ci->usage );
 	ici.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+	// Concurrent sharing lets a resource written on one queue family and read on
+	// another use only a semaphore for execution ordering — no per-frame queue-
+	// family-ownership transfer. concurrentGraphicsCompute adds the compute family
+	// (an async-compute pass writes, graphics reads); concurrentGraphicsTransfer adds
+	// the transfer family (an upload copy submits on transfer, graphics samples). Each
+	// family is only added when it actually differs from graphics; CONCURRENT with a
+	// single family is a spec violation, so a degenerate list stays EXCLUSIVE. qfamShare
+	// is function-scoped so pQueueFamilyIndices stays valid through CreateImage.
+	qfamShareCount = 0;
+	if ( ( ci->concurrentGraphicsCompute  && b->computeFamily  != b->graphicsFamily ) ||
+	     ( ci->concurrentGraphicsTransfer && b->transferFamily != b->graphicsFamily ) ) {
+		qfamShare[ qfamShareCount++ ] = b->graphicsFamily;
+		if ( ci->concurrentGraphicsCompute && b->computeFamily != b->graphicsFamily )
+			qfamShare[ qfamShareCount++ ] = b->computeFamily;
+		if ( ci->concurrentGraphicsTransfer && b->transferFamily != b->graphicsFamily && b->transferFamily != b->computeFamily )
+			qfamShare[ qfamShareCount++ ] = b->transferFamily;
+	}
+	if ( qfamShareCount >= 2 ) {
+		ici.sharingMode           = VK_SHARING_MODE_CONCURRENT;
+		ici.queueFamilyIndexCount = qfamShareCount;
+		ici.pQueueFamilyIndices   = qfamShare;
+	}
+	// The transfer family is in the concurrent set → an upload copy on the transfer
+	// queue can hand the image to graphics without an ownership-transfer barrier.
+	tex->concurrentTransfer = ( ci->concurrentGraphicsTransfer && b->transferFamily != b->graphicsFamily && ici.sharingMode == VK_SHARING_MODE_CONCURRENT ) ? qtrue : qfalse;
 	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	if ( b->vk.CreateImage( b->device, &ici, NULL, &tex->image ) != VK_SUCCESS ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateTexture: vkCreateImage failed (%ux%u, %u mips, fmt %d)\n", tex->width, tex->height, mips, (int)ci->format );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateTexture: vkCreateImage failed (%ux%u, %u mips, fmt %d)\n", tex->width, tex->height, mips, (int)ci->format );
 		free( tex ); return NULL;
 	}
 	b->vk.GetImageMemoryRequirements( b->device, tex->image, &req );
 	tex->alloc = ralVk_Alloc( b, req, ralVk_MemProps( ci->memory ) );
 	if ( !tex->alloc ) { b->vk.DestroyImage( b->device, tex->image, NULL ); free( tex ); return NULL; }
 	if ( b->vk.BindImageMemory( b->device, tex->image, tex->alloc->memory, 0 ) != VK_SUCCESS ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateTexture: vkBindImageMemory failed\n" );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateTexture: vkBindImageMemory failed\n" );
 		ralVk_Free( b, tex->alloc ); b->vk.DestroyImage( b->device, tex->image, NULL ); free( tex ); return NULL;
 	}
 
@@ -496,7 +597,7 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 	vci.subresourceRange.baseArrayLayer = 0;
 	vci.subresourceRange.layerCount     = layers;
 	if ( b->vk.CreateImageView( b->device, &vci, NULL, &tex->defaultView ) != VK_SUCCESS ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateTexture: vkCreateImageView failed\n" );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateTexture: vkCreateImageView failed\n" );
 		ralVk_Free( b, tex->alloc ); b->vk.DestroyImage( b->device, tex->image, NULL ); free( tex ); return NULL;
 	}
 	if ( ci->debugName ) {
@@ -511,7 +612,7 @@ void Ral_DestroyTexture( ralTexture_t *tex ) {
 	if ( !tex ) return;
 	if ( tex->header.refCount > 1 ) { tex->header.refCount--; return; }
 	b = tex->backend;
-	// Phase 7.4c-submit-A4: ownsImage=qfalse on Ral_AdoptTexture-created wrappers
+	// ownsImage=qfalse on Ral_AdoptTexture-created wrappers
 	// (the renderer's existing qvkCreateImage/qvkAllocateMemory/qvkCreateImageView
 	// retain lifetime ownership of the underlying VkImage/VkImageView/VkDeviceMemory).
 	// Free only the wrapper struct; defer-destroy of the backend objects belongs
@@ -522,16 +623,20 @@ void Ral_DestroyTexture( ralTexture_t *tex ) {
 	free( tex );
 }
 
-// Phase 7.4c-submit-A4 — adoption helper. Wraps an existing VkImage in a
+// Adoption helper. Wraps an existing VkImage + its VkImageView + format in a
 // ralTexture_t with ownsImage=qfalse. `aspect` is the caller's
-// VkImageAspectFlags bitmask (VK_IMAGE_ASPECT_COLOR_BIT or
-// VK_IMAGE_ASPECT_DEPTH_BIT, etc) — stored verbatim on tex->aspect so
-// ralImageMemoryBarrier_t builders can echo it. defaultView is left
-// VK_NULL_HANDLE because adopted-texture consumers in 7.4c-submit-A4 only
-// reference the VkImage; if a future site needs a view it can populate
-// tex->defaultView directly or use Ral_CreateTextureView on the wrapper.
+// VkImageAspectFlags bitmask (VK_IMAGE_ASPECT_COLOR_BIT / _DEPTH_BIT, …) stored
+// verbatim on tex->aspect so ralImageMemoryBarrier_t builders can echo it.
+// `externalView` (a VkImageView; NULL if the caller has no view) becomes the
+// wrapper's defaultView, so the adopted texture can serve as a dynamic-rendering
+// attachment (Ral_BeginRendering reads tex->defaultView). `fmt` records the
+// texture's format on tex->vkFormat / tex->ralFormat so pipelines + views built
+// from the wrapper carry the right format. currentLayout stays UNDEFINED — it is
+// runtime state, re-synced by the consumer via Ral_SetTextureLayout.
 ralTexture_t *Ral_AdoptTexture( ralBackend_t *b,
                                 void *externalImage,
+                                void *externalView,
+                                ralFormat_t fmt,
                                 uint32_t width, uint32_t height,
                                 uint32_t aspect,
                                 const char *debugName )
@@ -545,9 +650,9 @@ ralTexture_t *Ral_AdoptTexture( ralBackend_t *b,
 	tex->backend         = b;
 	tex->image           = (VkImage)externalImage;
 	tex->alloc           = NULL;
-	tex->defaultView     = VK_NULL_HANDLE;
-	tex->vkFormat        = VK_FORMAT_UNDEFINED;
-	tex->ralFormat       = RAL_FORMAT_UNDEFINED;
+	tex->defaultView     = (VkImageView)externalView;
+	tex->ralFormat       = fmt;
+	tex->vkFormat        = ( fmt != RAL_FORMAT_UNDEFINED ) ? ralVk_TranslateFormat( fmt ) : VK_FORMAT_UNDEFINED;
 	tex->type            = RAL_TEXTURE_2D;
 	tex->width           = width;
 	tex->height          = height ? height : 1;
@@ -562,8 +667,72 @@ ralTexture_t *Ral_AdoptTexture( ralBackend_t *b,
 	return tex;
 }
 
+// Array-adoption helper. Like Ral_AdoptTexture but for a 2D-ARRAY image rendered
+// one layer at a time via dynamic rendering. `defaultView` is the full-array
+// sampling view (viewType 2D_ARRAY, baseArrayLayer 0, layerCount layerCount) — it
+// becomes tex->defaultView for sampling. `layerViews[]` are the caller-owned
+// per-layer single-layer attachment views (each viewType 2D, baseArrayLayer=i,
+// layerCount 1); Ral_BeginRendering selects layerViews[depthAttachmentLayerIndex]
+// as the depth imageView (VkRenderingInfo has no baseArrayLayer, so the layer
+// offset must live in the bound view). arrayLayers is set to the real layerCount
+// so ralVk_RenderTargetTransition covers ALL layers (baseArrayLayer 0,
+// layerCount arrayLayers) — the first render transitions the whole array once and
+// currentLayout-tracking early-returns the rest. ownsImage=qfalse: the renderer
+// retains lifetime of the image + every view (default + per-layer); the wrapper
+// references layerViews caller memory and frees nothing on Ral_DestroyTexture.
+ralTexture_t *Ral_AdoptArrayTexture( ralBackend_t *b,
+                                     void *externalImage,
+                                     void *externalDefaultView,
+                                     const void *const *layerViews,
+                                     uint32_t layerCount,
+                                     ralFormat_t fmt,
+                                     uint32_t width, uint32_t height,
+                                     uint32_t aspect,
+                                     const char *debugName )
+{
+	ralTexture_t *tex;
+	if ( !b || !externalImage || !layerViews || layerCount == 0 ) return NULL;
+	tex = (ralTexture_t *)malloc( sizeof( *tex ) );
+	if ( !tex ) return NULL;
+	RAL_ZERO( *tex );
+	tex->header.refCount = 1;
+	tex->backend         = b;
+	tex->image           = (VkImage)externalImage;
+	tex->alloc           = NULL;
+	tex->defaultView     = (VkImageView)externalDefaultView;
+	tex->ralFormat       = fmt;
+	tex->vkFormat        = ( fmt != RAL_FORMAT_UNDEFINED ) ? ralVk_TranslateFormat( fmt ) : VK_FORMAT_UNDEFINED;
+	tex->type            = RAL_TEXTURE_2D_ARRAY;
+	tex->width           = width;
+	tex->height          = height ? height : 1;
+	tex->depthOrArrayLayers = layerCount;
+	tex->mipLevels       = 1;
+	tex->arrayLayers     = layerCount;
+	tex->sampleCount     = 1;
+	tex->aspect          = (VkImageAspectFlags)aspect;
+	tex->currentLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
+	tex->ownsImage       = qfalse;
+	tex->layerViews      = (const VkImageView *)layerViews;
+	tex->numLayerViews   = layerCount;
+	if ( debugName ) ralVk_SetObjectName( b, (uint64_t)tex->image, VK_OBJECT_TYPE_IMAGE, debugName );
+	return tex;
+}
+
 void *Ral_GetTextureImageHandle( const ralTexture_t *tex ) {
 	return tex ? (void *)tex->image : NULL;
+}
+
+void *Ral_GetTextureViewHandle( const ralTextureView_t *view ) {
+	return view ? (void *)view->view : NULL;
+}
+
+void *Ral_GetSamplerHandle( const ralSampler_t *s ) {
+	return s ? (void *)s->sampler : NULL;
+}
+
+void Ral_SetTextureLayout( ralTexture_t *tex, uint32_t vkLayout ) {
+	if ( !tex ) return;
+	tex->currentLayout = (VkImageLayout)vkLayout;
 }
 
 ralTextureView_t *Ral_CreateTextureView( ralBackend_t *b, const ralTextureViewCreateInfo_t *ci ) {
@@ -594,7 +763,7 @@ ralTextureView_t *Ral_CreateTextureView( ralBackend_t *b, const ralTextureViewCr
 	vci.subresourceRange.baseArrayLayer = ci->baseArrayLayer;
 	vci.subresourceRange.layerCount     = layerCount;
 	if ( b->vk.CreateImageView( b->device, &vci, NULL, &view->view ) != VK_SUCCESS ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateTextureView: vkCreateImageView failed\n" );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateTextureView: vkCreateImageView failed\n" );
 		free( view ); return NULL;
 	}
 	return view;
@@ -624,22 +793,30 @@ ralFence_t *Ral_TextureUploadAsync( ralTexture_t *tex, const ralTextureUploadDes
 	uint32_t              mip0w, mip0h, level;
 	qboolean              genMips, blitColor;
 	VkFilter              blitFilter;
+	uint32_t              releaseBaseMip, releaseMipCount, releaseBaseLayer, releaseLayerCount;
 	if ( !tex || !region || !region->data || region->dataSize == 0 ) return NULL;
 	b = tex->backend;
-	RAL_NOTE_ONCE( "[RAL] Ral_TextureUploadAsync runs on the transfer queue when no GPU mip-gen is needed (mip-gen uses vkCmdBlitImage, which stays on graphics); still waits internally before returning -- async streaming is Phase 7.15\n" );
+	RAL_NOTE_ONCE( "Ral_TextureUploadAsync runs on the transfer queue when no GPU mip-gen is needed (mip-gen uses vkCmdBlitImage, which stays on graphics); still waits internally before returning -- async streaming is Phase 7.15\n" );
 
 	mip0w = tex->width  >> region->mipLevel; if ( mip0w == 0 ) mip0w = 1;
 	mip0h = tex->height >> region->mipLevel; if ( mip0h == 0 ) mip0h = 1;
 
-	genMips   = ( region->mipLevel == 0 && region->arrayLayer == 0 && tex->mipLevels > 1
+	// Sub-region uploads (regionWidth/Height != 0) are the bindless-lightmap
+	// mirror path: copy a rectangle, never auto-gen mips (caller controls every
+	// mip in that case).
+	qboolean isSubRegion = ( region->regionWidth != 0 && region->regionHeight != 0 ) ? qtrue : qfalse;
+	genMips   = ( !isSubRegion && region->mipLevel == 0 && region->arrayLayer == 0 && tex->mipLevels > 1
 	              && tex->aspect == VK_IMAGE_ASPECT_COLOR_BIT
 	              && b->formatBlitGen[ tex->ralFormat ] && tex->arrayLayers == 1 ) ? qtrue : qfalse;
 	blitColor = !ralVk_FormatIsDepthOrInteger( tex->ralFormat );
 	blitFilter = blitColor ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
 	if ( !genMips && region->mipLevel == 0 && tex->mipLevels > 1 && !b->formatBlitGen[ tex->ralFormat ] )
-		RAL_NOTE_ONCE( "[RAL] Ral_TextureUploadAsync: format lacks BLIT support -- GPU mip-gen skipped; caller must supply all mips\n" );
+		RAL_NOTE_ONCE( "Ral_TextureUploadAsync: format lacks BLIT support -- GPU mip-gen skipped; caller must supply all mips\n" );
 	// blit (mip-gen) must stay on graphics — transfer queues don't support BLIT.
-	q = genMips ? RAL_QUEUE_GRAPHICS : ralVk_UploadQueue( b );
+	// Sub-region uploads must also stay on graphics so the FRAGMENT_SHADER →
+	// TRANSFER barrier (which preserves prior tiles) is legal — transfer queues
+	// don't support FRAGMENT_SHADER stage.
+	q = ( genMips || isSubRegion ) ? RAL_QUEUE_GRAPHICS : ralVk_UploadQueue( b );
 
 	RAL_ZERO( sci ); sci.size = region->dataSize; sci.usage = RAL_BUFFER_TRANSFER_SRC; sci.memory = RAL_MEMORY_HOST_COHERENT; sci.debugName = "ral-staging-tex-upload";
 	staging = Ral_CreateBuffer( b, &sci );
@@ -651,19 +828,34 @@ ralFence_t *Ral_TextureUploadAsync( ralTexture_t *tex, const ralTextureUploadDes
 
 	if ( !ralVk_BeginUploadCmd( b, q, &cb ) ) { Ral_DestroyBuffer( staging ); return NULL; }
 
-	// mip `region->mipLevel`: UNDEFINED → TRANSFER_DST, copy from staging.
-	ralVk_ImgBarrier( b, cb, tex->image, tex->aspect, region->mipLevel, 1, region->arrayLayer, 1,
-	                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-	                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-	                  0, VK_ACCESS_TRANSFER_WRITE_BIT );
+	// Initial barrier into TRANSFER_DST. Sub-region uploads must preserve
+	// previously-written tiles, so transition FROM currentLayout (typically
+	// SHADER_READ_ONLY after the first call); full uploads keep the legacy
+	// UNDEFINED behavior so the driver can discard the old contents we're
+	// about to overwrite anyway. Sub-region path is always on GRAPHICS queue
+	// (see the q-selection above), so FRAGMENT_SHADER as srcStage is legal
+	// there; the full-upload path uses UNDEFINED + TOP_OF_PIPE which is legal
+	// on any queue.
+	{
+		VkImageLayout        srcLayout = isSubRegion ? tex->currentLayout : VK_IMAGE_LAYOUT_UNDEFINED;
+		VkPipelineStageFlags srcStage  = isSubRegion ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		VkAccessFlags        srcAcc    = isSubRegion ? VK_ACCESS_SHADER_READ_BIT             : 0u;
+		ralVk_ImgBarrier( b, cb, tex->image, tex->aspect, region->mipLevel, 1, region->arrayLayer, 1,
+		                  srcLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		                  srcStage,  VK_PIPELINE_STAGE_TRANSFER_BIT,
+		                  srcAcc,    VK_ACCESS_TRANSFER_WRITE_BIT );
+	}
 	RAL_ZERO( bic );
 	bic.bufferOffset                    = 0;
 	bic.imageSubresource.aspectMask     = tex->aspect;
 	bic.imageSubresource.mipLevel       = region->mipLevel;
 	bic.imageSubresource.baseArrayLayer = region->arrayLayer;
 	bic.imageSubresource.layerCount     = 1;
-	bic.imageExtent.width               = mip0w;
-	bic.imageExtent.height              = mip0h;
+	bic.imageOffset.x                   = (int32_t)region->offsetX;
+	bic.imageOffset.y                   = (int32_t)region->offsetY;
+	bic.imageOffset.z                   = 0;
+	bic.imageExtent.width               = ( region->regionWidth  != 0 ) ? region->regionWidth  : mip0w;
+	bic.imageExtent.height              = ( region->regionHeight != 0 ) ? region->regionHeight : mip0h;
 	bic.imageExtent.depth               = ( tex->type == RAL_TEXTURE_3D ) ? ( tex->depthOrArrayLayers >> region->mipLevel ? tex->depthOrArrayLayers >> region->mipLevel : 1 ) : 1;
 	b->vk.CmdCopyBufferToImage( cb, staging->buffer, tex->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bic );
 
@@ -707,12 +899,13 @@ ralFence_t *Ral_TextureUploadAsync( ralTexture_t *tex, const ralTextureUploadDes
 		                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 		                  VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT );
 		tex->currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		releaseBaseMip = 0; releaseMipCount = tex->mipLevels; releaseBaseLayer = 0; releaseLayerCount = 1;
 	} else {
 		// single mip uploaded: TRANSFER_DST → SHADER_READ_ONLY.
 		// dstStage depends on the recording queue: FRAGMENT_SHADER_BIT is
 		// invalid on transfer queues (they only support TRANSFER + SPARSE).
 		// For transfer-queue uploads, use BOTTOM_OF_PIPE here; the consumer's
-		// graphics-queue acquire-barrier (Phase 7.4+ renderer migration)
+		// graphics-queue acquire-barrier (renderer migration)
 		// re-makes the layout visible to fragment-sampling. For graphics-
 		// queue uploads (mip-gen / depth-format paths), keep FRAGMENT_SHADER.
 		VkPipelineStageFlags dstStage = ( q == RAL_QUEUE_TRANSFER ) ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
@@ -722,14 +915,174 @@ ralFence_t *Ral_TextureUploadAsync( ralTexture_t *tex, const ralTextureUploadDes
 		                  VK_PIPELINE_STAGE_TRANSFER_BIT, dstStage,
 		                  VK_ACCESS_TRANSFER_WRITE_BIT, dstAcc );
 		tex->currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;   // approximation when not all mips written
+		releaseBaseMip = region->mipLevel; releaseMipCount = 1; releaseBaseLayer = region->arrayLayer; releaseLayerCount = 1;
 	}
-	// TODO 7.4: when `q == RAL_QUEUE_TRANSFER` and the transfer family differs
-	// from graphics, emit a queue-ownership release of the image here (paired
-	// acquire on the graphics queue is the consumer's job). 7.3 has no
-	// consumer of transfer-uploaded textures, so the release is omitted.
+	// Queue-ownership release: if this ran on a dedicated transfer family, hand
+	// `tex` (now in SHADER_READ_ONLY_OPTIMAL) to the graphics family. Mirrors the
+	// buffer-upload release above. The layout transition was already performed by
+	// the IGNORED-family barriers in the branches above (legal on the transfer
+	// queue for the SHADER_READ_ONLY target); this barrier is a pure ownership
+	// release (oldLayout == newLayout), so it adds no second layout change. The
+	// matching acquire on the graphics queue is the consumer's job (renderer
+	// migration, future) — until then nothing samples transfer-uploaded
+	// textures on the graphics queue, so the unacquired release is harmless.
+	if ( q == RAL_QUEUE_TRANSFER && b->queueFamily[RAL_QUEUE_TRANSFER] != b->queueFamily[RAL_QUEUE_GRAPHICS] ) {
+		VkImageMemoryBarrier bar;
+		RAL_ZERO( bar );
+		bar.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		bar.srcAccessMask                   = VK_ACCESS_TRANSFER_WRITE_BIT;
+		bar.dstAccessMask                   = 0;
+		bar.oldLayout                       = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		bar.newLayout                       = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		bar.srcQueueFamilyIndex             = b->queueFamily[RAL_QUEUE_TRANSFER];
+		bar.dstQueueFamilyIndex             = b->queueFamily[RAL_QUEUE_GRAPHICS];
+		bar.image                           = tex->image;
+		bar.subresourceRange.aspectMask     = tex->aspect;
+		bar.subresourceRange.baseMipLevel   = releaseBaseMip;
+		bar.subresourceRange.levelCount     = releaseMipCount;
+		bar.subresourceRange.baseArrayLayer = releaseBaseLayer;
+		bar.subresourceRange.layerCount     = releaseLayerCount;
+		b->vk.CmdPipelineBarrier( cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &bar );
+	}
 	ralVk_SubmitUploadCmdAndWait( b, q, cb, &fence );
 	Ral_DestroyBuffer( staging );
 	return ralVk_WrapFence( b, fence );
+}
+
+// A single-mip copy of `region` into `tex` on the dedicated transfer queue that
+// submits WITHOUT waiting and returns the in-flight fence. Only valid for a plain
+// upload (no GPU mip-gen, no sub-region): mip-gen needs vkCmdBlitImage and sub-region
+// needs a FRAGMENT_SHADER barrier, neither of which the transfer queue supports, so
+// those keep the synchronous graphics path. The image is CONCURRENT graphics+transfer
+// (tex->concurrentTransfer), so no queue-family-ownership-release barrier is emitted —
+// the graphics-side layout acquire (making the SHADER_READ_ONLY layout visible to
+// graphics sampling) is issued at residency-swap time by Ral_TextureAcquireBatchTo-
+// Graphics. The staging buffer is freed at the frame-in-flight boundary, after the copy
+// completes. Returns NULL on failure (the caller falls back to the synchronous path).
+static ralFence_t *ralVk_TextureUploadTransferNoWait( ralTexture_t *tex, const ralTextureUploadDesc_t *region ) {
+	ralBackend_t         *b = tex->backend;
+	ralBufferCreateInfo_t  sci;
+	ralBuffer_t           *staging;
+	void                  *mapped;
+	VkCommandBuffer        cb;
+	VkBufferImageCopy      bic;
+	VkFence                fence = VK_NULL_HANDLE;
+	uint32_t               mip0w, mip0h;
+	const ralQueueType_t   q = RAL_QUEUE_TRANSFER;
+
+	mip0w = tex->width  >> region->mipLevel; if ( mip0w == 0 ) mip0w = 1;
+	mip0h = tex->height >> region->mipLevel; if ( mip0h == 0 ) mip0h = 1;
+	{
+		static qboolean loggedQueue = qfalse;
+		if ( !loggedQueue ) {
+			loggedQueue = qtrue;
+			R_LOG( rch_ral, SEV_INFO, "async texture upload uses transfer queue family %u (graphics family %u)\n",
+			        b->queueFamily[ RAL_QUEUE_TRANSFER ], b->queueFamily[ RAL_QUEUE_GRAPHICS ] );
+		}
+	}
+
+	RAL_ZERO( sci ); sci.size = region->dataSize; sci.usage = RAL_BUFFER_TRANSFER_SRC; sci.memory = RAL_MEMORY_HOST_COHERENT; sci.debugName = "ral-staging-tex-upload-async";
+	staging = Ral_CreateBuffer( b, &sci );
+	if ( !staging ) return NULL;
+	mapped = Ral_MapBuffer( staging );
+	if ( !mapped ) { Ral_DestroyBuffer( staging ); return NULL; }
+	memcpy( mapped, region->data, (size_t)region->dataSize );
+	Ral_UnmapBuffer( staging );
+
+	if ( !ralVk_BeginUploadCmd( b, q, &cb ) ) { Ral_DestroyBuffer( staging ); return NULL; }
+
+	// UNDEFINED → TRANSFER_DST (full-upload discard semantics; legal on any queue).
+	ralVk_ImgBarrier( b, cb, tex->image, tex->aspect, region->mipLevel, 1, region->arrayLayer, 1,
+	                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+	                  0, VK_ACCESS_TRANSFER_WRITE_BIT );
+	RAL_ZERO( bic );
+	bic.bufferOffset                    = 0;
+	bic.imageSubresource.aspectMask     = tex->aspect;
+	bic.imageSubresource.mipLevel       = region->mipLevel;
+	bic.imageSubresource.baseArrayLayer = region->arrayLayer;
+	bic.imageSubresource.layerCount     = 1;
+	bic.imageExtent.width               = mip0w;
+	bic.imageExtent.height              = mip0h;
+	bic.imageExtent.depth               = 1;
+	b->vk.CmdCopyBufferToImage( cb, staging->buffer, tex->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bic );
+
+	// TRANSFER_DST → SHADER_READ_ONLY. dstStage is BOTTOM_OF_PIPE because FRAGMENT_SHADER
+	// is invalid on the transfer queue; the graphics-side first-use makes the layout
+	// visible to sampling at swap time. CONCURRENT sharing means no ownership-release
+	// barrier is needed (and emitting one would be wrong on a CONCURRENT image).
+	ralVk_ImgBarrier( b, cb, tex->image, tex->aspect, region->mipLevel, 1, region->arrayLayer, 1,
+	                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+	                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+	                  VK_ACCESS_TRANSFER_WRITE_BIT, 0 );
+	tex->currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	ralVk_SubmitUploadCmdNoWait( b, q, cb, &fence );
+	// The staging buffer must outlive the in-flight copy: Ral_DestroyBuffer defers the
+	// VkBuffer destroy to the frame-in-flight boundary (the same window the command
+	// buffer is freed in), by which time the transfer has completed.
+	Ral_DestroyBuffer( staging );
+	return ralVk_WrapFence( b, fence );
+}
+
+// Ral_TextureUploadBegin — residency-ticket entry point. With r_asyncTextureUpload on
+// (the default), a transfer queue present, and an upload that needs no GPU mip-gen
+// or sub-region handling, it pipelines the copy on the transfer queue and returns
+// before the copy completes (synchronous=qfalse); the caller polls Ral_FenceSignaled
+// for residency. With the cvar off or no dedicated transfer queue, it runs the
+// synchronous upload (Ral_TextureUploadAsync, which submits, waits, and returns an
+// already-signaled fence) and reports the texture resident-on-return — byte-identical
+// to the historical path. Uploads that need mip-gen / sub-region always take the
+// synchronous path (the transfer queue can't run those).
+ralUploadTicket_t Ral_TextureUploadBegin( ralTexture_t *tex, const ralTextureUploadDesc_t *region ) {
+	ralUploadTicket_t ticket;
+	ticket.texture       = tex;
+	ticket.synchronous   = qtrue;
+	ticket.fence         = NULL;
+	if ( tex && region && region->data && region->dataSize != 0 ) {
+		ralBackend_t *b           = tex->backend;
+		qboolean      isSubRegion = ( region->regionWidth != 0 && region->regionHeight != 0 ) ? qtrue : qfalse;
+		qboolean      needsMipGen = ( !isSubRegion && region->mipLevel == 0 && region->arrayLayer == 0 && tex->mipLevels > 1
+		                              && tex->aspect == VK_IMAGE_ASPECT_COLOR_BIT
+		                              && b->formatBlitGen[ tex->ralFormat ] && tex->arrayLayers == 1 ) ? qtrue : qfalse;
+		qboolean      wantAsync   = ( ri.Cvar_VariableIntegerValue( "r_asyncTextureUpload" ) != 0 ) ? qtrue : qfalse;
+		if ( wantAsync && b->caps.asyncTransfer && tex->concurrentTransfer && !needsMipGen && !isSubRegion ) {
+			ralFence_t *f = ralVk_TextureUploadTransferNoWait( tex, region );
+			if ( f ) { ticket.fence = f; ticket.synchronous = qfalse; return ticket; }
+			// fall through to the synchronous path on failure
+		}
+	}
+	ticket.fence       = Ral_TextureUploadAsync( tex, region );
+	ticket.synchronous = qtrue;
+	return ticket;
+}
+
+// Make a batch of async-uploaded images visible to graphics sampling. Each image was
+// copied + transitioned to SHADER_READ_ONLY on the transfer queue (CONCURRENT sharing,
+// so the write is visible across families), but the graphics queue has no record of the
+// layout — sampling it raises VUID-vkCmdDraw-None-09600. This records ONE graphics-queue
+// command buffer that transitions every image (UNDEFINED -> SHADER_READ_ONLY, from the
+// graphics queue's perspective) and submits it without waiting. The transfer copy is
+// already complete (the caller confirmed each fence signaled before calling), so the
+// barrier needs no source wait — it only establishes the layout + memory visibility for
+// FRAGMENT sampling on the graphics queue, which holds for every subsequent graphics
+// submit regardless of path. One submit per batch (per frame during load, none once the
+// residency list is empty). No-op for an empty batch.
+void Ral_TextureAcquireBatchToGraphics( ralBackend_t *b, ralTexture_t **textures, uint32_t count ) {
+	VkCommandBuffer cb;
+	uint32_t        i;
+	if ( !b || !textures || count == 0 ) return;
+	if ( !ralVk_BeginUploadCmd( b, RAL_QUEUE_GRAPHICS, &cb ) ) return;
+	for ( i = 0; i < count; i++ ) {
+		ralTexture_t *t = textures[i];
+		if ( !t || t->image == VK_NULL_HANDLE ) continue;
+		ralVk_ImgBarrier( b, cb, t->image, t->aspect, 0, t->mipLevels, 0, t->arrayLayers,
+		                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+		                  0, VK_ACCESS_SHADER_READ_BIT );
+		t->currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	}
+	ralVk_SubmitUploadCmdNoWait( b, RAL_QUEUE_GRAPHICS, cb, NULL );
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -742,7 +1095,7 @@ ralSampler_t *Ral_CreateSampler( ralBackend_t *b, const ralSamplerCreateInfo_t *
 	s = (ralSampler_t *)malloc( sizeof( *s ) );
 	if ( !s ) return NULL;
 	RAL_ZERO( *s );
-	s->header.refCount = 1; s->backend = b;
+	s->header.refCount = 1; s->backend = b; s->ownsSampler = qtrue;
 	RAL_ZERO( sci );
 	sci.sType         = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 	sci.magFilter     = ralVk_Filter( ci->magFilter );
@@ -766,7 +1119,7 @@ ralSampler_t *Ral_CreateSampler( ralBackend_t *b, const ralSamplerCreateInfo_t *
 	sci.maxLod           = ( ci->maxLod > 0.0f ) ? ci->maxLod : VK_LOD_CLAMP_NONE;
 	sci.borderColor      = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
 	if ( b->vk.CreateSampler( b->device, &sci, NULL, &s->sampler ) != VK_SUCCESS ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateSampler: vkCreateSampler failed\n" );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateSampler: vkCreateSampler failed\n" );
 		free( s ); return NULL;
 	}
 	ralVk_SetObjectName( b, (uint64_t)s->sampler, VK_OBJECT_TYPE_SAMPLER, ci->debugName );
@@ -778,8 +1131,28 @@ void Ral_DestroySampler( ralSampler_t *s ) {
 	if ( !s ) return;
 	if ( s->header.refCount > 1 ) { s->header.refCount--; return; }
 	b = s->backend;
-	ralVk_DeferDestroy( b, RAL_RES_SAMPLER, RAL_VK_H2U( s->sampler ), 0, NULL );
+	if ( s->ownsSampler ) {
+		ralVk_DeferDestroy( b, RAL_RES_SAMPLER, RAL_VK_H2U( s->sampler ), 0, NULL );
+	}
 	free( s );
+}
+
+// Adoption helper — wraps an existing VkSampler in a ralSampler_t with
+// ownsSampler=qfalse. Mirrors Ral_AdoptTexture / Ral_AdoptBindGroup:
+// teardown only frees the wrapper struct; the caller's create site
+// retains lifetime ownership.
+ralSampler_t *Ral_AdoptSampler( ralBackend_t *b, void *externalSampler, const char *debugName ) {
+	ralSampler_t *s;
+	if ( !b || !externalSampler ) return NULL;
+	s = (ralSampler_t *)malloc( sizeof( *s ) );
+	if ( !s ) return NULL;
+	RAL_ZERO( *s );
+	s->header.refCount = 1;
+	s->backend         = b;
+	s->sampler         = (VkSampler)externalSampler;
+	s->ownsSampler     = qfalse;
+	if ( debugName ) ralVk_SetObjectName( b, (uint64_t)s->sampler, VK_OBJECT_TYPE_SAMPLER, debugName );
+	return s;
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -794,13 +1167,13 @@ ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *b, const ralBindG
 	uint32_t                              i, lastUnbounded = 0xFFFFFFFFu;
 	qboolean                              anyUpdateAfterBind = qfalse;
 	if ( !b || !ci || ci->numEntries == 0 || ci->numEntries > RAL_VK_MAX_LAYOUT_ENTRIES ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateBindGroupLayout: bad/too-many entries (%u)\n", ci ? ci->numEntries : 0u );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBindGroupLayout: bad/too-many entries (%u)\n", ci ? ci->numEntries : 0u );
 		return NULL;
 	}
 	if ( ci->bindless ) {
 		for ( i = 0; i < ci->numEntries; i++ ) if ( ci->entries[i].count == 0 ) { lastUnbounded = i; }
 		if ( lastUnbounded != 0xFFFFFFFFu && !b->caps.bindlessTextures ) {
-			ri.Log( SEV_WARN, "[RAL] Ral_CreateBindGroupLayout: bindless layout requested but caps.bindlessTextures is false\n" );
+			R_LOG( rch_ral, SEV_WARN, "Ral_CreateBindGroupLayout: bindless layout requested but caps.bindlessTextures is false\n" );
 			return NULL;   // ralUnsupported equivalent for a handle-returning call
 		}
 	}
@@ -809,7 +1182,7 @@ ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *b, const ralBindG
 	if ( !L ) return NULL;
 	RAL_ZERO( *L );
 	L->header.refCount = 1; L->backend = b; L->bindless = ci->bindless; L->numEntries = ci->numEntries;
-	L->ownsLayout = qtrue;   // Phase 7.4c-bindgroup-pre: standalone create owns the VkDescriptorSetLayout.
+	L->ownsLayout = qtrue;   // standalone create owns the VkDescriptorSetLayout.
 
 	for ( i = 0; i < ci->numEntries; i++ ) {
 		const ralBindEntry_t *e = &ci->entries[i];
@@ -821,7 +1194,12 @@ ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *b, const ralBindG
 		binds[i].descriptorCount = cnt;
 		binds[i].stageFlags      = ralVk_StageFlags( e->stageFlags );
 		bflags[i] = 0;
-		if ( ci->bindless && e->count == 0 ) {
+		// In a bindless layout every entry fills in lazily (per-image VkImageView writes for the
+		// texture array, per-VkSampler-dedup-pool writes for the sampler array) and is written
+		// while command buffers may already reference the set — both bindings need
+		// PARTIALLY_BOUND + UPDATE_AFTER_BIND regardless of whether the array is bounded
+		// (count > 1) or unbounded (count == 0).
+		if ( ci->bindless ) {
 			bflags[i] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
 			anyUpdateAfterBind = qtrue;
 		}
@@ -844,14 +1222,14 @@ ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *b, const ralBindG
 		lci.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
 	}
 	if ( b->vk.CreateDescriptorSetLayout( b->device, &lci, NULL, &L->layout ) != VK_SUCCESS ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateBindGroupLayout: vkCreateDescriptorSetLayout failed\n" );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBindGroupLayout: vkCreateDescriptorSetLayout failed\n" );
 		free( L ); return NULL;
 	}
 	ralVk_SetObjectName( b, (uint64_t)L->layout, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, ci->debugName );
 	return L;
 }
 
-// Phase 7.4c-bindgroup-pre — wrap a caller-owned VkDescriptorSetLayout.
+// Wrap a caller-owned VkDescriptorSetLayout.
 // Used by renderervk so the q3now descriptor set layouts (vk.set_layout_*)
 // can be referenced by RAL pipelines created via Ral_CreateGraphicsPipeline
 // without RAL re-creating + double-owning them. The `entries[]` description
@@ -866,7 +1244,7 @@ ralBindGroupLayout_t *Ral_AdoptBindGroupLayout( ralBackend_t *b,
 	ralBindGroupLayout_t *L;
 	uint32_t              i;
 	if ( !b || !externalLayout || numEntries > RAL_VK_MAX_LAYOUT_ENTRIES ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_AdoptBindGroupLayout: bad args (externalLayout=%p, numEntries=%u, max=%u)\n",
+		R_LOG( rch_ral, SEV_WARN, "Ral_AdoptBindGroupLayout: bad args (externalLayout=%p, numEntries=%u, max=%u)\n",
 		        externalLayout, numEntries, (unsigned)RAL_VK_MAX_LAYOUT_ENTRIES );
 		return NULL;
 	}
@@ -900,7 +1278,7 @@ void Ral_DestroyBindGroupLayout( ralBindGroupLayout_t *layout ) {
 	if ( !layout ) return;
 	if ( layout->header.refCount > 1 ) { layout->header.refCount--; return; }
 	b = layout->backend;
-	// Phase 7.4c-bindgroup-pre: only defer-destroy the VkDescriptorSetLayout
+	// only defer-destroy the VkDescriptorSetLayout
 	// when RAL created it. Adopted layouts (ownsLayout=qfalse) belong to the
 	// caller — destroying them here would double-free on the renderer's own
 	// vkDestroyDescriptorSetLayout call.
@@ -909,6 +1287,10 @@ void Ral_DestroyBindGroupLayout( ralBindGroupLayout_t *layout ) {
 	}
 	(void)b;
 	free( layout );
+}
+
+void *Ral_GetBindGroupLayoutHandle( const ralBindGroupLayout_t *layout ) {
+	return layout ? (void *)layout->layout : NULL;
 }
 
 ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateInfo_t *ci ) {
@@ -921,11 +1303,21 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 	VkResult                    r;
 	if ( !b || !ci || !ci->layout ) return NULL;
 
+	// Refuse rather than silently truncate: the write loop caps at
+	// RAL_VK_MAX_BG_WRITES and would otherwise return a descriptor set with
+	// bindings past the cap left UNwritten (uninitialized), which the caller
+	// has no way to detect. Mirror Ral_Submit's over-capacity hard-fail.
+	if ( ci->numValues > RAL_VK_MAX_BG_WRITES ) {
+		R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBindGroup: over-capacity (values %u > max %u) — refusing (would truncate)\n",
+			ci->numValues, (unsigned)RAL_VK_MAX_BG_WRITES );
+		return NULL;
+	}
+
 	bg = (ralBindGroup_t *)malloc( sizeof( *bg ) );
 	if ( !bg ) return NULL;
 	RAL_ZERO( *bg );
 	bg->header.refCount = 1; bg->backend = b; bg->layout = ci->layout;
-	bg->ownsSet = qtrue;   // Phase 7.4c-bindgroup: native RAL allocation owns the set (Ral_AdoptBindGroup flips this to qfalse for adopted handles).
+	bg->ownsSet = qtrue;   // native RAL allocation owns the set (Ral_AdoptBindGroup flips this to qfalse for adopted handles).
 
 	RAL_ZERO( dai );
 	dai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -934,7 +1326,7 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 	dai.pSetLayouts        = &ci->layout->layout;
 	r = b->vk.AllocateDescriptorSets( b->device, &dai, &bg->set );
 	if ( r != VK_SUCCESS ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateBindGroup: vkAllocateDescriptorSets failed (VkResult %d -- pool may be exhausted)\n", (int)r );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBindGroup: vkAllocateDescriptorSets failed (VkResult %d -- pool may be exhausted)\n", (int)r );
 		free( bg ); return NULL;
 	}
 
@@ -996,13 +1388,13 @@ void Ral_DestroyBindGroup( ralBindGroup_t *g ) {
 	if ( !g ) return;
 	if ( g->header.refCount > 1 ) { g->header.refCount--; return; }
 	b = g->backend;
-	// Phase 7.4c-bindgroup: only defer-destroy the underlying VkDescriptorSet
+	// only defer-destroy the underlying VkDescriptorSet
 	// when RAL owns it. Adopted sets (ownsSet=qfalse) belong to the renderer's
 	// own descriptor pool — vkFreeDescriptorSets would race with / double-free
 	// against the existing vkResetDescriptorPool / vk_destroy_descriptor_pools
 	// path. Wrapper struct is freed in both cases.
 	if ( g->ownsSet ) {
-		// 7.3: the pool has FREE_DESCRIPTOR_SET_BIT — the set is returned to the
+		// the pool has FREE_DESCRIPTOR_SET_BIT — the set is returned to the
 		// pool via vkFreeDescriptorSets after the deferred-destroy delay.
 		ralVk_DeferDestroy( b, RAL_RES_DESC_SET, RAL_VK_H2U( g->set ), 0, NULL );
 	}
@@ -1011,14 +1403,14 @@ void Ral_DestroyBindGroup( ralBindGroup_t *g ) {
 }
 
 
-// Phase 7.4c-bindgroup: native-handle accessor for parallel-paths bind-side
+// native-handle accessor for parallel-paths bind-side
 // callers that need to reverse-look up adopted wrappers by VkDescriptorSet.
 void *Ral_GetBindGroupHandle( const ralBindGroup_t *g ) {
 	return g ? (void *)g->set : NULL;
 }
 
 
-// Phase 7.4c-bindgroup. Mirrors Ral_AdoptBindGroupLayout's contract: the
+// Mirrors Ral_AdoptBindGroupLayout's contract: the
 // caller's descriptor pool owns the lifetime of `externalSet`, the wrapper
 // is just metadata + a stable RAL handle that the renderer can pass to
 // Ral_CmdBindBindGroup. ownsSet=qfalse so Ral_DestroyBindGroup skips the
@@ -1026,7 +1418,7 @@ void *Ral_GetBindGroupHandle( const ralBindGroup_t *g ) {
 // created) ralBindGroupLayout_t whose binding shape matches the writes the
 // caller already did against externalSet.
 // ════════════════════════════════════════════════════════════════════════
-// Phase 7.4c-submit-A2 — ralPipelineLayout_t / ralRenderPass_t /
+// ralPipelineLayout_t / ralRenderPass_t /
 // ralFramebuffer_t adoption helpers. See ral_resource.h docblocks for
 // the parallel-paths lifetime rationale. ownsHandle=qfalse on adopted
 // wrappers; Ral_Destroy* frees only the wrapper, the underlying Vk handle
@@ -1111,7 +1503,7 @@ ralBindGroup_t *Ral_AdoptBindGroup( ralBackend_t *b,
                                     const char *debugName ) {
 	ralBindGroup_t *g;
 	if ( !b || !externalSet || !layout ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_AdoptBindGroup: bad args (b=%p, externalSet=%p, layout=%p)\n",
+		R_LOG( rch_ral, SEV_WARN, "Ral_AdoptBindGroup: bad args (b=%p, externalSet=%p, layout=%p)\n",
 		        (void *)b, externalSet, (const void *)layout );
 		return NULL;
 	}
@@ -1129,14 +1521,14 @@ ralBindGroup_t *Ral_AdoptBindGroup( ralBackend_t *b,
 	return g;
 }
 
-// Phase 7.4a: `tex == NULL` is a no-op clear. Vulkan doesn't have an
+// `tex == NULL` is a no-op clear. Vulkan doesn't have an
 // "unwrite descriptor" operation; writing VK_NULL_HANDLE as the imageView is
 // invalid even with PARTIALLY_BOUND (which only protects UNINITIALIZED
 // descriptors, not explicit-null writes). The bind-group is destroyed on
 // teardown either way, and PARTIALLY_BOUND + UPDATE_AFTER_BIND mean a stale
 // descriptor (left pointing at a now-destroyed VkImageView) is OK provided
-// no shader accesses it — which is enforced in 7.4a by the bindless table
-// being unused. A real "evict + reuse slot" path lands with 7.4c when the
+// no shader accesses it — which is currently enforced by the bindless table
+// being unused. A real "evict + reuse slot" path lands later when the
 // renderer starts consuming the bindless set and needs slot-recycling
 // semantics.
 void Ral_BindGroupSetTextureAt( ralBindGroup_t *g, uint32_t slot, ralTexture_t *tex ) {
@@ -1148,7 +1540,7 @@ void Ral_BindGroupSetTextureAt( ralBindGroup_t *g, uint32_t slot, ralTexture_t *
 	b = g->backend;
 	for ( i = 0; g->layout && i < g->layout->numEntries; i++ )
 		if ( g->layout->entries[i].vkType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ) { binding = g->layout->entries[i].binding; break; }
-	if ( binding == 0xFFFFFFFFu ) { ri.Log( SEV_WARN, "[RAL] Ral_BindGroupSetTextureAt: layout has no SAMPLED_IMAGE binding\n" ); return; }
+	if ( binding == 0xFFFFFFFFu ) { R_LOG( rch_ral, SEV_WARN, "Ral_BindGroupSetTextureAt: layout has no SAMPLED_IMAGE binding\n" ); return; }
 	RAL_ZERO( img );
 	img.imageView   = tex->defaultView;
 	img.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1163,11 +1555,36 @@ void Ral_BindGroupSetTextureAt( ralBindGroup_t *g, uint32_t slot, ralTexture_t *
 	b->vk.UpdateDescriptorSets( b->device, 1, &w, 0, NULL );
 }
 
-// Phase 7.4a interop bridge — renderervk needs raw VkImage / VkImageView /
+// Mirror of Ral_BindGroupSetTextureAt for the SAMPLER binding. NULL sampler
+// is a no-op (see the SAMPLED_IMAGE comment above for the rationale).
+void Ral_BindGroupSetSamplerAt( ralBindGroup_t *g, uint32_t slot, ralSampler_t *s ) {
+	VkWriteDescriptorSet  w;
+	VkDescriptorImageInfo img;
+	ralBackend_t         *b;
+	uint32_t              i, binding = 0xFFFFFFFFu;
+	if ( !g || !s ) return;
+	b = g->backend;
+	for ( i = 0; g->layout && i < g->layout->numEntries; i++ )
+		if ( g->layout->entries[i].vkType == VK_DESCRIPTOR_TYPE_SAMPLER ) { binding = g->layout->entries[i].binding; break; }
+	if ( binding == 0xFFFFFFFFu ) { R_LOG( rch_ral, SEV_WARN, "Ral_BindGroupSetSamplerAt: layout has no SAMPLER binding\n" ); return; }
+	RAL_ZERO( img );
+	img.sampler = s->sampler;
+	RAL_ZERO( w );
+	w.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	w.dstSet          = g->set;
+	w.dstBinding      = binding;
+	w.dstArrayElement = slot;
+	w.descriptorCount = 1;
+	w.descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLER;
+	w.pImageInfo      = &img;
+	b->vk.UpdateDescriptorSets( b->device, 1, &w, 0, NULL );
+}
+
+// interop bridge — renderervk needs raw VkImage / VkImageView /
 // VkDevice handles for the parallel-paths migration model. These are
 // backend-internal accessors (NOT part of the public RAL surface), exposed
 // only to code statically linked against the ral_vulkan static lib (the
-// renderer DLL). They go away in 7.4c+ when descriptor binding migrates onto
+// renderer DLL). They go away later when descriptor binding migrates onto
 // the RAL surface and the renderer stops needing native Vulkan handles.
 VkImage     ralVk_GetTextureNativeImage    ( const ralTexture_t *tex ) { return tex ? tex->image       : VK_NULL_HANDLE; }
 VkImageView ralVk_GetTextureNativeImageView( const ralTexture_t *tex ) { return tex ? tex->defaultView : VK_NULL_HANDLE; }
@@ -1190,13 +1607,13 @@ qboolean ralVk_InitResourceLayer( ralBackend_t *b ) {
 	sizes[5].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;          sizes[5].descriptorCount = 256u;
 	RAL_ZERO( dpi );
 	dpi.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-	dpi.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT          // Phase 7.3: per-set free path
+	dpi.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT          // per-set free path
 	                  | ( b->haveDescriptorIndexing ? VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT : 0u );
 	dpi.maxSets       = 4096u;
 	dpi.poolSizeCount = (uint32_t)( sizeof( sizes ) / sizeof( sizes[0] ) );
 	dpi.pPoolSizes    = sizes;
 	if ( b->vk.CreateDescriptorPool( b->device, &dpi, NULL, &b->descriptorPool ) != VK_SUCCESS ) {
-		ri.Log( SEV_WARN, "[RAL] ralVk_InitResourceLayer: vkCreateDescriptorPool failed\n" );
+		R_LOG( rch_ral, SEV_WARN, "ralVk_InitResourceLayer: vkCreateDescriptorPool failed\n" );
 		return qfalse;
 	}
 
@@ -1218,7 +1635,7 @@ void ralVk_ShutdownResourceLayer( ralBackend_t *b ) {
 	if ( b->descriptorPool != VK_NULL_HANDLE ) { b->vk.DestroyDescriptorPool( b->device, b->descriptorPool, NULL ); b->descriptorPool = VK_NULL_HANDLE; }
 	if ( b->allocations ) {
 		ralVkAllocation_t *a = b->allocations;
-		ri.Log( SEV_WARN, "[RAL] ralVk_ShutdownResourceLayer: %u allocation(s) still live -- freeing\n", b->numAllocations );
+		R_LOG( rch_ral, SEV_WARN, "ralVk_ShutdownResourceLayer: %u allocation(s) still live -- freeing\n", b->numAllocations );
 		while ( a ) { ralVkAllocation_t *n = a->next; if ( a->mapped ) b->vk.UnmapMemory( b->device, a->memory ); b->vk.FreeMemory( b->device, a->memory, NULL ); free( a ); a = n; }
 		b->allocations = NULL; b->numAllocations = 0; b->ralDeviceLocalBytes = 0; b->ralHostVisibleBytes = 0;
 	}
@@ -1284,7 +1701,7 @@ void ralVk_RunResourceTest( ralBackend_t *b ) {
 	ralBindGroup_t        *bg = NULL;
 	ralBindGroupLayout_t  *bgl = NULL;
 
-	ri.Log( SEV_INFO, "===== RAL resource test (Phase 7.2) =====\n" );
+	R_LOG( rch_ral, SEV_INFO, "===== RAL resource test (Phase 7.2) =====\n" );
 	Ral_QueryMemoryBudget( b, &before );
 
 	RAL_ZERO( tci );
@@ -1292,8 +1709,8 @@ void ralVk_RunResourceTest( ralBackend_t *b ) {
 	tci.width = W; tci.height = H; tci.depthOrArrayLayers = 1; tci.mipLevels = 0; tci.sampleCount = 1;
 	tci.usage = RAL_TEXTURE_USAGE_SAMPLED; tci.memory = RAL_MEMORY_DEVICE_LOCAL; tci.debugName = "ral-test-tex";
 	tex = Ral_CreateTexture( b, &tci );
-	if ( !tex ) { ri.Log( SEV_WARN, "  Ral_CreateTexture failed\n" ); ri.Log( SEV_INFO, "===== end RAL resource test =====\n" ); return; }
-	ri.Log( SEV_INFO, "  texture: %ux%u RGBA8_UNORM, %u mip levels, GPU-mip-gen=%s\n",
+	if ( !tex ) { R_LOG( rch_ral, SEV_WARN, "  Ral_CreateTexture failed\n" ); R_LOG( rch_ral, SEV_INFO, "===== end RAL resource test =====\n" ); return; }
+	R_LOG( rch_ral, SEV_INFO, "  texture: %ux%u RGBA8_UNORM, %u mip levels, GPU-mip-gen=%s\n",
 	        W, H, tex->mipLevels, b->formatBlitGen[ RAL_FORMAT_R8G8B8A8_UNORM ] ? "yes" : "no" );
 
 	// 1px red/blue checkerboard as mip 0
@@ -1305,8 +1722,8 @@ void ralVk_RunResourceTest( ralBackend_t *b ) {
 	}
 	RAL_ZERO( up ); up.mipLevel = 0; up.arrayLayer = 0; up.data = checker; up.dataSize = (uint64_t)W * H * 4u;
 	f = Ral_TextureUploadAsync( tex, &up );
-	if ( f ) { ri.Log( SEV_INFO, "  Ral_TextureUploadAsync: ok (mip 0 uploaded%s)\n", tex->mipLevels > 1 ? " + GPU mips generated" : "" ); Ral_DestroyFence( f ); }
-	else     { ri.Log( SEV_WARN, "  Ral_TextureUploadAsync failed\n" ); }
+	if ( f ) { R_LOG( rch_ral, SEV_INFO, "  Ral_TextureUploadAsync: ok (mip 0 uploaded%s)\n", tex->mipLevels > 1 ? " + GPU mips generated" : "" ); Ral_DestroyFence( f ); }
+	else     { R_LOG( rch_ral, SEV_WARN, "  Ral_TextureUploadAsync failed\n" ); }
 	free( checker );
 
 	Ral_QueryMemoryBudget( b, &after );
@@ -1320,7 +1737,7 @@ void ralVk_RunResourceTest( ralBackend_t *b ) {
 		if ( m == 0 || m >= tex->mipLevels ) continue;
 		mw = ( W >> m ) ? ( W >> m ) : 1u; mh = ( H >> m ) ? ( H >> m ) : 1u;
 		ralVk_ReadbackMip( b, tex, m, px, sizeof( px ) );
-		ri.Log( SEV_INFO, "  mip %u (%ux%u) pixel[0,0] = R%u G%u B%u A%u%s\n",
+		R_LOG( rch_ral, SEV_INFO, "  mip %u (%ux%u) pixel[0,0] = R%u G%u B%u A%u%s\n",
 		        m, mw, mh, px[0], px[1], px[2], px[3],
 		        ( idx == 0 ) ? "  (expect ~127/0/~127/255 = averaged red+blue)" : "" );
 	}
@@ -1330,23 +1747,23 @@ void ralVk_RunResourceTest( ralBackend_t *b ) {
 	RAL_ZERO( lci ); lci.entries = &be; lci.numEntries = 1; lci.bindless = qtrue; lci.debugName = "ral-test-bindless-layout";
 	bgl = Ral_CreateBindGroupLayout( b, &lci );
 	if ( !bgl ) {
-		ri.Log( SEV_INFO, "  bindless: skipped (caps.bindlessTextures=%s)\n", b->caps.bindlessTextures ? "yes-but-layout-failed" : "no" );
+		R_LOG( rch_ral, SEV_INFO, "  bindless: skipped (caps.bindlessTextures=%s)\n", b->caps.bindlessTextures ? "yes-but-layout-failed" : "no" );
 	} else {
 		ralBindGroupCreateInfo_t bci2;
 		RAL_ZERO( bci2 ); bci2.layout = bgl; bci2.values = NULL; bci2.numValues = 0; bci2.debugName = "ral-test-bindless-bg";
 		bg = Ral_CreateBindGroup( b, &bci2 );
 		if ( !bg ) {
-			ri.Log( SEV_WARN, "  bindless BindGroup creation failed\n" );
+			R_LOG( rch_ral, SEV_WARN, "  bindless BindGroup creation failed\n" );
 		} else {
 			Ral_BindGroupSetTextureAt( bg, 0, tex );
 			Ral_BindGroupSetTextureAt( bg, 1, tex );
-			ri.Log( SEV_INFO, "  bindless BindGroup: %u-slot SAMPLED_IMAGE array created; slots 0+1 populated with the test texture\n", RAL_VK_BINDLESS_LAYOUT_COUNT );
+			R_LOG( rch_ral, SEV_INFO, "  bindless BindGroup: %u-slot SAMPLED_IMAGE array created; slots 0+1 populated with the test texture\n", RAL_VK_BINDLESS_LAYOUT_COUNT );
 		}
 	}
 
-	ri.Log( SEV_INFO, "  memory: vk-reported device-local used: before=%u MiB  after=%u MiB\n",
+	R_LOG( rch_ral, SEV_INFO, "  memory: vk-reported device-local used: before=%u MiB  after=%u MiB\n",
 	        (unsigned)( before.deviceLocalUsed >> 20 ), (unsigned)( after.deviceLocalUsed >> 20 ) );
-	ri.Log( SEV_INFO, "  memory: RAL-tracked device-local footprint = %u KiB across %u allocation(s) (texture + mip chain still live)\n",
+	R_LOG( rch_ral, SEV_INFO, "  memory: RAL-tracked device-local footprint = %u KiB across %u allocation(s) (texture + mip chain still live)\n",
 	        (unsigned)( b->ralDeviceLocalBytes >> 10 ), b->numAllocations );
 
 	// teardown
@@ -1354,7 +1771,7 @@ void ralVk_RunResourceTest( ralBackend_t *b ) {
 	if ( bgl ) Ral_DestroyBindGroupLayout( bgl );
 	Ral_DestroyTexture( tex );
 	Ral_QueryMemoryBudget( b, &teardown );
-	ri.Log( SEV_INFO, "  teardown: RAL-tracked device-local footprint = %u KiB across %u allocation(s) [back to baseline]; vk-reported device-local used = %u MiB\n",
+	R_LOG( rch_ral, SEV_INFO, "  teardown: RAL-tracked device-local footprint = %u KiB across %u allocation(s) [back to baseline]; vk-reported device-local used = %u MiB\n",
 	        (unsigned)( b->ralDeviceLocalBytes >> 10 ), b->numAllocations, (unsigned)( teardown.deviceLocalUsed >> 20 ) );
-	ri.Log( SEV_INFO, "===== end RAL resource test =====\n" );
+	R_LOG( rch_ral, SEV_INFO, "===== end RAL resource test =====\n" );
 }

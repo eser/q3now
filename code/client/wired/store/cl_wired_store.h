@@ -5,7 +5,7 @@
 ===========================================================================
 cl_wired_store.h — Wired UI Store: generic key-value state bridge
 
-Phase 4: Game-agnostic state store replacing monolithic wiredHudState_t.
+Game-agnostic state store replacing monolithic wiredHudState_t.
 cgame writes via staging buffer + batch syscall, client reads at render time.
 ===========================================================================
 */
@@ -14,6 +14,7 @@ cgame writes via staging buffer + batch syscall, client reads at render time.
 #define CL_WIRED_STORE_H
 
 #include "../../../qcommon/q_shared.h"
+#include "../../../cgame/cg_public.h"	/* wuiMarker_t (WA-2a marker-list channel) */
 
 #if FEAT_WIRED_UI
 
@@ -42,11 +43,27 @@ typedef struct wuiStoreEntry_s {
 #define WUI_STORE_BUCKETS       512
 #define WUI_STORE_MAX_ENTRIES   4096
 
+/* ── world-anchored marker lists (WA-2a) ─────────────────────────────────
+ * A small fixed set of named marker LISTS (separate channel from the scalar
+ * hash store). Each frame cgame REPLACES a list via PushMarkerList; lists not
+ * pushed this frame are cleared in WiredStore_BeginFrame (frame-transient, no
+ * stale accumulation). MAX_MARKERS_PER_LIST 64 = 32 damage plums + headroom. */
+#define WUI_MAX_MARKER_LISTS        4
+/* WUI_MAX_MARKERS_PER_LIST is defined in cg_public.h (shared with the cgame
+ * staging scratch) — included above. */
+
+typedef struct {
+	char        key[64];                            /* listKey (e.g. "markers.plums"); empty = free slot */
+	int         count;                              /* live markers this frame */
+	wuiMarker_t markers[WUI_MAX_MARKERS_PER_LIST];
+} wuiMarkerList_t;
+
 typedef struct {
 	wuiStoreEntry_t *buckets[WUI_STORE_BUCKETS];    /* hash chains */
 	wuiStoreEntry_t  pool[WUI_STORE_MAX_ENTRIES];    /* pre-allocated entry pool */
 	int              numEntries;                      /* current entry count */
 	int              generation;                      /* incremented each frame/batch */
+	wuiMarkerList_t  markerLists[WUI_MAX_MARKER_LISTS]; /* WA-2a marker channel */
 } wuiStore_t;
 
 /* ── public API ─────────────────────────────────────────────────────── */
@@ -58,6 +75,13 @@ wuiStoreEntry_t *WiredStore_Get( const char *key );
 wuiStoreEntry_t *WiredStore_Set( const char *key );
 void             WiredStore_Delete( const char *key );
 void             WiredStore_BeginFrame( void );
+
+/* WA-2a marker channel: SetMarkerList REPLACES listKey's markers for this frame
+ * (find-or-alloc by key, caps at WUI_MAX_MARKERS_PER_LIST). GetMarkerList returns
+ * the marker array for a listKey (NULL + *outCount=0 if absent). Frame-transient:
+ * WiredStore_BeginFrame zeroes all list counts so an unpushed list draws nothing. */
+void                WiredStore_SetMarkerList( const char *listKey, const wuiMarker_t *markers, int count );
+const wuiMarker_t  *WiredStore_GetMarkerList( const char *listKey, int *outCount );
 
 /* Iterate all entries matching a key prefix. Calls fn(entry, userData) for
    each match. prefix="" matches everything. Not for use in render path. */

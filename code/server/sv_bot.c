@@ -5,7 +5,6 @@
 
 #include "server.h"
 #include "../botlib/botlib.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_botlib, "botlib" );
 LOG_DECLARE_CHANNEL( ch_server, "server" );
 
@@ -33,11 +32,20 @@ int SV_BotAllocateClient( void ) {
 	int			i;
 	client_t	*cl;
 
-	// find a client slot
-	for ( i = 0, cl = svs.clients; i < sv.maxclients; i++, cl++ ) {
+	// Find a client slot. Slot 0 is reserved for the integrated listen-server
+	// host (SV_IsHostClient identity = type NA_LOOPBACK AND slot 0). A bot is
+	// never the host, so it skips slot 0 and only takes it as a last resort
+	// when no other slot is free — otherwise a bot allocated while the host is
+	// away would claim slot 0 and the host would lose its identity on reconnect.
+	for ( i = 1, cl = &svs.clients[1]; i < sv.maxclients; i++, cl++ ) {
 		if ( cl->state == CS_FREE ) {
 			break;
 		}
+	}
+	// All non-reserved slots full: a bot may take slot 0 as a last resort.
+	if ( i == sv.maxclients && sv.maxclients > 0 && svs.clients[0].state == CS_FREE ) {
+		i  = 0;
+		cl = &svs.clients[0];
 	}
 
 	if ( i == sv.maxclients ) {
@@ -138,15 +146,15 @@ static __attribute__ ((format (printf, 2, 3))) void QDECL BotImport_Print(int ty
 			break;
 		}
 		case PRT_WARNING: {
-			Com_Log( SEV_WARN, LOG_CH(ch_botlib), S_COLOR_WARNING "Warning: %s", str);
+			Com_Log( SEV_WARN, LOG_CH(ch_botlib), "Warning: %s", str);
 			break;
 		}
 		case PRT_ERROR: {
-			Com_Log( SEV_ERROR, LOG_CH(ch_botlib), S_COLOR_ERROR "Error: %s", str);
+			Com_Log( SEV_ERROR, LOG_CH(ch_botlib), "Error: %s", str);
 			break;
 		}
 		case PRT_FATAL: {
-			Com_Log( SEV_FATAL, LOG_CH(ch_botlib), S_COLOR_ERROR "Fatal: %s", str);
+			Com_Log( SEV_FATAL, LOG_CH(ch_botlib), "Fatal: %s", str);
 			break;
 		}
 		case PRT_EXIT: {
@@ -446,7 +454,7 @@ int SV_BotLibSetup( void ) {
 	}
 
 	if ( !botlib_export ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_botlib), S_COLOR_ERROR "Error: SV_BotLibSetup without SV_BotInitBotLib\n" );
+		Com_Log( SEV_ERROR, LOG_CH(ch_botlib), "Error: SV_BotLibSetup without SV_BotInitBotLib\n" );
 		return -1;
 	}
 

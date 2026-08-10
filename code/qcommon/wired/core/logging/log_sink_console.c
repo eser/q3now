@@ -3,7 +3,7 @@
 
 /*
 ===========================================================================
-log_sink_console.c — In-game console sink (V1, #ifndef DEDICATED)
+log_sink_console.c — In-game console sink (V1, #ifndef HEADLESS)
 
 Severity filter from con_severity cvar (default INFO).
 Prefix format per logical line: "[SEV]  body" — always present.
@@ -21,35 +21,26 @@ in multiple pieces without a trailing newline.
 Delegates to CL_ConsolePrint for ring-buffer storage and color parsing.
 ===========================================================================
 */
-#ifndef DEDICATED
+#ifndef HEADLESS
 
 #include <assert.h>
 #include "q_shared.h"
 #include "qcommon.h"
 #include "log.h"
+#include "../console/con_public.h"   /* Con_PrintSeverity */
 
 // -------------------------------------------------------------------------
 // Sink state
 // -------------------------------------------------------------------------
 
-// Outer-padded bracket: body always starts at column 9 (8-char bracket + space
-// already included). All entries are exactly 8 chars.
-static const char *ConsoleSevBracket( log_severity_t sev )
-{
-    switch ( sev ) {
-    case SEV_TRACE: return "[TRACE] ";
-    case SEV_DEBUG: return "[DEBUG] ";
-    case SEV_INFO:  return "[INFO]  ";
-    case SEV_WARN:  return "[WARN]  ";
-    case SEV_ERROR: return "[ERROR] ";
-    case SEV_FATAL: return "[FATAL] ";
-    default:        return "[?????] ";
-    }
-}
-
-// Header: "HH:MM:SS " (9) + "[TRACE] " (8) + NUL = 18 bytes max.
-// 64 bytes gives large margin; assert guards against future growth.
-#define CON_HEADER_SIZE 64
+// TURN 3 V-20 (severity-as-data): the console sink no longer builds a
+// "[SEV] " text prefix or injects a color escape into the buffer. It tags the
+// line with rec->severity via Con_PrintSeverity; the in-game console colors
+// each line from that severity at draw time (elements/console.c). The
+// ConsoleSevBracket helper and the atLineStart header-building block are gone.
+// Optional HH:MM:SS timestamping is still owned by the console UI cvar
+// (con_timestamp) — this sink no longer prepends a timestamp either; the
+// console renders its own clock/timestamp presentation.
 
 typedef struct {
     cvar_t   *severity_cvar;
@@ -78,34 +69,12 @@ static void ConsoleSink_Emit( const log_record_t *rec, void *ctx )
 {
     console_sink_ctx_t *c = (console_sink_ctx_t *)ctx;
 
-    // Emit prefix only at the start of a new line.
-    if ( c->atLineStart ) {
-        char        header[CON_HEADER_SIZE];
-        int         hlen = 0;
-        const char *bracket;
-        int         blen;
-
-        // Optional timestamp (fmt=1: "HH:MM:SS"), gated by con_timestamp.
-        if ( c->timestamp_cvar && c->timestamp_cvar->integer ) {
-            hlen = Com_FormatTimestamp( header, sizeof( header ) - 12, 1 );
-            // Max timestamp len is 8; 12 bytes of guard leaves room for bracket+NUL.
-            assert( hlen < (int)sizeof( header ) - 10 );
-            header[hlen++] = ' ';
-            header[hlen]   = '\0';
-        }
-
-        // Severity bracket — always present, outer-padded to 8 chars.
-        bracket = ConsoleSevBracket( rec->severity );
-        blen    = 8;  // ConsoleSevBracket always returns 8 chars
-        assert( hlen + blen + 1 < (int)sizeof( header ) );
-        memcpy( header + hlen, bracket, blen );
-        hlen += blen;
-        header[hlen] = '\0';
-
-        CL_ConsolePrint( header );
-    }
-
-    CL_ConsolePrint( rec->body );
+    // Severity-as-data: tag the line with rec->severity and let the console
+    // color it at draw time. No text bracket, no color escape, no timestamp
+    // are injected into the buffer here (severity-as-data replaces the
+    // id-model text-prefix approach). The atLineStart bookkeeping is kept so
+    // the suffix logic below still tracks whether a newline closed the line.
+    Con_PrintSeverity( rec->severity, rec->body );
 
     // Update atLineStart: did this emit end on a newline?
     c->atLineStart = ( rec->body_len > 0 &&
@@ -153,4 +122,4 @@ void Log_UnregisterConsoleSink( void )
     Log_UnregisterSink( &s_consoleSink );
 }
 
-#endif // !DEDICATED
+#endif // !HEADLESS

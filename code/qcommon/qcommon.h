@@ -208,7 +208,7 @@ qboolean	NET_IsLocalAddress( const netadr_t *adr );
 const char	*NET_AdrToString( const netadr_t *a );
 const char	*NET_AdrToStringwPort( const netadr_t *a );
 int         NET_StringToAdr( const char *s, netadr_t *a, netadrtype_t family );
-#ifndef DEDICATED
+#ifndef HEADLESS
 qboolean	NET_GetLoopPacket( netsrc_t sock, netadr_t *net_from, msg_t *net_message );
 #endif
 #if FEAT_IPV6
@@ -235,7 +235,7 @@ qboolean	NET_Sleep( int timeout );
 Netchan handles packet fragmentation and out of order / duplicate suppression
 */
 
-/* Phase D: netchan_t retains only the address/sequence fields still
+/* netchan_t retains only the address/sequence fields still
  * referenced by QUIC-path code.  All netchan protocol logic (fragmentation,
  * OOB sequencing, rate-limit fields) is removed with net_chan.c. */
 typedef struct {
@@ -254,7 +254,7 @@ PROTOCOL
 ==============================================================
 */
 
-#define	PROTOCOL_VERSION	73
+#define	PROTOCOL_VERSION	74
 
 // maintain a list of compatible protocols for demo playing
 // NOTE: that stuff only works with two digits protocols
@@ -265,7 +265,7 @@ extern const int demo_protocols[];
 #ifndef MASTER_SERVER_NAME
 #define MASTER_SERVER_NAME	"master.quake3arena.com"
 #endif
-// Phase 6.4: AUTHORIZE_SERVER_NAME / PORT_AUTHORIZE removed.
+// AUTHORIZE_SERVER_NAME / PORT_AUTHORIZE removed.
 // Wired never contacts authorize.quake3arena.com — see CL_RequestAuthorization
 // removal in cl_main.c and SV_AuthorizeIpPacket removal in sv_client.c.
 
@@ -342,9 +342,7 @@ typedef enum {
 typedef enum {
 	VM_BAD = -1,
 	VM_GAME = 0,
-#ifndef USE_DEDICATED
 	VM_CGAME,
-#endif
 	VM_COUNT
 } vmIndex_t;
 
@@ -358,13 +356,48 @@ typedef intptr_t (QDECL *dllSyscall_t)( intptr_t callNum, ... );
 typedef void (QDECL *dllEntry_t)( dllSyscall_t syscallptr );
 
 void	VM_Init( void );
-vm_t	*VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscalls, vmInterpret_t interpret );
+// owner: an engine-owned, opaque app-instance token (pointer identity only).
+// Guards the dedup slot (a live slot returned to a different owner is a
+// lifecycle bug). Single-app passes one fixed sentinel. NEVER clc.clientNum.
+// cgameInstance: per-app cgame VM slot (in-process-queue L7). Selects
+// vmTable_cgame[cgameInstance] for VM_CGAME; ignored for VM_GAME (pass 0).
+vm_t	*VM_Create( vmIndex_t index, int cgameInstance, void *owner, syscall_t systemCalls, dllSyscall_t dllSyscalls, vmInterpret_t interpret );
 
 void	VM_Free( vm_t *vm );
-void	VM_Clear(void);
+
+// VM teardown callbacks: each upper tier registers a cleanup (keyed on its own
+// `owner` token) at VM-create / cgame-init time; VM_Free invokes them in reverse
+// registration order, after the backend teardown and before the VM struct is
+// wiped. Lets a pure VM_Free free everything the VM accreted without the caller
+// driving the cleanup order, and keeps qcommon from calling client/UI cleanup
+// directly — the resource owner supplies its own teardown function pointer. The
+// callback gets `owner` (NOT the vm_t, which may be mid-teardown) and must be
+// synchronous + free of VM syscalls / VM re-entry. Silently no-ops past the
+// per-VM slot cap.
+typedef void (*vmTeardownCallback_t)( void *owner );
+void	VM_RegisterTeardownCallback( vm_t *vm, void *owner, vmTeardownCallback_t cleanup );
+
+void	VM_ClearApp(int cgameInstance);
 void	VM_Forced_Unload_Start(void);
 void	VM_Forced_Unload_Done(void);
 vm_t	*VM_Restart( vm_t *vm );
+
+// Physical load-path of a loaded module (VM_GAME / primary VM_CGAME), captured
+// engine-side at load time — for the sysinfo "loaded-from" diagnostic. Returns
+// "" when the slot is not loaded. Native → the loose OS DLL path; WASM → the
+// loose OS path or "<pak> :: <qpath>" when served from a pak.
+const char *VM_LoadPath( vmIndex_t index );
+
+// The cgame VM whose vmMain is currently executing (per-app syscall routing).
+// Re-entrant: saved/restored on the C stack per VM_Call, NOT a bare global. Set
+// on BOTH backends — the native branch wraps vm->entryPoint, the WASM branch
+// wraps VM_CallWasm — so the cgame syscall handler can resolve which app's VM it
+// serves regardless of interpreter. Dormant (== the single VM) in single-app.
+vm_t	*VM_ActiveNativeVM( void );
+
+// The per-app cgame slot index a VM was created for (clientApps[] slot); lets a
+// syscall handler map VM_ActiveNativeVM() to its owning app. 0 for the game VM.
+int	VM_CgameInstance( vm_t *vm );
 
 intptr_t	QDECL VM_Call( vm_t *vm, int nargs, int callNum, ... );
 
@@ -445,6 +478,16 @@ void Cbuf_Execute( void );
 void Cbuf_Wait( void );
 // Checks if wait command timeout remaining
 
+void Cbuf_RegisterWaitForMapCheck( qboolean (*check)( void ) );
+// Client installs a readiness predicate used by /waitForMap. Predicate returns
+// qtrue when the local map is fully loaded (cls.state == CA_ACTIVE and, if a
+// local server is running, svs.spawn.phase == SPAWN_IDLE).
+
+void Cbuf_RequestWaitForMap( int maxFrames );
+// Arm the /waitForMap gate with a frame-counted safety timeout. The gate
+// yields Cbuf each frame until the registered check returns qtrue or the
+// budget is exhausted.
+
 //===========================================================================
 
 /*
@@ -465,13 +508,17 @@ void	Cmd_AddCommand( const char *cmd_name, xcommand_t function );
 // if function is NULL, the command will be forwarded to the server
 // as a clc_clientCommand instead of executed locally
 
-void	Cmd_AddCgameCommand( const char *cmd_name );
+void	Cmd_AddCgameCommand( const char *cmd_name, const void *owner );
 // Same as Cmd_AddCommand with function=NULL, but also tags the command
-// as cgame-owned so Cmd_RemoveCgameCommands can clean it up cleanly on
-// CL_ShutdownCGame without clobbering completion-only stubs.
+// as cgame-owned (with the owning cgame VM handle) so the cgame command set
+// can be cleaned up on CL_ShutdownCGame without clobbering completion-only
+// stubs — and, via Cmd_RemoveCgameCommandsByOwner, without clobbering another
+// client app's commands.
 
 void	Cmd_RemoveCommand( const char *cmd_name );
-void	Cmd_RemoveCgameCommands( void );
+// Remove only the cgame commands owned by `owner` (the cgame VM handle passed
+// at Cmd_AddCgameCommand). A NULL owner matches nothing.
+void	Cmd_RemoveCgameCommandsByOwner( const void *owner );
 
 qboolean Cmd_Exists( const char *cmd_name );
 // returns qtrue if a command with the given name is registered
@@ -701,9 +748,9 @@ typedef enum {
 
 #define	MAX_FOUND_FILES		0x5000
 
-#ifdef DEDICATED
-#define WIRED_CONFIG_CFG "config_dedicated.cfg"
-#define CONSOLE_HISTORY_FILE "history_dedicated"
+#ifdef HEADLESS
+#define WIRED_CONFIG_CFG "config_headless.cfg"
+#define CONSOLE_HISTORY_FILE "history_headless"
 #else
 #define WIRED_CONFIG_CFG "config.cfg"
 #define CONSOLE_HISTORY_FILE "history"
@@ -799,7 +846,7 @@ extern qboolean fs_reordered;
 // Tool-mode opt-out: when set qtrue before FS_InitFilesystem (only the
 // extract-meta tool does this today), FS_Restart skips its
 // "Couldn't load default.cfg" fatal check. Tools that bring up the FS
-// purely to enumerate files / parse BSPs don't need a baseq3 config.
+// purely to enumerate files / parse BSPs don't need a base config.
 extern qboolean fs_skipExecDefaults;
 
 int		FS_Write( const void *buffer, int len, fileHandle_t f );
@@ -887,7 +934,9 @@ int FS_VM_ReadFile( void *buffer, int len, fileHandle_t f, handleOwner_t owner )
 void FS_VM_WriteFile( void *buffer, int len, fileHandle_t f, handleOwner_t owner );
 int FS_VM_SeekFile( fileHandle_t f, long offset, fsOrigin_t origin, handleOwner_t owner );
 void FS_VM_CloseFile( fileHandle_t f, handleOwner_t owner );
-void FS_VM_CloseFiles( handleOwner_t owner );
+// appSlot scopes the close to one client app for the shared H_CGAME key
+// (multi-app); pass 0 for H_QAGAME / H_SYSTEM / single-app (byte-identical).
+void FS_VM_CloseFiles( handleOwner_t owner, int appSlot );
 
 const char *FS_GetCurrentGameDir( void );
 
@@ -917,7 +966,17 @@ const char *FS_GetInstallResourcePath( void );
 qboolean FS_StripExt( char *filename, const char *ext );
 qboolean FS_AllowedExtension( const char *fileName, qboolean allowPk3s, const char **ext );
 
-void *FS_LoadLibrary( const char *name );
+// outPath (may be NULL): on success receives the exact OS path the library was
+// loaded from (the winning FS_BuildOSPath result), so callers can report module
+// provenance. Captured at the success point (FS_BuildOSPath returns a rotating
+// static buffer — see files.c). Non-provenance callers pass NULL.
+void *FS_LoadLibrary( const char *name, char *outPath, int outLen );
+
+// Describes where an OPEN file handle was sourced from, for diagnostics. If the
+// handle is backed by a pak, writes "<pak-os-path> :: <internal-qpath>"; for a
+// loose file, re-resolves and writes the loose OS path. `out` gets "" if the
+// handle is invalid. Must be called while the handle is still open.
+void FS_DescribeHandleSource( fileHandle_t f, char *out, int outLen );
 
 typedef qboolean ( *fnamecallback_f )( const char *filename, int length );
 
@@ -1078,12 +1137,12 @@ static ID_INLINE unsigned int log2pad( unsigned int v, int roundup )
 }
 
 
-extern	cvar_t	*com_dedicated;
 extern	cvar_t	*com_speeds;
 extern	cvar_t	*com_timescale;
 extern	cvar_t	*com_viewlog;			// 0 = hidden, 1 = visible, 2 = minimized
 extern	cvar_t	*com_version;
 extern	cvar_t	*com_journal;
+extern	cvar_t	*com_automated;			// 1 = non-interactive run: suppress blocking GUI error dialogs
 extern	cvar_t	*com_cameraMode;
 extern	cvar_t	*com_protocol;
 
@@ -1092,7 +1151,7 @@ extern	cvar_t	*sv_paused;
 extern	cvar_t	*sv_packetdelay;
 extern	cvar_t	*com_sv_running;
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 extern	cvar_t	*cl_paused;
 extern	cvar_t	*cl_packetdelay;
 extern	cvar_t	*com_cl_running;
@@ -1127,7 +1186,7 @@ extern clProfile_t cl_prof;
 
 extern	int		com_frameTime;
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 extern	qboolean	gw_minimized;
 extern	qboolean	gw_active;
 #endif
@@ -1276,6 +1335,11 @@ void Com_Init( char *commandLine );
 void Com_FrameInit( void );
 void Com_Frame( qboolean noDelay );
 
+// Register an optional callback that prints a GPU-memory section in /meminfo.
+// The renderer's VRAM/budget numbers live behind the engine→renderer boundary,
+// so a higher layer registers a printer here. Pass NULL to deregister.
+void Com_RegisterGpuMemReport( void ( *fn )( void ) );
+
 // Zone allocator initializers — exposed so out-of-tree consumers
 // (extract-meta tool) can bring up the zone before Cvar_Init without
 // pulling in the full Com_Init pipeline.
@@ -1293,32 +1357,38 @@ CLIENT / SERVER SYSTEMS
 //
 // client interface
 //
+struct clientApp_s;	// per-app client container (defined in client.h); the
+					// client-interface protos below take it by pointer.
 void CL_Init( void );
 void CL_Characters_Init( void );  // must run before SV_Init (before BotLua preload)
 void CL_AbortFrame( void );
 qboolean CL_DemoPlaying( void );
-qboolean CL_Disconnect( qboolean showMainMenu );
+qboolean CL_Disconnect( struct clientApp_s *app, qboolean showMainMenu );
 void CL_ResetOldGame( void );
 void CL_Shutdown( const char *finalmsg, qboolean quit );
 void CL_Frame( int msec, int realMsec );
+void CL_DownloadsComplete_Tick( void ); /* advance one phase of the async load state machine */
 qboolean CL_GameCommand( void );
 void CL_KeyEvent (int key, qboolean down, unsigned time);
 
 void CL_CharEvent( int key );
 // char events are for field typing, not game control
 
-void CL_MouseEvent( int dx, int dy /*, int time*/ );
+void CL_MouseEvent( float dx, float dy /*, int time*/ );
 
 void CL_JoystickEvent( int axis, int value, int time );
 
 void CL_PacketEvent( const netadr_t *from, msg_t *msg );
-#if !defined(DEDICATED)
+#if !defined(HEADLESS)
 void CL_CheckReliableStreams( void );
 void CL_CheckSnapshotDatagrams( void );
 #endif
 
-#if !defined(DEDICATED)
+#if !defined(HEADLESS)
 void CL_ConsolePrint( const char *text );
+// Physical path the renderer DLL was dlopen'd from (sysinfo "loaded-from").
+// "" before the renderer is loaded / after shutdown. Captured engine-side.
+const char *CL_RendererLoadPath( void );
 #endif
 
 void CL_MapLoading( const char *mapname );
@@ -1364,8 +1434,26 @@ void Key_WriteBindings( fileHandle_t f );
 void S_ClearSoundBuffer( void );
 // call before filesystem access
 
-void CL_SystemInfoChanged( qboolean onlyGame );
-qboolean CL_GameSwitch( void );
+struct clientApp_s *CL_ActiveApp( void );
+void CL_SystemInfoChanged( struct clientApp_s *app, qboolean onlyGame );
+qboolean CL_GameSwitch( struct clientApp_s *app );
+
+// Faulting-app cursor for the per-app recovery. CL_FrameApp
+// is the app currently being serviced (the target Com_Terminate disconnects on a
+// recoverable error); CL_FrameAppAbort returns that app's per-frame setjmp recovery
+// point as a (void **) so qcommon (log.c) can Q_longjmp into it without seeing the
+// clientApp_t layout (the field deref happens client-tier). At N=1 both resolve to
+// clientApps[0]; in HEADLESS neither is referenced (the global abortframe is kept).
+struct clientApp_s *CL_FrameApp( void );
+void **CL_FrameAppAbort( void );
+// Is the faulting-app per-frame recovery point currently armed? Outside the armed
+// window (startup cbuf '+map'/'+demo' that runs in Com_Frame before the per-app
+// setjmp, Com_EventLoop, init) the per-app jmp_buf is zero-initialized and longjmp
+// through it is UB. Com_Terminate consults this and falls back to the process-global
+// abortframe when the per-app frame is not armed. Engine sets/clears it around the
+// per-app setjmp section in Com_Frame.
+qboolean CL_FrameAbortArmed( void );
+void CL_SetFrameAbortArmed( qboolean armed );
 
 // AVI files have the start of pixel lines 4 byte-aligned
 #define AVI_LINE_PADDING 4
@@ -1376,6 +1464,7 @@ qboolean CL_GameSwitch( void );
 void SV_Init( void );
 void SV_Shutdown( const char *finalmsg );
 void SV_SpawnServer_Tick( void ); /* advance one phase of the async spawn machine */
+qboolean SV_IsSpawnIdle( void );  /* qtrue when svs.spawn.phase == SPAWN_IDLE (no map transition in flight) */
 void SV_Frame( int msec );
 void SV_TrackCvarChanges( void );
 void SV_PacketEvent( const netadr_t *from, msg_t *msg );
@@ -1409,22 +1498,29 @@ typedef enum {
 	SE_NONE = 0,	// evTime is still valid
 	SE_KEY,		// evValue is a key code, evValue2 is the down flag
 	SE_CHAR,	// evValue is an ascii char
-	SE_MOUSE,	// evValue and evValue2 are relative signed x / y moves
+	SE_MOUSE,	// evValue/evValue2 are relative x/y moves as float (bit-cast into the int slots — decode via floatint_t) to preserve sub-pixel precision
 	SE_JOYSTICK_AXIS,	// evValue is an axis number and evValue2 is the current state (-127 to 127)
 	SE_CONSOLE,	// evPtr is a char*
 	SE_MAX,
 } sysEventType_t;
 
 typedef struct {
-	int				evTime;
+	uint64_t		evTime;			// nanoseconds (from Sys_NanoTime); ns to match high-res timers and avoid the ~24.8-day ms-int overflow. ms-expecting consumers convert ns/1000000 at the boundary.
 	sysEventType_t	evType;
-	int				evValue, evValue2;
+	int				evValue, evValue2;	// for SE_MOUSE these hold dx/dy as bit-cast float (floatint_t), not int
 	int				evPtrLength;	// bytes of data pointed to by evPtr, for journaling
 	void			*evPtr;			// this must be manually freed if not NULL
 } sysEvent_t;
 
 void	Sys_Init( void );
-void	Sys_QueEvent( int evTime, sysEventType_t evType, int value, int value2, int ptrLength, void *ptr );
+void	Sys_QueEvent( uint64_t evTime, sysEventType_t evType, int value, int value2, int ptrLength, void *ptr );
+
+// SE_MOUSE carries dx/dy as float (sub-pixel precision) bit-cast into the int
+// evValue/evValue2 slots. Producers encode with SE_MouseEnc, consumers decode
+// with SE_MouseDec — same floatint_t bit-cast the VM boundary uses (PASSFLOAT),
+// so the int slot/journaling width is unchanged and only SE_MOUSE reinterprets it.
+static ID_INLINE int   SE_MouseEnc( float v ) { floatint_t fi; fi.f = v; return fi.i; }
+static ID_INLINE float SE_MouseDec( int v )   { floatint_t fi; fi.i = v; return fi.f; }
 void	Sys_SendKeyEvents( void );
 void	Sys_Sleep( int msec );
 char	*Sys_ConsoleInput( void );
@@ -1434,6 +1530,11 @@ void	NORETURN Sys_Quit( void );
 char	*Sys_GetClipboardData( void );	// note that this isn't journaled...
 void	Sys_SetClipboardData( const char *text );
 void	Sys_SetClipboardBitmap( const byte *bitmap, int length );
+// cross-platform image clipboard.  Implementations
+// publish the PNG bytes to the OS clipboard with image/png MIME (X11
+// SelectionRequest; SDL_SetClipboardData with image/png mime).  macOS
+// stays unimplemented (Obj-C++ follow-up).
+void	Sys_SetClipboardImagePNG( const byte *png, int length );
 
 /* match alerts.
  * Sys_FlashWindow briefly flashes the taskbar / dock entry to draw
@@ -1458,7 +1559,7 @@ void	Sys_SnapVector( float *vector );
 
 qboolean Sys_RandomBytes( byte *string, int len );
 
-// the system console is shown when a dedicated server is running
+// the system console is shown when a headless server is running
 void	Sys_DisplaySystemConsole( qboolean show );
 
 void	Sys_ShowConsole( int level, qboolean quitOnClose );
@@ -1477,7 +1578,7 @@ FILE	*Sys_FOpen( const char *ospath, const char *mode );
 qboolean Sys_ResetReadOnlyAttribute( const char *ospath );
 
 const char *Sys_Pwd( void );
-const char *Sys_DefaultBasePath( void );
+const char *Sys_DefaultInstallPath( void );
 const char *Sys_DefaultHomePath( void );
 
 int Sys_GetCapsLockMode( void );
@@ -1526,8 +1627,8 @@ int HuffmanGetSymbol( unsigned int* symbol, const byte* buffer, int bitIndex );
 #define COM_TRAP_GETVALUE 700
 
 // BSP format abstraction (FEAT_BSP_ABSTRACTION)
-void BSP_Init( void );
-void BSP_Shutdown( void );
+void Map_Init( void );
+void Map_Shutdown( void );
 
 // Headless Lua scripting runtime
 #include "wired/core/scripting/wired_scripting.h"

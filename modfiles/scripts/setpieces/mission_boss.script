@@ -1,0 +1,17 @@
+// mission_boss.script — MISSION-category set-piece (Faz-7b).
+// Proves the objective_* verbs drive the in-memory g_objectives system from
+// event blocks, and the completion gate honours a failed REQUIRED objective.
+//
+// spawn:  register two REQUIRED objectives (indices 0 and 1).
+// death:  completing objective 0 when the boss dies (a normal mission beat).
+// The reach-exit objective (index 1) is failed by the reinforcement's trigger
+// block below — a failed required objective means the gate can NEVER latch.
+spawn {
+    print mission-boss-spawned
+    objective_add mission.kill_boss
+    objective_add mission.reach_exit
+}
+death {
+    print mission-boss-down
+    objective_complete 0
+}

@@ -1,0 +1,41 @@
+// qw_hud_scoreboard_overlay — V2_HUD_Active TAB-hold scoreboard table
+// Interface: #include once into the qw_hud_active composer menuDef body.
+// Source: docs/wui-claude-design-canonical-v2/project/qw-screens.jsx:1299-1345
+//   (top:140, centered, w:900; ◆ DEATHMATCH + ARENA GATE header, sorted
+//    rank/player/score/K-D/EFF/DMG/ACC/PING rows, footer).
+//
+// ABI (0 engine LoC): reuses the EXISTING `scorelist_widget` (type parsed at
+// cl_wired_parse.c:1275; renders the full sorted board — title, headers,
+// per-player rows, spectators, bg — internally from game.scores /
+// wiredHudState.scores[], cl_wired_ui_hud_scoreboard.c:196-250). Same idiom as
+// ingame_scoreboard_ffa.wui; the .wui supplies position + sizing only.
+//
+// Visibility: rendered (visible 1) to match the mockup baseline, which shows
+// the overlay. In real gameplay this is the TAB-hold panel — gating `visible`
+// on a showscores store key is a follow-up (the existing ingame_scoreboard_*
+// menus are HUD-state-toggled; out of this 0-LoC scope).
+// Tokens: $accent $line (frame); the widget self-colours its content.
+itemDef {
+	name "hud_active_scoreboard_overlay"
+	type container
+	position absolute
+	top 15.56vh
+	left 18.75vw
+	width 62.5vw
+	height 42vh
+	direction column
+	background $hud_panel_bg
+	border 1px $accent
+
+	itemDef {
+		name "hud_active_scorelist"
+		type scorelist_widget
+		rect 0 0 1 1
+		width PERCENT 1.0
+		height PERCENT 1.0
+		feeder "scoreboard"
+		forecolor $bone
+		decoration
+		visible 1
+	}
+}

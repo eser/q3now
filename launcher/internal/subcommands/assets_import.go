@@ -10,13 +10,13 @@ import (
 
 var assetsImportCmd = &cobra.Command{
 	Use:   "import",
-	Short: "Import downloaded assets (and optionally a full Q3 install) into baseq3/",
+	Short: "Import downloaded assets (and optionally a full Q3 install) into base/",
 	Long: `Process the downloaded id-quakepack bundle through the q3copy pipeline,
-producing pax01.sw3z in ~/wired${channelSuffix}/baseq3/.
+producing pax01.sw3z in ~/wired${channelSuffix}/base/.
 
 When --q3path points at a full Quake III Arena install root (a directory
-containing baseq3/pak0.pk3), the pipeline also produces pax02.sw3z from
-the full baseq3 PAKs and pax04.sw3z from missionpack/ if present.
+containing base/pak0.pk3), the pipeline also produces pax02.sw3z from
+the full base PAKs and pax04.sw3z from missionpack/ if present.
 
 Prerequisite: the bundle must be downloaded first (` + "`q3now assets download`" + `).
 Asset conversion (TGA→PNG, WAV→Opus, SW3Z repack) runs synchronously and
@@ -44,7 +44,7 @@ EULA: same gate as ` + "`q3now assets download`" + `.`,
 
 func init() {
 	assetsImportCmd.Flags().String("q3path", "",
-		"Path to a full Quake III Arena install root (containing baseq3/pak0.pk3). "+
+		"Path to a full Quake III Arena install root (containing base/pak0.pk3). "+
 			"When set, pax02 and pax04 are produced alongside pax01. Optional.")
 	assetsImportCmd.Flags().Bool("accept-eula", false,
 		"Record acceptance of the id Software demo EULA. Required on first run.")

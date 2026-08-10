@@ -12,7 +12,7 @@
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
-#ifndef DEDICATED
+#ifndef HEADLESS
 #include "../renderer/tr_local.h"
 #endif
 
@@ -91,7 +91,7 @@ static void signal_handler( int sig )
 
 	sprintf( msg, "Signal caught (%d)", sig );
 	VM_Forced_Unload_Start();
-#ifndef DEDICATED
+#ifndef HEADLESS
 	CL_Shutdown( msg, qtrue );
 #endif
 	SV_Shutdown( msg );

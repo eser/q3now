@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
 // ral_vulkan_caps.c — fills ralBackend_s::caps after the VkDevice exists.
-// Probes the extension set the Phase 7.1 brief calls out (descriptor
+// Probes the extension set the brief calls out (descriptor
 // indexing, dynamic rendering, timeline semaphores, fragment shading rate,
 // swapchain colorspace) plus separate queue families, and copies the
 // VkPhysicalDeviceLimits the renderer will need.
@@ -90,13 +90,35 @@ void ralVk_FillCaps( ralBackend_t *b ) {
 		// support snapshot; the gate is the enabled flag.)
 		(void)di; (void)hasDescriptorIndexing;
 		c->bindlessTextures   = b->haveDescriptorIndexing;
-		c->timelineSemaphores = b->haveTimelineSemaphore;   // enabled at device creation (required since 7.3); ts/hasTimelineSemaphore are the support snapshot
+		c->timelineSemaphores = b->haveTimelineSemaphore;   // enabled at device creation (required); ts/hasTimelineSemaphore are the support snapshot
 		(void)hasTimelineSemaphore; (void)ts;
 		c->dynamicRendering   = hasDynamicRendering  && dr.dynamicRendering  == VK_TRUE;
 	}
 
-	c->variableRateShading = hasFragmentShadingRate;
-	// Phase 7.4-pre: drawIndirectCount reflects what was ENABLED at device
+	// variableRateShading reflects what was ENABLED at device creation
+	// (b->haveFragmentShadingRate: extension enabled AND pipelineFragmentShadingRate
+	// feature on), not merely extension presence — a visible-but-unenabled extension
+	// would make a pipeline VRS state / vkCmdSetFragmentShadingRateKHR a validation
+	// error. false on MoltenVK / unsupported HW.
+	c->variableRateShading = b->haveFragmentShadingRate;
+	(void)hasFragmentShadingRate;
+	// depthClamp reflects what was ENABLED at device creation (b->haveDepthClamp:
+	// the renderer requested it AND the device reported VkPhysicalDeviceFeatures.
+	// depthClamp), not mere support — a pipeline depthClampEnable=VK_TRUE without
+	// the enabled feature is a validation error (VUID-...-depthClampEnable-00782).
+	// false on backends without native depth-clamp → renderer takes the projection
+	// near-plane-shrink fallback.
+	c->depthClamp          = b->haveDepthClamp;
+	// wideLines / vertexFragmentStores / samplerAnisotropyEnabled reflect what was
+	// ENABLED at device creation (b->have* flags), restored here after the memset
+	// above. Without these restores they read false in the renderer regardless of
+	// device support — the latent bug that silently disabled the halo/flare
+	// occlusion-probe (vk_flares.c gates R_ClearFlares + the dot-pipeline on
+	// vk.fragmentStores = caps.vertexFragmentStores).
+	c->wideLines                = b->haveWideLines;
+	c->vertexFragmentStores     = b->haveVertexFragmentStores;
+	c->samplerAnisotropyEnabled = b->haveSamplerAnisotropy;
+	// drawIndirectCount reflects what was ENABLED at device
 	// creation (b->haveDrawIndirectCount), not just version/extension presence
 	// — extension visible but feature not enabled would still mean callers
 	// can't legally use vkCmdDrawIndexedIndirectCount.
@@ -105,7 +127,7 @@ void ralVk_FillCaps( ralBackend_t *b ) {
 	c->debugUtils          = b->haveDebugUtils;
 	c->memoryBudget        = b->haveMemoryBudget;
 	// instance ext present → colorspaces are *potentially* presentable; real
-	// availability is per-surface and resolved in Phase 7.8b. Best effort here.
+	// availability is per-surface and resolved later. Best effort here.
 	c->hdr10Swapchain      = hasSwapchainColorspace;
 	c->scRGBSwapchain      = hasSwapchainColorspace;
 

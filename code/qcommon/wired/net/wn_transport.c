@@ -12,7 +12,10 @@ events).  This is the sole transport — there is no UDP netchan fallback.
 conn_handle_t mapping:
   CONN_INVALID          (0)               — no connection
   1..WN_MAX_CLIENTS                        — wn.game_conns[handle - 1]
-  CONN_CLIENT_HANDLE    (WN_MAX_CLIENTS+1) — wtcl (outgoing client cnx)
+  CONN_CLIENT_HANDLE    (WN_MAX_CLIENTS+1) — wtcl_array[0] (primary client cnx)
+  WN_APP_CONN_BASE..    (100 + app_idx)    — wtcl_array[app_idx], per-app local
+                                             client (in-process-queue; no
+                                             producer emits these until spawn/P5)
 
 Wire protocols:
   Stream 0x00 — binary TLV session control (CONNECT/ACCEPT/REFUSE/READY)
@@ -23,10 +26,17 @@ Wire protocols:
 */
 #include "wn_local.h"
 #include "../../net_transport.h"
-/* Phase 5: log channels */
-LOG_DECLARE_CHANNEL( ch_network, "network" );
+#include "../../vm_local.h"     /* MAX_LOCAL_CGAME_VMS — static_assert WN_MAX_LOCAL_CLIENTS matches */
 
-#if !defined(DEDICATED)
+/* The per-app client-slot bound (wn_local.h) must equal the cgame VM table
+ * bound so a client app slot and its cgame VM slot index agree. Kept as two
+ * constants (no net→vm header dependency) and pinned equal here. */
+_Static_assert( WN_MAX_LOCAL_CLIENTS == MAX_LOCAL_CGAME_VMS,
+	"WN_MAX_LOCAL_CLIENTS must track MAX_LOCAL_CGAME_VMS" );
+LOG_DECLARE_CHANNEL( ch_network, "network" );
+LOG_DECLARE_CHANNEL( ch_network_common, "network.common" );
+
+#if !defined(HEADLESS)
 #include "picotls/openssl.h"    /* ptls_openssl_verify_certificate_t, override callback */
 #include <openssl/sha.h>        /* SHA256 */
 #include <openssl/evp.h>        /* X509_get_pubkey, i2d_PUBKEY, EVP_PKEY_free */
@@ -36,8 +46,16 @@ LOG_DECLARE_CHANNEL( ch_network, "network" );
 /* ── Global transport pointer (extern declared in net_transport.h) ── */
 transport_t *transport = NULL;
 
-/* Sentinel handle for the single outgoing client connection */
+/* Sentinel handle for the primary outgoing client connection (wtcl_array[0]). */
 #define CONN_CLIENT_HANDLE  ((conn_handle_t)(WN_MAX_CLIENTS + 1))
+
+/* WN_APP_CONN_BASE / WN_APP_CONN_COUNT now live in wn_public.h (promoted so the
+ * transport_for_handle selector is visible to all conn-bearing call sites). Pin
+ * the public count to the internal per-app bound. */
+_Static_assert( WN_APP_CONN_COUNT == WN_MAX_LOCAL_CLIENTS,
+	"WN_APP_CONN_COUNT (wn_public.h) must equal WN_MAX_LOCAL_CLIENTS (wn_local.h)" );
+_Static_assert( WN_APP_SVCONN_COUNT == WN_MAX_LOCAL_CLIENTS,
+	"WN_APP_SVCONN_COUNT (wn_public.h) must equal WN_MAX_LOCAL_CLIENTS (wn_local.h)" );
 
 // ═══════════════════════════════════════════════════════════════════
 // Internal helpers
@@ -52,11 +70,45 @@ static wn_game_conn_t *wn_get_game_conn( conn_handle_t conn )
 	return gc->active ? gc : NULL;
 }
 
+#if !defined(HEADLESS)
+/* Catch the zero-size-array regression (the `#define wtcl wtcl_array[0]` trap):
+ * if the array ever degenerates to [0], sizeof drops to 0. Pin it explicitly.
+ * Client-only: wtcl_array / wn_client_state_t are #if !defined(HEADLESS). */
+_Static_assert( sizeof( wtcl_array ) == WN_MAX_LOCAL_CLIENTS * sizeof( wtcl_array[0] ),
+	"wtcl_array must be WN_MAX_LOCAL_CLIENTS elements (guards the zero-size-array bug)" );
+
+/* Resolve the per-app client transport state for a conn handle. At N=1 the only
+ * client handle ever passed is CONN_CLIENT_HANDLE -> slot 0 -> wtcl_array[0],
+ * byte-identical to the former singleton. The WN_APP_CONN_BASE range is decoded
+ * here for the N-ready path but is never produced at runtime until spawn (P5). */
+static wn_client_state_t *wn_get_client_state( conn_handle_t conn )
+{
+	if ( conn == CONN_CLIENT_HANDLE )
+		return &wtcl_array[0];
+	if ( conn >= WN_APP_CONN_BASE && conn < WN_APP_CONN_BASE + WN_MAX_LOCAL_CLIENTS )
+		return &wtcl_array[conn - WN_APP_CONN_BASE];
+	return NULL;
+}
+#endif
+
+/* Public: decode a client conn_handle to its per-app local-client slot. Lives
+ * outside the HEADLESS guard (declared in wn_public.h, may be linked from
+ * client recv/parse routing). CONN_CLIENT_HANDLE -> 0; WN_APP_CONN_BASE+i -> i;
+ * anything else -> 0. At N=1 only CONN_CLIENT_HANDLE is ever passed -> 0. */
+int WN_AppSlotForConn( conn_handle_t conn )
+{
+	if ( conn >= WN_APP_CONN_BASE && conn < WN_APP_CONN_BASE + WN_MAX_LOCAL_CLIENTS )
+		return (int)( conn - WN_APP_CONN_BASE );
+	return 0;
+}
+
 static picoquic_cnx_t *wn_get_cnx( conn_handle_t conn )
 {
-#if !defined(DEDICATED)
-	if ( conn == CONN_CLIENT_HANDLE )
-		return ( wtcl.initialized && wtcl.cnx ) ? wtcl.cnx : NULL;
+#if !defined(HEADLESS)
+	if ( conn == CONN_CLIENT_HANDLE || ( conn >= WN_APP_CONN_BASE && conn < WN_APP_CONN_BASE + WN_MAX_LOCAL_CLIENTS ) ) {
+		wn_client_state_t *c = wn_get_client_state( conn );
+		return ( c && c->initialized && c->cnx ) ? c->cnx : NULL;
+	}
 #endif
 	{
 		wn_game_conn_t *gc = wn_get_game_conn( conn );
@@ -149,7 +201,7 @@ static qboolean wn_reliable_stage_header( wn_rel_partial_t *partial,
 		(*data_io)++;
 		(*len_io)--;
 	}
-	Com_Log( SEV_TRACE, LOG_CH(ch_network), "[WiredNet] QUIC %s: stream %llu header staged %d/2 bytes\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC %s: stream %llu header staged %d/2 bytes\n",
 		tag, (unsigned long long)stream_id, partial->header_bytes );
 	if ( partial->header_bytes < 2 ) {
 		return qtrue; /* not yet complete — wait for next chunk */
@@ -172,7 +224,7 @@ static qboolean wn_reliable_stage_header( wn_rel_partial_t *partial,
 		return qfalse;
 	}
 	partial->channel = partial->header_staging[1];
-	Com_Log( SEV_TRACE, LOG_CH(ch_network), "[WiredNet] QUIC %s: stream %llu header complete chan=%d\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC %s: stream %llu header complete chan=%d\n",
 		tag, (unsigned long long)stream_id, partial->channel );
 	return qtrue;
 }
@@ -212,13 +264,24 @@ static void wn_reliable_free_partial( wn_rel_partial_t *partial )
 	}
 }
 
-static qboolean wn_reliable_queue_push( wn_rel_msg_t *queue, volatile int *head,
+qboolean wn_reliable_queue_push( wn_rel_msg_t *queue, volatile int *head,
 	volatile int *tail, int channel, const byte *data, int len )
 {
 	int next_head = ( *head + 1 ) % WN_REL_QUEUE_SIZE;
 	wn_rel_msg_t *msg;
 	if ( next_head == *tail ) {
 		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC: reliable recv queue full — message dropped (channel=%d len=%d)\n", channel, len );
+		return qfalse;
+	}
+	// Last-line-of-defense bound: queue slots use a fixed MAX_MSGLEN data
+	// buffer and `len` is derived from untrusted network framing. Every caller
+	// is expected to pre-check (the in-mem + QUIC paths do), but reject an
+	// out-of-range length here too rather than overflowing the queue slot if a
+	// caller ever forgets. A negative len would also wrap to a huge size_t in
+	// the memcpy.
+	if ( len < 0 || (size_t)len > sizeof( queue[*head].data ) ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC: reliable push rejected oversize len=%d (max=%d, channel=%d)\n",
+			len, (int)sizeof( queue[*head].data ), channel );
 		return qfalse;
 	}
 	msg = &queue[*head];
@@ -229,7 +292,7 @@ static qboolean wn_reliable_queue_push( wn_rel_msg_t *queue, volatile int *head,
 	return qtrue;
 }
 
-static qboolean wn_reliable_queue_pop( wn_rel_msg_t *queue, volatile int *head,
+qboolean wn_reliable_queue_pop( wn_rel_msg_t *queue, volatile int *head,
 	volatile int *tail, int *channel_out, byte *buf, int *len_out )
 {
 	wn_rel_msg_t *msg;
@@ -271,7 +334,7 @@ static void wn_reliable_server_consume_stream( wn_game_conn_t *gc, uint64_t stre
 				(unsigned long long)stream_id );
 			return;
 		}
-		Com_Log( SEV_TRACE, LOG_CH(ch_network), "[WiredNet] QUIC game: partial slot alloc for stream %llu first_chunk=%d bytes\n",
+		Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC game: partial slot alloc for stream %llu first_chunk=%d bytes\n",
 			(unsigned long long)stream_id, len );
 	}
 	if ( !wn_reliable_stage_header( partial, &payload, &payload_len, stream_id, "game" ) ) {
@@ -299,11 +362,11 @@ static void wn_reliable_server_consume_stream( wn_game_conn_t *gc, uint64_t stre
 	if ( payload_len > 0 ) {
 		memcpy( partial->data + partial->len, payload, (size_t)payload_len );
 		partial->len += payload_len;
-		Com_Log( SEV_TRACE, LOG_CH(ch_network), "[WiredNet] QUIC game: partial slot for stream %llu: %d bytes (fin=%d)\n",
+		Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC game: partial slot for stream %llu: %d bytes (fin=%d)\n",
 			(unsigned long long)stream_id, partial->len, (int)fin );
 	}
 	if ( fin ) {
-		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "[WiredNet] QUIC game: partial slot for stream %llu: %d bytes COMPLETE (chan=%d)\n",
+		Com_Log( SEV_DEBUG, LOG_CH(ch_network_common), "QUIC game: partial slot for stream %llu: %d bytes COMPLETE (chan=%d)\n",
 			(unsigned long long)stream_id, partial->len, partial->channel );
 		if ( !wn_reliable_queue_push( gc->rel_queue, &gc->rel_head, &gc->rel_tail,
 			partial->channel, partial->data, partial->len ) ) {
@@ -315,7 +378,7 @@ static void wn_reliable_server_consume_stream( wn_game_conn_t *gc, uint64_t stre
 	}
 }
 
-#if !defined(DEDICATED)
+#if !defined(HEADLESS)
 static void wn_reliable_client_consume_stream( uint64_t stream_id, const byte *data,
 	int len, qboolean fin )
 {
@@ -325,15 +388,15 @@ static void wn_reliable_client_consume_stream( uint64_t stream_id, const byte *d
 
 	/* See wn_reliable_server_consume_stream for rationale: the 2-byte header
 	 * may arrive across multiple chunks. Stage header bytes, then append. */
-	partial = wn_reliable_find_partial( wtcl.rel_partials, stream_id );
+	partial = wn_reliable_find_partial( wtcl_array[0].rel_partials, stream_id );
 	if ( !partial ) {
-		partial = wn_reliable_alloc_partial( wtcl.rel_partials, stream_id );
+		partial = wn_reliable_alloc_partial( wtcl_array[0].rel_partials, stream_id );
 		if ( !partial ) {
 			Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC client: no partial slots for stream %llu\n",
 				(unsigned long long)stream_id );
 			return;
 		}
-		Com_Log( SEV_TRACE, LOG_CH(ch_network), "[WiredNet] QUIC client: partial slot alloc for stream %llu first_chunk=%d bytes\n",
+		Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC client: partial slot alloc for stream %llu first_chunk=%d bytes\n",
 			(unsigned long long)stream_id, len );
 	}
 	if ( !wn_reliable_stage_header( partial, &payload, &payload_len, stream_id, "client" ) ) {
@@ -348,35 +411,35 @@ static void wn_reliable_client_consume_stream( uint64_t stream_id, const byte *d
 				"(%d/2 bytes) — dropped\n",
 				(unsigned long long)stream_id, partial->header_bytes );
 			wn_reliable_free_partial( partial );
-			picoquic_reset_stream_ctx( wtcl.cnx, stream_id );
+			picoquic_reset_stream_ctx( wtcl_array[0].cnx, stream_id );
 		}
 		return;
 	}
 	/* CHAN_BOOTSTRAP exceeds MAX_MSGLEN — route to the dedicated large buffer. */
 	if ( partial->channel == CHAN_BOOTSTRAP ) {
-		if ( wtcl.bootstrap_recv_ready ) {
+		if ( wtcl_array[0].bootstrap_recv_ready ) {
 			Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC client: bootstrap already pending; stream %llu dropped\n",
 				(unsigned long long)stream_id );
 			wn_reliable_free_partial( partial );
-			picoquic_reset_stream_ctx( wtcl.cnx, stream_id );
+			picoquic_reset_stream_ctx( wtcl_array[0].cnx, stream_id );
 			return;
 		}
-		if ( wtcl.bootstrap_recv_len + payload_len > WN_BOOTSTRAP_MAX ) {
+		if ( wtcl_array[0].bootstrap_recv_len + payload_len > WN_BOOTSTRAP_MAX ) {
 			Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC client: bootstrap stream %llu overflow — dropped\n",
 				(unsigned long long)stream_id );
 			wn_reliable_free_partial( partial );
-			picoquic_reset_stream_ctx( wtcl.cnx, stream_id );
+			picoquic_reset_stream_ctx( wtcl_array[0].cnx, stream_id );
 			return;
 		}
 		if ( payload_len > 0 ) {
-			memcpy( wtcl.bootstrap_recv_data + wtcl.bootstrap_recv_len,
+			memcpy( wtcl_array[0].bootstrap_recv_data + wtcl_array[0].bootstrap_recv_len,
 				payload, (size_t)payload_len );
-			wtcl.bootstrap_recv_len += payload_len;
+			wtcl_array[0].bootstrap_recv_len += payload_len;
 		}
 		if ( fin ) {
-			wtcl.bootstrap_recv_ready = qtrue;
+			wtcl_array[0].bootstrap_recv_ready = qtrue;
 			wn_reliable_free_partial( partial );
-			picoquic_reset_stream_ctx( wtcl.cnx, stream_id );
+			picoquic_reset_stream_ctx( wtcl_array[0].cnx, stream_id );
 		}
 		return;
 	}
@@ -389,19 +452,19 @@ static void wn_reliable_client_consume_stream( uint64_t stream_id, const byte *d
 	if ( payload_len > 0 ) {
 		memcpy( partial->data + partial->len, payload, (size_t)payload_len );
 		partial->len += payload_len;
-		Com_Log( SEV_TRACE, LOG_CH(ch_network), "[WiredNet] QUIC client: partial slot for stream %llu: %d bytes (fin=%d)\n",
+		Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC client: partial slot for stream %llu: %d bytes (fin=%d)\n",
 			(unsigned long long)stream_id, partial->len, (int)fin );
 	}
 	if ( fin ) {
-		Com_Log( SEV_TRACE, LOG_CH(ch_network), "[WiredNet] QUIC client: partial slot for stream %llu: %d bytes COMPLETE (chan=%d)\n",
+		Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC client: partial slot for stream %llu: %d bytes COMPLETE (chan=%d)\n",
 			(unsigned long long)stream_id, partial->len, partial->channel );
-		if ( !wn_reliable_queue_push( wtcl.rel_queue, &wtcl.rel_head, &wtcl.rel_tail,
+		if ( !wn_reliable_queue_push( wtcl_array[0].rel_queue, &wtcl_array[0].rel_head, &wtcl_array[0].rel_tail,
 			partial->channel, partial->data, partial->len ) ) {
 			Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC client: reliable recv queue full for stream %llu\n",
 				(unsigned long long)stream_id );
 		}
 		wn_reliable_free_partial( partial );
-		picoquic_reset_stream_ctx( wtcl.cnx, stream_id );
+		picoquic_reset_stream_ctx( wtcl_array[0].cnx, stream_id );
 	}
 }
 #endif
@@ -497,6 +560,12 @@ wn_game_conn_t *WN_GameAllocConn( wn_connection_t *conn )
 			gc->active   = qtrue;
 			gc->conn     = conn;
 			gc->hs_state = WN_GAME_HS_NONE;
+			/* QUIC publishes slot+1 (1..WN_MAX_CLIENTS) — byte-identical to the
+			 * legacy i+1 the usercmd drain used to synthesize. An in-process app
+			 * conn (WN_GameAllocConnApp) overrides pub_handle to the server end
+			 * WN_APP_SVCONN_BASE+slot (110+). */
+			// NOLINTNEXTLINE(bugprone-misplaced-widening-cast) — small slot index widened to conn_handle_t; no precision loss
+			gc->pub_handle = (conn_handle_t)( i + 1 );
 			wn.num_game_conns++;
 			conn->game_conn = gc;
 			Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC game: allocated conn slot %d for %s\n",
@@ -518,6 +587,153 @@ void WN_GameFreeConn( wn_game_conn_t *gc )
 	memset( gc, 0, sizeof( wn_game_conn_t ) );
 	if ( wn.num_game_conns > 0 )
 		wn.num_game_conns--;
+}
+
+/*
+==================
+WN_GameAllocConnApp — server-side game_conn for an in-process app (no QUIC).
+
+Mirror of WN_GameAllocConn for the in-memory transport: allocates a
+wn.game_conns[] slot with conn=NULL (no owning picoquic connection) and stamps
+pub_handle = WN_APP_CONN_BASE+app_slot so the server's svs.clients[].quic_conn
+match and the outbound transport_for_handle() routing both resolve to the
+in-memory backend for this conn. The recv_queue/rel_queue rings are otherwise
+identical to a QUIC game_conn — WN_ServerRecvUsercmd drains them unchanged.
+==================
+*/
+wn_game_conn_t *WN_GameAllocConnApp( int app_slot )
+{
+	int i;
+	int max_clients = wn.sv_wirednetMaxClients ? wn.sv_wirednetMaxClients->integer : WN_MAX_CLIENTS;
+	if ( max_clients > WN_MAX_CLIENTS ) max_clients = WN_MAX_CLIENTS;
+
+	if ( wn.num_game_conns >= max_clients ) {
+		COM_WARN( LOG_CH(ch_network), "in-mem game: connection limit (%d) reached, refusing\n", max_clients );
+		return NULL;
+	}
+	for ( i = 0; i < max_clients; i++ ) {
+		wn_game_conn_t *gc = &wn.game_conns[i];
+		if ( !gc->active ) {
+			memset( gc, 0, sizeof( wn_game_conn_t ) );
+			gc->active     = qtrue;
+			gc->conn       = NULL;   /* in-process: no owning picoquic connection */
+			gc->hs_state   = WN_GAME_HS_PENDING;
+			gc->pub_handle = (conn_handle_t)( WN_APP_SVCONN_BASE + app_slot );
+			wn.num_game_conns++;
+			Com_Log( SEV_DEBUG, LOG_CH(ch_network), "in-mem game: allocated conn slot %d (handle %llu) for app %d\n",
+				i, (unsigned long long)gc->pub_handle, app_slot );
+			return gc;
+		}
+	}
+	COM_WARN( LOG_CH(ch_network), "in-mem game: no free game_conn slots\n" );
+	return NULL;
+}
+
+/*
+==================
+WN_GameConnByAppHandle — find the server-side game_conn for a 100+ app handle.
+
+The in-memory send path (client→server usercmds) and drop path need to locate
+the game_conn whose pub_handle matches the app handle. Linear scan of
+wn.game_conns[]; returns NULL if no active match.
+==================
+*/
+wn_game_conn_t *WN_GameConnByAppHandle( conn_handle_t conn )
+{
+	int i;
+	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
+		if ( wn.game_conns[i].active && wn.game_conns[i].pub_handle == conn )
+			return &wn.game_conns[i];
+	}
+	return NULL;
+}
+
+/*
+==================
+WN_ConnectApp — in-process app connect producer (in-memory transport).
+
+The first emitter of a WN_APP_CONN_BASE+slot handle. Same-process, so it wires
+BOTH ends synchronously:
+  (client) initialize wtcl_array[app_slot] as a connected client end — no
+           picoquic, synthetic NA_LOOPBACK server_addr. Its recv_queue/rel_queue
+           are fed by the server's in-mem send path; drained by the existing
+           client recv vtable (which shares wtcl_array[app_slot]).
+  (server) allocate a game_conns[] slot (WN_GameAllocConnApp) and enqueue a
+           pending connect so WN_DrainPendingConnects → SV_OnPlayerConnect admits
+           the app exactly like a QUIC client.
+Returns the public handle (WN_APP_CONN_BASE+app_slot), or CONN_INVALID on failure.
+==================
+*/
+conn_handle_t WN_ConnectApp( int app_slot, const char *userinfo )
+{
+	wn_game_conn_t *gc;
+	conn_handle_t   handle;
+	int             i;
+
+	if ( app_slot < 0 || app_slot >= WN_MAX_LOCAL_CLIENTS ) {
+		COM_WARN( LOG_CH(ch_network), "WN_ConnectApp: app_slot %d out of range\n", app_slot );
+		return CONN_INVALID;
+	}
+
+#if !defined(HEADLESS)
+	/* Client end — mirror the wtcl_array init WN_ClientConnect does, minus
+	 * picoquic. Synthetic NA_LOOPBACK server_addr so the integrated host reads
+	 * as a same-process loopback peer on the server side (SV_IsHostClient). */
+	if ( wtcl_array[app_slot].initialized ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "WN_ConnectApp: app %d already connected\n", app_slot );
+		return (conn_handle_t)( WN_APP_CONN_BASE + app_slot );
+	}
+	memset( &wtcl_array[app_slot], 0, sizeof( wtcl_array[app_slot] ) );
+	wtcl_array[app_slot].connect_failed  = qfalse;
+	wtcl_array[app_slot].connect_error[0] = '\0';
+	Q_strncpyz( wtcl_array[app_slot].userinfo, userinfo ? userinfo : "", sizeof( wtcl_array[app_slot].userinfo ) );
+	wtcl_array[app_slot].quic              = NULL;   /* in-process: no picoquic */
+	wtcl_array[app_slot].cnx               = NULL;
+	wtcl_array[app_slot].server_addr.type  = NA_LOOPBACK;
+	wtcl_array[app_slot].initialized       = qtrue;
+#endif
+
+	/* Server end — allocate a game_conn slot (pub_handle = server-end 110+slot)
+	 * and enqueue admission. SV_OnPlayerConnect stores that handle in
+	 * svs.clients[].quic_conn, so the server's outbound transport_for_handle()
+	 * routes back through inmem_transport. */
+	gc = WN_GameAllocConnApp( app_slot );
+	if ( !gc ) {
+#if !defined(HEADLESS)
+		memset( &wtcl_array[app_slot], 0, sizeof( wtcl_array[app_slot] ) );
+#endif
+		return CONN_INVALID;
+	}
+	handle = gc->pub_handle;        /* server end (110+slot) — for admission */
+	gc->handshake_stream_id = 0;    /* unused for in-process */
+
+	/* Enqueue pending connect for main-thread consumption (same queue + drain
+	 * as QUIC; SV_OnPlayerConnect is transport-agnostic). The server-end handle
+	 * is what the server admits + stores. */
+	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
+		if ( !wn.pending_connects[i].pending ) {
+			wn.pending_connects[i].conn = handle;
+			Q_strncpyz( wn.pending_connects[i].userinfo, userinfo ? userinfo : "",
+				sizeof( wn.pending_connects[i].userinfo ) );
+			wn.pending_connects[i].pending = qtrue;
+			break;
+		}
+	}
+	if ( i == WN_MAX_CLIENTS ) {
+		COM_WARN( LOG_CH(ch_network), "WN_ConnectApp: pending_connects overflow — app %d dropped\n", app_slot );
+		WN_GameFreeConn( gc );
+#if !defined(HEADLESS)
+		memset( &wtcl_array[app_slot], 0, sizeof( wtcl_array[app_slot] ) );
+#endif
+		return CONN_INVALID;
+	}
+
+	Com_Log( SEV_INFO, LOG_CH(ch_network), "in-mem: app %d connected (client handle %llu, server handle %llu)\n",
+		app_slot, (unsigned long long)( WN_APP_CONN_BASE + app_slot ), (unsigned long long)handle );
+
+	/* Return the CLIENT-end handle (100+slot) — what the client stores in
+	 * clc.quic_conn and what WN_AppSlotForConn decodes back to this app. */
+	return (conn_handle_t)( WN_APP_CONN_BASE + app_slot );
 }
 
 
@@ -611,7 +827,7 @@ void WN_GameHandleHandshake( wn_connection_t *conn, uint64_t stream_id,
 		int      slot;
 		conn_handle_t conn_handle;
 
-		/* version = payload[0..1] (currently ignored — Phase D validates) */
+		/* version = payload[0..1] (currently ignored — validated later) */
 		userinfo_len = (uint16_t)( payload[2] | ( (uint16_t)payload[3] << 8 ) );
 		if ( userinfo_len > plen - 4 )
 			userinfo_len = (uint16_t)( plen - 4 );
@@ -704,7 +920,7 @@ void WN_SendGamePacketToAddr( const netadr_t *to, const void *data, int length )
 	wn_game_conn_t *gc;
 
 	if ( !wn.initialized || !wn.quic ) {
-#if !defined(DEDICATED)
+#if !defined(HEADLESS)
 		goto try_client;
 #else
 		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "WN_SendGamePacketToAddr: QUIC not initialized\n" );
@@ -719,37 +935,13 @@ void WN_SendGamePacketToAddr( const netadr_t *to, const void *data, int length )
 		return;
 	}
 
-#if !defined(DEDICATED)
+#if !defined(HEADLESS)
 try_client:
 	WN_ClientSendPacket( to, data, length );
 #else
 	Com_Log( SEV_DEBUG, LOG_CH(ch_network), "WN_SendGamePacketToAddr: no game conn for %s\n",
 		NET_AdrToStringwPort( to ) );
 #endif
-}
-
-qboolean WN_GetGamePacket( netadr_t *from, msg_t *message )
-{
-	/* Server usercmd datagrams (gc->recv_queue) must NOT be drained here.
-	 * Doing so would starve SV_DrainQUICUsercmds / WN_ServerRecvUsercmd,
-	 * which is the only path that sets cl->deltaMessage = snapshotAck.
-	 * Without that update wn_outgoing_sequence outpaces deltaMessage by
-	 * PACKET_BACKUP-3 and the server prints "Delta request from out of date
-	 * packet" on every snapshot, locking the player in place.
-	 *
-	 * Client snapshot datagrams (wtcl.recv_queue) are equally off-limits:
-	 * WN_ClientGetPacket already returns qfalse for the same reason
-	 * (see its comment — "Letting NET_GetPacket drain this queue misroutes
-	 * the raw bytes and starves the real consumer").
-	 *
-	 * This function now always returns qfalse.  The NET_Event while-loop
-	 * that calls it is retained for compatibility but is a no-op. */
-#if !defined(DEDICATED)
-	if ( WN_ClientGetPacket( from, message ) )
-		return qtrue;
-#endif
-	(void)from; (void)message;
-	return qfalse;
 }
 
 /*
@@ -796,10 +988,10 @@ Returns qtrue on success, qfalse when the handle is invalid.
 */
 qboolean WN_GetAddrByConnHandle( conn_handle_t conn, netadr_t *out )
 {
-#if !defined(DEDICATED)
+#if !defined(HEADLESS)
 	if ( conn == CONN_CLIENT_HANDLE ) {
-		if ( wtcl.initialized ) {
-			*out = wtcl.server_addr;
+		if ( wtcl_array[0].initialized ) {
+			*out = wtcl_array[0].server_addr;
 			return qtrue;
 		}
 		return qfalse;
@@ -811,6 +1003,18 @@ qboolean WN_GetAddrByConnHandle( conn_handle_t conn, netadr_t *out )
 			*out = gc->conn->addr;
 			return qtrue;
 		}
+	}
+	/* In-memory same-process app (in-process-queue L4): an in-process app handle
+	 * — either end — resolves to a synthetic NA_LOOPBACK address so
+	 * SV_OnPlayerConnect admits it as a local client (the server then keys
+	 * host-identity on slot, not type — see SV_IsHostClient). The server-end
+	 * handle (110+slot) is the one that reaches SV_OnPlayerConnect; the client
+	 * end (100+slot) is decoded too for symmetry / metrics callers. */
+	if ( ( conn >= WN_APP_CONN_BASE   && conn < WN_APP_CONN_BASE   + WN_APP_CONN_COUNT ) ||
+	     ( conn >= WN_APP_SVCONN_BASE  && conn < WN_APP_SVCONN_BASE + WN_APP_SVCONN_COUNT ) ) {
+		memset( out, 0, sizeof( *out ) );
+		out->type = NA_LOOPBACK;
+		return qtrue;
 	}
 	return qfalse;
 }
@@ -873,11 +1077,16 @@ void WN_RequeueConnect( conn_handle_t conn, const char *userinfo )
 			return;
 		}
 	}
-	/* All slots occupied — cannot hold the connection. */
+	/* All slots occupied — cannot hold the connection. Drop through the
+	 * per-handle backend (transport_for_handle), not the global `transport`
+	 * (QUIC) vtable: an in-process app conn (WN_APP_*_BASE range) belongs to
+	 * inmem_transport, and dropping it via the QUIC drop_client would target the
+	 * wrong backend. Mirrors the transport_for_handle(conn)->drop_client pattern
+	 * in sv_client.c. */
 	Com_Log( SEV_INFO, LOG_CH(ch_network), "*** WN_RequeueConnect: no free slot for conn %llu — dropping ***\n",
 		(unsigned long long)conn );
 	if ( transport )
-		transport->drop_client( conn, "Server starting up" );
+		transport_for_handle( conn )->drop_client( conn, "Server starting up" );
 }
 
 /*
@@ -895,15 +1104,91 @@ void WN_DrainPendingReady( void )
 		return;
 	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
 		if ( wn.pending_ready[i] ) {
-			// NOLINTNEXTLINE(bugprone-misplaced-widening-cast) — small client index widened to conn_handle_t; no precision loss
-			conn_handle_t conn = (conn_handle_t)( i + 1 );
+			/* Published handle (QUIC slot+1 byte-identical; in-mem server-end
+			 * 110+) so SV_OnPlayerReady's cl->quic_conn match resolves. */
+			conn_handle_t conn = wn.game_conns[i].active
+				? wn.game_conns[i].pub_handle
+				: (conn_handle_t)( i + 1 );
 			wn.pending_ready[i] = qfalse;
 			transport->ready_callback( conn );
 		}
 	}
 }
 
-#if !defined(DEDICATED)
+/*
+==================
+WN_DrainPendingFrees
+
+Free in-process game_conns marked for deferred teardown (in-process-queue B4).
+Called from sv_main.c AFTER SV_DrainQUICReliableCommands so a disconnecting
+in-mem host's in-band "disconnect" reliable command is processed (→ SV_DropClient
+→ CS_ZOMBIE) before its game_conn is released — the server sees the explicit
+disconnect instead of waiting for SV_CheckTimeouts to reap an orphan.
+
+Only in-mem conns ever set pending_free (wn_inmem_disconnect); a QUIC conn is
+torn down through the transport drop_client path, so this is a no-op (zero
+pending_free flags) for the QUIC server — byte-identical.
+==================
+*/
+void WN_DrainPendingFrees( void )
+{
+	int i;
+	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
+		wn_game_conn_t *gc = &wn.game_conns[i];
+		if ( gc->active && gc->pending_free )
+			WN_GameFreeConn( gc );   /* clears active + zeroes the slot */
+	}
+}
+
+#if !defined(HEADLESS)
+/*
+==================
+WN_ResetInmemClientRings
+
+Drain (queues only) the in-process app's client + server rings on a localReconnect
+map→map transition (in-process-queue B4). The host stays CA_CONNECTED across the
+transition (CL_MapLoading localReconnect branch — the conn is NOT torn down), so
+the rings carry stale snapshot/usercmd/reliable datagrams from the previous map.
+Reset the head/tail indices + the bootstrap-ready flag to discard those remnants
+deterministically (they were self-healing via serverId rejection + per-frame
+drain, but this makes the boundary explicit).
+
+Drains ONLY the queues — keeps initialized / server_addr / quic(==NULL) so the
+connection stays live. Both ends:
+  client end  — wtcl_array[slot].recv_queue + rel_queue + bootstrap_recv buffer
+  server end  — game_conns[slot's pub_handle].recv_queue + rel_queue
+so neither a stale srv→cli snapshot nor a stale cli→srv usercmd survives.
+
+Gated by the caller on WN_HasInmemClient(), so a QUIC host never calls this —
+byte-identical for QUIC.
+==================
+*/
+void WN_ResetInmemClientRings( int app_slot )
+{
+	wn_game_conn_t *gc;
+
+	if ( app_slot < 0 || app_slot >= WN_MAX_LOCAL_CLIENTS )
+		return;
+
+	/* Client end — wtcl_array[slot] queues + bootstrap, NOT the whole struct. */
+	{
+		wn_client_state_t *c = &wtcl_array[app_slot];
+		c->recv_head = c->recv_tail = 0;
+		c->rel_head  = c->rel_tail  = 0;
+		c->bootstrap_recv_ready = qfalse;
+		c->bootstrap_recv_len   = 0;
+	}
+
+	/* Server end — the game_conn for this app's server-end handle. */
+	gc = WN_GameConnByAppHandle( (conn_handle_t)( WN_APP_SVCONN_BASE + app_slot ) );
+	if ( gc && gc->active ) {
+		gc->recv_head = gc->recv_tail = 0;
+		gc->rel_head  = gc->rel_tail  = 0;
+	}
+}
+#endif
+
+#if !defined(HEADLESS)
 
 /*
 ==================
@@ -913,16 +1198,41 @@ Send TLV 0x05 READY on the session stream (CHAN_SESSION = stream 0) to inform
 the server that the client finished loading and is ready to enter the world.
 ==================
 */
-void WN_ClientSendReady( void )
+void WN_ClientSendReady( int app_slot )
 {
 	/* TLV: [type:u8=0x05][len_lo:u8=0x00][len_hi:u8=0x00] — no payload */
-	byte ready_tlv[3] = { 0x05, 0x00, 0x00 };
-	if ( transport )
-		transport->send_reliable( CONN_CLIENT_HANDLE, CHAN_SESSION,
-			ready_tlv, (int)sizeof( ready_tlv ) );
+	byte          ready_tlv[3] = { 0x05, 0x00, 0x00 };
+	conn_handle_t client_conn;
+
+	if ( app_slot < 0 || app_slot >= WN_MAX_LOCAL_CLIENTS )
+		return;
+
+	/* Route READY on this client's own handle. An in-process client (no picoquic)
+	 * uses its WN_APP_CONN_BASE+slot handle → inmem_transport; a QUIC client uses
+	 * CONN_CLIENT_HANDLE → the QUIC backend. The integrated host is the in-process
+	 * client at slot 0, so it sends on WN_APP_CONN_BASE+0 exactly as before. */
+	if ( wtcl_array[app_slot].initialized && wtcl_array[app_slot].quic == NULL )
+		client_conn = (conn_handle_t)( WN_APP_CONN_BASE + app_slot );
+	else
+		client_conn = (conn_handle_t)CONN_CLIENT_HANDLE;
+
+	transport_for_handle( client_conn )->send_reliable( client_conn, CHAN_SESSION,
+		ready_tlv, (int)sizeof( ready_tlv ) );
 }
 
-wn_client_state_t wtcl;
+wn_client_state_t wtcl_array[WN_MAX_LOCAL_CLIENTS];
+
+/* Recv-queue overflow counter (picoquic_callback_datagram drop site).
+ * Single-producer: incremented by the picoquic callback thread.
+ * Single-consumer for diagnostic readback: net_quic_status main thread via
+ * WN_GetRecvQueueFullDrops(). uint32_t reads/writes are atomic on the
+ * platforms we target — no fence required for surfacing a counter. */
+static volatile uint32_t wn_recv_queue_full_drops = 0;
+
+uint32_t WN_GetRecvQueueFullDrops( void )
+{
+	return wn_recv_queue_full_drops;
+}
 
 static int WN_ClientCallback(
 	picoquic_cnx_t            *cnx,
@@ -936,7 +1246,7 @@ static int WN_ClientCallback(
 	(void)callback_ctx;
 	(void)v_ctx;
 
-	Com_Log( SEV_TRACE, LOG_CH(ch_network), "[WiredNet] QUIC client CB: event=%d stream=%llu conn=%s len=%zu\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC client CB: event=%d stream=%llu conn=%s len=%zu\n",
 		(int)event, (unsigned long long)stream_id,
 		cnx ? "yes" : "no", length );
 
@@ -944,11 +1254,11 @@ static int WN_ClientCallback(
 
 	case picoquic_callback_ready:
 		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC client: connected to server %s\n",
-			NET_AdrToString( &wtcl.server_addr ) );
+			NET_AdrToString( &wtcl_array[0].server_addr ) );
 		{
 			/* Send TLV 0x01 CONNECT on session stream 0x00:
 			 * version:u16le=0x0100, userinfo_len:u16le, userinfo:bytes */
-			uint16_t ulen = (uint16_t)strlen( wtcl.userinfo );
+			uint16_t ulen = (uint16_t)strlen( wtcl_array[0].userinfo );
 			byte     connect_pl[MAX_INFO_STRING + 4];
 			byte     connect_tlv[MAX_INFO_STRING + 8];
 			int      tlv_len;
@@ -958,7 +1268,7 @@ static int WN_ClientCallback(
 			connect_pl[2] = (byte)( ulen & 0xFF );
 			connect_pl[3] = (byte)( (ulen >> 8) & 0xFF );
 			if ( ulen > 0 )
-				memcpy( connect_pl + 4, wtcl.userinfo, ulen );
+				memcpy( connect_pl + 4, wtcl_array[0].userinfo, ulen );
 			tlv_len = TLV_Write( connect_tlv, (int)sizeof(connect_tlv),
 				0x01, connect_pl, (uint16_t)( 4 + ulen ) );
 			if ( tlv_len > 0 ) {
@@ -986,7 +1296,7 @@ static int WN_ClientCallback(
 					break; /* incomplete; next callback will bring the rest */
 
 				if ( tlv_type == 0x02 ) { /* ACCEPT */
-					wtcl.accept_pending = qtrue;
+					wtcl_array[0].accept_pending = qtrue;
 					Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC client: TLV ACCEPT received\n" );
 				} else if ( tlv_type == 0x03 ) { /* REFUSE */
 					char reason[MAX_INFO_STRING] = "refused";
@@ -1021,18 +1331,43 @@ static int WN_ClientCallback(
 			break;
 		}
 		{
-			int            next_head = ( wtcl.recv_head + 1 ) % WN_GAME_QUEUE_SIZE;
+			int            next_head = ( wtcl_array[0].recv_head + 1 ) % WN_GAME_QUEUE_SIZE;
 			wn_snap_pkt_t *pkt;
-			if ( next_head == wtcl.recv_tail ) {
-				Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC client: recv queue full — datagram dropped\n" );
+			if ( next_head == wtcl_array[0].recv_tail ) {
+				/* Rate-limited surfacing of recv-queue overflow. First drop per
+				 * process emits a one-shot SEV_WARN; subsequent drops emit at
+				 * most once per 5 s, batched with an accumulated count. */
+				static unsigned int last_warn_ms     = 0;
+				static uint32_t     drops_since_warn = 0;
+				unsigned int        now_ms           = (unsigned int)Sys_Milliseconds();
+				uint32_t            total;
+
+				total = ++wn_recv_queue_full_drops;
+				drops_since_warn++;
+
+				if ( total == 1 ) {
+					Com_Log( SEV_WARN, LOG_CH(ch_network),
+						"QUIC client: recv queue full — first drop this session "
+						"(queue capacity=%d, datagram len=%zu)\n",
+						WN_GAME_QUEUE_SIZE, length );
+					last_warn_ms     = now_ms;
+					drops_since_warn = 0;
+				} else if ( now_ms - last_warn_ms >= 5000 ) {
+					Com_Log( SEV_WARN, LOG_CH(ch_network),
+						"QUIC client: recv queue full — %u dropped since last warning "
+						"(queue capacity=%d, total since start=%u)\n",
+						(unsigned)drops_since_warn, WN_GAME_QUEUE_SIZE, (unsigned)total );
+					last_warn_ms     = now_ms;
+					drops_since_warn = 0;
+				}
 				break;
 			}
-			pkt            = &wtcl.recv_queue[wtcl.recv_head];
-			pkt->from      = wtcl.server_addr;
-			pkt->from.type = ( wtcl.server_addr.type == NA_IP6 ) ? NA_QUIC6 : NA_QUIC;
+			pkt            = &wtcl_array[0].recv_queue[wtcl_array[0].recv_head];
+			pkt->from      = wtcl_array[0].server_addr;
+			pkt->from.type = ( wtcl_array[0].server_addr.type == NA_IP6 ) ? NA_QUIC6 : NA_QUIC;
 			pkt->len       = (int)length;
 			memcpy( pkt->data, bytes, length );
-			wtcl.recv_head = next_head;
+			wtcl_array[0].recv_head = next_head;
 		}
 		break;
 
@@ -1051,7 +1386,7 @@ static int WN_ClientCallback(
 		 * is still walking (use-after-free → SIGSEGV).
 		 * Set pending_disconnect; WN_ClientFlushOutbound checks the flag
 		 * after picoquic_prepare_next_packet_ex returns and does cleanup safely. */
-		wtcl.pending_disconnect = qtrue;
+		wtcl_array[0].pending_disconnect = qtrue;
 		break;
 
 	default:
@@ -1074,7 +1409,7 @@ static void WN_ClientFlushOutbound( void )
 	netadr_t                 to;
 	int                      ret;
 
-	if ( !wtcl.initialized || !wtcl.quic )
+	if ( !wtcl_array[0].initialized || !wtcl_array[0].quic )
 		return;
 
 	// Clear-before-send contract: anything in net_lastSendError after the
@@ -1086,7 +1421,7 @@ static void WN_ClientFlushOutbound( void )
 	while ( 1 ) {
 		send_len = 0;
 		ret = picoquic_prepare_next_packet_ex(
-			wtcl.quic, current_time,
+			wtcl_array[0].quic, current_time,
 			send_buf, sizeof(send_buf), &send_len,
 			&addr_to, &addr_from, &if_index,
 			&log_cid, &last_cnx, &send_msg_size );
@@ -1119,19 +1454,19 @@ static void WN_ClientFlushOutbound( void )
 	}
 
 	// Promote any sendto error from this frame to the connect-error slot.
-	if ( NET_HasLastSendError() && !wtcl.connect_failed ) {
+	if ( NET_HasLastSendError() && !wtcl_array[0].connect_failed ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_network), "*** WN_ClientFlushOutbound: send error → connect_failed: %s ***\n",
 			NET_LastSendError() );
-		Q_strncpyz( wtcl.connect_error, NET_LastSendError(),
-		            sizeof( wtcl.connect_error ) );
-		wtcl.connect_failed = qtrue;
+		Q_strncpyz( wtcl_array[0].connect_error, NET_LastSendError(),
+		            sizeof( wtcl_array[0].connect_error ) );
+		wtcl_array[0].connect_failed = qtrue;
 	}
 
 	// Deferred disconnect: if the close callback fired during the loop above,
 	// now that we are outside picoquic it is safe to call picoquic_free.
-	if ( wtcl.pending_disconnect ) {
+	if ( wtcl_array[0].pending_disconnect ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_network), "*** WN_ClientFlushOutbound: pending_disconnect → WN_ClientDisconnect ***\n" );
-		wtcl.pending_disconnect = qfalse;
+		wtcl_array[0].pending_disconnect = qfalse;
 		WN_ClientDisconnect();
 	}
 }
@@ -1264,7 +1599,7 @@ static int tofu_override_cb(
 	chk = wn_tofu_check( ctx->addr, fp );
 
 	if ( chk == 1 ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_network), "^5QUIC TOFU: new server %s — trusting (SPKI SHA256: %.16s...)\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_network), "QUIC TOFU: new server %s — trusting (SPKI SHA256: %.16s...)\n",
 			ctx->addr, fp );
 		wn_tofu_save( ctx->addr, fp );
 		return 0;
@@ -1293,31 +1628,31 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 	struct sockaddr_storage ss;
 	int                   ss_len = 0;
 
-	if ( wtcl.initialized ) {
+	if ( wtcl_array[0].initialized ) {
 		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "WN_ClientConnect: already connected\n" );
 		return;
 	}
 
-	memset( &wtcl, 0, sizeof(wtcl) );
+	memset( &wtcl_array[0], 0, sizeof(wtcl_array[0]) );
 	// Reset connect-error state so a retry starts clean (ED1 fix).
-	wtcl.connect_failed  = qfalse;
-	wtcl.connect_error[0] = '\0';
-	Q_strncpyz( wtcl.userinfo, userinfo, sizeof(wtcl.userinfo) );
-	wtcl.qport       = qport;
-	wtcl.server_addr = *serverAddr;
+	wtcl_array[0].connect_failed  = qfalse;
+	wtcl_array[0].connect_error[0] = '\0';
+	Q_strncpyz( wtcl_array[0].userinfo, userinfo, sizeof(wtcl_array[0].userinfo) );
+	wtcl_array[0].qport       = qport;
+	wtcl_array[0].server_addr = *serverAddr;
 
 	current_time = picoquic_current_time();
 
-	wtcl.quic = picoquic_create(
+	wtcl_array[0].quic = picoquic_create(
 		1, NULL, NULL, NULL,
 		WN_ALPN, NULL, NULL, NULL, NULL, NULL,
 		current_time, NULL, NULL, NULL, 0 );
 
-	if ( !wtcl.quic ) {
+	if ( !wtcl_array[0].quic ) {
 		COM_ERROR( LOG_CH(ch_network), "WN_ClientConnect: picoquic_create failed\n" );
-		wtcl.connect_failed = qtrue;
-		Q_strncpyz( wtcl.connect_error, "picoquic_create failed",
-		            sizeof( wtcl.connect_error ) );
+		wtcl_array[0].connect_failed = qtrue;
+		Q_strncpyz( wtcl_array[0].connect_error, "picoquic_create failed",
+		            sizeof( wtcl_array[0].connect_error ) );
 		return;
 	}
 
@@ -1328,7 +1663,7 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 		Cvar_Register( &d );
 	}
 	if ( Cvar_VariableIntegerValue( "wn_cert_verify" ) == 0 ) {
-		picoquic_set_null_verifier( wtcl.quic );
+		picoquic_set_null_verifier( wtcl_array[0].quic );
 	} else {
 		/* Build addr string for known_servers.txt lookup.
 		 * Handle loopback before the NA_LOOPBACK→127.0.0.1 fixup below. */
@@ -1346,14 +1681,14 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 		s_tofu_ctx.base.cb = tofu_override_cb;
 		ptls_openssl_init_verify_certificate( &s_tofu_verif, NULL );
 		s_tofu_verif.override_callback = &s_tofu_ctx.base;
-		picoquic_set_verify_certificate_callback( wtcl.quic,
+		picoquic_set_verify_certificate_callback( wtcl_array[0].quic,
 			&s_tofu_verif.super, tofu_free_fn );
 	}
-	picoquic_set_default_datagram_priority( wtcl.quic, 1 );
+	picoquic_set_default_datagram_priority( wtcl_array[0].quic, 1 );
 	/* Advertise datagram support.  Without this the local_parameters.max_datagram_frame_size
 	 * defaults to 0, and any received datagram triggers FRAME_FORMAT_ERROR (error 7) even
 	 * though picoquic_queue_datagram_frame only guards large datagrams on the send side. */
-	picoquic_set_default_tp_value( wtcl.quic, picoquic_tp_max_datagram_frame_size,
+	picoquic_set_default_tp_value( wtcl_array[0].quic, picoquic_tp_max_datagram_frame_size,
 	                               WN_SNAP_DGRAM_MAX );
 	/* Loopback (integrated server): client and server are the same process.
 	 * An idle timeout would fire during long map loads (WAMR init, bot AI,
@@ -1363,9 +1698,9 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 	 * large value.  Remote servers keep the 30-second timeout so dead
 	 * connections are detected promptly. */
 	if ( serverAddr->type == NA_LOOPBACK ) {
-		picoquic_set_default_idle_timeout( wtcl.quic, 3600000 );   /* 1 hour */
+		picoquic_set_default_idle_timeout( wtcl_array[0].quic, 3600000 );   /* 1 hour */
 	} else {
-		picoquic_set_default_idle_timeout( wtcl.quic, 30000 );
+		picoquic_set_default_idle_timeout( wtcl_array[0].quic, 30000 );
 	}
 
 	memset( &ss, 0, sizeof(ss) );
@@ -1384,12 +1719,12 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 		v4->sin_port        = serverAddr->port;
 		ss_len = sizeof(struct sockaddr_in);
 		/* update stored addr so WN_ClientCallback route-checks pass */
-		wtcl.server_addr.type        = NA_IP;
-		wtcl.server_addr.ipv._4[0]   = 127;
-		wtcl.server_addr.ipv._4[1]   = 0;
-		wtcl.server_addr.ipv._4[2]   = 0;
-		wtcl.server_addr.ipv._4[3]   = 1;
-		wtcl.server_addr.port        = serverAddr->port;
+		wtcl_array[0].server_addr.type        = NA_IP;
+		wtcl_array[0].server_addr.ipv._4[0]   = 127;
+		wtcl_array[0].server_addr.ipv._4[1]   = 0;
+		wtcl_array[0].server_addr.ipv._4[2]   = 0;
+		wtcl_array[0].server_addr.ipv._4[3]   = 1;
+		wtcl_array[0].server_addr.port        = serverAddr->port;
 	}
 #if FEAT_IPV6
 	else if ( serverAddr->type == NA_IP6 ) {
@@ -1404,56 +1739,56 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 	else {
 		COM_ERROR( LOG_CH(ch_network), "WN_ClientConnect: unsupported address type %d\n",
 			serverAddr->type );
-		picoquic_free( wtcl.quic );
-		wtcl.quic = NULL;
-		wtcl.connect_failed = qtrue;
-		Q_strncpyz( wtcl.connect_error,
+		picoquic_free( wtcl_array[0].quic );
+		wtcl_array[0].quic = NULL;
+		wtcl_array[0].connect_failed = qtrue;
+		Q_strncpyz( wtcl_array[0].connect_error,
 		            va( "unsupported address type %d", serverAddr->type ),
-		            sizeof( wtcl.connect_error ) );
+		            sizeof( wtcl_array[0].connect_error ) );
 		return;
 	}
 	(void)ss_len;
 
-	wtcl.cnx = picoquic_create_client_cnx(
-		wtcl.quic, (struct sockaddr *)&ss,
+	wtcl_array[0].cnx = picoquic_create_client_cnx(
+		wtcl_array[0].quic, (struct sockaddr *)&ss,
 		current_time, 0, NULL,
 		WN_ALPN, WN_ClientCallback, NULL );
 
-	if ( !wtcl.cnx ) {
+	if ( !wtcl_array[0].cnx ) {
 		/* picoquic_create_client_cnx already calls picoquic_start_client_cnx internally.
 		 * NULL here means TLS init failed (ALPN missing, crypto error, etc.). */
 		COM_ERROR( LOG_CH(ch_network), "WN_ClientConnect: picoquic_create_client_cnx failed\n" );
-		picoquic_free( wtcl.quic );
-		wtcl.quic = NULL;
-		wtcl.connect_failed = qtrue;
-		Q_strncpyz( wtcl.connect_error, "picoquic_create_client_cnx failed (TLS/crypto error)",
-		            sizeof( wtcl.connect_error ) );
+		picoquic_free( wtcl_array[0].quic );
+		wtcl_array[0].quic = NULL;
+		wtcl_array[0].connect_failed = qtrue;
+		Q_strncpyz( wtcl_array[0].connect_error, "picoquic_create_client_cnx failed (TLS/crypto error)",
+		            sizeof( wtcl_array[0].connect_error ) );
 		return;
 	}
 
-	wtcl.initialized = qtrue;
+	wtcl_array[0].initialized = qtrue;
 	Com_Log( SEV_INFO, LOG_CH(ch_network), "QUIC client: connecting to %s...\n",
 		NET_AdrToStringwPort( serverAddr ) );
 }
 
 qboolean WN_ClientHasError( char *out, int outSize )
 {
-	if ( !wtcl.connect_failed )
+	if ( !wtcl_array[0].connect_failed )
 		return qfalse;
 	if ( out && outSize > 0 )
-		Q_strncpyz( out, wtcl.connect_error, outSize );
+		Q_strncpyz( out, wtcl_array[0].connect_error, outSize );
 	return qtrue;
 }
 
 void WN_ClientClearError( void )
 {
-	wtcl.connect_failed   = qfalse;
-	wtcl.connect_error[0] = '\0';
+	wtcl_array[0].connect_failed   = qfalse;
+	wtcl_array[0].connect_error[0] = '\0';
 }
 
 void WN_ClientFrame( void )
 {
-	if ( !wtcl.initialized || !wtcl.quic )
+	if ( !wtcl_array[0].initialized || !wtcl_array[0].quic )
 		return;
 	WN_ClientFlushOutbound();
 }
@@ -1463,7 +1798,7 @@ void WN_ClientDisconnect( void )
 	picoquic_cnx_t  *cnx;
 	picoquic_quic_t *quic;
 
-	if ( !wtcl.initialized )
+	if ( !wtcl_array[0].initialized )
 		return;
 
 	Com_Log( SEV_INFO, LOG_CH(ch_network), "*** WN_ClientDisconnect: called while initialized ***\n" );
@@ -1471,10 +1806,10 @@ void WN_ClientDisconnect( void )
 	/* Zero state BEFORE calling into picoquic. picoquic_free triggers
 	 * picoquic_delete_cnx → picoquic_connection_disconnect → callback_close
 	 * → re-enters WN_ClientDisconnect. Without this guard the re-entrant
-	 * call sees wtcl.quic != NULL and calls picoquic_free a second time. */
-	cnx  = wtcl.cnx;
-	quic = wtcl.quic;
-	memset( &wtcl, 0, sizeof(wtcl) );   /* clears initialized, cnx, quic */
+	 * call sees wtcl_array[0].quic != NULL and calls picoquic_free a second time. */
+	cnx  = wtcl_array[0].cnx;
+	quic = wtcl_array[0].quic;
+	memset( &wtcl_array[0], 0, sizeof(wtcl_array[0]) );   /* clears initialized, cnx, quic */
 
 	if ( cnx )
 		picoquic_close( cnx, 0 );
@@ -1484,7 +1819,7 @@ void WN_ClientDisconnect( void )
 
 qboolean WN_ClientIsConnecting( void )
 {
-	return wtcl.initialized && wtcl.quic != NULL;
+	return wtcl_array[0].initialized && wtcl_array[0].quic != NULL;
 }
 
 qboolean WN_ClientCheckPacket( const netadr_t *from, byte *buf, int len )
@@ -1493,7 +1828,7 @@ qboolean WN_ClientCheckPacket( const netadr_t *from, byte *buf, int len )
 	struct sockaddr_storage ss_from;
 	struct sockaddr_in      ss_to;
 
-	if ( !wtcl.initialized || !wtcl.quic )
+	if ( !wtcl_array[0].initialized || !wtcl_array[0].quic )
 		return qfalse;
 	if ( len <= 0 || len > WN_PACKET_BUF_SIZE )
 		return qfalse;
@@ -1524,10 +1859,10 @@ qboolean WN_ClientCheckPacket( const netadr_t *from, byte *buf, int len )
 	ss_to.sin_port        = from->port;
 
 	current_time = picoquic_current_time();
-	memcpy( wtcl.recv_buf, buf, len );
+	memcpy( wtcl_array[0].recv_buf, buf, len );
 
 	picoquic_incoming_packet(
-		wtcl.quic, wtcl.recv_buf, (size_t)len,
+		wtcl_array[0].quic, wtcl_array[0].recv_buf, (size_t)len,
 		(struct sockaddr *)&ss_from,
 		(struct sockaddr *)&ss_to,
 		0, 0, current_time );
@@ -1536,25 +1871,15 @@ qboolean WN_ClientCheckPacket( const netadr_t *from, byte *buf, int len )
 	return qtrue;
 }
 
-qboolean WN_ClientGetPacket( netadr_t *from, msg_t *message )
-{
-	(void)from; (void)message;
-	/* recv_queue exclusively owned by wn_recv_unreliable / CL_CheckSnapshotDatagrams.
-	 * That path knows to strip the 8-byte tick header prepended by sv_snapshot.c.
-	 * Letting NET_GetPacket drain this queue misroutes the raw bytes (tick header
-	 * read as svc_ command → garbage → discard) and starves the real consumer. */
-	return qfalse;
-}
-
 void WN_ClientSendPacket( const netadr_t *to, const void *data, int length )
 {
-	if ( !wtcl.initialized || !wtcl.cnx ) {
+	if ( !wtcl_array[0].initialized || !wtcl_array[0].cnx ) {
 		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "WN_ClientSendPacket: no client connection\n" );
 		return;
 	}
 	{
 		/* Verify destination matches our server (type-agnostic IP compare) */
-		const netadr_t *a     = &wtcl.server_addr;
+		const netadr_t *a     = &wtcl_array[0].server_addr;
 		qboolean        match = qfalse;
 		if ( NET_IS_IPV6( a->type ) && NET_IS_IPV6( to->type ) )
 			match = ( memcmp( a->ipv._6, to->ipv._6, 16 ) == 0 );
@@ -1565,26 +1890,68 @@ void WN_ClientSendPacket( const netadr_t *to, const void *data, int length )
 			return;
 		}
 	}
-	picoquic_queue_datagram_frame( wtcl.cnx, (size_t)length, (const uint8_t *)data );
+	picoquic_queue_datagram_frame( wtcl_array[0].cnx, (size_t)length, (const uint8_t *)data );
 }
 
-#endif /* !DEDICATED */
+#endif /* !HEADLESS */
 
 
 // ═══════════════════════════════════════════════════════════════════
 // Transport vtable implementation
 // ═══════════════════════════════════════════════════════════════════
 
-static void wn_init( void )       { /* WN_Init() called directly; sets transport */ }
 static void wn_shutdown( void )   { /* WN_Shutdown() called directly */              }
+
+/*
+ * wn_frame — transport->frame vtable target.
+ *
+ * Phase ordering (transport-internal invariant, do not reorder):
+ *   1. WN_ProcessTimers      — picoquic retransmit / idle / keepalive timers
+ *   2. WN_FlushOutbound      — pull packets from picoquic → NET_SendPacket
+ *   3. WN_SendDatagrams      — observer state datagrams (FEAT_WIREDNET_OBSERVER)
+ *   4. WN_PushEvents         — observer event stream pushes
+ *   5. WN_TcpFrame           — HTTP observer accept/handle
+ *   6. WN_ProcessCommandQueue — MCP command queue drain (FEAT_WIREDNET_CONTROL)
+ *
+ * Called from sv_main.c POST-GAME-FRAME phase (after VM_Call GAME_RUN_FRAME +
+ * SV_SendClientMessages). Replaces the previous direct WN_* call sequence at
+ * sv_main.c:1296-1304.
+ *
+ * NOT included here (intentional):
+ *  - WN_ClientFrame()         — pumps from net_ip.c NET_Event every poll
+ *                                (independent scheduling). Including here would
+ *                                cause double-pump in listen-server mode.
+ *  - WN_DrainPendingConnects/Ready — admission machinery; must fire AFTER
+ *                                spawn-guard and BEFORE game frame so newly-
+ *                                connected clients are present in the snapshot.
+ *                                transport->frame fires after game frame, so
+ *                                drains stay direct in sv_main.c:1159+1162.
+ *  - WN_FlushOutbound (pre-spawn) — separate transport->flush_outbound() field
+ *                                covers the spawn-safe ACK-keepalive flush at
+ *                                sv_main.c:1148.
+ *
+ * Reference: GAME_TRANSPORT.md "Layers" + sv_main.c:1145-1156 spawn-safety
+ * inline doc.
+ */
 static void wn_frame( int msec )
 {
 	(void)msec;
 	WN_ProcessTimers();
 	WN_FlushOutbound();
-#if !defined(DEDICATED)
-	WN_ClientFrame();
+#if FEAT_WIREDNET_OBSERVER
+	WN_SendDatagrams();
+	WN_PushEvents();
+	WN_TcpFrame();
 #endif
+#if FEAT_WIREDNET_CONTROL
+	WN_ProcessCommandQueue();
+#endif
+}
+
+/* flush_outbound vtable target — pre-spawn-guard ACK keepalive flush. */
+static void wn_flush_outbound( void )
+{
+	WN_FlushOutbound();
 }
 
 static void wn_listen( int port ) { (void)port; /* QUIC already bound in WN_Init */ }
@@ -1600,7 +1967,7 @@ static void wn_drop_client( conn_handle_t conn, const char *reason )
 
 static conn_handle_t wn_connect( const char *address, int port, const char *userinfo )
 {
-#if !defined(DEDICATED)
+#if !defined(HEADLESS)
 	netadr_t adr;
 	/* "loopback" is returned by NET_AdrToString for NA_LOOPBACK addresses.
 	 * Pass it through as-is so WN_ClientConnect handles the 127.0.0.1 mapping. */
@@ -1621,7 +1988,7 @@ static conn_handle_t wn_connect( const char *address, int port, const char *user
 
 static void wn_disconnect( conn_handle_t conn, const char *reason )
 {
-#if !defined(DEDICATED)
+#if !defined(HEADLESS)
 	if ( conn == CONN_CLIENT_HANDLE ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_network), "*** wn_disconnect: CONN_CLIENT_HANDLE reason=%s ***\n",
 			reason ? reason : "NULL" );
@@ -1630,6 +1997,30 @@ static void wn_disconnect( conn_handle_t conn, const char *reason )
 	}
 #endif
 	wn_drop_client( conn, reason );
+}
+
+/* Client-side state-query vtable targets — Batch 3 rewire. */
+#if !defined(HEADLESS)
+static qboolean wn_is_connecting( void )
+{
+	return WN_ClientIsConnecting();
+}
+
+static qboolean wn_get_error( char *out, int outSize )
+{
+	return WN_ClientHasError( out, outSize );
+}
+
+static void wn_clear_error( void )
+{
+	WN_ClientClearError();
+}
+#endif
+
+/* lookup_by_addr vtable target — addr → conn_handle reverse lookup. */
+static conn_handle_t wn_lookup_by_addr( const netadr_t *addr )
+{
+	return WN_GetConnHandleByAddr( addr );
 }
 
 static void wn_send_unreliable( conn_handle_t conn, const byte *data, int len )
@@ -1667,8 +2058,11 @@ qboolean WN_ServerRecvUsercmd( conn_handle_t *conn_out, byte *buf, int *len_out 
 			continue;
 		}
 
-		// NOLINTNEXTLINE(bugprone-misplaced-widening-cast) — small slot index widened to conn_handle_t; no precision loss
-		*conn_out = (conn_handle_t)(i + 1);
+		/* Return the published handle (QUIC: slot+1, byte-identical; in-mem:
+		 * server end WN_APP_SVCONN_BASE+app_slot, 110+) so the server's
+		 * svs.clients[].quic_conn match (and the outbound transport_for_handle
+		 * routing) stays consistent for both. */
+		*conn_out = gc->pub_handle;
 		*len_out  = pkt->len;
 		memcpy( buf, pkt->data, pkt->len );
 		gc->recv_tail = ( gc->recv_tail + 1 ) % WN_GAME_QUEUE_SIZE;
@@ -1681,22 +2075,43 @@ qboolean WN_ServerRecvUsercmd( conn_handle_t *conn_out, byte *buf, int *len_out 
  * wn_recv_unreliable — client-side datagram drain (vtable entry).
  *
  * Called only from CL_CheckSnapshotDatagrams via transport->recv_unreliable.
- * Reads snapshots from wtcl.recv_queue — never touches gc->recv_queue.
+ * Reads snapshots from a per-client recv ring — never touches gc->recv_queue.
+ *
+ * Scans all in-process client slots (0..WN_MAX_LOCAL_CLIENTS-1); pops one
+ * datagram from the first non-empty ring and returns its per-slot handle. The
+ * returned handle is decoded back to clientApps[slot] by WN_AppSlotForConn in
+ * CL_CheckSnapshotDatagrams (cl_parse.c), so each client's snapshots route to its
+ * own clientApp_t.
+ *
+ * Slot 0 (the integrated host) returns the historical client handle
+ * CONN_CLIENT_HANDLE (9), not WN_APP_CONN_BASE+0 — keeping the host's recv routing
+ * unchanged and reserving the WN_APP_CONN_BASE range for additional in-process
+ * clients (slot i>0 returns WN_APP_CONN_BASE+i).
+ *
+ * Only slot 0 is initialized today; slots 1..3 are BSS-zero (initialized==qfalse,
+ * head==tail==0) and are skipped, so the loop finds slot 0 and returns 9 with the
+ * same pop logic as a single-client drain.
  */
 static qboolean wn_recv_unreliable( conn_handle_t *conn_out, byte *buf, int *len_out )
 {
-#if !defined(DEDICATED)
-	if ( wtcl.initialized && wtcl.recv_tail != wtcl.recv_head ) {
-		wn_snap_pkt_t *pkt = &wtcl.recv_queue[wtcl.recv_tail];
+#if !defined(HEADLESS)
+	int slot;
+	for ( slot = 0; slot < WN_MAX_LOCAL_CLIENTS; slot++ ) {
+		wn_client_state_t *c = &wtcl_array[slot];
+		wn_snap_pkt_t     *pkt;
+		if ( !c->initialized || c->recv_tail == c->recv_head )
+			continue;
+		pkt = &c->recv_queue[c->recv_tail];
 		if ( pkt->len <= *len_out ) {
-			*conn_out = CONN_CLIENT_HANDLE;
+			*conn_out = ( slot == 0 ) ? (conn_handle_t)CONN_CLIENT_HANDLE
+			                          : (conn_handle_t)( WN_APP_CONN_BASE + slot );
 			*len_out  = pkt->len;
 			memcpy( buf, pkt->data, pkt->len );
-			wtcl.recv_tail = ( wtcl.recv_tail + 1 ) % WN_GAME_QUEUE_SIZE;
+			c->recv_tail = ( c->recv_tail + 1 ) % WN_GAME_QUEUE_SIZE;
 			return qtrue;
 		}
-		/* oversized — discard */
-		wtcl.recv_tail = ( wtcl.recv_tail + 1 ) % WN_GAME_QUEUE_SIZE;
+		/* oversized — discard and keep scanning this drain call */
+		c->recv_tail = ( c->recv_tail + 1 ) % WN_GAME_QUEUE_SIZE;
 	}
 #else
 	(void)conn_out; (void)buf; (void)len_out;
@@ -1749,7 +2164,7 @@ static void wn_send_reliable( conn_handle_t conn, int channel,
 	ret = picoquic_add_to_stream( cnx, stream_id, send_data, (size_t)send_len,
 		wn_reliable_channel_allows_fixed_stream( channel ) ? 0 : 1 );
 	if ( framed_heap ) Z_Free( framed );
-	Com_Log( SEV_TRACE, LOG_CH(ch_network), "[WiredNet] QUIC: wn_send_reliable conn=%llu channel=%d len=%d ret=%d\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC: wn_send_reliable conn=%llu channel=%d len=%d ret=%d\n",
 		(unsigned long long)conn, channel, len, ret );
 }
 
@@ -1769,8 +2184,9 @@ qboolean WN_ServerRecvReliable( conn_handle_t *conn_out, int *channel_out,
 			&channel, buf, len_out ) ) {
 			continue;
 		}
-		// NOLINTNEXTLINE(bugprone-misplaced-widening-cast) — small slot index widened to conn_handle_t; no precision loss
-		*conn_out    = (conn_handle_t)(i + 1);
+		/* Published handle (QUIC slot+1 byte-identical; in-mem server-end 110+)
+		 * so the server's svs.clients[].quic_conn match stays consistent. */
+		*conn_out    = gc->pub_handle;
 		*channel_out = channel;
 		return qtrue;
 	}
@@ -1778,30 +2194,59 @@ qboolean WN_ServerRecvReliable( conn_handle_t *conn_out, int *channel_out,
 	return qfalse;
 }
 
-#if !defined(DEDICATED)
+#if !defined(HEADLESS)
 /* Return a pointer to the pending bootstrap payload and mark it consumed.
  * The pointer is valid until the next WN_ClientConnect call.
  * Returns qfalse if no bootstrap is pending. */
-qboolean WN_ClientConsumeBootstrap( const byte **data_out, int *len_out )
+/* WN_HasInmemClient — true if any active client connection is in-process (no
+ * picoquic). An in-process client produces no UDP traffic, so select() never
+ * wakes NET_Event to drive the client recv consumers; NET_Sleep uses this to pump
+ * them every frame instead. A QUIC client has quic != NULL and is unaffected
+ * (returns qfalse for a pure-QUIC client).
+ *
+ * Scans all client slots so the pump fires when any in-process client is live.
+ * Only slot 0 is initialized today (slots 1..3 are BSS-zero, initialized==qfalse),
+ * so this returns the single-client result. */
+qboolean WN_HasInmemClient( void )
 {
-	if ( !wtcl.initialized || !wtcl.bootstrap_recv_ready )
+	int slot;
+	for ( slot = 0; slot < WN_MAX_LOCAL_CLIENTS; slot++ ) {
+		if ( wtcl_array[slot].initialized && wtcl_array[slot].quic == NULL )
+			return qtrue;
+	}
+	return qfalse;
+}
+
+qboolean WN_ClientConsumeBootstrap( int app_slot, const byte **data_out, int *len_out )
+{
+	wn_client_state_t *c;
+	if ( app_slot < 0 || app_slot >= WN_MAX_LOCAL_CLIENTS )
 		return qfalse;
-	*data_out = wtcl.bootstrap_recv_data;
-	*len_out  = wtcl.bootstrap_recv_len;
-	wtcl.bootstrap_recv_ready = qfalse;
-	wtcl.bootstrap_recv_len   = 0;
+	c = &wtcl_array[app_slot];
+	if ( !c->initialized || !c->bootstrap_recv_ready )
+		return qfalse;
+	*data_out = c->bootstrap_recv_data;
+	*len_out  = c->bootstrap_recv_len;
+	c->bootstrap_recv_ready = qfalse;
+	c->bootstrap_recv_len   = 0;
 	return qtrue;
 }
 
-qboolean WN_ClientRecvReliable( int *channel_out, byte *buf, int *len_out )
+/* Drain one reliable message from a specific client's srv->cli ring
+ * (wtcl_array[app_slot].rel_queue). This is the client-side reliable receive ONLY
+ * — it never touches the server-side game_conns[].rel_queue (cli->srv commands),
+ * keeping the two directions separate in listen-server mode. */
+qboolean WN_ClientRecvReliable( int app_slot, int *channel_out, byte *buf, int *len_out )
 {
-	if ( wtcl.initialized ) {
-		if ( wn_reliable_queue_pop( wtcl.rel_queue, &wtcl.rel_head, &wtcl.rel_tail,
-			channel_out, buf, len_out ) ) {
-			return qtrue;
-		}
+	wn_client_state_t *c;
+	if ( app_slot < 0 || app_slot >= WN_MAX_LOCAL_CLIENTS )
+		return qfalse;
+	c = &wtcl_array[app_slot];
+	if ( c->initialized &&
+	     wn_reliable_queue_pop( c->rel_queue, &c->rel_head, &c->rel_tail,
+	         channel_out, buf, len_out ) ) {
+		return qtrue;
 	}
-
 	return qfalse;
 }
 #endif
@@ -1811,8 +2256,8 @@ static qboolean wn_recv_reliable( conn_handle_t *conn_out, int *channel_out,
 {
 	if ( WN_ServerRecvReliable( conn_out, channel_out, buf, len_out ) )
 		return qtrue;
-#if !defined(DEDICATED)
-	if ( WN_ClientRecvReliable( channel_out, buf, len_out ) ) {
+#if !defined(HEADLESS)
+	if ( WN_ClientRecvReliable( 0, channel_out, buf, len_out ) ) {
 		if ( conn_out ) *conn_out = CONN_CLIENT_HANDLE;
 		return qtrue;
 	}
@@ -1852,9 +2297,9 @@ static int wn_get_bandwidth( conn_handle_t conn )
 
 static void wn_get_address_string( conn_handle_t conn, char *buf, int buflen )
 {
-#if !defined(DEDICATED)
+#if !defined(HEADLESS)
 	if ( conn == CONN_CLIENT_HANDLE ) {
-		Q_strncpyz( buf, NET_AdrToStringwPort( &wtcl.server_addr ), buflen );
+		Q_strncpyz( buf, NET_AdrToStringwPort( &wtcl_array[0].server_addr ), buflen );
 		return;
 	}
 #endif
@@ -1868,20 +2313,41 @@ static void wn_get_address_string( conn_handle_t conn, char *buf, int buflen )
 }
 
 transport_t quic_transport = {
-	wn_init,
+	/* Lifecycle */
 	wn_shutdown,
 	wn_frame,
+	wn_flush_outbound,
+
+	/* Server */
 	wn_listen,
-	NULL,              /* accept_callback — set by caller (Phase B) */
-	NULL,              /* ready_callback  — set by caller (Phase B2) */
+	NULL,              /* accept_callback — set by caller */
+	NULL,              /* ready_callback  — set by caller */
 	wn_drop_client,
 	NULL,              /* drain_usercmds  — registered by server (sv_init.c) */
+	wn_lookup_by_addr,
+
+	/* Client */
 	wn_connect,
 	wn_disconnect,
+#if !defined(HEADLESS)
+	wn_is_connecting,
+	wn_get_error,
+	wn_clear_error,
+#else
+	NULL,              /* is_connecting — client-only, NULL in dedicated build */
+	NULL,              /* get_error     — client-only, NULL in dedicated build */
+	NULL,              /* clear_error   — client-only, NULL in dedicated build */
+#endif
+
+	/* Unreliable */
 	wn_send_unreliable,
 	wn_recv_unreliable,
+
+	/* Reliable */
 	wn_send_reliable,
 	wn_recv_reliable,
+
+	/* Metrics */
 	wn_get_ping,
 	wn_get_loss,
 	wn_get_bandwidth,

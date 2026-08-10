@@ -16,8 +16,8 @@ picoquic context management and the main callback dispatcher.
 #include <openssl/x509.h>
 #include <openssl/pem.h>
 #include <openssl/asn1.h>
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_network, "network" );
+LOG_DECLARE_CHANNEL( ch_network_common, "network.common" );
 
 #if FEAT_WIREDNET_OBSERVER
 // Platform socket headers for the TCP HTTP listener
@@ -207,7 +207,7 @@ static int WN_PicoquicCallback(
 		conn = WN_FindConnection( cnx );
 	}
 
-	Com_Log( SEV_TRACE, LOG_CH(ch_network), "[WiredNet] QUIC CB: event=%d stream=%llu conn=%s len=%zu\n",
+	Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC CB: event=%d stream=%llu conn=%s len=%zu\n",
 		(int)event, (unsigned long long)stream_id,
 		conn ? "yes" : "NULL", length );
 
@@ -549,7 +549,7 @@ void WN_Init( void )
 	 * timeout is min(client, server); for loopback connections the client
 	 * now sets 1 hour too, so the negotiated value is 1 hour.  This allows
 	 * connections to survive long map loads (WAMR init, bot AI, AAS) without
-	 * the idle timer firing.  For remote / dedicated servers this is
+	 * the idle timer firing.  For remote / headless servers this is
 	 * acceptable — the game server is expected to keep clients active. */
 	picoquic_set_default_idle_timeout( wn.quic, 3600000 );   /* 1 hour */
 
@@ -717,7 +717,7 @@ void WN_FlushOutbound( void )
 			continue; // unknown address family, skip
 		}
 
-		Com_Log( SEV_TRACE, LOG_CH(ch_network), "[WiredNet] QUIC: sending %d bytes to %s\n", (int)send_len, NET_AdrToString(&to) );
+		Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC: sending %d bytes to %s\n", (int)send_len, NET_AdrToString(&to) );
 		NET_SendPacket( NS_SERVER, (int)send_len, send_buf, &to );
 	}
 }
@@ -756,7 +756,7 @@ static qboolean WN_DemuxPacket( const netadr_t *from, const byte *data, int len 
 	// QUIC Long Header: bit 7 set (Initial, Handshake, 0-RTT, Retry)
 	// QUIC Short Header: bits 7:6 = 01 (1-RTT established connection)
 	if ( (first & 0x80) || (first & 0xC0) == 0x40 ) {
-		Com_Log( SEV_TRACE, LOG_CH(ch_network), "[WiredNet] QUIC: demux hit, first=0x%02X len=%d from=%s\n",
+		Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC: demux hit, first=0x%02X len=%d from=%s\n",
 			first, len, NET_AdrToString( from ) );
 		current_time = picoquic_current_time();
 
@@ -796,17 +796,17 @@ static qboolean WN_DemuxPacket( const netadr_t *from, const byte *data, int len 
 				0,                          // ECN
 				current_time
 			);
-			Com_Log( SEV_TRACE, LOG_CH(ch_network), "[WiredNet] QUIC: picoquic_incoming_packet returned %d\n", pq_ret );
+			Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC: picoquic_incoming_packet returned %d\n", pq_ret );
 		}
 
 		// Dual-flush: send ACKs immediately after receiving QUIC packets.
 		// Without this, ACKs are delayed until the next SV_Frame (50ms at 20Hz),
 		// exceeding QUIC's 25ms max_ack_delay and causing unnecessary retransmits.
-		Com_Log( SEV_TRACE, LOG_CH(ch_network), "[WiredNet] WiredNet: dual-flush after incoming packet\n" );
+		Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "WiredNet: dual-flush after incoming packet\n" );
 		WN_FlushOutbound();
 
 		// Also feed the client QUIC context (when running as non-dedicated client)
-#if !defined(DEDICATED)
+#if !defined(HEADLESS)
 		WN_ClientCheckPacket( from, (byte *)data, len ); /* safe: WN_ClientCheckPacket memcpy-copies immediately, never writes through */
 #endif
 
@@ -876,6 +876,10 @@ static void WN_Status_f( void )
 
 	Com_Log( SEV_INFO, LOG_CH(ch_network), "Events emitted: %llu\n", (unsigned long long)wn.event_seq );
 	Com_Log( SEV_INFO, LOG_CH(ch_network), "Dropped packets (misroute): %d\n", wn.dropped_packets );
+#if !defined(HEADLESS)
+	Com_Log( SEV_INFO, LOG_CH(ch_network), "Dropped datagrams (recv queue full): %u\n",
+		(unsigned)WN_GetRecvQueueFullDrops() );
+#endif
 }
 
 

@@ -5,7 +5,6 @@
 // g_misc.c
 
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
@@ -574,3 +573,14 @@ void Q3_DropPortalSource( gentity_t *player ) {
 
 }
 #endif
+
+// ── savegame callback registry — TIER 2 file-local sub-list ──────────────────
+// The file-static callbacks defined above, published through SG_Register_g_misc_q3().
+// The three Q3_Portal* handlers only exist under FEAT_PW_PORTAL; the list
+// (SG_LOCAL_CB_g_misc_q3 in g_save_localcbs.h) guards them identically so it holds
+// exactly what was compiled (and thus what could ever have been assigned to a
+// field). See g_save_funcs.h.
+#include "g_save_funcs.h"
+#include "g_save_localcbs.h"
+
+SG_DEFINE_LOCAL_REGISTRY( SG_LOCAL_CB_g_misc_q3, SG_Register_g_misc_q3 )

@@ -6,7 +6,6 @@
 
 #include "g_local.h"
 #include "g_character.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
@@ -442,6 +441,14 @@ void G_CheckMinimumPlayers( void ) {
 
 	if ( level.intermissiontime ) return;
 
+#if FEAT_RECAST_NAVMESH
+	// The navmesh may still be baking in the background (large map, cold cache):
+	// bots need it to path, and BotAISetupClient rejects a bot while it's not
+	// ready. Defer the periodic fill until the mesh lands — the next tick retries,
+	// so no bot is dropped, it just arrives a few seconds later on a cold cache.
+	if ( !trap_Nav_IsReady() ) return;
+#endif
+
 	trap_Cvar_Update( &g_autoBots );
 	trap_Cvar_Update( &g_minPlayers );
 
@@ -578,7 +585,7 @@ static void AddBotToSpawnQueue( int clientNum, int delay ) {
 		}
 	}
 
-	Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "Unable to delay spawn\n" );
+	Com_Log( SEV_WARN, LOG_CH(ch_game), "Unable to delay spawn\n" );
 	ClientBegin( clientNum );
 }
 
@@ -628,6 +635,79 @@ qboolean G_BotConnect( int clientNum, qboolean restart ) {
 
 /*
 ===============
+G_SetAutopilot
+
+Hands this client's entity to the bot brain (enable), or gives control back to
+the human (disable). Returns qtrue if the state actually changed.
+
+Enable attaches a real bot_state_t through the ordinary BotAISetupClient path,
+so the autopiloted client is driven by exactly the same brain, nav follower and
+usercmd production as any bot — there is no second AI. The two BotAIStartFrame
+loops are already gated on (botstates[i] && inuse && pers.connected) rather than
+on SVF_BOT, so they pick this client up with no change, and the resulting usercmd
+reaches the entity through trap_BotUserCommand. SVF_BOT is deliberately NOT set:
+it is read by scoring, arena and team logic and by the bot-clip tracemask, none
+of which should change just because a human handed over the controls.
+
+Disable is the interesting direction. Restoring the view is NOT cosmetic:
+ps->delta_angles holds the offset between the player's PHYSICAL mouse orientation
+and their in-game view (SetClientViewAngle: delta = ANGLE2SHORT(angle) -
+pers.cmd.angles), and the bot has been driving absolute angles through that same
+field. Without re-deriving it, the first real usercmd after release would snap the
+view from wherever the bot was looking to wherever the mouse happens to be
+pointing. SetClientViewAngle( ent, ps->viewangles ) re-anchors the delta to the
+CURRENT view so control returns silently — the same call with the same argument
+that Cmd_Team_f uses (g_cmds.c) after it changes a client's state.
+===============
+*/
+qboolean G_SetAutopilot( gentity_t *ent, qboolean enable ) {
+	if ( !ent || !ent->client ) {
+		return qfalse;
+	}
+	if ( ent->client->pers.autopilot == enable ) {
+		return qfalse;   /* already in the requested state */
+	}
+
+	if ( enable ) {
+		bot_settings_t settings;
+		char           userinfo[MAX_INFO_STRING];
+
+		trap_GetUserinfo( ent->s.number, userinfo, sizeof( userinfo ) );
+		Q_strncpyz( settings.characterfile,
+					Info_ValueForKey( userinfo, "characterfile" ),
+					sizeof( settings.characterfile ) );
+		settings.skill = atof( Info_ValueForKey( userinfo, "skill" ) );
+		if ( !settings.characterfile[0] ) {
+			/* A human has no characterfile in its userinfo. Empty selects the
+			   WiredIntel brain (BotAISetupClient sets wiredIntelActive when the
+			   character handle is negative), which is the brain this engine
+			   actually drives bots with. */
+			settings.skill = 5.0f;
+		}
+
+		if ( !BotAISetupClient( ent->s.number, &settings, qfalse ) ) {
+			return qfalse;   /* no brain -> do not claim the client */
+		}
+		ent->client->pers.autopilot = qtrue;
+		return qtrue;
+	}
+
+	/* ── disable: give the controls back ─────────────────────────────── */
+	ent->client->pers.autopilot = qfalse;
+
+	/* Tear the brain down. BotAIShutdownClient memsets the whole bot_state_t,
+	   which clears sequencedGoal too, so no half-finished ride or jump-touch
+	   sequence can re-drive the client after the handoff. */
+	BotAIShutdownClient( ent->s.number, qfalse );
+
+	/* Re-anchor delta_angles to the view the player is actually looking at, so
+	   the first human usercmd does not snap the camera (see the note above). */
+	SetClientViewAngle( ent, ent->client->ps.viewangles );
+	return qtrue;
+}
+
+/*
+===============
 G_AddBot
 ===============
 */
@@ -639,11 +719,36 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 	const char		*botname;
 	char			userinfo[MAX_INFO_STRING];
 
+#if FEAT_RECAST_NAVMESH
+	// On a cold cache the navmesh bakes in the background; BotAISetupClient (via
+	// ClientConnect below) rejects a bot until it's ready, which would DROP this
+	// bot outright. While a bake is IN FLIGHT, defer instead: re-post the same
+	// addbot command so it retries on a later frame, and land it once the mesh is
+	// ready. This preserves both roster fill (G_SpawnBots) and a manual "addbot"
+	// typed during the bake — no slot is allocated yet, nothing to clean up.
+	//
+	// The IsBaking() guard (not just !IsReady) is essential: on a map whose bake
+	// FAILS or that has no nav geometry, the mesh never becomes ready, so a bare
+	// !IsReady defer would re-post forever. Once the bake finishes-and-fails,
+	// IsBaking() returns qfalse and we fall through to the normal path (which
+	// drops the bot, exactly as before this change).
+	if ( !trap_Nav_IsReady() && trap_Nav_IsBaking() ) {
+		// skill arrives here normalised to 0..1; Svcmd_AddBot_f expects the 1..5
+		// form, so convert back. altname may be NULL. EXEC_APPEND (not INSERT) so
+		// the retry runs on the NEXT command-buffer cycle rather than spinning
+		// synchronously inside this frame's flush.
+		trap_SendConsoleCommand( EXEC_APPEND, va( "addbot \"%s\" %.2f %s %i \"%s\"\n",
+			name, 1.0f + 4.0f * skill, ( team && team[0] ) ? team : "free",
+			delay, ( altname && altname[0] ) ? altname : "" ) );
+		return;
+	}
+#endif
+
 	// have the server allocate a client slot
 	clientNum = trap_BotAllocateClient();
 	if ( clientNum == -1 ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_RED "Unable to add bot. All player slots are in use.\n" );
-		Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_RED "Start server with more 'open' slots (or check setting of sv_maxclients cvar).\n" );
+		Com_Log( SEV_WARN, LOG_CH(ch_game), "Unable to add bot. All player slots are in use.\n" );
+		Com_Log( SEV_WARN, LOG_CH(ch_game), "Start server with more 'open' slots (or check setting of sv_maxclients cvar).\n" );
 		return;
 	}
 
@@ -689,7 +794,7 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
 	}
 
 	if ( !characterInfo ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_RED "Error: Character '%s' not defined\n", name );
+		Com_Log( SEV_ERROR, LOG_CH(ch_game), "Error: Character '%s' not defined\n", name );
 		trap_BotFreeClient( clientNum );
 		return;
 	}

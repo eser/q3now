@@ -5,7 +5,6 @@
 #include "q_shared.h"
 #include "qcommon.h"
 #include "../../../client/keys.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 int		 anykeydown;

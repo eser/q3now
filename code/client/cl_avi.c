@@ -4,7 +4,6 @@
 
 #include "client.h"
 #include "snd_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 #define INDEX_FILE_EXTENSION ".index.dat"
@@ -390,8 +389,8 @@ qboolean CL_OpenAVIForWriting( const char *fileName, qboolean pipe, qboolean reo
 	afd.frameRate = cl_aviFrameRate->integer;
 	afd.framePeriod = (int)(1000000.0 / afd.frameRate);
 
-	afd.width = cls.captureWidth;
-	afd.height = cls.captureHeight;
+	afd.width = clientActiveApp->captureWidth;
+	afd.height = clientActiveApp->captureHeight;
 
 	if ( cl_aviMotionJpeg->integer && !pipe )
 		afd.motionJpeg = qtrue;
@@ -412,7 +411,10 @@ qboolean CL_OpenAVIForWriting( const char *fileName, qboolean pipe, qboolean reo
 
 	afd.a.rate = dma.speed;
 	afd.a.format = dma.isfloat ? WAVE_FORMAT_IEEE_FLOAT : WAV_FORMAT_PCM;
-	afd.a.channels = dma.channels;
+	// The recorded track is always stereo regardless of the live playback device
+	// channel count (which may be 5.1/7.1); the surround mix is downmixed to stereo
+	// for capture. Plain-PCM WAV only cleanly describes mono/stereo.
+	afd.a.channels = AVI_CAPTURE_CHANNELS;
 	afd.a.bits = dma.samplebits;
 	afd.a.sampleSize = (afd.a.bits * afd.a.channels) / 8;
 
@@ -426,6 +428,17 @@ qboolean CL_OpenAVIForWriting( const char *fileName, qboolean pipe, qboolean reo
 	{
 		afd.audio = qtrue;
 	}
+
+#ifndef HEADLESS
+	// Put the engine into read-driven capture mode so the AVI audio track is
+	// sourced deterministically from the engine mix (S_EngineFeedAviCapture),
+	// matching the format snapshot in afd.a above. Only on a fresh open — a mid-
+	// record auto-segment reopen keeps the same engine mode across segments.
+	if ( afd.audio && !reopen )
+	{
+		S_EngineBeginCapture();
+	}
+#endif
 
 	// This doesn't write a real header, but allocates the
 	// correct amount of space at the beginning of the file
@@ -486,7 +499,7 @@ static qboolean CL_CheckFileSize( int bytesToAdd )
 		CL_CloseAVI( qtrue );
 
 		// ...And open a new one
-		CL_OpenAVIForWriting( va( "%s-%02d.avi", clc.videoName, ++clc.videoIndex ), qfalse, qtrue );
+		CL_OpenAVIForWriting( va( "%s-%02d.avi", clientActiveApp->clc.videoName, ++clientActiveApp->clc.videoIndex ), qfalse, qtrue );
 
 		return qtrue;
 	}
@@ -616,10 +629,20 @@ void CL_WriteAVIAudioFrame( const byte *pcmBuffer, int size )
 		size = PCM_BUFFER_SIZE - bytesInBuffer;
 	}
 
-	// Only write if we have a frame's worth of audio
-	if ( bytesInBuffer >= afd.audioFrameSize )
+	// Flush once we have a frame's worth of audio. audioFrameSize scales as
+	// rate*sampleSize/frameRate, so at a very low capture frame rate it can exceed
+	// the capture buffer; cap the threshold at the buffer size so the flush still
+	// fires (rather than starving) in that pathological case. At normal frame
+	// rates audioFrameSize < PCM_BUFFER_SIZE, so the cadence is unchanged.
 	{
-		CL_FlushCaptureBuffer();
+		int flushThreshold = afd.audioFrameSize;
+		if ( flushThreshold > PCM_BUFFER_SIZE )
+			flushThreshold = PCM_BUFFER_SIZE;
+
+		if ( bytesInBuffer >= flushThreshold )
+		{
+			CL_FlushCaptureBuffer();
+		}
 	}
 
 	if ( pcmBuffer )
@@ -660,6 +683,15 @@ qboolean CL_CloseAVI( qboolean reopen )
 	{
 		return qfalse;
 	}
+
+#ifndef HEADLESS
+	// Return the engine to normal device-backed playback. Only on a real close —
+	// an auto-segment reopen keeps the engine in capture mode across segments.
+	if ( afd.audio && !reopen )
+	{
+		S_EngineEndCapture();
+	}
+#endif
 
 	CL_FlushCaptureBuffer();
 

@@ -98,7 +98,7 @@ static void EmitRemapSet(FILE *fp, const remap_set_t *s) {
 
 qboolean MetaEmit_Write(const char *out_dir,
                         const char *mapname,
-                        const bsp_inventory_t *inv,
+                        const map_inventory_t *inv,
                         const resolution_t *resolutions,
                         int resolution_count)
 {
@@ -156,7 +156,7 @@ qboolean MetaEmit_Write(const char *out_dir,
 
 	// Round-trip check: read the file back via stdio (same path) and
 	// hand the buffer to Meta_ParseFromBuffer. Avoids the engine FS
-	// (Meta_ParseFromFile) which would only see homepath/baseq3.
+	// (Meta_ParseFromFile) which would only see homepath/base.
 	FILE *rfp = fopen( out_path, "rb" );
 	if ( !rfp ) {
 		fprintf( stderr, "extract-meta: round-trip fopen failed for %s\n", out_path );

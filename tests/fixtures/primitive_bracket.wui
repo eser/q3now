@@ -1,0 +1,30 @@
+// primitive_bracket.wui — Bracket primitive demo (4 corner partials).
+// Composite: 4 corner brackets framing a labelled panel. Each bracket
+// is a single rect of accent-coloured leaf width or height
+// (top/right/bottom/left edges; ~5% of the panel side).
+
+menuDef {
+	name "primitive_bracket"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor $ink
+
+	// Top-left corner: horizontal + vertical stub.
+	itemDef { name "bracket_tl_h" rect 0.30 0.30 0.04 0.003 backcolor $accent visible 1 decoration }
+	itemDef { name "bracket_tl_v" rect 0.30 0.30 0.003 0.04 backcolor $accent visible 1 decoration }
+	// Top-right.
+	itemDef { name "bracket_tr_h" rect 0.66 0.30 0.04 0.003 backcolor $accent visible 1 decoration }
+	itemDef { name "bracket_tr_v" rect 0.697 0.30 0.003 0.04 backcolor $accent visible 1 decoration }
+	// Bottom-left.
+	itemDef { name "bracket_bl_h" rect 0.30 0.567 0.04 0.003 backcolor $accent visible 1 decoration }
+	itemDef { name "bracket_bl_v" rect 0.30 0.530 0.003 0.04 backcolor $accent visible 1 decoration }
+	// Bottom-right.
+	itemDef { name "bracket_br_h" rect 0.66 0.567 0.04 0.003 backcolor $accent visible 1 decoration }
+	itemDef { name "bracket_br_v" rect 0.697 0.530 0.003 0.04 backcolor $accent visible 1 decoration }
+
+	// Panel content centered in the bracket frame.
+	itemDef { name "bracket_label" rect 0.30 0.42 0.40 0.05 text "BRACKET · 4-corner accent frame" font $font_mono 14 forecolor $bone textalign 1 visible 1 decoration }
+}

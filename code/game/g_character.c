@@ -3,7 +3,6 @@
 
 #include "g_character.h"
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #define MAX_CHARACTERS 256
@@ -22,8 +21,6 @@ static qboolean G_Character_HasName( const char *name ) {
 
 static qboolean G_Character_Add(const char *name) {
 	char profilePath[MAX_QPATH];
-	fileHandle_t f;
-	int len;
 
 	if ( !name || !name[0] ) {
 		return qfalse;
@@ -34,11 +31,9 @@ static qboolean G_Character_Add(const char *name) {
 	}
 
 	Com_sprintf( profilePath, sizeof( profilePath ), "characters/%s/main.lua", name );
-	len = trap_FS_FOpenFile( profilePath, &f, FS_READ );
-	if ( len <= 0 || !f ) {
+	if ( !G_FileExists( profilePath ) ) {
 		return qfalse;
 	}
-	trap_FS_FCloseFile( f );
 
 	// Fetch display_name via engine Lua runtime.
 	{

@@ -8,10 +8,10 @@ ribbon.frag — primitive ribbon fragment shader
 
 Output = textured_sample × per-vertex RGBA.
 
-Phase 6B3'-a: legacy CGEN_VERTEX-equivalent halving removed. Ribbons
+Legacy CGEN_VERTEX-equivalent halving removed. Ribbons
 now render at full intensity in the linear pipeline. The push-block
 `frameParams.x` field stays in the layout (carries 1.0f written
-host-side) for push-range layout compatibility; 6B3'-f drops the
+host-side) for push-range layout compatibility; a later pass drops the
 field entirely.
 
 The textured sample comes from the binding-2 sampler array, indexed
@@ -24,15 +24,17 @@ clamp to slot 0, so unregistered or huge handles render
 // Must match PRIMITIVE_SHADER_IMAGE_MAX in renderervk/vk.h.
 #define PRIMITIVE_SHADER_IMAGE_MAX 64
 
-// Same push block ribbon.vert declares. As of Phase 6B3'-a the
+// Same push block ribbon.vert declares. The
 // fragment shader doesn't consume any push field (the legacy
 // `frameParams.x` halving was removed), but the declaration must
 // match the vertex stage byte layout for Vulkan to accept the
-// pipeline. 6B3'-f will trim the dead field.
-layout(push_constant) uniform Push {
+// pipeline. A later pass will trim the dead field.
+// Declaration must match ribbon.vert's set-1 effects UBO block (no field read here).
+layout(set = 1, binding = 0, std140) uniform EffectsUBO {
 	mat4 mvp;
 	vec4 eyeWorld;
 	vec4 frameParams;
+	vec4 _v2;
 };
 
 // Per-shader-handle texture array. Populated from
@@ -48,7 +50,7 @@ layout(location = 2) flat in uint fragShaderHandle;
 
 layout(location = 0) out vec4 outColor;
 
-// Phase 6B3'-d4-m5: precise piecewise sRGB <-> linear conversion.
+// Precise piecewise sRGB <-> linear conversion.
 // Duplicated in every fragment shader per the engine-wide
 // unconditional linear migration; compile.mjs lacks #include
 // support. Matches m1/m2/m3/m4 verbatim. linearToSRGB is unused
@@ -95,7 +97,7 @@ void main() {
 	uint slot = handle < uint(PRIMITIVE_SHADER_IMAGE_MAX) ? handle : 0u;
 	vec4 texel = sampleColorTexBindless( shaderImages[slot], fragUV, domain );
 
-	// Phase 6B3'-d4-m5: per-vertex colour decoded to linear (display
+	// Per-vertex colour decoded to linear (display
 	// domain); texel decoded per its colour domain. The rgb/a-separated
 	// modulate is unchanged. Alpha stays raw.
 	outColor = vec4(

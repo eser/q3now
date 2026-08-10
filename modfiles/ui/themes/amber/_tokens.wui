@@ -1,0 +1,8 @@
+// Amber accent overlay (default) — qw-shared.jsx QW_ACCENTS.amber.
+token accent                "#f4a03a"
+token accentDim             "#8a6230"
+token accentSoft            "#c87a2a"
+// Low-alpha accent wash — equipped weapon-carousel slot FILL. Sparse weapon-icon
+// line-art over a SOLID accent reads as a bright "empty box"; this wash lets the
+// icon dominate while the full-opacity accent border still marks the slot.
+token accentWash            "rgba(244,160,58,0.34)"

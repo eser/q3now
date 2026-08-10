@@ -2,7 +2,7 @@
 # smoke-fs-dedup.sh — regression test for FS_DeduplicateArchives SW3Z double-free
 #
 # Reproduces the bug pattern: two same-basename SW3Z archives in different
-# search-path roots (basepath/baseq3 vs homepath/baseq3). Pre-fix: engine
+# search-path roots (basepath/base vs homepath/base). Pre-fix: engine
 # crashes during FS_Startup with "Z_Free: freed a freed pointer" because the
 # SW3Z dedup branch called SW3Z_CloseArchive() (which Z_Free's the pack
 # internally) AND then redundantly Z_Free'd s->pack.
@@ -11,30 +11,30 @@
 # on a fixed binary. See git log for the FS_DeduplicateArchives commit.
 #
 # Usage:
-#   tests/smoke-fs-dedup.sh [path-to-wired-ded]
+#   tests/smoke-fs-dedup.sh [path-to-wired-headless]
 #
 # Exit codes:
 #   0  PASS — engine boots cleanly, dedup log line emitted
 #   1  FAIL — engine crashed, missing dedup line, or other failure
-#  77  SKIP — wired-ded binary or sw3z archiver not built
+#  77  SKIP — wired-headless binary or sw3z archiver not built
 
 set -euo pipefail
 
-DED="${1:-wired-ded}"
+DED="${1:-wired-headless}"
 SW3Z_TOOL="${SW3Z_TOOL:-tools/sw3z-archiver/cmd/sw3z/sw3z}"
 
 # ── locate binaries ─────────────────────────────────────────────────────────
 if [ ! -x "$DED" ] && ! command -v "$DED" >/dev/null 2>&1; then
   # Try common build locations
   for candidate in \
-    "build/release/wired-ded.x64.exe" \
-    "build/release/wired-ded.x86_64" \
-    "build/release/wired-ded"; do
+    "build/release/wired-headless.x64.exe" \
+    "build/release/wired-headless.x86_64" \
+    "build/release/wired-headless"; do
     if [ -x "$candidate" ]; then DED="$candidate"; break; fi
   done
 fi
 if [ ! -x "$DED" ] && ! command -v "$DED" >/dev/null 2>&1; then
-  echo "SKIP: wired-ded binary not found (tried: $1, build/release/wired-ded*)"
+  echo "SKIP: wired-headless binary not found (tried: $1, build/release/wired-headless*)"
   exit 77
 fi
 
@@ -50,7 +50,7 @@ HOMEPATH="$FIXTURE_ROOT/homepath"
 SEED="$FIXTURE_ROOT/seed"
 
 rm -rf "$FIXTURE_ROOT"
-mkdir -p "$BASEPATH/baseq3" "$HOMEPATH/baseq3" "$SEED"
+mkdir -p "$BASEPATH/base" "$HOMEPATH/base" "$SEED"
 
 # Minimal SW3Z content: needs default.cfg so FS_Restart's
 # `FS_ReadFile("default.cfg")` post-check passes; otherwise engine
@@ -59,8 +59,8 @@ mkdir -p "$BASEPATH/baseq3" "$HOMEPATH/baseq3" "$SEED"
 # fixture exercises the bug — but exit code wouldn't be 0.
 echo "// regression fixture marker — empty default.cfg" > "$SEED/default.cfg"
 echo "regression fixture for FS_DeduplicateArchives" > "$SEED/dummy.txt"
-"$SW3Z_TOOL" a "$BASEPATH/baseq3/regression_dup.sw3z" "$SEED" >/dev/null
-cp "$BASEPATH/baseq3/regression_dup.sw3z" "$HOMEPATH/baseq3/regression_dup.sw3z"
+"$SW3Z_TOOL" a "$BASEPATH/base/regression_dup.sw3z" "$SEED" >/dev/null
+cp "$BASEPATH/base/regression_dup.sw3z" "$HOMEPATH/base/regression_dup.sw3z"
 
 # ── convert to engine-readable paths ────────────────────────────────────────
 # Engine on Windows expects Windows-native paths; on Unix accepts as-is.
@@ -89,8 +89,6 @@ set +e
 "$DED" \
   +set fs_installpath "$BASEPATH_NATIVE" \
   +set fs_homepath "$HOMEPATH_NATIVE" \
-  +set fs_basegame baseq3 \
-  +set dedicated 2 \
   +quit \
   >"$LOGFILE" 2>&1
 EC=$?
@@ -113,6 +111,13 @@ fi
 # Z_Free crash signature must NOT be present (pre-fix produced this).
 if grep -q "Z_Free: freed a freed pointer" "$LOGFILE"; then
   fail "Z_Free double-free detected in output"
+fi
+
+# A fatal startup abort (Sys_Error / FATAL) must never pass — the exit-code
+# check above usually catches it, but guard explicitly so a dead engine is
+# never mistaken for a clean dedup run.
+if grep -qE "Sys_Error|FATAL" "$LOGFILE"; then
+  fail "fatal error (Sys_Error/FATAL) detected in output"
 fi
 
 # (a-extended) dedup log line MUST be present — proves we exercised the

@@ -1,0 +1,292 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+gtao.comp — wired-render ground-truth ambient occlusion.
+
+A single-pass screen-space AO compute pass. Reconstructs view-space position +
+normal from the scene depth copy (no normal G-buffer — this is a forward
+renderer), runs the GTAO horizon-search visibility integral (Jimenez et al.
+2016, "Practical Realtime Strategies for Accurate Indirect Occlusion"; the
+Intel XeGTAO formulation), and writes a single-channel visibility texture
+(1 = unoccluded, 0 = fully occluded). A separate depth-aware blur denoises it;
+the tonemap pass multiplies the scene radiance by it.
+
+Inputs:
+  - depthTex (set 0, binding 0) + depthSampler (binding 1): the non-MSAA device
+    depth copy (reversed-Z). The same copy the legacy SSAO/sunrays variants
+    sample; produced every frame the AO is on (the tonemap force-copy).
+  - push constants: the projection-derived reconstruction terms + viewport.
+
+Output:
+  - aoImage (set 0, binding 2): R8_UNORM visibility, GENERAL layout.
+
+Single-pass note: XeGTAO's reference uses a depth-MIP prefilter pass to bound
+sample-tap cost; this port samples full-res depth at LOD 0 to stay one pass
+(simplest, WebGPU-portable). A MIP prefilter is a future perf refinement.
+Normals are reconstructed from depth (XeGTAO's built-in path), so no new
+attachment is needed.
+*/
+
+const float PI      = 3.14159265358979323846;
+const float HALF_PI = 1.57079632679489661923;
+
+// 8x8 = 64 invocations/group — within the WebGPU ≤256 envelope.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform texture2D depthTex;
+layout(set = 0, binding = 1) uniform sampler   depthSampler;
+layout(r16f, set = 0, binding = 2) uniform writeonly image2D aoImage;
+
+// Projection-derived reconstruction terms + tuning, pushed each frame from the
+// host (vk_gtao_dispatch). Kept a tight push block (well under 128 B).
+layout(push_constant) uniform GtaoPush {
+	vec2  viewportSize;     // render extent in pixels
+	vec2  ndcToViewMul;     // NDC.xy -> view.xy scale  (tanHalfFOV * (2,-2))
+	vec2  ndcToViewAdd;     // NDC.xy -> view.xy bias   (tanHalfFOV * (-1,1))
+	float zNear;            // reversed-Z near (device z = 1 at near)
+	float zFar;             // reversed-Z far  (device z = 0 at far)
+	float effectRadius;     // world-space AO radius (units)
+	float falloffRange;     // [0,1] fraction of radius over which falloff ramps
+	int   sliceCount;       // GTAO directional slices (quality tier)
+	int   stepsPerSlice;    // horizon steps per slice (quality tier)
+	float finalPower;       // visibility^finalPower (contrast)
+	float intensity;        // 0..1 user strength (lerp toward no-AO)
+	// ── SSCS (screen-space contact shadow) directional fold ──────────────
+	// A short screen-space ray-march toward the sun that sharpens the fine
+	// model-on-ground contact the CSM shadow-map resolution misses. Folded into
+	// the GTAO visibility (a contact-darken multiply) rather than a 2nd pass.
+	// sscsEnabled is set host-side only on sun maps (tr.sunHasSource) when
+	// r_shadows is at the cast level — sunless maps have no meaningful sun
+	// direction, so it is structurally a no-op there (grounding §1).
+	vec4  sscsSunDirVS;     // .xyz = view-space direction TOWARD the sun (unit); .w unused
+	float sscsRadius;       // world-space contact march length (units)
+	int   sscsSteps;        // march samples
+	float sscsStrength;     // 0..1 darken applied where contact-occluded
+	int   sscsEnabled;      // 1 = run the contact march, 0 = skip (sunless / off)
+} pc;
+
+// Reversed-Z linear (view-space) depth — distance in front of the eye. Matches
+// the engine's reversed-Z mapping (device z = 1 at near, 0 at far), the same
+// reconstruction the .1 linearDepth fix verified against the projection matrix.
+float linearizeDepth( float z ) {
+	return pc.zNear * pc.zFar / ( pc.zNear + z * ( pc.zFar - pc.zNear ) );
+}
+
+// Reconstruct a view-space position from a screen UV [0,1] + device depth.
+// view.z = linear depth (positive, into the screen); view.xy from the NDC->view
+// terms. (We keep +Z forward here; only relative geometry matters to GTAO.)
+vec3 viewPosFromUV( vec2 uv, float deviceZ ) {
+	float vz  = linearizeDepth( deviceZ );
+	vec2  ndc = uv * 2.0 - 1.0;
+	vec2  vxy = ( ndc * pc.ndcToViewMul + pc.ndcToViewAdd ) * vz;
+	return vec3( vxy, vz );
+}
+
+float sampleDeviceDepth( vec2 uv ) {
+	return textureLod( sampler2D( depthTex, depthSampler ), uv, 0.0 ).r;
+}
+
+// Lagarde fast acos (max abs error ~7e-5 rad) — avoids a true acos per horizon.
+float fastAcos( float x ) {
+	float xa = abs( x );
+	float r  = ( -0.156583 * xa + HALF_PI ) * sqrt( 1.0 - xa );
+	return ( x >= 0.0 ) ? r : ( PI - r );
+}
+
+// View-space normal reconstructed from depth via the "best triangle" heuristic
+// (Wicked Engine / Turánszki): pick, on each axis, the neighbour pair with the
+// smaller depth discontinuity, so the cross product doesn't straddle a
+// silhouette edge (the artifact naive ddx/ddy produces). Sufficient for AO,
+// which wants the geometric face normal, not the high-frequency mapped normal.
+vec3 normalFromDepth( vec2 uv, vec3 P, vec2 texel ) {
+	float zL = sampleDeviceDepth( uv - vec2( texel.x, 0.0 ) );
+	float zR = sampleDeviceDepth( uv + vec2( texel.x, 0.0 ) );
+	float zU = sampleDeviceDepth( uv - vec2( 0.0, texel.y ) );
+	float zD = sampleDeviceDepth( uv + vec2( 0.0, texel.y ) );
+
+	vec3 Pl = viewPosFromUV( uv - vec2( texel.x, 0.0 ), zL );
+	vec3 Pr = viewPosFromUV( uv + vec2( texel.x, 0.0 ), zR );
+	vec3 Pu = viewPosFromUV( uv - vec2( 0.0, texel.y ), zU );
+	vec3 Pd = viewPosFromUV( uv + vec2( 0.0, texel.y ), zD );
+
+	// Horizontal/vertical edge vectors; choose the closer (smaller |Δview.z|).
+	vec3 dPdx = ( abs( Pr.z - P.z ) < abs( P.z - Pl.z ) ) ? ( Pr - P ) : ( P - Pl );
+	vec3 dPdy = ( abs( Pd.z - P.z ) < abs( P.z - Pu.z ) ) ? ( Pd - P ) : ( P - Pu );
+
+	vec3 n = cross( dPdx, dPdy );
+	float len = length( n );
+	return ( len > 1e-8 ) ? ( n / len ) : vec3( 0.0, 0.0, 1.0 );
+}
+
+// Interleaved-gradient noise (Jimenez 2014) — per-pixel slice/step jitter.
+float ign( vec2 pix ) {
+	return fract( 52.9829189 * fract( dot( pix, vec2( 0.06711056, 0.00583715 ) ) ) );
+}
+
+// SSCS contact factor: march a short ray from view-space P toward the sun and
+// test the scene depth for an occluder. Returns 1.0 = no contact occluder (lit),
+// (1 - sscsStrength) = a fine contact shadow toward the sun. View-space +Z is
+// forward (into the screen) here; project each marched view-space point back to
+// a screen UV via the inverse of viewPosFromUV (uv = (vxy/vz - ndcToViewAdd) /
+// ndcToViewMul, then NDC->[0,1]). The depth COMPARE uses linear (view) z so the
+// thickness test is in world units, not device-z. A thickness window rejects the
+// far background as a false occluder (the classic SSCS "behind, not in front"
+// gate). noise jitters the first step to break up banding.
+float sscsContact( vec3 P, vec2 texel, float noise ) {
+	if ( pc.sscsEnabled == 0 || pc.sscsStrength <= 0.0 )
+		return 1.0;
+
+	vec3  L        = pc.sscsSunDirVS.xyz;      // toward the sun, view-space, unit
+	float stepLen  = pc.sscsRadius / float( max( pc.sscsSteps, 1 ) );
+	float occluded = 0.0;
+
+	for ( int i = 1; i <= pc.sscsSteps; ++i ) {
+		float t = ( float( i ) - 0.5 + noise ) * stepLen;
+		vec3  sp = P + L * t;                    // marched view-space point
+		if ( sp.z <= 1e-3 )                      // behind the eye — stop
+			break;
+
+		// project sp.xyz -> screen uv (inverse of viewPosFromUV)
+		vec2 ndc = ( ( sp.xy / sp.z ) - pc.ndcToViewAdd ) / pc.ndcToViewMul;
+		vec2 uvS = ndc * 0.5 + 0.5;
+		if ( uvS.x < 0.0 || uvS.x > 1.0 || uvS.y < 0.0 || uvS.y > 1.0 )
+			break;                               // marched off-screen
+
+		float zScene = sampleDeviceDepth( uvS );
+		if ( zScene <= 0.0 )                      // sky — never an occluder
+			continue;
+		float sceneVz = linearizeDepth( zScene ); // scene linear depth at uvS
+		float diff    = sp.z - sceneVz;           // >0: ray point is BEHIND geometry
+
+		// Occluder only when the scene surface is in front of the ray sample by a
+		// small thickness window (contact scale), not the whole background.
+		if ( diff > stepLen * 0.5 && diff < pc.sscsRadius ) {
+			occluded = 1.0;
+			break;
+		}
+	}
+
+	return mix( 1.0, 1.0 - pc.sscsStrength, occluded );
+}
+
+void main() {
+	ivec2 pix    = ivec2( gl_GlobalInvocationID.xy );
+	ivec2 dim    = ivec2( pc.viewportSize );
+	if ( pix.x >= dim.x || pix.y >= dim.y )
+		return;
+
+	vec2 texel = 1.0 / pc.viewportSize;
+	vec2 uv    = ( vec2( pix ) + 0.5 ) * texel;
+
+	float centerZ = sampleDeviceDepth( uv );
+	// Sky / far plane (reversed-Z: device 0 = far): no geometry, fully visible.
+	if ( centerZ <= 0.0 ) {
+		imageStore( aoImage, pix, vec4( 1.0 ) );
+		return;
+	}
+
+	vec3 P = viewPosFromUV( uv, centerZ );          // pixel view-space position
+	vec3 N = normalFromDepth( uv, P, texel );       // reconstructed view normal
+	vec3 V = normalize( -P );                        // toward the eye (eye at origin)
+
+	// Project the world-space effect radius to a screen-space tap radius at this
+	// depth: a sphere of world radius r at view depth P.z subtends
+	// (r / P.z) * (viewport/ (2*tanHalfFOV)) pixels. We fold tanHalfFOV via
+	// ndcToViewMul (= tanHalfFOV*2): pixels = r / (P.z * |ndcToViewMul| ) of NDC,
+	// i.e. fraction of screen = r / (P.z * tanHalfFOV). Use the X term.
+	float tanHalfFovX = 0.5 * abs( pc.ndcToViewMul.x );   // ndcToViewMul.x = tanHalfFovX*2
+	float screenRadiusUV = clamp( pc.effectRadius / ( P.z * max( tanHalfFovX, 1e-4 ) ), texel.x, 0.5 );
+
+	float noise      = ign( vec2( pix ) );
+	float visibility = 0.0;
+
+	float falloffMul = 1.0 / max( pc.effectRadius * pc.falloffRange, 1e-4 );
+	float falloffAdd = -pc.effectRadius * ( 1.0 - pc.falloffRange ) * falloffMul;
+
+	for ( int slice = 0; slice < pc.sliceCount; ++slice ) {
+		float sliceK = ( float( slice ) + noise ) / float( pc.sliceCount );
+		float phi    = sliceK * PI;
+		vec2  dir    = vec2( cos( phi ), sin( phi ) );          // screen-space slice dir
+		vec3  dirVec = vec3( dir, 0.0 );
+
+		// Project N onto the slice plane (spanned by dirVec and V).
+		vec3  orthoDir = dirVec - dot( dirVec, V ) * V;
+		vec3  axis     = normalize( cross( orthoDir, V ) );
+		vec3  projN    = N - axis * dot( N, axis );
+		float projLen  = length( projN );
+		if ( projLen < 1e-5 )
+			continue;
+		float signN = sign( dot( orthoDir, projN ) );
+		float cosN  = clamp( dot( projN, V ) / projLen, -1.0, 1.0 );
+		float n     = signN * fastAcos( cosN );
+
+		float horizonCos0 = cos( n + HALF_PI );   // lowest possible (toward -dir)
+		float horizonCos1 = cos( n - HALF_PI );   // lowest possible (toward +dir)
+
+		// Push the first tap at least ~1.5 texels off-centre so a pixel never
+		// occludes itself with its immediate neighbour (the residual that leaves
+		// open surfaces slightly < 1.0). minS is that floor as a fraction of the
+		// slice's screen radius.
+		float minS = ( 1.5 * texel.x ) / max( screenRadiusUV, 1e-5 );
+		for ( int step = 0; step < pc.stepsPerSlice; ++step ) {
+			float stepNoise = fract( noise + float( slice * pc.stepsPerSlice + step ) * 0.6180339887 );
+			float s = ( float( step ) + stepNoise ) / float( pc.stepsPerSlice );
+			s = pow( s, 2.0 );                              // sampleDistributionPower=2
+			s += minS;
+			vec2 off = dir * s * screenRadiusUV;
+
+			vec2 uv0 = uv + off;
+			vec2 uv1 = uv - off;
+			float z0 = sampleDeviceDepth( uv0 );
+			float z1 = sampleDeviceDepth( uv1 );
+			vec3  s0 = viewPosFromUV( uv0, z0 );
+			vec3  s1 = viewPosFromUV( uv1, z1 );
+
+			vec3  d0 = s0 - P;
+			vec3  d1 = s1 - P;
+			float dist0 = length( d0 );
+			float dist1 = length( d1 );
+
+			float w0 = clamp( dist0 * falloffMul + falloffAdd, 0.0, 1.0 );
+			float w1 = clamp( dist1 * falloffMul + falloffAdd, 0.0, 1.0 );
+			w0 = 1.0 - w0;   // 1 near, 0 past the radius
+			w1 = 1.0 - w1;
+
+			float shc0 = dot( d0 / max( dist0, 1e-5 ), V );
+			float shc1 = dot( d1 / max( dist1, 1e-5 ), V );
+
+			// Sky samples (z<=0) must not raise the horizon.
+			if ( z0 <= 0.0 ) shc0 = horizonCos0;
+			if ( z1 <= 0.0 ) shc1 = horizonCos1;
+
+			horizonCos0 = max( horizonCos0, mix( horizonCos0, shc0, w0 ) );
+			horizonCos1 = max( horizonCos1, mix( horizonCos1, shc1, w1 ) );
+		}
+
+		// GTAO per-slice horizon-arc integral (Jimenez 2016):
+		//   iarc = (cosN + 2*h*sin(n) - cos(2h - n)) / 4
+		float h0 = -fastAcos( clamp( horizonCos1, -1.0, 1.0 ) );
+		float h1 =  fastAcos( clamp( horizonCos0, -1.0, 1.0 ) );
+		float iarc0 = ( cosN + 2.0 * h0 * sin( n ) - cos( 2.0 * h0 - n ) ) * 0.25;
+		float iarc1 = ( cosN + 2.0 * h1 * sin( n ) - cos( 2.0 * h1 - n ) ) * 0.25;
+		visibility += projLen * ( iarc0 + iarc1 );
+	}
+
+	visibility /= float( pc.sliceCount );
+	visibility = clamp( visibility, 0.0, 1.0 );
+	visibility = pow( visibility, pc.finalPower );
+	// User intensity: 1 = full AO, 0 = no AO (lerp visibility toward 1).
+	visibility = mix( 1.0, visibility, clamp( pc.intensity, 0.0, 1.0 ) );
+	visibility = max( visibility, 0.0 );
+
+	// SSCS directional contact fold: darken the visibility where a short march
+	// toward the sun hits a near occluder (the crisp model-ground contact line).
+	// A multiply keeps it a darken-only refinement — it never brightens, so it
+	// cannot regress the GTAO term; the host gates it to sun maps only.
+	visibility *= sscsContact( P, texel, noise );
+
+	imageStore( aoImage, pix, vec4( visibility ) );
+}

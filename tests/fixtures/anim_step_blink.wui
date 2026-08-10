@@ -1,0 +1,29 @@
+// anim_step_blink.wui — STEP curve runtime PoC.
+//
+// Loaded via `wui_test_anim_step` console command. Centres a single
+// text leaf with the `animation "blink"` built-in (STEP curve, opacity
+// 1.0 → 0.0, 600ms loop). The compositor's lazy-create path resolves
+// the built-in via WUI_AnimFindBuiltin, routes the output into
+// animAlphaMul, and the forecolor-alpha gate multiplies it through to
+// the rendered text so the label visibly snaps on/off at 50% of cycle.
+
+menuDef {
+	name "anim_step_blink"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor 0.05 0.05 0.10 1
+
+	itemDef {
+		name "anim_step_blink_label"
+		rect 0.45 0.45 0.10 0.06
+		text "BLINK"
+		font "oxanium" 32
+		forecolor $bone
+		animation "blink"
+		visible 1
+		decoration
+	}
+}

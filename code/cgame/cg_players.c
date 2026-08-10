@@ -4,8 +4,13 @@
 //
 // cg_players.c -- handle the media and animation for player entities
 #include "cg_local.h"
-/* Phase 5: log channels */
+#include "../qcommon/wired/render/primitives.h"
+#include "../qcommon/wired/render/traps.h"
+#if FEAT_WIRED_UI
+#include "wired/cg_wired_store.h"	// WUI_StageMarkers_* (WA-3 bot-directive markers)
+#endif
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
+LOG_DECLARE_CHANNEL( ch_cgame_player, "cgame.player" );
 
 // Canonical sound slot names — order matches CSOUND_* defines in cg_public.h
 static const char *cg_soundSlotNames[CM_SOUND_SLOTS] = {
@@ -1683,7 +1688,6 @@ static void CG_PlayerFlag( centity_t *cent, qhandle_t hSkin, refEntity_t *torso 
 	memset( &pole, 0, sizeof(pole) );
 	pole.hModel = cgs.media.flagPoleModel;
 	VectorCopy( torso->lightingOrigin, pole.lightingOrigin );
-	pole.shadowPlane = torso->shadowPlane;
 	pole.renderfx = torso->renderfx;
 	CG_PositionEntityOnTag( &pole, torso, torso->hModel, "tag_flag" );
 	trap_R_AddRefEntityToScene( &pole );
@@ -1693,7 +1697,6 @@ static void CG_PlayerFlag( centity_t *cent, qhandle_t hSkin, refEntity_t *torso 
 	flag.hModel = cgs.media.flagFlapModel;
 	flag.customSkin = hSkin;
 	VectorCopy( torso->lightingOrigin, flag.lightingOrigin );
-	flag.shadowPlane = torso->shadowPlane;
 	flag.renderfx = torso->renderfx;
 
 	VectorClear(angles);
@@ -2108,27 +2111,71 @@ qboolean CG_WorldToScreen( vec3_t point, float *x, float *y ) {
 
 /*
 ================
-CG_Draw2DBotDirectives
+CG_WorldToScreenPixels
 
-2D pass: called from CG_Draw2D (AFTER trap_R_RenderScene) so that
-trap_R_DrawTextNorm is called while the renderer is in 2D mode.
-Iterates all clients, projects their lerpOrigin to screen, draws directive text.
-lerpOrigins are already updated by CG_AddPacketEntities before this runs.
+World-anchored-UI affordance (WA-1): project a world point to ABSOLUTE real-pixel
+screen coords. Wraps CG_WorldToScreen (which returns the 640x480 VIRTUAL space,
+centered at 320,240 — see NORM_HSCALE=1/640, NORM_VSCALE=1/480) and scales to the
+real framebuffer. Returns qfalse (and leaves out-params untouched) when the point
+is behind the camera. The coordinate conversion lives HERE, in one place, so the
+WA workstream's clients (WA-1 crosshair, WA-2 bot directives) don't re-derive it.
+
+🔴 The crosshair stages an OFFSET-FROM-CENTER, so its caller subtracts the screen
+centre from the absolute result. WA-2 (bot directives) wants the absolute pixels
+directly. WA-3 (damage plums) is PRE-PROJECTED (it already holds screen pixels)
+and does NOT call this — it would only need the virtual->real scale, not the
+world->screen projection.
 ================
 */
-void CG_Draw2DBotDirectives( void ) {
+qboolean CG_WorldToScreenPixels( vec3_t point, float *xPx, float *yPx ) {
+	float vx, vy;
+	if ( !CG_WorldToScreen( point, &vx, &vy ) ) {
+		return qfalse;
+	}
+	*xPx = vx * NORM_HSCALE * (float)cgs.glconfig.vidWidth;   // vx/640 * vidWidth
+	*yPx = vy * NORM_VSCALE * (float)cgs.glconfig.vidHeight;  // vy/480 * vidHeight
+	return qtrue;
+}
+
+#if FEAT_WIRED_UI
+/*
+================
+CG_StageBotDirectives
+
+WA-3: stage each active bot directive as a world-anchored MARKER under
+"markers.botdir" (the second marker-list client; plums are the first). cgame
+computes WHERE (world -> real-pixel screen), the stateless Wired UI markerlist
+element draws WHAT. Replaces the retired imperative CG_Draw2DBotDirectives /
+trap_R_DrawTextNorm 2D draw. Called from the scene-build phase (CG_AddLocalEntities)
+as its own atomic Begin/Push/Flush cycle, AFTER the plum cycle (the staging scratch
+holds one list at a time). lerpOrigins are valid here — CG_AddPacketEntities runs
+before CG_AddLocalEntities. Filter / +56 offset / 1500u cull / per-type text are
+unchanged; only the draw path + coord space (real pixels) move.
+
+Color: the directive text carries a Q3 ^-color prefix that the old renderer-text
+path parsed per-glyph. Text_Draw (the marker draw) does NOT parse ^-codes, so the
+prefix is stripped to a single vec4 (g_color_table) at the old 0.85 alpha and the
+plain text is staged.
+================
+*/
+void CG_StageBotDirectives( void ) {
 	botDirectiveDisplay_t	*bd;
 	centity_t			*cent;
 	vec3_t				origin;
-	float				x, y, dist;
+	float				xPx, yPx, dist;
 	char				text[128];
-	vec4_t				color;
+
+	WUI_StageMarkers_Begin( "markers.botdir" );
 
 	if ( !cg.snap ) {
+		WUI_StageMarkers_Flush();	/* push an empty list to clear the prior frame */
 		return;
 	}
 
 	for ( int i = 0; i < MAX_CLIENTS; i++ ) {
+		vec4_t	col;
+		int		idx;
+
 		// only bots
 		if ( !cgs.clientinfo[i].infoValid || !cgs.clientinfo[i].botSkill ) {
 			continue;
@@ -2152,15 +2199,16 @@ void CG_Draw2DBotDirectives( void ) {
 			continue;
 		}
 
-		// project origin above head
+		// world point above the bot's head
 		VectorCopy( cent->lerpOrigin, origin );
 		origin[2] += 56;	// slightly above where sprites float (48)
 
-		if ( !CG_WorldToScreen( origin, &x, &y ) ) {
+		// real-pixel screen position (WA-1 helper); behind camera -> skip
+		if ( !CG_WorldToScreenPixels( origin, &xPx, &yPx ) ) {
 			continue;
 		}
 
-		// build display text; color prefix encodes directive category
+		// build display text; ^-color prefix encodes directive category
 		switch ( bd->type ) {
 			case 5:		// DIR_SEEK_ITEM
 				Com_sprintf( text, sizeof( text ), "^3> %s", bd->targetName );
@@ -2196,20 +2244,23 @@ void CG_Draw2DBotDirectives( void ) {
 				continue;
 		}
 
-		Vector4Set( color, 1.0f, 1.0f, 1.0f, 0.85f );
-
-		trap_R_DrawTextNorm(
-			text,
-			x * NORM_HSCALE,
-			y * NORM_VSCALE,
-			FONT_UI,
-			(float)SMALLCHAR_HEIGHT * NORM_VSCALE,
-			color,
-			TEXT_ALIGN_CENTER,
-			TEXT_DROPSHADOW
-		);
+		// strip the ^X prefix -> single color (g_color_table) + plain text. Every
+		// case above starts with "^N"; default white if somehow not. Alpha 0.85
+		// matches the old uniform transparency.
+		if ( text[0] == '^' && text[1] ) {
+			idx = ColorIndexFromChar( text[1] );
+			Vector4Copy( g_color_table[idx], col );
+			col[3] = 0.85f;
+			WUI_StageMarkers_Push( xPx, yPx, col, text + 2 );
+		} else {
+			Vector4Set( col, 1.0f, 1.0f, 1.0f, 0.85f );
+			WUI_StageMarkers_Push( xPx, yPx, col, text );
+		}
 	}
+
+	WUI_StageMarkers_Flush();			/* push "markers.botdir" */
 }
+#endif // FEAT_WIRED_UI
 
 /*
 ===============
@@ -2301,62 +2352,6 @@ static void CG_PlayerSprites( centity_t *cent ) {
 	}
 }
 
-/*
-===============
-CG_PlayerShadow
-
-Returns the Z component of the surface being shadowed
-
-  should it return a full plane instead of a Z?
-===============
-*/
-#define	SHADOW_DISTANCE		128
-static qboolean CG_PlayerShadow( centity_t *cent, float *shadowPlane ) {
-	vec3_t		end, mins = {-15, -15, 0}, maxs = {15, 15, 2};
-	trace_t		trace;
-	float		alpha;
-
-	*shadowPlane = 0;
-
-	if ( cg_shadows.integer == 0 ) {
-		return qfalse;
-	}
-
-	// no shadows when invisible
-	if ( CG_IsPlayerInvisible(cent) ) {
-		return qfalse;
-	}
-
-	// send a trace down from the player to the ground
-	VectorCopy( cent->lerpOrigin, end );
-	end[2] -= SHADOW_DISTANCE;
-
-	trap_CM_BoxTrace( &trace, cent->lerpOrigin, end, mins, maxs, 0, MASK_PLAYERSOLID );
-
-	// no shadow if too high
-	if ( trace.fraction == 1.0 || trace.startsolid || trace.allsolid ) {
-		return qfalse;
-	}
-
-	*shadowPlane = trace.endpos[2] + 1;
-
-	if ( cg_shadows.integer != 1 ) {	// no mark for stencil or projection shadows
-		return qtrue;
-	}
-
-	// fade the shadow out with height
-	alpha = 1.0 - trace.fraction;
-
-	// hack / FPE - bogus planes?
-	//assert( DotProduct( trace.plane.normal, trace.plane.normal ) != 0.0f )
-
-	// add the mark as a temporary, so it goes directly to the renderer
-	// without taking a spot in the cg_marks array
-	CG_ImpactMark( cgs.media.shadowMarkShader, trace.endpos, trace.plane.normal,
-		cent->pe.legs.yawAngle, alpha,alpha,alpha,1, qfalse, 24, qtrue );
-
-	return qtrue;
-}
 
 
 /*
@@ -2370,80 +2365,59 @@ static void CG_PlayerSplash( centity_t *cent ) {
 	vec3_t		start, end;
 	trace_t		trace;
 	int			contents;
-	polyVert_t	verts[4];
+	decalDesc_t	dd;
 
-	if ( !cg_shadows.integer ) {
-		return;
-	}
+	// Vanilla gate + surface-find. Two fixed-offset PointContents checks ARE the
+	// gate (no cg_shadows gate — that cvar is retired this session and the wake is
+	// no longer shadow-tied; no replacement). The downward liquid trace then finds
+	// the real water-surface top (trace.endpos) — the correct placement Z; earlier
+	// beats' CG_WaterLevel sample-height "water-line" landed at the feet, and a
+	// re-emit throttle left frames with no splash. Both are gone: vanilla every-
+	// frame emit, vanilla surface Z.
 
 	VectorCopy( cent->lerpOrigin, end );
 	end[2] -= 24;
-
 	// if the feet aren't in liquid, don't make a mark
-	// this won't handle moving water brushes, but they wouldn't draw right anyway...
-	contents = CG_PointContents( end, 0 );
+	contents = trap_CM_PointContents( end, 0 );
 	if ( !( contents & ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) ) {
 		return;
 	}
 
 	VectorCopy( cent->lerpOrigin, start );
 	start[2] += 32;
-
-	// if the head isn't out of liquid, don't make a mark
-	contents = CG_PointContents( start, 0 );
+	// if the head isn't out of liquid (or in solid), don't make a mark
+	contents = trap_CM_PointContents( start, 0 );
 	if ( contents & ( CONTENTS_SOLID | CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) {
 		return;
 	}
 
-	// trace down to find the surface
-	trap_CM_BoxTrace( &trace, start, end, NULL, NULL, 0, ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) );
-
+	// trace down to find the water surface; trace.endpos is the surface point
+	trap_CM_BoxTrace( &trace, start, end, NULL, NULL, 0,
+		( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) );
 	if ( trace.fraction == 1.0 ) {
 		return;
 	}
 
-	// create a mark polygon
-	VectorCopy( trace.endpos, verts[0].xyz );
-	verts[0].xyz[0] -= 32;
-	verts[0].xyz[1] -= 32;
-	verts[0].st[0] = 0;
-	verts[0].st[1] = 0;
-	verts[0].modulate.rgba[0] = 255;
-	verts[0].modulate.rgba[1] = 255;
-	verts[0].modulate.rgba[2] = 255;
-	verts[0].modulate.rgba[3] = 255;
-
-	VectorCopy( trace.endpos, verts[1].xyz );
-	verts[1].xyz[0] -= 32;
-	verts[1].xyz[1] += 32;
-	verts[1].st[0] = 0;
-	verts[1].st[1] = 1;
-	verts[1].modulate.rgba[0] = 255;
-	verts[1].modulate.rgba[1] = 255;
-	verts[1].modulate.rgba[2] = 255;
-	verts[1].modulate.rgba[3] = 255;
-
-	VectorCopy( trace.endpos, verts[2].xyz );
-	verts[2].xyz[0] += 32;
-	verts[2].xyz[1] += 32;
-	verts[2].st[0] = 1;
-	verts[2].st[1] = 1;
-	verts[2].modulate.rgba[0] = 255;
-	verts[2].modulate.rgba[1] = 255;
-	verts[2].modulate.rgba[2] = 255;
-	verts[2].modulate.rgba[3] = 255;
-
-	VectorCopy( trace.endpos, verts[3].xyz );
-	verts[3].xyz[0] += 32;
-	verts[3].xyz[1] -= 32;
-	verts[3].st[0] = 1;
-	verts[3].st[1] = 0;
-	verts[3].modulate.rgba[0] = 255;
-	verts[3].modulate.rgba[1] = 255;
-	verts[3].modulate.rgba[2] = 255;
-	verts[3].modulate.rgba[3] = 255;
-
-	trap_R_AddPolyToScene( cgs.media.wakeMarkShader, 4, verts );
+	// GPU-side wake: emit ONE free (non-projected) decal at the vanilla water-
+	// surface point. cgame computes WHERE (the trace above) — the GPU draws a flat
+	// ±32 quad there. DECAL_FLAG_NO_PROJECT makes the fragment shader render the
+	// quad verbatim at trace.endpos instead of box-projecting it onto the nearest
+	// solid (water has no solid at the surface plane — the floor-snap the CPU poly
+	// worked around). Emitted EVERY frame (vanilla); a short lifetime + the round-
+	// robin ring overwrite keep a moving player from leaving a stale trail.
+	// Architecture-aligned: no per-frame CPU vertex emission (cg_cpuEffects-retire
+	// / gpu-resident).
+	memset( &dd, 0, sizeof( dd ) );
+	VectorCopy( trace.endpos, dd.origin );      // vanilla water-surface point
+	dd.normal[0] = 0.0f; dd.normal[1] = 0.0f; dd.normal[2] = 1.0f;   // up — horizontal quad
+	dd.radius    = 32.0f;
+	dd.orientation = 0.0f;
+	dd.rgba[0] = dd.rgba[1] = dd.rgba[2] = dd.rgba[3] = 1.0f;
+	dd.shader    = cgs.media.wakeMarkShader;
+	dd.flags     = DECAL_FLAG_NO_PROJECT;
+	dd.lifetime  = 0.1f;   // short — re-emitted every frame; survives a frame with
+	                       // margin, expires fast so a moving player leaves no trail.
+	trap_R_AddDecalToScene( &dd );
 }
 
 
@@ -2578,6 +2552,55 @@ int CG_LightVerts( vec3_t normal, int numVerts, polyVert_t *verts )
 	return qtrue;
 }
 
+#if FEAT_IQM
+/*
+===============
+CG_CharacterMesh
+
+Shared single-mesh body render, used by both the player IQM path (CG_Player) and the
+creature path (CG_Creature). Builds the body refEntity from the passed model/skin/
+frame/axis/renderfx (no clientInfo lookup — the caller supplies those), then adds it
+with powerups. Fills the caller-owned refEntity_t so the caller can inspect the
+post-add body (the engine may null hModel). This is a straight relocation of the body-
+build that used to live inline in CG_Player; the player passes values that reproduce
+the original behavior exactly.
+===============
+*/
+void CG_CharacterMesh( centity_t *cent, refEntity_t *body, qhandle_t hModel,
+	qhandle_t customShader, qhandle_t customSkin, int frame, int oldframe,
+	float backlerp, vec3_t axis[3], int renderfx, int alpha, int team ) {
+
+	memset( body, 0, sizeof(*body) );
+
+	body->hModel = hModel;
+	if ( customShader ) body->customShader = customShader;
+	else if ( customSkin ) body->customSkin = customSkin;
+
+	VectorCopy( cent->lerpOrigin, body->origin );
+	VectorCopy( cent->lerpOrigin, body->lightingOrigin );
+	body->renderfx = renderfx;
+	VectorCopy( body->origin, body->oldorigin );
+
+	// use the passed animation frames for the single-mesh model
+	body->frame = frame;
+	body->oldframe = oldframe;
+	body->backlerp = backlerp;
+
+	// full-body orientation
+	AxisCopy( axis, body->axis );
+
+#if FEAT_THIRD_PERSON
+#if FEAT_FORCE_ENTITY_VERTEX_ALPHA
+	if ( renderfx & RF_FORCE_ENT_ALPHA ) {
+		body->shaderRGBA[3] = (byte)alpha;
+	}
+#endif
+#endif
+
+	CG_AddRefEntityWithPowerups( cent, body, &cent->currentState, qtrue, team );
+}
+#endif // FEAT_IQM
+
 /*
 ===============
 CG_Player
@@ -2593,8 +2616,6 @@ void CG_Player( centity_t *cent ) {
 #if FEAT_THIRD_PERSON
 	int				thirdPersonAlpha = 255;
 #endif
-	qboolean		shadow;
-	float			shadowPlane;
 	refEntity_t		skull;
 	refEntity_t		powerup;
 	int				t;
@@ -2633,7 +2654,11 @@ void CG_Player( centity_t *cent ) {
 		if (!cg.renderingThirdPerson) {
 			renderfx = RF_THIRD_PERSON;			// only draw in mirrors
 		} else {
-			if (cg_cameraMode.integer) {
+			// cg_cameraMode hides the local player model (classic no-draw camera).
+			// A scene cinematic explicitly WANTS the player model on screen, so
+			// don't drop it while a scene is playing — the scene forces
+			// renderingThirdPerson itself and reverts on scene-end.
+			if (cg_cameraMode.integer && !cg.scenePlayback.active) {
 				return;
 			}
 		}
@@ -2684,15 +2709,11 @@ void CG_Player( centity_t *cent ) {
 	// add the talk baloon or disconnect icon
 	CG_PlayerSprites( cent );
 
-	// add the shadow
-	shadow = CG_PlayerShadow( cent, &shadowPlane );
-
 	// add a water splash if partially in and out of water
 	CG_PlayerSplash( cent );
 
-	if ( cg_shadows.integer == 3 && shadow ) {
-		renderfx |= RF_SHADOW_PLANE;
-	}
+	// Player shadows are rendered entirely by the engine (sun-driven CSM, gated by
+	// r_shadows); cgame no longer computes a ground plane or sets any shadow field.
 	renderfx |= RF_LIGHTING_ORIGIN;			// use the same origin for all
 #if FEAT_HARVESTER
 	if( cgs.gametype == GT_HARVESTER ) {
@@ -2701,41 +2722,31 @@ void CG_Player( centity_t *cent ) {
 #endif
 #if FEAT_IQM
 	//
-	// IQM single-mesh player model rendering
+	// single-mesh player model rendering (IQM, or an MD3-shaped .mdl body — both set
+	// bodyModel; the render is format-agnostic, so gate on bodyModel not iqmModel)
 	//
-	if ( ci->iqmModel ) {
+	if ( ci->bodyModel ) {
 		refEntity_t body;
-
-		memset( &body, 0, sizeof(body) );
-
-		body.hModel = ci->bodyModel;
-		if ( ci->bodyShader ) body.customShader = ci->bodyShader;
-		else if ( ci->bodySkin ) body.customSkin = ci->bodySkin;
-
-		VectorCopy( cent->lerpOrigin, body.origin );
-		VectorCopy( cent->lerpOrigin, body.lightingOrigin );
-		body.shadowPlane = shadowPlane;
-		body.renderfx = renderfx;
-		VectorCopy( body.origin, body.oldorigin );
-
-		// use legs animation frames for the single-mesh model
-		body.frame = legs.frame;
-		body.oldframe = legs.oldframe;
-		body.backlerp = legs.backlerp;
-
-		// copy rotation from legs (full-body orientation)
-		AxisCopy( legs.axis, body.axis );
+		int rfx = renderfx;
+		int alpha = 0;
 
 #if FEAT_THIRD_PERSON
 #if FEAT_FORCE_ENTITY_VERTEX_ALPHA
+		// fold the third-person fade into the renderfx the shared core applies
 		if ( thirdPersonAlpha < 255 ) {
-			body.renderfx |= RF_FORCE_ENT_ALPHA;
-			body.shaderRGBA[3] = thirdPersonAlpha;
+			rfx |= RF_FORCE_ENT_ALPHA;
+			alpha = thirdPersonAlpha;
 		}
 #endif
 #endif
 
-		CG_AddRefEntityWithPowerups( cent, &body, &cent->currentState, qtrue, ci->team );
+		// build + add the single-mesh body via the shared core (legs animation frames
+		// drive the single mesh; bodyShader wins over bodySkin, so pass bodySkin only
+		// when bodyShader is unset to preserve the original else-if priority)
+		CG_CharacterMesh( cent, &body, ci->bodyModel,
+			ci->bodyShader, ci->bodyShader ? 0 : ci->bodySkin,
+			legs.frame, legs.oldframe, legs.backlerp, legs.axis,
+			rfx, alpha, ci->team );
 
 		if ( !body.hModel ) {
 			return;
@@ -2760,7 +2771,6 @@ void CG_Player( centity_t *cent ) {
 	VectorCopy( cent->lerpOrigin, legs.origin );
 
 	VectorCopy( cent->lerpOrigin, legs.lightingOrigin );
-	legs.shadowPlane = shadowPlane;
 	legs.renderfx = renderfx;
 	VectorCopy (legs.origin, legs.oldorigin);	// don't positionally lerp at all
 
@@ -2775,7 +2785,7 @@ void CG_Player( centity_t *cent ) {
 	{
 		static qboolean legs_printed = qfalse;
 		if (cg_debugCharacterSkin.integer && !legs_printed) { legs_printed = qtrue;
-		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "[ENT-legs] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame_player), "characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
 			legs.characterSkin, legs.shaderRGBA[0], legs.shaderRGBA[1], legs.shaderRGBA[2], legs.shaderRGBA[3],
 			legs.renderfx, legs.customShader); }
 	}
@@ -2802,7 +2812,6 @@ void CG_Player( centity_t *cent ) {
 
 	CG_PositionRotatedEntityOnTag( &torso, &legs, ci->legsModel, "tag_torso");
 
-	torso.shadowPlane = shadowPlane;
 	torso.renderfx = renderfx;
 
 #if FEAT_THIRD_PERSON
@@ -2816,7 +2825,7 @@ void CG_Player( centity_t *cent ) {
 	{
 		static qboolean torso_printed = qfalse;
 		if (cg_debugCharacterSkin.integer && !torso_printed) { torso_printed = qtrue;
-		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "[ENT-torso] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame_player), "characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
 			torso.characterSkin, torso.shaderRGBA[0], torso.shaderRGBA[1], torso.shaderRGBA[2], torso.shaderRGBA[3],
 			torso.renderfx, torso.customShader); }
 	}
@@ -2827,7 +2836,6 @@ void CG_Player( centity_t *cent ) {
 		memset( &skull, 0, sizeof(skull) );
 
 		VectorCopy( cent->lerpOrigin, skull.lightingOrigin );
-		skull.shadowPlane = shadowPlane;
 		skull.renderfx = renderfx;
 
 		if ( cent->currentState.eFlags & EF_DEAD ) {
@@ -3015,7 +3023,6 @@ void CG_Player( centity_t *cent ) {
 
 	CG_PositionRotatedEntityOnTag( &head, &torso, ci->torsoModel, "tag_head");
 
-	head.shadowPlane = shadowPlane;
 	head.renderfx = renderfx;
 
 #if FEAT_THIRD_PERSON
@@ -3029,7 +3036,7 @@ void CG_Player( centity_t *cent ) {
 	{
 		static qboolean head_printed = qfalse;
 		if (cg_debugCharacterSkin.integer && !head_printed) { head_printed = qtrue;
-		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "[ENT-head] characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_cgame_player), "characterSkin=%d shaderRGBA=%d,%d,%d,%d renderfx=%d customShader=%d\n",
 			head.characterSkin, head.shaderRGBA[0], head.shaderRGBA[1], head.shaderRGBA[2], head.shaderRGBA[3],
 			head.renderfx, head.customShader); }
 	}

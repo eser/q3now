@@ -74,6 +74,10 @@ local TOP_VALID = {
     model = true,
     sounds = true,
     stats = true,
+    selectable = true,
+    movement = true,
+    attack = true,
+    can_activate = true,
 }
 
 local function validate(spec, char_name)

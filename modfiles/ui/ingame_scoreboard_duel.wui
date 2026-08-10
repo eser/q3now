@@ -1,0 +1,60 @@
+// ingame_scoreboard_duel.wui -- q3now In-game Duel scoreboard (Phase 6a canonical)
+//
+// HUD-layer overlay for tournament / duel game type. Same engine
+// state machine as FFA (cl_wired_ui_hud_state.c) — visible=1 when
+// wiredHud->showScores AND wiredHud->gametype == GT_DUEL.
+//
+// Layout (§8.1 canonical, duel variant): full-viewport flexbox
+// wrapper holding a single scorelist_widget element with
+// `group "duel"`. The group field routes the widget's CUSTOM
+// dispatch to WiredHud_DrawDuelBoard — a two-panel fighter
+// layout (left + right player cards with K/D/Acc/headshot %).
+// Phase 6a wrapper provides full-viewport sizing; the duel board
+// handles ALL internal layout.
+
+menuDef {
+	name "ingame_scoreboard_duel"
+	layer "hud"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 0
+	style 0
+
+	itemDef {
+		name "duel_overlay"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		alignX center
+		alignY center
+
+		// V2 chrome restore (chain 6.x S1): duel had no inner root wrapper, so
+		// add a chrome container (mirrors FFA's scoreboard_root) holding the
+		// duelboard, carrying the V2 panel frame. Engine gates this menu's
+		// visibility by name on wiredHud->showScores
+		// (cl_wired_ui_hud_state.c:579-610) — the chrome only styles it.
+		itemDef {
+			name "scoreboard_root"
+			type container
+			rect 0.1 0.04 0.8 0.92
+			direction column
+			width PERCENT 0.8
+			height PERCENT 0.92
+			background $hud_panel_bg
+			border 1px $accent
+
+			itemDef {
+				name "duelboard"
+				type scorelist_widget
+				group "duel"
+				rect 0 0 1 1
+				width PERCENT 1.0
+				height PERCENT 1.0
+				forecolor $bone
+				visible 1
+				decoration
+			}
+		}
+	}
+}

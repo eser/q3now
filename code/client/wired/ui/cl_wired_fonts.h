@@ -38,6 +38,7 @@ typedef struct {
 	char            atlasName[64];  // e.g. "sansman" — references the MSDF atlas
 	fontWeight_t    weight;         // semantic weight this face represents
 	fontStyle_t     style;          // normal or italic
+	qboolean        lazy;           // qtrue: not loaded at boot — its atlas loads on first use
 	// Populated at load time:
 	msdfFont_t     *atlas;          // pointer to loaded MSDF atlas (shared across faces)
 } fontFace_t;
@@ -77,6 +78,11 @@ const fontFace_t *WiredFont_Resolve(
 
 // Resolve either family name or full face name (e.g. "sansman-italic").
 const fontFace_t *WiredFont_ResolveByName( const char *name );
+
+// Ensure a face's atlas is loaded (loads lazy faces on first use, block-until-
+// resident) and return it. Returns NULL if the atlas can't be loaded. Call before
+// using face->atlas at draw time.
+msdfFont_t *WiredFont_EnsureAtlas( const fontFace_t *face );
 
 // hex color parsing
 qboolean CG_Hex16GetColor( const char *str, float *color );

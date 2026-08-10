@@ -1,5 +1,5 @@
 #!/bin/bash
-# run-quic-server.sh — 12-factor dedicated server for QUIC testing
+# run-quic-server.sh — 12-factor headless server for QUIC testing
 #
 # Usage:
 #   ./tests/run-quic-server.sh
@@ -13,7 +13,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$PROJECT_DIR/build/quic-test"
-BINARY="$BUILD_DIR/wired-ded.arm64.app/Contents/MacOS/wired-ded.arm64"
+BINARY="$BUILD_DIR/wired-headless.arm64.app/Contents/MacOS/wired-headless.arm64"
 ASSETS_DIR="${WIRED_BASEPATH:-/Users/eser/q3now/old-q3}"
 
 if [ ! -f "$BINARY" ]; then
@@ -22,9 +22,9 @@ if [ ! -f "$BINARY" ]; then
     exit 1
 fi
 
-if [ ! -d "$ASSETS_DIR/baseq3" ]; then
-    echo "ERROR: Game assets not found at $ASSETS_DIR/baseq3"
-    echo "Set WIRED_BASEPATH to the directory containing baseq3/pak0.pk3"
+if [ ! -d "$ASSETS_DIR/base" ]; then
+    echo "ERROR: Game assets not found at $ASSETS_DIR/base"
+    echo "Set WIRED_BASEPATH to the directory containing base/pak0.pk3"
     exit 1
 fi
 
@@ -36,12 +36,12 @@ export WIRED_SV_QUIC="${WIRED_SV_QUIC:-1}"
 export WIRED_SV_QUICAUTHTOKEN="${WIRED_SV_QUICAUTHTOKEN:-observer:member:user:testtoken,observer:leader:admin:admintoken}"
 export WIRED_SV_QUICMAXCLIENTS="${WIRED_SV_QUICMAXCLIENTS:-8}"
 export WIRED_MAP="${WIRED_MAP:-arena7}"
-export WIRED_DEDICATED="${WIRED_DEDICATED:-1}"
+export WIRED_HEADLESS="${WIRED_HEADLESS:-1}"
 export WIRED_NET_PORT="${WIRED_NET_PORT:-27960}"
 export WIRED_COM_HUNKMEGS="${WIRED_COM_HUNKMEGS:-128}"
 
 echo "════════════════════════════════════════════════════════════"
-echo " q3now Dedicated Server (QUIC Transport Enabled)"
+echo " q3now Headless Server (QUIC Transport Enabled)"
 echo "════════════════════════════════════════════════════════════"
 echo " Hostname:    $WIRED_SV_HOSTNAME"
 echo " Map:         $WIRED_MAP"
@@ -51,10 +51,11 @@ echo " Auth tokens: $(echo $WIRED_SV_QUICAUTHTOKEN | tr ',' '\n' | wc -l | tr -d
 echo " Assets:      $ASSETS_DIR"
 echo "════════════════════════════════════════════════════════════"
 
+# 'dedicated' is retired: the server is started by WIRED_MAP (executed as
+# "map <value>" after full init). It stays unlisted unless WIRED_SV_HOSTLISTED=1.
 exec "$BINARY" \
     +set fs_installpath "$ASSETS_DIR" \
     +set fs_homepath "$PROJECT_DIR" \
-    +set dedicated 1 \
     +set com_hunkmegs "${WIRED_COM_HUNKMEGS}" \
     +set net_port "${WIRED_NET_PORT}" \
     "$@"

@@ -1,38 +1,38 @@
 #!/usr/bin/env bash
 # smoke-quic-game.sh — QUIC game transport smoke test for q3now
 #
-# Launches wired-ded with QUIC game transport enabled, verifies QUIC
+# Launches wired-headless with QUIC game transport enabled, verifies QUIC
 # initialization and that the server accepts game connections without
 # crashing.  No Q3A assets required (exits before map load if assets
 # are missing, but still validates QUIC init + networking stack).
 #
 # Usage:
-#   tests/smoke-quic-game.sh [path-to-wired-ded]
+#   tests/smoke-quic-game.sh [path-to-wired-headless]
 #
 # Environment:
-#   Q3DIR   path to game installation with baseq3/pak*.pk3
+#   Q3DIR   path to game installation with base/pak*.pk3
 #           (default: /Applications/q3now)
 #
 # Exit codes:
 #   0  PASS — QUIC game transport initialized, no startup errors
 #   1  FAIL — fatal error or QUIC failed to initialize
-#   77 SKIP — dedicated server binary not found
+#   77 SKIP — headless server binary not found
 
 set -euo pipefail
 
-DED="${1:-wired-ded}"
+DED="${1:-wired-headless}"
 Q3DIR="${Q3DIR:-/Applications/q3now}"
 
 # Locate binary: support macOS .app bundle layout
 if [ ! -x "$DED" ]; then
-  BUNDLED="$Q3DIR/Contents/MacOS/wired-ded"
-  ALT="$Q3DIR/wired-ded"
+  BUNDLED="$Q3DIR/Contents/MacOS/wired-headless"
+  ALT="$Q3DIR/wired-headless"
   if [ -x "$BUNDLED" ]; then
     DED="$BUNDLED"
   elif [ -x "$ALT" ]; then
     DED="$ALT"
   else
-    echo "SKIP: wired-ded not found (tried $BUNDLED, $ALT, $DED)"
+    echo "SKIP: wired-headless not found (tried $BUNDLED, $ALT, $DED)"
     exit 77
   fi
 fi
@@ -41,7 +41,7 @@ LOGFILE=$(mktemp /tmp/q3now-quic-game-XXXXXX.log)
 trap "rm -f $LOGFILE" EXIT
 
 EXTRA_ARGS=""
-if [ -f "$Q3DIR/baseq3/pak0.pk3" ]; then
+if [ -f "$Q3DIR/base/pak0.pk3" ]; then
   EXTRA_ARGS="+set fs_installpath $Q3DIR +map arena7 +addbot visor 1 +wait 200"
 else
   # Asset-free: just enough to reach network init
@@ -52,7 +52,6 @@ fi
 # about missing pak files, but QUIC init happens before FS_InitFilesystem.
 # We capture the log either way and check for QUIC-specific messages.
 timeout 15 "$DED" \
-  +set dedicated 1 \
   +set sv_maxclients 8 \
   +set developer 1 \
   +set ttycon 0 \
@@ -61,9 +60,9 @@ timeout 15 "$DED" \
   2>&1 | tee "$LOGFILE" || true
 
 # Hard failures always fail regardless of assets
-if grep -qE "^ERROR:|VM_Create.*failed|Sys_Error|Segmentation fault|Illegal instruction" "$LOGFILE"; then
+if grep -qE "^ERROR:|VM_Create.*failed|Sys_Error|FATAL|Segmentation fault|Illegal instruction" "$LOGFILE"; then
   echo "FAIL: Fatal error detected:"
-  grep -E "^ERROR:|VM_Create.*failed|Sys_Error|Segmentation fault|Illegal instruction" "$LOGFILE"
+  grep -E "^ERROR:|VM_Create.*failed|Sys_Error|FATAL|Segmentation fault|Illegal instruction" "$LOGFILE"
   exit 1
 fi
 

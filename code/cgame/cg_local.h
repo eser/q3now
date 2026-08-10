@@ -8,6 +8,7 @@
 #include "../renderercommon/tr_types.h"
 #include "../game/bg_public.h"
 #include "cg_public.h"
+#include "../qcommon/wired/scene/wired_scene_eval.h"   /* cinematic-scene POD + evaluator (runs cgame-side) */
 
 // Quake3e compat: refEntity_t renamed shaderRGBA[4] to shader (color4ub_t with .rgba[4])
 #ifndef shaderRGBA
@@ -57,16 +58,6 @@ typedef struct {
 	vec3_t      perpAxis[36];                   // precomputed ring positions
 	float       beamLen;                        // total beam length
 
-	polyVert_t  debris[MAX_RAIL_DEBRIS * 4];    // billboard quads
-	vec3_t      debrisOrg[MAX_RAIL_DEBRIS];     // spawn positions (for gravity drift)
-	vec3_t      debrisDelta[MAX_RAIL_DEBRIS];   // random drift velocity
-	int         numDebris;
-
-	polyVert_t  sparks[MAX_RAIL_SPARKS * 4];    // impact spark quads
-	vec3_t      sparkOrg[MAX_RAIL_SPARKS];      // spawn positions
-	vec3_t      sparkVel[MAX_RAIL_SPARKS];      // velocity (surface normal based)
-	int         numSparks;
-
 	vec3_t      impactPoint;
 	vec3_t      impactNormal;
 
@@ -99,7 +90,6 @@ typedef struct {
 #define	MAX_STEP_CHANGE		32
 
 #define	MAX_VERTS_ON_POLY	10
-#define	MAX_MARK_POLYS		256
 
 #define STAT_MINUS			10	// num frame for '-' stats digit
 
@@ -182,6 +172,14 @@ typedef struct {
 
 //=================================================
 
+// Q1 monster animation set: the per-model frame-range table (code -> range),
+// derived from the model's Q1 .mdl frame names. Cached per gameModels[] slot.
+typedef struct {
+	qboolean	derived;			// the query ran for this model slot
+	int			numAnims;			// count of MANIM_* codes actually resolved (0 = not a monster model)
+	animation_t	anims[MANIM_COUNT];	// frame range per monster anim code
+} monsterAnimSet_t;
+
 #if FEAT_EARTHQUAKE_SYSTEM
 typedef struct {
 	vec3_t	origin;
@@ -236,17 +234,6 @@ typedef struct centity_s {
 // local entities are created as a result of events or predicted actions,
 // and live independently from all server transmitted entities
 
-typedef struct markPoly_s {
-	struct markPoly_s	*prevMark, *nextMark;
-	int			time;
-	qhandle_t	markShader;
-	qboolean	alphaFade;		// fade alpha instead of rgb
-	float		color[4];
-	poly_t		poly;
-	polyVert_t	verts[MAX_VERTS_ON_POLY];
-} markPoly_t;
-
-
 typedef enum {
 	LE_MARK,
 	LE_EXPLOSION,
@@ -273,7 +260,13 @@ typedef enum {
 	LEF_PUFF_DONT_SCALE  = 0x0001,			// do not scale size over time
 	LEF_TUMBLE			 = 0x0002,			// tumble over time, used for ejecting shells
 	LEF_SOUND1			 = 0x0004,			// sound 1 for kamikaze
-	LEF_SOUND2			 = 0x0008			// sound 2 for kamikaze
+	LEF_SOUND2			 = 0x0008,			// sound 2 for kamikaze
+	LEF_BLOOD_TRAIL		 = 0x0010,			// emit a blood trail while in free fall (gibs);
+											// owns its own trail-alive state, decoupled from
+											// the one-shot leBounceSoundType
+	LEF_BRASS			 = 0x0020			// ejected weapon brass: flatten to the ground
+											// plane on settle (never cleared, so the settle
+											// gate is reliable after bounces)
 } leFlag_t;
 
 typedef enum {
@@ -358,6 +351,10 @@ typedef struct {
 // this is regenerated each time a client's configstring changes,
 // usually as a result of a userinfo (name, model, etc) change
 #define	MAX_CUSTOM_SOUNDS	32
+
+// Distinct creature characters cached per map (see cgs.creatureInfo). Sized for the
+// number of different creature species on screen, not the number of creature entities.
+#define	MAX_CREATURE_CHARS	16
 
 typedef struct {
 	qboolean		infoValid;
@@ -452,7 +449,7 @@ typedef struct {
 } clientInfo_t;
 
 // Per-bot directive display state, populated from CS_BOTDIRECTIVES configstrings.
-// Mirrors the server-side directiveType_t enum (g_wiredbots.h) as raw ints.
+// Mirrors the server-side directiveType_t enum (g_wiredintel.h) as raw ints.
 typedef struct {
 	int		type;				// directive type; 0 = none
 	char	targetName[64];		// display name ("Heavy Armor", "Keel", etc.)
@@ -608,6 +605,14 @@ typedef struct {
 	// view rendering
 	refdef_t	refdef;
 	vec3_t		refdefViewAngles;		// will be converted to refdef.viewaxis
+
+	// cinematic scene (evaluator runs cgame-side; both structs are POD, embedded
+	// by value — pb.def self-points at sceneDef, valid across frames in this cg_t)
+	wiredScene_t			sceneDef;		// the loaded definition (shipped POD via trap)
+	wiredScenePlayback_t	scenePlayback;	// runtime cursor; .active gates the view hook
+	float					sceneFov;	// authored fov the evaluator produced this frame
+	qboolean				sceneFovActive;	// CG_CalcFov honors sceneFov when set
+	char					sceneLastCaption[64];	// last caption key logged (edge-dedupe)
 
 	// zoom key
 	qboolean	zoomed;
@@ -872,7 +877,7 @@ typedef struct {
 	qhandle_t	lightningShaderPrim;
 	qhandle_t	lightningArcShaderPrim;
 
-	// Phase 5T: PTRAIL_PUSH visual assets — beam shader +
+	// PTRAIL_PUSH visual assets — beam shader +
 	// sparkle-stream particle class. Registered via
 	// CG_RegisterGraphics + CG_RegisterPushParticleClasses; the
 	// generic CG_RegisterPlayerTrailDefs binds these into the
@@ -883,11 +888,26 @@ typedef struct {
 	qhandle_t	pushTrailShader;
 	qhandle_t	pushStreamClass;
 
+	// Particle class for the rocket smoke-trail (MIG-trail-1): the GPU-ring
+	// replacement for the legacy LE_ smoke-puff for-loop (single path, W-51).
+	qhandle_t	rocketSmokeClass;
+
+	// Particle class for the gib blood-trail (MIG-trail-2): the GPU-ring
+	// replacement for the legacy LE_FALL_SCALE_FADE drift-sprite loop in
+	// CG_BloodTrail (single path, W-51). The gib BODY stays CPU.
+	qhandle_t	gibTrailClass;
+
 	// Particle class handle for Lightning Gun primary impact sparks.
 	// Registered via CG_RegisterLightningParticleClasses() once
 	// cgs.media.lightningSparkShader is bound; consumed by
-	// CG_LightningSparks's GPU branch (cg_cpuEffects == 0).
+	// CG_LightningSparks (GPU particle emit).
 	qhandle_t	lgSparksClass;
+
+	// Particle class handle for the rocket-explosion fire core (rlboom
+	// 8-frame flipbook). Registered via CG_RegisterExplosionParticleClasses();
+	// emitted unconditionally at PROJ_ROCKET impact (the GPU single path, W-51 —
+	// the legacy LE_ sprite explosion is retired for rockets).
+	qhandle_t	explosionFireClass;
 
 	qhandle_t	friendShader;
 	qhandle_t	friendFlagShaderNeutral;
@@ -901,6 +921,11 @@ typedef struct {
 	qhandle_t	selectShader;
 	qhandle_t	viewBloodShader;
 	qhandle_t	tracerShader;
+	qhandle_t	tracerShaderPrim;	// primitive-shader handle of the same tracer art, for
+									// the beam pipeline (CG_Tracer emits a transient beam, not a
+									// poly). The regular tracerShader handle maps to whiteImage
+									// through the beam's primitive-shader registry — beams need a
+									// trap_R_RegisterPrimitiveShader handle (see cgs.media.lightningShaderPrim).
 	qhandle_t	lagometerShader;
 	qhandle_t	backTileShader;
 	qhandle_t	noammoShader;
@@ -916,7 +941,7 @@ typedef struct {
 	qhandle_t	shotgunSmokePuffShader;
 	qhandle_t	plasmaBallShader;
 	qhandle_t	waterBubbleShader;
-	sfxHandle_t	waterSplashSound;	// Phase 6.5.3: water-surface crossing impact (Q1 misc/h2ohit1, Q3 watr_in fallback; 0 if neither present)
+	sfxHandle_t	waterSplashSound;	// water-surface crossing impact (Q1 misc/h2ohit1, Q3 watr_in fallback; 0 if neither present)
 	qhandle_t	bloodTrailShader;
 
 	// qhandle_t	nailPuffShader;
@@ -1176,6 +1201,11 @@ typedef struct {
 	float			normXScaleStretch;	// stretch-to-fill scale factor
 	float			normYScaleStretch;
 
+	// M1: the glconfigGeneration value the screen/norm scale-bias fields above
+	// were last computed against. Compared per-frame against the engine counter
+	// to detect resolution changes and trigger CG_RefreshScreenDims().
+	int				cachedGlconfigGeneration;
+
 	int				serverCommandSequence;	// reliable command stream counter
 	int				processedSnapshotNum;// the number of snapshots cgame has requested
 
@@ -1223,11 +1253,27 @@ typedef struct {
 	qhandle_t		gameModels[MAX_MODELS];
 	sfxHandle_t		gameSounds[MAX_SOUNDS];
 
+	// Q1 monster animation tables, derived lazily from each model's Q1 .mdl frame
+	// names (the MDL-anim query) the first time a monster entity using that model
+	// is rendered. Parallel to gameModels[]; only the entries for monster models
+	// are populated (numAnims > 0). See cg_monster.c.
+	monsterAnimSet_t	monsterAnims[MAX_MODELS];
+
 	int				numInlineModels;
 	qhandle_t		inlineDrawModel[MAX_MODELS];
 	vec3_t			inlineModelMidpoints[MAX_MODELS];
 
 	clientInfo_t	clientinfo[MAX_CLIENTS];
+
+	// Creature clientInfo cache. A non-client creature (a behavior monster rendered
+	// as a character) needs a clientInfo_t for its models/skins, but must NOT occupy a
+	// player clientinfo[] slot (those are indexed by clientNum). This is a small cache
+	// keyed by character name — one entry per distinct creature CHARACTER, shared by all
+	// creature entities of that species (clientInfo_t is per-character media, not per
+	// entity). Reset for free by the memset(&cgs,0,...) at the top of CG_Init on map load.
+	clientInfo_t	creatureInfo[MAX_CREATURE_CHARS];
+	char			creatureCharName[MAX_CREATURE_CHARS][MAX_QPATH];
+	int				numCreatureChars;
 
 	// teamchat width is *3 because of embedded color codes
 	char			teamChatMsgs[TEAMCHAT_HEIGHT][TEAMCHAT_WIDTH*3+1];
@@ -1259,7 +1305,7 @@ typedef struct {
 	// per-attack stats (populated by bstats server command)
 	cgAttackStat_t	attackStats[MAX_CLIENTS][ATT_NUM_ATTACKS];
 
-	// Phase 6.5.3: this is a Quake-1 BSP (com_mapBspVersion == 29). Gates the
+	// this is a Quake-1 BSP (com_mapBspVersion == 29). Gates the
 	// Q1-fidelity water-surface FX (splash sprite/sound, underwater-impact
 	// bubble burst). Q3 maps keep their existing visuals. Set in CG_Init.
 	qboolean		q1Map;
@@ -1274,17 +1320,15 @@ extern	centity_t		cg_entities[MAX_GENTITIES];
 extern	weaponInfo_t	cg_weapons[MAX_WEAPONS];
 extern	itemInfo_t		cg_items[MAX_ITEMS];
 extern	botDirectiveDisplay_t	cg_botDirectives[MAX_CLIENTS];
-extern	markPoly_t		cg_markPolys[MAX_MARK_POLYS];
 
 extern	vmCvar_t		cg_centertime;
-extern	vmCvar_t		cg_cpuEffects;
 extern	vmCvar_t		cg_runpitch;
 extern	vmCvar_t		cg_runroll;
 extern	vmCvar_t		cg_bobup;
 extern	vmCvar_t		cg_bobpitch;
 extern	vmCvar_t		cg_bobroll;
 extern	vmCvar_t		cg_swingSpeed;
-extern	vmCvar_t		cg_shadows;
+
 extern	vmCvar_t		cg_gibs;
 extern	vmCvar_t		cg_drawSnapshot;
 extern	vmCvar_t		cg_draw3dIcons;
@@ -1308,11 +1352,11 @@ extern	vmCvar_t		cg_nopredict;
 extern	vmCvar_t		cg_noPlayerAnims;
 extern	vmCvar_t		cg_showmiss;
 extern	vmCvar_t		cg_footsteps;
-extern	vmCvar_t		cg_addMarks;
 extern	vmCvar_t		cg_gun_frame;
 extern	vmCvar_t		cg_gunX;
 extern	vmCvar_t		cg_gunY;
 extern	vmCvar_t		cg_gunZ;
+extern	vmCvar_t		cl_splitScreen;
 extern	vmCvar_t		cg_drawGun;
 extern	vmCvar_t		cg_tracerChance;
 extern	vmCvar_t		cg_tracerWidth;
@@ -1376,28 +1420,38 @@ void	CG_RunPlayListFrame( void );
 #endif
 
 #if FEAT_LENS_FLARES
-typedef enum {
-	LFM_reflexion,
-	LFM_glare,
-	LFM_star
-} lensFlareMode_t;
-
 #define MAX_LENSFLARES_PER_EFFECT       16
 #define MAX_MISSILE_LENSFLARE_EFFECTS   16
 
+// ── lens-flare aesthetic config-table (P5c-1) ─────────────────────────────────
+// All three flare types (map / missile / powerup) are described by the same
+// per-layer row (lensFlare_t) + per-effect header (lensFlareEffect_t). Three
+// selectors absorb the verified per-type asymmetries so one emitter path renders
+// all three byte-identically:
+//   colorMode: ABSOLUTE = rgb literal; ABSOLUTE_SCALED = rgb*driver (map star);
+//              PALETTE = powerupPalette[tag]*colorFactor.
+//   alphaMode: SCALED = alpha*driver (map); RAW = alpha as-is, clamped (missile);
+//              CONST = alpha literal, no driver (powerup).
+//   driver:    SCALE = the map/missile scale; PULSE = the powerup sin-pulse.
+typedef enum { LF_COLOR_ABSOLUTE = 0, LF_COLOR_ABSOLUTE_SCALED, LF_COLOR_PALETTE } lfColorMode_t;
+typedef enum { LF_ALPHA_SCALED = 0, LF_ALPHA_RAW, LF_ALPHA_CONST } lfAlphaMode_t;
+typedef enum { LF_DRIVE_SCALE = 0, LF_DRIVE_PULSE } lfDriver_t;
+
 typedef struct {
-	qhandle_t        shader;
-	lensFlareMode_t  mode;
-	float            pos;
-	float            size;
-	float            rgba[4];
-	float            rotationOffset;
-	float            rotationYawFactor;
-	float            rotationPitchFactor;
-	float            rotationRollFactor;
-	float            fadeAngleFactor;
-	float            entityAngleFactor;
-	float            intensityThreshold;
+	qhandle_t        shader;            // resolved render shader handle
+	float            pos;               // ghost-chain interp factor (missile-only)
+	float            size;              // missile radius coefficient
+	float            radiusBase;        // additive radius base
+	float            radiusScale;       // radius coefficient on the driver
+	float            rgba[4];           // source color (rgb 0..255) + alpha (0..255)
+	lfColorMode_t    colorMode;
+	lfAlphaMode_t    alphaMode;
+	lfDriver_t       driver;
+	float            colorFactor;       // PALETTE per-layer multiplier
+	float            gate;              // appear threshold on the driver (map layers)
+	float            intensityThreshold;// missile per-layer visibility gate
+	float            rotationOffset;    // static sprite roll (degrees)
+	float            rotationRollFactor;// time-driven spin coefficient
 } lensFlare_t;
 
 typedef struct {
@@ -1409,9 +1463,13 @@ typedef struct {
 	lensFlare_t      lensFlares[MAX_LENSFLARES_PER_EFFECT];
 } lensFlareEffect_t;
 
+// Powerup palette (Tier-3): PW_* → rgb; a==0 marks "no flare" (PW_INVIS).
+typedef struct { byte r, g, b, a; } lfPowerupColor_t;
+
 extern	vmCvar_t		cg_lensFlare;
 extern	vmCvar_t		cg_missileFlare;
 extern	vmCvar_t		cg_powerupFlares;
+extern	vmCvar_t		cg_halo;
 void	CG_InitLensFlares( void );
 void	CG_AddLensFlares( void );
 void	CG_AddMissileFlare( centity_t *cent );
@@ -1426,6 +1484,7 @@ extern	vmCvar_t		cg_cameraOrbitDelay;
 extern	vmCvar_t		cg_timescaleFadeEnd;
 extern	vmCvar_t		cg_timescaleFadeSpeed;
 extern	vmCvar_t		cg_timescale;
+extern	vmCvar_t		r_pinFrameTime;	// dev/visual-gate only — pin cg.time (entity-animation) for deterministic captures; sibling of r_pinShaderTime. CVAR_CHEAT, default 0.
 extern	vmCvar_t		cg_cameraMode;
 extern	vmCvar_t		cg_noTaunt;
 extern	vmCvar_t		cg_noProjectileTrail;
@@ -1494,7 +1553,7 @@ void CG_StartMusic( void );
 void CG_UpdateCvars( void );
 
 void CG_KeyEvent(int key, qboolean down);
-void CG_MouseEvent(int x, int y);
+void CG_MouseEvent(float x, float y);
 void CG_EventHandling(int type);
 void CG_RankRunFrame( void );
 void CG_BuildSpectatorString( void );
@@ -1514,6 +1573,8 @@ void CG_ZoomUp_f( void );
 void CG_AddBufferedSound( sfxHandle_t sfx);
 
 void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback );
+void CG_RenderCameraView( void );
+void CG_RefreshScreenDims( void );
 
 // Normalized-coordinate draw helpers (0.0-1.0 screen space)
 void CG_FillRectNorm( float nx, float ny, float nw, float nh, const float *color );
@@ -1559,6 +1620,17 @@ void CG_Player( centity_t *cent );
 void CG_ResetPlayerEntity( centity_t *cent );
 void CG_AddRefEntityWithPowerups( centity_t *cent, refEntity_t *ent, entityState_t *state, qboolean isPlayerPart, int team );
 void CG_NewClientInfo( int clientNum );
+#if FEAT_IQM
+// Shared single-mesh render core: builds a body refEntity (model/skin/origin/frame/
+// axis/renderfx) and adds it with powerups. Fills the caller-owned refEntity_t so the
+// caller can read the post-add body (the engine may null hModel). Model/skin/team come
+// in as parameters — no clientInfo lookup — so both the player body path and the
+// creature body path share this exact geometry. alpha is written to shaderRGBA[3] only
+// when renderfx carries RF_FORCE_ENT_ALPHA.
+void CG_CharacterMesh( centity_t *cent, refEntity_t *body, qhandle_t hModel,
+	qhandle_t customShader, qhandle_t customSkin, int frame, int oldframe,
+	float backlerp, vec3_t axis[3], int renderfx, int alpha, int team );
+#endif
 
 //
 // cg_predict.c
@@ -1580,6 +1652,7 @@ const char	*CG_ClientName( const clientInfo_t *ci );
 const char	*CG_ClientNameByNum( int clientNum );
 void CG_EntityEvent( centity_t *cent, vec3_t position );
 void CG_PainEvent( centity_t *cent, int health );
+int CG_WaterLevel( centity_t *cent );
 
 #if FEAT_EARTHQUAKE_SYSTEM
 void CG_AddEarthquake( const vec3_t origin, float radius, float duration, float fadeIn, float fadeOut, float amplitude );
@@ -1614,6 +1687,7 @@ void CG_RegisterWeapon( int weaponNum );
 void CG_RegisterItemVisuals( int itemNum );
 
 void CG_FireWeapon( centity_t *cent );
+qboolean CG_CalcMuzzlePoint( int entityNum, vec3_t muzzle );	// muzzle = fire origin (local: ps.origin+viewheight+14u along ps.viewangles)
 void CG_MissileHitWall( int pType, int clientNum, vec3_t origin, vec3_t dir, impactSound_t soundType, int sourceEntityNum );
 void CG_MissileHitPlayer( int pType, vec3_t origin, vec3_t dir, int entityNum );
 void CG_ShotgunFire( entityState_t *es );
@@ -1629,7 +1703,7 @@ void CG_ClearRailTrails( void );
 void CG_RegisterRailParticleClasses( void );      // cg_wired_particles.c
 void CG_RegisterLightningParticleClasses( void ); // cg_wired_particles.c
 
-// Phase 5T: generic player-trail infrastructure.
+// generic player-trail infrastructure.
 // Multiple trail types per player can be active concurrently
 // (e.g., a haste-carrying flag runner shows both PUSH and FLAG
 // trails). Each (client, type) pair has its own expiry timestamp;
@@ -1696,6 +1770,9 @@ void CG_TriggerPlayerTrail( int clientNum,
                             int durationMs );
 
 void CG_RegisterPushParticleClasses( void );   // cg_wired_particles.c
+void CG_RegisterExplosionParticleClasses( void ); // cg_wired_particles.c
+void CG_RegisterRocketTrailParticleClass( void ); // cg_wired_particles.c (MIG-trail-1)
+void CG_RegisterGibTrailParticleClass( void ); // cg_wired_particles.c (MIG-trail-2)
 void CG_GrappleTrail( centity_t *ent, const weaponInfo_t *wi );
 void CG_AddViewWeapon (playerState_t *ps);
 void CG_AddPlayerWeapon( refEntity_t *parent, playerState_t *ps, centity_t *cent, int team );
@@ -1705,8 +1782,6 @@ void CG_OutOfAmmoChange( void );	// should this be in pmove?
 //
 // cg_marks.c
 //
-void	CG_InitMarkPolys( void );
-void	CG_AddMarks( void );
 void	CG_ImpactMark( qhandle_t markShader,
 				    const vec3_t origin, const vec3_t dir,
 					float orientation,
@@ -1720,7 +1795,6 @@ void	CG_ImpactMark( qhandle_t markShader,
 void	CG_InitLocalEntities( void );
 localEntity_t	*CG_AllocLocalEntity( void );
 void	CG_AddLocalEntities( void );
-void	CG_DrawPlumOverlays( void );
 
 //
 // cg_effects.c
@@ -1735,10 +1809,10 @@ localEntity_t *CG_SmokePuff( const vec3_t p,
 				   int leFlags,
 				   qhandle_t hShader );
 void CG_BubbleTrail( vec3_t start, vec3_t end, float spacing );
-// Phase 6.5.3: a small spray-of-droplets burst + watr_in sound at a point on a
+// a small spray-of-droplets burst + watr_in sound at a point on a
 // liquid surface. Pure helper — callers gate on cgs.q1Map.
 void CG_WaterSplash( vec3_t point );
-// Phase 6.5.3: given a hitscan segment [start,end], emit CG_WaterSplash() at
+// given a hitscan segment [start,end], emit CG_WaterSplash() at
 // wherever it pierces a liquid surface (entry and/or exit). No-op unless cgs.q1Map.
 void CG_WaterCrossingSplashes( vec3_t start, vec3_t end );
 void CG_SpawnEffect( vec3_t org );
@@ -1763,7 +1837,10 @@ void CG_ImpactSparks( vec3_t origin, vec3_t dir );	// 11A
 #endif
 void CG_LightningSparks( vec3_t origin, vec3_t dir );
 
-void CG_GibPlayer( vec3_t playerOrigin );
+void CG_GibPlayer( const vec3_t playerOrigin, const vec3_t playerAngles,
+				   const vec3_t playerVelocity, const lerpFrame_t *bodyAnimation,
+				   const vec3_t damageDir, int knockbackParm );
+void CG_Debris( const vec3_t origin, int count );
 void CG_BigExplode( vec3_t playerOrigin );
 
 void CG_Bleed( vec3_t origin, int entityNum );
@@ -1797,7 +1874,15 @@ void CG_InitConsoleCommands( void );
 // cg_players.c
 //
 qboolean CG_WorldToScreen( vec3_t point, float *x, float *y );
-void CG_Draw2DBotDirectives( void );
+qboolean CG_WorldToScreenPixels( vec3_t point, float *xPx, float *yPx );	// WA: world -> ABSOLUTE real pixels (qfalse if behind camera)
+#if FEAT_WIRED_UI
+void CG_StageBotDirectives( void );	// WA-3: stage bot directives as "markers.botdir" markers (scene-build)
+
+// Load scripts/scene/<...>.lua and start cinematic playback, optionally binding
+// live entities to the scene's look-at target slots (positional). Shared by the
+// sceneplay console command and the "scene" server-command crossing.
+void CG_SceneLoadAndStart( const char *path, const int *actorEntityNums, int nActors );
+#endif
 
 //
 // cg_servercmds.c
@@ -1830,18 +1915,23 @@ void		trap_Print( const char *fmt );
 void		trap_Error(const char *fmt) NORETURN;
 
 // severity-preserving log and terminate
-void		trap_Log( log_severity_t severity, const char *text );
+void		trap_Log( log_severity_t severity, const char *channel, const char *text );
 void		NORETURN trap_Terminate( terminationReason_t reason, const char *text );
 
 // milliseconds should only be used for performance tuning, never
 // for anything game related.  Get time from the CG_DrawActiveFrame parameter
 int			trap_Milliseconds( void );
 
+#if defined(WASM_MODULE)
+int			trap_VM_ABI_Query( void );   // typed-IPC ABI handshake (docs/vm-typed-ipc-design.md)
+#endif
+
 // console variable interaction
 void		trap_Cvar_Register( vmCvar_t *vmCvar, const char *varName, const char *defaultValue, int flags );
 void		trap_Cvar_Update( vmCvar_t *vmCvar );
 void		trap_Cvar_Set( const char *var_name, const char *value );
 void		trap_Cvar_VariableStringBuffer( const char *var_name, char *buffer, int bufsize );
+void		trap_L10n_Get( const char *key, char *buffer, int bufsize );
 
 // ServerCommand and ConsoleCommand parameter access
 int			trap_Argc( void );
@@ -1917,7 +2007,7 @@ void		trap_S_UpdateEntityPosition( int entityNum, const vec3_t origin );
 // given entityNum and position
 void		trap_S_Respatialize( int entityNum, const vec3_t origin, vec3_t axis[3], int inwater );
 sfxHandle_t	trap_S_RegisterSound( const char *sample, qboolean compressed );		// returns buzz if not found
-int			trap_S_SoundDuration( sfxHandle_t handle );	// Phase 6.2: returns sound length in milliseconds
+int			trap_S_SoundDuration( sfxHandle_t handle );	// returns sound length in milliseconds
 void		trap_S_StartBackgroundTrack( const char *intro, const char *loop );	// empty name stops music
 void	trap_S_StopBackgroundTrack( void );
 
@@ -1957,12 +2047,56 @@ qboolean	trap_R_inPVS( const vec3_t p1, const vec3_t p2 );
 #if FEAT_IQM
 int		trap_R_GetIQMAnimations( qhandle_t model, iqmAnimInfo_t *anims, int maxAnims );
 #endif // FEAT_IQM
+int		trap_R_GetMDLAnimations( qhandle_t model, mdlAnimRange_t *anims, int maxAnims );
+
+//
+// cg_monster.c
+//
+qboolean	CG_MonsterAnimation( centity_t *cent, int *frame, int *oldFrame, float *backLerp );
+// True when the model at modelIndex is a Q1 monster model (has a derived anim table).
+// The eType router uses this to tell a monster ET_GENERAL from a plain one.
+qboolean	CG_IsMonsterModel( int modelIndex );
 void		trap_R_SetLightstylePattern( int style, const char *pattern );
+
+//
+// cg_creature.c
+//
+// True if a CS_MODELS string is the creature render-identity sentinel ("characters/
+// <name>/tag") rather than a real model — cg_servercmds skips registering it. Always
+// compiled (the server writes it regardless of the client's creature-render feature).
+qboolean	CG_IsCreatureTagModel( const char *str );
+#if FEAT_IQM
+// Render a behavior monster as its character (borrows character models/skins, draws via
+// the shared single-mesh core). CG_CreatureRenders is the router's go/no-go: qtrue only
+// when the entity names a character that loads a usable body; else route to CG_General.
+void		CG_Creature( centity_t *cent );
+qboolean	CG_CreatureRenders( centity_t *cent );
+#endif
 
 // The glconfig_t will not change during the life of a cgame.
 // If it needs to change, the entire cgame will be restarted, because
 // all the qhandle_t are then invalid.
 void		trap_GetGlconfig( glconfig_t *glconfig );
+
+// M1: cheap integer poll — the engine bumps this counter on every
+// re.BeginRegistration. cgame compares it against cgs.cachedGlconfigGeneration
+// to detect resolution changes (vid_restart) without copying glconfig_t.
+int			trap_GetGlconfigGeneration( void );
+
+// V-16 (2026-05-25): WiredUI viewport-provider registry traps. Engine
+// invokes provider->render( rect, userdata ) from the compositor's
+// WUI_LAYER_WORLD_VIEWPORT walk when a .wui viewport itemDef's `id`
+// matches the registration. Shared struct: qcommon/wired/ui_viewport_types.h.
+#include "../qcommon/wired/ui_viewport_types.h"
+void		trap_RegisterViewportProvider  ( const char *id, int lifetime, int input_mode, int is_vm_routed, int vm_key );
+void		trap_UnregisterViewportProvider( const char *id );
+// V-20 (2026-05-31): pull per-frame scene context for the world-viewport
+// provider callback (slot 224). Shared struct: qcommon/wired/ui_viewport_types.h.
+void		trap_GetSceneFrameContext      ( wuiSceneFrameCtx_t *out );
+
+// Load a cinematic-scene .lua engine-side and marshal the POD wiredScene_t
+// into *out (one load-time crossing; the evaluator then runs cgame-side).
+qboolean	trap_WiredSceneLoad           ( const char *name, wiredScene_t *out );
 
 // the gamestate should be grabbed at startup, and whenever a
 // configstring changes
@@ -1991,8 +2125,8 @@ int			trap_GetCurrentCmdNumber( void );
 
 qboolean	trap_GetUserCmd( int cmdNumber, usercmd_t *ucmd );
 
-// used for the weapon select and zoom
-void		trap_SetUserCmdValue( int stateValue, float sensitivityScale );
+// used for the weapon select, zoom, and cinematic-scene input-freeze (null-move)
+void		trap_SetUserCmdValue( int stateValue, float sensitivityScale, int freezeMove );
 
 // aids for VM testing
 void		testPrintInt( char *string, int i );

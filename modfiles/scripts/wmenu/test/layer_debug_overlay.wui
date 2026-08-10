@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+//
+// layer_debug_overlay.wmenu — Phase 3b1 visual z-order fixture.
+// Top near-white strip marking the DEBUG_OVERLAY layer; front-most of the
+// 6-layer stack. Driven by the force-override mask via wui_layer_test_*.
+// Production DEBUG_OVERLAY activation requires developer + wired_ui_debug
+// both non-zero — the override path supersedes both.
+
+menuDef {
+	name "layer_debug_overlay"
+	rect 0 0 1 0.10
+	fullScreen 0
+	visible 1
+	style 1
+	backcolor 0.90 0.90 0.90 0.85
+	layer "debug_overlay"
+
+	itemDef {
+		type 0
+		rect 0 0.20 1 0.60
+		textalign 1
+		font "oxanium" 22
+		forecolor 0.1 0.1 0.1 1
+		text "LAYER DEBUG_OVERLAY"
+		decoration
+		visible 1
+	}
+}

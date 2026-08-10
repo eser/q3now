@@ -3,7 +3,7 @@
 
 /*
 ===========================================================================
-g_stats.c -- JSON match stats export (7B / FEAT_JSON_STATS)
+g_stats.c -- JSON match stats export (FEAT_JSON_STATS)
 
 Writes a JSON file after each match with player stats.
 Output: stats/<serverId>_<timestamp>.json
@@ -12,7 +12,6 @@ Guarded by FEAT_JSON_STATS — compiled out when disabled.
 ===========================================================================
 */
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #if FEAT_JSON_STATS

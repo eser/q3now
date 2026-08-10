@@ -2047,6 +2047,43 @@ var Q3CopyPax01Entries = map[string]ProcessorEntry{
 	"maps/e1m8.bsp":     {Pack: "id1/pak0.pak", PackIndex: "maps/e1m8.bsp"},
 	"maps/start.bsp":    {Pack: "id1/pak0.pak", PackIndex: "maps/start.bsp"},
 	"maps/b_explob.bsp": {Pack: "id1/pak0.pak", PackIndex: "maps/b_explob.bsp"},
+	// MDL — Q1 monster models (IDPO alias; raw-copy). The engine's MDL loader
+	// converts them to renderable MD3 and carries the frame names for the
+	// client-side animation derivation. The skin is embedded in the .mdl, so
+	// one entry per monster; the target path re-homes it under creatures/.
+	"creatures/soldier/soldier.mdl": {Pack: "id1/pak0.pak", PackIndex: "progs/soldier.mdl"},
+	// Same soldier .mdl re-homed under the character-manifest model path so the
+	// soldier can also load as a single-mesh character body (characters/soldier/
+	// models/body.mdl); the character loader tries .mdl and renders it MD3-shaped.
+	"characters/soldier/models/body.mdl": {Pack: "id1/pak0.pak", PackIndex: "progs/soldier.mdl"},
+	// Dog — the Q1 rottweiler. Same two-row pattern as the soldier: the model under
+	// creatures/ (the spawn's modelindex + the MDL-anim source) and a re-home under the
+	// character-manifest model path so it loads as a single-mesh character body.
+	"creatures/dog/dog.mdl":         {Pack: "id1/pak0.pak", PackIndex: "progs/dog.mdl"},
+	"characters/dog/models/body.mdl": {Pack: "id1/pak0.pak", PackIndex: "progs/dog.mdl"},
+	// Knight — the Q1 sword knight. Same two-row pattern.
+	"creatures/knight/knight.mdl":      {Pack: "id1/pak0.pak", PackIndex: "progs/knight.mdl"},
+	"characters/knight/models/body.mdl": {Pack: "id1/pak0.pak", PackIndex: "progs/knight.mdl"},
+	// Demon (fiend) — the Q1 leaping beast. Same two-row pattern.
+	"creatures/demon/demon.mdl":        {Pack: "id1/pak0.pak", PackIndex: "progs/demon.mdl"},
+	"characters/demon/models/body.mdl": {Pack: "id1/pak0.pak", PackIndex: "progs/demon.mdl"},
+	// Ogre — the Q1 chainsaw/grenade ogre. Same two-row pattern.
+	"creatures/ogre/ogre.mdl":         {Pack: "id1/pak0.pak", PackIndex: "progs/ogre.mdl"},
+	"characters/ogre/models/body.mdl": {Pack: "id1/pak0.pak", PackIndex: "progs/ogre.mdl"},
+	// Shambler — the Q1 shambler. Same two-row pattern.
+	"creatures/shambler/shambler.mdl":     {Pack: "id1/pak0.pak", PackIndex: "progs/shambler.mdl"},
+	"characters/shambler/models/body.mdl": {Pack: "id1/pak0.pak", PackIndex: "progs/shambler.mdl"},
+	// Zombie — the Q1 zombie (dies by gibbing; no death anim, by design). Same two-row pattern.
+	"creatures/zombie/zombie.mdl":       {Pack: "id1/pak0.pak", PackIndex: "progs/zombie.mdl"},
+	"characters/zombie/models/body.mdl": {Pack: "id1/pak0.pak", PackIndex: "progs/zombie.mdl"},
+	// Wizard (scrag) — the Q1 flying spellcaster. Same two-row pattern; it flies via its
+	// manifest movement="fly" (3D steer, no ground path), not via anything here.
+	"creatures/wizard/wizard.mdl":       {Pack: "id1/pak0.pak", PackIndex: "progs/wizard.mdl"},
+	"characters/wizard/models/body.mdl": {Pack: "id1/pak0.pak", PackIndex: "progs/wizard.mdl"},
+	// Boss (Chthon) — the Q1 lava lord. Same two-row pattern; he lobs aimed lavaballs via
+	// his manifest attack="ranged", not via anything here.
+	"creatures/boss/boss.mdl":         {Pack: "id1/pak0.pak", PackIndex: "progs/boss.mdl"},
+	"characters/boss/models/body.mdl": {Pack: "id1/pak0.pak", PackIndex: "progs/boss.mdl"},
 	// WAV → Opus (Q1 8-bit 11025 Hz mono; converted via opus pipeline)
 	"sound/ambience/buzz1.opus":    {Mode: ModeConvert, Converter: "opus", Pack: "id1/pak0.pak", PackIndex: "sound/ambience/buzz1.wav"},
 	"sound/ambience/comp1.opus":    {Mode: ModeConvert, Converter: "opus", Pack: "id1/pak0.pak", PackIndex: "sound/ambience/comp1.wav"},

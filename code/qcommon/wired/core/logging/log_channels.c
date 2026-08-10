@@ -3,7 +3,7 @@
 
 /*
 ===========================================================================
-log_channels.c — Hierarchical log-channel registry (Phase 1)
+log_channels.c — Hierarchical log-channel registry
 
 Storage + linear-scan lookup + lazy registration + dot-hierarchy
 inheritance resolution. See log_channels.h for the contract.
@@ -11,7 +11,7 @@ inheritance resolution. See log_channels.h for the contract.
 Threading model:
   - Registration (Log_GetChannel, Log_FindChannel, Log_ResolveChannel,
     Log_ResolveAllChannels) acquires s_channels_mutex.
-  - The eventual hot path in Com_Logv (Phase 2) does a lock-free
+  - The eventual hot path in Com_Logv does a lock-free
     aligned-int read of log_channels[id].effectiveSev. Aligned int
     reads/writes are atomic on every platform we target; readers may
     see either old or new value during a resolve transition, both are

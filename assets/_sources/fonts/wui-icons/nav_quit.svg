@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- nav_quit (U+E007) — power-off symbol: arc + vertical stroke -->
+  <path d="M 28 26
+           C 18 36 14 50 18 64
+           C 22 78 36 88 50 88
+           C 64 88 78 78 82 64
+           C 86 50 82 36 72 26
+           L 64 34
+           C 72 42 74 52 70 60
+           C 66 70 58 76 50 76
+           C 42 76 34 70 30 60
+           C 26 52 28 42 36 34 Z" fill="black"/>
+  <path d="M 46 8 L 54 8 L 54 50 L 46 50 Z" fill="black"/>
+</svg>

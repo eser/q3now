@@ -1,0 +1,43 @@
+// qw_bottom_hint_bar — bottom hotkey hint strip widget
+// Interface (consumer): #include directly into the menuDef body.
+// Tokens: $accent, $boneDim, $font_icon, $font_mono, $spacing_lg,
+//         $spacing_md
+// Cvar binds: `name` (player handle); falls back to LAROUX.POS literal.
+// Composition: row container — left hotkey hints + spacer + right
+//   "◆ SIGNED IN · <name>" identity caption. Padding on the outer
+//   container so the strip is not glued to the screen edge.
+itemDef {
+	name "bottom_bar"
+	type container
+	position absolute
+	bottom 0
+	left 0
+	width 100vw
+	height 4vh
+	direction row
+	padding $spacing_md $spacing_lg
+	alignY center
+	gap $spacing_md
+
+	itemDef { type 0 rect 0 0 10vw 2vh height FIT width PERCENT 10vw text "[UP/DN] NAVIGATE" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { type 0 rect 0 0 8vw 2vh height FIT width PERCENT 8vw text "[ENT] SELECT"     textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { type 0 rect 0 0 8vw 2vh height FIT width PERCENT 8vw text "[~] CONSOLE"      textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { type 0 rect 0 0 7vw 2vh height FIT width PERCENT 7vw text "[ESC] QUIT"       textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { type container grow 1 decoration visible 1 }
+
+	itemDef {
+		name "bottom_signed_in_row"
+		type container
+		rect 0 0 26vw 2vh
+		height FIT
+		direction row
+		alignY center
+		gap 0.012
+		width PERCENT 26vw
+		grow 0
+
+		itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond"    textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 11vw  2vh height FIT width PERCENT 11vw  text "SIGNED IN  ·  " textalign 0 font $font_mono  9 forecolor $accent decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 10vw  2vh height FIT width PERCENT 10vw  text "LAROUX.POS"     textalign 0 font $font_mono  9 forecolor $accent cvar "name" decoration visible 1 grow 0 }
+	}
+}

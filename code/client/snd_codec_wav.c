@@ -6,7 +6,6 @@
 #include "client.h"
 #include "snd_codec.h"
 #include "../qcommon/q_feats.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 #if FEAT_LEGACY_FORMATS_AUDIO

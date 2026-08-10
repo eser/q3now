@@ -5,7 +5,6 @@
 
 #include "server.h"
 #include "sv_bot_awareness.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 // ── Internal state ────────────────────────────────────────────────────────────

@@ -1,0 +1,15 @@
+// boss_intro.script — a minimal set-piece for the scripted verb dispatcher.
+// One verb per line: <verb> [args].  // starts a comment.  Blank lines ignored.
+//
+// The sequence: the scripted monster walks to a marker, waits a beat, then
+// holds until a player comes into its sight, and only then attacks. The blocking
+// verbs (wait / hold / playersight) suspend the cursor and resume on their
+// wake-condition — the whole point of the re-entrant runner.
+print boss-intro-begin
+gotomarker script_marker_a   // set a nav goal toward the named marker
+hold                          // suspend until the walk finishes (nav arrival)
+wait 500                      // suspend a fixed half-second, then continue
+faceangles 180 0             // choreography: face back the way it came
+playersight                   // suspend until a player is in sight (then target them)
+print player-spotted
+attack                        // engage the player it just spotted

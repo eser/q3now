@@ -15,7 +15,6 @@ See arena.h for the public API contract.
 #include "q_shared.h"
 #include "qcommon.h"
 #include "arena.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 #define ARENA_MAX_REGISTERED 32

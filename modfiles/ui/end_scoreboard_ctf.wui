@@ -1,0 +1,123 @@
+// end_scoreboard_ctf.wui -- q3now End-of-match CTF scoreboard (Phase 6c canonical)
+//
+// HUD-layer intermission overlay for Capture the Flag (also routes
+// GT_1FCTF). Phase 6c shape mirrors `end_scoreboard_tdm` exactly —
+// flag-state surfacing lives in the separate flagstatus HUD element
+// (cl_wired_hud_elem_flagstatus.c), not the scoreboard. Phase 6b
+// audit confirmed: the scoreboard is a pure per-team player list +
+// (at intermission) the widget's internal match-summary banner.
+//
+// Wrapper differences from `ingame_scoreboard_ctf`: alignY center +
+// Disconnect/Continue footer (same as `end_scoreboard_tdm`).
+
+menuDef {
+	name "end_scoreboard_ctf"
+	layer "hud"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 0
+	style 0
+
+	itemDef {
+		name "scoreboard_overlay"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		alignX center
+		alignY center
+
+		itemDef {
+			name "scoreboard_root"
+			type container
+			rect 0.05 0.05 0.9 0.9
+			direction column
+			gap $spacing_md
+			padding $spacing_md $spacing_md
+			width PERCENT 0.9
+			height PERCENT 0.9
+
+			itemDef {
+				name "team_header"
+				type container
+				rect 0 0 1 0.04
+				direction row
+				gap $spacing_md
+				height FIT
+				width PERCENT 1.0
+
+				itemDef { name "red_label"  type 0 rect 0 0 0.5 0.035 height FIT width PERCENT 0.5 text "RED TEAM"  textalign 1 font $font_sans_bold 18 forecolor $primary_red  decoration visible 1 grow 1 }
+				itemDef { name "blue_label" type 0 rect 0 0 0.5 0.035 height FIT width PERCENT 0.5 text "BLUE TEAM" textalign 1 font $font_sans_bold 18 forecolor $accent decoration visible 1 grow 1 }
+			}
+
+			itemDef {
+				name "split_pane"
+				type container
+				rect 0 0 1 0.82
+				direction row
+				gap $spacing_md
+				grow 1
+				height GROW
+				width PERCENT 1.0
+
+				itemDef {
+					name "red_panel"
+					type container
+					rect 0 0 0.5 1.0
+					direction column
+					grow 1
+					height PERCENT 1.0
+
+					itemDef {
+						name "red_scorelist"
+						type scorelist_widget
+						group "red"
+						rect 0 0 1 1
+						width PERCENT 1.0
+						height PERCENT 1.0
+						feeder "players_red_team"
+						forecolor $team_red_text
+						visible 1
+						decoration
+					}
+				}
+
+				itemDef {
+					name "blue_panel"
+					type container
+					rect 0 0 0.5 1.0
+					direction column
+					grow 1
+					height PERCENT 1.0
+
+					itemDef {
+						name "blue_scorelist"
+						type scorelist_widget
+						group "blue"
+						rect 0 0 1 1
+						width PERCENT 1.0
+						height PERCENT 1.0
+						feeder "players_blue_team"
+						forecolor $team_blue_text
+						visible 1
+						decoration
+					}
+				}
+			}
+
+			itemDef {
+				name "popup_footer"
+				type container
+				rect 0 0 1 0.05
+				direction row
+				gap $spacing_md
+				alignX end
+				height FIT
+				width PERCENT 1.0
+
+				itemDef { name "btn_disconnect" type 1 rect 0 0 0.18 0.04 height FIT text "Disconnect" textalign 1 font $font_sans 13       forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { exec "disconnect" } }
+				itemDef { name "btn_continue"   type 1 rect 0 0 0.18 0.04 height FIT text "Continue"   textalign 1 font $font_sans_bold 13 forecolor $accent  forecolor.active $accent visible 1 grow 0 action { exec "vstr nextmap" } }
+			}
+		}
+	}
+}

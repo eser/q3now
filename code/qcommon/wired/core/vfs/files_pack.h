@@ -51,9 +51,9 @@ typedef enum {
 
 typedef struct pack_s {
 	packType_t		type;
-	char			*pakFilename;				// c:\quake3\baseq3\pak0.pk3
+	char			*pakFilename;				// c:\quake3\base\pak0.pk3
 	char			*pakBasename;				// pak0
-	const char		*pakGamename;				// baseq3
+	const char		*pakGamename;				// base
 #if FEAT_SW3Z
 	union {
 		unzFile		zip;
@@ -81,7 +81,7 @@ typedef struct pack_s {
 	unsigned int	stringTableSize;
 	unsigned long	dataOffset;
 
-	/* Per-pack reusable compressed-data scratch buffer (Phase 4-#2).
+	/* Per-pack reusable compressed-data scratch buffer.
 	 * SW3Z_LoadArchive computes maxCompressedSize once; the scratch is
 	 * lazily allocated on first read and grown geometrically (in
 	 * practice, allocated once at maxCompressedSize and reused for the

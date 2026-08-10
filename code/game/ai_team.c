@@ -36,7 +36,7 @@
 #include "ai_dmnet.h"
 #include "ai_team.h"
 #include "ai_vcmd.h"
-#include "wired/bots/g_wiredbots.h"
+#include "wired/bots/g_wiredintel.h"
 
 #include "match.h"
 
@@ -104,7 +104,7 @@ int BotClientTravelTimeToGoal(int client, bot_goal_t *goal) {
 	}
 
 	if (!areanum) return 1;
-	return trap_AAS_AreaTravelTimeToGoalArea(areanum, ps.origin, goal->areanum, TFL_DEFAULT);
+	return BotAASTravelTimeProxy(ps.origin, goal->origin);
 }
 
 /*
@@ -315,7 +315,7 @@ void BotSayVoiceTeamOrder(bot_state_t *bs, int toclient, char *voicechat) {
 BotCTFOrder
 ==================
 Wrapper that delivers a CTF order both via the legacy chat channel (for human
-players) and directly to bot recipients via the WiredBots directive system.
+players) and directly to bot recipients via the WiredIntel directive system.
 */
 static void BotCTFOrder( bot_state_t *bs, int toclient,
                           directiveType_t type, int target_client ) {
@@ -1966,7 +1966,7 @@ void BotTeamAI(bot_state_t *bs) {
 			if (bs->becometeamleader_time && bs->becometeamleader_time < FloatTime()) {
 				BotAI_BotInitialChat(bs, "iamteamleader", NULL);
 				trap_BotEnterChat(bs->cs, 0, CHAT_TEAM);
-				if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_STATUS_STARTLEADER, NULL); else BotSayVoiceTeamOrder(bs, -1, VOICECHAT_STARTLEADER);
+				if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_STATUS_STARTLEADER, NULL); else BotSayVoiceTeamOrder(bs, -1, VOICECHAT_STARTLEADER);
 				ClientName(bs->client, netname, sizeof(netname));
 				Q_strncpyz(bs->directives.teamleader, netname, sizeof(bs->directives.teamleader));
 				bs->becometeamleader_time = 0;

@@ -5,7 +5,6 @@
 
 #include "q_shared.h"
 #include "qcommon.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 #define MAX_CMD_BUFFER  65536
@@ -20,6 +19,15 @@ static int   cmd_wait;
 static int   cmd_waitms_until;	/* absolute Sys_Milliseconds() deadline for /waitms */
 static cmd_t cmd_text;
 static byte  cmd_text_buf[MAX_CMD_BUFFER];
+
+/* /waitForMap gate. Yields Cbuf until the
+   client+server reach a fully-loaded state. Implementation here is purely the
+   gating mechanism; the readiness policy lives in the client (CL_Init
+   registers a check pointer + the user-facing command). Frame-counted
+   safety timeout prevents a stuck smoke from hanging indefinitely. */
+static qboolean  cmd_waitForMap_active;
+static int       cmd_waitForMap_framesLeft;
+static qboolean (*cmd_waitForMap_check)( void );
 
 
 //=============================================================================
@@ -236,11 +244,11 @@ void Cbuf_ExecuteText( cbufExec_t exec_when, const char *text )
 		cmd_wait = 0; // discard any pending waiting
 		cmd_waitms_until = 0;
 		if ( text && text[0] != '\0' ) {
-			Com_Log( SEV_DEBUG, LOG_CH(ch_system), S_COLOR_YELLOW "EXEC_NOW %s\n", text);
+			Com_Log( SEV_DEBUG, LOG_CH(ch_system), "EXEC_NOW %s\n", text);
 			Cmd_ExecuteString( text );
 		} else {
 			Cbuf_Execute();
-			Com_Log( SEV_DEBUG, LOG_CH(ch_system), S_COLOR_YELLOW "EXEC_NOW %s\n", cmd_text.data );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_system), "EXEC_NOW %s\n", cmd_text.data );
 		}
 		break;
 	case EXEC_INSERT:
@@ -293,6 +301,16 @@ void Cbuf_Execute( void )
 			return;
 		}
 		cmd_waitms_until = 0;
+	}
+
+	if ( cmd_waitForMap_active ) {
+		if ( cmd_waitForMap_check != NULL && cmd_waitForMap_check() ) {
+			cmd_waitForMap_active = qfalse;
+			Com_Log( SEV_INFO, LOG_CH(ch_system),
+				"waitForMap: map ready, releasing Cbuf\n" );
+		} else {
+			return;
+		}
 	}
 
 	// This will keep // style comments all on one line by not breaking on
@@ -378,7 +396,44 @@ void Cbuf_Execute( void )
 		if ( cmd_wait > 0 ) {
 			break;
 		}
+
+		// break on /waitForMap arming — gate must yield the cbuf so the
+		// remaining commands (the next +map, +quit, …) aren't drained in
+		// the same Cbuf_Execute pass that armed the gate.
+		if ( cmd_waitForMap_active ) {
+			break;
+		}
 	}
+}
+
+
+/*
+============
+Cbuf_RegisterWaitForMapCheck
+
+Client (and dedicated-server, if it ever needs it) installs a readiness
+predicate. The /waitForMap command yields Cbuf until the predicate returns
+qtrue. NULL re-installs are a no-op.
+============
+*/
+void Cbuf_RegisterWaitForMapCheck( qboolean (*check)( void ) )
+{
+	cmd_waitForMap_check = check;
+}
+
+
+/*
+============
+Cbuf_RequestWaitForMap
+
+Arm the /waitForMap gate. `maxFrames` is the safety-timeout budget — when
+exhausted, Cbuf_Wait clears the gate with a SEV_WARN.
+============
+*/
+void Cbuf_RequestWaitForMap( int maxFrames )
+{
+	cmd_waitForMap_active    = qtrue;
+	cmd_waitForMap_framesLeft = maxFrames;
 }
 
 
@@ -391,6 +446,14 @@ void Cbuf_Wait( void )
 {
 	if ( cmd_wait > 0 ) {
 		--cmd_wait;
+	}
+
+	if ( cmd_waitForMap_active ) {
+		if ( --cmd_waitForMap_framesLeft <= 0 ) {
+			cmd_waitForMap_active = qfalse;
+			COM_WARN( LOG_CH(ch_system),
+				"waitForMap: TIMEOUT — map did not become ready in budget; releasing Cbuf\n" );
+		}
 	}
 }
 
@@ -558,6 +621,9 @@ typedef struct cmd_function_s
 	xcommand_t				function;
 	completionFunc_t	complete;
 	qboolean				cgame;	// registered by cgame via CG_ADDCOMMAND?
+	const void				*owner;	// for cgame cmds: the owning cgame VM handle,
+									// so a single app's teardown removes only its
+									// own commands. NULL for engine commands.
 } cmd_function_t;
 
 
@@ -873,7 +939,7 @@ static cmd_function_t *Cmd_FindCommand( const char *cmd_name )
 Cmd_AddCommand
 ============
 */
-static void Cmd_AddCommandInternal( const char *cmd_name, xcommand_t function, qboolean cgame ) {
+static void Cmd_AddCommandInternal( const char *cmd_name, xcommand_t function, qboolean cgame, const void *owner ) {
 	// fail if the command already exists
 	if ( Cmd_FindCommand( cmd_name ) )
 	{
@@ -889,16 +955,17 @@ static void Cmd_AddCommandInternal( const char *cmd_name, xcommand_t function, q
 	cmd->function = function;
 	cmd->complete = NULL;
 	cmd->cgame = cgame;
+	cmd->owner = owner;
 	cmd->next = cmd_functions;
 	cmd_functions = cmd;
 }
 
 void Cmd_AddCommand( const char *cmd_name, xcommand_t function ) {
-	Cmd_AddCommandInternal( cmd_name, function, qfalse );
+	Cmd_AddCommandInternal( cmd_name, function, qfalse, NULL );
 }
 
-void Cmd_AddCgameCommand( const char *cmd_name ) {
-	Cmd_AddCommandInternal( cmd_name, NULL, qtrue );
+void Cmd_AddCgameCommand( const char *cmd_name, const void *owner ) {
+	Cmd_AddCommandInternal( cmd_name, NULL, qtrue, owner );
 }
 
 
@@ -989,12 +1056,15 @@ void Cmd_RemoveCommandSafe( const char *cmd_name )
 
 /*
 ============
-Cmd_RemoveCgameCommands
+Cmd_RemoveCgameCommandsByOwner
 
-Remove cgame-created commands
+Remove only the cgame commands registered by one owning cgame VM (the owner
+token supplied at Cmd_AddCgameCommand time). Lets one client app's command set
+be torn down without disturbing another app's. A NULL owner matches NOTHING
+(engine commands carry a NULL owner and must never be swept here).
 ============
 */
-void Cmd_RemoveCgameCommands( void )
+void Cmd_RemoveCgameCommandsByOwner( const void *owner )
 {
 	cmd_function_t **back = &cmd_functions;
 
@@ -1003,7 +1073,7 @@ void Cmd_RemoveCgameCommands( void )
 		if ( cmd == NULL ) {
 			return;
 		}
-		if ( !cmd->cgame ) {
+		if ( !( cmd->cgame && cmd->owner == owner ) ) {
 			back = &cmd->next;
 			continue;
 		}
@@ -1128,7 +1198,7 @@ void Cmd_ExecuteString( const char *text ) {
 		return;
 	}
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	// check client game commands
 	if ( com_cl_running && com_cl_running->integer && CL_GameCommand() ) {
 		return;
@@ -1140,7 +1210,7 @@ void Cmd_ExecuteString( const char *text ) {
 		return;
 	}
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	// send it as a server command if we are connected
 	// this will usually result in a chat message
 	CL_ForwardCommandToServer( text );

@@ -4,7 +4,6 @@
 
 #include "client.h"
 #include "../qcommon/qfiles.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 clMapInfo_t cl_mapInfo;
@@ -279,24 +278,31 @@ void CL_LoadMapInfo( const char *mapname ) {
 	// --- Fallback: extract from BSP entity lump ---
 	if ( !cl_mapInfo.hasMetaFile || cl_mapInfo.longName[0] == '\0' || cl_mapInfo.sky[0] == '\0' ) {
 		char bspPath[MAX_QPATH];
-		bspFile_t *bsp;
+		mapFile_t *bsp;
 
 		Com_sprintf( bspPath, sizeof( bspPath ), "maps/%s.bsp", mapname );
-		if ( BSP_Load( bspPath, &bsp, BSP_LOAD_FLAGS_NONE ) ) {
+		// RENDER_ONLY: this reader consumes bsp->entityString and nothing else, so it
+		// must not produce collision side-effects. Without the flag the Q1 parser's
+		// CMQ1_Store{LeafContents,Clipnodes} fire into the live cm.q1 from a metadata
+		// read, and — because this runs BEFORE the server's own CM_LoadMap — the map
+		// lands in Map_Load's cache. The server then takes the cache-hit fast path,
+		// its loadFunction never runs, and CM_ClearMap has already zeroed cm.q1, so
+		// the canonical collision build silently sees "not a Q1 map".
+		if ( Map_Load( bspPath, &bsp, MAP_LOAD_FLAG_RENDER_ONLY ) ) {
 			if ( bsp->entityString && bsp->entityStringLength > 0 ) {
 				CL_MapInfo_ParseWorldspawn( bsp->entityString, bsp->entityStringLength );
 			}
-			BSP_Free( bsp );
+			Map_Free( bsp );
 		} else {
 			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "CL_LoadMapInfo: no BSP found at %s\n", bspPath );
 		}
 	}
 
-	// --- Count item markers from bspPreview if itemNodes not set ---
-	if ( cl_mapInfo.itemNodes == 0 && cl_bspPreview.valid ) {
+	// --- Count item markers from mapPreview if itemNodes not set ---
+	if ( cl_mapInfo.itemNodes == 0 && cl_mapPreview.valid ) {
 		int count = 0;
-		for ( int i = 0; i < cl_bspPreview.numMarkers; i++ ) {
-			if ( cl_bspPreview.markers[i].type == 1 ) { // type 1 = item
+		for ( int i = 0; i < cl_mapPreview.numMarkers; i++ ) {
+			if ( cl_mapPreview.markers[i].type == 1 ) { // type 1 = item
 				count++;
 			}
 		}

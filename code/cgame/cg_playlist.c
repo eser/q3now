@@ -3,7 +3,6 @@
 // cg_playlist.c -- background music playlist engine
 
 #include "cg_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 #if FEAT_MUSIC_PLAYLIST
@@ -76,12 +75,12 @@ static qboolean OpenWaveFile( const char *name ) {
 
 	fileSize = trap_FS_FOpenFile( name, &file, FS_READ );
 	if ( !file ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "^3Couldn't open '%s'\n", name );
+		Com_Log( SEV_WARN, LOG_CH(ch_cgame), "Couldn't open '%s'\n", name );
 		return qfalse;
 	}
 	if ( fileSize < 44 ) {
 		BadFile:
-		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "^3Unknown file format: '%s'\n", name );
+		Com_Log( SEV_WARN, LOG_CH(ch_cgame), "Unknown file format: '%s'\n", name );
 		return qfalse;
 	}
 	bufPos = 0;
@@ -102,11 +101,11 @@ static void SkipToEndOfFile( void ) {
 
 static qboolean ReadChunkHeader( chunkHeader_t *header ) {
 	if ( !ReadDWORD( &header->id ) ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "^3Unexpected end of file\n" );
+		Com_Log( SEV_WARN, LOG_CH(ch_cgame), "Unexpected end of file\n" );
 		return qfalse;
 	}
 	if ( !ReadDWORD( &header->size ) ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "^3Unexpected end of file\n" );
+		Com_Log( SEV_WARN, LOG_CH(ch_cgame), "Unexpected end of file\n" );
 		return qfalse;
 	}
 	return qtrue;

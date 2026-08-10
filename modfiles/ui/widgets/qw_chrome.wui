@@ -1,0 +1,44 @@
+// qw_chrome — general top_bar / bottom_bar chrome for full-screen menus.
+//
+// Lifted verbatim from qw_settings_chrome.wui's QW_SETTINGS_TOPBAR /
+// QW_SETTINGS_BOTTOMBAR so ANY menu (Start Server, Server Browser, …) gets the
+// same breadcrumb strip + hint bar as the 7 settings tabs — one visual
+// language across the whole menu system. The settings-cluster macros still
+// live in qw_settings_chrome.wui and are re-expressed via these generals so the
+// tabs stay byte-identical.
+//
+// Tokens: $top_bar_height, $bottom_bar_height, $panel, $line, $accent,
+//   $boneDim, $font_sans_bold, $font_mono, $spacing_md.
+
+// Breadcrumb top bar: brand text (left) + grow spacer + version + OFFLINE.
+// BRAND_TEXT is the breadcrumb, e.g. "q3now / Multiplayer / Start Server".
+#define QW_TOPBAR(BRAND_TEXT) \
+	itemDef { name "top_bar" type container rect 0 0 1 $top_bar_height direction row padding 0.005 0.02 alignY center background $panel borderY 1px $line visible 1 \
+		itemDef { name "brand" type 0 rect 0 0 0.34 0.04 height FIT text BRAND_TEXT textalign 0 font $font_sans_bold 14 forecolor $accent grow 0 decoration visible 1 } \
+		itemDef { name "top_bar_spacer" type container rect 0 0 0 0 grow 1 visible 1 } \
+		itemDef { name "version" type 0 rect 0 0 0.12 0.04 height FIT text "v0.1-dev" textalign 2 font $font_mono 10 forecolor $boneDim grow 0 decoration visible 1 } \
+		itemDef { name "connection" type 0 rect 0 0 0.10 0.04 height FIT text "OFFLINE" textalign 2 font $font_mono 10 forecolor $boneDim grow 0 decoration visible 1 } \
+	}
+
+// Breadcrumb top bar with a live cvar status field replacing the static OFFLINE
+// slot — for menus that surface a bound status string (e.g. servers.wui's
+// ui_browserStatus). Same shape as QW_TOPBAR otherwise.
+#define QW_TOPBAR_STATUS(BRAND_TEXT, STATUS_CVAR) \
+	itemDef { name "top_bar" type container rect 0 0 1 $top_bar_height direction row padding 0.005 0.02 alignY center background $panel borderY 1px $line visible 1 \
+		itemDef { name "brand" type 0 rect 0 0 0.34 0.04 height FIT text BRAND_TEXT textalign 0 font $font_sans_bold 14 forecolor $accent grow 0 decoration visible 1 } \
+		itemDef { name "top_bar_spacer" type container rect 0 0 0 0 grow 1 visible 1 } \
+		itemDef { name "version" type 0 rect 0 0 0.12 0.04 height FIT text "v0.1-dev" textalign 2 font $font_mono 10 forecolor $boneDim grow 0 decoration visible 1 } \
+		itemDef { name "status" type 0 rect 0 0 0.20 0.04 height FIT textalign 2 font $font_mono 10 forecolor $boneDim cvar STATUS_CVAR grow 0 decoration visible 1 } \
+	}
+
+// Hint bottom bar: right-aligned contextual hint + ESC-back hint.
+#define QW_BOTTOMBAR(HINT_TEXT) \
+	itemDef { name "bottom_bar" type container rect 0 0 1 $bottom_bar_height direction row padding 0 0.02 alignY center alignX end gap $spacing_md visible 1 \
+		itemDef { name "hint_ctx" type 0 rect 0 0 0.30 0.025 height FIT text HINT_TEXT textalign 2 font $font_mono 10 forecolor $boneDim grow 0 decoration visible 1 } \
+		itemDef { name "hint_back" type 0 rect 0 0 0.10 0.025 height FIT text "ESC back" textalign 2 font $font_mono 10 forecolor $boneDim grow 0 decoration visible 1 } \
+	}
+
+// Grow spacer that pushes a right-aligned cluster to the far edge of a row —
+// e.g. Back on the left, action buttons on the right of one footer row.
+#define QW_FOOTER_SPACER \
+	itemDef { name "footer_spacer" type container rect 0 0 0 0 grow 1 visible 1 }

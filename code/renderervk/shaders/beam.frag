@@ -14,15 +14,15 @@ so unregistered or out-of-range handles render "untextured" (white
 texel × color = color).
 
 Beam does NOT apply CGEN_VERTEX-equivalent halving (it never did,
-and Phase 6B3'-a's linear-pipeline migration confirms this stays
+and the linear-pipeline migration confirms this stays
 the model for all primitives). Per-vertex color arrives via the
 `fragColor` varying — beam.vert linearly interpolates between
 hdr.startColor and hdr.endColor across the beam's length — and the
 texel-modulate is the only color transformation in the fragment
 stage. The push-block `frameParams.x` word is reserved/unused — it
-was the legacy identityLight halving factor, dropped in Phase
-6B3'-a and the named field removed in the Block 9 sweep; the word
-stays only so the push range stays byte-compatible across stages.
+was the legacy identityLight halving factor, dropped during the
+linear-pipeline migration and the named field removed in the Block 9
+sweep; the word stays only so the push range stays byte-compatible across stages.
 */
 
 #define PRIMITIVE_SHADER_IMAGE_MAX 64
@@ -31,12 +31,12 @@ stays only so the push range stays byte-compatible across stages.
 // push field today (texel × color is the entire computation), but the
 // declaration must match the vertex stage byte layout for Vulkan to
 // accept the pipeline.
-layout(push_constant) uniform Push {
+// Declaration must match beam.vert's set-1 effects UBO block (no field read here).
+layout(set = 1, binding = 0, std140) uniform EffectsUBO {
 	mat4 mvp;
 	vec4 eyeWorld;
 	vec4 frameParams;
-	vec4 stageParams;     // Phase 5G — per-draw stage index, kept in
-	                      // sync with beam.vert's push declaration.
+	vec4 stageParams;
 };
 
 layout(set = 0, binding = 1) uniform sampler2D shaderImages[PRIMITIVE_SHADER_IMAGE_MAX];
@@ -44,7 +44,7 @@ layout(set = 0, binding = 1) uniform sampler2D shaderImages[PRIMITIVE_SHADER_IMA
 layout(location = 0) in vec2 fragUV;
 layout(location = 1) in vec4 fragColor;
 layout(location = 2) flat in uint fragShaderHandle;
-// Phase 5G: per-stage image slot. Set in beam.vert from the stage's
+// per-stage image slot. Set in beam.vert from the stage's
 // PrimitiveStageGPU.imageSlot. When every stage of a multi-stage
 // shader samples the same image (the common case for additive
 // scrolling textures registered through RE_RegisterPrimitiveShader)
@@ -54,7 +54,7 @@ layout(location = 3) flat in uint fragImageSlot;
 
 layout(location = 0) out vec4 outColor;
 
-// Phase 6B3'-d4-m5: precise piecewise sRGB <-> linear conversion.
+// precise piecewise sRGB <-> linear conversion.
 // Duplicated in every fragment shader per the engine-wide
 // unconditional linear migration; compile.mjs lacks #include
 // support. Matches m1/m2/m3/m4 verbatim. linearToSRGB is unused
@@ -99,7 +99,7 @@ void main() {
 	uint slot = handle < uint(PRIMITIVE_SHADER_IMAGE_MAX) ? handle : 0u;
 	vec4 texel = sampleColorTexBindless( shaderImages[slot], fragUV, domain );
 
-	// Phase 6B3'-d4-m5: per-vertex colour decoded to linear. Alpha stays
+	// per-vertex colour decoded to linear. Alpha stays
 	// raw. fragColor is beam.vert's linear interpolation of the
 	// (display-domain) hdr.startColor..endColor endpoints — decoded
 	// here. Texel decoded per its colour domain. Texel × colour modulate

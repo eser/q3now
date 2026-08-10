@@ -1,0 +1,26 @@
+// qw_hud_crosshair — V2_HUD_Active center crosshair
+// Interface: #include once into the qw_hud_active composer menuDef body.
+// Source: docs/wui-claude-design-canonical-v2/project/qw-screens.jsx:1097-1106
+//   (viewport-center crosshair: circle dot + 4 ticks).
+// ABI: the existing `crosshair` hudElement dispatches the engine's
+//   cl_crosshair* render at the leaf's screen-center rect (mirrors
+//   default.wui hud_crosshair_root). Engine 0 LoC.
+//
+// D1 fix (2026-06-30): the crosshair was INVISIBLE because the leaf was wrapped
+// in a plain `type container direction column` parent. A zero-rect (`rect X Y 0 0`)
+// customDraw leaf that is a NATIVE-FLEX child (parentIsContainer, not floating)
+// collapses to 0 area in clay's flex pass and emits NO custom-draw command → its
+// routine is never dispatched (runtime-pinned: Create ran, Routine never fired).
+// The working zero-rect HUD elements (carousel, statusbar_*) are FLOATING items;
+// `position absolute` takes the zero-rect-customDraw exemption (cl_wired_clay.c:1952).
+// So the crosshair leaf is now a direct floating menuDef itemDef with
+// `position absolute`, matching the carousel pattern that renders correctly.
+itemDef {
+	name "hud_active_crosshair"
+	hudElement "crosshair"
+	position absolute
+	anchor CENTER
+	rect 0.5 0.5 0 0
+	decoration
+	visible 1
+}

@@ -1,0 +1,59 @@
+// repeat_poc.wui — minimal test fixture for the `repeat` runtime path.
+//
+// Loaded via `wui_test_repeat` console command (dev utility) which
+// first writes test data into the WiredStore under the `test.list.*`
+// prefix, then loose-loads this fixture, then pushes the menu. The
+// expansion driver in cl_wired_clay.c iterates `test.list.count`
+// rows and substitutes the `{{ row.text }}` placeholder in the
+// template's text against `WiredStore_Get("test.list.<i>.text")`.
+
+menuDef {
+	name "repeat_poc"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor 0.05 0.05 0.10 1
+
+	itemDef {
+		name "repeat_poc_root"
+		type container
+		rect 0.1 0.1 0.8 0.8
+		direction column
+		padding 0.02
+		gap 0.01
+		decoration
+
+		// Header label so the test screenshot self-identifies.
+		itemDef {
+			name "repeat_poc_header"
+			type 0
+			rect 0 0 1 0.05
+			height FIT
+			text "REPEAT PoC — expect 3 rows below"
+			textalign 0
+			font "oxanium" 22
+			forecolor 0 0.71 0.85 1
+			decoration
+			visible 1
+			grow 0
+		}
+
+		// The repeat block: walks WiredStore prefix `test.list.<i>.text`
+		// for i in [0, test.list.count). One text leaf per row.
+		repeat {
+			source "test.list"
+			countbind "test.list.count"
+			as "row"
+			itemDef {
+				name "repeat_poc_row"
+				rect 0 0 1 0.04
+				text "{{ row.text }}"
+				font "oxanium" 18
+				forecolor 1 1 1 1
+				visible 1
+			}
+		}
+	}
+}

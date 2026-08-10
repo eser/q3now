@@ -6,7 +6,7 @@
 #include "../qcommon/q_feats.h"
 
 #include "../qcommon/wired/net/wn_public.h"
-/* Phase 5: log channels */
+#include "../qcommon/nav/nav_public.h"   /* Nav_Frame — background bake pump */
 LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 serverStatic_t	svs;				// persistant server info
@@ -39,7 +39,8 @@ cvar_t	*sv_gametype;
 cvar_t	*sv_pure;
 cvar_t	*sv_cheats;
 cvar_t	*sv_floodProtect;
-cvar_t	*sv_lanForceRate; // dedicated 1 (LAN) server forces local client rates to 99999 (bug #491)
+cvar_t	*sv_lanForceRate; // unlisted (private) server forces LAN client rates to 99999 (bug #491)
+cvar_t	*sv_hostListed;   // whether the server announces itself to the master servers (heartbeat gate)
 
 cvar_t *sv_levelTimeReset;
 cvar_t *sv_filter;
@@ -205,7 +206,7 @@ void QDECL SV_SendServerCommand( client_t *cl, const char *fmt, ... ) {
 	}
 
 	// hack to echo broadcast prints to console
-	if ( com_dedicated->integer && !strncmp( message, "print", 5 ) ) {
+	if ( com_sv_running->integer && !strncmp( message, "print", 5 ) ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "broadcast: %s\n", SV_ExpandNewlines( message ) );
 	}
 
@@ -253,9 +254,9 @@ static void SV_MasterHeartbeat( const char *message )
 
 	netenabled = Cvar_VariableIntegerValue("net_enabled");
 
-	// "dedicated 1" is for lan play, "dedicated 2" is for inet public play
-	if (!com_dedicated || com_dedicated->integer != 2 || !(netenabled & (NET_ENABLEV4 | NET_ENABLEV6)))
-		return;		// only dedicated servers send heartbeats
+	// Only a publicly-listed server (sv_hostListed 1) announces to the masters.
+	if (!sv_hostListed || !sv_hostListed->integer || !(netenabled & (NET_ENABLEV4 | NET_ENABLEV6)))
+		return;		// private/unlisted servers send no heartbeats
 
 	// if not time yet, don't send anything
 	if ( svs.nextHeartbeatTime - svs.time > 0 )
@@ -666,13 +667,6 @@ static void SVC_Status( const netadr_t *from ) {
 	char status[MAX_PACKETLEN];
 	char infostring[MAX_INFO_STRING+160]; // add some space for challenge string
 
-	// ignore if we are in single player
-#ifndef DEDICATED
-	if ( Cvar_VariableIntegerValue("ui_singlePlayerActive")) {
-		return;
-	}
-#endif
-
 	// Prevent using getstatus as an amplifier
 	if ( SVC_RateLimitAddress( from, 10, 1000 ) ) {
 		Com_Log( SEV_DEBUG, LOG_CH(ch_server), "SVC_Status: rate limit from %s exceeded, dropping request\n",
@@ -731,13 +725,6 @@ if a user is interested in a server to do a full status
 */
 static void SVC_Info( const netadr_t *from ) {
 	char infostring[MAX_INFO_STRING];
-
-	// ignore if we are in single player
-#ifndef DEDICATED
-	if ( Cvar_VariableIntegerValue("ui_singlePlayerActive")) {
-		return;
-	}
-#endif
 
 	// Prevent using getinfo as an amplifier
 	if ( SVC_RateLimitAddress( from, 10, 1000 ) ) {
@@ -838,8 +825,8 @@ static void SV_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 		SVC_Status( from );
 	} else if (!Q_stricmp(c, "getinfo")) {
 		SVC_Info( from );
-	// Phase D: "getchallenge" and "connect" removed — QUIC handles connection setup.
-	// Phase 6.4: legacy "ipAuthorize" handler removed — Wired never sends a
+	// "getchallenge" and "connect" removed — QUIC handles connection setup.
+	// legacy "ipAuthorize" handler removed — Wired never sends a
 	// getIpAuthorize request, so we never need to receive a reply.
 	} else if ( !Q_stricmp( c, "rcon_auth" ) ) {
 		SV_RconAuth( from );
@@ -872,7 +859,7 @@ void SV_PacketEvent( const netadr_t *from, msg_t *msg ) {
 	if ( msg->cursize < 4 )
 		return;
 
-	/* Phase D: Only connectionless OOB packets (getstatus/getinfo for server browser)
+	/* Only connectionless OOB packets (getstatus/getinfo for server browser)
 	   reach here. QUIC handles all game traffic internally via picoquic. */
 	if ( *(int32_t *)msg->data == -1 ) {
 		SV_ConnectionlessPacket( from, msg );
@@ -995,8 +982,8 @@ SV_CheckPaused
 */
 static qboolean SV_CheckPaused( void ) {
 
-#ifdef DEDICATED
-	// can't pause on dedicated servers
+#ifdef HEADLESS
+	// can't pause on headless servers
 	return qfalse;
 #else
 	if ( !cl_paused->integer ) {
@@ -1023,7 +1010,7 @@ static qboolean SV_CheckPaused( void ) {
 		Cvar_Set("sv_paused", "1");
 
 	return qtrue;
-#endif // !DEDICATED
+#endif // !HEADLESS
 }
 
 
@@ -1133,19 +1120,21 @@ void SV_Frame( int msec ) {
 
 	if ( !com_sv_running->integer )
 	{
-		if ( com_dedicated->integer )
-		{
-			// Block indefinitely until something interesting happens
-			// on STDIN.
-			Sys_Sleep( -1 );
-		}
+#ifdef HEADLESS
+		// An idle headless server has nothing to draw, so block indefinitely
+		// until something interesting happens on STDIN.
+		Sys_Sleep( -1 );
+#endif
 		return;
 	}
 
 	// QUIC transport timers run every frame — picoquic needs frequent polling
 	// for ACK timing, keep-alive, and retransmits.  Safe during spawn because
-	// WN_ProcessTimers/FlushOutbound do not access gvm.
-	WN_FlushOutbound();
+	// WN_ProcessTimers/FlushOutbound do not access gvm. Dispatched through
+	// transport->flush_outbound (Batch 3 rewire) so future transports can
+	// register their own ACK-keepalive path without sv_main.c churn.
+	if ( transport && transport->flush_outbound )
+		transport->flush_outbound();
 
 	// Spawn machine owns the server during P1..P5.
 	// Between P1 (SV_ShutdownGameProgs) and P3 (SV_InitGameProgs), gvm == NULL
@@ -1155,11 +1144,20 @@ void SV_Frame( int msec ) {
 		return;
 	}
 
+	// Pump the background navmesh bake: when the worker finishes, this adopts the
+	// mesh on the main thread (query init, door tag, cache save, ready flip). Cheap
+	// no-op while no bake is in flight. Kept before the pause/frame-time gates so a
+	// finished bake is picked up promptly even on a paused or idle-but-running server.
+	Nav_Frame();
+
 	// QUIC game drains: safe only when gvm != NULL (SPAWN_IDLE guarantees that).
 	WN_DrainPendingConnects();
 	SV_DrainUsercmds();
 	SV_DrainQUICReliableCommands();
 	WN_DrainPendingReady();
+	/* In-process-queue B4: free in-mem game_conns deferred by wn_inmem_disconnect,
+	 * AFTER the reliable drain above has processed their in-band "disconnect". */
+	WN_DrainPendingFrees();
 
 	// allow pause if only the local client is connected
 	if ( SV_CheckPaused() ) {
@@ -1179,9 +1177,6 @@ void SV_Frame( int msec ) {
 	}
 
 	sv.timeResidual += msec;
-
-	if ( !com_dedicated->integer )
-		SV_BotFrame( sv.time + sv.timeResidual );
 
 	// if time is about to hit the 32nd bit, kick all clients
 	// and clear sv.time, rather
@@ -1264,7 +1259,7 @@ void SV_Frame( int msec ) {
 	// update ping based on the all received frames
 	SV_CalcPings();
 
-	if (com_dedicated->integer) SV_BotFrame (sv.time);
+	SV_BotFrame( sv.time );
 
 	// run the game simulation in chunks
 	while ( sv.timeResidual >= frameMsec ) {
@@ -1293,15 +1288,12 @@ void SV_Frame( int msec ) {
 	// QUIC transport frame processing — after game logic and client messages.
 	// Timer-driven: retransmits, keepalives, idle timeouts.
 	// Data-driven: push game state datagrams + events to QUIC observers.
-	WN_FlushOutbound();
-#if FEAT_WIREDNET_OBSERVER
-	WN_SendDatagrams();
-	WN_PushEvents();
-	WN_TcpFrame();
-#endif
-#if FEAT_WIREDNET_CONTROL
-	WN_ProcessCommandQueue();
-#endif
+	// Dispatched through transport->frame (Batch 3 rewire). Internal phase
+	// ordering preserved by wn_frame in wn_transport.c. Does NOT include
+	// WN_ClientFrame (separate scheduler via net_ip.c NET_Event) nor
+	// WN_DrainPendingConnects/Ready (admission machinery, kept direct above).
+	if ( transport && transport->frame )
+		transport->frame( msec );
 
 	WiredCoreEvents_DispatchSimple( WCE_FRAME_END, -1 );
 
@@ -1324,7 +1316,7 @@ a client based on its rate settings
 
 int SV_RateMsec( const client_t *client )
 {
-	/* Phase D: QUIC congestion control replaces application-level rate throttling. */
+	/* QUIC congestion control replaces application-level rate throttling. */
 	(void)client;
 	return 0;
 }

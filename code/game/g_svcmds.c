@@ -6,8 +6,7 @@
 // this file holds commands that can be executed by the server console, but not remote clients
 
 #include "g_local.h"
-#include "wired/bots/g_wiredbots.h"
-/* Phase 5: log channels */
+#include "wired/bots/g_wiredintel.h"
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
@@ -354,6 +353,18 @@ void	Svcmd_EntityList_f (void) {
 		if ( check->classname ) {
 			Com_Log( SEV_INFO, LOG_CH(ch_game), "%s", check->classname);
 		}
+		/* Pure diagnostic, appended to the same line: health is what separates a
+		   shoot-to-activate entity from a touch-activated one (a Q1 func_button
+		   with health > 0 has no touch handler and must be shot), and the target
+		   linkage says what it actuates. Read-only fields on an already-walked
+		   entity — nothing here is on any decision path. */
+		Com_Log( SEV_INFO, LOG_CH(ch_game), " health=%d", check->health );
+		if ( check->targetname ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_game), " targetname=%s", check->targetname );
+		}
+		if ( check->target ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_game), " target=%s", check->target );
+		}
 		Com_Log( SEV_INFO, LOG_CH(ch_game), "\n");
 	}
 }
@@ -431,6 +442,8 @@ ConsoleCommand
 
 =================
 */
+
+
 static void Svcmd_Q3nowEngine_f( void ) {
     char buf[256];
     trap_Cvar_VariableStringBuffer( "version", buf, sizeof(buf) );
@@ -442,7 +455,7 @@ static void Svcmd_Q3nowEngine_f( void ) {
 }
 
 // Called by the MCP bot_say tool via Cbuf_ExecuteText("bot_say_console ...").
-// Passes the message to WiredBots with senderClient = -1 (console authority),
+// Passes the message to WiredIntel with senderClient = -1 (console authority),
 // which bypasses BotAuthorizeOrder team checks and targets all bots.
 static void Svcmd_BotSayConsole_f( void ) {
 	const char     *msg;
@@ -459,7 +472,7 @@ static void Svcmd_BotSayConsole_f( void ) {
 	/* Default ACK — overwritten by BotReceiveDirective if a bot accepts/rejects */
 	trap_Cvar_Set( "wiredbot_ack", "no @mention matched any active bot" );
 
-	WiredBots_ProcessChat( -1, msg, &result );
+	WiredIntel_ProcessChat( -1, msg, &result );
 
 	/* If an @mention was parsed but no bot client matched the name, say so */
 	if ( result.hasMentions && result.numRecipients == 0 ) {
@@ -493,6 +506,35 @@ static void Svcmd_Lightstyle_f( void ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_game), "lightstyle: style %d set to '%s'\n", style, pattern );
 }
 
+// Dev command: remap one shader to another at runtime (cheat-gated). Wires the
+// existing AddRemap + BuildShaderStateConfig + CS_SHADERSTATE path — the same
+// mechanism map entities use — to the console, so a material can be swapped on a
+// live surface without a map edit (e.g. dropping a pbrMap test material onto a
+// stock floor to exercise the base-pass IBL ambient). Session-scoped: the remap
+// lives in the configstring until map reload.
+static void Svcmd_RemapShader_f( void ) {
+	char from[MAX_QPATH];
+	char to[MAX_QPATH];
+	char offStr[16];
+
+	if ( !g_cheats.integer ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "remapshader is cheat-protected (sv_cheats 1)\n" );
+		return;
+	}
+	if ( trap_Argc() < 3 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_game),
+		         "Usage: remapshader <fromShader> <toShader> [timeOffset]\n" );
+		return;
+	}
+	trap_Argv( 1, from, sizeof( from ) );
+	trap_Argv( 2, to, sizeof( to ) );
+	trap_Argv( 3, offStr, sizeof( offStr ) );
+
+	AddRemap( from, to, atof( offStr ) );
+	trap_SetConfigstring( CS_SHADERSTATE, BuildShaderStateConfig() );
+	Com_Log( SEV_INFO, LOG_CH(ch_game), "remapshader: '%s' -> '%s'\n", from, to );
+}
+
 qboolean	ConsoleCommand( void ) {
 	char	cmd[MAX_TOKEN_CHARS];
 
@@ -502,6 +544,8 @@ qboolean	ConsoleCommand( void ) {
 		Svcmd_EntityList_f();
 		return qtrue;
 	}
+
+	
 
 	if ( Q_stricmp (cmd, "forceteam") == 0 ) {
 		Svcmd_ForceTeam_f();
@@ -516,6 +560,15 @@ qboolean	ConsoleCommand( void ) {
 	if ( Q_stricmp (cmd, "q3now_engine") == 0 ) {
 		Svcmd_Q3nowEngine_f();
 		return qtrue;
+	}
+
+	if ( Q_stricmp (cmd, "objective") == 0 ) {
+		return G_Objectives_Command();
+	}
+
+	if ( Q_stricmp (cmd, "savegame") == 0 || Q_stricmp (cmd, "loadgame") == 0 ||
+	     Q_stricmp (cmd, "savepersistent") == 0 || Q_stricmp (cmd, "loadpersistent") == 0 ) {
+		return G_Save_Command( cmd );
 	}
 
 	if (Q_stricmp (cmd, "addbot") == 0) {
@@ -548,6 +601,11 @@ qboolean	ConsoleCommand( void ) {
 		return qtrue;
 	}
 
+	if ( Q_stricmp( cmd, "remapshader" ) == 0 ) {
+		Svcmd_RemapShader_f();
+		return qtrue;
+	}
+
 	if ( Q_stricmp( cmd, "bot_order" ) == 0 ) {
 		char botname[MAX_NETNAME];
 		if ( trap_Argc() < 3 ) {
@@ -559,12 +617,137 @@ qboolean	ConsoleCommand( void ) {
 		return qtrue;
 	}
 
+	// Assign a client to a squad, or clear it. Same name lookup as autopilot and
+	// bot_order, and like autopilot it scans CLIENTS rather than botstates[] —
+	// a human must be assignable, and a human has no bot_state_t.
+	//
+	// This is the caller G_SameSquad was written for and never had. The rule
+	// itself already handles the interesting case: its precedence says two
+	// entities with the SAME non-zero squad are allies, and that this is the one
+	// rule which overrides sess.sessionTeam. So assigning a companion and its
+	// target the same squad makes them allied even in a free-for-all gametype,
+	// where the legacy team test returns false for every pair and a bot would
+	// otherwise designate the player it is escorting as an enemy.
+	//
+	// Squad 0 stays the no-squad sentinel and the default, so any client that is
+	// never named by this command behaves exactly as before.
+	if ( Q_stricmp( cmd, "squad" ) == 0 ) {
+		char who[MAX_NETNAME];
+		char arg[MAX_TOKEN_CHARS];
+		char clean[MAX_NETNAME];
+		int  squadNum;
+		int  i;
+
+		if ( trap_Argc() < 3 ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "Usage: squad <playername> <number|none>\n" );
+			return qtrue;
+		}
+		trap_Argv( 1, who, sizeof( who ) );
+		trap_Argv( 2, arg, sizeof( arg ) );
+		squadNum = ( Q_stricmp( arg, "none" ) == 0 ) ? 0 : atoi( arg );
+		if ( squadNum < 0 ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "squad: number must be >= 0 (0 or 'none' clears)\n" );
+			return qtrue;
+		}
+
+		for ( i = 0; i < level.maxclients; i++ ) {
+			if ( level.clients[i].pers.connected != CON_CONNECTED ) {
+				continue;
+			}
+			Q_strncpyz( clean, level.clients[i].pers.netname, sizeof( clean ) );
+			Q_CleanStr( clean );
+			if ( Q_stricmpn( clean, who, strlen( who ) ) == 0 ) {
+				g_entities[i].squad = squadNum;
+				if ( squadNum ) {
+					Com_Log( SEV_INFO, LOG_CH(ch_game), "squad: %s assigned to squad %d\n",
+								level.clients[i].pers.netname, squadNum );
+				} else {
+					Com_Log( SEV_INFO, LOG_CH(ch_game), "squad: %s cleared (no squad)\n",
+								level.clients[i].pers.netname );
+				}
+				return qtrue;
+			}
+		}
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "squad: no connected player named '%s'\n", who );
+		return qtrue;
+	}
+
+	// Hand a client's entity to the bot brain, or take it back. Same name lookup
+	// as bot_order (cleaned netname, case-insensitive prefix match), but it scans
+	// CLIENTS rather than botstates[] because the whole point is to address a
+	// human — a client that has no bot_state_t until autopilot gives it one.
+	if ( Q_stricmp( cmd, "autopilot" ) == 0 ) {
+		char     who[MAX_NETNAME];
+		char     arg[MAX_TOKEN_CHARS];
+		char     clean[MAX_NETNAME];
+		qboolean enable;
+		int      i;
+
+		if ( trap_Argc() < 3 ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "Usage: autopilot <playername> <on|off>\n" );
+			return qtrue;
+		}
+		trap_Argv( 1, who, sizeof( who ) );
+		trap_Argv( 2, arg, sizeof( arg ) );
+		enable = ( Q_stricmp( arg, "on" ) == 0 || atoi( arg ) != 0 ) ? qtrue : qfalse;
+
+		for ( i = 0; i < level.maxclients; i++ ) {
+			if ( level.clients[i].pers.connected != CON_CONNECTED ) {
+				continue;
+			}
+			Q_strncpyz( clean, level.clients[i].pers.netname, sizeof( clean ) );
+			Q_CleanStr( clean );
+			if ( Q_stricmpn( clean, who, strlen( who ) ) == 0 ) {
+				if ( G_SetAutopilot( &g_entities[i], enable ) ) {
+					Com_Log( SEV_INFO, LOG_CH(ch_game), "autopilot %s for %s\n",
+								enable ? "ENABLED" : "disabled",
+								level.clients[i].pers.netname );
+				} else {
+					Com_Log( SEV_INFO, LOG_CH(ch_game),
+								"autopilot: no change for %s (already %s, or no brain available)\n",
+								level.clients[i].pers.netname, enable ? "on" : "off" );
+				}
+				return qtrue;
+			}
+		}
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "autopilot: no connected player named '%s'\n", who );
+		return qtrue;
+	}
+
+	// Deterministic placement of a named bot at a world origin. Cheat-gated —
+	// used by the playthrough harness to start the bot on a known real,
+	// nav-connected spawn instead of the seeded settle point (which can land on
+	// a disconnected nav pocket). Not a shipped gameplay command.
+	if ( Q_stricmp( cmd, "bot_teleport" ) == 0 ) {
+		char botname[MAX_NETNAME];
+		char arg[MAX_TOKEN_CHARS];
+		vec3_t origin;
+		float  yaw = 0.0f;
+		if ( !g_cheats.integer ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "bot_teleport is cheat-protected (sv_cheats 1)\n" );
+			return qtrue;
+		}
+		if ( trap_Argc() < 5 ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_game), "Usage: bot_teleport <botname> <x> <y> <z> [yaw]\n" );
+			return qtrue;
+		}
+		trap_Argv( 1, botname, sizeof( botname ) );
+		trap_Argv( 2, arg, sizeof( arg ) ); origin[0] = atof( arg );
+		trap_Argv( 3, arg, sizeof( arg ) ); origin[1] = atof( arg );
+		trap_Argv( 4, arg, sizeof( arg ) ); origin[2] = atof( arg );
+		if ( trap_Argc() >= 6 ) {
+			trap_Argv( 5, arg, sizeof( arg ) ); yaw = atof( arg );
+		}
+		BotDirective_ConsoleTeleport( botname, origin, yaw );
+		return qtrue;
+	}
+
 	if ( Q_stricmp( cmd, "bot_say_console" ) == 0 ) {
 		Svcmd_BotSayConsole_f();
 		return qtrue;
 	}
 
-	if (g_dedicated.integer) {
+	if ( G_ServerIsConsoleOnly() ) {
 		if (Q_stricmp (cmd, "say") == 0) {
 			trap_SendServerCommand( -1, va("print \"server: %s\n\"", ConcatArgs(1) ) );
 			return qtrue;

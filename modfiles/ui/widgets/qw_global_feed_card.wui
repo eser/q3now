@@ -1,0 +1,111 @@
+// qw_global_feed_card — right-rail live feed card widget
+// Interface (consumer): #include into the right_rail container body.
+// Tokens: $accent, $bone, $boneDim, $panelDeep, $line,
+//         $font_icon, $font_mono,
+//         $spacing_sm, $spacing_md, $spacing_xxs
+// Store binds (placeholder until cgame stages): feed.live_count, feed.row[0..4]
+// Composition: header row (◆ GLOBAL FEED + live count) + 5 feed rows.
+//   Each row uses a fixed 5-cell flex grid (actor / verb / victim /
+//   weapon / timeAgo) with explicit per-cell widths so cell columns
+//   align cross-row.
+itemDef {
+	name "card_global_feed"
+	type container
+	rect 0 0 1 24vh
+	height FIT
+	direction column
+	padding $spacing_card_padding_v $spacing_card_padding_h
+	gap $spacing_xxs
+	background $panelDeep
+	border 1px $line
+
+	// Header row
+	itemDef {
+		name "card_feed_header_row"
+		type container
+		rect 0 0 1 2.2vh
+		height FIT
+		direction row
+		alignY center
+		gap 0.006
+
+		itemDef { type 0 rect 0 0 1vw 2vh height FIT width PERCENT 1vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 animation "pulse" }
+		itemDef { type 0 rect 0 0 14vw 2vh height FIT width PERCENT 14vw text "GLOBAL FEED" textalign 0 font $font_mono 10 forecolor $bone decoration visible 1 grow 0 }
+		itemDef { type container grow 1 decoration visible 1 }
+		itemDef { type 0 rect 0 0 7vw 2vh height FIT width PERCENT 7vw text "2,148 live" textalign 2 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	}
+
+	// 5 feed rows — fixed-width 5-cell grid: actor(0.18) / verb(0.16) /
+	// victim(0.18) / weapon(0.14) / timeAgo(0.10). Cells sum to 0.76;
+	// remaining 0.24 absorbs row gap (0.005×4) + card padding.
+	itemDef {
+		name "card_feed_row_1"
+		type container
+		rect 0 0 1 2vh
+		height FIT
+		direction row
+		alignY center
+		gap 0.005
+		itemDef { type 0 rect 0 0 18vw 2vh height FIT width PERCENT 18vw text "OMEN.V"   textalign 0 font $font_mono 9 forecolor $bone    decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 16vw 2vh height FIT width PERCENT 16vw text "railgun"  textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 18vw 2vh height FIT width PERCENT 18vw text "arcus"    textalign 0 font $font_mono 9 forecolor $bone    decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 14vw 2vh height FIT width PERCENT 14vw text "x4"       textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 10vw 2vh height FIT width PERCENT 10vw text "02s"      textalign 2 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 1 }
+	}
+	itemDef {
+		name "card_feed_row_2"
+		type container
+		rect 0 0 1 2vh
+		height FIT
+		direction row
+		alignY center
+		gap 0.005
+		itemDef { type 0 rect 0 0 18vw 2vh height FIT width PERCENT 18vw text "ZHEN"     textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 16vw 2vh height FIT width PERCENT 16vw text "fragged"  textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 18vw 2vh height FIT width PERCENT 18vw text "ARCUS.Y"  textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 14vw 2vh height FIT width PERCENT 14vw text "rocket"   textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 10vw 2vh height FIT width PERCENT 10vw text "08s"      textalign 2 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 1 }
+	}
+	itemDef {
+		name "card_feed_row_3"
+		type container
+		rect 0 0 1 2vh
+		height FIT
+		direction row
+		alignY center
+		gap 0.005
+		itemDef { type 0 rect 0 0 18vw 2vh height FIT width PERCENT 18vw text "NULL"     textalign 0 font $font_mono 9 forecolor $accent  decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 16vw 2vh height FIT width PERCENT 16vw text "won"      textalign 0 font $font_mono 9 forecolor $accent  decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 18vw 2vh height FIT width PERCENT 18vw text "CA ROUND" textalign 0 font $font_mono 9 forecolor $accent  decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 14vw 2vh height FIT width PERCENT 14vw text "——"       textalign 0 font $font_mono 9 forecolor $accent  decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 10vw 2vh height FIT width PERCENT 10vw text "21s"      textalign 2 font $font_mono 9 forecolor $accent  decoration visible 1 grow 1 }
+	}
+	itemDef {
+		name "card_feed_row_4"
+		type container
+		rect 0 0 1 2vh
+		height FIT
+		direction row
+		alignY center
+		gap 0.005
+		itemDef { type 0 rect 0 0 18vw 2vh height FIT width PERCENT 18vw text "KVAZR"    textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 16vw 2vh height FIT width PERCENT 16vw text "took"     textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 18vw 2vh height FIT width PERCENT 18vw text "QUAD"     textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 14vw 2vh height FIT width PERCENT 14vw text "hog"      textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 10vw 2vh height FIT width PERCENT 10vw text "34s"      textalign 2 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 1 }
+	}
+	itemDef {
+		name "card_feed_row_5"
+		type container
+		rect 0 0 1 2vh
+		height FIT
+		direction row
+		alignY center
+		gap 0.005
+		itemDef { type 0 rect 0 0 18vw 2vh height FIT width PERCENT 18vw text "FRAY"     textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 16vw 2vh height FIT width PERCENT 16vw text "captured" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 18vw 2vh height FIT width PERCENT 18vw text "FLAG"     textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 14vw 2vh height FIT width PERCENT 14vw text "——"       textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+		itemDef { type 0 rect 0 0 10vw 2vh height FIT width PERCENT 10vw text "47s"      textalign 2 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 1 }
+	}
+}

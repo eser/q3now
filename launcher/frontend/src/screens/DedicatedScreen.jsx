@@ -273,7 +273,7 @@ export default function DedicatedScreen({ assetsReady, onBack }) {
       <div style={styles.header}>
         <Logo size="small" />
         <div>
-          <h2 style={styles.title}>Dedicated Server</h2>
+          <h2 style={styles.title}>Headless Server</h2>
           <p style={styles.subtitle}>Host a game server</p>
         </div>
       </div>

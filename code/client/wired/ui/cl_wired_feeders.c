@@ -7,10 +7,9 @@ cl_wired_feeders.c — Wired UI feeder implementations
 
 #include "../../client.h"
 #include "cl_wired_ui.h"
-#include "cl_wired_hud.h"
+#include "cl_wired_ui_hud_state.h"
 #include "../../../qcommon/menudef.h"
 #include "../../../qcommon/maps/meta.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
 #if FEAT_WIRED_UI
@@ -188,9 +187,6 @@ static int WiredFeeder_ServerSortCompare( const void *a, const void *b ) {
 }
 
 void WiredFeeder_SortServers( int column ) {
-	serverInfo_t *servers = NULL;
-	int count = 0;
-
 	// toggle direction if clicking same column
 	if ( column == wui_serverSortKey ) {
 		wui_serverSortDir = !wui_serverSortDir;
@@ -199,18 +195,13 @@ void WiredFeeder_SortServers( int column ) {
 		wui_serverSortDir = 0;
 	}
 
-	WiredFeeder_GetServerList( &servers, &count );
-
-	// build display list
-	wui_serverDisplayCount = 0;
-	for ( int i = 0; i < count && i < MAX_DISPLAY_SERVERS; i++ ) {
-		wui_serverDisplayList[wui_serverDisplayCount++] = i;
-	}
-
-	// sort display list
-	if ( wui_serverDisplayCount > 1 ) {
-		qsort( wui_serverDisplayList, wui_serverDisplayCount, sizeof( int ), WiredFeeder_ServerSortCompare );
-	}
+	/* Rebuild through the shared filtered path (applies WiredFeeder_ServerPasses-
+	 * Filter, re-sorts, and refreshes wui_serverLastRawCount). Pushing every raw
+	 * index here instead would drop the active browser filter — and, by leaving
+	 * wui_serverLastRawCount stale, keep the unfiltered list until the raw count
+	 * changed. The sort key/dir set above are read by WiredFeeder_ServerSort-
+	 * Compare inside the rebuild's qsort. */
+	WiredFeeder_RebuildServerDisplayList();
 
 	// export sort state to cvars for menu sort-direction indicators
 	WiredFeeder_StateSetInt( "ui_serverSortKey", wui_serverSortKey );
@@ -302,7 +293,7 @@ void WiredFeeder_LoadMods( void ) {
 	// first entry is always the base game; description sources the product
 	// name from cl_gamename (set by the cgame at init via GAMENAME_FOR_MASTER).
 	// Engine code stays product-agnostic — falls back to "Wired" before init.
-	Q_strncpyz( wui_modList[0], "baseq3", sizeof( wui_modList[0] ) );
+	Q_strncpyz( wui_modList[0], BASEGAME, sizeof( wui_modList[0] ) );
 	{
 		const char *gamename = Cvar_VariableString( "cl_gamename" );
 		if ( gamename && *gamename ) {
@@ -317,7 +308,7 @@ void WiredFeeder_LoadMods( void ) {
 
 	char *dirPtr = listBuf;
 	for ( int i = 0; i < numDirs && wui_modCount < MAX_WIRED_MODS; i++ ) {
-		if ( dirPtr[0] && Q_stricmp( dirPtr, "baseq3" ) ) {
+		if ( dirPtr[0] && Q_stricmp( dirPtr, BASEGAME ) ) {
 			Q_strncpyz( wui_modList[wui_modCount], dirPtr, sizeof( wui_modList[0] ) );
 			// try to read description.txt
 			wui_modDesc[wui_modCount][0] = '\0';
@@ -394,7 +385,7 @@ static int             wui_mapCount = 0;
 static int             wui_filteredMaps[MAX_WIRED_MAPS];
 static int             wui_filteredMapCount = 0;
 
-// Phase 5 (q3now meta migration): WiredFeeder_LoadArenaFile and
+// q3now meta migration: WiredFeeder_LoadArenaFile and
 // WiredFeeder_ParseArenaBuffer were removed when the UI map roster
 // was migrated to the .meta-driven maps_list[] global. The legacy
 // .arena fallback still happens — but inside Maps_LoadMetaFor, not
@@ -629,6 +620,32 @@ void WiredFeeder_SortMaps( int column ) {
 	if ( wui_filteredMapCount > 1 ) {
 		qsort( wui_filteredMaps, wui_filteredMapCount, sizeof( int ), WiredFeeder_MapSortByColumn );
 	}
+
+	// Export sort state so the engine-drawn header band can draw the
+	// active-column ^/v indicator (parity with WiredFeeder_SortServers).
+	WiredFeeder_StateSetInt( "ui_mapSortKey", wui_mapSortKey );
+	WiredFeeder_StateSetInt( "ui_mapSortDir", wui_mapSortDir );
+}
+
+/* Generic "which column is this feeder currently sorted by, and which
+ * direction" accessor, used by the engine header band (cl_wired_clay.c) to
+ * draw the ^/v sort indicator on the active column. Returns qtrue and fills
+ * *col / *dir (dir: 0=asc, 1=desc) when the feeder has a known sort; qfalse
+ * otherwise (no indicator drawn). */
+qboolean WiredFeeder_ActiveSort( int feederID, int *col, int *dir ) {
+	switch ( feederID ) {
+		case FEEDER_MAPS:
+		case FEEDER_ALLMAPS:
+			if ( col ) *col = wui_mapSortKey;
+			if ( dir ) *dir = wui_mapSortDir;
+			return qtrue;
+		case FEEDER_SERVERS:
+			if ( col ) *col = wui_serverSortKey;
+			if ( dir ) *dir = wui_serverSortDir;
+			return qtrue;
+		default:
+			return qfalse;
+	}
 }
 
 // ── scoreboard feeder ─────────────────────────────────────────────────
@@ -642,7 +659,7 @@ static int WiredFeeder_ScoreCount( int feederID ) {
 	if ( feederID == 0x05 /* red team feeder */ )  teamFilter = 1 /* red */;
 	if ( feederID == 0x06 /* blue team feeder */ ) teamFilter = 2 /* blue */;
 
-	if ( !wiredHud || !wiredHud->valid ) return 0;
+	if ( !wiredHud || !wiredHud_state_valid ) return 0;
 
 	for ( int i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
 		if ( teamFilter >= 0 && wiredHud->scores[i].team != teamFilter )
@@ -660,7 +677,7 @@ static const char *WiredFeeder_ScoreItemText( int feederID, int index, int colum
 	if ( feederID == 0x05 /* red team feeder */ )  teamFilter = 1 /* red */;
 	if ( feederID == 0x06 /* blue team feeder */ ) teamFilter = 2 /* blue */;
 
-	if ( !wiredHud || !wiredHud->valid ) return "";
+	if ( !wiredHud || !wiredHud_state_valid ) return "";
 
 	// find the Nth matching entry
 	int i;
@@ -702,6 +719,56 @@ static void WiredFeeder_ScoreSelection( int feederID, int index ) {
 	wui_selectedScore = index;
 }
 
+// ── player-list feeder (FEEDER_PLAYER_LIST) ───────────────────────────
+// Backs the kick / leader listboxes in callvote.wui and the kick listbox in
+// removebots.wui. Data source is the same as the scoreboard feeder
+// (wiredHud->scores[] + wiredHud->clients[]); spectators (team 3) are excluded
+// since they can't be kicked/led as active players. The selection callback
+// deposits the client NUMBER (not name) into state key ui_selectedPlayerNum,
+// which the vote/kick handlers read for the numeric console path
+// (clientkick <n> / callteamvote leader <n>).
+
+static int WiredFeeder_PlayerCount( int feederID ) {
+	int count = 0;
+	if ( !wiredHud || !wiredHud_state_valid ) return 0;
+	for ( int i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
+		if ( wiredHud->scores[i].team == 3 /* spectator */ ) continue;
+		count++;
+	}
+	return count;
+}
+
+static const char *WiredFeeder_PlayerItemText( int feederID, int index, int column ) {
+	int count = 0;
+	int i;
+	if ( !wiredHud || !wiredHud_state_valid ) return "";
+	for ( i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
+		if ( wiredHud->scores[i].team == 3 /* spectator */ ) continue;
+		if ( count == index ) break;
+		count++;
+	}
+	if ( i >= wiredHud->numScores || i >= WIRED_HUD_MAX_SCORES ) return "";
+	wiredHudScore_t *sc = &wiredHud->scores[i];
+	if ( sc->client >= 0 && sc->client < WIRED_HUD_MAX_CLIENTS
+		 && wiredHud->clients[sc->client].infoValid )
+		return wiredHud->clients[sc->client].name;
+	return "???";
+}
+
+static void WiredFeeder_PlayerSelection( int feederID, int index ) {
+	int count = 0;
+	int i;
+	if ( !wiredHud || !wiredHud_state_valid ) return;
+	for ( i = 0; i < wiredHud->numScores && i < WIRED_HUD_MAX_SCORES; i++ ) {
+		if ( wiredHud->scores[i].team == 3 /* spectator */ ) continue;
+		if ( count == index ) break;
+		count++;
+	}
+	if ( i >= wiredHud->numScores || i >= WIRED_HUD_MAX_SCORES ) return;
+	WiredFeeder_StateSetString( "ui_selectedPlayerNum",
+		va( "%d", wiredHud->scores[i].client ) );
+}
+
 // ── character feeder (FEEDER_CHARACTERS) ──────────────────────────────
 
 static int  wui_charSelected = -1;
@@ -727,15 +794,20 @@ static int WiredFeeder_PickSkinForChar( const clCharacterEntry_t *e ) {
 	return 0;
 }
 
+// The character feeder enumerates the SELECTABLE-only subset. Every entry point
+// below (Count / ItemText / ItemIcon / Selection / this loader) indexes through
+// CL_Characters_SelectableAt, and wui_charSelected is a selectable-subset index —
+// so the skins feeder, which reads CL_Characters_SelectableAt(wui_charSelected),
+// stays in the same index space. No raw registry index reaches the feeder.
 void WiredFeeder_LoadCharacters( void ) {
-	int count = CL_Characters_Count();
+	int count = CL_Characters_SelectableCount();
 
-	// match current char cvar to selection
+	// match current char cvar to selection (in the selectable subset)
 	char charBuf[64];
 	Cvar_VariableStringBuffer( "char", charBuf, sizeof( charBuf ) );
 	wui_charSelected = -1;
 	for ( int i = 0; i < count; i++ ) {
-		const clCharacterEntry_t *e = CL_Characters_At( i );
+		const clCharacterEntry_t *e = CL_Characters_SelectableAt( i );
 		if ( e && !Q_stricmp( e->dirname, charBuf ) ) {
 			wui_charSelected = i;
 			break;
@@ -743,28 +815,28 @@ void WiredFeeder_LoadCharacters( void ) {
 	}
 
 	// align the skin selection with whatever the current skin cvar is
-	wui_skinSelected = WiredFeeder_PickSkinForChar( CL_Characters_At( wui_charSelected ) );
+	wui_skinSelected = WiredFeeder_PickSkinForChar( CL_Characters_SelectableAt( wui_charSelected ) );
 
-	Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: found %d characters\n", count );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: found %d selectable characters\n", count );
 }
 
 static int WiredFeeder_CharactersCount( int feederID ) {
-	return CL_Characters_Count();
+	return CL_Characters_SelectableCount();
 }
 
 static const char *WiredFeeder_CharactersItemText( int feederID, int index, int column ) {
-	const clCharacterEntry_t *e = CL_Characters_At( index );
+	const clCharacterEntry_t *e = CL_Characters_SelectableAt( index );
 	if ( !e ) return "";
 	return e->manifest.displayName[0] ? e->manifest.displayName : e->dirname;
 }
 
 static qhandle_t WiredFeeder_CharactersItemIcon( int feederID, int index ) {
-	const clCharacterEntry_t *e = CL_Characters_At( index );
+	const clCharacterEntry_t *e = CL_Characters_SelectableAt( index );
 	return e ? e->iconHandle : 0;
 }
 
 static void WiredFeeder_CharactersSelection( int feederID, int index ) {
-	const clCharacterEntry_t *e = CL_Characters_At( index );
+	const clCharacterEntry_t *e = CL_Characters_SelectableAt( index );
 	int skinIdx;
 	if ( !e ) return;
 	wui_charSelected = index;
@@ -784,28 +856,35 @@ static void WiredFeeder_CharactersSelection( int feederID, int index ) {
 // Lists the skins of the currently selected character. Reflects wui_charSelected,
 // which is updated by the characters feeder; if no character is selected the list is empty.
 
+// Skins reflect the currently selected character. wui_charSelected is a
+// selectable-subset index (set by the characters feeder), so this resolves the
+// character through the same selectable view — keeping both feeders in one index
+// space.
 static int WiredFeeder_SkinsCount( int feederID ) {
-	const clCharacterEntry_t *e = CL_Characters_At( wui_charSelected );
+	const clCharacterEntry_t *e = CL_Characters_SelectableAt( wui_charSelected );
 	return e ? e->manifest.numSkins : 0;
 }
 
 static const char *WiredFeeder_SkinsItemText( int feederID, int index, int column ) {
-	const clCharacterEntry_t *e = CL_Characters_At( wui_charSelected );
+	const clCharacterEntry_t *e = CL_Characters_SelectableAt( wui_charSelected );
 	if ( !e || index < 0 || index >= e->manifest.numSkins ) return "";
 	return e->manifest.skins[index].name;
 }
 
 static void WiredFeeder_SkinsSelection( int feederID, int index ) {
-	const clCharacterEntry_t *e = CL_Characters_At( wui_charSelected );
+	const clCharacterEntry_t *e = CL_Characters_SelectableAt( wui_charSelected );
 	if ( !e || index < 0 || index >= e->manifest.numSkins ) return;
 	wui_skinSelected = index;
 	Cvar_Set( "skin", e->manifest.skins[index].name );
 }
 
-int WiredFeeder_GetCharacterCount( void ) { return CL_Characters_Count(); }
+// Public character helpers — the select surface (keyboard/gamepad character
+// cycling, the 3D preview's selection sync) operates on the same selectable-only
+// index space as the feeder, so these route through the selectable view too.
+int WiredFeeder_GetCharacterCount( void ) { return CL_Characters_SelectableCount(); }
 int WiredFeeder_GetCharacterSelected( void ) { return wui_charSelected; }
 const char *WiredFeeder_GetCharacterName( int index ) {
-	const clCharacterEntry_t *e = CL_Characters_At( index );
+	const clCharacterEntry_t *e = CL_Characters_SelectableAt( index );
 	return e ? e->dirname : NULL;
 }
 void WiredFeeder_SetCharacterSelected( int index ) {
@@ -831,6 +910,8 @@ void WiredUI_RegisterCoreFeeders( void ) {
 		WiredFeeder_ScoreItemText, WiredFeeder_ScoreSelection );
 	WiredUI_RegisterFeeder( FEEDER_BLUETEAM_LIST, "players_blue_team", WiredFeeder_ScoreCount,
 		WiredFeeder_ScoreItemText, WiredFeeder_ScoreSelection );
+	WiredUI_RegisterFeeder( FEEDER_PLAYER_LIST, "players", WiredFeeder_PlayerCount,
+		WiredFeeder_PlayerItemText, WiredFeeder_PlayerSelection );
 	WiredUI_RegisterFeeder( FEEDER_CHARACTERS, "characters", WiredFeeder_CharactersCount,
 		WiredFeeder_CharactersItemText, WiredFeeder_CharactersSelection );
 	WiredUI_RegisterFeederIcon( FEEDER_CHARACTERS, WiredFeeder_CharactersItemIcon );

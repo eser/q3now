@@ -28,7 +28,7 @@ import (
 
 // GUILauncher is the GUI bootstrap callback main injects before Execute.
 // Invoked by rootCmd's RunE when the binary runs with no subcommand.
-// Nil in headless build configurations (e.g. dedicated server CI builds);
+// Nil in headless build configurations (e.g. headless server CI builds);
 // RunE then returns an explanatory error.
 var GUILauncher func() error
 
