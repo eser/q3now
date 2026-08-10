@@ -1,4 +1,8 @@
-CMAKE_MINIMUM_REQUIRED(VERSION 3.14)
+# Floor 3.25: CMakePresets.json schema v6 and add_subdirectory(... SYSTEM)
+# both need it, and every supported platform ships well past it (Ubuntu 24.04:
+# 3.28, MSYS2/Homebrew: 4.x). The 3.14 floor was already false — the file used
+# post-3.14 features. Ceiling 4.4 sets the policy level actually tested.
+CMAKE_MINIMUM_REQUIRED(VERSION 3.25...4.4)
 
 PROJECT(wired LANGUAGES C CXX ASM)
 
@@ -1261,7 +1265,14 @@ ENDIF()
 # Build the static library via custom command, then import and link it.
 IF(USE_LUA)
 	SET(LUAJIT_DIR ${CMAKE_SOURCE_DIR}/src/libs/luajit)
-	SET(LUAJIT_LIB ${LUAJIT_DIR}/src/libluajit.a)
+	# Built in a per-build-dir COPY of the tree, not in the submodule itself.
+	# The old in-source build made libluajit.a a shared mutable artifact: every
+	# build dir (release/debug/...) linked the same file, and the `make clean`
+	# each build started with destroyed it for all of them. The copy also lets
+	# us drop the clean (LuaJIT's own make is mtime-incremental) and build -j —
+	# the in-source form was the slowest serial edge in the whole build (~11s).
+	SET(LUAJIT_BUILD_DIR ${CMAKE_BINARY_DIR}/luajit)
+	SET(LUAJIT_LIB ${LUAJIT_BUILD_DIR}/src/libluajit.a)
 
 	# Platform-specific build flags
 	SET(LUAJIT_XCFLAGS "")
@@ -1273,11 +1284,26 @@ IF(USE_LUA)
 		ENDIF()
 	ENDIF()
 
+	INCLUDE(ProcessorCount)
+	PROCESSORCOUNT(_LUAJIT_JOBS)
+	IF(_LUAJIT_JOBS EQUAL 0)
+		SET(_LUAJIT_JOBS 4)
+	ENDIF()
+
+	# DEPENDS on the LuaJIT sources so a submodule bump or a patch actually
+	# rebuilds the library — the old command had no inputs at all and only
+	# ever fired when the .a was missing. copy_directory only refreshes files
+	# whose content changed, so LuaJIT's own mtime-based make stays incremental
+	# across reruns.
+	FILE(GLOB_RECURSE LUAJIT_SOURCES
+		${LUAJIT_DIR}/src/*.c ${LUAJIT_DIR}/src/*.h
+		${LUAJIT_DIR}/src/*.lua ${LUAJIT_DIR}/src/Makefile ${LUAJIT_DIR}/Makefile)
 	add_custom_command(
 		OUTPUT ${LUAJIT_LIB}
-		COMMAND ${LUAJIT_MAKE_ENV} make -C ${LUAJIT_DIR}/src clean
-		COMMAND ${LUAJIT_MAKE_ENV} make -C ${LUAJIT_DIR}/src BUILDMODE=static "XCFLAGS=${LUAJIT_XCFLAGS}"
-		COMMENT "Building LuaJIT (static)"
+		COMMAND ${CMAKE_COMMAND} -E copy_directory ${LUAJIT_DIR} ${LUAJIT_BUILD_DIR}
+		COMMAND ${LUAJIT_MAKE_ENV} make -j${_LUAJIT_JOBS} -C ${LUAJIT_BUILD_DIR}/src BUILDMODE=static "XCFLAGS=${LUAJIT_XCFLAGS}"
+		DEPENDS ${LUAJIT_SOURCES}
+		COMMENT "Building LuaJIT (static, -j${_LUAJIT_JOBS})"
 	)
 	add_custom_target(luajit_build DEPENDS ${LUAJIT_LIB})
 

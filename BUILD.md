@@ -145,7 +145,7 @@ Install the pinned release for `arm64-macos` under `/opt/wasi-sdk`, or point `WA
 make
 ```
 
-`make` wraps `cmake` + `ninja`. On macOS CMake assembles a single product bundle rather than loose binaries:
+`make` wraps `cmake` + `ninja`. Invoking CMake directly is also supported via presets — `cmake --preset release && cmake --build --preset release` — which carry the same configuration `make` uses (a bare `cmake -B build` does **not**: it would silently configure without WASM). On macOS CMake assembles a single product bundle rather than loose binaries:
 
 ```
 build/release/q3now-preview.arm64.app/Contents/MacOS/{wired.arm64, wired-headless.arm64}
