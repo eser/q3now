@@ -97,9 +97,12 @@ jobs:
         # clang-format deliberately stays the apt default: bumping it can
         # reflow the committed formatting baseline, which is a separate
         # decision from lint findings.
+        # llvm.sh only registers the apt repo + core packages; clang-tidy
+        # ships separately in clang-tidy-22, install it explicitly.
         wget -q https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
         sudo ./llvm.sh 22
+        sudo apt-get -y install clang-tidy-22
         sudo ln -sf "$(command -v clang-tidy-22)" /usr/local/bin/clang-tidy
         clang-tidy --version
 
