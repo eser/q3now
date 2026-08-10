@@ -47,9 +47,6 @@ cvar_t	*cl_activeAction;
 cvar_t	*cl_motdString;
 
 cvar_t	*cl_allowDownload;
-#ifdef USE_CURL
-cvar_t	*cl_mapAutoDownload;
-#endif
 cvar_t	*cl_conXOffset;
 cvar_t	*cl_conYOffset;
 cvar_t	*cl_conColor;
@@ -165,9 +162,6 @@ char				cl_oldGame[ MAX_QPATH ];
 qboolean			cl_oldGameSet;
 static	qboolean	noGameRestart = qfalse;
 
-#ifdef USE_CURL
-download_t			download;
-#endif
 
 // Structure containing functions exported from refresh DLL
 refexport_t	re;
@@ -212,9 +206,6 @@ static void CL_ServerStatus_f( void );
 static void CL_ServerStatusResponse( const netadr_t *from, msg_t *msg );
 static void CL_ServerInfoPacket( const netadr_t *from, msg_t *msg );
 
-#ifdef USE_CURL
-static void CL_Download_f( void );
-#endif
 static void CL_LocalServers_f( void );
 static void CL_GlobalServers_f( void );
 static void CL_Ping_f( void );
@@ -1086,11 +1077,7 @@ static void CL_PlayDemo_f( void ) {
 	// inside a single command and never returns to Com_Frame, so we must drive
 	// the phase ticks here too — otherwise the load is deferred forever and
 	// CA_PRIMED is never reached (demo / timedemo would hang at CA_LOADING).
-#ifdef USE_CURL
-	while ( clientActiveApp->state >= CA_CONNECTED && clientActiveApp->state < CA_PRIMED && !Com_DL_InProgress( &download ) ) {
-#else
 	while ( clientActiveApp->state >= CA_CONNECTED && clientActiveApp->state < CA_PRIMED ) {
-#endif
 		CL_ReadDemoMessage();
 		CL_DownloadsComplete_Tick();
 	}
@@ -1209,9 +1196,6 @@ Do NOT call this on map transitions — use CL_ShutdownLevel() instead.
 */
 void CL_ShutdownAll( void ) {
 
-#ifdef USE_CURL
-	CL_cURL_Shutdown();
-#endif
 
 	// level-scoped teardown first (mutes sounds, kills cgame, frees level geo)
 	CL_ShutdownLevel();
@@ -2235,7 +2219,7 @@ CL_DownloadsComplete
 
 Called when all downloading has been completed.
 
-chunking: the synchronous cURL / downloadRestart early-return paths
+chunking: the synchronous downloadRestart early-return paths
 remain here (they exit without starting the load).  The actual load —
 CL_FlushMemory + CL_InitCGame + finalize — runs one phase per Com_Frame
 tick out of CL_DownloadsComplete_Tick below, mirroring SV_SpawnServer_Tick
@@ -2247,22 +2231,6 @@ contract is the architectural follow-up.
 */
 static void CL_DownloadsComplete( void ) {
 
-#ifdef USE_CURL
-	// if we downloaded with cURL
-	if ( clientActiveApp->clc.cURLUsed ) {
-		clientActiveApp->clc.cURLUsed = qfalse;
-		CL_cURL_Shutdown();
-		if ( clientActiveApp->clc.cURLDisconnected ) {
-			if ( clientActiveApp->clc.downloadRestart ) {
-				FS_Restart( clientActiveApp->clc.checksumFeed );
-				clientActiveApp->clc.downloadRestart = qfalse;
-			}
-			clientActiveApp->clc.cURLDisconnected = qfalse;
-			CL_Reconnect_f();
-			return;
-		}
-	}
-#endif
 
 	// if we downloaded files we need to restart the file system
 	if ( clientActiveApp->clc.downloadRestart ) {
@@ -2450,36 +2418,6 @@ void CL_NextDownload( void )
 		else
 			s = localName + strlen(localName); // point at the null byte
 
-#ifdef USE_CURL
-		if(!(cl_allowDownload->integer & DLF_NO_REDIRECT)) {
-			if(clientActiveApp->clc.sv_allowDownload & DLF_NO_REDIRECT) {
-				Com_Log( SEV_INFO, LOG_CH(ch_client), "WARNING: server does not "
-					"allow download redirection "
-					"(sv_allowDownload is %d)\n",
-					clientActiveApp->clc.sv_allowDownload);
-			}
-			else if(!*clientActiveApp->clc.sv_dlURL) {
-				Com_Log( SEV_INFO, LOG_CH(ch_client), "WARNING: server allows "
-					"download redirection, but does not "
-					"have sv_dlURL set\n");
-			}
-			else if(!CL_cURL_Init()) {
-				Com_Log( SEV_INFO, LOG_CH(ch_client), "WARNING: could not load "
-					"cURL library\n");
-			}
-			else {
-				CL_cURL_BeginDownload(localName, va("%s/%s",
-					clientActiveApp->clc.sv_dlURL, remoteName));
-				useCURL = qtrue;
-			}
-		}
-		else if(!(clientActiveApp->clc.sv_allowDownload & DLF_NO_REDIRECT)) {
-			Com_Log( SEV_INFO, LOG_CH(ch_client), "WARNING: server allows download "
-				"redirection, but it disabled by client "
-				"configuration (cl_allowDownload is %d)\n",
-				cl_allowDownload->integer);
-		}
-#endif /* USE_CURL */
 
 		if( !useCURL ) {
 			if( (cl_allowDownload->integer & DLF_NO_UDP) ) {
@@ -2579,26 +2517,6 @@ void CL_InitDownloads( clientApp_t *app ) {
 
 	}
 
-#ifdef USE_CURL
-	if ( cl_mapAutoDownload->integer && ( !(app->clc.sv_allowDownload & DLF_ENABLE) || app->clc.demoplaying ) )
-	{
-		const char *info, *mapname, *bsp;
-
-		// get map name and BSP file name
-		info = app->cl.gameState.stringData + app->cl.gameState.stringOffsets[ CS_SERVERINFO ];
-		mapname = Info_ValueForKey( info, "mapname" );
-		bsp = va( "maps/%s.bsp", mapname );
-
-		if ( FS_FOpenFileRead( bsp, NULL, qfalse ) == -1 )
-		{
-			if ( CL_Download( "dlmap", mapname, qtrue ) )
-			{
-				CL_SetState( app, CA_CONNECTED ); // prevent continue loading and shows the ui download progress screen
-				return;
-			}
-		}
-	}
-#endif // USE_CURL
 
 	CL_DownloadsComplete();
 }
@@ -3398,11 +3316,6 @@ CL_Frame
 */
 void CL_Frame( int msec, int realMsec ) {
 
-#ifdef USE_CURL
-	if ( download.cURL ) {
-		Com_DL_Perform( &download );
-	}
-#endif
 
 	if ( !com_cl_running->integer ) {
 		return;
@@ -3420,23 +3333,6 @@ void CL_Frame( int msec, int realMsec ) {
 	// save the msec before checking pause
 	cls.realFrametime = realMsec;
 
-#ifdef USE_CURL
-	if ( clientActiveApp->clc.downloadCURLM ) {
-		CL_cURL_PerformDownload();
-		// we can't process frames normally when in disconnected
-		// download mode since the ui vm expects cls.state to be
-		// CA_CONNECTED
-		if ( clientActiveApp->clc.cURLDisconnected ) {
-			cls.frametime = msec;
-			cls.realtime += msec;
-			cls.framecount++;
-			SCR_UpdateScreen();
-			S_Update( realMsec );
-			Con_RunConsole( ( Key_GetCatcher() & KEYCATCH_CONSOLE ) != 0, cls.realFrametime );
-			return;
-		}
-	}
-#endif
 
 	/* Boot auto-push retired: at CA_DISCONNECTED the bg_attract layer is
 	 * the sole visible surface (policy/bg_attract.c gates only on
@@ -4817,20 +4713,6 @@ void CL_Init( void ) {
 	// querying master servers; it is empty until cgame loads.
 	Cvar_Get( "cl_gamename", "", CVAR_ROM );
 
-#ifdef USE_CURL
-	{
-		static const cvarDesc_t d = CVAR_BOOL( "cl_mapAutoDownload", "0", CVAR_ARCHIVE | CVAR_NODEFAULT,
-			"Automatic map download for play and demo playback (via automatic \\dlmap call)." );
-		cl_mapAutoDownload = Cvar_Register( &d );
-	}
-#ifdef USE_CURL_DLOPEN
-	{
-		static const cvarDesc_t d = CVAR_STRING( "cl_cURLLib", DEFAULT_CURL_LIB, 0,
-			"Filename of cURL library to load." );
-		cl_cURLLib = Cvar_Register( &d );
-	}
-#endif
-#endif
 
 	{
 #ifdef MACOS_X
@@ -4911,10 +4793,6 @@ void CL_Init( void ) {
 	Cmd_AddCommand ("serverinfo", CL_Serverinfo_f );
 	Cmd_AddCommand ("systeminfo", CL_Systeminfo_f );
 
-#ifdef USE_CURL
-	Cmd_AddCommand( "download", CL_Download_f );
-	Cmd_AddCommand( "dlmap", CL_Download_f );
-#endif
 	Cmd_AddCommand( "modelist", CL_ModeList_f );
 	Cmd_AddCommand( "ral_dump", CL_RalDump_f );          // dump renderer RAL backend probe / caps / memory budget
 	Cmd_AddCommand( "ral_pipeline_test", CL_RalPipelineTest_f ); // walk 19 §17.7 pipeline fixtures
@@ -5011,12 +4889,6 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	Cmd_RemoveCommand( "wui_testerror" );
 #endif
 
-#ifdef USE_CURL
-	Com_DL_Cleanup( &download );
-
-	Cmd_RemoveCommand( "download" );
-	Cmd_RemoveCommand( "dlmap" );
-#endif
 
 	CL_ClearInput();
 
@@ -5910,70 +5782,3 @@ static void CL_ShowIP_f( void ) {
 }
 
 
-#ifdef USE_CURL
-
-qboolean CL_Download( const char *cmd, const char *pakname, qboolean autoDownload )
-{
-	if ( cl_dlURL->string[0] == '\0' )
-	{
-		COM_WARN( LOG_CH(ch_client), "cl_dlURL cvar is not set\n" );
-		return qfalse;
-	}
-
-	// skip leading slashes
-	while ( *pakname == '/' || *pakname == '\\' )
-		pakname++;
-
-	// skip gamedir
-	const char *s = strrchr( pakname, '/' );
-	if ( s )
-		pakname = s+1;
-
-	if ( !Com_DL_ValidFileName( pakname ) )
-	{
-		COM_WARN( LOG_CH(ch_client), "invalid file name: '%s'.\n", pakname );
-		return qfalse;
-	}
-
-	if ( !Q_stricmp( cmd, "dlmap" ) )
-	{
-		char name[MAX_CVAR_VALUE_STRING];
-		Q_strncpyz( name, pakname, sizeof( name ) );
-		FS_StripExt( name, ".pk3" );
-		if ( !name[0] )
-			return qfalse;
-		char url[MAX_OSPATH];
-		s = va( "maps/%s.bsp", name );
-		if ( FS_FileIsInPAK( s, NULL, url ) )
-		{
-			COM_WARN( LOG_CH(ch_client), " map %s already exists in %s.pk3\n", name, url );
-			return qfalse;
-		}
-	}
-
-	return Com_DL_Begin( &download, pakname, cl_dlURL->string, autoDownload );
-}
-
-
-/*
-==================
-CL_Download_f
-==================
-*/
-static void CL_Download_f( void )
-{
-	if ( Cmd_Argc() < 2 || *Cmd_Argv( 1 ) == '\0' )
-	{
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "usage: %s <mapname>\n", Cmd_Argv( 0 ) );
-		return;
-	}
-
-	if ( !strcmp( Cmd_Argv(1), "-" ) )
-	{
-		Com_DL_Cleanup( &download );
-		return;
-	}
-
-	CL_Download( Cmd_Argv( 0 ), Cmd_Argv( 1 ), qfalse );
-}
-#endif // USE_CURL

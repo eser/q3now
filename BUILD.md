@@ -14,7 +14,7 @@ Some of those submodules carry Wired-specific changes that are **not** upstream.
 
 Two toolchain pieces are needed beyond a C/C++ compiler on every platform:
 
-* **CMake ≥ 3.14 and Ninja** — `make` is a thin wrapper around them, not a standalone build.
+* **CMake ≥ 3.25 and Ninja** — `make` is a thin wrapper around them, not a standalone build.
 * **wasi-sdk** — the deployable mod pack (`pax21.sw3z`) always ships the WASM game modules: `Makefile`'s `PAK_VM_MODULES` lists `gamesv.wasm` / `gamecl.wasm` as unconditional prerequisites. Without wasi-sdk every `make` target fails with `No rule to make target .../gamesv.wasm`.
 
   Turning WASM off is not a way around this. `USE_WASM` gates *both* the WAMR runtime backend and the compilation of the `.wasm` modules themselves (`cmake/utils/wasm_tools.cmake` returns early when it is off), while the pack's requirement for those files stays unconditional — so `USE_WASM=0` does not drop the requirement, it makes it unsatisfiable. Note also that the CMake option defaults to `OFF` (`CMakeLists.txt`) but the Makefile defaults it to `1`, so the normal `make` path always has it on.
@@ -67,7 +67,7 @@ Build with either `make ARCH=x86` or `make ARCH=x86_64` commands depending on yo
 
 You may need to run the following commands to install packages (using fresh ubuntu-18.04 installation as example):
 
-* sudo apt install make gcc libcurl4-openssl-dev mesa-common-dev
+* sudo apt install make gcc libssl-dev mesa-common-dev
 * sudo apt install libxxf86dga-dev libxrandr-dev libxxf86vm-dev libasound-dev
 * sudo apt install libsdl3-dev
 
@@ -105,7 +105,7 @@ Build and install `q3now-git`:
 
 Install the build dependencies:
 
-* apt install libsdl3-dev libxxf86dga-dev libcurl4-openssl-dev
+* apt install libsdl3-dev libxxf86dga-dev libssl-dev
 
 Build with: `make`
 

@@ -15,9 +15,6 @@
 #include "snd_public.h"
 #include "keys.h"
 
-#ifdef USE_CURL
-#include "cl_curl.h"
-#endif
 
 #define	RECONNECT_TIMEOUT	3000	// time between packet retransmits at CA_CONNECTING / CA_CHALLENGING
 #define	RETRANSMIT_TIMEOUT	1000	// time between packet retransmits at CA_CONNECTED / CA_LOADING
@@ -202,14 +199,6 @@ typedef struct {
 	char		downloadList[BIG_INFO_STRING]; // list of paks we need to download
 	qboolean	downloadRestart;	// if true, we need to do another FS_Restart because we downloaded a pak
 
-#ifdef USE_CURL
-	qboolean	cURLEnabled;
-	qboolean	cURLUsed;
-	qboolean	cURLDisconnected;
-	char		downloadURL[MAX_OSPATH];
-	CURL		*downloadCURL;
-	CURLM		*downloadCURLM;
-#endif /* USE_CURL */
 
 	// demo information
 	char		demoName[MAX_OSPATH];
@@ -488,17 +477,6 @@ extern clLoadProgress_t cl_loadProgress;
 
 void CL_LoadingYield( const char *phaseName );
 
-#ifdef USE_CURL
-
-extern		download_t	download;
-qboolean	Com_DL_Perform( download_t *dl );
-void		Com_DL_Cleanup( download_t *dl );
-qboolean	Com_DL_Begin( download_t *dl, const char *localName, const char *remoteURL, qboolean autoDownload );
-qboolean	Com_DL_InProgress( const download_t *dl );
-qboolean	Com_DL_ValidFileName( const char *fileName );
-qboolean	CL_Download( const char *cmd, const char *pakname, qboolean autoDownload );
-
-#endif
 
 //=============================================================================
 
@@ -526,9 +504,6 @@ extern	cvar_t	*cl_aviPipeFormat;
 extern	cvar_t	*cl_activeAction;
 
 extern	cvar_t	*cl_allowDownload;
-#ifdef USE_CURL
-extern	cvar_t	*cl_mapAutoDownload;
-#endif
 extern	cvar_t	*cl_conXOffset;
 extern	cvar_t	*cl_conYOffset;
 extern	cvar_t	*cl_conColor;

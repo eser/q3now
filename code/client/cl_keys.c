@@ -945,11 +945,6 @@ static void CL_KeyDownEvent( int key, unsigned time )
 			return;
 		}
 
-#ifdef USE_CURL
-		if ( Com_DL_InProgress( &download ) && download.mapAutoDownload ) {
-			Com_DL_Cleanup( &download );
-		}
-#endif
 		if ( Key_GetCatcher() & KEYCATCH_CONSOLE ) {
 			if ( Con_IsSearchActive() ) {
 				// escape closes search first, not console
