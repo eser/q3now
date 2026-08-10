@@ -134,12 +134,34 @@ function(add_wasm MODULE_NAME)
         list(APPEND WASM_CFLAGS -I${dir})
     endforeach()
 
+    # Header dependencies. The module is one multi-input clang invocation, so
+    # there is no per-TU depfile — without explicit header deps a touched
+    # header silently did NOT rebuild the .wasm (the stale-VM-in-pak class the
+    # Makefile's PAK_OUT machinery exists to prevent). Approximate the true
+    # dependency set by globbing every header reachable through the include
+    # dirs and the source dirs; over-approximation only costs an occasional
+    # extra rebuild, under-approximation ships a stale module. Snapshot is
+    # taken at configure time: a header ADDED later is picked up at the next
+    # cmake reconfigure, same as the project's other source globs.
+    set(_wasm_dep_dirs ${ARG_INCLUDE_DIRECTORIES} ${CMAKE_SOURCE_DIR}/code/wasm)
+    foreach(_src ${ARG_SOURCES})
+        get_filename_component(_d ${_src} DIRECTORY)
+        list(APPEND _wasm_dep_dirs ${_d})
+    endforeach()
+    list(REMOVE_DUPLICATES _wasm_dep_dirs)
+    set(_wasm_hdr_deps "")
+    foreach(_d ${_wasm_dep_dirs})
+        file(GLOB_RECURSE _h ${_d}/*.h)
+        list(APPEND _wasm_hdr_deps ${_h})
+    endforeach()
+
     add_custom_command(
         OUTPUT ${WASM_OUT}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${WASM_OUTPUT_DIR}
         COMMAND ${WASI_CC} ${WASM_CFLAGS} -o ${WASM_OUT}
                 ${ARG_SOURCES} ${CMAKE_SOURCE_DIR}/code/wasm/wasm_bridge.c
         DEPENDS ${ARG_SOURCES} ${CMAKE_SOURCE_DIR}/code/wasm/wasm_bridge.c
+                ${_wasm_hdr_deps}
         COMMENT "Building WASM module: ${ARG_OUTPUT_NAME}.wasm"
         VERBATIM
     )

@@ -6,6 +6,8 @@ Thumbs.db
 
 # Per-build monotonic counter (bumped by `make`; survives `make clean`)
 .build_number
+# Content signature of the last stamped build (gates the counter bump)
+.build_signature
 # Generated per-build stamp header (written by `make` _build-stamp)
 code/qcommon/wired/wired_build_stamp_gen.h
 
