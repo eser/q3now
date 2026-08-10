@@ -441,51 +441,74 @@ ENDIF()
 # picoquic + picotls + mpack sources
 # These are added as git submodules under src/libs/
 
-# MinGW: picoquic + picotls have a handful of MSVC-only assumptions that
-# break under MinGW's CRT (struct timezone redefinition, va_args macros,
-# ws2tcpip include order, _dupenv_s missing).  Local patches in
-# patches/picoquic-mingw/ fix each.  Apply them idempotently at configure
-# time so fresh submodule checkouts (CI) get the same fixes that local
-# working trees have.
+# ── Vendored-submodule patches ────────────────────────────────────────────────
+# Some submodules need fixes that are not upstream.  Rather than forking each
+# one, the fix is kept as a patch under patches/<name>/ and applied to the
+# submodule working tree at configure time.
+#
+# Why this matters: a superproject records only a submodule's COMMIT, never its
+# working-tree content.  Edits made directly inside a submodule are invisible to
+# `git add -A` in the superproject and are silently lost on a fresh clone — the
+# Detour extensions were stranded on one machine exactly this way (2026-08-10).
+# Anything a submodule needs beyond its pinned commit MUST live here as a patch.
+# See SUBMODULE-PATCHES.md.
 #
 # Idempotency: try `git apply --check --reverse` first — exits 0 only when
 # the patch is already cleanly applied, so we skip.  Otherwise apply with
 # --ignore-whitespace so CRLF/LF drift on Windows working trees (Git's
 # autocrlf converts checked-out files) doesn't fail the patch context
 # match.  Both check and apply pass --ignore-whitespace for symmetry.
-IF(WIN32)
+FUNCTION(WIRED_APPLY_SUBMODULE_PATCHES _label _submodule_dir _patch_dir)
+	FILE(GLOB _patches "${CMAKE_SOURCE_DIR}/${_patch_dir}/*.patch")
+	IF(NOT _patches)
+		RETURN()
+	ENDIF()
+	IF(NOT EXISTS "${CMAKE_SOURCE_DIR}/${_submodule_dir}/.git")
+		MESSAGE(FATAL_ERROR
+			"${_label}: ${_patch_dir} carries patches, but the submodule "
+			"${_submodule_dir} is not checked out.\n"
+			"Run:  git submodule update --init --recursive")
+	ENDIF()
 	FIND_PROGRAM(_GIT_EXE git REQUIRED)
-	FILE(GLOB _PICOQUIC_PATCHES "${CMAKE_SOURCE_DIR}/patches/picoquic-mingw/*.patch")
-	LIST(SORT _PICOQUIC_PATCHES)
-	FOREACH(_patch ${_PICOQUIC_PATCHES})
+	LIST(SORT _patches)
+	FOREACH(_patch ${_patches})
 		GET_FILENAME_COMPONENT(_patch_name "${_patch}" NAME)
 		EXECUTE_PROCESS(
 			COMMAND "${_GIT_EXE}" apply --check --reverse --ignore-whitespace "${_patch}"
-			WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src/libs/picoquic"
+			WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/${_submodule_dir}"
 			RESULT_VARIABLE _rc_already
 			OUTPUT_QUIET ERROR_QUIET)
 		IF(_rc_already EQUAL 0)
-			MESSAGE(STATUS "picoquic patch already applied: ${_patch_name}")
+			MESSAGE(STATUS "${_label} patch already applied: ${_patch_name}")
 		ELSE()
 			EXECUTE_PROCESS(
 				COMMAND "${_GIT_EXE}" apply --ignore-whitespace "${_patch}"
-				WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src/libs/picoquic"
+				WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/${_submodule_dir}"
 				RESULT_VARIABLE _rc_apply
 				OUTPUT_VARIABLE _out_apply
 				ERROR_VARIABLE _err_apply)
 			IF(NOT _rc_apply EQUAL 0)
 				MESSAGE(FATAL_ERROR
 					"Failed to apply ${_patch_name}:\n${_err_apply}\n"
-					"This usually means the picoquic submodule has unrelated "
+					"This usually means the ${_label} submodule has unrelated "
 					"local modifications that conflict with the patch hunks.\n"
 					"To recover:\n"
-					"  git -C src/libs/picoquic reset --hard\n"
+					"  git -C ${_submodule_dir} reset --hard\n"
 					"  rm -rf build/release  # or build/debug\n"
 					"  re-run cmake / make")
 			ENDIF()
-			MESSAGE(STATUS "applied picoquic patch: ${_patch_name}")
+			MESSAGE(STATUS "applied ${_label} patch: ${_patch_name}")
 		ENDIF()
 	ENDFOREACH()
+ENDFUNCTION()
+
+# MinGW: picoquic + picotls have a handful of MSVC-only assumptions that
+# break under MinGW's CRT (struct timezone redefinition, va_args macros,
+# ws2tcpip include order, _dupenv_s missing).  Local patches in
+# patches/picoquic-mingw/ fix each.  Windows-only — the hunks target MinGW
+# CRT workarounds that would not apply against a POSIX build.
+IF(WIN32)
+	WIRED_APPLY_SUBMODULE_PATCHES(picoquic src/libs/picoquic patches/picoquic-mingw)
 ENDIF()
 
 FILE(GLOB PICOQUIC_SRCS src/libs/picoquic/picoquic/*.c)
@@ -567,6 +590,14 @@ OPTION(USE_RECAST_NAVMESH "Use Recast/Detour/DetourCrowd navmesh (replaces AAS)"
 IF(NOT USE_RECAST_NAVMESH)
 	ADD_COMPILE_DEFINITIONS(FEAT_RECAST_NAVMESH=0)
 ELSE()
+	# Detour carries Wired-specific extensions that nav_impl.cpp calls directly
+	# (reconnectUnlinkedOffMeshStarts, reconnectSplitFloorSeams,
+	# isPreferredWalkInFloor, getReachablePolyCount, finalizeOmcEndpoints).
+	# They are kept as a patch, not a fork — see SUBMODULE-PATCHES.md.
+	# Unlike the picoquic set this is NOT platform-gated: without it the
+	# engine does not compile anywhere.
+	WIRED_APPLY_SUBMODULE_PATCHES(recastnavigation src/libs/recastnavigation patches/recastnavigation)
+
 	# Recast / Detour / DetourCrowd sources from the vendored submodule.
 	# DetourCrowd is compiled but dormant until Phase 6.
 	FILE(GLOB RECAST_SRC    src/libs/recastnavigation/Recast/Source/*.cpp)
@@ -897,6 +928,11 @@ FUNCTION(WIRED_LINK_RAL_VULKAN _target)
 	IF(MSVC)
 		TARGET_LINK_LIBRARIES(${_target} ral_vulkan)
 		TARGET_LINK_OPTIONS(${_target} PRIVATE "/WHOLEARCHIVE:ral_vulkan")
+	ELSEIF(APPLE)
+		# Apple ld64 has no --whole-archive; -force_load takes the archive path
+		# directly and is the exact equivalent for a single archive.
+		TARGET_LINK_LIBRARIES(${_target} ral_vulkan)
+		TARGET_LINK_OPTIONS(${_target} PRIVATE "LINKER:-force_load,$<TARGET_FILE:ral_vulkan>")
 	ELSE()
 		TARGET_LINK_LIBRARIES(${_target} -Wl,--whole-archive ral_vulkan -Wl,--no-whole-archive)
 	ENDIF()
@@ -1031,7 +1067,14 @@ IF(USE_RENDERER_DLOPEN)
 	# symbolicating crash-trace return addresses. The flag is GNU-ld / lld
 	# only; if a non-GNU toolchain is ever swapped in here, this line is the
 	# one to gate behind `IF(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR …)`.
-	TARGET_LINK_OPTIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE "LINKER:-Map=${RENDERER_PREFIX}_vulkan${RENDEXT}.map")
+	#
+	# That case has arrived: Apple ld64 rejects -Map outright (its own map flag
+	# is `-map <file>`, and the format it emits is not what the symbolication
+	# tooling reads). Skip the map on Apple rather than emit one nothing can
+	# consume; macOS crash traces symbolicate via atos/dSYM instead.
+	IF(NOT APPLE)
+		TARGET_LINK_OPTIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE "LINKER:-Map=${RENDERER_PREFIX}_vulkan${RENDEXT}.map")
+	ENDIF()
 	# Phase 7: pull in the (dormant, FEAT_RAL-gated) RAL Vulkan backend skeleton
 	WIRED_LINK_RAL_VULKAN(${RENDERER_PREFIX}_vulkan${RENDEXT})
 

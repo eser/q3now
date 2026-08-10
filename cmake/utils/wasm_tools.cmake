@@ -17,13 +17,25 @@ if(NOT DEFINED WASI_SDK_PATH)
     if(DEFINED ENV{WASI_SDK_PATH})
         set(WASI_SDK_PATH "$ENV{WASI_SDK_PATH}")
     else()
-        set(_wasi_candidates "/opt/wasi-sdk")
+        # User-local install is tried first. A cross-compiler toolchain is
+        # per-developer state, not system state, so setting up a build should
+        # not require sudo. A deliberate system-wide install under /opt still
+        # works as a fallback, and an explicit WASI_SDK_PATH still wins over
+        # both.
+        set(_wasi_candidates "")
+        foreach(_home_var HOME USERPROFILE)
+            if(DEFINED ENV{${_home_var}})
+                list(APPEND _wasi_candidates "$ENV{${_home_var}}/.local/opt/wasi-sdk")
+            endif()
+        endforeach()
+        list(APPEND _wasi_candidates "/opt/wasi-sdk")
         if(WIN32)
             # MSYS2 mounts its /opt under C:/msys64/opt. cmake on Windows
             # doesn't see "/opt/wasi-sdk" as the same path, so list the
             # native form explicitly.
             list(APPEND _wasi_candidates "C:/msys64/opt/wasi-sdk")
         endif()
+        list(REMOVE_DUPLICATES _wasi_candidates)
         foreach(_candidate IN LISTS _wasi_candidates)
             if(EXISTS "${_candidate}")
                 set(WASI_SDK_PATH "${_candidate}")
