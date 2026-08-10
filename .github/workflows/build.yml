@@ -78,7 +78,7 @@ jobs:
         sudo apt-get -qq update
         # The X11/Wayland dev set mirrors the Linux build job: SDL3's source
         # configure refuses a video-less desktop build without it.
-        sudo apt-get -y install cmake ninja-build clang-tidy clang-format \
+        sudo apt-get -y install cmake ninja-build clang-format \
           libssl-dev libopus-dev libopusfile-dev \
           libasound-dev mesa-common-dev libegl-dev libgbm-dev libdrm-dev \
           libxxf86dga-dev libxrandr-dev libxxf86vm-dev libxss-dev \
@@ -86,6 +86,22 @@ jobs:
           libxtst-dev libxrender-dev libxext-dev \
           libxkbcommon-dev libwayland-dev libdecor-0-dev \
           libpipewire-0.3-dev libpulse-dev
+
+    - name: Install clang-tidy 22
+      run: |
+        # Pinned to major 22 via apt.llvm.org — Ubuntu 24.04's default
+        # clang-tidy is 18, and 18-vs-22 disagree on findings (18 flags
+        # sizeof-of-pointer patterns 22 no longer does), so developer
+        # machines could not predict CI. Pinning CI to what developers run
+        # makes a clean local sweep a real green-predictor.
+        # clang-format deliberately stays the apt default: bumping it can
+        # reflow the committed formatting baseline, which is a separate
+        # decision from lint findings.
+        wget -q https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 22
+        sudo ln -sf "$(command -v clang-tidy-22)" /usr/local/bin/clang-tidy
+        clang-tidy --version
 
     - name: Install SDL3
       run: |
@@ -136,20 +152,28 @@ jobs:
       if: github.event_name == 'pull_request' && steps.changed.outputs.c_only != ''
       shell: bash
       run: |
-        echo "${{ steps.changed.outputs.c_only }}" | while IFS= read -r f; do
+        fail=0
+        while IFS= read -r f; do
           [ -z "$f" ] && continue
-          clang-tidy -p . "$f"
-        done
+          clang-tidy -p . "$f" || fail=1
+        done <<< "${{ steps.changed.outputs.c_only }}"
+        exit $fail
 
     - name: clang-tidy (push — full engine + game sweep)
       if: github.event_name != 'pull_request'
       shell: bash
       run: |
-        find code/cgame code/game code/qcommon code/server code/client code/sdl \
+        # Accumulate failures instead of dying on the first bad file — under
+        # bash -e a plain loop aborts at the first nonzero clang-tidy, so
+        # each CI run used to reveal only ONE failing file per push. One run
+        # now reports the complete finding list.
+        fail=0
+        while IFS= read -r f; do
+          clang-tidy -p . "$f" || fail=1
+        done < <(find code/cgame code/game code/qcommon code/server code/client code/sdl \
              code/botlib code/renderer code/renderer2 code/renderervk code/renderercommon \
-             -name '*.c' | grep -vE 'sv_rankings\.c|g_rankings\.c' | while IFS= read -r f; do
-          clang-tidy -p . "$f"
-        done
+             -name '*.c' | grep -vE 'sv_rankings\.c|g_rankings\.c')
+        exit $fail
 
   linux-x86_64:
     name: Linux x86_64
