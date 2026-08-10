@@ -280,24 +280,30 @@ static ID_INLINE float   BigFloat( float x ) {
 	#include <stdint.h>
 #endif
 
+// Function-like on purpose: the non-standard argument types the Windows
+// branches need ((void **) for the GCC builtins, (void *) for the MSVC
+// custom impls) are cast HERE, so every call site passes a plain jmp_buf.
+// The casts used to live at the call sites, which poisoned the POSIX path:
+// setjmp(jmp_buf) receiving (void **) is a warning under clang and a hard
+// ERROR under gcc >= 14 (first caught by the Docker/trixie CI job).
 #if defined (_WIN32)
 #if !defined(_MSC_VER)
-// use GCC/Clang functions
-#define Q_setjmp __builtin_setjmp
-#define Q_longjmp __builtin_longjmp
+// use GCC/Clang builtins (MinGW CRT setjmp/longjmp unwinding is unreliable)
+#define Q_setjmp(env)      __builtin_setjmp((void **)(env))
+#define Q_longjmp(env, v)  __builtin_longjmp((void **)(env), (v))
 #elif idx64 && (_MSC_VER >= 1910)
 // use custom setjmp()/longjmp() implementations
-#define Q_setjmp Q_setjmp_c
-#define Q_longjmp Q_longjmp_c
+#define Q_setjmp(env)      Q_setjmp_c((void *)(env))
+#define Q_longjmp(env, v)  Q_longjmp_c((void *)(env), (v))
 int Q_setjmp_c(void *);
 int Q_longjmp_c(void *, int);
 #else // !idx64 || MSVC<2017
-#define Q_setjmp setjmp
-#define Q_longjmp longjmp
+#define Q_setjmp(env)      setjmp(env)
+#define Q_longjmp(env, v)  longjmp((env), (v))
 #endif
 #else // !_WIN32
-#define Q_setjmp setjmp
-#define Q_longjmp longjmp
+#define Q_setjmp(env)      setjmp(env)
+#define Q_longjmp(env, v)  longjmp((env), (v))
 #endif
 
 // byte, qboolean, color4ub_t, qhandle_t/sfxHandle_t/fileHandle_t/clipHandle_t,

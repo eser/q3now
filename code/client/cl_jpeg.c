@@ -48,7 +48,7 @@ static void CL_JPGErrorExit(j_common_ptr cinfo)
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "Error: %s", buffer );
 
 	/* Return control to the setjmp point */
-	Q_longjmp( (void **)jerr->setjmp_buffer, 1 );
+	Q_longjmp( jerr->setjmp_buffer, 1 );
 }
 
 
@@ -119,7 +119,7 @@ void CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *hei
 	cinfo.err->output_message = CL_JPGOutputMessage;
 
 	/* Establish the setjmp return context for R_JPGErrorExit to use. */
-	if ( Q_setjmp( (void **)jerr.setjmp_buffer ) )
+	if ( Q_setjmp( jerr.setjmp_buffer ) )
 	{
 		/* If we get here, the JPEG code has signaled an error.
 		* We need to clean up the JPEG object, close the input file, and return.
@@ -384,7 +384,7 @@ size_t CL_SaveJPGToBuffer(byte *buffer, size_t bufSize, int quality,
   cinfo.err->output_message = CL_JPGOutputMessage;
 
   /* Establish the setjmp return context for R_JPGErrorExit to use. */
-  if ( Q_setjmp( (void **)jerr.setjmp_buffer ) )
+  if ( Q_setjmp( jerr.setjmp_buffer ) )
   {
     /* If we get here, the JPEG code has signaled an error.
      * We need to clean up the JPEG object and return.

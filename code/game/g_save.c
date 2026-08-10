@@ -233,9 +233,13 @@ const saveField_t levelFields[] = {
 // pointers (re-acquired, not deserialized) as the canonical ignore ranges.
 const saveRange_t gentityIgnoreFields[] = {
 #if FEAT_RECAST_NAVMESH
+	// sizeof(pointer) is the point: the ignore range covers the POINTER's own
+	// bytes (pool slots are re-acquired, never deserialized), not the pointee.
+	// NOLINTNEXTLINE(bugprone-sizeof-expression)
 	{ FOFS( navState ),      sizeof( ((gentity_t *)0)->navState ) },
 #endif
 #if FEAT_MONSTER_AI
+	// NOLINTNEXTLINE(bugprone-sizeof-expression) — same as navState above
 	{ FOFS( behaviorState ), sizeof( ((gentity_t *)0)->behaviorState ) },
 #endif
 	{ 0, 0 }

@@ -843,10 +843,10 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Terminate( terminationReason_t reaso
 		FS_PureServerSetLoadedPaks( "", "" );
 		com_errorEntered = qfalse;
 
-		// Q_longjmp maps to __builtin_longjmp on MinGW which expects void**;
-		// jmp_buf decays compatibly under GCC but clang-tidy's frontend rejects
-		// the implicit conversion. The cast is a no-op at runtime and matches the
-		// existing Q3 setjmp/longjmp pattern. Recoverable errors longjmp to the
+		// Call sites pass plain jmp_buf; the MinGW __builtin_longjmp void**
+		// cast lives inside the Q_longjmp macro (q_shared.h) — site-level
+		// casts poisoned the POSIX path (gcc>=14 hard error).
+		// Recoverable errors longjmp to the
 		// FAULTING app's per-frame recovery point so a drop in one app does not
 		// abort co-resident apps; HEADLESS has no clientApps[]
 		// so it keeps the process-global abortframe.
@@ -861,11 +861,11 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Terminate( terminationReason_t reaso
 		// to the frame boundary (CL_AbortFrame + return) or the init error handler.
 #ifndef HEADLESS
 		if ( CL_FrameAbortArmed() )
-			Q_longjmp( CL_FrameAppAbort(), 1 );
+			Q_longjmp( *CL_FrameAppAbort(), 1 );
 		else
-			Q_longjmp( (void **)abortframe, 1 );
+			Q_longjmp( abortframe, 1 );
 #else
-		Q_longjmp( (void **)abortframe, 1 );
+		Q_longjmp( abortframe, 1 );
 #endif
 	} else if ( reason == TERM_CLIENT_DROP ) {
 #ifndef HEADLESS
@@ -904,11 +904,11 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Terminate( terminationReason_t reaso
 		// to the process-global abortframe (always armed during a frame / init).
 #ifndef HEADLESS
 		if ( CL_FrameAbortArmed() )
-			Q_longjmp( CL_FrameAppAbort(), 1 );
+			Q_longjmp( *CL_FrameAppAbort(), 1 );
 		else
-			Q_longjmp( (void **)abortframe, 1 );
+			Q_longjmp( abortframe, 1 );
 #else
-		Q_longjmp( (void **)abortframe, 1 );
+		Q_longjmp( abortframe, 1 );
 #endif
 	} else {
 		// TERM_UNRECOVERABLE
