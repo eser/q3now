@@ -34,7 +34,20 @@ BLK_N="${BLK_N:-24}"
 # real square (which shifts a corner by tens of units — even a near-black square
 # on a near-black menu differs by the fill's own brightness, ~7+).
 CORNER_DELTA="${CORNER_DELTA:-6.0}"
-GOLDEN="${GOLDEN:-$REPO_ROOT/tests/golden/wiredui_corners.txt}"
+# Corner goldens are PER-PLATFORM: the menu renders through different Vulkan
+# stacks (native vs MoltenVK) at different backing scales, so one platform's
+# blessed corners are not another's baseline. The legacy unsuffixed file is
+# the pre-split Windows bless and stays the Windows fallback.
+case "$(uname -s)" in
+    Darwin)               GOLDEN_PLAT="darwin-$(uname -m)" ;;
+    MINGW*|MSYS*|CYGWIN*) GOLDEN_PLAT="windows-$(uname -m)" ;;
+    *)                    GOLDEN_PLAT="linux-$(uname -m)" ;;
+esac
+GOLDEN_DEFAULT="$REPO_ROOT/tests/golden/wiredui_corners.$GOLDEN_PLAT.txt"
+if [ ! -e "$GOLDEN_DEFAULT" ] && [ -e "$REPO_ROOT/tests/golden/wiredui_corners.txt" ]; then
+    case "$GOLDEN_PLAT" in windows-*) GOLDEN_DEFAULT="$REPO_ROOT/tests/golden/wiredui_corners.txt" ;; esac
+fi
+GOLDEN="${GOLDEN:-$GOLDEN_DEFAULT}"
 
 # Analysis program written to a temp .py (NOT a `python3 -` heredoc): the heredoc
 # would BE stdin, leaving nothing for the raw image the program reads from stdin.
@@ -161,6 +174,16 @@ echo "==> WiredUI corner check (SMAA corner-squares, corner-vs-golden, mode=$MOD
 
 SHOT="$(ls -t "$HOME_DIR/base/screenshots/"*.png 2>/dev/null | head -1)"
 if [ -z "$SHOT" ]; then echo "FAIL: no menu screenshot captured"; exit 1; fi
+
+# On HiDPI the requested WxH is the LOGICAL size — the capture backs at the
+# physical pixel size (a 1280 request backs at 2560 on a 2x display). Sampling
+# with the requested dims would read the wrong pixels entirely, so take the
+# REAL dims from the PNG header (IHDR width/height, bytes 16..24, big-endian).
+ACTUAL_DIMS="$(python3 -c 'import struct,sys; d=open(sys.argv[1],"rb").read(26); print(*struct.unpack(">II", d[16:24]))' "$SHOT" 2>/dev/null)"
+if [ -n "$ACTUAL_DIMS" ]; then
+    W="${ACTUAL_DIMS%% *}"; H="${ACTUAL_DIMS##* }"
+    echo "  capture: ${W}x${H} (PNG-derived; golden: $(basename "$GOLDEN"))"
+fi
 
 mkdir -p "$(dirname "$GOLDEN")"
 "$PNG2RAW" "$SHOT" | python3 "$ASSERT_PY" "$W" "$H" "$BLK_N" "$CORNER_DELTA" "$MODE" "$GOLDEN"
