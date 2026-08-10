@@ -5619,7 +5619,7 @@ void WiredUI_CompositorEmitFrame( void )
 			if ( L == WUI_LAYER_MENU ) {
 				m = WiredUI_GetActiveMenu();
 				if ( m && m->visible
-				  && wui_visible_panel_count < (int) ARRAY_LEN( wui_visible_panels ) ) {
+				  && wui_visible_panel_count < WIRED_MAX_MENUS ) {
 					wui_visible_panels[ wui_visible_panel_count++ ] = m;
 				}
 				continue;
@@ -5630,7 +5630,7 @@ void WiredUI_CompositorEmitFrame( void )
 				if ( popupName && *popupName ) {
 					m = WiredUI_FindMenu( popupName );
 					if ( m && m->visible
-					  && wui_visible_panel_count < (int) ARRAY_LEN( wui_visible_panels ) ) {
+					  && wui_visible_panel_count < WIRED_MAX_MENUS ) {
 						wui_visible_panels[ wui_visible_panel_count++ ] = m;
 					}
 				}
@@ -5651,7 +5651,7 @@ void WiredUI_CompositorEmitFrame( void )
 				const char *path = WiredUI_GetLoadingMenuPath();
 				m = ( path && *path ) ? WiredUI_FindMenuByPath( path ) : NULL;
 				if ( m && m->visible
-				  && wui_visible_panel_count < (int) ARRAY_LEN( wui_visible_panels ) ) {
+				  && wui_visible_panel_count < WIRED_MAX_MENUS ) {
 					wui_visible_panels[ wui_visible_panel_count++ ] = m;
 				} else if ( path && *path && !m ) {
 					/* fail-loud: the loading UI was named but is not in the
@@ -5673,7 +5673,7 @@ void WiredUI_CompositorEmitFrame( void )
 				if ( !m ) continue;
 				if ( m->layer != L ) continue;
 				if ( !m->visible ) continue;
-				if ( wui_visible_panel_count >= (int) ARRAY_LEN( wui_visible_panels ) ) break;
+				if ( wui_visible_panel_count >= WIRED_MAX_MENUS ) break;
 				wui_visible_panels[ wui_visible_panel_count++ ] = m;
 			}
 		}
