@@ -83,6 +83,7 @@ jobs:
           libasound-dev mesa-common-dev libegl-dev libgbm-dev libdrm-dev \
           libxxf86dga-dev libxrandr-dev libxxf86vm-dev libxss-dev \
           libxcursor-dev libxi-dev libxinerama-dev libxfixes-dev \
+          libxtst-dev libxrender-dev libxext-dev \
           libxkbcommon-dev libwayland-dev libdecor-0-dev \
           libpipewire-0.3-dev libpulse-dev
 
