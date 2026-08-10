@@ -179,6 +179,11 @@ void Sys_Sleep( int msec ) {
 // Sys_Mutex — wraps CRITICAL_SECTION in the sys_mutex_t opaque buffer.
 _Static_assert( sizeof(CRITICAL_SECTION) <= SYS_MUTEX_OPAQUE_SIZE,
 	"sys_mutex_t opaque buffer too small for CRITICAL_SECTION" );
+// Alignment is a separate bound from size; see the matching assert in
+// code/unix/unix_main.c for why an under-aligned buffer is fatal on AArch64
+// and why the assert must target the struct's real alignment.
+_Static_assert( _Alignof(sys_mutex_t) >= _Alignof(CRITICAL_SECTION),
+	"sys_mutex_t under-aligned for CRITICAL_SECTION" );
 
 qboolean Sys_MutexInit( sys_mutex_t *m )
 {

@@ -926,14 +926,32 @@ typedef struct cvar_s cvar_t;
 void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Terminate( terminationReason_t level, const char *fmt, ... );
 // Com_Log is declared by the log.h include above (correct FORMAT_PRINTF(2,3))
 
+// alignas spelling that works from both the C engine and the C++ nav layer
+// (nav_impl.cpp includes this header).
+#if defined(__cplusplus)
+#	define WIRED_ALIGNAS(n) alignas(n)
+#else
+#	define WIRED_ALIGNAS(n) _Alignas(n)
+#endif
+
 // Platform mutex abstraction. Fixed-size opaque struct; platform files define
 // the actual member via _Static_assert-guarded cast into opaque[]. 128 bytes
 // covers pthread_mutex_t on macOS arm64 (64 B, the largest target) and
 // CRITICAL_SECTION on Win64 (40 B). Sys_MutexInit returns qfalse on resource
 // exhaustion; Com_Init callers must Com_Terminate TERM_UNRECOVERABLE on failure.
-#define SYS_MUTEX_OPAQUE_SIZE 128
+//
+// The buffer is over-aligned deliberately, and the alignment matters as much as
+// the size. A bare unsigned char[] has alignment 1, so an embedded sys_mutex_t
+// lands at whatever byte offset its enclosing struct puts it at; casting that
+// to pthread_mutex_t* then hands the platform a misaligned pointer. x86
+// tolerates the resulting unaligned atomic, AArch64 does not — the store-release
+// inside pthread_mutex_init faults with SIGBUS, killing the process inside
+// Com_Init before any log output exists to explain it. Both wrapped primitives
+// need 8; 16 leaves headroom. The platform files assert both bounds.
+#define SYS_MUTEX_OPAQUE_SIZE  128
+#define SYS_MUTEX_OPAQUE_ALIGN 16
 typedef struct sys_mutex_s {
-	unsigned char opaque[SYS_MUTEX_OPAQUE_SIZE];
+	WIRED_ALIGNAS(SYS_MUTEX_OPAQUE_ALIGN) unsigned char opaque[SYS_MUTEX_OPAQUE_SIZE];
 } sys_mutex_t;
 qboolean  Sys_MutexInit   ( sys_mutex_t *m );
 void      Sys_MutexLock   ( sys_mutex_t *m );
