@@ -641,14 +641,15 @@ its release artifacts) bundles development-only deps such as Dear ImGui
 and SDL — Wired's release binaries don't link to those, so attribution is
 not required for Wired's distribution.
 
-### 3.12 curl (system library — not vendored)
+### 3.12 curl (removed 2026-08-10)
 
-The `src/libs/curl/` directory contains **only** CMake configuration
-helper scripts (`conf751.sh`, `conf840.sh`, `windows/`) used during build.
-**The actual libcurl is provided by the host system** (`libcurl4-openssl-dev`
-on Linux, system curl on macOS, `mingw-w64-x86_64-curl` on Windows-MSYS2).
-Wired does not redistribute libcurl source or binaries; attribution
-obligations fall on the host distribution.
+cURL support was removed entirely: the `USE_CURL` macro was never defined in
+the CMake era (the guarded code never compiled), and in-game file download
+runs over WiredNet's reliable `CHAN_DOWNLOAD` QUIC channel, which supersedes
+the HTTP-redirect path curl served. The `src/libs/curl/` helper-script
+directory, `code/client/cl_curl.{c,h}` and the guarded call sites were
+deleted. Wired never redistributed libcurl source or binaries, so no
+attribution obligation existed or remains.
 
 For reference, libcurl is released under the **curl license** (a permissive
 MIT-style license) at https://curl.se/docs/copyright.html .

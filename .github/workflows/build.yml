@@ -77,7 +77,7 @@ jobs:
       run: |
         sudo apt-get -qq update
         sudo apt-get -y install cmake ninja-build clang-tidy clang-format \
-          libcurl4-openssl-dev libopus-dev libopusfile-dev \
+          libssl-dev libopus-dev libopusfile-dev \
           libasound-dev mesa-common-dev libegl-dev libgbm-dev libdrm-dev
 
     - name: Install SDL3
@@ -168,7 +168,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get -qq update
-        sudo apt-get -y install cmake ninja-build libcurl4-openssl-dev \
+        sudo apt-get -y install cmake ninja-build libssl-dev \
           mesa-common-dev libxxf86dga-dev libxrandr-dev libxxf86vm-dev \
           libasound-dev libxss-dev libxcursor-dev libxi-dev libxinerama-dev \
           libxfixes-dev libxkbcommon-dev libwayland-dev libdecor-0-dev \

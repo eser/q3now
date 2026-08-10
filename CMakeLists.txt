@@ -47,7 +47,6 @@ SET(DNAME "wired-headless")
 SET(RENDERER_PREFIX ${CNAME})
 SET(RENDERER_DEFAULT vulkan) # valid options: opengl, vulkan, opengl2; opengl as ultimate fallback
 
-OPTION(USE_CURL "" ON)
 OPTION(USE_OPENGL "" ON)
 OPTION(USE_VULKAN "" ON)
 OPTION(USE_SYSTEM_JPEG "" OFF)
@@ -761,7 +760,7 @@ target_link_libraries(opusfile PUBLIC opus ogg)
 target_include_directories(opusfile PUBLIC src/libs/ogg/include)
 target_include_directories(opusfile PRIVATE src/libs/opus/include/opus)
 
-# client + cURL + Wired UI + miniaudio test
+# client + Wired UI + miniaudio test
 AUX_SOURCE_DIRECTORY(code/client CLIENT_SRCS)
 list(FILTER CLIENT_SRCS EXCLUDE REGEX "cl_ui\\.c$")
 
@@ -793,9 +792,10 @@ AUX_SOURCE_DIRECTORY(code/client/wired/ui/panels   CLIENT_SRCS)
 AUX_SOURCE_DIRECTORY(code/client/wired/ui/elements CLIENT_SRCS)
 AUX_SOURCE_DIRECTORY(code/client/wired/ui/policy   CLIENT_SRCS)
 # bg_misc.c, bg_weapons.c and bg_gametypes.c are in QCOMMON_SRCS (shared with headless server); not duplicated here
-IF(NOT USE_CURL)
-	list(REMOVE_ITEM CLIENT_SRCS code/client/cl_curl.c)
-ENDIF()
+# cURL support was removed 2026-08-10: the USE_CURL macro was never defined in
+# the CMake era (cl_curl.c compiled to an empty TU), and in-game file download
+# runs over WiredNet's reliable CHAN_DOWNLOAD QUIC channel — the HTTP-redirect
+# path curl served is superseded (gamedata bootstrap belongs to the launcher).
 
 #ADD_LIBRARY(client OBJECT ${CLIENT_SRCS})
 

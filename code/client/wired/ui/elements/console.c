@@ -871,18 +871,6 @@ static void Con_DrawSolidConsole( float frac ) {
 			row--;
 		}
 
-#ifdef USE_CURL
-		if ( download.progress[ 0 ] )
-		{
-			float dlVY = Con_NativeToVirtualY( (float)(lines - (int)con_lineAdvance) );
-			int dlLen = strlen( download.progress );
-			for ( int x = 0; x < dlLen; x++ )
-			{
-				Text_DrawChar( download.progress[x], ( x + 1 ) * vcw, dlVY,
-				               FONT_MONO, con_textPointSize, g_color_table[ ColorIndex( COLOR_CYAN ) ] );
-			}
-		}
-#endif
 
 		for ( int i = 0; i < rows; i++, y -= (int)con_lineAdvance, row-- )
 		{

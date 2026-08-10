@@ -33,7 +33,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         git \
-        libcurl4-openssl-dev \
         libssl-dev \
         libsdl3-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -85,7 +84,6 @@ RUN ARCH=$(uname -m) && \
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libcurl4 \
         libssl3 \
         openssl \
         ca-certificates \
