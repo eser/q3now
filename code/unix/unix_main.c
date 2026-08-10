@@ -747,6 +747,14 @@ void Sys_Sleep( int msec ) {
 // Sys_Mutex — wraps pthread_mutex_t in the sys_mutex_t opaque buffer.
 _Static_assert( sizeof(pthread_mutex_t) <= SYS_MUTEX_OPAQUE_SIZE,
 	"sys_mutex_t opaque buffer too small for pthread_mutex_t" );
+// Alignment is a separate bound from size, and violating it is not benign:
+// AArch64 faults (SIGBUS) on the store-release inside pthread_mutex_init when
+// the pointer is misaligned, whereas x86 silently tolerates it. Assert against
+// the STRUCT's real alignment, not the SYS_MUTEX_OPAQUE_ALIGN constant — the
+// constant-form assert stays green even if WIRED_ALIGNAS is deleted from the
+// struct, which is exactly the regression it exists to block.
+_Static_assert( _Alignof(sys_mutex_t) >= _Alignof(pthread_mutex_t),
+	"sys_mutex_t under-aligned for pthread_mutex_t" );
 
 qboolean Sys_MutexInit( sys_mutex_t *m )
 {
