@@ -122,7 +122,7 @@ local int32_t bits(struct state *s, int32_t need)
     /* load at least need bits into val */
     int32_t val = s->bitbuf;
     while (s->bitcnt < need) {
-        if (s->incnt == s->inlen) Q_longjmp((void **)s->env, 1);   /* out of input */
+        if (s->incnt == s->inlen) Q_longjmp(s->env, 1);   /* out of input */
         val |= (int32_t)(s->in[s->incnt++]) << s->bitcnt;  /* load eight bits */
         s->bitcnt += 8;
     }
@@ -245,7 +245,7 @@ local int32_t decode(struct state *s, struct huffman *h)
         }
         left = (MAXBITS+1) - len;
         if (left == 0) break;
-        if (s->incnt == s->inlen) Q_longjmp((void **)s->env, 1);   /* out of input */
+        if (s->incnt == s->inlen) Q_longjmp(s->env, 1);   /* out of input */
         bitbuf = s->in[s->incnt++];
         if (left > 8) left = 8;
     }
@@ -723,7 +723,7 @@ int32_t puff(uint8_t  *dest,           /* pointer to destination pointer */
     s.bitcnt = 0;
 
     /* return if bits() or decode() tries to read past available input */
-    if ( Q_setjmp( (void **)s.env ) != 0 )       /* if came back here via longjmp() */
+    if ( Q_setjmp( s.env ) != 0 )       /* if came back here via longjmp() */
         err = 2;                        /* then skip do-loop, return error */
     else {
         /* process blocks until last block or error */

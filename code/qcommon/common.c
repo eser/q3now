@@ -3027,7 +3027,7 @@ void Com_Init( char *commandLine ) {
 
 	Hash_SelfTest();
 
-	if ( Q_setjmp( (void **)abortframe ) ) {
+	if ( Q_setjmp( abortframe ) ) {
 		Sys_Error ("Error during initialization");
 	}
 
@@ -3544,7 +3544,7 @@ void Com_Frame( qboolean noDelay ) {
 	static int biasUsec = 0;
 #endif
 
-	if ( Q_setjmp( (void **)abortframe ) ) {
+	if ( Q_setjmp( abortframe ) ) {
 #ifndef HEADLESS
 		CL_AbortFrame();	// reset SCR_UpdateScreen guard on ERR_DROP recovery
 #endif
@@ -3752,7 +3752,7 @@ void Com_Frame( qboolean noDelay ) {
 		// the top of every Com_Frame and during init). Clear the flag after the
 		// section so a later out-of-window drop is routed safely.
 		CL_SetFrameAbortArmed( qtrue );
-		if ( Q_setjmp( (void **)CL_FrameAppAbort() ) ) {
+		if ( Q_setjmp( *CL_FrameAppAbort() ) ) {
 			CL_AbortFrame();
 		} else {
 			// Advance one phase of the async CL_DownloadsComplete state

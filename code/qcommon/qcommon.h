@@ -1441,11 +1441,12 @@ qboolean CL_GameSwitch( struct clientApp_s *app );
 // Faulting-app cursor for the per-app recovery. CL_FrameApp
 // is the app currently being serviced (the target Com_Terminate disconnects on a
 // recoverable error); CL_FrameAppAbort returns that app's per-frame setjmp recovery
-// point as a (void **) so qcommon (log.c) can Q_longjmp into it without seeing the
-// clientApp_t layout (the field deref happens client-tier). At N=1 both resolve to
+// point as a (jmp_buf *) so qcommon (log.c) can Q_longjmp into it without seeing
+// the clientApp_t layout (jmp_buf is a standard type; the field deref happens
+// client-tier). Platform-specific casts live inside the Q_setjmp/Q_longjmp macros. At N=1 both resolve to
 // clientApps[0]; in HEADLESS neither is referenced (the global abortframe is kept).
 struct clientApp_s *CL_FrameApp( void );
-void **CL_FrameAppAbort( void );
+jmp_buf *CL_FrameAppAbort( void );
 // Is the faulting-app per-frame recovery point currently armed? Outside the armed
 // window (startup cbuf '+map'/'+demo' that runs in Com_Frame before the per-app
 // setjmp, Com_EventLoop, init) the per-app jmp_buf is zero-initialized and longjmp

@@ -126,8 +126,8 @@ static qboolean cl_frameAbortArmed = qfalse;
 clientApp_t *CL_FrameApp( void ) {
 	return cl_frameApp;
 }
-void **CL_FrameAppAbort( void ) {
-	return (void **)cl_frameApp->appAbortFrame;
+jmp_buf *CL_FrameAppAbort( void ) {
+	return &cl_frameApp->appAbortFrame;
 }
 qboolean CL_FrameAbortArmed( void ) {
 	return cl_frameAbortArmed;
@@ -3431,7 +3431,7 @@ void CL_Frame( int msec, int realMsec ) {
 			 * and we continue to the next app — the focused app + other apps
 			 * survive. N=1: this loop has zero iterations, so EDIT 5 never runs. */
 			cl_frameApp = other;
-			if ( Q_setjmp( (void **)other->appAbortFrame ) ) {
+			if ( Q_setjmp( other->appAbortFrame ) ) {
 				CL_AbortFrame();                 // this app dropped; teardown already done in Com_Terminate
 				cl_frameApp = clientActiveApp;   // restore cursor before next iteration
 				continue;                        // survive: skip to the next app
