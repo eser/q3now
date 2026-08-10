@@ -59,7 +59,9 @@ OPTION(USE_LUA "Enable LuaJIT scripting" ON)
 OPTION(USE_WIRED_UI_CLAY "Vendor Clay layout engine for the WiredUI compositor (client target only)" ON)
 OPTION(USE_SSAO "Compile the GTAO/SSAO renderer path in (FEAT_SSAO=1) for the visual-gate verify build; OFF = compiled-out ship path" OFF)
 
-SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+# cmake/ only — the cmake_modules/ entry pointed at a directory that has never
+# existed in this repository, leaving half the module search path dead.
+SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 AUX_SOURCE_DIRECTORY(code/qcommon QCOMMON_SRCS)
 AUX_SOURCE_DIRECTORY(code/qcommon/maps QCOMMON_SRCS)
@@ -650,7 +652,7 @@ ELSE()
 
 	# Unit test — Phase 2 hard gate 1: coordinate round-trip identity.
 	# Run with: ctest -R nav_coord_round_trip
-	ENABLE_TESTING()
+	# (ENABLE_TESTING() already ran at top level.)
 	ADD_EXECUTABLE(nav_coord_test
 		tests/nav_coord_test.c
 		code/qcommon/nav/nav_coord.c
@@ -762,7 +764,6 @@ target_include_directories(opusfile PRIVATE src/libs/opus/include/opus)
 # client + cURL + Wired UI + miniaudio test
 AUX_SOURCE_DIRECTORY(code/client CLIENT_SRCS)
 list(FILTER CLIENT_SRCS EXCLUDE REGEX "cl_ui\\.c$")
-list(FILTER CLIENT_SRCS EXCLUDE REGEX "snd_miniaudio_test\\.c$")
 
 # snd_miniaudio_test.c is a standalone test runner with its own main();
 # it must NOT be linked into the client library or it duplicates _main.
@@ -1457,7 +1458,14 @@ IF(APPLE)
 		@ONLY
 	)
 
-	add_custom_target(macos_app_bundle ALL
+	# OUTPUT-based command with a stamp file so ninja can reach a true no-op.
+	# The old form was an ALL custom target with no OUTPUT: ninja considered it
+	# perpetually dirty, re-assembled the bundle on every build, and a settled
+	# tree could never answer "did the build do work?" — the same
+	# signal-integrity failure class as make's unreliable exit code.
+	SET(_BUNDLE_STAMP "${CMAKE_BINARY_DIR}/CMakeFiles/macos_app_bundle.stamp")
+	add_custom_command(
+		OUTPUT "${_BUNDLE_STAMP}"
 		COMMAND ${CMAKE_COMMAND} -E make_directory "${APP_BUNDLE_DIR}/Contents/MacOS"
 		COMMAND ${CMAKE_COMMAND} -E make_directory "${APP_BUNDLE_DIR}/Contents/Resources"
 		COMMAND ${CMAKE_COMMAND} -E copy
@@ -1471,10 +1479,15 @@ IF(APPLE)
 			"${APP_BUNDLE_DIR}/Contents/Resources/quake3_flat.icns"
 		COMMAND ${CMAKE_COMMAND} -E echo_append "APPL????"
 			> "${APP_BUNDLE_DIR}/Contents/PkgInfo"
+		COMMAND ${CMAKE_COMMAND} -E touch "${_BUNDLE_STAMP}"
 		DEPENDS ${CNAME}${BINEXT} ${DNAME}${BINEXT}
+			"$<TARGET_FILE:${CNAME}${BINEXT}>"
+			"$<TARGET_FILE:${DNAME}${BINEXT}>"
+			"${CMAKE_SOURCE_DIR}/code/unix/quake3_flat.icns"
 		COMMENT "Assembling macOS bundle: ${APP_BUNDLE_NAME}${BINEXT}.app"
 		VERBATIM
 	)
+	add_custom_target(macos_app_bundle ALL DEPENDS "${_BUNDLE_STAMP}")
 ENDIF()
 
 # ============================================================
