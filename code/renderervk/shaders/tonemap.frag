@@ -1,6 +1,6 @@
 #version 450
 
-// tonemap.frag — Phase 6B3'-c1: scene-radiance post-process pass.
+// tonemap.frag — scene-radiance post-process pass.
 //
 // Reads vk.color_image (HDR linear scene + bloom composition),
 // writes vk.tonemapped_image (LDR linear). Runs between bloom
@@ -10,18 +10,17 @@
 // operate on the colour values themselves — not display encoding):
 //   * exposure_bias (r_brightness)
 //   * SSAO (depth-aware darken)
-//   * godrays (depth-aware additive)
+//   * sunrays (depth-aware additive)
 //   * tonemap operator (PBR Neutral / AgX / Lottes / Reinhard)
 //   * colour grading (tint / saturation / contrast)
 //   * saturation mix (r_saturation)
-// FXAA removed in Phase 6B3'-e — SMAA replaces it as the engine's
-// AA path.
+// FXAA is removed — SMAA replaces it as the engine's AA path.
 //
 // gamma.frag downstream remains a thin "linear -> sRGB encode
 // + framebuffer-bit-depth dither" pass.
 
 layout(set = 0, binding = 0) uniform sampler2D texture0;
-#if defined(USE_SSAO) || defined(USE_GODRAYS)
+#ifdef USE_SUNRAYS
 layout(set = 1, binding = 0) uniform sampler2D depthMap;
 #endif
 
@@ -29,14 +28,37 @@ layout(location = 0) in vec2 frag_tex_coord;
 
 layout(location = 0) out vec4 out_color;
 
+// Per-frame scene-exposure block (set 2). Mirrors vk_exposure_block_t and the
+// std430 block in exposure.comp: all 14 fields are 4-byte scalars, so std140 packs
+// them tightly at offsets 0..55 with no padding. exposure_bias arrives here from the
+// auto-exposure compute (or r_brightness when auto is off), so it is read from the
+// UBO rather than baked as a specialization constant. Declared unconditionally
+// because every tonemap variant links the same set-2 layout; the sunray fields are
+// read only under USE_SUNRAYS.
+layout(set = 2, binding = 0) uniform ExposureBlock {
+	float exposure_bias;
+	float key;
+	float pctLow;
+	float pctHigh;
+	float rateUp;
+	float rateDown;
+	float minExp;
+	float maxExp;
+	int   autoEnabled;
+	float brightness;
+	float sunScreenX;
+	float sunScreenY;
+	float sunrayIntensity;
+	float sunrayDecay;
+} eb;
+
 // Spec constant IDs match the host-side spec_entries[] in vk.c.
 // Gamma + dither IDs (0, 7, 8, 9, 10) are not declared here; the
 // driver silently ignores entries whose constantID isn't referenced
 // by the bound shader (vk.c documents this behaviour for the
 // previously-shared FragSpecData struct).
-layout(constant_id = 1) const float exposure_bias = 1.0;
 layout(constant_id = 2) const float saturation = 1.0;
-// Phase 6B3'-d8: HDR10 display output. hdr_mode == 1 when the swapchain
+// HDR10 display output. hdr_mode == 1 when the swapchain
 // colorspace is HDR10_ST2084 (the tonemap operator uses an HDR shoulder
 // peaking at hdr_peak_norm = r_hdrPeakLuminance / 100, instead of rolling
 // off at 1.0). hdr_peak_norm is in "graphics-white" units — graphics
@@ -45,11 +67,6 @@ layout(constant_id = 2) const float saturation = 1.0;
 // inside applyTonemap under USE_TONEMAP; ignored elsewhere).
 layout(constant_id = 12) const int   hdr_mode      = 0;
 layout(constant_id = 13) const float hdr_peak_norm = 10.0;
-#ifdef USE_SSAO
-layout(constant_id = 14) const float ssao_intensity = 1.0;
-layout(constant_id = 15) const float zNear = 4.0;
-layout(constant_id = 16) const float zFar = 4096.0;
-#endif
 #ifdef USE_TONEMAP
 // tonemap_mode is wired from r_tonemap->integer host-side. Mode 0
 // disables the tonemap pipeline variant entirely (varIdx bit unset
@@ -60,7 +77,7 @@ layout(constant_id = 17) const int tonemap_mode = 1;
 layout(constant_id = 18) const float tonemap_exposure = 1.0;
 // Lottes (mode 3) configurable filmic parameters wired from
 // r_lottes_* host-side. IDs 28-32 skip past color grading
-// (19-23), FXAA (24-25), and godrays (26-27) — the lowest free
+// (19-23), FXAA (24-25), and sunrays (26-27) — the lowest free
 // range. Defaults match Timothy Lottes's GDC 2016 canonical curve.
 layout(constant_id = 28) const float lottes_contrast = 1.6;
 layout(constant_id = 29) const float lottes_shoulder = 0.977;
@@ -75,60 +92,32 @@ layout(constant_id = 21) const float cg_tint_b = 1.0;
 layout(constant_id = 22) const float cg_saturation = 1.0;
 layout(constant_id = 23) const float cg_contrast = 1.0;
 #endif
-// Phase 6B3'-e: USE_FXAA removed (SMAA replaces it). Spec constant IDs
-// 24..25 are FREE for future use.
-#ifdef USE_GODRAYS
-layout(constant_id = 26) const int godrays_samples = 64;
-layout(constant_id = 27) const float godrays_density = 1.0;
-layout(push_constant) uniform GodRayParams {
-	vec2 sunScreenPos;
-	float intensity;
-	float decay;
-} godray;
+// USE_FXAA removed (SMAA replaces it). Spec id 24 is reclaimed from
+// the retired FXAA range for chromatic aberration (below); id 25
+// (show_ao, a FEAT_SSAO debug slot) stays free — no post-process
+// variant declares it, so the host's spec entry is ignored.
+//
+// Chromatic aberration (lens fringe) strength, wired from
+// r_chromaticAberration->value host-side (FragSpecData.chromatic_strength,
+// spec entry id 24). 0 = off — main() takes the single-sample input path,
+// byte-identical to no effect; the default keeps every existing golden put.
+// Declared unconditionally (like `saturation`): it acts at the input sample
+// every tonemap variant runs, so it is not gated behind any USE_* #ifdef.
+layout(constant_id = 24) const float chromatic_strength = 0.0;
+#ifdef USE_SUNRAYS
+layout(constant_id = 26) const int sunrays_samples = 64;
+layout(constant_id = 27) const float sunrays_density = 1.0;
+// Bright-pass threshold for the radial blur: raw HDR scene values below this
+// contribute nothing (per-channel soft-knee excess), so only the over-bright sun disc
+// / sky seed the shafts. Same raw-HDR-luminance space as bloom's 0.32 bright-pass.
+// Spec id 33 (the next free id after the Lottes block 28-32); left at the shader
+// default since the host emits no entry for it.
+layout(constant_id = 33) const float sunrays_threshold = 0.32;
+// sunScreenPos / intensity / decay come from the set-2 ExposureBlock (eb.sunScreenX/Y,
+// eb.sunrayIntensity, eb.sunrayDecay) rather than a push constant.
 #endif
 
 const vec3 sRGB = { 0.2126, 0.7152, 0.0722 };
-
-#ifdef USE_SSAO
-// Reconstruct linear depth from Z-buffer value
-float linearDepth( float z ) {
-	return zNear * zFar / ( zFar - z * ( zFar - zNear ) );
-}
-
-// Screen-space ambient occlusion — 8-sample hemisphere kernel
-float computeSSAO() {
-	vec2 texelSize = 1.0 / vec2( textureSize( depthMap, 0 ) );
-	float centerDepth = linearDepth( texture( depthMap, frag_tex_coord ).r );
-
-	const float radius = 5.0;
-	const vec2 samples[8] = vec2[8](
-		vec2( -0.94201,  -0.39906 ),
-		vec2(  0.94558,  -0.76890 ),
-		vec2( -0.09418,  -0.92938 ),
-		vec2(  0.34495,   0.29387 ),
-		vec2( -0.91588,   0.45771 ),
-		vec2( -0.81544,  -0.87912 ),
-		vec2(  0.19984,   0.78641 ),
-		vec2(  0.44323,  -0.97511 )
-	);
-
-	float angle = fract( sin( dot( gl_FragCoord.xy, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );
-	float ca = cos( angle * 6.283 );
-	float sa = sin( angle * 6.283 );
-	mat2 rot = mat2( ca, sa, -sa, ca );
-
-	float occlusion = 0.0;
-	for ( int i = 0; i < 8; i++ ) {
-		vec2 offset = rot * samples[i] * radius * texelSize;
-		float sampleDepth = linearDepth( texture( depthMap, frag_tex_coord + offset ).r );
-		float diff = centerDepth - sampleDepth;
-		float rangeCheck = smoothstep( 0.0, 1.0, radius * 2.0 / abs( diff ) );
-		occlusion += step( 0.5, diff ) * rangeCheck;
-	}
-
-	return 1.0 - ( occlusion / 8.0 ) * ssao_intensity;
-}
-#endif
 
 #ifdef USE_TONEMAP
 // PBR Neutral (Khronos glTF 2.0 sample viewer, 2024). Minimal-
@@ -196,7 +185,7 @@ vec3 tonemapAgX( vec3 color ) {
 	color = agxSigmoid( color );
 	// Outset rotation (restores chroma lost in the inset).
 	color = agxOutset * color;
-	// Phase 6B3'-d3 fix A: removed pow(x, 2.2) over-correction.
+	// No pow(x, 2.2) over-correction here.
 	// gamma.frag's downstream pipeline does NOT perform an sRGB
 	// encode — the hardware swapchain (B8G8R8A8_SRGB under r_fbo 1)
 	// does. The prior pow() was darkening output redundantly,
@@ -236,7 +225,7 @@ vec3 tonemapReinhard( vec3 color ) {
 	return color / ( 1.0 + color );
 }
 
-// Phase 6B3'-d8: peak-aware PBR Neutral for HDR10 output. The SDR curve's
+// Peak-aware PBR Neutral for HDR10 output. The SDR curve's
 // shoulder/ceiling at 1.0 is rescaled to `peak` (= hdr_peak_norm): inputs
 // below ~0.76*peak pass through unchanged (toe + mid-tones preserved, so
 // diffuse white / UI stays at graphics-white ≈ 100 nits), highlights roll
@@ -301,51 +290,101 @@ vec3 applyColorGrading( vec3 color ) {
 }
 #endif
 
-#ifdef USE_GODRAYS
-vec3 computeGodRays() {
-	vec2 deltaUV = ( frag_tex_coord - godray.sunScreenPos ) * godrays_density / float( godrays_samples );
+#ifdef USE_SUNRAYS
+// Bright-source radial blur (crepuscular shafts), gated to the sky. March from this
+// pixel toward the sun's screen position. A tap seeds shafts only if it is BOTH
+// over-bright AND at sky depth: god-rays are sunlight scattered from the sky, so the
+// bright sun disc (bright + sky depth) produces shafts while bright in-scene geometry
+// (lights, glowing items, lava — bright but at geometry depth in front of the sky)
+// does not. The bright-pass is a soft-knee subtraction (mirroring bloom.frag) in raw
+// pre-exposure HDR luminance, the same space bloom's 0.32 default lives in.
+vec3 computeSunRays() {
+	vec2 deltaUV = ( frag_tex_coord - vec2( eb.sunScreenX, eb.sunScreenY ) ) * sunrays_density / float( sunrays_samples );
 	vec2 uv = frag_tex_coord;
-	float illumination = 0.0;
+	vec3 illumination = vec3( 0.0 );
 	float weight = 1.0;
 
-	for ( int i = 0; i < godrays_samples; i++ ) {
+	for ( int i = 0; i < sunrays_samples; i++ ) {
 		uv -= deltaUV;
 
 		if ( uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 )
 			break;
 
+		// Sky gate: only far-plane (sky) taps can seed shafts. The engine renders with a
+		// reversed-Z depth buffer (depth compare GREATER_OR_EQUAL, depth cleared to 0),
+		// so the far plane — and therefore the sky — is at depth ~0, not 1.
 		float depth = texture( depthMap, uv ).r;
-#ifdef USE_REVERSED_DEPTH
 		float isSky = step( depth, 0.001 );
-#else
-		float isSky = step( 0.999, depth );
-#endif
 
-		illumination += isSky * weight;
-		weight *= godray.decay;
+		// Bright-pass: per-channel excess above the threshold, so only the over-bright
+		// sky/sun survive and mid-tone sky contributes nothing.
+		vec3 sceneColor = texture( texture0, uv ).rgb;
+		vec3 bright = max( sceneColor - vec3( sunrays_threshold ), vec3( 0.0 ) );
+
+		illumination += bright * isSky * weight;
+		weight *= eb.sunrayDecay;
 	}
 
-	illumination /= float( godrays_samples );
-	return vec3( illumination * godray.intensity );
+	illumination /= float( sunrays_samples );
+	return illumination * eb.sunrayIntensity;
 }
 #endif
 
-// Phase 6B3'-e: applyFXAA() removed entirely. SMAA (smaa_edge / smaa_blend
+// applyFXAA() is removed entirely. SMAA (smaa_edge / smaa_blend
 // / smaa_resolve) is the AA path going forward.
 
+// Chromatic aberration: sample R/G/B from radially-offset UVs so the colour
+// channels fringe apart toward the screen edge (a lens dispersion look). The
+// offset points along (uv - center), grows with radial distance (zero at the
+// centre, maximum at the corners), and scales with chromatic_strength. R is
+// pulled outward, B inward, G stays put — the classic red/blue split. The
+// offset UVs are clamped to [0,1] so an edge tap never reads outside the frame.
+// Only called when chromatic_strength > 0 (main() keeps the single-sample path
+// off, so the effect is exactly free and byte-identical when disabled).
+vec3 sampleChromatic( vec2 uv ) {
+	// MAX_OFFSET is the peak channel separation in UV units at strength 1.0,
+	// reached at the frame corner (radial ~0.707). 0.015 UV ≈ 19 px across a
+	// 1280-wide frame; the corner net (×0.707) is ~14 px at strength 1.0, ~7 px
+	// at the reference 0.5 — a visible, clearly-measurable fringe that stands
+	// clear of the engine's cold-launch capture jitter (the enabled-state visual
+	// gate relies on it), still tasteful and imperceptible near centre. Tunable:
+	// lower for a subtler look, higher for a stronger cinematic dispersion.
+	const float MAX_OFFSET = 0.015;
+	vec2  dir    = uv - vec2( 0.5 );        // from screen centre
+	float radial = length( dir );           // 0 at centre, ~0.707 at corners
+	vec2  offset = dir * ( chromatic_strength * radial * MAX_OFFSET );
+	float r = texture( texture0, clamp( uv + offset, 0.0, 1.0 ) ).r;
+	float g = texture( texture0, uv ).g;
+	float b = texture( texture0, clamp( uv - offset, 0.0, 1.0 ) ).b;
+	return vec3( r, g, b );
+}
+
 void main() {
-	vec3 base = texture(texture0, frag_tex_coord).rgb;
+	// Chromatic aberration acts here, at the input read (a per-channel radial
+	// UV offset), before exposure / tonemap / grade / saturation run on `base`.
+	// strength 0 (default) keeps the single-sample path — byte-identical to no
+	// effect, so the existing goldens do not move.
+	vec3 base = ( chromatic_strength > 0.0 )
+		? sampleChromatic( frag_tex_coord )
+		: texture( texture0, frag_tex_coord ).rgb;
 
-	// Pre-tonemap exposure bias driven by r_brightness->value
-	// (Phase 6B3'-a). Default 1.0 = no boost (linear identity).
-	base *= exposure_bias;
+	// Pre-tonemap exposure bias. With auto-exposure on this is the histogram-derived
+	// adapted value the reduce compute wrote into the UBO; with auto off it is
+	// r_brightness. Default 1.0 = no boost (linear identity).
+	base *= eb.exposure_bias;
 
-#ifdef USE_SSAO
-	base *= computeSSAO();
-#endif
+	// Legacy per-pixel SSAO fully retired: the modern GTAO (gen_frag.tmpl,
+	// screen-space visibility applied to the IBL-specular indirect term) is the
+	// sole AO path. The old computeSSAO() here multiplied the ENTIRE base by an
+	// 8-sample depth-delta kernel that hit exactly 0.0 at full occlusion, stamping
+	// pure-black speckles across the frame (per-pixel hash rotation + per-frame
+	// zFar → intermittent grain). The call was removed to kill the grain and the
+	// double-AO; the dead scaffolding (computeSSAO/linearDepth, the ssao_intensity
+	// spec constant, the ssaoZNear/ssaoZFar UBO fields, and the USE_SSAO tonemap
+	// variants) is now removed too, completing the SSAO→GTAO migration.
 
-#ifdef USE_GODRAYS
-	base += computeGodRays();
+#ifdef USE_SUNRAYS
+	base += computeSunRays();
 #endif
 
 #ifdef USE_TONEMAP

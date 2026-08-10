@@ -24,7 +24,7 @@
     <ClCompile Include="..\..\renderervk\tr_backend.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\renderervk\tr_bsp.c">
+    <ClCompile Include="..\..\renderervk\tr_map.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\renderervk\tr_cmds.c">

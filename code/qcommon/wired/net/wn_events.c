@@ -91,18 +91,28 @@ void WN_EventRingPush( const byte *data, int len )
 	// Write to recording file if active
 	WN_RecordEvent( data, len );
 
-	/* Also push to game clients on the QUIC game reliable events channel. */
+	/* Also push to game clients on the game reliable events channel.
+	 * Route by pub_handle so both backends are covered:
+	 *   QUIC conn   — conn!=NULL, cnx live, handshake ACCEPTED; pub_handle==i+1
+	 *                 → transport_for_handle(i+1)==quic_transport (byte-identical).
+	 *   in-mem conn — conn==NULL (WN_GameAllocConnApp), handshake stays PENDING
+	 *                 (no TLS round-trip); pub_handle==WN_APP_SVCONN_BASE+slot
+	 *                 → transport_for_handle()==inmem_transport. Include it so the
+	 *                 in-mem host is not excluded from the observer/scoreboard feed
+	 *                 (CHAN_EVENTS is a side-channel — /status.json + recording +
+	 *                 observer — gameplay-neutral, NOT snapshots/usercmds). */
 	{
 		int i;
 		for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
 			wn_game_conn_t *gc = &wn.game_conns[i];
-			if ( gc->active && gc->conn && gc->conn->cnx &&
-			     gc->hs_state == WN_GAME_HS_ACCEPTED ) {
-				if ( transport ) {
-					// NOLINTNEXTLINE(bugprone-misplaced-widening-cast) — `i+1` is a small client index; widening to conn_handle_t is intentional
-					transport->send_reliable( (conn_handle_t)( i + 1 ), CHAN_EVENTS,
-						(const byte *)data, len );
-				}
+			qboolean quicReady = ( gc->conn && gc->conn->cnx &&
+			                       gc->hs_state == WN_GAME_HS_ACCEPTED );
+			qboolean inmemReady = ( gc->conn == NULL &&
+			                        gc->pub_handle >= WN_APP_SVCONN_BASE &&
+			                        gc->pub_handle <  WN_APP_SVCONN_BASE + WN_APP_SVCONN_COUNT );
+			if ( gc->active && ( quicReady || inmemReady ) ) {
+				transport_for_handle( gc->pub_handle )->send_reliable(
+					gc->pub_handle, CHAN_EVENTS, (const byte *)data, len );
 			}
 		}
 	}

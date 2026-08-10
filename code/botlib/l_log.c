@@ -24,7 +24,6 @@ those dumps were only meaningful when the botlib stdio log was open.
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
 #include "l_log.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_botlib, "botlib" );
 
 void Log_Open( const char *filename )

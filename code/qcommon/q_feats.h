@@ -23,6 +23,7 @@
 #define FEAT_JSON_STATS                   0   // 7B  post-match JSON export
 #define FEAT_LENS_FLARES                  1   // 9A  map + missile lens flares (JUHOX)
 #define FEAT_MATCH_SUMMARY                1   // 8B  intermission stats overlay
+#define FEAT_MONSTER_AI                   1   // non-client monster behavior tick (decision layer over nav)
 #define FEAT_SPAWN_PROTECTION             1   // 2B  attacker gets no points for spawnkills
 #define FEAT_SPECTATOR_OUTLINES           1   // 8A  player outlines for spectators
 #define FEAT_SW3Z                         1   // SW3Z archive format (.sw3z)
@@ -86,7 +87,7 @@
 #define FEAT_WIREDNET_CONTROL             1   // MCP/JSON-RPC control channel over QUIC + HTTP POST /mcp
 #define FEAT_MEMSTATS                     1   // per-subsystem allocation accounting + meminfo commands
 #ifndef FEAT_RAL
-#define FEAT_RAL                          0   // Phase 7: GPU Renderer Abstraction Layer (code/renderer/ral*). Off until the renderer is migrated onto it; the Vulkan backend skeleton (code/renderer/ral_vulkan/) always builds + links into wired_vulkan_* so the surface stays validated, but renderervk does not include ral/*.h while this is 0. Renderer-DLL-internal — no ABI impact.
+#define FEAT_RAL                          0   // GPU Renderer Abstraction Layer (code/renderer/ral*). Off until the renderer is migrated onto it; the Vulkan backend skeleton (code/renderer/ral_vulkan/) always builds + links into wired_vulkan_* so the surface stays validated, but renderervk does not include ral/*.h while this is 0. Renderer-DLL-internal — no ABI impact.
 #endif
 
 // ── model formats ────────────────────────────────────────────────────
@@ -94,18 +95,18 @@
 
 // ── renderer ───────────────────────────────────────────────────────────
 #define FEAT_FOG_SYSTEM                   0   // Enhanced fog types (linear, exp, exp2)
-#define FEAT_CORONA                       0   // Corona/lens flare entities via flare pipeline
+#define FEAT_HALO                         1   // Halo/lens flare entities via flare pipeline
 #define FEAT_HEADLESS_RENDERER            0   // Dedicated server renderer stub (sv_ref.c)
-#define FEAT_DEPTH_CLAMP                  0   // disable near-plane vertex clipping at high FOV
-#define FEAT_DEPTH_FADE                   0   // soft particle edges (explosions, smoke, blood)
+#define FEAT_DEPTH_CLAMP                  1   // disable near-plane vertex clipping at high FOV
+#define FEAT_DEPTH_FADE                   1   // soft particle edges (explosions, smoke, blood)
 #define FEAT_PARALLAX_MAPPING             0   // steep parallax mapping with normalmap (height in alpha)
-#define FEAT_SSAO                         0   // screen-space ambient occlusion (embedded in gamma pass)
+#define FEAT_SSAO                         1   // ground-truth ambient occlusion (GTAO). #ifndef so CMake -DFEAT_SSAO=0 can still produce a no-AO build.
 #define FEAT_TONEMAP                      1   // HDR tone mapping (Reinhard/ACES/Uncharted2)
 #define FEAT_COLOR_GRADING                0   // color tint, saturation, contrast
-#define FEAT_GODRAYS                      0   // screen-space crepuscular rays (depth-based sky detection)
+#define FEAT_SUNRAYS                      1   // screen-space crepuscular rays (depth-based sky detection)
 #define FEAT_ADVANCED_WATER               0   // screen-space refraction + Fresnel + ripple noise for water
-#define FEAT_SHADOW_MAPPING               1   // Phase 6.5.4a: directional-sun shadow map (single map; CSM cascades land in 6.5.4b-d). Renderer-DLL-only flag — no ABI impact (not referenced outside code/renderervk/).
-#define FEAT_PBR                          0   // physically based rendering (GGX/Schlick/Smith BRDF)
+#define FEAT_SHADOW_MAPPING               1   // directional-sun shadow map (single map; CSM cascades land later). Renderer-DLL-only flag — no ABI impact (not referenced outside code/renderervk/).
+#define FEAT_PBR                          1   // physically based rendering (GGX/Schlick/Smith BRDF)
 #define FEAT_FORCE_ENTITY_VERTEX_ALPHA    0   // per-entity alpha override + dynamic pipeline swap
 
 // ── missionpack (Team Arena features, individually toggleable) ────────

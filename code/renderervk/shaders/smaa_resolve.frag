@@ -9,7 +9,9 @@
 layout(set = 0, binding = 0) uniform sampler2D colorTex;
 layout(set = 1, binding = 0) uniform sampler2D blendTex;
 
-layout(push_constant) uniform PushConstants {
+// rtMetrics rides in a per-frame UBO at set 3 of the shared SMAA pipeline layout,
+// not a VS|FS push. Anonymous block keeps the read sites.
+layout(set = 3, binding = 0, std140) uniform RtMetrics {
 	vec4 rtMetrics;
 };
 
@@ -19,13 +21,13 @@ layout(location = 1) in vec4 offset;
 layout(location = 0) out vec4 out_color;
 
 void main() {
-	// Phase 6B3'-d4-m11: this pass does a weight-normalised bilinear
-	// blend of colorTex (= vk.color_image) samples. Post the m1-m_final
+	// this pass does a weight-normalised bilinear
+	// blend of colorTex (= vk.color_image) samples. After the
 	// linear-pipeline migration colorTex holds linear radiance, so the
 	// blend is now colorimetrically correct (a weighted blend of
 	// sRGB-encoded values — the pre-migration state — gave the wrong
 	// midpoint). blendTex carries SMAA blend weights (geometry data),
-	// never decoded. No shader change in m11 — correctness improved for
+	// never decoded. No shader change here — correctness improved for
 	// free by the upstream domain change.
 
 	// Fetch the blending weights for current pixel:

@@ -16,7 +16,9 @@
 #define CTF
 
 #include "../qcommon/q_feats.h"
-#include "wired/bots/g_wiredbots.h"
+#include "wired/bots/g_wiredintel.h"
+#include "wired/bots/g_belief.h"
+#include "wired/bots/g_sequenced_goal.h"
 #include "ai_movement.h"
 
 #define MAX_ITEMS					256
@@ -60,8 +62,14 @@
 #define CTF_RETURNFLAG_TIME			180	//3 minutes to return the flag
 #define CTF_ROAM_TIME				60	//1 minute ctf roam time
 // Battle_Fight: how long (ms) the enemy can stay out of sight before the bot
-// exits combat. Matches Battle_Retreat/Chase which use a 4-second window;
-// this is shorter because brief occlusion (pillars, doorways) is common.
+// gives up combat. Matches Battle_Retreat/Chase which use a 4-second window;
+// this is shorter because brief occlusion (pillars, doorways) is common. Two
+// consumers carry the SAME duration: (1) the Fight->Seek_LTG cluster-exit still
+// compares enemyvisible_time against this in AINode_Battle_Fight (the bot leaves
+// combat to nav when it loses sight and does NOT want to chase); (2) the
+// Fight/Chase sub-composite uses it as its incumbent-hysteresis margin so the
+// Fight->Chase transition holds through the same grace window before Chase
+// displaces Fight (see AI_BuildRootComposite / fightChaseComposite).
 #define BATTLE_FIGHT_VIS_GRACE_MS	500	//0.5 seconds — hysteresis against single-tick occlusion
 //patrol flags
 #define PATROL_LOOP					1
@@ -130,25 +138,72 @@ typedef struct bot_waypoint_s
 	struct		bot_waypoint_s *next, *prev;
 } bot_waypoint_t;
 
-#define MAX_ACTIVATESTACK		8
-#define MAX_ACTIVATEAREAS		32
+// ── AI composite tree substrate ───────────────────────────────────────────
+//
+// The bot AI is a flat FSM of function-pointer nodes: each leaf has the
+// signature `int AINode_X(bot_state_t *bs)` and returns qtrue (done this
+// frame) / qfalse (transitioned, run the successor next). The composite tree
+// generalizes that: an inner node holds children and arbitrates which
+// child(ren) run this tick, while remaining callable through the SAME
+// qtrue/qfalse contract as a leaf — so composites nest arbitrarily.
+//
+// Unified callable contract:
+//   Every node — leaf or composite — is an aiNode_t with a `tick` function of
+//   type aiNodeTick_t: int tick(bot_state_t *bs, aiNode_t *self). It returns
+//   the leaf qtrue/qfalse semantics. A LEAF wraps a plain AINode_X via
+//   AI_LeafTick, which calls node->u.leaf.fn(bs). A COMPOSITE runs AI_CompositeTick,
+//   which selects and runs its children per its kind. Because both expose the
+//   same tick signature, a composite can be a child of another composite with
+//   no special case.
+//
+// A node's precondition is an optional predicate int pre(bot_state_t *bs,
+// aiNode_t *self) returning qtrue when the node is eligible this tick. A NULL
+// precondition means "always eligible".
 
-typedef struct bot_activategoal_s
-{
-	int inuse;
-	bot_goal_t goal;						//goal to activate (buttons etc.)
-	float time;								//time to activate something
-	float start_time;						//time starting to activate something
-	float justused_time;					//time the goal was used
-	int shoot;								//true if bot has to shoot to activate
-	int weapon;								//weapon to be used for activation
-	vec3_t target;							//target to shoot at to activate something
-	vec3_t origin;							//origin of the blocking entity to activate
-	int areas[MAX_ACTIVATEAREAS];			//routing areas disabled by blocking entity
-	int numareas;							//number of disabled routing areas
-	int areasdisabled;						//true if the areas are disabled for the routing
-	struct bot_activategoal_s *next;		//next activate goal on stack
-} bot_activategoal_t;
+struct aiNode_s;
+
+// unified callable contract: leaf and composite tick share this signature
+typedef int (*aiNodeTick_t)(struct bot_state_s *bs, struct aiNode_s *self);
+// optional per-node eligibility predicate (NULL = always eligible)
+typedef int (*aiNodePre_t)(struct bot_state_s *bs, struct aiNode_s *self);
+
+// composite arbitration kinds (domain names — not landing labels)
+typedef enum {
+	AI_COMPOSITE_PRIORITIZED,	// first eligible child in priority order, with incumbent-hysteresis
+	AI_COMPOSITE_SIMULTANEOUS,	// run every eligible child this tick
+	AI_COMPOSITE_FIRST_AVAILABLE	// run the first eligible child, short-circuit (no hysteresis)
+} aiCompositeKind_t;
+
+#define AI_MAX_COMPOSITE_CHILDREN	8
+
+typedef struct aiComposite_s {
+	aiCompositeKind_t	kind;
+	struct aiNode_s		*children[AI_MAX_COMPOSITE_CHILDREN];
+	int					numChildren;
+	// PRIORITIZED incumbent-hysteresis state:
+	//   incumbent = index of the child chosen last tick (-1 = none yet).
+	//   The incumbent keeps the slot while its precondition still passes; a
+	//   higher-priority challenger only displaces it once the challenger has
+	//   been eligible continuously for hysteresisMargin ms (measured from
+	//   challengeStart). This damps per-tick thrashing between two nodes whose
+	//   preconditions flicker on the same borderline.
+	int					incumbent;
+	int					challenger;		// index of the pending higher-priority challenger (-1 = none)
+	float				challengeStart;	// FloatTime() when the current challenger first became eligible
+	float				hysteresisMargin;	// ms the challenger must persist before it displaces the incumbent
+} aiComposite_t;
+
+typedef struct aiNode_s {
+	aiNodeTick_t	tick;		// unified callable: how this node runs
+	aiNodePre_t		pre;		// optional eligibility predicate (NULL = always)
+	const char		*name;		// debug label
+	union {
+		// leaf: wraps an existing AINode_X function-pointer
+		struct { int (*fn)(struct bot_state_s *bs); } leaf;
+		// composite: children + arbitration
+		aiComposite_t composite;
+	} u;
+} aiNode_t;
 
 //bot state
 typedef struct bot_state_s
@@ -184,7 +239,7 @@ typedef struct bot_state_s
 	int setupcount;									//true when the bot has just been setup
 	int map_restart;									//true when the map is being restarted
 	int entergamechat;								//true when the bot used an enter game chat
-	qboolean wiredBotsActive;						// true when character comes from BOTLUA path
+	qboolean wiredIntelActive;						// true when character comes from BOTLUA path
 	int num_deaths;									//number of time this bot died
 	int num_kills;									//number of kills of this bot
 	int current_streak;								//consecutive kill streak (reset on death)
@@ -300,9 +355,6 @@ typedef struct bot_state_s
 	/* subteam moved to bs->directives.subteam */
 	float formation_dist;							//formation team mate intervening space
 
-	bot_activategoal_t *activatestack;				//first activate goal on the stack
-	bot_activategoal_t activategoalheap[MAX_ACTIVATESTACK];	//activate goal heap
-
 	bot_waypoint_t *checkpoints;					//check points
 	bot_waypoint_t *patrolpoints;					//patrol points
 	bot_waypoint_t *curpatrolpoint;					//current patrol point the bot is going for
@@ -351,8 +403,31 @@ typedef struct bot_state_s
 	vec3_t			dodge_dir;				// computed dodge direction (zero if no dodge)
 	qboolean		dodge_active;			// qtrue if dodging this frame
 
-	// ── WiredBots directive state ─────────────────────────────────────
+	// ── WiredIntel directive state ─────────────────────────────────────
 	botDirectiveState_t directives;			// active tactical directive and tactic
+
+	// ── Belief store (per-brain addressable world-knowledge) ───────────
+	// The single addressable home for the bot's world-knowledge: discovered
+	// interactables (buttons/gates — backs the directive activation queue),
+	// last-seen threats (mirrors the enemy-tracking fields), and a bounded
+	// visited-area ring (the new explored-set producer). The item-belief is a
+	// VIEW over the shared, event-driven item-goal DB (s_mapGoalDb), not stored
+	// here. Game-VM-internal (never crosses the botlib/engine ABI). This is the
+	// seam the goal tree and the future coroutine layer query; the existing
+	// subsystems are its first clients. See wired/bots/g_belief.h.
+	beliefStore_t     beliefStore;
+
+	// ── Sequenced-goal cursor state (per-brain, own storage) ───────────
+	// Multi-step goals whose steps run across frames with wait-until gating,
+	// driven by WiredIntel_StepSequencedGoal before BotAI each tick. Generalizes
+	// the G_RunScriptDispatcher cursor+yield+advance+wait-until substrate to bot
+	// goals; steps write the goal through the directive projection (ltgtype/
+	// teamgoal + directiveLocked), never trap_BotPushGoal. Kept in the brain's
+	// OWN storage — NOT the botlib goal stack bs->gs — so a combat-edge goal-
+	// stack clear cannot discard an in-flight sequence. Game-VM-internal (no
+	// syscall/enum/wire/savegame). Idle by default → the driver is inert.
+	// See wired/bots/g_sequenced_goal.h.
+	botSequencedGoal_t sequencedGoal;
 
 	// ── Peripheral awareness (WCE sound ring) ─────────────────────────
 	bot_sound_event_t heardSounds[MAX_BOT_SOUND_EVENTS];
@@ -368,6 +443,49 @@ typedef struct bot_state_s
 	// Investigation target — set when bot hears but has no LOS
 	vec3_t            investigatepos;
 	float             investigatetime;  // FloatTime() when set; age out after ~3 s
+
+	// ── AI composite tree ─────────────────────────────────────────────
+	// Root of the composite tree that wraps the FSM dispatch. The root is a
+	// PRIORITIZED composite whose highest-priority children are the three
+	// cluster-exit guards (observer > intermission > dead), followed by the
+	// live-selection leaf as the lowest-priority, always-eligible child that
+	// ticks the current bs->ainode. The guards used to be re-checked as the
+	// first statement inside each of the six nav/battle nodes; they are hoisted
+	// here so the observer/intermission/dead exit is one top-level decision
+	// instead of six copies. Each guard child is eligible only when the live
+	// node is one of those six (AI_GuardApplies) AND its pure predicate holds,
+	// so the top-level arbitration reproduces the old per-node prologue exactly
+	// — a guard never fires while the live node is Observer/Intermission/
+	// Respawn/Stand (those never carried the prologue). aiRootInit gates
+	// one-time construction (BotResetState memsets bot_state_t to zero, so a
+	// false value forces reconstruction after a reset — no stale pointers
+	// survive).
+	aiNode_t          aiRoot;                 // root composite (guards + live leaf)
+	aiNode_t          aiLiveLeaf;             // leaf child that ticks the live bs->ainode (lowest priority)
+	aiNode_t          aiObserverGuardLeaf;    // guard child 0: observer  -> AIEnter_Observer
+	aiNode_t          aiIntermissionGuardLeaf;// guard child 1: intermission -> AIEnter_Intermission
+	aiNode_t          aiDeadGuardLeaf;        // guard child 2: dead      -> AIEnter_Respawn
+	qboolean          aiRootInit;             // qtrue once aiRoot + children are built
+
+	// ── Fight/Chase visibility arbitration ────────────────────────────
+	// A PRIORITIZED sub-composite that decides Battle_Fight vs Battle_Chase on
+	// line-of-sight, using the substrate's incumbent-hysteresis to damp the
+	// doorway/pillar single-tick occlusion flicker. Two children: Chase (higher
+	// priority, eligible only when the enemy is currently unseen AND the bot
+	// wants to chase) and Fight (lower priority, always-eligible fallback
+	// incumbent). The hysteresis dwell holds Fight for the grace margin before
+	// Chase can displace it — replacing the hand-rolled enemyvisible_time grace
+	// for the Fight->Chase edge. Built lazily by AI_BuildRootComposite (cleared
+	// by the reset-memset alongside aiRootInit, so no stale self-pointers).
+	aiNode_t          fightChaseComposite;   // PRIORITIZED Fight/Chase arbiter
+	aiNode_t          fightLeaf;             // Fight child (lower priority)
+	aiNode_t          chaseLeaf;             // Chase child (higher priority)
+	// The ainode value the sub-composite last drove. If bs->ainode differs from
+	// this on entry, the node was changed out-of-band (a leaf edge such as
+	// Retreat->Chase, or a battle re-entry from nav), so the stale hysteresis
+	// dwell must be cleared — otherwise a challenger clock left over from a prior
+	// engagement would skip the grace on re-entry.
+	int             (*fightChaseLastNode)(struct bot_state_s *bs);
 } bot_state_t;
 
 extern bot_state_t *botstates[MAX_CLIENTS];
@@ -382,6 +500,20 @@ float AngleDifference(float ang1, float ang2);
 
 extern float floattime;
 #define FloatTime() floattime
+
+// ── AI composite tree substrate (see ai_dmnet.c) ──────────────────────────
+// Unified tick for a leaf node: calls the wrapped AINode_X.
+int  AI_LeafTick(bot_state_t *bs, aiNode_t *self);
+// Unified tick for a composite node: selects + runs child(ren) per kind.
+int  AI_CompositeTick(bot_state_t *bs, aiNode_t *self);
+// Build the pass-through root that reproduces bs->ainode byte-identically.
+void AI_BuildRootComposite(bot_state_t *bs);
+// Tick the bot's composite root for this frame (byte-identical to bs->ainode(bs)).
+int  AI_TickRoot(bot_state_t *bs);
+// Composite-node helpers (used by the tree and the self-test).
+void AI_CompositeInit(aiNode_t *node, aiCompositeKind_t kind, const char *name, float hysteresisMargin);
+void AI_CompositeAddChild(aiNode_t *node, aiNode_t *child);
+void AI_LeafInit(aiNode_t *node, int (*fn)(bot_state_t *bs), aiNodePre_t pre, const char *name);
 
 // from the game source
 void	QDECL BotAI_Print(int type, char *fmt, ...) FORMAT_PRINTF(2, 3);

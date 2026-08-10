@@ -243,6 +243,46 @@ typedef struct {
 	int       flags;          // PRIM_FLAG_* (reserved)
 } beamDesc_t;
 
+// ── rail ribbon (parametric spiral) ─────────────────────────────────
+//
+// A GPU-resident helix ribbon: the caller submits the spawn-fixed spiral
+// parameters ONCE at fire time; the renderer's persistent pool tracks the
+// lifetime and its vertex shader regenerates the evolving spiral geometry
+// every frame from (currentTime - spawnTime). Unlike ribbonDesc_t (which
+// carries a caller-built point array rebuilt each frame), nothing here is
+// per-frame: the whole helix — expanding radius, unwinding spacing,
+// widening width, per-point fade, and the point count itself — is a
+// function of the age fraction and is derived analytically GPU-side.
+//
+// All fields are POD (no nested pointers), so the descriptor crosses the
+// VM boundary by value like beamDesc_t. The 36-entry perpAxis ring is the
+// precomputed rotation frame (mirrors railTrail_t.perpAxis); the shader
+// indexes it by (segment * RAIL_RIBBON_ROTATION) % 36.
+//
+// The evolution constants live below (RAIL_RIBBON_*), shared verbatim by
+// the cgame emitter, the renderer, and the vertex shader (passed in as
+// specialization constants) so the three can never drift.
+#define RAIL_RIBBON_MAX_SEGMENTS  2048   // worst-case control points (== MAX_RAIL_SEGMENTS)
+#define RAIL_RIBBON_RING_COUNT      36   // perpAxis ring entries
+#define RAIL_RIBBON_SPACING       3.0f   // base ring spacing at spawn (unwinds down)
+#define RAIL_RIBBON_WIDTH_BASE    1.5f   // base half-width at spawn (widens up)
+#define RAIL_RIBBON_ROTATION         2   // ring steps per segment
+#define RAIL_RIBBON_RADIUS_BASE   2.0f   // radius at spawn (grows to BASE+GROW)
+#define RAIL_RIBBON_RADIUS_GROW   2.0f   // radius growth over life (2 → 4)
+#define RAIL_RIBBON_WIDTH_GROW    1.5f   // width growth factor over life (×2.5)
+#define RAIL_RIBBON_SPACING_TIGHTEN 0.667f  // spacing unwind factor over life
+
+typedef struct {
+	vec3_t    start;                              // spiral origin (world)
+	vec3_t    beamAxis;                           // normalized beam direction
+	float     perpAxis[RAIL_RIBBON_RING_COUNT][3];// precomputed rotation ring (36 × vec3)
+	float     beamLen;                            // total beam length
+	vec4_t    color;                              // base RGBA [0..1] (per-point fade applied GPU-side)
+	float     duration;                           // seconds the helix lives (= RAIL_TRAILTIME/1000)
+	qhandle_t shader;                             // primitive shader handle; sampler-array slot
+	int       flags;                              // PRIM_FLAG_* (reserved)
+} railRibbonDesc_t;
+
 // ── sprite ──────────────────────────────────────────────────────────
 
 // Single billboard quad: muzzle flashes, expanding flash spheres,
@@ -285,17 +325,111 @@ typedef struct {
 // ── decal ───────────────────────────────────────────────────────────
 
 // World-projected decal (impact mark, scorch). Flat against a
-// surface; the system handles surface fitting and clipping.
+// surface; the renderer projects + clips it onto whatever it overlaps.
+// origin/normal/radius define the projection box; orientation rotates
+// the decal's tangent frame around the normal (the texture's roll, what
+// CG_ImpactMark picks per impact). reserved[] is a frozen tail so later
+// projector phases can add data without re-touching this shared ABI.
 typedef struct {
 	vec3_t    origin;
 	vec3_t    normal;
 	float     radius;
+	float     orientation;   // radians, rotation of the texture around `normal`
 	vec4_t    rgba;
 	qhandle_t shader;
-	int       flags;
+	int       flags;         // DECAL_FLAG_* bits (see below); 0 = a normal world-projected mark
+	float     lifetime;      // seconds until the mark fully fades + expires (0 = no auto-fade,
+	                         // stays until its ring slot is reused). Was reserved[0]: int→float
+	                         // is the same 4 bytes at the same offset, so the struct layout is
+	                         // UNCHANGED (no ABI lockstep hazard — the reserved tail's purpose).
+	int       reserved[1];   // frozen for future projector fields (P3)
 } decalDesc_t;
 
-// ── primitive shader stage info (Phase 5F) ────────────────────────────
+// decalDesc_t.flags bits.
+//   DECAL_FLAG_NO_PROJECT — render a FREE flat quad at the descriptor's explicit
+//   `origin` Z (no scene-depth box-projection, no discard-on-no-solid). For marks
+//   that must sit at a caller-computed world height rather than conform to the
+//   nearest solid — e.g. the player water-line wake, which lies on the water plane
+//   where no solid exists. Flag clear (default) = the normal world-projected mark
+//   (impact/blood/scorch), unchanged.
+#define DECAL_FLAG_NO_PROJECT  0x1
+
+// ── lens-source occlusion (lens-glow unification) ─────────────────────
+// A coarse, emit-and-forget descriptor: the game registers a light source
+// (origin + radius + a stable id) and the renderer's depth-sampling lens
+// oracle reports back a 0..1 visibility (is the source occluded by scene
+// geometry?). This is the gpu-offload-principle's thin channel — the GPU
+// does the occlusion (it needs the depth buffer); the game keeps the
+// game-state composition (the multi-layer flare sprites stay in cgame). The
+// descriptor is FLAT (no embedded pointers) so it crosses the VM boundary as
+// a single bounds-checked struct, like decalDesc_t. reserved[] is a frozen
+// tail for forward growth without re-touching this shared ABI.
+typedef struct {
+	int       id;            // stable per-source key (the caller's light index); maps to a registry slot
+	vec3_t    origin;        // world position of the light source
+	float     radius;        // source radius (drives the oracle's screen-space sample disc)
+	vec4_t    rgba;          // tint * intensity (informational; the oracle is occlusion-only today)
+	qhandle_t shader;        // optional source shader (informational; mirrors decalDesc_t.shader)
+	int       flags;         // reserved for future LENS_FLAG_* bits (none defined yet)
+	int       reserved[2];   // frozen for forward growth
+} lensSourceDesc_t;
+
+// Lens-source id banding (shared cgame↔renderer). The renderer maps a registered
+// source to a registry slot via slot = base + (desc.id % LENS_MAX_CGSOURCES), so
+// disjoint id ranges land in disjoint slots — the three source kinds (map-flares,
+// missiles, powerups) never alias. The CALLER pre-bands its id into the right
+// range; the renderer stays kind-agnostic. Map-flares use the raw light index
+// (< MAX_LENS_FLARE_ENTITIES = 256); entity-keyed sources wrap their entity
+// number into a per-kind 32-slot band (≤32 concurrent missiles/powerups is ample;
+// rare same-kind merge is a cosmetic visibility-share, never cross-kind).
+#define LENS_BAND_MAPFLARE   0               // [0,256)   map-light index
+#define LENS_BAND_MISSILE    256             // [256,288) 256 + (entityNum % 32)
+#define LENS_BAND_POWERUP    288             // [288,320) 288 + (entityNum % 32)
+#define LENS_BAND_HALO       320             // [320,352) 320 + (light index % 32)
+#define LENS_BAND_ENTSPAN    32              // per-entity-kind slot count
+#define LENS_MAX_CGSOURCES   352             // cgame strip size = sum of the bands
+
+// Direction-independent halo descriptor: a point-light glow that looks the
+// same from any angle (no view-axis fade — distinct from the directional lens
+// flare). Coarse emit-and-forget like the other scene primitives; FLAT (no embedded
+// pointers) so it crosses the VM boundary as one bounds-checked struct. `visible` is
+// the occlusion gate the caller drives from the shared lens oracle (the GPU does the
+// depth test; the renderer just draws or culls the halo sprite). reserved[] is a
+// frozen tail for forward growth.
+typedef struct {
+	int       id;            // stable per-halo key (pre-banded into LENS_BAND_HALO)
+	vec3_t    origin;        // world position of the halo
+	float     r, g, b;       // color, 0..1
+	float     scale;         // radius / intensity multiplier
+	int       visible;       // occlusion gate (qboolean), oracle-driven
+	int       reserved[2];   // frozen for forward growth
+} haloDesc_t;
+
+// ── atmospheric weather ───────────────────────────────────────────────
+
+// GPU-resident atmospheric weather descriptor (rain / snow). The cgame
+// emits this ONCE per weather change (not per frame); the renderer's
+// dedicated atmospheric GPU pool then self-spawns / integrates / collides
+// / fades / draws every frame. `type` matches the cgame atmType_t order
+// (0 = none, 1 = rain, 2 = snow). `bounds` is the world spawn volume
+// (xyz min, xyz max); the GPU respawns particles inside it and distance-
+// culls around the eye (passed per-frame in the compute UBO) to `distance`.
+// The collision heightgrid is NOT carried here — a struct-nested pointer
+// cannot cross the cgame VM boundary safely (only top-level syscall args
+// are address-translated), so it ships via the separate
+// trap_R_SetAtmosphereHeightgrid syscall (mirrors AddPolyToScene's
+// verts-ptr + count). worldMins/Maxs/gridSize describe that grid's xy
+// extent for the GPU's heightgrid sample.
+typedef struct {
+	int    type;          // 0 = none, 1 = rain, 2 = snow (atmType_t order)
+	float  bounds[6];     // xyz min, xyz max — world spawn volume
+	float  distance;      // eye-relative cull radius (ATM_DISTANCE)
+	vec2_t worldMins;     // tracemap xy bounds (heightgrid sample origin)
+	vec2_t worldMaxs;
+	int    gridSize;      // heightgrid edge (TRACEMAP_SIZE = 256)
+} atmosphericDesc_t;
+
+// ── primitive shader stage info ───────────────────────────────────────
 //
 // Per-stage rendering parameters extracted from a Q3 shader script.
 // Mirrors the relevant stage features of `shaderStage_t` for the

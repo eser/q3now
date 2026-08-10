@@ -1,0 +1,6 @@
+// Toxic accent overlay — qw-shared.jsx QW_ACCENTS.toxic.
+token accent                "#9fd14a"
+token accentDim             "#5a7a28"
+token accentSoft            "#7ab030"
+// Low-alpha accent wash — equipped weapon-carousel slot FILL (see amber/_tokens.wui).
+token accentWash            "rgba(159,209,74,0.34)"

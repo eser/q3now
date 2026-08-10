@@ -7,7 +7,6 @@
 #include "../qcommon/q_shared.h"
 #include "bg_public.h"
 #include "bg_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_physics, "physics" );
 
 /*

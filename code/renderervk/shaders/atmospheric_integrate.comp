@@ -1,0 +1,188 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+atmospheric_integrate.comp — wired-render atmospheric weather compute shader
+
+Drives the GPU-resident rain/snow pool. Each thread owns one slot indexed
+by gl_GlobalInvocationID.x; workgroup size 64, dispatch ceil(poolSize/64).
+The pool ping-pongs: this pass reads ReadPool, writes WritePool.
+
+Per slot, every frame:
+  - INACTIVE (flags < 0.5) → RESPAWN: continuous spawn. There is no GPU
+    rand(), so a hash of (slot index, time, seed) derives a pseudo-random
+    xy inside the world spawn volume; z starts at the top of the volume.
+    Velocity is type-based (rain: fast straight down + small xy jitter;
+    snow: slow down + wind sway). The slot is then marked falling.
+  - FALLING → integrate pos += vel*dt (snow adds a sin/cos wind sway from
+    time + index). COLLIDE: sample the heightgrid at the particle xy →
+    ground height; if pos.z < ground, mark inactive (respawns next frame).
+    DISTANCE-CULL: if the xy distance from the eye exceeds `distance`, mark
+    inactive. Below-eye floor kill mirrors the legacy CPU path.
+
+Layout matches the host atmParticleGPU_t (32 B) / atmFrame_t (208 B std140)
+mirrors in vk.h.
+*/
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct AtmParticle {
+	vec3  pos;
+	float seed;
+	vec3  vel;
+	float flags;   // 0 = inactive (respawn), 1 = falling
+};
+
+layout(set = 0, binding = 0) uniform AtmFrame {
+	mat4  mvp;          //   0..63   (render region — unused here)
+	vec4  viewLeft;     //  64..79
+	vec4  viewUp;       //  80..95
+	vec4  eyeWorld;     //  96..111  eye for distance-cull
+	float dt;           // 112..115
+	float time;         // 116..119
+	uint  poolSize;     // 120..123
+	uint  pingPongRead; // 124..127
+	vec4  boundsMin;    // 128..143  world spawn volume min (xyz)
+	vec4  boundsMax;    // 144..159  world spawn volume max (xyz)
+	vec2  worldMins;    // 160..167  heightgrid xy origin
+	vec2  worldMaxs;    // 168..175  heightgrid xy extent
+	vec2  invGridStep;  // 176..183  1 / cell-size
+	uint  gridSize;     // 184..187
+	uint  atmType;      // 188..191  0 none, 1 rain, 2 snow
+	float distance;     // 192..195
+	float pad0;         // 196..199
+	float pad1;         // 200..203
+	float pad2;         // 204..207
+};
+
+layout(std430, set = 0, binding = 1) readonly buffer ReadPool {
+	AtmParticle readParticles[];
+};
+
+layout(std430, set = 0, binding = 2) writeonly buffer WritePool {
+	AtmParticle writeParticles[];
+};
+
+layout(set = 0, binding = 3) uniform sampler2D heightgrid;
+
+// Q3 DEFAULT_GRAVITY is 800; rain falls at 1.1× that, snow at 0.2×.
+const float RAIN_SPEED = 1.1 * 800.0;
+const float SNOW_SPEED = 0.2 * 800.0;
+const float FLOOR_KILL_BELOW_EYE = 500.0;
+
+// Cheap integer hash → [0,1). Derived from gl_GlobalInvocationID + a time
+// quantum + the slot's stored seed, so successive respawns of the same slot
+// land at different positions.
+float hash11( uint x ) {
+	x ^= x >> 16;
+	x *= 0x7feb352du;
+	x ^= x >> 15;
+	x *= 0x846ca68bu;
+	x ^= x >> 16;
+	return float( x ) * ( 1.0 / 4294967296.0 );
+}
+
+float rand01( uint idx, uint salt, float seed ) {
+	uint t = uint( time * 1000.0 ) + uint( seed * 4096.0 );
+	return hash11( idx * 747796405u + salt * 2891336453u + t );
+}
+
+// Sample the R32F ground-height texture at a world xy. uv normalizes the
+// world position into [0,1] grid space (clamp sampler handles edges).
+float groundHeightAt( vec2 worldXY ) {
+	vec2 cell = ( worldXY - worldMins ) * invGridStep;   // grid texels
+	vec2 uv   = ( cell + 0.5 ) / float( gridSize );
+	return texture( heightgrid, uv ).r;
+}
+
+AtmParticle deadParticle() {
+	AtmParticle p;
+	p.pos   = vec3( 0.0 );
+	p.seed  = 0.0;
+	p.vel   = vec3( 0.0 );
+	p.flags = 0.0;
+	return p;
+}
+
+void main() {
+	uint idx = gl_GlobalInvocationID.x;
+	if ( idx >= poolSize ) return;
+
+	// Weather off → keep the whole pool inactive (the draw is skipped too).
+	if ( atmType == 0u ) {
+		writeParticles[idx] = deadParticle();
+		return;
+	}
+
+	AtmParticle p = readParticles[idx];
+
+	// ── RESPAWN inactive slots (continuous spawn) ────────────────────
+	if ( p.flags < 0.5 ) {
+		float rx = rand01( idx, 11u, p.seed );
+		float ry = rand01( idx, 23u, p.seed );
+		float rz = rand01( idx, 31u, p.seed );
+
+		// Spawn xy biased around the eye so the visible volume stays
+		// populated, clamped into the world bounds. Spawn z in a band ABOVE
+		// the eye (not at the world sky-margin top — that is tens of
+		// thousands of units up and rain would take ~40 s to fall into view).
+		// SPAWN_HEIGHT keeps fresh particles just overhead so they stream
+		// through the view continuously; clamp to the world ceiling.
+		float spread = distance;
+		const float SPAWN_HEIGHT = 800.0;
+		p.pos.x = clamp( eyeWorld.x + ( rx * 2.0 - 1.0 ) * spread, boundsMin.x, boundsMax.x );
+		p.pos.y = clamp( eyeWorld.y + ( ry * 2.0 - 1.0 ) * spread, boundsMin.y, boundsMax.y );
+		p.pos.z = min( eyeWorld.z + rz * SPAWN_HEIGHT, boundsMax.z );
+
+		p.seed = rx + ry + rz;
+
+		if ( atmType == 1u ) {
+			// rain: straight down, small xy jitter
+			p.vel.x = ( rand01( idx, 41u, p.seed ) * 2.0 - 1.0 ) * 30.0;
+			p.vel.y = ( rand01( idx, 53u, p.seed ) * 2.0 - 1.0 ) * 30.0;
+			p.vel.z = -RAIN_SPEED;
+		} else {
+			// snow: slow fall, gentle xy drift
+			p.vel.x = ( rand01( idx, 41u, p.seed ) * 2.0 - 1.0 ) * 20.0;
+			p.vel.y = ( rand01( idx, 53u, p.seed ) * 2.0 - 1.0 ) * 20.0;
+			p.vel.z = -SNOW_SPEED;
+		}
+
+		p.flags = 1.0;
+		writeParticles[idx] = p;
+		return;
+	}
+
+	// ── FALLING — integrate ──────────────────────────────────────────
+	p.pos += p.vel * dt;
+
+	// snow: add a slight per-particle wind sway (matches the legacy CPU path)
+	if ( atmType == 2u ) {
+		p.pos.x += sin( time + float( idx ) ) * 0.5;
+		p.pos.y += cos( time * 1.3 + float( idx ) ) * 0.5;
+	}
+
+	// COLLIDE against the heightgrid ground.
+	float ground = groundHeightAt( p.pos.xy );
+	if ( p.pos.z < ground ) {
+		writeParticles[idx] = deadParticle();
+		return;
+	}
+
+	// DISTANCE-CULL around the eye (xy only — vertical doesn't matter).
+	vec2 d = p.pos.xy - eyeWorld.xy;
+	if ( dot( d, d ) > distance * distance ) {
+		writeParticles[idx] = deadParticle();
+		return;
+	}
+
+	// kill if far below the viewer (avoids stragglers under the floor)
+	if ( p.pos.z < eyeWorld.z - FLOOR_KILL_BELOW_EYE ) {
+		writeParticles[idx] = deadParticle();
+		return;
+	}
+
+	writeParticles[idx] = p;
+}

@@ -1,0 +1,124 @@
+// ingame_scoreboard_tdm.wui -- q3now In-game TDM scoreboard (Phase 6b canonical)
+//
+// HUD-layer overlay for Team Deathmatch. Same engine state machine
+// as FFA/Duel (cl_wired_ui_hud_state.c) — visible=1 when
+// wiredHud->showScores AND wiredHud->gametype == GT_TDM/GT_OBELISK/
+// GT_HARVESTER.
+//
+// Layout (§8.2 canonical, team variant): top-anchored flexbox shell
+// containing a column-direction root with a row-direction split
+// pane. LEFT panel hosts the red team scorelist; RIGHT panel hosts
+// the blue team scorelist. Each panel uses scorelist_widget with
+// group "red"/"blue", which routes the CUSTOM dispatch through
+// WiredHud_DrawScorelistWidget with feederID 0x05 (red filter) or
+// 0x06 (blue filter). The widget filters wiredHud->scores by team
+// internally; the .wui wrapper only sizes and positions.
+//
+// Team labels (RED TEAM / BLUE TEAM) are rendered above the
+// scorelist panels as .wui-level decorative type-0 text — these
+// are independent of the widget which has its own internal title.
+
+menuDef {
+	name "ingame_scoreboard_tdm"
+	layer "hud"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 0
+	style 0
+
+	itemDef {
+		name "scoreboard_overlay"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		alignX center
+		alignY start
+
+		itemDef {
+			name "scoreboard_root"
+			type container
+			rect 0.05 0.04 0.9 0.92
+			direction column
+			gap $spacing_md
+			padding $spacing_md $spacing_md
+			width PERCENT 0.9
+			height PERCENT 0.92
+			// V2 chrome restore (chain 6.x S1): frames the whole RED|BLUE
+			// split-pane + team headers. Engine gates visibility by name on
+			// wiredHud->showScores (cl_wired_ui_hud_state.c:579-610).
+			background $hud_panel_bg
+			border 1px $accent
+
+			// ── Team header strip (RED TEAM | BLUE TEAM labels)
+			itemDef {
+				name "team_header"
+				type container
+				rect 0 0 1 0.04
+				direction row
+				gap $spacing_md
+				height FIT
+				width PERCENT 1.0
+
+				itemDef { name "red_label"  type 0 rect 0 0 0.5 0.035 height FIT width PERCENT 0.5 text "RED TEAM"  textalign 1 font $font_sans_bold 18 forecolor $primary_red    decoration visible 1 grow 1 }
+				itemDef { name "blue_label" type 0 rect 0 0 0.5 0.035 height FIT width PERCENT 0.5 text "BLUE TEAM" textalign 1 font $font_sans_bold 18 forecolor $accent   decoration visible 1 grow 1 }
+			}
+
+			// ── Split-pane body (LEFT red scorelist + RIGHT blue scorelist)
+			itemDef {
+				name "split_pane"
+				type container
+				rect 0 0 1 0.86
+				direction row
+				gap $spacing_md
+				grow 1
+				height GROW
+				width PERCENT 1.0
+
+				itemDef {
+					name "red_panel"
+					type container
+					rect 0 0 0.5 1.0
+					direction column
+					grow 1
+					height PERCENT 1.0
+
+					itemDef {
+						name "red_scorelist"
+						type scorelist_widget
+						group "red"
+						rect 0 0 1 1
+						width PERCENT 1.0
+						height PERCENT 1.0
+						feeder "players_red_team"
+						forecolor $team_red_text
+						visible 1
+						decoration
+					}
+				}
+
+				itemDef {
+					name "blue_panel"
+					type container
+					rect 0 0 0.5 1.0
+					direction column
+					grow 1
+					height PERCENT 1.0
+
+					itemDef {
+						name "blue_scorelist"
+						type scorelist_widget
+						group "blue"
+						rect 0 0 1 1
+						width PERCENT 1.0
+						height PERCENT 1.0
+						feeder "players_blue_team"
+						forecolor $team_blue_text
+						visible 1
+						decoration
+					}
+				}
+			}
+		}
+	}
+}

@@ -37,6 +37,24 @@ typedef struct {
 	wuiValue_t  x, y, w, h;
 } wuiRect_t;
 
+// -- CSS-style per-side anchor offsets ------------------------------------
+// Dispatch 5.5: standalone top/left/right/bottom on an item. Auto-promotes
+// the item to POSITION_ABSOLUTE in Clay-emit when any side is declared. Sides
+// not declared (hasX = qfalse) fall through to rect-based positioning.
+typedef struct {
+	wuiValue_t  top, right, bottom, left;
+	qboolean    hasTop, hasRight, hasBottom, hasLeft;
+} wuiOffset_t;
+
+// -- CSS-style per-side margin (outside the box) --------------------------
+// Dispatch 5.5: margin on a flex-child item. Contributes to parent's flex
+// gap on the relevant axis (Clay v0.14 has no per-child margin primitive;
+// we emulate by adjusting the item's resolvedRect when emitted).
+typedef struct {
+	wuiValue_t  top, right, bottom, left;
+	qboolean    hasAny;
+} wuiMargin_t;
+
 // -- Aspect ratio constraint ----------------------------------------------
 typedef struct {
 	float       ratio;      // w/h (e.g. 1.0 for square, 1.777 for 16:9)
@@ -71,6 +89,7 @@ typedef struct {
 	wuiAlign_t      align;
 	wuiJustify_t    justify;
 	qboolean        wrap;
+	qboolean        scroll;   // clip children to the box + wheel/drag scroll-offset (Clay .clip.vertical)
 } wuiFlexContainer_t;
 
 // -- Flex child properties ------------------------------------------------

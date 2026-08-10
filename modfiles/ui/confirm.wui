@@ -1,0 +1,59 @@
+// confirm.wui -- q3now Generic Confirmation dialog (Phase 5d canonical)
+//
+// Centered popup (§7.2 pattern). Callers populate ui_confirmText
+// (message body) and ui_confirmAction (script to run on Yes), then
+// open this menu via { open "confirm_popup" }. Yes triggers
+// execConfirm (reads ui_confirmAction state key). ESC = No.
+
+menuDef {
+	name "confirm_popup"
+	layer "popup"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+	modal
+
+	itemDef {
+		name "popup_overlay"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		alignX center
+		alignY center
+		background "layered" effects "vignette"
+
+		itemDef {
+			name "confirm_root"
+			type container
+			rect 0 0 0.3 0.2
+			direction column
+			padding $popup_padding
+			gap $spacing_md
+			background $panel
+			border 1px $line_strong
+			radius $radius_md
+			width PERCENT 0.3
+			height FIT
+
+			itemDef { name "header"  type 0 rect 0 0 1 0.05 height FIT text "Confirm"             textalign 0 font $font_sans_bold 20 forecolor $accent decoration visible 1 grow 0 }
+			itemDef { name "message" type 0 rect 0 0 1 0.06 height FIT textalign 0 font $font_sans 14 forecolor $bone cvar "ui_confirmText" decoration visible 1 grow 0 }
+
+			itemDef {
+				name "popup_footer"
+				type container
+				rect 0 0 1 0.05
+				direction row
+				gap $spacing_md
+				alignX end
+				height FIT
+
+				itemDef { name "btn_no"  type 1 rect 0 0 0.12 0.04 height FIT text "No"  textalign 1 font $font_sans 13       forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+				itemDef { name "btn_yes" type 1 rect 0 0 0.12 0.04 height FIT text "Yes" textalign 1 font $font_sans_bold 13 forecolor $accent forecolor.active $accent visible 1 grow 0 defaultButton action { execConfirm ; close } }
+			}
+		}
+	}
+
+	onESC { close }
+}

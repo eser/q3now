@@ -17,9 +17,36 @@ layout(set = 0, binding = 0) uniform UBO {
 	vec4 fogEyeT;				// vertex
 	vec4 fogColor;				// fragment
 //#endif
+	// Pad from fogColor (128) over the host's q1Style / cascade / modelMatrix /
+	// mvp span to the per-draw bindless index table at offset 544.
+	vec4 _pad_to_packed_indices[26];  // 128 -> 544
+	// Per-draw bindless index table (std140 uvec4[3] = 48 B). See vkUniform_t.
+	uvec4 packed_indices[3];      // offset 544, 48 bytes
 };
 
-layout(set = 2, binding = 0) uniform sampler2D fog_texture;
+// legacy-mainpath-retire STEP 6.1 — fog.frag was sampling `tr.fogImage` via a
+// legacy set=2 binding that STEP 2 silently retired (the ring write at
+// RB_FogPass was deleted; the NULL-gap fallback substituted tr.whiteImage,
+// turning the fog into a flat-coloured volume with no density ramp). 6.1
+// relocates the sampler onto the RAL-owned bindless 2D table (set 7) at role
+// 3 — the same role gen_frag.tmpl uses for fog. RB_FogPass now publishes the
+// fog image via vk_bindless_track(3, tr.fogImage) so vk_push_bindless_indices
+// pushes the correct slot through the existing FS push range at offset 96
+// of vk.pipeline_layout. The density ramp is restored.
+#extension GL_EXT_nonuniform_qualifier : require
+
+layout(set = 1, binding = 0) uniform texture2D wired_bindless_images[];
+layout(set = 1, binding = 1) uniform sampler   wired_bindless_samplers[];
+
+// Per-role packed index lives in the set-0 UBO as uvec4[3] (packed_indices
+// above); role N reads component N%4 of vec4 N/4. See gen_frag.tmpl.
+#define WIRED_BINDLESS_PACKED(role) packed_indices[ (role) / 4u ][ (role) % 4u ]
+
+// Role 3 = fog (matches gen_frag.tmpl's role assignment).
+#define WIRED_BINDLESS_FOG_ROLE 3u
+#define WIRED_BINDLESS_TEX(role) sampler2D( \
+	wired_bindless_images  [ nonuniformEXT(   WIRED_BINDLESS_PACKED( role )         & 0xFFFu ) ], \
+	wired_bindless_samplers[ nonuniformEXT( ( WIRED_BINDLESS_PACKED( role ) >> 12 ) & 0xFFu  ) ] )
 
 //layout(location = 0) in vec4 frag_color;
 //layout(location = 1) in vec2 frag_tex_coord0;
@@ -31,10 +58,10 @@ layout(location = 0) out vec4 out_color;
 
 //layout(constant_id = 0) const int alpha_test_func = 0;
 
-// Phase 6B3'-d4-m4: precise piecewise sRGB <-> linear conversion.
+// Precise piecewise sRGB <-> linear conversion.
 // Duplicated in every fragment shader per the engine-wide
 // unconditional linear migration; compile.mjs lacks #include
-// support. Matches m1/m2/m3 verbatim. Both helpers are unused in
+// support. Matches the other shader copies verbatim. Both helpers are unused in
 // fog.frag — fogColor arrives linear (host-decoded in VK_SetFogParams)
 // and fog_texture is a non-colour density ramp — so the driver DCEs
 // them; kept for migration symmetry / future use.
@@ -70,7 +97,7 @@ void main() {
 
 	//out_color = mix( base, fog, fog.a );
 
-	vec4 fog = texture(fog_texture, fog_tex_coord);
+	vec4 fog = texture( WIRED_BINDLESS_TEX( WIRED_BINDLESS_FOG_ROLE ), fog_tex_coord );
 //	fog.a = 1.0;
 	out_color = fog * fogColor;
 }

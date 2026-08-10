@@ -1,0 +1,19 @@
+// qw_hud_objectives — mission-objectives HUD list.
+//
+// The current mission objectives (localized text + completed/pending indicator)
+// as a standing top-left list. Uses the "objectives" HUD element
+// (cl_wired_hud_elem_objectives.c). This is a STANDARD hud:* element — it is
+// hidden by the normal sceneHudHidden gate during a cutscene (NOT scene-exempt,
+// unlike hud:subtitle). The draw routine self-anchors to the viewport top-left
+// and gates on there being active objectives, so the rect here is only a walk
+// anchor (decoration); `position absolute` matches the subtitle/crosshair pattern
+// so the zero-rect floating leaf emits correctly.
+itemDef {
+	name "hud_active_objectives"
+	hudElement "objectives"
+	position absolute
+	anchor TOP_LEFT
+	rect 0.03 0.20 0 0
+	decoration
+	visible 1
+}

@@ -25,7 +25,6 @@ a help panel below the input line when con_drawHelp is set.
 
 #include "q_shared.h"
 #include "qcommon.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 /* con_drawHelp bitmask flags */
@@ -106,7 +105,7 @@ static void Help_PrintCvar( const cvar_t *var )
 	char flagStr[256];
 
 	Com_Log( SEV_INFO, LOG_CH(ch_system),
-		S_COLOR_YELLOW "cvar " S_COLOR_WHITE "%s" S_COLOR_WHITE " (%s)\n",
+		"cvar " S_COLOR_WHITE "%s" S_COLOR_WHITE " (%s)\n",
 		var->name, Help_TypeName( var->type ) );
 
 	if ( var->description && var->description[0] ) {
@@ -184,7 +183,7 @@ Help_PrintCommand
 */
 static void Help_PrintCommand( const char *name )
 {
-	Com_Log( SEV_INFO, LOG_CH(ch_system), S_COLOR_YELLOW "command " S_COLOR_WHITE "%s\n", name );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "command " S_COLOR_WHITE "%s\n", name );
 	Com_Log( SEV_INFO, LOG_CH(ch_system), "  (no description available)\n" );
 }
 

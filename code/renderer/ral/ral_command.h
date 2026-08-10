@@ -24,10 +24,23 @@ extern "C" {
 // reused, drains the deferred-destroy queue (resources whose destroy frame is
 // at least MAX_FRAMES_IN_FLIGHT behind), and resets that fence. Ral_EndFrame
 // closes the frame (signals the frame fence). Consumers that don't run a
-// per-frame render loop (Phase 7.3 has none) may skip these; the resource
+// per-frame render loop may skip these; the resource
 // layer falls back to wait-idle-on-shutdown either way.
 void Ral_BeginFrame( ralBackend_t *b );
 void Ral_EndFrame  ( ralBackend_t *b );
+
+// Ral_DrainDeferred — advance the deferred-destroy frame counter and reclaim
+// every resource queued for destroy that is now safely past the frames-in-
+// flight window, WITHOUT touching RAL's internal frame fences or issuing the
+// empty stand-in submit that Ral_BeginFrame/Ral_EndFrame do. For consumers
+// that run their own render loop (the renderer advances vk.frame_count and
+// owns its own per-frame fence wait) and so cannot use Ral_BeginFrame's
+// fence/submit cycle, but still need the deferred-destroy ring to drain on a
+// real per-frame cadence instead of only on the 4096-entry overflow. Call it
+// once per rendered frame at the renderer's frame boundary, AFTER the host has
+// already waited the frame fence guaranteeing the work that referenced those
+// resources is complete. NULL-safe / no-op until the frame layer is up.
+void Ral_DrainDeferred( ralBackend_t *b );
 
 // ── command buffer lifecycle ────────────────────────────────────────────
 ralCommandBuffer_t *Ral_AcquireCommandBuffer ( ralBackend_t *b, ralQueueType_t q );
@@ -36,7 +49,7 @@ void                Ral_EndCommandBuffer     ( ralCommandBuffer_t *cb );
 void                Ral_DestroyCommandBuffer ( ralCommandBuffer_t *cb );    // usually superseded by Ral_PoolReset
 void                Ral_PoolReset            ( ralBackend_t *b, ralQueueType_t q );   // vkResetCommandPool for the queue's pool
 
-// Phase 7.4c-cmd / Phase 7.4c-submit-BC-B — combined Acquire+Begin helper for
+// Combined Acquire+Begin helper for
 // one-shot command buffers. Acquires a fresh VkCommandBuffer from RAL's pool
 // for the given queue, immediately begins it in
 // VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT mode, and returns the wrapper
@@ -46,35 +59,20 @@ void                Ral_PoolReset            ( ralBackend_t *b, ralQueueType_t q
 // Destroy.
 //
 // Used by:
-//  - vk_begin_frame's per-frame parallel-paths buffer (7.4c-cmd, vk.c:~19321
+//  - vk_begin_frame's per-frame parallel-paths buffer (vk.c:~19321
 //    with RAL_QUEUE_GRAPHICS).
-//  - The 13 one-shot staging / screenshot / shadow-caster sites that 7.4c-
-//    submit-BC-B migrated from the retired legacy Vk one-shot helpers (all
+//  - The 13 one-shot staging / screenshot / shadow-caster sites migrated
+//    from the retired legacy Vk one-shot helpers (all
 //    RAL_QUEUE_GRAPHICS to preserve the legacy graphics-queue serialization
-//    with rendering work; RAL_QUEUE_TRANSFER promotion is Phase 7.15 scope).
+//    with rendering work; RAL_QUEUE_TRANSFER promotion is a later scope).
 //
-// Phase 7.4c-submit-D-shim — renamed to reflect actual Acquire+Begin
-// semantics. The prior misleading "Adopt"-named identifier was a leftover
-// from an earlier parallel-paths model where this function once wrapped a
-// renderer-owned VkCommandBuffer; that adoption path migrated to
-// Ral_WrapCommandBuffer (BC-C-final), which is the true "wrap an external
-// buffer" surface today.
+// Renamed to reflect actual Acquire+Begin
+// semantics. The prior "Adopt"-named identifier was a leftover from an
+// earlier parallel-paths model; the retired Ral_WrapCommandBuffer
+// sibling has been removed by cleanup-final.
 ralCommandBuffer_t *Ral_AcquireBegunCommandBuffer( ralBackend_t *b, ralQueueType_t q );
 
-// Phase 7.4c-submit-BC-C-final — wrap an EXTERNALLY-allocated VkCommandBuffer
-// in a ralCommandBuffer_t with ownsBuffer=qfalse. Unlike Ral_AcquireCommandBuffer
-// (allocates fresh from RAL's pool) and Ral_AcquireBegunCommandBuffer (allocates
-// fresh + begins), this wraps a buffer the caller already owns + already begun +
-// already recorded. Ral_DestroyCommandBuffer on the wrapper frees only the
-// wrapper struct, not the underlying VkCommandBuffer — the caller retains
-// alloc/reset/begin/end/free lifecycle. Used by the per-frame submit migration
-// where the renderer's legacy vk.cmd->command_buffer keeps its lifecycle
-// intact but Ral_Submit replaces the qvkQueueSubmit call site.
-ralCommandBuffer_t *Ral_WrapCommandBuffer( ralBackend_t  *b,
-                                           void          *externalCommandBuffer, /* VkCommandBuffer on Vulkan */
-                                           ralQueueType_t q );
-
-// Phase 7.4c-submit-BC-B — end + submit + queue-idle + free in a single
+// End + submit + queue-idle + free in a single
 // call. Mirrors the retired legacy Vk one-shot helper's semantics
 // (synchronous-completion-before-return). Safe to call with NULL (no-op).
 // `cmd` MUST NOT be used after this call. The submit target queue is read
@@ -88,7 +86,7 @@ ralCommandBuffer_t *Ral_WrapCommandBuffer( ralBackend_t  *b,
 // not exposed on the RAL surface.
 void Ral_SubmitAndDispose( ralCommandBuffer_t *cmd );
 
-// Phase 7.4c-cmd — return the backend-native cmd buffer handle (VkCommandBuffer
+// Return the backend-native cmd buffer handle (VkCommandBuffer
 // on Vulkan) for a ralCommandBuffer_t. NULL-safe. Used by the parallel-paths
 // renderer to feed Ral_CmdBindBindGroups (and a few other void*-handle entry
 // points) the RAL-allocated parallel cmd buffer instead of the renderer's
@@ -110,7 +108,7 @@ typedef struct {
 
 void Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t *si );
 
-// Phase 7.4c-submit-followup-present-1 — host-side wait until all work
+// Host-side wait until all work
 // previously submitted on the specified queue completes. Equivalent to
 // vkQueueWaitIdle on Vulkan. Returns ralSuccess / ralErrorDeviceLost.
 // Used by the renderer's vk_queue_wait_idle helper after the BC-B
@@ -129,6 +127,21 @@ typedef struct {
 	ralLoadOp_t     depthLoadOp;
 	ralStoreOp_t    depthStoreOp;
 	float           depthClear;
+	// Array layer to render into when depthAttachment is an array image (adopted
+	// via Ral_AdoptArrayTexture, which carries per-layer views); 0 for single-layer
+	// (the default). VkRenderingInfo has no baseArrayLayer — the layer offset lives
+	// entirely in the bound attachment imageView's subresourceRange, so the backend
+	// selects depthAttachment->layerViews[depthAttachmentLayerIndex] as the depth
+	// imageView. Zero-init (every current single-layer caller) → layerViews unused,
+	// defaultView bound, byte-identical to before.
+	uint32_t        depthAttachmentLayerIndex;
+	// Stencil: the stencil attachment is the depthAttachment itself (combined
+	// depth+stencil format → one image/view). A stencil attachment is bound only
+	// when depthAttachment's format carries a stencil aspect; these fields are
+	// ignored otherwise. Zero-init (color-only / depth-only callers) → no stencil.
+	ralLoadOp_t     stencilLoadOp;
+	ralStoreOp_t    stencilStoreOp;
+	uint32_t        stencilClear;
 	ralTexture_t   *resolveAttachments[RAL_MAX_COLOR_ATTACHMENTS];  // MSAA resolve targets (NULL = none)
 	ralRect_t       renderArea;
 } ralRenderingInfo_t;
@@ -137,7 +150,7 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri );
 void Ral_EndRendering  ( ralCommandBuffer_t *cb );
 
 // ════════════════════════════════════════════════════════════════════════
-// Phase 7.4c-submit Cluster A — typed RAL cmd API surface.
+// Typed RAL cmd API surface.
 //
 // Each enum below uses the same numeric values as the matching Vulkan enum
 // so the backend can cast directly (zero-cost), while the public API stays
@@ -296,7 +309,7 @@ typedef enum { RAL_INDEX_UINT16, RAL_INDEX_UINT32 } ralIndexType_t;
 void Ral_CmdBindPipeline    ( ralCommandBuffer_t *cb, ralPipeline_t *p );
 void Ral_CmdBindBindGroup   ( ralCommandBuffer_t *cb, uint32_t setIndex, ralBindGroup_t *g );
 
-// Phase 7.4c-bindgroup — parallel-paths bind. Records vkCmdBindDescriptorSets
+// Parallel-paths bind. Records vkCmdBindDescriptorSets
 // (or backend equivalent) for `count` bind groups starting at `firstSet`,
 // against an EXTERNALLY-supplied pipeline layout + cmd handle. Unlike
 // Ral_CmdBindBindGroup (singular) this does not require a prior Ral_Cmd-
@@ -305,17 +318,17 @@ void Ral_CmdBindBindGroup   ( ralCommandBuffer_t *cb, uint32_t setIndex, ralBind
 // buffer and the pipeline layout; the RAL parallel call records the same
 // bind onto the same cmd buffer (idempotent — re-binding the same set is
 // a legal no-op behaviorally; CPU cost is the parallel-paths overhead
-// until 7.4c-submit retires the legacy path).
+// until the legacy path is retired).
 //
-// TODO_7.4c-cmd: `cmdHandle` is currently a raw VkCommandBuffer cast to
+// TODO: `cmdHandle` is currently a raw VkCommandBuffer cast to
 // void *, and `pipelineLayout` is a raw VkPipelineLayout cast to void *.
-// 7.4c-cmd introduces ralCommandBuffer_t threading + ralPipelineLayout_t
+// A later change introduces ralCommandBuffer_t threading + ralPipelineLayout_t
 // and tightens this signature. `bindPoint` is a VkPipelineBindPoint value
-// (0 = GRAPHICS, 1 = COMPUTE) — same TODO_7.4c-cmd treatment.
+// (0 = GRAPHICS, 1 = COMPUTE) — same TODO treatment.
 void Ral_CmdBindBindGroups  ( ralBackend_t *b,
-                              void *cmdHandle,                /* TODO_7.4c-cmd: VkCommandBuffer → ralCommandBuffer_t * */
-                              int bindPoint,                  /* TODO_7.4c-cmd: VkPipelineBindPoint → ralBindPoint_t */
-                              void *pipelineLayout,           /* TODO_7.4c-cmd: VkPipelineLayout → ralPipelineLayout_t * */
+                              void *cmdHandle,                /* TODO: VkCommandBuffer → ralCommandBuffer_t * */
+                              int bindPoint,                  /* TODO: VkPipelineBindPoint → ralBindPoint_t */
+                              void *pipelineLayout,           /* TODO: VkPipelineLayout → ralPipelineLayout_t * */
                               uint32_t firstSet,
                               uint32_t count,
                               ralBindGroup_t *const *bindGroups,
@@ -350,7 +363,7 @@ void Ral_CmdCopyBuffer          ( ralCommandBuffer_t *cb, ralBuffer_t *src, ralB
 void Ral_CmdCopyBufferToTexture ( ralCommandBuffer_t *cb, ralBuffer_t *src, ralTexture_t *dst, const ralBufferTextureCopy_t *region );
 // Readback path — caller must first transition `src` to TRANSFER_SRC_OPTIMAL
 // via a barrier op (the RAL test does this directly today; the renderer
-// migration in Phase 7.4 will route through the same coarse barriers).
+// migration will route through the same coarse barriers).
 void Ral_CmdCopyTextureToBuffer ( ralCommandBuffer_t *cb, ralTexture_t *src, ralBuffer_t *dst, const ralBufferTextureCopy_t *region );
 
 // ── barriers ────────────────────────────────────────────────────────────
@@ -373,9 +386,9 @@ void Ral_BeginDebugLabel( ralCommandBuffer_t *cb, const char *label, const float
 void Ral_EndDebugLabel  ( ralCommandBuffer_t *cb );
 
 // ════════════════════════════════════════════════════════════════════════
-// Phase 7.4c-submit-A2 — typed RAL cmd surface (additions).
+// Typed RAL cmd surface (additions).
 //
-// These typed entry points cover the call sites that the 7.4c-cmd `_Raw`
+// These typed entry points cover the call sites that the earlier `_Raw`
 // shims handled with raw Vk handles. Renderer migration: each _Raw caller
 // finds the matching typed wrapper from this surface and passes RAL-typed
 // arguments looked up via vk_ral_lookup_buffer / vk_ral_lookup_pipeline /
@@ -410,14 +423,14 @@ void Ral_CmdBindVertexBuffers( ralCommandBuffer_t *cb, uint32_t firstBinding,
 // separate paths).
 void Ral_CmdPushConstantsLayout( ralCommandBuffer_t *cb,
                                  ralPipelineLayout_t *layout,
-                                 uint32_t stageFlags,        // RAL_STAGE_* bitmask
+                                 uint32_t stageFlags,        // raw VkShaderStageFlags (VK_SHADER_STAGE_*_BIT), passed through verbatim by the Vulkan backend — NOT the RAL_STAGE_* convention used by Ral_CmdPushConstants
                                  uint32_t offset,
                                  uint32_t size,
                                  const void *data );
 
 // Legacy VkRenderPass / VkFramebuffer based render pass (the renderer's
 // existing render passes are not on dynamic rendering yet — that's a
-// post-7.4d migration; this surface bridges the legacy-pass model into the
+// later migration; this surface bridges the legacy-pass model into the
 // typed cmd buffer).
 void Ral_CmdBeginRenderPass( ralCommandBuffer_t *cb,
                              ralRenderPass_t *renderPass,
@@ -433,6 +446,17 @@ void Ral_CmdNextSubpass    ( ralCommandBuffer_t *cb, ralSubpassContents_t conten
 // coarse RAL_BARRIER_* scope of Ral_CmdPipelineBarrier).
 void Ral_CmdPipelineBarrierFull( ralCommandBuffer_t *cb,
                                  const ralPipelineBarrierInfo_t *info );
+
+// Transition a single texture between layouts AND record the matching image
+// barrier in one call: it both issues the VkImageMemoryBarrier (src/dst stage
+// from the args; access masks derived from the stages) AND updates the
+// texture's tracked currentLayout — so layout state and the GPU barrier can
+// never desync (unlike the state-only Ral_SetTextureLayout, which records no
+// barrier). Used e.g. to make a render target readable by a later compute pass.
+void Ral_CmdTransitionTexture( ralCommandBuffer_t *cb, ralTexture_t *tex,
+                               ralPipelineStageFlags_t srcStage,
+                               ralPipelineStageFlags_t dstStage,
+                               uint32_t newVkLayout );
 
 // Image-to-image / blit / buffer-to-image multi-region transfers.
 void Ral_CmdCopyImage         ( ralCommandBuffer_t *cb, ralTexture_t *src, ralTexture_t *dst,
@@ -458,16 +482,16 @@ void Ral_CmdWriteTimestamp( ralCommandBuffer_t *cb, uint32_t pipelineStageBits,
                             ralQueryPool_t *pool, uint32_t query );
 
 // ════════════════════════════════════════════════════════════════════════
-// Phase 7.4c-submit-A4 — parallel-paths void-handle shim retirement complete.
+// Parallel-paths void-handle shim retirement complete.
 //
-// The four pre-A4 void*-handle parallel-paths cmd forwarders (PipelineBarrier,
+// The four earlier void*-handle parallel-paths cmd forwarders (PipelineBarrier,
 // CopyImage, ResetQueryPool, WriteTimestamp) have been retired; their renderer
 // callsites migrated to the typed Ral_Cmd{PipelineBarrierFull,CopyImage,
 // ResetQueryPool,WriteTimestamp} surface above via
 // vk_ral_lookup_texture / vk_ral_lookup_query_pool reverse-lookups.
 // The remaining parallel-paths-era void*-handle entry point is
 // Ral_CmdBindBindGroups (lines 272-280 above) — its typed-handle migration
-// (ralCommandBuffer_t / ralPipelineLayout_t) is a TODO_7.4d-map-arena
+// (ralCommandBuffer_t / ralPipelineLayout_t) is a later
 // follow-up that requires per-frame rotating-set adoption.
 
 #ifdef __cplusplus

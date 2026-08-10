@@ -1,0 +1,25 @@
+// qw_hud_markers — WA-2a world-anchored marker overlay
+// Interface: #include once into the qw_hud_active composer menuDef body.
+//
+// The `markerlist` hudElement (WA-2a infra) draws a variable-count list of
+// world-anchored text markers at their ABSOLUTE staged pixel positions. cgame
+// stages the list under the bound key via WUI_StageMarkers_* (the PushMarkerList
+// syscall); this element draws each via Text_Draw. The marker positions are
+// absolute screen pixels (CG_WorldToScreenPixels), so the leaf rect is a
+// full-screen anchor and does not position the markers (mirrors how the
+// crosshair element draws at absolute coords, ignoring its rect).
+//
+// Two marker lists, each its own generic stateless `markerlist` element bound to a
+// distinct listKey: "markers.plums" (WA-2b: score + damage plums) and
+// "markers.botdir" (WA-3: bot directives). Same element type, different bind — no
+// new element. Each is empty until cgame stages its list (frame-transient).
+itemDef {
+	name "hud_active_markers"
+	type container
+	direction column
+	decoration
+	visible 1
+
+	itemDef { hudElement "markerlist" bind "markers.plums"  anchor TOP_LEFT rect 0 0 1 1 decoration visible 1 }
+	itemDef { hudElement "markerlist" bind "markers.botdir" anchor TOP_LEFT rect 0 0 1 1 decoration visible 1 }
+}

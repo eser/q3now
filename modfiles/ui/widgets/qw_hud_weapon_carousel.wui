@@ -1,0 +1,53 @@
+// qw_hud_weapon_carousel — V2_HUD_Active bottom-center weapon carousel
+// Interface: #include once into the qw_hud_active composer menuDef body.
+// Source: docs/wui-claude-design-canonical-v2/project/qw-screens.jsx:1262-1288
+//   (bottom-center horizontal weapon row; equipped slot emphasized).
+//
+// ABI (dispatch 5.23 decision 1): a SINGLE `weaponlist` hudElement
+// (registry cl_wired_ui_hud_register.c:162) self-draws every OWNED slot
+// AND the equipped-slot emphasis internally from weaponList[].selected
+// (= cg.snap->ps.weapon, the equipped weapon). The widget authors ONLY
+// the emphasis colour; there is NO per-slot `.active`/cvar machinery.
+// `cg.weaponSelect` (the cycling cursor) is a cgame-local int, NOT a cvar
+// — binding to it would be a silent dead clause, so it is NOT used.
+//
+// Layout: the weaponlist routine lays slots HORIZONTALLY when textAlign is
+// CENTER (cl_wired_hud_elem_weaponlist.c:87-91,248-251 — x increments per
+// slot); LEFT/RIGHT give the vertical mid-edge form default.wui uses.
+// Slot count is DYNAMIC (owned weapons only); at spawn the player owns
+// fewer than the mockup's full 9, so fewer slots render — correct.
+//
+// Emphasis: color2 = equipped-slot fill + border/borderColor = equipped-slot
+// outline (weaponlist.c:150-184; both applied only to the .selected slot).
+// Dispatch 5.24 S2 added the border/borderColor → ItemToConfig mapping so the
+// `border` keyword below reaches cfg->border for the selected slot.
+// Tokens: $bone (slot text/ammo) $hud_panel_bg (idle slot fill) $accent
+//   (equipped slot fill + outline).
+itemDef { hudElement "weaponlist"
+	anchor BOTTOM_CENTER
+	// D5 fix (2026-06-30): raised from y0.889 to y0.80. The redesign draws the
+	// ammo number BELOW the icon (weaponlist.c: ammo at y+h); at y0.889 with
+	// h0.071 the icon bottom was 0.96 and the ammo text fell at ~0.96–1.0 = OFF
+	// the screen bottom (invisible). At y0.80 the icon bottom is ~0.87 and the
+	// ammo number lands at ~0.89, on-screen and readable under each slot.
+	rect 0.5 0.80 0.071 0.071
+	font $font_sans
+	fontsize 10 12
+	textalign 1
+	forecolor $bone
+	// HUD redesign (Eser, 2026-06-30): vanilla-Q3 weapon-select look. NO per-slot
+	// background — idle slots are bare icons (no dark box behind them), and the
+	// equipped slot is marked ONLY by a border rect (no accent fill wash). So:
+	//   - NO `backcolor`  → bgcolor unset → the routine zeroes the idle back fill
+	//                       (weaponlist.c: !bgcolor.isSet → memset color 0) = no box.
+	//   - NO `color2`     → color2 unset → the routine zeroes the selected back fill
+	//                       = the equipped slot has no wash, only its border.
+	//   - keep `border`   → the equipped slot draws a 2px accent rect (idle borders
+	//                       are already zeroed in the routine), = the vanilla select box.
+	// These feed the weaponlist hudElement's PER-SLOT chrome (gated by weaponSelectTime);
+	// the compositor suppresses itemDef-level bg/border for custom-draw leaves (no
+	// persistent box). The ammo digit sits below each icon with a small gap (WLIST_AMMO_GAP).
+	border $border_med $accent   // equipped-slot per-slot select rect (only emphasis)
+	decoration
+	visible 1
+}

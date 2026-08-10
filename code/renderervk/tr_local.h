@@ -11,8 +11,7 @@
 #if defined (USE_VBO) && !defined(USE_FOG_ONLY)
 #define USE_FOG_ONLY
 #endif
-#define USE_LEGACY_DLIGHTS	// vq3 dynamic lights
-#define USE_PMLIGHT			// promode dynamic lights via \r_dlightMode 1|2
+#define USE_PMLIGHT			// per-pixel dynamic lights via \r_dynamiclight 1 (world) / 2 (world + models)
 #define MAX_REAL_DLIGHTS	(MAX_DLIGHTS*2)
 #define MAX_LITSURFS		(MAX_DRAWSURFS)
 #define	MAX_FLARES			256
@@ -33,6 +32,7 @@
 #include "../qcommon/qcommon.h"
 #include "../renderercommon/tr_public.h"
 #include "tr_common.h"
+#include "../renderercommon/tr_screenshot.h"
 #if FEAT_IQM
 #include "iqm.h"
 #endif // FEAT_IQM
@@ -116,9 +116,6 @@ typedef struct {
 	refEntity_t	e;
 
 	float		axisLength;		// compensate for non-normalized axis
-#ifdef USE_LEGACY_DLIGHTS
-	int			needDlights;	// 1 for bmodels that touch a dlight
-#endif
 	qboolean	lightingCalculated;
 	vec3_t		lightDir;		// normalized direction towards light
 	vec3_t		ambientLight;	// color normalized to 0-255
@@ -200,7 +197,6 @@ typedef enum {
 	DEFORM_NORMALS,
 	DEFORM_BULGE,
 	DEFORM_MOVE,
-	DEFORM_PROJECTION_SHADOW,
 	DEFORM_AUTOSPRITE,
 	DEFORM_AUTOSPRITE2,
 	DEFORM_TEXT0,
@@ -228,12 +224,12 @@ typedef enum {
 
 typedef enum {
 	CGEN_BAD,
-	CGEN_IDENTITY_LIGHTING,	// full white (linear pipeline; was 0.5×white pre-6B3'-a)
+	CGEN_IDENTITY_LIGHTING,	// full white (linear pipeline)
 	CGEN_IDENTITY,			// always (1,1,1,1)
 	CGEN_ENTITY,			// grabbed from entity's modulate field
 	CGEN_ONE_MINUS_ENTITY,	// grabbed from 1 - entity.modulate
 	CGEN_EXACT_VERTEX,		// tess.vertexColors
-	CGEN_VERTEX,			// tess.vertexColors (verbatim; was halved pre-6B3'-a)
+	CGEN_VERTEX,			// tess.vertexColors (verbatim)
 	CGEN_ONE_MINUS_VERTEX,
 	CGEN_WAVEFORM,			// programmatically generated
 	CGEN_LIGHTING_DIFFUSE,
@@ -465,6 +461,15 @@ typedef struct shader_s {
 
 	qboolean	multitextureEnv;		// if shader has multitexture stage(s)
 
+	// True when the baked lightmap is carried by its own trailing single-texture
+	// pass (lightmap in bundle[0]) instead of being collapsed into bundle[1] of a
+	// diffuse stage. Such shaders (e.g. animated/inset floors whose diffuse stages
+	// collapse among themselves and push the lightmap to a separate stage) escape
+	// the bundle[1]-keyed r_lightmap whiten; the stage-iterate path uses this to
+	// whiten the preceding diffuse stages instead, so r_lightmap 1 still yields a
+	// lightmap-only view. Detected at FinishShader after collapse.
+	qboolean	separateLightmapPass;
+
 	cullType_t	cullType;				// CT_FRONT_SIDED, CT_BACK_SIDED, or CT_TWO_SIDED
 	qboolean	polygonOffset;			// set for decals and other items that must be offset
 
@@ -522,7 +527,7 @@ typedef struct shader_s {
 	int			msdfAtlasHeight;	// atlas texture height
 
 	int              q1NumAnimFrames;  /* layers in q1AnimArray; 1 for single-frame or non-Q1 */
-	struct image_s  *q1AnimArray;      /* VK_IMAGE_VIEW_TYPE_2D_ARRAY built in Phase B; NULL if unavailable */
+	struct image_s  *q1AnimArray;      /* VK_IMAGE_VIEW_TYPE_2D_ARRAY; NULL if unavailable */
 
 	struct	shader_s	*next;
 } shader_t;
@@ -564,6 +569,13 @@ typedef struct {
 #ifdef USE_PMLIGHT
 	int			numLitSurfs;
 	struct litSurf_s	*litSurfs;
+	// Forward+ deduped lit-surface union — each surface lit by ANY light appears
+	// ONCE (the per-light litSurfs[] above has per-(surface,light) duplicates). Built
+	// in the per-light walk via the surf->fpFrameMark dedup; consumed once by the
+	// Forward+ lit pass (which sums the tile's lights per fragment). Reuses litSurf_t
+	// entries from a separate pool slice.
+	int			numFpUnionSurfs;
+	struct litSurf_s	*fpUnionSurfs;
 #endif
 #ifdef USE_VULKAN
 	qboolean	switchRenderPass;
@@ -592,8 +604,8 @@ typedef struct image_s {
 	imgFlags_t	flags;
 	colorDomain_t colorDomain;		// Block 5d: CD_SRGB (decode at sample) | CD_LINEAR (raw fetch)
 	uint32_t	layerCount;			/* 1 for 2D, 6 for cube, N for VK_IMAGE_VIEW_TYPE_2D_ARRAY */
-	texType_t	texType;			// Phase 6.5.1: TEXTYPE_2D (default) | _CUBE | _3D — drives VkImageType / view type
-	int			depth;				// Phase 6.5.1: volume slice count (extent.depth); 1 for 2D / cube
+	texType_t	texType;			// TEXTYPE_2D (default) | _CUBE | _3D — drives VkImageType / view type
+	int			depth;				// volume slice count (extent.depth); 1 for 2D / cube
 	int			frameUsed;			// for texture usage in frame statistics
 
 #ifdef USE_VULKAN
@@ -605,13 +617,19 @@ typedef struct image_s {
 	// Descriptor set that contains single descriptor used to access the given image.
 	// It is updated only once during image initialization.
 	VkDescriptorSet descriptor;
-	// Phase 7.4a (texture migration): when r_useRALTextures=1, a parallel RAL
+	// When r_useRALTextures=1, a parallel RAL
 	// texture is created alongside the legacy VkImage above. The legacy handle
 	// drives the renderer's descriptor binding / blits / screenshots; the RAL
-	// texture populates the bindless BindGroup for 7.4c. NULL when
+	// texture populates the bindless BindGroup. NULL when
 	// r_useRALTextures=0 or when the RAL backend init failed.
 	struct ralTexture_s *ral;
 	int		ralBindlessSlot;       // index into ral_bindless_set (-1 when not registered)
+	// bindless-main-shader: index into the RAL bindless set's sampler-
+	// array binding (WIRED_BINDLESS_BIND_SAMPLERS) corresponding to the sampler
+	// stored in image->descriptor. Filled at upload_vk_image time alongside
+	// vk_find_sampler; -1 when not resolved yet (bindless path not active, or
+	// image not yet uploaded).
+	int		bindlessSamplerSlot;
 #else
 	GLuint		texnum;				// gl texture binding
 	GLint		internalFormat;
@@ -665,10 +683,10 @@ typedef struct {
 	const float *fogColor; // vec4_t
 } fogProgramParms_t;
 
-#if FEAT_CORONA
-#define MAX_CORONAS 32
+#if FEAT_HALO
+#define MAX_HALOS 32
 
-typedef struct corona_s {
+typedef struct halo_s {
 	vec3_t				origin;
 	vec3_t				color;
 	vec3_t				transformed;	// viewspace position
@@ -676,8 +694,21 @@ typedef struct corona_s {
 	int					id;
 	qboolean			visible;
 	struct shader_s		*shader;
-} corona_t;
+} halo_t;
 #endif
+
+// Lens-source occlusion (lens-glow unification, B2 thin channel). The game adds
+// sources via RE_AddLensSourceToScene (stashed here, NOT projected — backEnd.viewParms
+// is invalid at scene-build time); RB_AddLensSourceFlares projects them at render time
+// and writes the oracle's registry. Independent of FEAT_HALO (it is the game's
+// occlusion read-back channel, not the renderer halo producer).
+#define MAX_LENS_SCENE_SOURCES 128
+
+typedef struct {
+	vec3_t		origin;			// world position (projected at render time)
+	float		radius;			// source radius (oracle sample disc)
+	int			id;				// stable per-source key → registry slot
+} lensSceneSource_t;
 
 typedef enum {
 	PV_NONE = 0,
@@ -810,9 +841,6 @@ typedef struct {
 	cplane_t	plane;
 
 	// dynamic lighting information
-#ifdef USE_LEGACY_DLIGHTS
-	int			dlightBits;
-#endif
 #ifdef USE_VBO
 	int			vboItemIndex;
 #endif
@@ -834,9 +862,6 @@ typedef struct {
 	surfaceType_t	surfaceType;
 
 	// dynamic lighting information
-#ifdef USE_LEGACY_DLIGHTS
-	int				dlightBits;
-#endif
 #ifdef USE_VBO
 	int				vboItemIndex;
 #endif
@@ -994,6 +1019,32 @@ typedef struct {
 	int			numSurfaces;
 } bmodel_t;
 
+// r_unbakeStaticLights world-cluster grid partition (shared: the load-time builder in
+// tr_map.c and the SSBO/upload in vk.c). The Forward+ dlights[] SSBO (FP_MAX_LIGHTS=256
+// slots, defined in vk.c) is split: runtime dlights [0..FP_MAX_DLIGHTS), extracted BSP
+// static lights [FP_STATIC_LIGHT_BASE..256). Static lights load ONCE into their reserved
+// slots (never re-shift) so the world grid can store their absolute dlights[] slot.
+#define FP_MAX_DLIGHTS        128                        // runtime dlights: dlights[0..127]
+#define FP_STATIC_LIGHT_BASE  FP_MAX_DLIGHTS             // static lights: dlights[128..255]
+#define FP_MAX_STATIC_LIGHTS  ( 256 - FP_STATIC_LIGHT_BASE )  // 128 (256 == FP_MAX_LIGHTS)
+#define FP_MAX_PER_CLUSTER    32                         // per-cell static-light capacity (drops extras)
+#define FP_CLUSTER_STRIDE     ( 1 + FP_MAX_PER_CLUSTER ) // uints per cell: [count, idx0..]
+#define FP_CLUSTER_CELLSIZE   128.0f                     // world-units/cell (auto-coarsens to fit the cap)
+#define FP_CLUSTER_MAX_CELLS  262144                     // 64^3 SSBO budget (~34 MB); larger maps coarsen
+
+// A static (BSP-baked) point light extracted from a worldspawn `light` entity
+// when r_unbakeStaticLights is on. Extracted once at map load into the world's
+// hunk, then binned into the world-cluster grid (view-independent; static lights ride
+// the fp cluster SSBO, NOT the per-frame screen-tile cull). Fields mirror the subset
+// vk_forwardplus_capture_dlights / the fp light upload read from a dlight_t.
+typedef struct {
+	vec3_t	origin;
+	float	radius;			// world-unit reach (light-value -> radius, see tr_map.c)
+	vec3_t	color;			// sRGB 0-1 (the fp upload decodes to linear)
+	vec3_t	origin2;		// == origin (point light, not a tube)
+	int		linear;			// 0
+} staticLight_t;
+
 typedef struct {
 	char		name[MAX_QPATH];		// ie: maps/tim_dm2.bsp
 	char		baseName[MAX_QPATH];	// ie: tim_dm2
@@ -1039,6 +1090,27 @@ typedef struct {
 	const char	*entityParsePoint;
 
 	qboolean	lightStyles;		// true if this is a Q1 map with per-slot lightmaps
+
+	// BSP static lights extracted for Forward+ when r_unbakeStaticLights is on.
+	// Loaded once (hunk-backed, freed with the world); numStaticLights stays 0 when
+	// the cvar is off, so the default path is byte-identical. staticLightDim is the
+	// tuned lightmap-boost multiplier that bounds the additive double-count (1.0 when
+	// off / no lights).
+	int				numStaticLights;
+	staticLight_t	*staticLights;
+	float			staticLightDim;
+
+	// World-space cluster grid binning the static lights (r_unbakeStaticLights), built
+	// ONCE at map load so a fragment's static-light set depends only on its WORLD
+	// position, not the camera (view-independent — no per-frame screen-tile cull). Each
+	// cell holds a [count, idx0..] list of ABSOLUTE dlights[] slots (FP_STATIC_LIGHT_BASE+k);
+	// the flat buffer (numClusterCells * FP_CLUSTER_STRIDE uints) is uploaded to the GPU
+	// once. Hunk-backed, freed with the world. numClusterCells stays 0 when the cvar is off.
+	int				clusterGridDims[3];
+	vec3_t			clusterGridOrigin;
+	float			clusterCellSize;
+	int				numClusterCells;
+	uint32_t		*clusterFlat;
 } world_t;
 
 //======================================================================
@@ -1076,6 +1148,7 @@ void		R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs );
 #if FEAT_IQM
 int		R_GetIQMAnimations( qhandle_t handle, iqmAnimInfo_t *anims, int maxAnims );
 #endif // FEAT_IQM
+int		R_GetMDLAnimations( qhandle_t handle, mdlAnimRange_t *anims, int maxAnims );
 
 void		R_Modellist_f (void);
 
@@ -1202,16 +1275,22 @@ typedef struct videoFrameCommand_s {
 	qboolean			motionJpeg;
 } videoFrameCommand_t;
 
-enum {
-	SCREENSHOT_TGA = 1<<0,
-	SCREENSHOT_JPG = 1<<1,
-	SCREENSHOT_BMP = 1<<2,
-	SCREENSHOT_BMP_CLIPBOARD = 1<<3,
-	SCREENSHOT_AVI = 1<<4 // take video frame
-};
+// SCREENSHOT_* type/destination mask now lives in
+// renderercommon/tr_screenshot.h (included via the top of this header).
 
 // all state modified by the back end is separated
 // from the front end state
+// One deferred overlay quad (a HUD widget fill flagged `composite overlay`).
+// Display/sRGB-space geometry + color + shader, replayed by the gamma present
+// pass after the scene has been gamma-encoded onto the swapchain image.
+#define MAX_OVERLAY_QUADS  256
+typedef struct {
+	float		x, y, w, h;
+	float		s1, t1, s2, t2;
+	color4ub_t	color;
+	shader_t	*shader;
+} overlayQuad_t;
+
 typedef struct {
 	trRefdef_t	refdef;
 	viewParms_t	viewParms;
@@ -1226,13 +1305,15 @@ typedef struct {
 	qboolean	doneSurfaces;   // done any 3d surfaces already
 	trRefEntity_t	entity2D;	// currentEntity will point at this when doing 2D rendering
 
-	int		screenshotMask;		// tga | jpg | bmp
+	int		screenshotMask;		// tga | jpg | bmp | png
 	char	screenshotTGA[ MAX_OSPATH ];
 	char	screenshotJPG[ MAX_OSPATH ];
 	char	screenshotBMP[ MAX_OSPATH ];
+	char	screenshotPNG[ MAX_OSPATH ];
 	qboolean screenShotTGAsilent;
 	qboolean screenShotJPGsilent;
 	qboolean screenShotBMPsilent;
+	qboolean screenShotPNGsilent;
 	videoFrameCommand_t	vcmd;	// avi capture
 
 	qboolean throttle;
@@ -1242,10 +1323,19 @@ typedef struct {
 	qboolean screenMapDone;
 	qboolean doneBloom;
 	qboolean doneUIPass;	// Block 8 (Delta 2): single source of truth for "the 3D→2D transition orchestrator already ran this frame" — set when render_pass.ui (gameplay: after bloom/tonemap/SMAA) or render_pass.ui_clear (pure-2D) was opened on img 265. Subsequent transition-site calls in the same frame are no-ops. Resets per frame next to doneBloom. (Replaces the old doneTonemap once-guard.)
+	qboolean sceneRenderedThisFrame;	// HUD-translucency fix (2026-06-30): set by the FRONT END (R_AddDrawSurfCmd) the moment a real world scene is queued (rdflags & RDF_NOWORLDMODEL excluded — UI 3D model previews don't count). RB_TransitionToUI reads it to decide LOAD-the-world (gameplay → HUD blends over the tonemapped scene) vs CLEAR-to-black (pure-2D menu/loading). Replaces the unreliable back-end command-stream pre-scan (rb_frameHas3D), which couldn't see RDF_NOWORLDMODEL and mis-classified gameplay frames as pure-2D → UI pass CLEARed img265 to black → translucent panels/console read as grey-over-black instead of see-through. Reset per frame in RE_BeginFrame.
 
 	// loading throttle: last time a buffer swap actually presented while
 	// tr.mapLoading was set. Used with r_loadingFpsCap.
 	int		lastLoadingSwapMsec;
+
+	// Overlay (post-gamma) 2D quads. RB_StretchPicOverlay records HUD widgets
+	// flagged `composite overlay` here instead of routing them through the
+	// linear-HDR UI pass; the gamma present pass replays them onto the
+	// swapchain image in display/sRGB space (light-independent legibility).
+	// Reset per frame in RE_BeginFrame alongside the done* flags.
+	overlayQuad_t	overlayQuads[ MAX_OVERLAY_QUADS ];
+	int		numOverlayQuads;
 
 } backEndState_t;
 
@@ -1286,13 +1376,12 @@ typedef struct {
 	image_t					*flareImage;
 	image_t					*blackImage;
 	image_t					*whiteImage;			// full of 0xff
-	image_t					*identityLightImage;	// full white 8x8 (linear pipeline; was 0.5×white pre-6B3'-a)
+	image_t					*identityLightImage;	// full white 8x8 (linear pipeline)
 
 	shader_t				*defaultShader;
 	shader_t				*whiteShader;
 	shader_t				*cinematicShader;
 	shader_t				*shadowShader;
-	shader_t				*projectionShadowShader;
 
 	shader_t				*flareShader;
 	shader_t				*sunShader;
@@ -1302,12 +1391,17 @@ typedef struct {
 	image_t					**lightmapsStyle[3];	// Q1 style-slot 1/2/3 lightmap images
 	int						numLightmapsStyle;		// count (== numLightmaps for Q1 maps)
 
+	// Load-time sun-visibility mask, allocated in parallel
+	// with lightmaps[] (count == numLightmaps, identical page dims). Page i .r
+	// holds the per-texel sun mask; RGBA8 (no R8 path) so .gba are unused.
+	image_t					**sunMaskAtlas;
+
 	image_t					**propLightmaps;		/* uploaded prop BSP lightmap pages (Z_Malloc, reset per level) */
 	int						numPropLightmaps;		/* count of valid entries in propLightmaps[] */
 	int						maxPropLightmaps;		/* allocated capacity of propLightmaps[] */
 
 	float					lightstyleValues[64];	// per-style animation intensity [0,1]
-	char					lightstylePatterns[64][64]; // per-style pattern string (Phase 1+, max LIGHTSTYLE_PATTERN_MAX)
+	char					lightstylePatterns[64][64]; // per-style pattern string (max LIGHTSTYLE_PATTERN_MAX)
 
 	qboolean				mergeLightmaps;
 	float					lightmapOffset[2];	// current shader lightmap offset
@@ -1322,11 +1416,11 @@ typedef struct {
 
 	viewParms_t				viewParms;
 
-	// Phase 6B3'-a: tr.identityLight, tr.identityLightByte, and
+	// tr.identityLight, tr.identityLightByte, and
 	// tr.overbrightBits removed — linear-pipeline migration. Sites
 	// that referenced them now use literal 1.0f / 255 / 0. r_brightness
 	// drives the pre-tonemap exposure_bias spec constant (vk.c).
-	// Phase 6B3'-d4-m_final (Block 1): the A1-era per-map worldLinearize*
+	// The former per-map worldLinearize*
 	// opt-in (Daemon `_q3map2_cmdline` convention) is retired — the
 	// engine is now self-consistently linear end-to-end, so colour
 	// texels are sRGB-decoded unconditionally in the world fragment
@@ -1346,6 +1440,7 @@ typedef struct {
 #endif
 	vec3_t					sunLight;			// from the sky shader for this level
 	vec3_t					sunDirection;
+	qboolean				sunHasSource;		// true only if a shader's sun/q3map_sun keyword moved sunDirection off the engine default; gates sun-rays + the CSM sun-mask off on sunless maps
 
 	frontEndCounters_t		pc;
 	int						frontEndMsec;		// not in pc due to clearing issue
@@ -1406,8 +1501,8 @@ typedef struct {
 	fogType_t				fogTypeCurrent;
 #endif
 
-#if FEAT_CORONA
-	int						coronaShader;
+#if FEAT_HALO
+	int						haloShader;
 #endif
 } trGlobals_t;
 
@@ -1434,6 +1529,9 @@ extern Vk_World		vk_world;		// this data is cleared during ref re-init
 extern cvar_t	*r_flareSize;
 extern cvar_t	*r_flareFade;
 extern cvar_t	*r_flareCoeff;			// coefficient for the flare intensity falloff function.
+extern cvar_t	*r_flareTarget;			// exposure-invariant flare brightness target (post-tonemap operating point).
+
+extern cvar_t	*r_pinShaderTime;		// c2-shadertime-pin — dev-only; pin shader animation time for deterministic C2 captures.
 
 extern cvar_t	*r_znear;				// near Z clip plane
 extern cvar_t	*r_zproj;				// z distance of projection plane
@@ -1446,13 +1544,13 @@ extern cvar_t	*r_teleporterFlash;		// teleport hyperspace visual
 
 extern cvar_t	*r_fastsky;				// controls whether sky should be cleared or drawn
 extern cvar_t	*r_neatsky;				// nomip and nopicmip for skyboxes
+extern cvar_t	*r_drawSky;				// sky pass on/off, uniform Q1+Q3 (default 1)
 extern cvar_t	*r_drawSun;				// controls drawing of sun quad
 extern cvar_t	*r_dynamiclight;		// dynamic lights enabled/disabled
 extern cvar_t	*r_mergeLightmaps;
 extern cvar_t	*r_lightmapAtlas;	// alias for r_mergeLightmaps
 extern cvar_t	*r_loadingFpsCap;	// swap throttle during map loads
 #ifdef USE_PMLIGHT
-extern cvar_t	*r_dlightMode;			// 0 - vq3, 1 - pmlight
 //extern cvar_t	*r_dlightSpecPower;		// 1 - 32
 //extern cvar_t	*r_dlightSpecColor;		// -1.0 - 1.0
 extern cvar_t	*r_dlightScale;			// 0.1 - 1.0
@@ -1466,14 +1564,46 @@ extern cvar_t	*r_vbo;
 #endif
 extern cvar_t	*r_fbo;
 extern cvar_t	*r_hdr;
-extern cvar_t	*r_hdrDisplay;        // Phase 6B3'-d8: HDR10 swapchain colorspace
+// legacy-mainpath-retire STEP 4: r_bindlessMainPath cvar retired (the legacy
+// rotating-set main path it gated is gone). Bindless is now the SOLE main path.
+extern cvar_t	*r_hdrDisplay;        // HDR10 swapchain colorspace
 extern cvar_t	*r_hdrPeakLuminance;  // HDR10 display peak (nits)
 extern cvar_t	*r_hdrMinLuminance;   // HDR10 display min (nits)
+// Histogram auto-exposure. r_hdrAutoExposure gates the (future) compute path;
+// the rest are per-frame tuning carried in the scene-exposure UBO. The tuning
+// cvars are deliberately NOT in CVG_RENDERER — they feed a per-frame buffer, so
+// a runtime tweak must not trigger a post-process pipeline rebake.
+extern cvar_t	*r_hdrAutoExposure;   // master toggle for histogram auto-exposure
+#ifndef NDEBUG
+extern cvar_t	*r_hdrHistogramDebug; // developer: read histogram back + log a bin summary (debug build only)
+extern cvar_t	*r_brdfLutDebug;      // developer: read the BRDF integration LUT back + log a few texels (debug build only)
+extern cvar_t	*r_probeSourceDebug;  // developer: read the IBL analytic-sky source cube back + log a few texels (debug build only)
+extern cvar_t	*r_probeRadianceDebug; // developer: read the IBL convolved radiance/irradiance cubes back + log a few texels (debug build only)
+#endif
+extern cvar_t	*r_hdrExposureKey;    // middle-grey target the average maps to
+extern cvar_t	*r_hdrExposurePctLow; // low histogram percentile clipped before averaging
+extern cvar_t	*r_hdrExposurePctHigh;// high histogram percentile clipped before averaging
+extern cvar_t	*r_hdrAdaptionRateUp; // adaptation speed dark->light (per second)
+extern cvar_t	*r_hdrAdaptionRateDown;// adaptation speed light->dark (per second)
+extern cvar_t	*r_hdrExposureMin;    // clamp floor for the computed exposure
+extern cvar_t	*r_hdrExposureMax;    // clamp ceiling for the computed exposure
 #if FEAT_PBR
 extern cvar_t	*r_pbr;
 #endif
+extern cvar_t	*r_forwardPlus;       // tiled (Forward+) dynamic lighting; 0 = PMLIGHT per-light-pass (default)
+extern cvar_t	*r_unbakeStaticLights; // extract BSP static lights into Forward+ + dim baked lightmap; 0 = off (default, byte-identical)
+#if FEAT_SHADOW_MAPPING
+extern cvar_t	*r_dlightShadows;     // omni shadows for runtime point dlights; 1 = on (default), 0 = off
+extern cvar_t	*r_dlightShadowK;     // number of shadow-casting dlights (top-K brightest); 1 = single brightest (default)
+extern cvar_t	*r_dlightShadowTest; // test-only (CVAR_CHEAT): inject a synthetic dlight to verify omni shadows headless
+extern cvar_t	*r_dlightShadowTestN; // test-only (CVAR_CHEAT): how many synthetic dlights (1..4) to inject in a ring
+extern cvar_t	*r_dlightShadowCount; // diagnostic (CVAR_CHEAT): log per-frame count + peak of shadow-eligible dlights
+extern cvar_t	*r_dlightShadowProfile; // diagnostic (CVAR_CHEAT): wall-clock the omni-shadow bake (us/frame + pass count)
+extern cvar_t	*r_shadowAtestTest;  // test-only (CVAR_CHEAT): inject a synthetic alpha-tested CSM caster (1 = holed, 2 = forced solid)
+#endif
 extern cvar_t	*r_bloom;
 extern cvar_t	*r_bloomPasses;
+extern cvar_t	*r_vrs;
 #ifdef __APPLE__
 extern cvar_t	*r_vkApplePinkBarrier;
 #endif
@@ -1486,12 +1616,24 @@ extern cvar_t	*r_renderWidth;
 extern cvar_t	*r_renderHeight;
 extern cvar_t	*r_renderScale;
 extern cvar_t	*r_depthFade;
+extern cvar_t	*r_depthFadeScale;
 #if FEAT_PARALLAX_MAPPING
 extern cvar_t	*r_parallaxMapping;
 #endif
 #if FEAT_SSAO
 extern cvar_t	*r_ssao;
+extern cvar_t	*r_ssaoRadius;
+extern cvar_t	*r_ssaoQuality;
+extern cvar_t	*r_ssaoIntensity;
+extern cvar_t	*r_showAO;
+extern cvar_t	*r_sscsRadius;
+extern cvar_t	*r_sscsStrength;
 #endif
+// async-compute: not FEAT_SSAO-gated — the depthFade snapshot's concurrent
+// graphics/compute sharing reads it even when SSAO is compiled out (the image is
+// shared for bloom/depth-fade too), and it is a general engine flag.
+extern cvar_t	*r_asyncCompute;   // run eligible compute (GTAO) on the dedicated compute queue
+extern cvar_t	*r_asyncTextureUpload;   // pipeline texture uploads on the dedicated transfer queue
 #if FEAT_TONEMAP
 extern cvar_t	*r_tonemap;
 extern cvar_t	*r_tonemapExposure;
@@ -1509,10 +1651,10 @@ extern cvar_t	*r_grade_tint_b;
 extern cvar_t	*r_grade_saturation;
 extern cvar_t	*r_grade_contrast;
 #endif
-#if FEAT_GODRAYS
-extern cvar_t	*r_godRays;
-extern cvar_t	*r_sunX;
-extern cvar_t	*r_sunY;
+#if FEAT_SUNRAYS
+extern cvar_t	*r_drawSunRays;
+extern cvar_t	*r_sunRayIntensity;
+extern cvar_t	*r_sunRayDecay;
 #endif
 extern cvar_t	*r_smaa;
 extern cvar_t	*r_smaa_threshold;
@@ -1531,6 +1673,7 @@ extern	cvar_t	*r_frameSpikeUs;		// per-frame host-side stage-timing spike report
 extern  cvar_t	*r_detailTextures;		// enables/disables detail texturing stages
 extern	cvar_t	*r_novis;				// disable/enable usage of PVS
 extern	cvar_t	*r_nocull;
+extern	cvar_t	*r_gpuBatchDecomp;		// ON = host frame-current cull re-derivation drives the VBO-eligible world draw (CPU per-surface walk retired); 0 = CPU recursion (default)
 extern	cvar_t	*r_facePlaneCull;		// enables culling of planar surfaces with back side test
 extern	cvar_t	*r_nocurves;
 extern	cvar_t	*r_showCluster;
@@ -1550,6 +1693,7 @@ extern	cvar_t	*r_offsetUnits;
 
 extern	cvar_t	*r_fullbright;					// avoid lightmap pass
 extern	cvar_t	*r_lightmap;					// render lightmaps only
+extern	cvar_t	*r_entitySSBO;					// per-entity matrices via frame-wide storage buffer (portable-binding surface)
 extern	cvar_t	*r_vertexLight;					// vertex lighting mode for better performance
 
 extern	cvar_t	*r_showTris;					// enables wireframe rendering of the world
@@ -1557,8 +1701,13 @@ extern	cvar_t	*r_showSky;						// forces sky in front of all surfaces
 extern	cvar_t	*r_showNormals;					// draws wireframe normals
 extern	cvar_t	*r_clear;						// force screen clear every frame
 
-extern	cvar_t	*r_shadows;						// controls shadows: 0 = none, 1 = blur, 2 = stencil, 3 = black planar projection
+extern	cvar_t	*r_shadows;						// shadow level: 0=off, 1=CSM-cast.
+
+qboolean R_ShadowDlightActive( void );  // dlight-omni wanted (level >= cast && r_dlightShadows)
+
 extern	cvar_t	*r_flares;						// light flares
+extern	cvar_t	*r_lens;						// depth-sampled lens occlusion oracle (replaces the dot-probe)
+extern	cvar_t	*r_halos;						// direction-independent halo glows, independent of r_flares
 
 #if FEAT_FOG_SYSTEM
 extern	cvar_t	*r_useGlFog;
@@ -1578,9 +1727,15 @@ extern	cvar_t	*r_skipBackEnd;
 
 extern	cvar_t	*r_saturation;
 extern	cvar_t	*r_dither;
+extern	cvar_t	*r_chromaticAberration;
 extern	cvar_t	*r_presentBits;
 #if FEAT_DEPTH_CLAMP
 extern	cvar_t	*r_depthClamp;
+// qtrue when the device enabled the native rasterizer depth-clamp feature (RAL caps).
+// qfalse → no native clamp (e.g. WebGL2) → R_SetupProjectionZ runs the near-plane
+// projection-tweak fallback. Defined in vk.c; lets the frontend pick the path without
+// reaching into the vk backend struct.
+qboolean vk_depth_clamp_supported( void );
 #endif
 
 extern	cvar_t	*r_ignoreGLErrors;
@@ -1588,6 +1743,7 @@ extern	cvar_t	*r_ignoreGLErrors;
 extern	cvar_t	*r_brightness;
 extern	cvar_t	*r_mapSaturation;
 extern	cvar_t	*r_lightmapSaturation;
+extern	cvar_t	*r_lightmapBoost;
 
 extern	cvar_t	*r_debugSurface;
 extern	cvar_t	*r_simpleMipMaps;
@@ -1599,6 +1755,10 @@ extern	cvar_t	*r_debugSort;
 extern	cvar_t	*r_printShaders;
 
 extern cvar_t	*r_marksOnTriangleMeshes;
+
+extern cvar_t	*r_gpuDecals;
+extern cvar_t	*r_atmosphericGPU;
+extern cvar_t	*r_particles;
 
 //====================================================================
 
@@ -1619,6 +1779,8 @@ void R_AddDrawSurf( surfaceType_t *surface, shader_t *shader, int fogIndex, int 
 #ifdef USE_PMLIGHT
 void R_DecomposeLitSort( unsigned sort, int *entityNum, shader_t **shader, int *fogNum );
 void R_AddLitSurf( surfaceType_t *surface, shader_t *shader, int fogIndex );
+qboolean R_LitSurfIsPlain( const shader_t *shader, const dlight_t *dl, int fogIndex );
+void R_AddStaticLitWorldSurf( surfaceType_t *surface, shader_t *shader, int fogIndex );
 #endif
 
 #define	CULL_IN		0		// completely unclipped
@@ -1698,7 +1860,8 @@ void		RE_UploadCinematic( int w, int h, int cols, int rows, byte *data, int clie
 
 void		RE_BeginFrame( stereoFrame_t stereoFrame );
 void		RE_BeginRegistration( glconfig_t *glconfig );
-void		RE_LoadWorldMap( const bspFile_t *bsp );
+void		RE_LoadWorldMap( const mapFile_t *bsp, int worldIndex );
+void		R_SetWorldSlot( int worldIndex );
 void		RE_SetWorldVisData( const byte *vis );
 qhandle_t	RE_RegisterModel( const char *name );
 qhandle_t	RE_RegisterSkin( const char *name );
@@ -1709,16 +1872,25 @@ model_t		*R_AllocModel( void );
 
 void		R_Init( void );
 
+// Flag the renderer DLL's `re` (refexport_t) so cl_main's post-BeginRegistration
+// poll sees a recoverable init failure and advances `cl_renderer` to the next
+// entry in the renderer fallback list. Callable from any TU during init; the
+// implementation lives in tr_init.c next to the static `re` declaration.
+void		R_DeclineInit( void );
+
 void		R_SetColorMappings( void );
 void		R_GammaCorrect( byte *buffer, int bufSize );
 void		R_ColorShiftLightingBytes( const byte in[4], byte out[4], qboolean hasAlpha, qboolean linearLightmap );
 
-// Phase 6B3'-d4-m2: precise piecewise sRGB EOTF/OETF for host-side colour decodes.
+// precise piecewise sRGB EOTF/OETF for host-side colour decodes.
 float		R_SRGBToLinear( float c );
 float		R_LinearToSRGB( float c );
 
 void	R_ImageList_f( void );
-void	R_TestDDS_f( void );	// Phase 6.5.1: `testdds <path>` — load + classify a .dds, print texType / layers / format
+void	R_TestDDS_f( void );	// `testdds <path>` — load + classify a .dds, print texType / layers / format
+void	R_TexEvictForce_f( void );	// Phase 7.15.4-b test harness: `r_texEvictForce <N>` — manual evict N oldest unpinned
+void	R_TexReregisterAll_f( void );	// Phase 7.15.4-b test harness: `r_texReregisterAll` — restore evicted images (round-trip)
+void	R_TexEvictPressureTest_f( void );	// Phase 7.15.4-c test harness: `r_texEvictPressureTest <N>` — synthetic CRITICAL → automatic drain
 void	R_SkinList_f( void );
 void	Cmd_BSPDump_f( void );
 
@@ -1727,6 +1899,10 @@ float	R_FogFactor( float s, float t );
 void	R_InitImages( void );
 void	R_DeleteTextures( void );
 int		R_SumOfUsedImages( void );
+// Phase 7.15.4: do-not-evict predicate read by the texture-LRU victim-scan
+// (7.15.4-c). True when the image carries IMGFLAG_PINNED (stamped in 7.15.4-a).
+// No caller in 7.15.4-a — the flag is a dark classification until the scan lands.
+qboolean R_ImageIsPinned( const image_t *img );
 void	R_InitSkins( void );
 skin_t	*R_GetSkinByHandle( qhandle_t hSkin );
 
@@ -1779,9 +1955,6 @@ typedef struct shaderCommands_s
 	vec2_t		texCoords[2][SHADER_MAX_VERTEXES] QALIGN(16);
 	vec2_t		texCoords00[SHADER_MAX_VERTEXES] QALIGN(16);
 	color4ub_t	vertexColors[SHADER_MAX_VERTEXES] QALIGN(16);
-#ifdef USE_LEGACY_DLIGHTS
-	int			vertexDlightBits[SHADER_MAX_VERTEXES] QALIGN(16);
-#endif
 	stageVars_t	svars QALIGN(16);
 
 	color4ub_t	constantColor255[SHADER_MAX_VERTEXES] QALIGN(16);
@@ -1797,9 +1970,6 @@ typedef struct shaderCommands_s
 	shader_t	*shader;
 	double		shaderTime;	// -EC- set to double for frameloss fix
 	int			fogNum;
-#ifdef USE_LEGACY_DLIGHTS
-	int			dlightBits;	// or together of all vertexDlightBits
-#endif
 	int			numIndexes;
 	int			numVertexes;
 
@@ -1807,6 +1977,7 @@ typedef struct shaderCommands_s
 	const dlight_t* light;
 	qboolean	dlightPass;
 	qboolean	dlightUpdateParams;
+	qboolean	forwardPlusPass;	// Forward+ tile-sum lit pass (the dlightPass sibling) — routes the surface end to VK_ForwardPlusPass
 #endif
 
 #ifdef USE_VULKAN
@@ -1854,6 +2025,17 @@ WORLD MAP
 
 void R_AddBrushModelSurfaces( trRefEntity_t *e );
 void R_AddWorldSurfaces( void );
+
+// Free + NULL renderer-zone (TAG_RENDERER) scratch statics on renderer teardown so a
+// later Z_FreeTags(TAG_RENDERER) doesn't leave them dangling (the #96 stale-static
+// zone re-free class). Called from vk_release_resources. Idempotent. The composite-
+// order + shadow-verify ones are _DEBUG-only (so are their statics).
+void R_ReleaseWorldCullStatics( void );          // tr_world.c (s_flat_* host-cull statics)
+#if defined(_DEBUG)
+void R_ReleaseCompositeOrderStatics( void );     // tr_main.c
+void VBO_ReleaseShadowVerifyStatics( void );     // vk_vbo.c
+#endif
+
 qboolean R_inPVS( const vec3_t p1, const vec3_t p2 );
 qhandle_t R_RegisterBSP( const char *name, model_t *mod );
 
@@ -1872,6 +2054,11 @@ void RB_AddFlare( void *surface, int fogNum, vec3_t point, vec3_t color, vec3_t 
 void RB_AddDlightFlares( void );
 void RB_RenderFlares( void );
 
+// Lens-source occlusion (lens-glow B2): project the game-registered lens sources at
+// render time (backEnd.viewParms valid) and write their oracle registry records.
+extern int r_numLensSources;   // stashed by RE_AddLensSourceToScene this frame
+void RB_AddLensSourceFlares( void );
+
 /*
 ============================================================
 
@@ -1886,6 +2073,7 @@ int R_LightForPoint( vec3_t point, vec3_t ambientLight, vec3_t directedLight, ve
 
 #ifdef USE_PMLIGHT
 void VK_LightingPass( void );
+void VK_ForwardPlusPass( void );
 qboolean R_LightCullBounds( const dlight_t* dl, const vec3_t mins, const vec3_t maxs );
 #endif // USE_PMLIGHT
 
@@ -1903,7 +2091,6 @@ SHADOWS
 
 void RB_ShadowTessEnd( void );
 void RB_ShadowFinish( void );
-void RB_ProjectionShadowDeform( void );
 
 /*
 ============================================================
@@ -1963,15 +2150,21 @@ void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, flo
 void RE_AddLinearLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );
 void RE_AddRibbonToScene( const ribbonDesc_t *desc );
 void RE_AddBeamToScene( const beamDesc_t *desc );
+void RE_AddRailRibbonToScene( const railRibbonDesc_t *desc );
 void RE_AddSpriteToScene( const spriteDesc_t *desc );
 void RE_EmitParticles( const emitterDesc_t *desc );
 void RE_AddDecalToScene( const decalDesc_t *desc );
+void RE_AddLensSourceToScene( const lensSourceDesc_t *desc );
+qboolean RE_GetLensVisibility( int id, float *outVis );
 void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass_t *cls );
 
 // vk.c — primitive ribbon backend
 void vk_init_ribbon( void );
 void vk_shutdown_ribbon( void );
+void vk_init_railribbon( void );
+void vk_shutdown_railribbon( void );
 void RB_DrawRibbons( void );
+void RB_DrawRailRibbons( void );
 
 // vk.c — primitive sprite backend
 void vk_init_sprite( void );
@@ -1990,6 +2183,29 @@ void vk_shutdown_particle( void );
 void RB_RunParticleCompute( void );
 void RB_DrawParticles( void );
 
+// vk.c — GPU decal ring + projector render pass (surface-aligned quads)
+void vk_init_decal( void );
+void vk_shutdown_decal( void );
+void RB_DrawDecals( void );
+
+// tr_scene.c / vk.c — GPU-resident atmospheric weather (rain/snow). The cgame
+// emits one descriptor on weather change (RE_SetAtmosphere) plus the collision
+// heightgrid (RE_SetAtmosphereHeightgrid); the renderer's dedicated pool then
+// self-spawns / integrates / collides / draws every frame.
+void RE_SetAtmosphere( const atmosphericDesc_t *desc );
+void RE_SetAtmosphereHeightgrid( const float *grid, int count );
+void vk_init_atmospheric( void );
+void vk_shutdown_atmospheric( void );
+void vk_atmospheric_write_descriptors( void );
+void RB_RunAtmosphericCompute( void );
+void RB_DrawAtmospheric( void );
+
+// vk.c — eager populate the projector's sampler array (binding 2) from the
+// decal-texture registry. Called from R_Init AFTER R_InitImages creates
+// tr.whiteImage (same phase constraint as vk_init_particle_textures), and
+// after any descriptor-pool reset that re-allocates the render descriptor sets.
+void vk_init_decal_textures( void );
+
 // vk.c — phase 5: write one slot of the per-class sampler array
 // (binding 3 of the particle render descriptor set) on every per-
 // frame descriptor set. Called from RE_RegisterParticleClass once
@@ -1998,6 +2214,14 @@ void RB_DrawParticles( void );
 // function pointer from vk.c.
 struct image_s;
 void vk_particle_set_class_image( int handle, struct image_s *image );
+void vk_particle_set_frame_image( int frameSlot, struct image_s *image );
+
+// vk.c — write one slot of the projector's decal-texture sampler array
+// (binding 2 of the decal render descriptor set) on every per-frame descriptor
+// set. Called from RE_AddDecalToScene's find-or-add registry when a new decal
+// shader claims a slot. Encapsulates the qvkUpdateDescriptorSets call.
+void vk_decal_set_texture_image( int slot, struct image_s *image );
+void vk_decal_flush_pending_images( void );
 
 // vk.c — phase 5: eager populate the per-class sampler array
 // (binding 3) with tr.whiteImage in every slot. Called once from
@@ -2007,10 +2231,10 @@ void vk_particle_set_class_image( int handle, struct image_s *image );
 // per-class slot writes by RE_RegisterParticleClass overwrite
 // individual slots.
 void vk_init_particle_textures( void );
-#if FEAT_CORONA
-void RE_AddCoronaToScene( const vec3_t org, float r, float g, float b, float scale, int id, qboolean visible );
-void RB_AddCoronaFlares( void );
-void R_ClearCoronas( void );
+#if FEAT_HALO
+void RE_AddHaloToScene( const vec3_t org, float r, float g, float b, float scale, int id, qboolean visible );
+void RB_AddHaloFlares( void );
+void R_ClearHalos( void );
 #endif
 
 void *R_GetCommandBuffer( int bytes );
@@ -2025,7 +2249,7 @@ int  R_BoundsFogNum( const vec3_t mins, const vec3_t maxs );
 qboolean R_IsGlobalFog( int fogNum );
 #endif
 
-void RE_RenderScene( const refdef_t *fd );
+void RE_RenderScene( const refdef_t *fd, int worldIndex );
 void RE_SetLightstylePattern( int style, const char *pattern );
 
 /*
@@ -2073,6 +2297,53 @@ int R_IQMLerpTag( orientation_t *tag, iqmData_t *data,
 void	R_TransformModelToClip( const vec3_t src, const float *modelMatrix, const float *projectionMatrix,
 							vec4_t eye, vec4_t dst );
 void	R_TransformClipToWindow( const vec4_t clip, const viewParms_t *view, vec4_t normalized, vec4_t window );
+
+// Result of projecting one world-space light point (a halo/flare position, or
+// a synthesised sun-direction point) through model+projection+view to the screen.
+// Superset of everything the two lens projection sites need from one
+// model->clip->screen transform: the halo/flare path (RB_AddFlare) reads the
+// integer window coords + eyeZ + raw clip; the sunray UBO fill reads the float
+// screen UV + the behind-near gate. The helper fills every field each call in the
+// originals' exact float-op order, so each site reproduces its value bit-for-bit.
+typedef struct {
+	// Raw clip-space output of R_TransformModelToClip. The halo path reads
+	// clip[2]&clip[3] for its USE_REVERSED_DEPTH drawZ bias and iterates
+	// clip[0..2] against +/-clip[3] for the completely-off-screen reject; the
+	// sunray path tests clip[3] > 0 (behindNear).
+	vec4_t		clip;
+
+	// eye[2] from the model-space transform — the halo flare's depth-sort key.
+	float		eyeZ;
+
+	// Integer-rounded, viewport-LOCAL window coords straight out of
+	// R_TransformClipToWindow (its (int)(x+0.5) rounding) — NOT yet offset by
+	// view->viewportX/Y; the halo site adds that itself, as the original did.
+	// Stored as float to carry the integral value bit-for-bit before the site's
+	// int math; windowZ is the normalized depth, kept for completeness.
+	float		windowX;
+	float		windowY;
+	float		windowZ;
+
+	// Float screen UV for the sunray tonemap quad, computed exactly as the
+	// original fill: invW = 0.5f/clip[3]; screenU = 0.5f + clip[0]*invW. NO
+	// viewport scale, NO integer rounding, NO Y flip. Valid only when
+	// behindNear == qfalse; otherwise left at 0.5,0.5 (the sunray fallback).
+	float		screenU;
+	float		screenV;
+
+	// qtrue when clip[3] <= 0 (point at/behind the near plane): the sunray site
+	// emits no rays. ( clip[3] > 0  <=>  behindNear == qfalse. )
+	qboolean	behindNear;
+
+	// Advisory: qtrue when the point passed the completely-off-screen clip
+	// reject AND the integer window landed inside the viewport. The halo site
+	// keeps its own explicit rejects inline for a 1:1 trace; this is exposed for
+	// future callers and is not load-bearing for byte-identity.
+	qboolean	onScreen;
+} lensScreenProj_t;
+
+void	R_ProjectLightToScreen( const vec3_t worldPos, const orientationr_t *model,
+							const viewParms_t *view, lensScreenProj_t *out );
 
 void	RB_DeformTessGeometry( void );
 
@@ -2158,6 +2429,18 @@ typedef struct {
 	float	s2, t2;
 } stretchPicCommand_t;
 
+// WiredUI SCENE procedural backdrop (menubg.frag). Records a blended full-viewport
+// draw into the currently-open 2D UI pass; the backend writes the 8-float MenuBgBlock
+// UBO and issues a RAL fullscreen-quad draw. Drawn as the backmost UI layer.
+typedef struct {
+	int		commandId;
+	float	x, y;
+	float	w, h;
+	float	time;
+	float	mouseX, mouseY;
+	float	transition;
+} menuBackdropCommand_t;
+
 typedef struct {
 	int		commandId;
 	shader_t	*shader;
@@ -2236,7 +2519,9 @@ typedef enum {
 	RC_CLEARDEPTH,
 	RC_CLEARCOLOR,
 	RC_SET_MSDF_OUTLINE,
-	RC_SET_MSDF_SHADOW
+	RC_SET_MSDF_SHADOW,
+	RC_STRETCH_PIC_OVERLAY,	// post-gamma display-space HUD fill (composite overlay)
+	RC_MENU_BACKDROP	// WiredUI SCENE procedural backdrop (blended fullscreen into the UI pass)
 } renderCommand_t;
 
 
@@ -2252,6 +2537,7 @@ typedef struct {
 	drawSurf_t	drawSurfs[MAX_DRAWSURFS];
 #ifdef USE_PMLIGHT
 	litSurf_t	litSurfs[MAX_LITSURFS];
+	litSurf_t	fpUnionSurfs[MAX_LITSURFS];  // Forward+ deduped lit-surface union (each surface once)
 	dlight_t	dlights[MAX_REAL_DLIGHTS];
 #else
 	dlight_t	dlights[MAX_DLIGHTS];
@@ -2260,9 +2546,10 @@ typedef struct {
 	trRefEntity_t	entities[MAX_REFENTITIES];
 	srfPoly_t	*polys;//[MAX_POLYS];
 	polyVert_t	*polyVerts;//[MAX_POLYVERTS];
-#if FEAT_CORONA
-	corona_t	coronas[MAX_CORONAS];
+#if FEAT_HALO
+	halo_t	halos[MAX_HALOS];
 #endif
+	lensSceneSource_t	lensSources[MAX_LENS_SCENE_SOURCES];
 	renderCommandList_t	commands;
 } backEndData_t;
 
@@ -2275,6 +2562,7 @@ void RB_ExecuteRenderCommands( const void *data );
 void RB_TakeScreenshot( int x, int y, int width, int height, const char *fileName );
 void RB_TakeScreenshotJPEG( int x, int y, int width, int height, const char *fileName );
 void RB_TakeScreenshotBMP( int x, int y, int width, int height, const char *fileName, int clipboard );
+void RB_TakeScreenshotPNG( int x, int y, int width, int height, const char *fileName, int clipboard );
 
 void R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs );
 
@@ -2284,6 +2572,10 @@ void RE_SetMSDFOutline( float outlineWidth, const float *outlineColor,
                          float glowWidth, const float *glowColor );
 void RE_SetMSDFShadow( float offsetX, float offsetY, const float *color );
 void RE_StretchPic ( float x, float y, float w, float h,
+					  float s1, float t1, float s2, float t2, qhandle_t hShader );
+void RE_DrawMenuBackdrop( float x, float y, float w, float h,
+					  float time, float mouseX, float mouseY, float transition );
+void RE_StretchPicOverlay ( float x, float y, float w, float h,
 					  float s1, float t1, float s2, float t2, qhandle_t hShader );
 void RE_RotatedPic( float x, float y, float w, float h,
 					  float s1, float t1, float s2, float t2, float angle, qhandle_t hShader );

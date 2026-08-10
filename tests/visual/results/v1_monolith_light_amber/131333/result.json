@@ -1,0 +1,131 @@
+{
+  "baseline": "C:/Users/eser/projects/eser/q3now/tests/visual/baselines/v1_monolith_light_amber.png",
+  "impl": "C:/Users/eser/projects/eser/q3now/tests/visual/results/v1_monolith_light_amber/131333/impl.png",
+  "diff": "C:/Users/eser/projects/eser/q3now/tests/visual/results/v1_monolith_light_amber/131333/diff.png",
+  "global_threshold_pct": 70,
+  "global_delta_pct": 58.149614197530866,
+  "fuzz_pct": 12,
+  "regions": [
+    {
+      "name": "title_bar",
+      "threshold_pct": 100,
+      "delta_pct": 99.30208333333333,
+      "pass": true
+    },
+    {
+      "name": "q_hover_indicator",
+      "threshold_pct": 99,
+      "delta_pct": 95.75,
+      "pass": true
+    },
+    {
+      "name": "hero_quake_wired",
+      "threshold_pct": 92,
+      "delta_pct": 88.09661835748793,
+      "pass": true
+    },
+    {
+      "name": "bg_vignette_corners",
+      "threshold_pct": 90,
+      "delta_pct": 84.6175,
+      "pass": true
+    },
+    {
+      "name": "bg_sky_band",
+      "threshold_pct": 85,
+      "delta_pct": 79.01136363636364,
+      "pass": true
+    },
+    {
+      "name": "arena_of_day_card",
+      "threshold_pct": 75,
+      "delta_pct": 68.59305555555555,
+      "pass": true
+    },
+    {
+      "name": "menu_row_1",
+      "threshold_pct": 68,
+      "delta_pct": 63.214285714285715,
+      "pass": true
+    },
+    {
+      "name": "menu_row_4",
+      "threshold_pct": 68,
+      "delta_pct": 62.79017857142857,
+      "pass": true
+    },
+    {
+      "name": "menu_row_0",
+      "threshold_pct": 68,
+      "delta_pct": 62.023809523809526,
+      "pass": true
+    },
+    {
+      "name": "bg_embers",
+      "threshold_pct": 65,
+      "delta_pct": 58.18836805555556,
+      "pass": true
+    },
+    {
+      "name": "menu_row_2",
+      "threshold_pct": 62,
+      "delta_pct": 56.61830357142857,
+      "pass": true
+    },
+    {
+      "name": "bg_fog_band",
+      "threshold_pct": 60,
+      "delta_pct": 52.54865056818182,
+      "pass": true
+    },
+    {
+      "name": "footer_strip",
+      "threshold_pct": 60,
+      "delta_pct": 51.1875,
+      "pass": true
+    },
+    {
+      "name": "menu_row_3",
+      "threshold_pct": 65,
+      "delta_pct": 49.914434523809526,
+      "pass": true
+    },
+    {
+      "name": "bottom_hint_bar",
+      "threshold_pct": 50,
+      "delta_pct": 44.11931818181818,
+      "pass": true
+    },
+    {
+      "name": "bg_floor_band",
+      "threshold_pct": 50,
+      "delta_pct": 43.00519587320574,
+      "pass": true
+    },
+    {
+      "name": "bg_tower_arches",
+      "threshold_pct": 45,
+      "delta_pct": 39.6625,
+      "pass": true
+    },
+    {
+      "name": "profile_card_header",
+      "threshold_pct": 30,
+      "delta_pct": 21.710858585858585,
+      "pass": true
+    },
+    {
+      "name": "last_match_grid",
+      "threshold_pct": 30,
+      "delta_pct": 19.438492063492063,
+      "pass": true
+    },
+    {
+      "name": "global_feed_columns",
+      "threshold_pct": 30,
+      "delta_pct": 18.895833333333332,
+      "pass": true
+    }
+  ],
+  "pass": true
+}

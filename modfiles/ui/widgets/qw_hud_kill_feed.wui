@@ -1,0 +1,35 @@
+// qw_hud_kill_feed — V2_HUD_Active top-left kill feed
+// Interface: #include once into the qw_hud_active composer menuDef body.
+// Source: docs/wui-claude-design-canonical-v2/project/qw-screens.jsx:1144-1183
+//   (top:80 left:24 maxWidth:380; recent obituary rows, left accent bar).
+//
+// ABI (dispatch 5.27): rows bind the new hud.feed.<N>.text WiredStore keys
+// staged by the client WIRED_EVENT_OBITUARY handler (cl_wired_ui_hud_state.c)
+// from cgame's name-resolved obituary push (cg_event.c) — the readable line
+// "<target> <verb> <attacker>". `bind` sets item->storeBind → clay-emit
+// storeBind text path. Newest at slot 0; empty slots render blank when fewer
+// than 5 recent kills (graceful — empty at a frozen no-combat spawn).
+// Tokens: $bone (line text) $accent (left bar) $line.
+itemDef {
+	// HUD redesign (Eser): kill-feed moved TOP-LEFT → TOP-RIGHT (competitive
+	// convention; frees TL for the console-notify layer, ends the z-collision).
+	// Rows are container-flex text nodes (NOT hudElements), so they follow the
+	// container move — no leaf-rect retune. Right-aligned + accent stripe flipped
+	// to the RIGHT edge so it faces inward. Lowered to top 3vh to clear telemetry.
+	name "hud_active_kill_feed"
+	type container
+	position absolute
+	top 3vh
+	right 1.67vw
+	width 26.39vw
+	height 18vh
+	direction column
+	alignX end
+	gap $spacing_xxs
+
+	itemDef { type 0 rect 0 0 1 2.2vh height FIT width PERCENT 1 bind "hud.feed.0.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
+	itemDef { type 0 rect 0 0 1 2.2vh height FIT width PERCENT 1 bind "hud.feed.1.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
+	itemDef { type 0 rect 0 0 1 2.2vh height FIT width PERCENT 1 bind "hud.feed.2.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
+	itemDef { type 0 rect 0 0 1 2.2vh height FIT width PERCENT 1 bind "hud.feed.3.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
+	itemDef { type 0 rect 0 0 1 2.2vh height FIT width PERCENT 1 bind "hud.feed.4.text" text "" textalign 2 font $font_mono 10 forecolor $bone borderRight 2px $accent padding 0.2vh 0.6vw decoration visible 1 grow 0 }
+}

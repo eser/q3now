@@ -1,0 +1,52 @@
+// qw_settings_nav — left-rail category row for the settings cluster (macro form)
+//
+// The settings equivalent of qw_menu_item: same main.wui nav DNA (big label,
+// leading chevron, solid focus-wash, row divider) but wired for section
+// switching. Clicking sets ui_settingsSection + does the `close ; open
+// <submenu>` transition the settings hub uses to swap the visible sub-menu.
+//
+// SELECTION vs FOCUS (kept distinct from qw_menu_item on purpose): here
+// `.active` = the currently-SELECTED section (persistent, cvar-driven via
+// `active ui_settingsSection SECTION`), so the selected row's label + chevron
+// stay $accent to mark the open tab — this is the settings-tab selection
+// indicator, not a hover cue. qw_menu_item's `.active` = transient FOCUS, so
+// there it switches to $bone. The two rails still share ONE chevron treatment.
+//
+// CHEVRON (BUG-2 fix, 2026-07-07): the resting chevron is a warm mid-grey at
+// alpha 0 (0.541 0.459 0.376 0, the $boneDim rgb) — NOT the old near-black
+// `0.1 0.05 0.03 0`. On a HOVERED-but-unselected row the solid accent-cyan
+// focus-wash sits under the alpha-0 chevron; with a near-black rgb the leak
+// read as a stark black ">" inside the row. The warm-grey rgb makes any leak a
+// faint neutral instead. Same rgb is used in qw_menu_item.wui so the two rails
+// render the chevron identically.
+//
+//   QW_SETTINGS_NAV("nav_video", "video", "Video", "video")
+// Args:
+//   ITEM_NAME  — unique itemDef name (string literal)
+//   SECTION    — ui_settingsSection value for this row (string literal)
+//   LABEL      — displayed label text
+//   SUBMENU    — .wui menu name to open on click
+// Tokens: $spacing_md, $line, $accent, $bone, $font_sans,
+//   $spacing_menu_row_padding_v, $spacing_menu_row_padding_h
+#define QW_SETTINGS_NAV(ITEM_NAME, SECTION, LABEL, SUBMENU) \
+	itemDef { \
+		name ITEM_NAME \
+		type 1 \
+		rect 0 0 1 6.5vh \
+		height FIXED 48px \
+		width PERCENT 1 \
+		direction row \
+		alignY center \
+		gap $spacing_sm \
+		padding $spacing_menu_row_padding_v $spacing_menu_row_padding_h \
+		borderBottom 1px $line \
+		forecolor $bone \
+		forecolor.active $accent \
+		visible 1 \
+		grow 0 \
+		active ui_settingsSection SECTION \
+		action { setcvar "ui_settingsSection" SECTION ; close ; open SUBMENU scene } \
+		\
+		itemDef { type 0 rect 0 0 1vw 3vh height FIT width PERCENT 1vw text "" textalign 0 font $font_sans 24 forecolor $boneDim decoration visible 1 grow 0 } \
+		itemDef { type 0 rect 0 0 16vw 3vh height FIT width PERCENT 16vw text LABEL textalign 0 font $font_sans 22 forecolor $bone forecolor.active $accent active ui_settingsSection SECTION decoration visible 1 grow 0 } \
+	}

@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+//
+// layer_loading.wmenu — Phase 3b1 visual z-order fixture.
+// Fullscreen translucent blue panel marking the LOADING layer; second from
+// the back of the 6-layer stack. Driven by the force-override mask via
+// wui_layer_test_single / wui_layer_test_stack.
+
+menuDef {
+	name "layer_loading"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+	backcolor 0.10 0.15 0.55 0.85
+	layer "loading"
+
+	itemDef {
+		type 0
+		rect 0 0.55 1 0.10
+		textalign 1
+		font "oxanium" 28
+		forecolor 1 1 1 1
+		text "LAYER LOADING"
+		decoration
+		visible 1
+	}
+}

@@ -3,7 +3,6 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
@@ -125,11 +124,19 @@ void G_InitSessionData( gclient_t *client, char *userinfo ) {
 		sess->sessionTeam = TEAM_SPECTATOR;
 		sess->spectatorState = SPECTATOR_FREE;
 
-		if ( value[0] || g_teamAutoJoin.integer ) {
+		// bit 2 gates auto-join on team gametypes; an explicit team preference
+		// (value[0], e.g. start-menu pick) always joins regardless of the bit
+		if ( value[0] || ( g_autoJoin.integer & 2 ) ) {
 			SetTeam( &g_entities[client - level.clients], value );
 		}
 	} else {
-		if ( value[0] == 's' ) {
+		// bit 1 gates auto-join on non-team gametypes; bots always auto-join
+		// (they cannot pick a team via the menu). A willing spectator
+		// (value[0]=='s') or a cleared bit leaves the client spectating; when
+		// auto-join is attempted the per-gametype capacity rules still decide.
+		qboolean wantsAuto = ( g_autoJoin.integer & 1 )
+			|| ( g_entities[client - level.clients].r.svFlags & SVF_BOT );
+		if ( value[0] == 's' || !wantsAuto ) {
 			// a willing spectator, not a waiting-in-line
 			sess->sessionTeam = TEAM_SPECTATOR;
 		} else {

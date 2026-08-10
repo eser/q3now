@@ -199,6 +199,23 @@ bfgLFLine
 	}
 }
 
+// Modern surface/dlight flare sprite (the tr.flareShader target). The 256x256
+// RGBA sprite carries all structure in its alpha channel: a defined hot core, an
+// inverse-square halo falloff, and a subtle horizontal anamorphic streak. The
+// alpha-modulated additive blend shapes a crisp flare while rgbGen vertex tints
+// it with the light's colour; replaces the classic 64x64 mushy round gradient.
+flareModern
+{
+	sort nearest
+	nopicmip
+	{
+		map gfx/misc/flare_modern.png
+		blendfunc gl_src_alpha gl_one
+		alphagen vertex
+		rgbgen vertex
+	}
+}
+
 // ── end q3now lens flare shaders ────────────────────────────────────
 
 powerups/spawnProtect
@@ -632,3 +649,18 @@ models/weapons2/grenadel/grenadel
 		alphaGen lightingSpecular
 	}
 }
+
+// PBR test material — ORM-packed (R=AO, G=roughness ramp, B=metalness: left half
+// metallic, right half dielectric). Parallax-free on purpose: a pbrMap surface that
+// also carries a normalMap gets its PBR pipeline overwritten by the parallax swap,
+// so this stays normalMap-free. Renders via Cook-Torrance GGX under r_pbr 1 when the
+// surface enters the dynamic-light (PMLIGHT) pass; legacy Blinn-Phong under r_pbr 0.
+textures/pbr_test/pbr_test
+{
+	{
+		map textures/pbr_test/albedo.png
+		rgbGen lightingDiffuse
+		pbrMap textures/pbr_test/orm.png
+	}
+}
+

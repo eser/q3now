@@ -1,0 +1,63 @@
+// primitive_player_badge.wui — PlayerBadge v2 primitive demo.
+// Composite: helmet glyph (U+F4) avatar + Mono name + accent role
+// + chevron arrow (arrow_right glyph). Mimics qw-shared.jsx
+// PlayerBadge component used top-right of every v2 artboard.
+
+menuDef {
+	name "primitive_player_badge"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor $ink
+
+	// Bracketed panel frame.
+	itemDef { name "pb_tl_h" rect 0.35 0.40 0.03 0.002 backcolor $accent visible 1 decoration }
+	itemDef { name "pb_tl_v" rect 0.35 0.40 0.002 0.03 backcolor $accent visible 1 decoration }
+	itemDef { name "pb_br_h" rect 0.62 0.527 0.03 0.002 backcolor $accent visible 1 decoration }
+	itemDef { name "pb_br_v" rect 0.648 0.50 0.002 0.03 backcolor $accent visible 1 decoration }
+
+	// Helmet avatar (left).
+	itemDef {
+		name "pb_helmet"
+		rect 0.36 0.42 0.05 0.10
+		iconText "helmet"
+		font $font_icon 56
+		forecolor $bone
+		visible 1
+		decoration
+	}
+
+	// Name (Mono large).
+	itemDef {
+		name "pb_name"
+		rect 0.42 0.42 0.18 0.04
+		text "LAROUX.POS"
+		font $font_mono 14
+		forecolor $bone
+		visible 1
+		decoration
+	}
+	// Role (Mono accent).
+	itemDef {
+		name "pb_role"
+		rect 0.42 0.47 0.18 0.03
+		text "◆ VISOR"
+		font $font_mono 11
+		forecolor $accent
+		visible 1
+		decoration
+	}
+
+	// Chevron arrow (right).
+	itemDef {
+		name "pb_chevron"
+		rect 0.62 0.44 0.025 0.05
+		iconText "arrow_right"
+		font $font_icon 28
+		forecolor $accentDim
+		visible 1
+		decoration
+	}
+}

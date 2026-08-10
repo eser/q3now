@@ -1,0 +1,9 @@
+// cinematic_control.script — the byte-identical control (Fork-1 Faz-7c).
+// Plays the SAME boss_intro scene with NO actor binding, so the "boss" look-at
+// target uses its authored static spline (the fixed arena-center point). The
+// camera path + facing must be identical to a pre-actor-binding playthrough —
+// this is the unbound == spline byte-identical proof.
+spawn {
+    print cinematic-control-spawned
+    playscene boss_intro
+}

@@ -4,6 +4,9 @@
 // tr_mesh.c: triangle model functions
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 static float ProjectRadius( float r, vec3_t location )
 {
@@ -293,7 +296,7 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 		|| (ent->e.frame < 0)
 		|| (ent->e.oldframe >= tr.currentModel->md3[0]->numFrames)
 		|| (ent->e.oldframe < 0) ) {
-			ri.Log( SEV_DEBUG, "R_AddMD3Surfaces: no such frame %d to %d for '%s'\n",
+			R_LOG( rch_assets, SEV_DEBUG, "R_AddMD3Surfaces: no such frame %d to %d for '%s'\n",
 				ent->e.oldframe, ent->e.frame,
 				tr.currentModel->name );
 			ent->e.frame = 0;
@@ -391,10 +394,10 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 				}
 			}
 			if (shader == tr.defaultShader) {
-				ri.Log( SEV_DEBUG, "WARNING: no shader for surface %s in skin %s\n", surface->name, skin->name);
+				R_LOG( rch_assets, SEV_DEBUG, "WARNING: no shader for surface %s in skin %s\n", surface->name, skin->name);
 			}
 			else if (shader->defaultShader) {
-				ri.Log( SEV_DEBUG, "WARNING: shader %s in skin %s not found\n", shader->name, skin->name);
+				R_LOG( rch_assets, SEV_DEBUG, "WARNING: shader %s in skin %s not found\n", shader->name, skin->name);
 			}
 		} else if ( surface->numShaders <= 0 ) {
 			shader = tr.defaultShader;
@@ -416,13 +419,6 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 			R_AddDrawSurf( (void *)surface, tr.shadowShader, 0, 0 );
 		}
 
-		// projection shadows work fine with personal models
-		if ( r_shadows->integer == 3
-			&& fogNum == 0
-			&& (ent->e.renderfx & RF_SHADOW_PLANE )
-			&& shader->sort == SS_OPAQUE ) {
-			R_AddDrawSurf( (void *)surface, tr.projectionShadowShader, 0, 0 );
-		}
 
 		// don't add third_person objects if not viewing through a portal
 		if ( !personalModel ) {

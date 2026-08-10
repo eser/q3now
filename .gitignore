@@ -4,6 +4,11 @@
 .DS_Store
 Thumbs.db
 
+# Per-build monotonic counter (bumped by `make`; survives `make clean`)
+.build_number
+# Generated per-build stamp header (written by `make` _build-stamp)
+code/qcommon/wired/wired_build_stamp_gen.h
+
 # Editor metadata
 .vscode/*
 !.vscode/extensions.json
@@ -24,8 +29,14 @@ dist/
 cmake-*
 
 # engine runtime (created if run from project dir)
-baseq3/
+base/
 
 # todos
 docs/
 TODOS.md
+
+# Python bytecode caches
+__pycache__/
+*.pyc
+tools/visual_regression/__pycache__/
+.scratch/

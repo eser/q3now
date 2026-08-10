@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// ServerConfig holds dedicated server launch configuration.
+// ServerConfig holds headless server launch configuration.
 type ServerConfig struct {
 	Hostname   string `json:"hostname"`
 	Map        string `json:"map"`
@@ -24,7 +24,7 @@ type ServerConfig struct {
 	BotCount   int    `json:"botCount"`
 }
 
-// DedServer manages the lifecycle of a dedicated server process.
+// DedServer manages the lifecycle of a headless server process.
 //
 //	State machine:
 //	  STOPPED ──Start()──▶ RUNNING ──Stop()──▶ STOPPED
@@ -48,13 +48,13 @@ func NewDedServer(onLog func(string), onStop func()) *DedServer {
 	}
 }
 
-// Start launches the dedicated server with the given config.
+// Start launches the headless server with the given config.
 func (d *DedServer) Start(binPath string, config ServerConfig) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	if d.running {
-		return fmt.Errorf("dedicated server is already running")
+		return fmt.Errorf("headless server is already running")
 	}
 
 	if config.Map == "" {
@@ -62,10 +62,10 @@ func (d *DedServer) Start(binPath string, config ServerConfig) error {
 	}
 
 	args := BuildArgs(config)
-	slog.Info("starting dedicated server", "binary", binPath, "args", args)
+	slog.Info("starting headless server", "binary", binPath, "args", args)
 
 	if _, err := os.Stat(binPath); err != nil {
-		return fmt.Errorf("dedicated server binary not found at %s: %w", binPath, err)
+		return fmt.Errorf("headless server binary not found at %s: %w", binPath, err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -81,7 +81,7 @@ func (d *DedServer) Start(binPath string, config ServerConfig) error {
 
 	if err := cmd.Start(); err != nil {
 		cancel()
-		return fmt.Errorf("failed to start dedicated server: %w", err)
+		return fmt.Errorf("failed to start headless server: %w", err)
 	}
 
 	d.cmd = cmd
@@ -111,9 +111,9 @@ func (d *DedServer) Start(binPath string, config ServerConfig) error {
 		d.mu.Unlock()
 
 		if err != nil {
-			slog.Info("dedicated server exited", "error", err)
+			slog.Info("headless server exited", "error", err)
 		} else {
-			slog.Info("dedicated server exited cleanly")
+			slog.Info("headless server exited cleanly")
 			if d.onLog != nil {
 				d.onLog("Server stopped.")
 			}
@@ -123,7 +123,7 @@ func (d *DedServer) Start(binPath string, config ServerConfig) error {
 		}
 	}()
 
-	slog.Info("dedicated server started", "pid", cmd.Process.Pid)
+	slog.Info("headless server started", "pid", cmd.Process.Pid)
 	return nil
 }
 
@@ -139,7 +139,7 @@ func (d *DedServer) Stop() error {
 	done := d.done
 	d.mu.Unlock()
 
-	slog.Info("stopping dedicated server")
+	slog.Info("stopping headless server")
 
 	// Graceful: SIGTERM / interrupt.
 	if cmd.Process != nil {
@@ -149,9 +149,9 @@ func (d *DedServer) Stop() error {
 	// Wait for the existing wait-goroutine to finish, or timeout.
 	select {
 	case <-done:
-		slog.Info("dedicated server stopped gracefully")
+		slog.Info("headless server stopped gracefully")
 	case <-time.After(5 * time.Second):
-		slog.Warn("dedicated server did not stop gracefully, force killing")
+		slog.Warn("headless server did not stop gracefully, force killing")
 		if cancel != nil {
 			cancel() // kills via context
 		}
@@ -165,17 +165,21 @@ func (d *DedServer) Stop() error {
 	return nil
 }
 
-// IsRunning returns whether the dedicated server is currently running.
+// IsRunning returns whether the headless server is currently running.
 func (d *DedServer) IsRunning() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.running
 }
 
-// BuildArgs converts a ServerConfig into Q3 dedicated server command-line arguments.
+// BuildArgs converts a ServerConfig into Q3 headless server command-line arguments.
 func BuildArgs(config ServerConfig) []string {
+	// 'dedicated' was retired in the engine: a server is brought up by the
+	// 'map' command (appended below) and announces to the master servers via
+	// sv_hostListed. This launcher starts an unlisted (LAN/private) server, so
+	// sv_hostListed stays 0 — matching the previous '+set dedicated 1' intent.
 	args := []string{
-		"+set", "dedicated", "1",
+		"+set", "sv_hostListed", "0",
 	}
 
 	if config.Hostname != "" {

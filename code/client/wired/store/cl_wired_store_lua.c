@@ -6,7 +6,6 @@
 #include "../../../qcommon/wired/core/scripting/wired_scripting.h"
 #include "cl_wired_store.h"
 #include "../ui/cl_wired_ui.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 #if FEAT_WIRED_UI

@@ -24,10 +24,21 @@ float SV_Lua_BotGetAttackAimHeight( int clientNum, int weaponNum );
 int SV_Lua_BotEvalItem( int clientNum, const wbItemEvalCtx_t *ctx );
 int SV_Lua_BotDecide( int clientNum, const wbDecideCtx_t *ctx, char *decision, int decisionSize );
 int SV_Lua_BotOnChat( int clientNum, const char *eventName, const wbChatCtx_t *ctx, char *outChat, int outChatSize );
+
+// Monster-Lua binding — parallel to the bot binding, keyed by entityNum.
+int SV_Lua_MonsterBind( int entityNum, int characterHandle );
+void SV_Lua_MonsterUnbind( int entityNum );
+float SV_Lua_MonsterProfileField( int entityNum, int field );
+int SV_Lua_MonsterDecide( int entityNum, const wbDecideCtx_t *ctx, char *decision, int decisionSize );
+
 void SV_BotVerifyCharacter_f( void );
 void SV_BotDebugWeapons_f( void );
 
 qboolean SV_Lua_GetCharacterDisplayName( const char *name, char *out, int outSize );
+qboolean SV_Lua_GetCharacterBBox( const char *name, char *out, int outSize );
+qboolean SV_Lua_GetCharacterMovement( const char *name, char *out, int outSize );
+qboolean SV_Lua_GetCharacterAttack( const char *name, char *out, int outSize );
+qboolean SV_Lua_GetCharacterCanActivate( const char *name, char *out, int outSize );
 int      SV_Lua_GetCharacterCount( void );
 qboolean SV_Lua_GetCharacterAt( int index, char *out, int outSize );
 

@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+forwardplus_depth_reduce.comp — per-tile depth min/max reduction for the tiled-
+lighting tile classification.
+
+Reads the scene depth (the opaque depth buffer) and reduces each TILE_SIZE-px
+screen tile to its (minDepth, maxDepth) — the per-tile depth slab the tile-
+classification compute culls lights against (so a tile only considers lights
+within its actual depth range, not the full view depth). One thread per tile;
+the thread scans its tile's texels (the tile is small, 16x16). Reversed-Z device
+depth: near=1.0, far=0.0. Output matches the producer's tileDepth[] layout
+([2*t]=minDepth far-most, [2*t+1]=maxDepth near-most).
+
+The depth read is the previous frame's depth (this runs in the no-render-pass
+seam before the main pass writes this frame's depth) — a 1-frame lag, the same
+lag the shadow-cascade fit + the deformed-mesh snap casters accept (imperceptible
+at frame motion scale; the tile depth-cull only TIGHTENS which lights a tile
+considers, so a 1-frame-stale bound is conservative — a light wrongly kept for one
+frame is harmless, never a missing light).
+*/
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#define TILE_SIZE 16
+
+layout(set = 0, binding = 0) uniform texture2D sceneDepth;
+layout(set = 0, binding = 1) uniform sampler   depthSampler;
+
+layout(std430, set = 0, binding = 2) buffer TileDepth {
+	float tileDepth[];   // [2*t]=min, [2*t+1]=max
+};
+
+layout(push_constant) uniform Push {
+	vec4 params;   // x=screenW, y=screenH, z=tilesX, w=tilesY
+};
+
+void main() {
+	uint tx = gl_GlobalInvocationID.x;
+	uint ty = gl_GlobalInvocationID.y;
+	uint tilesX = uint(params.z);
+	uint tilesY = uint(params.w);
+	if (tx >= tilesX || ty >= tilesY) return;
+
+	uint tileIndex = ty * tilesX + tx;
+	float screenW = params.x;
+	float screenH = params.y;
+
+	float x0 = float(tx * uint(TILE_SIZE));
+	float y0 = float(ty * uint(TILE_SIZE));
+
+	float dMin = 1.0;   // reversed-Z: start at near, shrink toward far
+	float dMax = 0.0;   // start at far, grow toward near
+	bool any = false;
+
+	for (uint j = 0u; j < uint(TILE_SIZE); j++) {
+		for (uint i = 0u; i < uint(TILE_SIZE); i++) {
+			float px = x0 + float(i);
+			float py = y0 + float(j);
+			if (px >= screenW || py >= screenH) continue;
+			vec2 uv = (vec2(px, py) + 0.5) / vec2(screenW, screenH);
+			float d = texture(sampler2D(sceneDepth, depthSampler), uv).r;
+			// skip cleared far texels (reversed-Z far=0.0 = sky / no geometry) so an
+			// empty tile keeps the full slab (set below) rather than collapsing to 0.
+			if (d <= 0.0) continue;
+			dMin = min(dMin, d);
+			dMax = max(dMax, d);
+			any = true;
+		}
+	}
+
+	if (!any) {
+		// no geometry in this tile — full slab so the classifier never wrongly drops
+		// a light (correctness over tightness).
+		dMin = 0.0;
+		dMax = 1.0;
+	}
+
+	tileDepth[2u * tileIndex + 0u] = dMin;
+	tileDepth[2u * tileIndex + 1u] = dMax;
+}

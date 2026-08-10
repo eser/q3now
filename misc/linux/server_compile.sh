@@ -3,7 +3,7 @@
 set -e
 
 export DBUILD_CLIENT="${DBUILD_CLIENT:-0}"
-export DBUILD_SERVER="${DBUILD_SERVER:-1}"
+export DBUILD_HEADLESS="${DBUILD_HEADLESS:-1}"
 export DUSE_HTTP="${DUSE_HTTP:-1}"
 export DUSE_CODEC_OPUS="${DUSE_CODEC_OPUS:-1}"
 export DUSE_VOIP="${DUSE_VOIP:-1}"
@@ -38,7 +38,7 @@ while true; do
                         cd $BUILD_DIR/ioq3
                         cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
                         -DBUILD_CLIENT="$DBUILD_CLIENT" \
-                        -DBUILD_SERVER="DBUILD_SERVER" \
+                        -DBUILD_HEADLESS="DBUILD_HEADLESS" \
                         -DUSE_HTTP="$DUSE_HTTP" \
                         -DUSE_CODEC_OPUS="$USE_CODEC_OPUS" \
                         -DUSE_VOIP="$USE_VOIP" \

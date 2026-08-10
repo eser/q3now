@@ -7,44 +7,97 @@ cl_wired_ui.c — Wired UI: unified menu/HUD system implementation
 
 #include "../../client.h"
 #include "cl_wired_ui.h"
+#include "cl_wired_widget_core.h"
+#include "cl_wired_compositor.h"
+#include "cl_wired_customdraw.h"
 #include "cl_wired_attract.h"
-#include "cl_wired_hud.h"
+#include "cl_wired_ui_hud_state.h"
 #include "cl_wired_fonts.h"
 #include "cl_wired_text.h"
 #include "cl_wired_draw.h"
+#include "cl_wired_anim.h"
+#include "cl_wired_viewport.h"   /* WiredUI_ViewportMultiSelfTest (#ifdef _DEBUG) */
+
+/* bootstrap helpers exposed from cl_wired_ownerdraw.c +
+ * cl_wired_ui_hud_register.c so WiredUI_Init can drive the unified-registry
+ * setup ordering. WiredHud_RegisterElements binds the permanent HUD element
+ * + family tables into the unified custom-draw registry (not transitional —
+ * see cl_wired_ui_hud_register.c). */
+extern void WiredOwnerDraw_RegisterAll          ( void );
+extern void WiredHud_RegisterElements           ( void );
+
+/* loading-screen custom-draw bootstrap, defined in
+ * cl_loading_ui.c — registers custom:loading_{wireframe,streaming_rows,
+ * mapinfo_stats} alongside the hud + ownerdraw entries. Retires
+ * with the rest of cl_loading_ui.c. */
+extern void WiredLoadingCustomDraws_RegisterAll( void );
+
+/* (debug-overlay-migration): the 6 debug-overlay custom-draw
+ * handlers (demo_recording, voip_meter, graph, ping, snaps, packets), defined
+ * in code/client/wired/ui/elements/debug_overlay.c. Registered alongside the
+ * overlay cursor/tooltip entries so the parser's `custom` sigil-rewrite
+ * resolves them against the live registry. */
+extern void WiredDebugOverlay_RegisterAll( void );
 #include "cl_wired_background.h"
 #include "cl_wired_store.h"
 #include "cl_wired_theme.h"
+#include "cl_wired_palette.h"
 #include "../../../qcommon/menudef.h"
 
+#include <stdio.h>   /* sscanf for token colour parsing */
 #include <lua.h>
 #include "../../../qcommon/wired/core/scripting/wired_scripting.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
 #if FEAT_WIRED_UI
 
-#define WUI_DEFAULT_FONT_SIZE  14.0f
+/* ── LOADING-layer state→named-UI binding (path-identity) ──────────────────
+ * The compositor's LOADING layer emits a SPECIFIC menu by path-identity (the
+ * React `return <LoadingComponent/>` model) instead of blind-scanning the
+ * registry for anything tagged `layer "loading"`. Connstate transitions set
+ * the relative path of the menu to show (connect.wui during the handshake,
+ * loading_screen.wui during map load); CA_ACTIVE clears it. Sequential — at
+ * most one loading menu is active at a time — so a single path suffices. */
+static char wui_loading_menu_path[ MAX_QPATH ];
+
+void WiredUI_SetLoadingMenu( const char *relPath ) {
+	char prev[ MAX_QPATH ];
+	Q_strncpyz( prev, wui_loading_menu_path, sizeof( prev ) );
+	if ( relPath && *relPath ) {
+		Q_strncpyz( wui_loading_menu_path, relPath, sizeof( wui_loading_menu_path ) );
+	} else {
+		wui_loading_menu_path[ 0 ] = '\0';
+	}
+	if ( Q_stricmp( prev, wui_loading_menu_path ) != 0 ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: loading menu -> '%s'\n",
+			wui_loading_menu_path[ 0 ] ? wui_loading_menu_path : "(none)" );
+	}
+}
+
+const char *WiredUI_GetLoadingMenuPath( void ) {
+	return wui_loading_menu_path;
+}
+
+/* WUI_DEFAULT_FONT_SIZE promoted to cl_wired_ui.h (compositor emit path
+ * needs the same fallback). */
 #define WIRED_UI_STATE_FILE     "wired_ui_state.dat"
 #define WIRED_UI_STATE_MAGIC    0x57554953
 #define WIRED_UI_STATE_VERSION  1
 
-// from cl_wired_hud_registry.c
+// from cl_wired_ui_hud_register.c (permanent HUD registration/runtime infra)
 extern void     WiredHud_DestroyAllElements( void );
 extern int      WiredHud_GetElementCount( void );
-// from cl_wired_hud.c
+// from cl_wired_ui_hud_state.c (transition shim)
 extern void     WiredHud_LoadFromMenus( void );
 
 // forward declarations
 static void WiredUI_ApplyAnchor( wiredMenuDef_t *menu, float menuW, float menuH,
                                   float *outX, float *outY );
-static void WiredUI_DrawWindowBorder( float x, float y, float w, float h,
-	int border, float borderSize, const vec4_t borderColor, float alphaScale );
-static void WiredUI_DrawModelItem( wiredItemDef_t *item, float x, float y, float w, float h );
 static qboolean WiredUI_ItemVisibleByBindRules( wiredItemDef_t *item );
 static qboolean WiredUI_ItemShouldRender( wiredItemDef_t *item );
 static qboolean WiredUI_ItemCanFocus( wiredItemDef_t *item );
-static qboolean WiredUI_StateListContainsValue( const char *list, const char *value );
+/* non-static: shared with cl_wired_widget_core.c (declared in cl_wired_ui.h) */
+qboolean WiredUI_StateListContainsValue( const char *list, const char *value );
 static qboolean WiredUI_IsPersistedStateKey( const char *key );
 static qboolean WiredUI_CallLuaStoreFunction( const char *functionName );
 static qhandle_t wui_gradientBarShader;
@@ -117,7 +170,7 @@ static const wiredUiStateDefault_t wui_uiStateDefaults[] = {
 	{ "ui_botCount", "0" },
 	{ "ui_botName", "" },
 	{ "ui_botTeam", "0" },
-	{ "ui_dedicated", "0" },
+	{ "ui_hostListed", "0" },
 	{ "ui_netGameType", "0" },
 	{ "ui_globalpreset", "0" },
 	{ "ui_mousePitch", "0" },
@@ -172,6 +225,12 @@ static qboolean WiredUI_IsPersistedStateKey( const char *key ) {
 	}
 
 	if ( !Q_stricmp( key, "ui_theme" ) ) {
+		return qfalse;
+	}
+	if ( !Q_stricmp( key, "ui_palette_mode" )
+	  || !Q_stricmp( key, "ui_palette_accent" ) ) {
+		/* Cvar layer (CVAR_ARCHIVE) handles persistence; the store-state
+		 * write path would double-persist these into wired_ui_state.dat. */
 		return qfalse;
 	}
 
@@ -432,6 +491,228 @@ int WiredUI_StateGetInt( const char *key ) {
 	return atoi( buf );
 }
 
+/* value-text resolution for cvar-bound items. Mirrors the legacy
+ * SCR switch (cl_wired_ui.c label-and-value branch) so both renderers
+ * stay in lockstep during the transition. Forward decls reach the
+ * file-static MULTI/edit/bind state without exposing them. */
+static qboolean wui_waitingForKey;
+static wiredItemDef_t *wui_bindItem;
+static qboolean       wui_editingField;
+static wiredItemDef_t *wui_editItem;
+static int            wui_editCursorPos;
+/* legacy focus index — single definition (was previously a tentative
+ * def here + an initialized def lower in the file; C merges those into one
+ * object, but the duplicate read as two variables and invited a "two
+ * highlights" misdiagnosis, so it is consolidated to this one initialized
+ * definition). -1 = no top-level item focused (focus may be a nested child,
+ * tracked by wui_focusedItemPtr). */
+static int             wui_focusItem = -1;
+/* authoritative focused item ptr — supports nested children
+ * (top-level wui_focusItem index can only address menu->items[N] directly). */
+static wiredItemDef_t *wui_focusedItemPtr;
+/* authoritative mouse-hovered item ptr (real definition sits lower, with the
+ * other pointer-state statics). Forward-declared here so WiredUI_GetHoveredItem
+ * — defined next to WiredUI_GetFocusedItem — can read it. Tentative-def merge
+ * folds this into the single initialized definition below. */
+static wiredItemDef_t *wui_hoveredItemPtr;
+
+const char *WiredUI_BoundValueText( const wiredItemDef_t *item, char *out, int outSize ) {
+	char cvarBuf[256];
+
+	if ( !out || outSize <= 0 ) return out;
+	out[0] = '\0';
+	if ( !item || !item->cvar[0] ) return out;
+
+	WiredUI_StateGetString( item->cvar, cvarBuf, sizeof( cvarBuf ) );
+
+	switch ( item->type ) {
+	case ITEM_TYPE_YESNO:
+		Q_strncpyz( out, atof( cvarBuf ) != 0 ? "Yes" : "No", outSize );
+		return out;
+
+	case ITEM_TYPE_CHECKBOX:
+		/* Component-library F2: the checkbox draws a box + check glyph as its
+		 * value cell (cl_wired_clay.c), so it emits NO value text — otherwise the
+		 * default case below would print the raw "1"/"0" beside the box. */
+		out[0] = '\0';
+		return out;
+
+	case ITEM_TYPE_SPINNER:
+		/* Component-library: the spinner draws [-] value [+] as its own value
+		 * cell (cl_wired_clay.c), so it emits NO trailing value text here —
+		 * otherwise the numeric readout would render twice. */
+		out[0] = '\0';
+		return out;
+
+	case ITEM_TYPE_MULTI:
+		if ( item->populateCallback[0] ) {
+			wuiPopulateCallback_t pop = WiredUI_GetPopulateCallback( item->populateCallback );
+			if ( !pop ) {
+				Q_strncpyz( out, "<missing populate callback>", outSize );
+				return out;
+			}
+			{
+				wuiPopulateResult_t res;
+				qboolean found = qfalse;
+				int j;
+				memset( &res, 0, sizeof( res ) );
+				pop( &res );
+				switch ( res.state ) {
+				case WUI_POPULATE_LOADING:
+					Q_strncpyz( out, "Scanning…", outSize );
+					return out;
+				case WUI_POPULATE_EMPTY:
+					Q_strncpyz( out, "No devices detected", outSize );
+					return out;
+				case WUI_POPULATE_ERROR:
+					Q_strncpyz( out, "Enumeration failed — Use default", outSize );
+					return out;
+				case WUI_POPULATE_SUCCESS:
+				case WUI_POPULATE_PARTIAL:
+					for ( j = 0; j < res.count; j++ ) {
+						if ( res.values && res.values[j] &&
+						     !Q_stricmp( cvarBuf, res.values[j] ) ) {
+							Q_strncpyz( out, res.names[j], outSize );
+							found = qtrue;
+							break;
+						}
+					}
+					if ( !found ) {
+						if ( cvarBuf[0] ) {
+							Com_sprintf( out, outSize, "%s (not present)", cvarBuf );
+						} else {
+							Q_strncpyz( out, "(System Default)", outSize );
+						}
+					}
+					return out;
+				default:
+					Q_strncpyz( out, cvarBuf, outSize );
+					return out;
+				}
+			}
+		}
+		else if ( item->multiData ) {
+			int j;
+			for ( j = 0; j < item->multiData->count; j++ ) {
+				if ( item->multiData->isStringList ) {
+					if ( !Q_stricmp( cvarBuf, item->multiData->strValues[j] ) ) {
+						Q_strncpyz( out, item->multiData->labels[j], outSize );
+						return out;
+					}
+				} else {
+					if ( item->multiData->floatValues[j] == atof( cvarBuf ) ) {
+						Q_strncpyz( out, item->multiData->labels[j], outSize );
+						return out;
+					}
+				}
+			}
+			if ( cvarBuf[0] ) Q_strncpyz( out, cvarBuf, outSize );
+		}
+		return out;
+
+	case ITEM_TYPE_SLIDER:
+		Com_sprintf( out, outSize, "%.1f", atof( cvarBuf ) );
+		return out;
+
+	case ITEM_TYPE_BIND:
+		if ( wui_waitingForKey && wui_bindItem == item ) {
+			Q_strncpyz( out, "Press a key...", outSize );
+			return out;
+		}
+		{
+			const char *key1 = NULL, *key2 = NULL;
+			int k;
+			for ( k = 0; k < MAX_KEYS; k++ ) {
+				const char *b = Key_GetBinding( k );
+				if ( b && !Q_stricmp( b, item->cvar ) ) {
+					if ( !key1 ) key1 = Key_KeynumToString( k );
+					else if ( !key2 ) { key2 = Key_KeynumToString( k ); break; }
+				}
+			}
+			if ( key1 && key2 ) {
+				Com_sprintf( out, outSize, "%s ^7or %s", key1, key2 );
+			} else if ( key1 ) {
+				Q_strncpyz( out, key1, outSize );
+			} else {
+				Q_strncpyz( out, "---", outSize );
+			}
+		}
+		return out;
+
+	case ITEM_TYPE_EDITFIELD:
+	case ITEM_TYPE_NUMERICFIELD:
+		if ( wui_editingField && wui_editItem == item ) {
+			int curPos = wui_editCursorPos;
+			qboolean showCursor = ( (int)( cls.realtime / 250 ) & 1 );
+			int cvarLen = (int) strlen( cvarBuf );
+			if ( curPos > cvarLen ) curPos = cvarLen;
+			Q_strncpyz( out, cvarBuf, curPos + 1 );
+			{
+				qstring_t qs = QS_WrapExisting( out, outSize );
+				QS_AppendChar( &qs, showCursor ? '_' : ' ' );
+				QS_Append( &qs, &cvarBuf[curPos] );
+			}
+		} else {
+			Q_strncpyz( out, cvarBuf, outSize );
+		}
+		return out;
+
+	default:
+		Q_strncpyz( out, cvarBuf, outSize );
+		return out;
+	}
+}
+
+float WiredUI_SliderFraction( const wiredItemDef_t *item ) {
+	char  cvarBuf[64];
+	float val, range, frac;
+
+	if ( !item || !item->cvar[0] ) return 0.0f;
+	WiredUI_StateGetString( item->cvar, cvarBuf, sizeof( cvarBuf ) );
+	val   = atof( cvarBuf );
+	range = item->sliderData.maxVal - item->sliderData.minVal;
+	frac  = ( range > 0 ) ? ( val - item->sliderData.minVal ) / range : 0.0f;
+	if ( frac < 0.0f ) frac = 0.0f;
+	if ( frac > 1.0f ) frac = 1.0f;
+	return frac;
+}
+
+/* focus accessors. Legacy retains focus authority via wui_focusItem
+ * (menu-local index) — driven by mouse hover, arrow nav, setfocus action,
+ * Tab cycle. Compositor reads this accessor instead of its own parallel
+ * wui_panel_state.focusedId (which only tracks Tab cycle today). Flips
+ * once mouse/arrow paths land their compositor-side updates. */
+const wiredItemDef_t *WiredUI_GetFocusedItem( void ) {
+	wiredMenuDef_t *menu = WiredUI_GetActiveMenu();
+	wiredItemDef_t *item;
+
+	if ( !menu ) return NULL;
+	/* prefer the authoritative pointer (may be nested). */
+	if ( wui_focusedItemPtr && WiredUI_ItemCanFocus( wui_focusedItemPtr ) ) {
+		return wui_focusedItemPtr;
+	}
+	if ( wui_focusItem < 0 || wui_focusItem >= menu->itemCount ) return NULL;
+	item = menu->items[ wui_focusItem ];
+	if ( !item ) return NULL;
+	if ( !WiredUI_ItemCanFocus( item ) ) return NULL;
+	return item;
+}
+
+/* Authoritative pointer-hover accessor. Formalizes the direct wui_hoveredItemPtr
+ * read the tooltip path already performs; the framework core reads this for the
+ * HOVER visual state. Distinct from focus — mouse hover updates hovered,
+ * keyboard nav updates focused. */
+const wiredItemDef_t *WiredUI_GetHoveredItem( void ) {
+	if ( wui_hoveredItemPtr && WiredUI_ItemCanFocus( wui_hoveredItemPtr ) ) {
+		return wui_hoveredItemPtr;
+	}
+	return NULL;
+}
+
+qhandle_t WiredUI_GradientBarShader( void ) {
+	return wui_gradientBarShader;
+}
+
 float WiredUI_StateGetFloat( const char *key ) {
 	char buf[256];
 	WiredUI_StateGetString( key, buf, sizeof( buf ) );
@@ -464,7 +745,7 @@ void WiredUI_StateSetFloat( const char *key, float value ) {
 	WiredUI_StateSetString( key, va( "%g", value ) );
 }
 
-static qboolean WiredUI_StateListContainsValue( const char *list, const char *value ) {
+qboolean WiredUI_StateListContainsValue( const char *list, const char *value ) {
 	if ( !list || !list[0] ) {
 		return qfalse;
 	}
@@ -496,247 +777,12 @@ static qboolean WiredUI_StateListContainsValue( const char *list, const char *va
 	return qfalse;
 }
 
-static void WiredUI_SetTeamWindowColor( vec4_t outColor, const vec4_t fallbackColor ) {
-	if ( wiredHud && wiredHud->valid ) {
-		if ( wiredHud->isOurTeamBlue ) {
-			Vector4Set( outColor, 0.20f, 0.35f, 0.95f, fallbackColor ? fallbackColor[3] : 1.0f );
-		} else {
-			Vector4Set( outColor, 0.95f, 0.20f, 0.20f, fallbackColor ? fallbackColor[3] : 1.0f );
-		}
-	} else {
-		if ( fallbackColor ) Vector4Copy( fallbackColor, outColor );
-		else Vector4Set( outColor, 1.0f, 1.0f, 1.0f, 1.0f );
-	}
-}
 
-static void WiredUI_DrawWindowBorder( float x, float y, float w, float h,
-	int border, float borderSize, const vec4_t borderColor, float alphaScale ) {
-	vec4_t bc;
-	float bs = borderSize > 0.0f ? borderSize : 1.0f;
 
-	if ( border == WINDOW_BORDER_NONE || !borderColor || borderColor[3] <= 0.0f ) {
-		return;
-	}
 
-	Vector4Copy( borderColor, bc );
-	bc[3] *= alphaScale;
 
-	switch ( border ) {
-		case WINDOW_BORDER_FULL:
-			WUI_FillRect( x, y, w, bs, bc );
-			WUI_FillRect( x, y + h - bs, w, bs, bc );
-			WUI_FillRect( x, y, bs, h, bc );
-			WUI_FillRect( x + w - bs, y, bs, h, bc );
-			break;
-		case WINDOW_BORDER_HORZ:
-			WUI_FillRect( x, y, w, bs, bc );
-			WUI_FillRect( x, y + h - bs, w, bs, bc );
-			break;
-		case WINDOW_BORDER_VERT:
-			WUI_FillRect( x, y, bs, h, bc );
-			WUI_FillRect( x + w - bs, y, bs, h, bc );
-			break;
-		case WINDOW_BORDER_KCGRADIENT:
-			if ( wui_gradientBarShader ) {
-				re.SetColor( bc );
-				WUI_DrawPic( x, y, w, bs, wui_gradientBarShader );
-				WUI_DrawPic( x, y + h - bs, w, bs, wui_gradientBarShader );
-				re.SetColor( NULL );
-			} else {
-				WUI_FillRect( x, y, w, bs, bc );
-				WUI_FillRect( x, y + h - bs, w, bs, bc );
-			}
-			break;
-		default:
-			WUI_FillRect( x, y, w, bs, bc );
-			WUI_FillRect( x, y + h - bs, w, bs, bc );
-			WUI_FillRect( x, y, bs, h, bc );
-			WUI_FillRect( x + w - bs, y, bs, h, bc );
-			break;
-	}
-}
 
-static void WiredUI_DrawModelItem( wiredItemDef_t *item, float x, float y, float w, float h ) {
-	if ( !item->assetModel[0] ) {
-		return;
-	}
-
-	if ( !item->modelHandle ) {
-		item->modelHandle = re.RegisterModel( item->assetModel );
-	}
-	if ( !item->modelHandle ) {
-		return;
-	}
-
-	if ( item->assetShader[0] && !item->modelShaderHandle ) {
-		item->modelShaderHandle = re.RegisterShaderNoMip( item->assetShader );
-	}
-
-	refdef_t refdef;
-	refEntity_t ent;
-	memset( &refdef, 0, sizeof( refdef ) );
-	memset( &ent, 0, sizeof( ent ) );
-
-	refdef.rdflags = RDF_NOWORLDMODEL;
-	refdef.x = (int)x;
-	refdef.y = (int)y;
-	refdef.width = (int)w;
-	refdef.height = (int)h;
-	if ( refdef.width < 1 || refdef.height < 1 ) return;
-
-	refdef.fov_x = item->modelFovX > 0.0f ? item->modelFovX : 40.0f;
-	refdef.fov_y = item->modelFovY > 0.0f ? item->modelFovY :
-		( refdef.fov_x * (float)refdef.height / (float)refdef.width );
-	refdef.time = cls.realtime;
-
-	// Camera looks down -X toward the model at origin. Q3's viewaxis[0] is
-	// the forward direction; AxisClear (identity) points forward at +X,
-	// which faces AWAY from a model placed at origin while vieworg is at +X.
-	{
-		vec3_t viewangles;
-		VectorSet( viewangles, 0, 180, 0 );
-		AnglesToAxis( viewangles, refdef.viewaxis );
-	}
-
-	VectorSet( refdef.vieworg,
-		item->modelOrigin[0] != 0.0f ? item->modelOrigin[0] : 80.0f,
-		item->modelOrigin[1],
-		item->modelOrigin[2] );
-
-	ent.reType = RT_MODEL;
-	ent.hModel = item->modelHandle;
-	if ( item->modelShaderHandle ) {
-		ent.customShader = item->modelShaderHandle;
-	}
-
-	VectorSet( ent.origin, 0.0f, 0.0f, 0.0f );
-	vec3_t angles;
-	angles[PITCH] = 0.0f;
-	angles[YAW] = item->modelAngle + item->modelRotation * ( (float)cls.realtime / 1000.0f );
-	angles[ROLL] = 0.0f;
-	AnglesToAxis( angles, ent.axis );
-	VectorCopy( ent.origin, ent.lightingOrigin );
-	ent.renderfx = RF_LIGHTING_ORIGIN | RF_NOSHADOW;
-
-	re.ClearScene();
-	re.AddRefEntityToScene( &ent, qfalse );
-	re.RenderScene( &refdef );
-}
-
-static void WiredUI_DrawMenuBackground( wiredMenuDef_t *menu,
-	float x, float y, float w, float h, float alphaScale ) {
-	if ( menu->style == WINDOW_STYLE_CINEMATIC && menu->cinematicHandle >= 0 ) {
-		CIN_SetExtents( menu->cinematicHandle, (int)x, (int)y, (int)w, (int)h );
-		CIN_RunCinematic( menu->cinematicHandle );
-		CIN_DrawCinematic( menu->cinematicHandle );
-		return;
-	}
-
-	if ( menu->style == WINDOW_STYLE_SHADER && menu->background[0] ) {
-		qhandle_t bgShader = re.RegisterShaderNoMip( menu->background );
-		if ( bgShader ) {
-			re.SetColor( NULL );
-			WUI_DrawPic( x, y, w, h, bgShader );
-			return;
-		}
-	}
-
-	if ( menu->style == WINDOW_STYLE_GRADIENT && menu->backcolor[3] > 0.0f ) {
-		vec4_t bc;
-		Vector4Copy( menu->backcolor, bc );
-		bc[3] *= alphaScale;
-		WUI_FillRect( x, y, w, h, bc );
-		if ( wui_gradientBarShader ) {
-			vec4_t gc;
-			Vector4Copy( menu->backcolor, gc );
-			gc[3] *= 0.5f * alphaScale;
-			re.SetColor( gc );
-			WUI_DrawPic( x, y, w, h, wui_gradientBarShader );
-			re.SetColor( NULL );
-		}
-		return;
-	}
-
-	if ( menu->style == WINDOW_STYLE_FILLED && menu->backcolor[3] > 0.0f ) {
-		vec4_t bc;
-		Vector4Copy( menu->backcolor, bc );
-		bc[3] *= alphaScale;
-		WUI_FillRect( x, y, w, h, bc );
-		return;
-	}
-
-	if ( menu->style == WINDOW_STYLE_TEAMCOLOR ) {
-		vec4_t tc;
-		WiredUI_SetTeamWindowColor( tc, menu->backcolor );
-		tc[3] *= alphaScale;
-		WUI_FillRect( x, y, w, h, tc );
-		return;
-	}
-
-	if ( menu->style == WINDOW_STYLE_EMPTY ) {
-		return;
-	}
-
-	{
-		vec4_t bgColor = { 0.1f, 0.1f, 0.15f, 1.0f };
-		bgColor[3] *= alphaScale;
-		WUI_FillRect( x, y, w, h, bgColor );
-	}
-}
-
-static void WiredUI_DrawItemBackground( wiredItemDef_t *item,
-	float x, float y, float w, float h, float alphaScale ) {
-	if ( item->style == WINDOW_STYLE_SHADER && item->background[0] ) {
-		qhandle_t itemBg = re.RegisterShaderNoMip( item->background );
-		if ( itemBg ) {
-			vec4_t shaderColor;
-			if ( item->forecolor[0] > 0.0f || item->forecolor[1] > 0.0f ||
-			     item->forecolor[2] > 0.0f || item->forecolor[3] > 0.0f ) {
-				Vector4Copy( item->forecolor, shaderColor );
-			} else {
-				Vector4Set( shaderColor, 1, 1, 1, 1 );
-			}
-			shaderColor[3] *= alphaScale;
-			re.SetColor( shaderColor );
-			WUI_DrawPic( x, y, w, h, itemBg );
-			re.SetColor( NULL );
-		}
-		return;
-	}
-
-	if ( item->style == WINDOW_STYLE_GRADIENT && item->backcolor[3] > 0.0f ) {
-		vec4_t bc;
-		Vector4Copy( item->backcolor, bc );
-		bc[3] *= alphaScale;
-		WUI_FillRect( x, y, w, h, bc );
-		if ( wui_gradientBarShader ) {
-			vec4_t gc;
-			Vector4Copy( item->backcolor, gc );
-			gc[3] *= 0.5f * alphaScale;
-			re.SetColor( gc );
-			WUI_DrawPic( x, y, w, h, wui_gradientBarShader );
-			re.SetColor( NULL );
-		}
-		return;
-	}
-
-	if ( item->style == WINDOW_STYLE_FILLED && item->backcolor[3] > 0.0f ) {
-		vec4_t bc;
-		Vector4Copy( item->backcolor, bc );
-		bc[3] *= alphaScale;
-		WUI_FillRect( x, y, w, h, bc );
-		return;
-	}
-
-	if ( item->style == WINDOW_STYLE_TEAMCOLOR ) {
-		vec4_t tc;
-		WiredUI_SetTeamWindowColor( tc, item->backcolor );
-		tc[3] *= alphaScale;
-		WUI_FillRect( x, y, w, h, tc );
-	}
-}
-
-static qboolean WiredUI_ItemVisibleByCvarRules( wiredItemDef_t *item ) {
+qboolean WiredUI_ItemVisibleByCvarRules( const wiredItemDef_t *item ) {
 	if ( item->cvarTest[0] ) {
 		char testBuf[256];
 
@@ -750,24 +796,13 @@ static qboolean WiredUI_ItemVisibleByCvarRules( wiredItemDef_t *item ) {
 		}
 	}
 
-	if ( item->enableCvar[0] || item->disableCvar[0] ) {
-		char testBuf[256];
-		qboolean enabled = qtrue;
-
-		if ( item->cvarTest[0] ) WiredUI_StateGetString( item->cvarTest, testBuf, sizeof( testBuf ) );
-		else if ( item->cvar[0] ) WiredUI_StateGetString( item->cvar, testBuf, sizeof( testBuf ) );
-		else testBuf[0] = '\0';
-
-		if ( item->enableCvar[0] ) {
-			enabled = WiredUI_StateListContainsValue( item->enableCvar, testBuf );
-		}
-		if ( item->disableCvar[0] ) {
-			if ( WiredUI_StateListContainsValue( item->disableCvar, testBuf ) ) {
-				enabled = qfalse;
-			}
-		}
-
-		if ( !enabled ) return qfalse;
+	/* Disable is now orthogonal to visibility: the enable/disable-cvar test lives
+	 * in WiredUI_ItemIsEnabled (framework core). A disabled item is HIDDEN only in
+	 * legacy `enableMode hide` mode (default) — this preserves every existing menu
+	 * exactly. `enableMode dim` items stay visible (rendered greyed +
+	 * non-interactive by the framework), so visibility no longer culls them. */
+	if ( ( item->enableCvar[0] || item->disableCvar[0] ) && !item->enableModeDim ) {
+		if ( !WiredUI_ItemIsEnabled( item ) ) return qfalse;
 	}
 
 	return qtrue;
@@ -816,7 +851,234 @@ static qboolean WiredUI_ItemCanFocus( wiredItemDef_t *item ) {
 		return qfalse;
 	}
 
+	/* Disabled `dim`-mode items render but are non-interactive: drop them from
+	 * BOTH focus traversals (wui_collect_focusable) and mouse-hover acceptance
+	 * (WiredUI_ItemAcceptsMouseHover routes through here). `hide`-mode disabled
+	 * items are already culled by WiredUI_ItemShouldRender below. */
+	if ( item->enableModeDim && !WiredUI_ItemIsEnabled( item ) ) {
+		return qfalse;
+	}
+
 	return WiredUI_ItemShouldRender( item );
+}
+
+/* Mouse-hover acceptance: mirrors the keyboard focus collector's rules
+ * (wui_collect_focusable_recursive) so the same item taxonomy drives
+ * both input paths. Pure layout containers (no action[]) are walked
+ * THROUGH, not bound, and decorative TEXT items are not bound. Without
+ * this filter, Clay's hit-test returns whatever element sits under the
+ * cursor — including outer card containers and inner decoration labels
+ * — and the legacy mouse path then flood-fills the focus highlight
+ * gradient (cl_wired_clay.c WiredUI_GetFocusedItem branch) plus fires
+ * wui_sfxFocus on every container traversal. */
+static qboolean WiredUI_ItemAcceptsMouseHover( wiredItemDef_t *item ) {
+	if ( !item ) return qfalse;
+	if ( !WiredUI_ItemCanFocus( item ) ) return qfalse;
+	if ( ( item->isFlexContainer || item->childCount > 0 )
+	  && !item->action[0]
+	  && !item->mouseEnter[0]
+	  && !item->mouseExit[0]
+	  && !item->onFocus[0]
+	  && !item->leaveFocus[0] ) {
+		return qfalse;
+	}
+	if ( item->type == ITEM_TYPE_TEXT
+	  && !item->action[0]
+	  && !item->mouseEnter[0]
+	  && !item->mouseExit[0]
+	  && !item->onFocus[0]
+	  && !item->leaveFocus[0] ) {
+		return qfalse;
+	}
+	return qtrue;
+}
+
+/* Depth-first flatten of the menu's focusable items so nested children
+ * inside containers become reachable by K_UPARROW / K_DOWNARROW.
+ * Layout-only containers (no action[] script) are walked into but not
+ * added — focus belongs on actionable leaves (buttons, dropdowns,
+ * editfields, sliders, bind rows, listboxes). Containers that DO carry
+ * an action[] are themselves the focus target — their nested children
+ * are decorative composition (num + label + sub + hot + arrow), so
+ * the container is added and recursion stops. */
+static void wui_collect_focusable_recursive( wiredItemDef_t *item,
+                                              wiredItemDef_t **flat,
+                                              int maxFlat, int *flatCount )
+{
+	int i;
+	if ( !item || *flatCount >= maxFlat ) return;
+	/* Containers with their own action script are themselves the focus
+	 * target — their nested leaves are decorative composition, not
+	 * separate actionable items. Add the container and stop descending. */
+	if ( ( item->isFlexContainer || item->childCount > 0 ) && item->action[0] ) {
+		if ( WiredUI_ItemCanFocus( item ) ) {
+			flat[ ( *flatCount )++ ] = item;
+		}
+		return;
+	}
+	/* Containers without an action are pure layout — descend so the
+	 * focusable leaves they hold become reachable. */
+	if ( item->isFlexContainer || item->childCount > 0 ) {
+		for ( i = 0; i < item->childCount; i++ ) {
+			wui_collect_focusable_recursive( item->children[ i ], flat, maxFlat, flatCount );
+		}
+		return;
+	}
+	/* ITEM_TYPE_TEXT (type 0) is non-actionable display text — labels,
+	 * subheaders, decorative copy. Skip unless it carries an explicit
+	 * action script. */
+	if ( item->type == ITEM_TYPE_TEXT && !item->action[0] ) {
+		return;
+	}
+	if ( WiredUI_ItemCanFocus( item ) ) {
+		flat[ ( *flatCount )++ ] = item;
+	}
+}
+
+static void wui_collect_focusable( wiredMenuDef_t *menu,
+                                    wiredItemDef_t **flat,
+                                    int maxFlat, int *flatCount )
+{
+	int i;
+	*flatCount = 0;
+	if ( !menu ) return;
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		wui_collect_focusable_recursive( menu->items[ i ], flat, maxFlat, flatCount );
+	}
+}
+
+static int wui_find_in_flat( wiredItemDef_t **flat, int flatCount,
+                              wiredItemDef_t *target )
+{
+	int i;
+	if ( !target ) return -1;
+	for ( i = 0; i < flatCount; i++ ) {
+		if ( flat[ i ] == target ) return i;
+	}
+	return -1;
+}
+
+/* Update both the legacy top-level index (for back-compat with mouse +
+ * listbox handlers) AND the new authoritative pointer. The index is set
+ * to -1 when the focused item lives inside a container (i.e. is not at
+ * top level), signalling read sites to consult the pointer. */
+static void wui_set_focused( wiredMenuDef_t *menu, wiredItemDef_t *item )
+{
+	int i;
+	wui_focusedItemPtr = item;
+	wui_focusItem = -1;
+	if ( !menu || !item ) return;
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		if ( menu->items[ i ] == item ) {
+			wui_focusItem = i;
+			return;
+		}
+	}
+}
+
+/* WiredUI F4 (settings tab strip): a "tab" in the settings cluster is a nav-rail
+ * button bound to the ui_settingsSection cvar (`active ui_settingsSection "<sec>"`)
+ * whose action does the `close ; open <submenu>` section swap. Detect one so
+ * Left/Right can jump between sibling tabs without a Tab-into-the-rail dance. The
+ * activeCvar test is the discriminator — ordinary buttons don't bind it. */
+static qboolean wui_item_is_settings_tab( const wiredItemDef_t *item )
+{
+	if ( !item ) return qfalse;
+	if ( item->type != ITEM_TYPE_BUTTON ) return qfalse;
+	return ( Q_stricmp( item->activeCvar, "ui_settingsSection" ) == 0 );
+}
+
+/* Collect the settings-tab nav rows of `menu` in authored (nav) order into
+ * `out` (cap `max`), returning the count and, via `curIdx`, the index of the tab
+ * matching the current ui_settingsSection value (-1 if none matches). Walks the
+ * SAME focusable flatten as nav so nested rail rows are found. */
+static int wui_collect_settings_tabs( wiredMenuDef_t *menu, wiredItemDef_t **out,
+                                      int max, int *curIdx )
+{
+	wiredItemDef_t *flat[ 128 ];
+	int             flatCount = 0;
+	int             n = 0;
+	int             i;
+	char            cur[ 64 ];
+	if ( curIdx ) *curIdx = -1;
+	if ( !menu ) return 0;
+	WiredUI_StateGetString( "ui_settingsSection", cur, sizeof( cur ) );
+	wui_collect_focusable( menu, flat, 128, &flatCount );
+	for ( i = 0; i < flatCount && n < max; i++ ) {
+		if ( !wui_item_is_settings_tab( flat[ i ] ) ) continue;
+		if ( curIdx && *curIdx < 0 && Q_stricmp( flat[ i ]->activeValue, cur ) == 0 ) {
+			*curIdx = n;
+		}
+		out[ n++ ] = flat[ i ];
+	}
+	return n;
+}
+
+/* WiredUI F4 (default button): return the first focusable item in `menu` whose
+ * `defaultButton` flag is set, or NULL if none authored one. Searches the same
+ * depth-first focusable flatten Tab/arrow nav walks, so a default button nested
+ * inside a container (the dialog footer) is found. */
+static wiredItemDef_t *wui_find_default_button( wiredMenuDef_t *menu )
+{
+	wiredItemDef_t *flat[ 128 ];
+	int             flatCount = 0;
+	int             i;
+	if ( !menu ) return NULL;
+	wui_collect_focusable( menu, flat, 128, &flatCount );
+	for ( i = 0; i < flatCount; i++ ) {
+		if ( flat[ i ]->defaultButton ) return flat[ i ];
+	}
+	return NULL;
+}
+
+/* WiredUI F4 (initial focus): give a freshly-opened menu keyboard focus so Enter
+ * works immediately. Preference order:
+ *   1. the authored `defaultButton` (dialogs: Enter confirms without a Tab),
+ *   2. the first focusable control in nav order.
+ * Marks focus as keyboard-provenance so the focus ring paints (WiredUI_FocusRingFor
+ * gates on wui_ix.focusFromKeyboard). No-op when the menu has no focusable items
+ * (pure display menus — HUD overlays, loading screens). */
+/* fwd-decl: wui_focusFromMouse is defined further down (with the other
+ * focus/hover statics); WiredUI_SetInitialFocus below references it before
+ * that point. */
+static qboolean wui_focusFromMouse;  /* fwd-decl, defined below */
+
+static void WiredUI_SetInitialFocus( wiredMenuDef_t *menu )
+{
+	wiredItemDef_t *target;
+	if ( !menu ) return;
+
+	/* Scope guard (do not disturb non-dialog menus): auto-seed initial focus
+	 * ONLY for menus that need Enter/keyboard entry on open — MODAL dialogs, or
+	 * any menu that explicitly authored a `defaultButton`. Ordinary menus (main,
+	 * ingame, the settings panels) keep today's mouse-first, no-initial-focus
+	 * behaviour, so no focus ring appears before the user actually navigates. */
+	target = wui_find_default_button( menu );
+	if ( !target ) {
+		/* Settings cluster: land focus on the ACTIVE nav tab so the Left/Right
+		 * tab-strip nav has a starting point AND stays continuous across a tab
+		 * switch (the `close ; open` swap re-opens here and re-homes focus on the
+		 * new section's tab). Only fires when the menu actually carries settings
+		 * tabs, so non-settings menus are unaffected. */
+		wiredItemDef_t *tabs[ 32 ];
+		int             curIdx = -1;
+		int             tabCount = wui_collect_settings_tabs( menu, tabs, 32, &curIdx );
+		if ( tabCount > 0 ) {
+			target = ( curIdx >= 0 ) ? tabs[ curIdx ] : tabs[ 0 ];
+		}
+	}
+	if ( !target ) {
+		wiredItemDef_t *flat[ 128 ];
+		int             flatCount = 0;
+		if ( !menu->modal ) return;   /* non-modal, no defaultButton, no tabs => unchanged */
+		wui_collect_focusable( menu, flat, 128, &flatCount );
+		if ( flatCount > 0 ) target = flat[ 0 ];
+	}
+	if ( target ) {
+		wui_set_focused( menu, target );
+		wui_focusFromMouse       = qfalse;
+		wui_ix.focusFromKeyboard = qtrue;
+	}
 }
 
 // ── symbol registry ───────────────────────────────────────────────────
@@ -937,7 +1199,25 @@ void WiredUI_ResetAssetGlobalsDefaults( void ) {
 	wui_assetGlobals.fadeAmount = 0.2f;
 	Vector4Set( wui_assetGlobals.shadowColor, 0.1f, 0.1f, 0.1f, 0.25f );
 	Q_strncpyz( wui_assetGlobals.focusSound, "sound/misc/menu2.opus", sizeof( wui_assetGlobals.focusSound ) );
-	Vector4Set( wui_assetGlobals.focusColor, 1.0f, 0.75f, 0.0f, 1.0f );
+	/* Accent-cyan focus default ($primary_cyan #00b4d8; was amber, off-theme).
+	 * Read the live token so this default follows ui_palette_accent. NOTE:
+	 * this init runs before the implicit ui/_tokens.wui include, so the token
+	 * table is usually empty here — the guarded read leaves the baked cyan
+	 * literal in place (which equals $primary_cyan), and becomes theme-driven
+	 * only if this reset is re-invoked after tokens load. .wui menus can also
+	 * override per-theme with `focuscolor $primary_cyan`. */
+	Vector4Set( wui_assetGlobals.focusColor, 0.0f, 0.706f, 0.847f, 1.0f );
+	{
+		extern const char *WiredToken_Find( const char *name );
+		const char *v = WiredToken_Find( "primary_cyan" );
+		unsigned    r, g, b;
+		if ( v && v[0] == '#' && ( strlen( v ) == 7 || strlen( v ) == 9 )
+		     && sscanf( v + 1, "%2x%2x%2x", &r, &g, &b ) == 3 ) {
+			wui_assetGlobals.focusColor[0] = (float) r / 255.0f;
+			wui_assetGlobals.focusColor[1] = (float) g / 255.0f;
+			wui_assetGlobals.focusColor[2] = (float) b / 255.0f;
+		}
+	}
 	wui_assetGlobals.shadowX = 1.0f;
 	wui_assetGlobals.shadowY = 1.0f;
 	Vector4Set( wui_assetGlobals.gradientBarColor, 0, 0, 0, 0 );
@@ -1042,6 +1322,21 @@ static int       wui_activeMenu = UIMENU_NONE;
 static char      wui_menuStack[WIRED_MENU_STACK_DEPTH][64];
 static int       wui_menuStackDepth = 0;
 
+/* WiredUI F4 (return-focus): the focused item on the menu that was on top when
+ * a new menu was pushed OVER it. On pop, WiredUI_PopMenu restores focus to this
+ * item so closing a dialog returns the caret to the control that opened it.
+ * Indexed by the NEW top's depth-1 slot (i.e. wui_returnFocus[d] is the item to
+ * restore when the menu at stack index d is popped). NULL = no saved focus (open
+ * with default/first-focus as before). Cleared on CloseAllMenus. */
+static wiredItemDef_t *wui_returnFocus[WIRED_MENU_STACK_DEPTH];
+
+/* Per-stack-entry background intent (parallel to wui_menuStack, keyed by the
+ * same depth). Set at push time; the compositor reads the stack-top entry's
+ * value via WiredUI_GetActiveBgIntent when emitting that menu's background.
+ * WUI_BG_INTENT_INHERIT (0) = use the .wui-authored flags (today's behavior);
+ * the array zero-inits, so any unset slot is INHERIT. */
+static wuiBgIntent_t wui_menuBgIntent[WIRED_MENU_STACK_DEPTH];
+
 // Pool/compositor health flag — set qtrue at the end of WiredUI_Init and
 // on successful SafeReload; set qfalse in WiredUI_Shutdown and on failing
 // SafeReload. Independent of cls.uiStarted so recovery can detect a dead
@@ -1062,6 +1357,25 @@ static wiredItemDef_t *wui_bindItem = NULL;
 static qboolean       wui_sliderDragging = qfalse;
 static wiredItemDef_t *wui_sliderDragItem = NULL;
 
+/* ── listbox scrollbar drag state ─────────────────────────────────────
+ * Non-NULL while the user drags a listbox's vertical scrollbar thumb.
+ * wui_listScrollGrabDY is the cursor's offset within the thumb at grab time
+ * (so the thumb does not jump under the cursor). Mirrors the slider-drag
+ * pattern; the flex scroll-container thumb drag lives in cl_wired_clay.c
+ * (its scroll state is there). */
+static wiredItemDef_t *wui_listScrollDragItem = NULL;
+static float           wui_listScrollGrabDY   = 0.0f;
+
+/* Spinner click-and-hold repeat: a held −/+ button steps once immediately, then
+ * (after WUI_SPINNER_HOLD_DELAY_MS) auto-repeats every WUI_SPINNER_HOLD_RATE_MS
+ * while the mouse button stays down. Latched on K_MOUSE1-down over a button
+ * (WiredUI_KeyEvent), fired from WiredUI_TickFrame, cleared on release. */
+#define WUI_SPINNER_HOLD_DELAY_MS  350   /* pause before auto-repeat kicks in */
+#define WUI_SPINNER_HOLD_RATE_MS    60   /* interval between repeated steps */
+static wiredItemDef_t *wui_spinnerHoldItem = NULL;
+static int             wui_spinnerHoldDir  = 0;    /* +1 / -1 */
+static int             wui_spinnerHoldNext = 0;    /* realtime of next repeat */
+
 // ── text field editing state ──────────────────────────────────────────
 static qboolean       wui_editingField = qfalse;
 static wiredItemDef_t *wui_editItem = NULL;
@@ -1070,8 +1384,12 @@ static int            wui_editPaintOffset = 0;
 
 static float     wui_cursorX = 320.0f;
 static float     wui_cursorY = 240.0f;
-static int       wui_focusItem = -1;     // index of focused item
-static qboolean  wui_focusFromMouse = qfalse;  // qtrue if focus came from mouse hover
+/* wui_focusItem is defined once near the top of the file (see the
+ * consolidation note there); the duplicate definition that used to sit here
+ * was removed. */
+static wiredItemDef_t *wui_focusedItemPtr = NULL; // authoritative focused item ptr (supports nested children)
+static wiredItemDef_t *wui_hoveredItemPtr = NULL; // authoritative mouse-hovered item ptr (supports nested children)
+static qboolean        wui_focusFromMouse = qfalse;  // qtrue if focus came from mouse hover
 
 // ── tooltip delay ─────────────────────────────────────────────────────
 #define WIRED_TOOLTIP_DELAY_MS  500   // ms before tooltip appears
@@ -1089,6 +1407,96 @@ static int       testall_delay = 2000;  // ms between menu switches
 static int       wui_lastClickTime = 0;
 static int       wui_lastClickRow = -1;
 static float     wui_lastClickFeeder = 0;
+
+/* ── overlay custom-draws ────────────────────────────────────────────
+ *
+ * The cursor sprite + hover tooltip render via the compositor
+ * (WUI_LAYER_OVERLAY) rather than imperatively from WiredUI_Refresh. The
+ * .wmenu item's resolved rect is ignored — both routines anchor to the
+ * post-clamp wui_cursorX/wui_cursorY pixel coordinates (set by
+ * WiredUI_MouseEvent). Layer gating (KEYCATCH_UI) lives in
+ * wui_layer_active so the items are not emitted at all in gameplay; the
+ * tooltip's own focus + delay gates live here in the routine. */
+
+static void WiredUI_CustomDraw_Cursor( float x, float y, float w, float h, vec4_t color ) {
+	vec4_t cursorTint = { 0.85f, 0.55f, 0.1f, 1.0f };
+
+	( void ) x; ( void ) y; ( void ) w; ( void ) h; ( void ) color;
+
+	if ( wui_cursorShader ) {
+		/* The cursor art only occupies the sprite's lower-right quarter (the
+		 * upper-left 3/4 is transparent padding), so a full-texture draw wastes
+		 * 3/4 of the rect and renders tiny. Draw ONLY that quarter (UV 0.5,0.5→
+		 * 1,1) stretched to fill the whole rect, doubling the visible arrow.
+		 * Size scales with dpiScale (WiredUI is physical-pixel space; the old
+		 * fixed 40px ignored HiDPI and read small). The arrow tip is the sprite
+		 * hotspot; anchor the rect's top-left at the pointer. */
+		float dpi  = WiredUI_GetDpiScale();
+		float size = 28.0f * dpi;
+		re.SetColor( cursorTint );
+		re.DrawStretchPic( wui_cursorX, wui_cursorY, size, size,
+		                   0.5f, 0.5f, 1.0f, 1.0f, wui_cursorShader );
+		re.SetColor( NULL );
+	} else {
+		re.SetColor( cursorTint );
+		WUI_FillRect( wui_cursorX - 1, wui_cursorY - 8, 2, 16, cursorTint );
+		WUI_FillRect( wui_cursorX - 8, wui_cursorY - 1, 16, 2, cursorTint );
+		re.SetColor( NULL );
+	}
+}
+
+static void WiredUI_CustomDraw_Tooltip( float x, float y, float w, float h, vec4_t color ) {
+	wiredMenuDef_t *menu;
+	wiredItemDef_t *focus;
+	float           tx, ty, tw, th;
+	vec4_t          tipBg = { 0.0f, 0.0f, 0.0f, 0.85f };
+	vec4_t          tipFg = { 1.0f, 1.0f, 1.0f, 0.95f };
+
+	( void ) x; ( void ) y; ( void ) w; ( void ) h; ( void ) color;
+
+	if ( !wui_focusFromMouse ) return;
+	if ( wui_tooltipStartTime <= 0 ) return;
+	if ( ( cls.realtime - wui_tooltipStartTime ) < WIRED_TOOLTIP_DELAY_MS ) return;
+
+	menu = WiredUI_GetActiveMenu();
+	if ( !menu ) return;
+	/* resolve the hovered item through the authoritative pointer-based
+	 * hover state, not the legacy top-level wui_focusItem index.
+	 * wui_focusItem is forced to -1 when a NESTED flex child is hovered (the
+	 * top-level scan at the hover-update site can't address children), so the
+	 * old index guard suppressed tooltips for every nested item. The tooltip
+	 * timer is already keyed on wui_hoveredItemPtr's tooltip, so consume the
+	 * same pointer here. */
+	focus = wui_hoveredItemPtr;
+	if ( !focus || !focus->tooltip[0] ) return;
+
+	tx = wui_cursorX + 16.0f;
+	ty = wui_cursorY + 16.0f;
+	tw = strlen( focus->tooltip ) * 8.0f + 8.0f;
+	th = 16.0f;
+
+	if ( tx + tw > (float)cls.glconfig.vidWidth )  tx = (float)cls.glconfig.vidWidth - tw;
+	if ( ty + th > (float)cls.glconfig.vidHeight ) ty = wui_cursorY - th - 4.0f;
+
+	WUI_FillRect( tx, ty, tw, th, tipBg );
+	Text_Draw( focus->tooltip, tx + 4.0f, ty + 4.0f, FONT_UI, 8.0f, tipFg, TEXT_ALIGN_LEFT, 0 );
+}
+
+static void WiredUI_RegisterOverlayCustomDraws( void ) {
+	wuiCustomDrawDef_t def;
+
+	memset( &def, 0, sizeof( def ) );
+	Q_strncpyz( def.name, "custom:wui_cursor", sizeof( def.name ) );
+	def.isStateful        = qfalse;
+	def.routine.stateless = WiredUI_CustomDraw_Cursor;
+	WiredUI_RegisterCustomDraw( &def );
+
+	memset( &def, 0, sizeof( def ) );
+	Q_strncpyz( def.name, "custom:wui_tooltip", sizeof( def.name ) );
+	def.isStateful        = qfalse;
+	def.routine.stateless = WiredUI_CustomDraw_Tooltip;
+	WiredUI_RegisterCustomDraw( &def );
+}
 
 typedef struct {
 	int count;
@@ -1108,6 +1516,14 @@ static void WiredUI_CloseMultiDropdown( void ) {
 	wui_multiDropdownItem = NULL;
 	wui_multiDropdownHover = -1;
 	wui_multiDropdownScroll = 0;
+}
+
+/* The item whose dropdown popup is currently open, or NULL. The compositor
+ * needs this to anchor the floating option list to the row's actual Clay
+ * element (CLAY_ATTACH_TO_ELEMENT_WITH_ID) instead of the CPU-side
+ * resolvedRect, which diverges for flex-container children. */
+wiredItemDef_t *WiredUI_GetMultiDropdownItem( void ) {
+	return wui_multiDropdownOpen ? wui_multiDropdownItem : NULL;
 }
 
 static void WiredUI_GetMultiOptions( wiredItemDef_t *item, wiredMultiOptions_t *out ) {
@@ -1169,25 +1585,165 @@ static void WiredUI_SetMultiOptionByIndex( wiredItemDef_t *item, const wiredMult
 	}
 }
 
+/* ── radio / segmented control (ITEM_TYPE_RADIOBUTTON) public helpers ─────────
+ * A segmented control is a MULTI whose N options render inline as horizontal
+ * segments instead of a dropdown. It shares the exact option-source machinery
+ * above (cvarStrList / cvarFloatList → wiredMultiDef_t, populate callbacks) and
+ * the same value↔index match logic, so radio and the faked dropdowns can never
+ * diverge on "which option is selected". Both the renderer (cl_wired_clay.c) and
+ * the input path consult these, keeping a single source of truth. */
+
+/* Number of segments this control renders (its option count, clamped to the
+ * multi maximum). 0 when the item has no option source. */
+int WiredUI_RadioSegmentCount( wiredItemDef_t *item ) {
+	wiredMultiOptions_t opts;
+	if ( !item ) return 0;
+	WiredUI_GetMultiOptions( item, &opts );
+	return opts.count;
+}
+
+/* Display label for segment `index`, or NULL when out of range. The pointer is
+ * owned by the item's multiData / populate result and is valid for this frame. */
+const char *WiredUI_RadioSegmentLabel( wiredItemDef_t *item, int index ) {
+	wiredMultiOptions_t opts;
+	if ( !item ) return NULL;
+	WiredUI_GetMultiOptions( item, &opts );
+	if ( index < 0 || index >= opts.count ) return NULL;
+	return opts.labels[index];
+}
+
+/* Index of the currently-selected segment (the option whose value matches the
+ * bound cvar), or -1 when the cvar matches no option. */
+int WiredUI_RadioSelectedIndex( wiredItemDef_t *item ) {
+	wiredMultiOptions_t opts;
+	char                curBuf[256];
+	if ( !item ) return -1;
+	WiredUI_GetMultiOptions( item, &opts );
+	if ( opts.count <= 0 ) return -1;
+	WiredUI_StateGetString( item->cvar, curBuf, sizeof( curBuf ) );
+	return WiredUI_FindMultiOptionIndex( item, &opts, curBuf );
+}
+
+/* Select segment `index` (writes its value into the bound cvar). No-op when out
+ * of range. The one mutation point for radio selection — click + keyboard both
+ * route here so they stay in lockstep. */
+void WiredUI_RadioSelectIndex( wiredItemDef_t *item, int index ) {
+	wiredMultiOptions_t opts;
+	if ( !item ) return;
+	WiredUI_GetMultiOptions( item, &opts );
+	WiredUI_SetMultiOptionByIndex( item, &opts, index );
+}
+
+/* Open the multi-select dropdown popup for `item`, seeding hover/scroll from
+ * the item's current cvar value. This is the SINGLE source of the open
+ * state-set — both the interactive click handler (ITEM_TYPE_MULTI mouse1) and
+ * the #ifdef _DEBUG wui_dropdown_test command call it, so the two paths can
+ * never diverge. Returns qtrue if the dropdown was opened (item has options). */
+static qboolean WiredUI_OpenMultiDropdown( wiredItemDef_t *item ) {
+	wiredMultiOptions_t opts;
+	char curBuf[256];
+
+	if ( !item ) return qfalse;
+	WiredUI_GetMultiOptions( item, &opts );
+	if ( opts.count <= 0 ) return qfalse;
+
+	WiredUI_StateGetString( item->cvar, curBuf, sizeof( curBuf ) );
+	wui_multiDropdownOpen = qtrue;
+	wui_multiDropdownItem = item;
+	wui_multiDropdownHover = WiredUI_FindMultiOptionIndex( item, &opts, curBuf );
+	if ( wui_multiDropdownHover < 0 ) wui_multiDropdownHover = 0;
+	wui_multiDropdownScroll = wui_multiDropdownHover - 4;
+	if ( wui_multiDropdownScroll < 0 ) wui_multiDropdownScroll = 0;
+	return qtrue;
+}
+
 static qboolean WiredUI_GetMultiDropdownRect( wiredMenuDef_t *menu, wiredItemDef_t *item,
-	int optionCount, float *x, float *y, float *w, float *h, float *rowH, int *visibleRows ) {
-	float rx, ry, rw, rh;
-	int rows;
-	if ( !menu || !item || optionCount <= 0 ) return qfalse;
+	const wiredMultiOptions_t *opts, float *x, float *y, float *w, float *h, float *rowH, int *visibleRows ) {
+	float rx, ry, rw, rh, widest = 0.0f;
+	int rows, li;
+	if ( !menu || !item || !opts || opts->count <= 0 ) return qfalse;
 
-	rw = item->resolvedRect.w;
-	rh = item->resolvedRect.h;
-	if ( rh < 18.0f ) rh = 18.0f;
+	/* Per-option row height: use the control's own elementheight (the listbox
+	 * model, cl_wired_clay.c:1366), NOT resolvedRect.h. resolvedRect.h is the
+	 * whole settings row's height, so multiplying it by the option count made
+	 * the popup vastly taller than its options ("dropdown gereksiz uzun").
+	 * elementheight * rows hugs the option list. */
+	{
+		/* Floor the row height to the glyph line box so option labels don't
+		 * overlap vertically (draw is top-aligned with zero leading). The popup
+		 * is laid out in physical pixels and the option font draws at
+		 * fontSize × dpiScale, so scale the authored/derived logical row height
+		 * by the same factor — otherwise on HiDPI the 2× text overflows an
+		 * un-scaled row and the lines look cramped. */
+		float dpi    = WiredUI_GetDpiScale();
+		float minRow = WUI_DEFAULT_FONT_SIZE * WUI_LINE_HEIGHT_FACTOR * dpi;
+		rh = item->elementheight > 0.0f ? item->elementheight * dpi : minRow;
+		if ( rh < minRow ) rh = minRow;
+	}
+	/* Width from the widest option label, not the whole settings row: the popup
+	 * hugs its content so it opens only as wide as its longest option ("neden
+	 * yalnizca o field'i kaplamiyor"). Text_Measure resolves the face and skips
+	 * colour codes; the option rows draw at FONT_UI / WUI_DEFAULT_FONT_SIZE, so
+	 * measure with the same metrics + cell padding. Measured HERE (not in the
+	 * caller) so the render path and the two hit-test callers all get the same
+	 * rect. Floored to a usable minimum and never wider than the owning row. */
+	for ( li = 0; li < opts->count; li++ ) {
+		float lw = Text_Measure( opts->labels[ li ], FONT_UI, WUI_DEFAULT_FONT_SIZE );
+		if ( lw > widest ) widest = lw;
+	}
+	/* Text_Measure returns a logical-px width, but the option labels DRAW at
+	 * fontSize × dpiScale (like rowH above). The popup lives in physical-pixel
+	 * Clay space, so scale the measured width to physical too — otherwise on
+	 * HiDPI the box is ~half as wide as the 2× glyphs and long labels
+	 * ("Capture the Flag") overflow the popup. */
+	widest *= WiredUI_GetDpiScale();
+	/* Anchor rect: prefer the ACTUAL Clay-rendered rect over the legacy
+	 * WUI_LayoutMenu resolvedRect. Settings rows inside a flexbox panel are
+	 * flex-positioned by Clay (emit uses CLAY_ATTACH_TO_NONE + CLAY_SIZING_GROW,
+	 * cl_wired_clay.c ~2528/2537), so their true on-screen rect — where the
+	 * right-aligned value actually draws — is Clay's layout, NOT resolvedRect.
+	 * resolvedRect for these rows is both offset AND narrower than the visible
+	 * row (measured: resolvedRect x=1494 w=396 vs Clay x=1700 w=645), which
+	 * anchored the popup a quarter-box left of the value. Fall back to
+	 * resolvedRect for legacy ATTACH_TO_ROOT rows Clay hasn't laid out. */
+	wuiPixelRect_t anchor;
+	if ( WiredUI_ClayItemRenderedRect( menu, item, &anchor ) ) {
+		/* Clay coords are absolute screen px already; the vertical scroll of the
+		 * owning panel is baked into Clay's layout, so don't re-subtract
+		 * scrollOffset for the Clay path. */
+	} else {
+		/* Legacy fallback: resolvedRect y is pre-scroll, so subtract the panel
+		 * scroll offset to land the popup under the on-screen row. */
+		anchor = item->resolvedRect;
+		anchor.y -= menu->scrollOffset;
+	}
 
-	rows = optionCount;
+	rw = widest + 24.0f * WiredUI_GetDpiScale();   /* 12px padding each side (physical) */
+	if ( rw < 160.0f * WiredUI_GetDpiScale() ) rw = 160.0f * WiredUI_GetDpiScale();
+	/* The popup hugs its widest OPTION, not the owning row — a narrow field
+	 * (e.g. server-settings "Type") must still show long labels like
+	 * "Capture the Flag" in full. Do NOT clamp to anchor.w; the right-align
+	 * below keeps the right edge under the value and the screen-edge clamps
+	 * (further down) stop it from overflowing off-screen. */
+
+	rows = opts->count;
 	if ( rows > 10 ) rows = 10;
 	if ( rows < 1 ) rows = 1;
 
-	rx = item->resolvedRect.x;
-	ry = item->resolvedRect.y - menu->scrollOffset + item->resolvedRect.h + 2.0f;
+	/* Right-align the popup under the VALUE field, not the row's left edge. The
+	 * value (and the dropdown's current text) hugs the row's right edge, so the
+	 * popup must open under it: anchor its right edge to the row's right edge.
+	 * Using anchor.x alone dropped the list under the label (row's left),
+	 * mid-row. rx = rowRight - popupWidth places it under the value column. */
+	rx = anchor.x + anchor.w - rw;
+	/* Right edge stays under the value; when the popup is wider than the field
+	 * it grows LEFT past the row's left edge (fine inside the panel). Don't
+	 * clamp to anchor.x — that would re-narrow it. The screen-edge clamps below
+	 * keep it on-screen. */
+	ry = anchor.y + anchor.h + 2.0f;
 
 	if ( ry + rh * rows > (float)cls.glconfig.vidHeight - 4.0f ) {
-		ry = item->resolvedRect.y - menu->scrollOffset - ( rh * rows ) - 2.0f;
+		ry = anchor.y - ( rh * rows ) - 2.0f;
 	}
 	if ( ry < 4.0f ) ry = 4.0f;
 	if ( rx + rw > (float)cls.glconfig.vidWidth - 4.0f ) rx = (float)cls.glconfig.vidWidth - rw - 4.0f;
@@ -1202,82 +1758,48 @@ static qboolean WiredUI_GetMultiDropdownRect( wiredMenuDef_t *menu, wiredItemDef
 	return qtrue;
 }
 
-static void WiredUI_DrawMultiDropdown( wiredMenuDef_t *menu ) {
-	wiredMultiOptions_t opts;
-	float ddX, ddY, ddW, ddH, rowH;
-	int visibleRows;
-	if ( !wui_multiDropdownOpen || !menu || !wui_multiDropdownItem ) return;
+void WiredUI_QueryMultiDropdownRender( wuiMultiDropdownRender_t *out ) {
+	wiredMenuDef_t      *menu;
+	wiredMultiOptions_t  opts;
+	char                 cvarBuf[256];
+	int                  i;
+	int                  copy;
+
+	if ( !out ) return;
+	memset( out, 0, sizeof( *out ) );
+	out->hoverRow    = -1;
+	out->selectedRow = -1;
+
+	if ( !wui_multiDropdownOpen || !wui_multiDropdownItem ) return;
+
+	menu = WiredUI_GetActiveMenu();
+	if ( !menu ) return;
 
 	WiredUI_GetMultiOptions( wui_multiDropdownItem, &opts );
-	if ( opts.count <= 0 ) {
-		WiredUI_CloseMultiDropdown();
+	if ( opts.count <= 0 ) return;
+
+	if ( !WiredUI_GetMultiDropdownRect( menu, wui_multiDropdownItem, &opts,
+	     &out->x, &out->y, &out->w, &out->h, &out->rowH, &out->visibleRows ) ) {
 		return;
 	}
 
-	if ( !WiredUI_GetMultiDropdownRect( menu, wui_multiDropdownItem, opts.count,
-		&ddX, &ddY, &ddW, &ddH, &rowH, &visibleRows ) ) {
-		WiredUI_CloseMultiDropdown();
-		return;
+	if ( wui_multiDropdownItem->cvar[0] ) {
+		WiredUI_StateGetString( wui_multiDropdownItem->cvar, cvarBuf, sizeof( cvarBuf ) );
+		out->selectedRow = WiredUI_FindMultiOptionIndex( wui_multiDropdownItem, &opts, cvarBuf );
 	}
 
-	char currentValue[256];
-	WiredUI_StateGetString( wui_multiDropdownItem->cvar, currentValue, sizeof( currentValue ) );
-	int selectedIndex = WiredUI_FindMultiOptionIndex( wui_multiDropdownItem, &opts, currentValue );
-	vec4_t panelColor = { 0.06f, 0.06f, 0.1f, 0.96f };
-	vec4_t borderColor = { 0.45f, 0.45f, 0.52f, 0.95f };
-	vec4_t hoverColor = { 0.85f, 0.55f, 0.1f, 0.20f };
-	vec4_t selectedColor = { 0.85f, 0.55f, 0.1f, 0.32f };
-
-	{
-		int maxScroll = opts.count - visibleRows;
-		if ( maxScroll < 0 ) maxScroll = 0;
-		if ( wui_multiDropdownScroll > maxScroll ) wui_multiDropdownScroll = maxScroll;
-		if ( wui_multiDropdownScroll < 0 ) wui_multiDropdownScroll = 0;
+	copy = opts.count;
+	if ( copy > WIRED_MAX_MULTI_CHOICES ) copy = WIRED_MAX_MULTI_CHOICES;
+	for ( i = 0; i < copy; i++ ) {
+		out->labels[i] = opts.labels[i];
 	}
 
-	WUI_FillRect( ddX, ddY, ddW, ddH, panelColor );
-	WUI_FillRect( ddX, ddY, ddW, 1.0f, borderColor );
-	WUI_FillRect( ddX, ddY + ddH - 1.0f, ddW, 1.0f, borderColor );
-	WUI_FillRect( ddX, ddY, 1.0f, ddH, borderColor );
-	WUI_FillRect( ddX + ddW - 1.0f, ddY, 1.0f, ddH, borderColor );
-
-	for ( int i = 0; i < visibleRows; i++ ) {
-		int idx = wui_multiDropdownScroll + i;
-		float rowY = ddY + rowH * i;
-		if ( idx >= opts.count ) break;
-
-		if ( idx == selectedIndex ) {
-			WUI_FillRect( ddX + 1.0f, rowY, ddW - 2.0f, rowH, selectedColor );
-		}
-		if ( idx == wui_multiDropdownHover ) {
-			WUI_FillRect( ddX + 1.0f, rowY, ddW - 2.0f, rowH, hoverColor );
-		}
-
-		if ( opts.labels[idx] && opts.labels[idx][0] ) {
-			float charSize = wui_multiDropdownItem->fontPointSize > 0.0f
-				? wui_multiDropdownItem->fontPointSize : WUI_DEFAULT_FONT_SIZE;
-			float textY = rowY + ( rowH - charSize ) * 0.5f;
-			Text_Draw( opts.labels[idx], ddX + 10.0f, textY, FONT_UI, charSize,
-				wui_multiDropdownItem->forecolor, TEXT_ALIGN_LEFT, 0 );
-		}
-	}
-
-	if ( opts.count > visibleRows ) {
-		float trackW = 4.0f;
-		float trackX = ddX + ddW - trackW - 2.0f;
-		float trackY = ddY + 2.0f;
-		float trackH = ddH - 4.0f;
-		float thumbH = trackH * ( (float)visibleRows / (float)opts.count );
-		float thumbY;
-		vec4_t trackColor = { 0.3f, 0.3f, 0.3f, 0.35f };
-		vec4_t thumbColor = { 0.7f, 0.7f, 0.7f, 0.6f };
-		if ( thumbH < 16.0f ) thumbH = 16.0f;
-		thumbY = trackY + ( trackH - thumbH ) *
-			( (float)wui_multiDropdownScroll / (float)( opts.count - visibleRows ) );
-		WUI_FillRect( trackX, trackY, trackW, trackH, trackColor );
-		WUI_FillRect( trackX, thumbY, trackW, thumbH, thumbColor );
-	}
+	out->open         = qtrue;
+	out->optionCount  = opts.count;
+	out->hoverRow     = wui_multiDropdownHover;
+	out->scrollOffset = wui_multiDropdownScroll;
 }
+
 
 // ── symbol registration ───────────────────────────────────────────────
 
@@ -1413,7 +1935,7 @@ wuiPopulateCallback_t WiredUI_GetPopulateCallback( const char *name ) {
 }
 
 // ── batch registration stubs ──────────────────────────────────────────
-// These will be filled in Phase 3 when ModernHUD elements are wrapped.
+// These will be filled in later when ModernHUD elements are wrapped.
 
 void WiredUI_RegisterCoreSymbols( void ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "WiredUI: core symbols registered (stub — Phase 3)\n" );
@@ -1426,7 +1948,7 @@ void WiredUI_RegisterCoreElements( void ) {
 // ── public API ────────────────────────────────────────────────────────
 
 // ── delayed screenshot ────────────────────────────────────────────────
-// +set wired_screenshotDelay N triggers screenshotJPEG after N seconds.
+// +set wired_screenshotDelay N triggers `screenshot jpg` after N seconds.
 // Useful for automated testing: make run-game DEV=1 +set wired_screenshotDelay 5
 
 static cvar_t *wired_screenshotDelay = NULL;
@@ -1484,15 +2006,23 @@ static void WiredUI_RegisterAssets( void ) {
 		wui_gradientBarShader = re.RegisterShaderNoMip( wui_assetGlobals.gradientBar );
 	}
 
+	// Phase 7.15.4-a class-B pin: the cursor + gradient-bar are cached WiredUI
+	// handles bound every menu frame without re-resolving residency — the
+	// texture-LRU must not evict them. Dark in 7.15.4-a (no reader yet).
+	if ( re.PinShaderImages ) {
+		if ( wui_cursorShader )      re.PinShaderImages( wui_cursorShader );
+		if ( wui_gradientBarShader ) re.PinShaderImages( wui_gradientBarShader );
+	}
+
 	WUI_BackgroundInit();
 }
 
 // ── hud cvar helper ───────────────────────────────────────────────────
-// Loads ui/<hud>.whud when the 'hud' cvar is non-empty.
+// Loads ui/<hud>.wui when the 'hud' cvar is non-empty.
 static void WiredUI_LoadHudFromCvar( void ) {
 	if ( !wired_hud || !wired_hud->string[0] ) return;
 	char path[MAX_QPATH];
-	Com_sprintf( path, sizeof(path), "ui/%s.whud", wired_hud->string );
+	Com_sprintf( path, sizeof(path), "ui/%s.wui", wired_hud->string );
 	WiredUI_LoadMenuFile( path );
 }
 
@@ -1520,6 +2050,214 @@ static void WiredUI_TestAll_f( void ) {
 		WiredUI_GetMenuCount(), testall_delay );
 }
 
+/* ad-hoc loose-file menu loader. Bypasses no FS layers — relies on
+ * the standard pak+loose search; for any path NOT present in a pak the FS
+ * layer resolves to the loose file in homepath or installpath. Useful for
+ * fixture .wmenu authoring under test_phase2c2/ etc. without rebuilding paks.
+ *
+ * Kept in tree as a dev workflow utility; a later pass decides whether to gate
+ * behind a developer cvar for release. */
+static void WiredUI_LoadMenuLoose_f( void ) {
+	const char *path;
+	if ( Cmd_Argc() < 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"Usage: wui_load_menu_loose <path>\n"
+			"  e.g. wui_load_menu_loose ui/test_phase2c2/fixture_repeat_lua.wmenu\n" );
+		return;
+	}
+	path = Cmd_Argv( 1 );
+	if ( WiredUI_LoadMenuFile( path ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"wui_load_menu_loose: loaded '%s' (menus=%d)\n",
+			path, WiredUI_GetMenuCount() );
+	} else {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_load_menu_loose: failed to load '%s'\n", path );
+	}
+}
+
+/* Dev workflow: exercise the repeat-block runtime path end-to-end.
+ * Writes three rows of test data into the WiredStore under the
+ * `test.list.*` prefix, loose-loads tests/fixtures/repeat_poc.wui,
+ * then pushes the menu. The expansion driver in cl_wired_clay.c
+ * iterates `test.list.count` rows and substitutes the template's
+ * `{{ row.text }}` placeholder against `WiredStore_Get("test.list.<i>.text")`.
+ * Kept in-tree alongside wui_load_menu_loose + ui_testall as a
+ * permanent dev utility for verifying repeat-block resolution
+ * without rebuilding a real cgame state path. */
+static void WiredUI_TestRepeat_f( void ) {
+	wuiStoreEntry_t *e;
+	int i;
+	const char *rows[3] = {
+		"row 0 — hello",
+		"row 1 — world",
+		"row 2 — final"
+	};
+
+	e = WiredStore_Set( "test.list.count" );
+	if ( e ) {
+		Q_strncpyz( e->text, "3", sizeof( e->text ) );
+		e->value = 3.0f;
+	}
+	for ( i = 0; i < 3; i++ ) {
+		char key[ 64 ];
+		Com_sprintf( key, sizeof( key ), "test.list.%d.text", i );
+		e = WiredStore_Set( key );
+		if ( e ) {
+			Q_strncpyz( e->text, rows[ i ], sizeof( e->text ) );
+		}
+	}
+
+	Com_Log( SEV_INFO, LOG_CH(ch_ui),
+		"wui_test_repeat: wrote 3 rows to test.list.{0,1,2}.text\n" );
+
+	if ( WiredUI_LoadMenuFile( "tests/fixtures/repeat_poc.wui" ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"wui_test_repeat: loaded fixture (menus=%d); pushing 'repeat_poc'\n",
+			WiredUI_GetMenuCount() );
+		Cbuf_InsertText( "wui_push repeat_poc\n" );
+	} else {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_test_repeat: failed to load tests/fixtures/repeat_poc.wui — "
+			"is the file under fs_installpath or fs_homepath?\n" );
+	}
+}
+
+/* Dev workflow: exercise per-row recursive child emit. Writes two rows
+ * of icon-shader + label test data into the WiredStore under the
+ * `test.image_list.*` prefix, loose-loads
+ * tests/fixtures/repeat_poc_image_text.wui, then pushes the menu. The
+ * repeat expansion clones the template subtree per row, substitutes
+ * `{{ row.icon }}` into the inner container's background shader path
+ * and `{{ row.label }}` into the inner text leaf, and emits both
+ * children via wui_clay_emit_item. Distinct per-row icon + label proves
+ * end-to-end Mustache substitution into clone fields. Kept in-tree as a
+ * permanent dev utility alongside wui_test_repeat. */
+static void WiredUI_TestRepeatImage_f( void ) {
+	wuiStoreEntry_t *e;
+	int              i;
+	const char *icons[2]  = { "levelshots/q3dm0",      "levelshots/q3dm1" };
+	const char *labels[2] = { "Award 1 — first icon", "Award 2 — second icon" };
+
+	e = WiredStore_Set( "test.image_list.count" );
+	if ( e ) {
+		Q_strncpyz( e->text, "2", sizeof( e->text ) );
+		e->value = 2.0f;
+	}
+	for ( i = 0; i < 2; i++ ) {
+		char key[ 64 ];
+		Com_sprintf( key, sizeof( key ), "test.image_list.%d.icon", i );
+		e = WiredStore_Set( key );
+		if ( e ) Q_strncpyz( e->text, icons[ i ], sizeof( e->text ) );
+		Com_sprintf( key, sizeof( key ), "test.image_list.%d.label", i );
+		e = WiredStore_Set( key );
+		if ( e ) Q_strncpyz( e->text, labels[ i ], sizeof( e->text ) );
+	}
+
+	Com_Log( SEV_INFO, LOG_CH(ch_ui),
+		"wui_test_repeat_image: wrote 2 rows to test.image_list.{0,1}.{icon,label}\n" );
+
+	if ( WiredUI_LoadMenuFile( "tests/fixtures/repeat_poc_image_text.wui" ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"wui_test_repeat_image: loaded fixture (menus=%d); pushing 'repeat_poc_image_text'\n",
+			WiredUI_GetMenuCount() );
+		Cbuf_InsertText( "wui_push repeat_poc_image_text\n" );
+	} else {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_test_repeat_image: failed to load tests/fixtures/repeat_poc_image_text.wui — "
+			"is the file under fs_installpath or fs_homepath?\n" );
+	}
+}
+
+/* Dev workflow: exercise the STEP curve built-in (`blink`). Loose-loads
+ * tests/fixtures/anim_step_blink.wui (a centred text leaf with
+ * `animation "blink"`) and pushes the menu. Visual verification: the
+ * label snaps fully visible / fully hidden at the 50% mark of each
+ * 600ms cycle — no fade, no interpolation. Kept in-tree alongside
+ * wui_test_repeat[_image] as a permanent dev utility. */
+static void WiredUI_TestAnimStep_f( void ) {
+	if ( WiredUI_LoadMenuFile( "tests/fixtures/anim_step_blink.wui" ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"wui_test_anim_step: loaded fixture (menus=%d); pushing 'anim_step_blink'\n",
+			WiredUI_GetMenuCount() );
+		Cbuf_InsertText( "wui_push anim_step_blink\n" );
+	} else {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_test_anim_step: failed to load tests/fixtures/anim_step_blink.wui — "
+			"is the file under fs_installpath or fs_homepath?\n" );
+	}
+}
+
+/* v2 primitive library demos — each loose-loads its fixture menu and
+ * pushes it. Kept in-tree alongside wui_test_repeat[_image] /
+ * wui_test_anim_step / wui_test_font_jbmono as permanent dev utilities
+ * for visual verification of the qw_* primitive set. */
+static void wui_primitive_push( const char *fixture, const char *menuName ) {
+	char path[ 128 ];
+	char push[ 128 ];
+	Com_sprintf( path, sizeof( path ), "tests/fixtures/%s.wui", fixture );
+	if ( WiredUI_LoadMenuFile( path ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"wui_test_primitive: loaded '%s' (menus=%d); pushing '%s'\n",
+			fixture, WiredUI_GetMenuCount(), menuName );
+		Com_sprintf( push, sizeof( push ), "wui_push %s\n", menuName );
+		Cbuf_InsertText( push );
+	} else {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_test_primitive: failed to load '%s'\n", path );
+	}
+}
+
+static void WiredUI_TestPrimitiveQwSigil_f( void )     { wui_primitive_push( "primitive_qw_sigil",     "primitive_qw_sigil"     ); }
+static void WiredUI_TestPrimitiveRunes_f( void )       { wui_primitive_push( "primitive_runes",        "primitive_runes"        ); }
+static void WiredUI_TestPrimitiveBracket_f( void )     { wui_primitive_push( "primitive_bracket",      "primitive_bracket"      ); }
+static void WiredUI_TestPrimitiveArenaThumb_f( void )  { wui_primitive_push( "primitive_arena_thumb",  "primitive_arena_thumb"  ); }
+static void WiredUI_TestPrimitiveDisplayText_f( void ) { wui_primitive_push( "primitive_display_text", "primitive_display_text" ); }
+static void WiredUI_TestPrimitiveMono_f( void )        { wui_primitive_push( "primitive_mono",         "primitive_mono"         ); }
+static void WiredUI_TestPrimitivePlayerBadge_f( void ) { wui_primitive_push( "primitive_player_badge", "primitive_player_badge" ); }
+static void WiredUI_TestBgDemo_f( void )                { wui_primitive_push( "bg_demo_backdrop",      "bg_demo_backdrop"      ); }
+static void WiredUI_TestBgPlasma_f( void )              { wui_primitive_push( "bg_plasma_primitive",   "bg_plasma_primitive"   ); }
+static void WiredUI_TestUtf8_f( void )                  { wui_primitive_push( "utf8_glyph_verify",     "utf8_glyph_verify"     ); }
+static void WiredUI_TestColorcode_f( void )             { wui_primitive_push( "text_colorcode_regression", "text_colorcode_regression" ); }
+
+/* Ticker demo needs WiredStore-driven repeat data; pre-populate
+ * test.ticker.{0..2}.label + test.ticker.count, then push. */
+static void WiredUI_TestPrimitiveTicker_f( void ) {
+	wuiStoreEntry_t *e;
+	int              i;
+	const char      *labels[3] = {
+		"PATCH 0.1.0 LIVE",
+		"RAILGUN HITBOX REVISED",
+		"QUAKECON QUALIFIERS OPEN",
+	};
+	e = WiredStore_Set( "test.ticker.count" );
+	if ( e ) { Q_strncpyz( e->text, "3", sizeof( e->text ) ); e->value = 3.0f; }
+	for ( i = 0; i < 3; i++ ) {
+		char key[ 64 ];
+		Com_sprintf( key, sizeof( key ), "test.ticker.%d.label", i );
+		e = WiredStore_Set( key );
+		if ( e ) Q_strncpyz( e->text, labels[ i ], sizeof( e->text ) );
+	}
+	wui_primitive_push( "primitive_ticker", "primitive_ticker" );
+}
+
+/* Dev workflow: render a JetBrains Mono visual sample (ASCII + v2
+ * telemetry punctuation). $font_mono in the fixture resolves to the
+ * jetbrainsmono atlas post-15.5; comparing this against the same
+ * fixture pre-15.5 reveals the share_tech_mono → JBMono swap. */
+static void WiredUI_TestFontJBMono_f( void ) {
+	if ( WiredUI_LoadMenuFile( "tests/fixtures/font_jbmono_sample.wui" ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"wui_test_font_jbmono: loaded fixture (menus=%d); pushing 'font_jbmono_sample'\n",
+			WiredUI_GetMenuCount() );
+		Cbuf_InsertText( "wui_push font_jbmono_sample\n" );
+	} else {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_test_font_jbmono: failed to load tests/fixtures/font_jbmono_sample.wui — "
+			"is the file under fs_installpath or fs_homepath?\n" );
+	}
+}
+
 // ── Layer 5: hot-reload check ─────────────────────────────────────────
 static void WiredUI_CheckHotReload( int realtime ) {
 	if ( !wired_hotreload || !wired_hotreload->integer ) return;
@@ -1532,47 +2270,6 @@ static void WiredUI_CheckHotReload( int realtime ) {
 }
 
 // ── Layer 5: visual layout debug overlay ──────────────────────────────
-static void WiredUI_DrawDebugOverlay( wiredMenuDef_t *menu ) {
-	if ( !wired_debug_layout || !wired_debug_layout->integer ) return;
-	if ( !menu ) return;
-
-	vec4_t containerColor = { 0, 1, 0, 0.5f };    // green
-	vec4_t childColor     = { 0, 0.5f, 1, 0.5f };  // blue
-	vec4_t itemColor      = { 1, 0, 0, 0.3f };      // red (unused label kept for clarity)
-	(void)itemColor; // suppress unused warning
-
-	// Draw menu rect outline (green if flex container)
-	if ( menu->isFlexContainer ) {
-		float mx = menu->rect.x;
-		float my = menu->rect.y;
-		float mw = menu->rect.w;
-		float mh = menu->rect.h;
-		WUI_FillRect( mx, my, mw, 1, containerColor );
-		WUI_FillRect( mx, my + mh - 1, mw, 1, containerColor );
-		WUI_FillRect( mx, my, 1, mh, containerColor );
-		WUI_FillRect( mx + mw - 1, my, 1, mh, containerColor );
-	}
-
-	for ( int i = 0; i < menu->itemCount; i++ ) {
-		wiredItemDef_t *item = menu->items[i];
-		vec4_t *color;
-		float x, y, w, h;
-
-		if ( !item ) continue;
-
-		color = item->isFlexContainer ? &containerColor : &childColor;
-		x = item->rect.x;
-		y = item->rect.y;
-		w = item->rect.w;
-		h = item->rect.h;
-
-		// Draw outline (1px borders)
-		WUI_FillRect( x, y, w, 1, *color );
-		WUI_FillRect( x, y + h - 1, w, 1, *color );
-		WUI_FillRect( x, y, 1, h, *color );
-		WUI_FillRect( x + w - 1, y, 1, h, *color );
-	}
-}
 
 // ── stack accessors ───────────────────────────────────────────────────
 // Expose wui_menuStack internals without leaking the raw statics.
@@ -1586,6 +2283,39 @@ const char *WiredUI_GetMenuStackTop( void ) {
 	if ( wui_menuStackDepth <= 0 )
 		return "";
 	return wui_menuStack[ wui_menuStackDepth - 1 ];
+}
+
+void WiredUI_GetCursorNorm( float *nx, float *ny ) {
+	/* Cursor position normalized to [-1..1] about the viewport centre
+	 * (nx: -1 left edge, +1 right edge). Read-only view of the existing
+	 * post-clamp wui_cursorX/Y — the background parallax layer's only window
+	 * onto the mouse. Does not touch cursor handling. */
+	float vw = (float) cls.glconfig.vidWidth;
+	float vh = (float) cls.glconfig.vidHeight;
+	if ( nx ) *nx = ( vw > 0.0f ) ? ( wui_cursorX / vw ) * 2.0f - 1.0f : 0.0f;
+	if ( ny ) *ny = ( vh > 0.0f ) ? ( wui_cursorY / vh ) * 2.0f - 1.0f : 0.0f;
+}
+
+wuiBgIntent_t WiredUI_GetActiveBgIntent( const wiredMenuDef_t *panel ) {
+	if ( !panel )
+		return WUI_BG_INTENT_INHERIT;
+
+	/* The LOADING layer (state-driven, not on the menu stack) is a SCENE variant
+	 * of the menu-background system: while a map loads, the parallax DemoBackdrop
+	 * plays behind the progress + map content — matching the standalone menus
+	 * routed SCENE in F4. Resolve SCENE when this panel is the bound loading menu. */
+	if ( wui_loading_menu_path[ 0 ]
+	  && panel == WiredUI_FindMenuByPath( wui_loading_menu_path ) )
+		return WUI_BG_INTENT_SCENE;
+
+	/* Otherwise the push-time intent applies only to the stack-top MENU-layer
+	 * panel. Popups and multi-panel layers keep their authored background, so
+	 * return INHERIT unless `panel` is exactly the current stack top. */
+	if ( wui_menuStackDepth <= 0 )
+		return WUI_BG_INTENT_INHERIT;
+	if ( panel != WiredUI_FindMenu( wui_menuStack[ wui_menuStackDepth - 1 ] ) )
+		return WUI_BG_INTENT_INHERIT;
+	return wui_menuBgIntent[ wui_menuStackDepth - 1 ];
 }
 
 // ── health + recovery ─────────────────────────────────────────────────
@@ -1666,7 +2396,7 @@ void WiredUI_Activate( void ) {
 	// we're already visible — just let the error dialog layer if needed.
 	if ( wui_activeMenu != UIMENU_MAIN || wui_menuStackDepth == 0 ) {
 		WiredUI_SetActiveMenu( UIMENU_MAIN ); // sets KEYCATCH_UI
-		WiredUI_PushMenu( "main" );
+		WiredUI_PushMenu( "main", WUI_BG_INTENT_SCENE );
 	}
 
 	// If an error is pending, surface it as a dialog on top of main.
@@ -1685,6 +2415,500 @@ static void WiredUI_Recover_f( void ) {
 	WiredUI_Activate();
 }
 
+
+/* console-level entry point for pushing a named menu
+ * onto the stack. The `open` script command is .wui-internal (only
+ * callable from action {} blocks); without this, headless multimodal
+ * smokes couldn't navigate to specific menus without temporarily
+ * editing main.wui's onOpen. Production: low cost (matches the menu
+ * by name + delegates to WiredUI_PushMenu, which already validates).
+ * Modders: can bind to a key for quick navigation during testing. */
+static void WiredUI_PushMenu_f( void ) {
+	wuiBgIntent_t intent = WUI_BG_INTENT_INHERIT;
+	if ( Cmd_Argc() < 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"usage: wui_push <menu_name> [scene|dim|none]\n" );
+		return;
+	}
+	/* Optional 2nd arg selects the background intent (for testing the seam);
+	 * absent → INHERIT, reproducing the menu's authored background. */
+	if ( Cmd_Argc() >= 3 ) {
+		const char *k = Cmd_Argv( 2 );
+		if      ( !Q_stricmp( k, "scene" ) ) intent = WUI_BG_INTENT_SCENE;
+		else if ( !Q_stricmp( k, "dim" )   ) intent = WUI_BG_INTENT_DIM;
+		else if ( !Q_stricmp( k, "none" )  ) intent = WUI_BG_INTENT_NONE;
+		else if ( !Q_stricmp( k, "inherit" ) ) intent = WUI_BG_INTENT_INHERIT;
+		else Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_push: unknown intent '%s' (scene|dim|none|inherit) — using inherit\n", k );
+	}
+	WiredUI_PushMenu( Cmd_Argv( 1 ), intent );
+}
+
+/* enter the keybind capture state programmatically.
+ * Mirrors what the type-13 widget's click handler does: walks the top
+ * of the menu stack, finds the type-13 itemDef whose cvar matches
+ * argv[1], and sets wui_waitingForKey + wui_bindItem so the next key
+ * press writes the binding. Used for headless smoke captures of the
+ * "Press a key..." visual indicator; modders can bind a key to it for
+ * quick rebinding too. */
+static wiredItemDef_t *wui_find_bind_item_recursive( wiredItemDef_t *item, const char *targetCvar )
+{
+	int i;
+	if ( !item ) return NULL;
+	if ( item->type == ITEM_TYPE_BIND && !Q_stricmp( item->cvar, targetCvar ) ) {
+		return item;
+	}
+	for ( i = 0; i < item->childCount; i++ ) {
+		wiredItemDef_t *found = wui_find_bind_item_recursive( item->children[ i ], targetCvar );
+		if ( found ) return found;
+	}
+	return NULL;
+}
+
+static void WiredUI_CaptureKey_f( void ) {
+	const char     *targetCvar;
+	wiredMenuDef_t *menu;
+	wiredItemDef_t *match = NULL;
+	int             i;
+
+	if ( Cmd_Argc() < 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"usage: wui_capture_key <cvar>\n" );
+		return;
+	}
+	if ( wui_menuStackDepth <= 0 ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_capture_key: no menu open\n" );
+		return;
+	}
+	menu = WiredUI_FindMenu( wui_menuStack[ wui_menuStackDepth - 1 ] );
+	if ( !menu ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_capture_key: top-of-stack menu not found\n" );
+		return;
+	}
+	targetCvar = Cmd_Argv( 1 );
+	for ( i = 0; i < menu->itemCount && !match; i++ ) {
+		match = wui_find_bind_item_recursive( menu->items[ i ], targetCvar );
+	}
+	if ( match ) {
+		wui_waitingForKey = qtrue;
+		wui_bindItem      = match;
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"wui_capture_key: capture state set on item '%s' (cvar '%s')\n",
+			match->name[0] ? match->name : "(unnamed)", targetCvar );
+		return;
+	}
+	Com_Log( SEV_WARN, LOG_CH(ch_ui),
+		"wui_capture_key: no type-13 itemDef with cvar '%s' in menu '%s'\n",
+		targetCvar, menu->name );
+}
+
+/* scriptable ListBox interactive state. Two commands:
+ *
+ *   wui_listbox_select <index>
+ *     Walks the top-of-stack menu's item tree, finds the first
+ *     ITEM_TYPE_LISTBOX, and sets its listSelectedRow to argv[1].
+ *     Mirrors the visual outcome of a mouse click on row N — the row
+ *     gets the cyan selection highlight (wui_listbox_sel_color in
+ *     cl_wired_clay.c) without needing actual cursor input. Pair with
+ *     a screenshot to capture the selected-row visual state from a
+ *     headless smoke.
+ *
+ *   wui_listbox_sort <column>
+ *     Routes through WiredFeeder_SortServers (the canonical multi-
+ *     column sortable feeder shipped with servers.wui). Other
+ *     feeders (maps, characters, demos, etc.) carry their own sort
+ *     paths via separate script commands (MapSort, etc.); a future
+ *     wui_listbox_sort polymorphic variant could dispatch via the
+ *     found ListBox's feeder name. This ships the servers-only
+ *     form since that's the only multi-sort feeder in the canonical
+ *     menus.
+ */
+static wiredItemDef_t *wui_find_listbox_recursive( wiredItemDef_t *item )
+{
+	int i;
+	if ( !item ) return NULL;
+	if ( item->type == ITEM_TYPE_LISTBOX ) return item;
+	for ( i = 0; i < item->childCount; i++ ) {
+		wiredItemDef_t *found = wui_find_listbox_recursive( item->children[ i ] );
+		if ( found ) return found;
+	}
+	return NULL;
+}
+
+static wiredItemDef_t *wui_find_top_listbox( void )
+{
+	wiredMenuDef_t *menu;
+	int             i;
+	if ( wui_menuStackDepth <= 0 ) return NULL;
+	menu = WiredUI_FindMenu( wui_menuStack[ wui_menuStackDepth - 1 ] );
+	if ( !menu ) return NULL;
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		wiredItemDef_t *found = wui_find_listbox_recursive( menu->items[ i ] );
+		if ( found ) return found;
+	}
+	return NULL;
+}
+
+/* Recursively find the listbox whose vertical scrollbar THUMB is under the
+ * cursor (cx, cy in physical px). Walks flex-container children too, so a
+ * listbox nested in the settings-panel shell (not in menu->items[]) is reached.
+ * Uses the single-source WiredUI_ListboxScrollbarGeom over each candidate's
+ * Clay-rendered rect + a small horizontal grab pad. Returns NULL if none.
+ * *outGrabDY receives the cursor's offset within the thumb (for steady drag). */
+static wiredItemDef_t *wui_listbox_thumb_at( wiredMenuDef_t *menu, wiredItemDef_t *item,
+                                             float cx, float cy, float *outGrabDY )
+{
+	int i;
+	if ( !item ) return NULL;
+
+	if ( item->type == ITEM_TYPE_LISTBOX && item->feeder != 0 ) {
+		wuiPixelRect_t clayLB, thumb;
+		float          trackTop, travel;
+		if ( WiredUI_ClayItemRenderedRect( menu, item, &clayLB )
+		  && WiredUI_ListboxScrollbarGeom( item, clayLB.x, clayLB.y, clayLB.w, clayLB.h,
+		                                   &thumb, &trackTop, &travel ) ) {
+			if ( cx >= thumb.x - 6.0f && cx <= thumb.x + thumb.w + 6.0f
+			  && cy >= thumb.y        && cy <= thumb.y + thumb.h ) {
+				if ( outGrabDY ) *outGrabDY = cy - thumb.y;
+				return item;
+			}
+		}
+	}
+	for ( i = 0; i < item->childCount; i++ ) {
+		wiredItemDef_t *found = wui_listbox_thumb_at( menu, item->children[ i ], cx, cy, outGrabDY );
+		if ( found ) return found;
+	}
+	return NULL;
+}
+
+static void WiredUI_ListBoxSelect_f( void ) {
+	wiredItemDef_t *lb;
+	int             index;
+
+	if ( Cmd_Argc() < 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"usage: wui_listbox_select <index>\n" );
+		return;
+	}
+	lb = wui_find_top_listbox();
+	if ( !lb ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_listbox_select: no ITEM_TYPE_LISTBOX in top-of-stack menu\n" );
+		return;
+	}
+	index = atoi( Cmd_Argv( 1 ) );
+	if ( index < 0 ) index = 0;
+	lb->listSelectedRow = index;
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"wui_listbox_select: selected row %d on item '%s'\n",
+		index, lb->name[0] ? lb->name : "(unnamed)" );
+}
+
+static void WiredUI_ListBoxSort_f( void ) {
+	extern void WiredFeeder_SortServers( int column );
+	extern void WiredFeeder_SortMaps( int column );
+	wiredItemDef_t *lb;
+	int             col;
+	int             feederId;
+
+	if ( Cmd_Argc() < 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"usage: wui_listbox_sort <column>\n" );
+		return;
+	}
+	lb = wui_find_top_listbox();
+	if ( !lb ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_listbox_sort: no ITEM_TYPE_LISTBOX in top-of-stack menu\n" );
+		return;
+	}
+	col = atoi( Cmd_Argv( 1 ) );
+	feederId = (int)lb->feeder;
+	switch ( feederId ) {
+	case FEEDER_SERVERS:
+		WiredFeeder_SortServers( col );
+		break;
+	case FEEDER_MAPS:
+	case FEEDER_ALLMAPS:
+		WiredFeeder_SortMaps( col );
+		break;
+	default:
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_listbox_sort: feeder %d on item '%s' has no registered sorter\n",
+			feederId, lb->name[0] ? lb->name : "(unnamed)" );
+		return;
+	}
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"wui_listbox_sort: sorted feeder %d on item '%s' by column %d\n",
+		feederId, lb->name[0] ? lb->name : "(unnamed)", col );
+}
+
+/* clear all key bindings that map to a given engine
+ * command (the cvar field on a type-13 itemDef is the command, not a
+ * key name). Callable as `unbindcmd <cmd>` — it looks up the command and
+ * clears every key bound to it. Distinct from the stock `unbind <key>`
+ * command which takes a key NAME and only clears that one key's binding. */
+static void WiredUI_UnbindCmd_f( void ) {
+	const char *cmd;
+	int         keynum;
+	int         cleared = 0;
+
+	if ( Cmd_Argc() < 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"usage: unbindcmd <cmd>\n" );
+		return;
+	}
+	cmd = Cmd_Argv( 1 );
+	for ( keynum = 0; keynum < MAX_KEYS; keynum++ ) {
+		const char *b = Key_GetBinding( keynum );
+		if ( b && !Q_stricmp( b, cmd ) ) {
+			Key_SetBinding( keynum, "" );
+			cleared++;
+		}
+	}
+	Com_Log( SEV_INFO, LOG_CH(ch_ui),
+		"unbindcmd: cleared %d binding(s) for '%s'\n", cleared, cmd );
+}
+
+/* scripted keyboard / focus injection for headless
+ * interactive proof. Subcommands:
+ *
+ *   wui_menu_nav up | down              synthesize K_UPARROW / K_DOWNARROW
+ *   wui_menu_nav enter                  synthesize K_ENTER
+ *   wui_menu_nav back                   synthesize K_ESCAPE
+ *   wui_menu_nav focus <name>           explicit item focus by name (recursive)
+ *
+ * Synthesis path: calls WiredUI_KeyEvent(key, true) then false — the same
+ * entry point CL_KeyEvent invokes when KEYCATCH_UI is held, so the dispatch
+ * chain (multiDropdown, edit-field, key-bind capture, focus walk, ESC pop)
+ * runs identically to a real keypress. */
+static wiredItemDef_t *wui_find_item_recursive( wiredItemDef_t *item, const char *name )
+{
+	int i;
+	if ( !item || !name ) return NULL;
+	if ( item->name[0] && !Q_stricmp( item->name, name ) ) return item;
+	for ( i = 0; i < item->childCount; i++ ) {
+		wiredItemDef_t *found = wui_find_item_recursive( item->children[ i ], name );
+		if ( found ) return found;
+	}
+	return NULL;
+}
+
+static int wui_find_item_index_in_menu( wiredMenuDef_t *menu, wiredItemDef_t *target )
+{
+	int i;
+	if ( !menu || !target ) return -1;
+	for ( i = 0; i < menu->itemCount; i++ ) {
+		if ( menu->items[ i ] == target ) return i;
+	}
+	return -1;
+}
+
+static void WiredUI_MenuNav_f( void ) {
+	const char *sub;
+
+	if ( Cmd_Argc() < 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"usage: wui_menu_nav <up|down|enter|back|focus> [<name>]\n" );
+		return;
+	}
+	sub = Cmd_Argv( 1 );
+
+	if ( !Q_stricmp( sub, "up" ) ) {
+		WiredUI_KeyEvent( K_UPARROW, qtrue );
+		WiredUI_KeyEvent( K_UPARROW, qfalse );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "wui_menu_nav: K_UPARROW dispatched\n" );
+	} else if ( !Q_stricmp( sub, "down" ) ) {
+		WiredUI_KeyEvent( K_DOWNARROW, qtrue );
+		WiredUI_KeyEvent( K_DOWNARROW, qfalse );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "wui_menu_nav: K_DOWNARROW dispatched\n" );
+	} else if ( !Q_stricmp( sub, "enter" ) ) {
+		WiredUI_KeyEvent( K_ENTER, qtrue );
+		WiredUI_KeyEvent( K_ENTER, qfalse );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "wui_menu_nav: K_ENTER dispatched\n" );
+	} else if ( !Q_stricmp( sub, "back" ) ) {
+		WiredUI_KeyEvent( K_ESCAPE, qtrue );
+		WiredUI_KeyEvent( K_ESCAPE, qfalse );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "wui_menu_nav: K_ESCAPE dispatched\n" );
+	} else if ( !Q_stricmp( sub, "focus" ) ) {
+		wiredMenuDef_t *menu;
+		wiredItemDef_t *target = NULL;
+		int             topIdx;
+		int             i;
+		const char     *name;
+		if ( Cmd_Argc() < 3 ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_ui),
+				"usage: wui_menu_nav focus <name>\n" );
+			return;
+		}
+		name = Cmd_Argv( 2 );
+		menu = WiredUI_GetActiveMenu();
+		if ( !menu ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_ui),
+				"wui_menu_nav focus: no active menu\n" );
+			return;
+		}
+		for ( i = 0; i < menu->itemCount && !target; i++ ) {
+			target = wui_find_item_recursive( menu->items[ i ], name );
+		}
+		if ( !target ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_ui),
+				"wui_menu_nav focus: item '%s' not found in active menu\n", name );
+			return;
+		}
+		/* wui_set_focused handles nested children via the
+		 * authoritative pointer. */
+		topIdx = wui_find_item_index_in_menu( menu, target );
+		wui_set_focused( menu, target );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"wui_menu_nav focus: focused item '%s' (top index %d)\n",
+			name, topIdx );
+	} else {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"wui_menu_nav: unknown subcommand '%s' (expected up|down|enter|back|focus)\n", sub );
+	}
+}
+
+/* Headless verification of the selection-unification fix (mouse hover →
+ * focus). Positions the cursor over a named item's bounding box and runs the
+ * real hover-detection path (WiredUI_MouseEvent), so the engine resolves the
+ * hovered item and sets focus exactly as a physical mouse move would — there is
+ * no separate "mouse focus" code path to bypass. The layout dump (taken on the
+ * next frame) then shows the gold focus-highlight moved to the hovered item and
+ * still exactly one item focused (no second highlight). Scripted-proof
+ * affordance like wui_menu_nav; inert unless invoked. */
+static void WiredUI_HoverTest_f( void ) {
+	wiredMenuDef_t *menu;
+	wiredItemDef_t *target = NULL;
+	const char     *name;
+	float           cx, cy;
+	int             i;
+
+	if ( Cmd_Argc() < 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui), "usage: wui_hover_test <item_name>\n" );
+		return;
+	}
+	name = Cmd_Argv( 1 );
+	menu = WiredUI_GetActiveMenu();
+	if ( !menu ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui), "wui_hover_test: no active menu\n" );
+		return;
+	}
+	for ( i = 0; i < menu->itemCount && !target; i++ ) {
+		target = wui_find_item_recursive( menu->items[ i ], name );
+	}
+	if ( !target ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui), "wui_hover_test: item '%s' not found\n", name );
+		return;
+	}
+
+	/* Centre of the item's screen rect. Prefer the CLAY-rendered bounding box
+	 * (physical-pixel space, honoring the ×dpiScale invariant) — that is where
+	 * the item is actually drawn and hit-tested, so it matches where a real
+	 * mouse would hover the visible widget. The legacy resolvedRect can diverge
+	 * from the Clay flex position (cumulatively down a flex column, and further
+	 * under HiDPI where resolvedRect is not in the same ×dpiScale space), so a
+	 * cursor planted there misses the drawn widget. Fall back to resolvedRect
+	 * only before the first Clay layout pass (Clay box not yet available). */
+	{
+		extern qboolean WiredUI_ClayItemRenderedRect( const wiredMenuDef_t *panel,
+			const wiredItemDef_t *item, wuiPixelRect_t *out );
+		wuiPixelRect_t crect;
+		if ( WiredUI_ClayItemRenderedRect( menu, target, &crect ) && crect.w > 0.0f && crect.h > 0.0f ) {
+			cx = crect.x + crect.w * 0.5f;
+			cy = crect.y + crect.h * 0.5f;
+		} else {
+			cx = target->resolvedRect.x + target->resolvedRect.w * 0.5f;
+			cy = target->resolvedRect.y + target->resolvedRect.h * 0.5f;
+		}
+	}
+
+	/* Plant the cursor, then run the genuine hover path with a zero delta so
+	 * WiredUI_FindItemAtCursor / the Clay hit-test re-resolve at this position
+	 * and drive wui_set_focused — the same code a real mouse move executes.
+	 * wui_cursorX/wui_cursorY are file-scope statics defined above. */
+	wui_cursorX = cx;
+	wui_cursorY = cy;
+	WiredUI_MouseEvent( 0.0f, 0.0f );
+
+	Com_Log( SEV_INFO, LOG_CH(ch_ui),
+		"wui_hover_test: hovered '%s' at (%.0f,%.0f)\n", name, cx, cy );
+}
+
+/* Headless verification of the error-dialog contract (fix #3). Mirrors the
+ * real caller (cl_main.c): set com_errorMessage via Com_SetLastError, then
+ * CL_WiredUI_ShowError. Logs a single machine-readable line the layout-check
+ * consumes:
+ *   wui_showerror_test: automated=<0|1> stackTop='<menu|none>' errMsg='<text>'
+ * so the check asserts:
+ *   * com_automated 1 → stackTop != error_popup (suppressed)
+ *   * com_automated 0 → stackTop == error_popup AND errMsg == the message
+ * Like wui_menu_nav, a scripted-proof affordance (no _DEBUG gate so release
+ * smokes can run it; inert unless invoked). */
+static void WiredUI_ShowErrorTest_f( void ) {
+	const char *msg = ( Cmd_Argc() >= 2 ) ? Cmd_Argv( 1 ) : "test error message";
+	const char *top;
+	char        errBuf[256];
+
+	/* The real caller sets com_errorMessage before showing — replicate it so
+	 * the dialog's text binding (error_popup.wui -> com_errorMessage) is
+	 * populated; this is exactly the cl_main.c fix path. */
+	Com_SetLastError( "%s", msg );
+	CL_WiredUI_ShowError( "Test Error", msg, qtrue );
+
+	top = ( wui_menuStackDepth > 0 ) ? wui_menuStack[ wui_menuStackDepth - 1 ] : "none";
+	Cvar_VariableStringBuffer( "com_errorMessage", errBuf, sizeof( errBuf ) );
+	Com_Log( SEV_INFO, LOG_CH(ch_ui),
+		"wui_showerror_test: automated=%d stackTop='%s' errMsg='%s'\n",
+		( com_automated && com_automated->integer ) ? 1 : 0, top, errBuf );
+}
+
+#ifdef _DEBUG
+/* Scripted keypress injection for W-14 self-verify smokes. Routes through
+ * the public CL_KeyEvent entry point so the dispatch chain — first-input
+ * attract→main promotion (cl_keys.c), KEYCATCH_UI forwarding,
+ * WiredUI_KeyEvent menu pop, NoteInput taps — runs identically to a real
+ * keypress. `wui_menu_nav` (above) only synthesises into WiredUI_KeyEvent
+ * directly and bypasses CL_KeyEvent's outer gates, so it can't reach the
+ * dispatch-2 first-input branch; this helper closes that gap. Accepts
+ * decimal keycodes from keycodes.h (e.g. 27 = K_ESCAPE, 13 = K_ENTER,
+ * 'q' = 113). _DEBUG-only — production builds drop the registration. */
+static void WiredUI_TestKeyDown_f( void ) {
+	int key;
+	if ( Cmd_Argc() < 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"usage: wui_test_keydown <keycode-decimal>\n"
+			"  27=ESC  13=ENTER  9=TAB  178=UPARROW  177=DOWNARROW\n" );
+		return;
+	}
+	key = atoi( Cmd_Argv( 1 ) );
+	CL_KeyEvent( key, qtrue,  cls.realtime );
+	CL_KeyEvent( key, qfalse, cls.realtime );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"wui_test_keydown: dispatched keycode %d\n", key );
+}
+
+/* W-17 dispatch 5b S4: arms the next compositor emit pass to write the Clay
+ * render command tree as JSON to <filename> under FS_FOpenFileWrite (lands
+ * in the homepath fs_homepath). Matches the schema vcompare consumes for
+ * structural diff against DOM extraction. Single-shot — fires once per
+ * arm. */
+extern void WiredUI_ClayDumpNext( const char *filename );
+static void WiredUI_TestDumpClay_f( void ) {
+	if ( Cmd_Argc() < 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"usage: wui_test_dump_clay <filename>\n" );
+		return;
+	}
+	WiredUI_ClayDumpNext( Cmd_Argv( 1 ) );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"wui_test_dump_clay: armed next-frame Clay dump → %s\n", Cmd_Argv( 1 ) );
+}
+
+#endif
+
 /* Single CL_Init-level entry point for all WiredUI Lua binding registration.
    Must be called BEFORE WiredScript_PostInit so that load_menu() and
    attract.* globals are live when WiredUI_Init and WiredAttract_Init exec
@@ -1694,7 +2918,55 @@ void WiredUI_LuaInit( void ) {
 	WiredAttract_LuaInit();   /* registers attract.* global    */
 }
 
-void WiredUI_Init( qboolean inGameUI ) {
+#ifdef _DEBUG
+static void WiredUI_DropdownTest_f( void );   /* defined after WiredUI_FindItemByName */
+static void WiredUI_ScoresTest_f( void );      /* defined alongside DropdownTest_f      */
+#endif
+
+/*
+=================
+WiredUI_LoadExplicitMenus
+
+System menus loaded OUTSIDE menus.lua (the manifest intentionally omits them
+— the parser doesn't dedupe by name, so a load_menu entry there would
+double-register on the Init path, which runs menus.lua THEN these explicit
+loads). They must run after EVERY WiredUI_LoadMenusFromLua so they survive
+WiredUI_SafeReload (hud_reload / wired_reload / per-map ReloadHud) — not only
+the one-time WiredUI_Init. Otherwise SafeReload (ClearMenus + LoadMenusFromLua)
+drops loading_screen + overlay from the registry, and the LOADING layer's
+by-path lookup (WiredUI_FindMenuByPath, dispatch 13-30) returns NULL → the
+fail-loud fires → black loading screen.
+
+The load-path strings here MUST be byte-identical to the paths the connstate
+setters bind via WiredUI_SetLoadingMenu ("ui/loading_screen.wui"), because
+WiredUI_ParseMenu stamps menu->sourcePath verbatim from this filename and
+WiredUI_FindMenuByPath matches it Q_stricmp-exact.
+=================
+*/
+void WiredUI_LoadExplicitMenus( void ) {
+	// load the system loading screen menu. menus.lua may
+	// or may not include it depending on theme; load explicitly here so
+	// the compositor's LOADING layer finds it by path-identity. Idempotent
+	// if menus.lua already loaded it (parser appends, latest wins).
+	WiredUI_LoadMenuFile( "ui/loading_screen.wui" );
+
+	/* load the cursor + tooltip overlay menu explicitly so it
+	 * exists in the registry on the WUI_LAYER_OVERLAY layer regardless of
+	 * what menus.lua opts in for. menus.lua intentionally omits this file
+	 * — the parser does not dedupe by name, so a duplicate load_menu
+	 * entry there would register two copies. */
+	WiredUI_LoadMenuFile( "ui/overlay.wui" );
+
+	/* (debug-overlay-migration): the debug-overlay panels live
+	 * outside menus.lua for the same reason as overlay.wui — they must exist
+	 * in the registry on the WUI_LAYER_DEBUG_OVERLAY layer regardless of theme
+	 * and survive WiredUI_SafeReload. The layer is gated on wired_ui_debug, so
+	 * loading the panels unconditionally is harmless when the gate is off. */
+	WiredUI_LoadMenuFile( "ui/debug_graph.wui" );
+	WiredUI_LoadMenuFile( "ui/debug_netstats.wui" );
+}
+
+qboolean WiredUI_Init( qboolean inGameUI ) {
 	// ── longjmp self-healing ─────────────────────────────────────────────
 	// If a previous WiredUI_EnsureLoaded call started CL_StartHunkUsers and
 	// CL_InitRenderer Com_Error'd (ERR_DROP) during texture reload, execution
@@ -1710,6 +2982,22 @@ void WiredUI_Init( qboolean inGameUI ) {
 	}
 
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "------- WiredUI_Init -------\n" );
+
+	/* wui_required functional gate cvar. Registered
+	 * at the top of WiredUI_Init so the boot path in cl_main.c can read
+	 * it on the failure branch. CVAR_LATCH — boot-time decision, no
+	 * mid-frame flips. Default "1" (UI mode required); dedicated /
+	 * headless boots pass `+set wui_required 0` on the command line.
+	 * Functional gate (NOT diagnostic) per Memory K16. */
+	{
+		static const cvarDesc_t d = CVAR_BOOL(
+			"wui_required", "1",
+			CVAR_LATCH,
+			"WiredUI required for engine boot. 1: fail boot if WiredUI init "
+			"fails. 0: graceful headless fallback (SEV_WARN, engine continues "
+			"without UI mode)." );
+		Cvar_Register( &d );
+	}
 
 	memset( wui_symbols, 0, sizeof( wui_symbols ) );
 	memset( wui_elements, 0, sizeof( wui_elements ) );
@@ -1733,10 +3021,43 @@ void WiredUI_Init( qboolean inGameUI ) {
 	// `feeder "name"` against this registry while loading .wmenu files.
 	WiredUI_RegisterCoreFeeders();
 
+	// initialise the unified custom-draw registry +
+	// bootstrap-register every entry in the legacy ownerdraw + hud
+	// element + hud family tables under their sigil prefixes. Runs
+	// BEFORE menus load so the parser's sigil rewrite has a populated
+	// registry to look up against when items declare ownerdraw/hudElement.
+	WiredUI_CustomDraw_Init();
+	WiredOwnerDraw_RegisterAll();
+	WiredHud_RegisterElements();
+
+	// register the 3 loading-screen custom-draws
+	// (loading_wireframe, loading_streaming_rows, loading_mapinfo_stats)
+	// before menus parse loading_screen.wmenu, so the parser's `custom`
+	// sigil-rewrite path has registry entries to match against. Retires
+	// alongside cl_loading_ui.c's whole-file deletion.
+	WiredLoadingCustomDraws_RegisterAll();
+
+	/* cursor + tooltip overlay custom-draws — registered before
+	 * menus parse overlay.wmenu so the parser's `custom` sigil-rewrite
+	 * resolves wui_cursor / wui_tooltip against the live registry. */
+	WiredUI_RegisterOverlayCustomDraws();
+
+	/* register the 6 debug-overlay custom-draws before menus
+	 * parse debug_graph.wui / debug_netstats.wui so the parser's `custom`
+	 * sigil-rewrite resolves debug_{demo_recording,voip_meter,graph,ping,
+	 * snaps,packets} against the live registry. */
+	WiredDebugOverlay_RegisterAll();
+
 	// load menu files from scripts/menus.lua
 	WiredUI_ClearMenus();
 	WiredUI_LoadMenusFromLua();
 	WiredUI_LoadHudFromCvar();
+
+	// Load the menus that live outside menus.lua (loading_screen + overlay)
+	// via the shared helper, so WiredUI_SafeReload re-runs the exact same set
+	// and they survive reloads (otherwise SafeReload drops them — see
+	// WiredUI_LoadExplicitMenus + the LOADING by-path lookup in 13-30).
+	WiredUI_LoadExplicitMenus();
 
 	if ( !WiredUI_CallLuaStoreFunction( "loadstate" ) ) {
 		WiredUI_LoadState();
@@ -1745,13 +3066,25 @@ void WiredUI_Init( qboolean inGameUI ) {
 	// Bootstrap MSDF font subsystem before HUD init
 	Text_Init();
 
-	// Phase 3: initialize HUD subsystem (state bridge)
+	/* compositor lifecycle was lifted
+	 * to CL_Init / CL_Shutdown so the WiredUI_Arena + Clay context survive
+	 * map loads. Here we only refresh the Clay font indirection table now
+	 * that MSDF's font registry has been (re)populated by Text_Init. */
+	WiredUI_ClayRefreshFontTable();
+
+	// initialize HUD subsystem (state bridge)
 	WiredHud_Init();
 
-	// Phase 4: semantic state theme system
+	// semantic state theme system
 	WiredTheme_Init();
 
-	// Phase 5: attract scheduler
+	/* v2 palette overlay driver (dark/light × 5 accent). Registers
+	 * ui_palette_mode + ui_palette_accent cvars; applies the initial
+	 * overlay chain. Distinct module from WiredTheme above (which maps
+	 * semantic state labels critical/warning/normal to colours). */
+	WiredPalette_Init();
+
+	// attract scheduler
 	WiredAttract_Init();
 
 	// hot reload commands
@@ -1761,8 +3094,92 @@ void WiredUI_Init( qboolean inGameUI ) {
 	// dev: cycle through all menus for visual verification
 	Cmd_AddCommand( "ui_testall", WiredUI_TestAll_f );
 
+	/* load a .wmenu file from loose-files (homepath or modfiles),
+	 * bypassing the pak-first FS layer. Used for fixture development +
+	 * ad-hoc menu testing without rebuilding the pak. Kept in the tree as
+	 * a dev workflow utility (it may later be gated behind a developer
+	 * cvar for release builds). */
+	Cmd_AddCommand( "wui_load_menu_loose", WiredUI_LoadMenuLoose_f );
+
+	/* PoC harness for the repeat runtime path; pairs with
+	 * tests/fixtures/repeat_poc.wui. */
+	Cmd_AddCommand( "wui_test_repeat", WiredUI_TestRepeat_f );
+	Cmd_AddCommand( "wui_test_repeat_image", WiredUI_TestRepeatImage_f );
+	Cmd_AddCommand( "wui_test_anim_step", WiredUI_TestAnimStep_f );
+	Cmd_AddCommand( "wui_test_font_jbmono", WiredUI_TestFontJBMono_f );
+	Cmd_AddCommand( "wui_test_primitive_qw_sigil",      WiredUI_TestPrimitiveQwSigil_f );
+	Cmd_AddCommand( "wui_test_primitive_runes",         WiredUI_TestPrimitiveRunes_f );
+	Cmd_AddCommand( "wui_test_primitive_bracket",       WiredUI_TestPrimitiveBracket_f );
+	Cmd_AddCommand( "wui_test_primitive_ticker",        WiredUI_TestPrimitiveTicker_f );
+	Cmd_AddCommand( "wui_test_primitive_arena_thumb",   WiredUI_TestPrimitiveArenaThumb_f );
+	Cmd_AddCommand( "wui_test_primitive_display_text",  WiredUI_TestPrimitiveDisplayText_f );
+	Cmd_AddCommand( "wui_test_primitive_mono",          WiredUI_TestPrimitiveMono_f );
+	Cmd_AddCommand( "wui_test_primitive_player_badge",  WiredUI_TestPrimitivePlayerBadge_f );
+	Cmd_AddCommand( "wui_test_bg_demo",                 WiredUI_TestBgDemo_f );
+	Cmd_AddCommand( "wui_test_bg_plasma",               WiredUI_TestBgPlasma_f );
+	Cmd_AddCommand( "wui_test_utf8",                    WiredUI_TestUtf8_f );
+	Cmd_AddCommand( "wui_test_colorcode",               WiredUI_TestColorcode_f );
+
 	// recovery command — brings WiredUI back from the fullscreen fallback console
 	Cmd_AddCommand( "wired_recover", WiredUI_Recover_f );
+
+	// push a menu by name from the console. The `open`
+	// script command is only reachable from inside .wui action blocks;
+	// `wui_push` exposes the same primitive for headless smokes + ad-hoc
+	// menu navigation without editing main.wui.
+	Cmd_AddCommand( "wui_push", WiredUI_PushMenu_f );
+
+	// enter the keybind capture state programmatically.
+	// Same effect as clicking a type-13 widget; used by headless smokes
+	// to capture the "Press a key..." visual state.
+	Cmd_AddCommand( "wui_capture_key", WiredUI_CaptureKey_f );
+
+#ifdef _DEBUG
+	// Dev/test: open a multi-select dropdown popup non-interactively so a
+	// headless smoke can pixel-verify the floating panel render (the
+	// interactive path needs a mouse click). Drives the SAME singleton open
+	// state as the click handler via WiredUI_OpenMultiDropdown — adds no new
+	// rendering logic, only a state-set hook. Removed in release builds.
+	Cmd_AddCommand( "wui_dropdown_test", WiredUI_DropdownTest_f );
+
+	// Dev/test: drive the cgame scoreboard-hold (+scores) non-interactively so
+	// a headless smoke can pixel-verify the V2 scoreboard chrome. The +scores
+	// button command can't be issued as a startup +arg (the leading + is the
+	// arg-introducer, so the engine runs bare "scores" which isn't a cgame
+	// command). This shim routes "+scores"/"-scores" through the SAME
+	// console→cgame path a keybind uses (Cbuf → Cmd_ExecuteString →
+	// CL_GameCommand → CG_CONSOLE_COMMAND → CG_ScoresDown_f), which sets
+	// cg.showScores in the cgame VM. The bridge restages it into
+	// wiredHud->showScores every frame, flipping the gametype scoreboard menu
+	// visible exactly as a real TAB-hold would. No VM-memory poke, no new
+	// render logic. Removed in release builds.
+	Cmd_AddCommand( "wui_scores_test", WiredUI_ScoresTest_f );
+#endif
+
+	// clear all key bindings that map to a given engine
+	// command. Clears every key bound to a given command; the keybind rows
+	// invoke it (via the Del/Backspace unbind path and per-row Reset buttons).
+	Cmd_AddCommand( "unbindcmd", WiredUI_UnbindCmd_f );
+
+	// scriptable ListBox interactive state. Sets the
+	// listSelectedRow / sort column on the top-of-stack menu's first
+	// ListBox itemDef so headless smokes can capture the cyan
+	// selection highlight + sorted row order without simulating mouse
+	// input.
+	Cmd_AddCommand( "wui_listbox_select", WiredUI_ListBoxSelect_f );
+	Cmd_AddCommand( "wui_listbox_sort",   WiredUI_ListBoxSort_f );
+
+	// scripted keyboard / focus injection for headless
+	// interactive proof. up/down/enter/back synthesize the corresponding
+	// key event via the same WiredUI_KeyEvent entry CL_KeyEvent uses;
+	// focus <name> walks the active menu's item tree recursively.
+	Cmd_AddCommand( "wui_menu_nav",       WiredUI_MenuNav_f );
+	Cmd_AddCommand( "wui_hover_test",     WiredUI_HoverTest_f );
+	Cmd_AddCommand( "wui_showerror_test", WiredUI_ShowErrorTest_f );
+#ifdef _DEBUG
+	Cmd_AddCommand( "wui_test_keydown",   WiredUI_TestKeyDown_f );
+	Cmd_AddCommand( "wui_test_dump_clay", WiredUI_TestDumpClay_f );
+#endif
 
 	WiredUI_RegisterAssets();
 
@@ -1801,6 +3218,10 @@ void WiredUI_Init( qboolean inGameUI ) {
 				}
 				if ( name[0] && WiredUI_FindMenu( name ) && wui_menuStackDepth < WIRED_MENU_STACK_DEPTH ) {
 					Q_strncpyz( wui_menuStack[wui_menuStackDepth], name, sizeof( wui_menuStack[0] ) );
+					/* Intent isn't persisted across save/restore — restored
+					 * entries use the authored background (INHERIT), and this
+					 * clears any stale value left in the slot from a prior push. */
+					wui_menuBgIntent[wui_menuStackDepth] = WUI_BG_INTENT_INHERIT;
 					wui_menuStackDepth++;
 				}
 				if ( !*p ) break;
@@ -1827,9 +3248,70 @@ void WiredUI_Init( qboolean inGameUI ) {
 
 	re.VertexLighting( qfalse ); // UI elements don't use vertex-light collapse
 
+	/* component-library F1: clear interaction state (press channel + keyboard-
+	 * focus provenance). The per-type value-arm registry (Table B) is populated
+	 * by F2 as controls are added; F1 leaves it empty (nav-only) by design. */
+	WiredUI_WidgetCoreReset();
+
 	wui_healthy = qtrue;
 	wui_recoveryFailTime = 0; // clear any stale failure banner
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "WiredUI: initialized (%d menus loaded)\n", WiredUI_GetMenuCount() );
+#ifdef _DEBUG
+	{
+		const int head  = WiredUI_GetPoolHead();
+		const int cap   = WiredUI_GetPoolCapacity();
+		const int freeB = cap - head;
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI/pool: post-init head=%d B / cap=%d B (%d B free, %d%% used) "
+			"sizeof(itemDef)=%zu sizeof(menuDef)=%zu sizeof(multiDef)=%zu\n",
+			head, cap, freeB, ( head * 100 ) / cap,
+			sizeof( wiredItemDef_t ), sizeof( wiredMenuDef_t ),
+			sizeof( wiredMultiDef_t ) );
+	}
+#endif
+
+	/* success return path. The caller in cl_main.c
+	 * branches on this return + the `wui_required` cvar. Internal subsystem
+	 * failures (Clay arena alloc, ClayInit) log SEV_ERROR but reach the
+	 * end of WiredUI_Init with wui_clay_initialized = qfalse; we report
+	 * that as the failure signal here so the caller's wui_required gate
+	 * sees the partial-init state. */
+	if ( !WiredUI_IsClayInitialized() ) {
+		Com_Log( SEV_ERROR, LOG_CH(ch_ui),
+			"WiredUI_Init: Clay compositor failed to initialize\n" );
+		return qfalse;
+	}
+
+#ifdef _DEBUG
+	/* one-shot multi-viewport dispatch acceptance test —
+	 * proves the viewport registry + render-dispatch primitive (the same one
+	 * the WORLD_VIEWPORT per-panel walk uses) handles >1 provider. Logs
+	 * PASS/FAIL. Verify-only, removed after acceptance (K16). */
+	WiredUI_ViewportMultiSelfTest();
+#endif
+
+#ifdef _DEBUG
+	/* debug-build-only fault injection for the
+	 * wui_required failure path. The compile-time #ifdef _DEBUG
+	 * guard keeps this stripped from release builds; runtime gating uses
+	 * the WIRED_UI_FORCE_INIT_FAIL environment variable (NOT a cvar) so
+	 * it doesn't add a diagnostic cvar (Memory K16). To run the
+	 * simulated-init-fail acceptance:
+	 *   WIRED_UI_FORCE_INIT_FAIL=1 wired.x64 +set wui_required 0 +map arena1
+	 * Expected: SEV_WARN logged + engine continues headless (no Sys_Error
+	 * because wui_required=0). With wui_required=1 the engine fatals. */
+	{
+		const char *forceFail = getenv( "WIRED_UI_FORCE_INIT_FAIL" );
+		if ( forceFail && forceFail[ 0 ] && forceFail[ 0 ] != '0' ) {
+			Com_Log( SEV_ERROR, LOG_CH(ch_ui),
+				"WiredUI_Init: WIRED_UI_FORCE_INIT_FAIL=%s — simulated fault\n",
+				forceFail );
+			return qfalse;
+		}
+	}
+#endif
+
+	return qtrue;
 }
 
 void WiredUI_Shutdown( void ) {
@@ -1839,7 +3321,7 @@ void WiredUI_Shutdown( void ) {
 
 	/* A dead UI must not hold KEYCATCH_UI — that bit signals "I am alive and
 	   handling input."  If we leave it set, Con_DrawConsole's fullscreen
-	   auto-show (Fix 6.2) sees the catcher and skips the fullscreen draw,
+	   auto-show sees the catcher and skips the fullscreen draw,
 	   leaving the user with a dark screen instead of the console fallback.
 	   CL_ShutdownUI() clears this before calling us, so this is a no-op
 	   in the normal path — it's a safety net for unexpected call sites. */
@@ -1878,14 +3360,54 @@ void WiredUI_Shutdown( void ) {
 	wui_activeMenu = UIMENU_NONE;
 	wui_initialized = qfalse;
 
+	/* wuiAnim pool reset so a hot-reload re-creates anims from
+	 * fresh itemDef state instead of dangling target_ref pointers. */
+	WUI_AnimStopAll();
+
+	/* the compositor arena now lives at
+	 * process scope (CL_Init / CL_Shutdown), so WiredUI_Shutdown — which runs
+	 * every map load via CL_FlushMemory → CL_ShutdownAll → CL_ShutdownUI —
+	 * MUST NOT tear it down. Compositor + Clay context + font indirection
+	 * table all survive across map loads. CompositorShutdown is owned by
+	 * CL_Shutdown only. */
+
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "WiredUI: shutdown\n" );
 }
 
-void WiredUI_Refresh( int realtime ) {
+void WiredUI_TickFrame( int realtime ) {
 	wiredMenuDef_t *menu;
 
 	if ( !wui_initialized ) {
 		return;
+	}
+
+	/* Spinner click-and-hold auto-repeat. While a −/+ button is held
+	 * (wui_spinnerHoldItem latched in WiredUI_KeyEvent on K_MOUSE1-down over a
+	 * button), fire an extra step every WUI_SPINNER_HOLD_RATE_MS after the
+	 * initial WUI_SPINNER_HOLD_DELAY_MS pause. Cleared on button release. The
+	 * step/clamp math is the shared core helper so held-repeat matches a single
+	 * click exactly. Stops repeating once the value pins at the range end. */
+	if ( wui_spinnerHoldItem && wui_spinnerHoldDir != 0
+	     && wui_spinnerHoldItem->type == ITEM_TYPE_SPINNER ) {
+		while ( realtime >= wui_spinnerHoldNext ) {
+			WiredUI_SpinnerAdjust( wui_spinnerHoldItem, wui_spinnerHoldDir, 1.0f );
+			wui_spinnerHoldNext += WUI_SPINNER_HOLD_RATE_MS;
+		}
+	}
+
+	/* poll-and-fire any palette reload deferred because
+	 * cls.uiStarted was qfalse when the accent/mode cvar callback ran.
+	 * No-op on most ticks (single-shot flag). */
+	WiredPalette_TickPending();
+
+	/* HUD state sync folded into the tick. Was a
+	 * separate WiredHud_Routine / WiredUI_HudTick call from
+	 * SCR_DrawScreenField; now lives here so the compositor walk emitted
+	 * AFTER this tick sees fresh cgame state. The fail-fast gate
+	 * (wiredHud_state_valid) keeps the tick a no-op when cgame hasn't
+	 * pushed its first state frame yet. */
+	if ( clientActiveApp->state == CA_ACTIVE && wiredHud_state_valid ) {
+		WiredUI_HudTick( realtime );
 	}
 
 	// live 'hud' cvar change: reload only when the value actually differs
@@ -1898,13 +3420,20 @@ void WiredUI_Refresh( int realtime ) {
 	// Layer 5: hot-reload check (dev mode)
 	WiredUI_CheckHotReload( realtime );
 
+	/* wuiAnim per-frame tick. Walks active anims and writes
+	 * eased values into per-item scalar fields (offsets / alpha) which
+	 * the compositor's emit_item consumes. Cheap when pool is empty;
+	 * dedicated mode never hits this path (WiredUI_TickFrame gated on
+	 * wui_initialized which stays qfalse server-side). */
+	WUI_AnimTick( realtime );
+
 	// attract scheduler tick + transition overlay draw
 	WiredAttract_Frame( realtime );
 
 	// delayed screenshot — fire once after N seconds
 	if ( wired_screenshotDelay && wired_screenshotDelay->integer > 0 && !wui_screenshotTaken ) {
 		if ( realtime - wui_screenshotTime >= wired_screenshotDelay->integer * 1000 ) {
-			Cbuf_ExecuteText( EXEC_APPEND, "screenshotJPEG\n" );
+			Cbuf_ExecuteText( EXEC_APPEND, "screenshot jpg\n" );
 			wui_screenshotTaken = qtrue;
 			Com_Log( SEV_INFO, LOG_CH(ch_ui), "WiredUI: delayed screenshot taken\n" );
 		}
@@ -1925,7 +3454,7 @@ void WiredUI_Refresh( int realtime ) {
 					wui_activeMenu = UIMENU_MAIN;
 					Key_SetCatcher( Key_GetCatcher() | KEYCATCH_UI );
 
-					WiredUI_PushMenu( m->name );
+					WiredUI_PushMenu( m->name, WUI_BG_INTENT_INHERIT );
 					Com_Log( SEV_INFO, LOG_CH(ch_ui), "ui_testall: [%d/%d] %s\n",
 						testall_menuIndex + 1, menuCount, m->name );
 				}
@@ -1969,760 +3498,23 @@ void WiredUI_Refresh( int realtime ) {
 	}
 
 
-	// resolve layout tree: all items get resolvedRect in pixel coords
-	float vpW = (float)cls.glconfig.vidWidth;
-	float vpH = (float)cls.glconfig.vidHeight;
-	WUI_LayoutMenu( menu, vpW, vpH );
+}
 
-	float menuX = menu->resolvedRect.x;
-	float menuY = menu->resolvedRect.y;
-	float menuW = menu->resolvedRect.w;
-	float menuH = menu->resolvedRect.h;
-	float scrollY = menu->scrollOffset;
-	float clipTop = menuY;
-	float clipBottom = menuY + menuH;
-
-	WiredUI_DrawMenuBackground( menu, menuX, menuY, menuW, menuH, 1.0f );
-	WiredUI_DrawWindowBorder( menuX, menuY, menuW, menuH,
-		menu->border, menu->bordersize, menu->bordercolor, 1.0f );
-
-	// ── fade animation ──────────────────────────────────────────────
-	// v6 menus fade in using fadeClamp/fadeCycle/fadeAmount from assetGlobalDef or menuDef
-	{
-		float fadeClamp = menu->fadeClamp > 0 ? menu->fadeClamp : 1.0f;
-		int fadeCycle = menu->fadeCycle > 0 ? menu->fadeCycle : 1;
-		float fadeAmount = menu->fadeAmount > 0 ? menu->fadeAmount : 0.1f;
-
-		if ( menu->openTime > 0 && menu->fadeAlpha < fadeClamp ) {
-			int elapsed = realtime - menu->openTime;
-			int steps = elapsed / fadeCycle;
-			menu->fadeAlpha = steps * fadeAmount;
-			if ( menu->fadeAlpha > fadeClamp ) menu->fadeAlpha = fadeClamp;
-		} else if ( menu->openTime == 0 ) {
-			// first frame — start fade
-			menu->openTime = realtime;
-			menu->fadeAlpha = 0;
-		}
+/* single dispatch authority. Replaces the legacy
+ * SCR_DrawScreenField 5-dispatch (Con_DrawConsole / WiredHud_Routine /
+ * CompositorEmitFrame / WiredUI_Refresh / SCR_Draw* helpers) with the
+ * tick-then-walk pair. cl_scrn.c::SCR_DrawScreenField collapses to
+ * re.BeginFrame + this. */
+void WiredUI_RenderFrame( void )
+{
+	if ( !wui_initialized ) {
+		/* wui_required + graceful fallback are wired here. For now:
+		 * no-op until init succeeds (no current visible UI either). */
+		return;
 	}
 
-	// ── transition + fade interpolation ─────────────────────────────
-	for ( int i = 0; i < menu->itemCount; i++ ) {
-		wiredItemDef_t *item = menu->items[i];
-
-		// rect transition
-		if ( item->transStartTime > 0 ) {
-			int elapsed = realtime - item->transStartTime;
-			if ( elapsed >= item->transDuration ) {
-				item->rect = item->transTo;
-				item->transStartTime = 0;
-			} else {
-				float t = (float)elapsed / (float)item->transDuration;
-				item->rect.x = item->transFrom.x + ( item->transTo.x - item->transFrom.x ) * t;
-				item->rect.y = item->transFrom.y + ( item->transTo.y - item->transFrom.y ) * t;
-				item->rect.w = item->transFrom.w + ( item->transTo.w - item->transFrom.w ) * t;
-				item->rect.h = item->transFrom.h + ( item->transTo.h - item->transFrom.h ) * t;
-			}
-		}
-
-		// alpha fade (fadein/fadeout)
-		if ( item->fadeStartTime > 0 ) {
-			int elapsed = realtime - item->fadeStartTime;
-			if ( elapsed >= item->fadeDurationItem ) {
-				// fade complete
-				item->fadeAlphaItem = item->fadeTargetAlpha;
-				item->fadeStartTime = 0;
-				if ( item->fadeTargetAlpha <= 0.0f ) {
-					item->visible = qfalse;  // fadeout hides item when done
-				}
-			} else {
-				float t = (float)elapsed / (float)item->fadeDurationItem;
-				float startAlpha = ( item->fadeTargetAlpha > 0.5f ) ? 0.0f : 1.0f;
-				item->fadeAlphaItem = startAlpha + ( item->fadeTargetAlpha - startAlpha ) * t;
-			}
-		}
-	}
-
-	// render items — coordinates are relative to menu origin for non-fullscreen
-	for ( int i = 0; i < menu->itemCount; i++ ) {
-		wiredItemDef_t *item = menu->items[i];
-
-		if ( !WiredUI_ItemShouldRender( item ) ) {
-			continue;
-		}
-
-		// read resolved pixel rect from layout engine
-		float itemX = item->resolvedRect.x;
-		float itemY = item->resolvedRect.y - scrollY;
-		float itemW = item->resolvedRect.w;
-		float itemH = item->resolvedRect.h;
-
-		// clip items outside visible area
-		if ( itemY + itemH < clipTop || itemY > clipBottom ) {
-			continue;
-		}
-
-		// apply fade alpha modulation (fadein/fadeout animation)
-		float itemAlpha = 1.0f;
-		if ( item->fadeStartTime > 0 || item->fadeAlphaItem < 1.0f ) {
-			itemAlpha = item->fadeAlphaItem;
-			if ( itemAlpha <= 0.01f ) continue;  // fully transparent — skip drawing
-		}
-
-		// apply menu-level fade (fadeClamp/fadeCycle/fadeAmount)
-		itemAlpha *= menu->fadeAlpha;
-		if ( itemAlpha <= 0.01f ) continue;
-
-		if ( item->type == ITEM_TYPE_MODEL ) {
-			WiredUI_DrawModelItem( item, itemX, itemY, itemW, itemH );
-			WiredUI_DrawWindowBorder( itemX, itemY, itemW, itemH,
-				item->border, item->bordersize, item->bordercolor, itemAlpha );
-			continue;
-		}
-
-		WiredUI_DrawItemBackground( item, itemX, itemY, itemW, itemH, itemAlpha );
-
-		WiredUI_DrawWindowBorder( itemX, itemY, itemW, itemH,
-			item->border, item->bordersize, item->bordercolor, itemAlpha );
-
-		// draw background image (levelshots, icons, etc.)
-		// auto-update "mappreview" items from ui_mapLevelshot cvar
-		if ( item->name[0] && !Q_stricmp( item->name, "mappreview" ) ) {
-			char lsBuf[MAX_QPATH];
-			WiredUI_StateGetString( "ui_mapLevelshot", lsBuf, sizeof( lsBuf ) );
-			if ( lsBuf[0] ) {
-				Q_strncpyz( item->background, lsBuf, sizeof( item->background ) );
-			}
-		}
-		if ( item->background[0] ) {
-			qhandle_t bgShader = re.RegisterShaderNoMip( item->background );
-			if ( bgShader ) {
-				re.SetColor( NULL );
-				WUI_DrawPic( itemX, itemY, itemW, itemH, bgShader );
-			}
-		}
-
-		/* bindicon: draw store-bound icon overlay */
-		{
-			qhandle_t storeIcon = 0;
-			float storeValue = 0.0f;
-
-			if ( item->storeBindIcon[0] ) {
-				wuiStoreEntry_t *iconEntry = WiredStore_Get( item->storeBindIcon );
-				if ( iconEntry && iconEntry->icon ) {
-					storeIcon = iconEntry->icon;
-				} else if ( !item->bindWarned ) {
-					Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: bindicon key '%s' not found (item '%s')\n",
-								 item->storeBindIcon, item->name );
-					item->bindWarned = qtrue;
-				}
-			}
-
-			/* bindvalue: resolve numeric value from store */
-			if ( item->storeBindValue[0] ) {
-				wuiStoreEntry_t *valEntry = WiredStore_Get( item->storeBindValue );
-				if ( valEntry ) {
-					storeValue = valEntry->value;
-				} else if ( !item->bindWarned ) {
-					Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: bindvalue key '%s' not found (item '%s')\n",
-								 item->storeBindValue, item->name );
-					item->bindWarned = qtrue;
-				}
-			}
-
-			if ( storeIcon ) {
-				re.SetColor( NULL );
-				WUI_DrawPic( itemX, itemY, itemW, itemH, storeIcon );
-			}
-
-			(void)storeValue; /* resolved for use by status bar elements (task-5) */
-		}
-
-		// draw OWNERDRAW items — TA compat (CG_OWNERDRAW_* dispatch)
-		if ( item->type == ITEM_TYPE_OWNERDRAW && item->ownerdraw > 0 ) {
-			WiredUI_OwnerDraw( item->ownerdraw, itemX, itemY,
-				itemW, itemH, item->forecolor, item->textstyle );
-			continue;  // ownerdraw items handle their own rendering entirely
-		}
-
-		// draw LISTBOX items — feeder-driven scrollable list
-		if ( item->type == ITEM_TYPE_LISTBOX && item->feeder != 0 ) {
-			int feederID   = (int)item->feeder;
-			int totalItems = WiredUI_FeederCount( feederID );
-			float charSize = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
-			float letterSpacing = item->letterSpacing;
-			vec4_t selColor = { 0.3f, 0.3f, 0.5f, 0.6f };
-
-			if ( item->backcolor[3] > 0 ) {
-				WUI_FillRect( itemX, itemY, itemW, itemH, item->backcolor );
-			}
-
-			if ( item->horizontalScroll ) {
-				/* horizontal axis: items flow left→right */
-				float colW        = item->elementwidth > 0 ? item->elementwidth : 64.0f;
-				int   visibleCols = (int)( itemW / colW );
-				float scrollBarH  = 4.0f;
-				float contentH    = itemH;
-				int   col;
-				int   hoverCol    = -1;
-				vec4_t hoverColor = { 1, 1, 1, 0.10f };
-
-				if ( totalItems > visibleCols ) {
-					contentH -= scrollBarH + 2.0f;
-				}
-
-				/* hover detection: which cell is the cursor over? Used as a click affordance. */
-				if ( wui_cursorX >= itemX && wui_cursorX < itemX + itemW &&
-				     wui_cursorY >= itemY && wui_cursorY < itemY + contentH ) {
-					hoverCol = (int)( ( wui_cursorX - itemX ) / colW );
-					if ( hoverCol < 0 || hoverCol >= visibleCols ) hoverCol = -1;
-					else if ( item->listScrollOffset + hoverCol >= totalItems ) hoverCol = -1;
-				}
-
-				Text_SetLetterSpacing( letterSpacing );
-				for ( col = 0; col < visibleCols && ( item->listScrollOffset + col ) < totalItems; col++ ) {
-					int       dataIdx = item->listScrollOffset + col;
-					float     colX    = itemX + col * colW;
-					qhandle_t icon    = ( item->elementtype == LISTBOX_IMAGE )
-					                    ? WiredUI_FeederItemIcon( feederID, dataIdx ) : 0;
-					const char *text  = ( item->elementtype != LISTBOX_IMAGE || !icon )
-					                    ? WiredUI_FeederItemText( feederID, dataIdx, 0 ) : NULL;
-
-					if ( dataIdx == item->listSelectedRow ) {
-						WUI_FillRect( colX, itemY, colW, contentH, selColor );
-					} else if ( col == hoverCol ) {
-						WUI_FillRect( colX, itemY, colW, contentH, hoverColor );
-					}
-
-					if ( icon ) {
-						/* fit the icon into the cell with a small inset; preserve aspect by using min(colW, contentH) */
-						float pad   = 2.0f;
-						float side  = colW < contentH ? colW : contentH;
-						side -= pad * 2.0f;
-						if ( side < 1 ) side = 1;
-						{
-							float iconX = colX + ( colW - side ) * 0.5f;
-							float iconY = itemY + ( contentH - side ) * 0.5f;
-							re.SetColor( item->forecolor );
-							WUI_DrawPic( iconX, iconY, side, side, icon );
-							re.SetColor( NULL );
-						}
-					} else if ( text && text[0] ) {
-						float centerX = colX + colW * 0.5f;
-						Text_Draw( text, centerX, itemY + ( contentH - charSize ) * 0.5f,
-						           FONT_UI, charSize, item->forecolor, TEXT_ALIGN_CENTER, 0 );
-					}
-				}
-				Text_SetLetterSpacing( 0.0f );
-
-				/* horizontal scrollbar at bottom, macOS-style fade */
-				if ( totalItems > visibleCols ) {
-					float trackX       = itemX + 1.0f;
-					float trackY       = itemY + itemH - scrollBarH - 1.0f;
-					float trackW       = itemW - 2.0f;
-					float visibleFrac  = (float)visibleCols / (float)totalItems;
-					float thumbW       = trackW * visibleFrac;
-					float maxScroll    = (float)( totalItems - visibleCols );
-					float thumbX       = trackX;
-					float alpha        = 0.0f;
-
-					if ( thumbW < 16.0f ) thumbW = 16.0f;
-					if ( maxScroll > 0 ) {
-						thumbX += ( trackW - thumbW ) * ( (float)item->listScrollOffset / maxScroll );
-					}
-
-					if ( item->listScrollFadeTime > 0 ) {
-						int elapsed = realtime - item->listScrollFadeTime;
-						if ( elapsed < 1500 ) {
-							alpha = 1.0f;
-						} else {
-							alpha = 1.0f - (float)( elapsed - 1500 ) / 500.0f;
-							if ( alpha < 0 ) alpha = 0;
-						}
-					}
-
-					if ( alpha > 0 ) {
-						vec4_t trackColor = { 0.3f, 0.3f, 0.3f, 0.15f * alpha };
-						vec4_t thumbColor = { 0.7f, 0.7f, 0.7f, 0.5f * alpha };
-						WUI_FillRect( trackX, trackY, trackW, scrollBarH, trackColor );
-						WUI_FillRect( thumbX, trackY, thumbW, scrollBarH, thumbColor );
-					}
-				}
-			} else {
-				/* vertical axis (default) */
-				float rowH       = item->elementheight > 0 ? item->elementheight : 16.0f;
-				int   visibleRows = (int)( itemH / rowH );
-				float scrollBarW = 4.0f;
-				float contentW   = itemW;
-				int   row, col;
-				vec4_t rowColor;
-
-				if ( totalItems > visibleRows ) {
-					contentW -= scrollBarW + 2.0f;
-				}
-
-				Text_SetLetterSpacing( letterSpacing );
-				for ( row = 0; row < visibleRows && ( item->listScrollOffset + row ) < totalItems; row++ ) {
-					int   dataRow = item->listScrollOffset + row;
-					float rowY    = itemY + row * rowH;
-					float colX    = itemX + 4;
-
-					if ( dataRow == item->listSelectedRow ) {
-						WUI_FillRect( itemX, rowY, contentW, rowH, selColor );
-					}
-
-					Vector4Copy( item->forecolor, rowColor );
-					for ( col = 0; col < ( item->columns > 0 ? item->columns : 1 ); col++ ) {
-						const char *text = WiredUI_FeederItemText( feederID, dataRow, col );
-						float colW = ( col < item->columns && item->columnWidths[col] > 0 )
-							? item->columnWidths[col] : contentW;
-						if ( text && text[0] ) {
-							int maxChars = (int)( ( colW - 4 ) / charSize );
-							int visChars = 0, ti;
-							if ( maxChars < 1 ) maxChars = 1;
-							for ( ti = 0; text[ti]; ti++ ) {
-								if ( Q_IsColorString( &text[ti] ) ) { ti++; continue; }
-								visChars++;
-							}
-							if ( visChars > maxChars ) {
-								char clipped[128];
-								int ci = 0, vc = 0;
-								for ( ti = 0; text[ti] && ci < (int)sizeof(clipped) - 1; ti++ ) {
-									if ( Q_IsColorString( &text[ti] ) ) {
-										clipped[ci++] = text[ti++];
-										if ( text[ti] ) clipped[ci++] = text[ti];
-										continue;
-									}
-									if ( vc >= maxChars ) break;
-									clipped[ci++] = text[ti];
-									vc++;
-								}
-								clipped[ci] = '\0';
-								Text_Draw( clipped, (float)colX, (float)( rowY + 2 ), FONT_UI, charSize, rowColor, TEXT_ALIGN_LEFT, 0 );
-							} else {
-								Text_Draw( text, (float)colX, (float)( rowY + 2 ), FONT_UI, charSize, rowColor, TEXT_ALIGN_LEFT, 0 );
-							}
-						}
-						colX += colW;
-					}
-				}
-				Text_SetLetterSpacing( 0.0f );
-
-				/* vertical scrollbar on right, macOS-style fade */
-				if ( totalItems > visibleRows ) {
-					float trackX      = itemX + itemW - scrollBarW - 1.0f;
-					float trackY      = itemY + 1.0f;
-					float trackH      = itemH - 2.0f;
-					float visibleFrac = (float)visibleRows / (float)totalItems;
-					float thumbH      = trackH * visibleFrac;
-					float maxScroll   = (float)( totalItems - visibleRows );
-					float thumbY      = trackY;
-					float alpha       = 0.0f;
-
-					if ( thumbH < 16.0f ) thumbH = 16.0f;
-					if ( maxScroll > 0 ) {
-						thumbY += ( trackH - thumbH ) * ( (float)item->listScrollOffset / maxScroll );
-					}
-
-					if ( item->listScrollFadeTime > 0 ) {
-						int elapsed = realtime - item->listScrollFadeTime;
-						if ( elapsed < 1500 ) {
-							alpha = 1.0f;
-						} else {
-							alpha = 1.0f - (float)( elapsed - 1500 ) / 500.0f;
-							if ( alpha < 0 ) alpha = 0;
-						}
-					}
-
-					if ( alpha > 0 ) {
-						vec4_t trackColor = { 0.3f, 0.3f, 0.3f, 0.15f * alpha };
-						vec4_t thumbColor = { 0.7f, 0.7f, 0.7f, 0.5f * alpha };
-						WUI_FillRect( trackX, trackY, scrollBarW, trackH, trackColor );
-						WUI_FillRect( trackX, thumbY, scrollBarW, thumbH, thumbColor );
-					}
-				}
-			}
-
-			continue; // skip normal text rendering for listbox
-		}
-
-		// draw cvar-bound item value (right side of label)
-		if ( item->cvar[0] && item->type != ITEM_TYPE_TEXT && item->type != ITEM_TYPE_BUTTON ) {
-			char cvarBuf[256];
-			const char *valueText = "";
-			float charSize = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
-			// vertical center text in rect when textaligny is not set
-			float textVCenter = ( item->textaligny == 0 && itemH > charSize )
-				? ( itemH - charSize ) * 0.5f : item->textaligny;
-			float labelX = itemX + item->textalignx;
-			float labelY = itemY + textVCenter;
-			float valueX;
-
-			// draw the label on the left
-			if ( item->text[0] ) {
-				Text_Draw( item->text, (float)labelX, (float)labelY, FONT_UI, charSize, item->forecolor, TEXT_ALIGN_LEFT, 0 );
-			}
-
-			// compute value text based on item type
-		WiredUI_StateGetString( item->cvar, cvarBuf, sizeof( cvarBuf ) );
-
-			switch ( item->type ) {
-				case ITEM_TYPE_YESNO:
-					valueText = atof( cvarBuf ) != 0 ? "Yes" : "No";
-					break;
-
-				case ITEM_TYPE_MULTI:
-					/* Dynamic MULTI: populateCallback supplies the option
-					 * list at render time. Branch on the callback's state
-					 * so loading/empty/error/success/partial each render
-					 * with intentional, non-generic visuals. */
-					if ( item->populateCallback[0] ) {
-						wuiPopulateCallback_t pop = WiredUI_GetPopulateCallback( item->populateCallback );
-						if ( !pop ) {
-							/* Callback name typo / forgot to register: surface
-							 * loudly so devs notice. */
-							valueText = "<missing populate callback>";
-						} else {
-							wuiPopulateResult_t res;
-							qboolean found = qfalse;
-							memset( &res, 0, sizeof( res ) );
-							pop( &res );
-							switch ( res.state ) {
-								case WUI_POPULATE_LOADING:
-									valueText = "Scanning…";
-									break;
-								case WUI_POPULATE_EMPTY:
-									valueText = "No devices detected";
-									break;
-								case WUI_POPULATE_ERROR:
-									valueText = "Enumeration failed — Use default";
-									break;
-								case WUI_POPULATE_SUCCESS:
-								case WUI_POPULATE_PARTIAL:
-									for ( int j = 0; j < res.count; j++ ) {
-										if ( res.values && res.values[j] &&
-										     !Q_stricmp( cvarBuf, res.values[j] ) ) {
-											valueText = res.names[j];
-											found = qtrue;
-											break;
-										}
-									}
-									if ( !found ) {
-										if ( cvarBuf[0] ) {
-											/* User requested a device that
-											 * isn't currently present
-											 * (unplugged, renamed, etc.). */
-											valueText = va( "%s (not present)", cvarBuf );
-										} else if ( res.count > 0 && res.names && res.names[0] ) {
-											/* Empty cvar = system default —
-											 * still show first option as a
-											 * preview hint. */
-											valueText = "(System Default)";
-										} else {
-											valueText = "(System Default)";
-										}
-									}
-									break;
-								default:
-									valueText = cvarBuf;
-									break;
-							}
-						}
-					}
-					else if ( item->multiData ) {
-						qboolean found = qfalse;
-						for ( int j = 0; j < item->multiData->count; j++ ) {
-							if ( item->multiData->isStringList ) {
-								if ( !Q_stricmp( cvarBuf, item->multiData->strValues[j] ) ) {
-									valueText = item->multiData->labels[j];
-									found = qtrue;
-									break;
-								}
-							} else {
-								if ( item->multiData->floatValues[j] == atof( cvarBuf ) ) {
-									valueText = item->multiData->labels[j];
-									found = qtrue;
-									break;
-								}
-							}
-						}
-						// fallback: show raw cvar value if no option matches
-						if ( !found && cvarBuf[0] ) {
-							valueText = cvarBuf;
-						}
-					}
-					break;
-
-				case ITEM_TYPE_SLIDER:
-					{
-						float val = atof( cvarBuf );
-						float range = item->sliderData.maxVal - item->sliderData.minVal;
-						float frac = ( range > 0 ) ? ( val - item->sliderData.minVal ) / range : 0;
-						float barX = itemX + itemW * 0.5f;
-						float barW = itemW * 0.45f;
-						float barY = itemY + itemH * 0.4f;
-						float barH = 4.0f;
-						vec4_t barBg = { 0.3f, 0.3f, 0.3f, 0.6f };
-						vec4_t barFg = { 1.0f, 0.75f, 0.0f, 1.0f };
-
-						if ( frac < 0 ) frac = 0;
-						if ( frac > 1 ) frac = 1;
-
-						// draw slider track
-						WUI_FillRect( barX, barY, barW, barH, barBg );
-						// draw slider fill
-						WUI_FillRect( barX, barY, barW * frac, barH, barFg );
-						// draw value as text
-						valueText = va( "%.1f", val );
-					}
-					break;
-
-				case ITEM_TYPE_BIND:
-					{
-						static char bindBuf[128];
-						if ( wui_waitingForKey && wui_bindItem == item ) {
-							valueText = "Press a key...";
-						} else {
-							// find primary + alternate keys bound to this command
-							const char *key1 = NULL, *key2 = NULL;
-							for ( int k = 0; k < MAX_KEYS; k++ ) {
-								const char *b = Key_GetBinding( k );
-								if ( b && !Q_stricmp( b, item->cvar ) ) {
-									if ( !key1 ) key1 = Key_KeynumToString( k );
-									else if ( !key2 ) { key2 = Key_KeynumToString( k ); break; }
-								}
-							}
-							if ( key1 && key2 ) {
-								Com_sprintf( bindBuf, sizeof( bindBuf ), "%s ^7or %s", key1, key2 );
-								valueText = bindBuf;
-							} else if ( key1 ) {
-								valueText = key1;
-							} else {
-								valueText = "---";
-							}
-						}
-					}
-					break;
-
-				case ITEM_TYPE_EDITFIELD:
-				case ITEM_TYPE_NUMERICFIELD:
-					if ( wui_editingField && wui_editItem == item ) {
-						// show value with blinking cursor
-						static char editBuf[512];
-						int curPos = wui_editCursorPos;
-						qboolean showCursor = ( (int)( cls.realtime / 250 ) & 1 );
-
-						if ( curPos > (int)strlen( cvarBuf ) ) curPos = strlen( cvarBuf );
-						Q_strncpyz( editBuf, cvarBuf, curPos + 1 );
-						{
-							qstring_t eb_qs = QS_WrapExisting( editBuf, sizeof(editBuf) );
-							QS_AppendChar( &eb_qs, showCursor ? '_' : ' ' );
-							QS_Append( &eb_qs, &cvarBuf[curPos] );
-						}
-						valueText = editBuf;
-					} else {
-						valueText = cvarBuf;
-					}
-					break;
-
-				default:
-					valueText = cvarBuf;
-					break;
-			}
-
-			// draw value text after label with consistent spacing
-			if ( valueText[0] ) {
-				float textLen = strlen( item->text[0] ? item->text : "" ) * charSize;
-				valueX = itemX + textLen + 12;
-				Text_SetLetterSpacing( item->letterSpacing );
-				Text_Draw( valueText, (float)valueX, (float)labelY, FONT_UI, charSize, item->forecolor, TEXT_ALIGN_LEFT, 0 );
-				Text_SetLetterSpacing( 0.0f );
-			}
-		}
-		/* draw text-only items (no cvar) — also handles storeBind text override */
-		else if ( item->text[0] || item->storeBind[0] ) {
-			float charSize = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
-			float textVCenter = ( item->textaligny == 0 && itemH > charSize )
-				? ( itemH - charSize ) * 0.5f : item->textaligny;
-			float x = itemX + item->textalignx;
-			float y = itemY + textVCenter;
-			int drawAlign = TEXT_ALIGN_LEFT;
-			const char *sourceText;
-			vec4_t drawColor;
-
-			Vector4Copy( item->forecolor, drawColor );
-			sourceText = item->text;
-
-			/* bind: override display text from store */
-			if ( item->storeBind[0] ) {
-				wuiStoreEntry_t *bindEntry = WiredStore_Get( item->storeBind );
-				if ( bindEntry && bindEntry->text[0] ) {
-					sourceText = bindEntry->text;
-				} else if ( !item->bindWarned ) {
-					Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: bind key '%s' not found (item '%s')\n",
-								 item->storeBind, item->name );
-					item->bindWarned = qtrue;
-				}
-			}
-
-			/* bindcolor: override forecolor from store */
-			if ( item->storeBindColor[0] ) {
-				wuiStoreEntry_t *colorEntry = WiredStore_Get( item->storeBindColor );
-				if ( colorEntry ) {
-					/* semantic state takes priority over raw color */
-					if ( colorEntry->state[0] ) {
-						if ( !WiredTheme_ResolveState( colorEntry->state, drawColor ) ) {
-							/* unknown state — fall back to raw color */
-							Vector4Copy( colorEntry->color, drawColor );
-						}
-					} else {
-						Vector4Copy( colorEntry->color, drawColor );
-					}
-				} else if ( !item->bindWarned ) {
-					Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: bindcolor key '%s' not found (item '%s')\n",
-								 item->storeBindColor, item->name );
-					item->bindWarned = qtrue;
-				}
-			}
-
-			if ( sourceText[0] ) {
-				if ( item->textalign == ITEM_ALIGN_CENTER && itemW > 0 ) {
-					x = itemX + itemW * 0.5f;
-					drawAlign = TEXT_ALIGN_CENTER;
-				} else if ( item->textalign == ITEM_ALIGN_RIGHT && itemW > 0 ) {
-					x = itemX + itemW;
-					drawAlign = TEXT_ALIGN_RIGHT;
-				}
-
-				Text_SetLetterSpacing( item->letterSpacing );
-				Text_DrawClipped( sourceText, (float)x, (float)y, (float)itemW, FONT_UI, charSize, drawColor, drawAlign, 0 );
-				Text_SetLetterSpacing( 0.0f );
-			}
-		}
-	}
-
-	// draw focus highlight on hovered/selected item
-	if ( wui_focusItem >= 0 && wui_focusItem < menu->itemCount ) {
-		wiredItemDef_t *focus = menu->items[wui_focusItem];
-		if ( WiredUI_ItemCanFocus( focus ) ) {
-			float fx = focus->resolvedRect.x;
-			float fy = focus->resolvedRect.y - scrollY;
-			float fw = focus->resolvedRect.w;
-			float fh = focus->resolvedRect.h;
-			// don't draw focus highlight outside clip area
-			if ( fy + fh < clipTop || fy > clipBottom ) goto skip_focus;
-			// TA-style: gradient bar behind focused item, or solid fill as fallback
-			if ( wui_gradientBarShader ) {
-				re.SetColor( menu->focuscolor );
-				WUI_DrawPic( fx, fy, fw, fh, wui_gradientBarShader );
-				re.SetColor( NULL );
-			} else {
-				WUI_FillRect( fx, fy, fw, fh, menu->focuscolor );
-			}
-			// redraw the focused item's text on top of highlight
-			if ( focus->text[0] ) {
-				float charSize = focus->fontPointSize > 0.0f ? focus->fontPointSize : WUI_DEFAULT_FONT_SIZE;
-				float focusVCenter = ( focus->textaligny == 0 && fh > charSize )
-					? ( fh - charSize ) * 0.5f : focus->textaligny;
-				float x = fx + focus->textalignx;
-				float y = fy + focusVCenter;
-				int focusAlign = TEXT_ALIGN_LEFT;
-				if ( focus->textalign == ITEM_ALIGN_CENTER && fw > 0 ) {
-					x = fx + fw * 0.5f;
-					focusAlign = TEXT_ALIGN_CENTER;
-				} else if ( focus->textalign == ITEM_ALIGN_RIGHT && fw > 0 ) {
-					x = fx + fw;
-					focusAlign = TEXT_ALIGN_RIGHT;
-				}
-				Text_SetLetterSpacing( focus->letterSpacing );
-				Text_DrawClipped( focus->text, (float)x, (float)y, (float)fw, FONT_UI, charSize, focus->forecolor, focusAlign, 0 );
-				Text_SetLetterSpacing( 0.0f );
-			}
-		}
-	}
-skip_focus:
-
-	// draw tooltip for mouse-hovered item only (ET:Legacy + QL)
-	// keyboard focus does NOT show tooltips — they anchor to the cursor
-	// tooltip only appears after WIRED_TOOLTIP_DELAY_MS of continuous hover
-	if ( wui_focusFromMouse && wui_focusItem >= 0 && wui_focusItem < menu->itemCount ) {
-		wiredItemDef_t *focus = menu->items[wui_focusItem];
-		if ( focus->tooltip[0] && wui_tooltipStartTime > 0 &&
-		     ( realtime - wui_tooltipStartTime ) >= WIRED_TOOLTIP_DELAY_MS ) {
-			float tx = wui_cursorX + 16;
-			float ty = wui_cursorY + 16;
-			float tw = strlen( focus->tooltip ) * 8.0f + 8;
-			float th = 16.0f;
-			vec4_t tipBg = { 0.0f, 0.0f, 0.0f, 0.85f };
-			vec4_t tipFg = { 1.0f, 1.0f, 1.0f, 0.95f };
-
-			// keep tooltip on screen
-			if ( tx + tw > (float)cls.glconfig.vidWidth ) tx = (float)cls.glconfig.vidWidth - tw;
-			if ( ty + th > (float)cls.glconfig.vidHeight ) ty = wui_cursorY - th - 4;
-
-			WUI_FillRect( tx, ty, tw, th, tipBg );
-			Text_Draw( focus->tooltip, (float)(tx + 4), (float)(ty + 4), FONT_UI, 8.0f, tipFg, TEXT_ALIGN_LEFT, 0 );
-		}
-	}
-
-	// macOS-style scrollbar — thin, semi-transparent, fades out
-	{
-		float maxScroll = menu->contentHeight - menuH;
-		if ( maxScroll > 0 ) {
-			float scrollBarWidth = 4.0f;
-			float scrollBarPadding = 2.0f;
-			float trackX = menuX + menuW - scrollBarWidth - scrollBarPadding;
-			float trackY = menuY + scrollBarPadding;
-			float trackH = menuH - scrollBarPadding * 2;
-
-			// thumb size proportional to visible/content ratio
-			float visibleFrac = menuH / menu->contentHeight;
-			float thumbH = trackH * visibleFrac;
-			if ( thumbH < 20.0f ) thumbH = 20.0f;
-			float thumbY = trackY + ( trackH - thumbH ) * ( scrollY / maxScroll );
-
-			// fade out after 1.5 seconds of inactivity
-			float alpha = 1.0f;
-			if ( menu->scrollBarFadeTime > 0 ) {
-				int elapsed = realtime - menu->scrollBarFadeTime;
-				if ( elapsed > 1500 ) {
-					alpha = 1.0f - ( elapsed - 1500 ) / 500.0f;
-					if ( alpha < 0 ) alpha = 0;
-				}
-			} else {
-				alpha = 0; // never scrolled — don't show
-			}
-
-			if ( alpha > 0 ) {
-				vec4_t trackColor = { 0.3f, 0.3f, 0.3f, 0.15f * alpha };
-				vec4_t thumbColor = { 0.7f, 0.7f, 0.7f, 0.5f * alpha };
-
-				WUI_FillRect( trackX, trackY, scrollBarWidth, trackH, trackColor );
-				WUI_FillRect( trackX, thumbY, scrollBarWidth, thumbH, thumbColor );
-			}
-		}
-	}
-
-	// Layer 5: visual layout debug overlay
-	WiredUI_DrawDebugOverlay( menu );
-
-	WiredUI_DrawMultiDropdown( menu );
-
-	if ( Key_GetCatcher() & KEYCATCH_UI ) {
-		vec4_t cursorTint = { 0.85f, 0.55f, 0.1f, 1.0f };
-		if ( wui_cursorShader ) {
-			re.SetColor( cursorTint );
-			WUI_DrawPic( wui_cursorX - 16, wui_cursorY - 16, 32, 32, wui_cursorShader );
-			re.SetColor( NULL );
-		} else {
-			vec4_t cursorColor = { 0.85f, 0.55f, 0.1f, 1.0f };
-			re.SetColor( cursorColor );
-			WUI_FillRect( wui_cursorX - 1, wui_cursorY - 8, 2, 16, cursorColor );
-			WUI_FillRect( wui_cursorX - 8, wui_cursorY - 1, 16, 2, cursorColor );
-			re.SetColor( NULL );
-		}
-	}
-
-	// Phase 2 rendering parity integrated for borders/teamcolor/model items.
+	WiredUI_TickFrame      ( cls.realtime );
+	WiredUI_CompositorEmitFrame();
 }
 
 // ── script command system ─────────────────────────────────────────────
@@ -2775,8 +3567,17 @@ static void WiredScript_Hide( wiredMenuDef_t *menu, wiredItemDef_t *item, int nu
 }
 
 static void WiredScript_Open( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	wuiBgIntent_t intent = WUI_BG_INTENT_INHERIT;
 	if ( numArgs < 1 ) return;
-	WiredUI_PushMenu( args[0] );
+	/* Optional 2nd arg selects the background intent so a .wui action can open a
+	 * menu ONTO the parallax scene: `open "startserver" scene`. Absent → INHERIT
+	 * (today's authored-flags background), so every existing `open "x"` is unchanged. */
+	if ( numArgs >= 2 ) {
+		if      ( !Q_stricmp( args[1], "scene" ) ) intent = WUI_BG_INTENT_SCENE;
+		else if ( !Q_stricmp( args[1], "dim"   ) ) intent = WUI_BG_INTENT_DIM;
+		else if ( !Q_stricmp( args[1], "none"  ) ) intent = WUI_BG_INTENT_NONE;
+	}
+	WiredUI_PushMenu( args[0], intent );
 }
 
 static void WiredScript_Close( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
@@ -2926,13 +3727,14 @@ static void WiredScript_FadeOut( wiredMenuDef_t *menu, wiredItemDef_t *item, int
 }
 
 static void WiredScript_SetFocus( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	int i;
+	wiredItemDef_t *target = NULL;
 	if ( numArgs < 1 ) return;
-	for ( int i = 0; i < menu->itemCount; i++ ) {
-		if ( !Q_stricmp( menu->items[i]->name, args[0] ) ) {
-			wui_focusItem = i;
-			break;
-		}
+	/* recursive find so nested children are reachable. */
+	for ( i = 0; i < menu->itemCount && !target; i++ ) {
+		target = wui_find_item_recursive( menu->items[ i ], args[0] );
 	}
+	if ( target ) wui_set_focused( menu, target );
 }
 
 // forward declaration (non-static — also called from cl_wui_feeders.c)
@@ -2967,7 +3769,7 @@ static const wiredGameTypePersistField_t wui_gameTypePersistCvars[] = {
 
 static const wiredGameTypePersistField_t wui_gameTypePersistStateKeys[] = {
 	{ "ui_botCount", qfalse },
-	{ "ui_dedicated", qfalse },
+	{ "ui_hostListed", qfalse },
 	{ NULL, qfalse }
 };
 
@@ -3198,6 +4000,42 @@ static void WiredScript_ClearMapPool( wiredMenuDef_t *menu, wiredItemDef_t *item
 	WiredUI_UpdateMapPoolButton();
 }
 
+// ── vote dispatch handlers ───────────────────────────────────────────
+// callvote.wui / removebots.wui submit buttons deposit their selection into
+// the state dict via the feeder selection callback, then invoke one of these
+// handlers to read the value and dispatch the real console command. (q3now has
+// no $-cvar expansion in WiredScript args, so the value must round-trip through
+// the state dict — same convention as StartServer's ui_selectedMap flow.)
+// Map vote reads ui_selectedMap (deposited by the allmaps feeder); kick/leader
+// read ui_selectedPlayerNum (the client NUMBER deposited by the player-list
+// feeder), since the game's robust vote path is numeric (clientkick <n> /
+// callteamvote leader <n>).
+
+static void WiredScript_VoteMap( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	char buf[MAX_QPATH];
+	WiredUI_StateGetString( "ui_selectedMap", buf, sizeof( buf ) );
+	if ( buf[0] ) Cbuf_ExecuteText( EXEC_APPEND, va( "callvote map %s\n", buf ) );
+}
+
+static void WiredScript_VoteKick( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	char buf[MAX_QPATH];
+	WiredUI_StateGetString( "ui_selectedPlayerNum", buf, sizeof( buf ) );
+	if ( buf[0] ) Cbuf_ExecuteText( EXEC_APPEND, va( "callvote clientkick %s\n", buf ) );
+}
+
+static void WiredScript_VoteLeader( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	char buf[MAX_QPATH];
+	WiredUI_StateGetString( "ui_selectedPlayerNum", buf, sizeof( buf ) );
+	if ( buf[0] ) Cbuf_ExecuteText( EXEC_APPEND, va( "callteamvote leader %s\n", buf ) );
+}
+
+// removebots.wui: direct host-side kick (not a vote) of the selected client.
+static void WiredScript_Kick( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	char buf[MAX_QPATH];
+	WiredUI_StateGetString( "ui_selectedPlayerNum", buf, sizeof( buf ) );
+	if ( buf[0] ) Cbuf_ExecuteText( EXEC_APPEND, va( "clientkick %s\n", buf ) );
+}
+
 // ── favorite maps ────────────────────────────────────────────────────
 // Stored in Wired Store key ui_favoriteMaps.
 
@@ -3302,14 +4140,10 @@ static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item,
 		Cvar_Set( "g_gametype", uiGameType );
 	}
 
-	// dedicated mode
-	if ( WiredUI_StateGetInt( "ui_dedicated" ) <= 0 ) {
-		Cvar_Set( "dedicated", "0" );
-	} else {
-		char uiDedicated[64];
-		WiredUI_StateGetString( "ui_dedicated", uiDedicated, sizeof( uiDedicated ) );
-		Cvar_Set( "dedicated", uiDedicated );
-	}
+	// server listing policy: private (unlisted) vs public (announced to masters).
+	// The server always runs in-process (the 'map' command below starts it);
+	// the only choice is whether it advertises itself.
+	Cvar_Set( "sv_hostListed", WiredUI_StateGetInt( "ui_hostListed" ) ? "1" : "0" );
 
 	// ensure sv_maxclients can accommodate g_minPlayers
 	{
@@ -3359,7 +4193,7 @@ static void WiredScript_JoinServer( wiredMenuDef_t *menu, wiredItemDef_t *item, 
 				if ( servers[j].g_needpass ) {
 					Cvar_VariableStringBuffer( "password", password, sizeof( password ) );
 					if ( !password[0] ) {
-						WiredUI_PushMenu( "password" );
+						WiredUI_PushMenu( "password", WUI_BG_INTENT_INHERIT );
 						return;
 					}
 				}
@@ -3414,8 +4248,8 @@ static void WiredScript_RunMod( wiredMenuDef_t *menu, wiredItemDef_t *item, int 
 
 	WiredUI_CloseAllMenus();
 
-	// "baseq3" means return to base game — clear fs_game
-	if ( Q_stricmp( modName, "baseq3" ) == 0 ) {
+	// BASEGAME means return to base game — clear fs_game
+	if ( Q_stricmp( modName, BASEGAME ) == 0 ) {
 		Cvar_Set( "fs_game", "" );
 	} else {
 		Cvar_Set( "fs_game", modName );
@@ -3519,9 +4353,9 @@ static void WiredScript_SetColor( wiredMenuDef_t *menu, wiredItemDef_t *item, in
 static void WiredScript_ConditionalOpen( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	if ( numArgs < 3 ) return;
 	if ( Cvar_VariableIntegerValue( args[0] ) != 0 ) {
-		WiredUI_PushMenu( args[1] );
+		WiredUI_PushMenu( args[1], WUI_BG_INTENT_INHERIT );
 	} else {
-		WiredUI_PushMenu( args[2] );
+		WiredUI_PushMenu( args[2], WUI_BG_INTENT_INHERIT );
 	}
 }
 
@@ -3634,6 +4468,8 @@ static const wiredUiScriptEntry_t wiredUiScripts[] = {
 	{ "closeingame",      NULL },
 	{ "prevCharacter",    WiredScript_PrevCharacter },
 	{ "nextCharacter",    WiredScript_NextCharacter },
+	{ "Kick",             WiredScript_Kick },
+	{ "kick",             WiredScript_Kick },
 	{ NULL, NULL }
 };
 
@@ -3658,7 +4494,10 @@ static void WiredScript_UiScript( wiredMenuDef_t *menu, wiredItemDef_t *item, in
 	} else if ( !Q_stricmp( args[0], "resetDefaults" ) ) {
 		Cbuf_ExecuteText( EXEC_APPEND, "exec default.cfg\n" );
 	} else if ( !Q_stricmp( args[0], "Controls" ) ) {
-		WiredUI_PushMenu( "controls" );
+		/* controls is a settings-cluster tab (SCENE everywhere via the settings
+		 * nav) — this alternate uiScript entry matches that so the tab is never
+		 * the bare authored grid. */
+		WiredUI_PushMenu( "controls", WUI_BG_INTENT_SCENE );
 	} else if ( !Q_stricmp( args[0], "clearError" ) ) {
 		// noop
 	} else if ( !Q_stricmp( args[0], "ServerSort" ) && numArgs >= 2 ) {
@@ -3730,7 +4569,7 @@ static const wiredScriptCommand_t wiredScriptCommands[] = {
 	{ "fadein",           WiredScript_FadeIn },
 	{ "fadeout",          WiredScript_FadeOut },
 	{ "setfocus",         WiredScript_SetFocus },
-	// ── Phase 2.5: v6 compatibility commands ────────────────────────
+	// ── v6 compatibility commands ────────────────────────
 	{ "setitemcolor",     WiredScript_SetItemColor },
 	{ "setcolor",         WiredScript_SetColor },
 	{ "conditionalopen",  WiredScript_ConditionalOpen },
@@ -3749,6 +4588,10 @@ static const wiredScriptCommand_t wiredScriptCommands[] = {
 	{ "togglemappool",    WiredScript_ToggleMapPool },
 	{ "ClearMapPool",     WiredScript_ClearMapPool },
 	{ "clearmappool",     WiredScript_ClearMapPool },
+	// ── vote dispatch (callvote.wui submit buttons) ─────────────────
+	{ "voteMap",          WiredScript_VoteMap },
+	{ "voteKick",         WiredScript_VoteKick },
+	{ "voteLeader",       WiredScript_VoteLeader },
 	{ "ToggleFavorite",   WiredScript_ToggleFavoriteMap },
 	{ "togglefavorite",   WiredScript_ToggleFavoriteMap },
 	{ "ServerSort",       WiredScript_ServerSortCmd },
@@ -3843,7 +4686,7 @@ static void WiredUI_RunScript( wiredMenuDef_t *menu, wiredItemDef_t *item, const
 
 // ── menu stack ────────────────────────────────────────────────────────
 
-void WiredUI_PushMenu( const char *name ) {
+void WiredUI_PushMenu( const char *name, wuiBgIntent_t bgIntent ) {
 	if ( !name || !name[0] ) return;
 
 	// check if menu exists
@@ -3852,14 +4695,52 @@ void WiredUI_PushMenu( const char *name ) {
 		return;
 	}
 
+	/* Idempotent top-of-stack guard. The settings sub-menus return to main with a
+	 * synchronous `close ; open "main"` batch (options/video/servers.wui et al):
+	 * `close` pops the sub-menu leaving main (now a real stack entry — see the
+	 * first-input / SetActiveMenu(MAIN) promotion) on top, then `open "main"` would
+	 * stack a SECOND main. That duplicate makes the first ESC-on-main a no-op (it
+	 * pops the dup back to the identical main instead of dismissing to attract) and
+	 * confuses depth-based predicates. Since the menu already showing on top is the
+	 * one being re-opened, collapse to it rather than push a copy. (error_popup has
+	 * its own analogous dedup at ShowError; this generalises the rule.) */
+	if ( wui_menuStackDepth > 0
+	     && Q_stricmp( wui_menuStack[ wui_menuStackDepth - 1 ], name ) == 0 ) {
+		/* Already on top — refresh its background intent so a re-open with a
+		 * different intent (e.g. INHERIT→DIM when entering from gameplay) takes
+		 * effect without stacking a duplicate. */
+		wui_menuBgIntent[ wui_menuStackDepth - 1 ] = bgIntent;
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: push menu '%s' collapsed (already on top, depth %d)\n", name, wui_menuStackDepth );
+		Key_SetCatcher( Key_GetCatcher() | KEYCATCH_UI );
+		return;
+	}
+
 	if ( wui_menuStackDepth >= WIRED_MENU_STACK_DEPTH ) {
 		COM_WARN( LOG_CH(ch_ui), "WiredUI: menu stack overflow (max %d)\n", WIRED_MENU_STACK_DEPTH );
 		return;
 	}
 
+	/* WiredUI F4 (return-focus): before this new menu takes the top slot and
+	 * clears the shared focus pointers, remember the control that was focused on
+	 * the menu we're pushing OVER. WiredUI_PopMenu restores it when this menu is
+	 * closed, returning the caret to the button/row that opened the dialog. The
+	 * slot is keyed by the NEW depth (post-increment index below), so pop reads
+	 * wui_returnFocus[depth-after-decrement]. */
+	wui_returnFocus[ wui_menuStackDepth ] = wui_focusedItemPtr;
+
 	Q_strncpyz( wui_menuStack[wui_menuStackDepth], name, sizeof( wui_menuStack[0] ) );
+	wui_menuBgIntent[wui_menuStackDepth] = bgIntent;   /* record how this menu was opened */
 	wui_menuStackDepth++;
+	/* SCENE menus get a one-shot parallax nudge so switching between them feels
+	 * like the scene shifts and settles (no-op for the flat/dim/none intents). */
+	if ( bgIntent == WUI_BG_INTENT_SCENE ) {
+		WiredUI_NotifyBgTransition();
+	}
 	wui_focusItem = -1;
+	wui_focusedItemPtr = NULL;
+	wui_hoveredItemPtr = NULL;
+	wui_ix.pressTarget = NULL;
+	wui_ix.focusFromKeyboard = qfalse;
 	wui_focusFromMouse = qfalse;
 	wui_tooltipStartTime = 0;
 	wui_tooltipFocusItem = -1;
@@ -3894,6 +4775,29 @@ void WiredUI_PushMenu( const char *name ) {
 			WiredUI_RunScript( opened, NULL, opened->onOpen );
 		}
 	}
+
+	// Invariant: a menu on the stack means the UI owns input. The settings nav
+	// buttons switch sub-menus with `close ; open` (options.wui:159 et al) run
+	// synchronously — `close` pops the stack to empty and WiredUI_PopMenu drops
+	// KEYCATCH_UI on that empty-stack edge (below), then this `open` re-fills the
+	// stack. Without restoring the catcher here the UI would render (GetActiveMenu
+	// reads the stack) but receive no mouse/key events until the next click
+	// happened to re-set KEYCATCH_UI via the attract first-input path — the cursor
+	// showed but wouldn't move. Re-assert the catcher whenever a menu is pushed so
+	// input and the visible menu never disagree. (Idempotent: OR-ing a set bit is
+	// a no-op on the normal open path where the catcher is already held.)
+	Key_SetCatcher( Key_GetCatcher() | KEYCATCH_UI );
+
+	/* WiredUI F4 (initial focus): seed keyboard focus on the freshly-opened
+	 * menu — the default button if authored, else the first focusable control —
+	 * so Enter activates it and Tab has a starting point. Runs AFTER onOpen (so a
+	 * script that toggles ui_* visibility has already run and the focusable set is
+	 * final) and AFTER the catcher assertion. Menus with no focusable items (HUD
+	 * overlays, loading screens, pure-display popups) are left untouched. */
+	{
+		wiredMenuDef_t *opened2 = WiredUI_FindMenu( name );
+		WiredUI_SetInitialFocus( opened2 );
+	}
 }
 
 void WiredUI_PopMenu( void ) {
@@ -3916,11 +4820,44 @@ void WiredUI_PopMenu( void ) {
 
 	wui_menuStackDepth--;
 	wui_focusItem = -1;
+	wui_focusedItemPtr = NULL;
+	wui_hoveredItemPtr = NULL;
+	wui_ix.pressTarget = NULL;
+	wui_ix.focusFromKeyboard = qfalse;
 	wui_focusFromMouse = qfalse;
 	wui_tooltipStartTime = 0;
 	wui_tooltipFocusItem = -1;
 	WiredUI_CloseMultiDropdown();
 	if ( wui_sfxMenuClose ) S_StartLocalSound( wui_sfxMenuClose, CHAN_LOCAL_SOUND );
+
+	/* WiredUI F4 (return-focus): restore the control that had focus on the menu
+	 * we just uncovered — the caret returns to the button/row that opened the
+	 * dialog. wui_returnFocus[wui_menuStackDepth] was stamped in PushMenu at the
+	 * matching depth. Validate the saved pointer still belongs to the now-active
+	 * menu AND is still focusable (a reload could have rebuilt the item pool);
+	 * otherwise leave focus cleared (Tab from the top, as before). Depth 0 is
+	 * valid here — GetActiveMenu resolves the root main/ingame menu, so a dialog
+	 * opened from the top-level menu still returns focus to its opener. If the
+	 * root then closes entirely below (in-game / disconnected-main edge), the
+	 * restored focus is simply discarded — harmless. */
+	if ( wui_menuStackDepth >= 0 && wui_returnFocus[ wui_menuStackDepth ] ) {
+		wiredMenuDef_t *nowTop = WiredUI_GetActiveMenu();
+		wiredItemDef_t *saved  = wui_returnFocus[ wui_menuStackDepth ];
+		int             fi;
+		int             flatCount = 0;
+		wiredItemDef_t *flat[ 128 ];
+		if ( nowTop ) {
+			wui_collect_focusable( nowTop, flat, 128, &flatCount );
+			for ( fi = 0; fi < flatCount; fi++ ) {
+				if ( flat[ fi ] == saved ) {
+					wui_set_focused( nowTop, saved );
+					wui_ix.focusFromKeyboard = qtrue;   /* keyboard provenance => ring */
+					break;
+				}
+			}
+		}
+	}
+	wui_returnFocus[ wui_menuStackDepth ] = NULL;
 
 	if ( wui_menuStackDepth <= 0 ) {
 		// stack empty — return to root menu behavior
@@ -3930,7 +4867,28 @@ void WiredUI_PopMenu( void ) {
 			Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
 			Cvar_Set( "cl_paused", "0" );
 		}
-		// for UIMENU_MAIN, the root stays visible (can't close the main menu)
+		else if ( wui_activeMenu == UIMENU_MAIN && CL_ActiveApp()->state == CA_DISCONNECTED ) {
+			// Reaching depth 0 with main as the active root means MAIN ITSELF was
+			// just dismissed — main is now a real depth-1 stack entry (see the
+			// SetActiveMenu(MAIN) promotion), so a sub-menu pop lands at depth>=1 and
+			// never gets here; only the final ESC ON MAIN (last pop, 1->0) does.
+			// Attract model change (Eser 2026-07-02): ESC at the main menu while
+			// disconnected closes the menu and reveals attract again — the main menu
+			// and attract are exclusive surfaces, so popping the root hands the screen
+			// back to the running attract demo. This is the manual equivalent of the
+			// idle attract timeout (Eser 2026-07-05: ESC on main MUST still go to
+			// attract). (The legacy model kept UIMENU_MAIN non-closable here, trapping
+			// the user in the menu with no way back to a clean attract screen.)
+			wui_activeMenu = UIMENU_NONE;
+			Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
+			// Restart the reel here (Eser 2026-07-03): the menu HID attract while it
+			// was up, so returning to it warrants a fresh demo. (Contrast: closing
+			// the console over attract does NOT restart — attract kept running under
+			// the console the whole time; see cl_keys.c K_CONSOLE handling.)
+			Cbuf_ExecuteText( EXEC_APPEND, "attract_restart\n" );
+		}
+		// (in-game root without the disconnected guard: main menu is not a valid
+		//  root while connected, so no other close path is needed.)
 	}
 
 	Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: pop menu (depth %d)\n", wui_menuStackDepth );
@@ -3946,7 +4904,12 @@ void WiredUI_CloseAllMenus( void ) {
 		}
 	}
 	wui_menuStackDepth = 0;
+	memset( wui_returnFocus, 0, sizeof( wui_returnFocus ) );  /* F4: drop saved return-focus */
 	wui_focusItem = -1;
+	wui_focusedItemPtr = NULL;
+	wui_hoveredItemPtr = NULL;
+	wui_ix.pressTarget = NULL;
+	wui_ix.focusFromKeyboard = qfalse;
 	wui_tooltipStartTime = 0;
 	wui_tooltipFocusItem = -1;
 	wui_activeMenu = UIMENU_NONE;
@@ -3955,6 +4918,8 @@ void WiredUI_CloseAllMenus( void ) {
 	wui_bindItem = NULL;
 	wui_sliderDragging = qfalse;
 	wui_sliderDragItem = NULL;
+	wui_listScrollDragItem = NULL;
+	WiredUI_CompositorScrollbarDragEnd();
 	wui_editingField = qfalse;
 	wui_editItem = NULL;
 	Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
@@ -3986,6 +4951,17 @@ void CL_WiredUI_ShowError( const char *title, const char *message, qboolean retr
 		return;
 	}
 
+	// Automated/headless run: suppress the blocking GUI error dialog (the
+	// error has already been logged to stderr via Com_SetLastError). Without
+	// this, a smoke/CI run that hits a connect error stalls on an unattended
+	// modal nobody can dismiss. Interactive runs (com_automated 0) still get
+	// the dialog with its message.
+	if ( com_automated && com_automated->integer ) {
+		COM_ERROR( LOG_CH(ch_ui), "Connect error (dialog suppressed, automated): %s\n",
+		            message ? message : "unknown error" );
+		return;
+	}
+
 	// Hide Retry if the caller says non-retryable, or if the last connect
 	// target was localhost (CL_Reconnect_f refuses it silently — B6 fix).
 	reconnectTarget = Cvar_VariableString( "cl_reconnectArgs" );
@@ -4007,7 +4983,7 @@ void CL_WiredUI_ShowError( const char *title, const char *message, qboolean retr
 		return;
 	}
 
-	WiredUI_PushMenu( "error_popup" );
+	WiredUI_PushMenu( "error_popup", WUI_BG_INTENT_INHERIT );
 }
 
 static wiredItemDef_t *WiredUI_FindItemByName( wiredMenuDef_t *menu, const char *name ) {
@@ -4019,6 +4995,105 @@ static wiredItemDef_t *WiredUI_FindItemByName( wiredMenuDef_t *menu, const char 
 	}
 	return NULL;
 }
+
+#ifdef _DEBUG
+/* the deep item-by-name walk this test hook needs is already provided by
+ * wui_find_item_recursive (defined above, always compiled) — menu->items[]
+ * holds only TOP-LEVEL children, so the real controls live nested in
+ * children[]/childCount. The former WiredUI_FindItemDeep was a line-for-line
+ * duplicate; collapsed onto the shared implementation. */
+
+/* wui_dropdown_test <menuName> <itemName>  — open that menu's ITEM_TYPE_MULTI
+ *                                            control's dropdown popup.
+ * wui_dropdown_test --dismiss               — close it.
+ * Dev/test hook so a headless smoke can pixel-verify the floating dropdown
+ * panel render without an interactive mouse click. Drives the SAME singleton
+ * open state as the click handler (WiredUI_OpenMultiDropdown); no new render
+ * logic. _DEBUG-only. */
+static void WiredUI_DropdownTest_f( void ) {
+	const char     *menuName, *itemName;
+	wiredMenuDef_t *menu;
+	wiredItemDef_t *item;
+	int             mi;
+
+	if ( Cmd_Argc() >= 2 &&
+	     ( !Q_stricmp( Cmd_Argv( 1 ), "--dismiss" ) || !Q_stricmp( Cmd_Argv( 1 ), "-d" ) ) ) {
+		WiredUI_CloseMultiDropdown();
+		Com_Log( SEV_INFO, LOG_CH(ch_ui), "wui_dropdown_test: dismissed\n" );
+		return;
+	}
+	if ( Cmd_Argc() < 3 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"Usage: wui_dropdown_test <menuName> <itemName>\n"
+			"       wui_dropdown_test --dismiss\n" );
+		return;
+	}
+	menuName = Cmd_Argv( 1 );
+	itemName = Cmd_Argv( 2 );
+
+	menu = WiredUI_FindMenu( menuName );
+	if ( !menu ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui), "wui_dropdown_test: menu '%s' not found\n", menuName );
+		return;
+	}
+	item = NULL;
+	for ( mi = 0; mi < menu->itemCount && !item; mi++ ) {
+		item = wui_find_item_recursive( menu->items[mi], itemName );
+	}
+	if ( !item ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui), "wui_dropdown_test: item '%s' not in menu '%s' (searched tree)\n", itemName, menuName );
+		return;
+	}
+	if ( item->type != ITEM_TYPE_MULTI ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_dropdown_test: item '%s' is type %d, not ITEM_TYPE_MULTI\n", itemName, item->type );
+		return;
+	}
+	/* the menu must be on the stack for the dropdown rect/render to resolve
+	 * against it; push it if it isn't already the top. */
+	if ( wui_menuStackDepth == 0 ||
+	     Q_stricmp( wui_menuStack[ wui_menuStackDepth - 1 ], menuName ) != 0 ) {
+		WiredUI_PushMenu( menuName, WUI_BG_INTENT_INHERIT );
+	}
+	if ( WiredUI_OpenMultiDropdown( item ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"wui_dropdown_test: opened dropdown '%s.%s' (open=%d hover=%d scroll=%d)\n",
+			menuName, itemName, wui_multiDropdownOpen, wui_multiDropdownHover, wui_multiDropdownScroll );
+	} else {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_dropdown_test: '%s.%s' has no options (not opened)\n", menuName, itemName );
+	}
+}
+
+/* wui_scores_test [1|0|--dismiss]  — hold (1) / release (0) the scoreboard.
+ * Dev/test hook so a headless smoke can pixel-verify the V2 scoreboard chrome
+ * without an interactive TAB-hold. Issues the cgame's "+scores"/"-scores"
+ * button command through the normal console→cgame route (the same path a
+ * keybind takes); the cgame sets cg.showScores in its VM and the bridge
+ * restages it into wiredHud->showScores each frame, flipping the gametype
+ * scoreboard menu visible via the engine name-gate. Drives existing cgame
+ * state only — no VM-memory poke, no new render logic. _DEBUG-only. */
+static void WiredUI_ScoresTest_f( void ) {
+	qboolean down = qtrue;
+
+	if ( Cmd_Argc() >= 2 ) {
+		const char *a = Cmd_Argv( 1 );
+		if ( !Q_stricmp( a, "0" ) || !Q_stricmp( a, "--dismiss" ) || !Q_stricmp( a, "-d" ) ) {
+			down = qfalse;
+		}
+	}
+
+	/* Dispatch synchronously (EXEC_NOW) so the cgame's CG_CONSOLE_COMMAND
+	 * runs +scores/-scores immediately while the client is connected and the
+	 * cgame VM is live — same tokenize+dispatch path a keybind/console line
+	 * takes, reaching CG_ScoresDown_f. EXEC_APPEND would queue it behind the
+	 * remaining startup +cmd tokens and (observed) never reach the handler in
+	 * the headless +arg-driven flow. */
+	Cbuf_ExecuteText( EXEC_NOW, down ? "+scores\n" : "-scores\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_ui),
+		"wui_scores_test: issued %s to cgame\n", down ? "+scores" : "-scores" );
+}
+#endif
 
 // apply a callback to all items matching name OR group
 static void WiredUI_ForEachItemByNameOrGroup( wiredMenuDef_t *menu, const char *name,
@@ -4065,30 +5140,183 @@ static qboolean WiredUI_PointInRect( float px, float py, wiredRect_t *r ) {
 	         py >= r->y && py < r->y + r->h );
 }
 
-static int WiredUI_FindItemAtCursor( wiredMenuDef_t *menu, float cx, float cy ) {
-	// Layout is already resolved by the render loop (WUI_LayoutMenu called each frame)
-	float menuH = menu->resolvedRect.h;
-	float oy = menu->resolvedRect.y;
-	float sy = menu->scrollOffset;
+/* Depth-first hit-test descending into flex containers. Flexbox-first
+ * menus produce a single top-level container wrapping all actionable
+ * leaves, so a top-level-only walk would return NULL and mouseEnter /
+ * Exit / click never dispatch. Layout-only containers descend; action-
+ * bearing containers ARE hover targets (mirrors the focusable collector
+ * — their nested decoration children compose the row but the container
+ * itself takes the click). Back-to-front iteration preserves topmost-
+ * wins semantics. Clip-scroll skip matches the gate at the menu level. */
+static wiredItemDef_t *wui_find_item_at_cursor_recursive(
+	wiredItemDef_t *item, float cx, float cy, float sy,
+	float clipTop, float clipBottom )
+{
+	int i;
+	if ( !item ) return NULL;
 
-	// iterate back-to-front so topmost item wins
-	for ( int i = menu->itemCount - 1; i >= 0; i-- ) {
-		wiredItemDef_t *item = menu->items[i];
+	/* Container with action[] populated is itself the hover target —
+	 * mirrors the focusable collector's container-action rule. The
+	 * container's bounding box is computed by Clay from its children;
+	 * fall through to the rect test below using the container's own
+	 * resolvedRect (or skip if resolvedRect is degenerate — that's
+	 * the flex-container 0,0 case which the Clay compositor hover
+	 * path covers via Clay_GetPointerOverIds). */
+	if ( ( item->isFlexContainer || item->childCount > 0 ) && !item->action[0] ) {
+		for ( i = item->childCount - 1; i >= 0; i-- ) {
+			wiredItemDef_t *hit = wui_find_item_at_cursor_recursive(
+				item->children[ i ], cx, cy, sy, clipTop, clipBottom );
+			if ( hit ) return hit;
+		}
+		return NULL;
+	}
+
+	if ( !WiredUI_ItemCanFocus( item ) ) return NULL;
+
+	{
 		wiredRect_t absRect;
-		if ( !WiredUI_ItemCanFocus( item ) ) continue;
 		absRect.x = item->resolvedRect.x;
 		absRect.y = item->resolvedRect.y - sy;
 		absRect.w = item->resolvedRect.w;
 		absRect.h = item->resolvedRect.h;
 
-		// skip items scrolled out of view
-		float clipTop = oy;
-		float clipBottom = clipTop + menuH;
-		if ( absRect.y + absRect.h < clipTop || absRect.y > clipBottom ) continue;
-
-		if ( WiredUI_PointInRect( cx, cy, &absRect ) ) return i;
+		/* Skip items scrolled out of view (same condition as the legacy
+		 * top-level loop). */
+		if ( absRect.y + absRect.h < clipTop || absRect.y > clipBottom ) {
+			return NULL;
+		}
+		if ( WiredUI_PointInRect( cx, cy, &absRect ) ) return item;
 	}
-	return -1;
+	return NULL;
+}
+
+static wiredItemDef_t *WiredUI_FindItemAtCursor( wiredMenuDef_t *menu, float cx, float cy ) {
+	// Layout is already resolved by the render loop (WUI_LayoutMenu called each frame)
+	float menuH = menu->resolvedRect.h;
+	float oy = menu->resolvedRect.y;
+	float sy = menu->scrollOffset;
+	float clipTop = oy;
+	float clipBottom = clipTop + menuH;
+	int   i;
+
+	// iterate back-to-front so topmost item wins; descend into each via the
+	// recursive helper so nested leaves are reachable.
+	for ( i = menu->itemCount - 1; i >= 0; i-- ) {
+		wiredItemDef_t *hit = wui_find_item_at_cursor_recursive(
+			menu->items[ i ], cx, cy, sy, clipTop, clipBottom );
+		if ( hit ) return hit;
+	}
+	return NULL;
+}
+
+/* ── listbox keyboard row-nav helpers ───────────────────────────────────
+ *
+ * Shared by the vertical UP/DOWN/HOME/END/PAGE row-nav and the type-to-jump
+ * search. The visible-row count is computed dpi-consistently with the render
+ * + click hit-test (cl_wired_clay.c wui_clay_emit_listbox uses the same
+ * charSize x WUI_LINE_HEIGHT_FACTOR x dpi row height), so the page-step and
+ * keep-in-view scroll agree with what is actually drawn on HiDPI. */
+static char wui_ascii_lower( char c )
+{
+	return ( c >= 'A' && c <= 'Z' ) ? (char)( c + 32 ) : c;
+}
+
+static int wui_listbox_visible_rows( const wiredItemDef_t *item )
+{
+	float dpi       = WiredUI_GetDpiScale();
+	float charSize  = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
+	float rowHFloor = charSize * WUI_LINE_HEIGHT_FACTOR * dpi;
+	float rowH      = item->elementheight > 0 ? item->elementheight * dpi : rowHFloor;
+	float headerH   = WiredUI_ListboxHeaderHeight( (wiredItemDef_t *)item );
+	int   vis;
+	if ( rowH < rowHFloor ) rowH = rowHFloor;
+	vis = ( rowH > 0.0f ) ? (int)( ( item->rect.h - headerH ) / rowH ) : 1;
+	return vis < 1 ? 1 : vis;
+}
+
+/* Move a vertical listbox's selection to `sel`, clamp to [0,total), update the
+ * feeder selection, keep the row in view, and play the focus sfx if the
+ * selection actually changed. Mirrors the horizontal-listbox LEFT/RIGHT logic
+ * on the vertical axis so both axes agree. */
+static void wui_listbox_set_selection( wiredItemDef_t *item, int sel )
+{
+	int total   = WiredUI_FeederCount( (int)item->feeder );
+	int visible = wui_listbox_visible_rows( item );
+
+	if ( total <= 0 ) return;
+	if ( sel < 0 )      sel = 0;
+	if ( sel >= total ) sel = total - 1;
+
+	if ( sel != item->listSelectedRow ) {
+		item->listSelectedRow = sel;
+		WiredUI_FeederSelection( (int)item->feeder, sel );
+		if ( wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
+	}
+
+	/* keep the selection visible: scroll if it left the window */
+	if ( sel < item->listScrollOffset ) {
+		item->listScrollOffset   = sel;
+		item->listScrollFadeTime = cls.realtime;
+	} else if ( sel >= item->listScrollOffset + visible ) {
+		item->listScrollOffset   = sel - visible + 1;
+		item->listScrollFadeTime = cls.realtime;
+	}
+	if ( item->listScrollOffset < 0 ) item->listScrollOffset = 0;
+}
+
+/* Type-to-jump: fold `ch` into the type-ahead buffer (bound to `item`) and
+ * jump the selection to the first row whose column-0 text starts with the
+ * buffer. A pause longer than WUI_TYPEAHEAD_RESET_MS, or a focus change to a
+ * different listbox, resets the buffer first. Returns qtrue if the key was
+ * consumed as a search character. */
+static qboolean wui_listbox_typeahead( wiredItemDef_t *item, int ch )
+{
+	int  total, i;
+	char lc;
+
+	if ( !item || item->feeder == 0 ) return qfalse;
+	/* printable ASCII only; skip SPACE so it stays a pure ACTIVATE key on a
+	 * focused listbox (K_SPACE keycode already toggles/activates) rather than
+	 * seeding a leading-space search that can never match a row label. */
+	if ( ch <= 32 || ch > 126 ) return qfalse;
+
+	/* reset the buffer on target change or timeout */
+	if ( wui_ix.typeTarget != item ||
+	     ( cls.realtime - wui_ix.typeLastMs ) > WUI_TYPEAHEAD_RESET_MS ) {
+		wui_ix.typeTarget = item;
+		wui_ix.typeLen    = 0;
+		wui_ix.typeBuf[0] = '\0';
+	}
+	wui_ix.typeLastMs = cls.realtime;
+
+	lc = wui_ascii_lower( (char) ch );
+	if ( wui_ix.typeLen < (int)sizeof( wui_ix.typeBuf ) - 1 ) {
+		wui_ix.typeBuf[ wui_ix.typeLen++ ] = lc;
+		wui_ix.typeBuf[ wui_ix.typeLen ]   = '\0';
+	}
+
+	/* find the first row whose column-0 text starts with the buffer (case-
+	 * insensitive, skipping Quake ^colour codes so "^1Foo" matches "foo"). */
+	total = WiredUI_FeederCount( (int)item->feeder );
+	for ( i = 0; i < total; i++ ) {
+		const char *raw = WiredUI_FeederItemText( (int)item->feeder, i, 0 );
+		const char *p   = raw;
+		int         j   = 0;
+		if ( !raw ) continue;
+		while ( *p && j < wui_ix.typeLen ) {
+			if ( Q_IsColorString( p ) ) { p += 2; continue; }
+			if ( wui_ascii_lower( *p ) != wui_ix.typeBuf[ j ] ) break;
+			p++; j++;
+		}
+		if ( j == wui_ix.typeLen ) {
+			wui_listbox_set_selection( item, i );
+			return qtrue;
+		}
+	}
+	/* no match - keep the buffer (so a following key can still narrow) but the
+	 * key is still "consumed" so it doesn't fall through to the default switch
+	 * (a printable key has no other listbox meaning). */
+	return qtrue;
 }
 
 // ── key event ─────────────────────────────────────────────────────────
@@ -4103,6 +5331,25 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 
 	// notify attract scheduler — any key stops attract
 	if ( down ) WiredAttract_NoteInput( key );
+
+	/* forward mouse-button + wheel +
+	 * Tab events to the compositor's hit-test layer so it can track down-
+	 * target, click resolution, Clay scroll-container updates, and focus
+	 * cycle IN PARALLEL with the legacy dispatch below. The compositor's
+	 * action-fire + focus-authority gates are OFF for now, so this
+	 * runs as bookkeeping only — no behaviour change. */
+	if ( key == K_MOUSE1 ) {
+		(void) WiredUI_CompositorMouseButton( down );
+	} else if ( down && key == K_MWHEELUP ) {
+		/* Consume the wheel when it lands on a scroll viewport so it scrolls
+		 * the content instead of falling through to legacy menu nav. */
+		if ( WiredUI_CompositorMouseWheel( -1.0f ) ) return;
+	} else if ( down && key == K_MWHEELDOWN ) {
+		if ( WiredUI_CompositorMouseWheel(  1.0f ) ) return;
+	} else if ( down && key == K_TAB ) {
+		qboolean forward = !( keys[ K_SHIFT ].down );
+		(void) WiredUI_CompositorTabFocus( forward );
+	}
 
 	menu = WiredUI_GetActiveMenu();
 
@@ -4120,7 +5367,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 			WiredUI_CloseMultiDropdown();
 			return;
 		}
-		if ( !WiredUI_GetMultiDropdownRect( menu, wui_multiDropdownItem, opts.count,
+		if ( !WiredUI_GetMultiDropdownRect( menu, wui_multiDropdownItem, &opts,
 			&ddX, &ddY, &ddW, &ddH, &rowH, &visibleRows ) ) {
 			WiredUI_CloseMultiDropdown();
 			return;
@@ -4233,7 +5480,12 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				if ( cbd ) {
 					int maxC = wui_editItem->maxChars > 0 ? wui_editItem->maxChars : 255;
 					int pasteLen = strlen( cbd );
-					int space = maxC - len;
+					int space;
+					// maxChars is parsed verbatim from the .wui with no upper bound —
+					// clamp it to the real buffer so a large value can't drive the
+					// memmove/memcpy below past buff[1024].
+					if ( maxC > (int)sizeof( buff ) - 1 ) maxC = (int)sizeof( buff ) - 1;
+					space = maxC - len;
 					if ( pasteLen > space ) pasteLen = space;
 					if ( pasteLen > 0 ) {
 						memmove( &buff[wui_editCursorPos + pasteLen], &buff[wui_editCursorPos], len + 1 - wui_editCursorPos );
@@ -4247,6 +5499,9 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 			} else if ( ch >= 32 ) {
 				// printable character — insert at cursor
 				int maxC = wui_editItem->maxChars > 0 ? wui_editItem->maxChars : 255;
+				// maxChars is unclamped .wui input; bound it to the buffer so the
+				// insert can't write past buff[1024] (see paste path above).
+				if ( maxC > (int)sizeof( buff ) - 1 ) maxC = (int)sizeof( buff ) - 1;
 				if ( wui_editItem->type == ITEM_TYPE_NUMERICFIELD && ( ch < '0' || ch > '9' ) && ch != '.' && ch != '-' ) {
 					// reject non-numeric
 				} else if ( len < maxC ) {
@@ -4363,11 +5618,49 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 
 	if ( !menu ) return;
 
-	if ( wui_focusItem >= 0 && wui_focusItem < menu->itemCount ) {
+	/* Mouse-click focus adoption: a K_MOUSE1 press adopts the hovered item as
+	 * the focused item, so the focusedItem-driven interactions (slider drag,
+	 * spinner +/- buttons) fire on a click — not only after keyboard nav.
+	 * Without this, wui_focusedItemPtr tracks ONLY keyboard focus, so clicking
+	 * a spinner or slider never reaches its focusedItem branch below and the
+	 * click is a no-op (the reported "-/+ buttons + sliders don't work"). */
+	if ( down && key == K_MOUSE1 ) {
+		const wiredItemDef_t *hov = WiredUI_CompositorHoveredItem();
+		/* Adopt the clicked item ONLY through the SAME strict filter the hover path
+		 * uses (WiredUI_ItemAcceptsMouseHover), not the weaker ItemCanFocus. The
+		 * weak filter passes a childful, script-less full-span container (e.g.
+		 * main_root, rect 0 0 1 1), so an empty-background click adopted it as the
+		 * focused item and the focus fill then painted across the whole screen. The
+		 * strict filter rejects such layout-only containers (and non-actionable
+		 * text) while still accepting real interactive items — buttons/sliders/list
+		 * rows carry action/onFocus and pass — so clicking empty space now adopts
+		 * nothing, matching hover. */
+		if ( hov && WiredUI_ItemAcceptsMouseHover( (wiredItemDef_t *) hov ) ) {
+			wui_focusedItemPtr        = (wiredItemDef_t *) hov;
+			wui_ix.focusFromKeyboard  = qfalse;
+		}
+	}
+
+	/* prefer the authoritative pointer (may reference a
+	 * nested child). Legacy top-level index is the fallback for mouse +
+	 * listbox-click paths that still set wui_focusItem directly. */
+	if ( wui_focusedItemPtr && WiredUI_ItemCanFocus( wui_focusedItemPtr ) ) {
+		focusedItem = wui_focusedItemPtr;
+	} else if ( wui_focusItem >= 0 && wui_focusItem < menu->itemCount ) {
 		focusedItem = menu->items[wui_focusItem];
 		if ( !WiredUI_ItemCanFocus( focusedItem ) ) {
 			focusedItem = NULL;
 		}
+	}
+
+	// Unbind the highlighted keybind row with Del/Backspace while browsing the
+	// list (NOT in "press a key" capture mode — that path is handled above).
+	// Standard keybind-list behavior: select a row, hit Del → clears its binding.
+	if ( down && focusedItem && focusedItem->type == ITEM_TYPE_BIND &&
+	     focusedItem->cvar[0] &&
+	     ( key == K_BACKSPACE || key == K_DEL || key == K_KP_DEL ) ) {
+		Cbuf_ExecuteText( EXEC_APPEND, va( "unbindcmd \"%s\"\n", focusedItem->cvar ) );
+		return;
 	}
 
 	// slider drag: release mouse button ends drag
@@ -4376,8 +5669,73 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		wui_sliderDragItem = NULL;
 	}
 
+	/* scrollbar drag: release mouse button ends any in-progress thumb drag
+	 * (flex scroll-container thumb, or listbox thumb). Handled before the
+	 * "only process key-down" gate so the release is not dropped. */
+	if ( !down && ( key == K_MOUSE1 ) ) {
+		if ( WiredUI_CompositorScrollbarDragging() ) WiredUI_CompositorScrollbarDragEnd();
+		if ( wui_listScrollDragItem ) wui_listScrollDragItem = NULL;
+	}
+
+	// spinner click-and-hold: release ends the auto-repeat + clears press paint
+	if ( !down && ( key == K_MOUSE1 ) && wui_spinnerHoldItem ) {
+		wui_spinnerHoldItem = NULL;
+		wui_spinnerHoldDir  = 0;
+		if ( wui_ix.pressTarget && wui_ix.pressKey == K_MOUSE1 ) {
+			wui_ix.pressTarget = NULL;
+			wui_ix.pressKey    = 0;
+		}
+	}
+
 	// only process key-down for most actions
 	if ( !down ) return;
+
+	/* SCROLLBAR THUMB GRAB (mouse-down): a click on a scrollbar thumb starts a
+	 * drag instead of the normal click/focus path. Checked here — after the
+	 * key-down gate, before any item hit-test — so the thumb wins over whatever
+	 * sits beneath it. Flex scroll-container thumb first (its geometry is cached
+	 * in cl_wired_clay.c), then the vertical listbox thumb (single-source
+	 * WiredUI_ListboxScrollbarGeom over the item's Clay-rendered rect). Both use
+	 * physical-px screen coords (wui_cursorX/Y). Consuming (return) suppresses
+	 * the row-select / action that a body click would otherwise fire. */
+	if ( key == K_MOUSE1 ) {
+		if ( WiredUI_CompositorScrollbarDragStart( wui_cursorX, wui_cursorY ) ) {
+			return;
+		}
+		/* Listbox thumb: probe every listbox on the active menu — including those
+		 * nested in flex containers (the settings-panel shell) — via the recursive
+		 * thumb hit-test. The grab is not limited to the focused item; the cursor
+		 * may be over an unfocused list's thumb. */
+		{
+			int             li;
+			float           grabDY = 0.0f;
+			wiredItemDef_t *lb     = NULL;
+			for ( li = 0; li < menu->itemCount && !lb; li++ ) {
+				lb = wui_listbox_thumb_at( menu, menu->items[ li ],
+				                           wui_cursorX, wui_cursorY, &grabDY );
+			}
+			if ( lb ) {
+				wui_listScrollDragItem = lb;
+				wui_listScrollGrabDY   = grabDY;
+				lb->listScrollFadeTime = cls.realtime;
+				return;
+			}
+		}
+	}
+
+	/* TYPE-TO-JUMP: a printable key (K_CHAR_FLAG) with a focused vertical
+	 * listbox jumps the selection to the first row whose text starts with the
+	 * accumulated prefix. Placed after the edit-field gate above (an active
+	 * editfield already returned), so it only fires when a listbox — not a text
+	 * control — holds focus. Char keys never collide with the execKey / onEsc /
+	 * onEnter / nav handling below (those key off non-char keycodes). */
+	if ( ( key & K_CHAR_FLAG ) && focusedItem
+	     && focusedItem->type == ITEM_TYPE_LISTBOX
+	     && !focusedItem->horizontalScroll && focusedItem->feeder != 0 ) {
+		if ( wui_listbox_typeahead( focusedItem, key & ~K_CHAR_FLAG ) ) {
+			return;
+		}
+	}
 
 	// ET:Legacy execKey: check ALL items for key-specific bindings
 	for ( int i = 0; i < menu->itemCount; i++ ) {
@@ -4419,9 +5777,27 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		case K_MOUSE2:
 		case K_ENTER:
 		case K_KP_ENTER:
+		/* component-library F1 (Table A: K_SPACE => ACTIVATE): Space activates
+		 * the keyboard-focused control exactly like Enter — toggles yesno/
+		 * checkbox, opens multi dropdowns, steps sliders, and runs action[].
+		 * Additive: no existing binding changes; Space was previously inert on
+		 * focused items. Slider/multi sub-branches key off K_MOUSE1/K_MOUSE2, so
+		 * Space takes the same "enter" path they already handle. */
+		case K_SPACE:
 			{
 				qboolean openedDropdown = qfalse;
 			if ( !focusedItem ) {
+				/* WiredUI F4 (default button): Enter/Space with nothing focused
+				 * still confirms a dialog — fire the authored default button's
+				 * action. Keyboard only (mouse click resolves its own hit-target);
+				 * gated to K_ENTER/K_KP_ENTER/K_SPACE so a stray mouse event here
+				 * never auto-fires. */
+				if ( key == K_ENTER || key == K_KP_ENTER || key == K_SPACE ) {
+					wiredItemDef_t *def = wui_find_default_button( menu );
+					if ( def && def->action[0] ) {
+						WiredUI_RunScript( menu, def, def->action );
+					}
+				}
 				break;
 			}
 
@@ -4442,16 +5818,78 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				int   clickedRow;
 				int   total = WiredUI_FeederCount( (int)focusedItem->feeder );
 
+				/* Prefer the ACTUAL Clay-rendered rect over the legacy
+				 * WUI_LayoutMenu resolvedRect. The listbox is emitted by
+				 * Clay flex (cl_wired_clay.c wui_clay_emit_listbox, ATTACH_TO_NONE
+				 * inside a flex parent), so its true on-screen origin is Clay's
+				 * layout, NOT resolvedRect — rows draw at clayRect.y + k*rowH.
+				 * Using the legacy rect.y/x mapped clicks to the wrong/no row
+				 * (same legacy-vs-Clay divergence as the multidropdown-anchor
+				 * fix). Fall back to resolvedRect for the pre-Clay layout case. */
+				wuiPixelRect_t clayLB;
+				qboolean       haveClay = WiredUI_ClayItemRenderedRect( menu, focusedItem, &clayLB );
+
 				if ( focusedItem->horizontalScroll ) {
 					float colW     = focusedItem->elementwidth > 0 ? focusedItem->elementwidth : 64.0f;
-					float menuOX   = menu->fullscreen ? 0 : menu->rect.x;
-					float listAbsX = menuOX + focusedItem->rect.x;
+					float listAbsX;
+					if ( haveClay ) {
+						listAbsX = clayLB.x;
+					} else {
+						float menuOX = menu->fullscreen ? 0 : menu->rect.x;
+						listAbsX = menuOX + focusedItem->rect.x;
+					}
 					clickedRow = (int)( ( wui_cursorX - listAbsX ) / colW ) + focusedItem->listScrollOffset;
 				} else {
-					float rowH     = focusedItem->elementheight > 0 ? focusedItem->elementheight : 16.0f;
-					float menuOY   = menu->fullscreen ? 0 : menu->rect.y;
-					float listAbsY = menuOY + focusedItem->rect.y - menu->scrollOffset;
-					clickedRow = (int)( ( wui_cursorY - listAbsY ) / rowH ) + focusedItem->listScrollOffset;
+					/* Match the listbox render rowH (cl_wired_clay.c emit_listbox):
+					 * rows are scaled by dpiScale, so an authored elementheight and
+					 * the derived glyph-line floor both multiply by dpi — else on
+					 * HiDPI the click maps to the wrong row. */
+					float dpi      = WiredUI_GetDpiScale();
+					float charSize = focusedItem->fontPointSize > 0.0f ? focusedItem->fontPointSize : WUI_DEFAULT_FONT_SIZE;
+					float rowHFloor = charSize * WUI_LINE_HEIGHT_FACTOR * dpi;
+					float rowH     = focusedItem->elementheight > 0 ? focusedItem->elementheight * dpi : rowHFloor;
+					float listAbsY, listAbsX, listW;
+					float headerH  = WiredUI_ListboxHeaderHeight( focusedItem );
+					if ( rowH < rowHFloor ) rowH = rowHFloor;
+					if ( haveClay ) {
+						/* Clay coords are absolute screen px with the panel scroll
+						 * already baked into the layout — do NOT re-subtract
+						 * menu->scrollOffset here (the Clay path in the dropdown
+						 * anchor fix documents the same). */
+						listAbsY = clayLB.y;
+						listAbsX = clayLB.x;
+						listW    = clayLB.w;
+					} else {
+						float menuOX = menu->fullscreen ? 0 : menu->rect.x;
+						float menuOY = menu->fullscreen ? 0 : menu->rect.y;
+						listAbsY = menuOY + focusedItem->rect.y - menu->scrollOffset;
+						listAbsX = menuOX + focusedItem->rect.x;
+						listW    = focusedItem->rect.w;
+					}
+
+					/* Header band click: the engine-drawn header (columnHeaders)
+					 * occupies the top headerH of the listbox. A click there maps
+					 * cursorX->column (same wui_listbox_column_geom model the header
+					 * is drawn with) and fires "<columnSort> <col>", so the header
+					 * and body share one column model AND the sort stays clickable. */
+					if ( headerH > 0.0f &&
+					     wui_cursorY >= listAbsY && wui_cursorY < listAbsY + headerH ) {
+						if ( focusedItem->columnSortCmd[0] ) {
+							int hcol = WiredUI_ListboxHeaderColumnAtX( focusedItem,
+							                                           listAbsX, listW, wui_cursorX );
+							if ( hcol >= 0 ) {
+								if ( wui_sfxAction ) S_StartLocalSound( wui_sfxAction, CHAN_LOCAL_SOUND );
+								/* MapSort/ServerSort are WiredUI script commands (not console
+								 * cmds), so dispatch through the wui script runner. */
+								WiredUI_RunScript( menu, focusedItem,
+									va( "%s %d", focusedItem->columnSortCmd, hcol ) );
+							}
+						}
+						break;   /* header consumed the click - no row select */
+					}
+
+					/* Body rows begin below the header band. */
+					clickedRow = (int)( ( wui_cursorY - listAbsY - headerH ) / rowH ) + focusedItem->listScrollOffset;
 				}
 
 				if ( clickedRow >= 0 && clickedRow < total ) {
@@ -4485,6 +5923,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				break;
 			}
 
+
 			// cvar-bound items: handle interaction based on type
 			if ( focusedItem->cvar[0] ) {
 				char cvarBuf[256];
@@ -4492,8 +5931,42 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 
 					switch ( focusedItem->type ) {
 					case ITEM_TYPE_YESNO:
-						// toggle 0 <-> 1
+					case ITEM_TYPE_CHECKBOX:
+						/* toggle 0 <-> 1. Checkbox binds a 0/1 cvar exactly like
+						 * yesno; ACTIVATE (mouse1 / Enter / Space) flips it. The
+						 * framework provides focus/hover/ring/disabled around this. */
 					WiredUI_StateSetString( focusedItem->cvar, atof( cvarBuf ) != 0 ? "0" : "1" );
+						break;
+
+					case ITEM_TYPE_RADIOBUTTON:
+						/* Segmented control. A left-click selects the segment under
+						 * the cursor (hit-test via the ACTUAL Clay-rendered rect +
+						 * the shared WiredUI_RadioSegmentAtX geometry, so the
+						 * clickable zone matches the drawn segment exactly).
+						 * Enter/Space/right-click with no cursor hit cycles forward
+						 * to the next option (keyboard/gamepad activation). */
+						{
+							int seg = -1;
+							if ( key == K_MOUSE1 ) {
+								wuiPixelRect_t rr;
+								if ( WiredUI_ClayItemRenderedRect( menu, focusedItem, &rr ) ) {
+									seg = WiredUI_RadioSegmentAtX( focusedItem, rr.x, rr.w, wui_cursorX );
+								}
+							}
+							if ( seg >= 0 ) {
+								WiredUI_RadioSelectIndex( focusedItem, seg );
+							} else {
+								int cnt = WiredUI_RadioSegmentCount( focusedItem );
+								int cur = WiredUI_RadioSelectedIndex( focusedItem );
+								if ( cnt > 0 ) {
+									int next = ( cur < 0 ) ? 0 : ( cur + 1 ) % cnt;
+									WiredUI_RadioSelectIndex( focusedItem, next );
+								}
+							}
+							if ( focusedItem->action[0] ) {
+								WiredUI_RunScript( menu, focusedItem, focusedItem->action );
+							}
+						}
 						break;
 
 					case ITEM_TYPE_MULTI:
@@ -4507,17 +5980,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 								WiredUI_SetMultiOptionByIndex( focusedItem, &opts, next );
 							}
 						} else {
-							wiredMultiOptions_t opts;
-							char curBuf[256];
-							WiredUI_GetMultiOptions( focusedItem, &opts );
-							if ( opts.count > 0 ) {
-							WiredUI_StateGetString( focusedItem->cvar, curBuf, sizeof( curBuf ) );
-								wui_multiDropdownOpen = qtrue;
-								wui_multiDropdownItem = focusedItem;
-								wui_multiDropdownHover = WiredUI_FindMultiOptionIndex( focusedItem, &opts, curBuf );
-								if ( wui_multiDropdownHover < 0 ) wui_multiDropdownHover = 0;
-								wui_multiDropdownScroll = wui_multiDropdownHover - 4;
-								if ( wui_multiDropdownScroll < 0 ) wui_multiDropdownScroll = 0;
+							if ( WiredUI_OpenMultiDropdown( focusedItem ) ) {
 								openedDropdown = qtrue;
 							}
 						}
@@ -4525,19 +5988,28 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 
 					case ITEM_TYPE_SLIDER:
 						if ( key == K_MOUSE1 ) {
-							// mouse1 click: start drag and set value by click position
-							float menuOX = menu->fullscreen ? 0 : menu->rect.x;
-							float absItemX = menuOX + focusedItem->rect.x;
-							float barX = absItemX + focusedItem->rect.w * 0.5f;
-							float barW = focusedItem->rect.w * 0.45f;
+							/* mouse1 click: start drag + set value by click position.
+							 * Hit geometry comes from the SAME single-source track rect
+							 * the render draws the thumb from (WiredUI_SliderTrackGeom,
+							 * Clay-rendered px) — never the legacy resolvedRect.x/.w*0.45,
+							 * which does not match the flex-positioned track at HiDPI and
+							 * was the drag-misalignment bug. Fallback to the legacy math
+							 * only before the first layout pass. */
 							float range = focusedItem->sliderData.maxVal - focusedItem->sliderData.minVal;
+							float barX, barW;
+							if ( !WiredUI_SliderTrackGeom( focusedItem, &barX, &barW, NULL, NULL ) ) {
+								float menuOX = menu->fullscreen ? 0 : menu->rect.x;
+								float absItemX = menuOX + focusedItem->rect.x;
+								barX = absItemX + focusedItem->rect.w * 0.5f;
+								barW = focusedItem->rect.w * 0.45f;
+							}
 							wui_sliderDragging = qtrue;
 							wui_sliderDragItem = focusedItem;
 							if ( barW > 0 && range > 0 ) {
 								float frac = ( wui_cursorX - barX ) / barW;
 								if ( frac < 0 ) frac = 0;
 								if ( frac > 1 ) frac = 1;
-							WiredUI_StateSetString( focusedItem->cvar, va( "%g", focusedItem->sliderData.minVal + frac * range ) );
+								WiredUI_StateSetString( focusedItem->cvar, va( "%g", focusedItem->sliderData.minVal + frac * range ) );
 							}
 						} else {
 							// right-click / enter / kp_enter: step value
@@ -4549,6 +6021,42 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 							if ( val < focusedItem->sliderData.minVal ) val = focusedItem->sliderData.minVal;
 							if ( val > focusedItem->sliderData.maxVal ) val = focusedItem->sliderData.maxVal;
 							WiredUI_StateSetString( focusedItem->cvar, va( "%g", val ) );
+						}
+						break;
+
+					case ITEM_TYPE_SPINNER:
+						if ( key == K_MOUSE1 ) {
+							/* Hit-test the -/+ buttons via their single-source Clay
+							 * rects (draw==hit). A click on a button steps once in that
+							 * direction AND arms click-and-hold: the press target + dir
+							 * are latched and WiredUI_TickFrame fires further steps after
+							 * the initial delay while held (release clears it). A click on
+							 * the numeric field between the buttons does nothing. */
+							wuiPixelRect_t decR, incR;
+							int  dir = 0;
+							qboolean haveInc = WiredUI_SpinnerButtonRect( focusedItem, qtrue, &incR );
+							qboolean haveDec = WiredUI_SpinnerButtonRect( focusedItem, qfalse, &decR );
+							if ( haveInc
+							     && wui_cursorX >= incR.x && wui_cursorX < incR.x + incR.w
+							     && wui_cursorY >= incR.y && wui_cursorY < incR.y + incR.h ) {
+								dir = +1;
+							} else if ( haveDec
+							     && wui_cursorX >= decR.x && wui_cursorX < decR.x + decR.w
+							     && wui_cursorY >= decR.y && wui_cursorY < decR.y + decR.h ) {
+								dir = -1;
+							}
+							if ( dir != 0 ) {
+								WiredUI_SpinnerAdjust( focusedItem, dir, 1.0f );
+								wui_spinnerHoldItem  = focusedItem;
+								wui_spinnerHoldDir   = dir;
+								wui_spinnerHoldNext  = cls.realtime + WUI_SPINNER_HOLD_DELAY_MS;
+								wui_ix.pressTarget   = focusedItem;
+								wui_ix.pressKey      = K_MOUSE1;
+							}
+						} else {
+							/* right-click / enter: MOUSE2 decrements, others increment */
+							WiredUI_SpinnerAdjust( focusedItem,
+								( key == K_MOUSE2 ) ? -1 : +1, 1.0f );
 						}
 						break;
 
@@ -4565,6 +6073,9 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 			}
 
 		case K_MWHEELUP:
+			/* Slider wheel-adjust is handled in WiredUI_CompositorMouseWheel
+			 * (reached via the early forward above), which consumes before this
+			 * switch — so no slider branch is needed here. */
 			if ( focusedItem && focusedItem->type == ITEM_TYPE_LISTBOX ) {
 				int total = WiredUI_FeederCount( (int)focusedItem->feeder );
 				int step = ( total > 20 ) ? 3 : 1;
@@ -4584,6 +6095,8 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 			break;
 
 		case K_MWHEELDOWN:
+			/* Slider wheel-adjust handled in WiredUI_CompositorMouseWheel (see
+			 * K_MWHEELUP above). */
 			if ( focusedItem && focusedItem->type == ITEM_TYPE_LISTBOX && focusedItem->feeder != 0 ) {
 				int total = WiredUI_FeederCount( (int)focusedItem->feeder );
 				int visible, step;
@@ -4591,7 +6104,13 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 					float colW = focusedItem->elementwidth > 0 ? focusedItem->elementwidth : 64.0f;
 					visible = (int)( focusedItem->rect.w / colW );
 				} else {
-					float rowH = focusedItem->elementheight > 0 ? focusedItem->elementheight : 16.0f;
+					/* dpi-consistent with the render/hit-test rowH so the visible
+					 * row count (and thus scroll clamp) matches what is drawn. */
+					float dpi      = WiredUI_GetDpiScale();
+					float charSize = focusedItem->fontPointSize > 0.0f ? focusedItem->fontPointSize : WUI_DEFAULT_FONT_SIZE;
+					float rowHFloor = charSize * WUI_LINE_HEIGHT_FACTOR * dpi;
+					float rowH = focusedItem->elementheight > 0 ? focusedItem->elementheight * dpi : rowHFloor;
+					if ( rowH < rowHFloor ) rowH = rowHFloor;
 					visible = (int)( focusedItem->rect.h / rowH );
 				}
 				step = ( total > 20 ) ? 3 : 1;
@@ -4616,6 +6135,31 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		case K_KP_LEFTARROW:
 		case K_RIGHTARROW:
 		case K_KP_RIGHTARROW:
+			/* WiredUI F4 (settings tab strip): when focus rests on a settings
+			 * nav-rail tab, Left/Right jumps to the previous/next sibling tab,
+			 * clamped at the ends (no wrap — the rail is a finite strip). The
+			 * jump fires the target tab's `setcvar ; close ; open` action, which
+			 * swaps the visible sub-menu, so we RETURN immediately (menu/focus
+			 * are torn down + rebuilt by the action). Conflict-free: nav-rail
+			 * tabs are type-1 buttons that consume no Left/Right today. */
+			if ( focusedItem && wui_item_is_settings_tab( focusedItem ) ) {
+				wiredItemDef_t *tabs[ 32 ];
+				int             curIdx = -1;
+				int             tabCount = wui_collect_settings_tabs( menu, tabs, 32, &curIdx );
+				int             dir = ( key == K_LEFTARROW || key == K_KP_LEFTARROW ) ? -1 : 1;
+				int             self = wui_find_in_flat( tabs, tabCount, focusedItem );
+				int             next;
+				if ( tabCount <= 1 ) break;
+				if ( self < 0 ) self = curIdx;
+				if ( self < 0 ) self = 0;
+				next = self + dir;
+				if ( next < 0 || next >= tabCount ) break;   /* clamp at ends */
+				if ( tabs[ next ]->action[0] ) {
+					WiredUI_RunScript( menu, tabs[ next ], tabs[ next ]->action );
+					return;
+				}
+				break;
+			}
 			if ( focusedItem && focusedItem->type == ITEM_TYPE_LISTBOX
 			     && focusedItem->horizontalScroll && focusedItem->feeder != 0 ) {
 				/* horizontal listbox: left/right moves the selection.
@@ -4684,22 +6228,162 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				else if ( focusedItem->type == ITEM_TYPE_YESNO ) {
 					WiredUI_StateSetString( focusedItem->cvar, atof( cvarBuf ) != 0 ? "0" : "1" );
 				}
+				else if ( focusedItem->type == ITEM_TYPE_CHECKBOX ) {
+					/* Directional: RIGHT (INC) checks, LEFT (DEC) unchecks. */
+					WiredUI_StateSetString( focusedItem->cvar, dir > 0 ? "1" : "0" );
+				}
+				else if ( focusedItem->type == ITEM_TYPE_SPINNER ) {
+					/* RIGHT increments, LEFT decrements — one step, clamped. The
+					 * step/clamp math lives in the widget core so keyboard, +/-
+					 * button click, click-and-hold, and wheel all agree. */
+					WiredUI_SpinnerAdjust( focusedItem, dir, 1.0f );
+				}
+				else if ( focusedItem->type == ITEM_TYPE_RADIOBUTTON ) {
+					/* Segmented control: left/right moves the selection one segment,
+					 * CLAMPED at the ends (segmented controls don't wrap). Same
+					 * select-by-index mutation as click, so both paths agree. */
+					int cnt = WiredUI_RadioSegmentCount( focusedItem );
+					int cur = WiredUI_RadioSelectedIndex( focusedItem );
+					if ( cnt > 0 ) {
+						int next;
+						if ( cur < 0 ) next = ( dir > 0 ) ? 0 : cnt - 1;
+						else           next = cur + dir;
+						if ( next < 0 )    next = 0;
+						if ( next >= cnt ) next = cnt - 1;
+						if ( next != cur ) {
+							WiredUI_RadioSelectIndex( focusedItem, next );
+							if ( focusedItem->action[0] ) {
+								WiredUI_RunScript( menu, focusedItem, focusedItem->action );
+							}
+						}
+					}
+				}
+			}
+			break;
+
+		/* component-library F1 (Table A: HOME/END/PAGE): jump/page a focused
+		 * listbox's selection. Additive — Home/End/PageUp/PageDown were inert on
+		 * listboxes in the legacy switch; every other focus type ignores them (no
+		 * behaviour change). Mirrors the horizontal-listbox row-move logic:
+		 * updates listSelectedRow + FeederSelection + keeps the row in view. */
+		case K_HOME:
+		case K_END:
+		case K_PGUP:
+		case K_PGDN:
+			if ( focusedItem && focusedItem->type == ITEM_TYPE_LISTBOX
+			     && focusedItem->feeder != 0 ) {
+				int   total   = WiredUI_FeederCount( (int)focusedItem->feeder );
+				float rowUnit = focusedItem->horizontalScroll
+				              ? ( focusedItem->elementwidth  > 0 ? focusedItem->elementwidth  : 64.0f )
+				              : ( focusedItem->elementheight > 0 ? focusedItem->elementheight : 16.0f );
+				float span    = focusedItem->horizontalScroll ? focusedItem->rect.w : focusedItem->rect.h;
+				int   visible = ( rowUnit > 0 ) ? (int)( span / rowUnit ) : 1;
+				int   sel     = focusedItem->listSelectedRow;
+
+				if ( total <= 0 ) break;
+				if ( visible < 1 ) visible = 1;
+				if ( sel < 0 ) sel = 0;
+
+				if      ( key == K_HOME ) sel = 0;
+				else if ( key == K_END )  sel = total - 1;
+				else if ( key == K_PGUP ) sel -= visible;
+				else if ( key == K_PGDN ) sel += visible;
+				if ( sel < 0 )      sel = 0;
+				if ( sel >= total ) sel = total - 1;
+
+				if ( sel != focusedItem->listSelectedRow ) {
+					focusedItem->listSelectedRow = sel;
+					WiredUI_FeederSelection( (int)focusedItem->feeder, sel );
+					if ( wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
+				}
+				/* keep selection visible */
+				if ( sel < focusedItem->listScrollOffset ) {
+					focusedItem->listScrollOffset = sel;
+					focusedItem->listScrollFadeTime = cls.realtime;
+				} else if ( sel >= focusedItem->listScrollOffset + visible ) {
+					focusedItem->listScrollOffset = sel - visible + 1;
+					focusedItem->listScrollFadeTime = cls.realtime;
+				}
+				if ( focusedItem->listScrollOffset < 0 ) focusedItem->listScrollOffset = 0;
+			}
+			else if ( focusedItem && focusedItem->type == ITEM_TYPE_SLIDER
+			          && focusedItem->cvar[0] ) {
+				/* Slider Home/End = jump to min/max. PageUp/PageDown are inert on
+				 * sliders (fine-grained value stepping stays on Left/Right). */
+				if ( key == K_HOME ) {
+					WiredUI_StateSetString( focusedItem->cvar,
+						va( "%g", focusedItem->sliderData.minVal ) );
+					if ( wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
+				} else if ( key == K_END ) {
+					WiredUI_StateSetString( focusedItem->cvar,
+						va( "%g", focusedItem->sliderData.maxVal ) );
+					if ( wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
+				}
+			}
+			else if ( focusedItem && focusedItem->type == ITEM_TYPE_SPINNER
+			          && focusedItem->cvar[0] ) {
+				/* Spinner: Home/End = min/max (via the core extreme setter);
+				 * PageUp/PageDown = a coarse step (10× the normal step, clamped).
+				 * All routes share WiredUI_Spinner* so keyboard/button/wheel agree. */
+				if ( key == K_HOME ) {
+					WiredUI_SpinnerSetExtreme( focusedItem, qfalse );
+					if ( wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
+				} else if ( key == K_END ) {
+					WiredUI_SpinnerSetExtreme( focusedItem, qtrue );
+					if ( wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
+				} else if ( key == K_PGUP ) {
+					WiredUI_SpinnerAdjust( focusedItem, +1, 10.0f );
+				} else if ( key == K_PGDN ) {
+					WiredUI_SpinnerAdjust( focusedItem, -1, 10.0f );
+				}
+			}
+			else if ( key == K_PGUP || key == K_PGDN ) {
+				/* Flex SCROLL-CONTAINER page scroll (F4 container behaviour): when
+				 * the focused item is not one of the above value/list widgets,
+				 * PageUp/PageDown pages the scroll viewport under the cursor by ±one
+				 * viewport height. Cursor-addressed (the container is not a focusable
+				 * item, so there is no "focused scroll container" to key off). No-op
+				 * when the cursor is not over an overflowing container — the switch
+				 * simply falls through with no menu-level page action today. */
+				(void) WiredUI_CompositorScrollPage( wui_cursorX, wui_cursorY,
+				                                     ( key == K_PGDN ) ? +1 : -1 );
 			}
 			break;
 
 		case K_UPARROW:
 		case K_KP_UPARROW:
 			{
-				int start = ( wui_focusItem > 0 ) ? wui_focusItem - 1 : menu->itemCount - 1;
-				for ( int i = 0; i < menu->itemCount; i++ ) {
-					int idx = ( start - i + menu->itemCount ) % menu->itemCount;
-					if ( WiredUI_ItemCanFocus( menu->items[idx] ) ) {
-						wui_focusItem = idx;
-						wui_focusFromMouse = qfalse;
-						if ( wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
-						break;
-					}
+				/* Vertical listbox owns UP/DOWN: move the SELECTED ROW inside
+				 * the list, not cross-item focus. A focused vertical listbox is
+				 * the standard container behaviour (F4) - up/down walks its rows
+				 * (keeping the selection in view) and stays inside the list.
+				 * Horizontal listboxes keep cross-item nav here (they use
+				 * LEFT/RIGHT for row-move, mirrored just above), and every
+				 * non-listbox focus falls through to the flat cross-item walk. */
+				if ( focusedItem && focusedItem->type == ITEM_TYPE_LISTBOX
+				     && !focusedItem->horizontalScroll && focusedItem->feeder != 0 ) {
+					int sel = focusedItem->listSelectedRow;
+					sel = ( sel < 0 ) ? 0 : sel - 1;
+					wui_listbox_set_selection( focusedItem, sel );
+					break;
 				}
+
+				/* tree-flatten the focusable items so nested
+				 * children (inside containers) become reachable. Legacy top-
+				 * level-only walk left the new flexbox-first menus inert —
+				 * focus index stuck on the popup_overlay container with no
+				 * visual change on K_UPARROW/K_DOWNARROW. */
+				wiredItemDef_t *flat[ 128 ];
+				int             flatCount = 0;
+				int             cur, target;
+				wui_collect_focusable( menu, flat, 128, &flatCount );
+				if ( flatCount == 0 ) break;
+				cur = wui_find_in_flat( flat, flatCount, wui_focusedItemPtr );
+				target = ( cur > 0 ) ? cur - 1 : flatCount - 1;
+				wui_set_focused( menu, flat[ target ] );
+				wui_focusFromMouse = qfalse;
+				wui_ix.focusFromKeyboard = qtrue;   /* keyboard nav => draw ring */
+				if ( wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
 			}
 			break;
 
@@ -4707,16 +6391,41 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		case K_DOWNARROW:
 		case K_KP_DOWNARROW:
 			{
-				int start = wui_focusItem + 1;
-				for ( int i = 0; i < menu->itemCount; i++ ) {
-					int idx = ( start + i ) % menu->itemCount;
-					if ( WiredUI_ItemCanFocus( menu->items[idx] ) ) {
-						wui_focusItem = idx;
-						wui_focusFromMouse = qfalse;
-						if ( wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
-						break;
-					}
+				wiredItemDef_t *flat[ 128 ];
+				int             flatCount = 0;
+				int             cur, target;
+
+				/* Vertical listbox owns DOWN-ARROW: advance the SELECTED ROW.
+				 * Gated on the arrow keys (K_TAB shares this case but must
+				 * always LEAVE the control, so TAB still falls through to the
+				 * cross-item walk). Symmetric with the UP case above. */
+				if ( ( key == K_DOWNARROW || key == K_KP_DOWNARROW )
+				     && focusedItem && focusedItem->type == ITEM_TYPE_LISTBOX
+				     && !focusedItem->horizontalScroll && focusedItem->feeder != 0 ) {
+					int sel = focusedItem->listSelectedRow;
+					sel = ( sel < 0 ) ? 0 : sel + 1;
+					wui_listbox_set_selection( focusedItem, sel );
+					break;
 				}
+
+				wui_collect_focusable( menu, flat, 128, &flatCount );
+				if ( flatCount == 0 ) break;
+				cur = wui_find_in_flat( flat, flatCount, wui_focusedItemPtr );
+				/* Shift+Tab (K_TAB with shift held) reverses traversal, mirroring
+				 * the K_UPARROW walk: previous focusable, wrap to last at the head.
+				 * Same flattened focusable set as the forward walk, so forward and
+				 * reverse skip identical non-focusable/decoration items. Arrow keys
+				 * (K_DOWNARROW) never reverse — only Tab reads the shift modifier,
+				 * detected the same way as the compositor path (keys[K_SHIFT].down). */
+				if ( key == K_TAB && keys[ K_SHIFT ].down ) {
+					target = ( cur > 0 ) ? cur - 1 : flatCount - 1;
+				} else {
+					target = ( cur >= 0 ) ? ( cur + 1 ) % flatCount : 0;
+				}
+				wui_set_focused( menu, flat[ target ] );
+				wui_focusFromMouse = qfalse;
+				wui_ix.focusFromKeyboard = qtrue;   /* keyboard nav => draw ring */
+				if ( wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
 			}
 			break;
 	}
@@ -4726,14 +6435,16 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 // Accumulates deltas into screen-space cursor, updates focus item,
 // fires mouseEnter/mouseExit scripts (ET:Legacy per-item events).
 
-void WiredUI_MouseEvent( int dx, int dy ) {
+void WiredUI_MouseEvent( float dx, float dy ) {
 	wiredMenuDef_t *menu;
-	int oldFocus, newFocus;
+	wiredItemDef_t *newHover;
+	wiredItemDef_t *oldHover;
 
 	if ( !wui_initialized ) return;
 
 	// notify attract scheduler — significant mouse movement stops attract
-	WiredAttract_NoteMouse( dx, dy );
+	// (attract only needs movement magnitude; int is fine for that gate)
+	WiredAttract_NoteMouse( (int)dx, (int)dy );
 
 	// accumulate deltas into cursor position (real screen pixels)
 	wui_cursorX += dx;
@@ -4744,15 +6455,76 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 	if ( wui_cursorY < 0 ) wui_cursorY = 0;
 	else if ( wui_cursorY > (float)cls.glconfig.vidHeight ) wui_cursorY = (float)cls.glconfig.vidHeight;
 
+	/* forward the post-clamp cursor
+	 * to the compositor's hit-test layer so Clay_SetPointerState gets a
+	 * coherent position next frame. Cheap pointer-copy; no behavior change
+	 * — the compositor's tracking runs in parallel with the legacy focus
+	 * machinery below. */
+	WiredUI_CompositorPointerMoved( wui_cursorX, wui_cursorY );
+
+	/* scrollbar thumb drag: while a thumb is held, map the cursor Y to the
+	 * scroll position and skip focus/hover churn (mirrors the slider-drag early
+	 * return below). Flex scroll-container thumb (state in cl_wired_clay.c) and
+	 * vertical listbox thumb (state here) are independent — at most one is live. */
+	if ( WiredUI_CompositorScrollbarDragging() ) {
+		WiredUI_CompositorScrollbarDragUpdate( wui_cursorY );
+		return;
+	}
+	if ( wui_listScrollDragItem ) {
+		wiredMenuDef_t *dragMenu = WiredUI_GetActiveMenu();
+		wuiPixelRect_t  clayLB, thumb;
+		float           trackTop, travel;
+		if ( dragMenu && wui_listScrollDragItem->feeder != 0
+		  && WiredUI_ClayItemRenderedRect( dragMenu, wui_listScrollDragItem, &clayLB )
+		  && WiredUI_ListboxScrollbarGeom( wui_listScrollDragItem, clayLB.x, clayLB.y,
+		                                   clayLB.w, clayLB.h, &thumb, &trackTop, &travel ) ) {
+			int total   = WiredUI_FeederCount( (int) wui_listScrollDragItem->feeder );
+			int visible, maxScroll;
+			/* dpi-consistent visibleRows (matches the render/hit-test rowH). */
+			float dpi      = WiredUI_GetDpiScale();
+			float charSize = wui_listScrollDragItem->fontPointSize > 0.0f
+			               ? wui_listScrollDragItem->fontPointSize : WUI_DEFAULT_FONT_SIZE;
+			float rowHFloor= charSize * WUI_LINE_HEIGHT_FACTOR * dpi;
+			float rowH     = wui_listScrollDragItem->elementheight > 0
+			               ? wui_listScrollDragItem->elementheight * dpi : rowHFloor;
+			float headerH  = WiredUI_ListboxHeaderHeight( wui_listScrollDragItem );
+			if ( rowH < rowHFloor ) rowH = rowHFloor;
+			visible   = rowH > 0.0f ? (int)( ( clayLB.h - headerH ) / rowH ) : 1;
+			if ( visible < 1 ) visible = 1;
+			maxScroll = total - visible;
+			if ( maxScroll < 0 ) maxScroll = 0;
+			if ( travel > 0.0f && maxScroll > 0 ) {
+				float thumbTop = wui_cursorY - wui_listScrollGrabDY;   /* desired top */
+				float frac     = ( thumbTop - trackTop ) / travel;     /* 0..1 */
+				int   off;
+				if ( frac < 0.0f ) frac = 0.0f;
+				if ( frac > 1.0f ) frac = 1.0f;
+				off = (int)( frac * (float) maxScroll + 0.5f );
+				if ( off < 0 ) off = 0;
+				if ( off > maxScroll ) off = maxScroll;
+				wui_listScrollDragItem->listScrollOffset  = off;
+				wui_listScrollDragItem->listScrollFadeTime = cls.realtime;
+			}
+		}
+		return;   // don't change focus while dragging
+	}
+
 	// slider drag: continuously update cvar while mouse1 is held
 	if ( wui_sliderDragging && wui_sliderDragItem && wui_sliderDragItem->cvar[0] ) {
 		wiredMenuDef_t *dragMenu = WiredUI_GetActiveMenu();
 		if ( dragMenu ) {
-			float menuOX = dragMenu->fullscreen ? 0 : dragMenu->rect.x;
-			float absItemX = menuOX + wui_sliderDragItem->rect.x;
-			float barX = absItemX + wui_sliderDragItem->rect.w * 0.5f;
-			float barW = wui_sliderDragItem->rect.w * 0.45f;
+			/* Continuous drag: resolve the value from the SAME single-source
+			 * track rect the thumb is drawn from (Clay-rendered px), so the thumb
+			 * tracks the cursor exactly at HiDPI. Legacy resolvedRect fallback only
+			 * until the track has rendered once. */
 			float range = wui_sliderDragItem->sliderData.maxVal - wui_sliderDragItem->sliderData.minVal;
+			float barX, barW;
+			if ( !WiredUI_SliderTrackGeom( wui_sliderDragItem, &barX, &barW, NULL, NULL ) ) {
+				float menuOX = dragMenu->fullscreen ? 0 : dragMenu->rect.x;
+				float absItemX = menuOX + wui_sliderDragItem->rect.x;
+				barX = absItemX + wui_sliderDragItem->rect.w * 0.5f;
+				barW = wui_sliderDragItem->rect.w * 0.45f;
+			}
 			if ( barW > 0 && range > 0 ) {
 				float frac = ( wui_cursorX - barX ) / barW;
 				if ( frac < 0 ) frac = 0;
@@ -4774,7 +6546,7 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 		WiredUI_GetMultiOptions( wui_multiDropdownItem, &opts );
 		if ( opts.count <= 0 ) {
 			WiredUI_CloseMultiDropdown();
-		} else if ( WiredUI_GetMultiDropdownRect( menu, wui_multiDropdownItem, opts.count,
+		} else if ( WiredUI_GetMultiDropdownRect( menu, wui_multiDropdownItem, &opts,
 			&ddX, &ddY, &ddW, &ddH, &rowH, &visibleRows ) ) {
 			if ( wui_cursorX >= ddX && wui_cursorX < ddX + ddW &&
 			     wui_cursorY >= ddY && wui_cursorY < ddY + ddH ) {
@@ -4787,41 +6559,96 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 				wui_multiDropdownHover = -1;
 			}
 		}
+		/* The dropdown is MODAL: while it is open it captures the pointer.
+		 * The main settings panels still run their own Clay_SetPointerState +
+		 * emit pass each frame (cl_wired_clay.c per-panel loop), so the Clay
+		 * hover lookup below would still resolve a background row under the
+		 * cursor and commit it to wui_focusedItemPtr — painting the gold
+		 * focus-gradient on a row hidden behind the overlay, and letting an
+		 * `active` row fire on hover. Clay's own pointer capture can't stop
+		 * this because the overlay is emitted in a SEPARATE Clay pass. Bail
+		 * out here so no background row registers hover/focus; the dropdown's
+		 * own option hover is tracked above via wui_multiDropdownHover, and
+		 * click/dismiss is handled entirely in WiredUI_KeyEvent's
+		 * wui_multiDropdownOpen branch. WiredUI_CloseMultiDropdown() above (on
+		 * a degenerate empty-options dropdown) clears the flag, so a closed
+		 * dropdown falls through to normal hover on the next event. */
+		if ( wui_multiDropdownOpen ) {
+			return;
+		}
 	}
 
-	oldFocus = wui_focusItem;
-	newFocus = WiredUI_FindItemAtCursor( menu, wui_cursorX, wui_cursorY );
-	if ( newFocus >= 0 && newFocus < menu->itemCount && !WiredUI_ItemCanFocus( menu->items[newFocus] ) ) {
-		newFocus = -1;
+	oldHover = wui_hoveredItemPtr;
+	/* prefer the compositor's Clay-side hover lookup
+	 * (prior-frame Clay_GetPointerOverIds → wui_id_map). Clay tracks the
+	 * runtime bounding box per element, so this works for nested flex
+	 * children whose resolvedRect.{x,y} cascade to 0. Falls back to the
+	 * resolvedRect-based recursive walk for menus that haven't yet
+	 * completed a render pass (first frame after a push) or when no Clay
+	 * element matches. */
+	{
+		extern const wiredItemDef_t *WiredUI_CompositorHoveredItem( void );
+		extern uint32_t WiredUI_CompositorGetHoveredId( void );
+		const wiredItemDef_t *clayHit = WiredUI_CompositorHoveredItem();
+		newHover = NULL;
+		/* Clay returns whatever element sits topmost under the cursor —
+		 * including pure layout containers (cards, rails, top/bottom bars)
+		 * and inner decoration labels nested inside an actionable
+		 * container. Accept Clay's hit only when it points at a hoverable
+		 * item; otherwise fall through to the resolvedRect walker, which
+		 * already implements the "actionable-container is the target,
+		 * children are decorative composition" rule (see
+		 * wui_find_item_at_cursor_recursive). */
+		if ( clayHit && WiredUI_ItemAcceptsMouseHover( (wiredItemDef_t *) clayHit ) ) {
+			newHover = (wiredItemDef_t *) clayHit;
+		} else if ( !clayHit ) {
+			/* Clay returned nothing — the menu hasn't completed a render pass
+			 * yet (first frame after a push), so Clay has no hit-test data.
+			 * Only then fall back to the resolvedRect walker. Once Clay HAS a
+			 * result (clayHit != NULL) we trust it even if it points at a
+			 * non-hoverable element (= cursor is over empty/decorative space,
+			 * so no hover). Using the resolvedRect fallback in that case
+			 * selected the WRONG row for flex-container children: their
+			 * resolvedRect.{x,y} diverge from where Clay actually paints them
+			 * (same divergence the dropdown-anchor fix documents), so the
+			 * highlight landed one row off from the cursor. */
+			newHover = WiredUI_FindItemAtCursor( menu, wui_cursorX, wui_cursorY );
+			if ( newHover && !WiredUI_ItemAcceptsMouseHover( newHover ) ) {
+				newHover = NULL;
+			}
+		}
 	}
 
 	// any mouse movement reactivates mouse-based focus
-	wui_focusFromMouse = ( newFocus >= 0 );
+	wui_focusFromMouse = ( newHover != NULL );
+	/* mouse hover clears the keyboard-focus provenance so the focus RING
+	 * (keyboard-only) yields to the hover FILL when the cursor moves. */
+	if ( newHover != NULL ) {
+		wui_ix.focusFromKeyboard = qfalse;
+	}
 
 	// fire mouseExit on old item, mouseEnter on new item
-	if ( newFocus != oldFocus ) {
-		if ( oldFocus >= 0 && oldFocus < menu->itemCount ) {
-			wiredItemDef_t *old = menu->items[oldFocus];
-			if ( old->mouseExit[0] ) {
-				WiredUI_RunScript( menu, old, old->mouseExit );
+	if ( newHover != oldHover ) {
+		if ( oldHover ) {
+			if ( oldHover->mouseExit[0] ) {
+				WiredUI_RunScript( menu, oldHover, oldHover->mouseExit );
 			}
-			if ( old->leaveFocus[0] ) {
-				WiredUI_RunScript( menu, old, old->leaveFocus );
+			if ( oldHover->leaveFocus[0] ) {
+				WiredUI_RunScript( menu, oldHover, oldHover->leaveFocus );
 			}
 		}
 		// reset tooltip timer on focus change
-		if ( newFocus >= 0 && newFocus < menu->itemCount ) {
-			wiredItemDef_t *cur = menu->items[newFocus];
-			if ( cur->mouseEnter[0] ) {
-				WiredUI_RunScript( menu, cur, cur->mouseEnter );
+		if ( newHover ) {
+			if ( newHover->mouseEnter[0] ) {
+				WiredUI_RunScript( menu, newHover, newHover->mouseEnter );
 			}
-			if ( cur->onFocus[0] ) {
-				WiredUI_RunScript( menu, cur, cur->onFocus );
+			if ( newHover->onFocus[0] ) {
+				WiredUI_RunScript( menu, newHover, newHover->onFocus );
 			}
 			// start tooltip delay timer if new item has a tooltip
-			if ( cur->tooltip[0] ) {
+			if ( newHover->tooltip[0] ) {
 				wui_tooltipStartTime = cls.realtime;
-				wui_tooltipFocusItem = newFocus;
+				wui_tooltipFocusItem = -1;  // pointer-based; legacy int retained as -1
 			} else {
 				wui_tooltipStartTime = 0;
 				wui_tooltipFocusItem = -1;
@@ -4831,8 +6658,23 @@ void WiredUI_MouseEvent( int dx, int dy ) {
 			wui_tooltipStartTime = 0;
 			wui_tooltipFocusItem = -1;
 		}
-		wui_focusItem = newFocus;
-		if ( newFocus >= 0 && wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
+		/* pointer-based mouse focus reaches nested
+		 * leaves (mirrors the keyboard collector). wui_focusedItemPtr is
+		 * the authoritative source consumed by WiredUI_GetFocusedItem +
+		 * the K_MOUSE1 click branch in WiredUI_KeyEvent (which resolves
+		 * focusedItem from the pointer before dispatching action). The
+		 * legacy wui_focusItem int index maps back to top-level only
+		 * when the hit happens to be at top level — otherwise -1. */
+		wui_hoveredItemPtr  = newHover;
+		wui_focusedItemPtr  = newHover;
+		wui_focusItem       = -1;
+		if ( newHover ) {
+			int i;
+			for ( i = 0; i < menu->itemCount; i++ ) {
+				if ( menu->items[ i ] == newHover ) { wui_focusItem = i; break; }
+			}
+		}
+		if ( newHover && wui_sfxFocus ) S_StartLocalSound( wui_sfxFocus, CHAN_LOCAL_SOUND );
 	}
 }
 
@@ -4859,7 +6701,41 @@ void WiredUI_SetActiveMenu( int menu ) {
 		// re-register all assets — Hunk_ClearLevel on map load invalidates handles
 		WiredUI_RegisterAssets();
 
-		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: SetActiveMenu %d\n", menu );
+		/* Main is a REAL resting surface, not a bare implicit root (Eser
+		 * 2026-07-05). Promote it to an actual depth-1 stack entry so the menu
+		 * navigation depth is honest:
+		 *   - popping the FIRST sub-menu (startserver/campaign/servers/settings)
+		 *     lands back on main at depth>=1 — the menu stays up, no attract flip;
+		 *   - ESC on main itself is the last pop (depth 1->0), which IS the genuine
+		 *     "user dismissed main" case that the depth-0 pop branch turns into
+		 *     attract_restart. So that branch now fires ONLY on real main-dismissal.
+		 * Previously main sat at depth 0 as an implicit root, so ANY pop that landed
+		 * at depth 0 (including the first sub-menu pop) was misread as "main
+		 * dismissed → attract", and the `close ; open "main"` batch's transient
+		 * depth-0 midpoint queued a spurious attract_restart mid-transition
+		 * (half-console / dead-input corruption).
+		 * INGAME stays an implicit root (no push): its depth-0 pop deliberately
+		 * closes the menu entirely and unpauses; pushing it would defeat that. Its
+		 * onOpen is fired manually below as before. */
+		if ( menu == UIMENU_MAIN ) {
+			if ( wui_menuStackDepth == 0 ) {
+				// PushMenu fires main's onOpen (initial focus seed) + re-asserts
+				// KEYCATCH_UI; the top-of-stack guard makes a redundant explicit
+				// `open "main"` (cl_wired_ui.c:2330) collapse instead of duplicating.
+				WiredUI_PushMenu( "main", WUI_BG_INTENT_SCENE );
+			}
+		} else if ( menu == UIMENU_INGAME ) {
+			/* Fire the ingame root's onOpen when activating via SetActiveMenu
+			 * alone (it lives behind the stack fallback, not pushed). */
+			if ( wui_menuStackDepth == 0 ) {
+				wiredMenuDef_t *root = WiredUI_FindMenu( "ingame" );
+				if ( root && root->onOpen[0] ) {
+					WiredUI_RunScript( root, NULL, root->onOpen );
+				}
+			}
+		}
+
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: SetActiveMenu %d (depth %d)\n", menu, wui_menuStackDepth );
 	} else {
 		Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
 		Cvar_Set( "cl_paused", "0" );
@@ -4876,353 +6752,99 @@ qboolean WiredUI_IsFullscreen( void ) {
 	return ( wui_activeMenu == UIMENU_MAIN );
 }
 
-void WiredUI_DrawConnectScreen( qboolean overlay ) {
-	wiredMenuDef_t	*menu;
-	const char		*status;
-	const char		*info;
-	char			buf[MAX_STRING_CHARS];
-	vec4_t			white = { 1, 1, 1, 1 };
-	vec4_t			dim   = { 0.6f, 0.6f, 0.6f, 1 };
-	float			y;
+/*
+================
+CL_PublishConnectState
 
-	if ( !wui_initialized ) {
+Extracted per-frame publisher (was inline at the top of
+WiredUI_DrawConnectScreen). Fires from CL_Frame BEFORE SCR_UpdateScreen
+runs the compositor emit walk, so storeBind reads see current-frame
+values (eliminates the one-frame lag the render-time publisher had).
+
+Gated on clientActiveApp->state range matching the legacy WiredUI_DrawConnectScreen
+invocation conditions (CA_CONNECTING through CA_PRIMED via cl_scrn.c's
+CA_CONNECTING/CHALLENGING/CONNECTED + CA_LOADING/PRIMED paths): outside
+that range the function no-ops, preserving legacy behavior of "connect.*
+keys untouched when not connecting." Eventually
+WiredUI_DrawConnectScreen retires, publisher stays.
+
+4 keys (B+X path, ratified 2026-05-24):
+  connect.servername   — composed "Connecting to %s" / "Starting…"
+  connect.state        — switch on clientActiveApp->state with download fold-in
+  connect.error        — clientActiveApp->clc.serverMessage (legacy errColor red)
+  connect.motd         — cl_motdString cvar (legacy dim)
+================
+*/
+void CL_PublishConnectState( void ) {
+	wuiStoreEntry_t *e;
+	char             buf[ MAX_STRING_CHARS ];
+
+	if ( clientActiveApp->state < CA_CONNECTING || clientActiveApp->state > CA_PRIMED ) {
 		return;
 	}
 
-	// CA_LOADING/CA_PRIMED overlay: just show a brief "Loading..." strip
-	// so it doesn't flash away too fast on fast loads (matches TA_UI behavior)
-	if ( overlay ) {
-		vec4_t overlayBg = { 0, 0, 0, 0.6f };
-		WUI_FillRect( 0, (float)cls.glconfig.vidHeight - 40, (float)cls.glconfig.vidWidth, 40, overlayBg );
-		Text_Draw( "Loading...", 8, (float)cls.glconfig.vidHeight - 32, FONT_UI, 8, white, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
-
-		// show server message if present
-		if ( clc.serverMessage[0] ) {
-			Text_Draw( clc.serverMessage, 8, (float)cls.glconfig.vidHeight - 20, FONT_UI, 8, dim, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
-		}
-		return;
-	}
-
-	// full-screen connection dialog
-	menu = WiredUI_FindMenu( "connect" );
-	if ( menu ) {
-		WiredUI_RenderMenuOverlay( menu, cls.realtime );
-	} else {
-		// fallback: dark background if connect.menu isn't loaded
-		vec4_t bg = { 0.05f, 0.05f, 0.1f, 1.0f };
-		WUI_FillRect( 0, 0, (float)cls.glconfig.vidWidth, (float)cls.glconfig.vidHeight, bg );
-	}
-
-	// dynamic status text — drawn on top of the menu
-	y = 260;
-
-	// server name
-	if ( cls.servername[0] ) {
-		if ( !Q_stricmp( cls.servername, "localhost" ) ) {
-			info = "Starting local server...";
+	/* connect.servername */
+	e = WiredStore_Set( "connect.servername" );
+	if ( e ) {
+		if ( clientActiveApp->servername[ 0 ] ) {
+			if ( !Q_stricmp( clientActiveApp->servername, "localhost" ) ) {
+				Q_strncpyz( e->text, "Starting local server...", sizeof( e->text ) );
+			} else {
+				Com_sprintf( e->text, sizeof( e->text ), "Connecting to %s", clientActiveApp->servername );
+			}
 		} else {
-			info = va( "Connecting to %s", cls.servername );
+			e->text[ 0 ] = '\0';
 		}
-		Text_Draw( info, 200, (float)y, FONT_UI, 8, white, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
-		y += 16;
 	}
 
-	// connection state
-	switch ( cls.state ) {
+	/* connect.state — download folded in for CA_CONNECTED per legacy verbatim */
+	e = WiredStore_Set( "connect.state" );
+	if ( e ) {
+		switch ( clientActiveApp->state ) {
 		case CA_CONNECTING:
-			status = va( "Awaiting connection... %d", clc.connectPacketCount );
+			Com_sprintf( e->text, sizeof( e->text ),
+				"Awaiting connection... %d", clientActiveApp->clc.connectPacketCount );
 			break;
 		case CA_CHALLENGING:
-			status = va( "Awaiting challenge... %d", clc.connectPacketCount );
+			Com_sprintf( e->text, sizeof( e->text ),
+				"Awaiting challenge... %d", clientActiveApp->clc.connectPacketCount );
 			break;
 		case CA_CONNECTED:
-			// check for download in progress
-			if ( clc.downloadName[0] ) {
+			if ( clientActiveApp->clc.downloadName[ 0 ] ) {
 				int pct = 0;
-				if ( clc.downloadSize > 0 ) {
-					pct = (int)( (float)clc.downloadCount * 100.0f / (float)clc.downloadSize );
+				if ( clientActiveApp->clc.downloadSize > 0 ) {
+					pct = (int)( (float) clientActiveApp->clc.downloadCount * 100.0f / (float) clientActiveApp->clc.downloadSize );
 				}
-				status = va( "Downloading %s... %d%%", clc.downloadName, pct );
+				Com_sprintf( e->text, sizeof( e->text ),
+					"Downloading %s... %d%%", clientActiveApp->clc.downloadName, pct );
 			} else {
-				status = "Awaiting gamestate...";
+				Q_strncpyz( e->text, "Awaiting gamestate...", sizeof( e->text ) );
 			}
 			break;
 		default:
-			status = "Connecting...";
+			Q_strncpyz( e->text, "Connecting...", sizeof( e->text ) );
 			break;
-	}
-	Text_Draw( status, 200, (float)y, FONT_UI, 8, dim, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
-	y += 16;
-
-	// server error message — use WCOLOR_ERROR values for consistency with error_popup.wmenu
-	if ( clc.serverMessage[0] ) {
-		vec4_t errColor = { 1, 0.45f, 0.35f, 1 };
-		Text_Draw( clc.serverMessage, 200, (float)y, FONT_UI, 8, errColor, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
-		y += 16;
+		}
 	}
 
-	// MOTD from master server
-	Cvar_VariableStringBuffer( "cl_motdString", buf, sizeof( buf ) );
-	if ( buf[0] ) {
-		Text_Draw( buf, 200, (float)y, FONT_UI, 8, dim, TEXT_ALIGN_LEFT, TEXT_FORCECOLOR );
+	/* connect.error — server error message (errColor red-ish) */
+	e = WiredStore_Set( "connect.error" );
+	if ( e ) Q_strncpyz( e->text, clientActiveApp->clc.serverMessage, sizeof( e->text ) );
+
+	/* connect.motd — master-server MOTD (dim) */
+	e = WiredStore_Set( "connect.motd" );
+	if ( e ) {
+		Cvar_VariableStringBuffer( "cl_motdString", buf, sizeof( buf ) );
+		Q_strncpyz( e->text, buf, sizeof( e->text ) );
 	}
 }
 
-// ── overlay renderer (for scoreboard, vote panel, etc.) ──────────────
-// Renders a menu's background + items without cursor/focus/tooltip logic.
-// Called from WiredHud_Routine() for in-game overlays that need .menu layout.
-
-void WiredUI_RenderMenuOverlay( wiredMenuDef_t *menu, int realtime ) {
-	float menuAlpha = 1.0f;
-
-	if ( !menu ) return;
-
-	float vpW = (float)cls.glconfig.vidWidth;
-	float vpH = (float)cls.glconfig.vidHeight;
-	WUI_LayoutMenu( menu, vpW, vpH );
-
-	float menuX = menu->resolvedRect.x;
-	float menuY = menu->resolvedRect.y;
-	float menuW = menu->resolvedRect.w;
-	float menuH = menu->resolvedRect.h;
-
-	if ( menu->fadeAlpha > 0.0f && menu->fadeAlpha <= 1.0f ) {
-		menuAlpha = menu->fadeAlpha;
-	}
-
-	if ( menuH > 0 ) {
-		WiredUI_DrawMenuBackground( menu, menuX, menuY, menuW, menuH, menuAlpha );
-		WiredUI_DrawWindowBorder( menuX, menuY, menuW, menuH,
-			menu->border, menu->bordersize, menu->bordercolor, menuAlpha );
-	}
-
-	// render items
-	for ( int i = 0; i < menu->itemCount; i++ ) {
-		wiredItemDef_t *item = menu->items[i];
-
-		if ( !WiredUI_ItemShouldRender( item ) ) continue;
-
-		float itemX = item->resolvedRect.x;
-		float itemY = item->resolvedRect.y;
-		float itemW = item->resolvedRect.w;
-		float itemH = item->resolvedRect.h;
-
-		// clip items outside menu bounds (when height=0, meaning auto-size)
-		if ( menuH > 0 && ( itemY + itemH < menuY || itemY > menuY + menuH ) ) continue;
-
-		if ( item->type == ITEM_TYPE_MODEL ) {
-			WiredUI_DrawModelItem( item, itemX, itemY, itemW, itemH );
-			WiredUI_DrawWindowBorder( itemX, itemY, itemW, itemH,
-				item->border, item->bordersize, item->bordercolor, menuAlpha );
-			continue;
-		}
-
-		WiredUI_DrawItemBackground( item, itemX, itemY, itemW, itemH, menuAlpha );
-		WiredUI_DrawWindowBorder( itemX, itemY, itemW, itemH,
-			item->border, item->bordersize, item->bordercolor, menuAlpha );
-
-		/* bindicon: draw store-bound icon overlay */
-		{
-			qhandle_t storeIcon = 0;
-			float storeValue = 0.0f;
-
-			if ( item->storeBindIcon[0] ) {
-				wuiStoreEntry_t *iconEntry = WiredStore_Get( item->storeBindIcon );
-				if ( iconEntry && iconEntry->icon ) {
-					storeIcon = iconEntry->icon;
-				} else if ( !item->bindWarned ) {
-					Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: bindicon key '%s' not found (item '%s')\n",
-								 item->storeBindIcon, item->name );
-					item->bindWarned = qtrue;
-				}
-			}
-
-			/* bindvalue: resolve numeric value from store */
-			if ( item->storeBindValue[0] ) {
-				wuiStoreEntry_t *valEntry = WiredStore_Get( item->storeBindValue );
-				if ( valEntry ) {
-					storeValue = valEntry->value;
-				} else if ( !item->bindWarned ) {
-					Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: bindvalue key '%s' not found (item '%s')\n",
-								 item->storeBindValue, item->name );
-					item->bindWarned = qtrue;
-				}
-			}
-
-			if ( storeIcon ) {
-				re.SetColor( NULL );
-				WUI_DrawPic( itemX, itemY, itemW, itemH, storeIcon );
-			}
-
-			(void)storeValue; /* resolved for use by status bar elements (task-5) */
-		}
-
-		// draw LISTBOX items (feeder-driven)
-		if ( item->type == ITEM_TYPE_LISTBOX && item->feeder != 0 ) {
-			int feederID = (int)item->feeder;
-			int totalRows = WiredUI_FeederCount( feederID );
-			float rowH = item->elementheight > 0 ? item->elementheight : 16.0f;
-			int visibleRows = (int)( itemH / rowH );
-			int row, col;
-			float charSize = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
-			vec4_t rowColor;
-			float contentW = itemW;
-
-			// draw list background
-			if ( item->backcolor[3] > 0 ) {
-				WUI_FillRect( itemX, itemY, itemW, itemH, item->backcolor );
-			}
-
-			// draw rows
-			for ( row = 0; row < visibleRows && ( item->listScrollOffset + row ) < totalRows; row++ ) {
-				int dataRow = item->listScrollOffset + row;
-				float rowY = itemY + row * rowH;
-
-				// draw columns
-				Vector4Copy( item->forecolor, rowColor );
-				float colX = itemX + 4;
-				for ( col = 0; col < ( item->columns > 0 ? item->columns : 1 ); col++ ) {
-					const char *text = WiredUI_FeederItemText( feederID, dataRow, col );
-					float colW = ( col < item->columns && item->columnWidths[col] > 0 )
-						? item->columnWidths[col] : contentW;
-					if ( text && text[0] ) {
-						int maxChars = (int)( ( colW - 4 ) / charSize );
-						if ( maxChars < 1 ) maxChars = 1;
-						if ( (int)strlen( text ) > maxChars ) {
-							char clipped[128];
-							Q_strncpyz( clipped, text, sizeof( clipped ) );
-							if ( maxChars < (int)sizeof( clipped ) ) {
-								clipped[maxChars] = '\0';
-							}
-							Text_Draw( clipped, (float)colX, (float)( rowY + 2 ), FONT_UI, charSize, rowColor, TEXT_ALIGN_LEFT, 0 );
-						} else {
-							Text_Draw( text, (float)colX, (float)( rowY + 2 ), FONT_UI, charSize, rowColor, TEXT_ALIGN_LEFT, 0 );
-						}
-					}
-					colX += colW;
-				}
-			}
-
-			continue;
-		}
-
-		/* TABLE widget -- store-driven data table (Phase 4) */
-		if ( item->tableSource[0] && item->numTableColumns > 0 ) {
-			extern void WiredHud_DrawTable( wiredItemDef_t *item, float ox, float oy, float ow, float oh,
-				int fontId, float fontSize );
-			int tblFontId = FONT_UI;
-			float tblFontSize = item->fontPointSize > 0.0f ? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
-			WiredHud_DrawTable( item, itemX, itemY, itemW, itemH, tblFontId, tblFontSize );
-			continue;
-		}
-
-		// draw SCORELIST widget -- rich scoreboard with per-cell coloring
-		if ( item->type == ITEM_TYPE_SCORELIST && item->feeder != 0 ) {
-			extern void WiredHud_DrawScorelistWidget( float x, float y, float w, float h,
-				int feederID, const vec4_t textColor );
-			WiredHud_DrawScorelistWidget( itemX, itemY, itemW, itemH,
-				(int)item->feeder, item->forecolor );
-			continue;
-		}
-
-		// draw DUELBOARD widget — Pro-style two-panel duel scoreboard
-		if ( item->type == ITEM_TYPE_DUELBOARD ) {
-			extern void WiredHud_DrawDuelBoard( float x, float y, float w, float h );
-			WiredHud_DrawDuelBoard( itemX, itemY, itemW, itemH );
-			continue;
-		}
-
-		/* draw text items (static text or cvar-bound) using modern font system */
-		{
-			const char *drawText = NULL;
-			char cvarBuf[256];
-			vec4_t overlayDrawColor;
-
-			Vector4Copy( item->forecolor, overlayDrawColor );
-
-			if ( item->text[0] ) {
-				drawText = item->text;
-			} else if ( item->cvar[0] && item->type == ITEM_TYPE_TEXT ) {
-				WiredUI_StateGetString( item->cvar, cvarBuf, sizeof( cvarBuf ) );
-				if ( cvarBuf[0] ) drawText = cvarBuf;
-			}
-
-			/* bind: override display text from store */
-			if ( item->storeBind[0] ) {
-				wuiStoreEntry_t *bindEntry = WiredStore_Get( item->storeBind );
-				if ( bindEntry && bindEntry->text[0] ) {
-					drawText = bindEntry->text;
-				} else if ( !drawText && !item->bindWarned ) {
-					Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: bind key '%s' not found (item '%s')\n",
-								 item->storeBind, item->name );
-					item->bindWarned = qtrue;
-				}
-			}
-
-			/* bindcolor: override forecolor from store */
-			if ( item->storeBindColor[0] ) {
-				wuiStoreEntry_t *colorEntry = WiredStore_Get( item->storeBindColor );
-				if ( colorEntry ) {
-					/* semantic state takes priority over raw color */
-					if ( colorEntry->state[0] ) {
-						if ( !WiredTheme_ResolveState( colorEntry->state, overlayDrawColor ) ) {
-							/* unknown state — fall back to raw color */
-							Vector4Copy( colorEntry->color, overlayDrawColor );
-						}
-					} else {
-						Vector4Copy( colorEntry->color, overlayDrawColor );
-					}
-				} else if ( !item->bindWarned ) {
-					Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: bindcolor key '%s' not found (item '%s')\n",
-								 item->storeBindColor, item->name );
-					item->bindWarned = qtrue;
-				}
-			}
-
-			if ( drawText ) {
-				float charW, charH;
-				int alignment = TEXT_ALIGN_LEFT;
-				int flags = TEXT_DROPSHADOW;
-
-				/* textscale maps to charW/charH (same mapping as main menu renderer) */
-				charW = item->textscale >= 0.7f ? 16.0f : ( item->textscale >= 0.3f ? 10.0f : 8.0f );
-				charH = charW * 1.4f;
-
-				if ( item->textalign == ITEM_ALIGN_CENTER ) {
-					alignment = TEXT_ALIGN_CENTER;
-				} else if ( item->textalign == ITEM_ALIGN_RIGHT ) {
-					alignment = TEXT_ALIGN_RIGHT;
-				}
-
-				if ( item->textstyle == ITEM_TEXTSTYLE_SHADOWEDMORE ) {
-					flags = TEXT_DROPSHADOW;
-				} else if ( item->textstyle == ITEM_TEXTSTYLE_SHADOWED ) {
-					flags = TEXT_DROPSHADOW;
-				} else if ( item->textstyle == ITEM_TEXTSTYLE_NORMAL ) {
-					flags = 0;
-				}
-
-				/* position: centered items use widget midpoint, others use left edge */
-				{
-					float x, y;
-					if ( item->textalign == ITEM_ALIGN_CENTER && itemW > 0 ) {
-						x = itemX + itemW * 0.5f;
-					} else if ( item->textalign == ITEM_ALIGN_RIGHT && itemW > 0 ) {
-						x = itemX + itemW;
-					} else {
-						x = itemX;
-					}
-					y = itemY + item->textaligny;
-
-				Text_SetLetterSpacing( item->letterSpacing );
-				Text_Draw( drawText, x, y, FONT_DISPLAY,
-					charH, overlayDrawColor, alignment, flags );
-				Text_SetLetterSpacing( 0.0f );
-			}
-		}
-		}
-	}
-}
+/* WiredUI_DrawConnectScreen + WiredUI_RenderMenuOverlay retired.
+ * Compositor is now the sole render path for connect dialog (connect.wmenu
+ * + 4 storeBind text items + CL_PublishConnectState publisher) and for
+ * scoreboards (8 scoreboard wmenu files + WiredHud_Routine's per-frame
+ * visible-toggle). Earlier passes landed all replacements before
+ * this deletion. */
 
 void WiredUI_ReloadHud( void ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "WiredUI: reloading HUD...\n" );
@@ -5266,6 +6888,10 @@ void WiredUI_ReloadMenus( void ) {
 	}
 	wui_menuStackDepth = 0;
 	wui_focusItem = -1;
+	wui_focusedItemPtr = NULL;
+	wui_hoveredItemPtr = NULL;
+	wui_ix.pressTarget = NULL;
+	wui_ix.focusFromKeyboard = qfalse;
 	wui_tooltipStartTime = 0;
 	wui_tooltipFocusItem = -1;
 
@@ -5289,7 +6915,7 @@ void WiredUI_ReloadMenus( void ) {
 
 	// re-open the menu that was active before reload
 	if ( currentMenu[0] && WiredUI_FindMenu( currentMenu ) ) {
-		WiredUI_PushMenu( currentMenu );
+		WiredUI_PushMenu( currentMenu, WUI_BG_INTENT_INHERIT );
 	}
 }
 

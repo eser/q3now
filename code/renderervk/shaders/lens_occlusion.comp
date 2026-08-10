@@ -1,0 +1,99 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+lens_occlusion.comp — wired-render lens-glow occlusion oracle.
+
+The shared visibility authority for lens sources (halo / surface flares first,
+sun + sprites later). One invocation per registered lens source: project the
+source's screen position into the scene depth copy, sample an N-tap disc around
+it, and compare each tap's scene depth against the source's own depth under
+reversed-Z. visibility = visibleTaps / N ∈ [0,1] — a smooth AREA factor that
+supersets the old binary single-point dot-probe (partial occlusion now fades).
+
+Inputs:
+  - depthTex (set 0, binding 0) + depthSampler (binding 1): the non-MSAA device
+    depth copy (reversed-Z, device z = 1 at near, 0 at far). The same copy GTAO /
+    SSAO / sunrays sample; NEAREST sampler (depth is not linear-filterable on
+    WebGPU/WebGL2).
+  - lensSources (set 0, binding 2): the per-source registry (host-written each
+    frame). rec0 = {screenU, screenV, compareZ, radiusPx}; rec1.w = visibility out.
+  - push constants: viewport size, source count, disc radius in depth texels.
+
+Output:
+  - lensSources[idx].colorVis.w (rec1.w): visibility 0..1, read by the halo draw.
+
+Multi-backend: a depth sample + an SSBO write, no readback, no GPU queries, no
+vertex push — expressible on Vulkan / GL43 / WebGPU / WebGL2.
+*/
+
+// One thread per source; ≤256 sources → a single 64-wide group dimension.
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform texture2D depthTex;
+layout(set = 0, binding = 1) uniform sampler   depthSampler;
+
+struct LensSource {
+	vec4 screenPosDepth;   // .xy = screen UV [0,1]; .z = reversed-Z compare depth; .w = radius px (unused here)
+	vec4 colorVis;         // .xyz = (reserved) color; .w = visibility OUTPUT
+};
+
+layout(std430, set = 0, binding = 2) buffer LensSources {
+	LensSource lensSources[];
+};
+
+layout(push_constant) uniform LensPush {
+	vec2  viewport;        // depth-copy resolution (px)
+	int   count;           // active source count
+	float radiusPx;        // disc radius in depth-copy texels
+};
+
+// 3x3 disc tap offsets (in units of radiusPx). 9 taps → visibility quantized to
+// /9 ≈ 11% steps: smooth enough for a halo fade, cheap (≤256*9 NEAREST samples).
+const int   TAP_COUNT = 9;
+const vec2  TAPS[9] = vec2[9](
+	vec2( 0.0,  0.0),
+	vec2( 1.0,  0.0), vec2(-1.0,  0.0),
+	vec2( 0.0,  1.0), vec2( 0.0, -1.0),
+	vec2( 0.7,  0.7), vec2(-0.7,  0.7),
+	vec2( 0.7, -0.7), vec2(-0.7, -0.7)
+);
+
+// Small reversed-Z bias so the flare's own surface (and depth-copy quantization)
+// does not self-occlude: a tap counts as occluded only when scene geometry is
+// meaningfully IN FRONT of the source.
+const float Z_BIAS = 0.0008;
+
+void main()
+{
+	uint idx = gl_GlobalInvocationID.x;
+	if ( idx >= uint(count) )
+		return;
+
+	vec2  uv       = lensSources[idx].screenPosDepth.xy;
+	float compareZ = lensSources[idx].screenPosDepth.z;
+
+	// Off-screen source → fully occluded (no rays from outside the frame). The host
+	// already rejects the obviously-off-screen ones, but guard the tap UVs anyway.
+	if ( uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 ) {
+		lensSources[idx].colorVis.w = 0.0;
+		return;
+	}
+
+	vec2 texel = ( viewport.x > 0.0 ) ? ( radiusPx / viewport ) : vec2(0.0);
+
+	int visible = 0;
+	for ( int t = 0; t < TAP_COUNT; t++ ) {
+		vec2  suv   = clamp( uv + TAPS[t] * texel, vec2(0.0), vec2(1.0) );
+		float scene = textureLod( sampler2D( depthTex, depthSampler ), suv, 0.0 ).r;
+		// Reversed-Z: device z = 1 at near, 0 at far. Scene geometry occludes the
+		// source when it is CLOSER than the source, i.e. scene depth > source depth.
+		// The source is visible at this tap when scene depth <= compareZ + bias.
+		if ( scene <= compareZ + Z_BIAS )
+			visible++;
+	}
+
+	lensSources[idx].colorVis.w = float(visible) / float(TAP_COUNT);
+}

@@ -1,0 +1,166 @@
+// preferences.wui -- q3now Preferences settings submenu (Phase 4c canonical)
+// Phase 4c settings panel pattern reuse (§6.1).
+// Gameplay basics (HUD on/off + visual prefs) + advanced (voice + brass + etc.).
+// Tabbed Basic/Advanced legacy structure folded into two category groups.
+
+#include "ui/widgets/qw_settings_nav.wui"
+#include "ui/widgets/qw_settings_chrome.wui"
+
+menuDef {
+	name "preferences"
+	layer "menu"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "settings_root"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		background "layered" effects "base+glow+noise+vignette"
+
+		QW_SETTINGS_TOPBAR("q3now / Settings / Preferences")
+
+		itemDef {
+			name "settings_content"
+			type container
+			rect 0 0 1 0.83
+			direction row
+			padding $content_padding_y $content_padding_x
+			gap $spacing_lg
+			grow 1
+			height GROW
+
+			itemDef {
+				name "settings_nav"
+				type container
+				rect 0 0 0.30 1
+				direction column
+				gap $spacing_sm
+
+				itemDef { name "nav_label" type 0 rect 0 0 1 0.025 height FIT text "CATEGORIES" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+				QW_SETTINGS_NAV("nav_sound",       "sound",       "Sound",       "sound")
+				QW_SETTINGS_NAV("nav_video",       "video",       "Video",       "video")
+				QW_SETTINGS_NAV("nav_display",     "display",     "Display",     "display")
+				QW_SETTINGS_NAV("nav_controls",    "controls",    "Controls",    "controls")
+				QW_SETTINGS_NAV("nav_network",     "network",     "Network",     "network")
+				QW_SETTINGS_NAV("nav_player",      "player",      "Player",      "playersettings")
+				QW_SETTINGS_NAV("nav_preferences", "preferences", "Preferences", "preferences")
+				itemDef { name "nav_spacer" type container rect 0 0 1 0 grow 1 }
+			}
+
+			itemDef {
+				name "settings_panel"
+				type container
+				rect 0 0 0.70 1
+				direction column
+				padding $card_padding
+				gap $card_gap_internal
+				grow 1
+				width GROW
+
+				itemDef { name "panel_header" type 0 rect 0 0 1 0.05 height FIT text "Preferences" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
+				itemDef { name "panel_subheader" type 0 rect 0 0 1 0.025 height FIT text "Gameplay basics + advanced HUD/audio" textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+
+				itemDef {
+					name "panel_content"
+					type container
+					rect 0 0 1 0.7
+					direction column
+					gap $spacing_md
+					grow 1
+					height GROW
+					scroll
+					alignY start
+					padding 0 0
+
+					// two-column grid row
+					itemDef {
+						name "grid_row_1"
+						type container
+						rect 0 0 1 0
+						height FIT
+						width PERCENT 1
+						grow 0
+						direction row
+						gap $spacing_md
+						alignY start
+						padding 0 0
+
+					// ── BASIC group box ────────────────────────
+					itemDef {
+						name "group_basic"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						alignY start
+
+						itemDef { name "group_basic_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "BASIC" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+						itemDef { name "row_simple_items" type checkbox rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Simple Items" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_simpleItems" visible 1 grow 0 }
+						itemDef { name "row_score_plums" type checkbox rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Floating Scores" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_scorePlums" visible 1 grow 0 }
+						itemDef { name "row_draw_gun" type checkbox rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Draw Gun" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_drawGun" visible 1 grow 0 }
+						itemDef { name "row_identify" type checkbox rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Identify Target" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_drawCrosshairNames" visible 1 grow 0 }
+					}
+
+					// ── ADVANCED group box ─────────────────────
+					itemDef {
+						name "group_advanced"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						alignY start
+
+						itemDef { name "group_advanced_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "ADVANCED" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+						itemDef { name "row_dyn_lights" type checkbox rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Dynamic Lights" textalign 0 font $font_sans 13 forecolor $bone cvar "r_dynamiclight" visible 1 grow 0 }
+						itemDef { name "row_brass" type segmented rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Ejecting Brass" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_brassTime" cvarFloatList { "High" 2500 "Medium" 1250 "Off" 0 } visible 1 grow 0 }
+						itemDef { name "row_no_voice" type checkbox rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Voices Off" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_noVoiceChats" visible 1 grow 0 }
+						itemDef { name "row_no_taunt" type checkbox rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Taunts Off" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_noTaunt" visible 1 grow 0 }
+					}
+					}
+				}
+
+				itemDef {
+					name "panel_footer"
+					type container
+					rect 0 0 1 0.05
+					direction row
+					gap $spacing_md
+					alignY center
+					height FIT
+
+					QW_SETTINGS_BACK_BTN
+					QW_SETTINGS_FOOTER_SPACER
+					QW_SETTINGS_FOOTER_BTN("btn_apply",  "Apply",  $accent,  { exec "writeconfig wired-overrides.cfg" })
+				}
+			}
+		}
+
+		QW_SETTINGS_BOTTOMBAR("click to toggle")
+	}
+
+	onOpen { setcvar "ui_settingsSection" "preferences" }
+	onESC  { close }
+}

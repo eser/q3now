@@ -6,10 +6,11 @@
 #include "client.h"
 #include "wired/ui/cl_wired_ui.h"
 #include "../qcommon/wired/net/wn_public.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
+LOG_DECLARE_CHANNEL( ch_network_client, "network.client" );
 
-extern int cl_sent; /* net-stats packet counter — defined in cl_net_stats.c */
+/* cl_sent (net-stats packet counter, defined in cl_net_stats.c) is now
+ * declared in client.h. */
 
 static unsigned frame_msec;
 static int old_com_frameTime;
@@ -77,7 +78,7 @@ static cvar_t *m_filter;
 static qboolean in_mlooking;
 
 static void IN_CenterView( void ) {
-	cl.viewangles[PITCH] = -SHORT2ANGLE(cl.snap.ps.delta_angles[PITCH]);
+	clientActiveApp->cl.viewangles[PITCH] = -SHORT2ANGLE(clientActiveApp->cl.snap.ps.delta_angles[PITCH]);
 }
 
 static void IN_MLookDown( void ) {
@@ -185,12 +186,6 @@ static float CL_KeyState( kbutton_t *key ) {
 		key->downtime = com_frameTime;
 	}
 
-#if 0
-	if (msec) {
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "%i ", msec);
-	}
-#endif
-
 	float val = (float)msec / frame_msec;
 	if ( val < 0 ) {
 		val = 0;
@@ -283,12 +278,12 @@ static void CL_AdjustAngles( void ) {
 	}
 
 	if ( !in_strafe.active ) {
-		cl.viewangles[YAW] -= speed*cl_yawspeed->value*CL_KeyState (&in_right);
-		cl.viewangles[YAW] += speed*cl_yawspeed->value*CL_KeyState (&in_left);
+		clientActiveApp->cl.viewangles[YAW] -= speed*cl_yawspeed->value*CL_KeyState (&in_right);
+		clientActiveApp->cl.viewangles[YAW] += speed*cl_yawspeed->value*CL_KeyState (&in_left);
 	}
 
-	cl.viewangles[PITCH] -= speed*cl_pitchspeed->value * CL_KeyState (&in_lookup);
-	cl.viewangles[PITCH] += speed*cl_pitchspeed->value * CL_KeyState (&in_lookdown);
+	clientActiveApp->cl.viewangles[PITCH] -= speed*cl_pitchspeed->value * CL_KeyState (&in_lookup);
+	clientActiveApp->cl.viewangles[PITCH] += speed*cl_pitchspeed->value * CL_KeyState (&in_lookdown);
 }
 
 
@@ -344,14 +339,17 @@ static void CL_KeyMove( usercmd_t *cmd ) {
 CL_MouseEvent
 =================
 */
-void CL_MouseEvent( int dx, int dy /*, int time*/ ) {
+void CL_MouseEvent( float dx, float dy /*, int time*/ ) {
 	if ( Key_GetCatcher() & KEYCATCH_UI ) {
 		UI_CALL_MOUSE_EVENT( dx, dy );
 	} else if ( Key_GetCatcher() & KEYCATCH_CGAME ) {
-		VM_Call( cgvm, 2, CG_MOUSE_EVENT, dx, dy );
+		// Float dx/dy cross the VM boundary bit-cast to int (4 bytes on wasm32
+		// and x64 alike); the cgame decodes them back to float. This preserves
+		// sub-pixel precision end-to-end.
+		VM_Call( clientActiveApp->cgvm, 2, CG_MOUSE_EVENT, SE_MouseEnc( dx ), SE_MouseEnc( dy ) );
 	} else {
-		cl.mouseDx[cl.mouseIndex] += dx;
-		cl.mouseDy[cl.mouseIndex] += dy;
+		clientActiveApp->cl.mouseDx[clientActiveApp->cl.mouseIndex] += dx;
+		clientActiveApp->cl.mouseDy[clientActiveApp->cl.mouseIndex] += dy;
 	}
 }
 
@@ -367,7 +365,7 @@ void CL_JoystickEvent( int axis, int value, int time ) {
 	if ( axis < 0 || axis >= MAX_JOYSTICK_AXIS ) {
 		Com_Terminate( TERM_CLIENT_DROP, "CL_JoystickEvent: bad axis %i", axis );
 	} else {
-		cl.joystickAxis[axis] = value;
+		clientActiveApp->cl.joystickAxis[axis] = value;
 	}
 }
 
@@ -395,18 +393,18 @@ static void CL_JoystickMove( usercmd_t *cmd ) {
 	}
 
 	if ( !in_strafe.active ) {
-		cl.viewangles[YAW] += anglespeed * cl_yawspeed->value * cl.joystickAxis[AXIS_SIDE];
+		clientActiveApp->cl.viewangles[YAW] += anglespeed * cl_yawspeed->value * clientActiveApp->cl.joystickAxis[AXIS_SIDE];
 	} else {
-		cmd->rightmove = ClampCharMove( cmd->rightmove + cl.joystickAxis[AXIS_SIDE] );
+		cmd->rightmove = ClampCharMove( cmd->rightmove + clientActiveApp->cl.joystickAxis[AXIS_SIDE] );
 	}
 
 	if ( in_mlooking ) {
-		cl.viewangles[PITCH] += anglespeed * cl_pitchspeed->value * cl.joystickAxis[AXIS_FORWARD];
+		clientActiveApp->cl.viewangles[PITCH] += anglespeed * cl_pitchspeed->value * clientActiveApp->cl.joystickAxis[AXIS_FORWARD];
 	} else {
-		cmd->forwardmove = ClampCharMove( cmd->forwardmove + cl.joystickAxis[AXIS_FORWARD] );
+		cmd->forwardmove = ClampCharMove( cmd->forwardmove + clientActiveApp->cl.joystickAxis[AXIS_FORWARD] );
 	}
 
-	cmd->upmove = ClampCharMove( cmd->upmove + cl.joystickAxis[AXIS_UP] );
+	cmd->upmove = ClampCharMove( cmd->upmove + clientActiveApp->cl.joystickAxis[AXIS_UP] );
 }
 
 
@@ -422,18 +420,18 @@ static void CL_MouseMove( usercmd_t *cmd )
 	// allow mouse smoothing
 	if (m_filter->integer)
 	{
-		mx = (cl.mouseDx[0] + cl.mouseDx[1]) * 0.5f;
-		my = (cl.mouseDy[0] + cl.mouseDy[1]) * 0.5f;
+		mx = (clientActiveApp->cl.mouseDx[0] + clientActiveApp->cl.mouseDx[1]) * 0.5f;
+		my = (clientActiveApp->cl.mouseDy[0] + clientActiveApp->cl.mouseDy[1]) * 0.5f;
 	}
 	else
 	{
-		mx = cl.mouseDx[cl.mouseIndex];
-		my = cl.mouseDy[cl.mouseIndex];
+		mx = clientActiveApp->cl.mouseDx[clientActiveApp->cl.mouseIndex];
+		my = clientActiveApp->cl.mouseDy[clientActiveApp->cl.mouseIndex];
 	}
 
-	cl.mouseIndex ^= 1;
-	cl.mouseDx[cl.mouseIndex] = 0;
-	cl.mouseDy[cl.mouseIndex] = 0;
+	clientActiveApp->cl.mouseIndex ^= 1;
+	clientActiveApp->cl.mouseDx[clientActiveApp->cl.mouseIndex] = 0;
+	clientActiveApp->cl.mouseDy[clientActiveApp->cl.mouseIndex] = 0;
 
 	if (mx == 0.0f && my == 0.0f)
 		return;
@@ -490,17 +488,17 @@ static void CL_MouseMove( usercmd_t *cmd )
 	}
 
 	// ingame FOV
-	mx *= cl.cgameSensitivity;
-	my *= cl.cgameSensitivity;
+	mx *= clientActiveApp->cl.cgameSensitivity;
+	my *= clientActiveApp->cl.cgameSensitivity;
 
 	// add mouse X/Y movement to cmd
 	if ( in_strafe.active )
 		cmd->rightmove = ClampCharMove( cmd->rightmove + m_side->value * mx );
 	else
-		cl.viewangles[YAW] -= m_yaw->value * mx;
+		clientActiveApp->cl.viewangles[YAW] -= m_yaw->value * mx;
 
 	if ( (in_mlooking || cl_freelook->integer) && !in_strafe.active )
-		cl.viewangles[PITCH] += m_pitch->value * my;
+		clientActiveApp->cl.viewangles[PITCH] += m_pitch->value * my;
 	else
 		cmd->forwardmove = ClampCharMove( cmd->forwardmove - m_forward->value * my );
 }
@@ -543,14 +541,14 @@ CL_FinishMove
 */
 static void CL_FinishMove( usercmd_t *cmd ) {
 	// copy the state that the cgame is currently sending
-	cmd->weapon = cl.cgameUserCmdValue;
+	cmd->weapon = clientActiveApp->cl.cgameUserCmdValue;
 
 	// send the current server time so the amount of movement
 	// can be determined without allowing cheating
-	cmd->serverTime = cl.serverTime;
+	cmd->serverTime = clientActiveApp->cl.serverTime;
 
 	for (int i=0 ; i<3 ; i++) {
-		cmd->angles[i] = ANGLE2SHORT(cl.viewangles[i]);
+		cmd->angles[i] = ANGLE2SHORT(clientActiveApp->cl.viewangles[i]);
 	}
 }
 
@@ -564,7 +562,7 @@ static usercmd_t CL_CreateCmd( void ) {
 	usercmd_t	cmd;
 	vec3_t		oldAngles;
 
-	VectorCopy( cl.viewangles, oldAngles );
+	VectorCopy( clientActiveApp->cl.viewangles, oldAngles );
 
 	// keyboard angle adjustment
 	CL_AdjustAngles ();
@@ -583,21 +581,35 @@ static usercmd_t CL_CreateCmd( void ) {
 	CL_JoystickMove( &cmd );
 
 	// check to make sure the angles haven't wrapped
-	if ( cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {
-		cl.viewangles[PITCH] = oldAngles[PITCH] + 90;
-	} else if ( oldAngles[PITCH] - cl.viewangles[PITCH] > 90 ) {
-		cl.viewangles[PITCH] = oldAngles[PITCH] - 90;
+	if ( clientActiveApp->cl.viewangles[PITCH] - oldAngles[PITCH] > 90 ) {
+		clientActiveApp->cl.viewangles[PITCH] = oldAngles[PITCH] + 90;
+	} else if ( oldAngles[PITCH] - clientActiveApp->cl.viewangles[PITCH] > 90 ) {
+		clientActiveApp->cl.viewangles[PITCH] = oldAngles[PITCH] - 90;
 	}
 
 	// store out the final values
 	CL_FinishMove( &cmd );
 
+	// scene cinematic-director playerfreeze: the cgame VM raised the freeze
+	// flag (pushed via trap_SetUserCmdValue). Suppress this client's movement
+	// and action inputs so the local player stays put during a cutscene. This
+	// is a pure client-view decision — the usercmd still flows through the
+	// normal cl.cmds[] ring, so prediction replays it identically and never
+	// snaps. View angles are left intact (the scene owns the camera anyway).
+	if ( clientActiveApp->cl.cgameFreezeMove ) {
+		cmd.forwardmove = 0;
+		cmd.rightmove = 0;
+		cmd.upmove = 0;
+		cmd.buttons &= ~( BUTTON_ATTACK | BUTTON_ATTACK_SEC | BUTTON_USE_HOLDABLE |
+			BUTTON_GESTURE | BUTTON_WALKING | BUTTON_GRAPPLE );
+	}
+
 	// draw debug graphs of turning for mouse testing
 	if ( cl_debugMove->integer ) {
 		if ( cl_debugMove->integer == 1 ) {
-			SCR_DebugGraph( fabsf( cl.viewangles[YAW] - oldAngles[YAW] ) );
+			SCR_DebugGraph( fabsf( clientActiveApp->cl.viewangles[YAW] - oldAngles[YAW] ) );
 		} else if ( cl_debugMove->integer == 2 ) {
-			SCR_DebugGraph( fabsf( cl.viewangles[PITCH] - oldAngles[PITCH] ) );
+			SCR_DebugGraph( fabsf( clientActiveApp->cl.viewangles[PITCH] - oldAngles[PITCH] ) );
 		}
 	}
 
@@ -614,7 +626,7 @@ Create a new usercmd_t structure for this frame
 */
 static void CL_CreateNewCommands( void ) {
 	// no need to create usercmds until we have a gamestate
-	if ( cls.state < CA_PRIMED ) {
+	if ( clientActiveApp->state < CA_PRIMED ) {
 		return;
 	}
 
@@ -635,9 +647,9 @@ static void CL_CreateNewCommands( void ) {
 
 
 	// generate a command for this frame
-	cl.cmdNumber++;
-	int cmdNum = cl.cmdNumber & CMD_MASK;
-	cl.cmds[cmdNum] = CL_CreateCmd();
+	clientActiveApp->cl.cmdNumber++;
+	int cmdNum = clientActiveApp->cl.cmdNumber & CMD_MASK;
+	clientActiveApp->cl.cmds[cmdNum] = CL_CreateCmd();
 }
 
 
@@ -654,34 +666,34 @@ getting more delta compression will reduce total bandwidth.
 */
 static qboolean CL_ReadyToSendPacket( void ) {
 	// don't send anything if playing back a demo
-	if ( clc.demoplaying || cls.state == CA_CINEMATIC ) {
+	if ( clientActiveApp->clc.demoplaying || clientActiveApp->state == CA_CINEMATIC ) {
 		return qfalse;
 	}
 
 	// If we are downloading, we send no less than 50ms between packets
-	if ( *clc.downloadTempName && cls.realtime - clc.lastPacketSentTime < 50 ) {
+	if ( *clientActiveApp->clc.downloadTempName && cls.realtime - clientActiveApp->clc.lastPacketSentTime < 50 ) {
 		return qfalse;
 	}
 
 	// if we don't have a valid gamestate yet, only send one packet a second
-	if ( cls.state != CA_ACTIVE && cls.state != CA_PRIMED &&
-		!*clc.downloadTempName &&
-		cls.realtime - clc.lastPacketSentTime < RETRANSMIT_TIMEOUT ) {
+	if ( clientActiveApp->state != CA_ACTIVE && clientActiveApp->state != CA_PRIMED &&
+		!*clientActiveApp->clc.downloadTempName &&
+		cls.realtime - clientActiveApp->clc.lastPacketSentTime < RETRANSMIT_TIMEOUT ) {
 		return qfalse;
 	}
 
 	// send every frame for loopbacks
-	if ( clc.netchan.remoteAddress.type == NA_LOOPBACK ) {
+	if ( clientActiveApp->clc.netchan.remoteAddress.type == NA_LOOPBACK ) {
 		return qtrue;
 	}
 
 	// send every frame for LAN
-	if ( cl_lanForcePackets->integer && clc.netchan.isLANAddress ) {
+	if ( cl_lanForcePackets->integer && clientActiveApp->clc.netchan.isLANAddress ) {
 		return qtrue;
 	}
 
-	int oldPacketNum = (clc.netchan.outgoingSequence - 1) & PACKET_MASK;
-	int delta        = cls.realtime - cl.outPackets[ oldPacketNum ].p_realtime;
+	int oldPacketNum = (clientActiveApp->clc.netchan.outgoingSequence - 1) & PACKET_MASK;
+	int delta        = cls.realtime - clientActiveApp->cl.outPackets[ oldPacketNum ].p_realtime;
 	if ( delta < 1000 / cl_maxpackets->integer ) {
 		// the accumulated commands will go out in the next packet
 		return qfalse;
@@ -704,7 +716,7 @@ During normal gameplay, a client packet will contain something like:
 2	qport
 4	serverid
 4	acknowledged sequence number
-4	clc.serverCommandSequence
+4	clientActiveApp->clc.serverCommandSequence
 <optional reliable commands>
 1	clc_move or clc_moveNoDelta
 1	command count
@@ -712,14 +724,14 @@ During normal gameplay, a client packet will contain something like:
 
 ===================
 */
-void CL_WritePacket( int repeat ) {
+void CL_WritePacket( clientApp_t *app, int repeat ) {
 	msg_t		buf;
 	byte		data[ MAX_MSGLEN_BUF ];
 	usercmd_t	*cmd, *oldcmd;
 	usercmd_t	nullcmd;
 
 	// don't send anything if playing back a demo
-	if ( clc.demoplaying || cls.state == CA_CINEMATIC ) {
+	if ( app->clc.demoplaying || app->state == CA_CINEMATIC ) {
 		return;
 	}
 
@@ -731,38 +743,38 @@ void CL_WritePacket( int repeat ) {
 	MSG_Bitstream( &buf );
 	// write the current serverId so the server
 	// can tell if this is from the current gameState
-	MSG_WriteLong( &buf, cl.serverId );
+	MSG_WriteLong( &buf, app->cl.serverId );
 
 	// write the last message we received, which can
 	// be used for delta compression, and is also used
 	// to tell if we dropped a gamestate
-	MSG_WriteLong( &buf, clc.serverMessageSequence );
+	MSG_WriteLong( &buf, app->clc.serverMessageSequence );
 
 	// write the last reliable message we received
-	MSG_WriteLong( &buf, clc.serverCommandSequence );
+	MSG_WriteLong( &buf, app->clc.serverCommandSequence );
 
 	// write any unacknowledged clientCommands
-	int n = clc.reliableSequence - clc.reliableAcknowledge;
-	if ( clc.quic_conn != CONN_INVALID && transport ) {
+	int n = app->clc.reliableSequence - app->clc.reliableAcknowledge;
+	if ( app->clc.quic_conn != CONN_INVALID && transport ) {
 		/* QUIC path: send each unacked command on the reliable game-command channel.
 		 * Stream guarantees delivery — acknowledge all immediately so
 		 * the netchan loop below sends nothing. */
-		for ( int ridx = clc.reliableAcknowledge + 1; ridx <= clc.reliableSequence; ridx++ ) {
-			const char *cmd = clc.reliableCommands[ridx & (MAX_RELIABLE_COMMANDS - 1)];
-			transport->send_reliable( clc.quic_conn, CHAN_COMMANDS,
+		for ( int ridx = app->clc.reliableAcknowledge + 1; ridx <= app->clc.reliableSequence; ridx++ ) {
+			const char *cmd = app->clc.reliableCommands[ridx & (MAX_RELIABLE_COMMANDS - 1)];
+			transport_for_handle( app->clc.quic_conn )->send_reliable( app->clc.quic_conn, CHAN_COMMANDS,
 				(byte *)cmd, (int)strlen( cmd ) + 1 );
 		}
-		clc.reliableAcknowledge = clc.reliableSequence;
+		app->clc.reliableAcknowledge = app->clc.reliableSequence;
 		n = 0; /* skip netchan embedding */
 	}
 	for ( int i = 0; i < n; i++ ) {
-		const int index = clc.reliableAcknowledge + 1 + i;
+		const int index = app->clc.reliableAcknowledge + 1 + i;
 		MSG_WriteByte( &buf, clc_clientCommand );
 		MSG_WriteLong( &buf, index );
-		MSG_WriteString( &buf, clc.reliableCommands[ index & ( MAX_RELIABLE_COMMANDS - 1 ) ] );
+		MSG_WriteString( &buf, app->clc.reliableCommands[ index & ( MAX_RELIABLE_COMMANDS - 1 ) ] );
 	}
 
-	if ( clc.quic_conn != CONN_INVALID && transport ) {
+	if ( app->clc.quic_conn != CONN_INVALID && transport ) {
 		/* QUIC usercmd datagram format:
 		 *   [client_tick:u32]    — cl.cmdNumber (newest cmd in this packet)
 		 *   [snapshot_ack:u32]   — clc.serverMessageSequence (last snapshot received)
@@ -774,41 +786,41 @@ void CL_WritePacket( int repeat ) {
 		byte  udg_data[2048];
 		msg_t udg;
 		int qcount = 3;
-		if ( cl.cmdNumber < 3 )
-			qcount = cl.cmdNumber > 0 ? cl.cmdNumber : 1;
+		if ( app->cl.cmdNumber < 3 )
+			qcount = app->cl.cmdNumber > 0 ? app->cl.cmdNumber : 1;
 
 		MSG_Init( &udg, udg_data, sizeof(udg_data) );
 		MSG_Bitstream( &udg );
 		/* client_tick:u32 — client's current command number */
-		MSG_WriteLong( &udg, cl.cmdNumber );
+		MSG_WriteLong( &udg, app->cl.cmdNumber );
 		/* snapshot_ack:u32 — last server snapshot received (enables delta compression) */
-		MSG_WriteLong( &udg, clc.serverMessageSequence );
+		MSG_WriteLong( &udg, app->clc.serverMessageSequence );
 		/* serverCmd_ack:u32 — last server command processed by client;
 		 * server advances reliableAcknowledge to stop re-embedding processed commands */
-		MSG_WriteLong( &udg, clc.serverCommandSequence );
-		Com_Log( SEV_TRACE, LOG_CH(ch_client), "[WiredNet] usercmd send: snapshot_ack=%d serverCmd_ack=%d\n",
-			clc.serverMessageSequence, clc.serverCommandSequence );
+		MSG_WriteLong( &udg, app->clc.serverCommandSequence );
+		Com_Log( SEV_TRACE, LOG_CH(ch_network_client), "usercmd send: snapshot_ack=%d serverCmd_ack=%d\n",
+			app->clc.serverMessageSequence, app->clc.serverCommandSequence );
 		MSG_WriteByte( &udg, qcount );
 
 		oldcmd = &nullcmd;
 		for ( int qi = 0; qi < qcount; qi++ ) {
-			int qj = (cl.cmdNumber - qcount + qi + 1) & CMD_MASK;
-			cmd = &cl.cmds[qj];
+			int qj = (app->cl.cmdNumber - qcount + qi + 1) & CMD_MASK;
+			cmd = &app->cl.cmds[qj];
 			MSG_WriteDeltaUsercmdKey( &udg, 0, oldcmd, cmd );
 			oldcmd = cmd;
 		}
 
 		if ( !udg.overflowed ) {
-			transport->send_unreliable( clc.quic_conn, udg.data, udg.cursize );
+			transport_for_handle( app->clc.quic_conn )->send_unreliable( app->clc.quic_conn, udg.data, udg.cursize );
 		}
 
 		/* keep outPackets ring valid for snapshot interpolation + next-frame count */
-		int packetNum = clc.netchan.outgoingSequence & PACKET_MASK;
-		cl.outPackets[packetNum].p_realtime   = cls.realtime;
-		cl.outPackets[packetNum].p_serverTime = oldcmd->serverTime;
-		cl.outPackets[packetNum].p_cmdNumber  = cl.cmdNumber;
-		clc.lastPacketSentTime                = cls.realtime;
-		clc.netchan.outgoingSequence++;
+		int packetNum = app->clc.netchan.outgoingSequence & PACKET_MASK;
+		app->cl.outPackets[packetNum].p_realtime   = cls.realtime;
+		app->cl.outPackets[packetNum].p_serverTime = oldcmd->serverTime;
+		app->cl.outPackets[packetNum].p_cmdNumber  = app->cl.cmdNumber;
+		app->clc.lastPacketSentTime                = cls.realtime;
+		app->clc.netchan.outgoingSequence++;
 		return;
 	}
 
@@ -816,8 +828,8 @@ void CL_WritePacket( int repeat ) {
 	// few packet, so even if a couple packets are dropped in a row,
 	// all the cmds will make it to the server
 
-	int oldPacketNum = (clc.netchan.outgoingSequence - 1 - cl_packetdup->integer) & PACKET_MASK;
-	int count        = cl.cmdNumber - cl.outPackets[ oldPacketNum ].p_cmdNumber;
+	int oldPacketNum = (app->clc.netchan.outgoingSequence - 1 - cl_packetdup->integer) & PACKET_MASK;
+	int count        = app->cl.cmdNumber - app->cl.outPackets[ oldPacketNum ].p_cmdNumber;
 	if ( count > MAX_PACKET_USERCMDS ) {
 		count = MAX_PACKET_USERCMDS;
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "MAX_PACKET_USERCMDS\n");
@@ -828,7 +840,7 @@ void CL_WritePacket( int repeat ) {
 		}
 
 		// begin a client move command
-		if ( cl_nodelta->integer || !cl.snap.valid || clc.demowaiting || clc.serverMessageSequence != cl.snap.messageNum ) {
+		if ( cl_nodelta->integer || !app->cl.snap.valid || app->clc.demowaiting || app->clc.serverMessageSequence != app->cl.snap.messageNum ) {
 			MSG_WriteByte( &buf, clc_moveNoDelta );
 		} else {
 			MSG_WriteByte( &buf, clc_move );
@@ -838,16 +850,16 @@ void CL_WritePacket( int repeat ) {
 		MSG_WriteByte( &buf, count );
 
 		// use the checksum feed in the key
-		int key = clc.checksumFeed;
+		int key = app->clc.checksumFeed;
 		// also use the message acknowledge
-		key ^= clc.serverMessageSequence;
+		key ^= app->clc.serverMessageSequence;
 		// also use the last acknowledged server command in the key
-		key ^= MSG_HashKey(clc.serverCommands[ clc.serverCommandSequence & (MAX_RELIABLE_COMMANDS-1) ], 32);
+		key ^= MSG_HashKey(app->clc.serverCommands[ app->clc.serverCommandSequence & (MAX_RELIABLE_COMMANDS-1) ], 32);
 
 		// write all the commands, including the predicted command
 		for ( int i = 0 ; i < count ; i++ ) {
-			int j = (cl.cmdNumber - count + i + 1) & CMD_MASK;
-			cmd = &cl.cmds[j];
+			int j = (app->cl.cmdNumber - count + i + 1) & CMD_MASK;
+			cmd = &app->cl.cmds[j];
 			MSG_WriteDeltaUsercmdKey (&buf, key, oldcmd, cmd);
 			oldcmd = cmd;
 		}
@@ -856,11 +868,11 @@ void CL_WritePacket( int repeat ) {
 	//
 	// deliver the message
 	//
-	int packetNum = clc.netchan.outgoingSequence & PACKET_MASK;
-	cl.outPackets[ packetNum ].p_realtime = cls.realtime;
-	cl.outPackets[ packetNum ].p_serverTime = oldcmd->serverTime;
-	cl.outPackets[ packetNum ].p_cmdNumber = cl.cmdNumber;
-	clc.lastPacketSentTime = cls.realtime;
+	int packetNum = app->clc.netchan.outgoingSequence & PACKET_MASK;
+	app->cl.outPackets[ packetNum ].p_realtime = cls.realtime;
+	app->cl.outPackets[ packetNum ].p_serverTime = oldcmd->serverTime;
+	app->cl.outPackets[ packetNum ].p_cmdNumber = app->cl.cmdNumber;
+	app->clc.lastPacketSentTime = cls.realtime;
 	cl_sent++;
 
 	if ( cl_showSend->integer ) {
@@ -870,13 +882,13 @@ void CL_WritePacket( int repeat ) {
 	MSG_WriteByte( &buf, clc_EOF );
 
 	if ( buf.overflowed ) {
-		if ( cls.state >= CA_CONNECTED && cls.state != CA_CINEMATIC ) {
-			cls.state = CA_CONNECTING; // to avoid recursive error
+		if ( app->state >= CA_CONNECTED && app->state != CA_CINEMATIC ) {
+			CL_SetState( app, CA_CONNECTING ); // to avoid recursive error
 		}
 		Com_Terminate( TERM_CLIENT_DROP, "%s: message overflowed", __func__ );
 	}
 
-	/* Phase D: netchan transmit removed — QUIC datagram path returned early above */
+	/* netchan transmit removed — QUIC datagram path returned early above */
 }
 
 
@@ -889,7 +901,7 @@ Called every frame to builds and sends a command packet to the server.
 */
 void CL_SendCmd( void ) {
 	// don't send any message if not connected
-	if ( cls.state < CA_CONNECTED ) {
+	if ( clientActiveApp->state < CA_CONNECTED ) {
 		return;
 	}
 
@@ -909,7 +921,40 @@ void CL_SendCmd( void ) {
 		return;
 	}
 
-	CL_WritePacket( 0 );
+	CL_WritePacket( clientActiveApp, 0 );
+}
+
+/*
+=================
+CL_SendAckOnly
+
+Per-app outbound ACK (in-process-queue L5). A non-input-focused live app does
+not run CL_SendCmd (which is input-focus-bound), so it would never advance the
+server's delta baseline for its own connection -> snapshot delivery starves.
+This sends a usercmd datagram with cmd_count=0 carrying only the snapshot/server-
+command acks for `app`. Input-build (CL_CreateNewCommands) is NOT touched — this
+is ack-only. Mirrors the ack header of CL_WritePacket (cl_input.c:782-805).
+Runs in CL_Frame (not the recv pump), operates solely on the passed `app`.
+=================
+*/
+void CL_SendAckOnly( clientApp_t *app ) {
+	byte  udg_data[2048];
+	msg_t udg;
+
+	if ( app->state < CA_CONNECTED )
+		return;
+	if ( app->clc.quic_conn == CONN_INVALID || !transport )
+		return;
+
+	MSG_Init( &udg, udg_data, sizeof( udg_data ) );
+	MSG_Bitstream( &udg );
+	MSG_WriteLong( &udg, app->cl.cmdNumber );                  /* client_tick */
+	MSG_WriteLong( &udg, app->clc.serverMessageSequence );     /* snapshot_ack */
+	MSG_WriteLong( &udg, app->clc.serverCommandSequence );     /* serverCmd_ack */
+	MSG_WriteByte( &udg, 0 );                                  /* cmd_count = 0 (ack-only) */
+
+	if ( !udg.overflowed )
+		transport_for_handle( app->clc.quic_conn )->send_unreliable( app->clc.quic_conn, udg.data, udg.cursize );
 }
 
 
@@ -955,20 +1000,20 @@ CL_InitInput
 ============
 */
 void CL_InitInput( void ) {
-	Cmd_AddCommand ("centerview",IN_CenterView);
+	Cmd_AddCommand ("centerview", IN_CenterView);
 
-	Cmd_AddCommand ("+moveup",IN_UpDown);
-	Cmd_AddCommand ("-moveup",IN_UpUp);
-	Cmd_AddCommand ("+movedown",IN_DownDown);
-	Cmd_AddCommand ("-movedown",IN_DownUp);
-	Cmd_AddCommand ("+left",IN_LeftDown);
-	Cmd_AddCommand ("-left",IN_LeftUp);
-	Cmd_AddCommand ("+right",IN_RightDown);
-	Cmd_AddCommand ("-right",IN_RightUp);
-	Cmd_AddCommand ("+forward",IN_ForwardDown);
-	Cmd_AddCommand ("-forward",IN_ForwardUp);
-	Cmd_AddCommand ("+back",IN_BackDown);
-	Cmd_AddCommand ("-back",IN_BackUp);
+	Cmd_AddCommand ("+moveup", IN_UpDown);
+	Cmd_AddCommand ("-moveup", IN_UpUp);
+	Cmd_AddCommand ("+movedown", IN_DownDown);
+	Cmd_AddCommand ("-movedown", IN_DownUp);
+	Cmd_AddCommand ("+left", IN_LeftDown);
+	Cmd_AddCommand ("-left", IN_LeftUp);
+	Cmd_AddCommand ("+right", IN_RightDown);
+	Cmd_AddCommand ("-right", IN_RightUp);
+	Cmd_AddCommand ("+forward", IN_ForwardDown);
+	Cmd_AddCommand ("-forward", IN_ForwardUp);
+	Cmd_AddCommand ("+back", IN_BackDown);
+	Cmd_AddCommand ("-back", IN_BackUp);
 	Cmd_AddCommand ("+lookup", IN_LookupDown);
 	Cmd_AddCommand ("-lookup", IN_LookupUp);
 	Cmd_AddCommand ("+lookdown", IN_LookdownDown);
@@ -981,8 +1026,10 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-speed", IN_SpeedUp);
 	Cmd_AddCommand ("+attack", IN_Button0Down);
 	Cmd_AddCommand ("-attack", IN_Button0Up);
-	Cmd_AddCommand ("+attackalt", IN_Button1Down);
-	Cmd_AddCommand ("-attackalt", IN_Button1Up);
+	Cmd_AddCommand ("+attackpri", IN_Button0Down);
+	Cmd_AddCommand ("-attackpri", IN_Button0Up);
+	Cmd_AddCommand ("+attacksec", IN_Button1Down);
+	Cmd_AddCommand ("-attacksec", IN_Button1Up);
 	Cmd_AddCommand ("+use", IN_Button2Down);
 	Cmd_AddCommand ("-use", IN_Button2Up);
 	Cmd_AddCommand ("+gesture1", IN_Button3Down);

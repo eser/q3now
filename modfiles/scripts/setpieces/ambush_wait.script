@@ -1,0 +1,10 @@
+// ambush_wait.script — proves the playersight + accum verbs explicitly.
+// The monster holds an ambush: it counts its wait cycles in an accum slot, then
+// suspends on playersight until a player appears, and attacks on sight.
+print ambush-armed
+accum 0 set 0
+accum 0 inc 1
+wait 300
+playersight        // SUSPENDS (qfalse) every frame until a player is in sight
+print ambush-triggered
+attack

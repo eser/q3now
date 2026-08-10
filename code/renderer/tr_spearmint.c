@@ -8,11 +8,11 @@ tr_spearmint.c — Spearmint feature adaptation.
 Adds:
   * Enhanced fog system (FT_LINEAR, FT_EXP, FT_EXP2) with front-end accessors
     and a thin RB_Fog backend helper that talks to GL_FOG.
-  * Corona (lens-flare-style glow) scene entries, rendered through the
+  * Halo (lens-flare-style glow) scene entries, rendered through the
     existing flare pipeline for free depth-buffer occlusion testing.
   * DrawRotatedPic / SetClipRegion 2D-rendering entry points.
 
-All functionality is gated on FEAT_FOG_SYSTEM / FEAT_CORONA and compiles to
+All functionality is gated on FEAT_FOG_SYSTEM / FEAT_HALO and compiles to
 empty translation units when the flags are 0.
 
 Every entry point here is gated behind its feature flag so the file
@@ -304,9 +304,9 @@ void RB_Fog( int fogNum ) {
 
 /* ===========================================================================
  *
- * CORONAS (FEAT_CORONA)
+ * HALOS (FEAT_HALO)
  *
- * Coronas are scene entries added by the game (e.g. for muzzle flashes, sun
+ * Halos are scene entries added by the game (e.g. for muzzle flashes, sun
  * glares, fire sources) that should render as a flare with depth-buffer
  * occlusion testing. We reuse the existing flare infrastructure so we get
  * the fade logic and qglReadPixels-based occlusion for free.
@@ -314,49 +314,49 @@ void RB_Fog( int fogNum ) {
  * ===========================================================================
  */
 
-#if FEAT_CORONA
+#if FEAT_HALO
 
-static int r_numcoronas;
-static int r_firstSceneCorona;
+static int r_numhalos;
+static int r_firstSceneHalo;
 
 
 /*
 ====================
-R_ClearCoronas
+R_ClearHalos
 
 Called from R_InitNextFrame (via tr_scene.c) to reset the per-frame
-corona list. Using a weak-ish symbol by exposing it via an extern in
+halo list. Using a weak-ish symbol by exposing it via an extern in
 tr_local.h keeps the existing tr_scene.c untouched beyond the hook.
 ====================
 */
-void R_ClearCoronas( void ) {
-	r_numcoronas = 0;
-	r_firstSceneCorona = 0;
+void R_ClearHalos( void ) {
+	r_numhalos = 0;
+	r_firstSceneHalo = 0;
 }
 
 
 /*
 ====================
-RE_AddCoronaToScene
+RE_AddHaloToScene
 
-Engine API: add a corona to the current scene buffer. Mirrors the
+Engine API: add a halo to the current scene buffer. Mirrors the
 Spearmint signature exactly.
 ====================
 */
-void RE_AddCoronaToScene( const vec3_t org, float r, float g, float b,
+void RE_AddHaloToScene( const vec3_t org, float r, float g, float b,
 	float scale, int id, qboolean visible )
 {
-	corona_t *cor;
+	halo_t *cor;
 
 	if ( !tr.registered ) {
 		return;
 	}
 
-	if ( r_numcoronas >= MAX_CORONAS ) {
+	if ( r_numhalos >= MAX_HALOS ) {
 		return;
 	}
 
-	cor = &backEndData->coronas[ r_numcoronas + r_firstSceneCorona ];
+	cor = &backEndData->halos[ r_numhalos + r_firstSceneHalo ];
 	VectorCopy( org, cor->origin );
 	cor->color[0] = r;
 	cor->color[1] = g;
@@ -365,23 +365,23 @@ void RE_AddCoronaToScene( const vec3_t org, float r, float g, float b,
 	cor->id = id;
 	cor->visible = visible;
 	cor->shader = NULL;
-	r_numcoronas++;
+	r_numhalos++;
 }
 
 
 /*
 ====================
-RB_AddCoronaFlares
+RB_AddHaloFlares
 
-Called from the flare rendering path once per view. Iterates the corona
+Called from the flare rendering path once per view. Iterates the halo
 list and emits each entry as a flare. The flare pipeline already handles
 depth-buffer occlusion testing (qglReadPixels in RB_TestFlare), fade-in/
 fade-out, and per-view visibility tracking.
 ====================
 */
-void RB_AddCoronaFlares( void ) {
+void RB_AddHaloFlares( void ) {
 	int i;
-	corona_t *cor;
+	halo_t *cor;
 	fog_t *fog = NULL;
 	int fogNum;
 
@@ -397,8 +397,8 @@ void RB_AddCoronaFlares( void ) {
 		(void)fog;
 	}
 
-	cor = backEndData->coronas + r_firstSceneCorona;
-	for ( i = 0; i < r_numcoronas; i++, cor++ ) {
+	cor = backEndData->halos + r_firstSceneHalo;
+	for ( i = 0; i < r_numhalos; i++, cor++ ) {
 		vec3_t scaledColor;
 
 		if ( !cor->visible ) {
@@ -432,7 +432,7 @@ void RB_AddCoronaFlares( void ) {
 	}
 }
 
-#endif // FEAT_CORONA
+#endif // FEAT_HALO
 
 
 /* ===========================================================================

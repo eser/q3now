@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Weapon bfg — BFG (chamber + barrel + glow) -->
+  <path d="M 17 33 L 71 33 L 79 25 L 92 25 L 92 71 L 79 71 L 71 63 L 17 63 Z M 29 63 L 29 83 L 50 83 L 50 63 Z M 38 42 L 50 42 L 50 54 L 38 54 Z" fill="black" fill-rule="evenodd"/>
+</svg>

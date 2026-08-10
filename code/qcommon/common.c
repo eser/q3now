@@ -6,6 +6,8 @@
 #include "q_shared.h"
 #include "qcommon.h"
 #include "wired/core/logging/log.h"
+#include "wired/stalltrace.h"
+#include "wired/wired_build_stamp.h"
 #include "maps/meta.h"
 #include "crash.h"
 #include <setjmp.h>
@@ -22,7 +24,6 @@
 #endif
 
 #include "../client/keys.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 const int demo_protocols[] = { PROTOCOL_VERSION, 0 };
@@ -42,13 +43,13 @@ fileHandle_t com_journalDataFile = FS_INVALID_HANDLE; // config files are writte
 
 cvar_t	*com_viewlog;
 cvar_t	*com_speeds;
-cvar_t	*com_dedicated;
 cvar_t	*com_timescale;
 static cvar_t *com_fixedtime;
 cvar_t	*com_journal;
+cvar_t	*com_automated;		// 1 = non-interactive/automated run: no blocking GUI error dialog
 cvar_t	*com_protocol;
 cvar_t	*com_busyWait;
-#ifndef DEDICATED
+#ifndef HEADLESS
 cvar_t	*com_maxfps;
 cvar_t	*com_maxfpsUnfocused;
 cvar_t	*com_maxfpsMinimized;
@@ -61,10 +62,7 @@ cvar_t	*com_affinityMask;
 static cvar_t *com_showtrace;
 cvar_t	*com_version;
 
-#ifndef DEDICATED
-static cvar_t	*com_introPlayed;
-cvar_t	*com_skipIdLogo;
-
+#ifndef HEADLESS
 cvar_t	*cl_paused;
 cvar_t	*cl_packetdelay;
 cvar_t	*com_cl_running;
@@ -95,8 +93,8 @@ qboolean	com_errorEntered = qfalse;
 qboolean	com_fullyInitialized = qfalse;
 
 // renderer window states
-qboolean	gw_minimized = qfalse; // this will be always true for dedicated servers
-#ifndef DEDICATED
+qboolean	gw_minimized = qfalse; // this will be always true for headless servers
+#ifndef HEADLESS
 qboolean	gw_active = qtrue;
 #endif
 
@@ -105,7 +103,6 @@ char com_errorMessage[ MAXPRINTMSG ];
 void Com_Shutdown( void );
 void CIN_CloseAllVideos( void );
 static void Com_ViewlogChanged( cvar_t *self );
-static void Com_DedicatedChanged( cvar_t *self );
 
 //============================================================================
 
@@ -128,7 +125,7 @@ void Com_Quit_f( void ) {
 		// a corrupt call stack makes no difference
 		VM_Forced_Unload_Start();
 		SV_Shutdown( p[0] ? p : "Server quit" );
-#ifndef DEDICATED
+#ifndef HEADLESS
 		CL_Shutdown( p[0] ? p : "Client quit", qtrue );
 #endif
 		VM_Forced_Unload_Done();
@@ -301,6 +298,11 @@ void Com_StartupVariable( const char *match ) {
 		}
 
 		name = Cmd_Argv( 1 );
+		if ( !Q_stricmp( name, "dedicated" ) ) {
+			Sys_Error(
+				"'dedicated' was retired: start a server with the 'map' command and set "
+				"'sv_hostListed 1' to announce it to the master servers." );
+		}
 		if ( !match || Q_stricmp( name, match ) == 0 ) {
 			if ( Cvar_Flags( name ) == CVAR_NONEXISTENT ) {
 				Cvar_Get( name, Cmd_ArgsFrom( 2 ), CVAR_USER_CREATED | CVAR_CMDLINE_CREATED );
@@ -1432,7 +1434,8 @@ static void Zone_Stats( const memzone_t *z, qboolean printDetails, zone_stats_t 
 				block = next->next;
 				continue;
 			}
-#endif Com_Log( SEV_INFO, LOG_CH( ch_system ), "ERROR: block size does not touch the next block\n" );
+#endif
+			Com_Log( SEV_INFO, LOG_CH( ch_system ), "ERROR: block size does not touch the next block\n" );
 		}
 		if ( block->next->prev != block) {
 			Com_Log( SEV_INFO, LOG_CH(ch_system), "ERROR: next block doesn't have proper back link\n" );
@@ -1480,6 +1483,17 @@ zoneStats_t Zone_GetStats( void ) {
 }
 #endif // FEAT_MEMSTATS
 
+
+// Optional GPU-memory report contributor. The renderer's VRAM/budget numbers
+// live behind the engine→renderer boundary (qcommon must not depend on the
+// renderer), so a higher layer (the client) registers a callback here that
+// pulls the budget through the re-export interface and prints it. NULL when no
+// renderer is loaded (headless / pure-2D); the meminfo handler skips it then.
+static void ( *com_gpuMemReport )( void );
+
+void Com_RegisterGpuMemReport( void ( *fn )( void ) ) {
+	com_gpuMemReport = fn;
+}
 
 /*
 =================
@@ -1556,6 +1570,66 @@ static void Com_Meminfo_f( void ) {
 		}
 	}
 #endif
+	// GPU memory (renderer-provided; skipped when no renderer is loaded).
+	if ( com_gpuMemReport )
+		com_gpuMemReport();
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "──────────────────────────────────────────\n" );
+}
+
+
+/*
+=================
+Com_Sysinfo_f
+
+Print a per-component build stamp table so a stale binary self-reports an older
+id/date than the engine. The engine rows come from this binary's own embedded
+WIRED_BUILD_ID/DATE (each component is compiled with its own copy). The renderer
+and the two VM rows are read from the CVAR_ROM cvars each module publishes at
+init (r_buildId/Date, cg_buildId/Date, g_buildId/Date) — "not loaded" when the
+cvar is empty (module not up). No new syscall / vmMain slot: the cvar route is
+the same zero-ABI path `gamedate` already uses.
+=================
+*/
+// The "loaded-from" column is captured ENGINE-side at load time (the module
+// never reports its own path — that is the whole point: a stale/shadowing copy
+// is only visible from where the engine actually loaded it). It is NOT routed
+// through the build-id CVAR_ROM channel. The path is printed in full, never
+// truncated (the value IS the diagnostic), so this column is last and free-width.
+static void Com_SysinfoRow( const char *component, const char *date, const char *id,
+                            const char *loadedFrom ) {
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "  %-10s  %-18s  %-10s  %s\n",
+		component, ( date && date[0] ) ? date : "not loaded",
+		( id && id[0] ) ? id : "-",
+		( loadedFrom && loadedFrom[0] ) ? loadedFrom : "not loaded" );
+}
+
+static void Com_Sysinfo_f( void ) {
+	const char *rDate = Cvar_VariableString( "r_buildDate" );
+	const char *rId   = Cvar_VariableString( "r_buildId" );
+	const char *cgDate = Cvar_VariableString( "cg_buildDate" );
+	const char *cgId   = Cvar_VariableString( "cg_buildId" );
+	const char *gDate = Cvar_VariableString( "g_buildDate" );
+	const char *gId   = Cvar_VariableString( "g_buildId" );
+#ifndef HEADLESS
+	const char *rPath  = CL_RendererLoadPath();
+	const char *cgPath = VM_LoadPath( VM_CGAME );
+#else
+	const char *rPath  = "";
+	const char *cgPath = "";
+#endif
+	const char *gPath  = VM_LoadPath( VM_GAME );
+
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "──────────────────────────────────────────\n" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "  %-10s  %-18s  %-10s  %s\n", "component", "compile-date", "build-id", "loaded-from" );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "  ----------  ------------------  ----------  -----------\n" );
+	// client + server rows = this engine binary's own embedded stamp; they ARE
+	// the running binary, not loaded from elsewhere.
+	Com_SysinfoRow( "client",   WIRED_BUILD_DATE, WIRED_BUILD_ID_STR, "(this binary)" );
+	Com_SysinfoRow( "server",   WIRED_BUILD_DATE, WIRED_BUILD_ID_STR, "(this binary)" );
+	Com_SysinfoRow( "renderer", rDate,  rId,  rPath  );
+	Com_SysinfoRow( "cgame",    cgDate, cgId, cgPath );
+	Com_SysinfoRow( "game",     gDate,  gId,  gPath  );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "  engine TU compiled: %s\n", WIRED_BUILD_TU_DATE );
 	Com_Log( SEV_INFO, LOG_CH(ch_system), "──────────────────────────────────────────\n" );
 }
 
@@ -1878,8 +1952,9 @@ qboolean Hunk_CheckMark( void ) {
 	return qfalse;
 }
 
-void CL_ShutdownCGame( void );
+void CL_ShutdownCGame( struct clientApp_s *app );
 void CL_ShutdownUI( void );
+int  CL_ActiveCgameInstance( void );
 void SV_ShutdownGameProgs( void );
 
 /*
@@ -1893,12 +1968,18 @@ backEndData) live outside the hunk and are NOT affected by this call.
 */
 void Hunk_ClearLevel( void ) {
 
-#ifndef DEDICATED
-	CL_ShutdownCGame();
+#ifndef HEADLESS
+	// Scope the level-transition VM teardown to the active app (its cgame slot ==
+	// its cgameInstance). Captured before CL_ShutdownCGame frees the VM; the index
+	// is stable either way. At N>1 this leaves co-resident apps' cgame VMs intact.
+	const int activeCgameInstance = CL_ActiveCgameInstance();
+	CL_ShutdownCGame( CL_ActiveApp() );
 	CL_ShutdownUI();
+#else
+	const int activeCgameInstance = 0;
 #endif
 	SV_ShutdownGameProgs();
-#ifndef DEDICATED
+#ifndef HEADLESS
 	CIN_CloseAllVideos();
 #endif
 	hunk_low.mark = 0;
@@ -1922,7 +2003,7 @@ void Hunk_ClearLevel( void ) {
 #endif
 
 	Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Hunk_ClearLevel: reset the hunk ok\n" );
-	VM_Clear();
+	VM_ClearApp( activeCgameInstance );
 #ifdef HUNK_DEBUG
 	hunkblocks = NULL;
 #endif
@@ -2293,10 +2374,10 @@ void Com_GameRestart( int checksumFeed, qboolean clientRestart )
 	if ( !com_gameRestarting && com_fullyInitialized )
 	{
 		com_gameRestarting = qtrue;
-#ifndef DEDICATED
+#ifndef HEADLESS
 		if ( clientRestart )
 		{
-			CL_Disconnect( qfalse );
+			CL_Disconnect( CL_ActiveApp(), qfalse );
 			CL_ShutdownAll();
 			CL_ClearMemory(); // Hunk_ClearLevel(); // -EC-
 		}
@@ -2315,10 +2396,11 @@ void Com_GameRestart( int checksumFeed, qboolean clientRestart )
 		// Clean out any user and VM created cvars
 		Cvar_Restart( qtrue );
 
-#ifndef DEDICATED
-		// Reparse pure paks and update cvars before FS startup
-		if ( CL_GameSwitch() )
-			CL_SystemInfoChanged( qfalse );
+#ifndef HEADLESS
+		// Reparse pure paks and update cvars before FS startup (active client —
+		// this is the process-global game-switch path)
+		if ( CL_GameSwitch( CL_ActiveApp() ) )
+			CL_SystemInfoChanged( CL_ActiveApp(), qfalse );
 #endif
 
 		FS_Restart( checksumFeed );
@@ -2326,7 +2408,7 @@ void Com_GameRestart( int checksumFeed, qboolean clientRestart )
 		// Load new configuration
 		Com_ExecuteCfg();
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 		if ( clientRestart )
 			CL_StartHunkUsers();
 #endif
@@ -2351,10 +2433,10 @@ static void Com_GameRestart_f( void )
 }
 
 
-// TTimo: centralizing the cl_cdkey stuff after I discovered a buffer overflow problem with the dedicated server version
+// TTimo: centralizing the cl_cdkey stuff after I discovered a buffer overflow problem with the headless server version
 //   not sure it's necessary to have different defaults for regular and dedicated, but I don't want to risk it
 //   https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=470
-#ifndef DEDICATED
+#ifndef HEADLESS
 char	cl_cdkey[34] = "                                ";
 #else
 char	cl_cdkey[34] = "123456789";
@@ -2781,8 +2863,14 @@ static const char *parseAffinityMask( const char *str, uint64_t *outv, int level
 			++str;
 			continue;
 		}
-		if ( *str == '0' && ( str[1] == 'x' || str[1] == 'X' ) && ( v = hex_code( str[2] ) ) >= 0 ) {
+		int firstHex;
+		if ( *str == '0' && ( str[1] == 'x' || str[1] == 'X' ) && ( firstHex = hex_code( str[2] ) ) >= 0 ) {
+			// Test the signed hex_code() result BEFORE storing into the uint64_t
+			// `v`: assigning -1 (non-hex digit) to v yields UINT64_MAX, and a
+			// `(uint64_t) >= 0` test can never reject — so `0x<non-hex>` would be
+			// wrongly accepted as an all-ones mask.
 			int hex;
+			v = (uint64_t)firstHex;
 			str += 3; // 0xH
 			while ( ( hex = hex_code( *str ) ) >= 0 ) {
 				v = v * 16 + hex;
@@ -2861,7 +2949,7 @@ Docker, systemd, k8s, or any 12-factor deployment:
   export WIRED_G_GAMETYPE=4
   export WIRED_MAP=arena7
   export WIRED_SV_WIREDNETAUTHTOKEN="observer:member:user:abc123"
-  ./wired-ded
+  ./wired-headless
 
 Special vars:
   WIRED_MAP  → executed as "map <value>" after full init (not a cvar)
@@ -2878,7 +2966,7 @@ static const struct {
 	{ "SV_MAXCLIENTS",      	"sv_maxclients" },
 	{ "SV_PURE",            	"sv_pure" },
 	{ "SV_FPS",             	"sv_fps" },
-	{ "DEDICATED",          	"dedicated" },
+	{ "SV_HOSTLISTED",      	"sv_hostListed" },
 	{ "G_GAMETYPE",         	"g_gametype" },
 	{ "G_SCORELIMIT",       	"g_scorelimit" },
 	{ "G_TIMELIMIT",        	"g_timelimit" },
@@ -2935,7 +3023,7 @@ void Com_Init( char *commandLine ) {
 		Sys_Error( "Log pipeline: Sys_MutexInit failed" );
 	}
 
-	Com_Log( SEV_INFO, LOG_CH(ch_system), "%s %s %s\n", WIRED_ENGINE_RELEASE_VERSION, PLATFORM_STRING, __DATE__ );
+	Com_Log( SEV_INFO, LOG_CH(ch_system), "%s %s %s\n", WIRED_ENGINE_TITLE, PLATFORM_STRING, __DATE__ );
 
 	Hash_SelfTest();
 
@@ -2949,6 +3037,11 @@ void Com_Init( char *commandLine ) {
 	Com_InitSmallZoneMemory();
 	Cvar_Init();
 
+	// Lifecycle freeze diagnostic (cvar-gated, default-off). Registered right
+	// after Cvar_Init so the bracket flag is live before the first window/audio
+	// init and before any focus event.
+	stalltrace_register();
+
 	// Global log gate: registered immediately after Cvar_Init so its
 	// onChange callback (wired in Log_InitChannels) can re-resolve every
 	// channel's effectiveSev when the floor moves. Default INFO suppresses
@@ -2961,11 +3054,23 @@ void Com_Init( char *commandLine ) {
 #endif
 		log_severity_cvar = Cvar_Register( &d );
 	}
+
+	// Non-interactive / automated-run flag. Registered this early (right after
+	// Cvar_Init) so it is live before the first IN_Frame and before any early
+	// Com_Terminate — when set, the fatal-error path skips the blocking GUI
+	// dialog (the error still reaches stderr/log). Settable via +set or the
+	// WIRED_COM_AUTOMATED env var (Com_SetCvarsFromEnvironment).
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "com_automated", "0", 0,
+			"Non-interactive run: suppress blocking GUI error dialogs (errors still log to stderr)." );
+		com_automated = Cvar_Register( &d );
+	}
+
 	Log_InitChannels();
 	LogBuffer_Init();
 
 	// TTY sink only needs cvars (con_severity / con_timestamp). Register it now
-	// so FS_InitFilesystem, BSP_Init, and WiredScript_Init all emit with a
+	// so FS_InitFilesystem, Map_Init, and WiredScript_Init all emit with a
 	// severity bracket and optional timestamp instead of raw fallback stderr.
 	Log_RegisterTtySink();
 	// Fallback served its purpose for the tiny pre-Cvar_Init window.
@@ -2976,10 +3081,6 @@ void Com_Init( char *commandLine ) {
 		static const cvarDesc_t d = CVAR_BOOL( "com_noErrorInterrupt", "0", 0, NULL );
 		com_noErrorInterrupt = Cvar_Register( &d );
 	}
-#endif
-
-#ifdef DEFAULT_GAME
-	Cvar_Set( "fs_game", DEFAULT_GAME );
 #endif
 
 	// prepare enough of the subsystems to handle
@@ -3023,7 +3124,7 @@ void Com_Init( char *commandLine ) {
 	Log_RegisterFileSink();
 
 	// initialize BSP format registry (FEAT_BSP_ABSTRACTION)
-	BSP_Init();
+	Map_Init();
 	Cvar_Get( "com_mapAssetProfile", "modern", CVAR_ROM );
 	Cvar_Get( "com_mapBspVersion", "0", CVAR_ROM );
 
@@ -3039,7 +3140,7 @@ void Com_Init( char *commandLine ) {
 	// Console sink registered late: it requires the ring buffer / Con_Init,
 	// which depends on renderer init. TTY and file sinks are already live.
 	// Compiled out in dedicated builds.
-#ifndef DEDICATED
+#ifndef HEADLESS
 	Log_RegisterConsoleSink();
 #endif
 
@@ -3056,18 +3157,14 @@ void Com_Init( char *commandLine ) {
 	// override anything from the config files with command line args
 	Com_StartupVariable( NULL );
 
-	// get dedicated here for proper hunk megs initialization
-	{
-#ifdef DEDICATED
-		static const cvarDesc_t d = CVAR_INT( "dedicated", "1", CVAR_INIT,
-			"Enables dedicated server mode.\n 0: Listen server\n 1: Unlisted dedicated server \n 2: Listed dedicated server", 1, 2 );
-#else
-		static const cvarDesc_t d = CVAR_INT( "dedicated", "0", CVAR_LATCH,
-			"Enables dedicated server mode.\n 0: Listen server\n 1: Unlisted dedicated server \n 2: Listed dedicated server", 0, 2 );
-#endif
-		com_dedicated = Cvar_Register( &d );
-	}
-	com_dedicated->onChange = Com_DedicatedChanged;
+	// The 'dedicated' cvar was RETIRED: its tri-state conflated three orthogonal
+	// concerns now split apart. Server lifecycle is command-driven (map /
+	// stopserver) with sv_running as the live state signal; whether a no-GUI
+	// binary is built is the compile-time HEADLESS define; whether a running
+	// server announces to the master servers is sv_hostListed. There is no
+	// runtime listen<->dedicated switch. '+set dedicated N' hard-errors in
+	// Com_StartupVariable.
+
 	// allocate the stack based hunk allocator
 	Com_InitHunkMemory();
 
@@ -3078,7 +3175,7 @@ void Com_Init( char *commandLine ) {
 	//
 	// init commands and vars
 	//
-#ifndef DEDICATED
+#ifndef HEADLESS
 	{
 		static const cvarDesc_t d = CVAR_INT( "com_maxfps", "250", 0,
 			"Sets maximum frames per second.", 0, 1000 );
@@ -3163,7 +3260,7 @@ void Com_Init( char *commandLine ) {
 		com_cameraMode = Cvar_Register( &d );
 	}
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	{
 		static const cvarDesc_t d = CVAR_BOOL( "timedemo", "0", 0,
 			"When set to '1' times a demo and returns frames per second like a benchmark." );
@@ -3203,27 +3300,17 @@ void Com_Init( char *commandLine ) {
 
 	Cvar_Get( "com_errorMessage", "", CVAR_ROM | CVAR_NORESTART );
 
-#ifndef DEDICATED
-	{
-		static const cvarDesc_t d = CVAR_BOOL( "com_introplayed", "0", CVAR_ARCHIVE,
-			"Skips the introduction cinematic." );
-		com_introPlayed = Cvar_Register( &d );
+	// A headless (no-GUI) build boots straight into its server console; a
+	// client build starts windowed. This is fixed at boot — there is no
+	// runtime listen<->dedicated switch any more.
+#ifdef HEADLESS
+	if ( !com_viewlog->integer ) {
+		Cvar_Set( "viewlog", "1" );
 	}
-	{
-		static const cvarDesc_t d = CVAR_BOOL( "com_skipIdLogo", "0", CVAR_ARCHIVE,
-			"Skip playing Id Software logo cinematic at startup." );
-		com_skipIdLogo = Cvar_Register( &d );
-	}
+	gw_minimized = qtrue;
+#else
+	gw_minimized = qfalse;
 #endif
-
-	if ( com_dedicated->integer ) {
-		if ( !com_viewlog->integer ) {
-			Cvar_Set( "viewlog", "1" );
-		}
-		gw_minimized = qtrue;
-	} else {
-		gw_minimized = qfalse;
-	}
 
 #ifdef _DEBUG
 	Cmd_AddCommand( "error", Com_Error_f );
@@ -3232,13 +3319,14 @@ void Com_Init( char *commandLine ) {
 #endif
 
 	Cmd_AddCommand( "quit", Com_Quit_f );
+	Cmd_AddCommand( "sysinfo", Com_Sysinfo_f );	// per-component build-stamp table (client + headless)
 	Cmd_AddCommand( "changeVectors", MSG_ReportChangeVectors_f );
 	// writeconfig registered in Cvar_Init (wired/cvar/cvar.c)
 	Cmd_AddCommand( "game_restart", Com_GameRestart_f );
 
 	Help_Init();
 
-	s = va( "%s %s %s", WIRED_ENGINE_VERSION, PLATFORM_STRING, __DATE__ );
+	s = va( "%s %s %s", WIRED_ENGINE_TITLE, PLATFORM_STRING, __DATE__ );
 	com_version = Cvar_Get( "version", s, CVAR_PROTECTED | CVAR_ROM | CVAR_SERVERINFO );
 	Cvar_SetDescription( com_version, "Read-only CVAR to see the version of the game." );
 
@@ -3275,42 +3363,30 @@ void Com_Init( char *commandLine ) {
 
 	// Pick a random port value
 	Com_RandomBytes( (byte*)&qport, sizeof( qport ) );
-	/* Netchan_Init removed — Phase D: netchan replaced by QUIC transport */
+	/* Netchan_Init removed — netchan replaced by QUIC transport */
 
 	VM_Init();
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	// Load character archetypes before SV_Init so BotLua preload finds them at init time.
 	CL_Characters_Init();
 #endif
 
 	SV_Init();
 
-#ifndef DEDICATED
-	if ( !com_dedicated->integer ) {
-		CL_Init();
-		// Sys_ShowConsole( com_viewlog->integer, qfalse ); // moved down
-	}
+#ifndef HEADLESS
+	// A client build always brings up the client subsystem; the server runs
+	// in-process and is driven by the 'map' command.
+	CL_Init();
+	// Sys_ShowConsole( com_viewlog->integer, qfalse ); // moved down
 #endif
 
 	WiredScript_PostInit();
 
 	// add + commands from command line
-	if ( !Com_AddStartupCommands() ) {
-		// if the user didn't give any commands, run default action
-		if ( !com_dedicated->integer ) {
-#ifndef DEDICATED
-			if ( !com_skipIdLogo || !com_skipIdLogo->integer )
-				Cbuf_AddText( "cinematic idlogo.RoQ\n" );
-			if( !com_introPlayed->integer ) {
-				Cvar_Set( com_introPlayed->name, "1" );
-				Cvar_Set( "nextmap", "cinematic intro.RoQ" );
-			}
-#endif
-		}
-	}
+	Com_AddStartupCommands();
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	CL_StartHunkUsers();
 #endif
 
@@ -3322,11 +3398,6 @@ void Com_Init( char *commandLine ) {
 
 	if ( !com_errorEntered )
 		Sys_ShowConsole( com_viewlog->integer, qfalse );
-
-#ifndef DEDICATED
-	// make sure single player is off by default
-	Cvar_Set( "ui_singlePlayerActive", "0" );
-#endif
 
 	// 12-factor: WIRED_MAP and WIRED_EXEC env vars execute commands after full init.
 	// These run AFTER Com_AddStartupCommands, so command-line +map overrides WIRED_MAP.
@@ -3355,7 +3426,7 @@ void Com_Init( char *commandLine ) {
 
 
 // Com_WriteConfigToFile, Com_WriteConfigToFileForced, Com_WriteConfiguration,
-// Com_WriteConfig_f — moved to wired/cvar/cvar.c Phase 1 Group 3
+// Com_WriteConfig_f — moved to wired/cvar/cvar.c
 
 
 /*
@@ -3382,24 +3453,32 @@ static int Com_ModifyMsec( int msec ) {
 		msec = 1;
 	}
 
-	if ( com_dedicated->integer ) {
-		// dedicated servers don't want to clamp for a much longer
-		// period, because it would mess up all the client's views
-		// of time.
-		if (com_sv_running->integer && msec > 500)
-			Com_Log( SEV_INFO, LOG_CH(ch_system), "Hitch warning: %i msec frame time\n", msec );
+	// Clamp selection (restores origin/main's three-way intent after the
+	// 'dedicated' cvar retirement). The retired `com_dedicated->integer` test
+	// maps to the compile-time HEADLESS define (a no-GUI dedicated-server binary;
+	// see the dedicated-retirement note in Com_Init). The prior rewrite collapsed
+	// it to `com_sv_running->integer`, which made the second branch
+	// (`!com_sv_running->integer`) the logical complement of the first — leaving
+	// the local/listen-server 200ms branch dead and (wrongly) handing a pure
+	// client the 5000ms server clamp.
+#ifdef HEADLESS
+	// Dedicated server: don't clamp for a much longer period, because it would
+	// mess up all the clients' views of time.
+	if ( com_sv_running->integer && msec > 500 )
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "Hitch warning: %i msec frame time\n", msec );
 
-		clampTime = 5000;
-	} else if ( !com_sv_running->integer ) {
+	clampTime = 5000;
+#else
+	if ( !com_sv_running->integer ) {
 		// clients of remote servers do not want to clamp time, because
 		// it would skew their view of the server's time temporarily
 		clampTime = 5000;
 	} else {
-		// for local single player gaming
-		// we may want to clamp the time to prevent players from
-		// flying off edges when something hitches.
+		// listen server / local single player gaming: clamp the time to
+		// prevent players from flying off edges when something hitches.
 		clampTime = 200;
 	}
+#endif
 
 	if ( msec > clampTime ) {
 		msec = clampTime;
@@ -3447,32 +3526,10 @@ void Com_FrameInit( void )
 }
 
 static void Com_ViewlogChanged( cvar_t *self ) {
-	if ( !com_dedicated->integer ) {
+	// Only pop the client console when no server is live; a running server
+	// (headless or in-process) keeps its own console visible.
+	if ( !com_sv_running->integer ) {
 		Sys_ShowConsole( self->integer, qfalse );
-	}
-}
-
-static void Com_DedicatedChanged( cvar_t *self ) {
-	Cvar_Get( "dedicated", "0", 0 );
-	if ( !self->integer ) {
-		SV_Shutdown( "dedicated set to 0" );
-		SV_RemoveDedicatedCommands();
-#ifndef DEDICATED
-		CL_Init();
-#endif
-		Sys_ShowConsole( com_viewlog->integer, qfalse );
-#ifndef DEDICATED
-		gw_minimized = qfalse;
-		CL_StartHunkUsers();
-#endif
-	} else {
-#ifndef DEDICATED
-		CL_Shutdown( "", qfalse );
-		CL_ClearMemory();
-#endif
-		Sys_ShowConsole( 1, qtrue );
-		SV_AddDedicatedCommands();
-		gw_minimized = qtrue;
 	}
 }
 
@@ -3483,12 +3540,12 @@ Com_Frame
 */
 void Com_Frame( qboolean noDelay ) {
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	static int biasUsec = 0;
 #endif
 
 	if ( Q_setjmp( (void **)abortframe ) ) {
-#ifndef DEDICATED
+#ifndef HEADLESS
 		CL_AbortFrame();	// reset SCR_UpdateScreen guard on ERR_DROP recovery
 #endif
 		return;			// an ERR_DROP was thrown
@@ -3517,14 +3574,27 @@ void Com_Frame( qboolean noDelay ) {
 		timeBeforeFirstEvents = Sys_Milliseconds();
 	}
 
-	// we may want to spin here if things are going too fast
-	if ( com_dedicated->integer ) {
+	// Frame pacing. A dedicated/headless server (server running, no local
+	// client) paces to the server tick (sv_fps) since it has no render to
+	// drive — this saves CPU. A listen server (server + local client) instead
+	// falls through to the com_maxfps render pacing below, the same path a
+	// pure client uses: the render and client interpolation run at com_maxfps
+	// while SV_Frame self-throttles the game sim and snapshots to sv_fps
+	// internally (via sv.timeResidual). This keeps the world simulating at
+	// sv_fps but renders it smoothly at the display rate. (A HEADLESS build has
+	// no client, so com_cl_running does not exist there — it is always the
+	// dedicated case.)
+#ifndef HEADLESS
+	if ( com_sv_running->integer && !com_cl_running->integer ) {
+#else
+	if ( com_sv_running->integer ) {
+#endif
 		minUsec = SV_FrameMsec() * 1000;
-#ifndef DEDICATED
+#ifndef HEADLESS
 		biasUsec = 0;
 #endif
 	} else {
-#ifndef DEDICATED
+#ifndef HEADLESS
 		if ( noDelay ) {
 			minUsec = 0;
 			biasUsec = 0;
@@ -3581,7 +3651,7 @@ void Com_Frame( qboolean noDelay ) {
 
 		if ( com_busyWait->integer ) {
 			// Pure busy-wait: never sleep, just poll events and spin.
-#ifndef DEDICATED
+#ifndef HEADLESS
 			Com_EventLoop();
 #endif
 			// NET_Sleep with a tiny timeout lets us pull incoming packets
@@ -3589,7 +3659,7 @@ void Com_Frame( qboolean noDelay ) {
 			NET_Sleep( 0 );
 		} else {
 			sleepUsec = timeValUsec;
-#ifndef DEDICATED
+#ifndef HEADLESS
 			if ( !gw_minimized && timeValUsec > com_yieldCPU->integer * 1000 )
 				sleepUsec = com_yieldCPU->integer * 1000;
 			// Reserve the last 2 ms for a busy-wait to tighten the frame
@@ -3630,7 +3700,7 @@ void Com_Frame( qboolean noDelay ) {
 
 	SV_Frame( msec );
 
-#ifdef DEDICATED
+#ifdef HEADLESS
 	if ( com_speeds->integer ) {
 		timeAfter = Sys_Milliseconds ();
 		timeBeforeEvents = timeAfter;
@@ -3638,9 +3708,10 @@ void Com_Frame( qboolean noDelay ) {
 	}
 #else
 	//
-	// client system
+	// client system — a non-headless build always runs its client; the server
+	// (when one is running) is driven in-process by the 'map' command.
 	//
-	if ( !com_dedicated->integer ) {
+	{
 		//
 		// run event loop a second time to get server to client packets
 		// without a frame of latency
@@ -3663,7 +3734,36 @@ void Com_Frame( qboolean noDelay ) {
 			timeBeforeClient = Sys_Milliseconds();
 		}
 
-		CL_Frame( msec, realMsec );
+		// Per-app recovery for the focused app. Arm the
+		// focused app's per-frame setjmp here so a recoverable error (Com_Terminate
+		// TERM_CLIENT_DROP/LEAVE/KICK) inside its CL_Frame longjmps back to THIS
+		// point instead of the process-global abortframe — leaving co-resident apps
+		// alive at N>1. Armed EVERY frame (a stale jmp_buf = dead-stack longjmp).
+		// The teardown already ran in Com_Terminate (log.c) before the longjmp, so
+		// the recovery body is ONLY CL_AbortFrame() — exactly the global recovery at
+		// :3441-3445 — no repeat (double-free). At N=1 the cursor is clientApps[0]
+		// and this is behaviorally identical to the global path.
+		// Mark the per-app recovery point as armed only for the duration of this
+		// setjmp-protected section. A recoverable Com_Terminate (TERM_CLIENT_DROP/
+		// LEAVE/KICK) raised OUTSIDE this window — e.g. the startup cbuf '+map <bad>'
+		// / '+demo <corrupt>' executed above (Cbuf_Execute) before this setjmp, or
+		// inside Com_EventLoop / init — must NOT longjmp through the zero-initialized
+		// per-app jmp_buf; it falls back to the process-global abortframe (armed at
+		// the top of every Com_Frame and during init). Clear the flag after the
+		// section so a later out-of-window drop is routed safely.
+		CL_SetFrameAbortArmed( qtrue );
+		if ( Q_setjmp( (void **)CL_FrameAppAbort() ) ) {
+			CL_AbortFrame();
+		} else {
+			// Advance one phase of the async CL_DownloadsComplete state
+			// machine.  Runs before CL_Frame so the loading screen drawn
+			// during this frame reflects the state set by this phase
+			// (e.g. cls.cgameStarted after P3).
+			CL_DownloadsComplete_Tick();
+
+			CL_Frame( msec, realMsec );
+		}
+		CL_SetFrameAbortArmed( qfalse );
 
 		if ( com_speeds->integer ) {
 			timeAfter = Sys_Milliseconds();
@@ -3739,11 +3839,11 @@ void Com_Shutdown( void ) {
 	WiredCore_Shutdown();
 
 	Maps_ShutdownArena();
-	BSP_Shutdown();
+	Map_Shutdown();
 
 	// Drain and close built-in sinks cleanly before filesystem shuts down.
 	Log_UnregisterFileSink();
-#ifndef DEDICATED
+#ifndef HEADLESS
 	Log_UnregisterConsoleSink();
 #endif
 	Log_UnregisterTtySink();
@@ -3824,7 +3924,10 @@ static void FindMatches( const char *s ) {
 	}
 
 	matchCount++;
-	if ( matchCount == 1 ) {
+	/* Seed shortestMatch on the first whole-name match.  matchCount cannot
+	   be the trigger: Lua member-name matches bump it too, yet must never
+	   feed shortestMatch. */
+	if ( shortestMatch[0] == '\0' ) {
 		Q_strncpyz( shortestMatch, s, sizeof( shortestMatch ) );
 		return;
 	}
@@ -3846,6 +3949,46 @@ static void FindMatches( const char *s ) {
 
 /*
 ===============
+FindLuaMatches
+
+Match collection for Lua sandbox entries.  A flattened "<table>.<member>"
+entry matches the typed text either by its whole synthesized name (handled
+exactly like a Q3 match) or by its bare member name.  A member-name match
+is counted and cycle-collected but deliberately does NOT feed shortestMatch,
+so surfacing "attract.clear" from "clear" never auto-extends the line.
+===============
+*/
+static void FindLuaMatches( const char *s ) {
+	const char *member;
+	int         clen;
+
+	/* whole-name prefix: identical handling to a Q3 command/cvar match */
+	if ( !Q_stricmpn( s, completionString, strlen( completionString ) ) ) {
+		FindMatches( s );
+		return;
+	}
+
+	/* member-name prefix: completionString prefixes the part after the
+	   last '.' (e.g. typing "clear" surfaces "attract.clear") */
+	member = strrchr( s, '.' );
+	if ( member == NULL ) {
+		return;
+	}
+	clen = (int)strlen( completionString );
+	if ( Q_stricmpn( member + 1, completionString, clen ) ) {
+		return;
+	}
+
+	if ( cycleCollecting && cycleMatchCount < MAX_CYCLE_MATCHES ) {
+		Q_strncpyz( cycleMatches[cycleMatchCount], s, sizeof( cycleMatches[0] ) );
+		cycleMatchCount++;
+	}
+	matchCount++;
+}
+
+
+/*
+===============
 PrintMatches
 ===============
 */
@@ -3858,15 +4001,58 @@ static void PrintMatches( const char *s ) {
 
 /*
 ===============
-PrintCvarMatches
+PrintLuaMatches
+
+Prints Lua sandbox matches -- top-level globals and flattened
+"<table>.<member>" entries -- bare, since they run from the console
+without a prefix.  Uses the same whole-name-or-member-name test as
+FindLuaMatches so the printed list mirrors the collected set.
 ===============
 */
-static void PrintCvarMatches( const char *s ) {
+static void PrintLuaMatches( const char *s ) {
+	const char *member;
+	int         clen = (int)strlen( completionString );
+
+	if ( !Q_stricmpn( s, completionString, clen ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "    %s\n", s );
+		return;
+	}
+	member = strrchr( s, '.' );
+	if ( member != NULL && !Q_stricmpn( member + 1, completionString, clen ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "    %s\n", s );
+	}
+}
+
+
+/*
+===============
+PrintMatchesEscaped
+
+Like PrintMatches, but prints the '\' command escape ahead of the name.
+Used for the Q3 command/cvar half of console completion: a leading '\'
+is what runs them from the Lua-first console.  Filters on completionString
+rather than shortestMatch -- a Lua member-name match can leave shortestMatch
+empty, which would otherwise pass every command through this filter.
+===============
+*/
+static void PrintMatchesEscaped( const char *s ) {
+	if ( !Q_stricmpn( s, completionString, strlen( completionString ) ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "    \\%s\n", s );
+	}
+}
+
+
+/*
+===============
+PrintCvarMatchesEscaped
+===============
+*/
+static void PrintCvarMatchesEscaped( const char *s ) {
 	char value[ TRUNCATE_LENGTH ];
 
-	if ( !Q_stricmpn( s, shortestMatch, strlen( shortestMatch ) ) ) {
+	if ( !Q_stricmpn( s, completionString, strlen( completionString ) ) ) {
 		Com_TruncateLongString( value, Cvar_VariableString( s ) );
-		Com_Log( SEV_INFO, LOG_CH(ch_system), "    %s = \"%s\"\n", s, value );
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "    \\%s = \"%s\"\n", s, value );
 	}
 }
 
@@ -3931,6 +4117,14 @@ static qboolean Field_Complete( void )
 		completionField->acLength = (int)strlen( cycleMatches[0] );
 		completionField->acMatchIndex = 0;
 		return qtrue;
+	}
+
+	/* When shortestMatch is still empty here, every match arrived via Lua
+	   member-name matching (e.g. "clear" surfacing "attract.clear").  Such
+	   matches must not rewrite the typed line -- list them only. */
+	if ( shortestMatch[0] == '\0' ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_system), "]%s\n", completionField->buffer );
+		return qfalse;
 	}
 
 	Q_strncpyz( &completionField->buffer[ completionOffset ], shortestMatch,
@@ -4134,6 +4328,27 @@ void Field_CompleteFilename( const char *dir, const char *ext, qboolean stripExt
 
 /*
 ===============
+Field_CompleteLuaGlobals
+
+Feeds the WiredScript sandbox globals and their flattened table members
+through a completion match sink so they join the console completion list.
+Only used for bare (non-'\') input: a leading '\' escapes to Q3
+command/cvar completion.
+===============
+*/
+static void Field_LuaGlobalSink( const char *name, int type, void *ctx ) {
+	void ( **emit )( const char * ) = ctx;
+	(void)type;
+	( *emit )( name );
+}
+
+static void Field_CompleteLuaGlobals( void ( *emit )( const char *s ) ) {
+	WiredScript_EnumerateGlobalsAndMembers( Field_LuaGlobalSink, &emit );
+}
+
+
+/*
+===============
 Field_CompleteCommand
 ===============
 */
@@ -4156,34 +4371,14 @@ void Field_CompleteCommand( const char *cmd, qboolean doCommands, qboolean doCva
 	else
 		completionString = Cmd_Argv( completionArgument - 1 );
 
-#ifndef DEDICATED
-	// Unconditionally add a '\' to the start of the buffer
-	if ( completionField->buffer[ 0 ] && completionField->buffer[ 0 ] != '\\' )
-	{
-		if( completionField->buffer[ 0 ] != '/' )
-		{
-			// Buffer is full, refuse to complete
-			if ( strlen( completionField->buffer ) + 1 >= sizeof( completionField->buffer ) )
-				return;
-
-			memmove( &completionField->buffer[ 1 ],
-				&completionField->buffer[ 0 ],
-				strlen( completionField->buffer ) + 1 );
-			completionField->cursor++;
-		}
-
-		completionField->buffer[ 0 ] = '\\';
-	}
-#endif
-
 	if ( completionArgument > 1 )
 	{
 		const char *baseCmd = Cmd_Argv( 0 );
 		const char *p;
 
-#ifndef DEDICATED
-			// This should always be true
-			if ( baseCmd[ 0 ] == '\\' || baseCmd[ 0 ] == '/' )
+#ifndef HEADLESS
+			// strip the opt-in '\' command escape if present
+			if ( baseCmd[ 0 ] == '\\' )
 				baseCmd++;
 #endif
 
@@ -4196,7 +4391,7 @@ void Field_CompleteCommand( const char *cmd, qboolean doCommands, qboolean doCva
 			qboolean argumentCompleted = Cmd_CompleteArgument( baseCmd, cmd, completionArgument );
 			if ( ( matchCount == 1 || argumentCompleted ) && doCvars )
 			{
-				if ( cmd[0] == '/' || cmd[0] == '\\' )
+				if ( cmd[0] == '\\' )
 					cmd++;
 				Cmd_TokenizeString( cmd );
 				Field_CompleteCvarValue( Cvar_VariableString( Cmd_Argv( 0 ) ), Cmd_Argv( 1 ) );
@@ -4205,7 +4400,12 @@ void Field_CompleteCommand( const char *cmd, qboolean doCommands, qboolean doCva
 	}
 	else
 	{
-		if ( completionString[0] == '\\' || completionString[0] == '/' )
+		// A leading '\' is the Q3-escape: complete commands and cvars only.
+		// Bare input is Lua-first, so the sandbox globals are completed too
+		// and listed ahead of the '\'-prefixed command/cvar matches.
+		qboolean luaPass = ( doCommands && completionString[0] != '\\' );
+
+		if ( completionString[0] == '\\' )
 			completionString++;
 
 		matchCount = 0;
@@ -4215,6 +4415,9 @@ void Field_CompleteCommand( const char *cmd, qboolean doCommands, qboolean doCva
 			return;
 		}
 
+		if ( luaPass )
+			Field_CompleteLuaGlobals( FindLuaMatches );
+
 		if ( doCommands )
 			Cmd_CommandCompletion( FindMatches );
 
@@ -4223,12 +4426,16 @@ void Field_CompleteCommand( const char *cmd, qboolean doCommands, qboolean doCva
 
 		if ( !Field_Complete() )
 		{
-			// run through again, printing matches
+			// run through again, printing matches: Lua entries bare (they
+			// run unprefixed), commands and cvars with the '\' escape.
+			if ( luaPass )
+				Field_CompleteLuaGlobals( PrintLuaMatches );
+
 			if ( doCommands )
-				Cmd_CommandCompletion( PrintMatches );
+				Cmd_CommandCompletion( PrintMatchesEscaped );
 
 			if ( doCvars )
-				Cvar_CommandCompletion( PrintCvarMatches );
+				Cvar_CommandCompletion( PrintCvarMatchesEscaped );
 		}
 	}
 }

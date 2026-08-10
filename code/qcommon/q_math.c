@@ -456,6 +456,10 @@ void ProjectPointOnPlane( vec3_t dst, const vec3_t p, const vec3_t normal )
 	float inv_denom = DotProduct( normal, normal );
 
 	assert( fabsf(inv_denom) != 0.0f ); // zero vectors get here
+	if ( inv_denom == 0.0f ) {  // degenerate (zero-length) normal — no plane to project onto
+		VectorCopy( p, dst );   // safe identity: leave the point unchanged
+		return;
+	}
 	inv_denom = 1.0f / inv_denom;
 
 	float d = DotProduct( normal, p ) * inv_denom;

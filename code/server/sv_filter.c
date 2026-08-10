@@ -4,7 +4,6 @@
 
 #include <string.h>
 #include "server.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 #define MAX_FILTER_MESSAGE 1000
@@ -841,7 +840,11 @@ void SV_LoadFilters( const char *filename )
 
 const char *SV_RunFilters( const char *userinfo, const netadr_t *addr )
 {
-	if ( addr->type <= NA_LOOPBACK ) // cannot kick host player/bot
+	// Address-based IP-ban filter: a loopback/bot address has no bannable IP, so
+	// skip regardless of slot. Host-vs-2nd-app kickability is a SLOT decision
+	// enforced at the kick sites (SV_IsHostClient); this fn sees only an address,
+	// no client_t/clientNum, so it stays address-based. (In-process-queue L4.)
+	if ( addr->type <= NA_LOOPBACK )
 		return "";
 
 	InfoTokens tokens;

@@ -34,8 +34,8 @@ void trap_Error(const char *fmt)
 	exit(1);
 }
 
-void trap_Log( log_severity_t severity, const char *text ) {
-	syscall( CG_LOG, (int)severity, text );
+void trap_Log( log_severity_t severity, const char *channel, const char *text ) {
+	syscall( CG_LOG, (int)severity, channel, text );
 }
 
 void trap_Terminate( terminationReason_t reason, const char *text ) {
@@ -46,6 +46,19 @@ void trap_Terminate( terminationReason_t reason, const char *text ) {
 int		trap_Milliseconds( void ) {
 	return syscall( CG_MILLISECONDS );
 }
+
+#if defined(WASM_MODULE)
+// Typed/versioned VM-IPC ABI handshake (docs/vm-typed-ipc-design.md, decision 2 = B).
+// The engine answers a RESERVED high syscall id — outside the CG_* enum so it shifts
+// no existing id — with its cgame ABI version. The module queries it at init and
+// exact-matches CGAME_IMPORT_API_VERSION (it was built against). Value mirrors the
+// engine's VM_SYSCALL_ABI_QUERY (vm_typed_syscall.h); the module can't include that
+// engine header, so the literal is duplicated with a comment, like the syscall ids.
+#define WIRED_VM_SYSCALL_ABI_QUERY  0x7FFF0000
+int trap_VM_ABI_Query( void ) {
+	return syscall( WIRED_VM_SYSCALL_ABI_QUERY );
+}
+#endif
 
 void	trap_Cvar_Register( vmCvar_t *vmCvar, const char *varName, const char *defaultValue, int flags ) {
 	syscall( CG_CVAR_REGISTER, vmCvar, varName, defaultValue, flags );
@@ -61,6 +74,10 @@ void	trap_Cvar_Set( const char *var_name, const char *value ) {
 
 void trap_Cvar_VariableStringBuffer( const char *var_name, char *buffer, int bufsize ) {
 	syscall( CG_CVAR_VARIABLESTRINGBUFFER, var_name, buffer, bufsize );
+}
+
+void trap_L10n_Get( const char *key, char *buffer, int bufsize ) {
+	syscall( CG_L10N_GET, key, buffer, bufsize );
 }
 
 int		trap_Argc( void ) {
@@ -213,7 +230,7 @@ sfxHandle_t	trap_S_RegisterSound( const char *sample, qboolean compressed ) {
 }
 
 int trap_S_SoundDuration( sfxHandle_t handle ) {
-	// Phase 6.2: returns sound length in milliseconds (0 if invalid).
+	// returns sound length in milliseconds (0 if invalid).
 	return syscall( CG_S_SOUNDDURATION, handle );
 }
 
@@ -286,6 +303,10 @@ void	trap_R_AddBeamToScene( const beamDesc_t *desc ) {
 	syscall( CG_R_ADDBEAMTOSCENE, desc );
 }
 
+void	trap_R_AddRailRibbonToScene( const railRibbonDesc_t *desc ) {
+	syscall( CG_R_ADDRAILRIBBONTOSCENE, desc );
+}
+
 void	trap_R_AddSpriteToScene( const spriteDesc_t *desc ) {
 	syscall( CG_R_ADDSPRITETOSCENE, desc );
 }
@@ -298,9 +319,29 @@ void	trap_R_AddDecalToScene( const decalDesc_t *desc ) {
 	syscall( CG_R_ADDDECALTOSCENE, desc );
 }
 
+void	trap_R_AddLensSourceToScene( const lensSourceDesc_t *desc ) {
+	syscall( CG_R_ADDLENSSOURCETOSCENE, desc );
+}
+
+qboolean trap_R_GetLensVisibility( int id, float *outVis ) {
+	return syscall( CG_R_GETLENSVISIBILITY, id, outVis );
+}
+
+void	trap_R_AddHaloToScene( const haloDesc_t *desc ) {
+	syscall( CG_R_ADDHALOTOSCENE, desc );
+}
+
 void	trap_R_RegisterParticleClass( particleClassHandle_t handle,
 									  const particleClass_t *cls ) {
 	syscall( CG_R_REGISTERPARTICLECLASS, handle, cls );
+}
+
+void	trap_R_SetAtmosphere( const atmosphericDesc_t *desc ) {
+	syscall( CG_R_SETATMOSPHERE, desc );
+}
+
+void	trap_R_SetAtmosphereHeightgrid( const float *grid, int count ) {
+	syscall( CG_R_SETATMOSPHEREHEIGHTGRID, grid, count );
 }
 
 void	trap_R_RenderScene( const refdef_t *fd ) {
@@ -337,6 +378,10 @@ void		trap_GetGlconfig( glconfig_t *glconfig ) {
 	syscall( CG_GETGLCONFIG, glconfig );
 }
 
+int		trap_GetGlconfigGeneration( void ) {
+	return syscall( CG_GET_GLCONFIG_GENERATION );
+}
+
 void		trap_GetGameState( gameState_t *gamestate ) {
 	syscall( CG_GETGAMESTATE, gamestate );
 }
@@ -361,8 +406,8 @@ qboolean	trap_GetUserCmd( int cmdNumber, usercmd_t *ucmd ) {
 	return syscall( CG_GETUSERCMD, cmdNumber, ucmd );
 }
 
-void		trap_SetUserCmdValue( int stateValue, float sensitivityScale ) {
-	syscall( CG_SETUSERCMDVALUE, stateValue, PASSFLOAT(sensitivityScale) );
+void		trap_SetUserCmdValue( int stateValue, float sensitivityScale, int freezeMove ) {
+	syscall( CG_SETUSERCMDVALUE, stateValue, PASSFLOAT(sensitivityScale), freezeMove );
 }
 
 void		testPrintInt( char *string, int i ) {
@@ -448,6 +493,14 @@ qboolean trap_getCameraInfo( int time, vec3_t *origin, vec3_t *angles) {
 }
 */
 
+/* Must match the engine-side assert in cl_cgame.c: the POD ship is a raw
+   wasm32<->x64 memcpy, safe only while the layout is identical on both sides. */
+_Static_assert( sizeof( wiredScene_t ) == 21936, "wiredScene_t POD size changed — re-verify wasm32<->x64 layout parity" );
+
+qboolean trap_WiredSceneLoad( const char *name, wiredScene_t *out ) {
+	return syscall( CG_WIRED_SCENE_LOAD, name, out );
+}
+
 qboolean trap_GetEntityToken( char *buffer, int bufferSize ) {
 	return syscall( CG_GET_ENTITY_TOKEN, buffer, bufferSize );
 }
@@ -461,6 +514,10 @@ int trap_R_GetIQMAnimations( qhandle_t model, iqmAnimInfo_t *anims, int maxAnims
 	return syscall( CG_R_GETIQMANIMS, model, anims, maxAnims );
 }
 #endif // FEAT_IQM
+
+int trap_R_GetMDLAnimations( qhandle_t model, mdlAnimRange_t *anims, int maxAnims ) {
+	return syscall( CG_R_GETMDLANIMS, model, anims, maxAnims );
+}
 
 #if FEAT_WIRED_UI
 void trap_WiredUI_PushHudState( wiredHudState_t *state ) {
@@ -487,6 +544,9 @@ float trap_R_MeasureTextNorm( const char *text, int fontId, float nSize ) {
 void trap_WiredStore_PushBatch( const wuiStagedEntry_t *entries, int count ) {
 	syscall( CG_WUI_STORE_PUSH_BATCH, entries, count );
 }
+void trap_WiredStore_PushMarkerList( const char *listKey, const wuiMarker_t *markers, int count ) {
+	syscall( CG_WUI_STORE_PUSH_MARKERLIST, listKey, markers, count );
+}
 void trap_WiredStore_Delete( const char *key ) {
 	syscall( CG_WUI_STORE_DELETE, key );
 }
@@ -501,4 +561,26 @@ void trap_R_SetLightstylePattern( int style, const char *pattern ) {
 
 qboolean trap_GetValue( char *value, int valueSize, const char *key ) {
 	return syscall( CG_TRAP_GETVALUE, value, valueSize, key );
+}
+
+/* WiredUI viewport-provider registry traps. The provider's fields are passed
+ * as scalar args, not as a struct pointer: cgame providers are always
+ * VM-routed (render/userdata are NULL and meaningless across the VM boundary),
+ * and the struct embeds a fn-ptr + void* whose width differs between a wasm32
+ * cgame and the x64 engine — passing the struct by pointer would make the
+ * engine read every field at the wrong offset. Sending plain ints is identical
+ * for wasm and native. */
+void trap_RegisterViewportProvider( const char *id, int lifetime, int input_mode, int is_vm_routed, int vm_key ) {
+	syscall( CG_REGISTER_VIEWPORT_PROVIDER, id, lifetime, input_mode, is_vm_routed, vm_key );
+}
+
+void trap_UnregisterViewportProvider( const char *id ) {
+	syscall( CG_UNREGISTER_VIEWPORT_PROVIDER, id );
+}
+
+/* pull the per-frame scene context (serverTime / stereo /
+ * demoPlayback) for the world-viewport provider callback. Engine fills *out
+ * via the slot-224 write-back. Shared struct: ui_viewport_types.h. */
+void trap_GetSceneFrameContext( wuiSceneFrameCtx_t *out ) {
+	syscall( CG_GET_SCENE_FRAME_CONTEXT, out );
 }

@@ -4,7 +4,6 @@
 // world.c -- world query functions
 
 #include "server.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 /*
@@ -440,7 +439,7 @@ void SV_ClipToEntity( trace_t *trace, const vec3_t start, const vec3_t mins, con
 	clipHandle_t clipHandle = SV_ClipHandleForEntity (touch);
 
 	float *origin = touch->r.currentOrigin;
-	float *angles = touch->r.currentAngles;
+	const float *angles = touch->r.currentAngles;
 
 	if ( !touch->r.bmodel ) {
 		angles = vec3_origin;	// boxes don't rotate
@@ -505,7 +504,7 @@ static void SV_ClipMoveToEntities( moveclip_t *clip ) {
 		clipHandle_t clipHandle = SV_ClipHandleForEntity (touch);
 
 		float *origin = touch->r.currentOrigin;
-		float *angles = touch->r.currentAngles;
+		const float *angles = touch->r.currentAngles;
 
 		if ( !touch->r.bmodel ) {
 			angles = vec3_origin;	// boxes don't rotate

@@ -1,0 +1,20 @@
+// qw_hud_subtitle — scene-caption subtitle surface.
+//
+// A localized cinematic subtitle (the caption's l10n text). Uses the "subtitle"
+// HUD element (cl_wired_hud_elem_subtitle.c), which reuses the unified HUD
+// element emit path (like msgqueue). The compositor EXEMPTS "hud:subtitle" from
+// the HUD-suppress gate, so a cutscene hides the HUD but this subtitle stays on
+// screen. The draw routine anchors itself to the viewport bottom-center and gates
+// on the active-caption state + fade, so the rect here is only a walk anchor.
+//
+// `position absolute` (zero-rect floating leaf) matches the crosshair pattern so
+// the emit renders correctly rather than being pruned as a zero-size flex child.
+itemDef {
+	name "hud_active_subtitle"
+	hudElement "subtitle"
+	position absolute
+	anchor BOTTOM_CENTER
+	rect 0.5 0.88 0 0
+	decoration
+	visible 1
+}

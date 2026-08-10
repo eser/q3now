@@ -9,10 +9,10 @@ Adds:
   * Enhanced fog system — fogType_t + real push-constant upload via
     vk_update_fog_push. The main pipeline layout reserves a fragment-stage
     push constant range (offset 64, size 32) for this purpose.
-  * Corona scene entries, rendered through the existing flare pipeline.
+  * Halo scene entries, rendered through the existing flare pipeline.
   * DrawRotatedPic / SetClipRegion 2D-rendering entry points.
 
-All functionality is gated on FEAT_FOG_SYSTEM / FEAT_CORONA.
+All functionality is gated on FEAT_FOG_SYSTEM / FEAT_HALO.
 */
 
 #include "tr_local.h"
@@ -216,36 +216,36 @@ void RB_Fog( int fogNum ) {
 
 
 /* ===========================================================================
- * CORONAS
+ * HALOS
  * ===========================================================================
  */
 
-#if FEAT_CORONA
+#if FEAT_HALO
 
-static int r_numcoronas;
-static int r_firstSceneCorona;
+static int r_numhalos;
+static int r_firstSceneHalo;
 
 
-void R_ClearCoronas( void ) {
-	r_numcoronas = 0;
-	r_firstSceneCorona = 0;
+void R_ClearHalos( void ) {
+	r_numhalos = 0;
+	r_firstSceneHalo = 0;
 }
 
 
-void RE_AddCoronaToScene( const vec3_t org, float r, float g, float b,
+void RE_AddHaloToScene( const vec3_t org, float r, float g, float b,
 	float scale, int id, qboolean visible )
 {
-	corona_t *cor;
+	halo_t *cor;
 
 	if ( !tr.registered ) {
 		return;
 	}
 
-	if ( r_numcoronas >= MAX_CORONAS ) {
+	if ( r_numhalos >= MAX_HALOS ) {
 		return;
 	}
 
-	cor = &backEndData->coronas[ r_numcoronas + r_firstSceneCorona ];
+	cor = &backEndData->halos[ r_numhalos + r_firstSceneHalo ];
 	VectorCopy( org, cor->origin );
 	cor->color[0] = r;
 	cor->color[1] = g;
@@ -254,22 +254,24 @@ void RE_AddCoronaToScene( const vec3_t org, float r, float g, float b,
 	cor->id = id;
 	cor->visible = visible;
 	cor->shader = NULL;
-	r_numcoronas++;
+	r_numhalos++;
 }
 
 
-void RB_AddCoronaFlares( void ) {
-	corona_t *cor;
+void RB_AddHaloFlares( void ) {
+	halo_t *cor;
 
-	if ( !r_flares || !r_flares->integer ) {
+	// halos are their own primitive; either the surface-flare master (r_flares)
+	// or the dedicated halo toggle (r_halos) is enough to draw them.
+	if ( ( !r_flares || !r_flares->integer ) && ( !r_halos || !r_halos->integer ) ) {
 		return;
 	}
 	if ( !backEndData ) {
 		return;
 	}
 
-	cor = backEndData->coronas + r_firstSceneCorona;
-	for ( int i = 0; i < r_numcoronas; i++, cor++ ) {
+	cor = backEndData->halos + r_firstSceneHalo;
+	for ( int i = 0; i < r_numhalos; i++, cor++ ) {
 		vec3_t scaledColor;
 
 		if ( !cor->visible ) {
@@ -282,7 +284,8 @@ void RB_AddCoronaFlares( void ) {
 		if ( tr.world && tr.world->numfogs > 1 ) {
 			for ( int j = 1; j < tr.world->numfogs; j++ ) {
 				const fog_t *fv = &tr.world->fogs[j];
-				for ( int k = 0; k < 3; k++ ) {
+				int k;
+				for ( k = 0; k < 3; k++ ) {
 					if ( cor->origin[k] < fv->bounds[0][k] ||
 					     cor->origin[k] > fv->bounds[1][k] ) {
 						break;
@@ -300,7 +303,7 @@ void RB_AddCoronaFlares( void ) {
 	}
 }
 
-#endif // FEAT_CORONA
+#endif // FEAT_HALO
 
 
 /* ===========================================================================

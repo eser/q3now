@@ -6,7 +6,7 @@
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
 #include "../qcommon/net_transport.h"
-#include "../qcommon/maps/bsp.h"
+#include "../qcommon/maps/map_format_registry.h"
 #include "../renderercommon/tr_public.h"
 #include "../qcommon/vm_local.h"
 #include "../cgame/cg_public.h"
@@ -89,13 +89,14 @@ typedef struct {
 
 	int			parseEntitiesNum;	// index (not anded off) into cl_parse_entities[]
 
-	int			mouseDx[2], mouseDy[2];	// added to by mouse events
+	float		mouseDx[2], mouseDy[2];	// added to by mouse events (float: sub-pixel mouse delta, not truncated)
 	int			mouseIndex;
 	int			joystickAxis[MAX_JOYSTICK_AXIS];	// set by joystick events
 
 	// cgame communicates a few values to the client system
 	int			cgameUserCmdValue;	// current weapon to add to usercmd_t
 	float		cgameSensitivity;
+	int			cgameFreezeMove;	// cinematic scene: 1 = null-move this cmd (client-only, no server change)
 
 	// cmds[cmdNumber] is the predicted command, [cmdNumber-1] is the last
 	// properly generated command
@@ -124,7 +125,10 @@ typedef struct {
 	byte			baselineUsed[MAX_GENTITIES];
 } clientActive_t;
 
-extern	clientActive_t		cl;
+// 'cl' is no longer a bare global — it lives in the per-app container
+// clientApp_t (see below). A macro alias preserves every existing `cl.field`
+// access site; in single-app it resolves to clientApps[0].cl (the pinned
+// instance), byte-identical to the former file-scope global.
 
 #define EM_GAMESTATE 1
 #define EM_SNAPSHOT  2
@@ -241,7 +245,8 @@ typedef struct {
 
 } clientConnection_t;
 
-extern	clientConnection_t clc;
+// 'clc' is no longer a bare global — see clientApp_t below. Macro alias
+// preserves every `clc.field` site; single-app resolves to clientApps[0].clc.
 
 /*
 ==================================================================
@@ -277,11 +282,39 @@ typedef struct {
 	int			g_needpass;
 } serverInfo_t;
 
-typedef struct {
-	connstate_t	state;				// connection status
-	qboolean	gameSwitch;
+/* ---- Async CL_DownloadsComplete state machine ----------------
+ *
+ * Mirrors the SV_SpawnServer_Tick pattern (sv_init.c).  CL_DownloadsComplete
+ * used to run CL_FlushMemory + CL_InitCGame back-to-back in one call,
+ * blocking the engine for ~2 s while the cgame VM initialised and registered
+ * every asset.  The chunked version drives one phase per Com_Frame tick so
+ * the console/loading screen stays responsive between phases.  The
+ * cgame-VM-internal CG_INIT asset loop is still synchronous
+ * within that single phase — the VM cooperative-yield contract is the
+ * architectural follow-up. */
+typedef enum {
+	DLC_IDLE = 0,            /* not in flight                              */
+	DLC_P1_EVENTLOOP,        /* Com_EventLoop + abort-if-state-changed     */
+	DLC_P2_FLUSH_MEMORY,     /* CL_FlushMemory                             */
+	DLC_P3_INIT_CGAME,       /* CL_InitCGame (single bounded hitch — VM)   */
+	DLC_P4_FINALIZE          /* callvote, pure checksums, ready, packet    */
+} cl_dlcomplete_phase_t;
 
-	char		servername[MAX_OSPATH];		// name of server from original connect (used by reconnect)
+typedef struct {
+	cl_dlcomplete_phase_t phase;
+} cl_dlcomplete_state_t;
+
+typedef struct {
+	// ---- clientStatic_t process-wide tier --------------------------------
+	// (server-client-decoupling): the per-connection "tail" that used
+	// to live here (state, gameSwitch, servername, cgameStarted, startCgame,
+	// cgameBsp, captureWidth/Height, dlcomplete) has moved into clientApp_t
+	// (per-app-instance container). Everything that REMAINS here is a true
+	// process-wide singleton — one GPU/audio device, one global frame clock,
+	// the master-server browser caches, and the glconfig-derived display
+	// geometry (con_factor is computed from glconfig in CL_SetScaling, NOT
+	// per connection). These stay global across N apps and are never
+	// DI-threaded.
 
 	// when the server clears the hunk, all of these must be restarted
 	qboolean	rendererStarted;
@@ -289,7 +322,6 @@ typedef struct {
 	qboolean	soundStarted;
 	qboolean	soundRegistered;
 	qboolean	uiStarted;
-	qboolean	cgameStarted;
 
 	int			framecount;
 	int			frametime;			// msec since last frame
@@ -312,29 +344,20 @@ typedef struct {
 	int pingUpdateSource;		// source currently pinging or updating
 
 	// update server info
-	netadr_t	updateServer;
-	char		updateChallenge[MAX_TOKEN_CHARS];
 	char		updateInfoString[MAX_INFO_STRING];
 
 	// rendering info
 	glconfig_t	glconfig;
+	int			glconfigGeneration;	// bumped on every re.BeginRegistration; cgame polls it to detect resolution changes
 	qhandle_t	whiteShader;
 	qhandle_t	consoleShader;
 
 	int			lastVidRestart;
 	int			soundMuted;
 
-	qboolean	startCgame;
-	bspFile_t	*cgameBsp;
-
-	int			captureWidth;
-	int			captureHeight;
-
+	// glconfig-derived display geometry — recomputed in CL_SetScaling on cvar
+	// change (con_factor). NOT per-connection; stays process-wide.
 	float		con_factor;
-
-	float		scale;
-	float		biasX;
-	float		biasY;
 
 } clientStatic_t;
 
@@ -344,6 +367,107 @@ extern int smallchar_width;
 extern int smallchar_height;
 
 extern	clientStatic_t		cls;
+
+/*
+==================================================================
+
+clientApp_t — per-app-instance client-state container (server-client-
+decoupling).
+
+Holds everything that is logically scoped to ONE client app-instance
+(a connection + its cgame): the active gameplay state (cl), the
+connection/protocol state (clc), and the "tail" of per-connection
+fields that historically lived in the process-wide clientStatic_t
+(state, gameSwitch, servername, the cgame boot flags/BSP, video-capture
+dimensions, and the async-download state machine).
+
+Today the runtime instantiates exactly ONE app, pinned at clientApps[0];
+the array capacity mirrors the VM tier's vmTable_cgame[MAX_LOCAL_CGAME_VMS]
+so the per-app spawn path fills higher slots without reshaping
+the container. Every legacy `cl.x` / `clc.y` access resolves — via the
+macro aliases below — to clientApps[0], byte-identical to the former
+file-scope globals. Per-connection tail fields (`cls.state` etc.) are
+rewritten to the explicit container form (app->state / the active-app
+accessor) since their bare names collide with locals across the tree.
+
+The `cgvm` field is the authoritative per-app cgame VM handle (the former
+bare `cgvm` global was deglobalized into it). Reads split by call context:
+INSIDE a cgame syscall the active VM comes from VM_ActiveNativeVM() (the token
+VM_Call sets around the vmMain call on BOTH the native and WASM backends, valid
+only while a vmMain is on the C stack); call-initiating / lifecycle reads use
+this field via clientActiveApp.
+
+==================================================================
+*/
+typedef struct clientApp_s {
+	clientActive_t		cl;		// per-connection gameplay/frame state
+	clientConnection_t	clc;	// per-connection protocol/connection state
+
+	// per-connection "tail" relocated out of clientStatic_t
+	connstate_t	state;			// connection status
+	qboolean	gameSwitch;
+	char		servername[MAX_OSPATH];	// server from original connect (reconnect)
+	qboolean	cgameStarted;
+	qboolean	startCgame;
+	mapFile_t	*cgameBsp;
+	int			captureWidth;
+	int			captureHeight;
+	cl_dlcomplete_state_t dlcomplete;	// async CL_DownloadsComplete machine
+
+	vm_t		*cgvm;			// per-app cgame VM handle (the deglobalized cgvm)
+
+	// per-connection CL_Frame-op state relocated out of cl_main.c file-statics
+	// (in-process-queue L6) so a 2nd live app does not collide. Zero-init matches
+	// the former static initializers; at N=1 only app[0]'s copy is touched.
+	char		pendingConnectError[512];	// was static cl_pendingConnectError
+	int			lastWarmupValue;			// was static cl_lastWarmupValue
+	int			matchAlertExpire;			// was static cl_matchAlertExpire
+	qboolean	timeoutWasBothPaused;		// was static wasBothPaused (CL_CheckTimeout)
+	qboolean	disconnecting;				// was static cl_disconnecting (CL_Disconnect reentry guard)
+
+	// Per-app TERM_CLIENT_DROP/LEAVE/KICK recovery target. Armed each frame at
+	// the CL_Frame call boundary (common.c); Com_Terminate longjmps here (via the
+	// cl_frameApp cursor) instead of the process-global abortframe, so a recoverable
+	// error in one app does not abort co-resident apps. At N=1 this is clientApps[0]
+	// and the recovery is behaviorally identical to the global path.
+	jmp_buf		appAbortFrame;
+} clientApp_t;
+
+// Single-app today: only slot 0 is ever touched. MAX_LOCAL_CGAME_VMS comes
+// from the VM tier (vm_local.h) so the container and the cgame-VM table share
+// one capacity bound.
+extern	clientApp_t		clientApps[MAX_LOCAL_CGAME_VMS];
+
+// The active app-instance. Single-app: always &clientApps[0] (pinned). The
+// per-app spawn path repoints this from input focus; the accessor
+// signature stays stable. Pull-model, engine-owned pointer identity — never
+// derived from clc.clientNum (tier rule).
+extern	clientApp_t		*clientActiveApp;
+
+// The `cl`/`clc` macro aliases were retired: all access is now explicit
+// through the active-app handle — `clientActiveApp->cl` / `clientActiveApp->clc`
+// (single-app: clientActiveApp == &clientApps[0], byte-identical to the former
+// globals). Making access explicit is the prerequisite for N-app: clientApps[i]
+// for i>0 can't be reached through a macro hardcoded to [0]. There are no
+// per-app loops yet (no spawn path), so every site is "the active
+// app"; a site meaning "a specific app i" would be threaded an app pointer then.
+
+// Active-app accessor (pull-model, client-tier). The WUI activation predicates
+// under wired/ui/policy/ read connection state through THIS, never through a
+// threaded clientApp_t* (which would leak a client-tier type into WiredUI-core
+// — see the tier note). Single-app returns &clientApps[0]; a later pass repoints
+// it from input focus. Never NULL.
+clientApp_t *CL_ActiveApp( void );
+
+// The active app's cgame slot index (== its cgameInstance). Lets engine-side
+// level-transition teardown scope its VM clear to the active app. Single-app: 0.
+int CL_ActiveCgameInstance( void );
+
+// True if any app owning a registered viewport provider is in a world-rendering
+// state (in-game, or primed with a cgame VM). Lets the world-viewport layer
+// activate per owning-app rather than per input-focus. Returns a plain bool so
+// the WiredUI-tier policy consumes no clientApp_t* (tier-clean).
+qboolean CL_AnyViewportAppRenderable( void );
 
 extern	char		cl_oldGame[MAX_QPATH];
 extern	qboolean	cl_oldGameSet;
@@ -378,7 +502,8 @@ qboolean	CL_Download( const char *cmd, const char *pakname, qboolean autoDownloa
 
 //=============================================================================
 
-extern	vm_t			*cgvm;	// interface to cgame dll or vm
+// The cgame VM handle is per-app: clientApps[N].cgvm (reach the active one via
+// clientActiveApp->cgvm or CL_ActiveApp()->cgvm). No bare global cgvm.
 extern	refexport_t		re;		// interface to refresh .dll
 
 
@@ -440,15 +565,23 @@ extern	cvar_t	*cl_drawBuffer;
 //
 // cl_main
 //
-void CL_AddReliableCommand( const char *cmd, qboolean isDisconnectCmd );
+void CL_AddReliableCommand( clientApp_t *app, const char *cmd, qboolean isDisconnectCmd );
 
 void CL_StartHunkUsers( void );
 
 void CL_Disconnect_f( void );
 void CL_ReadDemoMessage( void );
 void CL_StopRecord_f( void );
+// Close the console as part of entering a connection/demo, preserving it under
+// an attract reel. Interim single decision point; folds into the CL_SetState
+// transition observer when the console-ownership-decoupling workstream lands.
+void CL_ConsoleCloseForConnect( void );
+// The single funnel for client connection-state changes. Route every
+// `app->state = CA_XXX` through this so the transition is observable in one
+// place (see CL_OnClientStateChanged). Only the focused app's edges notify.
+void CL_SetState( clientApp_t *app, connstate_t newState );
 
-void CL_InitDownloads( void );
+void CL_InitDownloads( clientApp_t *app );
 void CL_NextDownload( void );
 
 void CL_GetPing( int n, char *buf, int buflen, int *pingtime );
@@ -456,7 +589,7 @@ void CL_GetPingInfo( int n, char *buf, int buflen );
 void CL_ClearPing( int n );
 int CL_GetPingQueueCount( void );
 
-void CL_ClearState( void );
+void CL_ClearState( clientApp_t *app );
 
 int CL_ServerStatus( const char *serverAddress, char *serverStatusString, int maxLen );
 
@@ -472,7 +605,8 @@ qboolean CL_GetModeInfo( int *width, int *height, float *windowAspect, int mode,
 void CL_InitInput( void );
 void CL_ClearInput( void );
 void CL_SendCmd( void );
-void CL_WritePacket( int repeat );
+void CL_WritePacket( clientApp_t *app, int repeat );
+void CL_SendAckOnly( clientApp_t *app );	// per-app ack-only datagram (in-process-queue L5)
 
 //
 // cl_keys.c
@@ -488,7 +622,7 @@ void Field_BigDraw( field_t *edit, int x, int y, int width, qboolean showCursor,
 //
 extern int cl_connectedToPureServer;
 
-void CL_ParseServerMessage( msg_t *msg );
+void CL_ParseServerMessage( clientApp_t *app, msg_t *msg );
 void CL_CheckReliableStreams( void );
 void CL_CheckSnapshotDatagrams( void );
 
@@ -507,9 +641,11 @@ extern cvar_t *con_scale;
 void Con_CheckResize( void );
 void Con_Init( void );
 void Con_Shutdown( void );
+void Con_InitProjection( void );      /* UI presentation-only setup (after Con_Init) */
+void Con_ShutdownProjection( void );  /* mirrors Con_InitProjection (UI teardown) */
 void Con_ToggleConsole_f( void );
 void Con_ClearNotify( void );
-void Con_RunConsole( void );
+void Con_RunConsole( qboolean consoleKeyActive, int frameMsec );
 void Con_DrawConsole( void );
 void Con_PageUp( int lines );
 void Con_PageDown( int lines );
@@ -544,26 +680,29 @@ void	SCR_UpdateScreen( void );
 
 void	SCR_DebugGraph( float value );
 
-int		SCR_GetBigStringWidth( const char *str );	// returns in virtual 640x480 coordinates
-
-void	SCR_AdjustFrom640( float *x, float *y, float *w, float *h );
-void	SCR_FillRect( float x, float y, float width, float height,
-					 const float *color );
-void	SCR_DrawPic( float x, float y, float width, float height, qhandle_t hShader );
-void	SCR_DrawNamedPic( float x, float y, float width, float height, const char *picname );
-
-void	SCR_DrawBigString( int x, int y, const char *s, float alpha, qboolean noColorEscape );			// draws a string with embedded color control characters with fade
 void	SCR_DrawStringExt( int x, int y, float size, const char *string, const float *setColor, qboolean forceColor, qboolean noColorEscape );
-void	SCR_DrawSmallStringExt( int x, int y, const char *string, const float *setColor, qboolean forceColor, qboolean noColorEscape );
-void	SCR_DrawSmallChar( int x, int y, int ch );
-void	SCR_DrawSmallString( int x, int y, const char *s, int len );
+
+//
+// cl_net_stats.c
+//
+void	SCR_NetStatsInit( void );
+/* outbound-packet counter: incremented by cl_input.c, registered/owned by
+ * cl_net_stats.c, read by the debug_packets custom-draw handler
+ * as a first-frame zero-division guard. */
+extern int cl_sent;
 
 //
 // cl_loading_ui.c
 //
-void	CL_DrawLoadingScreen( void );
+/* CL_DrawLoadingScreen retired — compositor sole loading-screen
+ * renderer via loading_screen.wmenu. */
 void	CL_LoadingScreenFinished( void );
 void	CL_ResetLoadingScreenState( void );
+/* Per-CL_Frame publishers — fired before render dispatch so compositor
+ * reads current-frame values. Loading + connect state surfaced to the
+ * WiredStore for storeBind/bindwidth wmenu items. */
+void	CL_PublishLoadingState( void );
+void	CL_PublishConnectState( void );
 
 //
 // cl_cin.c
@@ -584,11 +723,14 @@ void CIN_CloseAllVideos(void);
 //
 // cl_cgame.c
 //
-void CL_InitCGame( void );
-void CL_ShutdownCGame( void );
+void CL_InitCGame( clientApp_t *app );
+void CL_PrimeHeadlessApp( clientApp_t *app );  // VM-less prime → CA_PRIMED
+void CL_ShutdownCGame( clientApp_t *app );
 qboolean CL_GameCommand( void );
 void CL_CGameRendering( stereoFrame_t stereo );
-void CL_SetCGameTime( void );
+void CL_RenderCGameViewport( void *ownerCgvm, int vmKey, int x, int y, int w, int h );
+void CL_SetCGameTime( clientApp_t *app );
+void CL_DriveHeadlessApp( clientApp_t *app );  // VM-less per-app state advance (CA_PRIMED→CA_ACTIVE)
 
 //
 // cl_characters.c
@@ -598,6 +740,13 @@ typedef struct {
 	char                dirname[MAX_QPATH];
 	characterManifest_t manifest;
 	qhandle_t           iconHandle;
+	// Player character-select visibility. TRUE (the default when the manifest
+	// omits the key) → the character appears in the player select screen AND is
+	// spawnable. FALSE → creature-only: spawnable as a monster (loaded by name,
+	// not via the select feeder) but hidden from the select screen. Client-only:
+	// this wraps the serialized `manifest` and is never sent across the CL↔CG
+	// boundary (only `manifest` is memcpy'd in CL_Characters_GetManifest).
+	qboolean            selectable;
 } clCharacterEntry_t;
 
 void        CL_Characters_Init( void );
@@ -608,6 +757,12 @@ void        CL_Characters_RegisterShaders( void );
 const characterManifest_t *CL_Characters_Get( const char *dirname );
 int         CL_Characters_Count( void );
 const clCharacterEntry_t  *CL_Characters_At( int index );
+// Selectable-only view over the registry: enumerates just the characters that
+// are player-selectable (selectable==qtrue), so the character-select feeder can
+// use one index space for its count and its per-item lookups. SelectableAt(i)
+// maps subset index i → the underlying registry entry (NULL if out of range).
+int         CL_Characters_SelectableCount( void );
+const clCharacterEntry_t  *CL_Characters_SelectableAt( int index );
 qboolean    CL_Characters_GetManifest( const char *charName, char *buf, int bufSize );
 const cmSkin_t *CL_GetCharacterSkin( qhandle_t handle );
 
@@ -641,35 +796,35 @@ void	CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *hei
 //
 // cl_bsp_preview.c
 //
-#define BSP_PREVIEW_MAX_EDGES    8192
-#define BSP_PREVIEW_MAX_MARKERS  256
+#define MAP_PREVIEW_MAX_EDGES    8192
+#define MAP_PREVIEW_MAX_MARKERS  256
 
 typedef struct {
 	float x1, y1, x2, y2;  // 2D projected edge (top-down XY)
 	float z1, z2;           // original Z height per vertex (for height coloring)
 	int   type;             // 0=outer hull, 1=internal, 2=floor
-} bspPreviewEdge_t;
+} mapPreviewEdge_t;
 
 typedef struct {
 	float x, y;             // 2D position
 	int   type;             // 0=spawn, 1=item, 2=flag
-} bspPreviewMarker_t;
+} mapPreviewMarker_t;
 
 typedef struct {
-	bspPreviewEdge_t  edges[BSP_PREVIEW_MAX_EDGES];
+	mapPreviewEdge_t  edges[MAP_PREVIEW_MAX_EDGES];
 	int               numEdges;
-	bspPreviewMarker_t markers[BSP_PREVIEW_MAX_MARKERS];
+	mapPreviewMarker_t markers[MAP_PREVIEW_MAX_MARKERS];
 	int               numMarkers;
 	float             minX, minY, maxX, maxY;  // XY bounding box
 	float             minZ, maxZ;              // Z height range (for height coloring)
 	int               numSurfaces;  // planar surfaces parsed from BSP
 	qboolean          valid;
-} bspPreview_t;
+} mapPreview_t;
 
-extern bspPreview_t cl_bspPreview;
+extern mapPreview_t cl_mapPreview;
 
-void CL_BuildBspPreview( const char *mapname );
-void CL_ClearBspPreview( void );
+void CL_BuildMapPreview( const char *mapname );
+void CL_ClearMapPreview( void );
 
 //
 // cl_mapinfo.c

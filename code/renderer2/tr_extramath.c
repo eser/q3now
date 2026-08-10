@@ -4,6 +4,9 @@
 // tr_extramath.c - extra math needed by the renderer not in qmath.c
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.cmd
+
+R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
 // Some matrix helper functions
 // FIXME: do these already exist in ioq3 and I don't know about them?
@@ -73,10 +76,10 @@ qboolean Mat4Compare( const mat4_t a, const mat4_t b )
 
 void Mat4Dump( const mat4_t in )
 {
-	ri.Log( SEV_INFO, "%3.5f %3.5f %3.5f %3.5f\n", in[ 0], in[ 4], in[ 8], in[12]);
-	ri.Log( SEV_INFO, "%3.5f %3.5f %3.5f %3.5f\n", in[ 1], in[ 5], in[ 9], in[13]);
-	ri.Log( SEV_INFO, "%3.5f %3.5f %3.5f %3.5f\n", in[ 2], in[ 6], in[10], in[14]);
-	ri.Log( SEV_INFO, "%3.5f %3.5f %3.5f %3.5f\n", in[ 3], in[ 7], in[11], in[15]);
+	R_LOG( rch_cmd, SEV_INFO, "%3.5f %3.5f %3.5f %3.5f\n", in[ 0], in[ 4], in[ 8], in[12]);
+	R_LOG( rch_cmd, SEV_INFO, "%3.5f %3.5f %3.5f %3.5f\n", in[ 1], in[ 5], in[ 9], in[13]);
+	R_LOG( rch_cmd, SEV_INFO, "%3.5f %3.5f %3.5f %3.5f\n", in[ 2], in[ 6], in[10], in[14]);
+	R_LOG( rch_cmd, SEV_INFO, "%3.5f %3.5f %3.5f %3.5f\n", in[ 3], in[ 7], in[11], in[15]);
 }
 
 void Mat4Translation( vec3_t vec, mat4_t out )

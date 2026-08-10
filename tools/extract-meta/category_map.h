@@ -21,7 +21,7 @@ Copyright (C) 2024-2026 Wired engine contributors. GPLv2.
 #define EXTRACT_META_CATEGORY_MAP_H
 
 #include "q_shared.h"
-#include "bsp_inventory.h"   /* needed_asset_t, asset_kind_t */
+#include "map_inventory.h"   /* needed_asset_t, asset_kind_t */
 
 // Try the prefix-rewrite table for src->path. On match, write the
 // rewritten path into out_path (NUL-terminated, ≤ out_size bytes) and

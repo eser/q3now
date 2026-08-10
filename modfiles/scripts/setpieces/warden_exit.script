@@ -1,0 +1,12 @@
+// warden_exit.script — the exit gate that opens when the warden dies.
+// A scripted reactor holding closed until the warden's death block fires the
+// `warden_exit_open` trigger, then it "opens" (here: prints + could drive a
+// door/portal entity). Proves the event-driven trigger crossing from the boss's
+// death block to a separate entity, the same pattern the reinforcement fragment
+// used — now as the exit half of a real encounter.
+spawn {
+    print exit-sealed
+}
+trigger warden_exit_open {
+    print exit-opening
+}

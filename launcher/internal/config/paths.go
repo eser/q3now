@@ -30,8 +30,10 @@ type Paths struct {
 // ResolvePaths determines the home and executable directories.
 //
 // HomeDir layout matches the wired engine's Sys_DefaultHomePath:
-//   ~/wired/<product><channel>/   on Linux/macOS
-//   %USERPROFILE%\wired\<product><channel>\   on Windows
+//
+//	~/wired/<product><channel>/   on Linux/macOS
+//	%USERPROFILE%\wired\<product><channel>\   on Windows
+//
 // Engine root ~/wired/ is shared across all games on the wired engine; the
 // per-product subfolder isolates each game's per-user state. Keeping the
 // launcher and engine on the same path is required so paks/configs/saved
@@ -54,9 +56,12 @@ func ResolvePaths() (*Paths, error) {
 	}, nil
 }
 
-// BaseQ3Dir returns the path to <home>/baseq3/  (e.g. ~/wired/q3now-preview/baseq3/).
+// BaseQ3Dir returns the path to <home>/base/  (e.g. ~/wired/q3now-preview/base/).
+// The directory name must match the engine BASEGAME ("base" in
+// code/qcommon/q_shared.h) so paks the launcher writes are the ones the engine
+// scans; otherwise imported/embedded paks land where the engine never looks.
 func (p *Paths) BaseQ3Dir() string {
-	return filepath.Join(p.HomeDir, "baseq3")
+	return filepath.Join(p.HomeDir, "base")
 }
 
 // ManifestPath returns the path to <home>/q3now.json.
@@ -69,9 +74,9 @@ func (p *Paths) GameBinaryPath() string {
 	return filepath.Join(p.ExecDir, gameBinaryName())
 }
 
-// DedBinaryPath returns the full path to the dedicated server binary.
+// DedBinaryPath returns the full path to the headless server binary.
 func (p *Paths) DedBinaryPath() string {
-	return filepath.Join(p.ExecDir, "wired-ded")
+	return filepath.Join(p.ExecDir, "wired-headless")
 }
 
 // DownloadDir returns the path to <home>/downloaded/.

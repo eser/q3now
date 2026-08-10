@@ -326,76 +326,9 @@ CROSSHAIR
 
 
 
-/*
-=================
-CG_DrawCrosshair3D
-=================
-*/
-static void CG_DrawCrosshair3D(void)
-{
-	float		w;
-	qhandle_t	hShader;
-	float		f;
-
-	trace_t trace;
-	vec3_t endpos;
-	float stereoSep, zProj, maxdist, xmax;
-	char rendererinfos[128];
-	refEntity_t ent;
-
-	if ( !cg_crosshairAlpha.integer ) {
-		return;
-	}
-
-	if ( cg.snap->ps.persistant[PERS_TEAM] == TEAM_SPECTATOR) {
-		return;
-	}
-
-	if ( cg.renderingThirdPerson ) {
-		return;
-	}
-
-	w = cg_crosshairSize.value;
-
-	// pulse the size of the crosshair when picking up items
-	f = cg.time - cg.itemPickupBlendTime;
-	if ( f > 0 && f < ITEM_BLOB_TIME ) {
-		f /= ITEM_BLOB_TIME;
-		w *= ( 1 + f );
-	}
-
-	hShader = cgs.media.crosshairDefaultShader;
-
-	// Use a different method rendering the crosshair so players don't see two of them when
-	// focusing their eyes at distant objects with high stereo separation
-	// We are going to trace to the next shootable object and place the crosshair in front of it.
-
-	// first get all the important renderer information
-	trap_Cvar_VariableStringBuffer("r_zProj", rendererinfos, sizeof(rendererinfos));
-	zProj = atof(rendererinfos);
-	trap_Cvar_VariableStringBuffer("r_stereoSeparation", rendererinfos, sizeof(rendererinfos));
-	stereoSep = zProj / atof(rendererinfos);
-
-	xmax = zProj * tan(cg.refdef.fov_x * M_PI / 360.0f);
-
-	// let the trace run through until a change in stereo separation of the crosshair becomes less than one pixel.
-	maxdist = cgs.glconfig.vidWidth * stereoSep * zProj / (2 * xmax);
-	VectorMA(cg.refdef.vieworg, maxdist, cg.refdef.viewaxis[0], endpos);
-	CG_Trace(&trace, cg.refdef.vieworg, NULL, NULL, endpos, 0, MASK_SHOT);
-
-	memset(&ent, 0, sizeof(ent));
-	ent.reType = RT_SPRITE;
-	ent.renderfx = RF_DEPTHHACK | RF_CROSSHAIR;
-
-	VectorCopy(trace.endpos, ent.origin);
-
-	// scale the crosshair so it appears the same size for all distances
-	ent.radius = w * NORM_HSCALE * xmax * trace.fraction * maxdist / zProj;
-	ent.customShader = hShader;
-
-	trap_R_AddRefEntityToScene(&ent);
-}
-
+// WA-1: CG_DrawCrosshair3D (the imperative RT_SPRITE 3D crosshair) was RETIRED.
+// The Wired UI crosshair element now draws the crosshair in all modes at the
+// cgame-staged world-anchored offset (cg_wired_bridge.c) — inversion of control.
 
 
 /*
@@ -662,14 +595,24 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 		return;
 	}
 
+	// scene cinematic-director HUD-suppress: while a cutscene is playing with its
+	// HUD flag off (the default), skip the legacy 2D game draws below. The Wired
+	// UI HUD is hidden separately via state.sceneHudHidden (pushed in
+	// CG_WiredHudPushState) — that push still runs so the client receives the
+	// hide signal (an early-return here would freeze the last-pushed HUD state on
+	// screen). Client-view-only; the HUD returns on scene-end automatically.
+	qboolean sceneSuppressHud = ( cg.scenePlayback.active && !cg.scenePlayback.hudVisible );
+	if ( !sceneSuppressHud ) {
+
 	// camp detection overlay (drawn before HUD so UI elements render on top)
 	CG_DrawCampOverlay();
 
-	// bot directive text above heads — must be 2D pass (after trap_R_RenderScene)
-	CG_Draw2DBotDirectives();
+	// WA-2b/WA-3: bot directives, score plums and damage plums are now staged as
+	// world-anchored markers ("markers.botdir" / "markers.plums") in the scene-build
+	// phase (CG_AddLocalEntities) and drawn by the Wired UI markerlist elements —
+	// the imperative CG_Draw2DBotDirectives / CG_DrawPlumOverlays 2D draws are retired.
 
-	// score/damage plums — 2D projected text, same timing constraint
-	CG_DrawPlumOverlays();
+	}  // end !sceneSuppressHud (legacy 2D game draws)
 
 /*
 	if (cg.cameraMode) {
@@ -677,7 +620,9 @@ static void CG_Draw2D(stereoFrame_t stereoFrame)
 	}
 */
 #if FEAT_WIRED_UI
-	// Wired UI: always push game state to client
+	// Wired UI: always push game state to client (carries state.sceneHudHidden so
+	// the client hides the HUD during a cutscene — push must run even when the
+	// legacy 2D draws are suppressed above, or the client keeps the stale HUD).
 	CG_WiredHudPushState();
 	CG_ScanForCrosshairEntity();  // updates crosshairClientNum for state bridge
 	// crosshair + crosshair names drawn by Wired UI elements
@@ -771,8 +716,11 @@ void CG_DrawActive( stereoFrame_t stereoView ) {
 	// clear around the rendered view if sized down
 	CG_TileClear();
 
-	if(stereoView != STEREO_CENTER)
-		CG_DrawCrosshair3D();
+	// WA-1: the imperative 3D crosshair (CG_DrawCrosshair3D RT_SPRITE) is retired.
+	// The Wired UI crosshair element now draws the crosshair in ALL modes at the
+	// cgame-staged world-anchored offset (0,0 = center in first person). stereoView
+	// is unused for the crosshair now (the per-eye 2D Wired crosshair handles it).
+	(void)stereoView;
 
 	// draw 3D view
 	trap_R_RenderScene( &cg.refdef );

@@ -4,6 +4,10 @@
 // tr_shade_calc.c
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn B — renderer.cmd
+
+R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
+
 // -EC-: avoid using ri.ftol
 // NOLINTNEXTLINE(bugprone-macro-parentheses) — `table` is always a static float[] array, never a complex expression
 #define	WAVEVALUE( table, base, amplitude, phase, freq )  ((base) + table[ (int64_t)( ( ( (phase) + tess.shaderTime * (freq) ) * FUNCTABLE_SIZE ) ) & FUNCTABLE_MASK ] * (amplitude))
@@ -350,10 +354,10 @@ static void AutospriteDeform( void ) {
 	vec3_t	leftDir, upDir;
 
 	if ( tess.numVertexes & 3 ) {
-		ri.Log( SEV_WARN, "Autosprite shader %s had odd vertex count\n", tess.shader->name );
+		R_LOG( rch_cmd, SEV_WARN, "Autosprite shader %s had odd vertex count\n", tess.shader->name );
 	}
 	if ( tess.numIndexes != ( tess.numVertexes >> 2 ) * 6 ) {
-		ri.Log( SEV_WARN, "Autosprite shader %s had odd index count\n", tess.shader->name );
+		R_LOG( rch_cmd, SEV_WARN, "Autosprite shader %s had odd index count\n", tess.shader->name );
 	}
 
 	oldVerts = tess.numVertexes;
@@ -427,10 +431,10 @@ static void Autosprite2Deform( void ) {
 	vec3_t	forward;
 
 	if ( tess.numVertexes & 3 ) {
-		ri.Log( SEV_WARN, "Autosprite2 shader %s had odd vertex count\n", tess.shader->name );
+		R_LOG( rch_cmd, SEV_WARN, "Autosprite2 shader %s had odd vertex count\n", tess.shader->name );
 	}
 	if ( tess.numIndexes != ( tess.numVertexes >> 2 ) * 6 ) {
-		ri.Log( SEV_WARN, "Autosprite2 shader %s had odd index count\n", tess.shader->name );
+		R_LOG( rch_cmd, SEV_WARN, "Autosprite2 shader %s had odd index count\n", tess.shader->name );
 	}
 
 	if ( backEnd.currentEntity != &tr.worldEntity ) {
@@ -549,9 +553,6 @@ void RB_DeformTessGeometry( void ) {
 			break;
 		case DEFORM_MOVE:
 			RB_CalcMoveVertexes( ds );
-			break;
-		case DEFORM_PROJECTION_SHADOW:
-			RB_ProjectionShadowDeform();
 			break;
 		case DEFORM_AUTOSPRITE:
 			AutospriteDeform();
@@ -674,7 +675,7 @@ void RB_CalcWaveColor( const waveForm_t *wf, unsigned char *dstColors )
 	color4ub_t color;
 
 	glow = EvalWaveForm( wf );
-	/* Phase 6B3'-a: the deterministic-waveform glow path used to be
+	/* the deterministic-waveform glow path used to be
 	 * halved by tr.identityLight (= 0.5 under legacy obScale=2) to
 	 * compensate for the in-shader doubling. Linear pipeline drops
 	 * the halving; glow passes through as authored. */

@@ -3,6 +3,9 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn B — renderer.cmd
+
+R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
 static int			r_firstSceneDrawSurf;
 #ifdef USE_PMLIGHT
@@ -19,6 +22,12 @@ static int			r_numpolys;
 static int			r_firstScenePoly;
 
 static int			r_numpolyverts;
+
+// Lens-source occlusion stash (lens-glow B2). The game adds sources each frame;
+// they are projected + written to the oracle registry at render time (see
+// RB_AddLensSourceFlares), NOT here (backEnd.viewParms is invalid at scene build).
+int					r_numLensSources;
+static int			r_firstSceneLensSource;
 
 
 /*
@@ -47,8 +56,11 @@ void R_InitNextFrame( void ) {
 
 	r_numpolyverts = 0;
 
-#if FEAT_CORONA
-	R_ClearCoronas();
+	r_numLensSources = 0;
+	r_firstSceneLensSource = 0;
+
+#if FEAT_HALO
+	R_ClearHalos();
 #endif
 }
 
@@ -63,6 +75,7 @@ void RE_ClearScene( void ) {
 	r_firstSceneDlight = r_numdlights;
 	r_firstSceneEntity = r_numentities;
 	r_firstScenePoly = r_numpolys;
+	r_firstSceneLensSource = r_numLensSources;
 }
 
 /*
@@ -110,9 +123,18 @@ void RE_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts
 	if ( !tr.registered ) {
 		return;
 	}
+	// numVerts/numPolys arrive across the VM syscall boundary; a negative or
+	// zero count must be rejected before the capacity guard below. The guard
+	// `r_numpolyverts + numVerts > max_polyverts` is signed arithmetic, so a
+	// negative numVerts makes the sum SMALLER and slips through — then
+	// `numVerts * sizeof(*verts)` converts to a multi-gigabyte size_t and the
+	// memcpy at line 150 writes out of bounds.
+	if ( numVerts <= 0 || numPolys <= 0 ) {
+		return;
+	}
 #if 0
 	if ( !hShader ) {
-		ri.Log( SEV_WARN, "WARNING: RE_AddPolyToScene: NULL poly shader\n");
+		R_LOG( rch_cmd, SEV_WARN, "WARNING: RE_AddPolyToScene: NULL poly shader\n");
 		return;
 	}
 #endif
@@ -124,7 +146,7 @@ void RE_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts
       since we don't plan on changing the const and making for room for those effects
       simply cut this message to developer only
       */
-			ri.Log( SEV_DEBUG, "WARNING: RE_AddPolyToScene: r_max_polys or r_max_polyverts reached\n");
+			R_LOG( rch_cmd, SEV_DEBUG, "WARNING: RE_AddPolyToScene: r_max_polys or r_max_polyverts reached\n");
 			return;
 		}
 
@@ -201,14 +223,14 @@ void RE_AddRefEntityToScene( const refEntity_t *ent, qboolean intShaderTime ) {
 		return;
 	}
 	if ( r_numentities >= MAX_REFENTITIES ) {
-		ri.Log( SEV_DEBUG, "RE_AddRefEntityToScene: Dropping refEntity, reached MAX_REFENTITIES\n" );
+		R_LOG( rch_cmd, SEV_DEBUG, "RE_AddRefEntityToScene: Dropping refEntity, reached MAX_REFENTITIES\n" );
 		return;
 	}
 	if ( isnan_fp( &ent->origin[0] ) || isnan_fp( &ent->origin[1] ) || isnan_fp( &ent->origin[2] ) ) {
 		static qboolean first_time = qtrue;
 		if ( first_time ) {
 			first_time = qfalse;
-			ri.Log( SEV_WARN, "RE_AddRefEntityToScene passed a refEntity which has an origin with a NaN component\n" );
+			R_LOG( rch_cmd, SEV_WARN, "RE_AddRefEntityToScene passed a refEntity which has an origin with a NaN component\n" );
 		}
 		return;
 	}
@@ -248,9 +270,10 @@ static void RE_AddDynamicLightToScene( const vec3_t org, float intensity, float 
 	}
 #endif
 #ifdef USE_PMLIGHT
-#ifdef USE_LEGACY_DLIGHTS
-	if ( r_dlightMode->integer )
-#endif
+	// Per-pixel dlights apply the intensity/radius scaling (the retired fake tier did
+	// not). `0` (off) never reaches here — the master gate clears dlights — so this is
+	// effectively unconditional, but keep the guard explicit for clarity.
+	if ( r_dynamiclight->integer )
 	{
 		r *= r_dlightIntensity->value;
 		g *= r_dlightIntensity->value;
@@ -299,9 +322,10 @@ void RE_AddLinearLightToScene( const vec3_t start, const vec3_t end, float inten
 		return;
 	}
 #ifdef USE_PMLIGHT
-#ifdef USE_LEGACY_DLIGHTS
-	if ( r_dlightMode->integer )
-#endif
+	// Per-pixel dlights apply the intensity/radius scaling (the retired fake tier did
+	// not). `0` (off) never reaches here — the master gate clears dlights — so this is
+	// effectively unconditional, but keep the guard explicit for clarity.
+	if ( r_dynamiclight->integer )
 	{
 		r *= r_dlightIntensity->value;
 		g *= r_dlightIntensity->value;
@@ -381,7 +405,7 @@ void RE_AddRibbonToScene( const ribbonDesc_t *desc ) {
 	//   offset 16..23  vec2      uvScroll
 	// Ribbon is transient-only; uvScroll references the absolute frame
 	// clock (frameParams.y) directly, so no per-submission spawnTime is
-	// needed (Phase 5U dropped the dormant field). For a future
+	// needed (an earlier change dropped the dormant field). For a future
 	// persistent ribbon variant, restore the field here and in
 	// ribbon.vert's RibbonHeader (mirror beam's flag-branch pattern).
 	dstHeader = vk.ribbon.headers_ptr[frame] + dstHeaderIdx * RIBBON_HEADER_BYTES;
@@ -389,10 +413,10 @@ void RE_AddRibbonToScene( const ribbonDesc_t *desc ) {
 	fdst = (float    *)dstHeader;
 	udst[0] = dstPointBase;
 	udst[1] = (uint32_t)desc->numPoints;
-	// Phase 5K: cgame submits a qhandle; the GPU header carries a
+	// cgame submits a qhandle; the GPU header carries a
 	// primitive registry slot. Translate via the indirection table.
 	//
-	// Block 5d-followup: bits 0..30 carry the registry slot; bit 31 the
+	// Bits 0..30 carry the registry slot; bit 31 the
 	// slot image's colour domain (CD_LINEAR → ribbon.frag samples raw).
 	// ribbon.vert passes the packed value through unchanged; ribbon.frag
 	// masks the slot before the range clamp. Every registered primitive
@@ -426,7 +450,7 @@ persistent slots, writes a compacted run of GPU headers to the
 per-frame SSBO, and issues a single vkCmdDraw.
 
 Pool exhaustion drops the submission silently — at the current
-BEAM_POOL_MAX (128, post-Phase 5P), this is rare in practice. The
+BEAM_POOL_MAX (128), this is rare in practice. The
 heaviest current consumer is LG primary at 2 slots per firing player
 (main body + tapered tail); 16-player matches with all firing land
 ~70 slots used, comfortably within budget. A noisy log on overflow
@@ -500,6 +524,47 @@ void RE_AddBeamToScene( const beamDesc_t *desc ) {
 
 /*
 =====================
+RE_AddRailRibbonToScene
+
+Claim a persistent rail-ribbon pool slot for one helix, stamping the
+spawn time. The pool's draw pass (RB_DrawRailRibbons) regenerates the
+evolving spiral geometry every frame from (currentTime - spawnTime)
+until the duration expires, then frees the slot. Mirrors the beam
+pool's slot lifecycle; the per-slot payload is the spawn-fixed spiral
+descriptor (start / beamAxis / perpAxis[36] / beamLen / color), not a
+point array — the geometry is derived GPU-side, so nothing is per-frame.
+
+Pool exhaustion drops the submission silently (RAIL_RIBBON_POOL_MAX == 8,
+matching the ≤8 concurrent rail trails cgame allows).
+=====================
+*/
+void RE_AddRailRibbonToScene( const railRibbonDesc_t *desc ) {
+	int slot;
+
+	if ( !tr.registered ) return;
+	if ( desc == NULL ) return;
+	if ( !vk.railRibbon.available ) return;
+	if ( desc->duration <= 0.0f ) return;   // helix is always persistent
+	if ( desc->beamLen <= 0.0f ) return;
+
+	for ( slot = 0; slot < (int)RAIL_RIBBON_POOL_MAX; slot++ ) {
+		if ( !vk.railRibbon.active[slot] ) break;
+	}
+	if ( slot == (int)RAIL_RIBBON_POOL_MAX ) {
+		return;   // pool full — drop silently
+	}
+
+	vk.railRibbon.desc[slot]      = *desc;
+	// Front-end current-frame time (see RE_AddBeamToScene's note): keeps
+	// spawnTime aligned with what RB_DrawRailRibbons reads as the draw
+	// frame's floatTime, so age == 0 on the first render.
+	vk.railRibbon.spawnTime[slot] = (float)tr.refdef.floatTime;
+	vk.railRibbon.duration[slot]  = desc->duration;
+	vk.railRibbon.active[slot]    = qtrue;
+}
+
+/*
+=====================
 RE_AddSpriteToScene
 
 Append one GPU SpriteHeader (std430, 48 bytes) to the per-frame
@@ -547,7 +612,7 @@ void RE_AddSpriteToScene( const spriteDesc_t *desc ) {
 	fdst[6] = desc->rgba[2];
 	fdst[7] = desc->rgba[3];
 
-	// Phase 5K: cgame qhandle → primitive registry slot translation.
+	// cgame qhandle → primitive registry slot translation.
 	udst[8]  = vk_qhandle_to_prim_slot( desc->shader );
 	udst[9]  = (uint32_t)desc->flags;
 	udst[10] = 0; // pad0
@@ -680,8 +745,15 @@ void RE_EmitParticles( const emitterDesc_t *desc ) {
 		// an offset from there.
 		if ( cls->emitMode == EMIT_POINT ) {
 			VectorCopy( desc->origin, basePos );
-		} else {  // EMIT_PATH
-			float t = random();
+		} else {  // EMIT_PATH — stratified: one particle at the CENTRE of each equal
+		          // slice (deterministic, even spacing). The prior `(i + random())/count`
+		          // degenerated to plain random() at count==1 (the dominant high-fps case:
+		          // ~1 puff per 50ms grid-step), so consecutive single-puff frames landed
+		          // randomly in their ~50u segments and bunched ("2 close, gap, 2 close").
+		          // Slice-centre placement makes consecutive frames evenly ~50u apart at
+		          // count==1 AND keeps count>=2 evenly spaced within-segment + across the
+		          // frame boundary. No jitter → a perfect grid; clumping is impossible.
+			float t = ( (float)i + 0.5f ) / (float)desc->count;   // centre of the i-th slice
 			basePos[0] = desc->origin[0] + t * ( desc->end[0] - desc->origin[0] );
 			basePos[1] = desc->origin[1] + t * ( desc->end[1] - desc->origin[1] );
 			basePos[2] = desc->origin[2] + t * ( desc->end[2] - desc->origin[2] );
@@ -773,7 +845,7 @@ void RE_EmitParticles( const emitterDesc_t *desc ) {
 		p.lifetimeInv = lifetimeInv;
 		p.classHandle = (uint32_t)desc->cls;
 
-		// Phase 6: per-particle palette index. Random pick in
+		// Per-particle palette index. Random pick in
 		// [0, paletteCount). Class's paletteCount is clamped to
 		// >= 1 by RE_RegisterParticleClass; the > 1 branch
 		// documents intent and avoids a no-op modulo on
@@ -795,9 +867,192 @@ void RE_EmitParticles( const emitterDesc_t *desc ) {
 	}
 }
 
+// Resolve a decal shader qhandle to a slot in the projector's texture registry
+// (vk.decal.images[]). Find-or-add: a previously-resolved shader reuses its
+// slot; a new one claims the next free slot and writes its image into the
+// fragment shader's binding-2 sampler array. Three-tier image fallback mirrors
+// the particle precedent (RE_RegisterParticleClass): class shader →
+// defaultShader → tr.whiteImage. The registry has MAX_DECAL_TEXTURES slots; once
+// full, every further shader collapses to slot 0 (tr.whiteImage) rather than
+// OOB-indexing the bounded array — generous since decals reuse a handful of mark
+// shaders.
+static uint32_t R_ResolveDecalTextureSlot( qhandle_t shaderHandle ) {
+	shader_t *resolvedShader;
+	image_t  *resolvedImage;
+	uint32_t  k;
+
+	if ( !vk.decal.available )
+		return 0;
+
+	resolvedShader = R_GetShaderByHandle( shaderHandle );
+	if ( resolvedShader && resolvedShader->stages[0]
+	  && resolvedShader->stages[0]->bundle[0].image[0] ) {
+		resolvedImage = resolvedShader->stages[0]->bundle[0].image[0];
+	} else if ( tr.defaultShader && tr.defaultShader->stages[0]
+	         && tr.defaultShader->stages[0]->bundle[0].image[0] ) {
+		resolvedImage = tr.defaultShader->stages[0]->bundle[0].image[0];
+	} else {
+		resolvedImage = tr.whiteImage;
+	}
+
+	// Find an existing slot with this image.
+	for ( k = 0; k < vk.decal.numImages && k < MAX_DECAL_TEXTURES; k++ ) {
+		if ( vk.decal.images[k] == resolvedImage )
+			return k;
+	}
+
+	// Registry full → fall back to slot 0 (tr.whiteImage default).
+	if ( vk.decal.numImages >= MAX_DECAL_TEXTURES )
+		return 0;
+
+	// Claim the next free slot and push the image into the sampler array.
+	k = vk.decal.numImages++;
+	vk.decal.images[k] = resolvedImage;
+	vk_decal_set_texture_image( (int)k, resolvedImage );
+	return k;
+}
+
+// Per-decal blend modes. Each maps to one of the three projector pipelines
+// (built in vk_init_decal) and is selected on the GPU by the vertex-stage
+// degenerate-cull. Resolved renderer-side from the mark shader's stage-0 blend
+// bits so the cgame descriptor carries no blend state:
+//   DECAL_BLEND_ALPHA    = blood     SRC_ALPHA / ONE_MINUS_SRC_ALPHA
+//   DECAL_BLEND_ADDITIVE = burn      SRC_ALPHA / ONE
+//   DECAL_BLEND_COLOUR   = bullet    ZERO / ONE_MINUS_SRC_COLOR (shape in RGB)
+#define DECAL_BLEND_ALPHA      0u
+#define DECAL_BLEND_ADDITIVE   1u
+#define DECAL_BLEND_COLOUR     2u
+
+// Resolve a decal mark shader to its blend mode by reading the destination-blend
+// bits of the shader's first stage. ONE_MINUS_SRC_COLOR → colour-blend (bullet),
+// ONE → additive (burn), anything else (incl. ONE_MINUS_SRC_ALPHA / default) →
+// straight alpha (blood). Falls back to alpha if the shader or its stage-0 is
+// absent.
+static uint32_t R_ResolveDecalBlendMode( qhandle_t shaderHandle ) {
+	shader_t *resolvedShader;
+	uint32_t  dstBlend;
+
+	resolvedShader = R_GetShaderByHandle( shaderHandle );
+	if ( !resolvedShader || !resolvedShader->stages[0] )
+		return DECAL_BLEND_ALPHA;
+
+	dstBlend = resolvedShader->stages[0]->stateBits & GLS_DSTBLEND_BITS;
+
+	if ( dstBlend == GLS_DSTBLEND_ONE_MINUS_SRC_COLOR )
+		return DECAL_BLEND_COLOUR;
+	if ( dstBlend == GLS_DSTBLEND_ONE )
+		return DECAL_BLEND_ADDITIVE;
+	return DECAL_BLEND_ALPHA;
+}
+
+// Spawn-time write into the GPU decal ring. The front-end (cgame via the trap)
+// calls this at scene-build time. It translates the cgame descriptor into the
+// renderer-private decalGPU_t, resolves the shader qhandle to a sampler-array
+// slot, and stamps the decal into a round-robin pool slot. RB_DrawDecals reads
+// the ring in the main pass. With no cgame call site emitting decals the ring
+// stays empty and nothing changes on screen.
 void RE_AddDecalToScene( const decalDesc_t *desc ) {
-	// TODO: implement decal projection.
-	(void)desc;
+	decalGPU_t *pool;
+	decalGPU_t  d;
+	uint32_t    slot;
+
+	if ( !vk.decal.available || desc == NULL )
+		return;
+
+	memset( &d, 0, sizeof( d ) );
+
+	// originRadius.xyz = origin, .w = radius; normalOrient.xyz = normal,
+	// .w = orientation — folded next to their vec3 so the projector reads one
+	// vec4 per pull (see the decalGPU_t layout note in vk.h).
+	VectorCopy( desc->origin, d.originRadius );
+	d.originRadius[3] = desc->radius;
+	VectorCopy( desc->normal, d.normalOrient );
+	d.normalOrient[3] = desc->orientation;
+
+	Vector4Copy( desc->rgba, d.rgba );
+
+	// Resolve the shader qhandle to a registry slot at emit time (mirrors how
+	// the particle path resolves class shaders at registration). The fragment
+	// shader samples decalTextures[textureIndex].
+	//
+	// The slot is always < MAX_DECAL_TEXTURES (64), so the upper bits are free:
+	// bit 31 carries the DECAL_FLAG_NO_PROJECT flag into the GPU slot (mirrors the
+	// particle path's bit-31 colour-domain packing in particleClassHandle). The
+	// shaders mask the low bits for the sampler index and branch on bit 31 to skip
+	// the depth box-projection for a free flat quad. No spare lane exists in the
+	// 64 B decalGPU_t, and the reserved decalDesc_t.flags field carries no ABI — so
+	// this packing keeps both struct sizes unchanged.
+	d.textureIndex = R_ResolveDecalTextureSlot( desc->shader );
+	if ( desc->flags & DECAL_FLAG_NO_PROJECT ) {
+		d.textureIndex |= 0x80000000u;
+	}
+
+	// Stamp the front-end's current-frame time so the GPU derives
+	// age = now - spawnTime each frame, and fold the lifetime into lifetimeInv
+	// (= 1/lifetime, mirroring the particle path's divide-by-zero guard).
+	// lifetimeInv 0 means "no auto-fade": the mark stays until its ring slot is
+	// reused. The shader picks the fade CHANNEL from the resolved blendMode
+	// (alpha-blend → ramp alpha; modulate/additive → ramp rgb to black), so the
+	// caller's alphaFade hint isn't needed here — the actual blend pipeline is
+	// authoritative (e.g. burn marks pass alphaFade but blend as modulate).
+	d.spawnTime = (float)tr.refdef.floatTime;
+	if ( desc->lifetime > 0.0f ) {
+		float lifetime = desc->lifetime;
+		if ( lifetime < 0.001f ) lifetime = 0.001f;
+		d.lifetimeInv = 1.0f / lifetime;
+	} else {
+		d.lifetimeInv = 0.0f;
+	}
+
+	// Pick the blend mode from the mark shader so each decal rasterizes in the
+	// matching projector pipeline (the vertex shader culls non-matching modes).
+	d.blendMode   = R_ResolveDecalBlendMode( desc->shader );
+
+	// Round-robin slot allocation; wrap-around overwrites the oldest decal.
+	slot              = vk.decal.nextSlot;
+	vk.decal.nextSlot = ( slot + 1 ) % DECALS_PER_POOL;
+
+	pool = (decalGPU_t *)vk.decal.pool_ptr;
+	memcpy( &pool[ slot ], &d, sizeof( decalGPU_t ) );
+}
+
+// Lens-source occlusion (lens-glow B2 thin channel). The game registers a light
+// source each frame; the depth-sampling lens oracle (vk_lens_dispatch) reports
+// whether it is occluded. RE_AddLensSourceToScene only STASHES the descriptor —
+// it must NOT project here, because backEnd.viewParms is not valid at scene-build
+// time (it is set at RB_DrawSurfs). RB_AddLensSourceFlares does the render-time
+// projection + registry write, exactly as the flare/halo path does.
+void RE_AddLensSourceToScene( const lensSourceDesc_t *desc ) {
+	lensSceneSource_t *s;
+
+	if ( !tr.registered || desc == NULL )
+		return;
+	if ( r_numLensSources >= MAX_LENS_SCENE_SOURCES )
+		return;
+
+	s = &backEndData->lensSources[ r_numLensSources++ ];
+	VectorCopy( desc->origin, s->origin );
+	s->radius = desc->radius;
+	s->id     = desc->id;
+}
+
+// Read back the oracle's last-frame visibility (0..1) for a registered source id.
+// Returns qfalse when no GPU oracle is available (no registry mapped, e.g. r_lens
+// off / no FBO) so the game falls back to its own occlusion test (zero feature
+// loss). The 1-frame delay is intentional and matches the flare/halo contract:
+// the oracle samples this frame's record next frame; we read what it wrote last.
+qboolean RE_GetLensVisibility( int id, float *outVis ) {
+	int slot;
+
+	if ( !vk.lensSourcesPtr || !r_lens || !r_lens->integer || !vk.ral_lens_pipeline ) {
+		if ( outVis ) *outVis = 1.0f;   // no oracle → treat as fully visible
+		return qfalse;
+	}
+
+	slot = LENS_SLOT_CGSOURCES + ( ( id % LENS_MAX_CGSOURCES + LENS_MAX_CGSOURCES ) % LENS_MAX_CGSOURCES );
+	if ( outVis )
+		*outVis = *( (float *)vk.lensSourcesPtr + (size_t)slot * ( LENS_SOURCE_VEC4S * 4 ) + 7 );
+	return qtrue;
 }
 
 void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass_t *cls ) {
@@ -826,7 +1081,7 @@ void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass
 	dst->coneHalfAngle     = cls->coneHalfAngle;
 	dst->lifetimeMean      = cls->lifetimeMean;
 	dst->lifetimeJitter    = cls->lifetimeJitter;
-	// Phase 6: clamp paletteCount to [1, PARTICLE_CLASS_MAX_PALETTE].
+	// Clamp paletteCount to [1, PARTICLE_CLASS_MAX_PALETTE].
 	// 0 → would crash RE_EmitParticles's modulo at emit time.
 	// >16 → would let particle.vert read colorPalette[idx] out of
 	// bounds (the GLSL array is fixed at PARTICLE_CLASS_MAX_PALETTE).
@@ -874,7 +1129,14 @@ void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass
 	dst->sizeJitter            = cls->sizeJitter;
 	// pad4, pad5 stay zero from the memset.
 
-	// ── Phase 5: resolve class shader → image, write to sampler array.
+	// Sprite-frame (flipbook) fields. frameSlots[] is resolved below
+	// (left zero by the memset until then); frameCount/frameBlend carry
+	// straight through. frameCount <= 1 leaves the whole flipbook path
+	// inert and the single-shader path byte-identical.
+	dst->frameCount = ( cls->frameCount > 1 ) ? (uint32_t)cls->frameCount : 0u;
+	dst->frameBlend = ( cls->frameBlend != 0 ) ? 1u : 0u;
+
+	// ── Resolve class shader → image, write to sampler array.
 	//
 	// Three-tier fallback mirrors the IQM precedent at
 	// tr_model_iqm.c:1495-1504. The resolved image_t is cached in
@@ -916,7 +1178,7 @@ void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass
 		}
 		dst->shaderBlendIsAdditive = isAdditive;
 
-		// Block 5d-followup: carry the resolved image's colour domain
+		// Carry the resolved image's colour domain
 		// (CD_SRGB(0) | CD_LINEAR(1)) into the GPU class record;
 		// particle.vert packs it into bit 31 of particleClassHandle so
 		// particle.frag can sample raw vs. sRGB-decode per class. Every
@@ -930,6 +1192,54 @@ void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass
 		// per-frame render descriptor set. Helper lives in vk.c
 		// because the qvk* function pointers are static there.
 		vk_particle_set_class_image( handle, resolvedImage );
+	}
+
+	// ── Sprite-frame (flipbook) resolve. Only when the class opts in
+	// (frameCount > 1). Each frameShaders[i] resolves to a dedicated
+	// frame-pool slot [64..95] via the same three-tier image fallback as
+	// the single shader; the resolved ABSOLUTE sampler-array slot
+	// (MAX_PARTICLE_CLASSES + bare pool slot = [64..95], per the vk.h
+	// frameSlots[] contract) is stored in dst->frameSlots[i] so the
+	// fragment's particleSamplers[frameSlot0] indexes the frame pool
+	// directly. A static class (frameCount <= 1) skips this entirely →
+	// byte-identical.
+	if ( cls->frameCount > 1 ) {
+		int n = cls->frameCount;
+		int i;
+		if ( n > PARTICLE_CLASS_MAX_FRAMES ) n = PARTICLE_CLASS_MAX_FRAMES;
+
+		// Fail gracefully if the frame pool cannot fit this class's
+		// frames: leave frameCount 0 (static fallback via `shader`),
+		// matching how a full class table is tolerated rather than
+		// corrupting the pool. Registration of the class itself stands.
+		if ( vk.particle.frameNextSlot + (uint32_t)n > FRAME_POOL_SIZE ) {
+			R_LOG( rch_cmd, SEV_WARN,
+				"RE_RegisterParticleClass: frame pool overflow (%u + %d > %u); "
+				"class %d falls back to static shader\n",
+				vk.particle.frameNextSlot, n, (unsigned)FRAME_POOL_SIZE, handle );
+			dst->frameCount = 0;
+		} else {
+			for ( i = 0; i < n; i++ ) {
+				shader_t *fsh = R_GetShaderByHandle( cls->frameShaders[i] );
+				image_t  *fimg;
+				uint32_t  slot;
+
+				if ( fsh && fsh->stages[0]
+				  && fsh->stages[0]->bundle[0].image[0] ) {
+					fimg = fsh->stages[0]->bundle[0].image[0];
+				} else if ( tr.defaultShader && tr.defaultShader->stages[0]
+				         && tr.defaultShader->stages[0]->bundle[0].image[0] ) {
+					fimg = tr.defaultShader->stages[0]->bundle[0].image[0];
+				} else {
+					fimg = tr.whiteImage;
+				}
+
+				slot = vk.particle.frameNextSlot++;
+				dst->frameSlots[i] = (uint32_t)MAX_PARTICLE_CLASSES + slot;   // absolute sampler-array slot [64..95], per vk.h:1233 contract
+				vk_particle_set_frame_image( (int)slot, fimg );              // helper takes the BARE pool slot; it adds +MAX_PARTICLE_CLASSES itself (vk.c:7064)
+			}
+			dst->frameCount = (uint32_t)n;
+		}
 	}
 
 	// Registration is monotonic in the static-init use case (handle
@@ -976,7 +1286,7 @@ Rendering a scene may require multiple views to be rendered
 to handle mirrors,
 @@@@@@@@@@@@@@@@@@@@@
 */
-void RE_RenderScene( const refdef_t *fd ) {
+void RE_RenderScene( const refdef_t *fd, int worldIndex ) {
 #ifdef USE_VULKAN
 	renderCommand_t	lastRenderCommand;
 #endif
@@ -992,6 +1302,14 @@ void RE_RenderScene( const refdef_t *fd ) {
 	}
 
 	startTime = ri.Milliseconds();
+
+	// Select the rendering app's world slot. A world scene reads its app's loaded
+	// world; a worldless scene (UI/menu 3D, RDF_NOWORLDMODEL) leaves tr.world as-is
+	// since it has no world to read. Single app: slot 0 is the only loaded world,
+	// so this resolves tr.world to exactly what RE_LoadWorldMap published.
+	if ( !( fd->rdflags & RDF_NOWORLDMODEL ) ) {
+		R_SetWorldSlot( worldIndex );
+	}
 
 	if (!tr.world && !( fd->rdflags & RDF_NOWORLDMODEL ) ) {
 		ri.Terminate( TERM_CLIENT_DROP, "R_RenderScene: NULL worldmodel");
@@ -1013,6 +1331,18 @@ void RE_RenderScene( const refdef_t *fd ) {
 
 	tr.refdef.time = fd->time;
 	tr.refdef.rdflags = fd->rdflags;
+
+	/* c2-shadertime-pin — dev/C2-smoke override: when r_pinShaderTime is
+	 * non-zero, pin tr.refdef.time / floatTime to a fixed value so the
+	 * inputs to wave-shader evaluation (tess.shaderTime → EvalWaveForm,
+	 * R_NoiseGet4f, deform / tcMod / rgbGen wave) sit at a constant phase
+	 * across cold-cache launches. Eliminates the per-launch animation-
+	 * phase bimodality that the c2-brightness-reinvestigation pinned as
+	 * the residual C2 nondeterminism after the noise-table fix. Default
+	 * (0.0) = no pin → today's wall-clock-driven gameplay path. */
+	if ( r_pinShaderTime->value > 0.0f ) {
+		tr.refdef.time = (int)( r_pinShaderTime->value * 1000.0f );
+	}
 
 	// copy the areamask data over and note if it has changed, which
 	// will force a reset of the visible leafs even if the view hasn't moved
@@ -1044,6 +1374,9 @@ void RE_RenderScene( const refdef_t *fd ) {
 #ifdef USE_PMLIGHT
 	tr.refdef.numLitSurfs = r_firstSceneLitSurf;
 	tr.refdef.litSurfs = backEndData->litSurfs;
+	// Forward+ deduped lit-surface union (each surface lit by any light appears once).
+	tr.refdef.numFpUnionSurfs = 0;
+	tr.refdef.fpUnionSurfs = backEndData->fpUnionSurfs;
 #endif
 
 	tr.refdef.num_entities = r_numentities - r_firstSceneEntity;
@@ -1051,6 +1384,43 @@ void RE_RenderScene( const refdef_t *fd ) {
 
 	tr.refdef.num_dlights = r_numdlights - r_firstSceneDlight;
 	tr.refdef.dlights = &backEndData->dlights[r_firstSceneDlight];
+
+#if FEAT_SHADOW_MAPPING
+	// Test-only (r_dlightShadowTest, CVAR_CHEAT): append a synthetic dlight so the omni
+	// shadow path can be exercised + spatially verified headless (real dlights need
+	// gameplay firing). Placed at a fixed offset ABOVE the view origin so floor/wall
+	// geometry occludes it from a receiver behind a wall/pillar. The SAME light feeds the
+	// producer, the Forward+ lit pass, and the shadow render (one shared viewParms.dlights
+	// entry → consistent index). Default 0 → no injection → byte-identical.
+	if ( r_dlightShadowTest && r_dlightShadowTest->integer > 0 ) {
+		float rad = (float)r_dlightShadowTest->integer;
+		// Inject N synthetic lights (r_dlightShadowTestN, default 1) in a horizontal ring
+		// around the view so the K-light shadow budget can be exercised + spatially verified
+		// headless: each light is at a distinct azimuth so its cast shadow points a different
+		// way. N=1 → a single light directly above the eye (the original placement). Each is
+		// white, the SAME entry feeds producer / lit pass / shadow render (consistent index).
+		int n = ( r_dlightShadowTestN && r_dlightShadowTestN->integer > 0 ) ? r_dlightShadowTestN->integer : 1;
+		int e;
+		if ( n > 4 ) n = 4;
+		for ( e = 0; e < n && r_numdlights < (int)ARRAY_LEN( backEndData->dlights ); e++ ) {
+			dlight_t *dl = &backEndData->dlights[ r_numdlights++ ];
+			memset( dl, 0, sizeof( *dl ) );
+			if ( n == 1 ) {
+				dl->origin[0] = fd->vieworg[0];
+				dl->origin[1] = fd->vieworg[1];
+			} else {
+				float ang = ( (float)e / (float)n ) * 2.0f * (float)M_PI;
+				dl->origin[0] = fd->vieworg[0] + cos( ang ) * rad * 0.5f;
+				dl->origin[1] = fd->vieworg[1] + sin( ang ) * rad * 0.5f;
+			}
+			dl->origin[2] = fd->vieworg[2] + 200.0f;   // 200u above the eye
+			dl->radius = rad;
+			dl->color[0] = 1.0f; dl->color[1] = 1.0f; dl->color[2] = 1.0f;
+			dl->linear = qfalse;
+		}
+		tr.refdef.num_dlights = r_numdlights - r_firstSceneDlight;
+	}
+#endif
 
 	tr.refdef.numPolys = r_numpolys - r_firstScenePoly;
 	tr.refdef.polys = &backEndData->polys[r_firstScenePoly];

@@ -15,7 +15,7 @@ cl_wired_msdf.h — MSDF font loading and rendering API
 
 /* ── limits ─────────────────────────────────────────────────────────── */
 
-#define MAX_MSDF_FONTS          8
+#define MAX_MSDF_FONTS          16  /* bumped from 8 to fit wui_icons + future modder atlas slots */
 #define MAX_MSDF_GLYPH_COUNT    512   /* max glyphs per font (Latin Extended + specials) */
 
 /* ── glyph data (one per codepoint) ─────────────────────────────────── */
@@ -105,6 +105,20 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
                       qboolean forceColor );
 
 /*
+ * MSDF_DrawStringBytes
+ *   Draw exactly `byteLen` bytes of `str`, skipping Q3 colour codes for width
+ *   but consuming their bytes. Unlike the glyph-budget MSDF_DrawString,
+ *   `str` need NOT be NUL-terminated at the slice end — iteration stops at the
+ *   byte boundary. byteLen < 0 == run to NUL. Companion of
+ *   MSDF_MeasureStringBytes: the Clay compositor uses this pair so the metric
+ *   it lays out with is the metric it renders with, for any embedded ^N codes.
+ */
+void MSDF_DrawStringBytes( msdfFont_t *font, float x, float y,
+                           float size, const float *color,
+                           const char *str, int byteLen, float letterSpacing,
+                           qboolean forceColor );
+
+/*
  * MSDF_MeasureString
  *   Return the total width in real screen pixels of the string,
  *   skipping Q3 color codes.  `maxChars` limits visible chars counted
@@ -112,6 +126,17 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
  */
 float MSDF_MeasureString( msdfFont_t *font, float size,
                           const char *str, int maxChars, float letterSpacing );
+
+/*
+ * MSDF_MeasureStringBytes
+ *   Width of exactly `byteLen` bytes of `str` (a possibly non-NUL-terminated
+ *   slice into a larger buffer), skipping Q3 colour codes. byteLen < 0 == run
+ *   to NUL. Byte-bounded twin of MSDF_MeasureString: fixes the Clay per-word
+ *   width-summation skew where a glyph budget over-read past an embedded ^N
+ *   code. Result == MSDF_DrawStringBytes width for the same slice.
+ */
+float MSDF_MeasureStringBytes( msdfFont_t *font, float size,
+                               const char *str, int byteLen, float letterSpacing );
 
 /*
  * MSDF_ClampToWidth

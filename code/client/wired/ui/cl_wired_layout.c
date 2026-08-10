@@ -7,12 +7,23 @@ cl_wired_layout.c — Wired UI: resolution-independent coordinate resolver
 
 #include "cl_wired_layout.h"
 #include "cl_wired_ui.h"
+#include "cl_wired_compositor.h"   /* WiredUI_GetDpiScale (UNIT_PX scaling) */
+
+#ifdef _DEBUG
+LOG_DECLARE_CHANNEL( ch_ui, "ui" );
+#endif
 
 float WUI_Resolve( wuiValue_t val, float parentSizePx, float vpWidth, float vpHeight ) {
 	switch ( val.unit ) {
 		case UNIT_VW:   return ( val.value / 100.0f ) * vpWidth;
 		case UNIT_VH:   return ( val.value / 100.0f ) * vpHeight;
-		case UNIT_PX:   return val.value;
+		/* Authored pixel lengths are LOGICAL points, but the Clay layout runs
+		 * in PHYSICAL pixels and the text path multiplies font size by
+		 * WiredUI_GetDpiScale() (cl_wired_clay.c). A fixed-px box height that
+		 * skipped that scale stayed logical-sized while its text grew 2× on
+		 * HiDPI, so glyphs overflowed their rows (cramped line spacing). Scale
+		 * UNIT_PX by the same factor so box geometry tracks the font. */
+		case UNIT_PX:   return val.value * WiredUI_GetDpiScale();
 		case UNIT_AUTO: return 0.0f;  // resolved later by layout engine from content
 		case UNIT_NORM:
 		default:        return val.value * parentSizePx;
@@ -70,6 +81,61 @@ void WUI_ApplyMinMax( wuiPixelRect_t *rect, const wuiFlexChild_t *child,
 	}
 }
 
+/* Dispatch 5.7 S1: bottom-up content measurement for UNIT_AUTO-sized flex
+ * children. Recursion invariants:
+ *   - Leaf with explicit size on the axis: return WUI_Resolve of that value
+ *   - Flex container, main axis matches: sum of children main + (n-1)*gap +
+ *     padding[main-side-1] + padding[main-side-2]
+ *   - Flex container, cross axis: max of children cross + cross-padding
+ *   - Fallback (no resolvable size, no children): rect's stored value
+ *     interpreted as NORM against parent (the dispatch-5.7 parser change
+ *     preserves the rect's pre-FIT value as a hint for exactly this fallback)
+ *   - Depth-bounded by tree termination; recursion follows existing
+ *     childCount walk.
+ */
+static float wui_measure_natural( const wiredItemDef_t *item, qboolean isHeight,
+                                  float parentMain, float parentCross,
+                                  float vpW, float vpH );
+
+static float wui_measure_natural( const wiredItemDef_t *item, qboolean isHeight,
+                                  float parentMain, float parentCross,
+                                  float vpW, float vpH )
+{
+	const wuiValue_t *axis = isHeight ? &item->wuiRect.h : &item->wuiRect.w;
+	if ( axis->unit != UNIT_AUTO ) {
+		float v = WUI_Resolve( *axis, parentMain, vpW, vpH );
+		if ( v > 0 ) return v;
+	}
+	if ( item->isFlexContainer && item->childCount > 0 ) {
+		qboolean mainIsHeight = ( item->flexContainer.direction == WUI_LAYOUT_COLUMN );
+		float padA = WUI_Resolve( item->flexContainer.padding[ isHeight ? 0 : 3 ], parentMain, vpW, vpH );
+		float padB = WUI_Resolve( item->flexContainer.padding[ isHeight ? 2 : 1 ], parentMain, vpW, vpH );
+		float gap = WUI_Resolve( item->flexContainer.gap, parentMain, vpW, vpH );
+		float total = 0;
+		float childMaxCross = 0;
+		int n = 0;
+		for ( int i = 0; i < item->childCount; i++ ) {
+			if ( !item->children[i] || !item->children[i]->visible ) continue;
+			float childM = wui_measure_natural( item->children[i], isHeight, parentMain, parentCross, vpW, vpH );
+			float childC = wui_measure_natural( item->children[i], !isHeight, parentCross, parentMain, vpW, vpH );
+			if ( ( isHeight == mainIsHeight ) ) {
+				total += childM;
+				n++;
+			} else {
+				if ( childM > childMaxCross ) childMaxCross = childM;
+			}
+			(void) childC;
+		}
+		if ( isHeight == mainIsHeight ) {
+			float gaps = ( n > 1 ) ? gap * ( n - 1 ) : 0;
+			return padA + padB + total + gaps;
+		}
+		return padA + padB + childMaxCross;
+	}
+	/* Leaf fallback: rect's preserved pre-FIT value (or 0 if never set). */
+	return WUI_Resolve( (wuiValue_t){ axis->value, UNIT_NORM }, parentMain, vpW, vpH );
+}
+
 void WUI_LayoutFlex(
     const wuiRect_t *items, wuiPixelRect_t *resolved, int count,
     const wuiPixelRect_t *container, const wuiFlexContainer_t *flex,
@@ -96,6 +162,16 @@ void WUI_LayoutFlex(
 	float mainSize   = ( flex->direction == WUI_LAYOUT_ROW ) ? innerW : innerH;
 	float crossTotal = ( flex->direction == WUI_LAYOUT_ROW ) ? innerH : innerW;
 	float gapPx = WUI_Resolve( flex->gap, mainSize, vpWidth, vpHeight );
+
+#ifdef _DEBUG
+	Com_Log( SEV_TRACE, LOG_CH(ch_ui),
+		"WUI_TRACE FLEX_ENTRY container=(%.1f,%.1f,%.1f,%.1f) inner=(%.1f,%.1f,%.1f,%.1f) "
+		"dir=%d count=%d mainSize=%.1f gapPx=%.1f align=%d justify=%d wrap=%d\n",
+		container->x, container->y, container->w, container->h,
+		innerX, innerY, innerW, innerH,
+		(int) flex->direction, count, mainSize, gapPx,
+		(int) flex->align, (int) flex->justify, (int) flex->wrap );
+#endif
 
 	// Process items in lines (for wrap support)
 	float lineCrossOffset = 0;
@@ -204,6 +280,15 @@ void WUI_LayoutFlex(
 				mainSizes[i] = natural;
 			}
 			if ( mainSizes[i] < 0 ) mainSizes[i] = 0;
+#ifdef _DEBUG
+			Com_Log( SEV_TRACE, LOG_CH(ch_ui),
+				"WUI_TRACE FLEX_CHILD idx=%d item.h=(%.3f:%d) item.w=(%.3f:%d) natural=%.2f mainSize=%.2f "
+				"grow=%.2f shrink=%.2f totalNat=%.1f excess=%.1f\n",
+				idx, items[idx].h.value, items[idx].h.unit,
+				items[idx].w.value, items[idx].w.unit,
+				natural, mainSizes[i],
+				childProps[idx].grow, childProps[idx].shrink, totalNatural, excess );
+#endif
 		}
 
 		// 4. Apply justify (position on main axis)
@@ -213,6 +298,11 @@ void WUI_LayoutFlex(
 		if ( mainRemaining < 0 ) mainRemaining = 0;
 
 		float cursor;
+		// Per-line positioning gap. Seeded from the function-scope gapPx each
+		// iteration so the SPACE_BETWEEN override below cannot leak into the next
+		// wrapped line (the function-scope gapPx stays the authored flex->gap,
+		// which line 377's inter-line spacing still needs).
+		float layoutGap = gapPx;
 		switch ( flex->justify ) {
 			case WUI_JUSTIFY_CENTER:
 				cursor = mainRemaining * 0.5f;
@@ -223,7 +313,7 @@ void WUI_LayoutFlex(
 			case WUI_JUSTIFY_SPACE_BETWEEN:
 				cursor = 0;
 				if ( lineCount > 1 ) {
-					gapPx = mainRemaining / ( lineCount - 1 );
+					layoutGap = mainRemaining / ( lineCount - 1 );
 				}
 				break;
 			case WUI_JUSTIFY_START:
@@ -292,7 +382,7 @@ void WUI_LayoutFlex(
 				WUI_ApplyAspect( &resolved[idx], &aspects[idx] );
 			}
 
-			cursor += childMain + gapPx;
+			cursor += childMain + layoutGap;
 		}
 
 		lineCrossOffset += lineCrossMax;
@@ -303,8 +393,15 @@ void WUI_LayoutFlex(
 
 // ── Layout tree resolution ───────────────────────────────────────────
 
-void WUI_LayoutItem( wiredItemDef_t *item, const wuiPixelRect_t *parent,
-                     float vpWidth, float vpHeight ) {
+/* sizeAlreadyResolved: the caller (a parent flex pass) has ALREADY assigned this
+   item's final box into item->resolvedRect and passes that same box as `parent`.
+   In that case the item's own w/h/x/y must NOT be re-resolved against the parent
+   — doing so applies a PERCENT/NORM size a SECOND time (0.4×parent when the flex
+   pass already made the item 0.4×grandparent), starving the box. Preserve the
+   flex-assigned rect and only lay out the item's children. */
+static void WUI_LayoutItemImpl( wiredItemDef_t *item, const wuiPixelRect_t *parent,
+                                float vpWidth, float vpHeight,
+                                qboolean sizeAlreadyResolved ) {
 	const wuiRect_t *srcRect;
 
 	// Check for responsive breakpoint override
@@ -315,48 +412,250 @@ void WUI_LayoutItem( wiredItemDef_t *item, const wuiPixelRect_t *parent,
 		if ( bpRect ) srcRect = bpRect;
 	}
 
-	// Resolve this item's rect relative to parent
-	item->resolvedRect = WUI_ResolveRect( srcRect, parent, vpWidth, vpHeight );
-
-	// Apply aspect ratio constraint
-	if ( item->aspect.active ) {
-		WUI_ApplyAspect( &item->resolvedRect, &item->aspect );
+	// Resolve this item's rect relative to parent — UNLESS the parent's flex pass
+	// already assigned the final box (then re-resolving would double-apply size).
+	if ( !sizeAlreadyResolved ) {
+		item->resolvedRect = WUI_ResolveRect( srcRect, parent, vpWidth, vpHeight );
 	}
 
-	// Apply min/max constraints
-	WUI_ApplyMinMax( &item->resolvedRect, &item->flexChild, vpWidth, vpHeight );
+	/* No-size flex container → fill parent. A flex container that authored no
+	 * size on an axis (the default `{value:0, unit:UNIT_NORM}`, or an explicit
+	 * UNIT_AUTO) resolves that axis to 0 via WUI_Resolve — collapsing the whole
+	 * subtree. The loading-screen decoration group wrappers (loading_backdrop_
+	 * root, loading_topbar_root, loading_maptitle_root, …: `type container /
+	 * direction column / decoration` with no rect) are exactly this case, and
+	 * their absolutely-placed children then resolve against a 0×0 box. A flex
+	 * container with no authored extent is, by intent, a layout wrapper that
+	 * should span its parent (so its children — flex-flowed or absolutely
+	 * placed via the partition below — have a real coordinate space). Mirror
+	 * that: default each unauthored axis to the parent's size. An authored size
+	 * (any non-zero value, or a non-NORM/AUTO unit like VW/VH/PX) is left
+	 * untouched, so this never overrides an explicit container size. */
+	if ( item->isFlexContainer && !sizeAlreadyResolved ) {
+		if ( srcRect->w.value == 0.0f
+		     && ( srcRect->w.unit == UNIT_NORM || srcRect->w.unit == UNIT_AUTO ) ) {
+			item->resolvedRect.w = parent->w;
+		}
+		if ( srcRect->h.value == 0.0f
+		     && ( srcRect->h.unit == UNIT_NORM || srcRect->h.unit == UNIT_AUTO ) ) {
+			item->resolvedRect.h = parent->h;
+		}
+	}
+
+	// Dispatch 5.6 S1: CSS-style per-side anchor offset overrides. When
+	// wuiOffset has any side declared, override resolvedRect.x/y/w/h so the
+	// child recursion below resolves grandchildren against the correct
+	// floating-parent rect. Reference frame is the viewport (mirrors
+	// cl_wired_clay.c dispatch 5.5 S2 use of panel->resolvedRect; both must
+	// agree on the offset's reference frame for emit and layout to align).
+	// CSS-positioned ancestor lookup not implemented — V1_Monolith's
+	// main_root is the menu root which IS the viewport so this matches
+	// mockup intent; future artboards with nested position:relative
+	// ancestors will need that lookup.
+	{
+		const wuiOffset_t *off = &item->wuiOffset;
+		if ( off->hasTop || off->hasLeft || off->hasRight || off->hasBottom ) {
+			float pX = 0.0f;
+			float pY = 0.0f;
+			float pW = vpWidth;
+			float pH = vpHeight;
+			if ( off->hasLeft ) {
+				item->resolvedRect.x = pX + WUI_Resolve( off->left, pW, vpWidth, vpHeight );
+			}
+			if ( off->hasTop ) {
+				item->resolvedRect.y = pY + WUI_Resolve( off->top, pH, vpWidth, vpHeight );
+			}
+			if ( off->hasRight ) {
+				float rPx = WUI_Resolve( off->right, pW, vpWidth, vpHeight );
+				if ( off->hasLeft ) {
+					item->resolvedRect.w = ( pX + pW - rPx ) - item->resolvedRect.x;
+				} else {
+					if ( item->resolvedRect.w <= 0 ) item->resolvedRect.w = pW * 0.25f;
+					item->resolvedRect.x = pX + pW - rPx - item->resolvedRect.w;
+				}
+			}
+			if ( off->hasBottom ) {
+				float bPx = WUI_Resolve( off->bottom, pH, vpWidth, vpHeight );
+				if ( off->hasTop ) {
+					item->resolvedRect.h = ( pY + pH - bPx ) - item->resolvedRect.y;
+				} else {
+					if ( item->resolvedRect.h <= 0 ) item->resolvedRect.h = pH * 0.25f;
+					item->resolvedRect.y = pY + pH - bPx - item->resolvedRect.h;
+				}
+			}
+			// CSS-auto stretch: top without bottom → height fills to parent
+			// bottom; left without right → width fills to parent right.
+			if ( item->resolvedRect.h <= 0 && off->hasTop ) {
+				item->resolvedRect.h = pY + pH - item->resolvedRect.y;
+			}
+			if ( item->resolvedRect.w <= 0 && off->hasLeft ) {
+				item->resolvedRect.w = pX + pW - item->resolvedRect.x;
+			}
+		}
+	}
+
+	// Apply aspect + min/max — but ONLY on a fresh resolve. A flex-assigned child
+	// (sizeAlreadyResolved) had these applied to its box by the parent's flex pass;
+	// re-running them here is non-idempotent (a NORM min re-grows against the
+	// already-clamped width, aspect re-centers), so under the guard the assigned
+	// box is left fully final.
+	if ( !sizeAlreadyResolved ) {
+		// Apply aspect ratio constraint
+		if ( item->aspect.active ) {
+			WUI_ApplyAspect( &item->resolvedRect, &item->aspect );
+		}
+
+		// Apply min/max constraints
+		WUI_ApplyMinMax( &item->resolvedRect, &item->flexChild, vpWidth, vpHeight );
+	}
+
+#ifdef _DEBUG
+	Com_Log( SEV_TRACE, LOG_CH(ch_ui),
+		"WUI_TRACE LAYOUTITEM item='%s' parent=(%.1f,%.1f,%.1f,%.1f) "
+		"resolved=(%.1f,%.1f,%.1f,%.1f) flex=%d childCount=%d\n",
+		item->name[ 0 ] ? item->name : "<anon>",
+		parent->x, parent->y, parent->w, parent->h,
+		item->resolvedRect.x, item->resolvedRect.y,
+		item->resolvedRect.w, item->resolvedRect.h,
+		(int) item->isFlexContainer, item->childCount );
+#endif
 
 	// Recursively resolve children
 	if ( item->isFlexContainer && item->childCount > 0 ) {
-		// Use flexbox layout for children
-		wuiRect_t     *childRects  = (wuiRect_t *)alloca( item->childCount * sizeof( wuiRect_t ) );
-		wuiPixelRect_t *childResolved = (wuiPixelRect_t *)alloca( item->childCount * sizeof( wuiPixelRect_t ) );
-		wuiFlexChild_t *childProps = (wuiFlexChild_t *)alloca( item->childCount * sizeof( wuiFlexChild_t ) );
-		wuiAspect_t    *childAspects = (wuiAspect_t *)alloca( item->childCount * sizeof( wuiAspect_t ) );
+		/* Partition children the same way WUI_LayoutMenu's root loop does
+		 * (the menu-root split at the bottom of this file): an absolutely-
+		 * positioned child is resolved OUTSIDE the flex flow against this
+		 * container's rect (honoring its authored x/y/w/h), and is excluded
+		 * from the flex participant set so it is not column/row-stacked.
+		 * Static children flow through the flex path unchanged.
+		 *
+		 * "Absolutely-positioned" = explicit `position absolute|viewport`
+		 * OR a `decoration` leaf that authored an explicit non-AUTO rect
+		 * (e.g. loading_screen's loading_backdrop_root grid/divider/glow,
+		 * which are POSITION_STATIC by default but carry `rect X Y W H`).
+		 * The `decoration` qualifier is load-bearing: it distinguishes an
+		 * absolutely-placed visual from an interactive flex child that also
+		 * happens to author a rect (options/network/video controls), which
+		 * must keep flex-stacking. Without this split a flex container with
+		 * no authored size collapsed its absolute children to (0,0,0,0).
+		 * (Nested `position viewport` does not occur in the corpus — connect
+		 * .wui's viewport items are menu-root, handled by the root loop — so
+		 * VIEWPORT is resolved against the container here like ABSOLUTE.) */
+		int *flexIdx   = (int *)alloca( item->childCount * sizeof( int ) );
+		int  flexCount = 0;
 
 		for ( int i = 0; i < item->childCount; i++ ) {
-			childRects[i]   = item->children[i]->wuiRect;
-			childProps[i]   = item->children[i]->flexChild;
-			childAspects[i] = item->children[i]->aspect;
+			wiredItemDef_t *c = item->children[i];
+			/* A nested flex child is resolved at its authored rect (pulled
+			 * OUT of flex flow) iff it is explicitly non-static, OR it is an
+			 * absolutely-placed decoration leaf. The decoration arm needs
+			 * THREE guards to avoid sweeping in legitimate flex children that
+			 * also author a rect (the main-menu cards/rows in qw_*_card.wui /
+			 * qw_menu_item.wui, which are `decoration` with `width PERCENT` /
+			 * `height FIT` that resolve to non-AUTO units — so a w/h-only test
+			 * is not enough):
+			 *   - flexChild.grow == 0 : a grower is, by definition, flexed.
+			 *   - w & h are non-AUTO and > 0 : it authored a concrete size.
+			 *   - x != 0 || y != 0 : it authored a concrete POSITION. The card
+			 *     leaves author `rect 0 0 W H` and rely on flex to place them;
+			 *     the loading backdrop leaves author non-zero x/y (grid y=0.04…,
+			 *     dividers x=0.518…, glows x=0.10/0.50 y=0.30). This authored-
+			 *     position test is the load-bearing discriminator. */
+			qboolean absolute =
+				c->position != POSITION_STATIC
+				|| ( c->decoration
+				     && c->flexChild.grow == 0.0f
+				     && c->wuiRect.w.unit != UNIT_AUTO && c->wuiRect.w.value > 0.0f
+				     && c->wuiRect.h.unit != UNIT_AUTO && c->wuiRect.h.value > 0.0f
+				     && ( c->wuiRect.x.value != 0.0f || c->wuiRect.y.value != 0.0f ) );
+			if ( absolute ) {
+				// Resolve at the authored rect against this container; this
+				// call recurses into the child's own grandchildren internally.
+				WUI_LayoutItemImpl( c, &item->resolvedRect, vpWidth, vpHeight, qfalse );
+			} else {
+				flexIdx[ flexCount++ ] = i;
+			}
 		}
 
-		WUI_LayoutFlex( childRects, childResolved, item->childCount,
+		if ( flexCount > 0 ) {
+		// Use flexbox layout for the static participants only.
+		wuiRect_t     *childRects  = (wuiRect_t *)alloca( flexCount * sizeof( wuiRect_t ) );
+		wuiPixelRect_t *childResolved = (wuiPixelRect_t *)alloca( flexCount * sizeof( wuiPixelRect_t ) );
+		wuiFlexChild_t *childProps = (wuiFlexChild_t *)alloca( flexCount * sizeof( wuiFlexChild_t ) );
+		wuiAspect_t    *childAspects = (wuiAspect_t *)alloca( flexCount * sizeof( wuiAspect_t ) );
+
+		for ( int k = 0; k < flexCount; k++ ) {
+			wiredItemDef_t *c = item->children[ flexIdx[k] ];
+			childRects[k]   = c->wuiRect;
+			childProps[k]   = c->flexChild;
+			childAspects[k] = c->aspect;
+
+			/* Dispatch 5.7 S1: pre-resolve UNIT_AUTO sizes via the
+			 * parser-preserved rect-declared hint OR via bottom-up
+			 * measurement when no hint exists. WUI_LayoutFlex itself sees
+			 * the substituted UNIT_PX value and routes through the
+			 * existing fixed-size path. Without this, AUTO children
+			 * resolve to 0 via WUI_Resolve's UNIT_AUTO branch and all
+			 * stack at cursor=0. */
+			if ( childRects[k].h.unit == UNIT_AUTO ) {
+				float hint = childRects[k].h.value * item->resolvedRect.h;
+				float measured = hint > 0 ? hint : wui_measure_natural(
+					c, qtrue,
+					item->resolvedRect.h, item->resolvedRect.w, vpWidth, vpHeight );
+				if ( measured > 0 ) {
+					childRects[k].h.unit = UNIT_PX;
+					childRects[k].h.value = measured;
+				}
+			}
+			if ( childRects[k].w.unit == UNIT_AUTO ) {
+				float hint = childRects[k].w.value * item->resolvedRect.w;
+				float measured = hint > 0 ? hint : wui_measure_natural(
+					c, qfalse,
+					item->resolvedRect.w, item->resolvedRect.h, vpWidth, vpHeight );
+				if ( measured > 0 ) {
+					childRects[k].w.unit = UNIT_PX;
+					childRects[k].w.value = measured;
+				}
+			}
+		}
+
+		WUI_LayoutFlex( childRects, childResolved, flexCount,
 			&item->resolvedRect, &item->flexContainer, childProps, childAspects,
 			vpWidth, vpHeight );
 
-		for ( int i = 0; i < item->childCount; i++ ) {
-			item->children[i]->resolvedRect = childResolved[i];
-			// Recurse into grandchildren
-			if ( item->children[i]->isFlexContainer && item->children[i]->childCount > 0 ) {
-				WUI_LayoutItem( item->children[i], &childResolved[i], vpWidth, vpHeight );
+		for ( int k = 0; k < flexCount; k++ ) {
+			wiredItemDef_t *c = item->children[ flexIdx[k] ];
+			c->resolvedRect = childResolved[k];
+#ifdef _DEBUG
+			Com_Log( SEV_TRACE, LOG_CH(ch_ui),
+				"WUI_TRACE FLEXCHILD parent='%s' child='%s' assigned=(%.1f,%.1f,%.1f,%.1f) recurse=%d\n",
+				item->name[ 0 ] ? item->name : "<anon>",
+				c->name[ 0 ] ? c->name : "<anon>",
+				childResolved[k].x, childResolved[k].y,
+				childResolved[k].w, childResolved[k].h,
+				(int)( c->isFlexContainer && c->childCount > 0 ) );
+#endif
+			// Recurse into grandchildren. The child's box was ASSIGNED by the
+			// flex pass above (c->resolvedRect = childResolved[k]) — pass that as
+			// parent AND flag it resolved so the recursion lays out grandchildren
+			// without re-resolving (and double-applying) the child's own size.
+			if ( c->isFlexContainer && c->childCount > 0 ) {
+				WUI_LayoutItemImpl( c, &childResolved[k], vpWidth, vpHeight, qtrue );
 			}
+		}
 		}
 	} else {
 		// Absolute positioning: resolve children relative to this item
 		for ( int i = 0; i < item->childCount; i++ ) {
-			WUI_LayoutItem( item->children[i], &item->resolvedRect, vpWidth, vpHeight );
+			WUI_LayoutItemImpl( item->children[i], &item->resolvedRect, vpWidth, vpHeight, qfalse );
 		}
 	}
+}
+
+// Public entry: resolve an item and its subtree against `parent` from scratch.
+void WUI_LayoutItem( wiredItemDef_t *item, const wuiPixelRect_t *parent,
+                     float vpWidth, float vpHeight ) {
+	WUI_LayoutItemImpl( item, parent, vpWidth, vpHeight, qfalse );
 }
 
 void WUI_LayoutMenu( wiredMenuDef_t *menu, float vpWidth, float vpHeight ) {
@@ -460,8 +759,11 @@ void WUI_LayoutMenu( wiredMenuDef_t *menu, float vpWidth, float vpHeight ) {
 			for ( int i = 0; i < flexCount; i++ ) {
 				int idx = flexIndices[i];
 				menu->items[idx]->resolvedRect = flexResolved[i];
+				// Menu-root flex child: box already assigned (flexResolved[i]) —
+				// recurse in size-resolved mode so the child's own PERCENT size is
+				// not applied a second time against its just-assigned box.
 				if ( menu->items[idx]->isFlexContainer && menu->items[idx]->childCount > 0 ) {
-					WUI_LayoutItem( menu->items[idx], &flexResolved[i], vpWidth, vpHeight );
+					WUI_LayoutItemImpl( menu->items[idx], &flexResolved[i], vpWidth, vpHeight, qtrue );
 				}
 			}
 		}

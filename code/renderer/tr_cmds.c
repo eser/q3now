@@ -2,6 +2,9 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.cmd
+
+R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
 static int s_anaglyph_mod = -1;
 
@@ -19,33 +22,33 @@ static void R_PerformanceCounters( void ) {
 	}
 
 	if (r_speeds->integer == 1) {
-		ri.Log( SEV_INFO, "%i/%i shaders/surfs %i leafs %i verts %i/%i tris %.2f mtex %.2f dc\n",
+		R_LOG( rch_cmd, SEV_INFO, "%i/%i shaders/surfs %i leafs %i verts %i/%i tris %.2f mtex %.2f dc\n",
 			backEnd.pc.c_shaders, backEnd.pc.c_surfaces, tr.pc.c_leafs, backEnd.pc.c_vertexes,
 			backEnd.pc.c_indexes/3, backEnd.pc.c_totalIndexes/3,
 			R_SumOfUsedImages()/(1000000.0f), backEnd.pc.c_overDraw / (float)(glConfig.vidWidth * glConfig.vidHeight) );
 	} else if (r_speeds->integer == 2) {
-		ri.Log( SEV_INFO, "(patch) %i sin %i sclip  %i sout %i bin %i bclip %i bout\n",
+		R_LOG( rch_cmd, SEV_INFO, "(patch) %i sin %i sclip  %i sout %i bin %i bclip %i bout\n",
 			tr.pc.c_sphere_cull_patch_in, tr.pc.c_sphere_cull_patch_clip, tr.pc.c_sphere_cull_patch_out,
 			tr.pc.c_box_cull_patch_in, tr.pc.c_box_cull_patch_clip, tr.pc.c_box_cull_patch_out );
-		ri.Log( SEV_INFO, "(md3) %i sin %i sclip  %i sout %i bin %i bclip %i bout\n",
+		R_LOG( rch_cmd, SEV_INFO, "(md3) %i sin %i sclip  %i sout %i bin %i bclip %i bout\n",
 			tr.pc.c_sphere_cull_md3_in, tr.pc.c_sphere_cull_md3_clip, tr.pc.c_sphere_cull_md3_out,
 			tr.pc.c_box_cull_md3_in, tr.pc.c_box_cull_md3_clip, tr.pc.c_box_cull_md3_out );
 	} else if (r_speeds->integer == 3) {
-		ri.Log( SEV_INFO, "viewcluster: %i\n", tr.viewCluster );
+		R_LOG( rch_cmd, SEV_INFO, "viewcluster: %i\n", tr.viewCluster );
 	} else if (r_speeds->integer == 4) {
 		if ( backEnd.pc.c_dlightVertexes ) {
-			ri.Log( SEV_INFO, "dlight srf:%i  culled:%i  verts:%i  tris:%i\n",
+			R_LOG( rch_cmd, SEV_INFO, "dlight srf:%i  culled:%i  verts:%i  tris:%i\n",
 				tr.pc.c_dlightSurfaces, tr.pc.c_dlightSurfacesCulled,
 				backEnd.pc.c_dlightVertexes, backEnd.pc.c_dlightIndexes / 3 );
 		}
 	}
 	else if (r_speeds->integer == 5 )
 	{
-		ri.Log( SEV_INFO, "zFar: %.0f\n", tr.viewParms.zFar );
+		R_LOG( rch_cmd, SEV_INFO, "zFar: %.0f\n", tr.viewParms.zFar );
 	}
 	else if (r_speeds->integer == 6 )
 	{
-		ri.Log( SEV_INFO, "flare adds:%i tests:%i renders:%i\n",
+		R_LOG( rch_cmd, SEV_INFO, "flare adds:%i tests:%i renders:%i\n",
 			backEnd.pc.c_flareAdds, backEnd.pc.c_flareTests, backEnd.pc.c_flareRenders );
 	}
 

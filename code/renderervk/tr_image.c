@@ -3,9 +3,12 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_image.c
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism — renderer.assets
 #ifdef USE_VULKAN
-#include "vk_ral_textures.h"   // Phase 7.4a — parallel-paths RAL texture migration
+#include "vk_ral_textures.h"   // parallel-paths RAL texture migration
 #endif
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 static byte			 s_intensitytable[256];
 static unsigned char s_gammatable[256];
@@ -76,7 +79,7 @@ void GL_TextureMode( const char *string ) {
 	}
 
 	if ( mode == NULL ) {
-		ri.Log( SEV_INFO, "bad texture filter name '%s'\n", string );
+		R_LOG( rch_assets, SEV_INFO, "bad texture filter name '%s'\n", string );
 		return;
 	}
 
@@ -105,7 +108,7 @@ void GL_TextureMode( const char *string ) {
 	if ( glConfig.hardwareType == GLHW_3DFX_2D3D && gl_filter_max == GL_LINEAR &&
 		gl_filter_min == GL_LINEAR_MIPMAP_LINEAR ) {
 		gl_filter_min = GL_LINEAR_MIPMAP_NEAREST;
-		ri.Log( SEV_INFO, "Refusing to set trilinear on a voodoo.\n" );
+		R_LOG( rch_assets, SEV_INFO, "Refusing to set trilinear on a voodoo.\n" );
 	}
 
 	// change all the existing mipmap texture objects
@@ -140,6 +143,19 @@ int R_SumOfUsedImages( void ) {
 	return total;
 }
 
+/*
+===============
+R_ImageIsPinned
+
+Do-not-evict predicate for the texture-LRU (Phase 7.15.4). True when the image is
+flagged IMGFLAG_PINNED (set in 7.15.4-a on class A/B/C). The victim-scan in
+7.15.4-c skips pinned images. No caller yet in 7.15.4-a — dark classification.
+===============
+*/
+qboolean R_ImageIsPinned( const image_t *img ) {
+	return ( img && ( img->flags & IMGFLAG_PINNED ) ) ? qtrue : qfalse;
+}
+
 
 /*
 ===============
@@ -151,7 +167,7 @@ void R_ImageList_f( void ) {
 	int i, estTotalSize = 0;
 	char *name, buf[MAX_QPATH*2 + 5];
 
-	ri.Log( SEV_INFO, "\n -n- --w-- --h-- type  -size- --name-------\n" );
+	R_LOG( rch_assets, SEV_INFO, "\n -n- --w-- --h-- type  -size- --name-------\n" );
 
 	for ( i = 0; i < tr.numImages; i++ )
 	{
@@ -248,13 +264,13 @@ void R_ImageList_f( void ) {
 			name = buf;
 		}
 
-		ri.Log( SEV_INFO, " %3i %5i %5i %s %4i%s %s\n", i, image->uploadWidth, image->uploadHeight, format, displaySize, sizeSuffix, name );
+		R_LOG( rch_assets, SEV_INFO, " %3i %5i %5i %s %4i%s %s\n", i, image->uploadWidth, image->uploadHeight, format, displaySize, sizeSuffix, name );
 		estTotalSize += estSize;
 	}
 
-	ri.Log( SEV_INFO, " -----------------------\n" );
-	ri.Log( SEV_INFO, " approx %i kbytes\n", (estTotalSize + 1023) / 1024 );
-	ri.Log( SEV_INFO, " %i total images\n\n", tr.numImages );
+	R_LOG( rch_assets, SEV_INFO, " -----------------------\n" );
+	R_LOG( rch_assets, SEV_INFO, " approx %i kbytes\n", (estTotalSize + 1023) / 1024 );
+	R_LOG( rch_assets, SEV_INFO, " %i total images\n\n", tr.numImages );
 }
 
 
@@ -262,7 +278,7 @@ void R_ImageList_f( void ) {
 ===============
 R_TestDDS_f
 
-Phase 6.5.1: developer command — `testdds <path[.dds]>`. Loads the
+developer command — `testdds <path[.dds]>`. Loads the
 named DDS through the normal image path (so cubemap / volume header
 classification and the cube/3D VkImage + view creation all run) and
 prints what came back: dimensions, texType, array layers, internal
@@ -279,7 +295,7 @@ void R_TestDDS_f( void ) {
 	int          tt;
 
 	if ( ri.Cmd_Argc() < 2 ) {
-		ri.Log( SEV_INFO, "usage: testdds <path>  (e.g. testdds gfx/env/test_cube.dds)\n" );
+		R_LOG( rch_assets, SEV_INFO, "usage: testdds <path>  (e.g. testdds gfx/env/test_cube.dds)\n" );
 		return;
 	}
 
@@ -293,7 +309,7 @@ void R_TestDDS_f( void ) {
 
 	image = R_FindImageFile( path, IMGFLAG_NONE );
 	if ( image == NULL ) {
-		ri.Log( SEV_WARN, "testdds: '%s' could not be loaded (missing, bad header, or unsupported format).\n", path );
+		R_LOG( rch_assets, SEV_WARN, "testdds: '%s' could not be loaded (missing, bad header, or unsupported format).\n", path );
 		return;
 	}
 
@@ -301,7 +317,7 @@ void R_TestDDS_f( void ) {
 	if ( tt < 0 || tt >= (int)ARRAY_LEN( texTypeName ) )
 		tt = 0;
 
-	ri.Log( SEV_INFO, "testdds: '%s' -> %dx%d depth=%d  texType=%s  arrayLayers=%u  VkFormat=%d  view=%s descriptor=%s\n",
+	R_LOG( rch_assets, SEV_INFO, "testdds: '%s' -> %dx%d depth=%d  texType=%s  arrayLayers=%u  VkFormat=%d  view=%s descriptor=%s\n",
 		image->imgName, image->width, image->height, image->depth,
 		texTypeName[tt], image->layerCount, (int)image->internalFormat,
 		( image->view != VK_NULL_HANDLE ) ? "ok" : "NULL",
@@ -437,7 +453,7 @@ static void R_LightScaleTexture( byte *in, int inwidth, int inheight, qboolean o
 
 
 //
-// Phase 6B3'-d3-C: sRGB <-> linear lookup tables for gamma-correct
+// sRGB <-> linear lookup tables for gamma-correct
 // mipmap generation. Mipmap bytes are sRGB-encoded; naive byte-
 // space averaging compresses dark tones disproportionately,
 // producing chromatic shift in distant LODs. Decode -> linear-
@@ -476,7 +492,7 @@ static void R_InitMipmapLUTs( void ) {
 
 /*
 ================
-R_SRGBToLinear / R_LinearToSRGB — Phase 6B3'-d4-m2
+R_SRGBToLinear / R_LinearToSRGB
 
 Precise piecewise sRGB EOTF / OETF for one-off host-side colour
 decodes (push constants, colour uniforms). Math matches the GLSL
@@ -512,7 +528,7 @@ R_MipMap2
 Operates in place, quartering the size of the texture
 Proper linear filter
 
-Phase 6B3'-d3-C: when isSRGB == qtrue, the inner loop decodes
+When isSRGB == qtrue, the inner loop decodes
 input bytes via s_srgb_to_linear_lut, averages in linear domain,
 re-encodes via s_linear_to_srgb_lut. Alpha is averaged byte-space
 in both modes (alpha is not sRGB-encoded). When isSRGB == qfalse
@@ -643,7 +659,7 @@ static void R_MipMap( byte *out, byte *in, int width, int height, qboolean isSRG
 	width >>= 1;
 	height >>= 1;
 
-	// Phase 6B3'-d3-C: per-channel sRGB-aware averaging when isSRGB.
+	// per-channel sRGB-aware averaging when isSRGB.
 	// RGB channels round-trip through the decode/encode LUTs; alpha
 	// stays in byte space. The encode LUT is 1024-entry so the
 	// (sum / 4) bucket index uses `* (1023.0f / 4.0f)` directly.
@@ -786,6 +802,14 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 
 	memset( upload_data, 0, sizeof( *upload_data ) );
 
+	// Guard against a zero-dimension image: under IMGFLAG_NOSCALE the
+	// power-of-two normalization is skipped, so a 0 width/height would flow
+	// straight into the size math below and Hunk_AllocateTempMemory(0), with
+	// downstream memset/ResampleTexture/mip-gen then operating on a 0-byte
+	// buffer. Clamp to at least 1×1.
+	if ( width < 1 )  width = 1;
+	if ( height < 1 ) height = 1;
+
 	if ( image->flags & IMGFLAG_NOSCALE ) {
 		//
 		// keep original dimensions
@@ -844,7 +868,7 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 				// lm_XXXX atlases) — this loop is dead. If resurrected
 				// it'd be for lightmap atlases, so byte-verbatim (qtrue):
 				// the ×2 q3map2-overbright doubling is done in the shader
-				// (LIGHTMAP_BOOST). Phase 6B3'-d4-m_final (Block 1).
+				// (LIGHTMAP_BOOST).
 				R_ColorShiftLightingBytes( p, p, qfalse, qtrue );
 			}
 		}
@@ -888,12 +912,12 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 		return;	//return upload_data;
 	}
 
-	// Phase 6B3'-d3-C: source-content classification for sRGB-aware
+	// source-content classification for sRGB-aware
 	// mipmap averaging. Color content (no NOLIGHTSCALE, OR LIGHTMAP)
 	// gets the decode/average/encode round-trip. Non-color content
 	// (normal maps, masks, MSDF, LUTs — IMGFLAG_NOLIGHTSCALE without
 	// IMGFLAG_LIGHTMAP) preserves the legacy byte-space averaging.
-	// The LIGHTMAP override is required because tr_bsp.c's lightmap
+	// The LIGHTMAP override is required because tr_map.c's lightmap
 	// flags carry both NOLIGHTSCALE and LIGHTMAP — lightmaps are
 	// sRGB-encoded radiance from q3map2 and must decode/encode.
 	{
@@ -1038,6 +1062,9 @@ image_t *R_CreateImageArray( const char *name, byte **frames, int numFrames, int
 	image->handle        = VK_NULL_HANDLE;
 	image->view          = VK_NULL_HANDLE;
 	image->descriptor    = VK_NULL_HANDLE;
+	image->ral           = NULL;
+	image->ralBindlessSlot     = -1;
+	image->bindlessSamplerSlot = -1;
 
 	/* Determine format from first frame */
 	{
@@ -1070,6 +1097,13 @@ image_t *R_CreateImageArray( const char *name, byte **frames, int numFrames, int
 			ri.Hunk_FreeTempMemory( ud.buffer );
 		}
 	}
+
+	// register the 2D-array view into the parallel bindless
+	// SAMPLED_IMAGE binding so q1_ls_array.frag's animArray (and any future
+	// content 2D-array consumer) can sample by role index. vk_create_image
+	// already populated image->bindlessSamplerSlot via vk_update_descriptor_set;
+	// this only allocates the array-binding slot + writes image->view there.
+	vk_ral_register_image_array( image );
 
 	return image;
 }
@@ -1198,7 +1232,7 @@ static void Upload32( byte *data, int x, int y, int width, int height, image_t *
 		int i, n = width * height;
 		for ( i = 0; i < n; i++, p+=4 ) {
 			// dead loop (IMGFLAG_COLORSHIFT never set); see the twin in
-			// the Vulkan path above. Phase 6B3'-d4-m_final: byte-verbatim.
+			// the Vulkan path above. byte-verbatim.
 			R_ColorShiftLightingBytes( p, p, qfalse, qtrue );
 		}
 	}
@@ -1415,6 +1449,18 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 
 	tr.images[ tr.numImages++ ] = image;
 
+	// Phase 7.15.4-a class-A pin: procedural/no-disk-source built-ins (*default,
+	// *white, *black, *identityLight, *dlight, *fog, *scratch*, ...) and lightmap /
+	// sun-mask atlases (*mergedLightmap%d / *mergedSunMask%d, IMGFLAG_LIGHTMAP,
+	// filled in-place from BSP) cannot be re-decoded from disk, so they must never
+	// be evicted. They are exactly the '*'-named OR IMGFLAG_LIGHTMAP set and all
+	// route through R_CreateImage, so this single site covers class A. World/content
+	// textures are neither '*'-named nor lightmap-flagged, so they are NOT pinned
+	// here (the over-pin failure mode). Dark in 7.15.4-a (no reader yet).
+	if ( name[0] == '*' || ( flags & IMGFLAG_LIGHTMAP ) ) {
+		flags |= IMGFLAG_PINNED;
+	}
+
 	image->flags      = flags;
 	image->width      = width;
 	image->height     = height;
@@ -1450,8 +1496,9 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 	image->descriptor = VK_NULL_HANDLE;
 	image->ral = NULL;
 	image->ralBindlessSlot = -1;
+	image->bindlessSamplerSlot = -1;
 
-	// Phase 7.4a: parallel-paths migration. The RAL texture is registered
+	// parallel-paths migration. The RAL texture is registered
 	// BEFORE upload_vk_image because generate_image_upload_data may mutate
 	// `pic` in place (NPOT scaling, R_MipMap downsamples). Ral_TextureUpload-
 	// Async copies pic into a staging buffer + waits internally, so by the
@@ -1652,7 +1699,7 @@ static const char *R_LoadImage( const char *name, byte **pic, int *width, int *h
 #if 0
 			if ( orgNameFailed )
 			{
-				ri.Log( SEV_DEBUG, S_COLOR_YELLOW "WARNING: %s not present, using %s instead\n",
+				R_LOG( rch_assets, SEV_WARN, "WARNING: %s not present, using %s instead\n",
 						name, altName );
 			}
 #endif
@@ -1706,14 +1753,14 @@ static qboolean MixedFlagsWarnOnce( const char *name, imgFlags_t storedFlags, im
 ================
 R_CreateImageDDS
 
-Phase 6.5: image_t allocation + GPU upload for DDS assets. Skips the
+image_t allocation + GPU upload for DDS assets. Skips the
 RGBA-byte processing chain (Upload32, r_mapSaturation mutation,
 mipmap generation, format auto-detect) — the DDS file ships
 pre-encoded blocks with its own mip chain. Mirrors the bookkeeping
 side of R_CreateImage (hash table, tr.images[], wrapClampMode) so the
 engine treats the result like any other sampleable image.
 
-Phase 6.5.1: `info` carries the cubemap / volume classification from
+`info` carries the cubemap / volume classification from
 R_LoadDDS; image->texType / layerCount / depth are populated from it
 before vk_create_image (which then picks VkImageType, view type and
 arrayLayers) and vk_upload_dds_image_data (which picks the upload
@@ -1765,7 +1812,7 @@ static image_t *R_CreateImageDDS( const char *name, byte *data, int width, int h
 	// claims to be a cubemap but isn't, fall back to a plain 2D texture
 	// rather than letting vkCreateImage fail fatally.
 	if ( image->texType == TEXTYPE_CUBE && width != height ) {
-		ri.Log( SEV_WARN, "DDS %s is a non-square cubemap (%dx%d); loading as a plain 2D texture.\n", name, width, height );
+		R_LOG( rch_assets, SEV_WARN, "DDS %s is a non-square cubemap (%dx%d); loading as a plain 2D texture.\n", name, width, height );
 		image->texType    = TEXTYPE_2D;
 		image->layerCount = 1;
 		image->depth      = 1;
@@ -1781,8 +1828,55 @@ static image_t *R_CreateImageDDS( const char *name, byte *data, int width, int h
 	image->handle     = VK_NULL_HANDLE;
 	image->view       = VK_NULL_HANDLE;
 	image->descriptor = VK_NULL_HANDLE;
+	image->ral        = NULL;
+	image->ralBindlessSlot     = -1;
+	image->bindlessSamplerSlot = -1;
 
-	if ( numMips < 1 ) numMips = 1;
+	// validate the DDS-supplied dimensions BEFORE they reach
+	// vkCreateImage. A malformed / hostile .dds whose header claims width or
+	// height above glConfig.maxTextureSize (or zero), or a mip count beyond
+	// log2(max(w,h))+1, would otherwise cause a VUID violation / VK_ERROR_
+	// DEVICE_LOST inside vk_create_image. Reject (return NULL → caller falls
+	// back to the default image) rather than trusting the file.
+	if ( width <= 0 || height <= 0
+	  || width  > glConfig.maxTextureSize
+	  || height > glConfig.maxTextureSize ) {
+		R_LOG( rch_assets, SEV_WARN, "R_CreateImageDDS: %s has out-of-range dimensions %dx%d (max %d) — rejecting\n",
+			name, width, height, glConfig.maxTextureSize );
+		tr.numImages--;                 // undo the tr.images[] add above
+		hashTable[ hash ] = image->next;
+		return NULL;
+	}
+	{
+		int maxDim  = ( width > height ) ? width : height;
+		int maxMips = 1;
+		while ( ( maxDim >>= 1 ) > 0 )
+			maxMips++;                  // log2(max(w,h)) + 1
+		if ( numMips < 1 )
+			numMips = 1;
+		if ( numMips > maxMips ) {
+			R_LOG( rch_assets, SEV_WARN, "R_CreateImageDDS: %s declares %d mips but %dx%d allows at most %d — clamping\n",
+				name, numMips, width, height, maxMips );
+			numMips = maxMips;
+		}
+	}
+
+	// register the DDS image in the bindless 2D table. Every other content image
+	// gets a bindless slot via vk_ral_register_image; DDS skips that (it can't go
+	// through vk_ral_register_image, which forces an RGBA8 RAL texture + RGBA8
+	// upload that is wrong for BC*/packed DDS bytes). Instead it shares only the
+	// SLOT SOURCE — vk_ral_assign_dds_slot routes through the same free-list
+	// allocator + over-capacity bookkeeping as the main path, so there is one
+	// unified slot index (no raw tr.numImages-1 bypass that would collide with
+	// eviction's slot-recycle). Done BEFORE vk_create_image: vk_create_image →
+	// vk_update_descriptor_set then writes the real DDS-format image->view into
+	// the assigned bindless slot (the SOLE main-path texture source). Over-capacity
+	// leaves ralBindlessSlot=-1 and the image renders as the slot-0 / sentinel
+	// fallback, same as the main path.
+	if ( vk_ral_textures_available() ) {
+		vk_ral_assign_dds_slot( image );
+	}
+
 	vk_create_image( image, width, height, numMips );
 	vk_upload_dds_image_data( image, width, height, image->depth, numMips, data, dataSize );
 
@@ -1814,7 +1908,7 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 			if ( strcmp( name, "*white" ) != 0 ) {
 				if ( image->flags != flags ) {
 					if ( MixedFlagsWarnOnce( name, image->flags, flags ) )
-						ri.Log( SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
+						R_LOG( rch_assets, SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
 				}
 			}
 			return image;
@@ -1829,7 +1923,7 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 				//if ( strcmp( strippedName, "*white" ) ) {
 					if ( image->flags != flags ) {
 						if ( MixedFlagsWarnOnce( strippedName, image->flags, flags ) )
-							ri.Log( SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", strippedName, image->flags, flags );
+							R_LOG( rch_assets, SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", strippedName, image->flags, flags );
 					}
 				//}
 				return image;
@@ -1838,13 +1932,13 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 	}
 
 	//
-	// Phase 6.5: explicit .dds reference routes through the DDS loader.
+	// explicit .dds reference routes through the DDS loader.
 	// Skip the RGBA byte-processing path entirely — DDS files ship
 	// pre-encoded blocks + a mip chain. r_mapSaturation is not applied
 	// (BC data isn't mutable per-pixel without decompress + recompress,
 	// out of scope). Falls back to the standard loader chain if the file
 	// is missing or the GPU can't use the format.
-	// Phase 6.5.1: the loader also classifies cubemap / volume textures
+	// the loader also classifies cubemap / volume textures
 	// (ddsImageInfo_t); R_CreateImageDDS turns that into the right
 	// VkImage / view. IMGFLAG_CUBEMAP (set by the `cubeMap` shader keyword)
 	// only records that a cubemap was expected so a mismatch can warn.
@@ -1860,13 +1954,13 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 			R_LoadDDS( name, &ddsData, &width, &height, &picFormat, &numMips, &dataSize, &ddsInfo );
 			if ( ddsData != NULL ) {
 				if ( !vk_dds_format_uploadable( picFormat ) ) {
-					ri.Log( SEV_WARN, "DDS %s uses VkFormat %d which this GPU can't use for sampling; skipping.\n",
+					R_LOG( rch_assets, SEV_WARN, "DDS %s uses VkFormat %d which this GPU can't use for sampling; skipping.\n",
 						name, (int)picFormat );
 					ri.Free( ddsData );
 					return NULL;
 				}
 				if ( ( flags & IMGFLAG_CUBEMAP ) && ddsInfo.texType != TEXTYPE_CUBE ) {
-					ri.Log( SEV_WARN, "DDS %s was loaded as a cubemap but the file is not a 6-face cubemap (texType %d).\n",
+					R_LOG( rch_assets, SEV_WARN, "DDS %s was loaded as a cubemap but the file is not a 6-face cubemap (texType %d).\n",
 						name, (int)ddsInfo.texType );
 				}
 
@@ -1925,6 +2019,357 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 	return image;
 }
 
+
+/*
+===============
+vk_ral_reregister_image
+
+Phase 7.15.4-b — the reversibility leg of texture eviction. Restore an evicted-
+but-still-registered image_t: re-decode its source from disk and re-create BOTH the
+RAL bindless texture AND the legacy VkImage, mirroring R_CreateImage's pairing
+(vk_ral_register_image + upload_vk_image). The image_t survives eviction intact
+(imgName / width / height / flags / texType retained; only ral + ralBindlessSlot +
+handle/view were nulled), so re-creation needs nothing eviction discarded.
+
+Idempotent: a no-op if the image is already resident (image->ral != NULL). Pinned
+images must never be evicted, so one must never reach here — defensively skip + warn
+(a pinned image arriving here is a step-c victim-selection bug). Decode failure (the
+asset is gone) leaves the image non-resident and logs a warning; the next bind
+sentinel-declines to white (graceful, not a crash).
+
+This is the explicit re-register used by the step-b forced-evict round-trip test and,
+later, by the step-c eviction path. The automatic bind-time re-register-on-miss is
+7.15.3 (folded last).
+===============
+*/
+void vk_ral_reregister_image( image_t *image ) {
+	byte       *pic = NULL;
+	int         w = 0, h = 0;
+
+	if ( !image ) return;
+	if ( image->ral != NULL ) return;            // already resident — idempotent
+
+	if ( R_ImageIsPinned( image ) ) {
+		R_LOG( rch_assets, SEV_WARN, "vk_ral_reregister_image: pinned image '%s' reached re-register — should never be evicted (victim-selection bug)\n",
+		        image->imgName );
+		return;
+	}
+
+	// re-decode the source from disk via the retained imgName. R_LoadImage owns
+	// the pic allocation; we free it after both uploads, exactly as R_CreateImage.
+	R_LoadImage( image->imgName, &pic, &w, &h );
+	if ( pic == NULL ) {
+		R_LOG( rch_assets, SEV_WARN, "vk_ral_reregister_image: '%s' could not be re-decoded — left non-resident (bind sentinel-declines)\n",
+		        image->imgName );
+		return;
+	}
+
+	// The disk dimensions must match the original — the slot/descriptor + any cached
+	// size assumptions depend on it. A mid-session asset resize is not expected.
+	if ( w != image->width || h != image->height ) {
+		R_LOG( rch_assets, SEV_WARN, "vk_ral_reregister_image: '%s' re-decoded at %dx%d but was %dx%d — refusing re-register (asset changed)\n",
+		        image->imgName, w, h, image->width, image->height );
+		ri.Free( pic );
+		return;
+	}
+
+	// Re-create both halves, mirroring R_CreateImage's pairing (RAL first because
+	// generate_image_upload_data may mutate pic in place; the RAL upload copies into
+	// staging first). vk_ral_register_image is guarded on image->ral == NULL, which
+	// holds here, so it runs the normal registration (free-list slot + async/sync
+	// upload). upload_vk_image rebuilds the legacy VkImage + view.
+	vk_ral_register_image( image, pic, w, h );
+	upload_vk_image( image, pic );
+
+	ri.Free( pic );
+}
+
+/*
+===============
+R_TexEvictForce_f
+
+Phase 7.15.4-b TEST HARNESS — manual, render-thread, default-inert. Console command
+`r_texEvictForce <N>`: evict the N least-recently-used UNPINNED content images, on
+the render thread (command handlers run there), freeing BOTH the RAL texture (+ slot
+→ free-list) AND the legacy VkImage so device memory actually drops. This is NOT the
+eviction policy — there is no pressure hook, no poll thread, no hysteresis (step-c/d).
+Its only purpose is to produce a real non-resident state so vk_ral_reregister_image's
+round-trip is testable. Pinned images (R_ImageIsPinned) are skipped — proving the
+pinned-set holds. The victim scan READS frameUsed (LRU) + R_ImageIsPinned: this is
+the FIRST, MANUAL reader of both (the automatic pressure-driven reader is step-c).
+===============
+*/
+/*
+===============
+R_EvictOneOldestUnpinned
+
+Phase 7.15.4-c shared eviction primitive (render-thread only). Finds the single
+oldest-frameUsed, unpinned, RAL-resident image in tr.images[] and frees BOTH its
+halves: vk_ral_unregister_image (RAL texture + bindless slot → free-list) AND
+vk_destroy_image_resources (legacy VkImage + view) — the load-bearing dual-free
+(without the legacy half the device memory does not drop). Returns the evicted
+image (for logging) or NULL when nothing evictable remains. The reader of frameUsed
++ R_ImageIsPinned. Shared by the manual r_texEvictForce harness AND the automatic
+vk_ral_drain_evictions pressure path — both run on the render thread, so the scan +
+free are single-threaded by construction (Option-A).
+===============
+*/
+image_t *R_EvictOneOldestUnpinned( void ) {
+	image_t *victim = NULL;
+	int i;
+
+	for ( i = 0; i < tr.numImages; i++ ) {
+		image_t *im = tr.images[i];
+		if ( im == NULL || im->ral == NULL ) continue;      // already evicted / never RAL-resident
+		if ( R_ImageIsPinned( im ) ) continue;              // pinned — never evict
+		if ( victim == NULL || im->frameUsed < victim->frameUsed ) victim = im;
+	}
+	if ( victim == NULL ) return NULL;
+
+	// free the RAL half (texture + bindless slot → free-list)
+	vk_ral_unregister_image( victim );
+	// free the legacy VkImage half — the load-bearing free: without it the
+	// device memory does not drop and eviction would be a no-op.
+	vk_destroy_image_resources( &victim->handle, &victim->view );
+	victim->handle = VK_NULL_HANDLE;
+	victim->view   = VK_NULL_HANDLE;
+	return victim;
+}
+
+/*
+===============
+vk_ral_drain_evictions
+
+Phase 7.15.4-c automatic pressure-driven eviction — the render-thread DESTROY half
+of Option-A. Called once per frame at the safe boundary (vk.c, right after
+vk_ral_drain_pending_uploads), where the per-frame fence guarantees the prior GPU
+work is complete and no command buffer is recording — the same boundary the manual
+harness and the deferred-destroy drain use.
+
+Common case (no pressure): the volatile flag is clear → return immediately, zero
+cost. When the poll thread raised the flag (CRITICAL crossed), evict oldest-unpinned
+victims toward a hysteresis target below the WARNING line, then clear the flag.
+
+Memory free is FRAME-DEFERRED (step-b finding): vk_ral_unregister_image queues the
+VkImage/memory destroy, and ralDeviceLocalBytes only drops once the defer-destroy
+ring drains RAL_VK_MAX_FRAMES_IN_FLIGHT frames later. So this does NOT poll live
+bytes mid-loop (they won't move this frame) — it evicts a COUNT estimated to reach
+the target from the snapshot taken when the flag was seen, then clears the flag. If
+pressure is still CRITICAL after the deferred frees land, the poller re-raises the
+flag on the next transition (clean re-arm). This avoids both a busy-loop and a
+thrash near the threshold.
+===============
+*/
+void vk_ral_drain_evictions( void ) {
+	uint64_t dlUsed = 0, dlBudget = 0, target;
+	int      evicted = 0;
+
+	if ( !vk_ral_evict_requested() ) return;           // common case — flag clear, zero cost
+	vk_ral_clear_evict_request();                      // consume the mark (re-armed by the next CRITICAL transition)
+
+	if ( !vk_ral_query_memory_budget( &dlUsed, &dlBudget, NULL, NULL, NULL ) || dlBudget == 0 )
+		return;
+
+	// Hysteresis target derived from the poller's thresholds (ralVk_LevelOf:
+	// WARNING 75 %, CRITICAL 90 %). Evict down to WIRED_TEX_EVICT_TARGET_PERMILLE
+	// (700 ‰ = 70 %, a margin below the 75 % WARNING line) so the next poll does not
+	// immediately re-fire — anti-thrash. Below target → nothing to do.
+	{
+		uint64_t testDrop = vk_ral_get_evict_test_drop_bytes();
+		if ( testDrop > 0 ) {
+			// Synthetic-pressure test (default-OFF): real ~4 % pressure never reaches
+			// the 70 % target, so the test forces a target of (used - N MiB) to drive
+			// the REAL eviction loop. Consume the override once.
+			target = ( dlUsed > testDrop ) ? ( dlUsed - testDrop ) : 0;
+			vk_ral_clear_evict_test_drop();
+		} else {
+			target = ( dlBudget / 1000ull ) * WIRED_TEX_EVICT_TARGET_PERMILLE;
+		}
+	}
+	if ( dlUsed <= target ) return;
+
+	// Evict toward the target by ESTIMATED reclaim (uploadWidth*uploadHeight*4, RGBA),
+	// not by polling live bytes (frame-deferred — won't move this frame). Cap the
+	// per-frame batch so a huge over-budget never stalls one frame; the flag re-arms
+	// on the next CRITICAL transition if more is needed.
+	{
+		uint64_t need = dlUsed - target;
+		uint64_t freedEst = 0;
+		int      budget_iters = WIRED_TEX_EVICT_MAX_PER_FRAME;
+		while ( freedEst < need && budget_iters-- > 0 ) {
+			image_t *v = R_EvictOneOldestUnpinned();
+			if ( v == NULL ) break;                    // no more unpinned victims
+			freedEst += (uint64_t)v->uploadWidth * (uint64_t)v->uploadHeight * 4ull;
+			evicted++;
+		}
+	}
+
+	if ( evicted > 0 ) {
+		R_LOG( rch_assets, SEV_WARN, "vk_ral_drain_evictions: CRITICAL pressure — evicted %d unpinned texture(s) toward %u/%u MiB target (free is frame-deferred)\n",
+		        evicted, (unsigned)( target >> 20 ), (unsigned)( dlBudget >> 20 ) );
+	}
+}
+
+/*
+===============
+vk_ral_drain_reregisters
+
+Phase 7.15.3 — automatic bind-miss recovery (the lazy-residency fold, render-thread).
+Called once per frame at the safe boundary (vk.c, right after vk_ral_drain_evictions).
+Scans for images marked IMGFLAG_REREGISTER_PENDING — set in vk_bindless_track when an
+evicted texture (ral==NULL) was sampled this frame — and re-streams each via
+vk_ral_reregister_image (step-b: re-decode from imgName + re-create RAL + legacy).
+Lazy: only sampled-evicted textures carry the flag, so only they re-stream; an evicted
+texture never sampled stays evicted. The pending flag IS the queue membership (O(1)
+dedup at enqueue) — the scan is bounded by tr.numImages and only does work when
+something is pending.
+
+Per-frame cap (WIRED_TEX_REREGISTER_MAX_PER_FRAME) spreads a mass-resample over frames
+— a still-pending texture stays white-sentinel (graceful) until its turn. Thrash guard:
+each restored texture gets a fresh frameUsed = tr.frameCount (it was just sampled), so
+it is the NEWEST, not the LRU victim — the eviction drain (step-c) picks older textures
+first and won't immediately re-evict what was just re-streamed.
+===============
+*/
+void vk_ral_drain_reregisters( void ) {
+	int i, restored = 0;
+
+	for ( i = 0; i < tr.numImages; i++ ) {
+		image_t *im = tr.images[i];
+		if ( im == NULL || !( im->flags & IMGFLAG_REREGISTER_PENDING ) )
+			continue;
+
+		// clear the pending mark first, regardless of outcome, so a failed
+		// re-decode (asset gone) does not re-enqueue every frame forever — it
+		// stays white-sentinel and will only re-mark if sampled again (and fail
+		// again, harmlessly). A successful re-register makes ral!=NULL so the
+		// enqueue guard (ral==NULL) won't re-mark it.
+		im->flags &= ~IMGFLAG_REREGISTER_PENDING;
+
+		if ( im->ral != NULL )
+			continue;                          // already resident (e.g. a map reload restored it)
+
+		vk_ral_reregister_image( im );         // step-b: re-decode + re-create both halves
+
+		if ( im->ral != NULL ) {
+			// Thrash guard: the texture was just sampled, so stamp it as freshly
+			// used → it is the NEWEST in the LRU, not a re-eviction victim next
+			// pressure event. (vk_ral_reregister_image rebuilds the GPU texture but
+			// does not touch frameUsed; set it here.)
+			im->frameUsed = tr.frameCount;
+			restored++;
+		}
+
+		if ( restored >= WIRED_TEX_REREGISTER_MAX_PER_FRAME )
+			break;                             // spread the rest over later frames
+	}
+
+	if ( restored > 0 ) {
+		R_LOG( rch_assets, SEV_WARN, "vk_ral_drain_reregisters: auto-restreamed %d sampled-evicted texture(s)\n", restored );
+	}
+}
+
+void R_TexEvictForce_f( void ) {
+	int       want, evicted = 0, pass;
+	uint64_t  dlBefore = 0;
+
+	if ( ri.Cmd_Argc() < 2 ) {
+		R_LOG( rch_assets, SEV_INFO, "usage: r_texEvictForce <N>  (evict N oldest unpinned content textures; test harness)\n" );
+		return;
+	}
+	want = atoi( ri.Cmd_Argv( 1 ) );
+	if ( want <= 0 ) return;
+
+	vk_ral_query_memory_budget( &dlBefore, NULL, NULL, NULL, NULL );
+
+	// Evict N oldest unpinned via the shared primitive (same path the automatic
+	// pressure drain uses).
+	for ( pass = 0; pass < want; pass++ ) {
+		image_t *victim = R_EvictOneOldestUnpinned();
+		if ( victim == NULL ) break;                           // nothing left to evict
+		R_LOG( rch_assets, SEV_DEBUG, "r_texEvictForce: evicting '%s' (frameUsed %d, age %d)\n",
+		        victim->imgName, victim->frameUsed, tr.frameCount - victim->frameUsed );
+		evicted++;
+	}
+
+	// NOTE: the device-local free is DEFERRED — vk_ral_unregister_image →
+	// Ral_DestroyTexture → ralVk_DeferDestroy queues the VkImage/VkDeviceMemory
+	// destroy keyed by frame, and ralVk_DrainPendingDestroy (driven per-frame by
+	// Ral_DrainDeferred) only does the real vkFreeMemory + ralDeviceLocalBytes
+	// decrement after RAL_VK_MAX_FRAMES_IN_FLIGHT frames pass (frame-fenced UAF
+	// safety). So the budget queried synchronously here is unchanged; the actual
+	// drop lands a few frames later (observable via the budget once the ring
+	// drains — e.g. r_texReregisterAll's pre-restore reading). dlBefore is logged
+	// for reference only.
+	// SEV_WARN so the test harness's captured log retains it (the round-trip gate
+	// is W-67-automatable off this + the r_texReregisterAll memory report).
+	R_LOG( rch_assets, SEV_WARN, "r_texEvictForce: evicted %d image(s) (free is frame-deferred; device-local %u MiB at enqueue, drops after the defer-destroy ring drains)\n",
+	        evicted, (unsigned)( dlBefore >> 20 ) );
+}
+
+/*
+===============
+R_TexReregisterAll_f
+
+Phase 7.15.4-b TEST HARNESS — restore every evicted (ral==NULL, non-pinned, non-'*')
+content image via vk_ral_reregister_image. Pairs with r_texEvictForce to exercise the
+full evict → re-register round-trip (the gate). Render-thread, manual.
+===============
+*/
+void R_TexReregisterAll_f( void ) {
+	int i, restored = 0;
+	uint64_t dlPre = 0, dlPost = 0;
+
+	// This runs frames after r_texEvictForce (the harness inserts +wait between),
+	// so the deferred-destroy ring has drained and ralDeviceLocalBytes now reflects
+	// the actual post-evict free — the real memory-drop measurement point.
+	vk_ral_query_memory_budget( &dlPre, NULL, NULL, NULL, NULL );
+
+	for ( i = 0; i < tr.numImages; i++ ) {
+		image_t *im = tr.images[i];
+		if ( im == NULL || im->ral != NULL ) continue;          // resident — skip
+		if ( im->imgName[0] == '*' || R_ImageIsPinned( im ) ) continue;  // built-in/pinned never evicted
+		vk_ral_reregister_image( im );
+		if ( im->ral != NULL ) restored++;
+	}
+
+	vk_ral_query_memory_budget( &dlPost, NULL, NULL, NULL, NULL );
+	// dlPre (queried here, frames after r_texEvictForce) reflects the drained
+	// post-evict footprint — the real memory-drop measurement; dlPost is after the
+	// re-upload restores it. (Round-trip evidence: e.g. 509 -> 507 post-evict drop,
+	// 507 -> 509 restore.)
+	// SEV_WARN so the captured log retains the memory-drop evidence for the
+	// W-67-automatable round-trip gate (pre = drained post-evict footprint).
+	R_LOG( rch_assets, SEV_WARN, "r_texReregisterAll: restored %d image(s); device-local %u MiB (post-evict/pre-restore) -> %u MiB (post-restore)\n",
+	        restored, (unsigned)( dlPre >> 20 ), (unsigned)( dlPost >> 20 ) );
+}
+
+/*
+===============
+R_TexEvictPressureTest_f
+
+Phase 7.15.4-c SYNTHETIC-PRESSURE TEST HARNESS (default-inert). `r_texEvictPressureTest <N>`
+exercises the AUTOMATIC pressure-driven path (not the direct r_texEvictForce loop):
+it sets a synthetic target-drop of N MiB and raises the same evict-request flag the
+poll thread raises on CRITICAL. The actual eviction then happens next frame in
+vk_ral_drain_evictions, on the render thread, through the real hysteresis loop —
+proving the flag→render-drain hand-off + the hysteresis target logic + the
+victim-scan/dual-free, exactly as automatic CRITICAL pressure would (which never
+occurs at ~4 % real usage). Render-thread caller (command handler).
+===============
+*/
+void R_TexEvictPressureTest_f( void ) {
+	int mib;
+	if ( ri.Cmd_Argc() < 2 ) {
+		R_LOG( rch_assets, SEV_INFO, "usage: r_texEvictPressureTest <N>  (synthetic CRITICAL pressure: drive automatic eviction to drop ~N MiB)\n" );
+		return;
+	}
+	mib = atoi( ri.Cmd_Argv( 1 ) );
+	if ( mib <= 0 ) return;
+	vk_ral_set_evict_test_drop_mib( (unsigned)mib );
+	vk_ral_request_eviction();   // raise the flag → vk_ral_drain_evictions runs next frame
+	R_LOG( rch_assets, SEV_WARN, "r_texEvictPressureTest: synthetic CRITICAL raised (target-drop %d MiB) — automatic drain evicts next frame\n", mib );
+}
 
 /*
 ================
@@ -2191,7 +2636,7 @@ static void R_CreateBuiltinImages( void ) {
 	memset( data, 255, sizeof( data ) );
 	tr.whiteImage = R_CreateImage( "*white", NULL, (byte *)data, 8, 8, IMGFLAG_NONE );
 
-	// Phase 6B3'-a: in the linear pipeline, "*identityLight" is a
+	// in the linear pipeline, "*identityLight" is a
 	// solid white 8x8 (was 0.5×white under the legacy LDR overbright
 	// scheme). Used as a default sampler bind for stages without a
 	// real texture — the default fragment color is pure white,
@@ -2228,16 +2673,24 @@ void R_SetColorMappings( void ) {
 	float	g;
 	int		inf;
 	qboolean applyGamma;
+	// Lifecycle freeze diagnostic: bracket this function (called from the focus-
+	// gained handler) so a hard freeze pins whether it is the blocker. Gated on
+	// the engine `stalltrace` cvar, read across the renderer boundary.
+	int		stTrace = ri.Cvar_VariableIntegerValue( "stalltrace" );
+	int64_t	stT0 = stTrace ? ri.Microseconds() : 0;
 
 	if ( !tr.inited ) {
 		// it may be called from window handling functions where gamma flags is now yet known/set
 		return;
 	}
 
-	// Phase 6B3'-a: r_brightness no longer participates in the LUT
+	if ( stTrace )
+		R_LOG( rch_assets, SEV_INFO, "STALLTRACE enter R_SetColorMappings t=%lld\n", (long long)stT0 );
+
+	// r_brightness no longer participates in the LUT
 	// build. It drives the pre-tonemap exposure_bias spec constant
 	// (see vk.c) directly as a float; no log2/clamp transformation.
-	// Phase 6B3'-b: r_mapBrightness removed. R_ColorShiftLightingBytes
+	// r_mapBrightness removed. R_ColorShiftLightingBytes
 	// uses a fixed << 1 decode shift per Q3 BSP lightmap format spec.
 
 	// applyGamma still gates the hardware-display LUT upload below.
@@ -2269,6 +2722,10 @@ void R_SetColorMappings( void ) {
 		s_intensitytable[i] = j;
 	}
 
+	if ( stTrace )
+		R_LOG( rch_assets, SEV_INFO, "STALLTRACE mark  R_SetColorMappings pre-GLimp_SetGamma supportsGamma=%d t=%lld\n",
+			(int)gls.deviceSupportsGamma, (long long)ri.Microseconds() );
+
 #ifdef USE_VULKAN
 	if ( gls.deviceSupportsGamma ) {
 		if ( vk.fboActive )
@@ -2286,6 +2743,10 @@ void R_SetColorMappings( void ) {
 		}
 	}
 #endif
+
+	if ( stTrace )
+		R_LOG( rch_assets, SEV_INFO, "STALLTRACE exit  R_SetColorMappings dt=%lldus\n",
+			(long long)( ri.Microseconds() - stT0 ) );
 }
 
 
@@ -2303,7 +2764,7 @@ void R_InitImages( void ) {
 	ri.FreeAll();
 
 #ifdef USE_VULKAN
-	// Phase 7.4c-pre: RAL backend bringup moved into vk_initialize's tail
+	// RAL backend bringup moved into vk_initialize's tail
 	// (Option A — shared VkDevice with renderervk). Backend internal
 	// allocations are on stdlib malloc/free since PART C, so the ri.FreeAll
 	// above no longer wipes them and we don't need to re-init here.
@@ -2322,6 +2783,14 @@ void R_InitImages( void ) {
 	R_CreateBuiltinImages();
 
 #ifdef USE_VULKAN
+	// bind the black sun-mask decline sentinel into reserved
+	// bindless slot 4094 now that tr.blackImage exists. Re-asserted here on
+	// every R_InitImages so vid_restart (which recreates both tr.blackImage
+	// and the bindless set) re-establishes it.
+	vk_register_black_sentinel();
+	// twin: the white unused-texture-role sentinel into reserved
+	// bindless slot 4093 now that tr.whiteImage exists.
+	vk_register_white_sentinel();
 	vk_update_post_process_pipelines();
 #endif
 }
@@ -2344,7 +2813,7 @@ void R_DeleteTextures( void ) {
 
 	for ( i = 0; i < tr.numImages; i++ ) {
 		image_t *img = tr.images[ i ];
-		// Phase 7.4a: tear down the parallel RAL texture (if any) FIRST so the
+		// tear down the parallel RAL texture (if any) FIRST so the
 		// bindless slot is cleared while the RAL texture is still alive. Order
 		// against the legacy VkImage destroy doesn't matter (different VkDevice)
 		// but conceptually pairs with the registration order in R_CreateImage.
@@ -2353,6 +2822,13 @@ void R_DeleteTextures( void ) {
 
 		// img->descriptor will be released with pool reset
 	}
+	// The unregister loop above pushed every slot onto the bindless free-list.
+	// tr.numImages is about to reset to 0, so the next registration pass must
+	// restart at slot 0 — reset the allocator to keep the slot handout sequential
+	// and byte-identical to the old tr.numImages-1 source (Phase 7.15.2). Per-
+	// texture eviction (7.15.4) frees individual slots WITHOUT a bulk reset; that
+	// is the case the free-list is built for.
+	vk_ral_reset_bindless_slots();
 #else
 	for ( i = 0; i < tr.numImages; i++ ) {
 		image_t *img = tr.images[ i ];
@@ -2514,12 +2990,12 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	int			totalSurfaces;
 
 	if ( !name || !name[0] ) {
-		ri.Log( SEV_DEBUG, "Empty name passed to RE_RegisterSkin\n" );
+		R_LOG( rch_assets, SEV_DEBUG, "Empty name passed to RE_RegisterSkin\n" );
 		return 0;
 	}
 
 	if ( strlen( name ) >= MAX_QPATH ) {
-		ri.Log( SEV_DEBUG, "Skin name exceeds MAX_QPATH\n" );
+		R_LOG( rch_assets, SEV_DEBUG, "Skin name exceeds MAX_QPATH\n" );
 		return 0;
 	}
 
@@ -2537,7 +3013,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 
 	// allocate a new skin
 	if ( tr.numSkins == MAX_SKINS ) {
-		ri.Log( SEV_WARN, "WARNING: RE_RegisterSkin( '%s' ) MAX_SKINS hit\n", name );
+		R_LOG( rch_assets, SEV_WARN, "WARNING: RE_RegisterSkin( '%s' ) MAX_SKINS hit\n", name );
 		return 0;
 	}
 	tr.numSkins++;
@@ -2598,7 +3074,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	ri.FS_FreeFile( text.v );
 
 	if ( totalSurfaces > MAX_SKIN_SURFACES ) {
-		ri.Log( SEV_WARN, "WARNING: Ignoring excess surfaces (found %d, max is %d) in skin '%s'!\n",
+		R_LOG( rch_assets, SEV_WARN, "WARNING: Ignoring excess surfaces (found %d, max is %d) in skin '%s'!\n",
 					totalSurfaces, MAX_SKIN_SURFACES, name );
 	}
 
@@ -2656,16 +3132,16 @@ void	R_SkinList_f( void ) {
 	int			i, j;
 	skin_t		*skin;
 
-	ri.Log( SEV_INFO, "------------------\n");
+	R_LOG( rch_assets, SEV_INFO, "------------------\n");
 
 	for ( i = 0 ; i < tr.numSkins ; i++ ) {
 		skin = tr.skins[i];
 
-		ri.Log( SEV_INFO, "%3i:%s (%d surfaces)\n", i, skin->name, skin->numSurfaces );
+		R_LOG( rch_assets, SEV_INFO, "%3i:%s (%d surfaces)\n", i, skin->name, skin->numSurfaces );
 		for ( j = 0 ; j < skin->numSurfaces ; j++ ) {
-			ri.Log( SEV_INFO, "       %s = %s\n",
+			R_LOG( rch_assets, SEV_INFO, "       %s = %s\n",
 				skin->surfaces[j].name, skin->surfaces[j].shader->name );
 		}
 	}
-	ri.Log( SEV_INFO, "------------------\n");
+	R_LOG( rch_assets, SEV_INFO, "------------------\n");
 }

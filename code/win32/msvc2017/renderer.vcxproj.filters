@@ -20,7 +20,7 @@
     <ClCompile Include="..\..\renderer\tr_backend.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\renderer\tr_bsp.c">
+    <ClCompile Include="..\..\renderer\tr_map.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\renderer\tr_cmds.c">

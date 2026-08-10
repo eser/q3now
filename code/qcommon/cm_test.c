@@ -3,6 +3,11 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "cm_local.h"
 
+// World-tree leaf lookup (PVS / area / point-contents) walks the WORLD collision
+// tree: cm.world.* — canonical on Q1 (with real cluster/area copied into the
+// canonical leaves), the loaded arrays on Q3. Submodels never enter these paths
+// (they use their embedded cmod->leaf), so there is no submodel-view ambiguity
+// here — this is always the world model.
 
 /*
 ==================
@@ -17,7 +22,7 @@ static int CM_PointLeafnum_r( const vec3_t p, int num ) {
 
 	while (num >= 0)
 	{
-		node = cm.nodes + num;
+		node = cm.world.nodes + num;
 		plane = node->plane;
 
 		if (plane->type < 3)
@@ -58,7 +63,7 @@ void CM_StoreLeafs( leafList_t *ll, int nodenum ) {
 	leafNum = -1 - nodenum;
 
 	// store the lastLeaf even if the list is overflowed
-	if ( cm.leafs[ leafNum ].cluster != -1 ) {
+	if ( cm.world.leafs[ leafNum ].cluster != -1 ) {
 		ll->lastLeaf = leafNum;
 	}
 
@@ -78,13 +83,13 @@ void CM_StoreBrushes( leafList_t *ll, int nodenum ) {
 
 	leafnum = -1 - nodenum;
 
-	leaf = &cm.leafs[leafnum];
+	leaf = &cm.world.leafs[leafnum];
 
 	for ( k = 0 ; k < leaf->numLeafBrushes ; k++ ) {
-		brushnum = cm.leafbrushes[leaf->firstLeafBrush+k];
-		b = &cm.brushes[brushnum];
+		brushnum = cm.world.leafbrushes[leaf->firstLeafBrush+k];
+		b = &cm.world.brushes[brushnum];
 		if ( b->checkcount == cm.checkcount ) {
-			continue;	// already checked this brush in another leaf
+			continue;	// already checked this brush in another leaf (main-thread only path)
 		}
 		b->checkcount = cm.checkcount;
 		for ( i = 0 ; i < 3 ; i++ ) {
@@ -130,7 +135,7 @@ void CM_BoxLeafnums_r( leafList_t *ll, int nodenum ) {
 			return;
 		}
 
-		node = &cm.nodes[nodenum];
+		node = &cm.world.nodes[nodenum];
 		plane = node->plane;
 		s = BoxOnPlaneSide( ll->bounds[0], ll->bounds[1], plane );
 		if (s == 1) {
@@ -214,6 +219,11 @@ int CMQ3_PointContents( const vec3_t p, clipHandle_t model ) {
 	int			contents;
 	float		d;
 	cmodel_t	*clipm;
+	// Geometry source: model 0 (world) reads cm.world (canonical on Q1); a submodel
+	// reads the loaded cm.* arrays (its embedded leaf's offsets/pointers were baked
+	// against those). Mirrors the world/submodel split in CM_Trace.
+	int         *viewLeafbrushes;
+	cbrush_t    *viewBrushes;
 
 	if (!cm.numNodes) {	// map not loaded
 		return 0;
@@ -222,15 +232,19 @@ int CMQ3_PointContents( const vec3_t p, clipHandle_t model ) {
 	if ( model ) {
 		clipm = CM_ClipHandleToModel( model );
 		leaf = &clipm->leaf;
+		viewLeafbrushes = cm.leafbrushes;
+		viewBrushes     = cm.brushes;
 	} else {
 		leafnum = CM_PointLeafnum_r (p, 0);
-		leaf = &cm.leafs[leafnum];
+		leaf = &cm.world.leafs[leafnum];
+		viewLeafbrushes = cm.world.leafbrushes;
+		viewBrushes     = cm.world.brushes;
 	}
 
 	contents = 0;
 	for (k=0 ; k<leaf->numLeafBrushes ; k++) {
-		brushnum = cm.leafbrushes[leaf->firstLeafBrush+k];
-		b = &cm.brushes[brushnum];
+		brushnum = viewLeafbrushes[leaf->firstLeafBrush+k];
+		b = &viewBrushes[brushnum];
 
 		if ( !CM_BoundsIntersectPoint( b->bounds[0], b->bounds[1], p ) ) {
 			continue;

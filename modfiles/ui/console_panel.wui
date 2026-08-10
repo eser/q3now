@@ -1,0 +1,43 @@
+// console_panel.wui — Wired UI: default WUI_LAYER_CONSOLE panel.
+// V-20 (2026-05-25): the compositor's WUI_LAYER_CONSOLE walk emits this
+// panel when KEYCATCH_CONSOLE is on (the `~` toggle). The lone itemDef is
+// a console_view element that wraps the existing Con_DrawConsole call —
+// the .wui sizing exists so the layer participates in the policy +
+// input-claim machinery, not so Con_DrawConsole crops itself to the rect
+// (it draws against the full swapchain).
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "console_panel"
+	layer "console"
+	rect 0 0 1 1
+	fullscreen 1
+	visible 1
+	style 0
+
+	// ── Console layer projection (two-tier separation) ──
+	//
+	// The console_view custom-type leaf is wrapped in a
+	// single-leaf addressable identity container, consistent
+	// with the cluster-wide pattern. The leaf itself stays
+	// minimal — its rect exists so the layer participates in
+	// the policy + input-claim machinery; the actual scrollback
+	// + input rendering happens inside Con_DrawConsole against
+	// the full swapchain (read-only accessors against the
+	// WiredConsole core; no state mutation from this layer).
+	itemDef {
+		name "console_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef {
+			name "console_view"
+			type console_view
+			rect 0 0 1 0.5
+			decoration
+		}
+	}
+}

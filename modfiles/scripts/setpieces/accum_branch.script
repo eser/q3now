@@ -1,0 +1,8 @@
+// accum_branch.script — proves the accum branch primitive (abort_if_equal).
+// Slot 0 is set to 1, then abort_if_equal 1 ends the script early — the verbs
+// after the abort must NOT run (the trace proves they don't fire).
+print accum-begin
+accum 0 set 1
+accum 0 abort_if_equal 1        // slot0 == 1 -> END the script here
+print accum-should-not-print    // this must NEVER appear in the trace
+attack

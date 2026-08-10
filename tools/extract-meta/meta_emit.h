@@ -10,12 +10,12 @@ Copyright (C) 2024-2026 Wired engine contributors. GPLv2.
 #define EXTRACT_META_META_EMIT_H
 
 #include "q_shared.h"
-#include "bsp_inventory.h"
+#include "map_inventory.h"
 #include "asset_resolve.h"
 
 qboolean MetaEmit_Write(const char *out_dir,
                         const char *mapname,
-                        const bsp_inventory_t *inv,
+                        const map_inventory_t *inv,
                         const resolution_t *resolutions,
                         int resolution_count);
 

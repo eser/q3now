@@ -1,0 +1,8 @@
+// trigger_a.script — the FIRING half of the trigger/waitfortrigger loop.
+// Monster A walks to a marker, then fires a named trigger that unblocks B.
+print monster-a-begin
+walktomarker script_marker_a   // slow cutscene gait (half run speed)
+hold                            // suspend until A arrives
+print monster-a-arrived
+trigger a_done                  // fire the trigger B is waiting on
+print monster-a-fired-trigger

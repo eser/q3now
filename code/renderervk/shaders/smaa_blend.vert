@@ -5,7 +5,9 @@
 #version 450
 // SMAA Pass 2: Blending Weight Calculation — Vertex Shader
 
-layout(push_constant) uniform PushConstants {
+// rtMetrics rides in a per-frame UBO at set 3 of the shared SMAA pipeline layout,
+// not a VS|FS push. Anonymous block keeps the read sites.
+layout(set = 3, binding = 0, std140) uniform RtMetrics {
 	vec4 rtMetrics; // { 1/w, 1/h, w, h }
 };
 

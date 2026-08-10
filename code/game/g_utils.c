@@ -5,7 +5,6 @@
 // g_utils.c -- misc utility functions for game module
 
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 typedef struct {
@@ -100,6 +99,23 @@ int G_SoundIndex( char *name ) {
 	return G_FindConfigstringIndex (name, CS_SOUNDS, MAX_SOUNDS, qtrue);
 }
 
+/*
+================
+G_FileExists
+
+Returns qtrue if the named file is present on the server. Uses a NULL-handle
+FS probe: the engine returns the file size without opening a handle slot, so
+there is nothing to close and no handle leaks.
+================
+*/
+qboolean G_FileExists( const char *path ) {
+	if ( !path || !path[0] ) {
+		return qfalse;
+	}
+	// NULL handle -> engine returns size (>0 = present) without opening a slot.
+	return ( trap_FS_FOpenFile( path, NULL, FS_READ ) > 0 );
+}
+
 //=====================================================================
 
 
@@ -122,6 +138,31 @@ void G_TeamCommand( team_t team, const char *cmd ) {
 	}
 }
 
+
+/*
+=============
+G_ClassnameIs
+
+Format-agnostic classname match. The engine loads both Q3 (IBSP) and Q1 BSP
+maps; a Q1 map's entities carry a "q1_" classname prefix at runtime (added by the
+BSP loader's BSP_Q1_PrefixClassnames), while a Q3 map's spawn under the bare name.
+A door is a door in either format, so gameplay code that must recognize a class
+regardless of source map matches against the bare name after stripping an optional
+"q1_" prefix — "func_door" and "q1_func_door" are equivalent (same for buttons).
+The format knowledge lives here, in one place, not smeared across call sites.
+=============
+*/
+qboolean G_ClassnameIs( const gentity_t *ent, const char *bareName )
+{
+	const char *cn;
+	if ( !ent || !bareName ) return qfalse;
+	cn = ent->classname;
+	if ( !cn ) return qfalse;
+	if ( Q_stricmpn( cn, "q1_", 3 ) == 0 ) {
+		cn += 3;   // strip the Q1 format prefix; compare the bare classname
+	}
+	return ( Q_stricmp( cn, bareName ) == 0 ) ? qtrue : qfalse;
+}
 
 /*
 =============
@@ -450,6 +491,27 @@ void G_FreeEntity( gentity_t *ed ) {
 	if ( ed->neverFree ) {
 		return;
 	}
+
+	// Remove this entity's bot item-goal node, if it had one, before the wipe.
+	// Runs only past the neverFree early-return: a neverFree entity is not truly
+	// freed, so its node must persist. Pickup does NOT reach here (it never frees
+	// the entity), so a picked-up item's node correctly stays; only its
+	// query-time availability flips. No-op for the many freed non-item entities.
+	WiredIntel_MapGoalOnFree( ed );
+
+#if FEAT_RECAST_NAVMESH
+	// Return any acquired nav-state slot to the pool before the entity is wiped,
+	// so a freed nav-follower never leaves a dangling in-use pool slot.
+	Nav_ReleaseState( ed );
+#endif
+
+#if FEAT_MONSTER_AI
+	// Likewise return any acquired behavior-state slot before the wipe, so a
+	// freed monster never strands a behavior-pool slot.
+	Behavior_ReleaseState( ed );
+	// And release any scripted-drive slot the entity held.
+	Script_ReleaseForEntity( ed );
+#endif
 
 	memset (ed, 0, sizeof(*ed));
 	ed->classname = "freed";

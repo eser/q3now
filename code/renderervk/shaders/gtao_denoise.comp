@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+gtao_denoise.comp — depth-aware spatial denoise for the GTAO visibility texture.
+
+GTAO's horizon search is noisy (few slices/steps + per-pixel jitter), so the raw
+visibility needs a blur. This is a single-frame depth-aware (bilateral) blur — a
+small spatial kernel weighted down across depth discontinuities so the AO does
+not bleed across silhouette edges. Deliberately NO temporal accumulation: it
+keeps GTAO independent of TAA/history (the spatial-only XeGTAO configuration),
+so it does not block on motion-vector / history infrastructure.
+
+Reads the raw AO (set 0, binding 0) + the device depth (binding 1/2) for the
+edge weight, writes the denoised AO (binding 3). 1 = unoccluded.
+*/
+
+const float HALF_PI = 1.57079632679489661923;
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(r16f, set = 0, binding = 0) uniform readonly  image2D aoIn;
+layout(set = 0, binding = 1) uniform texture2D depthTex;
+layout(set = 0, binding = 2) uniform sampler   depthSampler;
+layout(r16f, set = 0, binding = 3) uniform writeonly image2D aoOut;
+
+layout(push_constant) uniform DenoisePush {
+	vec2  viewportSize;
+	float zNear;
+	float zFar;
+} pc;
+
+float linearizeDepth( float z ) {
+	return pc.zNear * pc.zFar / ( pc.zNear + z * ( pc.zFar - pc.zNear ) );
+}
+
+float linearAt( ivec2 p ) {
+	vec2 uv = ( vec2( p ) + 0.5 ) / pc.viewportSize;
+	return linearizeDepth( textureLod( sampler2D( depthTex, depthSampler ), uv, 0.0 ).r );
+}
+
+void main() {
+	ivec2 pix = ivec2( gl_GlobalInvocationID.xy );
+	ivec2 dim = ivec2( pc.viewportSize );
+	if ( pix.x >= dim.x || pix.y >= dim.y )
+		return;
+
+	float centerLin = linearAt( pix );
+	// Depth-difference tolerance scales with distance (far surfaces have larger
+	// absolute depth steps for the same geometry).
+	float depthScale = 1.0 / max( centerLin * 0.05, 1e-3 );
+
+	float sum    = 0.0;
+	float wsum   = 0.0;
+	const int R  = 2;   // 5x5 kernel
+	for ( int dy = -R; dy <= R; ++dy ) {
+		for ( int dx = -R; dx <= R; ++dx ) {
+			ivec2 q = clamp( pix + ivec2( dx, dy ), ivec2( 0 ), dim - 1 );
+			float ao = imageLoad( aoIn, q ).r;
+			float dl = linearAt( q );
+			// Bilateral weight: spatial (gaussian-ish) * depth (edge-stopping).
+			float wd = exp( -float( dx * dx + dy * dy ) * 0.5 );
+			float ddiff = abs( dl - centerLin ) * depthScale;
+			float we = exp( -ddiff * ddiff );
+			float w = wd * we;
+			sum  += ao * w;
+			wsum += w;
+		}
+	}
+
+	float result = ( wsum > 1e-5 ) ? ( sum / wsum ) : imageLoad( aoIn, pix ).r;
+	imageStore( aoOut, pix, vec4( result ) );
+}

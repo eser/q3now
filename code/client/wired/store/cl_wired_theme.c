@@ -5,14 +5,13 @@
 ===========================================================================
 cl_wired_theme.c — Wired UI Theme: semantic state to color mapping
 
-Phase 4: Default theme provides colors for standard state labels.
+Default theme provides colors for standard state labels.
 Modders can override colors via console commands or theme files (v2).
 ===========================================================================
 */
 
 #include "../../client.h"
 #include "cl_wired_theme.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 #if FEAT_WIRED_UI

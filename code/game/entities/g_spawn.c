@@ -4,8 +4,8 @@
 //
 
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
+LOG_DECLARE_CHANNEL( ch_botai, "botlib.ai" );   /* shared bot-nav telemetry stream */
 
 qboolean	G_SpawnString( const char *key, const char *defaultString, char **out ) {
 	int		i;
@@ -81,6 +81,7 @@ field_t fields[] = {
 	{"spawnflags", FOFS(spawnflags), F_INT},
 	{"speed", FOFS(speed), F_FLOAT},
 	{"target", FOFS(target), F_STRING},
+	{"target2", FOFS(target2), F_STRING},
 	{"targetname", FOFS(targetname), F_STRING},
 	{"message", FOFS(message), F_STRING},
 	{"team", FOFS(team), F_STRING},
@@ -88,11 +89,14 @@ field_t fields[] = {
 	{"random", FOFS(random), F_FLOAT},
 	{"count", FOFS(count), F_INT},
 	{"health", FOFS(health), F_INT},
+	{"armor", FOFS(armor), F_INT},
 	{"dmg", FOFS(damage), F_INT},
 	{"angles", FOFS(s.angles), F_VECTOR},
 	{"angle", FOFS(s.angles), F_ANGLEHACK},
 	{"targetShaderName", FOFS(targetShaderName), F_STRING},
 	{"targetShaderNewName", FOFS(targetShaderNewName), F_STRING},
+	{"key", FOFS(key), F_STRING},		// target_modify: field to edit
+	{"value", FOFS(value), F_STRING},	// target_modify: new value
 
 	{NULL}
 };
@@ -109,6 +113,7 @@ void SP_info_player_intermission (gentity_t *ent);
 
 void SP_q3_func_plat (gentity_t *ent);
 void SP_q3_func_static (gentity_t *ent);
+void SP_q3_func_breakable (gentity_t *ent);
 void SP_q3_func_rotating (gentity_t *ent);
 void SP_q3_func_bobbing (gentity_t *ent);
 void SP_q3_func_pendulum( gentity_t *ent );
@@ -119,9 +124,12 @@ void SP_q3_func_timer (gentity_t *self);
 
 void SP_q3_trigger_always (gentity_t *ent);
 void SP_q3_trigger_multiple (gentity_t *ent);
+void SP_q3_trigger_lock (gentity_t *ent);
 void SP_q3_trigger_push (gentity_t *ent);
 void SP_q3_trigger_teleport (gentity_t *ent);
 void SP_q3_trigger_hurt (gentity_t *ent);
+void SP_q3_trigger_frag (gentity_t *ent);
+void SP_q3_trigger_death (gentity_t *ent);
 
 void SP_q3_target_remove_powerups( gentity_t *ent );
 void SP_q3_target_give (gentity_t *ent);
@@ -132,6 +140,10 @@ void SP_q3_target_laser (gentity_t *self);
 void SP_q3_target_score( gentity_t *ent );
 void SP_q3_target_teleporter( gentity_t *ent );
 void SP_q3_target_relay (gentity_t *ent);
+void SP_q3_target_logic (gentity_t *ent);
+void SP_q3_target_gravity (gentity_t *ent);
+void SP_q3_target_playerspeed (gentity_t *ent);
+void SP_q3_target_playerstats (gentity_t *ent);
 void SP_q3_target_kill (gentity_t *ent);
 void SP_q3_target_position (gentity_t *ent);
 void SP_q3_target_location (gentity_t *ent);
@@ -139,6 +151,9 @@ void SP_q3_target_push (gentity_t *ent);
 #if FEAT_EARTHQUAKE_SYSTEM
 void SP_q3_target_earthquake (gentity_t *ent);
 #endif
+void SP_q3_target_unlink (gentity_t *ent);
+void SP_q3_target_modify (gentity_t *ent);
+void SP_q3_target_music (gentity_t *ent);
 
 void SP_q3_light (gentity_t *self);
 void SP_q3_info_null (gentity_t *self);
@@ -178,6 +193,7 @@ void SP_q1_func_train (gentity_t *ent);
 void SP_q1_func_rotating (gentity_t *ent);
 void SP_q1_func_episodegate (gentity_t *ent);
 void SP_q1_func_bossgate (gentity_t *ent);
+void SP_q1_monster (gentity_t *ent);
 void SP_q1_info_teleport_destination (gentity_t *ent);
 void SP_q1_trigger_once (gentity_t *ent);
 void SP_q1_trigger_multiple (gentity_t *ent);
@@ -231,6 +247,7 @@ spawn_t	spawns[] = {
 	{"func_button", SP_q3_func_button},
 	{"func_door", SP_q3_func_door},
 	{"func_static", SP_q3_func_static},
+	{"func_breakable", SP_q3_func_breakable},
 	{"func_rotating", SP_q3_func_rotating},
 	{"func_bobbing", SP_q3_func_bobbing},
 	{"func_pendulum", SP_q3_func_pendulum},
@@ -245,9 +262,12 @@ spawn_t	spawns[] = {
 	// could not be client side predicted (push and teleport).
 	{"trigger_always", SP_q3_trigger_always},
 	{"trigger_multiple", SP_q3_trigger_multiple},
+	{"trigger_lock", SP_q3_trigger_lock},
 	{"trigger_push", SP_q3_trigger_push},
 	{"trigger_teleport", SP_q3_trigger_teleport},
 	{"trigger_hurt", SP_q3_trigger_hurt},
+	{"trigger_frag", SP_q3_trigger_frag},
+	{"trigger_death", SP_q3_trigger_death},
 
 	// targets perform no action by themselves, but must be triggered
 	// by another entity
@@ -260,6 +280,10 @@ spawn_t	spawns[] = {
 	{"target_score", SP_q3_target_score},
 	{"target_teleporter", SP_q3_target_teleporter},
 	{"target_relay", SP_q3_target_relay},
+	{"target_logic", SP_q3_target_logic},
+	{"target_gravity", SP_q3_target_gravity},
+	{"target_playerspeed", SP_q3_target_playerspeed},
+	{"target_playerstats", SP_q3_target_playerstats},
 	{"target_kill", SP_q3_target_kill},
 	{"target_position", SP_q3_target_position},
 	{"target_location", SP_q3_target_location},
@@ -267,6 +291,10 @@ spawn_t	spawns[] = {
 #if FEAT_EARTHQUAKE_SYSTEM
 	{"target_earthquake", SP_q3_target_earthquake},
 #endif
+	{"target_unlink", SP_q3_target_unlink},
+	{"target_disable", SP_q3_target_unlink},		// legacy alias, same handler
+	{"target_modify", SP_q3_target_modify},
+	{"target_music", SP_q3_target_music},
 
 	{"light", SP_q3_light},
 	{"path_corner", SP_q3_path_corner},
@@ -350,6 +378,19 @@ spawn_t	spawns[] = {
 	{"q1_trigger_changelevel",     SP_q1_trigger_changelevel},
 	{"q1_item_key1",               SP_q1_item_key1},
 	{"q1_item_key2",               SP_q1_item_key2},
+
+	// Map-placed Q1 monsters — one adapter (SP_q1_monster) reads the character name from
+	// the classname suffix and spawns it via the shared name-driven path. Registering all
+	// shipped monsters lets a mapper place any of them; e1m8 uses q1_monster_boss (Chthon).
+	{"q1_monster_boss",            SP_q1_monster},
+	{"q1_monster_army",            SP_q1_monster},   // Q1 grunt -> soldier
+	{"q1_monster_dog",             SP_q1_monster},
+	{"q1_monster_knight",          SP_q1_monster},
+	{"q1_monster_demon1",          SP_q1_monster},   // Q1 fiend -> demon
+	{"q1_monster_ogre",            SP_q1_monster},
+	{"q1_monster_shambler",        SP_q1_monster},
+	{"q1_monster_zombie",          SP_q1_monster},
+	{"q1_monster_wizard",          SP_q1_monster},
 
 	{NULL, 0}
 };
@@ -853,4 +894,13 @@ void G_SpawnEntitiesFromString( void ) {
 	}
 
 	level.spawning = qfalse;			// any future calls to G_Spawn*() will be errors
+
+	// Census summary on the shared bot-nav stream: report how many behavior
+	// monsters the map placed so a playthrough harness reads the spawned total
+	// without parsing every spawn. (Console/script spawns after this add to the
+	// running census tracked in the per-kill telemetry.)
+	if ( level.numMonstersSpawned > 0 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_botai),
+			"level: %d monsters spawned\n", level.numMonstersSpawned );
+	}
 }

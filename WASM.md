@@ -95,9 +95,9 @@ make test-wasm
 
 When `USE_WASM=ON`, cmake:
 1. Builds WAMR as a static library (`vmlib`)
-2. Links it into the engine and dedicated server
+2. Links it into the engine and headless server
 3. Compiles `qagame` and `cgame` to `.wasm` via wasi-sdk (output:
-   `<build>/<config>/baseq3/vm/{qagame,cgame}.wasm`)
+   `<build>/<config>/base/vm/{qagame,cgame}.wasm`)
 
 ### Feature flags
 

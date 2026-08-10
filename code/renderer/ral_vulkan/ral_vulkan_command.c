@@ -5,10 +5,12 @@
 // buffers, multi-queue submission (vkQueueSubmit2), the trivially-backend
 // pass-through command ops (copy / barrier / timestamp / debug label /
 // viewport / scissor / depth-bias), plus the pipeline-dependent cmd ops
-// (bind / draw / dispatch / dynamic rendering) added in Phase 7.3c. See
-// docs/phase-7-ral-design.md §3.7, §6.2, §9.3, §10. Phase 7.3 / 7.3c.
+// (bind / draw / dispatch / dynamic rendering). See
+// docs/phase-7-ral-design.md §3.7, §6.2, §9.3, §10.
 
 #include "ral_vulkan_internal.h"
+
+R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
 
 #define RAL_VK_MAX_SUBMIT_CBS   16u
 #define RAL_VK_MAX_SUBMIT_SEMS  16u
@@ -22,11 +24,11 @@ void ralVk_QueueSubmit2( ralBackend_t *b, ralQueueType_t q, const VkSubmitInfo2 
 	r = b->vk.QueueSubmit2( b->queues[q], 1, si2, fence );
 	ralVk_QueueUnlock( b, q );
 	if ( r != VK_SUCCESS )
-		ri.Log( SEV_WARN, "[RAL] vkQueueSubmit2 (queue %d) failed (VkResult %d)\n", (int)q, (int)r );
+		R_LOG( rch_ral, SEV_WARN, "vkQueueSubmit2 (queue %d) failed (VkResult %d)\n", (int)q, (int)r );
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// Phase 7.4c-submit-followup-present-1 — Ral_WaitQueueIdle.
+// Ral_WaitQueueIdle.
 // Host-side wait on a specific queue's pending work. Replaces the legacy
 // qvkQueueWaitIdle(vk.queue) call inside vk_queue_wait_idle (B1 fold —
 // retarget done at vk.c:13753-13757). Lock the queue mutex during the
@@ -60,16 +62,16 @@ ralCommandBuffer_t *Ral_AcquireCommandBuffer( ralBackend_t *b, ralQueueType_t q 
 	ralVk_QueueLock( b, q );
 	if ( b->vk.AllocateCommandBuffers( b->device, &ai, &vcb ) != VK_SUCCESS ) vcb = VK_NULL_HANDLE;
 	ralVk_QueueUnlock( b, q );
-	if ( vcb == VK_NULL_HANDLE ) { ri.Log( SEV_WARN, "[RAL] Ral_AcquireCommandBuffer: vkAllocateCommandBuffers failed (queue %d)\n", (int)q ); return NULL; }
+	if ( vcb == VK_NULL_HANDLE ) { R_LOG( rch_ral, SEV_WARN, "Ral_AcquireCommandBuffer: vkAllocateCommandBuffers failed (queue %d)\n", (int)q ); return NULL; }
 	cb = (ralCommandBuffer_t *)malloc( sizeof( *cb ) );
 	if ( !cb ) { ralVk_QueueLock( b, q ); b->vk.FreeCommandBuffers( b->device, b->cmdPools[q], 1, &vcb ); ralVk_QueueUnlock( b, q ); return NULL; }
 	RAL_ZERO( *cb );
 	cb->backend = b; cb->cb = vcb; cb->queue = q; cb->state = RAL_VK_CMD_IDLE; cb->frame = b->currentFrame;
-	cb->ownsBuffer = qtrue;   // Phase 7.4c-cmd: RAL-allocated; matching Free in Ral_DestroyCommandBuffer
+	cb->ownsBuffer = qtrue;   // RAL-allocated; matching Free in Ral_DestroyCommandBuffer
 	return cb;
 }
 
-// Phase 7.4c-cmd / Phase 7.4c-submit-BC-B — combined Acquire+Begin helper.
+// Combined Acquire+Begin helper.
 // Allocates a fresh VkCommandBuffer from the backend's pool for the requested
 // queue and immediately enters RECORDING state via vkBeginCommandBuffer.
 // ownsBuffer=qtrue (inherited from Ral_AcquireCommandBuffer) so the matching
@@ -77,9 +79,9 @@ ralCommandBuffer_t *Ral_AcquireCommandBuffer( ralBackend_t *b, ralQueueType_t q 
 // the pool.
 //
 // Used by:
-//  - vk_begin_frame's per-frame parallel-paths buffer (7.4c-cmd, GRAPHICS).
+//  - vk_begin_frame's per-frame parallel-paths buffer (GRAPHICS).
 //  - The 13 one-shot staging / screenshot / shadow-caster sites migrated
-//    from the retired legacy Vk one-shot helpers (7.4c-submit-BC-B, all
+//    from the retired legacy Vk one-shot helpers (all
 //    GRAPHICS to preserve legacy queue serialization).
 //
 // The historical "adopt the renderer's VkCommandBuffer" reading is gone —
@@ -95,36 +97,13 @@ ralCommandBuffer_t *Ral_AcquireBegunCommandBuffer( ralBackend_t *b, ralQueueType
 	return cb;
 }
 
-// Phase 7.4c-submit-BC-C-final — wrap an externally-allocated VkCommandBuffer
-// in a ralCommandBuffer_t with ownsBuffer=qfalse. Used by the per-frame
-// submit migration: the renderer's legacy vk.cmd->command_buffer keeps its
-// existing alloc / reset / begin / record / end lifecycle; the wrapper is
-// short-lived (created right before Ral_Submit, destroyed right after) and
-// exists solely to feed the typed ralSubmitInfo_t.commandBuffers[] array.
-// State is set to RAL_VK_CMD_PENDING_SUBMIT (caller has already called
-// qvkEndCommandBuffer before wrap).
-ralCommandBuffer_t *Ral_WrapCommandBuffer( ralBackend_t *b, void *externalCommandBuffer, ralQueueType_t q ) {
-	ralCommandBuffer_t *cb;
-	if ( !b || !externalCommandBuffer || (uint32_t)q > RAL_QUEUE_TRANSFER ) return NULL;
-	cb = (ralCommandBuffer_t *)malloc( sizeof( *cb ) );
-	if ( !cb ) return NULL;
-	RAL_ZERO( *cb );
-	cb->backend    = b;
-	cb->cb         = (VkCommandBuffer)externalCommandBuffer;
-	cb->queue      = q;
-	cb->state      = RAL_VK_CMD_PENDING_SUBMIT;
-	cb->frame      = b->currentFrame;
-	cb->ownsBuffer = qfalse;   // Ral_DestroyCommandBuffer skips FreeCommandBuffers; caller retains underlying-buffer lifecycle.
-	return cb;
-}
-
-// Phase 7.4c-submit-BC-B — end + submit + wait + free in one shot.
+// End + submit + wait + free in one shot.
 // Replaces the retired legacy Vk one-shot helper's "submit to graphics
 // queue + vkQueueWaitIdle + vkFreeCommandBuffers" sequence; the wait is
 // fence-based via Ral_WaitFence (the established synchronous-completion
 // idiom at ralVk_RunAsyncTest's "fence cycle" block above), not a raw
 // QueueWaitIdle. Target queue is whichever cmd->queue was acquired on;
-// for the 13 BC-B callsites that's RAL_QUEUE_GRAPHICS, matching the
+// for the 13 callsites that's RAL_QUEUE_GRAPHICS, matching the
 // legacy graphics queue used by the prior retired pair.
 void Ral_SubmitAndDispose( ralCommandBuffer_t *cb ) {
 	ralBackend_t       *b;
@@ -152,18 +131,18 @@ void Ral_SubmitAndDispose( ralCommandBuffer_t *cb ) {
 void Ral_BeginCommandBuffer( ralCommandBuffer_t *cb ) {
 	VkCommandBufferBeginInfo bi;
 	if ( !cb ) return;
-	if ( cb->state != RAL_VK_CMD_IDLE ) { ri.Log( SEV_WARN, "[RAL] Ral_BeginCommandBuffer: command buffer not IDLE (state %d)\n", (int)cb->state ); return; }
+	if ( cb->state != RAL_VK_CMD_IDLE ) { R_LOG( rch_ral, SEV_WARN, "Ral_BeginCommandBuffer: command buffer not IDLE (state %d)\n", (int)cb->state ); return; }
 	RAL_ZERO( bi );
 	bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	if ( cb->backend->vk.BeginCommandBuffer( cb->cb, &bi ) != VK_SUCCESS ) { ri.Log( SEV_WARN, "[RAL] Ral_BeginCommandBuffer: vkBeginCommandBuffer failed\n" ); return; }
+	if ( cb->backend->vk.BeginCommandBuffer( cb->cb, &bi ) != VK_SUCCESS ) { R_LOG( rch_ral, SEV_WARN, "Ral_BeginCommandBuffer: vkBeginCommandBuffer failed\n" ); return; }
 	cb->state = RAL_VK_CMD_RECORDING;
 }
 
 void Ral_EndCommandBuffer( ralCommandBuffer_t *cb ) {
 	if ( !cb ) return;
-	if ( cb->state != RAL_VK_CMD_RECORDING ) { ri.Log( SEV_WARN, "[RAL] Ral_EndCommandBuffer: command buffer not RECORDING (state %d)\n", (int)cb->state ); return; }
-	if ( cb->backend->vk.EndCommandBuffer( cb->cb ) != VK_SUCCESS ) { ri.Log( SEV_WARN, "[RAL] Ral_EndCommandBuffer: vkEndCommandBuffer failed\n" ); return; }
+	if ( cb->state != RAL_VK_CMD_RECORDING ) { R_LOG( rch_ral, SEV_WARN, "Ral_EndCommandBuffer: command buffer not RECORDING (state %d)\n", (int)cb->state ); return; }
+	if ( cb->backend->vk.EndCommandBuffer( cb->cb ) != VK_SUCCESS ) { R_LOG( rch_ral, SEV_WARN, "Ral_EndCommandBuffer: vkEndCommandBuffer failed\n" ); return; }
 	cb->state = RAL_VK_CMD_PENDING_SUBMIT;
 }
 
@@ -175,12 +154,12 @@ void Ral_DestroyCommandBuffer( ralCommandBuffer_t *cb ) {
 	ralBackend_t *b;
 	if ( !cb ) return;
 	b = cb->backend;
-	// Phase 7.4c-cmd: adopted wrappers (ownsBuffer = qfalse) skip the FreeCommandBuffers
+	// Adopted wrappers (ownsBuffer = qfalse) skip the FreeCommandBuffers
 	// call — the renderer's existing pool owns the underlying VkCommandBuffer lifetime.
 	if ( cb->ownsBuffer ) {
-		// 7.3: command buffers in flight are always fence/timeline-waited before
+		// Command buffers in flight are always fence/timeline-waited before
 		// being freed by the current consumers; freed immediately (the deferred
-		// path for cmd buffers lands with the renderer migration in 7.4).
+		// path for cmd buffers lands with the renderer migration later).
 		ralVk_QueueLock( b, cb->queue );
 		b->vk.FreeCommandBuffers( b->device, b->cmdPools[cb->queue], 1, &cb->cb );
 		ralVk_QueueUnlock( b, cb->queue );
@@ -192,7 +171,7 @@ void Ral_PoolReset( ralBackend_t *b, ralQueueType_t q ) {
 	if ( !b || (uint32_t)q > RAL_QUEUE_TRANSFER ) return;
 	// Resets the pool; outstanding ralCommandBuffer_t wrappers for this queue
 	// become invalid (consumer must not reuse them). Wrapper bookkeeping is a
-	// 7.4 follow-up.
+	// follow-up.
 	ralVk_QueueLock( b, q );
 	b->vk.ResetCommandPool( b->device, b->cmdPools[q], 0 );
 	ralVk_QueueUnlock( b, q );
@@ -209,7 +188,23 @@ void Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t *si ) 
 	VkFence                   fence;
 	if ( !b || !si || (uint32_t)q > RAL_QUEUE_TRANSFER ) return;
 
-	nCb = ( si->numCommandBuffers < RAL_VK_MAX_SUBMIT_CBS ) ? si->numCommandBuffers : RAL_VK_MAX_SUBMIT_CBS;
+	// The per-submit fixed-capacity scratch arrays are intentional (16 is
+	// generous for every renderer submission path). Refuse — rather than
+	// silently record a truncated prefix — if a caller exceeds them: a partial
+	// submit (dropped command buffers / un-waited or un-signalled semaphores)
+	// would corrupt synchronization in a way that's far harder to diagnose than
+	// a hard fail here. Same "no silent degrade" idiom as Ral_CmdDrawIndexedIndirectCount.
+	if ( si->numCommandBuffers  > RAL_VK_MAX_SUBMIT_CBS  ||
+	     si->numWaitSemaphores   > RAL_VK_MAX_SUBMIT_SEMS ||
+	     si->numSignalSemaphores > RAL_VK_MAX_SUBMIT_SEMS ) {
+		R_LOG( rch_ral, SEV_ERROR, "Ral_Submit: over-capacity (cbs %u/%u, wait %u/%u, signal %u/%u) — refusing submit (would truncate; raise RAL_VK_MAX_SUBMIT_* if this is legitimate)\n",
+		        si->numCommandBuffers, RAL_VK_MAX_SUBMIT_CBS,
+		        si->numWaitSemaphores, RAL_VK_MAX_SUBMIT_SEMS,
+		        si->numSignalSemaphores, RAL_VK_MAX_SUBMIT_SEMS );
+		return;
+	}
+
+	nCb = si->numCommandBuffers;
 	for ( i = 0; i < nCb; i++ ) {
 		ralCommandBuffer_t *cb = si->commandBuffers[i];
 		RAL_ZERO( cbis[i] );
@@ -217,7 +212,7 @@ void Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t *si ) 
 		cbis[i].commandBuffer = cb ? cb->cb : VK_NULL_HANDLE;
 		if ( cb ) { cb->state = RAL_VK_CMD_SUBMITTED; cb->frame = b->currentFrame; }
 	}
-	nWait = ( si->numWaitSemaphores < RAL_VK_MAX_SUBMIT_SEMS ) ? si->numWaitSemaphores : RAL_VK_MAX_SUBMIT_SEMS;
+	nWait = si->numWaitSemaphores;
 	for ( i = 0; i < nWait; i++ ) {
 		ralSemaphore_t *s = si->waitSemaphores[i];
 		RAL_ZERO( waitInfos[i] );
@@ -226,7 +221,7 @@ void Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t *si ) 
 		waitInfos[i].value     = ( s && s->type == RAL_SEMAPHORE_TIMELINE && si->waitValues ) ? si->waitValues[i] : 0;
 		waitInfos[i].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 	}
-	nSig = ( si->numSignalSemaphores < RAL_VK_MAX_SUBMIT_SEMS ) ? si->numSignalSemaphores : RAL_VK_MAX_SUBMIT_SEMS;
+	nSig = si->numSignalSemaphores;
 	for ( i = 0; i < nSig; i++ ) {
 		ralSemaphore_t *s = si->signalSemaphores[i];
 		RAL_ZERO( signalInfos[i] );
@@ -273,7 +268,7 @@ void Ral_CmdCopyBufferToTexture( ralCommandBuffer_t *cb, ralBuffer_t *src, ralTe
 	cb->backend->vk.CmdCopyBufferToImage( cb->cb, src->buffer, dst->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bic );
 }
 
-// Mirror of Ral_CmdCopyBufferToTexture for readback (Phase 7.4-pre — the 7.3c
+// Mirror of Ral_CmdCopyBufferToTexture for readback (the early
 // RAL test went through the raw VK PFN; with this in place renderer
 // readbacks / screenshot paths can stay on the RAL surface).
 void Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb, ralTexture_t *src, ralBuffer_t *dst, const ralBufferTextureCopy_t *region ) {
@@ -370,7 +365,7 @@ void Ral_CmdSetDepthBias( ralCommandBuffer_t *cb, float constant, float clamp, f
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// pipeline-dependent ops (Phase 7.3c)
+// pipeline-dependent ops
 // ════════════════════════════════════════════════════════════════════════
 //
 // vkCmdBindPipeline records the pipeline + caches its layout/bindPoint on the
@@ -381,7 +376,7 @@ void Ral_CmdSetDepthBias( ralCommandBuffer_t *cb, float constant, float clamp, f
 void Ral_CmdBindPipeline( ralCommandBuffer_t *cb, ralPipeline_t *p ) {
 	if ( !cb ) return;
 	if ( !p ) {
-		// Phase 7.4c-submit-A2 — NULL-fallthrough contract: clear cb's current-
+		// NULL-fallthrough contract: clear cb's current-
 		// pipeline state so subsequent Ral_CmdDraw / DrawIndexed / Dispatch on
 		// this cmd buffer bail (they check cb->currentPipeline). Avoids
 		// VUID-vkCmdDraw-None-08606 / -vkCmdDispatch-None-08606 when the
@@ -400,7 +395,7 @@ void Ral_CmdBindPipeline( ralCommandBuffer_t *cb, ralPipeline_t *p ) {
 void Ral_CmdBindBindGroup( ralCommandBuffer_t *cb, uint32_t setIndex, ralBindGroup_t *g ) {
 	if ( !cb || !g || cb->currentLayout == VK_NULL_HANDLE ) {
 		if ( cb && cb->currentLayout == VK_NULL_HANDLE )
-			ri.Log( SEV_WARN, "[RAL] Ral_CmdBindBindGroup: no pipeline bound (call Ral_CmdBindPipeline first)\n" );
+			R_LOG( rch_ral, SEV_WARN, "Ral_CmdBindBindGroup: no pipeline bound (call Ral_CmdBindPipeline first)\n" );
 		return;
 	}
 	cb->backend->vk.CmdBindDescriptorSets( cb->cb, cb->currentBindPoint, cb->currentLayout,
@@ -408,7 +403,7 @@ void Ral_CmdBindBindGroup( ralCommandBuffer_t *cb, uint32_t setIndex, ralBindGro
 }
 
 
-// Phase 7.4c-bindgroup — see ral_command.h for docblock + TODO_7.4c-cmd
+// See ral_command.h for docblock + TODO_7.4c-cmd
 // rationale. Records onto the externally-supplied VkCommandBuffer with the
 // externally-supplied VkPipelineLayout — no cb->currentLayout dependency.
 // Internal-only stack scratch sized by RAL_VK_MAX_PIPELINE_SETS.
@@ -462,13 +457,24 @@ void Ral_CmdPushConstants( ralCommandBuffer_t *cb, uint32_t stageFlags, uint32_t
 	VkShaderStageFlags vkStages = 0;
 	if ( !cb || !data || size == 0 || cb->currentLayout == VK_NULL_HANDLE ) {
 		if ( cb && cb->currentLayout == VK_NULL_HANDLE )
-			ri.Log( SEV_WARN, "[RAL] Ral_CmdPushConstants: no pipeline bound\n" );
+			R_LOG( rch_ral, SEV_WARN, "Ral_CmdPushConstants: no pipeline bound\n" );
 		return;
 	}
-	if ( cb->currentPipeline && offset + size > cb->currentPipeline->pushConstantSize ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CmdPushConstants: range [%u,%u] exceeds pipeline's pushConstantSize %u\n",
-		        offset, offset + size, cb->currentPipeline->pushConstantSize );
+	// Require a bound pipeline so we have an authoritative pushConstantSize to
+	// validate against, then range-check WITHOUT the `offset + size` add (which
+	// is uint32 and wraps — e.g. offset=0xFFFFFFF0,size=0x20 → 0x10, slipping a
+	// huge offset past the bound and recording an out-of-range vkCmdPushConstants).
+	if ( !cb->currentPipeline ) {
+		R_LOG( rch_ral, SEV_WARN, "Ral_CmdPushConstants: no pipeline bound (cannot bound-check range)\n" );
 		return;
+	}
+	{
+		uint32_t limit = cb->currentPipeline->pushConstantSize;
+		if ( size > limit || offset > limit - size ) {
+			R_LOG( rch_ral, SEV_WARN, "Ral_CmdPushConstants: range [offset=%u size=%u] exceeds pipeline's pushConstantSize %u\n",
+			        offset, size, limit );
+			return;
+		}
 	}
 	if ( stageFlags & RAL_STAGE_VERTEX   ) vkStages |= VK_SHADER_STAGE_VERTEX_BIT;
 	if ( stageFlags & RAL_STAGE_FRAGMENT ) vkStages |= VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -479,7 +485,7 @@ void Ral_CmdPushConstants( ralCommandBuffer_t *cb, uint32_t stageFlags, uint32_t
 
 void Ral_CmdDraw( ralCommandBuffer_t *cb, uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance ) {
 	if ( !cb ) return;
-	// Phase 7.4c-submit-A2 — bail when no pipeline is currently bound. The
+	// Bail when no pipeline is currently bound. The
 	// renderer's parallel-paths era can hit this when vk_ral_lookup_pipeline
 	// returned NULL for a VkPipeline that has no RAL sibling yet (the matching
 	// Ral_CmdBindPipeline cleared cb->currentPipeline). Legacy qvkCmdDraw on
@@ -490,7 +496,7 @@ void Ral_CmdDraw( ralCommandBuffer_t *cb, uint32_t vertexCount, uint32_t instanc
 
 void Ral_CmdDrawIndexed( ralCommandBuffer_t *cb, uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance ) {
 	if ( !cb ) return;
-	if ( !cb->currentPipeline ) return;   // Phase 7.4c-submit-A2 — same NULL-fallthrough rationale as Ral_CmdDraw above.
+	if ( !cb->currentPipeline ) return;   // Same NULL-fallthrough rationale as Ral_CmdDraw above.
 	cb->backend->vk.CmdDrawIndexed( cb->cb, indexCount, instanceCount ? instanceCount : 1, firstIndex, vertexOffset, firstInstance );
 }
 
@@ -502,15 +508,15 @@ void Ral_CmdDrawIndexedIndirect( ralCommandBuffer_t *cb, ralBuffer_t *argBuf, ui
 void Ral_CmdDrawIndexedIndirectCount( ralCommandBuffer_t *cb, ralBuffer_t *argBuf, uint64_t argOffset,
                                       ralBuffer_t *countBuf, uint64_t countOffset, uint32_t maxDrawCount, uint32_t stride ) {
 	if ( !cb || !argBuf || !countBuf ) return;
-	// Phase 7.4-pre: refuse to silently degrade. The 7.3c fallback substituted
+	// Refuse to silently degrade. The earlier fallback substituted
 	// vkCmdDrawIndexedIndirect with maxDrawCount, which ignores the count
 	// buffer and renders *wrong* output (always maxDrawCount draws regardless
 	// of what compute culling produced). Consumers must branch on
 	// caps.drawIndirectCount and provide a non-indirect-count fallback path
 	// when the device lacks it.
 	if ( !cb->backend->caps.drawIndirectCount || !cb->backend->vk.CmdDrawIndexedIndirectCount ) {
-		RAL_NOTE_ONCE( "[RAL] Ral_CmdDrawIndexedIndirectCount called but caps.drawIndirectCount=false; consumer must branch on caps before calling. Call is a no-op (no degraded substitute).\n" );
-		ri.Log( SEV_ERROR, "[RAL] Ral_CmdDrawIndexedIndirectCount: caps.drawIndirectCount=false but called anyway — refusing to substitute vkCmdDrawIndexedIndirect (would render the wrong primitive count). Consumer must cap-branch.\n" );
+		RAL_NOTE_ONCE( "Ral_CmdDrawIndexedIndirectCount called but caps.drawIndirectCount=false; consumer must branch on caps before calling. Call is a no-op (no degraded substitute).\n" );
+		R_LOG( rch_ral, SEV_ERROR, "Ral_CmdDrawIndexedIndirectCount: caps.drawIndirectCount=false but called anyway — refusing to substitute vkCmdDrawIndexedIndirect (would render the wrong primitive count). Consumer must cap-branch.\n" );
 		return;
 	}
 	cb->backend->vk.CmdDrawIndexedIndirectCount( cb->cb, argBuf->buffer, (VkDeviceSize)argOffset,
@@ -519,7 +525,7 @@ void Ral_CmdDrawIndexedIndirectCount( ralCommandBuffer_t *cb, ralBuffer_t *argBu
 
 void Ral_CmdDispatch( ralCommandBuffer_t *cb, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) {
 	if ( !cb ) return;
-	if ( !cb->currentPipeline ) return;   // Phase 7.4c-submit-A2 — NULL-fallthrough (see Ral_CmdDraw).
+	if ( !cb->currentPipeline ) return;   // NULL-fallthrough (see Ral_CmdDraw).
 	cb->backend->vk.CmdDispatch( cb->cb, groupCountX ? groupCountX : 1, groupCountY ? groupCountY : 1, groupCountZ ? groupCountZ : 1 );
 }
 
@@ -529,21 +535,21 @@ void Ral_CmdDispatchIndirect( ralCommandBuffer_t *cb, ralBuffer_t *argBuf, uint6
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// Phase 7.4c-submit-A2 — `_Raw` shim retirement.
+// `_Raw` shim retirement.
 //
-// 16 of the 21 parallel-paths `Ral_Cmd*Raw` shims were deleted in 7.4c-submit-A2
+// 16 of the 21 parallel-paths `Ral_Cmd*Raw` shims were deleted
 // after the renderer migrated to the typed cmd surface below. The 5 remaining
 // shims (renamed `_Tr` for transitional) need ralRenderPass_t / ralFramebuffer_t
 // / ralTexture_t / ralQueryPool_t sibling infrastructure that didn't fit in
-// A2's scope; their bodies live below (BeginRenderPassTr, PipelineBarrierTr,
-// CopyImageTr, ResetQueryPoolTr, WriteTimestampTr). TODO_7.4c-submit-A3.
+// that scope; their bodies live below (BeginRenderPassTr, PipelineBarrierTr,
+// CopyImageTr, ResetQueryPoolTr, WriteTimestampTr).
 // ════════════════════════════════════════════════════════════════════════
 
-// Phase 7.4c-submit-A3 — begin-render-pass legacy bridge body removed (callers migrated
+// Begin-render-pass legacy bridge body removed (callers migrated
 // to typed Ral_CmdBeginRenderPass via vk_ral_parallel_begin_render_pass).
 
 // ════════════════════════════════════════════════════════════════════════
-// Phase 7.4c-submit-A2 — typed RAL cmd surface additions (8 new functions).
+// Typed RAL cmd surface additions (8 new functions).
 // See ral_command.h docblock for the migration rationale + NULL-fallthrough
 // contract. Bodies unwrap typed args via the struct .vkHandle / .pipeline /
 // .buffer / .image accessors and call the backend's loaded vkCmd*.
@@ -574,7 +580,7 @@ void Ral_CmdPushConstantsLayout( ralCommandBuffer_t *cb,
                                  const void *data )
 {
 	if ( !cb || !layout || size == 0 || !data ) return;
-	// Phase 7.4c-submit-A2 — `stageFlags` is passed through as VkShaderStageFlags
+	// `stageFlags` is passed through as VkShaderStageFlags
 	// (the renderer's call sites use VK_SHADER_STAGE_*_BIT). The existing
 	// Ral_CmdPushConstants (above) uses the RAL_STAGE_* convention for typed
 	// callers. Both coexist during the parallel-paths era.
@@ -592,7 +598,7 @@ void Ral_CmdBeginRenderPass( ralCommandBuffer_t *cb,
 {
 	VkRenderPassBeginInfo bi;
 	if ( !cb || !renderPass || !framebuffer || !renderArea ) {
-		// Phase 7.4c-submit-A3 NULL-fallthrough — also clear inRenderPass so
+		// NULL-fallthrough — also clear inRenderPass so
 		// the matching End skips. Required because the renderer's parallel
 		// buffer can hit a lookup miss for an unadopted VkRenderPass /
 		// VkFramebuffer (Begin silently skips; End must too).
@@ -616,7 +622,7 @@ void Ral_CmdBeginRenderPass( ralCommandBuffer_t *cb,
 
 void Ral_CmdEndRenderPass( ralCommandBuffer_t *cb ) {
 	if ( !cb ) return;
-	// Phase 7.4c-submit-A3 — bail if the matching Begin didn't fire (parallel-
+	// Bail if the matching Begin didn't fire (parallel-
 	// buffer Begin's NULL-fallthrough skipped due to lookup miss).
 	if ( !cb->inRenderPass ) return;
 	cb->backend->vk.CmdEndRenderPass( cb->cb );
@@ -638,9 +644,20 @@ void Ral_CmdPipelineBarrierFull( ralCommandBuffer_t *cb, const ralPipelineBarrie
 	m  = info->memoryBarrierCount;
 	b  = info->bufferMemoryBarrierCount;
 	im = info->imageMemoryBarrierCount;
-	if ( m  > ARRAY_LEN( memBarriers    ) ) m  = ARRAY_LEN( memBarriers    );
-	if ( b  > ARRAY_LEN( bufferBarriers ) ) b  = ARRAY_LEN( bufferBarriers );
-	if ( im > ARRAY_LEN( imageBarriers  ) ) im = ARRAY_LEN( imageBarriers  );
+	// The barrier scratch arrays are intentionally fixed-capacity (8/8/16 covers
+	// every renderer barrier batch). Recording only a prefix would silently drop
+	// barriers — leaving resources in the wrong layout / unsynchronized — which is
+	// a far worse failure than refusing the call. Hard-fail with a log (same
+	// "no silent degrade" idiom as Ral_Submit / Ral_CmdDrawIndexedIndirectCount).
+	if ( m  > ARRAY_LEN( memBarriers    ) ||
+	     b  > ARRAY_LEN( bufferBarriers ) ||
+	     im > ARRAY_LEN( imageBarriers  ) ) {
+		R_LOG( rch_ral, SEV_ERROR, "Ral_CmdPipelineBarrierFull: over-capacity (mem %u/%u, buffer %u/%u, image %u/%u) — refusing barrier (would truncate; split the batch or raise the scratch caps)\n",
+		        m,  (uint32_t)ARRAY_LEN( memBarriers    ),
+		        b,  (uint32_t)ARRAY_LEN( bufferBarriers ),
+		        im, (uint32_t)ARRAY_LEN( imageBarriers  ) );
+		return;
+	}
 	for ( i = 0; i < m; i++ ) {
 		RAL_ZERO( memBarriers[i] );
 		memBarriers[i].sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -682,6 +699,51 @@ void Ral_CmdPipelineBarrierFull( ralCommandBuffer_t *cb, const ralPipelineBarrie
 	                                     m,  m  ? memBarriers    : NULL,
 	                                     b,  b  ? bufferBarriers : NULL,
 	                                     im, im ? imageBarriers  : NULL );
+}
+
+// Derive the VkAccessFlags a stage uses, for a single-texture transition.
+// Conservative: a producer stage gets its write access, a consumer stage its
+// read access; the shader/transfer stages get read|write to cover either role.
+static VkAccessFlags ralVk_StageAccess( ralPipelineStageFlags_t stage ) {
+	VkAccessFlags a = 0;
+	if ( stage & RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT )
+		a |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+	if ( stage & ( RAL_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | RAL_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT ) )
+		a |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+	if ( stage & ( RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT | RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+	             | RAL_PIPELINE_STAGE_VERTEX_SHADER_BIT ) )
+		a |= VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+	if ( stage & RAL_PIPELINE_STAGE_TRANSFER_BIT )
+		a |= VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+	return a;
+}
+
+void Ral_CmdTransitionTexture( ralCommandBuffer_t *cb, ralTexture_t *tex,
+                               ralPipelineStageFlags_t srcStage,
+                               ralPipelineStageFlags_t dstStage,
+                               uint32_t newVkLayout ) {
+	VkImageMemoryBarrier ib;
+	if ( !cb || !tex ) return;
+	RAL_ZERO( ib );
+	ib.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	ib.srcAccessMask                   = ralVk_StageAccess( srcStage );
+	ib.dstAccessMask                   = ralVk_StageAccess( dstStage );
+	ib.oldLayout                       = tex->currentLayout;
+	ib.newLayout                       = (VkImageLayout)newVkLayout;
+	ib.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+	ib.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+	ib.image                           = tex->image;
+	ib.subresourceRange.aspectMask     = tex->aspect;
+	ib.subresourceRange.baseMipLevel   = 0;
+	ib.subresourceRange.levelCount     = tex->mipLevels;
+	ib.subresourceRange.baseArrayLayer = 0;
+	ib.subresourceRange.layerCount     = tex->arrayLayers;
+	cb->backend->vk.CmdPipelineBarrier( cb->cb,
+	                                    (VkPipelineStageFlags)srcStage,
+	                                    (VkPipelineStageFlags)dstStage,
+	                                    0, 0, NULL, 0, NULL, 1, &ib );
+	// Atomic with the barrier: tracked layout can never desync from the GPU.
+	tex->currentLayout = (VkImageLayout)newVkLayout;
 }
 
 void Ral_CmdCopyImage( ralCommandBuffer_t *cb, ralTexture_t *src, ralTexture_t *dst,
@@ -742,7 +804,7 @@ void Ral_CmdWriteTimestamp( ralCommandBuffer_t *cb, uint32_t pipelineStageBits,
 	                                    pool->pool, query );
 }
 
-// Phase 7.4c-submit-A4 — 4 void*-handle parallel-paths shims retired here
+// 4 void*-handle parallel-paths shims retired here
 // (PipelineBarrier / CopyImage / ResetQueryPool / WriteTimestamp). The
 // renderer's callsites migrated to the typed Ral_Cmd{PipelineBarrierFull,
 // CopyImage,ResetQueryPool,WriteTimestamp} surface above via renderer-side
@@ -756,7 +818,7 @@ void Ral_CmdWriteTimestamp( ralCommandBuffer_t *cb, uint32_t pipelineStageBits,
 // when the loadOp is CLEAR or DONT_CARE; LOAD on UNDEFINED is the caller's
 // bug). The post-render layout stays ATTACHMENT_OPTIMAL — consumers needing
 // SHADER_READ_ONLY (e.g., to sample the colour target afterwards) emit their
-// own transition via the renderer migration's barrier code in Phase 7.4+.
+// own transition via the renderer migration's barrier code.
 static VkAttachmentLoadOp ralVk_LoadOp( ralLoadOp_t o ) {
 	switch ( o ) {
 	case RAL_LOAD_OP_LOAD:      return VK_ATTACHMENT_LOAD_OP_LOAD;
@@ -771,7 +833,7 @@ static VkAttachmentStoreOp ralVk_StoreOp( ralStoreOp_t o ) {
 
 // Transition `tex` from `tex->currentLayout` to `newLayout` if different;
 // updates tex->currentLayout. Coarse stage/access masks — sufficient for the
-// RAL test; the renderer migration tightens these per use case (Phase 7.4+).
+// RAL test; the renderer migration tightens these per use case.
 static void ralVk_RenderTargetTransition( ralCommandBuffer_t *cb, ralTexture_t *tex, VkImageLayout newLayout ) {
 	VkImageMemoryBarrier bar;
 	VkPipelineStageFlags srcStage, dstStage;
@@ -814,7 +876,21 @@ static void ralVk_RenderTargetTransition( ralCommandBuffer_t *cb, ralTexture_t *
 	bar.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
 	bar.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
 	bar.image                           = tex->image;
+	// An image-layout transition is WHOLE-IMAGE: for a combined depth+stencil
+	// format both aspects move together, so the barrier subresourceRange must
+	// include the stencil aspect even when the texture was adopted DEPTH-only
+	// (e.g. the cascaded shadow map, rendered depth-only into a D24S8 image)
+	// — without it: VUID-VkImageMemoryBarrier-image-03320, and the never-
+	// transitioned stencil plane trips VUID-vkCmdDraw-None-09600 at draw. This is
+	// distinct from the ATTACHMENT aspect (which stays depth-only — the stencil
+	// auto-bind in Ral_BeginRendering still keys on tex->aspect, so no stencil
+	// attachment is bound). Purely additive: depth-only (D32) + color textures
+	// keep tex->aspect unchanged.
 	bar.subresourceRange.aspectMask     = tex->aspect;
+	if ( tex->vkFormat == VK_FORMAT_D24_UNORM_S8_UINT
+	  || tex->vkFormat == VK_FORMAT_D32_SFLOAT_S8_UINT
+	  || tex->vkFormat == VK_FORMAT_D16_UNORM_S8_UINT )
+		bar.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
 	bar.subresourceRange.baseMipLevel   = 0;
 	bar.subresourceRange.levelCount     = tex->mipLevels;
 	bar.subresourceRange.baseArrayLayer = 0;
@@ -826,6 +902,8 @@ static void ralVk_RenderTargetTransition( ralCommandBuffer_t *cb, ralTexture_t *
 void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ ) {
 	VkRenderingAttachmentInfo  colorAtt[ RAL_MAX_COLOR_ATTACHMENTS ];
 	VkRenderingAttachmentInfo  depthAtt;
+	VkRenderingAttachmentInfo  stencilAtt;
+	qboolean                   haveStencil = qfalse;
 	VkRenderingInfo            info;
 	uint32_t                   i;
 	if ( !cb || !ri_ ) return;
@@ -855,14 +933,47 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 		}
 	}
 	if ( ri_->depthAttachment ) {
+		const ralTexture_t *dtex = ri_->depthAttachment;
+		// Array depth image (adopted via Ral_AdoptArrayTexture): the layer offset
+		// can only live in the bound attachment view (VkRenderingInfo has no
+		// baseArrayLayer), so pick the per-layer view for depthAttachmentLayerIndex.
+		// Single-layer textures (every current caller: no layerViews, index 0) bind
+		// defaultView exactly as before — byte-identical.
+		VkImageView depthView = dtex->defaultView;
+		if ( dtex->layerViews && dtex->numLayerViews > 0 ) {
+			uint32_t li = ( ri_->depthAttachmentLayerIndex < dtex->numLayerViews )
+			            ? ri_->depthAttachmentLayerIndex : 0;
+			depthView = dtex->layerViews[ li ];
+		}
 		RAL_ZERO( depthAtt );
 		depthAtt.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-		depthAtt.imageView   = ri_->depthAttachment->defaultView;
+		depthAtt.imageView   = depthView;
 		depthAtt.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 		depthAtt.loadOp      = ralVk_LoadOp ( ri_->depthLoadOp  );
 		depthAtt.storeOp     = ralVk_StoreOp( ri_->depthStoreOp );
 		depthAtt.clearValue.depthStencil.depth   = ri_->depthClear;
 		depthAtt.clearValue.depthStencil.stencil = 0;
+
+		// A combined depth+stencil format (e.g. D24_UNORM_S8_UINT) carries a
+		// stencil aspect on the same image/view; bind it as the stencil
+		// attachment too. Depth-only formats (no stencil aspect) leave
+		// pStencilAttachment NULL. The depthAttachment transition above already
+		// targets DEPTH_STENCIL_ATTACHMENT_OPTIMAL, valid for both aspects. Use the
+		// same per-layer view the depth aspect resolved to (depthView) so a future
+		// depth+stencil array image binds the right layer for both aspects; for the
+		// single-layer callers depthView == defaultView (byte-identical). The
+		// current array consumer (shadow) is DEPTH-only so this branch stays off.
+		if ( ri_->depthAttachment->aspect & VK_IMAGE_ASPECT_STENCIL_BIT ) {
+			haveStencil = qtrue;
+			RAL_ZERO( stencilAtt );
+			stencilAtt.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+			stencilAtt.imageView   = depthView;
+			stencilAtt.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+			stencilAtt.loadOp      = ralVk_LoadOp ( ri_->stencilLoadOp  );
+			stencilAtt.storeOp     = ralVk_StoreOp( ri_->stencilStoreOp );
+			stencilAtt.clearValue.depthStencil.depth   = ri_->depthClear;
+			stencilAtt.clearValue.depthStencil.stencil = ri_->stencilClear;
+		}
 	}
 
 	RAL_ZERO( info );
@@ -871,12 +982,12 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 	info.renderArea.offset.y  = ri_->renderArea.y;
 	info.renderArea.extent.width  = ri_->renderArea.width;
 	info.renderArea.extent.height = ri_->renderArea.height;
-	info.layerCount           = 1;       // v1: single-layer rendering; multi-view + array layers land with Phase 7.x stereoscopic / cubemap work
+	info.layerCount           = 1;       // v1: single-layer rendering; multi-view + array layers land with stereoscopic / cubemap work
 	info.viewMask             = 0;
 	info.colorAttachmentCount = ri_->numColorAttachments;
 	info.pColorAttachments    = ri_->numColorAttachments ? colorAtt : NULL;
 	info.pDepthAttachment     = ri_->depthAttachment ? &depthAtt : NULL;
-	info.pStencilAttachment   = NULL;    // explicit stencil attachment lands with the depth-stencil renderer code
+	info.pStencilAttachment   = haveStencil ? &stencilAtt : NULL;   // stencil attachment when the depth format carries a stencil aspect
 	cb->backend->vk.CmdBeginRendering( cb->cb, &info );
 }
 
@@ -915,8 +1026,8 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 	ralQueryPool_t       *qpool = NULL;
 	uint32_t              i;
 
-	ri.Log( SEV_INFO, "===== RAL async test (Phase 7.3) =====\n" );
-	ri.Log( SEV_INFO, "  queues: graphics fam %u, compute fam %u (%s), transfer fam %u (%s)\n",
+	R_LOG( rch_ral, SEV_INFO, "===== RAL async test (Phase 7.3) =====\n" );
+	R_LOG( rch_ral, SEV_INFO, "  queues: graphics fam %u, compute fam %u (%s), transfer fam %u (%s)\n",
 	        b->queueFamily[RAL_QUEUE_GRAPHICS],
 	        b->queueFamily[RAL_QUEUE_COMPUTE],  b->caps.asyncCompute  ? "dedicated" : "shared-with-graphics",
 	        b->queueFamily[RAL_QUEUE_TRANSFER], b->caps.asyncTransfer ? "dedicated" : "shared-with-graphics" );
@@ -935,8 +1046,8 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 			Ral_Submit( b, RAL_QUEUE_GRAPHICS, &si );
 			Ral_WaitFence( f, ~0ull );
 			post = Ral_FenceSignaled( f );
-			ri.Log( SEV_INFO, "  fence cycle: pre-wait signaled=%s, post-wait signaled=%s  (expect post=yes)\n", pre ? "yes" : "no", post ? "yes" : "no" );
-		} else ri.Log( SEV_WARN, "  fence cycle: setup failed\n" );
+			R_LOG( rch_ral, SEV_INFO, "  fence cycle: pre-wait signaled=%s, post-wait signaled=%s  (expect post=yes)\n", pre ? "yes" : "no", post ? "yes" : "no" );
+		} else R_LOG( rch_ral, SEV_WARN, "  fence cycle: setup failed\n" );
 		if ( cb ) Ral_DestroyCommandBuffer( cb );
 		if ( f )  Ral_DestroyFence( f );
 	}
@@ -949,15 +1060,19 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 	if ( buf ) {
 		byte *data = (byte *)malloc( BIG );
 		ralFence_t *uf;
+		if ( !data ) {
+			R_LOG( rch_ral, SEV_WARN, "  async buffer upload: malloc(%u) failed — skipping\n", BIG );
+		} else {
 		for ( i = 0; i < BIG; i++ ) data[i] = (byte)( i & 0xFF );
 		uf = Ral_BufferUploadAsync( buf, 0, data, BIG );
 		if ( uf ) {
-			ri.Log( SEV_INFO, "  Ral_BufferUploadAsync: 1 MiB on %s queue; fence signaled=%s (synchronous internal wait — async streaming is Phase 7.15)\n",
+			R_LOG( rch_ral, SEV_INFO, "  Ral_BufferUploadAsync: 1 MiB on %s queue; fence signaled=%s (synchronous internal wait — async streaming is Phase 7.15)\n",
 			        b->caps.asyncTransfer ? "transfer" : "graphics", Ral_FenceSignaled( uf ) ? "yes" : "no" );
 			Ral_WaitFence( uf, ~0ull );
 			Ral_DestroyFence( uf );
-		} else ri.Log( SEV_WARN, "  Ral_BufferUploadAsync failed\n" );
+		} else R_LOG( rch_ral, SEV_WARN, "  Ral_BufferUploadAsync failed\n" );
 		free( data );
+		}
 	}
 
 	// ── (3) timeline semaphore cross-queue: transfer → graphics → compute ──
@@ -1004,15 +1119,15 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 			b->vk.DeviceWaitIdle( b->device );   // guarantee the transfer-queue copy is host-visible before mapping
 			tv = Ral_GetTimelineValue( timeline );
 			m = (byte *)Ral_MapBuffer( readback );
-			ri.Log( SEV_INFO, "  cross-queue (transfer→graphics→compute): timeline value=%llu (expect ≥4 after host signal); queue-ownership barriers (transfer fam %u → graphics fam %u) recorded\n",
+			R_LOG( rch_ral, SEV_INFO, "  cross-queue (transfer→graphics→compute): timeline value=%llu (expect ≥4 after host signal); queue-ownership barriers (transfer fam %u → graphics fam %u) recorded\n",
 			        (unsigned long long)tv, b->queueFamily[RAL_QUEUE_TRANSFER], b->queueFamily[RAL_QUEUE_GRAPHICS] );
-			ri.Log( SEV_INFO, "  readback after transfer-queue copy: byte[0..3] = %u %u %u %u  (expect 0 1 2 3)\n", m ? m[0] : 255, m ? m[1] : 255, m ? m[2] : 255, m ? m[3] : 255 );
+			R_LOG( rch_ral, SEV_INFO, "  readback after transfer-queue copy: byte[0..3] = %u %u %u %u  (expect 0 1 2 3)\n", m ? m[0] : 255, m ? m[1] : 255, m ? m[2] : 255, m ? m[3] : 255 );
 			Ral_UnmapBuffer( readback );
-		} else ri.Log( SEV_WARN, "  cross-queue: command buffer acquisition failed\n" );
+		} else R_LOG( rch_ral, SEV_WARN, "  cross-queue: command buffer acquisition failed\n" );
 		if ( cbC ) Ral_DestroyCommandBuffer( cbC );
 		if ( cbG ) Ral_DestroyCommandBuffer( cbG );
 		if ( cbT ) Ral_DestroyCommandBuffer( cbT );
-	} else ri.Log( SEV_WARN, "  cross-queue: timeline semaphore creation failed\n" );
+	} else R_LOG( rch_ral, SEV_WARN, "  cross-queue: timeline semaphore creation failed\n" );
 
 	// ── (4) GPU timestamps ─────────────────────────────────────────────
 	{
@@ -1045,13 +1160,13 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 			if ( Ral_GetQueryResults( qpool, 0, 4, res, qtrue ) ) {
 				d10 = (double)( res[1] - res[0] ) * (double)b->caps.timestampPeriodNs / 1000.0;   // µs
 				d30 = (double)( res[3] - res[0] ) * (double)b->caps.timestampPeriodNs / 1000.0;
-				ri.Log( SEV_INFO, "  timestamps: ts1-ts0 = %.3f us, ts3-ts0 = %.3f us  (timestampPeriod = %.3f ns/tick; expect microsecond-range)\n", d10, d30, (double)b->caps.timestampPeriodNs );
-			} else ri.Log( SEV_WARN, "  timestamps: Ral_GetQueryResults returned not-ready\n" );
+				R_LOG( rch_ral, SEV_INFO, "  timestamps: ts1-ts0 = %.3f us, ts3-ts0 = %.3f us  (timestampPeriod = %.3f ns/tick; expect microsecond-range)\n", d10, d30, (double)b->caps.timestampPeriodNs );
+			} else R_LOG( rch_ral, SEV_WARN, "  timestamps: Ral_GetQueryResults returned not-ready\n" );
 			Ral_ResetQueryPool( qpool, 0, 4 );   // host-side reset (exercise the public API)
-		} else ri.Log( SEV_WARN, "  timestamps: setup failed\n" );
+		} else R_LOG( rch_ral, SEV_WARN, "  timestamps: setup failed\n" );
 		if ( cb ) Ral_DestroyCommandBuffer( cb );
 		if ( f )  Ral_DestroyFence( f );
-	} else ri.Log( SEV_INFO, "  timestamps: skipped (timestampPeriod=%.3f)\n", (double)b->caps.timestampPeriodNs );
+	} else R_LOG( rch_ral, SEV_INFO, "  timestamps: skipped (timestampPeriod=%.3f)\n", (double)b->caps.timestampPeriodNs );
 
 	// ── (5) deferred-destroy stress: 100 frames × create+destroy a 256 KiB buffer ──
 	{
@@ -1065,7 +1180,7 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 			Ral_EndFrame( b );
 		}
 		for ( i = 0; i < RAL_VK_MAX_FRAMES_IN_FLIGHT + 1u; i++ ) { Ral_BeginFrame( b ); Ral_EndFrame( b ); }   // drain the tail
-		ri.Log( SEV_INFO, "  deferred destroy: 100 frames × (create+destroy 256 KiB buffer); pending was %u, now %u; RAL footprint %u KiB / %u allocations  (no OOM — drain works)\n",
+		R_LOG( rch_ral, SEV_INFO, "  deferred destroy: 100 frames × (create+destroy 256 KiB buffer); pending was %u, now %u; RAL footprint %u KiB / %u allocations  (no OOM — drain works)\n",
 		        pending0, b->numPendingDestroy, (unsigned)( b->ralDeviceLocalBytes >> 10 ), b->numAllocations );
 	}
 
@@ -1086,10 +1201,10 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 			}
 			peakPending = b->numPendingDestroy;
 			for ( i = 0; i < RAL_VK_MAX_FRAMES_IN_FLIGHT + 1u; i++ ) { Ral_BeginFrame( b ); Ral_EndFrame( b ); }   // drain all 1000
-			ri.Log( SEV_INFO, "  BindGroup cycle: 1000 × (create+destroy 1-UBO bind group); %u alloc failures (expect 0); peak pending-destroy %u; after drain %u  (descriptor-set free path works, no pool exhaustion)\n",
+			R_LOG( rch_ral, SEV_INFO, "  BindGroup cycle: 1000 × (create+destroy 1-UBO bind group); %u alloc failures (expect 0); peak pending-destroy %u; after drain %u  (descriptor-set free path works, no pool exhaustion)\n",
 			        failed, peakPending, b->numPendingDestroy );
 			Ral_DestroyBindGroupLayout( bgl );
-		} else ri.Log( SEV_WARN, "  BindGroup cycle: layout creation failed\n" );
+		} else R_LOG( rch_ral, SEV_WARN, "  BindGroup cycle: layout creation failed\n" );
 	}
 
 	// ── teardown ───────────────────────────────────────────────────────
@@ -1099,7 +1214,7 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 	if ( readback ) Ral_DestroyBuffer( readback );
 	if ( buf )      Ral_DestroyBuffer( buf );
 	for ( i = 0; i < RAL_VK_MAX_FRAMES_IN_FLIGHT + 1u; i++ ) { Ral_BeginFrame( b ); Ral_EndFrame( b ); }
-	ri.Log( SEV_INFO, "  teardown: %u pending destroys, %u live allocations, RAL footprint %u KiB device-local  (expect ~0)\n",
+	R_LOG( rch_ral, SEV_INFO, "  teardown: %u pending destroys, %u live allocations, RAL footprint %u KiB device-local  (expect ~0)\n",
 	        b->numPendingDestroy, b->numAllocations, (unsigned)( b->ralDeviceLocalBytes >> 10 ) );
-	ri.Log( SEV_INFO, "===== end RAL async test =====\n" );
+	R_LOG( rch_ral, SEV_INFO, "===== end RAL async test =====\n" );
 }

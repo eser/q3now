@@ -31,7 +31,8 @@
 #include "ai_dmnet.h"
 #include "ai_team.h"
 #include "wired/bots/g_bot_scripts.h"
-#include "wired/bots/g_wiredbots.h"
+#include "wired/bots/g_wiredintel.h"
+#include "wired/bots/g_sequenced_goal.h"
 #include "../qcommon/q_feats.h"
 #if FEAT_RECAST_NAVMESH
 #include "g_bot_nav.h"
@@ -66,8 +67,8 @@ static qboolean BotNavTouchingGoal( const vec3_t origin, const bot_goal_t *goal 
 
 // for the voice chats
 #include "../qcommon/menudef.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_botlib, "botlib" );
+LOG_DECLARE_CHANNEL( ch_botai, "botlib.ai" );
 
 //goal flag, see ../botlib/be_ai_goal.h for the other GFL_*
 #define GFL_AIR			128
@@ -118,6 +119,714 @@ void BotRecordNodeSwitch(bot_state_t *bs, char *node, char *str, char *s) {
 	}
 #endif //DEBUG
 	numnodeswitches++;
+}
+
+// ── AI composite tree substrate ───────────────────────────────────────────
+//
+// See ai_main.h for the type/contract documentation. The substrate below
+// provides the vocabulary (three composite kinds) and the dispatch mechanics,
+// plus the byte-identical pass-through root wiring. This landing does NOT move
+// any scattered in-node arbitration into the tree; the root simply reproduces
+// bs->ainode's current selection.
+
+/*
+==================
+AI_LeafInit
+
+Initialize a leaf node that wraps an existing AINode_X function pointer.
+==================
+*/
+void AI_LeafInit(aiNode_t *node, int (*fn)(bot_state_t *bs), aiNodePre_t pre, const char *name) {
+	memset(node, 0, sizeof(*node));
+	node->tick = AI_LeafTick;
+	node->pre = pre;
+	node->name = name;
+	node->u.leaf.fn = fn;
+}
+
+/*
+==================
+AI_LeafTick
+
+Unified tick for a leaf: run the wrapped AINode_X and return its qtrue/qfalse.
+==================
+*/
+int AI_LeafTick(bot_state_t *bs, aiNode_t *self) {
+	return self->u.leaf.fn(bs);
+}
+
+/*
+==================
+AI_CompositeInit
+
+Initialize a composite node of the given arbitration kind. hysteresisMargin is
+the PRIORITIZED dwell time (ms) a higher-priority challenger must remain
+eligible before it displaces the incumbent; it is ignored by the other kinds.
+==================
+*/
+void AI_CompositeInit(aiNode_t *node, aiCompositeKind_t kind, const char *name, float hysteresisMargin) {
+	memset(node, 0, sizeof(*node));
+	node->tick = AI_CompositeTick;
+	node->pre = NULL;
+	node->name = name;
+	node->u.composite.kind = kind;
+	node->u.composite.numChildren = 0;
+	node->u.composite.incumbent = -1;
+	node->u.composite.challenger = -1;
+	node->u.composite.challengeStart = 0.0f;
+	node->u.composite.hysteresisMargin = hysteresisMargin;
+}
+
+/*
+==================
+AI_CompositeAddChild
+==================
+*/
+void AI_CompositeAddChild(aiNode_t *node, aiNode_t *child) {
+	aiComposite_t *c = &node->u.composite;
+	if (c->numChildren >= AI_MAX_COMPOSITE_CHILDREN) {
+		BotAI_Print(PRT_ERROR, "AI_CompositeAddChild: composite '%s' full\n",
+			node->name ? node->name : "?");
+		return;
+	}
+	c->children[c->numChildren++] = child;
+}
+
+/*
+==================
+AI_ChildEligible
+
+A child is eligible when it has no precondition (always) or its precondition
+passes this tick.
+==================
+*/
+static int AI_ChildEligible(bot_state_t *bs, aiNode_t *child) {
+	if (!child->pre) return qtrue;
+	return child->pre(bs, child);
+}
+
+/*
+==================
+AI_CompositeTick
+
+Select and run child(ren) per the composite kind. Returns the leaf qtrue/qfalse
+semantics (qtrue = done this frame, qfalse = a transition happened, run next):
+
+  PRIORITIZED     — children are stored in priority order (index 0 highest). The
+                    incumbent (chosen last tick) keeps the slot while its own
+                    precondition still passes UNLESS a strictly higher-priority
+                    child has been eligible continuously for hysteresisMargin ms.
+                    If the incumbent loses its precondition it is replaced
+                    immediately by the highest-priority eligible child.
+  SIMULTANEOUS    — run EVERY eligible child this tick. The composite is "done"
+                    (qtrue) only if every child that ran reported done; if any
+                    child transitioned (qfalse) the composite reports qfalse.
+  FIRST_AVAILABLE — run the first eligible child and stop; no hysteresis, no
+                    incumbent tracking. Returns that child's result (qtrue if no
+                    child was eligible — nothing to do this frame).
+==================
+*/
+int AI_CompositeTick(bot_state_t *bs, aiNode_t *self) {
+	aiComposite_t *c = &self->u.composite;
+	int i;
+
+	switch (c->kind) {
+	case AI_COMPOSITE_PRIORITIZED: {
+		int best = -1;			// highest-priority eligible child this tick
+		int chosen;
+
+		for (i = 0; i < c->numChildren; i++) {
+			if (AI_ChildEligible(bs, c->children[i])) { best = i; break; }
+		}
+
+		// No eligible child at all: nothing runs, clear incumbent.
+		if (best < 0) {
+			c->incumbent = -1;
+			c->challenger = -1;
+			return qtrue;
+		}
+
+		// Is the incumbent still eligible? (index valid and precondition holds)
+		int incumbentEligible = (c->incumbent >= 0 && c->incumbent < c->numChildren
+			&& AI_ChildEligible(bs, c->children[c->incumbent]));
+
+		if (!incumbentEligible) {
+			// Incumbent lost its precondition (or none yet): take the best now.
+			chosen = best;
+			c->challenger = -1;
+			c->challengeStart = 0.0f;
+		} else if (best >= c->incumbent) {
+			// No strictly-higher-priority challenger: incumbent wins, hysteresis idle.
+			chosen = c->incumbent;
+			c->challenger = -1;
+			c->challengeStart = 0.0f;
+		} else {
+			// A strictly-higher-priority child (best < incumbent) is eligible.
+			// It only displaces the incumbent after persisting hysteresisMargin ms.
+			if (c->challenger != best) {
+				c->challenger = best;
+				c->challengeStart = FloatTime();
+			}
+			// FloatTime() is seconds; margins are expressed in ms.
+			if ((FloatTime() - c->challengeStart) * 1000.0f >= c->hysteresisMargin) {
+				chosen = best;			// challenger persisted past the margin
+				c->challenger = -1;
+				c->challengeStart = 0.0f;
+			} else {
+				chosen = c->incumbent;	// still within the dwell window
+			}
+		}
+
+		c->incumbent = chosen;
+		return c->children[chosen]->tick(bs, c->children[chosen]);
+	}
+
+	case AI_COMPOSITE_SIMULTANEOUS: {
+		int allDone = qtrue;
+		int ranAny = qfalse;
+		for (i = 0; i < c->numChildren; i++) {
+			if (AI_ChildEligible(bs, c->children[i])) {
+				ranAny = qtrue;
+				if (!c->children[i]->tick(bs, c->children[i])) {
+					allDone = qfalse;	// this child transitioned
+				}
+			}
+		}
+		if (!ranAny) return qtrue;		// nothing eligible: done this frame
+		return allDone;
+	}
+
+	case AI_COMPOSITE_FIRST_AVAILABLE: {
+		for (i = 0; i < c->numChildren; i++) {
+			if (AI_ChildEligible(bs, c->children[i])) {
+				return c->children[i]->tick(bs, c->children[i]);
+			}
+		}
+		return qtrue;					// nothing eligible: done this frame
+	}
+	}
+
+	return qtrue;
+}
+
+// ── Fight/Chase line-of-sight sub-composite ───────────────────────────────
+//
+// The Fight->Chase and Chase->Fight visibility transitions used to be hand-
+// rolled inside the two leaf bodies with an ad-hoc grace timer
+// (BATTLE_FIGHT_VIS_GRACE_MS compared against enemyvisible_time). They now live
+// in a PRIORITIZED sub-composite of two children so the substrate's incumbent-
+// hysteresis damps the doorway/pillar single-tick occlusion:
+//
+//   child 0 (higher priority)  Chase leaf  pre: enemy currently UNSEEN AND
+//                                                BotWantsToChase(bs)
+//   child 1 (lower priority)   Fight leaf  pre: NULL (always eligible fallback)
+//
+// Fight is the always-eligible incumbent while the bot is engaging. When the
+// enemy is occluded and the bot wants to chase, Chase becomes a strictly
+// higher-priority challenger; the incumbent-hysteresis holds Fight for the
+// margin (= the old grace) before Chase displaces it — reproducing "don't drop
+// combat on a single-tick occlusion". When the enemy reappears in Chase, Chase
+// loses its own precondition and Fight takes over immediately (no dwell), which
+// matches the old immediate Chase->Fight-on-visible edge.
+//
+// ONLY the pure visibility pair moved here. Every other battle edge stays in
+// the leaves: the Fight->Seek_LTG cluster-exit (unseen-past-grace AND NOT
+// wants-chase), the Chase better-enemy edge (BotFindEnemy, enemy-switching not
+// line-of-sight), the obelisk-out-of-sight edge, NBG, Retreat, SuicidalFight,
+// the cluster-exit guards, and the stochastic random()<0.2 lose-track.
+
+/*
+==================
+AI_FightChasePre_Chase
+
+Precondition for the higher-priority Chase child: the enemy is NOT currently
+visible AND the bot wants to chase it. When this is false the Chase child is
+ineligible, so Fight (the always-eligible fallback) holds — either because the
+enemy is visible, or because the bot does not want to chase (the Fight leaf then
+runs its own grace-gated exit to Seek_LTG).
+==================
+*/
+static int AI_FightChasePre_Chase(bot_state_t *bs, aiNode_t *self) {
+	(void)self;
+	if (bs->enemy < 0) return qfalse;
+	if (BotEntityVisible(bs->entitynum, bs->eye, bs->viewangles, 360, bs->enemy) > 0) return qfalse;
+	return BotWantsToChase(bs) ? qtrue : qfalse;
+}
+
+/*
+==================
+AI_FightChaseLeaf_Fight / AI_FightChaseLeaf_Chase
+
+Leaf ticks for the sub-composite's two children. When the composite selects a
+child that is NOT the live bs->ainode, the child first fires the corresponding
+AIEnter_Battle_X so the node switch is recorded and the entry side-effects
+(chase_time reset, avoid-reach reset, BFL_FIGHTSUICIDAL clear) run exactly on a
+real transition — never every tick. Then it runs the leaf body. This is the
+single place the Fight<->Chase visibility transition is issued; the leaf bodies
+no longer self-assign it.
+==================
+*/
+static int AI_FightChaseLeaf_Fight(bot_state_t *bs, aiNode_t *self) {
+	(void)self;
+	if (bs->ainode != AINode_Battle_Fight) {
+		AIEnter_Battle_Fight(bs, "battle fight: enemy visible");
+	}
+	return AINode_Battle_Fight(bs);
+}
+
+static int AI_FightChaseLeaf_Chase(bot_state_t *bs, aiNode_t *self) {
+	(void)self;
+	if (bs->ainode != AINode_Battle_Chase) {
+		// Composite issued the Fight->Chase visibility transition after the
+		// hysteresis dwell held combat through the grace window. Mirror the
+		// Fight-leaf's Seek_LTG debug line so the transition is observable at the
+		// same gate (wiredIntel + bot_debug >= 1).
+		if ( bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 )
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d enemy=%d unseen=%.2fs graceMs=%d -> chase\n",
+				bs->client, bs->enemy,
+				FloatTime() - bs->enemyvisible_time,
+				BATTLE_FIGHT_VIS_GRACE_MS );
+		AIEnter_Battle_Chase(bs, "battle fight: enemy out of sight");
+	}
+	return AINode_Battle_Chase(bs);
+}
+
+/*
+==================
+AI_TickFightChase
+
+Tick the Fight/Chase sub-composite. The scattered non-visibility edges may still
+self-transition Fight<->Chase inside the leaf bodies (e.g. Chase's better-enemy
+BotFindEnemy edge sets bs->ainode = AINode_Battle_Fight); honor that by syncing
+the composite's incumbent to the live node before arbitrating. Only the
+incumbent index is written — the challenger/challengeStart dwell clock persists
+across ticks, so the hysteresis window keeps accumulating.
+==================
+*/
+static int AI_TickFightChase(bot_state_t *bs) {
+	aiComposite_t *c = &bs->fightChaseComposite.u.composite;
+	int r;
+	// If bs->ainode was set out-of-band since the composite last ran (a leaf edge
+	// like Retreat->Chase, or a fresh battle entry from nav), clear the stale
+	// hysteresis dwell so a challenger clock from a prior engagement cannot skip
+	// the grace on this re-entry.
+	if (bs->ainode != bs->fightChaseLastNode) {
+		c->challenger = -1;
+		c->challengeStart = 0.0f;
+	}
+	// child 0 = Chase, child 1 = Fight (priority order set in AI_BuildRootComposite)
+	c->incumbent = (bs->ainode == AINode_Battle_Chase) ? 0 : 1;
+	r = bs->fightChaseComposite.tick(bs, &bs->fightChaseComposite);
+	bs->fightChaseLastNode = bs->ainode;
+	return r;
+}
+
+/*
+==================
+AI_LiveLeafTick
+
+Run whatever node bs->ainode currently points at. For the two battle-visibility
+nodes (Battle_Fight / Battle_Chase) the selection is delegated to the Fight/Chase
+sub-composite, which arbitrates the pure line-of-sight pair with incumbent-
+hysteresis; every other node ticks directly. The scattered in-node transitions
+(bs->ainode = AINode_Y) remain the live selection mechanism for all non-vis edges.
+==================
+*/
+static int AI_LiveLeafTick(bot_state_t *bs, aiNode_t *self) {
+	(void)self;
+	if (bs->ainode == AINode_Battle_Fight || bs->ainode == AINode_Battle_Chase) {
+		return AI_TickFightChase(bs);
+	}
+	return bs->ainode(bs);
+}
+
+// ── Top-level cluster-exit guards ─────────────────────────────────────────
+//
+// observer/intermission/dead are out-of-game conditions that transition the
+// bot out of the whole nav/battle regime (to Observer / Intermission /
+// Respawn). They used to be re-checked, in this exact priority order, as the
+// first statement of all six nav/battle nodes (Seek_NBG, Seek_LTG,
+// Battle_Fight, Battle_Chase, Battle_Retreat, Battle_NBG). BotIsObserver,
+// BotIntermission and BotIsDead are pure state reads (no side effects), so the
+// six prologues were duplicated pure predicates. They are hoisted here as the
+// three highest-priority children of the root PRIORITIZED composite.
+//
+// Byte-identical scope: each guard child is eligible ONLY when the live node is
+// one of the six that carried the prologue (AI_GuardApplies) AND the guard's
+// predicate holds. The four unguarded nodes (Observer, Intermission, Respawn,
+// Stand) never carried the prologue, so the guards must NOT fire while one of
+// them is live — otherwise, e.g., a still-dead bot in AINode_Respawn (which
+// does not clear PM_DEAD within the frame) would have the dead-guard re-fire
+// AIEnter_Respawn every dispatch iteration, an infinite re-entry the old
+// per-node placement never produced. Gating on the live node reproduces the
+// old placement exactly: guards run iff about to tick one of the six.
+//
+// Message text: each AIEnter_X's string argument is passed only to
+// BotRecordNodeSwitch, i.e. it is debug audit text with no behavioral effect
+// (the target node is the behavior). The old per-node messages differed only in
+// their "which node" prefix ("seek nbg: observer" vs "battle fight: observer");
+// consolidating to one message per guard here is byte-identical in behavior and
+// changes only that debug audit string.
+
+// True when the live node is one of the six nav/battle nodes that originally
+// carried the guard prologue. The guards apply to exactly these and no others.
+static int AI_GuardApplies(bot_state_t *bs) {
+	return (bs->ainode == AINode_Seek_NBG
+		|| bs->ainode == AINode_Seek_LTG
+		|| bs->ainode == AINode_Battle_Fight
+		|| bs->ainode == AINode_Battle_Chase
+		|| bs->ainode == AINode_Battle_Retreat
+		|| bs->ainode == AINode_Battle_NBG) ? qtrue : qfalse;
+}
+
+// Guard child preconditions: eligible when the guard applies to the live node
+// AND the pure exit predicate holds. Priority order is fixed by child index in
+// AI_BuildRootComposite (observer 0 > intermission 1 > dead 2), matching the
+// original in-node prologue order.
+static int AI_GuardPre_Observer(bot_state_t *bs, aiNode_t *self) {
+	(void)self;
+	return (AI_GuardApplies(bs) && BotIsObserver(bs)) ? qtrue : qfalse;
+}
+static int AI_GuardPre_Intermission(bot_state_t *bs, aiNode_t *self) {
+	(void)self;
+	return (AI_GuardApplies(bs) && BotIntermission(bs)) ? qtrue : qfalse;
+}
+static int AI_GuardPre_Dead(bot_state_t *bs, aiNode_t *self) {
+	(void)self;
+	return (AI_GuardApplies(bs) && BotIsDead(bs)) ? qtrue : qfalse;
+}
+
+// Guard child ticks: fire the same cluster-exit transition the per-node
+// prologue used to, then return qfalse (a transition happened — the dispatch
+// loop runs the newly-selected node next), exactly as the old
+// "AIEnter_X(...); return qfalse;" prologue did.
+static int AI_GuardTick_Observer(bot_state_t *bs, aiNode_t *self) {
+	(void)self;
+	AIEnter_Observer(bs, "cluster exit: observer");
+	return qfalse;
+}
+static int AI_GuardTick_Intermission(bot_state_t *bs, aiNode_t *self) {
+	(void)self;
+	AIEnter_Intermission(bs, "cluster exit: intermission");
+	return qfalse;
+}
+static int AI_GuardTick_Dead(bot_state_t *bs, aiNode_t *self) {
+	(void)self;
+	AIEnter_Respawn(bs, "cluster exit: bot dead");
+	return qfalse;
+}
+
+/*
+==================
+AI_BuildRootComposite
+
+Construct the root PRIORITIZED composite. Children in priority order:
+  0 observer-guard     (pre: guard applies AND BotIsObserver)  -> AIEnter_Observer
+  1 intermission-guard (pre: guard applies AND BotIntermission) -> AIEnter_Intermission
+  2 dead-guard         (pre: guard applies AND BotIsDead)       -> AIEnter_Respawn
+  3 live-ainode leaf   (no precondition, always eligible)       -> ticks bs->ainode
+
+The three guards were formerly the first statement of every nav/battle node;
+hoisting them (same priority order, same AIEnter_X targets, gated to the same
+six live nodes) runs them once before node dispatch instead of six times, and
+is byte-identical to the old per-node prologue. Hysteresis is idle here
+(hysteresisMargin 0), so a guard displaces the live leaf the instant its
+precondition holds — matching the old "checked first, every tick" behavior.
+==================
+*/
+void AI_BuildRootComposite(bot_state_t *bs) {
+	// live-selection leaf: no precondition (always eligible), custom tick.
+	memset(&bs->aiLiveLeaf, 0, sizeof(bs->aiLiveLeaf));
+	bs->aiLiveLeaf.tick = AI_LiveLeafTick;
+	bs->aiLiveLeaf.pre = NULL;
+	bs->aiLiveLeaf.name = "live-ainode";
+
+	// cluster-exit guard leaves (priority order set by add order below).
+	memset(&bs->aiObserverGuardLeaf, 0, sizeof(bs->aiObserverGuardLeaf));
+	bs->aiObserverGuardLeaf.tick = AI_GuardTick_Observer;
+	bs->aiObserverGuardLeaf.pre = AI_GuardPre_Observer;
+	bs->aiObserverGuardLeaf.name = "guard-observer";
+
+	memset(&bs->aiIntermissionGuardLeaf, 0, sizeof(bs->aiIntermissionGuardLeaf));
+	bs->aiIntermissionGuardLeaf.tick = AI_GuardTick_Intermission;
+	bs->aiIntermissionGuardLeaf.pre = AI_GuardPre_Intermission;
+	bs->aiIntermissionGuardLeaf.name = "guard-intermission";
+
+	memset(&bs->aiDeadGuardLeaf, 0, sizeof(bs->aiDeadGuardLeaf));
+	bs->aiDeadGuardLeaf.tick = AI_GuardTick_Dead;
+	bs->aiDeadGuardLeaf.pre = AI_GuardPre_Dead;
+	bs->aiDeadGuardLeaf.name = "guard-dead";
+
+	AI_CompositeInit(&bs->aiRoot, AI_COMPOSITE_PRIORITIZED, "root", 0.0f);
+	AI_CompositeAddChild(&bs->aiRoot, &bs->aiObserverGuardLeaf);      // 0 observer (highest)
+	AI_CompositeAddChild(&bs->aiRoot, &bs->aiIntermissionGuardLeaf);  // 1 intermission
+	AI_CompositeAddChild(&bs->aiRoot, &bs->aiDeadGuardLeaf);          // 2 dead
+	AI_CompositeAddChild(&bs->aiRoot, &bs->aiLiveLeaf);               // 3 live node (lowest, always eligible)
+
+	// Fight/Chase line-of-sight sub-composite: PRIORITIZED, incumbent-hysteresis
+	// margin = the old Fight-visibility grace so the Fight->Chase transition holds
+	// through the same occlusion window. Children in priority order: Chase (higher,
+	// eligible only when the enemy is unseen AND wants-chase) then Fight (lower,
+	// always-eligible fallback incumbent).
+	memset(&bs->fightLeaf, 0, sizeof(bs->fightLeaf));
+	bs->fightLeaf.tick = AI_FightChaseLeaf_Fight;
+	bs->fightLeaf.pre = NULL;                       // always eligible (fallback incumbent)
+	bs->fightLeaf.name = "battle-fight";
+
+	memset(&bs->chaseLeaf, 0, sizeof(bs->chaseLeaf));
+	bs->chaseLeaf.tick = AI_FightChaseLeaf_Chase;
+	bs->chaseLeaf.pre = AI_FightChasePre_Chase;     // unseen + wants-chase
+	bs->chaseLeaf.name = "battle-chase";
+
+	AI_CompositeInit(&bs->fightChaseComposite, AI_COMPOSITE_PRIORITIZED,
+		"fight-chase", (float)BATTLE_FIGHT_VIS_GRACE_MS);
+	AI_CompositeAddChild(&bs->fightChaseComposite, &bs->chaseLeaf);   // index 0 (higher priority)
+	AI_CompositeAddChild(&bs->fightChaseComposite, &bs->fightLeaf);   // index 1 (lower priority)
+
+	bs->aiRootInit = qtrue;
+}
+
+/*
+==================
+AI_TickRoot
+
+Tick the bot's composite root once. Lazily (re)builds the root if it has not
+been constructed for this bot state yet — BotResetState memsets bot_state_t to
+zero, so aiRootInit is cleared on every reset and the root is rebuilt fresh
+(no stale self-pointers survive a reset). Byte-identical to bs->ainode(bs).
+==================
+*/
+int AI_TickRoot(bot_state_t *bs) {
+	if (!bs->aiRootInit) {
+		AI_BuildRootComposite(bs);
+	}
+	return bs->aiRoot.tick(bs, &bs->aiRoot);
+}
+
+// ── AI composite tree self-test (out of the shipped path) ─────────────────
+//
+// The three composite kinds are defined here but not yet all consumed by real
+// arbitration (that lands in later sub-landings). This self-test mechanically
+// proves each kind in isolation so none is a vacuous definition. It is gated on
+// bot_debug >= 3 and runs at most once per process: normal play uses bot_debug
+// 1 and 2 (see ai_dmq3.c / ai_dmnet.c), so at the shipped default (bot_debug 0)
+// and at the debug levels the gate uses, this code never executes — it is out
+// of the shipped path. It uses the existing bot_debug cvar (no new cvar) and is
+// compiled but dormant. It touches only local stub nodes and a scratch
+// bot_state_t; it never mutates a live bot.
+
+// Controllable stub preconditions for the self-test. The bits in these masks
+// decide which stub child is eligible; the run-order tally records which stub
+// ticks actually fired, so an assertion can prove exactly-one / all / none.
+static int  s_aiTestEligible;			// bit i set => stub child i is eligible
+static int  s_aiTestRanMask;			// bit i set => stub child i's tick ran
+
+// Each stub is a distinct function so its index is implicit in the pointer; a
+// shared helper records the run and reports "done" (qtrue). Using distinct
+// functions (rather than an index field) keeps the leaf/composite contract
+// untouched by the test.
+#define AI_TEST_STUB(idx) \
+	static int AI_TestPre##idx(bot_state_t *bs, aiNode_t *self) { (void)bs; (void)self; return (s_aiTestEligible & (1 << idx)) ? qtrue : qfalse; } \
+	static int AI_TestTick##idx(bot_state_t *bs, aiNode_t *self) { (void)bs; (void)self; s_aiTestRanMask |= (1 << idx); return qtrue; }
+
+AI_TEST_STUB(0)
+AI_TEST_STUB(1)
+AI_TEST_STUB(2)
+
+static void AI_TestMakeStub(aiNode_t *node, int (*tick)(bot_state_t*, aiNode_t*), aiNodePre_t pre, const char *name) {
+	memset(node, 0, sizeof(*node));
+	node->tick = tick;
+	node->pre = pre;
+	node->name = name;
+}
+
+/*
+==================
+AI_CompositeSelfTest
+
+Prove the three composite kinds mechanically. Returns qtrue if every assertion
+passed. Anti-vacuous: each kind is exercised with stubs whose eligibility is
+toggled, and the assertions check the exact set of stubs that ran.
+==================
+*/
+static qboolean AI_CompositeSelfTest(void) {
+	bot_state_t scratch;
+	aiNode_t stub0, stub1, stub2;
+	aiNode_t comp;
+	int r;
+	int pass = qtrue;
+
+	memset(&scratch, 0, sizeof(scratch));
+	AI_TestMakeStub(&stub0, AI_TestTick0, AI_TestPre0, "stub0");
+	AI_TestMakeStub(&stub1, AI_TestTick1, AI_TestPre1, "stub1");
+	AI_TestMakeStub(&stub2, AI_TestTick2, AI_TestPre2, "stub2");
+
+	// ── PRIORITIZED: highest-priority passing child wins ──────────────────
+	// children in priority order [stub0(high), stub1, stub2(low)].
+	AI_CompositeInit(&comp, AI_COMPOSITE_PRIORITIZED, "test-prio", 500.0f);
+	AI_CompositeAddChild(&comp, &stub0);
+	AI_CompositeAddChild(&comp, &stub1);
+	AI_CompositeAddChild(&comp, &stub2);
+
+	// FloatTime() is in seconds; the 500 ms margin below is 0.5 s. All ticks
+	// in this test set floattime explicitly so the hysteresis clock is exact.
+
+	// Tick 1 @ t=1.000: only stub1 and stub2 eligible => stub1 (higher
+	// priority of the two) must run, alone, and become the incumbent.
+	floattime = 1.000f;
+	s_aiTestEligible = (1 << 1) | (1 << 2);
+	s_aiTestRanMask = 0;
+	r = comp.tick(&scratch, &comp);
+	if (s_aiTestRanMask != (1 << 1)) { pass = qfalse;
+		BotAI_Print(PRT_ERROR, "AIComposite-selftest: PRIORITIZED: expected only stub1 to run, ranMask=0x%x\n", s_aiTestRanMask); }
+	else BotAI_Print(PRT_MESSAGE, "AIComposite-selftest: PRIORITIZED highest-priority pick: PASS (stub1, r=%d)\n", r);
+
+	// ── PRIORITIZED incumbent-hysteresis ──────────────────────────────────
+	// stub1 is now the incumbent. A strictly-higher-priority stub0 becomes
+	// eligible; within the 500 ms margin the incumbent (stub1) must KEEP the
+	// slot, and only past the margin does stub0 displace it.
+
+	// Tick 2 @ t=1.100 (+100 ms): challenger stub0 appears; within margin =>
+	// incumbent stub1 must still hold (challenge clock starts here).
+	floattime = 1.100f; s_aiTestEligible = (1 << 0) | (1 << 1); s_aiTestRanMask = 0;
+	comp.tick(&scratch, &comp);
+	if (s_aiTestRanMask != (1 << 1)) { pass = qfalse;
+		BotAI_Print(PRT_ERROR, "AIComposite-selftest: HYSTERESIS(hold): expected incumbent stub1, ranMask=0x%x\n", s_aiTestRanMask); }
+
+	// Tick 3 @ t=1.400 (+300 ms since challenge start, still < 500 ms): hold.
+	floattime = 1.400f; s_aiTestRanMask = 0; comp.tick(&scratch, &comp);
+	if (s_aiTestRanMask != (1 << 1)) { pass = qfalse;
+		BotAI_Print(PRT_ERROR, "AIComposite-selftest: HYSTERESIS(mid): expected incumbent stub1 held, ranMask=0x%x\n", s_aiTestRanMask); }
+
+	// Tick 4 @ t=1.650 (+550 ms since challenge start, past 500 ms): stub0 wins.
+	floattime = 1.650f; s_aiTestRanMask = 0; comp.tick(&scratch, &comp);
+	if (s_aiTestRanMask != (1 << 0)) { pass = qfalse;
+		BotAI_Print(PRT_ERROR, "AIComposite-selftest: HYSTERESIS(switch): expected stub0 to displace past margin, ranMask=0x%x\n", s_aiTestRanMask); }
+	else BotAI_Print(PRT_MESSAGE, "AIComposite-selftest: PRIORITIZED incumbent-hysteresis (hold through 300ms, switch past 500ms): PASS\n");
+
+	// ── PRIORITIZED immediate replace when incumbent loses precondition ───
+	// stub0 is now the incumbent. Make it ineligible; stub2 (only remaining
+	// eligible child) must take over immediately — no hysteresis dwell applies
+	// when the incumbent itself loses its precondition.
+	floattime = 1.700f; s_aiTestEligible = (1 << 2); s_aiTestRanMask = 0; comp.tick(&scratch, &comp);
+	if (s_aiTestRanMask != (1 << 2)) { pass = qfalse;
+		BotAI_Print(PRT_ERROR, "AIComposite-selftest: PRIORITIZED(drop): expected immediate stub2, ranMask=0x%x\n", s_aiTestRanMask); }
+	else BotAI_Print(PRT_MESSAGE, "AIComposite-selftest: PRIORITIZED immediate-replace-on-precondition-loss: PASS\n");
+
+	// ── SIMULTANEOUS: every eligible child runs ───────────────────────────
+	AI_CompositeInit(&comp, AI_COMPOSITE_SIMULTANEOUS, "test-sim", 0.0f);
+	AI_CompositeAddChild(&comp, &stub0);
+	AI_CompositeAddChild(&comp, &stub1);
+	AI_CompositeAddChild(&comp, &stub2);
+	s_aiTestEligible = (1 << 0) | (1 << 2);	// stub1 NOT eligible
+	s_aiTestRanMask = 0;
+	r = comp.tick(&scratch, &comp);
+	if (s_aiTestRanMask != ((1 << 0) | (1 << 2))) { pass = qfalse;
+		BotAI_Print(PRT_ERROR, "AIComposite-selftest: SIMULTANEOUS: expected stub0+stub2, ranMask=0x%x\n", s_aiTestRanMask); }
+	else BotAI_Print(PRT_MESSAGE, "AIComposite-selftest: SIMULTANEOUS all-eligible-run: PASS (stub0+stub2, r=%d)\n", r);
+
+	// ── FIRST_AVAILABLE: only the first eligible child runs ───────────────
+	AI_CompositeInit(&comp, AI_COMPOSITE_FIRST_AVAILABLE, "test-first", 0.0f);
+	AI_CompositeAddChild(&comp, &stub0);
+	AI_CompositeAddChild(&comp, &stub1);
+	AI_CompositeAddChild(&comp, &stub2);
+	s_aiTestEligible = (1 << 1) | (1 << 2);	// stub0 NOT eligible; stub1 first eligible
+	s_aiTestRanMask = 0;
+	r = comp.tick(&scratch, &comp);
+	if (s_aiTestRanMask != (1 << 1)) { pass = qfalse;
+		BotAI_Print(PRT_ERROR, "AIComposite-selftest: FIRST_AVAILABLE: expected only stub1 (short-circuit), ranMask=0x%x\n", s_aiTestRanMask); }
+	else BotAI_Print(PRT_MESSAGE, "AIComposite-selftest: FIRST_AVAILABLE short-circuit: PASS (stub1 only, r=%d)\n", r);
+
+	BotAI_Print(PRT_MESSAGE, "AIComposite-selftest: RESULT: %s\n", pass ? "ALL PASS" : "FAILURE");
+	return pass;
+}
+
+// ── Fight/Chase arbitration mapping proof (out of the shipped path) ────────
+//
+// The self-test above proves the PRIORITIZED incumbent-hysteresis MECHANISM.
+// This proves the Fight/Chase MAPPING: that the specific two-child shape built
+// by AI_BuildRootComposite (Chase child 0, eligible only when the enemy is
+// unseen AND wants-chase; Fight child 1, always-eligible fallback; margin =
+// BATTLE_FIGHT_VIS_GRACE_MS) reproduces the combat-through-occlusion behavior.
+// It drives the composite through the visibility scenarios and asserts the exact
+// child that runs each tick. Same gating as the mechanism self-test (bot_debug
+// >= 3, once per process, scratch state only — never a live bot).
+//
+// The stub for Chase's precondition is fed the same eligibility signal the real
+// AI_FightChasePre_Chase computes (unseen AND wants-chase), so the priority +
+// dwell arithmetic under test is byte-for-byte the shipped arbitration; only the
+// world-query (BotEntityVisible/BotWantsToChase) is replaced by a driven bit.
+static int s_fcChaseEligible;	// 1 => the enemy is unseen AND the bot wants to chase
+
+static int AI_FCTestChasePre(bot_state_t *bs, aiNode_t *self) { (void)bs; (void)self; return s_fcChaseEligible ? qtrue : qfalse; }
+static int AI_FCTestChaseTick(bot_state_t *bs, aiNode_t *self) { (void)bs; (void)self; s_aiTestRanMask |= (1 << 0); return qtrue; }
+static int AI_FCTestFightTick(bot_state_t *bs, aiNode_t *self) { (void)bs; (void)self; s_aiTestRanMask |= (1 << 1); return qtrue; }
+
+static qboolean AI_FightChaseArbitrationTest(void) {
+	bot_state_t scratch;
+	aiNode_t comp, chase, fight;
+	qboolean pass = qtrue;
+	float graceS = BATTLE_FIGHT_VIS_GRACE_MS * 0.001f;
+
+	memset(&scratch, 0, sizeof(scratch));
+	// Chase = child 0 (higher priority), Fight = child 1 (always-eligible fallback),
+	// mirroring AI_BuildRootComposite exactly.
+	AI_TestMakeStub(&chase, AI_FCTestChaseTick, AI_FCTestChasePre, "fc-chase");
+	AI_TestMakeStub(&fight, AI_FCTestFightTick, NULL,              "fc-fight");
+	AI_CompositeInit(&comp, AI_COMPOSITE_PRIORITIZED, "fc-test", (float)BATTLE_FIGHT_VIS_GRACE_MS);
+	AI_CompositeAddChild(&comp, &chase);
+	AI_CompositeAddChild(&comp, &fight);
+
+	// Scenario 1 — enemy visible: only Fight runs, Fight is incumbent.
+	floattime = 10.000f; s_fcChaseEligible = 0; s_aiTestRanMask = 0;
+	comp.tick(&scratch, &comp);
+	if (s_aiTestRanMask != (1 << 1)) { pass = qfalse;
+		BotAI_Print(PRT_ERROR, "FightChase-test: visible-enemy: expected Fight, ranMask=0x%x\n", s_aiTestRanMask); }
+
+	// Scenario 2 — brief occlusion (unseen + wants-chase) WITHIN the grace: Fight
+	// HOLDS (incumbent-hysteresis dwell). This is the doorway/pillar flicker damp.
+	floattime = 10.100f; s_fcChaseEligible = 1; s_aiTestRanMask = 0;	// challenge starts here
+	comp.tick(&scratch, &comp);
+	if (s_aiTestRanMask != (1 << 1)) { pass = qfalse;
+		BotAI_Print(PRT_ERROR, "FightChase-test: occlusion-within-grace(+100ms): expected Fight held, ranMask=0x%x\n", s_aiTestRanMask); }
+	floattime = 10.100f + graceS - 0.050f; s_aiTestRanMask = 0;	// still just under the margin
+	comp.tick(&scratch, &comp);
+	if (s_aiTestRanMask != (1 << 1)) { pass = qfalse;
+		BotAI_Print(PRT_ERROR, "FightChase-test: occlusion-within-grace(just-under): expected Fight held, ranMask=0x%x\n", s_aiTestRanMask); }
+
+	// Scenario 3 — genuine loss of sight past the grace: Chase displaces Fight.
+	floattime = 10.100f + graceS + 0.010f; s_aiTestRanMask = 0;	// past the dwell margin
+	comp.tick(&scratch, &comp);
+	if (s_aiTestRanMask != (1 << 0)) { pass = qfalse;
+		BotAI_Print(PRT_ERROR, "FightChase-test: loss-of-sight-past-grace: expected Chase, ranMask=0x%x\n", s_aiTestRanMask); }
+
+	// Scenario 4 — reacquisition (enemy visible again): Chase loses its precondition,
+	// Fight takes over IMMEDIATELY (no dwell). This is the Chase->Fight-on-visible edge.
+	floattime += 0.016f; s_fcChaseEligible = 0; s_aiTestRanMask = 0;
+	comp.tick(&scratch, &comp);
+	if (s_aiTestRanMask != (1 << 1)) { pass = qfalse;
+		BotAI_Print(PRT_ERROR, "FightChase-test: reacquire: expected immediate Fight, ranMask=0x%x\n", s_aiTestRanMask); }
+
+	BotAI_Print(PRT_MESSAGE, "FightChase-test: hold-through-occlusion + chase-on-loss + fight-on-reacquire: %s\n",
+		pass ? "PASS" : "FAILURE");
+	return pass;
+}
+
+/*
+==================
+AI_CompositeSelfTestOnce
+
+Run the self-test at most once per process, only when bot_debug >= 3 (out of
+the shipped/normal path). Uses the existing bot_debug cvar — no new cvar.
+==================
+*/
+void AI_CompositeSelfTestOnce(void) {
+	static qboolean s_ran = qfalse;
+	if (s_ran) return;
+	if (trap_Cvar_VariableIntegerValue("bot_debug") < 3) return;
+	s_ran = qtrue;
+	AI_CompositeSelfTest();
+	AI_FightChaseArbitrationTest();
 }
 
 /*
@@ -183,7 +892,7 @@ int BotGoForAir(bot_state_t *bs, int tfl, bot_goal_t *ltg, float range) {
 		while ( trap_BotChooseNBGItem( bs->gs, bs->origin, bs->inventory, tfl, ltg, range ) ) {
 			trap_BotGetTopGoal( bs->gs, &goal );
 			//if the goal is not in water
-			if ( !( trap_AAS_PointContents( goal.origin ) & ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) ) {
+			if ( !( trap_PointContents( goal.origin, bs->entitynum ) & ( CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA ) ) ) {
 				return qtrue;
 			}
 			trap_BotPopGoal( bs->gs );
@@ -210,15 +919,14 @@ int BotNearbyGoal(bot_state_t *bs, int tfl, bot_goal_t *ltg, float range) {
 #endif
 		) {
 		//if the bot is just a few secs away from the base
-		if (trap_AAS_AreaTravelTimeToGoalArea(bs->areanum, bs->origin,
-				bs->teamgoal.areanum, TFL_DEFAULT) < 300) {
+		if (BotAASTravelTimeProxy(bs->origin, bs->teamgoal.origin) < 300) {
 			//make the range really small
 			range = 50;
 		}
 	}
 	//
-	if ( bs->wiredBotsActive ) {
-		ret = WiredBots_ChooseNBGItem( bs, tfl, ltg, range );
+	if ( bs->wiredIntelActive ) {
+		ret = WiredIntel_ChooseNBGItem( bs, tfl, ltg, range );
 	} else {
 		ret = trap_BotChooseNBGItem(bs->gs, bs->origin, bs->inventory, tfl, ltg, range);
 	}
@@ -251,35 +959,8 @@ int BotReachedGoal(bot_state_t *bs, bot_goal_t *goal) {
 		}
 		//if the goal isn't there
 		if (trap_BotItemGoalInVisButNotVisible(bs->entitynum, bs->eye, bs->viewangles, goal)) {
-			/*
-			float avoidtime;
-			int t;
-
-			avoidtime = trap_BotAvoidGoalTime(bs->gs, goal->number);
-			if (avoidtime > 0) {
-				t = trap_AAS_AreaTravelTimeToGoalArea(bs->areanum, bs->origin, goal->areanum, bs->tfl);
-				if ((float) t * 0.009 < avoidtime)
-					return qtrue;
-			}
-			*/
 			return qtrue;
 		}
-#if !FEAT_RECAST_NAVMESH
-		/* Under AAS, areanum is a meaningful BSP region index — check if bot is
-		   in the same area as the goal (handles floating/below-goal cases).
-		   Under Recast, bs->areanum and goal->areanum are both 0 (AAS not loaded),
-		   so this check would always fire, causing false "reached" for any bot at
-		   the item's XY regardless of floor — skip it entirely under Recast. */
-		if (bs->areanum == goal->areanum) {
-			if (bs->origin[0] > goal->origin[0] + goal->mins[0] && bs->origin[0] < goal->origin[0] + goal->maxs[0]) {
-				if (bs->origin[1] > goal->origin[1] + goal->mins[1] && bs->origin[1] < goal->origin[1] + goal->maxs[1]) {
-					if (!trap_AAS_Swimming(bs->origin)) {
-						return qtrue;
-					}
-				}
-			}
-		}
-#endif
 	}
 	else if (goal->flags & GFL_AIR) {
 		//if touching the goal
@@ -317,7 +998,7 @@ int BotGetItemLongTermGoal(bot_state_t *bs, int tfl, bot_goal_t *goal) {
 		//BotAI_Print(PRT_MESSAGE, "%s: choosing new ltg\n", ClientName(bs->client, netname, sizeof(netname)));
 		//choose a new goal
 		//BotAI_Print(PRT_MESSAGE, "%6.1f client %d: BotChooseLTGItem\n", FloatTime(), bs->client);
-		if ( bs->wiredBotsActive ? WiredBots_ChooseLTGItem( bs, tfl ) : trap_BotChooseLTGItem(bs->gs, bs->origin, bs->inventory, tfl) ) {
+		if ( bs->wiredIntelActive ? WiredIntel_ChooseLTGItem( bs, tfl ) : trap_BotChooseLTGItem(bs->gs, bs->origin, bs->inventory, tfl) ) {
 			/*
 			char buf[128];
 			//get the goal at the top of the stack
@@ -359,6 +1040,25 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 	char buf[MAX_MESSAGE_SIZE];
 	int areanum;
 	float croucher;
+
+	/* ── SEQUENCED-GOAL AUTHORITY (single arbitration gate) ──────────────────
+	   While a directive-locked sequenced step has an ACTIVE MOVEMENT goal (a GOTO
+	   or JUMP_TOUCH step that projected a destination into ltgtype/teamgoal this
+	   frame), goal selection yields to it UNCONDITIONALLY: return the step's goal
+	   and do not fall through to item/roam/defend selection.  This is the ONE point
+	   where the long-term goal is decided, so one gate here makes the sequence
+	   out-rank the single-goal item AI for every sequenced interaction identically —
+	   jump-touch, the elevator ride, and any future GOTO-interaction.  The step's
+	   own driver (WiredIntel_StepSequencedGoal) already wrote teamgoal + the lock
+	   before BotAI ran; a WAIT step claims no movement goal, so normal selection is
+	   free during a hold.  The deadlock watchdog + bounded retries in the step
+	   guarantee the sequence releases authority rather than wedging the bot. */
+	if ( bs->wiredIntelActive && !retreat &&
+	     bs->directives.directiveLocked &&
+	     WiredIntel_SequencedGoalHasMovementGoal( bs ) ) {
+		memcpy( goal, &bs->teamgoal, sizeof(bot_goal_t) );
+		return qtrue;
+	}
 	aas_entityinfo_t entinfo, botinfo;
 	bot_waypoint_t *wp;
 
@@ -367,7 +1067,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 		if (bs->teammessage_time && bs->teammessage_time < FloatTime()) {
 			BotAI_BotInitialChat(bs, "help_start", EasyClientName(bs->teammate, netname, sizeof(netname)), NULL);
 			trap_BotEnterChat(bs->cs, bs->decisionmaker, CHAT_TELL);
-			if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_ACK_YES, NULL); else BotVoiceChatOnly(bs, bs->decisionmaker, VOICECHAT_YES);
+			if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_ACK_YES, NULL); else BotVoiceChatOnly(bs, bs->decisionmaker, VOICECHAT_YES);
 			trap_EA_Action(bs->client, ACTION_AFFIRMATIVE);
 			bs->teammessage_time = 0;
 		}
@@ -394,7 +1094,9 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 		//if the entity information is valid (entity in PVS)
 		if (entinfo.valid) {
 			areanum = BotPointAreaNum(entinfo.origin);
-			if (areanum && trap_AAS_AreaReachability(areanum)) {
+			//nonzero areanum is a valid Recast poly ref, which already means the
+			//point is on the navmesh (reachable) - subsumes the old AAS reachability check
+			if (areanum) {
 				//update team goal
 				bs->teamgoal.entitynum = bs->teammate;
 				bs->teamgoal.areanum = areanum;
@@ -412,7 +1114,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 		if (bs->teammessage_time && bs->teammessage_time < FloatTime()) {
 			BotAI_BotInitialChat(bs, "accompany_start", EasyClientName(bs->teammate, netname, sizeof(netname)), NULL);
 			trap_BotEnterChat(bs->cs, bs->decisionmaker, CHAT_TELL);
-			if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_ACK_YES, NULL); else BotVoiceChatOnly(bs, bs->decisionmaker, VOICECHAT_YES);
+			if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_ACK_YES, NULL); else BotVoiceChatOnly(bs, bs->decisionmaker, VOICECHAT_YES);
 			trap_EA_Action(bs->client, ACTION_AFFIRMATIVE);
 			bs->teammessage_time = 0;
 		}
@@ -462,8 +1164,8 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 				//check if the bot wants to crouch
 				//don't crouch if crouched less than 5 seconds ago
 				if (bs->attackcrouch_time < FloatTime() - 5) {
-					if ( bs->wiredBotsActive ) {
-						croucher = WiredBots_ProfileFieldOr( bs, WB_PROFILE_DODGING, 0.2f );
+					if ( bs->wiredIntelActive ) {
+						croucher = WiredIntel_ProfileFieldOr( bs, WI_PROFILE_DODGING, 0.2f );
 					} else {
 						croucher = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CROUCHER, 0, 1);
 					}
@@ -472,7 +1174,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 					}
 				}
 				//don't crouch when swimming
-				if (trap_AAS_Swimming(bs->origin)) bs->attackcrouch_time = FloatTime() - 1;
+				if (trap_PointContents(bs->origin, bs->entitynum) & MASK_WATER) bs->attackcrouch_time = FloatTime() - 1;
 				//if not arrived yet or arived some time ago
 				if (bs->arrive_time < FloatTime() - 2) {
 					//if not arrived yet
@@ -527,7 +1229,9 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 		//if the entity information is valid (entity in PVS)
 		if (entinfo.valid) {
 			areanum = BotPointAreaNum(entinfo.origin);
-			if (areanum && trap_AAS_AreaReachability(areanum)) {
+			//nonzero areanum is a valid Recast poly ref, which already means the
+			//point is on the navmesh (reachable) - subsumes the old AAS reachability check
+			if (areanum) {
 				//update team goal
 				bs->teamgoal.entitynum = bs->teammate;
 				bs->teamgoal.areanum = areanum;
@@ -550,8 +1254,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 	}
 	//
 	if (bs->ltgtype == LTG_DEFENDKEYAREA) {
-		if (trap_AAS_AreaTravelTimeToGoalArea(bs->areanum, bs->origin,
-				bs->teamgoal.areanum, TFL_DEFAULT) > bs->defendaway_range) {
+		if (BotAASTravelTimeProxy(bs->origin, bs->teamgoal.origin) > bs->defendaway_range) {
 			bs->defendaway_time = 0;
 		}
 	}
@@ -563,7 +1266,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			trap_BotGoalName(bs->teamgoal.number, buf, sizeof(buf));
 			BotAI_BotInitialChat(bs, "defend_start", buf, NULL);
 			trap_BotEnterChat(bs->cs, 0, CHAT_TEAM);
-			if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_STATUS_DEFENSE, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONDEFENSE);
+			if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_STATUS_DEFENSE, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONDEFENSE);
 			bs->teammessage_time = 0;
 		}
 		//set the bot goal
@@ -619,7 +1322,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			trap_BotGoalName(bs->teamgoal.number, buf, sizeof(buf));
 			BotAI_BotInitialChat(bs, "getitem_start", buf, NULL);
 			trap_BotEnterChat(bs->cs, bs->decisionmaker, CHAT_TELL);
-			if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_ACK_YES, NULL); else BotVoiceChatOnly(bs, bs->decisionmaker, VOICECHAT_YES);
+			if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_ACK_YES, NULL); else BotVoiceChatOnly(bs, bs->decisionmaker, VOICECHAT_YES);
 			trap_EA_Action(bs->client, ACTION_AFFIRMATIVE);
 			bs->teammessage_time = 0;
 		}
@@ -651,7 +1354,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			if (bs->ltgtype == LTG_CAMPORDER) {
 				BotAI_BotInitialChat(bs, "camp_start", EasyClientName(bs->teammate, netname, sizeof(netname)), NULL);
 				trap_BotEnterChat(bs->cs, bs->decisionmaker, CHAT_TELL);
-				if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_ACK_YES, NULL); else BotVoiceChatOnly(bs, bs->decisionmaker, VOICECHAT_YES);
+				if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_ACK_YES, NULL); else BotVoiceChatOnly(bs, bs->decisionmaker, VOICECHAT_YES);
 				trap_EA_Action(bs->client, ACTION_AFFIRMATIVE);
 			}
 			bs->teammessage_time = 0;
@@ -675,7 +1378,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 				if (bs->ltgtype == LTG_CAMPORDER) {
 					BotAI_BotInitialChat(bs, "camp_arrive", EasyClientName(bs->teammate, netname, sizeof(netname)), NULL);
 					trap_BotEnterChat(bs->cs, bs->decisionmaker, CHAT_TELL);
-					if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_STATUS_INPOSITION, NULL); else BotVoiceChatOnly(bs, bs->decisionmaker, VOICECHAT_INPOSITION);
+					if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_STATUS_INPOSITION, NULL); else BotVoiceChatOnly(bs, bs->decisionmaker, VOICECHAT_INPOSITION);
 				}
 				bs->arrive_time = FloatTime();
 			}
@@ -690,8 +1393,8 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			//check if the bot wants to crouch
 			//don't crouch if crouched less than 5 seconds ago
 			if (bs->attackcrouch_time < FloatTime() - 5) {
-				if ( bs->wiredBotsActive ) {
-					croucher = WiredBots_ProfileFieldOr( bs, WB_PROFILE_DODGING, 0.2f );
+				if ( bs->wiredIntelActive ) {
+					croucher = WiredIntel_ProfileFieldOr( bs, WI_PROFILE_DODGING, 0.2f );
 				} else {
 					croucher = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_CROUCHER, 0, 1);
 				}
@@ -704,7 +1407,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 				trap_EA_Crouch(bs->client);
 			}
 			//don't crouch when swimming
-			if (trap_AAS_Swimming(bs->origin)) bs->attackcrouch_time = FloatTime() - 1;
+			if (trap_PointContents(bs->origin, bs->entitynum) & MASK_WATER) bs->attackcrouch_time = FloatTime() - 1;
 			//make sure the bot is not gonna drown
 			if (trap_PointContents(bs->eye,bs->entitynum) & (CONTENTS_WATER|CONTENTS_SLIME|CONTENTS_LAVA)) {
 				if (bs->ltgtype == LTG_CAMPORDER) {
@@ -736,7 +1439,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			}
 			BotAI_BotInitialChat(bs, "patrol_start", buf, NULL);
 			trap_BotEnterChat(bs->cs, bs->decisionmaker, CHAT_TELL);
-			if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_ACK_YES, NULL); else BotVoiceChatOnly(bs, bs->decisionmaker, VOICECHAT_YES);
+			if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_ACK_YES, NULL); else BotVoiceChatOnly(bs, bs->decisionmaker, VOICECHAT_YES);
 			trap_EA_Action(bs->client, ACTION_AFFIRMATIVE);
 			bs->teammessage_time = 0;
 		}
@@ -786,7 +1489,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			if (bs->teammessage_time && bs->teammessage_time < FloatTime()) {
 				BotAI_BotInitialChat(bs, "captureflag_start", NULL);
 				trap_BotEnterChat(bs->cs, 0, CHAT_TEAM);
-				if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_STATUS_GETFLAG, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONGETFLAG);
+				if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_STATUS_GETFLAG, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONGETFLAG);
 				bs->teammessage_time = 0;
 			}
 			//
@@ -844,7 +1547,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			if (bs->teammessage_time && bs->teammessage_time < FloatTime()) {
 				BotAI_BotInitialChat(bs, "returnflag_start", NULL);
 				trap_BotEnterChat(bs->cs, 0, CHAT_TEAM);
-				if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_STATUS_RETURNFLAG, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONRETURNFLAG);
+				if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_STATUS_RETURNFLAG, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONRETURNFLAG);
 				bs->teammessage_time = 0;
 			}
 			//
@@ -869,7 +1572,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			if (bs->teammessage_time && bs->teammessage_time < FloatTime()) {
 				BotAI_BotInitialChat(bs, "captureflag_start", NULL);
 				trap_BotEnterChat(bs->cs, 0, CHAT_TEAM);
-				if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_STATUS_GETFLAG, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONGETFLAG);
+				if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_STATUS_GETFLAG, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONGETFLAG);
 				bs->teammessage_time = 0;
 			}
 			memcpy(goal, &ctf_neutralflag, sizeof(bot_goal_t));
@@ -912,7 +1615,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			if (bs->teammessage_time && bs->teammessage_time < FloatTime()) {
 				BotAI_BotInitialChat(bs, "attackenemybase_start", NULL);
 				trap_BotEnterChat(bs->cs, 0, CHAT_TEAM);
-				if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_STATUS_OFFENSE, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONOFFENSE);
+				if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_STATUS_OFFENSE, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONOFFENSE);
 				bs->teammessage_time = 0;
 			}
 			switch(BotTeam(bs)) {
@@ -936,7 +1639,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			if (bs->teammessage_time && bs->teammessage_time < FloatTime()) {
 				BotAI_BotInitialChat(bs, "returnflag_start", NULL);
 				trap_BotEnterChat(bs->cs, 0, CHAT_TEAM);
-				if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_STATUS_RETURNFLAG, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONRETURNFLAG);
+				if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_STATUS_RETURNFLAG, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONRETURNFLAG);
 				bs->teammessage_time = 0;
 			}
 			//
@@ -956,7 +1659,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			if (bs->teammessage_time && bs->teammessage_time < FloatTime()) {
 				BotAI_BotInitialChat(bs, "attackenemybase_start", NULL);
 				trap_BotEnterChat(bs->cs, 0, CHAT_TEAM);
-				if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_STATUS_OFFENSE, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONOFFENSE);
+				if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_STATUS_OFFENSE, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONOFFENSE);
 				bs->teammessage_time = 0;
 			}
 			switch(BotTeam(bs)) {
@@ -1021,7 +1724,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			if (bs->teammessage_time && bs->teammessage_time < FloatTime()) {
 				BotAI_BotInitialChat(bs, "attackenemybase_start", NULL);
 				trap_BotEnterChat(bs->cs, 0, CHAT_TEAM);
-				if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_STATUS_OFFENSE, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONOFFENSE);
+				if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_STATUS_OFFENSE, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONOFFENSE);
 				bs->teammessage_time = 0;
 			}
 			switch(BotTeam(bs)) {
@@ -1046,7 +1749,7 @@ int BotGetLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) 
 			if (bs->teammessage_time && bs->teammessage_time < FloatTime()) {
 				BotAI_BotInitialChat(bs, "harvest_start", NULL);
 				trap_BotEnterChat(bs->cs, 0, CHAT_TEAM);
-				if (bs->wiredBotsActive) WiredBots_Announce(bs, WB_STATUS_OFFENSE, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONOFFENSE);
+				if (bs->wiredIntelActive) WiredIntel_Announce(bs, WI_STATUS_OFFENSE, NULL); else BotVoiceChatOnly(bs, -1, VOICECHAT_ONOFFENSE);
 				bs->teammessage_time = 0;
 			}
 			memcpy(goal, &neutralobelisk, sizeof(bot_goal_t));
@@ -1099,7 +1802,9 @@ int BotLongTermGoal(bot_state_t *bs, int tfl, int retreat, bot_goal_t *goal) {
 		//
 		if (entinfo.valid) {
 			areanum = BotPointAreaNum(entinfo.origin);
-			if (areanum && trap_AAS_AreaReachability(areanum)) {
+			//nonzero areanum is a valid Recast poly ref, which already means the
+			//point is on the navmesh (reachable) - subsumes the old AAS reachability check
+			if (areanum) {
 				//update team goal
 				bs->lead_teamgoal.entitynum = bs->lead_teammate;
 				bs->lead_teamgoal.areanum = areanum;
@@ -1165,7 +1870,7 @@ void AIEnter_Intermission(bot_state_t *bs, char *s) {
 	BotResetState(bs);
 	//check for end level chat
 	if (BotChat_EndLevel(bs)) {
-		if ( !bs->wiredBotsActive ) {
+		if ( !bs->wiredIntelActive ) {
 			trap_BotEnterChat(bs->cs, 0, bs->chatto);
 		}
 	}
@@ -1252,7 +1957,7 @@ int AINode_Stand(bot_state_t *bs) {
 	trap_EA_Talk(bs->client);
 	// when done standing
 	if (bs->stand_time < FloatTime()) {
-		if ( !bs->wiredBotsActive ) {
+		if ( !bs->wiredIntelActive ) {
 			trap_BotEnterChat(bs->cs, 0, bs->chatto);
 		}
 		AIEnter_Seek_LTG(bs, "stand: time out");
@@ -1301,7 +2006,7 @@ void AIEnter_Respawn(bot_state_t *bs, char *s) {
 	}
 	//if the bot wants to chat
 	if (BotChat_Death(bs)) {
-		if ( bs->wiredBotsActive ) {
+		if ( bs->wiredIntelActive ) {
 			bs->respawn_time = FloatTime() + 0.2f;
 			bs->respawnchat_time = 0;
 		} else {
@@ -1339,7 +2044,7 @@ int AINode_Respawn(bot_state_t *bs) {
 		// elementary action respawn
 		trap_EA_Respawn(bs->client);
 		//
-		if (!bs->wiredBotsActive && bs->respawnchat_time) {
+		if (!bs->wiredIntelActive && bs->respawnchat_time) {
 			trap_BotEnterChat(bs->cs, 0, bs->chatto);
 			bs->enemy = -1;
 		}
@@ -1429,224 +2134,6 @@ void BotClearPath(bot_state_t *bs, bot_moveresult_t *moveresult) {
 
 /*
 ==================
-AIEnter_Seek_ActivateEntity
-==================
-*/
-void AIEnter_Seek_ActivateEntity(bot_state_t *bs, char *s) {
-	BotRecordNodeSwitch(bs, "activate entity", "", s);
-	bs->ainode = AINode_Seek_ActivateEntity;
-}
-
-/*
-==================
-AINode_Seek_Activate_Entity
-==================
-*/
-int AINode_Seek_ActivateEntity(bot_state_t *bs) {
-	bot_goal_t *goal;
-	vec3_t target, dir, ideal_viewangles;
-	bot_moveresult_t moveresult;
-	int targetvisible;
-	bsp_trace_t bsptrace;
-	aas_entityinfo_t entinfo;
-
-	if (BotIsObserver(bs)) {
-		BotClearActivateGoalStack(bs);
-		AIEnter_Observer(bs, "active entity: observer");
-		return qfalse;
-	}
-	//if in the intermission
-	if (BotIntermission(bs)) {
-		BotClearActivateGoalStack(bs);
-		AIEnter_Intermission(bs, "activate entity: intermission");
-		return qfalse;
-	}
-	//respawn if dead
-	if (BotIsDead(bs)) {
-		BotClearActivateGoalStack(bs);
-		AIEnter_Respawn(bs, "activate entity: bot dead");
-		return qfalse;
-	}
-	//
-	bs->tfl = TFL_DEFAULT;
-	if (WiredBots_ProfileFieldOr(bs, WB_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
-	// if in lava or slime the bot should be able to get out
-	if (BotInLavaOrSlime(bs)) bs->tfl |= TFL_LAVA|TFL_SLIME;
-	// map specific code
-	BotMapScripts(bs);
-	// no enemy
-	if ( bs->enemy >= 0 && bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 )
-		Com_Log( SEV_INFO, LOG_CH(ch_botlib), "[EnemyClear] cl=%d was=%d (activate-state reset)\n", bs->client, bs->enemy );
-	bs->enemy = -1;
-	bs->enemyvisible_time = 0;
-	// if the bot has no activate goal
-	if (!bs->activatestack) {
-		BotClearActivateGoalStack(bs);
-		AIEnter_Seek_NBG(bs, "activate entity: no goal");
-		return qfalse;
-	}
-	//
-	goal = &bs->activatestack->goal;
-	// initialize target being visible to false
-	targetvisible = qfalse;
-	// if the bot has to shoot at a target to activate something
-	if (bs->activatestack->shoot) {
-		//
-		BotAI_Trace(&bsptrace, bs->eye, NULL, NULL, bs->activatestack->target, bs->entitynum, MASK_SHOT);
-		// if the shootable entity is visible from the current position
-		if (bsptrace.fraction >= 1.0 || bsptrace.ent == goal->entitynum) {
-			targetvisible = qtrue;
-			// if holding the right weapon
-			if (bs->cur_ps.weapon == bs->activatestack->weapon) {
-				VectorSubtract(bs->activatestack->target, bs->eye, dir);
-				vectoangles(dir, ideal_viewangles);
-				// if the bot is pretty close with its aim
-				if (InFieldOfVision(bs->viewangles, 20, ideal_viewangles)) {
-					trap_EA_Attack(bs->client);
-				}
-			}
-		}
-	}
-	// if the shoot target is visible
-	if (targetvisible) {
-		// get the entity info of the entity the bot is shooting at
-		BotEntityInfo(goal->entitynum, &entinfo);
-		// if the entity the bot shoots at moved
-		if (!VectorCompare(bs->activatestack->origin, entinfo.origin)) {
-#ifdef DEBUG
-			BotAI_Print(PRT_MESSAGE, "hit shootable button or trigger\n");
-#endif //DEBUG
-			bs->activatestack->time = 0;
-		}
-		// if the activate goal has been activated or the bot takes too long
-		if (bs->activatestack->time < FloatTime()) {
-			BotPopFromActivateGoalStack(bs);
-			// if there are more activate goals on the stack
-			if (bs->activatestack) {
-				bs->activatestack->time = FloatTime() + 10;
-				return qfalse;
-			}
-			AIEnter_Seek_NBG(bs, "activate entity: time out");
-			return qfalse;
-		}
-		memset(&moveresult, 0, sizeof(bot_moveresult_t));
-	}
-	else {
-		// if the bot has no goal
-		if (!goal) {
-			bs->activatestack->time = 0;
-		}
-		// if the bot does not have a shoot goal
-		else if (!bs->activatestack->shoot) {
-			//if the bot touches the current goal
-			if (trap_BotTouchingGoal(bs->origin, goal)) {
-#ifdef DEBUG
-				BotAI_Print(PRT_MESSAGE, "touched button or trigger\n");
-#endif //DEBUG
-				bs->activatestack->time = 0;
-			}
-		}
-		// if the activate goal has been activated or the bot takes too long
-		if (bs->activatestack->time < FloatTime()) {
-			BotPopFromActivateGoalStack(bs);
-			// if there are more activate goals on the stack
-			if (bs->activatestack) {
-				bs->activatestack->time = FloatTime() + 10;
-				return qfalse;
-			}
-			AIEnter_Seek_NBG(bs, "activate entity: activated");
-			return qfalse;
-		}
-		//predict obstacles
-		if (BotAIPredictObstacles(bs, goal))
-			return qfalse;
-		//initialize the movement state
-		BotSetupForMovement(bs);
-		//move towards the goal
-	BotNav_MoveToGoal(bs, goal, &moveresult);
-	//if the movement failed
-	if (moveresult.failure) {
-		//reset the avoid reach, otherwise bot is stuck in current area
-#if !FEAT_RECAST_NAVMESH
-		trap_BotResetAvoidReach(bs->ms);
-#endif
-			//
-			bs->activatestack->time = 0;
-		}
-		//check if the bot is blocked
-		BotAIBlocked(bs, &moveresult, qtrue);
-		BotMovementThink(bs, &moveresult);
-	}
-	//
-	BotClearPath(bs, &moveresult);
-	// if the bot has to shoot to activate
-	if (bs->activatestack->shoot) {
-		// if the view angles aren't yet used for the movement
-		if (!(moveresult.flags & MOVERESULT_MOVEMENTVIEW)) {
-			VectorSubtract(bs->activatestack->target, bs->eye, dir);
-			vectoangles(dir, moveresult.ideal_viewangles);
-			moveresult.flags |= MOVERESULT_MOVEMENTVIEW;
-		}
-		// if there's no weapon yet used for the movement
-		if (!(moveresult.flags & MOVERESULT_MOVEMENTWEAPON)) {
-			moveresult.flags |= MOVERESULT_MOVEMENTWEAPON;
-			//
-			bs->activatestack->weapon = BotSelectActivateWeapon(bs);
-			if (bs->activatestack->weapon == -1) {
-				//FIXME: find a decent weapon first
-				bs->activatestack->weapon = 0;
-			}
-			moveresult.weapon = bs->activatestack->weapon;
-		}
-	}
-	// if the ideal view angles are set for movement
-	if (moveresult.flags & (MOVERESULT_MOVEMENTVIEWSET|MOVERESULT_MOVEMENTVIEW|MOVERESULT_SWIMVIEW)) {
-		VectorCopy(moveresult.ideal_viewangles, bs->ideal_viewangles);
-	}
-	// if waiting for something
-	else if (moveresult.flags & MOVERESULT_WAITING) {
-		if (random() < bs->thinktime * 0.8) {
-			BotRoamGoal(bs, target);
-			VectorSubtract(target, bs->origin, dir);
-			dir[2] = 0;
-			vectoangles(dir, bs->ideal_viewangles);
-			bs->ideal_viewangles[2] *= 0.5;
-		}
-	}
-	else if (!(bs->flags & BFL_IDEALVIEWSET)) {
-		if (BotNav_MovementViewTarget(bs->client, goal, target)) {
-			VectorSubtract(target, bs->origin, dir);
-			dir[2] = 0;
-			vectoangles(dir, bs->ideal_viewangles);
-		}
-		else {
-			vectoangles(moveresult.movedir, bs->ideal_viewangles);
-		}
-		bs->ideal_viewangles[2] *= 0.5;
-	}
-	// if the weapon is used for the bot movement
-	if (moveresult.flags & MOVERESULT_MOVEMENTWEAPON)
-		bs->weaponnum = moveresult.weapon;
-	// if there is an enemy
-	if (BotFindEnemy(bs, -1)) {
-		if (BotWantsToRetreat(bs)) {
-			//keep the current long term goal and retreat
-			AIEnter_Battle_NBG(bs, "activate entity: found enemy");
-		}
-		else {
-			trap_BotResetLastAvoidReach(bs->ms);
-			//empty the goal stack
-			trap_BotEmptyGoalStack(bs->gs);
-			//go fight
-			AIEnter_Battle_Fight(bs, "activate entity: found enemy");
-		}
-		BotClearActivateGoalStack(bs);
-	}
-	return qtrue;
-}
-
-/*
-==================
 AIEnter_Seek_NBG
 ==================
 */
@@ -1674,23 +2161,11 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 	vec3_t target, dir;
 	bot_moveresult_t moveresult;
 
-	if (BotIsObserver(bs)) {
-		AIEnter_Observer(bs, "seek nbg: observer");
-		return qfalse;
-	}
-	//if in the intermission
-	if (BotIntermission(bs)) {
-		AIEnter_Intermission(bs, "seek nbg: intermision");
-		return qfalse;
-	}
-	//respawn if dead
-	if (BotIsDead(bs)) {
-		AIEnter_Respawn(bs, "seek nbg: bot dead");
-		return qfalse;
-	}
+	// observer/intermission/dead cluster-exit guards are arbitrated once at the
+	// root composite (AI_BuildRootComposite) before this node is dispatched.
 	//
 	bs->tfl = TFL_DEFAULT;
-	if (WiredBots_ProfileFieldOr(bs, WB_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
+	if (WiredIntel_ProfileFieldOr(bs, WI_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
 	//if in lava or slime the bot should be able to get out
 	if (BotInLavaOrSlime(bs)) bs->tfl |= TFL_LAVA|TFL_SLIME;
 	//
@@ -1699,11 +2174,40 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 	}
 	//map specific code
 	BotMapScripts(bs);
-	//no enemy
-	if ( bs->enemy >= 0 && bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 )
-		Com_Log( SEV_INFO, LOG_CH(ch_botlib), "[EnemyClear] cl=%d was=%d (nbg-state reset)\n", bs->client, bs->enemy );
-	bs->enemy = -1;
-	bs->enemyvisible_time = 0;
+	/* no enemy — but ONLY when this frame will re-decide the enemy from scratch.
+	 *
+	 * The clear is vanilla's design and is correct under vanilla's contract: assume no
+	 * enemy, re-search below, and ON SUCCESS LEAVE this node for a Battle node.  The
+	 * assumption is transient precisely because the node is exited.  Measured on the
+	 * e1m1 specimen: on the non-locked path the bot entered Battle 6 times against 6
+	 * acquisitions — a perfect 1:1, so the contract holds and this clear is harmless.
+	 *
+	 * The directive-locked branch below breaks that contract deliberately: it calls
+	 * WiredIntel_DefensiveCombat and STAYS in this node, so that the goal authority
+	 * (BotGetLongTermGoal, never called inside Battle_Fight) keeps running.  Staying is
+	 * an intended property and is NOT changed here.  But combined with an unconditional
+	 * clear it means the next frame re-enters and clears again: measured 4,161 clears
+	 * against 12 Battle entries — 352 acquisitions per exit.  Each clear forces a fresh
+	 * acquisition, which re-stamps enemysight_time, so the reaction gate is permanently
+	 * starved and the bot never fires (fired=0 of 4,500).
+	 *
+	 * So the reset is conditioned on the same predicate that decides whether the frame
+	 * exits.  This generalises the pattern the engine already uses for persisting
+	 * nodes — Battle_Fight (:2647) and Battle_Retreat (:2906) re-stamp
+	 * enemyvisible_time = FloatTime() rather than dropping enemy state — instead of
+	 * adding a special case.  A persisting node keeps its enemy state current; an
+	 * exiting node may safely discard it. */
+	if ( !bs->directives.directiveLocked ) {
+		if ( bs->enemy >= 0 && bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 )
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d was=%d (nbg-state reset)\n", bs->client, bs->enemy );
+		bs->enemy = -1;
+		bs->enemyvisible_time = 0;
+	} else if ( bs->enemy >= 0 ) {
+		/* Persisting node with a live enemy: keep the sighting current, exactly as the
+		 * Battle nodes do.  Without this the enemy would age out of every visibility
+		 * consumer while the bot is still looking straight at it. */
+		bs->enemyvisible_time = FloatTime();
+	}
 	//if the bot has no goal
 	if (!trap_BotGetTopGoal(bs->gs, &goal)) bs->nbg_time = 0;
 	//if the bot touches the current goal
@@ -1731,10 +2235,6 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 	BotNav_MoveToGoal(bs, &goal, &moveresult);
 	//if the movement failed
 	if (moveresult.failure) {
-		//reset the avoid reach, otherwise bot is stuck in current area
-#if !FEAT_RECAST_NAVMESH
-		trap_BotResetAvoidReach(bs->ms);
-#endif
 		bs->nbg_time = 0;
 	}
 	//check if the bot is blocked
@@ -1774,24 +2274,24 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 	//if there is an enemy
 	if ( bs->directives.directiveLocked ) {
 		/* Directive locked: keep pursuing objective, fire defensively */
-		WiredBots_DefensiveCombat( bs );
-		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^5[SeekNBG] cl=%d directiveLocked — defensive combat only\n", bs->client );
+		WiredIntel_DefensiveCombat( bs );
+		if ( bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d directiveLocked — defensive combat only\n", bs->client );
 		}
 	} else if (BotFindEnemy(bs, -1)) {
-		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^2[SeekNBG] cl=%d BotFindEnemy=TRUE enemy=%d\n", bs->client, bs->enemy );
+		if ( bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d BotFindEnemy=TRUE enemy=%d\n", bs->client, bs->enemy );
 		}
 		if (BotWantsToRetreat(bs)) {
-			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-				Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^1[SeekNBG] cl=%d WantsToRetreat=TRUE -> Battle_NBG\n", bs->client );
+			if ( bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+				Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d WantsToRetreat=TRUE -> Battle_NBG\n", bs->client );
 			}
 			//keep the current long term goal and retreat
 			AIEnter_Battle_NBG(bs, "seek nbg: found enemy");
 		}
 		else {
-			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-				Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^2[SeekNBG] cl=%d WantsToRetreat=FALSE -> Battle_Fight\n", bs->client );
+			if ( bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+				Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d WantsToRetreat=FALSE -> Battle_Fight\n", bs->client );
 			}
 			trap_BotResetLastAvoidReach(bs->ms);
 			//empty the goal stack
@@ -1799,11 +2299,11 @@ int AINode_Seek_NBG(bot_state_t *bs) {
 			//go fight
 			AIEnter_Battle_Fight(bs, "seek nbg: found enemy");
 		}
-	} else if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+	} else if ( bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
 		static float s_noEnemyNBG[MAX_CLIENTS];
 		if ( FloatTime() - s_noEnemyNBG[bs->client] > 2.0f ) {
 			s_noEnemyNBG[bs->client] = FloatTime();
-			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^3[SeekNBG] cl=%d BotFindEnemy=FALSE hp=%d lasthp=%d\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d BotFindEnemy=FALSE hp=%d lasthp=%d\n",
 				bs->client, bs->inventory[INVENTORY_HEALTH], bs->lasthealth );
 		}
 	}
@@ -1843,20 +2343,8 @@ int AINode_Seek_LTG(bot_state_t *bs)
 	//char buf[128];
 	//bot_goal_t tmpgoal;
 
-	if (BotIsObserver(bs)) {
-		AIEnter_Observer(bs, "seek ltg: observer");
-		return qfalse;
-	}
-	//if in the intermission
-	if (BotIntermission(bs)) {
-		AIEnter_Intermission(bs, "seek ltg: intermission");
-		return qfalse;
-	}
-	//respawn if dead
-	if (BotIsDead(bs)) {
-		AIEnter_Respawn(bs, "seek ltg: bot dead");
-		return qfalse;
-	}
+	// observer/intermission/dead cluster-exit guards are arbitrated once at the
+	// root composite (AI_BuildRootComposite) before this node is dispatched.
 	//
 	if (BotChat_Random(bs)) {
 		bs->stand_time = FloatTime() + BotChatTime(bs);
@@ -1865,7 +2353,7 @@ int AINode_Seek_LTG(bot_state_t *bs)
 	}
 	//
 	bs->tfl = TFL_DEFAULT;
-	if (WiredBots_ProfileFieldOr(bs, WB_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
+	if (WiredIntel_ProfileFieldOr(bs, WI_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
 	//if in lava or slime the bot should be able to get out
 	if (BotInLavaOrSlime(bs)) bs->tfl |= TFL_LAVA|TFL_SLIME;
 	//
@@ -1874,11 +2362,20 @@ int AINode_Seek_LTG(bot_state_t *bs)
 	}
 	//map specific code
 	BotMapScripts(bs);
-	//no enemy
-	if ( bs->enemy >= 0 && bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 )
-		Com_Log( SEV_INFO, LOG_CH(ch_botlib), "[EnemyClear] cl=%d was=%d (ltg-state reset)\n", bs->client, bs->enemy );
-	bs->enemy = -1;
-	bs->enemyvisible_time = 0;
+	/* no enemy — same mechanism as the NBG twin above; see the reasoning there.
+	 * The clear is only sound when this frame will exit the node on acquisition, which
+	 * is false on the directive-locked path.  This is where it was measured: 4,161
+	 * clears against 12 Battle entries on one run, starving the reaction gate so the
+	 * bot never fired.  The two sites are one defect and are fixed together — repairing
+	 * only the one that happened to be exercised would leave its twin latent. */
+	if ( !bs->directives.directiveLocked ) {
+		if ( bs->enemy >= 0 && bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 2 )
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d was=%d (ltg-state reset)\n", bs->client, bs->enemy );
+		bs->enemy = -1;
+		bs->enemyvisible_time = 0;
+	} else if ( bs->enemy >= 0 ) {
+		bs->enemyvisible_time = FloatTime();
+	}
 	//
 	if (bs->killedenemy_time > FloatTime() - 2) {
 		if (random() < bs->thinktime * 1) {
@@ -1888,24 +2385,24 @@ int AINode_Seek_LTG(bot_state_t *bs)
 	//if there is an enemy
 	if ( bs->directives.directiveLocked ) {
 		/* Directive locked: keep pursuing objective, fire defensively */
-		WiredBots_DefensiveCombat( bs );
-		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^5[SeekLTG] cl=%d directiveLocked — defensive combat only\n", bs->client );
+		WiredIntel_DefensiveCombat( bs );
+		if ( bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d directiveLocked — defensive combat only\n", bs->client );
 		}
 	} else if (BotFindEnemy(bs, -1)) {
-		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^2[SeekLTG] cl=%d BotFindEnemy=TRUE enemy=%d\n", bs->client, bs->enemy );
+		if ( bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d BotFindEnemy=TRUE enemy=%d\n", bs->client, bs->enemy );
 		}
 		if (BotWantsToRetreat(bs)) {
-			if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-				Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^1[SeekLTG] cl=%d WantsToRetreat=TRUE -> Battle_Retreat\n", bs->client );
+			if ( bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+				Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d WantsToRetreat=TRUE -> Battle_Retreat\n", bs->client );
 			}
 			//keep the current long term goal and retreat
 			AIEnter_Battle_Retreat(bs, "seek ltg: found enemy");
 			return qfalse;
 		}
-		if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
-			Com_Log( SEV_INFO, LOG_CH( ch_botlib ), "^2[SeekLTG] cl=%d WantsToRetreat=FALSE -> Battle_Fight\n",
+		if ( bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+			Com_Log( SEV_INFO, LOG_CH( ch_botai ), "cl=%d WantsToRetreat=FALSE -> Battle_Fight\n",
 					 bs->client );
 		}
 		trap_BotResetLastAvoidReach( bs->ms );
@@ -1915,11 +2412,11 @@ int AINode_Seek_LTG(bot_state_t *bs)
 		AIEnter_Battle_Fight( bs, "seek ltg: found enemy" );
 		return qfalse;
 
-	} else if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+	} else if ( bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
 		static float s_noEnemyLTG[MAX_CLIENTS];
 		if ( FloatTime() - s_noEnemyLTG[bs->client] > 2.0f ) {
 			s_noEnemyLTG[bs->client] = FloatTime();
-			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^3[SeekLTG] cl=%d BotFindEnemy=FALSE hp=%d lasthp=%d\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d BotFindEnemy=FALSE hp=%d lasthp=%d\n",
 				bs->client, bs->inventory[INVENTORY_HEALTH], bs->lasthealth );
 		}
 	}
@@ -1944,7 +2441,7 @@ int AINode_Seek_LTG(bot_state_t *bs)
 			return qtrue;
 		}
 	}
-	//if a WiredBots directive specifies a fixed position, honor it precisely
+	//if a WiredIntel directive specifies a fixed position, honor it precisely
 	BotDirective_OverrideGoal(bs, &goal);
 	//check for nearby goals periodicly
 	if (bs->check_time < FloatTime()) {
@@ -1996,10 +2493,6 @@ int AINode_Seek_LTG(bot_state_t *bs)
 	BotNav_MoveToGoal(bs, &goal, &moveresult);
 	//if the movement failed
 	if (moveresult.failure) {
-		//reset the avoid reach, otherwise bot is stuck in current area
-#if !FEAT_RECAST_NAVMESH
-		trap_BotResetAvoidReach(bs->ms);
-#endif
 		//BotAI_Print(PRT_MESSAGE, "movement failure %d\n", moveresult.traveltype);
 		bs->ltg_time = 0;
 	}
@@ -2084,19 +2577,21 @@ int AINode_Battle_Fight(bot_state_t *bs) {
 	aas_entityinfo_t entinfo;
 	bot_moveresult_t moveresult;
 
-	if (BotIsObserver(bs)) {
-		AIEnter_Observer(bs, "battle fight: observer");
-		return qfalse;
-	}
-
-	//if in the intermission
-	if (BotIntermission(bs)) {
-		AIEnter_Intermission(bs, "battle fight: intermission");
-		return qfalse;
-	}
-	//respawn if dead
-	if (BotIsDead(bs)) {
-		AIEnter_Respawn(bs, "battle fight: bot dead");
+	// observer/intermission/dead cluster-exit guards are arbitrated once at the
+	// root composite (AI_BuildRootComposite) before this node is dispatched.
+	//
+	// SEQUENCED-GOAL AUTHORITY: a directive-locked sequenced MOVEMENT step out-ranks
+	// combat.  Seek_LTG's locked path already suppresses ENTERING a full fight (it
+	// does defensive combat only), but a bot ALREADY in Battle_Fight when the step is
+	// installed (an enemy found before the sequence began) would otherwise stay here,
+	// where the single arbitration gate (BotGetLongTermGoal) is never called.  Bail
+	// back to Seek_LTG so the gate runs and drives the step; the sequence's own
+	// watchdog is the leash — if a monster genuinely blocks the launch, the step
+	// aborts, authority releases, and normal AI (this fight) resumes.  Uses the
+	// shipped AIEnter_Seek_LTG edge, not a new combat policy.
+	if ( bs->wiredIntelActive && bs->directives.directiveLocked &&
+	     WiredIntel_SequencedGoalHasMovementGoal( bs ) ) {
+		AIEnter_Seek_LTG( bs, "battle fight: sequenced-goal authority" );
 		return qfalse;
 	}
 	//if there is another better enemy
@@ -2156,17 +2651,12 @@ int AINode_Battle_Fight(bot_state_t *bs) {
 	}
 	//update the reachability area and origin if possible
 	areanum = BotPointAreaNum(target);
-#if FEAT_RECAST_NAVMESH
 	/* BotPointAreaNum returns 0 under Recast; always record last-seen position.
 	 * Sentinel 1 satisfies Battle_Chase's non-zero check. */
 	VectorCopy(target, bs->lastenemyorigin);
 	bs->lastenemyareanum = 1;
-#else
-	if (areanum && trap_AAS_AreaReachability(areanum)) {
-		VectorCopy(target, bs->lastenemyorigin);
-		bs->lastenemyareanum = areanum;
-	}
-#endif
+	//mirror the last-seen threat into the belief store (threats producer)
+	Belief_RecordThreat(bs, bs->enemy, target, bs->lastenemyareanum, FloatTime());
 	//update the attack inventory values
 	BotUpdateBattleInventory(bs, bs->enemy);
 	//if the bot's health decreased
@@ -2189,6 +2679,9 @@ int AINode_Battle_Fight(bot_state_t *bs) {
 	{
 		float visNow = BotEntityVisible(bs->entitynum, bs->eye, bs->viewangles, 360, bs->enemy);
 		if (visNow > 0) {
+			// keep enemyvisible_time current: other nodes (Chase/Retreat) and the
+			// Seek_LTG exit below still read it, and the composite's Chase precondition
+			// keys on the same live-visibility test.
 			bs->enemyvisible_time = FloatTime();
 		} else {
 #if FEAT_OVERLOAD
@@ -2197,22 +2690,22 @@ int AINode_Battle_Fight(bot_state_t *bs) {
 				return qfalse;
 			}
 #endif
-			// Hysteresis: stay in Battle_Fight as long as enemy was seen within the grace window.
-			// This prevents single-tick occlusion (doorways, pillars) from dropping combat.
+			// The Fight->Chase visibility transition (unseen-past-grace AND wants-chase)
+			// now lives in the Fight/Chase sub-composite, whose incumbent-hysteresis
+			// margin carries this same grace window. What stays here is the cluster-EXIT
+			// to nav: when the bot has lost sight past the grace and does NOT want to
+			// chase, it leaves combat for Seek_LTG. The grace check is preserved for
+			// that exit; the wants-chase branch is the composite's job.
 			if (bs->enemyvisible_time < FloatTime() - BATTLE_FIGHT_VIS_GRACE_MS * 0.001f) {
-				int wantsChase = BotWantsToChase(bs);
-				if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 )
-					Com_Log( SEV_INFO, LOG_CH(ch_botlib), "[BattleExit] cl=%d enemy=%d unseen=%.2fs graceMs=%d -> chase=%d\n",
-						bs->client, bs->enemy,
-						FloatTime() - bs->enemyvisible_time,
-						BATTLE_FIGHT_VIS_GRACE_MS,
-						wantsChase );
-				if (wantsChase) {
-					AIEnter_Battle_Chase(bs, "battle fight: enemy out of sight");
+				if (!BotWantsToChase(bs)) {
+					if ( bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 )
+						Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d enemy=%d unseen=%.2fs graceMs=%d -> seek-ltg\n",
+							bs->client, bs->enemy,
+							FloatTime() - bs->enemyvisible_time,
+							BATTLE_FIGHT_VIS_GRACE_MS );
+					AIEnter_Seek_LTG( bs, "battle fight: enemy out of sight" );
 					return qfalse;
 				}
-				AIEnter_Seek_LTG( bs, "battle fight: enemy out of sight" );
-				return qfalse;
 			}
 		}
 	}
@@ -2220,7 +2713,7 @@ int AINode_Battle_Fight(bot_state_t *bs) {
 	BotBattleUseItems(bs);
 	//
 	bs->tfl = TFL_DEFAULT;
-	if (WiredBots_ProfileFieldOr(bs, WB_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
+	if (WiredIntel_ProfileFieldOr(bs, WI_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
 	//if in lava or slime the bot should be able to get out
 	if (BotInLavaOrSlime(bs)) bs->tfl |= TFL_LAVA|TFL_SLIME;
 	//
@@ -2278,18 +2771,13 @@ int AINode_Battle_Chase(bot_state_t *bs)
 	bot_moveresult_t moveresult;
 	float range;
 
-	if (BotIsObserver(bs)) {
-		AIEnter_Observer(bs, "battle chase: observer");
-		return qfalse;
-	}
-	//if in the intermission
-	if (BotIntermission(bs)) {
-		AIEnter_Intermission(bs, "battle chase: intermission");
-		return qfalse;
-	}
-	//respawn if dead
-	if (BotIsDead(bs)) {
-		AIEnter_Respawn(bs, "battle chase: bot dead");
+	// observer/intermission/dead cluster-exit guards are arbitrated once at the
+	// root composite (AI_BuildRootComposite) before this node is dispatched.
+	// SEQUENCED-GOAL AUTHORITY (see AINode_Battle_Fight): a directive-locked movement
+	// step out-ranks a chase; bail to Seek_LTG so the arbitration gate runs.
+	if ( bs->wiredIntelActive && bs->directives.directiveLocked &&
+	     WiredIntel_SequencedGoalHasMovementGoal( bs ) ) {
+		AIEnter_Seek_LTG( bs, "battle chase: sequenced-goal authority" );
 		return qfalse;
 	}
 	//if no enemy
@@ -2297,12 +2785,13 @@ int AINode_Battle_Chase(bot_state_t *bs)
 		AIEnter_Seek_LTG(bs, "battle chase: no enemy");
 		return qfalse;
 	}
-	//if the enemy is visible
-	if (BotEntityVisible(bs->entitynum, bs->eye, bs->viewangles, 360, bs->enemy)) {
-		AIEnter_Battle_Fight(bs, "battle chase");
-		return qfalse;
-	}
-	//if there is another enemy
+	// The Chase->Fight visibility transition (enemy visible again) now lives in the
+	// Fight/Chase sub-composite: when the enemy reappears, Chase loses its precondition
+	// and the composite hands the slot back to Fight immediately (no dwell). It is not
+	// re-issued here.
+	//if there is another enemy — the better-enemy edge STAYS in the leaf. BotFindEnemy
+	//selects a new target as a side effect (not a pure line-of-sight predicate), and it
+	//is about enemy-switching, not the pure Fight<->Chase visibility arbitration.
 	if (BotFindEnemy(bs, -1)) {
 		AIEnter_Battle_Fight(bs, "battle chase: better enemy");
 		return qfalse;
@@ -2314,7 +2803,7 @@ int AINode_Battle_Chase(bot_state_t *bs)
 	}
 	//
 	bs->tfl = TFL_DEFAULT;
-	if (WiredBots_ProfileFieldOr(bs, WB_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
+	if (WiredIntel_ProfileFieldOr(bs, WI_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
 	//if in lava or slime the bot should be able to get out
 	if (BotInLavaOrSlime(bs)) bs->tfl |= TFL_LAVA|TFL_SLIME;
 	//
@@ -2357,10 +2846,6 @@ int AINode_Battle_Chase(bot_state_t *bs)
 	BotNav_MoveToGoal(bs, &goal, &moveresult);
 	//if the movement failed
 	if (moveresult.failure) {
-		//reset the avoid reach, otherwise bot is stuck in current area
-#if !FEAT_RECAST_NAVMESH
-		trap_BotResetAvoidReach(bs->ms);
-#endif
 		//BotAI_Print(PRT_MESSAGE, "movement failure %d\n", moveresult.traveltype);
 		bs->ltg_time = 0;
 	}
@@ -2368,12 +2853,6 @@ int AINode_Battle_Chase(bot_state_t *bs)
 	BotAIBlocked(bs, &moveresult, qfalse);
 	BotMovementThink(bs, &moveresult);
 	//
-#if !FEAT_RECAST_NAVMESH
-	if (moveresult.flags & (MOVERESULT_MOVEMENTVIEWSET|MOVERESULT_MOVEMENTVIEW|MOVERESULT_SWIMVIEW)) {
-		VectorCopy(moveresult.ideal_viewangles, bs->ideal_viewangles);
-	}
-	else
-#endif
 	if (!(bs->flags & BFL_IDEALVIEWSET)) {
 		if (bs->chase_time > FloatTime() - 2) {
 			BotAimAtEnemy(bs);
@@ -2424,20 +2903,8 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 	float attack_skill, range;
 	int areanum;
 
-	if (BotIsObserver(bs)) {
-		AIEnter_Observer(bs, "battle retreat: observer");
-		return qfalse;
-	}
-	//if in the intermission
-	if (BotIntermission(bs)) {
-		AIEnter_Intermission(bs, "battle retreat: intermission");
-		return qfalse;
-	}
-	//respawn if dead
-	if (BotIsDead(bs)) {
-		AIEnter_Respawn(bs, "battle retreat: bot dead");
-		return qfalse;
-	}
+	// observer/intermission/dead cluster-exit guards are arbitrated once at the
+	// root composite (AI_BuildRootComposite) before this node is dispatched.
 	//if no enemy
 	if (bs->enemy < 0) {
 		AIEnter_Seek_LTG(bs, "battle retreat: no enemy");
@@ -2457,7 +2924,7 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 	}
 	//
 	bs->tfl = TFL_DEFAULT;
-	if (WiredBots_ProfileFieldOr(bs, WB_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
+	if (WiredIntel_ProfileFieldOr(bs, WI_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
 	//if in lava or slime the bot should be able to get out
 	if (BotInLavaOrSlime(bs)) bs->tfl |= TFL_LAVA|TFL_SLIME;
 	//map specific code
@@ -2488,15 +2955,10 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 		}
 		//update the reachability area and origin if possible
 		areanum = BotPointAreaNum(target);
-#if FEAT_RECAST_NAVMESH
 		VectorCopy(target, bs->lastenemyorigin);
 		bs->lastenemyareanum = 1;
-#else
-		if (areanum && trap_AAS_AreaReachability(areanum)) {
-			VectorCopy(target, bs->lastenemyorigin);
-			bs->lastenemyareanum = areanum;
-		}
-#endif
+		//mirror the last-seen threat into the belief store (threats producer)
+		Belief_RecordThreat(bs, bs->enemy, target, bs->lastenemyareanum, FloatTime());
 	}
 	//if the enemy is NOT visible for 4 seconds
 	if (bs->enemyvisible_time < FloatTime() - 4) {
@@ -2554,10 +3016,6 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 	BotNav_MoveToGoal(bs, &goal, &moveresult);
 	//if the movement failed
 	if (moveresult.failure) {
-		//reset the avoid reach, otherwise bot is stuck in current area
-#if !FEAT_RECAST_NAVMESH
-		trap_BotResetAvoidReach(bs->ms);
-#endif
 		//BotAI_Print(PRT_MESSAGE, "movement failure %d\n", moveresult.traveltype);
 		bs->ltg_time = 0;
 	}
@@ -2567,17 +3025,9 @@ int AINode_Battle_Retreat(bot_state_t *bs) {
 	//choose the best weapon to fight with
 	BotChooseWeapon(bs);
 	//if the view is fixed for the movement
-#if !FEAT_RECAST_NAVMESH
-	if (moveresult.flags & (MOVERESULT_MOVEMENTVIEW|MOVERESULT_SWIMVIEW)) {
-		VectorCopy(moveresult.ideal_viewangles, bs->ideal_viewangles);
-	}
-	else if (!(moveresult.flags & MOVERESULT_MOVEMENTVIEWSET)
-				&& !(bs->flags & BFL_IDEALVIEWSET) ) {
-#else
 	if (!(bs->flags & BFL_IDEALVIEWSET)) {
-#endif
-		if ( bs->wiredBotsActive ) {
-			attack_skill = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ATTACK_SKILL, 0.5f );
+		if ( bs->wiredIntelActive ) {
+			attack_skill = WiredIntel_ProfileFieldOr( bs, WI_PROFILE_ATTACK_SKILL, 0.5f );
 		} else {
 			attack_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_ATTACK_SKILL, 0, 1);
 		}
@@ -2627,20 +3077,8 @@ int AINode_Battle_NBG(bot_state_t *bs) {
 	float attack_skill;
 	vec3_t target, dir;
 
-	if (BotIsObserver(bs)) {
-		AIEnter_Observer(bs, "battle nbg: observer");
-		return qfalse;
-	}
-	//if in the intermission
-	if (BotIntermission(bs)) {
-		AIEnter_Intermission(bs, "battle nbg: intermission");
-		return qfalse;
-	}
-	//respawn if dead
-	if (BotIsDead(bs)) {
-		AIEnter_Respawn(bs, "battle nbg: bot dead");
-		return qfalse;
-	}
+	// observer/intermission/dead cluster-exit guards are arbitrated once at the
+	// root composite (AI_BuildRootComposite) before this node is dispatched.
 	//if no enemy
 	if (bs->enemy < 0) {
 		AIEnter_Seek_NBG(bs, "battle nbg: no enemy");
@@ -2654,7 +3092,7 @@ int AINode_Battle_NBG(bot_state_t *bs) {
 	}
 	//
 	bs->tfl = TFL_DEFAULT;
-	if (WiredBots_ProfileFieldOr(bs, WB_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
+	if (WiredIntel_ProfileFieldOr(bs, WI_PROFILE_GRAPPLE, 0.0f) > 0.3f) bs->tfl |= TFL_GRAPPLEHOOK;
 	//if in lava or slime the bot should be able to get out
 	if (BotInLavaOrSlime(bs)) bs->tfl |= TFL_LAVA|TFL_SLIME;
 	//
@@ -2679,15 +3117,10 @@ int AINode_Battle_NBG(bot_state_t *bs) {
 		}
 		//update the reachability area and origin if possible
 		areanum = BotPointAreaNum(target);
-#if FEAT_RECAST_NAVMESH
 		VectorCopy(target, bs->lastenemyorigin);
 		bs->lastenemyareanum = 1;
-#else
-		if (areanum && trap_AAS_AreaReachability(areanum)) {
-			VectorCopy(target, bs->lastenemyorigin);
-			bs->lastenemyareanum = areanum;
-		}
-#endif
+		//mirror the last-seen threat into the belief store (threats producer)
+		Belief_RecordThreat(bs, bs->enemy, target, bs->lastenemyareanum, FloatTime());
 	}
 	//if the bot has no goal or touches the current goal
 	if (!trap_BotGetTopGoal(bs->gs, &goal)) {
@@ -2714,10 +3147,6 @@ int AINode_Battle_NBG(bot_state_t *bs) {
 	BotNav_MoveToGoal(bs, &goal, &moveresult);
 	//if the movement failed
 	if (moveresult.failure) {
-		//reset the avoid reach, otherwise bot is stuck in current area
-#if !FEAT_RECAST_NAVMESH
-		trap_BotResetAvoidReach(bs->ms);
-#endif
 		//BotAI_Print(PRT_MESSAGE, "movement failure %d\n", moveresult.traveltype);
 		bs->nbg_time = 0;
 	}
@@ -2729,17 +3158,9 @@ int AINode_Battle_NBG(bot_state_t *bs) {
 	//choose the best weapon to fight with
 	BotChooseWeapon(bs);
 	//if the view is fixed for the movement
-#if !FEAT_RECAST_NAVMESH
-	if (moveresult.flags & (MOVERESULT_MOVEMENTVIEW|MOVERESULT_SWIMVIEW)) {
-		VectorCopy(moveresult.ideal_viewangles, bs->ideal_viewangles);
-	}
-	else if (!(moveresult.flags & MOVERESULT_MOVEMENTVIEWSET)
-				&& !(bs->flags & BFL_IDEALVIEWSET)) {
-#else
 	if (!(bs->flags & BFL_IDEALVIEWSET)) {
-#endif
-		if ( bs->wiredBotsActive ) {
-			attack_skill = WiredBots_ProfileFieldOr( bs, WB_PROFILE_ATTACK_SKILL, 0.5f );
+		if ( bs->wiredIntelActive ) {
+			attack_skill = WiredIntel_ProfileFieldOr( bs, WI_PROFILE_ATTACK_SKILL, 0.5f );
 		} else {
 			attack_skill = trap_Characteristic_BFloat(bs->character, CHARACTERISTIC_ATTACK_SKILL, 0, 1);
 		}

@@ -13,7 +13,6 @@
 
 #include "snd_local.h"
 #include "snd_codec.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_sound, "sound" );
 
 #define DEF_COMSOUNDMEGS "32"
@@ -287,11 +286,11 @@ qboolean S_LoadSound( sfx_t *sfx )
 		return qfalse;
 
 	if ( info.width == 1 ) {
-		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "WARNING: %s is a 8 bit audio file\n", sfx->soundName);
+		Com_Log( SEV_WARN, LOG_CH(ch_sound), "WARNING: %s is a 8 bit audio file\n", sfx->soundName);
 	}
 
 	if ( info.rate != 48000 && info.rate != 44100 && info.rate != 22050 ) {
-		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "WARNING: %s has unusual sample rate %dHz\n", sfx->soundName, info.rate);
+		Com_Log( SEV_WARN, LOG_CH(ch_sound), "WARNING: %s has unusual sample rate %dHz\n", sfx->soundName, info.rate);
 	}
 
 	samples = Hunk_AllocateTempMemory(info.samples * sizeof(short) * 2);
@@ -318,18 +317,6 @@ qboolean S_LoadSound( sfx_t *sfx )
 		sfx->soundLength = ResampleSfxRawToRate( samples, info.channels, info.rate, info.width, info.samples, data + info.dataofs, OPUS_INMEM_RATE );
 		S_OpusEncodeSound( sfx, samples );
 #endif
-#if 0
-	} else if (info.channels == 1 && info.samples>(SND_CHUNK_SIZE*16) && info.width >1) {
-		sfx->soundCompressionMethod = 3;
-		sfx->soundData = NULL;
-		sfx->soundLength = ResampleSfxRaw( samples, info.channels, info.rate, info.width, info.samples, (data + info.dataofs) );
-		encodeMuLaw( sfx, samples);
-	} else if (info.channels == 1 && info.samples>(SND_CHUNK_SIZE*6400) && info.width >1) {
-		sfx->soundCompressionMethod = 2;
-		sfx->soundData = NULL;
-		sfx->soundLength = ResampleSfxRaw( samples, info.channels, info.rate, info.width, info.samples, (data + info.dataofs) );
-		encodeWavelet( sfx, samples);
-#endif
 	} else {
 		sfx->soundCompressionMethod = 0;
 		sfx->soundData = NULL;
@@ -338,7 +325,7 @@ qboolean S_LoadSound( sfx_t *sfx )
 
 	sfx->soundChannels = info.channels;
 
-	// Phase 6.2: cache sound length in milliseconds for S_SoundDuration().
+	// Cache sound length in milliseconds for S_SoundDuration().
 	// info.samples is the per-channel sample count (set in S_ReadRIFFHeader),
 	// so duration = samples / rate * 1000.
 	if ( info.rate > 0 ) {

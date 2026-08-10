@@ -1,0 +1,20 @@
+// primitive_mono.wui — Mono v2 primitive demo.
+// Five monospace samples at progressively larger sizes, all routed
+// through $font_mono (post-15.5: resolves to jetbrainsmono atlas).
+// Demonstrates pixel-perfect v2 Mono primitive fidelity.
+
+menuDef {
+	name "primitive_mono"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor $ink
+
+	itemDef { name "mono_a" rect 0.10 0.28 0.80 0.04 text "QUAKEWIRED · MMXXVI · 14:23 · v0.1.0"  font $font_mono  9 forecolor $boneDim visible 1 decoration }
+	itemDef { name "mono_b" rect 0.10 0.34 0.80 0.04 text "0123456789 ◆ ABCDEFGHIJKLM ◆ abcdefghijklm" font $font_mono 11 forecolor $bone    visible 1 decoration }
+	itemDef { name "mono_c" rect 0.10 0.42 0.80 0.06 text "JetBrains Mono · 110 glyphs · SIL OFL 1.1"   font $font_mono 16 forecolor $accent  visible 1 decoration }
+	itemDef { name "mono_d" rect 0.10 0.52 0.80 0.07 text "{[(<{*+;,.>)}]} — “en-quoted”"            font $font_mono 22 forecolor $bone    visible 1 decoration }
+	itemDef { name "mono_e" rect 0.10 0.62 0.80 0.10 text "FRAG ◆ 32"                                            font $font_mono 48 forecolor $accent  visible 1 decoration }
+}

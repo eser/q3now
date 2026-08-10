@@ -1,0 +1,39 @@
+// font_jbmono_sample.wui — JBMono visual sample fixture.
+//
+// Loaded via `wui_test_font_jbmono` console command. Renders two text
+// leaves through $font_mono — which post-15.5 resolves to the
+// jetbrainsmono atlas. The first line covers the ASCII charset; the
+// second exercises the punctuation/symbol set used by v2 telemetry
+// strings (bullets, en-dashes, smart quotes).
+
+menuDef {
+	name "font_jbmono_sample"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor 0.05 0.05 0.10 1
+
+	itemDef {
+		name "font_jbmono_sample_ascii"
+		rect 0.05 0.40 0.9 0.08
+		text "0123456789 ABCDEFGHIJ abcdefghij {[(<{*+;,.>)}]} `~!@#$%^&*"
+		font $font_mono
+		fontsize 16
+		forecolor $bone
+		visible 1
+		decoration
+	}
+
+	itemDef {
+		name "font_jbmono_sample_telemetry"
+		rect 0.05 0.52 0.9 0.06
+		text "QUAKEWIRED · MMXXVI · 14:23 · v0.1.0 — \"en-quoted\""
+		font $font_mono
+		fontsize 11
+		forecolor $accent
+		visible 1
+		decoration
+	}
+}

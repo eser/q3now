@@ -61,6 +61,9 @@ void WiredAttract_Skip( void );
 // ── query ────────────────────────────────────────────────────────────
 wiredAttractState_t WiredAttract_GetState( void );
 qboolean            WiredAttract_IsActive( void );
+// True while attract owns a playing demo — bg_attract stays active so the
+// demo-overlay panel renders over the match (state is CA_CONNECTED then).
+qboolean            WiredAttract_IsDemoOverlayActive( void );
 
 // ── completion callbacks (called from engine when content finishes) ───
 qboolean WiredAttract_OnDemoCompleted( void );      // qtrue = attract handled it

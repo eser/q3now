@@ -6,7 +6,7 @@
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
 #include "../qcommon/crash.h"
-#ifndef DEDICATED
+#ifndef HEADLESS
 #include "../client/client.h"
 #endif
 #include "win_local.h"
@@ -18,7 +18,6 @@
 #include <io.h>
 #include <time.h>
 #include <dbghelp.h>
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 
@@ -26,7 +25,7 @@ LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 WinVars_t	g_wv;
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 
 /*
 ==================
@@ -60,7 +59,7 @@ void Sys_BeginProfiling( void ) {
 	// this is just used on the mac build
 }
 
-#endif // !DEDICATED
+#endif // !HEADLESS
 
 /*
 =============
@@ -77,7 +76,7 @@ void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *error, ... ) {
 	vsnprintf( text, sizeof( text ), error, argptr );
 	va_end( argptr );
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	CL_Shutdown( text, qtrue );
 #endif
 
@@ -85,11 +84,10 @@ void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *error, ... ) {
 	Conbuf_AppendText( text );
 	Conbuf_AppendText( "\n" );
 
-	/* Sys_SetErrorText handles platform-appropriate user surfacing:
-	 *   - Dedicated: stderr only (no GUI dialog blocking unattended servers).
-	 *   - Client: stderr + MessageBox (blocks until user clicks OK; double-
-	 *     click users without a terminal still see the error).
-	 * After it returns we exit cleanly. */
+	/* The fatal error has already gone to qconsole (the SEV_FATAL Com_Log
+	 * above) and the console buffer. Sys_SetErrorText surfaces it to stderr
+	 * for both client and dedicated — no GUI dialog. After it returns we exit
+	 * cleanly. */
 	Sys_SetErrorText( text );
 
 	timeEndPeriod( 1 );
@@ -298,10 +296,10 @@ const char *Sys_Pwd( void )
 
 /*
 ==============
-Sys_DefaultBasePath
+Sys_DefaultInstallPath
 ==============
 */
-const char *Sys_DefaultBasePath( void )
+const char *Sys_DefaultInstallPath( void )
 {
 	return Sys_Pwd();
 }
@@ -594,12 +592,11 @@ Platform-dependent event handling
 */
 void Sys_SendKeyEvents( void )
 {
-#ifndef DEDICATED
-	if ( !com_dedicated->integer )
-		HandleEvents();
-	else
-#endif
+#ifndef HEADLESS
+	HandleEvents();
+#else
 	HandleConsoleEvents();
+#endif
 }
 
 
@@ -801,8 +798,8 @@ JSON crash report plus a minidump.
 */
 static LONG WINAPI ExceptionFilter( struct _EXCEPTION_POINTERS *ExceptionInfo )
 {
-#ifndef DEDICATED
-	if ( com_dedicated->integer == 0 ) {
+#ifndef HEADLESS
+	{
 		extern cvar_t *com_cl_running;
 		if ( com_cl_running  && com_cl_running->integer ) {
 			// assume we can restart client module
@@ -908,12 +905,12 @@ void Sys_InstallCrashHandler( void )
 }
 
 
-#ifdef DEDICATED
+#ifdef HEADLESS
 /*
 ==================
-main (console-subsystem entry for wired-ded)
+main (console-subsystem entry for wired-headless)
 
-The dedicated server builds as a Windows console-subsystem binary
+The headless server builds as a Windows console-subsystem binary
 (see CMakeLists.txt EXE_TYPE_DED). The console-subsystem entry point
 is main(), not WinMain(). Bridge to WinMain so the body below stays
 single-source — most of WinMain is platform-init that's identical
@@ -954,12 +951,12 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	HANDLE hProcess;
 	DWORD dwPriority;
 
-#ifndef DEDICATED
-	/* Phase 2 of Windows-console modernization (2026-05-05): reattach to
+#ifndef HEADLESS
+	/* Reattach to
 	 * the parent console when this GUI-subsystem binary is launched from
 	 * a terminal so stdout/stderr/stdin are usable. No-op when there's
-	 * no parent console (double-click case). Dedicated is console
-	 * subsystem (phase 1) and doesn't need this. */
+	 * no parent console (double-click case). Dedicated is a console
+	 * subsystem and doesn't need this. */
 	Sys_AttachParentConsole();
 #endif
 
@@ -1007,7 +1004,7 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 		// _controlfp( _PC_24, _MCW_PC );
 		// _controlfp( -1, _MCW_EM  ); // no exceptions, even if some crappy syscall turns them back on!
 
-#ifdef DEDICATED
+#ifdef HEADLESS
 		// run the game
 		Com_Frame( qfalse );
 #else

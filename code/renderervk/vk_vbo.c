@@ -3,9 +3,10 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"   // rilog-channel-mechanism Turn B — renderer.vk
 #include "vk.h"
-/* Phase 5: log channels */
-LOG_DECLARE_CHANNEL( ch_renderer, "renderer" );
+
+R_LOG_DECLARE_CHANNEL( rch_vk, "renderer.vk" );
 
 #ifdef USE_VBO
 
@@ -75,6 +76,78 @@ typedef struct vbo_s {
 
 static vbo_t world_vbo;
 
+// ── world batch-list contract (pre-pass decomposition seam) ─────────
+//
+// The producer/consumer seam between the surface→batch decomposition stage
+// (VBO_PrepareQueues — sorts the queued items and run-detects them into
+// device-local merged index runs + a host-visible soft-buffer remainder) and the
+// draw stage (VBO_RenderIBOItems). Today the decomposition runs in-pass and the
+// draw consumes its output directly; this struct names that output as an
+// engine-owned contract so the decomposition can later be hoisted to a pre-pass
+// (and ultimately a GPU compute) stage without the draw stage changing how it
+// reads the batch list. Execution order is untouched here — only the data
+// hand-off is explicit.
+//
+// The contract is a per-VIEW ARRAY, not a single scalar. The producer
+// APPENDS one entry per publish (one per shader batch, sub-split per unique
+// lightstyle signature); the consumer reads the LAST-published entry (which is
+// always its own, since publish→consume is paired within each batch before the
+// next publish). This removes the "single reused struct" blocker so a later pass can
+// pre-fill the whole view's batch list up front, before the in-pass walk. The
+// reset is per-view (VBO_BeginView at RB_DrawSurfs entry).
+//
+// The run array aliases world_vbo.ibo_items (same Hunk allocation, sized
+// (numStaticIndexes / MIN_IBO_RUN) + 1), which VBO_PrepareQueues OVERWRITES each
+// batch — so today every entry's `runs` pointer aliases the same live buffer,
+// valid only at its own consume (parity-exact for the read-last access pattern).
+// A future change will give each pre-built batch its own runs storage.
+typedef struct worldBatchList_s {
+	const ibo_item_t *runs;        // device-local merged index runs (== world_vbo.ibo_items)
+	int               runCount;    // number of valid runs
+	uint32_t          softIndexes; // host-visible remainder: total indexes
+	uint32_t          softOffset;  // host-visible remainder: first-index offset
+} worldBatchList_t;
+
+// Generous fixed bound: observed ~76 VBO shader batches per view; lightstyle
+// sub-splits multiply that modestly. 4096 is >50× headroom (~128 KB static). On
+// overflow the last slot is reused (never OOB) — see VBO_PublishBatchList.
+#define MAX_WORLD_BATCHES 4096
+
+static worldBatchList_t world_batches[ MAX_WORLD_BATCHES ];
+static int              world_batch_count;   // entries published this view
+
+// Reset the per-view batch-list contract. Called at RB_DrawSurfs entry (once per
+// view: main + each portal/mirror + the screenmap duplicate each get their own).
+// Clears the count so the producer appends from 0; the draw consumes the last-
+// published entry per batch.
+void VBO_BeginView( void )
+{
+	world_batch_count = 0;
+}
+
+// Publish one decomposition output into the batch-list array. Called at the tail
+// of every decomposition pass (VBO_PrepareQueues / VBO_PrepareSubqueue): the draw
+// stage reads the last-appended entry rather than reaching into world_vbo
+// internals. Appends; on overflow reuses the final slot (clamped, never OOB).
+static void VBO_PublishBatchList( void )
+{
+	const vbo_t      *vbo = &world_vbo;
+	worldBatchList_t *bl;
+	int               idx = world_batch_count;
+
+	if ( idx >= MAX_WORLD_BATCHES ) {
+		idx = MAX_WORLD_BATCHES - 1;   // clamp — never index out of range
+	} else {
+		world_batch_count = idx + 1;
+	}
+
+	bl = &world_batches[ idx ];
+	bl->runs        = vbo->ibo_items;
+	bl->runCount    = vbo->ibo_items_count;
+	bl->softIndexes = vbo->soft_buffer_indexes;
+	bl->softOffset  = vbo->soft_buffer_offset;
+}
+
 void VBO_Cleanup( void );
 
 static qboolean isStaticRGBgen( colorGen_t cgen )
@@ -82,12 +155,12 @@ static qboolean isStaticRGBgen( colorGen_t cgen )
 	switch ( cgen )
 	{
 		case CGEN_BAD:
-		case CGEN_IDENTITY_LIGHTING:	// full white (linear pipeline; was 0.5×white pre-6B3'-a)
+		case CGEN_IDENTITY_LIGHTING:	// full white (linear pipeline)
 		case CGEN_IDENTITY:				// always (1,1,1,1)
 		case CGEN_ENTITY:				// grabbed from entity's modulate field
 		case CGEN_ONE_MINUS_ENTITY:		// grabbed from 1 - entity.modulate
 		case CGEN_EXACT_VERTEX:			// tess.vertexColors
-		case CGEN_VERTEX:				// tess.vertexColors (verbatim; was halved pre-6B3'-a)
+		case CGEN_VERTEX:				// tess.vertexColors (verbatim)
 		case CGEN_ONE_MINUS_VERTEX:
 		// case CGEN_WAVEFORM:			// programmatically generated
 		case CGEN_LIGHTING_DIFFUSE:
@@ -480,6 +553,96 @@ static void initItem( vbo_item_t *item )
 }
 
 
+// Read a surface's vboItemIndex (0 if not a static VBO item).
+// vboItemIndex sits at a different struct offset per surface type, so dispatch on
+// the leading surfaceType (always the first field of every surf data struct).
+static int VBO_SurfItemIndex( const msurface_t *sf )
+{
+	switch ( *(const surfaceType_t *)sf->data ) {
+		case SF_FACE:      return ((const srfSurfaceFace_t *)sf->data)->vboItemIndex;
+		case SF_TRIANGLES: return ((const srfTriangles_t   *)sf->data)->vboItemIndex;
+#ifdef USE_VBO_GRID
+		case SF_GRID:      return ((const srfGridMesh_t    *)sf->data)->vboItemIndex;
+#endif
+		default:           return 0;
+	}
+}
+
+
+// Bake the static surfaceIndex↔vboItemIndex map + per-vboItem
+// static sort-key data into vk.* host tables, map-load lifetime (ri.Hunk_Alloc,
+// h_low). Called at the tail of R_BuildWorldVBO where every static surface carries
+// its final vboItemIndex. PURE DATA: nobody consumes these yet; this
+// only builds + self-verifies (_DEBUG round-trip identity). The forward map is a
+// direct per-surface read (vboItemIndex is stored on the surface struct regardless
+// of the build-time shader sort), so there is NO index-space hazard.
+void VBO_BuildSurfaceMap( const msurface_t *surf, int surfCount, int numStaticSurfaces )
+{
+	int i, item;
+
+	// Free any prior map (vid_restart / map reload rebuilds via fresh Hunk).
+	vk.cullSurfToItem  = NULL;
+	vk.cullItemToSurf  = NULL;
+	vk.cullItemSortKey = NULL;
+	vk.cullVboItemCount = 0;
+
+	if ( surfCount <= 0 || numStaticSurfaces <= 0 )
+		return;
+
+	// Forward: surfaceIndex (0-based into surfaces[]) → vboItemIndex (0 = not a VBO item).
+	vk.cullSurfToItem  = ri.Hunk_Alloc( surfCount * sizeof( uint32_t ), h_low );
+	// Inverse + per-item static key: indexed by vboItemIndex (1-based; slot 0 unused).
+	vk.cullItemToSurf  = ri.Hunk_Alloc( ( numStaticSurfaces + 1 ) * sizeof( uint32_t ), h_low );
+	vk.cullItemSortKey = ri.Hunk_Alloc( ( numStaticSurfaces + 1 ) * sizeof( uint32_t ), h_low );
+	vk.cullVboItemCount = numStaticSurfaces;
+
+	for ( i = 0; i < surfCount; i++ ) {
+		item = VBO_SurfItemIndex( &surf[i] );
+		vk.cullSurfToItem[i] = (uint32_t)item;
+		if ( item > 0 && item <= numStaticSurfaces ) {
+			vk.cullItemToSurf[item] = (uint32_t)i;
+			// Static sort-key components: (sortedIndex<<16)|fogIndex. The per-frame
+			// entity + dlight bits are NOT baked (the batch build adds them at
+			// runtime — under USE_PMLIGHT they collapse to entity=WORLD, dlight=0).
+			vk.cullItemSortKey[item] =
+				( (uint32_t)( surf[i].shader->sortedIndex & 0xFFFF ) << 16 ) |
+				( (uint32_t)( surf[i].fogIndex & 0xFFFF ) );
+		}
+	}
+
+	R_LOG( rch_vk, SEV_INFO, "VBO: baked surface map (%d surfaces, %d VBO items)\n",
+		surfCount, numStaticSurfaces );
+
+#if defined(_DEBUG)
+	// Round-trip identity self-check: every static surface's
+	// forward map round-trips through the inverse, and the per-item key matches a
+	// fresh read. Data-identity only — no render path to diff.
+	{
+		int mismatch = 0, firstBad = -1, items = 0;
+		for ( i = 0; i < surfCount; i++ ) {
+			uint32_t it = vk.cullSurfToItem[i];
+			if ( it == 0 )
+				continue;   // non-VBO surface — sentinel, correct
+			items++;
+			if ( it > (uint32_t)numStaticSurfaces || vk.cullItemToSurf[it] != (uint32_t)i ) {
+				mismatch++;
+				if ( firstBad < 0 ) firstBad = i;
+			}
+		}
+		if ( mismatch ) {
+			R_LOG( rch_vk, SEV_WARN,
+				"VBO map identity FAIL: %d/%d items mismatch (first surf=%d)\n",
+				mismatch, items, firstBad );
+		} else {
+			R_LOG( rch_vk, SEV_INFO,
+				"VBO map identity OK: %d VBO items round-trip (of %d surfaces), 0 mismatch\n",
+				items, surfCount );
+		}
+	}
+#endif
+}
+
+
 void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 {
 	vbo_t *vbo = &world_vbo;
@@ -505,7 +668,7 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 	// lightstyle signatures form separate VBO sub-groups, each drawn with its own UBO.
 
 	if ( glConfig.numTextureUnits < 3 ) {
-		ri.Log( SEV_WARN, "... not enough texture units for VBO\n" );
+		R_LOG( rch_vk, SEV_WARN, "... not enough texture units for VBO\n" );
 		return;
 	}
 
@@ -553,7 +716,7 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 #endif // USE_VBO_GRID
 	}
 	if ( numStaticSurfaces == 0 ) {
-		ri.Log( SEV_INFO, "...no static surfaces for VBO\n" );
+		R_LOG( rch_vk, SEV_INFO, "...no static surfaces for VBO\n" );
 		return;
 	}
 
@@ -675,9 +838,9 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 	vk_alloc_vbo( vbo->vbo_buffer, vbo->vbo_size );
 
 	//if ( err == GL_OUT_OF_MEMORY )
-	//	ri.Log( SEV_WARN, "%s: out of memory\n", __func__ );
+	//	R_LOG( rch_vk, SEV_WARN, "%s: out of memory\n", __func__ );
 	//else
-	//	ri.Log( SEV_ERROR, "%s: error %i\n", __func__, err );
+	//	R_LOG( rch_vk, SEV_ERROR, "%s: error %i\n", __func__, err );
 #if 0
 	// reset vbo markers
 	for ( i = 0, sf = surf; i < surfCount; i++, sf++ ) {
@@ -705,6 +868,12 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 
 	// release GPU resources
 	//VBO_Cleanup();
+
+	// Bake the static surfaceIndex↔vboItemIndex map + per-vboItem
+	// static sort-key data, now that every static surface carries its final
+	// vboItemIndex and vbo->items[] holds the run extents. Pure data, map-load
+	// lifetime; consumed by a later stage, not by any current render path.
+	VBO_BuildSurfaceMap( surf, surfCount, numStaticSurfaces );
 }
 
 
@@ -798,6 +967,10 @@ void VBO_ClearQueue( void )
 {
 	vbo_t *vbo = &world_vbo;
 	vbo->items_queue_count = 0;
+	// NB: do NOT reset the per-view batch-list array here — VBO_ClearQueue fires
+	// per shader batch (at each VBO surface-run start), but the contract array
+	// accumulates across the whole view. The array resets per-view in
+	// VBO_BeginView (RB_DrawSurfs entry).
 }
 
 
@@ -841,30 +1014,64 @@ static void VBO_AddItemRangeToIBOBuffer( int offset, int length )
 }
 
 
-void VBO_RenderIBOItems( void )
+void VBO_RenderIBOItems( uint32_t firstInstance )
 {
-	const vbo_t *vbo = &world_vbo;
+	// firstInstance selects the per-entity matrix storage-buffer slot on the
+	// r_entitySSBO path (== gl_InstanceIndex; 0 on the OFF path, where it is
+	// ignored — the world VBO surfaces read ubo.mvp). Threaded into every per-run
+	// and the soft draw so one batch's runs share its slot.
+	//
+	// Consume the batch-list contract published by the decomposition stage
+	// (VBO_PrepareQueues / VBO_PrepareSubqueue). The draw stage reads the last-
+	// appended entry of the per-view array (publish→consume is paired
+	// within each batch before the next publish, so the last entry is always this
+	// draw's own).
+	const worldBatchList_t *bl;
+
+	if ( world_batch_count == 0 )
+		return;
+
+	bl = &world_batches[ world_batch_count - 1 ];
+
+#if defined(_DEBUG)
+	// Parity self-check: the last-published entry must still match world_vbo's live
+	// decomposition output at consume time.
+	if ( bl->runs != world_vbo.ibo_items ||
+	     bl->runCount != world_vbo.ibo_items_count ||
+	     bl->softIndexes != world_vbo.soft_buffer_indexes ||
+	     bl->softOffset != world_vbo.soft_buffer_offset )
+	{
+		R_LOG( rch_vk, SEV_WARN,
+			"world batch-list parity drift: contract(runs=%p n=%d soft=%u@%u) vs live(n=%d soft=%u@%u)\n",
+			(const void *)bl->runs, bl->runCount, bl->softIndexes, bl->softOffset,
+			world_vbo.ibo_items_count, world_vbo.soft_buffer_indexes, world_vbo.soft_buffer_offset );
+	}
+#endif
 
 	// from device-local memory
-	if ( vbo->ibo_items_count )
+	if ( bl->runCount )
 	{
 		vk_bind_index_buffer( vk.vbo.vertex_buffer, tess.shader->iboOffset );
 
-		for ( int i = 0; i < vbo->ibo_items_count; i++ )
+		for ( int i = 0; i < bl->runCount; i++ )
 		{
-			vk_draw_indexed( vbo->ibo_items[ i ].length, vbo->ibo_items[ i ].offset );
+			vk_draw_indexed( bl->runs[ i ].length, bl->runs[ i ].offset, firstInstance );
 		}
 	}
 
 	// from host-visible memory
-	if ( vbo->soft_buffer_indexes )
+	if ( bl->softIndexes )
 	{
-		vk_bind_index_buffer( vk.cmd->vertex_buffer, vbo->soft_buffer_offset );
+		vk_bind_index_buffer( vk.cmd->vertex_buffer, bl->softOffset );
 
-		vk_draw_indexed( vbo->soft_buffer_indexes, 0 );
+		vk_draw_indexed( bl->softIndexes, 0, firstInstance );
 	}
 }
 
+
+#if defined(_DEBUG)
+static void VBO_ShadowVerifyDecompose( void );   // defined below
+#endif
 
 void VBO_PrepareQueues( void )
 {
@@ -900,7 +1107,197 @@ void VBO_PrepareQueues( void )
 		}
 		i += item_run;
 	}
+
+	VBO_PublishBatchList();
+
+#if defined(_DEBUG)
+	// Shadow-verify the decomposition. After the live decompose
+	// above published the authoritative entry, re-run an INDEPENDENT copy of the
+	// decomposition over the SAME queue and diff-assert byte-identical. Read-only:
+	// the shadow writes nothing live. This proves the standalone decompose
+	// (VBO_DecomposeShadow) — the function a later stage will feed a GPU-derived queue into —
+	// reproduces the live runs exactly. softOffset is EXCLUDED (a per-frame ring-
+	// allocator artifact, not a decomposition property).
+	VBO_ShadowVerifyDecompose();
+#endif
 }
+
+
+#if defined(_DEBUG)
+// Standalone, side-effect-free decomposition. Re-runs the
+// EXACT VBO_PrepareQueues logic (qsort_int → run_length / MIN_IBO_RUN run-merge →
+// device runs + soft accounting) over a caller-supplied queue, writing ONLY into
+// the caller's shadow output. Reads world_vbo.items[] (static, read-only). This is
+// the reusable decompose a later stage drives from the GPU visible-id list. Mirrors
+// vk_vbo.c VBO_PrepareQueues byte-for-byte; keep them in lockstep.
+//
+// out_runs must hold at least (count) ibo_item_t (worst case: every item its own
+// short run routes to soft, OR alternating → at most count device runs). The
+// caller sizes it; we clamp defensively.
+typedef struct vboShadowResult_s {
+	ibo_item_t *runs;        // caller-owned device-run array
+	int         runCap;      // capacity of runs[]
+	int         runCount;    // device runs produced
+	uint32_t    softIndexes; // soft-buffer total indexes (offset is a live-ring artifact, not reproduced)
+	qboolean    overflow;    // runs[] capacity exceeded (shadow inconclusive)
+} vboShadowResult_t;
+
+static void VBO_DecomposeShadow( int *queue, int count, vboShadowResult_t *out )
+{
+	const vbo_t *vbo = &world_vbo;
+	int i, item_run, index_run, n;
+
+	out->runCount    = 0;
+	out->softIndexes = 0;
+	out->overflow    = qfalse;
+
+	if ( count <= 0 )
+		return;
+
+	// Mirror VBO_PrepareQueues: terminate run + numeric sort by vboItemIndex.
+	queue[ count ] = 0;
+	if ( count > 1 )
+		qsort_int( queue, count - 1 );
+
+	i = 0;
+	while ( i < count )
+	{
+		// run_length over the SAME queue + the SAME static items[] num_indexes.
+		int cnt = 0, run = 1, j;
+		for ( j = i; j < count; j++, run++ ) {
+			cnt += vbo->items[ queue[j] ].num_indexes;
+			if ( queue[j] + 1 != queue[j + 1] )
+				break;
+		}
+		item_run = run;
+		index_run = cnt;
+
+		if ( index_run < MIN_IBO_RUN ) {
+			for ( n = 0; n < item_run; n++ )
+				out->softIndexes += (uint32_t)vbo->items[ queue[ i + n ] ].num_indexes;
+		} else {
+			const vbo_item_t *start = vbo->items + queue[ i ];
+			const vbo_item_t *end   = vbo->items + queue[ i + item_run - 1 ];
+			if ( out->runCount >= out->runCap ) { out->overflow = qtrue; return; }
+			out->runs[ out->runCount ].offset = start->index_offset;
+			out->runs[ out->runCount ].length = ( end->index_offset - start->index_offset ) + end->num_indexes;
+			out->runCount++;
+		}
+		i += item_run;
+	}
+}
+
+// Diff the shadow decomposition against the live one just
+// published. Re-runs VBO_DecomposeShadow over a COPY of the live queue (so the
+// shadow sort can't perturb the live queue) and asserts runCount + each run
+// {offset,length} + softIndexes match. softOffset excluded (ring artifact). Logs
+// the first divergence precisely. Throttled-quiet on success.
+// Scratch for VBO_ShadowVerifyDecompose. File-scope (not function-local) so
+// VBO_ReleaseShadowVerifyStatics can NULL them on renderer teardown.
+static int         s_svd_capacity  = 0;
+static int        *s_queueCopy     = NULL;   // count+1 (terminator)
+static ibo_item_t *s_runs          = NULL;   // device-run scratch
+
+static void VBO_ShadowVerifyDecompose( void )
+{
+	static int        s_okLogged = 0;
+	vboShadowResult_t  res;
+	const worldBatchList_t *live;
+	int                count = world_vbo.items_queue_count;
+	int                i;
+
+	if ( world_batch_count == 0 )
+		return;   // nothing published this batch
+	live = &world_batches[ world_batch_count - 1 ];
+
+	// Grow scratch to the queue size (worst case device runs <= count). ri.Malloc
+	// (persistent heap), NOT Hunk_AllocateTempMemory: stashing a temp-hunk pointer in
+	// a static and never freeing it breaks the hunk's LIFO invariant — a later
+	// Hunk_FreeTempMemory (R_BuildWorldVBO on a map reload) rewinds past it and the
+	// next free corrupts the zone (Z_Free without ZONEID at the map transition).
+	// The ri.Malloc block is TAG_RENDERER, so it is freed on renderer teardown by
+	// Z_FreeTags(TAG_RENDERER) (map-transition / vid_restart / shutdown); the statics
+	// holding it are NULL'd there by VBO_ReleaseShadowVerifyStatics so the lazy-grow
+	// below never re-frees a stale pointer. Grow-only between teardowns (freed-on-grow).
+	if ( count + 1 > s_svd_capacity ) {
+		if ( s_queueCopy ) ri.Free( s_queueCopy );
+		if ( s_runs )      ri.Free( s_runs );
+		s_svd_capacity = count + 1;
+		s_queueCopy = ri.Malloc( s_svd_capacity * sizeof( int ) );
+		s_runs      = ri.Malloc( s_svd_capacity * sizeof( ibo_item_t ) );
+	}
+
+	// Copy the live (already-decomposed, so still sorted) queue. Re-running the
+	// shadow sort over a copy yields the identical order and proves the sort too.
+	for ( i = 0; i < count; i++ )
+		s_queueCopy[i] = world_vbo.items_queue[i];
+
+	res.runs   = s_runs;
+	res.runCap = s_svd_capacity;
+	VBO_DecomposeShadow( s_queueCopy, count, &res );
+
+	if ( res.overflow ) {
+		R_LOG( rch_vk, SEV_WARN, "shadow: run scratch overflow (count=%d) — inconclusive\n", count );
+		return;
+	}
+
+	// Diff vs live: runCount, each run {offset,length}, softIndexes. (softOffset
+	// excluded — live-ring artifact.)
+	if ( res.runCount != live->runCount ) {
+		R_LOG( rch_vk, SEV_WARN,
+			"shadow DRIFT: runCount shadow=%d live=%d (queue=%d soft s=%u/l=%u)\n",
+			res.runCount, live->runCount, count, res.softIndexes, live->softIndexes );
+		return;
+	}
+	if ( res.softIndexes != live->softIndexes ) {
+		R_LOG( rch_vk, SEV_WARN,
+			"shadow DRIFT: softIndexes shadow=%u live=%u (queue=%d runCount=%d)\n",
+			res.softIndexes, live->softIndexes, count, res.runCount );
+		return;
+	}
+	for ( i = 0; i < res.runCount; i++ ) {
+		if ( res.runs[i].offset != live->runs[i].offset ||
+		     res.runs[i].length != live->runs[i].length ) {
+			R_LOG( rch_vk, SEV_WARN,
+				"shadow DRIFT: run[%d] shadow={off=%d len=%d} live={off=%d len=%d} (queue=%d)\n",
+				i, res.runs[i].offset, res.runs[i].length,
+				live->runs[i].offset, live->runs[i].length, count );
+			return;
+		}
+	}
+
+	// Log the first few OK batches AND, separately, the first OK batch that actually
+	// exercised the device-run (MIN_IBO_RUN coalescing) path, so the verify proves
+	// both the all-soft and the device-run cases match (not just the first 5 small
+	// batches, which tend to be all-soft).
+	{
+		static qboolean s_deviceRunLogged = qfalse;
+		if ( res.runCount > 0 && !s_deviceRunLogged ) {
+			R_LOG( rch_vk, SEV_INFO,
+				"shadow decompose OK (device-run path): runCount=%d softIndexes=%u (queue=%d), byte-identical\n",
+				res.runCount, res.softIndexes, count );
+			s_deviceRunLogged = qtrue;
+		} else if ( s_okLogged < 5 ) {
+			R_LOG( rch_vk, SEV_INFO,
+				"shadow decompose OK: runCount=%d softIndexes=%u (queue=%d), byte-identical\n",
+				res.runCount, res.softIndexes, count );
+			s_okLogged++;
+		}
+	}
+}
+
+// Free + NULL the shadow-verify scratch statics (TAG_RENDERER via ri.Malloc) and zero
+// the cap, on renderer teardown — same lifetime fix as R_ReleaseWorldCullStatics /
+// vk_shadow_snap_release_cpu. Z_FreeTags(TAG_RENDERER) reclaims the block on teardown;
+// nulling the statics here stops the next map's lazy-grow re-freeing the stale pointer.
+// Idempotent. _DEBUG-only (so are the statics + VBO_ShadowVerifyDecompose).
+void VBO_ReleaseShadowVerifyStatics( void )
+{
+	if ( s_queueCopy ) { ri.Free( s_queueCopy ); s_queueCopy = NULL; }
+	if ( s_runs )      { ri.Free( s_runs );      s_runs      = NULL; }
+	s_svd_capacity = 0;
+}
+#endif // _DEBUG
 
 
 // Process a sub-range of the sorted queue into IBO/soft buffers.
@@ -936,6 +1333,8 @@ void VBO_PrepareSubqueue( int start, int count )
 		}
 		i += item_run;
 	}
+
+	VBO_PublishBatchList();
 }
 
 

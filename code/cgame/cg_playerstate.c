@@ -8,7 +8,6 @@
 // when the snapshot transitions like all the other entities
 
 #include "cg_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 /*
@@ -175,8 +174,14 @@ void CG_Respawn( void ) {
 	// no error decay on player movement
 	cg.thisFrameTeleport = qtrue;
 
-	// display weapons available
-	cg.weaponSelectTime = cg.time;
+	// spawn / respawn / map_restart are NOT weapon switches: clear the
+	// switch-feedback timestamp so the V2 bottom-center weapon carousel does NOT
+	// flash on at match entry or after a respawn. Resetting to 0 (rather than
+	// leaving it) is deliberate — otherwise a value set just before death stays
+	// latched and could re-trigger the carousel on respawn. The gate treats
+	// weaponSelectTime <= 0 as "never switched". Only the genuine switch sites
+	// (CG_WeaponSelect + next/prev/use/out-of-ammo + autoswitch-on-pickup) re-arm it.
+	cg.weaponSelectTime = 0;
 
 	// select the weapon the server says we are using
 	cg.weaponSelect = cg.snap->ps.weapon;

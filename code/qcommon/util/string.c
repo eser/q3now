@@ -6,7 +6,6 @@
 #endif
 
 #include "q_shared.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 int Com_Split( char *in, char **out, int outsz, int delim )
@@ -157,7 +156,7 @@ int QDECL Com_sprintf( char *dest, int size, const char *fmt, ...)
 
 	if ( len >= size )
 	{
-		Com_Log( SEV_INFO, LOG_CH(ch_system), S_COLOR_YELLOW "Com_sprintf: overflow of %i in %i\n", len, size );
+		Com_Log( SEV_WARN, LOG_CH(ch_system), "Com_sprintf: overflow of %i in %i\n", len, size );
 #if defined(_DEBUG) && defined(_WIN32)
 		DebugBreak();
 #endif

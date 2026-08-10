@@ -147,7 +147,7 @@ void CG_RegisterRailParticleClasses( void ) {
 	cls.coneHalfAngle      = 0.0f;
 	cls.lifetimeMean       = 1.5f;
 	cls.lifetimeJitter     = 0.0f;
-	// Phase 6: 16-step grey ramp matching CPU's per-particle
+	// 16-step grey ramp matching CPU's per-particle
 	// randomness. CPU original: 255 - (rand() & 15) * 8 →
 	// [255, 247, 239, ..., 143, 135] (16 distinct values).
 	// Normalize to float [0.529, 1.0]; each step = 8/255 ≈ 0.0314.
@@ -344,7 +344,7 @@ void CG_RegisterLightningParticleClasses( void ) {
 ==========================
 CG_RegisterPushParticleClasses
 
-Phase 5T: register the sparkle-stream particle class consumed by
+Register the sparkle-stream particle class consumed by
 the PTRAIL_PUSH def-table entry. Called once from
 CG_RegisterGraphics (cg_main.c) after the particle shader is
 bound and before CG_RegisterPlayerTrailDefs wires the handle into
@@ -356,7 +356,7 @@ from the resolved per-trail color × the (capped) fade alpha; the
 class itself stores a neutral-white palette that the tint
 multiplies.
 
-Class parameters mirror the Phase 5Q jumppad_stream verbatim — only
+Class parameters mirror the jumppad_stream verbatim — only
 the registration function and class-name string change. Behaviour
 tweaks (velocity-scaled emit count, alpha ceiling) live in the
 def table and at the render-side call sites, not in the class.
@@ -403,4 +403,184 @@ void CG_RegisterPushParticleClasses( void ) {
 
 	cgs.media.pushStreamClass =
 		(qhandle_t)CG_RegisterParticleClass( "push_stream", &cls );
+}
+
+
+/*
+==========================
+CG_RegisterRocketTrailParticleClass
+
+Rocket smoke-trail as a GPU-ring EMIT_PATH stream (MIG-trail-1), the A/B
+replacement for CG_RocketTrail's LE_ smoke-puff for-loop (cg_weapons.c). Params
+mirror the CPU CG_AddScaleFade smoke-puff EXACTLY for zero-feature-loss:
+  - ALPHA blend (renderFlags 0 — NOT additive; smokePuffShader is an alpha sprite).
+  - zero velocity (VEL_PURE_CUBE, cubeJitter 0) → hangs in place like vel={0,0,0}.
+  - no gravity / drag.
+  - lifetime 1.8 s (= wiTrailTime 1800).
+  - size 8 → 56 linear (CPU radius*(1-c)+8 with radius 48: c=1→8, c=0→56).
+  - alpha 0.33 → 0 linear (CPU shaderRGBA[3]=0xff*c*0.33; base 0.33, fade to 0).
+  - single sprite (frameCount 0 — no flipbook).
+==========================
+*/
+void CG_RegisterRocketTrailParticleClass( void ) {
+	particleClass_t cls;
+
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = cgs.media.smokePuffShader;  // same sprite as the LE_ path
+	cls.renderFlags        = 0;                          // ALPHA blend (not PRIM_FLAG_ADDITIVE)
+	cls.emitMode           = EMIT_PATH;                  // uniform along the travelled segment
+	cls.scatterShape       = SCATTER_NONE;
+	cls.scatterMagnitude   = 0.0f;
+	cls.velocityShape      = VEL_PURE_CUBE;             // zero velocity → hang in place
+	cls.axialSpeed         = 0.0f;
+	cls.cubeJitter         = 0.0f;
+	cls.coneHalfAngle      = 0.0f;
+	cls.lifetimeMean       = 1.8f;                      // 1800 ms (wiTrailTime)
+	cls.lifetimeJitter     = 0.0f;
+	cls.paletteCount       = 1;
+	cls.colorPalette[0][0] = 1.0f;
+	cls.colorPalette[0][1] = 1.0f;
+	cls.colorPalette[0][2] = 1.0f;
+	cls.colorPalette[0][3] = 0.33f;                     // base alpha 0.33
+	cls.colorEndMult[0]    = 1.0f;
+	cls.colorEndMult[1]    = 1.0f;
+	cls.colorEndMult[2]    = 1.0f;
+	cls.colorEndMult[3]    = 0.0f;                      // alpha → 0 over lifetime
+	cls.sizeStart          = 8.0f;                      // radius*(1-c)+8 at c=1
+	cls.sizeEnd            = 56.0f;                     // radius(48)+8 at c=0
+	cls.gravityScale       = 0.0f;                      // no fall
+	cls.drag               = 0.0f;
+
+	cgs.media.rocketSmokeClass =
+		(qhandle_t)CG_RegisterParticleClass( "rocket_smoke", &cls );
+}
+
+
+/*
+==========================
+CG_RegisterGibTrailParticleClass
+
+MIG-trail-2: GPU-ring class mirroring the CPU CG_BloodTrail drift-sprites
+(CG_SmokePuff + LE_FALL_SCALE_FADE + trDelta[2]=40). The gib BODY itself
+(LE_FRAGMENT physics/collision/bounce) stays CPU; only the per-frame
+drift-sprites migrate. GPU single path (W-51 — legacy LE_ loop retired).
+
+Look match (vs CG_AddFallScaleFade, radius 20, lifetime 2000 ms):
+  - bloodTrailShader, ALPHA blend (renderFlags 0).
+  - EMIT_PATH along the travelled trajectory segment.
+  - size 16 → 36 (CPU re->radius = radius*(1-c)+16 with radius 20: c=1→16, c=0→36).
+  - alpha 1.0 → 0 linear (CPU shaderRGBA[3]=0xff*c*color[3], color[3]=1 from
+    CG_SmokePuff a=1).
+  - LINEAR -Z drift 40 u over 2 s = velocityBias[2] -20 (NOT gravityScale —
+    CPU origin[2] = trBase[2] - (1-c)*trDelta[2], trDelta[2]=40: a constant
+    downward push reaching -40 at death, no acceleration).
+  - single sprite (frameCount 0 — no flipbook).
+==========================
+*/
+void CG_RegisterGibTrailParticleClass( void ) {
+	particleClass_t cls;
+
+	memset( &cls, 0, sizeof( cls ) );
+	cls.shader             = cgs.media.bloodTrailShader; // same sprite as the LE_ path
+	cls.renderFlags        = 0;                          // ALPHA blend (not PRIM_FLAG_ADDITIVE)
+	cls.emitMode           = EMIT_PATH;                  // uniform along the travelled segment
+	cls.scatterShape       = SCATTER_NONE;
+	cls.scatterMagnitude   = 0.0f;
+	cls.velocityShape      = VEL_PURE_CUBE;             // no scatter; bias supplies drift
+	cls.axialSpeed         = 0.0f;
+	cls.cubeJitter         = 0.0f;
+	cls.coneHalfAngle      = 0.0f;
+	cls.lifetimeMean       = 2.0f;                      // 2000 ms
+	cls.lifetimeJitter     = 0.0f;
+	cls.paletteCount       = 1;
+	cls.colorPalette[0][0] = 1.0f;
+	cls.colorPalette[0][1] = 1.0f;
+	cls.colorPalette[0][2] = 1.0f;
+	cls.colorPalette[0][3] = 1.0f;                      // base alpha 1.0
+	cls.colorEndMult[0]    = 1.0f;
+	cls.colorEndMult[1]    = 1.0f;
+	cls.colorEndMult[2]    = 1.0f;
+	cls.colorEndMult[3]    = 0.0f;                      // alpha → 0 over lifetime
+	cls.sizeStart          = 16.0f;                     // radius(20)*(1-c)+16 at c=1 = 16
+	cls.sizeEnd            = 36.0f;                     // radius(20)*(1-c)+16 at c=0 = 36
+	cls.gravityScale       = 0.0f;                      // drift is LINEAR (velocityBias), no accel
+	cls.drag               = 0.0f;
+	cls.velocityBias[2]    = -20.0f;                    // -Z drift 40 u over 2 s lifetime
+
+	cgs.media.gibTrailClass =
+		(qhandle_t)CG_RegisterParticleClass( "blood_trail", &cls );
+}
+
+
+/*
+==========================
+CG_RegisterExplosionParticleClasses
+
+Rocket-explosion fire core as a GPU-ring flipbook (Track-C Stage-2 beat 1).
+The eight rlboom_1..8 frames (the same sequence the CPU rocketExplosion
+animmap played) become a frameCount-8 flipbook with sub-frame blend, so a
+single BURST particle at impact reads as the expanding fireball. One light
+core that stays put — the explosion grows through the flipbook frames, not
+motion. Emitted unconditionally from the PROJ_ROCKET impact (GPU single path,
+W-51 — the legacy LE_ sprite explosion is retired for rockets).
+==========================
+*/
+void CG_RegisterExplosionParticleClasses( void ) {
+	particleClass_t cls;
+	int i;
+
+	memset( &cls, 0, sizeof( cls ) );
+
+	// rlboom_1..8 — the bare texture path registers each PNG as an
+	// implicit shader (same convention as cgs.media.* model textures,
+	// e.g. cg_main.c "models/weaphits/kamikred"). frame 0 doubles as
+	// the static fallback for the frameCount<=1 ring path.
+	for ( i = 0; i < 8; i++ ) {
+		cls.frameShaders[i] =
+			trap_R_RegisterShader( va( "models/weaphits/rlboom/rlboom_%i", i + 1 ) );
+	}
+	cls.shader        = cls.frameShaders[0];
+	cls.frameCount    = 8;
+	cls.frameBlend    = 1;                 // silky sub-frame interpolation
+	cls.renderFlags   = PRIM_FLAG_ADDITIVE; // rlboom is additive (the renderer
+	                                        // re-derives blend from the frame-0
+	                                        // shader's stateBits regardless)
+
+	// One BURST particle at the impact point; the flipbook IS the
+	// explosion, so the core stays put (no scatter, no velocity).
+	cls.emitMode      = EMIT_POINT;
+	cls.scatterShape  = SCATTER_NONE;
+	cls.scatterMagnitude = 0.0f;
+	cls.velocityShape = VEL_AXIAL;
+	cls.axialSpeed    = 0.0f;
+	cls.cubeJitter    = 0.0f;
+
+	// Lifetime 1.0 s = the rocketExplosion duration (1000 ms). The ring
+	// advances frame = floor(age * 8) over [0,1] age, so the eight
+	// frames play across exactly the same 1 s the LE_ sprite did.
+	cls.lifetimeMean   = 1.0f;
+	cls.lifetimeJitter = 0.0f;
+
+	// Solid white palette — the additive rlboom texture carries its own
+	// fire colour; no per-particle tint (colorEndMult 1 = no fade-mult,
+	// the flipbook frames fade themselves).
+	cls.paletteCount     = 1;
+	cls.colorPalette[0][0] = 1.0f;
+	cls.colorPalette[0][1] = 1.0f;
+	cls.colorPalette[0][2] = 1.0f;
+	cls.colorPalette[0][3] = 1.0f;
+	cls.colorEndMult[0]  = 1.0f;
+	cls.colorEndMult[1]  = 1.0f;
+	cls.colorEndMult[2]  = 1.0f;
+	cls.colorEndMult[3]  = 1.0f;
+
+	// Size matches the legacy LE_ sprite scale (CG_AddSpriteExplosion radius
+	// ~30..42; the ring billboard half-extent is the radius, so ~36).
+	cls.sizeStart = 36.0f;
+	cls.sizeEnd   = 36.0f;     // constant — the frames do the growth
+	cls.gravityScale  = 0.0f;
+	cls.drag          = 0.0f;
+
+	cgs.media.explosionFireClass =
+		(qhandle_t)CG_RegisterParticleClass( "explosion_fire", &cls );
 }

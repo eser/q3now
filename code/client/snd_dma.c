@@ -14,7 +14,6 @@
 #include "snd_local.h"
 #include "snd_codec.h"
 #include "client.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 LOG_DECLARE_CHANNEL( ch_sound, "sound" );
 
@@ -28,29 +27,15 @@ static snd_stream_t *s_backgroundStream = NULL;
 static char s_backgroundLoop[MAX_QPATH];
 //static char		s_backgroundMusic[MAX_QPATH]; //TTimo: unused
 
-static byte		buffer2[ 0x10000 ]; // for muted painting
-
-byte			*dma_buffer2;
-
 // =======================================================================
 // Internal sound data & structures
 // =======================================================================
 
-// only begin attenuating sound volumes when outside the FULLVOLUME range
-#define		SOUND_FULLVOLUME	80
-
-#define		SOUND_ATTENUATE		0.0008f
-
-// linear fall-off: sounds fade linearly from full volume at 0 to silence
-// at SOUND_MAX_DIST. Enabled when s_linearFalloff is non-zero.
-#define		SOUND_MAX_DIST		1250.0f
-
+// Base one-shot volume, also scaled for announcer-channel sounds. The 3D
+// falloff / distance attenuation now lives in the engine (S_EngineConfigAttenuation).
 #define		MASTER_VOL			127
-#define		SPHERE_VOL			90
 
 channel_t   s_channels[MAX_CHANNELS];
-channel_t   loop_channels[MAX_CHANNELS];
-int			numLoopChannels;
 
 static		qboolean	s_soundStarted;
 static		qboolean	s_soundMuted;
@@ -63,6 +48,23 @@ static vec3_t		listener_axis[3];
 
 int			s_soundtime;		// sample PAIRS
 int   		s_paintedtime; 		// sample PAIRS
+
+// Window-focus mute state, driven by the platform focus events (not polled).
+// s_focusUnmuted is the mute decision the mixer reads: qtrue while the window
+// has focus, qfalse while it is unfocused. It is set once per focus transition
+// by S_FocusChanged, so the mixer reacts to the transition instead of re-deriving
+// from a window flag every mix. s_focusMuteStart records the s_soundtime sample
+// at which the most recent unfocus began, so the refocus flush can identify the
+// one-shot channels that were started during the unfocused window.
+//
+// s_focusEventsSeen guards the fallback: a platform that delivers focus events
+// (the SDL backend) drives s_focusUnmuted and gets the refocus flush, while a
+// platform that does not (the native Win32 backend, whose wndproc still owns
+// gw_active) leaves s_focusEventsSeen qfalse, and S_FocusUnmuted falls back to
+// the polled gw_active so that backend's behaviour is unchanged.
+static		qboolean	s_focusUnmuted = qtrue;	// qtrue = window focused
+static		qboolean	s_focusEventsSeen = qfalse;	// a focus event ever delivered
+static		int			s_focusMuteStart;		// s_soundtime when focus was lost
 
 // MAX_SFX may be larger than MAX_SOUNDS because
 // of custom player sounds
@@ -79,18 +81,15 @@ cvar_t		*s_show;
 static cvar_t *s_mixahead;
 static cvar_t *s_mixOffset;
 static cvar_t *s_linearFalloff;
-/* miniaudio backend cvars (task-3): registered for all platforms now that
- * miniaudio replaces the legacy ALSA/WASAPI/CoreAudio backends. The original
- * Linux-only ALSA s_device is superseded by the cross-platform one below. */
+/* miniaudio backend cvars: registered for all platforms now that miniaudio
+ * replaces the legacy ALSA/WASAPI/CoreAudio backends. The original Linux-only
+ * ALSA s_device is superseded by the cross-platform one below. */
 cvar_t		*s_device;
 cvar_t		*s_latency;
 cvar_t		*s_underruns;
 
 static loopSound_t	loopSounds[MAX_GENTITIES];
 static	channel_t	*freelist = NULL;
-
-int			s_rawend;
-portable_samplepair_t	s_rawsamples[MAX_RAW_SAMPLES];
 
 
 // ====================================================================
@@ -129,7 +128,10 @@ S_Base_SoundList
 =================
 */
 static void S_Base_SoundList( void ) {
-	static const char *type[4] = { "16bit", "adpcm", "daub4", "mulaw" };
+	/* Indexed by sfx->soundCompressionMethod; slots 2/3 are retired (were the
+	 * removed wavelet/mu-law paths) but kept as placeholders to preserve the
+	 * index alignment. Live methods: 0=16bit, 1=adpcm (FEAT-fenced). */
+	static const char *type[4] = { "16bit", "adpcm", "unused", "unused" };
 	static const char *mem[2] = { "paged out", "resident" };
 
 	int		total = 0;
@@ -333,11 +335,97 @@ static sfxHandle_t S_Base_RegisterSound( const char *name, qboolean compressed )
 }
 
 
+#ifndef HEADLESS
+/*
+==================
+S_EnginePlay_f
+
+Dev console command:
+  s_enginePlay <sfxname> [sfxname ...]      play unspatialized (listener-relative)
+  s_enginePlay <sfxname> <x> <y> <z>        play positioned at a Q3 world point
+
+Registers the named sound and plays it through ma_engine's graph as a real
+ma_sound. The positional form spatializes the voice at the given world origin,
+so a source placed to the listener's left (Q3 +Y) should pan left — the way to
+check the ma_spatializer axis mapping (confirm with s_engineLevels: L > R). This
+lives here — not in snd_main.c with the other command functions — because it
+needs the private sfx_t behind a handle (s_knownSfx), which only this file can
+reach.
+
+Plays the named sound through ma_engine's graph; prints a hint if it does not
+play (engine not up or the sound failed to load).
+==================
+*/
+void S_EnginePlay_f( void ) {
+	int c;
+	int i;
+
+	if ( !s_soundStarted ) {
+		return;
+	}
+
+	c = Cmd_Argc();
+	if ( c < 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_sound),
+			"Usage: s_enginePlay <sfxname> [sfxname ...] | s_enginePlay <sfxname> <x> <y> <z>\n" );
+		return;
+	}
+
+	// Positional form: exactly one name followed by three numeric coordinates.
+	if ( c == 5 ) {
+		vec3_t origin;
+		sfxHandle_t h;
+		origin[0] = atof( Cmd_Argv( 2 ) );
+		origin[1] = atof( Cmd_Argv( 3 ) );
+		origin[2] = atof( Cmd_Argv( 4 ) );
+		h = S_Base_RegisterSound( Cmd_Argv( 1 ), qfalse );
+		if ( h <= 0 || h >= s_numSfx ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_sound), "s_enginePlay: could not load \"%s\"\n",
+				Cmd_Argv( 1 ) );
+			return;
+		}
+		if ( S_EnginePlaySfxEx( &s_knownSfx[h], origin, qtrue ) ) {
+			// Log the listener frame too so the pan can be reasoned about: the
+			// source is to the listener's left when (origin-listener) . left > 0,
+			// where left = listener_axis[1] (Q3 +Y is left).
+			vec3_t rel;
+			VectorSubtract( origin, listener_origin, rel );
+			Com_Log( SEV_INFO, LOG_CH(ch_sound),
+				"s_enginePlay: \"%s\" positioned at (%.0f %.0f %.0f); listener (%.0f %.0f %.0f) "
+				"fwd (%.2f %.2f %.2f) left (%.2f %.2f %.2f); rel.left=%.1f rel.fwd=%.1f\n",
+				Cmd_Argv( 1 ), origin[0], origin[1], origin[2],
+				listener_origin[0], listener_origin[1], listener_origin[2],
+				listener_axis[0][0], listener_axis[0][1], listener_axis[0][2],
+				listener_axis[1][0], listener_axis[1][1], listener_axis[1][2],
+				DotProduct( rel, listener_axis[1] ), DotProduct( rel, listener_axis[0] ) );
+		} else {
+			Com_Log( SEV_INFO, LOG_CH(ch_sound),
+				"s_enginePlay: \"%s\" did not play\n", Cmd_Argv( 1 ) );
+		}
+		return;
+	}
+
+	for ( i = 1; i < c; i++ ) {
+		sfxHandle_t h = S_Base_RegisterSound( Cmd_Argv( i ), qfalse );
+		if ( h <= 0 || h >= s_numSfx ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_sound), "s_enginePlay: could not load \"%s\"\n",
+				Cmd_Argv( i ) );
+			continue;
+		}
+		if ( !S_EnginePlaySfx( &s_knownSfx[h] ) ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_sound),
+				"s_enginePlay: \"%s\" did not play\n", Cmd_Argv( i ) );
+		}
+	}
+}
+#endif
+
+
 /*
 ==================
 S_Base_SoundDuration
 
-Phase 6.2: returns the cached duration of a sfx in milliseconds, or 0 if the
+Returns the cached duration of a sfx in milliseconds, or 0 if the
 handle is out of range / not loaded. The duration field is populated in
 S_LoadSound when the sound first hits memory.
 ==================
@@ -366,7 +454,7 @@ static void S_Base_BeginRegistration( void ) {
 	memset( s_knownSfx, 0, sizeof( s_knownSfx ) );
 	memset( sfxHash, 0, sizeof( sfxHash ) );
 
-	S_Base_RegisterSound( "sound/feedback/hit.opus", qfalse ); // changed to a sound in baseq3
+	S_Base_RegisterSound( "sound/feedback/hit.opus", qfalse ); // changed to a sound in base
 }
 
 
@@ -382,121 +470,6 @@ static void S_memoryLoad( sfx_t *sfx ) {
 
 //=============================================================================
 
-/*
-=================
-S_SpatializeOrigin
-
-Used for spatializing s_channels
-=================
-*/
-static void S_SpatializeOrigin( const vec3_t origin, int master_vol, int *left_vol, int *right_vol )
-{
-	vec_t	dot;
-	vec_t	dist;
-	vec_t	lscale, rscale, scale;
-	vec3_t	source_vec;
-	vec3_t	vec;
-	qboolean linearFalloff;
-
-	linearFalloff = ( s_linearFalloff != NULL && s_linearFalloff->integer != 0 ) ? qtrue : qfalse;
-
-	// calculate stereo separation and distance attenuation
-	VectorSubtract(origin, listener_origin, source_vec);
-
-	dist = VectorNormalize(source_vec);
-
-	if ( linearFalloff ) {
-		// linear fall-off: culls completely beyond SOUND_MAX_DIST, then
-		// scales master_vol linearly with normalized distance.
-		if ( dist >= SOUND_MAX_DIST ) {
-			*left_vol = 0;
-			*right_vol = 0;
-			return;
-		}
-
-		{
-			float dist_normalized = dist * ( 1.0f / SOUND_MAX_DIST );
-			if ( dist_normalized > 1.0f ) {
-				dist_normalized = 1.0f;
-			}
-			scale = (float)master_vol * ( 1.0f - dist_normalized );
-		}
-
-		// attenuate correctly even if we can't spatialise
-		if ( dma.channels == 1 ) {
-			if ( scale < 0.0f ) {
-				scale = 0.0f;
-			}
-			*left_vol = *right_vol = (int)scale;
-			return;
-		}
-
-		VectorRotate( source_vec, listener_axis, vec );
-		dot = -vec[1];
-
-		rscale = 0.5f * ( 1.0f + dot );
-		lscale = 0.5f * ( 1.0f - dot );
-		if ( rscale < 0.0f ) {
-			rscale = 0.0f;
-		}
-		if ( lscale < 0.0f ) {
-			lscale = 0.0f;
-		}
-
-		*right_vol = (int)( scale * rscale );
-		if ( *right_vol < 0 ) {
-			*right_vol = 0;
-		}
-
-		*left_vol = (int)( scale * lscale );
-		if ( *left_vol < 0 ) {
-			*left_vol = 0;
-		}
-		return;
-	}
-
-	// --- Original Q3 power-like fall-off (s_linearFalloff 0) ---
-	{
-		const float dist_mult = SOUND_ATTENUATE;
-
-		dist -= SOUND_FULLVOLUME;
-		if (dist < 0)
-			dist = 0;			// close enough to be at full volume
-		dist *= dist_mult;		// different attenuation levels
-	}
-
-	VectorRotate( source_vec, listener_axis, vec );
-
-	dot = -vec[1];
-
-	if (dma.channels == 1)
-	{ // no attenuation = no spatialization
-		rscale = 1.0;
-		lscale = 1.0;
-	}
-	else
-	{
-		rscale = 0.5 * (1.0 + dot);
-		lscale = 0.5 * (1.0 - dot);
-		if ( rscale < 0.0 ) {
-			rscale = 0.0;
-		}
-		if ( lscale < 0.0 ) {
-			lscale = 0.0;
-		}
-	}
-
-	// add in distance effect
-	scale = (1.0 - dist) * rscale;
-	*right_vol = (master_vol * scale);
-	if (*right_vol < 0)
-		*right_vol = 0;
-
-	scale = (1.0 - dist) * lscale;
-	*left_vol = (master_vol * scale);
-	if (*left_vol < 0)
-		*left_vol = 0;
-}
 
 
 // =======================================================================
@@ -577,7 +550,7 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 	for ( int i = 0; i < MAX_CHANNELS; i++, ch++ ) {
 		if ( ch->entnum == entityNum && ch->thesfx == sfx ) {
 			if ( startTime - ch->allocTime < 20 ) {
-				Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "S_StartSound: Double start (%d ms < 20 ms) for %s\n", startTime - ch->allocTime, sfx->soundName);
+				Com_Log( SEV_DEBUG, LOG_CH(ch_sound), "S_StartSound: Double start (%d ms < 20 ms) for %s\n", startTime - ch->allocTime, sfx->soundName);
 				return;
 			}
 			inplay++;
@@ -586,7 +559,7 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 
 	// too much duplicated sounds, ignore
 	if ( inplay > allowed ) {
-		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "S_StartSound: %s hit the concurrent channels limit (%d)\n", sfx->soundName, allowed);
+		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), "S_StartSound: %s hit the concurrent channels limit (%d)\n", sfx->soundName, allowed);
 		return;
 	}
 
@@ -624,14 +597,14 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 					}
 				}
 				if (chosen == -1) {
-					Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "S_StartSound: No more channels free for %s\n", sfx->soundName);
+					Com_Log( SEV_DEBUG, LOG_CH(ch_sound), "S_StartSound: No more channels free for %s\n", sfx->soundName);
 					return;
 				}
 			}
 		}
 		ch = &s_channels[chosen];
 		ch->allocTime = sfx->lastTimeUsed;
-		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "S_StartSound: No more channels free for %s, dropping earliest sound: %s\n", sfx->soundName, ch->thesfx->soundName);
+		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), "S_StartSound: No more channels free for %s, dropping earliest sound: %s\n", sfx->soundName, ch->thesfx->soundName);
 	}
 
 	if ( origin ) {
@@ -651,6 +624,29 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 	ch->leftvol = ch->master_vol;		// these will get calced at next spatialize
 	ch->rightvol = ch->master_vol;		// unless the game isn't running
 	ch->doppler = qfalse;
+
+#ifndef HEADLESS
+	// ma_engine plays this one-shot with real 3D positioning. The channel bookkeeping
+	// above still runs (it provides the per-entity dedup / concurrency limiting), but
+	// the audible voice is the ma_sound created here. Sounds from the view entity
+	// (own weapon/footsteps) and announcer voices stay listener-relative
+	// (unspatialized, full volume); everything else is positioned at the entity's
+	// origin (fixed origin if one was given, else the entity's tracked position).
+	{
+		qboolean spatialize = ( entityNum != listener_number ) && ( entchannel != CHAN_ANNOUNCER );
+		if ( spatialize ) {
+			vec3_t soundOrigin;
+			if ( ch->fixed_origin ) {
+				VectorCopy( ch->origin, soundOrigin );
+			} else {
+				VectorCopy( loopSounds[ entityNum ].origin, soundOrigin );
+			}
+			S_EnginePlaySfxEx( sfx, soundOrigin, qtrue );
+		} else {
+			S_EnginePlaySfxEx( sfx, NULL, qfalse );
+		}
+	}
+#endif
 }
 
 
@@ -682,31 +678,22 @@ so sound doesn't stutter.
 ==================
 */
 static void S_Base_ClearSoundBuffer( void ) {
-	int		clear;
-
 	if (!s_soundStarted)
 		return;
 
 	// stop looping sounds
 	memset(loopSounds, 0, sizeof(loopSounds));
-	memset(loop_channels, 0, sizeof(loop_channels));
-	numLoopChannels = 0;
+
+#ifndef HEADLESS
+	// The per-frame loop reconcile (S_AddLoopSounds) is the only thing that stops
+	// looping ma_sounds, and it is skipped while the sound system is muted/stopped
+	// (S_Base_Respatialize early-returns). Clearing loopSounds[] here would
+	// otherwise strand the live engine loop voices, which ma_engine keeps mixing
+	// to the device — so drain the registry explicitly.
+	S_EngineLoopStopAll();
+#endif
 
 	S_ChannelSetup();
-
-	s_rawend = 0;
-
-	if (dma.samplebits == 8)
-		clear = 0x80;
-	else
-		clear = 0;
-
-	SNDDMA_BeginPainting();
-
-	if ( dma.buffer )
-		memset(dma.buffer, clear, dma.samples * dma.samplebits/8);
-
-	SNDDMA_Submit();
 }
 
 
@@ -724,6 +711,134 @@ static void S_Base_StopAllSounds( void ) {
 	S_Base_StopBackgroundTrack();
 
 	S_Base_ClearSoundBuffer();
+}
+
+
+/*
+==================
+S_Base_FocusChanged
+
+Drive the mute decision from a window-focus transition. On focus loss the mixer
+mutes (it stops painting channels into the hardware buffer); on focus gain it
+unmutes after flushing the one-shot channels that were started while unfocused,
+so refocus does not burst a backlog of stale sounds. Looping/ambient sounds are
+not touched here: loopSounds[] holds the per-entity loop state that the engine
+loop registry reads each frame, so any still-active loop resumes on its own after unmute.
+
+The flush targets only s_channels (fire-and-forget sounds) whose allocTime is at
+or after the unfocus point (s_focusMuteStart). Sounds that were already playing
+before the window lost focus keep their channel; only the during-unfocus backlog
+is cleared. The subtraction-vs-zero comparison is wraparound-safe, matching the
+allocTime ordering elsewhere in this file.
+*/
+void S_Base_FocusChanged( qboolean focused ) {
+	s_focusEventsSeen = qtrue;
+
+	if ( !s_soundStarted ) {
+		s_focusUnmuted = focused ? qtrue : qfalse;
+		return;
+	}
+
+	if ( !focused ) {
+		// entering the unfocused window: remember the moment so the eventual
+		// refocus can identify the sounds queued while we were away.
+		if ( s_focusUnmuted ) {
+			s_focusMuteStart = s_soundtime;
+		}
+		s_focusUnmuted = qfalse;
+#ifndef HEADLESS
+		S_UpdateAutoMute();		// apply the new focus state to the engine now
+#endif
+		return;
+	}
+
+	// regaining focus: flush the one-shots started during the unfocused window
+	// before unmuting, so they don't suddenly play.
+	if ( !s_focusUnmuted ) {
+		channel_t *ch = s_channels;
+		for ( int i = 0; i < MAX_CHANNELS; i++, ch++ ) {
+			if ( ch->thesfx == NULL ) {
+				continue;
+			}
+			// allocTime - s_focusMuteStart >= 0  ==  started at/after unfocus
+			if ( ch->allocTime - s_focusMuteStart >= 0 ) {
+				memset( ch, 0, sizeof( *ch ) );
+			}
+		}
+	}
+	s_focusUnmuted = qtrue;
+#ifndef HEADLESS
+	S_UpdateAutoMute();			// apply the new focus state to the engine now
+#endif
+}
+
+
+/*
+==================
+S_FocusUnmuted
+
+Read the focus-driven mute decision (qtrue while the window is focused). The
+mixer consults this once per mix instead of re-deriving from a window flag.
+
+When the platform never delivers focus events (the native Win32 backend keeps
+gw_active in its wndproc and does not call S_FocusChanged), fall back to the
+polled gw_active so that backend behaves exactly as before this change.
+==================
+*/
+qboolean S_FocusUnmuted( void ) {
+	if ( !s_focusEventsSeen ) {
+		return gw_active;
+	}
+	return s_focusUnmuted;
+}
+
+
+/*
+==================
+S_ComputeAutoMute
+
+Decide whether audio should be silenced because the window is unfocused or
+minimized. Returns qtrue to mute. Reads the focus state through S_FocusUnmuted()
+(the focus-event-driven decision, not a raw window poll) and the minimize flag.
+
+s_autoMute is a bitmask that, when non-zero, overrides the legacy
+s_muteWhenUnfocused / s_muteWhenMinimized toggles:
+  bit 1 = mute while unfocused (but not while minimized)
+  bit 2 = mute while minimized
+With s_autoMute == 0 the legacy per-condition cvars apply instead. The match-alert
+force-unmute (s_autoMute_OverrideMute) wins over everything.
+
+Main-thread only; all inputs are event-driven flags + cvars.
+==================
+*/
+qboolean S_ComputeAutoMute( void ) {
+	qboolean unfocused = !S_FocusUnmuted();
+	int am = s_autoMute ? s_autoMute->integer : 0;
+	qboolean wantMute;
+
+	if ( am != 0 ) {
+		wantMute = qfalse;
+		if ( (am & 1) && unfocused && !gw_minimized ) {
+			wantMute = qtrue;
+		}
+		if ( (am & 2) && gw_minimized ) {
+			wantMute = qtrue;
+		}
+	} else {
+		wantMute = qfalse;
+		if ( unfocused && !gw_minimized && s_muteWhenUnfocused->integer ) {
+			wantMute = qtrue;
+		}
+		if ( gw_minimized && s_muteWhenMinimized->integer ) {
+			wantMute = qtrue;
+		}
+	}
+
+	if ( s_autoMute_OverrideMute ) {
+		wantMute = qfalse;
+	}
+
+	return wantMute;
 }
 
 
@@ -756,7 +871,6 @@ void S_Base_ClearLoopingSounds( qboolean killall ) {
 			S_Base_StopLoopingSound(i);
 		}
 	}
-	numLoopChannels = 0;
 }
 
 
@@ -880,182 +994,40 @@ sum up the channel multipliers.
 ==================
 */
 void S_AddLoopSounds( void ) {
-	int			left_total, right_total, left, right;
-	channel_t	*ch;
-	loopSound_t	*loop, *loop2;
-	static int	loopFrame;
-
-
-	numLoopChannels = 0;
-
+	loopSound_t	*loop;
 	int			startTime = s_soundtime; // Com_Milliseconds();
 
-	loopFrame++;
-	for ( int i = 0 ; i < MAX_GENTITIES ; i++) {
+#ifndef HEADLESS
+	// Reconcile the persistent per-(entityNum,sfx) looping ma_sound registry
+	// against this frame's loopSounds[]. Each active loop is created once
+	// (looping) and thereafter only repositioned — never restarted, which would
+	// click. A voice not re-asserted this frame is uninited by the end-of-frame
+	// sweep. ma_spatializer positions each source independently, so there is no
+	// same-sfx merge: kill (S_AddLoopingSound, point source) uses the louder
+	// MASTER_VOL curve; !kill (S_AddRealLoopingSound, sphere) uses the quieter
+	// SPHERE_VOL base on the same falloff.
+
+	// Reap finished one-shot voices once per frame (their only other reap is
+	// lazily on the next one-shot play), so they do not linger in the mix graph.
+	S_EngineReapVoices();
+	S_EngineLoopBeginFrame();
+	for ( int i = 0 ; i < MAX_GENTITIES ; i++ ) {
 		loop = &loopSounds[i];
-		if ( !loop->active || loop->mergeFrame == loopFrame ) {
-			continue;	// already merged into an earlier sound
+		if ( !loop->active || !loop->sfx || loop->sfx->soundLength == 0 ) {
+			continue;
 		}
-
-		if (loop->kill) {
-			S_SpatializeOrigin( loop->origin, MASTER_VOL, &left_total, &right_total);	// 3d
-		} else {
-			S_SpatializeOrigin( loop->origin, SPHERE_VOL,  &left_total, &right_total);	// sphere
-		}
-
 		loop->sfx->lastTimeUsed = startTime;
-
-		for (int j=(i+1); j< MAX_GENTITIES ; j++) {
-			loop2 = &loopSounds[j];
-			if ( !loop2->active || loop2->doppler || loop2->sfx != loop->sfx) {
-				continue;
-			}
-			loop2->mergeFrame = loopFrame;
-
-			if (loop2->kill) {
-				S_SpatializeOrigin( loop2->origin, MASTER_VOL, &left, &right);		// 3d
-			} else {
-				S_SpatializeOrigin( loop2->origin, SPHERE_VOL,  &left, &right);		// sphere
-			}
-
-			loop2->sfx->lastTimeUsed = startTime;
-			left_total += left;
-			right_total += right;
-		}
-		if (left_total == 0 && right_total == 0) {
-			continue;		// not audible
-		}
-
-		// allocate a channel
-		ch = &loop_channels[numLoopChannels];
-
-		if (left_total > 255) {
-			left_total = 255;
-		}
-		if (right_total > 255) {
-			right_total = 255;
-		}
-
-		ch->master_vol = MASTER_VOL;
-		ch->leftvol = left_total;
-		ch->rightvol = right_total;
-		ch->thesfx = loop->sfx;
-		ch->doppler = loop->doppler;
-		ch->dopplerScale = loop->dopplerScale;
-		ch->oldDopplerScale = loop->oldDopplerScale;
-		numLoopChannels++;
-		if ( numLoopChannels >= MAX_CHANNELS ) {
-			return;
-		}
+		// loop->kill: point source (MASTER_VOL). !kill: sphere (SPHERE_VOL).
+		// Pass the stored velocity so the engine can doppler-shift moving
+		// point sources (sphere sources keep doppler off inside the upsert).
+		S_EngineLoopUpsert( i, loop->sfx, loop->origin, loop->velocity, loop->kill ? qfalse : qtrue );
 	}
+	S_EngineLoopEndFrame();
+#else
+	(void)loop; (void)startTime;
+#endif
 }
 
-//=============================================================================
-
-portable_samplepair_t *S_GetRawSamplePointer( void )
-{
-	return s_rawsamples;
-}
-
-
-/*
-============
-S_RawSamples
-
-Music streaming
-============
-*/
-static void S_Base_RawSamples( int samples, int rate, int width, int n_channels, const byte *data, float volume ) {
-	if ( !s_soundStarted || s_soundMuted ) {
-		return;
-	}
-
-	int		intVolume = 256 * volume;
-
-	if ( s_rawend - s_soundtime < 0 ) {
-		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), "S_RawSamples: resetting minimum: %i < %i\n", s_rawend, s_soundtime );
-		s_rawend = s_soundtime;
-	}
-
-	float	scale = (float)rate / dma.speed;
-
-	//Com_Log( SEV_INFO, LOG_CH(ch_client), "%i < %i < %i\n", s_soundtime, s_paintedtime, s_rawend);
-	if (n_channels == 2 && width == 2)
-	{
-		if (scale == 1.0)
-		{	// optimized case
-			for (int i=0 ; i<samples ; i++)
-			{
-				int dst = s_rawend&(MAX_RAW_SAMPLES-1);
-				s_rawend++;
-				s_rawsamples[dst].left = ((short *)data)[i*2] * intVolume;
-				s_rawsamples[dst].right = ((short *)data)[i*2+1] * intVolume;
-			}
-		}
-		else
-		{
-			for (int i=0 ; ; i++)
-			{
-				int src = i*scale;
-				if (src >= samples)
-					break;
-				int dst = s_rawend&(MAX_RAW_SAMPLES-1);
-				s_rawend++;
-				s_rawsamples[dst].left = ((short *)data)[src*2] * intVolume;
-				s_rawsamples[dst].right = ((short *)data)[src*2+1] * intVolume;
-			}
-		}
-	}
-	else if (n_channels == 1 && width == 2)
-	{
-		for (int i=0 ; ; i++)
-		{
-			int src = i*scale;
-			if (src >= samples)
-				break;
-			int dst = s_rawend&(MAX_RAW_SAMPLES-1);
-			s_rawend++;
-			s_rawsamples[dst].left = ((short *)data)[src] * intVolume;
-			s_rawsamples[dst].right = ((short *)data)[src] * intVolume;
-		}
-	}
-	else if (n_channels == 2 && width == 1)
-	{
-		intVolume *= 256;
-
-		for (int i=0 ; ; i++)
-		{
-			int src = i*scale;
-			if (src >= samples)
-				break;
-			int dst = s_rawend&(MAX_RAW_SAMPLES-1);
-			s_rawend++;
-			s_rawsamples[dst].left = ((char *)data)[src*2] * intVolume;
-			s_rawsamples[dst].right = ((char *)data)[src*2+1] * intVolume;
-		}
-	}
-	else if (n_channels == 1 && width == 1)
-	{
-		intVolume *= 256;
-
-		for (int i=0 ; ; i++)
-		{
-			int src = i*scale;
-			if (src >= samples)
-				break;
-			int dst = s_rawend&(MAX_RAW_SAMPLES-1);
-			s_rawend++;
-			s_rawsamples[dst].left = (((byte *)data)[src]-128) * intVolume;
-			s_rawsamples[dst].right = (((byte *)data)[src]-128) * intVolume;
-		}
-	}
-
-	if ( s_rawend - s_soundtime > MAX_RAW_SAMPLES ) {
-		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), "S_RawSamples: overflowed %i > %i\n", s_rawend, s_soundtime );
-	}
-}
-
-//=============================================================================
 
 /*
 =====================
@@ -1080,8 +1052,6 @@ Change the volumes of all the playing sounds for changes in their positions
 ============
 */
 void S_Base_Respatialize( int entityNum, const vec3_t head, vec3_t axis[3], int inwater ) {
-	channel_t	*ch;
-
 	if ( !s_soundStarted || s_soundMuted ) {
 		return;
 	}
@@ -1096,30 +1066,13 @@ void S_Base_Respatialize( int entityNum, const vec3_t head, vec3_t axis[3], int 
 	VectorCopy(axis[1], listener_axis[1]);
 	VectorCopy(axis[2], listener_axis[2]);
 
-	// update spatialization for dynamic sounds
-	ch = s_channels;
-	for ( int i = 0 ; i < MAX_CHANNELS ; i++, ch++ ) {
-		if ( !ch->thesfx ) {
-			continue;
-		}
-		// anything coming from the view entity will always be full volume
-		if (ch->entnum == listener_number) {
-			ch->leftvol = ch->master_vol;
-			ch->rightvol = ch->master_vol;
-		} else {
-			vec3_t		origin;
-			if (ch->fixed_origin) {
-				VectorCopy( ch->origin, origin );
-			} else {
-				VectorCopy( loopSounds[ ch->entnum ].origin, origin );
-			}
-
-			S_SpatializeOrigin (origin, ch->master_vol, &ch->leftvol, &ch->rightvol);
-		}
-	}
-
-	// add loopsounds
-	S_AddLoopSounds ();
+#ifndef HEADLESS
+	// ma_engine's listener + per-voice ma_spatializer do the 3D positioning. Push
+	// the listener frame (position from the view origin, forward from viewaxis[0],
+	// up from viewaxis[2]); loop reconcile follows.
+	S_EngineSetListener( listener_origin, listener_axis[0], listener_axis[2] );
+	S_AddLoopSounds();
+#endif
 }
 
 
@@ -1202,17 +1155,17 @@ static void S_GetSoundtime( void )
 	if ( CL_VideoRecording() )
 	{
 		const float duration = MAX( (float)dma.speed / cl_aviFrameRate->value, 1.0f );
-		const float frameDuration = duration + clc.aviSoundFrameRemainder;
+		const float frameDuration = duration + clientActiveApp->clc.aviSoundFrameRemainder;
 		const int msec = (int)frameDuration;
 
 		s_soundtime += msec;
-		clc.aviSoundFrameRemainder = frameDuration - msec;
+		clientActiveApp->clc.aviSoundFrameRemainder = frameDuration - msec;
 
 		// use same offset as in game
 		s_paintedtime = s_soundtime + (int)(s_mixOffset->value * (float)dma.speed);
 
 		// render exactly one frame of audio data
-		clc.aviFrameEndTime = s_paintedtime + (int)(duration + clc.aviSoundFrameRemainder);
+		clientActiveApp->clc.aviFrameEndTime = s_paintedtime + (int)(duration + clientActiveApp->clc.aviSoundFrameRemainder);
 		return;
 	}
 
@@ -1242,12 +1195,59 @@ static void S_GetSoundtime( void )
 }
 
 
+#ifndef HEADLESS
+/*
+======================
+S_EngineFeedAviCapture
+
+Source the AVI audio track from the engine while recording. Recording runs on a
+synthetic per-video-frame clock (S_GetSoundtime's recording branch), so the
+engine is in read-driven mode (S_EngineBeginCapture, entered at AVI open) and we
+pull exactly the frame count that clock computed for this video frame:
+aviFrameEndTime - s_paintedtime. That count varies +/-1 frame-to-frame by design
+(the fractional-sample remainder carry) and must be read straight off the clock,
+never recomputed. The pulled s16 stereo PCM goes to CL_WriteAVIAudioFrame.
+
+Main-thread only; inert when not recording. Called from S_Update_ after the
+clock is set.
+======================
+*/
+static void S_EngineFeedAviCapture( void ) {
+	int count;
+	int got;
+	// s16 stereo scratch for one video frame of audio. At 48 kHz / min 1 fps that
+	// is at most 48000 frames; size for a generous ceiling and clamp.
+	static short aviPcm[48000 * AVI_CAPTURE_CHANNELS];
+	int maxFrames = (int)( sizeof( aviPcm ) / ( sizeof( short ) * AVI_CAPTURE_CHANNELS ) );
+
+	if ( !CL_VideoRecording() ) {
+		return;
+	}
+
+	count = clientActiveApp->clc.aviFrameEndTime - s_paintedtime;
+	if ( count <= 0 ) {
+		return;
+	}
+	if ( count > maxFrames ) {
+		count = maxFrames;
+	}
+
+	got = S_EngineReadCaptureFrames( aviPcm, count );
+	if ( got > 0 ) {
+		// The AVI track is stereo regardless of the live device channel count;
+		// S_EngineReadCaptureFrames wrote AVI_CAPTURE_CHANNELS-interleaved s16.
+		CL_WriteAVIAudioFrame( (const byte *)aviPcm, got * AVI_CAPTURE_CHANNELS * dma.samplebits / 8 );
+	}
+}
+#endif
+
+
 static void S_Update_( int msec ) {
-	unsigned		endtime;
-	int				mixAhead[2];
-	int				thisTime, sane;
+	int				thisTime;
 	static int		ot = -1;
 	static int		lastTime = 0;
+
+	(void)msec;
 
 	if ( !s_soundStarted || s_soundMuted ) {
 		return;
@@ -1257,6 +1257,14 @@ static void S_Update_( int msec ) {
 
 	// Updates s_soundtime
 	S_GetSoundtime();
+
+#ifndef HEADLESS
+	// Apply the window focus/minimize auto-mute each frame (before the clock-stall
+	// early-out below), so minimize/restore and cvar/override changes take effect
+	// even though SDL raises no focus event on minimize. Sets the engine master
+	// volume only on a state change.
+	S_UpdateAutoMute();
+#endif
 
 	if ( s_soundtime == ot ) {
 		return;
@@ -1268,38 +1276,17 @@ static void S_Update_( int msec ) {
 	// and start any new sounds
 	S_ScanChannelStarts();
 
-	sane = thisTime - lastTime;
-	if ( sane < msec ) {
-		sane = msec;
-	}
+#ifndef HEADLESS
+	// While recording, source the AVI audio track from the engine deterministically
+	// on this synthetic per-video-frame clock: pull exactly the frame count
+	// S_GetSoundtime computed for this video frame (aviFrameEndTime - s_paintedtime)
+	// and hand it to the AVI writer. S_EngineFeedAviCapture is inert when not
+	// recording or when the engine is not in offline-capture mode.
+	S_EngineFeedAviCapture();
+#endif
 
-	mixAhead[0] = s_mixahead->value * (float)dma.speed;
-	mixAhead[1] = sane * 0.0015f * (float)dma.speed;
-
-	if ( mixAhead[0] < mixAhead[1] ) {
-		mixAhead[0] = mixAhead[1];
-	}
-
-	// mix ahead of current position
-	endtime = s_paintedtime + mixAhead[0];
-
-	// mix to an even submission block size
-	endtime = (endtime + dma.submission_chunk-1)
-		& ~(dma.submission_chunk-1);
-
-	// never mix more than the complete buffer
-	if ( endtime - s_paintedtime > dma.fullsamples ) {
-		endtime = s_paintedtime + dma.fullsamples;
-	}
-
-	// add raw data from streamed samples
+	// keep the background-music ring fed (ma_engine drains it at device rate)
 	S_UpdateBackgroundTrack();
-
-	SNDDMA_BeginPainting();
-
-	S_PaintChannels( endtime );
-
-	SNDDMA_Submit();
 
 	lastTime = thisTime;
 }
@@ -1319,11 +1306,15 @@ S_StopBackgroundTrack
 ======================
 */
 static void S_Base_StopBackgroundTrack( void ) {
+#ifndef HEADLESS
+	// Tear down the engine music voice (ma_sound + ring); a
+	// no-op when it was never started.
+	S_EngineMusicStop();
+#endif
 	if(!s_backgroundStream)
 		return;
 	S_CodecCloseStream(s_backgroundStream);
 	s_backgroundStream = NULL;
-	s_rawend = 0;
 }
 
 
@@ -1342,7 +1333,7 @@ static void S_OpenBackgroundStream( const char *filename ) {
 	}
 	COM_StripExtension( cleanPath, stemPath, sizeof( stemPath ) );
 
-	// close the background track, but DON'T reset s_rawend
+	// close the background track
 	// if restarting the same background track
 	if( s_backgroundStream )
 	{
@@ -1358,7 +1349,7 @@ static void S_OpenBackgroundStream( const char *filename ) {
 	}
 
 	if( s_backgroundStream->info.channels != 2 || s_backgroundStream->info.rate != 48000 ) {
-		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "WARNING: music file %s is not 48kHz stereo\n", filename );
+		Com_Log( SEV_WARN, LOG_CH(ch_sound), "WARNING: music file %s is not 48kHz stereo\n", filename );
 	}
 }
 
@@ -1383,11 +1374,104 @@ static void S_Base_StartBackgroundTrack( const char *intro, const char *loop ){
 		return;
 	}
 
+#ifndef HEADLESS
+	// Starting a new track: drop any engine music voice so its ring does not play
+	// a stale tail of the previous track. The feeder re-creates it next update at
+	// the new stream's format. (A loop reopen goes through S_OpenBackgroundStream
+	// directly and keeps the voice for a seamless loop.)
+	S_EngineMusicStop();
+#endif
+
 	Q_strncpyz( s_backgroundLoop, loop, sizeof( s_backgroundLoop ) );
 
 	S_OpenBackgroundStream( intro );
 }
 
+
+#ifndef HEADLESS
+/*
+======================
+S_EngineFeedBackgroundTrack
+
+Music feeder: decode the background stream and push it into ma_engine's
+streaming ring, which its audio thread drains at device rate.
+
+The engine music voice is created lazily here at the stream's format, and
+re-created if a loop reopen changes the channel count / rate. Fill is paced by
+the ring's free space (S_EngineMusicWritableFrames).
+Runs on the MAIN THREAD; only decode + ring writes happen here.
+======================
+*/
+static void S_EngineFeedBackgroundTrack( void ) {
+	byte	raw[30000];		// scratch for one decode chunk
+	short	conv[15000];	// s16 expansion of 8-bit source (<= raw/2 samples * 1)
+
+	// Ensure a music voice exists at the current stream's format; (re)open it on
+	// first use and whenever a loop reopen changed channels/rate.
+	{
+		int haveCh = 0, haveRate = 0;
+		qboolean live = S_EngineMusicActive( &haveCh, &haveRate );
+		if ( !live || haveCh != s_backgroundStream->info.channels ||
+		     haveRate != s_backgroundStream->info.rate ) {
+			if ( !S_EngineMusicStart( s_backgroundStream->info.channels,
+			                          s_backgroundStream->info.rate, s_musicVolume->value ) ) {
+				return;	// engine music unavailable — nothing to feed
+			}
+		} else {
+			// keep the live voice's volume in step with s_musicVolume
+			S_EngineMusicSetVolume( s_musicVolume->value );
+		}
+	}
+
+	// Fill the ring while it has room. ma_engine resamples the stream rate to the
+	// device rate and applies the music volume, so we push samples at the SOURCE
+	// rate with no per-sample scaling.
+	while ( S_EngineMusicWritableFrames() > 0 ) {
+		int width    = s_backgroundStream->info.width;
+		int channels = s_backgroundStream->info.channels;
+		int frameSize = width * channels;			// bytes per source frame
+		int roomFrames = S_EngineMusicWritableFrames();
+		int fileFrames = (int)( sizeof(raw) / frameSize );
+		int r;
+
+		if ( roomFrames < fileFrames )
+			fileFrames = roomFrames;
+		if ( fileFrames <= 0 )
+			return;
+
+		r = S_CodecReadStream( s_backgroundStream, fileFrames * frameSize, raw );
+
+		if ( r > 0 ) {
+			int gotFrames = r / frameSize;
+			const short *pcm;
+
+			if ( width == 2 ) {
+				// already s16 interleaved — push directly
+				pcm = (const short *)raw;
+			} else {
+				// 8-bit source: expand each byte to s16 (unsigned -> signed)
+				int n = gotFrames * channels;
+				for ( int i = 0; i < n && i < (int)( sizeof(conv)/sizeof(conv[0]) ); i++ ) {
+					conv[i] = (short)( ( (int)( (byte)raw[i] ) - 128 ) << 8 );
+				}
+				pcm = conv;
+			}
+
+			S_EngineMusicWrite( pcm, gotFrames );
+		} else {
+			// end of stream — loop the loop file, else stop
+			if ( s_backgroundLoop[0] != '\0' ) {
+				S_OpenBackgroundStream( s_backgroundLoop );
+				if ( !s_backgroundStream )
+					return;
+			} else {
+				S_Base_StopBackgroundTrack();
+				return;
+			}
+		}
+	}
+}
+#endif
 
 /*
 ======================
@@ -1395,12 +1479,6 @@ S_UpdateBackgroundTrack
 ======================
 */
 static void S_UpdateBackgroundTrack( void ) {
-	int		bufferSamples;
-	int		fileSamples;
-	byte	raw[30000];		// just enough to fit in a mac stack frame
-	int		fileBytes;
-	int		r;
-
 	if ( !s_backgroundStream ) {
 		return;
 	}
@@ -1410,58 +1488,11 @@ static void S_UpdateBackgroundTrack( void ) {
 		return;
 	}
 
-	// see how many samples should be copied into the raw buffer
-	if ( s_rawend - s_soundtime < 0 ) {
-		s_rawend = s_soundtime;
-	}
-
-	while ( s_rawend - s_soundtime < MAX_RAW_SAMPLES ) {
-		bufferSamples = MAX_RAW_SAMPLES - (s_rawend - s_soundtime);
-
-		// decide how much data needs to be read from the file
-		fileSamples = bufferSamples * s_backgroundStream->info.rate / dma.speed;
-
-		if ( fileSamples == 0 ) {
-			return;
-		}
-
-		// our max buffer size
-		fileBytes = fileSamples * (s_backgroundStream->info.width * s_backgroundStream->info.channels);
-		if ( fileBytes > sizeof(raw) ) {
-			fileBytes = sizeof(raw);
-			fileSamples = fileBytes / (s_backgroundStream->info.width * s_backgroundStream->info.channels);
-		}
-
-		// Read
-		r = S_CodecReadStream( s_backgroundStream, fileBytes, raw );
-		if( r < fileBytes )
-		{
-			fileSamples = r / (s_backgroundStream->info.width * s_backgroundStream->info.channels);
-		}
-
-		if ( r > 0 )
-		{
-			// add to raw buffer
-			S_Base_RawSamples( fileSamples, s_backgroundStream->info.rate,
-				s_backgroundStream->info.width, s_backgroundStream->info.channels, raw, s_musicVolume->value );
-		}
-		else
-		{
-			// loop
-			if ( s_backgroundLoop[0] != '\0' )
-			{
-				S_OpenBackgroundStream( s_backgroundLoop );
-				if ( !s_backgroundStream )
-					return;
-			}
-			else
-			{
-				S_Base_StopBackgroundTrack();
-				return;
-			}
-		}
-
-	}
+#ifndef HEADLESS
+	// Feed ma_engine's streaming ring: decode the stream and push it into the
+	// engine's music voice, which its audio thread drains at device rate.
+	S_EngineFeedBackgroundTrack();
+#endif
 }
 
 
@@ -1496,6 +1527,12 @@ void S_FreeOldestSound( void ) {
 	}
 	sfx->inMemory = qfalse;
 	sfx->soundData = NULL;
+
+	// Deliberately keep sfx->enginePcm (the flat decode used by the engine path).
+	// It is an independent copy of the samples, so freeing soundData does not
+	// touch it, and a live engine voice may still be reading it — freeing it here
+	// could use-after-free. It is content-identical to a fresh decode, so the
+	// retained buffer stays valid and is released only at S_Base_Shutdown.
 }
 
 
@@ -1513,25 +1550,27 @@ static void S_Base_Shutdown( void ) {
 
 	S_OpusDecoderShutdown();
 
-	// release sound buffers only when switching to dedicated
-	// to avoid redundant reallocation at client restart
-	if ( com_dedicated->integer )
+	// release sound buffers only when a server is running (no local audio
+	// playback) to avoid redundant reallocation at client restart
+	if ( com_sv_running->integer )
 		SND_shutdown();
 
 	s_soundStarted = qfalse;
 
-	// Free heap-owned soundName strings before resetting the pool.
+	// Free heap-owned soundName strings before resetting the pool. Also release
+	// any cached flat engine-PCM buffer (materialized for the ma_engine feed):
+	// SNDDMA_Shutdown above has already stopped every voice, so no ma_sound
+	// still points into these buffers.
 	for ( int i = 0; i < s_numSfx; i++ ) {
+#ifndef HEADLESS
+		S_EngineFreeSfxPcm( &s_knownSfx[i] );
+#endif
 		if ( s_knownSfx[i].soundName ) {
 			Z_Free( (void *)s_knownSfx[i].soundName );
 			s_knownSfx[i].soundName = NULL;
 		}
 	}
 	s_numSfx = 0; // clean up sound cache -EC-
-
-	if ( dma_buffer2 != buffer2 )
-		free( dma_buffer2 );
-	dma_buffer2 = NULL;
 
 	Cmd_RemoveCommand( "s_info" );
 
@@ -1629,14 +1668,6 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 		S_Base_StopAllSounds();
 
 		S_OpusDecoderInit();
-
-		// setup (likely) or allocate (unlikely) buffer for muted painting
-		if ( dma.samples * dma.samplebits/8 <= sizeof( buffer2 ) ) {
-			dma_buffer2 = buffer2;
-		} else {
-			dma_buffer2 = malloc( dma.samples * dma.samplebits/8 );
-			memset( dma_buffer2, 0, dma.samples * dma.samplebits/8 );
-		}
 	} else {
 		return qfalse;
 	}
@@ -1646,7 +1677,6 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 	si->StartLocalSound = S_Base_StartLocalSound;
 	si->StartBackgroundTrack = S_Base_StartBackgroundTrack;
 	si->StopBackgroundTrack = S_Base_StopBackgroundTrack;
-	si->RawSamples = S_Base_RawSamples;
 	si->StopAllSounds = S_Base_StopAllSounds;
 	si->ClearLoopingSounds = S_Base_ClearLoopingSounds;
 	si->AddLoopingSound = S_Base_AddLoopingSound;

@@ -1,0 +1,82 @@
+// removebots.wui -- q3now Remove Bot dialog (Phase 5b canonical)
+//
+// In-game cluster popup (§7.4). Centered overlay mirroring
+// serverinfo.wui (§7.3) shape: header + subheader + ListBox body
+// over the connected-player feeder (feeder 7 = FEEDER_PLAYER_LIST)
+// + footer with Kick / Close.
+//
+// Engine note: kick action shells out to the `clientkick` console
+// command — uiScript Kick on legacy CNQ3 reads listSelectedRow
+// from the PLAYER_LIST feeder and dispatches clientkick <id>.
+
+menuDef {
+	name "removebots"
+	layer "popup"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "popup_overlay"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		alignX center
+		alignY center
+		background "layered" effects "vignette"
+
+		itemDef {
+			name "removebots_root"
+			type container
+			rect 0 0 0.4 0.6
+			direction column
+			padding $popup_padding
+			gap $spacing_md
+			background $panel
+			border 1px $line_strong
+			radius $radius_md
+			width PERCENT 0.4
+			height PERCENT 0.6
+
+			itemDef { name "header" type 0 rect 0 0 1 0.06 height FIT text "Remove Bot" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
+			itemDef { name "subheader" type 0 rect 0 0 1 0.03 height FIT text "Select a connected client and kick it from the server." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+
+			// ── ListBox view of the PLAYER_LIST feeder (feeder 7).
+			// Single-column row of connected-client names; double-
+			// click kicks via uiScript Kick.
+			itemDef {
+				name "botlist"
+				type 6
+				rect 0 0 1 0.6
+				width PERCENT 1.0
+				height GROW
+				font $font_sans 12
+				forecolor $bone
+				backcolor $panelDeep
+				style 1
+				feeder 7
+				elementheight 22
+				columns 1 0 460 32
+				visible 1
+				doubleclick { uiScript Kick }
+			}
+
+			itemDef {
+				name "popup_footer"
+				type container
+				rect 0 0 1 0.05
+				direction row
+				gap $spacing_md
+				alignX end
+				height FIT
+
+				itemDef { type 1 rect 0 0 0.18 0.04 height FIT text "Kick Selected" textalign 1 font $font_sans_bold 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { uiScript Kick } }
+				itemDef { type 1 rect 0 0 0.12 0.04 height FIT text "Close" textalign 1 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+			}
+		}
+	}
+
+	onESC { close }
+}

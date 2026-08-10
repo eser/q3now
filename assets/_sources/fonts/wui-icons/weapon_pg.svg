@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Weapon pg — plasma gun (body + orb) -->
+  <path d="M 12 46 L 58 46 L 58 67 L 50 67 L 50 79 L 38 79 L 38 67 L 12 67 Z M 67 38 L 88 38 L 92 50 L 88 62 L 67 62 L 63 50 Z" fill="black" fill-rule="evenodd"/>
+</svg>

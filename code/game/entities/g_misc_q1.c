@@ -4,7 +4,6 @@
 // Q1 misc / ambient entities
 
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 /* worldtype constants matching Q1/RR */
@@ -228,7 +227,7 @@ static void q1_misc_explobox_die( gentity_t *self, gentity_t *inflictor, gentity
 =================
 Q1_DropToFloor
 
-Phase 6.5.3 (Bug 5): snap a freshly-spawned point entity down onto
+snap a freshly-spawned point entity down onto
 whatever world geometry is below it (within 4096 units) and record the
 floor entity so it rides movers — mirrors FinishSpawningItem
 (g_items.c). Q1's `misc_explobox` does the same (`origin_z += 2;
@@ -296,7 +295,7 @@ void SP_q1_misc_explobox( gentity_t *ent ) {
 	VectorSet( ent->r.mins,  0.0f,  0.0f,  0.0f );
 	VectorSet( ent->r.maxs, 32.0f, 32.0f, 64.0f );
 	VectorCopy( ent->s.origin, ent->r.currentOrigin );
-	Q1_DropToFloor( ent );	// Phase 6.5.3 (Bug 5): settle onto the floor like Q1 misc.qc droptofloor()
+	Q1_DropToFloor( ent );	// settle onto the floor like Q1 misc.qc droptofloor()
 	trap_LinkEntity( ent );
 }
 
@@ -330,7 +329,7 @@ void SP_q1_misc_explobox2( gentity_t *ent ) {
 	VectorSet( ent->r.mins,  0.0f,  0.0f,  0.0f );
 	VectorSet( ent->r.maxs, 32.0f, 32.0f, 64.0f );
 	VectorCopy( ent->s.origin, ent->r.currentOrigin );
-	Q1_DropToFloor( ent );	// Phase 6.5.3 (Bug 5): settle onto the floor like Q1 misc.qc droptofloor()
+	Q1_DropToFloor( ent );	// settle onto the floor like Q1 misc.qc droptofloor()
 	trap_LinkEntity( ent );
 }
 
@@ -682,3 +681,83 @@ void SP_q1_misc_fireball( gentity_t *ent ) {
 	/* stagger first shot 0–5 s so simultaneous emitters don't fire in sync */
 	ent->nextthink = level.time + (int)( random() * 5000.0f );
 }
+
+/*
+=================
+SP_q1_monster — spawn a map-placed Q1 monster as its character
+
+A Q1 map entity "monster_<name>" arrives here as "q1_monster_<name>" (the BSP loader
+prefixes every classname with q1_). The suffix IS the character name, so this one
+adapter places any of the shipped monsters — it strips the prefix and hands the BSP
+origin + facing to the same name-driven spawn the console/script paths use. No monster
+logic lives here: the character's model, hull, and attack all come from its manifest.
+
+The BSP placeholder entity is freed after — G_SpawnBehaviorMonster spawns a fresh
+behavior monster; the map entity was only carrying the origin/angle/classname.
+=================
+*/
+// Q1 monster classname suffix -> our character directory, for the few whose Q1 name
+// differs from our character name (army=the grunt, demon1=the fiend). Any suffix not
+// listed is used verbatim (dog/knight/ogre/shambler/zombie/wizard/boss all match).
+static const char *Q1MonsterCharacter( const char *suffix ) {
+	static const struct { const char *q1; const char *character; } map[] = {
+		{ "army",   "soldier" },   // Q1 grunt
+		{ "demon1", "demon"   },   // Q1 fiend
+	};
+	int i;
+	for ( i = 0; i < (int)( sizeof( map ) / sizeof( map[0] ) ); i++ ) {
+		if ( !Q_stricmp( suffix, map[i].q1 ) ) {
+			return map[i].character;
+		}
+	}
+	return suffix;
+}
+
+void SP_q1_monster( gentity_t *ent ) {
+	const char *name;
+	gentity_t  *mob;
+	int         health;
+
+	/* "q1_monster_boss" -> "boss". Anything not so prefixed is not ours. */
+	if ( !ent->classname || Q_stricmpn( ent->classname, "q1_monster_", 11 ) != 0 ) {
+		return;
+	}
+
+	/* Test lever: when set, map-placed monsters are not spawned, so a level can be
+	 * exercised without its combat gauntlet (e.g. to isolate nav/interaction from
+	 * fighting). Off by default → production spawns every monster as before. Read
+	 * directly (no registration) like the other diagnostic cvars. */
+	if ( trap_Cvar_VariableIntegerValue( "g_suppressMonsters" ) ) {
+		G_FreeEntity( ent );
+		return;
+	}
+
+	name = Q1MonsterCharacter( ent->classname + 11 );
+	if ( !name[0] ) {
+		return;
+	}
+
+	/* A mapper may set "health"; else the character's own default (0 -> the spawn
+	 * clamps to a sane minimum). The boss is killed by the scripted shock, not by its
+	 * health pool, so its exact value is not load-bearing. */
+	health = ent->health;
+
+	mob = G_SpawnBehaviorMonster( ent->s.origin, ENTITYNUM_NONE, health, 0, name );
+	if ( mob ) {
+		/* carry the map's facing onto the spawned monster */
+		VectorCopy( ent->s.angles, mob->s.angles );
+		VectorCopy( ent->s.angles, mob->r.currentAngles );
+	}
+
+	/* the placeholder has done its job — the real monster is a separate entity */
+	G_FreeEntity( ent );
+}
+
+// ── savegame callback registry — TIER 2 file-local sub-list ──────────────────
+// The file-static callbacks defined above, published through SG_Register_g_misc_q1().
+// Name list single-sourced in g_save_localcbs.h (SG_LOCAL_CB_g_misc_q1). See
+// g_save_funcs.h.
+#include "g_save_funcs.h"
+#include "g_save_localcbs.h"
+
+SG_DEFINE_LOCAL_REGISTRY( SG_LOCAL_CB_g_misc_q1, SG_Register_g_misc_q1 )

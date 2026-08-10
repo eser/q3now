@@ -287,7 +287,6 @@
     <ClCompile Include="..\..\client\snd_dma.c" />
     <ClCompile Include="..\..\client\snd_main.c" />
     <ClCompile Include="..\..\client\snd_mem.c" />
-    <ClCompile Include="..\..\client\snd_mix.c" />
     <ClCompile Include="..\..\client\snd_wavelet.c" />
     <ClCompile Include="..\..\qcommon\cmd.c" />
     <ClCompile Include="..\..\qcommon\cm_load.c" />
@@ -344,22 +343,6 @@
     <ClCompile Include="..\win_gamma.c" />
     <ClCompile Include="..\win_glimp.c" />
     <ClCompile Include="..\win_qgl.c" />
-  </ItemGroup>
-  <ItemGroup>
-    <CustomBuild Include="..\..\asm\snd_mix_x64.asm">
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Assembling...</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ml64 /c /Zi /Fo"$(IntDir)%(Filename)%(Extension).obj" "%(FullPath)"
-</Command>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(IntDir)%(Filename)%(Extension).obj;%(Outputs)</Outputs>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Assembling...</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">ml64 /c /Zi /Fo"$(IntDir)%(Filename)%(Extension).obj" "%(FullPath)"
-</Command>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(IntDir)%(Filename)%(Extension).obj;%(Outputs)</Outputs>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-    </CustomBuild>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\cgame\cg_public.h" />

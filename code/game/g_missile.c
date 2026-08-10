@@ -3,7 +3,6 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #define	MISSILE_PRESTEP_TIME	50
@@ -320,8 +319,15 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 		// use this to track when to damage the enemy
 		ent->last_move_time = level.time - 10000;
 
-		ent->parent->client->ps.pm_flags |= PMF_GRAPPLE_PULL;
-		VectorCopy( ent->r.currentOrigin, ent->parent->client->ps.grapplePoint);
+		// The hook's parent is structurally always a client (fire_grapple's sole
+		// caller, Offhand_Grapple_Fire, derefs ent->client before firing). Guard
+		// the deref anyway for consistency with the grapple-cleanup path below
+		// (which already checks ent->parent && ent->parent->client) and to stay
+		// safe if a non-client ever spawns a "hook" entity.
+		if ( ent->parent && ent->parent->client ) {
+			ent->parent->client->ps.pm_flags |= PMF_GRAPPLE_PULL;
+			VectorCopy( ent->r.currentOrigin, ent->parent->client->ps.grapplePoint);
+		}
 
 		trap_LinkEntity( ent );
 		trap_LinkEntity( nent );
@@ -380,20 +386,24 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace, vec3_t impactDir ) {
 
 				att = G_AttackFromMOD( ent->splashMethodOfDeath );
 
-                if (!hitClient) {
+                if (!hitClient && g_entities[ent->r.ownerNum].client) {
+                    // owner may be a non-client (world/obelisk/turret projectile)
+                    // → client is NULL; guard the accuracy_hits++ deref too, not
+                    // just the attackStats line.
                     g_entities[ent->r.ownerNum].client->accuracy_hits++;
-                    if (g_entities[ent->r.ownerNum].client) g_entities[ent->r.ownerNum].client->attackStats[att].hits++;
+                    g_entities[ent->r.ownerNum].client->attackStats[att].hits++;
                 }
             }
         }
         else if (G_RadiusDamage(trace->endpos, ent->parent, ent->splashDamage, ent->splashRadius, other, ent->splashMethodOfDeath, qfalse)) {
-            if (!hitClient) {
+            if (!hitClient && g_entities[ent->r.ownerNum].client) {
 				int att;
 
 				att = G_AttackFromMOD( ent->splashMethodOfDeath );
 
+				// guard the accuracy_hits++ deref — owner may be a non-client.
 				g_entities[ent->r.ownerNum].client->accuracy_hits++;
-                if (g_entities[ent->r.ownerNum].client) g_entities[ent->r.ownerNum].client->attackStats[att].hits++;
+				g_entities[ent->r.ownerNum].client->attackStats[att].hits++;
             }
         }
 	}
@@ -544,6 +554,153 @@ void G_RunMissile( gentity_t *ent ) {
 }
 
 
+#if FEAT_UNLAGGED
+/*
+=================
+G_SetMissileLaunchTime
+
+Anchor a freshly-spawned missile's trajectory time to the instant the shooter
+actually fired, not the (possibly much later) frame the server processed the
+shot on. For a high-ping shooter the command arrives late, so its missile would
+otherwise begin its flight from "now" and trace against client positions that
+are already too recent — the shooter misses targets they saw dead-center.
+
+Backdating s.pos.trTime to the shooter's attackTime puts the missile where it
+would be had it launched on time (the trajectory math reads trTime directly, and
+trTime is networked so every client renders the same advanced position). The
+per-frame replay (G_MissileRunDelag) then re-traces the missed flight against the
+matching client history. launchTime is a private copy of the backdated trTime so
+a later bounce/teleport that resets s.pos.trTime doesn't lose the replay anchor.
+
+Callers keep their own default trTime assignment; this only OVERRIDES it when the
+missile is delag-eligible (client-owned + g_unlagged + g_unlaggedMissiles), so a
+non-client / disabled missile keeps its vanilla spawn-frame trTime untouched.
+=================
+*/
+void G_SetMissileLaunchTime( gentity_t *self, gentity_t *bolt ) {
+	int launchTime;
+	int maxLatency;
+
+	bolt->needsDelag = qfalse;
+
+	// Non-client owners (world, disconnected shooter) and the disabled paths keep
+	// whatever trTime the spawn site already set — no backdate, no replay.
+	if ( !self->client || !g_unlagged.integer || !g_unlaggedMissiles.integer ) {
+		return;
+	}
+
+	// Honor the shooter's delag preference, like the hitscan path. The hitscan
+	// per-weapon bitmask (G_DoTimeShiftFor's wpflags) only carries bits for the
+	// four HITSCAN weapons — every projectile weapon maps to 0 there — so the
+	// only meaningful gate for a missile is the player's global delag bit
+	// (cg_delag userinfo -> pers.delag bit 1). A shooter who opted out of delag
+	// gets the vanilla spawn-frame trTime (the U1 batch still rewinds their
+	// missile this frame, but no missed-flight replay).
+	if ( !( self->client->pers.delag & 1 ) ) {
+		return;
+	}
+
+	launchTime = self->client->attackTime - g_unlaggedMissileNudge.integer;
+
+	// Clamp into [now - maxLatency, now]: never reach further back than the
+	// history ring can serve, and never anchor a missile in the future (which
+	// would make it move backwards relative to its launch on the first step).
+	maxLatency = g_unlaggedMissileMaxLatency.integer;
+	if ( launchTime < level.time - maxLatency ) {
+		launchTime = level.time - maxLatency;
+	} else if ( launchTime > level.time ) {
+		launchTime = level.time;
+	}
+
+	bolt->s.pos.trTime = launchTime;
+	bolt->launchTime   = launchTime;
+	bolt->needsDelag   = qtrue;
+}
+
+/*
+=================
+G_MissileRunDelag
+
+Replay a late missile's missed flight. Stepping a local clock from the start of
+the back-track window up to (but not into) the present frame, each step rewinds
+all clients except the owner to that historical instant, evaluates the missile's
+trajectory there, and traces it — so its early-flight impacts reconcile to where
+the targets actually were. The present step (previousTime -> level.time) is NOT
+run here; it is the job of the single G_RunFrame batch that follows, so each
+missile advances exactly one present frame per real frame (no double-run).
+
+stepmsec is the real server frame delta (level.time - level.previousTime), which
+is also the granularity the client history ring is stored at. The window is
+sv_fps-scaled off that same delta: maxLatency plus two frame periods of slack.
+=================
+*/
+void G_MissileRunDelag( gentity_t *ent, int stepmsec ) {
+	int maxBacktrack;
+	int savedTime;
+	int savedPrevTime;
+	int replayTime;
+
+	if ( !g_unlagged.integer || !g_unlaggedMissiles.integer || stepmsec <= 0 ) {
+		return;
+	}
+	if ( !ent->inuse || ent->freeAfterEvent ||
+	     ent->s.eType != ET_MISSILE || !ent->needsDelag ) {
+		return;
+	}
+
+	// Back-track window, scaled to the actual frame step (no hardcoded sv_fps):
+	// the latency cap plus two frame periods of slack.
+	maxBacktrack = g_unlaggedMissileMaxLatency.integer + stepmsec * 2;
+	if ( level.previousTime <= maxBacktrack ) {
+		ent->needsDelag = qfalse;
+		return;
+	}
+
+	savedTime     = level.time;
+	savedPrevTime = level.previousTime;
+
+	// Quantize the window start to a step boundary so each replay instant lines
+	// up with a stored history frame.
+	replayTime = level.previousTime - ( maxBacktrack / stepmsec ) * stepmsec;
+
+	while ( replayTime < savedPrevTime ) {
+		// Stop if a prior step already detonated / freed the missile.
+		if ( !ent->inuse || ent->freeAfterEvent ) {
+			break;
+		}
+		// Only replay instants at or after the true launch — earlier steps are
+		// before the missile existed.
+		if ( replayTime >= ent->launchTime ) {
+			// Present this step AS its own frame to the whole shift machinery:
+			// set level.time/previousTime to the historical step FIRST, so the
+			// shift's save-once-per-frame bookkeeping (G_TimeShiftClient keys the
+			// saved real position on level.time) and the matching unshift both key
+			// on this same step value — a self-contained shift/unshift pair that
+			// leaves savedHistory.time back at 0, never a stale value bleeding into
+			// the next step, the following U1 batch, or a later hitscan bracket.
+			level.time         = replayTime + stepmsec;
+			level.previousTime = replayTime;
+
+			// Rewind everyone but the owner (G_RunMissile already ignores the
+			// owner via passent=ownerNum; skipping it here keeps the shooter from
+			// being shifted into a self-collision).
+			G_TimeShiftAllClients( replayTime, ent->parent );
+			G_RunMissile( ent );
+			G_UnTimeShiftAllClients( ent->parent );
+
+			level.time         = savedTime;
+			level.previousTime = savedPrevTime;
+		}
+		replayTime += stepmsec;
+	}
+
+	// Caught up to the present; the following G_RunFrame batch runs the present
+	// step. Don't replay this missile again.
+	ent->needsDelag = qfalse;
+}
+#endif
+
+
 //=============================================================================
 
 /*
@@ -569,8 +726,6 @@ gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t rig
 		baseSpeed = 555;
 		additionalSpeed = 1800;
 	}
-
-	VectorNormalize (dir);
 
 	bolt = G_Spawn();
 	bolt->classname = "plasma";
@@ -612,6 +767,10 @@ gentity_t *fire_plasma(gentity_t *self, vec3_t start, vec3_t forward, vec3_t rig
 	SnapVector( bolt->s.pos.trDelta );			// save net bandwidth
 
 	VectorCopy (start, bolt->r.currentOrigin);
+
+#if FEAT_UNLAGGED
+	G_SetMissileLaunchTime( self, bolt );		// backdate trTime to the shooter's fire instant (delag)
+#endif
 
 #if FEAT_DESTROYABLE_MISSILES
 	G_MakeMissileDestroyable( bolt );  // 11B
@@ -684,6 +843,10 @@ gentity_t *fire_grenade (gentity_t *self, vec3_t start, vec3_t dir, int time, qb
 
 	VectorCopy (start, bolt->r.currentOrigin);
 
+#if FEAT_UNLAGGED
+	G_SetMissileLaunchTime( self, bolt );		// backdate trTime to the shooter's fire instant (delag)
+#endif
+
 #if FEAT_DESTROYABLE_MISSILES
 	G_MakeMissileDestroyable( bolt );  // 11B
 #endif
@@ -742,6 +905,10 @@ gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir) {
     VectorScale(dir, speed, bolt->s.pos.trDelta);
 	SnapVector( bolt->s.pos.trDelta );			// save net bandwidth
 	VectorCopy (start, bolt->r.currentOrigin);
+
+#if FEAT_UNLAGGED
+	G_SetMissileLaunchTime( self, bolt );		// backdate trTime to the shooter's fire instant (delag)
+#endif
 
 #if FEAT_DESTROYABLE_MISSILES
 	G_MakeMissileDestroyable( bolt );  // 11B
@@ -833,6 +1000,10 @@ gentity_t *fire_q1_spike( gentity_t *self, vec3_t start, vec3_t dir, int damage,
 	SnapVector( bolt->s.pos.trDelta );
 	VectorCopy( start, bolt->r.currentOrigin );
 
+#if FEAT_UNLAGGED
+	G_SetMissileLaunchTime( self, bolt );		// backdate trTime to the shooter's fire instant (delag)
+#endif
+
 	return bolt;
 }
 
@@ -872,6 +1043,10 @@ gentity_t *fire_q1_laser( gentity_t *self, vec3_t start, vec3_t dir ) {
 	VectorScale( dir, 600.0f, bolt->s.pos.trDelta );
 	SnapVector( bolt->s.pos.trDelta );
 	VectorCopy( start, bolt->r.currentOrigin );
+
+#if FEAT_UNLAGGED
+	G_SetMissileLaunchTime( self, bolt );		// backdate trTime to the shooter's fire instant (delag)
+#endif
 
 	return bolt;
 }
@@ -915,5 +1090,20 @@ gentity_t *fire_q1_lavaball( gentity_t *self, vec3_t start, vec3_t dir, float sp
 	SnapVector( bolt->s.pos.trDelta );
 	VectorCopy( start, bolt->r.currentOrigin );
 
+#if FEAT_UNLAGGED
+	G_SetMissileLaunchTime( self, bolt );		// backdate trTime to the shooter's fire instant (delag)
+#endif
+
 	return bolt;
 }
+
+// ── savegame callback registry — TIER 2 file-local sub-list ──────────────────
+// G_MissileExplodeDie (the die handler that lets a missile be shot down) only
+// exists under FEAT_DESTROYABLE_MISSILES; the list (SG_LOCAL_CB_g_missile in
+// g_save_localcbs.h) is guarded so it holds exactly what was compiled. When off
+// the list is empty and SG_Register_g_missile registers a zero-entry table. See
+// g_save_funcs.h.
+#include "g_save_funcs.h"
+#include "g_save_localcbs.h"
+
+SG_DEFINE_LOCAL_REGISTRY( SG_LOCAL_CB_g_missile, SG_Register_g_missile )

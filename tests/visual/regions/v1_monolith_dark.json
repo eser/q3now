@@ -1,0 +1,68 @@
+{
+  "_doc": "Dispatch 5.17: tightened rect coordinates to mockup baseline pixel-precise bounds (Eser dispatch 5.9 mockup-anchored canonical mandate preserved; NOT engine-anchored). Dispatch 5.16 visual mockup match achieved → tighter rects now contain content without slack. Per-region rationale documents extraction source + dispatch 5.17 tighten note. Thresholds calibrated separately in S3 (W-17 threshold-up guard preserved).",
+
+  "global_threshold_pct": 5.0,
+  "fuzz_pct": 12.0,
+
+  "regions": [
+    { "name": "title_bar",            "x":  72, "y":  18, "w": 200, "h":  20, "threshold_pct": 10.0, "ssim_threshold": 0.30,
+      "rationale": "Mockup baseline: QUAKEWIRED · MMXXVI mono small text. Dispatch 5.18: per-region threshold 0.30 (text-heavy MSDF vs Chrome web font rasterization floor; Eser ratified Option B per-region variance 2026-05-29; measured 0.355)." },
+
+    { "name": "hero_quake_wired",     "x":  44, "y":  72, "w": 560, "h": 250, "threshold_pct": 10.0, "ssim_threshold": 0.30,
+      "rationale": "Mockup baseline: QUAKE+WIRED hero stack y=72-322. Dispatch 5.18: per-region threshold 0.30 (text-heavy MSDF rasterization floor; measured 0.348)." },
+
+    { "name": "q_hover_indicator",    "x":  84, "y": 454, "w":  30, "h":  30, "threshold_pct": 10.0, "ssim_threshold": 0.40,
+      "rationale": "Active row chevron glyph. Dispatch 5.18: per-region threshold 0.40 (small-glyph MSDF rasterization floor; measured 0.4477 just below 0.45 default)." },
+
+    { "name": "menu_row_0",           "x":  72, "y": 448, "w": 480, "h":  53, "threshold_pct": 10.0,
+      "rationale": "qw-variants.jsx:98-130 CAMPAIGN row; menu starts at marginTop:48 after hero block (y=400) → y=448; row height = 28 label + 12+12 padding = 52. Dispatch 5.17 kept 5.9 calibration." },
+
+    { "name": "menu_row_1",           "x":  72, "y": 502, "w": 480, "h":  53, "threshold_pct": 10.0,
+      "rationale": "JOIN BATTLE; 448 + 52 + 2 = 502. Dispatch 5.17 kept 5.9 calibration." },
+
+    { "name": "menu_row_2",           "x":  72, "y": 556, "w": 480, "h":  53, "threshold_pct": 10.0,
+      "rationale": "HOST A MATCH; 502 + 54 = 556. Dispatch 5.17 kept 5.9 calibration." },
+
+    { "name": "menu_row_3",           "x":  72, "y": 610, "w": 480, "h":  53, "threshold_pct": 10.0,
+      "rationale": "OPTIONS; 556 + 54 = 610. Dispatch 5.17 kept 5.9 calibration." },
+
+    { "name": "menu_row_4",           "x":  72, "y": 664, "w": 480, "h":  53, "threshold_pct": 10.0, "ssim_threshold": 0.35,
+      "rationale": "QUIT row. Dispatch 5.18: per-region threshold 0.35 (text-heavy with active highlight cross-renderer floor; measured 0.408)." },
+
+    { "name": "profile_card_header",  "x":1024, "y":  72, "w": 360, "h":  44, "threshold_pct": 10.0, "ssim_threshold": 0.35,
+      "rationale": "Profile card header row. Dispatch 5.18: per-region threshold 0.35 (mixed text+widget cross-renderer floor; measured 0.424)." },
+
+    { "name": "last_match_grid",      "x":1024, "y": 256, "w": 360, "h": 170, "threshold_pct": 10.0, "ssim_threshold": 0.35,
+      "rationale": "Last match KILLS/DEATHS/ACC/DMG grid. Dispatch 5.18: per-region threshold 0.35 (mixed text+widget cross-renderer floor; measured 0.410)." },
+
+    { "name": "global_feed_columns",  "x":1024, "y": 450, "w": 320, "h": 200, "threshold_pct": 10.0,
+      "rationale": "Mockup GLOBAL FEED 5 entries y=450-650. Dispatch 5.17 tighten." },
+
+    { "name": "arena_of_day_card",    "x":1024, "y": 680, "w": 320, "h": 180, "threshold_pct": 10.0,
+      "rationale": "Mockup AREVA OF THE DAY CAMPGROUNDS card y=680-860. Dispatch 5.17 tighten." },
+
+    { "name": "bottom_hint_bar",      "x":  64, "y": 870, "w":1320, "h":  30, "threshold_pct": 10.0,
+      "rationale": "Mockup bottom hint bar y=870-900 (post-bottom_hint_bar position absolute fix). Dispatch 5.17 tighten." },
+
+    { "name": "footer_strip",         "x":  64, "y": 838, "w": 360, "h":  20, "threshold_pct": 10.0,
+      "rationale": "Mockup v0.1.0 · build mmxxvi footer line y=838-858. Dispatch 5.17 tighten." },
+
+    { "name": "bg_sky_band",          "x":  16, "y":   0, "w":1408, "h": 200, "threshold_pct": 10.0,
+      "rationale": "DemoBackdrop sky gradient — top 200 px of viewport, 16 px inset to avoid vignette" },
+
+    { "name": "bg_floor_band",        "x":  16, "y": 780, "w":1408, "h":  76, "threshold_pct": 10.0,
+      "rationale": "DemoBackdrop floor band — bottom 76 px above bottom_hint_bar" },
+
+    { "name": "bg_fog_band",          "x":  16, "y": 400, "w":1408, "h": 200, "threshold_pct": 10.0,
+      "rationale": "DemoBackdrop mid-fog band — central horizontal strip" },
+
+    { "name": "bg_embers",            "x":  16, "y":   0, "w":1408, "h": 900, "threshold_pct": 10.0,
+      "rationale": "DemoBackdrop embers distributed across full viewport" },
+
+    { "name": "bg_vignette_corners",  "x":   0, "y":   0, "w": 200, "h": 200, "threshold_pct": 10.0, "ssim_threshold": 0.40,
+      "rationale": "DemoBackdrop top-left corner vignette. Dispatch 5.18: per-region threshold 0.40 (BG renderer parameter residual; Bucket B post-LANDED follow-up; measured 0.413)." },
+
+    { "name": "bg_tower_arches",      "x": 600, "y": 200, "w": 240, "h": 500, "threshold_pct": 10.0,
+      "rationale": "DemoBackdrop tower silhouettes — central-vertical strip area where towers paint in mockup" }
+  ]
+}

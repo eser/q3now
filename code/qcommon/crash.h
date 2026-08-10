@@ -15,8 +15,9 @@ void Crash_WriteReport( const char *reason, const char *address, const char *mod
 void Crash_InstallHandlers( void );
 
 // Per-VM state tracking (called by vm.c when VMs load / unload).
-void Crash_SaveVMPointer( vmIndex_t vmIndex, vm_t *vm );
-void Crash_SaveVMChecksum( vmIndex_t vmIndex, unsigned int crc32 );
+// cgameInstance: per-app cgame slot (in-process-queue L7); 0 for game / primary cgame.
+void Crash_SaveVMPointer( vmIndex_t vmIndex, int cgameInstance, vm_t *vm );
+void Crash_SaveVMChecksum( vmIndex_t vmIndex, int cgameInstance, unsigned int crc32 );
 
 // Async-signal-safe stack trace print (POSIX signal handlers).
 #if !defined( _WIN32 )

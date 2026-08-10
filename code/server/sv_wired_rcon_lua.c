@@ -7,7 +7,6 @@
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 static void Rcon_SanitizeInline( char *dst, int dstSize, const char *src ) {
@@ -201,8 +200,14 @@ static int l_players_kick( lua_State *L ) {
 	if ( id < 0 || id >= sv.maxclients || svs.clients[id].state < CS_CONNECTED ) {
 		return luaL_error( L, "invalid player id" );
 	}
-	if ( svs.clients[id].netchan.remoteAddress.type <= NA_LOOPBACK ) {
-		return luaL_error( L, "cannot kick loopback/bot client" );
+	/* Protect non-real clients (NA_BAD/NA_BOT) and the host (slot-0 loopback);
+	 * a 2nd same-process app (NA_LOOPBACK, slot>0) is a real client -> kickable.
+	 * (in-process-queue L4-fix: the prior `type <= NA_LOOPBACK` protected the
+	 * NA_BAD integrated client; the SV_IsHostClient||NA_BOT rewrite dropped that
+	 * — NA_BAD is neither — restored here with the 2nd-app carve-out.) */
+	if ( svs.clients[id].netchan.remoteAddress.type <= NA_LOOPBACK
+	     && !( svs.clients[id].netchan.remoteAddress.type == NA_LOOPBACK && id > 0 ) ) {
+		return luaL_error( L, "cannot kick host/bot client" );
 	}
 
 	SV_DropClient( &svs.clients[id], reason && reason[0] ? reason : "was kicked" );
@@ -277,8 +282,13 @@ static int l_players_tell( lua_State *L ) {
 	if ( id < 0 || id >= sv.maxclients || svs.clients[id].state < CS_CONNECTED ) {
 		return luaL_error( L, "invalid player id" );
 	}
-	if ( svs.clients[id].netchan.remoteAddress.type <= NA_LOOPBACK ) {
-		return luaL_error( L, "cannot send tell to loopback/bot client" );
+	/* Protect non-real clients (NA_BAD/NA_BOT) and the host (slot-0 loopback);
+	 * a 2nd same-process app (NA_LOOPBACK, slot>0) is a real client -> tell-able.
+	 * (in-process-queue L4-fix: restores the prior `type <= NA_LOOPBACK` set —
+	 * which protected the NA_BAD integrated client — with the 2nd-app carve-out.) */
+	if ( svs.clients[id].netchan.remoteAddress.type <= NA_LOOPBACK
+	     && !( svs.clients[id].netchan.remoteAddress.type == NA_LOOPBACK && id > 0 ) ) {
+		return luaL_error( L, "cannot send tell to host/bot client" );
 	}
 
 	Rcon_SanitizeInline( clean, sizeof( clean ), msg );

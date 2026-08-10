@@ -12,7 +12,6 @@ extern int G_DamageFalloff( int damage, vec3_t start, vec3_t end, float maxDamag
 extern void SnapVectorTowards( vec3_t v, vec3_t to );
 
 #define MACHINEGUN_DAMAGE   8
-#define MACHINEGUN_SPREAD	250
 void Attack_Machinegun_Primary ( gentity_t *ent ) {
 	trace_t		tr;
 	vec3_t		end;
@@ -31,9 +30,16 @@ void Attack_Machinegun_Primary ( gentity_t *ent ) {
 		ent->client->attackStats[ATT_MACHINEGUN_PRIMARY].shots++;
 	}
 
-	r = random() * M_PI * 2.0f;
-	u = sin(r) * crandom() * MACHINEGUN_SPREAD * 16;
-	r = cos(r) * crandom() * MACHINEGUN_SPREAD * 16;
+	// RS-3: dynamic recoil/spread cone — ramps base(200)→ceiling(500) under
+	// sustained fire, decays after release, from the shooter's own synced anchor
+	// (ent->client->ps.fireRampStartTime). Server-authoritative bullet cone; the
+	// shape (crandom * spread * 16) and the *16 fixed-point scale are unchanged.
+	{
+		float spread = BG_CalcWeaponSpread( &ent->client->ps, ATT_MACHINEGUN_PRIMARY, level.time );
+		r = random() * M_PI * 2.0f;
+		u = sin(r) * crandom() * spread * 16;
+		r = cos(r) * crandom() * spread * 16;
+	}
 	VectorMA (muzzle, 8192*16, forward, end);
 	VectorMA (end, r, right, end);
 	VectorMA (end, u, up, end);
@@ -95,7 +101,6 @@ void Attack_Machinegun_Primary ( gentity_t *ent ) {
 }
 
 #define MACHINEGUN_BURST_DAMAGE   10
-#define MACHINEGUN_BURST_SPREAD   20
 void Attack_Machinegun_Burst( gentity_t *ent ) {
 	trace_t		tr;
 	vec3_t		end;
@@ -114,9 +119,15 @@ void Attack_Machinegun_Burst( gentity_t *ent ) {
 		ent->client->attackStats[ATT_MACHINEGUN_BURST].shots++;
 	}
 
-	r = random() * M_PI * 2.0f;
-	u = sin(r) * crandom() * MACHINEGUN_BURST_SPREAD * 16;
-	r = cos(r) * crandom() * MACHINEGUN_BURST_SPREAD * 16;
+	// RS-3: dynamic burst cone — its OWN ramp curve {base 20, ceiling 80}, read
+	// via ATT_MACHINEGUN_BURST (not the primary {200,500}). Anchor maintained in
+	// PM_MG_Burst_Start/Think. Shape + *16 scale unchanged.
+	{
+		float spread = BG_CalcWeaponSpread( &ent->client->ps, ATT_MACHINEGUN_BURST, level.time );
+		r = random() * M_PI * 2.0f;
+		u = sin(r) * crandom() * spread * 16;
+		r = cos(r) * crandom() * spread * 16;
+	}
 	VectorMA (muzzle, 8192*16, forward, end);
 	VectorMA (end, r, right, end);
 	VectorMA (end, u, up, end);

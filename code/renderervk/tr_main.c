@@ -4,6 +4,12 @@
 // tr_main.c -- main control flow for each frame
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn B — renderer.cmd
+
+R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
+#if defined(_DEBUG)
+R_LOG_DECLARE_CHANNEL( rch_vk, "renderer.vk" );   // composite-order shadow logs
+#endif
 
 #include <string.h> // memcpy
 
@@ -277,6 +283,78 @@ void R_TransformClipToWindow( const vec4_t clip, const viewParms_t *view, vec4_t
 
 	window[0] = (int) ( window[0] + 0.5 );
 	window[1] = (int) ( window[1] + 0.5 );
+}
+
+
+/*
+==========================
+R_ProjectLightToScreen
+
+Projects a single world point to the screen, returning every coordinate form
+the two lens projection sites need from one model->clip->screen transform: the
+halo/flare path (integer window + eyeZ + raw clip for its drawZ bias) and the
+sunray UBO fill (float screen UV + the behind-near gate). Pure wrapper around
+R_TransformModelToClip + R_TransformClipToWindow; the float-op order matches the
+two original inline copies exactly, so each site's output is byte-identical.
+
+The caller supplies the model orientation and view explicitly: the halo site
+uses backEnd.or (the current entity) while the sunray site uses
+backEnd.viewParms.world, and the entity orientation is not reachable from a
+viewParms_t. The caller also synthesises any at-infinity sun point itself
+(viewOrigin + dir*(zFar/1.75)) and passes the finite result here, keeping that
+arithmetic verbatim at the call site.
+==========================
+*/
+void R_ProjectLightToScreen( const vec3_t worldPos, const orientationr_t *model,
+		const viewParms_t *view, lensScreenProj_t *out ) {
+	vec4_t	eye, clip, normalized, window;
+	int		i;
+
+	// model -> eye -> clip (the identical call both original sites made)
+	R_TransformModelToClip( worldPos, model->modelMatrix, view->projectionMatrix, eye, clip );
+
+	Vector4Copy( clip, out->clip );
+	out->eyeZ = eye[2];
+
+	// sunray float UV. Match the original op order EXACTLY: invW = 0.5f/clip[3]
+	// first, then 0.5f + clip[i]*invW (NOT clip[i]/clip[3]*0.5f, which re-orders
+	// the rounding). Valid only in front of the near plane; behind it, mirror the
+	// sunray site's 0.5,0.5 fallback so a caller that ignores behindNear is safe.
+	if ( clip[3] > 0.0f ) {
+		float invW = 0.5f / clip[3];
+		out->behindNear = qfalse;
+		out->screenU = 0.5f + clip[0] * invW;
+		out->screenV = 0.5f + clip[1] * invW;
+	} else {
+		out->behindNear = qtrue;
+		out->screenU = 0.5f;
+		out->screenV = 0.5f;
+	}
+
+	// halo integer-window mapping. R_TransformClipToWindow does its own clip[3]
+	// divide and (int)(x+0.5) rounding, so windowX/Y carry that integral value
+	// before the halo site offsets by viewportX/Y.
+	R_TransformClipToWindow( clip, view, normalized, window );
+	out->windowX = window[0];
+	out->windowY = window[1];
+	out->windowZ = window[2];
+
+	// onScreen (advisory): the halo "completely off screen" clip reject AND the
+	// in-viewport window test. The halo site keeps its own inline rejects for a
+	// 1:1 byte trace; this flag is a convenience for future callers.
+	out->onScreen = qtrue;
+	for ( i = 0 ; i < 3 ; i++ ) {
+		if ( clip[i] >= clip[3] || clip[i] <= -clip[3] ) {
+			out->onScreen = qfalse;
+			break;
+		}
+	}
+	if ( out->onScreen ) {
+		if ( window[0] < 0 || window[0] >= view->viewportWidth ||
+		     window[1] < 0 || window[1] >= view->viewportHeight ) {
+			out->onScreen = qfalse;
+		}
+	}
 }
 
 
@@ -594,9 +672,36 @@ Sets the z-component transformation part in the projection matrix
 */
 static void R_SetupProjectionZ( viewParms_t *dest )
 {
-	const float zNear = r_znear->value;
+	float zNear = r_znear->value;
 	const float zFar = dest->zFar;
-	const float depth = zFar - zNear;
+	float depth;
+#if FEAT_DEPTH_CLAMP
+	// Two-mode depth-clamp surface. The native rasterizer depth-clamp
+	// (depthClampEnable on the pipeline) is the path on every backend that has it
+	// (Vulkan/GL43/WebGPU-unclippedDepth) — handled entirely in the raster state,
+	// nothing to do here. On a backend WITHOUT native depth-clamp (capability-false,
+	// e.g. WebGL2) the pipeline bit stays off, so instead pull the near plane very
+	// close while r_depthClamp is on: high-FOV geometry that would near-plane-clip
+	// stays inside the clip volume (the near clip is practically hidden). This costs
+	// depth-buffer precision (z-fighting risk at high FOV) — which is why it is
+	// confined to the capability-false backend that has no alternative; native
+	// backends never take it.
+	if ( r_depthClamp && r_depthClamp->integer && !vk_depth_clamp_supported() ) {
+		// Near-plane shrink. 0.25× keeps usable precision while hiding the near clip
+		// at the high FOVs depth-clamp targets; tuned small enough to bite, large
+		// enough to keep WebGL2 depth usable.
+		const float kFallbackNearScale = 0.25f;
+		float shrunk = zNear * kFallbackNearScale;
+		if ( shrunk > 0.0f && shrunk < zNear )
+			zNear = shrunk;
+		else
+			// Defensive fail-safe: neither native clamp nor a sane near-plane shrink
+			// is available — treat depth-clamp as off (no crash, no validation error;
+			// the pipeline bit is already VK_FALSE on capability-false backends).
+			R_LOG( rch_cmd, SEV_WARN, "r_depthClamp: no native depth-clamp and projection fallback unavailable — treating as off\n" );
+	}
+#endif
+	depth = zFar - zNear;
 
 	dest->projectionMatrix[2] = 0;
 	dest->projectionMatrix[6] = 0;
@@ -867,7 +972,7 @@ static qboolean R_GetPortalOrientations( const drawSurf_t *drawSurf, int entityN
 	// to see a surface before the server has communicated the matching
 	// portal surface entity, so we don't want to print anything here...
 
-	//ri.Log( SEV_INFO, "Portal surface without a portal entity\n" );
+	//R_LOG( rch_cmd, SEV_INFO, "Portal surface without a portal entity\n" );
 
 	return qfalse;
 }
@@ -1121,7 +1226,7 @@ static qboolean R_MirrorViewBySurface( const drawSurf_t *drawSurf, int entityNum
 
 	// don't recursively mirror
 	if ( tr.viewParms.portalView != PV_NONE ) {
-		ri.Log( SEV_DEBUG, "WARNING: recursive mirror/portal found\n" );
+		R_LOG( rch_cmd, SEV_DEBUG, "WARNING: recursive mirror/portal found\n" );
 		return qfalse;
 	}
 
@@ -1397,6 +1502,75 @@ static void R_SortLitsurfs( dlight_t* dl )
 R_AddLitSurf
 =================
 */
+// Tiled-lighting XOR-split predicate: is this lit surface a PLAIN classic-Phong
+// surface (the only variant the Forward+ tile-sum pass implements), or does it need
+// a PMLIGHT pipeline variant (linear / fog / pbrMap / parallax / two-sided)? Every
+// discriminator is readable here from shader + light + fogIndex — the same inputs
+// VK_LightingPass keys on — so the routing decision is made once, at the lit-surf
+// add-point, and used both ways (plain → the fp union; variant → the per-light
+// loop). shadowMap is NOT a discriminator (the per-light SHADOW pipeline swap is
+// retired in VK_LightingPass). The lightingStage>=0 gate is already enforced by the
+// callers, so stages[lightingStage] is a valid index.
+qboolean R_LitSurfIsPlain( const shader_t *shader, const dlight_t *dl, int fogIndex )
+{
+	const shaderStage_t *ls;
+	if ( dl->linear )
+		return qfalse;                                   // USE_LINE
+	if ( fogIndex != 0 && shader->fogPass )
+		return qfalse;                                   // fog_stage
+	if ( shader->cullType == CT_TWO_SIDED )
+		return qfalse;                                   // abs_light
+	ls = shader->stages[ shader->lightingStage ];
+	if ( ls == NULL )
+		return qfalse;
+#if FEAT_PBR
+	if ( r_pbr->integer && ls->bundle[3].image[0] )
+		return qfalse;                                   // PBR pipeline swap
+#endif
+#if FEAT_PARALLAX_MAPPING
+	if ( r_parallaxMapping->integer && ls->bundle[2].image[0] )
+		return qfalse;                                   // parallax pipeline swap
+#endif
+	if ( ls->stateBits & GLS_ATEST_BITS )
+		return qfalse;                                   // alpha-test (fp frag is no-atest)
+	return qtrue;
+}
+
+// Forward+ deduped union add. A lit surface is added to the fp union ONCE per frame
+// even if N lights touch it (the fragment sums the tile's lights). World surfaces
+// dedup via msurface_t->fpFrameMark (1:1 with a drawable surface); ENTITY (md3)
+// surfaces share a surfaceType_t* across instances, so they CANNOT use a surface-
+// resident stamp — they dedup by the (entityNum, surface) pair via a bounded scan
+// of this frame's union (numFpUnionSurfs is small). Both keyed off the same sort
+// (entityNum) + surface. Gated on r_forwardPlus + the plain predicate.
+static void R_AddForwardPlusUnionSurf( surfaceType_t *surface, shader_t *shader, int fogIndex )
+{
+	unsigned int sort;
+	int i;
+
+	if ( tr.refdef.numFpUnionSurfs >= ARRAY_LEN( backEndData->fpUnionSurfs ) )
+		return;
+
+	sort = ( shader->sortedIndex << QSORT_SHADERNUM_SHIFT )
+		| tr.shiftedEntityNum | ( fogIndex << QSORT_FOGNUM_SHIFT );
+
+	// dedup by (entityNum, surface): a surface lit by 2 lights on the SAME entity is
+	// one union entry; the SAME model surface on 2 DIFFERENT entities is two (correct).
+	// entityNum lives in the sort's REFENTITYNUM field; compare that + the surface ptr.
+	for ( i = 0; i < tr.refdef.numFpUnionSurfs; i++ ) {
+		if ( tr.refdef.fpUnionSurfs[i].surface == surface
+			&& ( ( tr.refdef.fpUnionSurfs[i].sort ^ sort ) & QSORT_REFENTITYNUM_MASK ) == 0 )
+			return;   // already in the union for this entity
+	}
+
+	{
+		litSurf_t *u = &tr.refdef.fpUnionSurfs[ tr.refdef.numFpUnionSurfs++ ];
+		u->sort    = sort;
+		u->surface = surface;
+		u->next    = NULL;
+	}
+}
+
 void R_AddLitSurf( surfaceType_t *surface, shader_t *shader, int fogIndex )
 {
 	struct litSurf_s *litsurf;
@@ -1419,6 +1593,66 @@ void R_AddLitSurf( surfaceType_t *surface, shader_t *shader, int fogIndex )
 
 	tr.light->tail = litsurf;
 	tr.light->tail->next = NULL;
+
+	// Forward+ XOR-split: PLAIN surfaces ALSO go to the deduped fp union (drawn once
+	// by the tile-sum pass); the per-light loop will SKIP them (RB_RenderLitSurfList).
+	// VARIANT surfaces stay only on the per-light list above. Gated on r_forwardPlus
+	// so the OFF path is byte-identical. Serves BOTH world + entity (the unification
+	// point — tr.light + tr.shiftedEntityNum are live for both).
+	if ( r_forwardPlus && r_forwardPlus->integer
+		&& R_LitSurfIsPlain( shader, tr.light, fogIndex ) ) {
+		R_AddForwardPlusUnionSurf( surface, shader, fogIndex );
+	}
+}
+
+
+// Static-light Forward+ coverage (r_unbakeStaticLights). The lit-surface union is
+// normally driven by runtime dlights walking the world (R_RecursiveLightNode →
+// R_AddLitSurf); a world surface touched ONLY by an extracted BSP static light is
+// never in that walk (static lights live in the fp SSBO, not backEndData->dlights),
+// so it would never enter the fp union and the static lights would light nothing.
+// When r_unbakeStaticLights is on, add every visible PLAIN world surface to the fp
+// union directly, so the tile compute's static lights actually paint. The fp frag
+// sums whatever lights cover each tile — a surface in a light-free tile just draws
+// its base (lightmap) contribution, so an over-inclusive union is correct, only a
+// per-frame cost. Called from the world-surface finalize (tr_world.c); world entity
+// context (tr.shiftedEntityNum) is live there. Plain-only (the fp pass implements
+// only the classic-Phong variant); static lights are always non-linear point lights.
+void R_AddStaticLitWorldSurf( surfaceType_t *surface, shader_t *shader, int fogIndex )
+{
+	const shaderStage_t *ls;
+
+	if ( !r_forwardPlus || !r_forwardPlus->integer )
+		return;
+	if ( !r_unbakeStaticLights || !r_unbakeStaticLights->integer )
+		return;
+	if ( !tr.world || tr.world->numStaticLights <= 0 )
+		return;
+
+	// R_LitSurfIsPlain's discriminators, minus the per-dlight `linear` test (static
+	// lights are point lights). Mirror it exactly so the routing matches the runtime
+	// path (a variant surface stays on the PMLIGHT path via its own lights, if any).
+	if ( fogIndex != 0 && shader->fogPass )
+		return;
+	if ( shader->cullType == CT_TWO_SIDED )
+		return;
+	if ( shader->lightingStage < 0 )
+		return;
+	ls = shader->stages[ shader->lightingStage ];
+	if ( ls == NULL )
+		return;
+#if FEAT_PBR
+	if ( r_pbr->integer && ls->bundle[3].image[0] )
+		return;
+#endif
+#if FEAT_PARALLAX_MAPPING
+	if ( r_parallaxMapping->integer && ls->bundle[2].image[0] )
+		return;
+#endif
+	if ( ls->stateBits & GLS_ATEST_BITS )
+		return;
+
+	R_AddForwardPlusUnionSurf( surface, shader, fogIndex );
 }
 
 
@@ -1448,8 +1682,15 @@ void R_AddDrawSurf( surfaceType_t *surface, shader_t *shader,
 	int			index;
 
 
-	// instead of checking for overflow, we just mask the index
-	// so it wraps around
+	// Drop surfaces past MAX_DRAWSURFS rather than masking the write index back
+	// into range — the old mask-and-wrap silently OVERWROTE already-recorded
+	// surfaces on overflow (corrupting earlier draws). Keep incrementing the
+	// count so R_RenderView's post-generation overflow check still fires; later
+	// surfaces are dropped instead of clobbering earlier ones.
+	if ( tr.refdef.numDrawSurfs >= MAX_DRAWSURFS ) {
+		tr.refdef.numDrawSurfs++;
+		return;
+	}
 	index = tr.refdef.numDrawSurfs & DRAWSURF_MASK;
 	// the sort data is packed into a single 32 bit value so it can be
 	// compared quickly during the qsorting process
@@ -1474,6 +1715,128 @@ void R_DecomposeSort( unsigned sort, int *entityNum, shader_t **shader,
 }
 
 
+#if defined(_DEBUG)
+// ── composite-order rebuild SHADOW ───────────────────
+//
+// The full-retire design rebuilds the composite draw order WITHOUT the per-surface
+// world walk being its source: the world draw collapses to one unit per (shader,fog)
+// batch (the GPU consumer draws each batch once); the composite order across world +
+// brush + entity is a single radix-sort on the 32-bit key. The brush interleave +
+// transparent ordering FALL OUT of the same-key re-sort (one order-rebuild, not two
+// separate mechanisms — a brush entity's key sorts it between the right world batches;
+// transparent entities sort by their keys).
+//
+// This SHADOW proves the rebuild: (1) the LIVE collapsed order = the live radix-sorted
+// drawSurfs[] with consecutive same-key WORLD entries merged (radix-contiguity: world
+// surfaces of one (shader,fog) share the identical full key — WORLD entity, dlight=0 —
+// so they're consecutive and collapse to one unit, matching the GPU batch); (2) the
+// REBUILT order = those same participants (one key per world (shader,fog) run ∪ each
+// entity drawSurf key) re-sorted INDEPENDENTLY via R_RadixSort. If the independent
+// re-sort reproduces the live collapsed order, the rebuild mechanism is proven — that
+// is exactly what the host consumer will do (it has the GPU world batch keys +
+// the host entity drawSurfs, and must walk them in this order). Read-only; the live
+// drawSurfs[]/sort path is untouched.
+//
+// FRAME-EXACT: built from the LIVE drawSurfs (the current frame's), NOT the lagged GPU
+// segmentation — an earlier change already proved the GPU segmentation keys == the live coalesced
+// world keys byte-identical, so feeding the rebuild from the live collapsed world keys
+// is equivalent AND lag-free, isolating the ORDER-rebuild mechanism cleanly.
+static drawSurf_t *s_co_live;     // collapsed live order (keys; surface ptr unused)
+static drawSurf_t *s_co_rebuilt;  // the independently re-sorted participants
+static int         s_co_cap;
+
+static void R_CompositeOrderShadow( const drawSurf_t *sorted, int numDrawSurfs )
+{
+	int i, nLive = 0, nReb = 0, firstBad = -1;
+
+	if ( numDrawSurfs <= 0 )
+		return;
+
+	if ( numDrawSurfs > s_co_cap ) {
+		if ( s_co_live )    ri.Free( s_co_live );
+		if ( s_co_rebuilt ) ri.Free( s_co_rebuilt );
+		s_co_cap     = numDrawSurfs;
+		s_co_live    = ri.Malloc( numDrawSurfs * sizeof( drawSurf_t ) );
+		s_co_rebuilt = ri.Malloc( numDrawSurfs * sizeof( drawSurf_t ) );
+	}
+	if ( !s_co_live || !s_co_rebuilt )
+		return;
+
+	// (1) Live COLLAPSED order: walk the live-sorted drawSurfs, merge consecutive
+	// same-key WORLD entries (entity == REFENTITYNUM_WORLD) into one. Entity entries
+	// pass through unchanged. The collapsed key sequence is the parity target + also
+	// the participant set for the rebuild (each collapsed unit = one participant key).
+	for ( i = 0; i < numDrawSurfs; i++ ) {
+		unsigned key = sorted[i].sort;
+		int      ent = ( key >> QSORT_REFENTITYNUM_SHIFT ) & REFENTITYNUM_MASK;
+		if ( nLive > 0 && ent == REFENTITYNUM_WORLD && s_co_live[ nLive - 1 ].sort == key ) {
+			// world surfaces of the same (shader,fog) collapse to the prior unit
+			continue;
+		}
+		s_co_live[ nLive ].sort    = key;
+		s_co_live[ nLive ].surface = NULL;
+		nLive++;
+	}
+
+	// (2) REBUILT order: the GPU consumer reconstructs the order from {GPU world batch
+	// keys} ∪ {entity drawSurfs}. To make this a REAL test (not a no-op re-sort of an
+	// already-sorted list) AND a faithful one, build the participant input as: all WORLD
+	// batch keys FIRST (reversed — they're unique, so order is irrelevant to the result,
+	// but feeding them out-of-position forces radix to actually place them), then all
+	// ENTITY participant keys IN THEIR LIVE RELATIVE ORDER (entities can share a key —
+	// two surfaces of one model, same shader — and R_RadixSort is STABLE, so they MUST be
+	// fed submission-order-preserving, exactly as the host entity stream provides them).
+	// Radix then reconstructs the live collapsed order iff the rebuild is sound.
+	{
+		int w = 0, e = 0;
+		// pass 1: world participants (unique keys), reversed
+		for ( i = nLive - 1; i >= 0; i-- ) {
+			int ent = ( s_co_live[i].sort >> QSORT_REFENTITYNUM_SHIFT ) & REFENTITYNUM_MASK;
+			if ( ent == REFENTITYNUM_WORLD ) { s_co_rebuilt[ w++ ] = s_co_live[i]; }
+		}
+		// pass 2: entity participants, in live (submission-preserving) relative order
+		for ( i = 0; i < nLive; i++ ) {
+			int ent = ( s_co_live[i].sort >> QSORT_REFENTITYNUM_SHIFT ) & REFENTITYNUM_MASK;
+			if ( ent != REFENTITYNUM_WORLD ) { s_co_rebuilt[ w + (e++) ] = s_co_live[i]; }
+		}
+		nReb = w + e;
+	}
+	R_RadixSort( s_co_rebuilt, nReb );
+
+	// (3) Assert the rebuilt order == the live collapsed order, key-for-key.
+	for ( i = 0; i < nLive; i++ ) {
+		if ( s_co_rebuilt[i].sort != s_co_live[i].sort ) { firstBad = i; break; }
+	}
+
+	if ( firstBad >= 0 ) {
+		R_LOG( rch_vk, SEV_WARN,
+			"composite-order DRIFT: rebuilt != live collapsed at unit %d (rebuilt key=0x%08x, live key=0x%08x; nUnits=%d, numDrawSurfs=%d) — the re-sort doesn't reproduce the live order\n",
+			firstBad, s_co_rebuilt[firstBad].sort, s_co_live[firstBad].sort, nLive, numDrawSurfs );
+	} else {
+		static int s_okLogged = 0;
+		if ( s_okLogged < 5 ) {
+			R_LOG( rch_vk, SEV_INFO,
+				"composite-order OK: rebuilt == live collapsed order (%d draw units from %d drawSurfs; world collapsed to one unit per (shader,fog), brush/transparent interleave from the same-key re-sort)\n",
+				nLive, numDrawSurfs );
+			s_okLogged++;
+		}
+	}
+}
+
+// Free + NULL the composite-order-verify scratch statics (TAG_RENDERER via ri.Malloc)
+// and zero the cap, on renderer teardown. Same lifetime fix as R_ReleaseWorldCullStatics
+// / vk_shadow_snap_release_cpu: without it, Z_FreeTags(TAG_RENDERER) reclaims the block
+// while s_co_* still point at it, and the next map's lazy-grow re-frees the stale pointer
+// → "Z_Free: freed a pointer without ZONEID". Idempotent. _DEBUG-only (so are the statics).
+void R_ReleaseCompositeOrderStatics( void )
+{
+	if ( s_co_live )    { ri.Free( s_co_live );    s_co_live    = NULL; }
+	if ( s_co_rebuilt ) { ri.Free( s_co_rebuilt ); s_co_rebuilt = NULL; }
+	s_co_cap = 0;
+}
+#endif // _DEBUG
+
+
 /*
 =================
 R_SortDrawSurfs
@@ -1495,6 +1858,15 @@ static void R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 	// sort the drawsurfs by sort type, then orientation, then shader
 	R_RadixSort( drawSurfs, numDrawSurfs );
+
+#if defined(_DEBUG)
+	// prove the composite draw order can be rebuilt without the
+	// per-surface walk being its source — collapse the live-sorted world surfaces to one
+	// unit per (shader,fog) ∪ the entity drawSurfs, re-sort independently, assert == the
+	// live collapsed order. Read-only shadow; the live drawSurfs[] order above is
+	// authoritative + untouched. Self-consistent per view (synchronous, frame-exact).
+	R_CompositeOrderShadow( drawSurfs, numDrawSurfs );
+#endif
 
 	// check for any pass through drawing, which
 	// may cause another view to be rendered first
@@ -1527,13 +1899,11 @@ static void R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	}
 
 #ifdef USE_PMLIGHT
-#ifdef USE_LEGACY_DLIGHTS
-	if ( r_dlightMode->integer )
-#endif
 	{
 		dlight_t *dl;
 		// all the lit surfaces are in a single queue
 		// but each light's surfaces are sorted within its subsection
+		// (num_dlights is 0 when r_dynamiclight is off, so this is a no-op then).
 		for ( i = 0; i < tr.refdef.num_dlights; ++i ) {
 			dl = &tr.refdef.dlights[ i ];
 			if ( dl->head ) {
@@ -1564,9 +1934,6 @@ static void R_AddEntitySurfaces( void ) {
 			tr.currentEntityNum < tr.refdef.num_entities;
 			tr.currentEntityNum++ ) {
 		ent = tr.currentEntity = &tr.refdef.entities[tr.currentEntityNum];
-#ifdef USE_LEGACY_DLIGHTS
-		ent->needDlights = 0;
-#endif
 		// preshift the value we are going to OR into the drawsurf sort
 		tr.shiftedEntityNum = tr.currentEntityNum << QSORT_REFENTITYNUM_SHIFT;
 

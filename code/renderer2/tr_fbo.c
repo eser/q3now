@@ -4,6 +4,9 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_fbo.c
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.fbo
+
+R_LOG_DECLARE_CHANNEL( rch_fbo, "renderer.fbo" );
 
 #include "tr_dsa.h"
 
@@ -23,31 +26,31 @@ static qboolean R_CheckFBO(const FBO_t * fbo)
 	switch (code)
 	{
 		case GL_FRAMEBUFFER_UNSUPPORTED:
-			ri.Log( SEV_WARN, "R_CheckFBO: (%s) Unsupported framebuffer format\n", fbo->name);
+			R_LOG( rch_fbo, SEV_WARN, "R_CheckFBO: (%s) Unsupported framebuffer format\n", fbo->name);
 			break;
 
 		case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT:
-			ri.Log( SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete attachment\n", fbo->name);
+			R_LOG( rch_fbo, SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete attachment\n", fbo->name);
 			break;
 
 		case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:
-			ri.Log( SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete, missing attachment\n", fbo->name);
+			R_LOG( rch_fbo, SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete, missing attachment\n", fbo->name);
 			break;
 
 		case GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER:
-			ri.Log( SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete, missing draw buffer\n", fbo->name);
+			R_LOG( rch_fbo, SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete, missing draw buffer\n", fbo->name);
 			break;
 
 		case GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER:
-			ri.Log( SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete, missing read buffer\n", fbo->name);
+			R_LOG( rch_fbo, SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete, missing read buffer\n", fbo->name);
 			break;
 
 		case GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE:
-			ri.Log( SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete multisample\n", fbo->name);
+			R_LOG( rch_fbo, SEV_WARN, "R_CheckFBO: (%s) Framebuffer incomplete multisample\n", fbo->name);
 			break;
 
 		default:
-			ri.Log( SEV_WARN, "R_CheckFBO: (%s) unknown error 0x%X\n", fbo->name, code);
+			R_LOG( rch_fbo, SEV_WARN, "R_CheckFBO: (%s) unknown error 0x%X\n", fbo->name, code);
 			break;
 	}
 
@@ -147,7 +150,7 @@ static void FBO_CreateBuffer(FBO_t *fbo, int format, int index, int multisample)
 			break;
 
 		default:
-			ri.Log( SEV_WARN, "FBO_CreateBuffer: invalid format %d\n", format);
+			R_LOG( rch_fbo, SEV_WARN, "FBO_CreateBuffer: invalid format %d\n", format);
 			return;
 	}
 
@@ -203,7 +206,7 @@ void FBO_Bind(FBO_t * fbo)
 {
 	if (!glRefConfig.framebufferObject)
 	{
-		ri.Log( SEV_WARN, "FBO_Bind() called without framebuffers enabled!\n");
+		R_LOG( rch_fbo, SEV_WARN, "FBO_Bind() called without framebuffers enabled!\n");
 		return;
 	}
 
@@ -230,7 +233,7 @@ void FBO_Init(void)
 	int             i;
 	int             hdrFormat, multisample = 0;
 
-	ri.Log( SEV_INFO, "------- FBO_Init -------\n");
+	R_LOG( rch_fbo, SEV_INFO, "------- FBO_Init -------\n");
 
 	if(!glRefConfig.framebufferObject)
 		return;
@@ -407,7 +410,7 @@ void FBO_Shutdown(void)
 	int             i, j;
 	FBO_t          *fbo;
 
-	ri.Log( SEV_INFO, "------- FBO_Shutdown -------\n");
+	R_LOG( rch_fbo, SEV_INFO, "------- FBO_Shutdown -------\n");
 
 	if(!glRefConfig.framebufferObject)
 		return;
@@ -447,21 +450,21 @@ static void R_FBOList_f(void)
 
 	if(!glRefConfig.framebufferObject)
 	{
-		ri.Log( SEV_INFO, "GL_EXT_framebuffer_object is not available.\n");
+		R_LOG( rch_fbo, SEV_INFO, "GL_EXT_framebuffer_object is not available.\n");
 		return;
 	}
 
-	ri.Log( SEV_INFO, "             size       name\n");
-	ri.Log( SEV_INFO, "----------------------------------------------------------\n");
+	R_LOG( rch_fbo, SEV_INFO, "             size       name\n");
+	R_LOG( rch_fbo, SEV_INFO, "----------------------------------------------------------\n");
 
 	for(i = 0; i < tr.numFBOs; i++)
 	{
 		fbo = tr.fbos[i];
 
-		ri.Log( SEV_INFO, "  %4i: %4i %4i %s\n", i, fbo->width, fbo->height, fbo->name);
+		R_LOG( rch_fbo, SEV_INFO, "  %4i: %4i %4i %s\n", i, fbo->width, fbo->height, fbo->name);
 	}
 
-	ri.Log( SEV_INFO, " %i FBOs\n", tr.numFBOs);
+	R_LOG( rch_fbo, SEV_INFO, " %i FBOs\n", tr.numFBOs);
 }
 #endif
 void FBO_BlitFromTexture(struct image_s *src, vec4_t inSrcTexCorners, vec2_t inSrcTexScale, FBO_t *dst, ivec4_t inDstBox, struct shaderProgram_s *shaderProgram, const vec4_t inColor, int blend)
@@ -477,7 +480,7 @@ void FBO_BlitFromTexture(struct image_s *src, vec4_t inSrcTexCorners, vec2_t inS
 
 	if (!src)
 	{
-		ri.Log( SEV_WARN, "Tried to blit from a NULL texture!\n");
+		R_LOG( rch_fbo, SEV_WARN, "Tried to blit from a NULL texture!\n");
 		return;
 	}
 
@@ -575,7 +578,7 @@ void FBO_Blit(FBO_t *src, ivec4_t inSrcBox, vec2_t srcTexScale, FBO_t *dst, ivec
 
 	if (!src)
 	{
-		ri.Log( SEV_WARN, "Tried to blit from a NULL FBO!\n");
+		R_LOG( rch_fbo, SEV_WARN, "Tried to blit from a NULL FBO!\n");
 		return;
 	}
 

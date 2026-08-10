@@ -9,8 +9,8 @@ fi
 # This script is to build a Universal 2 binary
 # (Apple's term for an x86_64 and aarch64 binary)
 
-echo "Building X86_64 Client/Dedicated Server"
-echo "Building AARCH64 Client/Dedicated Server"
+echo "Building X86_64 Client/Headless Server"
+echo "Building AARCH64 Client/Headless Server"
 echo
 
 if [ "$1" == "" ]; then

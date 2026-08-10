@@ -35,7 +35,7 @@ typedef enum {
 typedef struct image_s image_t;
 
 // any change in the LIGHTMAP_* defines here MUST be reflected in
-// R_FindShader() in tr_bsp.c
+// R_FindShader() in tr_map.c
 #ifndef LIGHTMAP_2D
 #define LIGHTMAP_2D         -4	// shader is for 2D rendering
 #define LIGHTMAP_BY_VERTEX  -3	// pre-lit triangle models
@@ -113,6 +113,12 @@ IMAGE LOADERS
 
 void R_LoadJPG( const char *name, byte **pic, int *width, int *height );
 void R_LoadPNG( const char *name, byte **pic, int *width, int *height );
+// PNG encoder (renderercommon/tr_image_png_write.c). Input is bottom-up
+// RGB (the RB_ReadPixels output convention); R_EncodePNG returns the bytes
+// via a Z_Malloc buffer the caller must ri.Free.
+qboolean R_EncodePNG( const byte *rgb_bottomup, int width, int height,
+                     byte **outBytes, int *outLen );
+qboolean R_SavePNG( const char *fileName, const byte *rgb_bottomup, int width, int height );
 #if FEAT_LEGACY_FORMATS_IMAGE
 void R_LoadBMP( const char *name, byte **pic, int *width, int *height );
 void R_LoadPCX( const char *name, byte **pic, int *width, int *height );

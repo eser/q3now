@@ -2,13 +2,15 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
 // ral_vulkan_sync.c — Vulkan backend: fences (CPU↔GPU) + binary & timeline
-// semaphores (GPU↔GPU + host signal/wait). Phase 7.3.
+// semaphores (GPU↔GPU + host signal/wait).
 //
 // A ralFence_t is normally backed by a real VkFence (Ral_CreateFence); the
 // synchronous-upload paths in 7.2 returned a "pre-signaled" token form which
 // is still honoured. Destroys go through the deferred-destroy queue.
 
 #include "ral_vulkan_internal.h"
+
+R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
 
 // ── fences ──────────────────────────────────────────────────────────────
 ralFence_t *Ral_CreateFence( ralBackend_t *b ) {
@@ -20,11 +22,11 @@ ralFence_t *Ral_CreateFence( ralBackend_t *b ) {
 	RAL_ZERO( *f );
 	f->backend     = b;
 	f->preSignaled = qfalse;
-	f->ownsFence   = qtrue;   // Phase 7.4c-submit-BC-C-min: native RAL allocation owns the VkFence; Ral_AdoptFence flips this to qfalse for adopted handles.
+	f->ownsFence   = qtrue;   // native RAL allocation owns the VkFence; Ral_AdoptFence flips this to qfalse for adopted handles.
 	RAL_ZERO( fi );
 	fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 	if ( b->vk.CreateFence( b->device, &fi, NULL, &f->fence ) != VK_SUCCESS ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateFence: vkCreateFence failed\n" );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateFence: vkCreateFence failed\n" );
 		free( f ); return NULL;
 	}
 	return f;
@@ -32,7 +34,7 @@ ralFence_t *Ral_CreateFence( ralBackend_t *b ) {
 
 void Ral_DestroyFence( ralFence_t *f ) {
 	if ( !f ) return;
-	// Phase 7.4c-submit-BC-C-min: ownsFence=qfalse on Ral_AdoptFence-created
+	// ownsFence=qfalse on Ral_AdoptFence-created
 	// wrappers (the renderer's existing qvkCreateFence/qvkDestroyFence pair
 	// retains lifetime ownership). Free only the wrapper struct.
 	if ( f->ownsFence && f->fence != VK_NULL_HANDLE && f->backend )
@@ -40,7 +42,7 @@ void Ral_DestroyFence( ralFence_t *f ) {
 	free( f );
 }
 
-// Phase 7.4c-submit-BC-C-min — fence adoption helper. Wraps an existing
+// Fence adoption helper. Wraps an existing
 // VkFence in a ralFence_t with ownsFence=qfalse. See ral_sync.h for the
 // parallel-paths lifetime contract.
 ralFence_t *Ral_AdoptFence( ralBackend_t *b, void *externalFence, const char *debugName ) {
@@ -85,14 +87,14 @@ ralSemaphore_t *Ral_CreateSemaphore( ralBackend_t *b, ralSemaphoreType_t type ) 
 	ralSemaphore_t           *s;
 	if ( !b ) return NULL;
 	if ( type == RAL_SEMAPHORE_TIMELINE && !b->caps.timelineSemaphores ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateSemaphore: timeline semaphores requested but caps.timelineSemaphores is false\n" );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateSemaphore: timeline semaphores requested but caps.timelineSemaphores is false\n" );
 		return NULL;
 	}
 	s = (ralSemaphore_t *)malloc( sizeof( *s ) );
 	if ( !s ) return NULL;
 	RAL_ZERO( *s );
 	s->backend = b; s->type = type;
-	s->ownsSemaphore = qtrue;   // Phase 7.4c-submit-BC-C-min: native RAL allocation owns the VkSemaphore; Ral_AdoptSemaphore flips this to qfalse for adopted handles.
+	s->ownsSemaphore = qtrue;   // native RAL allocation owns the VkSemaphore; Ral_AdoptSemaphore flips this to qfalse for adopted handles.
 	RAL_ZERO( sci ); sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 	if ( type == RAL_SEMAPHORE_TIMELINE ) {
 		RAL_ZERO( tci );
@@ -102,7 +104,7 @@ ralSemaphore_t *Ral_CreateSemaphore( ralBackend_t *b, ralSemaphoreType_t type ) 
 		sci.pNext = &tci;
 	}
 	if ( b->vk.CreateSemaphore( b->device, &sci, NULL, &s->sem ) != VK_SUCCESS ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateSemaphore: vkCreateSemaphore failed\n" );
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateSemaphore: vkCreateSemaphore failed\n" );
 		free( s ); return NULL;
 	}
 	return s;
@@ -110,7 +112,7 @@ ralSemaphore_t *Ral_CreateSemaphore( ralBackend_t *b, ralSemaphoreType_t type ) 
 
 void Ral_DestroySemaphore( ralSemaphore_t *s ) {
 	if ( !s ) return;
-	// Phase 7.4c-submit-BC-C-min: ownsSemaphore=qfalse on Ral_AdoptSemaphore-
+	// ownsSemaphore=qfalse on Ral_AdoptSemaphore-
 	// created wrappers (the renderer's existing qvkCreateSemaphore/Destroy
 	// pair retains lifetime ownership). Free only the wrapper struct.
 	if ( s->ownsSemaphore && s->sem != VK_NULL_HANDLE && s->backend )
@@ -118,7 +120,7 @@ void Ral_DestroySemaphore( ralSemaphore_t *s ) {
 	free( s );
 }
 
-// Phase 7.4c-submit-BC-C-min — semaphore adoption helper. Wraps an existing
+// Semaphore adoption helper. Wraps an existing
 // VkSemaphore in a ralSemaphore_t with ownsSemaphore=qfalse. See ral_sync.h
 // for the parallel-paths lifetime contract.
 ralSemaphore_t *Ral_AdoptSemaphore( ralBackend_t *b, void *externalSemaphore, ralSemaphoreType_t type, const char *debugName ) {

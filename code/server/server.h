@@ -327,6 +327,7 @@ extern	cvar_t	*sv_pure;
 extern	cvar_t	*sv_cheats;
 extern	cvar_t	*sv_floodProtect;
 extern	cvar_t	*sv_lanForceRate;
+extern	cvar_t	*sv_hostListed;
 
 extern	cvar_t *sv_levelTimeReset;
 extern	cvar_t *sv_filter;
@@ -398,6 +399,13 @@ void SV_ClientEnterWorld( client_t *client );
 void SV_FreeClient( client_t *client );
 void SV_DropClient( client_t *drop, const char *reason );
 
+// Host-identity authority (in-process-queue L4). The host is the same-process
+// local client in slot 0. A 2nd same-process app is also loopback but occupies
+// clientNum>0 and must stay kickable — so host-identity is type AND slot, not
+// address type alone. Replaces the scattered `remoteAddress.type==NA_LOOPBACK`
+// host-kick guards.
+qboolean SV_IsHostClient( const client_t *cl );
+
 qboolean SV_ExecuteClientCommand( client_t *cl, const char *s );
 void SV_ClientThink( client_t *cl, usercmd_t *cmd );
 
@@ -425,6 +433,7 @@ void SV_WriteFrameToClient( client_t *client, msg_t *msg );
 void SV_SendMessageToClient( msg_t *msg, client_t *client );
 void SV_SendClientMessages( void );
 void SV_SendClientSnapshot( client_t *client );
+void SV_SendClientGameState( client_t *client );
 
 void SV_InitSnapshotStorage( void );
 void SV_IssueNewSnapshot( void );

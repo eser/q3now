@@ -5,8 +5,8 @@
 #include <SDL3/SDL.h>
 
 #include "../client/client.h"
+#include "../qcommon/wired/stalltrace.h"
 #include "sdl_glw.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 static cvar_t *in_keyboardDebug;
@@ -45,7 +45,10 @@ static cvar_t *j_up_axis;
 
 static cvar_t *cl_consoleKeys;
 
-static int in_eventTime = 0;
+// ns timestamp (see sysEvent_t.evTime): Sys_QueEvent expects nanoseconds and
+// consumers convert ns/1000000 at the boundary, so feed Sys_NanoTime() here.
+// int64_t (not int) — ns overflows a 32-bit int in ~2.1 seconds.
+static int64_t in_eventTime = 0;
 static qboolean mouse_focus;
 
 #define CTRL(a) ((a)-'a'+1)
@@ -186,7 +189,7 @@ static qboolean IN_IsConsoleKey( keyNum_t key, int character )
 ===============
 IN_GenericModifierKey
 
-Phase 6.1: maps a side-specific modifier (e.g. K_LEFTSHIFT) to its generic
+Maps a side-specific modifier (e.g. K_LEFTSHIFT) to its generic
 counterpart (K_SHIFT). Returns 0 if the key is not a side-specific modifier.
 
 This lets HandleEvents emit BOTH events on the same physical key press,
@@ -318,7 +321,7 @@ static keyNum_t IN_TranslateSDLToQ3Key( const SDL_KeyboardEvent *event, qboolean
 			case SDLK_DELETE:       key = K_DEL;           break;
 			case SDLK_PAUSE:        key = K_PAUSE;         break;
 
-			// Phase 6.1: side-specific modifier keys.
+			// side-specific modifier keys.
 			// Translate to the LEFT/RIGHT variant; HandleEvents emits the
 			// generic K_SHIFT/K_CTRL/K_ALT/K_COMMAND/K_SUPER alongside for
 			// backward compatibility with bindings and engine code.
@@ -421,42 +424,35 @@ static void IN_ActivateMouse( void )
 	{
 		IN_GobbleMouseEvents();
 
-		// SDL3: SDL_SetRelativeMouseMode requires window parameter
-		SDL_SetWindowRelativeMouseMode( SDL_window, in_mouse->integer == 1 ? true : false );
+		// The mouse is grabbed: the game owns the pointer. Relative-mouse mode
+		// and a hidden cursor both follow from that single fact — independent of
+		// fullscreen. Relative mode delivers raw deltas so the cursor never
+		// saturates at the desktop edge, and the OS cursor is hidden so it does
+		// not show over the window. (mouseAvailable already gates in_mouse 0.)
+		SDL_SetWindowRelativeMouseMode( SDL_window, true );
 		// SDL3: SDL_SetWindowGrab renamed to SDL_SetWindowMouseGrab
-		SDL_SetWindowMouseGrab( SDL_window, true );
+		STALLTRACE( "SDL_SetWindowMouseGrab", SDL_SetWindowMouseGrab( SDL_window, true ) );
+		SDL_HideCursor(); // SDL3: SDL_ShowCursor(SDL_FALSE) → SDL_HideCursor()
 
-		if ( glw_state.isFullscreen )
-			SDL_HideCursor(); // SDL3: SDL_ShowCursor(SDL_FALSE) → SDL_HideCursor()
-
-		// NOLINTBEGIN(bugprone-integer-division) — pixel-aligned window-center coordinates; integer math intentional
-		SDL_WarpMouseInWindow( SDL_window,
-			(float)(glw_state.window_width / 2), (float)(glw_state.window_height / 2) );
-		// NOLINTEND(bugprone-integer-division)
+		// Recenter for relative-mouse mode. SDL_WarpMouseInWindow takes window
+		// LOGICAL coordinates, not physical pixels — query the current logical size
+		// rather than warping to glw_state.window_width/height (which are pixels) so
+		// the target stays the true center on a HiDPI display. At scale 1.0 logical
+		// == pixel, identical to before. Skipped under com_automated: a non-interactive
+		// run must never move the user's real cursor. (The grab gate already routes
+		// automated runs to IN_DeactivateMouse, so IN_ActivateMouse should not run
+		// then — this guard is the belt for any direct caller.)
+		if ( !( com_automated && com_automated->integer ) )
+		{
+			int logW = 0, logH = 0;
+			SDL_GetWindowSize( SDL_window, &logW, &logH );
+			// NOLINTNEXTLINE(bugprone-integer-division) — window-center coordinates; integer math intentional
+			SDL_WarpMouseInWindow( SDL_window, (float)(logW / 2), (float)(logH / 2) );
+		}
 
 #ifdef DEBUG_EVENTS
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "%4i %s\n", Sys_Milliseconds(), __func__ );
 #endif
-	}
-
-	// in_nograb makes no sense in fullscreen mode
-	if ( !glw_state.isFullscreen )
-	{
-		{
-			static int s_nograb_mod = -1;
-			if ( in_nograb->modificationCount != s_nograb_mod || !mouseActive )
-			{
-				if ( in_nograb->integer ) {
-					SDL_SetWindowRelativeMouseMode( SDL_window, false );
-					SDL_SetWindowMouseGrab( SDL_window, false );
-				} else {
-					SDL_SetWindowRelativeMouseMode( SDL_window, in_mouse->integer == 1 ? true : false );
-					SDL_SetWindowMouseGrab( SDL_window, true );
-				}
-
-				s_nograb_mod = in_nograb->modificationCount;
-			}
-		}
 	}
 
 	mouseActive = qtrue;
@@ -485,30 +481,38 @@ static void IN_DeactivateMouse( void )
 		SDL_SetWindowMouseGrab( SDL_window, false );
 		SDL_SetWindowRelativeMouseMode( SDL_window, false );
 
-		// NOLINTBEGIN(bugprone-integer-division) — pixel-aligned screen/window-center coordinates; integer math intentional
-		if ( gw_active )
-			SDL_WarpMouseInWindow( SDL_window,
-				(float)(glw_state.window_width / 2), (float)(glw_state.window_height / 2) );
-		else
+		// Recenter on ungrab. SDL_WarpMouseInWindow takes window LOGICAL coordinates —
+		// query the current logical size so the recenter target is the true center on a
+		// HiDPI display (glw_state.window_width/height are pixels). Scale 1.0: logical ==
+		// pixel. Skipped under com_automated: a non-interactive run must never move the
+		// user's real cursor (the desktop pointer stays where the user left it).
+		if ( !( com_automated && com_automated->integer ) )
 		{
-			if ( glw_state.isFullscreen )
-				SDL_ShowCursor(); // SDL3: SDL_ShowCursor(SDL_TRUE) → SDL_ShowCursor()
-
-			if ( drv && strcmp( drv, "x11" ) == 0 ) {
-				SDL_WarpMouseGlobal(
-					(float)(glw_state.desktop_width / 2),
-					(float)(glw_state.desktop_height / 2) );
+			if ( gw_active )
+			{
+				int logW = 0, logH = 0;
+				SDL_GetWindowSize( SDL_window, &logW, &logH );
+				// NOLINTNEXTLINE(bugprone-integer-division) — window-center coordinates; integer math intentional
+				SDL_WarpMouseInWindow( SDL_window, (float)(logW / 2), (float)(logH / 2) );
+			}
+			else
+			{
+				if ( drv && strcmp( drv, "x11" ) == 0 ) {
+					// NOLINTNEXTLINE(bugprone-integer-division) — screen-center coordinates; integer math intentional
+					SDL_WarpMouseGlobal(
+						(float)(glw_state.desktop_width / 2),
+						(float)(glw_state.desktop_height / 2) );
+				}
 			}
 		}
-		// NOLINTEND(bugprone-integer-division)
 
 		mouseActive = qfalse;
 	}
 
-	// Always show the cursor when the mouse is disabled,
-	// but not when fullscreen
-	if ( !glw_state.isFullscreen )
-		SDL_ShowCursor();
+	// The mouse is not grabbed: the pointer is free, so the OS cursor is always
+	// visible — independent of fullscreen. (Pairs with SDL_HideCursor on the
+	// grab-on path.)
+	SDL_ShowCursor(); // SDL3: SDL_ShowCursor(SDL_TRUE) → SDL_ShowCursor()
 }
 
 
@@ -888,7 +892,7 @@ static void IN_JoyMove( void )
 	int total = 0;
 	int i = 0;
 
-	in_eventTime = Sys_Milliseconds();
+	in_eventTime = Sys_NanoTime();
 
 	if (gamepad)
 	{
@@ -1128,7 +1132,7 @@ void HandleEvents( void )
 	if ( !SDL_WasInit( SDL_INIT_VIDEO ) )
 			return;
 
-	in_eventTime = Sys_Milliseconds();
+	in_eventTime = Sys_NanoTime();
 
 	IN_SyncModifiers();
 
@@ -1154,7 +1158,7 @@ void HandleEvents( void )
 
 					Com_QueueEvent( in_eventTime, SE_KEY, key, qtrue, 0, NULL );
 
-					// Phase 6.1: also emit the generic modifier (K_ALT/K_CTRL/...)
+					// also emit the generic modifier (K_ALT/K_CTRL/...)
 					// for backward compatibility with bindings and engine code.
 					generic = IN_GenericModifierKey( key );
 					if ( generic )
@@ -1189,7 +1193,7 @@ void HandleEvents( void )
 
 					Com_QueueEvent( in_eventTime, SE_KEY, key, qfalse, 0, NULL );
 
-					// Phase 6.1: release the generic modifier alongside the
+					// release the generic modifier alongside the
 					// side-specific one. We always emit it on key-up (even if
 					// the opposite-side key is still held) — this is OK because
 					// IN_SyncModifiers re-asserts keys[K_ALT].down etc. from
@@ -1259,8 +1263,10 @@ void HandleEvents( void )
 				{
 					if( !e.motion.xrel && !e.motion.yrel )
 						break;
-					// Cast float→int: preserves SDL2 behavior; sub-pixel precision lost
-					Com_QueueEvent( in_eventTime, SE_MOUSE, (int)e.motion.xrel, (int)e.motion.yrel, 0, NULL );
+					// SE_MOUSE carries dx/dy as float (bit-cast) — pass SDL's native
+					// float xrel/yrel without the old (int) truncation, preserving
+					// sub-pixel / high-poll-rate precision.
+					Com_QueueEvent( in_eventTime, SE_MOUSE, SE_MouseEnc( e.motion.xrel ), SE_MouseEnc( e.motion.yrel ), 0, NULL );
 				}
 				break;
 
@@ -1295,7 +1301,7 @@ void HandleEvents( void )
 					Com_QueueEvent( in_eventTime, SE_KEY, K_MWHEELDOWN, qtrue, 0, NULL );
 					Com_QueueEvent( in_eventTime, SE_KEY, K_MWHEELDOWN, qfalse, 0, NULL );
 				}
-				// Phase 6.1: horizontal mouse wheel (touchpad gestures, tilt wheels)
+				// horizontal mouse wheel (touchpad gestures, tilt wheels)
 				if( (int)e.wheel.x > 0 )
 				{
 					Com_QueueEvent( in_eventTime, SE_KEY, K_MWHEELRIGHT, qtrue, 0, NULL );
@@ -1349,23 +1355,37 @@ void HandleEvents( void )
 
 			// keyboard focus:
 			case SDL_EVENT_WINDOW_FOCUS_LOST:
+				STALLTRACE_MARK( "FOCUS_LOST handler enter" );
 				lastKeyDown = 0; Key_ClearStates(); IN_SyncModifiers(); gw_active = qfalse;
+				// mute audio at the focus transition; the mixer reads this
+				// state rather than polling gw_active.
+				STALLTRACE( "S_FocusChanged(qfalse)", S_FocusChanged( qfalse ) );
+				STALLTRACE_MARK( "FOCUS_LOST handler exit" );
 				break;
 
 			case SDL_EVENT_WINDOW_FOCUS_GAINED:
+				STALLTRACE_MARK( "FOCUS_GAINED handler enter" );
 				lastKeyDown = 0; Key_ClearStates(); IN_SyncModifiers();
 				gw_active = qtrue; gw_minimized = qfalse;
+				// unmute and flush sounds queued while unfocused.
+				STALLTRACE( "S_FocusChanged(qtrue)", S_FocusChanged( qtrue ) );
 				// Re-upload our gamma LUT — another app may have clobbered
-				// hardware state while we were unfocused. Still required
-				// post-Phase 6B3'-a: under r_fbo 0 the LUT is the only
+				// hardware state while we were unfocused. Still required:
+				// under r_fbo 0 the LUT is the only
 				// gamma path, and under r_fbo 1 we still need to restore
 				// the identity LUT so the shader is the sole transform.
 				if ( re.SetColorMappings ) {
-					re.SetColorMappings();
+					STALLTRACE( "re.SetColorMappings", re.SetColorMappings() );
 				}
+				STALLTRACE_MARK( "FOCUS_GAINED handler exit" );
 				break;
 
 			// mouse focus (SDL_EVENT_WINDOW_ENTER/LEAVE → MOUSE_ENTER/MOUSE_LEAVE):
+			// window-input-fix STEP 2(c) — mouse_focus is no longer load-bearing
+			// in the IN_Frame grab predicate (SDL3 macOS unreliability — see the
+			// note at IN_Frame). The variable + handlers stay for diagnostics
+			// and to keep parity with future SDL3 fixes that may make
+			// MOUSE_ENTER reliable across platforms.
 			case SDL_EVENT_WINDOW_MOUSE_ENTER:
 				mouse_focus = qtrue;
 				break;
@@ -1405,16 +1425,30 @@ void IN_Frame( void )
 	IN_JoyMove();
 #endif
 
-	if ( Key_GetCatcher() & KEYCATCH_CONSOLE ) {
-		// temporarily deactivate if not in the game and
-		// running on the desktop with multimonitor configuration
-		if ( !glw_state.isFullscreen || glw_state.monitorCount > 1 ) {
-			IN_DeactivateMouse();
-			return;
-		}
-	}
-
-	if ( !gw_active || !mouse_focus || in_nograb->integer ) {
+	// Confine the mouse to the game's internal handlers only when the window
+	// is OS-focused AND the console is closed AND this is not an automated run.
+	// In every other state — backgrounded, console open, or automated — release
+	// the mouse.
+	//
+	//   gw_active             : OS focus, driven by SDL_EVENT_WINDOW_FOCUS_*
+	//                           (and cleared on HIDDEN/MINIMIZED). When the
+	//                           window has focus, relative-mouse mode locks the
+	//                           cursor inside it, so cursor-inside-rect is not a
+	//                           separate signal; the old mouse_focus term is
+	//                           gone. gw_minimized is subsumed: gw_active is
+	//                           already cleared on minimize.
+	//   KEYCATCH_CONSOLE      : the console owns the pointer in every display
+	//                           mode, including fullscreen single-monitor (no
+	//                           exemption — an open console must free the mouse
+	//                           so the desktop cursor is usable).
+	//   com_automated         : a non-interactive run never grabs the pointer, so
+	//                           an automated session leaves the user's mouse free
+	//                           to use the desktop. (The automated window is also
+	//                           opened non-focusable, so gw_active stays false and
+	//                           the first term already releases the mouse; this is
+	//                           the explicit belt for that intent.)
+	const qboolean consoleOpen = ( Key_GetCatcher() & KEYCATCH_CONSOLE ) != 0;
+	if ( !gw_active || consoleOpen || ( com_automated && com_automated->integer ) ) {
 		IN_DeactivateMouse();
 		return;
 	}
@@ -1495,10 +1529,9 @@ void IN_Init( void )
 	// mouse variables
 	{
 		static const cvarDesc_t d = CVAR_INT( "in_mouse", "1", CVAR_ARCHIVE,
-			"Mouse data input source:\n"
-			"  0 - disable mouse input\n"
-			"  1 - di/raw mouse\n"
-			" -1 - win32 mouse", -1, 1 );
+			"Enable mouse input:\n"
+			"  0 - disabled\n"
+			"  1 - enabled (relative-mouse mode)", 0, 1 );
 		in_mouse = Cvar_Register( &d );
 	}
 

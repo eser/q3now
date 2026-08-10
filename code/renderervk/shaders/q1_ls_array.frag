@@ -28,21 +28,62 @@ layout(set = 0, binding = 0) uniform UBO {
 	vec4 _fogEyeT;
 	vec4 _fogColor;
 	vec4 q1StyleIntensities;
+	// Pad from q1StyleIntensities (128 → 144) over the host's cascade /
+	// modelMatrix / mvp span to the per-draw bindless index table at 544.
+	vec4 _pad_to_packed_indices[25];  // 144 -> 544
+	// Per-draw bindless index table (std140 uvec4[3] = 48 B). See vkUniform_t.
+	uvec4 packed_indices[3];      // offset 544, 48 bytes
 };
 
-layout(set = 1, binding = 0) uniform sampler2DArray animArray;
-layout(set = 2, binding = 0) uniform sampler2D lm0;
-layout(set = 3, binding = 0) uniform sampler2D lm1;
-layout(set = 4, binding = 0) uniform sampler2D lm2;
-layout(set = 5, binding = 0) uniform sampler2D lm3;
-// set=6 intentionally unused (no diffuseMapNext in the array pipeline)
+// q1_ls_array.frag now consumes only set 0 (uniform)
+// and set 7 (bindless 2D + 2DArray). Both the sampler2D lightmaps and
+// the sampler2DArray animArray ride the RAL-owned bindless table
+// — the 2D entries via binding=0 (`wired_bindless_images[]`, texture2D[]),
+// the 2DArray entry via binding=2 (`wired_bindless_image_arrays[]`,
+// texture2DArray[]). Both bindings are SAMPLED_IMAGE at the
+// VkDescriptorSetLayout side; the SPIR-V dimension declaration is what the
+// driver enforces, so the 2DArray view must be written into binding=2 (not
+// binding=0). The sampler dedup-pool array at binding=1 is shared between
+// 2D and 2DArray reads — the same VkSampler can sample either dimension.
+// Same per-draw packed index table (now in the set-0 UBO); the role's
+// uint32 means a 2D slot when read via WIRED_BINDLESS_TEX and a 2DArray
+// slot when read via WIRED_BINDLESS_TEX_ARRAY. The dispatch site decides
+// which space the per-role slot value names by which image_t it publishes
+// via vk_bindless_track.
+//
+//   Role 0 = animArray (2DArray; tess.shader->q1AnimArray)
+//   Role 2 = lm0       (2D; style 0;  tr.lightmaps[lmIdx])
+//   Role 3 = lm1       (2D; style 1;  tr.lightmapsStyle[0][lmIdx])
+//   Role 4 = lm2       (2D; style 2;  tr.lightmapsStyle[1][lmIdx])
+//   Role 5 = lm3       (2D; style 3;  tr.lightmapsStyle[2][lmIdx])
+#extension GL_EXT_nonuniform_qualifier : require
+
+layout(set = 1, binding = 0) uniform texture2D      wired_bindless_images       [];
+layout(set = 1, binding = 1) uniform sampler        wired_bindless_samplers     [];
+layout(set = 1, binding = 2) uniform texture2DArray wired_bindless_image_arrays [];
+
+// Per-role packed index lives in the set-0 UBO as uvec4[3] (packed_indices
+// above); role N reads component N%4 of vec4 N/4. See gen_frag.tmpl.
+#define WIRED_BINDLESS_PACKED(role) packed_indices[ (role) / 4u ][ (role) % 4u ]
+
+#define WIRED_BINDLESS_ANIMARRAY_ROLE  0u
+#define WIRED_BINDLESS_LM0_ROLE        2u
+#define WIRED_BINDLESS_LM1_ROLE        3u
+#define WIRED_BINDLESS_LM2_ROLE        4u
+#define WIRED_BINDLESS_LM3_ROLE        5u
+#define WIRED_BINDLESS_TEX(role) sampler2D( \
+	wired_bindless_images  [ nonuniformEXT(   WIRED_BINDLESS_PACKED( role )         & 0xFFFu ) ], \
+	wired_bindless_samplers[ nonuniformEXT( ( WIRED_BINDLESS_PACKED( role ) >> 12 ) & 0xFFu  ) ] )
+#define WIRED_BINDLESS_TEX_ARRAY(role) sampler2DArray( \
+	wired_bindless_image_arrays[ nonuniformEXT(   WIRED_BINDLESS_PACKED( role )         & 0xFFFu ) ], \
+	wired_bindless_samplers    [ nonuniformEXT( ( WIRED_BINDLESS_PACKED( role ) >> 12 ) & 0xFFu  ) ] )
 
 layout(location = 1) centroid in vec2 frag_tex_coord0;
 layout(location = 2) centroid in vec2 frag_tex_coord1;
 
 layout(location = 0) out vec4 out_color;
 
-// Phase 6B3'-d4-m6: precise piecewise sRGB <-> linear conversion.
+// precise piecewise sRGB <-> linear conversion.
 // Duplicated in every fragment shader per the engine-wide
 // unconditional linear migration; compile.mjs lacks #include
 // support. Matches m1/m2/m3/m4/m5 verbatim. linearToSRGB is unused
@@ -64,7 +105,7 @@ vec3 linearToSRGB( vec3 c ) {
 }
 
 void main() {
-	// Phase 6B3'-d4-m6: sampler2DArray frame-cross-fade variant of
+	// sampler2DArray frame-cross-fade variant of
 	// q1_ls.frag. Same colour-domain contract: animArray frames and
 	// lm0..lm3 are sRGB-encoded colour — decoded to linear; the frame
 	// cross-fade and the Q1 lightstyle weighted-sum × diffuse run in
@@ -80,16 +121,16 @@ void main() {
 	int   nextFr   = int(mod(float(frame) + 1.0, nf));
 	float blend    = fract(animPos);
 
-	vec4 diffuseA = texture(animArray, vec3(frag_tex_coord0, float(frame)));
-	vec4 diffuseB = texture(animArray, vec3(frag_tex_coord0, float(nextFr)));
+	vec4 diffuseA = texture( WIRED_BINDLESS_TEX_ARRAY( WIRED_BINDLESS_ANIMARRAY_ROLE ), vec3( frag_tex_coord0, float( frame  ) ) );
+	vec4 diffuseB = texture( WIRED_BINDLESS_TEX_ARRAY( WIRED_BINDLESS_ANIMARRAY_ROLE ), vec3( frag_tex_coord0, float( nextFr ) ) );
 	diffuseA.rgb = sRGBToLinear( diffuseA.rgb );
 	diffuseB.rgb = sRGBToLinear( diffuseB.rgb );
 	vec4 diffuse  = mix(diffuseA, diffuseB, blend);
 
-	vec4 t0 = texture(lm0, frag_tex_coord1); t0.rgb = sRGBToLinear( t0.rgb );
-	vec4 t1 = texture(lm1, frag_tex_coord1); t1.rgb = sRGBToLinear( t1.rgb );
-	vec4 t2 = texture(lm2, frag_tex_coord1); t2.rgb = sRGBToLinear( t2.rgb );
-	vec4 t3 = texture(lm3, frag_tex_coord1); t3.rgb = sRGBToLinear( t3.rgb );
+	vec4 t0 = texture( WIRED_BINDLESS_TEX( WIRED_BINDLESS_LM0_ROLE ), frag_tex_coord1 ); t0.rgb = sRGBToLinear( t0.rgb );
+	vec4 t1 = texture( WIRED_BINDLESS_TEX( WIRED_BINDLESS_LM1_ROLE ), frag_tex_coord1 ); t1.rgb = sRGBToLinear( t1.rgb );
+	vec4 t2 = texture( WIRED_BINDLESS_TEX( WIRED_BINDLESS_LM2_ROLE ), frag_tex_coord1 ); t2.rgb = sRGBToLinear( t2.rgb );
+	vec4 t3 = texture( WIRED_BINDLESS_TEX( WIRED_BINDLESS_LM3_ROLE ), frag_tex_coord1 ); t3.rgb = sRGBToLinear( t3.rgb );
 
 	vec4 lm = t0 * q1StyleIntensities.x
 	        + t1 * q1StyleIntensities.y

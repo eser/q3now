@@ -1,4 +1,4 @@
-// quic-probe — diagnostic client for q3now dedicated server QUIC transport
+// quic-probe — diagnostic client for q3now headless server QUIC transport
 //
 // Usage:
 //
@@ -61,9 +61,9 @@ var (
 )
 
 func main() {
-	server   := flag.String("server", "127.0.0.1:27960", "q3now server host:port")
-	mode     := flag.String("mode", "observer", "observer or player")
-	token    := flag.String("token", "probe", "auth token (any non-empty value for LAN)")
+	server := flag.String("server", "127.0.0.1:27960", "q3now server host:port")
+	mode := flag.String("mode", "observer", "observer or player")
+	token := flag.String("token", "probe", "auth token (any non-empty value for LAN)")
 	userinfo := flag.String("userinfo", `\name\ProbeBot\model\visor`, "player userinfo (player mode)")
 	flag.BoolVar(&flagV, "v", false, "verbose: print raw bytes")
 	flag.Parse()
@@ -210,7 +210,7 @@ func runPlayer(ctx context.Context, conn quic.Connection, token, userinfo string
 			return fmt.Errorf("ACCEPT payload too short (%d bytes)", len(tlvPayload))
 		}
 		slot := int(tlvPayload[0])
-		fps  := int(tlvPayload[1])
+		fps := int(tlvPayload[1])
 		logf("[stream0] TLV ACCEPT: slot=%d sv_fps=%d", slot, fps)
 
 		// Send TLV 0x05 READY (empty payload)
@@ -257,9 +257,9 @@ func recvDatagrams(ctx context.Context, conn quic.Connection) {
 			return
 		}
 
-		n   := dgCount.Add(1)
-		ts  := now()
-		sz  := len(dg)
+		n := dgCount.Add(1)
+		ts := now()
+		sz := len(dg)
 
 		if sz < 8 {
 			// Short datagram — likely a msgpack state update (observer) or malformed
@@ -272,9 +272,9 @@ func recvDatagrams(ctx context.Context, conn quic.Connection) {
 		}
 
 		// Attempt Q3 snapshot parse: first 8 bytes as [srv_tick:u32le][base_tick:u32le]
-		srvTick  := binary.LittleEndian.Uint32(dg[0:4])
+		srvTick := binary.LittleEndian.Uint32(dg[0:4])
 		baseTick := binary.LittleEndian.Uint32(dg[4:8])
-		snapLen  := sz - 8
+		snapLen := sz - 8
 
 		if flagV {
 			logf("[datagram #%d %s] srv_tick=%-8d  base_tick=%-8d  snap=%d bytes\n            payload: % x",
@@ -310,7 +310,7 @@ func drainEventStream(stream quic.ReceiveStream) {
 		n, err := stream.Read(buf)
 		if n > 0 {
 			num := evCount.Add(1)
-			ts  := now()
+			ts := now()
 			if flagV {
 				logf("[event #%d %s] %d bytes: % x", num, ts, n, buf[:n])
 			} else {
@@ -333,7 +333,7 @@ func drainEventStream(stream quic.ReceiveStream) {
 // tlvEncode produces [type:u8][plen:u16le][payload].
 func tlvEncode(msgType byte, payload []byte) []byte {
 	plen := uint16(len(payload))
-	out  := make([]byte, 3+int(plen))
+	out := make([]byte, 3+int(plen))
 	out[0] = msgType
 	out[1] = byte(plen & 0xFF)
 	out[2] = byte(plen >> 8)
@@ -370,11 +370,11 @@ func tlvParseString(payload []byte) string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func printHandshake(resp map[string]any) {
-	proto, _   := resp["protocol"].(float64)
+	proto, _ := resp["protocol"].(float64)
 	version, _ := resp["version"].(string)
 	granted, _ := resp["granted"].([]any)
-	perm, _    := resp["permission"].(map[string]any)
-	srv, _     := resp["server"].(map[string]any)
+	perm, _ := resp["permission"].(map[string]any)
+	srv, _ := resp["server"].(map[string]any)
 
 	logf("[handshake] protocol=%.0f  version=%s", proto, version)
 

@@ -49,13 +49,13 @@ set(QCOMMON_TOOL_SRCS
 	${CMAKE_SOURCE_DIR}/code/qcommon/sw3z.c
 	${CMAKE_SOURCE_DIR}/code/qcommon/unzip.c
 
-	# maps/* — needed by B2 for BSP_Load + Meta_*. Pulling these in
+	# maps/* — needed by B2 for Map_Load + Meta_*. Pulling these in
 	# also forces:
 	#   - cm_q1.c (CMQ1_Store{Clipnodes,LeafContents} called from
-	#     bsp_q1.c). cm_q1.c in turn references CM_Trace,
+	#     map_q1_bsp.c). cm_q1.c in turn references CM_Trace,
 	#     CMQ3_PointContents, CM_PointLeafnum, CMQ3_BiSphereTrace,
 	#     and the global `cm`, all from the rest of cm_*.c.
-	#   - nav/nav_coord.c (Nav_QuakeToRecast called from bsp_q1/q3.c).
+	#   - nav/nav_coord.c (Nav_QuakeToRecast called from map_q1/q3_bsp.c).
 	# All cm_* sources are self-contained except cm_patch.c, which
 	# references BotDrawDebugPolygons (botlib). That single symbol
 	# is satisfied by a no-op stub in stubs.c.
@@ -65,9 +65,9 @@ set(QCOMMON_TOOL_SRCS
 	${CMAKE_SOURCE_DIR}/code/qcommon/cm_q1.c
 	${CMAKE_SOURCE_DIR}/code/qcommon/cm_test.c
 	${CMAKE_SOURCE_DIR}/code/qcommon/cm_trace.c
-	${CMAKE_SOURCE_DIR}/code/qcommon/maps/bsp.c
-	${CMAKE_SOURCE_DIR}/code/qcommon/maps/bsp_q1.c
-	${CMAKE_SOURCE_DIR}/code/qcommon/maps/bsp_q3.c
+	${CMAKE_SOURCE_DIR}/code/qcommon/maps/map_format_registry.c
+	${CMAKE_SOURCE_DIR}/code/qcommon/maps/map_q1_bsp.c
+	${CMAKE_SOURCE_DIR}/code/qcommon/maps/map_q3_bsp.c
 	${CMAKE_SOURCE_DIR}/code/qcommon/maps/meta_aliases.c
 	${CMAKE_SOURCE_DIR}/code/qcommon/maps/meta_parse.c
 	${CMAKE_SOURCE_DIR}/code/qcommon/maps/meta_remap.c
@@ -182,7 +182,7 @@ ADD_EXECUTABLE(extract-meta EXCLUDE_FROM_ALL
 	# B2 modules
 	category_map.c
 	shader_index.c
-	bsp_inventory.c
+	map_inventory.c
 	asset_resolve.c
 	meta_emit.c
 	ent_emit.c

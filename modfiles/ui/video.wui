@@ -1,0 +1,429 @@
+// video.wui -- q3now Video settings submenu (flexbox-first §6.1 canonical)
+//
+// Settings panel pattern reuse: settings_root + top_bar + settings_content
+// (LEFT settings_nav + RIGHT settings_panel) + bottom_bar. Mirrors the
+// canonical §6.1 layout shipped for sound / display / network / controls /
+// playersettings / preferences. The LEFT nav was restored after the
+// engine pool resize (16 → 32 MB cap); the previous "nav omitted"
+// shape was a pre-resize pool-budget workaround.
+//
+// Widget types in use:
+//   type 11 yesno    (cvar)            — fullscreen / GL ext / compress
+//                                        textures / low-quality sky
+//   type 12 dropdown (cvar +           — resolution / colour depth / texture
+//                     cvarFloatList /    filter / anti-aliasing / global
+//                     cvarStrList)       preset / lighting / geometric detail
+//                                        / texture detail / texture quality
+//
+// Apply runs `vid_restart` so resolution + fullscreen + colour depth +
+// AA + GL-extensions changes take effect on the live renderer. The other
+// cvars (texture filter, picmip, lodbias, vertex light, fastsky) bind
+// live through the engine cvar system without a restart.
+
+#include "ui/widgets/qw_settings_nav.wui"
+#include "ui/widgets/qw_settings_chrome.wui"
+
+menuDef {
+	name "video"
+	layer "menu"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "settings_root"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		background "layered" effects "base+glow+noise+vignette"
+
+		// ── Top bar ────────────────────────────────────────────────
+		QW_SETTINGS_TOPBAR("q3now / Settings / Video")
+
+		// ── Settings content row (LEFT settings_nav + RIGHT panel)
+		itemDef {
+			name "settings_content"
+			type container
+			rect 0 0 1 0.83
+			direction row
+			padding $content_padding_y $content_padding_x
+			gap $spacing_lg
+			grow 1
+			height GROW
+
+			// ── LEFT nav column (canonical settings nav set) ───
+			itemDef {
+				name "settings_nav"
+				type container
+				rect 0 0 0.30 1
+				direction column
+				gap $spacing_sm
+
+				itemDef {
+					name "nav_label"
+					type 0
+					rect 0 0 1 0.025
+					height FIT
+					text "CATEGORIES"
+					textalign 0
+					font $font_mono 10
+					forecolor $boneDim
+					decoration
+					visible 1
+					grow 0
+				}
+
+				QW_SETTINGS_NAV("nav_sound",       "sound",       "Sound",       "sound")
+				QW_SETTINGS_NAV("nav_video",       "video",       "Video",       "video")
+				QW_SETTINGS_NAV("nav_display",     "display",     "Display",     "display")
+				QW_SETTINGS_NAV("nav_controls",    "controls",    "Controls",    "controls")
+				QW_SETTINGS_NAV("nav_network",     "network",     "Network",     "network")
+				QW_SETTINGS_NAV("nav_player",      "player",      "Player",      "playersettings")
+				QW_SETTINGS_NAV("nav_preferences", "preferences", "Preferences", "preferences")
+
+				itemDef {
+					name "nav_spacer"
+					type container
+					rect 0 0 1 0
+					grow 1
+				}
+			}
+
+			// ── RIGHT settings panel (video-specific widget rows) ─
+			itemDef {
+				name "settings_panel"
+				type container
+				rect 0 0 0.70 1
+				direction column
+				padding $card_padding
+				gap $card_gap_internal
+				grow 1
+				width GROW
+
+				itemDef { name "panel_header" type 0 rect 0 0 1 0.05 height FIT text "Video" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
+				itemDef { name "panel_subheader" type 0 rect 0 0 1 0.025 height FIT text "Display mode / quality / lighting" textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+
+				// ── Widget rows ─────────────────────────────────
+				itemDef {
+					name "panel_content"
+					type container
+					rect 0 0 1 0.7
+					direction column
+					gap $spacing_md
+					grow 1
+					height GROW
+					scroll
+					alignY start
+					padding 0 0
+
+					// two-column grid row
+					itemDef {
+						name "grid_row_1"
+						type container
+						rect 0 0 1 0
+						height FIT
+						width PERCENT 1
+						grow 0
+						direction row
+						gap $spacing_md
+						alignY start
+						padding 0 0
+
+					// ── DISPLAY MODE group box ──────────
+					itemDef {
+						name "group_display"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						alignY start
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						itemDef { name "grp_hdr_display_mode" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "DISPLAY MODE" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+						itemDef {
+							name "row_resolution"
+							type 12
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Resolution"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_mode"
+							cvarFloatList { "Native Desktop" -2 "Custom" -1 "640x480" 3 "800x600" 4 "1024x768" 6 "1280x720" 14 "1280x800" 16 "1280x1024" 17 "1600x900" 19 "1920x1080" 23 }
+							visible 1
+							grow 0
+						}
+						itemDef {
+							name "row_fullscreen"
+							type checkbox
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Fullscreen"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_fullscreen"
+							visible 1
+							grow 0
+						}
+						itemDef {
+							name "row_gl_ext"
+							type checkbox
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "GL Extensions"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_allowExtensions"
+							visible 1
+							grow 0
+						}
+						itemDef {
+							name "row_colorbits"
+							type segmented
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Color Depth"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_colorbits"
+							cvarFloatList { "Default" 0 "16-bit" 16 "32-bit" 32 }
+							visible 1
+							grow 0
+						}
+						itemDef {
+							name "row_aa"
+							type segmented
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Anti-Aliasing"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_ext_multisample"
+							cvarFloatList { "Off" 0 "2x" 2 "4x" 4 "8x" 8 }
+							visible 1
+							grow 0
+						}
+					}
+
+					// ── QUALITY group box ──────────────
+					itemDef {
+						name "group_quality"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						alignY start
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						itemDef { name "grp_hdr_quality" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "QUALITY" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+						itemDef {
+							name "row_tex_filter"
+							type segmented
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Texture Filter"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_textureMode"
+							cvarStrList { "Bilinear" "GL_LINEAR_MIPMAP_NEAREST" "Trilinear" "GL_LINEAR_MIPMAP_LINEAR" }
+							visible 1
+							grow 0
+						}
+						itemDef {
+							name "row_tex_compress"
+							type checkbox
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Compress Textures"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_ext_compressed_textures"
+							visible 1
+							grow 0
+						}
+						itemDef {
+							name "row_picmip"
+							type 12
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Texture Detail"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_picmip"
+							cvarFloatList { "High" 0 "Normal" 1 "Low" 2 "Very Low" 3 "Ultra Low" 4 "Potato" 6 }
+							visible 1
+							grow 0
+						}
+						itemDef {
+							name "row_tex_bits"
+							type segmented
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Texture Quality"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_textureBits"
+							cvarFloatList { "Default" 0 "16-bit" 16 "32-bit" 32 }
+							visible 1
+							grow 0
+						}
+					}
+					}
+
+					// two-column grid row
+					itemDef {
+						name "grid_row_2"
+						type container
+						rect 0 0 1 0
+						height FIT
+						width PERCENT 1
+						grow 0
+						direction row
+						gap $spacing_md
+						alignY start
+						padding 0 0
+
+					// ── LIGHTING group box ─────────────
+					itemDef {
+						name "group_lighting"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						alignY start
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						itemDef { name "grp_hdr_lighting" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "LIGHTING" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+						itemDef {
+							name "row_global_preset"
+							type segmented
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Global Preset"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "ui_globalpreset"
+							cvarFloatList { "Default" 0 "Quality" 1 "Performance" 2 "Competition" 3 }
+							visible 1
+							grow 0
+						}
+						itemDef {
+							name "row_lighting"
+							type segmented
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Lighting"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_vertexLight"
+							cvarFloatList { "Lightmap (High)" 0 "Vertex (Low)" 1 }
+							visible 1
+							grow 0
+						}
+						itemDef {
+							name "row_lod"
+							type segmented
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Geometric Detail"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_lodbias"
+							cvarFloatList { "High" 0 "Medium" 1 "Low" 2 }
+							visible 1
+							grow 0
+						}
+						itemDef {
+							name "row_fastsky"
+							type checkbox
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Low Quality Sky"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_fastsky"
+							visible 1
+							grow 0
+						}
+					}
+						itemDef { name "grid_spacer" type container rect 0 0 0.5 0 height FIT width PERCENT 0.5 grow 0 }
+					}
+				}
+
+				// ── Footer (Back … Apply on ONE row) ────────────
+				itemDef {
+					name "panel_footer"
+					type container
+					rect 0 0 1 0.05
+					direction row
+					gap $spacing_md
+					alignY center
+					height FIT
+
+					QW_SETTINGS_BACK_BTN
+					QW_SETTINGS_FOOTER_SPACER
+					QW_SETTINGS_FOOTER_BTN("btn_apply",  "Apply",  $accent,  { exec "vid_restart" })
+				}
+			}
+		}
+
+		QW_SETTINGS_BOTTOMBAR("left/right to adjust")
+
+	}
+
+	onOpen {
+		setcvar "ui_settingsSection" "video"
+	}
+	onESC {
+		close
+	}
+}

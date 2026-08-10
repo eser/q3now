@@ -1,0 +1,18 @@
+// accum_global.script — proves globalaccum + wave (Fork-1 refinement).
+// globalaccum slot 0: set 3, dec 1 -> 2, then abort_if_equal 2 aborts THIS block
+// so the line after must NOT print. A second (pain) block exercises wave: inc to
+// 5 then abort_if_equal 5 aborts, so its trailing line must NOT print either.
+spawn {
+    print accum-global-begin
+    globalaccum 0 set 3
+    globalaccum 0 dec 1
+    globalaccum 0 abort_if_equal 2     // slot0 == 2 -> abort the rest of THIS block
+    print global-should-not-print       // must be absent from the trace
+}
+pain {
+    print wave-begin
+    wave set 4
+    wave inc 1
+    wave abort_if_equal 5              // waveCount == 5 -> abort
+    print wave-should-not-print         // must be absent
+}

@@ -11,6 +11,10 @@
 #define SDL_GL_GetProcAddress( a ) ri.GL_GetProcAddress( a )
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.gl
+
+R_LOG_DECLARE_CHANNEL( rch_gl, "renderer.gl" );
+
 #include "tr_dsa.h"
 
 #define GLE(ret, name, ...) name##proc * qgl##name;
@@ -92,7 +96,7 @@ void GLimp_InitExtraExtensions( void )
 	// Check OpenGL version
 	if ( !QGL_VERSION_ATLEAST( 2, 0 ) )
 		ri.Terminate( TERM_UNRECOVERABLE, "OpenGL 2.0 required!" );
-	ri.Log( SEV_INFO, "...using OpenGL %s\n", glConfig.version_string );
+	R_LOG( rch_gl, SEV_INFO, "...using OpenGL %s\n", glConfig.version_string );
 
 	if ( !r_ignorehwgamma->integer )
 	{
@@ -124,11 +128,11 @@ void GLimp_InitExtraExtensions( void )
 
 		QGL_ARB_framebuffer_object_PROCS;
 
-		ri.Log( SEV_INFO, result[glRefConfig.framebufferObject], extension);
+		R_LOG( rch_gl, SEV_INFO, result[glRefConfig.framebufferObject], extension);
 	}
 	else
 	{
-		ri.Log( SEV_INFO, result[2], extension);
+		R_LOG( rch_gl, SEV_INFO, result[2], extension);
 	}
 
 	// OpenGL 3.0 - GL_ARB_vertex_array_object
@@ -148,11 +152,11 @@ void GLimp_InitExtraExtensions( void )
 
 		QGL_ARB_vertex_array_object_PROCS;
 
-		ri.Log( SEV_INFO, result[glRefConfig.vertexArrayObject], extension);
+		R_LOG( rch_gl, SEV_INFO, result[glRefConfig.vertexArrayObject], extension);
 	}
 	else
 	{
-		ri.Log( SEV_INFO, result[2], extension);
+		R_LOG( rch_gl, SEV_INFO, result[2], extension);
 	}
 
 	// OpenGL 3.0 - GL_ARB_texture_float
@@ -162,11 +166,11 @@ void GLimp_InitExtraExtensions( void )
 	{
 		glRefConfig.textureFloat = !!r_ext_texture_float->integer;
 
-		ri.Log( SEV_INFO, result[glRefConfig.textureFloat], extension);
+		R_LOG( rch_gl, SEV_INFO, result[glRefConfig.textureFloat], extension);
 	}
 	else
 	{
-		ri.Log( SEV_INFO, result[2], extension);
+		R_LOG( rch_gl, SEV_INFO, result[2], extension);
 	}
 
 	// OpenGL 3.2 - GL_ARB_depth_clamp
@@ -176,11 +180,11 @@ void GLimp_InitExtraExtensions( void )
 	{
 		glRefConfig.depthClamp = qtrue;
 
-		ri.Log( SEV_INFO, result[glRefConfig.depthClamp], extension);
+		R_LOG( rch_gl, SEV_INFO, result[glRefConfig.depthClamp], extension);
 	}
 	else
 	{
-		ri.Log( SEV_INFO, result[2], extension);
+		R_LOG( rch_gl, SEV_INFO, result[2], extension);
 	}
 
 	// OpenGL 3.2 - GL_ARB_seamless_cube_map
@@ -190,11 +194,11 @@ void GLimp_InitExtraExtensions( void )
 	{
 		glRefConfig.seamlessCubeMap = !!r_arb_seamless_cube_map->integer;
 
-		ri.Log( SEV_INFO, result[glRefConfig.seamlessCubeMap], extension);
+		R_LOG( rch_gl, SEV_INFO, result[glRefConfig.seamlessCubeMap], extension);
 	}
 	else
 	{
-		ri.Log( SEV_INFO, result[2], extension);
+		R_LOG( rch_gl, SEV_INFO, result[2], extension);
 	}
 
 	// Determine GLSL version
@@ -206,7 +210,7 @@ void GLimp_InitExtraExtensions( void )
 
 		sscanf(version, "%d.%d", &glRefConfig.glslMajorVersion, &glRefConfig.glslMinorVersion);
 
-		ri.Log( SEV_INFO, "...using GLSL version %s\n", version);
+		R_LOG( rch_gl, SEV_INFO, "...using GLSL version %s\n", version);
 	}
 
 	glRefConfig.memInfo = MI_NONE;
@@ -217,11 +221,11 @@ void GLimp_InitExtraExtensions( void )
 	{
 		glRefConfig.memInfo = MI_NVX;
 
-		ri.Log( SEV_INFO, result[1], extension);
+		R_LOG( rch_gl, SEV_INFO, result[1], extension);
 	}
 	else
 	{
-		ri.Log( SEV_INFO, result[2], extension);
+		R_LOG( rch_gl, SEV_INFO, result[2], extension);
 	}
 
 	// GL_ATI_meminfo
@@ -232,16 +236,16 @@ void GLimp_InitExtraExtensions( void )
 		{
 			glRefConfig.memInfo = MI_ATI;
 
-			ri.Log( SEV_INFO, result[1], extension);
+			R_LOG( rch_gl, SEV_INFO, result[1], extension);
 		}
 		else
 		{
-			ri.Log( SEV_INFO, result[0], extension);
+			R_LOG( rch_gl, SEV_INFO, result[0], extension);
 		}
 	}
 	else
 	{
-		ri.Log( SEV_INFO, result[2], extension);
+		R_LOG( rch_gl, SEV_INFO, result[2], extension);
 	}
 
 	glRefConfig.textureCompression = TCR_NONE;
@@ -255,11 +259,11 @@ void GLimp_InitExtraExtensions( void )
 		if (useRgtc)
 			glRefConfig.textureCompression |= TCR_RGTC;
 
-		ri.Log( SEV_INFO, result[useRgtc], extension);
+		R_LOG( rch_gl, SEV_INFO, result[useRgtc], extension);
 	}
 	else
 	{
-		ri.Log( SEV_INFO, result[2], extension);
+		R_LOG( rch_gl, SEV_INFO, result[2], extension);
 	}
 
 	glRefConfig.swizzleNormalmap = r_ext_compressed_textures->integer && !(glRefConfig.textureCompression & TCR_RGTC);
@@ -273,11 +277,11 @@ void GLimp_InitExtraExtensions( void )
 		if (useBptc)
 			glRefConfig.textureCompression |= TCR_BPTC;
 
-		ri.Log( SEV_INFO, result[useBptc], extension);
+		R_LOG( rch_gl, SEV_INFO, result[useBptc], extension);
 	}
 	else
 	{
-		ri.Log( SEV_INFO, result[2], extension);
+		R_LOG( rch_gl, SEV_INFO, result[2], extension);
 	}
 
 	// GL_EXT_direct_state_access
@@ -293,11 +297,11 @@ void GLimp_InitExtraExtensions( void )
 			QGL_EXT_direct_state_access_PROCS;
 		}
 
-		ri.Log( SEV_INFO, result[glRefConfig.directStateAccess], extension);
+		R_LOG( rch_gl, SEV_INFO, result[glRefConfig.directStateAccess], extension);
 	}
 	else
 	{
-		ri.Log( SEV_INFO, result[2], extension);
+		R_LOG( rch_gl, SEV_INFO, result[2], extension);
 	}
 
 #undef GLE

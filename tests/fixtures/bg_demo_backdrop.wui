@@ -1,0 +1,38 @@
+// bg_demo_backdrop.wui — v2 DemoBackdrop full-stack PoC.
+//
+// Composes the 4 new 15.6 layers (sky + arena_silhouette + embers + fog)
+// with the legacy NOISE + VIGNETTE on top, all under the PARALLAX
+// modifier so the sky/arena/embers slide ±3% of viewport width on the
+// 12 s LOOP_LINEAR sine. Embers oscillate in Y per their seeded phase
+// table (14 particles, 4..8 s periods). Live test for both atmosphere
+// composition and the time-driven parallax modifier.
+
+menuDef {
+	name "bg_demo_backdrop"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor $demoBg
+
+	itemDef {
+		name "bg_demo_backdrop_root"
+		type container
+		rect 0 0 1 1
+		background "layered"
+		effects "sky+arena+embers+fog+vignette+grain+parallax"
+		visible 1
+		decoration
+	}
+
+	itemDef {
+		name "bg_demo_backdrop_label"
+		rect 0.10 0.04 0.80 0.04
+		text "DemoBackdrop · sky+arena+embers+fog+vignette+grain · parallax 12s"
+		font $font_mono 12
+		forecolor $bone
+		visible 1
+		decoration
+	}
+}

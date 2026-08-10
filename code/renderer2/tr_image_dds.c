@@ -4,6 +4,9 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "tr_common.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 typedef unsigned int   ui32_t;
 
@@ -207,7 +210,7 @@ void R_LoadDDS ( const char *filename, byte **pic, int *width, int *height, GLen
 
 	if (!picFormat)
 	{
-		ri.Log( SEV_ERROR, "R_LoadDDS() called without picFormat parameter!");
+		R_LOG( rch_assets, SEV_ERROR, "R_LoadDDS() called without picFormat parameter!");
 		return;
 	}
 
@@ -235,7 +238,7 @@ void R_LoadDDS ( const char *filename, byte **pic, int *width, int *height, GLen
 	//
 	if (len < 4 + sizeof(*ddsHeader))
 	{
-		ri.Log( SEV_INFO, "File %s is too small to be a DDS file.\n", filename);
+		R_LOG( rch_assets, SEV_INFO, "File %s is too small to be a DDS file.\n", filename);
 		ri.FS_FreeFile(buffer.v);
 		return;
 	}
@@ -245,7 +248,7 @@ void R_LoadDDS ( const char *filename, byte **pic, int *width, int *height, GLen
 	//
 	if (*((ui32_t *)(buffer.b)) != EncodeFourCC("DDS "))
 	{
-		ri.Log( SEV_INFO, "File %s is not a DDS file.\n", filename);
+		R_LOG( rch_assets, SEV_INFO, "File %s is not a DDS file.\n", filename);
 		ri.FS_FreeFile(buffer.v);
 		return;
 	}
@@ -258,7 +261,7 @@ void R_LoadDDS ( const char *filename, byte **pic, int *width, int *height, GLen
 	{
 		if (len < 4 + sizeof(*ddsHeader) + sizeof(*ddsHeaderDxt10))
 		{
-			ri.Log( SEV_INFO, "File %s indicates a DX10 header it is too small to contain.\n", filename);
+			R_LOG( rch_assets, SEV_INFO, "File %s indicates a DX10 header it is too small to contain.\n", filename);
 			ri.FS_FreeFile(buffer.v);
 			return;
 		}
@@ -371,7 +374,7 @@ void R_LoadDDS ( const char *filename, byte **pic, int *width, int *height, GLen
 				break;
 
 			default:
-				ri.Log( SEV_INFO, "DDS File %s has unsupported DXGI format %d.", filename, ddsHeaderDxt10->dxgiFormat);
+				R_LOG( rch_assets, SEV_INFO, "DDS File %s has unsupported DXGI format %d.", filename, ddsHeaderDxt10->dxgiFormat);
 				ri.FS_FreeFile(buffer.v);
 				return;
 				break;
@@ -405,7 +408,7 @@ void R_LoadDDS ( const char *filename, byte **pic, int *width, int *height, GLen
 				*picFormat = GL_COMPRESSED_SIGNED_RG_RGTC2;
 			else
 			{
-				ri.Log( SEV_INFO, "DDS File %s has unsupported FourCC.", filename);
+				R_LOG( rch_assets, SEV_INFO, "DDS File %s has unsupported FourCC.", filename);
 				ri.FS_FreeFile(buffer.v);
 				return;
 			}
@@ -421,7 +424,7 @@ void R_LoadDDS ( const char *filename, byte **pic, int *width, int *height, GLen
 		}
 		else
 		{
-			ri.Log( SEV_INFO, "DDS File %s has unsupported RGBA format.", filename);
+			R_LOG( rch_assets, SEV_INFO, "DDS File %s has unsupported RGBA format.", filename);
 			ri.FS_FreeFile(buffer.v);
 			return;
 		}

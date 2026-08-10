@@ -1,0 +1,55 @@
+// qw_hud_overlay_messages — V2_HUD_Active overlay text feed (vote / follow / spectator)
+// HUD redesign (Eser) Phase E — overlay layer (CTF-less scope, Eser-ratified).
+// Three transient text states, all TOP-LEFT (the only empty corner now that the
+// kill-feed moved to TR). hudElement rects are FULL-VIEWPORT; the three stack
+// downward (vote on top, follow/spec below) — only one or two are ever active at
+// once so they don't collide in practice.
+//   votemessageworld : "VOTE(N): <text>  yes(F1):N  no(F2):N" + 30s countdown.
+//                       Engine reads cgs.vote* via compat (cl_wired_hud_elem_vmw.c);
+//                       visible during a call-vote in any gametype.
+//   followmessage    : "Following ^7<name>" — when spectating/following a player.
+//   specmessage      : "^1SPECTATOR" — when the local client is a spectator.
+// All three self-gate in the engine (vote active / CG_IsFollowing / IsSpectator),
+// so they render nothing during normal play. No bind needed — compat-fed.
+// Tokens: $bone $boneDim $primary_red $font_sans.
+itemDef {
+	name "hud_active_overlay_messages_root"
+	type container
+	direction column
+	decoration
+	visible 1
+
+	// call-vote line — top-left, just below the top edge
+	itemDef { hudElement "votemessageworld"
+		anchor TOP_LEFT
+		rect 0.018 0.150 0 0
+		font $font_sans
+		fontsize 16 20
+		textalign 0
+		forecolor $bone
+		decoration
+		visible 1
+	}
+	// "Following <name>" — under the vote line
+	itemDef { hudElement "followmessage"
+		anchor TOP_LEFT
+		rect 0.018 0.205 0 0
+		font $font_sans
+		fontsize 16 20
+		textalign 0
+		forecolor $boneDim
+		decoration
+		visible 1
+	}
+	// "SPECTATOR" — under the follow line, red accent (engine text already has ^1)
+	itemDef { hudElement "specmessage"
+		anchor TOP_LEFT
+		rect 0.018 0.250 0 0
+		font $font_sans
+		fontsize 18 22
+		textalign 0
+		forecolor $primary_red
+		decoration
+		visible 1
+	}
+}

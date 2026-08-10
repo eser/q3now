@@ -16,7 +16,7 @@ Endpoints:
   GET /health      → 200 OK (load balancer / Docker HEALTHCHECK)
   GET /metrics     → Prometheus-format QUIC stats (Grafana)
   GET /status.json → live scoreboard + event feed (browser UI)
-  GET /*           → static file from baseq3/web/ (Q3 VFS)
+  GET /*           → static file from base/web/ (Q3 VFS)
 ===========================================================================
 */
 #include "wn_local.h"
@@ -434,8 +434,8 @@ static void WN_HttpHandleStatus( wn_http_ctx_t *ctx )
 ====================
 WN_HttpHandleStaticFile
 
-Serve static web assets from baseq3/web/ via Q3's VFS.
-Supports mod overrides (mymod/web/ shadows baseq3/web/).
+Serve static web assets from base/web/ via Q3's VFS.
+Supports mod overrides (mymod/web/ shadows base/web/).
 Rejects files > 1MB and paths with traversal sequences.
 ====================
 */

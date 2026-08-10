@@ -3,12 +3,12 @@
 # Requires: msdf-atlas-gen (https://github.com/Chlumsky/msdf-atlas-gen)
 #
 # Usage: ./generate_atlases.sh [output_dir]
-# Default output: ../../baseq3/fonts/
+# Default output: ../../base/fonts/
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUTPUT_DIR="${1:-${SCRIPT_DIR}/../../baseq3/fonts}"
+OUTPUT_DIR="${1:-${SCRIPT_DIR}/../../base/fonts}"
 FONT_DIR="${SCRIPT_DIR}/fonts"
 CHARSET_LATIN="${SCRIPT_DIR}/charset_latin.txt"
 CHARSET_CONSOLE="${SCRIPT_DIR}/charset_console.txt"
@@ -59,6 +59,7 @@ generate_font() {
 generate_font "Enter Sansman" "EnterSansman-Regular.ttf" "${CHARSET_LATIN}" "sansman"
 generate_font "Oxanium Regular" "Oxanium-Regular.ttf" "${CHARSET_LATIN}" "oxanium"
 generate_font "Share Tech Mono" "ShareTechMono-Regular.ttf" "${CHARSET_CONSOLE}" "console"
+generate_font "JetBrains Mono" "JetBrainsMono-Regular.ttf" "${SCRIPT_DIR}/jetbrainsmono_charset.txt" "jetbrainsmono"
 
 echo ""
 echo "Done. Atlas files written to: ${OUTPUT_DIR}"
@@ -66,3 +67,4 @@ echo "Expected files:"
 echo "  sansman_atlas.png + sansman.json"
 echo "  oxanium_atlas.png + oxanium.json"
 echo "  console_atlas.png + console.json"
+echo "  jetbrainsmono_atlas.png + jetbrainsmono.json"

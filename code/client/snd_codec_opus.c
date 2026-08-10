@@ -11,7 +11,6 @@
 // includes for the Opus codec
 #include <errno.h>
 #include <opusfile.h>
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_sound, "sound" );
 
 // Opus always decodes to 16-bit signed PCM

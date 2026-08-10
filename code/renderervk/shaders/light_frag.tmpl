@@ -14,9 +14,9 @@ layout(set = 0, binding = 0) uniform UBO {
 	vec4 fogColor;				// fragment
 #endif
 #ifdef USE_SHADOWMAP
-	// Phase 6.5.4c: 4 per-cascade light view-projection matrices + cascade
+	// 4 per-cascade light view-projection matrices + cascade
 	// split distances (view-space Z for splits 1..4) at host offsets 144 and
-	// 400 (see code/renderervk/vk.h vkUniform_t). Phase 7.3b-followup:
+	// 400 (see code/renderervk/vk.h vkUniform_t).
 	// explicit `layout(offset=)` (an ARB_enhanced_layouts feature, not in
 	// GLSL ES 300) is replaced with natural std140 padding so SPIRV-Cross can
 	// emit the block under every backend (MSL / GLSL 4.30 / GLSL ES 300 /
@@ -30,24 +30,80 @@ layout(set = 0, binding = 0) uniform UBO {
 	mat4 cascadeMVP[4];           // offset 144, 256 bytes
 	vec4 cascadeSplits;           // offset 400,  16 bytes
 #endif
+	// Pad to the per-draw bindless index table at host offset 544 (over the
+	// host's modelMatrix @416 + mvp @480, neither declared here). The pad
+	// origin depends on the last field above:
+	//   USE_SHADOWMAP   → cascadeSplits ends 416 → 8 vec4
+	//   USE_FOG only    → fogColor      ends 128 → 26 vec4
+	//   neither         → lightVector   ends  64 → 30 vec4
+#ifdef USE_SHADOWMAP
+	vec4 _pad_to_packed_indices[8];   // 416 -> 544
+#elif defined(USE_FOG)
+	vec4 _pad_to_packed_indices[26];  // 128 -> 544
+#else
+	vec4 _pad_to_packed_indices[30];  //  64 -> 544
+#endif
+	// Per-draw bindless index table (std140 uvec4[3] = 48 B). See vkUniform_t.
+	uvec4 packed_indices[3];      // offset 544, 48 bytes
 };
 
-layout(set = 1, binding = 0) uniform sampler2D texture0;
+// legacy-mainpath-retire STEP 3 — light_frag is bindless-only.
+// 2D texture slots route through set 7. Role-to-name map: role 0 = texture0
+// (albedo), role 1 = fogtexture, role 3 = pbrMap, role 5 = normalmap. Roles
+// 2 + 4 are unused in this template — the host writes a sentinel slot for
+// them.
+// 7.4.6.4.1 — shadowMap (sampler2DArray) was relocated off the legacy set=3
+// ring binding onto the engine-resources descriptor set at set 8, binding 0.
+// The engine-resources set is a UNIFY home for single-render-target engine
+// state — shadowMap (CSM 2DArray) + screenmap (refraction 2D, water.frag).
+// Bound per-draw via the same fold pattern as set 7, gated on a stable
+// vk.engineResources.descriptor handle written by
+// vk_update_attachment_descriptors. The dlight-shadowmap-rebind bridge that
+// per-draw-bound shadowMap to set 3 is retired by this turn.
+#extension GL_EXT_nonuniform_qualifier : require
+
+layout(set = 1, binding = 0) uniform texture2D wired_bindless_images[];
+layout(set = 1, binding = 1) uniform sampler   wired_bindless_samplers[];
+
+// Per-role packed index is uint32 (8-bit sampler field). The std140 UBO stores
+// them as uvec4[3] (packed_indices above); role N reads component N%4 of
+// vec4 N/4. role is always a literal, so the index folds. See gen_frag.tmpl.
+#define WIRED_BINDLESS_PACKED(role) packed_indices[ (role) / 4u ][ (role) % 4u ]
+
+// Inline sampler2D ctor at each texture() call (GLSL disallows passing a
+// constructed sampler to a user function). See gen_frag.tmpl.
+#define WIRED_BINDLESS_TEX(role) sampler2D( \
+	wired_bindless_images  [ nonuniformEXT(   WIRED_BINDLESS_PACKED( role )         & 0xFFFu ) ], \
+	wired_bindless_samplers[ nonuniformEXT( ( WIRED_BINDLESS_PACKED( role ) >> 12 ) & 0xFFu  ) ] )
+
+#define texture0    0u
 #ifdef USE_FOG
-layout(set = 2, binding = 0) uniform sampler2D fogtexture;
-#endif
-#ifdef USE_PARALLAX
-layout(set = 6, binding = 0) uniform sampler2D normalmap;
-#endif
-#ifdef USE_SHADOWMAP
-// Phase 6.5.4b/c: depth target is a 4-layer 2D array (one layer per CSM
-// cascade). 6.5.4c picks the layer per fragment from view-space depth. The
-// descriptor binding is unchanged (COMBINED_IMAGE_SAMPLER accepts a 2D_ARRAY view).
-layout(set = 3, binding = 0) uniform sampler2DArray shadowMap;
+#define fogtexture  1u
 #endif
 #ifdef USE_PBR
-layout(set = 4, binding = 0) uniform sampler2D pbrMap; // glTF 2.0 ORM: R=occlusion, G=roughness, B=metalness
+#define pbrMap      3u
 #endif
+#ifdef USE_PARALLAX
+#define normalmap   5u
+#endif
+
+#define sampleColorTex(role, uv, slot)  wired_bl_sample_domain( role, uv, slot )
+#define sampleNormalMap(role, uv)       wired_bl_sample_normal( role, uv )
+#define wired_tex_raw(role, uv)         texture( WIRED_BINDLESS_TEX( role ), uv )
+#define wired_tex_size(role, lod)       textureSize( WIRED_BINDLESS_TEX( role ), lod )
+
+#ifdef USE_SHADOWMAP
+// 7.4.6.4.1 — set 8 binding 0 (WIRED_ENGINE_RES_BIND_SHADOWMAP) on the
+// engine-resources descriptor set; see header comment above.
+layout(set = 2, binding = 0) uniform sampler2DArray shadowMap;
+#endif
+
+// IBL ambient probe bindings (brdfLut + irradiance/radiance cubes) used to be
+// declared here for the ambient term — that term moved out: IBL is the
+// light-INDEPENDENT ambient and belongs in the base pass (always-on), not in
+// this per-dynamic-light pass. The engine-resources set-2 layout + the C-side
+// descriptor writes stay (inert, ready); the base pass re-declares + samples
+// them when the always-on ambient lands there.
 
 layout(location = 0) centroid in vec2 frag_tex_coord;
 layout(location = 1) in vec3 N;  // normalized object-space normal vector
@@ -82,18 +138,17 @@ layout (constant_id = 28) const int shadow_pcf = 5;       // 1, 5, or 9 samples
 layout (constant_id = 29) const float shadow_bias = 0.005;
 #endif
 
-// Phase 6B3'-d4-m_final (Block 1): the A4-era per-map `srgb` spec
-// constant (id 15) is retired along with the worldLinearize* opt-in.
-// sampleColorTex below decodes the diffuse/albedo texel unconditionally
-// — the engine is self-consistently linear end-to-end. Phase 6.5.2
-// reuses spec-constant id 15 for `normal_format` (see USE_PARALLAX
-// block below); ids are not required contiguous.
+// The legacy per-map `srgb` spec constant (id 15) is retired along with
+// the worldLinearize* opt-in. sampleColorTex below decodes the
+// diffuse/albedo texel unconditionally — the engine is self-consistently
+// linear end-to-end. Spec-constant id 15 is reused for `normal_format`
+// (see USE_PARALLAX block below); ids are not required contiguous.
 
 #ifdef USE_PARALLAX
 layout (constant_id = 12) const float parallax_scale = 0.03;
 layout (constant_id = 13) const int parallax_steps = 8;
 
-// Phase 6.5.2: tangent-space normal-map encoding.
+// Tangent-space normal-map encoding.
 //   0 = RGB  — BC1 / BC3 / uncompressed RGBA: X,Y,Z in all 3 channels,
 //              unpack *2-1 (legacy; the only encoding before this).
 //   1 = BC5 UNORM (ATI2N / 3Dc) — R=X, G=Y in [0,1]; unpack *2-1, then
@@ -108,116 +163,37 @@ layout (constant_id = 13) const int parallax_steps = 8;
 // internalFormat (VK_FORMAT_BC5_UNORM_BLOCK / _SNORM_BLOCK / else).
 layout (constant_id = 15) const int normal_format = 0;
 
-vec3 sampleNormalMap( sampler2D tex, vec2 uv ) {
+// legacy-mainpath-retire STEP 3 — bindless-only sampleNormalMap dispatch.
+// `role` index from the per-draw push block instead of a sampler2D param;
+// sampler2D ctor lives inline at the texture() call.
+vec3 wired_bl_sample_normal( uint role, vec2 uv ) {
 	if ( normal_format == 0 )
-		return texture( tex, uv ).rgb * 2.0 - 1.0;
-	vec2 xy = ( normal_format == 1 ) ? texture( tex, uv ).rg * 2.0 - 1.0
-	                                 : texture( tex, uv ).rg;          // SNORM: already [-1,1]
+		return texture( WIRED_BINDLESS_TEX( role ), uv ).rgb * 2.0 - 1.0;
+	vec2 xy = ( normal_format == 1 ) ? texture( WIRED_BINDLESS_TEX( role ), uv ).rg * 2.0 - 1.0
+	                                 : texture( WIRED_BINDLESS_TEX( role ), uv ).rg;
 	return vec3( xy, sqrt( max( 0.0, 1.0 - dot( xy, xy ) ) ) );
 }
 #endif
 
 #ifdef USE_SHADOWMAP
-// PCF shadow sampling — 3-tier quality (1/5/9 samples, FTEQW-style).
-// Phase 6.5.4c/d1: Cascaded Shadow Maps. The cascade is chosen per fragment from
-// view-space depth (cascadeSplits = view-space Z for splits 1..4; split 0 =
-// near is implicit); the fragment's world position is projected by that
-// cascade's matrix and the PCF taps read that cascade's array layer. 6.5.4d1
-// adds a soft boundary blend (lerp into cascade i+1 near the far split).
-
-// Sample one cascade layer with PCF. Returns 1.0 (lit) when outside the
-// cascade's window or beyond its far plane — which is also what a
-// cleared/disabled cascade layer (depth = 1.0 everywhere) returns.
-float sampleCascade( int c, vec3 worldPos ) {
-	vec4 sc4 = cascadeMVP[c] * vec4( worldPos, 1.0 );
-	vec3 sc = sc4.xyz / sc4.w;        // orthographic — w == 1
-	sc.xy = sc.xy * 0.5 + 0.5;        // NDC [-1,1] → UV [0,1]; sc.z already in [0,1]
-	if ( sc.x < 0.0 || sc.x > 1.0 || sc.y < 0.0 || sc.y > 1.0 || sc.z > 1.0 )
-		return 1.0;
-
-	float layer = float( c );
-	vec2 texelSize = 1.0 / vec2( textureSize( shadowMap, 0 ).xy );
-	float currentDepth = sc.z - shadow_bias;
-	float shadow = 0.0;
-
-	if ( shadow_pcf <= 1 ) {
-		shadow = step( currentDepth, texture( shadowMap, vec3( sc.xy, layer ) ).r );
-	} else if ( shadow_pcf <= 5 ) {
-		shadow += step( currentDepth, texture( shadowMap, vec3( sc.xy, layer ) ).r );
-		shadow += step( currentDepth, texture( shadowMap, vec3( sc.xy + vec2( texelSize.x, 0 ), layer ) ).r );
-		shadow += step( currentDepth, texture( shadowMap, vec3( sc.xy - vec2( texelSize.x, 0 ), layer ) ).r );
-		shadow += step( currentDepth, texture( shadowMap, vec3( sc.xy + vec2( 0, texelSize.y ), layer ) ).r );
-		shadow += step( currentDepth, texture( shadowMap, vec3( sc.xy - vec2( 0, texelSize.y ), layer ) ).r );
-		shadow /= 5.0;
-	} else {
-		for ( int x = -1; x <= 1; x++ ) {
-			for ( int y = -1; y <= 1; y++ ) {
-				shadow += step( currentDepth, texture( shadowMap, vec3( sc.xy + vec2( x, y ) * texelSize, layer ) ).r );
-			}
-		}
-		shadow /= 9.0;
-	}
-	return shadow;
-}
-
-//   worldPos  = object/world-space fragment position (shadowData.xyz)
-//   viewDepth = view-space depth of the fragment    (shadowData.w)
-//   outCascade = the cascade index that was selected (for r_csmShowCascades viz)
-float sampleShadow( vec3 worldPos, float viewDepth, out int outCascade ) {
-	// branchless cascade select: how many split planes is the fragment past?
-	vec4 cmp = step( cascadeSplits, vec4( viewDepth ) );
-	int cascade = min( int( cmp.x + cmp.y + cmp.z + cmp.w ), 3 );
-	outCascade = cascade;
-
-	// soft cascade boundary blend: as viewDepth approaches this cascade's far
-	// split, lerp toward the next cascade. The next cascade (clamped to 3, and
-	// for a disabled/cleared layer) reads as 1.0, so the blend hands off cleanly
-	// even at the last enabled cascade. No-op away from boundaries.
-	float prevSplit  = ( cascade == 0 ) ? 0.0 : cascadeSplits[max( cascade - 1, 0 )]; // max() guards a possible eager eval of the OOB index
-	float farSplit   = cascadeSplits[cascade];
-	float blendRange = max( 0.1 * ( farSplit - prevSplit ), 1.0 );
-	float blendT     = clamp( ( farSplit - viewDepth ) / blendRange, 0.0, 1.0 ); // 1 = interior, 0 = at the far edge
-
-	float s0 = sampleCascade( cascade, worldPos );
-	float s1 = sampleCascade( min( cascade + 1, 3 ), worldPos );
-	return mix( s1, s0, blendT );
-}
+// CSM PCF sun-shadow sampling — shared single source of truth with gen_frag's
+// world-surface receiver (the inline duplicate retired now that compile.mjs
+// supports #include). Depends on cascadeMVP[]/cascadeSplits/shadowMap/shadow_pcf/
+// shadow_bias, all declared above in this shader at the matching layout.
+#include "shadow.glsl"
 #endif
 
 #ifdef USE_PBR
-const float PI = 3.14159265359;
-
-// GGX/Trowbridge-Reitz normal distribution function
-float DistributionGGX( float NdotH, float roughness ) {
-	float a = roughness * roughness;
-	float a2 = a * a;
-	float denom = NdotH * NdotH * ( a2 - 1.0 ) + 1.0;
-	return a2 / ( PI * denom * denom );
-}
-
-// Schlick-GGX geometry function (single direction)
-float GeometrySchlickGGX( float NdotV, float roughness ) {
-	float r = roughness + 1.0;
-	float k = ( r * r ) / 8.0;
-	return NdotV / ( NdotV * ( 1.0 - k ) + k );
-}
-
-// Smith geometry function (both view and light directions)
-float GeometrySmith( float NdotV, float NdotL, float roughness ) {
-	return GeometrySchlickGGX( NdotV, roughness ) * GeometrySchlickGGX( NdotL, roughness );
-}
-
-// Schlick Fresnel approximation
-vec3 FresnelSchlick( float cosTheta, vec3 F0 ) {
-	float t = 1.0 - cosTheta;
-	float t2 = t * t;
-	return F0 + ( 1.0 - F0 ) * ( t2 * t2 * t ); // pow5
-}
+// Direct-light Cook-Torrance BRDF helpers (PI + GGX + Smith + Schlick) — shared
+// single source of truth (the inline duplicate retired now that compile.mjs
+// supports #include). The ambient IBL term, when it lands in the base pass,
+// builds on the same pbr.glsl via ibl.glsl.
+#include "pbr.glsl"
 #endif
 
 float CorrectAlpha(float threshold, float alpha, vec2 tc)
 {
-	ivec2 ts = textureSize(texture0, 0);
+	ivec2 ts = wired_tex_size(texture0, 0);
 	float dx = max(abs(dFdx(tc.x * float(ts.x))), 0.001);
 	float dy = max(abs(dFdy(tc.y * float(ts.y))), 0.001);
 	float dxy = max(dx, dy); // apply the smallest boost
@@ -226,31 +202,10 @@ float CorrectAlpha(float threshold, float alpha, vec2 tc)
 	return ac;
 }
 
-// Phase 6B3'-d4-A2/A4 / m_final: precise piecewise sRGB <-> linear
-// conversion (sRGB EOTF / OETF). Matches RBDOOM-3-BFG and Daemon
-// Engine convention and the renderer's CPU-side mipmap LUTs (Phase
-// 6B3'-d3-C); the pow(x, 2.2) approximation is rejected so the
-// colour-space pipeline stays precise end-to-end. The defensive
-// max(c, 0.0) guards against negatives that could reach these from a
-// float-FBO read in future use (a UNORM texture sample is already
-// non-negative). Duplicated from gen_frag.tmpl because compile.mjs
-// has no #include support — if a third consumer appears, revisit
-// build-infra.
-vec3 sRGBToLinear( vec3 c ) {
-	c = max( c, vec3( 0.0 ) );
-	bvec3 cutoff = lessThanEqual( c, vec3( 0.04045 ) );
-	vec3 lo = c / 12.92;
-	vec3 hi = pow( ( c + vec3( 0.055 ) ) / 1.055, vec3( 2.4 ) );
-	return mix( hi, lo, vec3( cutoff ) );
-}
-
-vec3 linearToSRGB( vec3 c ) {
-	c = max( c, vec3( 0.0 ) );
-	bvec3 cutoff = lessThanEqual( c, vec3( 0.0031308 ) );
-	vec3 lo = c * 12.92;
-	vec3 hi = pow( c, vec3( 1.0 / 2.4 ) ) * 1.055 - 0.055;
-	return mix( hi, lo, vec3( cutoff ) );
-}
+// Precise piecewise sRGB <-> linear conversion — shared single source of truth
+// with gen_frag (the inline duplicate retired now that compile.mjs supports
+// #include).
+#include "colorspace.glsl"
 
 // Block 5d: domain-aware colour-texture fetch — matches gen_frag.tmpl's
 // helper. In the lighting pass texture0 is the diffuse/albedo. CD_SRGB
@@ -260,8 +215,12 @@ vec3 linearToSRGB( vec3 c ) {
 // (See gen_frag.tmpl for the tex_domain mechanism. The normal/shadow/depth/
 // PBR textures sampled elsewhere in this shader are linear data and stay on
 // raw texture() — they were never sRGB-encoded.)
-vec4 sampleColorTex( sampler2D s, vec2 uv, int slot ) {
-	vec4 c = texture( s, uv );
+// legacy-mainpath-retire STEP 3 — bindless-only sampleColorTex dispatch.
+// Same domain-aware decode the legacy sampler2D function used to do; the
+// sampler2D ctor lives inline at the texture() call site (the only place
+// SPIR-V allows it).
+vec4 wired_bl_sample_domain( uint role, vec2 uv, int slot ) {
+	vec4 c = texture( WIRED_BINDLESS_TEX( role ), uv );
 	if ( ( tex_domain & ( 1 << slot ) ) != 0 )
 		return c;	// CD_LINEAR — raw
 	c.rgb = sRGBToLinear( c.rgb );
@@ -270,7 +229,7 @@ vec4 sampleColorTex( sampler2D s, vec2 uv, int slot ) {
 
 void main() {
 #ifdef USE_FOG
-	vec4 fog = texture(fogtexture, fog_tex_coord);
+	vec4 fog = wired_tex_raw(fogtexture, fog_tex_coord);
 #endif
 
 #ifdef USE_PARALLAX
@@ -297,11 +256,11 @@ void main() {
 	deltaUV /= float(parallax_steps);
 
 	vec2 currentUV = frag_tex_coord;
-	float currentMapDepth = 1.0 - texture( normalmap, currentUV ).a;
+	float currentMapDepth = 1.0 - wired_tex_raw( normalmap, currentUV ).a;
 
 	for ( int i = 0; i < parallax_steps && currentDepth < currentMapDepth; i++ ) {
 		currentUV -= deltaUV;
-		currentMapDepth = 1.0 - texture( normalmap, currentUV ).a;
+		currentMapDepth = 1.0 - wired_tex_raw( normalmap, currentUV ).a;
 		currentDepth += layerDepth;
 	}
 
@@ -316,13 +275,13 @@ void main() {
 			currentUV -= deltaUV;
 			currentDepth += layerDepth;
 		}
-		currentMapDepth = 1.0 - texture( normalmap, currentUV ).a;
+		currentMapDepth = 1.0 - wired_tex_raw( normalmap, currentUV ).a;
 	}
 
 	vec2 parallax_tc = currentUV;
 
 	// Sample normal from normalmap and transform to object space.
-	// Phase 6.5.2: format-aware fetch — RGB unpack, or BC5 X+Y with Z
+	// Format-aware fetch — RGB unpack, or BC5 X+Y with Z
 	// reconstructed (see sampleNormalMap / normal_format above).
 	vec3 mapNormal = sampleNormalMap( normalmap, parallax_tc );
 	vec3 Np = normalize( TBN * mapNormal );
@@ -351,11 +310,11 @@ void main() {
 		if (base.a < alpha_test_value) discard;
 	}
 
-	// Phase 6B3'-d4-m7: linear-domain BRDF contract for this pass.
+	// Linear-domain BRDF contract for this pass.
 	//   - texture0 (albedo): decoded unconditionally by sampleColorTex
-	//     above (m_final retired the A4 per-map srgb gate).
+	//     above (the per-map srgb gate is retired).
 	//   - lightColor.rgb: host-decoded to linear at the VK_SetLightParams
-	//     UBO fill site (m7) — the value below is already linear.
+	//     UBO fill site — the value below is already linear.
 	//   - lightColor.a (lightColorRadius.w): 1/r^2 falloff scalar — not a
 	//     colour, not decoded.
 	//   - normalmap (set 6, USE_PARALLAX): tangent normal in .rgb (unpacked
@@ -401,10 +360,9 @@ void main() {
 
 #ifdef USE_FOG
 	// modulate base by inverted fog alpha
-	// Phase 6B3'-d4-m4: this branch reads only fog.a (the fog_texture
-	// density ramp, not a colour) — it does not consume the fogColor
-	// uniform, so the m4 host-side fogColor linearisation does not affect
-	// it. Math unchanged.
+	// This branch reads only fog.a (the fog_texture density ramp, not a
+	// colour) — it does not consume the fogColor uniform, so the
+	// host-side fogColor linearisation does not affect it. Math unchanged.
 	base.xyz = base.xyz * ( 1.0 - fog.a );
 #endif
 
@@ -418,11 +376,11 @@ void main() {
 	//   A = reserved
 	//
 	// AO is sampled but not yet consumed; consumed by
-	// the ambient/IBL path in Phase 6C1+. Direct-light
+	// the ambient/IBL path. Direct-light
 	// BRDF below uses only roughness + metalness.
 	float roughness, metalness, ao;
 	{
-		vec3 pbr = texture( pbrMap, parallax_tc ).rgb;
+		vec3 pbr = wired_tex_raw( pbrMap, parallax_tc ).rgb;
 		ao        = pbr.r;
 		roughness = clamp( pbr.g, 0.04, 1.0 );
 		metalness = pbr.b;
@@ -456,6 +414,13 @@ void main() {
 	vec3 diffuseColor = kD * base.rgb / PI;
 
 	out_color = vec4( ( diffuseColor + specular ) * NdotL * intens, base.a );
+
+	// The IBL ambient term lived here briefly, but it is the light-INDEPENDENT
+	// ambient and belongs in the base/world pass (always-on), not in this
+	// per-dynamic-light pass — adding it here both mis-placed it and would
+	// double-count it on any surface hit by more than one dlight. It moves to the
+	// base pass; this pass keeps ONLY the direct-light Cook-Torrance GGX above.
+	// (ao is still sampled above; it is consumed by the base-pass ambient.)
 #else
 	// Classic Phong lighting
 	float diffuse = dot(Np, nL);
@@ -472,6 +437,13 @@ void main() {
 		diffuse = abs( diffuse );
 		specFactor = abs( specFactor );
 	}
+	else
+	{
+		// HDR FP16 buffer no longer clamps on store — keep both non-negative
+		// (negative diffuse would subtract; pow() of negative specFactor is NaN).
+		diffuse    = max( diffuse, 0.0 );
+		specFactor = max( specFactor, 0.0 );
+	}
 
 	//float spec = pow(specFactor, 8.0) * 0.25;
 	vec4 spec = vec4(pow(specFactor, 10.0)*0.25) * base * 0.8;
@@ -480,7 +452,7 @@ void main() {
 #endif
 
 #ifdef USE_SHADOWMAP
-	// Phase 6.5.4d1: r_csmShowCascades debug viz (eyePos.w == 1 ⇒ on). Tint by
+	// r_csmShowCascades debug viz (eyePos.w == 1 => on). Tint by
 	// the cascade that was sampled: 0 = red, 1 = green, 2 = blue, 3 = yellow.
 	if ( eyePos.w > 0.5 ) {
 		vec3 tint = ( dbgCascade == 0 ) ? vec3( 1.0, 0.3, 0.3 )

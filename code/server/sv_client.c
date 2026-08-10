@@ -273,8 +273,8 @@ typedef struct tld_info_s {
 	const char *country;
 } tld_info_t;
 
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_server, "server" );
+LOG_DECLARE_CHANNEL( ch_network_server, "network.server" );
 
 static const tld_info_t tld_info[] = {
 #include "tlds.h"
@@ -515,12 +515,71 @@ the game VM.
 
 Lean first-pass: fresh slot allocation, no IP-based reconnect detection.
 Reconnect detection will use conn_handle_t (picoquic callback_close + new) —
-added after Phase B passes its test gate.
+added in a later pass once it passes its test gate.
 ==================
 */
 /* Forward declaration: SV_SendClientGameState is defined later in this file
- * but must be called from SV_OnPlayerConnect for the QUIC fast-path. */
-static void SV_SendClientGameState( client_t *client );
+ * but must be called from SV_OnPlayerConnect for the QUIC fast-path. The
+ * symbol is also exported via server.h so the per-frame dispatcher
+ * (SV_SendClientMessages) can re-push gamestate to clients the async spawn
+ * machine just transitioned back to CS_CONNECTED + GSA_INIT — without that
+ * proactive push, the integrated client (QUIC loopback) stays stuck at
+ * CA_ACTIVE against a now-stale server across back-to-back +map commands. */
+void SV_SendClientGameState( client_t *client );
+
+/*
+==================
+SV_IsHostClient
+
+Single authority for "is this the un-kickable host?" (in-process-queue L4).
+The host is the same-process local client in slot 0 (clientNum 0). A 2nd
+same-process app is also loopback (NA_LOOPBACK) but occupies clientNum>0 and
+must stay kickable/bannable. Keying on address type alone (the old scattered
+`remoteAddress.type==NA_LOOPBACK` guards) would protect every loopback client
+including a spectator app — so host-identity is type AND slot.
+==================
+*/
+qboolean SV_IsHostClient( const client_t *cl )
+{
+	return (qboolean)( cl->netchan.remoteAddress.type == NA_LOOPBACK
+	                   && ( cl - svs.clients ) == 0 );
+}
+
+/*
+==================
+SV_ConnIsIntegratedHost
+
+Connection-identity test for the integrated listen-server host, used at
+connect time (the client_t/slot does not exist yet, so SV_IsHostClient can't
+be applied). The host is the same-process listen-server's own client: it
+connects over loopback (NA_LOOPBACK) on the in-process-queue transport at
+app slot 0, whose server-end conn handle is WN_APP_SVCONN_BASE (110) —
+see wn_inmem.c wn_inmem_connect → WN_ConnectApp(0). A *2nd* same-process app
+(spawn_headless_client, cl_main.c) connects at app slot >= 1, server-end
+handles WN_APP_SVCONN_BASE+1 .. +WN_APP_SVCONN_COUNT-1 (111..113) — those must
+stay normal kickable clients. A remote client is never NA_LOOPBACK.
+
+This is what lets SV_OnPlayerConnect steer the host into slot 0, so the
+type-AND-slot SV_IsHostClient identity survives a host disconnect + reconnect
+to a still-running listen server. It is also what causes SV_UserinfoChanged to
+stamp ip="localhost" (slot 0), which the game VM keys pers.localClient on —
+so G_ServerIsConsoleOnly() correctly reports a listen server (not a dedicated
+console), and console-typed client cheat commands (give/god/noclip/…) forward
+to ClientCommand instead of being eaten by the dedicated-console fallback.
+==================
+*/
+static qboolean SV_ConnIsIntegratedHost( conn_handle_t conn, const netadr_t *from )
+{
+	if ( from->type != NA_LOOPBACK )
+		return qfalse;
+	/* The host is app slot 0 (server-end handle == WN_APP_SVCONN_BASE).
+	 * Only app slot >= 1 (handles strictly above the base, up to the range
+	 * end) is a 2nd same-process app — a normal kickable client. The base
+	 * handle itself is the un-kickable integrated host. */
+	if ( conn > WN_APP_SVCONN_BASE && conn < WN_APP_SVCONN_BASE + WN_APP_SVCONN_COUNT )
+		return qfalse;
+	return qtrue;
+}
 
 void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 {
@@ -548,21 +607,40 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 			(unsigned long long)conn );
 		return;
 	}
-	/* Find a free slot (select least-recently-freed) */
+	/* Slot 0 is reserved for the integrated listen-server host so the
+	   type-AND-slot SV_IsHostClient identity survives a host disconnect +
+	   reconnect: the host always lands in slot 0, and a normal/remote/2nd-app
+	   client never occupies slot 0 while any other slot is free. */
+	qboolean isHost = SV_ConnIsIntegratedHost( conn, &from );
+
 	newcl = NULL;
-	for ( i = 0; i < sv.maxclients; i++ ) {
-		cl = &svs.clients[i];
-		if ( cl->state == CS_FREE ) {
-			if ( newcl == NULL ||
-			     svs.time - cl->lastDisconnectTime > svs.time - newcl->lastDisconnectTime )
-				newcl = cl;
+	if ( isHost ) {
+		/* The host claims slot 0 when free; only spill to the normal search
+		   if a stray client already holds it. */
+		if ( svs.clients[0].state == CS_FREE )
+			newcl = &svs.clients[0];
+	}
+	if ( !newcl ) {
+		/* Find a free slot (select least-recently-freed). Non-host clients
+		   skip the reserved slot 0 unless it is the only free slot left. */
+		for ( i = ( isHost ? 0 : 1 ); i < sv.maxclients; i++ ) {
+			cl = &svs.clients[i];
+			if ( cl->state == CS_FREE ) {
+				if ( newcl == NULL ||
+				     svs.time - cl->lastDisconnectTime > svs.time - newcl->lastDisconnectTime )
+					newcl = cl;
+			}
 		}
+		/* All non-reserved slots full: a non-host may take slot 0 as a last
+		   resort (host always preferred slot 0 above). */
+		if ( !newcl && !isHost && sv.maxclients > 0 && svs.clients[0].state == CS_FREE )
+			newcl = &svs.clients[0];
 	}
 	if ( !newcl ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "SV_OnPlayerConnect: server full, dropping conn %llu\n",
 			(unsigned long long)conn );
 		if ( transport )
-			transport->drop_client( conn, "server full" );
+			transport_for_handle( conn )->drop_client( conn, "server full" );
 		return;
 	}
 
@@ -572,7 +650,7 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 	/* Store QUIC connection handle — used by all future transport calls */
 	newcl->quic_conn = conn;
 
-	/* Phase D: netchan replaced by QUIC — only keep the fields still referenced downstream. */
+	/* netchan replaced by QUIC — only keep the fields still referenced downstream. */
 	newcl->netchan.remoteAddress  = from;
 	newcl->wn_outgoing_sequence = 0;
 	newcl->netchan.incomingSequence = 0;
@@ -597,7 +675,7 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "QUIC: game rejected connection from %s: %s\n",
 			NET_AdrToString( &from ), reason );
 		if ( transport )
-			transport->drop_client( conn, reason );
+			transport_for_handle( conn )->drop_client( conn, reason );
 		memset( newcl, 0, sizeof(*newcl) );
 		return;
 	}
@@ -687,7 +765,7 @@ void SV_DrainUsercmds_Impl( void )
 	/* Use WN_ServerRecvUsercmd directly — NOT transport->recv_unreliable.
 	 * In loopback, transport->recv_unreliable is the client snapshot path
 	 * (reads wtcl.recv_queue).  Server user commands live in gc->recv_queue
-	 * and must be drained via the dedicated server function. */
+	 * and must be drained via the headless server function. */
 	if ( !transport )
 		return;
 
@@ -732,7 +810,13 @@ void SV_DrainUsercmds_Impl( void )
 			/* cmd_count:u8 */
 			cmdCount      = MSG_ReadByte( &msg );
 
-			if ( cmdCount < 1 || cmdCount > MAX_PACKET_USERCMDS ) {
+			/* cmd_count==0 is a first-class ACK-only datagram (in-process-queue L5):
+			 * a non-input-focused spectator app advances the server's delta baseline
+			 * + reliable-ack each frame without sending usercmds. It still runs the
+			 * keep-alive + ack-update below; the decode + run loops are no-ops at
+			 * cmdCount==0 (cmds[cmdCount-1] is never evaluated when the run loop body
+			 * does not execute). Only an over-large count is rejected. */
+			if ( cmdCount > MAX_PACKET_USERCMDS ) {
 				dglen = (int)sizeof( dgbuf );
 				continue;
 			}
@@ -752,7 +836,7 @@ void SV_DrainUsercmds_Impl( void )
 				cl->reliableAcknowledge = serverCmdAck;
 			}
 
-			Com_Log( SEV_TRACE, LOG_CH(ch_server), "[WiredNet] usercmd recv: client=%s snapAck=%u cmdAck=%d → deltaMessage=%d reliableAck=%d\n",
+			Com_Log( SEV_TRACE, LOG_CH(ch_network_server), "usercmd recv: client=%s snapAck=%u cmdAck=%d → deltaMessage=%d reliableAck=%d\n",
 				cl->name, snapshotAck, serverCmdAck, cl->deltaMessage, cl->reliableAcknowledge );
 
 			/* decode cmds with key=0 (TLS handles confidentiality) */
@@ -808,6 +892,12 @@ void SV_DrainQUICReliableCommands( void )
 		return;
 
 	len = (int)sizeof( buf );
+	/* Direct WN_ServerRecvReliable call (NOT transport->recv_reliable).
+	 * See cl_parse.c CL_CheckReliableStreams: the unified shim drains both
+	 * server-side cli→srv and client-side srv→cli queues in listen-server
+	 * mode, mixing the two paths. Batch 3 keeps direct on both sides; the
+	 * vtable needs split fields (recv_reliable_client / recv_reliable_server)
+	 * before this can rewire safely. */
 	while ( WN_ServerRecvReliable( &rconn, &rchan, buf, &len ) ) {
 		if ( rchan == CHAN_COMMANDS ) {
 			/* null-terminate defensively */
@@ -1027,7 +1117,7 @@ It will be resent if the client acknowledges a later message but has
 the wrong gamestate.
 ================
 */
-static void SV_SendClientGameState( client_t *client ) {
+void SV_SendClientGameState( client_t *client ) {
 	int			start;
 	entityState_t nullstate;
 	msg_t		msg;
@@ -1160,7 +1250,7 @@ static void SV_SendClientGameState( client_t *client ) {
 			Z_Free( bootbuf );
 			Com_Terminate( TERM_CLIENT_DROP, "WiredNet bootstrap overflow" );
 		}
-		transport->send_reliable( client->quic_conn, CHAN_BOOTSTRAP, bootbuf, bootlen );
+		transport_for_handle( client->quic_conn )->send_reliable( client->quic_conn, CHAN_BOOTSTRAP, bootbuf, bootlen );
 		Z_Free( bootbuf );
 		return;
 	}
@@ -1202,15 +1292,13 @@ void SV_ClientEnterWorld( client_t *client ) {
 
 	/* Force delta reset so the first snapshot is a full snapshot.
 	 *
-	 * QUIC clients: set deltaMessage = 0, not (wn_outgoing_sequence - PACKET_BACKUP+1).
-	 * The latter is negative early in a session; cast to uint32 it sets bit 31 of the
-	 * wire delta_base field, which collides with the fragment flag (0x80000000).
-	 * deltaMessage=0 delta-compresses from frame[0] (zeroed) = full snapshot on wire. */
-	if ( client->quic_conn != CONN_INVALID ) {
-		client->deltaMessage = 0;
-	} else {
-		client->deltaMessage = client->wn_outgoing_sequence - (PACKET_BACKUP + 1);
-	}
+	 * The previous QUIC-only special-case (deltaMessage=0) existed to
+	 * prevent the negative initial value from setting bit 31 on the wire — that
+	 * bit was the tier-2 fragment flag. Wire format v2 moved the
+	 * is_fragment flag into a dedicated flags byte, so delta_base is now a pure
+	 * uint32 and the workaround is no longer needed. Restore the original Q3
+	 * semantics for both transports. */
+	client->deltaMessage = client->wn_outgoing_sequence - (PACKET_BACKUP + 1);
 	client->lastSnapshotTime = svs.time - 9999; // generate a snapshot immediately
 
 	// call the game begin function
@@ -1461,7 +1549,7 @@ static int SV_WriteDownloadToClient( client_t *cl )
 				dlbuf[msglen++] = (byte)( ( errlen >> 8 ) & 0xFF );
 				memcpy( dlbuf + msglen, errorMessage, (size_t)errlen );
 				msglen += errlen;
-				transport->send_reliable( cl->quic_conn, CHAN_DOWNLOAD, dlbuf, msglen );
+				transport_for_handle( cl->quic_conn )->send_reliable( cl->quic_conn, CHAN_DOWNLOAD, dlbuf, msglen );
 			}
 
 			*cl->downloadName = '\0';
@@ -1569,7 +1657,7 @@ static int SV_WriteDownloadToClient( client_t *cl )
 			memcpy( dlbuf + msglen, cl->downloadBlocks[curindex], (size_t)blockSize );
 			msglen += blockSize;
 		}
-		transport->send_reliable( cl->quic_conn, CHAN_DOWNLOAD, dlbuf, msglen );
+		transport_for_handle( cl->quic_conn )->send_reliable( cl->quic_conn, CHAN_DOWNLOAD, dlbuf, msglen );
 	}
 
 	Com_Log( SEV_DEBUG, LOG_CH(ch_server), "clientDownload: %d : writing block %d\n", (int) (cl - svs.clients), cl->downloadXmitBlock );
@@ -1593,7 +1681,7 @@ Return the shortest time interval for sending next packet to client
 */
 int SV_SendQueuedMessages( void )
 {
-	/* Phase D: QUIC handles fragmentation and flow control internally.
+	/* QUIC handles fragmentation and flow control internally.
 	   No application-level fragment queue exists. */
 	return -1;
 }
@@ -1811,8 +1899,8 @@ void SV_UserinfoChanged( client_t *cl, qboolean updateUserinfo, qboolean runFilt
 	// rate command
 
 	// if the client is on the same subnet as the server and we aren't running an
-	// internet public server, assume they don't need a rate choke
-	if ( cl->netchan.remoteAddress.type == NA_LOOPBACK || ( cl->netchan.isLANAddress && com_dedicated->integer != 2 && sv_lanForceRate->integer ) ) {
+	// internet public (listed) server, assume they don't need a rate choke
+	if ( cl->netchan.remoteAddress.type == NA_LOOPBACK || ( cl->netchan.isLANAddress && !sv_hostListed->integer && sv_lanForceRate->integer ) ) {
 		cl->rate = 0; // lans should not rate limit
 	} else {
 		val = Info_ValueForKey( cl->userinfo, "rate" );
@@ -1870,7 +1958,13 @@ void SV_UserinfoChanged( client_t *cl, qboolean updateUserinfo, qboolean runFilt
 	// TTimo
 	// maintain the IP information
 	// the banning code relies on this being consistently present
-	if ( NET_IsLocalAddress( &cl->netchan.remoteAddress ) )
+	//
+	// in-process-queue slot-0 gate: ip="localhost" is the marker the game VM
+	// keys pers.localClient on (the un-kickable host). Only the host — the
+	// same-process app in slot 0 — gets it. A future 2nd same-process app
+	// (NA_LOOPBACK, slot>0) must read as a normal remote so it stays
+	// kickable/bannable, matching SV_IsHostClient's type-AND-slot identity.
+	if ( NET_IsLocalAddress( &cl->netchan.remoteAddress ) && ( cl - svs.clients ) == 0 )
 		ip = "localhost";
 	else
 		ip = NET_AdrToString( &cl->netchan.remoteAddress );
@@ -2074,7 +2168,7 @@ qboolean SV_ExecuteClientCommand( client_t *cl, const char *s ) {
 	//	return qtrue;
 	// }
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	if ( !com_cl_running->integer && bFloodProtect && SV_FloodProtect( cl ) ) {
 #else
 	if ( bFloodProtect && SV_FloodProtect( cl ) ) {

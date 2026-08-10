@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Rune 3 — divided square -->
+  <path d="M 14 14 L 86 14 L 86 86 L 14 86 Z M 22 22 L 46 22 L 46 78 L 22 78 Z M 54 22 L 78 22 L 78 78 L 54 78 Z" fill="black" fill-rule="evenodd"/>
+</svg>

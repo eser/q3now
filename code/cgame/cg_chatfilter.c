@@ -10,7 +10,6 @@ Inspired by OSP2's chat filter, adapted for q3now's API.
 ===========================================================================
 */
 #include "cg_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 #if FEAT_CHAT_FILTER

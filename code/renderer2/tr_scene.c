@@ -3,6 +3,9 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.cmd
+
+R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
 static int			r_firstSceneDrawSurf;
 
@@ -40,8 +43,8 @@ void R_InitNextFrame( void ) {
 
 	r_numpolyverts = 0;
 
-#if FEAT_CORONA
-	R_ClearCoronas();
+#if FEAT_HALO
+	R_ClearHalos();
 #endif
 }
 
@@ -109,7 +112,7 @@ void RE_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts
 	if ( !hShader ) {
 		// This isn't a useful warning, and an hShader of zero isn't a null shader, it's
 		// the default shader.
-		//ri.Log( SEV_WARN, "WARNING: RE_AddPolyToScene: NULL poly shader\n");
+		//R_LOG( rch_cmd, SEV_WARN, "WARNING: RE_AddPolyToScene: NULL poly shader\n");
 		//return;
 	}
 
@@ -121,7 +124,7 @@ void RE_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts
       since we don't plan on changing the const and making for room for those effects
       simply cut this message to developer only
       */
-			ri.Log( SEV_DEBUG, "WARNING: RE_AddPolyToScene: r_max_polys or r_max_polyverts reached\n");
+			R_LOG( rch_cmd, SEV_DEBUG, "WARNING: RE_AddPolyToScene: r_max_polys or r_max_polyverts reached\n");
 			return;
 		}
 
@@ -193,14 +196,14 @@ void RE_AddRefEntityToScene( const refEntity_t *ent, qboolean intShaderTime ) {
 		return;
 	}
 	if ( r_numentities >= MAX_REFENTITIES ) {
-		ri.Log( SEV_DEBUG, "RE_AddRefEntityToScene: Dropping refEntity, reached MAX_REFENTITIES\n");
+		R_LOG( rch_cmd, SEV_DEBUG, "RE_AddRefEntityToScene: Dropping refEntity, reached MAX_REFENTITIES\n");
 		return;
 	}
 	if ( Q_isnan(ent->origin[0]) || Q_isnan(ent->origin[1]) || Q_isnan(ent->origin[2]) ) {
 		static qboolean firstTime = qtrue;
 		if (firstTime) {
 			firstTime = qfalse;
-			ri.Log( SEV_WARN, "RE_AddRefEntityToScene passed a refEntity which has an origin with a NaN component\n");
+			R_LOG( rch_cmd, SEV_WARN, "RE_AddRefEntityToScene passed a refEntity which has an origin with a NaN component\n");
 		}
 		return;
 	}
@@ -290,6 +293,11 @@ void RE_AddBeamToScene( const beamDesc_t *desc ) {
 	(void)desc;
 }
 
+void RE_AddRailRibbonToScene( const railRibbonDesc_t *desc ) {
+	// GPU parametric-ribbon pool is a renderervk feature; no-op here.
+	(void)desc;
+}
+
 void RE_AddSpriteToScene( const spriteDesc_t *desc ) {
 	// TODO: implement primitive sprite pipeline.
 	(void)desc;
@@ -303,6 +311,17 @@ void RE_EmitParticles( const emitterDesc_t *desc ) {
 void RE_AddDecalToScene( const decalDesc_t *desc ) {
 	// TODO: implement decal projection.
 	(void)desc;
+}
+
+void RE_AddLensSourceToScene( const lensSourceDesc_t *desc ) {
+	// GL backend has no depth-sampling lens oracle; no-op.
+	(void)desc;
+}
+
+qboolean RE_GetLensVisibility( int id, float *outVis ) {
+	(void)id;
+	if ( outVis ) *outVis = 1.0f;
+	return qfalse;
 }
 
 void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass_t *cls ) {
@@ -481,9 +500,10 @@ Rendering a scene may require multiple views to be rendered
 to handle mirrors,
 @@@@@@@@@@@@@@@@@@@@@
 */
-void RE_RenderScene( const refdef_t *fd ) {
+void RE_RenderScene( const refdef_t *fd, int worldIndex ) {
 	viewParms_t		parms;
 	int				startTime;
+	(void)worldIndex;	// single-world GL backend; index carried for refexport_t compat
 
 	if ( !tr.registered ) {
 		return;

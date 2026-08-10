@@ -61,7 +61,7 @@ typedef struct log_sink_s log_sink_t;
 
 typedef struct {
     log_severity_t   severity;
-    int              channel;        // index into log_channels[] (Phase 2+)
+    int              channel;        // index into log_channels[]
     const char      *body;           // NOT null-terminated past body_len
     uint32_t         body_len;       // use this, never strlen(body)
     qboolean         truncated;      // qtrue if message exceeded 64KB-1
@@ -194,6 +194,12 @@ log_severity_t Log_ParseSeverity( const char *name );
 // Log_SeverityBracket: returns static literal e.g. "[INFO]", "[WARN]".
 const char *Log_SeverityBracket( log_severity_t sev );
 
+// Log_SeverityColor: q_shared "^N" color-code prefix for a severity, applied
+// to the line prefix by the console and tty sinks. WARN/ERROR/FATAL return a
+// code; TRACE/DEBUG/INFO return "" (console/terminal default — g_color_table
+// has no gray code). The file sink ignores this (plain JSONL).
+const char *Log_SeverityColor( log_severity_t sev );
+
 // Log_SeverityName: bare name without brackets, e.g. "INFO", "WARN".
 // Implemented in log_sink_file.c (shared by file sink and log buffer).
 const char *Log_SeverityName( log_severity_t sev );
@@ -207,7 +213,7 @@ int JsonEscapeBody( const char *body, int body_len, char *out, int outsize );
 // -------------------------------------------------------------------------
 
 // Console sink — in-game ring buffer. Compiled out in dedicated builds.
-#ifndef DEDICATED
+#ifndef HEADLESS
 log_sink_t *Log_RegisterConsoleSink  ( void );
 void        Log_UnregisterConsoleSink( void );
 #endif

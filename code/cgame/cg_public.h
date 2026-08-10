@@ -56,7 +56,7 @@ functions imported from the main executable
 ==================================================================
 */
 
-#define	CGAME_IMPORT_API_VERSION	4
+#define	CGAME_IMPORT_API_VERSION	5
 
 typedef enum {
 	CG_PRINT,		// DEPRECATED, no new callers
@@ -186,10 +186,18 @@ typedef enum {
 	//                                     const particleClass_t *cls )
 	CG_R_REGISTERPRIMITIVESHADER,
 	// qhandle_t trap_R_RegisterPrimitiveShader( const char *name )
+	// ── Atmospheric weather (GPU-resident rain/snow) ────────────────
+	CG_R_SETATMOSPHERE,
+	// void trap_R_SetAtmosphere( const atmosphericDesc_t *desc )
+	CG_R_SETATMOSPHEREHEIGHTGRID,
+	// void trap_R_SetAtmosphereHeightgrid( const float *grid, int count )
+	// — the heightgrid ships as a separate top-level syscall arg because a
+	// struct-nested pointer can't be VM-address-translated (mirrors how the
+	// poly traps pass verts-ptr + count).
 	// — like CG_R_REGISTERSHADER but additionally writes the resolved
 	// shader's image into vk_primitive_shader_images[] so the ribbon
 	// (and future beam) pipeline can sample the texture by handle.
-	// ── Wired UI: HUD state bridge (Phase 3) ────────────────────────
+	// ── Wired UI: HUD state bridge ────────────────────────
 	CG_WIREDUI_PUSH_HUD_STATE = 200,
 	// void trap_WiredUI_PushHudState( wiredHudState_t *state )
 	CG_WIREDUI_PUSH_EVENT = 201,
@@ -212,7 +220,7 @@ typedef enum {
 	CG_R_MEASURETEXTNORM = 206,
 	// float trap_R_MeasureTextNorm( const char *text, int fontId, float nSize )
 
-	// ── Sound duration (Phase 6.2) ───────────────────────────────────
+	// ── Sound duration ───────────────────────────────────
 	CG_S_SOUNDDURATION = 207,
 	// int trap_S_SoundDuration( sfxHandle_t handle )
 	// Returns sound length in milliseconds (0 if invalid).
@@ -224,12 +232,106 @@ typedef enum {
 	// void trap_WiredStore_Clear( void )
 	CG_WUI_STORE_PUSH_BATCH = 218,
 	// void trap_WiredStore_PushBatch( const wuiStagedEntry_t *entries, int count )
+	CG_WUI_STORE_PUSH_MARKERLIST = 219,
+	// void trap_WiredStore_PushMarkerList( const char *listKey, const wuiMarker_t *markers, int count )
+	// WA-2a: stage a variable-count world-anchored marker list under listKey. Separate
+	// channel from PUSH_BATCH (markers are arrays, not deduped scalars). REPLACES the
+	// listKey's prior-frame list. Mid-enum APPEND (219 was the free slot); full rebuild.
 
 	// ── lightstyle pattern string update ──────────────────────────────
 	CG_R_SETLIGHTSTYLEPATTERN = 220,
 	// void trap_R_SetLightstylePattern( int style, const char *pattern )
 	// style in [0,63]; pattern is a NUL-terminated string up to LIGHTSTYLE_PATTERN_MAX chars.
 	// Stores pattern for renderer animation and derives a float for backward compat.
+
+	// ── Glconfig generation counter (M1: viewport resync) ────────────
+	CG_GET_GLCONFIG_GENERATION = 221,
+	// int trap_GetGlconfigGeneration( void )
+	// Returns cls.glconfigGeneration, bumped by the engine on every
+	// re.BeginRegistration. cgame polls it per-frame to detect resolution
+	// changes and re-fetch glconfig / recompute screen scale-bias.
+
+	// ── WiredUI viewport-provider registry ─────────
+	// Mid-enum APPEND only (NEVER INSERT — every value would shift and break
+	// ABI for shipped game modules). FULL REBUILD required after this change.
+	CG_REGISTER_VIEWPORT_PROVIDER   = 222,
+	// void trap_RegisterViewportProvider( const char *id, int lifetime,
+	//                                     int input_mode, int is_vm_routed, int vm_key )
+	// Registers a VM-routed viewport provider against `id` (kebab-case key,
+	// case-sensitive). The fields are passed as scalar args, not as a struct
+	// pointer: the provider struct embeds a fn-ptr + void* whose width differs
+	// between a wasm32 cgame and the x64 engine, so passing the struct by
+	// pointer would read every field at the wrong offset. The engine builds a
+	// host-layout provider from these scalars (render/userdata forced NULL —
+	// cgame providers dispatch via VM_Call by vm_key, never a render fn-ptr).
+	// The compositor's WUI_LAYER_WORLD_VIEWPORT walk enters the cgame for `id`
+	// when a .wui viewport itemDef references it. Conflict policy:
+	// last-write-wins + SEV_WARN. Field types: ui_viewport_types.h.
+
+	CG_UNREGISTER_VIEWPORT_PROVIDER = 223,
+	// void trap_UnregisterViewportProvider( const char *id )
+	// Removes the provider with matching id. No-op + SEV_DEBUG if id not
+	// registered. Auto-cleanup also fires by lifetime (LEVEL on
+	// CL_ShutdownLevel, FRAME at end-of-frame).
+
+	CG_R_ADDLENSSOURCETOSCENE       = 225,
+	// void trap_R_AddLensSourceToScene( const lensSourceDesc_t *desc )
+	// register a light source with the depth-sampling lens occlusion oracle.
+	CG_R_GETLENSVISIBILITY          = 226,
+	// qboolean trap_R_GetLensVisibility( int id, float *outVis )
+	// read back the oracle's last-frame visibility (0..1) for that source id;
+	// qfalse when no GPU oracle (GL backend / r_lens off) → caller falls back.
+	CG_R_ADDHALOTOSCENE             = 227,
+	// void trap_R_AddHaloToScene( const haloDesc_t *desc )
+	// register a direction-independent halo (drawn as a NULL-normal flare);
+	// desc->visible is the oracle-driven occlusion gate.
+
+	CG_WIRED_SCENE_LOAD            = 228,
+	// qboolean trap_WiredSceneLoad( const char *name, wiredScene_t *out )
+	// Load a cinematic-camera .lua definition engine-side (FS + System Lua VM),
+	// then marshal the parsed POD wiredScene_t back into the cgame's `out`
+	// buffer (raw bytes; the struct is pointer-free fixed arrays, so the
+	// wasm32<->x64 copy is layout-safe). A load-time crossing, NOT per-frame:
+	// cgame runs WiredScenePlayback_Start + WiredScene_Eval on its local copy
+	// every frame with no further trap. Returns qtrue on success. Slot 228,
+	// append-at-end after 227. FULL REBUILD required after this change.
+
+	CG_GET_SCENE_FRAME_CONTEXT      = 224,
+	// void trap_GetSceneFrameContext( wuiSceneFrameCtx_t *out )
+	// pull per-frame scene context (serverTime / stereo /
+	// demoPlayback) for the world-viewport provider's render callback. The
+	// engine fills *out from cl.serverTime / STEREO_CENTER / clc.demoplaying —
+	// the same inputs the (now-retired) engine-side CL_CGameRendering direct
+	// call supplied. Write-back via VMA pointer (mirrors CG_GETGLCONFIG).
+	// struct layout: code/qcommon/wired/ui_viewport_types.h (wuiSceneFrameCtx_t).
+	// APPEND-at-end (slot 224, next free after 222/223); CG_TRAP_GETVALUE
+	// below is a separate high-valued shared trap (=700), not a sequential
+	// sentinel — no collision. FULL REBUILD required after this change.
+
+	CG_L10N_GET                     = 229,
+	// void trap_L10n_Get( const char *key, char *buffer, int bufsize )
+	// Resolve an l10n key to its localized text via the engine-side table
+	// (WiredL10n_Get) and write it into the cgame's sized buffer. Missing key
+	// degrades to the key itself (never blank). Same shape as
+	// CG_CVAR_VARIABLESTRINGBUFFER ({ptr, sized-ptr, int}); the sized output
+	// ptr is bounds-checked by VARG_VMPTR_SIZED. Slot 229, append-at-end after
+	// 228. FULL REBUILD required after this change.
+
+	CG_R_ADDRAILRIBBONTOSCENE       = 230,
+	// void trap_R_AddRailRibbonToScene( const railRibbonDesc_t *desc )
+	// Submit a GPU-resident parametric helix ribbon ONCE at fire time; the
+	// renderer's persistent pool regenerates the evolving spiral geometry each
+	// frame from (currentTime - spawnTime) until the duration expires. The desc
+	// is flat POD (no nested pointers), so it crosses the VM by value like
+	// AddBeamToScene ({ VARG_VMPTR }). Slot 230, append-at-end after 229. FULL
+	// REBUILD required after this change.
+
+	CG_R_GETMDLANIMS                = 231,
+	// int trap_R_GetMDLAnimations( qhandle_t model, mdlAnimRange_t *anims, int maxAnims )
+	// Query Q1-.mdl-derived animation ranges (prefix-grouped frame names). Slot
+	// 231, append-at-end after 230 (no existing trap renumbered). Added for the Q1
+	// monster animation path (mirrors CG_R_GETIQMANIMS). { VARG_INT, VARG_VMPTR,
+	// VARG_INT } like the IQM query. FULL REBUILD required after this change.
 
 	CG_TRAP_GETVALUE = COM_TRAP_GETVALUE,
 
@@ -412,6 +514,7 @@ typedef struct {
 	int         warmup, levelStartTime;
 	qboolean    showScores, demoPlayback, intermission;
 	qboolean    connectionInterrupted; // client commands fell past CMD_BACKUP without ack
+	qboolean    sceneHudHidden;        // cinematic director active + HUD off: hide the whole game HUD
 
 	// team
 	int         ourTeam;
@@ -514,6 +617,7 @@ typedef struct {
 
 	/* ── pre-computed weapon list (cgame fills, client iterates) ──── */
 	int         weaponListCount;                  /* number of entries */
+	int         weaponSelectTime;                 /* cg.time of last weapon switch — carousel show/fade gate */
 	struct {
 		int       id;          /* weapon_t value */
 		qhandle_t icon;        /* weapon icon handle */
@@ -559,6 +663,10 @@ void trap_WiredUI_PushHudState( wiredHudState_t *state );
 #define WIRED_EVENT_CENTERPRINT 6  // center print text (routed through message queue)
 #define WIRED_EVENT_OBITUARY   7  // "attacker|target|mod|unfrozen" kill event
 #define WIRED_EVENT_TEMPACC    8  // "weapon|accuracy" recent weapon accuracy
+#define WIRED_EVENT_SUBTITLE   9  // localized scene-caption subtitle text (renders on a
+                                  // scene-gated surface that survives HUD-suppression)
+#define WIRED_EVENT_OBJECTIVE  10 // localized mission-objective list: "text,completed,failed;..."
+                                  // triples for the objectives HUD (standard HUD gate)
 
 void trap_WiredUI_PushEvent( int type, const char *data );
 
@@ -582,7 +690,25 @@ typedef struct {
 	int         fields;         /* WUI_STAGED_* bitmask — which fields are valid */
 } wuiStagedEntry_t;
 
+/* World-anchored-UI marker (WA-2a): one entry in a variable-count marker LIST
+ * staged per frame under a named listKey. A flat VM-boundary POD (no pointers;
+ * float/vec4/char[] only) — crosses the VM boundary, so changing it is an ABI
+ * change (cgame + client rebuilt together). x/y are ABSOLUTE REAL PIXELS (the
+ * CG_WorldToScreenPixels convention from WA-1) — the text element draws each
+ * marker at its pixel position via Text_Draw. Separate channel from the scalar
+ * wuiStagedEntry_t store (markers = arrays, store = deduped scalars). */
+typedef struct {
+	float       x, y;           /* absolute real-pixel screen position */
+	vec4_t      color;          /* RGBA */
+	char        text[24];       /* short label (e.g. a damage number) */
+} wuiMarker_t;
+
+/* Max markers in one staged list (shared cgame staging scratch + client store);
+ * 64 = 32 damage plums + headroom. Overflow drops with a logged warning. */
+#define WUI_MAX_MARKERS_PER_LIST    64
+
 void trap_WiredStore_PushBatch( const wuiStagedEntry_t *entries, int count );
+void trap_WiredStore_PushMarkerList( const char *listKey, const wuiMarker_t *markers, int count );
 void trap_WiredStore_Delete( const char *key );
 void trap_WiredStore_Clear( void );
 
@@ -653,10 +779,20 @@ typedef enum {
 //	void	(*CG_KeyEvent)( int key, qboolean down );
 
 	CG_MOUSE_EVENT,
-//	void	(*CG_MouseEvent)( int dx, int dy );
+//	void	(*CG_MouseEvent)( float dx, float dy );  // dx/dy bit-cast to int across the VM boundary (PASSFLOAT), decoded to float in vmMain
 
 	CG_EVENT_HANDLING,
 //	void (*CG_EventHandling)(int type);
+
+	CG_RENDER_VIEWPORT,
+//	void (*CG_RenderViewport)( int viewportKey );
+	// Engine→cgame: render the cgame-owned viewport identified by viewportKey
+	// into the active swapchain. The cgame branches on viewportKey (today:
+	// WUI_VIEWPORT_KEY_MAIN_SCENE → the world scene render). Invoked via VM_Call
+	// from the WiredUI WORLD_VIEWPORT walk when a VM-routed provider resolves.
+	// Frame context (serverTime/stereo/demoPlayback) is pulled by the cgame
+	// handler via the existing CG_GET_SCENE_FRAME_CONTEXT syscall (slot 224) —
+	// not passed as args, reusing the established pull mechanism.
 
 	CG_EXPORT_LAST,
 } cgameExport_t;

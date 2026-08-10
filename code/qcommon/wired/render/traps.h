@@ -35,12 +35,30 @@ trap returns.
 void trap_R_AddRibbonToScene  ( const ribbonPoint_t *points, int numPoints,
                                 qhandle_t shader, int flags );
 void trap_R_AddBeamToScene    ( const beamDesc_t    *desc );
+// Parametric helix ribbon: submit once at fire; the renderer's persistent
+// pool regenerates the evolving spiral each frame. railRibbonDesc_t is flat
+// POD (no pointers), so it passes as a struct like beamDesc_t.
+void trap_R_AddRailRibbonToScene( const railRibbonDesc_t *desc );
 void trap_R_AddSpriteToScene  ( const spriteDesc_t  *desc );
 void trap_R_EmitParticles     ( const emitterDesc_t *desc );
 void trap_R_AddDecalToScene   ( const decalDesc_t   *desc );
+// Lens-source occlusion oracle: register a source, read back its visibility.
+void trap_R_AddLensSourceToScene( const lensSourceDesc_t *desc );
+qboolean trap_R_GetLensVisibility( int id, float *outVis );
+// Direction-independent halo (occlusion gated by the lens oracle).
+void trap_R_AddHaloToScene( const haloDesc_t *desc );
 
 // Inform the renderer of a particle class. Called once per class at
 // registration time (not per-frame). The renderer keeps a shadow
 // copy for its compute shader. WASM-safe because particleClass_t is
 // flat (no embedded pointers).
 void trap_R_RegisterParticleClass( particleClassHandle_t handle, const particleClass_t *cls );
+
+// Configure GPU-resident atmospheric weather (rain / snow). Called once
+// per weather change (not per-frame); the renderer's dedicated
+// atmospheric pool self-spawns / integrates / collides / draws. The
+// collision heightgrid ships separately because a struct-nested pointer
+// can't be VM-address-translated (only top-level syscall args are).
+// `atmosphericDesc_t` is flat (no pointer field), so it crosses as a struct.
+void trap_R_SetAtmosphere( const atmosphericDesc_t *desc );
+void trap_R_SetAtmosphereHeightgrid( const float *grid, int count );

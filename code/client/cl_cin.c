@@ -16,7 +16,6 @@
 #include "client.h"
 #include "wired/ui/cl_wired_ui.h"
 #include "snd_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 #define MAXSIZE				8
@@ -35,8 +34,6 @@ LOG_DECLARE_CHANNEL( ch_client, "client" );
 #define ZA_SOUND_MONO		0x1020
 #define ZA_SOUND_STEREO		0x1021
 
-extern	int		s_paintedtime;
-extern	int		s_rawend;
 
 
 static void RoQ_init( void );
@@ -121,8 +118,6 @@ static cinematics_t		cin;
 static cin_cache		cinTable[MAX_VIDEO_HANDLES];
 static int				currentHandle = -1;
 static int				CL_handle = -1;
-
-extern int				s_soundtime;		// sample PAIRS
 
 extern int				CL_ScaledMilliseconds( void );
 
@@ -1131,18 +1126,29 @@ redump:
 			break;
 		case	ZA_SOUND_MONO:
 			if (!cinTable[currentHandle].silent) {
-				ssize = RllDecodeMonoToStereo( framedata, sbuf, cinTable[currentHandle].RoQFrameSize, 0, (unsigned short)cinTable[currentHandle].roq_flags);
-					S_RawSamples( ssize, 22050, 2, 1, (byte *)sbuf, s_volume->value );
+				// RllDecodeMonoToStereo writes stereo s16 into sbuf; ssize is the
+				// stereo frame count. Stream it to ma_engine (movie video is
+				// wall-clock paced, so no audio-clock coupling is needed).
+				// The mono decode writes 2 shorts per input byte, so cap the input
+				// byte count at sbuf/2 shorts so a malformed oversized chunk cannot
+				// overrun sbuf[32768]. Valid ROQ audio chunks are far smaller.
+				unsigned int inBytes = cinTable[currentHandle].RoQFrameSize;
+				if ( inBytes > sizeof(sbuf) / sizeof(sbuf[0]) / 2 )
+					inBytes = sizeof(sbuf) / sizeof(sbuf[0]) / 2;
+				ssize = RllDecodeMonoToStereo( framedata, sbuf, inBytes, 0, (unsigned short)cinTable[currentHandle].roq_flags);
+				S_EngineCinematicFeed( sbuf, ssize, 2, 22050, s_volume->value );
 			}
 			break;
 		case	ZA_SOUND_STEREO:
 			if (!cinTable[currentHandle].silent) {
-				if (cinTable[currentHandle].numQuads == -1) {
-					S_Update( 333 );
-					s_rawend = s_soundtime;
-				}
-				ssize = RllDecodeStereoToStereo( framedata, sbuf, cinTable[currentHandle].RoQFrameSize, 0, (unsigned short)cinTable[currentHandle].roq_flags);
-					S_RawSamples( ssize, 22050, 2, 2, (byte *)sbuf, s_volume->value );
+				// The stereo decode writes 1 short per input byte, so cap the input
+				// byte count at sbuf capacity so a malformed oversized chunk cannot
+				// overrun sbuf[32768]. Valid ROQ audio chunks are far smaller.
+				unsigned int inBytes = cinTable[currentHandle].RoQFrameSize;
+				if ( inBytes > sizeof(sbuf) / sizeof(sbuf[0]) )
+					inBytes = sizeof(sbuf) / sizeof(sbuf[0]);
+				ssize = RllDecodeStereoToStereo( framedata, sbuf, inBytes, 0, (unsigned short)cinTable[currentHandle].roq_flags);
+				S_EngineCinematicFeed( sbuf, ssize, 2, 22050, s_volume->value );
 			}
 			break;
 		case	ROQ_QUAD_INFO:
@@ -1260,13 +1266,16 @@ static void RoQShutdown( void ) {
 	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "finished cinematic\n");
 	cinTable[currentHandle].status = FMV_IDLE;
 
+	// stop the movie's streaming audio voice
+	S_EngineCinematicStop();
+
 	if ( cinTable[currentHandle].iFile != FS_INVALID_HANDLE ) {
 		FS_FCloseFile( cinTable[currentHandle].iFile );
 		cinTable[currentHandle].iFile = FS_INVALID_HANDLE;
 	}
 
 	if (cinTable[currentHandle].alterGameState) {
-		cls.state = CA_DISCONNECTED;
+		CL_SetState( clientActiveApp, CA_DISCONNECTED );
 		// we can't just do a vstr nextmap, because
 		// if we are aborting the intro cinematic with
 		// a map command, nextmap would be valid by
@@ -1299,7 +1308,7 @@ e_status CIN_StopCinematic( int handle ) {
 	}
 
 	if (cinTable[currentHandle].alterGameState) {
-		if ( cls.state != CA_CINEMATIC ) {
+		if ( clientActiveApp->state != CA_CINEMATIC ) {
 			return cinTable[currentHandle].status;
 		}
 	}
@@ -1336,7 +1345,7 @@ e_status CIN_RunCinematic( int handle )
 	currentHandle = handle;
 
 	if (cinTable[currentHandle].alterGameState) {
-		if ( cls.state != CA_CINEMATIC ) {
+		if ( clientActiveApp->state != CA_CINEMATIC ) {
 			return cinTable[currentHandle].status;
 		}
 	}
@@ -1458,7 +1467,7 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 		cinTable[currentHandle].status = FMV_PLAY;
 		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "trFMV::play(), playing %s\n", arg);
 
-		// Phase 6.3: pre-buffer the first frame BEFORE transitioning to
+		// Pre-buffer the first frame BEFORE transitioning to
 		// CA_CINEMATIC. Without this, cls.state flips to CA_CINEMATIC while
 		// cinTable[handle].buf is still NULL — the first display update sees
 		// "no frame yet" and renders a black screen for one frame, producing
@@ -1477,14 +1486,10 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 		}
 
 		if (cinTable[currentHandle].alterGameState) {
-			cls.state = CA_CINEMATIC;
+			CL_SetState( clientActiveApp, CA_CINEMATIC );
 		}
 
 		Con_Close();
-
-		if ( !cinTable[currentHandle].silent ) {
-			s_rawend = s_soundtime;
-		}
 
 		return currentHandle;
 	}
@@ -1581,19 +1586,7 @@ void CIN_DrawCinematic( int handle ) {
 	float	h = cinTable[handle].height;
 	byte	*buf = cinTable[handle].buf;
 
-#if 0 // keep aspect ratio for cinematics
-	if ( cls.biasX || cls.biasY ) {
-		// clear side areas
-		re.SetColor( colorBlack );
-		re.DrawStretchPic( 0, 0, cls.glconfig.vidWidth, cls.glconfig.vidHeight, 0, 0, 1, 1, cls.whiteShader );
-	}
-	x = x * cls.scale + cls.biasX;
-	y = y * cls.scale + cls.biasY;
-	w = w * cls.scale;
-	h = h * cls.scale;
-#else
 	// Extents are already in real screen pixels (set by caller)
-#endif
 
 	if (cinTable[handle].dirty && (cinTable[handle].CIN_WIDTH != cinTable[handle].drawX || cinTable[handle].CIN_HEIGHT != cinTable[handle].drawY)) {
 		int *buf2;
@@ -1617,7 +1610,7 @@ void CL_PlayCinematic_f( void ) {
 	int bits = CIN_system;
 
 	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "CL_PlayCinematic_f\n");
-	if (cls.state == CA_CINEMATIC) {
+	if (clientActiveApp->state == CA_CINEMATIC) {
 		SCR_StopCinematic();
 	}
 

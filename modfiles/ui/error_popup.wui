@@ -1,0 +1,61 @@
+// error_popup.wui -- q3now Engine / Network Error dialog (Phase 5d canonical)
+//
+// Centered popup (§7.2 pattern). Title bound to ui_errorTitle,
+// body bound to com_errorMessage (single source of truth — engine
+// publishes there; ED4 fix). Three actions: Copy to clipboard,
+// Retry (only when ui_errorRetry == "1" — engine gates the cvar
+// when retryable + non-localhost), Back to menu (disconnect).
+//
+// No outOfBoundsClick: error dialogs must be dismissed deliberately.
+
+menuDef {
+	name "error_popup"
+	layer "popup"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+	modal
+
+	itemDef {
+		name "popup_overlay"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		alignX center
+		alignY center
+		background "layered" effects "vignette"
+
+		itemDef {
+			name "error_root"
+			type container
+			rect 0 0 0 0
+			direction column
+			padding $popup_padding
+			gap $spacing_md
+			background $ink
+			border 1px $line_strong
+			radius $radius_md
+			width PERCENT 0.4
+			height FIT
+
+			itemDef { name "header"  type 0 rect 0 0 1 0.05 height FIT textalign 0 font $font_sans_bold 22 forecolor $primary_red cvar "ui_errorTitle"   decoration visible 1 grow 0 }
+			itemDef { name "message" type 0 rect 0 0 1 0.08 height FIT textalign 0 font $font_sans 14      forecolor $bone         cvar "com_errorMessage" decoration visible 1 grow 0 }
+
+			itemDef {
+				name "popup_footer"
+				type container
+				rect 0 0 1 0.05
+				direction row
+				gap $spacing_md
+				alignX end
+				height FIT
+
+				itemDef { name "btn_copy"  type 1 rect 0 0 0.16 0.04 height FIT text "Copy error"   textalign 1 font $font_sans 13       forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { clipboard cvar:com_errorMessage } }
+				itemDef { name "btn_retry" type 1 rect 0 0 0.12 0.04 height FIT text "Retry"        textalign 1 font $font_sans 13       forecolor $accent forecolor.active $accent visible 1 grow 0 cvarTest "ui_errorRetry" showCvar { "1" } action { exec "reconnect" ; close } }
+				itemDef { name "btn_back"  type 1 rect 0 0 0.18 0.04 height FIT text "Back to menu" textalign 1 font $font_sans_bold 13 forecolor $accent forecolor.active $accent visible 1 grow 0 defaultButton action { exec "disconnect" ; close } }
+			}
+		}
+	}
+}

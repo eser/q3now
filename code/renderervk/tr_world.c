@@ -2,7 +2,10 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn B — renderer.assets
 #include "../renderercommon/r_q1_texture.h"
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 
 
@@ -217,126 +220,6 @@ static qboolean R_LightCullSurface( const surfaceType_t* surface, const dlight_t
 #endif // USE_PMLIGHT
 
 
-#ifdef USE_LEGACY_DLIGHTS
-static int R_DlightFace( srfSurfaceFace_t *face, int dlightBits ) {
-	float		d;
-	const dlight_t	*dl;
-
-	for ( int i = 0; i < tr.refdef.num_dlights; i++ ) {
-		if ( ! ( dlightBits & ( 1 << i ) ) ) {
-			continue;
-		}
-		dl = &tr.refdef.dlights[i];
-		d = DotProduct( dl->transformed, face->plane.normal ) - face->plane.dist;
-		if ( d < -dl->radius || d > dl->radius ) {
-			// dlight doesn't reach the plane
-			dlightBits &= ~( 1 << i );
-		}
-	}
-
-	if ( !dlightBits ) {
-		tr.pc.c_dlightSurfacesCulled++;
-	}
-
-	face->dlightBits = dlightBits;
-	return dlightBits;
-}
-
-
-static int R_DlightGrid( srfGridMesh_t *grid, int dlightBits ) {
-	const dlight_t	*dl;
-
-	for ( int i = 0 ; i < tr.refdef.num_dlights ; i++ ) {
-		if ( ! ( dlightBits & ( 1 << i ) ) ) {
-			continue;
-		}
-		dl = &tr.refdef.dlights[i];
-		// use the entity-local (transformed) light position so brush model
-		// entities such as moving platforms (e.g. cpm25 elevator) keep
-		// affecting their surfaces correctly each frame
-		if ( dl->transformed[0] - dl->radius > grid->meshBounds[1][0]
-			|| dl->transformed[0] + dl->radius < grid->meshBounds[0][0]
-			|| dl->transformed[1] - dl->radius > grid->meshBounds[1][1]
-			|| dl->transformed[1] + dl->radius < grid->meshBounds[0][1]
-			|| dl->transformed[2] - dl->radius > grid->meshBounds[1][2]
-			|| dl->transformed[2] + dl->radius < grid->meshBounds[0][2] ) {
-			// dlight doesn't reach the bounds
-			dlightBits &= ~( 1 << i );
-		}
-	}
-
-	if ( !dlightBits ) {
-		tr.pc.c_dlightSurfacesCulled++;
-	}
-
-	grid->dlightBits = dlightBits;
-	return dlightBits;
-}
-
-
-static int R_DlightTrisurf( srfTriangles_t *surf, int dlightBits ) {
-	// FIXME: more dlight culling to trisurfs...
-	surf->dlightBits = dlightBits;
-	return dlightBits;
-#if 0
-	int			i;
-	const dlight_t	*dl;
-
-	for ( i = 0 ; i < tr.refdef.num_dlights ; i++ ) {
-		if ( ! ( dlightBits & ( 1 << i ) ) ) {
-			continue;
-		}
-		dl = &tr.refdef.dlights[i];
-		if ( dl->origin[0] - dl->radius > grid->meshBounds[1][0]
-			|| dl->origin[0] + dl->radius < grid->meshBounds[0][0]
-			|| dl->origin[1] - dl->radius > grid->meshBounds[1][1]
-			|| dl->origin[1] + dl->radius < grid->meshBounds[0][1]
-			|| dl->origin[2] - dl->radius > grid->meshBounds[1][2]
-			|| dl->origin[2] + dl->radius < grid->meshBounds[0][2] ) {
-			// dlight doesn't reach the bounds
-			dlightBits &= ~( 1 << i );
-		}
-	}
-
-	if ( !dlightBits ) {
-		tr.pc.c_dlightSurfacesCulled++;
-	}
-
-	grid->dlightBits = dlightBits;
-	return dlightBits;
-#endif
-}
-
-
-/*
-====================
-R_DlightSurface
-
-The given surface is going to be drawn, and it touches a leaf
-that is touched by one or more dlights, so try to throw out
-more dlights if possible.
-====================
-*/
-static int R_DlightSurface( msurface_t *surf, int dlightBits ) {
-	if ( *surf->data == SF_FACE ) {
-		dlightBits = R_DlightFace( (srfSurfaceFace_t *)surf->data, dlightBits );
-	} else if ( *surf->data == SF_GRID ) {
-		dlightBits = R_DlightGrid( (srfGridMesh_t *)surf->data, dlightBits );
-	} else if ( *surf->data == SF_TRIANGLES ) {
-		dlightBits = R_DlightTrisurf( (srfTriangles_t *)surf->data, dlightBits );
-	} else {
-		dlightBits = 0;
-	}
-
-	if ( dlightBits ) {
-		tr.pc.c_dlightSurfaces++;
-	}
-
-	return dlightBits;
-}
-#endif // USE_LEGACY_DLIGHTS
-
-
 /*
 ======================
 R_AddWorldSurface
@@ -367,26 +250,51 @@ static void R_AddWorldSurface( msurface_t *surf, int dlightBits ) {
 		/* Time-driven animation is handled at draw time via GPU array (shader_t.q1AnimArray) */
 	}
 
-#ifdef USE_PMLIGHT
-#ifdef USE_LEGACY_DLIGHTS
-	if ( r_dlightMode->integer )
-#endif
-	{
-		surf->vcVisible = tr.viewCount;
-		R_AddDrawSurf( surf->data, drawShader, surf->fogIndex, 0 );
-		return;
-	}
-#endif // USE_PMLIGHT
+	// Per-pixel dynamic lights are the only path: this world surface goes straight to
+	// drawSurfs with no fake-dlight bits (the per-light contribution is added later in
+	// the lit pass). dlightBits is unused.
+	surf->vcVisible = tr.viewCount;
+	R_AddDrawSurf( surf->data, drawShader, surf->fogIndex, 0 );
 
-#ifdef USE_LEGACY_DLIGHTS
-	// check for dlighting
-	if ( dlightBits ) {
-		dlightBits = R_DlightSurface( surf, dlightBits );
-		dlightBits = ( dlightBits != 0 );
+	// r_unbakeStaticLights: also add this visible world surface to the fp union so the
+	// extracted BSP static lights (which drive no PMLIGHT surface walk) can light it.
+	// No-op unless the cvar + Forward+ are on and the map has static lights.
+	R_AddStaticLitWorldSurf( surf->data, drawShader, surf->fogIndex );
+}
+
+
+// Add a world surface that the host frame-current cull (R_AddWorldSurfacesFlat) already
+// marked visible, WITHOUT R_CullSurface — the host AABB-frustum + backface test already
+// culled, so the per-surface cull is retired on this path. Mirrors R_AddWorldSurface's
+// post-cull tail: the SF_FACE altShader resolution + the PMLIGHT vcVisible + R_AddDrawSurf.
+// Each surface is visited once (the flat loop), so the multi-leaf viewCount-dedup is
+// unneeded; viewCount is still set (the GPU cull-verify reads it, and downstream PMLIGHT
+// R_AddLitSurface gates on vcVisible).
+static void R_AddWorldSurfaceVisible( msurface_t *surf )
+{
+	shader_t *drawShader = surf->shader;
+
+	surf->viewCount = tr.viewCount;
+
+	if ( *surf->data == SF_FACE ) {
+		const srfSurfaceFace_t *face = (const srfSurfaceFace_t *)surf->data;
+		if ( face->altShader
+		     && tr.currentEntity != NULL
+		     && tr.currentEntity != &tr.worldEntity
+		     && tr.currentEntity->e.frame != 0 ) {
+			drawShader = face->altShader;
+		}
 	}
 
-	R_AddDrawSurf( surf->data, drawShader, surf->fogIndex, dlightBits );
-#endif // USE_LEGACY_DLIGHTS
+	// Per-pixel dynamic lights are the only path: add the surface with no fake-dlight
+	// bits (the per-light contribution is added later in the lit pass).
+	surf->vcVisible = tr.viewCount;
+	R_AddDrawSurf( surf->data, drawShader, surf->fogIndex, 0 );
+
+	// r_unbakeStaticLights: also add this visible world surface to the fp union so the
+	// extracted BSP static lights (which drive no PMLIGHT surface walk) can light it.
+	// No-op unless the cvar + Forward+ are on and the map has static lights.
+	R_AddStaticLitWorldSurf( surf->data, drawShader, surf->fogIndex );
 }
 
 
@@ -425,6 +333,10 @@ static void R_AddLitSurface( msurface_t *surf, const dlight_t *light )
 		return;
 	}
 
+	// R_AddLitSurf builds the Forward+ deduped union (world + entity, plain-only) —
+	// see R_AddLitSurf / R_AddForwardPlusUnionSurf in tr_main.c. The per-(entity,
+	// surface) scan-dedup there covers both paths uniformly (the md3 entity path
+	// can't use a surface-resident stamp; the scan handles both).
 	R_AddLitSurf( surf->data, surf->shader, surf->fogIndex );
 }
 
@@ -522,10 +434,6 @@ void R_AddBrushModelSurfaces ( trRefEntity_t *ent ) {
 		return;
 	}
 
-#ifdef USE_PMLIGHT
-#ifdef USE_LEGACY_DLIGHTS
-	if ( r_dlightMode->integer )
-#endif
 	{
 		dlight_t *dl;
 		int s;
@@ -548,18 +456,7 @@ void R_AddBrushModelSurfaces ( trRefEntity_t *ent ) {
 				}
 			}
 		}
-		return;
 	}
-#endif // USE_PMLIGHT
-
-#ifdef USE_LEGACY_DLIGHTS
-	R_SetupEntityLighting( &tr.refdef, ent );
-	R_DlightBmodel( bmodel );
-
-	for ( i = 0 ; i < bmodel->numSurfaces ; i++ ) {
-		R_AddWorldSurface( bmodel->firstSurface + i, tr.currentEntity->needDlights );
-	}
-#endif
 }
 
 
@@ -580,8 +477,6 @@ R_RecursiveWorldNode
 static void R_RecursiveWorldNode( mnode_t *node, unsigned int planeBits, unsigned int dlightBits ) {
 
 	do {
-		unsigned int newDlights[2];
-
 		// if the node wasn't marked as potentially visible, exit
 		if (node->visframe != tr.visCount) {
 			return;
@@ -641,43 +536,14 @@ static void R_RecursiveWorldNode( mnode_t *node, unsigned int planeBits, unsigne
 
 		// node is just a decision point, so go down both sides
 		// since we don't care about sort orders, just go positive to negative
-
-		// determine which dlights are needed
-		newDlights[0] = 0;
-		newDlights[1] = 0;
-#ifdef USE_LEGACY_DLIGHTS
-#ifdef USE_PMLIGHT
-		if ( !r_dlightMode->integer )
-#endif
-		if ( dlightBits ) {
-			for ( int i = 0 ; i < tr.refdef.num_dlights ; i++ ) {
-				const dlight_t	*dl;
-				float		dist;
-
-				if ( dlightBits & ( 1 << i ) ) {
-					dl = &tr.refdef.dlights[i];
-					dist = DotProduct( dl->origin, node->plane->normal ) - node->plane->dist;
-
-					if ( dist > -dl->radius ) {
-						newDlights[0] |= ( 1 << i );
-					}
-					if ( dist < dl->radius ) {
-						newDlights[1] |= ( 1 << i );
-					}
-				}
-			}
-		}
-#endif // USE_LEGACY_DLIGHTS
+		// (the legacy per-node dlightBits split is retired — per-pixel dynamic lights
+		// don't use dlightBits, so the recursion carries 0).
 
 		// recurse down the children, front side first
-	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if / preprocessor-conditional idiom; statement is at correct enclosing scope
-		R_RecursiveWorldNode( node->children[0], planeBits, newDlights[0] );
+		R_RecursiveWorldNode( node->children[0], planeBits, 0 );
 
 		// tail recurse
 		node = node->children[1];
-#ifdef USE_LEGACY_DLIGHTS
-		dlightBits = newDlights[1];
-#endif
 	} while ( 1 );
 
 	{
@@ -828,7 +694,7 @@ static void R_MarkLeaves (void) {
 	if ( showcluster_changed || r_showCluster->integer ) {
 		s_showcluster_mod = r_showCluster->modificationCount;
 		if ( r_showCluster->integer ) {
-			ri.Log( SEV_INFO, "cluster:%i  area:%i\n", cluster, leaf->area );
+			R_LOG( rch_assets, SEV_INFO, "cluster:%i  area:%i\n", cluster, leaf->area );
 		}
 	}
 
@@ -873,6 +739,151 @@ static void R_MarkLeaves (void) {
 }
 
 
+// ── GPU-driven world batch decomposition: host frame-current cull drives the draw ──
+//
+// When r_gpuBatchDecomp is ON, the world cull is a LEAF-GATE + a FLAT per-surface cull,
+// NOT R_RecursiveWorldNode's fused per-node descent. The leaf-gate marks reached surfaces
+// (PVS + node-frustum prune — the descent is kept here; a flat-scan recursion removal is a
+// later refinement) + accumulates visBounds; then a flat host pass reproduces the GPU
+// cull's per-surface AABB-frustum + backface test (vk_cull_host_derive_visible) over the
+// reached set and adds the survivors to drawSurfs — frame-current (no readback). The GPU
+// cull/decompose stay VERIFICATION-ONLY: their host readback is ≥3-frame-lagged (the
+// matched-sequence pattern exists for that reason), unusable to drive a live draw; the GPU
+// ⊆ asserts instead verify the host re-derivation matches the GPU arithmetic. The result is
+// the frustum-tightened subset of the recursion's set (the per-surface AABB frustum is finer
+// than R_CullSurface's grid/tri bounds). OFF: R_RecursiveWorldNode, unchanged.
+//
+// Reached-marker: a per-surface byte array (NOT surf->viewCount — that's set in the add
+// pass). dlightBits: under USE_PMLIGHT the world passes dlight=0, so the flat pass needs
+// none; LEGACY_DLIGHTS keeps the recursion (this path is PMLIGHT-only, guarded by the cvar).
+static byte *s_flat_reached;        // per-surface reached marker (1 = in a reached leaf)
+static int   s_flat_reached_cap;
+
+// Flat scan over the leaf array (the BSP leaves, world->nodes[numDecisionNodes..numnodes) —
+// the loader stores decision nodes then leaves in one array, R_LoadNodesAndLeafs) to build
+// the reached-surface set + visBounds. Per leaf: PVS gate (visframe == visCount, set by
+// R_MarkLeaves on leaves + ancestors) + a 4-plane frustum reject (BoxOnPlaneSide r==2 on any
+// plane → skip) + visBounds accumulation + marksurface reached-marking. NO node recursion,
+// NO planeBits subtree prune. This gives up the recursion's whole-subtree prune + per-plane
+// bit-clearing, so the reached set is LOOSER (⊇ the recursion's set), which is SAFE and
+// absorbed: a looser visBounds only pushes the far plane OUT (zFar = max-corner-distance,
+// never clips), and the per-surface AABB-frustum cull (vk_cull_host_derive_visible /
+// cull.comp) re-rejects any over-admitted surface — the looser reached set does not change
+// the final visible set. Marks into reachedOut[surf - world->surfaces] (cap = reachedCap,
+// dedup by index).
+//
+// PERF TRADEOFF (honest, measured arena-class): a cache-friendly linear scan with no
+// pointer-chasing tree descent and no recursion stack, BUT it gives up the recursion's
+// whole-subtree prune — it visits every leaf (a cheap visframe int-compare) and does the
+// 4-plane frustum test on every PVS-pass leaf, where the recursion would reject whole
+// subtrees at one ancestor test. Measured arena1: 2109 leaves, 355 pass the PVS gate, 321
+// frustum-reached — sub-ms either way (the per-surface GPU frustum is the real cull, and the
+// PVS gate rejects ~83% of leaves before any plane test), so MEASURED-NEUTRAL on arena-class.
+// A regression-risk vector exists on high-leaf-count / low-frustum-coverage maps (e.g. tens
+// of thousands of leaves, few visible): the scan is O(total leaves) visframe checks + O(PVS-
+// pass leaves) plane tests with no subtree early-out. This is acknowledged and lands against
+// the future high-draw-map-class perf gate (a coarse cluster/area pre-reject is a separate
+// optional optimization), NOT claimed away.
+static void R_MarkReachedLeaves( const world_t *world, byte *reachedOut, int reachedCap )
+{
+	int li;
+	const int firstLeaf = world->numDecisionNodes;
+	const int lastLeaf  = world->numnodes;
+
+	for ( li = firstLeaf; li < lastLeaf; li++ ) {
+		mnode_t *leaf = &world->nodes[ li ];
+		int c;
+		msurface_t **mark;
+
+		if ( leaf->visframe != tr.visCount )
+			continue;   // not in the PVS / areamask
+
+		if ( !r_nocull->integer ) {
+			// fully outside ANY frustum plane → the whole leaf is invisible
+			if ( BoxOnPlaneSide( leaf->mins, leaf->maxs, &tr.viewParms.frustum[0] ) == 2 ) continue;
+			if ( BoxOnPlaneSide( leaf->mins, leaf->maxs, &tr.viewParms.frustum[1] ) == 2 ) continue;
+			if ( BoxOnPlaneSide( leaf->mins, leaf->maxs, &tr.viewParms.frustum[2] ) == 2 ) continue;
+			if ( BoxOnPlaneSide( leaf->mins, leaf->maxs, &tr.viewParms.frustum[3] ) == 2 ) continue;
+		}
+
+		if ( leaf->mins[0] < tr.viewParms.visBounds[0][0] ) tr.viewParms.visBounds[0][0] = leaf->mins[0];
+		if ( leaf->mins[1] < tr.viewParms.visBounds[0][1] ) tr.viewParms.visBounds[0][1] = leaf->mins[1];
+		if ( leaf->mins[2] < tr.viewParms.visBounds[0][2] ) tr.viewParms.visBounds[0][2] = leaf->mins[2];
+		if ( leaf->maxs[0] > tr.viewParms.visBounds[1][0] ) tr.viewParms.visBounds[1][0] = leaf->maxs[0];
+		if ( leaf->maxs[1] > tr.viewParms.visBounds[1][1] ) tr.viewParms.visBounds[1][1] = leaf->maxs[1];
+		if ( leaf->maxs[2] > tr.viewParms.visBounds[1][2] ) tr.viewParms.visBounds[1][2] = leaf->maxs[2];
+
+		mark = leaf->firstmarksurface;
+		c = leaf->nummarksurfaces;
+		while ( c-- ) {
+			ptrdiff_t idx = *mark - world->surfaces;
+			if ( idx >= 0 && idx < reachedCap )
+				reachedOut[ idx ] = 1;   // dedup by index (a multi-leaf surface marked once)
+			mark++;
+		}
+	}
+}
+
+static byte *s_flat_visible;        // per-surface host-cull visible flag (GPU-equivalent)
+static int   s_flat_visible_cap;
+
+// The flat cutover producer: leaf-gate marks reached + visBounds, then the HOST reproduces
+// cull.comp's per-surface test FRAME-CURRENT (backface only) over the reached set — the
+// GPU-equivalent visible set, produced host-side this frame (vk_cull_host_derive_visible,
+// reusing the host-coherent cull AABB SSBO + this-frame viewOrigin). Then
+// R_AddWorldSurfaceVisible adds each visible surface to drawSurfs WITHOUT re-culling (the
+// host test already culled — R_CullSurface is RETIRED on this path). The result MATCHES the
+// recursion's set: the recursion frustum-culls at LEAF granularity (R_MarkReachedLeaves
+// reproduces that leaf-frustum reject) and backface-culls per surface (R_CullSurface);
+// there is NO per-surface frustum cull on either side. (An earlier per-surface AABB-frustum
+// test here was a TIGHTER cull the recursion never had — it dropped on-screen surfaces in
+// leaves that straddle the frustum edge, the surface-dropout / black-void bug — and was
+// removed.) dlight=0 (PMLIGHT).
+static void R_AddWorldSurfacesFlat( void )
+{
+	int n = tr.world->numsurfaces, i;
+
+	if ( n > s_flat_reached_cap ) {
+		if ( s_flat_reached ) ri.Free( s_flat_reached );
+		s_flat_reached     = ri.Malloc( n );
+		s_flat_reached_cap = n;
+	}
+	if ( n > s_flat_visible_cap ) {
+		if ( s_flat_visible ) ri.Free( s_flat_visible );
+		s_flat_visible     = ri.Malloc( n );
+		s_flat_visible_cap = n;
+	}
+	if ( !s_flat_reached || !s_flat_visible ) {
+		// alloc failed — fall back to the recursion (never leave the world undrawn)
+		R_RecursiveWorldNode( tr.world->nodes, 15, ( 1ULL << tr.refdef.num_dlights ) - 1 );
+		return;
+	}
+	memset( s_flat_reached, 0, (size_t)n );
+
+	// flat leaf-array scan: mark reached surfaces + accumulate visBounds (frame-current)
+	R_MarkReachedLeaves( tr.world, s_flat_reached, n );
+
+	// host frame-current cull: backface-test the reached set using the host-coherent AABB
+	// SSBO + this-frame viewOrigin (no per-surface frustum — the recursion frustum-culls at
+	// leaf granularity only, which R_MarkReachedLeaves already applied). Frame-current visible
+	// set, no lagged readback.
+	if ( !vk_cull_host_derive_visible( tr.viewParms.frustum, tr.viewParms.or.origin,
+	                                   s_flat_reached, s_flat_visible, n ) ) {
+		// host cull unavailable (no AABB SSBO) — fall back to the recursion.
+		R_RecursiveWorldNode( tr.world->nodes, 15, ( 1ULL << tr.refdef.num_dlights ) - 1 );
+		return;
+	}
+
+	// add the visible surfaces to drawSurfs — NO re-cull (the host test culled). Sets
+	// surf->viewCount + surf->vcVisible + R_AddDrawSurf, mirroring R_AddWorldSurface's
+	// post-cull tail. The per-surface order within a (shader,fog) is irrelevant.
+	for ( i = 0; i < n; i++ ) {
+		if ( s_flat_visible[i] )
+			R_AddWorldSurfaceVisible( &tr.world->surfaces[i] );
+	}
+}
+
+
 /*
 =============
 R_AddWorldSurfaces
@@ -905,13 +916,30 @@ void R_AddWorldSurfaces( void ) {
 		tr.refdef.num_dlights = MAX_DLIGHTS;
 	}
 
-	R_RecursiveWorldNode( tr.world->nodes, 15, ( 1ULL << tr.refdef.num_dlights ) - 1 );
+	// r_gpuBatchDecomp ON drives the world cull from the host frame-current re-derivation
+	// (leaf-gate + flat host AABB cull, walk-free), retiring R_RecursiveWorldNode's
+	// per-surface cull. OFF (default) = the recursion, byte-identical. PMLIGHT-only (the
+	// flat path passes dlight=0); LEGACY_DLIGHTS keeps the recursion.
+#ifdef USE_PMLIGHT
+	if ( r_gpuBatchDecomp->integer ) {
+		R_AddWorldSurfacesFlat();
+	} else
+#endif
+	{
+		R_RecursiveWorldNode( tr.world->nodes, 15, ( 1ULL << tr.refdef.num_dlights ) - 1 );
+	}
+
+	// snapshot this (main world) view's per-surface visibility for the GPU cull verify: the
+	// cull walk has now set surf->viewCount (PVS+leaf-frustum reached) and surf->vcVisible
+	// (== drawSurfs membership) for every world surface. Only the first call per frame (main
+	// view) is captured. No-op unless the GPU cull is built. (Renderer→renderervk; the
+	// vk_cull_* implementation lives in vk.c.)
+	vk_cull_capture_world( &tr.viewParms, tr.world, tr.viewCount );
 
 #ifdef USE_PMLIGHT
-#ifdef USE_LEGACY_DLIGHTS
-	if ( !r_dlightMode->integer )
-		return;
-#endif // USE_LEGACY_DLIGHTS
+	// Per-pixel dynamic lights: walk each light's lit surfaces. When r_dynamiclight is
+	// off the dlight list is empty (the master gate clears it), so the loop below is a
+	// no-op — no early-return needed now that the fake tier is gone.
 
 	// "transform" all the dlights so that dl->transformed is actually populated
 	// (even though HERE it's == dl->origin) so we can always use R_LightCullBounds
@@ -932,4 +960,30 @@ void R_AddWorldSurfaces( void ) {
 		R_RecursiveLightNode( tr.world->nodes );
 	}
 #endif // USE_PMLIGHT
+}
+
+
+/*
+=================
+R_ReleaseWorldCullStatics
+
+Free + NULL the world-cull scratch statics that hold TAG_RENDERER blocks
+(ri.Malloc), and zero their caps. Called from vk_release_resources (the
+renderer-teardown path that runs on map-transition / vid_restart / shutdown),
+so the block these statics point at is invalidated WITH the pointer — mirroring
+vk_shadow_snap_release_cpu (vk.c). Without this, ri.FreeAll → Z_FreeTags(
+TAG_RENDERER) reclaims the block but leaves the static dangling; the next map's
+lazy-grow re-frees that stale pointer → "Z_Free: freed a pointer without ZONEID".
+Idempotent (guarded), so the full-teardown path is safe to call it too.
+
+s_flat_reached/s_flat_visible back the LIVE host-cull (R_AddWorldSurfacesFlat,
+r_gpuBatchDecomp).
+=================
+*/
+void R_ReleaseWorldCullStatics( void )
+{
+	if ( s_flat_reached )  { ri.Free( s_flat_reached );  s_flat_reached  = NULL; }
+	if ( s_flat_visible )  { ri.Free( s_flat_visible );  s_flat_visible  = NULL; }
+	s_flat_reached_cap = 0;
+	s_flat_visible_cap = 0;
 }

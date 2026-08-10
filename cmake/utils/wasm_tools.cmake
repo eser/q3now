@@ -97,11 +97,23 @@ function(add_wasm MODULE_NAME)
 
     set(WASM_CFLAGS
         -DWASM_MODULE
+        # Mirror the engine's Debug _DEBUG define (CMakeLists ADD_COMPILE_DEFINITIONS,
+        # which the WASI custom-command does NOT inherit) so _DEBUG-gated code — e.g.
+        # the typed-IPC PoC handshake (docs/vm-typed-ipc-design.md) — compiles into the
+        # module in Debug to match the engine. Release WASM stays clean.
+        $<$<CONFIG:Debug>:-D_DEBUG>
         -O2
         --target=wasm32-wasip1
         -Wl,--no-entry
         -Wl,--export=vmMain
-        -Wl,--initial-memory=16777216
+        # Initial linear memory (BSS + data floor). Raised 16->32 MiB: the game
+        # module's static arrays (g_entities[MAX_GENTITIES] et al.) already sit near
+        # ~15.4 MiB, and the savegame working buffers (g_save_file.c I/O scratch +
+        # g_save_world.c payload, gamesv-only) need headroom above that. 32 MiB
+        # (512 * 64 KiB pages) clears the ~22 MiB static requirement with margin.
+        # Link-time floor only — no runtime/gameplay effect; the host sets no
+        # conflicting max (WASM_HEAP_SIZE=0, no --max-memory, system allocator).
+        -Wl,--initial-memory=33554432
         ${ARG_DEFINITIONS}
     )
 

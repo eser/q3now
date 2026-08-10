@@ -4,6 +4,9 @@
 // tr_main.c -- main control flow for each frame
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.cmd
+
+R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
 #include <string.h> // memcpy
 
@@ -1107,7 +1110,7 @@ static qboolean R_GetPortalOrientations( const drawSurf_t *drawSurf, int entityN
 	// to see a surface before the server has communicated the matching
 	// portal surface entity, so we don't want to print anything here...
 
-	//ri.Log( SEV_INFO, "Portal surface without a portal entity\n" );
+	//R_LOG( rch_cmd, SEV_INFO, "Portal surface without a portal entity\n" );
 
 	return qfalse;
 }
@@ -1283,7 +1286,7 @@ static qboolean R_MirrorViewBySurface (const drawSurf_t *drawSurf, int entityNum
 
 	// don't recursively mirror
 	if (tr.viewParms.isPortal) {
-		ri.Log( SEV_DEBUG, "WARNING: recursive mirror/portal found\n" );
+		R_LOG( rch_cmd, SEV_DEBUG, "WARNING: recursive mirror/portal found\n" );
 		return qfalse;
 	}
 
@@ -1477,7 +1480,7 @@ static void R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	int             pshadowed;
 	int				i;
 
-	//ri.Log( SEV_INFO, "firstDrawSurf %d numDrawSurfs %d\n", (int)(drawSurfs - tr.refdef.drawSurfs), numDrawSurfs);
+	//R_LOG( rch_cmd, SEV_INFO, "firstDrawSurf %d numDrawSurfs %d\n", (int)(drawSurfs - tr.refdef.drawSurfs), numDrawSurfs);
 
 	// it is possible for some views to not have any surfaces
 	if ( numDrawSurfs < 1 ) {
@@ -2454,8 +2457,8 @@ void R_RenderSunShadowMaps(const refdef_t *fd, int level)
 			VectorScale(lightviewBounds[1], worldUnitsPerTexel, lightviewBounds[1]);
 		}
 
-		//ri.Log( SEV_INFO, "level %d znear %f zfar %f\n", level, lightviewBounds[0][0], lightviewBounds[1][0]);
-		//ri.Log( SEV_INFO, "xmin %f xmax %f ymin %f ymax %f\n", lightviewBounds[0][1], lightviewBounds[1][1], -lightviewBounds[1][2], -lightviewBounds[0][2]);
+		//R_LOG( rch_cmd, SEV_INFO, "level %d znear %f zfar %f\n", level, lightviewBounds[0][0], lightviewBounds[1][0]);
+		//R_LOG( rch_cmd, SEV_INFO, "xmin %f xmax %f ymin %f ymax %f\n", lightviewBounds[0][1], lightviewBounds[1][1], -lightviewBounds[1][2], -lightviewBounds[0][2]);
 	}
 
 	{
@@ -2608,7 +2611,7 @@ void R_RenderCubemapSide( int cubemapIndex, int cubemapSide, qboolean subscene )
 		// only print message for first side
 		if (scale < 1.0001f && cubemapSide == 0)
 		{
-			ri.Log( SEV_INFO, "cubemap %d %s (%f, %f, %f) is outside the lightgrid or inside a wall!\n", cubemapIndex, tr.cubemaps[cubemapIndex].name, tr.refdef.vieworg[0], tr.refdef.vieworg[1], tr.refdef.vieworg[2]);
+			R_LOG( rch_cmd, SEV_INFO, "cubemap %d %s (%f, %f, %f) is outside the lightgrid or inside a wall!\n", cubemapIndex, tr.cubemaps[cubemapIndex].name, tr.refdef.vieworg[0], tr.refdef.vieworg[1], tr.refdef.vieworg[2]);
 		}
 	}
 

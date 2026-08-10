@@ -1,0 +1,45 @@
+// qw_title_bar — top brand bar widget
+// Interface (consumer): #include into a menuDef body; the included
+//   fragment is a single container itemDef.
+// Tokens: $accent, $font_icon, $font_mono, $spacing_sm, $spacing_xs,
+//         $spacing_lg
+// Composition: row container — qw_sigil glyph (pulse) + mono caption.
+itemDef {
+	name "top_bar"
+	type container
+	rect 0 0 1 4.5vh
+	height FIT
+	direction row
+	alignY center
+	gap $spacing_sm
+	padding $spacing_xs $spacing_lg
+
+	itemDef {
+		name "top_sigil"
+		type 0
+		rect 0 0 1.8vw 3vh
+		height FIT
+		width PERCENT 1.8vw
+		iconText "qw_sigil"
+		font $font_icon 24
+		forecolor $accent
+		decoration
+		visible 1
+		grow 0
+		animation "pulse"
+	}
+	itemDef {
+		name "top_brand"
+		type 0
+		rect 0 0 22vw 2.5vh
+		height FIT
+		width PERCENT 22vw
+		text "QUAKEWIRED · MMXXVI"
+		textalign 0
+		font $font_mono 11
+		forecolor $accent
+		decoration
+		visible 1
+		grow 0
+	}
+}

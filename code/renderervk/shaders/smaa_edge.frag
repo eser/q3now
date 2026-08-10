@@ -8,7 +8,9 @@
 
 layout(set = 0, binding = 0) uniform sampler2D colorTex;
 
-layout(push_constant) uniform PushConstants {
+// rtMetrics rides in a per-frame UBO at set 3 of the shared SMAA pipeline layout,
+// not a VS|FS push. Anonymous block keeps the read sites.
+layout(set = 3, binding = 0, std140) uniform RtMetrics {
 	vec4 rtMetrics;
 };
 
@@ -22,7 +24,7 @@ layout(location = 0) out vec2 out_edges;
 const float SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR = 2.0;
 const vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);
 
-// Phase 6B4: relative-luma delta uses center luma as denominator,
+// relative-luma delta uses center luma as denominator,
 // guarded against zero by a small epsilon. Empirically chosen
 // to avoid amplifying noise in near-black pixels without
 // distorting the threshold semantic for non-trivial radiance.
@@ -37,14 +39,14 @@ void main() {
 	float Ltop   = dot(texture(colorTex, offset[0].zw).rgb, lumaWeights);
 
 	// Threshold check — relative luma delta (HDR-aware).
-	// Phase 6B4: divide neighbour delta by center luma so the
+	// divide neighbour delta by center luma so the
 	// threshold reads as "percentage deviation" instead of an
 	// absolute luma difference. Under r_hdr 1 (SFLOAT), absolute
 	// deltas over-trigger in bright regions and under-trigger
 	// in shadow regions; the relative form keeps the published
 	// SMAA quality presets meaningful at any input magnitude.
 	// Threshold 0.10 = "neighbour must differ by >=10% of L".
-	// Phase 6B3'-d4-m11: the m1-m_final linear-pipeline migration
+	// the linear pipeline
 	// makes colorTex (= vk.color_image) hold linear radiance; this
 	// relative-luma form already absorbs that domain shift (the
 	// ratio delta/L is unitless), so no threshold re-tune was

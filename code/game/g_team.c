@@ -4,7 +4,6 @@
 //
 
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
@@ -141,7 +140,71 @@ void AddTeamScore(vec3_t origin, int team, int score) {
 
 /*
 ==============
+G_SameSquad
+
+The one allegiance predicate. Answers "are these two entities allies" for ANY
+pair — client/client, client/monster, monster/monster — generalising the four
+gates that previously answered it only for clients and short-circuited on
+everything else (OnSameTeam's client test, BotSameTeam's and BotAwareTrackEntity's
+MAX_CLIENTS range tests, and BotFindEnemy's capability predicate).
+
+PRECEDENCE, in order:
+
+  1. An entity is always its own ally. Guards the self-comparison that the
+     callers used to get for free from their identity checks.
+
+  2. BOTH have a non-zero squad  -> allied iff the squad numbers are equal.
+     This is the only rule that can call two non-clients allies, and it is the
+     only rule that overrides sessionTeam: an explicit squad assignment is a
+     stronger statement of allegiance than the gametype's team split, so a
+     squad set on a client wins over sess.sessionTeam for that pair.
+
+  3. EXACTLY ONE has a non-zero squad -> NOT allied. Squad membership is
+     positive and symmetric; a squadded entity has no allegiance to an
+     unsquadded one, whatever team the unsquadded one is on. This is what
+     keeps a squadded monster hostile to every ordinary bot.
+
+  4. NEITHER has a squad -> fall through to the legacy client team test
+     (sess.sessionTeam via OnSameTeam's tail). Non-clients reach here only when
+     no squads exist anywhere, and they answer qfalse exactly as the old
+     range gates did.
+
+  Consequence, and it is the landing's gate: WHEN EVERY squad IS 0, only rules
+  1 and 4 can fire, so this function reduces to the legacy behaviour for every
+  pair the old code evaluated, and returns qfalse for every pair the old code
+  rejected by range. Behaviour is unchanged until a squad is assigned.
+==============
+*/
+qboolean G_SameSquad( gentity_t *ent1, gentity_t *ent2 ) {
+	if ( !ent1 || !ent2 ) {
+		return qfalse;
+	}
+
+	// 1. self is always its own ally
+	if ( ent1 == ent2 ) {
+		return qtrue;
+	}
+
+	// 2. both squadded — squad identity decides, and outranks sessionTeam
+	if ( ent1->squad && ent2->squad ) {
+		return ( ent1->squad == ent2->squad );
+	}
+
+	// 3. exactly one squadded — no allegiance across the boundary
+	if ( ent1->squad || ent2->squad ) {
+		return qfalse;
+	}
+
+	// 4. neither squadded — legacy client team test
+	return OnSameTeam( ent1, ent2 );
+}
+
+/*
+==============
 OnSameTeam
+
+Legacy client-only team test. Callers wanting allegiance for arbitrary entity
+pairs should use G_SameSquad, which delegates here for the unsquadded case.
 ==============
 */
 qboolean OnSameTeam( gentity_t *ent1, gentity_t *ent2 ) {
@@ -1477,3 +1540,14 @@ qboolean CheckObeliskAttack( gentity_t *obelisk, gentity_t *attacker ) {
 	return qfalse;
 }
 #endif
+
+// ── savegame callback registry — TIER 2 file-local sub-list ──────────────────
+// The Obelisk callbacks only exist under FEAT_OVERLOAD (Overload game mode); the
+// list (SG_LOCAL_CB_g_team in g_save_localcbs.h) is guarded so it holds exactly
+// what was compiled. When the mode is off the list is empty and SG_Register_g_team
+// registers a zero-entry table (the { NULL, NULL } sentinel in
+// SG_DEFINE_LOCAL_REGISTRY keeps the array legal). See g_save_funcs.h.
+#include "g_save_funcs.h"
+#include "g_save_localcbs.h"
+
+SG_DEFINE_LOCAL_REGISTRY( SG_LOCAL_CB_g_team, SG_Register_g_team )

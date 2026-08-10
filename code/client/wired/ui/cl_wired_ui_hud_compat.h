@@ -1,0 +1,231 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+/*
+cl_wired_ui_hud_compat.h — Compatibility shim for ModernHUD element migration.
+*
+* TRANSITION SHIM (V-13 2026-05-25)
+* =================================
+* Relocated from code/client/wired/hud/cl_wired_hud_compat.h during Turn 2
+* of the WiredUI Render Frame Unification workstream. The 46 element files
+* under code/client/wired/ui/elements/ (cl_wired_hud_elem_*.c — relocated
+* 2026-05-31 from hud/elements/) #include this header for trap_* macros +
+* types. Retire in [[wiredui-hud-element-relocation]] once the trap_* shim
+* becomes unnecessary (elements call engine APIs directly).
+*/
+
+#ifndef CL_WIRED_UI_HUD_COMPAT_H
+#define CL_WIRED_UI_HUD_COMPAT_H
+
+// NOTE: include "client.h" BEFORE this header in your .c file
+// This header must NOT include client.h itself to avoid double-include issues
+
+#include "../../../qcommon/wired/protocol.h"
+#include "cl_wired_ui_hud_state.h"
+#include "cl_wired_fonts.h"
+#include "cl_wired_text.h"
+
+// ── renderer trap → direct re.* calls ─────────────────────────────────
+
+#define trap_R_SetColor(c)                  re.SetColor(c)
+#define Wired_DrawPic(x,y,w,h,s1,t1,s2,t2,sh) \
+        re.DrawStretchPic(x,y,w,h,s1,t1,s2,t2,sh)
+#define trap_R_RegisterShader(n)            re.RegisterShader(n)
+#define trap_R_RegisterShaderNoMip(n)       re.RegisterShaderNoMip(n)
+
+// ── coordinate scaling ────────────────────────────────────────────────
+// Legacy coordinate scaling macro removed — Wired UI uses real screen pixels
+
+// ── Wired UI draw helpers — REAL SCREEN PIXELS (bypass AdjustFrom640) ─
+#include "cl_wired_draw.h"
+
+// Macros below expand into Com_Log calls that pass LOG_CH(ch_ui). Every
+// translation unit that includes this header is responsible for declaring
+// ch_ui itself via LOG_DECLARE_CHANNEL( ch_ui, "ui" ) at file scope.
+
+// ── filesystem trap → direct FS_* calls ───────────────────────────────
+
+#define trap_FS_FOpenFile(n,f,m)    FS_FOpenFileByMode(n,f,m)
+#define trap_FS_Read(b,l,f)         FS_Read(b,l,f)
+#define trap_FS_FCloseFile(f)       FS_FCloseFile(f)
+
+// ── sound trap ────────────────────────────────────────────────────────
+
+#define trap_S_StartLocalSound(s,c) S_StartLocalSound(s,c)
+
+// ── time ──────────────────────────────────────────────────────────────
+
+#define trap_Milliseconds()         Sys_Milliseconds()
+#define trap_RealTime(t)            Com_RealTime(t)
+
+// ── print ─────────────────────────────────────────────────────────────
+
+#define trap_Print(s)               COM_INFO( LOG_CH(ch_ui), "%s", s )
+
+// ── memory ────────────────────────────────────────────────────────────
+// Z_Malloc and Z_Free are available in both cgame and client
+
+#ifndef OSP_MEMORY_CHECK
+#define OSP_MEMORY_CHECK(p) do { if(!(p)) Com_Terminate( TERM_CLIENT_DROP, "Out of memory"); } while(0)
+#endif
+
+// ── cg.* field access via wiredHudState_t ─────────────────────────────
+// We create a struct that mirrors cg_t's layout for the fields elements use.
+// This struct reads from wiredHud-> so element code sees the same field names.
+
+typedef struct {
+	// Snapshot proxy — elements access cg.snap->ps.*
+	struct wiredSnapProxy_s {
+		playerState_t ps;
+		int ping;
+	} _snapData;
+	struct wiredSnapProxy_s *snap;
+
+	int         clientNum;
+	int         time;
+	int         frametime;
+	float       xyspeed;
+	int         warmup;
+	qboolean    showScores;
+	qboolean    demoPlayback;
+	qboolean    renderingThirdPerson;
+	int         crosshairClientNum;
+	int         crosshairClientTime;
+	int         weaponSelectTime;   /* HUD redesign: carousel show/fade gate */
+	int         lowAmmoWarning;
+	int         itemPickup;
+	int         itemPickupTime;
+	playerState_t predictedPlayerState;
+
+	int         rewardStack;
+	int         rewardTime;
+	int         rewardCount[WIRED_HUD_MAX_REWARDSTACK];
+	qhandle_t   rewardShader[WIRED_HUD_MAX_REWARDSTACK];
+	sfxHandle_t rewardSound[WIRED_HUD_MAX_REWARDSTACK];
+} wiredCgCompat_t;
+
+// global compat struct — synced from wiredHud each frame
+extern wiredCgCompat_t wired_cg;
+
+// Elements use "cg." — redirect to compat struct
+#define cg wired_cg
+
+// ── client info type (replaces cgame's clientInfo_t) ──────────────────
+
+typedef struct {
+	char        name[MAX_QPATH];
+	int         team;
+	int         health, armor, armorClass;
+	int         curWeapon;
+	int         location;
+	int         powerups;
+	qboolean    infoValid;
+} wiredClientInfoCompat_t;
+
+typedef wiredClientInfoCompat_t clientInfo_t;
+
+// ── cgs.* field access ────────────────────────────────────────────────
+
+typedef struct {
+	int         gametype;
+	int         scores1, scores2;
+	int         scorelimit, timelimit;
+	int         maxclients;
+	int         levelStartTime;
+	int         blueflag, redflag;
+	qboolean    voteModified;
+	int         voteTime, voteYes, voteNo;
+	char        voteString[256];
+	glconfig_t  glconfig;
+
+	struct {
+		qhandle_t   whiteShader;
+		qhandle_t   deferShader;
+		qhandle_t   noammoShader;
+		qhandle_t   healthIcon;
+		qhandle_t   heavyArmorIcon, combatArmorIcon, jacketArmorIcon;
+		qhandle_t   redFlagShader[3];
+		qhandle_t   blueFlagShader[3];
+		sfxHandle_t talkSound;
+	} media;
+
+	// clientinfo array — typedef for elements that use clientInfo_t
+	wiredClientInfoCompat_t clientinfo[WIRED_HUD_MAX_CLIENTS];
+} wiredCgsCompat_t;
+
+extern wiredCgsCompat_t wired_cgs;
+#define cgs wired_cgs
+
+// ── weapon icon access ────────────────────────────────────────────────
+// Elements use cg_weapons[i].weaponIcon
+
+typedef struct {
+	qhandle_t weaponIcon;
+	qhandle_t ammoIcon;
+} wiredWeaponCompat_t;
+
+extern wiredWeaponCompat_t wired_cg_weapons[32]; /* generic weapon buffer */
+#define cg_weapons wired_cg_weapons
+
+// ── helper function compat ────────────────────────────────────────────
+
+// CG_ConfigString — elements use it for server info
+#define CG_ConfigString(idx) wired_ConfigString(idx)
+const char *wired_ConfigString( int index );
+
+// wired_GetColorForAmount — color based on health value
+void wired_GetColorForAmount( int amount, vec4_t hcolor );
+
+// CG_IsFollowing / CG_IsSpectator
+qboolean wired_IsFollowing( void );
+qboolean wired_IsSpectator( void );
+#define CG_IsFollowing()          wired_IsFollowing()
+#define CG_IsSpectator()          wired_IsSpectator()
+
+// CG_RegisterItemVisuals — stub (not needed for HUD drawing)
+#define CG_RegisterItemVisuals(x)
+
+// CG_ModernDrawFrame — border frame drawing
+void WiredFont_DrawFrame( float x, float y, float w, float h, const float *border, const float *borderColor, qboolean filled );
+#define CG_ModernDrawFrame  WiredFont_DrawFrame
+
+// ── memory functions ──────────────────────────────────────────────────
+// Z_Malloc/Z_Free declared in qcommon.h, available in client
+
+#ifndef OSP_MEMORY_CHECK
+#define OSP_MEMORY_CHECK(p) do { if(!(p)) Com_Terminate( TERM_CLIENT_DROP, "Out of memory"); } while(0)
+#endif
+
+// ── cvar stubs from cgame ─────────────────────────────────────────────
+
+extern vmCvar_t wired_MaxlocationWidth;
+extern vmCvar_t wired_drawTimer;
+extern vmCvar_t wired_drawAmmoWarning;
+#define cg_MaxlocationWidth  wired_MaxlocationWidth
+#define cg_drawAmmoWarning   wired_drawAmmoWarning
+extern vmCvar_t wired_drawRewards;
+#define cg_drawRewards       wired_drawRewards
+extern vmCvar_t wired_drawCrosshairNames;
+extern vmCvar_t wired_crosshairAlpha;
+#define cg_drawCrosshairNames  wired_drawCrosshairNames
+#define cg_crosshairAlpha      wired_crosshairAlpha
+
+// ── item data stub ───────────────────────────────────────────────────
+
+typedef struct {
+	qhandle_t icon;
+} wiredItemCompat_t;
+extern wiredItemCompat_t wired_cg_items[256];
+#define cg_items wired_cg_items
+
+// ── team overlay data ─────────────────────────────────────────────────
+
+extern int wired_numSortedTeamPlayers;
+extern int wired_sortedTeamPlayers[WIRED_HUD_MAX_TEAMOVERLAY];
+#define numSortedTeamPlayers  wired_numSortedTeamPlayers
+#define sortedTeamPlayers     wired_sortedTeamPlayers
+
+// Sync compat structs from wiredHudState — called each frame before element routines
+void WiredHud_SyncCompat( void );
+
+#endif // CL_WIRED_UI_HUD_COMPAT_H

@@ -1,0 +1,93 @@
+// attract_demo_overlay.wui — chrome drawn ON TOP of a playing attract demo.
+//
+// Shown by the attract scheduler during a DEMO item (cl_wired_attract.c pushes
+// this panel visible; bg_attract_policy keeps the layer active via
+// WiredAttract_IsDemoOverlayActive so it renders over the CA_CONNECTED demo).
+// The recorded match fills the screen behind; this panel is TRANSPARENT
+// (backcolor alpha 0) so gameplay shows through — only the poster chrome draws.
+//
+// Brutalist Poster: faint top scrim strip with a pulsing red REC + clock, a huge
+// red index number bottom-left, and a bottom lower-third with the map + score.
+// Deliberately sparse so the match dominates. Same red spine as the other two
+// screens. Red is $poster_red #e6332b. Tokens: $bone $boneDim $font_mono
+// $poster_red; wordmark $font_sans_bold. Every element position-absolute + sized (no collapse).
+
+menuDef {
+	name "attract_demo_overlay"
+	layer "bg_attract"
+	rect 0 0 1.0 1.0
+	fullScreen 1
+	visible 0
+	backcolor 0 0 0 0             // transparent — the demo shows through
+
+	// ── red spine (shared signature) ─────────────────────────────────
+	itemDef {
+		name "do_spine"
+		type 0
+		position absolute
+		left 0
+		top 0
+		width 0.9vw
+		height 100vh
+		style 1
+		backcolor $poster_red
+		decoration
+		visible 1
+	}
+
+	// ── top scrim strip: REC + clock (faint backing for legibility) ──
+	itemDef {
+		name "do_strip"
+		type container
+		position absolute
+		left 0
+		top 0
+		width 100vw
+		height 6vh
+		direction row
+		alignY center
+		padding 0 4vw
+		background 0.039 0.035 0.031 0.42   // faint ink scrim, NOT opaque
+		borderBottom 1px $poster_red
+		grow 0
+
+		itemDef { type 0 rect 0 0 1 3vh height FIT width 24vw text "[REC] DEMO" textalign 0 font $font_mono 17 forecolor $poster_red decoration visible 1 grow 1 }
+		itemDef { type 0 rect 0 0 1 3vh height FIT width 20vw text "12:04.7"    textalign 2 font $font_mono 17 forecolor $attract_ink_hi decoration visible 1 grow 0 }
+	}
+
+	// ── big red index (bottom-left, poster element) ──────────────────
+	itemDef {
+		name "do_index"
+		type 0
+		position absolute
+		left 4vw
+		bottom 14vh
+		width 24vw
+		height 12vh
+		text "02"
+		textalign 0
+		font $font_sans_bold 88
+		forecolor $poster_red
+		decoration
+		visible 1
+	}
+
+	// ── bottom lower-third: map + score ──────────────────────────────
+	itemDef {
+		name "do_lower"
+		type container
+		position absolute
+		left 0
+		bottom 0
+		width 100vw
+		height 6vh
+		direction row
+		alignY center
+		padding 0 4vw
+		background 0.039 0.035 0.031 0.42
+		grow 0
+
+		itemDef { type 0 rect 0 0 1 3vh height FIT width 50vw text "Q3DM17 · THE LONGEST YARD" textalign 0 font $font_mono 16 forecolor $bone          decoration visible 1 grow 1 }
+		itemDef { type 0 rect 0 0 1 3vh height FIT width 30vw text "RANGER 14 · KEEL 11"        textalign 2 font $font_mono 16 forecolor $attract_ink_hi decoration visible 1 grow 0 }
+	}
+}

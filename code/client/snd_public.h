@@ -4,21 +4,23 @@
 
 
 /*
-The audio output backend was migrated from three platform-specific files
-(`win_snd.c`, `linux_snd.c`, `sdl_snd.c`) to a single cross-platform `snd_miniaudio.c`
+The audio output backend lives in a single cross-platform `snd_miniaudio.c`
 that uses the vendored [miniaudio](https://github.com/mackron/miniaudio) v0.11.25
-single-header library via its low-level `ma_device` API only.
+single-header library. It replaced three platform-specific files
+(`win_snd.c`, `linux_snd.c`, `sdl_snd.c`).
 
-When working on audio:
-- The audio callback in `S_MiniaudioCallback` MUST remain lock-free.
-  Run `tools/check_audio_callback.sh` to verify.
-- Do NOT use miniaudio's high-level `ma_engine` / `ma_sound` APIs — they would
-  recreate the dual-mixer problem we deliberately avoided.
-- Do NOT touch `snd_mix.c` (the engine mixer) or `S_SpatializeOrigin`. They are
-  battle-tested and intentionally untouched by the migration.
-- The dedicated server build skips the audio path via `#ifndef DEDICATED`.
-
-
+Audio architecture:
+- miniaudio's high-level `ma_engine` / `ma_sound` / `ma_spatializer` APIs are the
+  sole audio path. `ma_engine` owns the playback device (native → WASAPI /
+  CoreAudio / PulseAudio / ALSA, web → the WebAudio backend) and mixes its node
+  graph directly: per-voice sfx with a per-source spatializer, a persistent loop
+  registry, and streaming rings for background music and cinematic audio. There
+  is no CPU mixer.
+- The engine's `onProcess` tap (`S_EngineProcess`) runs on ma_engine's audio
+  thread and MUST remain lock-free. Run `tools/check_audio_callback.sh` to verify.
+- For offline AVI capture the engine runs read-driven (no device) and is pulled
+  deterministically on the main thread — see S_EngineReadCaptureFrames.
+- The headless server build skips the audio path via `#ifndef HEADLESS`.
 */
 
 void S_Init( void );
@@ -30,17 +32,17 @@ void S_Shutdown( void );
  * window is unfocused). */
 void S_SetMuteOverride( qboolean enabled );
 
+/* notify the sound system of a window-focus transition (focused=qtrue on
+ * gain, qfalse on loss).  The mixer mutes while unfocused and flushes the
+ * one-shot sounds queued during the unfocused window on refocus. */
+void S_FocusChanged( qboolean focused );
+
 // if origin is NULL, the sound will be dynamically sourced from the entity
 void S_StartSound( vec3_t origin, int entnum, int entchannel, sfxHandle_t sfx );
 void S_StartLocalSound( sfxHandle_t sfx, int channelNum );
 
 void S_StartBackgroundTrack( const char *intro, const char *loop );
 void S_StopBackgroundTrack( void );
-
-// cinematics and voice-over-network will send raw samples
-// 1.0 volume will be direct output of source samples
-void S_RawSamples (int samples, int rate, int width, int channels,
-				   const byte *data, float volume);
 
 // stop all sounds and the background track
 void S_StopAllSounds( void );
@@ -69,7 +71,7 @@ void S_BeginRegistration( void );
 // checks for missing files
 sfxHandle_t	S_RegisterSound( const char *sample, qboolean compressed );
 
-// Phase 6.2: returns the duration of a registered sound in milliseconds.
+// Returns the duration of a registered sound in milliseconds.
 // Returns 0 if the handle is invalid or the sound system is not running.
 int S_SoundDuration( sfxHandle_t handle );
 

@@ -5,8 +5,20 @@ Drives `qrenderdoc.exe --python <script>` (RenderDoc ships an embedded
 Python 3.6 interpreter — the `renderdoc` module is ABI-locked to it, so
 this *cannot* run under the system Python; we shell out). The embedded
 script opens the capture, finds the swapchain/backbuffer texture at the
-last Present, picks the requested pixels, and prints a JSON blob on
-stdout which the system-Python side parses.
+last Present, picks the requested pixels, and writes a JSON blob the
+system-Python side reads back.
+
+qrenderdoc --python quirks this code works around (verified on v1.44):
+  * sys.argv is NOT populated for the script → parameters are passed via the
+    environment (VR_RDC / VR_TEXTURE / VR_COORDS).
+  * the script's stdout is SWALLOWED by qrenderdoc → the result JSON is written
+    to a file (VR_OUT) which read_pixels() reads (stdout is still echoed as a
+    fallback for manual runs).
+  * after the script returns, qrenderdoc proceeds to open its GUI (blocks
+    forever headlessly) → the script ends with os._exit(0) to hard-quit.
+  * a triple-buffered swapchain exposes 3 SwapBuffer textures; only one was
+    Presented this frame (the others are often all-zero) → the chooser samples
+    each and picks the non-black one.
 
 Default qrenderdoc.exe location on Windows: C:\\Program Files\\RenderDoc\\qrenderdoc.exe
 (override with --qrenderdoc or the QRENDERDOC env var).
@@ -41,29 +53,48 @@ _DEFAULT_QRENDERDOC = os.environ.get(
 # of a resource's debug name (e.g. "tonemapped_image", "color_image").
 # Prints one line of JSON: {"ok": true, "texture": {...}, "pixels": [...]}.
 _RDOC_SCRIPT = r'''
-import sys, json
+import sys, os, json
+
+# qrenderdoc --python swallows the script's stdout, so write the result JSON to
+# the file named by VR_OUT (set by read_pixels) and ALSO echo to stdout (for the
+# CLI/manual case). The parent reads VR_OUT.
+_VR_OUT = os.environ.get("VR_OUT", "")
 
 def emit(obj):
-    sys.stdout.write(json.dumps(obj) + "\n")
-    sys.stdout.flush()
+    line = json.dumps(obj)
+    try:
+        sys.stdout.write(line + "\n"); sys.stdout.flush()
+    except Exception:
+        pass
+    if _VR_OUT:
+        try:
+            with open(_VR_OUT, "w", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except Exception:
+            pass
 
 try:
     import renderdoc as rd
 except Exception as e:  # noqa: BLE001
     emit({"ok": False, "error": "import renderdoc failed: %r" % (e,)})
-    sys.exit(0)
+    os._exit(0)
 
-argv = sys.argv[1:]
-if len(argv) < 3:
-    emit({"ok": False, "error": "usage: <rdc> <texture> <x,y> [<x,y> ...]"})
-    sys.exit(0)
-
-rdc_path = argv[0]
-tex_sel = argv[1]
+# qrenderdoc --python (v1.x) runs this script with the `renderdoc`/`qrenderdoc`
+# globals already injected but DOES NOT populate sys.argv — args passed after
+# "--" never reach the script. So parameters arrive via environment variables
+# (set by read_pixels()): VR_RDC, VR_TEXTURE, VR_COORDS ("x,y;x,y;...").
+rdc_path = os.environ.get("VR_RDC", "")
+tex_sel = os.environ.get("VR_TEXTURE", "backbuffer")
 coords = []
-for a in argv[2:]:
+for a in (os.environ.get("VR_COORDS", "") or "").split(";"):
+    a = a.strip()
+    if not a:
+        continue
     xs, ys = a.split(",")
     coords.append((int(float(xs)), int(float(ys))))
+if not rdc_path or not coords:
+    emit({"ok": False, "error": "missing VR_RDC / VR_COORDS env (got rdc=%r coords=%r)" % (rdc_path, coords)})
+    os._exit(0)
 
 cap = rd.OpenCaptureFile()
 res = cap.OpenFile(rdc_path, "", None)
@@ -75,7 +106,7 @@ else:
     good = (res == 0) or bool(res)
 if not good:
     emit({"ok": False, "error": "OpenFile failed: %r" % (res,)})
-    sys.exit(0)
+    os._exit(0)
 
 open_res = cap.OpenCapture(rd.ReplayOptions(), None)
 # OpenCapture returns (ResultDetails, ReplayController) on 1.x.
@@ -84,12 +115,12 @@ if isinstance(open_res, (tuple, list)) and len(open_res) == 2:
     sok = getattr(status, "OK", None)
     if callable(sok) and not status.OK():
         emit({"ok": False, "error": "OpenCapture failed: %r" % (status,)})
-        sys.exit(0)
+        os._exit(0)
 else:
     controller = open_res
 if controller is None:
     emit({"ok": False, "error": "OpenCapture returned no controller"})
-    sys.exit(0)
+    os._exit(0)
 
 try:
     # ── pick the event to inspect: the last action (= end of frame) ──
@@ -108,21 +139,45 @@ try:
     end = last_action(root)
     if end is None:
         emit({"ok": False, "error": "no actions in capture"})
-        sys.exit(0)
+        os._exit(0)
     controller.SetFrameEvent(end.eventId, True)
 
     # ── choose the texture ──
     textures = controller.GetTextures()
     chosen = None
     if tex_sel.lower() in ("backbuffer", "swapchain", "present", ""):
-        # Prefer a texture flagged as a swap/present source.
-        for t in textures:
-            cf = int(getattr(t, "creationFlags", 0))
-            # rd.TextureCategory: SwapBuffer bit. Fall back to "is 2D, format
-            # looks like a BGRA8 swapchain" if the flag enum isn't available.
-            if hasattr(rd, "TextureCategory") and (cf & int(rd.TextureCategory.SwapBuffer)):
-                chosen = t
-                break
+        # A triple-buffered swapchain exposes 3 SwapBuffer textures; only ONE is
+        # the frame that was actually Presented (the other two are stale/cleared,
+        # often all-zero). Grabbing the first SwapBuffer texture blindly can land
+        # on a black buffer. So: collect all SwapBuffer textures, then pick the
+        # one whose centre pixel is non-zero (the presented frame). If all read
+        # zero (a genuinely black frame), fall back to the first.
+        swaps = []
+        if hasattr(rd, "TextureCategory"):
+            for t in textures:
+                cf = int(getattr(t, "creationFlags", 0))
+                if cf & int(rd.TextureCategory.SwapBuffer):
+                    swaps.append(t)
+        if swaps:
+            _cast = rd.CompType.UNorm if hasattr(rd, "CompType") else None
+            _sub = rd.Subresource() if hasattr(rd, "Subresource") else None
+            def _centre_lum(t):
+                cx, cy = int(t.width) // 2, int(t.height) // 2
+                try:
+                    if _sub is not None and _cast is not None:
+                        pv = controller.PickPixel(t.resourceId, cx, cy, _sub, _cast)
+                    else:
+                        pv = controller.PickPixel(t.resourceId, cx, cy, 0, 0, 0)
+                    fv = list(getattr(pv, "floatValue", []) or [])
+                    return sum(fv[:3]) if len(fv) >= 3 else 0.0
+                except Exception:  # noqa: BLE001
+                    return 0.0
+            chosen = swaps[0]
+            best = _centre_lum(chosen)
+            for t in swaps[1:]:
+                l = _centre_lum(t)
+                if l > best:
+                    best, chosen = l, t
         if chosen is None:
             # heuristic: last 2D non-array BGRA/RGBA8 texture
             for t in reversed(textures):
@@ -150,7 +205,7 @@ try:
                 names.append(str(getattr(t, "resourceId", "?")))
         emit({"ok": False, "error": "no texture matched %r" % (tex_sel,),
               "available": names[:64]})
-        sys.exit(0)
+        os._exit(0)
 
     tex_id = chosen.resourceId
     try:
@@ -197,6 +252,11 @@ finally:
         controller.Shutdown()
     except Exception:  # noqa: BLE001
         pass
+
+# Hard-exit so qrenderdoc --python does NOT fall through to opening its GUI
+# (which would block forever in a headless run). os._exit skips atexit/Qt
+# teardown — fine, we already emitted the result.
+os._exit(0)
 '''
 
 
@@ -228,32 +288,56 @@ def read_pixels(rdc_path, pixels, *, texture="backbuffer", qrenderdoc=None, time
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as tf:
         tf.write(_RDOC_SCRIPT)
         script_path = tf.name
+    out_fd, out_path = tempfile.mkstemp(suffix=".json")
+    os.close(out_fd)
     try:
-        coord_args = [f"{int(x)},{int(y)}" for (x, y) in pixels]
-        cmd = [qexe, "--python", script_path, "--",
-               os.path.abspath(rdc_path), str(texture), *coord_args]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        # The embedded script prints one JSON line on stdout. qrenderdoc may
-        # emit other chatter (Qt/init messages) — scan for the JSON line.
+        os.remove(out_path)  # the script (re)creates it; absence => script never ran
+    except OSError:
+        pass
+    try:
+        # qrenderdoc --python (v1.x): (1) does NOT populate sys.argv, and (2)
+        # SWALLOWS the script's stdout. So pass parameters via the environment
+        # (VR_RDC / VR_TEXTURE / VR_COORDS) and read the result back from a file
+        # (VR_OUT) the script writes. A "--" argv tail is silently dropped.
+        coord_env = ";".join(f"{int(x)},{int(y)}" for (x, y) in pixels)
+        env = dict(os.environ)
+        env["VR_RDC"] = os.path.abspath(rdc_path)
+        env["VR_TEXTURE"] = str(texture)
+        env["VR_COORDS"] = coord_env
+        env["VR_OUT"] = out_path
+        cmd = [qexe, "--python", script_path]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
         payload = None
-        for line in (proc.stdout or "").splitlines():
-            line = line.strip()
-            if line.startswith("{") and line.endswith("}"):
-                try:
-                    payload = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
+        # Prefer the result file (qrenderdoc swallows stdout); fall back to
+        # scanning stdout for the JSON line (manual/CLI runs without VR_OUT).
+        if os.path.isfile(out_path):
+            try:
+                with open(out_path, encoding="utf-8") as f:
+                    payload = json.loads(f.read().strip())
+            except (OSError, json.JSONDecodeError):
+                payload = None
+        if payload is None:
+            for line in (proc.stdout or "").splitlines():
+                line = line.strip()
+                if line.startswith("{") and line.endswith("}"):
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
         if payload is None:
             raise RuntimeError(
-                "no JSON from qrenderdoc --python (exit %d)\n--- stdout ---\n%s\n--- stderr ---\n%s"
+                "no JSON from qrenderdoc --python (exit %d); VR_OUT not written "
+                "(script may have failed to import renderdoc or hit a launch error)\n"
+                "--- stdout ---\n%s\n--- stderr ---\n%s"
                 % (proc.returncode, proc.stdout, proc.stderr)
             )
         return payload
     finally:
-        try:
-            os.unlink(script_path)
-        except OSError:
-            pass
+        for p in (script_path, out_path):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
 
 
 # ── CLI ────────────────────────────────────────────────────────────────

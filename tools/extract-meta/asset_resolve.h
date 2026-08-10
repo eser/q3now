@@ -11,7 +11,7 @@ Copyright (C) 2024-2026 Wired engine contributors. GPLv2.
 #define EXTRACT_META_ASSET_RESOLVE_H
 
 #include "q_shared.h"
-#include "bsp_inventory.h"
+#include "map_inventory.h"
 #include "shader_index.h"
 
 typedef struct {

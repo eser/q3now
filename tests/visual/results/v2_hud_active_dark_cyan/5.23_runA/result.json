@@ -1,0 +1,314 @@
+{
+  "config": {
+    "artboard": "v2_hud_active",
+    "mode": "dark",
+    "accent": "cyan"
+  },
+  "baseline": "tests/visual/baselines/v2_hud_active_dark_cyan.png",
+  "impl": "tests/visual/results/v2_hud_active_dark_cyan/5.23_runA/impl.png",
+  "baseline_w": 1440,
+  "baseline_h": 900,
+  "impl_w": 1440,
+  "impl_h": 900,
+  "ssim": {
+    "global": {
+      "name": "global",
+      "value": 0.33230428531759665,
+      "threshold": 0.5,
+      "verdict": "fail"
+    },
+    "regions": {
+      "ammo_readout": {
+        "name": "ammo_readout",
+        "value": 0.1075761443141493,
+        "threshold": 0.45,
+        "verdict": "fail"
+      },
+      "armor_panel": {
+        "name": "armor_panel",
+        "value": 0.3238299666570908,
+        "threshold": 0.45,
+        "verdict": "fail"
+      },
+      "bg_arena_architecture": {
+        "name": "bg_arena_architecture",
+        "value": 0.5619233293592801,
+        "threshold": 0.45,
+        "verdict": "pass"
+      },
+      "bg_atmospheric_tint": {
+        "name": "bg_atmospheric_tint",
+        "value": 0.33230428531759665,
+        "threshold": 0.45,
+        "verdict": "fail"
+      },
+      "bg_floor_band": {
+        "name": "bg_floor_band",
+        "value": 0.23381116310051955,
+        "threshold": 0.45,
+        "verdict": "fail"
+      },
+      "bg_sky_band": {
+        "name": "bg_sky_band",
+        "value": 0.406055209263582,
+        "threshold": 0.45,
+        "verdict": "fail"
+      },
+      "crosshair": {
+        "name": "crosshair",
+        "value": 0.13558251459219442,
+        "threshold": 0.45,
+        "verdict": "fail"
+      },
+      "health_panel": {
+        "name": "health_panel",
+        "value": 0.27692449824498994,
+        "threshold": 0.45,
+        "verdict": "fail"
+      },
+      "holdables_strip": {
+        "name": "holdables_strip",
+        "value": 0.33084350401187845,
+        "threshold": 0.45,
+        "verdict": "fail"
+      },
+      "kill_feed": {
+        "name": "kill_feed",
+        "value": 0.3352657422102026,
+        "threshold": 0.45,
+        "verdict": "fail"
+      },
+      "scoreboard_overlay": {
+        "name": "scoreboard_overlay",
+        "value": 0.46843020853796125,
+        "threshold": 0.45,
+        "verdict": "pass"
+      },
+      "top_right_telemetry": {
+        "name": "top_right_telemetry",
+        "value": 0.34546149540490934,
+        "threshold": 0.45,
+        "verdict": "fail"
+      },
+      "top_scoreboard_bar": {
+        "name": "top_scoreboard_bar",
+        "value": 0.39596323321001264,
+        "threshold": 0.45,
+        "verdict": "fail"
+      },
+      "weapon_carousel": {
+        "name": "weapon_carousel",
+        "value": 0.22864773394018933,
+        "threshold": 0.45,
+        "verdict": "fail"
+      },
+      "weapon_placeholder": {
+        "name": "weapon_placeholder",
+        "value": 0.34075901082843235,
+        "threshold": 0.45,
+        "verdict": "fail"
+      }
+    }
+  },
+  "deltaE2000": {
+    "global": {
+      "name": "global",
+      "value": 18.748639746919796,
+      "threshold": 12,
+      "verdict": "fail"
+    },
+    "regions": {
+      "ammo_readout": {
+        "name": "ammo_readout",
+        "value": 31.447526745974276,
+        "threshold": 35,
+        "verdict": "pass"
+      },
+      "armor_panel": {
+        "name": "armor_panel",
+        "value": 18.05853830731752,
+        "threshold": 35,
+        "verdict": "pass"
+      },
+      "bg_arena_architecture": {
+        "name": "bg_arena_architecture",
+        "value": 4.889536362380957,
+        "threshold": 35,
+        "verdict": "pass"
+      },
+      "bg_atmospheric_tint": {
+        "name": "bg_atmospheric_tint",
+        "value": 18.748639746919796,
+        "threshold": 35,
+        "verdict": "pass"
+      },
+      "bg_floor_band": {
+        "name": "bg_floor_band",
+        "value": 20.97989472147199,
+        "threshold": 35,
+        "verdict": "pass"
+      },
+      "bg_sky_band": {
+        "name": "bg_sky_band",
+        "value": 15.76880656847313,
+        "threshold": 35,
+        "verdict": "pass"
+      },
+      "crosshair": {
+        "name": "crosshair",
+        "value": 30.698590120378455,
+        "threshold": 35,
+        "verdict": "pass"
+      },
+      "health_panel": {
+        "name": "health_panel",
+        "value": 21.054836069956906,
+        "threshold": 35,
+        "verdict": "pass"
+      },
+      "holdables_strip": {
+        "name": "holdables_strip",
+        "value": 11.25873174045744,
+        "threshold": 35,
+        "verdict": "pass"
+      },
+      "kill_feed": {
+        "name": "kill_feed",
+        "value": 12.367326151746383,
+        "threshold": 35,
+        "verdict": "pass"
+      },
+      "scoreboard_overlay": {
+        "name": "scoreboard_overlay",
+        "value": 12.101267915969654,
+        "threshold": 35,
+        "verdict": "pass"
+      },
+      "top_right_telemetry": {
+        "name": "top_right_telemetry",
+        "value": 23.259513179565975,
+        "threshold": 35,
+        "verdict": "pass"
+      },
+      "top_scoreboard_bar": {
+        "name": "top_scoreboard_bar",
+        "value": 12.623057236414644,
+        "threshold": 35,
+        "verdict": "pass"
+      },
+      "weapon_carousel": {
+        "name": "weapon_carousel",
+        "value": 21.55317983604014,
+        "threshold": 35,
+        "verdict": "pass"
+      },
+      "weapon_placeholder": {
+        "name": "weapon_placeholder",
+        "value": 11.087432381642918,
+        "threshold": 35,
+        "verdict": "pass"
+      }
+    }
+  },
+  "structural": {
+    "global": {
+      "name": "global",
+      "value": 0,
+      "threshold": 0.1,
+      "verdict": "skip"
+    },
+    "regions": {
+      "ammo_readout": {
+        "name": "ammo_readout",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "armor_panel": {
+        "name": "armor_panel",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "bg_arena_architecture": {
+        "name": "bg_arena_architecture",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "bg_atmospheric_tint": {
+        "name": "bg_atmospheric_tint",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "bg_floor_band": {
+        "name": "bg_floor_band",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "bg_sky_band": {
+        "name": "bg_sky_band",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "crosshair": {
+        "name": "crosshair",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "health_panel": {
+        "name": "health_panel",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "holdables_strip": {
+        "name": "holdables_strip",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "kill_feed": {
+        "name": "kill_feed",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "scoreboard_overlay": {
+        "name": "scoreboard_overlay",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "top_right_telemetry": {
+        "name": "top_right_telemetry",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "top_scoreboard_bar": {
+        "name": "top_scoreboard_bar",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "weapon_carousel": {
+        "name": "weapon_carousel",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "weapon_placeholder": {
+        "name": "weapon_placeholder",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      }
+    }
+  },
+  "verdict": "fail"
+}

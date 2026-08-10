@@ -1,0 +1,56 @@
+// qw_menu_item — single left-rail menu row widget (macro form)
+// Interface (consumer): #include this file once, then expand the macro
+//   per menu item:
+//     QW_MENU_ITEM("menu_campaign", "campaign", "CAMPAIGN", "continue the descent", { open "startserver" })
+// Args:
+//   ITEM_NAME   — unique itemDef name (string literal)
+//   CVAR_KEY    — legacy selection key (retained for signature/callsite
+//                 compatibility; no longer bound to a cvar — selection is
+//                 expressed by FOCUS, see below)
+//   LABEL       — primary label text (left-aligned)
+//   SUB         — secondary caption (right-aligned, mono small)
+//   ACTION_CMD  — script block expanded into action {} on click
+// Tokens consumed: $spacing_sm, $spacing_md, $spacing_xs, $line,
+//   $accent, $bone, $boneDim, $ink, $font_sans, $font_mono
+// Selection state: FOCUS is the single source of truth (keyboard nav AND
+//   mouse hover both move wui_focusItem; the engine sets focus on hover in
+//   WiredUI_MouseEvent). The focused row + its text children pick up the
+//   `forecolor.active` variants via the focus path (cl_wired_clay.c), and
+//   the gold focus-gradient draws the highlight. The previous hover-driven
+//   `active ui_currentMenuItem` cvar + `backcolor.active` (a misuse of the
+//   PERSISTENT `active` mechanism for a TRANSIENT cursor, which produced a
+//   SECOND cyan highlight alongside the gold one) was removed. The generic
+//   `active <cvar> <value>` engine feature is unchanged and still used by
+//   the settings tabs (active ui_settingsSection "video" etc.).
+// FOCUS-WASH READABILITY (2026-07-07): the focus highlight is a FLAT solid
+//   accent-cyan wash at ~0.30 alpha (cl_wired_clay.c). Row text must CONTRAST
+//   that wash, so LABEL + SUB + chevron use `forecolor.active $bone` (light) on
+//   focus, NOT $accent (cyan) — cyan text on the cyan wash read as unreadable /
+//   a wrong dark tone. The wash marks the focused row; the text stays bone.
+// Chevron: leading ">" glyph rendered transparent when resting and swaps to
+//   $bone via forecolor.active when the row is focused — an active-only chevron
+//   without needing visible.active engine support. Resting rgb is a warm
+//   mid-grey at alpha 0 (0.541 0.459 0.376 0, the $boneDim rgb) NOT a near-black,
+//   so if the alpha-0 fill bleeds through the solid wash it reads as a faint
+//   neutral, never a stark black ">" (the BUG-2 class fixed in the settings-nav
+//   twin). Kept identical in style to qw_settings_nav.wui so the two rails
+//   share one chevron + active-color treatment.
+#define QW_MENU_ITEM(ITEM_NAME, CVAR_KEY, LABEL, SUB, ACTION_CMD) \
+	itemDef { \
+		name ITEM_NAME \
+		type container \
+		rect 0 0 1 7.5vh \
+		height FIXED 56px \
+		width PERCENT 1 \
+		direction row \
+		alignY center \
+		gap $spacing_md \
+		padding $spacing_menu_row_padding_v $spacing_menu_row_padding_h \
+		borderBottom 1px $line \
+		action ACTION_CMD \
+		\
+		itemDef { type 0 rect 0 0 2.5vw 0 height FIT width PERCENT 2.5vw text ">" textalign 0 font $font_sans 32 forecolor $boneDim forecolor.active $bone decoration visible 1 grow 0 } \
+		itemDef { type 0 rect 0 0 20vw 0 height FIT width PERCENT 20vw text LABEL textalign 0 font $font_sans 28 forecolor $bone forecolor.active $bone decoration visible 1 grow 0 } \
+		itemDef { type container grow 1 decoration visible 1 } \
+		itemDef { type 0 rect 0 0 18vw 0 height FIT width PERCENT 18vw text SUB textalign 2 font $font_mono 10 forecolor $boneDim forecolor.active $bone decoration visible 1 grow 0 } \
+	}

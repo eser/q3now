@@ -20,18 +20,18 @@ Push range layout (VERTEX | FRAGMENT, 112 bytes):
     bytes   0..63   mat4  mvp           — world MVP, Y-flipped for Vulkan
     bytes  64..79   vec4  viewLeft      — .xyz = camera-left in world space
     bytes  80..95   vec4  viewUp        — .xyz = camera-up in world space
-    bytes  96..111  vec4  frameParams   — .x = reserved / unused (was
-                                          the legacy identityLight
-                                          halving factor; dropped Phase
-                                          6B3'-a, field removed in the
-                                          Block 9 sweep; the word stays
-                                          for push-range byte-compat),
-                                          .yzw reserved
+    bytes  96..111  vec4  frameParams   — .x = reserved / unused (the
+                                          word is kept for push-range
+                                          byte-compat), .yzw reserved
 Push range covers VERTEX | FRAGMENT for stage layout compatibility
 even though sprite.frag does not consume frameParams.
 */
 
-layout(push_constant) uniform Push {
+// Migrated off the retired 112-byte VS|FS push to the shared effects per-draw UBO
+// at set 1 (UNIFORM_BUFFER_DYNAMIC, std140). viewLeft=v0, viewUp=v1, frameParams=v2
+// (generic slots). Anonymous block keeps the read sites (mvp/viewLeft/viewUp)
+// unchanged. gl_InstanceIndex stays the sprite-header index.
+layout(set = 1, binding = 0, std140) uniform EffectsUBO {
 	mat4 mvp;
 	vec4 viewLeft;
 	vec4 viewUp;

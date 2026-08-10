@@ -1,11 +1,11 @@
 # ══════════════════════════════════════════════════════════════════════════════
-# q3now dedicated server — multi-stage Docker build
+# q3now headless server — multi-stage Docker build
 # ══════════════════════════════════════════════════════════════════════════════
 #
 # Usage:
 #   docker build -t q3now-server .
 #   docker run -p 27960:27960/udp \
-#     -v ./baseq3:/home/wired/baseq3 \
+#     -v ./base:/home/wired/base \
 #     eserozvataf/q3now +map arena7
 #
 # One UDP port serves all clients — QUIC (WebTransport) and legacy Q3 protocol
@@ -19,9 +19,10 @@ FROM debian:bookworm-slim AS builder
 
 ARG WASI_SDK_VERSION=32
 
-# libx11-dev: required at cmake configure time — the CMakeLists.txt always
-# processes client target definitions which call find_package(X11 REQUIRED),
-# even though the dedicated server itself never links against X11.
+# libsdl3-dev: required at cmake configure time — the CMakeLists.txt always
+# processes the client/window-system target definitions which call
+# find_package(SDL3 REQUIRED), even though the headless server itself never
+# links against the SDL window system.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         cmake \
@@ -31,7 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         libcurl4-openssl-dev \
         libssl-dev \
-        libx11-dev \
+        libsdl3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install wasi-sdk for WASM game module compilation
@@ -49,18 +50,18 @@ RUN ARCH=$(uname -m) && \
 WORKDIR /src
 COPY . .
 
-# Configure: dedicated server only (no SDL, no renderers)
-# WASM enabled for portable game module support
+# Configure: headless server only (no renderers). The window system is SDL3
+# (configure-time dependency only; the headless target does not link it).
+# WASM enabled for portable game module support.
 RUN cmake -S . -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
-    -DUSE_SDL=OFF \
     -DUSE_OPENGL=OFF \
     -DUSE_VULKAN=OFF \
     -DUSE_RENDERER_DLOPEN=OFF \
     -DUSE_WASM=ON \
     -DWASI_SDK_PREFIX=/opt/wasi-sdk
 
-# Build only the dedicated server + game modules (skip client which needs
+# Build only the headless server + game modules (skip client which needs
 # additional graphics/audio deps we don't have). Copy binary to a fixed path
 # so the runtime stage doesn't need to know the architecture suffix.
 RUN ARCH=$(uname -m) && \
@@ -70,11 +71,11 @@ RUN ARCH=$(uname -m) && \
       armv7l)  BINEXT=".arm" ;; \
       *)       BINEXT="" ;; \
     esac && \
-    cmake --build build --target "wired-ded${BINEXT}" \
-      cgame_baseq3 qagame_baseq3 \
-      qagame_wasm cgame_wasm \
+    cmake --build build --target "wired-headless${BINEXT}" \
+      gamecl_base gamesv_base \
+      gamesv_wasm gamecl_wasm \
       --parallel $(nproc) && \
-    cp "build/wired-ded${BINEXT}" /tmp/wired-ded
+    cp "build/wired-headless${BINEXT}" /tmp/wired-headless
 
 # ── Stage 2: Runtime ────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
@@ -88,22 +89,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && groupadd -g 1000 wired \
     && useradd -u 1000 -g wired -m -d /home/wired -s /bin/sh wired
 
-# Install dedicated server binary (arch-independent path)
-COPY --from=builder /tmp/wired-ded /opt/wired/wired-ded
+# Install headless server binary (arch-independent path)
+COPY --from=builder /tmp/wired-headless /opt/wired/wired-headless
 
 # Install game modules (native .so + WASM .wasm)
-COPY --from=builder /src/build/Release/baseq3/ /opt/wired/baseq3/
+COPY --from=builder /src/build/Release/base/ /opt/wired/base/
 
 # Install default server config
-COPY modfiles/config_server.cfg /opt/wired/baseq3/config_server.cfg
+COPY modfiles/config_server.cfg /opt/wired/base/config_server.cfg
 
 # Install entrypoint
 COPY docker/entrypoint.sh /opt/wired/entrypoint.sh
-RUN chmod +x /opt/wired/entrypoint.sh /opt/wired/wired-ded
+RUN chmod +x /opt/wired/entrypoint.sh /opt/wired/wired-headless
 
 # Create writable homepath directory for volume mounts
-# Operators mount game assets (pak files, configs) at /home/wired/baseq3
-RUN mkdir -p /home/wired/baseq3 /home/wired/certs \
+# Operators mount game assets (pak files, configs) at /home/wired/base
+RUN mkdir -p /home/wired/base /home/wired/certs \
     && chown -R wired:wired /home/wired
 
 # Single UDP port for all traffic — QUIC and the legacy Q3 protocol share

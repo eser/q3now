@@ -14,7 +14,7 @@ The full license text is in `LICENSE` and `THIRD_PARTY_LICENSES.md` at the
 repository root.
 ===========================================================================
 
-Phase 6.5: Ported from code/renderer2/tr_image_dds.c. The file-format
+Ported from code/renderer2/tr_image_dds.c. The file-format
 parser and FourCC / DXGI tables are unchanged from the renderer2
 implementation. The format dispatch swaps GL_COMPRESSED_* enums for the
 matching VK_FORMAT_BC* values, and the loader hands its raw mip data
@@ -24,6 +24,9 @@ this file — see vk_upload_image_data_compressed in vk.c.
 */
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn B — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 typedef unsigned int   ui32_t;
 
@@ -152,13 +155,13 @@ to the caller (free via ri.Free). *picFormat receives the matching
 VkFormat (or VK_FORMAT_UNDEFINED on parse failure). *numMips
 receives the mip-chain length declared in the header (>= 1).
 
-Phase 6.5: BC1 / BC3 / BC5 / BC7 are the audit-priority formats and
+BC1 / BC3 / BC5 / BC7 are the audit-priority formats and
 get UNORM + sRGB variants; BC2 / BC4 / BC6H map per the renderer2
 table for completeness. The caller (R_FindImageFile) checks
 vk.bc_formats_supported and falls back to NULL when the GPU rejects
 a format.
 
-Phase 6.5.1: *info (may be NULL) receives the cubemap / volume
+*info (may be NULL) receives the cubemap / volume
 classification. A cubemap is recognised either via the legacy
 DDSCAPS2_CUBEMAP caps2 bits (all six face bits must be present —
 partial cubemaps are rejected, Vulkan needs all 6 layers) or the
@@ -184,7 +187,7 @@ void R_LoadDDS( const char *filename, byte **pic, int *width, int *height, VkFor
 
 	if ( !picFormat )
 	{
-		ri.Log( SEV_ERROR, "R_LoadDDS() called without picFormat parameter!" );
+		R_LOG( rch_assets, SEV_ERROR, "R_LoadDDS() called without picFormat parameter!" );
 		return;
 	}
 
@@ -219,7 +222,7 @@ void R_LoadDDS( const char *filename, byte **pic, int *width, int *height, VkFor
 	//
 	if ( (size_t)len < 4 + sizeof( *ddsHeader ) )
 	{
-		ri.Log( SEV_INFO, "File %s is too small to be a DDS file.\n", filename );
+		R_LOG( rch_assets, SEV_INFO, "File %s is too small to be a DDS file.\n", filename );
 		ri.FS_FreeFile( buffer.v );
 		return;
 	}
@@ -229,7 +232,7 @@ void R_LoadDDS( const char *filename, byte **pic, int *width, int *height, VkFor
 	//
 	if ( *((ui32_t *)(buffer.b)) != EncodeFourCC( "DDS " ) )
 	{
-		ri.Log( SEV_INFO, "File %s is not a DDS file.\n", filename );
+		R_LOG( rch_assets, SEV_INFO, "File %s is not a DDS file.\n", filename );
 		ri.FS_FreeFile( buffer.v );
 		return;
 	}
@@ -242,7 +245,7 @@ void R_LoadDDS( const char *filename, byte **pic, int *width, int *height, VkFor
 	{
 		if ( (size_t)len < 4 + sizeof( *ddsHeader ) + sizeof( *ddsHeaderDxt10 ) )
 		{
-			ri.Log( SEV_INFO, "File %s indicates a DX10 header it is too small to contain.\n", filename );
+			R_LOG( rch_assets, SEV_INFO, "File %s indicates a DX10 header it is too small to contain.\n", filename );
 			ri.FS_FreeFile( buffer.v );
 			return;
 		}
@@ -271,7 +274,7 @@ void R_LoadDDS( const char *filename, byte **pic, int *width, int *height, VkFor
 	}
 
 	//
-	// Phase 6.5.1: cubemap / volume classification.
+	// cubemap / volume classification.
 	//
 	if ( info )
 	{
@@ -299,7 +302,7 @@ void R_LoadDDS( const char *filename, byte **pic, int *width, int *height, VkFor
 			{
 				if ( ( ddsHeader->caps2 & DDSCAPS2_CUBEMAP_ALLFACES ) != DDSCAPS2_CUBEMAP_ALLFACES )
 				{
-					ri.Log( SEV_INFO, "DDS File %s is a partial cubemap (caps2 0x%x); a complete 6-face cubemap is required.\n",
+					R_LOG( rch_assets, SEV_INFO, "DDS File %s is a partial cubemap (caps2 0x%x); a complete 6-face cubemap is required.\n",
 						filename, (unsigned)ddsHeader->caps2 );
 					ri.FS_FreeFile( buffer.v );
 					return;
@@ -311,7 +314,7 @@ void R_LoadDDS( const char *filename, byte **pic, int *width, int *height, VkFor
 		if ( isCube )
 		{
 			if ( cubeArraySize > 1 )
-				ri.Log( SEV_INFO, "DDS File %s is a cubemap array (arraySize %d); only the first cube is used (cube arrays unimplemented).\n",
+				R_LOG( rch_assets, SEV_INFO, "DDS File %s is a cubemap array (arraySize %d); only the first cube is used (cube arrays unimplemented).\n",
 					filename, cubeArraySize );
 			info->texType = TEXTYPE_CUBE;
 			info->layers  = 6;
@@ -407,14 +410,14 @@ void R_LoadDDS( const char *filename, byte **pic, int *width, int *height, VkFor
 				*picFormat = VK_FORMAT_R8G8B8A8_UNORM;
 				break;
 
-			// Phase 6.5.1: 16-bit-float RGBA — the natural carrier for HDR
-			// cubemaps that aren't BC6H-compressed (6C2 IBL probe captures).
+			// 16-bit-float RGBA — the natural carrier for HDR
+			// cubemaps that aren't BC6H-compressed (IBL probe captures).
 			case DXGI_FORMAT_R16G16B16A16_FLOAT:
 				*picFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 				break;
 
 			default:
-				ri.Log( SEV_INFO, "DDS File %s has unsupported DXGI format %d.\n", filename, ddsHeaderDxt10->dxgiFormat );
+				R_LOG( rch_assets, SEV_INFO, "DDS File %s has unsupported DXGI format %d.\n", filename, ddsHeaderDxt10->dxgiFormat );
 				ri.FS_FreeFile( buffer.v );
 				return;
 		}
@@ -447,7 +450,7 @@ void R_LoadDDS( const char *filename, byte **pic, int *width, int *height, VkFor
 				*picFormat = VK_FORMAT_BC5_SNORM_BLOCK;
 			else
 			{
-				ri.Log( SEV_INFO, "DDS File %s has unsupported FourCC.\n", filename );
+				R_LOG( rch_assets, SEV_INFO, "DDS File %s has unsupported FourCC.\n", filename );
 				ri.FS_FreeFile( buffer.v );
 				return;
 			}
@@ -463,7 +466,7 @@ void R_LoadDDS( const char *filename, byte **pic, int *width, int *height, VkFor
 		}
 		else
 		{
-			ri.Log( SEV_INFO, "DDS File %s has unsupported RGBA format.\n", filename );
+			R_LOG( rch_assets, SEV_INFO, "DDS File %s has unsupported RGBA format.\n", filename );
 			ri.FS_FreeFile( buffer.v );
 			return;
 		}

@@ -3,7 +3,6 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 /*
@@ -552,6 +551,15 @@ gentity_t *LaunchItem( gitem_t *item, vec3_t origin, vec3_t velocity ) {
 
 	trap_LinkEntity (dropped);
 
+	// Dropped items (weapon/flag drops on death, "give" fallthrough) do NOT pass
+	// through FinishSpawningItem — LaunchItem is their spawn-completion choke
+	// point, and the retired rebuild included them (inuse && item). Insert the
+	// node here so the maintained set still sees dropped items. Their origin then
+	// physics-settles over frames; the selection path re-syncs origin from the
+	// live entity, so the node never diverges. They G_FreeEntity after ~30s (or
+	// on pickup wait==-1), which removes the node via the free hook.
+	WiredIntel_MapGoalOnSpawn( dropped );
+
 	return dropped;
 }
 
@@ -635,6 +643,16 @@ void FinishSpawningItem( gentity_t *ent ) {
 		G_SetOrigin( ent, tr.endpos );
 	}
 
+	// The item entity is now a live goal candidate: origin is finalized (either
+	// suspended at its spawn origin or dropped to floor) and the startsolid-free
+	// path has already returned. Insert its bot item-goal node here, before the
+	// team-member / targetname / spawn-delay early-returns below — the retired
+	// rebuild included those NODRAW/unlinked-but-inuse items too (its filter was
+	// inuse && item, with no r.linked check), so covering them here keeps the
+	// maintained set equal to what the rebuild derived. Reached exactly once per
+	// map item that survives spawning.
+	WiredIntel_MapGoalOnSpawn( ent );
+
 	// team members and targeted items aren't present at start
 	if ( ( ent->flags & FL_TEAMMEMBER ) || ent->targetname ) {
 		ent->s.eFlags |= EF_NODRAW;
@@ -686,11 +704,11 @@ void G_CheckTeamItems( void ) {
 		// check for the two flags
 		item = BG_FindItem( "Red Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_CTF_redflag in map\n" );
+			Com_Log( SEV_WARN, LOG_CH(ch_game), "WARNING: No team_CTF_redflag in map\n" );
 		}
 		item = BG_FindItem( "Blue Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_CTF_blueflag in map\n" );
+			Com_Log( SEV_WARN, LOG_CH(ch_game), "WARNING: No team_CTF_blueflag in map\n" );
 		}
 	}
 	if( g_gametype.integer == GT_1FCTF ) {
@@ -699,15 +717,15 @@ void G_CheckTeamItems( void ) {
 		// check for all three flags
 		item = BG_FindItem( "Red Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_CTF_redflag in map\n" );
+			Com_Log( SEV_WARN, LOG_CH(ch_game), "WARNING: No team_CTF_redflag in map\n" );
 		}
 		item = BG_FindItem( "Blue Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_CTF_blueflag in map\n" );
+			Com_Log( SEV_WARN, LOG_CH(ch_game), "WARNING: No team_CTF_blueflag in map\n" );
 		}
 		item = BG_FindItem( "Neutral Flag" );
 		if ( !item || !itemRegistered[ item - bg_itemlist ] ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_CTF_neutralflag in map\n" );
+			Com_Log( SEV_WARN, LOG_CH(ch_game), "WARNING: No team_CTF_neutralflag in map\n" );
 		}
 	}
 
@@ -719,13 +737,13 @@ void G_CheckTeamItems( void ) {
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_redobelisk" );
 		if( !ent ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_redobelisk in map\n" );
+			Com_Log( SEV_WARN, LOG_CH(ch_game), "WARNING: No team_redobelisk in map\n" );
 		}
 
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_blueobelisk" );
 		if( !ent ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_blueobelisk in map\n" );
+			Com_Log( SEV_WARN, LOG_CH(ch_game), "WARNING: No team_blueobelisk in map\n" );
 		}
 	}
 #endif
@@ -738,19 +756,19 @@ void G_CheckTeamItems( void ) {
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_redobelisk" );
 		if( !ent ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_redobelisk in map\n" );
+			Com_Log( SEV_WARN, LOG_CH(ch_game), "WARNING: No team_redobelisk in map\n" );
 		}
 
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_blueobelisk" );
 		if( !ent ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_blueobelisk in map\n" );
+			Com_Log( SEV_WARN, LOG_CH(ch_game), "WARNING: No team_blueobelisk in map\n" );
 		}
 
 		ent = NULL;
 		ent = G_Find( ent, FOFS(classname), "team_neutralobelisk" );
 		if( !ent ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_YELLOW "WARNING: No team_neutralobelisk in map\n" );
+			Com_Log( SEV_WARN, LOG_CH(ch_game), "WARNING: No team_neutralobelisk in map\n" );
 		}
 	}
 #endif

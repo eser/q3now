@@ -7,8 +7,40 @@
 // processed entities, like smoke puffs, gibs, shells, etc.
 
 #include "cg_local.h"
+#include "../qcommon/wired/render/primitives.h"	// emitterDesc_t (MIG-trail-2)
+#include "../qcommon/wired/render/traps.h"		// trap_R_EmitParticles (MIG-trail-2)
+#if FEAT_WIRED_UI
+#include "wired/cg_wired_store.h"				// WUI_StageMarkers_* (WA-2b plum markers)
+#endif
 
 #define	MAX_LOCAL_ENTITIES	2048
+
+// Gib bounce-mark tunables (modder-tunable code-level constants, NOT user
+// cvars — same policy as the gib GIB_PART_* and brass BRASS_* constants).
+// A gib now leaves a blood mark on every bounce whose impact speed clears
+// GIB_BOUNCE_MARK_MIN_SPEED (replacing the old one-mark-per-gib guard, which a
+// gently-settling gib would otherwise spam). Mark radius scales with impact
+// speed up to GIB_BOUNCE_MARK_SPEED_REF, then by a per-gib-model factor.
+#define GIB_BOUNCE_MARK_MIN_SPEED	200.0f	// min per-bounce impact speed to mark
+#define GIB_BOUNCE_MARK_SPEED_REF	800.0f	// impact speed that saturates the size factor
+#define GIB_BOUNCE_MARK_BASE_RADIUS	16.0f	// minimum blood-mark radius
+#define GIB_BOUNCE_MARK_SPEED_SPREAD	24.0f	// extra radius added by the speed/jitter factor
+
+// Better-gibs D-feel (0035): per-bounce restitution randomization for blood gibs.
+// Each blood-gib bounce scales its bounceFactor by (1 - r*GIB_BOUNCE_RANDOMNESS),
+// r = (random()+random())*0.5 (a tighter-than-uniform triangular distribution), so
+// identical gibs don't bounce in lockstep — they settle with varied energy, reading
+// as "dead" rather than synchronized. Blood-only (brass/debris keep flat restitution
+// so the S-group brass settle is byte-identical). Modder-tunable code-level constant,
+// NOT a user cvar. 0.0 = flat (byte-identical to pre-0035). Local random() is fine:
+// bounce is per-client cosmetic, non-networked (same as brass S-group).
+#define GIB_BOUNCE_RANDOMNESS	0.5f
+
+// Base cubic half-extent of a gib's movement-collision box, scaled per gib model
+// below. Gibs use a small box (instead of a point) so they rest ON a surface
+// instead of sinking their lower half into it; brass/debris keep the point trace.
+// Modder-tunable code-level constant, NOT a user cvar.
+#define GIB_COLLISION_SIZE	2.0f
 localEntity_t	cg_localEntities[MAX_LOCAL_ENTITIES];
 localEntity_t	cg_activeLocalEntities;		// double linked list
 localEntity_t	*cg_freeLocalEntities;		// single linked list
@@ -102,8 +134,6 @@ void CG_BloodTrail( localEntity_t *le ) {
 	int		t;
 	int		t2;
 	int		step;
-	vec3_t	newOrigin;
-	localEntity_t	*blood;
 
 #if FEAT_SCREENSHOT_TOOLS
 	if ( cg.stopTime ) return;
@@ -113,21 +143,39 @@ void CG_BloodTrail( localEntity_t *le ) {
 	t = step * ( (cg.time - cg.frametime + step ) / step );
 	t2 = step * ( cg.time / step );
 
-	for ( ; t <= t2; t += step ) {
-		BG_EvaluateTrajectory( &le->pos, t, newOrigin );
+	if ( cgs.media.gibTrailClass ) {
+		// GPU-ring blood-trail (MIG-trail-2, single path — W-51 cvar gate
+		// retired): ONE EMIT_PATH per frame over the step=150 grid in [t, t2]
+		// instead of N legacy LE_FALL_SCALE_FADE puffs. Density is TIME-quantized
+		// (one drift-sprite per 150 ms grid point), matching the old loop exactly
+		// — NOT distance-quantized. count = number of grid points; the path runs
+		// from the trajectory position at the first grid point to the last. The
+		// blood_trail class carries the exact look (alpha-blend, grow 16→36, alpha
+		// 1.0→0 over 2 s, linear -Z drift 40 u), so colorTint is neutral white.
+		// The gib BODY (LE_FRAGMENT) is unaffected — only the per-frame
+		// drift-sprites migrate.
+		emitterDesc_t emitter;
+		vec3_t        segStart;
+		vec3_t        segEnd;
+		int           count;
 
-		blood = CG_SmokePuff( newOrigin, vec3_origin,
-					  20,		// radius
-					  1, 1, 1, 1,	// color
-					  2000,		// trailTime
-					  t,		// startTime
-					  0,		// fadeInTime
-					  0,		// flags
-					  cgs.media.bloodTrailShader );
-		// use the optimized version
-		blood->leType = LE_FALL_SCALE_FADE;
-		// drop a total of 40 units over its lifetime
-		blood->pos.trDelta[2] = 40;
+		count = ( t <= t2 ) ? ( ( t2 - t ) / step + 1 ) : 0;
+		if ( count > 0 ) {
+			vec3_t axis;
+			BG_EvaluateTrajectory( &le->pos, t,  segStart ); // first grid point
+			BG_EvaluateTrajectory( &le->pos, t2, segEnd );   // last grid point
+			memset( &emitter, 0, sizeof( emitter ) );
+			emitter.cls   = cgs.media.gibTrailClass;
+			emitter.count = count;
+			VectorCopy( segStart, emitter.origin );
+			VectorCopy( segEnd,   emitter.end );
+			VectorSubtract( segEnd, segStart, axis );
+			VectorNormalize( axis );
+			VectorCopy( axis, emitter.axis );
+			emitter.colorTint[0] = 1.0f; emitter.colorTint[1] = 1.0f;
+			emitter.colorTint[2] = 1.0f; emitter.colorTint[3] = 1.0f;
+			trap_R_EmitParticles( &emitter );
+		}
 	}
 }
 
@@ -137,12 +185,45 @@ void CG_BloodTrail( localEntity_t *le ) {
 CG_FragmentBounceMark
 ================
 */
-void CG_FragmentBounceMark( localEntity_t *le, trace_t *trace ) {
-	int			radius;
+void CG_FragmentBounceMark( localEntity_t *le, trace_t *trace, const vec3_t impactVelocityDiff ) {
+	float		radius;
 
 	if ( le->leMarkType == LEMT_BLOOD ) {
+		float	radiusFactor;
+		float	modelScale;
 
-		radius = 16 + (rand()&31);
+		// Speed-dependent size: a harder impact splats a bigger mark. The factor
+		// saturates at GIB_BOUNCE_MARK_SPEED_REF and degrades to ~0 at low speed,
+		// so a slow settle still leaves only the small base mark.
+		radiusFactor = VectorLengthSquared( impactVelocityDiff ) / Square( GIB_BOUNCE_MARK_SPEED_REF );
+		if ( radiusFactor > 1.0f ) {
+			radiusFactor = 1.0f;
+		}
+
+		// Per-gib-model scale: bigger body parts leave bigger marks, small bits
+		// smaller. Keyed on the model handle CG_LaunchGib set on this fragment.
+		if ( le->refEntity.hModel == cgs.media.gibIntestine ) {
+			modelScale = 0.25f;
+		} else if ( le->refEntity.hModel == cgs.media.gibSkull ||
+					le->refEntity.hModel == cgs.media.gibFist ) {
+			modelScale = 0.5f;
+		} else if ( le->refEntity.hModel == cgs.media.gibAbdomen ||
+					le->refEntity.hModel == cgs.media.gibChest ||
+					le->refEntity.hModel == cgs.media.gibLeg ) {
+			modelScale = 1.25f;
+		} else {
+			modelScale = 1.0f;
+		}
+
+		radius = GIB_BOUNCE_MARK_BASE_RADIUS +
+			( radiusFactor + 0.25f * crandom() ) * GIB_BOUNCE_MARK_SPEED_SPREAD;
+		radius *= modelScale;
+		// CG_ImpactMark Com_Terminates on radius <= 0; floor it so no future
+		// tuning of the speed/scale factors can ever drive it to zero.
+		if ( radius < 1.0f ) {
+			radius = 1.0f;
+		}
+
 		CG_ImpactMark( cgs.media.bloodMarkShader, trace->endpos, trace->plane.normal, random()*360,
 			1,1,1,1, qtrue, radius, qfalse );
 	} else if ( le->leMarkType == LEMT_BURN ) {
@@ -152,10 +233,9 @@ void CG_FragmentBounceMark( localEntity_t *le, trace_t *trace ) {
 			1,1,1,1, qtrue, radius, qfalse );
 	}
 
-
-	// don't allow a fragment to make multiple marks, or they
-	// pile up while settling
-	le->leMarkType = LEMT_NONE;
+	// No one-shot guard: a gib may mark on each bounce. The caller gates the call
+	// on impact speed (GIB_BOUNCE_MARK_MIN_SPEED), so a settling gib whose bounces
+	// fall below the threshold stops marking instead of piling marks up.
 }
 
 /*
@@ -194,7 +274,7 @@ void CG_FragmentBounceSound( localEntity_t *le, trace_t *trace ) {
 CG_ReflectVelocity
 ================
 */
-void CG_ReflectVelocity( localEntity_t *le, trace_t *trace ) {
+void CG_ReflectVelocity( localEntity_t *le, trace_t *trace, vec3_t velocityDifference ) {
 	vec3_t	velocity;
 	float	dot;
 	int		hitTime;
@@ -205,7 +285,24 @@ void CG_ReflectVelocity( localEntity_t *le, trace_t *trace ) {
 	dot = DotProduct( velocity, trace->plane.normal );
 	VectorMA( velocity, -2*dot, trace->plane.normal, le->pos.trDelta );
 
-	VectorScale( le->pos.trDelta, le->bounceFactor, le->pos.trDelta );
+	{
+		// Better-gibs D-feel (0035): randomize the restitution per bounce for blood
+		// gibs only (tighter-than-uniform), so they settle with varied energy
+		// instead of in lockstep. Brass/debris (LEBS_BRASS / LEBS_NONE) keep the
+		// flat le->bounceFactor — byte-identical to the S-group brass settle.
+		float bounceFactor = le->bounceFactor;
+		if ( le->leBounceSoundType == LEBS_BLOOD ) {
+			float r = ( random() + random() ) * 0.5f;
+			bounceFactor *= 1.0f - r * GIB_BOUNCE_RANDOMNESS;
+		}
+		VectorScale( le->pos.trDelta, bounceFactor, le->pos.trDelta );
+	}
+
+	// impact magnitude = how much velocity the bounce shed (pre-bounce minus the
+	// reflected/damped post-bounce). The caller uses this to gate + size the mark.
+	if ( velocityDifference != NULL ) {
+		VectorSubtract( velocity, le->pos.trDelta, velocityDifference );
+	}
 
 	VectorCopy( trace->endpos, le->pos.trBase );
 	le->pos.trTime = cg.time;
@@ -216,9 +313,75 @@ void CG_ReflectVelocity( localEntity_t *le, trace_t *trace ) {
 		( trace->plane.normal[2] > 0 &&
 		( le->pos.trDelta[2] < 40 || le->pos.trDelta[2] < -cg.frametime * le->pos.trDelta[2] ) ) ) {
 		le->pos.trType = TR_STATIONARY;
+
+		// Brass-only ground-settle: lay the shell flat on the surface instead of
+		// freezing at its mid-air tumble orientation. Build a resting axis whose
+		// "up" is the ground-plane normal; the two in-plane axes are an arbitrary
+		// perpendicular basis (brass is roughly symmetric, so any flat yaw reads
+		// fine). Gated on LEF_BRASS so gib settle (and other fragments) is
+		// byte-identical — gibs keep their frozen-tumble settle. Snap, not lerp:
+		// the settle is a single one-shot transition, brass is small, and a clean
+		// snap avoids per-frame lerp state on the local entity.
+		if ( ( le->leFlags & LEF_BRASS ) && !trace->allsolid &&
+			 trace->plane.normal[2] > 0 ) {
+			vec3_t	flatAxis[3];
+
+			VectorCopy( trace->plane.normal, flatAxis[2] );
+			PerpendicularVector( flatAxis[0], flatAxis[2] );
+			CrossProduct( flatAxis[2], flatAxis[0], flatAxis[1] );
+			AxisCopy( flatAxis, le->refEntity.axis );
+		}
 	} else {
 
 	}
+}
+
+/*
+================
+GetFragmentMinsMaxs
+
+Per-gib collision box for the movement trace. Gibs (LEMT_BLOOD) get a small
+CUBIC box scaled per model so they rest on a surface instead of clipping their
+lower half into it; everything else (brass / explode-debris, LEMT_NONE) gets no
+box and keeps the zero-extent point trace. Returns qtrue if a box was set.
+
+The box stays CUBIC (symmetric, all axes equal before the per-model scale)
+because the gib tumbles inside it (LEF_TUMBLE) — a model-shaped box would snag
+as it rotates. Per-model factors are hand-tuned (ported from the better-gibs
+mod) so each part rests naturally without sticking in floors/walls.
+================
+*/
+static qboolean GetFragmentMinsMaxs( const localEntity_t *le, vec3_t mins, vec3_t maxs ) {
+	float	sizeFactor;
+	float	half;
+
+	if ( le->leMarkType != LEMT_BLOOD ) {
+		return qfalse;		// brass / debris: point trace, unchanged
+	}
+
+	if ( le->refEntity.hModel == cgs.media.gibSkull ) {
+		sizeFactor = 2.0f;
+	} else if ( le->refEntity.hModel == cgs.media.gibIntestine ||
+				le->refEntity.hModel == cgs.media.gibBrain ||
+				le->refEntity.hModel == cgs.media.gibFist ||
+				le->refEntity.hModel == cgs.media.gibForearm ) {
+		sizeFactor = 0.5f;
+	} else if ( le->refEntity.hModel == cgs.media.gibAbdomen ) {
+		sizeFactor = 1.5f;
+	} else if ( le->refEntity.hModel == cgs.media.gibChest ) {
+		sizeFactor = 1.75f;
+	} else if ( le->refEntity.hModel == cgs.media.gibLeg ) {
+		sizeFactor = 1.25f;
+	} else if ( le->refEntity.hModel == cgs.media.gibFoot ) {
+		sizeFactor = 0.25f;		// deliberately tiny — a bigger box sticks in the ground
+	} else {
+		sizeFactor = 1.0f;
+	}
+
+	half = GIB_COLLISION_SIZE * sizeFactor;
+	VectorSet( mins, -half, -half, -half );
+	VectorSet( maxs,  half,  half,  half );
+	return qtrue;
 }
 
 /*
@@ -229,6 +392,8 @@ CG_AddFragment
 void CG_AddFragment( localEntity_t *le ) {
 	vec3_t	newOrigin;
 	trace_t	trace;
+	vec3_t	mins, maxs;
+	qboolean hasBox;
 
 	if ( le->pos.trType == TR_STATIONARY ) {
 		// sink into the ground if near the removal time
@@ -256,8 +421,15 @@ void CG_AddFragment( localEntity_t *le ) {
 	// calculate new position
 	BG_EvaluateTrajectory( &le->pos, cg.time, newOrigin );
 
-	// trace a line from previous position to new position
-	CG_Trace( &trace, le->refEntity.origin, NULL, NULL, newOrigin, -1, CONTENTS_SOLID );
+	// trace from previous to new position. Gibs sweep a small per-model box so
+	// they rest on surfaces instead of sinking; brass/debris pass NULL/NULL for a
+	// zero-extent point trace, byte-identical to the original behavior.
+	hasBox = GetFragmentMinsMaxs( le, mins, maxs );
+	if ( hasBox ) {
+		CG_Trace( &trace, le->refEntity.origin, mins, maxs, newOrigin, -1, CONTENTS_SOLID );
+	} else {
+		CG_Trace( &trace, le->refEntity.origin, NULL, NULL, newOrigin, -1, CONTENTS_SOLID );
+	}
 	if ( trace.fraction == 1.0 ) {
 		// still in free fall
 		VectorCopy( newOrigin, le->refEntity.origin );
@@ -271,8 +443,12 @@ void CG_AddFragment( localEntity_t *le ) {
 
 		trap_R_AddRefEntityToScene( &le->refEntity );
 
-		// add a blood trail
-		if ( le->leBounceSoundType == LEBS_BLOOD ) {
+		// add a blood trail. Gated on a dedicated leFlags bit, not on
+		// leBounceSoundType: the bounce-sound code clears that field to LEBS_NONE
+		// on the first bounce (so the splat is one-shot), which used to silently
+		// kill the trail too. LEF_BLOOD_TRAIL is never cleared, so the trail keeps
+		// emitting across bounces.
+		if ( le->leFlags & LEF_BLOOD_TRAIL ) {
 			CG_BloodTrail( le );
 		}
 
@@ -287,14 +463,22 @@ void CG_AddFragment( localEntity_t *le ) {
 		return;
 	}
 
-	// leave a mark
-	CG_FragmentBounceMark( le, &trace );
+	// reflect the velocity on the trace plane first, capturing the impact
+	// magnitude so the mark can be gated and sized by how hard the gib hit
+	{
+		vec3_t	velocityDifference;
 
-	// do a bouncy sound
+		CG_ReflectVelocity( le, &trace, velocityDifference );
+
+		// leave a mark — only on a bounce that hits hard enough, so a gib does
+		// not pile marks while gently settling (replaces the old one-mark guard)
+		if ( VectorLengthSquared( velocityDifference ) >= Square( GIB_BOUNCE_MARK_MIN_SPEED ) ) {
+			CG_FragmentBounceMark( le, &trace, velocityDifference );
+		}
+	}
+
+	// do a bouncy sound (unchanged — not gated on impact speed)
 	CG_FragmentBounceSound( le, &trace );
-
-	// reflect the velocity on the trace plane
-	CG_ReflectVelocity( le, &trace );
 
 	trap_R_AddRefEntityToScene( &le->refEntity );
 }
@@ -467,7 +651,17 @@ static void CG_AddExplosion( localEntity_t *ex ) {
 	ent = &ex->refEntity;
 
 	// add the entity
-	trap_R_AddRefEntityToScene(ent);
+	//
+	// Light-only LE (hModel == 0 && customShader == 0): the visual is supplied
+	// elsewhere (e.g. the rocket-explosion fire flipbook on the GPU particle
+	// ring); this LE exists solely to carry the impact dlight fade. Submitting
+	// a zero-model refEntity would draw the renderer's invalid-model fallback
+	// (an RGB coordinate axis), so skip the scene-entity add and run only the
+	// dlight below. Real-model explosions always have hModel > 0, so this guard
+	// is true for them and their behaviour is unchanged.
+	if ( ent->hModel || ent->customShader ) {
+		trap_R_AddRefEntityToScene(ent);
+	}
 
 	// add the dlight
 	if ( ex->light ) {
@@ -673,8 +867,13 @@ void CG_AddDeflectorJuiced( localEntity_t *le ) {
 		le->refEntity.axis[2][2] = (float) 0.7 + 0.3 * (2000 - (t - 3000)) / 2000;
 	}
 	if ( t > 5000 ) {
+		vec3_t	angles;
+
 		le->endTime = 0;
-		CG_GibPlayer( le->refEntity.origin );
+		// no meaningful body orientation here; launch upright from the entity.
+		// No damage direction here → NULL/0 reverts to the omnidirectional launch.
+		VectorClear( angles );
+		CG_GibPlayer( le->refEntity.origin, angles, le->pos.trDelta, NULL, NULL, 0 );
 	}
 	else {
 		trap_R_AddRefEntityToScene( &le->refEntity );
@@ -694,17 +893,12 @@ void CG_AddRefEntity( localEntity_t *le ) {
 	trap_R_AddRefEntityToScene( &le->refEntity );
 }
 
-// Deferred 2D plum overlay buffer — written during scene setup, drawn in 2D pass
-#define MAX_PLUM_OVERLAYS 32
-
-typedef struct {
-	float	x, y;		// 640x480 virtual screen coords
-	vec4_t	color;		// includes alpha
-	char	text[16];
-} plumOverlay_t;
-
-static plumOverlay_t	cg_plumOverlays[MAX_PLUM_OVERLAYS];
-static int				cg_numPlumOverlays;
+// WA-2b: score + damage plums are staged as world-anchored MARKERS (Wired UI
+// draws them via the markerlist element bound to "markers.plums") instead of the
+// retired imperative cg_plumOverlays[] / CG_DrawPlumOverlays / trap_R_DrawTextNorm
+// 2D path. The marker list is Begun once per frame in CG_AddLocalEntities, each
+// live plum is Pushed at its real-pixel screen position (CG_WorldToScreenPixels),
+// and Flushed in the bridge. Spawn/trajectory/lifetime/damage are unchanged.
 
 /*
 ===================
@@ -713,9 +907,8 @@ CG_AddScorePlum
 */
 void CG_AddScorePlum( localEntity_t *le ) {
 	vec3_t		origin, delta, dir, vec, up = {0, 0, 1};
-	float		c, len, x, y;
+	float		c, len;
 	int			score;
-	plumOverlay_t *po;
 
 	c = ( le->endTime - cg.time ) * le->lifeRate;
 
@@ -734,37 +927,42 @@ void CG_AddScorePlum( localEntity_t *le ) {
 		return;
 	}
 
-	if ( !CG_WorldToScreen( origin, &x, &y ) ) {
-		return;
-	}
-	if ( cg_numPlumOverlays >= MAX_PLUM_OVERLAYS ) {
-		return;
-	}
-
 	score = (int)le->radius;
-	po = &cg_plumOverlays[cg_numPlumOverlays++];
-	po->x = x;
-	po->y = y;
-	po->color[3] = ( c < 0.25f ) ? c * 4.0f : 1.0f;
 
-	if ( score < 0 ) {
-		po->color[0] = 1.0f; po->color[1] = 0.067f; po->color[2] = 0.067f;
-		Com_sprintf( po->text, sizeof( po->text ), "%d score", score );
-	} else {
-		if ( score >= 50 ) {
-			po->color[0] = 1.0f; po->color[1] = 0.0f; po->color[2] = 1.0f;
-		} else if ( score >= 20 ) {
-			po->color[0] = 0.0f; po->color[1] = 0.0f; po->color[2] = 1.0f;
-		} else if ( score >= 10 ) {
-			po->color[0] = 1.0f; po->color[1] = 1.0f; po->color[2] = 0.0f;
-		} else if ( score >= 2 ) {
-			po->color[0] = 0.0f; po->color[1] = 1.0f; po->color[2] = 0.0f;
-		} else {
-			po->color[0] = po->color[1] = po->color[2] = 1.0f;
+#if FEAT_WIRED_UI
+	/* WA-2b: stage as a world-anchored marker at its REAL-pixel screen position
+	 * (reproject the world `origin` via the WA-1 helper — NOT the old 640x480
+	 * virtual coord). Behind camera → skip. Animated alpha (c) staged per frame;
+	 * multi-color by score band; text fits 24. */
+	{
+		float xPx, yPx;
+		if ( CG_WorldToScreenPixels( origin, &xPx, &yPx ) ) {
+			vec4_t col;
+			char   txt[24];
+			col[3] = ( c < 0.25f ) ? c * 4.0f : 1.0f;
+			if ( score < 0 ) {
+				col[0] = 1.0f; col[1] = 0.067f; col[2] = 0.067f;
+				Com_sprintf( txt, sizeof( txt ), "%d score", score );
+			} else {
+				if ( score >= 50 ) {
+					col[0] = 1.0f; col[1] = 0.0f; col[2] = 1.0f;
+				} else if ( score >= 20 ) {
+					col[0] = 0.0f; col[1] = 0.0f; col[2] = 1.0f;
+				} else if ( score >= 10 ) {
+					col[0] = 1.0f; col[1] = 1.0f; col[2] = 0.0f;
+				} else if ( score >= 2 ) {
+					col[0] = 0.0f; col[1] = 1.0f; col[2] = 0.0f;
+				} else {
+					col[0] = col[1] = col[2] = 1.0f;
+				}
+				Com_sprintf( txt, sizeof( txt ), "+%d score", score );
+			}
+			WUI_StageMarkers_Push( xPx, yPx, col, txt );
 		}
-
-		Com_sprintf( po->text, sizeof( po->text ), "+%d score", score );
 	}
+#else
+	(void)score;
+#endif
 }
 
 #if FEAT_DAMAGE_PLUMS
@@ -776,9 +974,8 @@ Floating damage number (red), shown only to the attacker. (2A)
 */
 void CG_AddDamagePlum( localEntity_t *le ) {
 	vec3_t		origin, delta, dir, vec, up = {0, 0, 1};
-	float		c, len, x, y;
+	float		c, len;
 	int			dmg;
-	plumOverlay_t *po;
 
 	c = ( le->endTime - cg.time ) * le->lifeRate;
 
@@ -797,45 +994,27 @@ void CG_AddDamagePlum( localEntity_t *le ) {
 		return;
 	}
 
-	if ( !CG_WorldToScreen( origin, &x, &y ) ) {
-		return;
-	}
-	if ( cg_numPlumOverlays >= MAX_PLUM_OVERLAYS ) {
-		return;
-	}
-
 	dmg = (int)le->radius;
 	if ( dmg <= 0 ) dmg = 1;
 
-	po = &cg_plumOverlays[cg_numPlumOverlays++];
-	po->x = x;
-	po->y = y;
-	po->color[0] = 1.0f; po->color[1] = 0.2f; po->color[2] = 0.2f;
-	po->color[3] = ( c < 0.25f ) ? c * 4.0f : 1.0f;
-	Com_sprintf( po->text, sizeof( po->text ), "%d", dmg );
+#if FEAT_WIRED_UI
+	/* WA-2b: stage as a world-anchored marker at its REAL-pixel screen position
+	 * (reproject the world `origin` via the WA-1 helper). Behind camera → skip.
+	 * Red, animated alpha (c) staged per frame; "%d" damage text. */
+	{
+		float xPx, yPx;
+		if ( CG_WorldToScreenPixels( origin, &xPx, &yPx ) ) {
+			vec4_t col = { 1.0f, 0.2f, 0.2f, ( c < 0.25f ) ? c * 4.0f : 1.0f };
+			char   txt[24];
+			Com_sprintf( txt, sizeof( txt ), "%d", dmg );
+			WUI_StageMarkers_Push( xPx, yPx, col, txt );
+		}
+	}
+#else
+	(void)dmg;
+#endif
 }
 #endif
-
-/*
-===================
-CG_DrawPlumOverlays
-2D pass: draw all deferred plum overlays with MSDF text, then clear buffer.
-Called from CG_Draw2D after trap_R_RenderScene.
-===================
-*/
-void CG_DrawPlumOverlays( void ) {
-	plumOverlay_t	*po;
-
-	for ( int i = 0; i < cg_numPlumOverlays; i++ ) {
-		po = &cg_plumOverlays[i];
-		trap_R_DrawTextNorm( po->text,
-			po->x * NORM_HSCALE, po->y * NORM_VSCALE,
-			FONT_UI, (float)SMALLCHAR_HEIGHT * NORM_VSCALE,
-			po->color, TEXT_ALIGN_CENTER, TEXT_DROPSHADOW );
-	}
-	cg_numPlumOverlays = 0;
-}
-
 
 //==============================================================================
 
@@ -847,6 +1026,21 @@ CG_AddLocalEntities
 */
 void CG_AddLocalEntities( void ) {
 	localEntity_t	*le, *next;
+
+#if FEAT_WIRED_UI
+	/* WA-2b: begin the per-frame "markers.plums" list ONCE, before the entity
+	 * loop, so the score/damage plums visited below (CG_AddScorePlum /
+	 * CG_AddDamagePlum) rebuild a fresh list each frame (frame-transient — the
+	 * bridge Flush sends it, an empty list clears the prior frame). Begin resets
+	 * the scratch, so it MUST be once-per-pass and NOT inside the per-plum path.
+	 * NOTE: CG_RenderCameraView (cg_main.c) re-runs CG_AddLocalEntities in the
+	 * same frame for its secondary camera viewport; that pass re-Begins and
+	 * re-Pushes the identical plums (same cg.time → same alpha/text, same global
+	 * cg.refdef → same screen pixels), so the final flushed list is unchanged.
+	 * This Begin-reset is strictly safer than the retired cg_plumOverlays[] buffer
+	 * (which the second pass would have double-appended). */
+	WUI_StageMarkers_Begin( "markers.plums" );
+#endif
 
 	// walk the list backwards, so any new local entities generated
 	// (trails, marks, etc) will be present this frame
@@ -940,4 +1134,16 @@ void CG_AddLocalEntities( void ) {
 			break;
 		}
 	}
+
+#if FEAT_WIRED_UI
+	/* WA-2b/WA-3: TWO complete marker cycles, each fully Begin/Push/Flushed before
+	 * the next, because the staging scratch holds ONE list at a time (WA-2a). The
+	 * plum cycle's Pushes happened in the LE loop above (Begin at the top); flush
+	 * it now. Then the bot-directive cycle (its own listKey). Flushing here in the
+	 * scene-build (not the bridge) keeps each cycle atomic and still populates the
+	 * client store before the HUD draw. Each is flushed even when empty so a
+	 * vanished plum / cleared directive clears the prior frame's list. */
+	WUI_StageMarkers_Flush();			/* push "markers.plums" (Begun at the top) */
+	CG_StageBotDirectives();			/* Begin "markers.botdir" + Push + Flush */
+#endif
 }

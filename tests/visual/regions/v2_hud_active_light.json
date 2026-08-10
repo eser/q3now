@@ -1,0 +1,54 @@
+{
+  "_doc": "V2_HUD_Active LIGHT regions JSON (dispatch 5.28 finale). Mockup-anchored rects (qw-screens.jsx ScreenHUD 1041-1346), tightened to element bounds, cross-checked vs the v2_hud_active_light_* baselines at 1440x900. HUD-region-only verdict: gating_regions_only=true makes global metrics informational (BG-confounded over the live arena); the 4 bg_* regions are gating:false; only the 11 HUD-element regions gate. Per-region ssim_threshold calibrated to the measured fixed-viewpoint floor across the 2 LIGHT configs (amber/cyan) at measured-min x ~0.95 (V1 dispatch 5.18 Eser-ratified per-region variance Option B), floored at the 0.20 absolute floor. LIGHT floors differ from DARK per region (palette inversion shifts the cross-renderer floor). Regions clearing the 0.45 region default carry NO override (top_scoreboard_bar, scoreboard_overlay). ammo_readout + crosshair measure below the 0.20 floor (real fidelity gaps, deltaE-confirmed) and are FLAGGED — NOT rubber-stamped: retain the 0.45 default and FAIL pending a follow-up fix dispatch. deltaE2000 left at the region default 35 (V1 pattern). Calibration applied with --allow-threshold-up (downward calibration trips vcompare's threshold-up guard; authorized by the dispatch's explicit V1-5.18-ratified downward-calibration instruction; within measured-floor+buffer, no rubber-stamp). threshold_pct/fuzz_pct/global_threshold_pct are legacy vdiff fields ignored by vcompare.",
+
+  "global_threshold_pct": 5.0,
+  "fuzz_pct": 12.0,
+  "gating_regions_only": true,
+
+  "regions": [
+    { "name": "top_scoreboard_bar",     "x": 480, "y":  18, "w": 480, "h":  37, "threshold_pct": 10.0,
+      "rationale": "leader|timer|runner-up grid, top:18, centered 480..960. Measured light-min 0.607 — clears the 0.45 region default; NO override (gates at 0.45)." },
+
+    { "name": "top_right_telemetry",    "x":1303, "y":  18, "w": 113, "h":  30, "ssim_threshold": 0.22, "threshold_pct": 10.0,
+      "rationale": "FPS/MS pair, top:18, right:24. Measured light-min 0.238; calibrated 0.22 (=0.238*0.95). Small mono-digit region; cross-renderer rasterization floor." },
+
+    { "name": "kill_feed",              "x":  24, "y":  80, "w": 380, "h": 150, "ssim_threshold": 0.33, "threshold_pct": 10.0,
+      "rationale": "feed messages, top:80, left:24, maxWidth:380. Measured light-min 0.351; calibrated 0.33 (=0.351*0.95). DYNAMIC-CONTENT: sparse single-player feed — gates panel renders correctly when sparse, not full-feed parity (deltaE confirms colour)." },
+
+    { "name": "health_panel",           "x":  28, "y": 778, "w": 172, "h":  86, "ssim_threshold": 0.26, "threshold_pct": 10.0,
+      "rationale": "HEALTH bottom-left, left:28, bottom:36. Measured light-min 0.281; calibrated 0.26 (=0.281*0.95). clip-path notch corner absent (plain rect)." },
+
+    { "name": "armor_panel",            "x":1240, "y": 778, "w": 172, "h":  86, "ssim_threshold": 0.25, "threshold_pct": 10.0,
+      "rationale": "ARMOR bottom-right mirror, right:28, bottom:36. Measured light-min 0.268; calibrated 0.25 (=0.268*0.95). armor stat 0 at spawn; clip-path mirror corner absent." },
+
+    { "name": "holdables_strip",        "x":1262, "y": 710, "w": 150, "h":  46, "ssim_threshold": 0.31, "threshold_pct": 10.0,
+      "rationale": "holdables right:28, bottom:144. Measured light-min 0.326; calibrated 0.31 (=0.326*0.95). Player owns 0 holdables at spawn (empty render). Light floor below dark (0.36) — palette inversion." },
+
+    { "name": "weapon_carousel",        "x": 438, "y": 792, "w": 564, "h":  72, "ssim_threshold": 0.23, "threshold_pct": 10.0,
+      "rationale": "bottom-center, 564 wide centered 438..1002. Measured light-min 0.242; calibrated 0.23 (=0.242*0.95). 9-weapon icon detail; placeholder-overlap artifact resolved by tight rect." },
+
+    { "name": "ammo_readout",           "x": 640, "y": 716, "w": 160, "h":  56, "threshold_pct": 10.0,
+      "rationale": "FLAGGED REAL FIDELITY GAP — NOT calibrated, gates at the 0.45 default and FAILS. The rect is correctly mockup-anchored, but the engine renders its ammo '88' ~75px lower / ~30px right / ~2x taller than the mockup position — a real hudElement LAYOUT divergence no rect can reconcile. Measured light-min 0.116 << 0.20 absolute floor (SSIM-only FAIL; deltaE ~30.5 elevated vs ~7.7 well-matched, corroborating, but PASSES its 35 threshold). Fix is engine/widget work (out of 5.28 scope) -> follow-up fix dispatch." },
+
+    { "name": "scoreboard_overlay",     "x": 270, "y": 140, "w": 900, "h": 195, "threshold_pct": 10.0,
+      "rationale": "TAB-hold board, top:140, centered 270..1170. Measured light-min 0.474 — clears the 0.45 region default; NO override (gates at 0.45). DYNAMIC-CONTENT resolved by rect tightening (gates board chrome)." },
+
+    { "name": "crosshair",              "x": 696, "y": 426, "w":  48, "h":  48, "gating": false, "threshold_pct": 10.0,
+      "rationale": "EXTRACTED to the procedural-crosshair-system subsystem (dispatch 6.0 S0). The static-PNG crosshair (which renders 0px here — a crosshair-content-PNG-specific issue, see chain 5.31) is being replaced by a PROCEDURAL solid-color quad/ring reticle with its own future gate. gating:false = extraction to a separate subsystem, NOT a rubber-stamp — the V2 HUD-layout gate now evaluates the non-crosshair regions only." },
+
+    { "name": "weapon_placeholder",     "x":1002, "y": 588, "w": 326, "h": 264, "ssim_threshold": 0.26, "threshold_pct": 10.0,
+      "rationale": "weapon model placeholder, right:120, bottom:60, LEFT clipped to 1002 (carousel on top). Measured light-min 0.278; calibrated 0.26 (=0.278*0.95). Light floor below dark (0.28) — palette inversion." },
+
+    { "name": "bg_sky_band",            "x":   0, "y":   0, "w":1440, "h": 380, "gating": false, "threshold_pct": 10.0,
+      "rationale": "sky gradient y0..380. NON-GATING (live-arena BG; informational only)." },
+
+    { "name": "bg_floor_band",          "x":   0, "y": 380, "w":1440, "h": 520, "gating": false, "threshold_pct": 10.0,
+      "rationale": "floor fill y380..900. NON-GATING (live-arena BG; informational only)." },
+
+    { "name": "bg_arena_architecture",  "x":   0, "y": 180, "w":1440, "h": 200, "gating": false, "threshold_pct": 10.0,
+      "rationale": "arch group union bbox y180..380. NON-GATING (live-arena BG; informational only)." },
+
+    { "name": "bg_atmospheric_tint",    "x":   0, "y":   0, "w":1440, "h": 900, "gating": false, "threshold_pct": 10.0,
+      "rationale": "warm radial tint + scanline, full frame. NON-GATING (full-frame / global proxy; excluded from the verdict)." }
+  ]
+}

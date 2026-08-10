@@ -1,0 +1,367 @@
+client 1 repath (reason: goal_moved) O=(683,286,72) -> G=(-64,576,48): 2 pts
+wp 0: (688,286,58) flags=0x01
+wp 1: (688,290,58) flags=0x02
+client 1 repath (reason: timer) O=(676,287,72) -> G=(-64,576,48): 2 pts
+wp 0: (688,287,58) flags=0x01
+wp 1: (688,290,58) flags=0x02
+client 1 repath (reason: timer) O=(678,304,72) -> G=(-64,576,48): 2 pts
+wp 0: (688,304,58) flags=0x01
+wp 1: (688,304,58) flags=0x02
+client 1 repath (reason: new) O=(700,304,72) -> G=(-64,576,48): 2 pts
+wp 0: (688,302,58) flags=0x01
+wp 1: (688,290,58) flags=0x02
+client 1 repath (reason: timer) O=(698,272,72) -> G=(-64,576,48): 2 pts
+wp 0: (690,272,58) flags=0x01
+wp 1: (688,304,58) flags=0x02
+client 1 repath (reason: timer) O=(684,304,72) -> G=(-64,576,48): 2 pts
+wp 0: (688,304,58) flags=0x01
+wp 1: (688,304,58) flags=0x02
+client 1 repath (reason: new) O=(676,304,72) -> G=(-64,576,48): 2 pts
+wp 0: (688,304,58) flags=0x01
+wp 1: (688,304,58) flags=0x02
+client 1 repath (reason: timer) O=(670,304,72) -> G=(-64,576,48): 2 pts
+wp 0: (688,304,58) flags=0x01
+wp 1: (688,304,58) flags=0x02
+client 1 repath (reason: timer) O=(661,304,72) -> G=(-64,576,48): 2 pts
+wp 0: (656,303,48) flags=0x01
+wp 1: (656,290,48) flags=0x02
+client 1 repath (reason: new) O=(656,276,72) -> G=(-64,576,48): 2 pts
+wp 0: (656,276,72) flags=0x01
+wp 1: (656,304,48) flags=0x02
+client 1 repath (reason: timer) O=(656,304,72) -> G=(-64,576,48): 2 pts
+wp 0: (656,304,48) flags=0x01
+wp 1: (656,304,48) flags=0x02
+client 1 repath (reason: timer) O=(639,304,72) -> G=(-64,576,48): 2 pts
+wp 0: (626,304,68) flags=0x01
+wp 1: (608,290,68) flags=0x02
+client 1 repath (reason: timer) O=(578,263,47) -> G=(-64,576,48): 3 pts
+wp 0: (578,263,18) flags=0x01
+wp 1: (392,524,3) flags=0x00
+wp 2: (272,600,3) flags=0x02
+client 1 repath (reason: timer) O=(551,364,78) -> G=(-64,576,48): 3 pts
+wp 0: (551,364,78) flags=0x01
+wp 1: (392,524,3) flags=0x00
+wp 2: (272,600,3) flags=0x02
+client 1 repath (reason: timer) O=(534,515,58) -> G=(-64,576,48): 2 pts
+wp 0: (534,515,58) flags=0x01
+wp 1: (272,600,3) flags=0x02
+client 1 repath (reason: timer) O=(507,617,47) -> G=(-64,576,48): 2 pts
+wp 0: (507,617,47) flags=0x01
+wp 1: (272,600,3) flags=0x02
+client 1 repath (reason: timer) O=(477,655,59) -> G=(-64,576,48): 3 pts
+wp 0: (477,655,59) flags=0x01
+wp 1: (388,624,3) flags=0x00
+wp 2: (272,600,3) flags=0x02
+client 1 repath (reason: timer) O=(442,645,47) -> G=(-64,576,48): 3 pts
+wp 0: (442,645,47) flags=0x01
+wp 1: (388,624,3) flags=0x00
+wp 2: (272,600,3) flags=0x02
+client 1 repath (reason: timer) O=(404,586,59) -> G=(-64,576,48): 2 pts
+wp 0: (404,586,59) flags=0x01
+wp 1: (272,600,3) flags=0x02
+client 1 repath (reason: timer) O=(364,576,47) -> G=(-64,576,48): 2 pts
+wp 0: (364,576,47) flags=0x01
+wp 1: (272,600,3) flags=0x02
+client 1 repath (reason: timer) O=(322,612,59) -> G=(-64,576,48): 2 pts
+wp 0: (322,612,59) flags=0x01
+wp 1: (272,600,3) flags=0x02
+client 1 repath (reason: timer) O=(341,605,24) -> G=(-64,576,48): 2 pts
+wp 0: (341,605,24) flags=0x01
+wp 1: (272,600,3) flags=0x02
+client 1 repath (reason: timer) O=(290,573,68) -> G=(-64,576,48): 2 pts
+wp 0: (290,573,68) flags=0x01
+wp 1: (272,600,3) flags=0x02
+client 1 repath (reason: timer) O=(277,600,24) -> G=(-64,576,48): 2 pts
+wp 0: (277,600,24) flags=0x01
+wp 1: (272,576,3) flags=0x02
+client 1 repath (reason: timer) O=(251,586,24) -> G=(-64,576,48): 2 pts
+wp 0: (242,586,3) flags=0x01
+wp 1: (224,604,3) flags=0x02
+client 1 repath (reason: timer) O=(168,629,68) -> G=(-64,576,48): 2 pts
+wp 0: (168,629,68) flags=0x01
+wp 1: (-44,576,3) flags=0x02
+client 1 repath (reason: timer) O=(176,632,24) -> G=(-64,576,48): 2 pts
+wp 0: (176,632,24) flags=0x01
+wp 1: (-44,576,3) flags=0x02
+client 1 repath (reason: timer) O=(90,589,69) -> G=(-64,576,48): 2 pts
+wp 0: (90,589,69) flags=0x01
+wp 1: (-44,576,3) flags=0x02
+client 1 repath (reason: timer) O=(96,535,24) -> G=(-64,576,48): 2 pts
+wp 0: (96,535,24) flags=0x01
+wp 1: (-44,576,3) flags=0x02
+client 1 repath (reason: timer) O=(9,564,69) -> G=(-64,576,48): 2 pts
+wp 0: (9,564,69) flags=0x01
+wp 1: (-44,576,3) flags=0x02
+client 1 repath (reason: timer) O=(14,613,20) -> G=(-64,576,48): 2 pts
+wp 0: (14,613,20) flags=0x01
+wp 1: (-44,576,3) flags=0x02
+client 1 repath (reason: goal_moved) O=(-44,560,58) -> G=(96,708,-176): 2 pts
+wp 0: (-44,560,58) flags=0x01
+wp 1: (110,640,3) flags=0x02
+client 1 repath (reason: goal_moved) O=(-19,539,85) -> G=(1292,2048,-192): 2 pts
+wp 0: (-19,539,85) flags=0x01
+wp 1: (178,640,3) flags=0x02
+client 1 repath (reason: timer) O=(48,532,85) -> G=(1292,2048,-192): 2 pts
+wp 0: (48,532,85) flags=0x01
+wp 1: (178,640,3) flags=0x02
+client 1 repath (reason: timer) O=(159,576,24) -> G=(1292,2048,-192): 2 pts
+wp 0: (159,576,24) flags=0x01
+wp 1: (178,640,3) flags=0x02
+client 1 repath (reason: timer) O=(264,622,78) -> G=(1292,2048,-192): 2 pts
+wp 0: (264,654,133) flags=0x01
+wp 1: (306,722,133) flags=0x02
+client 1 repath (reason: timer) O=(405,618,24) -> G=(1292,2048,-192): 2 pts
+wp 0: (405,618,24) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: timer) O=(522,661,69) -> G=(1292,2048,-192): 2 pts
+wp 0: (522,661,69) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: timer) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: timer) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02
+client 1 repath (reason: new) O=(592,688,40) -> G=(1292,2048,-192): 2 pts
+wp 0: (592,688,40) flags=0x01
+wp 1: (594,688,18) flags=0x02

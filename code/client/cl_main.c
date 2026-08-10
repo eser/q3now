@@ -5,13 +5,17 @@
 
 #include "client.h"
 #include "wired/ui/cl_wired_ui.h"
+#include "wired/ui/cl_wired_viewport.h"
+#include "wired/ui/cl_wired_compositor.h"
 #include "wired/ui/cl_wired_attract.h"
 #include "wired/store/cl_wired_store.h"
+#include "wired/hud/cl_wired_crosshair.h"
+#include "wired/scene/cl_wired_scene_lua.h"
+#include "wired/l10n/cl_wired_l10n.h"
 #include "../qcommon/util/crypto.h"
 #include "../qcommon/maps/meta.h"
 #include "../qcommon/wired/net/wn_public.h"
 #include <limits.h>
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 LOG_DECLARE_CHANNEL( ch_renderer, "renderer" );
 
@@ -93,11 +97,69 @@ cvar_t *cl_stencilbits;
 cvar_t *cl_depthbits;
 cvar_t *cl_drawBuffer;
 
-clientActive_t		cl;
-clientConnection_t	clc;
+// Per-app-instance client-state container (server-client decoupling).
+// Single-app: only slot 0 is live; clientActiveApp pins to it. Access is explicit
+// through clientActiveApp->cl / clientActiveApp->clc (the cl/clc macro aliases
+// were retired).
+clientApp_t			clientApps[MAX_LOCAL_CGAME_VMS];
+clientApp_t			*clientActiveApp = &clientApps[0];
+
+// The app currently being serviced this frame — the "faulting-app cursor". A
+// recoverable error (TERM_CLIENT_DROP/LEAVE/KICK) inside an app's per-frame
+// service must disconnect + longjmp THAT app, not the input-focused one. Default
+// is the focused app (re-armed at the CL_Frame call boundary in common.c each
+// frame); the non-focused per-app loop points it at the iterated app per service,
+// then restores it. At N=1 it is always clientApps[0] == clientActiveApp.
+clientApp_t			*cl_frameApp = &clientApps[0];
+
+// Is the faulting-app cursor's per-frame recovery point (cl_frameApp->appAbortFrame)
+// currently armed? The per-app jmp_buf is only valid between the Q_setjmp at the
+// CL_Frame call boundary (common.c) and the end of that protected section; outside
+// that window (e.g. during the startup cbuf '+map <bad>' / '+demo <corrupt>' that
+// runs in Com_Frame BEFORE the per-app setjmp, or during Com_EventLoop / init) it
+// is a zero-initialized buffer and longjmp'ing through it is undefined behaviour.
+// Com_Terminate consults this so a recoverable drop raised outside the armed window
+// falls back to the process-global abortframe (always armed during a frame / init)
+// instead of crashing. Single-app: clientApps[0] only; engine sets/clears it around
+// the per-app setjmp section in common.c and in the non-focused per-app service loop.
+static qboolean cl_frameAbortArmed = qfalse;
+
+// Accessors so qcommon (Com_Terminate in log.c) can target the faulting app's
+// disconnect + per-frame recovery point without seeing the clientApp_t layout.
+clientApp_t *CL_FrameApp( void ) {
+	return cl_frameApp;
+}
+void **CL_FrameAppAbort( void ) {
+	return (void **)cl_frameApp->appAbortFrame;
+}
+qboolean CL_FrameAbortArmed( void ) {
+	return cl_frameAbortArmed;
+}
+void CL_SetFrameAbortArmed( qboolean armed ) {
+	cl_frameAbortArmed = armed;
+}
+
+// Active-app accessor — pull-model source for the WUI activation predicates.
+// Single-app: the pinned slot 0. clientActiveApp is initialised to &clientApps[0]
+// and never cleared, so this is never NULL.
+clientApp_t *CL_ActiveApp( void ) {
+	return clientActiveApp;
+}
+
+// The active app's cgame slot index (its clientApps[] index == its cgameInstance,
+// per the slot↔app mapping in cl_cgame.c). Stable regardless of whether the cgame
+// VM is currently loaded, so the engine's level-transition teardown can scope its
+// VM clear to this app without reaching into clientApp_t internals. Single-app:
+// clientActiveApp == &clientApps[0], so this is 0.
+int CL_ActiveCgameInstance( void ) {
+	return (int)( clientActiveApp - clientApps );
+}
 clientStatic_t		cls;
 clLoadProgress_t	cl_loadProgress;
-vm_t				*cgvm = NULL;
+// The cgame VM handle is no longer a bare global — it lives in the per-app
+// container (clientApps[N].cgvm), reached via clientActiveApp->cgvm /
+// CL_ActiveApp()->cgvm. Deglobalized (zero-init by the clientApps
+// array's static storage).
 
 char				cl_oldGame[ MAX_QPATH ];
 qboolean			cl_oldGameSet;
@@ -111,6 +173,23 @@ download_t			download;
 refexport_t	re;
 #ifdef USE_RENDERER_DLOPEN
 static void	*rendererLib;
+// Physical path the renderer DLL was dlopen'd from, captured engine-side at load
+// (the DLL can't know its own path — NOT routed via the r_buildId cvar). Read by
+// the sysinfo "loaded-from" diagnostic via CL_RendererLoadPath(). Cleared on
+// CL_ShutdownRef. Always a loose DLL in the install binary dir (never a pak).
+static char	s_rendererLoadPath[ MAX_OSPATH ];
+// Pointer to the renderer DLL's own static refexport_t (the one returned by
+// GetRefAPI). Kept across the BeginRegistration call so the recoverable
+// init-failure flag (initFailed) the renderer sets DURING BeginRegistration
+// can be polled by re-reading the DLL-side struct. The engine-side `re` is
+// a COPY made at CL_InitRef time; without this pointer we'd never observe
+// the DLL's late mutation.
+static refexport_t *s_re_dll;
+// Ordered renderer fallback list — cl_renderer is advanced through this on
+// recoverable init failure. Ordering matches CMakeLists.txt's RENDERER_DEFAULT
+// comment: vulkan first (current default), opengl2 next, opengl as ultimate
+// fallback. Adding a new renderer means appending here.
+static const char *s_renderer_fallback_list[] = { "vulkan", "opengl2", "opengl" };
 #endif
 
 static ping_t cl_pinglist[MAX_PINGREQUESTS];
@@ -143,15 +222,17 @@ static void CL_Ping_f( void );
 static void CL_InitRef( void );
 static void CL_ShutdownRef( refShutdownCode_t code );
 static void CL_InitGLimp_Cvars( void );
+static void CL_GpuMemReport( void );
 static void CL_RconLogin_f( void );
 static void CL_Rcon_f( void );
 
 static void CL_NextDemo( void );
+void CL_DownloadsComplete_Tick( void );
 
 static cvar_t *cl_wiredRconPassword;
 
 qboolean CL_DemoPlaying( void ) {
-	return clc.demoplaying;
+	return clientActiveApp->clc.demoplaying;
 }
 
 
@@ -171,10 +252,10 @@ The given command will be transmitted to the server, and is guaranteed to
 not have future usercmd_t executed before it is executed
 ======================
 */
-void CL_AddReliableCommand( const char *cmd, qboolean isDisconnectCmd ) {
-	int unacknowledged = clc.reliableSequence - clc.reliableAcknowledge;
+void CL_AddReliableCommand( clientApp_t *app, const char *cmd, qboolean isDisconnectCmd ) {
+	int unacknowledged = app->clc.reliableSequence - app->clc.reliableAcknowledge;
 
-	if ( clc.serverAddress.type == NA_BAD )
+	if ( app->clc.serverAddress.type == NA_BAD )
 		return;
 
 	// if we would be losing an old command that hasn't been acknowledged,
@@ -189,9 +270,9 @@ void CL_AddReliableCommand( const char *cmd, qboolean isDisconnectCmd ) {
 		Com_Terminate( TERM_CLIENT_DROP, "Client command overflow" );
 	}
 
-	clc.reliableSequence++;
-	int index = clc.reliableSequence & ( MAX_RELIABLE_COMMANDS - 1 );
-	Q_strncpyz( clc.reliableCommands[ index ], cmd, sizeof( clc.reliableCommands[ index ] ) );
+	app->clc.reliableSequence++;
+	int index = app->clc.reliableSequence & ( MAX_RELIABLE_COMMANDS - 1 );
+	Q_strncpyz( app->clc.reliableCommands[ index ], cmd, sizeof( app->clc.reliableCommands[ index ] ) );
 }
 
 
@@ -212,15 +293,15 @@ Dumps the current net message, prefixed by the length
 */
 static void CL_WriteDemoMessage( msg_t *msg, int headerBytes ) {
 	// write the packet sequence
-	int len = clc.serverMessageSequence;
+	int len = clientActiveApp->clc.serverMessageSequence;
 	int swlen = LittleLong( len );
-	FS_Write( &swlen, 4, clc.recordfile );
+	FS_Write( &swlen, 4, clientActiveApp->clc.recordfile );
 
 	// skip the packet sequencing information
 	len = msg->cursize - headerBytes;
 	swlen = LittleLong(len);
-	FS_Write( &swlen, 4, clc.recordfile );
-	FS_Write( msg->data + headerBytes, len, clc.recordfile );
+	FS_Write( &swlen, 4, clientActiveApp->clc.recordfile );
+	FS_Write( msg->data + headerBytes, len, clientActiveApp->clc.recordfile );
 }
 
 
@@ -233,27 +314,27 @@ stop recording a demo
 */
 void CL_StopRecord_f( void ) {
 
-	if ( clc.recordfile != FS_INVALID_HANDLE ) {
+	if ( clientActiveApp->clc.recordfile != FS_INVALID_HANDLE ) {
 		char tempName[MAX_OSPATH];
 		char finalName[MAX_OSPATH];
 		int protocol = PROTOCOL_VERSION;
 
 		// finish up
 		int len = -1;
-		FS_Write( &len, 4, clc.recordfile );
-		FS_Write( &len, 4, clc.recordfile );
-		FS_FCloseFile( clc.recordfile );
-		clc.recordfile = FS_INVALID_HANDLE;
+		FS_Write( &len, 4, clientActiveApp->clc.recordfile );
+		FS_Write( &len, 4, clientActiveApp->clc.recordfile );
+		FS_FCloseFile( clientActiveApp->clc.recordfile );
+		clientActiveApp->clc.recordfile = FS_INVALID_HANDLE;
 
 		if ( com_protocol->integer != PROTOCOL_VERSION ) {
 			protocol = com_protocol->integer;
 		}
 
-		Com_sprintf( tempName, sizeof( tempName ), "%s.tmp", clc.recordName );
+		Com_sprintf( tempName, sizeof( tempName ), "%s.tmp", clientActiveApp->clc.recordName );
 
-		Com_sprintf( finalName, sizeof( finalName ), "%s.%s%d", clc.recordName, DEMOEXT, protocol );
+		Com_sprintf( finalName, sizeof( finalName ), "%s.%s%d", clientActiveApp->clc.recordName, DEMOEXT, protocol );
 
-		if ( clc.explicitRecordName ) {
+		if ( clientActiveApp->clc.explicitRecordName ) {
 			/* Demo file is written via FS_FOpenFileWrite (homepath/fs_gamedir/...);
 			 * FS_HomeRemove rebuilds the same path. */
 			FS_HomeRemove( finalName );
@@ -262,21 +343,21 @@ void CL_StopRecord_f( void ) {
 			int sequence = 0;
 			while ( FS_FileExists( finalName ) && ++sequence < 1000 ) {
 				Com_sprintf( finalName, sizeof( finalName ), "%s-%02d.%s%d",
-					clc.recordName, sequence, DEMOEXT, protocol );
+					clientActiveApp->clc.recordName, sequence, DEMOEXT, protocol );
 			}
 		}
 
 		FS_Rename( tempName, finalName );
 	}
 
-	if ( !clc.demorecording ) {
+	if ( !clientActiveApp->clc.demorecording ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Not recording a demo.\n" );
 	} else {
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Stopped demo recording.\n" );
 	}
 
-	clc.demorecording = qfalse;
-	clc.spDemoRecording = qfalse;
+	clientActiveApp->clc.demorecording = qfalse;
+	clientActiveApp->clc.spDemoRecording = qfalse;
 }
 
 
@@ -286,21 +367,21 @@ CL_WriteServerCommands
 ====================
 */
 static void CL_WriteServerCommands( msg_t *msg ) {
-	if ( clc.serverCommandSequence - clc.demoCommandSequence > 0 ) {
+	if ( clientActiveApp->clc.serverCommandSequence - clientActiveApp->clc.demoCommandSequence > 0 ) {
 
 		// do not write more than MAX_RELIABLE_COMMANDS
-		if ( clc.serverCommandSequence - clc.demoCommandSequence > MAX_RELIABLE_COMMANDS ) {
-			clc.demoCommandSequence = clc.serverCommandSequence - MAX_RELIABLE_COMMANDS;
+		if ( clientActiveApp->clc.serverCommandSequence - clientActiveApp->clc.demoCommandSequence > MAX_RELIABLE_COMMANDS ) {
+			clientActiveApp->clc.demoCommandSequence = clientActiveApp->clc.serverCommandSequence - MAX_RELIABLE_COMMANDS;
 		}
 
-		for ( int i = clc.demoCommandSequence + 1 ; i <= clc.serverCommandSequence; i++ ) {
+		for ( int i = clientActiveApp->clc.demoCommandSequence + 1 ; i <= clientActiveApp->clc.serverCommandSequence; i++ ) {
 			MSG_WriteByte( msg, svc_serverCommand );
 			MSG_WriteLong( msg, i );
-			MSG_WriteString( msg, clc.serverCommands[ i & (MAX_RELIABLE_COMMANDS-1) ] );
+			MSG_WriteString( msg, clientActiveApp->clc.serverCommands[ i & (MAX_RELIABLE_COMMANDS-1) ] );
 		}
 	}
 
-	clc.demoCommandSequence = clc.serverCommandSequence;
+	clientActiveApp->clc.demoCommandSequence = clientActiveApp->clc.serverCommandSequence;
 }
 
 
@@ -319,26 +400,26 @@ static void CL_WriteGamestate( qboolean initial )
 	MSG_Bitstream( &msg );
 
 	// NOTE, MRE: all server->client messages now acknowledge
-	MSG_WriteLong( &msg, clc.reliableSequence );
+	MSG_WriteLong( &msg, clientActiveApp->clc.reliableSequence );
 
 	if ( initial ) {
-		clc.demoMessageSequence = 1;
-		clc.demoCommandSequence = clc.serverCommandSequence;
+		clientActiveApp->clc.demoMessageSequence = 1;
+		clientActiveApp->clc.demoCommandSequence = clientActiveApp->clc.serverCommandSequence;
 	} else {
 		CL_WriteServerCommands( &msg );
 	}
 
-	clc.demoDeltaNum = 0; // reset delta for next snapshot
+	clientActiveApp->clc.demoDeltaNum = 0; // reset delta for next snapshot
 
 	MSG_WriteByte( &msg, svc_gamestate );
-	MSG_WriteLong( &msg, clc.serverCommandSequence );
+	MSG_WriteLong( &msg, clientActiveApp->clc.serverCommandSequence );
 
 	// configstrings
 	for ( int i = 0 ; i < MAX_CONFIGSTRINGS ; i++ ) {
-		if ( !cl.gameState.stringOffsets[i] ) {
+		if ( !clientActiveApp->cl.gameState.stringOffsets[i] ) {
 			continue;
 		}
-		char *s = cl.gameState.stringData + cl.gameState.stringOffsets[i];
+		char *s = clientActiveApp->cl.gameState.stringData + clientActiveApp->cl.gameState.stringOffsets[i];
 		MSG_WriteByte( &msg, svc_configstring );
 		MSG_WriteShort( &msg, i );
 		MSG_WriteBigString( &msg, s );
@@ -348,9 +429,9 @@ static void CL_WriteGamestate( qboolean initial )
 	entityState_t nullstate;
 	memset( &nullstate, 0, sizeof( nullstate ) );
 	for ( int i = 0; i < MAX_GENTITIES ; i++ ) {
-		if ( !cl.baselineUsed[ i ] )
+		if ( !clientActiveApp->cl.baselineUsed[ i ] )
 			continue;
-		entityState_t *ent = &cl.entityBaselines[ i ];
+		entityState_t *ent = &clientActiveApp->cl.entityBaselines[ i ];
 		MSG_WriteByte( &msg, svc_baseline );
 		MSG_WriteDeltaEntity( &msg, &nullstate, ent, qtrue );
 	}
@@ -361,26 +442,26 @@ static void CL_WriteGamestate( qboolean initial )
 	// finished writing the gamestate stuff
 
 	// write the client num
-	MSG_WriteLong( &msg, clc.clientNum );
+	MSG_WriteLong( &msg, clientActiveApp->clc.clientNum );
 
 	// write the checksum feed
-	MSG_WriteLong( &msg, clc.checksumFeed );
+	MSG_WriteLong( &msg, clientActiveApp->clc.checksumFeed );
 
 	// finished writing the client packet
 	MSG_WriteByte( &msg, svc_EOF );
 
 	// write it to the demo file
 	int len;
-	if ( clc.demoplaying )
-		len = LittleLong( clc.demoMessageSequence - 1 );
+	if ( clientActiveApp->clc.demoplaying )
+		len = LittleLong( clientActiveApp->clc.demoMessageSequence - 1 );
 	else
-		len = LittleLong( clc.serverMessageSequence - 1 );
+		len = LittleLong( clientActiveApp->clc.serverMessageSequence - 1 );
 
-	FS_Write( &len, 4, clc.recordfile );
+	FS_Write( &len, 4, clientActiveApp->clc.recordfile );
 
 	len = LittleLong( msg.cursize );
-	FS_Write( &len, 4, clc.recordfile );
-	FS_Write( msg.data, msg.cursize, clc.recordfile );
+	FS_Write( &len, 4, clientActiveApp->clc.recordfile );
+	FS_Write( msg.data, msg.cursize, clientActiveApp->clc.recordfile );
 }
 
 
@@ -407,7 +488,7 @@ static void CL_EmitPacketEntities( clSnapshot_t *from, clSnapshot_t *to, msg_t *
 		if ( newindex >= to->numEntities ) {
 			newnum = MAX_GENTITIES+1;
 		} else {
-			newent = &cl.parseEntities[(to->parseEntitiesNum + newindex) % MAX_PARSE_ENTITIES];
+			newent = &clientActiveApp->cl.parseEntities[(to->parseEntitiesNum + newindex) % MAX_PARSE_ENTITIES];
 			newnum = newent->number;
 		}
 
@@ -433,7 +514,7 @@ static void CL_EmitPacketEntities( clSnapshot_t *from, clSnapshot_t *to, msg_t *
 		if ( newnum < oldnum ) {
 			// this is a new entity, send it from the baseline
 			// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — newnum < MAX_GENTITIES is enforced upstream by snapshot encoder
-			MSG_WriteDeltaEntity (msg, &cl.entityBaselines[newnum], newent, qtrue );
+			MSG_WriteDeltaEntity (msg, &clientActiveApp->cl.entityBaselines[newnum], newent, qtrue );
 			newindex++;
 			continue;
 		}
@@ -463,12 +544,12 @@ static void CL_WriteSnapshot( void ) {
 	byte	bufData[ MAX_MSGLEN_BUF ];
 	msg_t	msg;
 
-	clSnapshot_t *snap = &cl.snapshots[ cl.snap.messageNum & PACKET_MASK ]; // current snapshot
+	clSnapshot_t *snap = &clientActiveApp->cl.snapshots[ clientActiveApp->cl.snap.messageNum & PACKET_MASK ]; // current snapshot
 	//if ( !snap->valid ) // should never happen?
 	//	return;
 
 	clSnapshot_t *oldSnap;
-	if ( clc.demoDeltaNum == 0 ) {
+	if ( clientActiveApp->clc.demoDeltaNum == 0 ) {
 		oldSnap = NULL;
 	} else {
 		oldSnap = &saved_snap;
@@ -478,14 +559,14 @@ static void CL_WriteSnapshot( void ) {
 	MSG_Bitstream( &msg );
 
 	// NOTE, MRE: all server->client messages now acknowledge
-	MSG_WriteLong( &msg, clc.reliableSequence );
+	MSG_WriteLong( &msg, clientActiveApp->clc.reliableSequence );
 
 	// Write all pending server commands
 	CL_WriteServerCommands( &msg );
 
 	MSG_WriteByte( &msg, svc_snapshot );
 	MSG_WriteLong( &msg, snap->serverTime ); // sv.time
-	MSG_WriteByte( &msg, clc.demoDeltaNum ); // 0 or 1
+	MSG_WriteByte( &msg, clientActiveApp->clc.demoDeltaNum ); // 0 or 1
 	MSG_WriteByte( &msg, snap->snapFlags );  // snapFlags
 	MSG_WriteByte( &msg, snap->areabytes );  // areabytes
 	MSG_WriteData( &msg, snap->areamask, snap->areabytes );
@@ -501,25 +582,25 @@ static void CL_WriteSnapshot( void ) {
 
 	// write it to the demo file
 	int len;
-	if ( clc.demoplaying )
-		len = LittleLong( clc.demoMessageSequence );
+	if ( clientActiveApp->clc.demoplaying )
+		len = LittleLong( clientActiveApp->clc.demoMessageSequence );
 	else
-		len = LittleLong( clc.serverMessageSequence );
-	FS_Write( &len, 4, clc.recordfile );
+		len = LittleLong( clientActiveApp->clc.serverMessageSequence );
+	FS_Write( &len, 4, clientActiveApp->clc.recordfile );
 
 	len = LittleLong( msg.cursize );
-	FS_Write( &len, 4, clc.recordfile );
-	FS_Write( msg.data, msg.cursize, clc.recordfile );
+	FS_Write( &len, 4, clientActiveApp->clc.recordfile );
+	FS_Write( msg.data, msg.cursize, clientActiveApp->clc.recordfile );
 
 	// save last sent state so if there any need - we can skip any further incoming messages
 	for ( int i = 0; i < snap->numEntities; i++ )
-		saved_ents[ i ] = cl.parseEntities[ (snap->parseEntitiesNum + i) % MAX_PARSE_ENTITIES ];
+		saved_ents[ i ] = clientActiveApp->cl.parseEntities[ (snap->parseEntitiesNum + i) % MAX_PARSE_ENTITIES ];
 
 	saved_snap = *snap;
 	saved_snap.parseEntitiesNum = 0;
 
-	clc.demoMessageSequence++;
-	clc.demoDeltaNum = 1;
+	clientActiveApp->clc.demoMessageSequence++;
+	clientActiveApp->clc.demoDeltaNum = 1;
 }
 
 
@@ -538,20 +619,20 @@ static void CL_Record_f( void ) {
 		return;
 	}
 
-	if ( clc.demorecording ) {
-		if ( !clc.spDemoRecording ) {
+	if ( clientActiveApp->clc.demorecording ) {
+		if ( !clientActiveApp->clc.spDemoRecording ) {
 			Com_Log( SEV_INFO, LOG_CH(ch_client), "Already recording.\n" );
 		}
 		return;
 	}
 
-	if ( cls.state != CA_ACTIVE ) {
+	if ( clientActiveApp->state != CA_ACTIVE ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "You must be in a level to record.\n" );
 		return;
 	}
 
 	// sync 0 doesn't prevent recording, so not forcing it off .. everyone does g_sync 1 ; record ; g_sync 0 ..
-	if ( NET_IsLocalAddress( &clc.serverAddress ) && !Cvar_VariableIntegerValue( "g_synchronousClients" ) ) {
+	if ( NET_IsLocalAddress( &clientActiveApp->clc.serverAddress ) && !Cvar_VariableIntegerValue( "g_synchronousClients" ) ) {
 		COM_WARN( LOG_CH(ch_client), "WARNING: You should set 'g_synchronousClients 1' for smoother demo recording\n" );
 	}
 
@@ -572,7 +653,7 @@ static void CL_Record_f( void ) {
 		}
 		Com_sprintf( name, sizeof( name ), "demos/%s", demoName );
 
-		clc.explicitRecordName = qtrue;
+		clientActiveApp->clc.explicitRecordName = qtrue;
 	} else {
 		qtime_t t;
 		Com_RealTime( &t );
@@ -582,11 +663,11 @@ static void CL_Record_f( void ) {
 			1900 + t.tm_year, 1 + t.tm_mon, t.tm_mday,
 			t.tm_hour, t.tm_min, t.tm_sec );
 
-		clc.explicitRecordName = qfalse;
+		clientActiveApp->clc.explicitRecordName = qfalse;
 	}
 
 	// save desired filename without extension
-	Q_strncpyz( clc.recordName, name, sizeof( clc.recordName ) );
+	Q_strncpyz( clientActiveApp->clc.recordName, name, sizeof( clientActiveApp->clc.recordName ) );
 
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "recording to %s.\n", name );
 
@@ -594,25 +675,25 @@ static void CL_Record_f( void ) {
 	{ qstring_t _nm_qs = QS_WrapExisting( name, sizeof( name ) ); QS_Append( &_nm_qs, ".tmp" ); }
 
 	// open the demo file
-	clc.recordfile = FS_FOpenFileWrite( name );
-	if ( clc.recordfile == FS_INVALID_HANDLE ) {
+	clientActiveApp->clc.recordfile = FS_FOpenFileWrite( name );
+	if ( clientActiveApp->clc.recordfile == FS_INVALID_HANDLE ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "ERROR: couldn't open.\n" );
-		clc.recordName[0] = '\0';
+		clientActiveApp->clc.recordName[0] = '\0';
 		return;
 	}
 
-	clc.demorecording = qtrue;
+	clientActiveApp->clc.demorecording = qtrue;
 
-	Com_TruncateLongString( clc.recordNameShort, clc.recordName );
+	Com_TruncateLongString( clientActiveApp->clc.recordNameShort, clientActiveApp->clc.recordName );
 
 	if ( Cvar_VariableIntegerValue( "ui_recordSPDemo" ) ) {
-	  clc.spDemoRecording = qtrue;
+	  clientActiveApp->clc.spDemoRecording = qtrue;
 	} else {
-	  clc.spDemoRecording = qfalse;
+	  clientActiveApp->clc.spDemoRecording = qfalse;
 	}
 
 	// don't start saving messages until a non-delta compressed message is received
-	clc.demowaiting = qtrue;
+	clientActiveApp->clc.demowaiting = qtrue;
 
 	// write out the gamestate message
 	CL_WriteGamestate( qtrue );
@@ -653,14 +734,14 @@ CL_DemoCompleted
 */
 static void CL_DemoCompleted( void ) {
 	if ( com_timedemo->integer ) {
-		int time = Sys_Milliseconds() - clc.timeDemoStart;
+		int time = Sys_Milliseconds() - clientActiveApp->clc.timeDemoStart;
 		if ( time > 0 ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_client), "%i frames, %3.*f seconds: %3.1f fps\n", clc.timeDemoFrames,
-			time > 10000 ? 1 : 2, time/1000.0, clc.timeDemoFrames*1000.0 / time );
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "%i frames, %3.*f seconds: %3.1f fps\n", clientActiveApp->clc.timeDemoFrames,
+			time > 10000 ? 1 : 2, time/1000.0, clientActiveApp->clc.timeDemoFrames*1000.0 / time );
 		}
 	}
 
-	CL_Disconnect( qtrue );
+	CL_Disconnect( clientActiveApp, qtrue );
 	if ( WiredAttract_OnDemoCompleted() ) {
 		return; /* attract scheduler handled the advance */
 	}
@@ -677,25 +758,25 @@ void CL_ReadDemoMessage( void ) {
 	msg_t		buf;
 	byte		bufData[ MAX_MSGLEN_BUF ];
 
-	if ( clc.demofile == FS_INVALID_HANDLE ) {
+	if ( clientActiveApp->clc.demofile == FS_INVALID_HANDLE ) {
 		CL_DemoCompleted();
 		return;
 	}
 
 	// get the sequence number
 	int s;
-	int r = FS_Read( &s, 4, clc.demofile );
+	int r = FS_Read( &s, 4, clientActiveApp->clc.demofile );
 	if ( r != 4 ) {
 		CL_DemoCompleted();
 		return;
 	}
-	clc.serverMessageSequence = LittleLong( s );
+	clientActiveApp->clc.serverMessageSequence = LittleLong( s );
 
 	// init the message
 	MSG_Init( &buf, bufData, MAX_MSGLEN );
 
 	// get the length
-	r = FS_Read( &buf.cursize, 4, clc.demofile );
+	r = FS_Read( &buf.cursize, 4, clientActiveApp->clc.demofile );
 	if ( r != 4 ) {
 		CL_DemoCompleted();
 		return;
@@ -708,26 +789,27 @@ void CL_ReadDemoMessage( void ) {
 	if ( buf.cursize > buf.maxsize ) {
 		Com_Terminate( TERM_CLIENT_DROP, "CL_ReadDemoMessage: demoMsglen > MAX_MSGLEN");
 	}
-	r = FS_Read( buf.data, buf.cursize, clc.demofile );
+	r = FS_Read( buf.data, buf.cursize, clientActiveApp->clc.demofile );
 	if ( r != buf.cursize ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Demo file was truncated.\n");
 		CL_DemoCompleted();
 		return;
 	}
 
-	clc.lastPacketTime = cls.realtime;
+	clientActiveApp->clc.lastPacketTime = cls.realtime;
 	buf.readcount = 0;
 
-	clc.demoCommandSequence = clc.serverCommandSequence;
+	clientActiveApp->clc.demoCommandSequence = clientActiveApp->clc.serverCommandSequence;
 
-	CL_ParseServerMessage( &buf );
+	// Demo playback parses into the active app (the one playing the demo).
+	CL_ParseServerMessage( clientActiveApp, &buf );
 
-	if ( clc.demorecording ) {
+	if ( clientActiveApp->clc.demorecording ) {
 		// track changes and write new message
-		if ( clc.eventMask & EM_GAMESTATE ) {
+		if ( clientActiveApp->clc.eventMask & EM_GAMESTATE ) {
 			CL_WriteGamestate( qfalse );
 			// nothing should came after gamestate in current message
-		} else if ( clc.eventMask & (EM_SNAPSHOT|EM_COMMAND) ) {
+		} else if ( clientActiveApp->clc.eventMask & (EM_SNAPSHOT|EM_COMMAND) ) {
 			CL_WriteSnapshot();
 		}
 	}
@@ -798,6 +880,96 @@ static void CL_CompleteDemoName(const char *args, int argNum )
 		FS_SetFilenameCallback( CL_DemoNameCallback_f );
 		Field_CompleteFilename( "demos", "." DEMOEXT "??", qfalse, FS_MATCH_ANY | FS_MATCH_STICK | FS_MATCH_SUBDIRS );
 		FS_SetFilenameCallback( NULL );
+	}
+}
+
+
+/*
+====================
+CL_ConsoleCloseForConnect
+
+Close the console as part of entering a connection/demo, EXCEPT when an attract
+reel is driving the transition. The fullscreen console is a separate top layer
+(WUI_LAYER_CONSOLE) the user opens and closes deliberately; a user-initiated
+`\demo` or `\connect` should drop it, but attract advancing its own reel must not
+steal it (Eser 2026-07-03: "console is a different layer, never interrupted by
+attract screen changes"). Attract keeps the console alive by collapsing it
+visually while preserving KEYCATCH_CONSOLE — the same idiom the map-change path
+(CL_MapLoading) already uses. Single decision point for all connect-time console
+closes (CL_PlayDemo_f, CL_ParseGamestate, CL_WiredNetBootstrapResetState).
+====================
+*/
+void CL_ConsoleCloseForConnect( void ) {
+	if ( WiredAttract_IsActive() )
+		Con_SoftClose();   // reel transition — layer survives, user still owns ~
+	else
+		Con_Close();        // user-initiated connect/demo — drop the console
+}
+
+
+/*
+====================
+CL_OnClientStateChanged
+
+The single reaction point for a client connection-state edge. Called by
+CL_SetState only for the input-focused app (app == clientActiveApp). Cross-
+cutting reactions to "the connection state just changed" belong HERE, not
+inlined into the wire-parse / demo-pump functions that happen to cause the edge
+(Eser 2026-07-03: those should be side-effect-free).
+
+The session-entry edge = a transition INTO CA_CONNECTING, CA_CONNECTED, or
+CA_LOADING. This covers every way a new session/map begins:
+  - user \connect         → CA_CONNECTING
+  - \demo <file>          → CA_CONNECTED
+  - local \map (fresh)    → CA_CONNECTING; (localhost rotation) → CA_CONNECTED
+  - download-queued join  → CA_CONNECTED
+  - REMOTE server-pushed mid-session map change (no command typed, no download
+    needed) → CA_ACTIVE → CA_LOADING, which never touches CA_CONNECTING/CONNECTED.
+CA_LOADING is REQUIRED for that last case — without it the remote map rotation
+would not hard-close the console (only CL_InitCGame's soft-close would collapse
+it, wrongly preserving KEYCATCH_CONSOLE). CA_LOADING is entered ONLY inside the
+map-load pipeline (protocol.h: "only during cgame initialization, never during
+the main loop"), so keying on it produces no false close. Transitions into
+PRIMED / ACTIVE / CINEMATIC / DISCONNECTED are NOT session-entry and must not
+close. Because CL_SetState funnels ALL transitions, this fires on the server-
+pushed edge exactly as on a typed command — which a command-dispatch owner could
+not do (flow d has no command). The oldState!=newState guard in CL_SetState
+collapses the double CA_LOADING set (CL_DownloadsComplete then CL_InitCGame) to a
+single fire; redundant fires on connect/demo (already closed at CONNECTING/
+CONNECTED) are harmless — Con_Close/Con_SoftClose are idempotent.
+
+The attract distinction stays a property of the moment (WiredAttract_IsActive at
+transition time): an attract reel advancing a demo soft-closes (console layer
+survives), a user connect hard-closes.
+====================
+*/
+static void CL_OnClientStateChanged( clientApp_t *app, connstate_t oldState, connstate_t newState ) {
+	(void)app;
+	(void)oldState;
+	// Session-entry edge → close the console (attract-aware). Other edges: no-op.
+	if ( newState == CA_CONNECTING || newState == CA_CONNECTED || newState == CA_LOADING ) {
+		CL_ConsoleCloseForConnect();
+	}
+}
+
+
+/*
+====================
+CL_SetState
+
+The single funnel for client connection-state changes. Previously ~20 sites did
+a bare `app->state = CA_XXX;`, so a state transition was invisible — there was no
+seam to react to "a connection began." Routing every write through here makes the
+edge observable (CL_OnClientStateChanged) without the low-level functions naming
+the reaction. Only the input-focused app's transitions notify (a background
+in-process client must not drive host-global UI).
+====================
+*/
+void CL_SetState( clientApp_t *app, connstate_t newState ) {
+	connstate_t oldState = app->state;
+	app->state = newState;
+	if ( app == clientActiveApp && oldState != newState ) {
+		CL_OnClientStateChanged( app, oldState, newState );
 	}
 }
 
@@ -878,10 +1050,10 @@ static void CL_PlayDemo_f( void ) {
 	// 2 means don't force disconnect of local client
 	Cvar_Set( "sv_killserver", "2" );
 
-	CL_Disconnect( qtrue );
+	CL_Disconnect( clientActiveApp, qtrue );
 
 	// clc.demofile will be closed during CL_Disconnect so reopen it
-	if ( FS_FOpenFileRead( name, &clc.demofile, qtrue ) == -1 )
+	if ( FS_FOpenFileRead( name, &clientActiveApp->clc.demofile, qtrue ) == -1 )
 	{
 		// drop this time
 		COM_WARN( LOG_CH(ch_client), "couldn't open %s\n", name );
@@ -897,26 +1069,35 @@ static void CL_PlayDemo_f( void ) {
 	else
 		shortname = name;
 
-	Q_strncpyz( clc.demoName, shortname, sizeof( clc.demoName ) );
+	Q_strncpyz( clientActiveApp->clc.demoName, shortname, sizeof( clientActiveApp->clc.demoName ) );
 
-	Con_Close();
+	// (Console close is delegated to the CA_CONNECTED transition below via
+	//  CL_OnClientStateChanged — playing a demo is not itself a UI action.)
 
-	cls.state = CA_CONNECTED;
-	clc.demoplaying = qtrue;
-	Q_strncpyz( cls.servername, shortname, sizeof( cls.servername ) );
+	CL_SetState( clientActiveApp, CA_CONNECTED );
+	clientActiveApp->clc.demoplaying = qtrue;
+	Q_strncpyz( clientActiveApp->servername, shortname, sizeof( clientActiveApp->servername ) );
 
-	// read demo messages until connected
+	// Read demo messages until primed. The gamestate parsed out of the demo
+	// drives the client through CA_CONNECTED -> CA_LOADING (CL_DownloadsComplete
+	// kicks off the async load state machine and returns) and only reaches
+	// CA_PRIMED once that machine's phases have run. Com_Frame normally pumps
+	// CL_DownloadsComplete_Tick once per frame, but this loop runs synchronously
+	// inside a single command and never returns to Com_Frame, so we must drive
+	// the phase ticks here too — otherwise the load is deferred forever and
+	// CA_PRIMED is never reached (demo / timedemo would hang at CA_LOADING).
 #ifdef USE_CURL
-	while ( cls.state >= CA_CONNECTED && cls.state < CA_PRIMED && !Com_DL_InProgress( &download ) ) {
+	while ( clientActiveApp->state >= CA_CONNECTED && clientActiveApp->state < CA_PRIMED && !Com_DL_InProgress( &download ) ) {
 #else
-	while ( cls.state >= CA_CONNECTED && cls.state < CA_PRIMED ) {
+	while ( clientActiveApp->state >= CA_CONNECTED && clientActiveApp->state < CA_PRIMED ) {
 #endif
 		CL_ReadDemoMessage();
+		CL_DownloadsComplete_Tick();
 	}
 
 	// don't get the first snapshot this frame, to prevent the long
 	// time from the gamestate load from messing causing a time skip
-	clc.firstDemoFrameSkipped = qfalse;
+	clientActiveApp->clc.firstDemoFrameSkipped = qfalse;
 }
 
 
@@ -953,7 +1134,7 @@ CL_ShutdownVMs
 */
 static void CL_ShutdownVMs( void )
 {
-	CL_ShutdownCGame();
+	CL_ShutdownCGame( clientActiveApp );
 	CL_ShutdownUI();
 }
 
@@ -972,7 +1153,8 @@ Must NOT be called from process-exit paths — use CL_ShutdownAll for those.
 =====================
 */
 void CL_ShutdownLevel( void ) {
-	if ( com_dedicated->integer ) {
+	if ( !com_cl_running->integer ) {
+		// no local client subsystem — nothing to tear down
 		return;
 	}
 
@@ -981,15 +1163,23 @@ void CL_ShutdownLevel( void ) {
 
 	// cgame VM is level-scoped; shut it down.
 	// Wired UI VM is persistent — do NOT call CL_ShutdownUI() here.
-	CL_ShutdownCGame();
+	CL_ShutdownCGame( clientActiveApp );
 
-	// Release level-scoped renderer resources.  REF_KEEP_CONTEXT preserves
-	// the Vulkan device, GPU textures (font atlas, base shaders), and zone
-	// memory so they remain valid between async spawn phases.
-	// R_InitImages will destroy and re-register them when CL_InitRenderer
-	// runs on client reconnect (P5).
+	// The cgame just went away, so drop the LEVEL-lifetime viewport providers
+	// it registered (e.g. the world scene). Process-lifetime providers stay.
+	// Slot teardown only marks the slot free + clears the struct — providers
+	// own no heap here — so this is safe immediately after CG shutdown.
+	WiredUI_UnregisterLevelViewportProviders();
+
+	// Release level-scoped renderer resources.  REF_LEVEL_ONLY runs the
+	// map-scoped teardown path: level pipelines + per-map images + zone
+	// are released, but the renderer's persistent state (RAL backend +
+	// VkDevice + descriptor pool + base pipelines + backEndData) stays
+	// alive between async spawn phases. Font atlases + map textures are
+	// re-uploaded on the next CL_InitRenderer; CPU-side font glyph
+	// metadata (BSS) survives unchanged.
 	if ( re.Shutdown ) {
-		re.Shutdown( REF_KEEP_CONTEXT );
+		re.Shutdown( REF_LEVEL_ONLY );
 	}
 	// Signal CL_StartHunkUsers → CL_InitRenderer → RE_BeginRegistration so the
 	// renderer is properly re-initialized (new backEndData, fresh shaders, new
@@ -1029,11 +1219,11 @@ void CL_ShutdownAll( void ) {
 	// shutdown remaining persistent VMs — Wired UI VM
 	CL_ShutdownUI();
 
-	// CL_ShutdownLevel already called re.Shutdown(REF_KEEP_CONTEXT) to release
-	// level resources.  For a game-switch, also destroy the window and GL/Vk
-	// context entirely.  For the non-switch path, the REF_KEEP_CONTEXT call
-	// from CL_ShutdownLevel is sufficient — don't call it again.
-	if ( re.Shutdown && CL_GameSwitch() ) {
+	// CL_ShutdownLevel already called re.Shutdown(REF_LEVEL_ONLY) to release
+	// map-scoped resources.  For a game-switch, also destroy the window and
+	// GL/Vk context entirely.  For the non-switch path, the REF_LEVEL_ONLY
+	// call from CL_ShutdownLevel is sufficient — don't call it again.
+	if ( re.Shutdown && CL_GameSwitch( clientActiveApp ) ) {
 		CL_ShutdownRef( REF_DESTROY_WINDOW );
 	}
 
@@ -1079,7 +1269,7 @@ void CL_FlushMemory( void ) {
 
 	CL_ClearMemory();
 
-	BSP_ClearMapCache();
+	Map_ClearMapCache();
 
 	CL_StartHunkUsers();
 }
@@ -1095,44 +1285,55 @@ memory on the hunk from cgame, ui, and renderer
 =====================
 */
 void CL_MapLoading( const char *mapname ) {
-	if ( com_dedicated->integer ) {
-		cls.state = CA_DISCONNECTED;
-		Key_SetCatcher( KEYCATCH_CONSOLE );
-		return;
-	}
-
+	// A non-headless build always brings up its client, so there is no
+	// runtime "dedicated" branch here. If the client subsystem is not running
+	// (nothing to attach to the local server), there is nothing to do.
 	if ( !com_cl_running->integer ) {
 		return;
 	}
 
 	// Soft-close: collapse console visually but preserve KEYCATCH_CONSOLE so
-	// the user sees the log wall throughout the async spawn phases (Fix 6.1).
+	// the user sees the log wall throughout the async spawn phases.
 	Con_SoftClose();
+	// Fully close the menu stack before loading. The catcher drop below clears
+	// KEYCATCH_UI, but a still-populated menu stack (e.g. the main menu, which
+	// is now a real depth-1 stack entry) would re-assert KEYCATCH_UI on the
+	// next WiredUI frame and trip the cgame assert (KEYCATCH_UI must be 0 at
+	// CA_LOADING). Draining the stack keeps that invariant.
+	WiredUI_CloseAllMenus();
 	// Preserve the console catcher; drop all others (UI, cgame, etc.).
 	Key_SetCatcher( Key_GetCatcher() & KEYCATCH_CONSOLE );
 
-	qboolean localReconnect = ( cls.state >= CA_CONNECTED && !Q_stricmp( cls.servername, "localhost" ) );
+	qboolean localReconnect = ( clientActiveApp->state >= CA_CONNECTED && !Q_stricmp( clientActiveApp->servername, "localhost" ) );
 
 	// if we are already connected to the local host, stay connected
 	if ( localReconnect ) {
-		cls.state = CA_CONNECTED;		// so the connect screen is drawn
+		CL_SetState( clientActiveApp, CA_CONNECTED );		// so the connect screen is drawn
 		memset( cls.updateInfoString, 0, sizeof( cls.updateInfoString ) );
-		memset( clc.serverMessage, 0, sizeof( clc.serverMessage ) );
-		memset( &cl.gameState, 0, sizeof( cl.gameState ) );
-		clc.lastPacketSentTime = cls.realtime - RETRANSMIT_TIMEOUT; // send packet immediately
+		memset( clientActiveApp->clc.serverMessage, 0, sizeof( clientActiveApp->clc.serverMessage ) );
+		memset( &clientActiveApp->cl.gameState, 0, sizeof( clientActiveApp->cl.gameState ) );
+		clientActiveApp->clc.lastPacketSentTime = cls.realtime - RETRANSMIT_TIMEOUT; // send packet immediately
+		/* In-process-queue B4: the in-mem host keeps its connection across this
+		 * map→map reconnect (no CL_Disconnect/WN_ConnectApp re-run), so its
+		 * client+server rings still hold the previous map's snapshot/usercmd/
+		 * reliable datagrams. Drain them so the new map starts clean. Gated on
+		 * WN_HasInmemClient → no-op for a QUIC host (byte-identical). */
+		if ( WN_HasInmemClient() )
+			WN_ResetInmemClientRings( 0 );   /* the integrated host is app slot 0 */
 	} else {
 		// clear nextmap so the cinematic shutdown doesn't execute it
 		Cvar_Set( "nextmap", "" );
-		CL_Disconnect( qtrue );
-		Q_strncpyz( cls.servername, "localhost", sizeof(cls.servername) );
-		cls.state = CA_CONNECTING;		// so the connect screen is drawn
+		CL_Disconnect( clientActiveApp, qtrue );
+		Q_strncpyz( clientActiveApp->servername, "localhost", sizeof(clientActiveApp->servername) );
+		CL_SetState( clientActiveApp, CA_CONNECTING );		// so the connect screen is drawn
+		WiredUI_SetLoadingMenu( "ui/connect.wui" );  // state→named-UI: show connect
 		Key_SetCatcher( Key_GetCatcher() & KEYCATCH_CONSOLE );
 	}
 
 	memset( &cl_loadProgress, 0, sizeof( cl_loadProgress ) );
 	CL_ResetLoadingScreenState();
 	CL_ClearMapInfo();
-	CL_ClearBspPreview();
+	CL_ClearMapPreview();
 
 	cl_loadProgress.startTime = cls.realtime ? cls.realtime : 1;
 	cl_loadProgress.phase = "initializing";
@@ -1140,7 +1341,7 @@ void CL_MapLoading( const char *mapname ) {
 	// Load map metadata and BSP wireframe preview for the loading screen.
 	// mapname comes from SV_SpawnServer parameter (cvar not set yet at this point).
 	if ( mapname && mapname[0] ) {
-		CL_BuildBspPreview( mapname );
+		CL_BuildMapPreview( mapname );
 		CL_LoadMapInfo( mapname );
 		CL_ApplyLoadingTheme( &cl_mapInfo );
 	}
@@ -1149,8 +1350,8 @@ void CL_MapLoading( const char *mapname ) {
 	SCR_UpdateScreen();
 
 	if ( !localReconnect ) {
-		clc.connectTime = cls.realtime - RECONNECT_TIMEOUT; // send packet immediately
-		NET_StringToAdr( cls.servername, &clc.serverAddress, NA_UNSPEC );
+		clientActiveApp->clc.connectTime = cls.realtime - RECONNECT_TIMEOUT; // send packet immediately
+		NET_StringToAdr( clientActiveApp->servername, &clientActiveApp->clc.serverAddress, NA_UNSPEC );
 		// we don't need a challenge on the localhost
 		CL_CheckForResend();
 	}
@@ -1164,11 +1365,11 @@ CL_ClearState
 Called before parsing a gamestate
 =====================
 */
-void CL_ClearState( void ) {
+void CL_ClearState( clientApp_t *app ) {
 
 //	S_StopAllSounds();
 
-	memset( &cl, 0, sizeof( cl ) );
+	memset( &app->cl, 0, sizeof( app->cl ) );
 }
 
 
@@ -1208,9 +1409,19 @@ static qboolean CL_RestoreOldGame( void )
 {
 	if ( cl_oldGameSet )
 	{
+		// A running server owns fs_game for its lifetime. A client disconnect
+		// must NOT restore fs_game here (that would FS_ConditionalRestart ->
+		// Com_GameRestart -> SV_Shutdown, tearing the server down via the
+		// client's lifecycle). Defer: leave cl_oldGameSet/cl_oldGame intact so
+		// the restore still happens on a later disconnect when no server runs.
+		// (The server owns the gamedir; the client does not restore it out
+		// from under a live server.)
+		if ( com_sv_running && com_sv_running->integer )
+			return qfalse;
+
 		cl_oldGameSet = qfalse;
 		Cvar_Set( "fs_game", cl_oldGame );
-		FS_ConditionalRestart( clc.checksumFeed, qtrue );
+		FS_ConditionalRestart( clientActiveApp->clc.checksumFeed, qtrue );
 		return qtrue;
 	}
 	return qfalse;
@@ -1227,112 +1438,153 @@ Sends a disconnect message to the server
 This is also called on Com_Error and Com_Quit, so it shouldn't cause any errors
 =====================
 */
-qboolean CL_Disconnect( qboolean showMainMenu ) {
-	static qboolean cl_disconnecting = qfalse;
+qboolean CL_Disconnect( clientApp_t *app, qboolean showMainMenu ) {
 	qboolean cl_restarted = qfalse;
+	// Host-global singletons (the screen, audio, key, UI, FS-pure-pak, and
+	// loading-screen state are single per process) belong to the input-focused
+	// app; a non-focused app's disconnect tears down only its own connection.
+	qboolean isFocused = ( app == clientActiveApp );
 
 	if ( !com_cl_running || !com_cl_running->integer ) {
 		return cl_restarted;
 	}
 
-	if ( cl_disconnecting ) {
+	// Reentry guard is per-app (was a single process-wide static) so a 2nd
+	// app's disconnect does not block the host's, or vice-versa.
+	if ( app->disconnecting ) {
 		return cl_restarted;
 	}
 
-	cl_disconnecting = qtrue;
+	app->disconnecting = qtrue;
+
+	// Cancel any in-flight chunked-load state machine. If
+	// CL_InitCGame in CL_DownloadsComplete_Tick's P2/P3 phase longjmp'd
+	// out via Com_Error (e.g. a CG_INIT asset failure), the jump skipped
+	// the phase -> DLC_P4_FINALIZE advance, leaving app->dlcomplete.phase
+	// stuck at P2/P3. Without this reset CL_DownloadsComplete_Tick would
+	// re-fire that failed phase every Com_Frame forever — the empty-
+	// mapname CL_InitCGame loop. Any disconnect (error recovery or user)
+	// is an unconditional abort of the load.
+	app->dlcomplete.phase = DLC_IDLE;
 
 	// Stop demo recording
-	if ( clc.demorecording ) {
+	if ( app->clc.demorecording ) {
 		CL_StopRecord_f();
 	}
 
 	// Stop demo playback
-	if ( clc.demofile != FS_INVALID_HANDLE ) {
-		FS_FCloseFile( clc.demofile );
-		clc.demofile = FS_INVALID_HANDLE;
+	if ( app->clc.demofile != FS_INVALID_HANDLE ) {
+		FS_FCloseFile( app->clc.demofile );
+		app->clc.demofile = FS_INVALID_HANDLE;
 	}
 
 	// Finish downloads
-	if ( clc.download != FS_INVALID_HANDLE ) {
-		FS_FCloseFile( clc.download );
-		clc.download = FS_INVALID_HANDLE;
+	if ( app->clc.download != FS_INVALID_HANDLE ) {
+		FS_FCloseFile( app->clc.download );
+		app->clc.download = FS_INVALID_HANDLE;
 	}
-	*clc.downloadTempName = *clc.downloadName = '\0';
-	Cvar_Set( "cl_downloadName", "" );
+	*app->clc.downloadTempName = *app->clc.downloadName = '\0';
+	if ( isFocused ) {
+		Cvar_Set( "cl_downloadName", "" );
+	}
 
-	// Stop recording any video
-	if ( CL_VideoRecording() ) {
+	// Stop recording any video (host screen)
+	if ( isFocused && CL_VideoRecording() ) {
 		// Finish rendering current frame
 		cls.framecount++;
 		SCR_UpdateScreen();
 		CL_CloseAVI( qfalse );
 	}
 
-	if ( cgvm ) {
+	if ( app->cgvm ) {
 		// do that right after we rendered last video frame
-		CL_ShutdownCGame();
+		CL_ShutdownCGame( app );
 	}
 
-	SCR_StopCinematic();
-	S_StopAllSounds();
-	Key_ClearStates();
+	if ( isFocused ) {
+		SCR_StopCinematic();
+		S_StopAllSounds();
+		Key_ClearStates();
 
-	if ( UI_VM_ACTIVE && showMainMenu ) {
-		UI_CALL_SET_ACTIVE( UIMENU_NONE );
+		if ( UI_VM_ACTIVE && showMainMenu ) {
+			UI_CALL_SET_ACTIVE( UIMENU_NONE );
+		}
+
+		// Remove pure paks (host FS pure/referenced-pak state)
+		FS_PureServerSetLoadedPaks( "", "" );
+		FS_PureServerSetReferencedPaks( "", "" );
+
+		FS_ClearPakReferences( FS_GENERAL_REF | FS_UI_REF | FS_CGAME_REF );
 	}
 
-	// Remove pure paks
-	FS_PureServerSetLoadedPaks( "", "" );
-	FS_PureServerSetReferencedPaks( "", "" );
-
-	FS_ClearPakReferences( FS_GENERAL_REF | FS_UI_REF | FS_CGAME_REF );
-
-	if ( CL_GameSwitch() ) {
+	if ( CL_GameSwitch( app ) ) {
 		// keep current gamestate and connection
-		cl_disconnecting = qfalse;
+		app->disconnecting = qfalse;
 		return qfalse;
 	}
 
 	// send a disconnect message to the server
 	// send it a few times in case one is dropped
-	if ( cls.state >= CA_CONNECTED && cls.state != CA_CINEMATIC && !clc.demoplaying ) {
-		CL_AddReliableCommand( "disconnect", qtrue );
-		CL_WritePacket( 2 );
+	if ( app->state >= CA_CONNECTED && app->state != CA_CINEMATIC && !app->clc.demoplaying ) {
+		CL_AddReliableCommand( app, "disconnect", qtrue );
+		CL_WritePacket( app, 2 );
 	}
 
-	CL_ClearState();
-	memset( &cl_loadProgress, 0, sizeof( cl_loadProgress ) );
-	CL_ResetLoadingScreenState();
-	CL_ClearMapInfo();
-	CL_ClearBspPreview();
+	CL_ClearState( app );
+	if ( isFocused ) {
+		memset( &cl_loadProgress, 0, sizeof( cl_loadProgress ) );
+		CL_ResetLoadingScreenState();
+		CL_ClearMapInfo();
+		CL_ClearMapPreview();
+	}
 
 	// wipe the client connection
-	// Tear down client QUIC connection before wiping clc
+	// Tear down client QUIC connection before wiping app->clc
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "*** CL_Disconnect: state=%d showMainMenu=%d initialized=%d ***\n",
-		(int)cls.state, (int)showMainMenu, (int)WN_ClientIsConnecting() );
-	WN_ClientDisconnect();
+		(int)app->state, (int)showMainMenu,
+		(int)( transport && transport->is_connecting && transport->is_connecting() ) );
+	/* Route the disconnect through the backend that owns this client's handle.
+	 * In-process-queue: the integrated host stores an in-mem client handle
+	 * (100+slot) in clc.quic_conn; a QUIC client stores CONN_CLIENT_QUIC (9).
+	 * transport_for_handle picks the matching backend. Fall back to the QUIC
+	 * client handle when none is stored yet (never-connected teardown).
+	 * Per-app: keys on this app's own handle, so it never disturbs another
+	 * app's connection. */
+	{
+		conn_handle_t disc = app->clc.quic_conn != CONN_INVALID
+			? app->clc.quic_conn : CONN_CLIENT_QUIC;
+		if ( transport_for_handle( disc )->disconnect )
+			transport_for_handle( disc )->disconnect( disc, "client disconnect" );
+	}
 
-	memset( &clc, 0, sizeof( clc ) );
-	clc.wiredRconChallenge[0] = '\0';
+	memset( &app->clc, 0, sizeof( app->clc ) );
+	app->clc.wiredRconChallenge[0] = '\0';
 
-	cls.state = CA_DISCONNECTED;
+	CL_SetState( app, CA_DISCONNECTED );
 
-	// not connected to a pure server anymore
-	cl_connectedToPureServer = 0;
+	if ( isFocused ) {
+		// not connected to a pure server anymore
+		cl_connectedToPureServer = 0;
 
-	CL_UpdateGUID( NULL, 0 );
+		CL_UpdateGUID( NULL, 0 );
+	}
 
-	// Cmd_RemoveCommand( "callvote" );
-	Cmd_RemoveCgameCommands();
+	// Remove only this app's cgame commands (owner = its cgame VM handle). By
+	// this point the CL_ShutdownCGame above already swept + NULL'd app->cgvm, so
+	// this matches nothing (a NULL owner matches no command) — an intentional,
+	// safe no-op kept for symmetry. Self-scopes by owner; runs unconditionally.
+	Cmd_RemoveCgameCommandsByOwner( app->cgvm );
 
-	if ( noGameRestart )
-		noGameRestart = qfalse;
-	else
-		cl_restarted = CL_RestoreOldGame();
+	if ( isFocused ) {
+		if ( noGameRestart )
+			noGameRestart = qfalse;
+		else
+			cl_restarted = CL_RestoreOldGame();
+	}
 
-	cl_disconnecting = qfalse;
+	app->disconnecting = qfalse;
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	// Plan C hook: surface any ERR_DROP error as a Wired UI dialog.
 	// Four guards prevent reentry and false positives:
 	//   showMainMenu  — only when we are going back to the menu, not during
@@ -1341,7 +1593,8 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 	//   !com_errorEntered — ERR_DROP longjmp is still in progress when this
 	//                       is set; calling into UI would crash mid-teardown
 	//   com_errorMessage  — nothing to show if there's no error text
-	{
+	// Host-screen dialog — focused app only.
+	if ( isFocused ) {
 		const char *errMsg = Cvar_VariableString( "com_errorMessage" );
 		if ( showMainMenu
 		  && cls.uiStarted
@@ -1378,59 +1631,42 @@ void CL_ForwardCommandToServer( const char *string ) {
 		return;
 	}
 
-	if ( clc.demoplaying || cls.state < CA_CONNECTED || cmd[0] == '+' ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "Unknown command \"%s" S_COLOR_WHITE "\"\n", cmd );
+	if ( clientActiveApp->clc.demoplaying || clientActiveApp->state < CA_CONNECTED || cmd[0] == '+' ) {
+#if FEAT_WIRED_UI
+		/* source-attribution: when a wmenu/whud parse is
+		 * underway, the unknown command almost certainly came from a
+		 * parser fallthrough (botlib PC consumes a keyword the parser
+		 * doesn't recognise, then unmatched data lands here via
+		 * Cbuf_ExecuteText). Annotate with file + line + menu so the
+		 * cause is one log line away. */
+		const char *parseFile = WiredUI_ParseContextFile();
+		if ( parseFile ) {
+			const char *parseMenu = WiredUI_ParseContextMenu();
+			const char *parseItem = WiredUI_ParseContextItem();
+			int         parseLine = WiredUI_ParseContextLine();
+			Com_Log( SEV_INFO, LOG_CH(ch_client),
+				"Unknown command \"%s" S_COLOR_WHITE "\" "
+				"(leaked from parsing %s line %d, menu '%s'%s%s%s)\n",
+				cmd,
+				parseFile, parseLine,
+				( parseMenu && parseMenu[0] ) ? parseMenu : "(pre-name)",
+				parseItem ? ", item '" : "",
+				parseItem ? parseItem : "",
+				parseItem ? "'" : "" );
+		} else
+#endif
+		{
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Unknown command \"%s" S_COLOR_WHITE "\"\n", cmd );
+		}
 		return;
 	}
 
 	if ( Cmd_Argc() > 1 ) {
-		CL_AddReliableCommand( string, qfalse );
+		CL_AddReliableCommand( clientActiveApp, string, qfalse );
 	} else {
-		CL_AddReliableCommand( cmd, qfalse );
+		CL_AddReliableCommand( clientActiveApp, cmd, qfalse );
 	}
 }
-
-
-/*
-===================
-CL_RequestMotd
-
-===================
-*/
-#if 0
-static void CL_RequestMotd( void ) {
-	char		info[MAX_INFO_STRING];
-
-	if ( !cl_motd->integer ) {
-		return;
-	}
-	Com_Log( SEV_INFO, LOG_CH(ch_client), "Resolving %s\n", UPDATE_SERVER_NAME );
-	if ( !NET_StringToAdr( UPDATE_SERVER_NAME, &cls.updateServer, NA_IP ) ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "Couldn't resolve address\n" );
-		return;
-	}
-	cls.updateServer.port = BigShort( PORT_UPDATE );
-	Com_Log( SEV_INFO, LOG_CH(ch_client), "%s resolved to %i.%i.%i.%i:%i\n", UPDATE_SERVER_NAME,
-		cls.updateServer.ip[0], cls.updateServer.ip[1],
-		cls.updateServer.ip[2], cls.updateServer.ip[3],
-		BigShort( cls.updateServer.port ) );
-
-	info[0] = 0;
-	// NOTE TTimo xoring against Com_Milliseconds, otherwise we may not have a true randomization
-	// only srand I could catch before here is tr_noise.c l:26 srand(1001)
-	// https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=382
-	// NOTE: the Com_Milliseconds xoring only affects the lower 16-bit word,
-	//   but I decided it was enough randomization
-	Com_sprintf( cls.updateChallenge, sizeof( cls.updateChallenge ), "%i", ((rand() << 16) ^ rand()) ^ Com_Milliseconds());
-
-	Info_SetValueForKey( info, "challenge", cls.updateChallenge );
-	Info_SetValueForKey( info, "renderer", cls.glconfig.renderer_string );
-	Info_SetValueForKey( info, "version", com_version->string );
-
-	NET_OutOfBandPrint( NS_CLIENT, &cls.updateServer, "getmotd \"%s\"\n", info );
-}
-#endif
-
 
 
 /*
@@ -1447,7 +1683,7 @@ CL_ForwardToServer_f
 ==================
 */
 static void CL_ForwardToServer_f( void ) {
-	if ( cls.state != CA_ACTIVE || clc.demoplaying ) {
+	if ( clientActiveApp->state != CA_ACTIVE || clientActiveApp->clc.demoplaying ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Not connected to a server.\n");
 		return;
 	}
@@ -1456,7 +1692,7 @@ static void CL_ForwardToServer_f( void ) {
 		return;
 
 	// don't forward the first argument
-	CL_AddReliableCommand( Cmd_ArgsFrom( 1 ), qfalse );
+	CL_AddReliableCommand( clientActiveApp, Cmd_ArgsFrom( 1 ), qfalse );
 }
 
 static void CL_RconLogin_f( void ) {
@@ -1475,17 +1711,17 @@ static void CL_RconLogin_f( void ) {
 		return;
 	}
 
-	if ( clc.serverAddress.type == NA_BAD ) {
+	if ( clientActiveApp->clc.serverAddress.type == NA_BAD ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Not connected to a server.\n" );
 		return;
 	}
 
-	clc.wiredRconAuthed = qfalse;
-	clc.wiredRconHasChallenge = qfalse;
-	clc.wiredRconChallenge[0] = '\0';
-	clc.wiredRconAddress = clc.serverAddress;
+	clientActiveApp->clc.wiredRconAuthed = qfalse;
+	clientActiveApp->clc.wiredRconHasChallenge = qfalse;
+	clientActiveApp->clc.wiredRconChallenge[0] = '\0';
+	clientActiveApp->clc.wiredRconAddress = clientActiveApp->clc.serverAddress;
 
-	NET_OutOfBandPrint( NS_CLIENT, &clc.serverAddress, "rcon_auth" );
+	NET_OutOfBandPrint( NS_CLIENT, &clientActiveApp->clc.serverAddress, "rcon_auth" );
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "Wired RCON: requesting challenge...\n" );
 }
 
@@ -1506,13 +1742,13 @@ static void CL_Rcon_f( void ) {
 		return;
 	}
 
-	if ( !clc.wiredRconAuthed ) {
+	if ( !clientActiveApp->clc.wiredRconAuthed ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Plaintext rcon disabled. Use rcon_login.\n" );
 		return;
 	}
 
 	Com_sprintf( cmd, sizeof( cmd ), "rcon %s", Cmd_ArgsFrom( 1 ) );
-	NET_OutOfBandPrint( NS_CLIENT, &clc.wiredRconAddress, "%s", cmd );
+	NET_OutOfBandPrint( NS_CLIENT, &clientActiveApp->clc.wiredRconAddress, "%s", cmd );
 }
 
 
@@ -1523,21 +1759,17 @@ CL_Disconnect_f
 */
 void CL_Disconnect_f( void ) {
 	SCR_StopCinematic();
-	Cvar_Set( "ui_singlePlayerActive", "0" );
-	if ( cls.state != CA_DISCONNECTED && cls.state != CA_CINEMATIC ) {
-		if ( cgvm && cgvm->callLevel ) {
+	if ( clientActiveApp->state != CA_DISCONNECTED && clientActiveApp->state != CA_CINEMATIC ) {
+		if ( clientActiveApp->cgvm && clientActiveApp->cgvm->callLevel ) {
 			Com_Terminate( TERM_CLIENT_LEAVE, "Disconnected from server" );
 		} else {
 			// clear any previous "server full" type messages
-			clc.serverMessage[0] = '\0';
-			if ( com_sv_running && com_sv_running->integer ) {
-				// if running a local server, kill it
-				SV_Shutdown( "Disconnected from server" );
-			} else {
-				Com_Log( SEV_INFO, LOG_CH(ch_client), "Disconnected from %s\n", cls.servername );
-			}
+			clientActiveApp->clc.serverMessage[0] = '\0';
+			// Disconnect is CLIENT-ONLY. A running local server is left
+			// up (sv_running stays 1) — use 'stopserver' to stop it.
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Disconnected from %s\n", clientActiveApp->servername );
 			Com_ClearLastError();
-			if ( !CL_Disconnect( qfalse ) ) { // restart client if not done already
+			if ( !CL_Disconnect( clientActiveApp, qfalse ) ) { // restart client if not done already
 				CL_FlushMemory();
 			}
 			if ( UI_VM_ACTIVE ) {
@@ -1556,8 +1788,77 @@ CL_Reconnect_f
 static void CL_Reconnect_f( void ) {
 	if ( cl_reconnectArgs->string[0] == '\0' || Q_stricmp( cl_reconnectArgs->string, "localhost" ) == 0 )
 		return;
-	Cvar_Set( "ui_singlePlayerActive", "0" );
 	Cbuf_AddText( va( "connect %s\n", cl_reconnectArgs->string ) );
+}
+
+
+/*
+================
+CL_SpawnHeadlessApp_f
+
+Spawn a runtime-headless same-process client (an additional app slot) over the
+in-memory backend — a real, game-visible, kickable bot/MCP client that skips the
+render path and the cgame VM at runtime. (This is a runtime mode of a normal
+client, not a -DHEADLESS compile, which cannot coexist with the host in one
+process.)
+
+Currently an inert stub: the command is registered and the transport-layer drain
++ pump already iterate every client slot, but the handler does not yet allocate a
+slot, prime it without the cgame VM, drive its state, or send READY — so it
+spawns nothing and the integrated host (slot 0) remains the only live client.
+================
+*/
+static void CL_SpawnHeadlessApp_f( void ) {
+	int          slot;
+	clientApp_t *app;
+	char         info[MAX_INFO_STRING];
+	conn_handle_t handle;
+
+	if ( !com_sv_running || !com_sv_running->integer ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client),
+			"spawn_headless_client: requires a running local server.\n" );
+		return;
+	}
+
+	/* Find a free additional slot (slot 0 is the integrated host). */
+	for ( slot = 1; slot < MAX_LOCAL_CGAME_VMS; slot++ ) {
+		if ( clientApps[slot].state <= CA_DISCONNECTED )
+			break;
+	}
+	if ( slot >= MAX_LOCAL_CGAME_VMS ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client),
+			"spawn_headless_client: no free client slot.\n" );
+		return;
+	}
+	app = &clientApps[slot];
+
+	/* Minimal userinfo for a non-rendering bot/MCP client. */
+	info[0] = '\0';
+	Info_SetValueForKey_s( info, MAX_INFO_STRING, "name", "headless" );
+	Info_SetValueForKey_s( info, MAX_INFO_STRING, "rate", "25000" );
+	Info_SetValueForKey_s( info, MAX_INFO_STRING, "snaps", "20" );
+
+	/* Connect over the in-memory backend (no picoquic, no UDP). Returns the
+	 * client-end handle; the server admits this as a normal kickable client in a
+	 * slot>0 (it is not the un-kickable host). */
+	handle = WN_ConnectApp( slot, info );
+	if ( handle == CONN_INVALID ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_client),
+			"spawn_headless_client: WN_ConnectApp(%d) failed.\n", slot );
+		return;
+	}
+
+	memset( &app->clc, 0, sizeof( app->clc ) );
+	memset( &app->cl, 0, sizeof( app->cl ) );
+	app->clc.quic_conn = handle;
+	app->cgvm = NULL;                 /* runtime-headless: no cgame VM */
+	Q_strncpyz( app->servername, "localhost", sizeof( app->servername ) );
+	CL_SetState( app, CA_CONNECTING );
+
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"spawn_headless_client: client slot %d connecting (handle %llu); gamestate "
+		"ingest + prime + ready run from the per-frame drive.\n",
+		slot, (unsigned long long)handle );
 }
 
 
@@ -1592,7 +1893,7 @@ static void CL_Connect_f( void ) {
 		server = Cmd_Argv(2);
 	}
 
-	char	buffer[ sizeof( cls.servername ) ];  // same length as cls.servername
+	char	buffer[ sizeof( clientActiveApp->servername ) ];  // same length as cls.servername
 	Q_strncpyz( buffer, server, sizeof( buffer ) );
 
 	int len = strlen( buffer );
@@ -1629,13 +1930,11 @@ static void CL_Connect_f( void ) {
 	}
 
 	// save arguments for reconnect
-	char args[ sizeof( cls.servername ) + MAX_CVAR_VALUE_STRING ];
+	char args[ sizeof( clientActiveApp->servername ) + MAX_CVAR_VALUE_STRING ];
 	Q_strncpyz( args, Cmd_ArgsFrom( 1 ), sizeof( args ) );
 
-	Cvar_Set( "ui_singlePlayerActive", "0" );
-
 	// clear any previous "server full" type messages
-	clc.serverMessage[0] = '\0';
+	clientActiveApp->clc.serverMessage[0] = '\0';
 
 	// if running a local server, kill it
 	if ( com_sv_running->integer && !strcmp( server, "localhost" ) ) {
@@ -1647,21 +1946,23 @@ static void CL_Connect_f( void ) {
 	SV_Frame( 0 );
 
 	noGameRestart = qtrue;
-	CL_Disconnect( qtrue );
-	Con_Close();
+	CL_Disconnect( clientActiveApp, qtrue );
+	// (Console close is delegated to the CA_CONNECTING transition below via
+	//  CL_OnClientStateChanged — \connect is a connection, not a UI action. This
+	//  also fixes the old asymmetry where this bare Con_Close ignored attract.)
 
-	Q_strncpyz( cls.servername, server, sizeof( cls.servername ) );
+	Q_strncpyz( clientActiveApp->servername, server, sizeof( clientActiveApp->servername ) );
 
 	// copy resolved address
-	clc.serverAddress = addr;
+	clientActiveApp->clc.serverAddress = addr;
 
-	if (clc.serverAddress.port == 0) {
-		clc.serverAddress.port = BigShort( PORT_SERVER );
+	if (clientActiveApp->clc.serverAddress.port == 0) {
+		clientActiveApp->clc.serverAddress.port = BigShort( PORT_SERVER );
 	}
 
-	const char *serverString = NET_AdrToStringwPort( &clc.serverAddress );
+	const char *serverString = NET_AdrToStringwPort( &clientActiveApp->clc.serverAddress );
 
-	Com_Log( SEV_INFO, LOG_CH(ch_client), "%s resolved to %s\n", cls.servername, serverString );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "%s resolved to %s\n", clientActiveApp->servername, serverString );
 
 	if ( cl_guidServerUniq->integer )
 		CL_UpdateGUID( serverString, strlen( serverString ) );
@@ -1669,12 +1970,13 @@ static void CL_Connect_f( void ) {
 		CL_UpdateGUID( NULL, 0 );
 
 	// QUIC handles auth via TLS; LAN no longer needs the UDP challenge round-trip.
-	cls.state = CA_CONNECTING;
-	Com_RandomBytes( (byte*)&clc.challenge, sizeof( clc.challenge ) );
+	CL_SetState( clientActiveApp, CA_CONNECTING );
+	WiredUI_SetLoadingMenu( "ui/connect.wui" );  // state→named-UI: show connect
+	Com_RandomBytes( (byte*)&clientActiveApp->clc.challenge, sizeof( clientActiveApp->clc.challenge ) );
 
 	Key_SetCatcher( 0 );
-	clc.connectTime = cls.realtime - RECONNECT_TIMEOUT; // CL_CheckForResend() will fire immediately
-	clc.connectPacketCount = 0;
+	clientActiveApp->clc.connectTime = cls.realtime - RECONNECT_TIMEOUT; // CL_CheckForResend() will fire immediately
+	clientActiveApp->clc.connectPacketCount = 0;
 
 	Cvar_Set( "cl_reconnectArgs", args );
 
@@ -1691,14 +1993,14 @@ CL_SendPureChecksums
 static void CL_SendPureChecksums( void ) {
 	char cMsg[ MAX_STRING_CHARS-1 ];
 
-	if ( !cl_connectedToPureServer || clc.demoplaying )
+	if ( !cl_connectedToPureServer || clientActiveApp->clc.demoplaying )
 		return;
 
 	// if we are pure we need to send back a command with our referenced pk3 checksums
-	int len = sprintf( cMsg, "cp %d ", cl.serverId );
+	int len = sprintf( cMsg, "cp %d ", clientActiveApp->cl.serverId );
 	strcpy( cMsg + len, FS_ReferencedPakPureChecksums( sizeof( cMsg ) - len - 1 ) );
 
-	CL_AddReliableCommand( cMsg, qfalse );
+	CL_AddReliableCommand( clientActiveApp, cMsg, qfalse );
 }
 
 
@@ -1708,7 +2010,7 @@ CL_ResetPureClientAtServer
 =================
 */
 static void CL_ResetPureClientAtServer( void ) {
-	CL_AddReliableCommand( "vdr", qfalse );
+	CL_AddReliableCommand( clientActiveApp, "vdr", qfalse );
 }
 
 
@@ -1728,21 +2030,26 @@ static void CL_Vid_Restart( refShutdownCode_t shutdownCode ) {
 	if ( CL_VideoRecording() )
 		CL_CloseAVI( qfalse );
 
-	if ( clc.demorecording )
+	if ( clientActiveApp->clc.demorecording )
 		CL_StopRecord_f();
 
 	// clear and mute all sounds until next registration
 	S_DisableSounds();
 
+	// Teardown window: from here through CL_ShutdownRef the renderer + cgame are
+	// mid-tear-down (VMs shut down, the WiredUI compositor deregistered, the
+	// renderer about to release GPU resources). Do NOT pump a render frame in this
+	// window — SCR_UpdateScreen would reference half-freed render state.
 	// shutdown VMs
 	CL_ShutdownVMs();
 
 #if FEAT_WIRED_UI
+	WiredUI_CompositorUnregisterDevCommands();
 	WiredUI_Shutdown();
 #endif
 
 	// shutdown the renderer and clear the renderer interface
-	CL_ShutdownRef( shutdownCode ); // REF_KEEP_CONTEXT, REF_KEEP_WINDOW, REF_DESTROY_WINDOW
+	CL_ShutdownRef( shutdownCode ); // REF_LEVEL_ONLY, REF_KEEP_WINDOW, REF_DESTROY_WINDOW
 
 	// client is no longer pure until new checksums are sent
 	CL_ResetPureClientAtServer();
@@ -1751,8 +2058,8 @@ static void CL_Vid_Restart( refShutdownCode_t shutdownCode ) {
 	FS_ClearPakReferences( FS_UI_REF | FS_CGAME_REF );
 
 	// reinitialize the filesystem if the game directory or checksum has changed
-	if ( !clc.demoplaying ) // -EC-
-		FS_ConditionalRestart( clc.checksumFeed, qfalse );
+	if ( !clientActiveApp->clc.demoplaying ) // -EC-
+		FS_ConditionalRestart( clientActiveApp->clc.checksumFeed, qfalse );
 
 	cls.soundRegistered = qfalse;
 
@@ -1765,14 +2072,14 @@ static void CL_Vid_Restart( refShutdownCode_t shutdownCode ) {
 	CL_StartHunkUsers();
 
 	// start the cgame if connected
-	if ( ( cls.state > CA_CONNECTED && cls.state != CA_CINEMATIC ) || cls.startCgame ) {
-		cls.cgameStarted = qtrue;
-		CL_InitCGame();
+	if ( ( clientActiveApp->state > CA_CONNECTED && clientActiveApp->state != CA_CINEMATIC ) || clientActiveApp->startCgame ) {
+		clientActiveApp->cgameStarted = qtrue;
+		CL_InitCGame( clientActiveApp );
 		// send pure checksums
 		CL_SendPureChecksums();
 	}
 
-	cls.startCgame = qfalse;
+	clientActiveApp->startCgame = qfalse;
 }
 
 
@@ -1813,8 +2120,11 @@ static void CL_Snd_Restart_f( void )
 {
 	S_Shutdown();
 
-	// sound will be reinitialized by vid_restart
-	CL_Vid_Restart( REF_KEEP_CONTEXT /*REF_KEEP_WINDOW*/ );
+	// Sound will be reinitialized by vid_restart.  REF_KEEP_WINDOW
+	// destroys the device + recreates it on the !vk.active fallback;
+	// the renderer doesn't need full map-scoped preservation for a
+	// snd_restart (sound is independent of renderer context).
+	CL_Vid_Restart( REF_KEEP_WINDOW );
 }
 
 
@@ -1844,17 +2154,17 @@ CL_Configstrings_f
 ==================
 */
 static void CL_Configstrings_f( void ) {
-	if ( cls.state != CA_ACTIVE ) {
+	if ( clientActiveApp->state != CA_ACTIVE ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Not connected to a server.\n");
 		return;
 	}
 
 	for ( int i = 0 ; i < MAX_CONFIGSTRINGS ; i++ ) {
-		int ofs = cl.gameState.stringOffsets[ i ];
+		int ofs = clientActiveApp->cl.gameState.stringOffsets[ i ];
 		if ( !ofs ) {
 			continue;
 		}
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "%4i: %s\n", i, cl.gameState.stringData + ofs );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "%4i: %s\n", i, clientActiveApp->cl.gameState.stringData + ofs );
 	}
 }
 
@@ -1866,8 +2176,8 @@ CL_Clientinfo_f
 */
 static void CL_Clientinfo_f( void ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "--------- Client Information ---------\n" );
-	Com_Log( SEV_INFO, LOG_CH(ch_client), "state: %i\n", cls.state );
-	Com_Log( SEV_INFO, LOG_CH(ch_client), "Server: %s\n", cls.servername );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "state: %i\n", clientActiveApp->state );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "Server: %s\n", clientActiveApp->servername );
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "User info settings:\n");
 	Info_Print( Cvar_InfoString( CVAR_USERINFO, NULL ) );
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "--------------------------------------\n" );
@@ -1880,12 +2190,12 @@ CL_Serverinfo_f
 ==============
 */
 static void CL_Serverinfo_f( void ) {
-	int ofs = cl.gameState.stringOffsets[ CS_SERVERINFO ];
+	int ofs = clientActiveApp->cl.gameState.stringOffsets[ CS_SERVERINFO ];
 	if ( !ofs )
 		return;
 
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "Server info settings:\n" );
-	Info_Print( cl.gameState.stringData + ofs );
+	Info_Print( clientActiveApp->cl.gameState.stringData + ofs );
 }
 
 
@@ -1895,12 +2205,12 @@ CL_Systeminfo_f
 ===========
 */
 static void CL_Systeminfo_f( void ) {
-	int ofs = cl.gameState.stringOffsets[ CS_SYSTEMINFO ];
+	int ofs = clientActiveApp->cl.gameState.stringOffsets[ CS_SYSTEMINFO ];
 	if ( !ofs )
 		return;
 
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "System info settings:\n" );
-	Info_Print( cl.gameState.stringData + ofs );
+	Info_Print( clientActiveApp->cl.gameState.stringData + ofs );
 }
 
 
@@ -1923,22 +2233,31 @@ static void CL_CompleteCallvote(const char *args, int argNum )
 =================
 CL_DownloadsComplete
 
-Called when all downloading has been completed
+Called when all downloading has been completed.
+
+chunking: the synchronous cURL / downloadRestart early-return paths
+remain here (they exit without starting the load).  The actual load —
+CL_FlushMemory + CL_InitCGame + finalize — runs one phase per Com_Frame
+tick out of CL_DownloadsComplete_Tick below, mirroring SV_SpawnServer_Tick
+(sv_init.c).  This keeps the console + loading screen responsive between
+phases.  The cgame-VM-internal CG_INIT asset loop is still a single
+synchronous hitch inside its own phase — the VM cooperative-yield
+contract is the architectural follow-up.
 =================
 */
 static void CL_DownloadsComplete( void ) {
 
 #ifdef USE_CURL
 	// if we downloaded with cURL
-	if ( clc.cURLUsed ) {
-		clc.cURLUsed = qfalse;
+	if ( clientActiveApp->clc.cURLUsed ) {
+		clientActiveApp->clc.cURLUsed = qfalse;
 		CL_cURL_Shutdown();
-		if ( clc.cURLDisconnected ) {
-			if ( clc.downloadRestart ) {
-				FS_Restart( clc.checksumFeed );
-				clc.downloadRestart = qfalse;
+		if ( clientActiveApp->clc.cURLDisconnected ) {
+			if ( clientActiveApp->clc.downloadRestart ) {
+				FS_Restart( clientActiveApp->clc.checksumFeed );
+				clientActiveApp->clc.downloadRestart = qfalse;
 			}
-			clc.cURLDisconnected = qfalse;
+			clientActiveApp->clc.cURLDisconnected = qfalse;
 			CL_Reconnect_f();
 			return;
 		}
@@ -1946,13 +2265,13 @@ static void CL_DownloadsComplete( void ) {
 #endif
 
 	// if we downloaded files we need to restart the file system
-	if ( clc.downloadRestart ) {
-		clc.downloadRestart = qfalse;
+	if ( clientActiveApp->clc.downloadRestart ) {
+		clientActiveApp->clc.downloadRestart = qfalse;
 
-		FS_Restart(clc.checksumFeed); // We possibly downloaded a pak, restart the file system to load it
+		FS_Restart(clientActiveApp->clc.checksumFeed); // We possibly downloaded a pak, restart the file system to load it
 
 		// inform the server so we get new gamestate info
-		CL_AddReliableCommand( "donedl", qfalse );
+		CL_AddReliableCommand( clientActiveApp, "donedl", qfalse );
 
 		// by sending the donedl command we request a new gamestate
 		// so we don't want to load stuff yet
@@ -1960,38 +2279,97 @@ static void CL_DownloadsComplete( void ) {
 	}
 
 	// let the client game init and load data
-	cls.state = CA_LOADING;
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"cls.state: -> CA_LOADING (CL_DownloadsComplete: server=%s)\n",
+		clientActiveApp->servername[0] ? clientActiveApp->servername : "(local)" );
+	CL_SetState( clientActiveApp, CA_LOADING );
+	WiredUI_SetLoadingMenu( "ui/loading_screen.wui" );  // state→named-UI: map-load backdrop
 
-	// Pump the loop, this may change gamestate!
-	Com_EventLoop();
+	/* Kick off the async load state machine.  Actual work happens
+	 * one phase per Com_Frame tick in CL_DownloadsComplete_Tick. */
+	clientActiveApp->dlcomplete.phase = DLC_P1_EVENTLOOP;
+}
 
-	// if the gamestate was changed by calling Com_EventLoop
-	// then we loaded everything already and we don't want to do it again.
-	if ( cls.state != CA_LOADING ) {
+
+/*
+=================
+CL_DownloadsComplete_Tick
+
+Drive one phase of the async CL_DownloadsComplete state machine.  Called
+from Com_Frame once per tick, before CL_Frame, so the loading screen and
+console drawing happen between phases.  Mirrors SV_SpawnServer_Tick.
+
+Phase order:
+  P1  Event-loop pump        (Com_EventLoop; abort if state changed)
+  P2  Flush client memory    (CL_FlushMemory: CL_ShutdownAll + ClearMemory + StartHunkUsers)
+  P3  CGame init             (CL_InitCGame — single bounded VM hitch)
+  P4  Finalize               (callvote command, pure checksums, ready, packet)
+=================
+*/
+void CL_DownloadsComplete_Tick( void ) {
+	switch ( clientActiveApp->dlcomplete.phase ) {
+
+	case DLC_IDLE:
+		return;
+
+	/* ---- Phase 1: Pump the event loop ------------------------------------ */
+	case DLC_P1_EVENTLOOP:
+		// Pump the loop, this may change gamestate!
+		Com_EventLoop();
+
+		// if the gamestate was changed by calling Com_EventLoop
+		// then we loaded everything already and we don't want to do it again.
+		if ( clientActiveApp->state != CA_LOADING ) {
+			clientActiveApp->dlcomplete.phase = DLC_IDLE;
+			return;
+		}
+
+		clientActiveApp->dlcomplete.phase = DLC_P2_FLUSH_MEMORY;
+		return;
+
+	/* ---- Phase 2: Flush memory + CGame init (atomic pair) ---------------- */
+	//
+	// CL_FlushMemory clears the client hunk, shuts down VMs, and restarts
+	// hunk users into a partially-initialised state — the renderer is alive
+	// again but the cgame VM is gone.  If we yield to Com_Frame in that
+	// window, CL_Frame may try to render a loading screen whose dependencies
+	// are mid-rebuild.  Pair them as one atomic phase so CL_InitCGame
+	// restores a consistent state before Com_Frame loops back.  (A
+	// Com_sprintf buffer overflow once seen in this window was a separate
+	// log-sink bug, fixed by sizing the JSON header to
+	// LOG_JSON_HEADER_SIZE — the atomic-pair rationale here is architectural
+	// and independent of it.)  The VM-internal CG_INIT asset loop is still
+	// the architectural hitch — the VM cooperative-yield contract is the
+	// follow-up.
+	case DLC_P2_FLUSH_MEMORY:
+	case DLC_P3_INIT_CGAME:
+		CL_FlushMemory();
+		clientActiveApp->cgameStarted = qtrue;
+		CL_InitCGame( clientActiveApp );
+
+		clientActiveApp->dlcomplete.phase = DLC_P4_FINALIZE;
+		return;
+
+	/* ---- Phase 4: Finalize ----------------------------------------------- */
+	case DLC_P4_FINALIZE:
+		if ( clientActiveApp->clc.demofile == FS_INVALID_HANDLE ) {
+			Cmd_AddCommand( "callvote", NULL );
+			Cmd_SetCommandCompletionFunc( "callvote", CL_CompleteCallvote );
+		}
+
+		// set pure checksums
+		CL_SendPureChecksums();
+		WN_ClientSendReady( (int)( clientActiveApp - clientApps ) );
+
+		CL_WritePacket( clientActiveApp, 2 );
+
+		clientActiveApp->dlcomplete.phase = DLC_IDLE;
+		return;
+
+	default:
+		clientActiveApp->dlcomplete.phase = DLC_IDLE;
 		return;
 	}
-
-	// flush client memory and start loading stuff
-	// this will also (re)load the UI
-	// if this is a local client then only the client part of the hunk
-	// will be cleared, note that this is done after the hunk mark has been set
-	//if ( !com_sv_running->integer )
-	CL_FlushMemory();
-
-	// initialize the CGame
-	cls.cgameStarted = qtrue;
-	CL_InitCGame();
-
-	if ( clc.demofile == FS_INVALID_HANDLE ) {
-		Cmd_AddCommand( "callvote", NULL );
-		Cmd_SetCommandCompletionFunc( "callvote", CL_CompleteCallvote );
-	}
-
-	// set pure checksums
-	CL_SendPureChecksums();
-	WN_ClientSendReady();
-
-	CL_WritePacket( 2 );
 }
 
 
@@ -2010,8 +2388,8 @@ static void CL_BeginDownload( const char *localName, const char *remoteName ) {
 				"Remotename: %s\n"
 				"****************************\n", localName, remoteName);
 
-	Q_strncpyz ( clc.downloadName, localName, sizeof(clc.downloadName) );
-	Com_sprintf( clc.downloadTempName, sizeof(clc.downloadTempName), "%s.tmp", localName );
+	Q_strncpyz ( clientActiveApp->clc.downloadName, localName, sizeof(clientActiveApp->clc.downloadName) );
+	Com_sprintf( clientActiveApp->clc.downloadTempName, sizeof(clientActiveApp->clc.downloadTempName), "%s.tmp", localName );
 
 	// Set so UI gets access to it
 	Cvar_Set( "cl_downloadName", remoteName );
@@ -2019,10 +2397,10 @@ static void CL_BeginDownload( const char *localName, const char *remoteName ) {
 	Cvar_Set( "cl_downloadCount", "0" );
 	Cvar_SetIntegerValue( "cl_downloadTime", cls.realtime );
 
-	clc.downloadBlock = 0; // Starting new file
-	clc.downloadCount = 0;
+	clientActiveApp->clc.downloadBlock = 0; // Starting new file
+	clientActiveApp->clc.downloadCount = 0;
 
-	CL_AddReliableCommand( va("download %s", remoteName), qfalse );
+	CL_AddReliableCommand( clientActiveApp, va("download %s", remoteName), qfalse );
 }
 
 
@@ -2036,20 +2414,20 @@ A download completed or failed
 void CL_NextDownload( void )
 {
 	// A download has finished, check whether this matches a referenced checksum
-	if(*clc.downloadName)
+	if(*clientActiveApp->clc.downloadName)
 	{
-		const char *zippath = FS_BuildOSPath(Cvar_VariableString("fs_homepath"), clc.downloadName, NULL );
+		const char *zippath = FS_BuildOSPath(Cvar_VariableString("fs_homepath"), clientActiveApp->clc.downloadName, NULL );
 
 		if(!FS_CompareZipChecksum(zippath))
-			Com_Terminate( TERM_CLIENT_DROP, "Incorrect checksum for file: %s", clc.downloadName);
+			Com_Terminate( TERM_CLIENT_DROP, "Incorrect checksum for file: %s", clientActiveApp->clc.downloadName);
 	}
 
-	*clc.downloadTempName = *clc.downloadName = '\0';
+	*clientActiveApp->clc.downloadTempName = *clientActiveApp->clc.downloadName = '\0';
 	Cvar_Set("cl_downloadName", "");
 
 	// We are looking to start a download here
-	if (*clc.downloadList) {
-		char *s = clc.downloadList;
+	if (*clientActiveApp->clc.downloadList) {
+		char *s = clientActiveApp->clc.downloadList;
 		char *remoteName, *localName;
 		qboolean useCURL = qfalse;
 
@@ -2074,13 +2452,13 @@ void CL_NextDownload( void )
 
 #ifdef USE_CURL
 		if(!(cl_allowDownload->integer & DLF_NO_REDIRECT)) {
-			if(clc.sv_allowDownload & DLF_NO_REDIRECT) {
+			if(clientActiveApp->clc.sv_allowDownload & DLF_NO_REDIRECT) {
 				Com_Log( SEV_INFO, LOG_CH(ch_client), "WARNING: server does not "
 					"allow download redirection "
 					"(sv_allowDownload is %d)\n",
-					clc.sv_allowDownload);
+					clientActiveApp->clc.sv_allowDownload);
 			}
-			else if(!*clc.sv_dlURL) {
+			else if(!*clientActiveApp->clc.sv_dlURL) {
 				Com_Log( SEV_INFO, LOG_CH(ch_client), "WARNING: server allows "
 					"download redirection, but does not "
 					"have sv_dlURL set\n");
@@ -2091,11 +2469,11 @@ void CL_NextDownload( void )
 			}
 			else {
 				CL_cURL_BeginDownload(localName, va("%s/%s",
-					clc.sv_dlURL, remoteName));
+					clientActiveApp->clc.sv_dlURL, remoteName));
 				useCURL = qtrue;
 			}
 		}
-		else if(!(clc.sv_allowDownload & DLF_NO_REDIRECT)) {
+		else if(!(clientActiveApp->clc.sv_allowDownload & DLF_NO_REDIRECT)) {
 			Com_Log( SEV_INFO, LOG_CH(ch_client), "WARNING: server allows download "
 				"redirection, but it disabled by client "
 				"configuration (cl_allowDownload is %d)\n",
@@ -2113,10 +2491,10 @@ void CL_NextDownload( void )
 			}
 			CL_BeginDownload( localName, remoteName );
 		}
-		clc.downloadRestart = qtrue;
+		clientActiveApp->clc.downloadRestart = qtrue;
 
 		// move over the rest
-		memmove( clc.downloadList, s, strlen(s) + 1 );
+		memmove( clientActiveApp->clc.downloadList, s, strlen(s) + 1 );
 
 		return;
 	}
@@ -2129,22 +2507,22 @@ void CL_NextDownload( void )
 =================
 CL_SetupQuicNetchan
 
-Phase D removed the UDP netchan handshake, but the client still uses the
+The QUIC migration removed the UDP netchan handshake, but the client still uses the
 trimmed netchan state for packet pacing, packet-history bookkeeping, and to
 select the QUIC send path in CL_WritePacket. Seed the same fields that the old
 Netchan_Setup path used to initialize.
 
 Note: address type is left as-is (NA_IP, NA_IP6, NA_LOOPBACK).  NA_QUIC /
-NA_QUIC6 are transport-internal types; use (clc.quic_conn != CONN_INVALID) to
+NA_QUIC6 are transport-internal types; use (clientActiveApp->clc.quic_conn != CONN_INVALID) to
 test whether we are on a QUIC connection.
 =================
 */
 static void CL_SetupQuicNetchan( void )
 {
-	clc.netchan.remoteAddress = clc.serverAddress;
-	clc.netchan.incomingSequence = 0;
-	clc.netchan.outgoingSequence = 1;
-	clc.netchan.isLANAddress = Sys_IsLANAddress( &clc.netchan.remoteAddress );
+	clientActiveApp->clc.netchan.remoteAddress = clientActiveApp->clc.serverAddress;
+	clientActiveApp->clc.netchan.incomingSequence = 0;
+	clientActiveApp->clc.netchan.outgoingSequence = 1;
+	clientActiveApp->clc.netchan.isLANAddress = Sys_IsLANAddress( &clientActiveApp->clc.netchan.remoteAddress );
 }
 
 
@@ -2156,7 +2534,18 @@ After receiving a valid game state, we valid the cgame and local zip files here
 and determine if we need to download them
 =================
 */
-void CL_InitDownloads( void ) {
+void CL_InitDownloads( clientApp_t *app ) {
+
+	/* An additional in-process client shares this process's filesystem with the
+	 * integrated host — every pak the server references is already loaded. It
+	 * downloads nothing and does not run the cgame-loading flow (CL_DownloadsComplete
+	 * → CL_InitCGame → a cgame VM, which a runtime-headless client has no use for).
+	 * It just advances to CA_CONNECTED; the headless prime path takes it from
+	 * there to CA_PRIMED without a VM. */
+	if ( app != clientActiveApp ) {
+		CL_SetState( app, CA_CONNECTED );
+		return;
+	}
 
 	if ( !(cl_allowDownload->integer & DLF_ENABLE) )
 	{
@@ -2173,15 +2562,15 @@ void CL_InitDownloads( void ) {
 				"Go to the setting menu to turn on autodownload, or get the file elsewhere\n\n", missingfiles );
 		}
 	}
-	else if ( FS_ComparePaks( clc.downloadList, sizeof( clc.downloadList ) , qtrue ) ) {
+	else if ( FS_ComparePaks( app->clc.downloadList, sizeof( app->clc.downloadList ) , qtrue ) ) {
 
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "Need paks: %s\n", clc.downloadList );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Need paks: %s\n", app->clc.downloadList );
 
-		if ( *clc.downloadList ) {
+		if ( *app->clc.downloadList ) {
 			// if autodownloading is not enabled on the server
-			cls.state = CA_CONNECTED;
+			CL_SetState( app, CA_CONNECTED );
 
-			*clc.downloadTempName = *clc.downloadName = '\0';
+			*app->clc.downloadTempName = *app->clc.downloadName = '\0';
 			Cvar_Set( "cl_downloadName", "" );
 
 			CL_NextDownload();
@@ -2191,12 +2580,12 @@ void CL_InitDownloads( void ) {
 	}
 
 #ifdef USE_CURL
-	if ( cl_mapAutoDownload->integer && ( !(clc.sv_allowDownload & DLF_ENABLE) || clc.demoplaying ) )
+	if ( cl_mapAutoDownload->integer && ( !(app->clc.sv_allowDownload & DLF_ENABLE) || app->clc.demoplaying ) )
 	{
 		const char *info, *mapname, *bsp;
 
 		// get map name and BSP file name
-		info = cl.gameState.stringData + cl.gameState.stringOffsets[ CS_SERVERINFO ];
+		info = app->cl.gameState.stringData + app->cl.gameState.stringOffsets[ CS_SERVERINFO ];
 		mapname = Info_ValueForKey( info, "mapname" );
 		bsp = va( "maps/%s.bsp", mapname );
 
@@ -2204,7 +2593,7 @@ void CL_InitDownloads( void ) {
 		{
 			if ( CL_Download( "dlmap", mapname, qtrue ) )
 			{
-				cls.state = CA_CONNECTED; // prevent continue loading and shows the ui download progress screen
+				CL_SetState( app, CA_CONNECTED ); // prevent continue loading and shows the ui download progress screen
 				return;
 			}
 		}
@@ -2225,30 +2614,30 @@ Resend a connect message if the last one has timed out
 static void CL_CheckForResend( void ) {
 
 	// don't send anything if playing back a demo
-	if ( clc.demoplaying ) {
+	if ( clientActiveApp->clc.demoplaying ) {
 		return;
 	}
 
 	// resend if we haven't gotten a reply yet
-	if ( cls.state != CA_CONNECTING ) {
+	if ( clientActiveApp->state != CA_CONNECTING ) {
 		return;
 	}
 
-	if ( cls.realtime - clc.connectTime < RECONNECT_TIMEOUT ) {
+	if ( cls.realtime - clientActiveApp->clc.connectTime < RECONNECT_TIMEOUT ) {
 		return;
 	}
 
-	clc.connectTime = cls.realtime;	// for retransmit requests
-	clc.connectPacketCount++;
+	clientActiveApp->clc.connectTime = cls.realtime;	// for retransmit requests
+	clientActiveApp->clc.connectPacketCount++;
 
-	switch ( cls.state ) {
+	switch ( clientActiveApp->state ) {
 	case CA_CONNECTING:
 		// QUIC path: skip the UDP challenge round-trip.
 		// Build userinfo with challenge included (so server echoes it back in connectResponse),
 		// then initiate QUIC handshake via transport->connect() if not already started.
 		// "loopback" address string is handled inside wn_connect → WN_ClientConnect,
 		// which maps it to 127.0.0.1 so picoquic can send real UDP datagrams.
-		if ( !WN_ClientIsConnecting() ) {
+		if ( !( transport && transport->is_connecting && transport->is_connecting() ) ) {
 			char   info[MAX_INFO_STRING * 2];
 			qboolean truncated = qfalse;
 			int qport = Cvar_VariableIntegerValue( "net_qport" );
@@ -2256,18 +2645,51 @@ static void CL_CheckForResend( void ) {
 
 			// Embed client challenge so server echoes it back in connectResponse.
 			Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "challenge",
-									va( "%i", clc.challenge ) );
+									va( "%i", clientActiveApp->clc.challenge ) );
 			Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "protocol",
 									com_protocol->string );
 			Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "qport",
 									va( "%i", qport ) );
 
 			CL_SetupQuicNetchan();
-			if ( transport ) {
-				clc.quic_conn = transport->connect(
-					NET_AdrToString( &clc.serverAddress ),
-					(int)BigShort( clc.serverAddress.port ),
-					info );
+			/* In-process-queue (B2+B3): the integrated host (this client + the
+			 * same-process listen server, servername "localhost") connects over
+			 * the in-memory backend — a buffer-pass over per-app rings, no
+			 * loopback-QUIC. A remote connect stays on QUIC. The returned handle
+			 * encodes the backend: 100+ → in-mem (transport_for_handle), else
+			 * QUIC. The client-side recv pump (global `transport`) reads
+			 * wtcl_array[0] either way, so no recv-side branch is needed. */
+			{
+				/* The integrated host (listen server) is the ONLY connection that
+				 * may use the in-memory backend. The deciding factor is whether an
+				 * in-process server is actually being hosted in THIS process — NOT
+				 * the servername string. Routing on servername=="localhost" alone is
+				 * wrong: a `connect localhost` to a SEPARATE process (a standalone
+				 * wired-headless on the same box) also carries servername "localhost"
+				 * but has no in-process server to answer the in-mem rings, so it would
+				 * hang forever at CA_CONNECTING. That external connect must take the
+				 * network (loopback QUIC) path instead.
+				 *
+				 * com_sv_running alone is NOT sufficient: the integrated host enters
+				 * CA_CONNECTING and issues this connect during CL_MapLoading, which
+				 * runs inside SV_SpawnServer_Tick's SPAWN_P1 phase BEFORE SV_Startup
+				 * sets sv_running=1 (verified: sv_running=0 at this point). So also
+				 * accept an in-flight spawn (!SV_IsSpawnIdle()). For an external
+				 * `connect localhost` CL_Connect_f has already killed any local server
+				 * (sv_killserver), leaving sv_running=0 AND the spawn idle, so neither
+				 * condition holds and the connect correctly routes over the network.
+				 * The in-mem server end is admitted later by WN_DrainPendingConnects
+				 * once the spawn reaches SPAWN_IDLE, so the early in-mem connect is
+				 * simply queued — order-independent. */
+				qboolean inProcessServer = ( com_sv_running && com_sv_running->integer ) || !SV_IsSpawnIdle();
+				qboolean useInmem = inProcessServer && !Q_stricmp( clientActiveApp->servername, "localhost" );
+				transport_t *connTransport = useInmem ? &inmem_transport : transport;
+				if ( connTransport ) {
+					clientActiveApp->clc.quic_conn = connTransport->connect(
+						NET_AdrToString( &clientActiveApp->clc.serverAddress ),
+						(int)BigShort( clientActiveApp->clc.serverAddress.port ),
+						info );
+				}
 			}
 		} else {
 			// Already connecting — just pump timers (WN_ClientFrame is
@@ -2279,32 +2701,6 @@ static void CL_CheckForResend( void ) {
 	default:
 		break;
 	}
-}
-
-
-/*
-===================
-CL_MotdPacket
-===================
-*/
-static void CL_MotdPacket( const netadr_t *from ) {
-	// if not from our server, ignore it
-	if ( !NET_CompareAdr( from, &cls.updateServer ) ) {
-		return;
-	}
-
-	const char *info = Cmd_Argv(1);
-
-	// check challenge
-	const char *challenge = Info_ValueForKey( info, "challenge" );
-	if ( strcmp( challenge, cls.updateChallenge ) != 0 ) {
-		return;
-	}
-
-	challenge = Info_ValueForKey( info, "motd" );
-
-	Q_strncpyz( cls.updateInfoString, info, sizeof( cls.updateInfoString ) );
-	Cvar_Set( "cl_motdString", challenge );
 }
 
 
@@ -2546,7 +2942,7 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 	// challenge from the server we are connecting to
 	if ( !Q_stricmp(c, "challengeResponse" ) ) {
 
-		if ( cls.state != CA_CONNECTING ) {
+		if ( clientActiveApp->state != CA_CONNECTING ) {
 			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Unwanted challenge response received. Ignored.\n" );
 			return qfalse;
 		}
@@ -2560,22 +2956,22 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 			int sv_proto = atoi( s );
 		}
 
-		if ( *c == '\0' || challenge != clc.challenge )
+		if ( *c == '\0' || challenge != clientActiveApp->clc.challenge )
 		{
 			Com_Log( SEV_INFO, LOG_CH(ch_client), "Bad challenge for challengeResponse. Ignored.\n" );
 			return qfalse;
 		}
 
 		// start sending connect instead of challenge request packets
-		clc.challenge = atoi(Cmd_Argv(1));
-		cls.state = CA_CHALLENGING;
-		clc.connectPacketCount = 0;
-		clc.connectTime = cls.realtime - RECONNECT_TIMEOUT;
+		clientActiveApp->clc.challenge = atoi(Cmd_Argv(1));
+		CL_SetState( clientActiveApp, CA_CHALLENGING );
+		clientActiveApp->clc.connectPacketCount = 0;
+		clientActiveApp->clc.connectTime = cls.realtime - RECONNECT_TIMEOUT;
 
 		// take this address as the new server address.  This allows
 		// a server proxy to hand off connections to multiple servers
-		clc.serverAddress = *from;
-		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "challengeResponse: %d\n", clc.challenge );
+		clientActiveApp->clc.serverAddress = *from;
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "challengeResponse: %d\n", clientActiveApp->clc.challenge );
 		return qtrue;
 	}
 
@@ -2594,28 +2990,28 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 			return qfalse;
 		}
 
-		Q_strncpyz( clc.wiredRconChallenge, challengeStr, sizeof( clc.wiredRconChallenge ) );
-		clc.wiredRconHasChallenge = qtrue;
-		clc.wiredRconAddress = *from;
+		Q_strncpyz( clientActiveApp->clc.wiredRconChallenge, challengeStr, sizeof( clientActiveApp->clc.wiredRconChallenge ) );
+		clientActiveApp->clc.wiredRconHasChallenge = qtrue;
+		clientActiveApp->clc.wiredRconAddress = *from;
 
-		Com_HMAC_SHA256_Hex( cl_wiredRconPassword ? cl_wiredRconPassword->string : "", clc.wiredRconChallenge, hmacHex );
-		NET_OutOfBandPrint( NS_CLIENT, &clc.wiredRconAddress, "rcon_verify %s", hmacHex );
+		Com_HMAC_SHA256_Hex( cl_wiredRconPassword ? cl_wiredRconPassword->string : "", clientActiveApp->clc.wiredRconChallenge, hmacHex );
+		NET_OutOfBandPrint( NS_CLIENT, &clientActiveApp->clc.wiredRconAddress, "rcon_verify %s", hmacHex );
 		return qfalse;
 	}
 
 	if ( !Q_stricmp( c, "rconAuthResult" ) ) {
 		const char *result = Cmd_Argv( 1 );
 		if ( !Q_stricmp( result, "ok" ) ) {
-			clc.wiredRconAuthed = qtrue;
+			clientActiveApp->clc.wiredRconAuthed = qtrue;
 			Com_Log( SEV_INFO, LOG_CH(ch_client), "Wired RCON: authenticated.\n" );
 		} else {
-			clc.wiredRconAuthed = qfalse;
+			clientActiveApp->clc.wiredRconAuthed = qfalse;
 			Com_Log( SEV_INFO, LOG_CH(ch_client), "Wired RCON: authentication failed.\n" );
 		}
 		return qfalse;
 	}
 
-	/* Phase D: "connectResponse" OOB handler removed — QUIC uses TLV ACCEPT on stream 0.
+	/* "connectResponse" OOB handler removed — QUIC uses TLV ACCEPT on stream 0.
 	   CA_CONNECTED is set by CL_InitDownloads when bootstrap state arrives on
 	   the reliable bootstrap channel. */
 
@@ -2634,28 +3030,22 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 	// echo request from server
 	if ( !Q_stricmp(c, "echo") ) {
 		// NOTE: we may have to add exceptions for auth and update servers
-		if ( NET_CompareAdr( from, &clc.serverAddress ) ) {
+		if ( NET_CompareAdr( from, &clientActiveApp->clc.serverAddress ) ) {
 			NET_OutOfBandPrint( NS_CLIENT, from, "%s", Cmd_Argv(1) );
 			return qtrue;
 		}
 		return qfalse;
 	}
 
-	// Phase 6.4: legacy "keyAuthorize" packet handler removed — Wired never
+	// legacy "keyAuthorize" packet handler removed — Wired never
 	// talks to the id authorize server, so any such packet is unsolicited.
-
-	// global MOTD from id
-	if ( !Q_stricmp(c, "motd") ) {
-		CL_MotdPacket( from );
-		return qfalse;
-	}
 
 	// print string from server
 	if ( !Q_stricmp(c, "print") ) {
 		// NOTE: we may have to add exceptions for auth and update servers
-		if ( NET_CompareAdr( from, &clc.serverAddress ) ) {
+		if ( NET_CompareAdr( from, &clientActiveApp->clc.serverAddress ) ) {
 			s = MSG_ReadString( msg );
-			Q_strncpyz( clc.serverMessage, s, sizeof( clc.serverMessage ) );
+			Q_strncpyz( clientActiveApp->clc.serverMessage, s, sizeof( clientActiveApp->clc.serverMessage ) );
 			Com_Log( SEV_INFO, LOG_CH(ch_client), "%s", s );
 			return qtrue;
 		}
@@ -2690,11 +3080,11 @@ void CL_PacketEvent( const netadr_t *from, msg_t *msg ) {
 	if ( msg->cursize < 4 )
 		return;
 
-	/* Phase D: Only OOB packets (server browser infoResponse/statusResponse) are handled here.
+	/* Only OOB packets (server browser infoResponse/statusResponse) are handled here.
 	   All game traffic flows through QUIC streams and datagrams. */
 	if ( *(int *)msg->data == -1 ) {
 		if ( CL_ConnectionlessPacket( from, msg ) )
-			clc.lastPacketTime = cls.realtime;
+			clientActiveApp->clc.lastPacketTime = cls.realtime;
 	}
 }
 
@@ -2711,23 +3101,52 @@ static void CL_CheckTimeout( void ) {
 	// cl.timeoutcount, causing a false disconnect after pauses longer than
 	// cl_timeout seconds.  Stock Q3's in-memory loopback has zero transport
 	// latency so it never sees this window; QUIC loopback does.
-	static qboolean wasBothPaused = qfalse;
 	qboolean isBothPaused = ( CL_CheckPaused() && sv_paused->integer );
-	if ( wasBothPaused && !isBothPaused ) {
-		clc.lastPacketTime = cls.realtime;
+	if ( clientActiveApp->timeoutWasBothPaused && !isBothPaused ) {
+		clientActiveApp->clc.lastPacketTime = cls.realtime;
+
+		/* Pause→unpause time re-baseline — SYMMETRIC (momentum-safe, 2026-07-09).
+		 *
+		 * cls.realtime advances during pause while cl.snap.serverTime is frozen,
+		 * so on unpause the stale-forward delta makes serverTime leap ~pause-
+		 * duration ahead of the snapshot → a late <RESET> lurch. The earlier
+		 * "Fix B" re-baselined ONLY serverTimeDelta and left cl.oldServerTime at
+		 * its pre-pause value T0; because T0 > snap.serverTime, the backwards-flow
+		 * clamp (cl_cgame.c:2630) then PINNED serverTime at T0, every usercmd got
+		 * stamped T0, the cgame skipped them all (cg_predict.c:510) → zero forward
+		 * Pmove → the "drop straight down" momentum regression.
+		 *
+		 * The correct re-baseline is SYMMETRIC — set BOTH serverTimeDelta AND
+		 * oldServerTime to the snapshot, exactly like the two legitimate re-
+		 * baseline sites (CL_FirstSnapshot cl_cgame.c:2456-2457, <RESET>
+		 * cl_cgame.c:2384-2386). With oldServerTime moved down to snap.serverTime,
+		 * the backwards-flow clamp does NOT fire (serverTime == oldServerTime, not
+		 * < it), so there is no pin: serverTime sits exactly on the snapshot and
+		 * then advances forward normally, usercmds carry advancing time, Pmove
+		 * integrates forward — momentum preserved AND no <RESET> lurch.
+		 *
+		 * Local single-player only by construction — sv_paused is set only by
+		 * SV_CheckPaused for the lone-human integrated host, so a real networked
+		 * client (sv_paused never set for it) never takes this edge and keeps its
+		 * RTT-based time-sync untouched. Skipped in demo playback (delta fixed). */
+		if ( clientActiveApp->cl.snap.valid && !clientActiveApp->clc.demoplaying ) {
+			clientActiveApp->cl.serverTimeDelta =
+				clientActiveApp->cl.snap.serverTime - cls.realtime;
+			clientActiveApp->cl.oldServerTime = clientActiveApp->cl.snap.serverTime;
+		}
 	}
-	wasBothPaused = isBothPaused;
+	clientActiveApp->timeoutWasBothPaused = isBothPaused;
 
 	//
 	// check timeout
 	//
 	if ( ( !CL_CheckPaused() || !sv_paused->integer )
-		&& cls.state >= CA_CONNECTED && cls.state != CA_CINEMATIC
-		&& cls.realtime - clc.lastPacketTime > cl_timeout->integer * 1000 ) {
-		if ( ++cl.timeoutcount > 5 ) { // timeoutcount saves debugger
+		&& clientActiveApp->state >= CA_CONNECTED && clientActiveApp->state != CA_CINEMATIC
+		&& cls.realtime - clientActiveApp->clc.lastPacketTime > cl_timeout->integer * 1000 ) {
+		if ( ++clientActiveApp->cl.timeoutcount > 5 ) { // timeoutcount saves debugger
 			Com_Log( SEV_INFO, LOG_CH(ch_client), "\nServer connection timed out.\n" );
 			Com_SetLastError( "Server connection timed out." );
-			if ( !CL_Disconnect( qfalse ) ) { // restart client if not done already
+			if ( !CL_Disconnect( clientActiveApp, qfalse ) ) { // restart client if not done already
 				CL_FlushMemory();
 			}
 			if ( UI_VM_ACTIVE ) {
@@ -2736,7 +3155,7 @@ static void CL_CheckTimeout( void ) {
 			return;
 		}
 	} else {
-		cl.timeoutcount = 0;
+		clientActiveApp->cl.timeoutcount = 0;
 	}
 }
 
@@ -2763,7 +3182,7 @@ CL_NoDelay
 */
 qboolean CL_NoDelay( void )
 {
-	if ( CL_VideoRecording() || ( com_timedemo->integer && clc.demofile != FS_INVALID_HANDLE ) )
+	if ( CL_VideoRecording() || ( com_timedemo->integer && clientActiveApp->clc.demofile != FS_INVALID_HANDLE ) )
 		return qtrue;
 
 	return qfalse;
@@ -2778,7 +3197,7 @@ CL_CheckUserinfo
 static void CL_CheckUserinfo( void ) {
 
 	// don't add reliable commands when not yet connected
-	if ( cls.state < CA_CONNECTED )
+	if ( clientActiveApp->state < CA_CONNECTED )
 		return;
 
 	// don't overflow the reliable command buffer when paused
@@ -2798,7 +3217,7 @@ static void CL_CheckUserinfo( void ) {
 			COM_WARN( LOG_CH(ch_client), "WARNING: oversize userinfo, you might be not able to play on remote server!\n" );
 		}
 
-		CL_AddReliableCommand( va( "userinfo \"%s\"", info ), qfalse );
+		CL_AddReliableCommand( clientActiveApp, va( "userinfo \"%s\"", info ), qfalse );
 	}
 }
 
@@ -2820,21 +3239,22 @@ previous CS_WARMUP value and fire the alert on any warmup -> match or
 warmup -> new-warmup-value transition.
 ==================
 */
-static int  cl_lastWarmupValue = 0;
-static int  cl_matchAlertExpire = 0;
+// cl_lastWarmupValue / cl_matchAlertExpire relocated to clientApp_t
+// (lastWarmupValue / matchAlertExpire) — per-app, in-process-queue L6.
 
 static void CL_CheckMatchAlerts( void )
 {
+	clientApp_t *app = CL_ActiveApp();
 	qboolean fire = qfalse;
 
 	/* clear the s_autoMute override once the alert window closes */
-	if ( cl_matchAlertExpire > 0 && Sys_Milliseconds() >= cl_matchAlertExpire ) {
-		cl_matchAlertExpire = 0;
+	if ( app->matchAlertExpire > 0 && Sys_Milliseconds() >= app->matchAlertExpire ) {
+		app->matchAlertExpire = 0;
 		S_SetMuteOverride( qfalse );
 	}
 
-	if ( cls.state != CA_ACTIVE ) {
-		cl_lastWarmupValue = 0;
+	if ( clientActiveApp->state != CA_ACTIVE ) {
+		app->lastWarmupValue = 0;
 		return;
 	}
 
@@ -2845,25 +3265,25 @@ static void CL_CheckMatchAlerts( void )
 	if ( CS_WARMUP < 0 || CS_WARMUP >= MAX_CONFIGSTRINGS )
 		return;
 
-	int ofs = cl.gameState.stringOffsets[ CS_WARMUP ];
+	int ofs = clientActiveApp->cl.gameState.stringOffsets[ CS_WARMUP ];
 	if ( ofs == 0 )
 		return;
 
-	const char *s = cl.gameState.stringData + ofs;
+	const char *s = clientActiveApp->cl.gameState.stringData + ofs;
 	int warmup = atoi( s );
 
 	/* trigger whenever the warmup value transitions — either warmup
 	   begins (0 -> positive), a new restart time is scheduled
 	   (positive -> new positive), or warmup ends (positive -> 0 or
 	   anything -> negative for "match live") */
-	if ( warmup != cl_lastWarmupValue ) {
+	if ( warmup != app->lastWarmupValue ) {
 		/* only treat transitions that actually represent a match start
 		   event — avoid firing on the initial gamestate parse where
-		   cl_lastWarmupValue is still 0 and warmup is 0 */
-		if ( cl_lastWarmupValue != 0 || warmup != 0 ) {
+		   app->lastWarmupValue is still 0 and warmup is 0 */
+		if ( app->lastWarmupValue != 0 || warmup != 0 ) {
 			fire = qtrue;
 		}
-		cl_lastWarmupValue = warmup;
+		app->lastWarmupValue = warmup;
 	}
 
 	if ( !fire )
@@ -2891,7 +3311,7 @@ static void CL_CheckMatchAlerts( void )
 	}
 	if ( bits & 8 ) {
 		S_SetMuteOverride( qtrue );
-		cl_matchAlertExpire = Sys_Milliseconds() + 5000;
+		app->matchAlertExpire = Sys_Milliseconds() + 5000;
 	}
 }
 
@@ -2937,7 +3357,8 @@ Two cases after CL_Disconnect(qfalse):
       renderer and UI — the deferred check inside CL_StartHunkUsers fires
       and shows the dialog as soon as WiredUI is back up.
 */
-static char cl_pendingConnectError[512];
+// cl_pendingConnectError relocated to clientApp_t.pendingConnectError —
+// per-app, in-process-queue L6. Accessed via CL_ActiveApp().
 
 static void CL_CheckConnectError( void )
 {
@@ -2945,17 +3366,18 @@ static void CL_CheckConnectError( void )
 
 	// EB7: guard covers CA_CONNECTING + CA_CHALLENGING and any state
 	// between disconnected and fully active.
-	if ( cls.state <= CA_DISCONNECTED || cls.state >= CA_ACTIVE )
+	if ( clientActiveApp->state <= CA_DISCONNECTED || clientActiveApp->state >= CA_ACTIVE )
 		return;
-	if ( !WN_ClientHasError( msg, sizeof(msg) ) )
+	if ( !( transport && transport->get_error && transport->get_error( msg, sizeof(msg) ) ) )
 		return;
 
 	// Consume before CL_Disconnect so the error slot is clean on retry.
-	WN_ClientClearError();
+	if ( transport && transport->clear_error )
+		transport->clear_error();
 
 	COM_WARN( LOG_CH(ch_client), "Connect failed: %s\n", msg );
 	Com_SetLastError( "%s", msg );
-	CL_Disconnect( qfalse );
+	CL_Disconnect( clientActiveApp, qfalse );
 
 	if ( cls.uiStarted ) {
 		// UI is still up — show the error dialog directly.
@@ -2964,7 +3386,7 @@ static void CL_CheckConnectError( void )
 	} else {
 		// Renderer is down (SV_SpawnServer wiped it).  Restart everything
 		// and let the deferred check in CL_StartHunkUsers show the dialog.
-		Q_strncpyz( cl_pendingConnectError, msg, sizeof( cl_pendingConnectError ) );
+		Q_strncpyz( CL_ActiveApp()->pendingConnectError, msg, sizeof( CL_ActiveApp()->pendingConnectError ) );
 		CL_FlushMemory();
 	}
 }
@@ -2988,40 +3410,46 @@ void CL_Frame( int msec, int realMsec ) {
 
 #if FEAT_WIRED_UI
 	CL_PROF(store, WiredStore_BeginFrame());
+	/* Keep Clay layout state coherent.
+	 * Does NOT yet drive rendering — SCR_DrawScreenField still dispatches
+	 * panels below. Later passes take over rendering and retire the legacy
+	 * dispatcher (docs/wiredui-compositor-spec.md §13). */
+	WiredUI_CompositorFrame( cls.realtime );
 #endif
 
 	// save the msec before checking pause
 	cls.realFrametime = realMsec;
 
 #ifdef USE_CURL
-	if ( clc.downloadCURLM ) {
+	if ( clientActiveApp->clc.downloadCURLM ) {
 		CL_cURL_PerformDownload();
 		// we can't process frames normally when in disconnected
 		// download mode since the ui vm expects cls.state to be
 		// CA_CONNECTED
-		if ( clc.cURLDisconnected ) {
+		if ( clientActiveApp->clc.cURLDisconnected ) {
 			cls.frametime = msec;
 			cls.realtime += msec;
 			cls.framecount++;
 			SCR_UpdateScreen();
 			S_Update( realMsec );
-			Con_RunConsole();
+			Con_RunConsole( ( Key_GetCatcher() & KEYCATCH_CONSOLE ) != 0, cls.realFrametime );
 			return;
 		}
 	}
 #endif
 
-	if ( cls.state == CA_DISCONNECTED && !( Key_GetCatcher( ) & KEYCATCH_UI )
-		&& !com_sv_running->integer && UI_VM_ACTIVE ) {
-		// if disconnected, bring up the menu
-		S_StopAllSounds();
-		UI_CALL_SET_ACTIVE( UIMENU_MAIN );
-	}
+	/* Boot auto-push retired: at CA_DISCONNECTED the bg_attract layer is
+	 * the sole visible surface (policy/bg_attract.c gates only on
+	 * clientActiveApp->state). The first non-ESC keypress / mouse click promotes the
+	 * user into the main menu (cl_keys.c CL_KeyDownEvent first-input
+	 * branch). Error-recovery transitions (timeout, connect-failed,
+	 * deferred connect error) still call UI_CALL_SET_ACTIVE(UIMENU_MAIN)
+	 * explicitly elsewhere to surface the error dialog over main. */
 
 	// if recording an avi, lock to a fixed fps
 	if ( CL_VideoRecording() && msec ) {
 		// save the current screen
-		if ( cls.state == CA_ACTIVE || cl_forceavidemo->integer ) {
+		if ( clientActiveApp->state == CA_ACTIVE || cl_forceavidemo->integer ) {
 			float fps, frameDuration;
 
 			if ( com_timescale->value > 0.0001f )
@@ -3029,19 +3457,19 @@ void CL_Frame( int msec, int realMsec ) {
 			else
 				fps = 1000.0f;
 
-			frameDuration = MAX( 1000.0f / fps, 1.0f ) + clc.aviVideoFrameRemainder;
+			frameDuration = MAX( 1000.0f / fps, 1.0f ) + clientActiveApp->clc.aviVideoFrameRemainder;
 
 			CL_TakeVideoFrame();
 
 			msec = (int)frameDuration;
-			clc.aviVideoFrameRemainder = frameDuration - msec;
+			clientActiveApp->clc.aviVideoFrameRemainder = frameDuration - msec;
 
 			realMsec = msec; // sync sound duration
 		}
 	}
 
-	if ( cl_autoRecordDemo->integer && !clc.demoplaying ) {
-		if ( cls.state == CA_ACTIVE && !clc.demorecording ) {
+	if ( cl_autoRecordDemo->integer && !clientActiveApp->clc.demoplaying ) {
+		if ( clientActiveApp->state == CA_ACTIVE && !clientActiveApp->clc.demorecording ) {
 			// If not recording a demo, and we should be, start one
 			qtime_t	now;
 			char		mapName[ MAX_QPATH ];
@@ -3056,7 +3484,7 @@ void CL_Frame( int msec, int realMsec ) {
 					now.tm_min,
 					now.tm_sec );
 
-			Q_strncpyz( serverName, cls.servername, MAX_OSPATH );
+			Q_strncpyz( serverName, clientActiveApp->servername, MAX_OSPATH );
 			// Replace the ":" in the address as it is not a valid
 			// file name character
 			char *p = strchr( serverName, ':' );
@@ -3064,13 +3492,13 @@ void CL_Frame( int msec, int realMsec ) {
 				*p = '.';
 			}
 
-			Q_strncpyz( mapName, COM_SkipPath( cl.mapname ), sizeof( cl.mapname ) );
+			Q_strncpyz( mapName, COM_SkipPath( clientActiveApp->cl.mapname ), sizeof( clientActiveApp->cl.mapname ) );
 			COM_StripExtension(mapName, mapName, sizeof(mapName));
 
 			Cbuf_ExecuteText( EXEC_NOW,
 					va( "record %s-%s-%s", nowString, serverName, mapName ) );
 		}
-		else if ( cls.state != CA_ACTIVE && clc.demorecording ) {
+		else if ( clientActiveApp->state != CA_ACTIVE && clientActiveApp->clc.demorecording ) {
 			// Recording, but not CA_ACTIVE, so stop recording
 			CL_StopRecord_f();
 		}
@@ -3085,17 +3513,82 @@ void CL_Frame( int msec, int realMsec ) {
 	}
 
 	CL_PROF(userinfo, CL_CheckUserinfo());
-	if ( !clc.demoplaying ) { CL_PROF(misc, CL_CheckConnectError()); }
-	if ( !clc.demoplaying ) { CL_PROF(misc, CL_CheckTimeout()); }
+	if ( !clientActiveApp->clc.demoplaying ) { CL_PROF(misc, CL_CheckConnectError()); }
+	if ( !clientActiveApp->clc.demoplaying ) { CL_PROF(misc, CL_CheckTimeout()); }
 	CL_PROF(send,    CL_SendCmd());
+	/* Per-app outbound ACK (in-process-queue L5): the input-focused app sent its
+	 * acks via CL_SendCmd above (with real usercmds); every OTHER live app must
+	 * still ack-send each frame so the server's delta baseline for its connection
+	 * does not starve. At N=1 there is no non-focused live app -> zero iterations
+	 * -> byte-identical (clientActiveApp is the only connected app). */
+	for ( int ai = 0; ai < MAX_LOCAL_CGAME_VMS; ai++ ) {
+		clientApp_t *other = &clientApps[ai];
+		if ( other == clientActiveApp )
+			continue;
+		if ( other->state >= CA_CONNECTED ) {
+			/* Point the faulting-app cursor at the app being serviced so a
+			 * recoverable error here drops THIS app (not the focused one), and
+			 * arm THIS app's per-frame recovery point so the TERM_CLIENT_DROP
+			 * longjmp (Com_Terminate → cl_frameApp->appAbortFrame) lands in an
+			 * armed buffer. A drop during this app's service (e.g. CL_SetCGameTime
+			 * → Com_Terminate) tears the app down in Com_Terminate, longjmps here,
+			 * and we continue to the next app — the focused app + other apps
+			 * survive. N=1: this loop has zero iterations, so EDIT 5 never runs. */
+			cl_frameApp = other;
+			if ( Q_setjmp( (void **)other->appAbortFrame ) ) {
+				CL_AbortFrame();                 // this app dropped; teardown already done in Com_Terminate
+				cl_frameApp = clientActiveApp;   // restore cursor before next iteration
+				continue;                        // survive: skip to the next app
+			}
+			CL_SendAckOnly( other );
+			/* A non-focused client without a cgame VM (a runtime-headless
+			 * bot/MCP client) advances its own state machine here — the
+			 * input-focused client runs the full CL_SetCGameTime path below.
+			 * A non-focused client that DOES have a cgvm (a future split-screen
+			 * view) is left to a cgame-aware driver, not this VM-less one. */
+			if ( !other->cgvm ) {
+				/* Once its gamestate has been ingested (CA_CONNECTED), prime the
+				 * headless client to CA_PRIMED without a cgame VM and tell the
+				 * server it is ready; from CA_PRIMED, CL_DriveHeadlessApp enters
+				 * the world on the first snapshot. */
+				if ( other->state == CA_CONNECTED && other->cl.gameState.dataCount > 1 ) {
+					CL_PrimeHeadlessApp( other );
+					WN_ClientSendReady( (int)( other - clientApps ) );
+				}
+				CL_DriveHeadlessApp( other );
+			} else {
+				/* A non-focused client that has its own cgame VM advances its own
+				 * snapshot interpolation + world time each frame so its viewport
+				 * renders a live scene, without it holding input focus. The render
+				 * is pulled by the compositor through this client's registered
+				 * viewport provider; here we only advance time/state. */
+				CL_SetCGameTime( other );
+			}
+		}
+	}
+	/* Restore the cursor to the focused app for the remainder of the frame
+	 * (focused CL_SetCGameTime + the render path); the boundary in common.c
+	 * also re-arms it to clientActiveApp next frame. */
+	cl_frameApp = clientActiveApp;
 	CL_PROF(resend,  CL_CheckForResend());
-	CL_PROF(cgtime,  CL_SetCGameTime());
+	CL_PROF(cgtime,  CL_SetCGameTime( clientActiveApp ));
 	CL_PROF(misc,    CL_CheckMatchAlerts());
 	cls.framecount++;
+#if FEAT_WIRED_UI
+	/* C-14 follow-up A: per-frame state publishers — fire BEFORE
+	 * SCR_UpdateScreen so the compositor emit walk (inside
+	 * SCR_DrawScreenField) reads current-frame values, eliminating the
+	 * one-frame lag from the previous render-time publisher sites at
+	 * CL_DrawLoadingScreen top + WiredUI_DrawConnectScreen top.
+	 * Each publisher self-gates on clientActiveApp->state range to match the legacy
+	 * SCR invocation conditions (CA_CONNECTING through CA_PRIMED). */
+	CL_PublishLoadingState();
+	CL_PublishConnectState();
+#endif
 	SCR_UpdateScreen();
 	CL_PROF(sound,   S_Update( realMsec ));
 	CL_PROF(misc,    SCR_RunCinematic());
-	CL_PROF(misc,    Con_RunConsole());
+	CL_PROF(misc,    Con_RunConsole( ( Key_GetCatcher() & KEYCATCH_CONSOLE ) != 0, cls.realFrametime ));
 }
 
 
@@ -3107,6 +3600,10 @@ CL_ShutdownRef
 ============
 */
 static void CL_ShutdownRef( refShutdownCode_t code ) {
+
+	// Drop the /meminfo GPU hook before the renderer tears down — re.GetMemoryBudget
+	// would dangle once the DLL unloads. Re-registered by the next CL_InitRenderer.
+	Com_RegisterGpuMemReport( NULL );
 
 #ifdef USE_RENDERER_DLOPEN
 	if ( s_cl_renderer_mod != -1 && cl_renderer->modificationCount != s_cl_renderer_mod ) {
@@ -3123,6 +3620,10 @@ static void CL_ShutdownRef( refShutdownCode_t code ) {
 		S_Shutdown();
 	}
 
+	// SCR_Done() drops screen state, then re.Shutdown releases the renderer's GPU
+	// resources. Do NOT pump a render frame from here on — the render state is
+	// mid-tear-down until the renderer re-initializes; a frame here would touch
+	// freed resources.
 	SCR_Done();
 
 	if ( re.Shutdown ) {
@@ -3134,6 +3635,7 @@ static void CL_ShutdownRef( refShutdownCode_t code ) {
 		Sys_UnloadLibrary( rendererLib );
 		rendererLib = NULL;
 	}
+	s_rendererLoadPath[0] = '\0';
 #endif
 
 	memset( &re, 0, sizeof( re ) );
@@ -3141,6 +3643,54 @@ static void CL_ShutdownRef( refShutdownCode_t code ) {
 	cls.rendererStarted = qfalse;
 	cls.wiredUIStarted  = qfalse;
 }
+
+
+#ifdef USE_RENDERER_DLOPEN
+/*
+============
+CL_TryNextRenderer
+
+Advances `cl_renderer` to the next entry in s_renderer_fallback_list and
+queues a vid_restart. Called from CL_InitRenderer when the just-loaded
+renderer flagged a recoverable init failure (re.initFailed). The cursor
+ONLY advances — a renderer that just failed is never retried within the
+same fallback chain, so the walk is loop-safe by construction. If the
+current value is not in the list, treat as before-head (start the walk
+from list[0]). End-of-list ⇒ Com_Terminate(TERM_UNRECOVERABLE).
+============
+*/
+static void CL_TryNextRenderer( const char *failed ) {
+	int idx = -1;
+	int next;
+	for ( int i = 0; i < (int)ARRAY_LEN( s_renderer_fallback_list ); i++ ) {
+		if ( failed && Q_stricmp( failed, s_renderer_fallback_list[i] ) == 0 ) {
+			idx = i;
+			break;
+		}
+	}
+	// idx == -1 (current not in list) ⇒ start the walk from the head; otherwise
+	// advance one. next == ARRAY_LEN means the last entry just failed.
+	next = ( idx < 0 ) ? 0 : ( idx + 1 );
+	if ( next >= (int)ARRAY_LEN( s_renderer_fallback_list ) ) {
+		Com_Terminate( TERM_UNRECOVERABLE,
+			"renderer fallback exhausted: '%s' (last in list) failed to initialize; no renderer could initialize",
+			failed ? failed : "(null)" );
+		return;
+	}
+	Com_Log( SEV_WARN, LOG_CH(ch_client),
+		"renderer '%s' failed to initialize; advancing cl_renderer to '%s' and restarting video\n",
+		failed ? failed : "(null)", s_renderer_fallback_list[next] );
+	Cvar_Set( "cl_renderer", s_renderer_fallback_list[next] );
+	// Run the restart inline (not via Cbuf_AddText) so we re-enter
+	// CL_InitRenderer with the new cl_renderer BEFORE the outer
+	// CL_StartHunkUsers continues — otherwise it would invoke re.RegisterShader
+	// / CL_Characters_* on the half-initialised declined renderer (vk dispatch
+	// tables intact but vk state never came up). REF_DESTROY_WINDOW; the
+	// cl_renderer modificationCount bump inside CL_ShutdownRef escalates it
+	// to REF_UNLOAD_DLL so the previous DLL is unloaded.
+	CL_Vid_Restart( REF_DESTROY_WINDOW );
+}
+#endif
 
 
 /*
@@ -3157,28 +3707,49 @@ static void CL_InitRenderer( void ) {
 
 	// this sets up the renderer and calls R_Init
 	re.BeginRegistration( &cls.glconfig );
+	cls.glconfigGeneration++;	// signal cgame that glconfig / screen dims may have changed
+
+#ifdef USE_RENDERER_DLOPEN
+	// Recoverable init-failure poll. The renderer mutates s_re_dll->initFailed
+	// from inside BeginRegistration when a runtime check (e.g. GPU caps)
+	// makes it non-viable. The engine-side `re` is a stale COPY made at
+	// CL_InitRef time, so the flag must be re-read via s_re_dll. On a
+	// recoverable failure, advance cl_renderer + vid_restart and bail before
+	// touching re.RegisterShader / SCR_Init / etc.
+	if ( s_re_dll != NULL && s_re_dll->initFailed ) {
+		re.initFailed = qtrue;
+		CL_TryNextRenderer( cl_renderer ? cl_renderer->string : NULL );
+		return;
+	}
+#endif
+
+	// Surface the renderer's GPU memory budget in /meminfo (qcommon owns the
+	// command but can't reach the renderer; this client hook bridges it).
+	Com_RegisterGpuMemReport( CL_GpuMemReport );
 
 	// load character sets
 	cls.whiteShader = re.RegisterShader( "*white" );
 	cls.consoleShader = re.RegisterShader( "console" );
+	// Phase 7.15.4-a class-B pin: the console background is a persistent, client-
+	// cached handle bound every console frame without re-resolving residency, so
+	// the texture-LRU must never evict it. (*white is already class-A pinned by
+	// its '*' name.) Dark in 7.15.4-a — the pin has no reader yet.
+	if ( re.PinShaderImages ) re.PinShaderImages( cls.consoleShader );
 
 	Con_CheckResize();
 
-	g_console_field_width = ((cls.glconfig.vidWidth / smallchar_width)) - 2;
-	g_consoleField.widthInChars = g_console_field_width;
-
-	// for 640x480 virtualized screen
-	cls.biasY = 0;
-	cls.biasX = 0;
-	if ( cls.glconfig.vidWidth * 480 > cls.glconfig.vidHeight * 640 ) {
-		// wide screen, scale by height
-		cls.scale = cls.glconfig.vidHeight * (1.0/480.0);
-		cls.biasX = 0.5 * ( cls.glconfig.vidWidth - ( cls.glconfig.vidHeight * (640.0/480.0) ) );
-	} else {
-		// no wide screen, scale by width
-		cls.scale = cls.glconfig.vidWidth * (1.0/640.0);
-		cls.biasY = 0.5 * ( cls.glconfig.vidHeight - ( cls.glconfig.vidWidth * (480.0/640) ) );
+	// Defensive guard: smallchar_width (the DPI-scaled runtime console cell
+	// width, set in wired/ui/elements/console.c) can still be 0 on the map-load
+	// path when this recompute runs before the console UI element has
+	// initialised — a bare divide there is a div-by-zero crash that kills the
+	// loading render. Fall back to the base SMALLCHAR_WIDTH so the field width
+	// stays sane. The real init-ordering (why it's 0 here) is the rel-migration's
+	// to settle; this is only the minimal crash guard.
+	{
+		int consoleCharW = ( smallchar_width > 0 ) ? smallchar_width : SMALLCHAR_WIDTH;
+		g_console_field_width = ( cls.glconfig.vidWidth / consoleCharW ) - 2;
 	}
+	g_consoleField.widthInChars = g_console_field_width;
 
 	SCR_Init();
 }
@@ -3198,9 +3769,9 @@ void CL_StartHunkUsers( void ) {
 		return;
 	}
 
-	if ( cls.state >= CA_LOADING ) {
+	if ( clientActiveApp->state >= CA_LOADING ) {
 		// try to apply map-depending configuration from cvar cl_mapConfig_<mapname> cvars
-		const char *info = cl.gameState.stringData + cl.gameState.stringOffsets[ CS_SERVERINFO ];
+		const char *info = clientActiveApp->cl.gameState.stringData + clientActiveApp->cl.gameState.stringOffsets[ CS_SERVERINFO ];
 		const char *mapname = Info_ValueForKey( info, "mapname" );
 		if ( mapname && *mapname != '\0' ) {
 			const char *fmt = "cl_mapConfig_%s";
@@ -3238,7 +3809,21 @@ void CL_StartHunkUsers( void ) {
 #if FEAT_WIRED_UI
 	if ( !cls.wiredUIStarted ) {
 		cls.wiredUIStarted = qtrue;
-		WiredUI_Init( cls.state >= CA_AUTHORIZING && cls.state < CA_ACTIVE );
+		if ( !WiredUI_Init( clientActiveApp->state >= CA_AUTHORIZING && clientActiveApp->state < CA_ACTIVE ) ) {
+			/* V-25/V-26 (2026-05-25): graceful failure policy.
+			 * wui_required=1 → fatal (UI unrecoverable from here).
+			 * wui_required=0 → SEV_WARN + headless fallback; the engine
+			 * continues but WiredUI_RenderFrame's !wui_clay_initialized
+			 * gate keeps per-frame work a no-op. */
+			if ( Cvar_VariableIntegerValue( "wui_required" ) != 0 ) {
+				Com_Terminate( TERM_CLIENT_DROP,
+					"WiredUI init failed and wui_required=1" );
+			} else {
+				Com_Log( SEV_WARN, LOG_CH(ch_client),
+					"WiredUI init failed (wui_required=0); continuing "
+					"headless without UI mode\n" );
+			}
+		}
 	}
 #endif
 
@@ -3247,11 +3832,18 @@ void CL_StartHunkUsers( void ) {
 
 		// Show any connect error that was deferred across the UI restart
 		// triggered by CL_Disconnect() inside CL_CheckConnectError.
-		if ( cl_pendingConnectError[0] ) {
+		if ( CL_ActiveApp()->pendingConnectError[0] ) {
 			char pendingMsg[512];
-			Q_strncpyz( pendingMsg, cl_pendingConnectError, sizeof( pendingMsg ) );
-			cl_pendingConnectError[0] = '\0';
+			Q_strncpyz( pendingMsg, CL_ActiveApp()->pendingConnectError, sizeof( pendingMsg ) );
+			CL_ActiveApp()->pendingConnectError[0] = '\0';
 			UI_CALL_SET_ACTIVE( UIMENU_MAIN );
+			// Publish the message into com_errorMessage — the error_popup.wui
+			// dialog binds its text field to that cvar. It was set earlier by
+			// Com_SetLastError when the connect failed, but the failure was
+			// deferred across a UI restart and intervening errors may have
+			// overwritten it, so set it explicitly to the message we are about
+			// to show. Without this the dialog appears with empty text.
+			Com_SetLastError( "%s", pendingMsg );
 			CL_WiredUI_ShowError( "Connection Failed", pendingMsg, qtrue );
 		}
 	}
@@ -3310,8 +3902,8 @@ static void CL_SetScaling( float factor, int captureWidth, int captureHeight ) {
 	cls.con_factor = factor;
 
 	// set custom capture resolution
-	cls.captureWidth = captureWidth;
-	cls.captureHeight = captureHeight;
+	clientActiveApp->captureWidth = captureWidth;
+	clientActiveApp->captureHeight = captureHeight;
 }
 
 
@@ -3325,6 +3917,39 @@ static void QDECL RI_Log( log_severity_t severity, const char *fmt, ... ) {
 	va_start( args, fmt );
 	Com_Logv( severity, LOG_CH(ch_renderer), fmt, args );
 	va_end( args );
+}
+
+/*
+============
+RI_LogCh — channel-aware sink for the rilog-channel-mechanism (Turn A).
+The renderer DLL caches the channel id from ri.GetLogChannel (engine-side
+Log_GetChannel) per TU; here we just dispatch to Com_Logv with that id.
+The legacy RI_Log above stays for the unmigrated ri.Log call sites — they
+all route to the `renderer` root channel.
+============
+*/
+static void QDECL RI_LogCh( int channel, log_severity_t severity, const char *fmt, ... ) {
+	va_list args;
+	va_start( args, fmt );
+	Com_Logv( severity, channel, fmt, args );
+	va_end( args );
+}
+
+/*
+=================
+CL_RendererLoadPath
+
+Physical path the renderer DLL was dlopen'd from, for the sysinfo "loaded-from"
+diagnostic. "" before load / after shutdown. With a statically-linked renderer
+(no dlopen) there is no separate file → reports "(static renderer)".
+=================
+*/
+const char *CL_RendererLoadPath( void ) {
+#ifdef USE_RENDERER_DLOPEN
+	return s_rendererLoadPath;
+#else
+	return "(static renderer)";
+#endif
 }
 
 static void CL_InitRef( void ) {
@@ -3352,12 +3977,21 @@ static void CL_InitRef( void ) {
 	// elsewhere — covers both the .app bundle and the flat-dir layouts.
 	ospath = FS_BuildOSPath( FS_GetInstallBinaryPath(), dllName, NULL );
 	rendererLib = Sys_LoadLibrary( ospath );
+	if ( rendererLib )
+	{
+		// Copy NOW: FS_BuildOSPath returns a rotating static buffer.
+		Q_strncpyz( s_rendererLoadPath, ospath, sizeof( s_rendererLoadPath ) );
+	}
 	if ( !rendererLib )
 	{
 		Cvar_ForceReset( "cl_renderer" );
 		Com_sprintf( dllName, sizeof( dllName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, cl_renderer->string );
 		ospath = FS_BuildOSPath( FS_GetInstallBinaryPath(), dllName, NULL );
 		rendererLib = Sys_LoadLibrary( ospath );
+		if ( rendererLib )
+		{
+			Q_strncpyz( s_rendererLoadPath, ospath, sizeof( s_rendererLoadPath ) );
+		}
 		if ( !rendererLib )
 		{
 			Com_Terminate( TERM_UNRECOVERABLE, "Failed to load renderer %s", dllName );
@@ -3382,12 +4016,66 @@ static void CL_InitRef( void ) {
 	rimp.Cmd_Argv = Cmd_Argv;
 	rimp.Cmd_ExecuteText = Cbuf_ExecuteText;
 	rimp.Log = RI_Log;
+	// rilog-channel-mechanism Turn A — channel-aware refimport entries.
+	// rimp.GetLogChannel lets the renderer DLL resolve named channels
+	// (e.g. "renderer.init") and cache the integer id per-TU; rimp.LogCh
+	// dispatches to that channel. R_LOG macros in the renderer wrap both.
+	rimp.GetLogChannel = Log_GetChannel;
+	rimp.LogCh         = RI_LogCh;
+	// Floor the `renderer` root channel to WARN by default so the migrated
+	// R_LOG(renderer.X, INFO, …) calls (and the still-unmigrated ri.Log
+	// INFO sites, which route through the same root via RI_Log above)
+	// stay silent in default builds. Inheritance via the dot-hierarchy
+	// means every sub-channel that lacks its own override picks up WARN
+	// from "renderer". User opts in per channel with `log renderer.init
+	// info` (or `log renderer info` for the whole tree).
+	{
+		int rch = Log_GetChannel( "renderer" );
+		if ( rch >= 0 && rch < log_channelCount ) {
+			log_channels[ rch ].overrideSev = (int)SEV_WARN;
+		}
+		// renderer.screenshot overrides the root's WARN floor back to INFO:
+		// the `screenshot` command's "Screenshot saved as ..." confirmation
+		// is a deliberate, rare, user-facing event that must stay visible.
+		// Only screenshot events route to this channel, so INFO floods
+		// nothing.
+		{
+			int rchss = Log_GetChannel( "renderer.screenshot" );
+			if ( rchss >= 0 && rchss < log_channelCount ) {
+				log_channels[ rchss ].overrideSev = (int)SEV_INFO;
+			}
+		}
+		Log_ResolveAllChannels();
+		// Pre-register the renderer sub-channels so they appear in
+		// `log channels` output even before any R_LOG call hits them.
+		// Lazy resolve would still work, but discoverability matters
+		// for the workstream's UX. Each call is idempotent — if a TU's
+		// R_LOG_DECLARE_CHANNEL has the same name, both share the id.
+		(void)Log_GetChannel( "renderer.init"    );
+		(void)Log_GetChannel( "renderer.shaders" );
+		(void)Log_GetChannel( "renderer.assets"  );
+		(void)Log_GetChannel( "renderer.vk"      );
+		(void)Log_GetChannel( "renderer.gl"      );  /* Turn C — GL1/GL2 backend-internal logging */
+		(void)Log_GetChannel( "renderer.ral"     );
+		(void)Log_GetChannel( "renderer.hdr"     );
+		(void)Log_GetChannel( "renderer.fbo"     );
+		(void)Log_GetChannel( "renderer.timing"  );
+		(void)Log_GetChannel( "renderer.cmd"     );
+		(void)Log_GetChannel( "renderer.screenshot" );
+	}
 	rimp.Terminate = Com_Terminate;
 	rimp.Milliseconds = CL_ScaledMilliseconds;
 	rimp.Microseconds = Sys_Microseconds;
 	rimp.Malloc = CL_RefMalloc;
 	rimp.FreeAll = CL_RefFreeAll;
 	rimp.Free = Z_Free;
+
+	/* Bridge the engine's qcommon/arena.c API into the
+	 * renderer DLL so renderer-side persistent allocations register with
+	 * the engine's process-global arena list (visible in /meminfo). */
+	rimp.Arena_Create  = Arena_Create;
+	rimp.Arena_Destroy = Arena_Destroy;
+	rimp.Arena_Alloc   = Arena_Alloc;
 #ifdef HUNK_DEBUG
 	rimp.Hunk_AllocDebug = Hunk_AllocDebug;
 #else
@@ -3402,6 +4090,7 @@ static void CL_InitRef( void ) {
 	rimp.CM_GetBrushData = CM_GetBrushData;
 	rimp.CM_GetBrushSideData = CM_GetBrushSideData;
 	rimp.CM_DrawDebugSurface = CM_DrawDebugSurface;
+	rimp.CM_BoxTrace = CM_BoxTrace;	/* sun-mask ray-cast bridge; cm.tracer dispatches q1/q3 */
 
 	rimp.FS_ReadFile = FS_ReadFile;
 	rimp.FS_FreeFile = FS_FreeFile;
@@ -3411,8 +4100,8 @@ static void CL_InitRef( void ) {
 	//rimp.FS_FileIsInPAK = FS_FileIsInPAK;
 	rimp.FS_FileExists = FS_FileExists;
 
-	rimp.BSP_Load = BSP_Load;
-	rimp.BSP_Free = BSP_Free;
+	rimp.Map_Load = Map_Load;
+	rimp.Map_Free = Map_Free;
 
 	rimp.Cvar_Get = Cvar_Get;
 	rimp.Cvar_Set = Cvar_Set;
@@ -3442,6 +4131,7 @@ static void CL_InitRef( void ) {
 	rimp.CL_SetScaling = CL_SetScaling;
 
 	rimp.Sys_SetClipboardBitmap = Sys_SetClipboardBitmap;
+	rimp.Sys_SetClipboardImagePNG = Sys_SetClipboardImagePNG;
 	rimp.Sys_LowPhysicalMemory = Sys_LowPhysicalMemory;
 	rimp.Com_RealTime = Com_RealTime;
 
@@ -3477,6 +4167,12 @@ static void CL_InitRef( void ) {
 	}
 
 	re = *ret;
+#ifdef USE_RENDERER_DLOPEN
+	// Keep a pointer to the DLL's static refexport_t so the post-
+	// BeginRegistration poll can observe the renderer's recoverable
+	// init-failure mutation of initFailed.
+	s_re_dll = ret;
+#endif
 
 	// unpause so the cgame definitely gets a snapshot and renders a frame
 	Cvar_Set( "cl_paused", "0" );
@@ -3539,7 +4235,7 @@ static void CL_Video_f( void )
 	const char *ext;
 	qboolean pipe;
 
-	if( !clc.demoplaying )
+	if( !clientActiveApp->clc.demoplaying )
 	{
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "The %s command can only be used when playing back demos\n", Cmd_Argv( 0 ) );
 		return;
@@ -3591,13 +4287,13 @@ static void CL_Video_f( void )
 	}
 
 
-	clc.aviSoundFrameRemainder = 0.0f;
-	clc.aviVideoFrameRemainder = 0.0f;
+	clientActiveApp->clc.aviSoundFrameRemainder = 0.0f;
+	clientActiveApp->clc.aviVideoFrameRemainder = 0.0f;
 
-	Q_strncpyz( clc.videoName, filename, sizeof( clc.videoName ) );
-	clc.videoIndex = 0;
+	Q_strncpyz( clientActiveApp->clc.videoName, filename, sizeof( clientActiveApp->clc.videoName ) );
+	clientActiveApp->clc.videoIndex = 0;
 
-	CL_OpenAVIForWriting( va( "%s.%s", clc.videoName, ext ), pipe, qfalse );
+	CL_OpenAVIForWriting( va( "%s.%s", clientActiveApp->clc.videoName, ext ), pipe, qfalse );
 }
 
 
@@ -3883,13 +4579,39 @@ static cvar_t *clInitHandles[CLI_CVAR_COUNT];
 ====================
 CL_RalDump_f
 
-Phase 7 — "\ral_dump": dump the renderer's GPU Renderer Abstraction Layer
+"\ral_dump": dump the renderer's GPU Renderer Abstraction Layer
 state (backend probe, capabilities, memory budget). The RAL lives inside the
 renderer DLL; resolve and call its exported Ral_Dump(). Developer diagnostic;
 prints a note and does nothing if the loaded renderer has no RAL backend
 (e.g. the OpenGL renderers, which export no Ral_Dump).
 ====================
 */
+// GPU-memory section for /meminfo. Registered with qcommon (which owns the
+// command, but must not depend on the renderer); pulls the budget through the
+// re-export interface. No-op when the loaded renderer exposes no budget API
+// (the GL renderers leave re.GetMemoryBudget NULL).
+static void CL_GpuMemReport( void ) {
+	uint64_t dlUsed = 0, dlBudget = 0, hvUsed = 0, hvBudget = 0;
+	int      level = 0;
+	qboolean real;
+	const char *lvlName;
+
+	if ( !re.GetMemoryBudget )
+		return;
+
+	real    = re.GetMemoryBudget( &dlUsed, &dlBudget, &hvUsed, &hvBudget, &level );
+	lvlName = ( level >= 2 ) ? "CRITICAL" : ( level == 1 ) ? "warning" : "normal";
+
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "\nGPU MEMORY (%s):\n", real ? "reported" : "estimated" );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  device-local  %6u / %6u MiB   (%u%%)\n",
+		(unsigned)( dlUsed >> 20 ), (unsigned)( dlBudget >> 20 ),
+		dlBudget ? (unsigned)( ( dlUsed * 100ull ) / dlBudget ) : 0u );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  host-visible  %6u / %6u MiB   (%u%%)\n",
+		(unsigned)( hvUsed >> 20 ), (unsigned)( hvBudget >> 20 ),
+		hvBudget ? (unsigned)( ( hvUsed * 100ull ) / hvBudget ) : 0u );
+	Com_Log( SEV_INFO, LOG_CH(ch_client), "  pressure      %s\n", lvlName );
+}
+
 static void CL_RalDump_f( void ) {
 #ifdef USE_RENDERER_DLOPEN
 	void ( *ralDump )( void );
@@ -3900,7 +4622,7 @@ static void CL_RalDump_f( void ) {
 		return;
 	}
 
-	// Phase 7.4c-pre: "\ral_dump live" inspects the renderer's OWN backend
+	// "\ral_dump live" inspects the renderer's OWN backend
 	// (the imported-mode one shared with vk.device) rather than creating a
 	// throwaway. Falls through to the standard Ral_Dump when no subcmd or
 	// when the renderer's that old.
@@ -3931,12 +4653,52 @@ static void CL_RalDump_f( void ) {
 ====================
 CL_RalPipelineTest_f
 
-Phase 7.4c-pipeline-followup-4 — "\ral_pipeline_test": walk the 19 §17.7
+"\ral_pipeline_test": walk the 19 §17.7
 fixtures and report PASS/FAIL per fixture. Resolves Ral_PipelineTest in
 the renderer DLL; if the loaded renderer doesn't export it (e.g. OpenGL),
 prints a note and returns.
 ====================
 */
+/*
+====================
+CL_WaitForMap_Ready
+
+Predicate registered with Cbuf_RegisterWaitForMapCheck. Returns qtrue when
+the local map is fully loaded — i.e. the client has reached CA_ACTIVE and,
+if a local server is running, its async spawn machine is back to
+SPAWN_IDLE. Used by the /waitForMap command to gate the smoke-test cbuf
+on real map-load completion (vs. a fixed +wait N frames, which races the
+spawn machine's per-phase Cbuf_Wait calls).
+====================
+*/
+static qboolean CL_WaitForMap_Ready( void ) {
+	if ( clientActiveApp->state != CA_ACTIVE ) {
+		return qfalse;
+	}
+	if ( com_sv_running && com_sv_running->integer && !SV_IsSpawnIdle() ) {
+		return qfalse;
+	}
+	return qtrue;
+}
+
+
+/*
+====================
+CL_WaitForMap_f
+
+Console command — yields Cbuf until CL_WaitForMap_Ready() returns qtrue or
+the safety timeout (WAITFORMAP_MAX_FRAMES) expires.
+====================
+*/
+#define WAITFORMAP_MAX_FRAMES 2000
+static void CL_WaitForMap_f( void ) {
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"waitForMap: arming Cbuf gate (timeout %d frames)\n",
+		WAITFORMAP_MAX_FRAMES );
+	Cbuf_RequestWaitForMap( WAITFORMAP_MAX_FRAMES );
+}
+
+
 static void CL_RalPipelineTest_f( void ) {
 #ifdef USE_RENDERER_DLOPEN
 	void ( *ralPipelineTest )( void );
@@ -3966,9 +4728,10 @@ void CL_Init( void ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "----- Client Initialization -----\n" );
 
 	Con_Init();
+	Con_InitProjection();   /* UI presentation half (colors, fields, commands, close hook) */
 
-	CL_ClearState();
-	cls.state = CA_DISCONNECTED;	// no longer CA_UNINITIALIZED
+	CL_ClearState( clientActiveApp );
+	CL_SetState( clientActiveApp, CA_DISCONNECTED );	// no longer CA_UNINITIALIZED
 
 	CL_ResetOldGame();
 
@@ -3977,11 +4740,45 @@ void CL_Init( void ) {
 	CL_InitInput();
 
 #if FEAT_WIRED_UI
+	/* Compositor lifecycle lives at
+	 * process scope (CL_Init / CL_Shutdown), NOT WiredUI_Init / Shutdown.
+	 * WiredUI_Init runs again every map load via CL_FlushMemory →
+	 * CL_ShutdownAll → CL_StartHunkUsers; keeping the compositor here
+	 * means the arena, Clay context, font indirection table and measure
+	 * callback survive map loads + vid_restart. Per memory-architecture-
+	 * handoff §"CL_ShutdownAll Split", CL_Init runs exactly once per
+	 * engine session — CL_FlushMemory does not call it. */
+	WiredUI_CompositorInit();
+
 	WiredStore_Init();
 	WiredStoreLua_Init();
 	/* Single entry point: registers all WiredUI Lua globals (load_menu,
 	   attract.*) before WiredScript_PostInit runs them against the VM. */
 	WiredUI_LuaInit();
+
+	/* Register the `anim` namespace in System + User VMs.
+	 * Must run before WiredScript_PostInit (same window as the other Lua
+	 * binding registrars above). */
+	WiredAnimLua_Init();
+
+	/* Dev utilities — wui_popup_test / wui_anim_test. Gated by
+	 * `developer 1` inside the handlers, so cost is zero for end users. */
+	WiredUI_CompositorRegisterDevCommands();
+
+	/* Wired Crosshair: procedural per-weapon reticle. Registers
+	 * the q3.* Lua table + queues the crosshair script load; both run at
+	 * WiredScript_PostInit alongside the store/anim/menu registrars above. */
+	WiredCrosshair_Init();
+
+	/* Cinematic scene: registers the scene.play/stop/skip Lua table (System VM,
+	 * same PostInit registrar window). The triggers bridge to the cgame
+	 * playback state via the sceneplay/scenestop/sceneskip console commands. */
+	WiredScene_LuaInit();
+
+	/* Localization table: registers cl_language + l10n_reload and queues the
+	 * scripts/l10n/<lang>.lua key->text load at PostInit (same registrar window).
+	 * The caption consumer (cgame) bridges its keys through WiredL10n_Get. */
+	WiredL10n_Init();
 #endif
 
 	//
@@ -4092,6 +4889,10 @@ void CL_Init( void ) {
 	Cmd_AddCommand ("stoprecord", CL_StopRecord_f);
 	Cmd_AddCommand ("connect", CL_Connect_f);
 	Cmd_AddCommand ("reconnect", CL_Reconnect_f);
+	/* Spawn a runtime-headless same-process client over the in-memory backend.
+	 * The handler is currently an inert stub (spawns nothing); the transport
+	 * scaffold to drive an additional in-process client already exists. */
+	Cmd_AddCommand ("spawn_headless_client", CL_SpawnHeadlessApp_f);
 	Cmd_AddCommand ("rcon_login", CL_RconLogin_f);
 	Cmd_AddCommand ("rcon", CL_Rcon_f);
 	Cmd_AddCommand ("localservers", CL_LocalServers_f);
@@ -4115,12 +4916,22 @@ void CL_Init( void ) {
 	Cmd_AddCommand( "dlmap", CL_Download_f );
 #endif
 	Cmd_AddCommand( "modelist", CL_ModeList_f );
-	Cmd_AddCommand( "ral_dump", CL_RalDump_f );          // Phase 7: dump renderer RAL backend probe / caps / memory budget
-	Cmd_AddCommand( "ral_pipeline_test", CL_RalPipelineTest_f ); // Phase 7.4c-pipeline-followup-4: walk 19 §17.7 pipeline fixtures
+	Cmd_AddCommand( "ral_dump", CL_RalDump_f );          // dump renderer RAL backend probe / caps / memory budget
+	Cmd_AddCommand( "ral_pipeline_test", CL_RalPipelineTest_f ); // walk 19 §17.7 pipeline fixtures
+	Cmd_AddCommand( "waitForMap", CL_WaitForMap_f );     // yield Cbuf until map fully loaded
+	Cbuf_RegisterWaitForMapCheck( CL_WaitForMap_Ready );
 
 #ifndef NDEBUG
 	Cmd_AddCommand( "wui_testerror", CL_WuiTestError_f );
 	Cvar_Get( "net_forceSendError", "0", CVAR_TEMP );
+#endif
+
+#ifdef _DEBUG
+	/* Dev/test loading-backdrop capture gate. Integer = frames to hold the
+	 * client at CA_PRIMED (deferring CL_FirstSnapshot in CL_SetCGameTime) so
+	 * a +screenshot lands on a held loading frame. 0 = inert. Read by name in
+	 * cl_cgame.c. Test-only verify tool, removed in release. */
+	Cvar_Get( "debug_hold_loading", "0", CVAR_CHEAT | CVAR_TEMP );
 #endif
 
 	Cvar_Set( "cl_running", "1" );
@@ -4154,7 +4965,7 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	recursive = qtrue;
 
 	noGameRestart = quit;
-	CL_Disconnect( qfalse );
+	CL_Disconnect( clientActiveApp, qfalse );
 
 	// clear and mute all sounds until next registration
 	S_DisableSounds();
@@ -4163,6 +4974,7 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 
 	CL_ShutdownRef( quit ? REF_UNLOAD_DLL : REF_DESTROY_WINDOW );
 
+	Con_ShutdownProjection();
 	Con_Shutdown();
 
 	Cmd_RemoveCommand ("cmd");
@@ -4210,6 +5022,13 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 
 #if FEAT_WIRED_UI
 	WiredStore_Shutdown();
+	WiredL10n_Shutdown();   /* free the plain-C localization table */
+
+	/* Tear down the process-scope
+	 * compositor arena + Clay context. CL_Shutdown is the only path that
+	 * reaches this — map-load reset (CL_FlushMemory → CL_ShutdownAll) does
+	 * not, by design. */
+	WiredUI_CompositorShutdown();
 #endif
 
 	Cvar_Set( "cl_running", "0" );
@@ -4217,6 +5036,19 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	recursive = qfalse;
 
 	memset( &cls, 0, sizeof( cls ) );
+	// The per-connection tail (state, servername, cgameBsp, …) moved out of cls
+	// into clientApps[0]; the cls memset above no longer reaches it.
+	// Zero exactly those fields here to preserve the former wholesale-wipe
+	// semantics (clientActiveApp->cl/clientActiveApp->clc are intentionally left untouched, as before).
+	CL_SetState( clientActiveApp, CA_UNINITIALIZED );
+	clientActiveApp->gameSwitch = qfalse;
+	clientActiveApp->servername[0] = '\0';
+	clientActiveApp->cgameStarted = qfalse;
+	clientActiveApp->startCgame = qfalse;
+	clientActiveApp->cgameBsp = NULL;
+	clientActiveApp->captureWidth = 0;
+	clientActiveApp->captureHeight = 0;
+	memset( &clientActiveApp->dlcomplete, 0, sizeof( clientActiveApp->dlcomplete ) );
 	Key_SetCatcher( 0 );
 	CL_Characters_Shutdown();
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "-----------------------\n" );
@@ -5015,7 +5847,7 @@ static void CL_ServerStatus_f( void ) {
 
 	if ( argc != 2 && argc != 3 )
 	{
-		if (cls.state != CA_ACTIVE || clc.demoplaying)
+		if (clientActiveApp->state != CA_ACTIVE || clientActiveApp->clc.demoplaying)
 		{
 			Com_Log( SEV_INFO, LOG_CH(ch_client), "Not connected to a server.\n" );
 #if FEAT_IPV6
@@ -5026,7 +5858,7 @@ static void CL_ServerStatus_f( void ) {
 			return;
 		}
 
-		toptr = &clc.serverAddress;
+		toptr = &clientActiveApp->clc.serverAddress;
 	}
 
 	netadr_t to;

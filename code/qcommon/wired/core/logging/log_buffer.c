@@ -296,7 +296,7 @@ static void LogBuffer_Dump( const char *filename )
 
     for ( i = 0; i < total; i++ ) {
         dump_entry_t *e = &entries[i];
-        char     header[128];
+        char     header[ 96 + LOG_CHANNEL_NAME_MAX ];
         char     footer[128];
         int      header_len, msg_len, footer_len;
         uint32_t trim_len;

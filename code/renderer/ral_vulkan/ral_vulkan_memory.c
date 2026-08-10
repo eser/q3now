@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
 // ral_vulkan_memory.c — Vulkan backend:
-//   * memory suballocator (ralVk_Alloc/Free/Map/Unmap/Flush) — Phase 7.2,
+//   * memory suballocator (ralVk_Alloc/Free/Map/Unmap/Flush),
 //     one VkDeviceMemory per resource; the API is what matters, the backing
 //     strategy is replaceable;
 //   * Ral_QueryMemoryBudget — VK_EXT_memory_budget when available, plus the
@@ -10,6 +10,8 @@
 //   * Ral_SetPressureCallback + the 1 Hz polling thread (phase-7-ral-design.md §12).
 
 #include "ral_vulkan_internal.h"
+
+R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
 
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -27,6 +29,14 @@
 // ════════════════════════════════════════════════════════════════════════
 // per-queue OS mutexes (guard command-pool alloc/free/reset + vkQueueSubmit2
 // for that queue — Vulkan does not make those thread-safe)
+//
+// These intentionally do NOT reuse the engine's Sys_Mutex* abstraction: the RAL
+// Vulkan backend is deliberately engine-independent (see ral_vulkan_internal.h
+// header note — it depends only on the refimport_t `ri`, which does not expose a
+// mutex primitive; Sys_Mutex* lives in code/win32 + code/unix, outside that
+// import surface). Pulling Sys_Mutex* in would create a new dependency on engine
+// OS internals that the `ri` indirection exists to avoid, so the small
+// hand-rolled CRITICAL_SECTION / pthread_mutex_t wrappers stay local by design.
 // ════════════════════════════════════════════════════════════════════════
 #ifdef _WIN32
 typedef CRITICAL_SECTION ralVkMutex_t;
@@ -101,7 +111,7 @@ ralVkAllocation_t *ralVk_Alloc( ralBackend_t *b, VkMemoryRequirements req, VkMem
 			if ( req.memoryTypeBits & ( 1u << i ) ) { typeIndex = i; break; }
 	}
 	if ( typeIndex == 0xFFFFFFFFu ) {
-		ri.Log( SEV_WARN, "[RAL] ralVk_Alloc: no compatible memory type (typeBits=0x%x, props=0x%x)\n",
+		R_LOG( rch_ral, SEV_WARN, "ralVk_Alloc: no compatible memory type (typeBits=0x%x, props=0x%x)\n",
 		        req.memoryTypeBits, (unsigned)props );
 		return NULL;
 	}
@@ -114,7 +124,7 @@ ralVkAllocation_t *ralVk_Alloc( ralBackend_t *b, VkMemoryRequirements req, VkMem
 	ai.allocationSize  = req.size;
 	ai.memoryTypeIndex = typeIndex;
 	if ( b->vk.AllocateMemory( b->device, &ai, NULL, &a->memory ) != VK_SUCCESS ) {
-		ri.Log( SEV_WARN, "[RAL] ralVk_Alloc: vkAllocateMemory failed (%llu bytes, type %u)\n",
+		R_LOG( rch_ral, SEV_WARN, "ralVk_Alloc: vkAllocateMemory failed (%llu bytes, type %u)\n",
 		        (unsigned long long)req.size, typeIndex );
 		free( a );
 		return NULL;
@@ -154,7 +164,7 @@ void *ralVk_Map( ralVkAllocation_t *a ) {
 	if ( !a ) return NULL;
 	if ( a->mapped ) return a->mapped;
 	if ( !( a->propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT ) ) {
-		ri.Log( SEV_WARN, "[RAL] ralVk_Map: allocation is not host-visible\n" );
+		R_LOG( rch_ral, SEV_WARN, "ralVk_Map: allocation is not host-visible\n" );
 		return NULL;
 	}
 	if ( a->backend->vk.MapMemory( a->backend->device, a->memory, 0, VK_WHOLE_SIZE, 0, &a->mapped ) != VK_SUCCESS )
@@ -317,5 +327,5 @@ void Ral_SetPressureCallback( ralBackend_t *b, ralPressureCallback_t cb, void *u
 	}
 #endif
 	if ( !b->pollThread )
-		ri.Log( SEV_WARN, "[RAL] Ral_SetPressureCallback: could not start polling thread; pressure events disabled\n" );
+		R_LOG( rch_ral, SEV_WARN, "Ral_SetPressureCallback: could not start polling thread; pressure events disabled\n" );
 }

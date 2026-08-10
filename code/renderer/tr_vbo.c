@@ -2,8 +2,9 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
-/* Phase 5: log channels */
-LOG_DECLARE_CHANNEL( ch_renderer, "renderer" );
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.gl
+
+R_LOG_DECLARE_CHANNEL( rch_gl, "renderer.gl" );
 
 /*
 
@@ -803,12 +804,12 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 		return;
 
 	if (!qglGenProgramsARB) {
-		ri.Log( SEV_WARN, "... ARB shaders required for VBO\n" );
+		R_LOG( rch_gl, SEV_WARN, "... ARB shaders required for VBO\n" );
 		return;
 	}
 
 	if ( glConfig.numTextureUnits < 3 ) {
-		ri.Log( SEV_WARN, "... not enough texture units for VBO\n" );
+		R_LOG( rch_gl, SEV_WARN, "... not enough texture units for VBO\n" );
 		return;
 	}
 
@@ -857,7 +858,7 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 	}
 
 	if ( numStaticSurfaces == 0 ) {
-		ri.Log( SEV_INFO, "...no static surfaces for VBO\n" );
+		R_LOG( rch_gl, SEV_INFO, "...no static surfaces for VBO\n" );
 		return;
 	}
 
@@ -874,7 +875,7 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 	vbo->items_queue = ri.Hunk_Alloc( ( numStaticSurfaces + 1 ) * sizeof( int ), h_low );
 	vbo->items_queue_count = 0;
 
-	ri.Log( SEV_DEBUG, "...found %i VBO surfaces (%i vertexes, %i indexes)\n",
+	R_LOG( rch_gl, SEV_DEBUG, "...found %i VBO surfaces (%i vertexes, %i indexes)\n",
 		numStaticSurfaces, numStaticVertexes, numStaticIndexes );
 
 	//Com_Log( SEV_INFO, S_COLOR_CYAN "VBO size: %i\n", vbo_size );
@@ -1018,9 +1019,9 @@ void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 __fail:
 
 	if ( err == GL_OUT_OF_MEMORY )
-		ri.Log( SEV_WARN, "%s: out of memory\n", __func__ );
+		R_LOG( rch_gl, SEV_WARN, "%s: out of memory\n", __func__ );
 	else
-		ri.Log( SEV_ERROR, "%s: error %i\n", __func__, err );
+		R_LOG( rch_gl, SEV_ERROR, "%s: error %i\n", __func__, err );
 
 	// reset vbo markers
 	for ( i = 0, sf = surf; i < surfCount; i++, sf++ ) {

@@ -1,0 +1,39 @@
+// warden_encounter.script — the arena1 warden set-piece: one composite encounter
+// that chains all four scripted categories with real content.
+//
+//   approach  -> the boss waits until a player comes within range (waitplayerradius)
+//   cutscene  -> a boss-intro scene plays with the camera tracking THIS boss live
+//                (playscene ... self), held for its ~4s duration (waitscene)
+//   objective -> the mission objective "Kill the warden" appears (l10n'd)
+//   battle    -> the boss stops being scripted-idle and fights autonomously (attack
+//                hands it to the Fork-2 BATTLE state; it is a real fightable monster)
+//   death     -> killing it completes the objective and opens the exit
+//
+// The boss is the visor archetype, spawned at runtime (Script_SpawnDriven binds
+// the character) — arena1.ent is never touched. Its nav marker and the exit are
+// runtime-spawned entities resolved by NAME, so a future authored map entity of
+// the same name would satisfy the same lookup.
+//
+// The boss is made invulnerable (invuln 1) for its intro cutscene and back to
+// mortal (invuln 0) only once the objective is armed and it enters battle — so
+// the player can never kill it before the objective exists, and the cinematic
+// reads correctly (the warden cannot die during its own intro).
+spawn {
+    print warden-armed
+    waitplayerradius 400
+    print warden-approached
+    invuln 1
+    playscene warden_intro self
+    waitscene 4000
+    print warden-cutscene-done
+    objective_add objective/kill_warden
+    invuln 0
+    attack
+    print warden-battle-live
+}
+death {
+    print warden-down
+    objective_complete 0
+    trigger warden_exit_open
+    print warden-exit-opened
+}

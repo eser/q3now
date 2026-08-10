@@ -8,11 +8,10 @@
 #include "snd_local.h"
 #include "snd_public.h"
 #include "../qcommon/arena.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 LOG_DECLARE_CHANNEL( ch_sound, "sound" );
 
-/* ---- Audio_Arena (Step 3.4) -----------------------------------------------
+/* ---- Audio_Arena ----------------------------------------------------------
    The audio subsystem uses static globals and backend-internal allocations,
    not hunk memory.  Audio_Arena is a lifecycle-tracking arena: it is created
    at S_Init time and destroyed at S_Shutdown (process exit only), making the
@@ -46,7 +45,6 @@ static qboolean S_ValidSoundInterface( const soundInterface_t *s )
 	if( !s->StartLocalSound ) return qfalse;
 	if( !s->StartBackgroundTrack ) return qfalse;
 	if( !s->StopBackgroundTrack ) return qfalse;
-	if( !s->RawSamples ) return qfalse;
 	if( !s->StopAllSounds ) return qfalse;
 	if( !s->ClearLoopingSounds ) return qfalse;
 	if( !s->AddLoopingSound ) return qfalse;
@@ -115,20 +113,6 @@ void S_StopBackgroundTrack( void )
 {
 	if( si.StopBackgroundTrack ) {
 		si.StopBackgroundTrack( );
-	}
-}
-
-
-/*
-=================
-S_RawSamples
-=================
-*/
-void S_RawSamples (int samples, int rate, int width, int channels,
-		   const byte *data, float volume)
-{
-	if( si.RawSamples ) {
-		si.RawSamples( samples, rate, width, channels, data, volume );
 	}
 }
 
@@ -258,6 +242,20 @@ void S_SetMuteOverride( qboolean enabled )
 
 /*
 =================
+S_FocusChanged
+
+Forward a window-focus transition to the base mixer.  Safe to call before the
+sound system has started (the base handler just records the desired state).
+=================
+*/
+void S_FocusChanged( qboolean focused )
+{
+	S_Base_FocusChanged( focused );
+}
+
+
+/*
+=================
 S_DisableSounds
 =================
 */
@@ -305,7 +303,7 @@ sfxHandle_t	S_RegisterSound( const char *sample, qboolean compressed )
 =================
 S_SoundDuration
 
-Phase 6.2: returns the duration of a registered sound in milliseconds.
+returns the duration of a registered sound in milliseconds.
 Returns 0 if the handle is invalid or the sound system is not running.
 =================
 */
@@ -495,6 +493,11 @@ void S_Init( void )
 		Cmd_AddCommand( "s_list", S_SoundList );
 		Cmd_AddCommand( "s_stop", S_StopAllSounds );
 		Cmd_AddCommand( "s_info", S_SoundInfo );
+#ifndef HEADLESS
+		Cmd_AddCommand( "s_enginePlay", S_EnginePlay_f );
+		Cmd_AddCommand( "s_engineDecodeTest", S_EngineDecodeTest_f );
+		Cmd_AddCommand( "s_engineLevels", S_EngineLevels_f );
+#endif
 
 		if ( !started ) {
 			started = S_Base_Init( &si );
@@ -539,6 +542,11 @@ void S_Shutdown( void )
 	Cmd_RemoveCommand( "s_list" );
 	Cmd_RemoveCommand( "s_stop" );
 	Cmd_RemoveCommand( "s_info" );
+#ifndef HEADLESS
+	Cmd_RemoveCommand( "s_enginePlay" );
+	Cmd_RemoveCommand( "s_engineDecodeTest" );
+	Cmd_RemoveCommand( "s_engineLevels" );
+#endif
 
 	S_CodecShutdown();
 

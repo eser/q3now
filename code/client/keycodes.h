@@ -224,7 +224,7 @@ typedef enum {
 	K_PAD0_PADDLE4,  /* Xbox Elite paddle P4 */
 	K_PAD0_TOUCHPAD, /* PS4/PS5 touchpad button */
 
-	// Side-specific modifier keys (Phase 6.1)
+	// Side-specific modifier keys
 	// K_ALT, K_CTRL, K_SHIFT, K_COMMAND, K_SUPER above remain valid for backward
 	// compatibility — both the side-specific and generic event are emitted on the
 	// same physical key press (see IN_TranslateSDLToQ3Key / HandleEvents).

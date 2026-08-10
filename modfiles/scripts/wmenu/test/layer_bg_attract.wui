@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+//
+// layer_bg_attract.wmenu — Phase 3b1 visual z-order fixture.
+// Fullscreen mid-gray panel marking the BG_ATTRACT layer; sits at the back of
+// the 6-layer stack. Driven by wui_layer_test_single / wui_layer_test_stack
+// via the force-override mask. Production cls.state gating still applies when
+// the override mask is 0 (panel won't emit during normal play).
+
+menuDef {
+	name "layer_bg_attract"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+	backcolor 0.25 0.25 0.25 1
+	layer "bg_attract"
+
+	itemDef {
+		type 0
+		rect 0 0.45 1 0.10
+		textalign 1
+		font "oxanium" 28
+		forecolor 1 1 1 1
+		text "LAYER BG_ATTRACT"
+		decoration
+		visible 1
+	}
+}

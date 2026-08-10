@@ -1,0 +1,135 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+prefilter_radiance.comp — wired-render IBL prefiltered specular radiance.
+
+Convolves the environment source cube into the prefiltered radiance probe, one
+mip per roughness level (the split-sum specular term, Karis 2013). For a given
+output (face, mip), each texel's direction R is treated as N = V = R (the Karis
+approximation that drops the view dependency), and the source is GGX-importance-
+sampled around R: rougher mips integrate a wider lobe, so mip0 ≈ a sharp copy of
+the source and the high mips are progressively blurred.
+
+Reads the source as a filtered samplerCube (binding 0/1) — filtering matters,
+sampling the storage texels raw would alias. Writes one (face,mip) slice of the
+radiance cube via an image2DArray storage view (binding 2). Nothing samples the
+result yet (the IBL term that consumes it lands later) — this only produces it.
+*/
+
+const float PI = 3.14159265358979323846;
+
+// 1024 GGX importance samples per texel — enough for smooth roughness mips at
+// this cube resolution; the whole convolve is a one-shot at boot.
+const uint SAMPLE_COUNT = 1024u;
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform textureCube srcTex;
+layout(set = 0, binding = 1) uniform sampler     srcSamp;
+layout(rgba16f, set = 0, binding = 2) uniform writeonly image2DArray dstRadiance;
+
+layout(push_constant) uniform Push {
+	uint roughnessIdx;   // 0..(mips-1) → roughness = roughnessIdx / (mips-1)
+	uint roughnessMips;  // total mip count (so the shader maps idx→roughness)
+};
+
+// Van der Corput radical inverse — the low-discrepancy 2nd Hammersley dimension.
+float radicalInverse_VdC( uint bits )
+{
+	bits = ( bits << 16u ) | ( bits >> 16u );
+	bits = ( ( bits & 0x55555555u ) << 1u ) | ( ( bits & 0xAAAAAAAAu ) >> 1u );
+	bits = ( ( bits & 0x33333333u ) << 2u ) | ( ( bits & 0xCCCCCCCCu ) >> 2u );
+	bits = ( ( bits & 0x0F0F0F0Fu ) << 4u ) | ( ( bits & 0xF0F0F0F0u ) >> 4u );
+	bits = ( ( bits & 0x00FF00FFu ) << 8u ) | ( ( bits & 0xFF00FF00u ) >> 8u );
+	return float( bits ) * 2.3283064365386963e-10; // / 0x100000000
+}
+
+vec2 hammersley( uint i, uint n )
+{
+	return vec2( float( i ) / float( n ), radicalInverse_VdC( i ) );
+}
+
+// GGX importance sample: map a 2D low-discrepancy point to a half-vector H in
+// the tangent frame around N, distributed by the GGX NDF for the roughness.
+vec3 importanceSampleGGX( vec2 xi, float roughness, vec3 N )
+{
+	float a = roughness * roughness;
+
+	float phi      = 2.0 * PI * xi.x;
+	float cosTheta = sqrt( ( 1.0 - xi.y ) / ( 1.0 + ( a * a - 1.0 ) * xi.y ) );
+	float sinTheta = sqrt( 1.0 - cosTheta * cosTheta );
+
+	vec3 H;
+	H.x = cos( phi ) * sinTheta;
+	H.y = sin( phi ) * sinTheta;
+	H.z = cosTheta;
+
+	vec3 up        = abs( N.z ) < 0.999 ? vec3( 0.0, 0.0, 1.0 ) : vec3( 1.0, 0.0, 0.0 );
+	vec3 tangent   = normalize( cross( up, N ) );
+	vec3 bitangent = cross( N, tangent );
+
+	return normalize( tangent * H.x + bitangent * H.y + N * H.z );
+}
+
+// Cube face (layer) + face-uv [-1,1] → world direction (GL cube-array order
+// +X,-X,+Y,-Y,+Z,-Z). Must match source_sky.comp so the directions line up.
+vec3 cubeFaceDir( uint face, vec2 uv )
+{
+	float u = uv.x;
+	float v = uv.y;
+	vec3 dir;
+	if      ( face == 0u ) dir = vec3(  1.0,  -v,  -u );  // +X
+	else if ( face == 1u ) dir = vec3( -1.0,  -v,   u );  // -X
+	else if ( face == 2u ) dir = vec3(  u,   1.0,   v );  // +Y
+	else if ( face == 3u ) dir = vec3(  u,  -1.0,  -v );  // -Y
+	else if ( face == 4u ) dir = vec3(  u,   -v,   1.0 ); // +Z
+	else                   dir = vec3( -u,   -v,  -1.0 ); // -Z
+	return normalize( dir );
+}
+
+void main()
+{
+	ivec3 size  = imageSize( dstRadiance );   // (mipW, mipH, 6) for this mip
+	ivec3 coord = ivec3( gl_GlobalInvocationID.xyz );
+	if ( coord.x >= size.x || coord.y >= size.y || coord.z >= 6 )
+		return;
+
+	float roughness = ( roughnessMips > 1u )
+		? float( roughnessIdx ) / float( roughnessMips - 1u )
+		: 0.0;
+
+	vec2 uv  = ( ( vec2( coord.xy ) + 0.5 ) / vec2( size.xy ) ) * 2.0 - 1.0;
+	vec3 R   = cubeFaceDir( uint( coord.z ), uv );
+	vec3 N   = R;
+	vec3 V   = R;
+
+	// mip0 (roughness 0) is a sharp copy — skip the costly integral and just
+	// take the source along R (a single GGX lobe at roughness 0 collapses to R).
+	if ( roughness <= 0.0 ) {
+		vec3 c = texture( samplerCube( srcTex, srcSamp ), R ).rgb;
+		imageStore( dstRadiance, coord, vec4( c, 1.0 ) );
+		return;
+	}
+
+	vec3  prefiltered = vec3( 0.0 );
+	float totalWeight = 0.0;
+
+	for ( uint i = 0u; i < SAMPLE_COUNT; i++ ) {
+		vec2 xi = hammersley( i, SAMPLE_COUNT );
+		vec3 H  = importanceSampleGGX( xi, roughness, N );
+		vec3 L  = normalize( 2.0 * dot( V, H ) * H - V );
+
+		float NdotL = max( dot( N, L ), 0.0 );
+		if ( NdotL > 0.0 ) {
+			prefiltered += texture( samplerCube( srcTex, srcSamp ), L ).rgb * NdotL;
+			totalWeight += NdotL;
+		}
+	}
+
+	vec3 result = ( totalWeight > 0.0 ) ? ( prefiltered / totalWeight )
+	                                    : texture( samplerCube( srcTex, srcSamp ), R ).rgb;
+	imageStore( dstRadiance, coord, vec4( result, 1.0 ) );
+}

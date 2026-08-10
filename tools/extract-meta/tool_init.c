@@ -17,7 +17,7 @@ Released under GPLv2 — see code/qcommon/maps/meta.h for the full notice.
 //
 //   1. Provide replacement Sys_* platform symbols for the ones the
 //      qcommon_static archive references but win_main.c would normally
-//      supply (Sys_FOpen, Sys_GetFileStats, Sys_DefaultBasePath, the
+//      supply (Sys_FOpen, Sys_GetFileStats, Sys_DefaultInstallPath, the
 //      mutex primitives, etc.).
 //
 //   2. Drive the engine's bootstrap sequence (Com_InitPushEvent,
@@ -70,8 +70,8 @@ extern qboolean Log_RegisterFallbackStderrSink( void );
 extern void     Log_UnregisterFallbackStderrSink( void );
 extern cvar_t  *Cvar_Get( const char *var_name, const char *value, int flags );
 extern void     Cvar_Set( const char *var_name, const char *value );
-extern void     BSP_Init( void );          /* registers Q3+Q1 bspFormats */
-extern void     BSP_Shutdown( void );
+extern void     Map_Init( void );          /* registers Q3+Q1 mapFormats */
+extern void     Map_Shutdown( void );
 extern void     Maps_InitArena( void );
 extern void     Maps_ShutdownArena( void );
 
@@ -115,7 +115,7 @@ qboolean Sys_LowPhysicalMemory( void ) {
 
 void Sys_BeginProfiling( void ) { /* no-op */ }
 
-const char *Sys_DefaultBasePath( void ) {
+const char *Sys_DefaultInstallPath( void ) {
 	static char buf[MAX_OSPATH];
 	if ( !buf[0] ) {
 		DWORD n = GetCurrentDirectoryA( sizeof( buf ), buf );
@@ -145,7 +145,7 @@ const char *Sys_DefaultHomePath( void ) {
 }
 
 const char *Sys_Pwd( void ) {
-	return Sys_DefaultBasePath();
+	return Sys_DefaultInstallPath();
 }
 
 void Sys_Print( const char *msg ) {
@@ -285,9 +285,9 @@ void Sys_InstallCrashHandler( void ) { /* no-op */ }
 //   - wired/net/*                 (picoquic / mpack / WN)
 //
 // argv is intentionally unused: the tool doesn't accept +set fs_*
-// overrides this round. Install path comes from Sys_DefaultBasePath
+// overrides this round. Install path comes from Sys_DefaultInstallPath
 // (above; CWD-based) and Sys_DefaultHomePath (%APPDATA%\wired). To
-// override either, set the WIRED_FS_BASEPATH / WIRED_FS_HOMEPATH env
+// override either, set the WIRED_FS_INSTALLPATH / WIRED_FS_HOMEPATH env
 // vars before launch — engine-side support is independent of argv.
 
 void Tool_Init( int argc, char **argv ) {
@@ -340,9 +340,9 @@ void Tool_Init( int argc, char **argv ) {
 
 	// Step 7a — BSP format registry + meta arenas. Engine does this in
 	// Com_Init alongside FS_InitFilesystem; tool needs them explicitly
-	// because BSP_Load fails with "no matching format" until BSP_Init
+	// because Map_Load fails with "no matching format" until Map_Init
 	// has registered Q3 + Q1 formats.
-	BSP_Init();
+	Map_Init();
 	Maps_InitArena();
 
 	// Step 8 — tool-side arena (4 MB headroom; shader_index for a
@@ -362,7 +362,7 @@ void Tool_Shutdown( void ) {
 		Tool_Arena = NULL;
 	}
 	Maps_ShutdownArena();
-	BSP_Shutdown();
+	Map_Shutdown();
 	FS_Shutdown( qfalse );
 	Log_UnregisterFallbackStderrSink();
 }

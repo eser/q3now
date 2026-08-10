@@ -40,6 +40,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const HERE        = __dirname;
 const SPIRV_DIR   = join(HERE, 'spirv');
 const TMP_SPV     = join(SPIRV_DIR, 'data.spv');
+const TMP_GLSL    = join(SPIRV_DIR, 'data.expanded.glsl');
 const OUTPUT_PATH = join(SPIRV_DIR, 'shader_data.c');
 const MANIFEST    = join(HERE, 'shaders.manifest.mjs');
 
@@ -118,6 +119,51 @@ function bytesToHexC(bytes, name) {
 	return out.join('');
 }
 
+// ── #include expansion ───────────────────────────────────────────────
+//
+// Minimal directive support: a line of the form
+//
+//     #include "relative/path.glsl"
+//
+// (double-quoted, relative) is replaced inline by the contents of the
+// named file, resolved relative to the *including* file's directory.
+// Single-level only: an #include that appears inside an included file
+// is left verbatim — glslang then reports it as an unknown directive,
+// which is the intended "surface it" behaviour. No include guards, no
+// <system> includes, no recursion / cycle detection (deliberately
+// minimal — revisit if nested includes are ever needed in practice).
+//
+// Returns the expanded source string, or null when the file has no
+// #include directive — the caller then hands the original path to
+// glslang untouched, keeping non-#include shaders byte-identical.
+
+const INCLUDE_RE = /^[ \t]*#include[ \t]+"([^"]+)"[ \t]*$/;
+
+function expandIncludes(source) {
+	if (!existsSync(source)) return null;          // let glslang report the missing source
+	const text = readFileSync(source, 'utf8');
+	if (!text.includes('#include')) return null;   // fast path — nothing to expand
+
+	const srcDir  = dirname(source);
+	let   changed = false;
+
+	const out = text.split('\n').map((line) => {
+		const m = INCLUDE_RE.exec(line);
+		if (!m) return line;
+		const incPath = join(srcDir, m[1]);
+		if (!existsSync(incPath)) {
+			console.error(`ERROR: #include target not found: "${m[1]}"`);
+			console.error(`       included from: ${source}`);
+			console.error(`       resolved to:   ${incPath}`);
+			process.exit(1);
+		}
+		changed = true;
+		return readFileSync(incPath, 'utf8').replace(/\n$/, '');
+	});
+
+	return changed ? out.join('\n') : null;
+}
+
 // ── glslang invocation ───────────────────────────────────────────────
 
 function spawnSync(file, args, { capture = true } = {}) {
@@ -143,11 +189,20 @@ function spawnSync(file, args, { capture = true } = {}) {
 async function compileOne(entry) {
 	const { stage, source, defines = [], output } = entry;
 
+	// Expand any `#include` directives into a temp file. Sources with no
+	// includes are handed to glslang verbatim — byte-identical to the
+	// pre-#include behaviour, so untouched shaders regenerate diff-clean.
+	const expanded = expandIncludes(source);
+	const input    = expanded === null ? source : TMP_GLSL;
+	if (expanded !== null) {
+		writeFileSync(TMP_GLSL, expanded);
+	}
+
 	const args = [
 		'-S', stage,
 		'-V',
 		'-o', TMP_SPV,
-		source,
+		input,
 		...defines.map((d) => `-D${d}`),
 	];
 
@@ -201,8 +256,9 @@ async function main() {
 		combined += await compileOne(entry);
 	}
 
-	// Cleanup temp .spv whether we wrote shader_data.c or not.
-	try { unlinkSync(TMP_SPV); } catch { /* best-effort */ }
+	// Cleanup temp files whether we wrote shader_data.c or not.
+	try { unlinkSync(TMP_SPV);  } catch { /* best-effort */ }
+	try { unlinkSync(TMP_GLSL); } catch { /* best-effort */ }
 
 	if (CHECK) {
 		console.log(`==> --check OK: ${shaders.length} shaders compiled, shader_data.c not written.`);

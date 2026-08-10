@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
-// shader_xlate — Phase 7.3b offline shader-translation tool. Reads a SPIR-V
+// shader_xlate — offline shader-translation tool. Reads a SPIR-V
 // blob, emits MSL / GLSL 430 / GLSL ES 300 / WGSL alongside, per
 // docs/phase-7-hal-design.md §16.2:
 //

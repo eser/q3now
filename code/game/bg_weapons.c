@@ -85,6 +85,18 @@ gattack_t	bg_attacklist[] =
 		/* onAltFireStart       */ NULL,
 		/* onAltFireThink       */ NULL,
 		/* onAltFireRelease     */ NULL,
+		/* shellKnockback       */ 0.0f,
+		// recoil/spread (RS-1): base 200 → ceiling 500, ~1.0s ramp, ~0.5s decay
+		/* spreadBase           */ 200.0f,
+		/* spreadCeiling        */ 500.0f,
+		/* spreadRampTime       */ 1.0f,
+		/* spreadDecayTime      */ 0.5f,
+		// RS-4: authoritative per-shot UPWARD pitch view-kick (permanent; the
+		// player pulls down to compensate). MG fires fast (~10/s) so per-shot is
+		// small; tune by playing. The per-spray cap (VIEWKICK_SPRAY_CAP_DEG in
+		// bg_pmove.c) plateaus the climb. recoverTime unused (permanent model).
+		/* viewKickPitch        */ 0.5f,	// RS-4: degrees per shot
+		/* viewKickRecoverTime  */ 0.0f,	// RS-4: reserved (permanent-kick model has no auto-recovery)
 	},
 
 	// ATT_MACHINEGUN_BURST
@@ -109,6 +121,15 @@ gattack_t	bg_attacklist[] =
 		/* onAltFireThink       */ NULL,
 		/* onAltFireRelease     */ NULL,
 #endif
+		/* shellKnockback       */ 0.0f,
+		// recoil/spread (RS-1): burst is a tight, controlled tap — small base,
+		// modest ceiling, fast ramp/decay (configurable starting values).
+		/* spreadBase           */ 20.0f,
+		/* spreadCeiling        */ 80.0f,
+		/* spreadRampTime       */ 0.3f,
+		/* spreadDecayTime      */ 0.2f,
+		/* viewKickPitch        */ 0.0f,	// RS-4
+		/* viewKickRecoverTime  */ 0.0f,	// RS-4
 	},
 
 	// ATT_SHOTGUN_PRIMARY
@@ -127,6 +148,16 @@ gattack_t	bg_attacklist[] =
 		/* onAltFireStart       */ NULL,
 		/* onAltFireThink       */ NULL,
 		/* onAltFireRelease     */ NULL,
+		/* shellKnockback       */ 600.0f,	// one-shell momentum budget (≈ a rocket's kick)
+		// recoil/spread (RS-1): shotgun BLOOM — only the cone MAGNITUDE ramps;
+		// the seed-driven pellet PATTERN (g_shotgun.c) is untouched. base 600
+		// (current spread) → bloom ceiling under sustained fire.
+		/* spreadBase           */ 600.0f,
+		/* spreadCeiling        */ 900.0f,
+		/* spreadRampTime       */ 0.8f,
+		/* spreadDecayTime      */ 0.5f,
+		/* viewKickPitch        */ 0.0f,	// RS-4
+		/* viewKickRecoverTime  */ 0.0f,	// RS-4
 	},
 
 	// ATT_SHOTGUN_DOUBLE_BLAST
@@ -151,6 +182,7 @@ gattack_t	bg_attacklist[] =
 		/* onAltFireThink       */ NULL,
 		/* onAltFireRelease     */ NULL,
 #endif
+		/* shellKnockback       */ 1200.0f,	// two-shell budget (double blast = 2x the primary)
 	},
 
 	// ATT_GRENADE_LAUNCHER_PRIMARY
@@ -294,6 +326,106 @@ int BG_AttackByShortname( const char *shortname ) {
 		}
 	}
 	return ATT_NONE;
+}
+
+/*
+=================
+BG_CalcWeaponSpread
+
+Deterministic shared recoil/spread MAGNITUDE for the ACTIVE attack (attackIdx,
+e.g. ATT_MACHINEGUN_PRIMARY / ATT_MACHINEGUN_BURST / ATT_SHOTGUN_PRIMARY) at a
+given time. Pure: reads only the synced playerState anchor (ps->fireRampStartTime)
+and weaponstate plus the shared bg_attacklist tuning — so the server (bullet cone)
+and client (crosshair) compute the IDENTICAL value with zero networked recoil.
+
+Derivation (gauntlet-charge shape — a synced serverTime anchor → fraction → value):
+  elapsed = time - ps->fireRampStartTime
+  firing  → ramp:  frac = clamp(elapsed / spreadRampTime, 0..1)
+                   spread = base + frac*(ceiling - base)
+  idle    → decay: frac = clamp(elapsed / spreadDecayTime, 0..1)
+                   spread = ceiling + frac*(base - ceiling)   (ceiling → base)
+
+The single anchor encodes BOTH phases: RS-2/RS-3 RE-ANCHOR fireRampStartTime to
+`time` at each firing↔idle transition so `elapsed` measures progress through the
+current phase (exactly as gauntlet resets chargeStartTime). With no anchor
+maintenance yet (anchor == 0, RS-1) this returns spreadBase, which for every
+attack today is the at-rest cone — byte-identical, and there is no caller anyway.
+
+Returns 0 for attacks with no cone (all six spread fields zero-filled).
+=================
+*/
+// Resolve the attack row for an active attack index (bounds-checked → the
+// ATT_NONE row, which has all spread fields 0, for an out-of-range index).
+static const gattack_t *BG_AttackRow( int attackIdx ) {
+	if ( attackIdx <= ATT_NONE || attackIdx >= ATT_NUM_ATTACKS ) {
+		return &bg_attacklist[ATT_NONE];
+	}
+	return &bg_attacklist[attackIdx];
+}
+
+// RS-3-flag SSOT bridge: the at-rest cone for an attack — exactly what
+// BG_CalcWeaponSpread returns when fireRampStartTime <= 0 (no anchor). Lets a
+// caller without a playerState (e.g. the legacy bot-weapon-info fill in
+// g_syscalls.c) read the cone source of truth instead of duplicating the literal.
+// Bounds-checked via BG_AttackRow (out-of-range → ATT_NONE row → 0.0f).
+float BG_AttackSpreadBase( int attackIdx ) {
+	return BG_AttackRow( attackIdx )->spreadBase;
+}
+
+float BG_CalcWeaponSpread( const playerState_t *ps, int attackIdx, int time ) {
+	const gattack_t *att = BG_AttackRow( attackIdx );
+	float base    = att->spreadBase;
+	float ceiling = att->spreadCeiling;
+	int   elapsed;
+	float frac;
+
+	// No cone, or no anchor set yet (at rest / RS-1 unmaintained): rest cone.
+	if ( base <= 0.0f && ceiling <= 0.0f ) {
+		return 0.0f;
+	}
+	if ( ps->fireRampStartTime <= 0 ) {
+		return base;
+	}
+
+	elapsed = time - ps->fireRampStartTime;
+	if ( elapsed < 0 ) {
+		elapsed = 0;
+	}
+
+	if ( ps->weaponstate == WEAPON_FIRING ) {
+		// ramp base → ceiling
+		if ( att->spreadRampTime <= 0.0f ) {
+			return ceiling;	// flat: jump straight to ceiling
+		}
+		frac = (float)elapsed / ( att->spreadRampTime * 1000.0f );
+		if ( frac > 1.0f ) frac = 1.0f;
+		return base + frac * ( ceiling - base );
+	} else {
+		// decay ceiling → base
+		if ( att->spreadDecayTime <= 0.0f ) {
+			return base;	// instant settle
+		}
+		frac = (float)elapsed / ( att->spreadDecayTime * 1000.0f );
+		if ( frac > 1.0f ) frac = 1.0f;
+		return ceiling + frac * ( base - ceiling );
+	}
+}
+
+float BG_CalcWeaponSpreadNormalized( const playerState_t *ps, int attackIdx, int time ) {
+	const gattack_t *att = BG_AttackRow( attackIdx );
+	float base    = att->spreadBase;
+	float ceiling = att->spreadCeiling;
+	float span    = ceiling - base;
+	float current;
+
+	if ( span <= 0.0f ) {
+		return 0.0f;	// no ramp range (no cone, or ceiling == base)
+	}
+	current = BG_CalcWeaponSpread( ps, attackIdx, time );
+	current = ( current - base ) / span;
+	if ( current < 0.0f ) current = 0.0f;
+	if ( current > 1.0f ) current = 1.0f;
+	return current;
 }
 
 // Weapon definitions

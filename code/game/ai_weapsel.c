@@ -193,7 +193,7 @@ void BotChooseWeaponDPS( struct bot_state_s *bs )
 		} else {
 			hitRate = ws->baseAccuracy;
 			// skill-1 bot uses 0.2x base accuracy, skill-5 bot uses 1.0x
-			hitRate *= WiredBots_ResolveAbility( bs, 0.2f, 1.0f );
+			hitRate *= WiredIntel_ResolveAbility( bs, 0.2f, 1.0f );
 		}
 
 		if ( hitRate < 0.01f ) hitRate = 0.01f;

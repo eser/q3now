@@ -4,6 +4,9 @@
 // tr_mesh.c: triangle model functions
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn B — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 static float ProjectRadius( float r, vec3_t location )
 {
@@ -289,7 +292,7 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 		|| (ent->e.frame < 0)
 		|| (ent->e.oldframe >= tr.currentModel->md3[0]->numFrames)
 		|| (ent->e.oldframe < 0) ) {
-			ri.Log( SEV_DEBUG, "R_AddMD3Surfaces: no such frame %d to %d for '%s'\n",
+			R_LOG( rch_assets, SEV_DEBUG, "R_AddMD3Surfaces: no such frame %d to %d for '%s'\n",
 				ent->e.oldframe, ent->e.frame,
 				tr.currentModel->name );
 			ent->e.frame = 0;
@@ -315,13 +318,16 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 	//
 	// set up lighting now that we know we aren't culled
 	//
-	if ( !personalModel || r_shadows->integer > 1 ) {
+	// the `r_shadows > 1` term used to force entity lighting
+	// for personal models so the stencil/projection shadow could be built; those are
+	// retired, so personal models only need lighting when actually drawn (!personalModel).
+	if ( !personalModel ) {
 		R_SetupEntityLighting( &tr.refdef, ent );
 	}
 
 #ifdef USE_PMLIGHT
 	numDlights = 0;
-	if ( r_dlightMode->integer >= 2 && ( !personalModel || tr.viewParms.portalView != PV_NONE ) ) {
+	if ( r_dynamiclight->integer >= 2 && ( !personalModel || tr.viewParms.portalView != PV_NONE ) ) {
 		R_TransformDlights( tr.viewParms.num_dlights, tr.viewParms.dlights, &tr.or );
 		for ( n = 0; n < tr.viewParms.num_dlights; n++ ) {
 			dl = &tr.viewParms.dlights[ n ];
@@ -387,10 +393,10 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 				}
 			}
 			if (shader == tr.defaultShader) {
-				ri.Log( SEV_DEBUG, "WARNING: no shader for surface %s in skin %s\n", surface->name, skin->name);
+				R_LOG( rch_assets, SEV_DEBUG, "WARNING: no shader for surface %s in skin %s\n", surface->name, skin->name);
 			}
 			else if (shader->defaultShader) {
-				ri.Log( SEV_DEBUG, "WARNING: shader %s in skin %s not found\n", shader->name, skin->name);
+				R_LOG( rch_assets, SEV_DEBUG, "WARNING: shader %s in skin %s not found\n", shader->name, skin->name);
 			}
 		} else if ( surface->numShaders <= 0 ) {
 			shader = tr.defaultShader;
@@ -403,22 +409,11 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 
 		// we will add shadows even if the main object isn't visible in the view
 
-		// stencil shadows can't do personal models unless I polyhedron clip
-		if ( !personalModel
-			&& r_shadows->integer == 2
-			&& fogNum == 0
-			&& !(ent->e.renderfx & ( RF_NOSHADOW | RF_DEPTHHACK ) )
-			&& shader->sort == SS_OPAQUE ) {
-			R_AddDrawSurf( (void *)surface, tr.shadowShader, 0, 0 );
-		}
-
-		// projection shadows work fine with personal models
-		if ( r_shadows->integer == 3
-			&& fogNum == 0
-			&& (ent->e.renderfx & RF_SHADOW_PLANE )
-			&& shader->sort == SS_OPAQUE ) {
-			R_AddDrawSurf( (void *)surface, tr.projectionShadowShader, 0, 0 );
-		}
+		// legacy stencil-volume + planar-projection model
+		// shadows are RETIRED (the unified r_shadows level 2/3 now means cast/all =
+		// CSM directional shadows, drawn renderer-side from the sun depth map, not
+		// these per-model draw-surf shadows). The stencil/projection draw-surfs are
+		// no longer queued.
 
 		// don't add third_person objects if not viewing through a portal
 		if ( !personalModel ) {

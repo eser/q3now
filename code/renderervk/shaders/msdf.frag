@@ -3,19 +3,44 @@
 
 #version 450
 
-layout(set = 1, binding = 0) uniform sampler2D texture0;
+// legacy-mainpath-retire STEP 6.1 — MSDF was sampling its atlas via a legacy
+// set=1 binding fed by the GL_Bind ring write at tr_backend.c:85. 6.1 routes
+// the atlas through the RAL-owned bindless 2D table (set 7 of
+// vk.pipeline_layout_msdf) and adds a small FS push range at offset 128 that
+// carries the atlas's packed (tex<<12|sampler) slot. The new push range
+// extends the existing 128-byte MSDF push by 4 bytes — total 132 bytes,
+// within typical desktop GPU maxPushConstantsSize (>=256). The GL_Bind ring
+// write becomes dead and is removed at tr_backend.c:85 in the same turn.
+#extension GL_EXT_nonuniform_qualifier : require
 
-// Push constants shared with vertex shader (mat4 mvp occupies offset 0-63)
-// Layout satisfies std430: vec4 requires 16-byte alignment.
-// Floats packed first, then vec4s at 16-byte-aligned offsets.
-layout(push_constant) uniform PushConstants {
-    layout(offset = 64)  float outlineWidth;   // 0.0 = no outline, SDF units
-    layout(offset = 68)  float glowWidth;      // 0.0 = no glow, SDF units
-    layout(offset = 72)  vec2  shadowOffset;   // shadow shift in atlas pixels (0,0 = no shadow)
-    layout(offset = 80)  vec4  outlineColor;   // RGBA
-    layout(offset = 96)  vec4  glowColor;      // RGBA
-    layout(offset = 112) vec4  shadowColor;    // RGBA (a=0 disables shadow — branchless no-op)
+layout(set = 1, binding = 0) uniform texture2D wired_bindless_images[];
+layout(set = 1, binding = 1) uniform sampler   wired_bindless_samplers[];
+
+// Per-draw MSDF UBO at set 3 (UNIFORM_BUFFER_DYNAMIC, std140) — migrated off the
+// former 132-byte push constant (which exceeded the 128-byte Vulkan floor). Field
+// order/offsets match vk_msdf_ubo_t and msdf.vert's block exactly: mvp@0,
+// outlineWidth@64, glowWidth@68, shadowOffset@72, outlineColor@80, glowColor@96,
+// shadowColor@112, bindless_packed_slot@128 (carries WIRED_BINDLESS_PACK(atlas
+// tex, sampler) for the current text draw's atlas). The instance stays named `pc`
+// so the read sites below are unchanged. The fragment stage reads everything but
+// mvp (read by msdf.vert); mvp is declared here for a matching block layout.
+layout(set = 3, binding = 0, std140) uniform MsdfUBO {
+    mat4  mvp;
+    float outlineWidth;   // 0.0 = no outline, SDF units
+    float glowWidth;      // 0.0 = no glow, SDF units
+    vec2  shadowOffset;   // shadow shift in atlas pixels (0,0 = no shadow)
+    vec4  outlineColor;   // RGBA
+    vec4  glowColor;      // RGBA
+    vec4  shadowColor;    // RGBA (a=0 disables shadow — branchless no-op)
+    uint  bindless_packed_slot;  // atlas slot (tex:12 | sampler:8)
 } pc;
+
+// Sample the atlas via the bindless table. The atlas slot is constant for the
+// whole draw (one atlas per text string), so a per-fragment uniform read of
+// pc.bindless_packed_slot is folded by the driver to a constant.
+#define WIRED_MSDF_ATLAS sampler2D( \
+    wired_bindless_images  [ nonuniformEXT(   pc.bindless_packed_slot         & 0xFFFu ) ], \
+    wired_bindless_samplers[ nonuniformEXT( ( pc.bindless_packed_slot >> 12 ) & 0xFFu  ) ] )
 
 layout(location = 0) in vec4 frag_color0;
 layout(location = 1) in vec2 frag_tex_coord0;
@@ -29,10 +54,10 @@ float median(float r, float g, float b) {
     return max(min(r, g), min(max(r, g), b));
 }
 
-// Phase 6B3'-d4-m2: precise piecewise sRGB <-> linear conversion.
+// precise piecewise sRGB <-> linear conversion.
 // Duplicated in every fragment shader per the engine-wide
 // unconditional linear migration; compile.mjs lacks #include
-// support. Matches m1 (color.frag) verbatim. linearToSRGB is
+// support. Matches color.frag verbatim. linearToSRGB is
 // unused here — driver DCEs it; kept for migration symmetry.
 vec3 sRGBToLinear( vec3 c ) {
     c = max( c, vec3( 0.0 ) );
@@ -51,7 +76,7 @@ vec3 linearToSRGB( vec3 c ) {
 }
 
 void main() {
-    // Phase 6B3'-d4-m2: colour-domain contract for this shader —
+    // colour-domain contract for this shader —
     //   * texture0 is the MSDF distance field (signed-distance data
     //     in RGB, not a colour) — sampled RAW, never sRGB-decoded.
     //   * frag_color0 is the text tint, a normalised sRGB-encoded
@@ -63,11 +88,11 @@ void main() {
     // correct with every colour term in the linear domain.
     vec3 fillColor = sRGBToLinear( frag_color0.rgb );
 
-    vec3 msd = texture(texture0, frag_tex_coord0).rgb;
+    vec3 msd = texture(WIRED_MSDF_ATLAS, frag_tex_coord0).rgb;
     float sd = median(msd.r, msd.g, msd.b);
 
     // screenPxRange: official msdf-atlas-gen formula
-    vec2 unitRange = vec2(msdf_distance_range) / vec2(textureSize(texture0, 0));
+    vec2 unitRange = vec2(msdf_distance_range) / vec2(textureSize(WIRED_MSDF_ATLAS, 0));
     vec2 screenTexSize = vec2(1.0) / fwidth(frag_tex_coord0);
     float screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
 
@@ -82,8 +107,8 @@ void main() {
 
     // Shadow layer: sample atlas shifted opposite to offset direction.
     // shadowColor.a == 0 makes the shadow term a no-op (branchless).
-    vec2 shadowUV  = frag_tex_coord0 - pc.shadowOffset / vec2(textureSize(texture0, 0));
-    vec3 shadowMsd = texture(texture0, shadowUV).rgb;
+    vec2 shadowUV  = frag_tex_coord0 - pc.shadowOffset / vec2(textureSize(WIRED_MSDF_ATLAS, 0));
+    vec3 shadowMsd = texture(WIRED_MSDF_ATLAS, shadowUV).rgb;
     float shadowSd = median(shadowMsd.r, shadowMsd.g, shadowMsd.b);
     float shadowAlpha = clamp(screenPxRange * (shadowSd - 0.5) + 0.5, 0.0, 1.0) * pc.shadowColor.a;
 

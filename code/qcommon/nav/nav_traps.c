@@ -22,7 +22,6 @@ sv_game.c should pass:
 
 #include "../q_shared.h"
 #include "../q_feats.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_nav, "nav" );
 
 #if FEAT_RECAST_NAVMESH
@@ -45,7 +44,7 @@ static void *Nav_VMA( intptr_t val, byte *vmBase )
 
 /* -------------------------------------------------------------------------
    Nav_HandleTrap
-   Dispatches all G_NAV_* cases.  DetourCrowd stubs return -1/0 (Phase 6).
+   Dispatches all G_NAV_* cases.  DetourCrowd stubs return -1/0.
    ------------------------------------------------------------------------- */
 
 intptr_t Nav_HandleTrap( int trap, const intptr_t *args, byte *vmBase )
@@ -54,6 +53,9 @@ intptr_t Nav_HandleTrap( int trap, const intptr_t *args, byte *vmBase )
 
     case G_NAV_IS_READY:
         return Nav_IsReady();
+
+    case G_NAV_IS_BAKING:
+        return Nav_IsBaking();
 
     case G_NAV_FIND_PATH:
         /* args[1]=origin args[2]=goal args[3]=agentType args[4]=pathOut */
@@ -81,7 +83,7 @@ intptr_t Nav_HandleTrap( int trap, const intptr_t *args, byte *vmBase )
         return (intptr_t)Nav_GetPolyAreaFlags( (navPolyRef_t)args[1] );
 
     case G_NAV_TRIGGER_OFF_MESH_LINK:
-        /* Stub — deferred to Phase 4 */
+        /* Stub — deferred */
         return 0;
 
     case G_NAV_GET_RANDOM_POINT:
@@ -90,7 +92,7 @@ intptr_t Nav_HandleTrap( int trap, const intptr_t *args, byte *vmBase )
             (int)args[1],
             (float *)Nav_VMA( args[2], vmBase ) );
 
-    /* DetourCrowd — Phase 6 stubs */
+    /* DetourCrowd — stubs */
     case G_NAV_ADD_CROWD_AGENT:
         return -1;
 

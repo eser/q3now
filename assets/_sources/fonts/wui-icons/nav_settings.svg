@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- nav_settings (U+E006) — gear: 8 teeth + central hub + bore -->
+  <path d="M 45 10 L 55 10 L 56 22 L 64 25 L 72 17 L 79 24 L 71 32 L 74 40 L 86 41 L 86 51 L 74 52 L 71 60 L 79 68 L 72 75 L 64 67 L 56 70 L 55 82 L 45 82 L 44 70 L 36 67 L 28 75 L 21 68 L 29 60 L 26 52 L 14 51 L 14 41 L 26 40 L 29 32 L 21 24 L 28 17 L 36 25 L 44 22 Z
+           M 50 36
+           C 58 36 64 42 64 50
+           C 64 58 58 64 50 64
+           C 42 64 36 58 36 50
+           C 36 42 42 36 50 36 Z" fill="black" fill-rule="evenodd"/>
+</svg>

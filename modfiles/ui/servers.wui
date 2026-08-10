@@ -1,0 +1,303 @@
+// servers.wui -- q3now Server browser (Phase 5a canonical)
+//
+// Phase 5a settings panel §6.1 pattern reuse with §7.1 ListBox
+// extensions: filter bar + column header row + listbox body + footer.
+// Engine support: cl_wired_clay.c::wui_clay_emit_listbox now respects
+// parentIsContainer (Phase 5a engine fix) so the ListBox composes
+// cleanly with the flex shell here.
+//
+// Chrome refactor (2026-07-05): inline top/bottom bars + 5 footer text-links
+// swapped for the shared WiredUI widget library (QW_TOPBAR_STATUS preserves the
+// ui_browserStatus binding, QW_BOTTOMBAR, QW_BUTTON pills) so this reads in the
+// same visual language as the settings tabs. Cvars + actions unchanged.
+
+#include "ui/widgets/qw_chrome.wui"
+#include "ui/widgets/qw_button.wui"
+
+menuDef {
+	name "servers"
+	layer "menu"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "browser_root"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		background "layered" effects "base+glow+noise+vignette"
+
+		QW_TOPBAR_STATUS("q3now / Server Browser", "ui_browserStatus")
+
+		// ── MOTD line (master-server message-of-the-day). Thin display row
+		// directly under the top bar; binds cl_motdString (an engine cvar —
+		// WiredUI_StateGetString falls through to Cvar_VariableStringBuffer for
+		// non-ui-state keys, so type-0 text renders its value). Empty MOTD = blank.
+		itemDef {
+			name "browser_motd"
+			type 0
+			rect 0 0 1 0.025
+			height FIT
+			width PERCENT 1.0
+			padding 0.006 $content_padding_x
+			textalign 0
+			font $font_mono 10
+			forecolor $boneDim
+			cvar "cl_motdString"
+			decoration
+			visible 1
+		}
+
+		itemDef {
+			name "browser_content"
+			type container
+			rect 0 0 1 0.83
+			direction column
+			padding $content_padding_y $content_padding_x
+			gap $spacing_md
+			grow 1
+			height GROW
+
+			// ── Filter bar (source dropdown + game type filter + refresh)
+			itemDef {
+				name "browser_filters"
+				type container
+				rect 0 0 1 0.05
+				direction row
+				gap $spacing_md
+				height FIT
+				alignY center
+
+				itemDef {
+					name "filter_source"
+					type segmented
+					rect 0 0 0.52 0.04
+					height FIXED 36px
+					width PERCENT 0.52
+					text "Source"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					forecolor.active $accent
+					cvar "ui_netSource"
+					cvarFloatList { "Local" 0 "Internet" 1 }
+					visible 1
+					grow 0
+				}
+
+				itemDef {
+					name "filter_gametype"
+					type 12
+					rect 0 0 0.30 0.04
+					height FIXED 36px
+					width PERCENT 0.30
+					text "Game Type"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					forecolor.active $accent
+					cvar "ui_browserGameType"
+					cvarFloatList { "All" 0 "FFA" 1 "Tournament" 2 "TDM" 6 "CTF" 7 }
+					visible 1
+					grow 0
+				}
+
+				itemDef { name "filter_spacer" type container rect 0 0 0 0 grow 1 }
+
+				itemDef {
+					name "btn_refresh"
+					type 1
+					rect 0 0 0.14 0.04
+					height FIT
+					text "Refresh"
+					textalign 1
+					font $font_sans 13
+					forecolor $accent
+					forecolor.active $accent
+					visible 1
+					grow 0
+					action { refreshservers }
+				}
+
+				itemDef {
+					name "btn_filter"
+					type 1
+					rect 0 0 0.10 0.04
+					height FIT
+					text "Apply Filter"
+					textalign 1
+					font $font_sans 13
+					forecolor $boneDim
+					forecolor.active $accent
+					visible 1
+					grow 0
+					action { uiScript RefreshFilter }
+				}
+			}
+
+			// ── Filter bar row 2 (empty/full toggles + max-ping + refresh time)
+			// A second row keeps row 1 (Source + Game Type + Refresh/Apply) from
+			// overflowing. Checkboxes toggle their 0/1 cvar on ACTIVATE and, since
+			// they carry an action[], re-run RefreshFilter on-change (engine runs
+			// item->action after the toggle — cl_wired_ui.c ~5849). The Max-Ping
+			// editfield takes effect on Apply Filter (editfields don't fire actions
+			// on commit); 0 = no ping cap.
+			itemDef {
+				name "browser_filters2"
+				type container
+				rect 0 0 1 0.05
+				direction row
+				gap $spacing_md
+				height FIT
+				alignY center
+
+				itemDef {
+					name "filter_showfull"
+					type checkbox
+					rect 0 0 0.16 0.04
+					height FIXED 36px
+					width PERCENT 0.16
+					text "Show Full"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvar "ui_browserShowFull"
+					visible 1
+					grow 0
+					action { uiScript RefreshFilter }
+				}
+
+				itemDef {
+					name "filter_showempty"
+					type checkbox
+					rect 0 0 0.16 0.04
+					height FIXED 36px
+					width PERCENT 0.16
+					text "Show Empty"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvar "ui_browserShowEmpty"
+					visible 1
+					grow 0
+					action { uiScript RefreshFilter }
+				}
+
+				itemDef {
+					name "filter_maxping"
+					type 4
+					rect 0 0 0.22 0.04
+					height FIXED 36px
+					width PERCENT 0.22
+					text "Max Ping"
+					textalign 0
+					font $font_sans 13
+					forecolor $bone
+					cvar "ui_browserMaxPing"
+					maxchars 4
+					visible 1
+					grow 0
+				}
+
+				itemDef { name "filter2_spacer" type container rect 0 0 0 0 grow 1 }
+
+				itemDef {
+					name "refresh_label"
+					type 0
+					rect 0 0 0.16 0.04
+					height FIT
+					text "Last refreshed"
+					textalign 2
+					font $font_mono 10
+					forecolor $boneDim
+					decoration
+					visible 1
+				}
+
+				itemDef {
+					name "refresh_time"
+					type 0
+					rect 0 0 0.10 0.04
+					height FIT
+					textalign 0
+					font $font_mono 10
+					forecolor $bone
+					cvar "ui_lastRefreshDate"
+					decoration
+					visible 1
+				}
+			}
+
+			// ── ListBox body (server rows)
+			// The column header (SERVER/MAP/PLAYERS/TYPE/PING) is drawn by the
+			// ENGINE as a header band on the listbox below (columnHeaders +
+			// columnSort), so header cells and body cells share ONE column model
+			// (wui_listbox_column_geom) and stay aligned. The old hand-authored
+			// list_header (PERCENT widths that never matched the listbox `columns`
+			// pixel widths) was removed.
+			// The listbox emits as a FLOATING Clay element (it attaches to its
+			// parent rather than flowing), so on its own it does not reserve any
+			// vertical space in the column flex — which let the footer flow up
+			// directly under the column header. Wrap it in a grow-1 flex container
+			// so the container claims the middle space (pushing the footer to the
+			// bottom) and the floating listbox draws inside that reserved area.
+			itemDef {
+				name "serverlist_frame"
+				type container
+				rect 0 0 1 0
+				direction column
+				grow 1
+				height GROW
+				width PERCENT 1.0
+
+				itemDef {
+					name "serverlist"
+					type 6
+					rect 0 0 1 1
+					width PERCENT 1.0
+					height GROW
+					grow 1
+					font $font_sans 12
+					forecolor $bone
+					backcolor $panelDeep
+					style 1
+					feeder "servers"
+					elementheight 24
+					columns 5 0 460 30 460 250 20 720 130 10 860 130 10 1010 100 10
+					columnHeaders { 0 "SERVER" 1 "MAP" 2 "PLAYERS" 3 "TYPE" 4 "PING" }
+					columnSort "ServerSort"
+					visible 1
+					doubleclick { joinserver }
+				}
+			}
+
+			// ── Footer (Specify / Server Info / Cancel / Connect)
+			// Secondary actions pinned left, primary cluster (Cancel / Connect)
+			// pushed right by the grow spacer. All bordered pills.
+			itemDef {
+				name "browser_footer"
+				type container
+				rect 0 0 1 0.05
+				direction row
+				gap $spacing_md
+				alignY center
+				height FIT
+				padding 0.005 0
+
+				QW_BUTTON("btn_specify", "Specify...", $boneDim, { open "specifyserver" scene }, 0.12)
+				QW_BUTTON("btn_info", "Server Info", $boneDim, { open "serverinfo" scene }, 0.13)
+				QW_FOOTER_SPACER
+				QW_BUTTON("btn_cancel", "Cancel", $boneDim, { close ; open "main" scene }, 0.10)
+				QW_BUTTON("btn_connect", "Connect", $accent, { joinserver }, 0.12)
+			}
+		}
+
+		QW_BOTTOMBAR("double-click to join")
+	}
+
+	onOpen { refreshservers }
+	onESC  { close }
+}

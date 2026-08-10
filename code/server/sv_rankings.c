@@ -6,7 +6,6 @@
 #include "server.h"
 #include "..\rankings\1.0\gr\grapi.h"
 #include "..\rankings\1.0\gr\grlog.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 typedef struct

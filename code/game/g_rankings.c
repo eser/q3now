@@ -1108,9 +1108,10 @@ void G_RankGameOver( void )
 	num = trap_Cvar_VariableIntegerValue("sv_maxPing");
 	trap_RankReportInt( -1, -1, QGR_KEY_MAXPING, num, 0 );
 
-	// dedicated
-	num = trap_Cvar_VariableIntegerValue("dedicated");
-	trap_RankReportInt( -1, -1, QGR_KEY_DEDICATED, num, 0 );
+	// headless: report whether this is a console-only server (no local player),
+	// the Phase-1 replacement for the retired tri-state 'dedicated' cvar.
+	num = G_ServerIsConsoleOnly() ? 1 : 0;
+	trap_RankReportInt( -1, -1, QGR_KEY_HEADLESS, num, 0 );
 
 	// version
 	trap_Cvar_VariableStringBuffer( "version", str, sizeof(str) );

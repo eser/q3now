@@ -539,3 +539,12 @@ void G_StartKamikaze( gentity_t *ent ) {
 	te->r.svFlags |= SVF_BROADCAST;
 	te->s.eventParm = GTS_KAMIKAZE;
 }
+
+// ── savegame callback registry — TIER 2 file-local sub-list ──────────────────
+// KamikazeDamage is the one file-static callback here (a think handler for the
+// kamikaze blast). Published through SG_Register_g_weapon(). Name list
+// single-sourced in g_save_localcbs.h (SG_LOCAL_CB_g_weapon). See g_save_funcs.h.
+#include "g_save_funcs.h"
+#include "g_save_localcbs.h"
+
+SG_DEFINE_LOCAL_REGISTRY( SG_LOCAL_CB_g_weapon, SG_Register_g_weapon )

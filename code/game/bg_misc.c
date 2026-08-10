@@ -6,7 +6,6 @@
 
 #include "../qcommon/q_shared.h"
 #include "bg_public.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
@@ -1345,6 +1344,8 @@ char *eventnames[] = {
 #if FEAT_EARTHQUAKE_SYSTEM
 	,"EV_EARTHQUAKE"
 #endif
+
+	,"EV_EMIT_DEBRIS"
 };
 
 // A3: compile-time check — event name table must match entity_event_t enum

@@ -4,7 +4,6 @@
 
 #ifdef USE_CURL
 #include "client.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 cvar_t *cl_cURLLib;
 
@@ -57,7 +56,7 @@ static void *GPA(const char *str)
 	if(!rv)
 	{
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Can't load symbol %s\n", str);
-		clc.cURLEnabled = qfalse;
+		clientActiveApp->clc.cURLEnabled = qfalse;
 		return NULL;
 	}
 	else
@@ -105,7 +104,7 @@ qboolean CL_cURL_Init( void )
 #endif /* _WIN32 */
 	}
 
-	clc.cURLEnabled = qtrue;
+	clientActiveApp->clc.cURLEnabled = qtrue;
 
 	qcurl_version = GPA("curl_version");
 
@@ -127,7 +126,7 @@ qboolean CL_cURL_Init( void )
 	qcurl_multi_info_read = GPA("curl_multi_info_read");
 	qcurl_multi_strerror = GPA("curl_multi_strerror");
 
-	if(!clc.cURLEnabled)
+	if(!clientActiveApp->clc.cURLEnabled)
 	{
 		CL_cURL_Shutdown();
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "FAIL One or more symbols not found\n");
@@ -137,7 +136,7 @@ qboolean CL_cURL_Init( void )
 
 	return qtrue;
 #else
-	clc.cURLEnabled = qtrue;
+	clientActiveApp->clc.cURLEnabled = qtrue;
 	return qtrue;
 #endif /* USE_CURL_DLOPEN */
 }
@@ -179,27 +178,27 @@ void CL_cURL_Shutdown( void )
 
 void CL_cURL_Cleanup(void)
 {
-	if(clc.downloadCURLM) {
+	if(clientActiveApp->clc.downloadCURLM) {
 		CURLMcode result;
 
-		if(clc.downloadCURL) {
-			result = qcurl_multi_remove_handle(clc.downloadCURLM,
-				clc.downloadCURL);
+		if(clientActiveApp->clc.downloadCURL) {
+			result = qcurl_multi_remove_handle(clientActiveApp->clc.downloadCURLM,
+				clientActiveApp->clc.downloadCURL);
 			if(result != CURLM_OK) {
 				Com_Log( SEV_DEBUG, LOG_CH(ch_client), "qcurl_multi_remove_handle failed: %s\n", qcurl_multi_strerror(result));
 			}
-			qcurl_easy_cleanup(clc.downloadCURL);
+			qcurl_easy_cleanup(clientActiveApp->clc.downloadCURL);
 		}
-		result = qcurl_multi_cleanup(clc.downloadCURLM);
+		result = qcurl_multi_cleanup(clientActiveApp->clc.downloadCURLM);
 		if(result != CURLM_OK) {
 			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "CL_cURL_Cleanup: qcurl_multi_cleanup failed: %s\n", qcurl_multi_strerror(result));
 		}
-		clc.downloadCURLM = NULL;
-		clc.downloadCURL = NULL;
+		clientActiveApp->clc.downloadCURLM = NULL;
+		clientActiveApp->clc.downloadCURL = NULL;
 	}
-	else if(clc.downloadCURL) {
-		qcurl_easy_cleanup(clc.downloadCURL);
-		clc.downloadCURL = NULL;
+	else if(clientActiveApp->clc.downloadCURL) {
+		qcurl_easy_cleanup(clientActiveApp->clc.downloadCURL);
+		clientActiveApp->clc.downloadCURL = NULL;
 	}
 }
 
@@ -211,26 +210,26 @@ static int CL_cURL_CallbackProgress( void *dummy, double dltotal, double dlnow,
 	double ultotal, double ulnow )
 #endif
 {
-	clc.downloadSize = (int)dltotal;
-	Cvar_SetIntegerValue( "cl_downloadSize", clc.downloadSize );
-	clc.downloadCount = (int)dlnow;
-	Cvar_SetIntegerValue( "cl_downloadCount", clc.downloadCount );
+	clientActiveApp->clc.downloadSize = (int)dltotal;
+	Cvar_SetIntegerValue( "cl_downloadSize", clientActiveApp->clc.downloadSize );
+	clientActiveApp->clc.downloadCount = (int)dlnow;
+	Cvar_SetIntegerValue( "cl_downloadCount", clientActiveApp->clc.downloadCount );
 	return 0;
 }
 
 
 static size_t CL_cURL_CallbackWrite( void *buffer, size_t size, size_t nmemb, void *stream )
 {
-	if ( clc.download == FS_INVALID_HANDLE ) {
+	if ( clientActiveApp->clc.download == FS_INVALID_HANDLE ) {
 		if ( !CL_ValidPakSignature( buffer, size*nmemb ) ) {
 			Com_Terminate( TERM_CLIENT_DROP, "CL_cURL_CallbackWrite: invalid pak signature for %s",
-				clc.downloadName );
+				clientActiveApp->clc.downloadName );
 			return (size_t)-1;
 		}
-		clc.download = FS_SV_FOpenFileWrite( clc.downloadTempName );
-		if ( clc.download == FS_INVALID_HANDLE ) {
+		clientActiveApp->clc.download = FS_SV_FOpenFileWrite( clientActiveApp->clc.downloadTempName );
+		if ( clientActiveApp->clc.download == FS_INVALID_HANDLE ) {
 			Com_Terminate( TERM_CLIENT_DROP, "CL_cURL_CallbackWrite: failed to open %s for writing",
-				clc.downloadTempName );
+				clientActiveApp->clc.downloadTempName );
 			return (size_t)-1;
 		}
 	}
@@ -268,25 +267,25 @@ CURLcode qcurl_easy_setopt_warn(CURL *curl, CURLoption option, ...)
 
 static void CL_cURL_CloseDownload( void )
 {
-	if ( clc.download != FS_INVALID_HANDLE )
-		FS_FCloseFile( clc.download );
-	clc.download = FS_INVALID_HANDLE;
+	if ( clientActiveApp->clc.download != FS_INVALID_HANDLE )
+		FS_FCloseFile( clientActiveApp->clc.download );
+	clientActiveApp->clc.download = FS_INVALID_HANDLE;
 }
 
 void CL_cURL_BeginDownload( const char *localName, const char *remoteURL )
 {
 	CURLMcode result;
 
-	clc.cURLUsed = qtrue;
+	clientActiveApp->clc.cURLUsed = qtrue;
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "URL: %s\n", remoteURL);
 	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "***** CL_cURL_BeginDownload *****\n"
 		"Localname: %s\n"
 		"RemoteURL: %s\n"
 		"****************************\n", localName, remoteURL);
 	CL_cURL_Cleanup();
-	Q_strncpyz(clc.downloadURL, remoteURL, sizeof(clc.downloadURL));
-	Q_strncpyz(clc.downloadName, localName, sizeof(clc.downloadName));
-	Com_sprintf(clc.downloadTempName, sizeof(clc.downloadTempName),
+	Q_strncpyz(clientActiveApp->clc.downloadURL, remoteURL, sizeof(clientActiveApp->clc.downloadURL));
+	Q_strncpyz(clientActiveApp->clc.downloadName, localName, sizeof(clientActiveApp->clc.downloadName));
+	Com_sprintf(clientActiveApp->clc.downloadTempName, sizeof(clientActiveApp->clc.downloadTempName),
 		"%s.tmp", localName);
 
 	// Set so UI gets access to it
@@ -297,74 +296,74 @@ void CL_cURL_BeginDownload( const char *localName, const char *remoteURL )
 
 	CL_cURL_CloseDownload();
 
-	clc.downloadBlock = 0; // Starting new file
-	clc.downloadCount = 0;
+	clientActiveApp->clc.downloadBlock = 0; // Starting new file
+	clientActiveApp->clc.downloadCount = 0;
 
-	clc.downloadCURL = qcurl_easy_init();
-	if(!clc.downloadCURL) {
+	clientActiveApp->clc.downloadCURL = qcurl_easy_init();
+	if(!clientActiveApp->clc.downloadCURL) {
 		Com_Terminate( TERM_CLIENT_DROP, "CL_cURL_BeginDownload: qcurl_easy_init() "
 			"failed");
 		return;
 	}
 
 #ifdef _DEBUG
-	qcurl_easy_setopt_warn( clc.downloadCURL, CURLOPT_VERBOSE, 1 );
+	qcurl_easy_setopt_warn( clientActiveApp->clc.downloadCURL, CURLOPT_VERBOSE, 1 );
 #endif
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_URL, clc.downloadURL);
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_TRANSFERTEXT, 0);
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_REFERER, va("ioQ3://%s",
-		NET_AdrToString(&clc.serverAddress)));
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_USERAGENT, WIRED_ENGINE_VERSION);
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_WRITEFUNCTION,
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_URL, clientActiveApp->clc.downloadURL);
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_TRANSFERTEXT, 0);
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_REFERER, va("ioQ3://%s",
+		NET_AdrToString(&clientActiveApp->clc.serverAddress)));
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_USERAGENT, WIRED_ENGINE_TITLE);
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_WRITEFUNCTION,
 		CL_cURL_CallbackWrite);
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_WRITEDATA, &clc.download);
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_NOPROGRESS, 0);
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_WRITEDATA, &clientActiveApp->clc.download);
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_NOPROGRESS, 0);
 #if CURL_AT_LEAST_VERSION(7, 32, 0)
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_XFERINFOFUNCTION,
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_XFERINFOFUNCTION,
 		CL_cURL_CallbackProgress);
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_XFERINFODATA, NULL);
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_XFERINFODATA, NULL);
 #else
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_PROGRESSFUNCTION,
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_PROGRESSFUNCTION,
 		CL_cURL_CallbackProgress);
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_PROGRESSDATA, NULL);
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_PROGRESSDATA, NULL);
 #endif
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_FAILONERROR, 1);
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_FOLLOWLOCATION, 1);
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_MAXREDIRS, 5);
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_FAILONERROR, 1);
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_FOLLOWLOCATION, 1);
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_MAXREDIRS, 5);
 #if CURL_AT_LEAST_VERSION(7, 85, 0)
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_PROTOCOLS_STR, ALLOWED_PROTOCOLS_STR);
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_PROTOCOLS_STR, ALLOWED_PROTOCOLS_STR);
 #else
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_PROTOCOLS, ALLOWED_PROTOCOLS);
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_PROTOCOLS, ALLOWED_PROTOCOLS);
 #endif
 
 #ifdef CURL_MAX_READ_SIZE
-	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_BUFFERSIZE, CURL_MAX_READ_SIZE);
+	qcurl_easy_setopt_warn(clientActiveApp->clc.downloadCURL, CURLOPT_BUFFERSIZE, CURL_MAX_READ_SIZE);
 #endif
 
-	clc.downloadCURLM = qcurl_multi_init();
-	if( !clc.downloadCURLM ) {
-		qcurl_easy_cleanup( clc.downloadCURL );
-		clc.downloadCURL = NULL;
+	clientActiveApp->clc.downloadCURLM = qcurl_multi_init();
+	if( !clientActiveApp->clc.downloadCURLM ) {
+		qcurl_easy_cleanup( clientActiveApp->clc.downloadCURL );
+		clientActiveApp->clc.downloadCURL = NULL;
 		Com_Terminate( TERM_CLIENT_DROP, "CL_cURL_BeginDownload: qcurl_multi_init() "
 			"failed");
 		return;
 	}
 
-	result = qcurl_multi_add_handle( clc.downloadCURLM, clc.downloadCURL );
+	result = qcurl_multi_add_handle( clientActiveApp->clc.downloadCURLM, clientActiveApp->clc.downloadCURL );
 	if ( result != CURLM_OK ) {
-		qcurl_easy_cleanup( clc.downloadCURL );
-		clc.downloadCURL = NULL;
+		qcurl_easy_cleanup( clientActiveApp->clc.downloadCURL );
+		clientActiveApp->clc.downloadCURL = NULL;
 		Com_Terminate( TERM_CLIENT_DROP, "CL_cURL_BeginDownload: qcurl_multi_add_handle() failed: %s",
 			qcurl_multi_strerror( result ) );
 		return;
 	}
 
-	if(!(clc.sv_allowDownload & DLF_NO_DISCONNECT) &&
-		!clc.cURLDisconnected) {
+	if(!(clientActiveApp->clc.sv_allowDownload & DLF_NO_DISCONNECT) &&
+		!clientActiveApp->clc.cURLDisconnected) {
 
-		CL_AddReliableCommand("disconnect", qtrue);
-		CL_WritePacket( 2 );
-		clc.cURLDisconnected = qtrue;
+		CL_AddReliableCommand(clientActiveApp, "disconnect", qtrue);
+		CL_WritePacket( clientActiveApp, 2 );
+		clientActiveApp->clc.cURLDisconnected = qtrue;
 	}
 }
 
@@ -376,21 +375,21 @@ void CL_cURL_PerformDownload( void )
 	int c;
 	int i = 0;
 
-	res = qcurl_multi_perform(clc.downloadCURLM, &c);
+	res = qcurl_multi_perform(clientActiveApp->clc.downloadCURLM, &c);
 	while(res == CURLM_CALL_MULTI_PERFORM && i < 100) {
-		res = qcurl_multi_perform(clc.downloadCURLM, &c);
+		res = qcurl_multi_perform(clientActiveApp->clc.downloadCURLM, &c);
 		i++;
 	}
 	if(res == CURLM_CALL_MULTI_PERFORM)
 		return;
-	msg = qcurl_multi_info_read(clc.downloadCURLM, &c);
+	msg = qcurl_multi_info_read(clientActiveApp->clc.downloadCURLM, &c);
 	if(msg == NULL) {
 		return;
 	}
 	CL_cURL_CloseDownload();
 	if ( msg->msg == CURLMSG_DONE && msg->data.result == CURLE_OK ) {
-		FS_SV_Rename( clc.downloadTempName, clc.downloadName );
-		clc.downloadRestart = qtrue;
+		FS_SV_Rename( clientActiveApp->clc.downloadTempName, clientActiveApp->clc.downloadName );
+		clientActiveApp->clc.downloadRestart = qtrue;
 	}
 	else {
 		long code;
@@ -399,7 +398,7 @@ void CL_cURL_PerformDownload( void )
 			&code);
 		Com_Terminate( TERM_CLIENT_DROP, "Download Error: %s Code: %ld URL: %s",
 			qcurl_easy_strerror(msg->data.result),
-			code, clc.downloadURL);
+			code, clientActiveApp->clc.downloadURL);
 	}
 
 	CL_NextDownload();
@@ -725,7 +724,7 @@ static int Com_DL_CallbackProgress( void *data, double dltotal, double dlnow, do
 	dl->Size = (int)dltotal;
 	dl->Count = (int)dlnow;
 
-	if ( dl->mapAutoDownload && cls.state == CA_CONNECTED )
+	if ( dl->mapAutoDownload && clientActiveApp->state == CA_CONNECTED )
 	{
 		if ( Key_IsDown( K_ESCAPE ) )
 		{
@@ -974,7 +973,7 @@ qboolean Com_DL_Begin( download_t *dl, const char *localName, const char *remote
 	dl->func.easy_setopt( dl->cURL, CURLOPT_TRANSFERTEXT, 0 );
 	//dl->func.easy_setopt( dl->cURL, CURLOPT_REFERER, "q3a://127.0.0.1" );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_REFERER, dl->URL );
-	dl->func.easy_setopt( dl->cURL, CURLOPT_USERAGENT, WIRED_ENGINE_VERSION );
+	dl->func.easy_setopt( dl->cURL, CURLOPT_USERAGENT, WIRED_ENGINE_TITLE );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_WRITEFUNCTION, Com_DL_CallbackWrite );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_WRITEDATA, dl );
 	if ( dl->headerCheck )
@@ -1096,17 +1095,17 @@ qboolean Com_DL_Perform( download_t *dl )
 
 		Com_DL_Cleanup( dl );
 		FS_Reload(); //clc.downloadRestart = qtrue;
-		Com_Log( SEV_INFO, LOG_CH(ch_client), S_COLOR_GREEN "%s downloaded\n", name );
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "%s downloaded\n", name );
 		if ( autoDownload )
 		{
-			if ( cls.state == CA_CONNECTED && !clc.demoplaying )
+			if ( clientActiveApp->state == CA_CONNECTED && !clientActiveApp->clc.demoplaying )
 			{
-				CL_AddReliableCommand( "donedl", qfalse ); // get new gamestate info from server
+				CL_AddReliableCommand( clientActiveApp, "donedl", qfalse ); // get new gamestate info from server
 			}
-			else if ( clc.demoplaying )
+			else if ( clientActiveApp->clc.demoplaying )
 			{
 				// FIXME: there might be better solution than vid_restart
-				cls.startCgame = qtrue;
+				clientActiveApp->startCgame = qtrue;
 				Cbuf_ExecuteText( EXEC_APPEND, "vid_restart\n" );
 			}
 		}
@@ -1124,7 +1123,7 @@ qboolean Com_DL_Perform( download_t *dl )
 		remove( FS_BuildOSPath( Cvar_VariableString( "fs_homepath" ), name, NULL ) );
 		if ( autoDownload )
 		{
-			if ( cls.state == CA_CONNECTED )
+			if ( clientActiveApp->state == CA_CONNECTED )
 			{
 				Com_Terminate( TERM_CLIENT_DROP, "%s\n", "download error" );
 			}

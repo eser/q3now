@@ -14,10 +14,9 @@ Sources:
   Com_RealTimeMs        ← code/qcommon/wired/core/logging/log.c (added Cephe B-0b)
   Com_FormatTimestamp   ← code/qcommon/wired/core/logging/log.c (was Log_FormatTimestamp)
 
-sys_timeBase is a non-static global so that Sys_XTimeToSysTime in
-code/unix/linux_glimp.c can reference it via `extern unsigned long sys_timeBase`
-without modification — Option A ownership (time.c owns all time state) without
-requiring a touch on linux_glimp.c.
+sys_timeBase is a non-static global wall-clock epoch anchor owned here (Option A
+ownership: time.c owns all time state). It was historically read by the X11
+backend's Sys_XTimeToSysTime; that backend is retired, so it is now write-only.
 ===========================================================================
 */
 
@@ -36,11 +35,10 @@ requiring a touch on linux_glimp.c.
 #include "time.h"   /* own public header; pulls in q_shared.h → qtime_t, int64_t */
 
 // -------------------------------------------------------------------------
-// sys_timeBase — X11 epoch anchor (owned here, read via extern in linux_glimp.c)
+// sys_timeBase — wall-clock epoch anchor (owned here)
 // -------------------------------------------------------------------------
-// Wall-clock epoch second, set once at first Sys_Milliseconds call.
-// Only relevant on X11 Linux; kept as a regular global so linux_glimp.c's
-// existing `extern unsigned long sys_timeBase;` continues to compile unchanged.
+// Wall-clock epoch second, set once at first Sys_Milliseconds call. Formerly
+// read by the X11 backend's Sys_XTimeToSysTime, which has been retired.
 unsigned long sys_timeBase = 0;
 
 // -------------------------------------------------------------------------

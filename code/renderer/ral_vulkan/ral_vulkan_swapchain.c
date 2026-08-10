@@ -4,27 +4,27 @@
 // ral_vulkan_swapchain.c — Vulkan backend: presentation surface + HDR
 // metadata.
 //
-// Phase 7.4c-submit-followup-present-1: real bodies for Create / Destroy /
-// SetHdrMetadata; signature-updated stub bodies for AcquireNextImage /
-// Present (their real implementations land in -2). RAL adopts the
+// RAL adopts the
 // renderer-created VkSurfaceKHR via ralSwapchainCreateInfo_t.externalSurface
 // — RAL OWNS the VkSwapchainKHR + swapchain images (adopted as ralTexture_t
 // wrappers with ownsImage=qfalse since they're owned by the swapchain
 // implementation, not by the per-image VkImage allocation).
 //
-// Phase 7.8b's planned Windows DXGI rewrite happens in the platform layer
+// The planned Windows DXGI rewrite happens in the platform layer
 // (code/win32/), producing a VkSurfaceKHR (or surface-equivalent) that
 // this backend consumes unchanged.
 
 #include "ral_vulkan_internal.h"
 
-// Phase 7.4c-submit-followup-present-2 — phase-tag marker retired. All 5
+R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
+
+// All 5
 // swapchain entry points (Create / Destroy / AcquireNextImage / Present /
-// SetSwapchainHdrMetadata) have real bodies. Phase 7.8b's planned Windows
+// SetSwapchainHdrMetadata) have real bodies. The planned Windows
 // DXGI rewrite happens in the platform layer (code/win32/), producing a
 // VkSurfaceKHR-equivalent that this backend adopts unchanged via
 // ralSwapchainCreateInfo_t.externalSurface — no further RAL backend changes
-// expected for 7.8b.
+// expected for it.
 
 // ════════════════════════════════════════════════════════════════════════
 // format / colorspace / present-mode mapping helpers (ralFormat_t → Vk*)
@@ -40,12 +40,29 @@ static VkColorSpaceKHR ralVk_TranslateColorSpace( ralColorSpace_t cs ) {
 	}
 }
 
+// translate the RAL present mode to a Vulkan present mode FAITHFULLY.
+// Previously RAL_PRESENT_FIFO_RELAXED / _LATEST_READY did not exist and the
+// renderer's Vk_to_RalPresentMode collapsed both Vk modes to RAL_PRESENT_FIFO,
+// which this helper then re-expanded to plain VK_PRESENT_MODE_FIFO_KHR — so a
+// late frame hit the hard 16ms vblank stall the legacy code chose
+// FIFO_RELAXED / FIFO_LATEST_READY specifically to avoid (esp. MoltenVK at
+// r_swapInterval 0). The mode is now carried through unchanged.
+//
+// Device-support contract: the ONLY caller, the renderer's vk_create_swapchain,
+// enumerates VkPresentModeKHR support for the surface and SELECTS a present
+// mode it observed as supported (FIFO is always available per spec, and it only
+// picks FIFO_RELAXED / FIFO_LATEST_READY behind a "supported" flag). So the
+// requested mode is guaranteed creatable; no device re-query is needed here
+// (and the RAL backend's instance-PFN set deliberately excludes
+// GetPhysicalDeviceSurfacePresentModesKHR — the renderer owns that query).
 static VkPresentModeKHR ralVk_TranslatePresentMode( ralPresentMode_t pm ) {
 	switch ( pm ) {
-	case RAL_PRESENT_MAILBOX:   return VK_PRESENT_MODE_MAILBOX_KHR;
-	case RAL_PRESENT_IMMEDIATE: return VK_PRESENT_MODE_IMMEDIATE_KHR;
+	case RAL_PRESENT_MAILBOX:             return VK_PRESENT_MODE_MAILBOX_KHR;
+	case RAL_PRESENT_IMMEDIATE:           return VK_PRESENT_MODE_IMMEDIATE_KHR;
+	case RAL_PRESENT_FIFO_RELAXED:        return VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+	case RAL_PRESENT_FIFO_LATEST_READY:   return VK_PRESENT_MODE_FIFO_LATEST_READY_EXT;
 	case RAL_PRESENT_FIFO:
-	default:                    return VK_PRESENT_MODE_FIFO_KHR;
+	default:                              return VK_PRESENT_MODE_FIFO_KHR;
 	}
 }
 
@@ -61,7 +78,7 @@ ralSwapchain_t *Ral_CreateSwapchain( ralBackend_t *b, const ralSwapchainCreateIn
 	uint32_t                 i;
 
 	if ( !b || !ci || !ci->externalSurface ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateSwapchain: bad args (b=%p, ci=%p, externalSurface=%p)\n",
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateSwapchain: bad args (b=%p, ci=%p, externalSurface=%p)\n",
 		        (void *)b, (const void *)ci, ci ? ci->externalSurface : NULL );
 		return NULL;
 	}
@@ -80,7 +97,7 @@ ralSwapchain_t *Ral_CreateSwapchain( ralBackend_t *b, const ralSwapchainCreateIn
 
 	RAL_ZERO( sci );
 	sci.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-	sci.pNext            = ci->backendExtensionChain;   // Phase 7.4c-submit-followup-present-2 — caller-owned extension chain (Win32 HDR FSE on q3now's Windows build)
+	sci.pNext            = ci->backendExtensionChain;   // caller-owned extension chain (Win32 HDR FSE on q3now's Windows build)
 	sci.surface          = sc->surface;
 	sci.minImageCount    = ci->minImageCount ? ci->minImageCount : 2u;
 	sci.imageFormat      = sc->vkFormat;
@@ -93,7 +110,7 @@ ralSwapchain_t *Ral_CreateSwapchain( ralBackend_t *b, const ralSwapchainCreateIn
 	sci.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 	sci.presentMode      = sc->vkPresentMode;
 	sci.clipped          = VK_TRUE;
-	// Phase 7.4c-submit-followup-present-2 — atomic-handoff support. When the
+	// Atomic-handoff support. When the
 	// renderer drives a swapchain recreate (r_fbo / r_ext_multisample / r_hdrDisplay
 	// toggle, or VK_ERROR_OUT_OF_DATE_KHR recovery), it passes the prior RAL
 	// swapchain's VkSwapchainKHR here so the new swapchain transitions atomically
@@ -102,7 +119,7 @@ ralSwapchain_t *Ral_CreateSwapchain( ralBackend_t *b, const ralSwapchainCreateIn
 
 	r = b->vk.CreateSwapchainKHR( b->device, &sci, NULL, &sc->swapchain );
 	if ( r != VK_SUCCESS ) {
-		ri.Log( SEV_ERROR, "[RAL] Ral_CreateSwapchain: vkCreateSwapchainKHR returned %d (format=%d colorSpace=%d presentMode=%d %ux%u)\n",
+		R_LOG( rch_ral, SEV_ERROR, "Ral_CreateSwapchain: vkCreateSwapchainKHR returned %d (format=%d colorSpace=%d presentMode=%d %ux%u)\n",
 		        (int)r, (int)sc->vkFormat, (int)sc->vkColorSpace, (int)sc->vkPresentMode, sc->extent.width, sc->extent.height );
 		free( sc );
 		return NULL;
@@ -111,7 +128,7 @@ ralSwapchain_t *Ral_CreateSwapchain( ralBackend_t *b, const ralSwapchainCreateIn
 	// enumerate swapchain images + adopt each as ralTexture_t
 	b->vk.GetSwapchainImagesKHR( b->device, sc->swapchain, &imageCount, NULL );
 	if ( imageCount > MAX_RAL_SWAPCHAIN_IMAGES ) {
-		ri.Log( SEV_WARN, "[RAL] Ral_CreateSwapchain: swapchain image count %u exceeds MAX_RAL_SWAPCHAIN_IMAGES %u; clamping\n",
+		R_LOG( rch_ral, SEV_WARN, "Ral_CreateSwapchain: swapchain image count %u exceeds MAX_RAL_SWAPCHAIN_IMAGES %u; clamping\n",
 		        imageCount, MAX_RAL_SWAPCHAIN_IMAGES );
 		imageCount = MAX_RAL_SWAPCHAIN_IMAGES;
 	}
@@ -119,8 +136,12 @@ ralSwapchain_t *Ral_CreateSwapchain( ralBackend_t *b, const ralSwapchainCreateIn
 	b->vk.GetSwapchainImagesKHR( b->device, sc->swapchain, &sc->imageCount, sc->images );
 
 	for ( i = 0; i < sc->imageCount; i++ ) {
+		// Swapchain images are presented, not used as RAL dynamic-rendering
+		// attachments via defaultView — adopt with no view; carry the format.
 		sc->adoptedImages[i] = Ral_AdoptTexture( b,
 			(void *)sc->images[i],
+			NULL,
+			ci->format,
 			sc->extent.width, sc->extent.height,
 			VK_IMAGE_ASPECT_COLOR_BIT,
 			"wired-swapchain-image" );
@@ -160,8 +181,16 @@ void *Ral_GetSwapchainHandle( const ralSwapchain_t *sc ) {
 	return sc ? (void *)sc->swapchain : NULL;
 }
 
+// Ral_GetSwapchainExtent — the cached swapchain image extent (sc->extent, set
+// from the surface currentExtent at create time = physical present pixels). The
+// correct render-target size for the gamma present-blit; writes 0 on NULL.
+void Ral_GetSwapchainExtent( const ralSwapchain_t *sc, uint32_t *width, uint32_t *height ) {
+	if ( width )  *width  = sc ? sc->extent.width  : 0;
+	if ( height ) *height = sc ? sc->extent.height : 0;
+}
+
 // ════════════════════════════════════════════════════════════════════════
-// Ral_AcquireNextImage — real body (Phase 7.4c-submit-followup-present-2).
+// Ral_AcquireNextImage — real body.
 // Drives vkAcquireNextImageKHR; signals caller's semaphore on success;
 // translates VkResult to ralResult_t. ralOutOfDate / ralSuboptimal flow
 // the renderer into its vk_restart_swapchain recreate path.
@@ -194,15 +223,21 @@ ralResult_t Ral_AcquireNextImage( ralSwapchain_t *sc, uint64_t timeoutNs, ralSem
 	}
 	if ( res == VK_ERROR_OUT_OF_DATE_KHR )
 		return ralOutOfDate;
-	if ( res == VK_TIMEOUT )
-		return ralErrorUnknown;
+	// VK_TIMEOUT / VK_NOT_READY are RECOVERABLE: no image became
+	// available within timeoutNs (the legacy code treated these positive
+	// results as a non-fatal "skip this frame"). A compositor / RDP / suspend
+	// stall longer than the acquire timeout must NOT hard-terminate. Map to the
+	// distinct ralTimeout so vk_begin_frame can skip the frame instead of
+	// crashing, leaving the swapchain valid.
+	if ( res == VK_TIMEOUT || res == VK_NOT_READY )
+		return ralTimeout;
 
-	ri.Log( SEV_ERROR, "[RAL] Ral_AcquireNextImage: vkAcquireNextImageKHR returned %d\n", (int)res );
+	R_LOG( rch_ral, SEV_ERROR, "Ral_AcquireNextImage: vkAcquireNextImageKHR returned %d\n", (int)res );
 	return ralErrorDeviceLost;
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// Ral_Present — real body (Phase 7.4c-submit-followup-present-2). Drives
+// Ral_Present — real body. Drives
 // vkQueuePresentKHR on the graphics queue. Builds VkPresentInfoKHR from
 // the typed ralPresentInfo_t array shape; unwraps adopted semaphores via
 // Ral_GetSemaphoreHandle. Caps at MAX_RAL_SWAPCHAIN_IMAGES per scratch
@@ -247,7 +282,7 @@ ralResult_t Ral_Present( ralBackend_t *b, const ralPresentInfo_t *info ) {
 	if ( res == VK_ERROR_OUT_OF_DATE_KHR ) return ralOutOfDate;
 	if ( res == VK_ERROR_DEVICE_LOST )     return ralErrorDeviceLost;
 
-	ri.Log( SEV_ERROR, "[RAL] Ral_Present: vkQueuePresentKHR returned %d\n", (int)res );
+	R_LOG( rch_ral, SEV_ERROR, "Ral_Present: vkQueuePresentKHR returned %d\n", (int)res );
 	return ralErrorUnknown;
 }
 

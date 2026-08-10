@@ -43,21 +43,26 @@ normal.xyz; .w is unused pad.
 //   bytes 64..79   vec4  eyeWorld      (.xyz used; world-space camera origin)
 //   bytes 80..95   vec4  frameParams   (.x  = reserved / unused — was
 //                                            the legacy identityLight
-//                                            halving factor (dropped
-//                                            Phase 6B3'-a, field removed
+//                                            halving factor (dropped,
+//                                            field removed
 //                                            in the Block 9 sweep); the
 //                                            word stays for push-range
 //                                            byte-compat across the
 //                                            primitive shaders,
 //                                       .yzw reserved for future scalars)
 // frameParams.x was the CGEN_VERTEX-equivalent halving factor before
-// Phase 6B3'-a's linear-pipeline migration. ribbon.frag no longer
+// the linear-pipeline migration. ribbon.frag no longer
 // consumes it; the field stays only because push range layouts must
 // be byte-compatible across stages.
-layout(push_constant) uniform Push {
+// Migrated off the retired 96-byte VS|FS push to the shared effects per-draw UBO
+// at set 1 (UNIFORM_BUFFER_DYNAMIC, std140). Anonymous block keeps the read sites
+// (mvp/eyeWorld/frameParams) unchanged. _v2 is the generic v2 slot (unused by
+// ribbon; beam=stageParams, sprite=frameParams).
+layout(set = 1, binding = 0, std140) uniform EffectsUBO {
 	mat4 mvp;
 	vec4 eyeWorld;
 	vec4 frameParams;
+	vec4 _v2;
 };
 
 struct RibbonPoint {
@@ -182,7 +187,7 @@ void main() {
 	// no-op since baseUV is already in [0, 1]; load-bearing for
 	// any future scrolling ribbon consumer.
 	//
-	// (Beam took a different approach in Phase 5J: separate
+	// (Beam took a different approach: separate
 	// REPEAT-mode sampler + no fract, which avoids fract(1.0)=0
 	// V-collapse when the GLSL spec collapses the V=1 vertex.
 	// Ribbon's V is per-point (varies smoothly along the strip)

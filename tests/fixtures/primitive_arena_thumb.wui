@@ -1,0 +1,33 @@
+// primitive_arena_thumb.wui — ArenaThumb v2 primitive demo.
+// 120 × 68 panel with a level-shot background + Mono caption overlay.
+// Uses an existing pak shader for the "thumb" content.
+
+menuDef {
+	name "primitive_arena_thumb"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor $ink
+
+	itemDef {
+		name "arena_thumb_panel"
+		rect 0.40 0.40 0.20 0.18
+		background "levelshots/q3dm0"
+		bordercolor $accent
+		bordersize 1
+		visible 1
+		decoration
+	}
+	itemDef {
+		name "arena_thumb_label"
+		rect 0.40 0.56 0.20 0.03
+		text "ARENA THUMB · Q3DM0"
+		font $font_mono 10
+		forecolor $boneDim
+		textalign 1
+		visible 1
+		decoration
+	}
+}

@@ -42,6 +42,8 @@ This file is part of the Wired engine source code. GPLv2.
 #include "q_shared.h"
 #include "qcommon.h"
 #include "wired/core/logging/log.h"   /* log_sink_t */
+#include "wired/stalltrace.h"         /* stalltrace_register prototype */
+#include "wired/core/scripting/wired_scripting.h"  /* WiredScript_* prototypes */
 
 #ifdef _WIN32
 #  include <windows.h>
@@ -53,11 +55,12 @@ This file is part of the Wired engine source code. GPLv2.
 // CL_* — never reached from tool path
 // =====================================================================
 
+struct clientApp_s;	// per-app client container — stubs below take it by pointer
 void     CL_Init                    ( void ) { /* unreached */ }
 void     CL_Characters_Init         ( void ) { /* unreached */ }
 void     CL_AbortFrame              ( void ) { /* unreached */ }
 qboolean CL_DemoPlaying             ( void ) { return qfalse; }
-qboolean CL_Disconnect              ( qboolean showMainMenu ) { (void)showMainMenu; return qfalse; }
+qboolean CL_Disconnect              ( struct clientApp_s *app, qboolean showMainMenu ) { (void)app; (void)showMainMenu; return qfalse; }
 void     CL_Shutdown                ( const char *finalmsg, qboolean quit ) { (void)finalmsg; (void)quit; }
 void     CL_Frame                   ( int msec, int realMsec ) { (void)msec; (void)realMsec; }
 qboolean CL_GameCommand             ( void ) { return qfalse; }
@@ -66,10 +69,24 @@ void     CL_ShutdownAll             ( void ) { /* unreached */ }
 void     CL_ClearMemory             ( void ) { /* unreached */ }
 void     CL_FlushMemory             ( void ) { /* unreached */ }
 void     CL_StartHunkUsers          ( void ) { /* unreached */ }
-void     CL_SystemInfoChanged       ( qboolean onlyGame ) { (void)onlyGame; }
-qboolean CL_GameSwitch              ( void ) { return qfalse; }
-void     CL_ShutdownCGame           ( void ) { /* unreached */ }
+void     CL_SystemInfoChanged       ( struct clientApp_s *app, qboolean onlyGame ) { (void)app; (void)onlyGame; }
+qboolean CL_GameSwitch              ( struct clientApp_s *app ) { (void)app; return qfalse; }
+void     CL_ShutdownCGame           ( struct clientApp_s *app ) { (void)app; /* unreached */ }
 void     CL_ShutdownUI              ( void ) { /* unreached */ }
+void     CL_DownloadsComplete_Tick  ( void ) { /* unreached */ }
+
+// Per-app cursors (cl_main.c not linked into the tool). common.c and
+// log.c reference these for the per-app error-recovery / shutdown
+// chains; tool path never enters those, so a NULL/no-op is safe.
+struct clientApp_s *CL_ActiveApp    ( void ) { return NULL; }
+struct clientApp_s *CL_FrameApp     ( void ) { return NULL; }
+void **             CL_FrameAppAbort ( void ) { return NULL; }
+int                 CL_ActiveCgameInstance( void ) { return 0; }
+// Frame-abort flag (cl_main.c not linked). common.c / log.c read+set it during
+// the long-operation abort guard; the tool has no frame loop, so the flag is
+// always "disarmed" and the setter is a no-op.
+qboolean            CL_FrameAbortArmed( void ) { return qfalse; /* unreached */ }
+void                CL_SetFrameAbortArmed( qboolean armed ) { (void)armed; /* unreached */ }
 void     CIN_CloseAllVideos         ( void ) { /* unreached */ }
 
 // =====================================================================
@@ -94,6 +111,15 @@ void     SV_ShutdownGameProgs       ( void ) { /* unreached */ }
 void WiredCore_Init        ( void ) { /* unreached */ }
 void WiredCore_Shutdown    ( void ) { /* unreached */ }
 void WiredScript_PostInit  ( void ) { /* unreached */ }
+// Lua globals/members enumeration (scripting layer excluded). No Lua state in
+// the tool, so the callback is never invoked.
+void WiredScript_EnumerateGlobalsAndMembers(
+		void (*callback)( const char *name, int type, void *ctx ), void *ctx ) {
+	(void)callback; (void)ctx; /* unreached — no Lua in tool */
+}
+// stalltrace cvar registration (wired/stalltrace.c excluded). common.c's cvar
+// setup resolves this; the tool has no frame loop, so registering nothing is fine.
+void stalltrace_register   ( void ) { /* unreached — tool has no frame loop */ }
 
 // =====================================================================
 // Event subsystem — events/event.c excluded
@@ -131,6 +157,12 @@ int  VM_GetCallStack          ( void *vm, char *out, int outsize ) {
 	if ( out && outsize > 0 ) out[0] = '\0';
 	return 0;
 }
+// Per-app VM cursors. common.c / files.c resolve these for the per-cgame-app
+// teardown + active-VM lookups; the tool never instantiates a VM, so a no-op /
+// NULL / 0 is safe.
+void   VM_ClearApp            ( int cgameInstance ) { (void)cgameInstance; /* unreached */ }
+vm_t  *VM_ActiveNativeVM      ( void ) { return NULL; /* unreached */ }
+int    VM_CgameInstance       ( vm_t *vm ) { (void)vm; return 0; /* unreached */ }
 
 // =====================================================================
 // Network init — net_ip.c excluded
@@ -172,7 +204,7 @@ void        Log_UnregisterConsoleSink ( void ) { /* unreached */ }
 
 // =====================================================================
 // CM trace counters — formerly stubbed; cm_*.c sources are now in
-// QCOMMON_TOOL_SRCS (B2 brought them back in via the BSP_Load chain),
+// QCOMMON_TOOL_SRCS (B2 brought them back in via the Map_Load chain),
 // and the counters are defined inside cm_trace.c. No tool-side storage
 // needed.
 // =====================================================================

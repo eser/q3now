@@ -1,0 +1,141 @@
+// serverinfo.wui -- q3now Server Info detail panel (Phase 5a §7.3 canonical)
+//
+// Selected-server detail popup. Phase 5a §7.3 pattern: a popup-style
+// modal with a label-and-value table sourced from the SERVERSTATUS
+// feeder (feeder 13 in legacy, feeder "serverstatus" symbolic).
+// Triggered from servers.wui's Server Info footer button.
+
+menuDef {
+	name "serverinfo"
+	layer "popup"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "popup_overlay"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		alignX center
+		alignY center
+		background "layered" effects "vignette"
+
+		itemDef {
+			name "serverinfo_root"
+			type container
+			rect 0.2 0.15 0.6 0.7
+			direction column
+			padding $popup_padding
+			gap $spacing_md
+			background $panel
+			border 1px $line_strong
+			radius $radius_md
+			width PERCENT 0.6
+			height PERCENT 0.7
+
+			itemDef {
+				name "popup_header"
+				type 0
+				rect 0 0 1 0.06
+				height FIT
+				text "Server Info"
+				textalign 0
+				font $font_sans_bold 22
+				forecolor $accent
+				decoration
+				visible 1
+				grow 0
+			}
+
+			itemDef {
+				name "popup_subheader"
+				type 0
+				rect 0 0 1 0.03
+				height FIT
+				text "Status / map / players / version (live from selected server)"
+				textalign 0
+				font $font_mono 11
+				forecolor $boneDim
+				decoration
+				visible 1
+				grow 0
+			}
+
+			// ── ListBox view of the SERVERSTATUS feeder rows.
+			//    feeder 13 = FEEDER_SERVERSTATUS; columns key→value pairs.
+			itemDef {
+				name "statuslist"
+				type 6
+				rect 0 0 1 0.55
+				width PERCENT 1.0
+				height GROW
+				font $font_sans 12
+				forecolor $bone
+				backcolor $panelDeep
+				style 1
+				feeder 13
+				elementheight 22
+				columns 2 0 220 32 220 540 32
+				visible 1
+			}
+
+			itemDef {
+				name "popup_footer"
+				type container
+				rect 0 0 1 0.05
+				direction row
+				gap $spacing_md
+				alignX end
+				height FIT
+
+				itemDef {
+					name "btn_back"
+					type 1
+					rect 0 0 0.20 0.04
+					height FIT
+					text "Back to Browser"
+					textalign 1
+					font $font_sans 13
+					forecolor $boneDim
+					forecolor.active $accent
+					visible 1
+					grow 0
+					action { close ; open "servers" scene }
+				}
+				itemDef {
+					name "btn_connect"
+					type 1
+					rect 0 0 0.20 0.04
+					height FIT
+					text "Connect"
+					textalign 1
+					font $font_sans_bold 13
+					forecolor $accent
+					forecolor.active $accent
+					visible 1
+					grow 0
+					action { joinserver }
+				}
+				itemDef {
+					name "btn_close"
+					type 1
+					rect 0 0 0.12 0.04
+					height FIT
+					text "Close"
+					textalign 1
+					font $font_sans 13
+					forecolor $boneDim
+					forecolor.active $accent
+					visible 1
+					grow 0
+					action { close }
+				}
+			}
+		}
+	}
+
+	onESC { close }
+}

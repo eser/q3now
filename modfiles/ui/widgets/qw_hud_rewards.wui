@@ -1,0 +1,37 @@
+// qw_hud_rewards — V2_HUD_Active reward / medal feed (Excellent / Impressive / etc.)
+// HUD redesign (Eser) Phase D — status layer: frag-time medals. The engine
+// (cl_wired_hud_elem_reward.c) pops one reward off cg.rewardStack at a time and
+// fades it; rewardicons draws cg.rewardShader[0], rewardnumbers draws the count
+// ("×N") via the config text format. No bind needed — both read cg.reward* live.
+// Placement TOP_CENTER y0.22, just below the msgqueue (y0.158) — the classic Q3
+// medal lane, eye-centre so a frag's medal lands where attention already is.
+// hudElement rects are FULL-VIEWPORT. The count sits just under the icon.
+itemDef {
+	name "hud_active_rewards_root"
+	type container
+	direction column
+	decoration
+	visible 1
+
+	// medal icon — centred, ~5% tall square
+	itemDef { hudElement "rewardicons"
+		anchor TOP_CENTER
+		rect 0.500 0.220 0.045 0.060
+		forecolor 1 1 1 1
+		decoration
+		visible 1
+	}
+	// "×N" count under the icon — amber, small sans. config.text format string
+	// is the va() template the engine fills with cg.rewardCount[0].
+	itemDef { hudElement "rewardnumbers"
+		anchor TOP_CENTER
+		rect 0.500 0.286 0 0
+		font $font_sans
+		fontsize 14 18
+		textalign 1
+		text "x%i"
+		forecolor $accent
+		decoration
+		visible 1
+	}
+}

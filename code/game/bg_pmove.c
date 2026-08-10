@@ -8,7 +8,6 @@
 #include "../qcommon/q_shared.h"
 #include "bg_public.h"
 #include "bg_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_physics, "physics" );
 
 pmove_t		*pm;
@@ -48,6 +47,13 @@ int     pm_overbounceThreshold = 400;   // overbounce is gated with threshold (4
 float	pm_weapondrop = 0; // 200;
 float	pm_weaponraise = 250;
 float	pm_outofammodelay = 500;
+
+// RS-4 view-kick: the maximum cumulative UPWARD pitch (degrees) a single spray
+// may accumulate before the kick plateaus. Bounds delta_angles[PITCH] far under
+// the engine's ±16000-short (±90°) clamp so a long hold can never pin the aim at
+// the look-limit. Integer short units (ANGLE2SHORT) are used at the shot site so
+// the gate is bit-identical on the server and client-predicted modules.
+#define VIEWKICK_SPRAY_CAP_DEG	30.0f
 
 // Backpacks
 int		pm_backpacks = 1;
@@ -2006,6 +2012,17 @@ qboolean PM_MG_Burst_Start( pmove_t *pm ) {
 		maxRounds = pm->ps->ammo[ pm->ps->weapon ];
 	}
 	pm->ps->burstRoundsRemaining = maxRounds - 1;  // -1: first round fires now
+	// RS-3: anchor the burst's spread ramp on the rest→firing EDGE (prior state
+	// not WEAPON_FIRING). Burst fires via this callback (it never reaches the
+	// primary shot site), so its anchor must be maintained here for the
+	// ATT_MACHINEGUN_BURST cone to ramp. Edge-test, not a <=0 guard: across a
+	// sustained hold the reload gap leaves weaponstate==WEAPON_FIRING (PM_Weapon
+	// returns at the weaponTime>0 guard), so successive bursts DON'T re-anchor and
+	// the ramp grows; a fresh tap from idle (state READY after a decay re-anchor)
+	// does re-anchor → ramps from base.
+	if ( pm->ps->weaponstate != WEAPON_FIRING ) {
+		pm->ps->fireRampStartTime = pm->cmd.serverTime;
+	}
 	PM_StartTorsoAnim( TORSO_ATTACK2 );
 	PM_AddEvent( EV_FIRE_WEAPON_SEC );
 	pm->ps->weaponstate = WEAPON_FIRING;
@@ -2031,6 +2048,11 @@ qboolean PM_MG_Burst_Think( pmove_t *pm ) {
 	if ( !( pm->cmd.buttons & BUTTON_ATTACK_SEC ) ) {
 		pm->ps->burstRoundsRemaining = 0;
 		pm->ps->weaponTime = 0;
+		// RS-3: burst fire-stop (alt released) → re-anchor on the firing→idle
+		// EDGE so the burst's decay ramp measures elapsed from release. This path
+		// only runs mid-burst (burstRoundsRemaining>0), i.e. while WEAPON_FIRING,
+		// so it is always a genuine edge.
+		pm->ps->fireRampStartTime = pm->cmd.serverTime;
 		pm->ps->weaponstate = WEAPON_READY;
 		return qtrue;
 	}
@@ -2311,6 +2333,14 @@ static void PM_Weapon( void ) {
 	int 	attIdx, eventIdx;
 	int		addTime;
 	int		buttons;
+	// RS-3: weaponstate at frame entry, before any branch below mutates it. The
+	// recoil/spread anchor (fireRampStartTime) re-anchors only on a phase EDGE —
+	// re-anchored when the PRIOR state was not WEAPON_FIRING (rest→firing) and
+	// when leaving WEAPON_FIRING (firing→idle, for the decay phase), but left
+	// unchanged WITHIN a phase so `elapsed` grows. Re-anchoring every idle frame
+	// would freeze decay at the ceiling — hence the edge test, not an
+	// unconditional write. Mirrors gauntlet chargeStartTime's transition reset.
+	qboolean wasFiring = ( pm->ps->weaponstate == WEAPON_FIRING );
 
 	// don't allow attack until all buttons are up
 	if ( pm->ps->pm_flags & PMF_RESPAWNED ) {
@@ -2395,6 +2425,7 @@ static void PM_Weapon( void ) {
 		if ( (pm->pmove_flags & PMF_FAST_SWITCH_MASK) == PMF_FAST_SWITCH_INSTANT ) {
 			// mode 2: instant — finish change and go straight to READY
 			PM_FinishWeaponChange();
+			pm->ps->fireRampStartTime = 0;	// RS-2: clear the spread ramp anchor on idle
 			pm->ps->weaponstate = WEAPON_READY;
 			pm->ps->weaponTime = 0;
 		} else if ( pm->pmove_flags & PMF_FAST_SWITCH_SKIP_DROP ) {
@@ -2425,6 +2456,7 @@ static void PM_Weapon( void ) {
             return;
         }
 
+		pm->ps->fireRampStartTime = 0;	// RS-2: clear the spread ramp anchor on idle
 		pm->ps->weaponstate = WEAPON_READY;
 		if ( pm->ps->weapon == WP_GAUNTLET ) {
 			PM_StartTorsoAnim( TORSO_STAND2 );
@@ -2434,10 +2466,17 @@ static void PM_Weapon( void ) {
 		return;
 	}
 
-	// ignore +attackalt if the weapon has no alt-fire
-	if ( (buttons & BUTTON_ATTACK_SEC) && !( buttons & BUTTON_ATTACK_PRI ) ) {
+	// ignore +attacksec if the weapon has no alt-fire
+	if ( ( buttons & BUTTON_ATTACK_SEC ) && !( buttons & BUTTON_ATTACK_PRI ) ) {
 		if ( bg_weaponlist[pm->ps->weapon].attackAlt == ATT_NONE ) {
 			pm->ps->weaponTime = 0;
+			// RS-3: fire-stop while the weapon stays equipped → re-anchor on the
+			// firing→idle EDGE so the decay ramp measures elapsed from release.
+			// Edge-only (wasFiring): re-anchoring every idle frame would pin
+			// elapsed≈0 and freeze decay at the ceiling.
+			if ( wasFiring ) {
+				pm->ps->fireRampStartTime = pm->cmd.serverTime;
+			}
 			pm->ps->weaponstate = WEAPON_READY;
 			return;
 		}
@@ -2453,6 +2492,14 @@ static void PM_Weapon( void ) {
 			}
 		}
 		pm->ps->weaponTime = 0;
+		// RS-3: dominant fire-stop (no attack button) → re-anchor on the
+		// firing→idle EDGE so the decay ramp lives (Option A, single field). The
+		// formula reads weaponstate==WEAPON_READY here → its decay branch, and
+		// elapsed = serverTime - this anchor grows ceiling→base over decayTime.
+		// Edge-only (wasFiring): every-idle-frame re-anchor would freeze decay.
+		if ( wasFiring ) {
+			pm->ps->fireRampStartTime = pm->cmd.serverTime;
+		}
 		pm->ps->weaponstate = WEAPON_READY;
 		return;
 	}
@@ -2463,6 +2510,7 @@ static void PM_Weapon( void ) {
 		if ( !( buttons & BUTTON_ATTACK_SEC ) ) {
 			if ( !pm->gauntletHit ) {
 				pm->ps->weaponTime = 0;
+				pm->ps->fireRampStartTime = 0;	// RS-2: clear the spread ramp anchor on idle
 				pm->ps->weaponstate = WEAPON_READY;
 				return;
 			}
@@ -2509,6 +2557,60 @@ static void PM_Weapon( void ) {
 
 	PM_AddEvent( eventIdx );
 
+	// RS-3: anchor the recoil/spread ramp on the rest→firing EDGE (prior state
+	// not WEAPON_FIRING). On a sustained-fire frame (wasFiring) the anchor is
+	// LEFT unchanged so elapsed = serverTime - anchor GROWS across the burst and
+	// the ramp climbs base→ceiling. Re-anchoring per shot (the old <=0 guard
+	// would also re-set after a fire-stop re-anchor) would restart the ramp every
+	// frame — the edge test is what makes "anchor marks the start of the CURRENT
+	// phase" exactly true. Placed past the out-of-ammo / ATT_NONE / onAltFireStart
+	// early-returns so only a real committed primary shot anchors. Server
+	// (g_active Pmove) and client-predicted (cg_predict Pmove) replay the same
+	// cmd.serverTime → identical anchor, zero bandwidth (mirrors chargeStartTime).
+	if ( !wasFiring ) {
+		pm->ps->fireRampStartTime = pm->cmd.serverTime;
+	}
+
+	// RS-4: authoritative per-shot UPWARD pitch view-kick written into the synced
+	// delta_angles[PITCH] — perturbs the ACTUAL aim (the muzzle rises), so it
+	// changes where bullets go and the player compensates by pulling the mouse
+	// DOWN (CS/Valorant permanent-kick model). SIGN: positive pitch aims down
+	// (PM_UpdateViewAngles clamp + AngleVectors forward[2]=-sin(pitch)), so an
+	// upward climb SUBTRACTS from delta_angles[PITCH]. PERMANENT: never auto-
+	// recovered or yanked back — the player's cmd.angles compensation is what
+	// holds the rendered aim; the kick stays baked. Runs once per committed
+	// PRIMARY shot (this site is past the out-of-ammo / ATT_NONE / onAltFireStart
+	// early-returns and gated by weaponTime), so sustained fire accumulates the
+	// rising spray shot-by-shot.
+	//
+	// Per-spray cap (integer-only, deterministic): the spray's shot count is
+	// DERIVED from the synced anchor — shotsThisSpray = (serverTime -
+	// fireRampStartTime)/reloadTime — with no new field (the spray boundary is
+	// already marked by fireRampStartTime, re-anchored at fire-start above and at
+	// fire-stop by RS-3). The anchor was set THIS frame on the rest→firing edge,
+	// so the first shot derives 0 and the cap measures fresh each spray. The gate
+	// uses ANGLE2SHORT integer math throughout (no float compare) so the server
+	// (g_active Pmove) and client-predicted (cg_predict Pmove) write a bit-
+	// identical delta_angles[PITCH]. Once the spray hits the cap the kick plateaus
+	// (further shots add nothing), keeping delta well under the ±16000 clamp.
+	{
+		float viewKickDeg = bg_attacklist[attIdx].viewKickPitch;
+		int   reloadMs    = bg_attacklist[attIdx].reloadTime;
+		if ( viewKickDeg > 0.0f && reloadMs > 0 ) {
+			int kickShort = ANGLE2SHORT( viewKickDeg );
+			int capShort  = ANGLE2SHORT( VIEWKICK_SPRAY_CAP_DEG );
+			int elapsed   = pm->cmd.serverTime - pm->ps->fireRampStartTime;
+			int shotsThisSpray;
+			if ( elapsed < 0 ) {
+				elapsed = 0;
+			}
+			shotsThisSpray = elapsed / reloadMs;
+			if ( shotsThisSpray * kickShort < capShort ) {
+				pm->ps->delta_angles[PITCH] -= kickShort;
+			}
+		}
+	}
+
 	addTime = bg_attacklist[attIdx].reloadTime;
 
 	if (pm->ps->weapon == WP_RAILGUN) {
@@ -2535,36 +2637,6 @@ static void PM_Animate( void ) {
 			PM_StartTorsoAnim( TORSO_GESTURE );
 			pm->ps->torsoTimer = TIMER_GESTURE;
 			PM_AddEvent( EV_TAUNT );
-		}
-	} else if ( pm->cmd.buttons & BUTTON_GETFLAG ) {
-		if ( pm->ps->torsoTimer == 0 ) {
-			PM_StartTorsoAnim( TORSO_GETFLAG );
-			pm->ps->torsoTimer = 600;	//TIMER_GESTURE;
-		}
-	} else if ( pm->cmd.buttons & BUTTON_GUARDBASE ) {
-		if ( pm->ps->torsoTimer == 0 ) {
-			PM_StartTorsoAnim( TORSO_GUARDBASE );
-			pm->ps->torsoTimer = 600;	//TIMER_GESTURE;
-		}
-	} else if ( pm->cmd.buttons & BUTTON_PATROL ) {
-		if ( pm->ps->torsoTimer == 0 ) {
-			PM_StartTorsoAnim( TORSO_PATROL );
-			pm->ps->torsoTimer = 600;	//TIMER_GESTURE;
-		}
-	} else if ( pm->cmd.buttons & BUTTON_FOLLOWME ) {
-		if ( pm->ps->torsoTimer == 0 ) {
-			PM_StartTorsoAnim( TORSO_FOLLOWME );
-			pm->ps->torsoTimer = 600;	//TIMER_GESTURE;
-		}
-	} else if ( pm->cmd.buttons & BUTTON_AFFIRMATIVE ) {
-		if ( pm->ps->torsoTimer == 0 ) {
-			PM_StartTorsoAnim( TORSO_AFFIRMATIVE);
-			pm->ps->torsoTimer = 600;	//TIMER_GESTURE;
-		}
-	} else if ( pm->cmd.buttons & BUTTON_NEGATIVE ) {
-		if ( pm->ps->torsoTimer == 0 ) {
-			PM_StartTorsoAnim( TORSO_NEGATIVE );
-			pm->ps->torsoTimer = 600;	//TIMER_GESTURE;
 		}
 	}
 }
@@ -2710,7 +2782,7 @@ void PmoveSingle (pmove_t *pmove) {
 #if FEAT_GAME_MEETING
         && pm->ps->pm_type != PM_MEETING
 #endif
-        && (pm->cmd.buttons & BUTTON_AFFIRMATIVE)) {
+        && (pm->cmd.buttons & BUTTON_GRAPPLE)) {
         pm->ps->eFlags |= EF_GRAPPLE;
     }
     else {

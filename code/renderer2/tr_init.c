@@ -4,6 +4,11 @@
 // tr_init.c -- functions that are not called every frame
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.init / .gl / .cmd
+
+R_LOG_DECLARE_CHANNEL( rch_init, "renderer.init" );
+R_LOG_DECLARE_CHANNEL( rch_gl,   "renderer.gl"   );
+R_LOG_DECLARE_CHANNEL( rch_cmd,  "renderer.cmd"  );
 
 #include "tr_dsa.h"
 
@@ -212,7 +217,7 @@ void QDECL Com_Log_Impl( log_severity_t severity, int channel, const char *fmt, 
 	va_start( argptr, fmt );
 	vsnprintf( buf, sizeof( buf ), fmt, argptr );
 	va_end( argptr );
-	ri.Log( severity, "%s", buf );
+	R_LOG( rch_init,severity, "%s", buf );
 }
 
 // Stub for q_shared.c's LOG_CH expansion. The renderer DLL has no access
@@ -305,7 +310,7 @@ static void InitOpenGL( void )
 
 	// check for GLSL function textureCubeLod()
 	if ( r_cubeMapping->integer && !QGL_VERSION_ATLEAST( 3, 0 ) ) {
-		ri.Log( SEV_WARN, "WARNING: Disabled r_cubeMapping because it requires OpenGL 3.0\n" );
+		R_LOG( rch_init, SEV_WARN, "WARNING: Disabled r_cubeMapping because it requires OpenGL 3.0\n" );
 		ri.Cvar_Set( "r_cubeMapping", "0" );
 	}
 
@@ -366,10 +371,10 @@ void GL_CheckErrs( char *file, int line ) {
 NOTE TTimo
 some thoughts about the screenshots system:
 screenshots get written in fs_homepath + fs_gamedir
-vanilla q3 .. baseq3/screenshots/ *.tga
-team arena .. missionpack/screenshots/ *.tga
+q3now .. base/screenshots/ *.png
 
-two commands: "screenshot" and "screenshotJPEG"
+one command: "screenshot" (see renderercommon/tr_screenshot.c for the
+token grammar — png|jpg|bmp|tga|clipboard|silent|levelshot|<filename>)
 we use statics to store a count and start writing the first screenshot/screenshot????.tga (.jpg) available
 (with FS_FileExists / FS_FOpenFileWrite calls)
 FIXME: the statics don't get a reinit between fs_game changes
@@ -502,6 +507,156 @@ static void RB_TakeScreenshotJPEG(int x, int y, int width, int height, const cha
 	ri.Hunk_FreeTempMemory(buffer);
 }
 
+static void FillBMPHeader( byte *buffer, int width, int height, int memcount, int header_size )
+{
+	int filesize;
+	memset( buffer, 0, header_size );
+
+	// bitmap file header
+	buffer[0] = 'B';
+	buffer[1] = 'M';
+	filesize = memcount + header_size;
+	buffer[2] = (filesize >> 0) & 255;
+	buffer[3] = (filesize >> 8) & 255;
+	buffer[4] = (filesize >> 16) & 255;
+	buffer[5] = (filesize >> 24) & 255;
+	buffer[10] = header_size; // data offset
+
+	// bitmap info header
+	buffer[14] = 40; // size of this header
+	buffer[18] = (width >> 0) & 255;
+	buffer[19] = (width >> 8) & 255;
+	buffer[20] = (width >> 16) & 255;
+	buffer[21] = (width >> 24) & 255;
+
+	buffer[22] = (height >> 0) & 255;
+	buffer[23] = (height >> 8) & 255;
+	buffer[24] = (height >> 16) & 255;
+	buffer[25] = (height >> 24) & 255;
+	buffer[26] = 1; // number of color planes
+	buffer[28] = 24; // bpp
+
+	buffer[34] = (memcount >> 0) & 255;
+	buffer[35] = (memcount >> 8) & 255;
+	buffer[36] = (memcount >> 16) & 255;
+	buffer[37] = (memcount >> 24) & 255;
+	buffer[38] = 0xC4; // horizontal dpi
+	buffer[39] = 0x0E; // horizontal dpi
+	buffer[42] = 0xC4; // vertical dpi
+	buffer[43] = 0x0E; // vertical dpi
+}
+
+/*
+==================
+RB_TakeScreenshotBMP
+
+GL2 variant. RB_ReadPixels here takes no lineAlign argument, so the BMP
+4-byte scanline padding is materialised into a freshly allocated buffer
+(rather than the in-place rearrange the renderervk/GL1 path uses).
+==================
+*/
+static void RB_TakeScreenshotBMP( int x, int y, int width, int height, const char *fileName, int clipboardOnly )
+{
+	byte *allbuf;
+	byte *src, *out;
+	size_t offset = 0, memcount;
+	const int header_size = 54; // bitmapfileheader(14) + bitmapinfoheader(40)
+	int padlen;
+	int scanlen, srcstride;
+	int row, col;
+
+	allbuf = RB_ReadPixels( x, y, width, height, &offset, &padlen );
+	src = allbuf + offset;
+	srcstride = width * 3 + padlen;
+
+	// BMP scanlines are padded to a 4-byte boundary
+	scanlen = PAD( width * 3, 4 );
+	memcount = (size_t)scanlen * height;
+
+	// gamma correction
+	if ( glConfig.deviceSupportsGamma )
+		R_GammaCorrect( src, srcstride * height );
+
+	out = ri.Hunk_AllocateTempMemory( memcount + header_size );
+	FillBMPHeader( out, width, height, memcount, header_size );
+
+	// swap rgb to bgr, copy scanlines with BMP padding
+	for ( row = 0; row < height; row++ ) {
+		byte *srcrow = src + (size_t)row * srcstride;
+		byte *dstrow = out + header_size + (size_t)row * scanlen;
+		for ( col = 0; col < width; col++ ) {
+			dstrow[0] = srcrow[2];
+			dstrow[1] = srcrow[1];
+			dstrow[2] = srcrow[0];
+			srcrow += 3;
+			dstrow += 3;
+		}
+	}
+
+	if ( clipboardOnly ) {
+		// copy starting from bitmapinfoheader
+		ri.Sys_SetClipboardBitmap( out + 14, memcount + 40 );
+	} else {
+		ri.FS_WriteFile( fileName, out, memcount + header_size );
+	}
+
+	ri.Hunk_FreeTempMemory( out );
+	ri.Hunk_FreeTempMemory( allbuf );
+}
+
+/*
+==================
+RB_TakeScreenshotPNG
+
+PNG encoder via renderercommon/tr_image_png_write.c. Input follows the
+RB_ReadPixels convention (bottom-up RGB); padding, if any, is compacted
+in place before encoding.
+==================
+*/
+static void RB_TakeScreenshotPNG( int x, int y, int width, int height, const char *fileName, int clipboardOnly )
+{
+	byte	*allbuf;
+	byte	*buffer;
+	byte	*pngBytes = NULL;
+	int		 pngLen = 0;
+	size_t	 offset = 0;
+	int		 padlen;
+
+	allbuf = RB_ReadPixels( x, y, width, height, &offset, &padlen );
+	buffer = allbuf + offset;
+
+	// compact away any line padding
+	if ( padlen != 0 ) {
+		byte *src = buffer;
+		byte *dst = buffer;
+		int  i;
+		for ( i = 0; i < height; i++ ) {
+			if ( src != dst ) memmove( dst, src, width * 3 );
+			src += width * 3 + padlen;
+			dst += width * 3;
+		}
+	}
+
+	// gamma correction
+	if ( glConfig.deviceSupportsGamma )
+		R_GammaCorrect( buffer, (size_t)width * 3 * height );
+
+	if ( !R_EncodePNG( buffer, width, height, &pngBytes, &pngLen ) ) {
+		R_LOG( rch_cmd, SEV_WARN, "RB_TakeScreenshotPNG: encode failed\n" );
+		ri.Hunk_FreeTempMemory( allbuf );
+		return;
+	}
+
+	if ( clipboardOnly ) {
+		ri.Sys_SetClipboardImagePNG( pngBytes, pngLen );
+	} else {
+		ri.FS_WriteFile( fileName, pngBytes, pngLen );
+	}
+
+	ri.Free( pngBytes );
+	ri.Hunk_FreeTempMemory( allbuf );
+}
+
 /*
 ==================
 RB_TakeScreenshotCmd
@@ -516,10 +671,17 @@ const void *RB_TakeScreenshotCmd( const void *data ) {
 	if(tess.numIndexes)
 		RB_EndSurface();
 
-	if (cmd->jpeg)
-		RB_TakeScreenshotJPEG( cmd->x, cmd->y, cmd->width, cmd->height, cmd->fileName);
+	if ( cmd->typeMask & SCREENSHOT_JPG )
+		RB_TakeScreenshotJPEG( cmd->x, cmd->y, cmd->width, cmd->height, cmd->fileName );
+	else if ( cmd->typeMask & SCREENSHOT_BMP )
+		RB_TakeScreenshotBMP( cmd->x, cmd->y, cmd->width, cmd->height, cmd->fileName, cmd->typeMask & SCREENSHOT_BMP_CLIPBOARD );
+	else if ( cmd->typeMask & SCREENSHOT_PNG )
+		RB_TakeScreenshotPNG( cmd->x, cmd->y, cmd->width, cmd->height, cmd->fileName, cmd->typeMask & SCREENSHOT_PNG_CLIPBOARD );
 	else
-		RB_TakeScreenshot( cmd->x, cmd->y, cmd->width, cmd->height, cmd->fileName);
+		RB_TakeScreenshot( cmd->x, cmd->y, cmd->width, cmd->height, cmd->fileName );
+
+	if ( !cmd->silent )
+		R_ScreenshotPrintSaved( cmd->fileName );
 
 	return (const void *)(cmd + 1);
 }
@@ -527,9 +689,11 @@ const void *RB_TakeScreenshotCmd( const void *data ) {
 /*
 ==================
 R_TakeScreenshot
+
+Enqueue an RC_SCREENSHOT command. typeMask is a SCREENSHOT_* value.
 ==================
 */
-static void R_TakeScreenshot( int x, int y, int width, int height, char *name, qboolean jpeg ) {
+static void R_TakeScreenshot( int x, int y, int width, int height, const char *name, int typeMask, qboolean silent ) {
 	static char	fileName[MAX_OSPATH]; // bad things if two screenshots per frame?
 	screenshotCommand_t	*cmd;
 
@@ -545,33 +709,8 @@ static void R_TakeScreenshot( int x, int y, int width, int height, char *name, q
 	cmd->height = height;
 	Q_strncpyz( fileName, name, sizeof(fileName) );
 	cmd->fileName = fileName;
-	cmd->jpeg = jpeg;
-}
-
-/*
-==================
-R_ScreenshotFilename
-==================
-*/
-static void R_ScreenshotFilename( char *fileName, const char *fileExt ) {
-	qtime_t t;
-
-	int count = 0;
-	ri.Com_RealTime( &t );
-	int ms = ri.Milliseconds() % 1000;
-	if ( ms < 0 ) ms = 0;
-
-	Com_sprintf( fileName, MAX_OSPATH,
-		"screenshots/%04d_%02d_%02d-%02d_%02d_%02d-%03d.%s",
-		1900 + t.tm_year, 1 + t.tm_mon, t.tm_mday,
-		t.tm_hour, t.tm_min, t.tm_sec, ms, fileExt );
-
-	while (	ri.FS_FileExists( fileName ) && ++count < 1000 ) {
-		Com_sprintf( fileName, MAX_OSPATH,
-			"screenshots/%04d_%02d_%02d-%02d_%02d_%02d-%03d_%d.%s",
-			1900 + t.tm_year, 1 + t.tm_mon, t.tm_mday,
-			t.tm_hour, t.tm_min, t.tm_sec, ms, count, fileExt );
-	}
+	cmd->typeMask = typeMask;
+	cmd->silent = silent;
 }
 
 /*
@@ -580,9 +719,12 @@ R_LevelShot
 
 levelshots are specialized 128*128 thumbnails for
 the menu system, sampled down from full screen distorted images
+
+Non-static — called by the shared screenshot grammar (renderercommon/
+tr_screenshot.c) via the R_LevelShot hook.
 ====================
 */
-static void R_LevelShot( void ) {
+void R_LevelShot( void ) {
 	char		checkname[MAX_OSPATH];
 	byte		*buffer;
 	byte		*source, *allsource;
@@ -638,77 +780,22 @@ static void R_LevelShot( void ) {
 	ri.Hunk_FreeTempMemory(buffer);
 	ri.Hunk_FreeTempMemory(allsource);
 
-	ri.Log( SEV_INFO, "Wrote %s\n", checkname );
+	R_LOG( rch_cmd, SEV_INFO, "Wrote %s\n", checkname );
 }
 
 /*
 ==================
-R_ScreenShot_f
+RB_ScheduleScreenshot
 
-screenshot
-screenshot [silent]
-screenshot [levelshot]
-screenshot [filename]
-
-Doesn't print the pacifier message if there is a second arg
+Screenshot grammar hook (see renderercommon/tr_screenshot.h). The shared
+grammar resolves (typeMask, fileName, silent); GL2 schedules the capture
+through its render-command queue (RC_SCREENSHOT). Always succeeds — GL2
+has no minimized/FBO restriction here.
 ==================
 */
-static void R_ScreenShot_f (void) {
-	char	checkname[MAX_OSPATH];
-	qboolean	silent;
-
-	if ( !strcmp( ri.Cmd_Argv(1), "levelshot" ) ) {
-		R_LevelShot();
-		return;
-	}
-
-	if ( !strcmp( ri.Cmd_Argv(1), "silent" ) ) {
-		silent = qtrue;
-	} else {
-		silent = qfalse;
-	}
-
-	if ( ri.Cmd_Argc() == 2 && !silent ) {
-		// explicit filename
-		Com_sprintf( checkname, MAX_OSPATH, "screenshots/%s.tga", ri.Cmd_Argv( 1 ) );
-	} else {
-		R_ScreenshotFilename( checkname, "tga" );
-	}
-
-	R_TakeScreenshot( 0, 0, glConfig.vidWidth, glConfig.vidHeight, checkname, qfalse );
-
-	if ( !silent ) {
-		ri.Log( SEV_INFO, "Wrote %s\n", checkname);
-	}
-}
-
-static void R_ScreenShotJPEG_f (void) {
-	char		checkname[MAX_OSPATH];
-	qboolean	silent;
-
-	if ( !strcmp( ri.Cmd_Argv(1), "levelshot" ) ) {
-		R_LevelShot();
-		return;
-	}
-
-	if ( !strcmp( ri.Cmd_Argv(1), "silent" ) ) {
-		silent = qtrue;
-	} else {
-		silent = qfalse;
-	}
-
-	if ( ri.Cmd_Argc() == 2 && !silent ) {
-		// explicit filename
-		Com_sprintf( checkname, MAX_OSPATH, "screenshots/%s.jpg", ri.Cmd_Argv( 1 ) );
-	} else {
-		R_ScreenshotFilename( checkname, "jpg" );
-	}
-
-	R_TakeScreenshot( 0, 0, glConfig.vidWidth, glConfig.vidHeight, checkname, qtrue );
-
-	if ( !silent ) {
-		ri.Log( SEV_INFO, "Wrote %s\n", checkname);
-	}
+qboolean RB_ScheduleScreenshot( int typeMask, const char *fileName, qboolean silent ) {
+	R_TakeScreenshot( 0, 0, glConfig.vidWidth, glConfig.vidHeight, fileName, typeMask, silent );
+	return qtrue;
 }
 
 //============================================================================
@@ -894,7 +981,7 @@ static void R_PrintLongString(const char *string) {
 	while(size > 0)
 	{
 		Q_strncpyz(buffer, p, sizeof (buffer) );
-		ri.Log( SEV_DEBUG, "%s", buffer );
+		R_LOG( rch_init, SEV_DEBUG, "%s", buffer );
 		p += 1023;
 		size -= 1023;
 	}
@@ -918,11 +1005,11 @@ static void GfxInfo_f( void )
 		"fullscreen"
 	};
 
-	ri.Log( SEV_INFO, "\n" );
-	ri.Log( SEV_INFO, "GL_VENDOR: %s\n", glConfig.vendor_string );
-	ri.Log( SEV_INFO, "GL_RENDERER: %s\n", glConfig.renderer_string );
-	ri.Log( SEV_INFO, "GL_VERSION: %s\n", glConfig.version_string );
-	ri.Log( SEV_INFO, "GL_EXTENSIONS: " );
+	R_LOG( rch_init, SEV_INFO, "\n" );
+	R_LOG( rch_init, SEV_INFO, "GL_VENDOR: %s\n", glConfig.vendor_string );
+	R_LOG( rch_init, SEV_INFO, "GL_RENDERER: %s\n", glConfig.renderer_string );
+	R_LOG( rch_init, SEV_INFO, "GL_VERSION: %s\n", glConfig.version_string );
+	R_LOG( rch_init, SEV_INFO, "GL_EXTENSIONS: " );
 	if ( qglGetStringi )
 	{
 		GLint numExtensions;
@@ -930,44 +1017,44 @@ static void GfxInfo_f( void )
 		qglGetIntegerv( GL_NUM_EXTENSIONS, &numExtensions );
 		for ( int i = 0; i < numExtensions; i++ )
 		{
-			ri.Log( SEV_INFO, "%s ", qglGetStringi( GL_EXTENSIONS, i ) );
+			R_LOG( rch_init, SEV_INFO, "%s ", qglGetStringi( GL_EXTENSIONS, i ) );
 		}
 	}
 	else
 	{
 		R_PrintLongString( glConfig.extensions_string );
 	}
-	ri.Log( SEV_INFO, "\n" );
-	ri.Log( SEV_INFO, "GL_MAX_TEXTURE_SIZE: %d\n", glConfig.maxTextureSize );
-	ri.Log( SEV_INFO, "GL_MAX_TEXTURE_IMAGE_UNITS: %d\n", glConfig.numTextureUnits );
-	ri.Log( SEV_INFO, "\n" );
-	ri.Log( SEV_INFO, "PIXELFORMAT: color(%d-bits) Z(%d-bit) stencil(%d-bits)\n", glConfig.colorBits, glConfig.depthBits, glConfig.stencilBits );
-	ri.Log( SEV_INFO, "MODE: %d, %d x %d %s hz:", ri.Cvar_VariableIntegerValue( "r_mode" ), glConfig.vidWidth, glConfig.vidHeight, fsstrings[ glConfig.isFullscreen != 0 ] );
+	R_LOG( rch_init, SEV_INFO, "\n" );
+	R_LOG( rch_init, SEV_INFO, "GL_MAX_TEXTURE_SIZE: %d\n", glConfig.maxTextureSize );
+	R_LOG( rch_init, SEV_INFO, "GL_MAX_TEXTURE_IMAGE_UNITS: %d\n", glConfig.numTextureUnits );
+	R_LOG( rch_init, SEV_INFO, "\n" );
+	R_LOG( rch_init, SEV_INFO, "PIXELFORMAT: color(%d-bits) Z(%d-bit) stencil(%d-bits)\n", glConfig.colorBits, glConfig.depthBits, glConfig.stencilBits );
+	R_LOG( rch_init, SEV_INFO, "MODE: %d, %d x %d %s hz:", ri.Cvar_VariableIntegerValue( "r_mode" ), glConfig.vidWidth, glConfig.vidHeight, fsstrings[ glConfig.isFullscreen != 0 ] );
 	if ( glConfig.displayFrequency )
 	{
-		ri.Log( SEV_INFO, "%d\n", glConfig.displayFrequency );
+		R_LOG( rch_init, SEV_INFO, "%d\n", glConfig.displayFrequency );
 	}
 	else
 	{
-		ri.Log( SEV_INFO, "N/A\n" );
+		R_LOG( rch_init, SEV_INFO, "N/A\n" );
 	}
 	if ( glConfig.deviceSupportsGamma )
 	{
-		ri.Log( SEV_DEBUG, "GAMMA: hardware w/ %d overbright bits\n", tr.overbrightBits );
+		R_LOG( rch_init, SEV_DEBUG, "GAMMA: hardware w/ %d overbright bits\n", tr.overbrightBits );
 	}
 	else
 	{
-		ri.Log( SEV_DEBUG, "GAMMA: software w/ %d overbright bits\n", tr.overbrightBits );
+		R_LOG( rch_init, SEV_DEBUG, "GAMMA: software w/ %d overbright bits\n", tr.overbrightBits );
 	}
 
-	ri.Log( SEV_INFO, "texturemode: %s\n", r_textureMode->string );
-	ri.Log( SEV_INFO, "picmip: %d\n", r_picmip->integer );
-	ri.Log( SEV_INFO, "texture bits: %d\n", r_textureBits->integer );
-	ri.Log( SEV_INFO, "texenv add: %s\n", enablestrings[glConfig.textureEnvAddAvailable != 0] );
-	ri.Log( SEV_INFO, "compressed textures: %s\n", enablestrings[glConfig.textureCompression!=TC_NONE] );
+	R_LOG( rch_init, SEV_INFO, "texturemode: %s\n", r_textureMode->string );
+	R_LOG( rch_init, SEV_INFO, "picmip: %d\n", r_picmip->integer );
+	R_LOG( rch_init, SEV_INFO, "texture bits: %d\n", r_textureBits->integer );
+	R_LOG( rch_init, SEV_INFO, "texenv add: %s\n", enablestrings[glConfig.textureEnvAddAvailable != 0] );
+	R_LOG( rch_init, SEV_INFO, "compressed textures: %s\n", enablestrings[glConfig.textureCompression!=TC_NONE] );
 
 	if ( r_finish->integer ) {
-		ri.Log( SEV_INFO, "Forcing glFinish\n" );
+		R_LOG( rch_init, SEV_INFO, "Forcing glFinish\n" );
 	}
 }
 
@@ -983,7 +1070,7 @@ static void GfxMemInfo_f( void )
 	{
 		case MI_NONE:
 		{
-			ri.Log( SEV_INFO, "No extension found for GPU memory info.\n");
+			R_LOG( rch_init, SEV_INFO, "No extension found for GPU memory info.\n");
 		}
 		break;
 		case MI_NVX:
@@ -991,19 +1078,19 @@ static void GfxMemInfo_f( void )
 			int value;
 
 			qglGetIntegerv(GL_GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX, &value);
-			ri.Log( SEV_INFO, "GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX: %ikb\n", value);
+			R_LOG( rch_init, SEV_INFO, "GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX: %ikb\n", value);
 
 			qglGetIntegerv(GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX, &value);
-			ri.Log( SEV_INFO, "GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX: %ikb\n", value);
+			R_LOG( rch_init, SEV_INFO, "GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX: %ikb\n", value);
 
 			qglGetIntegerv(GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX, &value);
-			ri.Log( SEV_INFO, "GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX: %ikb\n", value);
+			R_LOG( rch_init, SEV_INFO, "GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX: %ikb\n", value);
 
 			qglGetIntegerv(GL_GPU_MEMORY_INFO_EVICTION_COUNT_NVX, &value);
-			ri.Log( SEV_INFO, "GPU_MEMORY_INFO_EVICTION_COUNT_NVX: %i\n", value);
+			R_LOG( rch_init, SEV_INFO, "GPU_MEMORY_INFO_EVICTION_COUNT_NVX: %i\n", value);
 
 			qglGetIntegerv(GL_GPU_MEMORY_INFO_EVICTED_MEMORY_NVX, &value);
-			ri.Log( SEV_INFO, "GPU_MEMORY_INFO_EVICTED_MEMORY_NVX: %ikb\n", value);
+			R_LOG( rch_init, SEV_INFO, "GPU_MEMORY_INFO_EVICTED_MEMORY_NVX: %ikb\n", value);
 		}
 		break;
 		case MI_ATI:
@@ -1012,13 +1099,13 @@ static void GfxMemInfo_f( void )
 			int value[4];
 
 			qglGetIntegerv(GL_VBO_FREE_MEMORY_ATI, &value[0]);
-			ri.Log( SEV_INFO, "VBO_FREE_MEMORY_ATI: %ikb total %ikb largest aux: %ikb total %ikb largest\n", value[0], value[1], value[2], value[3]);
+			R_LOG( rch_init, SEV_INFO, "VBO_FREE_MEMORY_ATI: %ikb total %ikb largest aux: %ikb total %ikb largest\n", value[0], value[1], value[2], value[3]);
 
 			qglGetIntegerv(GL_TEXTURE_FREE_MEMORY_ATI, &value[0]);
-			ri.Log( SEV_INFO, "TEXTURE_FREE_MEMORY_ATI: %ikb total %ikb largest aux: %ikb total %ikb largest\n", value[0], value[1], value[2], value[3]);
+			R_LOG( rch_init, SEV_INFO, "TEXTURE_FREE_MEMORY_ATI: %ikb total %ikb largest aux: %ikb total %ikb largest\n", value[0], value[1], value[2], value[3]);
 
 			qglGetIntegerv(GL_RENDERBUFFER_FREE_MEMORY_ATI, &value[0]);
-			ri.Log( SEV_INFO, "RENDERBUFFER_FREE_MEMORY_ATI: %ikb total %ikb largest aux: %ikb total %ikb largest\n", value[0], value[1], value[2], value[3]);
+			R_LOG( rch_init, SEV_INFO, "RENDERBUFFER_FREE_MEMORY_ATI: %ikb total %ikb largest aux: %ikb total %ikb largest\n", value[0], value[1], value[2], value[3]);
 		}
 		break;
 	}
@@ -1099,7 +1186,7 @@ static void R_Register( void )
 	r_postProcess = ri.Cvar_Get( "r_postProcess", "1", CVAR_ARCHIVE );
 	ri.Cvar_SetDescription( r_postProcess, "Enable post-processing." );
 
-	r_toneMap = ri.Cvar_Get( "r_toneMap", "1", CVAR_ARCHIVE );
+	r_toneMap = ri.Cvar_Get( "r_toneMap", "3", CVAR_ARCHIVE );
 	ri.Cvar_SetDescription( r_toneMap, "Enable tone mapping. Requires r_hdr and r_postProcess." );
 	r_forceToneMap = ri.Cvar_Get( "r_forceToneMap", "0", CVAR_CHEAT );
 	r_forceToneMapMin = ri.Cvar_Get( "r_forceToneMapMin", "-8.0", CVAR_CHEAT );
@@ -1212,7 +1299,7 @@ static void R_Register( void )
 	r_lodbias = ri.Cvar_Get( "r_lodbias", "-2", CVAR_ARCHIVE );
 	ri.Cvar_SetDescription( r_lodbias, "Sets the level of detail of in-game models:\n -2: Ultra (further delays LOD transition in the distance)\n -1: Very High (delays LOD transition in the distance)\n 0: High\n 1: Medium\n 2: Low" );
 	r_flares = ri.Cvar_Get ("r_flares", "0", CVAR_ARCHIVE );
-	ri.Cvar_SetDescription( r_flares, "Enables corona effects on light sources." );
+	ri.Cvar_SetDescription( r_flares, "Enables halo effects on light sources." );
 	r_znear = ri.Cvar_Get( "r_znear", "4", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_znear, "0.001", "200", CV_FLOAT );
 	ri.Cvar_SetDescription( r_znear, "Viewport distance from view origin (how close objects can be to the player before they're clipped out of the scene)." );
@@ -1331,7 +1418,14 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_lockpvs, "Debugging tool: Locks to current potentially visible set. Useful for testing vis-culling in maps." );
 	r_noportals = ri.Cvar_Get ("r_noportals", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription(r_noportals, "Disables in-game portals, valid values: 0: Portals enabled\n 1: Portals disabled\n 2: Portals and mirrors disabled" );
-	r_shadows = ri.Cvar_Get( "cg_shadows", "1", 0 );
+	// cg_shadows is a single archived cvar shared with the Vulkan renderer, where it is
+	// the unified shadow level (0=off, 1=contact/blob, 2=cast, 3=all) and defaults to 2.
+	// This legacy GL2 path keeps its own 0=none/1=blur/2=stencil/3=projection (and 4=pshadow)
+	// semantics, so the default is aligned to 2 to match the shared value a Vulkan session
+	// archives — a 2 here selects this renderer's stencil shadows (legacy, no crash) rather
+	// than a surprise off/blur. GL2 shadow semantics are otherwise unchanged; Vulkan is the
+	// shipped path.
+	r_shadows = ri.Cvar_Get( "cg_shadows", "2", 0 );
 
 	r_marksOnTriangleMeshes = ri.Cvar_Get("r_marksOnTriangleMeshes", "0", CVAR_ARCHIVE);
 	ri.Cvar_SetDescription( r_marksOnTriangleMeshes, "Enables impact marks on triangle mesh surfaces (ie: MD3 models.) Requires impact marks to be enabled in the game code." );
@@ -1352,8 +1446,6 @@ static void R_Register( void )
 	ri.Cmd_AddCommand( "shaderlist", R_ShaderList_f );
 	ri.Cmd_AddCommand( "skinlist", R_SkinList_f );
 	ri.Cmd_AddCommand( "modellist", R_Modellist_f );
-	ri.Cmd_AddCommand( "screenshot", R_ScreenShot_f );
-	ri.Cmd_AddCommand( "screenshotJPEG", R_ScreenShotJPEG_f );
 	ri.Cmd_AddCommand( "gfxinfo", GfxInfo_f );
 	ri.Cmd_AddCommand( "gfxmeminfo", GfxMemInfo_f );
 	ri.Cmd_AddCommand( "exportCubemaps", R_ExportCubemaps_f );
@@ -1393,18 +1485,23 @@ void R_Init( void ) {
 	int	err;
 	byte *ptr;
 
-	ri.Log( SEV_INFO, "----- R_Init -----\n" );
+	R_LOG( rch_init, SEV_INFO, "----- R_Init -----\n" );
 
 	// clear all our internal state
 	memset( &tr, 0, sizeof( tr ) );
 	memset( &backEnd, 0, sizeof( backEnd ) );
 	memset( &tess, 0, sizeof( tess ) );
 
-	if(sizeof(glconfig_t) != 11332)
-		ri.Terminate( TERM_UNRECOVERABLE, "Mod ABI incompatible: sizeof(glconfig_t) == %u != 11332", (unsigned int) sizeof(glconfig_t));
+	// glconfig_t ABI tripwire. Was 11332; bumped to 11340 when vidWidthLogical/
+	// vidHeightLogical (2 ints, +8 bytes) were appended for HiDPI font scaling.
+	// All native modules (engine + renderer DLLs + gamecl/gamesv) are rebuilt
+	// from the same tr_types.h, so they agree on the new size; this constant is
+	// the human tripwire that forces that coordinated rebuild.
+	if(sizeof(glconfig_t) != 11340)
+		ri.Terminate( TERM_UNRECOVERABLE, "Mod ABI incompatible: sizeof(glconfig_t) == %u != 11340", (unsigned int) sizeof(glconfig_t));
 
 	if ( (intptr_t)tess.xyz & 15 ) {
-		ri.Log( SEV_WARN, "tess.xyz not 16 byte aligned\n" );
+		R_LOG( rch_init, SEV_WARN, "tess.xyz not 16 byte aligned\n" );
 	}
 	//memset( tess.constantColor255, 255, sizeof( tess.constantColor255 ) );
 
@@ -1479,11 +1576,11 @@ void R_Init( void ) {
 
 	err = qglGetError();
 	if ( err != GL_NO_ERROR )
-		ri.Log( SEV_INFO, "glGetError() = 0x%x\n", err);
+		R_LOG( rch_gl, SEV_INFO, "glGetError() = 0x%x\n", err);
 
 	// print info
 	GfxInfo_f();
-	ri.Log( SEV_INFO, "----- finished R_Init -----\n" );
+	R_LOG( rch_init, SEV_INFO, "----- finished R_Init -----\n" );
 }
 
 
@@ -1494,15 +1591,18 @@ RE_Shutdown
 */
 static void RE_Shutdown( refShutdownCode_t code ) {
 
-	ri.Log( SEV_INFO, "RE_Shutdown( %i )\n", code );
+	R_LOG( rch_init, SEV_INFO, "RE_Shutdown( %i )\n", code );
 
 	ri.Cmd_RemoveCommand( "imagelist" );
 	ri.Cmd_RemoveCommand( "shaderlist" );
 	ri.Cmd_RemoveCommand( "skinlist" );
 	ri.Cmd_RemoveCommand( "modellist" );
 	ri.Cmd_RemoveCommand( "modelist" );
-	ri.Cmd_RemoveCommand( "screenshot" );
-	ri.Cmd_RemoveCommand( "screenshotJPEG" );
+	// `screenshot` is registered persistently from GetRefAPI so it survives
+	// map transitions; only deregister it on an actual DLL unload.
+	if ( code != REF_LEVEL_ONLY ) {
+		R_ScreenshotUnregisterCommands();
+	}
 	ri.Cmd_RemoveCommand( "gfxinfo" );
 	ri.Cmd_RemoveCommand( "minimize" );
 	ri.Cmd_RemoveCommand( "gfxmeminfo" );
@@ -1522,7 +1622,7 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	R_DoneFreeType();
 
 	// shut down platform specific OpenGL stuff
-	if ( code != REF_KEEP_CONTEXT ) {
+	if ( code != REF_LEVEL_ONLY ) {
 		if ( ri.GLimp_Shutdown ) {
 			ri.GLimp_Shutdown( code == REF_UNLOAD_DLL ? qtrue: qfalse );
 		}
@@ -1576,7 +1676,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	memset( &re, 0, sizeof( re ) );
 
 	if ( apiVersion != REF_API_VERSION ) {
-		ri.Log( SEV_INFO, "Mismatched REF_API_VERSION: expected %i, got %i\n",
+		R_LOG( rch_init, SEV_INFO, "Mismatched REF_API_VERSION: expected %i, got %i\n",
 			REF_API_VERSION, apiVersion );
 		return NULL;
 	}
@@ -1611,12 +1711,15 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.AddAdditiveLightToScene = RE_AddAdditiveLightToScene;
 	re.AddRibbonToScene = RE_AddRibbonToScene;
 	re.AddBeamToScene = RE_AddBeamToScene;
+	re.AddRailRibbonToScene = RE_AddRailRibbonToScene;
 	re.AddSpriteToScene = RE_AddSpriteToScene;
 	re.EmitParticles = RE_EmitParticles;
 	re.AddDecalToScene = RE_AddDecalToScene;
+	re.AddLensSourceToScene = RE_AddLensSourceToScene;
+	re.GetLensVisibility = RE_GetLensVisibility;
 	re.RegisterParticleClass = RE_RegisterParticleClass;
-#if FEAT_CORONA
-	re.AddCoronaToScene = RE_AddCoronaToScene;
+#if FEAT_HALO
+	re.AddHaloToScene = RE_AddHaloToScene;
 #endif
 #if FEAT_FOG_SYSTEM
 	re.GetGlobalFog = RE_GetGlobalFog;
@@ -1650,6 +1753,11 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 #if FEAT_IQM
 	re.GetIQMAnimations = R_GetIQMAnimations;
 #endif // FEAT_IQM
+
+	// `screenshot` grammar (renderercommon/tr_screenshot.c) is registered
+	// once per DLL load so it persists across map transitions — R_Register
+	// commands are torn down on every REF_LEVEL_ONLY shutdown.
+	R_ScreenshotRegisterCommands();
 
 	return &re;
 }

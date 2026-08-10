@@ -33,6 +33,7 @@ LOG_DECLARE_CHANNEL( ch_nav, "nav" );
 
 #include "../qcommon.h"
 #include "nav_local.h"
+#include "../wired/wired_build_stamp.h"  /* WIRED_BUILD_ID — folded into the cache identity */
 
 #include <string.h>
 #include <stdio.h>
@@ -77,11 +78,65 @@ unsigned int Nav_Cache_ParamHash( void )
         float maxEdge, maxSimpl;
         int   minReg, mergeReg, maxVerts;
         float detailDist, detailErr;
+        /* Engine build identity — any rebuild that touches the nav extractor /
+         * bake / off-mesh code shifts this, so a stale on-disk cache produced by
+         * an older build self-invalidates on load and is re-baked.  No prebaked
+         * .nav ever ships; the engine owns cache correctness. */
+        int   buildId;
+        /* OMC endpoint snap + target-poly-preference extents: a value change to
+         * any of these alters the baked mesh, so fold them in too. */
+        float omcSnapH, omcSnapV, omcApproachH, goalPrefH;
+        /* Split-floor gap-bridge reconnect extents.  These are applied at load
+         * finalize (post-init), not baked into the tile blob, but folding them in
+         * keeps the cache identity conservative: a value change re-derives the
+         * mesh graph, so force a re-bake for a clean, consistent result. */
+        float seamMaxStep, seamMaxGap, seamMinOverlap;
+        /* Q1 extraction: exclude non-solid mover (trigger) submodel draw-faces
+         * from the nav surface pass (phantom-floor removal). Folded in so the
+         * cache identity is explicit about the extractor's surface-filter mode;
+         * WIRED_BUILD_ID already invalidates on rebuild, this makes intent clear. */
+        int   excludeMoverSurfaces;
+        /* Door floor-gap off-mesh connection extents: a value change alters the
+         * emitted OMCs, so the baked mesh differs — fold them in to self-
+         * invalidate the on-disk cache. */
+        float doorGapMinW, doorGapMaxW, doorGapStep, doorGapZWin, doorGapInset;
+        /* Water-edge off-mesh connection extents: a value change alters the
+         * emitted wade links, so the baked mesh differs — fold them in for the
+         * same self-invalidation reason. */
+        float weCell, weClimb, weHeadroom, weStep, weWaterBand, weGapMax;
+        int   wePairCells;
+        /* Hatch-descent off-mesh connection extents: a value change alters the
+         * emitted drop OMCs, so the baked mesh differs — fold them in to self-
+         * invalidate the on-disk cache (same reason as door-gap / water-edge). */
+        float hatchMinDrop, hatchMaxDrop, hatchStep, hatchHeadroom, hatchLipInset, hatchLipZWin, hatchMaxHoff;
+        /* Unified physics-link generator (nav_impl.cpp): the candidate-search reach
+         * / rise / drop bounds, the inward inset ladder, the component-seed floor,
+         * and the link radius.  These decide which physics OMCs bake into the tile,
+         * so a value change alters the baked mesh directly — fold them in so a stale
+         * .nav self-invalidates. */
+        float genMaxReach, genMaxRise, genMinDrop;
+        float genInsetStep;
+        int   genInsetLadder, genCompMin;
+        float genLinkRadius;
     } cfg = {
         2.0f, 5.0f, 56.0f, 18.0f, 15.0f, 45.0f,
         12.0f, 1.3f,
         64, 400, 6,
-        6.0f, 5.0f
+        6.0f, 5.0f,
+        (int)WIRED_BUILD_ID,
+        NAV_OMC_SNAP_HORIZ, NAV_OMC_SNAP_VERT, NAV_OMC_APPROACH_HORIZ, NAV_GOAL_PREF_HORIZ,
+        18.0f, 32.0f, 8.0f, /* NAV_SEAM_MAX_STEP, NAV_SEAM_MAX_GAP, NAV_SEAM_MIN_OVERLAP */
+        1,                  /* excludeMoverSurfaces */
+        NAV_DOORGAP_MIN_WIDTH, NAV_DOORGAP_MAX_WIDTH, NAV_DOORGAP_SAMPLE_STEP,
+        NAV_DOORGAP_Z_WINDOW, NAV_DOORGAP_ENDPOINT_INSET,
+        NAV_WATEREDGE_CELL, NAV_WATEREDGE_CLIMB, NAV_WATEREDGE_HEADROOM,
+        NAV_WATEREDGE_STEP, NAV_WATEREDGE_WATER_BAND, NAV_WATEREDGE_GAP_MAX,
+        NAV_WATEREDGE_PAIR_CELLS,
+        NAV_HATCH_MIN_DROP, NAV_HATCH_MAX_DROP, NAV_HATCH_SAMPLE_STEP,
+        NAV_HATCH_HEADROOM, NAV_HATCH_LIP_INSET, NAV_HATCH_LIP_Z_WINDOW, NAV_HATCH_MAX_HOFFSET,
+        NAV_GEN_MAX_REACH, NAV_GEN_MAX_RISE, NAV_GEN_MIN_DROP,
+        NAV_GEN_INSET_STEP, NAV_GEN_INSET_LADDER, NAV_GEN_COMP_MIN,
+        NAV_GEN_LINK_RADIUS
     };
 
     unsigned int h = 2166136261u;

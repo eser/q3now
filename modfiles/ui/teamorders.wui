@@ -1,0 +1,63 @@
+// teamorders.wui -- q3now Team Orders dialog (Phase 5d canonical)
+//
+// In-game popup (§7.4 cluster). Centered overlay — header + 5
+// voice-command quick-action buttons + Cancel. Reached from
+// in-game team comms hotkey OR ESC menu shortcut during team
+// modes.
+
+menuDef {
+	name "teamorders"
+	layer "popup"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "popup_overlay"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		alignX center
+		alignY center
+		background "layered" effects "vignette"
+
+		itemDef {
+			name "teamorders_root"
+			type container
+			rect 0 0 0.3 0.5
+			direction column
+			padding $popup_padding
+			gap $spacing_md
+			background $panel
+			border 1px $line_strong
+			radius $radius_md
+			width PERCENT 0.3
+			height PERCENT 0.5
+
+			itemDef { name "header"    type 0 rect 0 0 1 0.06 height FIT text "Team Orders" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
+			itemDef { name "subheader" type 0 rect 0 0 1 0.03 height FIT text "Issue a team-wide voice order." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+
+			itemDef {
+				name "form_content"
+				type container
+				rect 0 0 1 0.3
+				direction column
+				gap $spacing_sm
+				grow 1
+				height GROW
+				padding 0.005 0.01
+
+				itemDef { name "btn_getflag"  type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Get Flag"  textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd vsay_team getflag"  ; close } }
+				itemDef { name "btn_offense"  type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Offense"   textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd vsay_team offense"  ; close } }
+				itemDef { name "btn_defend"   type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Defend"    textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd vsay_team defend"   ; close } }
+				itemDef { name "btn_patrol"   type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Patrol"    textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd vsay_team patrol"   ; close } }
+				itemDef { name "btn_followme" type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Follow Me" textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd vsay_team followme" ; close } }
+				itemDef { name "btn_cancel"   type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Cancel"    textalign 0 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+			}
+		}
+	}
+
+	onESC { close }
+}

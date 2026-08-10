@@ -1,0 +1,21 @@
+{
+  "_doc": "Shared threshold policy file: vdiff reads the global/region/fuzz ceiling block; vcompare reads the ssim/deltaE2000/structural starting + ceiling block. Ceilings hard-reject violating regions JSONs via HALT-fork (vdiff exit 2, vcompare exit 2). Threshold-UP (loosening) requires --allow-threshold-up; never set by make targets. Threshold-DOWN (tightening) is silent-allowed. Dispatch 5.17 calibrated against dispatch 5.16 visual-mockup-match measured floor; absolute floor 0.45 honored.",
+
+  "global_ceiling_pct": 10.0,
+  "global_starting_pct": 5.0,
+  "region_ceiling_pct": 20.0,
+  "region_starting_pct": 10.0,
+  "fuzz_pct": 12.0,
+
+  "ssim_threshold_global": 0.50,
+  "ssim_threshold_region_default": 0.45,
+  "ssim_ceiling": 0.10,
+
+  "deltaE2000_threshold_global": 12.0,
+  "deltaE2000_threshold_region_default": 35.0,
+  "deltaE2000_ceiling": 35.0,
+
+  "structural_threshold_global": 0.10,
+  "structural_threshold_region_default": 0.20,
+  "structural_ceiling": 0.40
+}

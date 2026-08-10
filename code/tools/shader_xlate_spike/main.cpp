@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
-// shader_xlate_spike — Phase 7 pre-flight throwaway.
+// shader_xlate_spike — pre-flight throwaway.
 //
 // Validates that the shader-translation toolchain (per phase7-hal-design.md
 // §16.2: SPIRV-Cross for MSL/GLSL/GLES, naga for WGSL) can be vendored, built,

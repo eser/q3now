@@ -1,0 +1,128 @@
+// specifyserver.wui -- q3now Specify Server popup (Phase 5a §7.2 canonical)
+//
+// Centered popup; manual IP entry then connect. Phase 5a §7.2 pattern:
+// a popup-style modal with editfield input + Connect/Cancel button row.
+// Differs from the full-viewport settings panels of Phase 4 — it's a
+// floating overlay anchored to the viewport center via position
+// absolute + rect coords. Used by the servers.wui browser footer
+// (Specify... button) and standalone via wui_push.
+
+menuDef {
+	name "specifyserver"
+	layer "popup"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "popup_overlay"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		alignX center
+		alignY center
+		background "layered" effects "vignette"
+
+		itemDef {
+			name "specify_root"
+			type container
+			rect 0.3 0.35 0.4 0.3
+			direction column
+			padding $popup_padding
+			gap $spacing_md
+			background $panel
+			border 1px $line_strong
+			radius $radius_md
+			width PERCENT 0.4
+			height FIT
+
+			itemDef {
+				name "popup_header"
+				type 0
+				rect 0 0 1 0.06
+				height FIT
+				text "Specify Server"
+				textalign 0
+				font $font_sans_bold 22
+				forecolor $accent
+				decoration
+				visible 1
+				grow 0
+			}
+
+			itemDef {
+				name "popup_subheader"
+				type 0
+				rect 0 0 1 0.03
+				height FIT
+				text "Enter address:port for the server you want to join."
+				textalign 0
+				font $font_mono 11
+				forecolor $boneDim
+				decoration
+				visible 1
+				grow 0
+			}
+
+			itemDef {
+				name "ip_entry"
+				type 4
+				rect 0 0 1 0.05
+				height FIXED 40px
+				width PERCENT 1.0
+				text "Address"
+				textalign 0
+				font $font_sans 14
+				forecolor $bone
+				forecolor.active $accent
+				cvar "ui_specifyAddress"
+				maxChars 64
+				visible 1
+				grow 0
+			}
+
+			itemDef {
+				name "popup_footer"
+				type container
+				rect 0 0 1 0.05
+				direction row
+				gap $spacing_md
+				alignX end
+				height FIT
+
+				itemDef {
+					name "btn_cancel"
+					type 1
+					rect 0 0 0.30 0.04
+					height FIT
+					text "Cancel"
+					textalign 1
+					font $font_sans 14
+					forecolor $boneDim
+					forecolor.active $accent
+					visible 1
+					grow 0
+					action { close ; open "servers" scene }
+				}
+				itemDef {
+					name "btn_connect"
+					type 1
+					rect 0 0 0.30 0.04
+					height FIT
+					text "Connect"
+					textalign 1
+					font $font_sans_bold 14
+					forecolor $accent
+					forecolor.active $accent
+					visible 1
+					grow 0
+					action { exec "connect" }
+				}
+			}
+		}
+	}
+
+	onESC { close ; open "servers" scene }
+}

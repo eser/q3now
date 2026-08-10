@@ -2,11 +2,11 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 /*
-sv_ref.c — Dedicated server headless renderer (FEAT_HEADLESS_RENDERER)
+sv_ref.c — Headless server renderer (FEAT_HEADLESS_RENDERER)
 
 Provides a refexport_t implementation for dedicated-server builds that
 never open a window. 2D drawing, scene submission, and GPU-backed calls
-become inert sinks because a dedicated server has no display surface.
+become inert sinks because a headless server has no display surface.
 The functions that server-side code (bot AI, physics, game VM) genuinely
 needs — LoadWorld, RegisterModel, ModelBounds, LerpTag — do real work:
 
@@ -34,7 +34,6 @@ Activation:
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 #if FEAT_HEADLESS_RENDERER
@@ -404,7 +403,7 @@ static void SVR_Shutdown( refShutdownCode_t code ) {
 }
 
 static void SVR_BeginRegistration( glconfig_t *config ) {
-	/* A dedicated server has no display, but the engine still expects
+	/* A headless server has no display, but the engine still expects
 	 * a populated glconfig so shared code that inspects vidWidth /
 	 * windowAspect stays sane. */
 	if ( config ) {
@@ -493,7 +492,7 @@ static qhandle_t SVR_RegisterModel( const char *name ) {
 ====================
 SVR_RegisterSkin / SVR_RegisterShader*
 
-These would live in the client renderer. On a dedicated server there
+These would live in the client renderer. On a headless server there
 is no texture upload path and no shader database — return 0 so callers
 know the handle is inactive.
 ====================
@@ -519,7 +518,7 @@ side and guarantees the collision database is loaded after the
 refexport_t entry point returns.
 ====================
 */
-static void SVR_LoadWorld( const bspFile_t *bsp ) {
+static void SVR_LoadWorld( const mapFile_t *bsp ) {
 	const char *name;
 	int checksum = 0;
 
@@ -537,7 +536,7 @@ static void SVR_LoadWorld( const bspFile_t *bsp ) {
 static void SVR_SetWorldVisData( const byte *vis ) { (void)vis; }
 static void SVR_EndRegistration( void ) {}
 
-/* ----- Scene / draw entry points: inert on a dedicated server ----- */
+/* ----- Scene / draw entry points: inert on a headless server ----- */
 
 static void SVR_ClearScene( void ) {}
 static void SVR_AddRefEntityToScene( const refEntity_t *re, qboolean intShaderTime ) {
@@ -612,7 +611,7 @@ the renderer-side R_LerpTag math (linear blend of origin + axis,
 followed by re-normalisation of the axis basis). Currently supports
 MD3 attachments, which covers every stock Q3 model. IQM handles fall
 back to identity because reconstructing tags from skeletal poses
-requires the full pose machinery that the dedicated server skips.
+requires the full pose machinery that the headless server skips.
 ====================
 */
 static int SVR_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFrame,
@@ -742,8 +741,8 @@ static void SVR_GetViewFog( const vec3_t origin, refFogType_t *type, vec3_t colo
 }
 #endif
 
-#if FEAT_CORONA
-static void SVR_AddCoronaToScene( const vec3_t org, float r, float g, float b,
+#if FEAT_HALO
+static void SVR_AddHaloToScene( const vec3_t org, float r, float g, float b,
 	float scale, int id, qboolean visible )
 {
 	(void)org; (void)r; (void)g; (void)b; (void)scale; (void)id; (void)visible;
@@ -837,8 +836,8 @@ void GetRefAPI_Headless( refexport_t *re ) {
 	re->GetGlobalFog = SVR_GetGlobalFog;
 	re->GetViewFog = SVR_GetViewFog;
 #endif
-#if FEAT_CORONA
-	re->AddCoronaToScene = SVR_AddCoronaToScene;
+#if FEAT_HALO
+	re->AddHaloToScene = SVR_AddHaloToScene;
 #endif
 #if FEAT_IQM
 	re->GetIQMAnimations = SVR_GetIQMAnimations;

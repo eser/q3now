@@ -26,6 +26,7 @@
 #include "../qcommon/qcommon.h"
 #include "../renderercommon/tr_public.h"
 #include "tr_common.h"
+#include "../renderercommon/tr_screenshot.h"
 #if FEAT_IQM
 #include "iqm.h"
 #endif // FEAT_IQM
@@ -565,10 +566,10 @@ typedef struct {
 	const float *fogColor; // vec4_t
 } fogProgramParms_t;
 
-#if FEAT_CORONA
-#define MAX_CORONAS 32
+#if FEAT_HALO
+#define MAX_HALOS 32
 
-typedef struct corona_s {
+typedef struct halo_s {
 	vec3_t				origin;
 	vec3_t				color;
 	vec3_t				transformed;	// viewspace position
@@ -576,7 +577,7 @@ typedef struct corona_s {
 	int					id;
 	qboolean			visible;
 	struct shader_s		*shader;
-} corona_t;
+} halo_t;
 #endif
 
 typedef enum {
@@ -1082,13 +1083,8 @@ typedef struct videoFrameCommand_s {
 	qboolean			motionJpeg;
 } videoFrameCommand_t;
 
-enum {
-	SCREENSHOT_TGA = 1<<0,
-	SCREENSHOT_JPG = 1<<1,
-	SCREENSHOT_BMP = 1<<2,
-	SCREENSHOT_BMP_CLIPBOARD = 1<<3,
-	SCREENSHOT_AVI = 1<<4 // take video frame
-};
+// SCREENSHOT_* type/destination mask now lives in
+// renderercommon/tr_screenshot.h (included via the top of this header).
 
 // all state modified by the back end is separated
 // from the front end state
@@ -1107,13 +1103,15 @@ typedef struct {
 	qboolean	doneSurfaces;   // done any 3d surfaces already
 	trRefEntity_t	entity2D;	// currentEntity will point at this when doing 2D rendering
 
-	int		screenshotMask;		// tga | jpg | bmp
+	int		screenshotMask;		// tga | jpg | bmp | png
 	char	screenshotTGA[ MAX_OSPATH ];
 	char	screenshotJPG[ MAX_OSPATH ];
 	char	screenshotBMP[ MAX_OSPATH ];
+	char	screenshotPNG[ MAX_OSPATH ];
 	qboolean screenShotTGAsilent;
 	qboolean screenShotJPGsilent;
 	qboolean screenShotBMPsilent;
+	qboolean screenShotPNGsilent;
 	videoFrameCommand_t	vcmd;	// avi capture
 
 	qboolean throttle;
@@ -1256,8 +1254,8 @@ typedef struct {
 	fogType_t				fogTypeCurrent;
 #endif
 
-#if FEAT_CORONA
-	int						coronaShader;
+#if FEAT_HALO
+	int						haloShader;
 #endif
 
 	float					msdfOutlineWidth;
@@ -1506,7 +1504,7 @@ void		RE_UploadCinematic( int w, int h, int cols, int rows, byte *data, int clie
 
 void		RE_BeginFrame( stereoFrame_t stereoFrame );
 void		RE_BeginRegistration( glconfig_t *glconfig );
-void		RE_LoadWorldMap( const bspFile_t *bsp );
+void		RE_LoadWorldMap( const mapFile_t *bsp, int worldIndex );
 void		RE_SetWorldVisData( const byte *vis );
 qhandle_t	RE_RegisterModel( const char *name );
 qhandle_t	RE_RegisterSkin( const char *name );
@@ -1781,14 +1779,17 @@ void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, flo
 void RE_AddLinearLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );
 void RE_AddRibbonToScene( const ribbonDesc_t *desc );
 void RE_AddBeamToScene( const beamDesc_t *desc );
+void RE_AddRailRibbonToScene( const railRibbonDesc_t *desc );
 void RE_AddSpriteToScene( const spriteDesc_t *desc );
 void RE_EmitParticles( const emitterDesc_t *desc );
 void RE_AddDecalToScene( const decalDesc_t *desc );
+void RE_AddLensSourceToScene( const lensSourceDesc_t *desc );
+qboolean RE_GetLensVisibility( int id, float *outVis );
 void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass_t *cls );
-#if FEAT_CORONA
-void RE_AddCoronaToScene( const vec3_t org, float r, float g, float b, float scale, int id, qboolean visible );
-void RB_AddCoronaFlares( void );
-void R_ClearCoronas( void );
+#if FEAT_HALO
+void RE_AddHaloToScene( const vec3_t org, float r, float g, float b, float scale, int id, qboolean visible );
+void RB_AddHaloFlares( void );
+void R_ClearHalos( void );
 #endif
 
 void *R_GetCommandBuffer( int bytes );
@@ -1803,7 +1804,7 @@ int  R_BoundsFogNum( const vec3_t mins, const vec3_t maxs );
 qboolean R_IsGlobalFog( int fogNum );
 #endif
 
-void RE_RenderScene( const refdef_t *fd );
+void RE_RenderScene( const refdef_t *fd, int worldIndex );
 
 /*
 =============================================================
@@ -2035,8 +2036,8 @@ typedef struct {
 	trRefEntity_t	entities[MAX_REFENTITIES];
 	srfPoly_t	*polys;//[MAX_POLYS];
 	polyVert_t	*polyVerts;//[MAX_POLYVERTS];
-#if FEAT_CORONA
-	corona_t	coronas[MAX_CORONAS];
+#if FEAT_HALO
+	halo_t	halos[MAX_HALOS];
 #endif
 	renderCommandList_t	commands;
 } backEndData_t;
@@ -2050,6 +2051,7 @@ void RB_ExecuteRenderCommands( const void *data );
 void RB_TakeScreenshot( int x, int y, int width, int height, const char *fileName );
 void RB_TakeScreenshotJPEG( int x, int y, int width, int height, const char *fileName );
 void RB_TakeScreenshotBMP( int x, int y, int width, int height, const char *fileName, int clipboard );
+void RB_TakeScreenshotPNG( int x, int y, int width, int height, const char *fileName, int clipboard );
 
 void R_IssuePendingRenderCommands( void );
 

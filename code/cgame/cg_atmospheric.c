@@ -7,8 +7,11 @@
 ===========================================================================
 cg_atmospheric.c -- Rain & snow atmospheric effects (3B / FEAT_ATMOSPHERIC)
 
-Simplified port from Spearmint/mint-arena. Uses tracemap for sky/ground
-height detection. Weather is server-controlled via g_envWeather cvar.
+Weather is server-controlled via the g_envWeather cvar; the client resolves
+it to a GPU-resident atmospheric pool that self-spawns, integrates, collides
+against the world heightgrid, and draws every frame. cgame's job is to emit
+the weather descriptor + collision heightgrid ONCE per weather change (after
+the tracemap is built) — the renderer owns the per-frame lifecycle.
 
 g_envWeather "rain"  — rain particles
 g_envWeather "snow"  — snow particles
@@ -21,15 +24,12 @@ Based on Spearmint Source Code (GPL v3).
 ===========================================================================
 */
 #include "cg_local.h"
+#include "../qcommon/wired/render/primitives.h"
+#include "../qcommon/wired/render/traps.h"
 
 #if FEAT_ATMOSPHERIC
 
-#define MAX_ATM_PARTICLES   8000
 #define ATM_DISTANCE        1500
-#define ATM_RAIN_SPEED      ( 1.1f * DEFAULT_GRAVITY )
-#define ATM_SNOW_SPEED      ( 0.2f * DEFAULT_GRAVITY )
-#define ATM_RAIN_HEIGHT     150
-#define ATM_SNOW_HEIGHT     8
 
 typedef enum {
 	ATM_NONE,
@@ -37,26 +37,11 @@ typedef enum {
 	ATM_SNOW
 } atmType_t;
 
-typedef enum {
-	PART_INACTIVE,
-	PART_FALLING
-} partActive_t;
-
-typedef struct {
-	vec3_t		pos;
-	vec3_t		vel;
-	float		height;
-	partActive_t active;
-	int			startTime;
-	float		weight;
-} atmParticle_t;
-
 static struct {
-	atmParticle_t	particles[MAX_ATM_PARTICLES];
 	atmType_t		type;
-	int				numActive;
 	qhandle_t		shader;
 	qboolean		tracemapGenerated;
+	qboolean		gpuEmitted;        // GPU descriptor + heightgrid pushed for the current weather
 } atm;
 
 /*
@@ -64,8 +49,8 @@ static struct {
 CG_AtmosphericInit
 
 Idempotent — called from CG_ParseServerinfo whenever serverinfo updates.
-Reads cgs.weather (set by server's g_envWeather cvar).
-Generates tracemap on first call, reinitializes particles on weather change.
+Reads cgs.weather (set by server's g_envWeather cvar). Marks the weather
+descriptor stale on a type change so the next frame re-emits it to the pool.
 ==================
 */
 void CG_AtmosphericInit( void ) {
@@ -85,10 +70,10 @@ void CG_AtmosphericInit( void ) {
 		return;
 	}
 
-	// clear particles for weather change
-	memset( atm.particles, 0, sizeof( atm.particles ) );
-	atm.numActive = 0;
 	atm.type = newType;
+	// Re-push the GPU weather descriptor on the next frame the tracemap is ready
+	// (the new type / spawn volume must reach the renderer pool).
+	atm.gpuEmitted = qfalse;
 
 	if ( newType == ATM_RAIN ) {
 		atm.shader = trap_R_RegisterShader( "gfx/misc/raindrop" );
@@ -107,114 +92,75 @@ void CG_AtmosphericInit( void ) {
 
 /*
 ==================
-CG_GenerateParticle
+CG_AtmosphericEmitGPU
 
-Spawns a new particle at a random position around the viewer.
-Uses tracemap for O(1) sky height lookup instead of per-particle traces.
+Push the current weather descriptor + collision heightgrid to the renderer's
+GPU-resident atmospheric pool. Called ONCE per weather change (the GPU pool
+then self-spawns / integrates / collides / draws every frame). The spawn
+volume is the world xy bounds plus a generous z range; the GPU distance-culls
+around the eye each frame, so emit-once is sufficient. Requires the tracemap.
 ==================
 */
-static void CG_GenerateParticle( atmParticle_t *p ) {
-	float	dist, skyHeight, groundHeight;
+static void CG_AtmosphericEmitGPU( void ) {
+	atmosphericDesc_t	desc;
+	const float			*ground;
+	vec2_t				mins2, maxs2;
+	int					gridSize;
 
-	// random position around player within ATM_DISTANCE
-	dist = ATM_DISTANCE * 0.5f;
-	p->pos[0] = cg.refdef.vieworg[0] + crandom() * dist;
-	p->pos[1] = cg.refdef.vieworg[1] + crandom() * dist;
-
-	// use tracemap for sky and ground height
-	skyHeight = BG_GetSkyHeightAtPoint( p->pos );
-	if ( skyHeight >= ( 128 * 1024 ) ) {
-		// no sky above this position (indoors)
-		p->active = PART_INACTIVE;
-		return;
+	ground = BG_GetTracemapGround( mins2, maxs2, &gridSize );
+	if ( ground == NULL ) {
+		return;   // tracemap not ready yet — retry next frame
 	}
 
-	groundHeight = BG_GetGroundHeightAtPoint( p->pos );
-	if ( groundHeight <= ( -128 * 1024 ) ) {
-		// no ground below (void) — skip to avoid particles in empty space
-		p->active = PART_INACTIVE;
-		return;
-	}
+	memset( &desc, 0, sizeof( desc ) );
+	desc.type = (int)atm.type;   // ATM_NONE/RAIN/SNOW order matches the renderer
 
-	// spawn at random height between sky and ground for natural distribution
-	p->pos[2] = groundHeight + random() * ( skyHeight - groundHeight );
+	// Spawn volume = world xy bounds, z from the lowest ground up through a
+	// generous sky margin. The GPU distance-culls to the eye, so a world-wide
+	// volume is fine for an emit-once descriptor.
+	desc.bounds[0] = mins2[0];
+	desc.bounds[1] = mins2[1];
+	desc.bounds[2] = -( 32 * 1024 );          // floor (clamped against the heightgrid on the GPU)
+	desc.bounds[3] = maxs2[0];
+	desc.bounds[4] = maxs2[1];
+	desc.bounds[5] =  ( 32 * 1024 );          // sky margin
 
-	if ( atm.type == ATM_RAIN ) {
-		p->vel[0] = crandom() * 30;
-		p->vel[1] = crandom() * 30;
-		p->vel[2] = -ATM_RAIN_SPEED;
-		p->height = ATM_RAIN_HEIGHT;
-	} else {
-		p->vel[0] = crandom() * 20;
-		p->vel[1] = crandom() * 20;
-		p->vel[2] = -ATM_SNOW_SPEED;
-		p->height = ATM_SNOW_HEIGHT;
-		p->weight = 0.3f + random() * 0.5f;
-	}
+	desc.distance     = ATM_DISTANCE;
+	desc.worldMins[0] = mins2[0];
+	desc.worldMins[1] = mins2[1];
+	desc.worldMaxs[0] = maxs2[0];
+	desc.worldMaxs[1] = maxs2[1];
+	desc.gridSize     = gridSize;
 
-	p->active = PART_FALLING;
-	p->startTime = cg.time;
-}
+	trap_R_SetAtmosphere( &desc );
+	// Heightgrid ships separately (a struct-nested pointer can't cross the VM
+	// boundary). gridSize² floats, row-major ground[y][x].
+	trap_R_SetAtmosphereHeightgrid( ground, gridSize * gridSize );
 
-/*
-==================
-CG_RenderParticle
-
-Renders a single rain/snow particle as a poly triangle.
-==================
-*/
-static void CG_RenderParticle( atmParticle_t *p ) {
-	polyVert_t	verts[3];
-	vec3_t		forward, right;
-	float		size;
-
-	if ( atm.type == ATM_RAIN ) {
-		size = 1.0f;
-		// rain streak: elongated vertical triangle
-		VectorSet( forward, 0, 0, -p->height * 0.02f );
-		VectorSet( right, size, 0, 0 );
-	} else {
-		size = p->height * p->weight;
-		VectorSet( forward, 0, 0, size );
-		VectorSet( right, size, 0, 0 );
-	}
-
-	VectorCopy( p->pos, verts[0].xyz );
-	VectorAdd( p->pos, forward, verts[1].xyz );
-	VectorAdd( p->pos, right, verts[2].xyz );
-
-	verts[0].st[0] = 0; verts[0].st[1] = 0;
-	verts[1].st[0] = 1; verts[1].st[1] = 0;
-	verts[2].st[0] = 0; verts[2].st[1] = 1;
-
-	if ( atm.type == ATM_RAIN ) {
-		verts[0].modulate.rgba[0] = verts[0].modulate.rgba[1] = verts[0].modulate.rgba[2] = 128;
-		verts[1].modulate.rgba[0] = verts[1].modulate.rgba[1] = verts[1].modulate.rgba[2] = 128;
-		verts[2].modulate.rgba[0] = verts[2].modulate.rgba[1] = verts[2].modulate.rgba[2] = 128;
-	} else {
-		verts[0].modulate.rgba[0] = verts[0].modulate.rgba[1] = verts[0].modulate.rgba[2] = 255;
-		verts[1].modulate.rgba[0] = verts[1].modulate.rgba[1] = verts[1].modulate.rgba[2] = 255;
-		verts[2].modulate.rgba[0] = verts[2].modulate.rgba[1] = verts[2].modulate.rgba[2] = 255;
-	}
-	verts[0].modulate.rgba[3] = verts[1].modulate.rgba[3] = verts[2].modulate.rgba[3] = 200;
-
-	trap_R_AddPolyToScene( atm.shader, 3, verts );
+	atm.gpuEmitted = qtrue;
 }
 
 /*
 ==================
 CG_AddAtmosphericEffects
 
-Called once per frame from cg_view.c to add rain/snow particles.
+Called once per frame from cg_view.c. Builds the collision tracemap on the
+first frame (deferred — the collision model must be loaded first), then emits
+the weather descriptor + heightgrid to the GPU pool once per weather change.
+The renderer's GPU-resident pool owns spawn/integrate/collide/draw thereafter.
 ==================
 */
 void CG_AddAtmosphericEffects( void ) {
-	int		i, max;
-	float	deltaTime;
-	vec3_t	groundEnd;
-	trace_t	tr;
-
 	if ( atm.type == ATM_NONE ) {
+		// Weather just turned off — tell the pool to go inert (type 0) so it
+		// stops drawing.
+		if ( atm.tracemapGenerated && !atm.gpuEmitted ) {
+			atmosphericDesc_t desc;
+			memset( &desc, 0, sizeof( desc ) );
+			desc.type = 0;
+			trap_R_SetAtmosphere( &desc );
+			atm.gpuEmitted = qtrue;
+		}
 		return;
 	}
 
@@ -235,61 +181,10 @@ void CG_AddAtmosphericEffects( void ) {
 		atm.tracemapGenerated = qtrue;
 	}
 
-	deltaTime = ( cg.frametime ) * 0.001f;
-
-	// spawn new particles (up to 100 per frame)
-	max = 100;
-	for ( i = 0; i < MAX_ATM_PARTICLES && max > 0; i++ ) {
-		if ( atm.particles[i].active == PART_INACTIVE ) {
-			CG_GenerateParticle( &atm.particles[i] );
-			if ( atm.particles[i].active == PART_FALLING ) {
-				max--;
-			}
-		}
-	}
-
-	// update and render active particles
-	atm.numActive = 0;
-	for ( i = 0; i < MAX_ATM_PARTICLES; i++ ) {
-		atmParticle_t *p = &atm.particles[i];
-		if ( p->active != PART_FALLING ) continue;
-
-		// move
-		VectorMA( p->pos, deltaTime, p->vel, p->pos );
-
-		// snow: add slight wind drift
-		if ( atm.type == ATM_SNOW ) {
-			p->pos[0] += sin( cg.time * 0.001f + i ) * 0.5f;
-			p->pos[1] += cos( cg.time * 0.0013f + i ) * 0.5f;
-		}
-
-		// check ground collision (short trace — cheap and precise; ignore sky surfaces)
-		VectorCopy( p->pos, groundEnd );
-		groundEnd[2] -= 4;
-		CG_Trace( &tr, p->pos, NULL, NULL, groundEnd, -1, CONTENTS_SOLID | CONTENTS_WATER );
-		if ( tr.fraction < 1.0f && !( tr.surfaceFlags & SURF_SKY ) ) {
-			p->active = PART_INACTIVE;
-			continue;
-		}
-
-		// cull if too far from viewer (XY distance only — vertical doesn't matter for falling particles)
-		{
-			float dx = p->pos[0] - cg.refdef.vieworg[0];
-			float dy = p->pos[1] - cg.refdef.vieworg[1];
-			if ( dx * dx + dy * dy > ATM_DISTANCE * ATM_DISTANCE ) {
-				p->active = PART_INACTIVE;
-				continue;
-			}
-		}
-
-		// kill if below viewer by too much
-		if ( p->pos[2] < cg.refdef.vieworg[2] - 500 ) {
-			p->active = PART_INACTIVE;
-			continue;
-		}
-
-		CG_RenderParticle( p );
-		atm.numActive++;
+	// Emit the weather descriptor + heightgrid once, then let the renderer pool
+	// own everything (spawn / integrate / collide / draw).
+	if ( !atm.gpuEmitted ) {
+		CG_AtmosphericEmitGPU();
 	}
 }
 

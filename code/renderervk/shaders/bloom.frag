@@ -11,10 +11,11 @@ layout(location = 0) in vec2 frag_tex_coord;
 layout(location = 0) out vec4 out_color;
 
 //layout(constant_id = 0) const float gamma = 1.0;
-// Phase 6B3'-a: legacy obScale (constant_id 1) declaration removed
-// — bloom-extract operates on linear values; host now feeds
-// exposure_bias to constant_id 1 globally but bloom.frag does not
-// consume it (bloom threshold compares to raw scene luminance).
+// legacy obScale (constant_id 1) declaration removed
+// — bloom-extract operates on linear values; the scene exposure
+// multiplier is a per-frame UBO on the post-process layout now, and
+// bloom.frag does not consume it (bloom threshold compares to raw
+// scene luminance).
 //layout(constant_id = 2) const float saturation = 1.0;
 layout(constant_id = 3) const float threshold = 0.32;
 //layout(constant_id = 4) const float factor = 0.5;

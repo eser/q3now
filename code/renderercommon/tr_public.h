@@ -10,9 +10,21 @@
 #include "../qcommon/wired/render/primitives.h"
 #include "../qcommon/wired/render/particle_class.h"
 
-typedef struct bspFile_s bspFile_t;
+typedef struct mapFile_s mapFile_t;
 
-#define	REF_API_VERSION		10
+/* Forward-declared so refimport_t can carry arena allocator function
+ * pointers without pulling arena.h into renderer headers. The full
+ * definition lives in code/qcommon/arena.h and is linked into the engine
+ * (wired.x64). The renderer DLL only sees the opaque pointer. */
+typedef struct arena_s arena_t;
+
+#define	REF_API_VERSION		16	/* DrawMenuBackdrop added (WiredUI SCENE procedural backdrop) */
+
+// Number of concurrent world slots the renderer holds — one per local client
+// app. Must be >= the engine's MAX_LOCAL_CGAME_VMS (the app-instance count); the
+// world index passed to LoadWorld/RenderScene is bounds-checked against this.
+// Only slot 0 is populated when a single app is connected.
+#define MAX_RENDER_WORLDS	4
 
 // Lightmap index constants for RegisterShaderLightMap and friends.
 // Must match the values in each renderer's tr_common.h.
@@ -37,8 +49,11 @@ typedef enum {
 // these are the functions exported by the refresh module
 //
 typedef enum {
-	REF_KEEP_CONTEXT, // don't destroy window and context
-	REF_KEEP_WINDOW,  // destroy context, keep window
+	REF_LEVEL_ONLY,    // tear down map-scoped state only;
+	                   // renderer + RAL context persists
+	                   // (RAL owns the Vulkan context for the
+	                   //  lifetime of the process)
+	REF_KEEP_WINDOW,   // destroy device, keep window
 	REF_DESTROY_WINDOW,
 	REF_UNLOAD_DLL
 } refShutdownCode_t;
@@ -73,7 +88,14 @@ typedef struct {
 	// handles that will be passed to trap_R_AddRibbonToScene or
 	// trap_R_AddBeamToScene.
 	qhandle_t (*RegisterPrimitiveShader)( const char *name );
-	void	(*LoadWorld)( const bspFile_t *bsp );
+	// Phase 7.15.4-a: stamp IMGFLAG_PINNED onto every image of the resolved
+	// shader's active stages so the texture-LRU (7.15.4-c) never evicts it.
+	// The CALLER invokes this after registering a UI / font / console / persistent
+	// atlas shader whose image_t*/bindless slot it caches without re-checking
+	// residency. Renderer-internal classification only — no render-output effect
+	// (the flag has no reader until the victim-scan lands).
+	void	(*PinShaderImages)( qhandle_t hShader );
+	void	(*LoadWorld)( const mapFile_t *bsp, int worldIndex );
 
 	// the vis data is a large enough block of data that we go to the trouble
 	// of sharing it with the clipmodel subsystem
@@ -101,8 +123,18 @@ typedef struct {
 	void	(*AddDecalToScene)   ( const decalDesc_t   *desc );
 	void	(*RegisterParticleClass)( particleClassHandle_t handle,
 	                                  const particleClass_t *cls );
+	void	(*SetAtmosphere)         ( const atmosphericDesc_t *desc );
+	void	(*SetAtmosphereHeightgrid)( const float *grid, int count );
 
-	void	(*RenderScene)( const refdef_t *fd );
+	// Lens-source occlusion oracle (lens-glow unification). The game registers a
+	// light source each frame; the renderer's depth-sampling oracle reports its
+	// visibility (0 = occluded by geometry, 1 = clear). GetLensVisibility returns
+	// qfalse when no GPU oracle is available (GL backends, r_lens off) so the game
+	// falls back to its own occlusion test — zero feature loss.
+	void	(*AddLensSourceToScene)( const lensSourceDesc_t *desc );
+	qboolean (*GetLensVisibility)( int id, float *outVis );
+
+	void	(*RenderScene)( const refdef_t *fd, int worldIndex );
 
 	void	(*SetColor)( const float *rgba );	// NULL = 1,1,1,1
 	void	(*SetMSDFOutline)( float outlineWidth, const float *outlineColor,
@@ -111,6 +143,14 @@ typedef struct {
 	void	(*SetClipRegion)( const float *region );	// NULL = clear clip region; non-NULL = {x,y,w,h}
 	void	(*DrawStretchPic) ( float x, float y, float w, float h,
 		float s1, float t1, float s2, float t2, qhandle_t hShader );	// 0 = white
+	// WiredUI SCENE procedural backdrop: draws a blended full-viewport constellation-
+	// over-warm-dusk scene into the current 2D UI pass. time is continuous wallclock
+	// seconds; mouseX/Y are normalized cursor [-1..1]; transition is the eased menu-
+	// change nudge. Drawn as the backmost UI layer; menu content composites on top.
+	void	(*DrawMenuBackdrop)( float x, float y, float w, float h,
+		float time, float mouseX, float mouseY, float transition );
+	void	(*DrawStretchPicOverlay) ( float x, float y, float w, float h,
+		float s1, float t1, float s2, float t2, qhandle_t hShader );	// post-gamma display-space (composite overlay)
 	void	(*DrawRotatedPic)( float x, float y, float w, float h,
 		float s1, float t1, float s2, float t2, float angle, qhandle_t hShader );
 	void	(*DrawLine)( float x1, float y1, float x2, float y2, float width, qhandle_t hShader );
@@ -151,6 +191,15 @@ typedef struct {
 
 	const glconfig_t *(*GetConfig)( void );
 
+	// GPU memory budget for the /meminfo GPU section. Out-params are plain bytes
+	// (no RAL struct across the ABI). Returns qtrue if the numbers are real
+	// (the backend exposes a budget extension) or qfalse if they are estimates /
+	// unavailable (still fills the RAL-tracked footprint into *used). A NULL
+	// pointer is allowed for any out-param the caller doesn't need.
+	qboolean (*GetMemoryBudget)( uint64_t *deviceLocalUsed, uint64_t *deviceLocalBudget,
+	                             uint64_t *hostVisibleUsed,  uint64_t *hostVisibleBudget,
+	                             int *pressureLevel /* 0 normal, 1 warning, 2 critical */ );
+
 	void	(*VertexLighting)( qboolean allowed );
 	void	(*SyncRender)( void );
 
@@ -165,10 +214,10 @@ typedef struct {
 		float *depthForOpaque, float *density, qboolean *useColorArray );
 #endif
 
-#if FEAT_CORONA
-	// Add a corona (lens-flare-style glow) to the current scene. Rendered with
+#if FEAT_HALO
+	// Add a halo (lens-flare-style glow) to the current scene. Rendered with
 	// depth-buffer occlusion testing.
-	void	(*AddCoronaToScene)( const vec3_t org, float r, float g, float b,
+	void	(*AddHaloToScene)( const vec3_t org, float r, float g, float b,
 		float scale, int id, qboolean visible );
 #endif
 
@@ -178,10 +227,28 @@ typedef struct {
 	int		(*GetIQMAnimations)( qhandle_t model, iqmAnimInfo_t *anims, int maxAnims );
 #endif // FEAT_IQM
 
-	// Set lightstyle pattern string at runtime (Phase 1+).
+	// Query Q1-.mdl-derived animation ranges (prefix-grouped frame names) from a
+	// model. Returns the number of ranges found (0 if not a mesh / no named frames).
+	int		(*GetMDLAnimations)( qhandle_t model, mdlAnimRange_t *anims, int maxAnims );
+
+	// Set lightstyle pattern string at runtime.
 	// style in [0,63]; pattern is a NUL-terminated string up to LIGHTSTYLE_PATTERN_MAX chars.
 	// Stores the pattern and derives a float value for backward-compat with the float path.
 	void	(*SetLightstylePattern)( int style, const char *pattern );
+
+	// Recoverable init-failure signal. Set by the renderer's BeginRegistration
+	// path when a runtime check (e.g. GPU caps) makes the renderer non-viable
+	// but NOT a hard process error — cl_main reads this immediately after the
+	// BeginRegistration call and advances `cl_renderer` to the next entry in
+	// the renderer fallback list. Default (zero-initialised) = qfalse.
+	qboolean	initFailed;
+
+	// GPU-resident parametric helix ribbon: cgame submits the spawn-fixed
+	// spiral params once at fire; the renderer's persistent pool regenerates
+	// the evolving geometry each frame until the duration expires. Appended at
+	// the end of refexport_t so existing pointer offsets stay stable (ABI-
+	// additive; full rebuild after adding). NULL on renderers without the pool.
+	void	(*AddRailRibbonToScene)( const railRibbonDesc_t *desc );
 
 } refexport_t;
 
@@ -216,6 +283,13 @@ typedef struct {
 	void	(*Free)( void *buf );
 	void	(*FreeAll)( void );
 
+	// Named arena allocators (engine-side qcommon/arena.c).
+	// Used by the renderer to register process-lifetime allocations in
+	// /meminfo. Bumps the renderer ABI to REF_API_VERSION 10+.
+	arena_t *(*Arena_Create)( const char *name, size_t size );
+	void     (*Arena_Destroy)( arena_t *arena );
+	void    *(*Arena_Alloc)( arena_t *arena, size_t size, size_t alignment );
+
 	cvar_t	*(*Cvar_Get)( const char *name, const char *value, int flags );
 	void	(*Cvar_Set)( const char *name, const char *value );
 	void	(*Cvar_SetValue) (const char *name, float value);
@@ -240,6 +314,14 @@ typedef struct {
 
 	byte	*(*CM_ClusterPVS)(int cluster);
 	int		(*CM_PointContents)( const vec3_t p, clipHandle_t model );
+	// Engine collision ray-cast bridge. Wraps the engine
+	// CM_BoxTrace (cm_trace.c); the engine cm.tracer vtable dispatches q1/q3
+	// internally, so the renderer stays format-blind. Used by the load-time
+	// sun-mask compute to test per-texel sun visibility against world BSP
+	// geometry. brushmask 0 + zero mins/maxs = a point ray through hull-0.
+	void	(*CM_BoxTrace)( trace_t *results, const vec3_t start, const vec3_t end,
+							const vec3_t mins, const vec3_t maxs,
+							clipHandle_t model, int brushmask, qboolean capsule );
 	int		(*CM_NumBrushes)( void );
 	void	(*CM_GetBrushData)( int idx, int *contents, int *shaderNum, const char **shaderName,
 								float mins[3], float maxs[3], int *numsides );
@@ -260,8 +342,8 @@ typedef struct {
 	qboolean (*FS_FileExists)( const char *file );
 
 	// BSP loading — used by R_RegisterBSP for standalone prop BSPs
-	qboolean (*BSP_Load)( const char *name, bspFile_t **bspFile, unsigned flags );
-	void     (*BSP_Free)( bspFile_t *bspFile );
+	qboolean (*Map_Load)( const char *name, mapFile_t **bspFile, unsigned flags );
+	void     (*Map_Free)( mapFile_t *bspFile );
 
 	// cinematic stuff
 	void	(*CIN_UploadCinematic)( int handle );
@@ -278,6 +360,8 @@ typedef struct {
 	void	(*CL_SetScaling)( float factor, int captureWidth, int captureHeight );
 
 	void	(*Sys_SetClipboardBitmap)( const byte *bitmap, int size );
+	// cross-platform image clipboard (PNG payload).
+	void	(*Sys_SetClipboardImagePNG)( const byte *png, int length );
 	qboolean(*Sys_LowPhysicalMemory)( void );
 
 	int		(*Com_RealTime)( qtime_t *qtime );
@@ -311,6 +395,18 @@ typedef struct {
 	// otherwise. May itself be NULL in early-init paths; callers must
 	// null-check. Engine-side state lives in code/qcommon/maps/meta_remap.c.
 	const char *(*MetaRemap_Lookup)( int kind, const char *name );
+
+	// rilog-channel-mechanism Turn A — channel-aware logging.
+	// `GetLogChannel(name)` resolves (lazy-registers) a dot-hierarchical
+	// channel and returns its integer id; the renderer's R_LOG macro caches
+	// the id per-TU so the engine-side Log_GetChannel runs once per channel
+	// per TU. `LogCh(channel, sev, fmt, ...)` is the channel-aware sink — a
+	// thin wrapper over Com_Logv. The existing `Log` entry (which routes to
+	// the `renderer` root channel only) stays parallel for the ~600 legacy
+	// ri.Log call sites; the channelled path bypasses it. Bumps the renderer
+	// ABI to REF_API_VERSION 11.
+	int  (*GetLogChannel)( const char *name );
+	void FORMAT_PRINTF(3, 4) (QDECL *LogCh)( int channel, log_severity_t severity, const char *fmt, ... );
 
 } refimport_t;
 

@@ -2,8 +2,11 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.cmd
 #include "tr_fbo.h"
 #include "tr_dsa.h"
+
+R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
 backEndData_t	*backEndData;
 backEndState_t	backEnd;
@@ -37,7 +40,7 @@ void GL_BindToTMU( image_t *image, int tmu )
 	}
 	else
 	{
-		ri.Log( SEV_WARN, "GL_BindToTMU: NULL image\n");
+		R_LOG( rch_cmd, SEV_WARN, "GL_BindToTMU: NULL image\n");
 	}
 
 	GL_BindMultiTexture(GL_TEXTURE0_ARB + tmu, target, texture);
@@ -693,7 +696,7 @@ void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, byte *data, 
 
 	if ( r_speeds->integer ) {
 		end = ri.Milliseconds();
-		ri.Log( SEV_INFO, "qglTexSubImage2D %i, %i: %i msec\n", cols, rows, end - start );
+		R_LOG( rch_cmd, SEV_INFO, "qglTexSubImage2D %i, %i: %i msec\n", cols, rows, end - start );
 	}
 
 	// FIXME: HUGE hack
@@ -727,7 +730,7 @@ void RE_UploadCinematic (int w, int h, int cols, int rows, byte *data, int clien
 
 	if (!tr.scratchImage[client])
 	{
-		ri.Log( SEV_WARN, "RE_UploadCinematic: scratch images not initialized\n");
+		R_LOG( rch_cmd, SEV_WARN, "RE_UploadCinematic: scratch images not initialized\n");
 		return;
 	}
 
@@ -1468,7 +1471,7 @@ void RB_ShowImages( void ) {
 	qglFinish();
 
 	end = ri.Milliseconds();
-	ri.Log( SEV_INFO, "%i msec to draw all images\n", end - start );
+	R_LOG( rch_cmd, SEV_INFO, "%i msec to draw all images\n", end - start );
 
 }
 
@@ -1906,7 +1909,7 @@ static const void *RB_ExportCubemaps(const void *data)
 	if (!glRefConfig.framebufferObject || !tr.world || tr.numCubemaps == 0)
 	{
 		// do nothing
-		ri.Log( SEV_INFO, "Nothing to export!\n");
+		R_LOG( rch_cmd, SEV_INFO, "Nothing to export!\n");
 		return (const void *)(cmd + 1);
 	}
 
@@ -1943,7 +1946,7 @@ static const void *RB_ExportCubemaps(const void *data)
 			}
 
 			R_SaveDDS(filename, cubemapPixels, r_cubemapSize->integer, r_cubemapSize->integer, 6);
-			ri.Log( SEV_INFO, "Saved cubemap %d as %s\n", i, filename);
+			R_LOG( rch_cmd, SEV_INFO, "Saved cubemap %d as %s\n", i, filename);
 		}
 
 		FBO_Bind(oldFbo);

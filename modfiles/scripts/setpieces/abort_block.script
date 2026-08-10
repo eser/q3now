@@ -1,0 +1,12 @@
+// abort_block.script — proves abort_if_* aborts only the CURRENT block, and the
+// NEXT event still fires. The spawn block aborts after set/abort_if_equal, so
+// spawn-after-abort must NOT print; then pain (a separate block) still fires.
+spawn {
+    print abort-spawn-begin
+    accum 0 set 1
+    accum 0 abort_if_equal 1        // slot0 == 1 -> abort the rest of THIS block
+    print abort-should-not-print     // must be absent from the trace
+}
+pain {
+    print abort-pain-still-fires     // proves the NEXT event still works after abort
+}

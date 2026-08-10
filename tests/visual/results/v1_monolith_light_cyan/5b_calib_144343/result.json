@@ -1,0 +1,404 @@
+{
+  "config": {
+    "artboard": "v1_monolith",
+    "mode": "light",
+    "accent": "cyan"
+  },
+  "baseline": "tests/visual/baselines/v1_monolith_light_cyan.png",
+  "impl": "tests/visual/results/v1_monolith_light_cyan/131339/impl.png",
+  "baseline_w": 1440,
+  "baseline_h": 900,
+  "impl_w": 1440,
+  "impl_h": 900,
+  "ssim": {
+    "global": {
+      "name": "global",
+      "value": 0.5993351153664325,
+      "threshold": 0.9,
+      "verdict": "fail"
+    },
+    "regions": {
+      "arena_of_day_card": {
+        "name": "arena_of_day_card",
+        "value": 0.5634204630824274,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "bg_embers": {
+        "name": "bg_embers",
+        "value": 0.5950609359020528,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "bg_floor_band": {
+        "name": "bg_floor_band",
+        "value": 0.7583047847622838,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "bg_fog_band": {
+        "name": "bg_fog_band",
+        "value": 0.5859254466866299,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "bg_sky_band": {
+        "name": "bg_sky_band",
+        "value": 0.5847729144439299,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "bg_tower_arches": {
+        "name": "bg_tower_arches",
+        "value": 0.7074600975272611,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "bg_vignette_corners": {
+        "name": "bg_vignette_corners",
+        "value": 0.5740303895421435,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "bottom_hint_bar": {
+        "name": "bottom_hint_bar",
+        "value": 0.8436951453177645,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "footer_strip": {
+        "name": "footer_strip",
+        "value": 0.8344613686108886,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "global_feed_columns": {
+        "name": "global_feed_columns",
+        "value": 0.6061676915890836,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "hero_quake_wired": {
+        "name": "hero_quake_wired",
+        "value": 0.3682524683573634,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "last_match_grid": {
+        "name": "last_match_grid",
+        "value": 0.4661082419183658,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "menu_row_0": {
+        "name": "menu_row_0",
+        "value": 0.4440892583418687,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "menu_row_1": {
+        "name": "menu_row_1",
+        "value": 0.4724677888794999,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "menu_row_2": {
+        "name": "menu_row_2",
+        "value": 0.47140608030418835,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "menu_row_3": {
+        "name": "menu_row_3",
+        "value": 0.5234525232847281,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "menu_row_4": {
+        "name": "menu_row_4",
+        "value": 0.45314937256568394,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "profile_card_header": {
+        "name": "profile_card_header",
+        "value": 0.6516471589110512,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "q_hover_indicator": {
+        "name": "q_hover_indicator",
+        "value": 0.2726926387318939,
+        "threshold": 0.85,
+        "verdict": "fail"
+      },
+      "title_bar": {
+        "name": "title_bar",
+        "value": 0.36515442956021,
+        "threshold": 0.85,
+        "verdict": "fail"
+      }
+    }
+  },
+  "deltaE2000": {
+    "global": {
+      "name": "global",
+      "value": 15.64114747447895,
+      "threshold": 8,
+      "verdict": "fail"
+    },
+    "regions": {
+      "arena_of_day_card": {
+        "name": "arena_of_day_card",
+        "value": 22.217033498080415,
+        "threshold": 12,
+        "verdict": "fail"
+      },
+      "bg_embers": {
+        "name": "bg_embers",
+        "value": 15.673064428805521,
+        "threshold": 12,
+        "verdict": "fail"
+      },
+      "bg_floor_band": {
+        "name": "bg_floor_band",
+        "value": 14.628424899642232,
+        "threshold": 12,
+        "verdict": "fail"
+      },
+      "bg_fog_band": {
+        "name": "bg_fog_band",
+        "value": 12.203220125321224,
+        "threshold": 12,
+        "verdict": "fail"
+      },
+      "bg_sky_band": {
+        "name": "bg_sky_band",
+        "value": 21.146702073500265,
+        "threshold": 12,
+        "verdict": "fail"
+      },
+      "bg_tower_arches": {
+        "name": "bg_tower_arches",
+        "value": 8.859622475222364,
+        "threshold": 12,
+        "verdict": "pass"
+      },
+      "bg_vignette_corners": {
+        "name": "bg_vignette_corners",
+        "value": 14.277911107598621,
+        "threshold": 12,
+        "verdict": "fail"
+      },
+      "bottom_hint_bar": {
+        "name": "bottom_hint_bar",
+        "value": 9.291510032872846,
+        "threshold": 12,
+        "verdict": "pass"
+      },
+      "footer_strip": {
+        "name": "footer_strip",
+        "value": 9.658608418619288,
+        "threshold": 12,
+        "verdict": "pass"
+      },
+      "global_feed_columns": {
+        "name": "global_feed_columns",
+        "value": 8.187155402893628,
+        "threshold": 12,
+        "verdict": "pass"
+      },
+      "hero_quake_wired": {
+        "name": "hero_quake_wired",
+        "value": 26.79172350548708,
+        "threshold": 12,
+        "verdict": "fail"
+      },
+      "last_match_grid": {
+        "name": "last_match_grid",
+        "value": 8.698153516623039,
+        "threshold": 12,
+        "verdict": "pass"
+      },
+      "menu_row_0": {
+        "name": "menu_row_0",
+        "value": 13.643701939906087,
+        "threshold": 12,
+        "verdict": "fail"
+      },
+      "menu_row_1": {
+        "name": "menu_row_1",
+        "value": 13.559283939084185,
+        "threshold": 12,
+        "verdict": "fail"
+      },
+      "menu_row_2": {
+        "name": "menu_row_2",
+        "value": 13.489927381515715,
+        "threshold": 12,
+        "verdict": "fail"
+      },
+      "menu_row_3": {
+        "name": "menu_row_3",
+        "value": 12.24480555651432,
+        "threshold": 12,
+        "verdict": "fail"
+      },
+      "menu_row_4": {
+        "name": "menu_row_4",
+        "value": 14.678741990611906,
+        "threshold": 12,
+        "verdict": "fail"
+      },
+      "profile_card_header": {
+        "name": "profile_card_header",
+        "value": 8.898330505132648,
+        "threshold": 12,
+        "verdict": "pass"
+      },
+      "q_hover_indicator": {
+        "name": "q_hover_indicator",
+        "value": 20.097298218984022,
+        "threshold": 12,
+        "verdict": "fail"
+      },
+      "title_bar": {
+        "name": "title_bar",
+        "value": 24.51471197207188,
+        "threshold": 12,
+        "verdict": "fail"
+      }
+    }
+  },
+  "structural": {
+    "global": {
+      "name": "global",
+      "value": 0,
+      "threshold": 0.1,
+      "verdict": "skip"
+    },
+    "regions": {
+      "arena_of_day_card": {
+        "name": "arena_of_day_card",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "bg_embers": {
+        "name": "bg_embers",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "bg_floor_band": {
+        "name": "bg_floor_band",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "bg_fog_band": {
+        "name": "bg_fog_band",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "bg_sky_band": {
+        "name": "bg_sky_band",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "bg_tower_arches": {
+        "name": "bg_tower_arches",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "bg_vignette_corners": {
+        "name": "bg_vignette_corners",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "bottom_hint_bar": {
+        "name": "bottom_hint_bar",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "footer_strip": {
+        "name": "footer_strip",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "global_feed_columns": {
+        "name": "global_feed_columns",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "hero_quake_wired": {
+        "name": "hero_quake_wired",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "last_match_grid": {
+        "name": "last_match_grid",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "menu_row_0": {
+        "name": "menu_row_0",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "menu_row_1": {
+        "name": "menu_row_1",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "menu_row_2": {
+        "name": "menu_row_2",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "menu_row_3": {
+        "name": "menu_row_3",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "menu_row_4": {
+        "name": "menu_row_4",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "profile_card_header": {
+        "name": "profile_card_header",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "q_hover_indicator": {
+        "name": "q_hover_indicator",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      },
+      "title_bar": {
+        "name": "title_bar",
+        "value": 0,
+        "threshold": 0.2,
+        "verdict": "skip"
+      }
+    }
+  },
+  "verdict": "fail"
+}

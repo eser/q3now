@@ -7,15 +7,36 @@ cl_wired_msdf.c -- MSDF font loading and rendering
 
 #include "../../client.h"
 #include "cl_wired_msdf.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
 #if FEAT_WIRED_UI
 
 /* ── font pool ──────────────────────────────────────────────────────── */
 
-static msdfFont_t	wui_fonts[MAX_MSDF_FONTS];
-static int			wui_fontCount = 0;
+/* wui_fonts moved from BSS into a named arena
+ * (~165 KB of MSDF glyph metadata).  s_fontArena is an Engine-layer arena:
+ * created once via lazy-init the first time any reader touches wui_fonts,
+ * survives REF_LEVEL_ONLY map transitions, never destroyed (OS reclaims at
+ * process exit, mirroring WiredScript_Arena / Console_Arena).
+ *
+ * GPU font atlas lifecycle is unchanged — the atlasShader qhandle_t
+ * inside each msdfFont_t is invalidated by R_DeleteTextures every map
+ * and re-registered by MSDF_ReregisterShaders (cl_wired_text.c:51).
+ * Font_Arena only houses CPU-side metadata (glyph table, atlas
+ * dimensions/metrics, font name). */
+#define FONT_ARENA_SIZE  ( MAX_MSDF_FONTS * sizeof( msdfFont_t ) + 4096 )
+
+static arena_t    *s_fontArena   = NULL;
+static msdfFont_t *wui_fonts     = NULL;   /* arena-backed; lazy-init below */
+static int         wui_fontCount = 0;
+
+static void MSDF_EnsureArena( void )
+{
+	if ( s_fontArena ) return;   /* idempotent (re-entry from any reader) */
+	s_fontArena = Arena_Create( "Font", FONT_ARENA_SIZE );
+	wui_fonts   = Arena_AllocArray( s_fontArena, msdfFont_t, MAX_MSDF_FONTS );
+	memset( wui_fonts, 0, MAX_MSDF_FONTS * sizeof( msdfFont_t ) );
+}
 
 /* ── outline / glow state ──────────────────────────────────────────── */
 
@@ -33,13 +54,14 @@ typedef struct {
 	msdfFont_t *font;
 	float       size;
 	float       letterSpacing;
-	int         maxChars;
+	int         maxChars;      /* glyph budget, or byte length when byteBounded */
+	qboolean    byteBounded;   /* qtrue: maxChars is a byte length (end-bounded) */
 	float       result;
 	int         frame;
 } msdf_meas_entry_t;
 
 static msdf_meas_entry_t wui_meas_cache[MSDF_MEAS_CACHE_SIZE];
-static int                wui_meas_cache_idx = 0;
+static unsigned           wui_meas_cache_idx = 0;   // unsigned: defined wrap, no negative %
 
 void MSDF_SetOutline( float outlineWidth, const float *outlineColor,
                        float glowWidth, const float *glowColor )
@@ -464,6 +486,41 @@ static int MSDF_GlyphCompare( const void *a, const void *b )
 	return ga->unicode - gb->unicode;
 }
 
+/* ── glyph fallback chain ───────────────────────────────────────────── */
+
+/* Primary lookup with cross-font fallback. When the requested font lacks
+ * the codepoint (typical for atlases authored against a narrow charset)
+ * we iterate the live font registry and pick the first font that ships
+ * the glyph. Returns the (font, glyph) pair through the out-params so
+ * the renderer can switch atlas shaders when the fallback font wins.
+ * Both out-params are NULL when no font has the glyph. */
+static void MSDF_FindGlyphFallback( msdfFont_t *primary, int unicode,
+                                     msdfFont_t **outFont, msdfGlyph_t **outGlyph )
+{
+	msdfGlyph_t *g;
+	int          i;
+
+	*outFont  = NULL;
+	*outGlyph = NULL;
+
+	if ( primary ) {
+		g = MSDF_FindGlyph( primary, unicode );
+		if ( g ) { *outFont = primary; *outGlyph = g; return; }
+	}
+
+	/* Fallback: walk every loaded font. The first hit wins. The text path
+	 * usually requests ASCII which the primary covers, so this loop only
+	 * runs for the rare BMP punctuation case (smart quotes, dashes,
+	 * dingbats, etc.). Order matches the registration order, which is
+	 * roughly "general-purpose first, icon-only atlases last". */
+	for ( i = 0; i < wui_fontCount; i++ ) {
+		msdfFont_t *f = &wui_fonts[ i ];
+		if ( !f->loaded || f == primary ) continue;
+		g = MSDF_FindGlyph( f, unicode );
+		if ( g ) { *outFont = f; *outGlyph = g; return; }
+	}
+}
+
 /* ── binary search for glyph by unicode ─────────────────────────────── */
 
 msdfGlyph_t *MSDF_FindGlyph( msdfFont_t *font, int unicode )
@@ -493,6 +550,8 @@ msdfFont_t *MSDF_LoadFont( const char *fontName )
 		COM_ERROR( LOG_CH(ch_ui), "MSDF_LoadFont: NULL font name\n" );
 		return NULL;
 	}
+
+	MSDF_EnsureArena();
 
 	/* check if already loaded */
 	for ( int i = 0; i < wui_fontCount; i++ ) {
@@ -548,6 +607,10 @@ msdfFont_t *MSDF_LoadFont( const char *fontName )
 		COM_WARN( LOG_CH(ch_ui), "MSDF_LoadFont: could not register atlas shader '%s'\n", shaderPath );
 		/* not fatal -- font can still be used for measurement */
 	}
+	// Phase 7.15.4-a class-B pin: the font atlas is a UI-critical, cached handle
+	// bound every text draw without re-checking residency (and SL-4c lazy fonts are
+	// block-until-resident) — the texture-LRU must never evict it. Dark in 7.15.4-a.
+	else if ( re.PinShaderImages ) re.PinShaderImages( font->atlasShader );
 
 	font->loaded = qtrue;
 	wui_fontCount++;
@@ -569,6 +632,8 @@ void MSDF_ReregisterShaders( void )
 {
 	char shaderPath[MAX_QPATH];
 
+	MSDF_EnsureArena();
+
 	for ( int i = 0; i < wui_fontCount; i++ ) {
 		msdfFont_t *f = &wui_fonts[i];
 		if ( !f->loaded || f->name[0] == '\0' ) continue;
@@ -580,6 +645,9 @@ void MSDF_ReregisterShaders( void )
 		if ( f->atlasShader == 0 ) {
 			COM_WARN( LOG_CH(ch_ui), "MSDF_ReregisterShaders: failed for '%s'\n", f->name );
 		}
+		// Phase 7.15.4-a class-B pin (re-register path, e.g. vid_restart): re-pin
+		// the freshly-resolved atlas — IMGFLAG_PINNED must survive the new image_t.
+		else if ( re.PinShaderImages ) re.PinShaderImages( f->atlasShader );
 	}
 
 	if ( wui_fontCount > 0 ) {
@@ -594,7 +662,8 @@ int MSDF_GetFontCount( void ) { return wui_fontCount; }
 void MSDF_DrawChar( msdfFont_t *font, float x, float y,
                     float size, const float *color, int ch )
 {
-	msdfGlyph_t *g;
+	msdfFont_t  *resolvedFont = NULL;
+	msdfGlyph_t *g            = NULL;
 	float        pixelSize;
 	float        s0, t0, s1, t1;
 	float        xOff, yOff, w, h;
@@ -603,15 +672,32 @@ void MSDF_DrawChar( msdfFont_t *font, float x, float y,
 	if ( !font || !font->loaded ) return;
 	if ( ch < 0 ) return;
 
-	g = MSDF_FindGlyph( font, ch );
-
-
-
-	if ( !g ) return;
+	/* Fallback chain — if the requested font lacks this codepoint, pick
+	 * up the first font in the registry that ships it. The (font,glyph)
+	 * pair travels together so we sample the right atlas + shader. */
+	MSDF_FindGlyphFallback( font, ch, &resolvedFont, &g );
+	if ( !g || !resolvedFont ) return;
+	font = resolvedFont;
 
 	/* nothing to draw if there are no atlas bounds (e.g. space character) */
 	if ( g->atlasRight <= g->atlasLeft || g->atlasTop <= g->atlasBottom ) {
 		return;
+	}
+
+	/* First-sample inventory probe (wui_fontProbe cheat): log the first draw of
+	 * each font atlas with a frame marker so the load-burst vs in-frame first-use
+	 * classification can be measured. cls.framecount==0 means the draw happens in
+	 * the synchronous boot burst before any frame boundary. One line per font. */
+	{
+		static qboolean fontFirstDrawn[ MAX_MSDF_FONTS ];
+		static cvar_t  *probe = NULL;
+		int             fidx = (int)( font - wui_fonts );
+		if ( !probe ) probe = Cvar_Get( "wui_fontProbe", "0", CVAR_CHEAT );
+		if ( probe && probe->integer && fidx >= 0 && fidx < MAX_MSDF_FONTS && !fontFirstDrawn[ fidx ] ) {
+			fontFirstDrawn[ fidx ] = qtrue;
+			Com_Log( SEV_WARN, LOG_CH(ch_ui), "UIPROBE font-first-draw name='%s' frame=%d\n",
+			            font->name, (int)cls.framecount );
+		}
 	}
 
 	pixelSize = size;  /* 1 em = pixelSize virtual pixels */
@@ -695,7 +781,11 @@ static int MSDF_HandleColorCode( const char *p, float *outColor )
 
 static float MSDF_GlyphAdvancePx( msdfFont_t *font, int ch,
                                    float pixelSize, float letterSpacing ) {
-	msdfGlyph_t *g = MSDF_FindGlyph( font, ch );
+	/* Mirror the DrawChar fallback so layout width stays consistent with
+	 * the chosen draw font when a glyph lives in a secondary atlas. */
+	msdfFont_t  *resolvedFont = NULL;
+	msdfGlyph_t *g            = NULL;
+	MSDF_FindGlyphFallback( font, ch, &resolvedFont, &g );
 	return ( g ? g->advance : 0.5f ) * pixelSize + letterSpacing;
 }
 
@@ -706,26 +796,102 @@ static float MSDF_GlyphAdvancePx( msdfFont_t *font, int ch,
 
 /* Consume one escape sequence or character from *pp and return a codepoint.
    colorOut: if non-NULL, color codes update it; if NULL, they are silently skipped.
-   Returns: character codepoint (>0), MSDF_CHAR_COLORCODE, MSDF_CHAR_NEWLINE, or 0 (end). */
+   Returns: character codepoint (>0), MSDF_CHAR_COLORCODE, MSDF_CHAR_NEWLINE, or 0 (end).
+
+   UTF-8 multibyte sequences are decoded into a single Unicode codepoint
+   that the caller feeds straight into the atlas glyph lookup. Atlases
+   that ship supplementary characters (JBMono covers Latin-1 supplement
+   + selected punctuation through U+25CF for v2) resolve directly;
+   atlases that don't fall back to the missing-glyph slot — same
+   behaviour as for unknown ASCII codepoints. */
 static int MSDF_NextRenderableChar( const char **pp, float *colorOut )
 {
 	const char *p = *pp;
-	int skip;
+	int           skip;
+	unsigned char b0;
 	if ( !*p ) return 0;
 	if ( *p == '\n' ) { *pp = p + 1; return MSDF_CHAR_NEWLINE; }
 	if ( p[0] == Q_COLOR_ESCAPE && p[1] == Q_COLOR_ESCAPE ) { *pp = p + 2; return Q_COLOR_ESCAPE; }
 	skip = MSDF_HandleColorCode( p, colorOut );
 	if ( skip > 0 ) { *pp = p + skip; return MSDF_CHAR_COLORCODE; }
+
+	b0 = (unsigned char) p[ 0 ];
+	if ( b0 < 0x80 ) {
+		/* ASCII fast path. */
+		*pp = p + 1;
+		return b0;
+	}
+	/* the icon-font path (cl_wired_parse.c iconText) stores RAW single
+	 * bytes in the 0xE0..0xFE range — glyphs registered at codepoints
+	 * 224..254 — which are NOT valid UTF-8 lead bytes followed by
+	 * continuation bytes. Decode defensively: a multi-byte lead is only
+	 * consumed as multi-byte when its continuation byte(s) are actually
+	 * present and well-formed (0b10xxxxxx) AND do not run past the NUL
+	 * terminator. Otherwise the lead byte is treated as a single codepoint
+	 * (so 0xE0..0xFE map straight to glyphs 224..254 as before) and the
+	 * pointer advances by exactly one byte — never past the terminator. */
+	if ( ( b0 & 0xE0 ) == 0xC0 ) {
+		/* 2-byte UTF-8: 110xxxxx 10xxxxxx -> 11 bits (U+0080..U+07FF). */
+		unsigned char b1 = (unsigned char) p[ 1 ];
+		if ( ( b1 & 0xC0 ) != 0x80 ) { *pp = p + 1; return b0; }
+		*pp = p + 2;
+		return ( ( b0 & 0x1F ) << 6 ) | ( b1 & 0x3F );
+	}
+	if ( ( b0 & 0xF0 ) == 0xE0 ) {
+		/* 3-byte UTF-8: 1110xxxx 10xxxxxx 10xxxxxx -> 16 bits.
+		 * Covers BMP punctuation the v2 design uses (diamond U+25C6,
+		 * circle U+25CF, en/em-dash, smart quotes, etc.). A NUL in b1
+		 * short-circuits the b2 read (b1 fails the 0x80 test first). */
+		unsigned char b1 = (unsigned char) p[ 1 ];
+		unsigned char b2 = ( b1 != 0 ) ? (unsigned char) p[ 2 ] : 0;
+		if ( ( b1 & 0xC0 ) != 0x80 || ( b2 & 0xC0 ) != 0x80 ) { *pp = p + 1; return b0; }
+		*pp = p + 3;
+		return ( ( b0 & 0x0F ) << 12 ) | ( ( b1 & 0x3F ) << 6 ) | ( b2 & 0x3F );
+	}
+	if ( ( b0 & 0xF8 ) == 0xF0 ) {
+		/* 4-byte UTF-8 (supplementary planes; emoji). No atlas ships
+		 * glyphs above U+FFFF today; resolve as the missing glyph but
+		 * only advance past the full sequence after validating all three
+		 * continuation bytes — a short/raw sequence (e.g. an icon byte
+		 * 0xF0..0xF7 at end of string) must NOT walk past the NUL.
+		 * Stop reading the moment a NUL or bad continuation byte appears. */
+		unsigned char b1 = (unsigned char) p[ 1 ];
+		unsigned char b2 = ( b1 != 0 ) ? (unsigned char) p[ 2 ] : 0;
+		unsigned char b3 = ( b2 != 0 ) ? (unsigned char) p[ 3 ] : 0;
+		if ( ( b1 & 0xC0 ) != 0x80 || ( b2 & 0xC0 ) != 0x80 || ( b3 & 0xC0 ) != 0x80 ) {
+			*pp = p + 1;
+			return b0;
+		}
+		*pp = p + 4;
+		return 0xFFFD;
+	}
+	/* 0xF8..0xFE lead bytes are not valid UTF-8 leads at all (and 0xFE/0xFF
+	 * never appear in UTF-8). Treat as a single-byte codepoint so raw icon
+	 * bytes (e.g. 0xFE diamond) resolve to glyph 254, advancing one byte. */
 	*pp = p + 1;
-	return (unsigned char)*p;
+	return b0;
 }
 
 /* ── string drawing ─────────────────────────────────────────────────── */
 
-void MSDF_DrawString( msdfFont_t *font, float x, float y,
-                      float size, const float *color,
-                      const char *str, int maxChars, float letterSpacing,
-                      qboolean forceColor )
+/* Core string draw shared by the glyph-budget entry point (MSDF_DrawString)
+ * and the byte-bounded entry point (MSDF_DrawStringBytes). Two independent
+ * stop conditions, both honouring the renderable-glyph model:
+ *   maxChars >= 0 : stop after that many RENDERABLE glyphs are drawn (colour
+ *                   codes never count) — the ellipsis-prefix contract used by
+ *                   Text_DrawClipped via MSDF_ClampToWidth.
+ *   end != NULL   : stop when the source pointer reaches `end` BYTES into the
+ *                   string — used by the Clay compositor so a non-NUL-terminated
+ *                   word/run slice measures and draws exactly its own bytes
+ *                   (colour codes inside those bytes are skipped for width but
+ *                   consume their bytes). This keeps measure == draw for any
+ *                   colour-coded slice: both walk the identical byte window and
+ *                   skip the identical ^N codes. */
+static void MSDF_DrawStringCore( msdfFont_t *font, float x, float y,
+                                 float size, const float *color,
+                                 const char *str, int maxChars,
+                                 const char *end, float letterSpacing,
+                                 qboolean forceColor )
 {
 	float       curColor[4];
 
@@ -745,6 +911,7 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
 	for ( p = str; *p; ) {
 		int ch;
 		if ( maxChars >= 0 && drawn >= maxChars ) break;
+		if ( end && p >= end ) break;
 		ch = MSDF_NextRenderableChar( &p, forceColor ? NULL : curColor );
 		if ( ch == MSDF_CHAR_COLORCODE ) continue;
 		if ( ch == MSDF_CHAR_NEWLINE ) { curX = x; y += font->lineHeight * pixelSize; continue; }
@@ -757,21 +924,58 @@ void MSDF_DrawString( msdfFont_t *font, float x, float y,
 	re.SetColor( NULL );
 }
 
+void MSDF_DrawString( msdfFont_t *font, float x, float y,
+                      float size, const float *color,
+                      const char *str, int maxChars, float letterSpacing,
+                      qboolean forceColor )
+{
+	MSDF_DrawStringCore( font, x, y, size, color, str, maxChars, NULL,
+	                     letterSpacing, forceColor );
+}
+
+/* Byte-bounded draw: render exactly `byteLen` bytes of `str` (a possibly
+ * non-NUL-terminated slice into a larger buffer), skipping colour codes.
+ * byteLen < 0 falls back to run-to-NUL. Companion of MSDF_MeasureStringBytes;
+ * the Clay compositor uses this pair so the metric it lays out with is the
+ * metric it renders with, for any embedded ^N codes. */
+void MSDF_DrawStringBytes( msdfFont_t *font, float x, float y,
+                           float size, const float *color,
+                           const char *str, int byteLen, float letterSpacing,
+                           qboolean forceColor )
+{
+	const char *end = ( byteLen >= 0 && str ) ? str + byteLen : NULL;
+	MSDF_DrawStringCore( font, x, y, size, color, str, -1, end,
+	                     letterSpacing, forceColor );
+}
+
 /* ── string measurement ─────────────────────────────────────────────── */
 
-float MSDF_MeasureString( msdfFont_t *font, float size,
-                          const char *str, int maxChars, float letterSpacing )
+/* Core measure shared by the glyph-budget entry point (MSDF_MeasureString)
+ * and the byte-bounded entry point (MSDF_MeasureStringBytes). The stop
+ * conditions mirror MSDF_DrawStringCore exactly (same maxChars glyph budget,
+ * same `end` byte bound, same MSDF_NextRenderableChar colour-code skipping),
+ * which is what keeps measured width == drawn width for any colour-coded slice.
+ * The per-frame cache key folds in `end` so byte-bounded and unbounded queries
+ * on the same `str` pointer never alias. */
+static float MSDF_MeasureStringCore( msdfFont_t *font, float size,
+                                     const char *str, int maxChars,
+                                     const char *end, float letterSpacing )
 {
 	if ( !font || !font->loaded || !str || !str[0] ) return 0.0f;
 
-	/* per-frame cache: avoid re-iterating the same string within one frame */
+	/* per-frame cache: avoid re-iterating the same string within one frame.
+	 * `maxChars` doubles as the byte-bound discriminator: unbounded calls use
+	 * the caller's maxChars, byte-bounded calls store the byte length, so the
+	 * two never collide on the same (str,font,size,ls) tuple. */
+	int cacheKey = end ? (int)( end - str ) : maxChars;
 	for ( int i = 0; i < MSDF_MEAS_CACHE_SIZE; i++ ) {
 		if ( wui_meas_cache[i].frame == cls.realtime &&
 		     wui_meas_cache[i].str == str &&
 		     wui_meas_cache[i].font == font &&
 		     wui_meas_cache[i].size == size &&
 		     wui_meas_cache[i].letterSpacing == letterSpacing &&
-		     wui_meas_cache[i].maxChars == maxChars ) {
+		     wui_meas_cache[i].byteBounded == ( end != NULL ) &&
+		     wui_meas_cache[i].maxChars == cacheKey ) {
 			return wui_meas_cache[i].result;
 		}
 	}
@@ -785,6 +989,7 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 	for ( p = str; *p; ) {
 		int ch;
 		if ( maxChars >= 0 && counted >= maxChars ) break;
+		if ( end && p >= end ) break;
 		ch = MSDF_NextRenderableChar( &p, NULL );
 		if ( ch == MSDF_CHAR_COLORCODE ) continue;
 		if ( ch == MSDF_CHAR_NEWLINE ) { if ( lineWidth > maxWidth ) maxWidth = lineWidth; lineWidth = 0.0f; continue; }
@@ -797,18 +1002,39 @@ float MSDF_MeasureString( msdfFont_t *font, float size,
 
 	/* store result in per-frame ring cache */
 	{
-		int idx = wui_meas_cache_idx % MSDF_MEAS_CACHE_SIZE;
+		unsigned idx = wui_meas_cache_idx & ( MSDF_MEAS_CACHE_SIZE - 1 );  // size is a power of two
 		wui_meas_cache[idx].str          = str;
 		wui_meas_cache[idx].font         = font;
 		wui_meas_cache[idx].size         = size;
 		wui_meas_cache[idx].letterSpacing = letterSpacing;
-		wui_meas_cache[idx].maxChars     = maxChars;
+		wui_meas_cache[idx].maxChars     = cacheKey;
+		wui_meas_cache[idx].byteBounded  = ( end != NULL );
 		wui_meas_cache[idx].result       = maxWidth;
 		wui_meas_cache[idx].frame        = cls.realtime;
 		wui_meas_cache_idx++;
 	}
 
 	return maxWidth;
+}
+
+float MSDF_MeasureString( msdfFont_t *font, float size,
+                          const char *str, int maxChars, float letterSpacing )
+{
+	return MSDF_MeasureStringCore( font, size, str, maxChars, NULL, letterSpacing );
+}
+
+/* Byte-bounded measure: width of exactly `byteLen` bytes of `str` (a possibly
+ * non-NUL-terminated slice), skipping colour codes. byteLen < 0 falls back to
+ * run-to-NUL. This is the fix for the Clay word-summation skew: Clay hands the
+ * measure callback byte slices into a shared, non-terminated buffer, so a
+ * glyph-budget stop would over-read past the slice whenever the slice held an
+ * embedded ^N code (each 2-byte code let one extra glyph slip in). Bounding on
+ * the byte window stops exactly where the draw run stops, so measure == draw. */
+float MSDF_MeasureStringBytes( msdfFont_t *font, float size,
+                               const char *str, int byteLen, float letterSpacing )
+{
+	const char *end = ( byteLen >= 0 && str ) ? str + byteLen : NULL;
+	return MSDF_MeasureStringCore( font, size, str, -1, end, letterSpacing );
 }
 
 /* ── clamped char count ─────────────────────────────────────────────── */
@@ -828,26 +1054,19 @@ int MSDF_ClampToWidth( msdfFont_t *font, float size,
 		return 0;
 
 	for ( p = str; *p; ) {
-		float advance;
-		int   skip;
+		float       advance;
+		const char *q  = p;
+		int         ch = MSDF_NextRenderableChar( &q, NULL );
 
-		if ( p[0] == Q_COLOR_ESCAPE && p[1] == Q_COLOR_ESCAPE ) {
-			advance = MSDF_GlyphAdvancePx( font, Q_COLOR_ESCAPE, pixelSize, letterSpacing );
-			if ( curWidth + advance > maxPixels ) break;
-			curWidth += advance;
-			counted++;
-			p += 2;
-			continue;
-		}
+		if ( ch == 0 ) break;
+		if ( ch == MSDF_CHAR_COLORCODE ) { p = q; continue; }
+		if ( ch == MSDF_CHAR_NEWLINE )   { p = q; continue; }
 
-		skip = MSDF_HandleColorCode( p, NULL );
-		if ( skip > 0 ) { p += skip; continue; }
-
-		advance = MSDF_GlyphAdvancePx( font, (unsigned char)*p, pixelSize, letterSpacing );
+		advance = MSDF_GlyphAdvancePx( font, ch, pixelSize, letterSpacing );
 		if ( curWidth + advance > maxPixels ) break;
 		curWidth += advance;
 		counted++;
-		p++;
+		p = q;   /* advance past the full (UTF-8) sequence */
 	}
 
 	if ( totalWidthOut ) *totalWidthOut = curWidth;

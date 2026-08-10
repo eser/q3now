@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+//
+// debug_netstats.wui — Wired UI: WUI_LAYER_DEBUG_OVERLAY net-stats panel.
+//
+// Turn 4 V-29 (debug-overlay-migration): the compositor's
+// WUI_LAYER_DEBUG_OVERLAY walk emits this panel when the layer is active
+// (wired_ui_debug != 0). The five itemDefs are decoration-only custom-draw
+// stubs — the rect exists so the layer participates in the policy +
+// input-claim machinery; the actual rendering happens inside the handlers in
+// elements/debug_overlay.c against the full swapchain. Each handler self-gates
+// on its own cvar (cl_drawRecording / cl_drawPing / cl_drawSnaps /
+// cl_drawPackets) so nothing draws unless the operator opts in.
+//
+// VoIP: the debug_voip_meter itemDef ships unconditionally (the .wui is
+// build-agnostic). On a USE_VOIP build the handler reads live VoIP state; on a
+// non-VOIP build the registration installs a silent no-op stub so the lookup
+// resolves cleanly and draws nothing.
+
+menuDef {
+	name "debug_netstats"
+	rect 0 0 1 1
+	fullscreen 1
+	visible 1
+	layer "debug_overlay"
+
+	itemDef {
+		name "debug_demo_recording"
+		rect 0 0 1 1
+		decoration
+		visible 1
+		custom "debug_demo_recording"
+	}
+
+	itemDef {
+		name "debug_voip_meter"
+		rect 0 0 1 1
+		decoration
+		visible 1
+		custom "debug_voip_meter"
+	}
+
+	itemDef {
+		name "debug_ping"
+		rect 0 0 1 1
+		decoration
+		visible 1
+		custom "debug_ping"
+	}
+
+	itemDef {
+		name "debug_snaps"
+		rect 0 0 1 1
+		decoration
+		visible 1
+		custom "debug_snaps"
+	}
+
+	itemDef {
+		name "debug_packets"
+		rect 0 0 1 1
+		decoration
+		visible 1
+		custom "debug_packets"
+	}
+}

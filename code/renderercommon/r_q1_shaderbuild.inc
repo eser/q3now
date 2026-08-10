@@ -122,6 +122,31 @@ static void Q1_AddAnimStage( int si, struct image_s * const *diffFrames,
 
 
 /*
+Q1 sun-direction table — 7.4.11.1.
+
+Q1 maps carry no sun source, so tr.sunDirection would otherwise stay at
+the RE_LoadWorldMap default on every Q1 map. This per-sky-texture table
+seeds tr.sunDirection (matched case-insensitively against the sky miptex
+name) so RB_DrawSun places the disc sensibly and 7.4.10.5 has a real
+direction to consume. On no-match tr.sunDirection keeps the default.
+
+id1 skies are scrolling cloud fields with no painted sun disc, so these
+are conservative high-sun directions — Eser eyeballs + tweaks post-
+landing. Stored values need not be unit; the apply site normalizes.
+*/
+typedef struct {
+    const char *skyName;
+    vec3_t      dir;
+} q1SunEntry_t;
+
+static const q1SunEntry_t q1_sun_table[] = {
+    { "sky1", { 0.30f,  0.25f, 0.92f } },
+    { "sky3", { 0.00f,  0.35f, 0.94f } },
+    { "sky4", { -0.35f, -0.20f, 0.92f } },
+};
+
+
+/*
 R_Q1_BuildSyntheticShader
 =========================
 Called from R_FindShader when R_Q1_IsActive() returns qtrue.
@@ -196,9 +221,29 @@ static shader_t *R_Q1_BuildSyntheticShader( const char *name, int lightmapIndex 
             Q1_AddScrollTcMod( ns, 0.04f, 0.02f );
             ns++;
         }
-        shader.isSky         = qtrue;
+        /* 7.4.11.1 — deliberately NO shader.isSky. With isSky unset,
+           FinishShader's ComputeStageIteratorFunc picks
+           RB_StageIteratorGeneric, so the two scroll stages above
+           actually iterate. RB_StageIteratorSky never iterated stages[]
+           for Q1 sky (empty sky.outerbox + cloudHeight 0 → nothing
+           drawn). SURF_SKY stays — it carries the depth /
+           dlight-suppression / shadow-caster-exclusion classification,
+           independent of the isSky iterator routing. */
         shader.sort          = SS_ENVIRONMENT;
         shader.surfaceFlags |= SURF_SKY | SURF_NOLIGHTMAP;
+
+        /* Seed tr.sunDirection from the per-sky-texture table. On a
+           no-match tr.sunDirection keeps the RE_LoadWorldMap default. */
+        {
+            int t;
+            for ( t = 0; t < (int)ARRAY_LEN( q1_sun_table ); t++ ) {
+                if ( !Q_stricmp( name, q1_sun_table[t].skyName ) ) {
+                    VectorCopy( q1_sun_table[t].dir, tr.sunDirection );
+                    VectorNormalize( tr.sunDirection );
+                    break;
+                }
+            }
+        }
         break;
     }
 

@@ -51,5 +51,10 @@ void  Text_DrawChar( int ch, float x, float y, int fontId,
 void  Text_SetLetterSpacing( float spacing );
 float Text_GetLetterSpacing( void );
 
+/* Returns qtrue iff the cl_wiredTextShadow cvar is non-zero. Used by the
+ * compositor dispatch (cl_wired_clay.c) to mirror legacy SCR shadow gating
+ * inside MSDF_DrawString — promoted to header scope. */
+qboolean Text_ShadowEnabled( void );
+
 #endif /* FEAT_WIRED_UI */
 #endif /* CL_WIRED_TEXT_H */

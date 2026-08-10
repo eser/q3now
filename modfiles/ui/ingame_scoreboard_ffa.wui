@@ -1,0 +1,70 @@
+// ingame_scoreboard_ffa.wui -- q3now In-game FFA scoreboard (Phase 6a canonical)
+//
+// HUD-layer overlay shown when the player holds TAB during a match
+// (wiredHud->showScores) OR during intermission/warmup. The engine
+// state machine (cl_wired_ui_hud_state.c) flips visible=1 on the
+// gametype-matching scoreboard menu and visible=0 on all siblings.
+//
+// Layout (§8.1 canonical): top-anchored flexbox wrapper containing
+// a single scorelist_widget CUSTOM element. The widget itself
+// (cl_wired_ui_hud_scoreboard.c::WiredHud_DrawScorelistWidget)
+// renders the title, placement string, column headers (rank /
+// player / score / K/D / EFF% / DMG / ATT / ACC% / ping), per-
+// player rows, and the spectator block — all internal to the
+// widget. The .wui wrapper supplies position + sizing only.
+//
+// Authoring rationale: a fully-declarative scoreboard (.wui-level
+// column headers + per-row stat columns) would require either
+// (a) a feeder + ListBox with 9 columns + custom row template, or
+// (b) cgame ABI changes to publish per-stat cvars. The widget
+// approach (Phase V-13b LANDED) is the canonical answer; Phase 6a
+// formalizes its authoring shell.
+
+menuDef {
+	name "ingame_scoreboard_ffa"
+	layer "hud"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 0
+	style 0
+
+	itemDef {
+		name "scoreboard_overlay"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		alignX center
+		alignY start
+
+		itemDef {
+			name "scoreboard_root"
+			type container
+			rect 0.1 0.04 0.8 0.92
+			direction column
+			width PERCENT 0.8
+			height PERCENT 0.92
+			// V2 chrome restore (chain 6.x S1): the panel frame the removed
+			// qw_hud_scoreboard_overlay used to provide. Engine gates this
+			// menu's visibility by name on wiredHud->showScores
+			// (cl_wired_ui_hud_state.c:579-610) — the chrome only styles it.
+			background $hud_panel_bg
+			border 1px $accent
+
+			// Single scorelist_widget CUSTOM child fills the wrapper.
+			// The widget handles all internal layout — title +
+			// placement + headers + rows + spectators + background.
+			itemDef {
+				name "scorelist"
+				type scorelist_widget
+				rect 0 0 1 1
+				width PERCENT 1.0
+				height PERCENT 1.0
+				feeder "scoreboard"
+				forecolor $bone
+				visible 1
+				decoration
+			}
+		}
+	}
+}

@@ -274,7 +274,7 @@ G_TimeShiftAllClients
 Rewind all clients except "skip" to the specified time.
 =====================
 */
-static void G_TimeShiftAllClients( int time, gentity_t *skip ) {
+void G_TimeShiftAllClients( int time, gentity_t *skip ) {
 	int			i;
 	gentity_t	*ent;
 #if FEAT_UNLAGGED
@@ -377,7 +377,7 @@ G_UnTimeShiftAllClients
 Restore all clients except "skip" to their real positions.
 =======================
 */
-static void G_UnTimeShiftAllClients( gentity_t *skip ) {
+void G_UnTimeShiftAllClients( gentity_t *skip ) {
 	int			i;
 	gentity_t	*ent;
 

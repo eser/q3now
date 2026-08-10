@@ -3,13 +3,12 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "server.h"
-#include "../qcommon/maps/bsp.h"
+#include "../qcommon/maps/map_format_registry.h"
 #include "../qcommon/maps/meta.h"
 #include "../qcommon/wired/core/scripting/user_vm.h"
 #include "../qcommon/q_feats.h"
 
 #include "../qcommon/wired/net/wn_public.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 // Active per-server map metadata. Points into maps_list[] (owned by
@@ -427,7 +426,7 @@ void SV_SpawnServer_Tick( void ) {
 
 		Sys_SetStatus( "Initializing server..." );
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 		CL_MapLoading( mapname );
 		CL_ShutdownLevel();
 #endif
@@ -451,7 +450,7 @@ void SV_SpawnServer_Tick( void ) {
 			}
 		}
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 		FS_PureServerSetLoadedPaks( "", "" );
 		FS_PureServerSetReferencedPaks( "", "" );
 #endif
@@ -502,7 +501,7 @@ void SV_SpawnServer_Tick( void ) {
 		int checksum;
 		const char *mapname = svs.spawn.mapname;
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 		Cvar_Set( "cl_paused", "0" );
 #endif
 
@@ -513,7 +512,7 @@ void SV_SpawnServer_Tick( void ) {
 		Com_RandomBytes( (byte*)&sv.checksumFeed, sizeof( sv.checksumFeed ) );
 		FS_Restart( sv.checksumFeed );
 
-		// Phase 5 (q3now meta): resolve per-map metadata BEFORE CM_LoadMap.
+		// Resolve per-map metadata BEFORE CM_LoadMap.
 		// CM_LoadMap triggers RE_RegisterShader on the client, and the
 		// renderer's R_FindShader fallback consults the active remap; the
 		// remap pointer must be live before any shader resolution starts.
@@ -605,6 +604,12 @@ void SV_SpawnServer_Tick( void ) {
 						svs.clients[i].gamestateAck = GSA_INIT;
 						svs.clients[i].state = CS_CONNECTED;
 						svs.clients[i].gentity = NULL;
+						/* explicit gamestate delivery
+						 * happens in a SECOND pass below, after the
+						 * CS_SYSTEMINFO / CS_SERVERINFO configstrings have
+						 * been refreshed for the new map. Sending here would
+						 * ship stale configstrings (mapname etc. empty),
+						 * stalling the client at CL_InitCGame. */
 					} else {
 						SV_ClientEnterWorld( &svs.clients[i] );
 					}
@@ -649,7 +654,7 @@ void SV_SpawnServer_Tick( void ) {
 			}
 
 			if ( pakslen > freespace || infolen + pakslen >= BIG_INFO_STRING || overflowed ) {
-				Com_Log( SEV_DEBUG, LOG_CH(ch_server), S_COLOR_YELLOW "WARNING: skipping sv_paks setup to avoid gamestate overflow\n" );
+				Com_Log( SEV_WARN, LOG_CH(ch_server), "WARNING: skipping sv_paks setup to avoid gamestate overflow\n" );
 			} else {
 				Cvar_Set( "sv_paks", p );
 				if ( *p == '\0' ) {
@@ -663,6 +668,21 @@ void SV_SpawnServer_Tick( void ) {
 
 		SV_SetConfigstring( CS_SERVERINFO, Cvar_InfoString( CVAR_SERVERINFO, NULL ) );
 		cvar_modifiedFlags &= ~CVAR_SERVERINFO;
+
+		/* explicit gamestate delivery (second pass).
+		 * Now that CS_SYSTEMINFO / CS_SERVERINFO carry the new map's
+		 * mapname + sv_paks, push the gamestate to every non-bot client
+		 * that the per-client setup loop above left at CS_CONNECTED +
+		 * GSA_INIT. Unifies integrated and remote clients on one delivery
+		 * path; the vanilla reactive stale-serverId resend in
+		 * sv_client.c remains as a defensive fallback. */
+		for ( int i = 0; i < sv.maxclients; i++ ) {
+			if ( svs.clients[i].state == CS_CONNECTED
+			  && svs.clients[i].gamestateAck == GSA_INIT
+			  && svs.clients[i].netchan.remoteAddress.type != NA_BOT ) {
+				SV_SendClientGameState( &svs.clients[i] );
+			}
+		}
 
 		{
 			static int s_sv_cheats_mod = -1;
@@ -713,6 +733,20 @@ void SV_SpawnServer( const char *mapname, qboolean killBots ) {
 	Q_strncpyz( svs.spawn.mapname, mapname, sizeof( svs.spawn.mapname ) );
 	svs.spawn.killBots = killBots;
 	svs.spawn.phase = SPAWN_P1_TEARDOWN_SETUP;
+}
+
+
+/*
+=================
+SV_IsSpawnIdle
+
+Tiny accessor for engine code outside server/ that needs to know whether
+the async spawn machine is currently quiescent (no map transition in
+flight). Used by the Cbuf /waitForMap gate from cl_main.c.
+=================
+*/
+qboolean SV_IsSpawnIdle( void ) {
+	return svs.spawn.phase == SPAWN_IDLE;
 }
 
 
@@ -804,6 +838,10 @@ static const cvarDesc_t svDescs[] = {
 	CVAR_STRING( "sv_banFile",           "serverbans.dat", CVAR_ARCHIVE,
 	             "Name of the file that is used for storing the server bans." ),
 #endif
+	CVAR_BOOL(   "sv_hostListed",        "0",            CVAR_ARCHIVE,
+	             "Whether this server announces itself to the master servers.\n"
+	             " 0: private/unlisted (no heartbeat)\n"
+	             " 1: public/listed (send heartbeats)" ),
 };
 
 enum {
@@ -838,6 +876,7 @@ enum {
 #ifdef USE_BANS
 	SV_BAN_FILE,
 #endif
+	SV_HOST_LISTED,
 	SV_CVAR_COUNT
 };
 
@@ -858,8 +897,12 @@ void SV_Init( void )
 	SV_AddOperatorCommands();
 	SV_BotAwareness_Init();
 
-	if ( com_dedicated->integer )
-		SV_AddDedicatedCommands();
+#ifdef HEADLESS
+	// A headless (no-GUI) build is operated entirely from its console, so it
+	// always exposes the operator console commands (serverinfo/say/tell/…). A
+	// client build drives those through the in-game UI instead.
+	SV_AddDedicatedCommands();
+#endif
 
 	// serverinfo vars — game-owned; server seeds them with serverinfo flags
 	Cvar_Get( "g_noFootsteps", "0",  CVAR_SERVERINFO );
@@ -893,6 +936,12 @@ void SV_Init( void )
 	Cvar_Get( "nextmap",  "", CVAR_TEMP );
 	Cvar_Get( "sv_dlURL", "", CVAR_SERVERINFO | CVAR_ARCHIVE );
 
+	// Deterministic game RNG seed. -1 (default) = wall-clock seed, so spawn
+	// selection varies every launch (normal play). A non-negative value pins
+	// the seed for a reproducible headless run — read at GAME_INIT in sv_game.c
+	// and used by the nav-trace regression gate. CVAR_CHEAT: dev/test only.
+	Cvar_Get( "sv_seed", "-1", CVAR_CHEAT );
+
 	// owned cvars — registered via typed descriptor table
 	Cvar_RegisterTable( svDescs, SV_CVAR_COUNT, svHandles );
 	sv_mapname            = svHandles[SV_MAPNAME];
@@ -920,6 +969,7 @@ void SV_Init( void )
 	sv_killserver         = svHandles[SV_KILLSERVER];
 	sv_mapChecksum        = svHandles[SV_MAP_CHECKSUM];
 	sv_lanForceRate       = svHandles[SV_LAN_FORCE_RATE];
+	sv_hostListed         = svHandles[SV_HOST_LISTED];
 	sv_levelTimeReset     = svHandles[SV_LEVEL_TIME_RESET];
 	sv_minRestartDelay    = svHandles[SV_MIN_RESTART_DELAY];
 	sv_filter             = svHandles[SV_FILTER];
@@ -946,6 +996,7 @@ void SV_Init( void )
 
 	// track group cvar changes
 	Cvar_SetGroup( sv_lanForceRate, CVG_SERVER );
+	Cvar_SetGroup( sv_hostListed, CVG_SERVER );
 	Cvar_SetGroup( sv_minRate, CVG_SERVER );
 	Cvar_SetGroup( sv_maxRate, CVG_SERVER );
 	Cvar_SetGroup( sv_fps, CVG_SERVER );
@@ -1068,16 +1119,12 @@ void SV_Shutdown( const char *finalmsg ) {
 	// allow setting timescale 0 for demo playback
 	Cvar_CheckRange( com_timescale, "0", NULL, CV_FLOAT );
 
-#ifndef DEDICATED
-	Cvar_Set( "ui_singlePlayerActive", "0" );
-#endif
-
 	Com_Log( SEV_INFO, LOG_CH(ch_server), "---------------------------\n" );
 
-#ifndef DEDICATED
+#ifndef HEADLESS
 	// disconnect any local clients
 	if ( sv_killserver->integer != 2 )
-		CL_Disconnect( qfalse );
+		CL_Disconnect( CL_ActiveApp(), qfalse );
 #endif
 
 	// clean some server cvars
@@ -1086,7 +1133,7 @@ void SV_Shutdown( const char *finalmsg ) {
 	Cvar_Set( "sv_mapChecksum", "" );
 	Cvar_Set( "sv_serverid", "0" );
 
-	BSP_ClearMapCache();
+	Map_ClearMapCache();
 
 	Sys_SetStatus( "Server is not running" );
 }

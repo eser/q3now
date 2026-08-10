@@ -1,0 +1,729 @@
+// hud_default.whud — q3now default competitive HUD (Wired UI native format)
+// Normalized coordinates (0.0-1.0), explicit font names, anchor keywords.
+// Produces identical layout to hud_default.hud at 1920x1080.
+
+#include "ui/wmenumacros.h"
+
+menuDef {
+	name "hud_default"
+	rect 0 0 1 1
+	fullScreen 0
+	visible 1
+	layer "hud"
+
+	// ── Top Score Bar chrome (predecorate pair) ─────────────
+	//
+	// Two predecorate hudElement instances: the dark-navy
+	// backfill (rect 0.336 0 0.328 0.042) + the red centreline
+	// divider (rect 0.498 0 0.003 0.042). Both render below
+	// the score / name / teamcount / flagstatus stat-pair text
+	// layers, providing the TOP_CENTER score bar visual band.
+	// The container is an addressable identity for "hide score
+	// bar chrome" toggles; leaves preserve absolute rect +
+	// per-instance config verbatim.
+	itemDef {
+		name "hud_predecorate_top_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "predecorate"
+			anchor TOP_CENTER
+			rect 0.336 0 0.328 0.042
+			backcolor 0.10 0.086 0.07 0.6
+			fill
+		}
+		itemDef { hudElement "predecorate"
+			anchor TOP_CENTER
+			rect 0.498 0 0.003 0.042
+			image "white"
+			forecolor 0.85 0.1 0.1 1
+		}
+	}
+	// ── Score + Name top-center pairs (own/nme split) ───────
+	//
+	// Static N-element groups: each pair (score / name) wraps
+	// its own + nme leaves into a single addressable container.
+	// The cgame HUD dispatcher reads each leaf's absolute
+	// screen-space rect directly (own to the left of TC mid-
+	// line, nme to the right), so the containers serve as
+	// authoring structure only — no flex layout authority over
+	// the leaf positions. Leaf properties (anchor + rect + font
+	// + fontsize + textalign + alignv + forecolor) preserved
+	// verbatim.
+
+	itemDef {
+		name "hud_score_pair_root"
+		type container
+		direction row
+		decoration
+		visible 1
+
+		// Scores symmetric about the centre divider (x≈0.4995): equal gap d on
+		// each side. own is RIGHT-aligned (right edge = x), nme LEFT-aligned (left
+		// edge = x), so a hair off the divider on each side reads balanced.
+		itemDef { hudElement "score_own"
+			anchor TOP_CENTER
+			rect 0.4875 0 0 0.022
+			font "sansman"
+			fontsize 14 18
+			textalign 2
+			alignv C
+			forecolor 1 1 1 1
+		}
+		itemDef { hudElement "score_nme"
+			anchor TOP_CENTER
+			rect 0.5115 0 0 0.022
+			font "sansman"
+			fontsize 14 18
+			textalign 0
+			alignv C
+			forecolor 1 1 1 1
+		}
+	}
+
+	// ── Names ────────────────────────────────────────────────
+	itemDef {
+		name "hud_name_pair_root"
+		type container
+		direction row
+		decoration
+		visible 1
+
+		// Names hug the centre next to their scores: own is RIGHT-aligned so its
+		// text grows leftward from a right edge just left of score_own; nme is
+		// LEFT-aligned so its text grows rightward from a left edge just right of
+		// score_nme. (Previously reversed + stranded at the far edges 0.363/0.638.)
+		itemDef { hudElement "name_own"
+			anchor TOP_CENTER
+			rect 0.470 0 0 0.022
+			font "sansman"
+			fontsize 6 18
+			textalign 2
+			alignv C
+			forecolor 1 1 1 0.6
+		}
+		itemDef { hudElement "name_nme"
+			anchor TOP_CENTER
+			rect 0.529 0 0 0.022
+			font "sansman"
+			fontsize 6 18
+			textalign 0
+			alignv C
+			forecolor 1 1 1 0.6
+		}
+	}
+
+	// ── Match info group (gametime TC + gametype TL) ────────
+	//
+	// Function-based logical grouping for the persistent match-
+	// status elements. The leaves' actual anchor zones differ
+	// (gametime TOP_CENTER, gametype TOP_LEFT) — the container
+	// is an addressable group identity, not a layout authority,
+	// so the cross-anchor mix is intentional. The cgame HUD
+	// dispatcher reads each leaf's absolute screen-space rect
+	// directly; the wrapper exists so future authoring can
+	// address "all match info" as one unit (fade-on-warmup,
+	// hide-in-replay, etc.). The gametype leaf was originally
+	// at line ~131 standalone; pulled here so both leaves share
+	// the same addressable group.
+	itemDef {
+		name "hud_match_info_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "gametime"
+			anchor TOP_CENTER
+			rect 0.500 0.046 0 0
+			font "sansman"
+			fontsize 10 14
+			textalign 1
+			forecolor 1 1 1 0.8
+		}
+		itemDef { hudElement "gametype"
+			anchor TOP_LEFT
+			rect 0.006 0.006 0 0
+			font "sansman"
+			fontsize 10 14
+			textalign 0
+			forecolor 1 1 1 1
+		}
+	}
+
+	// ── Crosshair (screen-center visual core) ───────────────
+	//
+	// The cgame side pre-computes color + size from cl_crosshair* cvars and
+	// dispatches into hud:crosshair against the leaf's absolute screen-center rect.
+	//
+	// The crosshair MUST be a direct floating (`position absolute`) menuDef itemDef,
+	// NOT a native-flex child of a `type container` wrapper: a zero-rect (`rect X Y 0
+	// 0`) customDraw leaf that is a native-flex child collapses to 0 area in clay's
+	// flex pass and emits NO custom-draw command, so its routine never fires and the
+	// crosshair is invisible (runtime-pinned: Create runs, Routine never fires). Only
+	// a floating item takes the zero-rect-customDraw exemption (cl_wired_clay.c
+	// wui_useFloating). This matches the ui/widgets/qw_hud_crosshair.wui leaf, which
+	// hit + fixed the same collapse (D1). The old `hud_crosshair_root` container
+	// wrapper caused exactly this drop under `hud default`.
+	itemDef {
+		name "hud_crosshair_root"
+		hudElement "crosshair"
+		position absolute
+		anchor CENTER
+		rect 0.500 0.500 0 0
+		decoration
+		visible 1
+	}
+
+	// ── Disconnect warning (top center; transient announce) ──
+	itemDef {
+		name "hud_disconnect_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "disconnect"
+			anchor TOP_CENTER
+			rect 0.500 0.210 0 0
+			font "sansman"
+			fontsize 24 28
+			textalign 1
+			forecolor 1 1 1 1
+		}
+	}
+
+	// ── Telemetry group (fps TR + playerspeed BL) ───────────
+	//
+	// Function-based logical grouping for performance telemetry.
+	// Anchors differ (fps TR, playerspeed BL) — same cross-zone
+	// pattern as the match_info group above; the container is
+	// an addressable group identity for "telemetry off" /
+	// "telemetry only" toggles. The playerspeed leaf was
+	// originally at line ~302 standalone; pulled here so both
+	// telemetry readouts share the same group.
+	itemDef {
+		name "hud_telemetry_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "fps"
+			anchor TOP_RIGHT
+			rect 0.997 0.004 0 0
+			font "sansman"
+			fontsize 18 20
+			textalign 2
+			forecolor 1 1 1 0.4
+		}
+		itemDef { hudElement "playerspeed"
+			anchor BOTTOM_LEFT
+			rect 0.005 0.942 0 0
+			font "sansman"
+			fontsize 18 20
+			textalign 0
+			forecolor 1 1 1 0.4
+		}
+	}
+
+	// (gametype moved into hud_match_info_root above)
+
+	// ── Weapon List + Holdable List (mirrored side anchors) ──
+	//
+	// Both lists are single list-style hudElements: the cgame
+	// HUD render path walks the per-frame weapon / holdable state
+	// arrays and draws a row per active entry inside the leaf's
+	// anchored rect. Authoring exposes only the anchor + style +
+	// font + colors; iteration is engine-side. The logical-
+	// grouping container wraps each list so the addressable
+	// "weaponlist group" / "holdablelist group" identity is
+	// available to future authoring (per-list overlays, fade
+	// animations) without disturbing the per-leaf absolute rect
+	// the engine renders against. Legacy anchor (CENTER_LEFT for
+	// the weapon list, CENTER_RIGHT for the holdable list) is
+	// preserved verbatim — the visual mid-edge placement matches
+	// the q3now competitive layout.
+
+	itemDef {
+		name "hud_weaponlist_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "weaponlist"
+			anchor CENTER_LEFT
+			rect 0.003 0.180 0.030 0.030
+			font "sansman"
+			fontsize 10 15
+			textalign 0
+			direction T
+			forecolor 1 1 1 0.5
+			backcolor 0.1 0.1 0.1 0.5
+			color2 0.4 0.2 0.6 0.5
+		}
+	}
+
+	itemDef {
+		name "hud_holdablelist_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "holdablelist"
+			anchor CENTER_RIGHT
+			rect 0.967 0.180 0.030 0.030
+			font "sansman"
+			fontsize 10 15
+			textalign 0
+			direction T
+			forecolor 1 1 1 0.5
+			backcolor 0.1 0.1 0.1 0.5
+			color2 0.4 0.2 0.6 0.5
+		}
+	}
+
+	// ── Statusbars (health + armor, bottom-center anchor zone) ──
+	//
+	// Canonical flexbox-first authoring: per-stat group is a
+	// container (logical grouping of bar+icon+value into one
+	// addressable unit); the BC anchor zone wraps the two stat
+	// groups into a single bottom-center cluster. The hudElement
+	// leaves inside the containers retain their absolute rects +
+	// per-leaf BOTTOM_CENTER anchor — the engine HUD dispatcher
+	// reads absolute screen-space coordinates per hudElement
+	// (cgame-side render path is binding-driven and rect-direct),
+	// so the flex containers serve as authoring structure rather
+	// than layout authority. The visual output is byte-identical
+	// to the pre-rewrite legacy 6-itemDef shape.
+	//
+	// Predecorate background bars (the dim 0.12 grey track under
+	// each statusbar_bar fill) are addressed separately in the
+	// predecorate sub-cluster dispatch; they sit at the same BC
+	// anchor zone and are unchanged here.
+
+	// ── Statusbar track backings (predecorate pair) ─────────
+	//
+	// Two predecorate hudElement instances: the dim grey
+	// (#1F1F1F α=0.5) horizontal tracks that sit under the
+	// health (left) + armor (right) `statusbar_bar` fill
+	// hudElements. Rendered before the fill layer so the
+	// track shows through wherever the fill is below 100%.
+	// Container is an addressable identity for "hide
+	// statusbar track backings" toggles; leaves preserve
+	// absolute rect + per-instance config verbatim.
+	itemDef {
+		name "hud_predecorate_statusbar_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "predecorate"
+			anchor BOTTOM_CENTER
+			rect 0.203 0.896 0.297 0.010
+			image "white"
+			forecolor 0.12 0.12 0.12 0.5
+		}
+		itemDef { hudElement "predecorate"
+			anchor BOTTOM_CENTER
+			rect 0.531 0.896 0.297 0.010
+			image "white"
+			forecolor 0.12 0.12 0.12 0.5
+		}
+	}
+
+	itemDef {
+		name "hud_statusbars_root"
+		type container
+		direction row
+		decoration
+		visible 1
+
+		itemDef {
+			name "hud_health_group"
+			type container
+			direction row
+			decoration
+			visible 1
+
+			itemDef { hudElement "statusbar_bar"    bind "health"  anchor BOTTOM_CENTER  rect 0.203 0.896 0.297 0.010  forecolor 1 1 1 0.9  direction L }
+			itemDef { hudElement "statusbar_icon"   bind "health"  anchor BOTTOM_CENTER  rect 0.476 0.925 0.022 0.038 }
+			itemDef { hudElement "statusbar_value"  bind "health"  anchor BOTTOM_CENTER  rect 0.466 0.923 0 0  font "sansman"  fontsize 28 34  textalign 2 }
+		}
+
+		itemDef {
+			name "hud_armor_group"
+			type container
+			direction row
+			decoration
+			visible 1
+
+			itemDef { hudElement "statusbar_value"  bind "armor"   anchor BOTTOM_CENTER  rect 0.569 0.923 0 0  font "sansman"  fontsize 28 34  textalign 0 }
+			itemDef { hudElement "statusbar_icon"   bind "armor"   anchor BOTTOM_CENTER  rect 0.534 0.925 0.022 0.038 }
+			itemDef { hudElement "statusbar_bar"    bind "armor"   anchor BOTTOM_CENTER  rect 0.531 0.896 0.297 0.010  forecolor 1 1 1 0.9  direction R }
+		}
+	}
+
+	// ── Ammo (bottom far right anchor zone) ─────────────────
+	//
+	// Mirrors the statusbars logical-grouping pattern above:
+	// flex containers provide canonical authoring structure +
+	// addressable "ammo stat group" identity; the leaf
+	// hudElements preserve absolute rects + BOTTOM_RIGHT anchor
+	// because the cgame HUD render dispatcher reads per-leaf
+	// screen-space rect directly (binding-driven, not flex-laid).
+	// Ammo carries only value + icon (no bar) so the group is a
+	// two-leaf pair rather than the three-leaf bar+icon+value.
+	// The `ammomessage` screen-center notification text sits in
+	// a different anchor zone (CENTER) and is addressed by the
+	// chat/overlay sub-cluster, not here.
+
+	itemDef {
+		name "hud_ammo_root"
+		type container
+		direction row
+		decoration
+		visible 1
+
+		itemDef {
+			name "hud_ammo_group"
+			type container
+			direction row
+			decoration
+			visible 1
+
+			itemDef { hudElement "statusbar_value"  bind "ammo"    anchor BOTTOM_RIGHT  rect 0.919 0.925 0 0  font "sansman"  fontsize 22 28  textalign 2 }
+			itemDef { hudElement "statusbar_icon"   bind "ammo"    anchor BOTTOM_RIGHT  rect 0.931 0.923 0.025 0.042 }
+		}
+	}
+	// ── Ammomessage (center; "Out of ammo!" announce) ───────
+	itemDef {
+		name "hud_ammomessage_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "ammomessage"
+			anchor CENTER
+			rect 0.500 0.271 0 0
+			font "sansman"
+			fontsize 10 12
+			textalign 1
+			forecolor 1 0 0 0.8
+		}
+	}
+
+	// (playerspeed moved into hud_telemetry_root near the top
+	//  of the file so fps + playerspeed share one telemetry
+	//  group identity.)
+
+	// ── Spectator messages group (spec-mode-only info) ──────
+	itemDef {
+		name "hud_spec_messages_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "followmessage"
+			anchor CENTER_LEFT
+			rect 0.003 0.292 0 0
+			font "sansman"
+			fontsize 8 12
+		}
+		itemDef { hudElement "specmessage"
+			anchor CENTER_LEFT
+			rect 0.003 0.292 0 0
+			font "sansman"
+			fontsize 8 12
+		}
+	}
+
+	// ── Message Queue (priority-ordered single-visible) ─────
+	// frags (HIGH) > center prints (NORMAL) > warmup (LOW);
+	// engine picks one entry at a time + fade-in/out — see
+	// cl_wired_hud_elem_msgqueue.c. Single-visible behaviour
+	// makes this a static element from the authoring side; the
+	// container is an addressable identity wrapper, not a
+	// list-style repeat consumer.
+	itemDef {
+		name "hud_msgqueue_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "msgqueue"
+			anchor TOP_CENTER
+			rect 0.500 0.158 0 0
+			font "sansman"
+			fontsize 20 28
+			textalign 1
+			forecolor 1 1 1 1
+		}
+	}
+
+	// ── Chat lines (canonical reform: single repeat block) ──
+	//
+	// Engine writer: cl_wired_ui_hud_state.c WIRED_EVENT_CHAT /
+	// _TEAMCHAT cases publish into WiredStore keys
+	// `hud.chat.<i>.text` (i ∈ [0, ModernHUD_MAX_CHAT_LINES))
+	// plus a `hud.chat.count` scalar. The repeat block reads
+	// `hud.chat.count` for the active row count and substitutes
+	// `{{ row.text }}` per row from the matching `hud.chat.<i>.text`.
+	//
+	// Per-row fade timing (`time fadedelay fade`) from the legacy
+	// 8-leaf form is not preserved — repeat path has no per-row
+	// lifecycle. Messages persist as a rolling ring (count-capped
+	// by ModernHUD_MAX_CHAT_LINES); oldest entries fall off as new
+	// chat arrives. W-11 minimum-verbosity acceptable.
+	itemDef {
+		name "hud_chat_root"
+		type container
+		direction column
+		anchor BOTTOM_LEFT
+		rect 0.006 0.671 0.469 0.200
+		decoration
+		visible 1
+
+		repeat {
+			source "hud.chat"
+			countbind "hud.chat.count"
+			as "row"
+
+			itemDef {
+				name "hud_chat_row"
+				text "{{ row.text }}"
+				font "defaultMonoFont"
+				fontsize 6 9
+				monospace
+				forecolor 1 1 1 0.7
+			}
+		}
+	}
+
+	// ── Vote announce (callvote in-progress info) ───────────
+	itemDef {
+		name "hud_votemessageworld_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "votemessageworld"
+			anchor CENTER_LEFT
+			rect 0.003 0.125 0 0.025
+			font "defaultMonoFont"
+			fontsize 6 10
+			textalign 0
+			forecolor 1 1 0 1
+		}
+	}
+
+	// ── Powerups ────────────────────────────────────────────
+	itemDef { hudElement "powerup1_icon"  anchor CENTER_RIGHT  rect 0.953 0.563 0.028 0.050  forecolor 1 1 1 1 }
+	itemDef { hudElement "powerup1_time"  anchor CENTER_RIGHT  rect 0.947 0.573 0 0  font "sansman"  fontsize 12 16  textalign 2 }
+	itemDef { hudElement "powerup2_icon"  anchor CENTER_RIGHT  rect 0.953 0.479 0.028 0.050  forecolor 1 1 1 1 }
+	itemDef { hudElement "powerup2_time"  anchor CENTER_RIGHT  rect 0.947 0.490 0 0  font "sansman"  fontsize 12 16  textalign 2 }
+
+	// ── Target info group (aim-target name + status pair) ───
+	//
+	// Both leaves share the same CENTER anchor (rect 0.500 y at
+	// 0.583 / 0.613 — name above status, just below the screen
+	// midline so the crosshair stays clear). The wrapper is an
+	// addressable identity for "hide target info in competitive
+	// mode" toggles; cgame dispatches into hud:targetname +
+	// hud:targetstatus against the leaves' absolute rects with
+	// the shared fade-on-aim-loss behaviour (fadedelay 250 /
+	// time 100 / fade-to-transparent end colour).
+	itemDef {
+		name "hud_target_info_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "targetname"
+			anchor CENTER
+			rect 0.500 0.583 0 0.025
+			font "sansman"
+			fontsize 8 12
+			textalign 1
+			fadedelay 250
+			time 100
+			fade 1 1 1 0
+		}
+		itemDef { hudElement "targetstatus"
+			anchor CENTER
+			rect 0.500 0.613 0 0.025
+			font "sansman"
+			fontsize 8 12
+			textalign 1
+			fadedelay 250
+			time 100
+			fade 1 1 1 0
+		}
+	}
+
+	// ── Item Pickup (text + icon pair feed) ─────────────────
+	itemDef {
+		name "hud_itempickup_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "itempickup"
+			anchor CENTER
+			rect 0.500 0.646 0 0.025
+			font "sansman"
+			fontsize 8 22
+			textalign 1
+			time 3000
+			fadedelay 1000
+			fade 1 1 1 0
+		}
+		itemDef { hudElement "itempickupicon"
+			anchor CENTER
+			rect 0.488 0.696 0.025 0.042
+			time 3000
+			fadedelay 1000
+			fade 1 1 1 0
+		}
+	}
+
+	// ── Flag Status (CTF) ───────────────────────────────────
+	// Per-pair logical-grouping wrap; both leaves preserve
+	// absolute rect verbatim (CTF flag icon positions are pinned
+	// to the TC anchor zone left/right halves).
+	itemDef {
+		name "hud_flagstatus_pair_root"
+		type container
+		direction row
+		decoration
+		visible 1
+
+		itemDef { hudElement "flagstatus_own"  anchor TOP_CENTER  rect 0.338 0.004 0.022 0.042  forecolor 1 1 1 1 }
+		itemDef { hudElement "flagstatus_nme"  anchor TOP_CENTER  rect 0.663 0.004 0.022 0.042  forecolor 1 1 1 1 }
+	}
+
+	// ── Team Count ──────────────────────────────────────────
+	// Per-pair logical-grouping wrap; own/nme player-count
+	// badges sit just inside the flag icons (rect 0.313 /
+	// 0.688) with monospace fill backgrounds.
+	itemDef {
+		name "hud_teamcount_pair_root"
+		type container
+		direction row
+		decoration
+		visible 1
+
+		itemDef { hudElement "teamcount_own"
+			anchor TOP_CENTER
+			rect 0.313 0.004 0.025 0.042
+			font "sansman"
+			fontsize 10 14
+			textalign 1
+			forecolor 1 1 1 1
+			backcolor 0 0 0 0.3
+			fill
+		}
+		itemDef { hudElement "teamcount_nme"
+			anchor TOP_CENTER
+			rect 0.688 0.004 0.025 0.042
+			font "sansman"
+			fontsize 10 14
+			textalign 1
+			forecolor 1 1 1 1
+			backcolor 0 0 0 0.3
+			fill
+		}
+	}
+
+	// ── Team Overlay ────────────────────────────────────────
+	itemDef { hudElement "team8"   anchor BOTTOM_LEFT  rect 0.006 0.708 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team7"   anchor BOTTOM_LEFT  rect 0.006 0.729 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team6"   anchor BOTTOM_LEFT  rect 0.006 0.750 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team5"   anchor BOTTOM_LEFT  rect 0.006 0.771 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team4"   anchor BOTTOM_LEFT  rect 0.006 0.792 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team3"   anchor BOTTOM_LEFT  rect 0.006 0.813 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team2"   anchor BOTTOM_LEFT  rect 0.006 0.833 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+	itemDef { hudElement "team1"   anchor BOTTOM_LEFT  rect 0.006 0.854 0 0.021  font "defaultMonoFont"  fontsize 6 10  monospace  forecolor 1 1 1 1  backcolor 0.75 0.75 0.75 0.25  fill }
+
+	// ── Awards (engine-iterated reward feed) ────────────────
+	itemDef {
+		name "hud_awards_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "awards"
+			anchor TOP_CENTER
+			rect 0.500 0.088 0.040 0.055
+			font "sansman"
+			fontsize 10 14
+			textalign 1
+			forecolor 1 1 1 1
+			time 3000
+			fade 1 1 1 0
+		}
+	}
+
+	// ── Warmup announce group (TC; conditional) ─────────────
+	//
+	// Standalone group: warmupinfo is the only leaf, but the
+	// wrapper exists so the conditional-visibility behaviour
+	// (only renders during warmup countdown) can be addressed
+	// at the group level by future authoring without coupling
+	// it to the always-on match_info group above.
+	itemDef {
+		name "hud_warmup_announce_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef { hudElement "warmupinfo"
+			anchor TOP_CENTER
+			rect 0.500 0.146 0 0
+			font "sansman"
+			fontsize 8 10
+			textalign 1
+		}
+	}
+
+	// ── Bot Directives (engine-iterated team callout feed) ──
+	//
+	// Canonical reform: bound to WiredStore key
+	// `game.bots.directives` (text-only leaf, no element handler).
+	// Engine writer: WiredStore_Set("game.bots.directives", ...)
+	// in the bot directives publisher. Single generic text leaf;
+	// no per-element create/routine pair.
+	itemDef {
+		name "hud_botdirectives_root"
+		type container
+		direction column
+		decoration
+		visible 1
+
+		itemDef {
+			name "hud_botdirectives_text"
+			bind "game.bots.directives"
+			anchor CENTER_LEFT
+			rect 0.003 0.320 0.220 0
+			font "defaultMonoFont"
+			fontsize 6 16
+			monospace
+			forecolor 1 1 1 0.85
+			backcolor 0 0 0 0.35
+			fill
+		}
+	}
+}

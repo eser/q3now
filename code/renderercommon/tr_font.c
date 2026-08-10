@@ -53,6 +53,9 @@
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
 #include "../renderercommon/tr_public.h"
+#include "r_log.h"                       // rilog-channel-mechanism Turn B — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 extern void R_IssuePendingRenderCommands( void );
 extern qhandle_t RE_RegisterShaderNoMip( const char *name );
@@ -121,7 +124,7 @@ FT_Bitmap *R_RenderGlyph(FT_GlyphSlot glyph, glyphInfo_t* glyphOut) {
 
 		return bit2;
 	} else {
-		ri.Log( SEV_INFO, "Non-outline fonts are not supported\n");
+		R_LOG( rch_assets, SEV_INFO, "Non-outline fonts are not supported\n");
 	}
 	return NULL;
 }
@@ -334,7 +337,7 @@ void RE_RegisterFont(const char *fontName, int pointSize, fontInfo_t *font) {
 	char name[1024];
 
 	if (!fontName) {
-		ri.Log( SEV_INFO, "RE_RegisterFont: called with empty name\n");
+		R_LOG( rch_assets, SEV_INFO, "RE_RegisterFont: called with empty name\n");
 		return;
 	}
 
@@ -345,7 +348,7 @@ void RE_RegisterFont(const char *fontName, int pointSize, fontInfo_t *font) {
 	//R_IssuePendingRenderCommands();
 
 	if (registeredFontCount >= MAX_FONTS) {
-		ri.Log( SEV_WARN, "RE_RegisterFont: Too many fonts registered already.\n");
+		R_LOG( rch_assets, SEV_WARN, "RE_RegisterFont: Too many fonts registered already.\n");
 		return;
 	}
 
@@ -392,28 +395,28 @@ void RE_RegisterFont(const char *fontName, int pointSize, fontInfo_t *font) {
 	}
 
 #ifndef BUILD_FREETYPE
-	ri.Log( SEV_WARN, "RE_RegisterFont: FreeType code not available\n");
+	R_LOG( rch_assets, SEV_WARN, "RE_RegisterFont: FreeType code not available\n");
 #else
 	if (ftLibrary == NULL) {
-		ri.Log( SEV_WARN, "RE_RegisterFont: FreeType not initialized.\n");
+		R_LOG( rch_assets, SEV_WARN, "RE_RegisterFont: FreeType not initialized.\n");
 		return;
 	}
 
 	len = ri.FS_ReadFile(fontName, &faceData);
 	if (len <= 0) {
-		ri.Log( SEV_WARN, "RE_RegisterFont: Unable to read font file '%s'\n", fontName);
+		R_LOG( rch_assets, SEV_WARN, "RE_RegisterFont: Unable to read font file '%s'\n", fontName);
 		return;
 	}
 
 	// allocate on the stack first in case we fail
 	if (FT_New_Memory_Face( ftLibrary, faceData, len, 0, &face )) {
-		ri.Log( SEV_WARN, "RE_RegisterFont: FreeType, unable to allocate new face.\n");
+		R_LOG( rch_assets, SEV_WARN, "RE_RegisterFont: FreeType, unable to allocate new face.\n");
 		return;
 	}
 
 
 	if (FT_Set_Char_Size( face, pointSize << 6, pointSize << 6, dpi, dpi)) {
-		ri.Log( SEV_WARN, "RE_RegisterFont: FreeType, unable to set face char size.\n");
+		R_LOG( rch_assets, SEV_WARN, "RE_RegisterFont: FreeType, unable to set face char size.\n");
 		return;
 	}
 
@@ -424,7 +427,7 @@ void RE_RegisterFont(const char *fontName, int pointSize, fontInfo_t *font) {
 
 	out = ri.Malloc(256*256);
 	if (out == NULL) {
-		ri.Log( SEV_WARN, "RE_RegisterFont: ri.Malloc failure during output image creation.\n");
+		R_LOG( rch_assets, SEV_WARN, "RE_RegisterFont: ri.Malloc failure during output image creation.\n");
 		return;
 	}
 	memset(out, 0, 256*256);
@@ -528,7 +531,7 @@ void RE_RegisterFont(const char *fontName, int pointSize, fontInfo_t *font) {
 void R_InitFreeType(void) {
 #ifdef BUILD_FREETYPE
 	if (FT_Init_FreeType( &ftLibrary )) {
-		ri.Log( SEV_WARN, "R_InitFreeType: Unable to initialize FreeType.\n");
+		R_LOG( rch_assets, SEV_WARN, "R_InitFreeType: Unable to initialize FreeType.\n");
 	}
 #endif
 	registeredFontCount = 0;

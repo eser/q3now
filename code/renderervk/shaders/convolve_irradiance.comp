@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+convolve_irradiance.comp — wired-render IBL diffuse irradiance.
+
+Convolves the environment source cube into the diffuse irradiance probe: for
+each output direction N, integrate the cosine-weighted hemisphere of incoming
+radiance (the Lambertian diffuse term). The result is very low-frequency — a
+smooth averaged sky-up / ground-down ambient — so a single small mip and a
+modest sample count suffice (unlike the specular prefilter's per-roughness mips).
+
+Reads the source as a filtered samplerCube (binding 0/1), writes one face of the
+irradiance cube via an image2DArray storage view (binding 2). Nothing samples
+the result yet (the IBL term lands later) — this only produces it.
+*/
+
+const float PI = 3.14159265358979323846;
+
+// Cosine-Hammersley hemisphere samples. Diffuse irradiance is low-frequency, so
+// a few hundred samples give a smooth result; the whole convolve is a one-shot.
+const uint SAMPLE_COUNT = 256u;
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform textureCube srcTex;
+layout(set = 0, binding = 1) uniform sampler     srcSamp;
+layout(rgba16f, set = 0, binding = 2) uniform writeonly image2DArray dstIrradiance;
+
+layout(push_constant) uniform Push {
+	uint pad;   // reserved (the face comes from gl_GlobalInvocationID.z)
+};
+
+float radicalInverse_VdC( uint bits )
+{
+	bits = ( bits << 16u ) | ( bits >> 16u );
+	bits = ( ( bits & 0x55555555u ) << 1u ) | ( ( bits & 0xAAAAAAAAu ) >> 1u );
+	bits = ( ( bits & 0x33333333u ) << 2u ) | ( ( bits & 0xCCCCCCCCu ) >> 2u );
+	bits = ( ( bits & 0x0F0F0F0Fu ) << 4u ) | ( ( bits & 0xF0F0F0F0u ) >> 4u );
+	bits = ( ( bits & 0x00FF00FFu ) << 8u ) | ( ( bits & 0xFF00FF00u ) >> 8u );
+	return float( bits ) * 2.3283064365386963e-10;
+}
+
+vec2 hammersley( uint i, uint n )
+{
+	return vec2( float( i ) / float( n ), radicalInverse_VdC( i ) );
+}
+
+// Cube face (layer) + face-uv [-1,1] → world direction (GL cube-array order).
+vec3 cubeFaceDir( uint face, vec2 uv )
+{
+	float u = uv.x;
+	float v = uv.y;
+	vec3 dir;
+	if      ( face == 0u ) dir = vec3(  1.0,  -v,  -u );  // +X
+	else if ( face == 1u ) dir = vec3( -1.0,  -v,   u );  // -X
+	else if ( face == 2u ) dir = vec3(  u,   1.0,   v );  // +Y
+	else if ( face == 3u ) dir = vec3(  u,  -1.0,  -v );  // -Y
+	else if ( face == 4u ) dir = vec3(  u,   -v,   1.0 ); // +Z
+	else                   dir = vec3( -u,   -v,  -1.0 ); // -Z
+	return normalize( dir );
+}
+
+void main()
+{
+	ivec3 size  = imageSize( dstIrradiance );   // (w, h, 6)
+	ivec3 coord = ivec3( gl_GlobalInvocationID.xyz );
+	if ( coord.x >= size.x || coord.y >= size.y || coord.z >= 6 )
+		return;
+
+	vec2 uv = ( ( vec2( coord.xy ) + 0.5 ) / vec2( size.xy ) ) * 2.0 - 1.0;
+	vec3 N  = cubeFaceDir( uint( coord.z ), uv );
+
+	// Tangent frame around N for the hemisphere parameterisation.
+	vec3 up        = abs( N.z ) < 0.999 ? vec3( 0.0, 0.0, 1.0 ) : vec3( 1.0, 0.0, 0.0 );
+	vec3 tangent   = normalize( cross( up, N ) );
+	vec3 bitangent = cross( N, tangent );
+
+	vec3 irradiance = vec3( 0.0 );
+
+	// Monte-Carlo cosine-weighted hemisphere integral: importance-sample by
+	// cos(theta) so the cosine term folds into the sampling density and the
+	// estimator is simply the mean radiance × PI.
+	for ( uint i = 0u; i < SAMPLE_COUNT; i++ ) {
+		vec2 xi = hammersley( i, SAMPLE_COUNT );
+
+		float phi      = 2.0 * PI * xi.x;
+		float cosTheta = sqrt( 1.0 - xi.y );   // cosine-weighted
+		float sinTheta = sqrt( xi.y );
+
+		vec3 s = vec3( cos( phi ) * sinTheta, sin( phi ) * sinTheta, cosTheta );
+		vec3 sampleDir = s.x * tangent + s.y * bitangent + s.z * N;
+
+		irradiance += texture( samplerCube( srcTex, srcSamp ), sampleDir ).rgb;
+	}
+
+	irradiance = PI * irradiance / float( SAMPLE_COUNT );
+	imageStore( dstIrradiance, coord, vec4( irradiance, 1.0 ) );
+}

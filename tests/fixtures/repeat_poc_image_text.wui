@@ -1,0 +1,76 @@
+// repeat_poc_image_text.wui — recursive child emit test fixture.
+//
+// Loaded via `wui_test_repeat_image` console command (dev utility) which
+// first writes test data into the WiredStore under the `test.image_list.*`
+// prefix (icon shader path + label per row), then loose-loads this
+// fixture and pushes the menu. The repeat expansion clones the template
+// subtree per row, Mustache-substitutes `{{ row.icon }}` into the inner
+// container's `background` field and `{{ row.label }}` into the inner
+// text leaf's `text` field, and emits both via the standard recursive
+// wui_clay_emit_item pipeline.
+
+menuDef {
+	name "repeat_poc_image_text"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor 0.05 0.05 0.10 1
+
+	itemDef {
+		name "repeat_poc_image_text_root"
+		type container
+		rect 0.1 0.1 0.8 0.8
+		direction column
+		padding 0.02
+		gap 0.01
+		decoration
+
+		itemDef {
+			name "repeat_poc_image_text_header"
+			rect 0 0 1 0.05
+			height FIT
+			text "REPEAT PoC image+text — 2 rows; each row has image (left) + label (right) distinct per row"
+			font "oxanium" 16
+			forecolor 0 0.71 0.85 1
+			decoration
+			visible 1
+		}
+
+		// Row template: container with image leaf + text leaf children.
+		// Container's `background` field carries the Mustache template for
+		// the row icon shader; the inner text leaf's `text` field carries
+		// the per-row label.
+		repeat {
+			source "test.image_list"
+			countbind "test.image_list.count"
+			as "row"
+
+			itemDef {
+				name "repeat_poc_image_text_row"
+				type container
+				direction row
+				rect 0 0 1 0.08
+				gap 0.005
+
+				itemDef {
+					name "repeat_poc_image_text_icon"
+					rect 0 0 0.05 0.05
+					background "{{ row.icon }}"
+					decoration
+					visible 1
+				}
+
+				itemDef {
+					name "repeat_poc_image_text_label"
+					rect 0 0 0.5 0.05
+					text "{{ row.label }}"
+					font "oxanium" 18
+					forecolor 1 1 1 1
+					visible 1
+				}
+			}
+		}
+	}
+}

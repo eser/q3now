@@ -4,7 +4,7 @@
 //
 
 #include "g_local.h"
-/* Phase 5: log channels */
+#include "wired/wired_build_stamp.h"  // WIRED_BUILD_ID / WIRED_BUILD_DATE (this VM's own stamp)
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 // Q3NOW_GAMEDATE is injected by cmake for native builds; QVM builds fall back to unknown
@@ -38,7 +38,6 @@ vmCvar_t	g_password;
 vmCvar_t	g_needpass;
 vmCvar_t	g_maxclients;
 vmCvar_t	g_maxGameClients;
-vmCvar_t	g_dedicated;
 vmCvar_t	g_envGravity;
 vmCvar_t	g_cheats;
 vmCvar_t	g_forceRespawn;
@@ -53,7 +52,7 @@ vmCvar_t	g_logfile;
 vmCvar_t	g_logfileSync;
 vmCvar_t	g_blood;
 vmCvar_t	g_allowVote;
-vmCvar_t	g_teamAutoJoin;
+vmCvar_t	g_autoJoin;
 vmCvar_t	g_teamForceBalance;
 vmCvar_t	g_banIPs;
 vmCvar_t	g_filterBan;
@@ -80,6 +79,9 @@ vmCvar_t	g_kothGhosts;
 
 #if FEAT_UNLAGGED
 vmCvar_t	g_unlagged;
+vmCvar_t	g_unlaggedMissiles;
+vmCvar_t	g_unlaggedMissileNudge;
+vmCvar_t	g_unlaggedMissileMaxLatency;
 #endif
 #if FEAT_SPAWN_PROTECTION
 vmCvar_t	g_spawnProtect;
@@ -167,6 +169,11 @@ static cvarTable_t		gameCvarTable[] = {
 	// noset vars
 	{ NULL, "gamename", Q3NOW_GAMENAME , CVAR_SERVERINFO | CVAR_ROM, 0, qfalse  },
 	{ NULL, "gamedate", Q3NOW_GAMEDATE , CVAR_ROM, 0, qfalse  },
+	// Per-build stamp (CVAR_ROM) — this game VM's OWN embedded id/date, read by the
+	// engine's `sysinfo` for the game row. WIRED_BUILD_ID_STR / WIRED_BUILD_DATE are
+	// string-literal defines, usable as table default values. Zero-ABI cvar route.
+	{ NULL, "g_buildId",   WIRED_BUILD_ID_STR , CVAR_ROM, 0, qfalse  },
+	{ NULL, "g_buildDate", WIRED_BUILD_DATE   , CVAR_ROM, 0, qfalse  },
 	{ &g_restarted, "g_restarted", "0", CVAR_ROM, 0, qfalse  },
 	// { NULL, "sv_mapname", "", CVAR_SERVERINFO | CVAR_ROM, 0, qfalse  },
 
@@ -186,7 +193,7 @@ static cvarTable_t		gameCvarTable[] = {
 
 	{ &g_friendlyFire, "g_friendlyFire", "0", CVAR_ARCHIVE, 0, qtrue  },
 
-	{ &g_teamAutoJoin, "g_teamAutoJoin", "0", CVAR_ARCHIVE  },
+	{ &g_autoJoin, "g_autoJoin", "1", CVAR_ARCHIVE  },	// bitmask: 1=auto-join non-team gametypes, 2=auto-join team gametypes, 3=both
 	{ &g_teamForceBalance, "g_teamForceBalance", "0", CVAR_ARCHIVE  },
 
 	{ &g_logfile, "g_log", "games.log", CVAR_ARCHIVE, 0, qfalse  },
@@ -198,8 +205,6 @@ static cvarTable_t		gameCvarTable[] = {
 	{ &g_filterBan, "g_filterBan", "1", CVAR_ARCHIVE, 0, qfalse  },
 
 	{ &g_needpass, "g_needpass", "0", CVAR_SERVERINFO | CVAR_ROM, 0, qfalse },
-
-	{ &g_dedicated, "dedicated", "0", 0, 0, qfalse  },
 
 	{ &g_envGravity, "g_envGravity", "800", 0, 0, qtrue  },
 	{ &g_forceRespawn, "g_forceRespawn", "0", 0, 0, qtrue },
@@ -236,6 +241,9 @@ static cvarTable_t		gameCvarTable[] = {
 
 #if FEAT_UNLAGGED
     { &g_unlagged, "g_unlagged", "1", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+    { &g_unlaggedMissiles, "g_unlaggedMissiles", "1", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
+    { &g_unlaggedMissileNudge, "g_unlaggedMissileNudge", "10", CVAR_ARCHIVE, 0, qfalse },
+    { &g_unlaggedMissileMaxLatency, "g_unlaggedMissileMaxLatency", "500", CVAR_ARCHIVE, 0, qfalse },
 #endif
 #if FEAT_SPAWN_PROTECTION
     { &g_spawnProtect,            "g_spawnProtect",            "2", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse },
@@ -420,6 +428,32 @@ void G_FindTeams( void ) {
 
 /*
 =================
+G_ServerIsConsoleOnly
+
+Replacement for the retired 'dedicated' cvar as the game module saw it.
+A console-only server is one that is running with no local (loopback) player
+attached — i.e. the old "dedicated" boolean. Used purely to gate console log
+echoes and console-server feature commands; never gameplay. The game VM cannot
+read engine globals, so server state is queried via the sv_running cvar trap.
+=================
+*/
+qboolean G_ServerIsConsoleOnly( void ) {
+	int i;
+
+	if ( !trap_Cvar_VariableIntegerValue( "sv_running" ) ) {
+		return qfalse;
+	}
+	for ( i = 0; i < level.maxclients; i++ ) {
+		if ( level.clients[i].pers.connected != CON_DISCONNECTED
+		     && level.clients[i].pers.localClient ) {
+			return qfalse;	// a local player is attached → not console-only
+		}
+	}
+	return qtrue;
+}
+
+/*
+=================
 G_RegisterCvars
 =================
 */
@@ -483,6 +517,21 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_game), "------- Game Initialization -------\n");
 	Com_Log( SEV_INFO, LOG_CH(ch_game), "gamename: %s\n", Q3NOW_GAMENAME);
 	Com_Log( SEV_INFO, LOG_CH(ch_game), "gamedate: %s\n", Q3NOW_GAMEDATE);
+
+#if defined(WASM_MODULE)
+	// Typed/versioned VM-IPC ABI handshake (decision 2 = B, exact-match): query the
+	// engine's game ABI version over the reserved syscall and assert it equals the
+	// version this module was built against. A mismatch is a hard error (silent ABI
+	// drift is exactly the failure mode the handshake exists to prevent).
+	{
+		int engineAbi = trap_VM_ABI_Query();
+		if ( engineAbi != GAME_API_VERSION ) {
+			trap_Error( va( "VM ABI mismatch: module built for %d, engine %d",
+			                GAME_API_VERSION, engineAbi ) );
+		}
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "VM ABI handshake ok (v%d)\n", engineAbi );
+	}
+#endif
 
 	// Publish per-game identity to engine cvars. The wired engine reads these
 	// for master-server heartbeats / queries and never includes bg_public.h.
@@ -590,6 +639,19 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	memset( g_entities, 0, MAX_GENTITIES * sizeof(g_entities[0]) );
 	level.gentities = g_entities;
 
+#if FEAT_RECAST_NAVMESH
+	// Free every non-client nav-state slot (the memset above already NULLed
+	// each ent->navState); the pool must not carry state across a map change.
+	Nav_ResetEntityPool();
+#endif
+
+#if FEAT_MONSTER_AI
+	// Same for the behavior-state pool — it must not carry state across a map.
+	Behavior_ResetPool();
+	// And the scripted-drive pool (set-piece verb lists), same discipline.
+	Script_ResetPool();
+#endif
+
 	// initialize all clients for this game
 	level.maxclients = g_maxclients.integer;
 	memset( g_clients, 0, MAX_CLIENTS * sizeof(g_clients[0]) );
@@ -617,6 +679,13 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	InitBodyQue();
 
 	ClearRegisteredItems();
+
+	// Start the event-driven bot item-goal DB empty for this level, before any
+	// item entity spawns. The retired per-tick rebuild discarded stale state
+	// implicitly every call; the maintained DB is cleared explicitly once here so
+	// no node from a previous map survives the transition. Items then populate it
+	// as they finish spawning (FinishSpawningItem / LaunchItem).
+	WiredIntel_ClearMapGoalDb();
 
 	// parse the key/value pairs and spawn gentities
 	G_SpawnEntitiesFromString();
@@ -772,23 +841,41 @@ void NORETURN QDECL Com_Terminate( terminationReason_t reason, const char *error
 	trap_Terminate( reason, text );
 }
 
+// VM-local channel-name table. LOG_CH() interns each declared channel name
+// here (via Log_GetChannel) and caches the returned index; Com_Log_Impl maps
+// the index back to the name and forwards it across the G_LOG bridge so the
+// engine resolves it to the real channel (game, botlib.ai, ...).
+#define VM_LOG_MAX_CHANNELS 64
+static const char	*vm_logChannels[VM_LOG_MAX_CHANNELS];
+static int		vm_logChannelCount;
+
+int Log_GetChannel( const char *name ) {
+	int		i;
+
+	for ( i = 0; i < vm_logChannelCount; i++ ) {
+		if ( !strcmp( vm_logChannels[i], name ) ) {
+			return i;
+		}
+	}
+	if ( vm_logChannelCount >= VM_LOG_MAX_CHANNELS ) {
+		return 0;
+	}
+	vm_logChannels[vm_logChannelCount] = name;
+	return vm_logChannelCount++;
+}
+
 void QDECL Com_Log_Impl( log_severity_t severity, int channel, const char *msg, ... ) {
 	va_list		argptr;
 	char		text[MAX_STRING_CHARS];
+	const char	*channelName;
 
-	(void)channel;  // VM-side routes everything through trap_Log → "game"
+	channelName = ( channel >= 0 && channel < vm_logChannelCount )
+		? vm_logChannels[channel] : "";
 	va_start( argptr, msg );
 	vsnprintf( text, sizeof(text), msg, argptr );
 	va_end( argptr );
 
-	trap_Log( severity, text );
-}
-
-// Stub for the LOG_CH expansion in shared headers compiled into the native
-// game DLL. The VM bridge ignores the channel id, so 0 is always fine.
-int Log_GetChannel( const char *name ) {
-	(void)name;
-	return 0;
+	trap_Log( severity, channelName, text );
 }
 
 /*
@@ -1117,8 +1204,9 @@ void CalculateRanks( void ) {
 		}
 	}
 
-	// see if it is time to end the level
-	CheckExitRules();
+	// defer the match-end check to the frame boundary (G_RunFrame) so a frag
+	// can never end the match mid-frame with cleanup state half-done
+	level.needToCheckExitRules = qtrue;
 
 	// if we are at the intermission, send the new info to everyone
 	if ( level.intermissiontime ) {
@@ -1367,7 +1455,7 @@ void QDECL G_LogPrintf( const char *fmt, ... ) {
 	vsnprintf(string + 7, sizeof(string) - 7, fmt, argptr);
 	va_end( argptr );
 
-	if ( g_dedicated.integer ) {
+	if ( G_ServerIsConsoleOnly() ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_game), "%s", string + 7 );
 	}
 
@@ -1596,6 +1684,8 @@ void CheckExitRules( void ) {
 	gclient_t	*cl;
     int numClients;
     int aliveClients;
+
+	level.needToCheckExitRules = qfalse;	// consumed; the per-frame G_RunFrame call always runs this
 
 	// if at the intermission, wait for all non-bots to
 	// signal ready, then go to next level
@@ -2738,6 +2828,9 @@ Advances the non-player objects in the world
 void G_RunFrame( int levelTime ) {
 	int			i;
 	gentity_t	*ent;
+#if FEAT_UNLAGGED
+	qboolean	missilesRun = qfalse;
+#endif
 
 	// if we are waiting for the level to restart, do nothing
 	if ( level.restarted ) {
@@ -2772,10 +2865,77 @@ void G_RunFrame( int levelTime ) {
 	// get any cvar changes
 	G_UpdateCvars();
 
+#if FEAT_RECAST_NAVMESH
+	// Async navmesh bake: on the frame the mesh becomes ready (cold-cache bake
+	// finished this tick), re-apply door blocked-flags — doors that spawned closed
+	// while the mesh was baking applied their flags into a not-ready mesh (no-op).
+	{
+		qboolean navReady = trap_Nav_IsReady();
+		if ( navReady && !level.navWasReady ) {
+			G_Nav_ReconcileDoors();
+		}
+		level.navWasReady = navReady;
+	}
+#endif
+
 #if FEAT_GAME_MEETING
 	if ( level.meeting ) {
 		CheckIntermissionExit();
 		return;
+	}
+#endif
+
+#if FEAT_UNLAGGED
+	// Per-missile flight replay (U2): BEFORE the single batch below, let every
+	// delag-flagged missile catch up on the flight it missed because its shooter
+	// was seen late. Each replays its trajectory step-by-step against the matching
+	// client history (G_MissileRunDelag), advancing only through the strictly-past
+	// steps and clearing its needsDelag flag. The present step (previousTime ->
+	// level.time) is NOT run here — that is the single batch's job below, so each
+	// missile still advances exactly one present frame per real frame (no
+	// double-run). stepmsec is the real server frame delta, which is also the
+	// granularity the client history ring is stored at. Skipped wholesale when
+	// g_unlagged / g_unlaggedMissiles is off (G_MissileRunDelag early-returns).
+	{
+		int stepmsec = level.time - level.previousTime;
+
+		ent = &g_entities[0];
+		for ( i = 0; i < level.num_entities; i++, ent++ ) {
+			if ( !ent->inuse || ent->s.eType != ET_MISSILE ) {
+				continue;
+			}
+			G_MissileRunDelag( ent, stepmsec );
+		}
+	}
+
+	// Projectile lag-compensation: run all of this frame's missiles inside a
+	// single time-shift batch so their impact traces reconcile against rewound
+	// client positions (just like the hitscan brackets do for instant-hit
+	// weapons). Rewind every client once to the previous frame time, run every
+	// missile, then restore once. skip==NULL rewinds the shooter too, which is
+	// safe — G_RunMissile's trace ignores the owner via passent=ownerNum, so no
+	// owner-self-collision. When unlagged is off this whole block is skipped and
+	// missiles run unbracketed in the main entity loop below, byte-identical to
+	// the un-compensated path.
+	//
+	// Missiles fired later this frame (during a client's ClientThink) are not in
+	// this batch; they run in next frame's batch — the same one-frame deferral
+	// the batch model has always had (the rewind brackets the run, not the spawn).
+	if ( g_unlagged.integer ) {
+		G_TimeShiftAllClients( level.previousTime, NULL );
+
+		ent = &g_entities[0];
+		for ( i = 0; i < level.num_entities; i++, ent++ ) {
+			if ( !ent->inuse ) {
+				continue;
+			}
+			if ( ent->s.eType == ET_MISSILE ) {
+				G_RunMissile( ent );
+			}
+		}
+
+		G_UnTimeShiftAllClients( NULL );
+		missilesRun = qtrue;
 	}
 #endif
 
@@ -2821,9 +2981,53 @@ void G_RunFrame( int levelTime ) {
 		}
 
 		if ( ent->s.eType == ET_MISSILE ) {
+#if FEAT_UNLAGGED
+			// already run in the lag-compensated missile pass above; skip here
+			// to avoid a double-run. When that pass did not run (unlagged off),
+			// fall through and run the missile now, exactly as before.
+			if ( missilesRun ) {
+				continue;
+			}
+#endif
 			G_RunMissile( ent );
 			continue;
 		}
+
+#if FEAT_RECAST_NAVMESH
+		// Nav-driven mover (non-client). Checked before the physicsObject
+		// branch below because a follower sets physicsObject (to be mover-
+		// pushable) and must run through its own trajectory runner, not
+		// G_RunItem.
+		//
+		// A THINKING monster is excluded here (&& !aiThink): it owns its whole
+		// frame in G_RunBehavior below, which drives the nav-follower ride
+		// itself when it is moving. Without this guard a monster that started
+		// following would be dispatched to the follower runner instead of its
+		// behavior tick and stop deciding. A pure follower (the nav dev-command
+		// entity, aiThink=qfalse) is unaffected — this branch is byte-identical
+		// for it, so the bot/follower nav trace does not change.
+		if ( ent->navFollower
+#if FEAT_MONSTER_AI
+		     && !ent->aiThink
+#endif
+		   ) {
+			G_RunNavFollower( ent );
+			continue;
+		}
+#endif
+
+#if FEAT_MONSTER_AI
+		// Non-client monster behavior tick (the decision layer above nav
+		// movement). Checked before the physicsObject branch below for the same
+		// reason as the nav-follower: a monster may set physicsObject to be
+		// mover-pushable and must run its own tick, not G_RunItem. A thinking
+		// monster is routed here even while following (see the guard above), so
+		// G_RunBehavior stays its single frame owner.
+		if ( ent->aiThink ) {
+			G_RunBehavior( ent );
+			continue;
+		}
+#endif
 
 		if ( ent->s.eType == ET_ITEM || ent->physicsObject ) {
 			G_RunItem( ent );

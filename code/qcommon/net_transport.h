@@ -75,9 +75,30 @@ typedef enum {
 
 typedef struct {
 	/* ── Lifecycle ──────────────────────────────────────────────── */
-	void          (*init)( void );
+	/* shutdown: currently unused; WN_Shutdown owns teardown directly
+	 * (chicken-and-egg — `transport` may be NULL at shutdown call time). */
 	void          (*shutdown)( void );
+
+	/* frame: called once per server frame from sv_main.c POST-GAME-FRAME phase.
+	 * Internal phase ordering (transport-internal invariant, see
+	 * code/qcommon/wired/net/wn_transport.c wn_frame impl):
+	 *   WN_ProcessTimers → WN_FlushOutbound → WN_SendDatagrams (observer) →
+	 *   WN_PushEvents (observer) → WN_TcpFrame (observer) →
+	 *   WN_ProcessCommandQueue (control)
+	 * Does NOT include WN_ClientFrame — client-side QUIC pump runs from
+	 * net_ip.c NET_Event loop on every poll independent of SV. Including it
+	 * here would cause double-pump in listen-server mode.
+	 * Does NOT include drains (DrainPendingConnects/Ready) — those are
+	 * admission machinery that must run after spawn-guard and before game
+	 * frame; transport->frame fires after game frame. Drains stay direct in
+	 * sv_main.c. */
 	void          (*frame)( int msec );
+
+	/* flush_outbound: called from sv_main.c PRE-SPAWN-GUARD position
+	 * (sv_main.c:1148). The pre-spawn flush keeps QUIC ACK/keepalive timing
+	 * during async spawn phases when gvm is NULL. Distinct from the
+	 * flush-inside-frame() that fires after game frame. */
+	void          (*flush_outbound)( void );
 
 	/* ── Server ─────────────────────────────────────────────────── */
 	void          (*listen)( int port );
@@ -101,13 +122,31 @@ typedef struct {
 	 * For QUIC: reads gc->recv_queue (separate from the client snapshot
 	 * queue in wtcl.recv_queue, which is why recv_unreliable cannot be used).
 	 * NULL in the static initializer; registered by the server layer after
-	 * transport->init() (see sv_init.c).
+	 * WN_Init publishes &quic_transport (see sv_init.c).
 	 */
 	void          (*drain_usercmds)( void );
+
+	/* lookup_by_addr: reverse of get_address_string — given a netadr_t,
+	 * return the conn_handle for the matching active connection (or
+	 * CONN_INVALID). Used by sv_game.c stat-collection metrics. */
+	conn_handle_t (*lookup_by_addr)( const netadr_t *addr );
 
 	/* ── Client ─────────────────────────────────────────────────── */
 	conn_handle_t (*connect)( const char *address, int port, const char *userinfo );
 	void          (*disconnect)( conn_handle_t conn, const char *reason );
+
+	/* is_connecting: true if a client connection is in handshake or
+	 * established state. Pass-through for WN_ClientIsConnecting. */
+	qboolean      (*is_connecting)( void );
+
+	/* get_error: read pending connect-phase error string. Copies into
+	 * out[outSize] and returns qtrue if an error is pending, qfalse
+	 * otherwise. Matches WN_ClientHasError signature. */
+	qboolean      (*get_error)( char *out, int outSize );
+
+	/* clear_error: consume the pending error before disconnect so it isn't
+	 * wiped by the disconnect path. */
+	void          (*clear_error)( void );
 
 	/* ── Unreliable datagrams — snapshots and usercmds ──────────── */
 	void          (*send_unreliable)( conn_handle_t conn, const byte *data, int len );

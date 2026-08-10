@@ -9,7 +9,6 @@ cl_wired_attract.c — Wired Attract scheduler
 #include "cl_wired_ui.h"
 #include "cl_wired_attract.h"
 #include "../../../qcommon/wired/core/scripting/wired_scripting.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
 #if FEAT_WIRED_UI
@@ -103,32 +102,31 @@ static void Attract_Teardown( void ) {
 
 			switch ( item->kind ) {
 			case ATTRACT_ITEM_PANEL:
+			case ATTRACT_ITEM_CINEMATIC:
+				/* Panels live on WUI_LAYER_BG_ATTRACT and emit via the
+				 * compositor's multi-panel walk when m->visible. The
+				 * scheduler toggles m->visible directly rather than
+				 * touching the user-owned menu stack — that keeps the
+				 * attract surface on its own z-layer behind any user
+				 * menu and avoids stack-ownership contention. */
 				if ( wui_attract.pushedPanel[0] != '\0' ) {
-					/* Only pop if our panel is still top of stack */
-					if ( WiredUI_GetMenuStackDepth() > 0 &&
-					     Q_stricmp( WiredUI_GetMenuStackTop(), wui_attract.pushedPanel ) == 0 ) {
-						WiredUI_PopMenu();
-					}
+					wiredMenuDef_t *panel = WiredUI_FindMenu( wui_attract.pushedPanel );
+					if ( panel ) panel->visible = qfalse;
 					wui_attract.pushedPanel[0] = '\0';
 				}
 				break;
 
 			case ATTRACT_ITEM_DEMO:
-				if ( wui_attract.ownsDemo && clc.demoplaying ) {
-					CL_Disconnect( qtrue );
-				}
-				wui_attract.ownsDemo = qfalse;
-				break;
-
-			case ATTRACT_ITEM_CINEMATIC:
-				/* Cinematic runs inside attract_cinematic.wmenu — pop the panel */
+				/* Hide the demo overlay panel (pushed in Attract_DispatchCurrent). */
 				if ( wui_attract.pushedPanel[0] != '\0' ) {
-					if ( WiredUI_GetMenuStackDepth() > 0 &&
-					     Q_stricmp( WiredUI_GetMenuStackTop(), wui_attract.pushedPanel ) == 0 ) {
-						WiredUI_PopMenu();
-					}
+					wiredMenuDef_t *panel = WiredUI_FindMenu( wui_attract.pushedPanel );
+					if ( panel ) panel->visible = qfalse;
 					wui_attract.pushedPanel[0] = '\0';
 				}
+				if ( wui_attract.ownsDemo && clientActiveApp->clc.demoplaying ) {
+					CL_Disconnect( clientActiveApp, qtrue );
+				}
+				wui_attract.ownsDemo = qfalse;
 				break;
 			}
 		}
@@ -148,34 +146,52 @@ static void Attract_DispatchCurrent( void ) {
 	wui_attract.ownsDemo = qfalse;
 
 	switch ( item->kind ) {
-	case ATTRACT_ITEM_PANEL:
-		if ( WiredUI_FindMenu( item->source ) == NULL ) {
+	case ATTRACT_ITEM_PANEL: {
+		wiredMenuDef_t *panel = WiredUI_FindMenu( item->source );
+		if ( panel == NULL ) {
 			Com_Log( SEV_INFO, LOG_CH(ch_ui), "attract: panel '%s' not found, skipping\n", item->source );
 			Attract_Advance();
 			return;
 		}
-		WiredUI_PushMenu( item->source );
+		panel->visible = qtrue;
 		Q_strncpyz( wui_attract.pushedPanel, item->source, sizeof( wui_attract.pushedPanel ) );
 		break;
+	}
 
-	case ATTRACT_ITEM_DEMO:
+	case ATTRACT_ITEM_DEMO: {
+		/* Demo items play the recorded match fullscreen AND show a bg_attract
+		 * overlay panel on top (the poster strip/index chrome). The demo runs
+		 * at CA_CONNECTED, so bg_attract_policy keys its layer on the demo-
+		 * overlay predicate (see WiredAttract_IsDemoOverlayActive) to keep the
+		 * panel visible over the scene. Attract owning the demo-overlay is its
+		 * OWN chrome, not the user menu — the menu still hides attract. */
+		wiredMenuDef_t *panel;
 		wui_attract.ownsDemo = qtrue;
 		/* source is already validated — safe to use in command */
 		Cbuf_ExecuteText( EXEC_NOW, va( "demo %s\n", item->source ) );
+		panel = WiredUI_FindMenu( "attract_demo_overlay" );
+		if ( panel ) {
+			panel->visible = qtrue;
+			Q_strncpyz( wui_attract.pushedPanel, "attract_demo_overlay", sizeof( wui_attract.pushedPanel ) );
+		}
 		break;
+	}
 
-	case ATTRACT_ITEM_CINEMATIC:
+	case ATTRACT_ITEM_CINEMATIC: {
 		/* MVP: attract_cinematic.wmenu has a hardcoded cinematic.
 		   Store the file path in a WiredUI state key for the menu to read. */
+		wiredMenuDef_t *panel;
 		WiredUI_StateSetString( "attract.cinematic.file", item->source );
-		if ( WiredUI_FindMenu( "attract_cinematic" ) == NULL ) {
+		panel = WiredUI_FindMenu( "attract_cinematic" );
+		if ( panel == NULL ) {
 			Com_Log( SEV_INFO, LOG_CH(ch_ui), "attract: attract_cinematic menu not found, skipping\n" );
 			Attract_Advance();
 			return;
 		}
-		WiredUI_PushMenu( "attract_cinematic" );
+		panel->visible = qtrue;
 		Q_strncpyz( wui_attract.pushedPanel, "attract_cinematic", sizeof( wui_attract.pushedPanel ) );
 		break;
+	}
 
 	default:
 		Com_Log( SEV_INFO, LOG_CH(ch_ui), "attract: unknown item kind %d, skipping\n", item->kind );
@@ -237,7 +253,7 @@ static void Attract_Status_f( void ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "  attract_volume: %.2f\n",
 	            wui_attract.cvVolume ? wui_attract.cvVolume->value : 0.0f );
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "  ownsDemo      : %d (demoplaying=%d)\n",
-	            wui_attract.ownsDemo, clc.demoplaying );
+	            wui_attract.ownsDemo, clientActiveApp->clc.demoplaying );
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "  wiredHealthy  : %d\n", WiredUI_IsHealthy() );
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "  recoveryFail  : %d ms ago\n",
 	            WiredUI_GetLastRecoveryFailTime() != 0
@@ -333,10 +349,13 @@ void WiredAttract_Init( void ) {
 
 	wui_attract.transitionMs = 500; /* 250ms out + 250ms in */
 	wui_attract.loop         = qtrue;
-	wui_attract.prevClientState = cls.state;
+	wui_attract.prevClientState = clientActiveApp->state;
 
 	wui_attract.cvEnabled = Cvar_Get( "attract_enabled", "1", CVAR_ARCHIVE );
-	wui_attract.cvDelay   = Cvar_Get( "attract_delay",  "30", CVAR_ARCHIVE );
+	/* Zero-delay default: attract surface up from boot. Modders raise
+	 * attract_delay to restore the legacy "wait N seconds of idle
+	 * before starting" behaviour. */
+	wui_attract.cvDelay   = Cvar_Get( "attract_delay",  "0", CVAR_ARCHIVE );
 	wui_attract.cvVolume  = Cvar_Get( "attract_volume", "0.5", CVAR_ARCHIVE );
 
 	Cmd_AddCommand( "attract_start",   Attract_Start_f );
@@ -352,6 +371,18 @@ void WiredAttract_Init( void ) {
 	wui_attract.initialized = qtrue;
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "WiredAttract: initialized (%d items in playlist)\n",
 	            wui_attract.playlistCount );
+
+	/* Boot kick into WAITING so the per-frame tick promotes to PLAYING
+	 * on the first frame with attract_delay=0. WAITING (not STARTING)
+	 * preserves the existing elapsed-vs-delay authority; raising
+	 * attract_delay restores the boot delay naturally. */
+	if ( wui_attract.cvEnabled && wui_attract.cvEnabled->integer
+	  && wui_attract.playlistCount > 0
+	  && clientActiveApp->state < CA_ACTIVE ) {
+		wui_attract.disconnectTime = cls.realtime;
+		wui_attract.lastInputTime  = cls.realtime;
+		wui_attract.state          = ATTRACT_STATE_WAITING;
+	}
 }
 
 void WiredAttract_Shutdown( void ) {
@@ -376,17 +407,17 @@ void WiredAttract_Frame( int msec ) {
 	if ( !wui_attract.cvEnabled || !wui_attract.cvEnabled->integer ) return;
 
 	/* ── edge detect cls.state (connect / disconnect) ─────────────── */
-	if ( wui_attract.prevClientState == CA_ACTIVE && cls.state < CA_ACTIVE ) {
+	if ( wui_attract.prevClientState == CA_ACTIVE && clientActiveApp->state < CA_ACTIVE ) {
 		/* Just disconnected — start idle timer */
 		wui_attract.disconnectTime = cls.realtime;
 		if ( wui_attract.state != ATTRACT_STATE_STOPPED ) {
 			wui_attract.state = ATTRACT_STATE_WAITING;
 		}
-	} else if ( wui_attract.prevClientState < CA_ACTIVE && cls.state == CA_ACTIVE ) {
+	} else if ( wui_attract.prevClientState < CA_ACTIVE && clientActiveApp->state == CA_ACTIVE ) {
 		/* Just connected — stop attract */
 		WiredAttract_Stop();
 	}
-	wui_attract.prevClientState = cls.state;
+	wui_attract.prevClientState = clientActiveApp->state;
 
 	/* ── edge detect Com_HasLastError — stop attract immediately ──── */
 	{
@@ -401,28 +432,21 @@ void WiredAttract_Frame( int msec ) {
 
 	/* ── demo ownership sanity (handles /disconnect during attract) ── */
 	if ( wui_attract.state == ATTRACT_STATE_PLAYING &&
-	     wui_attract.ownsDemo && !clc.demoplaying ) {
+	     wui_attract.ownsDemo && !clientActiveApp->clc.demoplaying ) {
 		wui_attract.ownsDemo = qfalse;
 		Attract_Advance();
 		return;
 	}
 
 	/* ── gate: only advance state machine while disconnected and idle ─ */
-	if ( cls.state >= CA_ACTIVE ) return;
+	if ( clientActiveApp->state >= CA_ACTIVE ) return;
 	if ( Com_HasLastError() ) return;
 
-	/* Don't fight user menus — only run when attract owns the stack */
-	{
-		int depth = WiredUI_GetMenuStackDepth();
-		if ( depth > 0 ) {
-			const char *top = WiredUI_GetMenuStackTop();
-			if ( wui_attract.pushedPanel[0] == '\0' ||
-			     Q_stricmp( top, wui_attract.pushedPanel ) != 0 ) {
-				/* A user menu is on top that we didn't push — back off */
-				goto draw_transition;
-			}
-		}
-	}
+	/* Attract panels live on WUI_LAYER_BG_ATTRACT and the scheduler
+	 * drives their visibility directly (not via the menu stack). The
+	 * legacy "back off if a user menu is on top" gate retires — attract
+	 * keeps cycling its playlist as a persistent background surface
+	 * while the user navigates menus on the foreground layer. */
 
 	/* ── state dispatch ──────────────────────────────────────────────── */
 	int curState = (int)wui_attract.state;
@@ -508,10 +532,10 @@ void WiredAttract_NoteInput( int key ) {
 
 	wui_attract.lastInputTime = cls.realtime;
 
-	if ( wui_attract.state == ATTRACT_STATE_PLAYING ||
-	     wui_attract.state == ATTRACT_STATE_TRANSITIONING ) {
-		WiredAttract_Stop();
-	}
+	/* User input no longer stops attract. The scheduler keeps cycling
+	 * on the bg_attract layer until clientActiveApp->state leaves CA_DISCONNECTED;
+	 * the foreground menu (promoted by cl_keys.c first-input branch)
+	 * draws on top. */
 }
 
 void WiredAttract_NoteMouse( int dx, int dy ) {
@@ -519,11 +543,7 @@ void WiredAttract_NoteMouse( int dx, int dy ) {
 	if ( dx * dx + dy * dy <= 64 ) return;
 
 	wui_attract.lastInputTime = cls.realtime;
-
-	if ( wui_attract.state == ATTRACT_STATE_PLAYING ||
-	     wui_attract.state == ATTRACT_STATE_TRANSITIONING ) {
-		WiredAttract_Stop();
-	}
+	/* Stop semantics retired — see WiredAttract_NoteInput. */
 }
 
 /* ── SafeReload hook ─────────────────────────────────────────────────── */
@@ -574,6 +594,15 @@ qboolean WiredAttract_IsActive( void ) {
 	       ( wui_attract.state == ATTRACT_STATE_PLAYING ||
 	         wui_attract.state == ATTRACT_STATE_STARTING ||
 	         wui_attract.state == ATTRACT_STATE_TRANSITIONING );
+}
+
+qboolean WiredAttract_IsDemoOverlayActive( void ) {
+	/* True while attract is playing a demo it owns — the window in which the
+	 * bg_attract layer must stay active (state is CA_CONNECTED, not
+	 * DISCONNECTED) so the demo-overlay panel renders over the match. */
+	return wui_attract.initialized &&
+	       wui_attract.ownsDemo &&
+	       clientActiveApp->clc.demoplaying;
 }
 
 /* ── completion callbacks ────────────────────────────────────────────── */

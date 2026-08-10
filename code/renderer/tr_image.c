@@ -3,6 +3,9 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_image.c
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 static byte	s_intensitytable[256];
 static byte	s_gammatable[256];
@@ -74,7 +77,7 @@ void GL_TextureMode( const char *string ) {
 	}
 
 	if ( mode == NULL ) {
-		ri.Log( SEV_INFO, "bad texture filter name '%s'\n", string );
+		R_LOG( rch_assets, SEV_INFO, "bad texture filter name '%s'\n", string );
 		return;
 	}
 
@@ -86,7 +89,7 @@ void GL_TextureMode( const char *string ) {
 	if ( glConfig.hardwareType == GLHW_3DFX_2D3D && gl_filter_max == GL_LINEAR &&
 		gl_filter_min == GL_LINEAR_MIPMAP_LINEAR ) {
 		gl_filter_min = GL_LINEAR_MIPMAP_NEAREST;
-		ri.Log( SEV_INFO, "Refusing to set trilinear on a voodoo.\n" );
+		R_LOG( rch_assets, SEV_INFO, "Refusing to set trilinear on a voodoo.\n" );
 	}
 
 	// change all the existing mipmap texture objects
@@ -131,7 +134,7 @@ void R_ImageList_f( void ) {
 	int i, estTotalSize = 0;
 	char *name, buf[MAX_QPATH*2 + 5];
 
-	ri.Log( SEV_INFO, "\n -n- --w-- --h-- type  -size- --name-------\n" );
+	R_LOG( rch_assets, SEV_INFO, "\n -n- --w-- --h-- type  -size- --name-------\n" );
 
 	for ( i = 0; i < tr.numImages; i++ )
 	{
@@ -205,13 +208,13 @@ void R_ImageList_f( void ) {
 			name = buf;
 		}
 
-		ri.Log( SEV_INFO, " %3i %5i %5i %s %4i%s %s\n", i, image->uploadWidth, image->uploadHeight, format, displaySize, sizeSuffix, name );
+		R_LOG( rch_assets, SEV_INFO, " %3i %5i %5i %s %4i%s %s\n", i, image->uploadWidth, image->uploadHeight, format, displaySize, sizeSuffix, name );
 		estTotalSize += estSize;
 	}
 
-	ri.Log( SEV_INFO, " -----------------------\n" );
-	ri.Log( SEV_INFO, " approx %i kbytes\n", (estTotalSize + 1023) / 1024 );
-	ri.Log( SEV_INFO, " %i total images\n\n", tr.numImages );
+	R_LOG( rch_assets, SEV_INFO, " -----------------------\n" );
+	R_LOG( rch_assets, SEV_INFO, " approx %i kbytes\n", (estTotalSize + 1023) / 1024 );
+	R_LOG( rch_assets, SEV_INFO, " %i total images\n\n", tr.numImages );
 }
 
 //=======================================================================
@@ -987,7 +990,7 @@ static const char *R_LoadImage( const char *name, byte **pic, int *width, int *h
 #if 0
 			if ( orgNameFailed )
 			{
-				ri.Log( SEV_DEBUG, S_COLOR_YELLOW "WARNING: %s not present, using %s instead\n",
+				R_LOG( rch_assets, SEV_DEBUG, S_COLOR_YELLOW "WARNING: %s not present, using %s instead\n",
 						name, altName );
 			}
 #endif
@@ -1031,7 +1034,7 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 			// the white image can be used with any set of parms, but other mismatches are errors
 			if ( strcmp( name, "*white" ) != 0 ) {
 				if ( image->flags != flags ) {
-					ri.Log( SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
+					R_LOG( rch_assets, SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", name, image->flags, flags );
 				}
 			}
 			return image;
@@ -1045,7 +1048,7 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 			if ( !Q_stricmp( strippedName, image->imgName ) ) {
 				//if ( strcmp( strippedName, "*white" ) ) {
 					if ( image->flags != flags ) {
-						ri.Log( SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", strippedName, image->flags, flags );
+						R_LOG( rch_assets, SEV_DEBUG, "WARNING: reused image %s with mixed flags (%i vs %i)\n", strippedName, image->flags, flags );
 					}
 				//}
 				return image;
@@ -1662,12 +1665,12 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	int			totalSurfaces;
 
 	if ( !name || !name[0] ) {
-		ri.Log( SEV_DEBUG, "Empty name passed to RE_RegisterSkin\n" );
+		R_LOG( rch_assets, SEV_DEBUG, "Empty name passed to RE_RegisterSkin\n" );
 		return 0;
 	}
 
 	if ( strlen( name ) >= MAX_QPATH ) {
-		ri.Log( SEV_DEBUG, "Skin name exceeds MAX_QPATH\n" );
+		R_LOG( rch_assets, SEV_DEBUG, "Skin name exceeds MAX_QPATH\n" );
 		return 0;
 	}
 
@@ -1685,7 +1688,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 
 	// allocate a new skin
 	if ( tr.numSkins == MAX_SKINS ) {
-		ri.Log( SEV_WARN, "WARNING: RE_RegisterSkin( '%s' ) MAX_SKINS hit\n", name );
+		R_LOG( rch_assets, SEV_WARN, "WARNING: RE_RegisterSkin( '%s' ) MAX_SKINS hit\n", name );
 		return 0;
 	}
 	tr.numSkins++;
@@ -1748,7 +1751,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	ri.FS_FreeFile( text.v );
 
 	if ( totalSurfaces > MAX_SKIN_SURFACES ) {
-		ri.Log( SEV_WARN, "WARNING: Ignoring excess surfaces (found %d, max is %d) in skin '%s'!\n",
+		R_LOG( rch_assets, SEV_WARN, "WARNING: Ignoring excess surfaces (found %d, max is %d) in skin '%s'!\n",
 					totalSurfaces, MAX_SKIN_SURFACES, name );
 	}
 
@@ -1806,16 +1809,16 @@ void	R_SkinList_f( void ) {
 	int			i, j;
 	skin_t		*skin;
 
-	ri.Log( SEV_INFO, "------------------\n");
+	R_LOG( rch_assets, SEV_INFO, "------------------\n");
 
 	for ( i = 0 ; i < tr.numSkins ; i++ ) {
 		skin = tr.skins[i];
 
-		ri.Log( SEV_INFO, "%3i:%s (%d surfaces)\n", i, skin->name, skin->numSurfaces );
+		R_LOG( rch_assets, SEV_INFO, "%3i:%s (%d surfaces)\n", i, skin->name, skin->numSurfaces );
 		for ( j = 0 ; j < skin->numSurfaces ; j++ ) {
-			ri.Log( SEV_INFO, "       %s = %s\n",
+			R_LOG( rch_assets, SEV_INFO, "       %s = %s\n",
 				skin->surfaces[j].name, skin->surfaces[j].shader->name );
 		}
 	}
-	ri.Log( SEV_INFO, "------------------\n");
+	R_LOG( rch_assets, SEV_INFO, "------------------\n");
 }

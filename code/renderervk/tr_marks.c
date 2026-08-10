@@ -233,6 +233,10 @@ static void R_AddMarkFragments(int numClipPoints, vec3_t clipPoints[2][MAX_VERTS
 =================
 R_MarkFragments
 
+Clips a projected mark polygon against the world surfaces and returns the
+resulting fragments. Exposed through the renderer's public interface
+(re.MarkFragments); impact marks no longer use it — they project on the GPU
+via the decal pass (RB_DrawDecals) — but the export is retained for the ABI.
 =================
 */
 int R_MarkFragments( int numPoints, const vec3_t *points, const vec3_t projection,

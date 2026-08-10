@@ -13,7 +13,11 @@ Flags: Q1_IMGF_* (renderer-agnostic; each callback maps to imgFlags_t).
 */
 
 #include "r_q1_texture.h"
-#include "maps/bsp.h"             /* full bspFile_t definition */
+#include "maps/map_format_registry.h"             /* full mapFile_t definition */
+#include "r_log.h"                /* rilog-channel-mechanism Turn B — renderer.assets */
+
+R_LOG_DECLARE_CHANNEL( rch_assets,    "renderer.assets"    );
+R_LOG_DECLARE_CHANNEL( rch_assets_q1, "renderer.assets.q1" );
 
 /* =========================================================================
    Standard Quake 1 palette — 256 RGB triplets (768 bytes total).
@@ -246,7 +250,7 @@ typedef struct {
    R_Q1_PrepareTextures
    ========================================================================= */
 
-void R_Q1_PrepareTextures( const bspFile_t *bsp ) {
+void R_Q1_PrepareTextures( const mapFile_t *bsp ) {
     const byte   *lump;
     int           lumpLen;
     int32_t       numMipTex;
@@ -270,7 +274,7 @@ void R_Q1_PrepareTextures( const bspFile_t *bsp ) {
 
     numMipTex = LittleLong( *(const int32_t *)lump );
     if ( numMipTex <= 0 || numMipTex > 2048 ) {
-        ri.Log( SEV_WARN, "R_Q1_PrepareTextures: bogus numMipTex %d\n", numMipTex );
+        R_LOG( rch_assets, SEV_WARN, "R_Q1_PrepareTextures: bogus numMipTex %d\n", numMipTex );
         return;
     }
 
@@ -304,16 +308,16 @@ void R_Q1_PrepareTextures( const bspFile_t *bsp ) {
         /* Parts 2 & 3 — pixel decode + expand sanity (first miptex only) */
         if ( s_cacheCount == 0 ) {
             int pi;
-            ri.Log( SEV_INFO, "Miptex '%s' (%ux%u) first 16 pixels:", hdr->name, w, h );
+            R_LOG( rch_assets, SEV_INFO, "Miptex '%s' (%ux%u) first 16 pixels:", hdr->name, w, h );
             for ( pi = 0; pi < 16 && pi < (int)(w * h); pi++ )
-                ri.Log( SEV_INFO, " %d", (int)pixdata[pi] );
-            ri.Log( SEV_INFO, "\n" );
+                R_LOG( rch_assets, SEV_INFO, " %d", (int)pixdata[pi] );
+            R_LOG( rch_assets, SEV_INFO, "\n" );
 
             /* Expand first 4 pixels inline and compare against palette lookup */
             {
                 byte tmp[16];
                 ExpandIndexed( pixdata, 4, tmp, 0, qfalse );
-                ri.Log( SEV_INFO,
+                R_LOG( rch_assets, SEV_INFO,
                     "Expanded '%s' first 4 RGBA:"
                     " (%d,%d,%d,%d) (%d,%d,%d,%d) (%d,%d,%d,%d) (%d,%d,%d,%d)\n",
                     hdr->name,
@@ -321,7 +325,7 @@ void R_Q1_PrepareTextures( const bspFile_t *bsp ) {
                     tmp[4],  tmp[5],  tmp[6],  tmp[7],
                     tmp[8],  tmp[9],  tmp[10], tmp[11],
                     tmp[12], tmp[13], tmp[14], tmp[15] );
-                ri.Log( SEV_INFO,
+                R_LOG( rch_assets, SEV_INFO,
                     "  palette check px[0]=idx%d → (%d,%d,%d), px[1]=idx%d → (%d,%d,%d)\n",
                     (int)pixdata[0],
                     q1_palette[pixdata[0]*3+0], q1_palette[pixdata[0]*3+1], q1_palette[pixdata[0]*3+2],
@@ -495,8 +499,8 @@ void R_Q1_PrepareTextures( const bspFile_t *bsp ) {
                 for ( si = 0; si < s_cacheCount; si++ ) {
                     if ( Q_stricmp( s_cache[si].name, sibName ) == 0 && scratch[si].pixdata ) {
                         if ( scratch[si].w != scratch[i].w || scratch[si].h != scratch[i].h ) {
-                            ri.Log( SEV_WARN,
-                                "[Q1ARRAY] '%s' frame %d dim mismatch (%ux%u vs %ux%u), skipping array\n",
+                            R_LOG( rch_assets_q1, SEV_WARN,
+                                "'%s' frame %d dim mismatch (%ux%u vs %ux%u), skipping array\n",
                                 entry->name, k,
                                 scratch[si].w, scratch[si].h,
                                 scratch[i].w,  scratch[i].h );
@@ -510,7 +514,7 @@ void R_Q1_PrepareTextures( const bspFile_t *bsp ) {
                     }
                 }
                 if ( !frames[k] ) {
-                    ri.Log( SEV_WARN, "[Q1ARRAY] '%s' frame %d missing, skipping array\n",
+                    R_LOG( rch_assets_q1, SEV_WARN, "'%s' frame %d missing, skipping array\n",
                             entry->name, k );
                     goto cleanup;
                 }
@@ -521,7 +525,7 @@ void R_Q1_PrepareTextures( const bspFile_t *bsp ) {
                                                    (int)scratch[i].w, (int)scratch[i].h,
                                                    Q1_IMGF_MIPMAP | Q1_IMGF_PICMIP );
             arrBuilt++;
-            ri.Log( SEV_DEBUG, "[Q1ARRAY] '%s' numFrames=%d animArray=%s layerCount=%d\n",
+            R_LOG( rch_assets_q1, SEV_DEBUG, "'%s' numFrames=%d animArray=%s layerCount=%d\n",
                     entry->name, N,
                     entry->animArray ? "non-null" : "null", N );
 
@@ -530,13 +534,13 @@ void R_Q1_PrepareTextures( const bspFile_t *bsp ) {
                 if ( frames[k] ) ri.Free( frames[k] );
             }
         }
-        ri.Log( SEV_INFO, "R_Q1_PrepareTextures: %d texture arrays built\n", arrBuilt );
+        R_LOG( rch_assets, SEV_INFO, "R_Q1_PrepareTextures: %d texture arrays built\n", arrBuilt );
     }
 
     {
         /* Estimate GPU memory: 4 bytes/px × ~1.33 mip chain × 2 (diffuse+glow) */
         float mbGPU = (float)totalPx * 4 * 1.33f * 2.0f / ( 1024.0f * 1024.0f );
-        ri.Log( SEV_INFO,
+        R_LOG( rch_assets, SEV_INFO,
             "R_Q1_PrepareTextures: %d miptextures, %d with fullbright glow,"
             " %d with normalmap, %d skipped, ~%.1f MB GPU\n",
             s_cacheCount, withGlow, withNormal, skipped, mbGPU );

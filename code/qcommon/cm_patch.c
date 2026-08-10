@@ -4,7 +4,6 @@
 
 #include "cm_local.h"
 #include "cm_patch.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_collision, "collision" );
 
 /*

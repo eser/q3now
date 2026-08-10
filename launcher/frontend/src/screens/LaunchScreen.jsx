@@ -198,10 +198,10 @@ export default function LaunchScreen({
 
   const formattedDate = appState.importedAt
     ? new Date(appState.importedAt).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    })
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      })
     : null;
 
   return (
@@ -224,10 +224,7 @@ export default function LaunchScreen({
           <span style={styles.shortcut}>L</span>
         </button>
 
-        <button
-          style={styles.menuButton}
-          onClick={onGameOptions}
-        >
+        <button style={styles.menuButton} onClick={onGameOptions}>
           Launch with Options
           <span style={styles.shortcut}>O</span>
         </button>
@@ -238,7 +235,7 @@ export default function LaunchScreen({
               style={{ ...styles.statusDot, background: "var(--success)" }}
             />
           )}
-          Host Dedicated Server
+          Host Headless Server
           <span style={styles.shortcut}>S</span>
         </button>
 
@@ -254,11 +251,7 @@ export default function LaunchScreen({
           <span style={styles.shortcut}>T</span>
         </button>
 
-        <button
-          style={styles.quitButton}
-          onClick={() =>
-            Quit()}
-        >
+        <button style={styles.quitButton} onClick={() => Quit()}>
           Quit
           <span style={styles.shortcut}>Q</span>
         </button>

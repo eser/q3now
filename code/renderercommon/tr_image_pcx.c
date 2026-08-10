@@ -6,6 +6,9 @@
 #include "../qcommon/q_shared.h"
 #include "../renderercommon/tr_public.h"
 #include "../qcommon/q_feats.h"
+#include "r_log.h"                       // rilog-channel-mechanism Turn B — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 #if FEAT_LEGACY_FORMATS_IMAGE
 
@@ -67,7 +70,7 @@ void R_LoadPCX ( const char *filename, byte **pic, int *width, int *height)
 
 	if((unsigned)len < sizeof(pcx_t))
 	{
-		ri.Log( SEV_INFO, "PCX truncated: %s\n", filename);
+		R_LOG( rch_assets, SEV_INFO, "PCX truncated: %s\n", filename);
 		ri.FS_FreeFile (raw.v);
 		return;
 	}
@@ -90,7 +93,7 @@ void R_LoadPCX ( const char *filename, byte **pic, int *width, int *height)
 		|| w >= 1024
 		|| h >= 1024)
 	{
-		ri.Log( SEV_INFO, "Bad or unsupported pcx file %s (%dx%d@%d)\n", filename, w, h, pcx->bits_per_pixel);
+		R_LOG( rch_assets, SEV_INFO, "Bad or unsupported pcx file %s (%dx%d@%d)\n", filename, w, h, pcx->bits_per_pixel);
 		return;
 	}
 
@@ -123,14 +126,14 @@ void R_LoadPCX ( const char *filename, byte **pic, int *width, int *height)
 
 	if(pix < pic8+size)
 	{
-		ri.Log( SEV_INFO, "PCX file truncated: %s\n", filename);
+		R_LOG( rch_assets, SEV_INFO, "PCX file truncated: %s\n", filename);
 		ri.FS_FreeFile (pcx);
 		ri.Free (pic8);
 	}
 
 	if (raw.b-(byte*)pcx >= end - (byte*)769 || end[-769] != 0x0c)
 	{
-		ri.Log( SEV_INFO, "PCX missing palette: %s\n", filename);
+		R_LOG( rch_assets, SEV_INFO, "PCX missing palette: %s\n", filename);
 		ri.FS_FreeFile (pcx);
 		ri.Free (pic8);
 		return;

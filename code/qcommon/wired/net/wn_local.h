@@ -22,6 +22,12 @@ Shared between wn_*.c files. Not included by engine code — use wn_public.h.
 // ───────────────────────────────────────────────────────────────────
 
 #define WN_MAX_CLIENTS          8       // sv_wirednetMaxClients default
+
+// Per-app local client slots (in-process-queue P1/L1). Mirrors the cgame VM
+// table bound MAX_LOCAL_CGAME_VMS (vm_local.h) — kept as a local constant here
+// to avoid a net→vm layering include; a static_assert in wn_transport.c proves
+// the two stay equal. Single-app today uses only slot 0.
+#define WN_MAX_LOCAL_CLIENTS    4
 #define WN_ALPN                 "q3v69"
 #define WN_EVENT_RING_SIZE      65536   // 64KB event ring buffer
 #define WN_PACKET_BUF_SIZE      1536    // max UDP packet (MTU + headroom)
@@ -86,9 +92,21 @@ typedef struct {
 // Per-player QUIC game connection state (one slot per connected game client)
 typedef struct wn_game_conn_s {
 	qboolean            active;
-	struct wn_connection_s *conn;           // owning QUIC connection (back-pointer)
+	struct wn_connection_s *conn;           // owning QUIC connection (back-pointer); NULL for an in-process app conn
+	conn_handle_t       pub_handle;         // handle published to the server layer + returned by WN_ServerRecvUsercmd.
+	                                        // QUIC: slot+1 (1..WN_MAX_CLIENTS) — byte-identical to the legacy i+1.
+	                                        // In-mem: the SERVER end WN_APP_SVCONN_BASE+app_slot (110..) so
+	                                        // transport_for_handle() routes this conn's outbound back through
+	                                        // inmem_transport (the client end is WN_APP_CONN_BASE+slot, 100..).
 	wn_game_hs_state_t  hs_state;
 	uint64_t            handshake_stream_id; // Stream 0x00 handle (session control)
+
+	/* In-process-queue B4: deferred teardown. wn_inmem_disconnect sets this
+	 * instead of freeing immediately, so the pending in-band "disconnect"
+	 * reliable command in rel_queue is drained by SV_DrainQUICReliableCommands
+	 * FIRST; WN_DrainPendingFrees (after that drain) then frees the conn. Always
+	 * qfalse for a QUIC conn (it is dropped via the transport drop_client path). */
+	qboolean            pending_free;
 
 	// Single-producer (QUIC callback), single-consumer (NET_Event main loop)
 	// lock-free ring: head written by producer, tail read by consumer
@@ -273,7 +291,16 @@ void             WN_HttpHandleRequest( wn_connection_t *conn, uint64_t stream_id
 
 // wn_transport.c — WiredNet game transport (snapshot/usercmd datagrams + session handshake)
 	wn_game_conn_t  *WN_GameAllocConn( wn_connection_t *conn );
+	wn_game_conn_t  *WN_GameAllocConnApp( int app_slot );
 	void             WN_GameFreeConn( wn_game_conn_t *gc );
+
+	/* SPSC reliable ring ops shared by the QUIC + in-memory backends. */
+	qboolean         wn_reliable_queue_push( wn_rel_msg_t *queue, volatile int *head,
+	                                          volatile int *tail, int channel,
+	                                          const byte *data, int len );
+	qboolean         wn_reliable_queue_pop( wn_rel_msg_t *queue, volatile int *head,
+	                                         volatile int *tail, int *channel_out,
+	                                         byte *buf, int *len_out );
 	void             WN_GameHandleDatagram( wn_connection_t *conn, const byte *data, int len );
 	void             WN_GameHandleHandshake( wn_connection_t *conn, uint64_t stream_id,
 	                                          const byte *data, int len );
@@ -282,7 +309,7 @@ void             WN_HttpHandleRequest( wn_connection_t *conn, uint64_t stream_id
 	void             WN_GameHandleReliable( wn_connection_t *conn, uint64_t stream_id,
 	                                         const byte *data, int len, qboolean fin );
 
-#if !defined(DEDICATED)
+#if !defined(HEADLESS)
 /*
  * wn_client_state_t — game-client QUIC context.
  * Created when a non-dedicated client connects to a remote server via QUIC.
@@ -338,7 +365,12 @@ typedef struct {
 	qboolean         pending_disconnect;
 } wn_client_state_t;
 
-extern wn_client_state_t wtcl;
+// Per-app client transport state (in-process-queue P1/L1). Was a single global
+// `wtcl`; now an array indexed by app slot. Single-app uses only wtcl_array[0]
+// (resolved from CONN_CLIENT_HANDLE), byte-identical to the former singleton.
+// Higher slots are reachable only via the WN_APP_CONN_BASE handle range, which
+// no producer emits until the spawn phase (P5).
+extern wn_client_state_t wtcl_array[WN_MAX_LOCAL_CLIENTS];
 
 // wn_transport.c
 void     WN_ClientConnect( const netadr_t *serverAddr, const char *userinfo, int qport );
@@ -346,12 +378,16 @@ void     WN_ClientFrame( void );     // pump picoquic client timers + flush outb
 void     WN_ClientDisconnect( void );
 qboolean WN_ClientIsConnecting( void );
 qboolean WN_ClientCheckPacket( const netadr_t *from, byte *buf, int len );
-qboolean WN_ClientGetPacket( netadr_t *from, msg_t *message );
 void     WN_ClientSendPacket( const netadr_t *to, const void *data, int length );
+
+/* Snapshot of recv_queue overflow drops since process start (client only). */
+uint32_t WN_GetRecvQueueFullDrops( void );
 #endif
 
-/* transport_t vtable — implemented in wn_transport.c */
+/* transport_t vtable — implemented in wn_transport.c. wn_public.h declares the
+ * backends (quic_transport / inmem_transport), the WN_APP_CONN_BASE range, and
+ * the transport_for_handle selector; pull it in so all wn_*.c share one source. */
 #include "../../net_transport.h"
-extern transport_t quic_transport;
+#include "wn_public.h"
 
 #endif // WN_LOCAL_H

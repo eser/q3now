@@ -21,9 +21,9 @@
 
 #include "../client/client.h"
 #include "../renderercommon/tr_public.h"
+#include "../qcommon/wired/stalltrace.h"
 #include "sdl_glw.h"
 #include "sdl_icon.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 typedef enum {
@@ -43,7 +43,6 @@ static PFN_vkGetInstanceProcAddr qvkGetInstanceProcAddr;
 #endif
 
 cvar_t *r_stereoEnabled;
-cvar_t *in_nograb;
 
 /*
 ===============
@@ -56,7 +55,9 @@ void GLimp_Shutdown( qboolean unloadDLL )
 
 	IN_Shutdown();
 
-	if ( glw_state.isFullscreen ) {
+	// Skip the cursor recenter under com_automated: a non-interactive run must
+	// never move the user's real cursor, even on shutdown.
+	if ( glw_state.isFullscreen && !( com_automated && com_automated->integer ) ) {
 		if ( drv && strcmp( drv, "x11" ) == 0 ) {
 			// NOLINTNEXTLINE(bugprone-integer-division) — pixel-aligned screen-center coordinates; integer math intentional
 			SDL_WarpMouseGlobal( (float)(glw_state.desktop_width / 2), (float)(glw_state.desktop_height / 2) );
@@ -66,12 +67,12 @@ void GLimp_Shutdown( qboolean unloadDLL )
 	}
 
 	if ( SDL_window ) {
-		SDL_DestroyWindow( SDL_window );
+		STALLTRACE( "SDL_DestroyWindow", SDL_DestroyWindow( SDL_window ) );
 		SDL_window = NULL;
 	}
 
 	if ( unloadDLL )
-		SDL_QuitSubSystem( SDL_INIT_VIDEO );
+		STALLTRACE( "SDL_QuitSubSystem(VIDEO)", SDL_QuitSubSystem( SDL_INIT_VIDEO ) );
 }
 
 
@@ -219,6 +220,34 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Initializing OpenGL display\n");
 	}
 
+	// Request a full physical-pixel backing on HiDPI displays. Without this flag a
+	// window on a scaled (e.g. 2x) display is backed at the logical (downscaled)
+	// resolution, so SDL_GetWindowSizeInPixels would report the logical size and the
+	// swapchain/viewport (which read pixel size) would render below native
+	// resolution. With it, pixel size is the true physical size and the render path
+	// runs at full resolution. On a 1x display logical == pixel, so this is a no-op.
+	flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
+
+	// Automated (non-interactive) run: open the window in the BACKGROUND z-order,
+	// unactivated, so it does not pop over or steal focus from the user's work — but
+	// keep it a NORMAL, taskbar-visible window the user can alt-tab / click to the
+	// front when they want it. The mechanism is "show without activating": the window
+	// is created HIDDEN, then SDL_ShowWindow is called with the ACTIVATE_WHEN_SHOWN
+	// hint "0" (set just before the show, below), so on Windows it maps to
+	// ShowWindow(SW_SHOWNOACTIVATE) — shown in place, not raised, not focused, still in
+	// the taskbar.
+	//
+	// NOT SDL_WINDOW_NOT_FOCUSABLE: that flag only blocks input focus, but on Windows
+	// it realises as WS_EX_NOACTIVATE which ALSO drops the taskbar button and makes the
+	// window unreachable — the opposite of what is wanted here. NOT SDL_WINDOW_UTILITY
+	// (explicitly "not showing in the task bar"). The window stays SHOWN once
+	// SDL_ShowWindow runs (below) so the swapchain keeps rendering for capture — only a
+	// minimized/hidden window stalls the swapchain (gw_minimized gate), and this one is
+	// only momentarily hidden between create and the immediate show. Interactive runs
+	// (com_automated 0) are unaffected.
+	if ( com_automated && com_automated->integer )
+		flags |= SDL_WINDOW_HIDDEN;
+
 	// If a window exists, note its display
 	if ( SDL_window != NULL )
 	{
@@ -260,9 +289,17 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		glw_state.desktop_height = 480;
 	}
 
-	// For windowed mode, clamp to usable display area so the window
-	// does not extend behind the menu bar, taskbar, or dock
-	if ( !fullscreen && displayID != 0 )
+	// For BORDERED windowed mode, clamp to usable display area so the
+	// window does not sit behind the menu bar, taskbar, or dock.
+	//
+	// window-input-fix STEP 1(a) — gate on !r_noborder as well as !fullscreen.
+	// A borderless window (`r_noborder=1`) is fake-fullscreen intent: it must
+	// cover the menu bar / dock, not sit inside the usable strip. Without this
+	// gate, a macOS borderless window sized to the usable region (clamped here)
+	// + positioned at (vid_xpos,vid_ypos) leaves desktop visible at the edges.
+	// Bordered-windowed mode keeps the clamp — it still wants to stay inside
+	// the OS chrome.
+	if ( !fullscreen && !r_noborder->integer && displayID != 0 )
 	{
 		SDL_Rect bounds, usable;
 		if ( SDL_GetDisplayBounds( displayID, &bounds ) && SDL_GetDisplayUsableBounds( displayID, &usable ) )
@@ -442,8 +479,13 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		}
 
 		// SDL3: SDL_CreateWindow no longer takes x, y params.
-		// Create window first, then set position.
-		if ( ( SDL_window = SDL_CreateWindow( cl_title, config->vidWidth, config->vidHeight, flags ) ) == NULL )
+		// Create window first, then set position. Under com_automated the
+		// SDL_WINDOW_HIDDEN flag (set above) keeps the create from showing/activating
+		// the window; it is shown unactivated below once positioned (see SDL_ShowWindow
+		// with the ACTIVATE_WHEN_SHOWN hint).
+		STALLTRACE( "SDL_CreateWindow",
+			SDL_window = SDL_CreateWindow( cl_title, config->vidWidth, config->vidHeight, flags ) );
+		if ( SDL_window == NULL )
 		{
 			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "SDL_CreateWindow failed: %s\n", SDL_GetError() );
 			continue;
@@ -451,9 +493,31 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 
 		if ( !fullscreen )
 		{
-			SDL_SetWindowPosition( SDL_window, x, y );
+			// window-input-fix STEP 1(b) — position borderless windows at the
+			// display origin. Borderless = fake-fullscreen intent; the window
+			// covers the display from (0,0) to (desktop_w, desktop_h). The
+			// (vid_xpos, vid_ypos) defaults (3, 22) were sized for bordered
+			// windows to clear the title bar — leaving them in place for
+			// borderless produces visible desktop strips at the top + left edges.
+			// Bordered-windowed mode keeps the saved (vid_xpos, vid_ypos).
+			if ( r_noborder->integer )
+				SDL_SetWindowPosition( SDL_window, 0, 0 );
+			else
+				SDL_SetWindowPosition( SDL_window, x, y );
 
-			// Resize if the window extends beyond the display
+			// Resize if the window extends beyond the display.
+			// window-input-fix STEP 1(c) — skip the shrink for borderless.
+			// The overflow check measures (winY + borderTop + contentH) against
+			// the full display bottom (SDL_GetDisplayBounds, NOT usable). For a
+			// borderless window at (0,0) sized to the full display, overflow
+			// resolves to 0 — but SDL_GetWindowBordersSize behaviour on
+			// borderless windows is platform-quirky (macOS in particular has
+			// reported non-zero values for compositor-decorated borderless
+			// surfaces in some SDL3 builds), and a stray non-zero borderTop
+			// would re-introduce the size regression by shrinking the window.
+			// Skip the block entirely for borderless — the fake-fullscreen
+			// sizing is already exact.
+			if ( !r_noborder->integer )
 			{
 				SDL_DisplayID winDisplay = SDL_GetDisplayForWindow( SDL_window );
 				SDL_Rect dBounds;
@@ -585,6 +649,21 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 			SDL_DestroySurface( icon );
 		}
 #endif
+
+		// Automated run: the window was created HIDDEN (flags above). Show it now
+		// WITHOUT activating it — ACTIVATE_WHEN_SHOWN "0" makes SDL_ShowWindow map to a
+		// no-activate show (ShowWindow(SW_SHOWNOACTIVATE) on Windows), so the window
+		// appears in the BACKGROUND z-order (the user's active window stays in front),
+		// does not take focus, and stays a normal taskbar window (reachable via
+		// alt-tab / click). After this the window is SHOWN, so the swapchain renders
+		// for capture (the #207 contract). The interactive path never set HIDDEN, so
+		// this branch is skipped and the window shows + activates normally.
+		if ( com_automated && com_automated->integer )
+		{
+			SDL_SetHint( SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0" );
+			SDL_SetHint( SDL_HINT_WINDOW_ACTIVATE_WHEN_RAISED, "0" );
+			SDL_ShowWindow( SDL_window );
+		}
 	}
 	else
 	{
@@ -598,13 +677,25 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 	// SDL3: SDL_GetWindowSizeInPixels replaces both SDL_GL_GetDrawableSize and SDL_Vulkan_GetDrawableSize
 	SDL_GetWindowSizeInPixels( SDL_window, &config->vidWidth, &config->vidHeight );
 
+	// Logical (DPI-independent) point size — drives dpiScale in the WiredUI
+	// compositor (dpiScale = vidWidth / vidWidthLogical). On a non-HiDPI display
+	// this equals the physical pixel size and dpiScale comes out 1.0.
+	SDL_GetWindowSize( SDL_window, &config->vidWidthLogical, &config->vidHeightLogical );
+
 	// save render dimensions as renderer may change it in advance
 	glw_state.window_width = config->vidWidth;
 	glw_state.window_height = config->vidHeight;
 
-	// SDL3: SDL_WarpMouseInWindow takes float coords
-	// NOLINTNEXTLINE(bugprone-integer-division) — pixel-aligned window-center coordinates; integer math intentional
-	SDL_WarpMouseInWindow( SDL_window, (float)(glw_state.window_width / 2), (float)(glw_state.window_height / 2) );
+	// SDL_WarpMouseInWindow takes window LOGICAL coordinates (not physical pixels),
+	// so recenter on the logical size — on a HiDPI display warping to pixel/2 would
+	// land at twice the intended position (off-window). At scale 1.0 logical ==
+	// pixel, so this is the same target as before. Skipped under com_automated: a
+	// non-interactive run must never move the user's real cursor at window create.
+	if ( !( com_automated && com_automated->integer ) )
+	{
+		// NOLINTNEXTLINE(bugprone-integer-division) — window-center coordinates; integer math intentional
+		SDL_WarpMouseInWindow( SDL_window, (float)(config->vidWidthLogical / 2), (float)(config->vidHeightLogical / 2) );
+	}
 
 	return RSERR_OK;
 }
@@ -619,9 +710,11 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 {
 	rserr_t err;
 
-	if ( fullscreen && in_nograb->integer )
+	// An automated (non-interactive) run stays windowed: fullscreen forces the
+	// window to the foreground, which defeats the unfocused-background intent.
+	if ( fullscreen && com_automated && com_automated->integer )
 	{
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "Fullscreen not allowed with \\in_nograb 1\n");
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Fullscreen not used with \\com_automated 1 (automated runs stay windowed + unfocused)\n");
 		Cvar_Set( "r_fullscreen", "0" );
 		fullscreen = qfalse;
 	}
@@ -658,7 +751,9 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 #endif
 
 		// SDL3: SDL_Init returns bool (true = success)
-		if ( !SDL_Init( SDL_INIT_VIDEO ) )
+		bool sdlInitOk;
+		STALLTRACE( "SDL_Init(VIDEO)", sdlInitOk = SDL_Init( SDL_INIT_VIDEO ) );
+		if ( !sdlInitOk )
 		{
 			Com_Log( SEV_INFO, LOG_CH(ch_client), "SDL_Init( SDL_INIT_VIDEO ) FAILED (%s)\n", SDL_GetError() );
 			return RSERR_FATAL_ERROR;
@@ -720,12 +815,6 @@ void GLimp_Init( glconfig_t *config )
 	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "GLimp_Init()\n" );
 
 	glw_state.config = config; // feedback renderer configuration
-
-	{
-		static const cvarDesc_t d = CVAR_BOOL( "in_nograb", "0", 0,
-			"Do not capture mouse in game, may be useful during online streaming." );
-		in_nograb = Cvar_Register( &d );
-	}
 
 	r_allowSoftwareGL = Cvar_Get( "r_allowSoftwareGL", "0", CVAR_LATCH );
 
@@ -820,12 +909,6 @@ void VKimp_Init( glconfig_t *config )
 
 	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "VKimp_Init()\n" );
 
-	{
-		static const cvarDesc_t d = CVAR_BOOL( "in_nograb", "0", CVAR_ARCHIVE,
-			"Do not capture mouse in game, may be useful during online streaming." );
-		in_nograb = Cvar_Register( &d );
-	}
-
 	r_swapInterval = Cvar_Get( "r_swapInterval", "0", CVAR_ARCHIVE | CVAR_LATCH );
 	{
 		static const cvarDesc_t d = CVAR_BOOL( "r_stereoEnabled", "0", CVAR_ARCHIVE | CVAR_LATCH,
@@ -916,7 +999,9 @@ void VKimp_Shutdown( qboolean unloadDLL )
 
 	IN_Shutdown();
 
-	if ( glw_state.isFullscreen ) {
+	// Skip the cursor recenter under com_automated: a non-interactive run must
+	// never move the user's real cursor, even on shutdown.
+	if ( glw_state.isFullscreen && !( com_automated && com_automated->integer ) ) {
 		if ( drv && strcmp( drv, "x11" ) == 0 ) {
 			// NOLINTNEXTLINE(bugprone-integer-division) — pixel-aligned screen-center coordinates; integer math intentional
 			SDL_WarpMouseGlobal( (float)(glw_state.desktop_width / 2), (float)(glw_state.desktop_height / 2) );
@@ -926,12 +1011,12 @@ void VKimp_Shutdown( qboolean unloadDLL )
 	}
 
 	if ( SDL_window ) {
-		SDL_DestroyWindow( SDL_window );
+		STALLTRACE( "SDL_DestroyWindow", SDL_DestroyWindow( SDL_window ) );
 		SDL_window = NULL;
 	}
 
 	if ( unloadDLL )
-		SDL_QuitSubSystem( SDL_INIT_VIDEO );
+		STALLTRACE( "SDL_QuitSubSystem(VIDEO)", SDL_QuitSubSystem( SDL_INIT_VIDEO ) );
 }
 #endif // USE_VULKAN_API
 
@@ -955,7 +1040,7 @@ Sys_GetClipboardData
 */
 char *Sys_GetClipboardData( void )
 {
-#ifdef DEDICATED
+#ifdef HEADLESS
 	return NULL;
 #else
 	char *data = NULL;
@@ -990,7 +1075,7 @@ SDL has no flash support the call becomes a no-op.
 */
 void Sys_FlashWindow( void )
 {
-#ifndef DEDICATED
+#ifndef HEADLESS
 	if ( SDL_window != NULL ) {
 		SDL_FlashWindow( SDL_window, SDL_FLASH_BRIEFLY );
 	}
@@ -1011,7 +1096,7 @@ by MessageBeep via the win32 backend.
 */
 void Sys_BeepAttention( void )
 {
-#ifndef DEDICATED
+#ifndef HEADLESS
 	/* SDL3 has no direct system beep API; fall back to the BEL control
 	   character which both terminals and modern desktop environments
 	   interpret as an attention signal. */
@@ -1031,7 +1116,7 @@ Used by console mark-mode copy and the help/search tooling.
 */
 void Sys_SetClipboardData( const char *text )
 {
-#ifdef DEDICATED
+#ifdef HEADLESS
 	(void)text;
 #else
 	if ( text == NULL )
@@ -1067,5 +1152,97 @@ void Sys_SetClipboardBitmap( const byte *bitmap, int length )
 		SetClipboardData( CF_DIB, hMem );
 	}
 	CloseClipboard();
+#else
+	(void)bitmap;
+	(void)length;
+#endif
+}
+
+
+/*
+===============
+Sys_SetClipboardImagePNG
+
+cross-platform image clipboard via SDL3.  We register
+an image/png data callback with SDL_SetClipboardData; SDL serves the
+bytes to the active windowing system (X11 SelectionRequest, Wayland
+data-device offer, Win32 RegisterClipboardFormat etc.).  The callback
+holds the PNG bytes until SDL invokes the cleanup callback (selection
+loss or a subsequent SDL_SetClipboardData call).
+
+The macOS Obj-C++ "Pasteboard" path is the architectural follow-up that
+Eser owns separately — this implementation covers the Linux X11 default
+build (and any platform whose SDL backend implements PNG selections).
+===============
+*/
+#ifndef _WIN32
+static byte *s_sdl_clipboard_png_data = NULL;
+static size_t s_sdl_clipboard_png_len = 0;
+
+static const void *Sys_ClipboardImagePNG_Callback( void *userdata, const char *mime_type, size_t *size )
+{
+	(void)userdata;
+	if ( mime_type == NULL ) {
+		return NULL;
+	}
+	if ( Q_stricmp( mime_type, "image/png" ) != 0 ) {
+		return NULL;
+	}
+	if ( size ) {
+		*size = s_sdl_clipboard_png_len;
+	}
+	return s_sdl_clipboard_png_data;
+}
+
+static void Sys_ClipboardImagePNG_Cleanup( void *userdata )
+{
+	(void)userdata;
+	if ( s_sdl_clipboard_png_data ) {
+		free( s_sdl_clipboard_png_data );
+		s_sdl_clipboard_png_data = NULL;
+	}
+	s_sdl_clipboard_png_len = 0;
+}
+#endif
+
+void Sys_SetClipboardImagePNG( const byte *png, int length )
+{
+#ifdef _WIN32
+	// Windows clipboard image path is CF_DIB / Sys_SetClipboardBitmap.
+	// PNG-on-Windows-clipboard is a separate follow-up if ever needed.
+	(void)png;
+	(void)length;
+#elif defined(__APPLE__)
+	// macOS Cocoa pasteboard is the architectural Obj-C++ follow-up —
+	// R_ScreenShot_f already returns before reaching here on macOS.
+	(void)png;
+	(void)length;
+#else
+	const char *mime_types[1] = { "image/png" };
+
+	if ( png == NULL || length <= 0 ) {
+		return;
+	}
+
+	// Free any previous payload before replacing — SDL keeps the
+	// userdata pointer alive across callback invocations, so we cannot
+	// simply hand it a stack buffer.
+	if ( s_sdl_clipboard_png_data ) {
+		free( s_sdl_clipboard_png_data );
+		s_sdl_clipboard_png_data = NULL;
+	}
+	s_sdl_clipboard_png_data = (byte *)malloc( (size_t)length );
+	if ( s_sdl_clipboard_png_data == NULL ) {
+		s_sdl_clipboard_png_len = 0;
+		return;
+	}
+	memcpy( s_sdl_clipboard_png_data, png, (size_t)length );
+	s_sdl_clipboard_png_len = (size_t)length;
+
+	SDL_SetClipboardData( Sys_ClipboardImagePNG_Callback,
+	                      Sys_ClipboardImagePNG_Cleanup,
+	                      NULL,
+	                      mime_types,
+	                      1 );
 #endif
 }

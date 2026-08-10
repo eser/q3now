@@ -5,20 +5,17 @@
 
 // IQM GPU skinning vertex shader
 // Transforms vertices using bone matrices from a UBO.
-// Uses the same push-constant MVP as the standard pipeline.
-
-// 64 bytes — same as every other renderervk vertex shader
-layout(push_constant) uniform Transform {
-	mat4 mvp;
-};
 
 // set 0, binding 0 — bone matrices (128 * mat3x4 stored as vec4[3] per joint)
 // Each bone matrix is a 3x4 affine matrix stored as 3 rows of vec4
 // boneMats[joint*3 + 0] = row 0  (m00 m01 m02 m03)
 // boneMats[joint*3 + 1] = row 1  (m10 m11 m12 m13)
 // boneMats[joint*3 + 2] = row 2  (m20 m21 m22 m23)
+// mvp is appended after the bone array (it rides in this UBO, not a VS push
+// constant). std140: boneMats ends at offset 6144, mvp lands 16-aligned at 6144.
 layout(set = 0, binding = 0) uniform BoneMatrices {
 	vec4 boneMats[128 * 3]; // 128 joints * 3 rows each
+	mat4 mvp;
 };
 
 // vertex inputs — interleaved IQM vertex

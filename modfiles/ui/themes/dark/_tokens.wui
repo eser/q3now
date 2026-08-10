@@ -1,0 +1,27 @@
+// Dark mode overlay — v2 palette
+//
+// Loaded by cl_wired_palette when ui_palette_mode == "dark". Token names
+// must already exist in the base ui/_tokens.wui (mod-override gate runs
+// allowNew=qfalse for overlays). Values mirror qw-shared.jsx QW_MODES.dark.
+
+token ink                   "#0a0908"
+token panel                 "#14110e40"
+token panelDeep             "#1a161240"
+token line                  "#2a2520"
+token lineBright            "#3a322a"
+token bone                  "#e8dfd0"
+token boneDim               "#8a7560"
+
+token demoBg                "#0a0403"
+token demoSky1              "#3a1808"
+token demoSky2              "#1a0905"
+token demoFog               "#1a0c06"
+token demoFloor             "#2a1208"
+token demoTowerA            "#0a0605"
+token demoTowerB            "#0e0706"
+token demoArchA             "rgba(20,9,6,0.5)"
+token demoArchB             "rgba(26,12,8,0.5)"
+
+token vignette              "rgba(0,0,0,0.55)"
+token vignetteHard          "rgba(0,0,0,0.85)"
+token grain                 "rgba(0,0,0,0.25)"

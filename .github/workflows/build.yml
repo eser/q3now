@@ -83,7 +83,7 @@ jobs:
         cmake -B build/lint -G Ninja \
           -DCMAKE_BUILD_TYPE=Debug \
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-          -DUSE_SDL=OFF -DUSE_WASM=OFF \
+          -DUSE_WASM=OFF \
           -DBUILD_GAME_LIBRARIES=ON
         cp build/lint/compile_commands.json .
 
@@ -337,7 +337,7 @@ jobs:
       run: |
         export PATH="${{ runner.temp }}/msys64/mingw64/bin:$PATH"
         WASI_HOME="${USERPROFILE//\\//}/wasi-sdk"
-        make release CHANNEL=public Q3DIR=dist/q3now USE_SDL=0 WASI_SDK_PATH="$WASI_HOME"
+        make release CHANNEL=public Q3DIR=dist/q3now WASI_SDK_PATH="$WASI_HOME"
 
     - uses: actions/upload-artifact@v4
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'

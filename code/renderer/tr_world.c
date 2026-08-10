@@ -2,6 +2,9 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 
 
@@ -511,7 +514,7 @@ void R_AddBrushModelSurfaces ( trRefEntity_t *ent ) {
 		static int bmodel_diag_count = 0;
 		if ( bmodel_diag_count < 40 ) {
 			bmodel_diag_count++;
-			ri.Log( SEV_TRACE,
+			R_LOG( rch_assets, SEV_TRACE,
 				"R_AddBrushModelSurfaces[%d]: hModel=%d numSurfaces=%d"
 				" bounds=(%.0f,%.0f,%.0f)-(%.0f,%.0f,%.0f)"
 				" ent.origin=(%.0f,%.0f,%.0f)\n",
@@ -527,7 +530,7 @@ void R_AddBrushModelSurfaces ( trRefEntity_t *ent ) {
 		static int bmodel_cull_count = 0;
 		if ( bmodel_cull_count < 40 ) {
 			bmodel_cull_count++;
-			ri.Log( SEV_TRACE,
+			R_LOG( rch_assets, SEV_TRACE,
 				"R_AddBrushModelSurfaces: CULL_OUT hModel=%d ent.origin=(%.0f,%.0f,%.0f)\n",
 				ent->e.hModel,
 				ent->e.origin[0], ent->e.origin[1], ent->e.origin[2] );
@@ -843,7 +846,7 @@ static void R_MarkLeaves (void) {
 	if ( showcluster_changed || r_showCluster->integer ) {
 		s_showcluster_mod = r_showCluster->modificationCount;
 		if ( r_showCluster->integer ) {
-			ri.Log( SEV_INFO, "cluster:%i  area:%i\n", cluster, leaf->area );
+			R_LOG( rch_assets, SEV_INFO, "cluster:%i  area:%i\n", cluster, leaf->area );
 		}
 	}
 

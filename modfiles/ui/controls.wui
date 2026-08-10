@@ -1,0 +1,884 @@
+// controls.wui -- q3now Controls settings submenu (Phase 4b canonical)
+//
+// Phase 4b settings panel pattern reuse (Phase 4a §6.1):
+//   - settings_root + top_bar + bottom_bar (same as options.wui /
+//     sound.wui)
+//   - settings_content with LEFT nav column (Controls highlighted cyan
+//     via active ui_settingsSection "controls")
+//   - settings_panel with category groups; each group is a flex column
+//     container with its own section header + key-binding rows
+//
+// Full keybind set (matches Team Arena's control_menu coverage, scoped to
+// q3now's actual command + weapon roster):
+//   - MOVEMENT  : Forward/Back/Left/Right/Turn-Left/Turn-Right/Walk/
+//                 Jump/Crouch + Always Run
+//   - WEAPONS   : slots 1-8 (q3now weapon_t: Gauntlet..Plasma) + Attack +
+//                 Next/Prev + Autoswitch
+//   - LOOK      : Sensitivity + Invert + Free Look + Smooth Mouse +
+//                 Zoom View + Center View
+//   - MISC      : Use Item + Gesture + Show Scores + Toggle Console
+//   - CHAT      : Chat + Team Chat + Target Chat
+//
+// All bind commands verified against q3now game/cgame/client code — see
+// cl_input.c (movement/look), cg_consolecmds.c (+scores/+zoom/weapon),
+// console.c (messagemode/2/3), protocol.h weapon_t (8-weapon roster, NO
+// BFG/Nailgun/Prox/Chaingun that TA carries).
+//
+// Widget pattern verification scope:
+//   - Key binding widget (type 13) — primary Phase 4b deliverable
+//   - Slider widget (type 10) — mouse sensitivity
+//   - Toggle widget (type checkbox) — Always Run / Invert / Free Look /
+//     Smooth Mouse / Autoswitch
+//
+// Panel is scroll-enabled (panel_content `scroll`) so the long binding
+// list flows freely; category group boxes are laid out two-per-row.
+
+#include "ui/widgets/qw_settings_nav.wui"
+#include "ui/widgets/qw_settings_chrome.wui"
+
+menuDef {
+	name "controls"
+	layer "menu"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "settings_root"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		background "layered" effects "base+glow+noise+vignette"
+
+		// ── Top bar ────────────────────────────────────────────────
+		QW_SETTINGS_TOPBAR("q3now / Settings / Controls")
+
+		// ── Settings content row (LEFT nav + RIGHT panel) ───────────
+		itemDef {
+			name "settings_content"
+			type container
+			rect 0 0 1 0.83
+			direction row
+			padding $content_padding_y $content_padding_x
+			gap $spacing_lg
+			grow 1
+			height GROW
+
+			// ── LEFT nav column ────────────────────────────────
+			itemDef {
+				name "settings_nav"
+				type container
+				rect 0 0 0.30 1
+				direction column
+				gap $spacing_sm
+
+				itemDef {
+					name "nav_label"
+					type 0
+					rect 0 0 1 0.025
+					height FIT
+					text "CATEGORIES"
+					textalign 0
+					font $font_mono 10
+					forecolor $boneDim
+					decoration
+					visible 1
+					grow 0
+				}
+
+				QW_SETTINGS_NAV("nav_sound",       "sound",       "Sound",       "sound")
+				QW_SETTINGS_NAV("nav_video",       "video",       "Video",       "video")
+				QW_SETTINGS_NAV("nav_display",     "display",     "Display",     "display")
+				QW_SETTINGS_NAV("nav_controls",    "controls",    "Controls",    "controls")
+				QW_SETTINGS_NAV("nav_network",     "network",     "Network",     "network")
+				QW_SETTINGS_NAV("nav_player",      "player",      "Player",      "playersettings")
+				QW_SETTINGS_NAV("nav_preferences", "preferences", "Preferences", "preferences")
+
+				itemDef {
+					name "nav_spacer"
+					type container
+					rect 0 0 1 0
+					grow 1
+				}
+			}
+
+			// ── RIGHT settings panel (controls-specific) ───────
+			itemDef {
+				name "settings_panel"
+				type container
+				rect 0 0 0.70 1
+				direction column
+				padding $card_padding
+				gap $card_gap_internal
+				grow 1
+				width GROW
+
+				itemDef {
+					name "panel_header"
+					type 0
+					rect 0 0 1 0.05
+					height FIT
+					text "Controls"
+					textalign 0
+					font $font_sans_bold 22
+					forecolor $accent
+					decoration
+					visible 1
+					grow 0
+				}
+
+				itemDef {
+					name "panel_subheader"
+					type 0
+					rect 0 0 1 0.025
+					height FIT
+					text "Key bindings + mouse + gamepad"
+					textalign 0
+					font $font_mono 11
+					forecolor $boneDim
+					decoration
+					visible 1
+					grow 0
+				}
+
+				// ── panel_content: category group boxes stacked vertically
+				itemDef {
+					name "panel_content"
+					type container
+					rect 0 0 1 0.7
+					direction column
+					gap $spacing_md
+					grow 1
+					height GROW
+					scroll
+					alignY start
+					padding 0 0
+
+					// ══ ROW 1 : MOVEMENT | WEAPONS ══════════════
+					itemDef {
+						name "grid_row_1"
+						type container
+						rect 0 0 1 0
+						height FIT
+						width PERCENT 1
+						grow 0
+						direction row
+						gap $spacing_md
+						alignY start
+						padding 0 0
+
+					// ── MOVEMENT group box ──────────────────────
+					itemDef {
+						name "group_movement"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						alignY start
+
+						itemDef { name "group_movement_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "MOVEMENT" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+
+						itemDef {
+							name "row_forward"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Forward"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "+forward"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_back"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Backpedal"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "+back"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_moveleft"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Move Left"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "+moveleft"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_moveright"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Move Right"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "+moveright"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_turnleft"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Turn Left"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "+left"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_turnright"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Turn Right"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "+right"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_walk"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Walk"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "+speed"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_jump"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Jump"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "+moveup"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_crouch"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Crouch"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "+movedown"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_always_run"
+							type checkbox
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Always Run"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "cl_run"
+							visible 1
+							grow 0
+						}
+					}
+
+					// ── WEAPONS group box ───────────────────────
+					itemDef {
+						name "group_weapons"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						alignY start
+
+						itemDef { name "group_weapons_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "WEAPONS" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+
+						itemDef {
+							name "row_weap_gauntlet"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Gauntlet"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "weapon 1"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_weap_machinegun"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Machinegun"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "weapon 2"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_weap_shotgun"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Shotgun"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "weapon 3"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_weap_grenade"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Grenade Launcher"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "weapon 4"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_weap_rocket"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Rocket Launcher"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "weapon 5"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_weap_lightning"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Lightning Gun"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "weapon 6"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_weap_railgun"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Railgun"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "weapon 7"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_weap_plasma"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Plasma Rifle"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "weapon 8"
+							visible 1
+							grow 0
+						}
+					}
+					}
+
+					// ══ ROW 2 : COMBAT | LOOK ═══════════════════
+					itemDef {
+						name "grid_row_2"
+						type container
+						rect 0 0 1 0
+						height FIT
+						width PERCENT 1
+						grow 0
+						direction row
+						gap $spacing_md
+						alignY start
+						padding 0 0
+
+					// ── COMBAT group box ────────────────────────
+					itemDef {
+						name "group_combat"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						alignY start
+
+						itemDef { name "group_combat_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "COMBAT" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+
+						itemDef {
+							name "row_fire"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Fire"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "+attack"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_weapnext"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Next Weapon"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "weapnext"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_weapprev"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Previous Weapon"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "weapprev"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_autoswitch"
+							type checkbox
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Autoswitch Weapon"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "cg_autoswitch"
+							visible 1
+							grow 0
+						}
+					}
+
+					// ── LOOK group box ──────────────────────────
+					itemDef {
+						name "group_look"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						alignY start
+
+						itemDef { name "group_look_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "LOOK" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+
+						itemDef {
+							name "row_sensitivity"
+							type 10
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Mouse Sensitivity"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvarFloat "sensitivity" 5 1 30
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_invert"
+							type checkbox
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Invert Mouse"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "ui_mousePitch"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_freelook"
+							type checkbox
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Free Look"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "cl_freelook"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_smoothmouse"
+							type checkbox
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Smooth Mouse"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "m_filter"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_zoom"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Zoom View"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "+zoom"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_centerview"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Center View"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "centerview"
+							visible 1
+							grow 0
+						}
+					}
+					}
+
+					// ══ ROW 3 : MISC | CHAT ═════════════════════
+					itemDef {
+						name "grid_row_3"
+						type container
+						rect 0 0 1 0
+						height FIT
+						width PERCENT 1
+						grow 0
+						direction row
+						gap $spacing_md
+						alignY start
+						padding 0 0
+
+					// ── MISC group box ──────────────────────────
+					itemDef {
+						name "group_misc"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						alignY start
+
+						itemDef { name "group_misc_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "MISC" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+
+						itemDef {
+							name "row_useitem"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Use Item"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "+button2"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_gesture"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Gesture"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "+button3"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_scores"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Show Scores"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "+scores"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_console"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Toggle Console"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "toggleconsole"
+							visible 1
+							grow 0
+						}
+					}
+
+					// ── CHAT group box ──────────────────────────
+					itemDef {
+						name "group_chat"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						alignY start
+
+						itemDef { name "group_chat_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "CHAT" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+
+						itemDef {
+							name "row_chat"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Chat"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "messagemode"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_chat_team"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Team Chat"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "messagemode2"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_chat_target"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Target Chat"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "messagemode3"
+							visible 1
+							grow 0
+						}
+					}
+					}
+				}
+
+				// ── Footer (Back … Reset / Apply on ONE row) ────
+				itemDef {
+					name "panel_footer"
+					type container
+					rect 0 0 1 0.05
+					direction row
+					gap $spacing_md
+					alignY center
+					height FIT
+
+					QW_SETTINGS_BACK_BTN
+					QW_SETTINGS_FOOTER_SPACER
+					// Panel-level Reset Defaults restores the whole config via
+					// default.cfg. Per-row Reset (per type-13 binding row) wires
+					// action { unbindcmd "<cvar>" } to clear a single command.
+					QW_SETTINGS_FOOTER_BTN("btn_reset",  "Reset Defaults", $boneDim, { exec "exec default.cfg" })
+					QW_SETTINGS_FOOTER_BTN("btn_apply",  "Apply",          $accent,  { exec "writeconfig wired-overrides.cfg" })
+				}
+			}
+		}
+
+		// ── Bottom bar (hints) ──────────────────────────────────────
+		QW_SETTINGS_BOTTOMBAR("click row to rebind")
+	}
+
+	onOpen {
+		setcvar "ui_settingsSection" "controls"
+	}
+	onESC {
+		close
+	}
+}

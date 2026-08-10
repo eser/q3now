@@ -4,31 +4,16 @@
 #ifndef __LINUX_LOCAL_H__
 #define __LINUX_LOCAL_H__
 
-// Input subsystem
+// Unix OS-tier header. The X11 window/input/surface backend has been retired in
+// favour of the SDL3 backend (code/sdl); what remains here is what the OS-tier
+// files (unix_main.c, unix_shared.c, linux_signals.c) share.
 
-void IN_Init (void);
+// pumped each frame by unix_main.c's game loop; provided by the SDL backend.
 void IN_Frame (void);
-void IN_Shutdown (void);
-
-
-void IN_JoyMove( void );
-void IN_StartupJoystick( void );
-
-// OpenGL subsystem
-qboolean QGL_Init( const char *dllname );
-void QGL_Shutdown( qboolean unloadDLL );
-
-// Vulkan subsystem
-qboolean QVK_Init( void );
-void QVK_Shutdown( qboolean unloadDLL );
-
-
-// bk001130 - win32
-// void IN_JoystickCommands (void);
 
 char *strlwr (char *s);
 
-// signals.c
+// linux_signals.c
 void InitSig(void);
 
 #endif // __LINUX_LOCAL_H__

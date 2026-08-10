@@ -1,0 +1,10 @@
+// reinforcement.script — the downstream reactor. Its trigger block fires when a
+// script fires `trigger boss_dead` (string-equal param match), proving the
+// event-driven trigger loop (distinct from the polling waitfortrigger verb).
+spawn {
+    print reinforcement-standby
+}
+trigger boss_dead {
+    print reinforcement-activated
+    attack
+}

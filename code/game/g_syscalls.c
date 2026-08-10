@@ -13,7 +13,6 @@
 #define MAX_STRINGFIELD 80
 #endif
 #include "../botlib/be_ai_weap.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #ifdef WASM_MODULE
@@ -62,6 +61,19 @@ static qboolean Trap_ParseLuaCharacterName( const char *charfile, char *out, int
 	return qtrue;
 }
 
+#if defined(WASM_MODULE)
+// Typed/versioned VM-IPC ABI handshake (docs/vm-typed-ipc-design.md, decision 2 = B).
+// The engine answers a RESERVED high syscall id — outside the G_* enum so it shifts
+// no existing id — with its game ABI version. The module queries it at init and
+// exact-matches GAME_API_VERSION (it was built against). Value mirrors the engine's
+// VM_SYSCALL_ABI_QUERY (vm_typed_syscall.h); the module can't include that engine
+// header, so the literal is duplicated with a comment, like the syscall ids.
+#define WIRED_VM_SYSCALL_ABI_QUERY  0x7FFF0000
+int trap_VM_ABI_Query( void ) {
+	return syscall( WIRED_VM_SYSCALL_ABI_QUERY );
+}
+#endif
+
 void	trap_Print( const char *text ) {
 	syscall( G_PRINT, text );
 }
@@ -73,8 +85,8 @@ void trap_Error( const char *text )
 	exit(1);
 }
 
-void trap_Log( log_severity_t severity, const char *text ) {
-	syscall( G_LOG, (int)severity, text );
+void trap_Log( log_severity_t severity, const char *channel, const char *text ) {
+	syscall( G_LOG, (int)severity, channel, text );
 }
 
 void trap_Terminate( terminationReason_t reason, const char *text ) {
@@ -115,6 +127,13 @@ int trap_FS_GetFileList(  const char *path, const char *extension, char *listbuf
 
 int trap_FS_Seek( fileHandle_t f, long offset, int origin ) {
 	return syscall( G_FS_SEEK, f, offset, origin );
+}
+
+// Rename a file within the home game dir (both paths are homepath+gamedir-relative,
+// so this is a same-dir atomic rename). Added in GAME_API_VERSION 9 for the
+// savegame atomic write. Thin wrapper over the engine's FS_Rename.
+void trap_FS_Rename( const char *from, const char *to ) {
+	syscall( G_FS_RENAME, from, to );
 }
 
 void	trap_SendConsoleCommand( int exec_when, const char *text ) {
@@ -309,100 +328,6 @@ void trap_BotUserCommand(int clientNum, usercmd_t *ucmd) {
 	syscall( BOTLIB_USER_COMMAND, clientNum, ucmd );
 }
 
-void trap_AAS_EntityInfo(int entnum, void /* struct aas_entityinfo_s */ *info) {
-	syscall( BOTLIB_AAS_ENTITY_INFO, entnum, info );
-}
-
-int trap_AAS_Initialized(void) {
-	return syscall( BOTLIB_AAS_INITIALIZED );
-}
-
-void trap_AAS_PresenceTypeBoundingBox(int presencetype, vec3_t mins, vec3_t maxs) {
-	syscall( BOTLIB_AAS_PRESENCE_TYPE_BOUNDING_BOX, presencetype, mins, maxs );
-}
-
-float trap_AAS_Time(void) {
-	floatint_t fi;
-	fi.i = syscall( BOTLIB_AAS_TIME );
-	return fi.f;
-}
-
-int trap_AAS_PointAreaNum(vec3_t point) {
-	return syscall( BOTLIB_AAS_POINT_AREA_NUM, point );
-}
-
-int trap_AAS_PointReachabilityAreaIndex(vec3_t point) {
-	return syscall( BOTLIB_AAS_POINT_REACHABILITY_AREA_INDEX, point );
-}
-
-int trap_AAS_TraceAreas(vec3_t start, vec3_t end, int *areas, vec3_t *points, int maxareas) {
-	return syscall( BOTLIB_AAS_TRACE_AREAS, start, end, areas, points, maxareas );
-}
-
-int trap_AAS_BBoxAreas(vec3_t absmins, vec3_t absmaxs, int *areas, int maxareas) {
-	return syscall( BOTLIB_AAS_BBOX_AREAS, absmins, absmaxs, areas, maxareas );
-}
-
-int trap_AAS_AreaInfo( int areanum, void /* struct aas_areainfo_s */ *info ) {
-	return syscall( BOTLIB_AAS_AREA_INFO, areanum, info );
-}
-
-int trap_AAS_PointContents(vec3_t point) {
-	return syscall( BOTLIB_AAS_POINT_CONTENTS, point );
-}
-
-int trap_AAS_NextBSPEntity(int ent) {
-	return syscall( BOTLIB_AAS_NEXT_BSP_ENTITY, ent );
-}
-
-int trap_AAS_ValueForBSPEpairKey(int ent, char *key, char *value, int size) {
-	return syscall( BOTLIB_AAS_VALUE_FOR_BSP_EPAIR_KEY, ent, key, value, size );
-}
-
-int trap_AAS_VectorForBSPEpairKey(int ent, char *key, vec3_t v) {
-	return syscall( BOTLIB_AAS_VECTOR_FOR_BSP_EPAIR_KEY, ent, key, v );
-}
-
-int trap_AAS_FloatForBSPEpairKey(int ent, char *key, float *value) {
-	return syscall( BOTLIB_AAS_FLOAT_FOR_BSP_EPAIR_KEY, ent, key, value );
-}
-
-int trap_AAS_IntForBSPEpairKey(int ent, char *key, int *value) {
-	return syscall( BOTLIB_AAS_INT_FOR_BSP_EPAIR_KEY, ent, key, value );
-}
-
-int trap_AAS_AreaReachability(int areanum) {
-	return syscall( BOTLIB_AAS_AREA_REACHABILITY, areanum );
-}
-
-int trap_AAS_AreaTravelTimeToGoalArea(int areanum, vec3_t origin, int goalareanum, int travelflags) {
-	return syscall( BOTLIB_AAS_AREA_TRAVEL_TIME_TO_GOAL_AREA, areanum, origin, goalareanum, travelflags );
-}
-
-int trap_AAS_EnableRoutingArea( int areanum, int enable ) {
-	return syscall( BOTLIB_AAS_ENABLE_ROUTING_AREA, areanum, enable );
-}
-
-int trap_AAS_PredictRoute(void /*struct aas_predictroute_s*/ *route, int areanum, vec3_t origin,
-							int goalareanum, int travelflags, int maxareas, int maxtime,
-							int stopevent, int stopcontents, int stoptfl, int stopareanum) {
-	return syscall( BOTLIB_AAS_PREDICT_ROUTE, route, areanum, origin, goalareanum, travelflags, maxareas, maxtime, stopevent, stopcontents, stoptfl, stopareanum );
-}
-
-int trap_AAS_AlternativeRouteGoals(vec3_t start, int startareanum, vec3_t goal, int goalareanum, int travelflags,
-										void /*struct aas_altroutegoal_s*/ *altroutegoals, int maxaltroutegoals,
-										int type) {
-	return syscall( BOTLIB_AAS_ALTERNATIVE_ROUTE_GOAL, start, startareanum, goal, goalareanum, travelflags, altroutegoals, maxaltroutegoals, type );
-}
-
-int trap_AAS_Swimming(vec3_t origin) {
-	return syscall( BOTLIB_AAS_SWIMMING, origin );
-}
-
-int trap_AAS_PredictClientMovement(void /* struct aas_clientmove_s */ *move, int entnum, vec3_t origin, int presencetype, int onground, vec3_t velocity, vec3_t cmdmove, int cmdframes, int maxframes, float frametime, int stopevent, int stopareanum, int visualize) {
-	return syscall( BOTLIB_AAS_PREDICT_CLIENT_MOVEMENT, move, entnum, origin, presencetype, onground, velocity, cmdmove, cmdframes, maxframes, PASSFLOAT(frametime), stopevent, stopareanum, visualize );
-}
-
 void trap_EA_Say(int client, char *str) {
 	syscall( BOTLIB_EA_SAY, client, str );
 }
@@ -500,39 +425,59 @@ void trap_EA_ResetInput(int client) {
 }
 
 int trap_BotLuaBindBot(int client, int characterHandle) {
-	return syscall( WB_BIND_BOT, client, characterHandle );
+	return syscall( WI_BIND_BOT, client, characterHandle );
 }
 
 int trap_BotLuaBotThink(int client, float thinktime) {
-	return syscall( WB_BOT_THINK, client, PASSFLOAT(thinktime) );
+	return syscall( WI_BOT_THINK, client, PASSFLOAT(thinktime) );
 }
 
 float trap_BotLuaBotProfileField(int client, int field) {
 	floatint_t fi;
-	fi.i = syscall( WB_BOT_PROFILE_FIELD, client, field );
+	fi.i = syscall( WI_BOT_PROFILE_FIELD, client, field );
 	return fi.f;
 }
 
 int trap_BotLuaBotPickWeapon(int client, const wbCombatCtx_t *ctx, char *weaponKey, int weaponKeySize) {
-	return syscall( WB_BOT_PICK_WEAPON, client, ctx, weaponKey, weaponKeySize );
+	return syscall( WI_BOT_PICK_WEAPON, client, ctx, weaponKey, weaponKeySize );
 }
 
 float trap_BotLuaBotGetAttackAimHeight(int client, int weaponNum) {
 	floatint_t fi;
-	fi.i = syscall( WB_BOT_GET_ATTACK_AIM_HEIGHT, client, weaponNum );
+	fi.i = syscall( WI_BOT_GET_ATTACK_AIM_HEIGHT, client, weaponNum );
 	return fi.f;
 }
 
 int trap_BotLuaBotEvalItem(int client, const wbItemEvalCtx_t *ctx) {
-	return syscall( WB_BOT_EVAL_ITEM, client, ctx );
+	return syscall( WI_BOT_EVAL_ITEM, client, ctx );
 }
 
 int trap_BotLuaBotDecide(int client, const wbDecideCtx_t *ctx, char *decision, int decisionSize) {
-	return syscall( WB_BOT_DECIDE, client, ctx, decision, decisionSize );
+	return syscall( WI_BOT_DECIDE, client, ctx, decision, decisionSize );
 }
 
 int trap_BotLuaBotOnChat(int client, const char *eventName, const wbChatCtx_t *ctx, char *outChat, int outChatSize) {
-	return syscall( WB_BOT_ON_CHAT, client, eventName, ctx, outChat, outChatSize );
+	return syscall( WI_BOT_ON_CHAT, client, eventName, ctx, outChat, outChatSize );
+}
+
+// ── Monster-Lua behavior traps (parallel to the bot traps above) ─────────
+// Entity-keyed rather than client-keyed; the engine handlers guard entityNum.
+int trap_MonsterLuaBind(int entityNum, int characterHandle) {
+	return syscall( G_MONSTER_LUA_BIND, entityNum, characterHandle );
+}
+
+void trap_MonsterLuaUnbind(int entityNum) {
+	syscall( G_MONSTER_LUA_UNBIND, entityNum );
+}
+
+float trap_MonsterLuaProfileField(int entityNum, int field) {
+	floatint_t fi;
+	fi.i = syscall( G_MONSTER_LUA_PROFILE_FIELD, entityNum, field );
+	return fi.f;
+}
+
+int trap_MonsterLuaDecide(int entityNum, const wbDecideCtx_t *ctx, char *decision, int decisionSize) {
+	return syscall( G_MONSTER_LUA_DECIDE, entityNum, ctx, decision, decisionSize );
 }
 
 static void Trap_BotFillWeaponInfoFromGame( int weapon, weaponinfo_t *weaponinfo ) {
@@ -571,14 +516,21 @@ static void Trap_BotFillWeaponInfoFromGame( int weapon, weaponinfo_t *weaponinfo
 			weaponinfo->proj.damage = 50;
 			break;
 		case WP_MACHINEGUN:
-			weaponinfo->hspread = 250.0f;
-			weaponinfo->vspread = 250.0f;
+			// RS-3-flag: legacy bot-aim-noise spread tracks the at-rest weapon cone
+			// SSOT (BG_CalcWeaponSpread / bg_attacklist[ATT_MACHINEGUN_PRIMARY].
+			// spreadBase = 200) instead of a hard-coded literal that went stale when
+			// RS-3 buffed the MG cone 250→200. Future cone changes follow automatically.
+			weaponinfo->hspread = BG_AttackSpreadBase( ATT_MACHINEGUN_PRIMARY );
+			weaponinfo->vspread = weaponinfo->hspread;
 			weaponinfo->reload = 0.1f;
 			weaponinfo->proj.damage = 8;
 			break;
 		case WP_SHOTGUN:
-			weaponinfo->hspread = DEFAULT_SHOTGUN_SPREAD;
-			weaponinfo->vspread = DEFAULT_SHOTGUN_SPREAD;
+			// RS-3-flag: shotgun aim-noise spread now SSOT-sourced from the cone table
+			// (ATT_SHOTGUN_PRIMARY.spreadBase = 600) — same value as the former
+			// DEFAULT_SHOTGUN_SPREAD literal, but no longer a separate source.
+			weaponinfo->hspread = BG_AttackSpreadBase( ATT_SHOTGUN_PRIMARY );
+			weaponinfo->vspread = weaponinfo->hspread;
 			weaponinfo->numprojectiles = DEFAULT_SHOTGUN_COUNT;
 			weaponinfo->reload = 1.0f;
 			weaponinfo->proj.damage = 8;
@@ -625,19 +577,19 @@ int trap_BotLoadCharacter(char *charfile, float skill) {
 			luaSkill = ( luaSkill - 1.0f ) / 4.0f;
 		}
 		{
-			int handle = syscall( WB_LOAD_CHARACTER, characterName, PASSFLOAT(luaSkill) );
+			int handle = syscall( WI_LOAD_CHARACTER, characterName, PASSFLOAT(luaSkill) );
 			if ( handle > 0 ) {
 				return -handle;
 			}
 		}
 	}
-	Com_Log( SEV_INFO, LOG_CH(ch_game), S_COLOR_RED "Unsupported legacy bot character file: %s\n", charfile ? charfile : "<null>" );
+	Com_Log( SEV_ERROR, LOG_CH(ch_game), "Unsupported legacy bot character file: %s\n", charfile ? charfile : "<null>" );
 	return 0;
 }
 
 void trap_BotFreeCharacter(int character) {
 	if ( character < 0 ) {
-		syscall( WB_FREE_CHARACTER, -character );
+		syscall( WI_FREE_CHARACTER, -character );
 		return;
 	}
 	syscall( BOTLIB_AI_FREE_CHARACTER, character );
@@ -646,7 +598,7 @@ void trap_BotFreeCharacter(int character) {
 float trap_Characteristic_Float(int character, int index) {
 	floatint_t fi;
 	if ( character < 0 ) {
-		fi.i = syscall( WB_CHARACTERISTIC_FLOAT, -character, index );
+		fi.i = syscall( WI_CHARACTERISTIC_FLOAT, -character, index );
 		return fi.f;
 	}
 	fi.i = syscall( BOTLIB_AI_CHARACTERISTIC_FLOAT, character, index );
@@ -656,7 +608,7 @@ float trap_Characteristic_Float(int character, int index) {
 float trap_Characteristic_BFloat(int character, int index, float min, float max) {
 	floatint_t fi;
 	if ( character < 0 ) {
-		fi.i = syscall( WB_CHARACTERISTIC_BFLOAT, -character, index, PASSFLOAT(min), PASSFLOAT(max) );
+		fi.i = syscall( WI_CHARACTERISTIC_BFLOAT, -character, index, PASSFLOAT(min), PASSFLOAT(max) );
 		return fi.f;
 	}
 	fi.i = syscall( BOTLIB_AI_CHARACTERISTIC_BFLOAT, character, index, PASSFLOAT(min), PASSFLOAT(max) );
@@ -665,21 +617,21 @@ float trap_Characteristic_BFloat(int character, int index, float min, float max)
 
 int trap_Characteristic_Integer(int character, int index) {
 	if ( character < 0 ) {
-		return syscall( WB_CHARACTERISTIC_INTEGER, -character, index );
+		return syscall( WI_CHARACTERISTIC_INTEGER, -character, index );
 	}
 	return syscall( BOTLIB_AI_CHARACTERISTIC_INTEGER, character, index );
 }
 
 int trap_Characteristic_BInteger(int character, int index, int min, int max) {
 	if ( character < 0 ) {
-		return syscall( WB_CHARACTERISTIC_BINTEGER, -character, index, min, max );
+		return syscall( WI_CHARACTERISTIC_BINTEGER, -character, index, min, max );
 	}
 	return syscall( BOTLIB_AI_CHARACTERISTIC_BINTEGER, character, index, min, max );
 }
 
 void trap_Characteristic_String(int character, int index, char *buf, int size) {
 	if ( character < 0 ) {
-		syscall( WB_CHARACTERISTIC_STRING, -character, index, buf, size );
+		syscall( WI_CHARACTERISTIC_STRING, -character, index, buf, size );
 		return;
 	}
 	syscall( BOTLIB_AI_CHARACTERISTIC_STRING, character, index, buf, size );
@@ -896,10 +848,6 @@ void trap_BotAddAvoidSpot(int movestate, vec3_t origin, float radius, int type) 
 	syscall( BOTLIB_AI_ADD_AVOID_SPOT, movestate, origin, PASSFLOAT(radius), type);
 }
 
-void trap_BotMoveToGoal(void /* struct bot_moveresult_s */ *result, int movestate, void /* struct bot_goal_s */ *goal, int travelflags) {
-	syscall( BOTLIB_AI_MOVE_TO_GOAL, result, movestate, goal, travelflags );
-}
-
 int trap_BotMoveInDirection(int movestate, vec3_t dir, float speed, int type) {
 	return syscall( BOTLIB_AI_MOVE_IN_DIRECTION, movestate, dir, PASSFLOAT(speed), type );
 }
@@ -1063,7 +1011,7 @@ int trap_WCE_GetSoundEvents( int clientNum, bot_sound_event_t *out, int maxOut )
 }
 
 // ── Recast/Detour nav traps ───────────────────────────────────────────
-// Phase 2: wrappers exist; engine-side stubs return -1 until Phase 3+.
+// wrappers exist; engine-side stubs return -1 until the traps are wired up.
 // These are guarded by FEAT_RECAST_NAVMESH so the AAS build compiles clean.
 #if FEAT_RECAST_NAVMESH
 int trap_Nav_FindPath( vec3_t origin, vec3_t goal, int agentType, navPath_t *pathOut ) {
@@ -1107,6 +1055,9 @@ void trap_Nav_UpdateCrowd( float deltaTime ) {
 }
 qboolean trap_Nav_IsReady( void ) {
 	return (qboolean)syscall( G_NAV_IS_READY );
+}
+qboolean trap_Nav_IsBaking( void ) {
+	return (qboolean)syscall( G_NAV_IS_BAKING );
 }
 void trap_Nav_SetPolyFlagsForDoor( const char *targetname, int setFlags, int clearFlags ) {
 	syscall( G_NAV_SET_POLY_FLAGS_FOR_DOOR, targetname, setFlags, clearFlags );

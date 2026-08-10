@@ -1,0 +1,11 @@
+// mission_timer.script — the fail half of the MISSION gate proof (Faz-7b).
+// A second scripted monster that, on the `timer_expired` trigger, fails the
+// reach-exit objective (index 1). Because index 1 is REQUIRED, the mission
+// completion gate can never latch after this fires — the fail beat is terminal.
+spawn {
+    print mission-timer-standby
+}
+trigger timer_expired {
+    print mission-timer-expired
+    objective_fail 1
+}

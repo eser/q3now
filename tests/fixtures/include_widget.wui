@@ -1,0 +1,14 @@
+// include_widget.wui — fixture body fragment included into include_root.wui
+// to verify that botlib preprocessor #include resolves widget content
+// inside a menuDef.
+itemDef {
+	name "include_widget_marker"
+	type 0
+	rect 0.2 0.4 0.6 0.2
+	textalign 1
+	font "oxanium" 28
+	forecolor 1 0.6 0.1 1
+	text "INCLUDE WIDGET MARKER"
+	decoration
+	visible 1
+}

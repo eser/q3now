@@ -29,7 +29,9 @@
 										// with their origin going solid, and allows all parts of a
 										// player to get the same lighting
 
-#define	RF_SHADOW_PLANE		0x0100		// use refEntity->shadowPlane
+// 0x0100 retired (was RF_SHADOW_PLANE — legacy projection-shadow plane, removed
+// with refEntity_t.shadowPlane). The bit is left unused so sibling RF_ values
+// keep their numbers and the renderfx ABI bit layout stays stable.
 #define	RF_WRAP_FRAMES		0x0200		// mod the model frames by the maxframes to allow continuous
 										// animation without needing to know the frame count
 
@@ -108,7 +110,6 @@ typedef struct {
 
 	// most recent data
 	vec3_t		lightingOrigin;		// so multi-part models can be lit identically (RF_LIGHTING_ORIGIN)
-	float		shadowPlane;		// projection shadows go here, stencils go slightly lower
 
 	vec3_t		axis[3];			// rotation vectors
 	qboolean	nonNormalizedAxes;	// axis are not normalized, i.e. they have scale
@@ -233,6 +234,18 @@ typedef struct {
 	qboolean				isFullscreen;
 	qboolean				stereoEnabled;
 	qboolean				smpActive;		// UNUSED, present for compatibility
+
+	// Logical (DPI-independent) window size in points. On a HiDPI display the
+	// OS reports a larger physical pixel size (vidWidth/vidHeight, filled from
+	// SDL_GetWindowSizeInPixels) than the logical point size the window was
+	// created with (SDL_GetWindowSize). dpiScale = vidWidth / vidWidthLogical
+	// (>=1.0; 1.0 on a non-HiDPI display). The platform layer (code/sdl) fills
+	// these next to vidWidth/vidHeight; the WiredUI compositor reads them to
+	// scale font sizes. Appended at the end of the struct so the VM-facing
+	// glconfig ABI for the existing fields above stays byte-stable. Zero when
+	// the platform layer has not published them — consumers fall back to the
+	// physical size (dpiScale 1.0).
+	int						vidWidthLogical, vidHeightLogical;
 } glconfig_t;
 
 #define	myftol(x) ((int)(x))
@@ -257,5 +270,20 @@ typedef struct {
 	int		flags;			// IQM_LOOP etc.
 } iqmAnimInfo_t;
 #endif // FEAT_IQM
+
+// ── MDL (Q1) animation-range query (renderer -> cgame) ──────────────
+// A Q1 .mdl has no explicit animation table — animations are implied by frame
+// NAMES ("stand1".."stand8", "walk1".."walk8", ...). The MDL loader carries the
+// per-frame name into md3Frame_t.name (tr_model_mdl.c), and the renderer derives
+// contiguous same-label ranges by prefix-grouping (strip trailing digits). The
+// query returns one entry per derived range, keyed by the raw Q1 label; cgame
+// maps the label -> a monster anim code (the alias table, mirroring the IQM
+// name->code path CG_ParseIQMAnimations uses). Always-available (not FEAT_IQM).
+#define MAX_MDL_ANIMS	32
+typedef struct {
+	char	label[16];		// the Q1 frame-name prefix, digits stripped (e.g. "walk", "painb")
+	int		first_frame;	// first MD3 frame index of the range
+	int		num_frames;		// contiguous frame count in the range
+} mdlAnimRange_t;
 
 #endif	// __TR_TYPES_H

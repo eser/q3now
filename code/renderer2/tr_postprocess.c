@@ -3,6 +3,9 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.fbo
+
+R_LOG_DECLARE_CHANNEL( rch_fbo, "renderer.fbo" );
 
 void RB_ToneMap(FBO_t *hdrFbo, ivec4_t hdrBox, FBO_t *ldrFbo, ivec4_t ldrBox, int autoExposure)
 {
@@ -265,7 +268,7 @@ static qboolean RB_UpdateSunFlareVis(void)
 				break;
 		}
 
-		ri.Log( SEV_DEBUG, "Waited %d iterations\n", iter);
+		R_LOG( rch_fbo, SEV_DEBUG, "Waited %d iterations\n", iter);
 	}
 	
 	qglGetQueryObjectuiv(tr.sunFlareQuery[tr.sunFlareQueryIndex], GL_QUERY_RESULT, &sampleCount);

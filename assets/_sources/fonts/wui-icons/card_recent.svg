@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- card_recent (U+E001) — clock circle + hour/minute hands -->
+  <path d="M 50 10
+           C 72 10 90 28 90 50
+           C 90 72 72 90 50 90
+           C 28 90 10 72 10 50
+           C 10 28 28 10 50 10 Z
+           M 50 22
+           C 34 22 22 34 22 50
+           C 22 66 34 78 50 78
+           C 66 78 78 66 78 50
+           C 78 34 66 22 50 22 Z" fill="black" fill-rule="evenodd"/>
+  <path d="M 47 28 L 53 28 L 53 52 L 47 52 Z" fill="black"/>
+  <path d="M 50 48 L 70 48 L 70 54 L 50 54 Z" fill="black"/>
+</svg>

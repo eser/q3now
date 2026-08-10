@@ -12,18 +12,20 @@ import (
 //go:embed all:assets/baseq3
 var embeddedBaseQ3 embed.FS
 
-// extractEmbeddedAssets writes embedded sw3z archives to the game's baseq3/
-// directory. On macOS, data goes to Contents/Resources/baseq3/ (Apple bundle
-// convention: code in MacOS/, data in Resources/ — required for codesign).
-// On Linux, data goes alongside the binary. Skips files that are already
-// present with the same size — does NOT re-extract on every startup.
+// extractEmbeddedAssets writes embedded sw3z archives to the game's base/
+// directory. The directory name must match the engine BASEGAME ("base" in
+// code/qcommon/q_shared.h) so the engine actually scans the extracted paks.
+// On macOS, data goes to Contents/Resources/base/ (Apple bundle convention:
+// code in MacOS/, data in Resources/ — required for codesign). On Linux, data
+// goes alongside the binary. Skips files that are already present with the same
+// size — does NOT re-extract on every startup.
 func extractEmbeddedAssets(execDir string) {
 	var destDir string
 	if runtime.GOOS == "darwin" {
-		// macOS: Contents/MacOS/../Resources/baseq3 = Contents/Resources/baseq3
-		destDir = filepath.Join(execDir, "..", "Resources", "baseq3")
+		// macOS: Contents/MacOS/../Resources/base = Contents/Resources/base
+		destDir = filepath.Join(execDir, "..", "Resources", "base")
 	} else {
-		destDir = filepath.Join(execDir, "baseq3")
+		destDir = filepath.Join(execDir, "base")
 	}
 
 	entries, err := fs.ReadDir(embeddedBaseQ3, "assets/baseq3")

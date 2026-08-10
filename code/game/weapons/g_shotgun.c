@@ -71,18 +71,41 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent, int mod ) {
 				continue;
 			}
 
-			if( LogAccuracyHit( traceEnt, ent ) ) {
-				hitClient = qtrue;
-			}
-
 			{
 				int pDamage = damage;
+				vec3_t kbDir;
 
 				// eser - damage falloff
 				pDamage = G_DamageFalloff( pDamage, muzzle, tr.endpos, bg_attacklist[ATT_SHOTGUN_PRIMARY].maxDamageDistance );
 				// eser - damage falloff
 
-				G_Damage( traceEnt, ent, ent, forward, tr.endpos, pDamage, 0, mod );
+				// Knockback points along THIS pellet's travel direction (muzzle ->
+				// impact), not the shared aim vector. Each pellet of the spread
+				// cone impacts at a slightly different point, so the per-pellet
+				// directions diverge; their vector sum then depends on the spread
+				// (a wide spread partially cancels, a tight point-blank cone stays
+				// near-parallel). A fresh local per call: G_Damage normalizes dir
+				// in place, which would corrupt a shared vector across pellets.
+				VectorSubtract( tr.endpos, muzzle, kbDir );
+				VectorNormalize( kbDir );
+
+				// A corpse should not absorb a pellet: damage it (so it can still
+				// be gibbed by overkill) but keep tracing so the pellet reaches a
+				// live target standing behind it. Without this, the dead body of
+				// a freshly-killed player soaks up to GIB_HEALTH worth of pellets
+				// from the same blast, shorting the player behind it.
+				if ( traceEnt->client && traceEnt->client->ps.pm_type == PM_DEAD ) {
+					G_Damage( traceEnt, ent, ent, kbDir, tr.endpos, pDamage, DAMAGE_MOMENTUM_EVENT, mod );
+					passent = traceEnt->s.number;
+					VectorCopy( tr.endpos, tr_start );
+					continue;
+				}
+
+				if ( LogAccuracyHit( traceEnt, ent ) ) {
+					hitClient = qtrue;
+				}
+
+				G_Damage( traceEnt, ent, ent, kbDir, tr.endpos, pDamage, DAMAGE_MOMENTUM_EVENT, mod );
 			}
 
 			return hitClient;
@@ -92,6 +115,33 @@ qboolean ShotgunPellet( vec3_t start, vec3_t end, gentity_t *ent, int mod ) {
 	return qfalse;
 }
 
+// Resolve the death-side-effects that G_Damage / player_die deferred for the
+// duration of a shotgun blast (see WIRED_SHOTGUN_POSTPONE_MOD in g_local.h).
+// Called once after the whole pellet loop: every pellet has now landed, so it
+// is safe to shrink the corpse box, re-arm FL_NO_KNOCKBACK, and perform any gib
+// that was scheduled (the body stayed solid through the blast and accrued the
+// full knockback). `attacker` is the shooter, used as the gib event's killer.
+static void G_ResolveShotgunDeferredDeaths( gentity_t *attacker ) {
+	int        i;
+	gentity_t *ent;
+
+	for ( i = 0, ent = &g_entities[0]; i < level.num_entities; i++, ent++ ) {
+		if ( !ent->inuse ) {
+			continue;
+		}
+
+		if ( ent->client && ent->client->ps.pm_type == PM_DEAD ) {
+			SetDeadHeight( ent );
+			SetFlNoKnockback( ent );
+		}
+
+		if ( ent->gibScheduled ) {
+			GibEntity( ent, attacker->s.number );
+			ent->gibScheduled = qfalse;
+		}
+	}
+}
+
 // this should match CG_ShotgunPattern
 void ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent ) {
 	int			i;
@@ -99,6 +149,12 @@ void ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent ) {
 	vec3_t		end;
 	vec3_t		localForward, localRight, localUp;
 	qboolean	hitClient = qfalse;
+	// RS-3: `seed` is the packed eventParm — bits[7:0] = the rotation/PRNG seed,
+	// bits[23:8] = the int-quantized bloom magnitude. Mask to low-8 before using
+	// it for rotation/PRNG; derive spreadScale from the same int the client
+	// unpacks so both trace identical patterns. // this must match CG_ShotgunPattern
+	int			seedLow = seed & 255;
+	float		spreadScale = (float)( ( seed >> 8 ) & 0xFFFF ) * 16;
 
 	// derive the right and up vectors from the forward vector, because
 	// the client won't have any other information
@@ -108,8 +164,7 @@ void ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent ) {
 
 #if FEAT_SHOTGUN_PATTERN
 	{
-		float rotation = ( seed / 256.0f ) * 2.0f * M_PI;
-		float spreadScale = DEFAULT_SHOTGUN_SPREAD * 16;
+		float rotation = ( seedLow / 256.0f ) * 2.0f * M_PI;
 
 		for ( i = 0; i < DEFAULT_SHOTGUN_COUNT; i++ ) {
 			float angle = bg_shotgunPattern[i].angle + rotation;
@@ -134,8 +189,8 @@ void ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent ) {
 #else
 	// generate the "random" spread pattern
 	for ( i = 0 ; i < DEFAULT_SHOTGUN_COUNT ; i++ ) {
-		r = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
-		u = Q_crandom( &seed ) * DEFAULT_SHOTGUN_SPREAD * 16;
+		r = Q_crandom( &seedLow ) * spreadScale;
+		u = Q_crandom( &seedLow ) * spreadScale;
 		VectorMA( origin, 8192 * 16, localForward, end);
 		VectorMA (end, r, localRight, end);
 		VectorMA (end, u, localUp, end);
@@ -149,6 +204,9 @@ void ShotgunPattern( vec3_t origin, vec3_t origin2, int seed, gentity_t *ent ) {
 		}
 	}
 #endif
+
+	// every pellet of the blast has landed — apply the deferred death effects.
+	G_ResolveShotgunDeferredDeaths( ent );
 }
 
 
@@ -164,7 +222,20 @@ void Attack_Shotgun_Primary (gentity_t *ent) {
 	tent = G_TempEntity( muzzle, EV_SHOTGUN );
 	VectorScale( forward, 4096, tent->s.origin2 );
 	SnapVector( tent->s.origin2 );
-	tent->s.eventParm = rand() & 255;		// seed for spread pattern
+	// RS-3: pack the dynamic bloom magnitude alongside the pattern seed so the
+	// CLIENT mirror (CG_ShotgunPattern) — which renders EVERY player's blast and
+	// has no access to a remote shooter's ps — uses the SAME magnitude as the
+	// server trace. Layout: bits[7:0]=seed (rotation/PRNG, unchanged), bits[23:8]=
+	// quantized bloom (~600..900, fits 16 bits). The bloom is int-quantized HERE,
+	// and both server (ShotgunPattern) and client unpack this same int → they
+	// trace byte-identical patterns (no float/int requantization drift). The
+	// seed-driven pellet PATTERN (bg_shotgunPattern) is unchanged; only the scalar
+	// magnitude ramps (base 600 → ceiling 900). // this must match CG_ShotgunPattern
+	{
+		int seed  = rand() & 255;
+		int bloom = (int)BG_CalcWeaponSpread( &ent->client->ps, ATT_SHOTGUN_PRIMARY, level.time );
+		tent->s.eventParm = seed | ( ( bloom & 0xFFFF ) << 8 );
+	}
 	tent->s.otherEntityNum = ent->s.number;
 
 	ShotgunPattern( tent->s.pos.trBase, tent->s.origin2, tent->s.eventParm, ent );
@@ -222,6 +293,9 @@ void ShotgunPatternSpread( vec3_t origin, vec3_t origin2, int seed, gentity_t *e
 		}
 	}
 #endif
+
+	// every pellet of the blast has landed — apply the deferred death effects.
+	G_ResolveShotgunDeferredDeaths( ent );
 }
 
 void Attack_Shotgun_DoubleBlast( gentity_t *ent ) {

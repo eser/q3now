@@ -13,7 +13,6 @@ animations into the supplied clientInfo_t.
 
 #include "cg_local.h"
 #include "cg_public.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 // ── Warn-once dedup (replaces per-clientInfo_t soundMissingWarnedMask) ──────
@@ -68,7 +67,9 @@ qboolean CG_LoadCharacter( clientInfo_t *ci, const char *charName ) {
 
 	// ── Model parts ──────────────────────────────────────────────────────────
 	// Each part entry in mf.partPaths is a path prefix without extension.
-	// Try {path}.iqm first (IQM single-mesh), then fall back to {path}.md3.
+	// Try {path}.iqm first (IQM single-mesh), then .md3, then .mdl (a Q1 model —
+	// the loader returns it MD3-shaped, so it renders through the same single-mesh
+	// path as .iqm; only the anim source differs, and that is not our concern here).
 	for ( i = 0; i < mf.partCount; i++ ) {
 		const char *pname = mf.partNames[i];
 		const char *prefix = mf.partPaths[i];
@@ -87,7 +88,14 @@ qboolean CG_LoadCharacter( clientInfo_t *ci, const char *charName ) {
 		}
 
 		if ( !handle ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "^3CG_LoadCharacter: '%s' part '%s' not found (tried .iqm/.md3)\n",
+			// Q1 single-mesh model — trap_R_RegisterModel is extension-agnostic and
+			// returns it MD3-shaped (a Q1 monster body loads with no mesh conversion).
+			Com_sprintf( tryPath, sizeof(tryPath), "%s.mdl", prefix );
+			handle = trap_R_RegisterModel( tryPath );
+		}
+
+		if ( !handle ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_cgame), "CG_LoadCharacter: '%s' part '%s' not found (tried .iqm/.md3/.mdl)\n",
 				charName, pname );
 			// Non-fatal for non-body parts; fatal for the primary mesh.
 			if ( !Q_stricmp( pname, "lower" ) || !Q_stricmp( pname, "legs" ) ||
@@ -105,24 +113,27 @@ qboolean CG_LoadCharacter( clientInfo_t *ci, const char *charName ) {
 		} else if ( !Q_stricmp( pname, "lower" ) || !Q_stricmp( pname, "legs" ) ) {
 			ci->legsModel = handle;
 		} else if ( !Q_stricmp( pname, "body" ) ) {
-			// Shared body mesh: assign to both torso and legs slots.
+			// Shared single-mesh body: assign to both torso and legs slots, and set
+			// bodyModel — the render gate keys on bodyModel so ANY single-mesh body
+			// (.iqm or MD3-shaped .mdl) draws through the single-mesh core. iqmModel
+			// stays IQM-only (it gates IQM-specific concerns like embedded-anim skins).
 			ci->torsoModel = handle;
 			ci->legsModel  = handle;
 #if FEAT_IQM
+			ci->bodyModel = handle;
 			if ( isIQM ) {
-				ci->bodyModel = handle;
-				ci->iqmModel  = qtrue;
+				ci->iqmModel = qtrue;
 			}
 #endif
 		} else {
-			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "^3CG_LoadCharacter: '%s' unknown part name '%s' (ignored)\n",
+			Com_Log( SEV_WARN, LOG_CH(ch_cgame), "CG_LoadCharacter: '%s' unknown part name '%s' (ignored)\n",
 				charName, pname );
 		}
 	}
 
 	// Require at least a legs/torso model.
 	if ( !ci->legsModel && !ci->torsoModel ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_cgame), "^3CG_LoadCharacter: '%s' no usable body model found\n", charName );
+		Com_Log( SEV_WARN, LOG_CH(ch_cgame), "CG_LoadCharacter: '%s' no usable body model found\n", charName );
 		return qfalse;
 	}
 	// Fall back: if only one of torso/legs was loaded, share the handle.
@@ -170,7 +181,7 @@ qboolean CG_LoadCharacter( clientInfo_t *ci, const char *charName ) {
 					if ( !Q_stricmp( warnedChars[w], charName ) ) { already = qtrue; break; }
 				}
 				if ( !already && warnedCount < CM_MAX_SKINS ) {
-					Com_Log( SEV_INFO, LOG_CH(ch_cgame), "^3Warning: character '%s' has no paintable skin; using non-tinted default in team play\n", charName );
+					Com_Log( SEV_WARN, LOG_CH(ch_cgame), "Warning: character '%s' has no paintable skin; using non-tinted default in team play\n", charName );
 					Q_strncpyz( warnedChars[warnedCount++], charName, sizeof( warnedChars[0] ) );
 				}
 				// Fall through to normal skin selection (chosen stays 0).
@@ -234,7 +245,7 @@ qboolean CG_LoadCharacter( clientInfo_t *ci, const char *charName ) {
 		}
 		// Warn once per (charName, slot) if all three tiers failed
 		if ( !ci->sounds[i] && MissWarnOnce( charName, s_soundSlotName[i] ) ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "^3characters/{%s,_archetypes/%s,_archetypes/_base}/sounds/%s.opus not found, using default\n",
+			Com_Log( SEV_WARN, LOG_CH(ch_cgame), "characters/{%s,_archetypes/%s,_archetypes/_base}/sounds/%s.opus not found, using default\n",
 				charName, archetype, s_soundSlotName[i] );
 		}
 	}
@@ -264,7 +275,7 @@ qboolean CG_LoadCharacter( clientInfo_t *ci, const char *charName ) {
 		}
 		// Warn once per (charName, slot) if all three tiers failed
 		if ( !*dest && MissWarnOnce( charName, s_effectSlots[i].slot ) ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_cgame), "^3characters/{%s,_archetypes/%s,_archetypes/_base}/sounds/%s.opus not found, using default\n",
+			Com_Log( SEV_WARN, LOG_CH(ch_cgame), "characters/{%s,_archetypes/%s,_archetypes/_base}/sounds/%s.opus not found, using default\n",
 				charName, archetype, s_effectSlots[i].slot );
 		}
 	}
@@ -294,7 +305,7 @@ qboolean CG_LoadCharacter( clientInfo_t *ci, const char *charName ) {
 			}
 			// Warn once per (charName, footstepType) if all three tiers failed
 			if ( !h && v == 0 && MissWarnOnce( charName, s_footstepTypes[ft] ) ) {
-				Com_Log( SEV_INFO, LOG_CH(ch_cgame), "^3characters/{%s,_archetypes/%s,_archetypes/_base}/sounds/footsteps/%s{1,2,3,4}.opus not found, using default\n",
+				Com_Log( SEV_WARN, LOG_CH(ch_cgame), "characters/{%s,_archetypes/%s,_archetypes/_base}/sounds/footsteps/%s{1,2,3,4}.opus not found, using default\n",
 					charName, archetype, s_footstepTypes[ft] );
 			}
 			ci->footstepSounds[ft][v] = h;

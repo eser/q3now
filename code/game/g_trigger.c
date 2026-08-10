@@ -3,7 +3,6 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 
@@ -96,6 +95,124 @@ void SP_q3_trigger_multiple( gentity_t *ent ) {
 /*
 ==============================================================================
 
+trigger_lock
+
+Standalone keyed gate. Checks the activator's holdable keys (SILVER / GOLD per
+spawnflags) and only fires its targets when every required key is held. Adapted
+from EntityPlus (QIIIA/id-derived) trigger_lock — see THIRD_PARTY_LICENSES.
+
+Spawnflag -> key map (q3now SILVER/GOLD key set only; EntityPlus's
+RED/GREEN/BLUE/YELLOW/MASTER/IRON colors do NOT exist in q3now's holdable_t and
+are deliberately omitted — no dead bits):
+    1   RED_ONLY    (team gate, same as trigger_multiple)
+    2   BLUE_ONLY   (team gate, same as trigger_multiple)
+    4   KEY_SILVER  (requires HI_KEY_SILVER)
+    8   KEY_GOLD    (requires HI_KEY_GOLD)
+   16   KEEP_KEYS   (do not consume the key(s) on unlock)
+
+With no KEY_* bit set it behaves like an ordinary trigger_multiple.
+
+Zero new ABI: HI_KEY_SILVER/GOLD and STAT_HOLDABLE_BITS already exist
+(protocol.h); trigger_multiple semantics (Q3_multi_trigger) are reused; this is a
+new server-side entity built entirely on existing fields.
+==============================================================================
+*/
+
+#define TLOCK_KEY_SILVER	4
+#define TLOCK_KEY_GOLD		8
+#define TLOCK_KEEP_KEYS		16
+
+void Q3_Touch_Lock( gentity_t *self, gentity_t *other, trace_t *trace ) {
+	int			holdables;
+	qboolean	hasKeys;
+
+	if ( !other->client ) {
+		return;
+	}
+
+	// debounce: while locked we throttle the feedback so a player standing in the
+	// volume doesn't spam the message/sound every frame.
+	if ( self->pain_debounce_time > level.time ) {
+		return;
+	}
+
+	holdables = other->client->ps.stats[STAT_HOLDABLE_BITS];
+	hasKeys = qtrue;
+
+	if ( ( self->spawnflags & TLOCK_KEY_SILVER ) &&
+		!( holdables & BG_HOLDABLE_BIT( HI_KEY_SILVER ) ) ) {
+		hasKeys = qfalse;
+	}
+	if ( ( self->spawnflags & TLOCK_KEY_GOLD ) &&
+		!( holdables & BG_HOLDABLE_BIT( HI_KEY_GOLD ) ) ) {
+		hasKeys = qfalse;
+	}
+
+	if ( !hasKeys ) {
+		// locked: optional centerprint + locked sound, then throttle.
+		self->pain_debounce_time = level.time + 2000;
+		if ( self->message ) {
+			trap_SendServerCommand( other - g_entities, va( "cp \"%s\"", self->message ) );
+		}
+		if ( self->soundPos1 ) {
+			G_Sound( self, CHAN_VOICE, self->soundPos1 );
+		}
+		return;
+	}
+
+	// unlocked: play the unlock sound and consume the key(s) unless KEEP_KEYS.
+	if ( self->soundPos2 ) {
+		G_Sound( self, CHAN_VOICE, self->soundPos2 );
+	}
+	if ( !( self->spawnflags & TLOCK_KEEP_KEYS ) ) {
+		if ( self->spawnflags & TLOCK_KEY_SILVER ) {
+			other->client->ps.stats[STAT_HOLDABLE_BITS] &= ~BG_HOLDABLE_BIT( HI_KEY_SILVER );
+		}
+		if ( self->spawnflags & TLOCK_KEY_GOLD ) {
+			other->client->ps.stats[STAT_HOLDABLE_BITS] &= ~BG_HOLDABLE_BIT( HI_KEY_GOLD );
+		}
+	}
+
+	// everything else is the same as a trigger_multiple (team gate + target fire
+	// + wait/retrigger handling all live in Q3_multi_trigger).
+	Q3_multi_trigger( self, other );
+}
+
+/*QUAKED trigger_lock (.5 .5 .5) ? RED_ONLY BLUE_ONLY KEY_SILVER KEY_GOLD KEEP_KEYS
+"wait"          seconds between triggerings (0.5 default, -1 = one time only)
+"random"        wait variance (default 0)
+"message"       centerprint shown while locked (e.g. "You need the gold key")
+"lockedsound"   sound played on a failed (locked) touch
+"unlockedsound" sound played when the lock opens
+Keyed gate: requires the SILVER/GOLD holdable key(s) selected by spawnflags.
+*/
+void SP_q3_trigger_lock( gentity_t *self ) {
+	char *lockedsound;
+	char *unlockedsound;
+
+	G_SpawnFloat( "wait", "0.5", &self->wait );
+	G_SpawnFloat( "random", "0", &self->random );
+	G_SpawnString( "lockedsound", "", &lockedsound );
+	G_SpawnString( "unlockedsound", "", &unlockedsound );
+
+	self->soundPos1 = G_SoundIndex( lockedsound );
+	self->soundPos2 = G_SoundIndex( unlockedsound );
+
+	if ( self->random >= self->wait && self->wait >= 0 ) {
+		self->random = self->wait - FRAMETIME;
+		Com_Log( SEV_INFO, LOG_CH(ch_game), "trigger_lock has random >= wait\n" );
+	}
+
+	self->touch = Q3_Touch_Lock;
+
+	Q3_InitTrigger( self );
+	trap_LinkEntity( self );
+}
+
+
+/*
+==============================================================================
+
 trigger_always
 
 ==============================================================================
@@ -162,6 +279,13 @@ void Q3_AimAtTarget( gentity_t *self ) {
 
 	height = ent->s.origin[2] - origin[2];
 	gravity = g_envGravity.value;
+	// A target at or below the pad makes height <= 0, so height/(.5*gravity) is
+	// negative and sqrt() yields NaN — which slips past `!time` (NaN != 0) and
+	// fills origin2 with NaN. Reject it up front.
+	if ( height <= 0 || gravity <= 0 ) {
+		G_FreeEntity( self );
+		return;
+	}
 	time = sqrt( height / ( .5 * gravity ) );
 	if ( !time ) {
 		G_FreeEntity( self );
@@ -495,4 +619,168 @@ void SP_q3_func_timer( gentity_t *self ) {
 	}
 
 	self->r.svFlags = SVF_NOCLIENT;
+}
+
+
+/*
+==============================================================================
+
+trigger_death / trigger_frag — game-event-driven triggers
+
+These have no brush volume and are never touched physically; they are fired
+from player_die (g_combat.c) via Q3_FireFragDeathTriggers when a player dies or
+scores a frag. The running tally lives in self->damage (game-private), the
+threshold in self->count, and the bot/human gate in FL_NO_BOTS / FL_NO_HUMANS.
+
+==============================================================================
+*/
+
+/*QUAKED trigger_death (.5 .5 .5) (-8 -8 -8) (8 8 8) RED_ONLY BLUE_ONLY TRIGGER_ONCE
+Fires when a player dies (any death). activator is the player that died.
+"count" fire only after N deaths (default 1). "nobots"/"nohumans" gate by the
+dying player's type. TRIGGER_ONCE frees the entity after it fires.
+*/
+void Q3_trigger_death_use( gentity_t *self, gentity_t *other, gentity_t *activator ) {
+	if ( !activator || !activator->client ) {
+		return;
+	}
+	if ( ( self->spawnflags & 1 ) && activator->client->sess.sessionTeam != TEAM_RED ) {
+		return;
+	}
+	if ( ( self->spawnflags & 2 ) && activator->client->sess.sessionTeam != TEAM_BLUE ) {
+		return;
+	}
+	if ( ( self->flags & FL_NO_BOTS ) && ( activator->r.svFlags & SVF_BOT ) ) {
+		return;
+	}
+	if ( ( self->flags & FL_NO_HUMANS ) && !( activator->r.svFlags & SVF_BOT ) ) {
+		return;
+	}
+
+	// damage holds the running death tally; count is the threshold
+	self->damage++;
+	if ( self->damage < self->count ) {
+		return;
+	}
+	self->damage = 0;
+
+	G_UseTargets( self, activator );
+
+	if ( self->spawnflags & 4 ) {
+		G_FreeEntity( self );
+	}
+}
+
+void SP_q3_trigger_death( gentity_t *self ) {
+	int		i;
+
+	self->use = Q3_trigger_death_use;
+
+	G_SpawnInt( "nobots", "0", &i );
+	if ( i ) {
+		self->flags |= FL_NO_BOTS;
+	}
+	G_SpawnInt( "nohumans", "0", &i );
+	if ( i ) {
+		self->flags |= FL_NO_HUMANS;
+	}
+
+	G_SpawnInt( "count", "1", &self->count );
+	self->damage = 0;
+
+	self->r.svFlags = SVF_NOCLIENT;
+}
+
+
+/*QUAKED trigger_frag (.5 .5 .5) (-8 -8 -8) (8 8 8) RED_ONLY BLUE_ONLY TRIGGER_ONCE NO_SUICIDE
+Fires when a player scores a frag. activator is the killer, other is the victim.
+"count" fire only after N frags (default 1). "nobots"/"nohumans" gate by the
+killer's type. NO_SUICIDE skips self-kills. TRIGGER_ONCE frees the entity after.
+*/
+void Q3_trigger_frag_use( gentity_t *self, gentity_t *other, gentity_t *activator ) {
+	if ( !activator || !activator->client ) {
+		return;
+	}
+	// NO_SUICIDE: do not fire when the killer is the victim
+	if ( ( self->spawnflags & 8 ) && activator == other ) {
+		return;
+	}
+	if ( ( self->spawnflags & 1 ) && activator->client->sess.sessionTeam != TEAM_RED ) {
+		return;
+	}
+	if ( ( self->spawnflags & 2 ) && activator->client->sess.sessionTeam != TEAM_BLUE ) {
+		return;
+	}
+	if ( ( self->flags & FL_NO_BOTS ) && ( activator->r.svFlags & SVF_BOT ) ) {
+		return;
+	}
+	if ( ( self->flags & FL_NO_HUMANS ) && !( activator->r.svFlags & SVF_BOT ) ) {
+		return;
+	}
+
+	// damage holds the running frag tally; count is the threshold
+	self->damage++;
+	if ( self->damage < self->count ) {
+		return;
+	}
+	self->damage = 0;
+
+	G_UseTargets( self, activator );
+
+	if ( self->spawnflags & 4 ) {
+		G_FreeEntity( self );
+	}
+}
+
+void SP_q3_trigger_frag( gentity_t *self ) {
+	int		i;
+
+	self->use = Q3_trigger_frag_use;
+
+	G_SpawnInt( "nobots", "0", &i );
+	if ( i ) {
+		self->flags |= FL_NO_BOTS;
+	}
+	G_SpawnInt( "nohumans", "0", &i );
+	if ( i ) {
+		self->flags |= FL_NO_HUMANS;
+	}
+
+	G_SpawnInt( "count", "1", &self->count );
+	self->damage = 0;
+
+	self->r.svFlags = SVF_NOCLIENT;
+}
+
+
+/*
+==============================================================================
+Q3_FireFragDeathTriggers
+
+Leaf call from player_die (g_combat.c): scans for trigger_frag / trigger_death
+entities and fires the ones whose gates pass. trigger_frag fires only when a
+player got the kill credit (attacker is a client); trigger_death fires for every
+player death. Each use-handler applies its own team / bot / count / once gating.
+==============================================================================
+*/
+void Q3_FireFragDeathTriggers( gentity_t *died, gentity_t *attacker ) {
+	gentity_t	*t;
+
+	// trigger_frag: only when a player scored the kill (activator = killer)
+	if ( attacker && attacker->client ) {
+		t = NULL;
+		while ( ( t = G_Find( t, FOFS( classname ), "trigger_frag" ) ) != NULL ) {
+			if ( t->use ) {
+				t->use( t, died, attacker );
+			}
+		}
+	}
+
+	// trigger_death: every player death (activator = the dying player)
+	t = NULL;
+	while ( ( t = G_Find( t, FOFS( classname ), "trigger_death" ) ) != NULL ) {
+		if ( t->use ) {
+			t->use( t, attacker, died );
+		}
+	}
 }

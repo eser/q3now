@@ -1,0 +1,310 @@
+// sound.wui -- q3now Sound settings submenu (Phase 4a canary canonical)
+//
+// Phase 4a settings panel pattern reuse:
+//   - settings_root + top_bar (same as options.wui / main.wui)
+//   - settings_content with LEFT nav column (same nav set as
+//     options.wui; ui_settingsSection=sound highlights nav_sound cyan)
+//   - settings_panel with sound-specific widget rows
+//
+// Widget pattern verification scope (Phase 3c restoration carry-over):
+//   - Slider widget       (type 10)  — Master / Music / Latency
+//   - Dropdown widget     (type 12)  — Sample Rate, Output Device
+//   - Hybrid                          — Test / Apply action buttons
+//
+// Each widget row is a flex container (direction row) with text label
+// + widget control. Row height is FIXED so the slider track + thumb
+// render at predictable pixel coordinates (the slider drawing code in
+// cl_wired_clay.c:2097-2150 anchors the track to `h*0.4`, expecting a
+// stable per-row height).
+
+#include "ui/widgets/qw_settings_nav.wui"
+#include "ui/widgets/qw_settings_chrome.wui"
+
+menuDef {
+	name "sound"
+	layer "menu"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "settings_root"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		background "layered" effects "base+glow+noise+vignette"
+
+		// ── Top bar ────────────────────────────────────────────────
+		QW_SETTINGS_TOPBAR("q3now / Settings / Sound")
+
+		// ── Settings content row (LEFT nav + RIGHT panel) ───────────
+		itemDef {
+			name "settings_content"
+			type container
+			rect 0 0 1 0.83
+			direction row
+			padding $content_padding_y $content_padding_x
+			gap $spacing_lg
+			grow 1
+			height GROW
+
+			// ── LEFT nav column (same as options.wui) ──────────
+			itemDef {
+				name "settings_nav"
+				type container
+				rect 0 0 0.30 1
+				direction column
+				gap $spacing_sm
+
+				itemDef {
+					name "nav_label"
+					type 0
+					rect 0 0 1 0.025
+					height FIT
+					text "CATEGORIES"
+					textalign 0
+					font $font_mono 10
+					forecolor $boneDim
+					decoration
+					visible 1
+					grow 0
+				}
+
+				QW_SETTINGS_NAV("nav_sound",       "sound",       "Sound",       "sound")
+				QW_SETTINGS_NAV("nav_video",       "video",       "Video",       "video")
+				QW_SETTINGS_NAV("nav_display",     "display",     "Display",     "display")
+				QW_SETTINGS_NAV("nav_controls",    "controls",    "Controls",    "controls")
+				QW_SETTINGS_NAV("nav_network",     "network",     "Network",     "network")
+				QW_SETTINGS_NAV("nav_player",      "player",      "Player",      "playersettings")
+				QW_SETTINGS_NAV("nav_preferences", "preferences", "Preferences", "preferences")
+
+				itemDef {
+					name "nav_spacer"
+					type container
+					rect 0 0 1 0
+					grow 1
+				}
+			}
+
+			// ── RIGHT settings panel (sound-specific) ──────────
+			itemDef {
+				name "settings_panel"
+				type container
+				rect 0 0 0.70 1
+				direction column
+				padding $card_padding
+				gap $card_gap_internal
+				grow 1
+				width GROW
+
+				itemDef {
+					name "panel_header"
+					type 0
+					rect 0 0 1 0.05
+					height FIT
+					text "Sound"
+					textalign 0
+					font $font_sans_bold 22
+					forecolor $accent
+					decoration
+					visible 1
+					grow 0
+				}
+
+				itemDef {
+					name "panel_subheader"
+					type 0
+					rect 0 0 1 0.025
+					height FIT
+					text "Master volume, music, sample rate, output device"
+					textalign 0
+					font $font_mono 11
+					forecolor $boneDim
+					decoration
+					visible 1
+					grow 0
+				}
+
+				// ── Widget rows (grouped into themed boxes) ─────
+				itemDef {
+					name "panel_content"
+					type container
+					rect 0 0 1 0.7
+					direction column
+					gap $spacing_md
+					grow 1
+					height GROW
+					scroll
+					alignY start
+					padding 0 0
+
+					// two-column grid row
+					itemDef {
+						name "grid_row_1"
+						type container
+						rect 0 0 1 0
+						height FIT
+						width PERCENT 1
+						grow 0
+						direction row
+						gap $spacing_md
+						alignY start
+						padding 0 0
+
+					// ── LEVELS group box ───────────────────────
+					itemDef {
+						name "group_levels"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						alignY start
+
+						itemDef { name "group_levels_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "LEVELS" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+
+						// Master volume slider row
+						itemDef {
+							name "row_master"
+							type 10
+							rect 0.005 0.005 0.98 0.045
+							height FIXED 38px
+							width PERCENT 1
+							text "Master Volume"
+							textalign 0
+							font $font_sans 14
+							forecolor $bone
+							cvarFloat "s_volume" 0.7 0 1
+							visible 1
+							grow 0
+						}
+
+						// Music volume slider row
+						itemDef {
+							name "row_music"
+							type 10
+							rect 0.005 0.055 0.98 0.045
+							height FIXED 38px
+							width PERCENT 1
+							text "Music Volume"
+							textalign 0
+							font $font_sans 14
+							forecolor $bone
+							cvarFloat "s_musicvolume" 0.25 0 1
+							visible 1
+							grow 0
+						}
+					}
+
+					// ── OUTPUT group box ───────────────────────
+					itemDef {
+						name "group_output"
+						type container
+						rect 0 0 0.5 0
+						height FIT
+						width PERCENT 0.5
+						grow 0
+						direction column
+						padding $spacing_card_padding_v $spacing_card_padding_h
+						gap $spacing_sm
+						background $panelDeep
+						border 1px $line
+						radius $radius_md
+						alignY start
+
+						itemDef { name "group_output_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
+							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "OUTPUT" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
+
+						// Sample rate segmented row
+						itemDef {
+							name "row_samplerate"
+							type segmented
+							rect 0.005 0.105 0.98 0.045
+							height FIXED 38px
+							width PERCENT 1
+							text "Sample Rate"
+							textalign 0
+							font $font_sans 14
+							forecolor $bone
+							cvar "s_khz"
+							cvarFloatList { "11 kHz" 11 "22 kHz" 22 "44 kHz" 44 "48 kHz" 48 }
+							visible 1
+							grow 0
+						}
+
+						// Latency slider row
+						itemDef {
+							name "row_latency"
+							type 10
+							rect 0.005 0.155 0.98 0.045
+							height FIXED 38px
+							width PERCENT 1
+							text "Latency (ms)"
+							textalign 0
+							font $font_sans 14
+							forecolor $bone
+							cvarFloat "s_latency" 6 2 20
+							visible 1
+							grow 0
+						}
+
+						// Output device dropdown row
+						itemDef {
+							name "row_device"
+							type 12
+							rect 0.005 0.205 0.98 0.045
+							height FIXED 38px
+							width PERCENT 1
+							text "Output Device"
+							textalign 0
+							font $font_sans 14
+							forecolor $bone
+							cvar "s_device"
+							populateCallback "audio_devices"
+							visible 1
+							grow 0
+						}
+					}
+					}
+				}
+
+				// ── Footer (Back … Test / Apply on ONE row) ─────
+				itemDef {
+					name "panel_footer"
+					type container
+					rect 0 0 1 0.05
+					direction row
+					gap $spacing_md
+					alignY center
+					height FIT
+
+					QW_SETTINGS_BACK_BTN
+					QW_SETTINGS_FOOTER_SPACER
+					QW_SETTINGS_FOOTER_BTN("btn_test",   "Test",   $boneDim, { exec "snd_test" })
+					QW_SETTINGS_FOOTER_BTN("btn_apply",  "Apply",  $accent,  { exec "snd_restart" })
+				}
+			}
+		}
+
+		// ── Bottom bar (hints) ──────────────────────────────────────
+		QW_SETTINGS_BOTTOMBAR("left/right to adjust")
+	}
+
+	onOpen {
+		setcvar "ui_settingsSection" "sound"
+	}
+	onESC {
+		close
+	}
+}

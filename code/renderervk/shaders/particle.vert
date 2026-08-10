@@ -71,6 +71,12 @@ struct ParticleClassGPU {
 	                              //   of the class's resolved stage-0 image; packed into bit
 	                              //   31 of particleClassHandle for the fragment stage.
 	uint  pad5;
+	// Sprite-frame (flipbook) animation — mirrors host particleClassGPU_t.
+	uint  frameSlots[16];         // PARTICLE_CLASS_MAX_FRAMES; resolved sampler slot per frame
+	uint  frameCount;             // 0/1 = static; >1 = animate
+	uint  frameBlend;             // 1 = interpolate adjacent frames
+	uint  framePad0;
+	uint  framePad1;
 };
 
 layout(set = 0, binding = 0) uniform ParticleFrame {
@@ -82,13 +88,12 @@ layout(set = 0, binding = 0) uniform ParticleFrame {
 	uint  poolSize;
 	uint  numClasses;
 	uint  pingPongRead;
-	// 16 B of std140 vec4-stride padding. pad0 (offset 128) was the
-	// legacy `identityLight` halving factor — dropped Phase 6B3'-a,
-	// field removed in the Block 9 sweep. Mirrors host particleFrame_t.
-	float pad0;
-	float pad1;
-	float pad2;
-	float pad3;
+	// Soft-particle depth-fade params (consumed only by particle.frag; the vertex
+	// shader keeps them declared so the std140 layout matches host particleFrame_t).
+	float invResX;       // 1/renderWidth
+	float invResY;       // 1/renderHeight
+	float depthValid;    // 1.0 when the shared scene-depth copy is fresh this frame
+	float exposureBias;  // consumed only by particle.frag; kept here for std140 layout match
 };
 
 layout(std430, set = 0, binding = 1) readonly buffer Pool {
@@ -101,7 +106,7 @@ layout(std430, set = 0, binding = 2) readonly buffer Classes {
 
 layout(location = 0) out vec2 fragUV;
 layout(location = 1) out vec4 fragColor;
-// Phase 5: per-particle class handle, flat-interpolated to fragment
+// per-particle class handle, flat-interpolated to fragment
 // shader for the per-class sampler array lookup. Same value for all 6
 // vertices of one particle (all share gl_InstanceIndex), so flat is
 // uniform-correct.
@@ -112,6 +117,15 @@ layout(location = 1) out vec4 fragColor;
 // particle-class image is CD_SRGB so bit 31 is always 0 — the fragment
 // path is byte-identical to before this change.
 layout(location = 2) flat out uint particleClassHandle;
+// Sprite-frame (flipbook) outputs. frameSlot0 == FRAME_SLOT_NONE → the
+// fragment uses the class-handle sampling path (static class, byte-
+// identical). Otherwise frameSlot0/frameSlot1 are frame-pool sampler
+// indices and frameBlend in [0,1) interpolates between them.
+layout(location = 3) flat out uint  frameSlot0;
+layout(location = 4) flat out uint  frameSlot1;
+layout(location = 5)      out float frameBlend;
+
+const uint FRAME_SLOT_NONE = 0xFFFFFFFFu;
 
 out gl_PerVertex {
 	vec4 gl_Position;
@@ -137,6 +151,9 @@ void emitDegenerate() {
 	// after the handle-1 decrement) which is always populated
 	// (tr.whiteImage at init, or a registered class).
 	particleClassHandle = 1u;
+	frameSlot0          = FRAME_SLOT_NONE;
+	frameSlot1          = FRAME_SLOT_NONE;
+	frameBlend          = 0.0;
 }
 
 void main() {
@@ -199,4 +216,23 @@ void main() {
 	// Block 5d-followup: low bits carry the class handle; bit 31 carries
 	// the resolved image's colour domain (c.colorDomain ∈ {0,1}).
 	particleClassHandle = p.classHandle | (c.colorDomain << 31u);
+
+	// Sprite-frame (flipbook) select. Static classes (frameCount <= 1)
+	// forward the NONE sentinel so the fragment keeps the class-handle
+	// sampling path byte-identical. Animated classes select the frame
+	// from age (last-frame CLAMP, no wrap — one-shot semantics) and,
+	// when frameBlend is set, forward the next frame + a blend factor.
+	if ( c.frameCount > 1u ) {
+		float fr     = p.age * float(c.frameCount);
+		uint  last   = c.frameCount - 1u;
+		uint  frame0 = uint(clamp(floor(fr), 0.0, float(last)));
+		uint  frame1 = min(frame0 + 1u, last);
+		frameSlot0 = c.frameSlots[frame0];
+		frameSlot1 = c.frameSlots[frame1];
+		frameBlend = (c.frameBlend != 0u) ? fract(fr) : 0.0;
+	} else {
+		frameSlot0 = FRAME_SLOT_NONE;
+		frameSlot1 = FRAME_SLOT_NONE;
+		frameBlend = 0.0;
+	}
 }

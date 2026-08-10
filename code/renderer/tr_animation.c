@@ -3,6 +3,9 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 /*
 
@@ -186,7 +189,7 @@ void R_MDRAddAnimSurfaces( trRefEntity_t *ent ) {
 		|| (ent->e.oldframe >= header->numFrames)
 		|| (ent->e.oldframe < 0) )
 	{
-		ri.Log( SEV_DEBUG, "R_MDRAddAnimSurfaces: no such frame %d to %d for '%s'\n",
+		R_LOG( rch_assets, SEV_DEBUG, "R_MDRAddAnimSurfaces: no such frame %d to %d for '%s'\n",
 			   ent->e.oldframe, ent->e.frame, tr.currentModel->name );
 		ent->e.frame = 0;
 		ent->e.oldframe = 0;
@@ -260,15 +263,6 @@ void R_MDRAddAnimSurfaces( trRefEntity_t *ent ) {
 			&& shader->sort == SS_OPAQUE )
 		{
 			R_AddDrawSurf( (void *)surface, tr.shadowShader, 0, 0 );
-		}
-
-		// projection shadows work fine with personal models
-		if ( r_shadows->integer == 3
-			&& fogNum == 0
-			&& (ent->e.renderfx & RF_SHADOW_PLANE )
-			&& shader->sort == SS_OPAQUE )
-		{
-			R_AddDrawSurf( (void *)surface, tr.projectionShadowShader, 0, 0 );
 		}
 
 		if (!personalModel)

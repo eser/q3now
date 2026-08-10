@@ -16,7 +16,7 @@ layout(location = 2) in vec4 frag_tangent;  // tangent (xyz) + bitangent sign (w
 
 layout(location = 0) out vec4 out_color;
 
-// Phase 6B3'-d4-m3: precise piecewise sRGB <-> linear conversion.
+// Precise piecewise sRGB <-> linear conversion.
 // Duplicated in every fragment shader per the engine-wide
 // unconditional linear migration; compile.mjs lacks #include
 // support. Matches m1/m2 verbatim. linearToSRGB is unused here —
@@ -38,7 +38,7 @@ vec3 linearToSRGB( vec3 c ) {
 }
 
 void main() {
-	// Phase 6B3'-d4-m3: decode the albedo sample to linear. texture0
+	// Decode the albedo sample to linear. texture0
 	// is an sRGB-encoded colour texture (UNORM format, display-domain
 	// byte content). Alpha stays raw (alpha is not sRGB-encoded).
 	vec4 tex = texture(texture0, frag_tex_coord);

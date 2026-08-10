@@ -38,12 +38,11 @@ ADD_COMPILE_DEFINITIONS(PRODUCT_NAME="${PRODUCT_NAME}")
 ADD_COMPILE_DEFINITIONS(CHANNEL_SUFFIX="${CHANNEL_SUFFIX}")
 
 SET(CNAME "wired")
-SET(DNAME "wired-ded")
+SET(DNAME "wired-headless")
 
 SET(RENDERER_PREFIX ${CNAME})
 SET(RENDERER_DEFAULT vulkan) # valid options: opengl, vulkan, opengl2; opengl as ultimate fallback
 
-OPTION(USE_SDL "" ON)
 OPTION(USE_CURL "" ON)
 OPTION(USE_OPENGL "" ON)
 OPTION(USE_VULKAN "" ON)
@@ -53,6 +52,8 @@ OPTION(USE_ZLIB_NG "" ON)
 OPTION(USE_RENDERER_DLOPEN "" ON)
 OPTION(USE_WASM "Enable WASM VM backend via WAMR" OFF)
 OPTION(USE_LUA "Enable LuaJIT scripting" ON)
+OPTION(USE_WIRED_UI_CLAY "Vendor Clay layout engine for the WiredUI compositor (client target only)" ON)
+OPTION(USE_SSAO "Compile the GTAO/SSAO renderer path in (FEAT_SSAO=1) for the visual-gate verify build; OFF = compiled-out ship path" OFF)
 
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
@@ -62,6 +63,9 @@ AUX_SOURCE_DIRECTORY(code/qcommon/maps QCOMMON_SRCS)
 # Arena allocator (must be explicit — AUX_SOURCE_DIRECTORY is configure-time only)
 list(APPEND QCOMMON_SRCS code/qcommon/arena.c)
 
+# stalltrace diagnostic (temporary; cvar-gated, default-off)
+list(APPEND QCOMMON_SRCS code/qcommon/wired/stalltrace.c)
+
 # LZ4 decoder (for SW3Z archive reader)
 list(APPEND QCOMMON_SRCS src/libs/lz4/lz4.c src/libs/lz4/lz4frame.c src/libs/lz4/xxhash.c src/libs/lz4/lz4hc.c)
 
@@ -69,6 +73,13 @@ list(APPEND QCOMMON_SRCS src/libs/lz4/lz4.c src/libs/lz4/lz4frame.c src/libs/lz4
 # and vm.c skips WASM code paths (q_feats.h hardcodes FEAT_WASM=1).
 IF(NOT USE_WASM)
 	ADD_COMPILE_DEFINITIONS(FEAT_WASM=0)
+ENDIF()
+
+# When USE_SSAO is ON, override FEAT_SSAO=1 so the GTAO renderer path compiles in
+# for the visual-gate verify build (q_feats.h #ifndef-defaults it to 0 = the ship
+# build's compiled-out path). The default ship build leaves USE_SSAO OFF → FEAT_SSAO 0.
+IF(USE_SSAO)
+	ADD_COMPILE_DEFINITIONS(FEAT_SSAO=1)
 ENDIF()
 
 # MinGW: picoquic + picotls use bare `#ifdef _WINDOWS` (MSVC-only auto-define)
@@ -116,7 +127,7 @@ TARGET_INCLUDE_DIRECTORIES(botlib PRIVATE code/qcommon)
 AUX_SOURCE_DIRECTORY(code/server SERVER_SRCS)
 list(REMOVE_ITEM SERVER_SRCS code/server/sv_rankings.c)
 
-# bg_weapons.c, bg_misc.c and bg_gametypes.c go into qcommon so the dedicated
+# bg_weapons.c, bg_misc.c and bg_gametypes.c go into qcommon so the headless
 # server can access bg_weaponlist, bg_itemlist and bg_gametypelist
 # (e.g. for MCP tools like game.items, coaching.tick)
 list(APPEND QCOMMON_SRCS code/game/bg_weapons.c code/game/bg_misc.c code/game/bg_gametypes.c)
@@ -124,9 +135,9 @@ list(APPEND QCOMMON_SRCS code/game/bg_weapons.c code/game/bg_misc.c code/game/bg
 # universal binary
 ADD_LIBRARY(qcommon OBJECT ${QCOMMON_SRCS} ${SERVER_SRCS})
 
-# dedicated server
+# headless server
 ADD_LIBRARY(qcommon_ded OBJECT ${QCOMMON_SRCS} ${SERVER_SRCS})
-TARGET_COMPILE_DEFINITIONS(qcommon_ded PUBLIC DEDICATED)
+TARGET_COMPILE_DEFINITIONS(qcommon_ded PUBLIC HEADLESS)
 
 # LZ4 include path (for SW3Z archive reader)
 TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE src/libs/lz4)
@@ -152,6 +163,17 @@ FILE(GLOB WIRED_CON_SRCS  code/qcommon/wired/core/shell/*.c)
 TARGET_SOURCES(qcommon     PRIVATE ${WIRED_CON_SRCS})
 TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_CON_SRCS})
 
+# wired/core/console — presentation-agnostic ring buffer + history +
+# scrollback + search/mark + severity-as-data + the param-injected geometry
+# reflow (Con_Reflow). Turn 3 V-20 extracted all UI-tier touches (glconfig,
+# render metrics, color vecs, Key_*/Field_*/cgvm, the toggleconsole/messagemode
+# commands, and Con_CheckResize's glconfig half) into the projection at
+# code/client/wired/ui/elements/console.c. con_buffer.c now includes ZERO
+# client/* headers, so it joins the dedicated-server (qcommon_ded) target too.
+FILE(GLOB WIRED_CONSOLE_SRCS code/qcommon/wired/core/console/*.c)
+TARGET_SOURCES(qcommon     PRIVATE ${WIRED_CONSOLE_SRCS})
+TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_CONSOLE_SRCS})
+
 # wired/core/logging — log pipeline (console/tty/file sinks, ring buffer)
 FILE(GLOB WIRED_LOG_SRCS  code/qcommon/wired/core/logging/*.c)
 TARGET_SOURCES(qcommon     PRIVATE ${WIRED_LOG_SRCS})
@@ -167,10 +189,174 @@ FILE(GLOB WIRED_TIME_SRCS  code/qcommon/wired/core/time/*.c)
 TARGET_SOURCES(qcommon     PRIVATE ${WIRED_TIME_SRCS})
 TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_TIME_SRCS})
 
+# wired/core/thread — portable thread + atomic primitives (Sys_CreateThread, ...), links
+# into both client and headless (unlike SDL threads) for the background navmesh bake
+FILE(GLOB WIRED_THREAD_SRCS  code/qcommon/wired/core/thread/*.c)
+TARGET_SOURCES(qcommon     PRIVATE ${WIRED_THREAD_SRCS})
+TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_THREAD_SRCS})
+
 # wired/core — orchestration layer (WiredCore_Init / WiredCore_Shutdown)
 FILE(GLOB WIRED_CORE_SRCS code/qcommon/wired/core/*.c)
 TARGET_SOURCES(qcommon     PRIVATE ${WIRED_CORE_SRCS})
 TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_CORE_SRCS})
+
+# wired/math — pure-CPU math (spline curve core; NOT renderer, NOT RAL).
+# Cinematic-scene spline core: RBDOOM Curve.h port (Catmull-Rom + TCB +
+# arc-length reparameterization). No Vulkan/RAL dependency — only q_shared.h
+# vec macros.
+FILE(GLOB WIRED_MATH_SRCS code/qcommon/wired/math/*.c)
+TARGET_SOURCES(qcommon     PRIVATE ${WIRED_MATH_SRCS})
+TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_MATH_SRCS})
+
+# wired_curve math-core unit test (cinematic-scene spline core gate).
+# Standalone: wired_curve.c compiled with -DWIRED_CURVE_STANDALONE so it uses
+# its local vec-macro fallback (no full q_shared.h chain in the test binary).
+# Asserts: interpolation-through-control-points, straight-line constant
+# tangent, TCB(0,0,0)==Catmull-Rom, SetConstantSpeed linearity, GetTimeForLength
+# round-trip, Newton div-by-zero guard.
+# Run with: ctest -R wired_curve
+ENABLE_TESTING()
+ADD_EXECUTABLE(wired_curve_test
+	tests/wired_curve_test.c
+	code/qcommon/wired/math/wired_curve.c
+)
+TARGET_COMPILE_DEFINITIONS(wired_curve_test PRIVATE WIRED_CURVE_STANDALONE)
+IF(NOT WIN32)
+	TARGET_LINK_LIBRARIES(wired_curve_test m)
+ENDIF()
+ADD_TEST(NAME wired_curve COMMAND wired_curve_test)
+
+# wired_scene evaluator unit test (samples wiredScene_t -> {origin,angles,fov}).
+# Standalone: wired_scene_eval.c + wired_curve.c compiled with
+# -DWIRED_SCENE_STANDALONE / -DWIRED_CURVE_STANDALONE so they use local vec /
+# vectoangles / stricmp fallbacks (no q_shared.h or Lua VM in the test binary).
+# The test builds a wiredScene_t directly (WiredCurve_Init + WiredCurve_AddValue,
+# events filled in C) — no Lua loader needed. Asserts: origin exact at t=0 / a
+# knot / t=end, tangent facing without a target, look-at facing + curTargetIndex
+# flip after a TARGET event, authored-vs-event fov precedence, a WAIT holding the
+# origin, and FADEOUT/SCENE surfaced as pending signals (not acted on).
+# Run with: ctest -R wired_scene_eval
+ADD_EXECUTABLE(wired_scene_eval_test
+	tests/wired_scene_eval_test.c
+	code/qcommon/wired/scene/wired_scene_eval.c
+	code/qcommon/wired/math/wired_curve.c
+)
+TARGET_COMPILE_DEFINITIONS(wired_scene_eval_test PRIVATE WIRED_SCENE_STANDALONE WIRED_CURVE_STANDALONE)
+IF(NOT WIN32)
+	TARGET_LINK_LIBRARIES(wired_scene_eval_test m)
+ENDIF()
+ADD_TEST(NAME wired_scene_eval COMMAND wired_scene_eval_test)
+
+# savegame callback registry — Phase-2 hard gate: name<->pointer round-trip +
+# completeness across both registry tiers. Compiles the REAL resolver source
+# (code/game/g_save_registry.c) against stub callback symbols under
+# SG_FUNCS_STANDALONE; the callback name lists (central SG_CALLBACK_LIST +
+# per-file SG_LOCAL_CB_*) are the single source shared with the game build.
+# Asserts: name->ptr->name and ptr->name->ptr for every registered callback,
+# pointer distinctness, the registered count (114 in the default feature config),
+# the NULL/""/unknown-name paths (unknown -> NULL, the Phase-6 version signal),
+# and that Q3_ReturnToPos1 (the runtime-reassigned mover think) resolves.
+# Run with: ctest -R sg_registry
+ADD_EXECUTABLE(sg_registry_test
+	tests/sg_registry_test.c
+	code/game/g_save_registry.c
+)
+TARGET_INCLUDE_DIRECTORIES(sg_registry_test PRIVATE code/game)
+ADD_TEST(NAME sg_registry COMMAND sg_registry_test)
+
+# savegame file primitive — Phase-3 hard gate: version header + RLE codec
+# round-trip. Compiles the REAL codec (code/game/g_save_codec.c, the game-type-
+# free half of the file primitive) and drives it directly. Asserts: header
+# init/validate, strict wrong-magic / wrong-version / NULL rejection, and the
+# zero-run RLE codec round-tripping every buffer shape (all-zero, no-zero, sparse,
+# alternating, >255 runs, empty) plus capacity and malformed-input guards. The
+# trap-using SG_WriteFile / SG_ReadFile (g_save_file.c) wrap this codec in FS
+# calls and are covered by the game build compiling them.
+# Run with: ctest -R sg_savefile
+ADD_EXECUTABLE(sg_savefile_test
+	tests/sg_savefile_test.c
+	code/game/g_save_codec.c
+)
+TARGET_INCLUDE_DIRECTORIES(sg_savefile_test PRIVATE code/game)
+ADD_TEST(NAME sg_savefile COMMAND sg_savefile_test)
+
+# savegame serializer — Phase-4 hard gate: the field-walker round-trip + index
+# relocation. Compiles the REAL walker (g_save_serialize.c) + registry
+# (g_save_registry.c) and drives them with a synthetic world carrying every
+# field-type the Phase-1 descriptors use. Asserts: byte-exact round-trip of
+# scalars/vector/RAW/string, symmetric index relocation (ptr<->index, -1==NULL both
+# directions) for entity/client/item, callback round-trip via the registry name,
+# and rejection of an out-of-range index + an unknown callback name. The real
+# gentity_t walk over g_entities (g_save_world.c) is covered by the game build.
+# Run with: ctest -R sg_serialize
+ADD_EXECUTABLE(sg_serialize_test
+	tests/sg_serialize_test.c
+	code/game/g_save_serialize.c
+	code/game/g_save_registry.c
+)
+TARGET_INCLUDE_DIRECTORIES(sg_serialize_test PRIVATE code/game)
+ADD_TEST(NAME sg_serialize COMMAND sg_serialize_test)
+
+# savegame .psw persistent subset — Phase-5 hard gate: the cross-map carry
+# (player-progression byte ranges + objectives POD) round-trip. Compiles the REAL
+# range-walker (g_save_serialize.c SG_WriteRanges/SG_ReadRanges) + the header codec
+# (g_save_codec.c) and drives them with a synthetic client + objectives. Asserts:
+# progression ranges round-trip byte-exact, SUBSET-ONLY (a non-whitelisted
+# transient field does NOT leak into the .psw), objectives POD round-trips, and a
+# wrong-version/magic .psw header is REJECTED. The real gclientPersFields walk over
+# level.clients (g_save_world.c) is covered by the game build.
+# Run with: ctest -R sg_psw
+ADD_EXECUTABLE(sg_psw_test
+	tests/sg_psw_test.c
+	code/game/g_save_serialize.c
+	code/game/g_save_codec.c
+)
+TARGET_INCLUDE_DIRECTORIES(sg_psw_test PRIVATE code/game)
+ADD_TEST(NAME sg_psw COMMAND sg_psw_test)
+
+# savegame load fixup — Phase-6 (FINAL) hard gate: the two-phase load relocation.
+# Compiles the REAL walker (g_save_serialize.c SG_ReadFields + SG_ResolveIndices) +
+# registry (g_save_registry.c) and drives a synthetic world of cross-referencing
+# records through Phase-A (load-all into fixed-base slots, pointers = indices) then
+# Phase-B (SG_ResolveIndices patches indices -> live pointers). Asserts every
+# cross-reference resolves to the CORRECT live slot — forward-references (A->C where
+# C loads later), backward, self, and NULL — and strings re-intern via the
+# callback. This is the relocation the live SG_LoadWorld resume depends on.
+# Run with: ctest -R sg_reloc
+ADD_EXECUTABLE(sg_reloc_test
+	tests/sg_reloc_test.c
+	code/game/g_save_serialize.c
+	code/game/g_save_registry.c
+)
+TARGET_INCLUDE_DIRECTORIES(sg_reloc_test PRIVATE code/game)
+ADD_TEST(NAME sg_reloc COMMAND sg_reloc_test)
+
+# Q1 monster animation derivation — Phase A hard gate: the frame-name prefix
+# grouping that turns a Q1 .mdl's frame names into animation ranges. Compiles the
+# REAL derivation (code/renderercommon/tr_model_mdl_anim.h, MDL_ANIM_TEST_STANDALONE)
+# and drives it with the canonical Q1 soldier frame-name sequence. Asserts:
+# contiguous same-label frames form one range; id's letter-before-digit variants
+# (pain vs painb) stay SEPARATE; all-digit/empty-label frames open no range. This
+# is the derivation the renderer's R_GetMDLAnimations + cgame's CG_ParseMDLAnimations
+# both build on.
+# Run with: ctest -R mdl_anim
+ADD_EXECUTABLE(mdl_anim_test
+	tests/mdl_anim_test.c
+)
+ADD_TEST(NAME mdl_anim COMMAND mdl_anim_test)
+
+# wired/scene — cinematic-scene definition + Lua-table loader. Pure CPU +
+# Lua load (NOT renderer, NOT RAL): loads a scene .lua that returns a table
+# into a wiredScene_t (eye-path spline + named target splines + fov lerp +
+# decoded event list) atop the wired/math spline core. Depends on WiredScript
+# (the Lua VM) — scene definitions are Lua like the rest of Wired content. The
+# luajit include dir + link for qcommon/qcommon_ded are set with WiredScript's.
+FILE(GLOB WIRED_SCENE_SRCS code/qcommon/wired/scene/*.c)
+TARGET_SOURCES(qcommon     PRIVATE ${WIRED_SCENE_SRCS})
+TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_SCENE_SRCS})
+
+# The wired_scene Lua-loader unit test links LuaJIT, so its target is defined
+# in the IF(USE_LUA) block below (after LUAJIT_DIR / the luajit target exist).
 
 # util/ — utility sub-components (crypto, md5, md4; string/sort/hash extraction TBD)
 FILE(GLOB UTIL_SRCS code/qcommon/util/*.c)
@@ -366,7 +552,7 @@ SET(WIREDNET_INCLUDE_DIRS
 # OpenSSL (required by picotls for crypto primitives)
 FIND_PACKAGE(OpenSSL REQUIRED)
 
-# Add to qcommon (client) and qcommon_ded (dedicated server)
+# Add to qcommon (client) and qcommon_ded (headless server)
 TARGET_SOURCES(qcommon PRIVATE ${WIREDNET_ALL_SRCS})
 TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE ${WIREDNET_INCLUDE_DIRS})
 TARGET_LINK_LIBRARIES(qcommon PRIVATE OpenSSL::Crypto)
@@ -548,23 +734,31 @@ list(FILTER CLIENT_SRCS EXCLUDE REGEX "snd_miniaudio_test\\.c$")
 list(FILTER CLIENT_SRCS EXCLUDE REGEX "snd_miniaudio_test\\.c$")
 AUX_SOURCE_DIRECTORY(code/client/wired/ui          CLIENT_SRCS)
 AUX_SOURCE_DIRECTORY(code/client/wired/store       CLIENT_SRCS)
-AUX_SOURCE_DIRECTORY(code/client/wired/hud         CLIENT_SRCS)
-AUX_SOURCE_DIRECTORY(code/client/wired/hud/elements CLIENT_SRCS)
+# V-13 (2026-05-25): code/client/wired/hud/ top-level files relocated to
+# code/client/wired/ui/ as cl_wired_ui_hud_*.
+# hud-element-relocation (2026-05-31): the 46 cl_wired_hud_elem_*.c element
+# modules moved from code/client/wired/hud/elements/ to code/client/wired/ui/
+# elements/ — they now compile via the ui/elements glob below; the old
+# hud/elements glob is retired. cl_wired_ui_hud_register.c (in ui/) is the
+# PERMANENT C-13 HUD registration infra (name→element table + config-bridge
+# adapter); it binds the elements by symbol. The table is load-bearing at
+# create-time (registry/element create-signature mismatch) — not a retireable
+# shim. See that file's header for the rationale.
+# Chain 6.0: the procedural-crosshair Lua pipeline (cl_wired_crosshair.c) is a
+# top-level wired/hud module — compile the directory back in (it is already on
+# the include path below). It stays in code/client/wired/hud/.
+AUX_SOURCE_DIRECTORY(code/client/wired/hud          CLIENT_SRCS)
+# cinematic-scene Lua trigger surface (scene.play/stop/skip on the System VM;
+# bridges to the cgame playback state via the sceneplay/scenestop/sceneskip commands).
+AUX_SOURCE_DIRECTORY(code/client/wired/scene       CLIENT_SRCS)
+# localization table loader (scripts/l10n/<lang>.lua key->text on the System VM).
+AUX_SOURCE_DIRECTORY(code/client/wired/l10n        CLIENT_SRCS)
 AUX_SOURCE_DIRECTORY(code/client/wired/ui/panels   CLIENT_SRCS)
-# bg_misc.c, bg_weapons.c and bg_gametypes.c are in QCOMMON_SRCS (shared with dedicated server); not duplicated here
+AUX_SOURCE_DIRECTORY(code/client/wired/ui/elements CLIENT_SRCS)
+AUX_SOURCE_DIRECTORY(code/client/wired/ui/policy   CLIENT_SRCS)
+# bg_misc.c, bg_weapons.c and bg_gametypes.c are in QCOMMON_SRCS (shared with headless server); not duplicated here
 IF(NOT USE_CURL)
 	list(REMOVE_ITEM CLIENT_SRCS code/client/cl_curl.c)
-ENDIF()
-
-# x86_64 sound mixing ASM (GAS syntax — works with GCC on both Linux and MinGW)
-IF(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
-	IF(NOT MSVC)
-		list(APPEND CLIENT_SRCS code/asm/snd_mix_x86_64.s)
-		# The .s file uses C preprocessor macros (#ifdef, C()) and needs
-		# preprocessing. -DELF avoids underscore prefix (correct for x86_64 ABI).
-		set_source_files_properties(code/asm/snd_mix_x86_64.s PROPERTIES
-			COMPILE_FLAGS "-x assembler-with-cpp -DELF")
-	ENDIF()
 ENDIF()
 
 #ADD_LIBRARY(client OBJECT ${CLIENT_SRCS})
@@ -630,6 +824,14 @@ target_include_directories(client PRIVATE
     code/client/wired/store
     code/client/wired/scripting
 )
+
+# Clay layout engine — WiredUI compositor only. Client target only;
+# renderer DLLs / server / VMs MUST NOT see clay.h on their include path
+# (per docs/wiredui-compositor-spec.md §5.1 and §10).
+IF(USE_WIRED_UI_CLAY)
+    target_include_directories(client PRIVATE src/libs/clay)
+    target_compile_definitions(client PRIVATE USE_WIRED_UI_CLAY=1)
+ENDIF()
 
 # renderers
 AUX_SOURCE_DIRECTORY(code/renderercommon RENDERER_COMMON_SRCS)
@@ -822,6 +1024,14 @@ IF(USE_RENDERER_DLOPEN)
 	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE USE_RENDERER_DLOPEN)
 	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE code/qcommon)
 	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_vulkan${RENDEXT} PROPERTIES PREFIX "")
+	# Emit a linker map file alongside the DLL — includes every symbol (static
+	# functions, compiler-generated helpers, etc.) with its VMA. Built-in
+	# objdump/addr2line resolution of caller IPs against the stripped DLL is
+	# sparse (statics are omitted), so the map is the authoritative source for
+	# symbolicating crash-trace return addresses. The flag is GNU-ld / lld
+	# only; if a non-GNU toolchain is ever swapped in here, this line is the
+	# one to gate behind `IF(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR …)`.
+	TARGET_LINK_OPTIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE "LINKER:-Map=${RENDERER_PREFIX}_vulkan${RENDEXT}.map")
 	# Phase 7: pull in the (dormant, FEAT_RAL-gated) RAL Vulkan backend skeleton
 	WIRED_LINK_RAL_VULKAN(${RENDERER_PREFIX}_vulkan${RENDEXT})
 
@@ -849,8 +1059,20 @@ IF(USE_RENDERER_DLOPEN)
 ELSE()
 	IF(USE_VULKAN)
 		ADD_LIBRARY(${RENDERER_PREFIX}_vulkan OBJECT ${RENDERER_VK_SRCS} ${RENDERER_COMMON_SRCS})
+		# Statically-linked Vulkan renderer compiles into the client. Give the
+		# OBJECT lib the same include paths the DLOPEN DLL gets (code/qcommon at
+		# line ~857) plus code/renderer/ral — the renderervk sources reference the
+		# RAL surface (Ral_* in vk.c, vk_ral_textures.c) and need its headers. The
+		# whole-archive helper is for the DLL (force-exporting Ral_Dump); the
+		# static client resolves only the Ral_* symbols renderervk actually calls,
+		# so a plain link of ral_vulkan into the executable suffices (done at the
+		# client link list below). Just put the include path on the OBJECT lib here.
+		TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_vulkan PRIVATE
+			code/qcommon
+			${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral)
 	ELSE()
 		ADD_LIBRARY(${RENDERER_PREFIX}_opengl OBJECT ${RENDERER_GL_SRCS} ${RENDERER_COMMON_SRCS})
+		TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_opengl PRIVATE code/qcommon)
 	ENDIF()
 ENDIF()
 
@@ -861,36 +1083,22 @@ IF(UNIX)
 		code/unix/unix_shared.c
 		code/unix/linux_signals.c)
 
-	IF(USE_SDL)
-		AUX_SOURCE_DIRECTORY(code/sdl WINDOW_SYSTEM_SRCS)
-	ELSE()
-		# Note: audio is now handled by code/client/snd_miniaudio.c (vendored
-		# miniaudio.h), not by a per-platform SNDDMA backend. linux_snd.c was
-		# deleted along with sdl_snd.c and win_snd.c.
-		SET(WINDOW_SYSTEM_SRCS
-			code/unix/linux_glimp.c
-			code/unix/linux_qgl.c
-			code/unix/x11_dga.c
-			code/unix/x11_randr.c
-			code/unix/x11_vidmode.c)
-		IF(USE_VULKAN)
-			list(APPEND WINDOW_SYSTEM_SRCS code/unix/linux_qvk.c)
-		ENDIF()
-	ENDIF()
+	# The window/input/surface backend is SDL3 on every platform (code/sdl).
+	AUX_SOURCE_DIRECTORY(code/sdl WINDOW_SYSTEM_SRCS)
 
 	IF(APPLE)
 		# macOS: build the engine binaries as plain executables. The combined
-		# product bundle (containing both wired and wired-ded under
+		# product bundle (containing both wired and wired-headless under
 		# Contents/MacOS/) is assembled by a custom target later in this file —
 		# see "Combined macOS bundle assembly".
 		SET(EXE_TYPE "")
 		list(APPEND Q3_SRCS code/macosx/macosx_main.c)
 	ENDIF()
 ELSEIF(WIN32)
-	# Per-target subsystem: client is GUI (game has a window), dedicated is
+	# Per-target subsystem: client is GUI (game has a window), headless is
 	# console (Linux-style stdio so smoke harnesses, NSSM-services, Docker
 	# logs, terminal redirection etc. all see stdout/stderr). See
-	# docs/health.md "wired-ded Windows GUI-subsystem blocks smoke output capture"
+	# docs/health.md "wired-headless Windows GUI-subsystem blocks smoke output capture"
 	# and docs/launcher.md (analogous launcher CLI dual-mode pattern).
 	SET(EXE_TYPE_CLIENT WIN32) # GUI subsystem (-mwindows / /SUBSYSTEM:WINDOWS)
 	SET(EXE_TYPE_DED    "")    # Console subsystem (default, no flag)
@@ -907,7 +1115,7 @@ ELSEIF(WIN32)
 
 	# Q3_SRCS holds files that go into BOTH executables. After phase 3 of
 	# the Windows-console modernization (2026-05-05), win_syscon.c is a
-	# single stdio shim shared by client and dedicated — no per-target
+	# single stdio shim shared by client and headless — no per-target
 	# split needed for it. Client adds win_console_attach.c on top
 	# (AttachConsole shim for the GUI-subsystem binary).
 	SET(Q3_SRCS
@@ -916,19 +1124,13 @@ ELSEIF(WIN32)
 		code/win32/win_syscon.c
 		code/win32/win_resource.rc)
 
-	# Note: audio is now handled by code/client/snd_miniaudio.c (vendored
-	# miniaudio.h), not by a per-platform SNDDMA backend. win_snd.c was
-	# deleted along with sdl_snd.c and linux_snd.c.
-	SET(WINDOW_SYSTEM_SRCS
-		code/win32/win_gamma.c
-		code/win32/win_glimp.c
-		code/win32/win_input.c
-		code/win32/win_minimize.c
-		code/win32/win_qgl.c
-		code/win32/win_wndproc.c)
-	IF(USE_VULKAN)
-		list(APPEND WINDOW_SYSTEM_SRCS code/win32/win_qvk.c)
-	ENDIF()
+	# Note: audio is handled by code/client/snd_miniaudio.c (vendored
+	# miniaudio.h), not by a per-platform SNDDMA backend.
+	#
+	# The window/input/surface backend is SDL3 (code/sdl). The OS-tier files in
+	# Q3_SRCS above (win_main/win_shared/win_syscon/win_resource.rc: registry,
+	# CPU, console, dedicated path) are platform-native and stay.
+	AUX_SOURCE_DIRECTORY(code/sdl WINDOW_SYSTEM_SRCS)
 ENDIF(UNIX)
 
 # Define _DEBUG for Debug builds so signal handlers, backtraces, and
@@ -938,13 +1140,8 @@ ADD_COMPILE_DEFINITIONS($<$<CONFIG:Debug>:_DEBUG>)
 ADD_LIBRARY(windowSystem OBJECT ${WINDOW_SYSTEM_SRCS})
 
 IF(NOT MSVC)
-	IF(USE_SDL)
-		find_package(SDL3 REQUIRED)
-		TARGET_LINK_LIBRARIES(windowSystem SDL3::SDL3)
-	ELSEIF(UNIX)
-		find_package (X11 REQUIRED)
-		TARGET_LINK_LIBRARIES(windowSystem ${X11_LIBRARIES})
-	ENDIF()
+	find_package(SDL3 REQUIRED)
+	TARGET_LINK_LIBRARIES(windowSystem SDL3::SDL3)
 ENDIF()
 
 IF(USE_OPENGL)
@@ -979,7 +1176,7 @@ TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} qcommon botlib client windowSystem opusf
 IF(WIN32)
 	# Client adds the AttachConsole shim (phase 2 of Windows-console
 	# modernization, 2026-05-05) — reattaches stdio to parent console when
-	# this GUI-subsystem binary is launched from a terminal. Dedicated
+	# this GUI-subsystem binary is launched from a terminal. Headless
 	# doesn't need it (console subsystem auto-attaches at process start).
 	# The shared win_syscon.c is in Q3_SRCS, linked into both targets.
 	TARGET_SOURCES(${CNAME}${BINEXT} PRIVATE code/win32/win_console_attach.c)
@@ -988,19 +1185,27 @@ ENDIF()
 
 IF(NOT USE_RENDERER_DLOPEN)
 	IF(USE_VULKAN)
-		TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} ${RENDERER_PREFIX}_vulkan)
+		# Static Vulkan: the renderervk OBJECT lib references the RAL Vulkan
+		# backend (Ral_* in vk.c / vk_ral_textures.c), which lives in the
+		# ral_vulkan static lib. The DLOPEN path bundles it into the DLL via
+		# WIRED_LINK_RAL_VULKAN; here it must be linked into the executable too,
+		# or the static build has unresolved Ral_* symbols. Plain link (no
+		# --whole-archive): unlike the DLL, the static client never force-exports
+		# Ral_Dump (its "\ral_dump" path is #ifdef USE_RENDERER_DLOPEN, see
+		# cl_main.c CL_RalDump_f), so only the referenced objects need pulling.
+		TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} ${RENDERER_PREFIX}_vulkan ral_vulkan)
 	ELSE()
 		TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} ${RENDERER_PREFIX}_opengl)
 	ENDIF()
 ENDIF()
 
-# dedicated server executable
+# headless server executable
 
 ADD_EXECUTABLE(${DNAME}${BINEXT} ${_DED_EXE_TYPE} ${Q3_SRCS})
 TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} qcommon_ded botlib)
-# Dedicated uses the same win_syscon.c (in Q3_SRCS) as client; the
-# Sys_ConsoleInput stdin reader path is gated #ifdef DEDICATED so only
-# the dedicated build compiles it.
+# Headless uses the same win_syscon.c (in Q3_SRCS) as client; the
+# Sys_ConsoleInput stdin reader path is gated #ifdef HEADLESS so only
+# the headless build compiles it.
 
 # WAMR library linking
 IF(USE_WASM)
@@ -1037,7 +1242,7 @@ IF(USE_LUA)
 	set_target_properties(luajit PROPERTIES IMPORTED_LOCATION ${LUAJIT_LIB})
 	add_dependencies(luajit luajit_build)
 
-	# Headless Lua runtime lives in qcommon/wired/core/scripting/ — used by both client and dedicated server
+	# Headless Lua runtime lives in qcommon/wired/core/scripting/ — used by both client and headless server
 	AUX_SOURCE_DIRECTORY(code/qcommon/wired/core/scripting QCOMMON_SCRIPTING_SRCS)
 	TARGET_SOURCES(qcommon PRIVATE ${QCOMMON_SCRIPTING_SRCS})
 	TARGET_SOURCES(qcommon_ded PRIVATE ${QCOMMON_SCRIPTING_SRCS})
@@ -1047,9 +1252,33 @@ IF(USE_LUA)
 	TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE ${LUAJIT_DIR}/src)
 	TARGET_INCLUDE_DIRECTORIES(client PRIVATE ${LUAJIT_DIR}/src)
 
-	# Link LuaJIT to both client and dedicated server executables
+	# Link LuaJIT to both client and headless server executables
 	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} luajit)
 	TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} luajit)
+
+	# wired_scene Lua-loader unit test. Spins up a minimal luaL_newstate (links
+	# LuaJIT directly) — no engine FS / WiredScript. wired_scene.c + wired_curve.c
+	# are built with -DWIRED_SCENE_STANDALONE / -DWIRED_CURVE_STANDALONE so they
+	# route diagnostics to stderr and skip the q_shared / WiredScript chain; the
+	# test pushes a scene table itself and calls WiredScene_ReadTable. Asserts:
+	# eye-path knot count + round-tripped positions, named targets, the fov table
+	# (incl. ['end']), each live event verb decoded (wait/target/fov/fadeout/
+	# fadein/feather/stop/scene) + unknown-verb skip, the TCB knot triple + its
+	# default, missing-field defaults, and malformed-input (non-table) failure.
+	# Defined here (not with the other tests) because it needs the luajit target.
+	# Run with: ctest -R wired_scene
+	ADD_EXECUTABLE(wired_scene_test
+		tests/wired_scene_test.c
+		code/qcommon/wired/scene/wired_scene.c
+		code/qcommon/wired/math/wired_curve.c
+	)
+	TARGET_COMPILE_DEFINITIONS(wired_scene_test PRIVATE WIRED_SCENE_STANDALONE WIRED_CURVE_STANDALONE)
+	TARGET_INCLUDE_DIRECTORIES(wired_scene_test PRIVATE ${LUAJIT_DIR}/src)
+	TARGET_LINK_LIBRARIES(wired_scene_test luajit)
+	IF(NOT WIN32)
+		TARGET_LINK_LIBRARIES(wired_scene_test m dl pthread)
+	ENDIF()
+	ADD_TEST(NAME wired_scene COMMAND wired_scene_test)
 
 	MESSAGE(STATUS "LuaJIT scripting enabled")
 ENDIF()
@@ -1074,8 +1303,19 @@ ELSE()
 	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} m ${CMAKE_DL_LIBS})
 	TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} m ${CMAKE_DL_LIBS})
 
-	# miniaudio platform link dependencies (client only — dedicated server
-	# never compiles snd_miniaudio.c thanks to #ifndef DEDICATED).
+	# pthread is a hard link dep of BOTH binaries on POSIX: wired/core/thread
+	# (Sys_CreateThread/Sys_JoinThread for the background navmesh bake) compiles
+	# into qcommon AND qcommon_ded, and the bake runs server-side in both builds.
+	# Link Threads::Threads to the headless server too (not just the client) —
+	# otherwise wired-headless fails to link on any toolchain that needs -pthread
+	# (glibc < 2.34, musl). Kept outside the miniaudio block below, which is
+	# client-only.
+	FIND_PACKAGE(Threads REQUIRED)
+	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} Threads::Threads)
+	TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} Threads::Threads)
+
+	# miniaudio platform link dependencies (client only — headless server
+	# never compiles snd_miniaudio.c thanks to #ifndef HEADLESS).
 	IF(APPLE)
 		# miniaudio uses CoreAudio + AudioToolbox on macOS.
 		FIND_LIBRARY(COREAUDIO_LIBRARY CoreAudio)
@@ -1085,13 +1325,8 @@ ELSE()
 			${COREAUDIO_LIBRARY}
 			${AUDIOTOOLBOX_LIBRARY}
 			${COREFOUNDATION_LIBRARY})
-	ELSE()
-		# miniaudio dlopens ALSA / PulseAudio / JACK at runtime, so the
-		# only hard link deps on Linux are pthread, dl (already via
-		# CMAKE_DL_LIBS above), and m (already linked above).
-		FIND_PACKAGE(Threads REQUIRED)
-		TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} Threads::Threads)
 	ENDIF()
+	# (Linux miniaudio dlopens ALSA/PulseAudio/JACK at runtime — no extra hard deps.)
 ENDIF()
 
 # macOS: ARM64 JIT requires entitlements for MAP_JIT and executable memory
@@ -1107,7 +1342,7 @@ ENDIF()
 # ─────────────────────────────────────────────────────────────────────
 # Combined macOS bundle assembly
 #
-# CMake builds the engine binaries (wired, wired-ded) as plain executables on
+# CMake builds the engine binaries (wired, wired-headless) as plain executables on
 # macOS. This target assembles both into a single product bundle named after
 # PRODUCT_NAME + CHANNEL_SUFFIX, with the engine binaries co-located under
 # Contents/MacOS/. This keeps the engine identity ("wired") on the binary while
@@ -1120,7 +1355,7 @@ ENDIF()
 #       PkgInfo                ("APPL????")
 #       MacOS/
 #         wired${BINEXT}       (client engine binary)
-#         wired-ded${BINEXT}   (dedicated server engine binary)
+#         wired-headless${BINEXT}   (headless server engine binary)
 #       Resources/
 #         quake3_flat.icns
 # ─────────────────────────────────────────────────────────────────────
@@ -1162,16 +1397,16 @@ IF(APPLE)
 ENDIF()
 
 # ============================================================
-# q3now game modules (cgame, qagame, ui)
+# q3now game modules (gamecl, gamesv, ui)
 # ============================================================
 
 OPTION(BUILD_GAME_LIBRARIES "Build game native shared libraries (.dylib/.so)" ON)
 
 IF(BUILD_GAME_LIBRARIES)
 	SET(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/code)
-	SET(BASEGAME "baseq3")
-	SET(CGAME_MODULE "cgame")
-	SET(GAME_MODULE "qagame")
+	SET(BASEGAME "base")
+	SET(GAMECL_MODULE "gamecl")
+	SET(GAMESV_MODULE "gamesv")
 	IF(WIN32)
 		SET(COMMON_LIBRARIES)
 	ELSE()
@@ -1184,10 +1419,21 @@ IF(BUILD_GAME_LIBRARIES)
 	TARGET_COMPILE_DEFINITIONS(qcommon PRIVATE Q3NOW_GAMEDATE="${Q3NOW_GAMEDATE}")
 	TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE Q3NOW_GAMEDATE="${Q3NOW_GAMEDATE}")
 	TARGET_COMPILE_DEFINITIONS(client PRIVATE Q3NOW_GAMEDATE="${Q3NOW_GAMEDATE}")
+	# Per-build stamp values, computed BEFORE basegame so the game VM targets
+	# (gamecl/gamesv native + WASM, stamped in basegame.cmake) see the same id/date
+	# as the engine. WIRED_BUILD_ID = Makefile counter (-D; default 0); the DATE is
+	# computed here (never passed from the Makefile → no windres spaces trap). The
+	# engine + renderer targets are stamped in the dedicated block after this IF.
 	# CHANNEL_SUFFIX + PRODUCT_NAME compile definitions are propagated globally
 	# from the top-of-file branding block (search for "Product / channel branding").
 	INCLUDE(basegame)
 ENDIF()
+
+# Per-build stamp (WIRED_BUILD_ID / WIRED_BUILD_DATE for `sysinfo`) is NOT a
+# compile definition: the Makefile `_build-stamp` target writes a generated header
+# (code/qcommon/wired/wired_build_stamp_gen.h) that wired/wired_build_stamp.h
+# includes. That refreshes every build with no cmake reconfigure and reaches the
+# WASI wasm builds for free — see the Makefile comment + wired_build_stamp.h.
 
 # ============================================================
 # Lint & format integration

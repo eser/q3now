@@ -3,6 +3,9 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_surf.c
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 /*
 
@@ -956,7 +959,7 @@ static void RB_SurfaceEntity( const surfaceType_t *surfType ) {
 }
 
 static void RB_SurfaceBad( const surfaceType_t *surfType ) {
-	ri.Log( SEV_INFO, "Bad surface tesselated.\n" );
+	R_LOG( rch_assets, SEV_INFO, "Bad surface tesselated.\n" );
 }
 
 static void RB_SurfaceFlare(srfFlare_t *surf)

@@ -5,7 +5,6 @@
 // g_combat.c
 
 #include "g_local.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 /*
@@ -300,6 +299,7 @@ GibEntity
 */
 void GibEntity( gentity_t *self, int killer ) {
 	gentity_t *ent;
+	int			gibSpeedParm = 0;
 
 	//if this entity still has kamikaze
 	if (self->s.eFlags & EF_KAMIKAZE) {
@@ -316,7 +316,36 @@ void GibEntity( gentity_t *self, int killer ) {
 			break;
 		}
 	}
-	G_AddEvent( self, EV_GIB_PLAYER, killer );
+
+	// Directional gib: launch the parts away along the direction the killing
+	// blow came from, at a speed proportional to the knockback it carried.
+	// damage_from is the impact origin G_Damage accumulated for this victim, so
+	// normalize(currentOrigin - damage_from) is the knock direction. The gib
+	// event's parm carries the quantized knockback speed (8-bit, 0..255 ->
+	// 0..255*WIRED_GIB_KNOCKBACK_DIVISOR speed units), which the cgame also uses
+	// to seed the per-part RNG so the scatter is identical on every client.
+	// Falls back to a neutral up-vector (no bias) for non-client / self / zero
+	// directions, where the cgame reverts to the omnidirectional launch.
+	VectorSet( self->s.damageDir, 0.0f, 0.0f, 1.0f );
+	if ( self->client ) {
+		vec3_t	dir;
+		int		kb;
+
+		VectorSubtract( self->r.currentOrigin, self->client->damage_from, dir );
+		if ( VectorNormalize( dir ) > 0.1f ) {
+			VectorCopy( dir, self->s.damageDir );
+		}
+
+		kb = self->client->damage_knockback / WIRED_GIB_KNOCKBACK_DIVISOR;
+		if ( kb < 0 ) {
+			kb = 0;
+		} else if ( kb > 255 ) {
+			kb = 255;
+		}
+		gibSpeedParm = kb;
+	}
+
+	G_AddEvent( self, EV_GIB_PLAYER, gibSpeedParm );
 	self->takedamage = qfalse;
 	self->s.eType = ET_INVISIBLE;
 	self->r.contents = 0;
@@ -331,12 +360,25 @@ void body_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int d
 	if ( self->health > GIB_HEALTH ) {
 		return;
 	}
-	if ( !g_blood.integer || !IsGibMOD( meansOfDeath ) ) {
+	// A gib death needs blood on and either a gib-MOD, or — in g_excessive mode —
+	// a shotgun overkill (mirrors the call-site gate in player_die; the IsGibMOD
+	// classifier omits the shotgun so normal play stays shotgun-non-gib).
+	if ( !g_blood.integer
+	  || ( !IsGibMOD( meansOfDeath )
+	       && !( g_excessive.integer && WIRED_SHOTGUN_POSTPONE_MOD( meansOfDeath ) ) ) ) {
 		self->health = GIB_HEALTH+1;
 		return;
 	}
 
-	GibEntity( self, 0 );
+	// This death gibs. If it came from a shotgun blast, defer the actual gib
+	// until all pellets have landed: gibbing now turns the body non-solid, so
+	// the rest of the blast would miss it and its knockback would be lost.
+	// ShotgunPattern performs the deferred GibEntity after the pellet loop.
+	if ( WIRED_SHOTGUN_POSTPONE_MOD( meansOfDeath ) ) {
+		self->gibScheduled = qtrue;
+	} else {
+		GibEntity( self, 0 );
+	}
 }
 
 
@@ -781,7 +823,18 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 	self->s.loopSound = 0;
 
-	self->r.maxs[2] = DEAD_MAXS_Z;
+	// Collapse the corpse bounding box on death — BUT defer it for a shotgun
+	// kill. The deferred-gib / deferred-knockback feature needs the body to stay
+	// solid (full-height hull) through the REST of the pellets in the same
+	// ShotgunPattern blast; shrinking maxs[2] here on the killing pellet would let
+	// every trailing pellet whiff the flattened corpse (lost knockback, wrong
+	// shielding). G_ResolveShotgunDeferredDeaths re-applies it via SetDeadHeight
+	// at the end of the blast (g_shotgun.c). Non-shotgun deaths shrink immediately
+	// as before. Mirrors the sibling deferral paths (FL_NO_KNOCKBACK skip below,
+	// the gib-defer at the gibScheduled branch).
+	if ( !WIRED_SHOTGUN_POSTPONE_MOD( meansOfDeath ) ) {
+		self->r.maxs[2] = DEAD_MAXS_Z;
+	}
 
 	// don't allow respawn until the death anim is done
 	// g_forcerespawn may force spawning at some later time
@@ -793,9 +846,24 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	// never gib in a nodrop
 	contents = trap_PointContents( self->r.currentOrigin, -1 );
 
-	if ( (self->health <= GIB_HEALTH && !(contents & CONTENTS_NODROP) && g_blood.integer && IsGibMOD( meansOfDeath )) || IsInstantGibMOD( meansOfDeath ) ) {
-		// gib death
-		GibEntity( self, killer );
+	// In g_excessive (extreme-physics) mode, a shotgun overkill also gibs — the
+	// IsGibMOD classifier deliberately omits the shotgun so normal play stays
+	// shotgun-non-gib, so this admits it at the call site only. The deferred-gib
+	// branch below then routes it through gibScheduled like any other shotgun gib.
+	if ( (self->health <= GIB_HEALTH && !(contents & CONTENTS_NODROP) && g_blood.integer && IsGibMOD( meansOfDeath ))
+	  || IsInstantGibMOD( meansOfDeath )
+	  || ( g_excessive.integer && WIRED_SHOTGUN_POSTPONE_MOD( meansOfDeath )
+	       && self->health <= GIB_HEALTH && !(contents & CONTENTS_NODROP) && g_blood.integer ) ) {
+		// gib death. If a shotgun blast caused it, defer the gib to the end of
+		// the blast (ShotgunPattern) so the body stays solid through the rest of
+		// the pellets and gibs with the full blast's accumulated knockback;
+		// otherwise gib immediately. Keyed on this gate firing (the death really
+		// gibbed), not on the mod, so it covers any shotgun-overkill gib.
+		if ( WIRED_SHOTGUN_POSTPONE_MOD( meansOfDeath ) ) {
+			self->gibScheduled = qtrue;
+		} else {
+			GibEntity( self, killer );
+		}
 	} else {
 		// normal death
 		static int lastDeath;
@@ -839,6 +907,8 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 	trap_LinkEntity (self);
 
+	// fire any trigger_frag / trigger_death map entities for this death
+	Q3_FireFragDeathTriggers( self, attacker );
 }
 
 
@@ -1018,6 +1088,18 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	// the intermission has already been qualified for, so don't
 	// allow any extra scoring
 	if ( level.intermissionQueued ) {
+		// Exception: still let a corpse be gibbed after the round is decided,
+		// so the last frag can end with a gib instead of being silently
+		// swallowed. This is the only effect we allow through — no scoring,
+		// knockback, friendly-fire, armor, etc. Each shotgun pellet is its own
+		// G_Damage call, so without this a last-frag shotgun gib would never
+		// land. body_die ignores all its args but `targ`, so NULLs are fine.
+		if ( targ->die == body_die ) {
+			targ->health -= damage;
+			if ( targ->health <= 0 ) {
+				targ->die( targ, inflictor, attacker, damage, mod );
+			}
+		}
 		return;
 	}
 
@@ -1111,7 +1193,47 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 			}
 
 			VectorScale( dir, (float)knockback * knockbackScale, kvel );
-			VectorAdd( targ->client->ps.velocity, kvel, targ->client->ps.velocity );
+
+			// Accumulate this impulse into the frame-local bucket for this
+			// momentum source (attacker + mod) instead of writing ps.velocity
+			// now; P_KnockbackFlush sums the buckets onto ps.velocity once at
+			// frame end. Find-or-add the bucket; on overflow fold into bucket 0
+			// (graceful — more than MAX_KB_SOURCES distinct sources in one frame
+			// on one target is already pathological). The summed result is
+			// motion-identical to an immediate VectorAdd per hit.
+			{
+				gclient_t          *tc = targ->client;
+				int                 srcKey = attacker->s.number;
+				knockbackSource_t  *bucket = NULL;
+				int                 si;
+				// momentum budget for this source: a multi-pellet shot caps its
+				// summed impulse magnitude at flush, so a point-blank cluster of
+				// near-parallel pellets shoves like one shell instead of N. 0 =
+				// uncapped (single-hit weapons never need it).
+				float               budget =
+					( dflags & DAMAGE_MOMENTUM_EVENT )
+						? bg_attacklist[attIdx].shellKnockback : 0.0f;
+
+				for ( si = 0; si < tc->numKnockbackSources; si++ ) {
+					if ( tc->knockbackSources[si].srcKey == srcKey
+					  && tc->knockbackSources[si].mod == mod ) {
+						bucket = &tc->knockbackSources[si];
+						break;
+					}
+				}
+				if ( bucket == NULL ) {
+					if ( tc->numKnockbackSources < MAX_KB_SOURCES ) {
+						bucket = &tc->knockbackSources[tc->numKnockbackSources++];
+						bucket->srcKey = srcKey;
+						bucket->mod    = mod;
+						VectorClear( bucket->impulse );
+					} else {
+						bucket = &tc->knockbackSources[0];
+					}
+				}
+				bucket->budget = budget;
+				VectorAdd( bucket->impulse, kvel, bucket->impulse );
+			}
 
 			// set the timer so that the other client can't cancel
 			// out the movement immediately
@@ -1307,8 +1429,14 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	}
 
 	if ( targ->health <= 0 ) {
-		if ( targ->client )
-			targ->flags |= FL_NO_KNOCKBACK;
+		// For a shotgun blast we DON'T flag FL_NO_KNOCKBACK on the killing
+		// pellet: the remaining pellets of the same blast should still push the
+		// dead body, otherwise it gets a fraction of the knockback the full
+		// blast represents (and gibs get too little momentum). ShotgunPattern
+		// re-applies FL_NO_KNOCKBACK after the whole pellet loop. For every
+		// other weapon (a single G_Damage per frame) the behaviour is unchanged.
+		if ( targ->client && !WIRED_SHOTGUN_POSTPONE_MOD( mod ) )
+			SetFlNoKnockback( targ );
 
 		if (targ->health < -999)
 			targ->health = -999;
@@ -1320,6 +1448,13 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
 	if ( targ->pain ) {
 		targ->pain( targ, attacker, take );
 	}
+#if FEAT_MONSTER_AI
+	// A scripted monster that survived a hit fires its `pain` event (selects the
+	// pain block; the dispatcher runs it next frame). No-op for anything else.
+	if ( targ->behaviorState ) {
+		Script_FireEvent( targ, "pain", NULL );
+	}
+#endif
 }
 
 

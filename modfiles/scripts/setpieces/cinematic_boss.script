@@ -1,0 +1,9 @@
+// cinematic_boss.script — CINEMATIC set-piece (Fork-1 Faz-7c).
+// The scripted monster IS the boss; on spawn it plays the boss_intro cutscene
+// with ITSELF bound to the scene's "boss" look-at target (playscene ... self).
+// Move this monster and the cutscene camera's look-at tracks it live — the
+// runtime actor-binding proof. `stopscene` (unused here) would hard-cut it.
+spawn {
+    print cinematic-boss-spawned
+    playscene boss_intro self
+}

@@ -3,8 +3,8 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
 #include "g_local.h"
-#include "wired/bots/g_wiredbots.h"
-/* Phase 5: log channels */
+#include "g_behavior.h"
+#include "wired/bots/g_wiredintel.h"
 LOG_DECLARE_CHANNEL( ch_game, "game" );
 
 #if FEAT_TA_VOICECHAT
@@ -750,7 +750,7 @@ void SetTeam( gentity_t *ent, const char *s ) {
 	// get and distribute relevant parameters
 	ClientUserinfoChanged( clientNum );
 
-	// client hasn't spawned yet, they sent an early team command, teampref userinfo, or g_teamAutoJoin is enabled
+	// client hasn't spawned yet, they sent an early team command, teampref userinfo, or g_autoJoin is enabled
 	if ( client->pers.connected != CON_CONNECTED ) {
 		return;
 	}
@@ -1001,10 +1001,12 @@ void G_Say( gentity_t *ent, gentity_t *target, int mode, const char *chatText ) 
 	int			j;
 	gentity_t	*other;
 	int			color;
-	char		name[64];
 	// don't let text be too long for malicious reasons
 	char		text[MAX_SAY_TEXT];
 	char		location[64];
+	// hold the netname + location + colour-escape prefix without truncating
+	// the SAY_TEAM/SAY_TELL location string on maps with long location names
+	char		name[ MAX_NETNAME + sizeof(location) + 16 ];
 
 	if ( !g_gametypeIsTeamGame && mode == SAY_TEAM ) {
 		mode = SAY_ALL;
@@ -1040,13 +1042,13 @@ void G_Say( gentity_t *ent, gentity_t *target, int mode, const char *chatText ) 
 
 	Q_strncpyz( text, chatText, sizeof(text) );
 
-	// WiredBots: process @-addressed directives and colorize mentions before relay
+	// WiredIntel: process @-addressed directives and colorize mentions before relay
 	if ( text[0] == '@' ) {
 		wbParseResult_t wbResult;
-		WiredBots_ProcessChat( ent->s.number, text, &wbResult );
+		WiredIntel_ProcessChat( ent->s.number, text, &wbResult );
 		if ( wbResult.hasMentions ) {
 			char colorized[MAX_SAY_TEXT];
-			WiredBots_ColorizeMentions( text, colorized, sizeof(colorized),
+			WiredIntel_ColorizeMentions( text, colorized, sizeof(colorized),
 			                            wbResult.recipientMention, wbResult.targetMention );
 			Q_strncpyz( text, colorized, sizeof(text) );
 		}
@@ -1058,7 +1060,7 @@ void G_Say( gentity_t *ent, gentity_t *target, int mode, const char *chatText ) 
 	}
 
 	// echo the text to the console
-	if ( g_dedicated.integer ) {
+	if ( G_ServerIsConsoleOnly() ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_game), "%s%s\n", name, text);
 	}
 
@@ -1202,7 +1204,7 @@ void G_Voice( gentity_t *ent, gentity_t *target, int mode, const char *id, qbool
 	}
 
 	// echo the text to the console
-	if ( g_dedicated.integer ) {
+	if ( G_ServerIsConsoleOnly() ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_game), "voice: %s %s\n", ent->client->pers.netname, id);
 	}
 
@@ -1416,6 +1418,24 @@ void Cmd_Where_f( gentity_t *ent ) {
 
 /*
 ==================
+G_MapExist
+
+Returns qtrue when maps/<mapname>.bsp can be opened on the server — the file
+the "map <name>" command will load. Used to reject a vote for a missing map.
+==================
+*/
+static qboolean G_MapExist( const char *mapname ) {
+	char			expanded[ MAX_QPATH ];
+
+	if ( !mapname || !mapname[0] ) {
+		return qfalse;
+	}
+	Com_sprintf( expanded, sizeof( expanded ), "maps/%s.bsp", mapname );
+	return G_FileExists( expanded );
+}
+
+/*
+==================
 Cmd_CallVote_f
 ==================
 */
@@ -1471,6 +1491,11 @@ void Cmd_CallVote_f( gentity_t *ent ) {
 	if ( !Q_stricmp( arg1, "map_restart" ) ) {
 	} else if ( !Q_stricmp( arg1, "nextmap" ) ) {
 	} else if ( !Q_stricmp( arg1, "map" ) ) {
+		// reject a vote for a map the server cannot load, before building voteString
+		if ( !G_MapExist( arg2 ) ) {
+			trap_SendServerCommand( ent-g_entities, va( "print \"Map '%s' not found on server.\n\"", arg2 ) );
+			return;
+		}
 	} else if ( !Q_stricmp( arg1, "g_gametype" ) ) {
 	} else if ( !Q_stricmp( arg1, "kick" ) ) {
 	} else if ( !Q_stricmp( arg1, "clientkick" ) ) {
@@ -1849,8 +1874,10 @@ void Cmd_SetViewpos_f( gentity_t *ent ) {
 		trap_SendServerCommand( ent-g_entities, "print \"Cheats are not enabled on this server.\n\"");
 		return;
 	}
-	if ( trap_Argc() != 5 ) {
-		trap_SendServerCommand( ent-g_entities, "print \"usage: setviewpos x y z yaw\n\"");
+	// 5 args = x y z yaw; an optional 6th sets pitch (look up/down), used by the
+	// automated shadow gates to aim the test camera at the floor.
+	if ( trap_Argc() != 5 && trap_Argc() != 6 ) {
+		trap_SendServerCommand( ent-g_entities, "print \"usage: setviewpos x y z yaw [pitch]\n\"");
 		return;
 	}
 
@@ -1863,8 +1890,399 @@ void Cmd_SetViewpos_f( gentity_t *ent ) {
 	trap_Argv( 4, buffer, sizeof( buffer ) );
 	angles[YAW] = atof( buffer );
 
+	if ( trap_Argc() == 6 ) {
+		trap_Argv( 5, buffer, sizeof( buffer ) );
+		angles[PITCH] = atof( buffer );
+	}
+
 	TeleportPlayer( ent, origin, angles, 400 );
 }
+
+#if FEAT_RECAST_NAVMESH
+/*
+=================
+Cmd_NavWalkTest_f
+
+Dev-only: walk a virtual point from the player's current origin to a goal
+<x y z> over the client-independent nav seam, to prove the steering core paths a
+non-client agent end-to-end. Reports whether the point reached the goal and how
+many steps it took. Cheat-gated; does nothing on a live server.
+=================
+*/
+static void Cmd_NavWalkTest_f( gentity_t *ent ) {
+	vec3_t	goal;
+	char	buffer[MAX_TOKEN_CHARS];
+	int		i, steps = 0;
+	qboolean reached;
+
+	if ( !g_cheats.integer ) {
+		trap_SendServerCommand( ent-g_entities, "print \"Cheats are not enabled on this server.\n\"");
+		return;
+	}
+	if ( trap_Argc() != 4 ) {
+		trap_SendServerCommand( ent-g_entities, "print \"usage: nav_walktest x y z\n\"");
+		return;
+	}
+
+	for ( i = 0 ; i < 3 ; i++ ) {
+		trap_Argv( i + 1, buffer, sizeof( buffer ) );
+		goal[i] = atof( buffer );
+	}
+
+	reached = BotNav_WalkTest( ent->client->ps.origin, goal, &steps );
+
+	trap_SendServerCommand( ent-g_entities, va( "print \"walktest: %s in %d steps\n\"",
+		reached ? "reached goal" : "unreachable/stuck", steps ) );
+}
+
+/*
+=================
+Cmd_NavSpawnFollower_f
+
+Dev-only: spawn a non-client nav-follower at the player's origin and send it to
+a goal <x y z>. The follower walks the navmesh via the trajectory runner (no
+client slot, no AI — movement only). Cheat-gated.
+=================
+*/
+static void Cmd_NavSpawnFollower_f( gentity_t *ent ) {
+	vec3_t		goal, spawnOrigin;
+	char		buffer[MAX_TOKEN_CHARS];
+	int			i, agentType = 0;
+	gentity_t	*follower;
+
+	if ( !g_cheats.integer ) {
+		trap_SendServerCommand( ent-g_entities, "print \"Cheats are not enabled on this server.\n\"");
+		return;
+	}
+	if ( trap_Argc() != 4 && trap_Argc() != 5 ) {
+		trap_SendServerCommand( ent-g_entities, "print \"usage: nav_spawnfollower x y z [agentType 0=player 1=small 2=large]\n\"");
+		return;
+	}
+
+	for ( i = 0 ; i < 3 ; i++ ) {
+		trap_Argv( i + 1, buffer, sizeof( buffer ) );
+		goal[i] = atof( buffer );
+	}
+	if ( trap_Argc() == 5 ) {
+		trap_Argv( 4, buffer, sizeof( buffer ) );
+		agentType = atoi( buffer );
+	}
+
+	follower = G_Spawn();
+	if ( !follower ) {
+		trap_SendServerCommand( ent-g_entities, "print \"nav-follower: no free entity\n\"");
+		return;
+	}
+	follower->classname = "nav_follower";
+	VectorCopy( ent->client->ps.origin, spawnOrigin );
+	VectorCopy( spawnOrigin, follower->s.pos.trBase );
+	VectorCopy( spawnOrigin, follower->r.currentOrigin );
+	VectorSet( follower->r.mins, -15, -15, -24 );
+	VectorSet( follower->r.maxs,  15,  15,  32 );
+
+	if ( !Nav_StartFollower( follower, goal, agentType ) ) {
+		trap_SendServerCommand( ent-g_entities, "print \"nav-follower: could not start (pool full)\n\"");
+		G_FreeEntity( follower );
+		return;
+	}
+
+	trap_LinkEntity( follower );
+	trap_SendServerCommand( ent-g_entities, "print \"nav-follower: spawned, walking to goal\n\"");
+}
+#endif
+
+#if FEAT_MONSTER_AI
+/*
+=================
+G_SpawnBehaviorMonster
+
+Spawn one non-client behavior monster at `origin`, seed `enemyNum` as its enemy,
+and start its FSM (aiThink). If characterHandle > 0, bind it to that character
+via the monster Lua trap; the bind return tells us whether the character carries
+a Lua "decide" override (2) or not (1), which sets luaDecide so the FSM either
+consults Lua for state selection (opt-in) or stays pure C. Returns the entity, or
+NULL if no free entity / behavior pool full.
+=================
+*/
+gentity_t *G_SpawnBehaviorMonster( const vec3_t origin, int enemyNum, int startHealth, int characterHandle, const char *characterName ) {
+	gentity_t *mob = G_Spawn();
+	if ( !mob ) return NULL;
+
+	// One name drives the monster's whole identity: its model (creatures/<name>/<name>.mdl),
+	// its render character (characters/<name>/tag), and its collision hull (the character
+	// manifest's bbox). A caller that passes no name gets the soldier, so every existing
+	// spawn stays identical; a caller that passes "dog" gets the dog with zero new code.
+	const char *monsterName = ( characterName && characterName[0] ) ? characterName : "soldier";
+
+	mob->classname = "monster_behavior";
+	mob->s.eType   = ET_GENERAL;
+	VectorCopy( origin, mob->s.pos.trBase );
+	VectorCopy( origin, mob->r.currentOrigin );
+	mob->s.pos.trType = TR_STATIONARY;
+
+	// Collision hull: read the monster's own size from its character manifest (model.bbox).
+	// A creature carries its own size — a dog is wider and lower than a soldier. This
+	// default human-ish hull is only a safety net for a monster whose manifest omits bbox;
+	// the shipped monsters (soldier, dog, …) each declare their own, so the default is
+	// overwritten below. (Keep it equal to the soldier's historical hull for safety.)
+	VectorSet( mob->r.mins, -15, -15, -24 );
+	VectorSet( mob->r.maxs,  15,  15,  32 );
+	{
+		char  key[MAX_QPATH];
+		char  buf[128];
+		vec3_t mins, maxs;
+		Com_sprintf( key, sizeof( key ), "char:%s:bbox", monsterName );
+		if ( trap_GetValue( buf, sizeof( buf ), key ) &&
+		     sscanf( buf, "%f %f %f %f %f %f",
+		             &mins[0], &mins[1], &mins[2], &maxs[0], &maxs[1], &maxs[2] ) == 6 ) {
+			VectorCopy( mins, mob->r.mins );
+			VectorCopy( maxs, mob->r.maxs );
+		}
+	}
+
+#if FEAT_RECAST_NAVMESH
+	// Movement mode: a flyer/swimmer steers in 3D and is not ground-clamped. Read the
+	// manifest's `movement` string once and resolve it to the nav-follower's mode; absent
+	// or unrecognized → ground (every existing monster is unchanged). String→enum here,
+	// never per frame.
+	mob->navMovement = NAVMOVE_GROUND;
+	{
+		char key[MAX_QPATH];
+		char buf[16];
+		Com_sprintf( key, sizeof( key ), "char:%s:movement", monsterName );
+		if ( trap_GetValue( buf, sizeof( buf ), key ) && buf[0] ) {
+			if ( !Q_stricmp( buf, "fly" ) ) {
+				mob->navMovement = NAVMOVE_FLY;
+			} else if ( !Q_stricmp( buf, "swim" ) ) {
+				mob->navMovement = NAVMOVE_SWIM;
+			} else if ( Q_stricmp( buf, "ground" ) != 0 ) {
+				Com_Log( SEV_DEBUG, LOG_CH(ch_game),
+					"monster '%s': unrecognized movement '%s' — using ground\n", monsterName, buf );
+			}
+		}
+	}
+#endif
+
+#if FEAT_MONSTER_AI
+	// Attack mode: a ranged monster fires a projectile aimed in 3D instead of a melee
+	// swing. Read the manifest's `attack` string once; absent or unrecognized → melee
+	// (every existing monster is unchanged). String→enum here, never per frame.
+	mob->attackMode = ATTACK_MELEE;
+	{
+		char key[MAX_QPATH];
+		char buf[16];
+		Com_sprintf( key, sizeof( key ), "char:%s:attack", monsterName );
+		if ( trap_GetValue( buf, sizeof( buf ), key ) && buf[0] ) {
+			if ( !Q_stricmp( buf, "ranged" ) ) {
+				mob->attackMode = ATTACK_RANGED;
+			} else if ( Q_stricmp( buf, "melee" ) != 0 ) {
+				Com_Log( SEV_DEBUG, LOG_CH(ch_game),
+					"monster '%s': unrecognized attack '%s' — using melee\n", monsterName, buf );
+			}
+		}
+	}
+#endif
+
+	mob->clipmask    = MASK_PLAYERSOLID;
+	mob->r.contents  = CONTENTS_BODY;
+	mob->takedamage  = qtrue;
+	mob->health      = startHealth < 1 ? 1 : startHealth;
+	mob->die         = Behavior_MonsterDie;   /* else G_Damage NULL-derefs on kill */
+
+	// Give the monster its visible model — the Q1 .mdl at creatures/<name>/<name>.mdl.
+	// The .mdl loads via the MDL loader (its frame names drive the client-side animation),
+	// and s.legsAnim carries the animation CODE the client resolves to a frame range.
+	{
+		char modelPath[MAX_QPATH];
+		Com_sprintf( modelPath, sizeof( modelPath ), "creatures/%s/%s.mdl", monsterName, monsterName );
+		mob->s.modelindex = G_ModelIndex( modelPath );
+	}
+	mob->s.legsAnim   = MANIM_STAND;
+
+	// Name the character to the client for the character render path. The client reads
+	// this CS_MODELS path back (via modelindex2) and derives the slug to load the
+	// character's body; the primary modelindex above stays the .mdl so a creature with
+	// no loadable character body still renders through the client's CG_General fallback.
+	// modelindex2 is a pure data channel here — ET_GENERAL never draws a second model.
+	{
+		char tagPath[MAX_QPATH];
+		Com_sprintf( tagPath, sizeof( tagPath ), "characters/%s/tag", monsterName );
+		mob->s.modelindex2 = G_ModelIndex( tagPath );
+	}
+
+	if ( !Behavior_AcquireState( mob ) ) {
+		G_FreeEntity( mob );
+		return NULL;
+	}
+
+	mob->behaviorState->enemy        = enemyNum;
+	mob->behaviorState->state        = BSTATE_IDLE;   /* Decide() picks the real state */
+	mob->behaviorState->nextThink    = level.time;
+	mob->behaviorState->stateEntered = level.time;
+	mob->behaviorState->luaDecide    = qfalse;        /* pure C unless a Lua-fn binds */
+
+	// Optional Lua-decide opt-in: bind a character. The trap returns 2 when the
+	// bound character carries a Lua "decide" override, 1 when it does not, 0 on
+	// failure. Only a "2" flips the monster onto the Lua-decide path.
+	if ( characterHandle > 0 ) {
+		int bound = trap_MonsterLuaBind( mob->s.number, characterHandle );
+		mob->behaviorState->luaDecide = ( bound == 2 );
+	}
+
+	mob->aiThink = qtrue;
+	trap_LinkEntity( mob );
+
+	// Census: this is the single chokepoint for all monster creation (map-placed,
+	// console-spawned, script-spawned), so counting a successful spawn here is exact.
+	level.numMonstersSpawned++;
+	return mob;
+}
+
+/*
+=================
+Cmd_SpawnMonster_f
+
+Dev-only: spawn one (or a count of) non-client behavior monster(s) in front of
+the invoking player, seeded with the player as enemy, running the native FSM
+(Battle/Hunt/TakeCover). Cheat-gated.
+
+Usage: spawnmonster [name] [count] [startHealth]
+  name          the monster to spawn (dog, knight, ... ; default soldier). Drives its
+                model, character render, and collision size from characters/<name>.
+  count         number of monsters (default 1)
+  startHealth   starting health (default 100; low → immediate take-cover)
+=================
+*/
+static void Cmd_SpawnMonster_f( gentity_t *ent ) {
+	vec3_t		fwd, base, origin;
+	char		buffer[MAX_TOKEN_CHARS];
+	char		charName[MAX_QPATH];
+	int			count = 1, startHealth = 100, i, spawned = 0;
+	int			characterHandle = 0;
+	int			argBase = 1;   /* first numeric arg (shifts by 1 if a name leads) */
+
+	charName[0] = '\0';
+
+	if ( !g_cheats.integer ) {
+		trap_SendServerCommand( ent-g_entities, "print \"Cheats are not enabled on this server.\n\"");
+		return;
+	}
+
+	// A leading non-numeric argument is the monster name (spawnmonster dog [count]
+	// [health]); a leading number keeps the classic count-first form (spawnmonster 3).
+	if ( trap_Argc() >= 2 ) {
+		trap_Argv( 1, buffer, sizeof( buffer ) );
+		if ( buffer[0] && !isdigit( (unsigned char)buffer[0] ) && buffer[0] != '-' ) {
+			Q_strncpyz( charName, buffer, sizeof( charName ) );
+			argBase = 2;
+
+			// Optionally bind the same character for the Lua-decide FSM opt-in (a monster
+			// whose bot/main.lua defines decide()). trap_BotLoadCharacter returns a NEGATIVE
+			// handle for a Lua character; the monster bind wants the raw positive handle.
+			{
+				char path[MAX_QPATH];
+				int  botChar;
+				Com_sprintf( path, sizeof( path ), "characters/%s/main.lua", charName );
+				botChar = trap_BotLoadCharacter( path, 3.0f );
+				if ( botChar < 0 ) {
+					characterHandle = -botChar;
+				}
+			}
+		}
+	}
+
+	if ( trap_Argc() >= argBase + 1 ) { trap_Argv( argBase,     buffer, sizeof( buffer ) ); count       = atoi( buffer ); }
+	if ( trap_Argc() >= argBase + 2 ) { trap_Argv( argBase + 1, buffer, sizeof( buffer ) ); startHealth = atoi( buffer ); }
+	if ( count < 1 ) count = 1;
+
+	// Base spawn point a little in front of the invoking player.
+	AngleVectors( ent->client->ps.viewangles, fwd, NULL, NULL );
+	fwd[2] = 0.0f;
+	VectorNormalize( fwd );
+	VectorMA( ent->client->ps.origin, 200.0f, fwd, base );
+
+	for ( i = 0; i < count; i++ ) {
+		// spread multiple monsters so they do not all telefrag on one point
+		VectorCopy( base, origin );
+		origin[0] += ( i % 10 ) * 40.0f;
+		origin[1] += ( i / 10 ) * 40.0f;
+		if ( G_SpawnBehaviorMonster( origin, ent->s.number, startHealth, characterHandle, charName ) ) {
+			spawned++;
+		}
+	}
+
+	trap_SendServerCommand( ent-g_entities, va(
+		"print \"monster: spawned %d/%d (health %d, %s) — running FSM\n\"",
+		spawned, count, startHealth, characterHandle > 0 ? "lua-bound" : "pure-C" ) );
+}
+
+/*
+=================
+Cmd_SpawnScript_f
+
+Dev-only: drive a scripted monster from a set-piece script file. Drops a named
+nav-marker in front of the player (the script's gotomarker target), then spawns
+a scripted monster a little to the side and binds it to the script. The monster
+runs the verb list — walk to the marker, hold, wait for player-sight, attack.
+Cheat-gated.
+
+Usage: spawnscript [scriptPath]   (default scripts/setpieces/boss_intro.script)
+=================
+*/
+static void Cmd_SpawnScript_f( gentity_t *ent ) {
+	vec3_t     fwd, markerPos, monPos;
+	char       path[MAX_QPATH];
+	gentity_t *marker, *mob;
+
+	if ( !g_cheats.integer ) {
+		trap_SendServerCommand( ent-g_entities, "print \"Cheats are not enabled on this server.\n\"");
+		return;
+	}
+
+	if ( trap_Argc() >= 2 ) {
+		trap_Argv( 1, path, sizeof( path ) );
+	} else {
+		Q_strncpyz( path, "scripts/setpieces/boss_intro.script", sizeof( path ) );
+	}
+
+	AngleVectors( ent->client->ps.viewangles, fwd, NULL, NULL );
+	fwd[2] = 0.0f;
+	VectorNormalize( fwd );
+
+	// Marker 400u ahead (the gotomarker destination); monster 150u ahead + offset.
+	VectorMA( ent->client->ps.origin, 400.0f, fwd, markerPos );
+	VectorMA( ent->client->ps.origin, 150.0f, fwd, monPos );
+	monPos[1] += 60.0f;
+
+	marker = G_Spawn();
+	if ( marker ) {
+		marker->classname  = "target_position";
+		marker->targetname = "script_marker_a";
+		VectorCopy( markerPos, marker->s.origin );
+		VectorCopy( markerPos, marker->r.currentOrigin );
+		trap_LinkEntity( marker );
+	}
+
+	// Optional 2nd arg: the character the scripted monster renders + sizes as (e.g.
+	// "boss" for the Chthon encounter). Absent → the spawn's soldier default.
+	{
+		char charArg[MAX_QPATH];
+		const char *charName = NULL;
+		if ( trap_Argc() >= 3 ) {
+			trap_Argv( 2, charArg, sizeof( charArg ) );
+			if ( charArg[0] ) charName = charArg;
+		}
+		mob = Script_SpawnDriven( path, monPos, ent->s.number, charName );
+	}
+	if ( mob ) {
+		trap_SendServerCommand( ent-g_entities, va(
+			"print \"script: driving monster %d from '%s'\n\"", mob->s.number, path ) );
+	} else {
+		trap_SendServerCommand( ent-g_entities, va(
+			"print \"script: failed to spawn from '%s'\n\"", path ) );
+	}
+}
+#endif
 
 
 
@@ -1874,20 +2292,6 @@ Cmd_Stats_f
 =================
 */
 void Cmd_Stats_f( gentity_t *ent ) {
-/*
-	int max, n, i;
-
-	max = trap_AAS_PointReachabilityAreaIndex( NULL );
-
-	n = 0;
-	for ( i = 0; i < max; i++ ) {
-		if ( ent->client->areabits[i >> 3] & (1 << (i & 7)) )
-			n++;
-	}
-
-	//trap_SendServerCommand( ent-g_entities, va("print \"visited %d of %d areas\n\"", n, max));
-	trap_SendServerCommand( ent-g_entities, va("print \"%d%% level coverage\n\"", n * 100 / max));
-*/
 }
 
 // eser - admin mode
@@ -2052,7 +2456,7 @@ void Cmd_BStats_f( gentity_t *ent ) {
 =================
 Cmd_BotSay_f
 =================
-Stateless-client-only command: routes a chat message to WiredBots without
+Stateless-client-only command: routes a chat message to WiredIntel without
 going through the normal G_Say path.  The message must start with '@'.
 Regular clients attempting this command are rejected.
 */
@@ -2072,7 +2476,7 @@ static void Cmd_BotSay_f( gentity_t *ent ) {
 	}
 	Q_strncpyz( msg, args, sizeof( msg ) );
 
-	WiredBots_ProcessChat( ent->s.number, msg, &result );
+	WiredIntel_ProcessChat( ent->s.number, msg, &result );
 
 	/* echo to sender so it can confirm the command was received */
 	trap_SendServerCommand( ent->s.number, va( "print \"[cmd] %s\n\"", msg ) );
@@ -2212,6 +2616,18 @@ void ClientCommand( int clientNum ) {
 		Cmd_GameCommand_f( ent );
 	else if (Q_stricmp (cmd, "setviewpos") == 0)
 		Cmd_SetViewpos_f( ent );
+#if FEAT_RECAST_NAVMESH
+	else if (Q_stricmp (cmd, "nav_walktest") == 0)
+		Cmd_NavWalkTest_f( ent );
+	else if (Q_stricmp (cmd, "nav_spawnfollower") == 0)
+		Cmd_NavSpawnFollower_f( ent );
+#endif
+#if FEAT_MONSTER_AI
+	else if (Q_stricmp (cmd, "spawnmonster") == 0)
+		Cmd_SpawnMonster_f( ent );
+	else if (Q_stricmp (cmd, "spawnscript") == 0)
+		Cmd_SpawnScript_f( ent );
+#endif
 	else if (Q_stricmp (cmd, "stats") == 0)
 		Cmd_Stats_f( ent );
 #if FEAT_PING_LOCATION

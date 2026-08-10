@@ -1,0 +1,5 @@
+{
+  "global_threshold_pct": 5.0,
+  "fuzz_pct": 2.0,
+  "regions": []
+}

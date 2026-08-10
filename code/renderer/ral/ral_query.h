@@ -32,7 +32,7 @@ typedef struct {
 ralQueryPool_t *Ral_CreateQueryPool ( ralBackend_t *b, const ralQueryPoolCreateInfo_t *ci );
 void            Ral_DestroyQueryPool( ralQueryPool_t *pool );
 
-// Phase 7.4c-submit-A4 — adopt-style wrapper around an existing backend
+// adopt-style wrapper around an existing backend
 // VkQueryPool (caller's qvkCreateQueryPool retains lifetime ownership).
 // Mirrors Ral_AdoptPipelineLayout / Ral_AdoptTexture: ownsPool=qfalse so
 // Ral_DestroyQueryPool frees only the wrapper struct, the underlying
@@ -52,7 +52,7 @@ ralQueryPool_t *Ral_AdoptQueryPool( ralBackend_t *b,
                                     uint32_t count,
                                     const char *debugName );
 
-// Phase 7.4c-submit-A4: read the backend-native VkQueryPool from an adopted
+// read the backend-native VkQueryPool from an adopted
 // (or owned) ralQueryPool_t. Mirrors Ral_GetTextureImageHandle. Returns NULL
 // on bad arg. Consumers cast back to VkQueryPool.
 void *Ral_GetQueryPoolHandle( const ralQueryPool_t *pool );

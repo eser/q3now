@@ -1,0 +1,102 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+source_sky.comp — wired-render analytic sky environment source cube.
+
+Fills a 6-face cube (as a 2D array storage image) with an analytic sky
+radiance: a horizon-to-zenith colour gradient plus a soft sun disk. This is the
+SOURCE that the IBL convolve later prefilters into the irradiance + radiance
+probe cubes — a neutral-but-directional ambient (sky-tone above, ground-tone
+below, a warm sun lobe), far better than flat grey for showing PBR shading.
+
+SWAP-READY SEAM: this analytic fill is a placeholder for a real captured HDR
+environment. When one is provided, ONLY the host-side source fill is swapped
+(the analytic compute dispatch is replaced by an R_LoadDDS of an HDR cube into
+the same vk.ral_probe_source image); the per-face/per-mip views, the convolve,
+the probe binding, and the IBL term all stay unchanged. Keep this shader's
+output format (RGBA16F linear radiance, GL cube-face order) identical to what a
+loaded HDR cube would present so the downstream is asset-source-agnostic.
+
+Vulkan compute cannot imageStore into an imageCube (that type is sampled-only),
+so the storage target is an image2DArray of 6 layers in GL cube-face order
+(+X,-X,+Y,-Y,+Z,-Z). A VK_IMAGE_VIEW_TYPE_CUBE sampled view over the same image
+reinterprets the 6 layers as a cube for later sampling.
+*/
+
+const float PI = 3.14159265358979323846;
+
+// Linear-radiance sky palette (pre-tonemap scene scale; co-tuned with the
+// engine's ~0.0123 middle-grey). Tuned to read as a clear daytime sky without
+// blowing the auto-exposure — zenith deep blue, horizon pale, ground muted.
+const vec3  SKY_ZENITH  = vec3( 0.045, 0.090, 0.190 );
+const vec3  SKY_HORIZON = vec3( 0.130, 0.150, 0.180 );
+const vec3  GROUND      = vec3( 0.045, 0.040, 0.034 );
+
+// Fixed sun: a normalized direction (up and to one side) + a warm disk colour.
+// The lobe is a soft power falloff on the dir·sun cosine, not a hard disk, so
+// the later roughness convolve has something smooth to spread.
+const vec3  SUN_DIR     = vec3( 0.40, 0.82, 0.41 );  // normalized below
+const vec3  SUN_COLOR   = vec3( 1.30, 1.05, 0.70 );
+const float SUN_TIGHT   = 320.0;  // higher = tighter disk
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(rgba16f, set = 0, binding = 0) uniform writeonly image2DArray skyImage;
+
+// GL cube-face (layer) + face-uv → world direction. Layer order is the Vulkan
+// cube-array convention (+X,-X,+Y,-Y,+Z,-Z); u,v are the face-local [-1,1].
+vec3 cubeFaceDir( uint face, vec2 uv )
+{
+	float u = uv.x;
+	float v = uv.y;
+	vec3 dir;
+	if      ( face == 0u ) dir = vec3(  1.0,  -v,  -u );  // +X
+	else if ( face == 1u ) dir = vec3( -1.0,  -v,   u );  // -X
+	else if ( face == 2u ) dir = vec3(  u,   1.0,   v );  // +Y
+	else if ( face == 3u ) dir = vec3(  u,  -1.0,  -v );  // -Y
+	else if ( face == 4u ) dir = vec3(  u,   -v,   1.0 ); // +Z
+	else                   dir = vec3( -u,   -v,  -1.0 ); // -Z
+	return normalize( dir );
+}
+
+vec3 analyticSky( vec3 dir )
+{
+	// up = dir.y in [-1,1]. Sky hemisphere blends horizon→zenith; below the
+	// horizon fades to the ground tone.
+	float up = dir.y;
+
+	vec3 sky;
+	if ( up >= 0.0 ) {
+		float t = smoothstep( 0.0, 1.0, up );
+		sky = mix( SKY_HORIZON, SKY_ZENITH, t );
+	} else {
+		float t = smoothstep( 0.0, -0.35, up );
+		sky = mix( SKY_HORIZON, GROUND, t );
+	}
+
+	// Soft sun lobe (only above the horizon so the ground stays unlit).
+	float sd = max( dot( dir, normalize( SUN_DIR ) ), 0.0 );
+	float lobe = pow( sd, SUN_TIGHT );
+	if ( up > 0.0 )
+		sky += SUN_COLOR * lobe;
+
+	return sky;
+}
+
+void main()
+{
+	ivec3 size  = imageSize( skyImage );   // (w, h, 6)
+	ivec3 coord = ivec3( gl_GlobalInvocationID.xyz );
+	if ( coord.x >= size.x || coord.y >= size.y || coord.z >= 6 )
+		return;
+
+	// Face-local uv at the texel centre, mapped to [-1,1].
+	vec2 uv = ( ( vec2( coord.xy ) + 0.5 ) / vec2( size.xy ) ) * 2.0 - 1.0;
+	vec3 dir = cubeFaceDir( uint( coord.z ), uv );
+
+	vec3 radiance = analyticSky( dir );
+	imageStore( skyImage, coord, vec4( radiance, 1.0 ) );
+}

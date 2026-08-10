@@ -31,8 +31,7 @@ BotStrafeJumpCheck() call in ai_dmnet.c.
 #include "ai_main.h"
 #include "ai_movement.h"
 #include "ai_dmq3.h"
-/* Phase 5: log channels */
-LOG_DECLARE_CHANNEL( ch_botlib, "botlib" );
+LOG_DECLARE_CHANNEL( ch_botai, "botlib.ai" );
 
 /*
  * Modern physics parameters — defined as plain globals in bg_pmove.c.
@@ -610,10 +609,10 @@ void BotMovementThink( bot_state_t *bs, bot_moveresult_t *moveresult )
 	if ( airborne )
 		BotAirSteer( bs );
 
-	if ( bs->wiredBotsActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
+	if ( bs->wiredIntelActive && trap_Cvar_VariableIntegerValue( "bot_debug" ) >= 1 ) {
 		static int s_moveExitTick[MAX_CLIENTS];
 		if ( ++s_moveExitTick[bs->client] % 30 == 0 ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_botlib), "^2[MoveExit] cl=%d ideal=(%.1f %.1f) wrote_ideal=0\n",
+			Com_Log( SEV_INFO, LOG_CH(ch_botai), "cl=%d ideal=(%.1f %.1f) wrote_ideal=0\n",
 				bs->client,
 				bs->ideal_viewangles[PITCH], bs->ideal_viewangles[YAW] );
 		}

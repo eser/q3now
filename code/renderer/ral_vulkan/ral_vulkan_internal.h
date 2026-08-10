@@ -10,8 +10,8 @@
 //
 // IMPORTANT: this backend is deliberately *independent* of code/renderervk/.
 // It owns its own VkInstance / VkPhysicalDevice / VkDevice / VkQueues — they
-// are never shared with the legacy Vulkan renderer (per phase-7-ral-design.md
-// and the Phase 7.x briefs). It does reuse the engine's platform Vulkan loader
+// are never shared with the legacy Vulkan renderer (per phase-7-ral-design.md).
+// It does reuse the engine's platform Vulkan loader
 // entry point (ri.VK_GetInstanceProcAddr) and the engine's logging / allocation
 // imports (the refimport_t `ri`), because the backend is statically linked into
 // the same renderer DLL.
@@ -29,9 +29,10 @@
 
 #include "../ral/ral.h"                       // q_shared.h + the public RAL surface
 #include "../../renderercommon/tr_public.h"   // refimport_t, extern refimport_t ri
+#include "../../renderercommon/r_log.h"       // rilog-channel-mechanism — R_LOG / R_LOG_DECLARE_CHANNEL
 
 #include <string.h>
-#include <stdlib.h>   // Phase 7.4c-pre: backend internal allocations use stdlib malloc/free (not ri.Malloc) so RAL state survives ri.FreeAll() inside R_InitImages.
+#include <stdlib.h>   // backend internal allocations use stdlib malloc/free (not ri.Malloc) so RAL state survives ri.FreeAll() inside R_InitImages.
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,11 +69,17 @@ typedef struct {
 	PFN_vkCmdBeginDebugUtilsLabelEXT            CmdBeginDebugUtilsLabelEXT;          // NULL unless VK_EXT_debug_utils
 	PFN_vkCmdEndDebugUtilsLabelEXT              CmdEndDebugUtilsLabelEXT;
 
+	// surface PFNs (instance-level; needed by
+	// Ral_CreateBackend's owned-instance path to create + later destroy
+	// VkSurfaceKHR via ri.VK_CreateSurface).
+	PFN_vkDestroySurfaceKHR                     DestroySurfaceKHR;
+	PFN_vkGetPhysicalDeviceSurfaceSupportKHR    GetPhysicalDeviceSurfaceSupportKHR;
+
 	// device — core lifecycle
 	PFN_vkDestroyDevice                         DestroyDevice;
 	PFN_vkGetDeviceQueue                        GetDeviceQueue;
 	PFN_vkDeviceWaitIdle                        DeviceWaitIdle;
-	PFN_vkQueueWaitIdle                         QueueWaitIdle;   // Phase 7.4c-submit-followup-present-1: used by Ral_WaitQueueIdle (BC-B vk_queue_wait_idle retarget)
+	PFN_vkQueueWaitIdle                         QueueWaitIdle;   // used by Ral_WaitQueueIdle (vk_queue_wait_idle retarget)
 	PFN_vkQueueSubmit                           QueueSubmit;     // v1 (kept; v2 path used by Ral_Submit)
 	PFN_vkQueueSubmit2                          QueueSubmit2;    // core 1.3 (synchronization2)
 
@@ -146,7 +153,7 @@ typedef struct {
 	PFN_vkResetQueryPool                        ResetQueryPool;       // host-side reset, core 1.2
 	PFN_vkGetQueryPoolResults                   GetQueryPoolResults;
 
-	// device — pipelines (Phase 7.3c)
+	// device — pipelines
 	PFN_vkCreateShaderModule                    CreateShaderModule;
 	PFN_vkDestroyShaderModule                   DestroyShaderModule;
 	PFN_vkCreatePipelineLayout                  CreatePipelineLayout;
@@ -158,7 +165,7 @@ typedef struct {
 	PFN_vkDestroyPipelineCache                  DestroyPipelineCache;
 	PFN_vkGetPipelineCacheData                  GetPipelineCacheData;
 
-	// device — pipeline-dependent cmd ops (Phase 7.3c)
+	// device — pipeline-dependent cmd ops
 	PFN_vkCmdBindPipeline                       CmdBindPipeline;
 	PFN_vkCmdBindDescriptorSets                 CmdBindDescriptorSets;
 	PFN_vkCmdBindVertexBuffers                  CmdBindVertexBuffers;
@@ -173,12 +180,12 @@ typedef struct {
 	PFN_vkCmdBeginRendering                     CmdBeginRendering;              // core 1.3 (dynamic rendering)
 	PFN_vkCmdEndRendering                       CmdEndRendering;
 
-	// Phase 7.4c-cmd — Vk-typed parallel-paths cmd forwarders. The renderer's
+	// Vk-typed parallel-paths cmd forwarders. The renderer's
 	// legacy qvk path still uses VkRenderPass / VkFramebuffer-based render
 	// passes (not dynamic rendering), and ClearAttachments / NextSubpass /
 	// CopyImage / WriteTimestamp (legacy non-2) are not yet covered by the
 	// RAL surface but need parallel-paths support during the migration. Once
-	// 7.4c-submit retires the legacy path these can either stay (for code that
+	// the legacy path is retired these can either stay (for code that
 	// still uses VkRenderPass) or be retired alongside.
 	PFN_vkCmdBeginRenderPass                    CmdBeginRenderPass;
 	PFN_vkCmdEndRenderPass                      CmdEndRenderPass;
@@ -187,7 +194,7 @@ typedef struct {
 	PFN_vkCmdClearAttachments                   CmdClearAttachments;
 	PFN_vkCmdWriteTimestamp                     CmdWriteTimestamp;             // legacy non-sync2; matches renderer's qvkCmdWriteTimestamp
 
-	// Phase 7.4c-submit-followup-present-1 — swapchain + HDR-metadata function
+	// swapchain + HDR-metadata function
 	// pointers. VK_KHR_swapchain device extension is enabled by the renderer
 	// at device creation; imported-mode RAL backend inherits its enabled state.
 	// SetHdrMetadataEXT is gated on VK_EXT_hdr_metadata presence — NULL when
@@ -213,14 +220,14 @@ typedef struct {
 #  define RAL_VK_U2H( type, u )   ( (type)(u) )
 #endif
 
-// ── refcount header embedded in every RAL resource handle (§7.1) ────────
+// ── refcount header embedded in every RAL resource handle ───────────────
 typedef struct {
 	uint32_t refCount;
-	uint64_t lastUsedFrame;          // for the deferred-destroy queue (Phase 7.3)
+	uint64_t lastUsedFrame;          // for the deferred-destroy queue
 } ralResourceHeader_t;
 
 // ── memory suballocator ─────────────────────────────────────────────────
-// 7.2: one VkDeviceMemory per resource (replaceable later; the API is what
+// one VkDeviceMemory per resource (replaceable later; the API is what
 // matters). The backend owns a linked list of live allocations for memory-
 // budget accounting + leak detection at shutdown.
 //
@@ -249,6 +256,9 @@ struct ralBuffer_s {
 	ralMemoryType_t     memoryType;
 	qboolean            hostVisible;     // can be mapped
 	qboolean            coherent;        // skip flush
+	qboolean            ownsBuffer;      // qtrue: Ral_CreateBuffer made the VkBuffer (RAL destroys it).
+	                                     // qfalse: adopted via Ral_AdoptBuffer (engine owns it; RAL
+	                                     // destroys only the wrapper, never the VkBuffer/memory).
 };
 
 struct ralTexture_s {
@@ -265,8 +275,18 @@ struct ralTexture_s {
 	uint32_t            arrayLayers;     // 1 for non-array (cube = 6); resolved layer count for image views
 	uint32_t            sampleCount;
 	VkImageAspectFlags  aspect;          // COLOR or DEPTH(+STENCIL)
-	VkImageLayout       currentLayout;   // single layout tracked for the whole image (7.2 simplification)
-	qboolean            ownsImage;       // Phase 7.4c-submit-A4: qtrue if Ral_CreateTexture owns the VkImage + VkImageView + alloc, qfalse if adopted via Ral_AdoptTexture (caller retains lifetime; Ral_DestroyTexture skips defer-destroy of the underlying image / view / memory).
+	VkImageLayout       currentLayout;   // single layout tracked for the whole image (simplification)
+	qboolean            ownsImage;       // qtrue if Ral_CreateTexture owns the VkImage + VkImageView + alloc, qfalse if adopted via Ral_AdoptTexture (caller retains lifetime; Ral_DestroyTexture skips defer-destroy of the underlying image / view / memory).
+	qboolean            concurrentTransfer;   // qtrue when created CONCURRENT graphics+transfer — an upload copy on the transfer queue needs no ownership-transfer barrier.
+	// Per-array-layer attachment views for an adopted 2D-array image (NULL for
+	// non-array / native textures). Supplied caller-owned by Ral_AdoptArrayTexture
+	// (the renderer's existing per-layer VkImageViews — e.g. the shadow cascade
+	// views); Ral_BeginRendering binds layerViews[depthAttachmentLayerIndex] as the
+	// depth imageView. defaultView stays the full-array sampling view. The pointer
+	// references caller memory; Ral_DestroyTexture never frees these (ownsImage
+	// already gates view destruction, and adopted = qfalse).
+	const VkImageView  *layerViews;      // NULL = single-layer (bind defaultView)
+	uint32_t            numLayerViews;   // 0 = none; else == arrayLayers
 };
 
 struct ralTextureView_s {
@@ -280,6 +300,7 @@ struct ralSampler_s {
 	ralResourceHeader_t header;
 	ralBackend_t       *backend;
 	VkSampler           sampler;
+	qboolean            ownsSampler;       // qtrue if Ral_CreateSampler owns the VkSampler, qfalse if adopted via Ral_AdoptSampler (caller retains lifetime; Ral_DestroySampler skips defer-destroy of the underlying sampler).
 };
 
 #define RAL_VK_MAX_LAYOUT_ENTRIES 16
@@ -296,7 +317,7 @@ struct ralBindGroupLayout_s {
 	ralBackend_t         *backend;
 	VkDescriptorSetLayout layout;
 	qboolean              bindless;
-	qboolean              ownsLayout;        // Phase 7.4c-bindgroup-pre: qtrue if Ral_CreateBindGroupLayout owns the VkDescriptorSetLayout, qfalse if adopted via Ral_AdoptBindGroupLayout (caller retains ownership; Ral_DestroyBindGroupLayout skips vkDestroyDescriptorSetLayout).
+	qboolean              ownsLayout;        // qtrue if Ral_CreateBindGroupLayout owns the VkDescriptorSetLayout, qfalse if adopted via Ral_AdoptBindGroupLayout (caller retains ownership; Ral_DestroyBindGroupLayout skips vkDestroyDescriptorSetLayout).
 	uint32_t              numEntries;
 	ralVkBindEntry_t      entries[RAL_VK_MAX_LAYOUT_ENTRIES];
 };
@@ -306,21 +327,21 @@ struct ralBindGroup_s {
 	ralBackend_t               *backend;
 	VkDescriptorSet             set;             // freed via vkFreeDescriptorSets (pool has FREE_DESCRIPTOR_SET_BIT) on deferred-destroy
 	const ralBindGroupLayout_t *layout;
-	qboolean                    ownsSet;         // Phase 7.4c-bindgroup: qtrue if Ral_CreateBindGroup owns the VkDescriptorSet, qfalse if adopted via Ral_AdoptBindGroup (caller's pool retains ownership; Ral_DestroyBindGroup skips vkFreeDescriptorSets).
+	qboolean                    ownsSet;         // qtrue if Ral_CreateBindGroup owns the VkDescriptorSet, qfalse if adopted via Ral_AdoptBindGroup (caller's pool retains ownership; Ral_DestroyBindGroup skips vkFreeDescriptorSets).
 };
 
 struct ralFence_s {
 	ralBackend_t *backend;
 	VkFence       fence;          // VK_NULL_HANDLE when preSignaled
-	qboolean      preSignaled;    // legacy 7.2 token form; 7.3 uploads return real (already-signaled) fences
-	qboolean      ownsFence;      // Phase 7.4c-submit-BC-C-min: qtrue if Ral_CreateFence owns the VkFence, qfalse if adopted via Ral_AdoptFence (caller retains lifetime; Ral_DestroyFence skips defer-destroy of the underlying fence).
+	qboolean      preSignaled;    // legacy token form; later uploads return real (already-signaled) fences
+	qboolean      ownsFence;      // qtrue if Ral_CreateFence owns the VkFence, qfalse if adopted via Ral_AdoptFence (caller retains lifetime; Ral_DestroyFence skips defer-destroy of the underlying fence).
 };
 
 struct ralSemaphore_s {
 	ralBackend_t      *backend;
 	VkSemaphore        sem;
 	ralSemaphoreType_t type;      // BINARY or TIMELINE — drives VkSemaphoreSubmitInfo.value handling
-	qboolean           ownsSemaphore; // Phase 7.4c-submit-BC-C-min: qtrue if Ral_CreateSemaphore owns the VkSemaphore, qfalse if adopted via Ral_AdoptSemaphore (caller retains lifetime; Ral_DestroySemaphore skips defer-destroy of the underlying semaphore).
+	qboolean           ownsSemaphore; // qtrue if Ral_CreateSemaphore owns the VkSemaphore, qfalse if adopted via Ral_AdoptSemaphore (caller retains lifetime; Ral_DestroySemaphore skips defer-destroy of the underlying semaphore).
 };
 
 struct ralQueryPool_s {
@@ -328,14 +349,14 @@ struct ralQueryPool_s {
 	VkQueryPool    pool;
 	ralQueryType_t type;
 	uint32_t       count;
-	qboolean       ownsPool;             // Phase 7.4c-submit-A4: qtrue if Ral_CreateQueryPool owns the VkQueryPool, qfalse if adopted via Ral_AdoptQueryPool (caller retains lifetime; Ral_DestroyQueryPool skips defer-destroy of the underlying pool).
+	qboolean       ownsPool;             // qtrue if Ral_CreateQueryPool owns the VkQueryPool, qfalse if adopted via Ral_AdoptQueryPool (caller retains lifetime; Ral_DestroyQueryPool skips defer-destroy of the underlying pool).
 };
 
-// ── pipeline + pipeline-layout cache (Phase 7.3c) ───────────────────────
+// ── pipeline + pipeline-layout cache ────────────────────────────────────
 // Pipelines own a VkPipeline + a refcounted VkPipelineLayout drawn from the
 // backend's small layout cache (one VkPipelineLayout per distinct combination
 // of {bindGroupLayouts[], pushConstantSize, pushConstantStages}). Caches help
-// the renderer migration (Phase 7.4+) avoid re-creating identical layouts when
+// the renderer migration avoid re-creating identical layouts when
 // every shader variant for the same bind-set lineage gets its own pipeline.
 #define RAL_VK_MAX_PIPELINE_SETS   8u    // per-pipeline VkDescriptorSetLayouts (Vulkan min maxBoundDescriptorSets=4; 8 is generous)
 #define RAL_VK_LAYOUT_CACHE_MAX  256u    // distinct (set-layouts × push-constants) tuples cached in ralBackend_s.layoutCache
@@ -361,7 +382,7 @@ struct ralPipeline_s {
 	uint32_t            pushConstantStages; // VkShaderStageFlags
 };
 
-// Phase 7.4c-submit-A2 — typed wrappers around renderer-owned VkPipelineLayout /
+// typed wrappers around renderer-owned VkPipelineLayout /
 // VkRenderPass / VkFramebuffer. ownsHandle=qfalse on all wrappers created by
 // the renderer's adoption helpers — Ral_Destroy* frees only the wrapper struct,
 // the underlying Vk handle's lifetime stays with vk.c's existing teardown path.
@@ -391,7 +412,7 @@ typedef enum {
 	RAL_VK_CMD_SUBMITTED        // handed to a queue
 } ralVkCmdState_t;
 
-// Phase 7.4c-submit-followup-present-1 — RAL-side swapchain wrapper. Adopts an
+// RAL-side swapchain wrapper. Adopts an
 // externally-created VkSurfaceKHR (renderer-owned via ri.VK_CreateSurface;
 // ownsSurface=qfalse) and owns its own VkSwapchainKHR + image array. Each
 // swapchain image is wrapped in an adopted ralTexture_t (ownsImage=qfalse) so
@@ -426,20 +447,20 @@ struct ralCommandBuffer_s {
 	ralPipeline_t      *currentPipeline;   // weak ref (caller guarantees lifetime through Submit)
 	VkPipelineLayout    currentLayout;     // mirror of currentPipeline->layout (also a weak ref)
 	VkPipelineBindPoint currentBindPoint;  // mirror of currentPipeline->bindPoint
-	// Phase 7.4c-cmd: parallel-paths adoption. When ownsBuffer == qfalse the
+	// parallel-paths adoption. When ownsBuffer == qfalse the
 	// wrapper was created by Ral_AcquireBegunCommandBuffer around a renderer-owned
 	// VkCommandBuffer; Ral_DestroyCommandBuffer skips vkFreeCommandBuffers
 	// (the renderer's existing pool owns lifetime). Wrappers created by
 	// Ral_AcquireCommandBuffer have ownsBuffer == qtrue (legacy RAL path).
 	qboolean            ownsBuffer;
-	// Phase 7.4c-submit-A3: tracks whether a Ral_CmdBeginRenderPass succeeded.
+	// tracks whether a Ral_CmdBeginRenderPass succeeded.
 	// Ral_CmdEndRenderPass / vkCmdEndRenderPass bails if false (matches the
 	// NULL-fallthrough contract — when the parallel buffer's render-pass /
 	// framebuffer lookup misses, Begin silently skips and End must too).
 	qboolean            inRenderPass;
 };
 
-// ── deferred-destroy queue (§7.2 lifecycle) ─────────────────────────────
+// ── deferred-destroy queue (lifecycle) ──────────────────────────────────
 #define RAL_VK_MAX_FRAMES_IN_FLIGHT  2
 #define RAL_VK_PENDING_DESTROY_MAX   4096   // ring capacity; overflow forces a synchronous drain
 
@@ -453,8 +474,9 @@ typedef enum {
 	RAL_RES_FENCE,            // h1 = VkFence
 	RAL_RES_SEMAPHORE,        // h1 = VkSemaphore
 	RAL_RES_QUERY_POOL,       // h1 = VkQueryPool
-	RAL_RES_PIPELINE,         // h1 = VkPipeline           (Phase 7.3c)
-	RAL_RES_PIPELINE_LAYOUT   // h1 = VkPipelineLayout     (Phase 7.3c — layout cache refcount → 0)
+	RAL_RES_PIPELINE,         // h1 = VkPipeline
+	RAL_RES_PIPELINE_LAYOUT,  // h1 = VkPipelineLayout     (layout cache refcount → 0)
+	RAL_RES_CMD_BUFFER        // h1 = VkCommandBuffer, h2 = ralQueueType_t (which cmdPool to free from)
 } ralResourceKind_t;
 
 typedef struct {
@@ -468,7 +490,7 @@ typedef struct {
 // ── concrete backend object ─────────────────────────────────────────────
 struct ralBackend_s {
 	ralBackendType_t  type;            // always RAL_BACKEND_VULKAN for this implementation
-	uint32_t          flags;           // RAL_FLAG_VALIDATION | RAL_FLAG_DEBUG_LABELS
+	uint32_t          flags;           // RAL_FLAG_DEBUG_LABELS
 	uint32_t          instanceApiVersion;   // version the VkInstance was created at
 
 	ralVkFuncs_t      vk;
@@ -487,31 +509,59 @@ struct ralBackend_s {
 	VkQueue           transferQueue;    // == graphicsQueue if shared
 
 	VkDebugUtilsMessengerEXT debugMessenger;   // VK_NULL_HANDLE unless validation requested + available
-	qboolean          ownsHandles;           // Phase 7.4c-pre: qtrue → Ral_DestroyBackend tears down instance/device/debugMessenger; qfalse → caller owns them (imported mode)
+
+	// RAL-owned surface (created via ri.VK_CreateSurface
+	// in Ral_CreateBackend's owned-instance path; VK_NULL_HANDLE in imported
+	// mode where the renderer retains surface lifecycle).
+	VkSurfaceKHR      surface;
+
+	// fine-grained ownership flags replace the prior
+	// monolithic ownsHandles. ownsInstance gates teardown of instance +
+	// messenger + surface; ownsDevice gates teardown of device. Imported
+	// mode sets both qfalse; standalone sets both qtrue; the owned-
+	// instance/imported-device hybrid sets ownsInstance=qtrue + ownsDevice=
+	// qfalse until a later change flips ownsDevice.
+	qboolean          ownsInstance;
+	qboolean          ownsDevice;
+
+	// flat list of device extensions actually
+	// enabled at vkCreateDevice time. Pointers refer to either the
+	// caller-supplied string literals (bci.platformDeviceExtensions[])
+	// or RAL-internal static literals (VK_KHR_swapchain,
+	// VK_EXT_memory_budget). Owned: the *array of pointers* is malloc'd
+	// in the owned-device branch and freed in ralVk_DestroyBackendInternal;
+	// the strings themselves are NOT owned (string-literal storage).
+	const char      **enabledDeviceExtensions;
+	uint32_t          enabledDeviceExtensionCount;
+
 	qboolean          haveDebugUtils;        // VK_EXT_debug_utils instance extension present + entry points loaded
 	qboolean          haveMemoryBudget;      // VK_EXT_memory_budget device extension enabled
 	qboolean          haveDescriptorIndexing;  // descriptor-indexing features enabled at device creation → bindless usable
-	qboolean          haveSync2;             // synchronization2 feature enabled (required by 7.3+: vkQueueSubmit2, vkCmdWriteTimestamp2)
-	qboolean          haveTimelineSemaphore;  // timelineSemaphore feature enabled (required by 7.3+)
+	qboolean          haveSync2;             // synchronization2 feature enabled (required for vkQueueSubmit2, vkCmdWriteTimestamp2)
+	qboolean          haveTimelineSemaphore;  // timelineSemaphore feature enabled (required)
 	qboolean          haveSamplerAnisotropy;  // samplerAnisotropy core feature enabled
 	qboolean          haveHostQueryReset;    // hostQueryReset feature enabled → vkResetQueryPool usable
-	qboolean          haveDrawIndirectCount; // drawIndirectCount feature enabled → vkCmdDrawIndexedIndirectCount usable (Phase 7.4-pre)
+	qboolean          haveDrawIndirectCount; // drawIndirectCount feature enabled → vkCmdDrawIndexedIndirectCount usable
+	qboolean          haveFragmentShadingRate; // VK_KHR_fragment_shading_rate enabled AND pipelineFragmentShadingRate feature on → pipeline-static VRS legal
+	qboolean          haveDepthClamp;        // depthClamp core feature enabled → pipeline depthClampEnable legal (read into caps.depthClamp by ralVk_FillCaps, which survives the caps memset)
+	qboolean          haveWideLines;         // wideLines core feature enabled → pipeline lineWidth != 1.0 legal (read into caps.wideLines by ralVk_FillCaps)
+	qboolean          haveVertexFragmentStores; // vertexPipelineStoresAndAtomics + fragmentStoresAndAtomics both enabled → shader image/SSBO stores legal (read into caps.vertexFragmentStores by ralVk_FillCaps)
 
 	ralCaps_t         caps;
 
-	// ── per-queue command pools + queues + serialization (Phase 7.3) ──
+	// ── per-queue command pools + queues + serialization ──
 	VkQueue           queues[3];             // indexed by ralQueueType_t; compute/transfer alias graphics if no dedicated family
 	uint32_t          queueFamily[3];        // family index per queue type
 	VkCommandPool     cmdPools[3];           // one per queue type, RESET_COMMAND_BUFFER_BIT; also used for one-shot upload/readback cmds
 	void             *queueMutex[3];         // boxed CRITICAL_SECTION/pthread_mutex_t — guards pool alloc/free/reset + vkQueueSubmit2 for that queue
 
-	// ── per-frame lifecycle + deferred destroy (Phase 7.3) ──
+	// ── per-frame lifecycle + deferred destroy ──
 	uint64_t          currentFrame;          // advanced by Ral_BeginFrame
 	VkFence           frameFences[ RAL_VK_MAX_FRAMES_IN_FLIGHT ];   // signaled by Ral_EndFrame's empty submit; waited by Ral_BeginFrame
 	ralVkPendingDestroy_t *pendingDestroy;   // malloc'd ring of RAL_VK_PENDING_DESTROY_MAX entries
 	uint32_t          numPendingDestroy;
 
-	// ── resource layer (Phase 7.2) ──
+	// ── resource layer ──
 	VkDescriptorPool  descriptorPool;        // one big pool, UPDATE_AFTER_BIND | FREE_DESCRIPTOR_SET
 	ralVkAllocation_t *allocations;          // live-allocation list
 	uint32_t          numAllocations;
@@ -519,7 +569,7 @@ struct ralBackend_s {
 	VkDeviceSize      ralHostVisibleBytes;   // sum of host-visible allocation sizes
 	uint8_t           formatBlitGen[ RAL_FORMAT_COUNT ];  // 1 if optimal-tiling format supports BLIT_SRC|BLIT_DST|SAMPLED → GPU mip gen ok
 
-	// ── pipeline layer (Phase 7.3c) ──
+	// ── pipeline layer ──
 	VkPipelineCache   pipelineCache;         // backend-wide VkPipelineCache; seeds VkPipeline creation, persisted via Ral_{Save,Load}PipelineCache
 	ralVkLayoutCacheEntry_t *layoutCache;    // malloc'd array of RAL_VK_LAYOUT_CACHE_MAX entries
 	uint32_t          numLayoutCache;        // live entries (entries with refCount > 0 OR not yet defer-destroyed)
@@ -533,12 +583,15 @@ struct ralBackend_s {
 };
 
 // ── once-per-method-per-process stub log ────────────────────────────────
+// rilog-channel-mechanism Turn B — route through R_LOG on the renderer.ral
+// channel; every TU that expands these macros must (and does) declare a
+// file-scope rch_ral via R_LOG_DECLARE_CHANNEL.
 #define RAL_STUB_ONCE( fnname, phase ) \
 	do { \
 		static qboolean ral_stub_logged_ = qfalse; \
 		if ( !ral_stub_logged_ ) { \
 			ral_stub_logged_ = qtrue; \
-			ri.Log( SEV_DEBUG, "[RAL] stub: %s -- TODO Phase %s\n", (fnname), (phase) ); \
+			R_LOG( rch_ral, SEV_DEBUG, "stub: %s -- TODO Phase %s\n", (fnname), (phase) ); \
 		} \
 	} while ( 0 )
 
@@ -546,7 +599,7 @@ struct ralBackend_s {
 #define RAL_NOTE_ONCE( ... ) \
 	do { \
 		static qboolean ral_note_logged_ = qfalse; \
-		if ( !ral_note_logged_ ) { ral_note_logged_ = qtrue; ri.Log( SEV_DEBUG, __VA_ARGS__ ); } \
+		if ( !ral_note_logged_ ) { ral_note_logged_ = qtrue; R_LOG( rch_ral, SEV_DEBUG, __VA_ARGS__ ); } \
 	} while ( 0 )
 
 #define RAL_ZERO( x )  memset( &(x), 0, sizeof( x ) )
@@ -596,12 +649,12 @@ qboolean ralVk_HasExtension       ( const VkExtensionProperties *exts, uint32_t 
 void     ralVk_SetObjectName      ( ralBackend_t *b, uint64_t handle, VkObjectType type, const char *name );
 VkFormat ralVk_TranslateFormat    ( ralFormat_t f );
 
-// ── Phase 7.4a interop bridge (renderer migration) ──────────────────────
+// ── interop bridge (renderer migration) ─────────────────────────────────
 // Renderervk needs raw VkImage / VkImageView / VkDevice handles for the
 // parallel-paths migration model. These accessors are backend-internal —
 // they let renderervk peek at RAL-managed Vulkan objects without round-
 // tripping through the public RAL surface. Used by renderervk to populate
-// diagnostic dumps (\ral_textures), and (in 7.4c+) to bridge into the new
+// diagnostic dumps (\ral_textures), and to bridge into the new
 // descriptor-binding path. Not part of the v1 RAL surface.
 VkImage     ralVk_GetTextureNativeImage    ( const ralTexture_t *tex );
 VkImageView ralVk_GetTextureNativeImageView( const ralTexture_t *tex );

@@ -4,11 +4,10 @@
 
 #version 450
 
-// 64 bytes
-layout(push_constant) uniform Transform {
-	mat4 mvp;
-};
-
+// mvp rides in the set-0 vkUniform_t ring (filled by VK_PushUniform, which stamps mvp
+// from vk_world.mvp), not a VS push constant. It is appended to this shader's existing
+// set-0 UBO at host offset 480 (FEAT_SHADOW_MAPPING build); pad from fogColor (ends
+// @128) to 480.
 layout(set = 0, binding = 0) uniform UBO {
 	// light/env parameters:
 	vec4 eyePos;				// vertex
@@ -22,6 +21,8 @@ layout(set = 0, binding = 0) uniform UBO {
 	vec4 fogEyeT;				// vertex
 	vec4 fogColor;				// fragment
 //#endif
+	vec4 _pad_to_mvp[22];		// 128 -> 480 (352 bytes)
+	mat4 mvp;					// host offset 480
 };
 
 layout(location = 0) in vec3 in_position;

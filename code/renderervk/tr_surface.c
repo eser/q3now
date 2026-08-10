@@ -3,6 +3,9 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_surf.c
 #include "tr_local.h"
+#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn B — renderer.assets
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 /*
 
@@ -285,16 +288,9 @@ static void RB_SurfaceTriangles( const srfTriangles_t *srf ) {
 	float		*texCoords0;
 	float		*texCoords1;
 	uint32_t	*color;
-#ifdef USE_LEGACY_DLIGHTS
-	int			dlightBits;
-#endif
 
 #ifdef USE_VBO
-#ifdef USE_LEGACY_DLIGHTS
-	if ( tess.allowVBO && srf->vboItemIndex && !srf->dlightBits ) {
-#else
 	if ( tess.allowVBO && srf->vboItemIndex ) {
-#endif
 		// transition to vbo render list
 		if ( tess.vboIndex == 0 ) {
 			RB_EndSurface();
@@ -314,11 +310,6 @@ static void RB_SurfaceTriangles( const srfTriangles_t *srf ) {
 #endif // USE_VBO
 
 	RB_CHECKOVERFLOW( srf->numVerts, srf->numIndexes );
-
-#ifdef USE_LEGACY_DLIGHTS
-	dlightBits = srf->dlightBits;
-	tess.dlightBits |= dlightBits;
-#endif
 
 #ifdef USE_VBO
 	tess.surfType = SF_TRIANGLES;
@@ -367,11 +358,6 @@ static void RB_SurfaceTriangles( const srfTriangles_t *srf ) {
 		// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — `color` iterates within tess.vertexColors[]; bounded by srf->numVerts upstream
 		*color = dv->color.u32;
 	}
-#ifdef USE_LEGACY_DLIGHTS
-	for ( i = 0 ; i < srf->numVerts ; i++ ) {
-		tess.vertexDlightBits[ tess.numVertexes + i] = dlightBits;
-	}
-#endif
 	tess.numVertexes += srf->numVerts;
 }
 
@@ -436,6 +422,7 @@ static void RB_SurfaceBeam( void )
 
 	vk_bind_pipeline( vk.surface_beam_pipeline );
 	vk_bind_geometry( TESS_XYZ | TESS_RGBA0 );
+	VK_PushUniformScratch();
 	vk_draw_geometry( DEPTH_RANGE_NORMAL, qfalse );
 
 	tess.numIndexes = 0;
@@ -634,7 +621,7 @@ static void RB_SurfaceMesh(md3Surface_t *surface) {
 	tess.numVertexes += surface->numVerts;
 
 #if FEAT_SHADOW_MAPPING
-	// Phase 6.5.4d2-followup: snapshot this deformed MD3 surface for next frame's
+	// snapshot this deformed MD3 surface for next frame's
 	// shadow pass (no-op if the entity isn't an opaque caster / shadow mapping off).
 	vk_shadow_capture_mesh( tess.numVertexes - surface->numVerts, surface->numVerts,
 	                        tess.numIndexes - indexes, indexes );
@@ -656,16 +643,9 @@ static void RB_SurfaceFace( const srfSurfaceFace_t *surf ) {
 	int			ndx;
 	int			Bob;
 	int			numPoints;
-#ifdef USE_LEGACY_DLIGHTS
-	int			dlightBits;
-#endif
 
 #ifdef USE_VBO
-#ifdef USE_LEGACY_DLIGHTS
-	if ( tess.allowVBO && surf->vboItemIndex && !surf->dlightBits ) {
-#else
 	if ( tess.allowVBO && surf->vboItemIndex ) {
-#endif
 		// transition to vbo render list
 		if ( tess.vboIndex == 0 ) {
 			RB_EndSurface();
@@ -688,11 +668,6 @@ static void RB_SurfaceFace( const srfSurfaceFace_t *surf ) {
 
 #ifdef USE_VBO
 	tess.surfType = SF_FACE;
-#endif
-
-#ifdef USE_LEGACY_DLIGHTS
-	dlightBits = surf->dlightBits;
-	tess.dlightBits |= dlightBits;
 #endif
 
 	indices = ( unsigned * ) ( ( ( char  * ) surf ) + surf->ofsIndices );
@@ -742,9 +717,6 @@ static void RB_SurfaceFace( const srfSurfaceFace_t *surf ) {
 			tess.texCoords[1][ndx][1] = v[6];
 		}
 		* ( unsigned int * ) &tess.vertexColors[ndx] = * ( unsigned int * ) &v[7];
-#ifdef USE_LEGACY_DLIGHTS
-		tess.vertexDlightBits[ndx] = dlightBits;
-#endif
 	}
 
 	tess.numVertexes += surf->numPoints;
@@ -869,17 +841,9 @@ static void RB_SurfaceGrid( srfGridMesh_t *cv ) {
 	float	lodError;
 	int		lodWidth, lodHeight;
 	int		numVertexes;
-#ifdef USE_LEGACY_DLIGHTS
-	int		dlightBits;
-	int		*vDlightBits;
-#endif
 
 #ifdef USE_VBO_GRID
-#ifdef USE_LEGACY_DLIGHTS
-	if ( tess.allowVBO && cv->vboItemIndex && !cv->dlightBits ) {
-#else
 	if ( tess.allowVBO && cv->vboItemIndex ) {
-#endif
 		// transition to vbo render list
 		if ( tess.vboIndex == 0 ) {
 			RB_EndSurface();
@@ -900,11 +864,6 @@ static void RB_SurfaceGrid( srfGridMesh_t *cv ) {
 #ifdef USE_VBO
 	VBO_Flush();
 #endif
-#endif
-
-#ifdef USE_LEGACY_DLIGHTS
-	dlightBits = cv->dlightBits;
-	tess.dlightBits |= dlightBits;
 #endif
 
 #ifdef USE_VBO_GRID
@@ -991,9 +950,6 @@ static void RB_SurfaceGrid( srfGridMesh_t *cv ) {
 		texCoords0 = tess.texCoords[0][numVertexes];
 		texCoords1 = tess.texCoords[1][numVertexes];
 		color = &tess.vertexColors[numVertexes].u32;
-#ifdef USE_LEGACY_DLIGHTS
-		vDlightBits = &tess.vertexDlightBits[numVertexes];
-#endif
 		for ( i = 0 ; i < rows ; i++ ) {
 			for ( j = 0 ; j < lodWidth ; j++ ) {
 				dv = cv->verts + heightTable[ used + i ] * cv->width
@@ -1023,9 +979,6 @@ static void RB_SurfaceGrid( srfGridMesh_t *cv ) {
 				}
 				// NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) — `color` iterates within tess.vertexColors[]; bounded by srf->numVerts upstream
 				*color = dv->color.u32;
-#ifdef USE_LEGACY_DLIGHTS
-				*vDlightBits++ = dlightBits;
-#endif
 				xyz += 4;
 				texCoords0 += 2;
 				color++;
@@ -1112,6 +1065,7 @@ static void RB_SurfaceAxis( void ) {
 	vk_bind_pipeline( vk.surface_axis_pipeline );
 	// TODO: use common layout and avoid ST0 binding?
 	vk_bind_geometry( TESS_XYZ | TESS_RGBA0 | TESS_ST0 );
+	VK_PushUniformScratch();
 	vk_draw_geometry( DEPTH_RANGE_NORMAL, qfalse );
 
 	tess.numVertexes = 0;
@@ -1185,7 +1139,7 @@ static void RB_SurfaceEntity( const surfaceType_t *surfType ) {
 
 
 static void RB_SurfaceBad( const surfaceType_t *surfType ) {
-	ri.Log( SEV_INFO, "Bad surface tesselated.\n" );
+	R_LOG( rch_assets, SEV_INFO, "Bad surface tesselated.\n" );
 }
 
 

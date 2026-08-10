@@ -8,7 +8,6 @@
 
 #include "cg_local.h"
 #include "../qcommon/menudef.h"
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
 typedef struct {
@@ -318,6 +317,76 @@ void CG_ShaderStateChanged(void) {
 
 /*
 ================
+CG_ParseObjectives
+
+Parse the CS_OBJECTIVES server string ("key,required,completed,failed;"
+quadruples), resolve each objective's l10n key to localized text (trap_L10n_Get
+— graceful missing-key fallback to the raw key), and push the localized list to
+the objectives HUD element as WIRED_EVENT_OBJECTIVE ("text,completed,failed;"
+triples). The required flag is a server-side gate concern and is not forwarded to
+the HUD; completed + failed drive the completed/struck rendering.
+================
+*/
+static void CG_ParseObjectives( const char *str ) {
+	char        out[MAX_STRING_CHARS];
+	const char *p = str;
+	int         len = 0;
+
+	out[0] = '\0';
+
+	while ( p && *p ) {
+		char        key[64];
+		char        text[192];
+		char        chunk[224];
+		const char *comma1, *comma2, *comma3, *semi;
+		int         completed = 0;
+		int         failed = 0;
+		int         keyLen, clen;
+
+		semi = strchr( p, ';' );
+		if ( !semi )
+			break;
+
+		comma1 = strchr( p, ',' );          /* end of key */
+		if ( !comma1 || comma1 > semi ) {
+			p = semi + 1;
+			continue;
+		}
+		comma2 = strchr( comma1 + 1, ',' ); /* required | completed */
+		if ( comma2 && comma2 < semi ) {
+			completed = atoi( comma2 + 1 );
+			comma3 = strchr( comma2 + 1, ',' ); /* completed | failed */
+			if ( comma3 && comma3 < semi )
+				failed = atoi( comma3 + 1 );
+		}
+
+		keyLen = (int)( comma1 - p );
+		if ( keyLen <= 0 || keyLen >= (int)sizeof( key ) ) {
+			p = semi + 1;
+			continue;
+		}
+		memcpy( key, p, keyLen );
+		key[keyLen] = '\0';
+
+		/* key -> localized text (missing key degrades to the raw key) */
+		trap_L10n_Get( key, text, sizeof( text ) );
+
+		Com_sprintf( chunk, sizeof( chunk ), "%s,%d,%d;", text, completed ? 1 : 0, failed ? 1 : 0 );
+		clen = (int)strlen( chunk );
+		if ( len + clen >= (int)sizeof( out ) )
+			break;   /* out of room — push what fits */
+		memcpy( out + len, chunk, clen );
+		len += clen;
+		out[len] = '\0';
+
+		p = semi + 1;
+	}
+
+	trap_WiredUI_PushEvent( WIRED_EVENT_OBJECTIVE, out );
+}
+
+/*
+================
 CG_ConfigStringModified
 
 ================
@@ -375,7 +444,15 @@ static void CG_ConfigStringModified( void ) {
 	} else if ( num == CS_INTERMISSION ) {
 		cg.intermissionStarted = atoi( str );
 	} else if ( num >= CS_MODELS && num < CS_MODELS+MAX_MODELS ) {
-		cgs.gameModels[ num-CS_MODELS ] = trap_R_RegisterModel( str );
+		// A "characters/<name>/tag" model slot is not a real model — it is the creature
+		// render-identity data channel (a behavior monster's modelindex2 carries it so
+		// the client can derive the character slug; see cg_creature.c). Skip registering
+		// it: there is no such file, so trap_R_RegisterModel would only fire futile
+		// per-format load probes (and warnings) every map. cgs.gameModels[] for this slot
+		// stays 0, which nothing renders — the slug is read from the configstring string.
+		if ( !CG_IsCreatureTagModel( str ) ) {
+			cgs.gameModels[ num-CS_MODELS ] = trap_R_RegisterModel( str );
+		}
 	} else if ( num >= CS_SOUNDS && num < CS_SOUNDS+MAX_SOUNDS ) {
 		if ( str[0] != '*' ) {	// player specific sounds don't register here
 			cgs.gameSounds[ num-CS_SOUNDS] = trap_S_RegisterSound( str, qfalse );
@@ -410,7 +487,29 @@ static void CG_ConfigStringModified( void ) {
 		bd->type = atoi( str );
 		sep = strchr( str, '\\' );
 		if ( sep ) {
-			Q_strncpyz( bd->targetName, sep + 1, sizeof( bd->targetName ) );
+			// Copy the display name up to the NEXT separator, not to the end of
+			// the string.
+			//
+			// LATENT-DEFECT FIX, independent of any particular writer. These
+			// fields are positional, and the old code copied the whole remainder,
+			// so the moment this configstring carried a third field the display
+			// name silently absorbed it. The failure mode is invisible — no parse
+			// error, just wrong 3D text above the bot's head — and ANY future
+			// writer that appends would trigger it, not one specific change.
+			// Bounding the read here makes appending safe by construction, which
+			// is also why no format version is needed: a reader that wants only
+			// the leading fields keeps working whatever follows them.
+			const char *end = strchr( sep + 1, '\\' );
+			if ( end ) {
+				int len = (int)( end - ( sep + 1 ) );
+				if ( len >= (int)sizeof( bd->targetName ) ) {
+					len = (int)sizeof( bd->targetName ) - 1;
+				}
+				memcpy( bd->targetName, sep + 1, len );
+				bd->targetName[len] = '\0';
+			} else {
+				Q_strncpyz( bd->targetName, sep + 1, sizeof( bd->targetName ) );
+			}
 		} else {
 			bd->targetName[0] = '\0';
 		}
@@ -418,6 +517,8 @@ static void CG_ConfigStringModified( void ) {
 	} else if ( num >= CS_LIGHTSTYLES && num < CS_LIGHTSTYLES + CS_MAX_LIGHTSTYLES ) {
 		int style = num - CS_LIGHTSTYLES; /* 0-63 directly */
 		trap_R_SetLightstylePattern( style, str );
+	} else if ( num == CS_OBJECTIVES ) {
+		CG_ParseObjectives( str );
 	}
 }
 
@@ -509,7 +610,6 @@ static void CG_MapRestart( void ) {
 	}
 
 	CG_InitLocalEntities();
-	CG_InitMarkPolys();
 	CG_ClearParticles ();
 
 	// make sure the "3 frags left" warnings play again
@@ -938,6 +1038,37 @@ static void CG_ServerCommand( void ) {
 
 	if ( !strcmp( cmd, "cp" ) ) {
 		CG_CenterPrint( CG_Argv(1), 144, BIGCHAR_WIDTH );
+		return;
+	}
+
+	// Cinematic crossing (game-side playscene/stopscene verbs → here). The scene
+	// definition (splines/events) lives in scripts/scene/<name>.lua and loads via
+	// trap_WiredSceneLoad; the command string carries only the scene name and the
+	// live entity numbers to bind to the scene's look-at target slots (positional).
+	//   scene <name> [actorNum ...]   load + play, binding actors
+	//   scene stop                    end the running cutscene
+	// NB: "stop" is a reserved sub-command, so `stop` is not a playable scene name
+	// (a scripts/scene/stop.lua could not be reached through this crossing).
+	if ( !strcmp( cmd, "scene" ) ) {
+		const char *name = CG_Argv(1);
+		if ( !name[0] || !strcmp( name, "stop" ) ) {
+			cg.scenePlayback.active = 0;   // hard cut (same as scenestop)
+			return;
+		}
+		{
+			char  path[MAX_QPATH];
+			int   actors[WIRED_MAX_SCENE_TARGETS];
+			int   nActors = 0;
+			int   argc = trap_Argc();
+			int   i;
+			for ( i = 2; i < argc && nActors < WIRED_MAX_SCENE_TARGETS; i++ ) {
+				int e = atoi( CG_Argv( i ) );
+				// clamp a bad entity number to "unbound" (-1) rather than wedge
+				actors[nActors++] = ( e >= 0 && e < MAX_GENTITIES ) ? e : -1;
+			}
+			Com_sprintf( path, sizeof( path ), "scripts/scene/%s.lua", name );
+			CG_SceneLoadAndStart( path, nActors ? actors : NULL, nActors );
+		}
 		return;
 	}
 

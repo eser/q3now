@@ -30,7 +30,7 @@ typedef enum {
 typedef enum {
 	RAL_POLYGON_FILL,
 	RAL_POLYGON_LINE,
-	RAL_POLYGON_POINT   // Phase 7.4c-pipeline (§17.8 gap #3) — Q3's TYPE_DOT shader. WebGPU lacks polygon-mode point; backends without it should fall back to RAL_TOPOLOGY_POINT_LIST.
+	RAL_POLYGON_POINT   // Q3's TYPE_DOT shader. WebGPU lacks polygon-mode point; backends without it should fall back to RAL_TOPOLOGY_POINT_LIST.
 } ralPolygonMode_t;
 typedef enum { RAL_CULL_NONE, RAL_CULL_FRONT, RAL_CULL_BACK } ralCullMode_t;
 typedef enum { RAL_FRONT_FACE_CCW, RAL_FRONT_FACE_CW } ralFrontFace_t;
@@ -46,7 +46,7 @@ typedef enum {
 	RAL_BLEND_ONE_MINUS_SRC_ALPHA,
 	RAL_BLEND_DST_ALPHA,
 	RAL_BLEND_ONE_MINUS_DST_ALPHA,
-	RAL_BLEND_SRC_ALPHA_SATURATE   // Phase 7.4c-pipeline (§17.8 gap #2) — Q3 GLS_SRCBLEND_ALPHA_SATURATE → particle anti-aliased point sprites.
+	RAL_BLEND_SRC_ALPHA_SATURATE   // Q3 GLS_SRCBLEND_ALPHA_SATURATE → particle anti-aliased point sprites.
 } ralBlendFactor_t;
 
 typedef enum {
@@ -88,7 +88,7 @@ typedef struct {
 	uint32_t         writeMask;        // RAL_COLOR_WRITE_*
 } ralColorBlendAttachment_t;
 
-// Phase 7.4c-pipeline (§17.8 gap #1) — stencil op detail. v1 deferred this;
+// stencil op detail. v1 deferred this;
 // q3now's stencil-shadow-volume passes (SHADOW_EDGES + SHADOW_FS_QUAD per
 // §17.6.d) need full front/back-face state. Backends map directly:
 // Vulkan VkStencilOp / Metal MTLStencilOperation / WebGPU GPUStencilOperation
@@ -119,8 +119,8 @@ typedef struct {
 	qboolean             depthWriteEnable;
 	ralCompareOp_t       depthCompareOp;
 	qboolean             stencilTestEnable;
-	ralStencilOpState_t  stencilFront;       // Phase 7.4c-pipeline — only consulted when stencilTestEnable == qtrue.
-	ralStencilOpState_t  stencilBack;        // Phase 7.4c-pipeline — set equal to stencilFront for two-sided same-op.
+	ralStencilOpState_t  stencilFront;       // only consulted when stencilTestEnable == qtrue.
+	ralStencilOpState_t  stencilBack;        // set equal to stencilFront for two-sided same-op.
 } ralDepthStencilState_t;
 
 typedef struct {
@@ -132,7 +132,7 @@ typedef struct {
 	float            depthBiasSlope;
 	float            depthBiasClamp;
 	qboolean         depthClampEnable;
-	float            lineWidth;              // Phase 7.4c-pipeline (§17.8 gap #4) — 0.0f → 1.0f; > 1.0 requires backend wideLines support (Vulkan) and is silently clamped to 1.0 on WebGPU.
+	float            lineWidth;              // 0.0f → 1.0f; > 1.0 requires backend wideLines support (Vulkan) and is silently clamped to 1.0 on WebGPU.
 } ralRasterState_t;
 
 // Specialization constant override (§8.4). v1 treats every constant as a
@@ -180,7 +180,7 @@ typedef struct {
 	const ralSpecConstant_t    *specConstants;
 	uint32_t                    numSpecConstants;
 
-	// Phase 7.4c-submit-A3 — optional caller-provided pipeline layout. When
+	// optional caller-provided pipeline layout. When
 	// non-NULL, Ral_CreateGraphicsPipeline reuses this layout (via
 	// `externalLayout->vkHandle`) instead of building a fresh one through the
 	// backend's layoutCache from bindGroupLayouts + pushConstantSize/Stages.
@@ -193,7 +193,7 @@ typedef struct {
 	// compatible with descriptor-set binds recorded on that buffer).
 	ralPipelineLayout_t        *externalLayout;
 
-	// Phase 7.4c-submit-A3 — optional caller-provided VkRenderPass. When
+	// optional caller-provided VkRenderPass. When
 	// non-NULL, the pipeline is created with a legacy VkRenderPass + subpass
 	// instead of VkPipelineRenderingCreateInfo (dynamic rendering). Required
 	// when the consumer binds the pipeline inside a vkCmdBeginRenderPass
@@ -203,6 +203,15 @@ typedef struct {
 	// as a typed `ralRenderPass_t *` wrapper; backend extracts vkHandle.
 	ralRenderPass_t            *externalRenderPass;
 	uint32_t                    externalSubpass;        // 0 by default
+
+	// Optional per-pipeline variable-rate shading. Default RAL_SHADING_RATE_1x1
+	// (== 0, so a zero-initialized create-info is unchanged): the pipeline runs one
+	// fragment-shader invocation per pixel exactly as before. A coarser rate is
+	// attached (VkPipelineFragmentShadingRateStateCreateInfoKHR) ONLY when the rate
+	// is non-1x1 AND the backend reports caps.variableRateShading; otherwise it is
+	// silently ignored (1x1). The consumer must restrict coarse rates to
+	// readability-safe passes (low-frequency post-process) — never HUD / world / text.
+	ralFragmentShadingRate_t    shadingRate;
 
 	const char                 *debugName;
 } ralGraphicsPipelineCreateInfo_t;
@@ -222,7 +231,7 @@ typedef struct {
 	const ralSpecConstant_t    *specConstants;
 	uint32_t                    numSpecConstants;
 
-	ralPipelineLayout_t        *externalLayout;     // Phase 7.4c-submit-A3 — see graphics variant docblock above
+	ralPipelineLayout_t        *externalLayout;     // see graphics variant docblock above
 
 	const char                 *debugName;
 } ralComputePipelineCreateInfo_t;
@@ -237,7 +246,7 @@ void Ral_DestroyPipeline( ralPipeline_t *p );
 void Ral_SavePipelineCache( ralBackend_t *b, const char *path );
 void Ral_LoadPipelineCache( ralBackend_t *b, const char *path );
 
-// Phase 7.4c-pipeline-followup-5 PART 3 — pipeline-layout cache observability.
+// pipeline-layout cache observability.
 // SlotCount: read-only accessor for the high-water slot index. Consumers can
 // branch on >0 / read in summary lines.
 // DumpToLog: prints the per-slot state via ri.Log (SEV_INFO). Backend stays

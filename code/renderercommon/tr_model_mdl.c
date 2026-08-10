@@ -20,6 +20,9 @@ MDL format reference: FTEQW engine/client/modelgen.h (ALIAS_VERSION 6).
 #include "tr_public.h"
 #include "tr_model_mdl.h"
 #include "r_q1_texture.h"
+#include "r_log.h"                /* rilog-channel-mechanism Turn B — renderer.assets */
+
+R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 
 /* bytedirs[NUMVERTEXNORMALS] — declared in q_shared.h, defined in q_math.c */
 
@@ -104,6 +107,12 @@ qboolean MDL_BuildMD3Buffer( const void *buffer, int filesize,
     static float s_bmin[MD3_MAX_FRAMES][3];
     static float s_bmax[MD3_MAX_FRAMES][3];
 
+    /* Per-frame Q1 name ("stand1", "walk1", ...): carried through to
+       md3Frame_t.name so cgame can derive animation ranges by prefix-grouping
+       (the Q1-monster animation path, mirroring the IQM named-animation query).
+       The MDL frame name[16] and md3Frame_t.name[16] are the same width. */
+    static char s_frameName[MD3_MAX_FRAMES][16];
+
     /* MDL on-disk data buffers */
     static mdl_stvert_t    s_stverts[MD3_MAX_VERTS];
     static mdl_triangle_t  s_tris[MD3_MAX_TRIANGLES];
@@ -120,14 +129,14 @@ qboolean MDL_BuildMD3Buffer( const void *buffer, int filesize,
 
     /* ---- Validate header ---- */
     if ( filesize < (int)sizeof( dmdl_t ) ) {
-        ri.Log( SEV_WARN, "%s: %s too small for MDL header\n", __func__, modName );
+        R_LOG( rch_assets, SEV_WARN, "%s: %s too small for MDL header\n", __func__, modName );
         return qfalse;
     }
 
     phdr = (const dmdl_t *)p;
     if ( LittleLong( phdr->ident )   != MDL_IDENT  ||
          LittleLong( phdr->version ) != MDL_VERSION ) {
-        ri.Log( SEV_WARN, "%s: %s: bad MDL ident/version\n", __func__, modName );
+        R_LOG( rch_assets, SEV_WARN, "%s: %s: bad MDL ident/version\n", __func__, modName );
         return qfalse;
     }
 
@@ -148,7 +157,7 @@ qboolean MDL_BuildMD3Buffer( const void *buffer, int filesize,
          numverts   < 1 || numverts   > MD3_MAX_VERTS     ||
          numtris    < 1 || numtris    > MD3_MAX_TRIANGLES ||
          numframes  < 1 || numframes  > MD3_MAX_FRAMES ) {
-        ri.Log( SEV_WARN, "%s: %s out-of-range MDL counts\n", __func__, modName );
+        R_LOG( rch_assets, SEV_WARN, "%s: %s out-of-range MDL counts\n", __func__, modName );
         return qfalse;
     }
 
@@ -187,7 +196,7 @@ qboolean MDL_BuildMD3Buffer( const void *buffer, int filesize,
             /* upload first frame only */
             if ( p + skinpixels > pEnd ) goto trunc;
             if ( numValidSkins < MD3_MAX_SHADERS ) {
-                ri.Log( SEV_WARN, "%s: %s skin %d is a group; using first frame\n",
+                R_LOG( rch_assets, SEV_WARN, "%s: %s skin %d is a group; using first frame\n",
                         __func__, modName, i );
                 Com_sprintf( s_skinName[numValidSkins], MAX_QPATH,
                              "*mdl_%.48s_skin%d", baseName, numValidSkins );
@@ -203,7 +212,7 @@ qboolean MDL_BuildMD3Buffer( const void *buffer, int filesize,
     }
 
     if ( numValidSkins == 0 ) {
-        ri.Log( SEV_WARN, "%s: %s no valid skins\n", __func__, modName );
+        R_LOG( rch_assets, SEV_WARN, "%s: %s no valid skins\n", __func__, modName );
         return qfalse;
     }
 
@@ -274,7 +283,7 @@ qboolean MDL_BuildMD3Buffer( const void *buffer, int filesize,
     }
 
     if ( expandedCount == 0 ) {
-        ri.Log( SEV_WARN, "%s: %s no expanded verts\n", __func__, modName );
+        R_LOG( rch_assets, SEV_WARN, "%s: %s no expanded verts\n", __func__, modName );
         return qfalse;
     }
 
@@ -299,8 +308,13 @@ qboolean MDL_BuildMD3Buffer( const void *buffer, int filesize,
         p += 4;
 
         if ( frametype == ALIAS_FRAME_SINGLE ) {
-            /* Skip daliasframe_t: bboxmin(4) + bboxmax(4) + name[16] */
+            /* daliasframe_t: bboxmin(4) + bboxmax(4) + name[16]. Capture the name
+               (for animation-range derivation) before stepping past it. */
             if ( p + (int)sizeof( mdl_aliasframe_t ) > pEnd ) goto trunc;
+            if ( totalFrames < MD3_MAX_FRAMES ) {
+                Q_strncpyz( s_frameName[totalFrames],
+                    ((const mdl_aliasframe_t *)p)->name, sizeof( s_frameName[0] ) );
+            }
             p += sizeof( mdl_aliasframe_t );
 
             if ( p + numverts * (int)sizeof( mdl_trivertx_t ) > pEnd ) goto trunc;
@@ -356,6 +370,10 @@ qboolean MDL_BuildMD3Buffer( const void *buffer, int filesize,
 
             for ( j = 0; j < ngroup; j++ ) {
                 if ( p + (int)sizeof( mdl_aliasframe_t ) > pEnd ) goto trunc;
+                if ( totalFrames < MD3_MAX_FRAMES ) {
+                    Q_strncpyz( s_frameName[totalFrames],
+                        ((const mdl_aliasframe_t *)p)->name, sizeof( s_frameName[0] ) );
+                }
                 p += sizeof( mdl_aliasframe_t );
                 if ( p + numverts * (int)sizeof( mdl_trivertx_t ) > pEnd ) goto trunc;
                 if ( totalFrames < MD3_MAX_FRAMES ) {
@@ -401,7 +419,7 @@ qboolean MDL_BuildMD3Buffer( const void *buffer, int filesize,
     }
 
     if ( totalFrames == 0 ) {
-        ri.Log( SEV_WARN, "%s: %s produced no frames\n", __func__, modName );
+        R_LOG( rch_assets, SEV_WARN, "%s: %s produced no frames\n", __func__, modName );
         return qfalse;
     }
 
@@ -440,7 +458,7 @@ qboolean MDL_BuildMD3Buffer( const void *buffer, int filesize,
 
         blob = (byte *)ri.Malloc( totalSz );
         if ( !blob ) {
-            ri.Log( SEV_WARN, "%s: out of memory for %s\n", __func__, modName );
+            R_LOG( rch_assets, SEV_WARN, "%s: out of memory for %s\n", __func__, modName );
             return qfalse;
         }
         memset( blob, 0, totalSz );
@@ -480,6 +498,9 @@ qboolean MDL_BuildMD3Buffer( const void *buffer, int filesize,
             dz = s_bmax[f][2] - cz;
             r  = (float)sqrt( (double)( dx*dx + dy*dy + dz*dz ) );
             mframe->radius = LittleFloat( r );
+            /* Carry the Q1 frame name so cgame can derive animation ranges by
+               prefix-grouping (mirrors the IQM named-animation query). */
+            Q_strncpyz( mframe->name, s_frameName[f], sizeof( mframe->name ) );
         }
 
         /* -- Surface header -- */
@@ -541,6 +562,56 @@ qboolean MDL_BuildMD3Buffer( const void *buffer, int filesize,
     return qtrue;
 
 trunc:
-    ri.Log( SEV_WARN, "%s: %s truncated MDL data\n", __func__, modName );
+    R_LOG( rch_assets, SEV_WARN, "%s: %s truncated MDL data\n", __func__, modName );
     return qfalse;
 }
+
+/*
+==================
+MDL_DeriveAnimRanges
+
+Group contiguous same-label frames into animation ranges. The implementation is
+pure (only <string.h> + the mdlAnimRange_t struct — no renderer state), so it lives
+in the header tr_model_mdl_anim.h and is shared verbatim with the unit test. See
+that header for the algorithm rationale (id's letter-before-digit convention).
+==================
+*/
+#define MDL_ANIM_IMPL 1
+#include "tr_model_mdl_anim.h"
+
+#if 0  /* the derivation now lives in tr_model_mdl_anim.h (shared with the test) */
+int MDL_DeriveAnimRanges( const char (*frameNames)[16], int numFrames,
+                          mdlAnimRange_t *out, int maxOut ) {
+    int  i, count = 0;
+    char prevLabel[16];
+    char curLabel[16];
+
+    prevLabel[0] = '\0';
+
+    for ( i = 0; i < numFrames; i++ ) {
+        MDL_StripLabel( frameNames[i], curLabel, sizeof( curLabel ) );
+
+        /* An empty label (an unnamed frame) does not extend or open a range. */
+        if ( curLabel[0] == '\0' ) {
+            prevLabel[0] = '\0';
+            continue;
+        }
+
+        if ( count > 0 && strcmp( curLabel, prevLabel ) == 0 ) {
+            /* same label as the open range -> extend it */
+            out[count - 1].num_frames++;
+        } else {
+            /* label changed -> open a new range (if room) */
+            if ( count >= maxOut ) {
+                break;
+            }
+            Q_strncpyz( out[count].label, curLabel, sizeof( out[count].label ) );
+            out[count].first_frame = i;
+            out[count].num_frames  = 1;
+            count++;
+            Q_strncpyz( prevLabel, curLabel, sizeof( prevLabel ) );
+        }
+    }
+    return count;
+}
+#endif  /* moved to tr_model_mdl_anim.h */

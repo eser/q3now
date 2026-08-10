@@ -18,7 +18,6 @@
 
 #include "snd_local.h"
 #include <opus.h>
-/* Phase 5: log channels */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 LOG_DECLARE_CHANNEL( ch_sound, "sound" );
 
@@ -300,7 +299,7 @@ static int S_OpusDecodeFrame( const sfx_t *sc, int frameIdx )
 	decoded = opus_decode( s_opusDecoder, encBuf, frameLen,
 	                       s_opusDecodeBuf, OPUS_INMEM_FRAME_SAMPLES, 0 );
 	if ( decoded < 0 ) {
-		Com_Log( SEV_DEBUG, LOG_CH(ch_sound), S_COLOR_YELLOW "WARNING: opus_decode error %d (frame %d)\n",
+		Com_Log( SEV_WARN, LOG_CH(ch_sound), "WARNING: opus_decode error %d (frame %d)\n",
 		             decoded, frameIdx );
 		s_opusDecodeBufValid = 0;
 		return 0;

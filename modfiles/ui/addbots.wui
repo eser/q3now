@@ -1,0 +1,97 @@
+// addbots.wui -- q3now Add Bot dialog (Phase 5b canonical)
+//
+// In-game cluster: reached from the ingame escape menu hierarchy.
+// Phase 5b §7.4 pattern — centered popup overlay (not the §6.1
+// settings hub, since this menu is invoked from an in-game state
+// not the main menu). Shape mirrors specifyserver.wui /
+// serverinfo.wui (centered card with header + content + footer).
+//
+// Form fields: bot name editfield (free-text override) + skill
+// dropdown + team dropdown + 5 quick-add buttons for the canonical
+// q3 bots (Sarge / Keel / Bones / Slash / Doom).
+
+menuDef {
+	name "addbots"
+	layer "popup"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "popup_overlay"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		alignX center
+		alignY center
+		background "layered" effects "vignette"
+
+		itemDef {
+			name "addbots_root"
+			type container
+			rect 0 0 0.4 0.7
+			direction column
+			padding $popup_padding
+			gap $spacing_md
+			background $panel
+			border 1px $line_strong
+			radius $radius_md
+			width PERCENT 0.4
+			height PERCENT 0.75
+
+			itemDef { name "header" type 0 rect 0 0 1 0.06 height FIT text "Add Bot" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
+			itemDef { name "subheader" type 0 rect 0 0 1 0.03 height FIT text "Spawn a CPU opponent on the active server." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+
+			itemDef {
+				name "form_content"
+				type container
+				rect 0 0 1 0.6
+				direction column
+				gap $spacing_sm
+				grow 1
+				height GROW
+				padding 0.005 0.01
+
+				itemDef { name "cat_form_label" type 0 rect 0 0 1 0.025 height FIT text "BOT PROFILE" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+
+				itemDef { name "row_name" type 4 rect 0.005 0 0.95 0.035 height FIXED 36px width PERCENT 0.95 text "Name (override)" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botName" maxChars 32 visible 1 grow 0 }
+				itemDef { name "row_skill" type 12 rect 0.005 0 0.95 0.035 height FIXED 36px width PERCENT 0.95 text "Skill" textalign 0 font $font_sans 13 forecolor $bone cvar "g_skill" cvarFloatList { "I Can Win" 1 "Bring It On" 2 "Hurt Me Plenty" 3 "Hardcore" 4 "Nightmare" 5 } visible 1 grow 0 }
+				itemDef { name "row_team" type segmented rect 0.005 0 0.95 0.035 height FIXED 36px width PERCENT 0.95 text "Team" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botTeam" cvarStrList { "Red" "red" "Blue" "blue" "Free" "free" } visible 1 grow 0 }
+
+				itemDef { name "cat_quick_label" type 0 rect 0 0 1 0.025 height FIT text "QUICK ADD" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+
+				itemDef {
+					name "quick_row_1"
+					type container
+					rect 0 0 1 0.05
+					direction row
+					gap $spacing_sm
+					height FIT
+					padding 0.005 0
+					itemDef { type 1 rect 0 0 0.18 0.04 height FIT text "Sarge" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "addbot Sarge 3" ; close } }
+					itemDef { type 1 rect 0 0 0.18 0.04 height FIT text "Keel" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "addbot Keel 3" ; close } }
+					itemDef { type 1 rect 0 0 0.18 0.04 height FIT text "Bones" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "addbot Bones 3" ; close } }
+					itemDef { type 1 rect 0 0 0.18 0.04 height FIT text "Slash" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "addbot Slash 3" ; close } }
+					itemDef { type 1 rect 0 0 0.18 0.04 height FIT text "Doom" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "addbot Doom 3" ; close } }
+				}
+			}
+
+			itemDef {
+				name "popup_footer"
+				type container
+				rect 0 0 1 0.05
+				direction row
+				gap $spacing_md
+				alignX end
+				height FIT
+
+				itemDef { type 1 rect 0 0 0.20 0.04 height FIT text "Add Custom" textalign 1 font $font_sans_bold 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "addbot $ui_botName $g_skill $ui_botTeam" ; close } }
+				itemDef { type 1 rect 0 0 0.12 0.04 height FIT text "Close" textalign 1 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+			}
+		}
+	}
+
+	onESC { close }
+}

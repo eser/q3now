@@ -87,6 +87,20 @@ they remain `GPL-2.0-or-later`:
   derived from **Spearmint** (Zack Middleton / Spearmint contributors).
 - `code/qcommon/util/md4.c` — MD4 implementation from **Samba**
   (`Copyright (c) 1997-1998 Andrew Tridgell`), GPL-2.0-or-later.
+- `code/cgame/cg_effects.c`, `code/cgame/cg_localents.c`,
+  `code/cgame/cg_weapons.c` — gib fidelity, bounce-mark, and shell-ejection
+  physics adapted from the **better-gibs** mod
+  (`Copyright (c) WofWca <wofwca@protonmail.com>`), GPL-2.0-or-later.
+- `code/game/entities/g_target_q3.c`, `code/game/g_trigger.c` and related
+  spawn-table entries in `code/game/entities/g_spawn.c` — map-entity logic
+  adapted from the **EntityPlus** single-player map-scripting mod (QIIIA /
+  id-Tech-3 derived, by the EntityPlus contributors), GPL-2.0-or-later. The
+  adapted entities are `target_music` (runtime CS_MUSIC switch) and
+  `trigger_lock` (standalone keyed gate), alongside the earlier arena picks
+  `target_logic`, `func_breakable`, `target_gravity` / `target_playerspeed` /
+  `target_playerstats`, `trigger_frag` / `trigger_death`, and
+  `target_unlink` / `target_modify`. Logic was re-implemented against q3now's
+  `SP_q3_*` convention and existing fields/ABI, not pasted verbatim.
 
 Other in-tree files are third-party code under **non-GPL** licenses; see
 §4 below and the `SPDX-License-Identifier` tag in each such file. Notable ones:
@@ -127,7 +141,7 @@ launcher's per-user `settings.json`.
 
 After download, `assets import` extracts the bundle to
 `~/wired${channel}/downloaded/id-quakepack/` and converts the contained
-PAKs into q3now's `.sw3z` format under `~/wired${channel}/baseq3/`.
+PAKs into q3now's `.sw3z` format under `~/wired${channel}/base/`.
 
 The bundle aggregates content from several distinct copyright holders. Each
 is enumerated below with its origin, license/permission status, and what
@@ -747,6 +761,24 @@ The file carries `SPDX-License-Identifier: MIT` and the Khronos copyright line.
 
 These headers carry `SPDX-License-Identifier: LicenseRef-public-domain`.
 
+### 4.9 Clay — single-header layout engine
+
+- **Upstream:** https://github.com/nicbarker/clay
+- **License:** zlib/libpng (see Appendix D)
+- **Path:** `src/libs/clay/clay.h`
+- **Version:** v0.14 (vendored 2026-05-23)
+- **Copyright:** `Copyright (c) 2024 Nic Barker`
+
+Clay is a small flexbox / hit-test / render-command-array layout engine used
+internally by the WiredUI compositor (per `docs/wiredui-compositor-spec.md`).
+The header is vendored byte-identical to the upstream `v0.14` tag; the
+upstream zlib-style permission notice is preserved verbatim at the bottom of
+`clay.h` (lines 4369–4393). Wired adds no copyright header — the file is
+treated like other vendored single-headers (e.g. `code/client/miniaudio.h`).
+
+The Wired source tree references Clay only from the client target's include
+path; no renderer DLL, server, dedicated, or VM consumes it.
+
 ---
 
 ## 5. Build & development tooling
@@ -912,17 +944,21 @@ atlas outputs inherit each source font's license.
   | `oxanium*` | Oxanium by Sherif Magdy | SIL Open Font License 1.1 |
   | `sansman-*` | Sansman by Manuel Guerrero | (verify upstream — likely SIL OFL or CC-BY) |
   | `sharetechmono` | Share Tech Mono by Carrois Apostrophe | SIL Open Font License 1.1 |
+  | `jetbrainsmono` | JetBrains Mono by The JetBrains Mono Project Authors | SIL Open Font License 1.1 |
 
   Per SIL OFL 1.1, the font copyright notices and license must be included
   in the documentation accompanying any package that includes the font.
   When q3now ships a release artifact containing the baked atlas PNG/JSON,
   this section satisfies that obligation. The full SIL OFL 1.1 text is
-  available at https://scripts.sil.org/OFL_web .
+  available at https://scripts.sil.org/OFL_web . The JetBrains Mono OFL
+  notice ships verbatim alongside its source TTF at
+  `tools/msdf/fonts/OFL-JetBrainsMono.txt`.
 
   If you redistribute q3now and want to verify the font licenses
   authoritatively, check the source TTF/OTF files at the upstream font
-  repositories (Oxanium and Share Tech Mono are both on Google Fonts /
-  fonts.google.com under SIL OFL 1.1).
+  repositories (Oxanium, Share Tech Mono, and JetBrains Mono are all on
+  Google Fonts / fonts.google.com under SIL OFL 1.1; JetBrains Mono is
+  also at https://github.com/JetBrains/JetBrainsMono ).
 
 ---
 
