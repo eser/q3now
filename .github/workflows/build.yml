@@ -24,8 +24,8 @@ on:
         default: ''
         type: string
 
-env:
-  WASI_SDK_VERSION: "32"
+# wasi-sdk version pin lives in .wasi-sdk-version (single source, shared with
+# the Dockerfile and WASM.md) — each install step reads it from the checkout.
 
 jobs:
   prepare:
@@ -54,11 +54,12 @@ jobs:
             exit 1
           fi
 
-      - name: Create and push tag
-        if: github.event.inputs.version != ''
-        run: |
-          git tag "${{ github.event.inputs.version }}"
-          git push origin "${{ github.event.inputs.version }}"
+      # NOTE: the tag is deliberately NOT created here. It used to be tagged
+      # and pushed before anything was built, so a failed release build left a
+      # dangling tag on origin and retrying the same version required a
+      # delete-release round-trip. The release action in each build job
+      # (softprops/action-gh-release with tag_name) creates the tag on the
+      # first successful upload instead — no build, no tag.
 
   lint:
     name: Lint (clang-tidy + clang-format)
@@ -92,11 +93,7 @@ jobs:
 
     - name: Configure (generate compile_commands.json)
       run: |
-        cmake -B build/lint -G Ninja \
-          -DCMAKE_BUILD_TYPE=Debug \
-          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-          -DUSE_WASM=OFF \
-          -DBUILD_GAME_LIBRARIES=ON
+        cmake --preset lint
         cp build/lint/compile_commands.json .
 
     # PR mode: changed-files-only — fast feedback, also matches the
@@ -159,10 +156,6 @@ jobs:
         fetch-depth: 0
         submodules: recursive
 
-    - name: Fetch release tag
-      if: needs.prepare.outputs.is_release == 'true'
-      run: git fetch --tags
-
     - uses: actions/setup-go@v5
       with:
         go-version: '1.26.1'
@@ -193,6 +186,7 @@ jobs:
 
     - name: Install wasi-sdk
       run: |
+        WASI_SDK_VERSION=$(cat .wasi-sdk-version)
         curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux.tar.gz" \
           | sudo tar xz -C /opt
         sudo ln -sf /opt/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux /opt/wasi-sdk
@@ -201,7 +195,9 @@ jobs:
       run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
     - name: Build and package
-      run: make release CHANNEL=public Q3DIR=${{ runner.temp }}/q3now WAILS_TAGS="-tags webkit2_41"
+      env:
+        RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      run: make release CHANNEL=public Q3DIR=${{ runner.temp }}/q3now WAILS_TAGS="-tags webkit2_41" ${RELEASE_VERSION:+VERSION=$RELEASE_VERSION}
 
     - uses: actions/upload-artifact@v4
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'
@@ -232,10 +228,6 @@ jobs:
         fetch-depth: 0
         submodules: recursive
 
-    - name: Fetch release tag
-      if: needs.prepare.outputs.is_release == 'true'
-      run: git fetch --tags
-
     - uses: actions/setup-go@v5
       with:
         go-version: '1.26.1'
@@ -246,10 +238,14 @@ jobs:
         node-version: '25.8.0'
 
     - name: Install system dependencies
-      run: brew install cmake ninja sdl3 molten-vk create-dmg opus opusfile
+      # openssl@3 is a hard configure requirement (picoquic TLS); listed
+      # explicitly even though runners preinstall it, so the dependency is
+      # visible and survives a runner-image change.
+      run: brew install cmake ninja sdl3 molten-vk openssl@3 create-dmg opus opusfile
 
     - name: Install wasi-sdk
       run: |
+        WASI_SDK_VERSION=$(cat .wasi-sdk-version)
         curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-arm64-macos.tar.gz" \
           | sudo tar xz -C /opt
         sudo ln -sf /opt/wasi-sdk-${WASI_SDK_VERSION}.0-arm64-macos /opt/wasi-sdk
@@ -258,7 +254,9 @@ jobs:
       run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
     - name: Build and package
-      run: make release CHANNEL=public Q3DIR=${{ runner.temp }}/q3now.app
+      env:
+        RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      run: make release CHANNEL=public Q3DIR=${{ runner.temp }}/q3now.app ${RELEASE_VERSION:+VERSION=$RELEASE_VERSION}
 
     - uses: actions/upload-artifact@v4
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'
@@ -321,6 +319,7 @@ jobs:
     - name: Install wasi-sdk
       shell: pwsh
       run: |
+        $env:WASI_SDK_VERSION = (Get-Content .wasi-sdk-version -Raw).Trim()
         $url = "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-$env:WASI_SDK_VERSION/wasi-sdk-$env:WASI_SDK_VERSION.0-x86_64-windows.tar.gz"
         $archive = "$env:RUNNER_TEMP\wasi-sdk.tar.gz"
         Invoke-WebRequest -Uri $url -OutFile $archive
@@ -352,7 +351,8 @@ jobs:
       run: |
         export PATH="${{ runner.temp }}/msys64/mingw64/bin:$PATH"
         WASI_HOME="${USERPROFILE//\\//}/wasi-sdk"
-        make release CHANNEL=public Q3DIR=dist/q3now WASI_SDK_PATH="$WASI_HOME"
+        RELEASE_VERSION="${{ needs.prepare.outputs.version }}"
+        make release CHANNEL=public Q3DIR=dist/q3now WASI_SDK_PATH="$WASI_HOME" ${RELEASE_VERSION:+VERSION=$RELEASE_VERSION}
 
     - uses: actions/upload-artifact@v4
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'
@@ -384,10 +384,6 @@ jobs:
       with:
         fetch-depth: 0
         submodules: recursive
-
-    - name: Fetch release tag
-      if: needs.prepare.outputs.is_release == 'true'
-      run: git fetch --tags
 
     - name: Docker meta
       id: meta
