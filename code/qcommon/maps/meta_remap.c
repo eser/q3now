@@ -88,7 +88,7 @@ void Remap_Add( remap_table_t *t, const char *src, const char *dst ) {
 	Q_strncpyz( e->src, src, sizeof( e->src ) );
 	Q_strncpyz( e->dst, dst, sizeof( e->dst ) );
 
-	unsigned int slot = Remap_HashPath( src ) & ( ARRAY_LEN( t->buckets ) - 1 );
+	unsigned int slot = Remap_HashPath( src ) & ( META_REMAP_BUCKETS - 1 );
 	e->next = t->buckets[slot];
 	t->buckets[slot] = e;
 	t->count++;
@@ -96,7 +96,7 @@ void Remap_Add( remap_table_t *t, const char *src, const char *dst ) {
 
 const char *Remap_Lookup( const remap_table_t *t, const char *src ) {
 	if ( !t || !src || !*src ) return NULL;
-	unsigned int slot = Remap_HashPath( src ) & ( ARRAY_LEN( t->buckets ) - 1 );
+	unsigned int slot = Remap_HashPath( src ) & ( META_REMAP_BUCKETS - 1 );
 	for ( const remap_entry_t *e = t->buckets[slot]; e; e = e->next ) {
 		if ( !Q_stricmp( e->src, src ) ) {
 			return e->dst;
