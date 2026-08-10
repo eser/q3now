@@ -15,7 +15,7 @@
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── Stage 1: Builder ────────────────────────────────────────────────────────
-FROM debian:bookworm-slim AS builder
+FROM debian:trixie-slim AS builder
 
 # wasi-sdk version is single-sourced from .wasi-sdk-version at the repo root —
 # CI, this Dockerfile and the docs all read the same pin (they had drifted:
@@ -81,7 +81,7 @@ RUN ARCH=$(uname -m) && \
     cp "build/wired-headless${BINEXT}" /tmp/wired-headless
 
 # ── Stage 2: Runtime ────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libssl3 \

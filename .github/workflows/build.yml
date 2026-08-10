@@ -76,9 +76,15 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get -qq update
+        # The X11/Wayland dev set mirrors the Linux build job: SDL3's source
+        # configure refuses a video-less desktop build without it.
         sudo apt-get -y install cmake ninja-build clang-tidy clang-format \
           libssl-dev libopus-dev libopusfile-dev \
-          libasound-dev mesa-common-dev libegl-dev libgbm-dev libdrm-dev
+          libasound-dev mesa-common-dev libegl-dev libgbm-dev libdrm-dev \
+          libxxf86dga-dev libxrandr-dev libxxf86vm-dev libxss-dev \
+          libxcursor-dev libxi-dev libxinerama-dev libxfixes-dev \
+          libxkbcommon-dev libwayland-dev libdecor-0-dev \
+          libpipewire-0.3-dev libpulse-dev
 
     - name: Install SDL3
       run: |

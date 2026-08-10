@@ -469,10 +469,19 @@ FUNCTION(WIRED_APPLY_SUBMODULE_PATCHES _label _submodule_dir _patch_dir)
 		RETURN()
 	ENDIF()
 	IF(NOT EXISTS "${CMAKE_SOURCE_DIR}/${_submodule_dir}/.git")
-		MESSAGE(FATAL_ERROR
-			"${_label}: ${_patch_dir} carries patches, but the submodule "
-			"${_submodule_dir} is not checked out.\n"
-			"Run:  git submodule update --init --recursive")
+		# Two distinct cases share this shape. A submodule that was never
+		# checked out has NO source files either — fatal, tell the user to
+		# init. A Docker build context has the FILES but not the .git
+		# metadata (.dockerignore strips it) — proceed: `git apply` operates
+		# fine on plain directories outside a repository.
+		IF(NOT EXISTS "${CMAKE_SOURCE_DIR}/${_submodule_dir}/CMakeLists.txt"
+		   AND NOT EXISTS "${CMAKE_SOURCE_DIR}/${_submodule_dir}/Makefile")
+			MESSAGE(FATAL_ERROR
+				"${_label}: ${_patch_dir} carries patches, but the submodule "
+				"${_submodule_dir} is not checked out.\n"
+				"Run:  git submodule update --init --recursive")
+		ENDIF()
+		MESSAGE(STATUS "${_label}: no .git metadata (container build context) — applying patches to the plain tree")
 	ENDIF()
 	FIND_PROGRAM(_GIT_EXE git REQUIRED)
 	LIST(SORT _patches)
@@ -907,6 +916,11 @@ SET(RAL_VK_SRCS
 	${RAL_VK_DIR}/ral_vulkan_query.c
 )
 ADD_LIBRARY(ral_vulkan STATIC ${RAL_VK_SRCS})
+# This archive is force-loaded into the renderer SHARED library, so its
+# objects must be PIC. macOS compiles everything PIC by default, which is
+# why this was invisible locally — Linux ld fails the .so link without it
+# ("recompile with -fPIC", first caught by the branch's first CI run).
+SET_TARGET_PROPERTIES(ral_vulkan PROPERTIES POSITION_INDEPENDENT_CODE ON)
 TARGET_INCLUDE_DIRECTORIES(ral_vulkan PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderercommon
