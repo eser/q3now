@@ -1377,9 +1377,21 @@ IF(APPLE)
 	SET_TARGET_PROPERTIES(${CNAME}${BINEXT} PROPERTIES
 		XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_SOURCE_DIR}/misc/macos/wired.entitlements"
 	)
-	# rpath: find bundled dylibs (SDL3, MoltenVK) in the same dir as the executable
-	SET(CMAKE_INSTALL_RPATH "@executable_path")
-	SET(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+	# rpath: find bundled dylibs (SDL3, MoltenVK, libcrypto) in the same dir as
+	# the executable. Must be set as TARGET properties: the CMAKE_INSTALL_RPATH
+	# variable only seeds targets created AFTER it, and both executables already
+	# exist by this point in the file — the variable form was silently a no-op
+	# (verified: the shipped binary's only LC_RPATH was /opt/homebrew/lib).
+	SET_TARGET_PROPERTIES(${CNAME}${BINEXT} PROPERTIES
+		INSTALL_RPATH "@executable_path"
+		BUILD_WITH_INSTALL_RPATH ON
+	)
+	IF(TARGET ${DNAME}${BINEXT})
+		SET_TARGET_PROPERTIES(${DNAME}${BINEXT} PROPERTIES
+			INSTALL_RPATH "@executable_path"
+			BUILD_WITH_INSTALL_RPATH ON
+		)
+	ENDIF()
 ENDIF()
 
 # ─────────────────────────────────────────────────────────────────────
