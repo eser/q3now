@@ -4721,7 +4721,7 @@ void BotDirective_IssueToDirect( bot_state_t *bs,
                                   int issuer_client,
                                   directiveType_t type,
                                   int target_client,
-                                  vec3_t area_origin ) {
+                                  const vec3_t area_origin ) {
     botDirective_t *d   = &bs->directives.tactical;
     float           now = FloatTime();
 
