@@ -10,6 +10,7 @@
 
 #include "crash.h"
 #include "vm_local.h"
+#include "wired/wired_build_stamp.h"  // build identity embedded in crash reports
 
 #include <stdio.h>
 #include <string.h>
