@@ -10,6 +10,7 @@ on:
   push:
     branches:
       - main
+      - 'refactor/**'
     paths-ignore:
       - '**.md'
       - '*.txt'
@@ -77,6 +78,17 @@ jobs:
         sudo apt-get -y install cmake ninja-build clang-tidy clang-format \
           libcurl4-openssl-dev libopus-dev libopusfile-dev \
           libasound-dev mesa-common-dev libegl-dev libgbm-dev libdrm-dev
+
+    - name: Install SDL3
+      run: |
+        # find_package(SDL3 REQUIRED) — not in Ubuntu 24.04 repos, build from
+        # source, pinned to the release the project builds against locally.
+        git clone --depth 1 --branch release-3.4.14 \
+          https://github.com/libsdl-org/SDL.git /tmp/SDL3
+        cmake -S /tmp/SDL3 -B /tmp/SDL3/build -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+        cmake --build /tmp/SDL3/build --parallel
+        sudo cmake --install /tmp/SDL3/build
 
     - name: Configure (generate compile_commands.json)
       run: |
@@ -170,8 +182,10 @@ jobs:
           libpipewire-0.3-dev libpulse-dev libegl-dev libdrm-dev libgbm-dev \
           libwebkit2gtk-4.1-dev libgtk-3-dev \
           libopus-dev libopusfile-dev
-        # SDL3 is not in Ubuntu 24.04 repos — build from source
-        git clone --depth 1 https://github.com/libsdl-org/SDL.git /tmp/SDL3
+        # SDL3 is not in Ubuntu 24.04 repos — build from source, pinned to the
+        # release the project builds against locally (was: unpinned HEAD).
+        git clone --depth 1 --branch release-3.4.14 \
+          https://github.com/libsdl-org/SDL.git /tmp/SDL3
         cmake -S /tmp/SDL3 -B /tmp/SDL3/build -G Ninja \
           -DCMAKE_BUILD_TYPE=Release -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
         cmake --build /tmp/SDL3/build --parallel
@@ -301,6 +315,7 @@ jobs:
           mingw-w64-x86_64-opus
           mingw-w64-x86_64-opusfile
           mingw-w64-x86_64-pkg-config
+          mingw-w64-x86_64-sdl3
         path-type: inherit
 
     - name: Install wasi-sdk
