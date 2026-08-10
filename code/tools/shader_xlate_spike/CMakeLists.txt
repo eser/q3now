@@ -9,7 +9,7 @@
 #   ninja -C build/shader_xlate_spike
 #   build/shader_xlate_spike/shader_xlate_spike <some.spv> [outdir]
 #
-# Builds SPIRV-Cross (vendored at code/libs/SPIRV-Cross/) as static libs and
+# Builds SPIRV-Cross (vendored at src/libs/SPIRV-Cross/) as static libs and
 # links shader_xlate_spike against spirv-cross-{core,glsl,msl}. CLI / tests /
 # HLSL / C-API of SPIRV-Cross are turned off — only what the spike needs.
 
@@ -26,7 +26,9 @@ endif()
 # which 4.x accepts but warns about; pin a floor so the build is quiet.
 set(CMAKE_POLICY_VERSION_MINIMUM 3.10 CACHE STRING "" FORCE)
 
-set(SPIRV_CROSS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../libs/SPIRV-Cross" CACHE PATH
+# Points at the engine's single vendored copy under src/libs/ — the spike used
+# to carry its own byte-identical 3.2MB duplicate under code/libs/.
+set(SPIRV_CROSS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../src/libs/SPIRV-Cross" CACHE PATH
 	"Vendored SPIRV-Cross tree")
 if(NOT EXISTS "${SPIRV_CROSS_DIR}/CMakeLists.txt")
 	message(FATAL_ERROR

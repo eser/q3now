@@ -426,12 +426,12 @@ Four separate libraries from Xiph.Org, all under BSD-3-Clause
 - **Path:** `src/libs/ogg/`
 - **Copyright:** `Copyright (c) 2002, Xiph.org Foundation`
 
-#### 3.4.2 libvorbis
+#### 3.4.2 libvorbis (removed 2026-08-10)
 
-- **Upstream:** https://xiph.org/vorbis/
-- **License:** BSD-3-Clause (see Appendix B)
-- **Path:** `src/libs/vorbis/`
-- **Copyright:** `Copyright (c) 2002-2020 Xiph.org Foundation`
+- The vendored `src/libs/vorbis/` tree was removed — it was referenced by no
+  build target (audio is Opus + miniaudio). Entry kept as a tombstone; if
+  vorbis is ever re-vendored, restore the BSD-3-Clause attribution:
+  `Copyright (c) 2002-2020 Xiph.org Foundation`, https://xiph.org/vorbis/
 
 #### 3.4.3 Opus
 
