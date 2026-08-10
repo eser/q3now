@@ -572,12 +572,33 @@ endif
 ifeq ($(UNAME_S),Darwin)
 define install_app_skeleton
 	@echo "==> Installing .app skeleton to $(Q3DIR) ..."
-	rsync -a --checksum --delete "$(BUILT_APP)/" "$(Q3DIR)/"
-	@test -f "$(LAUNCHER_BIN)" && \
-	  cp "$(LAUNCHER_BIN)" "$(Q3DIR)/Contents/MacOS/q3now-launcher" || \
-	  echo "  NOTE: launcher not built (run make create-launcher)"
-	/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable q3now-launcher" \
-	  "$(Q3DIR)/Contents/Info.plist"
+	@# --delete purges stale skeleton files, but the install dir also holds
+	@# artifacts OTHER targets own — renderer/dependency dylibs (copy-libs),
+	@# the mod pack under Resources/base (copy-packs), and the launcher
+	@# binary. Without the excludes, a standalone `make copy-build` silently
+	@# stripped all of them and left an unbootable bundle.
+	rsync -a --checksum --delete \
+	  --exclude='libSDL3*' --exclude='libMoltenVK*' --exclude='libcrypto*' \
+	  --exclude='$(CMAKE_APP_NAME)_*$(RENDEXT).dylib' \
+	  --exclude='Resources/base/' \
+	  --exclude='q3now-launcher' \
+	  "$(BUILT_APP)/" "$(Q3DIR)/"
+	@# CFBundleExecutable must point at something that exists: the launcher
+	@# when present, the engine binary otherwise — the old unconditional
+	@# rewrite left a clean-clone bundle pointing at a missing launcher.
+	@if test -f "$(LAUNCHER_BIN)"; then \
+	  cp "$(LAUNCHER_BIN)" "$(Q3DIR)/Contents/MacOS/q3now-launcher"; \
+	  /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable q3now-launcher" \
+	    "$(Q3DIR)/Contents/Info.plist"; \
+	elif test -f "$(Q3DIR)/Contents/MacOS/q3now-launcher"; then \
+	  echo "  NOTE: launcher not rebuilt — keeping installed copy"; \
+	  /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable q3now-launcher" \
+	    "$(Q3DIR)/Contents/Info.plist"; \
+	else \
+	  echo "  NOTE: launcher not built (run make create-launcher) — bundle opens the engine"; \
+	  /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $(CMAKE_APP_NAME)$(BINEXT)" \
+	    "$(Q3DIR)/Contents/Info.plist"; \
+	fi
 endef
 else ifdef IS_WINDOWS
 define install_app_skeleton
@@ -693,8 +714,10 @@ copy-all:       copy-build copy-libs copy-packs
 # ── bundle-codesign ──────────────────────────────────────────────────────────
 # Code signs the fully assembled .app bundle (macOS only).
 # Ad-hoc by default; set CODESIGN_IDENTITY for distribution signing.
+# Depends on copy-all so the bundle it seals is the freshly-deployed one —
+# standalone invocations used to sign whatever happened to be installed.
 
-bundle-codesign:
+bundle-codesign: copy-all
 ifeq ($(UNAME_S),Darwin)
 	@echo "==> Code signing..."
 	@for dylib in "$(Q3DIR)/Contents/MacOS/"*.dylib \
@@ -823,7 +846,16 @@ endif
 # DEV controls Release vs Debug throughout BUILD_DIR / BUILD_CFG
 # / BUILT_APP / BUILT_DED / MODULE_DIR / PAK_OUT — copy-all picks up the right
 # config automatically. No separate copy-all-debug.
+#
+# macOS runs through bundle-codesign (which itself depends on copy-all): the
+# ARM64 JIT and the VM interpreter need the allow-jit entitlement, and the
+# PlistBuddy rewrite in copy-build invalidates any earlier bundle seal — so
+# an unsigned run-game was launching a broken-signature bundle every time.
+ifeq ($(UNAME_S),Darwin)
+_RUN_GAME_DEP := bundle-codesign
+else
 _RUN_GAME_DEP := copy-all
+endif
 
 # VM mode: 0=native dylibs (default), 1=WASM AOT modules with sv_pure
 ifeq ($(VM),1)
