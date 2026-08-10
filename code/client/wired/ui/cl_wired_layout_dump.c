@@ -84,6 +84,12 @@ static void WUI_DumpRegionLine( FILE *f, const char *region, const char *kind,
 	WUI_DumpJsonRGBA( f, "rgba_forecolor", fore );
 	fprintf( f, ",\"fontPointSize\":%.6g,\"dpiScale\":%.6g,\"focused\":%d",
 		(double)fontPointSize, (double)WiredUI_GetDpiScale(), focused );
+	/* Physical backing width: lets the DPI gate derive its expected ratio from
+	 * the window the engine ACTUALLY got. On HiDPI the launch width is the
+	 * LOGICAL size (a 1280 request backs at 2560 on a 2x display), so a gate
+	 * that assumes physical == requested computes the wrong expectation —
+	 * the engine's ratio was right, the harness's assumption wasn't. */
+	fprintf( f, ",\"vidWidthPx\":%d", cls.glconfig.vidWidth );
 	/* Selection-state verification fields: activeCvar = the `active <cvar>`
 	 * binding (empty after the menu rows dropped ui_currentMenuItem; the
 	 * settings tabs keep ui_settingsSection); hasActiveBackcolor = whether a

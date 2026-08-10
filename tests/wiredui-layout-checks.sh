@@ -185,7 +185,21 @@ if [ ! -s "$LAYOUT_DUMP" ]; then
     [ -s "$JSONL.stdout" ] && { echo "  ── stdout tail ──"; tail -15 "$JSONL.stdout" | sed 's/^/  /'; }
     exit 1
 fi
-echo "    dpi REAL path   : physical ${PHYS_W}x${PHYS_H} / logical ${LOGICAL_W}x${LOGICAL_H} -> expect dpiScale=$DPI_TEST (vidWidth/vidWidthLogical)"
+# HiDPI correction: the launch width is the LOGICAL size — on a 2x display a
+# 1280 request backs at 2560 physical pixels, so "expected = PHYS_W/LOGICAL_W"
+# under-states the genuine ratio and fails a CORRECT engine. The dump now
+# records the backing width the engine actually got (vidWidthPx); derive the
+# expectation from that. Falls back to the launch-width assumption when the
+# field is absent (older dumps / self-test fixtures).
+# tr -cd: strip everything non-digit — some environments force grep color even
+# into pipes, and the ANSI tail would fail the numeric test silently.
+VID_PX="$(grep -o '"vidWidthPx":[0-9]*' "$LAYOUT_DUMP" | head -1 | cut -d: -f2 | tr -cd '0-9')"
+if [ -n "$VID_PX" ] && [ "$VID_PX" -gt 0 ] 2>/dev/null; then
+    DPI_TEST="$(awk -v p="$VID_PX" -v l="$LOGICAL_W" 'BEGIN{printf "%.6g", p/l}')"
+    echo "    dpi REAL path   : backing ${VID_PX}px / logical ${LOGICAL_W} -> expect dpiScale=$DPI_TEST (vidWidthPx from dump)"
+else
+    echo "    dpi REAL path   : physical ${PHYS_W}x${PHYS_H} / logical ${LOGICAL_W}x${LOGICAL_H} -> expect dpiScale=$DPI_TEST (vidWidth/vidWidthLogical)"
+fi
 
 # ── analysis (jq-free awk; tolerant of field order) ───────────────────────────
 # Read the LAST frame's worth of lines (a static menu dumps identical lines each
