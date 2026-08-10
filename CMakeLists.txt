@@ -468,12 +468,23 @@ FUNCTION(WIRED_APPLY_SUBMODULE_PATCHES _label _submodule_dir _patch_dir)
 	IF(NOT _patches)
 		RETURN()
 	ENDIF()
-	IF(NOT EXISTS "${CMAKE_SOURCE_DIR}/${_submodule_dir}/.git")
-		# Two distinct cases share this shape. A submodule that was never
-		# checked out has NO source files either — fatal, tell the user to
-		# init. A Docker build context has the FILES but not the .git
-		# metadata (.dockerignore strips it) — proceed: `git apply` operates
-		# fine on plain directories outside a repository.
+	FIND_PROGRAM(_GIT_EXE git REQUIRED)
+	# Pick the apply mode by asking git, not by probing for a .git entry.
+	# A Docker build context is the trap: .dockerignore strips the root .git/
+	# but each submodule still carries its .git GITFILE ("gitdir: ../../../
+	# .git/modules/...") pointing at metadata that no longer exists — any git
+	# command run INSIDE the submodule dies with "fatal: not a git
+	# repository". When that happens (and the sources are present), apply
+	# from the source root in plain-tree mode via --directory: git apply
+	# works outside a repository as a pure file operation.
+	EXECUTE_PROCESS(
+		COMMAND "${_GIT_EXE}" -C "${CMAKE_SOURCE_DIR}/${_submodule_dir}" rev-parse --is-inside-work-tree
+		RESULT_VARIABLE _rc_repo
+		OUTPUT_QUIET ERROR_QUIET)
+	IF(_rc_repo EQUAL 0)
+		SET(_apply_cwd "${CMAKE_SOURCE_DIR}/${_submodule_dir}")
+		SET(_dir_flag "")
+	ELSE()
 		IF(NOT EXISTS "${CMAKE_SOURCE_DIR}/${_submodule_dir}/CMakeLists.txt"
 		   AND NOT EXISTS "${CMAKE_SOURCE_DIR}/${_submodule_dir}/Makefile")
 			MESSAGE(FATAL_ERROR
@@ -481,23 +492,24 @@ FUNCTION(WIRED_APPLY_SUBMODULE_PATCHES _label _submodule_dir _patch_dir)
 				"${_submodule_dir} is not checked out.\n"
 				"Run:  git submodule update --init --recursive")
 		ENDIF()
-		MESSAGE(STATUS "${_label}: no .git metadata (container build context) — applying patches to the plain tree")
+		MESSAGE(STATUS "${_label}: git metadata unavailable (container build context) — plain-tree apply")
+		SET(_apply_cwd "${CMAKE_SOURCE_DIR}")
+		SET(_dir_flag "--directory=${_submodule_dir}")
 	ENDIF()
-	FIND_PROGRAM(_GIT_EXE git REQUIRED)
 	LIST(SORT _patches)
 	FOREACH(_patch ${_patches})
 		GET_FILENAME_COMPONENT(_patch_name "${_patch}" NAME)
 		EXECUTE_PROCESS(
-			COMMAND "${_GIT_EXE}" apply --check --reverse --ignore-whitespace "${_patch}"
-			WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/${_submodule_dir}"
+			COMMAND "${_GIT_EXE}" apply ${_dir_flag} --check --reverse --ignore-whitespace "${_patch}"
+			WORKING_DIRECTORY "${_apply_cwd}"
 			RESULT_VARIABLE _rc_already
 			OUTPUT_QUIET ERROR_QUIET)
 		IF(_rc_already EQUAL 0)
 			MESSAGE(STATUS "${_label} patch already applied: ${_patch_name}")
 		ELSE()
 			EXECUTE_PROCESS(
-				COMMAND "${_GIT_EXE}" apply --ignore-whitespace "${_patch}"
-				WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/${_submodule_dir}"
+				COMMAND "${_GIT_EXE}" apply ${_dir_flag} --ignore-whitespace "${_patch}"
+				WORKING_DIRECTORY "${_apply_cwd}"
 				RESULT_VARIABLE _rc_apply
 				OUTPUT_VARIABLE _out_apply
 				ERROR_VARIABLE _err_apply)
