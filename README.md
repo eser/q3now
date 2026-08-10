@@ -237,10 +237,22 @@ mount a real cert via `WIRED_WIREDNET_CERT` / `WIRED_WIREDNET_KEY`.
 | `WIRED_EXEC`            | `+exec`                | Execute a config file         |
 | `WIRED_EXTRA_ARGS`      | _(verbatim)_           | Arbitrary engine arguments    |
 
-## [Build Instructions](BUILD.md)
+## Documentation
 
-_This repository does not contain any game content. To play, copy the resulting
-binaries into your existing Quake III Arena installation._
+| Document | Covers |
+|---|---|
+| [BUILD.md](BUILD.md) | Per-platform build setup and toolchain prerequisites |
+| [GAME-DATA.md](GAME-DATA.md) | Getting game data from zero — what you need to own, and where files land |
+| [SUBMODULE-PATCHES.md](SUBMODULE-PATCHES.md) | How `src/libs/` submodule changes are carried — **read this before editing anything under `src/libs/`** |
+| [WASM.md](WASM.md) | WASM VM backend and the wasi-sdk pin |
+| [BUILD-RUST.md](BUILD-RUST.md) | Rust component build |
+
+_This repository contains no game art, maps or sounds._ You do **not** need to
+own Quake III Arena: the launcher downloads a redistributable bundle that
+includes the Q3 and Team Arena demo paks, the point-release patch paks, and the
+Quake 1 shareware episode. Owning retail Q3A adds the stock map roster on top.
+Building the repository is still required regardless — `default.cfg` ships only
+in the repo-built pack. See [GAME-DATA.md](GAME-DATA.md).
 
 ## Contacts
 
