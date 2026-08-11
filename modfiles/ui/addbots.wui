@@ -6,9 +6,9 @@
 // not the main menu). Shape mirrors specifyserver.wui /
 // serverinfo.wui (centered card with header + content + footer).
 //
-// Form fields: bot name editfield (free-text override) + skill
-// dropdown + team dropdown + 5 quick-add buttons for the canonical
-// q3 bots (Sarge / Keel / Bones / Slash / Doom).
+// Deterministic quick-add buttons plus a validated local-server custom form.
+// The submit action reads Store/cvar state and revalidates every field; no
+// authored value is interpolated through generic exec.
 
 menuDef {
 	name "addbots"
@@ -54,12 +54,6 @@ menuDef {
 				height GROW
 				padding 0.005 0.01
 
-				itemDef { name "cat_form_label" type 0 rect 0 0 1 0.025 height FIT text "BOT PROFILE" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
-
-				itemDef { name "row_name" type 4 rect 0.005 0 0.95 0.035 height FIXED 36px width PERCENT 0.95 text "Name (override)" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botName" maxChars 32 visible 1 grow 0 }
-				itemDef { name "row_skill" type 12 rect 0.005 0 0.95 0.035 height FIXED 36px width PERCENT 0.95 text "Skill" textalign 0 font $font_sans 13 forecolor $bone cvar "g_skill" cvarFloatList { "I Can Win" 1 "Bring It On" 2 "Hurt Me Plenty" 3 "Hardcore" 4 "Nightmare" 5 } visible 1 grow 0 }
-				itemDef { name "row_team" type segmented rect 0.005 0 0.95 0.035 height FIXED 36px width PERCENT 0.95 text "Team" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botTeam" cvarStrList { "Red" "red" "Blue" "blue" "Free" "free" } visible 1 grow 0 }
-
 				itemDef { name "cat_quick_label" type 0 rect 0 0 1 0.025 height FIT text "QUICK ADD" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
 				itemDef {
@@ -70,12 +64,16 @@ menuDef {
 					gap $spacing_sm
 					height FIT
 					padding 0.005 0
-					itemDef { type 1 rect 0 0 0.18 0.04 height FIT text "Sarge" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "addbot Sarge 3" ; close } }
-					itemDef { type 1 rect 0 0 0.18 0.04 height FIT text "Keel" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "addbot Keel 3" ; close } }
-					itemDef { type 1 rect 0 0 0.18 0.04 height FIT text "Bones" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "addbot Bones 3" ; close } }
-					itemDef { type 1 rect 0 0 0.18 0.04 height FIT text "Slash" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "addbot Slash 3" ; close } }
-					itemDef { type 1 rect 0 0 0.18 0.04 height FIT text "Doom" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "addbot Doom 3" ; close } }
+					itemDef { name "btn_quick_visor" type 1 rect 0 0 0.3 0.04 height FIT text "Add Visor" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { addquickbot visor ; close } }
+					itemDef { name "btn_quick_grunt" type 1 rect 0 0 0.3 0.04 height FIT text "Add Grunt" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { addquickbot grunt ; close } }
 				}
+
+				itemDef { name "cat_custom_label" type 0 rect 0 0 1 0.025 height FIT text "CUSTOM ADD" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "row_profile" type 12 rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Profile" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botProfile" populateCallback "bot_profiles" visible 1 grow 0 action { botprofileselected } }
+				itemDef { name "row_name" type 4 rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Name" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botName" maxChars 31 visible 1 grow 0 }
+				itemDef { name "row_skill" type 12 rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Skill" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botSkill" cvarFloatList { "Beginner" 1 "Casual" 2 "Competitive" 3 "Pro" 4 "Nightmare" 5 } visible 1 grow 0 }
+				itemDef { name "row_team" type 12 rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Team" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botTeam" cvarStrList { "Free" "free" "Red" "red" "Blue" "blue" } visible 1 grow 0 }
+				itemDef { name "btn_add_custom" type 1 rect 0 0 0.35 0.04 height FIT text "Add Custom Bot" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { addcustombot } }
 			}
 
 			itemDef {
@@ -87,11 +85,11 @@ menuDef {
 				alignX end
 				height FIT
 
-				itemDef { type 1 rect 0 0 0.20 0.04 height FIT text "Add Custom" textalign 1 font $font_sans_bold 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "addbot $ui_botName $g_skill $ui_botTeam" ; close } }
-				itemDef { type 1 rect 0 0 0.12 0.04 height FIT text "Close" textalign 1 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+				itemDef { name "btn_close" type 1 rect 0 0 0.12 0.04 height FIT text "Close" textalign 1 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
 			}
 		}
 	}
 
 	onESC { close }
+	onOpen { botprofileinit visor }
 }

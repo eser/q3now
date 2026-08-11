@@ -118,7 +118,7 @@ menuDef {
 					forecolor.active $accent
 					visible 1
 					grow 0
-					action { exec "connect" }
+					action { connectspecified }
 				}
 			}
 		}

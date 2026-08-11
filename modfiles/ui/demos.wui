@@ -90,8 +90,8 @@ menuDef {
 				height FIT
 				padding 0.005 0
 
-				itemDef { type 1 rect 0 0 0.14 0.04 height FIT text "Back" textalign 1 font $font_sans 13       forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
-				itemDef { type 1 rect 0 0 0.14 0.04 height FIT text "Play" textalign 1 font $font_sans_bold 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { rundemo } }
+				itemDef { name "btn_back" type 1 rect 0 0 0.14 0.04 height FIT text "Back" textalign 1 font $font_sans 13       forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+				itemDef { name "btn_play_demo" type 1 rect 0 0 0.14 0.04 height FIT text "Play" textalign 1 font $font_sans_bold 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { rundemo } }
 			}
 		}
 
@@ -109,5 +109,6 @@ menuDef {
 		}
 	}
 
+	onOpen { uiScript LoadDemos }
 	onESC { close }
 }

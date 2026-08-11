@@ -709,6 +709,72 @@ qboolean NET_IsLocalAddress( const netadr_t *adr )
 	return adr->type == NA_LOOPBACK;
 }
 
+/*
+==================
+NET_IsBrowserOOBPacket
+
+The game transport is QUIC-only, but the server browser still uses the
+connectionless getinfo/getstatus request-response protocol.  Keep that
+control plane narrowly available without reopening legacy rcon, connect,
+disconnect, or sequenced UDP traffic.
+==================
+*/
+static qboolean NET_HasOOBMarker( const byte *data, int length )
+{
+	return length >= 4 && data[0] == 0xFF && data[1] == 0xFF &&
+	       data[2] == 0xFF && data[3] == 0xFF;
+}
+
+static qboolean NET_IsBrowserOOBPacket( const byte *data, int length )
+{
+	static const char *const commands[] = {
+		"getinfo",
+		"getstatus",
+		"getserversResponse",
+		"getserversExtResponse",
+		"infoResponse",
+		"statusResponse",
+	};
+
+	if ( !NET_HasOOBMarker( data, length ) )
+		return qfalse;
+
+	data += 4;
+	length -= 4;
+
+	for ( size_t i = 0; i < ARRAY_LEN( commands ); i++ ) {
+		size_t commandLength = strlen( commands[i] );
+		qboolean masterResponse = strcmp( commands[i], "getserversResponse" ) == 0 ||
+			strcmp( commands[i], "getserversExtResponse" ) == 0;
+
+		if ( length < (int)commandLength || memcmp( data, commands[i], commandLength ) != 0 )
+			continue;
+
+		/* Master responses transition directly from the ASCII command token to
+		 * binary address records. Bare or whitespace-delimited variants are not
+		 * browser control-plane packets and must not pass transport demux. */
+		if ( masterResponse ) {
+			return length > (int)commandLength &&
+			       ( data[commandLength] == '\\' || data[commandLength] == '/' );
+		}
+
+		if ( length == (int)commandLength )
+			return qtrue;
+
+		switch ( data[commandLength] ) {
+			case '\0':
+			case '\r':
+			case '\n':
+			case ' ':
+				return qtrue;
+			default:
+				break;
+		}
+	}
+
+	return qfalse;
+}
+
 //=============================================================================
 
 /*
@@ -771,8 +837,17 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 				byte *pkt_data = net_message->data + net_message->readcount;
 				int   pkt_len  = ret - net_message->readcount;
 				// Skip Q3 connectionless packets (4 bytes of 0xFF)
-				if ( pkt_len >= 4 && *(uint32_t *)pkt_data == 0xFFFFFFFF ) {
-					// Not QUIC — fall through to Netchan
+				if ( NET_IsBrowserOOBPacket( pkt_data, pkt_len ) ) {
+					if ( net_message->readcount > 0 ) {
+						memmove( net_message->data, pkt_data, pkt_len );
+						net_message->readcount = 0;
+						net_message->cursize = pkt_len;
+					} else {
+						net_message->cursize = ret;
+					}
+					return qtrue;
+				} else if ( NET_HasOOBMarker( pkt_data, pkt_len ) ) {
+					// Other legacy OOB commands remain disabled.
 				} else if ( Net_DispatchDemux( net_from, pkt_data, pkt_len ) ) {
 					// Consumed by transport demux — do not process as Netchan
 					net_packetConsumed = qtrue;
@@ -815,8 +890,11 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 			{
 				byte *pkt_data = net_message->data + net_message->readcount;
 				int   pkt_len  = ret - net_message->readcount;
-				if ( pkt_len >= 4 && *(uint32_t *)pkt_data == 0xFFFFFFFF ) {
-					// Q3 connectionless — not QUIC
+				if ( NET_IsBrowserOOBPacket( pkt_data, pkt_len ) ) {
+					net_message->cursize = ret;
+					return qtrue;
+				} else if ( NET_HasOOBMarker( pkt_data, pkt_len ) ) {
+					// Other legacy OOB commands remain disabled.
 				} else if ( Net_DispatchDemux( net_from, pkt_data, pkt_len ) ) {
 					net_packetConsumed = qtrue;
 					return qfalse;
@@ -855,8 +933,11 @@ static qboolean NET_GetPacket( netadr_t *net_from, msg_t *net_message, const fd_
 			{
 				byte *pkt_data = net_message->data + net_message->readcount;
 				int   pkt_len  = ret - net_message->readcount;
-				if ( pkt_len >= 4 && *(uint32_t *)pkt_data == 0xFFFFFFFF ) {
-					// Q3 connectionless — not QUIC
+				if ( NET_IsBrowserOOBPacket( pkt_data, pkt_len ) ) {
+					net_message->cursize = ret;
+					return qtrue;
+				} else if ( NET_HasOOBMarker( pkt_data, pkt_len ) ) {
+					// Other legacy OOB commands remain disabled.
 				} else if ( Net_DispatchDemux( net_from, pkt_data, pkt_len ) ) {
 					net_packetConsumed = qtrue;
 					return qfalse;

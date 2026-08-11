@@ -9,4 +9,6 @@ return {
     display_name = "^4Skulk",
     nicknames    = { "skulk" },
     role         = "holder",
+    -- Behavior proof profile; no packaged player model yet.
+    selectable   = false,
 }

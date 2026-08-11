@@ -166,7 +166,6 @@ typedef struct {
 	 * CL_Disconnect (via memset).  Use (clc.quic_conn != CONN_INVALID)
 	 * as the authoritative test for "we are on a QUIC connection". */
 	conn_handle_t quic_conn;
-
 	// these are our reliable messages that go to the server
 	int			reliableSequence;
 	int			reliableAcknowledge;		// the last one the server has executed
@@ -248,8 +247,11 @@ no client connection is active at all
 
 typedef struct {
 	netadr_t	adr;
-	int			start;
+	unsigned int	start;
+	unsigned int	timeout;
+	unsigned int	generation;
 	int			time;
+	char		challenge[33];
 	char		info[MAX_INFO_STRING];
 } ping_t;
 
@@ -270,6 +272,11 @@ typedef struct {
 	int			g_humanplayers;
 	int			g_needpass;
 } serverInfo_t;
+
+/* Strict parser for untrusted getinfo/infoResponse browser metadata. */
+qboolean CL_ParseServerInfoResponse( const char *info, int expectedProtocol,
+	serverInfo_t *server );
+qboolean CL_ServerInfoChallengeMatches( const char *info, const char *expectedChallenge );
 
 /* ---- Async CL_DownloadsComplete state machine ----------------
  *
@@ -322,6 +329,7 @@ typedef struct {
 	serverInfo_t	localServers[MAX_OTHER_SERVERS];
 
 	int			numglobalservers;
+	unsigned int	globalServerGeneration;
 	serverInfo_t  globalServers[MAX_GLOBAL_SERVERS];
 	// additional global servers
 	int			numGlobalServerAddresses;
@@ -567,6 +575,8 @@ int CL_GetPingQueueCount( void );
 void CL_ClearState( clientApp_t *app );
 
 int CL_ServerStatus( const char *serverAddress, char *serverStatusString, int maxLen );
+qboolean CL_NormalizeServerAddress( const char *input, netadrtype_t family,
+	char *normalized, int normalizedSize, netadr_t *address );
 
 qboolean CL_CheckPaused( void );
 qboolean CL_NoDelay( void );
@@ -598,6 +608,7 @@ void Field_BigDraw( field_t *edit, int x, int y, int width, qboolean showCursor,
 extern int cl_connectedToPureServer;
 
 void CL_ParseServerMessage( clientApp_t *app, msg_t *msg );
+void CL_RecordCommittedSnapshot( clientApp_t *app );
 void CL_CheckReliableStreams( void );
 void CL_CheckSnapshotDatagrams( void );
 
@@ -722,6 +733,9 @@ typedef struct {
 	// this wraps the serialized `manifest` and is never sent across the CL↔CG
 	// boundary (only `manifest` is memcpy'd in CL_Characters_GetManifest).
 	qboolean            selectable;
+	// Authored bot-menu opt-in, made true only when a packaged primary mesh is
+	// present. Manifest load alone is not sufficient renderability authority.
+	qboolean            botEligible;
 } clCharacterEntry_t;
 
 void        CL_Characters_Init( void );
@@ -738,6 +752,8 @@ const clCharacterEntry_t  *CL_Characters_At( int index );
 // maps subset index i → the underlying registry entry (NULL if out of range).
 int         CL_Characters_SelectableCount( void );
 const clCharacterEntry_t  *CL_Characters_SelectableAt( int index );
+qboolean    CL_Characters_IsBotEligible( const char *dirname );
+unsigned int CL_Characters_Generation( void );
 qboolean    CL_Characters_GetManifest( const char *charName, char *buf, int bufSize );
 const cmSkin_t *CL_GetCharacterSkin( qhandle_t handle );
 

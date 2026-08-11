@@ -8,8 +8,10 @@ return {
     nicknames    = { "visor", "goggles" },
     bio          = "A cybernetic gladiator with enhanced optics. Sees everything.",
     role         = "duelist",
+    bot_eligible = true,
 
     model        = {
+        icon = "./icon_default.png",
         -- String-form skin: one texture applied to every surface via customShader.
         -- Table-form skin with paintable=true: per-surface .skin file via customSkin.
         skins = {

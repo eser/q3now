@@ -458,6 +458,38 @@ static void SV_KickNum_f( void ) {
 	cl->lastPacketTime = svs.time;	// in case there is a funny zombie
 }
 
+/* Bot-only numeric removal for the in-game Remove Bot UI. The client feeder
+ * narrows presentation, but this execution-time NA_BOT check is the authority:
+ * a recycled slot or stale queued command must never remove a human. */
+static void SV_KickBotNum_f( void ) {
+	client_t *cl;
+	int clientNum;
+	char name[ sizeof( svs.clients[0].name ) ];
+
+	if ( !com_sv_running->integer ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
+		return;
+	}
+	if ( Cmd_Argc() != 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: botkick <client number>\n" );
+		return;
+	}
+
+	cl = SV_GetPlayerByNum();
+	if ( !cl ) return;
+	clientNum = (int)( cl - svs.clients );
+	if ( cl->netchan.remoteAddress.type != NA_BOT ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_server),
+			"botkick: refused non-bot client=%d name=%s\n", clientNum, cl->name );
+		return;
+	}
+
+	Q_strncpyz( name, cl->name, sizeof( name ) );
+	Com_Log( SEV_INFO, LOG_CH(ch_server),
+		"botkick: removed bot client=%d name=%s\n", clientNum, name );
+	SV_DropClient( cl, "was kicked" );
+}
+
 #ifndef STANDALONE
 // these functions require the auth server which of course is not available anymore for stand-alone games.
 
@@ -2012,6 +2044,7 @@ void SV_AddOperatorCommands( void ) {
 	Cmd_AddCommand ("kicknum", SV_KickNum_f);
 	Cmd_AddCommand ("clientkick", SV_KickNum_f); // Legacy command
 	Cmd_SetCommandCompletionFunc( "clientkick", SV_CompleteClientName );
+	Cmd_AddCommand ("botkick", SV_KickBotNum_f);
 	Cmd_AddCommand ("status", SV_Status_f);
 	Cmd_AddCommand ("dumpuser", SV_DumpUser_f);
 	Cmd_SetCommandCompletionFunc( "dumpuser", SV_CompleteClientName );

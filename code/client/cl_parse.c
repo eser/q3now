@@ -171,6 +171,7 @@ static void CL_ParsePacketEntities( clientApp_t *app, msg_t *msg, const clSnapsh
 			oldnum = oldstate->number;
 		}
 	}
+
 }
 
 
@@ -300,6 +301,7 @@ static void CL_ParseSnapshot( clientApp_t *app, msg_t *msg ) {
 	app->cl.newSnapshots = qtrue;
 
 	app->clc.eventMask |= EM_SNAPSHOT;
+	CL_RecordCommittedSnapshot( app );
 }
 
 

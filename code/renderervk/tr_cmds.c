@@ -54,6 +54,16 @@ static void R_PerformanceCounters( void ) {
 		R_LOG( rch_cmd, SEV_INFO, "flare adds:%i tests:%i renders:%i\n",
 			backEnd.pc.c_flareAdds, backEnd.pc.c_flareTests, backEnd.pc.c_flareRenders );
 	}
+	else if (r_speeds->integer == 7 )
+	{
+		if ( tr.pc.c_particleEmitters || backEnd.pc.c_particleComputes || backEnd.pc.c_particleDraws )
+		{
+			R_LOG( rch_cmd, SEV_INFO,
+				"particle emitters:%i particles:%i computes:%i draws:%i\n",
+				tr.pc.c_particleEmitters, tr.pc.c_particleParticles,
+				backEnd.pc.c_particleComputes, backEnd.pc.c_particleDraws );
+		}
+	}
 
 	memset( &tr.pc, 0, sizeof( tr.pc ) );
 	memset( &backEnd.pc, 0, sizeof( backEnd.pc ) );

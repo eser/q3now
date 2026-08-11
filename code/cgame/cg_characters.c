@@ -312,5 +312,10 @@ qboolean CG_LoadCharacter( clientInfo_t *ci, const char *charName ) {
 		}
 	}
 
+	Com_Log( SEV_DEBUG, LOG_CH(ch_cgame),
+		"CG_LoadCharacter: loaded profile=%s parts=%d legs=%d torso=%d head=%d icon=%d skin=%d\n",
+		charName, mf.partCount, ci->legsModel, ci->torsoModel, ci->headModel,
+		ci->modelIcon, ci->skinHandle );
+
 	return qtrue;
 }

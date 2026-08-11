@@ -119,11 +119,11 @@ static const int s_numAnimNames = (int)(sizeof(s_animNames) / sizeof(s_animNames
 
 static const char *s_knownTopKeys[] = {
 	"name", "display_name", "nicknames", "bio", "role", "archetype",
-	"model", "sounds", "stats", "selectable", "movement", "attack",
+	"model", "sounds", "stats", "selectable", "bot_eligible", "movement", "attack",
 	"can_activate", NULL
 };
 static const char *s_knownModelKeys[] = {
-	"parts", "icon", "headoffset", "skins", "bbox", NULL
+	"root", "parts", "icon", "headoffset", "skins", "bbox", NULL
 };
 static const char *s_knownSoundsKeys[] = {
 	"footsteps",
@@ -407,12 +407,12 @@ const cmSkin_t *CL_GetCharacterSkin( qhandle_t handle ) {
 // ── Skin path resolution ──────────────────────────────────────────────────
 
 /* Resolve a skin path value from the manifest into an absolute VFS path.
-   "./foo.tga" → "characters/{charName}/models/foo.tga"
+   "./foo.tga" → "{modelRoot}/foo.tga"
    Anything else is passed through as-is. */
 static void CL_Char_ResolveSkinPath( char *out, int outSize,
-	const char *charName, const char *val ) {
+	const char *modelRoot, const char *val ) {
 	if ( val[0] == '.' && val[1] == '/' ) {
-		Com_sprintf( out, outSize, "characters/%s/models/%s", charName, val + 2 );
+		Com_sprintf( out, outSize, "%s/%s", modelRoot, val + 2 );
 	} else {
 		Q_strncpyz( out, val, outSize );
 	}
@@ -423,6 +423,7 @@ static void CL_Char_ResolveSkinPath( char *out, int outSize,
    value may be a string (Case 1/3 via string) or a table (Case 2/3).
    Returns qtrue if a valid skin was parsed. */
 static qboolean CL_Char_ParseSkin( lua_State *L, const char *charName,
+	const char *modelRoot,
 	const char *skinName, clParsedSkin_t *sk ) {
 	memset( sk, 0, sizeof( *sk ) );
 	Q_strncpyz( sk->name, skinName, CM_SKIN_NAME_LEN );
@@ -433,7 +434,7 @@ static qboolean CL_Char_ParseSkin( lua_State *L, const char *charName,
 		// Case 1: string → singlePath shader
 		sk->singlePath = 1;
 		CL_Char_ResolveSkinPath( sk->fallback, sizeof( sk->fallback ),
-			charName, lua_tostring( L, val ) );
+			modelRoot, lua_tostring( L, val ) );
 		return qtrue;
 	}
 
@@ -463,12 +464,12 @@ static qboolean CL_Char_ParseSkin( lua_State *L, const char *charName,
 
 		if ( !Q_stricmp( k, "default" ) ) {
 			hasDefault = qtrue;
-			CL_Char_ResolveSkinPath( defaultPath, sizeof( defaultPath ), charName, v );
+			CL_Char_ResolveSkinPath( defaultPath, sizeof( defaultPath ), modelRoot, v );
 		} else {
 			if ( overrideCount < CM_MAX_SURFACE_OVERRIDES ) {
 				Q_strncpyz( sk->overrides[overrideCount].surface, k, CM_SURFACE_NAME_LEN );
 				CL_Char_ResolveSkinPath( sk->overrides[overrideCount].path,
-					sizeof( sk->overrides[overrideCount].path ), charName, v );
+					sizeof( sk->overrides[overrideCount].path ), modelRoot, v );
 				overrideCount++;
 			} else {
 				COM_WARN( LOG_CH(ch_client),
@@ -694,9 +695,67 @@ static void CL_Archetypes_Scan( void ) {
 
 #define CL_MAX_CHARACTERS 128
 
+static qboolean CL_Char_IsSafeModelRoot( const char *root ) {
+	const char *segment;
+	const char *p;
+	if ( !root || !root[0] || root[0] == '/' || root[0] == '\\' ) return qfalse;
+	if ( strlen( root ) >= MAX_QPATH || strstr( root, "//" ) || strchr( root, '\\' ) ) return qfalse;
+	segment = root;
+	for ( p = root; ; p++ ) {
+		unsigned char ch = (unsigned char)*p;
+		if ( ch == '/' || ch == '\0' ) {
+			int length = (int)( p - segment );
+			if ( length == 0 || ( length == 1 && segment[0] == '.' )
+			  || ( length == 2 && segment[0] == '.' && segment[1] == '.' ) ) return qfalse;
+			if ( ch == '\0' ) break;
+			segment = p + 1;
+			continue;
+		}
+		if ( ch < 32 || ch == 127 || ch == ':' || ch == '"' || ch == ';' ) return qfalse;
+	}
+	return qtrue;
+}
+
+static qboolean CL_Char_FileExists( const char *path ) {
+	fileHandle_t f = FS_INVALID_HANDLE;
+	int length = FS_FOpenFileRead( path, &f, qfalse );
+	if ( length < 0 || f == FS_INVALID_HANDLE ) return qfalse;
+	FS_FCloseFile( f );
+	return qtrue;
+}
+
+static qboolean CL_Char_FindPrimaryModel( const characterManifest_t *mf,
+	char *found, int foundSize ) {
+	static const char * const primary[] = { "lower", "legs", "body" };
+	static const char * const extensions[] = { ".iqm", ".md3", ".mdl" };
+	char path[MAX_QPATH];
+	for ( int i = 0; i < mf->partCount; i++ ) {
+		qboolean isPrimary = qfalse;
+		for ( int p = 0; p < (int)( sizeof( primary ) / sizeof( primary[0] ) ); p++ ) {
+			if ( !Q_stricmp( mf->partNames[i], primary[p] ) ) { isPrimary = qtrue; break; }
+		}
+		if ( !isPrimary ) continue;
+		for ( int e = 0; e < (int)( sizeof( extensions ) / sizeof( extensions[0] ) ); e++ ) {
+			Com_sprintf( path, sizeof( path ), "%s%s", mf->partPaths[i], extensions[e] );
+			if ( CL_Char_FileExists( path ) ) {
+				Q_strncpyz( found, path, foundSize );
+				return qtrue;
+			}
+		}
+	}
+	if ( foundSize > 0 ) found[0] = '\0';
+	return qfalse;
+}
+
 static clCharacterEntry_t  s_clCharacters[CL_MAX_CHARACTERS];
 static int                 s_clCharacterCount;
+static unsigned int        s_clCharacterGeneration = 1;
 static void CL_ReloadCharacters_f( void );  // forward declaration
+
+static void CL_Characters_BumpGeneration( void ) {
+	s_clCharacterGeneration++;
+	if ( s_clCharacterGeneration == 0 ) s_clCharacterGeneration = 1;
+}
 
 // Load one character directory into the next free registry slot.
 // Uses the provided Lua state (must be valid).  Stack is guarded.
@@ -706,6 +765,8 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 	clCharacterEntry_t *entry;
 	int base;
 	qboolean selectable = qtrue;   // default: appears in the player select screen
+	qboolean botEligibleRequested = qfalse;
+	char modelRoot[MAX_QPATH];
 
 	if ( s_clCharacterCount >= CL_MAX_CHARACTERS ) {
 		COM_WARN( LOG_CH(ch_client), "CL_Characters: registry full, skipping '%s'\n", dirname );
@@ -842,11 +903,30 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 		selectable = lua_toboolean( L, -1 ) ? qtrue : qfalse;
 	}
 	lua_pop( L, 1 );
+	lua_getfield( L, merged_idx, "bot_eligible" );
+	if ( lua_isboolean( L, -1 ) ) {
+		botEligibleRequested = lua_toboolean( L, -1 ) ? qtrue : qfalse;
+	}
+	lua_pop( L, 1 );
 
 	// ── Step 7: Extract model fields ─────────────────────────────────────
+	Com_sprintf( modelRoot, sizeof( modelRoot ), "characters/%s/models", dirname );
 	lua_getfield( L, merged_idx, "model" );
 	int model_idx = lua_gettop( L );
 	if ( lua_istable( L, model_idx ) ) {
+		lua_getfield( L, model_idx, "root" );
+		if ( lua_isstring( L, -1 ) && lua_tostring( L, -1 )[0] ) {
+			const char *authoredRoot = lua_tostring( L, -1 );
+			if ( !CL_Char_IsSafeModelRoot( authoredRoot ) ) {
+				COM_ERROR( LOG_CH(ch_client),
+					"CL_Characters: '%s' has unsafe model.root\n", dirname );
+				lua_settop( L, base );
+				return qfalse;
+			}
+			Q_strncpyz( modelRoot, authoredRoot, sizeof( modelRoot ) );
+		}
+		lua_pop( L, 1 );
+
 		lua_getfield( L, model_idx, "parts" );
 		if ( lua_istable( L, -1 ) ) {
 			int parts_tbl = lua_gettop( L );
@@ -857,7 +937,7 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 				const char *pname = lua_tostring( L, -1 );
 				Q_strncpyz( mf.partNames[mf.partCount], pname, CM_PART_NAME_LEN );
 				Com_sprintf( mf.partPaths[mf.partCount], sizeof( mf.partPaths[0] ),
-					"characters/%s/models/%s", dirname, pname );
+					"%s/%s", modelRoot, pname );
 				mf.partCount++;
 				lua_pop( L, 1 );
 			}
@@ -865,9 +945,16 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 		lua_pop( L, 1 );
 
 		lua_getfield( L, model_idx, "icon" );
-		if ( lua_isstring( L, -1 ) )
-			Com_sprintf( mf.iconPath, sizeof( mf.iconPath ),
-				"%s%s", mf.charRoot, lua_tostring( L, -1 ) );
+		if ( lua_isstring( L, -1 ) ) {
+			const char *icon = lua_tostring( L, -1 );
+			if ( icon[0] == '.' && icon[1] == '/' ) {
+				Com_sprintf( mf.iconPath, sizeof( mf.iconPath ), "%s/%s", modelRoot, icon + 2 );
+			} else if ( strchr( icon, '/' ) ) {
+				Q_strncpyz( mf.iconPath, icon, sizeof( mf.iconPath ) );
+			} else {
+				Com_sprintf( mf.iconPath, sizeof( mf.iconPath ), "%s%s", mf.charRoot, icon );
+			}
+		}
 		lua_pop( L, 1 );
 
 		lua_getfield( L, model_idx, "headoffset" );
@@ -889,7 +976,7 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 				if ( lua_type( L, -2 ) == LUA_TSTRING && mf.numSkins < CM_MAX_SKINS ) {
 					const char *skinName = lua_tostring( L, -2 );
 					clParsedSkin_t parsed;
-					if ( CL_Char_ParseSkin( L, dirname, skinName, &parsed ) ) {
+					if ( CL_Char_ParseSkin( L, dirname, modelRoot, skinName, &parsed ) ) {
 						mf.skins[mf.numSkins].skinHandle = CL_RegisterCharacterSkin( &parsed );
 						Q_strncpyz( mf.skins[mf.numSkins].name, parsed.name, CM_SKIN_NAME_LEN );
 						mf.skins[mf.numSkins].paintable = parsed.paintable;
@@ -942,6 +1029,20 @@ static qboolean CL_Characters_LoadOne( lua_State *L, const char *dirname ) {
 	memcpy( &entry->manifest, &mf, sizeof( mf ) );
 	entry->iconHandle = 0;   // registered lazily in CL_Characters_RegisterIcons
 	entry->selectable = selectable;
+	entry->botEligible = qfalse;
+	if ( botEligibleRequested ) {
+		char primaryPath[MAX_QPATH];
+		if ( CL_Char_FindPrimaryModel( &entry->manifest, primaryPath, sizeof( primaryPath ) ) ) {
+			entry->botEligible = qtrue;
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+				"CL_Characters: bot profile '%s' eligible primary=%s\n",
+				dirname, primaryPath );
+		} else {
+			COM_WARN( LOG_CH(ch_client),
+				"CL_Characters: bot profile '%s' disabled: no packaged primary model\n",
+				dirname );
+		}
+	}
 
 	return qtrue;
 }
@@ -967,6 +1068,7 @@ static void CL_Characters_Scan( lua_State *L ) {
 
 void CL_Characters_Init( void ) {
 	lua_State *L;
+	CL_Characters_BumpGeneration();
 
 	memset( s_archetypeNames, 0, sizeof( s_archetypeNames ) );
 	s_archetypeCount = 0;
@@ -990,6 +1092,7 @@ void CL_Characters_Init( void ) {
 
 void CL_Characters_Reload( void ) {
 	lua_State *L;
+	CL_Characters_BumpGeneration();
 
 	memset( s_archetypeNames, 0, sizeof( s_archetypeNames ) );
 	s_archetypeCount = 0;
@@ -1015,6 +1118,7 @@ void CL_Characters_Reload( void ) {
 }
 
 void CL_Characters_Shutdown( void ) {
+	CL_Characters_BumpGeneration();
 	memset( s_archetypeNames, 0, sizeof( s_archetypeNames ) );
 	s_archetypeCount = 0;
 	memset( s_clCharacters, 0, sizeof( s_clCharacters ) );
@@ -1033,11 +1137,19 @@ static qhandle_t CL_Characters_TryIconCandidates( const clCharacterEntry_t *entr
 	char tryPath[MAX_QPATH];
 	int s, e;
 
+	if ( mf->iconPath[0] ) {
+		qhandle_t h = re.RegisterShaderNoMip( mf->iconPath );
+		if ( h ) return h;
+	}
 	for ( s = 0; s < mf->numSkins; s++ ) {
 		for ( e = 0; e < (int)( sizeof( exts ) / sizeof( exts[0] ) ); e++ ) {
-			Com_sprintf( tryPath, sizeof( tryPath ), "%sicon_%s.%s",
+			Com_sprintf( tryPath, sizeof( tryPath ), "%smodels/icon_%s.%s",
 				mf->charRoot, mf->skins[s].name, exts[e] );
 			qhandle_t h = re.RegisterShaderNoMip( tryPath );
+			if ( h ) return h;
+			Com_sprintf( tryPath, sizeof( tryPath ), "%sicon_%s.%s",
+				mf->charRoot, mf->skins[s].name, exts[e] );
+			h = re.RegisterShaderNoMip( tryPath );
 			if ( h ) return h;
 		}
 	}
@@ -1081,6 +1193,18 @@ int CL_Characters_Count( void ) {
 const clCharacterEntry_t *CL_Characters_At( int index ) {
 	if ( index < 0 || index >= s_clCharacterCount ) return NULL;
 	return &s_clCharacters[index];
+}
+
+qboolean CL_Characters_IsBotEligible( const char *dirname ) {
+	for ( int i = 0; i < s_clCharacterCount; i++ ) {
+		if ( s_clCharacters[i].loaded && s_clCharacters[i].botEligible
+		  && !Q_stricmp( s_clCharacters[i].dirname, dirname ) ) return qtrue;
+	}
+	return qfalse;
+}
+
+unsigned int CL_Characters_Generation( void ) {
+	return s_clCharacterGeneration;
 }
 
 // ── Selectable-only view ──────────────────────────────────────────────────────

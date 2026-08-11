@@ -99,6 +99,7 @@ typedef enum {
 #define FEEDER_CINEMATICS					0x0f			// cinematics
 #define FEEDER_CHARACTERS					0x10			// playable characters
 #define FEEDER_SKINS						0x11			// skins for the currently selected character
+#define FEEDER_BOTS						0x12			// connected bot clients only
 
 // display flags
 #define CG_SHOW_BLUE_TEAM_HAS_REDFLAG     0x00000001
