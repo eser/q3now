@@ -1207,6 +1207,8 @@ typedef struct {
 	int		c_leafs;
 	int		c_dlightSurfaces;
 	int		c_dlightSurfacesCulled;
+	int		c_particleEmitters;
+	int		c_particleParticles;
 #ifdef USE_PMLIGHT
 	int		c_light_cull_out;
 	int		c_light_cull_in;
@@ -1254,6 +1256,8 @@ typedef struct {
 	int		c_flareAdds;
 	int		c_flareTests;
 	int		c_flareRenders;
+	int		c_particleComputes;
+	int		c_particleDraws;
 
 	int		msec;			// total msec for backend run
 #ifdef USE_PMLIGHT

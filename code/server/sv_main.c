@@ -666,6 +666,8 @@ static void SVC_Status( const netadr_t *from ) {
 	char player[MAX_NAME_LENGTH + 32]; // score + ping + name
 	char status[MAX_PACKETLEN];
 	char infostring[MAX_INFO_STRING+160]; // add some space for challenge string
+	Com_Log( SEV_DEBUG, LOG_CH(ch_server), "SVC_Status: request from %s\n",
+		NET_AdrToStringwPort( from ) );
 
 	// Prevent using getstatus as an amplifier
 	if ( SVC_RateLimitAddress( from, 10, 1000 ) ) {

@@ -76,7 +76,7 @@ menuDef {
 				forecolor $bone
 				backcolor $panelDeep
 				style 1
-				feeder 13
+				feeder "serverstatus"
 				elementheight 22
 				columns 2 0 220 32 220 540 32
 				visible 1
@@ -94,7 +94,7 @@ menuDef {
 				itemDef {
 					name "btn_back"
 					type 1
-					rect 0 0 0.20 0.04
+					rect 0 0 0.18 0.04
 					height FIT
 					text "Back to Browser"
 					textalign 1
@@ -103,12 +103,26 @@ menuDef {
 					forecolor.active $accent
 					visible 1
 					grow 0
-					action { close ; open "servers" scene }
+					action { serverstatuscancel ; close ; open "servers" scene }
+				}
+				itemDef {
+					name "btn_retry"
+					type 1
+					rect 0 0 0.14 0.04
+					height FIT
+					text "Retry"
+					textalign 1
+					font $font_sans 13
+					forecolor $boneDim
+					forecolor.active $accent
+					visible 1
+					grow 0
+					action { serverstatusretry }
 				}
 				itemDef {
 					name "btn_connect"
 					type 1
-					rect 0 0 0.20 0.04
+					rect 0 0 0.18 0.04
 					height FIT
 					text "Connect"
 					textalign 1
@@ -131,11 +145,11 @@ menuDef {
 					forecolor.active $accent
 					visible 1
 					grow 0
-					action { close }
+					action { serverstatuscancel ; close }
 				}
 			}
 		}
 	}
 
-	onESC { close }
+	onESC { serverstatuscancel ; close }
 }

@@ -510,6 +510,7 @@ typedef struct wiredItemDef_s {
 	wiredSliderDef_t sliderData;            // for ITEM_TYPE_SLIDER (cvarFloat min/max)
 	int             maxChars;               // for ITEM_TYPE_EDITFIELD
 	int             maxPaintChars;          // visible chars in edit field
+	qboolean        password;               // mask the rendered edit value
 
 	// Dynamic MULTI: when populateCallback is set on an ITEM_TYPE_MULTI, the
 	// option list is filled at render time by the named callback (registered
@@ -903,7 +904,7 @@ qhandle_t WiredUI_FeederItemIcon( int feederID, int index );
 void     WiredUI_FeederSelection( int feederID, int index );
 /* Active sort column + direction for a feeder (cl_wired_feeders.c), used by
  * the engine-drawn listbox header band to draw the ^/v indicator. Returns
- * qtrue + fills *col/*dir (dir 0=asc,1=desc) for feeders with a known sort. */
+ * qtrue and fills *col and *dir (dir 0=asc,1=desc) for known sorts. */
 qboolean WiredFeeder_ActiveSort( int feederID, int *col, int *dir );
 
 // ── feeder data loading (cl_wired_feeders.c) ──────────────────────────
@@ -911,7 +912,28 @@ qboolean WiredFeeder_ActiveSort( int feederID, int *col, int *dir );
 void     WiredUI_RegisterCoreFeeders( void );
 void     WiredFeeder_LoadMaps( void );
 void     WiredFeeder_LoadDemos( void );
+qboolean WiredFeeder_GetSelectedDemo( char *name, size_t nameSize );
 void     WiredFeeder_LoadMods( void );
+void     WiredFeeder_RebuildServerDisplayList( void );
+qboolean WiredFeeder_ServerStatusBegin( void );
+qboolean WiredFeeder_ServerStatusRetry( void );
+void     WiredFeeder_ServerStatusPoll( void );
+void     WiredFeeder_ServerStatusCancel( void );
+qboolean WiredFeeder_GetSelectedServerAddress( char *out, int outSize );
+qboolean WiredFeeder_GetSelectedServerConnection( char *address, int addressSize,
+	char *displayName, int displayNameSize, qboolean *needPassword,
+	int *selectionGeneration );
+int      WiredFeeder_ServerDisplayGeneration( void );
+qboolean WiredFeeder_GetSelectedServerIdentity( int displayRow, int *rawIndex,
+	int *source, int *listGeneration, int *selectionGeneration );
+void     WiredUI_ResetListboxDoubleClick( const char *reason );
+qboolean WiredFeeder_ServerFixtureInstall( int sentinelPort, int targetPort,
+	qboolean targetNeedsPassword );
+void     WiredFeeder_ServerFixtureClear( void );
+qboolean WiredFeeder_ServerFixtureActive( void );
+void     WiredFeeder_ClearBotSelection( void );
+qboolean WiredFeeder_GetSelectedBotClientNum( int *clientNum );
+void     WiredFeeder_BotTrace( void );
 
 // ── menu stack ────────────────────────────────────────────────────────
 

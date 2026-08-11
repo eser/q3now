@@ -6249,6 +6249,10 @@ void FS_Restart( int checksumFeed ) {
 	static char lastValidGame[MAX_OSPATH];
 
 	static qboolean execConfig = qfalse;
+	/* File handles belong to the current VFS generation.  Keeping the JSONL
+	 * sink registered across FS_Shutdown leaves it holding a stale handle; the
+	 * first intervening log record then fatals because the filesystem is down. */
+	Log_PauseFileSinkForRestart();
 
 	// free anything we currently have loaded
 	FS_Shutdown( qfalse );
@@ -6297,6 +6301,8 @@ void FS_Restart( int checksumFeed ) {
 	// can introduce new maps; deleted paks can remove them. Both maps_list[]
 	// and the Maps_Arena (remap tables) are reset here.
 	Maps_ScanAll();
+
+	Log_ResumeFileSinkAfterRestart();
 }
 
 
@@ -6319,12 +6325,17 @@ restart if necessary
 */
 qboolean FS_ConditionalRestart( int checksumFeed, qboolean clientRestart )
 {
+	const char *requestedGame = fs_gamedirvar->string;
 	qboolean gamedirChanged;
-	{
-		static int s_gamedirvar_mod = -1;
-		gamedirChanged = ( s_gamedirvar_mod != -1 && fs_gamedirvar->modificationCount != s_gamedirvar_mod );
-		s_gamedirvar_mod = fs_gamedirvar->modificationCount;
+
+	/* Compare desired state with the directory the live search path actually
+	 * loaded.  A lazy modification-count snapshot misses the first fs_game
+	 * change when FS_ConditionalRestart has not previously been called: it
+	 * seeds the snapshot after the change and the mod is never mounted. */
+	if ( !requestedGame[0] || FS_IsBaseGame( requestedGame ) ) {
+		requestedGame = fs_basegame->string;
 	}
+	gamedirChanged = Q_stricmp( fs_gamedir, requestedGame ) != 0;
 
 	if ( gamedirChanged )
 	{

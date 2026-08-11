@@ -9,4 +9,22 @@ return {
     display_name = "^1Grunt",
     nicknames    = { "grunt" },
     role         = "rusher",
+    selectable   = true,
+    bot_eligible = true,
+
+    -- Grunt is a distinct behavior/personality profile that intentionally
+    -- shares Visor's licensed mechanized-male render assets.  The explicit
+    -- VFS root avoids duplicating those bytes into pax21.
+    model = {
+        root = "characters/visor/models",
+        icon = "characters/visor/models/icon_default.png",
+        skins = {
+            default = {
+                paintable = true,
+                u_torso = "characters/visor/models/skin_default.png",
+                l_legs  = "characters/visor/models/skin_default.png",
+                h_head  = "characters/visor/models/skin_default.png",
+            },
+        },
+    },
 }

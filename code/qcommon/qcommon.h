@@ -1180,8 +1180,8 @@ typedef struct {
 extern clProfile_t cl_prof;
 
 #define CL_PROF(field, call) do { \
-	int64_t _clp_t0 = Sys_Microseconds(); call; \
-	cl_prof.field += (int)(Sys_Microseconds() - _clp_t0); \
+	int64_t _clp_t0 = Sys_NanoTime(); call; \
+	cl_prof.field += (int)((Sys_NanoTime() - _clp_t0) / 1000); \
 } while (0)
 
 extern	int		com_frameTime;

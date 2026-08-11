@@ -53,6 +53,11 @@ LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 static int     s_fileSinkFailures = 0;
 static cvar_t *s_failuresCvar     = NULL;
+static qboolean s_forceAppendOnRegister = qfalse;
+static qboolean s_forceSyncOnRegister = qfalse;
+static qboolean s_resumeAfterFsRestart = qfalse;
+static qboolean s_resumeDoSync = qfalse;
+static qboolean s_fileSinkRegistered = qfalse;
 
 typedef struct {
     fileHandle_t  fh;
@@ -258,6 +263,16 @@ log_sink_t *Log_RegisterFileSink( void )
     char        logPath[MAX_OSPATH];
     const char *logName = "qconsole.jsonl";
 
+    if ( s_fileSinkRegistered ) {
+        return &s_fileSink;
+    }
+    /* A prior registry-full failure can leave no registered sink but must not
+     * leak its freshly opened VFS handle into a retry. */
+    if ( s_fileSinkCtx.fh != FS_INVALID_HANDLE ) {
+        FS_FCloseFile( s_fileSinkCtx.fh );
+        s_fileSinkCtx.fh = FS_INVALID_HANDLE;
+    }
+
     {
         static const cvarDesc_t ds = CVAR_STRING( "log_file_severity", "", CVAR_ARCHIVE,
             "Minimum severity written to qconsole.jsonl: [EMPTY] TRACE DEBUG INFO WARN ERROR FATAL" );
@@ -289,6 +304,12 @@ log_sink_t *Log_RegisterFileSink( void )
         do_append = qfalse;
         do_sync   = qfalse;
     }
+    if ( s_forceAppendOnRegister ) {
+        do_append = qtrue;
+    }
+    if ( s_forceSyncOnRegister ) {
+        do_sync = s_resumeDoSync;
+    }
 
     if ( do_append )
         s_fileSinkCtx.fh = FS_SV_FOpenFileAppend( logName );
@@ -312,12 +333,68 @@ log_sink_t *Log_RegisterFileSink( void )
     s_fileSink.min_severity  = Log_ParseSeverity(
                                    s_fileSinkCtx.severity_cvar->string );
 
-    return Log_RegisterSink( &s_fileSink );
+    {
+        log_sink_t *registered = Log_RegisterSink( &s_fileSink );
+        if ( !registered ) {
+            FS_FCloseFile( s_fileSinkCtx.fh );
+            s_fileSinkCtx.fh = FS_INVALID_HANDLE;
+            return NULL;
+        }
+        s_fileSinkRegistered = qtrue;
+        return registered;
+    }
+}
+
+static log_sink_t *Log_ResumeFileSink( void )
+{
+    log_sink_t *sink;
+
+    /* A filesystem restart is part of the same logging session.  Reopen in
+     * append mode even when startup mode is overwrite, or registration after
+     * the restart would erase all pre-restart evidence. */
+    s_forceAppendOnRegister = qtrue;
+    s_forceSyncOnRegister = qtrue;
+    sink = Log_RegisterFileSink();
+    s_forceAppendOnRegister = qfalse;
+    s_forceSyncOnRegister = qfalse;
+    return sink;
+}
+
+void Log_PauseFileSinkForRestart( void )
+{
+    if ( s_resumeAfterFsRestart || s_fileSinkCtx.fh == FS_INVALID_HANDLE ) {
+        return;
+    }
+
+    s_resumeDoSync = s_fileSinkCtx.do_sync;
+    Log_UnregisterFileSink();
+    s_resumeAfterFsRestart = qtrue;
+}
+
+void Log_ResumeFileSinkAfterRestart( void )
+{
+    log_sink_t *sink;
+
+    if ( !s_resumeAfterFsRestart ) {
+        return;
+    }
+
+    /* Clear pending state before registration: registration may itself log,
+     * and a recoverable failure must not leave nested restarts suppressed. */
+    s_resumeAfterFsRestart = qfalse;
+    sink = Log_ResumeFileSink();
+    if ( sink ) {
+        Com_Log( SEV_INFO, LOG_CH(ch_system),
+            "log_sink_file: resumed append sync=%d\n", s_fileSinkCtx.do_sync ? 1 : 0 );
+    }
 }
 
 void Log_UnregisterFileSink( void )
 {
-    Log_UnregisterSink( &s_fileSink );
+    if ( s_fileSinkRegistered ) {
+        Log_UnregisterSink( &s_fileSink );
+        s_fileSinkRegistered = qfalse;
+    }
 
     if ( s_fileSinkCtx.fh != FS_INVALID_HANDLE ) {
         FS_FCloseFile( s_fileSinkCtx.fh );

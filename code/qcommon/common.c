@@ -43,6 +43,7 @@ fileHandle_t com_journalDataFile = FS_INVALID_HANDLE; // config files are writte
 
 cvar_t	*com_viewlog;
 cvar_t	*com_speeds;
+static cvar_t *com_perfTrace;
 cvar_t	*com_timescale;
 static cvar_t *com_fixedtime;
 cvar_t	*com_journal;
@@ -2391,6 +2392,7 @@ void Com_GameRestart( int checksumFeed, qboolean clientRestart )
 		Con_ResetHistory();
 
 		// Shutdown FS early so Cvar_Restart will not reset old game cvars
+		Log_PauseFileSinkForRestart();
 		FS_Shutdown( qtrue );
 
 		// Clean out any user and VM created cvars
@@ -2427,7 +2429,13 @@ Expose possibility to change current running mod to the user
 */
 static void Com_GameRestart_f( void )
 {
-	Cvar_Set( "fs_game", Cmd_Argv( 1 ) );
+	/* With an argument this remains the explicit game-switch command.  Without
+	 * one, restart the already-selected fs_game; UI callers can set the CV_FSPATH
+	 * validated cvar directly and avoid interpolating a filesystem name into a
+	 * console command string. */
+	if ( Cmd_Argc() > 1 ) {
+		Cvar_Set( "fs_game", Cmd_Argv( 1 ) );
+	}
 
 	Com_GameRestart( 0, qtrue );
 }
@@ -3251,9 +3259,15 @@ void Com_Init( char *commandLine ) {
 	}
 	com_viewlog->onChange = Com_ViewlogChanged;
 	{
-		static const cvarDesc_t d = CVAR_BOOL( "com_speeds", "0", 0,
-			"Prints speed information per frame to the console. Used for debugging." );
+		static const cvarDesc_t d = CVAR_INT( "com_speeds", "0", 0,
+			"Print frame timing: 0 disables, 1 prints every frame, and 2+ prints frames at or above that millisecond threshold plus subsystem micro-timings.",
+			0, 1000 );
 		com_speeds = Cvar_Register( &d );
+	}
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "com_perfTrace", "0", CVAR_CHEAT,
+			"Emit aggregate-only 200-frame CPU/SCR pacing diagnostics without per-frame logging." );
+		com_perfTrace = Cvar_Register( &d );
 	}
 	{
 		static const cvarDesc_t d = CVAR_BOOL( "com_cameraMode", "0", CVAR_CHEAT, NULL );
@@ -3539,6 +3553,11 @@ Com_Frame
 =================
 */
 void Com_Frame( qboolean noDelay ) {
+	static uint64_t diagWorkUsec;
+	static uint64_t diagScrUsec;
+	static uint32_t diagFrameCount;
+	static uint32_t diagBucket;
+	static qboolean diagActive;
 
 #ifndef HEADLESS
 	static int biasUsec = 0;
@@ -3560,6 +3579,8 @@ void Com_Frame( qboolean noDelay ) {
 	int timeBeforeEvents = 0;
 	int timeBeforeClient = 0;
 	int timeAfter = 0;
+	int64_t timeBeforeServerNsec = 0;
+	int64_t timeAfterNsec = 0;
 	memset( &cl_prof, 0, sizeof( cl_prof ) );
 
 	// write config file if anything changed
@@ -3693,6 +3714,8 @@ void Com_Frame( qboolean noDelay ) {
 	if ( com_speeds->integer ) {
 		timeBeforeServer = Sys_Milliseconds();
 	}
+	if ( com_perfTrace->integer )
+		timeBeforeServerNsec = Sys_NanoTime();
 
 	// Advance one phase of the async spawn state machine.
 	// Must run before SV_Frame so SV_Frame sees a consistent spawn state.
@@ -3706,6 +3729,8 @@ void Com_Frame( qboolean noDelay ) {
 		timeBeforeEvents = timeAfter;
 		timeBeforeClient = timeAfter;
 	}
+	if ( com_perfTrace->integer )
+		timeAfterNsec = Sys_NanoTime();
 #else
 	//
 	// client system — a non-headless build always runs its client; the server
@@ -3768,6 +3793,8 @@ void Com_Frame( qboolean noDelay ) {
 		if ( com_speeds->integer ) {
 			timeAfter = Sys_Milliseconds();
 		}
+		if ( com_perfTrace->integer )
+			timeAfterNsec = Sys_NanoTime();
 	}
 #endif
 
@@ -3803,6 +3830,35 @@ void Com_Frame( qboolean noDelay ) {
 					cl_prof.whud_load, cl_prof.whud_sync, cl_prof.whud_render, cl_prof.whud_score);
 			}
 		}
+	}
+
+	// Aggregate-only profiling covers every measured frame without the
+	// performance-dependent observer overhead of com_speeds' thresholded
+	// per-frame JSON rows.
+	if ( com_perfTrace->integer && timeAfterNsec >= timeBeforeServerNsec ) {
+		if ( !diagActive ) {
+			diagWorkUsec = diagScrUsec = 0;
+			diagFrameCount = 0;
+			diagActive = qtrue;
+		}
+		diagWorkUsec += (uint64_t)( timeAfterNsec - timeBeforeServerNsec ) / 1000;
+		diagScrUsec += (uint64_t)cl_prof.endframe;
+		diagFrameCount++;
+		if ( diagFrameCount == 200 ) {
+			diagBucket++;
+			Com_Log( SEV_INFO, LOG_CH(ch_system),
+				"frame trace (200f): bucket=%u count=%u valid=%u cpu_work_total=%lluus scr_end_total=%lluus\n",
+				diagBucket,
+				diagFrameCount, diagFrameCount,
+				(unsigned long long)diagWorkUsec,
+				(unsigned long long)diagScrUsec );
+			diagWorkUsec = diagScrUsec = 0;
+			diagFrameCount = 0;
+		}
+	} else if ( diagActive ) {
+		diagWorkUsec = diagScrUsec = 0;
+		diagFrameCount = 0;
+		diagActive = qfalse;
 	}
 
 	//

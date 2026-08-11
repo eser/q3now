@@ -168,8 +168,10 @@ static const wiredUiStateDefault_t wui_uiStateDefaults[] = {
 	{ "ui_voteTimelimit", "20" },
 	{ "ui_voteScorelimit", "0" },
 	{ "ui_botCount", "0" },
+	{ "ui_botProfile", "visor" },
 	{ "ui_botName", "" },
-	{ "ui_botTeam", "0" },
+	{ "ui_botSkill", "3" },
+	{ "ui_botTeam", "free" },
 	{ "ui_hostListed", "0" },
 	{ "ui_netGameType", "0" },
 	{ "ui_globalpreset", "0" },
@@ -227,6 +229,11 @@ static qboolean WiredUI_IsPersistedStateKey( const char *key ) {
 	if ( !Q_stricmp( key, "ui_theme" ) ) {
 		return qfalse;
 	}
+	if ( !Q_stricmp( key, "ui_selectedServerAddr" )
+	  || !Q_stricmp( key, "ui_selectedServerName" )
+	  || !Q_stricmp( key, "ui_selectedDemo" ) ) {
+		return qfalse;
+	}
 	if ( !Q_stricmp( key, "ui_palette_mode" )
 	  || !Q_stricmp( key, "ui_palette_accent" ) ) {
 		/* Cvar layer (CVAR_ARCHIVE) handles persistence; the store-state
@@ -239,6 +246,11 @@ static qboolean WiredUI_IsPersistedStateKey( const char *key ) {
 	}
 
 	return ( Q_stricmpn( key, "ui_", 3 ) == 0 );
+}
+
+static qboolean WiredUI_IsTransientServerSelectionKey( const char *key ) {
+	return key && ( !Q_stricmp( key, "ui_selectedServerAddr" )
+		|| !Q_stricmp( key, "ui_selectedServerName" ) );
 }
 
 static void WiredUI_CountPersistedStateEntry( wuiStoreEntry_t *entry, void *userData ) {
@@ -352,6 +364,7 @@ void WiredUI_LoadState( void ) {
 	const byte *p = data + sizeof( header );
 	const byte *end = data + len;
 	int loadedCount = 0;
+	int ignoredTransientServerSelectionCount = 0;
 
 	for ( int i = 0; i < header.count; i++ ) {
 		wiredUiStateFileEntryHeader_t eh;
@@ -392,6 +405,9 @@ void WiredUI_LoadState( void ) {
 		p += eh.valueLen;
 
 		if ( !WiredUI_IsPersistedStateKey( key ) ) {
+			if ( WiredUI_IsTransientServerSelectionKey( key ) ) {
+				ignoredTransientServerSelectionCount++;
+			}
 			continue;
 		}
 
@@ -408,7 +424,9 @@ void WiredUI_LoadState( void ) {
 
 	Z_Free( data );
 
-	Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: loaded %d UI state entries\n", loadedCount );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: loaded %d UI state entries (ignored transient server selection %d)\n",
+		loadedCount, ignoredTransientServerSelectionCount );
 }
 
 static qboolean WiredUI_CallLuaStoreFunction( const char *functionName ) {
@@ -515,6 +533,24 @@ static wiredItemDef_t *wui_focusedItemPtr;
  * — defined next to WiredUI_GetFocusedItem — can read it. Tentative-def merge
  * folds this into the single initialized definition below. */
 static wiredItemDef_t *wui_hoveredItemPtr;
+
+typedef struct {
+	qboolean valid;
+	char address[MAX_STRING_CHARS];
+	int selectionGeneration;
+} wiredPasswordPrompt_t;
+
+static wiredPasswordPrompt_t wui_passwordPrompt;
+
+static qboolean WiredUI_IsSafePasswordValue( const char *value ) {
+	const unsigned char *p = (const unsigned char *)value;
+	if ( !value || !value[0] || strlen( value ) > 32
+	     || !Info_ValidateKeyValue( value ) ) return qfalse;
+	for ( ; *p; p++ ) {
+		if ( *p < 0x20 || *p > 0x7e ) return qfalse;
+	}
+	return qtrue;
+}
 
 const char *WiredUI_BoundValueText( const wiredItemDef_t *item, char *out, int outSize ) {
 	char cvarBuf[256];
@@ -641,6 +677,9 @@ const char *WiredUI_BoundValueText( const wiredItemDef_t *item, char *out, int o
 
 	case ITEM_TYPE_EDITFIELD:
 	case ITEM_TYPE_NUMERICFIELD:
+		if ( item->password ) {
+			for ( int i = 0; cvarBuf[i]; i++ ) cvarBuf[i] = '*';
+		}
 		if ( wui_editingField && wui_editItem == item ) {
 			int curPos = wui_editCursorPos;
 			qboolean showCursor = ( (int)( cls.realtime / 250 ) & 1 );
@@ -971,7 +1010,21 @@ static void wui_set_focused( wiredMenuDef_t *menu, wiredItemDef_t *item )
 	for ( i = 0; i < menu->itemCount; i++ ) {
 		if ( menu->items[ i ] == item ) {
 			wui_focusItem = i;
-			return;
+			break;
+		}
+	}
+
+	/* Focusing a populated listbox establishes an authoritative feeder
+	 * selection even when its zero-initialized visual row is already 0. Without
+	 * this, a one-row list can never fire its callback via keyboard Down because
+	 * the clamped destination equals the pre-existing visual row. */
+	if ( item->type == ITEM_TYPE_LISTBOX && item->feeder > 0 ) {
+		int total = WiredUI_FeederCount( (int)item->feeder );
+		if ( total > 0 ) {
+			int row = item->listSelectedRow;
+			if ( row < 0 || row >= total ) row = 0;
+			item->listSelectedRow = row;
+			WiredUI_FeederSelection( (int)item->feeder, row );
 		}
 	}
 }
@@ -1404,9 +1457,55 @@ static int       testall_delay = 2000;  // ms between menu switches
 
 // ── double-click detection ───────────────────────────────────────────
 #define WIRED_DOUBLECLICK_TIME  300   // ms
-static int       wui_lastClickTime = 0;
-static int       wui_lastClickRow = -1;
-static float     wui_lastClickFeeder = 0;
+typedef struct {
+	qboolean valid;
+	wiredMenuDef_t *menu;
+	wiredItemDef_t *item;
+	char menuName[64];
+	char itemName[64];
+	int feeder;
+	int row;
+	int listGeneration;
+	int time;
+	qboolean releaseObserved;
+} wiredListboxClickLatch_t;
+
+static wiredListboxClickLatch_t wui_listboxClickLatch;
+static qboolean wui_compositorPointerDown;
+
+void WiredUI_ResetListboxDoubleClick( const char *reason ) {
+	if ( wui_listboxClickLatch.valid ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: listbox click phase=reset reason=%s menu=%s item=%s feeder=%d row=%d list_generation=%d\n",
+			reason && reason[0] ? reason : "unspecified",
+			wui_listboxClickLatch.menuName[0]
+				? wui_listboxClickLatch.menuName : "none",
+			wui_listboxClickLatch.itemName[0]
+				? wui_listboxClickLatch.itemName : "none",
+			wui_listboxClickLatch.feeder, wui_listboxClickLatch.row,
+			wui_listboxClickLatch.listGeneration );
+	}
+	memset( &wui_listboxClickLatch, 0, sizeof( wui_listboxClickLatch ) );
+	wui_listboxClickLatch.row = -1;
+	wui_listboxClickLatch.listGeneration = -1;
+}
+
+static int WiredUI_ListboxIdentityGeneration( const wiredItemDef_t *item ) {
+	if ( item && (int)item->feeder == FEEDER_SERVERS ) {
+		return WiredFeeder_ServerDisplayGeneration();
+	}
+	return 0;
+}
+
+static void WiredUI_ReleaseCompositorPointer( const char *reason ) {
+	qboolean wasDown = wui_compositorPointerDown;
+	(void) WiredUI_CompositorMouseButton( qfalse );
+	wui_compositorPointerDown = qfalse;
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: pointer phase=release reason=%s was_down=%d pointer_down=%d\n",
+		reason && reason[0] ? reason : "unspecified", wasDown ? 1 : 0,
+		wui_compositorPointerDown ? 1 : 0 );
+}
 
 /* ── overlay custom-draws ────────────────────────────────────────────
  *
@@ -2678,7 +2777,9 @@ static void WiredUI_UnbindCmd_f( void ) {
  *   wui_menu_nav up | down              synthesize K_UPARROW / K_DOWNARROW
  *   wui_menu_nav enter                  synthesize K_ENTER
  *   wui_menu_nav back                   synthesize K_ESCAPE
+ *   wui_menu_nav backspace              synthesize K_BACKSPACE
  *   wui_menu_nav focus <name>           explicit item focus by name (recursive)
+ *   wui_menu_nav type <quoted-text>     printable ASCII through K_CHAR_FLAG
  *
  * Synthesis path: calls WiredUI_KeyEvent(key, true) then false — the same
  * entry point CL_KeyEvent invokes when KEYCATCH_UI is held, so the dispatch
@@ -2711,7 +2812,7 @@ static void WiredUI_MenuNav_f( void ) {
 
 	if ( Cmd_Argc() < 2 ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_ui),
-			"usage: wui_menu_nav <up|down|enter|back|focus> [<name>]\n" );
+			"usage: wui_menu_nav <up|down|enter|back|backspace|focus|type> [<arg>]\n" );
 		return;
 	}
 	sub = Cmd_Argv( 1 );
@@ -2732,6 +2833,40 @@ static void WiredUI_MenuNav_f( void ) {
 		WiredUI_KeyEvent( K_ESCAPE, qtrue );
 		WiredUI_KeyEvent( K_ESCAPE, qfalse );
 		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "wui_menu_nav: K_ESCAPE dispatched\n" );
+	} else if ( !Q_stricmp( sub, "backspace" ) ) {
+		WiredUI_KeyEvent( K_BACKSPACE, qtrue );
+		WiredUI_KeyEvent( K_BACKSPACE, qfalse );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "wui_menu_nav: K_BACKSPACE dispatched\n" );
+	} else if ( !Q_stricmp( sub, "type" ) ) {
+		const char *typed;
+		int length;
+		if ( Cmd_Argc() != 3 ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_ui),
+				"usage: wui_menu_nav type <quoted-text>\n" );
+			return;
+		}
+		typed = Cmd_Argv( 2 );
+		length = (int)strlen( typed );
+		if ( length < 1 || length > 64 ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_ui),
+				"wui_menu_nav type: text length must be 1..64\n" );
+			return;
+		}
+		for ( int i = 0; i < length; i++ ) {
+			const unsigned char ch = (unsigned char)typed[i];
+			if ( ch < 32 || ch > 126 ) {
+				Com_Log( SEV_WARN, LOG_CH(ch_ui),
+					"wui_menu_nav type: printable ASCII only\n" );
+				return;
+			}
+		}
+		for ( int i = 0; i < length; i++ ) {
+			const int key = ( (unsigned char)typed[i] ) | K_CHAR_FLAG;
+			WiredUI_KeyEvent( key, qtrue );
+			WiredUI_KeyEvent( key, qfalse );
+		}
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"wui_menu_nav: typed %d printable character(s)\n", length );
 	} else if ( !Q_stricmp( sub, "focus" ) ) {
 		wiredMenuDef_t *menu;
 		wiredItemDef_t *target = NULL;
@@ -2837,6 +2972,126 @@ static void WiredUI_HoverTest_f( void ) {
 		"wui_hover_test: hovered '%s' at (%.0f,%.0f)\n", name, cx, cy );
 }
 
+/* Automated pointer acceptance uses the same public engine ingress as SDL:
+ * move to the centre of an actually rendered listbox row, allow Clay a frame
+ * to publish hover authority, then send a separate paired K_MOUSE1 command.
+ * Neither command calls a feeder callback or item action directly. */
+static void WiredUI_PointerListbox_f( void ) {
+	wiredMenuDef_t *menu;
+	wiredItemDef_t *item = NULL;
+	wuiPixelRect_t rect;
+	const char *name;
+	int row;
+	int total;
+	float dpi;
+	float charSize;
+	float rowHFloor;
+	float rowH;
+	float headerH;
+	float cx;
+	float cy;
+
+	if ( !com_automated || !com_automated->integer ) {
+		COM_WARN( LOG_CH(ch_ui), "wui_pointer_listbox requires com_automated 1\n" );
+		return;
+	}
+	if ( Cmd_Argc() != 3 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"usage: wui_pointer_listbox <item-name> <display-row>\n" );
+		return;
+	}
+	menu = WiredUI_GetActiveMenu();
+	name = Cmd_Argv( 1 );
+	row = atoi( Cmd_Argv( 2 ) );
+	if ( !menu ) {
+		COM_WARN( LOG_CH(ch_ui), "wui_pointer_listbox: no active menu\n" );
+		return;
+	}
+	for ( int i = 0; i < menu->itemCount && !item; i++ ) {
+		item = wui_find_item_recursive( menu->items[i], name );
+	}
+	if ( !item || item->type != ITEM_TYPE_LISTBOX || item->feeder == 0
+	     || item->horizontalScroll ) {
+		COM_WARN( LOG_CH(ch_ui),
+			"wui_pointer_listbox: '%s' is not a vertical feeder listbox\n", name );
+		return;
+	}
+	total = WiredUI_FeederCount( (int)item->feeder );
+	if ( row < 0 || row >= total ) {
+		COM_WARN( LOG_CH(ch_ui),
+			"wui_pointer_listbox: row %d outside feeder count %d\n", row, total );
+		return;
+	}
+	if ( !WiredUI_ClayItemRenderedRect( menu, item, &rect )
+	     || rect.w <= 0.0f || rect.h <= 0.0f ) {
+		COM_WARN( LOG_CH(ch_ui),
+			"wui_pointer_listbox: item '%s' has no rendered rect\n", name );
+		return;
+	}
+
+	dpi = WiredUI_GetDpiScale();
+	charSize = item->fontPointSize > 0.0f
+		? item->fontPointSize : WUI_DEFAULT_FONT_SIZE;
+	rowHFloor = charSize * WUI_LINE_HEIGHT_FACTOR * dpi;
+	rowH = item->elementheight > 0.0f ? item->elementheight * dpi : rowHFloor;
+	if ( rowH < rowHFloor ) rowH = rowHFloor;
+	headerH = WiredUI_ListboxHeaderHeight( item );
+	if ( row < item->listScrollOffset
+	     || headerH + ( row - item->listScrollOffset + 1 ) * rowH > rect.h ) {
+		COM_WARN( LOG_CH(ch_ui),
+			"wui_pointer_listbox: row %d is outside rendered viewport offset=%d\n",
+			row, item->listScrollOffset );
+		return;
+	}
+
+	cx = rect.x + rect.w * 0.5f;
+	cy = rect.y + headerH + ( row - item->listScrollOffset + 0.5f ) * rowH;
+	CL_MouseEvent( cx - wui_cursorX, cy - wui_cursorY );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: pointer phase=moved ingress=CL_MouseEvent menu=%s item=%s feeder=%d row=%d list_generation=%d x=%.0f y=%.0f\n",
+		menu->name, item->name, (int)item->feeder, row,
+		WiredUI_ListboxIdentityGeneration( item ), cx, cy );
+}
+
+static void WiredUI_PointerClick_f( void ) {
+	if ( !com_automated || !com_automated->integer ) {
+		COM_WARN( LOG_CH(ch_ui), "wui_pointer_click requires com_automated 1\n" );
+		return;
+	}
+	if ( Cmd_Argc() != 1 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui), "usage: wui_pointer_click\n" );
+		return;
+	}
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: pointer phase=click ingress=CL_KeyEvent key=K_MOUSE1 x=%.0f y=%.0f\n",
+		wui_cursorX, wui_cursorY );
+	CL_KeyEvent( K_MOUSE1, qtrue, (unsigned)cls.realtime );
+	CL_KeyEvent( K_MOUSE1, qfalse, (unsigned)cls.realtime );
+}
+
+static void WiredUI_PointerButton_f( void ) {
+	qboolean down;
+	const char *edge;
+
+	if ( !com_automated || !com_automated->integer ) {
+		COM_WARN( LOG_CH(ch_ui), "wui_pointer_button requires com_automated 1\n" );
+		return;
+	}
+	if ( Cmd_Argc() != 2
+	     || ( Q_stricmp( Cmd_Argv( 1 ), "down" )
+	       && Q_stricmp( Cmd_Argv( 1 ), "up" ) ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"usage: wui_pointer_button <down|up>\n" );
+		return;
+	}
+	down = !Q_stricmp( Cmd_Argv( 1 ), "down" ) ? qtrue : qfalse;
+	edge = down ? "down" : "up";
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: pointer phase=button ingress=CL_KeyEvent key=K_MOUSE1 edge=%s x=%.0f y=%.0f\n",
+		edge, wui_cursorX, wui_cursorY );
+	CL_KeyEvent( K_MOUSE1, down, (unsigned)cls.realtime );
+}
+
 /* Headless verification of the error-dialog contract (fix #3). Mirrors the
  * real caller (cl_main.c): set com_errorMessage via Com_SetLastError, then
  * CL_WiredUI_ShowError. Logs a single machine-readable line the layout-check
@@ -2863,6 +3118,112 @@ static void WiredUI_ShowErrorTest_f( void ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_ui),
 		"wui_showerror_test: automated=%d stackTop='%s' errMsg='%s'\n",
 		( com_automated && com_automated->integer ) ? 1 : 0, top, errBuf );
+}
+
+static void WiredUI_ServerStatusTrace_f( void ) {
+	int feeder;
+	int count;
+	if ( !com_automated || !com_automated->integer ) {
+		COM_WARN( LOG_CH(ch_ui), "wui_serverstatus_trace requires com_automated 1\n" );
+		return;
+	}
+	feeder = WiredUI_FeederIDByName( "serverstatus" );
+	count = feeder ? WiredUI_FeederCount( feeder ) : 0;
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: server status registry feeder=%d count=%d\n", feeder, count );
+	for ( int i = 0; i < count; i++ ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: server status registry row=%d key=%s value=%s\n", i,
+			WiredUI_FeederItemText( feeder, i, 0 ),
+			WiredUI_FeederItemText( feeder, i, 1 ) );
+	}
+}
+
+static void WiredUI_ServerFixture_f( void ) {
+	int sentinelPort;
+	int targetPort;
+	qboolean targetNeedsPassword = qfalse;
+	if ( !com_automated || !com_automated->integer ) {
+		COM_WARN( LOG_CH(ch_ui), "wui_server_fixture requires com_automated 1\n" );
+		return;
+	}
+	if ( Cmd_Argc() == 2 && !Q_stricmp( Cmd_Argv( 1 ), "clear" ) ) {
+		WiredFeeder_ServerFixtureClear();
+		return;
+	}
+	if ( Cmd_Argc() != 3 && Cmd_Argc() != 4 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"usage: wui_server_fixture <sentinel-port> <target-port> [target-needpass=0|1]|clear\n" );
+		return;
+	}
+	sentinelPort = atoi( Cmd_Argv( 1 ) );
+	targetPort = atoi( Cmd_Argv( 2 ) );
+	if ( Cmd_Argc() == 4 ) {
+		if ( Q_stricmp( Cmd_Argv( 3 ), "0" ) && Q_stricmp( Cmd_Argv( 3 ), "1" ) ) {
+			COM_WARN( LOG_CH(ch_ui), "wui_server_fixture rejected invalid target-needpass\n" );
+			return;
+		}
+		targetNeedsPassword = atoi( Cmd_Argv( 3 ) ) ? qtrue : qfalse;
+	}
+	if ( !WiredFeeder_ServerFixtureInstall( sentinelPort, targetPort,
+		targetNeedsPassword ) ) {
+		COM_WARN( LOG_CH(ch_ui), "wui_server_fixture rejected invalid ports\n" );
+	}
+}
+
+static void WiredUI_BotTrace_f( void ) {
+	if ( !com_automated || !com_automated->integer ) {
+		COM_WARN( LOG_CH(ch_ui), "wui_bot_trace requires com_automated 1\n" );
+		return;
+	}
+	WiredFeeder_BotTrace();
+}
+
+static void WiredUI_DemoTrace_f( void ) {
+	if ( !com_automated || !com_automated->integer ) {
+		COM_WARN( LOG_CH(ch_ui), "wui_demo_trace requires com_automated 1\n" );
+		return;
+	}
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: demo playback trace state=%d demoplaying=%d name=%s sequence=%d serverTime=%d\n",
+		clientActiveApp ? clientActiveApp->state : CA_UNINITIALIZED,
+		clientActiveApp ? clientActiveApp->clc.demoplaying : 0,
+		( clientActiveApp && clientActiveApp->clc.demoName[0] )
+			? clientActiveApp->clc.demoName : "none",
+		clientActiveApp ? clientActiveApp->clc.serverMessageSequence : 0,
+		clientActiveApp ? clientActiveApp->cl.serverTime : 0 );
+}
+
+static void WiredUI_PasswordTrace_f( void ) {
+	const wiredItemDef_t *item;
+	char rendered[MAX_CVAR_VALUE_STRING];
+	qboolean masked = qtrue;
+	int length;
+
+	if ( !com_automated || !com_automated->integer ) {
+		COM_WARN( LOG_CH(ch_ui), "wui_password_trace requires com_automated 1\n" );
+		return;
+	}
+	item = WiredUI_GetFocusedItem();
+	if ( !item || Q_stricmp( item->name, "row_password" ) ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: password render trace refused reason=wrong-focus\n" );
+		return;
+	}
+	WiredUI_BoundValueText( item, rendered, sizeof( rendered ) );
+	length = (int)strlen( rendered );
+	if ( length < 1 ) masked = qfalse;
+	for ( int i = 0; i < length; i++ ) {
+		if ( rendered[i] != '*' ) {
+			masked = qfalse;
+			break;
+		}
+	}
+	/* Never log the rendered buffer: if masking regresses it contains the
+	 * credential. The boolean still distinguishes that mutation safely. */
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: password render trace length=%d masked=%d\n",
+		length, masked ? 1 : 0 );
 }
 
 #ifdef _DEBUG
@@ -3003,6 +3364,11 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	memset( wui_elements, 0, sizeof( wui_elements ) );
 	memset( wui_populateCallbacks, 0, sizeof( wui_populateCallbacks ) );
 	memset( wui_populateCallbacksHash, 0, sizeof( wui_populateCallbacksHash ) );
+	WiredUI_ResetListboxDoubleClick( "init" );
+	wui_compositorPointerDown = qfalse;
+	memset( &wui_passwordPrompt, 0, sizeof( wui_passwordPrompt ) );
+	Cvar_Get( "ui_password_server_name", "", CVAR_TEMP );
+	Cvar_Set( "ui_password_server_name", "" );
 	wui_numSymbols = 0;
 	wui_numElements = 0;
 	wui_numPopulateCallbacks = 0;
@@ -3062,6 +3428,13 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	if ( !WiredUI_CallLuaStoreFunction( "loadstate" ) ) {
 		WiredUI_LoadState();
 	}
+	/* Browser selection is process-local authority. Older state files may
+	 * still contain these keys, so clear them after every load as well as
+	 * excluding them from future saves. */
+	WiredUI_StateSetString( "ui_selectedServerAddr", "" );
+	WiredUI_StateSetString( "ui_selectedServerName", "" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: reset transient server selection after state load\n" );
 
 	// Bootstrap MSDF font subsystem before HUD init
 	Text_Init();
@@ -3175,7 +3548,15 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	// focus <name> walks the active menu's item tree recursively.
 	Cmd_AddCommand( "wui_menu_nav",       WiredUI_MenuNav_f );
 	Cmd_AddCommand( "wui_hover_test",     WiredUI_HoverTest_f );
+	Cmd_AddCommand( "wui_pointer_listbox", WiredUI_PointerListbox_f );
+	Cmd_AddCommand( "wui_pointer_click",  WiredUI_PointerClick_f );
+	Cmd_AddCommand( "wui_pointer_button", WiredUI_PointerButton_f );
 	Cmd_AddCommand( "wui_showerror_test", WiredUI_ShowErrorTest_f );
+	Cmd_AddCommand( "wui_serverstatus_trace", WiredUI_ServerStatusTrace_f );
+	Cmd_AddCommand( "wui_server_fixture", WiredUI_ServerFixture_f );
+	Cmd_AddCommand( "wui_bot_trace",      WiredUI_BotTrace_f );
+	Cmd_AddCommand( "wui_demo_trace",     WiredUI_DemoTrace_f );
+	Cmd_AddCommand( "wui_password_trace", WiredUI_PasswordTrace_f );
 #ifdef _DEBUG
 	Cmd_AddCommand( "wui_test_keydown",   WiredUI_TestKeyDown_f );
 	Cmd_AddCommand( "wui_test_dump_clay", WiredUI_TestDumpClay_f );
@@ -3318,6 +3699,13 @@ void WiredUI_Shutdown( void ) {
 	if ( !wui_initialized ) {
 		return;
 	}
+
+	WiredUI_ResetListboxDoubleClick( "shutdown" );
+	WiredUI_ReleaseCompositorPointer( "shutdown" );
+	WiredFeeder_ServerStatusCancel();
+	WiredFeeder_ServerFixtureClear();
+	memset( &wui_passwordPrompt, 0, sizeof( wui_passwordPrompt ) );
+	Cvar_Set( "ui_password_server_name", "" );
 
 	/* A dead UI must not hold KEYCATCH_UI — that bit signals "I am alive and
 	   handling input."  If we leave it set, Con_DrawConsole's fullscreen
@@ -3481,7 +3869,7 @@ void WiredUI_TickFrame( int realtime ) {
 		wiredMenuDef_t *serverMenu = WiredUI_FindMenu( "servers" );
 		if ( menu == serverMenu ) {
 			static int lastPingUpdate = 0;
-			if ( realtime - lastPingUpdate > 1000 ) {  // every second
+			if ( !WiredFeeder_ServerFixtureActive() && realtime - lastPingUpdate > 1000 ) {  // every second
 				int uiSource = WiredUI_StateGetInt( "ui_netSource" );
 				int engineSource;
 				extern qboolean CL_UpdateVisiblePings_f( int source );
@@ -3495,6 +3883,10 @@ void WiredUI_TickFrame( int realtime ) {
 				lastPingUpdate = realtime;
 			}
 		}
+	}
+
+	if ( menu == WiredUI_FindMenu( "serverinfo" ) ) {
+		WiredFeeder_ServerStatusPoll();
 	}
 
 
@@ -3661,6 +4053,196 @@ static void WiredScript_Exec( wiredMenuDef_t *menu, wiredItemDef_t *item, int nu
 	if ( numArgs >= 1 ) {
 		Cbuf_ExecuteText( EXEC_APPEND, va( "%s\n", args[0] ) );
 	}
+}
+
+/* Quick-add buttons are authored with a character directory, but should not
+ * inherit the generic exec command's arbitrary-string surface or deferred
+ * queue position.  Resolve the directory against the loaded character
+ * registry, constrain its command-token grammar, and insert one canonical
+ * local-server command for the next command-buffer pass. */
+static qboolean WiredUI_IsSafeBotProfileToken( const char *profile ) {
+	const unsigned char *p = (const unsigned char *)profile;
+	if ( !profile || !profile[0] || strlen( profile ) >= MAX_QPATH ) return qfalse;
+	for ( ; *p; p++ ) {
+		if ( !( ( *p >= 'a' && *p <= 'z' ) || ( *p >= 'A' && *p <= 'Z' )
+		  || ( *p >= '0' && *p <= '9' ) || *p == '_' || *p == '-' ) ) return qfalse;
+	}
+	return qtrue;
+}
+
+static qboolean WiredUI_IsSafeBotDisplayName( const char *name ) {
+	const unsigned char *p = (const unsigned char *)name;
+	int length;
+	qboolean hasAlnum = qfalse;
+	if ( !name ) return qfalse;
+	length = (int)strlen( name );
+	if ( length < 1 || length > 31 || name[0] == ' ' || name[length - 1] == ' ' ) return qfalse;
+	for ( ; *p; p++ ) {
+		if ( ( *p >= 'a' && *p <= 'z' ) || ( *p >= 'A' && *p <= 'Z' )
+		  || ( *p >= '0' && *p <= '9' ) ) {
+			hasAlnum = qtrue;
+			continue;
+		}
+		if ( *p != ' ' && *p != '_' && *p != '-' ) return qfalse;
+	}
+	return hasAlnum;
+}
+
+static const clCharacterEntry_t *WiredUI_ResolveEligibleBotProfile( const char *profile ) {
+	if ( !WiredUI_IsSafeBotProfileToken( profile ) ) return NULL;
+	for ( int i = 0; i < CL_Characters_Count(); i++ ) {
+		const clCharacterEntry_t *entry = CL_Characters_At( i );
+		if ( entry && entry->loaded && entry->botEligible
+		  && !Q_stricmp( entry->dirname, profile ) ) return entry;
+	}
+	return NULL;
+}
+
+typedef struct {
+	qboolean valid;
+	unsigned int generation;
+	char profile[MAX_QPATH];
+} wiredBotProfileSelection_t;
+
+static wiredBotProfileSelection_t wui_botProfileSelection;
+
+static qboolean WiredUI_CaptureBotProfileSelection( const char *profile ) {
+	const clCharacterEntry_t *entry = WiredUI_ResolveEligibleBotProfile( profile );
+	memset( &wui_botProfileSelection, 0, sizeof( wui_botProfileSelection ) );
+	if ( !entry ) return qfalse;
+	wui_botProfileSelection.valid = qtrue;
+	wui_botProfileSelection.generation = CL_Characters_Generation();
+	Q_strncpyz( wui_botProfileSelection.profile, entry->dirname,
+		sizeof( wui_botProfileSelection.profile ) );
+	WiredUI_StateSetString( "ui_botProfile", entry->dirname );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: custom bot profile selected profile=%s generation=%u\n",
+		entry->dirname, wui_botProfileSelection.generation );
+	return qtrue;
+}
+
+static void WiredScript_BotProfileInit( wiredMenuDef_t *menu, wiredItemDef_t *item,
+	int numArgs, const char **args ) {
+	const char *preferred = numArgs >= 1 ? args[0] : "visor";
+	(void)menu;
+	(void)item;
+	if ( WiredUI_CaptureBotProfileSelection( preferred ) ) return;
+	for ( int i = 0; i < CL_Characters_Count(); i++ ) {
+		const clCharacterEntry_t *entry = CL_Characters_At( i );
+		if ( entry && entry->loaded && entry->botEligible
+		  && WiredUI_CaptureBotProfileSelection( entry->dirname ) ) return;
+	}
+	WiredUI_StateSetString( "ui_botProfile", "" );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: no eligible custom bot profile\n" );
+}
+
+static void WiredScript_BotProfileSelected( wiredMenuDef_t *menu, wiredItemDef_t *item,
+	int numArgs, const char **args ) {
+	char profile[MAX_QPATH];
+	(void)menu;
+	(void)item;
+	(void)numArgs;
+	(void)args;
+	WiredUI_StateGetString( "ui_botProfile", profile, sizeof( profile ) );
+	if ( !WiredUI_CaptureBotProfileSelection( profile ) ) {
+		COM_WARN( LOG_CH(ch_ui), "WiredUI: custom bot profile selection rejected\n" );
+	}
+}
+
+static void WiredScript_AddQuickBot( wiredMenuDef_t *menu, wiredItemDef_t *item,
+	int numArgs, const char **args ) {
+	const clCharacterEntry_t *entry;
+
+	(void)menu;
+	(void)item;
+
+	if ( !com_sv_running || !com_sv_running->integer ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: quick bot add refused without a running local server\n" );
+		return;
+	}
+	if ( numArgs != 1 || !args || !args[0][0] ) {
+		COM_WARN( LOG_CH(ch_ui), "WiredUI: quick bot add rejected without a profile\n" );
+		return;
+	}
+	entry = WiredUI_ResolveEligibleBotProfile( args[0] );
+	if ( !entry ) {
+		COM_WARN( LOG_CH(ch_ui), "WiredUI: quick bot add rejected invalid or ineligible profile\n" );
+		return;
+	}
+
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: queued validated quick bot add profile=%s skill=3 team=free\n",
+		entry->dirname );
+	Cbuf_ExecuteText( EXEC_INSERT, va( "addbot \"%s\" 3 free\n", entry->dirname ) );
+}
+
+static void WiredScript_AddCustomBot( wiredMenuDef_t *menu, wiredItemDef_t *item,
+	int numArgs, const char **args ) {
+	char profile[ MAX_QPATH ];
+	/* Read the complete Store value before applying the authored 31-byte form
+	 * contract.  A form-sized destination would silently accept an unsafe or
+	 * overlong persisted value after Q_strncpyz truncation. */
+	char name[ sizeof( ((wuiStoreEntry_t *)0)->text ) ];
+	char skillText[ 16 ];
+	char team[ 16 ];
+	char *skillEnd = NULL;
+	long skill;
+	const char *canonicalTeam;
+	const clCharacterEntry_t *entry;
+
+	(void)menu;
+	(void)item;
+	(void)numArgs;
+	(void)args;
+
+	if ( !com_sv_running || !com_sv_running->integer ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: custom bot add refused without a running local server\n" );
+		return;
+	}
+
+	WiredUI_StateGetString( "ui_botProfile", profile, sizeof( profile ) );
+	WiredUI_StateGetString( "ui_botName", name, sizeof( name ) );
+	WiredUI_StateGetString( "ui_botSkill", skillText, sizeof( skillText ) );
+	WiredUI_StateGetString( "ui_botTeam", team, sizeof( team ) );
+
+	if ( !wui_botProfileSelection.valid
+	  || wui_botProfileSelection.generation != CL_Characters_Generation()
+	  || Q_stricmp( profile, wui_botProfileSelection.profile ) ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: custom bot add rejected stale profile selection\n" );
+		return;
+	}
+	entry = WiredUI_ResolveEligibleBotProfile( wui_botProfileSelection.profile );
+	if ( !entry ) {
+		COM_WARN( LOG_CH(ch_ui), "WiredUI: custom bot add rejected ineligible profile\n" );
+		return;
+	}
+	if ( !WiredUI_IsSafeBotDisplayName( name ) ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: custom bot add rejected invalid display name\n" );
+		return;
+	}
+	skill = strtol( skillText, &skillEnd, 10 );
+	if ( skillEnd == skillText || *skillEnd != '\0' || skill < 1 || skill > 5 ) {
+		COM_WARN( LOG_CH(ch_ui), "WiredUI: custom bot add rejected invalid skill\n" );
+		return;
+	}
+	if ( !Q_stricmp( team, "free" ) ) canonicalTeam = "free";
+	else if ( !Q_stricmp( team, "red" ) ) canonicalTeam = "red";
+	else if ( !Q_stricmp( team, "blue" ) ) canonicalTeam = "blue";
+	else {
+		COM_WARN( LOG_CH(ch_ui), "WiredUI: custom bot add rejected invalid team\n" );
+		return;
+	}
+
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: queued validated custom bot add profile=%s name=%s skill=%ld team=%s\n",
+		entry->dirname, name, skill, canonicalTeam );
+	Cbuf_ExecuteText( EXEC_INSERT,
+		va( "addbot \"%s\" %ld %s 0 \"%s\"\n", entry->dirname, skill, canonicalTeam, name ) );
+	WiredUI_PopMenu();
 }
 
 // execConfirm: execute the command stored in ui_confirmAction state key.
@@ -4031,9 +4613,26 @@ static void WiredScript_VoteLeader( wiredMenuDef_t *menu, wiredItemDef_t *item, 
 
 // removebots.wui: direct host-side kick (not a vote) of the selected client.
 static void WiredScript_Kick( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
-	char buf[MAX_QPATH];
-	WiredUI_StateGetString( "ui_selectedPlayerNum", buf, sizeof( buf ) );
-	if ( buf[0] ) Cbuf_ExecuteText( EXEC_APPEND, va( "clientkick %s\n", buf ) );
+	int clientNum;
+	if ( !com_sv_running || !com_sv_running->integer ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: bot kick refused without a running local server\n" );
+		return;
+	}
+	if ( !WiredFeeder_GetSelectedBotClientNum( &clientNum ) ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: bot kick refused without a current bot selection\n" );
+		return;
+	}
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: queued verified bot kick client=%d\n", clientNum );
+	Cbuf_ExecuteText( EXEC_INSERT, va( "botkick %d\n", clientNum ) );
+	WiredFeeder_ClearBotSelection();
+}
+
+static void WiredScript_ClearBotSelection( wiredMenuDef_t *menu, wiredItemDef_t *item,
+	int numArgs, const char **args ) {
+	WiredFeeder_ClearBotSelection();
 }
 
 // ── favorite maps ────────────────────────────────────────────────────
@@ -4170,53 +4769,141 @@ static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item,
 	}
 }
 
+static void WiredScript_ResetPasswordPrompt( qboolean clearPassword ) {
+	memset( &wui_passwordPrompt, 0, sizeof( wui_passwordPrompt ) );
+	WiredUI_StateSetString( "ui_password_server_name", "" );
+	if ( clearPassword ) Cvar_Set( "password", "" );
+}
+
+static void WiredScript_QueueBrowserConnect( const char *normalized ) {
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: queued validated connect origin=browser address=%s\n", normalized );
+	WiredUI_CloseAllMenus();
+	Cbuf_ExecuteText( EXEC_APPEND, va( "connect \"%s\"\n", normalized ) );
+}
+
 static void WiredScript_JoinServer( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	char addr[256];
-	char password[256];
+	char normalized[256];
+	char password[MAX_CVAR_VALUE_STRING];
+	qboolean needPassword;
+	qboolean passwordSubmit = menu && !Q_stricmp( menu->name, "password" );
+	int selectionGeneration;
+	netadr_t resolved;
 
-	WiredUI_StateGetString( "ui_selectedServerAddr", addr, sizeof( addr ) );
-	if ( !addr[0] ) {
-		COM_WARN( LOG_CH(ch_ui), "WiredUI: no server selected\n" );
+	if ( !WiredFeeder_GetSelectedServerConnection( addr, sizeof( addr ),
+		NULL, 0, &needPassword, &selectionGeneration ) ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: browser connect refused without current selection\n" );
+		return;
+	}
+	if ( !CL_NormalizeServerAddress( addr, NA_UNSPEC, normalized, sizeof( normalized ), &resolved ) ) {
+		COM_WARN( LOG_CH(ch_ui), "WiredUI: rejected invalid server address origin=browser\n" );
 		return;
 	}
 
-	// check if server requires password and none is set
-	{
-		// look up the server by address to check g_needpass
-		int uiSource = WiredUI_StateGetInt( "ui_netSource" );
-		serverInfo_t *servers = ( uiSource == 0 ) ? cls.localServers :
-		                        ( uiSource == 6 ) ? cls.favoriteServers : cls.globalServers;
-		int count = ( uiSource == 0 ) ? cls.numlocalservers :
-		            ( uiSource == 6 ) ? cls.numfavoriteservers : cls.numglobalservers;
-		for ( int j = 0; j < count; j++ ) {
-			if ( !Q_stricmp( NET_AdrToStringwPort( &servers[j].adr ), addr ) ) {
-				if ( servers[j].g_needpass ) {
-					Cvar_VariableStringBuffer( "password", password, sizeof( password ) );
-					if ( !password[0] ) {
-						WiredUI_PushMenu( "password", WUI_BG_INTENT_INHERIT );
-						return;
-					}
-				}
-				break;
-			}
+	if ( needPassword && !passwordSubmit ) {
+		/* A cached credential must never bypass target confirmation.  Bind the
+		 * prompt to the feeder's typed selection epoch; do not seed reconnect. */
+		WiredScript_ResetPasswordPrompt( qtrue );
+		wui_passwordPrompt.valid = qtrue;
+		Q_strncpyz( wui_passwordPrompt.address, normalized,
+			sizeof( wui_passwordPrompt.address ) );
+		wui_passwordPrompt.selectionGeneration = selectionGeneration;
+		/* A hostile hostname must not impersonate the credential target. */
+		WiredUI_StateSetString( "ui_password_server_name", normalized );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: password required origin=browser address=%s selection_generation=%d\n",
+			normalized, selectionGeneration );
+		WiredUI_PushMenu( "password", WUI_BG_INTENT_INHERIT );
+		return;
+	}
+	if ( passwordSubmit ) {
+		Cvar_VariableStringBuffer( "password", password, sizeof( password ) );
+		if ( !needPassword || !wui_passwordPrompt.valid
+		     || wui_passwordPrompt.selectionGeneration != selectionGeneration
+		     || Q_stricmp( wui_passwordPrompt.address, normalized ) ) {
+			Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+				"WiredUI: password submit refused reason=stale-selection\n" );
+			return;
 		}
+		if ( !WiredUI_IsSafePasswordValue( password ) ) {
+			Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+				"WiredUI: password submit refused reason=invalid-credential\n" );
+			return;
+		}
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: password submit accepted address=%s selection_generation=%d\n",
+			normalized, selectionGeneration );
+		WiredScript_ResetPasswordPrompt( qfalse );
+	}
+	WiredScript_QueueBrowserConnect( normalized );
+}
+
+static void WiredScript_JoinServerPassword( wiredMenuDef_t *menu,
+	wiredItemDef_t *item, int numArgs, const char **args ) {
+	if ( !menu || Q_stricmp( menu->name, "password" ) ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: password submit refused reason=inactive-prompt\n" );
+		return;
+	}
+	WiredScript_JoinServer( menu, item, numArgs, args );
+}
+
+static void WiredScript_CancelServerPassword( wiredMenuDef_t *menu,
+	wiredItemDef_t *item, int numArgs, const char **args ) {
+	if ( !menu || Q_stricmp( menu->name, "password" ) ) return;
+	WiredScript_ResetPasswordPrompt( qtrue );
+	WiredUI_PopMenu();
+}
+
+static void WiredScript_ConnectSpecified( wiredMenuDef_t *menu, wiredItemDef_t *item,
+	int numArgs, const char **args ) {
+	char raw[256];
+	char normalized[256];
+
+	WiredUI_StateGetString( "ui_specifyAddress", raw, sizeof( raw ) );
+	if ( !CL_NormalizeServerAddress( raw, NA_UNSPEC, normalized, sizeof( normalized ), NULL ) ) {
+		/* Never echo rejected Store data: it can contain control/command text. */
+		COM_WARN( LOG_CH(ch_ui), "WiredUI: rejected invalid server address origin=specify\n" );
+		return;
 	}
 
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: queued validated connect origin=specify address=%s\n", normalized );
 	WiredUI_CloseAllMenus();
-	Cbuf_ExecuteText( EXEC_APPEND, va( "connect %s\n", addr ) );
+	Cbuf_ExecuteText( EXEC_APPEND, va( "connect \"%s\"\n", normalized ) );
 }
 
 static void WiredScript_RunDemo( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	char demoName[MAX_QPATH];
+	const unsigned char *p;
 
-	WiredUI_StateGetString( "ui_selectedDemo", demoName, sizeof( demoName ) );
-	if ( !demoName[0] ) {
+	if ( !WiredFeeder_GetSelectedDemo( demoName, sizeof( demoName ) ) ) {
 		COM_WARN( LOG_CH(ch_ui), "WiredUI: no demo selected\n" );
 		return;
 	}
+	if ( !Q_stricmp( demoName, "." ) || !Q_stricmp( demoName, ".." ) ) {
+		COM_WARN( LOG_CH(ch_ui), "WiredUI: rejected unsafe demo selection\n" );
+		return;
+	}
+	for ( p = (const unsigned char *)demoName; *p; p++ ) {
+		if ( !( ( *p >= 'a' && *p <= 'z' ) || ( *p >= 'A' && *p <= 'Z' )
+		     || ( *p >= '0' && *p <= '9' ) || *p == '_' || *p == '-' || *p == '.' ) ) {
+			COM_WARN( LOG_CH(ch_ui), "WiredUI: rejected unsafe demo selection\n" );
+			return;
+		}
+	}
 
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: queued validated demo playback name=%s\n", demoName );
 	WiredUI_CloseAllMenus();
-	Cbuf_ExecuteText( EXEC_APPEND, va( "demo %s\n", demoName ) );
+	Cbuf_ExecuteText( EXEC_INSERT, va( "demo \"%s\"\n", demoName ) );
+}
+
+static void WiredScript_LoadDemos( wiredMenuDef_t *menu, wiredItemDef_t *item,
+	int numArgs, const char **args ) {
+	WiredFeeder_LoadDemos();
 }
 
 // ── updateMapPreview ─────────────────────────────────────────────────
@@ -4254,20 +4941,32 @@ static void WiredScript_RunMod( wiredMenuDef_t *menu, wiredItemDef_t *item, int 
 	} else {
 		Cvar_Set( "fs_game", modName );
 	}
-	Cbuf_ExecuteText( EXEC_APPEND, "vid_restart\n" );
+	/* Defer the full game-directory lifecycle until this UI action returns.
+	 * fs_game has already passed its CV_FSPATH validator, so the restart command
+	 * needs no externally sourced argument and opens no command-string surface. */
+	Cbuf_ExecuteText( EXEC_APPEND, "game_restart\n" );
 }
 
 static void WiredScript_RefreshServers( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	int source = WiredUI_StateGetInt( "ui_netSource" );
+	char command[128];
 	qtime_t qt;
+	if ( WiredFeeder_ServerFixtureActive() ) {
+		WiredFeeder_RebuildServerDisplayList();
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: server refresh suppressed by automated fixture\n" );
+		return;
+	}
 
-	// always query local servers too — they appear instantly
-	Cbuf_ExecuteText( EXEC_APPEND, "localservers\n" );
-
+	/* Keep refresh causally adjacent to the authored action.  EXEC_APPEND can
+	 * strand these queries behind an already-buffered automation/config tail,
+	 * letting later UI steps observe a roster before the refresh ever ran. */
+	Q_strncpyz( command, "localservers\n", sizeof( command ) );
 	if ( source > 0 && source < 6 ) {
 		// query internet master servers
-		Cbuf_ExecuteText( EXEC_APPEND, va( "globalservers %d %d\n", source - 1, PROTOCOL_VERSION ) );
+		Com_sprintf( command, sizeof( command ),
+			"localservers\nglobalservers %d %d\n", source - 1, PROTOCOL_VERSION );
 	}
+	Cbuf_ExecuteText( EXEC_INSERT, command );
 
 	// record refresh timestamp for UI display
 	Com_RealTime( &qt );
@@ -4277,6 +4976,21 @@ static void WiredScript_RefreshServers( wiredMenuDef_t *menu, wiredItemDef_t *it
 static void WiredScript_RefreshFilter( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	extern void WiredFeeder_RebuildServerDisplayList( void );
 	WiredFeeder_RebuildServerDisplayList();
+}
+
+static void WiredScript_ServerStatusOpen( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	if ( !WiredFeeder_ServerStatusBegin() ) {
+		return;
+	}
+	WiredUI_PushMenu( "serverinfo", WUI_BG_INTENT_SCENE );
+}
+
+static void WiredScript_ServerStatusCancel( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	WiredFeeder_ServerStatusCancel();
+}
+
+static void WiredScript_ServerStatusRetry( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	(void) WiredFeeder_ServerStatusRetry();
 }
 
 // ── conditionalScript ─────────────────────────────────────────────────
@@ -4454,15 +5168,27 @@ static const wiredUiScriptEntry_t wiredUiScripts[] = {
 	{ "startserver",      WiredScript_StartServer },
 	{ "JoinServer",       WiredScript_JoinServer },
 	{ "joinserver",       WiredScript_JoinServer },
+	{ "JoinServerPassword", WiredScript_JoinServerPassword },
+	{ "joinserverpassword", WiredScript_JoinServerPassword },
+	{ "CancelServerPassword", WiredScript_CancelServerPassword },
+	{ "cancelserverpassword", WiredScript_CancelServerPassword },
+	{ "ConnectSpecified", WiredScript_ConnectSpecified },
+	{ "connectspecified", WiredScript_ConnectSpecified },
 	{ "RunDemo",          WiredScript_RunDemo },
 	{ "rundemo",          WiredScript_RunDemo },
 	{ "RunMod",           WiredScript_RunMod },
 	{ "runmod",           WiredScript_RunMod },
-	{ "LoadDemos",        NULL },  // feeders auto-load, noop
+	{ "LoadDemos",        WiredScript_LoadDemos },
 	{ "LoadMods",         NULL },
 	{ "LoadMovies",       NULL },
 	{ "RefreshServers",   WiredScript_RefreshServers },
 	{ "RefreshFilter",    WiredScript_RefreshFilter },
+	{ "ServerStatusOpen", WiredScript_ServerStatusOpen },
+	{ "serverstatusopen", WiredScript_ServerStatusOpen },
+	{ "ServerStatusCancel", WiredScript_ServerStatusCancel },
+	{ "serverstatuscancel", WiredScript_ServerStatusCancel },
+	{ "ServerStatusRetry", WiredScript_ServerStatusRetry },
+	{ "serverstatusretry", WiredScript_ServerStatusRetry },
 	{ "StopRefresh",      NULL },  // noop — server queries are fire-and-forget
 	{ "closeJoin",        NULL },
 	{ "closeingame",      NULL },
@@ -4470,6 +5196,8 @@ static const wiredUiScriptEntry_t wiredUiScripts[] = {
 	{ "nextCharacter",    WiredScript_NextCharacter },
 	{ "Kick",             WiredScript_Kick },
 	{ "kick",             WiredScript_Kick },
+	{ "ClearBotSelection", WiredScript_ClearBotSelection },
+	{ "clearbotselection", WiredScript_ClearBotSelection },
 	{ NULL, NULL }
 };
 
@@ -4560,6 +5288,10 @@ static const wiredScriptCommand_t wiredScriptCommands[] = {
 	{ "savestate",        WiredScript_SaveState },
 	{ "loadstate",        WiredScript_LoadState },
 	{ "exec",             WiredScript_Exec },
+	{ "addquickbot",      WiredScript_AddQuickBot },
+	{ "botprofileinit",   WiredScript_BotProfileInit },
+	{ "botprofileselected", WiredScript_BotProfileSelected },
+	{ "addcustombot",     WiredScript_AddCustomBot },
 	{ "clipboard",        WiredScript_Clipboard },
 	{ "execConfirm",      WiredScript_ExecConfirm },
 	{ "execconfirm",      WiredScript_ExecConfirm },
@@ -4599,9 +5331,15 @@ static const wiredScriptCommand_t wiredScriptCommands[] = {
 	// ── game action commands (also reachable via uiScript) ──────────
 	{ "startserver",      WiredScript_StartServer },
 	{ "joinserver",       WiredScript_JoinServer },
+	{ "joinserverpassword", WiredScript_JoinServerPassword },
+	{ "cancelserverpassword", WiredScript_CancelServerPassword },
+	{ "connectspecified", WiredScript_ConnectSpecified },
 	{ "rundemo",          WiredScript_RunDemo },
 	{ "runmod",           WiredScript_RunMod },
 	{ "refreshservers",   WiredScript_RefreshServers },
+	{ "serverstatusopen", WiredScript_ServerStatusOpen },
+	{ "serverstatuscancel", WiredScript_ServerStatusCancel },
+	{ "serverstatusretry", WiredScript_ServerStatusRetry },
 
 	{ NULL, NULL }
 };
@@ -4615,7 +5353,11 @@ static const wiredScriptCommand_t wiredScriptCommands[] = {
 static void WiredUI_RunScript( wiredMenuDef_t *menu, wiredItemDef_t *item, const char *script ) {
 	char        token[MAX_STRING_CHARS];
 	const char *args[WIRED_MAX_SCRIPT_ARGS];
-	static char argBuf[WIRED_MAX_SCRIPT_ARGS][256];
+	/* Script actions can re-enter the runner (`open` -> menu `onOpen`). Keep
+	 * argument storage call-local: a shared static buffer lets the nested script
+	 * overwrite the outer handler's args while that handler is still using them
+	 * (notably corrupting the menu name inside WiredUI_PushMenu). */
+	char        argBuf[WIRED_MAX_SCRIPT_ARGS][256];
 	int         numArgs;
 	const char *p;
 	qboolean    handled;
@@ -4694,6 +5436,8 @@ void WiredUI_PushMenu( const char *name, wuiBgIntent_t bgIntent ) {
 		COM_WARN( LOG_CH(ch_ui), "WiredUI: cannot open menu '%s' — not found (loaded %d menus)\n", name, WiredUI_GetMenuCount() );
 		return;
 	}
+	WiredUI_ResetListboxDoubleClick( "push" );
+	WiredUI_ReleaseCompositorPointer( "push" );
 
 	/* Idempotent top-of-stack guard. The settings sub-menus return to main with a
 	 * synchronous `close ; open "main"` batch (options/video/servers.wui et al):
@@ -4801,6 +5545,8 @@ void WiredUI_PushMenu( const char *name, wuiBgIntent_t bgIntent ) {
 }
 
 void WiredUI_PopMenu( void ) {
+	WiredUI_ResetListboxDoubleClick( "pop" );
+	WiredUI_ReleaseCompositorPointer( "pop" );
 	if ( wui_menuStackDepth <= 0 ) {
 		// nothing to pop — close UI entirely
 		wui_activeMenu = UIMENU_NONE;
@@ -4904,6 +5650,8 @@ void WiredUI_PopMenu( void ) {
 }
 
 void WiredUI_CloseAllMenus( void ) {
+	WiredUI_ResetListboxDoubleClick( "close-all" );
+	WiredUI_ReleaseCompositorPointer( "close-all" );
 	// stop all active cinematics on the stack
 	for ( int i = 0; i < wui_menuStackDepth; i++ ) {
 		wiredMenuDef_t *m = WiredUI_FindMenu( wui_menuStack[i] );
@@ -4938,6 +5686,18 @@ void WiredUI_CloseAllMenus( void ) {
 	wui_editItem = NULL;
 	Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
 	Cvar_Set( "cl_paused", "0" );
+
+	/* Machine-readable lifecycle evidence for release behavior gates.  Read
+	 * every field back from its authoritative owner after the mutations above;
+	 * this is a postcondition observation, not a predicted success message. */
+	{
+		wiredMenuDef_t *active = WiredUI_GetActiveMenu();
+		int catcherUI = ( Key_GetCatcher() & KEYCATCH_UI ) ? 1 : 0;
+		int paused = Cvar_VariableIntegerValue( "cl_paused" );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: close all postcondition depth=%d active=%s catcher_ui=%d paused=%d\n",
+			wui_menuStackDepth, active ? active->name : "none", catcherUI, paused );
+	}
 }
 
 // ── helper functions ──────────────────────────────────────────────────
@@ -5354,6 +6114,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 	 * runs as bookkeeping only — no behaviour change. */
 	if ( key == K_MOUSE1 ) {
 		(void) WiredUI_CompositorMouseButton( down );
+		wui_compositorPointerDown = down;
 	} else if ( down && key == K_MWHEELUP ) {
 		/* Consume the wheel when it lands on a scroll viewport so it scrolls
 		 * the content instead of falling through to legacy menu nav. */
@@ -5666,6 +6427,24 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 			focusedItem = NULL;
 		}
 	}
+	if ( down && key == K_MOUSE1 && wui_listboxClickLatch.valid
+	     && ( menu != wui_listboxClickLatch.menu
+	       || focusedItem != wui_listboxClickLatch.item ) ) {
+		WiredUI_ResetListboxDoubleClick( "different-target" );
+	}
+	if ( !down && key == K_MOUSE1 && wui_listboxClickLatch.valid ) {
+		if ( menu == wui_listboxClickLatch.menu
+		     && focusedItem == wui_listboxClickLatch.item ) {
+			wui_listboxClickLatch.releaseObserved = qtrue;
+			Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+				"WiredUI: listbox click phase=release input=K_MOUSE1 menu=%s item=%s feeder=%d row=%d list_generation=%d pointer_down=%d\n",
+				menu->name, focusedItem->name, wui_listboxClickLatch.feeder,
+				wui_listboxClickLatch.row, wui_listboxClickLatch.listGeneration,
+				wui_compositorPointerDown ? 1 : 0 );
+		} else {
+			WiredUI_ResetListboxDoubleClick( "release-target-change" );
+		}
+	}
 
 	// Unbind the highlighted keybind row with Del/Backspace while browsing the
 	// list (NOT in "press a key" capture mode — that path is handled above).
@@ -5829,6 +6608,25 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 
 			// LISTBOX items: click to select row (or column, in horizontal mode)
 			if ( focusedItem->type == ITEM_TYPE_LISTBOX && focusedItem->feeder != 0 ) {
+				if ( key != K_MOUSE1 ) {
+					const char *input = key == K_ENTER ? "K_ENTER"
+						: key == K_KP_ENTER ? "K_KP_ENTER"
+						: key == K_SPACE ? "K_SPACE" : "non-primary-pointer";
+					/* Keyboard activation consumes the already-authoritative
+					 * listSelectedRow established by navigation. It never re-hit-tests
+					 * the cursor, re-calls the feeder, or participates in double-click. */
+					WiredUI_ResetListboxDoubleClick( "non-primary-pointer" );
+					Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+						"WiredUI: listbox activate input=%s menu=%s item=%s feeder=%d row=%d\n",
+						input, menu->name, focusedItem->name,
+						(int)focusedItem->feeder, focusedItem->listSelectedRow );
+					if ( focusedItem->action[0]
+					     && ( key == K_ENTER || key == K_KP_ENTER ) ) {
+						if ( wui_sfxAction ) S_StartLocalSound( wui_sfxAction, CHAN_LOCAL_SOUND );
+						WiredUI_RunScript( menu, focusedItem, focusedItem->action );
+					}
+					break;
+				}
 				int   clickedRow;
 				int   total = WiredUI_FeederCount( (int)focusedItem->feeder );
 
@@ -5888,6 +6686,7 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 					 * and body share one column model AND the sort stays clickable. */
 					if ( headerH > 0.0f &&
 					     wui_cursorY >= listAbsY && wui_cursorY < listAbsY + headerH ) {
+						WiredUI_ResetListboxDoubleClick( "header" );
 						if ( focusedItem->columnSortCmd[0] ) {
 							int hcol = WiredUI_ListboxHeaderColumnAtX( focusedItem,
 							                                           listAbsX, listW, wui_cursorX );
@@ -5907,21 +6706,72 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				}
 
 				if ( clickedRow >= 0 && clickedRow < total ) {
+					int rawIndex = -1;
+					int source = -1;
+					int listGeneration = WiredUI_ListboxIdentityGeneration( focusedItem );
+					int selectionGeneration = -1;
+					int elapsed;
+					qboolean identityValid = qtrue;
+
 					focusedItem->listSelectedRow = clickedRow;
 					WiredUI_FeederSelection( (int)focusedItem->feeder, clickedRow );
 
-					// double-click detection: same row + same feeder within threshold
-					if ( focusedItem->doubleClick[0] &&
-					     clickedRow == wui_lastClickRow &&
-					     focusedItem->feeder == wui_lastClickFeeder &&
-					     ( cls.realtime - wui_lastClickTime ) < WIRED_DOUBLECLICK_TIME ) {
-						WiredUI_RunScript( menu, focusedItem, focusedItem->doubleClick );
-						wui_lastClickTime = 0;  // consumed
-					} else {
-						wui_lastClickTime = cls.realtime;
-						wui_lastClickRow = clickedRow;
-						wui_lastClickFeeder = focusedItem->feeder;
+					if ( (int)focusedItem->feeder == FEEDER_SERVERS ) {
+						identityValid = WiredFeeder_GetSelectedServerIdentity( clickedRow,
+							&rawIndex, &source, &listGeneration, &selectionGeneration );
 					}
+					if ( !identityValid ) {
+						WiredUI_ResetListboxDoubleClick( "selection-invalid" );
+						break;
+					}
+
+					elapsed = cls.realtime - wui_listboxClickLatch.time;
+					if ( wui_listboxClickLatch.valid ) {
+						if ( menu != wui_listboxClickLatch.menu
+						     || focusedItem != wui_listboxClickLatch.item
+						     || (int)focusedItem->feeder != wui_listboxClickLatch.feeder ) {
+							WiredUI_ResetListboxDoubleClick( "different-target" );
+						} else if ( clickedRow != wui_listboxClickLatch.row ) {
+							WiredUI_ResetListboxDoubleClick( "different-row" );
+						} else if ( listGeneration != wui_listboxClickLatch.listGeneration ) {
+							WiredUI_ResetListboxDoubleClick( "generation-change" );
+						} else if ( elapsed < 0 || elapsed >= WIRED_DOUBLECLICK_TIME ) {
+							WiredUI_ResetListboxDoubleClick( "timeout" );
+						} else if ( !wui_listboxClickLatch.releaseObserved ) {
+							WiredUI_ResetListboxDoubleClick( "missing-release" );
+						} else if ( focusedItem->doubleClick[0] ) {
+							/* Consume before the action: JoinServer closes all menus, and a
+							 * lifecycle reset must not observe stale item pointers. */
+							wui_listboxClickLatch.valid = qfalse;
+							Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+								"WiredUI: listbox click phase=double input=K_MOUSE1 menu=%s item=%s feeder=%d row=%d raw=%d source=%d list_generation=%d selection_generation=%d elapsed=%d\n",
+								menu->name, focusedItem->name, (int)focusedItem->feeder,
+								clickedRow, rawIndex, source, listGeneration,
+								selectionGeneration, elapsed );
+							WiredUI_RunScript( menu, focusedItem, focusedItem->doubleClick );
+							break;
+						}
+					}
+
+					wui_listboxClickLatch.valid = qtrue;
+					wui_listboxClickLatch.menu = menu;
+					wui_listboxClickLatch.item = focusedItem;
+					Q_strncpyz( wui_listboxClickLatch.menuName, menu->name,
+						sizeof( wui_listboxClickLatch.menuName ) );
+					Q_strncpyz( wui_listboxClickLatch.itemName, focusedItem->name,
+						sizeof( wui_listboxClickLatch.itemName ) );
+					wui_listboxClickLatch.feeder = (int)focusedItem->feeder;
+					wui_listboxClickLatch.row = clickedRow;
+					wui_listboxClickLatch.listGeneration = listGeneration;
+					wui_listboxClickLatch.time = cls.realtime;
+					wui_listboxClickLatch.releaseObserved = qfalse;
+					Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+						"WiredUI: listbox click phase=armed input=K_MOUSE1 menu=%s item=%s feeder=%d row=%d raw=%d source=%d list_generation=%d selection_generation=%d\n",
+						menu->name, focusedItem->name, (int)focusedItem->feeder,
+						clickedRow, rawIndex, source, listGeneration,
+						selectionGeneration );
+				} else {
+					WiredUI_ResetListboxDoubleClick( "invalid-row" );
 				}
 				if ( focusedItem->action[0] && ( key == K_MOUSE1 || key == K_ENTER || key == K_KP_ENTER ) ) {
 					if ( wui_sfxAction ) S_StartLocalSound( wui_sfxAction, CHAN_LOCAL_SOUND );
@@ -6862,6 +7712,8 @@ void CL_PublishConnectState( void ) {
 
 void WiredUI_ReloadHud( void ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "WiredUI: reloading HUD...\n" );
+	WiredUI_ResetListboxDoubleClick( "reload" );
+	WiredUI_ReleaseCompositorPointer( "reload" );
 
 	// destroy all active elements (frees Z_Malloc'd contexts)
 	WiredHud_DestroyAllElements();
@@ -6883,6 +7735,8 @@ void WiredUI_ReloadHud( void ) {
 
 void WiredUI_ReloadMenus( void ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "WiredUI: reloading menus...\n" );
+	WiredUI_ResetListboxDoubleClick( "reload" );
+	WiredUI_ReleaseCompositorPointer( "reload" );
 
 	// stop all cinematics before reload
 	{

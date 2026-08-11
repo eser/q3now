@@ -9,4 +9,5 @@ return {
     display_name = "^5TestMonster",
     nicknames    = { "testmonster" },
     role         = "duelist",
+    selectable   = false,
 }

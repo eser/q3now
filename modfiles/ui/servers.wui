@@ -288,7 +288,7 @@ menuDef {
 				padding 0.005 0
 
 				QW_BUTTON("btn_specify", "Specify...", $boneDim, { open "specifyserver" scene }, 0.12)
-				QW_BUTTON("btn_info", "Server Info", $boneDim, { open "serverinfo" scene }, 0.13)
+				QW_BUTTON("btn_info", "Server Info", $boneDim, { serverstatusopen }, 0.13)
 				QW_FOOTER_SPACER
 				QW_BUTTON("btn_cancel", "Cancel", $boneDim, { close ; open "main" scene }, 0.10)
 				QW_BUTTON("btn_connect", "Connect", $accent, { joinserver }, 0.12)

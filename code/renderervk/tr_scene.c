@@ -721,6 +721,9 @@ void RE_EmitParticles( const emitterDesc_t *desc ) {
 	  || (uint32_t)desc->cls > vk.particle.numClasses ) return;
 	if ( desc->count <= 0 ) return;
 
+	tr.pc.c_particleEmitters++;
+	tr.pc.c_particleParticles += desc->count;
+
 	gpuClasses = (const particleClassGPU_t *)vk.particle.classes_ptr;
 	cls        = &gpuClasses[ desc->cls - 1 ];
 

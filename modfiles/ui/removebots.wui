@@ -2,7 +2,7 @@
 //
 // In-game cluster popup (§7.4). Centered overlay mirroring
 // serverinfo.wui (§7.3) shape: header + subheader + ListBox body
-// over the connected-player feeder (feeder 7 = FEEDER_PLAYER_LIST)
+// over the bot-only feeder
 // + footer with Kick / Close.
 //
 // Engine note: kick action shells out to the `clientkick` console
@@ -41,10 +41,10 @@ menuDef {
 			height PERCENT 0.6
 
 			itemDef { name "header" type 0 rect 0 0 1 0.06 height FIT text "Remove Bot" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
-			itemDef { name "subheader" type 0 rect 0 0 1 0.03 height FIT text "Select a connected client and kick it from the server." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { name "subheader" type 0 rect 0 0 1 0.03 height FIT text "Select a connected bot and remove it from the server." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
 
-			// ── ListBox view of the PLAYER_LIST feeder (feeder 7).
-			// Single-column row of connected-client names; double-
+			// ── ListBox view of the bot-only feeder.
+			// Single-column row of connected-bot names; double-
 			// click kicks via uiScript Kick.
 			itemDef {
 				name "botlist"
@@ -56,7 +56,7 @@ menuDef {
 				forecolor $bone
 				backcolor $panelDeep
 				style 1
-				feeder 7
+				feeder "bots"
 				elementheight 22
 				columns 1 0 460 32
 				visible 1
@@ -72,11 +72,12 @@ menuDef {
 				alignX end
 				height FIT
 
-				itemDef { type 1 rect 0 0 0.18 0.04 height FIT text "Kick Selected" textalign 1 font $font_sans_bold 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { uiScript Kick } }
-				itemDef { type 1 rect 0 0 0.12 0.04 height FIT text "Close" textalign 1 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+				itemDef { name "btn_kick_bot" type 1 rect 0 0 0.18 0.04 height FIT text "Remove Selected" textalign 1 font $font_sans_bold 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { uiScript Kick } }
+				itemDef { name "btn_close" type 1 rect 0 0 0.12 0.04 height FIT text "Close" textalign 1 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
 			}
 		}
 	}
 
+	onOpen { clearbotselection }
 	onESC { close }
 }

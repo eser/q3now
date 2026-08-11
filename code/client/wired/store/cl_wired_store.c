@@ -331,6 +331,47 @@ static void WiredStore_Cmd_Get( void ) {
 
 /*
 ==================
+WiredStore_Cmd_Fingerprint
+
+Privacy-bounded Store evidence for automated behavior gates.  This proves the
+exact byte sequence reached the authoritative Store without echoing editfield
+contents (which may intentionally contain command-injection probes).
+
+Usage: wui_store_fingerprint <key>
+==================
+*/
+static void WiredStore_Cmd_Fingerprint( void ) {
+	const char *key;
+	const unsigned char *p;
+	wuiStoreEntry_t *e;
+	unsigned int hash = 2166136261u;
+	int length;
+
+	if ( Cmd_Argc() != 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Usage: wui_store_fingerprint <key>\n" );
+		return;
+	}
+
+	key = Cmd_Argv( 1 );
+	e = WiredStore_Get( key );
+	if ( !e ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client),
+			"WiredStore fingerprint: key=%s missing\n", key );
+		return;
+	}
+
+	length = (int)strlen( e->text );
+	for ( p = (const unsigned char *)e->text; *p; p++ ) {
+		hash ^= *p;
+		hash *= 16777619u;
+	}
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"WiredStore fingerprint: key=%s length=%d fnv1a32=%08x\n",
+		e->key, length, hash );
+}
+
+/*
+==================
 WiredStore_Cmd_Dump
 
 Prints all entries in bucket order.
@@ -466,6 +507,7 @@ void WiredStore_Init( void ) {
 	memset( &wired_store, 0, sizeof( wired_store ) );
 
 	Cmd_AddCommand( "wui_store_get", WiredStore_Cmd_Get );
+	Cmd_AddCommand( "wui_store_fingerprint", WiredStore_Cmd_Fingerprint );
 	Cmd_AddCommand( "wui_store_dump", WiredStore_Cmd_Dump );
 	Cmd_AddCommand( "wui_store_list", WiredStore_Cmd_List );
 	Cmd_AddCommand( "wui_store_watch", WiredStore_Cmd_Watch );
@@ -481,6 +523,7 @@ WiredStore_Shutdown
 */
 void WiredStore_Shutdown( void ) {
 	Cmd_RemoveCommand( "wui_store_get" );
+	Cmd_RemoveCommand( "wui_store_fingerprint" );
 	Cmd_RemoveCommand( "wui_store_dump" );
 	Cmd_RemoveCommand( "wui_store_list" );
 	Cmd_RemoveCommand( "wui_store_watch" );

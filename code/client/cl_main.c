@@ -188,9 +188,59 @@ static const char *s_renderer_fallback_list[] = { "vulkan", "opengl2", "opengl" 
 
 static ping_t cl_pinglist[MAX_PINGREQUESTS];
 
+#define CL_INFO_CHALLENGE_BYTES 16
+#define CL_INFO_CHALLENGE_CHARS ( CL_INFO_CHALLENGE_BYTES * 2 )
+#define CL_LOCAL_DISCOVERY_TIMEOUT_MS 3000u
+#define CL_MASTER_DISCOVERY_TIMEOUT_MS 3000u
+
+typedef struct {
+	char challenge[CL_INFO_CHALLENGE_CHARS + 1];
+	unsigned int generation;
+	unsigned int start;
+	unsigned int timeout;
+	qboolean active;
+} localDiscovery_t;
+
+typedef struct {
+	netadr_t address;
+	qboolean extended;
+} masterDiscoverySource_t;
+
+typedef struct {
+	masterDiscoverySource_t sources[MAX_MASTER_SERVERS];
+	unsigned int generation;
+	unsigned int start;
+	unsigned int timeout;
+	int sourceCount;
+	qboolean active;
+} masterDiscovery_t;
+
+static localDiscovery_t cl_localDiscovery;
+static masterDiscovery_t cl_masterDiscovery;
+static unsigned int cl_infoChallengeGeneration;
+static unsigned int cl_masterDiscoveryGeneration;
+
+static void hash_reset( void );
+
+static void CL_BumpGlobalServerGeneration( void ) {
+	cls.globalServerGeneration++;
+	if ( cls.globalServerGeneration == 0 ) cls.globalServerGeneration++;
+}
+
+static void CL_ClearServerQueryTransactions( void ) {
+	/* Discovery and directed-ping authority must not cross a client
+	 * shutdown/re-init boundary.  Keep the process-wide generation counter so
+	 * the next request still receives a distinct identity. */
+	memset( &cl_localDiscovery, 0, sizeof( cl_localDiscovery ) );
+	memset( &cl_masterDiscovery, 0, sizeof( cl_masterDiscovery ) );
+	memset( cl_pinglist, 0, sizeof( cl_pinglist ) );
+	hash_reset();
+}
+
 typedef struct serverStatus_s
 {
 	char string[BIG_INFO_STRING];
+	char challenge[24];
 	netadr_t address;
 	int time, startTime;
 	qboolean pending;
@@ -199,6 +249,7 @@ typedef struct serverStatus_s
 } serverStatus_t;
 
 static serverStatus_t cl_serverStatusList[MAX_SERVERSTATUSREQUESTS];
+static unsigned cl_serverStatusChallengeSerial;
 
 static void CL_CheckForResend( void );
 static void CL_ShowIP_f( void );
@@ -293,6 +344,29 @@ static void CL_WriteDemoMessage( msg_t *msg, int headerBytes ) {
 	swlen = LittleLong(len);
 	FS_Write( &swlen, 4, clientActiveApp->clc.recordfile );
 	FS_Write( msg->data + headerBytes, len, clientActiveApp->clc.recordfile );
+}
+
+static void CL_WriteGamestate( qboolean initial );
+static void CL_WriteSnapshot( void );
+
+/*
+====================
+CL_RecordCommittedSnapshot
+
+The WiredNet receive paths do not expose one legacy packet blob to copy into a
+demo.  Once CL_ParseSnapshot has validated and committed a snapshot, re-encode
+that authoritative state through the canonical demo writer.  Invalid deltas
+and pre-commit packet-entity state never reach the recording.
+====================
+*/
+void CL_RecordCommittedSnapshot( clientApp_t *app ) {
+	if ( app != clientActiveApp || !app->clc.demorecording
+	  || app->clc.demoplaying
+	  || app->clc.recordfile == FS_INVALID_HANDLE ) {
+		return;
+	}
+	app->clc.demowaiting = qfalse;
+	CL_WriteSnapshot();
 }
 
 
@@ -1853,6 +1927,96 @@ static void CL_SpawnHeadlessApp_f( void ) {
 
 /*
 ================
+CL_NormalizeServerAddress
+
+Validates one console-safe server-address token, resolves it once, and returns
+the canonical numeric address consumed by every UI/console connect path.  The
+lexical gate runs before NET_StringToAdr so command separators, quoting,
+whitespace, control bytes, and malformed ports never reach either DNS or the
+command buffer.
+================
+*/
+qboolean CL_NormalizeServerAddress( const char *input, netadrtype_t family,
+	char *normalized, int normalizedSize, netadr_t *address ) {
+	char token[sizeof( clientActiveApp->servername )];
+	const char *start;
+	const char *end;
+	const char *port = NULL;
+	int colonCount = 0;
+	int length;
+	netadr_t resolved;
+
+	if ( !input || !normalized || normalizedSize < 1 ) return qfalse;
+	normalized[0] = '\0';
+
+	start = input;
+	while ( *start == ' ' || *start == '\t' ) start++;
+	end = start + strlen( start );
+	while ( end > start && ( end[-1] == ' ' || end[-1] == '\t' ) ) end--;
+	length = (int)( end - start );
+	if ( length <= 0 || length >= (int)sizeof( token ) ) return qfalse;
+
+	for ( int i = 0; i < length; i++ ) {
+		const unsigned char ch = (unsigned char)start[i];
+		if ( ch >= 'A' && ch <= 'Z' ) continue;
+		if ( ch >= 'a' && ch <= 'z' ) continue;
+		if ( ch >= '0' && ch <= '9' ) continue;
+		if ( ch == '.' || ch == '_' || ch == '-' || ch == ':' ||
+		     ch == '[' || ch == ']' || ch == '%' ) continue;
+		return qfalse;
+	}
+
+	memcpy( token, start, (size_t)length );
+	token[length] = '\0';
+	for ( int i = 0; i < length; i++ ) {
+		if ( token[i] == ':' ) colonCount++;
+	}
+
+	if ( token[0] == '[' ) {
+		char *close = strchr( token + 1, ']' );
+		if ( !close || close == token + 1 || strchr( close + 1, ']' ) ||
+		     strchr( token + 1, '[' ) ) return qfalse;
+		if ( close[1] ) {
+			if ( close[1] != ':' || !close[2] ) return qfalse;
+			port = close + 2;
+		}
+	} else {
+		if ( strchr( token, '[' ) || strchr( token, ']' ) ) return qfalse;
+		if ( colonCount == 1 ) {
+			char *separator = strchr( token, ':' );
+			if ( separator == token || !separator[1] ) return qfalse;
+			port = separator + 1;
+		}
+	}
+
+	if ( port ) {
+		char *parseEnd = NULL;
+		long value;
+		for ( const char *p = port; *p; p++ ) {
+			if ( *p < '0' || *p > '9' ) return qfalse;
+		}
+		value = strtol( port, &parseEnd, 10 );
+		if ( !parseEnd || *parseEnd || value < 1 || value > 65535 ) return qfalse;
+	}
+
+	if ( !NET_StringToAdr( token, &resolved, family ) || resolved.type == NA_BAD ) {
+		return qfalse;
+	}
+	if ( resolved.port == 0 ) resolved.port = BigShort( PORT_SERVER );
+
+	if ( resolved.type == NA_LOOPBACK ) {
+		Q_strncpyz( normalized, "localhost", normalizedSize );
+	} else {
+		Q_strncpyz( normalized, NET_AdrToStringwPort( &resolved ), normalizedSize );
+	}
+	if ( !normalized[0] ) return qfalse;
+	if ( address ) *address = resolved;
+	return qtrue;
+}
+
+
+/*
+================
 CL_Connect_f
 ================
 */
@@ -1911,22 +2075,25 @@ static void CL_Connect_f( void ) {
 		return;
 	}
 
-	// try resolve remote server first
+	// Validate and resolve once.  All subsequent state and reconnect evidence
+	// uses the canonical token, never the raw command-buffer argument.
 	netadr_t addr;
-	if ( !NET_StringToAdr( server, &addr, family ) ) {
-		COM_WARN( LOG_CH(ch_client), "Bad server address - %s\n", server );
+	char normalized[sizeof( clientActiveApp->servername )];
+	if ( !CL_NormalizeServerAddress( server, family, normalized, sizeof( normalized ), &addr ) ) {
+		COM_WARN( LOG_CH(ch_client), "Bad server address\n" );
 		return;
 	}
+	server = normalized;
 
 	// save arguments for reconnect
 	char args[ sizeof( clientActiveApp->servername ) + MAX_CVAR_VALUE_STRING ];
-	Q_strncpyz( args, Cmd_ArgsFrom( 1 ), sizeof( args ) );
+	Q_strncpyz( args, server, sizeof( args ) );
 
 	// clear any previous "server full" type messages
 	clientActiveApp->clc.serverMessage[0] = '\0';
 
 	// if running a local server, kill it
-	if ( com_sv_running->integer && !strcmp( server, "localhost" ) ) {
+	if ( com_sv_running->integer && addr.type == NA_LOOPBACK ) {
 		SV_Shutdown( "Server quit" );
 	}
 
@@ -2718,6 +2885,97 @@ static hash_chain_t *hash_find( const netadr_t *addr )
 	return NULL;
 }
 
+static qboolean CL_MasterResponseCommandMatches( const msg_t *msg, qboolean extended ) {
+	const char *command = extended ? "getserversExtResponse" : "getserversResponse";
+	const size_t commandLength = strlen( command );
+	const byte *cursor;
+	const byte *end;
+
+	if ( !msg || msg->cursize < 4 || (size_t)( msg->cursize - 4 ) <= commandLength ) {
+		return qfalse;
+	}
+	cursor = msg->data + 4;
+	end = msg->data + msg->cursize;
+	if ( memcmp( cursor, command, commandLength ) != 0 ) return qfalse;
+	cursor += commandLength;
+	if ( cursor >= end ) return qfalse;
+	return *cursor == '\\' || ( extended && *cursor == '/' );
+}
+
+static int CL_MasterResponseSource( const netadr_t *from, qboolean extended ) {
+	for ( int i = 0; i < cl_masterDiscovery.sourceCount; i++ ) {
+		if ( cl_masterDiscovery.sources[i].extended == extended
+		  && NET_CompareAdr( from, &cl_masterDiscovery.sources[i].address ) ) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+static qboolean CL_ParseMasterResponseAddresses( const netadr_t *from,
+	const msg_t *msg, qboolean extended, netadr_t *addresses, int *addressCount ) {
+	const char *command = extended ? "getserversExtResponse" : "getserversResponse";
+	const byte *cursor = msg->data + 4 + strlen( command );
+	const byte *end = msg->data + msg->cursize;
+	int count = 0;
+
+	memset( addresses, 0, sizeof( *addresses ) * MAX_SERVERSPERPACKET );
+	while ( cursor < end ) {
+		byte separator = *cursor;
+		int addressBytes;
+
+		if ( end - cursor >= 4 && ( separator == '\\' || ( extended && separator == '/' ) )
+		  && cursor[1] == 'E' && cursor[2] == 'O' && cursor[3] == 'T' ) {
+			cursor += 4;
+			while ( cursor < end && ( *cursor == '\0' || *cursor == '\r' || *cursor == '\n' ) ) cursor++;
+			if ( cursor != end ) return qfalse;
+			*addressCount = count;
+			return qtrue;
+		}
+		if ( count >= MAX_SERVERSPERPACKET ) return qfalse;
+		if ( separator == '\\' ) {
+			addresses[count].type = NA_IP;
+			addressBytes = (int)sizeof( addresses[count].ipv._4 );
+		} else if ( extended && separator == '/' ) {
+#if FEAT_IPV6
+			addresses[count].type = NA_IP6;
+			addresses[count].scope_id = from->scope_id;
+			addressBytes = (int)sizeof( addresses[count].ipv._6 );
+#else
+			return qfalse;
+#endif
+		} else {
+			return qfalse;
+		}
+		cursor++;
+		if ( end - cursor < addressBytes + 2 ) return qfalse;
+		if ( addresses[count].type == NA_IP ) {
+			memcpy( addresses[count].ipv._4, cursor, addressBytes );
+		} else {
+#if FEAT_IPV6
+			memcpy( addresses[count].ipv._6, cursor, addressBytes );
+#endif
+		}
+		cursor += addressBytes;
+		{
+			unsigned int port = ( (unsigned int)cursor[0] << 8 ) | cursor[1];
+			if ( port == 0 ) return qfalse;
+			addresses[count].port = BigShort( (short)port );
+			cursor += 2;
+		}
+		count++;
+	}
+	return qfalse;
+}
+
+static qboolean CL_GlobalAddressKnown( const netadr_t *address ) {
+	if ( hash_find( address ) ) return qtrue;
+	for ( int i = 0; i < cls.numGlobalServerAddresses; i++ ) {
+		if ( NET_CompareAdr( address, &cls.globalServerAddresses[i] ) ) return qtrue;
+	}
+	return qfalse;
+}
+
 
 /*
 ===================
@@ -2726,115 +2984,70 @@ CL_ServersResponsePacket
 */
 static void CL_ServersResponsePacket( const netadr_t* from, msg_t *msg, qboolean extended ) {
 	netadr_t addresses[MAX_SERVERSPERPACKET];
-
-	//Com_Log( SEV_INFO, LOG_CH(ch_client), "CL_ServersResponsePacket\n"); // moved down
-
-	if (cls.numglobalservers == -1) {
-		// state to detect lack of servers or lack of response
-		cls.numglobalservers = 0;
-		cls.numGlobalServerAddresses = 0;
-		hash_reset();
-	}
-
-	// parse through server response string
+	unsigned int elapsed;
+	int sourceIndex;
 	int numservers = 0;
-	byte *buffptr  = msg->data;
-	byte *buffend  = buffptr + msg->cursize;
+	int added = 0;
 
-	// advance to initial token
-	do
-	{
-		if(*buffptr == '\\' || (extended && *buffptr == '/'))
-			break;
-
-		buffptr++;
-	} while (buffptr < buffend);
-
-	while (buffptr + 1 < buffend)
-	{
-		// IPv4 address
-		if (*buffptr == '\\')
-		{
-			buffptr++;
-
-			if (buffend - buffptr < sizeof(addresses[numservers].ipv._4) + sizeof(addresses[numservers].port) + 1)
-				break;
-
-			for(int i = 0; i < (int)sizeof(addresses[numservers].ipv._4); i++)
-				addresses[numservers].ipv._4[i] = *buffptr++;
-
-			addresses[numservers].type = NA_IP;
-		}
-#if FEAT_IPV6
-		// IPv6 address, if it's an extended response
-		else if (extended && *buffptr == '/')
-		{
-			buffptr++;
-
-			if (buffend - buffptr < sizeof(addresses[numservers].ipv._6) + sizeof(addresses[numservers].port) + 1)
-				break;
-
-			for(int i = 0; i < (int)sizeof(addresses[numservers].ipv._6); i++)
-				addresses[numservers].ipv._6[i] = *buffptr++;
-
-			addresses[numservers].type = NA_IP6;
-			addresses[numservers].scope_id = from->scope_id;
-		}
-#endif
-		else
-			// syntax error!
-			break;
-
-		// parse out port
-		addresses[numservers].port = (*buffptr++) << 8;
-		addresses[numservers].port += *buffptr++;
-		addresses[numservers].port = BigShort( addresses[numservers].port );
-
-		// syntax check
-		if (*buffptr != '\\' && *buffptr != '/')
-			break;
-
-		numservers++;
-		if (numservers >= MAX_SERVERSPERPACKET)
-			break;
+	if ( !cl_masterDiscovery.active ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+			"Ignored master response reason=inactive source=%s kind=%s\n",
+			NET_AdrToStringwPort( from ), extended ? "extended" : "classic" );
+		return;
+	}
+	elapsed = (unsigned int)Sys_Milliseconds() - cl_masterDiscovery.start;
+	if ( elapsed >= cl_masterDiscovery.timeout ) {
+		cl_masterDiscovery.active = qfalse;
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+			"Ignored master response reason=expired generation=%u source=%s kind=%s elapsed=%ums\n",
+			cl_masterDiscovery.generation, NET_AdrToStringwPort( from ),
+			extended ? "extended" : "classic", elapsed );
+		return;
+	}
+	sourceIndex = CL_MasterResponseSource( from, extended );
+	if ( sourceIndex < 0 ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+			"Ignored unauthorized %s from %s\n",
+			extended ? "getserversExtResponse" : "getserversResponse",
+			NET_AdrToStringwPort( from ) );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+			"Ignored master response reason=source-or-kind generation=%u source=%s kind=%s\n",
+			cl_masterDiscovery.generation, NET_AdrToStringwPort( from ),
+			extended ? "extended" : "classic" );
+		return;
+	}
+	if ( !CL_MasterResponseCommandMatches( msg, extended )
+	  || !CL_ParseMasterResponseAddresses( from, msg, extended, addresses, &numservers ) ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+			"Ignored master response reason=malformed generation=%u source=%s kind=%s\n",
+			cl_masterDiscovery.generation, NET_AdrToStringwPort( from ),
+			extended ? "extended" : "classic" );
+		return;
 	}
 
-	int count = cls.numglobalservers;
-
-	int i;
-	for (i = 0; i < numservers && count < MAX_GLOBAL_SERVERS; i++) {
-
-		// Tequila: It's possible to have sent many master server requests. Then
-		// we may receive many times the same addresses from the master server.
-		// We just avoid to add a server if it is still in the global servers list.
-		if ( hash_find( &addresses[i] ) )
-			continue;
-
-		hash_insert( &addresses[i] );
-
-		// build net address
-		serverInfo_t *server = &cls.globalServers[count];
-
-		CL_InitServerInfo( server, &addresses[i] );
-		// advance to next slot
-		count++;
-	}
-
-	// if getting the global list
-	if ( count >= MAX_GLOBAL_SERVERS && cls.numGlobalServerAddresses < MAX_GLOBAL_SERVERS )
-	{
-		// if we couldn't store the servers in the main list anymore
-		for (; i < numservers && cls.numGlobalServerAddresses < MAX_GLOBAL_SERVERS; i++)
-		{
-			// just store the addresses in an additional list
+	for ( int i = 0; i < numservers; i++ ) {
+		if ( CL_GlobalAddressKnown( &addresses[i] ) ) continue;
+		if ( cls.numglobalservers < MAX_GLOBAL_SERVERS ) {
+			hash_insert( &addresses[i] );
+			CL_InitServerInfo( &cls.globalServers[cls.numglobalservers], &addresses[i] );
+			cls.numglobalservers++;
+			added++;
+		} else if ( cls.numGlobalServerAddresses < MAX_GLOBAL_SERVERS ) {
 			cls.globalServerAddresses[cls.numGlobalServerAddresses++] = addresses[i];
+			added++;
 		}
 	}
-
-	cls.numglobalservers = count;
-	int total = count + cls.numGlobalServerAddresses;
-
-	Com_Log( SEV_INFO, LOG_CH(ch_client), "getserversResponse:%3d servers parsed (total %d)\n", numservers, total);
+	if ( added ) CL_BumpGlobalServerGeneration();
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"Accepted %s generation=%u address=%s parsed=%d total=%d\n",
+		extended ? "getserversExtResponse" : "getserversResponse",
+		cl_masterDiscovery.generation, NET_AdrToStringwPort( from ), numservers,
+		cls.numglobalservers + cls.numGlobalServerAddresses );
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"Accepted master response generation=%u source_index=%d source=%s kind=%s parsed=%d added=%d total=%d elapsed=%ums\n",
+		cl_masterDiscovery.generation, sourceIndex, NET_AdrToStringwPort( from ),
+		extended ? "extended" : "classic", numservers, added,
+		cls.numglobalservers + cls.numGlobalServerAddresses, elapsed );
 }
 
 
@@ -2976,13 +3189,15 @@ static qboolean CL_ConnectionlessPacket( const netadr_t *from, msg_t *msg ) {
 	}
 
 	// list of servers sent back by a master server (classic)
-	if ( !strncmp(c, "getserversResponse", 18) ) {
+	if ( !strncmp( c, "getserversResponse", 18 )
+	  && CL_MasterResponseCommandMatches( msg, qfalse ) ) {
 		CL_ServersResponsePacket( from, msg, qfalse );
 		return qfalse;
 	}
 
 	// list of servers sent back by a master server (extended)
-	if ( !strncmp(c, "getserversExtResponse", 21) ) {
+	if ( !strncmp( c, "getserversExtResponse", 21 )
+	  && CL_MasterResponseCommandMatches( msg, qtrue ) ) {
 		CL_ServersResponsePacket( from, msg, qtrue );
 		return qfalse;
 	}
@@ -4627,6 +4842,7 @@ CL_Init
 */
 void CL_Init( void ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "----- Client Initialization -----\n" );
+	CL_ClearServerQueryTransactions();
 
 	Con_Init();
 	Con_InitProjection();   /* UI presentation half (colors, fields, commands, close hook) */
@@ -4713,10 +4929,10 @@ void CL_Init( void ) {
 	cl_reconnectArgs          = clInitHandles[CLI_RECONNECTARGS];
 	cl_wiredRconPassword      = clInitHandles[CLI_WIREDRCONPASSWORD];
 
-	// Per-game identity — populated by cgame's CG_Init from
-	// bg_public.h's GAMENAME_FOR_MASTER. Engine reads only this cvar when
-	// querying master servers; it is empty until cgame loads.
-	Cvar_Get( "cl_gamename", "", CVAR_ROM );
+	// Cold-menu master queries run before cgame has published its per-game
+	// identity.  PRODUCT_NAME is the packaged product authority at that point;
+	// cgame may still replace this ROM cvar from GAMENAME_FOR_MASTER at init.
+	Cvar_Get( "cl_gamename", PRODUCT_NAME, CVAR_ROM );
 
 
 	{
@@ -4912,6 +5128,7 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 
 	recursive = qfalse;
 
+	CL_ClearServerQueryTransactions();
 	memset( &cls, 0, sizeof( cls ) );
 	// The per-connection tail (state, servername, cgameBsp, …) moved out of cls
 	// into clientApps[0]; the cls memset above no longer reaches it.
@@ -4932,45 +5149,85 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 }
 
 
-static void CL_SetServerInfo(serverInfo_t *server, const char *info, int ping) {
-	if (server) {
-		if (info) {
-			server->clients = atoi(Info_ValueForKey(info, "clients"));
-			Q_strncpyz(server->hostName,Info_ValueForKey(info, "hostname"), MAX_HOSTNAME_LENGTH);
-			Q_strncpyz(server->mapName, Info_ValueForKey(info, "mapname"), MAX_NAME_LENGTH);
-			server->maxClients = atoi(Info_ValueForKey(info, "sv_maxclients"));
-			Q_strncpyz(server->game,Info_ValueForKey(info, "game"), MAX_NAME_LENGTH);
-			server->gameType = atoi(Info_ValueForKey(info, "gametype"));
-			server->netType = atoi(Info_ValueForKey(info, "nettype"));
-			server->minPing = atoi(Info_ValueForKey(info, "minping"));
-			server->maxPing = atoi(Info_ValueForKey(info, "maxping"));
-			server->punkbuster = atoi(Info_ValueForKey(info, "punkbuster"));
-			server->g_humanplayers = atoi(Info_ValueForKey(info, "g_humanplayers"));
-			server->g_needpass = atoi(Info_ValueForKey(info, "g_needpass"));
-		}
+static qboolean CL_SetServerInfo( serverInfo_t *server, const char *info, int ping ) {
+	serverInfo_t parsed;
+	netadr_t address;
+	qboolean visible;
+
+	if ( !server ) return qfalse;
+	if ( !info ) {
 		server->ping = ping;
+		return qtrue;
 	}
+	if ( !CL_ParseServerInfoResponse( info, com_protocol->integer, &parsed ) ) {
+		return qfalse;
+	}
+	address = server->adr;
+	visible = server->visible;
+	*server = parsed;
+	server->adr = address;
+	server->visible = visible;
+	server->ping = ping;
+	return qtrue;
 }
 
 
 static void CL_SetServerInfoByAddress(const netadr_t *from, const char *info, int ping) {
+	qboolean globalChanged = qfalse;
 	for (int i = 0; i < MAX_OTHER_SERVERS; i++) {
 		if (NET_CompareAdr(from, &cls.localServers[i].adr) ) {
 			CL_SetServerInfo(&cls.localServers[i], info, ping);
 		}
 	}
 
-	for (int i = 0; i < MAX_GLOBAL_SERVERS; i++) {
+	for (int i = 0; i < cls.numglobalservers; i++) {
 		if (NET_CompareAdr(from, &cls.globalServers[i].adr)) {
-			CL_SetServerInfo(&cls.globalServers[i], info, ping);
+			if ( CL_SetServerInfo( &cls.globalServers[i], info, ping ) ) {
+				globalChanged = qtrue;
+			}
 		}
 	}
+	if ( globalChanged ) CL_BumpGlobalServerGeneration();
 
 	for (int i = 0; i < MAX_OTHER_SERVERS; i++) {
 		if (NET_CompareAdr(from, &cls.favoriteServers[i].adr)) {
 			CL_SetServerInfo(&cls.favoriteServers[i], info, ping);
 		}
 	}
+}
+
+static int CL_ServerInfoNetType( const netadr_t *from ) {
+	if ( !from ) return 0;
+	switch ( from->type ) {
+		case NA_BROADCAST:
+		case NA_IP:
+			return 1;
+#if FEAT_IPV6
+		case NA_IP6:
+			return 2;
+#endif
+		default:
+			return 0;
+	}
+}
+
+static unsigned int CL_ElapsedMilliseconds( unsigned int start ) {
+	return (unsigned int)Sys_Milliseconds() - start;
+}
+
+static void CL_NewInfoChallenge( char challenge[CL_INFO_CHALLENGE_CHARS + 1],
+	unsigned int *generation ) {
+	static const char hex[] = "0123456789abcdef";
+	byte random[CL_INFO_CHALLENGE_BYTES];
+	Com_RandomBytes( random, sizeof( random ) );
+	for ( size_t i = 0; i < sizeof( random ); i++ ) {
+		challenge[i * 2] = hex[random[i] >> 4];
+		challenge[i * 2 + 1] = hex[random[i] & 15];
+	}
+	challenge[CL_INFO_CHALLENGE_CHARS] = '\0';
+	cl_infoChallengeGeneration++;
+	if ( cl_infoChallengeGeneration == 0 ) cl_infoChallengeGeneration++;
+	if ( generation ) *generation = cl_infoChallengeGeneration;
 }
 
 
@@ -4981,61 +5238,96 @@ CL_ServerInfoPacket
 */
 static void CL_ServerInfoPacket( const netadr_t *from, msg_t *msg ) {
 	char	info[MAX_INFO_STRING];
+	serverInfo_t parsed;
+	ping_t *pingRequest = NULL;
+	const char *expectedChallenge;
+	unsigned int requestGeneration;
+	unsigned int elapsed;
 
-	const char *infoString = MSG_ReadString( msg );
+	/* Read the complete packet payload before applying the MAX_INFO_STRING
+	 * contract; MSG_ReadString would silently return a valid-looking 1023-byte
+	 * prefix for an overlong response. */
+	const char *infoString = MSG_ReadBigString( msg );
+	if ( strlen( infoString ) >= sizeof( info ) ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Rejected overlong infoResponse from %s\n",
+			NET_AdrToStringwPort( from ) );
+		return;
+	}
+	Q_strncpyz( info, infoString, sizeof( info ) );
 
-	// if this isn't the correct protocol version, ignore it
-	int prot = atoi( Info_ValueForKey( infoString, "protocol" ) );
-	if ( prot != com_protocol->integer ) {
-		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Different protocol info packet: %s\n", infoString );
+	/* An address alone is not response authority.  Prefer a live directed-ping
+	 * transaction for that address; otherwise only an active local broadcast
+	 * generation may admit a previously unknown row. */
+	for ( int i = 0; i < MAX_PINGREQUESTS; i++ ) {
+		if ( cl_pinglist[i].adr.port && !cl_pinglist[i].time
+		  && NET_CompareAdr( from, &cl_pinglist[i].adr ) ) {
+			pingRequest = &cl_pinglist[i];
+			break;
+		}
+	}
+	if ( pingRequest ) {
+		elapsed = CL_ElapsedMilliseconds( pingRequest->start );
+		if ( elapsed >= pingRequest->timeout ) {
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+				"Ignored expired ping infoResponse generation=%u from %s\n",
+				pingRequest->generation, NET_AdrToStringwPort( from ) );
+			return;
+		}
+		expectedChallenge = pingRequest->challenge;
+		requestGeneration = pingRequest->generation;
+	} else {
+		if ( !Sys_IsLANAddress( from ) ) {
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+				"Ignored non-LAN local discovery infoResponse from %s\n",
+				NET_AdrToStringwPort( from ) );
+			return;
+		}
+		elapsed = CL_ElapsedMilliseconds( cl_localDiscovery.start );
+		if ( !cl_localDiscovery.active || elapsed >= cl_localDiscovery.timeout ) {
+			cl_localDiscovery.active = qfalse;
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+				"Ignored unsolicited infoResponse from %s\n", NET_AdrToStringwPort( from ) );
+			return;
+		}
+		expectedChallenge = cl_localDiscovery.challenge;
+		requestGeneration = cl_localDiscovery.generation;
+	}
+	if ( !CL_ServerInfoChallengeMatches( info, expectedChallenge ) ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+			"Ignored infoResponse challenge mismatch generation=%u from %s\n",
+			requestGeneration, NET_AdrToStringwPort( from ) );
+		return;
+	}
+	if ( !Info_SetValueForKey( info, "nettype", va( "%d", CL_ServerInfoNetType( from ) ) ) ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Rejected full infoResponse from %s\n",
+			NET_AdrToStringwPort( from ) );
+		return;
+	}
+
+	// Reject the complete untrusted row before it can enter any browser cache.
+	if ( !CL_ParseServerInfoResponse( info, com_protocol->integer, &parsed ) ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Rejected invalid infoResponse from %s\n",
+			NET_AdrToStringwPort( from ) );
 		return;
 	}
 
 	// iterate servers waiting for ping response
-	for (int i=0; i<MAX_PINGREQUESTS; i++)
-	{
-		if ( cl_pinglist[i].adr.port && !cl_pinglist[i].time && NET_CompareAdr( from, &cl_pinglist[i].adr ) )
-		{
+	if ( pingRequest ) {
 			// calc ping time
-			cl_pinglist[i].time = Sys_Milliseconds() - cl_pinglist[i].start;
-			if ( cl_pinglist[i].time < 1 )
+			pingRequest->time = (int)elapsed;
+			if ( pingRequest->time < 1 )
 			{
-				cl_pinglist[i].time = 1;
+				pingRequest->time = 1;
 			}
-			Com_Log( SEV_DEBUG, LOG_CH(ch_client), "ping time %dms from %s\n", cl_pinglist[i].time, NET_AdrToString( from ) );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+				"Accepted ping infoResponse generation=%u time=%dms address=%s\n",
+				pingRequest->generation, pingRequest->time, NET_AdrToStringwPort( from ) );
 
 			// save of info
-			Q_strncpyz( cl_pinglist[i].info, infoString, sizeof( cl_pinglist[i].info ) );
-
-			// tack on the net type
-			// NOTE: make sure these types are in sync with the netnames strings in the UI
-			int type;
-			switch (from->type)
-			{
-				case NA_BROADCAST:
-				case NA_IP:
-					type = 1;
-					break;
-#if FEAT_IPV6
-				case NA_IP6:
-					type = 2;
-					break;
-#endif
-				default:
-					type = 0;
-					break;
-			}
-
-			Info_SetValueForKey( cl_pinglist[i].info, "nettype", va( "%d", type ) );
-			CL_SetServerInfoByAddress( from, infoString, cl_pinglist[i].time );
+			Q_strncpyz( pingRequest->info, info, sizeof( pingRequest->info ) );
+			CL_SetServerInfoByAddress( from, pingRequest->info, pingRequest->time );
 
 			return;
-		}
-	}
-
-	// if not just sent a local broadcast or pinging local servers
-	if (cls.pingUpdateSource != AS_LOCAL) {
-		return;
 	}
 
 	int i;
@@ -5057,17 +5349,19 @@ static void CL_ServerInfoPacket( const netadr_t *from, msg_t *msg ) {
 	}
 
 	// add this to the list
-	cls.numlocalservers = i+1;
 	CL_InitServerInfo( &cls.localServers[i], from );
-
-	Q_strncpyz( info, MSG_ReadString( msg ), sizeof( info ) );
-	int len = (int) strlen( info );
-	if ( len > 0 ) {
-		if ( info[ len-1 ] == '\n' ) {
-			info[ len-1 ] = '\0';
-		}
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "%s: %s\n", NET_AdrToStringwPort( from ), info );
+	if ( elapsed < 1 ) elapsed = 1;
+	if ( !CL_SetServerInfo( &cls.localServers[i], info, (int)elapsed ) ) {
+		memset( &cls.localServers[i], 0, sizeof( cls.localServers[i] ) );
+		return;
 	}
+	cls.numlocalservers = i+1;
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"Accepted local discovery infoResponse generation=%u address=%s rtt=%ums name=%s map=%s clients=%d/%d gametype=%d\n",
+		cl_localDiscovery.generation,
+		NET_AdrToStringwPort( from ), elapsed, cls.localServers[i].hostName,
+		cls.localServers[i].mapName, cls.localServers[i].clients,
+		cls.localServers[i].maxClients, cls.localServers[i].gameType );
 }
 
 
@@ -5098,6 +5392,20 @@ static serverStatus_t *CL_GetServerStatus( const netadr_t *from ) {
 	return &cl_serverStatusList[oldest];
 }
 
+static void CL_BeginServerStatusRequest( serverStatus_t *serverStatus,
+	const netadr_t *to, qboolean print ) {
+	serverStatus->address = *to;
+	serverStatus->print = print;
+	serverStatus->pending = qtrue;
+	serverStatus->retrieved = qfalse;
+	serverStatus->startTime = Sys_Milliseconds();
+	serverStatus->time = 0;
+	Com_sprintf( serverStatus->challenge, sizeof( serverStatus->challenge ),
+		"%08x%08x", (unsigned)serverStatus->startTime,
+		++cl_serverStatusChallengeSerial );
+	NET_OutOfBandPrint( NS_CLIENT, to, "getstatus %s", serverStatus->challenge );
+}
+
 
 /*
 ===================
@@ -5110,7 +5418,7 @@ int CL_ServerStatus( const char *serverAddress, char *serverStatusString, int ma
 	// if no server address then reset all server status requests
 	if ( !serverAddress ) {
 		for (int i = 0; i < MAX_SERVERSTATUSREQUESTS; i++) {
-			cl_serverStatusList[i].address.port = 0;
+			memset( &cl_serverStatusList[i], 0, sizeof( cl_serverStatusList[i] ) );
 			cl_serverStatusList[i].retrieved = qtrue;
 		}
 		return qfalse;
@@ -5122,6 +5430,7 @@ int CL_ServerStatus( const char *serverAddress, char *serverStatusString, int ma
 	serverStatus_t *serverStatus = CL_GetServerStatus( &to );
 	// if no server status string then reset the server status request for this address
 	if ( !serverStatusString ) {
+		memset( serverStatus, 0, sizeof( *serverStatus ) );
 		serverStatus->retrieved = qtrue;
 		return qfalse;
 	}
@@ -5142,19 +5451,13 @@ int CL_ServerStatus( const char *serverAddress, char *serverStatusString, int ma
 			serverStatus->retrieved = qfalse;
 			serverStatus->time		= 0;
 			serverStatus->startTime = Sys_Milliseconds();
-			NET_OutOfBandPrint( NS_CLIENT, &to, "getstatus" );
+			NET_OutOfBandPrint( NS_CLIENT, &to, "getstatus %s", serverStatus->challenge );
 			return qfalse;
 		}
 	}
 	// if retrieved
 	else if ( serverStatus->retrieved ) {
-		serverStatus->address = to;
-		serverStatus->print = qfalse;
-		serverStatus->pending = qtrue;
-		serverStatus->retrieved = qfalse;
-		serverStatus->startTime = Sys_Milliseconds();
-		serverStatus->time = 0;
-		NET_OutOfBandPrint( NS_CLIENT, &to, "getstatus" );
+		CL_BeginServerStatusRequest( serverStatus, &to, qfalse );
 		return qfalse;
 	}
 	return qfalse;
@@ -5178,10 +5481,20 @@ static void CL_ServerStatusResponse( const netadr_t *from, msg_t *msg ) {
 	}
 	// if we didn't request this server status
 	if (!serverStatus) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+			"CL_ServerStatusResponse: ignored unrequested response from %s\n",
+			NET_AdrToStringwPort( from ) );
 		return;
 	}
 
 	const char *s = MSG_ReadStringLine( msg );
+	if ( !serverStatus->pending || !serverStatus->challenge[0]
+	     || Q_stricmp( Info_ValueForKey( s, "challenge" ), serverStatus->challenge ) ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+			"CL_ServerStatusResponse: ignored stale challenge from %s\n",
+			NET_AdrToStringwPort( from ) );
+		return;
+	}
 
 	int len = 0;
 	Com_sprintf(&serverStatus->string[len], sizeof(serverStatus->string)-len, "%s", s);
@@ -5251,6 +5564,9 @@ static void CL_ServerStatusResponse( const netadr_t *from, msg_t *msg ) {
 	serverStatus->time = Sys_Milliseconds();
 	serverStatus->address = *from;
 	serverStatus->pending = qfalse;
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+		"CL_ServerStatusResponse: stored response from %s bytes=%d\n",
+		NET_AdrToStringwPort( from ), (int)strlen( serverStatus->string ) );
 	if (serverStatus->print) {
 		serverStatus->retrieved = qtrue;
 	}
@@ -5268,6 +5584,14 @@ static void CL_LocalServers_f( void ) {
 	// reset the list, waiting for response
 	cls.numlocalservers = 0;
 	cls.pingUpdateSource = AS_LOCAL;
+	CL_NewInfoChallenge( cl_localDiscovery.challenge, &cl_localDiscovery.generation );
+	cl_localDiscovery.start = (unsigned int)Sys_Milliseconds();
+	cl_localDiscovery.timeout = CL_LOCAL_DISCOVERY_TIMEOUT_MS;
+	cl_localDiscovery.active = qtrue;
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+		"Local discovery request generation=%u challenge=%s timeout=%ums\n",
+		cl_localDiscovery.generation, cl_localDiscovery.challenge,
+		cl_localDiscovery.timeout );
 
 	for (int i = 0; i < MAX_OTHER_SERVERS; i++) {
 		qboolean b = cls.localServers[i].visible;
@@ -5278,12 +5602,6 @@ static void CL_LocalServers_f( void ) {
 	netadr_t to;
 	memset( &to, 0, sizeof( to ) );
 
-	// The 'xxx' in the message is a challenge that will be echoed back
-	// by the server.  We don't care about that here, but master servers
-	// can use that to prevent spoofed server responses from invalid ip
-	const char *message = "\377\377\377\377getinfo xxx";
-	int n = (int)strlen( message );
-
 	// send each message twice in case one is dropped
 	for ( int i = 0 ; i < 2 ; i++ ) {
 		// send a broadcast packet on each server port
@@ -5293,10 +5611,10 @@ static void CL_LocalServers_f( void ) {
 			to.port = BigShort( (short)(PORT_SERVER + j) );
 
 			to.type = NA_BROADCAST;
-			NET_SendPacket( NS_CLIENT, n, message, &to );
+			NET_OutOfBandPrint( NS_CLIENT, &to, "getinfo %s", cl_localDiscovery.challenge );
 #if FEAT_IPV6
 			to.type = NA_MULTICAST6;
-			NET_SendPacket( NS_CLIENT, n, message, &to );
+			NET_OutOfBandPrint( NS_CLIENT, &to, "getinfo %s", cl_localDiscovery.challenge );
 #endif
 		}
 	}
@@ -5312,103 +5630,183 @@ ioquake3 2008; added support for requesting five separate master servers using 0
 ioquake3 2017; made master 0 fetch all master servers and 1-5 request a single master server.
 ==================
 */
-static void CL_GlobalServers_f( void ) {
-	char		command[1024];
+static qboolean CL_MasterDecimalArg( const char *text, int maximum, int *value ) {
+	int parsed = 0;
+	if ( !text || !text[0] || !value || maximum < 0 ) return qfalse;
+	for ( const unsigned char *p = (const unsigned char *)text; *p; p++ ) {
+		int digit = *p - '0';
+		if ( digit < 0 || digit > 9 || parsed > ( maximum - digit ) / 10 ) return qfalse;
+		parsed = parsed * 10 + digit;
+	}
+	*value = parsed;
+	return qtrue;
+}
 
-	int count, masterNum;
-	if ( (count = Cmd_Argc()) < 3 || (masterNum = atoi(Cmd_Argv(1))) < 0 || masterNum > MAX_MASTER_SERVERS )
-	{
+static qboolean CL_MasterTokenSafe( const char *text ) {
+	if ( !text || !text[0] ) return qfalse;
+	for ( const unsigned char *p = (const unsigned char *)text; *p; p++ ) {
+		if ( !( ( *p >= 'a' && *p <= 'z' ) || ( *p >= 'A' && *p <= 'Z' )
+		     || ( *p >= '0' && *p <= '9' ) || *p == '_' || *p == '-' || *p == '.' ) ) {
+			return qfalse;
+		}
+	}
+	return qtrue;
+}
+
+static void CL_GlobalServers_f( void ) {
+	masterDiscoverySource_t resolved[MAX_MASTER_SERVERS];
+	const char *gamename;
+	size_t commandLength;
+	int count = Cmd_Argc();
+	int masterNum;
+	int protocol;
+	int resolvedCount = 0;
+
+	if ( count < 3
+	  || !CL_MasterDecimalArg( Cmd_Argv( 1 ), MAX_MASTER_SERVERS, &masterNum )
+	  || !CL_MasterDecimalArg( Cmd_Argv( 2 ), INT_MAX, &protocol ) || protocol <= 0 ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "usage: globalservers <master# 0-%d> <protocol> [keywords]\n", MAX_MASTER_SERVERS );
 		return;
 	}
-
-	// request from all master servers
-	if ( masterNum == 0 ) {
-		int numAddress = 0;
-
-		for ( int i = 1; i <= MAX_MASTER_SERVERS; i++ ) {
-			sprintf( command, "sv_master%d", i );
-			const char *masteraddress = Cvar_VariableString( command );
-
-			if ( !*masteraddress )
-				continue;
-
-			numAddress++;
-
-			Com_sprintf( command, sizeof( command ), "globalservers %d %s %s\n", i, Cmd_Argv( 2 ), Cmd_ArgsFrom( 3 ) );
-			Cbuf_AddText( command );
+	gamename = Cvar_VariableString( "cl_gamename" );
+	if ( !CL_MasterTokenSafe( gamename ) ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_client),
+			"CL_GlobalServers_f: invalid or empty cl_gamename; cannot query master.\n" );
+		return;
+	}
+	for ( int i = 3; i < count; i++ ) {
+		if ( !CL_MasterTokenSafe( Cmd_Argv( i ) ) ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_client),
+				"CL_GlobalServers_f: rejected invalid master keyword.\n" );
+			return;
 		}
-
-		if ( !numAddress ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_client), "CL_GlobalServers_f: Error: No master server addresses.\n");
+	}
+	commandLength = strlen( gamename ) + 32;
+	for ( int i = 3; i < count; i++ ) commandLength += strlen( Cmd_Argv( i ) ) + 1;
+	if ( commandLength >= 1024 ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_client),
+			"CL_GlobalServers_f: master query command too long; cache preserved.\n" );
+		return;
+	}
+	{
+		size_t commandLength = strlen( "getserversExt " ) + strlen( gamename ) + 1
+			+ strlen( Cmd_Argv( 2 ) ) + strlen( " ipv6" );
+		for ( int i = 3; i < count; i++ ) commandLength += 1 + strlen( Cmd_Argv( i ) );
+		if ( commandLength >= 1024 ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_client),
+				"CL_GlobalServers_f: rejected overlong master query.\n" );
+			return;
 		}
-		return;
 	}
 
-	sprintf( command, "sv_master%d", masterNum );
-	const char *masteraddress = Cvar_VariableString( command );
+	memset( resolved, 0, sizeof( resolved ) );
+	for ( int number = masterNum ? masterNum : 1;
+	      number <= ( masterNum ? masterNum : MAX_MASTER_SERVERS ); number++ ) {
+		char cvarName[32];
+		const char *masterAddress;
+		netadr_t address;
+		int result;
+		qboolean duplicate = qfalse;
 
-	if ( !*masteraddress )
-	{
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "CL_GlobalServers_f: Error: No master server address given.\n");
-		return;
-	}
-
-	// reset the list, waiting for response
-	// -1 is used to distinguish a "no response"
-
-	netadr_t to;
-	int i = NET_StringToAdr( masteraddress, &to, NA_UNSPEC );
-
-	if ( i == 0 )
-	{
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "CL_GlobalServers_f: Error: could not resolve address of master %s\n", masteraddress );
-		return;
-	}
-	if ( i == 2 )
-		to.port = BigShort( PORT_MASTER );
-
-	Com_Log( SEV_INFO, LOG_CH(ch_client), "Requesting servers from %s (%s)...\n", masteraddress, NET_AdrToStringwPort( &to ) );
-
-	cls.numglobalservers = -1;
-	cls.pingUpdateSource = AS_GLOBAL;
-
-	// Use the extended query for IPv6 masters
-	const char *gamename = Cvar_VariableString( "cl_gamename" );
-	if ( !*gamename ) {
-		Com_Log( SEV_WARN, LOG_CH(ch_client), "CL_GlobalServers_f: cl_gamename empty (cgame not initialized?); cannot query master.\n" );
-		return;
-	}
+		Com_sprintf( cvarName, sizeof( cvarName ), "sv_master%d", number );
+		masterAddress = Cvar_VariableString( cvarName );
+		if ( !masterAddress[0] ) continue;
+		memset( &address, 0, sizeof( address ) );
+		result = NET_StringToAdr( masterAddress, &address, NA_UNSPEC );
+		if ( result == 0 ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_client),
+				"Master discovery resolve failed slot=%d address=%s\n", number, masterAddress );
+			continue;
+		}
+		if ( result == 2 ) address.port = BigShort( PORT_MASTER );
+		if ( address.type != NA_IP
 #if FEAT_IPV6
-	if ( to.type == NA_IP6 || to.type == NA_MULTICAST6 )
-	{
-		int v4enabled = Cvar_VariableIntegerValue( "net_enabled" ) & NET_ENABLEV4;
-
-		if ( v4enabled )
-		{
-			Com_sprintf( command, sizeof( command ), "getserversExt %s %s",
-				gamename, Cmd_Argv(2) );
-		}
-		else
-		{
-			Com_sprintf( command, sizeof( command ), "getserversExt %s %s ipv6",
-				gamename, Cmd_Argv(2) );
-		}
-	}
-	else
+		  && address.type != NA_IP6
 #endif
-		Com_sprintf( command, sizeof( command ), "getservers %s", Cmd_Argv(2) );
-
-	{
-		qstring_t cmd_qs = QS_WrapExisting( command, sizeof( command ) );
-		for ( int i = 3; i < count; i++ )
-		{
-			QS_AppendChar( &cmd_qs, ' ' );
-			QS_Append( &cmd_qs, Cmd_Argv( i ) );
+		) {
+			Com_Log( SEV_WARN, LOG_CH(ch_client),
+				"Master discovery resolve rejected slot=%d address=%s\n", number, masterAddress );
+			continue;
 		}
+		for ( int i = 0; i < resolvedCount; i++ ) {
+			if ( NET_CompareAdr( &address, &resolved[i].address ) ) {
+				duplicate = qtrue;
+				break;
+			}
+		}
+		if ( duplicate ) continue;
+		resolved[resolvedCount].address = address;
+#if FEAT_IPV6
+		resolved[resolvedCount].extended = address.type == NA_IP6;
+#else
+		resolved[resolvedCount].extended = qfalse;
+#endif
+		resolvedCount++;
+	}
+	if ( resolvedCount == 0 ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_client),
+			"CL_GlobalServers_f: no configured master endpoint resolved; cache preserved.\n" );
+		return;
 	}
 
-	NET_OutOfBandPrint( NS_SERVER, &to, "%s", command );
+	memset( &cl_masterDiscovery, 0, sizeof( cl_masterDiscovery ) );
+	memcpy( cl_masterDiscovery.sources, resolved,
+		(size_t)resolvedCount * sizeof( resolved[0] ) );
+	cl_masterDiscovery.sourceCount = resolvedCount;
+	cl_masterDiscoveryGeneration++;
+	if ( cl_masterDiscoveryGeneration == 0 ) cl_masterDiscoveryGeneration++;
+	cl_masterDiscovery.generation = cl_masterDiscoveryGeneration;
+	cl_masterDiscovery.start = (unsigned int)Sys_Milliseconds();
+	cl_masterDiscovery.timeout = CL_MASTER_DISCOVERY_TIMEOUT_MS;
+	cl_masterDiscovery.active = qtrue;
+
+	memset( cls.globalServers, 0, sizeof( cls.globalServers ) );
+	memset( cls.globalServerAddresses, 0, sizeof( cls.globalServerAddresses ) );
+	memset( cl_pinglist, 0, sizeof( cl_pinglist ) );
+	cls.numglobalservers = 0;
+	cls.numGlobalServerAddresses = 0;
+	cls.pingUpdateSource = AS_GLOBAL;
+	hash_reset();
+	CL_BumpGlobalServerGeneration();
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"Master discovery query generation=%u sources=%d protocol=%d gamename=%s timeout=%ums\n",
+		cl_masterDiscovery.generation, resolvedCount, protocol, gamename,
+		cl_masterDiscovery.timeout );
+
+	for ( int source = 0; source < resolvedCount; source++ ) {
+		char command[1024];
+		qstring_t commandString;
+		if ( resolved[source].extended ) {
+			Com_sprintf( command, sizeof( command ), "getserversExt %s %d", gamename, protocol );
+		} else {
+			Com_sprintf( command, sizeof( command ), "getservers %s %d", gamename, protocol );
+		}
+		commandString = QS_WrapExisting( command, sizeof( command ) );
+#if FEAT_IPV6
+		if ( resolved[source].extended
+		  && !( Cvar_VariableIntegerValue( "net_enabled" ) & NET_ENABLEV4 ) ) {
+			QS_Append( &commandString, " ipv6" );
+		}
+#endif
+		Com_Log( SEV_INFO, LOG_CH(ch_client),
+			"Master query generation=%u address=%s extended=%d timeout=%ums\n",
+			cl_masterDiscovery.generation,
+			NET_AdrToStringwPort( &resolved[source].address ),
+			resolved[source].extended ? 1 : 0, cl_masterDiscovery.timeout );
+		for ( int i = 3; i < count; i++ ) {
+			QS_AppendChar( &commandString, ' ' );
+			QS_Append( &commandString, Cmd_Argv( i ) );
+		}
+		Com_Log( SEV_INFO, LOG_CH(ch_client),
+			"Master discovery send generation=%u source_index=%d endpoint=%s kind=%s command=%s\n",
+			cl_masterDiscovery.generation, source,
+			NET_AdrToStringwPort( &resolved[source].address ),
+			resolved[source].extended ? "extended" : "classic", command );
+		/* This is a client browser transaction.  Using NS_SERVER routes the
+		 * master's reply back to the server socket, where a GUI-only client never
+		 * feeds it through CL_ConnectionlessPacket. */
+		NET_OutOfBandPrint( NS_CLIENT, &resolved[source].address, "%s", command );
+	}
 }
 
 
@@ -5434,16 +5832,19 @@ void CL_GetPing( int n, char *buf, int buflen, int *pingtime )
 	if ( time == 0 )
 	{
 		// check for timeout
-		time = Sys_Milliseconds() - cl_pinglist[n].start;
-		int maxPing = Cvar_VariableIntegerValue( "cl_maxPing" );
-		if ( time < maxPing )
+		unsigned int elapsed = CL_ElapsedMilliseconds( cl_pinglist[n].start );
+		if ( elapsed < cl_pinglist[n].timeout )
 		{
 			// not timed out yet
 			time = 0;
+		} else {
+			time = (int)elapsed;
+			CL_SetServerInfoByAddress( &cl_pinglist[n].adr, NULL, 0 );
 		}
+	} else {
+		CL_SetServerInfoByAddress( &cl_pinglist[n].adr,
+			cl_pinglist[n].info, cl_pinglist[n].time );
 	}
-
-	CL_SetServerInfoByAddress(&cl_pinglist[n].adr, cl_pinglist[n].info, cl_pinglist[n].time);
 
 	*pingtime = time;
 }
@@ -5478,7 +5879,7 @@ void CL_ClearPing( int n )
 	if (n < 0 || n >= MAX_PINGREQUESTS)
 		return;
 
-	cl_pinglist[n].adr.port = 0;
+	memset( &cl_pinglist[n], 0, sizeof( cl_pinglist[n] ) );
 }
 
 
@@ -5509,7 +5910,7 @@ CL_GetFreePing
 */
 static ping_t* CL_GetFreePing( void )
 {
-	int msec = Sys_Milliseconds();
+	unsigned int msec = (unsigned int)Sys_Milliseconds();
 	ping_t* pingptr = cl_pinglist;
 	for ( int i = 0; i < ARRAY_LEN( cl_pinglist ); i++, pingptr++ )
 	{
@@ -5518,7 +5919,7 @@ static ping_t* CL_GetFreePing( void )
 		{
 			if ( pingptr->time == 0 )
 			{
-				if ( msec - pingptr->start < 500 )
+				if ( msec - pingptr->start < pingptr->timeout )
 				{
 					// still waiting for response
 					continue;
@@ -5532,26 +5933,41 @@ static ping_t* CL_GetFreePing( void )
 		}
 
 		// clear it
-		pingptr->adr.port = 0;
+		memset( pingptr, 0, sizeof( *pingptr ) );
 		return pingptr;
 	}
 
 	// use oldest entry
 	pingptr = cl_pinglist;
 	ping_t* best = cl_pinglist;
-	int oldest = INT_MIN;
+	unsigned int oldest = 0;
 	for ( int i = 0; i < ARRAY_LEN( cl_pinglist ); i++, pingptr++ )
 	{
 		// scan for oldest
-		int time = msec - pingptr->start;
+		unsigned int time = msec - pingptr->start;
 		if ( time > oldest )
 		{
 			oldest = time;
 			best   = pingptr;
 		}
 	}
-
+	memset( best, 0, sizeof( *best ) );
 	return best;
+}
+
+static void CL_BeginPingRequest( ping_t *ping, const netadr_t *address ) {
+	if ( !ping || !address ) return;
+	memset( ping, 0, sizeof( *ping ) );
+	ping->adr = *address;
+	ping->start = (unsigned int)Sys_Milliseconds();
+	ping->timeout = (unsigned int)Cvar_VariableIntegerValue( "cl_maxPing" );
+	CL_NewInfoChallenge( ping->challenge, &ping->generation );
+	CL_SetServerInfoByAddress( &ping->adr, NULL, 0 );
+	NET_OutOfBandPrint( NS_CLIENT, &ping->adr, "getinfo %s", ping->challenge );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+		"Ping request generation=%u challenge=%s timeout=%ums address=%s\n",
+		ping->generation, ping->challenge, ping->timeout,
+		NET_AdrToStringwPort( &ping->adr ) );
 }
 
 
@@ -5598,13 +6014,7 @@ static void CL_Ping_f( void ) {
 
 	ping_t* pingptr = CL_GetFreePing();
 
-	memcpy( &pingptr->adr, &to, sizeof (netadr_t) );
-	pingptr->start = Sys_Milliseconds();
-	pingptr->time  = 0;
-
-	CL_SetServerInfoByAddress( &pingptr->adr, NULL, 0 );
-
-	NET_OutOfBandPrint( NS_CLIENT, &to, "getinfo xxx" );
+	CL_BeginPingRequest( pingptr, &to );
 }
 
 
@@ -5664,10 +6074,7 @@ qboolean CL_UpdateVisiblePings_f(int source) {
 						status = qtrue;
 						for (j = 0; j < MAX_PINGREQUESTS; j++) {
 							if (!cl_pinglist[j].adr.port) {
-								memcpy(&cl_pinglist[j].adr, &server[i].adr, sizeof(netadr_t));
-								cl_pinglist[j].start = Sys_Milliseconds();
-								cl_pinglist[j].time = 0;
-								NET_OutOfBandPrint(NS_CLIENT, &cl_pinglist[j].adr, "getinfo xxx");
+								CL_BeginPingRequest( &cl_pinglist[j], &server[i].adr );
 								slots++;
 								break;
 							}
@@ -5768,12 +6175,8 @@ static void CL_ServerStatus_f( void ) {
 			return;
 	}
 
-	NET_OutOfBandPrint( NS_CLIENT, toptr, "getstatus" );
-
 	serverStatus_t *serverStatus = CL_GetServerStatus( toptr );
-	serverStatus->address = *toptr;
-	serverStatus->print = qtrue;
-	serverStatus->pending = qtrue;
+	CL_BeginServerStatusRequest( serverStatus, toptr, qtrue );
 }
 
 
@@ -5785,5 +6188,3 @@ CL_ShowIP_f
 static void CL_ShowIP_f( void ) {
 	Sys_ShowIP();
 }
-
-

@@ -1170,6 +1170,7 @@ static const wuiPropDef_t s_itemProps[] = {
 	WP_I( "ownerdrawFlag",    wiredItemDef_t, ownerdrawFlag    ),
 	WP_I( "maxChars",         wiredItemDef_t, maxChars         ),
 	WP_I( "maxPaintChars",    wiredItemDef_t, maxPaintChars    ),
+	WP_I( "password",         wiredItemDef_t, password         ),
 	WP_I( "fadedelay",        wiredItemDef_t, fadeDelay        ),
 	WP_I( "time",             wiredItemDef_t, timeMs           ),
 	WP_I( "widescreen",       wiredItemDef_t, modelWidescreen  ),

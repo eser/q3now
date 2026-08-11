@@ -225,6 +225,8 @@ void        Log_UnregisterTtySink    ( void );
 // File sink — log_file_path cvar.
 log_sink_t *Log_RegisterFileSink     ( void );
 void        Log_UnregisterFileSink   ( void );
+void        Log_PauseFileSinkForRestart( void );
+void        Log_ResumeFileSinkAfterRestart( void );
 
 // -------------------------------------------------------------------------
 // Convenience macros

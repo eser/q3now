@@ -101,7 +101,8 @@ static HMONITOR vk_hmonitor = NULL;
 #endif
 
 static int vk_diag_fence_ms, vk_diag_submit_ms, vk_diag_present_ms, vk_diag_acquire_ms, vk_diag_frames;
-static int vk_diag_ft_fence_ms; // background fence thread: accumulated vkWaitForFences duration
+static uint64_t vk_diag_slot_wait_us;
+static uint32_t vk_diag_pacing_bucket;
 static int vk_diag_drawcalls, vk_diag_pipebinds, vk_diag_msdf_draws, vk_diag_msdf_binds;
 static qboolean vk_diag_msdf_active;
 
@@ -9767,6 +9768,7 @@ void RB_RunParticleCompute( void )
 
 	// Dispatch ceil(PARTICLES_PER_POOL / 64). Workgroup size = 64.
 	qvkCmdDispatch( cmd, ( PARTICLES_PER_POOL + 63 ) / 64, 1, 1 );
+	backEnd.pc.c_particleComputes++;
 
 	// Barrier: compute writes to pool[1-pingRead] must be visible to
 	// the next vertex shader read in RB_DrawParticles. Now outside any
@@ -9902,6 +9904,7 @@ void RB_DrawParticles( void )
 
 	Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.particle.ral_render_pipeline_additive );   // dynamic main pass
 	qvkCmdDraw( cmd, 6, PARTICLES_PER_POOL, 0, 0 );
+	backEnd.pc.c_particleDraws += 2;
 
 	// Invalidate cached pipeline / descriptor / depth-range so the
 	// next standard draw rebinds correctly. Same cleanup pattern the
@@ -27627,8 +27630,9 @@ static qboolean vk_find_screenmap_drawsurfs( void )
 // ---------------------------------------------------------------------------
 #ifndef _WIN32
 typedef struct {
-	int     slot;
-	VkFence fence;
+	int      slot;
+	VkFence  fence;
+	int64_t  queued_us;
 } vk_fence_work_t;
 
 static pthread_t         vk_ft_thread;
@@ -27640,6 +27644,13 @@ static qboolean          vk_slot_ready[ NUM_COMMAND_BUFFERS ];
 static vk_fence_work_t   vk_ft_queue[ NUM_COMMAND_BUFFERS * 2 ];
 static int               vk_ft_head;
 static int               vk_ft_tail;
+// Written and snapshotted only while vk_ft_mutex is held. Keeping the worker
+// attribution in one critical section prevents the 200-frame diagnostic reset
+// from racing an in-flight fence completion.
+static uint64_t          vk_ft_diag_queue_us;
+static uint64_t          vk_ft_diag_fence_us;
+static uint32_t          vk_ft_diag_work_count;
+static uint32_t          vk_ft_diag_max_queue;
 
 static void *vk_fence_worker( void *arg )
 {
@@ -27648,6 +27659,11 @@ static void *vk_fence_worker( void *arg )
 
 	pthread_mutex_lock( &vk_ft_mutex );
 	while ( vk_ft_running || vk_ft_head != vk_ft_tail ) {
+		int64_t queued_us;
+		int64_t queue_delay_us;
+		int64_t fence_start_us;
+		int64_t fence_end_us;
+
 		while ( vk_ft_head == vk_ft_tail && vk_ft_running )
 			pthread_cond_wait( &vk_ft_cwork, &vk_ft_mutex );
 
@@ -27656,16 +27672,19 @@ static void *vk_fence_worker( void *arg )
 
 		slot = vk_ft_queue[ vk_ft_head ].slot;
 		fen  = vk_ft_queue[ vk_ft_head ].fence;
+		queued_us = vk_ft_queue[ vk_ft_head ].queued_us;
 		vk_ft_head = ( vk_ft_head + 1 ) % ( NUM_COMMAND_BUFFERS * 2 );
+		queue_delay_us = ri.Microseconds() - queued_us;
 		pthread_mutex_unlock( &vk_ft_mutex );
 
-		{
-			int t0 = ri.Milliseconds();
-			qvkWaitForFences( vk.device, 1, &fen, VK_FALSE, (uint64_t)10000000000ULL );
-			qvkResetFences( vk.device, 1, &fen );
-			pthread_mutex_lock( &vk_ft_mutex );
-			vk_diag_ft_fence_ms += ri.Milliseconds() - t0;
-		}
+		fence_start_us = ri.Microseconds();
+		qvkWaitForFences( vk.device, 1, &fen, VK_FALSE, (uint64_t)10000000000ULL );
+		qvkResetFences( vk.device, 1, &fen );
+		fence_end_us = ri.Microseconds();
+		pthread_mutex_lock( &vk_ft_mutex );
+		vk_ft_diag_queue_us += (uint64_t)( queue_delay_us < 0 ? 0 : queue_delay_us );
+		vk_ft_diag_fence_us += (uint64_t)( fence_end_us - fence_start_us );
+		vk_ft_diag_work_count++;
 		vk_slot_ready[ slot ] = qtrue;
 		pthread_cond_broadcast( &vk_ft_cready );
 	}
@@ -27677,6 +27696,8 @@ static void vk_fence_thread_start( void )
 {
 	pthread_attr_t attr;
 	vk_ft_head = vk_ft_tail = 0;
+	vk_ft_diag_queue_us = vk_ft_diag_fence_us = 0;
+	vk_ft_diag_work_count = vk_ft_diag_max_queue = 0;
 	vk_ft_running = qtrue;
 	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ )
 		vk_slot_ready[ i ] = qfalse; // set to qtrue by fence thread after each vkResetFences
@@ -27703,11 +27724,30 @@ static void vk_fence_thread_stop( void )
 // Called after vkQueueSubmit: hand fence to background thread.
 static void vk_fence_submit( int slot, VkFence fence )
 {
+	int queue_depth;
+
 	pthread_mutex_lock( &vk_ft_mutex );
 	vk_ft_queue[ vk_ft_tail ].slot  = slot;
 	vk_ft_queue[ vk_ft_tail ].fence = fence;
+	vk_ft_queue[ vk_ft_tail ].queued_us = ri.Microseconds();
 	vk_ft_tail = ( vk_ft_tail + 1 ) % ( NUM_COMMAND_BUFFERS * 2 );
+	queue_depth = ( vk_ft_tail - vk_ft_head + NUM_COMMAND_BUFFERS * 2 ) % ( NUM_COMMAND_BUFFERS * 2 );
+	if ( (uint32_t)queue_depth > vk_ft_diag_max_queue )
+		vk_ft_diag_max_queue = (uint32_t)queue_depth;
 	pthread_cond_signal( &vk_ft_cwork );
+	pthread_mutex_unlock( &vk_ft_mutex );
+}
+
+static void vk_fence_diag_snapshot( uint64_t *queue_us, uint64_t *fence_us,
+	uint32_t *work_count, uint32_t *max_queue )
+{
+	pthread_mutex_lock( &vk_ft_mutex );
+	*queue_us = vk_ft_diag_queue_us;
+	*fence_us = vk_ft_diag_fence_us;
+	*work_count = vk_ft_diag_work_count;
+	*max_queue = vk_ft_diag_max_queue;
+	vk_ft_diag_queue_us = vk_ft_diag_fence_us = 0;
+	vk_ft_diag_work_count = vk_ft_diag_max_queue = 0;
 	pthread_mutex_unlock( &vk_ft_mutex );
 }
 
@@ -27728,6 +27768,12 @@ static void vk_fence_thread_start( void ) {}
 static void vk_fence_thread_stop( void )  {}
 static void vk_fence_submit( int slot, VkFence fence ) { (void)slot; (void)fence; }
 static void vk_slot_wait( int slot ) { (void)slot; }
+static void vk_fence_diag_snapshot( uint64_t *queue_us, uint64_t *fence_us,
+	uint32_t *work_count, uint32_t *max_queue )
+{
+	*queue_us = *fence_us = 0;
+	*work_count = *max_queue = 0;
+}
 #endif  // !_WIN32
 
 #ifndef UINT64_MAX
@@ -27993,6 +28039,7 @@ void vk_begin_frame( void )
 
 	{
 		int t_diag = ri.Milliseconds();
+		int64_t slot_wait_start_us = ri.Microseconds();
 		if ( vk.cmd->waitForFence ) {
 			vk.cmd->waitForFence = qfalse;
 #ifdef _WIN32
@@ -28013,6 +28060,7 @@ void vk_begin_frame( void )
 			vk_slot_wait( vk.cmd_index );
 #endif
 		}
+		vk_diag_slot_wait_us += (uint64_t)( ri.Microseconds() - slot_wait_start_us );
 		{
 			int fence_ms = ri.Milliseconds() - t_diag;
 			vk_diag_fence_ms += fence_ms;
@@ -28021,13 +28069,28 @@ void vk_begin_frame( void )
 		}
 		vk_frame_t_after_fence = ri.Microseconds();
 		if ( ++vk_diag_frames >= 200 ) {
-			if ( r_vkDebugTiming && r_vkDebugTiming->integer )
+			uint64_t worker_queue_us;
+			uint64_t worker_fence_us;
+			uint32_t worker_count;
+			uint32_t max_queue;
+
+			vk_fence_diag_snapshot( &worker_queue_us, &worker_fence_us, &worker_count, &max_queue );
+			vk_diag_pacing_bucket++;
+			if ( r_vkDebugTiming && r_vkDebugTiming->integer ) {
 				R_LOG( rch_timing, SEV_DEBUG, "vk timing (200f avg): fence=%dms/f  ft_fence=%dms/f  acquire=%dms/f  submit=%dms/f  present=%dms/f  draws=%d/f(msdf=%d)  pipebinds=%d/f(msdf=%d)\n",
-					vk_diag_fence_ms / 200, vk_diag_ft_fence_ms / 200,
+					vk_diag_fence_ms / 200, (int)( worker_fence_us / 1000 / 200 ),
 					vk_diag_acquire_ms / 200, vk_diag_submit_ms / 200, vk_diag_present_ms / 200,
 					vk_diag_drawcalls / 200, vk_diag_msdf_draws / 200,
 					vk_diag_pipebinds / 200, vk_diag_msdf_binds / 200 );
-			vk_diag_fence_ms = vk_diag_ft_fence_ms = vk_diag_submit_ms = vk_diag_present_ms = vk_diag_acquire_ms = vk_diag_frames = 0;
+				R_LOG( rch_timing, SEV_DEBUG, "vk pacing (200f avg): bucket=%u slots=%u main_slot_wait=%lluus/f worker_queue=%lluus/work worker_fence=%lluus/work worker_count=%u max_queue=%u\n",
+					vk_diag_pacing_bucket, (unsigned)NUM_COMMAND_BUFFERS,
+					(unsigned long long)( vk_diag_slot_wait_us / 200 ),
+					(unsigned long long)( worker_count ? worker_queue_us / worker_count : 0 ),
+					(unsigned long long)( worker_count ? worker_fence_us / worker_count : 0 ),
+					worker_count, max_queue );
+			}
+			vk_diag_fence_ms = vk_diag_submit_ms = vk_diag_present_ms = vk_diag_acquire_ms = vk_diag_frames = 0;
+			vk_diag_slot_wait_us = 0;
 			vk_diag_drawcalls = vk_diag_pipebinds = vk_diag_msdf_draws = vk_diag_msdf_binds = 0;
 		}
 	}
