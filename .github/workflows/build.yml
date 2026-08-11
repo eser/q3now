@@ -190,14 +190,24 @@ jobs:
         fetch-depth: 0
         submodules: recursive
 
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with:
         go-version: '1.26.1'
-        cache-dependency-path: launcher/go.sum
+        cache-dependency-path: |
+          launcher/go.sum
+          tools/quic-probe/go.sum
 
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v7
       with:
-        node-version: '25.8.0'
+        node-version: '24.19.0'
+
+    - name: Verify QUIC probe
+      working-directory: tools/quic-probe
+      run: |
+        go mod verify
+        go test ./...
+        go vet ./...
+        go build -trimpath ./...
 
     - name: Install system dependencies
       run: |
@@ -226,24 +236,24 @@ jobs:
         sudo ln -sf /opt/wasi-sdk-${WASI_SDK_VERSION}.0-x86_64-linux /opt/wasi-sdk
 
     - name: Install Wails CLI
-      run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 
     - name: Build and package
       env:
         RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
       run: make release CHANNEL=public Q3DIR=${{ runner.temp }}/q3now WAILS_TAGS="-tags webkit2_41" ${RELEASE_VERSION:+VERSION=$RELEASE_VERSION}
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'
       with:
         name: linux-x86_64
         path: build/release/*.tar.gz
-        if-no-files-found: warn
+        if-no-files-found: error
         retention-days: 5
 
     - name: Upload to release
       if: needs.prepare.outputs.is_release == 'true'
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         tag_name: ${{ needs.prepare.outputs.version }}
         name: ${{ needs.prepare.outputs.version }}
@@ -262,14 +272,24 @@ jobs:
         fetch-depth: 0
         submodules: recursive
 
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with:
         go-version: '1.26.1'
-        cache-dependency-path: launcher/go.sum
+        cache-dependency-path: |
+          launcher/go.sum
+          tools/quic-probe/go.sum
 
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v7
       with:
-        node-version: '25.8.0'
+        node-version: '24.19.0'
+
+    - name: Verify QUIC probe
+      working-directory: tools/quic-probe
+      run: |
+        go mod verify
+        go test ./...
+        go vet ./...
+        go build -trimpath ./...
 
     - name: Install system dependencies
       # openssl@3 is a hard configure requirement (picoquic TLS); listed
@@ -285,14 +305,14 @@ jobs:
         sudo ln -sf /opt/wasi-sdk-${WASI_SDK_VERSION}.0-arm64-macos /opt/wasi-sdk
 
     - name: Install Wails CLI
-      run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 
     - name: Build and package
       env:
         RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
       run: make release CHANNEL=public Q3DIR=${{ runner.temp }}/q3now.app ${RELEASE_VERSION:+VERSION=$RELEASE_VERSION}
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'
       with:
         name: macos-arm64-dmg
@@ -302,7 +322,7 @@ jobs:
 
     - name: Upload to release
       if: needs.prepare.outputs.is_release == 'true'
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         tag_name: ${{ needs.prepare.outputs.version }}
         name: ${{ needs.prepare.outputs.version }}
@@ -326,14 +346,24 @@ jobs:
       shell: bash
       run: git fetch --tags
 
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v7
       with:
         go-version: '1.26.1'
-        cache-dependency-path: launcher/go.sum
+        cache-dependency-path: |
+          launcher/go.sum
+          tools/quic-probe/go.sum
 
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v7
       with:
-        node-version: '25.8.0'
+        node-version: '24.19.0'
+
+    - name: Verify QUIC probe
+      working-directory: tools/quic-probe
+      run: |
+        go mod verify
+        go test ./...
+        go vet ./...
+        go build -trimpath ./...
 
     - name: Install system dependencies
       run: choco install ninja -y
@@ -361,7 +391,7 @@ jobs:
         tar xzf $archive --strip-components=1 -C "$env:USERPROFILE\wasi-sdk"
 
     - name: Install Wails CLI
-      run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 
     - name: Build and package
       shell: bash
@@ -388,17 +418,17 @@ jobs:
         RELEASE_VERSION="${{ needs.prepare.outputs.version }}"
         make release CHANNEL=public Q3DIR=dist/q3now WASI_SDK_PATH="$WASI_HOME" ${RELEASE_VERSION:+VERSION=$RELEASE_VERSION}
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'
       with:
-        name: windows-x86_64
-        path: dist/q3now/
-        if-no-files-found: warn
+        name: windows-x86_64-zip
+        path: build/release/*.zip
+        if-no-files-found: error
         retention-days: 5
 
     - name: Upload to release
       if: needs.prepare.outputs.is_release == 'true'
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         tag_name: ${{ needs.prepare.outputs.version }}
         name: ${{ needs.prepare.outputs.version }}
@@ -421,7 +451,7 @@ jobs:
 
     - name: Docker meta
       id: meta
-      uses: docker/metadata-action@v5
+      uses: docker/metadata-action@v6
       with:
         images: eserozvataf/q3now
         tags: |
@@ -430,17 +460,17 @@ jobs:
           type=semver,pattern={{version}},value=${{ needs.prepare.outputs.version }}
           type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-    - uses: docker/setup-buildx-action@v3
+    - uses: docker/setup-buildx-action@v4
 
     - name: Login to Docker Hub
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
     - name: Build and push
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7
       with:
         context: .
         push: ${{ github.event_name == 'push' || needs.prepare.outputs.is_release == 'true' }}

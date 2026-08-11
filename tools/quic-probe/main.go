@@ -117,7 +117,7 @@ func main() {
 // Observer mode — JSON handshake on stream 0x00
 // ─────────────────────────────────────────────────────────────────────────────
 
-func runObserver(ctx context.Context, conn quic.Connection, token string) error {
+func runObserver(ctx context.Context, conn *quic.Conn, token string) error {
 	stream, err := conn.OpenStreamSync(ctx)
 	if err != nil {
 		return fmt.Errorf("open stream 0x00: %w", err)
@@ -168,7 +168,7 @@ func runObserver(ctx context.Context, conn quic.Connection, token string) error 
 // Player mode — binary TLV on stream 0x00
 // ─────────────────────────────────────────────────────────────────────────────
 
-func runPlayer(ctx context.Context, conn quic.Connection, token, userinfo string) error {
+func runPlayer(ctx context.Context, conn *quic.Conn, token, userinfo string) error {
 	stream, err := conn.OpenStreamSync(ctx)
 	if err != nil {
 		return fmt.Errorf("open stream 0x00: %w", err)
@@ -247,7 +247,7 @@ func runPlayer(ctx context.Context, conn quic.Connection, token, userinfo string
 // Observer datagrams: msgpack-encoded state update (no fixed header)
 // ─────────────────────────────────────────────────────────────────────────────
 
-func recvDatagrams(ctx context.Context, conn quic.Connection) {
+func recvDatagrams(ctx context.Context, conn *quic.Conn) {
 	for {
 		dg, err := conn.ReceiveDatagram(ctx)
 		if err != nil {
@@ -290,7 +290,7 @@ func recvDatagrams(ctx context.Context, conn quic.Connection) {
 // Event stream receiver — server-initiated unidirectional streams (stream 0x03+)
 // ─────────────────────────────────────────────────────────────────────────────
 
-func recvEvents(ctx context.Context, conn quic.Connection) {
+func recvEvents(ctx context.Context, conn *quic.Conn) {
 	for {
 		stream, err := conn.AcceptUniStream(ctx)
 		if err != nil {
@@ -304,7 +304,7 @@ func recvEvents(ctx context.Context, conn quic.Connection) {
 	}
 }
 
-func drainEventStream(stream quic.ReceiveStream) {
+func drainEventStream(stream *quic.ReceiveStream) {
 	buf := make([]byte, 65536)
 	for {
 		n, err := stream.Read(buf)
