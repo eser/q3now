@@ -1267,8 +1267,15 @@ int main( int argc, const char* argv[] )
 	/* Sys_SetBinaryPath gives <root>/Foo.app/Contents/MacOS;
 	 * Sys_AppBundleRoot lifts that to <root>/Foo.app — fs_installpath wants
 	 * the .app itself so FS_GetInstallBinaryPath/ResourcePath can append
-	 * Contents/MacOS and Contents/Resources from a single anchor. */
-	Sys_SetBinaryPath( argv[ 0 ] );
+	 * Contents/MacOS and Contents/Resources from a single anchor.
+	 * argv[0] must go through Sys_BinName: a relative launch ("./wired.arm64"
+	 * from inside Contents/MacOS) leaves dirname(argv[0]) == "." — the bundle
+	 * root is never detected, no install paks load, and boot dies on
+	 * "Couldn't load default.cfg". _NSGetExecutablePath resolves the real
+	 * path regardless of how the binary was invoked (release builds only;
+	 * debug keeps argv[0] verbatim for symlinked dev setups, matching the
+	 * Sys_BinName contract). */
+	Sys_SetBinaryPath( Sys_BinName( argv[ 0 ] ) );
 	Sys_SetDefaultBasePath( Sys_AppBundleRoot( binaryPath ) );
 #endif
 
