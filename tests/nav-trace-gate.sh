@@ -10,13 +10,13 @@
 #      (bot stuck / no path) that a byte-identical diff of a broken-but-stable
 #      trace would miss.
 #
-#   2. GOLDEN gate — the fresh trace matches a committed reference byte-for-byte.
-#      This is the stable baseline every later navigation change diffs against:
-#      if the world-mode nav trace still matches the golden, bot pathing is
-#      unchanged. The trace is captured at nav_botdebug 2, so the golden records
-#      the full waypoint XYZ of every path (not just the point count) — the routed
-#      corridor geometry, including the snapped goal endpoint, is the diffed value.
-#      Set NAV_UPDATE_GOLDEN=1 to re-bless after an INTENDED change.
+#   2. GOLDEN gate — Windows (the committed golden's owner) compares the fresh
+#      trace byte-for-byte. Other platforms compare a bounded semantic trace:
+#      event order, repath reason, waypoint topology/flags, OMC and stuck events
+#      stay exact; Detour query counts may vary and coordinates get a measured
+#      four-unit cross-platform tolerance instead of being discarded.
+#      NAVVAL remains the geometry/collision authority on every platform.
+#      Set NAV_UPDATE_GOLDEN=1 on Windows to re-bless after an INTENDED change.
 #
 # The pinned seed is the whole point: sv_seed >= 0 makes GAME_INIT reproducible
 # (sv_game.c); the default sv_seed -1 keeps wall-clock seeding for normal play.
@@ -43,6 +43,9 @@
 #   NAV_MAP           map to run (default arena1; e1m1 for a playthrough).
 #   NAV_MODE          nav (default) | playthrough.
 #   NAV_MIN_KILLS     playthrough: minimum monster kills to pass (default 1).
+#   NAV_GOLDEN_MODE   auto (default) | exact | semantic. auto is exact on
+#                     Windows and semantic elsewhere.
+#   NAV_KEEP_ARTIFACTS 1 = keep isolated home/stdout/fresh trace for diagnosis.
 #
 # Exit codes:
 #   0  PASS — positive gate + golden match (nav), or threshold gate met (playthrough).
@@ -51,6 +54,14 @@
 
 set -euo pipefail
 
+# Test runners may force coloured grep output even when stdout is redirected
+# (notably the RTK-wrapped macOS path). Those ANSI bytes become part of FRESH:
+# the first capture then visually contains `client N repath (reason: ...)`, but
+# the positive gate cannot match it because an escape sequence sits between
+# `repath` and `(`. All grep consumers in this harness are machine parsers, so
+# force byte-clean output regardless of the caller's colour policy.
+grep() { command grep --color=never "$@"; }
+
 DED="${1:-wired-headless}"
 Q3DIR="${Q3DIR:-/Applications/q3now}"
 NAV_SEED="${NAV_SEED:-1337}"
@@ -58,6 +69,182 @@ NAV_MAP="${NAV_MAP:-arena1}"
 NAV_MODE="${NAV_MODE:-nav}"
 NAV_MIN_KILLS="${NAV_MIN_KILLS:-1}"
 NAV_UPDATE_GOLDEN="${NAV_UPDATE_GOLDEN:-0}"
+NAV_GOLDEN_MODE="${NAV_GOLDEN_MODE:-auto}"
+
+# The checked-in arena1 baseline was captured on Windows. Recast/Detour output
+# is sensitive to the platform's floating-point path, and historical repeated
+# runs also showed harmless +/-1-unit origin drift. Keep the strongest useful
+# contract instead of either transferring a Windows byte artifact to macOS or
+# dropping the golden entirely: Windows owns the exact baseline; other systems
+# preserve the trace's decisions and keep every routed coordinate within the
+# measured platform band. NAVVAL independently enforces reachable-mesh agreement
+# with live collision.
+if [ "$NAV_GOLDEN_MODE" = "auto" ]; then
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) NAV_GOLDEN_MODE=exact ;;
+    *)                    NAV_GOLDEN_MODE=semantic ;;
+  esac
+fi
+case "$NAV_GOLDEN_MODE" in
+  exact|semantic) ;;
+  *) echo "FAIL: NAV_GOLDEN_MODE must be auto, exact, or semantic (got '$NAV_GOLDEN_MODE')"; exit 1 ;;
+esac
+
+NAV_COORD_TOLERANCE=4
+
+semantic_nav_match() {
+  local golden="$1" fresh="$2" tolerance="$3" python_bin
+  python_bin="$(command -v python3 2>/dev/null || true)"
+  if [ -z "$python_bin" ]; then
+    echo "FAIL: python3 is required for the non-Windows semantic nav comparison"
+    return 2
+  fi
+  "$python_bin" - "$golden" "$fresh" "$tolerance" <<'PY'
+import math
+import re
+import sys
+
+golden_path, fresh_path, tolerance_text = sys.argv[1:]
+try:
+    tolerance = float(tolerance_text)
+except ValueError:
+    print(f"FAIL: invalid nav coordinate tolerance: {tolerance_text}")
+    raise SystemExit(2)
+
+with open(golden_path, encoding="utf-8", errors="replace") as stream:
+    golden = [line.rstrip("\r\n") for line in stream]
+with open(fresh_path, encoding="utf-8", errors="replace") as stream:
+    fresh = [line.rstrip("\r\n") for line in stream]
+
+find_path = re.compile(r"\[BOTNAV\] FindPath engine: (\d+) polys -> (\d+) pts(.*)")
+repath = re.compile(
+    r"client (\d+) repath \(reason: ([^)]+)\) "
+    r"O=\(([^)]+)\) -> G=\(([^)]+)\): (\d+) pts(.*)"
+)
+waypoint = re.compile(r"wp (\d+): \(([^)]+)\) flags=(0x[0-9A-Fa-f]+)(.*)")
+
+def coordinates(text):
+    values = tuple(float(value) for value in text.split(","))
+    if len(values) != 3 or not all(math.isfinite(value) for value in values):
+        raise ValueError(text)
+    return values
+
+def delta(left, right):
+    return max(abs(a - b) for a, b in zip(coordinates(left), coordinates(right)))
+
+errors = []
+max_delta = 0.0
+if len(golden) != len(fresh):
+    errors.append(f"line-count: golden={len(golden)} fresh={len(fresh)}")
+
+for number, (expected, actual) in enumerate(zip(golden, fresh), 1):
+    expected_find, actual_find = find_path.fullmatch(expected), find_path.fullmatch(actual)
+    if expected_find or actual_find:
+        if not (expected_find and actual_find) or expected_find.group(3) != actual_find.group(3):
+            errors.append(f"line {number}: FindPath shape/OMC changed\n  G: {expected}\n  F: {actual}")
+        # Poly and point counts are platform-dependent probe diagnostics. The
+        # routed corridor itself is checked by the repath/waypoint records below.
+        continue
+
+    expected_repath, actual_repath = repath.fullmatch(expected), repath.fullmatch(actual)
+    if expected_repath or actual_repath:
+        if not (expected_repath and actual_repath):
+            errors.append(f"line {number}: repath shape changed\n  G: {expected}\n  F: {actual}")
+            continue
+        expected_shape = (expected_repath.group(1), expected_repath.group(2),
+                          expected_repath.group(5), expected_repath.group(6))
+        actual_shape = (actual_repath.group(1), actual_repath.group(2),
+                        actual_repath.group(5), actual_repath.group(6))
+        try:
+            origin_delta = delta(expected_repath.group(3), actual_repath.group(3))
+            goal_delta = delta(expected_repath.group(4), actual_repath.group(4))
+        except ValueError:
+            errors.append(f"line {number}: invalid/non-finite repath coordinate\n  G: {expected}\n  F: {actual}")
+            continue
+        max_delta = max(max_delta, origin_delta, goal_delta)
+        if expected_shape != actual_shape or origin_delta > tolerance or goal_delta > tolerance:
+            errors.append(
+                f"line {number}: repath changed (origin delta={origin_delta:g}, "
+                f"goal delta={goal_delta:g}, tolerance={tolerance:g})\n"
+                f"  G: {expected}\n  F: {actual}"
+            )
+        continue
+
+    expected_waypoint, actual_waypoint = waypoint.fullmatch(expected), waypoint.fullmatch(actual)
+    if expected_waypoint or actual_waypoint:
+        if not (expected_waypoint and actual_waypoint):
+            errors.append(f"line {number}: waypoint shape changed\n  G: {expected}\n  F: {actual}")
+            continue
+        expected_shape = (expected_waypoint.group(1), expected_waypoint.group(3), expected_waypoint.group(4))
+        actual_shape = (actual_waypoint.group(1), actual_waypoint.group(3), actual_waypoint.group(4))
+        try:
+            waypoint_delta = delta(expected_waypoint.group(2), actual_waypoint.group(2))
+        except ValueError:
+            errors.append(f"line {number}: invalid/non-finite waypoint coordinate\n  G: {expected}\n  F: {actual}")
+            continue
+        max_delta = max(max_delta, waypoint_delta)
+        if expected_shape != actual_shape or waypoint_delta > tolerance:
+            errors.append(
+                f"line {number}: waypoint changed (delta={waypoint_delta:g}, "
+                f"tolerance={tolerance:g})\n  G: {expected}\n  F: {actual}"
+            )
+        continue
+
+    if expected != actual:
+        errors.append(f"line {number}: decision event changed\n  G: {expected}\n  F: {actual}")
+
+if errors:
+    print("\n".join(errors[:30]))
+    raise SystemExit(1)
+
+print(f"    semantic coordinate delta: max={max_delta:g}u <= {tolerance:g}u")
+PY
+}
+
+if [ "${1:-}" = "--self-test" ]; then
+  fixture_dir="$(mktemp -d /tmp/q3now-nav-semantic-selftest-XXXXXX)"
+  golden_fixture="$fixture_dir/golden.trace"
+  fresh_fixture="$fixture_dir/fresh.trace"
+  printf '%s\n' \
+    '[BOTNAV] FindPath engine: 36 polys -> 9 pts [OMC]' \
+    'client 1 repath (reason: new) O=(100,200,24) -> G=(400,500,15): 2 pts' \
+    'wp 0: (100,200,24) flags=0x01' \
+    'wp 1: (400,500,15) flags=0x02' \
+    'client 1 wp 0 reached (flags=0x01)' > "$golden_fixture"
+  printf '%s\n' \
+    '[BOTNAV] FindPath engine: 40 polys -> 12 pts [OMC]' \
+    'client 1 repath (reason: new) O=(103,198,24) -> G=(400,500,15): 2 pts' \
+    'wp 0: (103,198,24) flags=0x01' \
+    'wp 1: (400,500,15) flags=0x02' \
+    'client 1 wp 0 reached (flags=0x01)' > "$fresh_fixture"
+  rc=0
+  semantic_nav_match "$golden_fixture" "$fresh_fixture" "$NAV_COORD_TOLERANCE" \
+    || { echo "FAIL: semantic self-test rejected measured 3u platform drift"; rc=1; }
+  sed 's/(103,198,24)/(9000,9000,9000)/g' "$fresh_fixture" > "$fixture_dir/diverged.trace"
+  if semantic_nav_match "$golden_fixture" "$fixture_dir/diverged.trace" "$NAV_COORD_TOLERANCE" >/dev/null; then
+    echo "FAIL: semantic self-test accepted a divergent corridor"
+    rc=1
+  else
+    echo "PASS: semantic self-test rejected a divergent corridor"
+  fi
+  sed 's/reason: new/reason: timer/' "$fresh_fixture" > "$fixture_dir/reason.trace"
+  if semantic_nav_match "$golden_fixture" "$fixture_dir/reason.trace" "$NAV_COORD_TOLERANCE" >/dev/null; then
+    echo "FAIL: semantic self-test accepted a changed repath reason"
+    rc=1
+  else
+    echo "PASS: semantic self-test rejected a changed repath reason"
+  fi
+  sed 's/(103,198,24)/(nan,198,24)/g' "$fresh_fixture" > "$fixture_dir/nonfinite.trace"
+  if semantic_nav_match "$golden_fixture" "$fixture_dir/nonfinite.trace" "$NAV_COORD_TOLERANCE" >/dev/null 2>&1; then
+    echo "FAIL: semantic self-test accepted a non-finite corridor coordinate"
+    rc=1
+  else
+    echo "PASS: semantic self-test rejected a non-finite corridor coordinate"
+  fi
+  rm -rf "$fixture_dir"
+  [ "$rc" -eq 0 ] && echo "PASS: semantic nav comparator has teeth"
+  exit "$rc"
+fi
 
 # nav_validate enforce thresholds (reachable-scope). Justified from the four
 # measured-good maps under the final clearance-clamped-box probe + spawn-anchor
@@ -189,10 +376,27 @@ if ! command -v "$DED" >/dev/null 2>&1 && [ ! -x "$DED" ]; then
   fi
 fi
 
-STDOUT="$(mktemp /tmp/q3now-navgate-XXXXXX.log)"
-FRESH="$(mktemp /tmp/q3now-navgate-XXXXXX.trace)"
+STDOUT="$(mktemp /tmp/q3now-navgate-log-XXXXXX)"
+FRESH="$(mktemp /tmp/q3now-navgate-trace-XXXXXX)"
 NAV_HOME="$(mktemp -d /tmp/q3now-navgate-home-XXXXXX)"
-trap 'rm -f "$STDOUT" "$FRESH"; rm -rf "$NAV_HOME"' EXIT
+ACT=""
+OFC=""
+PLAY=""
+cleanup_nav_gate() {
+  if [ "${NAV_KEEP_ARTIFACTS:-0}" = "1" ]; then
+    echo "    kept nav artifacts: stdout=$STDOUT trace=$FRESH home=$NAV_HOME"
+    [ -n "$ACT" ] && echo "    activation trace: $ACT"
+    [ -n "$OFC" ] && echo "    off-floor trace: $OFC"
+    [ -n "$PLAY" ] && echo "    playthrough trace: $PLAY"
+  else
+    rm -f "$STDOUT" "$FRESH"
+    [ -n "$ACT" ] && rm -f "$ACT"
+    [ -n "$OFC" ] && rm -f "$OFC"
+    [ -n "$PLAY" ] && rm -f "$PLAY"
+    rm -rf "$NAV_HOME"
+  fi
+}
+trap cleanup_nav_gate EXIT
 
 # Isolated run home so the FRESH build's game modules are exercised, not an
 # installed copy. Maps (pax01) come from the Q3DIR content; the freshly built
@@ -402,9 +606,8 @@ fi
 # that the current single-goal model does not do — that is future goal-tree work,
 # not this chain. The exit distance, when derivable, is printed as context only.
 if [ "$NAV_MODE" = "activation" ]; then
-  ACT="$(mktemp /tmp/q3now-navgate-act-XXXXXX.trace)"
-  OFC="$(mktemp /tmp/q3now-navgate-offfloor-XXXXXX.trace)"
-  trap 'rm -f "$STDOUT" "$FRESH" "$ACT" "$OFC"; rm -rf "$NAV_HOME"' EXIT
+  ACT="$(mktemp /tmp/q3now-navgate-act-XXXXXX)"
+  OFC="$(mktemp /tmp/q3now-navgate-offfloor-XXXXXX)"
   grep -aE 'gate door=[0-9]+ ->|button pressed: ent=[0-9]+|button [0-9]+/[0-9]+ fired|gate door=[0-9]+ opened|ordered -> exit goal|idle -> exit goal|client [0-9]+ pos \(' "$STDOUT" \
     | sed -E 's/^[0-9:.+-]+ +\[[A-Z ]+\] +//' > "$ACT"
   echo "    captured $(wc -l < "$ACT") activation telemetry lines"
@@ -524,6 +727,10 @@ EOF2
   # invariant, so the golden is documentation/regression-diff aid, not a byte gate.
   OFF_GOLDEN="$SCRIPT_DIR/golden/botnav_${NAV_MAP}_offfloor.trace"
   if [ "$NAV_UPDATE_GOLDEN" = "1" ]; then
+    if [ "$NAV_GOLDEN_MODE" != "exact" ]; then
+      echo "FAIL: refusing to overwrite the Windows-owned off-floor golden in semantic mode"
+      exit 1
+    fi
     mkdir -p "$(dirname "$OFF_GOLDEN")"
     cp "$OFC" "$OFF_GOLDEN"
     echo "BLESSED off-floor golden: $OFF_GOLDEN ($(wc -l < "$OFC") lines)"
@@ -567,8 +774,7 @@ EOF2
 fi
 
 if [ "$NAV_MODE" = "playthrough" ]; then
-  PLAY="$(mktemp /tmp/q3now-navgate-play-XXXXXX.trace)"
-  trap 'rm -f "$STDOUT" "$FRESH" "$PLAY"; rm -rf "$NAV_HOME"' EXIT
+  PLAY="$(mktemp /tmp/q3now-navgate-play-XXXXXX)"
   grep -aE 'monster [0-9]+ killed by |level: [0-9]+ monsters spawned|client [0-9]+ pos \(|ordered -> exit goal|idle -> exit goal|exit reached:' "$STDOUT" \
     | sed -E 's/^[0-9:.+-]+ +\[[A-Z ]+\] +//' > "$PLAY"
   echo "    captured $(wc -l < "$PLAY") gameplay telemetry lines"
@@ -736,8 +942,13 @@ if [ "${navval_gate:-PASS}" = "FAIL" ]; then
   exit 1
 fi
 
-# ── GOLDEN gate: byte-identical to the committed reference ────────────────
+# ── GOLDEN gate: exact on Windows, structural elsewhere ──────────────────
 if [ "$NAV_UPDATE_GOLDEN" = "1" ]; then
+  if [ "$NAV_GOLDEN_MODE" != "exact" ]; then
+    echo "FAIL: refusing to overwrite the Windows-owned byte golden in semantic mode"
+    echo "      Re-run on Windows, or explicitly choose NAV_GOLDEN_MODE=exact after reviewing the platform ownership change."
+    exit 1
+  fi
   mkdir -p "$(dirname "$GOLDEN")"
   cp "$FRESH" "$GOLDEN"
   echo "BLESSED golden: $GOLDEN ($lines lines, seed=$NAV_SEED, map=$NAV_MAP)"
@@ -749,17 +960,19 @@ if [ ! -s "$GOLDEN" ]; then
   exit 1
 fi
 
-# Portable byte comparison — cmp/diff are not always on PATH in this
-# environment. Normalize CR (Windows line endings can differ between the
-# blessed golden and a fresh capture) then compare content with shell string
-# equality; on mismatch, list the differing lines with awk (always present).
-golden_body="$(tr -d '\r' < "$GOLDEN")"
-fresh_body="$(tr -d '\r' < "$FRESH")"
-if [ "$golden_body" = "$fresh_body" ]; then
-  echo "PASS: nav trace matches golden ($lines lines) — bot pathing unchanged"
-  exit 0
-else
-  echo "FAIL: nav trace diverged from golden — bot pathing changed"
+# Portable comparison — cmp/diff are not always on PATH in this environment.
+# Exact mode normalizes only CR. Semantic mode ignores the platform-dependent
+# FindPath diagnostic counts, but checks every corridor coordinate within the
+# measured 4u band and keeps event order/reasons/point counts/indices/flags,
+# OMC and stuck/reached events exact.
+if [ "$NAV_GOLDEN_MODE" = "exact" ]; then
+  golden_body="$(tr -d '\r' < "$GOLDEN")"
+  fresh_body="$(tr -d '\r' < "$FRESH")"
+  if [ "$golden_body" = "$fresh_body" ]; then
+    echo "PASS: nav trace matches golden (exact, $lines lines) — bot pathing unchanged"
+    exit 0
+  fi
+  echo "FAIL: nav trace diverged from golden (exact) — bot pathing changed"
   echo "----- differing lines (G=golden F=fresh, first 30) -----"
   awk 'NR==FNR{g[FNR]=$0; gn=FNR; next}
        {if($0!=g[FNR]){printf "line %d:\n  G: %s\n  F: %s\n", FNR, g[FNR], $0; c++} }
@@ -768,3 +981,10 @@ else
       <(tr -d '\r' < "$GOLDEN") <(tr -d '\r' < "$FRESH") | head -30
   exit 1
 fi
+
+if semantic_nav_match "$GOLDEN" "$FRESH" "$NAV_COORD_TOLERANCE"; then
+  echo "PASS: nav trace matches golden (semantic, $lines lines) — bot corridor stayed within the measured platform band"
+  exit 0
+fi
+echo "FAIL: nav trace diverged from golden (semantic) — bot corridor/decision topology changed"
+exit 1
