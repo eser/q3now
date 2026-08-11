@@ -1,8 +1,9 @@
 /*
  * wired_curve_test.c -- spline math-core unit test (cinematic camera)
  *
- * Deterministic, standalone (no game run). Pins the RBDOOM Curve.h port
- * against known analytic properties. The reference is RBDOOM's own
+ * Deterministic, host-only (no game run). Pins the RBDOOM Curve.h port against
+ * known analytic properties using the production q_shared.h configuration.
+ * The reference is RBDOOM's own
  * idCurve<idVec3>, which we cannot run here, so we assert the curve's
  * mathematical invariants instead:
  *
@@ -15,16 +16,25 @@
  *   5. GetTimeForLength inverts GetLengthForTime (round-trip within eps).
  *   6. Newton div-by-zero guard: coincident control points (speed->0) do
  *      not produce NaN.
+ *   7. Construction keeps sorted time/value/TCB payloads aligned and a
+ *      capacity failure leaves the curve byte-identical.
+ *   8. Empty, single-knot, and fully stationary curves have finite,
+ *      deterministic SetConstantSpeed boundary behavior.
  *
- * Build: compiled with -DWIRED_CURVE_STANDALONE so wired_curve.c uses its
- * local vec-macro fallback instead of the full q_shared.h chain.
+ * Build: wired_curve.c consumes the production q_shared.h declarations and
+ * vec macros; WIRED_CURVE_STANDALONE must not be defined for this target.
  *
  * Run:  ctest -R wired_curve   (or ./wired_curve_test directly)
  */
 #include <stdio.h>
 #include <math.h>
+#include <string.h>
 
 #include "../code/qcommon/wired/math/wired_curve.h"
+
+#ifdef WIRED_CURVE_STANDALONE
+#error "wired_curve_test must exercise the production q_shared.h configuration"
+#endif
 
 static int   g_failures = 0;
 static int   g_checks   = 0;
@@ -229,6 +239,142 @@ static void test_divzero_guard( void ) {
 	check( is_finite3( out ), "GetFirstDerivative finite with coincident knots" );
 }
 
+/* ── Test 7: construction ordering + capacity failure atomicity ───────── */
+static void test_construction_contract( void ) {
+	wiredCurve_t c, before;
+	float p20[3] = { 20, 21, 22 };
+	float p0 [3] = {  0,  1,  2 };
+	float p10[3] = { 10, 11, 12 };
+	int i, result, allInserted = 1;
+
+	printf( "[7] construction keeps authored payload aligned and capacity failure atomic\n" );
+	WiredCurve_Init( &c, WCURVE_TCB, WCURVE_BT_CLAMPED );
+	check( WiredCurve_AddValue( &c, 20.0f, p20, .20f, .21f, .22f ) == 0,
+	       "first authored knot inserted at index 0" );
+	check( WiredCurve_AddValue( &c,  0.0f, p0,  .00f, .01f, .02f ) == 0,
+	       "earlier authored knot inserted at index 0" );
+	check( WiredCurve_AddValue( &c, 10.0f, p10, .10f, .11f, .12f ) == 1,
+	       "middle authored knot inserted at index 1" );
+	check( c.numKnots == 3 && c.times[0] == 0.0f && c.times[1] == 10.0f && c.times[2] == 20.0f,
+	       "authored knot times sorted" );
+	check( vec3_close( c.values[0], p0, 0.0f + 1e-6f )
+	    && vec3_close( c.values[1], p10, 0.0f + 1e-6f )
+	    && vec3_close( c.values[2], p20, 0.0f + 1e-6f ),
+	       "values stay aligned with sorted times" );
+	check( fabsf( c.tcb[0][0] - .00f ) < 1e-6f && fabsf( c.tcb[0][1] - .01f ) < 1e-6f
+	    && fabsf( c.tcb[0][2] - .02f ) < 1e-6f
+	    && fabsf( c.tcb[1][0] - .10f ) < 1e-6f && fabsf( c.tcb[1][1] - .11f ) < 1e-6f
+	    && fabsf( c.tcb[1][2] - .12f ) < 1e-6f
+	    && fabsf( c.tcb[2][0] - .20f ) < 1e-6f && fabsf( c.tcb[2][1] - .21f ) < 1e-6f
+	    && fabsf( c.tcb[2][2] - .22f ) < 1e-6f,
+	       "TCB payload stays aligned with sorted times" );
+	{
+		float endpoint[3];
+		WiredCurve_GetValue( &c, c.times[0], endpoint );
+		check( is_finite3( endpoint ) && vec3_close( endpoint, p0, 1e-6f ),
+		       "TCB first endpoint uses bounded authored parameters" );
+		WiredCurve_GetValue( &c, c.times[2], endpoint );
+		check( is_finite3( endpoint ) && vec3_close( endpoint, p20, 1e-6f ),
+		       "TCB last endpoint uses bounded authored parameters" );
+	}
+
+	WiredCurve_Init( &c, WCURVE_CATMULLROM, WCURVE_BT_FREE );
+	for ( i = 0; i < WIRED_MAX_KNOTS; i++ ) {
+		float p[3] = { (float)i, (float)( i + 1 ), (float)( i + 2 ) };
+		if ( WiredCurve_AddValue( &c, (float)i, p, 0, 0, 0 ) != i ) {
+			allInserted = 0;
+		}
+	}
+	check( allInserted, "all capacity-bound inserts succeed" );
+	memcpy( &before, &c, sizeof( before ) );
+	result = WiredCurve_AddValue( &c, 1000.0f, p20, 0, 0, 0 );
+	check( result == -1, "capacity+1 insert is rejected" );
+	check( memcmp( &before, &c, sizeof( c ) ) == 0,
+	       "capacity failure leaves curve byte-identical" );
+}
+
+/* ── Test 8: empty/single/stationary constant-speed boundaries ────────── */
+static void test_degenerate_constant_speed_contract( void ) {
+	wiredCurve_t c, emptyBefore;
+	float p[3] = { 5, 6, 7 };
+	float out[3];
+	float zero[3] = { 0, 0, 0 };
+	float t;
+	int i, exactTimeline = 1;
+
+	printf( "[8] degenerate curves keep finite deterministic timelines\n" );
+	WiredCurve_Init( &c, WCURVE_CATMULLROM, WCURVE_BT_CLAMPED );
+	memcpy( &emptyBefore, &c, sizeof( c ) );
+	check( WiredCurve_GetTimeForLength( &c, 1.0f, 0.1f ) == 0.0f,
+	       "empty curve inverse length returns 0" );
+	WiredCurve_SetConstantSpeed( &c, 8.0f );
+	check( memcmp( &emptyBefore, &c, sizeof( c ) ) == 0,
+	       "empty curve SetConstantSpeed is a no-op" );
+
+	WiredCurve_AddValue( &c, 3.0f, p, 0, 0, 0 );
+	check( WiredCurve_GetTimeForLength( &c, 1.0f, 0.1f ) == 3.0f,
+	       "single knot inverse length returns its authored time" );
+	WiredCurve_SetConstantSpeed( &c, 8.0f );
+	check( c.times[0] == 8.0f, "single knot becomes the last knot at totalTime" );
+	WiredCurve_GetValue( &c, -100.0f, out );
+	check( vec3_close( out, p, 1e-6f ), "single knot value stable before its time" );
+	WiredCurve_GetValue( &c, 100.0f, out );
+	check( vec3_close( out, p, 1e-6f ), "single knot value stable after its time" );
+	WiredCurve_GetFirstDerivative( &c, 8.0f, out );
+	check( vec3_close( out, zero, 1e-6f ),
+	       "single knot derivative is zero" );
+
+	WiredCurve_Init( &c, WCURVE_CATMULLROM, WCURVE_BT_CLAMPED );
+	WiredCurve_AddValue( &c,  2.0f, p, 0, 0, 0 );
+	WiredCurve_AddValue( &c,  5.0f, p, 0, 0, 0 );
+	WiredCurve_AddValue( &c,  5.0f, p, 0, 0, 0 );
+	WiredCurve_AddValue( &c, 20.0f, p, 0, 0, 0 );
+	WiredCurve_SetConstantSpeed( &c, 12.0f );
+	for ( i = 0; i < c.numKnots; i++ ) {
+		float expected = 4.0f * (float)i;
+		if ( !isfinite( c.times[i] ) || c.times[i] != expected ) exactTimeline = 0;
+	}
+	check( exactTimeline, "stationary duplicate-time curve becomes exact {0,4,8,12}" );
+	t = WiredCurve_GetTimeForLength( &c, 1.0f, 0.1f );
+	check( isfinite( t ) && t >= c.times[0] && t <= c.times[c.numKnots-1],
+	       "stationary GetTimeForLength is finite and bounded" );
+}
+
+/* ── Test 9: CLOSED two-knot seam wraps every boundary-owned array ────── */
+static void test_closed_two_knot_contract( void ) {
+	wiredCurve_t c;
+	float p0[3] = { 1, 2, 3 };
+	float p1[3] = { 9, 6, 3 };
+	float out[3], deriv[3], firstDeriv[3];
+
+	printf( "[9] CLOSED two-knot TCB seam wraps values, times, and TCB payloads\n" );
+	WiredCurve_Init( &c, WCURVE_TCB, WCURVE_BT_CLOSED );
+	c.closeTime = 2.0f;
+	WiredCurve_AddValue( &c, 0.0f, p0,  0.2f, -0.3f,  0.4f );
+	WiredCurve_AddValue( &c, 2.0f, p1, -0.1f,  0.25f, -0.5f );
+
+	WiredCurve_GetValue( &c, 0.0f, out );
+	WiredCurve_GetFirstDerivative( &c, 0.0f, deriv );
+	memcpy( firstDeriv, deriv, sizeof( firstDeriv ) );
+	check( is_finite3( out ) && vec3_close( out, p0, 1e-6f ),
+	       "closed first endpoint equals first knot" );
+	check( is_finite3( deriv ), "closed first endpoint derivative is finite" );
+
+	WiredCurve_GetValue( &c, 2.0f, out );
+	WiredCurve_GetFirstDerivative( &c, 2.0f, deriv );
+	check( is_finite3( out ) && vec3_close( out, p1, 1e-6f ),
+	       "closed last authored endpoint equals last knot" );
+	check( is_finite3( deriv ), "closed last endpoint derivative is finite" );
+
+	/* period = last authored time + closeTime = 4; the seam returns p0. */
+	WiredCurve_GetValue( &c, 4.0f, out );
+	WiredCurve_GetFirstDerivative( &c, 4.0f, deriv );
+	check( is_finite3( out ) && vec3_close( out, p0, 1e-6f ),
+	       "closed period wraps exactly to first knot" );
+	check( is_finite3( deriv ) && vec3_close( deriv, firstDeriv, 1e-6f ),
+	       "closed period derivative equals first-knot derivative" );
+}
+
 int main( void ) {
 	printf( "wired_curve math-core test (RBDOOM Curve.h port)\n" );
 	printf( "======================================================\n" );
@@ -239,6 +385,9 @@ int main( void ) {
 	test_constant_speed_linearity();
 	test_time_for_length_roundtrip();
 	test_divzero_guard();
+	test_construction_contract();
+	test_degenerate_constant_speed_contract();
+	test_closed_two_knot_contract();
 
 	printf( "------------------------------------------------------\n" );
 	printf( "%d/%d checks passed\n", g_checks - g_failures, g_checks );

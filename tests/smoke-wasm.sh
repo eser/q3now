@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # smoke-wasm.sh — WASM VM backend smoke test
 #
-# Runs the headless server with WASM modules (vm_game=3) on arena7
-# (Temple of Retribution). arena7 is in the Q3 demo PAK (`demoq3/pak0.pk3`,
+# Runs a headless gamesv check and a finite client/server gamesv+gamecl check
+# in supported VM mode 2 on arena7 (Temple of Retribution). arena7 is in the
+# Q3 demo PAK (`demoq3/pak0.pk3`,
 # verified via launcher/internal/pipeline/proc_q3copy_entries_pax01.go:102),
 # so this smoke runs against redistributable demo assets — no full Q3
 # install required.
@@ -25,9 +26,9 @@
 #   at the build instructions. There is no manual fallback — a single
 #   known-good path beats two paths where one is broken.
 #
-# Map choice: arena7. Reasoning: shipped in demoq3/pak0.pk3, exercises
-# bot AI navigation, jump pads, item placement variety better than
-# arena1/arena7. Override via the second positional arg if needed.
+# Map choice: arena7. Reasoning: shipped in demoq3/pak0.pk3 and provides a
+# stable full client gameplay transition. Override via the second positional
+# arg if needed.
 #
 # Usage:
 #   bash tests/smoke-wasm.sh [path-to-ded] [map] [path-to-basepath]
@@ -43,6 +44,10 @@
 #                              for idempotency. Default: <repo>/base-demo.
 #   Q3NOW_LAUNCHER=...         Override the launcher binary path. Default:
 #                              auto-detect <repo>/launcher/build/bin/...
+#   WIRED_CLIENT=...           Override the GUI client binary used to prove
+#                              gamecl + FIRST GAMEPLAY FRAME.
+#   WASM_SMOKE_OUTPUT_DIR=...  Persistent evidence root. Default:
+#                              build/test-results/wasm-smoke.
 #   Q3NOW_CHANNEL=...          Channel suffix the launcher was built with.
 #                              Default: "-preview" (matches Makefile default).
 #                              Smoke uses this to find the launcher's output
@@ -53,6 +58,28 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+PYTHON=()
+for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 \
+        && "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+        PYTHON=("$candidate")
+        break
+    fi
+done
+if [ "${#PYTHON[@]}" -eq 0 ] && command -v py >/dev/null 2>&1 \
+    && py -3 -c 'import sys; raise SystemExit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+    PYTHON=(py -3)
+fi
+[ "${#PYTHON[@]}" -gt 0 ] || { echo "SKIP: Python 3.8+ is required"; exit 77; }
+PYTHON_OS="$("${PYTHON[@]}" -c 'import os; print(os.name)')"
+
+python_path() {
+    case "$(uname -s):$PYTHON_OS" in
+        MINGW*:nt|MSYS*:nt|CYGWIN*:nt) cygpath -w "$1" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
 # ── Locate headless server binary ──────────────────────────────────────────
 DED_OVERRIDE="${1:-}"
 MAP="${2:-arena7}"
@@ -62,10 +89,12 @@ if [ -n "$DED_OVERRIDE" ]; then
     DED="$DED_OVERRIDE"
 else
     for candidate in \
+        "${PROJECT_DIR}/build/release/wired-headless.arm64" \
+        "${PROJECT_DIR}/build/release/wired-headless.aarch64" \
         "${PROJECT_DIR}/build/release/wired-headless.x86_64" \
         "${PROJECT_DIR}/build/release/wired-headless.x64.exe" \
-        "${PROJECT_DIR}/build/Release/wired-headless.arm64" \
-        "${PROJECT_DIR}/build/release/wired-headless.aarch64" \
+        "${PROJECT_DIR}/build/release/wired-headless.exe" \
+        "${PROJECT_DIR}/build/release/wired-headless" \
     ; do
         if [ -x "$candidate" ]; then DED="$candidate"; break; fi
     done
@@ -75,6 +104,28 @@ if [ -z "${DED:-}" ] || [ ! -x "$DED" ]; then
     echo "ERROR: headless server not found. Tried:"
     echo "  build/release/wired-headless.{x86_64,x64.exe,arm64,aarch64}"
     echo "Override: bash $0 path-to-ded [map] [basepath]"
+    exit 1
+fi
+
+# The client run is authoritative for gamecl: a headless server can only prove
+# gamesv. Keep discovery beside the headless binary so both use one build.
+CLIENT="${WIRED_CLIENT:-}"
+if [ -z "$CLIENT" ]; then
+    for candidate in \
+        "${PROJECT_DIR}/build/release/q3now-preview.arm64.app/Contents/MacOS/wired.arm64" \
+        "${PROJECT_DIR}/build/release/wired.arm64" \
+        "${PROJECT_DIR}/build/release/wired.aarch64" \
+        "${PROJECT_DIR}/build/release/wired.x86_64" \
+        "${PROJECT_DIR}/build/release/wired.x64.exe" \
+        "${PROJECT_DIR}/build/release/wired.exe" \
+        "${PROJECT_DIR}/build/release/wired" \
+    ; do
+        if [ -x "$candidate" ]; then CLIENT="$candidate"; break; fi
+    done
+fi
+if [ -z "$CLIENT" ] || [ ! -x "$CLIENT" ]; then
+    echo "ERROR: client engine not found; gamecl WASM cannot be proven."
+    echo "Override with WIRED_CLIENT=/path/to/wired."
     exit 1
 fi
 
@@ -145,13 +196,31 @@ else
     exit 1
 fi
 
-# ── Stage build artifacts into the smoke basepath ──────────────────────────
+# ── Stage build artifacts into an isolated writable home ──────────────────
 # Two distinct artifact groups, both produced by `make` / `make create-packs`:
 #   1. WASM modules (gamesv.wasm, gamecl.wasm) from <build>/<config>/base/vm/
-#      → engine searches fs_installpath/base/vm/ at runtime
+#      → engine searches fs_homepath/base/vm/ before the read-only install root
 #   2. Mod pack (pax21.sw3z) from <build>/base/  — this is what ships
 #      modfiles/default.cfg and other q3now overrides; without it the engine
-#      hard-fails with "Couldn't load default.cfg"
+#      hard-fails with "Couldn't load default.cfg". The user's install/content
+#      root is never mutated by the smoke.
+RESULT_ROOT="${WASM_SMOKE_OUTPUT_DIR:-${PROJECT_DIR}/build/test-results/wasm-smoke}"
+RUN_DIR="${RESULT_ROOT}/run-$(date +%Y%m%d-%H%M%S)-$$"
+HOME_PATH="${RUN_DIR}/home"
+mkdir -p "${HOME_PATH}/base/vm"
+
+content_staged=0
+for content_pack in "${Q3DIR}"/base/*.sw3z "${Q3DIR}"/base/*.pk3; do
+    [ -f "$content_pack" ] || continue
+    cp -f "$content_pack" "${HOME_PATH}/base/"
+    content_staged=$((content_staged + 1))
+done
+if [ "$content_staged" -eq 0 ]; then
+    echo "  -- ERROR: basepath resolved but no content pack could be staged."
+    exit 1
+fi
+echo "  -- Staged $content_staged read-only content pack(s) from $Q3DIR"
+
 WASM_BUILD_DIR=""
 for candidate in \
     "${PROJECT_DIR}/build/release/Release/base/vm" \
@@ -161,13 +230,17 @@ for candidate in \
 done
 
 if [ -n "$WASM_BUILD_DIR" ]; then
-    mkdir -p "${Q3DIR}/base/vm"
-    cp -f "${WASM_BUILD_DIR}/gamesv.wasm" "${WASM_BUILD_DIR}/gamecl.wasm" "${Q3DIR}/base/vm/"
+    cp -f "${WASM_BUILD_DIR}/gamesv.wasm" "${WASM_BUILD_DIR}/gamecl.wasm" "${HOME_PATH}/base/vm/"
+    for module in gamesv gamecl; do
+        if [ -f "${WASM_BUILD_DIR}/${module}.aot" ]; then
+            cp -f "${WASM_BUILD_DIR}/${module}.aot" "${HOME_PATH}/base/vm/"
+        fi
+    done
     echo "  -- Staged WASM modules from $WASM_BUILD_DIR"
 else
-    echo "  -- WARNING: no compiled .wasm found in build tree;"
-    echo "     vm_game=3 test will fail unless modules are already at"
-    echo "     ${Q3DIR}/base/vm/. Build with USE_WASM=ON first."
+    echo "  -- ERROR: no compiled gamesv.wasm found in build tree."
+    echo "     Build with USE_WASM=ON first."
+    exit 1
 fi
 
 MODPACK_BUILD=""
@@ -179,8 +252,7 @@ for candidate in \
 done
 
 if [ -n "$MODPACK_BUILD" ]; then
-    mkdir -p "${Q3DIR}/base"
-    cp -f "$MODPACK_BUILD" "${Q3DIR}/base/"
+    cp -f "$MODPACK_BUILD" "${HOME_PATH}/base/"
     echo "  -- Staged mod pack: $(basename "$MODPACK_BUILD")"
 else
     echo "  -- ERROR: mod pack (pax21.sw3z) not found at"
@@ -194,66 +266,94 @@ fi
 
 echo "=== WASM Smoke Test ==="
 echo "Server:   $DED"
+echo "Client:   $CLIENT"
 echo "Basepath: $Q3DIR"
+echo "Homepath: $HOME_PATH"
 echo "Map:      $MAP"
+echo "Evidence: $RUN_DIR"
 echo ""
 
-# ── Test 1: Explicit WASM mode (vm_game=3) ──────────────────────────
-echo "[1/3] Running headless server with vm_game=3 (explicit WASM)..."
-timeout 30 "$DED" \
-    +set fs_installpath "$Q3DIR" \
-    +set vm_game 3 \
-    +map "$MAP" \
-    +addbot visor 1 \
-    +wait 300 \
-    +quit \
-    2>&1 | tee /tmp/smoke-wasm-1.log || true
+run_engine() {
+    local binary="$1"
+    local stdout_file="$2"
+    shift 2
+    local binary_dir
+    binary_dir="$(cd "$(dirname "$binary")" && pwd)"
 
-if grep -q "loaded as WASM" /tmp/smoke-wasm-1.log; then
-    echo "  PASS: WASM module loaded"
-else
-    echo "  FAIL: WASM module did not load"
-    exit 1
-fi
+    set +e
+    "${PYTHON[@]}" "$(python_path "$SCRIPT_DIR/run-with-timeout.py")" \
+        --timeout 45 --kill-after 10 \
+        --cwd "$(python_path "$binary_dir")" \
+        --stdout "$(python_path "$stdout_file")" -- \
+        "$(python_path "$binary_dir/$(basename "$binary")")" "$@"
+    local rc=$?
+    set -e
+    if [ "$rc" -ne 0 ]; then
+        echo "  FAIL: engine exited with status $rc"
+        tail -40 "$stdout_file" 2>/dev/null || true
+        exit 1
+    fi
+    if grep -aEq 'died on signal|Sys_Error|FATAL|WASM: failed|WASM[^:]*exception' "$stdout_file"; then
+        echo "  FAIL: fatal/WASM error signature in $stdout_file"
+        grep -aE 'died on signal|Sys_Error|FATAL|WASM: failed|WASM[^:]*exception' "$stdout_file" | tail -20
+        exit 1
+    fi
+}
 
-# ── Test 2: Auto-detect mode (vm_game=2 with .wasm present) ─────────
-echo "[2/3] Running with vm_game=2 (auto-detect, should prefer .wasm)..."
-timeout 30 "$DED" \
-    +set fs_installpath "$Q3DIR" \
+HOME_NATIVE="$(python_path "$HOME_PATH")"
+SERVER_LOG="$RUN_DIR/server.log"
+CLIENT_LOG="$RUN_DIR/client.log"
+
+# ── Test 1: authoritative server-module load ───────────────────────────────
+echo "[1/2] Running headless server with vm_game=2..."
+run_engine "$DED" "$SERVER_LOG" \
+    +set fs_homepath "$HOME_NATIVE" \
+    +set com_noHardReboot 1 \
+    +set sv_pure 0 \
     +set vm_game 2 \
     +map "$MAP" \
-    +wait 100 \
-    +quit \
-    2>&1 | tee /tmp/smoke-wasm-2.log || true
+    +wait 300 \
+    +quit
 
-if grep -q "WASM" /tmp/smoke-wasm-2.log; then
-    echo "  PASS: Auto-detected WASM module"
-else
-    echo "  INFO: No WASM auto-detect (may be expected if no .wasm in vm/)"
+if ! grep -aEq 'gamesv\.(wasm|aot) loaded as WASM (interpreter|AOT)' "$SERVER_LOG"; then
+    echo "  FAIL: gamesv did not load through WAMR"
+    tail -60 "$SERVER_LOG"
+    exit 1
 fi
+echo "  PASS: gamesv loaded through WAMR"
 
-# ── Test 3: Fallback when no .wasm exists ────────────────────────────
-echo "[3/3] Testing QVM fallback (rename .wasm temporarily)..."
-WASM_FILE="${Q3DIR}/base/vm/gamesv.wasm"
-if [ -f "$WASM_FILE" ]; then
-    mv "$WASM_FILE" "${WASM_FILE}.bak"
-    timeout 15 "$DED" \
-        +set fs_installpath "$Q3DIR" \
-        +set vm_game 2 \
-        +map "$MAP" \
-        +wait 50 \
-        +quit \
-        2>&1 | tee /tmp/smoke-wasm-3.log || true
-    mv "${WASM_FILE}.bak" "$WASM_FILE"
+# ── Test 2: client-module load + gameplay transition ───────────────────────
+# A headless process cannot instantiate gamecl. This finite window runs a local
+# client/server, requires both modules, and proves cgame reached CA_ACTIVE.
+echo "[2/2] Running client with vm_game=2 + vm_cgame=2..."
+run_engine "$CLIENT" "$CLIENT_LOG" \
+    +set fs_homepath "$HOME_NATIVE" \
+    +set com_noHardReboot 1 \
+    +set com_automated 1 \
+    +set r_fullscreen 0 \
+    +set r_mode -1 \
+    +set r_customwidth 640 \
+    +set r_customheight 480 \
+    +set sv_pure 0 \
+    +set vm_game 2 \
+    +set vm_cgame 2 \
+    +map "$MAP" \
+    +wait 500 \
+    +quit
 
-    if grep -q "QVM" /tmp/smoke-wasm-3.log || grep -q "compiled" /tmp/smoke-wasm-3.log; then
-        echo "  PASS: Fell back to QVM when .wasm missing"
-    else
-        echo "  INFO: Could not verify QVM fallback"
+for module in gamesv gamecl; do
+    if ! grep -aEq "${module}\\.(wasm|aot) loaded as WASM (interpreter|AOT)" "$CLIENT_LOG"; then
+        echo "  FAIL: $module did not load through WAMR in client run"
+        tail -80 "$CLIENT_LOG"
+        exit 1
     fi
-else
-    echo "  SKIP: No .wasm file to test fallback"
+done
+if ! grep -aEq "FIRST GAMEPLAY FRAME mapname=(maps/)?${MAP}(\\.bsp)?([^A-Za-z0-9_.-]|$)" "$CLIENT_LOG"; then
+    echo "  FAIL: client did not reach the first gameplay frame on $MAP"
+    tail -80 "$CLIENT_LOG"
+    exit 1
 fi
+echo "  PASS: gamesv + gamecl loaded through WAMR; first gameplay frame reached"
 
 echo ""
 echo "=== WASM Smoke Test Complete ==="
