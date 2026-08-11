@@ -1285,6 +1285,11 @@ void CL_MapLoading( const char *mapname ) {
 	// next WiredUI frame and trip the cgame assert (KEYCATCH_UI must be 0 at
 	// CA_LOADING). Draining the stack keeps that invariant.
 	WiredUI_CloseAllMenus();
+	// An intentional map start also voids any stale error text. Without this
+	// the CL_Disconnect(qtrue) below sees the leftover com_errorMessage and
+	// the Plan C hook re-surfaces error_popup over the connect screen
+	// (sticky/empty-popup family, qconsole-9 #3/#5).
+	Com_ClearLastError();
 	// Preserve the console catcher; drop all others (UI, cgame, etc.).
 	Key_SetCatcher( Key_GetCatcher() & KEYCATCH_CONSOLE );
 
