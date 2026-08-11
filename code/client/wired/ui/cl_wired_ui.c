@@ -4818,6 +4818,15 @@ void WiredUI_PopMenu( void ) {
 		}
 	}
 
+	// Dismissing the error dialog consumes the error, whatever the dismissal
+	// path (ESC pop, button close, CloseAllMenus drain). Without this a stale
+	// com_errorMessage survives the dismiss and the next
+	// CL_Disconnect(showMainMenu) re-surfaces the dialog via the Plan C hook
+	// (sticky/empty-popup family, qconsole-9 #3/#5).
+	if ( !Q_stricmp( wui_menuStack[wui_menuStackDepth - 1], "error_popup" ) ) {
+		Com_ClearLastError();
+	}
+
 	wui_menuStackDepth--;
 	wui_focusItem = -1;
 	wui_focusedItemPtr = NULL;
@@ -4901,6 +4910,11 @@ void WiredUI_CloseAllMenus( void ) {
 		if ( m && m->cinematicHandle >= 0 ) {
 			CIN_StopCinematic( m->cinematicHandle );
 			m->cinematicHandle = -1;
+		}
+		// Draining a stack that holds the error dialog dismisses it —
+		// consume the error, same contract as the WiredUI_PopMenu path.
+		if ( !Q_stricmp( wui_menuStack[i], "error_popup" ) ) {
+			Com_ClearLastError();
 		}
 	}
 	wui_menuStackDepth = 0;
