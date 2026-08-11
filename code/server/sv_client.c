@@ -1742,6 +1742,7 @@ static void SV_VerifyPaks_f( client_t *cl ) {
 	int nClientChkSum[512];
 	const char *pArg;
 	qboolean bGood = qtrue;
+	const char *why = NULL;   // which validation branch rejected the client
 
 	// if we are pure, we "expect" the client to load certain things from
 	// certain pk3 files, namely we want the client to have loaded the
@@ -1751,8 +1752,15 @@ static void SV_VerifyPaks_f( client_t *cl ) {
 
 		nChkSum1 = 0;
 
-		// verify the cgame WASM the client "should" be running
-		bGood = FS_FileIsInPAK( "vm/cgame.wasm", &nChkSum1, NULL );
+		// verify the cgame WASM the client "should" be running.
+		// The module was renamed cgame→gamecl (files.c tracks FS_CGAME_REF on
+		// "vm/gamecl.wasm"); the stale "vm/cgame.wasm" lookup here failed for
+		// every pak set, so every pure server kicked every client at
+		// CS_PRIMED (alpha-ux sweep #2/#7 root).
+		bGood = FS_FileIsInPAK( "vm/gamecl.wasm", &nChkSum1, NULL );
+		if ( !bGood ) {
+			why = "server: vm/gamecl.wasm not found in any pak";
+		}
 		// bGood &= FS_FileIsInPAK( "vm/ui.wasm", &nChkSum2, NULL );
 
 		nClientPaks = Cmd_Argc();
@@ -1766,6 +1774,7 @@ static void SV_VerifyPaks_f( client_t *cl ) {
 		pArg = Cmd_Argv(nCurArg++);
 		if ( !*pArg ) {
 			bGood = qfalse;
+			why = "empty serverId arg";
 		}
 		else
 		{
@@ -1783,18 +1792,21 @@ static void SV_VerifyPaks_f( client_t *cl ) {
 			// numChecksums is encoded
 			if (nClientPaks < 6) {
 				bGood = qfalse;
+				why = va( "too few cp args (%d < 6)", nClientPaks );
 				break;
 			}
 			// verify first to be the cgame checksum
 			pArg = Cmd_Argv(nCurArg++);
 			if ( !*pArg || *pArg == '@' || atoi(pArg) != nChkSum1 ) {
 				bGood = qfalse;
+				why = va( "cgame checksum mismatch (client '%s', server %d)", pArg, nChkSum1 );
 				break;
 			}
 			// should be sitting at the delimeter now
 			pArg = Cmd_Argv(nCurArg++);
 			if (*pArg != '@') {
 				bGood = qfalse;
+				why = va( "missing '@' delimiter (got '%s')", pArg );
 				break;
 			}
 			// store checksums since tokenization is not re-entrant
@@ -1813,6 +1825,7 @@ static void SV_VerifyPaks_f( client_t *cl ) {
 						continue;
 					if (nClientChkSum[i] == nClientChkSum[j]) {
 						bGood = qfalse;
+						why = va( "duplicate client checksum %d (slots %d/%d of %d)", nClientChkSum[i], i, j, nClientPaks );
 						break;
 					}
 				}
@@ -1826,6 +1839,7 @@ static void SV_VerifyPaks_f( client_t *cl ) {
 			for ( i = 0; i < nClientPaks; i++ ) {
 				if ( !FS_IsPureChecksum( nClientChkSum[i] ) ) {
 					bGood = qfalse;
+					why = va( "referenced pak checksum %d (slot %d of %d) is not in the server pure set", nClientChkSum[i], i, nClientPaks );
 					break;
 				}
 			}
@@ -1841,6 +1855,7 @@ static void SV_VerifyPaks_f( client_t *cl ) {
 			nChkSum1 ^= nClientPaks;
 			if (nChkSum1 != nClientChkSum[nClientPaks]) {
 				bGood = qfalse;
+				why = va( "checksum-feed digest mismatch (client %d, server %d, feed %d, %d paks)", nClientChkSum[nClientPaks], nChkSum1, sv.checksumFeed, nClientPaks );
 				break;
 			}
 
@@ -1854,6 +1869,11 @@ static void SV_VerifyPaks_f( client_t *cl ) {
 			cl->pureAuthentic = qtrue;
 		} else {
 			cl->pureAuthentic = qfalse;
+			// Field-diagnosable kicks: a purity rejection is rare and almost
+			// always a checksum-flow bug, not an actual impure client — log
+			// exactly which branch rejected (alpha-ux sweep #2/#7 probe).
+			COM_WARN( LOG_CH(ch_server), "SV_VerifyPaks: rejecting %s: %s\n",
+			          cl->name, why ? why : "unknown branch" );
 			cl->lastSnapshotTime = svs.time - 9999; // generate a snapshot immediately
 			cl->state = CS_ZOMBIE; // skip delta generation
 			SV_SendClientSnapshot( cl );

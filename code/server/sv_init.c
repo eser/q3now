@@ -623,11 +623,14 @@ void SV_SpawnServer_Tick( void ) {
 		SV_BotFrame( sv.time );
 		svs.time += 100;
 
-		FS_TouchFileInPak( "vm/cgame.wasm" );
+		// cgame module was renamed cgame→gamecl; keep the reference-touch in
+		// sync with the FS_CGAME_REF tracking in files.c and the pure
+		// handshake in SV_VerifyPaks_f.
+		FS_TouchFileInPak( "vm/gamecl.wasm" );
 
 		p = FS_ReferencedPakNames();
 		if ( FS_ExcludeReference() ) {
-			FS_TouchFileInPak( "vm/cgame.wasm" );
+			FS_TouchFileInPak( "vm/gamecl.wasm" );
 			p = FS_ReferencedPakNames();
 		}
 		Cvar_Set( "sv_referencedPakNames", p );
