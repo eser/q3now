@@ -465,7 +465,7 @@ char *COM_ParseComplex( ComParser *parser, const char **data_p, qboolean allowLi
 	int c;
 	int len = 0;
 	int shift = 0; // token line shift relative to parser->lines
-	parser->tokentype = TK_GENEGIC;
+	parser->tokentype = TK_GENERIC;
 
 __reswitch:
 	switch ( *str )

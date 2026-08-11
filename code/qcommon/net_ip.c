@@ -67,6 +67,7 @@ const char *NET_LastSendError( void ) {
 #ifdef _WIN32
 #	include <winsock2.h>
 #	include <ws2tcpip.h>
+#	include <iphlpapi.h>
 #	if WINVER < 0x501
 #		ifdef __MINGW32__
 			// wspiapi.h isn't available on MinGW, so if it's
@@ -294,7 +295,7 @@ static char *NET_ErrorString( void ) {
 		case WSAENETDOWN: return "WSAENETDOWN";
 		case WSAENETUNREACH: return "WSAENETUNREACH";
 		case WSAENETRESET: return "WSAENETRESET";
-		case WSAECONNABORTED: return "WSWSAECONNABORTEDAEINTR";
+		case WSAECONNABORTED: return "WSAECONNABORTED";
 		case WSAECONNRESET: return "WSAECONNRESET";
 		case WSAENOBUFS: return "WSAENOBUFS";
 		case WSAEISCONN: return "WSAEISCONN";
@@ -1638,12 +1639,12 @@ static void NET_GetLocalAddress( void )
 	char	hostname[256];
 	struct ifaddrs *ifap, *search;
 
+	numIP = 0;
+
 	if ( gethostname( hostname, sizeof( hostname ) ) )
 		return;
 
 	Com_Log( SEV_INFO, LOG_CH(ch_network), "Hostname: %s\n", hostname );
-
-	numIP = 0;
 
 	if ( getifaddrs( &ifap ) )
 		Com_Log( SEV_INFO, LOG_CH(ch_network), "NET_GetLocalAddress: Unable to get list of network interfaces: %s\n", NET_ErrorString() );
@@ -1662,6 +1663,46 @@ static void NET_GetLocalAddress( void )
 	}
 }
 #else // _WIN32
+static void NET_FindNetMask4( const struct sockaddr *addr, struct sockaddr *netmask ) {
+	MIB_IPADDRTABLE *addrTable;
+	const struct sockaddr_in *address;
+	DWORD result;
+	HANDLE heap;
+	ULONG size = 0;
+
+	result = GetIpAddrTable( NULL, &size, FALSE );
+	if ( result != ERROR_INSUFFICIENT_BUFFER ) {
+		return;
+	}
+
+	heap = GetProcessHeap();
+	if ( heap == NULL ) {
+		return;
+	}
+
+	addrTable = (MIB_IPADDRTABLE *)HeapAlloc( heap, 0, size );
+	if ( addrTable == NULL ) {
+		return;
+	}
+
+	result = GetIpAddrTable( addrTable, &size, FALSE );
+	if ( result != NO_ERROR ) {
+		HeapFree( heap, 0, addrTable );
+		return;
+	}
+
+	address = (const struct sockaddr_in *)addr;
+	for ( DWORD i = 0; i < addrTable->dwNumEntries; i++ ) {
+		if ( memcmp( &address->sin_addr, &addrTable->table[i].dwAddr, sizeof( IN_ADDR ) ) == 0 ) {
+			struct sockaddr_in *output = (struct sockaddr_in *)netmask;
+			memcpy( &output->sin_addr, &addrTable->table[i].dwMask, sizeof( IN_ADDR ) );
+			break;
+		}
+	}
+
+	HeapFree( heap, 0, addrTable );
+}
+
 static void NET_GetLocalAddress( void ) {
 	char	hostname[256];
 	struct addrinfo	hint;
@@ -1703,11 +1744,15 @@ static void NET_GetLocalAddress( void ) {
 		// add all IPs from returned list.
 		for ( search = res; search; search = search->ai_next )
 		{
-			if ( search->ai_family == AF_INET )
-				NET_AddLocalAddress( "", search->ai_addr, (struct sockaddr *) &mask4 );
+			if ( search->ai_family == AF_INET ) {
+				NET_FindNetMask4( search->ai_addr, (struct sockaddr *)&mask4 );
+				NET_AddLocalAddress( "", search->ai_addr, (struct sockaddr *)&mask4 );
+				continue;
+			}
 #if FEAT_IPV6
-			else if ( search->ai_family == AF_INET6 )
-				NET_AddLocalAddress( "", search->ai_addr, (struct sockaddr *) &mask6 );
+			if ( search->ai_family == AF_INET6 ) {
+				NET_AddLocalAddress( "", search->ai_addr, (struct sockaddr *)&mask6 );
+			}
 #endif
 		}
 
@@ -1935,6 +1980,8 @@ NET_Config
 static void NET_Config( qboolean enableNetworking ) {
 	qboolean	stop;
 	qboolean	start;
+
+	NET_FlushPacketQueue( -99999 );
 
 	// get any latched changes to cvars
 	qboolean modified = NET_GetCvars();

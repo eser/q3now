@@ -1488,8 +1488,8 @@ ENDIF()
 #TARGET_LINK_OPTIONS(${DNAME} PRIVATE -fno-pie) # v3.13+
 
 IF(WIN32)
-	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} winmm comctl32 ws2_32)
-	TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} winmm comctl32 ws2_32)
+	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} winmm comctl32 ws2_32 iphlpapi)
+	TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} winmm comctl32 ws2_32 iphlpapi)
 	IF(USE_WASM)
 		# WAMR's WASI libc (win_file.c, random.c) needs pathcch + bcrypt
 		TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} pathcch bcrypt)

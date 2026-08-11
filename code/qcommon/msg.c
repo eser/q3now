@@ -203,7 +203,7 @@ static int MSG_ReadBits( msg_t *msg, int bits ) {
 	if ( sgn && bits < 32 ) {
 		// NOLINTNEXTLINE(clang-analyzer-core.BitwiseShift) — analyzer explores INT_MIN/INT_MAX paths; real call sites pass 8/16/32 or other small positives, so bits is in [1, 31] here
 		if ( value & ( 1 << ( bits - 1 ) ) ) {
-			value |= -1 ^ ( ( 1 << bits ) - 1 );
+			value |= -1 ^ ( ( 1U << bits ) - 1 );
 		}
 	}
 
@@ -271,7 +271,7 @@ void MSG_WriteString( msg_t *sb, const char *s ) {
 	for ( int i = 0 ; i < l; i++ ) {
 		// get rid of 0x80+ and '%' chars, because old clients don't like them
 		char v;
-		if ( s[i] & 0x80 || s[i] == '%' )
+		if ( (byte)s[i] & 0x80 || s[i] == '%' )
 			v = '.';
 		else
 			v = s[i];
@@ -291,7 +291,7 @@ void MSG_WriteBigString( msg_t *sb, const char *s ) {
 	for ( int i = 0 ; i < l ; i++ ) {
 		// get rid of 0x80+ and '%' chars, because old clients don't like them
 		char v;
-		if ( s[i] & 0x80 || s[i] == '%' )
+		if ( (byte)s[i] & 0x80 || s[i] == '%' )
 			v = '.';
 		else
 			v = s[i];

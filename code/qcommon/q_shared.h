@@ -686,7 +686,7 @@ unsigned long Com_GenerateHashValue( const char *fname, const unsigned int size 
 void Hash_SelfTest( void );
 
 typedef enum {
-	TK_GENEGIC = 0, // for single-char tokens
+	TK_GENERIC = 0, // for single-char tokens
 	TK_STRING,
 	TK_QUOTED,
 	TK_EQ,
