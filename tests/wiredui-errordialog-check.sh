@@ -128,10 +128,97 @@ LINE_INTERACTIVE="$(run_case 0)"
 fail=0
 VERBOSE=1 assert_contract "$LINE_AUTO" "$LINE_INTERACTIVE" || fail=1
 
-echo "  NOTE #3c (close): the back/copy buttons in error_popup.wui dispatch"
-echo "       'close' -> WiredScript_Close -> WiredUI_PopMenu (verified in source)."
-echo "       With text now populated the dialog is focusable/dismissable; driving"
-echo "       an actual button click headlessly is not covered here (coverage gap)."
+# ── #5/#7 lifecycle case (one interactive run) ────────────────────────────────
+# Closes the coverage gap the old #3c NOTE used to flag. A single
+# com_automated=0 run with r_layoutDump exercises the full dialog LIFECYCLE:
+#   show → dismiss (wui_menu_nav back = the real ESC path) → map load →
+#   show AGAIN over the running game → re-map.
+# Computed assertions (no eyes):
+#   #5a  some dump frame CONTAINS the error_popup region (it really showed)
+#   #5b  popup-free frames FOLLOW the last popup frame (dismiss/map-load
+#        clears it — the stuck-dialog symptom would keep it to the end)
+#   #7a  both maps reach load and the run exits cleanly with zero
+#        FATAL/Z_Free lines (popup → re-map does not crash)
+#   #7b  the FINAL dump frame carries no error_popup
+# Maps need game data: the isolated home receives an APFS clone (cp -c,
+# instant) of the user's pax01 when present; the lifecycle SKIPs without it.
+lifecycle_case() {
+    local home_parent home_dir jsonl dump rc
+    home_parent="$(mktemp -d -t wired-errlc-XXXXXX 2>/dev/null || mktemp -d)"
+    home_dir="$home_parent/q3now-preview"
+    mkdir -p "$home_dir/base"
+    jsonl="$home_dir/qconsole.jsonl"
+    local pax01="$HOME/wired/q3now-preview/base/pax01.sw3z"
+    if [ ! -f "$pax01" ]; then
+        echo "  SKIP #5/#7 lifecycle: no pax01 at $pax01 (maps needed)"
+        rm -rf "$home_parent"; return 0
+    fi
+    cp -c "$pax01" "$home_dir/base/" 2>/dev/null || cp "$pax01" "$home_dir/base/"
+    dump="$WIRED_DIR/layoutdump.jsonl"
+    rm -f "$dump"
+    (
+        cd "$WIRED_DIR" || exit 1
+        timeout 240 "$WIRED" \
+            +set fs_homepath "$home_dir" \
+            +set com_automated 0 \
+            +set com_noHardReboot 1 \
+            +set s_initsound 0 \
+            +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 \
+            +set r_layoutDump 1 \
+            +wait 100 \
+            +wui_showerror_test "$TEST_MSG" +wait 40 \
+            +wui_menu_nav back +wait 40 \
+            +map arena1 +wait 250 \
+            +wui_showerror_test "$TEST_MSG" +wait 40 \
+            +map arena7 +wait 250 \
+            +quit >/dev/null 2>&1
+    )
+    rc=$?
+    local lfail=0 maps fatals
+    maps="$(grep -c "Server: arena" "$jsonl" 2>/dev/null | tr -cd '0-9')"
+    fatals="$(grep -ciE "FATAL|Z_Free|crashed" "$jsonl" 2>/dev/null | tr -cd '0-9')"
+    if [ "$rc" -eq 0 ] && [ "${maps:-0}" -ge 2 ] && [ "${fatals:-0}" -eq 0 ]; then
+        echo "  PASS #7a: popup → dismiss → map → popup-over-game → re-map: ${maps} map loads, 0 FATAL, clean exit"
+    else
+        echo "  FAIL #7a: rc=$rc maps=${maps:-0} fatal-lines=${fatals:-0} (popup/re-map lifecycle broke the run)"
+        lfail=1
+    fi
+    if [ -s "$dump" ]; then
+        python3 - "$dump" <<'LCPY' || lfail=1
+import json, sys, collections
+frames = collections.defaultdict(bool)
+for line in open(sys.argv[1], errors="ignore"):
+    try: o = json.loads(line)
+    except ValueError: continue
+    fr = o.get("frame", 0)
+    if o.get("menu") == "error_popup" or o.get("region") == "error_popup":
+        frames[fr] = True
+    else:
+        frames.setdefault(fr, False)
+order = sorted(frames)
+shown = [f for f in order if frames[f]]
+fail = 0
+if shown:
+    print(f"  PASS #5a: error_popup present in dump frames {shown[0]}..{shown[-1]} (dialog really showed)")
+else:
+    print("  FAIL #5a: error_popup never appeared in the layout dump"); fail = 1
+if shown and any(f > shown[-1] for f in order):
+    print("  PASS #5b: popup-free frames follow the last popup frame (cleared — not stuck)")
+elif shown:
+    print("  FAIL #5b: the dialog is present through the FINAL frame (stuck-dialog symptom)"); fail = 1
+if order and not frames[order[-1]]:
+    print("  PASS #7b: final frame carries no error_popup")
+elif order:
+    print("  FAIL #7b: final frame still shows error_popup"); fail = 1
+sys.exit(fail)
+LCPY
+    else
+        echo "  FAIL #5: no layout dump produced"; lfail=1
+    fi
+    rm -rf "$home_parent"
+    return $lfail
+}
+lifecycle_case || fail=1
 
 if [ "$fail" -eq 0 ]; then echo "==> WiredUI error-dialog check: PASS"; else echo "==> WiredUI error-dialog check: FAIL"; fi
 exit $fail
