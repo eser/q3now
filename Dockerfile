@@ -71,6 +71,7 @@ RUN ARCH=$(uname -m) && \
     case "$ARCH" in \
       x86_64)  BINEXT=".x86_64" ;; \
       aarch64) BINEXT=".aarch64" ;; \
+      riscv64) BINEXT=".riscv64" ;; \
       armv7l)  BINEXT=".arm" ;; \
       *)       BINEXT="" ;; \
     esac && \
@@ -99,6 +100,11 @@ COPY --from=builder /src/build/Release/base/ /opt/wired/base/
 
 # Install default server config
 COPY modfiles/config_server.cfg /opt/wired/base/config_server.cfg
+
+# Ship the engine and bundled third-party notices with the runtime artifact.
+COPY --from=builder /src/LICENSE /opt/wired/LICENSE
+COPY --from=builder /src/THIRD_PARTY_LICENSES.md /opt/wired/THIRD_PARTY_LICENSES.md
+COPY --from=builder /src/LICENSES/ /opt/wired/LICENSES/
 
 # Install entrypoint
 COPY docker/entrypoint.sh /opt/wired/entrypoint.sh

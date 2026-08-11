@@ -24,6 +24,7 @@
 #define idx64 0
 #define arm32 0
 #define arm64 0
+#define riscv64 0
 
 // ============================== Win32 ====================================
 
@@ -127,6 +128,15 @@
 #undef arm64
 #define arm64 1
 #endif // __arm64__
+
+#if defined (__riscv) && (__riscv_xlen == 64)
+#define ARCH_STRING "riscv64"
+#undef riscv64
+#define riscv64 1
+#ifndef __WORDSIZE
+#define __WORDSIZE 64
+#endif
+#endif // __riscv && __riscv_xlen == 64
 
 #if defined (__PPC64__)
 #if defined (__LITTLE_ENDIAN__) || defined (__LITTLE_ENDIAN)

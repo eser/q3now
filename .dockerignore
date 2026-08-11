@@ -16,6 +16,7 @@ dist/
 docs/
 *.md
 !README.md
+!THIRD_PARTY_LICENSES.md
 
 # CI/CD
 .github/

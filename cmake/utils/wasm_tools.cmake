@@ -60,6 +60,8 @@ message(STATUS "WASM: wasi-sdk found at ${WASI_SDK_PATH}")
 # Detect AOT target
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
     set(WASM_AOT_TARGET "aarch64")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64")
+    set(WASM_AOT_TARGET "riscv64")
 else()
     set(WASM_AOT_TARGET "x86_64")
 endif()
