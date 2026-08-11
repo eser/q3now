@@ -110,6 +110,10 @@ else ifeq ($(UNAME_M),aarch64)
   BINEXT  := .aarch64
   RENDEXT := _aarch64
   EXEEXT  :=
+else ifeq ($(UNAME_M),riscv64)
+  BINEXT  := .riscv64
+  RENDEXT := _riscv64
+  EXEEXT  :=
 else ifeq ($(UNAME_M),x86_64)
   BINEXT  := .x86_64
   RENDEXT := _x86_64
@@ -775,7 +779,8 @@ ifeq ($(UNAME_S),Linux)
 	  cp "$(Q3DIR)/$(CMAKE_APP_NAME)-headless$(BINEXT)" "$(TAR_STAGING)/" || true
 	cp "$(LAUNCHER_BIN)" "$(TAR_STAGING)/q3now-launcher" 2>/dev/null || true
 	cp -R "$(Q3DATADIR)/." "$(TAR_STAGING)/base/"
-	cp README.md "$(TAR_STAGING)/"
+	cp README.md LICENSE THIRD_PARTY_LICENSES.md "$(TAR_STAGING)/"
+	cp -R LICENSES "$(TAR_STAGING)/LICENSES"
 	tar czf "$(TAR_OUT)" -C $(TAR_STAGING) .
 	rm -rf $(TAR_STAGING)
 	@echo "==> $(TAR_OUT) ready ($$(du -h "$(TAR_OUT)" | cut -f1))"
@@ -800,7 +805,8 @@ ifdef IS_WINDOWS
 	  [ -f "$$dll" ] && cp "$$dll" "$(ZIP_STAGING)/" || true; \
 	done
 	cp -R "$(Q3DATADIR)/." "$(ZIP_STAGING)/base/"
-	cp README.md "$(ZIP_STAGING)/"
+	cp README.md LICENSE THIRD_PARTY_LICENSES.md "$(ZIP_STAGING)/"
+	cp -R LICENSES "$(ZIP_STAGING)/LICENSES"
 	cd $(ZIP_STAGING) && powershell -Command "Compress-Archive -Path '*' -DestinationPath '$(CURDIR)/$(ZIP_OUT)' -Force"
 	rm -rf $(ZIP_STAGING)
 	@echo "==> $(ZIP_OUT) ready"

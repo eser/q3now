@@ -116,6 +116,9 @@ ELSEIF(CMAKE_SYSTEM_PROCESSOR MATCHES aarch64|arm64)
 		SET(BINEXT .aarch64)
 		SET(RENDEXT _aarch64)
 	ENDIF()
+ELSEIF(CMAKE_SYSTEM_PROCESSOR MATCHES riscv64)
+	SET(BINEXT .riscv64)
+	SET(RENDEXT _riscv64)
 ELSEIF(CMAKE_SYSTEM_PROCESSOR MATCHES arm*)
 	SET(BINEXT .arm)
 	SET(RENDEXT _arm)
@@ -1596,6 +1599,8 @@ IF(APPLE)
 	# tree could never answer "did the build do work?" — the same
 	# signal-integrity failure class as make's unreliable exit code.
 	SET(_BUNDLE_STAMP "${CMAKE_BINARY_DIR}/CMakeFiles/macos_app_bundle.stamp")
+	file(GLOB_RECURSE _BUNDLE_LICENSE_FILES CONFIGURE_DEPENDS
+		"${CMAKE_SOURCE_DIR}/LICENSES/*")
 	add_custom_command(
 		OUTPUT "${_BUNDLE_STAMP}"
 		COMMAND ${CMAKE_COMMAND} -E make_directory "${APP_BUNDLE_DIR}/Contents/MacOS"
@@ -1609,12 +1614,26 @@ IF(APPLE)
 		COMMAND ${CMAKE_COMMAND} -E copy
 			"${CMAKE_SOURCE_DIR}/code/unix/quake3_flat.icns"
 			"${APP_BUNDLE_DIR}/Contents/Resources/quake3_flat.icns"
+		COMMAND ${CMAKE_COMMAND} -E copy
+			"${CMAKE_SOURCE_DIR}/LICENSE"
+			"${APP_BUNDLE_DIR}/Contents/Resources/LICENSE"
+		COMMAND ${CMAKE_COMMAND} -E copy
+			"${CMAKE_SOURCE_DIR}/THIRD_PARTY_LICENSES.md"
+			"${APP_BUNDLE_DIR}/Contents/Resources/THIRD_PARTY_LICENSES.md"
+		COMMAND ${CMAKE_COMMAND} -E rm -rf
+			"${APP_BUNDLE_DIR}/Contents/Resources/LICENSES"
+		COMMAND ${CMAKE_COMMAND} -E copy_directory
+			"${CMAKE_SOURCE_DIR}/LICENSES"
+			"${APP_BUNDLE_DIR}/Contents/Resources/LICENSES"
 		COMMAND ${CMAKE_COMMAND} -E echo_append "APPL????"
 			> "${APP_BUNDLE_DIR}/Contents/PkgInfo"
 		DEPENDS ${CNAME}${BINEXT} ${DNAME}${BINEXT}
 			"$<TARGET_FILE:${CNAME}${BINEXT}>"
 			"$<TARGET_FILE:${DNAME}${BINEXT}>"
 			"${CMAKE_SOURCE_DIR}/code/unix/quake3_flat.icns"
+			"${CMAKE_SOURCE_DIR}/LICENSE"
+			"${CMAKE_SOURCE_DIR}/THIRD_PARTY_LICENSES.md"
+			${_BUNDLE_LICENSE_FILES}
 		COMMENT "Assembling macOS bundle: ${APP_BUNDLE_NAME}${BINEXT}.app"
 		VERBATIM
 	)

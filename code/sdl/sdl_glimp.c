@@ -44,6 +44,10 @@ static PFN_vkGetInstanceProcAddr qvkGetInstanceProcAddr;
 
 cvar_t *r_stereoEnabled;
 
+#if defined(__APPLE__) && defined(USE_VULKAN_API)
+static cvar_t *r_metalHUD;
+#endif
+
 /*
 ===============
 GLimp_Shutdown
@@ -710,6 +714,16 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 {
 	rserr_t err;
 
+#if defined(__APPLE__) && defined(USE_VULKAN_API)
+	// MoltenVK reads this process setting while its Metal objects are created.
+	// Keep the diagnostic opt-in and Vulkan-only; canonical performance runs
+	// therefore carry no HUD observer overhead unless explicitly requested.
+	if ( vulkan )
+	{
+		setenv( "MTL_HUD_ENABLED", r_metalHUD && r_metalHUD->integer ? "1" : "0", 1 );
+	}
+#endif
+
 	// An automated (non-interactive) run stays windowed: fullscreen forces the
 	// window to the foreground, which defeats the unfocused-background intent.
 	if ( fullscreen && com_automated && com_automated->integer )
@@ -915,6 +929,14 @@ void VKimp_Init( glconfig_t *config )
 			"Enable stereo rendering for techniques like shutter glasses." );
 		r_stereoEnabled = Cvar_Register( &d );
 	}
+
+#if defined(__APPLE__)
+	{
+		static const cvarDesc_t d = CVAR_BOOL( "r_metalHUD", "0", CVAR_ARCHIVE | CVAR_LATCH,
+			"Enable Apple's Metal Performance HUD for Vulkan diagnostics." );
+		r_metalHUD = Cvar_Register( &d );
+	}
+#endif
 
 	// feedback to renderer configuration
 	glw_state.config = config;
