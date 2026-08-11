@@ -1,51 +1,76 @@
 {
-  "version": 6,
-  "configurePresets": [
-    {
-      "name": "base",
-      "hidden": true,
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "USE_WASM": "ON"
-      }
-    },
-    {
-      "name": "release",
-      "inherits": "base",
-      "displayName": "Release",
-      "description": "Matches `make` / `make build`: Ninja + Release + WASM modules. Product/channel identity defaults to q3now/-preview from CMakeLists; the Makefile passes them explicitly, so keep the two in step if defaults ever change.",
-      "binaryDir": "${sourceDir}/build/release",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
-      }
-    },
-    {
-      "name": "debug",
-      "inherits": "base",
-      "displayName": "Debug",
-      "description": "Matches `make build-debug`.",
-      "binaryDir": "${sourceDir}/build/debug",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
-      }
-    },
-    {
-      "name": "lint",
-      "displayName": "Lint (compile_commands only)",
-      "description": "CI static-analysis configure: generates compile_commands.json, skips WASM. Not a development configuration — the pak cannot be produced from it.",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/lint",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "USE_WASM": "OFF",
-        "BUILD_GAME_LIBRARIES": "ON"
-      }
-    }
-  ],
-  "buildPresets": [
-    { "name": "release", "configurePreset": "release" },
-    { "name": "debug", "configurePreset": "debug" }
-  ]
+    "version": 6,
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "USE_WASM": "ON"
+            }
+        },
+        {
+            "name": "release",
+            "inherits": "base",
+            "displayName": "Release",
+            "description": "Matches `make` / `make build`: Ninja + Release + WASM modules. Product/channel identity defaults to q3now/-preview from CMakeLists; the Makefile passes them explicitly, so keep the two in step if defaults ever change.",
+            "binaryDir": "${sourceDir}/build/release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "debug",
+            "inherits": "base",
+            "displayName": "Debug",
+            "description": "Matches `make build-debug`.",
+            "binaryDir": "${sourceDir}/build/debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "lint",
+            "displayName": "Lint (compile_commands only)",
+            "description": "CI static-analysis configure: generates compile_commands.json, skips WASM. Not a development configuration — the pak cannot be produced from it.",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/lint",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "USE_WASM": "OFF",
+                "BUILD_GAME_LIBRARIES": "ON"
+            }
+        },
+        {
+            "name": "sanitize-host",
+            "inherits": "base",
+            "displayName": "Host contracts (ASan + UBSan)",
+            "description": "Host-only subsystem tests with fail-fast AddressSanitizer and UndefinedBehaviorSanitizer; no product or WASM target is instrumented.",
+            "binaryDir": "${sourceDir}/build/sanitize-host",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "USE_WASM": "OFF",
+                "BUILD_GAME_LIBRARIES": "OFF",
+                "BUILD_TESTING": "ON",
+                "WIRED_HOST_SANITIZERS": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "release",
+            "configurePreset": "release"
+        },
+        {
+            "name": "debug",
+            "configurePreset": "debug"
+        },
+        {
+            "name": "sanitize-host",
+            "configurePreset": "sanitize-host",
+            "targets": ["host_tests"]
+        }
+    ]
 }

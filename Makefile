@@ -176,7 +176,7 @@ endif
 CMAKE_EXTRA_FLAGS ?=
 CMAKE_CHANNEL_FLAG := -DCHANNEL_SUFFIX="$(CHANNEL_SUFFIX)"
 CMAKE_PRODUCT_FLAG := -DPRODUCT_NAME="$(PRODUCT_NAME)"
-CMAKE_CONFIGURE    := cmake -S . -B $(BUILD_DIR) $(GENERATOR) -DCMAKE_BUILD_TYPE=$(BUILD_CFG) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON $(CMAKE_WASM_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_PRODUCT_FLAG) $(CMAKE_EXTRA_FLAGS)
+CMAKE_CONFIGURE    := cmake -S . -B $(BUILD_DIR) $(GENERATOR) -DCMAKE_BUILD_TYPE=$(BUILD_CFG) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTING=ON $(CMAKE_WASM_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_PRODUCT_FLAG) $(CMAKE_EXTRA_FLAGS)
 CMAKE_BUILD        := cmake --build $(BUILD_DIR) --parallel $(JOBS)
 
 # Code signing identity (default: ad-hoc).
@@ -245,7 +245,11 @@ PAK_OUT := $(BUILD_DIR)/base/pax21.sw3z
         copy-libs copy-build copy-packs copy-all \
         bundle-codesign bundle-dmg bundle-tar bundle-zip bundle-docker \
         run-launcher run-game run-headless release \
-        check smoke test-vm test-quic-game test-fs-dedup bench diff-api lint help
+        check smoke test-wiredui-menu-functional test-wiredui-external-actions \
+        test-wiredui-external-actions-self test-wiredui-bot-actions \
+        test-wiredui-bot-actions-self test-wiredui-connect-action \
+        test-wiredui-connect-action-self test-wiredui-demo-play test-wiredui-demo-play-self \
+        test-vm test-quic-game test-fs-dedup bench diff-api lint help
 
 # Default target: a CONSISTENT DEPLOYABLE WORLD, not just compiled objects.
 # `build` compiles the engine + native game DLLs + the WASM VM modules (the
@@ -417,17 +421,17 @@ PAK_CONTENT_SRC := $(shell find modfiles -type f 2>/dev/null)
 # run-* reach the same file target, and Make de-duplicates it within one
 # invocation, so `make all` (build -> pak, then create-packs -> pak-already-fresh)
 # repacks EXACTLY once — no double-repack, no cycle.
-$(PAK_OUT): $(PAK_VM_MODULES) $(PAK_CONTENT_SRC) $(SW3Z_BIN)
+$(PAK_OUT): Makefile $(PAK_VM_MODULES) $(PAK_CONTENT_SRC) $(SW3Z_BIN)
 	@echo "==> Staging pak contents..."
 	rm -rf $(PAK_STAGING)
 	mkdir -p $(PAK_STAGING) $(BUILD_DIR)/base
 	cp -R modfiles/. $(PAK_STAGING)/
 	@echo "==> Copying VM modules into pak..."
-	# WASM VM modules (gamecl.wasm / gamesv.wasm) follow DEV via $(MODULE_DIR),
-	# the same tree the engine + native game DLLs deploy from — so the packed
-	# WASM is always the config's just-compiled module (the prerequisite above
-	# guarantees this rule re-fires when it changes).
-	cp -R $(MODULE_DIR)/vm $(PAK_STAGING)/
+	# Package exactly the declared prerequisites.  AOT is intentionally excluded
+	# until it has its own freshness/removal contract; recursively copying vm/
+	# can otherwise ship stale .aot files that runtime mode 2 prefers over WASM.
+	mkdir -p $(PAK_STAGING)/vm
+	cp $(PAK_VM_MODULES) $(PAK_STAGING)/vm/
 	@echo "==> Stamping version..."
 	echo "$(APP_NAME) $$(git describe --always --dirty) ($$(date +%Y-%m-%d))" > $(PAK_STAGING)/description.txt
 	@echo "==> Creating $(PAK_OUT)..."
@@ -955,8 +959,25 @@ endif
 # VERIFICATION & TESTING
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ── host subsystem contracts ────────────────────────────────────────────────
+# CTest is the single native runner. Labels carry layer/owner/failure/feature
+# taxonomy; --no-tests=error prevents a misconfigured BUILD_TESTING=OFF tree
+# from turning release evidence into a vacuous green.
+
+test-host: build
+	ctest --test-dir $(BUILD_DIR) --output-on-failure --no-tests=error -L host-only
+
+# Dedicated host-only sanitizer tree. Product, game-VM and WASM targets stay
+# uninstrumented; host_tests is an aggregate of the exact subsystem contracts.
+test-sanitize-host:
+	cmake --preset sanitize-host
+	cmake --build --preset sanitize-host
+	ctest --test-dir build/sanitize-host --output-on-failure --no-tests=error -L host-only --output-junit host-sanitizer-results.xml
+
+.PHONY: test-host test-sanitize-host
+
 # ── check ────────────────────────────────────────────────────────────────────
-# Verifies all build outputs are present.
+# Verifies all build outputs are present and host subsystem contracts pass.
 
 # check — verify the build produced everything it must ship. This is a REAL
 # gate: any missing artifact exits nonzero (it used to be `A && echo OK ||
@@ -967,7 +988,7 @@ endif
 # The two codesign probes stay ADVISORY (no fail): `release` runs check
 # BEFORE bundle-codesign, so failing on an unsigned tree would deadlock the
 # release flow; bundle-codesign itself errors if signing fails.
-check: create-packs
+check: create-packs test-host
 	@fail=0; \
 	echo "==> Verifying build..."; \
 	if ls $(MODULE_DIR)/vm/gamecl.wasm  > /dev/null 2>&1; then echo "  gamecl VM:    OK"; else echo "  gamecl VM:    MISSING (wasi-sdk not found?)"; fail=1; fi; \
@@ -1007,6 +1028,82 @@ else
 endif
 
 .PHONY: smoke nav-gate
+
+# Deterministic, pixel-free M1 menu transition gate. WIRED identifies the
+# current binary/pack; WIRED_CONTENT_ROOT may supply read-only licensed base
+# content for a staging build. --self-test remains pack- and engine-free.
+test-wiredui-menu-functional:
+	@bash tests/wiredui-menu-functional-check.sh "$${WIRED:---self-test}"
+
+.PHONY: test-wiredui-menu-functional
+
+# External-data action gate.  Unlike the analyzer-only target, the product
+# target is fail-closed and requires an explicit assembled GUI binary; licensed
+# base content is supplied through WIRED_CONTENT_ROOT.
+test-wiredui-external-actions:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/wiredui-external-actions-check.sh "$${WIRED}"
+
+test-wiredui-external-actions-self:
+	@bash tests/wiredui-external-actions-check.sh --self-test
+
+.PHONY: test-wiredui-external-actions test-wiredui-external-actions-self
+
+# In-game bot action gate. The product target proves real add/remove UI actions
+# on one isolated GUI listen-server; the self target is engine/content-free.
+test-wiredui-bot-actions:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/wiredui-bot-actions-check.sh "$${WIRED}"
+
+test-wiredui-bot-actions-self:
+	@bash tests/wiredui-bot-actions-check.sh --self-test
+
+.PHONY: test-wiredui-bot-actions test-wiredui-bot-actions-self
+
+test-wiredui-demo-play:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/wiredui-demo-play-check.sh "$${WIRED}"
+
+test-wiredui-demo-play-self:
+	@bash tests/wiredui-demo-play-check.sh --self-test
+
+.PHONY: test-wiredui-demo-play test-wiredui-demo-play-self
+
+# Specify Server action gate.  The product target starts an isolated loopback
+# headless server and drives the real GUI editfield/action path; the self target
+# exercises the strict analyzer and its injected-fault fixtures without an
+# engine, renderer, licensed pack, or socket.
+test-wiredui-connect-action:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/wiredui-connect-action-check.sh "$${WIRED}"
+
+test-wiredui-connect-action-self:
+	@bash tests/wiredui-connect-action-check.sh --self-test
+
+.PHONY: test-wiredui-connect-action test-wiredui-connect-action-self
+
+# Live-loopback server browser/status/action gate.  The product target proves
+# stale-safe status plus footer Connect to the real arena7 headless endpoint;
+# the self target validates the strict analyzer and defect fixtures.
+test-wiredui-server-browser:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/wiredui-server-browser-check.sh "$${WIRED}"
+
+test-wiredui-server-browser-self:
+	@bash tests/wiredui-server-browser-check.sh --self-test
+
+.PHONY: test-wiredui-server-browser test-wiredui-server-browser-self
+
+# Real global-browser discovery through an authorized loopback master and
+# challenge-bound directed info responses. Deliberately excludes Connect.
+test-wiredui-global-browser:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/wiredui-global-browser-check.sh "$${WIRED}"
+
+test-wiredui-global-browser-self:
+	@bash tests/wiredui-global-browser-check.sh --self-test
+
+.PHONY: test-wiredui-global-browser test-wiredui-global-browser-self
 
 # ── QUIC game transport smoke test ───────────────────────────────────────────
 

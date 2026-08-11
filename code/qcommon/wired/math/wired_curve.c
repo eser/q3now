@@ -61,13 +61,25 @@ inherit from idCurve_Spline, so these are the canonical helpers).
 RBDOOM Curve.h:1115-1180.
 ====================
 */
+static int WiredCurve_ClosedIndex( int index, int count, int *cycle ) {
+	int q = index / count;
+	int r = index % count;
+	if ( r < 0 ) {
+		r += count;
+		q--;
+	}
+	if ( cycle ) {
+		*cycle = q;
+	}
+	return r;
+}
+
 static void WiredCurve_ValueForIndex( const wiredCurve_t *c, int index, float out[3] ) {
 	int n = c->numKnots - 1;
 
 	if ( index < 0 ) {
 		if ( c->boundaryType == WCURVE_BT_CLOSED ) {
-			/* values[ numKnots + index % numKnots ] */
-			int k = c->numKnots + ( index % c->numKnots );
+			int k = WiredCurve_ClosedIndex( index, c->numKnots, NULL );
 			VectorCopy( c->values[k], out );
 		} else {
 			/* values[0] + index * ( values[1] - values[0] ) */
@@ -78,7 +90,7 @@ static void WiredCurve_ValueForIndex( const wiredCurve_t *c, int index, float ou
 		return;
 	} else if ( index > n ) {
 		if ( c->boundaryType == WCURVE_BT_CLOSED ) {
-			int k = index % c->numKnots;
+			int k = WiredCurve_ClosedIndex( index, c->numKnots, NULL );
 			VectorCopy( c->values[k], out );
 		} else {
 			/* values[n] + ( index - n ) * ( values[n] - values[n-1] ) */
@@ -93,18 +105,15 @@ static void WiredCurve_ValueForIndex( const wiredCurve_t *c, int index, float ou
 
 static float WiredCurve_TimeForIndex( const wiredCurve_t *c, int index ) {
 	int n = c->numKnots - 1;
+	int cycle, wrapped;
 
+	if ( c->boundaryType == WCURVE_BT_CLOSED && ( index < 0 || index > n ) ) {
+		wrapped = WiredCurve_ClosedIndex( index, c->numKnots, &cycle );
+		return cycle * ( c->times[n] + c->closeTime ) + c->times[wrapped];
+	}
 	if ( index < 0 ) {
-		if ( c->boundaryType == WCURVE_BT_CLOSED ) {
-			return ( index / c->numKnots ) * ( c->times[n] + c->closeTime )
-			     - ( c->times[n] + c->closeTime - c->times[ c->numKnots + ( index % c->numKnots ) ] );
-		}
 		return c->times[0] + index * ( c->times[1] - c->times[0] );
 	} else if ( index > n ) {
-		if ( c->boundaryType == WCURVE_BT_CLOSED ) {
-			return ( index / c->numKnots ) * ( c->times[n] + c->closeTime )
-			     + c->times[ index % c->numKnots ];
-		}
 		return c->times[n] + ( index - n ) * ( c->times[n] - c->times[n-1] );
 	}
 	return c->times[index];
@@ -198,6 +207,23 @@ static void WiredCurve_TCB_BasisFirstDerivative( const wiredCurve_t *c, int inde
 	bvals[3] = ( 3.0f * s - 2.0f ) * s;
 }
 
+/* TCB parameters belong to authored knots. Virtual FREE/CLAMPED boundary
+   knots inherit the nearest endpoint parameters; CLOSED curves wrap. */
+static int WiredCurve_TCBIndexForIndex( const wiredCurve_t *c, int index ) {
+	if ( index < 0 ) {
+		if ( c->boundaryType == WCURVE_BT_CLOSED ) {
+			return WiredCurve_ClosedIndex( index, c->numKnots, NULL );
+		}
+		return 0;
+	}
+	if ( index >= c->numKnots ) {
+		return c->boundaryType == WCURVE_BT_CLOSED
+		     ? WiredCurve_ClosedIndex( index, c->numKnots, NULL )
+		     : c->numKnots - 1;
+	}
+	return index;
+}
+
 /*
 ====================
 WiredCurve_TCB_TangentsForIndex  (RBDOOM Curve.h:1948-1980)
@@ -209,6 +235,8 @@ non-uniform time-adjust factor `adj`.
 static void WiredCurve_TCB_TangentsForIndex( const wiredCurve_t *c, int index, float t0[3], float t1[3] ) {
 	float dt, omt, omc, opc, omb, opb, adj, s0, s1;
 	float delta[3], vi[3], vim1[3], vip2[3], vip1[3], tmp[3];
+	int tcb0 = WiredCurve_TCBIndexForIndex( c, index );
+	int tcb1 = WiredCurve_TCBIndexForIndex( c, index + 1 );
 
 	/* delta = ValueForIndex(index+1) - ValueForIndex(index) */
 	{
@@ -220,11 +248,11 @@ static void WiredCurve_TCB_TangentsForIndex( const wiredCurve_t *c, int index, f
 	dt = WiredCurve_TimeForIndex( c, index + 1 ) - WiredCurve_TimeForIndex( c, index );
 
 	/* first point's outgoing tangent */
-	omt = 1.0f - c->tcb[index][0];   /* tension    */
-	omc = 1.0f - c->tcb[index][1];   /* continuity */
-	opc = 1.0f + c->tcb[index][1];
-	omb = 1.0f - c->tcb[index][2];   /* bias       */
-	opb = 1.0f + c->tcb[index][2];
+	omt = 1.0f - c->tcb[tcb0][0];   /* tension    */
+	omc = 1.0f - c->tcb[tcb0][1];   /* continuity */
+	opc = 1.0f + c->tcb[tcb0][1];
+	omb = 1.0f - c->tcb[tcb0][2];   /* bias       */
+	opb = 1.0f + c->tcb[tcb0][2];
 	adj = 2.0f * dt / ( WiredCurve_TimeForIndex( c, index + 1 ) - WiredCurve_TimeForIndex( c, index - 1 ) );
 	s0  = 0.5f * adj * omt * opc * opb;
 	s1  = 0.5f * adj * omt * omc * omb;
@@ -237,11 +265,11 @@ static void WiredCurve_TCB_TangentsForIndex( const wiredCurve_t *c, int index, f
 	VectorMA( t0, s0, tmp, t0 );              /* t0 += s0 * (vi - vim1) */
 
 	/* second point's incoming tangent */
-	omt = 1.0f - c->tcb[index + 1][0];
-	omc = 1.0f - c->tcb[index + 1][1];
-	opc = 1.0f + c->tcb[index + 1][1];
-	omb = 1.0f - c->tcb[index + 1][2];
-	opb = 1.0f + c->tcb[index + 1][2];
+	omt = 1.0f - c->tcb[tcb1][0];
+	omc = 1.0f - c->tcb[tcb1][1];
+	opc = 1.0f + c->tcb[tcb1][1];
+	omb = 1.0f - c->tcb[tcb1][2];
+	opb = 1.0f + c->tcb[tcb1][2];
 	adj = 2.0f * dt / ( WiredCurve_TimeForIndex( c, index + 2 ) - WiredCurve_TimeForIndex( c, index ) );
 	s0  = 0.5f * adj * omt * omc * opb;
 	s1  = 0.5f * adj * omt * opc * omb;
@@ -448,6 +476,13 @@ float WiredCurve_GetTimeForLength( const wiredCurve_t *c, float length, float ep
 	float accumLength[WIRED_MAX_KNOTS];
 	float totalLength, len0, len1, t, diff, speed;
 
+	if ( c->numKnots <= 0 ) {
+		return 0.0f;
+	}
+	if ( c->numKnots == 1 ) {
+		return c->times[0];
+	}
+
 	if ( length <= 0.0f ) {
 		return c->times[0];
 	}
@@ -506,12 +541,55 @@ void WiredCurve_SetConstantSpeed( wiredCurve_t *c, float totalTime ) {
 	int   i;
 	float length[WIRED_MAX_KNOTS];
 	float totalLength, scale, t;
+	int   stationary;
+
+	/* Empty curves have no timeline to rewrite. A single point has no
+	   segments, but the public contract still makes its last knot time the
+	   requested total time. Both guards also prevent times[-1] and 0/0. */
+	if ( c->numKnots <= 0 ) {
+		return;
+	}
+	if ( c->numKnots == 1 ) {
+		c->times[0] = totalTime;
+		return;
+	}
+
+	/* Detect a stationary path before evaluating its spline basis. Authored
+	   times may contain duplicates, whose zero denominator would otherwise
+	   produce NaN before the zero-length fallback can run. */
+	stationary = 1;
+	for ( i = 1; i < c->numKnots; i++ ) {
+		if ( c->values[i][0] != c->values[0][0]
+		  || c->values[i][1] != c->values[0][1]
+		  || c->values[i][2] != c->values[0][2] ) {
+			stationary = 0;
+			break;
+		}
+	}
+	if ( stationary ) {
+		scale = totalTime / (float)( c->numKnots - 1 );
+		for ( i = 0; i < c->numKnots; i++ ) {
+			c->times[i] = scale * (float)i;
+		}
+		return;
+	}
 
 	/* first pass: read all segment lengths against the ORIGINAL times[] */
 	totalLength = 0.0f;
 	for ( i = 0; i < c->numKnots - 1; i++ ) {
 		length[i] = WiredCurve_GetLengthBetweenKnots( c, i, i + 1 );
 		totalLength += length[i];
+	}
+
+	/* Constant speed is undefined when every segment has zero arc length.
+	   Keep the stationary curve usable by assigning a deterministic finite
+	   timeline instead of multiplying zero segment lengths by infinity. */
+	if ( totalLength <= 0.0f ) {
+		scale = totalTime / (float)( c->numKnots - 1 );
+		for ( i = 0; i < c->numKnots; i++ ) {
+			c->times[i] = scale * (float)i;
+		}
+		return;
 	}
 
 	/* second pass: rewrite times[] so equal dt == equal arc length */

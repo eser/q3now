@@ -214,22 +214,65 @@ TARGET_SOURCES(qcommon     PRIVATE ${WIRED_MATH_SRCS})
 TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_MATH_SRCS})
 
 # wired_curve math-core unit test (cinematic-scene spline core gate).
-# Standalone: wired_curve.c compiled with -DWIRED_CURVE_STANDALONE so it uses
-# its local vec-macro fallback (no full q_shared.h chain in the test binary).
+# Production configuration: wired_curve.c consumes q_shared.h exactly as the
+# engine targets do; the standalone vec-macro fallback is not enabled here.
 # Asserts: interpolation-through-control-points, straight-line constant
 # tangent, TCB(0,0,0)==Catmull-Rom, SetConstantSpeed linearity, GetTimeForLength
 # round-trip, Newton div-by-zero guard.
 # Run with: ctest -R wired_curve
-ENABLE_TESTING()
+INCLUDE(CTest)
+IF(BUILD_TESTING)
+OPTION(WIRED_HOST_SANITIZERS
+	"Build host-only subsystem tests with AddressSanitizer and UndefinedBehaviorSanitizer"
+	OFF)
+ADD_CUSTOM_TARGET(host_tests)
+
+FUNCTION(WIRED_CONFIGURE_HOST_TEST target test_name)
+	ADD_DEPENDENCIES(host_tests ${target})
+	IF(WIRED_HOST_SANITIZERS)
+		IF(NOT CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+			MESSAGE(FATAL_ERROR
+				"WIRED_HOST_SANITIZERS requires GCC or Clang; compiler is ${CMAKE_C_COMPILER_ID}")
+		ENDIF()
+		TARGET_COMPILE_OPTIONS(${target} PRIVATE
+			-fsanitize=address,undefined
+			-fno-omit-frame-pointer
+			-fno-sanitize-recover=all)
+		TARGET_LINK_OPTIONS(${target} PRIVATE
+			-fsanitize=address,undefined
+			-fno-omit-frame-pointer
+			-fno-sanitize-recover=all)
+		SET_PROPERTY(TEST ${test_name} APPEND PROPERTY LABELS "sanitizer.asan-ubsan")
+		SET_PROPERTY(TEST ${test_name} PROPERTY ENVIRONMENT
+			"ASAN_OPTIONS=abort_on_error=1:detect_leaks=0;UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1")
+	ENDIF()
+ENDFUNCTION()
+
+IF(WIRED_HOST_SANITIZERS)
+	ADD_EXECUTABLE(sanitizer_fault_probe tests/sanitizer_fault_probe.c)
+	ADD_TEST(NAME sanitizer_runtime_contract
+		COMMAND bash ${CMAKE_SOURCE_DIR}/tests/sanitizer-runtime-check.sh
+			$<TARGET_FILE:sanitizer_fault_probe>)
+	SET_TESTS_PROPERTIES(sanitizer_runtime_contract PROPERTIES
+		LABELS "host-only;infrastructure;owner.build;failure.sanitizer-runtime"
+		TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(sanitizer_fault_probe sanitizer_runtime_contract)
+ENDIF()
+
 ADD_EXECUTABLE(wired_curve_test
 	tests/wired_curve_test.c
 	code/qcommon/wired/math/wired_curve.c
 )
-TARGET_COMPILE_DEFINITIONS(wired_curve_test PRIVATE WIRED_CURVE_STANDALONE)
+TARGET_INCLUDE_DIRECTORIES(wired_curve_test PRIVATE code/qcommon)
 IF(NOT WIN32)
 	TARGET_LINK_LIBRARIES(wired_curve_test m)
 ENDIF()
 ADD_TEST(NAME wired_curve COMMAND wired_curve_test)
+SET_TESTS_PROPERTIES(wired_curve PROPERTIES
+	LABELS "host-only;subsystem;owner.wired-math;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(wired_curve_test wired_curve)
 
 # wired_scene evaluator unit test (samples wiredScene_t -> {origin,angles,fov}).
 # Standalone: wired_scene_eval.c + wired_curve.c compiled with
@@ -251,6 +294,11 @@ IF(NOT WIN32)
 	TARGET_LINK_LIBRARIES(wired_scene_eval_test m)
 ENDIF()
 ADD_TEST(NAME wired_scene_eval COMMAND wired_scene_eval_test)
+SET_TESTS_PROPERTIES(wired_scene_eval PROPERTIES
+	LABELS "host-only;subsystem;owner.wired-scene;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(wired_scene_eval_test wired_scene_eval)
 
 # savegame callback registry — Phase-2 hard gate: name<->pointer round-trip +
 # completeness across both registry tiers. Compiles the REAL resolver source
@@ -268,6 +316,11 @@ ADD_EXECUTABLE(sg_registry_test
 )
 TARGET_INCLUDE_DIRECTORIES(sg_registry_test PRIVATE code/game)
 ADD_TEST(NAME sg_registry COMMAND sg_registry_test)
+SET_TESTS_PROPERTIES(sg_registry PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-save;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(sg_registry_test sg_registry)
 
 # savegame file primitive — Phase-3 hard gate: version header + RLE codec
 # round-trip. Compiles the REAL codec (code/game/g_save_codec.c, the game-type-
@@ -284,6 +337,11 @@ ADD_EXECUTABLE(sg_savefile_test
 )
 TARGET_INCLUDE_DIRECTORIES(sg_savefile_test PRIVATE code/game)
 ADD_TEST(NAME sg_savefile COMMAND sg_savefile_test)
+SET_TESTS_PROPERTIES(sg_savefile PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-save;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(sg_savefile_test sg_savefile)
 
 # savegame serializer — Phase-4 hard gate: the field-walker round-trip + index
 # relocation. Compiles the REAL walker (g_save_serialize.c) + registry
@@ -301,6 +359,11 @@ ADD_EXECUTABLE(sg_serialize_test
 )
 TARGET_INCLUDE_DIRECTORIES(sg_serialize_test PRIVATE code/game)
 ADD_TEST(NAME sg_serialize COMMAND sg_serialize_test)
+SET_TESTS_PROPERTIES(sg_serialize PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-save;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(sg_serialize_test sg_serialize)
 
 # savegame .psw persistent subset — Phase-5 hard gate: the cross-map carry
 # (player-progression byte ranges + objectives POD) round-trip. Compiles the REAL
@@ -318,6 +381,11 @@ ADD_EXECUTABLE(sg_psw_test
 )
 TARGET_INCLUDE_DIRECTORIES(sg_psw_test PRIVATE code/game)
 ADD_TEST(NAME sg_psw COMMAND sg_psw_test)
+SET_TESTS_PROPERTIES(sg_psw PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-save;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(sg_psw_test sg_psw)
 
 # savegame load fixup — Phase-6 (FINAL) hard gate: the two-phase load relocation.
 # Compiles the REAL walker (g_save_serialize.c SG_ReadFields + SG_ResolveIndices) +
@@ -335,6 +403,11 @@ ADD_EXECUTABLE(sg_reloc_test
 )
 TARGET_INCLUDE_DIRECTORIES(sg_reloc_test PRIVATE code/game)
 ADD_TEST(NAME sg_reloc COMMAND sg_reloc_test)
+SET_TESTS_PROPERTIES(sg_reloc PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-save;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(sg_reloc_test sg_reloc)
 
 # Q1 monster animation derivation — Phase A hard gate: the frame-name prefix
 # grouping that turns a Q1 .mdl's frame names into animation ranges. Compiles the
@@ -349,6 +422,26 @@ ADD_EXECUTABLE(mdl_anim_test
 	tests/mdl_anim_test.c
 )
 ADD_TEST(NAME mdl_anim COMMAND mdl_anim_test)
+SET_TESTS_PROPERTIES(mdl_anim PROPERTIES
+	LABELS "host-only;subsystem;owner.wired-renderer-model;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(mdl_anim_test mdl_anim)
+
+# Browser getinfo/infoResponse ingress contract. Compiles the exact production
+# parser as a dependency-free host leaf and drives malicious numeric/text rows
+# that previously reached the server-list cache through atoi/truncation.
+ADD_EXECUTABLE(server_info_parse_test
+	tests/server_info_parse_test.c
+	code/client/cl_server_info.c
+)
+ADD_TEST(NAME server_info_parse_contract COMMAND server_info_parse_test)
+SET_TESTS_PROPERTIES(server_info_parse_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-client;failure.security-contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(server_info_parse_test server_info_parse_contract)
+ENDIF()
 
 # wired/scene — cinematic-scene definition + Lua-table loader. Pure CPU +
 # Lua load (NOT renderer, NOT RAL): loads a scene .lua that returns a table
@@ -670,14 +763,20 @@ ELSE()
 	TARGET_LINK_LIBRARIES(qcommon     PRIVATE recast_nav)
 	TARGET_LINK_LIBRARIES(qcommon_ded PRIVATE recast_nav)
 
-	# Unit test — Phase 2 hard gate 1: coordinate round-trip identity.
-	# Run with: ctest -R nav_coord_round_trip
-	# (ENABLE_TESTING() already ran at top level.)
-	ADD_EXECUTABLE(nav_coord_test
-		tests/nav_coord_test.c
-		code/qcommon/nav/nav_coord.c
-	)
-	ADD_TEST(NAME nav_coord_round_trip COMMAND nav_coord_test)
+	IF(BUILD_TESTING)
+		# Unit test — direct axis/handedness contract plus round-trip identity.
+		# Run with: ctest -R nav_coord_contract
+		ADD_EXECUTABLE(nav_coord_test
+			tests/nav_coord_test.c
+			code/qcommon/nav/nav_coord.c
+		)
+		ADD_TEST(NAME nav_coord_contract COMMAND nav_coord_test)
+		SET_TESTS_PROPERTIES(nav_coord_contract PROPERTIES
+			LABELS "host-only;subsystem;owner.wired-nav;failure.contract;feature.recast"
+			TIMEOUT 30
+		)
+		WIRED_CONFIGURE_HOST_TEST(nav_coord_test nav_coord_contract)
+	ENDIF()
 ENDIF()
 
 
@@ -1352,6 +1451,7 @@ IF(USE_LUA)
 	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} luajit)
 	TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} luajit)
 
+	IF(BUILD_TESTING)
 	# wired_scene Lua-loader unit test. Spins up a minimal luaL_newstate (links
 	# LuaJIT directly) — no engine FS / WiredScript. wired_scene.c + wired_curve.c
 	# are built with -DWIRED_SCENE_STANDALONE / -DWIRED_CURVE_STANDALONE so they
@@ -1375,6 +1475,12 @@ IF(USE_LUA)
 		TARGET_LINK_LIBRARIES(wired_scene_test m dl pthread)
 	ENDIF()
 	ADD_TEST(NAME wired_scene COMMAND wired_scene_test)
+	SET_TESTS_PROPERTIES(wired_scene PROPERTIES
+		LABELS "host-only;subsystem;owner.wired-scene;failure.contract;feature.lua"
+		TIMEOUT 30
+	)
+	WIRED_CONFIGURE_HOST_TEST(wired_scene_test wired_scene)
+	ENDIF()
 
 	MESSAGE(STATUS "LuaJIT scripting enabled")
 ENDIF()
@@ -1505,13 +1611,45 @@ IF(APPLE)
 			"${APP_BUNDLE_DIR}/Contents/Resources/quake3_flat.icns"
 		COMMAND ${CMAKE_COMMAND} -E echo_append "APPL????"
 			> "${APP_BUNDLE_DIR}/Contents/PkgInfo"
-		COMMAND ${CMAKE_COMMAND} -E touch "${_BUNDLE_STAMP}"
 		DEPENDS ${CNAME}${BINEXT} ${DNAME}${BINEXT}
 			"$<TARGET_FILE:${CNAME}${BINEXT}>"
 			"$<TARGET_FILE:${DNAME}${BINEXT}>"
 			"${CMAKE_SOURCE_DIR}/code/unix/quake3_flat.icns"
 		COMMENT "Assembling macOS bundle: ${APP_BUNDLE_NAME}${BINEXT}.app"
 		VERBATIM
+	)
+	IF(USE_RENDERER_DLOPEN)
+		# The client resolves renderer modules beside the executable. Make them
+		# first-class bundle inputs: otherwise the OUTPUT stamp can stay newer than
+		# a rebuilt dylib and the app silently runs an obsolete renderer.
+		add_custom_command(
+			OUTPUT "${_BUNDLE_STAMP}"
+			APPEND
+			COMMAND ${CMAKE_COMMAND} -E copy
+				"$<TARGET_FILE:${RENDERER_PREFIX}_opengl${RENDEXT}>"
+				"${APP_BUNDLE_DIR}/Contents/MacOS/$<TARGET_FILE_NAME:${RENDERER_PREFIX}_opengl${RENDEXT}>"
+			COMMAND ${CMAKE_COMMAND} -E copy
+				"$<TARGET_FILE:${RENDERER_PREFIX}_opengl2${RENDEXT}>"
+				"${APP_BUNDLE_DIR}/Contents/MacOS/$<TARGET_FILE_NAME:${RENDERER_PREFIX}_opengl2${RENDEXT}>"
+			COMMAND ${CMAKE_COMMAND} -E copy
+				"$<TARGET_FILE:${RENDERER_PREFIX}_vulkan${RENDEXT}>"
+				"${APP_BUNDLE_DIR}/Contents/MacOS/$<TARGET_FILE_NAME:${RENDERER_PREFIX}_vulkan${RENDEXT}>"
+			DEPENDS
+				${RENDERER_PREFIX}_opengl${RENDEXT}
+				${RENDERER_PREFIX}_opengl2${RENDEXT}
+				${RENDERER_PREFIX}_vulkan${RENDEXT}
+				"$<TARGET_FILE:${RENDERER_PREFIX}_opengl${RENDEXT}>"
+				"$<TARGET_FILE:${RENDERER_PREFIX}_opengl2${RENDEXT}>"
+				"$<TARGET_FILE:${RENDERER_PREFIX}_vulkan${RENDEXT}>"
+		)
+	ENDIF()
+	# Publish the stamp only after every required bundle input has copied.  If a
+	# renderer copy fails, leaving an older/missing stamp forces the next build to
+	# retry instead of accepting a partially assembled app as up to date.
+	add_custom_command(
+		OUTPUT "${_BUNDLE_STAMP}"
+		APPEND
+		COMMAND ${CMAKE_COMMAND} -E touch "${_BUNDLE_STAMP}"
 	)
 	add_custom_target(macos_app_bundle ALL DEPENDS "${_BUNDLE_STAMP}")
 ENDIF()

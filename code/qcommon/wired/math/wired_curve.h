@@ -63,8 +63,9 @@ typedef enum {
 	WCURVE_BT_CLOSED         /* wrap-around loop                            */
 } wiredCurveBoundary_t;
 
-/* The curve. Caller owns the knot arrays (no idList). times[] must be
-   monotonically non-decreasing. For WCURVE_TCB, tcb[i] = {tension,
+/* The curve. Caller owns the knot arrays (no idList). Construction keeps
+   times[] monotonically non-decreasing; spline evaluation requires strictly
+   increasing adjacent times. For WCURVE_TCB, tcb[i] = {tension,
    continuity, bias} at knot i; leave all zero for Catmull-Rom-equivalent
    behavior. tcb[] is unused for WCURVE_CATMULLROM. */
 typedef struct {
@@ -106,13 +107,17 @@ float WiredCurve_GetLengthForTime( const wiredCurve_t *c, float t );
 /* Inverse of GetLengthForTime: the time at which the accumulated arc
    length equals `length`, found by Newton's method (32 iters). epsilon is
    the arc-length tolerance (RBDOOM default 0.1). Guards against
-   division-by-zero when the local speed collapses (coincident knots). */
+   division-by-zero when the local speed collapses (coincident knots).
+   Empty curves return 0; a single knot returns its authored time. */
 float WiredCurve_GetTimeForLength( const wiredCurve_t *c, float length, float epsilon );
 
 /* Rewrite times[] so that equal dt corresponds to equal arc length — the
    constant-speed dolly reparameterization. After this call, evaluating at
    uniformly spaced times yields uniformly spaced arc lengths.
-   totalTime becomes the time of the last knot. */
+   totalTime becomes the time of the last knot. Empty curves are unchanged;
+   a single knot takes totalTime; a fully stationary multi-knot curve receives
+   a finite uniform 0..totalTime timeline. totalTime must be finite and
+   non-negative. */
 void  WiredCurve_SetConstantSpeed( wiredCurve_t *c, float totalTime );
 
 /* Index of the first knot whose time is >= t (RBDOOM IndexForTime, binary
