@@ -28,6 +28,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+TIMEOUT_RUNNER="$SCRIPT_DIR/run-with-timeout.py"
 
 # ── #7 DPI gate self-test (gate-has-teeth, no engine) ──────────────────────────
 # Proves the #4 DPI assertion FAILS when the engine's computed dpiScale is wrong
@@ -99,6 +100,47 @@ esac
 WIRED_DIR="$(cd "$(dirname "$WIRED")" && pwd)"
 WIRED="$WIRED_DIR/$(basename "$WIRED")"
 
+if [ ! -f "$TIMEOUT_RUNNER" ] ||
+   ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,8) else 1)' 2>/dev/null; then
+    echo "SKIP: Python >=3.8 and tests/run-with-timeout.py are required"
+    exit 77
+fi
+
+# Resolve the exact current UI pack from either a bare assembled install or a
+# macOS .app (Contents/MacOS binary + Contents/Resources content).  Licensed
+# base content may come from the same install or an explicit external root.
+PACK_ROOT=""
+for candidate in "$WIRED_DIR" "$WIRED_DIR/../Resources" "$WIRED_DIR/../../.."; do
+    if [ -f "$candidate/base/pax21.sw3z" ]; then
+        PACK_ROOT="$(cd "$candidate" && pwd)"
+        break
+    fi
+done
+if [ -z "$PACK_ROOT" ]; then
+    echo "SKIP: no current base/pax21.sw3z found beside bundle/install for $WIRED"
+    exit 77
+fi
+
+CONTENT_ROOT=""
+BASE_ARCHIVE=""
+for candidate in "${WIRED_CONTENT_ROOT:-}" "$PACK_ROOT"; do
+    [ -n "$candidate" ] || continue
+    if [ -f "$candidate/base/pax01.sw3z" ]; then
+        CONTENT_ROOT="$(cd "$candidate" && pwd)"
+        BASE_ARCHIVE="$CONTENT_ROOT/base/pax01.sw3z"
+        break
+    fi
+    if [ -f "$candidate/base/pak0.pk3" ]; then
+        CONTENT_ROOT="$(cd "$candidate" && pwd)"
+        BASE_ARCHIVE="$CONTENT_ROOT/base/pak0.pk3"
+        break
+    fi
+done
+if [ -z "$BASE_ARCHIVE" ]; then
+    echo "SKIP: canonical base content missing; set WIRED_CONTENT_ROOT to a root containing base/pax01.sw3z or base/pak0.pk3"
+    exit 77
+fi
+
 # Isolated homepath so we never touch the user's config; mirror the smoke
 # harness's product-dir naming so CVAR_ARCHIVE writeback lands here.
 PRODUCT_DIRNAME="q3now-preview"
@@ -113,19 +155,26 @@ HOME_PARENT="$(mktemp -d -t wired-uichk-XXXXXX 2>/dev/null || mktemp -d)"
 HOME_DIR="$HOME_PARENT/$PRODUCT_DIRNAME"
 trap 'rm -rf "$HOME_PARENT"' EXIT INT TERM
 mkdir -p "$HOME_DIR/base"
+if ! cp "$BASE_ARCHIVE" "$HOME_DIR/base/$(basename "$BASE_ARCHIVE")" ||
+   ! cp "$PACK_ROOT/base/pax21.sw3z" "$HOME_DIR/base/pax21.sw3z"; then
+    echo "FAIL: could not stage exact base archive and current pax21 into isolated home"
+    exit 1
+fi
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) HOME_NATIVE="$(cygpath -w "$HOME_DIR")" ;;
     *)                    HOME_NATIVE="$HOME_DIR" ;;
 esac
 
-# Stage BSP-less menu run: the main menu needs only base UI assets, which the
-# build-dir paks (reached via fs_installpath = CWD) carry. No map → no BSP need.
-# The layout dump is written to the launch CWD as layoutdump.jsonl.
-LAYOUT_DUMP="$WIRED_DIR/layoutdump.jsonl"
-rm -f "$LAYOUT_DUMP"
+# The layout dump and stdout live beside the isolated home, never in the app or
+# build directory.  The explicit two-file stage above prevents stale/arbitrary
+# archives from contaminating this product check.
+LAYOUT_DUMP="$HOME_PARENT/layoutdump.jsonl"
 JSONL="$HOME_DIR/qconsole.jsonl"
+STDOUT="$HOME_PARENT/wired.stdout"
 
 echo "==> WiredUI layout checks: $WIRED"
+echo "    current pack: $PACK_ROOT/base/pax21.sw3z"
+echo "    base archive: $BASE_ARCHIVE (read-only source)"
 echo "    fs_homepath : $HOME_NATIVE (isolated)"
 echo "    layout dump : $LAYOUT_DUMP"
 
@@ -157,34 +206,75 @@ DPI_TEST="$(awk -v p="$PHYS_W" -v l="$LOGICAL_W" 'BEGIN{printf "%.6g", p/l}')"
 # input modes. com_automated 1 keeps any error dialog from blocking (also fix
 # #3). Windowed, no mouse-grab, sound off; no map (the menu needs no BSP).
 HOVER_ITEM="${HOVER_ITEM:-menu_host}"
-(
-    cd "$WIRED_DIR" || exit 1
-    timeout 90 "$WIRED" \
-        +set fs_homepath "$HOME_NATIVE" \
-        +set com_automated 1 \
-        +set s_initsound 0 \
-        +set r_fullscreen 0 \
-        +set r_mode -1 +set r_customwidth "$PHYS_W" +set r_customheight "$PHYS_H" \
-        +set r_uiLogicalWidthTest "$LOGICAL_W" +set r_uiLogicalHeightTest "$LOGICAL_H" \
-        +set r_layoutDump 1 \
-        +wait 80 \
-        +wui_push main \
-        +wait 40 \
-        +wui_menu_nav down \
-        +wait 40 \
-        +wui_hover_test "$HOVER_ITEM" \
-        +wait 20 \
-        +wui_hover_test "$HOVER_ITEM" \
-        +wait 60 \
-        +quit \
-        >"$JSONL.stdout" 2>&1
-)
+KEYBOARD_ITEM="${KEYBOARD_ITEM:-menu_join}"
+python3 "$TIMEOUT_RUNNER" \
+    --timeout 90 \
+    --kill-after 15 \
+    --cwd "$HOME_PARENT" \
+    --stdout "$STDOUT" \
+    -- "$WIRED" \
+    +set fs_homepath "$HOME_NATIVE" \
+    +set com_automated 1 \
+    +set s_initsound 0 \
+    +set r_fullscreen 0 \
+    +set r_mode -1 +set r_customwidth "$PHYS_W" +set r_customheight "$PHYS_H" \
+    +set r_uiLogicalWidthTest "$LOGICAL_W" +set r_uiLogicalHeightTest "$LOGICAL_H" \
+    +set r_layoutDump 1 \
+    +wait 80 \
+    +wui_push main \
+    +wait 40 \
+    +wui_menu_nav down \
+    +wait 40 \
+    +wui_hover_test "$HOVER_ITEM" \
+    +wait 20 \
+    +wui_hover_test "$HOVER_ITEM" \
+    +wait 60 \
+    +quit
+engine_rc=$?
+if [ "$engine_rc" -ne 0 ]; then
+    echo "FAIL: layout engine exited with status $engine_rc"
+    [ -s "$STDOUT" ] && { echo "  -- stdout tail --"; tail -15 "$STDOUT" | sed 's/^/  /'; }
+    exit 1
+fi
 
 if [ ! -s "$LAYOUT_DUMP" ]; then
     echo "FAIL: no layoutdump.jsonl produced (engine did not lay out a menu)"
-    [ -s "$JSONL.stdout" ] && { echo "  ── stdout tail ──"; tail -15 "$JSONL.stdout" | sed 's/^/  /'; }
+    [ -s "$STDOUT" ] && { echo "  -- stdout tail --"; tail -15 "$STDOUT" | sed 's/^/  /'; }
     exit 1
 fi
+# The layout result is invalid if its owning engine phase logged a fatal/error
+# or an authoritative UI warning.  Parse JSON strictly; a partial good dump may
+# not mask a corrupt/partial qconsole stream.
+python3 - "$JSONL" <<'LOGPY' || exit 1
+import json, sys
+rows = []
+errors = 0
+try:
+    with open(sys.argv[1], encoding="utf-8", errors="replace") as stream:
+        for raw in stream:
+            if not raw.strip():
+                continue
+            try:
+                row = json.loads(raw)
+            except ValueError:
+                errors += 1
+                continue
+            if not isinstance(row, dict):
+                errors += 1
+            else:
+                rows.append(row)
+except OSError as exc:
+    print(f"FAIL: cannot read layout phase qconsole: {exc}")
+    raise SystemExit(1)
+bad = [row for row in rows
+       if str(row.get("sev", "")).upper() in {"ERROR", "FATAL"}
+       or (str(row.get("sev", "")).upper() == "WARN"
+           and str(row.get("cat", "")).lower() == "ui")]
+if errors or bad:
+    print(f"FAIL: layout phase qconsole malformed={errors} unexpected-severity={len(bad)}")
+    raise SystemExit(1)
+print(f"  qconsole: {len(rows)} strict JSON records, zero ERROR/FATAL/cat=ui WARN")
+LOGPY
 # HiDPI correction: the launch width is the LOGICAL size — on a 2x display a
 # 1280 request backs at 2560 physical pixels, so "expected = PHYS_W/LOGICAL_W"
 # under-states the genuine ratio and fails a CORRECT engine. The dump now
@@ -205,22 +295,32 @@ fi
 # Read the LAST frame's worth of lines (a static menu dumps identical lines each
 # frame; the last frame is the settled state). Group by menu, sum focused,
 # collect fontPointSize/dpiScale.
-python3 - "$LAYOUT_DUMP" "$DPI_TEST" "$HOVER_ITEM" <<'PYEOF'
+python3 - "$LAYOUT_DUMP" "$DPI_TEST" "$HOVER_ITEM" "$KEYBOARD_ITEM" <<'PYEOF'
 import json, sys, collections
 
 path = sys.argv[1]
 dpi_expected = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0
 hover_item = sys.argv[3] if len(sys.argv) > 3 else ""
+keyboard_item = sys.argv[4] if len(sys.argv) > 4 else ""
 lines = []
+parse_errors = 0
 with open(path, "r", encoding="utf-8", errors="replace") as fh:
     for ln in fh:
         ln = ln.strip()
         if not ln:
             continue
         try:
-            lines.append(json.loads(ln))
+            row = json.loads(ln)
+            if not isinstance(row, dict):
+                parse_errors += 1
+            else:
+                lines.append(row)
         except Exception:
-            pass
+            parse_errors += 1
+
+if parse_errors:
+    print(f"FAIL: layoutdump.jsonl contains {parse_errors} malformed/non-object record(s)")
+    sys.exit(1)
 
 if not lines:
     print("FAIL: layoutdump.jsonl had no parseable JSON lines")
@@ -266,14 +366,41 @@ if worst_ever > 1:
           f"{worst_ever} focused items — the two-highlights bug")
     fail = True
 elif not saw_exactly_one:
-    # Not the bug (never >1), but the test did not exercise a focused item, so
-    # the "exactly one" half is unproven. Report as a coverage note, not a pass.
-    print(f"  WARN #2: invariant held (never >1) but no frame focused an item — "
-          f"the nav-down did not land a focus; 'exactly one' is unverified here "
-          f"(the <=1 invariant IS verified)")
+    print(f"  FAIL #2: no frame focused an item — keyboard/hover behavior was not exercised")
+    fail = True
 else:
     print(f"  PASS #2: exactly one highlight when focused, never more than one "
           f"across {len(all_frames)} frames (single highlight-emit path)")
+
+# The aggregate <=1 invariant is insufficient by itself: a later mouse hover
+# could hide a broken keyboard transition.  Require the authored main onOpen
+# focus, the real Down target, and the later hover target as an exact ordered
+# sequence on distinct frames.
+focus_frames = []
+for fr in all_frames:
+    focused = [it.get("region", "") for it in items_of(fr) if int(it.get("focused", 0))]
+    if len(focused) == 1:
+        focus_frames.append((fr, focused[0]))
+
+wanted_focus = ["menu_campaign", keyboard_item, hover_item]
+focus_cursor = 0
+matched_focus = []
+last_focus_frame = -1
+for wanted in wanted_focus:
+    for index in range(focus_cursor, len(focus_frames)):
+        fr, region = focus_frames[index]
+        if fr > last_focus_frame and region == wanted:
+            matched_focus.append((fr, region))
+            last_focus_frame = fr
+            focus_cursor = index + 1
+            break
+    else:
+        print(f"  FAIL #K: missing ordered focus transition to '{wanted}'")
+        fail = True
+        break
+if len(matched_focus) == len(wanted_focus):
+    print("  PASS #K: ordered initial→keyboard→hover focus = " +
+          " -> ".join(f"{region}@{fr}" for fr, region in matched_focus))
 
 # ── #4 DPI font scaling — REAL vidWidth/vidWidthLogical path (#7) ─────────────
 # dpi_expected is physical/logical (the launch computed PHYS_W/LOGICAL_W). The
@@ -346,7 +473,8 @@ if bad_active or bad_backc:
           f"(activeCvar:{bad_active} backcolor:{bad_backc})")
     fail = True
 elif not menu_rows:
-    print(f"  WARN #N: no menu_* rows in the dump — cannot confirm removal")
+    print(f"  FAIL #N: no menu_* rows in the dump — removal is unverified")
+    fail = True
 else:
     print(f"  PASS #N: no menu row carries activeCvar or active-backcolor — the "
           f"cyan hover-active second highlight is gone; focus is the only state")
@@ -385,9 +513,11 @@ n_emph = sum(1 for o in last_items
 print(f"  [#E emphasis] focused row(s)={foc_rows}; checked {n_emph} emphasis-bearing "
       f"child itemDef(s) for focusActive==parent.focused")
 if not foc_rows:
-    print(f"  WARN #E: no focused menu row in the settled frame — emphasis re-home unverified")
+    print(f"  FAIL #E: no focused menu row in the settled frame — emphasis re-home unverified")
+    fail = True
 elif n_emph == 0:
-    print(f"  WARN #E: no emphasis-bearing children dumped — cannot verify")
+    print(f"  FAIL #E: no emphasis-bearing children dumped — cannot verify")
+    fail = True
 elif not emph_ok:
     print(f"  FAIL #E: text emphasis does not follow focus: {detail[:4]}")
     fail = True

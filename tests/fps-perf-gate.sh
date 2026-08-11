@@ -4,8 +4,8 @@
 #
 # fps-perf-gate.sh -- deterministic real-gameplay FPS + bottleneck benchmark.
 #
-# A repeatable regression gate for render performance. Launches the engine AS-IS
-# (real homepath — NO fs_*path override), loads a representative-load scene (map +
+# A repeatable regression gate for render performance. Launches a current,
+# assembled engine against an ISOLATED home, loads a representative scene (map +
 # dlights + several bots + effects) with a PINNED camera and PINNED frame time so
 # the per-frame render work is identical every run, then collects — from the
 # structured qconsole.jsonl log, parsed as JSON — the total FPS, the
@@ -17,7 +17,7 @@
 # visual-render-features.sh + the addbot/sv_seed recipe from nav-trace-gate.sh) —
 # it does NOT introduce any new diagnostic cvar or a parallel harness.
 #
-# Determinism: cg.time is frozen (r_pinFrameTime 1.0), so the CLIENT render is
+# Determinism: cg.time is frozen (r_pinFrameTime 2.0), so the CLIENT render is
 # pinned regardless of ongoing server bot AI — the same interpolated scene, the
 # same draws/dlights in frustum, every frame. sv_seed pins the spawn RNG,
 # fixedtime pins the sim delta, noclip removes the gravity settle so the camera
@@ -25,259 +25,494 @@
 # is the true render ceiling, not the 250 cap.
 #
 # Usage:
-#   tests/fps-perf-gate.sh --engine build/debug/wired.x64.exe [--map arena1] [--bots 6] [--tag head]
+#   WIRED_CONTENT_ROOT=/path/to/content \
+#     tests/fps-perf-gate.sh --engine build/release/wired.arm64 [--map arena1] [--bots 6] [--tag head]
 #
 # Re-run it on any build to compare; the before/after regression answer just
 # needs the same script run against a second (pre-regression) build.
 
-set -u
+set -euo pipefail
 
 # ── args ──────────────────────────────────────────────────────────────────
 ENGINE=""
+HEADLESS="${WIRED_HEADLESS:-}"
 MAP="arena1"
 BOTS=6
 TAG="head"
 VIEWPOS="1052 1432 90 135"   # interior lit spot in arena1, action in frustum
 SEED="12345"
-HOLD_FRAMES=500             # >> 200 so several 200-frame timing averages fire
+HOLD_FRAMES=650             # first 200f bucket is discarded; two clean buckets remain
+TARGET_FPS="${FPS_TARGET_FPS:-250}"
+RENDER_WIDTH=1280
+RENDER_HEIGHT=720
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+PYTHON=()
+for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 \
+        && "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+        PYTHON=("$candidate")
+        break
+    fi
+done
+if [ "${#PYTHON[@]}" -eq 0 ] && command -v py >/dev/null 2>&1 \
+    && py -3 -c 'import sys; raise SystemExit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+    PYTHON=(py -3)
+fi
+[ "${#PYTHON[@]}" -gt 0 ] || { echo "SKIP: Python 3.8+ is required"; exit 77; }
+PYTHON_OS="$("${PYTHON[@]}" -c 'import os; print(os.name)')"
+
+python_path() {
+    case "$(uname -s):$PYTHON_OS" in
+        MINGW*:nt|MSYS*:nt|CYGWIN*:nt) cygpath -w "$1" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
+if [ "${1:-}" = "--self-test" ] && [ "$#" -eq 1 ]; then
+    "${PYTHON[@]}" "$(python_path "$SCRIPT_DIR/fps-perf-analyze.py")" --self-test
+    "${PYTHON[@]}" "$(python_path "$SCRIPT_DIR/run-with-timeout.py")" --self-test
+    exit 0
+fi
+
+shell_path() {
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) cygpath -u "$1" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --engine)  ENGINE="$2"; shift 2 ;;
-        --map)     MAP="$2"; shift 2 ;;
-        --bots)    BOTS="$2"; shift 2 ;;
-        --tag)     TAG="$2"; shift 2 ;;
-        --viewpos) VIEWPOS="$2"; shift 2 ;;
-        --seed)    SEED="$2"; shift 2 ;;
+        --engine|--headless|--map|--bots|--tag|--viewpos|--seed|--target-fps)
+            [ "$#" -ge 2 ] || { echo "FAIL: $1 requires a value" >&2; exit 2; }
+            option="$1"; value="$2"; shift 2
+            case "$option" in
+                --engine) ENGINE="$value" ;;
+                --headless) HEADLESS="$value" ;;
+                --map) MAP="$value" ;;
+                --bots) BOTS="$value" ;;
+                --tag) TAG="$value" ;;
+                --viewpos) VIEWPOS="$value" ;;
+                --seed) SEED="$value" ;;
+                --target-fps) TARGET_FPS="$value" ;;
+            esac
+            ;;
+        --help)
+            echo "usage: $0 --engine PATH [--headless PATH] [--map NAME] [--bots N] [--tag TAG] [--viewpos 'X Y Z YAW'] [--target-fps N]"
+            echo "       $0 --self-test"
+            exit 0
+            ;;
+        --) shift; break ;;
         *) echo "unknown arg: $1" >&2; exit 2 ;;
     esac
 done
 
-[ -n "$ENGINE" ] || { echo "FAIL: --engine <wired.x64.exe> required" >&2; exit 2; }
-[ -f "$ENGINE" ] || { echo "FAIL: engine not found: $ENGINE" >&2; exit 2; }
-
-ENGINE_DIR="$(cd "$(dirname "$ENGINE")" && pwd)"
-ENGINE_BIN="./$(basename "$ENGINE")"
-
-# The engine writes qconsole.jsonl to fs_homepath (root). We run AS-IS with the
-# real homepath, so this is the canonical per-user location.
-HOMEPATH="/c/Users/eser/wired/q3now-preview"
-QCONSOLE="$HOMEPATH/qconsole.jsonl"
-CONFIG="$HOMEPATH/base/config.cfg"
-
-# Output dir. Use a Windows-native path so the MSYS2 bash tools and the
-# Windows-native Python (which does not resolve the MSYS /tmp mount) agree.
-OUTDIR="C:/msys64/tmp/fps-gate"
-mkdir -p "$OUTDIR"
-STDOUT="$OUTDIR/stdout-$TAG.log"
-QSNAP="$OUTDIR/qconsole-$TAG.jsonl"
-
-# ── reap: a windowed engine ignores SIGTERM; force-kill on timeout / after ──
-reap() {
-    ( powershell.exe -NoProfile -Command \
-        "Get-Process wired.x64 -ErrorAction SilentlyContinue | Stop-Process -Force" \
-        >/dev/null 2>&1 ) || true
-}
-
-echo "==> fps-perf-gate: $TAG  map=$MAP bots=$BOTS seed=$SEED viewpos=($VIEWPOS)"
-
-# Back up config so the perf-cvar writes don't leak into the user's config.
-CONFIG_BAK=""
-if [ -f "$CONFIG" ]; then
-    CONFIG_BAK="$OUTDIR/config.cfg.bak"
-    cp "$CONFIG" "$CONFIG_BAK"
+[ -n "$ENGINE" ] || { echo "FAIL: --engine <wired-binary> required" >&2; exit 2; }
+ENGINE="$(shell_path "$ENGINE")"
+[ -x "$ENGINE" ] || { echo "FAIL: engine not found or not executable: $ENGINE" >&2; exit 2; }
+case "$ENGINE" in /*) : ;; *) ENGINE="$PWD/$ENGINE" ;; esac
+case "$BOTS" in ''|*[!0-9]*) echo "FAIL: --bots must be a non-negative integer" >&2; exit 2 ;; esac
+case "$TAG" in ''|*[!A-Za-z0-9_.-]*) echo "FAIL: --tag must use only letters, numbers, dot, underscore, or dash" >&2; exit 2 ;; esac
+case "$MAP" in ''|*[!A-Za-z0-9_.-]*) echo "FAIL: --map must use only letters, numbers, dot, underscore, or dash" >&2; exit 2 ;; esac
+case "$SEED" in ''|*[!0-9-]*|-) echo "FAIL: --seed must be an integer" >&2; exit 2 ;; esac
+if ! printf '%s\n' "$VIEWPOS" | grep -Eq '^-?[0-9]+([.][0-9]+)? +-?[0-9]+([.][0-9]+)? +-?[0-9]+([.][0-9]+)? +-?[0-9]+([.][0-9]+)?$'; then
+    echo "FAIL: --viewpos must contain exactly four numeric values: x y z yaw" >&2
+    exit 2
+fi
+if ! "${PYTHON[@]}" -c 'import math,sys; value=float(sys.argv[1]); raise SystemExit(not math.isfinite(value) or value <= 0)' "$TARGET_FPS"; then
+    echo "FAIL: --target-fps must be a positive finite number" >&2
+    exit 2
 fi
 
-reap   # no stale engine may hold the window / qconsole file
+ENGINE_DIR="$(cd "$(dirname "$ENGINE")" && pwd)"
+ENGINE="$ENGINE_DIR/$(basename "$ENGINE")"
+if [ -n "$HEADLESS" ]; then
+    HEADLESS="$(shell_path "$HEADLESS")"
+    case "$HEADLESS" in /*) : ;; *) HEADLESS="$PWD/$HEADLESS" ;; esac
+else
+    engine_base="$(basename "$ENGINE")"
+    engine_suffix="${engine_base#wired}"
+    for candidate in \
+        "$ENGINE_DIR/wired-headless$engine_suffix" \
+        "$ENGINE_DIR/wired-headless.arm64" \
+        "$ENGINE_DIR/wired-headless.aarch64" \
+        "$ENGINE_DIR/wired-headless.x86_64" \
+        "$ENGINE_DIR/wired-headless.x64.exe" \
+        "$ENGINE_DIR/wired-headless.exe" \
+        "$ENGINE_DIR/wired-headless"; do
+        if [ -x "$candidate" ]; then
+            HEADLESS="$candidate"
+            break
+        fi
+    done
+fi
+if [ -z "$HEADLESS" ]; then
+    echo "SKIP: a sibling wired-headless binary is required to warm the isolated navmesh cache"
+    exit 77
+fi
 
-# Build the staggered addbot chain. The shipped game data registers ONE playable
-# character (visor — "CL_Characters: loaded 1 character(s)"), so distinct-name
-# addbots would fail; the representative bot load is N visor bots at fixed skill,
-# staggered so each finishes spawning before the next (deterministic given
-# sv_seed). Fixed count + fixed character + fixed skill = repeatable.
-BOT_CHAIN=""
-i=0
-while [ "$i" -lt "$BOTS" ]; do
-    BOT_CHAIN="$BOT_CHAIN +addbot visor 5 +wait 8"
-    i=$((i+1))
+# Resolve the current product pack separately from licensed base content. Both
+# are staged into the isolated home: the engine does not mount launcher-home
+# pax01 through fs_basepath alone, while the current pax21 must win over any old
+# installed module. The user's content remains read-only.
+PACK_ROOT=""
+WIRED_PACK_ROOT_POSIX=""
+if [ -n "${WIRED_PACK_ROOT:-}" ]; then
+    WIRED_PACK_ROOT_POSIX="$(shell_path "$WIRED_PACK_ROOT")"
+fi
+for candidate in "$WIRED_PACK_ROOT_POSIX" "$ENGINE_DIR" "$ENGINE_DIR/../Resources" "$ENGINE_DIR/../../.."; do
+    [ -n "$candidate" ] || continue
+    if [ -f "$candidate/base/pax21.sw3z" ]; then
+        PACK_ROOT="$(cd "$candidate" && pwd)"
+        break
+    fi
 done
+if [ -z "$PACK_ROOT" ]; then
+    echo "SKIP: no current base/pax21.sw3z found beside bundle/build for $ENGINE"
+    exit 77
+fi
+
+CONTENT_ROOT=""
+WIRED_CONTENT_ROOT_POSIX=""
+if [ -n "${WIRED_CONTENT_ROOT:-}" ]; then
+    WIRED_CONTENT_ROOT_POSIX="$(shell_path "$WIRED_CONTENT_ROOT")"
+fi
+for candidate in "$WIRED_CONTENT_ROOT_POSIX" "$PACK_ROOT"; do
+    [ -n "$candidate" ] || continue
+    if [ -f "$candidate/base/pax01.sw3z" ] || [ -f "$candidate/base/pak0.pk3" ]; then
+        CONTENT_ROOT="$(cd "$candidate" && pwd)"
+        break
+    fi
+done
+if [ -z "$CONTENT_ROOT" ]; then
+    echo "SKIP: licensed base content missing; set WIRED_CONTENT_ROOT to a root containing base/pax01.sw3z or base/pak0.pk3"
+    exit 77
+fi
+
+RUN_PARENT="$(mktemp -d -t wired-fpsgate-XXXXXX 2>/dev/null || mktemp -d)"
+HOME_DIR="$RUN_PARENT/q3now-preview"
+
+cleanup_runtime() {
+    if [ "${KEEP_ARTIFACTS:-0}" = "1" ]; then
+        echo "    kept isolated runtime: $RUN_PARENT"
+    else
+        rm -rf "$RUN_PARENT"
+    fi
+}
+trap cleanup_runtime EXIT INT TERM
+
+mkdir -p "$HOME_DIR/base"
+if ! cp "$PACK_ROOT/base/pax21.sw3z" "$HOME_DIR/base/pax21.sw3z"; then
+    echo "FAIL: could not stage current pax21.sw3z into isolated home"
+    exit 1
+fi
+content_staged=0
+for content_pack in "$CONTENT_ROOT"/base/pax0*.sw3z "$CONTENT_ROOT"/base/pak*.pk3; do
+    [ -f "$content_pack" ] || continue
+    if ! cp "$content_pack" "$HOME_DIR/base/"; then
+        echo "FAIL: could not stage base content pack: $content_pack"
+        exit 1
+    fi
+    content_staged=$((content_staged + 1))
+done
+if [ "$content_staged" -eq 0 ]; then
+    echo "FAIL: content root resolved but no base content pack could be staged"
+    exit 1
+fi
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) HOME_NATIVE="$(cygpath -w "$HOME_DIR")" ;;
+    *)                    HOME_NATIVE="$HOME_DIR" ;;
+esac
+
+OUTDIR_RAW="${FPS_OUTPUT_DIR:-$PROJECT_ROOT/build/test-results/fps-gate}"
+OUTDIR="$(shell_path "$OUTDIR_RAW")"
+mkdir -p "$OUTDIR"
+RUN_OUTDIR="$OUTDIR/run-$TAG-$$"
+mkdir -p "$RUN_OUTDIR"
+STDOUT="$RUN_OUTDIR/stdout.log"
+WARM_STDOUT="$RUN_OUTDIR/warm.log"
+QSNAP="$RUN_OUTDIR/qconsole.jsonl"
+QCONSOLE="$HOME_DIR/qconsole.jsonl"
+CONFIG="$HOME_DIR/base/fps-perf-gate.cfg"
+WARM_CONFIG="$HOME_DIR/base/fps-perf-warm.cfg"
+
+echo "==> fps-perf-gate: $TAG  map=$MAP bots=$BOTS seed=$SEED viewpos=($VIEWPOS)"
+echo "    current pack : $PACK_ROOT/base/pax21.sw3z"
+echo "    base content : $CONTENT_ROOT/base ($content_staged pack(s), staged from read-only source)"
+echo "    fs_homepath  : $HOME_NATIVE (isolated)"
+echo "    evidence     : $RUN_OUTDIR"
+
+# A fresh isolated home has no nav cache. Warm it with the sibling headless
+# binary before the measured client run; otherwise addbot self-defers while the
+# async bake runs and a nominal six-bot benchmark silently measures zero bots.
+printf '%s\n' \
+    'set sv_pure 0' \
+    'set fixedtime 1' \
+    'set com_maxfps 85' \
+    "map $MAP" \
+    'wait 450' \
+    'quit' > "$WARM_CONFIG"
+warm_port=$((27960 + ($$ % 1000)))
+set +e
+"${PYTHON[@]}" "$(python_path "$SCRIPT_DIR/run-with-timeout.py")" \
+    --timeout 120 --kill-after 15 \
+    --cwd "$(python_path "$(dirname "$HEADLESS")")" \
+    --stdout "$(python_path "$WARM_STDOUT")" -- \
+    "$(python_path "$HEADLESS")" \
+    +set fs_homepath "$HOME_NATIVE" \
+    +set com_noHardReboot 1 \
+    +set net_port "$warm_port" \
+    +exec fps-perf-warm.cfg
+warm_rc=$?
+set -e
+if [ "$warm_rc" -ne 0 ] || ! grep -aFq "navmesh ready for '$MAP'" "$WARM_STDOUT"; then
+    echo "FAIL: isolated navmesh warm pass did not complete (status=$warm_rc)"
+    [ -s "$WARM_STDOUT" ] && { echo "----- warm stdout tail -----"; tail -30 "$WARM_STDOUT"; }
+    exit 1
+fi
+
+# One cfg avoids the engine command-line's finite '+' token budget. The marker
+# pair makes the parser consume only the pinned, steady measurement window.
+{
+    printf '%s\n' \
+        'set sv_cheats 1' \
+        'set sv_pure 0' \
+        'set bot_enable 1' \
+        'set g_gametype 0' \
+        'set sv_maxclients 16' \
+        'set g_warmup 0' \
+        'set g_doWarmup 0' \
+        "set sv_seed $SEED" \
+        'set fixedtime 1' \
+        'set com_maxfps 0' \
+        'set com_maxfpsUnfocused 0' \
+        'set com_maxfpsMinimized 0' \
+        'set r_swapInterval 0' \
+        'set com_automated 0' \
+        'set log_severity DEBUG' \
+        'set log_file_severity DEBUG' \
+        'set sv_floodProtect 0' \
+        "map $MAP" \
+        'waitForMap' \
+        'wait 100' \
+        'cmd noclip' \
+        'wait 20' \
+        "cmd setviewpos $VIEWPOS" \
+        'wait 300' \
+        "cmd setviewpos $VIEWPOS 1000000" \
+        'wait 100' \
+        'echo FPS_GATE_CAMERA_CHECK' \
+        'viewpos' \
+        'wait 20' \
+        'viewpos' \
+        'wait 20' \
+        'viewpos' \
+        'log renderer.cmd info' \
+        'log renderer.init info' \
+        'gfxinfo' \
+        'echo FPS_GATE_BOT_VIS_PRE_BEGIN' \
+        'set r_speeds 2' \
+        'wait 10' \
+        'set r_speeds 0' \
+        'echo FPS_GATE_BOT_VIS_PRE_END'
+    i=0
+    while [ "$i" -lt "$BOTS" ]; do
+        printf '%s\n' 'addbot visor 5' 'wait 8'
+        i=$((i+1))
+    done
+    printf '%s\n' \
+        'wait 80' \
+        'bot_teleport visor 989 1575 68 295' \
+        'wait 20' \
+        'echo FPS_GATE_BOT_VIS_POST_BEGIN' \
+        'set r_speeds 2' \
+        'wait 10' \
+        'set r_speeds 0' \
+        'echo FPS_GATE_BOT_VIS_POST_END' \
+        'set r_dynamiclight 1' \
+        'set r_dlightShadowTest 300' \
+        'set r_dlightShadowTestN 1' \
+        'set r_dlightShadows 1' \
+        'set r_dlightShadowK 1' \
+        'set r_dlightShadowCount 1' \
+        'set r_dlightShadowProfile 1' \
+        'set r_particles 1' \
+        'set r_dither 0' \
+        'set con_notifytime 0' \
+        'set cg_debugevents 1' \
+        'cmd give all' \
+        'cmd god' \
+        'weapon 7' \
+        'wait 300' \
+        'cmd noclip' \
+        'wait 100' \
+        'set r_speeds 7' \
+        '+attack' \
+        'wait 10' \
+        '-attack' \
+        'wait 20' \
+        'cmd noclip' \
+        'wait 100' \
+        'set r_speeds 0' \
+        "cmd setviewpos $VIEWPOS" \
+        'wait 300' \
+        "cmd setviewpos $VIEWPOS 1000000" \
+        'set r_pinShaderTime 2.0' \
+        'set r_pinFrameTime 2.0' \
+        'wait 100' \
+        'echo FPS_GATE_CAMERA_CHECK' \
+        'viewpos' \
+        'wait 20' \
+        'viewpos' \
+        'wait 20' \
+        'viewpos' \
+        'set r_particles 0' \
+        'wait 5' \
+        'screenshot fps_particles_off_a png silent' \
+        'wait 5' \
+        'screenshot fps_particles_off_b png silent' \
+        'set r_particles 1' \
+        'wait 5' \
+        'screenshot fps_particles_on png silent' \
+        'set cg_debugevents 0' \
+        'set g_envWeather rain' \
+        'echo FPS_GATE_SCENE_BEGIN' \
+        'print r_particles' \
+        'print g_envWeather' \
+        'set r_speeds 1' \
+        'wait 10' \
+        'set r_speeds 4' \
+        'wait 20' \
+        'set r_speeds 0' \
+        'wait 20' \
+        'echo FPS_GATE_SCENE_END' \
+        'set r_vkDebugTiming 1' \
+        'log renderer.timing debug' \
+        'set r_atmosphericGPU 1' \
+        'wait 200' \
+        'set r_dlightShadowCount 0' \
+        'set r_dlightShadowProfile 0' \
+        'set com_speeds 0' \
+        'set com_perfTrace 1' \
+        'set r_gpuSpeeds 1' \
+        'echo FPS_GATE_MEASURE_BEGIN' \
+        "wait $HOLD_FRAMES" \
+        'echo FPS_GATE_MEASURE_END' \
+        'set com_perfTrace 0' \
+        'set r_gpuSpeeds 0' \
+        'set r_vkDebugTiming 0' \
+        'wait 2' \
+        'quit'
+} > "$CONFIG"
 
 # ── launch ──────────────────────────────────────────────────────────────────
-# AS-IS: no fs_homepath override (real homepath → real qconsole.jsonl).
 #  sv_cheats 1  : CVAR_LATCH — active only AFTER map spawn. The CVAR_CHEAT timing
 #    cvars (r_gpuSpeeds / r_vkDebugTiming / r_pinShaderTime / r_pinFrameTime) are
 #    therefore set AFTER +map, not at startup (a startup set is "cheat protected").
 #  com_maxfps 0 : uncap — measure the true render ceiling, not the 250 cap.
 #  r_swapInterval 0 : vsync off (present-mode IMMEDIATE).
-#  com_speeds 2 : per-frame sv/ev/cl/gm/rf/bk + the cl micro (end = SCR_UpdateScreen).
-#    (com_speeds is NOT a cheat cvar — safe at startup.)
+#  com_perfTrace 1 : aggregate-only full-population CPU/SCR micro-timing;
+#    com_speeds stays 0 so threshold-dependent JSON writes cannot bias wall FPS.
 #  r_gpuSpeeds 1 / r_vkDebugTiming 1 : 200-frame GPU per-pass + fence/present + draws.
 #  log_file_severity DEBUG + `log renderer.timing debug` : route the SEV_DEBUG
 #    renderer.timing lines to the qconsole.jsonl file sink (after renderer init).
-( cd "$ENGINE_DIR" && timeout -s KILL -k 15 200 "$ENGINE_BIN" \
-    +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
-    +set bot_enable 1 +set g_gametype 0 +set sv_maxclients 16 \
-    +set g_warmup 0 +set g_doWarmup 0 +set sv_seed "$SEED" +set fixedtime 1 \
-    +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 \
-    +set com_maxfps 0 +set r_swapInterval 0 \
-    +set com_automated 0 \
-    +set log_file_severity DEBUG \
-    +set com_speeds 2 \
-    +map "$MAP" +waitForMap +wait 100 \
-    +set r_gpuSpeeds 1 +set r_vkDebugTiming 1 \
-    +log renderer.timing debug \
-    $BOT_CHAIN \
-    +wait 40 \
-    +cmd noclip +wait 20 \
-    +cmd setviewpos $VIEWPOS +wait 40 +cmd setviewpos $VIEWPOS +wait 20 \
-    +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 \
-    +wait "$HOLD_FRAMES" \
-    +quit \
-    > "$STDOUT" 2>&1 || true )
+set +e
+"${PYTHON[@]}" "$(python_path "$SCRIPT_DIR/run-with-timeout.py")" \
+    --timeout 200 --kill-after 15 \
+    --cwd "$(python_path "$ENGINE_DIR")" \
+    --stdout "$(python_path "$STDOUT")" -- \
+    "$(python_path "$ENGINE")" \
+    +set fs_homepath "$HOME_NATIVE" \
+    +set com_noHardReboot 1 \
+    +set r_mode -1 \
+    +set r_customwidth "$RENDER_WIDTH" \
+    +set r_customheight "$RENDER_HEIGHT" \
+    +set r_fullscreen 0 \
+    +set r_fbo 1 \
+    +set r_renderScale 1 \
+    +set r_renderWidth "$RENDER_WIDTH" \
+    +set r_renderHeight "$RENDER_HEIGHT" \
+    +exec fps-perf-gate.cfg
+engine_rc=$?
+set -e
 
-reap
-
-# Snapshot qconsole so a later run doesn't clobber the parsed evidence.
-cp "$QCONSOLE" "$QSNAP" 2>/dev/null || { echo "FAIL: no qconsole.jsonl at $QCONSOLE" >&2; }
-
-# Restore config.
-if [ -n "$CONFIG_BAK" ] && [ -f "$CONFIG_BAK" ]; then
-    cp "$CONFIG_BAK" "$CONFIG"
+if [ "$engine_rc" -ne 0 ]; then
+    echo "FAIL: engine exited with status $engine_rc"
+    [ -s "$STDOUT" ] && { echo "----- stdout tail -----"; tail -30 "$STDOUT"; }
+    exit 1
+fi
+if grep -aEq 'died on signal|Sys_Error|FATAL|^ERROR:' "$STDOUT"; then
+    echo "FAIL: engine stdout contains a fatal/crash signature"
+    grep -aE 'died on signal|Sys_Error|FATAL|^ERROR:' "$STDOUT" | tail -20
+    exit 1
 fi
 
+# Snapshot qconsole so a later run doesn't clobber the parsed evidence.
+if [ ! -s "$QCONSOLE" ]; then
+    echo "FAIL: no qconsole.jsonl at $QCONSOLE" >&2
+    exit 1
+fi
+cp "$QCONSOLE" "$QSNAP"
+
+PNG2RAW="${PNG2RAW:-$PROJECT_ROOT/tools/png2raw/png2raw}"
+if [ ! -x "$PNG2RAW" ] && [ -x "$PNG2RAW.exe" ]; then
+    PNG2RAW="$PNG2RAW.exe"
+fi
+[ -x "$PNG2RAW" ] || { echo "FAIL: png2raw not found (build: make png2raw)" >&2; exit 1; }
+SHOT_OFF_A="$HOME_DIR/base/screenshots/fps_particles_off_a.png"
+SHOT_OFF_B="$HOME_DIR/base/screenshots/fps_particles_off_b.png"
+SHOT_ON="$HOME_DIR/base/screenshots/fps_particles_on.png"
+if [ ! -s "$SHOT_OFF_A" ] || [ ! -s "$SHOT_OFF_B" ] || [ ! -s "$SHOT_ON" ]; then
+    echo "FAIL: particle control/A/B screenshots missing" >&2
+    exit 1
+fi
+RAW_OFF_A="$RUN_OUTDIR/particles-off-a.rgb"
+RAW_OFF_B="$RUN_OUTDIR/particles-off-b.rgb"
+RAW_ON="$RUN_OUTDIR/particles-on.rgb"
+"$PNG2RAW" "$SHOT_OFF_A" > "$RAW_OFF_A"
+"$PNG2RAW" "$SHOT_OFF_B" > "$RAW_OFF_B"
+"$PNG2RAW" "$SHOT_ON" > "$RAW_ON"
+read -r PARTICLE_PIXELS PARTICLE_CHANGED PARTICLE_MAD PARTICLE_CONTROL_CHANGED PARTICLE_CONTROL_MAD <<EOF
+$("${PYTHON[@]}" -c 'import pathlib,sys; a=pathlib.Path(sys.argv[1]).read_bytes(); b=pathlib.Path(sys.argv[2]).read_bytes(); c=pathlib.Path(sys.argv[3]).read_bytes(); assert len(a)==len(b)==len(c) and len(a)%3==0, (len(a),len(b),len(c)); metric=lambda x,y: (sum(any(d) for d in zip(*(iter([abs(i-j) for i,j in zip(x,y)]),)*3)), sum(abs(i-j) for i,j in zip(x,y))/len(x)); changed,mad=metric(b,c); control_changed,control_mad=metric(a,b); print(len(a)//3,changed,mad,control_changed,control_mad)' "$(python_path "$RAW_OFF_A")" "$(python_path "$RAW_OFF_B")" "$(python_path "$RAW_ON")")
+EOF
+
 # ── parse (JSON, not string-grep) ─────────────────────────────────────────
-python - "$QSNAP" "$TAG" <<'PY'
-import json, re, sys, statistics
-
-path, tag = sys.argv[1], sys.argv[2]
-
-# com_speeds line 1: "frame:N all:X sv:X ev:X cl:X gm:X rf:X bk:X"
-re_all   = re.compile(r'frame:(\d+)\s+all:\s*(\d+)\s+sv:\s*(\d+)\s+ev:\s*(\d+)\s+cl:\s*(\d+)\s+gm:\s*(\d+)\s+rf:\s*(\d+)\s+bk:\s*(\d+)')
-# com_speeds 2 micro: "cl: ... end:X ... (us)"  (microseconds)
-re_end   = re.compile(r'\bend:(\d+)')
-# r_gpuSpeeds 1 emits a MULTI-LINE block (one log record each): a header
-# "gpu (Nf avg, ms):", then "  <label>=X" per pass, then "  total=X".
-re_gpu_hdr = re.compile(r'^gpu \((\d+)f avg, ms\):')
-re_gpu_lbl = re.compile(r'^\s*([A-Za-z_]+)=([\d.]+)')
-re_gpu_tot = re.compile(r'^\s*total=([\d.]+)')
-# r_vkDebugTiming 1: "vk timing (Nf avg): fence=X ... present=X draws=N/f(...)"
-re_vkt   = re.compile(r'vk timing \(\d+f avg\): fence=(\d+)ms/f\s+ft_fence=(\d+)ms/f\s+acquire=(\d+)ms/f\s+submit=(\d+)ms/f\s+present=(\d+)ms/f\s+draws=(\d+)/f')
-
-alls, ends = [], []
-vkt_lines = []
-gpu_blocks = []          # list of dicts {label: ms, ..., total: ms}
-cur_gpu = None
-
-with open(path, encoding='utf-8', errors='replace') as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            o = json.loads(line)
-        except Exception:
-            continue
-        msg = o.get('msg', '').rstrip('\n')
-        m = re_all.search(msg)
-        if m:
-            alls.append(int(m.group(2)))       # all = total frame ms
-        me = re_end.search(msg)
-        if me and 'cl:' in msg:
-            ends.append(int(me.group(1)))       # end = SCR_UpdateScreen (us)
-        mv = re_vkt.search(msg)
-        if mv:
-            vkt_lines.append(mv.groups())
-        # multi-line GPU block state machine
-        mh = re_gpu_hdr.match(msg)
-        if mh:
-            cur_gpu = {}
-            continue
-        if cur_gpu is not None:
-            mt = re_gpu_tot.match(msg)
-            if mt:
-                cur_gpu['total'] = float(mt.group(1))
-                gpu_blocks.append(cur_gpu)
-                cur_gpu = None
-                continue
-            ml = re_gpu_lbl.match(msg)
-            if ml:
-                cur_gpu[ml.group(1)] = float(ml.group(2))
-            else:
-                cur_gpu = None   # block interrupted; drop partial
-
-# 'all' is INTEGER ms — a true ~3.5ms frame logs as 3 or 4, so the median flips
-# on tiny variance (a labeling artifact, not real divergence). The MEAN over the
-# steady window (warmup + spikes dropped) is the stable frame-time estimate; the
-# µs-precision 'end' below is the robust cross-run comparison basis.
-STEADY_SKIP = 2000
-def steady(ms_list):
-    return [v for v in ms_list[STEADY_SKIP:] if v is not None and v < 20]
-
-print(f"\n=== FPS-PERF-GATE RESULT [{tag}] ===")
-print(f"  com_speeds frames parsed : {len(alls)}")
-mean_all = None
-if alls:
-    st = steady(alls)
-    if st:
-        mean_all = statistics.mean(st)
-        med_all  = statistics.median(st)
-        fps_mean = 1000.0/mean_all if mean_all>0 else float('inf')
-        print(f"  frame time all (ms)      : mean={mean_all:.3f}  median={med_all} (integer-ms; see note)")
-        print(f"  TOTAL FPS (mean frame)   : {fps_mean:.1f}   (>=250 target: {'MET' if fps_mean>=250 else 'NOT MET'})")
-if ends:
-    emed = statistics.median(ends)
-    print(f"  end/SCR_UpdateScreen (us): median={emed}  ({emed/1000.0:.2f} ms)  [the measured FPS ceiling]")
-    print(f"  end-implied FPS ceiling  : {1000000.0/emed:.1f}" if emed>0 else "  end=0 (<1us)")
-gpu_last = gpu_blocks[-1] if gpu_blocks else None
-if gpu_last:
-    # median of each pass across all 200f-avg blocks (robust)
-    passes = [k for k in gpu_last.keys()]
-    print(f"  GPU per-pass (r_gpuSpeeds 200f avg, median of {len(gpu_blocks)} blocks):")
-    med_passes = {}
-    for k in passes:
-        vals = [b[k] for b in gpu_blocks if k in b]
-        med_passes[k] = statistics.median(vals) if vals else None
-    # dominant non-total pass
-    dom = max(((k,v) for k,v in med_passes.items() if k!='total' and v is not None),
-              key=lambda kv: kv[1], default=(None,None))
-    for k in passes:
-        mark = "  <-- dominant" if k == dom[0] else ""
-        print(f"    {k:>16} = {med_passes[k]:.2f} ms{mark}")
-    print(f"  GPU bottleneck           : {dom[0]} ({dom[1]:.2f} ms of {med_passes.get('total',0):.2f} ms total)")
-else:
-    print(f"  GPU per-pass             : (no r_gpuSpeeds block — needs >=200 frames + renderer.timing routed)")
-if vkt_lines:
-    fence, ftf, acq, sub, pres, draws = vkt_lines[-1]
-    med_draws = int(statistics.median([int(v[5]) for v in vkt_lines]))
-    print(f"  vk timing (r_vkDebugTiming 200f avg, last): fence={fence}ms ft_fence={ftf}ms acquire={acq}ms submit={sub}ms present={pres}ms")
-    print(f"  DRAW COUNT               : median={med_draws}/f  (last={draws}/f)")
-else:
-    med_draws = None
-    print(f"  vk timing / draw count   : (no r_vkDebugTiming line — needs >=200 frames + renderer.timing routed)")
-
-# CPU-bound vs GPU-bound: compare the end (SCR_UpdateScreen, CPU submit path) to
-# the GPU total. If GPU total ~ frame time, GPU-bound; if end >> GPU, CPU-bound.
-if ends and gpu_last:
-    emed_ms = statistics.median(ends)/1000.0
-    gtot = statistics.median([b['total'] for b in gpu_blocks if 'total' in b])
-    bound = "GPU-bound" if gtot >= emed_ms*0.7 else "CPU-bound (SCR_UpdateScreen)"
-    print(f"  BOUND                    : {bound}  (end={emed_ms:.2f}ms vs GPU total={gtot:.2f}ms)")
-print(f"=== END RESULT [{tag}] ===\n")
-
-# emit a compact machine-readable summary for two-run determinism comparison
-summary = {
-    "tag": tag,
-    "frames": len(alls),
-    "all_mean_ms": round(mean_all,3) if mean_all else None,
-    "fps_mean": round(1000.0/mean_all,1) if mean_all else None,
-    "end_median_us": statistics.median(ends) if ends else None,
-    "gpu_total_ms": statistics.median([b['total'] for b in gpu_blocks if 'total' in b]) if gpu_blocks else None,
-    "draws_median": med_draws,
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        printf 'unavailable\n'
+    fi
 }
-import os
-with open(os.path.join(os.path.dirname(path), f"summary-{tag}.json"), "w") as sf:
-    json.dump(summary, sf)
-print("SUMMARY:", json.dumps(summary))
-PY
+ENGINE_SHA256="$(sha256_file "$ENGINE")"
+PAX21_SHA256="$(sha256_file "$PACK_ROOT/base/pax21.sw3z")"
+
+set +e
+"${PYTHON[@]}" "$(python_path "$SCRIPT_DIR/fps-perf-analyze.py")" \
+    --input "$(python_path "$QSNAP")" \
+    --tag "$TAG" \
+    --map "$MAP" \
+    --bots "$BOTS" \
+    --target-fps "$TARGET_FPS" \
+    --hold-frames "$HOLD_FRAMES" \
+    --viewpos "$VIEWPOS" \
+    --render-width "$RENDER_WIDTH" \
+    --render-height "$RENDER_HEIGHT" \
+    --draw-floor 30 \
+    --particle-changed "$PARTICLE_CHANGED" \
+    --particle-mad "$PARTICLE_MAD" \
+    --particle-pixels "$PARTICLE_PIXELS" \
+    --particle-control-changed "$PARTICLE_CONTROL_CHANGED" \
+    --particle-control-mad "$PARTICLE_CONTROL_MAD" \
+    --engine-sha256 "$ENGINE_SHA256" \
+    --pax21-sha256 "$PAX21_SHA256"
+parse_rc=$?
+set -e
 
 echo "==> stdout: $STDOUT   qconsole: $QSNAP"
+exit "$parse_rc"
