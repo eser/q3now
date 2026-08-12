@@ -37,6 +37,7 @@ RE_VK_PACING = re.compile(
     r" worker_queue=(\d+)us/work worker_fence=(\d+)us/work"
     r" worker_count=(\d+) max_queue=(\d+)"
 )
+RE_VK_PERF_V2 = re.compile(r"^vk perf v2: (.+)$")
 RE_FRAME_PACING = re.compile(
     r"frame trace \((\d+)f\): bucket=(\d+) count=(\d+) valid=(\d+)"
     r" cpu_work_total=(\d+)us scr_end_total=(\d+)us"
@@ -65,6 +66,54 @@ RE_RENDER_EXTENT = re.compile(
 RE_PARTICLE_RUNTIME = re.compile(
     r"^particle emitters:(\d+) particles:(\d+) computes:(\d+) draws:(\d+)$"
 )
+
+VK_PERF_V2_KEYS = {
+    "epoch", "bucket", "count", "valid", "acquire_total_us", "submit_total_us",
+    "present_call_total_us", "main_slot_wait_total_us", "worker_queue_total_us",
+    "worker_wait_total_us", "worker_reset_total_us", "worker_count", "maxq",
+    "generation", "mode", "r_swapInterval", "requested_images", "actual_images",
+    "slots", "extent", "platform", "worker_mode", "draws_total", "image_hits",
+    "identity_stable",
+}
+VK_PERF_V2_INTEGER_KEYS = VK_PERF_V2_KEYS - {
+    "mode", "extent", "platform", "worker_mode", "image_hits",
+}
+
+
+def parse_vk_perf_v2(payload: str) -> dict | None:
+    fields: dict[str, str] = {}
+    for token in payload.split():
+        if token.count("=") != 1:
+            return None
+        key, value = token.split("=", 1)
+        if not key or not value or key in fields:
+            return None
+        fields[key] = value
+    if set(fields) != VK_PERF_V2_KEYS:
+        return None
+    try:
+        parsed: dict = {key: int(fields[key]) for key in VK_PERF_V2_INTEGER_KEYS}
+        parsed.update({key: fields[key] for key in ("mode", "platform", "worker_mode")})
+        extent = fields["extent"].split("x")
+        if len(extent) != 2:
+            return None
+        parsed["extent"] = (int(extent[0]), int(extent[1]))
+        hits: dict[int, int] = {}
+        if fields["image_hits"] == "none":
+            parsed["image_hits"] = hits
+            return parsed
+        for item in fields["image_hits"].split(","):
+            index_text, separator, count_text = item.partition(":")
+            if separator != ":":
+                return None
+            index, count = int(index_text), int(count_text)
+            if index < 0 or count < 0 or index in hits:
+                return None
+            hits[index] = count
+        parsed["image_hits"] = hits
+        return parsed
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass(frozen=True)
@@ -107,6 +156,8 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
     pair_errors = 0
     raw_vkt: list[tuple[str, ...]] = []
     raw_vk_pacing: list[tuple[str, ...]] = []
+    raw_vk_v2: list[dict] = []
+    vk_v2_parse_errors = 0
     raw_frame_pacing: list[tuple[str, ...]] = []
     vk_pacing_pair_errors = 0
     pending_vk_pacing = False
@@ -307,6 +358,13 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
                     vk_pacing_pair_errors += 1
                 raw_vk_pacing.append(pacing.groups())
                 pending_vk_pacing = False
+            vk_v2_match = RE_VK_PERF_V2.fullmatch(msg) if category == "renderer.timing" else None
+            if vk_v2_match:
+                vk_v2 = parse_vk_perf_v2(vk_v2_match.group(1))
+                if vk_v2 is None:
+                    vk_v2_parse_errors += 1
+                else:
+                    raw_vk_v2.append(vk_v2)
             frame_pacing = RE_FRAME_PACING.fullmatch(msg) if category == "system" else None
             if frame_pacing:
                 raw_frame_pacing.append(frame_pacing.groups())
@@ -334,11 +392,11 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
     if measurement_state == "active" and cur_gpu is not None:
         partial_gpu += 1
 
-    # The first diagnostic buckets can straddle the pre-roll/marker boundary.
-    # They are presence evidence only; every reported metric uses clean buckets.
+    # GPU timestamps have their own pre-roll cadence, so only their first block
+    # can straddle the marker and is discarded. V2 starts a fresh measurement
+    # epoch at the marker boundary and uses all three contained 200-attempt blocks.
     gpu_blocks = raw_gpu[1:]
-    vkt_lines = raw_vkt[1:]
-    pacing_lines = raw_vk_pacing[1:]
+    vk_v2_blocks = raw_vk_v2
     steady_all = alls[50:]
     p95_all = percentile(steady_all, 0.95)
     p99_all = percentile(steady_all, 0.99)
@@ -379,20 +437,30 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
         else None
     )
 
-    draws = [int(values[6]) for values in vkt_lines]
-    draws_median = int(statistics.median(draws)) if draws else None
-    vkt_metric_names = ("fence", "ft_fence", "acquire", "submit", "present")
-    vkt_medians = {
-        name: statistics.median(int(values[index]) for values in vkt_lines)
-        for index, name in enumerate(vkt_metric_names, 1)
-        if vkt_lines
-    }
-    pacing_metric_names = ("main_slot_wait", "worker_queue", "worker_fence", "worker_count", "max_queue")
-    pacing_medians = {
-        name: statistics.median(int(values[index]) for values in pacing_lines)
-        for index, name in enumerate(pacing_metric_names, 3)
-        if pacing_lines
-    }
+    vk_attempt_coverage = sum(block["count"] for block in vk_v2_blocks)
+    vk_worker_coverage = sum(block["worker_count"] for block in vk_v2_blocks)
+
+    def vk_attempt_mean(key: str) -> float | None:
+        return (
+            sum(block[key] for block in vk_v2_blocks) / vk_attempt_coverage
+            if vk_attempt_coverage else None
+        )
+
+    def vk_worker_mean(key: str) -> float | None:
+        return (
+            sum(block[key] for block in vk_v2_blocks) / vk_worker_coverage
+            if vk_worker_coverage else None
+        )
+
+    vk_acquire_mean_us = vk_attempt_mean("acquire_total_us")
+    vk_submit_mean_us = vk_attempt_mean("submit_total_us")
+    vk_present_call_mean_us = vk_attempt_mean("present_call_total_us")
+    vk_main_slot_wait_mean_us = vk_attempt_mean("main_slot_wait_total_us")
+    vk_worker_queue_mean_us = vk_worker_mean("worker_queue_total_us")
+    vk_worker_wait_mean_us = vk_worker_mean("worker_wait_total_us")
+    vk_worker_reset_mean_us = vk_worker_mean("worker_reset_total_us")
+    draws_mean = vk_attempt_mean("draws_total")
+    draws_median = int(draws_mean) if finite(draws_mean) else None
     bots_entered = max(0, entrant_broadcasts - 1)
     wall_seconds = wall_fps = None
     timestamp_error = None
@@ -526,50 +594,87 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
         )
     if any(not any(label not in {"frames", "total"} for label in block) for block in gpu_blocks):
         failures.append("GPU timing blocks contain no non-total pass")
-    vkt_sizes_ok = all(int(values[0]) == 200 for values in raw_vkt)
-    if len(raw_vkt) < 3 or len(vkt_lines) < 2 or not vkt_sizes_ok:
-        failures.append(f"vk timing blocks invalid (raw={len(raw_vkt)}, clean={len(vkt_lines)})")
-    pacing_sizes_ok = all(int(values[0]) == 200 for values in raw_vk_pacing)
-    pacing_buckets = [int(values[1]) for values in raw_vk_pacing]
-    pacing_order_ok = len(pacing_buckets) == len(set(pacing_buckets)) and all(
-        ((current - previous) & 0xFFFFFFFF) == 1
-        for previous, current in zip(pacing_buckets, pacing_buckets[1:])
+    vk_v2_buckets = [block["bucket"] for block in raw_vk_v2]
+    vk_v2_epochs = [block["epoch"] for block in raw_vk_v2]
+    vk_v2_order_ok = (
+        vk_v2_buckets == list(range(1, expected_frame_blocks + 1))
+        and bool(vk_v2_epochs)
+        and vk_v2_epochs[0] > 0
+        and all(epoch == vk_v2_epochs[0] for epoch in vk_v2_epochs)
     )
-    pacing_aligned = len(raw_vk_pacing) == len(raw_vkt) and vk_pacing_pair_errors == 0
+    vk_v2_sizes_ok = all(
+        block["count"] == 200 and block["valid"] == 200
+        for block in raw_vk_v2
+    )
+    identity_keys = (
+        "generation", "mode", "r_swapInterval", "requested_images", "actual_images",
+        "slots", "extent", "platform", "worker_mode",
+    )
+    vk_v2_identity_ok = bool(raw_vk_v2) and all(
+        block["identity_stable"] == 1
+        and all(block[key] == raw_vk_v2[0][key] for key in identity_keys)
+        for block in raw_vk_v2
+    )
+    expected_vk_platform = {
+        "Windows": "windows", "Darwin": "macos", "Linux": "linux",
+    }.get(platform.system(), "other")
+    vk_v2_contract_ok = all(
+        block["slots"] == 2
+        and render_observed is not None
+        and block["extent"] == render_observed[2:4]
+        and block["platform"] == expected_vk_platform
+        and block["r_swapInterval"] == 0
+        and block["mode"] in {
+            "IMMEDIATE", "MAILBOX", "FIFO", "FIFO_RELAXED", "FIFO_LATEST_READY",
+        }
+        and block["generation"] > 0
+        and block["requested_images"] >= 2
+        and block["actual_images"] >= block["requested_images"]
+        and block["actual_images"] <= 8
+        and all(block[key] >= 0 for key in VK_PERF_V2_INTEGER_KEYS)
+        and set(block["image_hits"]) == set(range(block["actual_images"]))
+        and sum(block["image_hits"].values()) == block["valid"]
+        and block["acquire_total_us"] > 0
+        and block["submit_total_us"] > 0
+        and block["present_call_total_us"] > 0
+        and block["main_slot_wait_total_us"] > 0
+        for block in raw_vk_v2
+    )
     if (
-        len(raw_vk_pacing) < 3
-        or len(pacing_lines) < 2
-        or not pacing_sizes_ok
-        or not pacing_order_ok
-        or not pacing_aligned
+        vk_v2_parse_errors
+        or len(raw_vk_v2) != expected_frame_blocks
+        or vk_attempt_coverage != expected_frame_coverage
+        or sum(block["valid"] for block in raw_vk_v2) != expected_frame_coverage
+        or vk_attempt_coverage != frame_coverage
+        or not vk_v2_sizes_ok
+        or not vk_v2_order_ok
+        or not vk_v2_identity_ok
+        or not vk_v2_contract_ok
     ):
         failures.append(
-            "vk pacing blocks invalid "
-            f"(raw={len(raw_vk_pacing)}, clean={len(pacing_lines)}, "
-            f"ordered={pacing_order_ok}, aligned={pacing_aligned})"
+            "vk perf v2 blocks invalid "
+            f"(raw={len(raw_vk_v2)}/{expected_frame_blocks}, coverage={vk_attempt_coverage}/{expected_frame_coverage}, "
+            f"frame_coverage={frame_coverage}, parse={vk_v2_parse_errors}, "
+            f"sized={vk_v2_sizes_ok}, ordered={vk_v2_order_ok}, "
+            f"identity={vk_v2_identity_ok}, contract={vk_v2_contract_ok})"
         )
-    else:
-        slots = [int(values[2]) for values in pacing_lines]
-        worker_queues = [int(values[4]) for values in pacing_lines]
-        worker_fences = [int(values[5]) for values in pacing_lines]
-        worker_counts = [int(values[6]) for values in pacing_lines]
-        max_queues = [int(values[7]) for values in pacing_lines]
-        if any(slot <= 0 or slot != slots[0] for slot in slots):
-            failures.append(f"vk pacing slot cardinality invalid ({slots})")
-        elif platform.system() == "Windows":
-            if any(worker_queues) or any(worker_fences) or any(worker_counts) or any(max_queues):
-                failures.append(
-                    "vk pacing Windows worker attribution must be zero "
-                    f"(queue={worker_queues}, fence={worker_fences}, count={worker_counts}, max={max_queues})"
-                )
-        elif any(
-            count < 200 - slots[index] or count > 200 + slots[index]
-            for index, count in enumerate(worker_counts)
-        ) or any(depth < 1 or depth > slots[index] for index, depth in enumerate(max_queues)):
-            failures.append(
-                "vk pacing worker attribution invalid "
-                f"(slots={slots}, counts={worker_counts}, max_queue={max_queues})"
-            )
+    elif expected_vk_platform == "windows":
+        if any(
+            block[key] != 0
+            for block in raw_vk_v2
+            for key in ("worker_queue_total_us", "worker_wait_total_us", "worker_reset_total_us", "worker_count", "maxq")
+        ) or any(block["worker_mode"] != "sync" for block in raw_vk_v2):
+            failures.append("vk perf v2 Windows worker attribution invalid")
+    elif any(
+        block["worker_mode"] != "pthread"
+        or block["worker_count"] < 200 - block["slots"]
+        or block["worker_count"] > 200 + block["slots"]
+        or block["maxq"] < 1
+        or block["maxq"] > block["slots"]
+        or block["worker_wait_total_us"] + block["worker_reset_total_us"] <= 0
+        for block in raw_vk_v2
+    ):
+        failures.append("vk perf v2 worker attribution invalid")
     if draws_median is None or draws_median < contract.draw_floor:
         failures.append(
             f"representative draw floor not met ({draws_median} < {contract.draw_floor})"
@@ -655,23 +760,25 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
         "gpu_implied_fps": round(gpu_implied_fps, 1) if finite(gpu_implied_fps) else None,
         "gpu_dominant_pass": dominant[0],
         "gpu_dominant_ms": dominant[1],
-        "vk_blocks_raw": len(raw_vkt),
-        "vk_blocks_clean": len(vkt_lines),
-        "vk_fence_median_ms": vkt_medians.get("fence"),
-        "vk_frame_time_fence_median_ms": vkt_medians.get("ft_fence"),
-        "vk_acquire_median_ms": vkt_medians.get("acquire"),
-        "vk_submit_median_ms": vkt_medians.get("submit"),
-        "vk_present_median_ms": vkt_medians.get("present"),
-        "vk_pacing_blocks_raw": len(raw_vk_pacing),
-        "vk_pacing_blocks_clean": len(pacing_lines),
-        "vk_pacing_pair_errors": vk_pacing_pair_errors,
-        "vk_pacing_bucket_first": pacing_buckets[0] if pacing_buckets else None,
-        "vk_pacing_bucket_last": pacing_buckets[-1] if pacing_buckets else None,
-        "vk_main_slot_wait_median_us": pacing_medians.get("main_slot_wait"),
-        "vk_worker_queue_median_us": pacing_medians.get("worker_queue"),
-        "vk_worker_fence_median_us": pacing_medians.get("worker_fence"),
-        "vk_worker_count_median": pacing_medians.get("worker_count"),
-        "vk_max_queue_median": pacing_medians.get("max_queue"),
+        "vk_perf_v2_blocks_raw": len(raw_vk_v2),
+        "vk_perf_v2_blocks_clean": len(vk_v2_blocks),
+        "vk_perf_v2_parse_errors": vk_v2_parse_errors,
+        "vk_perf_v2_bucket_first": vk_v2_buckets[0] if vk_v2_buckets else None,
+        "vk_perf_v2_bucket_last": vk_v2_buckets[-1] if vk_v2_buckets else None,
+        "vk_perf_v2_attempt_coverage": vk_attempt_coverage,
+        "vk_acquire_mean_us": vk_acquire_mean_us,
+        "vk_submit_mean_us": vk_submit_mean_us,
+        "vk_present_call_mean_us": vk_present_call_mean_us,
+        "vk_main_slot_wait_mean_us": vk_main_slot_wait_mean_us,
+        "vk_worker_queue_mean_us": vk_worker_queue_mean_us,
+        "vk_worker_wait_mean_us": vk_worker_wait_mean_us,
+        "vk_worker_reset_mean_us": vk_worker_reset_mean_us,
+        "vk_worker_count": vk_worker_coverage,
+        "vk_max_queue": max((block["maxq"] for block in vk_v2_blocks), default=None),
+        "vk_swapchain_identity": {
+            key: (list(raw_vk_v2[0][key]) if key == "extent" else raw_vk_v2[0][key])
+            for key in identity_keys
+        } if raw_vk_v2 else None,
         "effective_fps": round(effective_fps, 1) if finite(effective_fps) else None,
         "draws_median": draws_median,
         "draw_floor": contract.draw_floor,
@@ -694,20 +801,17 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
         print(f"  CPU FPS                 : {fps_mean:.1f}" if finite(fps_mean) else "  CPU FPS                 : unavailable")
         print(f"  GPU blocks              : raw={len(raw_gpu)} clean={len(gpu_blocks)}")
         print(f"  GPU total/FPS           : {gpu_total_median:.3f}ms / {gpu_implied_fps:.1f}" if finite(gpu_implied_fps) else "  GPU total/FPS           : unavailable")
-        print(f"  vk blocks/draws         : raw={len(raw_vkt)} clean={len(vkt_lines)} median={draws_median}")
+        print(f"  vk perf v2/draws        : raw={len(raw_vk_v2)} clean={len(vk_v2_blocks)} mean={draws_mean}")
         print(
-            "  vk pacing medians (ms)  : "
-            f"fence={vkt_medians.get('fence')} ft_fence={vkt_medians.get('ft_fence')} "
-            f"acquire={vkt_medians.get('acquire')} submit={vkt_medians.get('submit')} "
-            f"present={vkt_medians.get('present')}"
+            "  vk attempt means (us)   : "
+            f"acquire={vk_acquire_mean_us} submit={vk_submit_mean_us} "
+            f"present_call={vk_present_call_mean_us} slot={vk_main_slot_wait_mean_us}"
         )
         print(
-            "  vk pacing attribution   : "
-            f"raw={len(raw_vk_pacing)} clean={len(pacing_lines)} "
-            f"slot={pacing_medians.get('main_slot_wait')}us/f "
-            f"queue={pacing_medians.get('worker_queue')}us/work "
-            f"fence={pacing_medians.get('worker_fence')}us/work "
-            f"work={pacing_medians.get('worker_count')} maxq={pacing_medians.get('max_queue')}"
+            "  vk worker means (us)    : "
+            f"queue={vk_worker_queue_mean_us} wait={vk_worker_wait_mean_us} "
+            f"reset={vk_worker_reset_mean_us} work={vk_worker_coverage} "
+            f"maxq={max((block['maxq'] for block in vk_v2_blocks), default=None)}"
         )
         print(f"  wall FPS                : {wall_fps:.1f}" if finite(wall_fps) else "  wall FPS                : unavailable")
         print(f"  EFFECTIVE FPS           : {effective_fps:.1f}" if finite(effective_fps) else "  EFFECTIVE FPS           : unavailable")
@@ -722,6 +826,8 @@ def record(ts: str, msg: str, cat: str = "system") -> str:
 
 def synthetic_fixture(samples: int = 650) -> list[str]:
     base = dt.datetime.fromisoformat("2026-08-11T12:00:00+03:00")
+    fixture_platform = {"Windows": "windows", "Darwin": "macos", "Linux": "linux"}.get(platform.system(), "other")
+    fixture_worker_mode = "sync" if fixture_platform == "windows" else "pthread"
     lines = [
         record(base.isoformat(), "cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME mapname=maps/arena1.bsp serverTime=400 numEntities=17 framecount=8)", "client"),
         record(base.isoformat(), 'broadcast: print "local has entered the game\\n"', "server"),
@@ -729,7 +835,7 @@ def synthetic_fixture(samples: int = 650) -> list[str]:
     lines.extend(record(base.isoformat(), 'broadcast: print "Visor has entered the game\\n"', "server") for _ in range(2))
     lines.extend(
         [
-            record(base.isoformat(), "RENDER: 1280 x 720, MODE: -1, 1280 x 720 windowed hz:N/A", "renderer.init"),
+            record(base.isoformat(), "RENDER: 1280 x 720, MODE: -1, 2560 x 1440 windowed hz:N/A", "renderer.init"),
             record(base.isoformat(), "FPS_GATE_CAMERA_CHECK"),
             record(base.isoformat(), "1052 1432 117 135 0", "cgame"),
             record(base.isoformat(), "1052 1432 117 135 0", "cgame"),
@@ -767,6 +873,14 @@ def synthetic_fixture(samples: int = 650) -> list[str]:
             slot_wait = (999, 5, 7)[index // 200]
             worker_queue = (888, 10, 14)[index // 200]
             worker_fence = (777, 20, 24)[index // 200]
+            v2_slot_wait = (3, 5, 7)[index // 200]
+            v2_worker_queue = (8, 10, 14)[index // 200]
+            v2_worker_wait = (16, 20, 24)[index // 200]
+            v2_draws = (60, 60, 62)[index // 200]
+            acquire_total = (2000, 4000, 8000)[index // 200]
+            submit_total = (1000, 2000, 6000)[index // 200]
+            present_total = (3000, 6000, 10000)[index // 200]
+            worker_reset_total = (100, 200, 400)[index // 200]
             cpu_work = (9000, 4000, 4200)[index // 200]
             scr_end = (8000, 3000, 3200)[index // 200]
             lines.extend(
@@ -777,6 +891,22 @@ def synthetic_fixture(samples: int = 650) -> list[str]:
                     record(ts, f"  total={total:.2f}", "renderer.timing"),
                     record(ts, f"vk timing (200f avg): fence={fence}ms/f  ft_fence={frame_time_fence}ms/f  acquire=0ms/f  submit=0ms/f  present=0ms/f  draws={draws}/f(msdf=0)  pipebinds=2/f(msdf=0)", "renderer.timing"),
                     record(ts, f"vk pacing (200f avg): bucket={pacing_bucket} slots=2 main_slot_wait={slot_wait}us/f worker_queue={worker_queue}us/work worker_fence={worker_fence}us/work worker_count=200 max_queue=1", "renderer.timing"),
+                    record(
+                        ts,
+                        "vk perf v2: "
+                        f"epoch=1 bucket={pacing_bucket} count=200 valid=200 "
+                        f"acquire_total_us={acquire_total} submit_total_us={submit_total} "
+                        f"present_call_total_us={present_total} main_slot_wait_total_us={v2_slot_wait * 200} "
+                        f"worker_queue_total_us={0 if fixture_worker_mode == 'sync' else v2_worker_queue * 200} "
+                        f"worker_wait_total_us={0 if fixture_worker_mode == 'sync' else v2_worker_wait * 200} "
+                        f"worker_reset_total_us={0 if fixture_worker_mode == 'sync' else worker_reset_total} "
+                        f"worker_count={0 if fixture_worker_mode == 'sync' else 200} "
+                        f"maxq={0 if fixture_worker_mode == 'sync' else 1} generation=1 mode=IMMEDIATE "
+                        "r_swapInterval=0 requested_images=3 actual_images=3 slots=2 extent=2560x1440 "
+                        f"platform={fixture_platform} worker_mode={fixture_worker_mode} draws_total={v2_draws * 200} "
+                        "image_hits=0:67,1:67,2:66 identity_stable=1",
+                        "renderer.timing",
+                    ),
                 ]
             )
     end = base + dt.timedelta(seconds=samples / 100.0)
@@ -785,7 +915,10 @@ def synthetic_fixture(samples: int = 650) -> list[str]:
 
 
 def run_self_test() -> int:
-    base_contract = Contract("self", "arena1", 2, 90.0, 650, (1052, 1432, 117, 135, 0))
+    base_contract = Contract(
+        "self", "arena1", 2, 90.0, 650, (1052, 1432, 117, 135, 0),
+        particle_pixels=2560 * 1440,
+    )
     cases: list[tuple[str, list[str], Contract, bool, str | None]] = []
     clean = synthetic_fixture()
     cases.append(("clean", clean, base_contract, True, None))
@@ -831,8 +964,9 @@ def run_self_test() -> int:
     cases.append(("partial-gpu", partial, base_contract, False, "GPU timing blocks invalid"))
     cases.append(("total-only-gpu", without("world_done"), base_contract, False, "no non-total pass"))
     cases.append(("missing-gpu", [line for line in clean if "gpu (" not in line and "world_done=" not in line and "total=" not in line], base_contract, False, "GPU timing blocks invalid"))
-    cases.append(("missing-vkt", without("vk timing"), base_contract, False, "vk timing blocks invalid"))
-    cases.append(("missing-vk-pacing", without("vk pacing"), base_contract, False, "vk pacing blocks invalid"))
+    cases.append(("legacy-vk-lines-absent", without("vk timing"), base_contract, True, None))
+    cases.append(("legacy-vk-pacing-absent", without("vk pacing"), base_contract, True, None))
+    cases.append(("missing-vk-perf-v2", without("vk perf v2"), base_contract, False, "vk perf v2 blocks invalid"))
     cases.append(("missing-frame-pacing", without("frame trace"), base_contract, False, "frame pacing blocks invalid"))
     duplicate_frame_bucket = [
         line.replace("frame trace (200f): bucket=3", "frame trace (200f): bucket=2")
@@ -853,30 +987,54 @@ def run_self_test() -> int:
         for line in clean
     ]
     cases.append(("slow-frame-aggregate", slow_frame_block, base_contract, False, "target not met"))
-    negative_pacing = [line.replace("main_slot_wait=5us/f", "main_slot_wait=-5us/f") for line in clean]
-    cases.append(("negative-vk-pacing", negative_pacing, base_contract, False, "vk pacing blocks invalid"))
-    zero_worker = [line.replace("worker_count=200", "worker_count=0") for line in clean]
-    cases.append(("zero-worker-count", zero_worker, base_contract, False, "worker attribution invalid"))
-    tiny_worker = [line.replace("worker_count=200", "worker_count=1") for line in clean]
-    cases.append(("tiny-worker-count", tiny_worker, base_contract, False, "worker attribution invalid"))
-    huge_queue = [line.replace("max_queue=1", "max_queue=999") for line in clean]
-    cases.append(("huge-worker-queue", huge_queue, base_contract, False, "worker attribution invalid"))
-    duplicate_bucket = [line.replace("bucket=3 slots", "bucket=2 slots") for line in clean]
-    cases.append(("duplicate-pacing-bucket", duplicate_bucket, base_contract, False, "vk pacing blocks invalid"))
-    out_of_order_bucket = [
-        line.replace("bucket=2 slots", "bucket=3 slots").replace(
-            "bucket=3 slots=2 main_slot_wait=7", "bucket=2 slots=2 main_slot_wait=7"
-        )
+    bad_v2_count = [line.replace("epoch=1 bucket=2 count=200", "epoch=1 bucket=2 count=199") for line in clean]
+    cases.append(("bad-v2-count", bad_v2_count, base_contract, False, "vk perf v2 blocks invalid"))
+    bad_v2_valid = [line.replace("epoch=1 bucket=2 count=200 valid=200", "epoch=1 bucket=2 count=200 valid=199") for line in clean]
+    cases.append(("bad-v2-valid", bad_v2_valid, base_contract, False, "vk perf v2 blocks invalid"))
+    negative_v2_total = [line.replace("acquire_total_us=4000", "acquire_total_us=-1") for line in clean]
+    cases.append(("negative-v2-total", negative_v2_total, base_contract, False, "vk perf v2 blocks invalid"))
+    for field, value in (
+        ("acquire_total_us", "4000"),
+        ("submit_total_us", "2000"),
+        ("present_call_total_us", "6000"),
+        ("main_slot_wait_total_us", "1000"),
+    ):
+        zero_total = [line.replace(f"{field}={value}", f"{field}=0") for line in clean]
+        cases.append((f"zero-v2-{field}", zero_total, base_contract, False, "vk perf v2 blocks invalid"))
+    unstable_v2 = [line.replace("identity_stable=1", "identity_stable=0") for line in clean]
+    cases.append(("unstable-v2-identity", unstable_v2, base_contract, False, "vk perf v2 blocks invalid"))
+    mutated_generation = [
+        line.replace("generation=1 mode=IMMEDIATE", "generation=2 mode=IMMEDIATE")
+        if "vk perf v2: epoch=1 bucket=3" in line else line
         for line in clean
     ]
-    cases.append(("out-of-order-pacing-bucket", out_of_order_bucket, base_contract, False, "vk pacing blocks invalid"))
-    skipped_bucket = [line.replace("bucket=3 slots", "bucket=4 slots") for line in clean]
-    cases.append(("skipped-pacing-bucket", skipped_bucket, base_contract, False, "vk pacing blocks invalid"))
-    pacing_records = [line for line in clean if "vk pacing (" in line]
-    separated_pacing = [line for line in clean if "vk pacing (" not in line]
-    separated_end = next(i for i, line in enumerate(separated_pacing) if "FPS_GATE_MEASURE_END" in line)
-    separated_pacing[separated_end:separated_end] = pacing_records
-    cases.append(("separated-vkt-pacing", separated_pacing, base_contract, False, "vk pacing blocks invalid"))
+    cases.append(("mutated-v2-generation", mutated_generation, base_contract, False, "vk perf v2 blocks invalid"))
+    mutated_epoch = [
+        line.replace("epoch=1 bucket=3", "epoch=2 bucket=3")
+        for line in clean
+    ]
+    cases.append(("mutated-v2-epoch", mutated_epoch, base_contract, False, "vk perf v2 blocks invalid"))
+    wrong_slots = [line.replace("actual_images=3 slots=2", "actual_images=3 slots=3") for line in clean]
+    cases.append(("wrong-current-slot-fixture", wrong_slots, base_contract, False, "vk perf v2 blocks invalid"))
+    internal_as_swapchain = [
+        line.replace("extent=2560x1440", "extent=1280x720")
+        for line in clean
+    ]
+    cases.append(("internal-as-v2-swapchain-extent", internal_as_swapchain, base_contract, False, "vk perf v2 blocks invalid"))
+    bad_hits = [line.replace("image_hits=0:67,1:67,2:66", "image_hits=0:67,1:67,2:65") for line in clean]
+    cases.append(("bad-v2-image-histogram", bad_hits, base_contract, False, "vk perf v2 blocks invalid"))
+    skipped_v2_bucket = [line.replace("epoch=1 bucket=3", "epoch=1 bucket=4") for line in clean]
+    cases.append(("skipped-v2-bucket", skipped_v2_bucket, base_contract, False, "vk perf v2 blocks invalid"))
+    malformed_v2 = [line.replace("identity_stable=1", "identity_stable=1 unexpected=1") for line in clean]
+    cases.append(("unknown-v2-field", malformed_v2, base_contract, False, "vk perf v2 blocks invalid"))
+    if platform.system() != "Windows":
+        tiny_worker = [line.replace("worker_count=200 maxq=1 generation", "worker_count=1 maxq=1 generation") for line in clean]
+        cases.append(("tiny-v2-worker-count", tiny_worker, base_contract, False, "worker attribution invalid"))
+        zero_worker_timing = [
+            line.replace("worker_queue_total_us=2000 worker_wait_total_us=4000 worker_reset_total_us=200", "worker_queue_total_us=2000 worker_wait_total_us=0 worker_reset_total_us=0")
+            for line in clean
+        ]
+        cases.append(("queue-only-v2-worker-timing", zero_worker_timing, base_contract, False, "worker attribution invalid"))
     invalid_time = clean.copy()
     end_index = next(i for i, line in enumerate(invalid_time) if "FPS_GATE_MEASURE_END" in line)
     end_record = json.loads(invalid_time[end_index])
@@ -902,19 +1060,21 @@ def run_self_test() -> int:
         clean_summary = analyze(clean_path, base_contract, emit=False)
         if (
             clean_summary["gpu_total_ms"] != 5.5
-            or clean_summary["draws_median"] != 61
-            or clean_summary["vk_fence_median_ms"] != 0
-            or clean_summary["vk_frame_time_fence_median_ms"] != 0
-            or clean_summary["vk_main_slot_wait_median_us"] != 6
-            or clean_summary["vk_worker_queue_median_us"] != 12
-            or clean_summary["vk_worker_fence_median_us"] != 22
+            or clean_summary["draws_median"] != 60
+            or not math.isclose(clean_summary["vk_acquire_mean_us"], 23.3333, abs_tol=0.001)
+            or clean_summary["vk_submit_mean_us"] != 15
+            or not math.isclose(clean_summary["vk_present_call_mean_us"], 31.6667, abs_tol=0.001)
+            or clean_summary["vk_main_slot_wait_mean_us"] != 5
+            or (platform.system() != "Windows" and not math.isclose(clean_summary["vk_worker_queue_mean_us"], 10.6667, abs_tol=0.001))
+            or (platform.system() != "Windows" and clean_summary["vk_worker_wait_mean_us"] != 20)
+            or (platform.system() != "Windows" and not math.isclose(clean_summary["vk_worker_reset_mean_us"], 1.1667, abs_tol=0.001))
             or not math.isclose(clean_summary["cpu_work_mean_us"], 5733.3, abs_tol=0.05)
             or not math.isclose(clean_summary["scr_end_mean_us"], 4733.3, abs_tol=0.05)
         ):
             failed = True
-            print("SELF-TEST FAIL: contaminated first bucket influenced clean medians")
+            print("SELF-TEST FAIL: contained v2 totals were not weighted over exact attempt/work coverage")
         else:
-            print("SELF-TEST PASS: contaminated first bucket discarded")
+            print("SELF-TEST PASS: all three contained v2 buckets contribute to weighted means")
         sparse_legacy: list[str] = []
         legacy_frames = 0
         for line in clean:

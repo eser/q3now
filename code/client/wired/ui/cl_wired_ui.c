@@ -154,6 +154,7 @@ static const wiredUiStateDefault_t wui_uiStateDefaults[] = {
 	{ "ui_browserStatus", "" },
 	{ "ui_selectedServerAddr", "" },
 	{ "ui_selectedServerName", "" },
+	{ "ui_joinPasswordError", "" },
 	{ "ui_selectedMap", "" },
 	{ "ui_currentNetMap", "0" },
 	{ "ui_mapLevelshot", "" },
@@ -231,7 +232,8 @@ static qboolean WiredUI_IsPersistedStateKey( const char *key ) {
 	}
 	if ( !Q_stricmp( key, "ui_selectedServerAddr" )
 	  || !Q_stricmp( key, "ui_selectedServerName" )
-	  || !Q_stricmp( key, "ui_selectedDemo" ) ) {
+	  || !Q_stricmp( key, "ui_selectedDemo" )
+	  || !Q_stricmp( key, "ui_joinPasswordError" ) ) {
 		return qfalse;
 	}
 	if ( !Q_stricmp( key, "ui_palette_mode" )
@@ -538,9 +540,145 @@ typedef struct {
 	qboolean valid;
 	char address[MAX_STRING_CHARS];
 	int selectionGeneration;
+	char secret[33];
 } wiredPasswordPrompt_t;
 
 static wiredPasswordPrompt_t wui_passwordPrompt;
+
+#define WUI_SECURE_JOIN_PASSWORD_BINDING "@secure_join_password"
+
+static qboolean WiredUI_IsSecureJoinPasswordItem( const wiredItemDef_t *item ) {
+	return item && !Q_stricmp( item->cvar, WUI_SECURE_JOIN_PASSWORD_BINDING );
+}
+
+static void WiredUI_ClearPasswordPromptState( qboolean clearError ) {
+	Q_SecureZeroMemory( &wui_passwordPrompt, sizeof( wui_passwordPrompt ) );
+	WiredUI_StateSetString( "ui_password_server_name", "" );
+	if ( clearError )
+		WiredUI_StateSetString( "ui_joinPasswordError", "" );
+}
+
+/* Dedicated edit path for the join secret. It never calls State/Store/Cvar
+ * APIs and commits through a full-buffer erase so deleted/replaced suffixes
+ * cannot remain beyond the terminating NUL. */
+static qboolean WiredUI_HandleSecureJoinEditKey( int key ) {
+	char buff[sizeof( wui_passwordPrompt.secret )];
+	int len;
+	qboolean changed = qfalse;
+
+	Q_strncpyz( buff, wui_passwordPrompt.secret, sizeof( buff ) );
+	len = (int)strlen( buff );
+	if ( wui_editCursorPos > len ) wui_editCursorPos = len;
+
+	if ( key & K_CHAR_FLAG ) {
+		int ch = key & ~K_CHAR_FLAG;
+		if ( ch == 'h' - 'a' + 1 ) {
+			if ( wui_editCursorPos > 0 ) {
+				memmove( &buff[wui_editCursorPos - 1], &buff[wui_editCursorPos],
+					(size_t)( len + 1 - wui_editCursorPos ) );
+				wui_editCursorPos--;
+				changed = qtrue;
+			}
+		} else if ( ch == 'a' - 'a' + 1 ) {
+			wui_editCursorPos = 0;
+		} else if ( ch == 'e' - 'a' + 1 ) {
+			wui_editCursorPos = len;
+		} else if ( ch == 'v' - 'a' + 1 ) {
+			char *clip = Sys_GetClipboardData();
+			if ( clip ) {
+				int clipBytes = (int)strlen( clip );
+				int pasteLen = clipBytes;
+				int space = 32 - len;
+				if ( pasteLen > space ) pasteLen = space;
+				for ( int i = 0; i < pasteLen; i++ ) {
+					unsigned char c = (unsigned char)clip[i];
+					if ( c < 0x20 || c > 0x7e || c == '\\' || c == ';' || c == '"' ) {
+						pasteLen = i;
+						break;
+					}
+				}
+				if ( pasteLen > 0 ) {
+					memmove( &buff[wui_editCursorPos + pasteLen],
+						&buff[wui_editCursorPos], (size_t)( len + 1 - wui_editCursorPos ) );
+					memcpy( &buff[wui_editCursorPos], clip, (size_t)pasteLen );
+					wui_editCursorPos += pasteLen;
+					changed = qtrue;
+				}
+				Q_SecureZeroMemory( clip, (size_t)clipBytes );
+				Z_Free( clip );
+			}
+		} else if ( ch >= 0x20 && ch <= 0x7e && ch != '\\' && ch != ';'
+			&& ch != '"' && len < 32 ) {
+			memmove( &buff[wui_editCursorPos + 1], &buff[wui_editCursorPos],
+				(size_t)( len + 1 - wui_editCursorPos ) );
+			buff[wui_editCursorPos++] = (char)ch;
+			changed = qtrue;
+		}
+	} else {
+		switch ( key ) {
+		case K_ESCAPE:
+			wui_editingField = qfalse;
+			wui_editItem = NULL;
+			WiredUI_ClearPasswordPromptState( qtrue );
+			WiredUI_PopMenu();
+			break;
+		case K_ENTER:
+		case K_KP_ENTER:
+		case K_TAB:
+			wui_editingField = qfalse;
+			wui_editItem = NULL;
+			break;
+		case K_BACKSPACE:
+			if ( wui_editCursorPos > 0 ) {
+				int pos = wui_editCursorPos - 1;
+				if ( keys[K_CTRL].down ) {
+					pos = wui_editCursorPos;
+					while ( pos > 0 && buff[pos - 1] == ' ' ) pos--;
+					while ( pos > 0 && buff[pos - 1] != ' ' ) pos--;
+				}
+				memmove( &buff[pos], &buff[wui_editCursorPos],
+					(size_t)( len + 1 - wui_editCursorPos ) );
+				wui_editCursorPos = pos;
+				changed = qtrue;
+			}
+			break;
+		case K_DEL:
+		case K_KP_DEL:
+			if ( wui_editCursorPos < len ) {
+				memmove( &buff[wui_editCursorPos], &buff[wui_editCursorPos + 1],
+					(size_t)( len - wui_editCursorPos ) );
+				changed = qtrue;
+			}
+			break;
+		case K_LEFTARROW:
+		case K_KP_LEFTARROW:
+			if ( wui_editCursorPos > 0 ) wui_editCursorPos--;
+			break;
+		case K_RIGHTARROW:
+		case K_KP_RIGHTARROW:
+			if ( wui_editCursorPos < len ) wui_editCursorPos++;
+			break;
+		case K_HOME:
+		case K_KP_HOME:
+			wui_editCursorPos = 0;
+			break;
+		case K_END:
+		case K_KP_END:
+			wui_editCursorPos = len;
+			break;
+		default:
+			break;
+		}
+	}
+	if ( changed ) {
+		Q_SecureZeroMemory( wui_passwordPrompt.secret,
+			sizeof( wui_passwordPrompt.secret ) );
+		Q_strncpyz( wui_passwordPrompt.secret, buff,
+			sizeof( wui_passwordPrompt.secret ) );
+	}
+	Q_SecureZeroMemory( buff, sizeof( buff ) );
+	return qtrue;
+}
 
 static qboolean WiredUI_IsSafePasswordValue( const char *value ) {
 	const unsigned char *p = (const unsigned char *)value;
@@ -559,7 +697,10 @@ const char *WiredUI_BoundValueText( const wiredItemDef_t *item, char *out, int o
 	out[0] = '\0';
 	if ( !item || !item->cvar[0] ) return out;
 
-	WiredUI_StateGetString( item->cvar, cvarBuf, sizeof( cvarBuf ) );
+	if ( WiredUI_IsSecureJoinPasswordItem( item ) )
+		Q_strncpyz( cvarBuf, wui_passwordPrompt.secret, sizeof( cvarBuf ) );
+	else
+		WiredUI_StateGetString( item->cvar, cvarBuf, sizeof( cvarBuf ) );
 
 	switch ( item->type ) {
 	case ITEM_TYPE_YESNO:
@@ -694,6 +835,7 @@ const char *WiredUI_BoundValueText( const wiredItemDef_t *item, char *out, int o
 		} else {
 			Q_strncpyz( out, cvarBuf, outSize );
 		}
+		Q_SecureZeroMemory( cvarBuf, sizeof( cvarBuf ) );
 		return out;
 
 	default:
@@ -3366,9 +3508,10 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	memset( wui_populateCallbacksHash, 0, sizeof( wui_populateCallbacksHash ) );
 	WiredUI_ResetListboxDoubleClick( "init" );
 	wui_compositorPointerDown = qfalse;
-	memset( &wui_passwordPrompt, 0, sizeof( wui_passwordPrompt ) );
+	Q_SecureZeroMemory( &wui_passwordPrompt, sizeof( wui_passwordPrompt ) );
 	Cvar_Get( "ui_password_server_name", "", CVAR_TEMP );
 	Cvar_Set( "ui_password_server_name", "" );
+	WiredUI_StateSetString( "ui_joinPasswordError", "" );
 	wui_numSymbols = 0;
 	wui_numElements = 0;
 	wui_numPopulateCallbacks = 0;
@@ -3696,6 +3839,9 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 }
 
 void WiredUI_Shutdown( void ) {
+	Q_SecureZeroMemory( &wui_passwordPrompt, sizeof( wui_passwordPrompt ) );
+	WiredUI_StateSetString( "ui_joinPasswordError", "" );
+	Cvar_Set( "ui_password_server_name", "" );
 	if ( !wui_initialized ) {
 		return;
 	}
@@ -3704,9 +3850,6 @@ void WiredUI_Shutdown( void ) {
 	WiredUI_ReleaseCompositorPointer( "shutdown" );
 	WiredFeeder_ServerStatusCancel();
 	WiredFeeder_ServerFixtureClear();
-	memset( &wui_passwordPrompt, 0, sizeof( wui_passwordPrompt ) );
-	Cvar_Set( "ui_password_server_name", "" );
-
 	/* A dead UI must not hold KEYCATCH_UI — that bit signals "I am alive and
 	   handling input."  If we leave it set, Con_DrawConsole's fullscreen
 	   auto-show sees the catcher and skips the fullscreen draw,
@@ -4769,17 +4912,21 @@ static void WiredScript_StartServer( wiredMenuDef_t *menu, wiredItemDef_t *item,
 	}
 }
 
-static void WiredScript_ResetPasswordPrompt( qboolean clearPassword ) {
-	memset( &wui_passwordPrompt, 0, sizeof( wui_passwordPrompt ) );
-	WiredUI_StateSetString( "ui_password_server_name", "" );
-	if ( clearPassword ) Cvar_Set( "password", "" );
+static void WiredScript_ResetPasswordPrompt( qboolean clearError ) {
+	WiredUI_ClearPasswordPromptState( clearError );
 }
 
-static void WiredScript_QueueBrowserConnect( const char *normalized ) {
+static qboolean WiredScript_BeginBrowserConnect( const char *normalized,
+	const netadr_t *resolved, const char *password, int selectionGeneration ) {
+	if ( !CL_ConnectBrowserServer( normalized, resolved, password,
+		selectionGeneration ) ) {
+		return qfalse;
+	}
 	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
-		"WiredUI: queued validated connect origin=browser address=%s\n", normalized );
+		"WiredUI: started validated connect origin=browser address=%s selection_generation=%d credential_present=%d\n",
+		normalized, selectionGeneration, password && password[0] ? 1 : 0 );
 	WiredUI_CloseAllMenus();
-	Cbuf_ExecuteText( EXEC_APPEND, va( "connect \"%s\"\n", normalized ) );
+	return qtrue;
 }
 
 static void WiredScript_JoinServer( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
@@ -4795,10 +4942,18 @@ static void WiredScript_JoinServer( wiredMenuDef_t *menu, wiredItemDef_t *item, 
 		NULL, 0, &needPassword, &selectionGeneration ) ) {
 		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
 			"WiredUI: browser connect refused without current selection\n" );
+		if ( passwordSubmit ) {
+			WiredScript_ResetPasswordPrompt( qtrue );
+			WiredUI_PopMenu();
+		}
 		return;
 	}
 	if ( !CL_NormalizeServerAddress( addr, NA_UNSPEC, normalized, sizeof( normalized ), &resolved ) ) {
 		COM_WARN( LOG_CH(ch_ui), "WiredUI: rejected invalid server address origin=browser\n" );
+		if ( passwordSubmit ) {
+			WiredScript_ResetPasswordPrompt( qtrue );
+			WiredUI_PopMenu();
+		}
 		return;
 	}
 
@@ -4819,25 +4974,35 @@ static void WiredScript_JoinServer( wiredMenuDef_t *menu, wiredItemDef_t *item, 
 		return;
 	}
 	if ( passwordSubmit ) {
-		Cvar_VariableStringBuffer( "password", password, sizeof( password ) );
+		Q_strncpyz( password, wui_passwordPrompt.secret, sizeof( password ) );
 		if ( !needPassword || !wui_passwordPrompt.valid
 		     || wui_passwordPrompt.selectionGeneration != selectionGeneration
 		     || Q_stricmp( wui_passwordPrompt.address, normalized ) ) {
 			Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
 				"WiredUI: password submit refused reason=stale-selection\n" );
+			Q_SecureZeroMemory( password, sizeof( password ) );
+			WiredScript_ResetPasswordPrompt( qtrue );
+			WiredUI_PopMenu();
 			return;
 		}
 		if ( !WiredUI_IsSafePasswordValue( password ) ) {
 			Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
 				"WiredUI: password submit refused reason=invalid-credential\n" );
+			Q_SecureZeroMemory( password, sizeof( password ) );
 			return;
 		}
-		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
-			"WiredUI: password submit accepted address=%s selection_generation=%d\n",
-			normalized, selectionGeneration );
-		WiredScript_ResetPasswordPrompt( qfalse );
+		if ( !WiredScript_BeginBrowserConnect( normalized, &resolved, password,
+			selectionGeneration ) ) {
+			Q_SecureZeroMemory( password, sizeof( password ) );
+			return;
+		}
+		Q_SecureZeroMemory( password, sizeof( password ) );
+		WiredScript_ResetPasswordPrompt( qtrue );
+		return;
 	}
-	WiredScript_QueueBrowserConnect( normalized );
+	WiredScript_ResetPasswordPrompt( qtrue );
+	WiredScript_BeginBrowserConnect( normalized, &resolved, NULL,
+		selectionGeneration );
 }
 
 static void WiredScript_JoinServerPassword( wiredMenuDef_t *menu,
@@ -4855,6 +5020,49 @@ static void WiredScript_CancelServerPassword( wiredMenuDef_t *menu,
 	if ( !menu || Q_stricmp( menu->name, "password" ) ) return;
 	WiredScript_ResetPasswordPrompt( qtrue );
 	WiredUI_PopMenu();
+}
+
+qboolean CL_WiredUI_ShowJoinPasswordRetry( const char *target,
+	int selectionGeneration ) {
+	char addr[256];
+	char normalized[256];
+	char serverName[256];
+	qboolean needPassword;
+	int currentGeneration;
+	netadr_t resolved;
+
+	if ( !target || !target[0] || !cls.uiStarted ) {
+		return qfalse;
+	}
+	if ( !WiredFeeder_GetSelectedServerConnection( addr, sizeof( addr ),
+		serverName, sizeof( serverName ), &needPassword, &currentGeneration )
+	     || !needPassword || currentGeneration != selectionGeneration
+	     || !CL_NormalizeServerAddress( addr, NA_UNSPEC, normalized,
+			sizeof( normalized ), &resolved )
+	     || Q_stricmp( normalized, target ) ) {
+		WiredScript_ResetPasswordPrompt( qtrue );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: authentication retry suppressed reason=stale-selection selection_generation=%d\n",
+			selectionGeneration );
+		return qfalse;
+	}
+
+	WiredUI_CloseAllMenus();
+	WiredUI_SetActiveMenu( UIMENU_MAIN );
+	WiredUI_PushMenu( "servers", WUI_BG_INTENT_SCENE );
+	WiredScript_ResetPasswordPrompt( qtrue );
+	wui_passwordPrompt.valid = qtrue;
+	Q_strncpyz( wui_passwordPrompt.address, normalized,
+		sizeof( wui_passwordPrompt.address ) );
+	wui_passwordPrompt.selectionGeneration = selectionGeneration;
+	WiredUI_StateSetString( "ui_password_server_name", normalized );
+	WiredUI_StateSetString( "ui_joinPasswordError",
+		"Authentication failed. Enter the server password again." );
+	WiredUI_PushMenu( "password", WUI_BG_INTENT_INHERIT );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: authentication retry opened address=%s selection_generation=%d\n",
+		normalized, selectionGeneration );
+	return qtrue;
 }
 
 static void WiredScript_ConnectSpecified( wiredMenuDef_t *menu, wiredItemDef_t *item,
@@ -5548,12 +5756,15 @@ void WiredUI_PopMenu( void ) {
 	WiredUI_ResetListboxDoubleClick( "pop" );
 	WiredUI_ReleaseCompositorPointer( "pop" );
 	if ( wui_menuStackDepth <= 0 ) {
+		WiredUI_ClearPasswordPromptState( qtrue );
 		// nothing to pop — close UI entirely
 		wui_activeMenu = UIMENU_NONE;
 		Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
 		Cvar_Set( "cl_paused", "0" );
 		return;
 	}
+	if ( !Q_stricmp( wui_menuStack[wui_menuStackDepth - 1], "password" ) )
+		WiredUI_ClearPasswordPromptState( qtrue );
 
 	// stop cinematic on the menu being popped (before decrement)
 	{
@@ -5650,6 +5861,7 @@ void WiredUI_PopMenu( void ) {
 }
 
 void WiredUI_CloseAllMenus( void ) {
+	WiredUI_ClearPasswordPromptState( qtrue );
 	WiredUI_ResetListboxDoubleClick( "close-all" );
 	WiredUI_ReleaseCompositorPointer( "close-all" );
 	// stop all active cinematics on the stack
@@ -6228,6 +6440,11 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		char buff[1024];
 		int len;
 
+		if ( WiredUI_IsSecureJoinPasswordItem( wui_editItem ) ) {
+			WiredUI_HandleSecureJoinEditKey( key );
+			return;
+		}
+
 			WiredUI_StateGetString( wui_editItem->cvar, buff, sizeof( buff ) );
 		len = strlen( buff );
 
@@ -6600,8 +6817,12 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				char buf[256];
 				wui_editingField = qtrue;
 				wui_editItem = focusedItem;
-				WiredUI_StateGetString( focusedItem->cvar, buf, sizeof( buf ) );
+				if ( WiredUI_IsSecureJoinPasswordItem( focusedItem ) )
+					Q_strncpyz( buf, wui_passwordPrompt.secret, sizeof( buf ) );
+				else
+					WiredUI_StateGetString( focusedItem->cvar, buf, sizeof( buf ) );
 				wui_editCursorPos = strlen( buf );
+				Q_SecureZeroMemory( buf, sizeof( buf ) );
 				wui_editPaintOffset = 0;
 				break;
 			}
@@ -7711,6 +7932,7 @@ void CL_PublishConnectState( void ) {
  * this deletion. */
 
 void WiredUI_ReloadHud( void ) {
+	WiredUI_ClearPasswordPromptState( qtrue );
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "WiredUI: reloading HUD...\n" );
 	WiredUI_ResetListboxDoubleClick( "reload" );
 	WiredUI_ReleaseCompositorPointer( "reload" );
@@ -7734,6 +7956,7 @@ void WiredUI_ReloadHud( void ) {
 }
 
 void WiredUI_ReloadMenus( void ) {
+	WiredUI_ClearPasswordPromptState( qtrue );
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "WiredUI: reloading menus...\n" );
 	WiredUI_ResetListboxDoubleClick( "reload" );
 	WiredUI_ReleaseCompositorPointer( "reload" );

@@ -40,6 +40,7 @@ Shared between wn_*.c files. Not included by engine code — use wn_public.h.
  * Must match WN_DATAGRAM_MTU (defined in wn_public.h, included above). */
 #define WN_SNAP_DGRAM_MAX       WN_DATAGRAM_MTU
 #define WIREDNET_SESSION_STREAM_ID  0x00    // session control channel (binary TLV)
+#define WN_SESSION_BUFFER_MAX       ( MAX_INFO_STRING + 16 )
 #define WN_REL_QUEUE_SIZE      64
 #define WN_REL_PARTIAL_CAP     64
 /* CHAN_BOOTSTRAP carries all configstrings + baselines and can exceed MAX_MSGLEN.
@@ -92,6 +93,7 @@ typedef struct {
 // Per-player QUIC game connection state (one slot per connected game client)
 typedef struct wn_game_conn_s {
 	qboolean            active;
+	uint64_t            allocation_id;      // monotonic identity; never inferred from recyclable slot/handle
 	struct wn_connection_s *conn;           // owning QUIC connection (back-pointer); NULL for an in-process app conn
 	conn_handle_t       pub_handle;         // handle published to the server layer + returned by WN_ServerRecvUsercmd.
 	                                        // QUIC: slot+1 (1..WN_MAX_CLIENTS) — byte-identical to the legacy i+1.
@@ -135,6 +137,11 @@ typedef struct wn_connection_s {
 	uint64_t         control_stream_id;  // Stream 0x00 (session control, binary TLV)
 	uint64_t         event_stream_id;    // Stream 0x03 (server→client events)
 	wn_game_conn_t  *game_conn;          // non-NULL when WN_PERM_PLAYER is set
+	byte             session_recv_data[WN_SESSION_BUFFER_MAX];
+	int              session_recv_len;
+	qboolean         session_failed;
+	int              admission_terminal; /* 0 none, 1 accepted, 2 refused */
+	qboolean         refusal_teardown_pending; /* retire only after REFUSE flush */
 
 	// coaching.tick state
 	uint64_t         last_tick_json_seq; // JSON ring cursor: events already sent to this client
@@ -166,8 +173,15 @@ typedef struct {
 typedef struct {
 	qboolean         pending;
 	conn_handle_t    conn;
+	uint64_t         allocation_id;
 	char             userinfo[MAX_INFO_STRING];
 } wn_pending_connect_t;
+
+typedef struct {
+	qboolean         pending;
+	conn_handle_t    conn;
+	uint64_t         allocation_id;
+} wn_pending_ready_t;
 
 // Global QUIC state
 typedef struct wn_state_s {
@@ -215,13 +229,14 @@ typedef struct wn_state_s {
 	// Game connection state — one per player QUIC connection
 	wn_game_conn_t   game_conns[WN_MAX_CLIENTS];
 	int              num_game_conns;
+	uint64_t         next_game_conn_allocation_id;
 
 	// Pending connects: written by QUIC I/O thread, drained on main thread
 	wn_pending_connect_t pending_connects[WN_MAX_CLIENTS];
 
 	/* Pending ready events: set when a client sends TLV 0x05 READY.
 	 * Index corresponds to game_conns[] slot (0-based). */
-	qboolean             pending_ready[WN_MAX_CLIENTS];
+	wn_pending_ready_t   pending_ready[WN_MAX_CLIENTS];
 } wn_state_t;
 
 extern wn_state_t wn;
@@ -239,7 +254,7 @@ void             WN_LogDisconnect( wn_connection_t *conn, const char *reason );
 
 // wn_connection.c (continued)
 void             WN_HandleCapabilityNegotiation( wn_connection_t *conn, uint64_t stream_id,
-                                                  const byte *data, int len );
+                                                  const byte *data, int len, qboolean fin );
 
 // wn_transport.c
 qboolean         WN_IsWiredNetPacket( const byte *buf, int len );
@@ -293,6 +308,11 @@ void             WN_HttpHandleRequest( wn_connection_t *conn, uint64_t stream_id
 	wn_game_conn_t  *WN_GameAllocConn( wn_connection_t *conn );
 	wn_game_conn_t  *WN_GameAllocConnApp( int app_slot );
 	void             WN_GameFreeConn( wn_game_conn_t *gc );
+	wn_game_conn_t  *WN_GameConnByIdentity( conn_handle_t conn,
+	                                      uint64_t allocation_id );
+	qboolean         WN_GameConnIdentityAccepted( conn_handle_t conn,
+	                                            uint64_t allocation_id );
+	qboolean         WN_QueuePendingReady( wn_game_conn_t *gc );
 
 	/* SPSC reliable ring ops shared by the QUIC + in-memory backends. */
 	qboolean         wn_reliable_queue_push( wn_rel_msg_t *queue, volatile int *head,
@@ -303,7 +323,7 @@ void             WN_HttpHandleRequest( wn_connection_t *conn, uint64_t stream_id
 	                                         byte *buf, int *len_out );
 	void             WN_GameHandleDatagram( wn_connection_t *conn, const byte *data, int len );
 	void             WN_GameHandleHandshake( wn_connection_t *conn, uint64_t stream_id,
-	                                          const byte *data, int len );
+	                                          const byte *data, int len, qboolean fin );
 	conn_handle_t    WN_GetConnHandleByAddr( const netadr_t *addr );
 	void             WN_DrainPendingConnects( void );
 	void             WN_GameHandleReliable( wn_connection_t *conn, uint64_t stream_id,
@@ -334,6 +354,9 @@ typedef struct {
 
 	// TLV session channel (stream 0x00): set when ACCEPT received
 	qboolean         accept_pending;
+	byte             session_recv_data[WN_SESSION_BUFFER_MAX];
+	int              session_recv_len;
+	int              admission_terminal; /* 0 none, 1 accepted, 2 refused */
 
 	/* Reliable stream receive queue for server->client messages. */
 	wn_rel_msg_t       rel_queue[WN_REL_QUEUE_SIZE];
@@ -348,6 +371,7 @@ typedef struct {
 	// consumed by WN_ClientHasError / WN_ClientClearError.
 	qboolean         connect_failed;
 	char             connect_error[512];
+	netConnectErrorKind_t connect_error_kind;
 
 	/* CHAN_BOOTSTRAP: dedicated large recv buffer — bypasses rel_queue because
 	 * configstrings + baselines can far exceed MAX_MSGLEN (16 KB).

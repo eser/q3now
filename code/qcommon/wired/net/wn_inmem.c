@@ -82,6 +82,32 @@ static void wn_inmem_drop_client( conn_handle_t conn, const char *reason ) {
 		WN_GameFreeConn( gc );
 }
 
+static void wn_inmem_complete_admission( conn_handle_t conn, qboolean accepted,
+	netRefuseClass_t refusalClass ) {
+	wn_game_conn_t *gc = WN_GameConnByAppHandle( conn );
+	int slot = wn_inmem_client_slot( conn );
+	if ( gc ) gc->hs_state = accepted ? WN_GAME_HS_ACCEPTED : WN_GAME_HS_REFUSED;
+#if !defined(HEADLESS)
+	if ( !accepted && slot >= 0 && slot < WN_MAX_LOCAL_CLIENTS ) {
+		wtcl_array[slot].connect_failed = qtrue;
+		wtcl_array[slot].connect_error_kind = refusalClass == NET_REFUSE_AUTH
+			? NET_CONNECT_ERROR_AUTH_REFUSED
+			: ( refusalClass == NET_REFUSE_SERVER_FULL
+				? NET_CONNECT_ERROR_SERVER_FULL : NET_CONNECT_ERROR_GENERIC );
+		Q_strncpyz( wtcl_array[slot].connect_error,
+			refusalClass == NET_REFUSE_AUTH ? "Server authentication failed"
+				: ( refusalClass == NET_REFUSE_SERVER_FULL ? "Server is full"
+					: "Connection refused" ),
+			sizeof( wtcl_array[slot].connect_error ) );
+	}
+#else
+	(void)slot;
+	(void)refusalClass;
+#endif
+	if ( !accepted && gc )
+		WN_GameFreeConn( gc );
+}
+
 static conn_handle_t wn_inmem_lookup_by_addr( const netadr_t *addr ) { (void)addr; return CONN_INVALID; }
 
 /* ── Client ────────────────────────────────────────────────────────────── */
@@ -127,7 +153,7 @@ static void wn_inmem_disconnect( conn_handle_t conn, const char *reason ) {
 			gc->pending_free = qtrue;
 	}
 #if !defined(HEADLESS)
-	memset( &wtcl_array[slot], 0, sizeof( wtcl_array[slot] ) );
+	Q_SecureZeroMemory( &wtcl_array[slot], sizeof( wtcl_array[slot] ) );
 #endif
 }
 
@@ -138,7 +164,10 @@ static qboolean wn_inmem_is_connecting( void ) {
 	 * issues the connect exactly once, mirroring the QUIC fast-path intent. */
 	return qfalse;
 }
-static qboolean wn_inmem_get_error( char *out, int outSize ) { (void)out; (void)outSize; return qfalse; }
+static qboolean wn_inmem_get_error( char *out, int outSize,
+	netConnectErrorKind_t *kind ) {
+	return WN_ClientHasError( out, outSize, kind );
+}
 static void wn_inmem_clear_error( void ) { }
 #endif
 
@@ -197,7 +226,8 @@ static void wn_inmem_send_unreliable( conn_handle_t conn, const byte *data, int 
 		 * Mirror of WN_GameHandleDatagram. */
 		wn_game_conn_t *gc = WN_GameConnByAppHandle( (conn_handle_t)( WN_APP_SVCONN_BASE + slot ) );
 		wn_game_pkt_t *pkt;
-		if ( !gc || !gc->active )
+		if ( !gc || !WN_GameConnIdentityAccepted( gc->pub_handle,
+			gc->allocation_id ) )
 			return;
 		if ( len > WN_GAME_PKT_MAX ) {
 			Com_Log( SEV_DEBUG, LOG_CH(ch_network), "in-mem: cli→srv datagram %d > %d — dropped\n", len, WN_GAME_PKT_MAX );
@@ -238,32 +268,33 @@ static qboolean wn_inmem_recv_unreliable( conn_handle_t *conn_out, byte *buf, in
 }
 
 /* ── Reliable streams ──────────────────────────────────────────────────── */
-static void wn_inmem_send_reliable( conn_handle_t conn, int channel, const byte *data, int len ) {
+static qboolean wn_inmem_send_reliable( conn_handle_t conn, int channel,
+	const byte *data, int len ) {
 	int slot = wn_inmem_client_slot( conn );
 	if ( slot < 0 || len <= 0 )
-		return;
+		return qfalse;
 
 	if ( wn_inmem_is_server_end( conn ) ) {
 		/* server → client reliable. */
 #if !defined(HEADLESS)
 		wn_client_state_t *c = &wtcl_array[slot];
 		if ( !c->initialized )
-			return;
+			return qfalse;
 		if ( channel == CHAN_BOOTSTRAP ) {
 			/* Bypass rel_queue → dedicated large buffer (mirror of the QUIC
 			 * client bootstrap path). The whole message arrives in one call. */
 			if ( c->bootstrap_recv_ready ) {
 				Com_Log( SEV_DEBUG, LOG_CH(ch_network), "in-mem: bootstrap already pending — dropped\n" );
-				return;
+				return qfalse;
 			}
 			if ( len > WN_BOOTSTRAP_MAX ) {
 				Com_Log( SEV_DEBUG, LOG_CH(ch_network), "in-mem: bootstrap %d > %d — dropped\n", len, WN_BOOTSTRAP_MAX );
-				return;
+				return qfalse;
 			}
 			memcpy( c->bootstrap_recv_data, data, (size_t)len );
 			c->bootstrap_recv_len   = len;
 			c->bootstrap_recv_ready = qtrue;
-			return;
+			return qtrue;
 		}
 		/* Non-bootstrap reliable messages land in the fixed wn_rel_msg_t.data
 		 * (MAX_MSGLEN). Bound the length BEFORE the ring push memcpy — the QUIC
@@ -272,30 +303,29 @@ static void wn_inmem_send_reliable( conn_handle_t conn, int channel, const byte 
 		 * tier-3 snapshot = 9 + MAX_MSGLEN > MAX_MSGLEN) would overflow the slot. */
 		if ( len > MAX_MSGLEN ) {
 			Com_Log( SEV_DEBUG, LOG_CH(ch_network), "in-mem: srv→cli reliable %d > %d (channel=%d) — dropped\n", len, MAX_MSGLEN, channel );
-			return;
+			return qfalse;
 		}
-		wn_reliable_queue_push( c->rel_queue, &c->rel_head, &c->rel_tail, channel, data, len );
+		return wn_reliable_queue_push( c->rel_queue, &c->rel_head,
+			&c->rel_tail, channel, data, len );
 #endif
-		return;
+		return qfalse;
 	}
 
 	if ( wn_inmem_is_client_end( conn ) ) {
 		/* client → server reliable. */
 		wn_game_conn_t *gc = WN_GameConnByAppHandle( (conn_handle_t)( WN_APP_SVCONN_BASE + slot ) );
-		if ( !gc || !gc->active )
-			return;
+		if ( !gc || !WN_GameConnIdentityAccepted( gc->pub_handle,
+			gc->allocation_id ) )
+			return qfalse;
 		if ( channel == CHAN_SESSION ) {
 			/* Session-control TLV. The only client→server session TLV is 0x05
 			 * READY (client finished loading the gamestate). Mirror the QUIC
 			 * handshake's pending_ready enqueue so WN_DrainPendingReady →
 			 * ready_callback (SV_OnPlayerReady) transitions the server client
 			 * CS_PRIMED → CS_ACTIVE — without it the host stalls at CA_PRIMED. */
-			if ( len >= 1 && data[0] == 0x05 ) {
-				int gslot = (int)( gc - wn.game_conns );
-				if ( gslot >= 0 && gslot < WN_MAX_CLIENTS )
-					wn.pending_ready[gslot] = qtrue;
-			}
-			return;
+			if ( len == 3 && data[0] == 0x05 && data[1] == 0 && data[2] == 0 )
+				return WN_QueuePendingReady( gc );
+			return qfalse;
 		}
 		/* CHAN_COMMANDS etc. → the server reliable command ring. Bound the
 		 * length BEFORE the ring push memcpy (wn_rel_msg_t.data is MAX_MSGLEN and
@@ -303,11 +333,12 @@ static void wn_inmem_send_reliable( conn_handle_t conn, int channel, const byte 
 		 * over-length reject in wn_send_reliable. */
 		if ( len > MAX_MSGLEN ) {
 			Com_Log( SEV_DEBUG, LOG_CH(ch_network), "in-mem: cli→srv reliable %d > %d (channel=%d) — dropped\n", len, MAX_MSGLEN, channel );
-			return;
+			return qfalse;
 		}
-		wn_reliable_queue_push( gc->rel_queue, &gc->rel_head, &gc->rel_tail, channel, data, len );
-		return;
+		return wn_reliable_queue_push( gc->rel_queue, &gc->rel_head,
+			&gc->rel_tail, channel, data, len );
 	}
+	return qfalse;
 }
 
 static qboolean wn_inmem_recv_reliable( conn_handle_t *conn_out, int *channel_out, byte *buf, int *len_out ) {
@@ -349,6 +380,8 @@ transport_t inmem_transport = {
 	wn_inmem_listen,
 	NULL,              /* accept_callback — admission runs via the global transport's callback */
 	NULL,              /* ready_callback  — unused (synchronous in-process admit) */
+	NULL,              /* closed_callback — in-memory teardown is synchronous */
+	wn_inmem_complete_admission,
 	wn_inmem_drop_client,
 	NULL,              /* drain_usercmds  — server drains via WN_ServerRecvUsercmd (shared ring) */
 	wn_inmem_lookup_by_addr,

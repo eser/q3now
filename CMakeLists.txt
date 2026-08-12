@@ -444,6 +444,43 @@ SET_TESTS_PROPERTIES(server_info_parse_contract PROPERTIES
 	TIMEOUT 30
 )
 WIRED_CONFIGURE_HOST_TEST(server_info_parse_test server_info_parse_contract)
+
+# Typed cvar lexical/range ingress. Compiles the exact dependency-free
+# production seam used by qcommon and qcommon_ded; rejection must be byte-atomic.
+ADD_EXECUTABLE(cvar_value_test
+	tests/cvar_value_test.c
+	code/qcommon/wired/core/cvars/cvar_value.c
+)
+ADD_TEST(NAME cvar_value_contract COMMAND cvar_value_test)
+SET_TESTS_PROPERTIES(cvar_value_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.wired-cvars;failure.security-contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(cvar_value_test cvar_value_contract)
+
+# VFS qpaths must reject exact parent-directory components before any handle
+# allocation or host-filesystem call. Compiles the exact production lexical
+# seam used by both qcommon targets; symlink/junction containment is out of scope.
+ADD_EXECUTABLE(fs_qpath_test
+	tests/fs_qpath_test.c
+	code/qcommon/wired/core/vfs/fs_qpath.c
+)
+ADD_TEST(NAME fs_qpath_contract COMMAND fs_qpath_test)
+SET_TESTS_PROPERTIES(fs_qpath_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.wired-vfs;failure.security-contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(fs_qpath_test fs_qpath_contract)
+
+# Recyclable game-connection handles must be paired with their monotonic
+# allocation identity before a pending CONNECT/READY event can be consumed.
+ADD_EXECUTABLE(wn_identity_test tests/wn_identity_test.c)
+ADD_TEST(NAME wired_connection_identity_contract COMMAND wn_identity_test)
+SET_TESTS_PROPERTIES(wired_connection_identity_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.wired-network;failure.security-contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(wn_identity_test wired_connection_identity_contract)
 ENDIF()
 
 # wired/scene — cinematic-scene definition + Lua-table loader. Pure CPU +

@@ -10,7 +10,9 @@
 # the per-frame render work is identical every run, then collects — from the
 # structured qconsole.jsonl log, parsed as JSON — the total FPS, the
 # SCR_UpdateScreen ("end") time, the GPU per-pass breakdown, the fence/present
-# split, and the draw count.
+# split, stable swapchain identity, and the draw count. Vulkan CPU attribution
+# is consumed only from the authoritative 200-attempt `vk perf v2` aggregate;
+# the older rounded timing lines are informational and are never added together.
 #
 # It reuses the existing timing infrastructure (com_speeds / r_gpuSpeeds /
 # r_vkDebugTiming, the qconsole.jsonl sink, the deterministic-camera recipe from
@@ -41,7 +43,7 @@ BOTS=6
 TAG="head"
 VIEWPOS="1052 1432 90 135"   # interior lit spot in arena1, action in frustum
 SEED="12345"
-HOLD_FRAMES=650             # first 200f bucket is discarded; two clean buckets remain
+HOLD_FRAMES=650             # fresh V2 epoch yields exactly 3x200 contained attempts (+50 tail frames)
 TARGET_FPS="${FPS_TARGET_FPS:-250}"
 RENDER_WIDTH=1280
 RENDER_HEIGHT=720
@@ -396,8 +398,11 @@ fi
         'set r_dlightShadowCount 0' \
         'set r_dlightShadowProfile 0' \
         'set com_speeds 0' \
-        'set com_perfTrace 1' \
         'set r_gpuSpeeds 1' \
+        'set r_vkDebugTiming 0' \
+        'wait 1' \
+        'set com_perfTrace 1' \
+        'set r_vkDebugTiming 1' \
         'echo FPS_GATE_MEASURE_BEGIN' \
         "wait $HOLD_FRAMES" \
         'echo FPS_GATE_MEASURE_END' \
@@ -416,7 +421,10 @@ fi
 #  r_swapInterval 0 : vsync off (present-mode IMMEDIATE).
 #  com_perfTrace 1 : aggregate-only full-population CPU/SCR micro-timing;
 #    com_speeds stays 0 so threshold-dependent JSON writes cannot bias wall FPS.
-#  r_gpuSpeeds 1 / r_vkDebugTiming 1 : 200-frame GPU per-pass + fence/present + draws.
+#  r_gpuSpeeds 1 / r_vkDebugTiming 1 : 200-frame GPU per-pass plus authoritative
+#    200-attempt Vulkan totals, swapchain identity, image histogram, and draws.
+#    The forced 0/wait/1 edge immediately before MEASURE_BEGIN starts a fresh
+#    Vulkan diagnostic epoch; all three emitted buckets are measurement-contained.
 #  log_file_severity DEBUG + `log renderer.timing debug` : route the SEV_DEBUG
 #    renderer.timing lines to the qconsole.jsonl file sink (after renderer init).
 set +e

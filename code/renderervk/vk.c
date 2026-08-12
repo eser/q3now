@@ -106,6 +106,38 @@ static uint32_t vk_diag_pacing_bucket;
 static int vk_diag_drawcalls, vk_diag_pipebinds, vk_diag_msdf_draws, vk_diag_msdf_binds;
 static qboolean vk_diag_msdf_active;
 
+typedef struct {
+	uint64_t generation;
+	int present_mode;
+	int swap_interval;
+	uint32_t requested_images;
+	uint32_t actual_images;
+	uint32_t width;
+	uint32_t height;
+} vk_diag_swapchain_identity_t;
+
+typedef struct {
+	uint32_t count;
+	uint32_t valid;
+	uint64_t acquire_total_us;
+	uint64_t submit_total_us;
+	uint64_t present_call_total_us;
+	uint64_t main_slot_wait_total_us;
+	uint64_t image_hits[ MAX_SWAPCHAIN_IMAGES ];
+	uint64_t draws_total;
+	vk_diag_swapchain_identity_t identity;
+	qboolean identity_set;
+	qboolean identity_stable;
+} vk_diag_v2_t;
+
+static vk_diag_swapchain_identity_t vk_diag_swapchain_identity;
+static vk_diag_v2_t vk_diag_v2;
+static qboolean vk_diag_attempt_active;
+static qboolean vk_diag_attempt_acquired;
+static qboolean vk_diag_attempt_submitted;
+static qboolean vk_diag_v2_enabled_last;
+static uint64_t vk_diag_v2_epoch;
+
 // Lifetime tallies for the per-frame adopted ralCommandBuffer_t
 // and the per-frame rotating ralBindGroup_t wrappers. Tracked so the
 // vk_ral_cmd_diag_dump helper (fires periodically and at shutdown) can confirm
@@ -1262,6 +1294,17 @@ static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice devi
 		vk.swapchain_image_count = MIN( vk.swapchain_image_count, MAX_SWAPCHAIN_IMAGES );
 		VK_CHECK( qvkGetSwapchainImagesKHR( vk.device, vkSc, &vk.swapchain_image_count, vk.swapchain_images ) );
 	}
+
+	/* Diagnostic identity is updated only after a complete, queryable swapchain
+	 * exists.  A generation change inside a 200-attempt bucket makes that bucket
+	 * explicitly unstable instead of silently combining two present contracts. */
+	vk_diag_swapchain_identity.generation++;
+	vk_diag_swapchain_identity.present_mode = (int)present_mode;
+	vk_diag_swapchain_identity.swap_interval = v;
+	vk_diag_swapchain_identity.requested_images = image_count;
+	vk_diag_swapchain_identity.actual_images = vk.swapchain_image_count;
+	vk_diag_swapchain_identity.width = image_extent.width;
+	vk_diag_swapchain_identity.height = image_extent.height;
 
 	// Attach the HDR10 mastering metadata to the freshly-
 	// created swapchain (no-op unless an HDR colorspace was negotiated).
@@ -27623,16 +27666,16 @@ static qboolean vk_find_screenmap_drawsurfs( void )
 // Background fence-wait thread
 // Moves vkWaitForFences + vkResetFences off the main thread so game simulation
 // and command recording are not blocked by Metal's drawable-release latency.
-// With NUM_COMMAND_BUFFERS=3 at 100 FPS (10ms frames), each slot is reused after
-// 30ms. Metal releases the drawable after ~16.67ms. The thread finishes its wait
-// ~13ms before the main thread ever needs the slot — making the main-thread wait
-// effectively 0ms in steady state.
+// With the current two command-buffer slots, the worker can overlap the prior
+// slot's completion with recording of the other slot, keeping the synchronous
+// main-thread portion small without changing the present policy.
 // ---------------------------------------------------------------------------
 #ifndef _WIN32
 typedef struct {
 	int      slot;
 	VkFence  fence;
 	int64_t  queued_us;
+	uint64_t diag_epoch;
 } vk_fence_work_t;
 
 static pthread_t         vk_ft_thread;
@@ -27648,9 +27691,11 @@ static int               vk_ft_tail;
 // attribution in one critical section prevents the 200-frame diagnostic reset
 // from racing an in-flight fence completion.
 static uint64_t          vk_ft_diag_queue_us;
-static uint64_t          vk_ft_diag_fence_us;
+static uint64_t          vk_ft_diag_wait_us;
+static uint64_t          vk_ft_diag_reset_us;
 static uint32_t          vk_ft_diag_work_count;
 static uint32_t          vk_ft_diag_max_queue;
+static uint64_t          vk_ft_diag_epoch;
 
 static void *vk_fence_worker( void *arg )
 {
@@ -27661,8 +27706,10 @@ static void *vk_fence_worker( void *arg )
 	while ( vk_ft_running || vk_ft_head != vk_ft_tail ) {
 		int64_t queued_us;
 		int64_t queue_delay_us;
-		int64_t fence_start_us;
-		int64_t fence_end_us;
+		int64_t wait_start_us;
+		int64_t wait_end_us;
+		int64_t reset_end_us;
+		uint64_t work_diag_epoch;
 
 		while ( vk_ft_head == vk_ft_tail && vk_ft_running )
 			pthread_cond_wait( &vk_ft_cwork, &vk_ft_mutex );
@@ -27673,18 +27720,23 @@ static void *vk_fence_worker( void *arg )
 		slot = vk_ft_queue[ vk_ft_head ].slot;
 		fen  = vk_ft_queue[ vk_ft_head ].fence;
 		queued_us = vk_ft_queue[ vk_ft_head ].queued_us;
+		work_diag_epoch = vk_ft_queue[ vk_ft_head ].diag_epoch;
 		vk_ft_head = ( vk_ft_head + 1 ) % ( NUM_COMMAND_BUFFERS * 2 );
 		queue_delay_us = ri.Microseconds() - queued_us;
 		pthread_mutex_unlock( &vk_ft_mutex );
 
-		fence_start_us = ri.Microseconds();
+		wait_start_us = ri.Microseconds();
 		qvkWaitForFences( vk.device, 1, &fen, VK_FALSE, (uint64_t)10000000000ULL );
+		wait_end_us = ri.Microseconds();
 		qvkResetFences( vk.device, 1, &fen );
-		fence_end_us = ri.Microseconds();
+		reset_end_us = ri.Microseconds();
 		pthread_mutex_lock( &vk_ft_mutex );
-		vk_ft_diag_queue_us += (uint64_t)( queue_delay_us < 0 ? 0 : queue_delay_us );
-		vk_ft_diag_fence_us += (uint64_t)( fence_end_us - fence_start_us );
-		vk_ft_diag_work_count++;
+		if ( work_diag_epoch == vk_ft_diag_epoch ) {
+			vk_ft_diag_queue_us += (uint64_t)( queue_delay_us < 0 ? 0 : queue_delay_us );
+			vk_ft_diag_wait_us += (uint64_t)( wait_end_us - wait_start_us );
+			vk_ft_diag_reset_us += (uint64_t)( reset_end_us - wait_end_us );
+			vk_ft_diag_work_count++;
+		}
 		vk_slot_ready[ slot ] = qtrue;
 		pthread_cond_broadcast( &vk_ft_cready );
 	}
@@ -27696,8 +27748,9 @@ static void vk_fence_thread_start( void )
 {
 	pthread_attr_t attr;
 	vk_ft_head = vk_ft_tail = 0;
-	vk_ft_diag_queue_us = vk_ft_diag_fence_us = 0;
+	vk_ft_diag_queue_us = vk_ft_diag_wait_us = vk_ft_diag_reset_us = 0;
 	vk_ft_diag_work_count = vk_ft_diag_max_queue = 0;
+	vk_ft_diag_epoch = 1;
 	vk_ft_running = qtrue;
 	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ )
 		vk_slot_ready[ i ] = qfalse; // set to qtrue by fence thread after each vkResetFences
@@ -27725,28 +27778,45 @@ static void vk_fence_thread_stop( void )
 static void vk_fence_submit( int slot, VkFence fence )
 {
 	int queue_depth;
+	int cursor;
 
 	pthread_mutex_lock( &vk_ft_mutex );
 	vk_ft_queue[ vk_ft_tail ].slot  = slot;
 	vk_ft_queue[ vk_ft_tail ].fence = fence;
 	vk_ft_queue[ vk_ft_tail ].queued_us = ri.Microseconds();
+	vk_ft_queue[ vk_ft_tail ].diag_epoch = vk_ft_diag_epoch;
 	vk_ft_tail = ( vk_ft_tail + 1 ) % ( NUM_COMMAND_BUFFERS * 2 );
-	queue_depth = ( vk_ft_tail - vk_ft_head + NUM_COMMAND_BUFFERS * 2 ) % ( NUM_COMMAND_BUFFERS * 2 );
+	queue_depth = 0;
+	for ( cursor = vk_ft_head; cursor != vk_ft_tail;
+		cursor = ( cursor + 1 ) % ( NUM_COMMAND_BUFFERS * 2 ) ) {
+		if ( vk_ft_queue[cursor].diag_epoch == vk_ft_diag_epoch )
+			queue_depth++;
+	}
 	if ( (uint32_t)queue_depth > vk_ft_diag_max_queue )
 		vk_ft_diag_max_queue = (uint32_t)queue_depth;
 	pthread_cond_signal( &vk_ft_cwork );
 	pthread_mutex_unlock( &vk_ft_mutex );
 }
 
-static void vk_fence_diag_snapshot( uint64_t *queue_us, uint64_t *fence_us,
-	uint32_t *work_count, uint32_t *max_queue )
+static void vk_fence_diag_snapshot( uint64_t *queue_us, uint64_t *wait_us,
+	uint64_t *reset_us, uint32_t *work_count, uint32_t *max_queue )
 {
 	pthread_mutex_lock( &vk_ft_mutex );
 	*queue_us = vk_ft_diag_queue_us;
-	*fence_us = vk_ft_diag_fence_us;
+	*wait_us = vk_ft_diag_wait_us;
+	*reset_us = vk_ft_diag_reset_us;
 	*work_count = vk_ft_diag_work_count;
 	*max_queue = vk_ft_diag_max_queue;
-	vk_ft_diag_queue_us = vk_ft_diag_fence_us = 0;
+	vk_ft_diag_queue_us = vk_ft_diag_wait_us = vk_ft_diag_reset_us = 0;
+	vk_ft_diag_work_count = vk_ft_diag_max_queue = 0;
+	pthread_mutex_unlock( &vk_ft_mutex );
+}
+
+static void vk_fence_diag_new_epoch( void )
+{
+	pthread_mutex_lock( &vk_ft_mutex );
+	vk_ft_diag_epoch++;
+	vk_ft_diag_queue_us = vk_ft_diag_wait_us = vk_ft_diag_reset_us = 0;
 	vk_ft_diag_work_count = vk_ft_diag_max_queue = 0;
 	pthread_mutex_unlock( &vk_ft_mutex );
 }
@@ -27768,13 +27838,175 @@ static void vk_fence_thread_start( void ) {}
 static void vk_fence_thread_stop( void )  {}
 static void vk_fence_submit( int slot, VkFence fence ) { (void)slot; (void)fence; }
 static void vk_slot_wait( int slot ) { (void)slot; }
-static void vk_fence_diag_snapshot( uint64_t *queue_us, uint64_t *fence_us,
-	uint32_t *work_count, uint32_t *max_queue )
+static void vk_fence_diag_snapshot( uint64_t *queue_us, uint64_t *wait_us,
+	uint64_t *reset_us, uint32_t *work_count, uint32_t *max_queue )
 {
-	*queue_us = *fence_us = 0;
+	*queue_us = *wait_us = *reset_us = 0;
 	*work_count = *max_queue = 0;
 }
+static void vk_fence_diag_new_epoch( void ) {}
 #endif  // !_WIN32
+
+static void vk_diag_drop_epoch( void )
+{
+	/* Advancing the worker epoch also rejects late completions from queued or
+	 * in-flight off/pre-roll work, rather than letting them contaminate the next
+	 * measurement after a simple counter reset. */
+	vk_fence_diag_new_epoch();
+	memset( &vk_diag_v2, 0, sizeof( vk_diag_v2 ) );
+	vk_diag_attempt_active = qfalse;
+	vk_diag_attempt_acquired = qfalse;
+	vk_diag_attempt_submitted = qfalse;
+	vk_diag_pacing_bucket = 0;
+	vk_diag_fence_ms = vk_diag_submit_ms = vk_diag_present_ms = vk_diag_acquire_ms = vk_diag_frames = 0;
+	vk_diag_slot_wait_us = 0;
+	vk_diag_drawcalls = vk_diag_pipebinds = vk_diag_msdf_draws = vk_diag_msdf_binds = 0;
+}
+
+static qboolean vk_diag_identity_equal( const vk_diag_swapchain_identity_t *a,
+	const vk_diag_swapchain_identity_t *b )
+{
+	return a->generation == b->generation &&
+		a->present_mode == b->present_mode &&
+		a->swap_interval == b->swap_interval &&
+		a->requested_images == b->requested_images &&
+		a->actual_images == b->actual_images &&
+		a->width == b->width && a->height == b->height;
+}
+
+static void vk_diag_attempt_finish( qboolean presented )
+{
+	uint32_t i;
+
+	if ( !vk_diag_attempt_active )
+		return;
+	if ( !r_vkDebugTiming || !r_vkDebugTiming->integer ) {
+		vk_diag_drop_epoch();
+		vk_diag_v2_enabled_last = qfalse;
+		return;
+	}
+
+	if ( !vk_diag_identity_equal( &vk_diag_v2.identity, &vk_diag_swapchain_identity ) )
+		vk_diag_v2.identity_stable = qfalse;
+
+	vk_diag_v2.count++;
+	vk_diag_frames++;
+	if ( presented && vk_diag_attempt_acquired && vk_diag_attempt_submitted ) {
+		vk_diag_v2.valid++;
+		if ( vk.cmd->swapchain_image_index < MAX_SWAPCHAIN_IMAGES )
+			vk_diag_v2.image_hits[ vk.cmd->swapchain_image_index ]++;
+	}
+	vk_diag_attempt_active = qfalse;
+
+	if ( vk_diag_v2.count == 200 ) {
+		uint64_t worker_queue_us, worker_wait_us, worker_reset_us;
+		uint32_t worker_count, max_queue;
+		char image_hits[ 256 ];
+		char hit[ 48 ];
+#if defined( _WIN32 )
+		const char *platform_name = "windows";
+		const char *worker_mode = "sync";
+#elif defined( __APPLE__ )
+		const char *platform_name = "macos";
+		const char *worker_mode = "pthread";
+#elif defined( __linux__ )
+		const char *platform_name = "linux";
+		const char *worker_mode = "pthread";
+#else
+		const char *platform_name = "other";
+		const char *worker_mode = "pthread";
+#endif
+
+		vk_fence_diag_snapshot( &worker_queue_us, &worker_wait_us, &worker_reset_us,
+			&worker_count, &max_queue );
+		vk_diag_pacing_bucket++;
+		vk_diag_v2.draws_total = (uint64_t)vk_diag_drawcalls;
+		image_hits[0] = '\0';
+		for ( i = 0; i < vk_diag_v2.identity.actual_images && i < MAX_SWAPCHAIN_IMAGES; i++ ) {
+			size_t used = strlen( image_hits );
+			Com_sprintf( hit, sizeof( hit ), "%s%u:%llu", i ? "," : "", i,
+				(unsigned long long)vk_diag_v2.image_hits[i] );
+			if ( used < sizeof( image_hits ) - 1 )
+				Com_sprintf( image_hits + used, sizeof( image_hits ) - used, "%s", hit );
+		}
+		if ( image_hits[0] == '\0' )
+			Q_strncpyz( image_hits, "none", sizeof( image_hits ) );
+
+		if ( r_vkDebugTiming && r_vkDebugTiming->integer ) {
+			R_LOG( rch_timing, SEV_DEBUG, "vk timing (200f avg): fence=%dms/f  ft_fence=%dms/f  acquire=%dms/f  submit=%dms/f  present=%dms/f  draws=%d/f(msdf=%d)  pipebinds=%d/f(msdf=%d)\n",
+				vk_diag_fence_ms / 200, (int)( ( worker_wait_us + worker_reset_us ) / 1000 / 200 ),
+				vk_diag_acquire_ms / 200, vk_diag_submit_ms / 200, vk_diag_present_ms / 200,
+				vk_diag_drawcalls / 200, vk_diag_msdf_draws / 200,
+				vk_diag_pipebinds / 200, vk_diag_msdf_binds / 200 );
+			R_LOG( rch_timing, SEV_DEBUG, "vk pacing (200f avg): bucket=%u slots=%u main_slot_wait=%lluus/f worker_queue=%lluus/work worker_fence=%lluus/work worker_count=%u max_queue=%u\n",
+				vk_diag_pacing_bucket, (unsigned)NUM_COMMAND_BUFFERS,
+				(unsigned long long)( vk_diag_slot_wait_us / 200 ),
+				(unsigned long long)( worker_count ? worker_queue_us / worker_count : 0 ),
+				(unsigned long long)( worker_count ? ( worker_wait_us + worker_reset_us ) / worker_count : 0 ),
+				worker_count, max_queue );
+			R_LOG( rch_timing, SEV_DEBUG,
+				"vk perf v2: epoch=%llu bucket=%u count=%u valid=%u acquire_total_us=%llu submit_total_us=%llu present_call_total_us=%llu main_slot_wait_total_us=%llu worker_queue_total_us=%llu worker_wait_total_us=%llu worker_reset_total_us=%llu worker_count=%u maxq=%u generation=%llu mode=%s r_swapInterval=%d requested_images=%u actual_images=%u slots=%u extent=%ux%u platform=%s worker_mode=%s draws_total=%llu image_hits=%s identity_stable=%d\n",
+				(unsigned long long)vk_diag_v2_epoch,
+				vk_diag_pacing_bucket, vk_diag_v2.count, vk_diag_v2.valid,
+				(unsigned long long)vk_diag_v2.acquire_total_us,
+				(unsigned long long)vk_diag_v2.submit_total_us,
+				(unsigned long long)vk_diag_v2.present_call_total_us,
+				(unsigned long long)vk_diag_v2.main_slot_wait_total_us,
+				(unsigned long long)worker_queue_us,
+				(unsigned long long)worker_wait_us,
+				(unsigned long long)worker_reset_us,
+				worker_count, max_queue,
+				(unsigned long long)vk_diag_v2.identity.generation,
+				pmode_to_str( (VkPresentModeKHR)vk_diag_v2.identity.present_mode ),
+				vk_diag_v2.identity.swap_interval,
+				vk_diag_v2.identity.requested_images,
+				vk_diag_v2.identity.actual_images,
+				(unsigned)NUM_COMMAND_BUFFERS,
+				vk_diag_v2.identity.width, vk_diag_v2.identity.height,
+				platform_name, worker_mode,
+				(unsigned long long)vk_diag_v2.draws_total,
+				image_hits, vk_diag_v2.identity_stable ? 1 : 0 );
+		}
+
+		memset( &vk_diag_v2, 0, sizeof( vk_diag_v2 ) );
+		vk_diag_fence_ms = vk_diag_submit_ms = vk_diag_present_ms = vk_diag_acquire_ms = vk_diag_frames = 0;
+		vk_diag_slot_wait_us = 0;
+		vk_diag_drawcalls = vk_diag_pipebinds = vk_diag_msdf_draws = vk_diag_msdf_binds = 0;
+	}
+}
+
+static void vk_diag_attempt_begin( void )
+{
+	qboolean enabled = ( r_vkDebugTiming && r_vkDebugTiming->integer ) ? qtrue : qfalse;
+
+	if ( !enabled ) {
+		if ( vk_diag_v2_enabled_last )
+			vk_diag_drop_epoch();
+		vk_diag_v2_enabled_last = qfalse;
+		return;
+	}
+	if ( !vk_diag_v2_enabled_last ) {
+		vk_diag_drop_epoch();
+		vk_diag_v2_epoch++;
+		vk_diag_v2_enabled_last = qtrue;
+	}
+
+	/* Defensive closure: even an unexpected caller that omitted present cannot
+	 * let an attempt disappear from the authoritative bucket. */
+	if ( vk_diag_attempt_active )
+		vk_diag_attempt_finish( qfalse );
+
+	vk_diag_attempt_active = qtrue;
+	vk_diag_attempt_acquired = qfalse;
+	vk_diag_attempt_submitted = qfalse;
+	if ( !vk_diag_v2.identity_set ) {
+		vk_diag_v2.identity = vk_diag_swapchain_identity;
+		vk_diag_v2.identity_set = qtrue;
+		vk_diag_v2.identity_stable = qtrue;
+	} else if ( !vk_diag_identity_equal( &vk_diag_v2.identity, &vk_diag_swapchain_identity ) ) {
+		vk_diag_v2.identity_stable = qfalse;
+	}
+}
 
 #ifndef UINT64_MAX
 #define UINT64_MAX 0xFFFFFFFFFFFFFFFFULL
@@ -28030,6 +28262,7 @@ void vk_begin_frame( void )
 
 	vk_frame_t_start = ri.Microseconds();
 	vk_frame_present_done = qfalse;
+	vk_diag_attempt_begin();
 
 #ifdef USE_UPLOAD_QUEUE
 	vk_flush_staging_buffer( qtrue );
@@ -28055,12 +28288,16 @@ void vk_begin_frame( void )
 			VK_CHECK( qvkResetFences( vk.device, 1, &vk.cmd->rendering_finished_fence ) );
 #else
 			// Background fence thread already waited + reset the fence.
-			// This call is nearly instant: with 3 buffers, the slot was freed
-			// ~13ms before we need it again.
+			// This call is normally short because the worker started waiting as
+			// soon as the prior submit handed off this slot's fence.
 			vk_slot_wait( vk.cmd_index );
 #endif
 		}
-		vk_diag_slot_wait_us += (uint64_t)( ri.Microseconds() - slot_wait_start_us );
+		{
+			uint64_t slot_wait_us = (uint64_t)( ri.Microseconds() - slot_wait_start_us );
+			vk_diag_slot_wait_us += slot_wait_us;
+			vk_diag_v2.main_slot_wait_total_us += slot_wait_us;
+		}
 		{
 			int fence_ms = ri.Milliseconds() - t_diag;
 			vk_diag_fence_ms += fence_ms;
@@ -28068,31 +28305,6 @@ void vk_begin_frame( void )
 				R_LOG( rch_timing, SEV_DEBUG, "fence spike: %dms\n", fence_ms );
 		}
 		vk_frame_t_after_fence = ri.Microseconds();
-		if ( ++vk_diag_frames >= 200 ) {
-			uint64_t worker_queue_us;
-			uint64_t worker_fence_us;
-			uint32_t worker_count;
-			uint32_t max_queue;
-
-			vk_fence_diag_snapshot( &worker_queue_us, &worker_fence_us, &worker_count, &max_queue );
-			vk_diag_pacing_bucket++;
-			if ( r_vkDebugTiming && r_vkDebugTiming->integer ) {
-				R_LOG( rch_timing, SEV_DEBUG, "vk timing (200f avg): fence=%dms/f  ft_fence=%dms/f  acquire=%dms/f  submit=%dms/f  present=%dms/f  draws=%d/f(msdf=%d)  pipebinds=%d/f(msdf=%d)\n",
-					vk_diag_fence_ms / 200, (int)( worker_fence_us / 1000 / 200 ),
-					vk_diag_acquire_ms / 200, vk_diag_submit_ms / 200, vk_diag_present_ms / 200,
-					vk_diag_drawcalls / 200, vk_diag_msdf_draws / 200,
-					vk_diag_pipebinds / 200, vk_diag_msdf_binds / 200 );
-				R_LOG( rch_timing, SEV_DEBUG, "vk pacing (200f avg): bucket=%u slots=%u main_slot_wait=%lluus/f worker_queue=%lluus/work worker_fence=%lluus/work worker_count=%u max_queue=%u\n",
-					vk_diag_pacing_bucket, (unsigned)NUM_COMMAND_BUFFERS,
-					(unsigned long long)( vk_diag_slot_wait_us / 200 ),
-					(unsigned long long)( worker_count ? worker_queue_us / worker_count : 0 ),
-					(unsigned long long)( worker_count ? worker_fence_us / worker_count : 0 ),
-					worker_count, max_queue );
-			}
-			vk_diag_fence_ms = vk_diag_submit_ms = vk_diag_present_ms = vk_diag_acquire_ms = vk_diag_frames = 0;
-			vk_diag_slot_wait_us = 0;
-			vk_diag_drawcalls = vk_diag_pipebinds = vk_diag_msdf_draws = vk_diag_msdf_binds = 0;
-		}
 	}
 
 	// GPU timestamp readback: fence above guarantees this slot's GPU work is done.
@@ -28167,6 +28379,7 @@ void vk_begin_frame( void )
 
 	if ( !ri.CL_IsMinimized() && !vk.cmd->swapchain_image_acquired ) {
 		int t_acquire = ri.Milliseconds();
+		int64_t t_acquire_us = ri.Microseconds();
 		qboolean retry = qfalse;
 		qboolean acquireTimedOut = qfalse;
 _retry:
@@ -28213,6 +28426,8 @@ _retry:
 		if ( !acquireTimedOut )
 			vk.cmd->swapchain_image_acquired = qtrue;
 		vk_diag_acquire_ms += ri.Milliseconds() - t_acquire;
+		vk_diag_v2.acquire_total_us += (uint64_t)( ri.Microseconds() - t_acquire_us );
+		vk_diag_attempt_acquired = vk.cmd->swapchain_image_acquired;
 	}
 	vk_frame_t_after_acquire = ri.Microseconds();
 
@@ -29086,6 +29301,8 @@ void vk_end_frame( void )
 		Ral_Submit( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS, &ralSubmit );
 		vk_diag_submit_ms += ri.Milliseconds() - t_submit;
 		vk_frame_t_after_submit = ri.Microseconds();
+		vk_diag_v2.submit_total_us += (uint64_t)( vk_frame_t_after_submit - vk_frame_t_submit_start );
+		vk_diag_attempt_submitted = qtrue;
 	}
 
 	// per-frame Ral_DestroyCommandBuffer
@@ -29153,11 +29370,13 @@ void vk_present_frame( void )
 	VkResult res;
 
 	if ( ri.CL_IsMinimized() || !vk.cmd->swapchain_image_acquired ) {
+		vk_diag_attempt_finish( qfalse );
 		return;
 	}
 
 	if ( !vk.cmd->waitForFence ) {
 		// nothing has been submitted this frame due to geometry buffer overflow?
+		vk_diag_attempt_finish( qfalse );
 		return;
 	}
 
@@ -29185,11 +29404,13 @@ void vk_present_frame( void )
 		ralRes = Ral_Present( vk_ral_get_backend(), &pi );
 		vk_diag_present_ms += ri.Milliseconds() - t_present;
 		vk_frame_t_after_present = ri.Microseconds();
+		vk_diag_v2.present_call_total_us += (uint64_t)( vk_frame_t_after_present - vk_frame_t_present_start );
 		vk_frame_present_done = qtrue;
 
 		if ( ralRes == ralOutOfDate || ralRes == ralSuboptimal ) {
 			// swapchain re-creation needed
 			vk_restart_swapchain( __func__, ( ralRes == ralSuboptimal ) ? VK_SUBOPTIMAL_KHR : VK_ERROR_OUT_OF_DATE_KHR );
+			vk_diag_attempt_finish( qfalse );
 			return;
 		}
 		if ( ralRes == ralErrorDeviceLost ) {
@@ -29197,6 +29418,7 @@ void vk_present_frame( void )
 		} else if ( ralRes != ralSuccess ) {
 			ri.Terminate( TERM_UNRECOVERABLE, "Ral_Present returned %d", (int)ralRes );
 		}
+		vk_diag_attempt_finish( ralRes == ralSuccess ? qtrue : qfalse );
 	}
 
 	// pickup next command buffer for rendering

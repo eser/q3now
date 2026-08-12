@@ -80,7 +80,7 @@ void     CL_DownloadsComplete_Tick  ( void ) { /* unreached */ }
 // chains; tool path never enters those, so a NULL/no-op is safe.
 struct clientApp_s *CL_ActiveApp    ( void ) { return NULL; }
 struct clientApp_s *CL_FrameApp     ( void ) { return NULL; }
-void **             CL_FrameAppAbort ( void ) { return NULL; }
+jmp_buf *           CL_FrameAppAbort ( void ) { return NULL; }
 int                 CL_ActiveCgameInstance( void ) { return 0; }
 // Frame-abort flag (cl_main.c not linked). common.c / log.c read+set it during
 // the long-operation abort guard; the tool has no frame loop, so the flag is
