@@ -5,6 +5,7 @@
 
 #include "q_shared.h"
 #include "qcommon.h"
+#include "cvar_value.h"
 LOG_DECLARE_CHANNEL( ch_system, "system" );
 
 static cvar_t	*cvar_vars = NULL;
@@ -605,43 +606,6 @@ static void Cvar_Print( const cvar_t *v ) {
 // Typed-validation helpers (used by Cvar_ValidateTyped and Cvar_Set2)
 // -------------------------------------------------------------------------
 
-static qboolean Cvar_ParseBool( const char *value, int *outInteger )
-{
-    if ( !Q_stricmp(value,"1") || !Q_stricmp(value,"true")
-      || !Q_stricmp(value,"yes") || !Q_stricmp(value,"on") ) {
-        *outInteger = 1;
-        return qtrue;
-    }
-    if ( !Q_stricmp(value,"0") || !Q_stricmp(value,"false")
-      || !Q_stricmp(value,"no") || !Q_stricmp(value,"off") ) {
-        *outInteger = 0;
-        return qtrue;
-    }
-    return qfalse;
-}
-
-static qboolean Cvar_ParseInt( const char *value, int *outInteger )
-{
-    char *endptr;
-    long  result;
-    if ( !value || !*value ) return qfalse;
-    result = strtol( value, &endptr, 10 );
-    if ( *endptr != '\0' ) return qfalse; // trailing garbage
-    *outInteger = (int)result;
-    return qtrue;
-}
-
-static qboolean Cvar_ParseFloat( const char *value, float *outFloat )
-{
-    char  *endptr;
-    float  result;
-    if ( !value || !*value ) return qfalse;
-    result = strtof( value, &endptr );
-    if ( *endptr != '\0' ) return qfalse; // trailing garbage
-    *outFloat = result;
-    return qtrue;
-}
-
 // Returns a comma-separated list of valid enum values for error messages.
 // Uses a static buffer — only called on the rejection (cold) path.
 static const char *Cvar_EnumValuesString( const cvar_t *var )
@@ -668,87 +632,99 @@ static const char *Cvar_EnumValuesString( const cvar_t *var )
 // Returns qtrue if value is accepted.
 // On acceptance, *outInteger and *outFloat receive the parsed numeric values.
 // *outNormalized receives a canonical string if the input needs normalization
-// (bool "true"→"1"; enum "3"→"circle"); NULL means no normalization needed.
+// (bool "true"→"1"; enum "LINEAR"→"linear"); NULL means no normalization needed.
 // On rejection, a SEV_WARN is logged and qfalse is returned.
 // CVT_STRING always returns qtrue.
 static qboolean Cvar_ValidateTyped( cvar_t *var, const char *value,
                                      int *outInteger, float *outFloat,
                                      const char **outNormalized )
 {
-    *outNormalized = NULL;
+	wiredCvarValue_t parsed;
+	wiredCvarValue_t diagnostic;
+	wiredCvarValueStatus_t status;
 
     switch ( var->type ) {
     case CVT_STRING:
         *outInteger = atoi( value );
         *outFloat   = (float)atof( value );
+		*outNormalized = NULL;
         return qtrue;
 
     case CVT_BOOL: {
-        if ( !Cvar_ParseBool( value, outInteger ) ) {
+		status = wired_cvar_value_bool( value, &parsed );
+		if ( status != WIRED_CVAR_VALUE_OK ) {
             Com_Log( SEV_WARN, LOG_CH(ch_system),
                 "%s: invalid boolean '%s' (valid: 0, 1, true, false, yes, no, on, off)\n",
                 var->name, value );
             return qfalse;
         }
-        *outFloat      = (float)*outInteger;
-        *outNormalized = *outInteger ? "1" : "0";
-        return qtrue;
+		break;
     }
 
     case CVT_INT: {
-        if ( !Cvar_ParseInt( value, outInteger ) ) {
+		status = wired_cvar_value_int( value, (int)var->typeMin, (int)var->typeMax, &parsed );
+		if ( status == WIRED_CVAR_VALUE_INVALID ) {
             Com_Log( SEV_WARN, LOG_CH(ch_system),
                 "%s: '%s' is not a valid integer\n", var->name, value );
             return qfalse;
         }
-        if ( var->typeMin != var->typeMax ) { // min==max==0 means no range check
-            if ( *outInteger < (int)var->typeMin || *outInteger > (int)var->typeMax ) {
-                Com_Log( SEV_WARN, LOG_CH(ch_system),
-                    "%s: value %d out of range [%d, %d]\n",
-                    var->name, *outInteger, (int)var->typeMin, (int)var->typeMax );
-                return qfalse;
-            }
-        }
-        *outFloat = (float)*outInteger;
-        return qtrue;
+		if ( status == WIRED_CVAR_VALUE_OUT_OF_RANGE ) {
+			if ( wired_cvar_value_int( value, 0, 0, &diagnostic ) != WIRED_CVAR_VALUE_OK ) {
+				return qfalse;
+			}
+			Com_Log( SEV_WARN, LOG_CH(ch_system),
+				"%s: value %d out of range [%d, %d]\n",
+				var->name, diagnostic.integer, (int)var->typeMin, (int)var->typeMax );
+			return qfalse;
+		}
+		break;
     }
 
     case CVT_FLOAT: {
-        if ( !Cvar_ParseFloat( value, outFloat ) ) {
+		status = wired_cvar_value_float( value, var->typeMin, var->typeMax, &parsed );
+		if ( status == WIRED_CVAR_VALUE_INVALID ) {
             Com_Log( SEV_WARN, LOG_CH(ch_system),
                 "%s: '%s' is not a valid number\n", var->name, value );
             return qfalse;
         }
-        if ( var->typeMin != var->typeMax ) {
-            if ( *outFloat < var->typeMin || *outFloat > var->typeMax ) {
-                Com_Log( SEV_WARN, LOG_CH(ch_system),
-                    "%s: value %g out of range [%g, %g]\n",
-                    var->name, *outFloat, var->typeMin, var->typeMax );
-                return qfalse;
-            }
-        }
-        *outInteger = (int)*outFloat;
-        return qtrue;
+		if ( status == WIRED_CVAR_VALUE_OUT_OF_RANGE ) {
+			if ( wired_cvar_value_float( value, 0.0f, 0.0f, &diagnostic ) != WIRED_CVAR_VALUE_OK ) {
+				return qfalse;
+			}
+			Com_Log( SEV_WARN, LOG_CH(ch_system),
+				"%s: value %g out of range [%g, %g]\n",
+				var->name, diagnostic.number, var->typeMin, var->typeMax );
+			return qfalse;
+		}
+		break;
     }
 
     case CVT_ENUM: {
-        int idx;
-        for ( idx = 0; idx < var->enumCount; idx++ ) {
-            if ( Q_stricmp( value, var->enumValues[idx] ) == 0 ) {
-                *outInteger    = idx;
-                *outFloat      = (float)idx;
-                *outNormalized = var->enumValues[idx];
-                return qtrue;
-            }
-        }
+		if ( !var->enumValues || var->enumCount <= 0 ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_system),
+				"%s: invalid enum descriptor\n", var->name );
+			return qfalse;
+		}
+		status = wired_cvar_value_enum( value, (const char *const *)var->enumValues,
+			(size_t)var->enumCount, &parsed );
+		if ( status == WIRED_CVAR_VALUE_OK ) {
+			break;
+		}
         Com_Log( SEV_WARN, LOG_CH(ch_system),
             "%s: '%s' is not a valid option (valid: %s)\n",
             var->name, value, Cvar_EnumValuesString( var ) );
         return qfalse;
     }
+	default:
+		Com_Log( SEV_WARN, LOG_CH(ch_system), "%s: unknown cvar type %d\n",
+			var->name, (int)var->type );
+		return qfalse;
     } // switch
 
-    return qfalse;
+	*outInteger = parsed.integer;
+	*outFloat = parsed.number;
+	*outNormalized = parsed.normalized;
+	return qtrue;
 }
 
 
@@ -818,7 +794,7 @@ cvar_t *Cvar_Set2( const char *var_name, const char *value, qboolean force ) {
 
 	// Typed validation: reject invalid values before ANY state change.
 	// CVT_STRING cvars and legacy (Cvar_Get) cvars skip this entirely.
-	// Normalization (bool "true"→"1"; enum index→canonical name) is applied
+	// Normalization (bool "true"→"1"; enum "LINEAR"→"linear") is applied
 	// here so all downstream paths (latch storage, string copy) use the
 	// canonical form.
 	if ( var->type != CVT_STRING ) {

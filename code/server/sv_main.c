@@ -153,7 +153,7 @@ void SV_AddServerCommand( client_t *client, const char *cmd ) {
 	// we check == instead of >= so a broadcast print added by SV_DropClient()
 	// doesn't cause a recursive drop client
 	if ( client->reliableSequence - client->reliableAcknowledge == MAX_RELIABLE_COMMANDS + 1 ) {
-		if ( client->quic_conn != CONN_INVALID ) {
+		if ( SV_ClientTransportAccepted( client ) ) {
 			/* QUIC: reliable delivery is guaranteed at the transport layer.
 			 * The netchan overflow guard does not apply — the client acks via
 			 * serverCmd_ack in each usercmd datagram.  If the queue is full it

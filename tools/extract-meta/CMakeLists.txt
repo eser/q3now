@@ -89,6 +89,7 @@ set(QCOMMON_TOOL_SRCS
 	# which are already excluded; tool stubs WiredCore_Init/Shutdown +
 	# WiredScript_PostInit instead)
 	${CMAKE_SOURCE_DIR}/code/qcommon/wired/core/cvars/cvar.c
+	${CMAKE_SOURCE_DIR}/code/qcommon/wired/core/cvars/cvar_value.c
 	${CMAKE_SOURCE_DIR}/code/qcommon/wired/core/logging/log.c
 	${CMAKE_SOURCE_DIR}/code/qcommon/wired/core/logging/log_buffer.c
 	${CMAKE_SOURCE_DIR}/code/qcommon/wired/core/logging/log_channels.c
@@ -98,6 +99,7 @@ set(QCOMMON_TOOL_SRCS
 	${CMAKE_SOURCE_DIR}/code/qcommon/wired/core/shell/keys.c
 	${CMAKE_SOURCE_DIR}/code/qcommon/wired/core/time/time.c
 	${CMAKE_SOURCE_DIR}/code/qcommon/wired/core/vfs/files.c
+	${CMAKE_SOURCE_DIR}/code/qcommon/wired/core/vfs/fs_qpath.c
 
 	# Sound codec dispatcher (split TU). Provides S_CodecResolves for
 	# offline asset auditing without dragging the codec implementations

@@ -42,7 +42,7 @@ wn_connection_t *WN_AllocConnection( picoquic_cnx_t *cnx, netadr_t *from )
 	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
 		if ( !wn.connections[i].active ) {
 			wn_connection_t *conn = &wn.connections[i];
-			memset( conn, 0, sizeof( *conn ) );
+			Q_SecureZeroMemory( conn, sizeof( *conn ) );
 			conn->cnx = cnx;
 			conn->active = qtrue;
 			conn->connect_time = Sys_Microseconds();
@@ -72,13 +72,13 @@ void WN_FreeConnection( wn_connection_t *conn )
 	if ( !conn || !conn->active )
 		return;
 
-	conn->active = qfalse;
-
 	if ( conn->game_conn )
 		WN_GameFreeConn( conn->game_conn );
 
-	conn->cnx = NULL;
 	wn.num_connections--;
+	/* The session accumulator can contain a fragmented CONNECT userinfo.  Wipe
+	 * the entire slot before returning it to the pool. */
+	Q_SecureZeroMemory( conn, sizeof( *conn ) );
 }
 
 
@@ -122,17 +122,17 @@ Otherwise route to the game handshake handler (TLV CONNECT / READY).
 ====================
 */
 void WN_HandleCapabilityNegotiation( wn_connection_t *conn, uint64_t stream_id,
-                                      const byte *data, int len )
+                                      const byte *data, int len, qboolean fin )
 {
 	/* FIN-only callback: nothing to process. */
-	if ( len <= 0 )
+	if ( len <= 0 && !fin )
 		return;
 
 	if ( !conn || !conn->active )
 		return;
 
 	/* Reject legacy JSON clients — binary TLV is the only accepted protocol. */
-	if ( (uint8_t)data[0] == '{' ) {
+	if ( len > 0 && conn->session_recv_len == 0 && (uint8_t)data[0] == '{' ) {
 		static const char err[] = "{\"error\":\"Legacy JSON protocol no longer supported\"}";
 		picoquic_add_to_stream( conn->cnx, stream_id,
 			(const uint8_t *)err, sizeof(err) - 1, 0 );
@@ -140,5 +140,5 @@ void WN_HandleCapabilityNegotiation( wn_connection_t *conn, uint64_t stream_id,
 		return;
 	}
 
-	WN_GameHandleHandshake( conn, stream_id, data, len );
+	WN_GameHandleHandshake( conn, stream_id, data, len, fin );
 }

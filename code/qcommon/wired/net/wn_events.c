@@ -95,8 +95,9 @@ void WN_EventRingPush( const byte *data, int len )
 	 * Route by pub_handle so both backends are covered:
 	 *   QUIC conn   — conn!=NULL, cnx live, handshake ACCEPTED; pub_handle==i+1
 	 *                 → transport_for_handle(i+1)==quic_transport (byte-identical).
-	 *   in-mem conn — conn==NULL (WN_GameAllocConnApp), handshake stays PENDING
-	 *                 (no TLS round-trip); pub_handle==WN_APP_SVCONN_BASE+slot
+	 *   in-mem conn — conn==NULL (WN_GameAllocConnApp); VM admission still
+	 *                 advances its transport state to ACCEPTED before routing.
+	 *                 pub_handle==WN_APP_SVCONN_BASE+slot
 	 *                 → transport_for_handle()==inmem_transport. Include it so the
 	 *                 in-mem host is not excluded from the observer/scoreboard feed
 	 *                 (CHAN_EVENTS is a side-channel — /status.json + recording +
@@ -105,12 +106,8 @@ void WN_EventRingPush( const byte *data, int len )
 		int i;
 		for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
 			wn_game_conn_t *gc = &wn.game_conns[i];
-			qboolean quicReady = ( gc->conn && gc->conn->cnx &&
-			                       gc->hs_state == WN_GAME_HS_ACCEPTED );
-			qboolean inmemReady = ( gc->conn == NULL &&
-			                        gc->pub_handle >= WN_APP_SVCONN_BASE &&
-			                        gc->pub_handle <  WN_APP_SVCONN_BASE + WN_APP_SVCONN_COUNT );
-			if ( gc->active && ( quicReady || inmemReady ) ) {
+			if ( WN_GameConnIdentityAccepted( gc->pub_handle,
+				gc->allocation_id ) ) {
 				transport_for_handle( gc->pub_handle )->send_reliable(
 					gc->pub_handle, CHAN_EVENTS, (const byte *)data, len );
 			}

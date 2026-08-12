@@ -25,6 +25,7 @@ Wire protocols:
 ===========================================================================
 */
 #include "wn_local.h"
+#include "wn_identity.h"
 #include "../../net_transport.h"
 #include "../../vm_local.h"     /* MAX_LOCAL_CGAME_VMS — static_assert WN_MAX_LOCAL_CLIENTS matches */
 
@@ -474,7 +475,8 @@ static wn_game_conn_t *WN_GameFindConnForAddr( const netadr_t *addr )
 	int i;
 	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
 		wn_game_conn_t *gc = &wn.game_conns[i];
-		if ( !gc->active || !gc->conn )
+		if ( !gc->conn || !WN_GameConnIdentityAccepted( gc->pub_handle,
+			gc->allocation_id ) )
 			continue;
 		{
 			const netadr_t *a = &gc->conn->addr;
@@ -540,6 +542,76 @@ static qboolean TLV_Read( const byte *data, int len,
 // Game conn lifecycle
 // ═══════════════════════════════════════════════════════════════════
 
+static uint64_t WN_NextGameConnAllocationId( void ) {
+	wn.next_game_conn_allocation_id++;
+	if ( wn.next_game_conn_allocation_id == 0 )
+		wn.next_game_conn_allocation_id++;
+	return wn.next_game_conn_allocation_id;
+}
+
+wn_game_conn_t *WN_GameConnByIdentity( conn_handle_t conn,
+	uint64_t allocation_id ) {
+	int i;
+	if ( allocation_id == 0 ) return NULL;
+	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
+		wn_game_conn_t *gc = &wn.game_conns[i];
+		if ( WN_AllocationIdentityMatches( gc->active,
+			(uint64_t)gc->pub_handle, gc->allocation_id,
+			(uint64_t)conn, allocation_id ) )
+			return gc;
+	}
+	return NULL;
+}
+
+qboolean WN_GameConnIdentityAccepted( conn_handle_t conn,
+	uint64_t allocation_id ) {
+	wn_game_conn_t *gc = WN_GameConnByIdentity( conn, allocation_id );
+	qboolean accepted;
+	if ( !gc ) return qfalse;
+	accepted = gc->hs_state == WN_GAME_HS_ACCEPTED
+		&& ( !gc->conn || gc->conn->admission_terminal == 1 );
+	return WN_AcceptedAllocationIdentityMatches( gc->active, accepted,
+		(uint64_t)gc->pub_handle, gc->allocation_id,
+		(uint64_t)conn, allocation_id ) ? qtrue : qfalse;
+}
+
+static qboolean WN_QueuePendingConnect( wn_game_conn_t *gc,
+	const char *userinfo ) {
+	int i;
+	if ( !gc || !gc->active || gc->allocation_id == 0 ) return qfalse;
+	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
+		wn_pending_connect_t *pending = &wn.pending_connects[i];
+		if ( pending->pending ) continue;
+		Q_SecureZeroMemory( pending, sizeof( *pending ) );
+		pending->conn = gc->pub_handle;
+		pending->allocation_id = gc->allocation_id;
+		Q_strncpyz( pending->userinfo, userinfo ? userinfo : "",
+			sizeof( pending->userinfo ) );
+		pending->pending = qtrue;
+		return qtrue;
+	}
+	return qfalse;
+}
+
+qboolean WN_QueuePendingReady( wn_game_conn_t *gc ) {
+	wn_pending_ready_t *pending;
+	int slot;
+	if ( !gc || !gc->active || gc->allocation_id == 0 ) return qfalse;
+	slot = (int)( gc - wn.game_conns );
+	if ( slot < 0 || slot >= WN_MAX_CLIENTS ) return qfalse;
+	pending = &wn.pending_ready[slot];
+	if ( pending->pending ) {
+		if ( pending->conn == gc->pub_handle
+		     && pending->allocation_id == gc->allocation_id )
+			return qtrue;
+		Q_SecureZeroMemory( pending, sizeof( *pending ) );
+	}
+	pending->conn = gc->pub_handle;
+	pending->allocation_id = gc->allocation_id;
+	pending->pending = qtrue;
+	return qtrue;
+}
+
 wn_game_conn_t *WN_GameAllocConn( wn_connection_t *conn )
 {
 	int i;
@@ -556,8 +628,9 @@ wn_game_conn_t *WN_GameAllocConn( wn_connection_t *conn )
 	for ( i = 0; i < max_clients; i++ ) {
 		wn_game_conn_t *gc = &wn.game_conns[i];
 		if ( !gc->active ) {
-			memset( gc, 0, sizeof( wn_game_conn_t ) );
+			Q_SecureZeroMemory( gc, sizeof( *gc ) );
 			gc->active   = qtrue;
+			gc->allocation_id = WN_NextGameConnAllocationId();
 			gc->conn     = conn;
 			gc->hs_state = WN_GAME_HS_NONE;
 			/* QUIC publishes slot+1 (1..WN_MAX_CLIENTS) — byte-identical to the
@@ -579,12 +652,30 @@ wn_game_conn_t *WN_GameAllocConn( wn_connection_t *conn )
 
 void WN_GameFreeConn( wn_game_conn_t *gc )
 {
+	conn_handle_t handle;
+	uint64_t allocation_id;
+	int i;
 	if ( !gc || !gc->active )
 		return;
+	handle = gc->pub_handle;
+	allocation_id = gc->allocation_id;
 	if ( gc->conn )
 		gc->conn->game_conn = NULL;
+	/* A queued main-thread event must never survive reuse of this slot/handle. */
+	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
+		if ( wn.pending_connects[i].pending
+		     && wn.pending_connects[i].conn == handle
+		     && wn.pending_connects[i].allocation_id == allocation_id )
+			Q_SecureZeroMemory( &wn.pending_connects[i],
+				sizeof( wn.pending_connects[i] ) );
+		if ( wn.pending_ready[i].pending
+		     && wn.pending_ready[i].conn == handle
+		     && wn.pending_ready[i].allocation_id == allocation_id )
+			Q_SecureZeroMemory( &wn.pending_ready[i],
+				sizeof( wn.pending_ready[i] ) );
+	}
 	Com_Log( SEV_DEBUG, LOG_CH(ch_network), "WiredNet game: freed conn slot %td\n", gc - wn.game_conns );
-	memset( gc, 0, sizeof( wn_game_conn_t ) );
+	Q_SecureZeroMemory( gc, sizeof( *gc ) );
 	if ( wn.num_game_conns > 0 )
 		wn.num_game_conns--;
 }
@@ -614,8 +705,9 @@ wn_game_conn_t *WN_GameAllocConnApp( int app_slot )
 	for ( i = 0; i < max_clients; i++ ) {
 		wn_game_conn_t *gc = &wn.game_conns[i];
 		if ( !gc->active ) {
-			memset( gc, 0, sizeof( wn_game_conn_t ) );
+			Q_SecureZeroMemory( gc, sizeof( *gc ) );
 			gc->active     = qtrue;
+			gc->allocation_id = WN_NextGameConnAllocationId();
 			gc->conn       = NULL;   /* in-process: no owning picoquic connection */
 			gc->hs_state   = WN_GAME_HS_PENDING;
 			gc->pub_handle = (conn_handle_t)( WN_APP_SVCONN_BASE + app_slot );
@@ -668,7 +760,6 @@ conn_handle_t WN_ConnectApp( int app_slot, const char *userinfo )
 {
 	wn_game_conn_t *gc;
 	conn_handle_t   handle;
-	int             i;
 
 	if ( app_slot < 0 || app_slot >= WN_MAX_LOCAL_CLIENTS ) {
 		COM_WARN( LOG_CH(ch_network), "WN_ConnectApp: app_slot %d out of range\n", app_slot );
@@ -683,10 +774,9 @@ conn_handle_t WN_ConnectApp( int app_slot, const char *userinfo )
 		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "WN_ConnectApp: app %d already connected\n", app_slot );
 		return (conn_handle_t)( WN_APP_CONN_BASE + app_slot );
 	}
-	memset( &wtcl_array[app_slot], 0, sizeof( wtcl_array[app_slot] ) );
+	Q_SecureZeroMemory( &wtcl_array[app_slot], sizeof( wtcl_array[app_slot] ) );
 	wtcl_array[app_slot].connect_failed  = qfalse;
 	wtcl_array[app_slot].connect_error[0] = '\0';
-	Q_strncpyz( wtcl_array[app_slot].userinfo, userinfo ? userinfo : "", sizeof( wtcl_array[app_slot].userinfo ) );
 	wtcl_array[app_slot].quic              = NULL;   /* in-process: no picoquic */
 	wtcl_array[app_slot].cnx               = NULL;
 	wtcl_array[app_slot].server_addr.type  = NA_LOOPBACK;
@@ -700,7 +790,7 @@ conn_handle_t WN_ConnectApp( int app_slot, const char *userinfo )
 	gc = WN_GameAllocConnApp( app_slot );
 	if ( !gc ) {
 #if !defined(HEADLESS)
-		memset( &wtcl_array[app_slot], 0, sizeof( wtcl_array[app_slot] ) );
+		Q_SecureZeroMemory( &wtcl_array[app_slot], sizeof( wtcl_array[app_slot] ) );
 #endif
 		return CONN_INVALID;
 	}
@@ -710,20 +800,11 @@ conn_handle_t WN_ConnectApp( int app_slot, const char *userinfo )
 	/* Enqueue pending connect for main-thread consumption (same queue + drain
 	 * as QUIC; SV_OnPlayerConnect is transport-agnostic). The server-end handle
 	 * is what the server admits + stores. */
-	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
-		if ( !wn.pending_connects[i].pending ) {
-			wn.pending_connects[i].conn = handle;
-			Q_strncpyz( wn.pending_connects[i].userinfo, userinfo ? userinfo : "",
-				sizeof( wn.pending_connects[i].userinfo ) );
-			wn.pending_connects[i].pending = qtrue;
-			break;
-		}
-	}
-	if ( i == WN_MAX_CLIENTS ) {
+	if ( !WN_QueuePendingConnect( gc, userinfo ) ) {
 		COM_WARN( LOG_CH(ch_network), "WN_ConnectApp: pending_connects overflow — app %d dropped\n", app_slot );
 		WN_GameFreeConn( gc );
 #if !defined(HEADLESS)
-		memset( &wtcl_array[app_slot], 0, sizeof( wtcl_array[app_slot] ) );
+		Q_SecureZeroMemory( &wtcl_array[app_slot], sizeof( wtcl_array[app_slot] ) );
 #endif
 		return CONN_INVALID;
 	}
@@ -752,7 +833,8 @@ void WN_GameHandleDatagram( wn_connection_t *conn, const byte *data, int len )
 		return;
 	}
 	gc = conn ? conn->game_conn : NULL;
-	if ( !gc || !gc->active ) {
+	if ( !gc || gc->conn != conn
+	     || !WN_GameConnIdentityAccepted( gc->pub_handle, gc->allocation_id ) ) {
 		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC game: datagram from non-game connection — dropped\n" );
 		return;
 	}
@@ -776,14 +858,81 @@ void WN_GameHandleDatagram( wn_connection_t *conn, const byte *data, int len )
 // Handshake — Stream 0x00 (binary TLV only)
 // ═══════════════════════════════════════════════════════════════════
 
-void WN_GameHandleHandshake( wn_connection_t *conn, uint64_t stream_id,
-                              const byte *data, int len )
+static void WN_GameSendAdmission( wn_connection_t *conn, wn_game_conn_t *gc,
+	qboolean accepted, netRefuseClass_t refusalClass ) {
+	byte payload[4];
+	byte tlv[16];
+	int tlvLen;
+	int sendResult = -1;
+
+	if ( !conn || !conn->cnx ) return;
+	if ( conn->admission_terminal != 0 ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_network),
+			"QUIC game: duplicate admission send terminal_close=1\n" );
+		conn->session_failed = qtrue;
+		picoquic_close( conn->cnx, 1 );
+		return;
+	}
+	if ( accepted ) {
+		int slot;
+		if ( !gc || gc->hs_state != WN_GAME_HS_PENDING ) return;
+		slot = (int)( gc - wn.game_conns );
+		payload[0] = (byte)slot;
+		payload[1] = 20;
+		payload[2] = 0;
+		payload[3] = 0;
+		tlvLen = TLV_Write( tlv, (int)sizeof( tlv ), 0x02, payload, 4 );
+	} else {
+		payload[0] = (byte)refusalClass;
+		tlvLen = TLV_Write( tlv, (int)sizeof( tlv ), 0x03, payload, 1 );
+	}
+	if ( tlvLen > 0 ) {
+		sendResult = picoquic_add_to_stream( conn->cnx, WIREDNET_SESSION_STREAM_ID,
+			tlv, (size_t)tlvLen, 0 );
+	}
+	Q_SecureZeroMemory( payload, sizeof( payload ) );
+	Q_SecureZeroMemory( tlv, sizeof( tlv ) );
+	if ( tlvLen <= 0 || sendResult != 0 ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_network),
+			"QUIC game: admission send failed result=%d terminal_close=1\n",
+			sendResult );
+		conn->session_failed = qtrue;
+		picoquic_close( conn->cnx, 1 );
+		if ( !accepted && gc )
+			WN_GameFreeConn( gc );
+		return;
+	}
+	if ( gc )
+		gc->hs_state = accepted ? WN_GAME_HS_ACCEPTED : WN_GAME_HS_REFUSED;
+	conn->admission_terminal = accepted ? 1 : 2;
+	Com_Log( SEV_DEBUG, LOG_CH(ch_network),
+		"QUIC game: admission result=%s class=%d\n",
+		accepted ? "accepted" : "refused", accepted ? 0 : (int)refusalClass );
+	/* WN_GameSendAdmission can run inside picoquic's receive callback. Do not
+	 * re-enter the packet pump here: the normal post-receive/server-frame flush
+	 * sends REFUSE, then WN_FlushOutbound retires the recyclable game slot. */
+	if ( !accepted ) conn->refusal_teardown_pending = qtrue;
+}
+
+static void WN_GameSessionFail( wn_connection_t *conn, int failureClass ) {
+	if ( !conn || conn->session_failed ) return;
+	conn->session_failed = qtrue;
+	Q_SecureZeroMemory( conn->session_recv_data,
+		sizeof( conn->session_recv_data ) );
+	conn->session_recv_len = 0;
+	Com_Log( SEV_WARN, LOG_CH(ch_network),
+		"QUIC game: malformed session stream class=%d terminal_close=1\n",
+		failureClass );
+	if ( conn->cnx ) picoquic_close( conn->cnx, 1 );
+}
+
+static void WN_GameHandleHandshakeMessage( wn_connection_t *conn,
+	uint64_t stream_id, const byte *data, int len )
 {
 	uint8_t         tlv_type;
 	const byte     *payload;
 	uint16_t        plen;
 	wn_game_conn_t *gc;
-	int             i;
 
 	if ( !conn || !conn->active )
 		return;
@@ -796,43 +945,49 @@ void WN_GameHandleHandshake( wn_connection_t *conn, uint64_t stream_id,
 
 	if ( tlv_type == 0x05 ) { /* READY: client has processed gamestate, ready to enter world */
 		wn_game_conn_t *gc = conn->game_conn;
-		if ( gc && gc->active ) {
-			int slot = (int)( gc - wn.game_conns );
-			if ( slot >= 0 && slot < WN_MAX_CLIENTS ) {
-				wn.pending_ready[slot] = qtrue;
-				Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC game: TLV READY from slot %d — enqueued\n", slot );
-			}
+		if ( plen != 0 || !gc || !gc->active
+		     || gc->hs_state != WN_GAME_HS_ACCEPTED
+		     || conn->admission_terminal != 1 ) {
+			WN_GameSessionFail( conn, 5 );
+			return;
 		}
+		if ( !WN_QueuePendingReady( gc ) ) {
+			WN_GameSessionFail( conn, 10 );
+			return;
+		}
+		Com_Log( SEV_DEBUG, LOG_CH(ch_network),
+			"QUIC game: TLV READY allocation=%llu — enqueued\n",
+			(unsigned long long)gc->allocation_id );
 		return;
 	}
 
 	if ( tlv_type != 0x01 ) {
-		/* Non-CONNECT TLV on session stream — future message types, ignore for now */
-		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC game: TLV type 0x%02X on session stream (not CONNECT) — ignored\n",
-			(unsigned)tlv_type );
+		WN_GameSessionFail( conn, 1 );
+		return;
+	}
+	if ( conn->admission_terminal != 0 ) {
+		WN_GameSessionFail( conn, 9 );
 		return;
 	}
 
 	/* TLV 0x01 CONNECT: version:u16le, userinfo_len:u16le, userinfo:bytes */
 	if ( plen < 4 ) {
-		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC game: TLV CONNECT payload too short (%u bytes)\n", (unsigned)plen );
+		WN_GameSessionFail( conn, 2 );
 		return;
 	}
 	{
 		char     userinfo[MAX_INFO_STRING];
 		uint16_t userinfo_len;
-		byte     accept_payload[8];
-		byte     accept_tlv[16];
-		int      tlv_len;
 		int      slot;
-		conn_handle_t conn_handle;
 
 		/* version = payload[0..1] (currently ignored — validated later) */
 		userinfo_len = (uint16_t)( payload[2] | ( (uint16_t)payload[3] << 8 ) );
-		if ( userinfo_len > plen - 4 )
-			userinfo_len = (uint16_t)( plen - 4 );
-		if ( userinfo_len >= (uint16_t)sizeof(userinfo) )
-			userinfo_len = (uint16_t)( sizeof(userinfo) - 1 );
+		if ( payload[0] != 0x00 || payload[1] != 0x01
+		     || userinfo_len != plen - 4
+		     || userinfo_len >= (uint16_t)sizeof( userinfo ) ) {
+			WN_GameSessionFail( conn, 3 );
+			return;
+		}
 		memcpy( userinfo, payload + 4, userinfo_len );
 		userinfo[userinfo_len] = '\0';
 
@@ -840,64 +995,69 @@ void WN_GameHandleHandshake( wn_connection_t *conn, uint64_t stream_id,
 		if ( !gc ) {
 			gc = WN_GameAllocConn( conn );
 			if ( !gc ) {
-				const char *reason = "server full";
-				uint16_t    rlen   = (uint16_t)strlen( reason );
-				byte        refuse_pl[MAX_INFO_STRING + 2];
-				byte        refuse_tlv[MAX_INFO_STRING + 8];
-				refuse_pl[0] = (byte)( rlen & 0xFF );
-				refuse_pl[1] = (byte)( (rlen >> 8) & 0xFF );
-				// NOLINTNEXTLINE(bugprone-not-null-terminated-result) — TLV payload; raw bytes only, no NUL terminator wanted
-				memcpy( refuse_pl + 2, reason, rlen );
-				tlv_len = TLV_Write( refuse_tlv, (int)sizeof(refuse_tlv),
-					0x03, refuse_pl, (uint16_t)( rlen + 2 ) );
-				if ( tlv_len > 0 )
-					picoquic_add_to_stream( conn->cnx, WIREDNET_SESSION_STREAM_ID,
-						refuse_tlv, (size_t)tlv_len, 0 );
+				WN_GameSendAdmission( conn, NULL, qfalse, NET_REFUSE_SERVER_FULL );
+				Q_SecureZeroMemory( userinfo, sizeof( userinfo ) );
 				return;
 			}
+		}
+		if ( gc->hs_state != WN_GAME_HS_NONE ) {
+			Q_SecureZeroMemory( userinfo, sizeof( userinfo ) );
+			WN_GameSessionFail( conn, 4 );
+			return;
 		}
 
 		gc->handshake_stream_id = WIREDNET_SESSION_STREAM_ID;
 		gc->hs_state            = WN_GAME_HS_PENDING;
 
 		slot        = (int)( gc - wn.game_conns );
-		// NOLINTNEXTLINE(bugprone-misplaced-widening-cast) — small slot index widened to conn_handle_t; no precision loss
-		conn_handle = (conn_handle_t)( slot + 1 );
-
-		/* Enqueue pending connect for main-thread consumption */
-		for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
-			if ( !wn.pending_connects[i].pending ) {
-				wn.pending_connects[i].conn    = conn_handle;
-				Q_strncpyz( wn.pending_connects[i].userinfo, userinfo,
-					sizeof( wn.pending_connects[i].userinfo ) );
-				/* Write fields before setting pending flag (store barrier) */
-				wn.pending_connects[i].pending = qtrue;
-				break;
-			}
-		}
-		if ( i == WN_MAX_CLIENTS ) {
+		/* Enqueue pending connect with the allocation identity. */
+		if ( !WN_QueuePendingConnect( gc, userinfo ) ) {
 			COM_WARN( LOG_CH(ch_network),
 				"QUIC game: pending_connects overflow — TLV CONNECT from %s dropped\n",
 				NET_AdrToStringwPort( &conn->addr ) );
+			WN_GameSendAdmission( conn, gc, qfalse, NET_REFUSE_GENERIC );
+			Q_SecureZeroMemory( userinfo, sizeof( userinfo ) );
 			return;
 		}
-
-		/* Send TLV 0x02 ACCEPT: slot:u8, sv_fps:u8, sv_info_len:u16le(0), sv_info:"" */
-		accept_payload[0] = (byte)slot;
-		accept_payload[1] = 20; /* sv_fps */
-		accept_payload[2] = 0;  /* sv_info_len lo */
-		accept_payload[3] = 0;  /* sv_info_len hi */
-		tlv_len = TLV_Write( accept_tlv, (int)sizeof(accept_tlv),
-			0x02, accept_payload, 4 );
-		if ( tlv_len > 0 )
-			picoquic_add_to_stream( conn->cnx, WIREDNET_SESSION_STREAM_ID,
-				accept_tlv, (size_t)tlv_len, 0 );
-
-		gc->hs_state = WN_GAME_HS_ACCEPTED;
-
-		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC game: TLV CONNECT from %s → slot %d, accept pending\n",
+		Q_SecureZeroMemory( userinfo, sizeof( userinfo ) );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC game: TLV CONNECT from %s → slot %d, VM admission pending\n",
 			NET_AdrToStringwPort( &conn->addr ), slot );
 	}
+}
+
+void WN_GameHandleHandshake( wn_connection_t *conn, uint64_t stream_id,
+	const byte *data, int len, qboolean fin ) {
+	if ( !conn || !conn->active || conn->session_failed ) return;
+	if ( len < 0 || len > WN_SESSION_BUFFER_MAX - conn->session_recv_len ) {
+		WN_GameSessionFail( conn, 6 );
+		return;
+	}
+	if ( len > 0 ) {
+		memcpy( conn->session_recv_data + conn->session_recv_len, data,
+			(size_t)len );
+		conn->session_recv_len += len;
+	}
+	while ( conn->session_recv_len >= 3 ) {
+		int payloadLen = conn->session_recv_data[1]
+			| ( (int)conn->session_recv_data[2] << 8 );
+		int totalLen = 3 + payloadLen;
+		if ( totalLen > WN_SESSION_BUFFER_MAX ) {
+			WN_GameSessionFail( conn, 7 );
+			return;
+		}
+		if ( conn->session_recv_len < totalLen ) break;
+		WN_GameHandleHandshakeMessage( conn, stream_id,
+			conn->session_recv_data, totalLen );
+		if ( conn->session_failed ) return;
+		memmove( conn->session_recv_data,
+			conn->session_recv_data + totalLen,
+			(size_t)( conn->session_recv_len - totalLen ) );
+		conn->session_recv_len -= totalLen;
+		Q_SecureZeroMemory( conn->session_recv_data + conn->session_recv_len,
+			(size_t)totalLen );
+	}
+	if ( fin && conn->session_recv_len != 0 )
+		WN_GameSessionFail( conn, 8 );
 }
 
 
@@ -905,7 +1065,8 @@ void WN_GameHandleReliable( wn_connection_t *conn, uint64_t stream_id,
                                const byte *data, int len, qboolean fin )
 {
 	wn_game_conn_t *gc = conn ? conn->game_conn : NULL;
-	if ( !gc || !gc->active )
+	if ( !gc || gc->conn != conn
+	     || !WN_GameConnIdentityAccepted( gc->pub_handle, gc->allocation_id ) )
 		return;
 	wn_reliable_server_consume_stream( gc, stream_id, data, len, fin );
 }
@@ -960,7 +1121,8 @@ conn_handle_t WN_GetConnHandleByAddr( const netadr_t *addr )
 	int i;
 	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
 		wn_game_conn_t *gc = &wn.game_conns[i];
-		if ( !gc->active || !gc->conn )
+		if ( !gc->conn || !WN_GameConnIdentityAccepted( gc->pub_handle,
+			gc->allocation_id ) )
 			continue;
 		{
 			const netadr_t *a = &gc->conn->addr;
@@ -1045,10 +1207,19 @@ void WN_DrainPendingConnects( void )
 	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
 		if ( was_pending[i] ) {
 			conn_handle_t conn = wn.pending_connects[i].conn;
+			uint64_t      allocationId = wn.pending_connects[i].allocation_id;
 			char          ui[MAX_INFO_STRING];
 			Q_strncpyz( ui, wn.pending_connects[i].userinfo, sizeof(ui) );
-			wn.pending_connects[i].pending = qfalse;
-			transport->accept_callback( conn, ui );
+			Q_SecureZeroMemory( &wn.pending_connects[i],
+				sizeof( wn.pending_connects[i] ) );
+			if ( WN_GameConnByIdentity( conn, allocationId ) ) {
+				transport->accept_callback( conn, allocationId, ui );
+			} else {
+				Com_Log( SEV_WARN, LOG_CH(ch_network),
+					"QUIC game: stale pending CONNECT rejected allocation=%llu\n",
+					(unsigned long long)allocationId );
+			}
+			Q_SecureZeroMemory( ui, sizeof( ui ) );
 		}
 	}
 }
@@ -1065,18 +1236,17 @@ retry accept_callback.
 Called from SV_OnPlayerConnect when svs.spawn.phase != SPAWN_IDLE.
 ==================
 */
-void WN_RequeueConnect( conn_handle_t conn, const char *userinfo )
+void WN_RequeueConnect( conn_handle_t conn, uint64_t allocationId,
+	const char *userinfo )
 {
-	int i;
-	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
-		if ( !wn.pending_connects[i].pending ) {
-			wn.pending_connects[i].conn    = conn;
-			wn.pending_connects[i].pending = qtrue;
-			Q_strncpyz( wn.pending_connects[i].userinfo, userinfo,
-				sizeof( wn.pending_connects[i].userinfo ) );
-			return;
-		}
+	wn_game_conn_t *gc = WN_GameConnByIdentity( conn, allocationId );
+	if ( !gc ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_network),
+			"QUIC game: stale CONNECT requeue rejected allocation=%llu\n",
+			(unsigned long long)allocationId );
+		return;
 	}
+	if ( WN_QueuePendingConnect( gc, userinfo ) ) return;
 	/* All slots occupied — cannot hold the connection. Drop through the
 	 * per-handle backend (transport_for_handle), not the global `transport`
 	 * (QUIC) vtable: an in-process app conn (WN_APP_*_BASE range) belongs to
@@ -1103,14 +1273,18 @@ void WN_DrainPendingReady( void )
 	if ( !transport || !transport->ready_callback )
 		return;
 	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
-		if ( wn.pending_ready[i] ) {
-			/* Published handle (QUIC slot+1 byte-identical; in-mem server-end
-			 * 110+) so SV_OnPlayerReady's cl->quic_conn match resolves. */
-			conn_handle_t conn = wn.game_conns[i].active
-				? wn.game_conns[i].pub_handle
-				: (conn_handle_t)( i + 1 );
-			wn.pending_ready[i] = qfalse;
-			transport->ready_callback( conn );
+		if ( wn.pending_ready[i].pending ) {
+			conn_handle_t conn = wn.pending_ready[i].conn;
+			uint64_t allocationId = wn.pending_ready[i].allocation_id;
+			Q_SecureZeroMemory( &wn.pending_ready[i],
+				sizeof( wn.pending_ready[i] ) );
+			if ( WN_GameConnIdentityAccepted( conn, allocationId ) ) {
+				transport->ready_callback( conn, allocationId );
+			} else {
+				Com_Log( SEV_WARN, LOG_CH(ch_network),
+					"QUIC game: stale READY rejected allocation=%llu\n",
+					(unsigned long long)allocationId );
+			}
 		}
 	}
 }
@@ -1203,6 +1377,7 @@ void WN_ClientSendReady( int app_slot )
 	/* TLV: [type:u8=0x05][len_lo:u8=0x00][len_hi:u8=0x00] — no payload */
 	byte          ready_tlv[3] = { 0x05, 0x00, 0x00 };
 	conn_handle_t client_conn;
+	transport_t  *ready_transport;
 
 	if ( app_slot < 0 || app_slot >= WN_MAX_LOCAL_CLIENTS )
 		return;
@@ -1216,8 +1391,23 @@ void WN_ClientSendReady( int app_slot )
 	else
 		client_conn = (conn_handle_t)CONN_CLIENT_HANDLE;
 
-	transport_for_handle( client_conn )->send_reliable( client_conn, CHAN_SESSION,
-		ready_tlv, (int)sizeof( ready_tlv ) );
+	ready_transport = transport_for_handle( client_conn );
+	if ( !ready_transport->send_reliable( client_conn,
+		CHAN_SESSION, ready_tlv, (int)sizeof( ready_tlv ) ) ) {
+		wn_client_state_t *client = &wtcl_array[app_slot];
+		qboolean networkClient = client->quic != NULL;
+		if ( !networkClient && ready_transport->disconnect )
+			ready_transport->disconnect( client_conn, "READY send failed" );
+		client->accept_pending = qfalse;
+		client->connect_failed = qtrue;
+		client->connect_error_kind = NET_CONNECT_ERROR_GENERIC;
+		Q_strncpyz( client->connect_error, "Unable to complete server admission",
+			sizeof( client->connect_error ) );
+		client->pending_disconnect = networkClient;
+		Com_Log( SEV_WARN, LOG_CH(ch_network),
+			"QUIC client: READY send failed deferred_disconnect=%d\n",
+			networkClient ? 1 : 0 );
+	}
 }
 
 wn_client_state_t wtcl_array[WN_MAX_LOCAL_CLIENTS];
@@ -1232,6 +1422,104 @@ static volatile uint32_t wn_recv_queue_full_drops = 0;
 uint32_t WN_GetRecvQueueFullDrops( void )
 {
 	return wn_recv_queue_full_drops;
+}
+
+static void WN_ClientSessionFail( int failureClass ) {
+	wn_client_state_t *client = &wtcl_array[0];
+	Q_SecureZeroMemory( client->session_recv_data,
+		sizeof( client->session_recv_data ) );
+	client->session_recv_len = 0;
+	client->accept_pending = qfalse;
+	client->connect_failed = qtrue;
+	client->connect_error_kind = NET_CONNECT_ERROR_GENERIC;
+	Q_strncpyz( client->connect_error, "Invalid server admission response",
+		sizeof( client->connect_error ) );
+	client->pending_disconnect = qtrue;
+	Com_Log( SEV_WARN, LOG_CH(ch_network),
+		"QUIC client: malformed session stream class=%d deferred_disconnect=1\n",
+		failureClass );
+}
+
+static void WN_ClientConsumeSession( const byte *data, int len, qboolean fin ) {
+	wn_client_state_t *client = &wtcl_array[0];
+
+	if ( len < 0 || len > WN_SESSION_BUFFER_MAX - client->session_recv_len ) {
+		WN_ClientSessionFail( 1 );
+		return;
+	}
+	if ( len > 0 ) {
+		memcpy( client->session_recv_data + client->session_recv_len, data,
+			(size_t)len );
+		client->session_recv_len += len;
+	}
+	while ( client->session_recv_len >= 3 ) {
+		byte *message = client->session_recv_data;
+		int payloadLen = message[1] | ( (int)message[2] << 8 );
+		int totalLen = 3 + payloadLen;
+		if ( totalLen > WN_SESSION_BUFFER_MAX ) {
+			WN_ClientSessionFail( 2 );
+			return;
+		}
+		if ( client->session_recv_len < totalLen ) break;
+		if ( client->admission_terminal != 0 ) {
+			WN_ClientSessionFail( 3 );
+			return;
+		}
+		if ( message[0] == 0x02 ) {
+			if ( payloadLen != 4 ) {
+				WN_ClientSessionFail( 4 );
+				return;
+			}
+			client->admission_terminal = 1;
+			client->accept_pending = qtrue;
+			Com_Log( SEV_DEBUG, LOG_CH(ch_network),
+				"QUIC client: TLV ACCEPT received\n" );
+		} else if ( message[0] == 0x03 ) {
+			netRefuseClass_t refusalClass;
+			if ( payloadLen != 1 ) {
+				WN_ClientSessionFail( 5 );
+				return;
+			}
+			refusalClass = (netRefuseClass_t)message[3];
+			client->admission_terminal = 2;
+			client->connect_failed = qtrue;
+			switch ( refusalClass ) {
+			case NET_REFUSE_AUTH:
+				client->connect_error_kind = NET_CONNECT_ERROR_AUTH_REFUSED;
+				Q_strncpyz( client->connect_error, "Server authentication failed",
+					sizeof( client->connect_error ) );
+				break;
+			case NET_REFUSE_SERVER_FULL:
+				client->connect_error_kind = NET_CONNECT_ERROR_SERVER_FULL;
+				Q_strncpyz( client->connect_error, "Server is full",
+					sizeof( client->connect_error ) );
+				break;
+			case NET_REFUSE_GENERIC:
+				client->connect_error_kind = NET_CONNECT_ERROR_GENERIC;
+				Q_strncpyz( client->connect_error, "Connection refused",
+					sizeof( client->connect_error ) );
+				break;
+			default:
+				WN_ClientSessionFail( 6 );
+				return;
+			}
+			client->pending_disconnect = qtrue;
+			Com_Log( SEV_WARN, LOG_CH(ch_network),
+				"QUIC connect refused class=%d deferred_disconnect=1\n",
+				(int)refusalClass );
+		} else {
+			WN_ClientSessionFail( 7 );
+			return;
+		}
+		memmove( client->session_recv_data,
+			client->session_recv_data + totalLen,
+			(size_t)( client->session_recv_len - totalLen ) );
+		client->session_recv_len -= totalLen;
+		Q_SecureZeroMemory( client->session_recv_data + client->session_recv_len,
+			(size_t)totalLen );
+	}
+	if ( fin && client->session_recv_len != 0 )
+		WN_ClientSessionFail( 8 );
 }
 
 static int WN_ClientCallback(
@@ -1262,6 +1550,7 @@ static int WN_ClientCallback(
 			byte     connect_pl[MAX_INFO_STRING + 4];
 			byte     connect_tlv[MAX_INFO_STRING + 8];
 			int      tlv_len;
+			int      send_result = -1;
 
 			connect_pl[0] = 0x00; /* version lo */
 			connect_pl[1] = 0x01; /* version hi */
@@ -1272,50 +1561,36 @@ static int WN_ClientCallback(
 			tlv_len = TLV_Write( connect_tlv, (int)sizeof(connect_tlv),
 				0x01, connect_pl, (uint16_t)( 4 + ulen ) );
 			if ( tlv_len > 0 ) {
-				picoquic_add_to_stream( cnx, WIREDNET_SESSION_STREAM_ID,
+				send_result = picoquic_add_to_stream( cnx, WIREDNET_SESSION_STREAM_ID,
 					connect_tlv, (size_t)tlv_len, 0 );
-				Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC client: sent TLV CONNECT on stream 0x%02X (%d bytes)\n",
+			}
+			if ( tlv_len <= 0 || send_result != 0 ) {
+				wtcl_array[0].connect_failed = qtrue;
+				wtcl_array[0].connect_error_kind = NET_CONNECT_ERROR_GENERIC;
+				Q_strncpyz( wtcl_array[0].connect_error,
+					"Unable to start server admission",
+					sizeof( wtcl_array[0].connect_error ) );
+				wtcl_array[0].pending_disconnect = qtrue;
+				Com_Log( SEV_WARN, LOG_CH(ch_network),
+					"QUIC client: CONNECT send failed result=%d deferred_disconnect=1\n",
+					send_result );
+			} else {
+				Com_Log( SEV_DEBUG, LOG_CH(ch_network),
+					"QUIC client: sent TLV CONNECT on stream 0x%02X (%d bytes)\n",
 					(unsigned)WIREDNET_SESSION_STREAM_ID, tlv_len );
 			}
+			Q_SecureZeroMemory( wtcl_array[0].userinfo,
+				sizeof( wtcl_array[0].userinfo ) );
+			Q_SecureZeroMemory( connect_pl, sizeof( connect_pl ) );
+			Q_SecureZeroMemory( connect_tlv, sizeof( connect_tlv ) );
 		}
 		break;
 
 	case picoquic_callback_stream_data:
 	case picoquic_callback_stream_fin:
 		if ( stream_id == WIREDNET_SESSION_STREAM_ID ) {
-			/* Binary TLV session channel — parse inline (messages are small) */
-			const byte *p         = (const byte *)bytes;
-			int         remaining = (int)length;
-
-			while ( remaining >= 3 ) {
-				uint8_t      tlv_type;
-				const byte  *payload;
-				uint16_t     plen;
-
-				if ( !TLV_Read( p, remaining, &tlv_type, &payload, &plen ) )
-					break; /* incomplete; next callback will bring the rest */
-
-				if ( tlv_type == 0x02 ) { /* ACCEPT */
-					wtcl_array[0].accept_pending = qtrue;
-					Com_Log( SEV_DEBUG, LOG_CH(ch_network), "QUIC client: TLV ACCEPT received\n" );
-				} else if ( tlv_type == 0x03 ) { /* REFUSE */
-					char reason[MAX_INFO_STRING] = "refused";
-					if ( plen >= 2 ) {
-						uint16_t rlen = (uint16_t)( payload[0] | ( (uint16_t)payload[1] << 8 ) );
-						if ( rlen > plen - 2 )
-							rlen = (uint16_t)( plen - 2 );
-						if ( rlen >= (uint16_t)sizeof(reason) )
-							rlen = (uint16_t)( sizeof(reason) - 1 );
-						memcpy( reason, payload + 2, rlen );
-						reason[rlen] = '\0';
-					}
-					COM_WARN( LOG_CH(ch_network), "QUIC connect refused: %s\n", reason );
-					WN_ClientDisconnect();
-					return 0;
-				}
-				p         += 3 + plen;
-				remaining -= 3 + plen;
-			}
+			WN_ClientConsumeSession( (const byte *)bytes, (int)length,
+				event == picoquic_callback_stream_fin );
 			break;
 		}
 		/* Non-session game-reliable message from server.
@@ -1460,6 +1735,7 @@ static void WN_ClientFlushOutbound( void )
 		Q_strncpyz( wtcl_array[0].connect_error, NET_LastSendError(),
 		            sizeof( wtcl_array[0].connect_error ) );
 		wtcl_array[0].connect_failed = qtrue;
+		wtcl_array[0].connect_error_kind = NET_CONNECT_ERROR_GENERIC;
 	}
 
 	// Deferred disconnect: if the close callback fired during the loop above,
@@ -1633,10 +1909,11 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 		return;
 	}
 
-	memset( &wtcl_array[0], 0, sizeof(wtcl_array[0]) );
+	Q_SecureZeroMemory( &wtcl_array[0], sizeof( wtcl_array[0] ) );
 	// Reset connect-error state so a retry starts clean (ED1 fix).
 	wtcl_array[0].connect_failed  = qfalse;
 	wtcl_array[0].connect_error[0] = '\0';
+	wtcl_array[0].connect_error_kind = NET_CONNECT_ERROR_NONE;
 	Q_strncpyz( wtcl_array[0].userinfo, userinfo, sizeof(wtcl_array[0].userinfo) );
 	wtcl_array[0].qport       = qport;
 	wtcl_array[0].server_addr = *serverAddr;
@@ -1651,8 +1928,11 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 	if ( !wtcl_array[0].quic ) {
 		COM_ERROR( LOG_CH(ch_network), "WN_ClientConnect: picoquic_create failed\n" );
 		wtcl_array[0].connect_failed = qtrue;
+		wtcl_array[0].connect_error_kind = NET_CONNECT_ERROR_GENERIC;
 		Q_strncpyz( wtcl_array[0].connect_error, "picoquic_create failed",
 		            sizeof( wtcl_array[0].connect_error ) );
+		Q_SecureZeroMemory( wtcl_array[0].userinfo,
+			sizeof( wtcl_array[0].userinfo ) );
 		return;
 	}
 
@@ -1742,9 +2022,12 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 		picoquic_free( wtcl_array[0].quic );
 		wtcl_array[0].quic = NULL;
 		wtcl_array[0].connect_failed = qtrue;
+		wtcl_array[0].connect_error_kind = NET_CONNECT_ERROR_GENERIC;
 		Q_strncpyz( wtcl_array[0].connect_error,
 		            va( "unsupported address type %d", serverAddr->type ),
 		            sizeof( wtcl_array[0].connect_error ) );
+		Q_SecureZeroMemory( wtcl_array[0].userinfo,
+			sizeof( wtcl_array[0].userinfo ) );
 		return;
 	}
 	(void)ss_len;
@@ -1761,8 +2044,11 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 		picoquic_free( wtcl_array[0].quic );
 		wtcl_array[0].quic = NULL;
 		wtcl_array[0].connect_failed = qtrue;
+		wtcl_array[0].connect_error_kind = NET_CONNECT_ERROR_GENERIC;
 		Q_strncpyz( wtcl_array[0].connect_error, "picoquic_create_client_cnx failed (TLS/crypto error)",
 		            sizeof( wtcl_array[0].connect_error ) );
+		Q_SecureZeroMemory( wtcl_array[0].userinfo,
+			sizeof( wtcl_array[0].userinfo ) );
 		return;
 	}
 
@@ -1771,12 +2057,15 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 		NET_AdrToStringwPort( serverAddr ) );
 }
 
-qboolean WN_ClientHasError( char *out, int outSize )
+qboolean WN_ClientHasError( char *out, int outSize,
+	netConnectErrorKind_t *kind )
 {
 	if ( !wtcl_array[0].connect_failed )
 		return qfalse;
 	if ( out && outSize > 0 )
 		Q_strncpyz( out, wtcl_array[0].connect_error, outSize );
+	if ( kind )
+		*kind = wtcl_array[0].connect_error_kind;
 	return qtrue;
 }
 
@@ -1784,6 +2073,7 @@ void WN_ClientClearError( void )
 {
 	wtcl_array[0].connect_failed   = qfalse;
 	wtcl_array[0].connect_error[0] = '\0';
+	wtcl_array[0].connect_error_kind = NET_CONNECT_ERROR_NONE;
 }
 
 void WN_ClientFrame( void )
@@ -1797,9 +2087,15 @@ void WN_ClientDisconnect( void )
 {
 	picoquic_cnx_t  *cnx;
 	picoquic_quic_t *quic;
+	char connectError[sizeof( wtcl_array[0].connect_error )];
+	netConnectErrorKind_t connectErrorKind;
+	qboolean connectFailed;
 
-	if ( !wtcl_array[0].initialized )
+	if ( !wtcl_array[0].initialized ) {
+		Q_SecureZeroMemory( wtcl_array[0].userinfo,
+			sizeof( wtcl_array[0].userinfo ) );
 		return;
+	}
 
 	Com_Log( SEV_INFO, LOG_CH(ch_network), "*** WN_ClientDisconnect: called while initialized ***\n" );
 
@@ -1809,12 +2105,23 @@ void WN_ClientDisconnect( void )
 	 * call sees wtcl_array[0].quic != NULL and calls picoquic_free a second time. */
 	cnx  = wtcl_array[0].cnx;
 	quic = wtcl_array[0].quic;
-	memset( &wtcl_array[0], 0, sizeof(wtcl_array[0]) );   /* clears initialized, cnx, quic */
+	connectFailed = wtcl_array[0].connect_failed;
+	connectErrorKind = wtcl_array[0].connect_error_kind;
+	Q_strncpyz( connectError, wtcl_array[0].connect_error,
+		sizeof( connectError ) );
+	Q_SecureZeroMemory( &wtcl_array[0], sizeof( wtcl_array[0] ) );
 
 	if ( cnx )
 		picoquic_close( cnx, 0 );
 	if ( quic )
 		picoquic_free( quic );
+	if ( connectFailed ) {
+		wtcl_array[0].connect_failed = qtrue;
+		wtcl_array[0].connect_error_kind = connectErrorKind;
+		Q_strncpyz( wtcl_array[0].connect_error, connectError,
+			sizeof( wtcl_array[0].connect_error ) );
+	}
+	Q_SecureZeroMemory( connectError, sizeof( connectError ) );
 }
 
 qboolean WN_ClientIsConnecting( void )
@@ -1956,11 +2263,18 @@ static void wn_flush_outbound( void )
 
 static void wn_listen( int port ) { (void)port; /* QUIC already bound in WN_Init */ }
 
+static void wn_complete_admission( conn_handle_t conn, qboolean accepted,
+	netRefuseClass_t refusalClass ) {
+	wn_game_conn_t *gc = wn_get_game_conn( conn );
+	if ( !gc || !gc->conn ) return;
+	WN_GameSendAdmission( gc->conn, gc, accepted, refusalClass );
+}
+
 static void wn_drop_client( conn_handle_t conn, const char *reason )
 {
 	picoquic_cnx_t *cnx = wn_get_cnx( conn );
-	Com_Log( SEV_INFO, LOG_CH(ch_network), "*** wn_drop_client: conn=%llu reason=%s ***\n",
-		(unsigned long long)conn, reason ? reason : "NULL" );
+	Com_Log( SEV_INFO, LOG_CH(ch_network), "*** wn_drop_client: conn=%llu reason_present=%d ***\n",
+		(unsigned long long)conn, reason && reason[0] ? 1 : 0 );
 	if ( cnx )
 		picoquic_close( cnx, 0 );
 }
@@ -2006,9 +2320,10 @@ static qboolean wn_is_connecting( void )
 	return WN_ClientIsConnecting();
 }
 
-static qboolean wn_get_error( char *out, int outSize )
+static qboolean wn_get_error( char *out, int outSize,
+	netConnectErrorKind_t *kind )
 {
-	return WN_ClientHasError( out, outSize );
+	return WN_ClientHasError( out, outSize, kind );
 }
 
 static void wn_clear_error( void )
@@ -2041,14 +2356,16 @@ static void wn_send_unreliable( conn_handle_t conn, const byte *data, int len )
  * cross-contamination where CL_CheckSnapshotDatagrams would accidentally
  * dequeue user-command datagrams instead of snapshot datagrams.
  */
-qboolean WN_ServerRecvUsercmd( conn_handle_t *conn_out, byte *buf, int *len_out )
+qboolean WN_ServerRecvUsercmd( conn_handle_t *conn_out,
+	uint64_t *allocationIdOut, byte *buf, int *len_out )
 {
 	int i;
 	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
 		wn_game_conn_t *gc  = &wn.game_conns[i];
 		wn_game_pkt_t  *pkt;
 
-		if ( !gc->active || gc->recv_tail == gc->recv_head )
+		if ( !WN_GameConnIdentityAccepted( gc->pub_handle, gc->allocation_id )
+		     || gc->recv_tail == gc->recv_head )
 			continue;
 
 		pkt = &gc->recv_queue[gc->recv_tail];
@@ -2063,6 +2380,7 @@ qboolean WN_ServerRecvUsercmd( conn_handle_t *conn_out, byte *buf, int *len_out 
 		 * svs.clients[].quic_conn match (and the outbound transport_for_handle
 		 * routing) stays consistent for both. */
 		*conn_out = gc->pub_handle;
+		if ( allocationIdOut ) *allocationIdOut = gc->allocation_id;
 		*len_out  = pkt->len;
 		memcpy( buf, pkt->data, pkt->len );
 		gc->recv_tail = ( gc->recv_tail + 1 ) % WN_GAME_QUEUE_SIZE;
@@ -2119,8 +2437,8 @@ static qboolean wn_recv_unreliable( conn_handle_t *conn_out, byte *buf, int *len
 	return qfalse;
 }
 
-static void wn_send_reliable( conn_handle_t conn, int channel,
-                              const byte *data, int len )
+static qboolean wn_send_reliable( conn_handle_t conn, int channel,
+                                 const byte *data, int len )
 {
 	picoquic_cnx_t *cnx = wn_get_cnx( conn );
 	uint64_t        stream_id;
@@ -2132,13 +2450,13 @@ static void wn_send_reliable( conn_handle_t conn, int channel,
 	int             send_len  = len;
 	int ret;
 	if ( !cnx || !data || len <= 0 )
-		return;
+		return qfalse;
 	sending_from_client = ( conn == CONN_CLIENT_HANDLE ) ? qtrue : qfalse;
 	stream_id = wn_resolve_reliable_send_stream( cnx, channel, sending_from_client );
 	if ( stream_id == UINT64_MAX ) {
 		COM_WARN( LOG_CH(ch_network), "QUIC: invalid reliable channel %d for conn %llu\n",
 			channel, (unsigned long long)conn );
-		return;
+		return qfalse;
 	}
 	if ( !wn_reliable_channel_allows_fixed_stream( channel ) ) {
 		/* CHAN_BOOTSTRAP may exceed MAX_MSGLEN — allow up to WN_BOOTSTRAP_MAX. */
@@ -2146,7 +2464,7 @@ static void wn_send_reliable( conn_handle_t conn, int channel,
 		if ( !wn_reliable_channel_is_game( channel ) || len > max_payload ) {
 			COM_WARN( LOG_CH(ch_network), "QUIC: invalid reliable payload for channel %d\n",
 				channel );
-			return;
+			return qfalse;
 		}
 		if ( channel == CHAN_BOOTSTRAP ) {
 			framed = (byte *)Z_Malloc( len + 2 );
@@ -2166,10 +2484,11 @@ static void wn_send_reliable( conn_handle_t conn, int channel,
 	if ( framed_heap ) Z_Free( framed );
 	Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC: wn_send_reliable conn=%llu channel=%d len=%d ret=%d\n",
 		(unsigned long long)conn, channel, len, ret );
+	return ret == 0 ? qtrue : qfalse;
 }
 
-qboolean WN_ServerRecvReliable( conn_handle_t *conn_out, int *channel_out,
-	byte *buf, int *len_out )
+qboolean WN_ServerRecvReliable( conn_handle_t *conn_out,
+	uint64_t *allocationIdOut, int *channel_out, byte *buf, int *len_out )
 {
 	int i;
 	int channel;
@@ -2177,7 +2496,7 @@ qboolean WN_ServerRecvReliable( conn_handle_t *conn_out, int *channel_out,
 	/* Server-side: drain game_conns rel_recv slots */
 	for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
 		wn_game_conn_t *gc = &wn.game_conns[i];
-		if ( !gc->active )
+		if ( !WN_GameConnIdentityAccepted( gc->pub_handle, gc->allocation_id ) )
 			continue;
 		channel = -1;
 		if ( !wn_reliable_queue_pop( gc->rel_queue, &gc->rel_head, &gc->rel_tail,
@@ -2187,6 +2506,7 @@ qboolean WN_ServerRecvReliable( conn_handle_t *conn_out, int *channel_out,
 		/* Published handle (QUIC slot+1 byte-identical; in-mem server-end 110+)
 		 * so the server's svs.clients[].quic_conn match stays consistent. */
 		*conn_out    = gc->pub_handle;
+		if ( allocationIdOut ) *allocationIdOut = gc->allocation_id;
 		*channel_out = channel;
 		return qtrue;
 	}
@@ -2254,8 +2574,9 @@ qboolean WN_ClientRecvReliable( int app_slot, int *channel_out, byte *buf, int *
 static qboolean wn_recv_reliable( conn_handle_t *conn_out, int *channel_out,
 	byte *buf, int *len_out )
 {
-	if ( WN_ServerRecvReliable( conn_out, channel_out, buf, len_out ) )
-		return qtrue;
+	/* The server drains its direction through WN_ServerRecvReliable, which also
+	 * returns allocation identity. This vtable slot is client-only so it cannot
+	 * discard that identity or cross-route cli->srv traffic in a listen server. */
 #if !defined(HEADLESS)
 	if ( WN_ClientRecvReliable( 0, channel_out, buf, len_out ) ) {
 		if ( conn_out ) *conn_out = CONN_CLIENT_HANDLE;
@@ -2322,6 +2643,8 @@ transport_t quic_transport = {
 	wn_listen,
 	NULL,              /* accept_callback — set by caller */
 	NULL,              /* ready_callback  — set by caller */
+	NULL,              /* closed_callback — set by caller */
+	wn_complete_admission,
 	wn_drop_client,
 	NULL,              /* drain_usercmds  — registered by server (sv_init.c) */
 	wn_lookup_by_addr,

@@ -20,6 +20,8 @@ This directory contains two deliberately separate evidence layers:
 | `sg_reloc` | always | q3now save | two-phase pointer fixup | contract | `host-only`, `subsystem`, `owner.q3now-save`, `failure.contract`, `feature.always` |
 | `mdl_anim` | always | Wired renderer model | Q1 MDL animation derivation | contract | `host-only`, `subsystem`, `owner.wired-renderer-model`, `failure.contract`, `feature.always` |
 | `server_info_parse_contract` | always | q3now client | strict browser infoResponse parsing and bounds | security contract | `host-only`, `subsystem`, `owner.q3now-client`, `failure.security-contract`, `feature.always` |
+| `cvar_value_contract` | always | Wired cvars | production typed bool/int/float/enum lexical and range validator | security contract | `host-only`, `subsystem`, `owner.wired-cvars`, `failure.security-contract`, `feature.always` |
+| `fs_qpath_contract` | always | Wired VFS | production lexical qpath parent-component and legacy `::` rejection before host I/O | security contract | `host-only`, `subsystem`, `owner.wired-vfs`, `failure.security-contract`, `feature.always` |
 | `nav_coord_contract` | `USE_RECAST_NAVMESH=ON` | Wired nav | exact Quake/Recast axis, handedness and round-trip conversion | contract | `host-only`, `subsystem`, `owner.wired-nav`, `failure.contract`, `feature.recast` |
 | `wired_scene` | `USE_LUA=ON` | Wired scene | Lua scene-table loader | contract | `host-only`, `subsystem`, `owner.wired-scene`, `failure.contract`, `feature.lua` |
 
@@ -71,7 +73,7 @@ current `pax21.sw3z`; `WIRED_CONTENT_ROOT` supplies the read-only canonical
 | `bash tests/wiredui-errordialog-check.sh ...` | automated/interactive error popup lifecycle across two map loads |
 | `make test-wiredui-external-actions WIRED=...` | paired mod feeder selection, Load Mod, full game-directory restart, mounted mod marker and logging continuity |
 | `make test-wiredui-bot-actions WIRED=...` | real in-game quick-add of two bots, bot-only feeder selection, verified bot kick and human/survivor protection |
-| `make test-wiredui-demo-play WIRED=...` | current-protocol recording, typed demo-feeder selection, exact playback, advancing frames and natural EOF |
+| `make test-wiredui-demo-play WIRED=...` | main-menu keyboard route to current-protocol demos, typed feeder selection, exact playback, advancing frames and natural EOF |
 | `make test-wiredui-connect-action WIRED=...` | real Specify Server editfield input, invalid-address rejection, validated loopback connect and first gameplay frame |
 | `make test-wiredui-server-browser WIRED=...` | two-row browser selection, stale-safe status feeder lifecycle, then footer Connect to real headless QUIC gameplay |
 | `make test-wiredui-global-browser WIRED=...` | authorized loopback master discovery, challenge-bound directed info hydration and real keyboard selection; Connect remains a separate regression |

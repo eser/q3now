@@ -221,6 +221,7 @@ typedef struct client_s {
 	uint32_t        wn_outgoing_sequence; /* WiredNet snapshot sequence counter (replaces netchan.outgoingSequence) */
 
 	conn_handle_t	quic_conn;            /* QUIC connection handle — replaces netchan.remoteAddress for QUIC clients */
+	uint64_t        quic_allocation_id;   /* exact transport allocation paired with quic_conn */
 
 } client_t;
 
@@ -385,8 +386,11 @@ void SV_SyncReloadTracker( void );
 //
 // sv_client.c
 //
-void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo );
-void SV_OnPlayerReady( conn_handle_t conn );
+void SV_OnPlayerConnect( conn_handle_t conn, uint64_t allocationId,
+	                     const char *userinfo );
+void SV_OnPlayerReady( conn_handle_t conn, uint64_t allocationId );
+void SV_OnPlayerTransportClosed( conn_handle_t conn, uint64_t allocationId );
+qboolean SV_ClientTransportAccepted( const client_t *client );
 void SV_DrainUsercmds_Impl( void );  /* transport vtable target — use SV_DrainUsercmds() everywhere else */
 void SV_DrainUsercmds( void );
 void SV_DrainQUICReliableCommands( void );

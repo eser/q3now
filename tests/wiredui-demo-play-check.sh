@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Two-process Q0 contract: record current-protocol demos, then select and play
-# the target through the real WiredUI demo browser until natural EOF.
+# Two-process Q0 contract: record current-protocol demos, then reach the real
+# WiredUI demo browser through the authored main-menu keyboard route and play
+# the selected target until natural EOF.
 
 set -uo pipefail
 
@@ -56,10 +57,15 @@ ordered(pm, [
 
 ordered(cm, [
  ("ignored stale state",r"WiredUI: loaded 0 UI state entries"),
- ("demos menu",r"WiredUI: push menu 'demos' \(depth 1\)"),
+ ("main menu",r"WiredUI: push menu 'main' \(depth 1\)"),
+ ("main Down 1",r"wui_menu_nav: K_DOWNARROW dispatched"),
+ ("main Down 2",r"wui_menu_nav: K_DOWNARROW dispatched"),
+ ("main Down 3",r"wui_menu_nav: K_DOWNARROW dispatched"),
+ ("demos menu",r"WiredUI: push menu 'demos' \(depth 2\)"),
  ("inventory",r"WiredUI: demos loaded protocol=74 count=2 generation=2\b"),
  ("decoy row",r"demo feeder row=0 name=a0_decoy generation=2\b"),
  ("target row",r"demo feeder row=1 name=q0_target generation=2\b"),
+ ("main Enter",r"wui_menu_nav: K_ENTER dispatched"),
  ("preselection Play",r"focused item 'btn_play_demo'"),
  ("refusal",r"WiredUI: no demo selected"),
  ("refusal Enter",r"wui_menu_nav: K_ENTER dispatched"),
@@ -74,6 +80,16 @@ ordered(cm, [
  ("exact file",r"Demo file: demos/q0_target\.dm_74\b"),
  ("playback FIRST",r"FIRST GAMEPLAY FRAME mapname=(?:maps/)?arena7(?:\.bsp)?.*numEntities=[1-9][0-9]*"),
 ])
+
+main_pushes=[i for i,m in enumerate(cm) if re.search(r"WiredUI: push menu 'main' \(depth 1\)",m)]
+demos_pushes=[i for i,m in enumerate(cm) if re.search(r"WiredUI: push menu 'demos' \(depth 2\)",m)]
+if len(main_pushes)!=1 or len(demos_pushes)!=1 or main_pushes[0]>=demos_pushes[0]:
+    raise SystemExit("FAIL route: expected one ordered main-to-demos push")
+route=cm[main_pushes[0]+1:demos_pushes[0]]
+if sum("wui_menu_nav: K_DOWNARROW dispatched" in m for m in route)!=3:
+    raise SystemExit("FAIL route: main-to-demos route must contain exactly three K_DOWN dispatches")
+if any(re.search(r"focused item 'menu_demos'",m) for m in cm[:demos_pushes[0]]):
+    raise SystemExit("FAIL route: named menu_demos focus bypassed the authored keyboard route")
 
 traces=[]
 rx=re.compile(r"demo playback trace state=8 demoplaying=1 name=q0_target\.dm_74 sequence=([0-9]+) serverTime=([0-9]+)")
@@ -92,20 +108,70 @@ if any("QUIC client: TLV ACCEPT" in m or "SV_OnPlayerConnect:" in m for m in cm)
 if any(x in "\n".join(cm) for x in ("Demo file was truncated", "Protocol 74 not supported", "couldn't open demos/")):
     raise SystemExit("FAIL: demo backend reported playback failure")
 
-focus=[]
-for row in layout:
-    menu=str(row.get("menu",row.get("menuName","")))
-    if menu!="demos": continue
-    if row.get("kind")=="item" and bool(row.get("focused",0)):
-        item=str(row.get("region",""))
-    else:
-        item=str(row.get("focusedItem",""))
-        if not item and isinstance(row.get("focused"),str):
-            item=row["focused"]
-    if item: focus.append(item)
-for wanted in ("btn_play_demo","demolist","btn_play_demo"):
-    try: idx=focus.index(wanted); focus=focus[idx+1:]
-    except ValueError: raise SystemExit(f"FAIL layout: missing ordered demos/{wanted}")
+def focused_frames(menu):
+    frames={}
+    for row in layout:
+        owner=str(row.get("menu",row.get("menuName","")))
+        if owner!=menu: continue
+        item=""
+        if row.get("kind")=="item" and bool(row.get("focused",0)):
+            item=str(row.get("region",""))
+        else:
+            item=str(row.get("focusedItem",""))
+            if not item and isinstance(row.get("focused"),str): item=row["focused"]
+        if item: frames.setdefault(int(row.get("frame",0)),[]).append(item)
+    for frame,items in frames.items():
+        if len(items)>1:
+            raise SystemExit(f"FAIL layout: {menu} frame {frame} has {len(items)} focused items")
+    return [(frame,items[0]) for frame,items in sorted(frames.items())]
+
+def require_focus_order(menu,wanted):
+    sequence=focused_frames(menu); cursor=0; matched=[]
+    for item in wanted:
+        for index in range(cursor,len(sequence)):
+            if sequence[index][1]==item:
+                matched.append(sequence[index]); cursor=index+1; break
+        else: raise SystemExit(f"FAIL layout: missing ordered {menu}/{item}")
+    return matched
+
+main_focus=require_focus_order("main",("menu_campaign","menu_demos"))
+route_frame=main_focus[-1][0]
+expected_rail=("menu_campaign","menu_join","menu_host","menu_demos","menu_options","menu_quit")
+route_rows=[r for r in layout if str(r.get("menu",""))=="main"
+            and r.get("kind")=="item" and int(r.get("frame",0))==route_frame
+            and str(r.get("region","")).startswith("menu_")
+            and "/" not in str(r.get("region",""))]
+by_name={str(r.get("region","")):r for r in route_rows}
+if set(by_name)!=set(expected_rail) or len(route_rows)!=len(expected_rail):
+    raise SystemExit("FAIL layout: main rail inventory is not the exact six authored rows")
+ordered_rail=sorted(route_rows,key=lambda r:float(r.get("y",-1)))
+if tuple(str(r.get("region","")) for r in ordered_rail)!=expected_rail:
+    raise SystemExit("FAIL layout: main rail visual order does not match keyboard order")
+menu_rows=[r for r in layout if str(r.get("menu",""))=="main"
+           and r.get("kind")=="menu" and int(r.get("frame",0))==route_frame]
+if len(menu_rows)!=1: raise SystemExit("FAIL layout: missing unique main menu bounds")
+menu_row=menu_rows[0]; mx=float(menu_row.get("x",0)); my=float(menu_row.get("y",0))
+mw=float(menu_row.get("w",0)); mh=float(menu_row.get("h",0)); tol=.75
+if mw<=0 or mh<=0: raise SystemExit("FAIL layout: invalid main menu bounds")
+for row in ordered_rail:
+    x=float(row.get("x",-1)); y=float(row.get("y",-1))
+    w=float(row.get("w",-1)); h=float(row.get("h",-1)); dpi=float(row.get("dpiScale",0))
+    if dpi<=0 or abs(h-56.0*dpi)>tol:
+        raise SystemExit(f"FAIL layout: {row.get('region')} height {h:g} != 56*dpiScale ({56*dpi:g})")
+    if w<=0 or x<mx-tol or y<my-tol or x+w>mx+mw+tol or y+h>my+mh+tol:
+        raise SystemExit(f"FAIL layout: {row.get('region')} escapes main menu bounds")
+for previous,current in zip(ordered_rail,ordered_rail[1:]):
+    if float(previous["y"])+float(previous["h"])>float(current["y"])+tol:
+        raise SystemExit("FAIL layout: main rail rows overlap")
+footers=[r for r in layout if str(r.get("menu",""))=="main"
+         and r.get("kind")=="item" and int(r.get("frame",0))==route_frame
+         and str(r.get("region",""))=="left_footer_row"]
+if len(footers)!=1: raise SystemExit("FAIL layout: missing unique main footer row")
+footer=footers[0]; fy=float(footer.get("y",-1)); fh=float(footer.get("h",-1))
+if fh<=0 or fy+tol<float(ordered_rail[-1]["y"])+float(ordered_rail[-1]["h"]):
+    raise SystemExit("FAIL layout: main footer overlaps the rail")
+
+require_focus_order("demos",("btn_play_demo","demolist","btn_play_demo"))
 
 def inspect_demo(path):
     data=open(path,"rb").read()
@@ -133,22 +199,102 @@ import json,struct,sys
 mode,p,c,l,d,t=sys.argv[1:]
 def rec(msg,sev="DEBUG",cat="ui"): return {"ts":"2026-08-11T00:00:00Z","sev":sev,"cat":cat,"msg":msg}
 prod=[rec("cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp serverTime=100 numEntities=4 framecount=1)","INFO","client"),rec("recording to demos/a0_decoy.\n","INFO","client"),rec("Stopped demo recording.\n","INFO","client"),rec("recording to demos/q0_target.\n","INFO","client"),rec("Stopped demo recording.\n","INFO","client"),rec("Q0_DEMOS_RECORDED","INFO","system")]
-cons_msgs=["WiredUI: loaded 0 UI state entries (ignored transient server selection 0)\n","WiredUI: push menu 'demos' (depth 1)","WiredUI: demos loaded protocol=74 count=2 generation=2\n","WiredUI: demo feeder row=0 name=a0_decoy generation=2\n","WiredUI: demo feeder row=1 name=q0_target generation=2\n","wui_menu_nav focus: focused item 'btn_play_demo'","WiredUI: no demo selected\n","wui_menu_nav: K_ENTER dispatched","WiredUI: demo feeder selection row=0 name=a0_decoy generation=2\n","wui_menu_nav focus: focused item 'demolist'","WiredUI: demo feeder selection row=1 name=q0_target generation=2\n","wui_menu_nav: K_DOWNARROW dispatched","wui_menu_nav focus: focused item 'btn_play_demo'","WiredUI: queued validated demo playback name=q0_target\n","WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0","wui_menu_nav: K_ENTER dispatched","Demo file: demos/q0_target.dm_74\n","cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp serverTime=200 numEntities=4 framecount=2)","WiredUI: demo playback trace state=8 demoplaying=1 name=q0_target.dm_74 sequence=10 serverTime=220\n","WiredUI: demo playback trace state=8 demoplaying=1 name=q0_target.dm_74 sequence=14 serverTime=300\n","CL_NextDemo: exec q0-demo-done.cfg\n","Q0_DEMO_COMPLETED"]
+cons_msgs=[
+    "WiredUI: loaded 0 UI state entries (ignored transient server selection 0)\n",
+    "WiredUI: push menu 'main' (depth 1)",
+    "wui_menu_nav: K_DOWNARROW dispatched",
+    "wui_menu_nav: K_DOWNARROW dispatched",
+    "wui_menu_nav: K_DOWNARROW dispatched",
+    "WiredUI: push menu 'demos' (depth 2)",
+    "WiredUI: demos loaded protocol=74 count=2 generation=2\n",
+    "WiredUI: demo feeder row=0 name=a0_decoy generation=2\n",
+    "WiredUI: demo feeder row=1 name=q0_target generation=2\n",
+    "wui_menu_nav: K_ENTER dispatched",
+    "wui_menu_nav focus: focused item 'btn_play_demo'",
+    "WiredUI: no demo selected\n",
+    "wui_menu_nav: K_ENTER dispatched",
+    "WiredUI: demo feeder selection row=0 name=a0_decoy generation=2\n",
+    "wui_menu_nav focus: focused item 'demolist'",
+    "WiredUI: demo feeder selection row=1 name=q0_target generation=2\n",
+    "wui_menu_nav: K_DOWNARROW dispatched",
+    "wui_menu_nav focus: focused item 'btn_play_demo'",
+    "WiredUI: queued validated demo playback name=q0_target\n",
+    "WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0",
+    "wui_menu_nav: K_ENTER dispatched",
+    "Demo file: demos/q0_target.dm_74\n",
+    "cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp serverTime=200 numEntities=4 framecount=2)",
+    "WiredUI: demo playback trace state=8 demoplaying=1 name=q0_target.dm_74 sequence=10 serverTime=220\n",
+    "WiredUI: demo playback trace state=8 demoplaying=1 name=q0_target.dm_74 sequence=14 serverTime=300\n",
+    "CL_NextDemo: exec q0-demo-done.cfg\n",
+    "Q0_DEMO_COMPLETED",
+]
 cons=[rec(m,"WARN" if m=="WiredUI: no demo selected\n" else ("INFO" if "FIRST" in m or "Demo file:" in m else "DEBUG"),"client" if "FIRST" in m or "Demo file:" in m or "CL_NextDemo" in m else "ui") for m in cons_msgs]
-layout=[{"menu":"demos","kind":"item","region":"btn_play_demo","focused":1},
-        {"menu":"demos","kind":"item","region":"demolist","focused":1},
-        {"menu":"demos","kind":"item","region":"btn_play_demo","focused":1}]
+rail=("menu_campaign","menu_join","menu_host","menu_demos","menu_options","menu_quit")
+def main_layout(frame,focused):
+    out=[{"menu":"main","kind":"menu","region":"main","frame":frame,
+          "x":0,"y":0,"w":1280,"h":720,"dpiScale":1.0,"focused":0}]
+    for index,name in enumerate(rail):
+        out.append({"menu":"main","kind":"item","region":name,"frame":frame,
+                    "x":64,"y":300+57*index,"w":534,"h":56,"dpiScale":1.0,
+                    "focused":int(name==focused)})
+    out.append({"menu":"main","kind":"item","region":"action_menu","frame":frame,
+                "x":64,"y":296,"w":534,"h":346,"dpiScale":1.0,"focused":0})
+    out.append({"menu":"main","kind":"item","region":"left_footer_row","frame":frame,
+                "x":64,"y":680,"w":534,"h":14,"dpiScale":1.0,"focused":0})
+    return out
+layout=main_layout(1,"menu_campaign")+main_layout(2,"menu_demos")+[
+        {"menu":"demos","kind":"item","region":"btn_play_demo","frame":3,"focused":1},
+        {"menu":"demos","kind":"item","region":"demolist","frame":4,"focused":1},
+        {"menu":"demos","kind":"item","region":"btn_play_demo","frame":5,"focused":1}]
 def remove(s):
     nonlocal_dummy=None
     for arr in (prod,cons): arr[:]=[r for r in arr if s not in r["msg"]]
 def replace(a,b):
     for arr in (prod,cons):
         for r in arr: r["msg"]=r["msg"].replace(a,b)
+def remove_nth(s,n):
+    hits=[]
+    for arr in (prod,cons):
+        for i,r in enumerate(arr):
+            if s in r["msg"]: hits.append((arr,i))
+    if n>=len(hits): raise RuntimeError(f"fixture missing occurrence {n} of {s!r}")
+    arr,i=hits[n]; del arr[i]
 if mode=="missing-record": remove("recording to demos/q0_target")
 elif mode=="missing-stop": prod=[r for i,r in enumerate(prod) if not ("Stopped demo" in r["msg"] and i>2)]
 elif mode=="wrong-count": replace("count=2","count=3")
 elif mode=="wrong-row": replace("row=1 name=q0_target","row=1 name=a0_decoy")
-elif mode=="missing-down": remove("K_DOWNARROW")
+elif mode=="missing-demo-down": remove_nth("K_DOWNARROW",3)
+elif mode=="missing-main-down": remove_nth("K_DOWNARROW",1)
+elif mode=="extra-main-down":
+    at=next(i for i,r in enumerate(cons) if "push menu 'demos'" in r["msg"])
+    cons.insert(at,rec("wui_menu_nav: K_DOWNARROW dispatched"))
+elif mode=="named-main-focus":
+    at=next(i for i,r in enumerate(cons) if "push menu 'demos'" in r["msg"])
+    cons.insert(at,rec("wui_menu_nav focus: focused item 'menu_demos'"))
+elif mode=="missing-main-enter": remove_nth("K_ENTER",0)
+elif mode=="early-main-enter":
+    enter=next(r for r in cons if "K_ENTER" in r["msg"]); cons.remove(enter)
+    at=next(i for i,r in enumerate(cons) if "demo feeder row=0" in r["msg"])
+    cons.insert(at,enter)
+elif mode=="wrong-demos-depth": replace("push menu 'demos' (depth 2)","push menu 'demos' (depth 1)")
+elif mode=="wrong-main-focus":
+    for r in layout:
+        if r.get("menu")=="main" and r.get("frame")==2:
+            r["focused"]=int(r.get("region")=="menu_options")
+elif mode=="duplicate-main-focus":
+    next(r for r in layout if r.get("menu")=="main" and r.get("frame")==2 and r.get("region")=="menu_host")["focused"]=1
+elif mode=="duplicate-demos-focus":
+    layout.append({"menu":"demos","kind":"item","region":"btn_back","frame":4,"focused":1})
+elif mode=="missing-main-row":
+    layout=[r for r in layout if not (r.get("menu")=="main" and r.get("frame")==2 and r.get("region")=="menu_options")]
+elif mode=="bad-main-height":
+    next(r for r in layout if r.get("menu")=="main" and r.get("frame")==2 and r.get("region")=="menu_host")["h"]=55
+elif mode=="main-overlap":
+    next(r for r in layout if r.get("menu")=="main" and r.get("frame")==2 and r.get("region")=="menu_demos")["y"]=450
+elif mode=="main-overflow":
+    next(r for r in layout if r.get("menu")=="main" and r.get("frame")==2 and r.get("region")=="menu_quit")["y"]=690
+elif mode=="footer-overlap":
+    next(r for r in layout if r.get("menu")=="main" and r.get("frame")==2 and r.get("region")=="left_footer_row")["y"]=630
 elif mode=="missing-queue": remove("queued validated")
 elif mode=="bad-close": replace("catcher_ui=0","catcher_ui=1")
 elif mode=="wrong-file": replace("Demo file: demos/q0_target","Demo file: demos/a0_decoy")
@@ -182,11 +328,11 @@ if [ "${1:-}" = "--self-test" ]; then
     write_fixture clean "$ROOT/p.jsonl" "$ROOT/c.jsonl" "$ROOT/l.jsonl" "$ROOT/a.dm_74" "$ROOT/q.dm_74"
     analyze_contract "$ROOT/p.jsonl" "$ROOT/c.jsonl" "$ROOT/l.jsonl" "$ROOT/a.dm_74" "$ROOT/q.dm_74" >/dev/null || { echo "FAIL: clean fixture rejected"; exit 1; }
     rc=0
-    for defect in missing-record missing-stop wrong-count wrong-row missing-down missing-queue bad-close wrong-file no-first zero-entities one-trace stale-trace early-eof network ui-warn renderer-error missing-layout malformed-json bad-demo; do
+    for defect in missing-record missing-stop wrong-count wrong-row missing-demo-down missing-main-down extra-main-down named-main-focus missing-main-enter early-main-enter wrong-demos-depth wrong-main-focus duplicate-main-focus duplicate-demos-focus missing-main-row bad-main-height main-overlap main-overflow footer-overlap missing-queue bad-close wrong-file no-first zero-entities one-trace stale-trace early-eof network ui-warn renderer-error missing-layout malformed-json bad-demo; do
         write_fixture "$defect" "$ROOT/p-$defect.jsonl" "$ROOT/c-$defect.jsonl" "$ROOT/l-$defect.jsonl" "$ROOT/a-$defect.dm_74" "$ROOT/q-$defect.dm_74"
         if analyze_contract "$ROOT/p-$defect.jsonl" "$ROOT/c-$defect.jsonl" "$ROOT/l-$defect.jsonl" "$ROOT/a-$defect.dm_74" "$ROOT/q-$defect.dm_74" >/dev/null 2>&1; then echo "FAIL: accepted defect $defect"; rc=1; else echo "  PASS rejected $defect"; fi
     done
-    [ "$rc" -eq 0 ] && echo "==> SELF-TEST PASS: clean accepted; nineteen defects rejected"
+    [ "$rc" -eq 0 ] && echo "==> SELF-TEST PASS: clean accepted; thirty-three defects rejected"
     exit "$rc"
 fi
 
@@ -258,7 +404,21 @@ set attract_enabled 0
 set nextdemo "exec q0-demo-done.cfg"
 set activeAction "exec q0-demo-playback-live.cfg"
 wait 100
-wui_push demos
+wui_push main
+wait 20
+set r_layoutDump 1
+wait 2
+set r_layoutDump 0
+wui_menu_nav down
+wait 2
+wui_menu_nav down
+wait 2
+wui_menu_nav down
+wait 10
+set r_layoutDump 1
+wait 2
+set r_layoutDump 0
+wui_menu_nav enter
 wait 20
 wui_menu_nav focus btn_play_demo
 set r_layoutDump 1

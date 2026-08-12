@@ -667,7 +667,7 @@ void SV_SendMessageToClient( msg_t *msg, client_t *client )
 	 *
 	 * delta_base is a pure u32 in v2 — no bit-multiplexing. The bit-31 collision
 	 * hazard is structurally fixed by the dedicated flags byte. */
-	if ( client->quic_conn != CONN_INVALID && transport ) {
+	if ( transport && SV_ClientTransportAccepted( client ) ) {
 		conn_handle_t conn = client->quic_conn;
 		{
 			uint32_t srv_tick  = (uint32_t)client->wn_outgoing_sequence;

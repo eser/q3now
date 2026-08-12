@@ -16,6 +16,7 @@
 #include "unzip.h"
 #include "q_feats.h"
 #include "maps/meta.h"
+#include "fs_qpath.h"
 
 #if FEAT_SW3Z
 #include "sw3z.h"
@@ -549,19 +550,13 @@ char *FS_BuildOSPath( const char *base, const char *game, const char *qpath ) {
 ================
 FS_CheckDirTraversal
 
-Check whether the string contains stuff like "../" to prevent directory traversal bugs
-and return qtrue if it does.
+Reject an exact parent-directory component (with either qpath separator) and
+the legacy "::" spelling. Return qtrue when the lexical qpath is unsafe.
 ================
 */
 static qboolean FS_CheckDirTraversal( const char *checkdir )
 {
-	if ( strstr( checkdir, "../" ) || strstr( checkdir, "..\\" ) )
-		return qtrue;
-
-	if ( strstr( checkdir, "::" ) )
-		return qtrue;
-
-	return qfalse;
+	return wired_fs_qpath_is_safe( checkdir ) ? qfalse : qtrue;
 }
 
 
@@ -748,6 +743,10 @@ FS_HomeRemove
 */
 void FS_HomeRemove( const char *osPath )
 {
+	if ( FS_CheckDirTraversal( osPath ) ) {
+		return;
+	}
+
 	FS_CheckFilenameIsNotAllowed( osPath, __func__, qfalse );
 
 	remove( FS_BuildOSPath( fs_homepath->string,
@@ -767,6 +766,10 @@ NOTE TTimo: this goes with FS_FOpenFileWrite for opening the file afterwards
 */
 qboolean FS_FileExists( const char *file )
 {
+	if ( FS_CheckDirTraversal( file ) ) {
+		return qfalse;
+	}
+
 	char *testpath = FS_BuildOSPath( fs_homepath->string, fs_gamedir, file );
 	FILE *f = Sys_FOpen( testpath, "rb" );
 	if (f) {
@@ -786,6 +789,10 @@ Tests if the file exists
 */
 qboolean FS_SV_FileExists( const char *file )
 {
+	if ( FS_CheckDirTraversal( file ) ) {
+		return qfalse;
+	}
+
 	// SV files only ever land in fs_homepath; the basepath fallback was
 	// for a write target nothing in the engine actually writes to.
 	char *testpath = FS_BuildOSPath( fs_homepath->string, file, NULL );
@@ -831,7 +838,7 @@ fileHandle_t FS_SV_FOpenFileWrite( const char *filename ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "Filesystem call made without initialization" );
 	}
 
-	if ( !*filename ) {
+	if ( !filename || !*filename || FS_CheckDirTraversal( filename ) ) {
 		return FS_INVALID_HANDLE;
 	}
 
@@ -885,7 +892,7 @@ fileHandle_t FS_SV_FOpenFileAppend( const char *filename ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "Filesystem call made without initialization" );
 	}
 
-	if ( !*filename ) {
+	if ( !filename || !*filename || FS_CheckDirTraversal( filename ) ) {
 		return FS_INVALID_HANDLE;
 	}
 
@@ -942,6 +949,10 @@ int FS_SV_FOpenFileRead( const char *filename, fileHandle_t *fp ) {
 	if ( !fp ) {
 		return -1;
 	}
+	if ( FS_CheckDirTraversal( filename ) ) {
+		*fp = FS_INVALID_HANDLE;
+		return -1;
+	}
 
 	// allocate new file handle
 	f = FS_HandleForFile();
@@ -988,6 +999,9 @@ void FS_SV_Rename( const char *from, const char *to ) {
 	if ( !fs_searchpaths ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "Filesystem call made without initialization" );
 	}
+	if ( FS_CheckDirTraversal( from ) || FS_CheckDirTraversal( to ) ) {
+		return;
+	}
 
 #ifndef HEADLESS
 	// don't let sound stutter
@@ -1020,6 +1034,9 @@ void FS_Rename( const char *from, const char *to ) {
 
 	if ( !fs_searchpaths ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "Filesystem call made without initialization" );
+	}
+	if ( FS_CheckDirTraversal( from ) || FS_CheckDirTraversal( to ) ) {
+		return;
 	}
 
 #ifndef HEADLESS
@@ -1305,6 +1322,9 @@ FS_ResetReadOnlyAttribute
 */
 qboolean FS_ResetReadOnlyAttribute( const char *filename ) {
 	char *ospath;
+	if ( FS_CheckDirTraversal( filename ) ) {
+		return qfalse;
+	}
 
 	ospath = FS_BuildOSPath( fs_homepath->string, fs_gamedir, filename );
 
@@ -1326,7 +1346,7 @@ fileHandle_t FS_FOpenFileWrite( const char *filename ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "Filesystem call made without initialization" );
 	}
 
-	if ( !filename || !*filename ) {
+	if ( !filename || !*filename || FS_CheckDirTraversal( filename ) ) {
 		return FS_INVALID_HANDLE;
 	}
 
@@ -1378,7 +1398,7 @@ fileHandle_t FS_FOpenFileAppend( const char *filename ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "Filesystem call made without initialization" );
 	}
 
-	if ( !*filename ) {
+	if ( !filename || !*filename || FS_CheckDirTraversal( filename ) ) {
 		return FS_INVALID_HANDLE;
 	}
 
@@ -1927,6 +1947,9 @@ void FS_TouchFileInPak( const char *filename ) {
 	long			fullHash, hash;
 	pack_t			*pak;
 	fileInPack_t	*pakFile;
+	if ( FS_CheckDirTraversal( filename ) ) {
+		return;
+	}
 
 	fullHash = FS_HashFileName( filename, 0U );
 
@@ -1974,6 +1997,10 @@ int FS_Home_FOpenFileRead( const char *filename, fileHandle_t *file )
 
 	// should never happen but for safe
 	if ( !file ) {
+		return -1;
+	}
+	if ( FS_CheckDirTraversal( filename ) ) {
+		*file = FS_INVALID_HANDLE;
 		return -1;
 	}
 
@@ -2357,6 +2384,12 @@ int FS_ReadFile( const char *qpath, void **buffer ) {
 
 	if ( qpath == NULL || qpath[0] == '\0' ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "FS_ReadFile with empty name" );
+	}
+	if ( FS_CheckDirTraversal( qpath ) ) {
+		if ( buffer ) {
+			*buffer = NULL;
+		}
+		return -1;
 	}
 
 	buf = NULL;	// quiet compiler warning
@@ -3844,6 +3877,10 @@ static char **FS_ListFilteredFiles( const char *path, const char *extension, con
 		*numfiles = 0;
 		return NULL;
 	}
+	if ( FS_CheckDirTraversal( path ) ) {
+		*numfiles = 0;
+		return NULL;
+	}
 
 	if ( !extension ) {
 		extension = "";
@@ -4046,6 +4083,9 @@ char **FS_ListDirectories( const char *path, int *numDirs ) {
 	}
 
 	if ( !path || !path[0] ) {
+		return NULL;
+	}
+	if ( FS_CheckDirTraversal( path ) ) {
 		return NULL;
 	}
 
@@ -4627,6 +4667,10 @@ static void FS_Which_f( void ) {
 	// qpaths are not supposed to have a leading slash
 	if ( filename[0] == '/' || filename[0] == '\\' ) {
 		filename++;
+	}
+	if ( FS_CheckDirTraversal( filename ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "Unsafe qpath refused\n" );
+		return;
 	}
 
 	// just wants to see if file is there
@@ -6367,7 +6411,7 @@ int	FS_FOpenFileByMode( const char *qpath, fileHandle_t *f, fsMode_t mode ) {
 	qboolean	sync;
 	fileHandleData_t *fhd;
 
-	if ( !qpath || !*qpath ) {
+	if ( !qpath || !*qpath || FS_CheckDirTraversal( qpath ) ) {
 		if ( f )
 			*f = FS_INVALID_HANDLE;
 		return -1;
@@ -6631,6 +6675,9 @@ fileHandle_t FS_PipeOpenWrite( const char *cmd, const char *filename ) {
 
 	if ( !fs_searchpaths ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "Filesystem call made without initialization" );
+	}
+	if ( FS_CheckDirTraversal( filename ) ) {
+		return FS_INVALID_HANDLE;
 	}
 
 	ospath = FS_BuildOSPath( fs_homepath->string, fs_gamedir, filename );

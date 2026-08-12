@@ -224,7 +224,9 @@ void WN_ResetInmemClientRings( int app_slot );
 // Dequeue one user-command datagram from any active server game connection.
 // Called directly by SV_DrainQUICUsercmds — bypasses transport vtable so the
 // client's recv_unreliable path (snapshots) is never contaminated with user cmds.
-qboolean      WN_ServerRecvUsercmd( conn_handle_t *conn_out, byte *buf, int *len_out );
+qboolean      WN_ServerRecvUsercmd( conn_handle_t *conn_out,
+	                               uint64_t *allocationIdOut,
+	                               byte *buf, int *len_out );
 
 // Dequeue one reliable message sent from the client to the server.
 // Semantic channel is returned via *channel_out.
@@ -232,15 +234,20 @@ qboolean      WN_ServerRecvUsercmd( conn_handle_t *conn_out, byte *buf, int *len
 // transport->recv_reliable shim would mix server-side cli→srv and
 // client-side srv→cli queues in listen-server mode. Splitting the vtable
 // into recv_reliable_client / recv_reliable_server is a future cleanup.
-qboolean      WN_ServerRecvReliable( conn_handle_t *conn_out, int *channel_out,
-	byte *buf, int *len_out );
+qboolean      WN_ServerRecvReliable( conn_handle_t *conn_out,
+	                                uint64_t *allocationIdOut,
+	                                int *channel_out, byte *buf, int *len_out );
+
+qboolean      WN_GameConnIdentityAccepted( conn_handle_t conn,
+	                                      uint64_t allocationId );
 
 // Drain pending game-client connects on the main thread, calling transport->accept_callback.
 void          WN_DrainPendingConnects( void );
 
 // Re-enqueue a connection that could not be admitted yet (server mid-spawn).
 // Called from SV_OnPlayerConnect when svs.spawn.phase != SPAWN_IDLE.
-void          WN_RequeueConnect( conn_handle_t conn, const char *userinfo );
+void          WN_RequeueConnect( conn_handle_t conn, uint64_t allocationId,
+	                             const char *userinfo );
 
 // Drain pending game-client ready events (TLV 0x05), calling transport->ready_callback.
 void          WN_DrainPendingReady( void );
@@ -287,7 +294,8 @@ void        WN_ClientDisconnect( void );
 // Check if a connect-phase error was recorded.  Copies the error string to
 // *out (if non-NULL) and returns qtrue.  Returns qfalse if no error.
 // Vtable-internal (Batch 3). App layer uses transport->get_error.
-qboolean    WN_ClientHasError( char *out, int outSize );
+qboolean    WN_ClientHasError( char *out, int outSize,
+                              netConnectErrorKind_t *kind );
 
 // Consume the pending error — call before CL_Disconnect to avoid it being
 // wiped by the disconnect path before the dialog reads it.

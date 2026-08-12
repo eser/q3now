@@ -251,7 +251,8 @@ static int WN_PicoquicCallback(
 
 		// Stream 0x00 = session control channel (binary TLV: CONNECT/ACCEPT/REFUSE/READY)
 		if ( stream_id == 0x00 ) {
-			WN_HandleCapabilityNegotiation( conn, stream_id, bytes, (int)length );
+			WN_HandleCapabilityNegotiation( conn, stream_id, bytes, (int)length,
+				event == picoquic_callback_stream_fin );
 			break;
 		}
 
@@ -290,6 +291,9 @@ static int WN_PicoquicCallback(
 			(int)event, (unsigned long long)err_code, (unsigned long long)remote_err );
 		if ( conn && conn->active ) {
 			char reason[128];
+			if ( conn->game_conn && transport && transport->closed_callback )
+				transport->closed_callback( conn->game_conn->pub_handle,
+					conn->game_conn->allocation_id );
 			Com_sprintf( reason, sizeof(reason), "event=%d local=%llu remote=%llu",
 				(int)event, (unsigned long long)err_code, (unsigned long long)remote_err );
 			WN_LogDisconnect( conn, reason );
@@ -315,6 +319,9 @@ static int WN_PicoquicCallback(
 	case picoquic_callback_stateless_reset:
 		Com_Log( SEV_INFO, LOG_CH(ch_network), "QUIC: stateless reset received\n" );
 		if ( conn && conn->active ) {
+			if ( conn->game_conn && transport && transport->closed_callback )
+				transport->closed_callback( conn->game_conn->pub_handle,
+					conn->game_conn->allocation_id );
 			WN_LogDisconnect( conn, "stateless reset" );
 			WN_FreeConnection( conn );
 		}
@@ -618,6 +625,10 @@ void WN_Shutdown( void )
 	picoquic_free( wn.quic );
 	wn.quic = NULL;
 	Net_UnregisterDemux( &s_quic_demux );
+	/* A shutdown can race the main-thread pending-connect drain.  No CONNECT
+	 * userinfo may survive merely because its callback was never consumed. */
+	Q_SecureZeroMemory( wn.pending_connects, sizeof( wn.pending_connects ) );
+	Q_SecureZeroMemory( wn.pending_ready, sizeof( wn.pending_ready ) );
 	wn.initialized = qfalse;
 
 	Com_Log( SEV_INFO, LOG_CH(ch_network), "QUIC transport shut down.\n" );
@@ -719,6 +730,22 @@ void WN_FlushOutbound( void )
 
 		Com_Log( SEV_TRACE, LOG_CH(ch_network_common), "QUIC: sending %d bytes to %s\n", (int)send_len, NET_AdrToString(&to) );
 		NET_SendPacket( NS_SERVER, (int)send_len, send_buf, &to );
+	}
+
+	/* REFUSE teardown is deliberately after the packet pump: queuing a terminal
+	 * TLV and freeing its game slot in the receive callback loses delivery and
+	 * also risks picoquic re-entry. A pump error leaves it pending for retry. */
+	if ( ret == 0 ) {
+		int i;
+		for ( i = 0; i < WN_MAX_CLIENTS; i++ ) {
+			wn_connection_t *conn = &wn.connections[i];
+			if ( !conn->active || !conn->refusal_teardown_pending ) continue;
+			conn->refusal_teardown_pending = qfalse;
+			if ( conn->game_conn ) WN_GameFreeConn( conn->game_conn );
+			if ( conn->cnx ) picoquic_close( conn->cnx, 0 );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_network),
+				"QUIC game: refusal flushed slot_released=1 close_queued=1\n" );
+		}
 	}
 }
 

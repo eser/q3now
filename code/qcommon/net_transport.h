@@ -32,6 +32,19 @@ reliable_channel_t
 #include "q_shared.h"
 
 typedef uint64_t conn_handle_t;
+
+typedef enum {
+	NET_CONNECT_ERROR_NONE = 0,
+	NET_CONNECT_ERROR_GENERIC,
+	NET_CONNECT_ERROR_AUTH_REFUSED,
+	NET_CONNECT_ERROR_SERVER_FULL
+} netConnectErrorKind_t;
+
+typedef enum {
+	NET_REFUSE_GENERIC = 1,
+	NET_REFUSE_AUTH = 2,
+	NET_REFUSE_SERVER_FULL = 3
+} netRefuseClass_t;
 #define CONN_INVALID ((conn_handle_t)0)
 
 typedef enum {
@@ -108,13 +121,21 @@ typedef struct {
 	 * userinfo: the client's info string (from Stream 0 CONNECT payload).
 	 * Set to NULL until Phase B wires in SV_OnPlayerConnect.
 	 */
-	void          (*accept_callback)( conn_handle_t conn, const char *userinfo );
+	void          (*accept_callback)( conn_handle_t conn, uint64_t allocationId,
+	                                const char *userinfo );
 	/*
 	 * ready_callback: called when a connected game-client sends TLV 0x05 READY,
 	 * signalling it has processed the gamestate and is ready to enter the world.
 	 * Set to NULL until Phase B2 wires in SV_OnPlayerReady.
 	 */
-	void          (*ready_callback)( conn_handle_t conn );
+	void          (*ready_callback)( conn_handle_t conn, uint64_t allocationId );
+	/* closed_callback invalidates the exact long-lived server-client identity
+	 * before a recyclable game handle can be allocated again. */
+	void          (*closed_callback)( conn_handle_t conn, uint64_t allocationId );
+	/* Complete game-VM admission.  CONNECT parsing only creates a pending
+	 * transport session; ACCEPT/REFUSE is emitted here after server policy. */
+	void          (*complete_admission)( conn_handle_t conn, qboolean accepted,
+	                                    netRefuseClass_t refusalClass );
 	void          (*drop_client)( conn_handle_t conn, const char *reason );
 	/*
 	 * drain_usercmds: called once per server frame to drain all pending
@@ -142,7 +163,8 @@ typedef struct {
 	/* get_error: read pending connect-phase error string. Copies into
 	 * out[outSize] and returns qtrue if an error is pending, qfalse
 	 * otherwise. Matches WN_ClientHasError signature. */
-	qboolean      (*get_error)( char *out, int outSize );
+	qboolean      (*get_error)( char *out, int outSize,
+	                           netConnectErrorKind_t *kind );
 
 	/* clear_error: consume the pending error before disconnect so it isn't
 	 * wiped by the disconnect path. */
@@ -153,7 +175,7 @@ typedef struct {
 	qboolean      (*recv_unreliable)( conn_handle_t *conn_out, byte *buf, int *len_out );
 
 	/* ── Reliable streams ───────────────────────────────────────── */
-	void          (*send_reliable)( conn_handle_t conn, int channel,
+	qboolean      (*send_reliable)( conn_handle_t conn, int channel,
 	                                const byte *data, int len );
 	qboolean      (*recv_reliable)( conn_handle_t *conn_out, int *channel_out,
 	                                byte *buf, int *len_out );

@@ -867,9 +867,17 @@ char *ClientConnect( int clientNum, qboolean firstTime, qboolean isBot ) {
 //	char		*areabits;
 	gclient_t	*client;
 	char		userinfo[MAX_INFO_STRING];
+	char		joinSecret[33];
 	gentity_t	*ent;
 
+#define CLIENT_CONNECT_RETURN( reason ) do { \
+	Q_SecureZeroMemory( joinSecret, sizeof( joinSecret ) ); \
+	Q_SecureZeroMemory( userinfo, sizeof( userinfo ) ); \
+	return (reason); \
+} while ( 0 )
+
 	ent = &g_entities[ clientNum ];
+	memset( joinSecret, 0, sizeof( joinSecret ) );
 
 	trap_GetUserinfo( clientNum, userinfo, sizeof( userinfo ) );
 
@@ -879,23 +887,29 @@ char *ClientConnect( int clientNum, qboolean firstTime, qboolean isBot ) {
  	// check to see if they are on the banned IP list
 	value = Info_ValueForKey (userinfo, "ip");
 	if ( G_FilterPacket( value ) ) {
-		return "You are banned from this server.";
+		CLIENT_CONNECT_RETURN( "You are banned from this server." );
 	}
 
   // we don't check password for bots and local client
   // NOTE: local client <-> "ip" "localhost"
   //   this means this client is not running in our current process
 	if ( !isBot && (strcmp(value, "localhost") != 0)) {
-		// check for a password
-		value = Info_ValueForKey (userinfo, "password");
-		if ( g_password.string[0] && Q_stricmp( g_password.string, "none" ) &&
-			strcmp( g_password.string, value) != 0) {
-			return "Invalid password";
+		/* Browser joins use a distinct one-shot credential key. Console joins
+		 * retain the legacy password key as a compatibility fallback. */
+		if ( !Info_ValueForKeyBuf( userinfo, "join_password", joinSecret,
+			sizeof( joinSecret ) ) || !joinSecret[0] ) {
+			Info_ValueForKeyBuf( userinfo, "password", joinSecret,
+				sizeof( joinSecret ) );
 		}
+		if ( g_password.string[0] && Q_stricmp( g_password.string, "none" ) &&
+			strcmp( g_password.string, joinSecret ) != 0) {
+			CLIENT_CONNECT_RETURN( "Invalid password" );
+		}
+		Q_SecureZeroMemory( joinSecret, sizeof( joinSecret ) );
 	}
 #if FEAT_GAME_MEETING
 	if ( !isBot && g_meeting.integer && !level.meeting ) {
-		return "Game in progress. Wait for the next match.";
+		CLIENT_CONNECT_RETURN( "Game in progress. Wait for the next match." );
 	}
 #endif
 	// if a player reconnects quickly after a disconnect, the client disconnect may never be called, thus flag can get lost in the ether
@@ -924,7 +938,7 @@ char *ClientConnect( int clientNum, qboolean firstTime, qboolean isBot ) {
 		ent->r.svFlags |= SVF_BOT;
 		ent->inuse = qtrue;
 		if( !G_BotConnect( clientNum, !firstTime ) ) {
-			return "BotConnectfailed";
+			CLIENT_CONNECT_RETURN( "BotConnectfailed" );
 		}
 	}
 
@@ -964,6 +978,9 @@ char *ClientConnect( int clientNum, qboolean firstTime, qboolean isBot ) {
 //	client->areabits = areabits;
 //	if ( !client->areabits )
 
+	Q_SecureZeroMemory( joinSecret, sizeof( joinSecret ) );
+	Q_SecureZeroMemory( userinfo, sizeof( userinfo ) );
+#undef CLIENT_CONNECT_RETURN
 	return NULL;
 }
 

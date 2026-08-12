@@ -21,6 +21,19 @@
 
 // snapshots are a view of the server at a given time
 typedef struct {
+	/* Browser-origin connection authentication is one attempt, one target.
+	 * The secret is copied only after CL_Disconnect has wiped the previous
+	 * connection and is erased as soon as the transport copies CONNECT
+	 * userinfo.  Non-secret target/generation metadata survives until the
+	 * attempt succeeds or fails so WiredUI can offer a scoped retry. */
+	qboolean	browserOrigin;
+	qboolean	credentialPending;
+	char		target[MAX_OSPATH];
+	int		selectionGeneration;
+	char		joinPassword[33];
+} clientJoinAttempt_t;
+
+typedef struct {
 	qboolean		valid;			// cleared if delta parsing was invalid
 	int				snapFlags;		// rate delayed and dropped commands
 
@@ -166,6 +179,7 @@ typedef struct {
 	 * CL_Disconnect (via memset).  Use (clc.quic_conn != CONN_INVALID)
 	 * as the authoritative test for "we are on a QUIC connection". */
 	conn_handle_t quic_conn;
+	clientJoinAttempt_t joinAttempt;
 	// these are our reliable messages that go to the server
 	int			reliableSequence;
 	int			reliableAcknowledge;		// the last one the server has executed
@@ -549,6 +563,11 @@ extern	cvar_t	*cl_drawBuffer;
 // cl_main
 //
 void CL_AddReliableCommand( clientApp_t *app, const char *cmd, qboolean isDisconnectCmd );
+
+/* Typed browser connect path.  The caller has already normalized `target`
+ * and resolved `address`; no credential enters Cbuf, a cvar, or a log. */
+qboolean CL_ConnectBrowserServer( const char *target, const netadr_t *address,
+	const char *joinPassword, int selectionGeneration );
 
 void CL_StartHunkUsers( void );
 

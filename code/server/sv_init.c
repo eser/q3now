@@ -1020,6 +1020,7 @@ void SV_Init( void )
 	if ( transport ) {
 		transport->accept_callback = SV_OnPlayerConnect;
 		transport->ready_callback  = SV_OnPlayerReady;
+		transport->closed_callback = SV_OnPlayerTransportClosed;
 		transport->drain_usercmds  = SV_DrainUsercmds_Impl;
 	}
 

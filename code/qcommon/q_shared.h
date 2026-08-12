@@ -797,6 +797,11 @@ qboolean Q_isintegral( float f );
 // buffer size safe library replacements
 void	Q_strncpyz( char *dest, const char *src, int destsize );
 
+/* Compiler-resistant memory erasure for credentials and other short-lived
+ * secrets.  Unlike memset, the volatile writes may not be optimized away
+ * after the buffer's final read. */
+void    Q_SecureZeroMemory( void *ptr, size_t size );
+
 int     Q_replace( const char *str1, const char *str2, char *src, int max_len );
 
 char	*Q_stradd( char *dst, const char *src );
@@ -900,6 +905,8 @@ void Com_TruncateLongString( char *buffer, const char *s );
 // key / value info strings
 //
 const char *Info_ValueForKey( const char *s, const char *key );
+qboolean Info_ValueForKeyBuf( const char *s, const char *key, char *out,
+                             int outSize );
 void Info_Tokenize( InfoTokens *tokens, const char *s );
 const char *Info_ValueForKeyToken( const InfoTokens *tokens, const char *key );
 #define Info_SetValueForKey( buf, key, value ) Info_SetValueForKey_s( (buf), MAX_INFO_STRING, (key), (value) )

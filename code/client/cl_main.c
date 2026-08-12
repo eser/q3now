@@ -1011,6 +1011,12 @@ survives), a user connect hard-closes.
 static void CL_OnClientStateChanged( clientApp_t *app, connstate_t oldState, connstate_t newState ) {
 	(void)app;
 	(void)oldState;
+	/* A server that has advanced us beyond admission no longer needs browser
+	 * retry metadata.  The credential itself was already erased immediately
+	 * after transport->connect copied CONNECT userinfo. */
+	if ( newState >= CA_CONNECTED && app->clc.joinAttempt.browserOrigin ) {
+		Q_SecureZeroMemory( &app->clc.joinAttempt, sizeof( app->clc.joinAttempt ) );
+	}
 	// Session-entry edge → close the console (attract-aware). Other edges: no-op.
 	if ( newState == CA_CONNECTING || newState == CA_CONNECTED || newState == CA_LOADING ) {
 		CL_ConsoleCloseForConnect();
@@ -1620,6 +1626,7 @@ qboolean CL_Disconnect( clientApp_t *app, qboolean showMainMenu ) {
 			transport_for_handle( disc )->disconnect( disc, "client disconnect" );
 	}
 
+	Q_SecureZeroMemory( &app->clc.joinAttempt, sizeof( app->clc.joinAttempt ) );
 	memset( &app->clc, 0, sizeof( app->clc ) );
 	app->clc.wiredRconChallenge[0] = '\0';
 
@@ -2015,82 +2022,20 @@ qboolean CL_NormalizeServerAddress( const char *input, netadrtype_t family,
 }
 
 
-/*
-================
-CL_Connect_f
-================
-*/
-static void CL_Connect_f( void ) {
-	int argc = Cmd_Argc();
-	netadrtype_t family = NA_UNSPEC;
-
-	if ( argc != 2 && argc != 3 ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "usage: connect [-4|-6] <server>\n");
-		return;
-	}
-
-	const char *server;
-	if ( argc == 2 ) {
-		server = Cmd_Argv(1);
-	} else {
-		if( !strcmp( Cmd_Argv(1), "-4" ) )
-			family = NA_IP;
-#if FEAT_IPV6
-		else if( !strcmp( Cmd_Argv(1), "-6" ) )
-			family = NA_IP6;
-		else
-			COM_WARN( LOG_CH(ch_client), "warning: only -4 or -6 as address type understood.\n" );
-#else
-			COM_WARN( LOG_CH(ch_client), "warning: only -4 as address type understood.\n" );
-#endif
-		server = Cmd_Argv(2);
-	}
-
-	char	buffer[ sizeof( clientActiveApp->servername ) ];  // same length as cls.servername
-	Q_strncpyz( buffer, server, sizeof( buffer ) );
-
-	int len = strlen( buffer );
-	if ( len <= 0 ) {
-		return;
-	}
-
-	// some programs may add ending slash
-	if ( buffer[len - 1] == '/' ) {
-		buffer[len - 1] = '\0';
-	}
-
-	server = buffer;
-
-	// skip leading "q3a:/" in connection string
-	if ( !Q_stricmpn( server, "q3a:/", 5 ) ) {
-		server += 5;
-	}
-
-	// skip all slash prefixes
-	while ( *server == '/' ) {
-		server++;
-	}
-
-	if ( *server == '\0' ) {
-		return;
-	}
-
-	// Validate and resolve once.  All subsequent state and reconnect evidence
-	// uses the canonical token, never the raw command-buffer argument.
+/* Begin a connection from already-normalized, already-resolved authority.
+ * Browser callers enter through CL_ConnectBrowserServer; console callers are
+ * normalized by CL_Connect_f below. */
+static qboolean CL_BeginResolvedConnect( const char *server, const netadr_t *resolved,
+	qboolean browserOrigin, const char *joinPassword, int selectionGeneration ) {
 	netadr_t addr;
-	char normalized[sizeof( clientActiveApp->servername )];
-	if ( !CL_NormalizeServerAddress( server, family, normalized, sizeof( normalized ), &addr ) ) {
-		COM_WARN( LOG_CH(ch_client), "Bad server address\n" );
-		return;
-	}
-	server = normalized;
-
 	// save arguments for reconnect
 	char args[ sizeof( clientActiveApp->servername ) + MAX_CVAR_VALUE_STRING ];
-	Q_strncpyz( args, server, sizeof( args ) );
 
-	// clear any previous "server full" type messages
-	clientActiveApp->clc.serverMessage[0] = '\0';
+	if ( !server || !server[0] || !resolved || resolved->type == NA_BAD ) {
+		return qfalse;
+	}
+	addr = *resolved;
+	Q_strncpyz( args, server, sizeof( args ) );
 
 	// if running a local server, kill it
 	if ( com_sv_running->integer && addr.type == NA_LOOPBACK ) {
@@ -2108,6 +2053,22 @@ static void CL_Connect_f( void ) {
 	//  also fixes the old asymmetry where this bare Con_Close ignored attract.)
 
 	Q_strncpyz( clientActiveApp->servername, server, sizeof( clientActiveApp->servername ) );
+	clientActiveApp->clc.serverMessage[0] = '\0';
+	if ( browserOrigin ) {
+		clientActiveApp->clc.joinAttempt.browserOrigin = qtrue;
+		clientActiveApp->clc.joinAttempt.selectionGeneration = selectionGeneration;
+		Q_strncpyz( clientActiveApp->clc.joinAttempt.target, server,
+			sizeof( clientActiveApp->clc.joinAttempt.target ) );
+		if ( joinPassword && joinPassword[0] ) {
+			Q_strncpyz( clientActiveApp->clc.joinAttempt.joinPassword, joinPassword,
+				sizeof( clientActiveApp->clc.joinAttempt.joinPassword ) );
+			clientActiveApp->clc.joinAttempt.credentialPending = qtrue;
+		}
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+			"Browser connect attempt armed target=%s selection_generation=%d credential_present=%d\n",
+			server, selectionGeneration,
+			clientActiveApp->clc.joinAttempt.credentialPending ? 1 : 0 );
+	}
 
 	// copy resolved address
 	clientActiveApp->clc.serverAddress = addr;
@@ -2138,6 +2099,88 @@ static void CL_Connect_f( void ) {
 
 	// server connection string
 	Cvar_Set( "cl_currentServerAddress", server );
+	return qtrue;
+}
+
+qboolean CL_ConnectBrowserServer( const char *target, const netadr_t *address,
+	const char *joinPassword, int selectionGeneration ) {
+	char secret[33];
+	char normalized[sizeof( clientActiveApp->servername )];
+	netadr_t resolved;
+	qboolean result;
+
+	memset( secret, 0, sizeof( secret ) );
+	if ( joinPassword && joinPassword[0] ) {
+		if ( strlen( joinPassword ) > 32 || !Info_ValidateKeyValue( joinPassword ) ) {
+			Q_SecureZeroMemory( secret, sizeof( secret ) );
+			return qfalse;
+		}
+		Q_strncpyz( secret, joinPassword, sizeof( secret ) );
+	}
+	/* Treat the typed address as corroborating evidence, not authority. Resolve
+	 * the canonical target again at the CL boundary and require an exact
+	 * address+port match before copying anything into connection state. */
+	if ( !address || !CL_NormalizeServerAddress( target, NA_UNSPEC, normalized,
+		sizeof( normalized ), &resolved ) || !NET_CompareAdr( &resolved, address ) ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_client),
+			"Browser connect refused stage=target-revalidation address_match=0\n" );
+		Q_SecureZeroMemory( secret, sizeof( secret ) );
+		return qfalse;
+	}
+	result = CL_BeginResolvedConnect( normalized, &resolved, qtrue, secret,
+		selectionGeneration );
+	Q_SecureZeroMemory( secret, sizeof( secret ) );
+	return result;
+}
+
+/*
+================
+CL_Connect_f
+================
+*/
+static void CL_Connect_f( void ) {
+	int argc = Cmd_Argc();
+	netadrtype_t family = NA_UNSPEC;
+	const char *server;
+	char buffer[ sizeof( clientActiveApp->servername ) ];
+	char normalized[sizeof( clientActiveApp->servername )];
+	netadr_t addr;
+	int len;
+
+	if ( argc != 2 && argc != 3 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "usage: connect [-4|-6] <server>\n");
+		return;
+	}
+	if ( argc == 2 ) {
+		server = Cmd_Argv(1);
+	} else {
+		if ( !strcmp( Cmd_Argv(1), "-4" ) ) {
+			family = NA_IP;
+#if FEAT_IPV6
+		} else if ( !strcmp( Cmd_Argv(1), "-6" ) ) {
+			family = NA_IP6;
+#endif
+		} else {
+			COM_WARN( LOG_CH(ch_client), "warning: only -4 or -6 as address type understood.\n" );
+			return;
+		}
+		server = Cmd_Argv(2);
+	}
+
+	Q_strncpyz( buffer, server, sizeof( buffer ) );
+	len = (int)strlen( buffer );
+	if ( len <= 0 ) return;
+	if ( buffer[len - 1] == '/' ) buffer[len - 1] = '\0';
+	server = buffer;
+	if ( !Q_stricmpn( server, "q3a:/", 5 ) ) server += 5;
+	while ( *server == '/' ) server++;
+	if ( !server[0] ) return;
+	if ( !CL_NormalizeServerAddress( server, family, normalized,
+		sizeof( normalized ), &addr ) ) {
+		COM_WARN( LOG_CH(ch_client), "Bad server address\n" );
+		return;
+	}
+	CL_BeginResolvedConnect( normalized, &addr, qfalse, NULL, 0 );
 }
 
 
@@ -2730,16 +2773,58 @@ static void CL_CheckForResend( void ) {
 		if ( !( transport && transport->is_connecting && transport->is_connecting() ) ) {
 			char   info[MAX_INFO_STRING * 2];
 			qboolean truncated = qfalse;
+			qboolean infoValid;
+			qboolean handedOff = qfalse;
 			int qport = Cvar_VariableIntegerValue( "net_qport" );
 			Q_strncpyz( info, Cvar_InfoString( CVAR_USERINFO, &truncated ), sizeof( info ) );
+			infoValid = !truncated && strlen( info ) < MAX_USERINFO_LENGTH;
+
+			/* Browser authentication is target-scoped.  Never inherit the
+			 * process-global legacy password into a browser attempt; inject the
+			 * one-shot credential under its distinct wire key instead. */
+			if ( clientActiveApp->clc.joinAttempt.browserOrigin ) {
+				Info_RemoveKey( info, "password" );
+				Info_RemoveKey( info, "join_password" );
+				Info_RemoveKey( info, "join_auth" );
+				if ( infoValid && clientActiveApp->clc.joinAttempt.credentialPending ) {
+					infoValid = Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH,
+						"join_password", clientActiveApp->clc.joinAttempt.joinPassword );
+				}
+			}
 
 			// Embed client challenge so server echoes it back in connectResponse.
-			Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "challenge",
-									va( "%i", clientActiveApp->clc.challenge ) );
-			Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "protocol",
-									com_protocol->string );
-			Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH, "qport",
-									va( "%i", qport ) );
+			if ( infoValid )
+				infoValid = Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH,
+					"challenge", va( "%i", clientActiveApp->clc.challenge ) );
+			if ( infoValid )
+				infoValid = Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH,
+					"protocol", com_protocol->string );
+			if ( infoValid )
+				infoValid = Info_SetValueForKey_s( info, MAX_USERINFO_LENGTH,
+					"qport", va( "%i", qport ) );
+			if ( !infoValid ) {
+				static const char productError[] =
+					"Unable to connect because the client settings are too large.";
+				Com_Log( SEV_WARN, LOG_CH(ch_client),
+					"Connect userinfo rejected stage=build truncated=%d browser_origin=%d\n",
+					truncated ? 1 : 0,
+					clientActiveApp->clc.joinAttempt.browserOrigin ? 1 : 0 );
+				Q_SecureZeroMemory( info, sizeof( info ) );
+				Q_SecureZeroMemory( clientActiveApp->clc.joinAttempt.joinPassword,
+					sizeof( clientActiveApp->clc.joinAttempt.joinPassword ) );
+				clientActiveApp->clc.joinAttempt.credentialPending = qfalse;
+				Com_SetLastError( "%s", productError );
+				CL_Disconnect( clientActiveApp, qfalse );
+				if ( cls.uiStarted ) {
+					UI_CALL_SET_ACTIVE( UIMENU_MAIN );
+					CL_WiredUI_ShowError( "Connection Failed", productError, qtrue );
+				} else {
+					Q_strncpyz( CL_ActiveApp()->pendingConnectError, productError,
+						sizeof( CL_ActiveApp()->pendingConnectError ) );
+					CL_FlushMemory();
+				}
+				return;
+			}
 
 			CL_SetupQuicNetchan();
 			/* In-process-queue (B2+B3): the integrated host (this client + the
@@ -2779,8 +2864,18 @@ static void CL_CheckForResend( void ) {
 						NET_AdrToString( &clientActiveApp->clc.serverAddress ),
 						(int)BigShort( clientActiveApp->clc.serverAddress.port ),
 						info );
+					handedOff = qtrue;
 				}
 			}
+			if ( handedOff && clientActiveApp->clc.joinAttempt.browserOrigin ) {
+				Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+					"Browser connect credential disposed target=%s stage=client-handoff\n",
+					clientActiveApp->clc.joinAttempt.target );
+				Q_SecureZeroMemory( clientActiveApp->clc.joinAttempt.joinPassword,
+					sizeof( clientActiveApp->clc.joinAttempt.joinPassword ) );
+				clientActiveApp->clc.joinAttempt.credentialPending = qfalse;
+			}
+			Q_SecureZeroMemory( info, sizeof( info ) );
 		} else {
 			// Already connecting — just pump timers (WN_ClientFrame is
 			// also called from NET_Event, but belt-and-suspenders here).
@@ -3501,21 +3596,44 @@ Two cases after CL_Disconnect(qfalse):
 static void CL_CheckConnectError( void )
 {
 	char msg[512];
+	char retryTarget[MAX_OSPATH];
+	netConnectErrorKind_t errorKind = NET_CONNECT_ERROR_NONE;
+	int retryGeneration = 0;
+	qboolean retryAuthentication = qfalse;
 
 	// EB7: guard covers CA_CONNECTING + CA_CHALLENGING and any state
 	// between disconnected and fully active.
 	if ( clientActiveApp->state <= CA_DISCONNECTED || clientActiveApp->state >= CA_ACTIVE )
 		return;
-	if ( !( transport && transport->get_error && transport->get_error( msg, sizeof(msg) ) ) )
+	if ( !( transport && transport->get_error
+	     && transport->get_error( msg, sizeof(msg), &errorKind ) ) )
 		return;
+
+	retryTarget[0] = '\0';
+	if ( errorKind == NET_CONNECT_ERROR_AUTH_REFUSED
+	     && clientActiveApp->clc.joinAttempt.browserOrigin ) {
+		retryAuthentication = qtrue;
+		retryGeneration = clientActiveApp->clc.joinAttempt.selectionGeneration;
+		Q_strncpyz( retryTarget, clientActiveApp->clc.joinAttempt.target,
+			sizeof( retryTarget ) );
+	}
 
 	// Consume before CL_Disconnect so the error slot is clean on retry.
 	if ( transport && transport->clear_error )
 		transport->clear_error();
 
-	COM_WARN( LOG_CH(ch_client), "Connect failed: %s\n", msg );
-	Com_SetLastError( "%s", msg );
+	Com_Log( SEV_WARN, LOG_CH(ch_client),
+		"Connect failed kind=%d browser_retry=%d\n", (int)errorKind,
+		retryAuthentication ? 1 : 0 );
+	if ( !retryAuthentication ) {
+		Com_SetLastError( "%s", msg );
+	}
 	CL_Disconnect( clientActiveApp, qfalse );
+
+	if ( retryAuthentication
+	     && CL_WiredUI_ShowJoinPasswordRetry( retryTarget, retryGeneration ) ) {
+		return;
+	}
 
 	if ( cls.uiStarted ) {
 		// UI is still up — show the error dialog directly.

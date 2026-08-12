@@ -48,6 +48,10 @@ void     WiredUI_KeyEvent( int key, qboolean down );
 void     WiredUI_MouseEvent( float dx, float dy );
 void     WiredUI_SetActiveMenu( int menu );       // UIMENU_NONE, UIMENU_MAIN, UIMENU_INGAME
 qboolean WiredUI_IsFullscreen( void );
+/* Re-open the password dialog only when the browser selection still names the
+ * exact target and generation that received an authentication refusal. */
+qboolean CL_WiredUI_ShowJoinPasswordRetry( const char *target,
+	int selectionGeneration );
 /* C-15: WiredUI_DrawConnectScreen retired — compositor sole path. */
 
 // ── health / recovery ─────────────────────────────────────────────────

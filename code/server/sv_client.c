@@ -508,10 +508,9 @@ void SV_PrintClientStateChange( const client_t *cl, clientState_t newState ) {
 ==================
 SV_OnPlayerConnect
 
-Called on the main thread (from WN_DrainPendingConnects) when a QUIC game
-client has completed the Stream 0 binary TLV handshake. TLV ACCEPT was already
-sent by WN_GameHandleHandshake — this function finalises the slot and notifies
-the game VM.
+Called on the main thread (from WN_DrainPendingConnects) when a transport
+client has submitted the Stream 0 binary TLV handshake. This function owns VM
+admission and completes the transport ACCEPT/REFUSE only after that decision.
 
 Lean first-pass: fresh slot allocation, no IP-based reconnect detection.
 Reconnect detection will use conn_handle_t (picoquic callback_close + new) —
@@ -581,7 +580,8 @@ static qboolean SV_ConnIsIntegratedHost( conn_handle_t conn, const netadr_t *fro
 	return qtrue;
 }
 
-void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
+void SV_OnPlayerConnect( conn_handle_t conn, uint64_t allocationId,
+	const char *userinfo )
 {
 	char        tld[3];
 	client_t   *cl, *newcl;
@@ -596,7 +596,7 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 	if ( svs.spawn.phase != SPAWN_IDLE ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "SV_OnPlayerConnect: spawn in progress (phase %d), deferring conn %llu\n",
 			(int)svs.spawn.phase, (unsigned long long)conn );
-		WN_RequeueConnect( conn, userinfo );
+		WN_RequeueConnect( conn, allocationId, userinfo );
 		return;
 	}
 
@@ -637,18 +637,20 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 			newcl = &svs.clients[0];
 	}
 	if ( !newcl ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_server), "SV_OnPlayerConnect: server full, dropping conn %llu\n",
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "SV_OnPlayerConnect: server full, refusing conn %llu\n",
 			(unsigned long long)conn );
-		if ( transport )
-			transport_for_handle( conn )->drop_client( conn, "server full" );
+		if ( transport && transport_for_handle( conn )->complete_admission )
+			transport_for_handle( conn )->complete_admission( conn, qfalse,
+				NET_REFUSE_SERVER_FULL );
 		return;
 	}
 
 	int clientNum = (int)( newcl - svs.clients );
-	memset( newcl, 0, sizeof(*newcl) );
+	Q_SecureZeroMemory( newcl, sizeof( *newcl ) );
 
 	/* Store QUIC connection handle — used by all future transport calls */
 	newcl->quic_conn = conn;
+	newcl->quic_allocation_id = allocationId;
 
 	/* netchan replaced by QUIC — only keep the fields still referenced downstream. */
 	newcl->netchan.remoteAddress  = from;
@@ -657,6 +659,9 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 	newcl->netchan.isLANAddress   = Sys_IsLANAddress( &from );
 
 	Q_strncpyz( newcl->userinfo, userinfo, sizeof(newcl->userinfo) );
+	/* A client cannot assert an authentication-continuity marker on initial
+	 * admission; only the one-shot join_password reaches VM. */
+	Info_RemoveKey( newcl->userinfo, "join_auth" );
 	newcl->longstr = qtrue; /* QUIC clients always support long strings */
 
 	SV_SetTLD( tld, &from, Sys_IsLANAddress( &from ) );
@@ -672,12 +677,28 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 	intptr_t denied = VM_Call( gvm, 3, GAME_CLIENT_CONNECT, clientNum, qtrue, qfalse );
 	if ( denied ) {
 		const char *reason = GVM_ArgPtr( denied );
-		Com_Log( SEV_INFO, LOG_CH(ch_server), "QUIC: game rejected connection from %s: %s\n",
-			NET_AdrToString( &from ), reason );
-		if ( transport )
-			transport_for_handle( conn )->drop_client( conn, reason );
-		memset( newcl, 0, sizeof(*newcl) );
+		netRefuseClass_t refusalClass = reason && !strcmp( reason, "Invalid password" )
+			? NET_REFUSE_AUTH : NET_REFUSE_GENERIC;
+		Com_Log( SEV_INFO, LOG_CH(ch_server),
+			"QUIC: game rejected connection from %s class=%d\n",
+			NET_AdrToString( &from ), (int)refusalClass );
+		if ( transport && transport_for_handle( conn )->complete_admission )
+			transport_for_handle( conn )->complete_admission( conn, qfalse,
+				refusalClass );
+		Q_SecureZeroMemory( newcl, sizeof( *newcl ) );
 		return;
+	}
+
+	/* Dispose of the transient credential before any userinfo broadcast. Rebuild
+	 * through a scratch buffer so bytes beyond the new NUL cannot retain it. */
+	{
+		char sanitized[MAX_INFO_STRING];
+		Q_strncpyz( sanitized, newcl->userinfo, sizeof( sanitized ) );
+		Info_RemoveKey( sanitized, "join_password" );
+		Info_RemoveKey( sanitized, "join_auth" );
+		Q_SecureZeroMemory( newcl->userinfo, sizeof( newcl->userinfo ) );
+		Q_strncpyz( newcl->userinfo, sanitized, sizeof( newcl->userinfo ) );
+		Q_SecureZeroMemory( sanitized, sizeof( sanitized ) );
 	}
 
 	if ( sv_clientTLD->integer )
@@ -695,6 +716,10 @@ void SV_OnPlayerConnect( conn_handle_t conn, const char *userinfo )
 	newcl->justConnected      = qfalse;
 	/* Force gamestate retransmit on first snapshot */
 	newcl->gamestateMessageNum = newcl->messageAcknowledge - 1;
+
+	if ( transport && transport_for_handle( conn )->complete_admission )
+		transport_for_handle( conn )->complete_admission( conn, qtrue,
+			NET_REFUSE_GENERIC );
 
 	/* Send gamestate immediately: there is no usercmd exchange to trigger it
 	 * from SV_ExecuteClientMessage (client is waiting for gamestate to exit
@@ -724,13 +749,15 @@ Finds the CS_PRIMED client slot matching the conn handle and calls
 SV_ClientEnterWorld to transition it to CS_ACTIVE.
 ==================
 */
-void SV_OnPlayerReady( conn_handle_t conn )
+void SV_OnPlayerReady( conn_handle_t conn, uint64_t allocationId )
 {
 	client_t *cl;
 
 	for ( int i = 0; i < sv_maxclients->integer; i++ ) {
 		cl = &svs.clients[i];
-		if ( cl->state == CS_PRIMED && cl->quic_conn == conn ) {
+		if ( cl->state == CS_PRIMED && cl->quic_conn == conn
+		     && cl->quic_allocation_id == allocationId
+		     && WN_GameConnIdentityAccepted( conn, allocationId ) ) {
 			Com_Log( SEV_DEBUG, LOG_CH(ch_server), "QUIC: SV_OnPlayerReady — slot %d (%s)\n", i, cl->name );
 			SV_ClientEnterWorld( cl );
 			return;
@@ -738,6 +765,39 @@ void SV_OnPlayerReady( conn_handle_t conn )
 	}
 	Com_Log( SEV_DEBUG, LOG_CH(ch_server), "QUIC: SV_OnPlayerReady: no CS_PRIMED client for conn %llu\n",
 		(unsigned long long)conn );
+}
+
+void SV_OnPlayerTransportClosed( conn_handle_t conn, uint64_t allocationId )
+{
+	client_t *cl;
+	for ( int i = 0; i < sv_maxclients->integer; i++ ) {
+		cl = &svs.clients[i];
+		if ( cl->state < CS_CONNECTED || cl->quic_conn != conn
+		     || cl->quic_allocation_id != allocationId ) continue;
+		/* Invalidate before invoking game/server teardown so no nested send or
+		 * recyclable handle can route through the dead association. */
+		cl->quic_conn = CONN_INVALID;
+		cl->quic_allocation_id = 0;
+		Com_Log( SEV_INFO, LOG_CH(ch_server),
+			"QUIC: exact transport close client_slot=%d allocation=%llu\n",
+			i, (unsigned long long)allocationId );
+		if ( gvm ) {
+			SV_DropClient( cl, NULL );
+		} else {
+			SV_FreeClient( cl );
+			Q_SecureZeroMemory( cl->userinfo, sizeof( cl->userinfo ) );
+			cl->state = CS_FREE;
+		}
+		return;
+	}
+}
+
+qboolean SV_ClientTransportAccepted( const client_t *client )
+{
+	return client && client->quic_conn != CONN_INVALID
+		&& client->quic_allocation_id != 0
+		&& WN_GameConnIdentityAccepted( client->quic_conn,
+			client->quic_allocation_id );
 }
 
 /*
@@ -759,6 +819,7 @@ void SV_DrainUsercmds_Impl( void )
 	byte          dgbuf[2048];
 	int           dglen;
 	conn_handle_t dgconn;
+	uint64_t      dgAllocationId;
 	int           i;
 	client_t     *cl;
 
@@ -770,7 +831,7 @@ void SV_DrainUsercmds_Impl( void )
 		return;
 
 	dglen = (int)sizeof( dgbuf );
-	while ( WN_ServerRecvUsercmd( &dgconn, dgbuf, &dglen ) ) {
+	while ( WN_ServerRecvUsercmd( &dgconn, &dgAllocationId, dgbuf, &dglen ) ) {
 		if ( dglen >= 13 ) {  /* client_tick(4) + snapshot_ack(4) + serverCmd_ack(4) + cmd_count(1) minimum */
 			msg_t         msg;
 			int           snapshotAck;
@@ -784,7 +845,8 @@ void SV_DrainUsercmds_Impl( void )
 			cl = NULL;
 			for ( j = 0; j < sv_maxclients->integer; j++ ) {
 				if ( svs.clients[j].state >= CS_CONNECTED &&
-				     svs.clients[j].quic_conn == dgconn ) {
+				     svs.clients[j].quic_conn == dgconn &&
+				     svs.clients[j].quic_allocation_id == dgAllocationId ) {
 					cl = &svs.clients[j];
 					break;
 				}
@@ -885,6 +947,7 @@ void SV_DrainQUICReliableCommands( void )
 	byte          buf[MAX_MSGLEN];
 	int           len;
 	conn_handle_t rconn;
+	uint64_t      rAllocationId;
 	int           rchan;
 	client_t     *cl;
 
@@ -898,7 +961,7 @@ void SV_DrainQUICReliableCommands( void )
 	 * mode, mixing the two paths. Batch 3 keeps direct on both sides; the
 	 * vtable needs split fields (recv_reliable_client / recv_reliable_server)
 	 * before this can rewire safely. */
-	while ( WN_ServerRecvReliable( &rconn, &rchan, buf, &len ) ) {
+	while ( WN_ServerRecvReliable( &rconn, &rAllocationId, &rchan, buf, &len ) ) {
 		if ( rchan == CHAN_COMMANDS ) {
 			/* null-terminate defensively */
 			buf[ len < (int)sizeof(buf) ? len : (int)sizeof(buf) - 1 ] = '\0';
@@ -906,7 +969,8 @@ void SV_DrainQUICReliableCommands( void )
 			cl = NULL;
 			for ( int i = 0; i < sv_maxclients->integer; i++ ) {
 				if ( svs.clients[i].state >= CS_CONNECTED &&
-				     svs.clients[i].quic_conn == rconn ) {
+				     svs.clients[i].quic_conn == rconn &&
+				     svs.clients[i].quic_allocation_id == rAllocationId ) {
 					cl = &svs.clients[i];
 					break;
 				}
@@ -1240,7 +1304,7 @@ void SV_SendClientGameState( client_t *client ) {
 	}
 
 	// deliver this to the client
-	if ( client->quic_conn != CONN_INVALID && transport ) {
+	if ( transport && SV_ClientTransportAccepted( client ) ) {
 		byte *bootbuf = (byte *)Z_Malloc( WN_BOOTSTRAP_MAX );
 		int bootlen = 0;
 		/* WiredNet QUIC client: send typed bootstrap sections on the reliable
@@ -1538,7 +1602,7 @@ static int SV_WriteDownloadToClient( client_t *cl )
 			MSG_WriteString( &msg, errorMessage );
 
 			MSG_WriteByte( &msg, svc_EOF );
-			if ( cl->quic_conn != CONN_INVALID && transport ) {
+			if ( transport && SV_ClientTransportAccepted( cl ) ) {
 				byte dlbuf[1024 + 16];
 				int  msglen = 0;
 				int  errlen = (int)strlen( errorMessage );
@@ -1638,7 +1702,7 @@ static int SV_WriteDownloadToClient( client_t *cl )
 
 	MSG_WriteByte( &msg, svc_EOF );
 
-	if ( cl->quic_conn != CONN_INVALID && transport ) {
+	if ( transport && SV_ClientTransportAccepted( cl ) ) {
 		byte dlbuf[MAX_DOWNLOAD_BLKSIZE + 16];
 		int  msglen = 0;
 		int  blockSize = cl->downloadBlockSize[curindex];
@@ -2015,6 +2079,7 @@ SV_UpdateUserinfo_f
 */
 static void SV_UpdateUserinfo_f( client_t *cl ) {
 	const char *info;
+	char sanitized[MAX_INFO_STRING];
 
 	info = Cmd_Argv( 1 );
 
@@ -2023,7 +2088,12 @@ static void SV_UpdateUserinfo_f( client_t *cl ) {
 		return;
 	}
 
-	Q_strncpyz( cl->userinfo, info, sizeof( cl->userinfo ) );
+	Q_strncpyz( sanitized, info, sizeof( sanitized ) );
+	Info_RemoveKey( sanitized, "join_auth" );
+	Info_RemoveKey( sanitized, "join_password" );
+	Q_SecureZeroMemory( cl->userinfo, sizeof( cl->userinfo ) );
+	Q_strncpyz( cl->userinfo, sanitized, sizeof( cl->userinfo ) );
+	Q_SecureZeroMemory( sanitized, sizeof( sanitized ) );
 
 	SV_UserinfoChanged( cl, qtrue, qtrue ); // update userinfo, run filter
 	// call prog code to allow overrides

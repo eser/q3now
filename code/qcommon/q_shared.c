@@ -884,6 +884,18 @@ void Q_strncpyz( char *dest, const char *src, int destsize )
 #endif
 }
 
+void Q_SecureZeroMemory( void *ptr, size_t size )
+{
+	volatile byte *cursor = (volatile byte *)ptr;
+
+	if ( !cursor ) {
+		return;
+	}
+	while ( size-- > 0 ) {
+		*cursor++ = 0;
+	}
+}
+
 
 /*
 =============
@@ -1463,6 +1475,38 @@ const char *Info_ValueForKey( const char *s, const char *key )
 	}
 
 	return "";
+}
+
+qboolean Info_ValueForKeyBuf( const char *s, const char *key, char *out,
+	int outSize ) {
+	int keyLen;
+
+	if ( !out || outSize <= 0 ) return qfalse;
+	out[0] = '\0';
+	if ( !s || !key || !key[0] ) return qfalse;
+	keyLen = (int)strlen( key );
+	if ( *s == '\\' ) s++;
+	while ( *s ) {
+		const char *pairKey = s;
+		const char *value;
+		int pairKeyLen;
+		int valueLen;
+		while ( *s && *s != '\\' ) s++;
+		if ( !*s ) return qfalse;
+		pairKeyLen = (int)( s - pairKey );
+		s++;
+		value = s;
+		while ( *s && *s != '\\' ) s++;
+		valueLen = (int)( s - value );
+		if ( pairKeyLen == keyLen && Q_strkey( pairKey, key, keyLen ) ) {
+			if ( valueLen >= outSize ) return qfalse;
+			memcpy( out, value, (size_t)valueLen );
+			out[valueLen] = '\0';
+			return qtrue;
+		}
+		if ( *s == '\\' ) s++;
+	}
+	return qfalse;
 }
 
 
