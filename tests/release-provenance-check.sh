@@ -29,7 +29,7 @@ require_exact_count() {
 
 run_case() {
   local uname_s=$1 uname_m=$2 bundle_target=$3 artifact=$4 summary_label=$5
-  local output recursive_row artifact_row summary_row description_rows rsync_rows
+  local output recursive_row pack_recursive_row artifact_row summary_row description_rows rsync_rows
 
   output=$(
     "$MAKE_BIN" --no-print-directory --always-make -n -C "$ROOT" -f "$MAKEFILE_PATH" release \
@@ -42,6 +42,10 @@ run_case() {
   recursive_row="$bundle_target VERSION=\"$PROBE_VERSION\" SOURCE_VERSION=\"$PROBE_SOURCE\" BUILD_DATE_ISO=\"$PROBE_DATE\""
   [[ $(grep -Fc "$recursive_row" <<<"$output" || true) == 1 ]] \
     || fail "$uname_s recursive bundle did not receive the exact frozen tuple"
+
+  pack_recursive_row="build/release/base/pax21.sw3z VERSION=\"$PROBE_VERSION\" SOURCE_VERSION=\"$PROBE_SOURCE\" BUILD_DATE_ISO=\"$PROBE_DATE\""
+  [[ $(grep -Fc "$pack_recursive_row" <<<"$output" || true) -ge 1 ]] \
+    || fail "$uname_s recursive pack did not receive the exact frozen tuple"
 
   description_rows=$(grep -F 'description.txt' <<<"$output" || true)
   [[ -n $description_rows ]] || fail "$uname_s emitted no pack description recipe"
@@ -95,11 +99,12 @@ if [[ $SELF_TEST == 1 ]]; then
   }
 
   expect_reject missing-source-forward 's/ SOURCE_VERSION="$(SOURCE_VERSION)"//g'
+  expect_reject missing-pack-source-forward '/$(MAKE) $(PAK_OUT)/s/ SOURCE_VERSION="$(SOURCE_VERSION)"//'
   expect_reject stale-pack-stamp 's/echo "$(APP_NAME) $(SOURCE_VERSION) ($(BUILD_DATE_ISO))"/echo "$(APP_NAME) stale-source (stale-date)"/'
   expect_reject missing-artifact-postcondition '/expected release artifact missing/d'
   expect_reject missing-macos-base-filter "/--filter='H \/Contents\/MacOS\/base\/'/d"
 
-  echo "PASS release provenance self-test: clean +4 mutations"
+  echo "PASS release provenance self-test: clean +5 mutations"
   exit 0
 fi
 
