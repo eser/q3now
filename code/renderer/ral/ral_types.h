@@ -50,8 +50,6 @@ typedef struct ralBindGroupLayout_s  ralBindGroupLayout_t;
 typedef struct ralBindGroup_s        ralBindGroup_t;
 typedef struct ralPipeline_s         ralPipeline_t;
 typedef struct ralPipelineLayout_s   ralPipelineLayout_t;   // typed cmd API
-typedef struct ralRenderPass_s       ralRenderPass_t;       // typed cmd API
-typedef struct ralFramebuffer_s      ralFramebuffer_t;      // typed cmd API
 typedef struct ralCommandBuffer_s    ralCommandBuffer_t;
 typedef struct ralFence_s            ralFence_t;
 typedef struct ralSemaphore_s        ralSemaphore_t;

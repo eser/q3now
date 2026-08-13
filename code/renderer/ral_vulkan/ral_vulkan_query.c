@@ -30,7 +30,6 @@ ralQueryPool_t *Ral_CreateQueryPool( ralBackend_t *b, const ralQueryPoolCreateIn
 	if ( !qp ) return NULL;
 	RAL_ZERO( *qp );
 	qp->backend = b; qp->type = ci->type; qp->count = ci->count;
-	qp->ownsPool = qtrue;   // native RAL allocation owns the VkQueryPool; Ral_AdoptQueryPool flips this to qfalse.
 	RAL_ZERO( qpi );
 	qpi.sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
 	qpi.queryType  = ralVk_QueryType( ci->type );
@@ -54,34 +53,9 @@ ralQueryPool_t *Ral_CreateQueryPool( ralBackend_t *b, const ralQueryPoolCreateIn
 
 void Ral_DestroyQueryPool( ralQueryPool_t *pool ) {
 	if ( !pool ) return;
-	// ownsPool=qfalse on Ral_AdoptQueryPool-created wrappers
-	// (the renderer's existing qvkCreateQueryPool retains lifetime ownership of
-	// the underlying VkQueryPool). Free only the wrapper struct.
-	if ( pool->ownsPool && pool->pool != VK_NULL_HANDLE && pool->backend )
+	if ( pool->pool != VK_NULL_HANDLE && pool->backend )
 		ralVk_DeferDestroy( pool->backend, RAL_RES_QUERY_POOL, RAL_VK_H2U( pool->pool ), 0, NULL );
 	free( pool );
-}
-
-// query-pool adoption helper. Wraps an existing
-// VkQueryPool in a ralQueryPool_t with ownsPool=qfalse. See ral_query.h
-// for the parallel-paths lifetime contract.
-ralQueryPool_t *Ral_AdoptQueryPool( ralBackend_t *b, void *externalPool, ralQueryType_t type, uint32_t count, const char *debugName ) {
-	ralQueryPool_t *qp;
-	if ( !b || !externalPool || count == 0 ) return NULL;
-	qp = (ralQueryPool_t *)malloc( sizeof( *qp ) );
-	if ( !qp ) return NULL;
-	RAL_ZERO( *qp );
-	qp->backend  = b;
-	qp->pool     = (VkQueryPool)externalPool;
-	qp->type     = type;
-	qp->count    = count;
-	qp->ownsPool = qfalse;
-	if ( debugName ) ralVk_SetObjectName( b, RAL_VK_H2U( qp->pool ), VK_OBJECT_TYPE_QUERY_POOL, debugName );
-	return qp;
-}
-
-void *Ral_GetQueryPoolHandle( const ralQueryPool_t *pool ) {
-	return pool ? (void *)pool->pool : NULL;
 }
 
 void Ral_ResetQueryPool( ralQueryPool_t *pool, uint32_t firstQuery, uint32_t queryCount ) {

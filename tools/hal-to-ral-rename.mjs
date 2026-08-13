@@ -77,9 +77,9 @@ const RULES = [
 	// 2) Header guards (specific to avoid catching nothing else)
 	[/\bWIRED_HAL_/g, "WIRED_RAL_"],
 
-	// 3) Build flag (specific — must precede bare HAL_)
-	[/\bFEAT_HAL\b/g, "FEAT_RAL"],
-	[/-DFEAT_HAL\b/g, "-DFEAT_RAL"],
+	// 3) The historical optional build flag has no RAL equivalent. RAL is a
+	// mandatory renderer layer; any FEAT_HAL occurrence is deliberately left
+	// for checkRemainingHal() to reject instead of manufacturing a retired flag.
 	[/WIRED_BUILD_SHADER_XLATE/g, "WIRED_BUILD_SHADER_XLATE"], // no-op (kept to document intent)
 
 	// 4) Cvar name — explicit (preserves the "RAL" capitalization in `r_useRALTextures`)

@@ -9,9 +9,10 @@
 # (AO open≈1.0 / corners<1.0 / spread for GTAO; tile-equivalence for Forward+),
 # NEVER a human look. Eser is terminal-only.
 #
-# For mode=gtao this builds the FEAT_SSAO=1 verify DLL (USE_SSAO=ON) into a
-# separate build dir and swaps it into the run dir, so the ship build is never
-# clobbered; it restores the ship DLL on exit. mode=fwdplus uses the ship build.
+# For mode=gtao this builds a dedicated FEAT_SSAO=1 verify DLL (USE_SSAO=ON)
+# into a separate build dir and swaps it into the run dir, so the current
+# product renderer is never clobbered; it restores that renderer on exit.
+# mode=fwdplus uses the current product build.
 #
 # Usage: visual-feature-bless-verify.sh <gtao|fwdplus> <run-build-dir> <verify-build-dir>
 set -u
@@ -30,7 +31,7 @@ RESTORE_DLL=0
 cleanup() {
     if [ "$RESTORE_DLL" = "1" ] && [ -f "$DLL_BAK" ]; then
         cp "$DLL_BAK" "$SHIP_DLL" && rm -f "$DLL_BAK"
-        echo "==== restored ship renderer DLL (FEAT_SSAO=0) ===="
+        echo "==== restored current product renderer DLL ===="
     fi
 }
 trap cleanup EXIT
@@ -39,11 +40,11 @@ if [ "$MODE" = "gtao" ]; then
     echo "==== build the FEAT_SSAO=1 verify renderer DLL (USE_SSAO=ON) ===="
     cmake -S . -B "$SSAO_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DUSE_SSAO=ON -DUSE_RENDERER_DLOPEN=ON >/dev/null 2>&1
     ninja -C "$SSAO_DIR" wired_vulkan_x86_64 || { echo "FAIL: FEAT_SSAO=1 DLL build failed"; exit 1; }
-    # swap the FEAT_SSAO=1 DLL into the run dir (only the renderer DLL needs SSAO;
+    # swap the dedicated FEAT_SSAO=1 DLL into the run dir (only the renderer DLL needs SSAO;
     # the engine + game are FEAT_SSAO-agnostic, so the proven run-dir engine is reused).
     cp "$SHIP_DLL" "$DLL_BAK" && cp "$SSAO_DIR/wired_vulkan_x86_64.dll" "$SHIP_DLL"
     RESTORE_DLL=1
-    echo "    swapped FEAT_SSAO=1 DLL into $RUN_DIR (ship DLL backed up)"
+    echo "    swapped dedicated FEAT_SSAO=1 DLL into $RUN_DIR (product DLL backed up)"
 fi
 
 echo

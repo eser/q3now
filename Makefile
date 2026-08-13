@@ -266,8 +266,9 @@ PAK_OUT := $(BUILD_DIR)/base/pax21.sw3z
         test-bot-slot-restart test-bot-slot-restart-self \
         test-wasm-map-restart test-wasm-map-restart-self \
         test-vmi-bytecode-gui test-vmi-bytecode-gui-self \
-        test-reload-wasm-refusal test-reload-wasm-refusal-self \
-        test-vmi-pack-runtime test-vmi-pack-runtime-self \
+	test-reload-wasm-refusal test-reload-wasm-refusal-self \
+	test-vmi-pack-runtime test-vmi-pack-runtime-self \
+	test-dlight-shadow-gpu-budget test-dlight-shadow-gpu-budget-self \
         test-wiredui-demo-semantic-continuation test-wiredui-demo-semantic-continuation-self \
         test-directed-ping-queue test-directed-ping-queue-self \
 		test-ping-owner-browser test-ping-owner-browser-self \
@@ -1187,6 +1188,17 @@ test-vmi-pack-runtime-self:
 
 .PHONY: test-vmi-pack-runtime test-vmi-pack-runtime-self
 
+# RAL-native timestamp sweep for the dlight omni-shadow GPU budget. This
+# measures OFF plus K=1..4; it deliberately does not choose the ship default.
+test-dlight-shadow-gpu-budget:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/dlight-shadow-gpu-budget-check.sh "$${WIRED}"
+
+test-dlight-shadow-gpu-budget-self:
+	@bash tests/dlight-shadow-gpu-budget-check.sh --self-test
+
+.PHONY: test-dlight-shadow-gpu-budget test-dlight-shadow-gpu-budget-self
+
 test-wiredui-demo-semantic-continuation:
 	@test -n "$${WIRED}" || { echo "usage: make $@ WIRED=/absolute/path/to/wired"; exit 64; }
 	@bash tests/wiredui-demo-semantic-continuation-check.sh "$${WIRED}"
@@ -1254,6 +1266,46 @@ test-local-listen-timeout-self:
 	@bash tests/local-listen-timeout-check.sh --self-test
 
 .PHONY: test-local-listen-timeout test-local-listen-timeout-self
+
+# The historical command now runs the exact production offscreen RAL pipeline
+# exercise: layout sharing, graphics readback, compute SSBO and cache roundtrip.
+test-ral-pipeline-runtime:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/ral-pipeline-runtime-check.sh "$${WIRED}"
+
+test-ral-pipeline-runtime-self:
+	@bash tests/ral-pipeline-runtime-check.sh --self-test
+
+.PHONY: test-ral-pipeline-runtime test-ral-pipeline-runtime-self
+
+# Real whole-texture adapter exercise for the generic RAL residency policy:
+# deterministic eviction, explicit evicted state, white fallback and restore.
+test-ral-residency-runtime:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/ral-residency-runtime-check.sh "$${WIRED}"
+
+test-ral-residency-runtime-self:
+	@bash tests/ral-residency-runtime-check.sh --self-test
+
+.PHONY: test-ral-residency-runtime test-ral-residency-runtime-self
+
+test-ral-profile-markers:
+	@test -n "$${WIRED}" || { echo "usage: make test-ral-profile-markers WIRED=/absolute/path/to/wired"; exit 64; }
+	@bash tests/ral-profile-markers-check.sh "$${WIRED}"
+
+test-ral-profile-markers-self:
+	@bash tests/ral-profile-markers-check.sh --self-test
+
+.PHONY: test-ral-profile-markers test-ral-profile-markers-self
+
+test-ral-profile-layout:
+	@test -n "$${WIRED}" || { echo "usage: make test-ral-profile-layout WIRED=/absolute/path/to/wired"; exit 64; }
+	@bash tests/ral-profile-layout-check.sh "$${WIRED}"
+
+test-ral-profile-layout-self:
+	@bash tests/ral-profile-layout-check.sh --self-test
+
+.PHONY: test-ral-profile-layout test-ral-profile-layout-self
 
 # Real global-browser discovery through an authorized loopback master and
 # challenge-bound directed info responses. Deliberately excludes Connect.
@@ -1488,12 +1540,12 @@ endif
 
 # ── render-feature visual gates (GTAO + Forward+) ────────────────────────────
 # Fully-automated, ZERO-human-in-the-loop pixel gates for two render features the
-# default golden gate does NOT cover (it runs a FEAT_SSAO=0 build, and never pixel-
+# default golden gate does NOT cover (it never isolates the AO field and never pixel-
 # equivalence-gates r_forwardPlus). Each target runs end-to-end: (build →) capture →
 # COMPUTED sanity assertions → bless-if-sane → cold re-verify → pass/fail. No eyeball.
 #
-#   visual-gtao    : builds the FEAT_SSAO=1 verify DLL (USE_SSAO=ON, separate build/
-#                    ssao-verify dir), swaps it into the run dir, captures 5 viewpoints
+#   visual-gtao    : builds a dedicated FEAT_SSAO=1 verify DLL (USE_SSAO=ON, separate
+#                    build/ssao-verify dir), swaps it into the run dir, captures 5 viewpoints
 #                    x {r_ssao 0 (==base golden), r_ssao 1, r_showAO 1 (AO-isolated)},
 #                    and ASSERTS the AO field directly (open-surface ~1.0, corners <1.0
 #                    by threshold, real spread). Restores the ship DLL on exit.

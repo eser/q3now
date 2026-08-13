@@ -49,13 +49,6 @@ typedef struct {
 ralSwapchain_t *Ral_CreateSwapchain ( ralBackend_t *b, const ralSwapchainCreateInfo_t *ci );
 void            Ral_DestroySwapchain( ralSwapchain_t *sc );
 
-// Accessor for the underlying
-// VkSwapchainKHR (on Vulkan). Used by the renderer to mirror its legacy
-// vk.swapchain field from the RAL-owned swapchain so the 100+ existing
-// vk.swapchain references in vk.c work transparently. Returns NULL on
-// NULL arg or pre-create state. Consumer casts back to VkSwapchainKHR.
-void *Ral_GetSwapchainHandle( const ralSwapchain_t *sc );
-
 // Cached swapchain image extent (surface currentExtent at create time = physical
 // swapchain pixels). The correct render-target size for the final present-blit
 // pass — distinct from the SDL-reported window size (half on hi-DPI) and from the

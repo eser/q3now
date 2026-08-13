@@ -86,10 +86,6 @@
 #define FEAT_WIREDNET_OBSERVER            1   // HTTP observer: /status.json, JSON event ring, static web UI
 #define FEAT_WIREDNET_CONTROL             1   // MCP/JSON-RPC control channel over QUIC + HTTP POST /mcp
 #define FEAT_MEMSTATS                     1   // per-subsystem allocation accounting + meminfo commands
-#ifndef FEAT_RAL
-#define FEAT_RAL                          0   // GPU Renderer Abstraction Layer (code/renderer/ral*). Off until the renderer is migrated onto it; the Vulkan backend skeleton (code/renderer/ral_vulkan/) always builds + links into wired_vulkan_* so the surface stays validated, but renderervk does not include ral/*.h while this is 0. Renderer-DLL-internal — no ABI impact.
-#endif
-
 // ── model formats ────────────────────────────────────────────────────
 #define FEAT_IQM                          1   // IQM (Inter-Quake Model) skeletal mesh format
 
@@ -100,7 +96,9 @@
 #define FEAT_DEPTH_CLAMP                  1   // disable near-plane vertex clipping at high FOV
 #define FEAT_DEPTH_FADE                   1   // soft particle edges (explosions, smoke, blood)
 #define FEAT_PARALLAX_MAPPING             0   // steep parallax mapping with normalmap (height in alpha)
-#define FEAT_SSAO                         1   // ground-truth ambient occlusion (GTAO). #ifndef so CMake -DFEAT_SSAO=0 can still produce a no-AO build.
+#ifndef FEAT_SSAO
+#define FEAT_SSAO                         1   // ground-truth ambient occlusion (GTAO); CMake explicitly owns ON/OFF.
+#endif
 #define FEAT_TONEMAP                      1   // HDR tone mapping (Reinhard/ACES/Uncharted2)
 #define FEAT_COLOR_GRADING                0   // color tint, saturation, contrast
 #define FEAT_SUNRAYS                      1   // screen-space crepuscular rays (depth-based sky detection)

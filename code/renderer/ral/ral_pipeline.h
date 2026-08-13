@@ -193,17 +193,6 @@ typedef struct {
 	// compatible with descriptor-set binds recorded on that buffer).
 	ralPipelineLayout_t        *externalLayout;
 
-	// optional caller-provided VkRenderPass. When
-	// non-NULL, the pipeline is created with a legacy VkRenderPass + subpass
-	// instead of VkPipelineRenderingCreateInfo (dynamic rendering). Required
-	// when the consumer binds the pipeline inside a vkCmdBeginRenderPass
-	// instance (validation: pipeline's renderPass must equal the bound
-	// renderPass, or null for dynamic rendering — there's no mixing). The
-	// caller retains lifetime ownership of the underlying VkRenderPass. Passed
-	// as a typed `ralRenderPass_t *` wrapper; backend extracts vkHandle.
-	ralRenderPass_t            *externalRenderPass;
-	uint32_t                    externalSubpass;        // 0 by default
-
 	// Optional per-pipeline variable-rate shading. Default RAL_SHADING_RATE_1x1
 	// (== 0, so a zero-initialized create-info is unchanged): the pipeline runs one
 	// fragment-shader invocation per pixel exactly as before. A coarser rate is

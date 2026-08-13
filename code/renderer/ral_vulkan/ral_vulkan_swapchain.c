@@ -29,17 +29,6 @@ R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
 // ════════════════════════════════════════════════════════════════════════
 // format / colorspace / present-mode mapping helpers (ralFormat_t → Vk*)
 // ════════════════════════════════════════════════════════════════════════
-static VkColorSpaceKHR ralVk_TranslateColorSpace( ralColorSpace_t cs ) {
-	switch ( cs ) {
-	case RAL_COLORSPACE_EXTENDED_SRGB_LINEAR: return VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT;
-	case RAL_COLORSPACE_HDR10_ST2084:         return VK_COLOR_SPACE_HDR10_ST2084_EXT;
-	case RAL_COLORSPACE_HDR10_HLG:            return VK_COLOR_SPACE_HDR10_HLG_EXT;
-	case RAL_COLORSPACE_DISPLAY_P3:           return VK_COLOR_SPACE_DISPLAY_P3_NONLINEAR_EXT;
-	case RAL_COLORSPACE_SRGB_NONLINEAR:
-	default:                                   return VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-	}
-}
-
 // translate the RAL present mode to a Vulkan present mode FAITHFULLY.
 // Previously RAL_PRESENT_FIFO_RELAXED / _LATEST_READY did not exist and the
 // renderer's Vk_to_RalPresentMode collapsed both Vk modes to RAL_PRESENT_FIFO,
@@ -55,17 +44,6 @@ static VkColorSpaceKHR ralVk_TranslateColorSpace( ralColorSpace_t cs ) {
 // requested mode is guaranteed creatable; no device re-query is needed here
 // (and the RAL backend's instance-PFN set deliberately excludes
 // GetPhysicalDeviceSurfacePresentModesKHR — the renderer owns that query).
-static VkPresentModeKHR ralVk_TranslatePresentMode( ralPresentMode_t pm ) {
-	switch ( pm ) {
-	case RAL_PRESENT_MAILBOX:             return VK_PRESENT_MODE_MAILBOX_KHR;
-	case RAL_PRESENT_IMMEDIATE:           return VK_PRESENT_MODE_IMMEDIATE_KHR;
-	case RAL_PRESENT_FIFO_RELAXED:        return VK_PRESENT_MODE_FIFO_RELAXED_KHR;
-	case RAL_PRESENT_FIFO_LATEST_READY:   return VK_PRESENT_MODE_FIFO_LATEST_READY_EXT;
-	case RAL_PRESENT_FIFO:
-	default:                              return VK_PRESENT_MODE_FIFO_KHR;
-	}
-}
-
 // ════════════════════════════════════════════════════════════════════════
 // Ral_CreateSwapchain — adopt externalSurface, create VkSwapchainKHR +
 // adopt each swapchain image as ralTexture_t (ownsImage=qfalse).

@@ -26,6 +26,8 @@
 
 #ifdef USE_VULKAN
 
+#include "../renderer/ral_vulkan/ral_vulkan_bridge.h"
+
 struct image_s;     // forward — from tr_local.h
 struct ralTexture_s;
 struct ralBackend_s;
@@ -80,7 +82,7 @@ void     vk_ral_adopt_static_bindgroups( void );
 // over the adoption registry. Returns NULL when `vkSet` isn't adopted
 // (e.g. per-shader-type rotating descriptors deferred to the later
 // per-frame adoption). Callers at the ~25 parallel bind-call sites
-// guard on non-NULL before calling Ral_CmdBindBindGroups.
+// guard on non-NULL before binding through the typed singular RAL command.
 struct ralBindGroup_s;
 struct ralBindGroup_s *vk_ral_lookup_bindgroup( VkDescriptorSet vkSet );
 
@@ -95,19 +97,12 @@ struct ralBuffer_s;
 struct ralPipeline_s;
 struct ralPipelineLayout_s;
 struct ralTexture_s;
-struct ralQueryPool_s;
 struct ralBuffer_s         *vk_ral_lookup_buffer         ( VkBuffer         vkBuf    );
 struct ralPipeline_s       *vk_ral_lookup_pipeline       ( VkPipeline       vkPipe   );
 
-// VkImage / VkQueryPool → adopted-wrapper reverse-lookup
-// for the typed Ral_Cmd{PipelineBarrierFull,CopyImage,WriteTimestamp,ResetQueryPool}
-// migration. Returns NULL when the lookup target wasn't adopted (e.g. transient
-// images / a VkQueryPool other than the renderer's vk_gpu_ts_pool). Parallel-
-// paths NULL-fallthrough contract: callers either short-circuit with a SEV_WARN
-// log on miss, or skip the typed RAL call and rely on the legacy qvkCmd* path
-// staying authoritative.
+// VkImage → adopted-wrapper reverse lookup for the typed image command
+// migration. Query pools are native RAL resources and need no reverse lookup.
 struct ralTexture_s        *vk_ral_lookup_texture        ( VkImage          vkImage  );
-struct ralQueryPool_s      *vk_ral_lookup_query_pool     ( VkQueryPool      vkPool   );
 
 // Boot-time adoption of the renderer's 6 internal-image
 // VkImage handles (depth_image / color_image / tonemapped_image + 3 inside
@@ -211,6 +206,7 @@ void vk_ral_reset_bindless_slots( void );
 // frame (spreads a mass-resample over frames; a still-pending texture stays
 // white-sentinel until its turn). Modder-code-level tunable, not a user cvar.
 #define WIRED_TEX_REREGISTER_MAX_PER_FRAME 64
+#define WIRED_TEX_REREGISTER_MAX_BYTES_PER_FRAME ( 32u * 1024u * 1024u )
 
 // Option-A cross-thread flag accessors. Poll thread (single producer) sets the
 // flag on CRITICAL via vk_ral_on_memory_pressure; render thread (single consumer)
@@ -220,6 +216,16 @@ void vk_ral_reset_bindless_slots( void );
 qboolean vk_ral_evict_requested( void );
 void     vk_ral_clear_evict_request( void );
 void     vk_ral_request_eviction( void );   // render-thread test hook (r_texEvictForce)
+
+// Default-inert parent-view integration gate. `restore=qfalse` deterministically
+// selects a live mipmapped image and holds baseMip=1 in its existing bindless
+// slot; `restore=qtrue` promotes the same page identity back to its full view.
+qboolean vk_ral_residency_mip_test( qboolean restore );
+const char *vk_ral_residency_mip_test_source( int *width, int *height );
+qboolean vk_ral_residency_mip_upload( const byte *pic, int width, int height );
+qboolean vk_ral_residency_material_test( qboolean restore );
+const char *vk_ral_residency_material_source( int plane, int *width, int *height );
+qboolean vk_ral_residency_material_upload( byte *const pics[2], const int widths[2], const int heights[2] );
 
 // Synthetic-pressure test override (default 0 = OFF). Set by r_texEvictPressureTest
 // so the automatic drain can be exercised without real CRITICAL pressure (which

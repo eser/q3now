@@ -28,15 +28,11 @@ step is skipped with a one-line note — see `BUILD-RUST.md` to install it.
 
 ## Build
 
-The tool is gated by the `WIRED_BUILD_SHADER_XLATE` CMake option (default
-OFF). Either:
+The tool is gated by the explicit `WIRED_BUILD_SHADER_XLATE` CMake option
+(default OFF). RAL itself is mandatory in the Vulkan renderer; translator
+tooling remains an independent build-time choice.
 
 ```sh
-# A — auto-enabled by FEAT_RAL
-cmake -DFEAT_RAL=1 -G Ninja -S . -B build/debug
-ninja -C build/debug shader_xlate
-
-# B — explicit
 cmake -DWIRED_BUILD_SHADER_XLATE=ON -G Ninja -S . -B build/debug
 ninja -C build/debug shader_xlate
 ```

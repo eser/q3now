@@ -28,6 +28,8 @@
 #include "../../renderercommon/vulkan/vulkan.h"
 
 #include "../ral/ral.h"                       // q_shared.h + the public RAL surface
+#include "ral_vulkan_bridge.h"                // backend-native migration seam (not portable RAL)
+#include "ral_vulkan_translate.h"             // exact pure RAL-enum → Vulkan mapping
 #include "../../renderercommon/tr_public.h"   // refimport_t, extern refimport_t ri
 #include "../../renderercommon/r_log.h"       // rilog-channel-mechanism — R_LOG / R_LOG_DECLARE_CHANNEL
 
@@ -187,9 +189,6 @@ typedef struct {
 	// RAL surface but need parallel-paths support during the migration. Once
 	// the legacy path is retired these can either stay (for code that
 	// still uses VkRenderPass) or be retired alongside.
-	PFN_vkCmdBeginRenderPass                    CmdBeginRenderPass;
-	PFN_vkCmdEndRenderPass                      CmdEndRenderPass;
-	PFN_vkCmdNextSubpass                        CmdNextSubpass;
 	PFN_vkCmdCopyImage                          CmdCopyImage;
 	PFN_vkCmdClearAttachments                   CmdClearAttachments;
 	PFN_vkCmdWriteTimestamp                     CmdWriteTimestamp;             // legacy non-sync2; matches renderer's qvkCmdWriteTimestamp
@@ -349,7 +348,6 @@ struct ralQueryPool_s {
 	VkQueryPool    pool;
 	ralQueryType_t type;
 	uint32_t       count;
-	qboolean       ownsPool;             // qtrue if Ral_CreateQueryPool owns the VkQueryPool, qfalse if adopted via Ral_AdoptQueryPool (caller retains lifetime; Ral_DestroyQueryPool skips defer-destroy of the underlying pool).
 };
 
 // ── pipeline + pipeline-layout cache ────────────────────────────────────
@@ -390,18 +388,6 @@ struct ralPipelineLayout_s {
 	ralBackend_t     *backend;
 	VkPipelineLayout  vkHandle;
 	qboolean          ownsHandle;
-};
-
-struct ralRenderPass_s {
-	ralBackend_t  *backend;
-	VkRenderPass   vkHandle;
-	qboolean       ownsHandle;
-};
-
-struct ralFramebuffer_s {
-	ralBackend_t   *backend;
-	VkFramebuffer   vkHandle;
-	qboolean        ownsHandle;
 };
 
 // ── command-buffer wrapper ──────────────────────────────────────────────
@@ -447,17 +433,17 @@ struct ralCommandBuffer_s {
 	ralPipeline_t      *currentPipeline;   // weak ref (caller guarantees lifetime through Submit)
 	VkPipelineLayout    currentLayout;     // mirror of currentPipeline->layout (also a weak ref)
 	VkPipelineBindPoint currentBindPoint;  // mirror of currentPipeline->bindPoint
+	// Dynamic-rendering debug-label scope. The counters are reset for each
+	// recording and increment only after real vkCmd*DebugUtilsLabelEXT calls.
+	qboolean            renderingDebugLabelActive;
+	uint32_t            debugLabelBeginCount;
+	uint32_t            debugLabelEndCount;
 	// parallel-paths adoption. When ownsBuffer == qfalse the
 	// wrapper was created by Ral_AcquireBegunCommandBuffer around a renderer-owned
 	// VkCommandBuffer; Ral_DestroyCommandBuffer skips vkFreeCommandBuffers
 	// (the renderer's existing pool owns lifetime). Wrappers created by
 	// Ral_AcquireCommandBuffer have ownsBuffer == qtrue (legacy RAL path).
 	qboolean            ownsBuffer;
-	// tracks whether a Ral_CmdBeginRenderPass succeeded.
-	// Ral_CmdEndRenderPass / vkCmdEndRenderPass bails if false (matches the
-	// NULL-fallthrough contract — when the parallel buffer's render-pass /
-	// framebuffer lookup misses, Begin silently skips and End must too).
-	qboolean            inRenderPass;
 };
 
 // ── deferred-destroy queue (lifecycle) ──────────────────────────────────
@@ -647,7 +633,6 @@ void     ralVk_DeferDestroy       ( ralBackend_t *b, ralResourceKind_t kind, uin
 void     ralVk_DrainPendingDestroy( ralBackend_t *b, uint64_t drainBeforeFrame );   // ~0ull → drain everything
 qboolean ralVk_HasExtension       ( const VkExtensionProperties *exts, uint32_t count, const char *name );
 void     ralVk_SetObjectName      ( ralBackend_t *b, uint64_t handle, VkObjectType type, const char *name );
-VkFormat ralVk_TranslateFormat    ( ralFormat_t f );
 
 // ── interop bridge (renderer migration) ─────────────────────────────────
 // Renderervk needs raw VkImage / VkImageView / VkDevice handles for the

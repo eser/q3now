@@ -141,9 +141,12 @@ static qboolean ralVk_LoadInstanceFuncs( ralBackend_t *b ) {
 	LOAD_OPT( SetDebugUtilsObjectNameEXT,             vkSetDebugUtilsObjectNameEXT )
 	LOAD_OPT( CmdBeginDebugUtilsLabelEXT,             vkCmdBeginDebugUtilsLabelEXT )
 	LOAD_OPT( CmdEndDebugUtilsLabelEXT,               vkCmdEndDebugUtilsLabelEXT )
-	// surface PFNs (instance-level)
-	LOAD_REQ( DestroySurfaceKHR,                      vkDestroySurfaceKHR )
-	LOAD_REQ( GetPhysicalDeviceSurfaceSupportKHR,     vkGetPhysicalDeviceSurfaceSupportKHR )
+	// Surface entry points are optional for a deliberately offscreen backend.
+	// The owned present-capable path validates both before creating its surface;
+	// imported/offscreen diagnostics must not fail merely because the instance
+	// did not enable VK_KHR_surface.
+	LOAD_OPT( DestroySurfaceKHR,                      vkDestroySurfaceKHR )
+	LOAD_OPT( GetPhysicalDeviceSurfaceSupportKHR,     vkGetPhysicalDeviceSurfaceSupportKHR )
 	return qtrue;
 	#undef LOAD_REQ
 	#undef LOAD_OPT
@@ -252,9 +255,6 @@ static qboolean ralVk_LoadDeviceFuncs( ralBackend_t *b ) {
 	LOAD_DEV( CmdEndRendering,                vkCmdEndRendering )
 
 	// Vk-typed parallel-paths cmd forwarders (see header).
-	LOAD_DEV( CmdBeginRenderPass,             vkCmdBeginRenderPass )
-	LOAD_DEV( CmdEndRenderPass,               vkCmdEndRenderPass )
-	LOAD_DEV( CmdNextSubpass,                 vkCmdNextSubpass )
 	LOAD_DEV( CmdCopyImage,                   vkCmdCopyImage )
 	LOAD_DEV( CmdClearAttachments,            vkCmdClearAttachments )
 	LOAD_DEV( CmdWriteTimestamp,              vkCmdWriteTimestamp )
@@ -265,7 +265,8 @@ static qboolean ralVk_LoadDeviceFuncs( ralBackend_t *b ) {
 	// SetHdrMetadataEXT loaded via LOAD_DEV_OPT (NULL OK on drivers lacking
 	// the extension; caller null-checks before invocation).
 	//
-	// guard the swapchain function group. vkGetDeviceProcAddr returns
+	// Guard the swapchain function group only for a backend that actually owns
+	// a surface. vkGetDeviceProcAddr returns
 	// NULL for these when VK_KHR_swapchain was NOT enabled on the device
 	// (owned-device path HARD-REQUIRES it; imported mode inherits the renderer's
 	// enable). Load them as OPT and, if ANY is NULL, decline with a PRECISE
@@ -279,8 +280,9 @@ static qboolean ralVk_LoadDeviceFuncs( ralBackend_t *b ) {
 	LOAD_DEV_OPT( GetSwapchainImagesKHR,      vkGetSwapchainImagesKHR )
 	LOAD_DEV_OPT( AcquireNextImageKHR,        vkAcquireNextImageKHR )
 	LOAD_DEV_OPT( QueuePresentKHR,            vkQueuePresentKHR )
-	if ( !b->vk.CreateSwapchainKHR || !b->vk.DestroySwapchainKHR || !b->vk.GetSwapchainImagesKHR
-	  || !b->vk.AcquireNextImageKHR || !b->vk.QueuePresentKHR ) {
+	if ( b->surface != VK_NULL_HANDLE
+	  && ( !b->vk.CreateSwapchainKHR || !b->vk.DestroySwapchainKHR || !b->vk.GetSwapchainImagesKHR
+	  || !b->vk.AcquireNextImageKHR || !b->vk.QueuePresentKHR ) ) {
 		R_LOG( rch_ral, SEV_WARN, "Vulkan: VK_KHR_swapchain device functions unavailable (extension not enabled on this device) — device cannot present\n" );
 		return qfalse;
 	}
@@ -525,6 +527,10 @@ ralBackend_t *Ral_CreateBackend( const ralBackendCreateInfo_t *ci ) {
 
 		// Platform surface (via engine's existing ri.VK_CreateSurface callback;
 		// works on win32/linux/SDL transparently — same surface contract).
+		if ( !b->vk.DestroySurfaceKHR || !b->vk.GetPhysicalDeviceSurfaceSupportKHR ) {
+			R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBackend: VK_KHR_surface entry points unavailable\n" );
+			goto fail_after_instance;
+		}
 		if ( !ri.VK_CreateSurface ) {
 			R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBackend: ri.VK_CreateSurface unavailable\n" );
 			goto fail_after_instance;
@@ -1617,16 +1623,12 @@ uint32_t Ral_ProbeBackends( ralBackendAvailability_t *out, uint32_t maxOut ) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// Ral_Dump — "\ral_dump" developer command body. Exported from the renderer
-// DLL; the client's ral_dump command resolves it with Sys_LoadFunction.
+// Ral_RunDiagnostic — shared body for the generic "\ral_dump" command and
+// the dedicated "\ral_pipeline_test" compatibility command. A forced
+// subcommand keeps the latter independent of Cmd_Argv state while exercising
+// the exact same offscreen backend path as "\ral_dump pipeline".
 // ════════════════════════════════════════════════════════════════════════
-Q_EXPORT void Ral_Dump( void ) {
-#if !defined( FEAT_RAL ) || !FEAT_RAL
-	if ( ri.Cvar_VariableIntegerValue( "r_vkValidate" ) <= 0 ) {
-		R_LOG( rch_ral, SEV_INFO, "ral_dump: needs 'r_vkValidate 1' (or a FEAT_RAL build).\n" );
-		return;
-	}
-#endif
+static void Ral_RunDiagnostic( const char *forcedSubcommand ) {
 	{
 		ralBackendAvailability_t avail[4];
 		ralBackendCreateInfo_t   ci;
@@ -1695,8 +1697,10 @@ Q_EXPORT void Ral_Dump( void ) {
 		//   async            → queue/cmd/sync/query/deferred-destroy
 		//   pipeline         → pipeline/cache/layout-cache/draw/dispatch
 		//   all              → all of the above
-		if ( ri.Cmd_Argc() > 1 ) {
-			const char *sub = ri.Cmd_Argv( 1 );
+		{
+			const char *sub = forcedSubcommand;
+			if ( ( !sub || !sub[0] ) && ri.Cmd_Argc() > 1 ) sub = ri.Cmd_Argv( 1 );
+			if ( !sub || !sub[0] ) goto diagnostic_done;
 			if ( Q_stricmp( sub, "resource" ) == 0 || Q_stricmp( sub, "test" ) == 0 )      ralVk_RunResourceTest( b );
 			else if ( Q_stricmp( sub, "async" ) == 0 )                                     ralVk_RunAsyncTest( b );
 			else if ( Q_stricmp( sub, "pipeline" ) == 0 )                                  ralVk_RunPipelineTest( b );
@@ -1704,8 +1708,17 @@ Q_EXPORT void Ral_Dump( void ) {
 			else R_LOG( rch_ral, SEV_INFO, "  (unknown \\ral_dump subcommand \"%s\" — try: resource | async | pipeline | all)\n", sub );
 		}
 
+	diagnostic_done:
 		Ral_DestroyBackend( b );
 		R_LOG( rch_ral, SEV_INFO, "Ral_DestroyBackend: ok\n" );
 		R_LOG( rch_ral, SEV_INFO, "===== end RAL dump =====\n" );
 	}
+}
+
+Q_EXPORT void Ral_Dump( void ) {
+	Ral_RunDiagnostic( NULL );
+}
+
+void Ral_RunPipelineDiagnostic( void ) {
+	Ral_RunDiagnostic( "pipeline" );
 }

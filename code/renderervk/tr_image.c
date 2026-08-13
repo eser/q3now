@@ -1495,6 +1495,7 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 	image->view = VK_NULL_HANDLE;
 	image->descriptor = VK_NULL_HANDLE;
 	image->ral = NULL;
+	image->ralResidencyMipCount = 0;
 	image->ralBindlessSlot = -1;
 	image->bindlessSamplerSlot = -1;
 
@@ -2114,17 +2115,76 @@ vk_ral_drain_evictions pressure path — both run on the render thread, so the s
 free are single-threaded by construction (Option-A).
 ===============
 */
+static ralResidencyCandidate_t R_TextureResidencyCandidate( const image_t *image,
+		uint32_t resourceId, ralResidencyState_t state,
+		ralResidencyTier_t tier ) {
+	ralResidencyCandidate_t candidate;
+	int age = 0;
+
+	memset( &candidate, 0, sizeof( candidate ) );
+	candidate.id.classId = RAL_RESIDENCY_CLASS_TEXTURE;
+	candidate.id.resource = resourceId;
+	candidate.id.planeMask = 1; // current adapter is one whole-texture coherence group
+	candidate.state = state;
+	candidate.tier = tier;
+	if ( image ) {
+		uint64_t budgetWidth = (uint64_t)image->uploadWidth;
+		uint64_t budgetHeight = (uint64_t)image->uploadHeight;
+		age = tr.frameCount - image->frameUsed;
+		if ( age < 0 ) age = 0;
+		candidate.ageFrames = (uint32_t)age;
+		candidate.screenErrorQ8 = tier == RAL_RESIDENCY_TIER_VISIBLE ? 256u : 0u;
+		candidate.sampleCount = tier == RAL_RESIDENCY_TIER_VISIBLE ? 1u : 0u;
+		if ( glConfig.maxTextureSize > 0 ) {
+			if ( budgetWidth > (uint64_t)glConfig.maxTextureSize ) budgetWidth = (uint64_t)glConfig.maxTextureSize;
+			if ( budgetHeight > (uint64_t)glConfig.maxTextureSize ) budgetHeight = (uint64_t)glConfig.maxTextureSize;
+		}
+		candidate.costBytes = budgetWidth * budgetHeight * 4ull;
+		candidate.pinned = R_ImageIsPinned( image ) ? 1u : 0u;
+		// Whole textures do not yet have a parent mip page.  The existing white
+		// bindless sentinel is their explicit coarse fallback during eviction.
+		candidate.fallbackReady = 1u;
+	}
+	return candidate;
+}
+
 image_t *R_EvictOneOldestUnpinned( void ) {
 	image_t *victim = NULL;
+	ralResidencyCandidate_t victimCandidate;
 	int i;
 
 	for ( i = 0; i < tr.numImages; i++ ) {
 		image_t *im = tr.images[i];
+		ralResidencyCandidate_t candidate;
+		ralResidencyTier_t tier;
 		if ( im == NULL || im->ral == NULL ) continue;      // already evicted / never RAL-resident
-		if ( R_ImageIsPinned( im ) ) continue;              // pinned — never evict
-		if ( victim == NULL || im->frameUsed < victim->frameUsed ) victim = im;
+		tier = im->frameUsed == tr.frameCount
+			? RAL_RESIDENCY_TIER_VISIBLE : RAL_RESIDENCY_TIER_BACKGROUND;
+		candidate = R_TextureResidencyCandidate( im, (uint32_t)i,
+			RAL_RESIDENCY_RESIDENT, tier );
+		if ( !Ral_ResidencyEvictionEligible( &candidate ) ) continue;
+		if ( victim == NULL ||
+		     Ral_ResidencyCompareEviction( &candidate, &victimCandidate,
+				&ralResidencyDefaultPolicy ) < 0 ) {
+			victim = im;
+			victimCandidate = candidate;
+		}
 	}
 	if ( victim == NULL ) return NULL;
+
+	{
+		ralResidencyScore_t score = Ral_ResidencyScore( &victimCandidate,
+			&ralResidencyDefaultPolicy );
+		R_LOG( rch_assets, SEV_DEBUG,
+			"RAL residency select: action=evict class=texture resource=%u tier=background age=%u screenAge=%llu samples=%llu motion=%llu explicit=%llu cost=%llu total=%llu fallback=white\n",
+			victimCandidate.id.resource, victimCandidate.ageFrames,
+			(unsigned long long)score.screenAge,
+			(unsigned long long)score.samples,
+			(unsigned long long)score.motion,
+			(unsigned long long)score.explicitBoost,
+			(unsigned long long)score.cost,
+			(unsigned long long)score.total );
+	}
 
 	// free the RAL half (texture + bindless slot → free-list)
 	vk_ral_unregister_image( victim );
@@ -2133,7 +2193,52 @@ image_t *R_EvictOneOldestUnpinned( void ) {
 	vk_destroy_image_resources( &victim->handle, &victim->view );
 	victim->handle = VK_NULL_HANDLE;
 	victim->view   = VK_NULL_HANDLE;
+	victim->flags |= IMGFLAG_RESIDENCY_EVICTED;
 	return victim;
+}
+
+static image_t *R_SelectReregisterRequest( qboolean pendingOnly,
+		const byte *skip, ralResidencyCandidate_t *outCandidate ) {
+	image_t *bestImage = NULL;
+	ralResidencyCandidate_t bestCandidate;
+	int i;
+
+	for ( i = 0; i < tr.numImages; i++ ) {
+		image_t *candidateImage = tr.images[i];
+		ralResidencyCandidate_t candidate;
+		if ( skip && skip[i] ) continue;
+		if ( candidateImage == NULL || candidateImage->ral != NULL ||
+		     !( candidateImage->flags & IMGFLAG_RESIDENCY_EVICTED ) ||
+		     R_ImageIsPinned( candidateImage ) || !candidateImage->imgName ||
+		     candidateImage->imgName[0] == '*' ) continue;
+		if ( pendingOnly && !( candidateImage->flags & IMGFLAG_REREGISTER_PENDING ) ) continue;
+		candidate = R_TextureResidencyCandidate( candidateImage, (uint32_t)i,
+			RAL_RESIDENCY_REQUESTED, RAL_RESIDENCY_TIER_VISIBLE );
+		if ( !Ral_ResidencyRequestEligible( &candidate ) ) continue;
+		if ( bestImage == NULL ||
+		     Ral_ResidencyCompareRequest( &candidate, &bestCandidate,
+				&ralResidencyDefaultPolicy ) < 0 ) {
+			bestImage = candidateImage;
+			bestCandidate = candidate;
+		}
+	}
+	if ( bestImage && outCandidate ) *outCandidate = bestCandidate;
+	return bestImage;
+}
+
+static void R_LogReregisterSelection( const ralResidencyCandidate_t *candidate ) {
+	ralResidencyScore_t score;
+	if ( !candidate ) return;
+	score = Ral_ResidencyScore( candidate, &ralResidencyDefaultPolicy );
+	R_LOG( rch_assets, SEV_DEBUG,
+		"RAL residency select: action=request class=texture resource=%u tier=visible age=%u screenAge=%llu samples=%llu motion=%llu explicit=%llu cost=%llu total=%llu fallback=white\n",
+		candidate->id.resource, candidate->ageFrames,
+		(unsigned long long)score.screenAge,
+		(unsigned long long)score.samples,
+		(unsigned long long)score.motion,
+		(unsigned long long)score.explicitBoost,
+		(unsigned long long)score.cost,
+		(unsigned long long)score.total );
 }
 
 /*
@@ -2232,12 +2337,39 @@ first and won't immediately re-evict what was just re-streamed.
 ===============
 */
 void vk_ral_drain_reregisters( void ) {
+	static ralResidencyCandidate_t candidates[MAX_DRAWIMAGES];
+	static image_t *images[MAX_DRAWIMAGES];
+	static size_t selected[MAX_DRAWIMAGES];
+	static byte selectedScratch[MAX_DRAWIMAGES];
+	ralResidencyBudget_t budget;
+	size_t count = 0, selectedCount, n;
 	int i, restored = 0;
+	uint64_t restoredBytes = 0;
 
-	for ( i = 0; i < tr.numImages; i++ ) {
+	for ( i = 0; i < tr.numImages; ++i ) {
 		image_t *im = tr.images[i];
-		if ( im == NULL || !( im->flags & IMGFLAG_REREGISTER_PENDING ) )
-			continue;
+		if ( im == NULL || !( im->flags & IMGFLAG_REREGISTER_PENDING ) ||
+		     im->ral != NULL || !( im->flags & IMGFLAG_RESIDENCY_EVICTED ) ||
+		     R_ImageIsPinned( im ) || !im->imgName || im->imgName[0] == '*' ) continue;
+		images[count] = im;
+		candidates[count] = R_TextureResidencyCandidate( im, (uint32_t)i,
+			RAL_RESIDENCY_REQUESTED, RAL_RESIDENCY_TIER_VISIBLE );
+		count++;
+	}
+	if ( count == 0 ) return;
+
+	memset( &budget, 0, sizeof( budget ) );
+	budget.maxPages = WIRED_TEX_REREGISTER_MAX_PER_FRAME;
+	budget.maxBytes = WIRED_TEX_REREGISTER_MAX_BYTES_PER_FRAME;
+	budget.minPerClass[RAL_RESIDENCY_CLASS_TEXTURE] = 1;
+	selectedCount = Ral_ResidencySelectRequests( candidates, count,
+		&ralResidencyDefaultPolicy, &budget, selected,
+		MAX_DRAWIMAGES, selectedScratch );
+
+	for ( n = 0; n < selectedCount; ++n ) {
+		const size_t index = selected[n];
+		image_t *im = images[index];
+		const ralResidencyCandidate_t *chosen = &candidates[index];
 
 		// clear the pending mark first, regardless of outcome, so a failed
 		// re-decode (asset gone) does not re-enqueue every frame forever — it
@@ -2245,9 +2377,6 @@ void vk_ral_drain_reregisters( void ) {
 		// again, harmlessly). A successful re-register makes ral!=NULL so the
 		// enqueue guard (ral==NULL) won't re-mark it.
 		im->flags &= ~IMGFLAG_REREGISTER_PENDING;
-
-		if ( im->ral != NULL )
-			continue;                          // already resident (e.g. a map reload restored it)
 
 		vk_ral_reregister_image( im );         // step-b: re-decode + re-create both halves
 
@@ -2257,15 +2386,17 @@ void vk_ral_drain_reregisters( void ) {
 			// pressure event. (vk_ral_reregister_image rebuilds the GPU texture but
 			// does not touch frameUsed; set it here.)
 			im->frameUsed = tr.frameCount;
+			R_LogReregisterSelection( chosen );
 			restored++;
+			restoredBytes += chosen->costBytes;
 		}
-
-		if ( restored >= WIRED_TEX_REREGISTER_MAX_PER_FRAME )
-			break;                             // spread the rest over later frames
 	}
 
 	if ( restored > 0 ) {
-		R_LOG( rch_assets, SEV_WARN, "vk_ral_drain_reregisters: auto-restreamed %d sampled-evicted texture(s)\n", restored );
+		R_LOG( rch_assets, SEV_WARN, "vk_ral_drain_reregisters: auto-restreamed %d sampled-evicted texture(s), %u KiB within %u-page/%u-MiB frame budget\n",
+			restored, (unsigned)( restoredBytes >> 10 ),
+			WIRED_TEX_REREGISTER_MAX_PER_FRAME,
+			WIRED_TEX_REREGISTER_MAX_BYTES_PER_FRAME >> 20 );
 	}
 }
 
@@ -2317,7 +2448,8 @@ full evict → re-register round-trip (the gate). Render-thread, manual.
 ===============
 */
 void R_TexReregisterAll_f( void ) {
-	int i, restored = 0;
+	byte attempted[MAX_DRAWIMAGES];
+	int restored = 0;
 	uint64_t dlPre = 0, dlPost = 0;
 
 	// This runs frames after r_texEvictForce (the harness inserts +wait between),
@@ -2325,12 +2457,17 @@ void R_TexReregisterAll_f( void ) {
 	// the actual post-evict free — the real memory-drop measurement point.
 	vk_ral_query_memory_budget( &dlPre, NULL, NULL, NULL, NULL );
 
-	for ( i = 0; i < tr.numImages; i++ ) {
-		image_t *im = tr.images[i];
-		if ( im == NULL || im->ral != NULL ) continue;          // resident — skip
-		if ( im->imgName[0] == '*' || R_ImageIsPinned( im ) ) continue;  // built-in/pinned never evicted
+	memset( attempted, 0, sizeof( attempted ) );
+	for ( ;; ) {
+		ralResidencyCandidate_t candidate;
+		image_t *im = R_SelectReregisterRequest( qfalse, attempted, &candidate );
+		if ( im == NULL ) break;
+		attempted[candidate.id.resource] = 1;
 		vk_ral_reregister_image( im );
-		if ( im->ral != NULL ) restored++;
+		if ( im->ral != NULL ) {
+			R_LogReregisterSelection( &candidate );
+			restored++;
+		}
 	}
 
 	vk_ral_query_memory_budget( &dlPost, NULL, NULL, NULL, NULL );
@@ -2342,6 +2479,116 @@ void R_TexReregisterAll_f( void ) {
 	// W-67-automatable round-trip gate (pre = drained post-evict footprint).
 	R_LOG( rch_assets, SEV_WARN, "r_texReregisterAll: restored %d image(s); device-local %u MiB (post-evict/pre-restore) -> %u MiB (post-restore)\n",
 	        restored, (unsigned)( dlPre >> 20 ), (unsigned)( dlPost >> 20 ) );
+}
+
+/*
+===============
+R_TexResidencyBudgetTest_f
+
+Default-inert process-gate hook. Marks every genuinely evicted whole-texture
+page as requested, then invokes the SAME production budgeted drain used at the
+per-frame safe boundary. Unlike R_TexReregisterAll it cannot bypass page/byte
+limits or the shared selector.
+===============
+*/
+void R_TexResidencyBudgetTest_f( void ) {
+	byte requestedSet[MAX_DRAWIMAGES];
+	uint64_t dlPre = 0, dlPost = 0;
+	int i, requested = 0, restored = 0, pending = 0;
+
+	memset( requestedSet, 0, sizeof( requestedSet ) );
+	vk_ral_query_memory_budget( &dlPre, NULL, NULL, NULL, NULL );
+	for ( i = 0; i < tr.numImages; ++i ) {
+		image_t *im = tr.images[i];
+		if ( im == NULL || im->ral != NULL ||
+		     !( im->flags & IMGFLAG_RESIDENCY_EVICTED ) ||
+		     R_ImageIsPinned( im ) || !im->imgName || im->imgName[0] == '*' ) continue;
+		im->flags |= IMGFLAG_REREGISTER_PENDING;
+		requestedSet[i] = 1;
+		requested++;
+	}
+
+	vk_ral_drain_reregisters();
+	for ( i = 0; i < tr.numImages; ++i ) {
+		image_t *im = tr.images[i];
+		if ( !requestedSet[i] || !im ) continue;
+		if ( im->flags & IMGFLAG_REREGISTER_PENDING ) pending++;
+		else if ( im->ral != NULL && !( im->flags & IMGFLAG_RESIDENCY_EVICTED ) ) restored++;
+	}
+	vk_ral_query_memory_budget( &dlPost, NULL, NULL, NULL, NULL );
+	R_LOG( rch_assets, SEV_WARN,
+		"r_texResidencyBudgetTest: requested %d, restored %d, pending %d; device-local %u MiB (post-evict/pre-restore) -> %u MiB (post-restore); budget %u pages/%u MiB\n",
+		requested, restored, pending, (unsigned)( dlPre >> 20 ),
+		(unsigned)( dlPost >> 20 ), WIRED_TEX_REREGISTER_MAX_PER_FRAME,
+		WIRED_TEX_REREGISTER_MAX_BYTES_PER_FRAME >> 20 );
+}
+
+void R_TexResidencyMipTest_f( void ) {
+	const char *action;
+	if ( ri.Cmd_Argc() != 2 ) {
+		R_LOG( rch_assets, SEV_INFO, "usage: r_texResidencyMipTest <hold|upload|restore>\n" );
+		return;
+	}
+	action = ri.Cmd_Argv( 1 );
+	if ( !Q_stricmp( action, "hold" ) ) {
+		(void)vk_ral_residency_mip_test( qfalse );
+	} else if ( !Q_stricmp( action, "upload" ) ) {
+		byte       *pic = NULL;
+		int         expectedWidth = 0, expectedHeight = 0;
+		int         width = 0, height = 0;
+		const char *source = vk_ral_residency_mip_test_source( &expectedWidth, &expectedHeight );
+		if ( !source ) {
+			R_LOG( rch_assets, SEV_WARN, "RAL residency mip test: upload refused (no held parent source)\n" );
+			return;
+		}
+		R_LoadImage( source, &pic, &width, &height );
+		if ( !pic ) {
+			R_LOG( rch_assets, SEV_WARN, "RAL residency mip test: upload refused (decode failed for %s)\n", source );
+			return;
+		}
+		if ( width != expectedWidth || height != expectedHeight ) {
+			R_LOG( rch_assets, SEV_WARN,
+			       "RAL residency mip test: upload refused (decoded source changed for %s: %dx%d expected %dx%d)\n",
+			       source, width, height, expectedWidth, expectedHeight );
+			ri.Free( pic );
+			return;
+		}
+		(void)vk_ral_residency_mip_upload( pic, width, height );
+		ri.Free( pic );
+	} else if ( !Q_stricmp( action, "restore" ) ) {
+		(void)vk_ral_residency_mip_test( qtrue );
+	} else {
+		R_LOG( rch_assets, SEV_INFO, "usage: r_texResidencyMipTest <hold|upload|restore>\n" );
+	}
+}
+
+void R_TexResidencyMaterialTest_f( void ) {
+	const char *action;
+	if ( ri.Cmd_Argc() != 2 ) {
+		R_LOG( rch_assets, SEV_INFO, "usage: r_texResidencyMaterialTest <hold|upload|restore>\n" );
+		return;
+	}
+	action = ri.Cmd_Argv( 1 );
+	if ( !Q_stricmp( action, "hold" ) ) {
+		if ( !vk_ral_residency_material_test( qfalse ) )
+			R_LOG( rch_assets, SEV_WARN, "RAL residency material: hold refused (PBR base+ORM material unavailable)\n" );
+	} else if ( !Q_stricmp( action, "upload" ) ) {
+		byte *pics[2] = { NULL, NULL }; int widths[2], heights[2], i;
+		for ( i = 0; i < 2; ++i ) {
+			int expectedWidth, expectedHeight; const char *source;
+			source = vk_ral_residency_material_source( i, &expectedWidth, &expectedHeight );
+			if ( !source ) break;
+			R_LoadImage( source, &pics[i], &widths[i], &heights[i] );
+			if ( !pics[i] || widths[i] != expectedWidth || heights[i] != expectedHeight ) break;
+		}
+		if ( i == 2 ) (void)vk_ral_residency_material_upload( pics, widths, heights );
+		else R_LOG( rch_assets, SEV_WARN, "RAL residency material: upload refused (decode/source mismatch)\n" );
+		for ( i = 0; i < 2; ++i ) if ( pics[i] ) ri.Free( pics[i] );
+	} else if ( !Q_stricmp( action, "restore" ) ) {
+		(void)vk_ral_residency_material_test( qtrue );
+	} else {
+		R_LOG( rch_assets, SEV_INFO, "usage: r_texResidencyMaterialTest <hold|upload|restore>\n" );
+	}
 }
 
 /*

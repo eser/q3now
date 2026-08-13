@@ -86,13 +86,6 @@ ralCommandBuffer_t *Ral_AcquireBegunCommandBuffer( ralBackend_t *b, ralQueueType
 // not exposed on the RAL surface.
 void Ral_SubmitAndDispose( ralCommandBuffer_t *cmd );
 
-// Return the backend-native cmd buffer handle (VkCommandBuffer
-// on Vulkan) for a ralCommandBuffer_t. NULL-safe. Used by the parallel-paths
-// renderer to feed Ral_CmdBindBindGroups (and a few other void*-handle entry
-// points) the RAL-allocated parallel cmd buffer instead of the renderer's
-// legacy VkCommandBuffer. Mirrors Ral_GetBindGroupHandle.
-void *Ral_GetCommandBufferHandle( const ralCommandBuffer_t *cb );
-
 // ── submission ──────────────────────────────────────────────────────────
 typedef struct {
 	ralCommandBuffer_t **commandBuffers;
@@ -144,6 +137,10 @@ typedef struct {
 	uint32_t        stencilClear;
 	ralTexture_t   *resolveAttachments[RAL_MAX_COLOR_ATTACHMENTS];  // MSAA resolve targets (NULL = none)
 	ralRect_t       renderArea;
+	// Optional semantic GPU pass label. When the backend exposes debug-utils,
+	// Ral_BeginRendering/Ral_EndRendering wrap this dynamic-rendering scope in
+	// one balanced debug-label pair. NULL keeps the path byte-for-byte inert.
+	const char     *debugName;
 } ralRenderingInfo_t;
 
 void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri );
@@ -163,11 +160,6 @@ typedef enum {
 	RAL_BIND_POINT_GRAPHICS = 0,    // == VK_PIPELINE_BIND_POINT_GRAPHICS
 	RAL_BIND_POINT_COMPUTE  = 1     // == VK_PIPELINE_BIND_POINT_COMPUTE
 } ralBindPoint_t;
-
-typedef enum {
-	RAL_SUBPASS_CONTENTS_INLINE                    = 0,
-	RAL_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS = 1
-} ralSubpassContents_t;
 
 // Pipeline stage flag bits — same numeric values as VK_PIPELINE_STAGE_*_BIT.
 // The renderer's parallel-paths era only uses a subset; the rest are reserved
@@ -309,31 +301,6 @@ typedef enum { RAL_INDEX_UINT16, RAL_INDEX_UINT32 } ralIndexType_t;
 void Ral_CmdBindPipeline    ( ralCommandBuffer_t *cb, ralPipeline_t *p );
 void Ral_CmdBindBindGroup   ( ralCommandBuffer_t *cb, uint32_t setIndex, ralBindGroup_t *g );
 
-// Parallel-paths bind. Records vkCmdBindDescriptorSets
-// (or backend equivalent) for `count` bind groups starting at `firstSet`,
-// against an EXTERNALLY-supplied pipeline layout + cmd handle. Unlike
-// Ral_CmdBindBindGroup (singular) this does not require a prior Ral_Cmd-
-// BindPipeline — the caller passes layout + bindPoint explicitly. Used by
-// the parallel-paths era where the legacy renderer drives both the cmd
-// buffer and the pipeline layout; the RAL parallel call records the same
-// bind onto the same cmd buffer (idempotent — re-binding the same set is
-// a legal no-op behaviorally; CPU cost is the parallel-paths overhead
-// until the legacy path is retired).
-//
-// TODO: `cmdHandle` is currently a raw VkCommandBuffer cast to
-// void *, and `pipelineLayout` is a raw VkPipelineLayout cast to void *.
-// A later change introduces ralCommandBuffer_t threading + ralPipelineLayout_t
-// and tightens this signature. `bindPoint` is a VkPipelineBindPoint value
-// (0 = GRAPHICS, 1 = COMPUTE) — same TODO treatment.
-void Ral_CmdBindBindGroups  ( ralBackend_t *b,
-                              void *cmdHandle,                /* TODO: VkCommandBuffer → ralCommandBuffer_t * */
-                              int bindPoint,                  /* TODO: VkPipelineBindPoint → ralBindPoint_t */
-                              void *pipelineLayout,           /* TODO: VkPipelineLayout → ralPipelineLayout_t * */
-                              uint32_t firstSet,
-                              uint32_t count,
-                              ralBindGroup_t *const *bindGroups,
-                              uint32_t dynamicOffsetCount,
-                              const uint32_t *dynamicOffsets );
 void Ral_CmdBindVertexBuffer( ralCommandBuffer_t *cb, uint32_t binding, ralBuffer_t *buf, uint64_t offset );
 void Ral_CmdBindIndexBuffer ( ralCommandBuffer_t *cb, ralBuffer_t *buf, uint64_t offset, ralIndexType_t type );
 void Ral_CmdSetViewport     ( ralCommandBuffer_t *cb, const ralViewport_t *vp );
@@ -373,6 +340,7 @@ void Ral_CmdCopyTextureToBuffer ( ralCommandBuffer_t *cb, ralTexture_t *src, ral
 typedef enum {
 	RAL_BARRIER_ALL,                    // full pipeline barrier
 	RAL_BARRIER_COMPUTE_TO_GRAPHICS,    // SSBO/UAV written by compute, read by graphics
+	RAL_BARRIER_COMPUTE_TO_TRANSFER,    // SSBO/UAV written by compute, copied by transfer
 	RAL_BARRIER_GRAPHICS_TO_COMPUTE,
 	RAL_BARRIER_TRANSFER_TO_GRAPHICS,   // upload finished, sampled by graphics
 	RAL_BARRIER_INDIRECT                // buffer written by compute, consumed as indirect-draw args
@@ -382,8 +350,21 @@ void Ral_CmdPipelineBarrier( ralCommandBuffer_t *cb, ralBarrierScope_t scope );
 
 // ── GPU timestamps + debug labels (v1 primitives) ───────────────────────
 void Ral_WriteTimestamp ( ralCommandBuffer_t *cb, ralQueryPool_t *pool, uint32_t query );
-void Ral_BeginDebugLabel( ralCommandBuffer_t *cb, const char *label, const float color[4] );  // color NULL → default
-void Ral_EndDebugLabel  ( ralCommandBuffer_t *cb );
+// Return qtrue only when the backend command was actually emitted. This lets
+// diagnostics distinguish a requested label from a real GPU-capture marker.
+qboolean Ral_BeginDebugLabel( ralCommandBuffer_t *cb, const char *label, const float color[4] );  // color NULL → default
+qboolean Ral_EndDebugLabel  ( ralCommandBuffer_t *cb );
+
+typedef struct {
+	qboolean supported;
+	qboolean renderingLabelActive;
+	uint32_t beginCount;
+	uint32_t endCount;
+} ralDebugLabelStats_t;
+
+// Per-recording command-buffer receipt. Counts reset in Ral_BeginCommandBuffer.
+qboolean Ral_GetDebugLabelStats( const ralCommandBuffer_t *cb, ralDebugLabelStats_t *out );
+void Ral_ResetDebugLabelStats( ralCommandBuffer_t *cb );
 
 // ════════════════════════════════════════════════════════════════════════
 // Typed RAL cmd surface (additions).
@@ -427,20 +408,6 @@ void Ral_CmdPushConstantsLayout( ralCommandBuffer_t *cb,
                                  uint32_t offset,
                                  uint32_t size,
                                  const void *data );
-
-// Legacy VkRenderPass / VkFramebuffer based render pass (the renderer's
-// existing render passes are not on dynamic rendering yet — that's a
-// later migration; this surface bridges the legacy-pass model into the
-// typed cmd buffer).
-void Ral_CmdBeginRenderPass( ralCommandBuffer_t *cb,
-                             ralRenderPass_t *renderPass,
-                             ralFramebuffer_t *framebuffer,
-                             const ralRect_t *renderArea,
-                             uint32_t clearValueCount,
-                             const ralClearValue_t *clearValues,
-                             ralSubpassContents_t contents );
-void Ral_CmdEndRenderPass  ( ralCommandBuffer_t *cb );
-void Ral_CmdNextSubpass    ( ralCommandBuffer_t *cb, ralSubpassContents_t contents );
 
 // Full pipeline barrier (Vk-style — granular per-resource barriers, not the
 // coarse RAL_BARRIER_* scope of Ral_CmdPipelineBarrier).
@@ -487,12 +454,9 @@ void Ral_CmdWriteTimestamp( ralCommandBuffer_t *cb, uint32_t pipelineStageBits,
 // The four earlier void*-handle parallel-paths cmd forwarders (PipelineBarrier,
 // CopyImage, ResetQueryPool, WriteTimestamp) have been retired; their renderer
 // callsites migrated to the typed Ral_Cmd{PipelineBarrierFull,CopyImage,
-// ResetQueryPool,WriteTimestamp} surface above via
-// vk_ral_lookup_texture / vk_ral_lookup_query_pool reverse-lookups.
-// The remaining parallel-paths-era void*-handle entry point is
-// Ral_CmdBindBindGroups (lines 272-280 above) — its typed-handle migration
-// (ralCommandBuffer_t / ralPipelineLayout_t) is a later
-// follow-up that requires per-frame rotating-set adoption.
+// ResetQueryPool,WriteTimestamp} surface above. Query pools are now created
+// natively by RAL; texture adoption remains a Vulkan-migration detail.
+// No raw void*-handle command forwarder remains in the public command API.
 
 #ifdef __cplusplus
 }
