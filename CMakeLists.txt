@@ -334,6 +334,19 @@ SET_TESTS_PROPERTIES(qcommon_shared_graph_contract PROPERTIES
 	TIMEOUT 90
 )
 
+# Release/package provenance is owned by the production Makefile.  Exercise its
+# three platform recipe branches without building: recursive bundle makes must
+# retain the outer source/date/version tuple, final summaries must name an exact
+# fail-closed artifact, and macOS staging must reject runtime-generated files.
+ADD_TEST(NAME release_provenance_contract
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/release-provenance-check.sh
+		--self-test ${CMAKE_SOURCE_DIR}
+)
+SET_TESTS_PROPERTIES(release_provenance_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.build;failure.package-provenance"
+	TIMEOUT 30
+)
+
 FUNCTION(WIRED_CONFIGURE_HOST_TEST target test_name)
 	ADD_DEPENDENCIES(host_tests ${target})
 	IF(WIRED_HOST_SANITIZERS)
