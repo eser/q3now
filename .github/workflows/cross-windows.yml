@@ -1,0 +1,37 @@
+# Linux → Windows x86_64 cross build with llvm-mingw (clang), the clang-based
+# successor of the classic ioq3 mingw-gcc cross recipe. Manual trigger only —
+# this is a toolchain probe lane, not a release lane.
+#
+# KNOWN GATE: goes green only after the deferred cross fixes land in
+# CMakeLists.txt (LuaJIT HOST_CC/TARGET_SYS/CROSS args, stringify host-tool
+# split) and the picoquic include fixes (patches/picoquic candidate). See
+# cmake/toolchains/llvm-mingw-x86_64.cmake header for the full workaround list.
+name: cross-windows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  cross-windows:
+    name: Linux → Windows x86_64 (llvm-mingw)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: recursive
+
+    - name: Build toolchain image
+      run: docker build -t wired-cross-windows docker/cross-windows
+
+    - name: Cross build
+      run: docker run --rm -v "$PWD:/src" wired-cross-windows /src/docker/cross-windows/build.sh
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: cross-windows-x86_64
+        path: |
+          build/cross-windows-docker/*.exe
+          build/cross-windows-docker/*.dll
+          build/cross-windows-docker/Release/base/vm/*.wasm
+        if-no-files-found: error
