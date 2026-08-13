@@ -13,8 +13,25 @@
 #     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/llvm-mingw-x86_64.cmake \
 #     -DLLVM_MINGW_ROOT=$HOME/.local/opt/llvm-mingw \
 #     -DWIRED_CROSS_PREFIX=$HOME/.local/opt/wired-win64 \
+#     -DCMAKE_INSTALL_PREFIX=$PWD/build/cross-windows/stage \
 #     -DCMAKE_BUILD_TYPE=Release -DUSE_WASM=ON -DBUILD_TESTING=OFF \
-#     -DWIRED_HOST_STRINGIFY=$PWD/build/host-tools/stringify
+#     -DWAMR_BUILD_PLATFORM=windows
+#
+# Proven 2026-08-13 (probe, macOS arm64 host): full artifact set — wired.x64.exe
+# (WAMR embedded), wired-headless.x64.exe, 3 renderer DLLs, gamecl/gamesv.wasm —
+# self-contained (only system DLL + UCRT api-set imports). Known remaining
+# workarounds until the corresponding CMakeLists/vendored fixes land:
+#   * CMAKE_INSTALL_PREFIX must be a host-style path (libjpeg-turbo package
+#     config chokes on the Windows-default c:/ prefix).
+#   * stringify is built for the TARGET by CMakeLists; overwrite
+#     build dir stringify.exe with a host-compiled binary
+#     (cc -O2 code/renderer2/stringify.c -o <build>/stringify.exe).
+#   * LuaJIT custom command needs HOST_CC=cc TARGET_SYS=Windows
+#     CROSS=<llvm-mingw>/bin/x86_64-w64-mingw32- appended (CMakeLists edit).
+#   * vendored picoquic: ech.c backslash includes + sockloop.c missing
+#     <errno.h> on the _WINDOWS path → patches/picoquic candidate.
+#   * WAMR defaults WAMR_BUILD_PLATFORM from the HOST system name — pass
+#     -DWAMR_BUILD_PLATFORM=windows explicitly (upstream cross limitation).
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Guard against the double-inclusion CMake does for try_compile projects.
