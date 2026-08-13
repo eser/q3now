@@ -60,6 +60,3 @@ target_link_libraries(shader_xlate_spike PRIVATE spirv-cross-msl spirv-cross-gls
 # (spirv_glsl.hpp, spirv_msl.hpp, …); add_subdirectory already exports this via
 # the targets' PUBLIC include dirs, but be explicit for older CMake.
 target_include_directories(shader_xlate_spike PRIVATE "${SPIRV_CROSS_DIR}")
-if(MSVC)
-	target_compile_options(shader_xlate_spike PRIVATE /EHsc)
-endif()

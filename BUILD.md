@@ -25,7 +25,7 @@ Two toolchain pieces are needed beyond a C/C++ compiler on every platform:
 
 ### windows/cmake
 
-Wired uses CMake as its build system. **MSYS2 MINGW64 is the canonical Windows toolchain** — it's vendor-neutral, community-owned, and is the profile actively built and verified. The MSVC + Visual Studio cmake generator path is not currently verified; a community contributor wishing to maintain an MSVC build profile is welcome to submit one, but it is not presented here as a supported path until verified.
+Wired uses CMake as its build system. **MSYS2 MINGW64 is the canonical Windows toolchain** — it's vendor-neutral, community-owned, and is the profile actively built and verified. MSVC is not supported: the legacy MSVC project files and MSVC-only code paths were removed in 2026-08 (they had no build-system consumers). A community contributor wishing to build an MSVC profile would need to reintroduce those paths from git history and maintain them end to end.
 
 **Using `make` from MSYS2 MINGW64:**
 ```

@@ -21,7 +21,7 @@
 
 /* C99 defines __func__ */
 #if __STDC_VERSION__ < 199901L
-#if __GNUC__ >= 2 || _MSC_VER >= 1300
+#if __GNUC__ >= 2
 #define __func__ __FUNCTION__
 #else
 #define __func__ "(unknown)"
@@ -757,11 +757,7 @@ typedef enum {
 #endif
 
 typedef	time_t fileTime_t;
-#if defined  (_MSC_VER) && defined (__clang__)
-typedef	_off_t  fileOffset_t;
-#else
 typedef	off_t  fileOffset_t;
-#endif
 
 // file entry in a pack archive (PK3 or SW3Z)
 typedef struct fileInPack_s {

@@ -2466,37 +2466,6 @@ static uint64_t affinityMask; // saved at startup
 
 #if (idx64 || id386)
 
-#if defined _MSC_VER
-#include <intrin.h>
-static void CPUID( int func, unsigned int *regs )
-{
-	__cpuid( (int*)regs, func );
-}
-
-#ifdef USE_AFFINITY_MASK
-#if idx64
-extern void CPUID_EX( int func, int param, unsigned int *regs );
-#else
-void CPUID_EX( int func, int param, unsigned int *regs )
-{
-	__asm {
-		push edi
-		mov eax, func
-		mov ecx, param
-		cpuid
-		mov edi, regs
-		mov [edi +0], eax
-		mov [edi +4], ebx
-		mov [edi +8], ecx
-		mov [edi+12], edx
-		pop edi
-	}
-}
-#endif // !idx64
-#endif // USE_AFFINITY_MASK
-
-#else // clang/gcc/mingw
-
 static void CPUID( int func, unsigned int *regs )
 {
 	__asm__ __volatile__( "cpuid" :
@@ -2519,8 +2488,6 @@ static void CPUID_EX( int func, int param, unsigned int *regs )
 		"c"(param) );
 }
 #endif // USE_AFFINITY_MASK
-
-#endif  // clang/gcc/mingw
 
 static void Sys_GetProcessorId( char *vendor )
 {
@@ -2728,74 +2695,6 @@ static void Sys_GetProcessorId( char *vendor )
 Sys_SnapVector
 ================
 */
-#ifdef _MSC_VER
-#if idx64
-void Sys_SnapVector( float *vector )
-{
-	__m128 vf0, vf1, vf2;
-	__m128i vi;
-	DWORD mxcsr;
-
-	mxcsr = _mm_getcsr();
-	vf0 = _mm_setr_ps( vector[0], vector[1], vector[2], 0.0f );
-
-	_mm_setcsr( mxcsr & ~0x6000 ); // enforce rounding mode to "round to nearest"
-
-	vi = _mm_cvtps_epi32( vf0 );
-	vf0 = _mm_cvtepi32_ps( vi );
-
-	vf1 = _mm_shuffle_ps(vf0, vf0, _MM_SHUFFLE(1,1,1,1));
-	vf2 = _mm_shuffle_ps(vf0, vf0, _MM_SHUFFLE(2,2,2,2));
-
-	_mm_setcsr( mxcsr ); // restore rounding mode
-
-	_mm_store_ss( &vector[0], vf0 );
-	_mm_store_ss( &vector[1], vf1 );
-	_mm_store_ss( &vector[2], vf2 );
-}
-#endif // idx64
-
-#if id386
-void Sys_SnapVector( float *vector )
-{
-	static const DWORD cw037F = 0x037F;
-	DWORD cwCurr;
-__asm {
-	fnstcw word ptr [cwCurr]
-	mov ecx, vector
-	fldcw word ptr [cw037F]
-
-	fld   dword ptr[ecx+8]
-	fistp dword ptr[ecx+8]
-	fild  dword ptr[ecx+8]
-	fstp  dword ptr[ecx+8]
-
-	fld   dword ptr[ecx+4]
-	fistp dword ptr[ecx+4]
-	fild  dword ptr[ecx+4]
-	fstp  dword ptr[ecx+4]
-
-	fld   dword ptr[ecx+0]
-	fistp dword ptr[ecx+0]
-	fild  dword ptr[ecx+0]
-	fstp  dword ptr[ecx+0]
-
-	fldcw word ptr cwCurr
-	}; // __asm
-}
-#endif // id386
-
-#if arm64 || arm32
-void Sys_SnapVector( float *vector )
-{
-	vector[0] = rint( vector[0] );
-	vector[1] = rint( vector[1] );
-	vector[2] = rint( vector[2] );
-}
-#endif
-
-#else // clang/gcc/mingw
-
 #if id386
 
 #define QROUNDX87(src) \
@@ -2833,8 +2732,6 @@ void Sys_SnapVector( float *vector )
 }
 
 #endif
-
-#endif // clang/gcc/mingw
 
 #ifdef USE_AFFINITY_MASK
 
