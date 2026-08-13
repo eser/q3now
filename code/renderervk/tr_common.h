@@ -50,6 +50,12 @@ typedef enum
 	   once), cleared by vk_ral_drain_reregisters after vk_ral_reregister_image
 	   restores it. Renderer-internal, transient — NOT a classification. */
 	IMGFLAG_REREGISTER_PENDING = 0x8000,
+	/* explicit whole-texture residency state. Set only by the scheduler-owned
+	   eviction transition and cleared after successful RAL recreation. This
+	   distinguishes a genuinely evicted page from images that never had a RAL
+	   allocation (unsupported type/data/capacity), so bind-miss recovery cannot
+	   manufacture a false request. */
+	IMGFLAG_RESIDENCY_EVICTED  = 0x10000,
 } imgFlags_t;
 
 // image dimensionality. The DDS loader classifies by header

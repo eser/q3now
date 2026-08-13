@@ -42,6 +42,7 @@ struct q1AnimChain_s; // defined in renderercommon/r_q1_texture.h
 
 #ifdef USE_VULKAN
 #include "vk.h"
+#include "../renderer/ral/ral_residency.h"
 // GL constants substitutions
 typedef enum {
 	GL_NEAREST,
@@ -72,6 +73,7 @@ typedef enum {
 #define GLint				int
 #define GLuint				unsigned int
 #define GLboolean			VkBool32
+#define MAX_IMAGE_RESIDENCY_MIPS 16
 #else
 #define GL_INDEX_TYPE		GL_UNSIGNED_INT
 #endif
@@ -623,6 +625,18 @@ typedef struct image_s {
 	// texture populates the bindless BindGroup. NULL when
 	// r_useRALTextures=0 or when the RAL backend init failed.
 	struct ralTexture_s *ral;
+	// Portable sampling view used by the bindless residency path. It currently
+	// spans the full mip chain (behavior-preserving); future coarse-parent
+	// fallback changes only this view range, never the bindless descriptor ABI.
+	struct ralTextureView_s *ralResidencyView;
+	// Optional baseMip=1 parent view used only while the residency scheduler
+	// holds a coarse fallback in the bindless slot. NULL in normal/full mode.
+	struct ralTextureView_s *ralCoarseResidencyView;
+	// Persistent page-address + lifecycle authority for the RAL mip chain.
+	// MAX_TEXTURE_SIZE currently needs at most 12 levels; keep headroom for
+	// future backend limits while retaining owner-local fixed storage.
+	uint32_t ralResidencyMipCount;
+	ralResidencyPageRecord_t ralMipResidency[MAX_IMAGE_RESIDENCY_MIPS];
 	int		ralBindlessSlot;       // index into ral_bindless_set (-1 when not registered)
 	// bindless-main-shader: index into the RAL bindless set's sampler-
 	// array binding (WIRED_BINDLESS_BIND_SAMPLERS) corresponding to the sampler
@@ -1672,6 +1686,7 @@ extern	cvar_t	*r_drawEntities;		// disable/enable entity rendering
 extern	cvar_t	*r_drawWorld;			// disable/enable world rendering
 extern	cvar_t	*r_speeds;				// various levels of information display
 extern	cvar_t	*r_gpuSpeeds;			// per-pass GPU timestamp report
+extern	cvar_t	*r_profileMarkers;		// semantic RAL dynamic-rendering GPU labels
 extern	cvar_t	*r_vkDebugTiming;		// 200-frame Vulkan host-side timing averages
 extern	cvar_t	*r_frameSpikeUs;		// per-frame host-side stage-timing spike report
 extern  cvar_t	*r_detailTextures;		// enables/disables detail texturing stages
@@ -1894,6 +1909,9 @@ void	R_ImageList_f( void );
 void	R_TestDDS_f( void );	// `testdds <path>` — load + classify a .dds, print texType / layers / format
 void	R_TexEvictForce_f( void );	// Phase 7.15.4-b test harness: `r_texEvictForce <N>` — manual evict N oldest unpinned
 void	R_TexReregisterAll_f( void );	// Phase 7.15.4-b test harness: `r_texReregisterAll` — restore evicted images (round-trip)
+void	R_TexResidencyBudgetTest_f( void ); // mark evicted pages + invoke one production page/byte-budgeted request drain
+void	R_TexResidencyMipTest_f( void ); // default-inert parent hold + decoded child upload/promote gate
+void	R_TexResidencyMaterialTest_f( void ); // default-inert base+ORM atomic promotion gate
 void	R_TexEvictPressureTest_f( void );	// Phase 7.15.4-c test harness: `r_texEvictPressureTest <N>` — synthetic CRITICAL → automatic drain
 void	R_SkinList_f( void );
 void	Cmd_BSPDump_f( void );

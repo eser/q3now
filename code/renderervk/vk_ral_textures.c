@@ -62,6 +62,20 @@ static uint32_t              s_ral_upload_async_count;    // uploads that took t
 static uint32_t              s_ral_skipped_no_slot;       // textures created but slot index overflowed s_ral_bindless_capacity
 static uint32_t              s_ral_skipped_no_data;       // R_CreateImage calls with pic=NULL (scratch/placeholder)
 static uint32_t              s_ral_destroyed_count;       // textures destroyed via vk_ral_unregister_image
+static image_t              *s_ral_mip_test_image;        // default-inert parent-view hold owner
+static int                   s_ral_mip_test_resource = -1;
+static int                   s_ral_mip_test_start_frame;
+static int                   s_ral_mip_test_upload_frame;
+static uint64_t              s_ral_mip_test_upload_bytes;
+static ralUploadTicket_t     s_ral_mip_test_ticket;
+#define VK_RAL_MATERIAL_PLANES 2
+static image_t              *s_ral_material_images[VK_RAL_MATERIAL_PLANES];
+static ralTextureView_t     *s_ral_material_coarse[VK_RAL_MATERIAL_PLANES];
+static ralUploadTicket_t     s_ral_material_tickets[VK_RAL_MATERIAL_PLANES];
+static ralResidencyPageRecord_t s_ral_material_group;
+static uint8_t               s_ral_material_completed;
+static int                   s_ral_material_start_frame;
+static void                  vk_ral_material_reset( qboolean restoreViews );
 
 // Phase 7.15.4-c automatic eviction — Option-A cross-thread hand-off. The 1 Hz
 // poll thread (ralVk_PollThreadProc) calls vk_ral_on_memory_pressure on level
@@ -92,9 +106,10 @@ static uint32_t              vk_ral_alloc_bindless_slot( const image_t *image );
 // Pending async-upload residency list: an entry per texture whose async transfer
 // upload had not completed when it was registered. Each frame, vk_ral_drain_pending_
 // uploads() polls the fence; when the copy is done it swaps the real texture into the
-// bindless slot (replacing the *default placeholder) and records the timeline wait so
-// the graphics frame waits the transfer before sampling. The slot holds the resident
-// placeholder until then — never black, never stale.
+// bindless slot (replacing the *default placeholder) only after a batched
+// graphics acquire waits the ticket's transfer-ready semaphore for its exact
+// mip/layer range. The slot holds the resident placeholder until then — never
+// black, never stale.
 typedef struct {
 	ralUploadTicket_t ticket;
 	uint32_t          slot;
@@ -105,6 +120,13 @@ static vk_ral_pending_upload_t s_ral_pending_uploads[ VK_RAL_MAX_PENDING_UPLOADS
 static uint32_t                s_ral_pending_upload_count;
 static uint32_t                s_ral_pending_peak;
 static void                  vk_ral_on_memory_pressure( struct ralBackend_s *b, ralPressureLevel_t level, const ralMemoryBudget_t *budget, void *user );   // fwd
+
+static void vk_ral_release_upload_ticket( ralUploadTicket_t *ticket ) {
+	if ( !ticket ) return;
+	if ( ticket->fence ) Ral_DestroyFence( ticket->fence );
+	if ( ticket->readySemaphore ) Ral_DestroySemaphore( ticket->readySemaphore );
+	memset( ticket, 0, sizeof( *ticket ) );
+}
 
 // ── RAL buffer parallel-paths tracker ─────────────────────
 // `s_buf_pending` holds register-buffer calls made before the RAL backend
@@ -153,12 +175,8 @@ static void                 vk_ral_destroy_all_active_buffers( void );  // fwd
 static void                 vk_ral_destroy_adopted_pipeline_layouts( void );  // fwd
 void                        vk_ral_adopt_static_pipeline_layouts( void );      // fwd
 // internal-texture adoption (depth, color, tonemapped,
-// SMAA input/edges/blend). The GPU-timestamp query-pool adoption + matching
-// destroy live inline in vk.c (vk_gpu_ts_init / vk_gpu_ts_shutdown) because
-// the VkQueryPool is created strictly after vk_init_descriptors runs. The
-// reverse-lookup helper below resolves the wrapper via these externs.
-extern VkQueryPool             vk_gpu_ts_pool;            // vk.c (defined non-static for adoption visibility)
-extern struct ralQueryPool_s  *vk_gpu_ts_ral_pool;         // vk.c — adopted parallel-paths sibling
+// SMAA input/edges/blend). GPU timestamp queries are native RAL resources
+// owned directly by vk_gpu_ts_init/vk_gpu_ts_shutdown in vk.c.
 
 // boot-time adoption of every allocate-once
 // VkDescriptorSet wrapped into a ralBindGroup_t with ownsSet=qfalse so the
@@ -465,6 +483,12 @@ void vk_ral_textures_init( void ) {
 	s_ral_skipped_no_slot = 0;
 	s_ral_skipped_no_data = 0;
 	s_ral_destroyed_count = 0;
+	s_ral_mip_test_image = NULL;
+	s_ral_mip_test_resource = -1;
+	s_ral_mip_test_start_frame = 0;
+	s_ral_mip_test_upload_frame = 0;
+	s_ral_mip_test_upload_bytes = 0;
+	memset( &s_ral_mip_test_ticket, 0, sizeof( s_ral_mip_test_ticket ) );
 	// 2D bindless slot allocator resets here too (Phase 7.15.2) for the
 	// first-boot / vid_restart-with-fresh-set path. NOTE: this init early-returns
 	// when s_ral_bindless_set already exists (the persisting-set vid_restart
@@ -850,13 +874,6 @@ void vk_ral_adopt_one_texture( VkImage vkImage, VkImageView vkView, VkFormat fmt
 // VkImages; re-running the adoption sweep at vid_restart picks up the fresh
 // handles via the idempotent destroy-then-adopt pattern below.
 //
-// Note on the GPU-timestamp query pool: vk_gpu_ts_init runs AFTER
-// vk_init_descriptors (which is the hook point this sweep fires from), so
-// the matching ralQueryPool_t adoption can't happen here. It's done inline
-// at vk_gpu_ts_init's tail instead; vk_gpu_ts_shutdown owns its destroy.
-// The vk_ral_lookup_query_pool helper below sees the static once
-// vk_gpu_ts_init populates it.
-//
 // Logged count (always-on SEV_INFO): "adopted N internal textures
 // as ralTexture_t".
 // ════════════════════════════════════════════════════════════════════════
@@ -1104,14 +1121,6 @@ struct ralTexture_s *vk_ral_lookup_texture( VkImage vkImage )
 }
 
 
-struct ralQueryPool_s *vk_ral_lookup_query_pool( VkQueryPool vkPool )
-{
-	if ( vkPool == VK_NULL_HANDLE ) return NULL;
-	if ( vkPool == vk_gpu_ts_pool && vk_gpu_ts_ral_pool != NULL ) return vk_gpu_ts_ral_pool;
-	return NULL;
-}
-
-
 static void vk_ral_destroy_adopted_pipeline_layouts( void )
 {
 	#define KILL_PL( ralfield ) do { if ( ralfield ) { Ral_DestroyPipelineLayout( ralfield ); ralfield = NULL; } } while ( 0 )
@@ -1237,11 +1246,8 @@ void vk_ral_textures_shutdown( qboolean destroyWindow ) {
 	// BEFORE Ral_DestroyBackend for the same dangling-ref reason.
 	vk_ral_destroy_adopted_pipeline_layouts();
 
-	// destroy every adopted internal-texture + query-
-	// pool wrapper. Same ownsImage=qfalse / ownsPool=qfalse contract: only the
-	// wrapper structs get freed; the underlying VkImage / VkQueryPool stays
-	// owned by the renderer's existing teardown path (vk_destroy_attachments
-	// for the images, vk_gpu_ts_shutdown for the query pool).
+	// Destroy every adopted internal-texture wrapper. ownsImage=qfalse means
+	// only wrappers are freed; underlying VkImages remain renderer-owned.
 	vk_ral_destroy_adopted_internal_textures();
 
 	// renderer-side RAL pipeline +
@@ -1291,10 +1297,14 @@ void vk_ral_textures_shutdown( qboolean destroyWindow ) {
 	{
 		uint32_t i;
 		for ( i = 0; i < s_ral_pending_upload_count; i++ )
-			if ( s_ral_pending_uploads[i].ticket.fence ) Ral_DestroyFence( s_ral_pending_uploads[i].ticket.fence );
+			vk_ral_release_upload_ticket( &s_ral_pending_uploads[i].ticket );
 		s_ral_pending_upload_count = 0;
 		s_ral_pending_peak         = 0;
 	}
+	vk_ral_release_upload_ticket( &s_ral_mip_test_ticket );
+	vk_ral_material_reset( qfalse );
+	s_ral_mip_test_upload_frame = 0;
+	s_ral_mip_test_upload_bytes = 0;
 	// Reset buffer counters too — vid_restart re-enters with a clean state.
 	s_buf_pending_count       = 0;
 	s_buf_pending_warned_full = qfalse;
@@ -1313,9 +1323,256 @@ static void vk_ral_record_name( const char *name ) {
 	s_ral_recent_head = ( s_ral_recent_head + 1 ) % VK_RAL_RECENT_NAMES;
 }
 
+static qboolean vk_ral_whole_texture_promotion_ready( const image_t *image ) {
+	ralResidencyCandidate_t candidate;
+	if ( !image ) return qfalse;
+	if ( image->ralResidencyMipCount > 0 ) {
+		uint32_t i;
+		for ( i = 0; i < image->ralResidencyMipCount; ++i ) {
+			if ( image->ralMipResidency[i].state != RAL_RESIDENCY_RESIDENT )
+				return qfalse;
+		}
+		return qtrue;
+	}
+	memset( &candidate, 0, sizeof( candidate ) );
+	candidate.id.classId = RAL_RESIDENCY_CLASS_TEXTURE;
+	candidate.id.planeMask = 1; // current whole-texture adapter is one atomic plane
+	candidate.state = RAL_RESIDENCY_IN_FLIGHT;
+	// level 0 has no parent dependency; completed mask 1 proves the only plane.
+	return Ral_ResidencyPromotionReady( &candidate, 1, 0 ) ? qtrue : qfalse;
+}
+
+static qboolean vk_ral_init_mip_records( image_t *image, uint32_t resource,
+		uint32_t mipLevels, ralResidencyState_t initialState,
+		uint32_t serial ) {
+	uint32_t i;
+	if ( !image || mipLevels == 0 || mipLevels > MAX_IMAGE_RESIDENCY_MIPS ) return qfalse;
+	memset( image->ralMipResidency, 0, sizeof( image->ralMipResidency ) );
+	for ( i = 0; i < mipLevels; ++i ) {
+		ralResidencyPageId_t id;
+		memset( &id, 0, sizeof( id ) );
+		id.classId = RAL_RESIDENCY_CLASS_TEXTURE;
+		id.resource = resource;
+		id.level = (uint16_t)i;
+		id.planeMask = 1;
+		if ( !Ral_ResidencyPageRecordInit( &image->ralMipResidency[i], &id,
+		                                  initialState, serial ) ) {
+			image->ralResidencyMipCount = 0;
+			return qfalse;
+		}
+	}
+	image->ralResidencyMipCount = mipLevels;
+	return qtrue;
+}
+
+static qboolean vk_ral_mip_transition( image_t *image, uint32_t level,
+		ralResidencyState_t state, uint8_t completedPlaneMask,
+		qboolean parentReady, uint32_t serial ) {
+	if ( !image || level >= image->ralResidencyMipCount ) return qfalse;
+	return Ral_ResidencyPageRecordTransition( &image->ralMipResidency[level],
+		state, completedPlaneMask, parentReady ? 1 : 0, serial ) ? qtrue : qfalse;
+}
+
+static qboolean vk_ral_mip_mark_resident( image_t *image, uint32_t level,
+		uint32_t serial ) {
+	ralResidencyPageRecord_t *record;
+	qboolean parentReady;
+	if ( !image || level >= image->ralResidencyMipCount ) return qfalse;
+	record = &image->ralMipResidency[level];
+	parentReady = level == 0 ||
+		( level - 1u < image->ralResidencyMipCount &&
+		  image->ralMipResidency[level - 1u].state == RAL_RESIDENCY_RESIDENT );
+	if ( record->state == RAL_RESIDENCY_ABSENT &&
+	     !vk_ral_mip_transition( image, level, RAL_RESIDENCY_REQUESTED,
+	                             0, parentReady, serial ) ) return qfalse;
+	if ( record->state == RAL_RESIDENCY_REQUESTED &&
+	     !vk_ral_mip_transition( image, level, RAL_RESIDENCY_IN_FLIGHT,
+	                             0, parentReady, serial ) ) return qfalse;
+	if ( record->state == RAL_RESIDENCY_IN_FLIGHT &&
+	     !vk_ral_mip_transition( image, level, RAL_RESIDENCY_RESIDENT,
+	                             record->id.planeMask, parentReady, serial ) ) return qfalse;
+	return record->state == RAL_RESIDENCY_RESIDENT ? qtrue : qfalse;
+}
+
+static qboolean vk_ral_mip_promotion_ready( const image_t *image,
+		uint32_t level ) {
+	ralResidencyCandidate_t candidate;
+	const ralResidencyPageRecord_t *record;
+	if ( !image || level >= image->ralResidencyMipCount ) return qfalse;
+	record = &image->ralMipResidency[level];
+	memset( &candidate, 0, sizeof( candidate ) );
+	candidate.id = record->id;
+	candidate.state = record->state;
+	return Ral_ResidencyPromotionReady( &candidate, candidate.id.planeMask,
+	                                   level == 0 ? 0 : record->parentReady )
+		? qtrue : qfalse;
+}
+
+static void vk_ral_log_mip_record( const image_t *image, uint32_t level,
+		const char *action ) {
+	const ralResidencyPageRecord_t *record;
+	const char *state;
+	if ( !image || level >= image->ralResidencyMipCount || !action ) return;
+	record = &image->ralMipResidency[level];
+	switch ( record->state ) {
+	case RAL_RESIDENCY_STALE: state = "stale"; break;
+	case RAL_RESIDENCY_IN_FLIGHT: state = "in-flight"; break;
+	case RAL_RESIDENCY_RESIDENT: state = "resident"; break;
+	default: state = "unexpected"; break;
+	}
+	R_LOG( rch_ral_texture, SEV_WARN,
+	       "RAL residency page state: action=%s class=texture resource=%u level=%u x=%u y=%u planeMask=%u state=%s completedMask=%u parentReady=%u serial=%u name=%s\n",
+	       action, record->id.resource, (unsigned)record->id.level,
+	       record->id.x, record->id.y, record->id.planeMask, state,
+	       record->completedPlaneMask, record->parentReady,
+	       record->transitionSerial, image->imgName );
+}
+
+static void vk_ral_material_reset( qboolean restoreViews ) {
+	uint32_t i;
+	for ( i = 0; i < VK_RAL_MATERIAL_PLANES; ++i ) {
+		if ( s_ral_material_tickets[i].fence ) {
+			Ral_WaitFence( s_ral_material_tickets[i].fence, ~0ull );
+			vk_ral_release_upload_ticket( &s_ral_material_tickets[i] );
+		}
+		if ( restoreViews && s_ral_material_images[i] && s_ral_material_images[i]->ralResidencyView &&
+		     s_ral_material_images[i]->ralBindlessSlot >= 0 )
+			Ral_BindGroupSetTextureViewAt( s_ral_bindless_set,
+				(uint32_t)s_ral_material_images[i]->ralBindlessSlot,
+				s_ral_material_images[i]->ralResidencyView );
+		if ( s_ral_material_coarse[i] ) Ral_DestroyTextureView( s_ral_material_coarse[i] );
+		s_ral_material_images[i] = NULL;
+		s_ral_material_coarse[i] = NULL;
+	}
+	memset( &s_ral_material_group, 0, sizeof( s_ral_material_group ) );
+	s_ral_material_completed = 0;
+	s_ral_material_start_frame = 0;
+}
+
+qboolean vk_ral_residency_material_test( qboolean restore ) {
+	image_t *images[VK_RAL_MATERIAL_PLANES];
+	const uint8_t planeBits[VK_RAL_MATERIAL_PLANES] = { 1u, 4u };
+	ralResidencyPageId_t id;
+	uint32_t i;
+	if ( restore ) { vk_ral_material_reset( qtrue ); return qtrue; }
+	if ( s_ral_material_images[0] || s_ral_material_images[1] ) {
+		R_LOG( rch_ral_texture, SEV_WARN,
+		       "RAL residency material: unavailable reason=already-active\n" );
+		return qfalse;
+	}
+	// Exact committed PBR fixture: these are the base and packed ORM planes of
+	// textures/pbr_test/pbr_test. Load through the same image owner/flags used by
+	// shader parsing so the diagnostic exercises real material resources even on
+	// maps that do not otherwise reference the fixture shader.
+	images[0] = R_FindImageFile( "textures/pbr_test/albedo.png", IMGFLAG_MIPMAP );
+	images[1] = R_FindImageFile( "textures/pbr_test/orm.png",
+		IMGFLAG_MIPMAP | IMGFLAG_NOLIGHTSCALE | IMGFLAG_NO_COMPRESSION | IMGFLAG_DOMAIN_LINEAR );
+	for ( i = 0; i < VK_RAL_MATERIAL_PLANES; ++i ) {
+		ralTextureViewCreateInfo_t vci;
+		if ( !images[i] || !images[i]->ral || !images[i]->ralResidencyView ||
+		     images[i]->ralBindlessSlot < 0 || images[i]->ralResidencyMipCount < 2 ) {
+			R_LOG( rch_ral_texture, SEV_WARN,
+			       "RAL residency material: unavailable plane=%u image=%u texture=%u view=%u slot=%d mipRecords=%u name=%s\n",
+			       i, images[i] ? 1u : 0u,
+			       images[i] && images[i]->ral ? 1u : 0u,
+			       images[i] && images[i]->ralResidencyView ? 1u : 0u,
+			       images[i] ? images[i]->ralBindlessSlot : -1,
+			       images[i] ? images[i]->ralResidencyMipCount : 0u,
+			       images[i] ? images[i]->imgName : "none" );
+			vk_ral_material_reset( qtrue ); return qfalse;
+		}
+		memset( &vci, 0, sizeof( vci ) );
+		vci.texture = images[i]->ral; vci.viewType = RAL_TEXTURE_2D;
+		vci.baseMipLevel = 1; vci.mipLevelCount = 0; vci.arrayLayerCount = 1;
+		s_ral_material_coarse[i] = Ral_CreateTextureView( s_ral_backend, &vci );
+		if ( !s_ral_material_coarse[i] ) {
+			R_LOG( rch_ral_texture, SEV_WARN,
+			       "RAL residency material: unavailable reason=coarse-view plane=%u\n", i );
+			vk_ral_material_reset( qtrue ); return qfalse;
+		}
+		s_ral_material_images[i] = images[i];
+		images[i]->ralMipResidency[0].id.planeMask = planeBits[i];
+		if ( !vk_ral_mip_transition( images[i], 0, RAL_RESIDENCY_STALE, 0,
+		                             qtrue, (uint32_t)tr.frameCount ) ) {
+			R_LOG( rch_ral_texture, SEV_WARN,
+			       "RAL residency material: unavailable reason=page-transition plane=%u state=%u mask=%u serial=%u frame=%u\n",
+			       i, images[i]->ralMipResidency[0].state,
+			       images[i]->ralMipResidency[0].id.planeMask,
+			       images[i]->ralMipResidency[0].transitionSerial,
+			       (uint32_t)tr.frameCount );
+			vk_ral_material_reset( qtrue ); return qfalse;
+		}
+	}
+	memset( &id, 0, sizeof( id ) );
+	id.classId = RAL_RESIDENCY_CLASS_TEXTURE;
+	id.resource = images[0]->ralMipResidency[0].id.resource;
+	id.level = 0; id.planeMask = 5;
+	if ( !Ral_ResidencyPageRecordInit( &s_ral_material_group, &id,
+	                                  RAL_RESIDENCY_RESIDENT, (uint32_t)tr.frameCount ) ||
+	     !Ral_ResidencyPageRecordTransition( &s_ral_material_group,
+	                                        RAL_RESIDENCY_STALE, 0, 1,
+	                                        (uint32_t)tr.frameCount ) ) {
+		R_LOG( rch_ral_texture, SEV_WARN,
+		       "RAL residency material: unavailable reason=group-transition\n" );
+		vk_ral_material_reset( qtrue ); return qfalse;
+	}
+	{
+		uint32_t slots[2] = { (uint32_t)images[0]->ralBindlessSlot, (uint32_t)images[1]->ralBindlessSlot };
+		ralTextureView_t *views[2] = { s_ral_material_coarse[0], s_ral_material_coarse[1] };
+		if ( !Ral_BindGroupSetTextureViewsAt( s_ral_bindless_set, slots, views, 2 ) ) {
+			R_LOG( rch_ral_texture, SEV_WARN,
+			       "RAL residency material: unavailable reason=atomic-parent-bind\n" );
+			vk_ral_material_reset( qtrue ); return qfalse;
+		}
+	}
+	s_ral_material_start_frame = tr.frameCount;
+	R_LOG( rch_ral_texture, SEV_WARN,
+	       "RAL residency material: action=hold material=%u level=0 planeMask=5 state=stale completedMask=0 baseResource=%u baseSlot=%d ormResource=%u ormSlot=%d baseMip=1 atomic=1\n",
+	       id.resource, images[0]->ralMipResidency[0].id.resource, images[0]->ralBindlessSlot,
+	       images[1]->ralMipResidency[0].id.resource, images[1]->ralBindlessSlot );
+	return qtrue;
+}
+
+const char *vk_ral_residency_material_source( int plane, int *width, int *height ) {
+	image_t *image = plane >= 0 && plane < VK_RAL_MATERIAL_PLANES ? s_ral_material_images[plane] : NULL;
+	if ( width ) *width = image ? image->width : 0;
+	if ( height ) *height = image ? image->height : 0;
+	return image ? image->imgName : NULL;
+}
+
+qboolean vk_ral_residency_material_upload( byte *const pics[2], const int widths[2], const int heights[2] ) {
+	uint32_t i;
+	if ( !pics || !widths || !heights || s_ral_material_group.state != RAL_RESIDENCY_STALE ) return qfalse;
+	for ( i = 0; i < VK_RAL_MATERIAL_PLANES; ++i ) {
+		ralTextureUploadDesc_t up;
+		image_t *image = s_ral_material_images[i];
+		if ( !image || !pics[i] || widths[i] != image->width || heights[i] != image->height ) return qfalse;
+		memset( &up, 0, sizeof( up ) ); up.data = pics[i]; up.dataSize = (uint64_t)widths[i] * heights[i] * 4u;
+		up.suppressMipGeneration = qtrue;
+		s_ral_material_tickets[i] = Ral_TextureUploadBegin( image->ral, &up );
+		if ( !s_ral_material_tickets[i].fence ) { vk_ral_material_reset( qtrue ); return qfalse; }
+		if ( !vk_ral_mip_transition( image, 0, RAL_RESIDENCY_IN_FLIGHT, 0,
+		                             qtrue, (uint32_t)tr.frameCount ) ) {
+			vk_ral_material_reset( qtrue ); return qfalse;
+		}
+	}
+	if ( !Ral_ResidencyPageRecordTransition( &s_ral_material_group,
+	                                        RAL_RESIDENCY_IN_FLIGHT, 0, 1,
+	                                        (uint32_t)tr.frameCount ) ) {
+		vk_ral_material_reset( qtrue ); return qfalse;
+	}
+	R_LOG( rch_ral_texture, SEV_WARN,
+	       "RAL residency material: action=upload-start material=%u level=0 planeMask=5 state=in-flight completedMask=0 parentBound=1 heldFrames=%d atomic=1\n",
+	       s_ral_material_group.id.resource, tr.frameCount - s_ral_material_start_frame );
+	return qtrue;
+}
+
 void vk_ral_register_image( image_t *image, byte *pic, int width, int height ) {
 	ralTextureCreateInfo_t tci;
+	ralTextureViewCreateInfo_t vci;
 	uint32_t               slot;
+	uint32_t               resource = ~0u;
+	uint32_t               mipLevels;
 
 	if ( !vk_ral_textures_available() || !image ) return;
 	if ( image->ral ) return;                                          // already registered
@@ -1367,6 +1624,41 @@ void vk_ral_register_image( image_t *image, byte *pic, int width, int height ) {
 	image->ral = Ral_CreateTexture( s_ral_backend, &tci );
 	if ( !image->ral ) {
 		R_LOG( rch_ral_texture, SEV_WARN, "Ral_CreateTexture failed for '%s' (%dx%d)\n", image->imgName, width, height );
+		return;
+	}
+	mipLevels = Ral_GetTextureMipLevelCount( image->ral );
+	if ( tr.numImages > 0 && tr.images[tr.numImages - 1] == image )
+		resource = (uint32_t)( tr.numImages - 1 );
+	// Empty create-then-fill images retain the legacy lifecycle until their
+	// sub-region producer gains page records.  Every ordinary decoded image gets
+	// an exact persistent address/state table before its first upload.
+	if ( pic && resource != ~0u &&
+	     !vk_ral_init_mip_records( image, resource, mipLevels,
+	                               RAL_RESIDENCY_ABSENT,
+	                               (uint32_t)tr.frameCount ) ) {
+		R_LOG( rch_ral_texture, SEV_WARN,
+		       "RAL residency page record init refused for '%s' (resource=%u mipLevels=%u capacity=%u)\n",
+		       image->imgName, resource, mipLevels,
+		       (unsigned)MAX_IMAGE_RESIDENCY_MIPS );
+	}
+
+	// Bind through an explicit portable view even while it spans the full chain.
+	// This is byte/visual-equivalent to texture->defaultView, but makes the
+	// residency boundary capable of holding a coarse parent mip independently of
+	// the child upload without exposing a Vulkan image view outside the backend.
+	memset( &vci, 0, sizeof( vci ) );
+	vci.texture         = image->ral;
+	vci.viewType        = RAL_TEXTURE_2D;
+	vci.format          = RAL_FORMAT_UNDEFINED;
+	vci.baseMipLevel    = 0;
+	vci.mipLevelCount   = 0; // full remaining chain
+	vci.baseArrayLayer  = 0;
+	vci.arrayLayerCount = 1;
+	image->ralResidencyView = Ral_CreateTextureView( s_ral_backend, &vci );
+	if ( !image->ralResidencyView ) {
+		R_LOG( rch_ral_texture, SEV_WARN, "Ral_CreateTextureView failed for residency view '%s'\n", image->imgName );
+		Ral_DestroyTexture( image->ral );
+		image->ral = NULL;
 		return;
 	}
 
@@ -1424,9 +1716,13 @@ void vk_ral_register_image( image_t *image, byte *pic, int width, int height ) {
 		qboolean canDefer = ( placeholderBound && slot < s_ral_bindless_capacity
 		                      && s_ral_pending_upload_count < VK_RAL_MAX_PENDING_UPLOADS ) ? qtrue : qfalse;
 		if ( ticket.synchronous ) {
+			uint32_t level;
 			resident = qtrue;
 			s_ral_upload_sync_count++;
-			if ( ticket.fence ) Ral_DestroyFence( ticket.fence );
+			vk_ral_release_upload_ticket( &ticket );
+			for ( level = 0; level < image->ralResidencyMipCount; ++level )
+				if ( !vk_ral_mip_mark_resident( image, level,
+				                                (uint32_t)tr.frameCount ) ) resident = qfalse;
 		} else if ( canDefer ) {
 			// In flight: keep the placeholder bound; the drain swaps the real texture in
 			// and issues the graphics acquire once the fence signals.
@@ -1436,16 +1732,32 @@ void vk_ral_register_image( image_t *image, byte *pic, int width, int height ) {
 			p->ticket = ticket;
 			p->slot   = slot;
 			p->image  = image;
+			if ( image->ralResidencyMipCount > 0 ) {
+				if ( !vk_ral_mip_transition( image, 0, RAL_RESIDENCY_REQUESTED,
+				                             0, qtrue, (uint32_t)tr.frameCount ) ||
+				     !vk_ral_mip_transition( image, 0, RAL_RESIDENCY_IN_FLIGHT,
+				                             0, qtrue, (uint32_t)tr.frameCount ) )
+					R_LOG( rch_ral_texture, SEV_WARN,
+					       "RAL residency page transition refused for '%s' initial async upload\n",
+					       image->imgName );
+			}
 			if ( s_ral_pending_upload_count > s_ral_pending_peak ) s_ral_pending_peak = s_ral_pending_upload_count;
 		} else {
 			// Can't defer (no placeholder / list full): the async path can't issue its
 			// graphics acquire through the drain, so fall back to the synchronous upload
 			// for visibility. Wait the async copy, then re-upload synchronously so the
 			// graphics-visible layout transition is recorded; correctness over pipelining.
-			if ( ticket.fence ) { Ral_WaitFence( ticket.fence, ~0ull ); Ral_DestroyFence( ticket.fence ); }
+			if ( ticket.fence ) Ral_WaitFence( ticket.fence, ~0ull );
+			vk_ral_release_upload_ticket( &ticket );
 			ralFence_t *sf = Ral_TextureUploadAsync( image->ral, &up );
 			if ( sf ) { Ral_WaitFence( sf, ~0ull ); Ral_DestroyFence( sf ); }
 			resident = qtrue;
+			{
+				uint32_t level;
+				for ( level = 0; level < image->ralResidencyMipCount; ++level )
+					if ( !vk_ral_mip_mark_resident( image, level,
+					                                (uint32_t)tr.frameCount ) ) resident = qfalse;
+			}
 		}
 	}
 
@@ -1453,7 +1765,12 @@ void vk_ral_register_image( image_t *image, byte *pic, int width, int height ) {
 	// appear in the BindGroup. Within capacity, swap the real texture into the
 	// slot once it is resident (the placeholder stays bound until the drain swaps).
 	if ( slot < s_ral_bindless_capacity ) {
-		if ( resident ) Ral_BindGroupSetTextureAt( s_ral_bindless_set, slot, image->ral );
+		if ( resident ) {
+			if ( vk_ral_whole_texture_promotion_ready( image ) )
+				Ral_BindGroupSetTextureViewAt( s_ral_bindless_set, slot, image->ralResidencyView );
+			else
+				R_LOG( rch_ral_texture, SEV_WARN, "RAL residency promotion refused for '%s' (incomplete coherence group or parent fallback)\n", image->imgName );
+		}
 		image->ralBindlessSlot = (int)slot;
 		s_ral_registered_count++;
 		vk_ral_record_name( image->imgName );
@@ -1462,6 +1779,7 @@ void vk_ral_register_image( image_t *image, byte *pic, int width, int height ) {
 		s_ral_skipped_no_slot++;
 		vk_ral_warn_bindless_full();
 	}
+	image->flags &= ~IMGFLAG_RESIDENCY_EVICTED;
 }
 
 // Swap any async-uploaded textures whose transfer copy has completed from the *default
@@ -1473,33 +1791,301 @@ void vk_ral_register_image( image_t *image, byte *pic, int width, int height ) {
 // dependence on any one submit carrying a wait. Called once per frame by the renderer;
 // entries not yet resident stay pending for a later frame.
 void vk_ral_drain_pending_uploads( void ) {
-	ralTexture_t *acquire[ VK_RAL_MAX_PENDING_UPLOADS ];
+	ralUploadTicket_t acquire[ VK_RAL_MAX_PENDING_UPLOADS ];
 	uint32_t      acquireCount = 0;
 	uint32_t      i = 0;
 	if ( !vk_ral_textures_available() ) return;
+	// First gather a stable copy of every signaled ticket. The exact-range
+	// graphics acquire must be submitted before any descriptor publishes the
+	// uploaded image; if command allocation fails, leave the entries pending and
+	// retry next frame without consuming their binary semaphores.
+	for ( i = 0; i < s_ral_pending_upload_count; i++ ) {
+		vk_ral_pending_upload_t *p = &s_ral_pending_uploads[i];
+		if ( p->ticket.fence && Ral_FenceSignaled( p->ticket.fence ) &&
+		     p->slot < s_ral_bindless_capacity && p->image && p->image->ral && p->image->ralResidencyView &&
+		     ( p->image->ralResidencyMipCount == 0 ||
+		       vk_ral_mip_promotion_ready( p->image, 0 ) ) ) {
+			acquire[ acquireCount++ ] = p->ticket;
+		}
+	}
+	if ( acquireCount > 0 && !Ral_TextureAcquireBatchToGraphics( s_ral_backend, acquire, acquireCount ) ) return;
+	i = 0;
 	while ( i < s_ral_pending_upload_count ) {
 		vk_ral_pending_upload_t *p = &s_ral_pending_uploads[i];
 		if ( p->ticket.fence && Ral_FenceSignaled( p->ticket.fence ) ) {
-			if ( p->slot < s_ral_bindless_capacity && p->image && p->image->ral ) {
-				Ral_BindGroupSetTextureAt( s_ral_bindless_set, p->slot, p->image->ral );
-				if ( acquireCount < VK_RAL_MAX_PENDING_UPLOADS ) acquire[ acquireCount++ ] = p->image->ral;
+			if ( p->slot < s_ral_bindless_capacity && p->image && p->image->ral && p->image->ralResidencyView &&
+			     ( p->image->ralResidencyMipCount == 0 ||
+			       vk_ral_mip_mark_resident( p->image, 0, (uint32_t)tr.frameCount ) ) &&
+			     vk_ral_whole_texture_promotion_ready( p->image ) ) {
+				Ral_BindGroupSetTextureViewAt( s_ral_bindless_set, p->slot, p->image->ralResidencyView );
 			}
-			Ral_DestroyFence( p->ticket.fence );
+			vk_ral_release_upload_ticket( &p->ticket );
 			// Remove by swapping the last entry into this slot (order doesn't matter).
 			*p = s_ral_pending_uploads[ --s_ral_pending_upload_count ];
 		} else {
 			i++;
 		}
 	}
-	// One graphics-queue acquire submit makes the whole batch's layout visible to
-	// graphics sampling, on every submit path. The fences were signaled above, so the
-	// transfer copies are complete and the acquire needs no GPU-side source wait.
-	if ( acquireCount > 0 ) Ral_TextureAcquireBatchToGraphics( s_ral_backend, acquire, acquireCount );
+	// The page-level mip test uses a graphics-queue no-wait copy.  Its parent
+	// view stays bound across frames until this poll observes the real fence;
+	// only then may the exact same slot expose child mip 0 again.
+	if ( s_ral_mip_test_ticket.fence && Ral_FenceSignaled( s_ral_mip_test_ticket.fence ) ) {
+		image_t *image = s_ral_mip_test_image;
+		if ( image && image->ral && image->ralResidencyView && image->ralCoarseResidencyView &&
+		     image->ralBindlessSlot >= 0 &&
+		     vk_ral_mip_transition( image, 0, RAL_RESIDENCY_RESIDENT, 1,
+		                            qtrue, (uint32_t)tr.frameCount ) ) {
+			uint32_t mipLevels = Ral_GetTextureMipLevelCount( image->ral );
+			int heldFrames = tr.frameCount - s_ral_mip_test_start_frame;
+			int uploadFrames = tr.frameCount - s_ral_mip_test_upload_frame;
+			int sampleAge = tr.frameCount - image->frameUsed;
+			Ral_BindGroupSetTextureViewAt( s_ral_bindless_set,
+			                                   (uint32_t)image->ralBindlessSlot,
+			                                   image->ralResidencyView );
+			R_LOG( rch_ral_texture, SEV_WARN,
+			       "RAL residency mip test: action=upload-promote class=texture resource=%d slot=%d childLevel=0 parentLevel=1 baseMip=0 levelCount=%u bytes=%llu synchronous=%d fenceSignaled=1 heldFrames=%d uploadFrames=%d sampleAge=%d fallback=parent source=decoded name=%s\n",
+			       s_ral_mip_test_resource, image->ralBindlessSlot, mipLevels,
+			       (unsigned long long)s_ral_mip_test_upload_bytes,
+			       s_ral_mip_test_ticket.synchronous ? 1 : 0,
+			       heldFrames, uploadFrames, sampleAge, image->imgName );
+			vk_ral_log_mip_record( image, 0, "upload-promote" );
+			Ral_DestroyTextureView( image->ralCoarseResidencyView );
+			image->ralCoarseResidencyView = NULL;
+		}
+		vk_ral_release_upload_ticket( &s_ral_mip_test_ticket );
+		s_ral_mip_test_image = NULL;
+		s_ral_mip_test_resource = -1;
+		s_ral_mip_test_start_frame = 0;
+		s_ral_mip_test_upload_frame = 0;
+		s_ral_mip_test_upload_bytes = 0;
+	}
+	// Material coherence diagnostic: independently completed base/ORM copies
+	// retain both parent views. Only the complete planeMask=5 group may advance
+	// and one batched descriptor update publishes both child views together.
+	{
+		const uint8_t planeBits[VK_RAL_MATERIAL_PLANES] = { 1u, 4u };
+		uint32_t j;
+		for ( j = 0; j < VK_RAL_MATERIAL_PLANES; ++j ) {
+			if ( s_ral_material_tickets[j].fence &&
+			     Ral_FenceSignaled( s_ral_material_tickets[j].fence ) ) {
+				s_ral_material_completed |= planeBits[j];
+				vk_ral_release_upload_ticket( &s_ral_material_tickets[j] );
+				R_LOG( rch_ral_texture, SEV_WARN,
+				       "RAL residency material plane: action=complete material=%u plane=%s bit=%u resource=%u slot=%d completedMask=%u\n",
+				       s_ral_material_group.id.resource, j == 0 ? "base" : "orm",
+				       planeBits[j], s_ral_material_images[j]->ralMipResidency[0].id.resource,
+				       s_ral_material_images[j]->ralBindlessSlot, s_ral_material_completed );
+			}
+		}
+		if ( s_ral_material_group.state == RAL_RESIDENCY_IN_FLIGHT &&
+		     s_ral_material_completed == s_ral_material_group.id.planeMask ) {
+			ralResidencyPageRecord_t nextRecords[VK_RAL_MATERIAL_PLANES];
+			ralResidencyPageRecord_t nextGroup = s_ral_material_group;
+			uint32_t slots[2]; ralTextureView_t *views[2];
+			qboolean ready = qtrue;
+			for ( j = 0; j < VK_RAL_MATERIAL_PLANES; ++j ) {
+				image_t *image = s_ral_material_images[j];
+				if ( !image ) { ready = qfalse; continue; }
+				nextRecords[j] = image->ralMipResidency[0];
+				if ( !Ral_ResidencyPageRecordTransition( &nextRecords[j],
+					RAL_RESIDENCY_RESIDENT, planeBits[j], 1,
+					(uint32_t)tr.frameCount ) ) ready = qfalse;
+				slots[j] = (uint32_t)image->ralBindlessSlot;
+				views[j] = image->ralResidencyView;
+			}
+			if ( ready && Ral_ResidencyPageRecordTransition( &nextGroup,
+				RAL_RESIDENCY_RESIDENT, s_ral_material_completed, 1,
+				(uint32_t)tr.frameCount ) &&
+			     Ral_BindGroupSetTextureViewsAt( s_ral_bindless_set, slots, views, 2 ) ) {
+				for ( j = 0; j < VK_RAL_MATERIAL_PLANES; ++j )
+					s_ral_material_images[j]->ralMipResidency[0] = nextRecords[j];
+				s_ral_material_group = nextGroup;
+				R_LOG( rch_ral_texture, SEV_WARN,
+				       "RAL residency material: action=promote material=%u level=0 planeMask=5 state=resident completedMask=5 baseSlot=%u ormSlot=%u heldFrames=%d atomic=1\n",
+				       s_ral_material_group.id.resource, slots[0], slots[1],
+				       tr.frameCount - s_ral_material_start_frame );
+				vk_ral_material_reset( qfalse );
+			}
+		}
+	}
+}
+
+qboolean vk_ral_residency_mip_test( qboolean restore ) {
+	image_t *image = s_ral_mip_test_image;
+	uint32_t mipLevels;
+	int i;
+
+	if ( !vk_ral_textures_available() ) return qfalse;
+	if ( restore ) {
+		if ( s_ral_mip_test_ticket.fence ) {
+			R_LOG( rch_ral_texture, SEV_WARN, "RAL residency mip test: restore refused (child upload in flight)\n" );
+			return qfalse;
+		}
+		if ( !image || !image->ral || !image->ralResidencyView ||
+		     image->ralBindlessSlot < 0 || image->ralCoarseResidencyView == NULL ) {
+			R_LOG( rch_ral_texture, SEV_WARN, "RAL residency mip test: restore refused (no held parent view)\n" );
+			return qfalse;
+		}
+		if ( !vk_ral_mip_transition( image, 0, RAL_RESIDENCY_RESIDENT, 1,
+		                             qtrue, (uint32_t)tr.frameCount ) ) {
+			R_LOG( rch_ral_texture, SEV_WARN,
+			       "RAL residency mip test: restore refused (page state transition failed)\n" );
+			return qfalse;
+		}
+		Ral_BindGroupSetTextureViewAt( s_ral_bindless_set, (uint32_t)image->ralBindlessSlot, image->ralResidencyView );
+		mipLevels = Ral_GetTextureMipLevelCount( image->ral );
+		R_LOG( rch_ral_texture, SEV_WARN,
+		       "RAL residency mip test: action=promote class=texture resource=%d slot=%d childLevel=0 parentLevel=1 baseMip=0 levelCount=%u heldFrames=%d sampleAge=%d fallback=parent name=%s\n",
+		       s_ral_mip_test_resource, image->ralBindlessSlot, mipLevels,
+		       tr.frameCount - s_ral_mip_test_start_frame,
+		       tr.frameCount - image->frameUsed, image->imgName );
+		vk_ral_log_mip_record( image, 0, "promote" );
+		Ral_DestroyTextureView( image->ralCoarseResidencyView );
+		image->ralCoarseResidencyView = NULL;
+		s_ral_mip_test_image = NULL;
+		s_ral_mip_test_resource = -1;
+		s_ral_mip_test_start_frame = 0;
+		s_ral_mip_test_upload_frame = 0;
+		s_ral_mip_test_upload_bytes = 0;
+		return qtrue;
+	}
+
+	if ( s_ral_mip_test_image != NULL ) {
+		R_LOG( rch_ral_texture, SEV_WARN, "RAL residency mip test: hold refused (parent view already held)\n" );
+		return qfalse;
+	}
+	// Highest frameUsed wins; resource index breaks ties. This selects a texture
+	// the current map actually sampled rather than a registration-order fixture.
+	for ( i = 0; i < tr.numImages; ++i ) {
+		image_t *candidate = tr.images[i];
+		uint32_t candidateMips;
+		if ( !candidate || !candidate->ral || !candidate->ralResidencyView ||
+		     candidate->ralBindlessSlot < 0 || candidate->imgName[0] == '*' ||
+		     !( candidate->flags & IMGFLAG_MIPMAP ) || R_ImageIsPinned( candidate ) ||
+		     candidate->ralResidencyMipCount == 0 ||
+		     candidate->ralMipResidency[0].id.planeMask != 1u ) continue;
+		candidateMips = Ral_GetTextureMipLevelCount( candidate->ral );
+		if ( candidateMips < 2u ) continue;
+		if ( !image || candidate->frameUsed > image->frameUsed ||
+		     ( candidate->frameUsed == image->frameUsed && i < s_ral_mip_test_resource ) ) {
+			image = candidate;
+			s_ral_mip_test_resource = i;
+		}
+	}
+	if ( !image ) {
+		R_LOG( rch_ral_texture, SEV_WARN, "RAL residency mip test: hold refused (no live mipmapped texture)\n" );
+		return qfalse;
+	}
+	{
+		ralTextureViewCreateInfo_t vci;
+		memset( &vci, 0, sizeof( vci ) );
+		vci.texture = image->ral; vci.viewType = RAL_TEXTURE_2D;
+		vci.baseMipLevel = 1u; vci.mipLevelCount = 0u;
+		vci.baseArrayLayer = 0u; vci.arrayLayerCount = 1u;
+		image->ralCoarseResidencyView = Ral_CreateTextureView( s_ral_backend, &vci );
+	}
+	if ( !image->ralCoarseResidencyView ) {
+		R_LOG( rch_ral_texture, SEV_WARN, "RAL residency mip test: hold refused (coarse view creation failed)\n" );
+		return qfalse;
+	}
+	mipLevels = Ral_GetTextureMipLevelCount( image->ral );
+	if ( image->ralResidencyMipCount != mipLevels ||
+	     image->ralMipResidency[0].id.resource != (uint32_t)s_ral_mip_test_resource ||
+	     !vk_ral_mip_transition( image, 0, RAL_RESIDENCY_STALE, 0,
+	                            qtrue, (uint32_t)tr.frameCount ) ) {
+		Ral_DestroyTextureView( image->ralCoarseResidencyView );
+		image->ralCoarseResidencyView = NULL;
+		R_LOG( rch_ral_texture, SEV_WARN,
+		       "RAL residency mip test: hold refused (persistent page state/address mismatch)\n" );
+		return qfalse;
+	}
+	Ral_BindGroupSetTextureViewAt( s_ral_bindless_set, (uint32_t)image->ralBindlessSlot, image->ralCoarseResidencyView );
+	s_ral_mip_test_image = image;
+	s_ral_mip_test_start_frame = tr.frameCount;
+	R_LOG( rch_ral_texture, SEV_WARN,
+	       "RAL residency mip test: action=hold class=texture resource=%d slot=%d childLevel=0 parentLevel=1 baseMip=1 levelCount=%u sampleAge=%d fallback=parent name=%s\n",
+	       s_ral_mip_test_resource, image->ralBindlessSlot, mipLevels - 1u,
+	       tr.frameCount - image->frameUsed, image->imgName );
+	vk_ral_log_mip_record( image, 0, "hold" );
+	return qtrue;
+}
+
+const char *vk_ral_residency_mip_test_source( int *width, int *height ) {
+	image_t *image = s_ral_mip_test_image;
+	if ( width ) *width = image ? image->width : 0;
+	if ( height ) *height = image ? image->height : 0;
+	return ( image && image->imgName[0] ) ? image->imgName : NULL;
+}
+
+qboolean vk_ral_residency_mip_upload( const byte *pic, int width, int height ) {
+	image_t               *image = s_ral_mip_test_image;
+	ralTextureUploadDesc_t upload;
+	ralUploadTicket_t      ticket;
+	uint64_t               bytes;
+	int                    heldFrames, sampleAge;
+
+	if ( !image || !image->ral || !image->ralResidencyView ||
+	     image->ralBindlessSlot < 0 || image->ralCoarseResidencyView == NULL ) {
+		R_LOG( rch_ral_texture, SEV_WARN, "RAL residency mip test: upload refused (no held parent view)\n" );
+		return qfalse;
+	}
+	if ( s_ral_mip_test_ticket.fence ) {
+		R_LOG( rch_ral_texture, SEV_WARN, "RAL residency mip test: upload refused (child upload already in flight)\n" );
+		return qfalse;
+	}
+	if ( !pic || width != image->width || height != image->height || width <= 0 || height <= 0 ) {
+		R_LOG( rch_ral_texture, SEV_WARN,
+		       "RAL residency mip test: upload refused (decoded source mismatch for %s: %dx%d expected %dx%d)\n",
+		       image->imgName, width, height, image->width, image->height );
+		return qfalse;
+	}
+	heldFrames = tr.frameCount - s_ral_mip_test_start_frame;
+	sampleAge = tr.frameCount - image->frameUsed;
+	if ( heldFrames < 20 || sampleAge > 1 ) {
+		R_LOG( rch_ral_texture, SEV_WARN,
+		       "RAL residency mip test: upload refused (parent hold/sample authority heldFrames=%d sampleAge=%d)\n",
+		       heldFrames, sampleAge );
+		return qfalse;
+	}
+
+	// The explicit no-mipgen flag overwrites only child mip 0 and preserves the
+	// already-visible parent chain.  Ral_TextureUploadBegin submits this page copy
+	// without waiting; the parent view remains bound until the per-frame drain
+	// observes its completion fence and promotes the full-chain view.
+	bytes = (uint64_t)(uint32_t)width * (uint64_t)(uint32_t)height * 4u;
+	memset( &upload, 0, sizeof( upload ) );
+	upload.mipLevel = 0;
+	upload.arrayLayer = 0;
+	upload.data = pic;
+	upload.dataSize = bytes;
+	upload.suppressMipGeneration = qtrue;
+	ticket = Ral_TextureUploadBegin( image->ral, &upload );
+	if ( !ticket.fence ) {
+		R_LOG( rch_ral_texture, SEV_WARN, "RAL residency mip test: upload refused (child upload did not return a fence)\n" );
+		return qfalse;
+	}
+	if ( !vk_ral_mip_transition( image, 0, RAL_RESIDENCY_IN_FLIGHT, 0,
+	                            qtrue, (uint32_t)tr.frameCount ) ) {
+		vk_ral_release_upload_ticket( &ticket );
+		R_LOG( rch_ral_texture, SEV_WARN,
+		       "RAL residency mip test: upload refused (page state transition failed)\n" );
+		return qfalse;
+	}
+	s_ral_mip_test_ticket = ticket;
+	s_ral_mip_test_upload_frame = tr.frameCount;
+	s_ral_mip_test_upload_bytes = bytes;
+	R_LOG( rch_ral_texture, SEV_WARN,
+	       "RAL residency mip test: action=upload-start class=texture resource=%d slot=%d childLevel=0 parentLevel=1 baseMip=1 bytes=%llu synchronous=%d parentBound=1 heldFrames=%d sampleAge=%d fallback=parent source=decoded name=%s\n",
+	       s_ral_mip_test_resource, image->ralBindlessSlot,
+	       (unsigned long long)bytes, ticket.synchronous ? 1 : 0,
+	       heldFrames, sampleAge, image->imgName );
+	vk_ral_log_mip_record( image, 0, "upload-start" );
+	return qtrue;
 }
 
 // True while any async upload is still in flight (its placeholder not yet swapped).
 qboolean vk_ral_pending_uploads_active( void ) {
-	return ( s_ral_pending_upload_count > 0 ) ? qtrue : qfalse;
+	return ( s_ral_pending_upload_count > 0 || s_ral_mip_test_ticket.fence != NULL ) ? qtrue : qfalse;
 }
 
 void vk_ral_upload_counts( uint32_t *syncOut, uint32_t *asyncOut ) {
@@ -1572,6 +2158,16 @@ void vk_ral_assign_dds_slot( image_t *image ) {
 
 void vk_ral_unregister_image( image_t *image ) {
 	if ( !image || !s_ral_backend ) return;
+	if ( s_ral_material_images[0] == image || s_ral_material_images[1] == image )
+		vk_ral_material_reset( qfalse );
+	if ( s_ral_mip_test_image == image ) {
+		vk_ral_release_upload_ticket( &s_ral_mip_test_ticket );
+		s_ral_mip_test_image = NULL;
+		s_ral_mip_test_resource = -1;
+		s_ral_mip_test_start_frame = 0;
+		s_ral_mip_test_upload_frame = 0;
+		s_ral_mip_test_upload_bytes = 0;
+	}
 	// Scrub any in-flight async-upload entries that reference this image BEFORE
 	// it is freed. R_DeleteTextures calls us for every tr.images[] entry on a
 	// map transition without draining s_ral_pending_uploads; once Hunk_ClearLevel
@@ -1583,7 +2179,7 @@ void vk_ral_unregister_image( image_t *image ) {
 		while ( i < s_ral_pending_upload_count ) {
 			vk_ral_pending_upload_t *p = &s_ral_pending_uploads[i];
 			if ( p->image == image ) {
-				if ( p->ticket.fence ) Ral_DestroyFence( p->ticket.fence );
+				vk_ral_release_upload_ticket( &p->ticket );
 				*p = s_ral_pending_uploads[ --s_ral_pending_upload_count ];
 				// don't advance i — the swapped-in entry must be re-checked
 			} else {
@@ -1607,11 +2203,21 @@ void vk_ral_unregister_image( image_t *image ) {
 		}
 		image->ralBindlessSlot = -1;
 	}
+	if ( image->ralCoarseResidencyView ) {
+		Ral_DestroyTextureView( image->ralCoarseResidencyView );
+		image->ralCoarseResidencyView = NULL;
+	}
+	if ( image->ralResidencyView ) {
+		Ral_DestroyTextureView( image->ralResidencyView );
+		image->ralResidencyView = NULL;
+	}
 	if ( image->ral ) {
 		Ral_DestroyTexture( image->ral );
 		image->ral = NULL;
 		s_ral_destroyed_count++;
 	}
+	image->ralResidencyMipCount = 0;
+	memset( image->ralMipResidency, 0, sizeof( image->ralMipResidency ) );
 }
 
 
@@ -1833,6 +2439,18 @@ Q_EXPORT void Ral_DumpLive( void ) {
 	const ralCaps_t  *c;
 	ralMemoryBudget_t mb;
 
+	// `ral_dump live markers` is the exact renderer-DLL-owned one-frame arm.
+	// The client command already resolved this live export; keep the profiler
+	// receipt on the real imported backend without adding a second command ABI.
+	if ( ri.Cmd_Argc() > 2 && Q_stricmp( ri.Cmd_Argv( 2 ), "markers" ) == 0 ) {
+		vk_profile_markers_arm();
+		return;
+	}
+	if ( ri.Cmd_Argc() > 2 && Q_stricmp( ri.Cmd_Argv( 2 ), "profile" ) == 0 ) {
+		vk_gpu_profile_dump();
+		return;
+	}
+
 	R_LOG( rch_ral, SEV_INFO, "===== \\ral_dump live (renderer-owned imported-mode backend) =====\n" );
 
 	if ( !s_ral_init_attempted ) {
@@ -1881,16 +2499,11 @@ Q_EXPORT void Ral_DumpLive( void ) {
 	R_LOG( rch_ral, SEV_INFO, "===== end \\ral_dump live =====\n" );
 }
 
-// ── "\ral_pipeline_test" — walk the fixtures, report PASS/FAIL ────
-// Q_EXPORT'd so cl_main.c's CL_RalPipelineTest_f can resolve it via
-// Sys_LoadFunction. Each fixture asserts a specific parallel ralPipeline_t
-// sibling field is non-NULL after boot (proving the special-case site or
-// the centralized helper created the matching RAL pipeline). Fixtures that
-// require runtime conditions not in scope at \ral_pipeline_test invocation
-// time (mirror portal, wireframe, stencil shadow) are reported as N/A with
-// a note about what would create them — they're still parallel-paths-
-// compatible per the centralized helper coverage, but enumerating live
-// requires triggering the conditional code path first.
+// ── "\ral_pipeline_test" — exact offscreen pipeline exercise ─────────
+// Q_EXPORT'd so cl_main.c can resolve it through Sys_LoadFunction. The old
+// 19-fixture sibling-field walk retired with that scaffolding; this command
+// now delegates to the same production RAL draw/readback + compute + cache
+// exercise as "\ral_dump pipeline".
 typedef struct {
 	const char           *name;
 	const ralPipeline_t **field;
@@ -1898,15 +2511,9 @@ typedef struct {
 } ral_pipeline_test_fixture_t;
 
 Q_EXPORT void Ral_PipelineTest( void ) {
-	// body retired alongside the
-	// sibling pipeline fields. The test enumerated 19 fixtures backed by
-	// vk.ral_*_pipeline siblings; with those fields deleted, every fixture
-	// is permanently N/A. The command stays exported so the cl_main.c
-	// resolver still binds, but it just logs the retirement.
-	R_LOG( rch_ral, SEV_INFO, "===== \\ral_pipeline_test =====\n" );
-	R_LOG( rch_ral, SEV_INFO, "  Sibling pipeline scaffolding retired in Phase 7.4c-submit-sibling-retire.\n" );
-	R_LOG( rch_ral, SEV_INFO, "  Rendering is now exclusively on the legacy VkPipeline path.\n" );
-	R_LOG( rch_ral, SEV_INFO, "===== end \\ral_pipeline_test =====\n" );
+	R_LOG( rch_ral, SEV_INFO,
+	       "ral_pipeline_test: running exact offscreen RAL pipeline exercise\n" );
+	Ral_RunPipelineDiagnostic();
 }
 
 #if 0  /* retired Ral_PipelineTest body — kept for archival reference only */

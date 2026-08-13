@@ -120,28 +120,6 @@ typedef struct {
 ralBackend_t *Ral_CreateBackend ( const ralBackendCreateInfo_t *ci );
 void          Ral_DestroyBackend( ralBackend_t *b );
 
-// alias-preserve accessors for the RAL-owned
-// handles. Renderer reads back into vk.instance / vk.physical_device /
-// vk.device aliases at boot. Mirrors the Ral_GetSwapchainHandle pattern.
-void *Ral_GetInstanceHandle      ( const ralBackend_t *b );  // VkInstance
-void *Ral_GetPhysicalDeviceHandle( const ralBackend_t *b );  // VkPhysicalDevice
-void *Ral_GetSurfaceHandle       ( const ralBackend_t *b );  // VkSurfaceKHR
-void *Ral_GetDeviceHandle        ( const ralBackend_t *b );  // VkDevice
-void *Ral_GetQueueHandle         ( const ralBackend_t *b, ralQueueType_t q );  // VkQueue
-uint32_t Ral_GetQueueFamily      ( const ralBackend_t *b, ralQueueType_t q );
-
-// read back the device-extension list RAL actually
-// enabled on the VkDevice (intersection of bci.platformDeviceExtensions[]
-// with availability, plus RAL-internal additions like VK_KHR_swapchain).
-// Renderer iterates at boot to set side-effect state (vk_fse_ext_enabled,
-// vk.debugMarkers, vk.dedicatedAllocation) and to fill
-// glConfig.extensions_string. Pointers refer to either the caller-supplied
-// strings (string-literal lifetime) or RAL-internal static literals; do
-// NOT free.
-void Ral_GetEnabledDeviceExtensions( const ralBackend_t *b,
-                                     const char *const **out,
-                                     uint32_t           *outCount );
-
 // ── capabilities ────────────────────────────────────────────────────────
 // Filled once at backend creation. Renderer reads via Ral_GetCaps() and
 // caches. Adding fields is backward-compatible (renderer only reads what it
@@ -241,6 +219,11 @@ uint32_t Ral_ProbeBackends( ralBackendAvailability_t *out, uint32_t maxOut );
 // it with Sys_LoadFunction. Probes, creates a throwaway backend, dumps caps
 // and memory budget, destroys it. Not part of the rendering path.
 Q_EXPORT void Ral_Dump( void );
+
+// Exact compatibility target for the historical "\ral_pipeline_test"
+// command. Runs the same offscreen draw/readback + compute + cache exercise
+// as "\ral_dump pipeline" without depending on console argument state.
+void Ral_RunPipelineDiagnostic( void );
 
 // "\ral_dump live" dumps the *renderer-owned* backend (the
 // one vk_ral_textures.c created via Ral_CreateBackend in imported mode)

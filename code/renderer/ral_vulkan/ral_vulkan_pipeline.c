@@ -118,18 +118,6 @@ static VkBlendOp ralVk_BlendOp( ralBlendOp_t o ) {
 // Variable-rate-shading rate → fragment-size VkExtent2D. 1x1 (default) is never
 // passed here (the caller only builds the VRS state for a coarser rate). Unknown
 // rates fall back to 1x1 (a no-op fragment size).
-static VkExtent2D ralVk_TranslateShadingRate( ralFragmentShadingRate_t r ) {
-	VkExtent2D e;
-	switch ( r ) {
-	case RAL_SHADING_RATE_2x2: e.width = 2; e.height = 2; break;
-	case RAL_SHADING_RATE_2x4: e.width = 2; e.height = 4; break;
-	case RAL_SHADING_RATE_4x2: e.width = 4; e.height = 2; break;
-	case RAL_SHADING_RATE_4x4: e.width = 4; e.height = 4; break;
-	case RAL_SHADING_RATE_1x1:
-	default:                   e.width = 1; e.height = 1; break;
-	}
-	return e;
-}
 static VkCompareOp ralVk_PipelineCompareOp( ralCompareOp_t c ) {
 	switch ( c ) {
 	case RAL_COMPARE_LESS:          return VK_COMPARE_OP_LESS;
@@ -628,17 +616,10 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 	// ── go ──────────────────────────────────────────────────────────────
 	RAL_ZERO( gpci );
 	gpci.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-	// when the caller supplies externalRenderPass, use
-	// the legacy VkRenderPass + subpass shape (required when the bound cmd
-	// buffer is inside vkCmdBeginRenderPass). Otherwise default to dynamic
-	// rendering (§6) via VkPipelineRenderingCreateInfo.pNext.
-	if ( ci->externalRenderPass != NULL ) {
-		gpci.pNext      = NULL;
-		gpci.renderPass = ci->externalRenderPass->vkHandle;
-		gpci.subpass    = ci->externalSubpass;
-	} else {
-		gpci.pNext               = &dynRendering;                   // no VkRenderPass — dynamic rendering
-	}
+	// RAL graphics pipelines use dynamic rendering exclusively. Legacy
+	// VkRenderPass/VkFramebuffer adoption was a callerless migration bridge and
+	// is deliberately absent from the public surface.
+	gpci.pNext = &dynRendering;
 
 	// Variable-rate shading (pipeline-static rate). Attached ONLY when the pipeline
 	// requests a coarser-than-1x1 rate AND the device enabled the feature
@@ -667,13 +648,8 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 	gpci.pColorBlendState    = &cb;
 	gpci.pDynamicState       = &dynState;
 	gpci.layout              = layout;
-	// only force VK_NULL_HANDLE for the dynamic-rendering
-	// path. With externalRenderPass set (legacy pass path) the renderPass + subpass
-	// were already set above and must not be overwritten.
-	if ( ci->externalRenderPass == NULL ) {
-		gpci.renderPass = VK_NULL_HANDLE;
-		gpci.subpass    = 0;
-	}
+	gpci.renderPass          = VK_NULL_HANDLE;
+	gpci.subpass             = 0;
 
 	r = b->vk.CreateGraphicsPipelines( b->device, b->pipelineCache, 1, &gpci, NULL, &vkPipe );
 	b->vk.DestroyShaderModule( b->device, modVert, NULL );
@@ -1180,7 +1156,7 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 				Ral_CmdBindBindGroup( cb, 0, bg );
 				Ral_CmdPushConstants( cb, RAL_STAGE_COMPUTE, 0, sizeof( COUNT ), &COUNT );
 				Ral_CmdDispatch     ( cb, ( COUNT + 63u ) / 64u, 1, 1 );
-				Ral_CmdPipelineBarrier( cb, RAL_BARRIER_COMPUTE_TO_GRAPHICS );   // compute write → transfer read
+				Ral_CmdPipelineBarrier( cb, RAL_BARRIER_COMPUTE_TO_TRANSFER );   // compute write → transfer read
 				RAL_ZERO( copy ); copy.size = COUNT * sizeof( uint32_t );
 				Ral_CmdCopyBuffer( cb, ssbo, cReadback, &copy );
 				Ral_EndCommandBuffer( cb );
@@ -1218,7 +1194,164 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 		if ( ssbo )      Ral_DestroyBuffer( ssbo );
 	}
 
-	// ── (4) pipeline cache save/load roundtrip ────────────────────────
+	// ── (4) restricted residency-view sample + readback ──────────────
+	{
+		uint8_t                         mip0[4u * 4u * 4u];
+		const uint8_t                   mip2[4] = { 0u, 255u, 0u, 255u };
+		ralTextureCreateInfo_t          tci;
+		ralTextureUploadDesc_t          upload;
+		ralTextureViewCreateInfo_t      vci;
+		ralSamplerCreateInfo_t          sci;
+		ralBufferCreateInfo_t           bci;
+		ralBindEntry_t                  entries[3];
+		ralBindGroupLayoutCreateInfo_t  lci;
+		ralBindingValue_t               values[3];
+		ralBindGroupCreateInfo_t        bgci;
+		ralComputePipelineCreateInfo_t  cci;
+		const ralBindGroupLayout_t     *layouts[1];
+		ralTexture_t                   *tex = NULL;
+		ralTextureView_t               *fullView = NULL, *coarseView = NULL;
+		ralSampler_t                   *sampler = NULL;
+		ralBuffer_t                    *sampleOut = NULL, *sampleReadback = NULL;
+		ralBindGroupLayout_t           *layout = NULL;
+		ralBindGroup_t                 *group = NULL;
+		ralPipeline_t                  *pipe = NULL;
+		ralCommandBuffer_t             *cb = NULL, *readyCb = NULL;
+		ralFence_t                     *fence = NULL, *uploadFence = NULL;
+		ralSemaphore_t                 *readySemaphore = NULL;
+		ralUploadTicket_t               acquireTicket;
+		qboolean                        acquired = qfalse;
+		uint32_t                        i;
+
+		for ( i = 0; i < sizeof( mip0 ); i += 4u ) {
+			mip0[i + 0u] = 255u; mip0[i + 1u] = 0u; mip0[i + 2u] = 0u; mip0[i + 3u] = 255u;
+		}
+		RAL_ZERO( tci );
+		tci.type = RAL_TEXTURE_2D; tci.format = RAL_FORMAT_R8G8B8A8_UNORM;
+		tci.width = 4u; tci.height = 4u; tci.depthOrArrayLayers = 1u;
+		tci.mipLevels = 3u; tci.sampleCount = 1u;
+		tci.usage = RAL_TEXTURE_USAGE_SAMPLED; tci.memory = RAL_MEMORY_DEVICE_LOCAL;
+		tci.debugName = "ral-pipeline-test-residency-texture";
+		tex = Ral_CreateTexture( b, &tci );
+		if ( tex ) {
+			RAL_ZERO( upload ); upload.mipLevel = 0u; upload.data = mip0; upload.dataSize = sizeof( mip0 );
+			uploadFence = Ral_TextureUploadAsync( tex, &upload );
+			if ( uploadFence ) { Ral_WaitFence( uploadFence, ~0ull ); Ral_DestroyFence( uploadFence ); uploadFence = NULL; }
+			RAL_ZERO( upload ); upload.mipLevel = 2u; upload.data = mip2; upload.dataSize = sizeof( mip2 );
+			uploadFence = Ral_TextureUploadAsync( tex, &upload );
+			if ( uploadFence ) { Ral_WaitFence( uploadFence, ~0ull ); Ral_DestroyFence( uploadFence ); uploadFence = NULL; }
+		}
+		if ( tex ) {
+			RAL_ZERO( vci ); vci.texture = tex; vci.viewType = RAL_TEXTURE_2D; vci.arrayLayerCount = 1u;
+			fullView = Ral_CreateTextureView( b, &vci );
+			vci.baseMipLevel = 2u; vci.mipLevelCount = 1u;
+			coarseView = Ral_CreateTextureView( b, &vci );
+		}
+		RAL_ZERO( sci ); sci.magFilter = RAL_FILTER_NEAREST; sci.minFilter = RAL_FILTER_NEAREST;
+		sci.mipmapMode = RAL_MIPMAP_NEAREST; sci.addressU = sci.addressV = sci.addressW = RAL_ADDRESS_CLAMP_TO_EDGE;
+		sci.maxLod = 1.0f; sci.debugName = "ral-pipeline-test-residency-sampler";
+		sampler = Ral_CreateSampler( b, &sci );
+		RAL_ZERO( bci ); bci.size = sizeof( uint32_t ); bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_SRC;
+		bci.memory = RAL_MEMORY_DEVICE_LOCAL; bci.debugName = "ral-pipeline-test-residency-output";
+		sampleOut = Ral_CreateBuffer( b, &bci );
+		RAL_ZERO( bci ); bci.size = sizeof( uint32_t ); bci.usage = RAL_BUFFER_TRANSFER_DST;
+		bci.memory = RAL_MEMORY_HOST_COHERENT; bci.debugName = "ral-pipeline-test-residency-readback";
+		sampleReadback = Ral_CreateBuffer( b, &bci );
+
+		RAL_ZERO( entries[0] ); entries[0].binding = 0u; entries[0].type = RAL_BIND_SAMPLED_TEXTURE; entries[0].count = 1u; entries[0].stageFlags = RAL_STAGE_COMPUTE;
+		RAL_ZERO( entries[1] ); entries[1].binding = 1u; entries[1].type = RAL_BIND_SAMPLER; entries[1].count = 1u; entries[1].stageFlags = RAL_STAGE_COMPUTE;
+		RAL_ZERO( entries[2] ); entries[2].binding = 2u; entries[2].type = RAL_BIND_STORAGE_BUFFER; entries[2].count = 1u; entries[2].stageFlags = RAL_STAGE_COMPUTE;
+		RAL_ZERO( lci ); lci.entries = entries; lci.numEntries = 3u; lci.debugName = "ral-pipeline-test-residency-layout";
+		layout = Ral_CreateBindGroupLayout( b, &lci );
+		if ( layout && fullView && sampler && sampleOut ) {
+			RAL_ZERO( values[0] ); values[0].binding = 0u; values[0].type = RAL_BIND_SAMPLED_TEXTURE; values[0].textureView = fullView;
+			RAL_ZERO( values[1] ); values[1].binding = 1u; values[1].type = RAL_BIND_SAMPLER; values[1].sampler = sampler;
+			RAL_ZERO( values[2] ); values[2].binding = 2u; values[2].type = RAL_BIND_STORAGE_BUFFER; values[2].buffer = sampleOut; values[2].bufferRange = sizeof( uint32_t );
+			RAL_ZERO( bgci ); bgci.layout = layout; bgci.values = values; bgci.numValues = 3u; bgci.debugName = "ral-pipeline-test-residency-group";
+			group = Ral_CreateBindGroup( b, &bgci );
+		}
+		layouts[0] = layout;
+		RAL_ZERO( cci ); cci.computeSpirv = ral_pipeline_test_residency_comp_spv;
+		cci.computeSpirvSize = ral_pipeline_test_residency_comp_spv_size;
+		cci.bindGroupLayouts = layouts; cci.numBindGroupLayouts = 1u; cci.debugName = "ral-pipeline-test-residency-pipeline";
+		pipe = layout ? Ral_CreateComputePipeline( b, &cci ) : NULL;
+		if ( group && coarseView && pipe && sampleReadback ) {
+			// Exercise the portable transfer-to-graphics handoff with the exact
+			// mip/layer range consumed below.  The signal is produced on the
+			// graphics queue here so this remains valid on single-family devices;
+			// distinct-family ownership is separate platform coverage.
+			readySemaphore = Ral_CreateSemaphore( b, RAL_SEMAPHORE_BINARY );
+			readyCb = Ral_AcquireCommandBuffer( b, RAL_QUEUE_GRAPHICS );
+			if ( readySemaphore && readyCb ) {
+				ralCommandBuffer_t *readyCbs[1];
+				ralSemaphore_t *signals[1];
+				ralSubmitInfo_t readySubmit;
+				Ral_BeginCommandBuffer( readyCb );
+				Ral_EndCommandBuffer( readyCb );
+				readyCbs[0] = readyCb;
+				signals[0] = readySemaphore;
+				RAL_ZERO( readySubmit );
+				readySubmit.commandBuffers = readyCbs;
+				readySubmit.numCommandBuffers = 1u;
+				readySubmit.signalSemaphores = signals;
+				readySubmit.numSignalSemaphores = 1u;
+				Ral_Submit( b, RAL_QUEUE_GRAPHICS, &readySubmit );
+				RAL_ZERO( acquireTicket );
+				acquireTicket.readySemaphore = readySemaphore;
+				acquireTicket.texture = tex;
+				acquireTicket.baseMipLevel = 2u;
+				acquireTicket.mipLevelCount = 1u;
+				acquireTicket.baseArrayLayer = 0u;
+				acquireTicket.arrayLayerCount = 1u;
+				acquireTicket.graphicsAcquireRequired = qtrue;
+				acquired = Ral_TextureAcquireBatchToGraphics( b, &acquireTicket, 1u );
+			}
+			R_LOG( rch_ral, acquired ? SEV_INFO : SEV_WARN,
+			       "  residency acquire: baseMip=2 mipCount=1 baseLayer=0 layerCount=1 readySemaphore=%u result=%s\n",
+			       readySemaphore ? 1u : 0u, acquired ? "ok" : "failed" );
+			// The group starts on mip0 red; the portable sparse update must make
+			// view-local LOD0 resolve to original mip2 green before dispatch.
+			Ral_BindGroupSetTextureViewAt( group, 0u, coarseView );
+			cb = Ral_AcquireCommandBuffer( b, RAL_QUEUE_GRAPHICS );
+			fence = Ral_CreateFence( b );
+			if ( cb && fence ) {
+				ralCommandBuffer_t *cbs[1]; ralSubmitInfo_t si; ralBufferCopy_t copy;
+				Ral_BeginCommandBuffer( cb );
+				Ral_CmdBindPipeline( cb, pipe ); Ral_CmdBindBindGroup( cb, 0u, group ); Ral_CmdDispatch( cb, 1u, 1u, 1u );
+				Ral_CmdPipelineBarrier( cb, RAL_BARRIER_COMPUTE_TO_TRANSFER );
+				RAL_ZERO( copy ); copy.size = sizeof( uint32_t ); Ral_CmdCopyBuffer( cb, sampleOut, sampleReadback, &copy );
+				Ral_EndCommandBuffer( cb ); cbs[0] = cb; RAL_ZERO( si ); si.commandBuffers = cbs; si.numCommandBuffers = 1u; si.signalFence = fence;
+				Ral_Submit( b, RAL_QUEUE_GRAPHICS, &si ); Ral_WaitFence( fence, ~0ull );
+				{
+					const uint32_t *packed = (const uint32_t *)Ral_MapBuffer( sampleReadback );
+					if ( packed ) {
+						const uint32_t rgba = *packed;
+						R_LOG( rch_ral, SEV_INFO,
+						       "  residency view: baseMip=2 sample RGBA = %u %u %u %u (expect coarse green; mip0 is red)\n",
+						       rgba & 255u, ( rgba >> 8u ) & 255u, ( rgba >> 16u ) & 255u, ( rgba >> 24u ) & 255u );
+						Ral_UnmapBuffer( sampleReadback );
+					} else R_LOG( rch_ral, SEV_WARN, "  residency view: readback map failed\n" );
+				}
+			}
+		} else R_LOG( rch_ral, SEV_WARN, "  residency view: setup failed (tex=%p full=%p coarse=%p sampler=%p out=%p readback=%p layout=%p group=%p pipe=%p)\n",
+		                (void *)tex, (void *)fullView, (void *)coarseView, (void *)sampler, (void *)sampleOut,
+		                (void *)sampleReadback, (void *)layout, (void *)group, (void *)pipe );
+		if ( fence ) Ral_DestroyFence( fence );
+		if ( cb ) Ral_DestroyCommandBuffer( cb );
+		if ( readyCb ) Ral_DestroyCommandBuffer( readyCb );
+		if ( readySemaphore ) Ral_DestroySemaphore( readySemaphore );
+		if ( pipe ) Ral_DestroyPipeline( pipe );
+		if ( group ) Ral_DestroyBindGroup( group );
+		if ( layout ) Ral_DestroyBindGroupLayout( layout );
+		if ( sampleReadback ) Ral_DestroyBuffer( sampleReadback );
+		if ( sampleOut ) Ral_DestroyBuffer( sampleOut );
+		if ( sampler ) Ral_DestroySampler( sampler );
+		if ( coarseView ) Ral_DestroyTextureView( coarseView );
+		if ( fullView ) Ral_DestroyTextureView( fullView );
+		if ( tex ) Ral_DestroyTexture( tex );
+	}
+
+	// ── (5) pipeline cache save/load roundtrip ────────────────────────
 	{
 		const char *path = "ral_pipeline_cache.bin";
 		FILE       *vf;
@@ -1237,10 +1370,13 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 
 	// drain final frame so any tail-end deferred destroys land before the test returns
 	{
-		uint32_t i;
+		uint32_t i, liveLayouts = 0;
 		for ( i = 0; i < RAL_VK_MAX_FRAMES_IN_FLIGHT + 1u; i++ ) { Ral_BeginFrame( b ); Ral_EndFrame( b ); }
+		for ( i = 0; i < b->numLayoutCache; i++ )
+			if ( b->layoutCache[i].layout != VK_NULL_HANDLE ) liveLayouts++;
+		R_LOG( rch_ral, SEV_INFO,
+		       "  teardown: %u pending destroys, %u live allocations, %u live layout-cache slots (%u high-water)\n",
+		       b->numPendingDestroy, b->numAllocations, liveLayouts, b->numLayoutCache );
 	}
-	R_LOG( rch_ral, SEV_INFO, "  teardown: %u pending destroys, %u live allocations, %u layout-cache slots in use\n",
-	        b->numPendingDestroy, b->numAllocations, b->numLayoutCache );
 	R_LOG( rch_ral, SEV_INFO, "===== end RAL pipeline test =====\n" );
 }

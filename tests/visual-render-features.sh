@@ -4,8 +4,8 @@
 # the GTAO and Forward+ render features. Extends the smoke-map-transition golden
 # infrastructure (same png2raw decode, same 8x8-tile block-mean differ, same
 # 3-capture noise-bound, same SMOKE_UPDATE_GOLDEN re-bless) to two render paths
-# the default golden gate does NOT cover (it runs a FEAT_SSAO=0 build, and never
-# pixel-equivalence-gates r_forwardPlus).
+# the default golden gate does NOT cover (it never isolates the AO field and
+# never pixel-equivalence-gates r_forwardPlus).
 #
 # Every "is this golden sane?" decision here is a COMPUTED assertion (tile-mean /
 # tile-diff thresholds), never a human looking at an image. The agent captures,
@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
         *) echo "unknown arg: $1" >&2; exit 2;;
     esac
 done
-[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|dlight-shadow|dlight-shadow-probe|selftest} required" >&2; exit 2; }
+[ -n "$MODE" ]   || { echo "FAIL: --mode {gtao|fwdplus|viewport|shadow_atest|scene|chromatic|dlight-shadow|dlight-shadow-lifecycle|dlight-shadow-probe|selftest} required" >&2; exit 2; }
 # selftest needs no engine (it exercises the assertion math on synthetic inputs).
 if [ "$MODE" != "selftest" ]; then
     [ -n "$ENGINE" ] || { echo "FAIL: --engine <wired.x64> required" >&2; exit 2; }
@@ -606,18 +606,23 @@ chromatic_assert() {
 # dlight omni point-shadow darken predicate. The shadow-on frame must DARKEN a
 # receiver region relative to shadow-off, and the darkening must be LOCALISED (a
 # cast shadow), not a whole-frame dim. Inputs: max per-tile darken (off-on luma),
-# how many tiles darkened past half the floor, and the whole-frame mean delta.
+# how many tiles darkened past half the floor, whole-frame mean delta, and the
+# worst same-configuration on-vs-on tile jitter. The signal is authoritative
+# only when that independent jitter stays below the declared noise ceiling.
 # OK iff max-darken clears the floor AND few tiles darkened AND the frame mean
 # barely moved. Single source of truth for "did the omni shadow fall in the right
 # place?", exercised verbatim by the live gate AND --mode selftest.
 DLS_DARKEN_MIN="${DLS_DARKEN_MIN:-6.0}"   # a shadow tile must darken (off-on luma) at least this
 DLS_LOCAL_TILES="${DLS_LOCAL_TILES:-8}"   # at most this many tiles may darken past half the floor (else = global dim)
+DLS_NOISE_CEIL="${DLS_NOISE_CEIL:-3.0}"   # same-config on/on worst tile jitter must remain bounded
 dlight_darken_assert() {
-    local maxDark="$1" nDark="$2" frameDelta="$3" v="OK"
+    local maxDark="$1" nDark="$2" frameDelta="$3" maxNoise="${4:-0}" v="OK"
     awk -v d="$maxDark" -v f="$DLS_DARKEN_MIN" 'BEGIN{exit !(d>=f)}' \
         || v="FAIL(no-shadow:max-darken $maxDark < $DLS_DARKEN_MIN — the shadow-on frame did not darken any receiver tile past the floor; the omni shadow did not fall in frame)"
     awk -v n="$nDark" -v m="$DLS_LOCAL_TILES" -v fd="$frameDelta" -v f="$DLS_DARKEN_MIN" 'BEGIN{exit !(n<=m && fd < f/2.0)}' \
         || v="FAIL(global-dim:darkened-tiles $nDark > $DLS_LOCAL_TILES or frame-mean-delta $frameDelta >= half-floor — the darkening is a whole-frame dim, not a localised cast shadow)"
+    awk -v n="$maxNoise" -v c="$DLS_NOISE_CEIL" 'BEGIN{exit !(n<=c)}' \
+        || v="FAIL(unstable:same-config max-noise $maxNoise > $DLS_NOISE_CEIL — launch/frame jitter is larger than the allowed shadow evidence noise floor)"
     echo "$v"; [ "$v" = "OK" ]
 }
 
@@ -628,8 +633,8 @@ echo "    golden dir: $GOLDEN_DIR   update-golden: $SMOKE_UPDATE_GOLDEN"
 # ════════════════════════════════════════════════════════════════════════════
 case "$MODE" in
 gtao)
-    # The FEAT_SSAO=1-build no-AO path (r_ssao 0) must match the existing FEAT_SSAO=0
-    # golden — proves the compile-in doesn't change the no-AO render. AO thresholds
+    # The current FEAT_SSAO=1 build's no-AO path (r_ssao 0) is compared with the
+    # established base golden. AO thresholds
     # (AO_OPEN_MIN/DARK_MAX/SPREAD_MIN) + ao_assert() are defined at shared scope above.
     GTAO_OFF_TILE_FLOOR="${GTAO_OFF_TILE_FLOOR:-60.0}"   # same band as the smoke gate
 
@@ -668,13 +673,13 @@ gtao)
     for entry in "${VPS[@]}"; do
         set -- $entry; map="$1" x="$2" y="$3" z="$4" yaw="$5" id="$6"
 
-        # (1) r_ssao 0 — INFORMATIONAL: the FEAT_SSAO=1-build no-AO path vs the existing
-        # FEAT_SSAO=0 base golden. This is the same cross-build/cross-launch comparison the
+        # (1) r_ssao 0 — INFORMATIONAL: the current no-AO runtime path vs the existing
+        # base golden. This is the same cross-launch comparison the
         # smoke gate handles with its full noise-bound + per-tile exclusion machinery (the
         # base goldens are from a different process; tile 14 mode-flips by design — see the
         # smoke gate's TILE_EXCLUDE). A raw single-capture worst-tile-diff here lacks that
         # machinery, so it is reported but NOT gated. The RIGOROUS "no-AO path unchanged"
-        # check is `make smoke-map-transition` run against the FEAT_SSAO=1 DLL (the full gate).
+        # check is `make smoke-map-transition` run against the same FEAT_SSAO=1 DLL (the full gate).
         off_shot="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_off_$id" +set r_ssao 0 +set r_showAO 0)" || { FAIL=1; continue; }
         base_golden="$GOLDEN_DIR/${id}.png"
         if [ -s "$base_golden" ]; then
@@ -1102,7 +1107,7 @@ dlight-shadow-probe)
     done
     ;;
 
-dlight-shadow)
+dlight-shadow|dlight-shadow-lifecycle)
     # -- DLIGHT OMNI POINT-SHADOW gate (P1 ship-verify) --
     # P1 renders an omni cube-depth shadow for the brightest visible runtime dlight; its
     # math was self-verified (6/6 cube faces, monotone depth) but never proven ON SCREEN.
@@ -1119,49 +1124,122 @@ dlight-shadow)
     # fails. The shadow-on frame is blessed as a regression golden after the assertion.
     DLS_RADIUS="${DLS_RADIUS:-800}"
     DLS_MAP="${DLS_MAP:-arena1}"
+    if [ "$MODE" = "dlight-shadow-lifecycle" ]; then
+        DLS_K="${DLS_K:-4}"
+        DLS_TEST_N="${DLS_TEST_N:-4}"
+        DLS_PROFILE="${DLS_PROFILE:-1}"
+    else
+        DLS_K="${DLS_K:-1}"
+        DLS_TEST_N="${DLS_TEST_N:-1}"
+        DLS_PROFILE="${DLS_PROFILE:-0}"
+    fi
     # Camera where the synthetic overhead dlight casts a frame-visible LOCALISED shadow
     # onto the wall by the torch (measured: max-darken ~9 luma over ~3 tiles, frame-mean
     # delta ~0.3 = a cast shadow, not a global dim). Requires Forward+ active (the omni
     # shadow is sampled only in forwardplus_lit.frag) — which now runs in gameplay.
-    DLS_POS="${DLS_POS:-900 1432 50 90}"
+    DLS_POS="${DLS_POS:-900 1432 50 96}"
     DLS_SHADOW_TILES="${DLS_SHADOW_TILES:-35 36}"   # tiles the cast shadow darkens (measured)
     # DLS_DARKEN_MIN / DLS_LOCAL_TILES are the shared dlight_darken_assert thresholds (hoisted above).
-    DLS_NOISE_CEIL="${DLS_NOISE_CEIL:-3.0}"    # a non-shadow tile's |off-on| must stay within this (it's not in the shadow)
     golden="$GOLDEN_DIR/dlight_shadow_${DLS_MAP}.png"
-    # Extra settle frames before the screenshot — the omni shadow's 1-frame producer→render
-    # lag means a grab on the frame right after the view-change can miss it. ~90 extra frames
-    # guarantee the cube-depth atlas is filled and steady, so on-captures agree (was the
-    # source of the ~11-luma "noise" between back-to-back shadow-on frames). dlight-only.
-    # A frame COUNT (folded into capture_fixed_cam's single "+wait"), not "+wait" tokens —
-    # extra tokens would overflow the 32-line command split and eat +quit (see that fn).
-    export CAP_EXTRA_WAIT="${DLS_EXTRA_WAIT:-90}"
+    # Capture the complete A/A/B sequence in ONE engine process.  The former gate
+    # launched three fresh processes, so its purported same-config noise oracle also
+    # included cold renderer/resource state; a frame could pass once and globally drift
+    # on the next launch.  This command-buffer fixture holds map, camera, synthetic light,
+    # animation clocks and renderer generation constant.  Only r_dlightShadows changes
+    # between the second on-frame and the off-frame, which makes the pixel difference a
+    # real product A/B rather than a process-start comparison.  Keeping the sequence in a
+    # cfg also avoids MAX_CONSOLE_LINES: startup contributes one +exec command instead of
+    # a long tail of +wait/+screenshot tokens.
+    capture_dlight_triplet() {
+        local logfile cfg x y z yaw shot
+        logfile="/tmp/vrf-dls-sequence.log"
+        cfg="$SMOKE_HOME/base/dlight-shadow-gate.cfg"
+        set -- $DLS_POS
+        [ "$#" -eq 4 ] || { echo >&2 "  dlight-shadow: invalid DLS_POS '$DLS_POS'"; return 1; }
+        x="$1"; y="$2"; z="$3"; yaw="$4"
 
-    # 2 shadow-on captures (the first warms the pipeline + bounds per-tile jitter against
-    # the second) + 1 shadow-off. cap_retry retries a capture once as a belt-and-braces
-    # guard against a genuine transient; the ~20-30% "stall" that USED to plague this mode
-    # was NOT a map-load / sound-asset hitch — it was the MAX_CONSOLE_LINES (32) command
-    # split eating the +quit token once the recipe crossed 32 "+" tokens (see
-    # capture_fixed_cam). With the settle folded into single "+wait N" tokens the recipe now
-    # stays under 32 and captures are reliable; the retry is now rarely if ever exercised.
-    cap_retry() {
-        local r
-        r="$(capture_fixed_cam "$@")" && { echo "$r"; return 0; }
-        echo >&2 "  cap_retry: capture '$3' stalled; retrying once"
-        r="$(capture_fixed_cam "$@")" && { echo "$r"; return 0; }
-        return 1
+        DLS_ON_A="$SHOTDIR/vrf_dls_on_a.png"
+        DLS_ON_B="$SHOTDIR/vrf_dls_on_b.png"
+        DLS_OFF_A="$SHOTDIR/vrf_dls_off.png"
+        DLS_NO_LIGHT="$SHOTDIR/vrf_dls_no_light.png"
+        rm -f "$DLS_ON_A" "$DLS_ON_B" "$DLS_OFF_A" "$DLS_NO_LIGHT" "$SMOKE_HOME/base/config.cfg" 2>/dev/null
+        scrub_home_cgame
+        {
+            printf 'set r_forwardPlus 1\n'
+            # Pin the exact classic-Phong cohort the Forward+ lit consumer owns.
+            # PBR/parallax/two-sided/alpha-test surfaces intentionally remain on the
+            # PMLIGHT variant path, which has no omni-shadow sampler and is therefore
+            # not valid receiver evidence for this gate.
+            printf 'set r_pbr 0\nset r_parallaxMapping 0\n'
+            printf 'set r_dlightShadows 1\n'
+            printf 'set r_dlightShadowK %s\n' "${DLS_K:-1}"
+            printf 'set r_dlightShadowTest %s\n' "$DLS_RADIUS"
+            printf 'set r_dlightShadowTestN %s\n' "${DLS_TEST_N:-1}"
+            printf 'set r_dlightShadowCount %s\n' "${DLS_COUNT:-0}"
+            printf 'set r_dlightShadowProfile %s\n' "${DLS_PROFILE:-0}"
+            printf 'map %s\n' "$DLS_MAP"
+            printf 'waitForMap\nwait 80\ncmd noclip\nwait 20\n'
+            printf 'cmd setviewpos %s %s %s %s\n' "$x" "$y" "$z" "$yaw"
+            printf 'wait %s\n' "${DLS_SETTLE_FRAMES:-250}"
+            printf 'screenshot vrf_dls_on_a\nwait 30\n'
+            printf 'screenshot vrf_dls_on_b\nwait 30\n'
+            printf 'set r_dlightShadows 0\nwait %s\n' "${DLS_TOGGLE_SETTLE_FRAMES:-90}"
+            printf 'screenshot vrf_dls_off\nwait 30\n'
+            printf 'set r_dlightShadowTest 0\nwait %s\n' "${DLS_TOGGLE_SETTLE_FRAMES:-90}"
+            printf 'screenshot vrf_dls_no_light\nwait 30\nquit\n'
+        } >"$cfg"
+
+        ( cd "$ENGINE_DIR" && timeout -s KILL -k 15 160 "$ENGINE_BIN" \
+            +set fs_homepath "$SMOKE_HOME_NATIVE" \
+            +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
+            +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 \
+            +log renderer.ral info \
+            +set r_forwardPlus 1 +set r_pbr 0 +set r_parallaxMapping 0 \
+            +set r_dlightShadows 1 +set r_dlightShadowK "${DLS_K:-1}" \
+            +set r_ssao 0 +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 \
+            +set con_notifytime 0 +set com_automated 1 \
+            +exec dlight-shadow-gate.cfg >"$logfile" 2>&1 || true )
+        reap_engine
+
+        grep -q "FIRST GAMEPLAY FRAME" "$logfile" \
+            || { echo >&2 "  dlight-shadow: FAIL — never reached CA_ACTIVE (see $logfile)"; return 1; }
+        local vuid
+        vuid="$(grep -E 'VUID|Validation Error' "$logfile" | grep -vc 'vkDestroyDevice-device-05137' || true)"
+        if [ "${vuid:-0}" -gt 0 ]; then
+            echo >&2 "  dlight-shadow: FAIL — $vuid unexpected VUID(s) (see $logfile)"
+            grep -E 'VUID|Validation Error' "$logfile" | grep -v 'vkDestroyDevice-device-05137' | head -2 | sed 's/^/    /' >&2
+            return 1
+        fi
+        for shot in "$DLS_ON_A" "$DLS_ON_B" "$DLS_OFF_A" "$DLS_NO_LIGHT"; do
+            [ -s "$shot" ] || { echo >&2 "  dlight-shadow: FAIL — missing screenshot $shot"; return 1; }
+        done
+        return 0
     }
-    on1="$(cap_retry "$DLS_MAP" "$DLS_POS" "dls_on_a" +set r_forwardPlus 1 +set r_dlightShadows 1 +set r_dlightShadowTest $DLS_RADIUS)" || FAIL=1
-    onA="/tmp/vrf-dls-on-a.png"; [ "$FAIL" = 0 ] && cp "$on1" "$onA"
-    on2="$(cap_retry "$DLS_MAP" "$DLS_POS" "dls_on_b" +set r_forwardPlus 1 +set r_dlightShadows 1 +set r_dlightShadowTest $DLS_RADIUS)" || FAIL=1
-    onB="/tmp/vrf-dls-on-b.png"; [ "$FAIL" = 0 ] && cp "$on2" "$onB"
-    off1="$(cap_retry "$DLS_MAP" "$DLS_POS" "dls_off" +set r_forwardPlus 1 +set r_dlightShadows 0 +set r_dlightShadowTest $DLS_RADIUS)" || FAIL=1
-    offA="/tmp/vrf-dls-off.png"; [ "$FAIL" = 0 ] && cp "$off1" "$offA"
 
-    if [ "$FAIL" = 0 ]; then
+    capture_dlight_triplet || FAIL=1
+    onA="$DLS_ON_A"; onB="$DLS_ON_B"; offA="$DLS_OFF_A"; noLight="$DLS_NO_LIGHT"
+
+    if [ "$MODE" = "dlight-shadow-lifecycle" ] && [ "$FAIL" = 0 ]; then
+        # K=4 is intentionally a lifecycle/portability contract, not a visual-style
+        # assertion: four independently placed lights may shadow most of this camera.
+        # Prove the full 24-pass producer ran, the on→off rebuild completed, and the
+        # process reached all post-toggle screenshots without a VUID/crash.  This catches
+        # both the 24576px atlas regression and stale descriptor generation on live off.
+        if ! grep -Eq 'dlightShadowProfile: 4 lights x 6 = 24 passes/frame,' /tmp/vrf-dls-sequence.log; then
+            echo "  dlight-shadow-lifecycle: FAIL — no exact K=4/24-pass producer authority"
+            FAIL=1
+        elif ! grep -Fq 'dlight shadows: live rebuild active=0 k=1' /tmp/vrf-dls-sequence.log; then
+            echo "  dlight-shadow-lifecycle: FAIL — on→off resource rebuild did not complete"
+            FAIL=1
+        else
+            echo "  dlight-shadow-lifecycle: K=4/24-pass producer + bounded atlas + live on→off rebuild + post-toggle screenshots -> OK"
+        fi
+    elif [ "$FAIL" = 0 ]; then
         # per-tile luma for each capture
         tile_lums "$onA" > /tmp/vrf-dls-la.txt
         tile_lums "$onB" > /tmp/vrf-dls-lb.txt
         tile_lums "$offA" > /tmp/vrf-dls-loff.txt
+        tile_lums "$noLight" > /tmp/vrf-dls-lnolight.txt
         # Position-independent: find the tile that darkens most (off - mean(on)) — that is
         # where the shadow falls. Assert (a) that max-darken exceeds DLS_DARKEN_MIN (a real
         # cast shadow), and (b) it is LOCALISED — only a few tiles darken past half the
@@ -1191,9 +1269,15 @@ dlight-shadow)
             END{ printf "%.1f %d %d %.1f %.1f", maxDark, maxTile, nDark, (sumOff-sumOn)/nt, maxNoise }' \
             /tmp/vrf-dls-la.txt /tmp/vrf-dls-lb.txt /tmp/vrf-dls-loff.txt)"
         read -r maxDark maxTile nDark frameDelta maxNoise <<<"$stats"
-        v="$(dlight_darken_assert "$maxDark" "$nDark" "$frameDelta")" || FAIL=1
-        printf "  dlight-shadow (%s [%s] r=%s): max-darken=%s@tile%s (floor %s) darkened-tiles=%s frame-mean-delta=%s noise=%s -> %s\n" \
-            "$DLS_MAP" "$DLS_POS" "$DLS_RADIUS" "$maxDark" "$maxTile" "$DLS_DARKEN_MIN" "$nDark" "$frameDelta" "$maxNoise" "$v"
+        lightMax="$(paste /tmp/vrf-dls-loff.txt /tmp/vrf-dls-lnolight.txt | awk '
+            BEGIN{m=0} {d=$2-$4; if(d>m)m=d} END{printf "%.1f",m}')"
+        v="$(dlight_darken_assert "$maxDark" "$nDark" "$frameDelta" "$maxNoise")" || FAIL=1
+        if ! awk -v d="$lightMax" -v f="$DLS_DARKEN_MIN" 'BEGIN{exit !(d>=f)}'; then
+            v="FAIL(no-lit-receiver:max-light-addition $lightMax < $DLS_DARKEN_MIN — the synthetic dlight did not visibly illuminate this camera, so shadow absence is not meaningful)"
+            FAIL=1
+        fi
+        printf "  dlight-shadow (%s [%s] r=%s): max-light=%s max-darken=%s@tile%s (floor %s) darkened-tiles=%s frame-mean-delta=%s noise=%s -> %s\n" \
+            "$DLS_MAP" "$DLS_POS" "$DLS_RADIUS" "$lightMax" "$maxDark" "$maxTile" "$DLS_DARKEN_MIN" "$nDark" "$frameDelta" "$maxNoise" "$v"
         echo "    (max-darken tile must drop >= $DLS_DARKEN_MIN luma off-vs-on = shadow falls; few tiles darkened + small frame-mean-delta = localised cast shadow, not global dimming)"
 
         if [ "$v" = "OK" ] && [ "$SMOKE_UPDATE_GOLDEN" = "1" ]; then
@@ -1585,16 +1669,19 @@ selftest)
     # Inputs: (max-darken, darkened-tile-count, frame-mean-delta) for shadow-off vs -on.
     # clean cast shadow: a receiver tile drops ~12 luma (past the 6.0 floor), only a few
     # tiles darkened, frame mean barely moved -> a localised shadow -> expect OK.
-    v="$(dlight_darken_assert 12.0 3 0.4)"; [ "$v" = "OK" ] && echo "    localised cast shadow (max-darken12/tiles3/frameDelta0.4): $v" \
+    v="$(dlight_darken_assert 12.0 3 0.4 1.0)"; [ "$v" = "OK" ] && echo "    localised cast shadow (max-darken12/tiles3/frameDelta0.4/noise1): $v" \
         || { echo "    localised cast shadow: $v (BUG: rejects a correct omni-shadow darkening)"; rc=1; }
     # defect A: off==on — the shadow-on frame is identical to shadow-off (no darkening),
     # the exact "shadow did not render" failure the gate exists to catch -> expect FAIL(no-shadow).
-    v="$(dlight_darken_assert 0.5 0 0.0)"; case "$v" in FAIL*) echo "    off==on / no darkening (max-darken0.5): $v  FAIL-as-expected";;
+    v="$(dlight_darken_assert 0.5 0 0.0 0.2)"; case "$v" in FAIL*) echo "    off==on / no darkening (max-darken0.5): $v  FAIL-as-expected";;
         *) echo "    off==on: $v (BUG: blind to a shadow that never rendered — off==on frame)"; rc=1;; esac
     # defect B: global dim — the whole frame darkened uniformly (not a localised cast
     # shadow) — many tiles past the floor, big frame-mean-delta -> expect FAIL(global-dim).
-    v="$(dlight_darken_assert 12.0 40 8.0)"; case "$v" in FAIL*) echo "    global dim (40 tiles, frameDelta8): $v  FAIL-as-expected";;
+    v="$(dlight_darken_assert 12.0 40 8.0 1.0)"; case "$v" in FAIL*) echo "    global dim (40 tiles, frameDelta8): $v  FAIL-as-expected";;
         *) echo "    global dim: $v (BUG: passes a whole-frame dim as a localised shadow)"; rc=1;; esac
+    # defect C: same-config captures move more than the claimed shadow signal.
+    v="$(dlight_darken_assert 12.0 3 0.4 8.0)"; case "$v" in FAIL*) echo "    unstable same-config captures (noise8): $v  FAIL-as-expected";;
+        *) echo "    unstable captures: $v (BUG: passes jitter larger than the evidence noise ceiling)"; rc=1;; esac
 
     echo "  -- (1h) dlight-shadow golden SHIFT teeth (deterministic, no engine) --"
     # A shadow that falls in the WRONG place = the on-frame diverges from the blessed

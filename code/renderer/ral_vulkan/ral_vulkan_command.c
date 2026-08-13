@@ -136,6 +136,9 @@ void Ral_BeginCommandBuffer( ralCommandBuffer_t *cb ) {
 	bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	if ( cb->backend->vk.BeginCommandBuffer( cb->cb, &bi ) != VK_SUCCESS ) { R_LOG( rch_ral, SEV_WARN, "Ral_BeginCommandBuffer: vkBeginCommandBuffer failed\n" ); return; }
+	cb->renderingDebugLabelActive = qfalse;
+	cb->debugLabelBeginCount = 0;
+	cb->debugLabelEndCount = 0;
 	cb->state = RAL_VK_CMD_RECORDING;
 }
 
@@ -291,41 +294,14 @@ void Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb, ralTexture_t *src, ralB
 
 void Ral_CmdPipelineBarrier( ralCommandBuffer_t *cb, ralBarrierScope_t scope ) {
 	VkMemoryBarrier mb;
-	VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, dstStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	ralVkBarrierTranslation_t barrier;
 	if ( !cb ) return;
-	RAL_ZERO( mb ); mb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-	switch ( scope ) {
-	case RAL_BARRIER_COMPUTE_TO_GRAPHICS:
-		srcStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-		dstStage = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
-		mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		mb.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-		break;
-	case RAL_BARRIER_GRAPHICS_TO_COMPUTE:
-		srcStage = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-		dstStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-		mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-		mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-		break;
-	case RAL_BARRIER_TRANSFER_TO_GRAPHICS:
-		srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-		dstStage = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-		mb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		mb.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
-		break;
-	case RAL_BARRIER_INDIRECT:
-		srcStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-		dstStage = VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
-		mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		mb.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-		break;
-	case RAL_BARRIER_ALL:
-	default:
-		mb.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-		mb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-		break;
-	}
-	cb->backend->vk.CmdPipelineBarrier( cb->cb, srcStage, dstStage, 0, 1, &mb, 0, NULL, 0, NULL );
+	barrier = ralVk_TranslateBarrierScope( scope );
+	RAL_ZERO( mb );
+	mb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+	mb.srcAccessMask = barrier.srcAccess;
+	mb.dstAccessMask = barrier.dstAccess;
+	cb->backend->vk.CmdPipelineBarrier( cb->cb, barrier.srcStage, barrier.dstStage, 0, 1, &mb, 0, NULL, 0, NULL );
 }
 
 void Ral_WriteTimestamp( ralCommandBuffer_t *cb, ralQueryPool_t *pool, uint32_t query ) {
@@ -333,18 +309,41 @@ void Ral_WriteTimestamp( ralCommandBuffer_t *cb, ralQueryPool_t *pool, uint32_t 
 	cb->backend->vk.CmdWriteTimestamp2( cb->cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, pool->pool, query );
 }
 
-void Ral_BeginDebugLabel( ralCommandBuffer_t *cb, const char *label, const float color[4] ) {
+qboolean Ral_BeginDebugLabel( ralCommandBuffer_t *cb, const char *label, const float color[4] ) {
 	VkDebugUtilsLabelEXT li;
-	if ( !cb || !label || !cb->backend->haveDebugUtils || !cb->backend->vk.CmdBeginDebugUtilsLabelEXT ) return;
+	if ( !cb || !label || !cb->backend->haveDebugUtils || !cb->backend->vk.CmdBeginDebugUtilsLabelEXT ) return qfalse;
 	RAL_ZERO( li );
 	li.sType      = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
 	li.pLabelName = label;
 	if ( color ) { li.color[0] = color[0]; li.color[1] = color[1]; li.color[2] = color[2]; li.color[3] = color[3]; }
 	cb->backend->vk.CmdBeginDebugUtilsLabelEXT( cb->cb, &li );
+	cb->debugLabelBeginCount++;
+	return qtrue;
 }
-void Ral_EndDebugLabel( ralCommandBuffer_t *cb ) {
-	if ( !cb || !cb->backend->haveDebugUtils || !cb->backend->vk.CmdEndDebugUtilsLabelEXT ) return;
+qboolean Ral_EndDebugLabel( ralCommandBuffer_t *cb ) {
+	if ( !cb || !cb->backend->haveDebugUtils || !cb->backend->vk.CmdEndDebugUtilsLabelEXT ) return qfalse;
 	cb->backend->vk.CmdEndDebugUtilsLabelEXT( cb->cb );
+	cb->debugLabelEndCount++;
+	return qtrue;
+}
+
+qboolean Ral_GetDebugLabelStats( const ralCommandBuffer_t *cb, ralDebugLabelStats_t *out ) {
+	if ( !cb || !out ) return qfalse;
+	RAL_ZERO( *out );
+	out->supported = ( cb->backend->haveDebugUtils
+		&& cb->backend->vk.CmdBeginDebugUtilsLabelEXT
+		&& cb->backend->vk.CmdEndDebugUtilsLabelEXT ) ? qtrue : qfalse;
+	out->renderingLabelActive = cb->renderingDebugLabelActive;
+	out->beginCount = cb->debugLabelBeginCount;
+	out->endCount = cb->debugLabelEndCount;
+	return qtrue;
+}
+
+void Ral_ResetDebugLabelStats( ralCommandBuffer_t *cb ) {
+	if ( !cb ) return;
+	cb->renderingDebugLabelActive = qfalse;
+	cb->debugLabelBeginCount = 0;
+	cb->debugLabelEndCount = 0;
 }
 
 void Ral_CmdSetViewport( ralCommandBuffer_t *cb, const ralViewport_t *vp ) {
@@ -402,40 +401,6 @@ void Ral_CmdBindBindGroup( ralCommandBuffer_t *cb, uint32_t setIndex, ralBindGro
 	                                       setIndex, 1, &g->set, 0, NULL );
 }
 
-
-// See ral_command.h for docblock + TODO_7.4c-cmd
-// rationale. Records onto the externally-supplied VkCommandBuffer with the
-// externally-supplied VkPipelineLayout — no cb->currentLayout dependency.
-// Internal-only stack scratch sized by RAL_VK_MAX_PIPELINE_SETS.
-void Ral_CmdBindBindGroups( ralBackend_t *b,
-                            void *cmdHandle,
-                            int bindPoint,
-                            void *pipelineLayout,
-                            uint32_t firstSet,
-                            uint32_t count,
-                            ralBindGroup_t *const *bindGroups,
-                            uint32_t dynamicOffsetCount,
-                            const uint32_t *dynamicOffsets ) {
-	VkDescriptorSet sets[ RAL_VK_MAX_PIPELINE_SETS ];
-	uint32_t        i;
-
-	if ( !b || !cmdHandle || !pipelineLayout || count == 0 || count > RAL_VK_MAX_PIPELINE_SETS ) return;
-	if ( !bindGroups ) return;
-
-	// Unwrap each adopted ralBindGroup_t back to its raw VkDescriptorSet. NULL
-	// entries are a programming error (caller passed an unadopted set) but we
-	// degrade gracefully by bailing rather than recording garbage.
-	for ( i = 0; i < count; i++ ) {
-		if ( !bindGroups[i] ) return;
-		sets[i] = bindGroups[i]->set;
-	}
-
-	b->vk.CmdBindDescriptorSets( (VkCommandBuffer)cmdHandle,
-	                             (VkPipelineBindPoint)bindPoint,
-	                             (VkPipelineLayout)pipelineLayout,
-	                             firstSet, count, sets,
-	                             dynamicOffsetCount, dynamicOffsets );
-}
 
 void Ral_CmdBindVertexBuffer( ralCommandBuffer_t *cb, uint32_t binding, ralBuffer_t *buf, uint64_t offset ) {
 	VkDeviceSize off;
@@ -537,16 +502,9 @@ void Ral_CmdDispatchIndirect( ralCommandBuffer_t *cb, ralBuffer_t *argBuf, uint6
 // ════════════════════════════════════════════════════════════════════════
 // `_Raw` shim retirement.
 //
-// 16 of the 21 parallel-paths `Ral_Cmd*Raw` shims were deleted
-// after the renderer migrated to the typed cmd surface below. The 5 remaining
-// shims (renamed `_Tr` for transitional) need ralRenderPass_t / ralFramebuffer_t
-// / ralTexture_t / ralQueryPool_t sibling infrastructure that didn't fit in
-// that scope; their bodies live below (BeginRenderPassTr, PipelineBarrierTr,
-// CopyImageTr, ResetQueryPoolTr, WriteTimestampTr).
+// Parallel-path raw-handle entry points are gone. The remaining command
+// surface below accepts typed RAL resources and command buffers only.
 // ════════════════════════════════════════════════════════════════════════
-
-// Begin-render-pass legacy bridge body removed (callers migrated
-// to typed Ral_CmdBeginRenderPass via vk_ral_parallel_begin_render_pass).
 
 // ════════════════════════════════════════════════════════════════════════
 // Typed RAL cmd surface additions (8 new functions).
@@ -586,52 +544,6 @@ void Ral_CmdPushConstantsLayout( ralCommandBuffer_t *cb,
 	// callers. Both coexist during the parallel-paths era.
 	cb->backend->vk.CmdPushConstants( cb->cb, layout->vkHandle,
 	                                   (VkShaderStageFlags)stageFlags, offset, size, data );
-}
-
-void Ral_CmdBeginRenderPass( ralCommandBuffer_t *cb,
-                             ralRenderPass_t *renderPass,
-                             ralFramebuffer_t *framebuffer,
-                             const ralRect_t *renderArea,
-                             uint32_t clearValueCount,
-                             const ralClearValue_t *clearValues,
-                             ralSubpassContents_t contents )
-{
-	VkRenderPassBeginInfo bi;
-	if ( !cb || !renderPass || !framebuffer || !renderArea ) {
-		// NULL-fallthrough — also clear inRenderPass so
-		// the matching End skips. Required because the renderer's parallel
-		// buffer can hit a lookup miss for an unadopted VkRenderPass /
-		// VkFramebuffer (Begin silently skips; End must too).
-		if ( cb ) cb->inRenderPass = qfalse;
-		return;
-	}
-	RAL_ZERO( bi );
-	bi.sType                    = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-	bi.renderPass               = renderPass->vkHandle;
-	bi.framebuffer              = framebuffer->vkHandle;
-	bi.renderArea.offset.x      = renderArea->x;
-	bi.renderArea.offset.y      = renderArea->y;
-	bi.renderArea.extent.width  = renderArea->width;
-	bi.renderArea.extent.height = renderArea->height;
-	bi.clearValueCount          = clearValueCount;
-	// ralClearValue_t is binary-compat with VkClearValue (union of color[4] + depth/stencil).
-	bi.pClearValues             = (const VkClearValue *)clearValues;
-	cb->backend->vk.CmdBeginRenderPass( cb->cb, &bi, (VkSubpassContents)contents );
-	cb->inRenderPass = qtrue;
-}
-
-void Ral_CmdEndRenderPass( ralCommandBuffer_t *cb ) {
-	if ( !cb ) return;
-	// Bail if the matching Begin didn't fire (parallel-
-	// buffer Begin's NULL-fallthrough skipped due to lookup miss).
-	if ( !cb->inRenderPass ) return;
-	cb->backend->vk.CmdEndRenderPass( cb->cb );
-	cb->inRenderPass = qfalse;
-}
-
-void Ral_CmdNextSubpass( ralCommandBuffer_t *cb, ralSubpassContents_t contents ) {
-	if ( !cb ) return;
-	cb->backend->vk.CmdNextSubpass( cb->cb, (VkSubpassContents)contents );
 }
 
 void Ral_CmdPipelineBarrierFull( ralCommandBuffer_t *cb, const ralPipelineBarrierInfo_t *info )
@@ -704,20 +616,6 @@ void Ral_CmdPipelineBarrierFull( ralCommandBuffer_t *cb, const ralPipelineBarrie
 // Derive the VkAccessFlags a stage uses, for a single-texture transition.
 // Conservative: a producer stage gets its write access, a consumer stage its
 // read access; the shader/transfer stages get read|write to cover either role.
-static VkAccessFlags ralVk_StageAccess( ralPipelineStageFlags_t stage ) {
-	VkAccessFlags a = 0;
-	if ( stage & RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT )
-		a |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
-	if ( stage & ( RAL_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | RAL_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT ) )
-		a |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
-	if ( stage & ( RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT | RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-	             | RAL_PIPELINE_STAGE_VERTEX_SHADER_BIT ) )
-		a |= VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-	if ( stage & RAL_PIPELINE_STAGE_TRANSFER_BIT )
-		a |= VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-	return a;
-}
-
 void Ral_CmdTransitionTexture( ralCommandBuffer_t *cb, ralTexture_t *tex,
                                ralPipelineStageFlags_t srcStage,
                                ralPipelineStageFlags_t dstStage,
@@ -726,8 +624,8 @@ void Ral_CmdTransitionTexture( ralCommandBuffer_t *cb, ralTexture_t *tex,
 	if ( !cb || !tex ) return;
 	RAL_ZERO( ib );
 	ib.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-	ib.srcAccessMask                   = ralVk_StageAccess( srcStage );
-	ib.dstAccessMask                   = ralVk_StageAccess( dstStage );
+	ib.srcAccessMask                   = ralVk_TranslateStageAccess( srcStage );
+	ib.dstAccessMask                   = ralVk_TranslateStageAccess( dstStage );
 	ib.oldLayout                       = tex->currentLayout;
 	ib.newLayout                       = (VkImageLayout)newVkLayout;
 	ib.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
@@ -807,10 +705,8 @@ void Ral_CmdWriteTimestamp( ralCommandBuffer_t *cb, uint32_t pipelineStageBits,
 // 4 void*-handle parallel-paths shims retired here
 // (PipelineBarrier / CopyImage / ResetQueryPool / WriteTimestamp). The
 // renderer's callsites migrated to the typed Ral_Cmd{PipelineBarrierFull,
-// CopyImage,ResetQueryPool,WriteTimestamp} surface above via renderer-side
-// vk_ral_parallel_* conversion helpers in renderervk/vk.c that perform
-// vk_ral_lookup_texture / vk_ral_lookup_query_pool reverse-lookups and
-// NULL-skip with SEV_WARN-once on miss.
+// CopyImage,ResetQueryPool,WriteTimestamp} surface above. Query pools are
+// native RAL resources; texture adoption remains a Vulkan-migration detail.
 
 // ─── dynamic rendering ──────────────────────────────────────────────────
 // Ral_BeginRendering transitions every attachment from its current layout to
@@ -819,58 +715,19 @@ void Ral_CmdWriteTimestamp( ralCommandBuffer_t *cb, uint32_t pipelineStageBits,
 // bug). The post-render layout stays ATTACHMENT_OPTIMAL — consumers needing
 // SHADER_READ_ONLY (e.g., to sample the colour target afterwards) emit their
 // own transition via the renderer migration's barrier code.
-static VkAttachmentLoadOp ralVk_LoadOp( ralLoadOp_t o ) {
-	switch ( o ) {
-	case RAL_LOAD_OP_LOAD:      return VK_ATTACHMENT_LOAD_OP_LOAD;
-	case RAL_LOAD_OP_CLEAR:     return VK_ATTACHMENT_LOAD_OP_CLEAR;
-	case RAL_LOAD_OP_DONT_CARE:
-	default:                    return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-	}
-}
-static VkAttachmentStoreOp ralVk_StoreOp( ralStoreOp_t o ) {
-	return ( o == RAL_STORE_OP_STORE ) ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
-}
-
 // Transition `tex` from `tex->currentLayout` to `newLayout` if different;
 // updates tex->currentLayout. Coarse stage/access masks — sufficient for the
 // RAL test; the renderer migration tightens these per use case.
 static void ralVk_RenderTargetTransition( ralCommandBuffer_t *cb, ralTexture_t *tex, VkImageLayout newLayout ) {
 	VkImageMemoryBarrier bar;
-	VkPipelineStageFlags srcStage, dstStage;
-	VkAccessFlags        srcAccess, dstAccess;
-	qboolean             depth;
+	ralVkLayoutTranslation_t src, dst;
 	if ( !tex || tex->currentLayout == newLayout ) return;
-	depth = ( tex->aspect & VK_IMAGE_ASPECT_DEPTH_BIT ) ? qtrue : qfalse;
-	srcStage  = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-	srcAccess = 0;
-	if ( tex->currentLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL || tex->currentLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL ) {
-		srcStage  = VK_PIPELINE_STAGE_TRANSFER_BIT;
-		srcAccess = ( tex->currentLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ) ? VK_ACCESS_TRANSFER_WRITE_BIT : VK_ACCESS_TRANSFER_READ_BIT;
-	} else if ( tex->currentLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ) {
-		srcStage  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-		srcAccess = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-	} else if ( tex->currentLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL ) {
-		srcStage  = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-		srcAccess = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-	} else if ( tex->currentLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL ) {
-		srcStage  = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-		srcAccess = VK_ACCESS_SHADER_READ_BIT;
-	}
-	if ( newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ) {
-		dstStage  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-		dstAccess = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-	} else if ( newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL ) {
-		dstStage  = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-		dstAccess = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-	} else {
-		dstStage  = VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
-		dstAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-	}
-	(void)depth;
+	src = ralVk_TranslateSourceLayout( tex->currentLayout );
+	dst = ralVk_TranslateDestinationLayout( newLayout );
 	RAL_ZERO( bar );
 	bar.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-	bar.srcAccessMask                   = srcAccess;
-	bar.dstAccessMask                   = dstAccess;
+	bar.srcAccessMask                   = src.access;
+	bar.dstAccessMask                   = dst.access;
 	bar.oldLayout                       = tex->currentLayout;
 	bar.newLayout                       = newLayout;
 	bar.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
@@ -895,7 +752,7 @@ static void ralVk_RenderTargetTransition( ralCommandBuffer_t *cb, ralTexture_t *
 	bar.subresourceRange.levelCount     = tex->mipLevels;
 	bar.subresourceRange.baseArrayLayer = 0;
 	bar.subresourceRange.layerCount     = tex->arrayLayers;
-	cb->backend->vk.CmdPipelineBarrier( cb->cb, srcStage, dstStage, 0, 0, NULL, 0, NULL, 1, &bar );
+	cb->backend->vk.CmdPipelineBarrier( cb->cb, src.stage, dst.stage, 0, 0, NULL, 0, NULL, 1, &bar );
 	tex->currentLayout = newLayout;
 }
 
@@ -908,6 +765,11 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 	uint32_t                   i;
 	if ( !cb || !ri_ ) return;
 	if ( ri_->numColorAttachments > RAL_MAX_COLOR_ATTACHMENTS ) return;
+	if ( cb->renderingDebugLabelActive ) {
+		R_LOG( rch_ral, SEV_WARN, "Ral_BeginRendering: prior debug-label scope still active\n" );
+		Ral_EndDebugLabel( cb );
+		cb->renderingDebugLabelActive = qfalse;
+	}
 
 	// transitions first — every attachment needs the right layout before vkCmdBeginRendering
 	for ( i = 0; i < ri_->numColorAttachments; i++ )
@@ -920,8 +782,8 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 		colorAtt[i].sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
 		colorAtt[i].imageView   = ri_->colorAttachments[i] ? ri_->colorAttachments[i]->defaultView : VK_NULL_HANDLE;
 		colorAtt[i].imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-		colorAtt[i].loadOp      = ralVk_LoadOp ( ri_->colorLoadOps [i] );
-		colorAtt[i].storeOp     = ralVk_StoreOp( ri_->colorStoreOps[i] );
+		colorAtt[i].loadOp      = ralVk_TranslateLoadOp ( ri_->colorLoadOps [i] );
+		colorAtt[i].storeOp     = ralVk_TranslateStoreOp( ri_->colorStoreOps[i] );
 		colorAtt[i].clearValue.color.float32[0] = ri_->colorClears[i].color[0];
 		colorAtt[i].clearValue.color.float32[1] = ri_->colorClears[i].color[1];
 		colorAtt[i].clearValue.color.float32[2] = ri_->colorClears[i].color[2];
@@ -949,8 +811,8 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 		depthAtt.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
 		depthAtt.imageView   = depthView;
 		depthAtt.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-		depthAtt.loadOp      = ralVk_LoadOp ( ri_->depthLoadOp  );
-		depthAtt.storeOp     = ralVk_StoreOp( ri_->depthStoreOp );
+		depthAtt.loadOp      = ralVk_TranslateLoadOp ( ri_->depthLoadOp  );
+		depthAtt.storeOp     = ralVk_TranslateStoreOp( ri_->depthStoreOp );
 		depthAtt.clearValue.depthStencil.depth   = ri_->depthClear;
 		depthAtt.clearValue.depthStencil.stencil = 0;
 
@@ -969,8 +831,8 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 			stencilAtt.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
 			stencilAtt.imageView   = depthView;
 			stencilAtt.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-			stencilAtt.loadOp      = ralVk_LoadOp ( ri_->stencilLoadOp  );
-			stencilAtt.storeOp     = ralVk_StoreOp( ri_->stencilStoreOp );
+			stencilAtt.loadOp      = ralVk_TranslateLoadOp ( ri_->stencilLoadOp  );
+			stencilAtt.storeOp     = ralVk_TranslateStoreOp( ri_->stencilStoreOp );
 			stencilAtt.clearValue.depthStencil.depth   = ri_->depthClear;
 			stencilAtt.clearValue.depthStencil.stencil = ri_->stencilClear;
 		}
@@ -988,12 +850,19 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 	info.pColorAttachments    = ri_->numColorAttachments ? colorAtt : NULL;
 	info.pDepthAttachment     = ri_->depthAttachment ? &depthAtt : NULL;
 	info.pStencilAttachment   = haveStencil ? &stencilAtt : NULL;   // stencil attachment when the depth format carries a stencil aspect
+	cb->renderingDebugLabelActive = ri_->debugName
+		? Ral_BeginDebugLabel( cb, ri_->debugName, NULL ) : qfalse;
 	cb->backend->vk.CmdBeginRendering( cb->cb, &info );
 }
 
 void Ral_EndRendering( ralCommandBuffer_t *cb ) {
 	if ( !cb ) return;
 	cb->backend->vk.CmdEndRendering( cb->cb );
+	if ( cb->renderingDebugLabelActive ) {
+		if ( !Ral_EndDebugLabel( cb ) )
+			R_LOG( rch_ral, SEV_WARN, "Ral_EndRendering: active debug-label scope could not close\n" );
+		cb->renderingDebugLabelActive = qfalse;
+	}
 }
 
 // ════════════════════════════════════════════════════════════════════════

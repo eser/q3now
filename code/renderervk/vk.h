@@ -767,6 +767,8 @@ void vk_clear_color( const vec4_t color );
 void vk_clear_depth( qboolean clear_stencil );
 void vk_begin_frame( void );
 void vk_end_frame( void );
+void vk_profile_markers_arm( void );
+void vk_gpu_profile_dump( void );
 void vk_present_frame( void );
 
 void vk_end_render_pass( void );
@@ -1008,8 +1010,8 @@ typedef struct vk_tess_s {
 	// the UI pass, and the screenmap (mirror/portal) pass are dynamic-rendering
 	// (Ral_BeginRendering); they are closed through the shared vk_end_render_pass(),
 	// which uses this to pick Ral_EndRendering + the right attachment hand-off
-	// barrier (different target image per pass) instead of the legacy
-	// qvkCmdEndRenderPass. 0 = no dynamic pass open (legacy pass or none).
+	// barrier (different target image per pass). Raw VkRenderPass command recording
+	// is retired; 0 means no pass is open and ending it is a fail-closed error.
 	enum { VK_DYN_PASS_NONE = 0, VK_DYN_PASS_MAIN, VK_DYN_PASS_UI, VK_DYN_PASS_SCREENMAP, VK_DYN_PASS_CAPTURE, VK_DYN_PASS_GAMMA, VK_DYN_PASS_BLOOM_EXTRACT, VK_DYN_PASS_BLUR } open_dynamic_pass;
 	VkPipeline			last_pipeline;
 	/* The RAL world-pipeline (MAIN/SCREENMAP) most-recently bound this pass.
@@ -1580,9 +1582,6 @@ typedef struct {
 		VkRenderPass ui;       // 2D UI compositing pass — LOADs img 265 (tonemap+SMAA output), 2D draws blend in, gamma+capture read result. Gameplay path.
 		VkRenderPass ui_clear; // same as render_pass.ui but loadOp=CLEAR on the colour attachment — pure-2D frames (menu/loading) skip tonemap entirely and draw 2D straight into a cleared img 265.
 		// capture / gamma / bloom_extract / blur / post_bloom are dynamic-rendering only.
-		VkRenderPass smaa_edge;		// SMAA edge detection (R8G8)
-		VkRenderPass smaa_blend;	// SMAA blend weight (RGBA8)
-		VkRenderPass smaa_resolve;	// SMAA resolve (writes to color_image)
 	} render_pass;
 
 	VkDescriptorPool descriptor_pool;
@@ -2836,9 +2835,6 @@ typedef struct {
 		VkFramebuffer ui;       // 2D UI pass framebuffer (tonemapped_image + depth_image) — render_pass.ui (LOAD)
 		VkFramebuffer ui_clear; // same attachments, render_pass.ui_clear (CLEAR)
 		// capture is dynamic-rendering only (capture.ral_image) — no framebuffer.
-		VkFramebuffer smaa_edge;
-		VkFramebuffer smaa_blend;
-		VkFramebuffer smaa_resolve;
 	} framebuffers;
 
 #ifdef USE_UPLOAD_QUEUE
@@ -3125,13 +3121,8 @@ typedef struct {
 	struct ralPipelineLayout_s *ral_pipeline_layout_sunrays;
 	// capture / bloom_extract / blur / bloom_blend are dynamic-rendering only (ral_* siblings).
 
-	VkPipeline smaa_edge_pipeline;
-	VkPipeline smaa_blend_pipeline;
-	VkPipeline smaa_resolve_pipeline;
-	// Dynamic-rendering SMAA siblings: created alongside the legacy pipelines
-	// in vk_create_smaa_pipelines (which re-runs on the r_smaa / r_smaa_threshold
-	// rebake), so their cvar-baked spec constants stay in sync. The bind path
-	// uses these instead of the legacy VkPipeline.
+	// Dynamic-rendering SMAA pipelines. Recreated on r_smaa / r_smaa_threshold
+	// rebake so their cvar-baked specialization constants stay in sync.
 	struct ralPipeline_s *ral_smaa_edge_pipeline;
 	struct ralPipeline_s *ral_smaa_blend_pipeline;
 	struct ralPipeline_s *ral_smaa_resolve_pipeline;

@@ -23,10 +23,8 @@
 // doc. Later work adds capabilities (VRS, streaming hooks, …) but does not
 // break what is here.
 //
-// Include this single header; it pulls in the per-area headers below. Nothing
-// in the renderer includes ral/*.h until the FEAT_RAL build flag is enabled
-// (default off initially — the Vulkan backend skeleton ships behind
-// it for build/link validation only).
+// Include this single header; it pulls in the per-area headers below. RAL is a
+// mandatory layer of the Vulkan renderer; it is not an optional feature flag.
 //
 // ── Swapchain coexistence during the migration ────────
 // The renderer migration onto the RAL starts while the swapchain
@@ -69,5 +67,7 @@
 #include "ral_sync.h"       // fences, semaphores (binary + timeline)
 #include "ral_swapchain.h"  // presentation surface, HDR metadata
 #include "ral_query.h"      // query pools (timestamps, occlusion, pipeline stats)
+#include "ral_residency.h"  // backend-neutral page lifecycle, ranking and budgets
+#include "ral_profile.h"    // semantic GPU timing accumulation + topology epochs
 
 #endif // WIRED_RAL_H

@@ -219,6 +219,7 @@ cvar_t	*r_drawEntities;
 cvar_t	*r_drawWorld;
 cvar_t	*r_speeds;
 cvar_t	*r_gpuSpeeds;
+cvar_t	*r_profileMarkers;
 cvar_t	*r_vkDebugTiming;
 cvar_t	*r_frameSpikeUs;
 cvar_t	*r_fullbright;
@@ -2052,6 +2053,15 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_speeds, "Prints out various debugging stats from PVS:\n 0: Disabled\n 1: Backend BSP\n 2: Frontend grid culling\n 3: Current view cluster index\n 4: Dynamic lighting\n 5: zFar clipping\n 6: Flares" );
 	r_gpuSpeeds = ri.Cvar_Get( "r_gpuSpeeds", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_gpuSpeeds, "Per-pass GPU timestamp report.\n 0: off\n 1: 200-frame averages\n N(>=2): only frames where total GPU time >= N ms" );
+	// Profiling instrumentation is local and frame-byte-inert; unlike visual cheat
+	// cvars it must survive normal local-server map startup so a capture can be
+	// armed without enabling gameplay cheats. Default remains off.
+	r_profileMarkers = ri.Cvar_Get( "r_profileMarkers", "0", 0 );
+	ri.Cvar_CheckRange( r_profileMarkers, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_profileMarkers,
+		"Emit semantic RAL dynamic-rendering GPU debug labels when Vulkan debug-utils is available.\n"
+		" 0: off (default)\n 1: on\n"
+		"Use `ral_dump live markers` for a one-frame backend receipt." );
 	r_vkDebugTiming = ri.Cvar_Get( "r_vkDebugTiming", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_vkDebugTiming, "Print Vulkan host-side timing averages every 200 frames.\n 0: off\n 1: on (fence, acquire, submit, present, draw calls, pipeline binds)" );
 	r_frameSpikeUs = ri.Cvar_Get( "r_frameSpikeUs", "0", CVAR_CHEAT );
@@ -2445,7 +2455,8 @@ static void R_Register( void )
 	// Debug-visibility view (NOT a developer cvar): output the denoised AO buffer as
 	// grayscale instead of compositing it, so the visual gate can capture + assert the
 	// AO field directly. Default 0 (normal composite). LATCH (baked into the SSAO
-	// tonemap variant spec const). Only registered in the FEAT_SSAO verify build.
+	// tonemap variant spec const). Registered whenever the current build enables
+	// FEAT_SSAO (the product default; USE_SSAO=OFF is the explicit permutation).
 	r_showAO = ri.Cvar_Get( "r_showAO", "0", CVAR_CHEAT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_showAO, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_showAO, "Debug: show the GTAO AO buffer grayscale (visual-gate isolation view)." );
@@ -3117,6 +3128,9 @@ static void RE_RegisterPersistentCommands( void ) {
 	// vk_ral_reregister_image round-trip without the real pressure-driven eviction.
 	ri.Cmd_AddCommand( "r_texEvictForce", R_TexEvictForce_f );
 	ri.Cmd_AddCommand( "r_texReregisterAll", R_TexReregisterAll_f );
+	ri.Cmd_AddCommand( "r_texResidencyBudgetTest", R_TexResidencyBudgetTest_f );
+	ri.Cmd_AddCommand( "r_texResidencyMipTest", R_TexResidencyMipTest_f );
+	ri.Cmd_AddCommand( "r_texResidencyMaterialTest", R_TexResidencyMaterialTest_f );
 	// Phase 7.15.4-c synthetic-pressure test (default-inert): drive the AUTOMATIC
 	// eviction drain without real CRITICAL pressure (~4% never triggers it).
 	ri.Cmd_AddCommand( "r_texEvictPressureTest", R_TexEvictPressureTest_f );

@@ -32,31 +32,6 @@ typedef struct {
 ralQueryPool_t *Ral_CreateQueryPool ( ralBackend_t *b, const ralQueryPoolCreateInfo_t *ci );
 void            Ral_DestroyQueryPool( ralQueryPool_t *pool );
 
-// adopt-style wrapper around an existing backend
-// VkQueryPool (caller's qvkCreateQueryPool retains lifetime ownership).
-// Mirrors Ral_AdoptPipelineLayout / Ral_AdoptTexture: ownsPool=qfalse so
-// Ral_DestroyQueryPool frees only the wrapper struct, the underlying
-// VkQueryPool stays alive past the wrapper. `type` describes the underlying
-// pool's query type (TIMESTAMP / OCCLUSION / PIPELINE_STATISTICS) so the
-// wrapper's metadata matches a native Ral_CreateQueryPool result. `count`
-// is the pool's queryCount — used for the existing bounds checks in
-// Ral_ResetQueryPool / Ral_GetQueryResults.
-//
-// Used by the renderer's GPU-timestamp pool (`vk_gpu_ts_pool`): the adoption
-// wrapper backs vk_ral_lookup_query_pool() so the typed Ral_CmdWriteTimestamp /
-// Ral_CmdResetQueryPool entry points can replace the parallel-paths-era
-// Ral_Cmd*Legacy shims at the gpu-timestamp callsites.
-ralQueryPool_t *Ral_AdoptQueryPool( ralBackend_t *b,
-                                    void *externalPool,
-                                    ralQueryType_t type,
-                                    uint32_t count,
-                                    const char *debugName );
-
-// read the backend-native VkQueryPool from an adopted
-// (or owned) ralQueryPool_t. Mirrors Ral_GetTextureImageHandle. Returns NULL
-// on bad arg. Consumers cast back to VkQueryPool.
-void *Ral_GetQueryPoolHandle( const ralQueryPool_t *pool );
-
 // Must be issued (CPU-side, or via the backend's reset path) before reuse.
 void Ral_ResetQueryPool( ralQueryPool_t *pool, uint32_t firstQuery, uint32_t queryCount );
 

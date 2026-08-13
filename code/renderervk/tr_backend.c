@@ -2030,6 +2030,17 @@ static const void *RB_DrawSurfs( const void *data ) {
 	// them (backEnd.viewParms.num_dlights is 0 in the seam). Without this, fpActive was
 	// never true and dlights never reached the Forward+ tile-lit path.
 	vk_forwardplus_capture_dlights();
+	if ( r_dlightShadowProfile && r_dlightShadowProfile->integer ) {
+		static int nextProfileLog;
+		int now = ri.Milliseconds();
+		if ( now >= nextProfileLog ) {
+			R_LOG( rch_cmd, SEV_WARN,
+				"dlightShadowReceiverProfile: dlights=%d litSurfs=%d fpUnionSurfs=%d fpActive=%d\n",
+				backEnd.viewParms.num_dlights, backEnd.refdef.numLitSurfs,
+				tr.refdef.numFpUnionSurfs, vk.fpActive ? 1 : 0 );
+			nextProfileLog = now + 1000;
+		}
+	}
 #endif
 
 #ifdef USE_VBO

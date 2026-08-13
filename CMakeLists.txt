@@ -56,7 +56,20 @@ OPTION(USE_RENDERER_DLOPEN "" ON)
 OPTION(USE_WASM "Enable WASM VM backend via WAMR" OFF)
 OPTION(USE_LUA "Enable LuaJIT scripting" ON)
 OPTION(USE_WIRED_UI_CLAY "Vendor Clay layout engine for the WiredUI compositor (client target only)" ON)
-OPTION(USE_SSAO "Compile the GTAO/SSAO renderer path in (FEAT_SSAO=1) for the visual-gate verify build; OFF = compiled-out ship path" OFF)
+OPTION(USE_SSAO "Compile the GTAO/SSAO renderer path (current product default ON; OFF is an explicit compiled-out permutation)" ON)
+OPTION(WIRED_BUILD_IMGUI_TOOLS "Build tool-only Dear ImGui profiling/editor adapters" OFF)
+
+# RAL is a mandatory part of the Vulkan renderer, not an optional feature.
+# The historical RAL feature cache/header switch never controlled renderer
+# compilation and could therefore advertise a false disabled state. Reject it
+# fail-closed; shader translation remains the explicit independent option below.
+STRING(CONCAT _retired_ral_feature "FEAT_" "RAL")
+IF(DEFINED ${_retired_ral_feature})
+	MESSAGE(FATAL_ERROR
+		"${_retired_ral_feature} is retired: Vulkan RAL is mandatory. "
+		"Use WIRED_BUILD_SHADER_XLATE=ON to build the offline translators.")
+ENDIF()
+UNSET(_retired_ral_feature)
 
 # cmake/ only — the cmake_modules/ entry pointed at a directory that has never
 # existed in this repository, leaving half the module search path dead.
@@ -154,11 +167,16 @@ IF(NOT USE_WASM)
 	ADD_COMPILE_DEFINITIONS(FEAT_WASM=0)
 ENDIF()
 
-# When USE_SSAO is ON, override FEAT_SSAO=1 so the GTAO renderer path compiles in
-# for the visual-gate verify build (q_feats.h #ifndef-defaults it to 0 = the ship
-# build's compiled-out path). The default ship build leaves USE_SSAO OFF → FEAT_SSAO 0.
+# CMake is the build-policy authority for GTAO.  Define the macro in both
+# branches so USE_SSAO=OFF is a real compiled-out permutation rather than being
+# silently overridden by q_feats.h's product default.  Default ON preserves the
+# current assembled product behavior.
 IF(USE_SSAO)
 	ADD_COMPILE_DEFINITIONS(FEAT_SSAO=1)
+	SET(WIRED_SSAO_COMPILE_VALUE 1)
+ELSE()
+	ADD_COMPILE_DEFINITIONS(FEAT_SSAO=0)
+	SET(WIRED_SSAO_COMPILE_VALUE 0)
 ENDIF()
 
 # MinGW: picoquic + picotls use bare `#ifdef _WINDOWS` (MSVC-only auto-define)
@@ -310,10 +328,46 @@ WIRED_ROUTE_QCOMMON_SOURCES(${WIRED_MATH_SRCS})
 # round-trip, Newton div-by-zero guard.
 # Run with: ctest -R wired_curve
 INCLUDE(CTest)
-IF(BUILD_TESTING)
 OPTION(WIRED_HOST_SANITIZERS
 	"Build host-only subsystem tests with AddressSanitizer and UndefinedBehaviorSanitizer"
 	OFF)
+SET(WIRED_IMGUI_DIR "${CMAKE_SOURCE_DIR}/src/libs/recastnavigation/RecastDemo/Contrib/imgui")
+IF(WIRED_BUILD_IMGUI_TOOLS OR BUILD_TESTING)
+	IF(NOT TARGET SDL3::SDL3)
+		FIND_PACKAGE(SDL3 REQUIRED)
+	ENDIF()
+	FOREACH(_imgui_required imgui.h imgui.cpp imgui_draw.cpp imgui_tables.cpp imgui_widgets.cpp)
+		IF(NOT EXISTS "${WIRED_IMGUI_DIR}/${_imgui_required}")
+			MESSAGE(FATAL_ERROR
+				"WIRED_BUILD_IMGUI_TOOLS requires the vendored Recast Dear ImGui source: ${_imgui_required}")
+		ENDIF()
+	ENDFOREACH()
+	ADD_LIBRARY(wired_profile_imgui STATIC
+		code/tools/profile_imgui/wired_profile_imgui.cpp
+		code/tools/profile_imgui/wired_profile_imgui_sdl3.cpp
+		${WIRED_IMGUI_DIR}/imgui.cpp
+		${WIRED_IMGUI_DIR}/imgui_draw.cpp
+		${WIRED_IMGUI_DIR}/imgui_tables.cpp
+		${WIRED_IMGUI_DIR}/imgui_widgets.cpp
+	)
+	TARGET_INCLUDE_DIRECTORIES(wired_profile_imgui PUBLIC
+		code/tools/profile_imgui
+		code/renderer/ral
+		${WIRED_IMGUI_DIR}
+	)
+	TARGET_LINK_LIBRARIES(wired_profile_imgui PUBLIC SDL3::SDL3)
+	IF(WIRED_HOST_SANITIZERS)
+		IF(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+			MESSAGE(FATAL_ERROR
+				"WIRED_HOST_SANITIZERS requires GCC or Clang; C++ compiler is ${CMAKE_CXX_COMPILER_ID}")
+		ENDIF()
+		TARGET_COMPILE_OPTIONS(wired_profile_imgui PRIVATE
+			-fsanitize=address,undefined
+			-fno-omit-frame-pointer
+			-fno-sanitize-recover=all)
+	ENDIF()
+ENDIF()
+IF(BUILD_TESTING)
 ADD_CUSTOM_TARGET(host_tests)
 
 # Build-graph contract for the first qcommon dedup cohort. The engine variants
@@ -344,6 +398,60 @@ ADD_TEST(NAME release_provenance_contract
 )
 SET_TESTS_PROPERTIES(release_provenance_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.build;failure.package-provenance"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME ral_feature_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/ral_feature_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(ral_feature_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME ssao_feature_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
+		-DCOMPILE_COMMANDS=${CMAKE_BINARY_DIR}/compile_commands.json
+		-DEXPECTED_SSAO=${WIRED_SSAO_COMPILE_VALUE}
+		-P ${CMAKE_SOURCE_DIR}/cmake/ssao_feature_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(ssao_feature_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;feature.ssao"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME ral_retired_feature_rejected
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
+		-DPROBE_ROOT=${CMAKE_BINARY_DIR}/ral-retired-feature-probe
+		-P ${CMAKE_SOURCE_DIR}/cmake/ral_retired_feature_reject_check.cmake
+)
+SET_TESTS_PROPERTIES(ral_retired_feature_rejected PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.configuration"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME ral_public_surface_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/ral_public_surface_check.cmake
+)
+SET_TESTS_PROPERTIES(ral_public_surface_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME ral_public_surface_reintroduction_rejected
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
+		-DPROBE_ROOT=${CMAKE_BINARY_DIR}/ral-public-surface-probe
+		-P ${CMAKE_SOURCE_DIR}/cmake/ral_public_surface_reject_check.cmake
+)
+SET_TESTS_PROPERTIES(ral_public_surface_reintroduction_rejected PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract"
 	TIMEOUT 30
 )
 
@@ -378,6 +486,72 @@ IF(WIRED_HOST_SANITIZERS)
 		TIMEOUT 30)
 	WIRED_CONFIGURE_HOST_TEST(sanitizer_fault_probe sanitizer_runtime_contract)
 ENDIF()
+
+ADD_EXECUTABLE(ral_vulkan_translate_test
+	tests/ral_vulkan_translate_test.c
+	code/renderer/ral_vulkan/ral_vulkan_translate.c
+)
+TARGET_INCLUDE_DIRECTORIES(ral_vulkan_translate_test PRIVATE
+	code/qcommon
+	code/renderer/ral
+	code/renderer/ral_vulkan
+	code/renderercommon
+)
+ADD_TEST(NAME ral_vulkan_translate_contract COMMAND ral_vulkan_translate_test)
+SET_TESTS_PROPERTIES(ral_vulkan_translate_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(ral_vulkan_translate_test ral_vulkan_translate_contract)
+
+ADD_EXECUTABLE(ral_residency_policy_test
+	tests/ral_residency_policy_test.c
+	code/renderer/ral/ral_residency.c
+)
+TARGET_INCLUDE_DIRECTORIES(ral_residency_policy_test PRIVATE
+	code/renderer/ral
+)
+ADD_TEST(NAME ral_residency_policy_contract COMMAND ral_residency_policy_test)
+SET_TESTS_PROPERTIES(ral_residency_policy_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(ral_residency_policy_test ral_residency_policy_contract)
+
+ADD_EXECUTABLE(ral_profile_test
+	tests/ral_profile_test.c
+	code/renderer/ral/ral_profile.c
+)
+TARGET_INCLUDE_DIRECTORIES(ral_profile_test PRIVATE
+	code/renderer/ral
+)
+ADD_TEST(NAME ral_profile_contract COMMAND ral_profile_test)
+SET_TESTS_PROPERTIES(ral_profile_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(ral_profile_test ral_profile_contract)
+
+ADD_EXECUTABLE(ral_profile_imgui_test tests/ral_profile_imgui_test.cpp)
+TARGET_LINK_LIBRARIES(ral_profile_imgui_test PRIVATE wired_profile_imgui)
+ADD_TEST(NAME ral_profile_imgui_contract COMMAND ral_profile_imgui_test)
+SET_TESTS_PROPERTIES(ral_profile_imgui_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.tools;failure.contract;feature.imgui"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(ral_profile_imgui_test ral_profile_imgui_contract)
+
+ADD_TEST(NAME imgui_tool_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
+		-DCOMPILE_COMMANDS=${CMAKE_BINARY_DIR}/compile_commands.json
+		-DBUILD_NINJA=${CMAKE_BINARY_DIR}/build.ninja
+		-P ${CMAKE_SOURCE_DIR}/cmake/imgui_tool_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(imgui_tool_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.tools;failure.build-graph;feature.imgui"
+	TIMEOUT 30
+)
 
 ADD_EXECUTABLE(wired_curve_test
 	tests/wired_curve_test.c
@@ -1265,22 +1439,23 @@ AUX_SOURCE_DIRECTORY(code/renderer RENDERER_GL_SRCS)
 AUX_SOURCE_DIRECTORY(code/renderer2 RENDERER_GL2_SRCS)
 AUX_SOURCE_DIRECTORY(code/renderervk RENDERER_VK_SRCS)
 
-# ── Phase 7 RAL — Vulkan backend skeleton ──────────────────────────────────
+# ── RAL — mandatory Vulkan renderer backend layer ──────────────────────────
 # code/renderer/ral/        — public RAL surface (headers only)
-# code/renderer/ral_vulkan/ — the Vulkan backend (skeleton in Phase 7.1)
+# code/renderer/ral_vulkan/ — the active Vulkan backend
 # Built as a static lib and linked into the Vulkan renderer DLL alongside the
 # renderervk objects (it references the DLL's `ri` global, defined in
 # code/renderervk/tr_init.c, so it must only link into a target that also has
-# renderervk). FEAT_RAL (default 0; pass -DFEAT_RAL=1 to flip) gates whether
-# the *renderer* uses the RAL; the static lib is always built so the surface
-# stays link-validated. No file under code/renderervk/ includes ral/*.h while
-# FEAT_RAL is 0. The RAL's Ral_Dump() entry point is exported (Q_EXPORT) and
+# renderervk). RAL is not feature-gated: the static lib and live renderer
+# consumers always build together. Ral_Dump() is exported (Q_EXPORT) and
 # resolved by the client's "\ral_dump" command via Sys_LoadFunction.
 SET(RAL_VK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral_vulkan")
 SET(RAL_VK_SRCS
+	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_profile.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_residency.c
 	${RAL_VK_DIR}/ral_vulkan_backend.c
 	${RAL_VK_DIR}/ral_vulkan_caps.c
 	${RAL_VK_DIR}/ral_vulkan_memory.c
+	${RAL_VK_DIR}/ral_vulkan_translate.c
 	${RAL_VK_DIR}/ral_vulkan_resource.c
 	${RAL_VK_DIR}/ral_vulkan_pipeline.c
 	${RAL_VK_DIR}/ral_vulkan_command.c
@@ -1340,16 +1515,12 @@ ENDFUNCTION()
 # (Phase 7.3c integrates RAL pipeline creation with them).
 #
 # Default OFF in mainline builds (don't slow renderer-only iteration);
-# auto-enabled when FEAT_RAL is on; explicit:
+# explicitly enabled when the offline translators are required:
 #   cmake -DWIRED_BUILD_SHADER_XLATE=ON -B build/debug
 #   ninja -C build/debug shader_xlate
 OPTION(WIRED_BUILD_SHADER_XLATE
 	"Build the offline GLSL → SPIR-V → {MSL, GLSL, GLSL ES, WGSL} translator (needs src/libs/SPIRV-Cross submodule; WGSL needs the `naga` CLI on PATH — see BUILD-RUST.md)"
 	OFF)
-IF(FEAT_RAL)
-	SET(WIRED_BUILD_SHADER_XLATE ON CACHE BOOL "" FORCE)
-ENDIF()
-
 IF(WIRED_BUILD_SHADER_XLATE)
 	SET(SPIRV_CROSS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/libs/SPIRV-Cross")
 	IF(NOT EXISTS "${SPIRV_CROSS_DIR}/CMakeLists.txt")
@@ -1467,7 +1638,7 @@ IF(USE_RENDERER_DLOPEN)
 	IF(NOT APPLE)
 		TARGET_LINK_OPTIONS(${RENDERER_PREFIX}_vulkan${RENDEXT} PRIVATE "LINKER:-Map=${RENDERER_PREFIX}_vulkan${RENDEXT}.map")
 	ENDIF()
-	# Phase 7: pull in the (dormant, FEAT_RAL-gated) RAL Vulkan backend skeleton
+	# Mandatory Vulkan RAL backend used by the live renderer consumers.
 	WIRED_LINK_RAL_VULKAN(${RENDERER_PREFIX}_vulkan${RENDEXT})
 
 	# Linux: renderer shared libs need libm for math functions (powf etc.)
@@ -1575,7 +1746,9 @@ ADD_COMPILE_DEFINITIONS($<$<CONFIG:Debug>:_DEBUG>)
 ADD_LIBRARY(windowSystem OBJECT ${WINDOW_SYSTEM_SRCS})
 
 IF(NOT MSVC)
-	find_package(SDL3 REQUIRED)
+	IF(NOT TARGET SDL3::SDL3)
+		find_package(SDL3 REQUIRED)
+	ENDIF()
 	TARGET_LINK_LIBRARIES(windowSystem SDL3::SDL3)
 ENDIF()
 

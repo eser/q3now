@@ -24,6 +24,7 @@ fi
 glslangValidator -V pipeline_test_vert.glsl -S vert -o pipeline_test_vert.spv
 glslangValidator -V pipeline_test_frag.glsl -S frag -o pipeline_test_frag.spv
 glslangValidator -V pipeline_test_comp.glsl -S comp -o pipeline_test_comp.spv
+glslangValidator -V pipeline_test_residency_comp.glsl -S comp -o pipeline_test_residency_comp.spv
 
 "$NODE" -e '
 const fs = require("fs");
@@ -54,6 +55,7 @@ process.stdout.write("#include <stdint.h>\n\n");
 emit("ral_pipeline_test_vert_spv", "pipeline_test_vert.spv");
 emit("ral_pipeline_test_frag_spv", "pipeline_test_frag.spv");
 emit("ral_pipeline_test_comp_spv", "pipeline_test_comp.spv");
+emit("ral_pipeline_test_residency_comp_spv", "pipeline_test_residency_comp.spv");
 process.stdout.write("#endif // WIRED_RAL_VULKAN_PIPELINE_TEST_SPV_H\n");
 ' > ../pipeline_test_spv.h
 

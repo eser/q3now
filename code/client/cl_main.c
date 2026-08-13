@@ -5141,10 +5141,10 @@ static void CL_RalDump_f( void ) {
 ====================
 CL_RalPipelineTest_f
 
-"\ral_pipeline_test": walk the 19 §17.7
-fixtures and report PASS/FAIL per fixture. Resolves Ral_PipelineTest in
-the renderer DLL; if the loaded renderer doesn't export it (e.g. OpenGL),
-prints a note and returns.
+"\ral_pipeline_test": run the renderer's exact offscreen RAL pipeline
+exercise (layout sharing, draw/readback, compute dispatch and cache roundtrip).
+Resolves Ral_PipelineTest in the renderer DLL; if the loaded renderer doesn't
+export it (e.g. OpenGL), prints a note and returns.
 ====================
 */
 /*
@@ -5390,7 +5390,7 @@ void CL_Init( void ) {
 
 	Cmd_AddCommand( "modelist", CL_ModeList_f );
 	Cmd_AddCommand( "ral_dump", CL_RalDump_f );          // dump renderer RAL backend probe / caps / memory budget
-	Cmd_AddCommand( "ral_pipeline_test", CL_RalPipelineTest_f ); // walk 19 §17.7 pipeline fixtures
+	Cmd_AddCommand( "ral_pipeline_test", CL_RalPipelineTest_f ); // exact offscreen RAL pipeline exercise
 	Cmd_AddCommand( "waitForMap", CL_WaitForMap_f );     // yield Cbuf until map fully loaded
 	Cbuf_RegisterWaitForMapCheck( CL_WaitForMap_Ready );
 
