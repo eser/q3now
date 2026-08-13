@@ -14,6 +14,7 @@
 #include "../qcommon/menudef.h"
 #include "snd_public.h"
 #include "keys.h"
+#include "cl_ping_owner.h"
 
 
 #define	RECONNECT_TIMEOUT	3000	// time between packet retransmits at CA_CONNECTING / CA_CHALLENGING
@@ -264,6 +265,7 @@ typedef struct {
 	unsigned int	start;
 	unsigned int	timeout;
 	unsigned int	generation;
+	clPingOwner_t	owner;
 	int			time;
 	char		challenge[33];
 	char		info[MAX_INFO_STRING];
@@ -410,6 +412,12 @@ this field via clientActiveApp.
 
 ==================================================================
 */
+typedef enum {
+	DEMO_MESSAGE_ABORT_NONE = 0,
+	DEMO_MESSAGE_ABORT_ILLEGAL_SVC,
+	DEMO_MESSAGE_ABORT_SNAPSHOT_AREAMASK
+} demoMessageAbortKind_t;
+
 typedef struct clientApp_s {
 	clientActive_t		cl;		// per-connection gameplay/frame state
 	clientConnection_t	clc;	// per-connection protocol/connection state
@@ -435,6 +443,25 @@ typedef struct clientApp_s {
 	int			matchAlertExpire;			// was static cl_matchAlertExpire
 	qboolean	timeoutWasBothPaused;		// was static wasBothPaused (CL_CheckTimeout)
 	qboolean	disconnecting;				// was static cl_disconnecting (CL_Disconnect reentry guard)
+	/* Process-lifetime connection epoch. Unlike clc.quic_conn (whose public
+	 * handle may be reused by the next transport allocation), this advances on
+	 * every successful transport connect and is not cleared by CL_Disconnect. */
+	uint64_t	connectionGeneration;
+
+	// Narrow local recovery boundary for a structurally valid demo frame with
+	// a typed semantic parse failure. Live network parsing never arms this boundary.
+	qboolean	demoMessageAbortArmed;
+	int		demoMessageAbortCommand;
+	demoMessageAbortKind_t demoMessageAbortKind;
+	int		demoMessageAbortDetail;
+	jmp_buf		demoMessageAbort;
+
+	// Automated acceptance seam for the next successfully opened demo only.
+	// The file adapter consumes this byte budget and then returns one typed
+	// read error; normal VFS reads and live-network parsing never see it.
+	qboolean	demoReadFaultArmed;
+	int		demoReadFaultAfterBytes;
+	int		demoReadFaultRemaining;
 
 	// Per-app TERM_CLIENT_DROP/LEAVE/KICK recovery target. Armed each frame at
 	// the CL_Frame call boundary (common.c); Com_Terminate longjmps here (via the
@@ -588,7 +615,6 @@ void CL_NextDownload( void );
 
 void CL_GetPing( int n, char *buf, int buflen, int *pingtime );
 void CL_GetPingInfo( int n, char *buf, int buflen );
-void CL_ClearPing( int n );
 int CL_GetPingQueueCount( void );
 
 void CL_ClearState( clientApp_t *app );

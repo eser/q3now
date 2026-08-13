@@ -17,6 +17,7 @@ cl_wired_ui.c — Wired UI: unified menu/HUD system implementation
 #include "cl_wired_draw.h"
 #include "cl_wired_anim.h"
 #include "cl_wired_viewport.h"   /* WiredUI_ViewportMultiSelfTest (#ifdef _DEBUG) */
+#include <inttypes.h>
 
 /* bootstrap helpers exposed from cl_wired_ownerdraw.c +
  * cl_wired_ui_hud_register.c so WiredUI_Init can drive the unified-registry
@@ -558,6 +559,36 @@ static void WiredUI_ClearPasswordPromptState( qboolean clearError ) {
 		WiredUI_StateSetString( "ui_joinPasswordError", "" );
 }
 
+/* One cancellation boundary for every authored password dismissal path.  The
+ * origin is fixed product metadata, never user input.  Publish only the
+ * postcondition after PopMenu has run: no secret bytes or prior target are
+ * observable through this diagnostic. */
+static void WiredUI_CancelPasswordPrompt( const char *origin ) {
+	const char *top;
+	int depth;
+	char target[256];
+	char error[256];
+
+	wui_editingField = qfalse;
+	wui_editItem = NULL;
+	wui_editCursorPos = 0;
+	WiredUI_ClearPasswordPromptState( qtrue );
+	WiredUI_PopMenu();
+	WiredUI_StateGetString( "ui_password_server_name", target, sizeof( target ) );
+	WiredUI_StateGetString( "ui_joinPasswordError", error, sizeof( error ) );
+	depth = WiredUI_GetMenuStackDepth();
+	top = WiredUI_GetMenuStackTop();
+	if ( !top[0] ) top = "none";
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: password cancel postcondition origin=%s valid=%d secret_length=%d editing=%d target_empty=%d error_empty=%d top=%s depth=%d\n",
+		origin, wui_passwordPrompt.valid ? 1 : 0,
+		(int)strlen( wui_passwordPrompt.secret ),
+		wui_editingField ? 1 : 0, target[0] ? 0 : 1,
+		error[0] ? 0 : 1, top, depth );
+	Q_SecureZeroMemory( target, sizeof( target ) );
+	Q_SecureZeroMemory( error, sizeof( error ) );
+}
+
 /* Dedicated edit path for the join secret. It never calls State/Store/Cvar
  * APIs and commits through a full-buffer erase so deleted/replaced suffixes
  * cannot remain beyond the terminating NUL. */
@@ -617,10 +648,7 @@ static qboolean WiredUI_HandleSecureJoinEditKey( int key ) {
 	} else {
 		switch ( key ) {
 		case K_ESCAPE:
-			wui_editingField = qfalse;
-			wui_editItem = NULL;
-			WiredUI_ClearPasswordPromptState( qtrue );
-			WiredUI_PopMenu();
+			WiredUI_CancelPasswordPrompt( "edit-escape" );
 			break;
 		case K_ENTER:
 		case K_KP_ENTER:
@@ -2656,6 +2684,59 @@ static void WiredUI_Recover_f( void ) {
 	WiredUI_Activate();
 }
 
+static int WiredUI_ServerEngineSource( int uiSource ) {
+	if ( uiSource == 0 ) return AS_LOCAL;
+	if ( uiSource == 6 ) return AS_FAVORITES;
+	return AS_GLOBAL;
+}
+
+/* Deterministic acceptance seam for browser transaction lifecycle gates.
+ * Production frames use the same source mapping and consumer entry point
+ * below; this command only removes scheduler timing from com_automated runs. */
+static void WiredUI_ServerPingTick_f( void ) {
+	int uiSource;
+	int engineSource;
+	qboolean work;
+
+	if ( !com_automated || !com_automated->integer ) return;
+	uiSource = WiredUI_StateGetInt( "ui_netSource" );
+	engineSource = WiredUI_ServerEngineSource( uiSource );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: server ping tick dispatch source=%d engine_source=%d\n",
+		uiSource, engineSource );
+	work = CL_UpdateVisiblePings_f( engineSource );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: server ping tick source=%d engine_source=%d work=%d\n",
+		uiSource, engineSource, work ? 1 : 0 );
+}
+
+/* Privacy-safe active-match acceptance readback.  The transport handle is
+ * intentionally reduced to presence; connected Server Info retains and
+ * compares the exact handle internally. */
+static void WiredUI_IngameTrace_f( void ) {
+	const wiredMenuDef_t *top;
+	const wiredItemDef_t *focused;
+	const qboolean active = clientActiveApp && clientActiveApp->state == CA_ACTIVE;
+	const qboolean connected = active && !clientActiveApp->clc.demoplaying
+		&& clientActiveApp->clc.quic_conn != CONN_INVALID;
+	const char *address = connected
+		? NET_AdrToStringwPort( &clientActiveApp->clc.serverAddress ) : "none";
+
+	if ( !com_automated || !com_automated->integer ) return;
+	top = WiredUI_GetActiveMenu();
+	focused = WiredUI_GetFocusedItem();
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: ingame state active=%d demo=%d catcher_ui=%d paused=%d connection_present=%d address=%s server_time=%d top=%s depth=%d focused=%s\n",
+		active ? 1 : 0,
+		active && clientActiveApp->clc.demoplaying ? 1 : 0,
+		( Key_GetCatcher() & KEYCATCH_UI ) ? 1 : 0,
+		Cvar_VariableIntegerValue( "cl_paused" ) ? 1 : 0,
+		connected ? 1 : 0, address,
+		active ? clientActiveApp->cl.serverTime : 0,
+		top ? top->name : "none", wui_menuStackDepth,
+		focused && focused->name[0] ? focused->name : "none" );
+}
+
 
 /* console-level entry point for pushing a named menu
  * onto the stack. The `open` script command is .wui-internal (only
@@ -3114,6 +3195,53 @@ static void WiredUI_HoverTest_f( void ) {
 		"wui_hover_test: hovered '%s' at (%.0f,%.0f)\n", name, cx, cy );
 }
 
+/* Automated pointer acceptance for a rendered interactive item.  It resolves
+ * only geometry, then enters through CL_MouseEvent; the caller must issue the
+ * separate real K_MOUSE1 ingress with wui_pointer_click. */
+static void WiredUI_PointerItem_f( void ) {
+	wiredMenuDef_t *menu;
+	wiredItemDef_t *item = NULL;
+	wuiPixelRect_t rect;
+	const char *name;
+	float cx;
+	float cy;
+
+	if ( !com_automated || !com_automated->integer ) {
+		COM_WARN( LOG_CH(ch_ui), "wui_pointer_item requires com_automated 1\n" );
+		return;
+	}
+	if ( Cmd_Argc() != 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui), "usage: wui_pointer_item <item-name>\n" );
+		return;
+	}
+	menu = WiredUI_GetActiveMenu();
+	name = Cmd_Argv( 1 );
+	if ( !menu ) {
+		COM_WARN( LOG_CH(ch_ui), "wui_pointer_item: no active menu\n" );
+		return;
+	}
+	for ( int i = 0; i < menu->itemCount && !item; i++ ) {
+		item = wui_find_item_recursive( menu->items[i], name );
+	}
+	if ( !item || !WiredUI_ItemAcceptsMouseHover( item ) ) {
+		COM_WARN( LOG_CH(ch_ui),
+			"wui_pointer_item: '%s' is not an interactive item\n", name );
+		return;
+	}
+	if ( !WiredUI_ClayItemRenderedRect( menu, item, &rect )
+	     || rect.w <= 0.0f || rect.h <= 0.0f ) {
+		COM_WARN( LOG_CH(ch_ui),
+			"wui_pointer_item: item '%s' has no rendered rect\n", name );
+		return;
+	}
+	cx = rect.x + rect.w * 0.5f;
+	cy = rect.y + rect.h * 0.5f;
+	CL_MouseEvent( cx - wui_cursorX, cy - wui_cursorY );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: pointer phase=moved ingress=CL_MouseEvent menu=%s item=%s x=%.0f y=%.0f\n",
+		menu->name, item->name, cx, cy );
+}
+
 /* Automated pointer acceptance uses the same public engine ingress as SDL:
  * move to the centre of an actually rendered listbox row, allow Clay a frame
  * to publish hover authority, then send a separate paired K_MOUSE1 command.
@@ -3269,6 +3397,7 @@ static void WiredUI_ServerStatusTrace_f( void ) {
 		COM_WARN( LOG_CH(ch_ui), "wui_serverstatus_trace requires com_automated 1\n" );
 		return;
 	}
+	WiredFeeder_ServerStatusTrace();
 	feeder = WiredUI_FeederIDByName( "serverstatus" );
 	count = feeder ? WiredUI_FeederCount( feeder ) : 0;
 	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
@@ -3346,6 +3475,31 @@ static void WiredUI_PasswordTrace_f( void ) {
 		COM_WARN( LOG_CH(ch_ui), "wui_password_trace requires com_automated 1\n" );
 		return;
 	}
+	if ( Cmd_Argc() == 2 && !Q_stricmp( Cmd_Argv( 1 ), "state" ) ) {
+		const char *top = wui_menuStackDepth > 0
+			? wui_menuStack[wui_menuStackDepth - 1] : "none";
+		char target[256];
+		char error[256];
+		WiredUI_StateGetString( "ui_password_server_name", target, sizeof( target ) );
+		WiredUI_StateGetString( "ui_joinPasswordError", error, sizeof( error ) );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: password state valid=%d secret_length=%d editing=%d selection_generation=%d address=%s target_empty=%d error_present=%d top=%s depth=%d\n",
+			wui_passwordPrompt.valid ? 1 : 0,
+			(int)strlen( wui_passwordPrompt.secret ),
+			wui_editingField ? 1 : 0,
+			wui_passwordPrompt.selectionGeneration,
+			wui_passwordPrompt.address[0] ? wui_passwordPrompt.address : "none",
+			target[0] ? 0 : 1, error[0] ? 1 : 0,
+			top, wui_menuStackDepth );
+		Q_SecureZeroMemory( target, sizeof( target ) );
+		Q_SecureZeroMemory( error, sizeof( error ) );
+		return;
+	}
+	if ( Cmd_Argc() != 1 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"usage: wui_password_trace [state]\n" );
+		return;
+	}
 	item = WiredUI_GetFocusedItem();
 	if ( !item || Q_stricmp( item->name, "row_password" ) ) {
 		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
@@ -3368,8 +3522,7 @@ static void WiredUI_PasswordTrace_f( void ) {
 		length, masked ? 1 : 0 );
 }
 
-#ifdef _DEBUG
-/* Scripted keypress injection for W-14 self-verify smokes. Routes through
+/* Scripted keypress injection for automated acceptance. Routes through
  * the public CL_KeyEvent entry point so the dispatch chain — first-input
  * attract→main promotion (cl_keys.c), KEYCATCH_UI forwarding,
  * WiredUI_KeyEvent menu pop, NoteInput taps — runs identically to a real
@@ -3377,9 +3530,10 @@ static void WiredUI_PasswordTrace_f( void ) {
  * directly and bypasses CL_KeyEvent's outer gates, so it can't reach the
  * dispatch-2 first-input branch; this helper closes that gap. Accepts
  * decimal keycodes from keycodes.h (e.g. 27 = K_ESCAPE, 13 = K_ENTER,
- * 'q' = 113). _DEBUG-only — production builds drop the registration. */
+ * 'q' = 113). Release-safe but inert unless com_automated is set. */
 static void WiredUI_TestKeyDown_f( void ) {
 	int key;
+	if ( !com_automated || !com_automated->integer ) return;
 	if ( Cmd_Argc() < 2 ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_ui),
 			"usage: wui_test_keydown <keycode-decimal>\n"
@@ -3393,6 +3547,7 @@ static void WiredUI_TestKeyDown_f( void ) {
 		"wui_test_keydown: dispatched keycode %d\n", key );
 }
 
+#ifdef _DEBUG
 /* W-17 dispatch 5b S4: arms the next compositor emit pass to write the Clay
  * render command tree as JSON to <filename> under FS_FOpenFileWrite (lands
  * in the homepath fs_homepath). Matches the schema vcompare consumes for
@@ -3644,6 +3799,8 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	// `wui_push` exposes the same primitive for headless smokes + ad-hoc
 	// menu navigation without editing main.wui.
 	Cmd_AddCommand( "wui_push", WiredUI_PushMenu_f );
+	Cmd_AddCommand( "wui_server_ping_tick", WiredUI_ServerPingTick_f );
+	Cmd_AddCommand( "wui_ingame_trace", WiredUI_IngameTrace_f );
 
 	// enter the keybind capture state programmatically.
 	// Same effect as clicking a type-13 widget; used by headless smokes
@@ -3691,6 +3848,7 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	// focus <name> walks the active menu's item tree recursively.
 	Cmd_AddCommand( "wui_menu_nav",       WiredUI_MenuNav_f );
 	Cmd_AddCommand( "wui_hover_test",     WiredUI_HoverTest_f );
+	Cmd_AddCommand( "wui_pointer_item",   WiredUI_PointerItem_f );
 	Cmd_AddCommand( "wui_pointer_listbox", WiredUI_PointerListbox_f );
 	Cmd_AddCommand( "wui_pointer_click",  WiredUI_PointerClick_f );
 	Cmd_AddCommand( "wui_pointer_button", WiredUI_PointerButton_f );
@@ -3699,9 +3857,9 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	Cmd_AddCommand( "wui_server_fixture", WiredUI_ServerFixture_f );
 	Cmd_AddCommand( "wui_bot_trace",      WiredUI_BotTrace_f );
 	Cmd_AddCommand( "wui_demo_trace",     WiredUI_DemoTrace_f );
+	Cmd_AddCommand( "wui_test_keydown",   WiredUI_TestKeyDown_f );
 	Cmd_AddCommand( "wui_password_trace", WiredUI_PasswordTrace_f );
 #ifdef _DEBUG
-	Cmd_AddCommand( "wui_test_keydown",   WiredUI_TestKeyDown_f );
 	Cmd_AddCommand( "wui_test_dump_clay", WiredUI_TestDumpClay_f );
 #endif
 
@@ -3880,6 +4038,9 @@ void WiredUI_Shutdown( void ) {
 	Cmd_RemoveCommand( "menu_reload" );
 	Cmd_RemoveCommand( "ui_testall" );
 	Cmd_RemoveCommand( "wired_recover" );
+	Cmd_RemoveCommand( "wui_server_ping_tick" );
+	Cmd_RemoveCommand( "wui_ingame_trace" );
+	Cmd_RemoveCommand( "wui_test_keydown" );
 	testall_active = qfalse;
 
 	wui_healthy = qfalse;
@@ -4014,13 +4175,7 @@ void WiredUI_TickFrame( int realtime ) {
 			static int lastPingUpdate = 0;
 			if ( !WiredFeeder_ServerFixtureActive() && realtime - lastPingUpdate > 1000 ) {  // every second
 				int uiSource = WiredUI_StateGetInt( "ui_netSource" );
-				int engineSource;
-				extern qboolean CL_UpdateVisiblePings_f( int source );
-
-				// map UI source values to engine AS_* constants
-				if ( uiSource == 0 )       engineSource = AS_LOCAL;
-				else if ( uiSource == 6 )  engineSource = AS_FAVORITES;
-				else                       engineSource = AS_GLOBAL;
+				int engineSource = WiredUI_ServerEngineSource( uiSource );
 
 				CL_UpdateVisiblePings_f( engineSource );
 				lastPingUpdate = realtime;
@@ -4756,20 +4911,22 @@ static void WiredScript_VoteLeader( wiredMenuDef_t *menu, wiredItemDef_t *item, 
 
 // removebots.wui: direct host-side kick (not a vote) of the selected client.
 static void WiredScript_Kick( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
-	int clientNum;
+	wuiBotSelection_t selection;
 	if ( !com_sv_running || !com_sv_running->integer ) {
 		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
 			"WiredUI: bot kick refused without a running local server\n" );
 		return;
 	}
-	if ( !WiredFeeder_GetSelectedBotClientNum( &clientNum ) ) {
+	if ( !WiredFeeder_GetSelectedBotIdentity( &selection ) ) {
 		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
 			"WiredUI: bot kick refused without a current bot selection\n" );
 		return;
 	}
 	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
-		"WiredUI: queued verified bot kick client=%d\n", clientNum );
-	Cbuf_ExecuteText( EXEC_INSERT, va( "botkick %d\n", clientNum ) );
+		"WiredUI: queued verified bot kick client=%d allocation=%" PRIu64 "\n",
+		selection.clientNum, selection.allocationId );
+	Cbuf_ExecuteText( EXEC_INSERT, va( "botkick %d %" PRIu64 "\n",
+		selection.clientNum, selection.allocationId ) );
 	WiredFeeder_ClearBotSelection();
 }
 
@@ -5018,8 +5175,7 @@ static void WiredScript_JoinServerPassword( wiredMenuDef_t *menu,
 static void WiredScript_CancelServerPassword( wiredMenuDef_t *menu,
 	wiredItemDef_t *item, int numArgs, const char **args ) {
 	if ( !menu || Q_stricmp( menu->name, "password" ) ) return;
-	WiredScript_ResetPasswordPrompt( qtrue );
-	WiredUI_PopMenu();
+	WiredUI_CancelPasswordPrompt( item ? "button" : "menu-escape" );
 }
 
 qboolean CL_WiredUI_ShowJoinPasswordRetry( const char *target,
@@ -5106,7 +5262,7 @@ static void WiredScript_RunDemo( wiredMenuDef_t *menu, wiredItemDef_t *item, int
 	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
 		"WiredUI: queued validated demo playback name=%s\n", demoName );
 	WiredUI_CloseAllMenus();
-	Cbuf_ExecuteText( EXEC_INSERT, va( "demo \"%s\"\n", demoName ) );
+	Cbuf_ExecuteText( EXEC_INSERT, va( "demo_ui \"%s\"\n", demoName ) );
 }
 
 static void WiredScript_LoadDemos( wiredMenuDef_t *menu, wiredItemDef_t *item,
@@ -5186,11 +5342,53 @@ static void WiredScript_RefreshFilter( wiredMenuDef_t *menu, wiredItemDef_t *ite
 	WiredFeeder_RebuildServerDisplayList();
 }
 
+static qboolean WiredUI_ConfigureServerInfoControls( qboolean connected ) {
+	wiredMenuDef_t *popup = WiredUI_FindMenu( "serverinfo" );
+	wiredItemDef_t *back = NULL;
+	wiredItemDef_t *connect = NULL;
+	wiredItemDef_t *retry = NULL;
+	wiredItemDef_t *close = NULL;
+
+	for ( int i = 0; popup && i < popup->itemCount; i++ ) {
+		if ( !back ) back = wui_find_item_recursive( popup->items[i], "btn_back" );
+		if ( !connect ) connect = wui_find_item_recursive( popup->items[i], "btn_connect" );
+		if ( !retry ) retry = wui_find_item_recursive( popup->items[i], "btn_retry" );
+		if ( !close ) close = wui_find_item_recursive( popup->items[i], "btn_close" );
+	}
+	if ( !back || !connect || !retry || !close ) return qfalse;
+	back->visible = connected ? qfalse : qtrue;
+	connect->visible = connected ? qfalse : qtrue;
+	retry->visible = qtrue;
+	close->visible = qtrue;
+	if ( connected ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: connected server status controls back=%d connect=%d retry=%d close=%d\n",
+			back->visible ? 1 : 0, connect->visible ? 1 : 0,
+			retry->visible ? 1 : 0, close->visible ? 1 : 0 );
+	}
+	return qtrue;
+}
+
 static void WiredScript_ServerStatusOpen( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	if ( !WiredFeeder_ServerStatusBegin() ) {
 		return;
 	}
+	if ( !WiredUI_ConfigureServerInfoControls( qfalse ) ) {
+		WiredFeeder_ServerStatusCancel();
+		return;
+	}
 	WiredUI_PushMenu( "serverinfo", WUI_BG_INTENT_SCENE );
+}
+
+static void WiredScript_ServerStatusOpenConnected( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
+	if ( !WiredFeeder_ServerStatusBeginConnected() ) {
+		return;
+	}
+	if ( !WiredUI_ConfigureServerInfoControls( qtrue ) ) {
+		WiredFeeder_ServerStatusCancel();
+		return;
+	}
+	WiredUI_PushMenu( "serverinfo", WUI_BG_INTENT_DIM );
 }
 
 static void WiredScript_ServerStatusCancel( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
@@ -5393,6 +5591,8 @@ static const wiredUiScriptEntry_t wiredUiScripts[] = {
 	{ "RefreshFilter",    WiredScript_RefreshFilter },
 	{ "ServerStatusOpen", WiredScript_ServerStatusOpen },
 	{ "serverstatusopen", WiredScript_ServerStatusOpen },
+	{ "ServerStatusOpenConnected", WiredScript_ServerStatusOpenConnected },
+	{ "serverstatusopenconnected", WiredScript_ServerStatusOpenConnected },
 	{ "ServerStatusCancel", WiredScript_ServerStatusCancel },
 	{ "serverstatuscancel", WiredScript_ServerStatusCancel },
 	{ "ServerStatusRetry", WiredScript_ServerStatusRetry },
@@ -5546,6 +5746,7 @@ static const wiredScriptCommand_t wiredScriptCommands[] = {
 	{ "runmod",           WiredScript_RunMod },
 	{ "refreshservers",   WiredScript_RefreshServers },
 	{ "serverstatusopen", WiredScript_ServerStatusOpen },
+	{ "serverstatusopenconnected", WiredScript_ServerStatusOpenConnected },
 	{ "serverstatuscancel", WiredScript_ServerStatusCancel },
 	{ "serverstatusretry", WiredScript_ServerStatusRetry },
 
@@ -5759,6 +5960,12 @@ void WiredUI_PopMenu( void ) {
 		WiredUI_ClearPasswordPromptState( qtrue );
 		// nothing to pop — close UI entirely
 		wui_activeMenu = UIMENU_NONE;
+		wui_focusItem = -1;
+		wui_focusedItemPtr = NULL;
+		wui_hoveredItemPtr = NULL;
+		wui_ix.pressTarget = NULL;
+		wui_ix.focusFromKeyboard = qfalse;
+		wui_focusFromMouse = qfalse;
 		Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
 		Cvar_Set( "cl_paused", "0" );
 		return;
@@ -5828,10 +6035,13 @@ void WiredUI_PopMenu( void ) {
 	if ( wui_menuStackDepth <= 0 ) {
 		// stack empty — return to root menu behavior
 		if ( wui_activeMenu == UIMENU_INGAME ) {
-			// close in-game menu entirely
-			wui_activeMenu = UIMENU_NONE;
-			Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_UI );
-			Cvar_Set( "cl_paused", "0" );
+			/* INGAME is an implicit depth-0 root. Reaching zero by popping a
+			 * real depth-1 child reveals that root; it must not be confused
+			 * with ESC/Close invoked while the root itself is already at zero
+			 * (handled by the early branch above). Keep catcher, pause and the
+			 * opener focus restored by wui_returnFocus[0]. */
+			Key_SetCatcher( Key_GetCatcher() | KEYCATCH_UI );
+			Cvar_Set( "cl_paused", "1" );
 		}
 		else if ( wui_activeMenu == UIMENU_MAIN && CL_ActiveApp()->state == CA_DISCONNECTED ) {
 			// Reaching depth 0 with main as the active root means MAIN ITSELF was
@@ -5861,12 +6071,17 @@ void WiredUI_PopMenu( void ) {
 }
 
 void WiredUI_CloseAllMenus( void ) {
+	qboolean cancelServerStatus = qfalse;
+
 	WiredUI_ClearPasswordPromptState( qtrue );
 	WiredUI_ResetListboxDoubleClick( "close-all" );
 	WiredUI_ReleaseCompositorPointer( "close-all" );
 	// stop all active cinematics on the stack
 	for ( int i = 0; i < wui_menuStackDepth; i++ ) {
 		wiredMenuDef_t *m = WiredUI_FindMenu( wui_menuStack[i] );
+		if ( !Q_stricmp( wui_menuStack[i], "serverinfo" ) ) {
+			cancelServerStatus = qtrue;
+		}
 		if ( m && m->cinematicHandle >= 0 ) {
 			CIN_StopCinematic( m->cinematicHandle );
 			m->cinematicHandle = -1;
@@ -5876,6 +6091,13 @@ void WiredUI_CloseAllMenus( void ) {
 		if ( !Q_stricmp( wui_menuStack[i], "error_popup" ) ) {
 			Com_ClearLastError();
 		}
+	}
+	// A validated Server Info Connect drains the popup rather than running its
+	// authored Back/Close action.  Retire the status request exactly once at
+	// this ownership boundary, but only after join validation has succeeded and
+	// elected to close the stack.  Refused joins keep their popup data intact.
+	if ( cancelServerStatus ) {
+		WiredFeeder_ServerStatusCancelForCloseAll();
 	}
 	wui_menuStackDepth = 0;
 	memset( wui_returnFocus, 0, sizeof( wui_returnFocus ) );  /* F4: drop saved return-focus */
@@ -6441,8 +6663,23 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 		int len;
 
 		if ( WiredUI_IsSecureJoinPasswordItem( wui_editItem ) ) {
-			WiredUI_HandleSecureJoinEditKey( key );
-			return;
+			const wiredItemDef_t *hovered = WiredUI_CompositorHoveredItem();
+			/* A real primary-pointer press changes interaction ownership.  End
+			 * secure editing but retain the prompt secret long enough for the
+			 * normal hovered-item path below to run its authored action.  In
+			 * particular, a visible Cancel click must wipe+pop in this same event
+			 * instead of being swallowed by the hidden editor. A click on the edit
+			 * item itself remains owned and consumed by the secure editor. */
+			if ( key == K_MOUSE1 && hovered && hovered != wui_editItem
+			     && WiredUI_ItemAcceptsMouseHover( (wiredItemDef_t *)hovered ) ) {
+				wui_editingField = qfalse;
+				wui_editItem = NULL;
+				wui_editCursorPos = 0;
+				goto password_edit_pointer_fallthrough;
+			} else {
+				WiredUI_HandleSecureJoinEditKey( key );
+				return;
+			}
 		}
 
 			WiredUI_StateGetString( wui_editItem->cvar, buff, sizeof( buff ) );
@@ -6573,6 +6810,8 @@ void WiredUI_KeyEvent( int key, qboolean down ) {
 				return; // eat all other keys while editing
 		}
 	}
+
+password_edit_pointer_fallthrough:
 
 	// key binding capture mode — waiting for user to press a key
 	if ( wui_waitingForKey && down ) {

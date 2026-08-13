@@ -397,6 +397,13 @@ void Cbuf_Execute( void )
 			break;
 		}
 
+		// /waitms arms a wall-clock gate just like /wait arms a frame gate.
+		// Yield now so commands after it remain buffered until a later
+		// Cbuf_Execute observes that the deadline has elapsed.
+		if ( cmd_waitms_until > 0 ) {
+			break;
+		}
+
 		// break on /waitForMap arming — gate must yield the cbuf so the
 		// remaining commands (the next +map, +quit, …) aren't drained in
 		// the same Cbuf_Execute pass that armed the gate.

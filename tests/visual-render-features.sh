@@ -49,7 +49,13 @@ PNG2RAW="${PNG2RAW:-$REPO_ROOT/tools/png2raw/png2raw}"
 PERTURB="${PERTURB:-$REPO_ROOT/tools/png-perturb/png-perturb.exe}"
 
 # Isolated home (matches smoke-map-transition: paks present, config wiped per launch).
-SMOKE_HOME="${SMOKE_HOME:-/c/msys64/tmp/fp-verify-home}"
+# The engine-free self-test never launches/captures; use a writable POSIX temp
+# instead of probing the MSYS /c default on non-Windows hosts.
+if [ "$MODE" = "selftest" ]; then
+    SMOKE_HOME="${SMOKE_HOME:-/tmp/vrf-selftest-home}"
+else
+    SMOKE_HOME="${SMOKE_HOME:-/c/msys64/tmp/fp-verify-home}"
+fi
 SMOKE_HOME_NATIVE="$(cygpath -w "$SMOKE_HOME" 2>/dev/null || echo "$SMOKE_HOME")"
 SHOTDIR="$SMOKE_HOME/base/screenshots"
 mkdir -p "$SHOTDIR"
@@ -68,9 +74,12 @@ ENGINE_BIN="./$(basename "$ENGINE")"
 # MAX_CONSOLE_LINES (32) split ceiling (see capture_fixed_cam). Default 0.
 CAP_EXTRA_WAIT="${CAP_EXTRA_WAIT:-0}"
 
-# Decode params — IDENTICAL to smoke-map-transition (8x8 grid over a 1280x720 frame).
+# Decode params — 8x8 grid over the actual screenshot framebuffer.  SDL3's
+# high-pixel-density window produces 2560x1440 screenshots for the requested
+# 1280x720 logical window on Retina displays; the gtao gate detects that exact
+# 1x/2x framebuffer scale after warmup instead of mis-wrapping rows.
 GRID_W=8; GRID_H=8
-SAMPLE_COLS=40         # 1280 / 32
+SAMPLE_COLS=1280
 SAMPLE_ROWS=720
 
 # The 5 fixed viewpoints (same as the smoke golden gate) — GENUINELY DISTINCT
@@ -96,9 +105,15 @@ VPS=(
 # the engine already exited. The image name is derived from $ENGINE_BIN.
 reap_engine() {
     local img; img="$(basename "$ENGINE_BIN")"        # e.g. wired.x64.exe
-    case "$img" in *.exe) ;; *) img="$img.exe";; esac
-    # taskkill is the Windows-native reaper; pkill is the POSIX fallback (msys/linux).
-    taskkill //F //IM "$img" >/dev/null 2>&1 || pkill -9 -f "$img" >/dev/null 2>&1 || true
+    case "$img" in
+        *.exe)
+            # The detached-window escape this guard addresses is Windows-specific.
+            # `timeout` owns and waits for the normal POSIX child, so a broad POSIX
+            # fallback is unnecessary and can tear down the analyzer's process group.
+            taskkill //F //IM "$img" >/dev/null 2>&1 || pkill -9 -x "$img" >/dev/null 2>&1 || true
+            ;;
+        *) : ;;
+    esac
 }
 
 # ── scrub_home_cgame: remove any loose game module from SMOKE_HOME/base before a
@@ -120,9 +135,10 @@ scrub_home_cgame() {
 # Args: MAP X Y Z YAW TAG  <extra +set cvar tokens...>
 capture() {
     local map="$1" x="$2" y="$3" z="$4" yaw="$5" tag="$6"; shift 6
-    local pre_ts logfile shot
-    pre_ts=$(date +%s)
+    local logfile shot
     logfile="/tmp/vrf-$tag.log"
+    shot="$SHOTDIR/vrf_$tag.png"
+    rm -f "$shot" 2>/dev/null
     rm -f "$SMOKE_HOME/base/config.cfg" 2>/dev/null
     scrub_home_cgame   # no stale home cgame may shadow the fresh installpath module
     # -s KILL / -k: the windowed engine ignores SIGTERM, so a plain `timeout` on an
@@ -132,8 +148,8 @@ capture() {
         +set fs_homepath "$SMOKE_HOME_NATIVE" \
         +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
         +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 \
-        +set r_brightness 1 +set r_fbo 1 \
-        +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set r_dither 0 +set r_chromaticAberration 0 \
+        +log renderer.ral info \
+        +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 \
         +set com_automated 1 \
         "$@" \
         +map "$map" +waitForMap +wait 80 \
@@ -154,14 +170,12 @@ capture() {
     # validation-error gate (exclude the documented pre-existing ssao pipeline-layout
     # teardown leak which is unrelated to these features).
     local vuid
-    vuid="$(grep -E 'VUID|Validation Error' "$logfile" | grep -v 'wired-pl-ssao' | grep -vc 'vkDestroyDevice-device-05137' || true)"
+    vuid="$(grep -E 'VUID|Validation Error' "$logfile" | grep -vc 'vkDestroyDevice-device-05137' || true)"
     if [ "${vuid:-0}" -gt 0 ]; then
         echo >&2 "  capture($tag): FAIL — $vuid unexpected VUID(s) while firing (see $logfile)"
-        grep -E 'VUID|Validation Error' "$logfile" | grep -v 'wired-pl-ssao' | head -2 | sed 's/^/    /' >&2
+        grep -E 'VUID|Validation Error' "$logfile" | grep -v 'vkDestroyDevice-device-05137' | head -2 | sed 's/^/    /' >&2
         return 1
     fi
-    shot="$(find "$SHOTDIR" -name "vrf_$tag.png" -newermt "@$pre_ts" 2>/dev/null | sort | tail -1)"
-    [ -n "$shot" ] || shot="$(find "$SHOTDIR" -name '*.png' -newermt "@$pre_ts" 2>/dev/null | sort | tail -1)"
     [ -n "$shot" ] && [ -s "$shot" ] || { echo >&2 "  capture($tag): FAIL — no screenshot"; return 1; }
     echo "$shot"
 }
@@ -194,10 +208,11 @@ capture() {
 #     intermittent capture hangs/timeouts.)
 # Args: MAP "X Y Z YAW" TAG
 capture_fixed_cam() {
-    local map="$1" pos="$2" tag="$3" pre_ts logfile shot
+    local map="$1" pos="$2" tag="$3" logfile shot
     shift 3   # remaining args are extra +set cvar tokens forwarded to the engine
-    pre_ts=$(date +%s)
     logfile="/tmp/vrf-$tag.log"
+    shot="$SHOTDIR/vrf_$tag.png"
+    rm -f "$shot" 2>/dev/null
     rm -f "$SMOKE_HOME/base/config.cfg" 2>/dev/null
     scrub_home_cgame   # no stale home cgame may shadow the fresh installpath module
     # -s KILL / -k: the windowed engine ignores SIGTERM, so a plain `timeout` on an
@@ -207,9 +222,9 @@ capture_fixed_cam() {
         +set fs_homepath "$SMOKE_HOME_NATIVE" \
         +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
         +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 \
-        +set r_brightness 1 +set r_fbo 1 \
+        +log renderer.ral info \
         +set r_ssao 0 \
-        +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set r_dither 0 +set r_chromaticAberration 0 \
+        +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 \
         +set com_automated 1 \
         "$@" `# extra +set tokens; a later +set r_ssao 1 here overrides the default-off above (last-wins)` \
         +map "$map" +waitForMap +wait 80 \
@@ -243,10 +258,16 @@ capture_fixed_cam() {
     if ! grep -q "FIRST GAMEPLAY FRAME" "$logfile"; then
         echo >&2 "  capture_fixed_cam($tag): FAIL — never reached CA_ACTIVE (see $logfile)"; return 1
     fi
-    # The screenshot carries the explicit name vrf_<tag>.png; find that exact file (newer
-    # than this run's start), falling back to the newest .png for robustness.
-    shot="$(find "$SHOTDIR" -name "vrf_$tag.png" -newermt "@$pre_ts" 2>/dev/null | sort | tail -1)"
-    [ -n "$shot" ] || shot="$(find "$SHOTDIR" -name '*.png' -newermt "@$pre_ts" 2>/dev/null | sort | tail -1)"
+    local vuid
+    vuid="$(grep -E 'VUID|Validation Error' "$logfile" | grep -vc 'vkDestroyDevice-device-05137' || true)"
+    if [ "${vuid:-0}" -gt 0 ]; then
+        echo >&2 "  capture_fixed_cam($tag): FAIL — $vuid unexpected VUID(s) (see $logfile)"
+        grep -E 'VUID|Validation Error' "$logfile" | grep -v 'vkDestroyDevice-device-05137' | head -2 | sed 's/^/    /' >&2
+        return 1
+    fi
+    # The exact target is removed before launch, so its existence now is a portable
+    # freshness proof on GNU, BSD/macOS and MSYS alike.  This avoids GNU-only
+    # `find -newermt`, which made successful macOS captures look missing.
     [ -n "$shot" ] && [ -s "$shot" ] || { echo >&2 "  capture_fixed_cam($tag): FAIL — no screenshot"; return 1; }
     echo "$shot"
 }
@@ -264,10 +285,11 @@ capture_fixed_cam() {
 # non-zero mid-arc point, reproducible run-to-run.
 # Args: MAP CAMNAME WAITFRAMES TAG   <extra +set cvar tokens...>
 capture_scene() {
-    local map="$1" scenename="$2" waitframes="$3" tag="$4" pre_ts logfile shot
+    local map="$1" scenename="$2" waitframes="$3" tag="$4" logfile shot
     shift 4   # remaining args are extra +set cvar tokens forwarded to the engine
-    pre_ts=$(date +%s)
     logfile="/tmp/vrf-$tag.log"
+    shot="$SHOTDIR/vrf_$tag.png"
+    rm -f "$shot" 2>/dev/null
     rm -f "$SMOKE_HOME/base/config.cfg" 2>/dev/null
     scrub_home_cgame   # no stale home cgame may shadow the fresh installpath module
     # -s KILL / -k mirrors capture_fixed_cam (windowed engine ignores SIGTERM).
@@ -275,9 +297,9 @@ capture_scene() {
         +set fs_homepath "$SMOKE_HOME_NATIVE" \
         +set sv_cheats 1 +set sv_pure 0 +set vm_game 0 +set vm_cgame 0 \
         +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set r_fullscreen 0 \
-        +set r_brightness 1 +set r_fbo 1 \
+        +log renderer.ral info \
         +set r_ssao 0 \
-        +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set r_dither 0 +set r_chromaticAberration 0 \
+        +set r_pinShaderTime 1.0 +set r_pinFrameTime 1.0 +set con_notifytime 0 \
         +set fixedtime 1 \
         +set com_automated 1 \
         "$@" `# extra +set tokens; last-wins over the defaults above` \
@@ -295,7 +317,7 @@ capture_scene() {
         echo >&2 "  capture_scene($tag): FAIL — never reached CA_ACTIVE (see $logfile)"; return 1
     fi
     local vuid
-    vuid="$(grep -E 'VUID|Validation Error' "$logfile" | grep -v 'wired-pl-ssao' | grep -vc 'vkDestroyDevice-device-05137' || true)"
+    vuid="$(grep -E 'VUID|Validation Error' "$logfile" | grep -vc 'vkDestroyDevice-device-05137' || true)"
     if [ "${vuid:-0}" -gt 0 ]; then
         echo >&2 "  capture_scene($tag): FAIL — $vuid unexpected VUID(s) (see $logfile)"; return 1
     fi
@@ -305,17 +327,38 @@ capture_scene() {
     if ! grep -q "scene: playing" "$logfile"; then
         echo >&2 "  capture_scene($tag): FAIL — cinematic never started (no 'scene: playing' — see $logfile)"; return 1
     fi
-    shot="$(find "$SHOTDIR" -name "vrf_$tag.png" -newermt "@$pre_ts" 2>/dev/null | sort | tail -1)"
-    [ -n "$shot" ] || shot="$(find "$SHOTDIR" -name '*.png' -newermt "@$pre_ts" 2>/dev/null | sort | tail -1)"
     [ -n "$shot" ] && [ -s "$shot" ] || { echo >&2 "  capture_scene($tag): FAIL — no screenshot"; return 1; }
     echo "$shot"
+}
+
+# ── portable packed-BGR row decoder ────────────────────────────────────────
+# png2raw emits a byte stream. GNU od's `-w` made it convenient to align each
+# output row to whole BGR triplets, but BSD/macOS od has no `-w`. Normalize the
+# byte stream first and repack it with POSIX paste so every consumer sees one
+# complete `B G R` pixel per row on GNU, BSD/macOS and MSYS alike.
+raw_bgr_rows() {
+    "$PNG2RAW" "$1" | od -A n -t u1 -v | tr -s '[:space:]' '\n' | awk 'NF' | paste - - -
+}
+
+detect_sample_dimensions() {
+    local raw_bytes
+    raw_bytes="$("$PNG2RAW" "$1" | wc -c | tr -d '[:space:]')"
+    case "$raw_bytes" in
+        2764800)  SAMPLE_COLS=1280; SAMPLE_ROWS=720 ;;
+        11059200) SAMPLE_COLS=2560; SAMPLE_ROWS=1440 ;;
+        *)
+            echo >&2 "FAIL: unexpected screenshot byte count $raw_bytes (expected 1280x720 or Retina 2560x1440 RGB)"
+            return 1
+            ;;
+    esac
+    echo "    framebuffer decode: ${SAMPLE_COLS}x${SAMPLE_ROWS} RGB"
 }
 
 # ── per-tile MEAN grayscale value (for the AO-isolation assertion) ──
 # Emits "tile_idx meanGray" for the 8x8 grid. The AO frame is grayscale (R==G==B),
 # so the mean of the three channels is the visibility (0=occluded..255=open).
 tile_means() {
-    "$PNG2RAW" "$1" | od -A n -t u1 -v -w96 | awk '{print $1,$2,$3}' \
+    raw_bgr_rows "$1" \
       | awk -v W="$SAMPLE_COLS" -v H="$SAMPLE_ROWS" -v GW="$GRID_W" -v GH="$GRID_H" '
         BEGIN { TW=W/GW; TH=H/GH; for(i=0;i<GW*GH;i++){n[i]=0;s[i]=0} }
         NF>=3 {
@@ -333,7 +376,7 @@ tile_means() {
 # (AO on the IBL-specular term only) keeps mean luminance ~unchanged. png2raw emits
 # BGR triplets, so $1=B $2=G $3=R.
 frame_mean_lum() {
-    "$PNG2RAW" "$1" | od -A n -t u1 -v -w96 | awk '{print $1,$2,$3}' \
+    raw_bgr_rows "$1" \
       | awk 'NF>=3 { s += 0.114*$1 + 0.587*$2 + 0.299*$3; n++ } END { printf "%.3f", (n>0)?s/n:0 }'
 }
 
@@ -342,7 +385,7 @@ frame_mean_lum() {
 # fine for a grayscale AO buffer); this luma-weights a COLOR frame so a direct-lit
 # tile reads bright and an ambient tile reads dim.
 tile_lums() {
-    "$PNG2RAW" "$1" | od -A n -t u1 -v -w96 | awk '{print $1,$2,$3}' \
+    raw_bgr_rows "$1" \
       | awk -v W="$SAMPLE_COLS" -v H="$SAMPLE_ROWS" -v GW="$GRID_W" -v GH="$GRID_H" '
         BEGIN { TW=W/GW; TH=H/GH; for(i=0;i<GW*GH;i++){n[i]=0;s[i]=0} }
         NF>=3 {
@@ -404,8 +447,8 @@ ambient_invariant_assert() {
 # ── per-tile block-mean DIFF (the smoke differ, BGR-L1) ──
 tiled_diff() {
     paste -d ' ' \
-        <("$PNG2RAW" "$1" | od -A n -t u1 -v -w96 | awk '{print $1,$2,$3}') \
-        <("$PNG2RAW" "$2" | od -A n -t u1 -v -w96 | awk '{print $1,$2,$3}') \
+        <(raw_bgr_rows "$1") \
+        <(raw_bgr_rows "$2") \
       | awk -v W="$SAMPLE_COLS" -v H="$SAMPLE_ROWS" -v GW="$GRID_W" -v GH="$GRID_H" '
         BEGIN { TW=W/GW; TH=H/GH; for(i=0;i<GW*GH;i++){n[i]=0;sb1[i]=sg1[i]=sr1[i]=sb2[i]=sg2[i]=sr2[i]=0} }
         NF>=6 {
@@ -454,6 +497,9 @@ edge_center_diff() {
 AO_OPEN_MIN="${AO_OPEN_MIN:-210}"     # the brightest tile must be >= this (open ≈ 1.0; 255*0.82)
 AO_DARK_MAX="${AO_DARK_MAX:-235}"     # the darkest tile must be <= this (some occlusion present)
 AO_SPREAD_MIN="${AO_SPREAD_MIN:-8}"   # (brightest - darkest) must exceed this (AO has dynamic range)
+AO_GRAY_MAX="${AO_GRAY_MAX:-1}"       # isolated R8 visibility must encode equal RGB channels
+AO_ISOLATION_DIFF_MIN="${AO_ISOLATION_DIFF_MIN:-8.0}" # isolated AO must differ from final scene colour
+AO_FLAT_DIFF_MIN="${AO_FLAT_DIFF_MIN:-8.0}" # dynamic AO must differ from intensity=0 flat white
 
 # ao_assert <bright> <dark> <spread> → echoes "OK" or "FAIL(reason)"; rc 0/1.
 # The single source of truth for "is this AO frame physically plausible?", so the
@@ -464,6 +510,51 @@ ao_assert() {
     awk -v d="$dark"   -v m="$AO_DARK_MAX"   'BEGIN{exit !(d<=m)}' || v="FAIL(no-occlusion:darkest>$AO_DARK_MAX)"
     awk -v s="$spread" -v m="$AO_SPREAD_MIN" 'BEGIN{exit !(s>=m)}' || v="FAIL(flat-AO:spread<$AO_SPREAD_MIN)"
     echo "$v"; [ "$v" = "OK" ]
+}
+
+# Maximum RGB channel separation across every pixel. png2raw emits packed BGR;
+# a true sampled single-channel AO view remains grayscale through the common gamma transfer.
+max_channel_delta() {
+    raw_bgr_rows "$1" | awk '
+        function abs(x){return x<0?-x:x}
+        {for(i=1;i+2<=NF;i+=3){d=abs($i-$(i+1)); if(abs($i-$(i+2))>d)d=abs($i-$(i+2)); if(abs($(i+1)-$(i+2))>d)d=abs($(i+1)-$(i+2)); if(d>m)m=d}}
+        END{printf "%.0f", m+0}'
+}
+
+# Direct isolation contract: the diagnostic must be grayscale and materially
+# different from the normal final-colour frame. Either tooth alone is insufficient:
+# a desaturated scene can be gray, and a grayscale copy of final colour can differ.
+ao_isolation_assert() {
+    local gray="$1" sceneDiff="$2" v="OK"
+    awk -v x="$gray" -v m="$AO_GRAY_MAX" 'BEGIN{exit !(x<=m)}' \
+        || v="FAIL(not-grayscale:max-channel-delta $gray > $AO_GRAY_MAX)"
+    awk -v x="$sceneDiff" -v m="$AO_ISOLATION_DIFF_MIN" 'BEGIN{exit !(x>=m)}' \
+        || v="FAIL(scene-substitution:isolated-vs-normal $sceneDiff < $AO_ISOLATION_DIFF_MIN)"
+    echo "$v"; [ "$v" = "OK" ]
+}
+
+# Authoritative route marker inventory. Exactly one denoised-GTAO decision and
+# zero other r_showAO semantic rows are required.
+ao_route_assert() {
+    local routed="$1" refused="$2" v="OK"
+    [ "$routed" -eq 1 ] || v="FAIL(route-cardinality:$routed != 1)"
+    [ "$refused" -eq 0 ] || v="FAIL(unexpected-refusal:$refused != 0)"
+    echo "$v"; [ "$v" = "OK" ]
+}
+
+ao_route_log_assert() {
+    local tag="$1" log="/tmp/vrf-$1.log"
+    awk '
+        index($0, "r_showAO:") {
+            family++
+            if ($0 ~ /^[0-9][0-9]:[0-9][0-9]:[0-9][0-9][.][0-9][0-9][0-9][+-][0-9][0-9]:[0-9][0-9] \[INFO \] r_showAO: route=denoised-gtao source=wired-gtao-ao-denoised layout=shader-read-only set=3$/)
+                exact++
+        }
+        END {
+            if (family == 1 && exact == 1) { print "OK"; exit 0 }
+            printf "FAIL(route-family:family=%d exact=%d)\n", family, exact
+            exit 1
+        }' "$log"
 }
 
 # Alpha-tested cut-out shadow predicate. Input is the MAX worst-tile diff between the
@@ -546,6 +637,33 @@ gtao)
     # is cold (~90 BGR one-shot vs warm); one throwaway warms the pipeline cache so
     # every gated capture below — and the blessed golden — is warm and deterministic.
     set -- ${VPS[0]}; capture "$1" "$2" "$3" "$4" "$5" "warmup" +set r_ssao 0 +set r_showAO 0 >/dev/null 2>&1 || true
+    detect_sample_dimensions "$SHOTDIR/vrf_warmup.png" || exit 1
+
+    # ── AO route/isolation authority (one deterministic fixed camera) ─────────
+    # Intensity=0 produces the authored flat-white AO negative and must differ
+    # from the dynamic field. This is stronger and more deterministic than a
+    # cross-process dlight comparison (known GTAO launch jitter can exceed a tiny
+    # dlight-invariance ceiling). HUD/gun are hidden so neither can counterfeit
+    # grayscale or the normal-vs-isolated comparison. Shadows are pinned equally
+    # in dynamic and flat captures; only r_ssaoIntensity changes.
+    set -- ${VPS[0]}; iso_map="$1"; iso_pos="$2 $3 $4 $5"
+    iso_normal="$(capture_fixed_cam "$iso_map" "$iso_pos" "gtao_iso_normal" +set r_ssao 1 +set r_showAO 0 +set r_shadows 0 +set cg_draw2D 0 +set cg_drawGun 0)" || FAIL=1
+    iso_ao="$(capture_fixed_cam "$iso_map" "$iso_pos" "gtao_iso_ao" +set r_ssao 1 +set r_showAO 1 +set r_ssaoIntensity 1 +set r_shadows 0 +set cg_draw2D 0 +set cg_drawGun 0)" || FAIL=1
+    iso_flat="$(capture_fixed_cam "$iso_map" "$iso_pos" "gtao_iso_flat" +set r_ssao 1 +set r_showAO 1 +set r_ssaoIntensity 0 +set r_shadows 0 +set cg_draw2D 0 +set cg_drawGun 0)" || FAIL=1
+    if [ "$FAIL" = 0 ]; then
+        iso_gray="$(max_channel_delta "$iso_ao")"
+        iso_scene_diff="$(worst_tile_diff "$iso_ao" "$iso_normal")"
+        iso_v="$(ao_isolation_assert "$iso_gray" "$iso_scene_diff")" || FAIL=1
+        flat_stats="$(tile_means "$iso_flat" | awk 'BEGIN{mn=1e9;mx=-1e9}{if($2<mn)mn=$2;if($2>mx)mx=$2}END{printf "%.1f %.1f %.1f",mx,mn,mx-mn}')"
+        flat_bright="$(echo "$flat_stats" | awk '{print $1}')"; flat_spread="$(echo "$flat_stats" | awk '{print $3}')"
+        flat_dynamic_diff="$(worst_tile_diff "$iso_flat" "$iso_ao")"
+        flat_v="$(awk -v b="$flat_bright" -v s="$flat_spread" -v d="$flat_dynamic_diff" -v m="$AO_FLAT_DIFF_MIN" 'BEGIN{print (b>=250 && s<=1 && d>=m)?"OK":"FAIL(flat-white-negative)"}')"
+        [ "$flat_v" = "OK" ] || FAIL=1
+        route_v="$(ao_route_log_assert gtao_iso_ao)" || FAIL=1
+        route_flat_v="$(ao_route_log_assert gtao_iso_flat)" || FAIL=1
+        printf "  AO route/isolation: gray-max=%s isolated-vs-normal=%s -> %s; marker=%s\n" "$iso_gray" "$iso_scene_diff" "$iso_v" "$route_v"
+        printf "  AO flat-white negative: bright=%s spread=%s dynamic-diff=%s -> %s; marker=%s\n" "$flat_bright" "$flat_spread" "$flat_dynamic_diff" "$flat_v" "$route_flat_v"
+    fi
 
     for entry in "${VPS[@]}"; do
         set -- $entry; map="$1" x="$2" y="$3" z="$4" yaw="$5" id="$6"
@@ -567,9 +685,9 @@ gtao)
         fi
 
         # (2) r_ssao 1 final-frame golden.
-        on_shot="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_on_$id" +set r_ssao 1 +set r_showAO 0)" || { FAIL=1; continue; }
+        on_shot="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_on_$id" +set r_ssao 1 +set r_showAO 0 +set cg_draw2D 0 +set cg_drawGun 0)" || { FAIL=1; continue; }
         # (3) r_showAO 1 isolated AO buffer.
-        ao_shot="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_ao_$id" +set r_ssao 1 +set r_showAO 1)" || { FAIL=1; continue; }
+        ao_shot="$(capture "$map" "$x" "$y" "$z" "$yaw" "gtao_ao_$id" +set r_ssao 1 +set r_showAO 1 +set cg_draw2D 0 +set cg_drawGun 0)" || { FAIL=1; continue; }
 
         # ── COMPUTED AO assertion (the direct gate — no image-to-eyeball) ──
         stats="$(tile_means "$ao_shot" | awk '
@@ -584,7 +702,11 @@ gtao)
         dark="$(echo "$stats" | awk '{print $2}')"
         spread="$(echo "$stats" | awk '{print $3}')"
         ao_v="$(ao_assert "$bright" "$dark" "$spread")" || FAIL=1
-        printf "  %-8s AO-isolated: open(brightest tile)=%6s darkest=%6s spread=%6s  -> %s\n" "$id" "$bright" "$dark" "$spread" "$ao_v"
+        gray="$(max_channel_delta "$ao_shot")"
+        scene_diff="$(worst_tile_diff "$ao_shot" "$on_shot")"
+        isolation_v="$(ao_isolation_assert "$gray" "$scene_diff")" || FAIL=1
+        route_v="$(ao_route_log_assert "gtao_ao_$id")" || FAIL=1
+        printf "  %-8s AO-isolated: open=%6s dark=%6s spread=%6s gray-max=%s scene-diff=%s -> shape=%s isolation=%s route=%s\n" "$id" "$bright" "$dark" "$spread" "$gray" "$scene_diff" "$ao_v" "$isolation_v" "$route_v"
 
         # ── GATE B: final-composite luminance budget (catches the over-darkening the
         # AO-isolation buffer can't see) ── The AO buffer being correct does NOT prove
@@ -633,12 +755,12 @@ gtao)
         # direct light untouched). This closes the self-referential bless (the old gate
         # blessed gtao_on on the AO-buffer assertion alone).
         if [ "$SMOKE_UPDATE_GOLDEN" = "1" ]; then
-            if [ "$ao_v" = "OK" ] && [ "$lum_v" = "OK" ] && [ "$inv_verdict" = "OK" ]; then
+            if [ "$ao_v" = "OK" ] && [ "$isolation_v" = "OK" ] && [ "$route_v" = "OK" ] && [ "$lum_v" = "OK" ] && [ "$inv_verdict" = "OK" ]; then
                 cp "$on_shot" "$GOLDEN_DIR/gtao_on_${id}.png"
                 cp "$ao_shot" "$GOLDEN_DIR/gtao_ao_${id}.png"
-                echo "    $id : goldens blessed (gtao_on/gtao_ao) — AO + luminance-budget + ambient-invariant all passed"
+                echo "    $id : goldens blessed (gtao_on/gtao_ao) — AO shape + grayscale/isolation/route + luminance-budget + ambient-invariant all passed"
             else
-                echo "    $id : NOT blessed — a correctness gate FAILED (AO=$ao_v lum=$lum_v invariant=$inv_verdict; numbers above)"
+                echo "    $id : NOT blessed — a correctness gate FAILED (AO=$ao_v isolation=$isolation_v route=$route_v lum=$lum_v invariant=$inv_verdict; numbers above)"
             fi
         else
             # Golden pixel-diff for gtao_on/gtao_ao — INFORMATIONAL, NOT gating.
@@ -709,8 +831,8 @@ fwdplus)
     fp1="$(capture_fixed_cam arena1 "$FP_ACT_POS" "fpact1" +set r_forwardPlus 1 +set r_dlightShadows 0 +set r_dlightShadowTest 300)" || FAIL=1
     if [ "$FAIL" = 0 ] && [ -n "$fp0" ] && [ -n "$fp1" ]; then
         # whole-frame mean per-pixel luma delta (png2raw grayscale mean of |fp0-fp1|).
-        fpDelta="$( paste <("$PNG2RAW" "$fp0" | od -A n -t u1 -v -w96 | awk '{for(i=1;i<=NF;i+=3)print ($i+$(i+1)+$(i+2))/3}') \
-                          <("$PNG2RAW" "$fp1" | od -A n -t u1 -v -w96 | awk '{for(i=1;i<=NF;i+=3)print ($i+$(i+1)+$(i+2))/3}') \
+        fpDelta="$( paste <(raw_bgr_rows "$fp0" | awk '{print ($1+$2+$3)/3}') \
+                          <(raw_bgr_rows "$fp1" | awk '{print ($1+$2+$3)/3}') \
                    | awk 'function abs(x){return x<0?-x:x}{s+=abs($1-$2);n++}END{printf "%.3f", (n?s/n:0)}' )"
         v="$(awk -v d="$fpDelta" -v m="$FP_ACT_MIN" 'BEGIN{print (d>=m)?"OK":"FAIL(forward+ inactive: fp1==fp0)"}')"
         [ "${v:0:2}" = "OK" ] || FAIL=1
@@ -1328,6 +1450,35 @@ selftest)
     # defect C: AO buffer dead/black — brightest 50 < 210 → expect FAIL(open<)
     v="$(ao_assert 50 10 40)"; case "$v" in FAIL*) echo "    dead AO buffer (brightest 50): $v  FAIL-as-expected";; *) echo "    dead AO: $v (BUG: blind to empty AO buffer)"; rc=1;; esac
 
+    echo "  -- (1a) AO route/grayscale/substitution teeth --"
+    v="$(ao_isolation_assert 0 45.0)"; [ "$v" = "OK" ] && echo "    real single-channel grayscale, distinct from scene: $v" \
+        || { echo "    clean AO isolation: $v (BUG: rejects real isolation)"; rc=1; }
+    v="$(ao_isolation_assert 18 45.0)"; case "$v" in FAIL*) echo "    coloured final-scene substitute (channel delta18): $v  FAIL-as-expected";;
+        *) echo "    coloured substitute: $v (BUG: grayscale tooth absent)"; rc=1;; esac
+    v="$(ao_isolation_assert 0 0.2)"; case "$v" in FAIL*) echo "    grayscale final-scene substitute (diff0.2): $v  FAIL-as-expected";;
+        *) echo "    same-as-normal substitute: $v (BUG: isolation tooth absent)"; rc=1;; esac
+    v="$(ao_route_assert 1 0)"; [ "$v" = "OK" ] && echo "    one RAL denoised-GTAO route, no refusal: $v" \
+        || { echo "    clean route inventory: $v (BUG)"; rc=1; }
+    v="$(ao_route_assert 0 0)"; case "$v" in FAIL*) echo "    missing route marker: $v  FAIL-as-expected";; *) echo "    missing route: $v (BUG)"; rc=1;; esac
+    v="$(ao_route_assert 1 1)"; case "$v" in FAIL*) echo "    route plus refusal: $v  FAIL-as-expected";; *) echo "    route+refusal: $v (BUG)"; rc=1;; esac
+    route_test_log="/tmp/vrf-self-route.log"
+    printf '%s\n' '12:34:56.789+03:00 [INFO ] r_showAO: route=denoised-gtao source=wired-gtao-ao-denoised layout=shader-read-only set=3' >"$route_test_log"
+    v="$(ao_route_log_assert self-route)"; [ "$v" = "OK" ] && echo "    exact whole-row route family: $v" \
+        || { echo "    exact route family: $v (BUG)"; rc=1; }
+    printf '%s\n' '12:34:56.789+03:00 [INFO ] r_showAO: route=denoised-gtao source=wired-gtao-ao-denoised layout=shader-read-only set=3 suffix' >"$route_test_log"
+    if ao_route_log_assert self-route >/dev/null; then echo "    suffixed route: OK (BUG: whole-row tooth absent)"; rc=1
+    else echo "    suffixed route marker: FAIL-as-expected"; fi
+    printf '%s\n' \
+        '12:34:56.789+03:00 [INFO ] r_showAO: route=denoised-gtao source=wired-gtao-ao-denoised layout=shader-read-only set=3' \
+        '12:34:56.790+03:00 [INFO ] r_showAO: route=final-color source=scene' >"$route_test_log"
+    if ao_route_log_assert self-route >/dev/null; then echo "    additive route: OK (BUG: family cardinality tooth absent)"; rc=1
+    else echo "    additive alternative route: FAIL-as-expected"; fi
+    rm -f "$route_test_log"
+    # r_ssaoIntensity=0 is the authored flat-white negative. Its shape tuple
+    # (open255/dark255/spread0) must be rejected by the same AO predicate.
+    v="$(ao_assert 255 255 0)"; case "$v" in FAIL*) echo "    flat-white intensity=0 negative: $v  FAIL-as-expected";;
+        *) echo "    flat-white negative: $v (BUG: dynamic-AO predicate is vacuous)"; rc=1;; esac
+
     echo "  -- (1b) final-composite luminance-budget teeth --"
     # clean: AO touches only the small indirect term → on≈off, ratio≈0.99 → expect OK
     out="$(lum_budget_assert 119.0 120.0)"; v="$(echo "$out" | awk '{print $1}')"
@@ -1517,7 +1668,7 @@ selftest)
         [ "$(awk -v s="$vself" 'BEGIN{print (s<1.0)?1:0}')" = 1 ] && [ "$(awk -v p="$vshift" -v t="$VPP_FLOOR_ST" 'BEGIN{print (p>t)?1:0}')" = 1 ] && echo "    viewport-placement teeth: clean PASS + SUBTLE shift FAIL-as-expected (above the GTAO-on noise-bound floor)"
     fi
 
-    if [ "$rc" -eq 0 ]; then echo "==> SELF-TEST PASS: AO-assertion + luminance-budget + ambient-invariant + chromatic-edge-concentration (synthetic + numeric) + dlight-shadow-darken (numeric + shift) + value tiled_diff + viewport-placement all have teeth"; else echo "==> SELF-TEST FAIL"; fi
+    if [ "$rc" -eq 0 ]; then echo "==> SELF-TEST PASS: AO shape + grayscale/isolation/route + flat-white negative + luminance-budget + ambient-invariant + chromatic-edge-concentration (synthetic + numeric) + dlight-shadow-darken (numeric + shift) + value tiled_diff + viewport-placement all have teeth"; else echo "==> SELF-TEST FAIL"; fi
     exit $rc
     ;;
 

@@ -3759,7 +3759,7 @@ void vk_update_attachment_descriptors( void ) {
 				qvkUpdateDescriptorSets( vk.device, 1, &iblWrite, 0, NULL );
 			}
 
-			// binding 4 — screen-space GTAO visibility (R8). gen_frag samples this to
+			// binding 4 — screen-space GTAO visibility (R16F). gen_frag samples this to
 			// modulate the additive IBL-specular indirect term. Always bound with a
 			// valid view so the shader never reads an unbound descriptor: the denoised
 			// GTAO view + its sampler when GTAO resources exist, otherwise tr.whiteImage
@@ -10969,10 +10969,13 @@ static void vk_create_shader_modules( void )
 	// variant shaders moved from gamma.frag to tonemap.frag.
 	// Bit layout (TONEMAP_VAR_*) preserved; shader source/output names changed.
 	memset( vk.tonemap_variant_fs, 0, sizeof( vk.tonemap_variant_fs ) );
-	// TONEMAP_VAR_SSAO variants removed: the legacy per-pixel tonemap SSAO path is
-	// fully retired (GTAO is the sole AO path), so the SSAO bit is never set at
-	// selection time and its variant slots stay NULL. Only the BASE / CG / SUNRAYS
-	// combos (varIdx bits 2/4/8) are built.
+	// Reserved bit 0 is now the diagnostic-only GTAO isolation view. It samples
+	// the denoised RAL GTAO texture directly; it does not restore the retired
+	// per-pixel tonemap SSAO composite.
+#if FEAT_SSAO
+	vk.tonemap_variant_fs[ TONEMAP_VAR_SSAO ] = SHADER_MODULE( tonemap_ao_frag_spv );
+#endif
+	// Normal scene variants remain BASE / CG / SUNRAYS combinations only.
 #if FEAT_TONEMAP
 	vk.tonemap_variant_fs[ TONEMAP_VAR_BASE ] = SHADER_MODULE( tonemap_tonemap_frag_spv );
 #endif
@@ -12787,6 +12790,19 @@ static void vk_rebuild_for_fbo_change( void )
 }
 
 
+static qboolean vk_show_ao_source_ready( void )
+{
+#if FEAT_SSAO
+	return ( r_ssao && r_ssao->integer
+	      && vk.ral_gtao_main_pipeline
+	      && vk.ral_gtao_denoise_pipeline
+	      && vk.ral_gtao_composite_descriptor
+	      && vk.ral_tonemap_variants[ TONEMAP_VAR_SSAO ] ) ? qtrue : qfalse;
+#else
+	return qfalse;
+#endif
+}
+
 void vk_update_post_process_pipelines( void )
 {
 	// r_fbo and r_hdr live conversion. The r_fbo
@@ -13065,17 +13081,27 @@ void vk_update_post_process_pipelines( void )
 		// Create tonemap variant pipeline if any post-process features are active
 		{
 			int varIdx = 0;
-			// TONEMAP_VAR_SSAO is retired (GTAO is the sole AO path); r_ssao no
-			// longer feeds the tonemap variant selection.
+			// r_showAO overrides the scene-radiance variants: its dedicated module
+			// reads the denoised GTAO field directly, so final colour cannot stand in
+			// for AO-isolation evidence.
+#if FEAT_SSAO
+			// Build the diagnostic pipeline from the cvar request alone. GTAO
+			// resources are adopted later in some startup orders; runtime route
+			// selection is where their complete readiness is required.
+			if ( r_showAO && r_showAO->integer ) varIdx = TONEMAP_VAR_SSAO;
+			else
+#endif
+			{
 #if FEAT_TONEMAP
-			if ( r_tonemap->integer ) varIdx |= TONEMAP_VAR_BASE;
+				if ( r_tonemap->integer ) varIdx |= TONEMAP_VAR_BASE;
 #endif
 #if FEAT_COLOR_GRADING
-			if ( r_colorGrading->integer ) varIdx |= TONEMAP_VAR_CG;
+				if ( r_colorGrading->integer ) varIdx |= TONEMAP_VAR_CG;
 #endif
 #if FEAT_SUNRAYS
-			if ( r_drawSunRays->integer ) varIdx |= TONEMAP_VAR_SUNRAYS;
+				if ( r_drawSunRays->integer ) varIdx |= TONEMAP_VAR_SUNRAYS;
 #endif
+			}
 			if ( varIdx ) {
 				vk_create_post_process_pipeline( 5, 0, 0 ); // tonemap variant
 			}
@@ -15827,7 +15853,7 @@ void vk_gtao_shutdown( void )
 }
 
 // GTAO: bring up the ground-truth ambient-occlusion compute resources. Two RAL
-// compute passes (main horizon-search + depth-aware denoise) writing R8 storage
+// compute passes (main horizon-search + depth-aware denoise) writing R16F storage
 // textures, dispatched per frame in the vk_tonemap compute seam. Inputs are the
 // device depth copy (vk.sceneDepth.image) reconstructed in-shader to view-space
 // position + normal — no normal G-buffer needed. Gated on the depth copy
@@ -15858,7 +15884,7 @@ void vk_gtao_init( ralBackend_t *backend )
 	if ( !backend || !vk.sceneDepth.ral_image )
 		return;
 
-	// Two R8 AO storage textures at render resolution: raw (main pass out) and
+	// Two R16F AO storage textures at render resolution: raw (main pass out) and
 	// denoised (denoise pass out -> tonemap samples). STORAGE for the compute
 	// imageStore, SAMPLED so the denoise + tonemap can read them.
 	memset( &tci, 0, sizeof( tci ) );
@@ -15966,40 +15992,22 @@ void vk_gtao_init( ralBackend_t *backend )
 	}
 
 	// ── composite descriptor: the denoised AO bound for the tonemap pass (set 3).
-	//    set 3 in the SSAO pipeline layout is vk.set_layout_sampler — a single
-	//    COMBINED_IMAGE_SAMPLER (matching the shader's `sampler2D aoMap`). RAL's
-	//    Ral_CreateBindGroup only emits SAMPLED_IMAGE/SAMPLER (separate) writes,
-	//    which would leave the combined descriptor's sampler half unset (samples
-	//    read 0 -> black). So allocate a raw VkDescriptorSet from the same combined
-	//    layout, write it COMBINED_IMAGE_SAMPLER (denoised view + sampler), and
-	//    adopt it as the RAL bind-group the tonemap binds — the same shape the
-	//    set-0 color descriptor uses. ──
+	// The adopted set-layout metadata and the descriptor write are both typed as
+	// RAL_BIND_COMBINED_TEXTURE_SAMPLER, matching shader sampler2D aoMap. No raw
+	// VkDescriptorSet allocation/update bridge is involved.
 	if ( vk.ral_bgl_sampler && vk.ral_gtao_denoised_view && vk.ral_gtao_sampler ) {
-		VkDescriptorSetAllocateInfo aci;
-		VkDescriptorImageInfo       iinfo;
-		VkWriteDescriptorSet        wr;
-		VkDescriptorSet             vkSet = VK_NULL_HANDLE;
-
-		memset( &aci, 0, sizeof( aci ) );
-		aci.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		aci.descriptorPool     = vk.descriptor_pool;
-		aci.descriptorSetCount = 1;
-		aci.pSetLayouts        = &vk.set_layout_sampler;
-		if ( qvkAllocateDescriptorSets( vk.device, &aci, &vkSet ) == VK_SUCCESS && vkSet != VK_NULL_HANDLE ) {
-			memset( &iinfo, 0, sizeof( iinfo ) );
-			iinfo.sampler     = (VkSampler)Ral_GetSamplerHandle( vk.ral_gtao_sampler );
-			iinfo.imageView   = (VkImageView)Ral_GetTextureViewHandle( vk.ral_gtao_denoised_view );
-			iinfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			memset( &wr, 0, sizeof( wr ) );
-			wr.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			wr.dstSet          = vkSet;
-			wr.dstBinding      = 0;
-			wr.descriptorCount = 1;
-			wr.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			wr.pImageInfo      = &iinfo;
-			qvkUpdateDescriptorSets( vk.device, 1, &wr, 0, NULL );
-			vk.ral_gtao_composite_descriptor = Ral_AdoptBindGroup( backend, vkSet, vk.ral_bgl_sampler, "wired-gtao-composite-bg" );
-		}
+		ralBindingValue_t value;
+		memset( &value, 0, sizeof( value ) );
+		value.binding     = 0;
+		value.type        = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
+		value.textureView = vk.ral_gtao_denoised_view;
+		value.sampler     = vk.ral_gtao_sampler;
+		memset( &bgci, 0, sizeof( bgci ) );
+		bgci.layout    = vk.ral_bgl_sampler;
+		bgci.values    = &value;
+		bgci.numValues = 1;
+		bgci.debugName = "wired-gtao-composite-bg";
+		vk.ral_gtao_composite_descriptor = Ral_CreateBindGroup( backend, &bgci );
 	}
 
 	if ( vk.ral_gtao_main_bgl && vk.ral_gtao_main_descriptor ) {
@@ -16027,7 +16035,7 @@ void vk_gtao_init( ralBackend_t *backend )
 	}
 
 	if ( vk.ral_gtao_main_pipeline && vk.ral_gtao_denoise_pipeline && vk.ral_gtao_composite_descriptor ) {
-		R_LOG( rch_ral, SEV_INFO, "gtao: RAL compute AO ready (%dx%d, R8)\n", glConfig.vidWidth, glConfig.vidHeight );
+		R_LOG( rch_ral, SEV_INFO, "gtao: RAL compute AO ready (%dx%d, R16F)\n", glConfig.vidWidth, glConfig.vidHeight );
 	} else {
 		R_LOG( rch_ral, SEV_WARN, "gtao: compute setup incomplete; SSAO disabled\n" );
 		vk_gtao_shutdown();
@@ -19255,7 +19263,7 @@ qboolean vk_initialize( void )
 	{
 		// 5 COMBINED_IMAGE_SAMPLER bindings, FRAGMENT stage: 0=CSM shadow 2DArray,
 		// 1=BRDF LUT (2D), 2=irradiance cube, 3=radiance cube, 4=screen-space GTAO
-		// visibility (R8). All are GLOBAL scene resources (not per-draw) so they share
+		// visibility (R16F). All are GLOBAL scene resources (not per-draw) so they share
 		// this set, mirroring the shadowMap. The layout is born with all 5 bindings here
 		// on the init path BEFORE any pipeline is created against it, so every pipeline
 		// is 5-binding-compatible — this is not a live layout mutation. binding 4 is
@@ -19621,7 +19629,7 @@ qboolean vk_initialize( void )
 			e.binding    = 0;
 			e.count      = 1;
 
-			e.type       = RAL_BIND_SAMPLED_TEXTURE;
+			e.type       = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
 			e.stageFlags = RAL_STAGE_FRAGMENT;
 			vk.ral_bgl_sampler = Ral_AdoptBindGroupLayout( backend, vk.set_layout_sampler, 1, &e, "wired-set-layout-sampler-adopted" );
 
@@ -21627,7 +21635,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	VkGraphicsPipelineCreateInfo create_info;
 	VkViewport viewport;
 	VkRect2D scissor;
-	VkSpecializationMapEntry spec_entries[27];  // post-process: 12 gamma+tonemap (exposure_bias retired to the set-2 UBO) + 5 lottes + 1 srgb_swapchain + 5 colour grading + 2 HDR10 + 1 chromatic aberration + 1 show_ao (id 25, FEAT_SSAO verify-build debug view)
+	VkSpecializationMapEntry spec_entries[27];  // post-process: 12 gamma+tonemap (exposure_bias retired to the set-2 UBO) + 5 lottes + 1 srgb_swapchain + 5 colour grading + 2 HDR10 + 1 chromatic aberration + 1 reserved show_ao slot (module-selected diagnostic)
 	VkSpecializationInfo frag_spec_info;
 	VkShaderModule fsmodule;
 	VkPipelineLayout layout;
@@ -21655,11 +21663,9 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 		// 0 = off (one tap, byte-identical). Written unconditionally; pipelines
 		// that don't declare id 24 (gamma, non-tonemap variants) ignore it.
 		float chromatic_strength;
-		// r_showAO debug view → tonemap.frag spec constant id 25 (the FREE slot,
-		// SSAO variant only). 1 = output the denoised AO buffer grayscale instead of
-		// the composited scene (the visual-gate AO-isolation view). 0 = normal
-		// composite (default). Only meaningful in the FEAT_SSAO=1 verify build; inert
-		// in the ship build. LATCH-acceptable (baked at pipeline create).
+		// Reserved ABI slot formerly proposed for a show-AO specialization constant.
+		// The real diagnostic is module-selected and reads the denoised RAL texture;
+		// no shader declares id 25. Keeping this zero-valued field preserves offsets.
 		int   show_ao;
 		float bloom_threshold;
 		float bloom_intensity;
@@ -21777,19 +21783,25 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 			ralRpfmt  = RPFMT_GAMMA;                      // color-only, present format
 			ralLayout = vk.ral_pipeline_layout_post_process;
 			break;
-		case 5: { // tonemap variant (tonemap/colorgrade/sunrays combo)
+		case 5: { // tonemap variant (AO-isolation or tonemap/colorgrade/sunrays combo)
 			int varIdx = 0;
-			// TONEMAP_VAR_SSAO is retired (GTAO is the sole AO path); r_ssao no
-			// longer feeds the tonemap variant selection.
+			// AO isolation is a dedicated override, never combined with final-colour
+			// grading/tonemap/sunrays variants.
+#if FEAT_SSAO
+			if ( r_showAO && r_showAO->integer ) varIdx = TONEMAP_VAR_SSAO;
+			else
+#endif
+			{
 #if FEAT_TONEMAP
-			if ( r_tonemap->integer )  varIdx |= TONEMAP_VAR_BASE;
+				if ( r_tonemap->integer )  varIdx |= TONEMAP_VAR_BASE;
 #endif
 #if FEAT_COLOR_GRADING
-			if ( r_colorGrading->integer ) varIdx |= TONEMAP_VAR_CG;
+				if ( r_colorGrading->integer ) varIdx |= TONEMAP_VAR_CG;
 #endif
 #if FEAT_SUNRAYS
-			if ( r_drawSunRays->integer )  varIdx |= TONEMAP_VAR_SUNRAYS;
+				if ( r_drawSunRays->integer )  varIdx |= TONEMAP_VAR_SUNRAYS;
 #endif
+			}
 			// defensive fallback. The table covers every BASE/CG/SUNRAYS combo,
 			// but a feature-flag-disabled build (e.g. FEAT_SUNRAYS off while
 			// r_drawSunRays is still set) can leave the selected slot NULL. Drop
@@ -21818,7 +21830,9 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 			// module is unbuilt), like the legacy array.
 			ralTarget = &vk.ral_tonemap_variants[ varIdx ];
 			ralRpfmt  = RPFMT_TONEMAP;
-			if ( varIdx & TONEMAP_VAR_SUNRAYS )
+			if ( varIdx & TONEMAP_VAR_SSAO )
+				ralLayout = vk.ral_pipeline_layout_ssao;
+			else if ( varIdx & TONEMAP_VAR_SUNRAYS )
 				ralLayout = vk.ral_pipeline_layout_sunrays;
 			else
 				ralLayout = vk.ral_pipeline_layout_post_process;
@@ -21844,14 +21858,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	// written here and no spec entry is emitted for constant id 1.
 	frag_spec_data.saturation = r_saturation->value;
 	frag_spec_data.chromatic_strength = r_chromaticAberration->value;
-#if FEAT_SSAO
-	// r_showAO (spec const id 25): currently inert. The AO-isolation grayscale view
-	// lived on the retired tonemap SSAO variant, which is gone (GTAO is the sole AO
-	// path). The spec entry is still emitted for FragSpecData offset stability, but
-	// no post-process shader declares id 25, so the driver silently ignores it. The
-	// cheat-latch cvar is kept as a hook for a future GTAO-composite debug view.
-	frag_spec_data.show_ao = ( r_showAO && r_showAO->integer ) ? 1 : 0;
-#endif
+	frag_spec_data.show_ao = 0; // reserved id-25 ABI slot; AO is module-selected
 	frag_spec_data.bloom_threshold = r_bloomThreshold->value;
 	frag_spec_data.bloom_intensity = r_bloomIntensity->value;
 	frag_spec_data.bloom_threshold_mode = r_bloomThresholdMode->integer;
@@ -22057,10 +22064,8 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	spec_entries[25].offset = offsetof(struct FragSpecData, chromatic_strength);
 	spec_entries[25].size = sizeof(frag_spec_data.chromatic_strength);
 
-	// r_showAO debug view — spec const id 25. No post-process shader declares id 25
-	// anymore (the SSAO tonemap variant that consumed it is retired), so the driver
-	// ignores this entry on every variant. Kept for FragSpecData / spec_entries[]
-	// offset stability; inert (0) outside the FEAT_SSAO build.
+	// Reserved id-25 ABI slot. No post-process module declares it; the dedicated
+	// AO module is selected by TONEMAP_VAR_SSAO and consumes set 3 instead.
 	spec_entries[26].constantID = 25;
 	spec_entries[26].offset = offsetof(struct FragSpecData, show_ao);
 	spec_entries[26].size = sizeof(frag_spec_data.show_ao);
@@ -26042,26 +26047,36 @@ when !fboActive.
 void vk_tonemap( void )
 {
 	int varIdx = 0;
+	static qboolean s_showAoRouteLogged = qfalse;
 
 	if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP )
 		return;
 	if ( !vk.fboActive )
 		return;
 
-	// TONEMAP_VAR_SSAO is retired (GTAO is the sole AO path, applied in the base
-	// pass); r_ssao no longer selects a tonemap variant.
+	// r_showAO is a diagnostic override: select the dedicated denoised-GTAO
+	// isolation module only when its real descriptor exists. A missing descriptor
+	// cannot be substituted with final colour; the visual gate's grayscale and
+	// isolation-difference teeth will fail the run.
+#if FEAT_SSAO
+	if ( r_showAO && r_showAO->integer && vk_show_ao_source_ready() )
+		varIdx = TONEMAP_VAR_SSAO;
+	else
+#endif
+	{
 #if FEAT_TONEMAP
-	if ( r_tonemap->integer ) varIdx |= TONEMAP_VAR_BASE;
+		if ( r_tonemap->integer ) varIdx |= TONEMAP_VAR_BASE;
 #endif
 #if FEAT_COLOR_GRADING
-	if ( r_colorGrading->integer ) varIdx |= TONEMAP_VAR_CG;
+		if ( r_colorGrading->integer ) varIdx |= TONEMAP_VAR_CG;
 #endif
 #if FEAT_SUNRAYS
 	// Sun-rays require a real map sun: tr.sunHasSource is false on q3map_sun-less maps
 	// (tr.sunDirection is the engine default), so the rays would otherwise radiate from a
 	// nonexistent sun. Gate the variant off in that case.
-	if ( r_drawSunRays->integer && vk.sceneDepth.active && tr.sunHasSource ) varIdx |= TONEMAP_VAR_SUNRAYS;
+		if ( r_drawSunRays->integer && vk.sceneDepth.active && tr.sunHasSource ) varIdx |= TONEMAP_VAR_SUNRAYS;
 #endif
+	}
 
 	// Tonemap is RAL-only. Select the dynamic-rendering sibling for the chosen
 	// FEAT variant: ral_tonemap_variants[varIdx] when a variant is selected and
@@ -26074,6 +26089,24 @@ void vk_tonemap( void )
 	} else {
 		ralTone = vk.ral_tonemap_pipeline;
 		varIdx = 0;
+	}
+
+	// One authoritative route decision per process. The diagnostic gate consumes
+	// this marker in addition to pixels: it proves the fullscreen pass selected
+	// the RAL-native denoised GTAO binding rather than substituting scene colour.
+	if ( r_showAO && r_showAO->integer && !s_showAoRouteLogged ) {
+		if ( varIdx == TONEMAP_VAR_SSAO ) {
+			R_LOG( rch_ral, SEV_INFO, "r_showAO: route=denoised-gtao source=wired-gtao-ao-denoised layout=shader-read-only set=3\n" );
+		} else {
+			R_LOG( rch_ral, SEV_WARN,
+				"r_showAO: refused reason=gtao-unavailable r_ssao=%d main=%d denoise=%d descriptor=%d pipeline=%d\n",
+				( r_ssao && r_ssao->integer ) ? 1 : 0,
+				vk.ral_gtao_main_pipeline ? 1 : 0,
+				vk.ral_gtao_denoise_pipeline ? 1 : 0,
+				vk.ral_gtao_composite_descriptor ? 1 : 0,
+				vk.ral_tonemap_variants[ TONEMAP_VAR_SSAO ] ? 1 : 0 );
+		}
+		s_showAoRouteLogged = qtrue;
 	}
 
 	// Any active scene-depth consumer samples the depth copy (vk.sceneDepth.image).
@@ -26465,11 +26498,12 @@ void vk_tonemap( void )
 		// layout does not declare is a VUID. The depth copy was produced above
 		// (forced when no transparent surface triggered the sort-boundary copy); the
 		// descriptor samples vk.sceneDepth.image in SHADER_READ_ONLY.
-		// (The retired tonemap SSAO variant used to share this bind and a set-3 GTAO
-		// composite sampler; both are gone — GTAO applies its AO in the base pass.)
+		// AO isolation does not use set 1; its denoised GTAO input is set 3.
 		if ( varIdx & TONEMAP_VAR_SUNRAYS )
 			Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 1, vk.sceneDepth.ral_descriptor );
 		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 2, vk.exposure.ral_descriptor[ vk.cmd_index ] );
+		if ( varIdx & TONEMAP_VAR_SSAO )
+			Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 3, vk.ral_gtao_composite_descriptor );
 		Ral_CmdDraw( vk.cmd->ral_cmd, 4, 1, 0, 0 );
 
 		Ral_EndRendering( vk.cmd->ral_cmd );

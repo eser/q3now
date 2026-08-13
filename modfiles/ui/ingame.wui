@@ -156,7 +156,7 @@ menuDef {
 					direction row
 					gap $spacing_sm
 					height FIT
-					itemDef { name "btn_serverinfo" type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Server Info"     textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "serverinfo" dim } }
+					itemDef { name "btn_serverinfo" type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Server Info"     textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { serverstatusopenconnected } }
 					itemDef { name "btn_player"     type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Player Settings" textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "playersettings" scene } }
 				}
 			}

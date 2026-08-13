@@ -68,11 +68,85 @@ AUX_SOURCE_DIRECTORY(code/qcommon/maps QCOMMON_SRCS)
 # Arena allocator (must be explicit — AUX_SOURCE_DIRECTORY is configure-time only)
 list(APPEND QCOMMON_SRCS code/qcommon/arena.c)
 
+# VM candidate policy (explicit for already-configured build graphs).
+list(APPEND QCOMMON_SRCS code/qcommon/vm_interpret_policy.c)
+
 # stalltrace diagnostic (temporary; cvar-gated, default-off)
 list(APPEND QCOMMON_SRCS code/qcommon/wired/stalltrace.c)
 
-# LZ4 decoder (for SW3Z archive reader)
-list(APPEND QCOMMON_SRCS src/libs/lz4/lz4.c src/libs/lz4/lz4frame.c src/libs/lz4/xxhash.c src/libs/lz4/lz4hc.c)
+# LZ4 decoder (for SW3Z archive reader). These vendor translation units are
+# independent of qcommon headers and the HEADLESS compile definition, so build
+# them once for both engine variants. qcommon_tool intentionally keeps its own
+# curated copy: its bootstrap/link contract remains tool-private.
+SET(QCOMMON_VENDOR_SHARED_SRCS
+	src/libs/lz4/lz4.c
+	src/libs/lz4/lz4frame.c
+	src/libs/lz4/xxhash.c
+	src/libs/lz4/lz4hc.c
+)
+
+# The only qcommon/server translation units whose generated code depends on
+# HEADLESS. Everything else is compiled once in qcommon_engine_shared and its
+# objects are injected directly into both final executables. Keep this list
+# explicit and fail-closed: the graph contract verifies every listed source is
+# present in both variants and every other engine source is shared exactly once.
+SET(QCOMMON_VARIANT_ALLOWLIST
+	code/qcommon/common.c
+	code/qcommon/crash.c
+	code/qcommon/history.c
+	code/qcommon/msg.c
+	code/qcommon/net_ip.c
+	code/qcommon/vm.c
+	code/qcommon/wired/core/console/con_buffer.c
+	code/qcommon/wired/core/cvars/cvar.c
+	code/qcommon/wired/core/events/event.c
+	code/qcommon/wired/core/logging/log.c
+	code/qcommon/wired/core/logging/log_sink_console.c
+	code/qcommon/wired/core/shell/cmd.c
+	code/qcommon/wired/core/vfs/files.c
+	code/qcommon/wired/net/wn_bg_stubs.c
+	code/qcommon/wired/net/wn_inmem.c
+	code/qcommon/wired/net/wn_main.c
+	code/qcommon/wired/net/wn_transport.c
+	code/server/sv_client.c
+	code/server/sv_init.c
+	code/server/sv_main.c
+)
+
+FUNCTION(WIRED_PARTITION_QCOMMON_SOURCES shared_out variant_out)
+	SET(_shared)
+	SET(_variant)
+	FOREACH(_src IN LISTS ARGN)
+		IF(IS_ABSOLUTE "${_src}")
+			FILE(RELATIVE_PATH _key "${CMAKE_SOURCE_DIR}" "${_src}")
+		ELSE()
+			SET(_key "${_src}")
+		ENDIF()
+		LIST(FIND QCOMMON_VARIANT_ALLOWLIST "${_key}" _variant_index)
+		IF(_variant_index GREATER -1)
+			LIST(APPEND _variant "${_src}")
+		ELSE()
+			LIST(APPEND _shared "${_src}")
+		ENDIF()
+	ENDFOREACH()
+	LIST(REMOVE_DUPLICATES _shared)
+	LIST(REMOVE_DUPLICATES _variant)
+	SET(${shared_out} "${_shared}" PARENT_SCOPE)
+	SET(${variant_out} "${_variant}" PARENT_SCOPE)
+ENDFUNCTION()
+
+FUNCTION(WIRED_ROUTE_QCOMMON_SOURCES)
+	WIRED_PARTITION_QCOMMON_SOURCES(_shared _variant ${ARGN})
+	IF(_shared)
+		TARGET_SOURCES(qcommon_engine_shared PRIVATE ${_shared})
+		SET_PROPERTY(GLOBAL APPEND PROPERTY QCOMMON_SHARED_SOURCE_INVENTORY ${_shared})
+	ENDIF()
+	IF(_variant)
+		TARGET_SOURCES(qcommon PRIVATE ${_variant})
+		TARGET_SOURCES(qcommon_ded PRIVATE ${_variant})
+		SET_PROPERTY(GLOBAL APPEND PROPERTY QCOMMON_VARIANT_SOURCE_INVENTORY ${_variant})
+	ENDIF()
+ENDFUNCTION()
 
 # When WASM is disabled, override FEAT_WASM=0 so vm_wasm.c compiles to empty
 # and vm.c skips WASM code paths (q_feats.h hardcodes FEAT_WASM=1).
@@ -140,11 +214,32 @@ list(REMOVE_ITEM SERVER_SRCS code/server/sv_rankings.c)
 # (e.g. for MCP tools like game.items, coaching.tick)
 list(APPEND QCOMMON_SRCS code/game/bg_weapons.c code/game/bg_misc.c code/game/bg_gametypes.c)
 
+# Partition the initial qcommon + server inventory before target creation.
+WIRED_PARTITION_QCOMMON_SOURCES(
+	_QCOMMON_INITIAL_SHARED
+	_QCOMMON_INITIAL_VARIANT
+	${QCOMMON_SRCS}
+	${SERVER_SRCS}
+)
+
 # universal binary
-ADD_LIBRARY(qcommon OBJECT ${QCOMMON_SRCS} ${SERVER_SRCS})
+ADD_LIBRARY(qcommon_engine_shared OBJECT
+	${QCOMMON_VENDOR_SHARED_SRCS}
+	${_QCOMMON_INITIAL_SHARED}
+)
+TARGET_INCLUDE_DIRECTORIES(qcommon_engine_shared PRIVATE src/libs/lz4)
+SET_PROPERTY(GLOBAL APPEND PROPERTY QCOMMON_SHARED_SOURCE_INVENTORY
+	${QCOMMON_VENDOR_SHARED_SRCS}
+	${_QCOMMON_INITIAL_SHARED}
+)
+SET_PROPERTY(GLOBAL APPEND PROPERTY QCOMMON_VARIANT_SOURCE_INVENTORY
+	${_QCOMMON_INITIAL_VARIANT}
+)
+
+ADD_LIBRARY(qcommon OBJECT ${_QCOMMON_INITIAL_VARIANT})
 
 # headless server
-ADD_LIBRARY(qcommon_ded OBJECT ${QCOMMON_SRCS} ${SERVER_SRCS})
+ADD_LIBRARY(qcommon_ded OBJECT ${_QCOMMON_INITIAL_VARIANT})
 TARGET_COMPILE_DEFINITIONS(qcommon_ded PUBLIC HEADLESS)
 
 # LZ4 include path (for SW3Z archive reader)
@@ -155,21 +250,19 @@ TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE src/libs/lz4)
 # sibling headers (qcommon.h, q_shared.h, unzip.h, etc.) without relative paths.
 TARGET_INCLUDE_DIRECTORIES(qcommon     PRIVATE code/qcommon)
 TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE code/qcommon)
+TARGET_INCLUDE_DIRECTORIES(qcommon_engine_shared PRIVATE code/qcommon)
 
 # wired/core/vfs — virtual filesystem
 FILE(GLOB WIRED_VFS_SRCS  code/qcommon/wired/core/vfs/*.c)
-TARGET_SOURCES(qcommon     PRIVATE ${WIRED_VFS_SRCS})
-TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_VFS_SRCS})
+WIRED_ROUTE_QCOMMON_SOURCES(${WIRED_VFS_SRCS})
 
 # wired/core/cvars — cvar sub-component
 FILE(GLOB WIRED_CVAR_SRCS code/qcommon/wired/core/cvars/*.c)
-TARGET_SOURCES(qcommon     PRIVATE ${WIRED_CVAR_SRCS})
-TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_CVAR_SRCS})
+WIRED_ROUTE_QCOMMON_SOURCES(${WIRED_CVAR_SRCS})
 
 # wired/core/shell — keys + cmd
 FILE(GLOB WIRED_CON_SRCS  code/qcommon/wired/core/shell/*.c)
-TARGET_SOURCES(qcommon     PRIVATE ${WIRED_CON_SRCS})
-TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_CON_SRCS})
+WIRED_ROUTE_QCOMMON_SOURCES(${WIRED_CON_SRCS})
 
 # wired/core/console — presentation-agnostic ring buffer + history +
 # scrollback + search/mark + severity-as-data + the param-injected geometry
@@ -179,42 +272,35 @@ TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_CON_SRCS})
 # code/client/wired/ui/elements/console.c. con_buffer.c now includes ZERO
 # client/* headers, so it joins the dedicated-server (qcommon_ded) target too.
 FILE(GLOB WIRED_CONSOLE_SRCS code/qcommon/wired/core/console/*.c)
-TARGET_SOURCES(qcommon     PRIVATE ${WIRED_CONSOLE_SRCS})
-TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_CONSOLE_SRCS})
+WIRED_ROUTE_QCOMMON_SOURCES(${WIRED_CONSOLE_SRCS})
 
 # wired/core/logging — log pipeline (console/tty/file sinks, ring buffer)
 FILE(GLOB WIRED_LOG_SRCS  code/qcommon/wired/core/logging/*.c)
-TARGET_SOURCES(qcommon     PRIVATE ${WIRED_LOG_SRCS})
-TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_LOG_SRCS})
+WIRED_ROUTE_QCOMMON_SOURCES(${WIRED_LOG_SRCS})
 
 # wired/core/events — event primitive stubs (V2 bodies TBD)
 FILE(GLOB WIRED_EVENT_SRCS code/qcommon/wired/core/events/*.c)
-TARGET_SOURCES(qcommon     PRIVATE ${WIRED_EVENT_SRCS})
-TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_EVENT_SRCS})
+WIRED_ROUTE_QCOMMON_SOURCES(${WIRED_EVENT_SRCS})
 
 # wired/core/time — time subsystem (Sys_NanoTime, Sys_Milliseconds, Com_RealTime, Com_FormatTimestamp)
 FILE(GLOB WIRED_TIME_SRCS  code/qcommon/wired/core/time/*.c)
-TARGET_SOURCES(qcommon     PRIVATE ${WIRED_TIME_SRCS})
-TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_TIME_SRCS})
+WIRED_ROUTE_QCOMMON_SOURCES(${WIRED_TIME_SRCS})
 
 # wired/core/thread — portable thread + atomic primitives (Sys_CreateThread, ...), links
 # into both client and headless (unlike SDL threads) for the background navmesh bake
 FILE(GLOB WIRED_THREAD_SRCS  code/qcommon/wired/core/thread/*.c)
-TARGET_SOURCES(qcommon     PRIVATE ${WIRED_THREAD_SRCS})
-TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_THREAD_SRCS})
+WIRED_ROUTE_QCOMMON_SOURCES(${WIRED_THREAD_SRCS})
 
 # wired/core — orchestration layer (WiredCore_Init / WiredCore_Shutdown)
 FILE(GLOB WIRED_CORE_SRCS code/qcommon/wired/core/*.c)
-TARGET_SOURCES(qcommon     PRIVATE ${WIRED_CORE_SRCS})
-TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_CORE_SRCS})
+WIRED_ROUTE_QCOMMON_SOURCES(${WIRED_CORE_SRCS})
 
 # wired/math — pure-CPU math (spline curve core; NOT renderer, NOT RAL).
 # Cinematic-scene spline core: RBDOOM Curve.h port (Catmull-Rom + TCB +
 # arc-length reparameterization). No Vulkan/RAL dependency — only q_shared.h
 # vec macros.
 FILE(GLOB WIRED_MATH_SRCS code/qcommon/wired/math/*.c)
-TARGET_SOURCES(qcommon     PRIVATE ${WIRED_MATH_SRCS})
-TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_MATH_SRCS})
+WIRED_ROUTE_QCOMMON_SOURCES(${WIRED_MATH_SRCS})
 
 # wired_curve math-core unit test (cinematic-scene spline core gate).
 # Production configuration: wired_curve.c consumes q_shared.h exactly as the
@@ -229,6 +315,24 @@ OPTION(WIRED_HOST_SANITIZERS
 	"Build host-only subsystem tests with AddressSanitizer and UndefinedBehaviorSanitizer"
 	OFF)
 ADD_CUSTOM_TARGET(host_tests)
+
+# Build-graph contract for the first qcommon dedup cohort. The engine variants
+# must consume one shared vendor-material archive while extract-meta retains
+# its curated, tool-private LZ4 compilation. Reading compile_commands makes an
+# accidental source re-addition to qcommon/qcommon_ded a test failure rather
+# than a silent cost regression.
+ADD_TEST(NAME qcommon_shared_graph_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DCOMPILE_COMMANDS=${CMAKE_BINARY_DIR}/compile_commands.json
+		-DSHARED_MANIFEST=${CMAKE_BINARY_DIR}/qcommon_engine_shared_sources.txt
+		-DVARIANT_MANIFEST=${CMAKE_BINARY_DIR}/qcommon_engine_variant_sources.txt
+		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/qcommon_shared_graph_check.cmake
+)
+SET_TESTS_PROPERTIES(qcommon_shared_graph_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.build;failure.build-graph"
+	TIMEOUT 90
+)
 
 FUNCTION(WIRED_CONFIGURE_HOST_TEST target test_name)
 	ADD_DEPENDENCIES(host_tests ${target})
@@ -445,6 +549,97 @@ SET_TESTS_PROPERTIES(server_info_parse_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(server_info_parse_test server_info_parse_contract)
 
+# Browser challenge derivation.  Compiles the exact production helper and pins
+# generation freshness even when the platform RNG repeats identical bytes.
+ADD_EXECUTABLE(cl_info_challenge_test
+	tests/cl_info_challenge_test.c
+	code/client/cl_info_challenge.c
+)
+TARGET_INCLUDE_DIRECTORIES(cl_info_challenge_test PRIVATE code/client)
+ADD_TEST(NAME cl_info_challenge_contract COMMAND cl_info_challenge_test)
+SET_TESTS_PROPERTIES(cl_info_challenge_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-client;failure.security-contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(cl_info_challenge_test cl_info_challenge_contract)
+
+# Directed-ping queue reuse policy. Compiles the exact dependency-free
+# production selector used by the client allocator: a >=500ms valid completed
+# result stays retained while a free slot exists, is reclaimed before a live
+# request under saturation, and an all-live saturated queue evicts oldest.
+ADD_EXECUTABLE(cl_ping_queue_test
+	tests/cl_ping_queue_test.c
+	code/client/cl_ping_queue.c
+)
+TARGET_INCLUDE_DIRECTORIES(cl_ping_queue_test PRIVATE code/client)
+ADD_TEST(NAME cl_ping_queue_contract COMMAND cl_ping_queue_test)
+SET_TESTS_PROPERTIES(cl_ping_queue_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(cl_ping_queue_test cl_ping_queue_contract)
+
+# Ping transaction ownership. Compiles the exact dependency-free production
+# seam that keeps direct/local/global/favorites consumers and cache effects
+# source-scoped while the existing queue capacity remains shared.
+ADD_EXECUTABLE(cl_ping_owner_test
+	tests/cl_ping_owner_test.c
+	code/client/cl_ping_owner.c
+)
+TARGET_INCLUDE_DIRECTORIES(cl_ping_owner_test PRIVATE code/client)
+ADD_TEST(NAME cl_ping_owner_contract COMMAND cl_ping_owner_test)
+SET_TESTS_PROPERTIES(cl_ping_owner_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(cl_ping_owner_test cl_ping_owner_contract)
+
+# Current-protocol demo framing.  The exact production reader distinguishes
+# the canonical <-1,-1> terminator from truncated/invalid envelopes and never
+# publishes a partial frame on rejection.
+ADD_EXECUTABLE(cl_demo_frame_test
+	tests/cl_demo_frame_test.c
+	code/client/cl_demo_frame.c
+	code/qcommon/huffman_static.c
+)
+TARGET_INCLUDE_DIRECTORIES(cl_demo_frame_test PRIVATE code/client code/qcommon)
+ADD_TEST(NAME cl_demo_frame_contract COMMAND cl_demo_frame_test)
+SET_TESTS_PROPERTIES(cl_demo_frame_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-client;failure.security-contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(cl_demo_frame_test cl_demo_frame_contract)
+
+# Local bot-slot allocation identity. Compiles the exact production parser and
+# match seam so a queued removal cannot authorize a replacement bot in a reused
+# physical client slot.
+ADD_EXECUTABLE(bot_slot_identity_test
+	tests/bot_slot_identity_test.c
+	code/server/sv_bot_identity.c
+)
+TARGET_INCLUDE_DIRECTORIES(bot_slot_identity_test PRIVATE code/server)
+ADD_TEST(NAME bot_slot_identity_contract COMMAND bot_slot_identity_test)
+SET_TESTS_PROPERTIES(bot_slot_identity_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-server;failure.security-contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(bot_slot_identity_test bot_slot_identity_contract)
+
+# Public VM interpretation semantics. Compiles the exact dependency-free
+# production policy consumed by VM_Create: BYTECODE is .wasm-only, COMPILED is
+# .aot then .wasm, and NATIVE is DLL then compiled-WASM fallback.
+ADD_EXECUTABLE(vm_interpret_policy_test
+	tests/vm_interpret_policy_test.c
+	code/qcommon/vm_interpret_policy.c
+)
+TARGET_INCLUDE_DIRECTORIES(vm_interpret_policy_test PRIVATE code/qcommon)
+ADD_TEST(NAME vm_interpret_policy_contract COMMAND vm_interpret_policy_test)
+SET_TESTS_PROPERTIES(vm_interpret_policy_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.wired-vm;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(vm_interpret_policy_test vm_interpret_policy_contract)
+
 # Typed cvar lexical/range ingress. Compiles the exact dependency-free
 # production seam used by qcommon and qcommon_ded; rejection must be byte-atomic.
 ADD_EXECUTABLE(cvar_value_test
@@ -490,18 +685,17 @@ ENDIF()
 # (the Lua VM) — scene definitions are Lua like the rest of Wired content. The
 # luajit include dir + link for qcommon/qcommon_ded are set with WiredScript's.
 FILE(GLOB WIRED_SCENE_SRCS code/qcommon/wired/scene/*.c)
-TARGET_SOURCES(qcommon     PRIVATE ${WIRED_SCENE_SRCS})
-TARGET_SOURCES(qcommon_ded PRIVATE ${WIRED_SCENE_SRCS})
+WIRED_ROUTE_QCOMMON_SOURCES(${WIRED_SCENE_SRCS})
 
 # The wired_scene Lua-loader unit test links LuaJIT, so its target is defined
 # in the IF(USE_LUA) block below (after LUAJIT_DIR / the luajit target exist).
 
 # util/ — utility sub-components (crypto, md5, md4; string/sort/hash extraction TBD)
 FILE(GLOB UTIL_SRCS code/qcommon/util/*.c)
-TARGET_SOURCES(qcommon     PRIVATE ${UTIL_SRCS})
-TARGET_SOURCES(qcommon_ded PRIVATE ${UTIL_SRCS})
+WIRED_ROUTE_QCOMMON_SOURCES(${UTIL_SRCS})
 TARGET_INCLUDE_DIRECTORIES(qcommon     PRIVATE code/qcommon/util)
 TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE code/qcommon/util)
+TARGET_INCLUDE_DIRECTORIES(qcommon_engine_shared PRIVATE code/qcommon/util)
 TARGET_INCLUDE_DIRECTORIES(botlib      PRIVATE code/qcommon/util)
 
 # ── zlib-ng (faster inflate for pk3 decompression) ────────────────
@@ -518,11 +712,16 @@ IF(USE_ZLIB_NG)
     TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/libs/zlib-ng
         ${CMAKE_CURRENT_BINARY_DIR}/src/libs/zlib-ng)
+    TARGET_INCLUDE_DIRECTORIES(qcommon_engine_shared PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/libs/zlib-ng
+        ${CMAKE_CURRENT_BINARY_DIR}/src/libs/zlib-ng)
     TARGET_LINK_LIBRARIES(qcommon     PRIVATE zlibstatic)
     TARGET_LINK_LIBRARIES(qcommon_ded PRIVATE zlibstatic)
+    TARGET_LINK_LIBRARIES(qcommon_engine_shared PRIVATE zlibstatic)
 ELSE()
     TARGET_COMPILE_DEFINITIONS(qcommon     PRIVATE FEAT_LEGACY_ZLIB)
     TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE FEAT_LEGACY_ZLIB)
+    TARGET_COMPILE_DEFINITIONS(qcommon_engine_shared PRIVATE FEAT_LEGACY_ZLIB)
 ENDIF()
 
 # WAMR (WebAssembly Micro Runtime) for WASM VM backend
@@ -568,11 +767,13 @@ IF(USE_WASM)
 	ENDIF()
 	TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE src/libs/wamr/core/iwasm/include)
 	TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE src/libs/wamr/core/iwasm/include)
+	TARGET_INCLUDE_DIRECTORIES(qcommon_engine_shared PRIVATE src/libs/wamr/core/iwasm/include)
 ENDIF()
 
 IF(NO_VM_COMPILED)
 	TARGET_COMPILE_DEFINITIONS(qcommon PRIVATE NO_VM_COMPILED)
 	TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE NO_VM_COMPILED)
+	TARGET_COMPILE_DEFINITIONS(qcommon_engine_shared PRIVATE NO_VM_COMPILED)
 ENDIF()
 
 # ── WiredNet ──────────────────────────────────────────────────────
@@ -709,7 +910,7 @@ FILE(GLOB MPACK_SRCS    src/libs/mpack/src/mpack/*.c)
 # wired/net module — WiredNet transport layer
 FILE(GLOB WN_SRCS code/qcommon/wired/net/*.c)
 
-SET(WIREDNET_ALL_SRCS ${PICOQUIC_SRCS} ${PICOTLS_SRCS} ${MPACK_SRCS} ${WN_SRCS})
+SET(WIREDNET_MATERIAL_SRCS ${PICOQUIC_SRCS} ${PICOTLS_SRCS} ${MPACK_SRCS})
 
 # MinGW: MinGW's <inttypes.h> defines imaxabs via __CRT_INLINE which under
 # strict -std=c11 expands to extern inline (strong symbol per TU) instead of
@@ -734,12 +935,19 @@ SET(WIREDNET_INCLUDE_DIRS
 # OpenSSL (required by picotls for crypto primitives)
 FIND_PACKAGE(OpenSSL REQUIRED)
 
-# Add to qcommon (client) and qcommon_ded (headless server)
-TARGET_SOURCES(qcommon PRIVATE ${WIREDNET_ALL_SRCS})
+# Vendor transport material has no qcommon or HEADLESS dependency. Compile it
+# once beside LZ4; keep WiredNet's WN_* integration translation units variant-
+# local because they do consume client/server compile-time policy.
+WIRED_ROUTE_QCOMMON_SOURCES(${WIREDNET_MATERIAL_SRCS})
+TARGET_INCLUDE_DIRECTORIES(qcommon_engine_shared PRIVATE ${WIREDNET_INCLUDE_DIRS})
+TARGET_LINK_LIBRARIES(qcommon_engine_shared PUBLIC OpenSSL::Crypto)
+
+# Add the WiredNet integration layer to qcommon (client) and qcommon_ded
+# (headless server).
+WIRED_ROUTE_QCOMMON_SOURCES(${WN_SRCS})
 TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE ${WIREDNET_INCLUDE_DIRS})
 TARGET_LINK_LIBRARIES(qcommon PRIVATE OpenSSL::Crypto)
 
-TARGET_SOURCES(qcommon_ded PRIVATE ${WIREDNET_ALL_SRCS})
 TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE ${WIREDNET_INCLUDE_DIRS})
 TARGET_LINK_LIBRARIES(qcommon_ded PRIVATE OpenSSL::Crypto)
 
@@ -794,14 +1002,15 @@ ELSE()
 	SET_SOURCE_FILES_PROPERTIES(${NAV_CPP_SRCS} PROPERTIES
 		COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-exceptions;-fno-rtti>")
 
-	TARGET_SOURCES(qcommon     PRIVATE ${NAV_CPP_SRCS} ${NAV_C_SRCS})
-	TARGET_SOURCES(qcommon_ded PRIVATE ${NAV_CPP_SRCS} ${NAV_C_SRCS})
+	WIRED_ROUTE_QCOMMON_SOURCES(${NAV_CPP_SRCS} ${NAV_C_SRCS})
 
 	TARGET_INCLUDE_DIRECTORIES(qcommon     PRIVATE ${RECAST_INCLUDE_DIRS})
 	TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE ${RECAST_INCLUDE_DIRS})
+	TARGET_INCLUDE_DIRECTORIES(qcommon_engine_shared PRIVATE ${RECAST_INCLUDE_DIRS})
 
 	TARGET_LINK_LIBRARIES(qcommon     PRIVATE recast_nav)
 	TARGET_LINK_LIBRARIES(qcommon_ded PRIVATE recast_nav)
+	TARGET_LINK_LIBRARIES(qcommon_engine_shared PRIVATE recast_nav)
 
 	IF(BUILD_TESTING)
 		# Unit test — direct axis/handedness contract plus round-trip identity.
@@ -1385,6 +1594,7 @@ ELSE()
 ENDIF()
 
 ADD_EXECUTABLE(${CNAME}${BINEXT} ${_CLIENT_EXE_TYPE} ${Q3_SRCS})
+TARGET_SOURCES(${CNAME}${BINEXT} PRIVATE $<TARGET_OBJECTS:qcommon_engine_shared>)
 TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} qcommon botlib client windowSystem opusfile)
 IF(WIN32)
 	# Client adds the AttachConsole shim (phase 2 of Windows-console
@@ -1415,6 +1625,7 @@ ENDIF()
 # headless server executable
 
 ADD_EXECUTABLE(${DNAME}${BINEXT} ${_DED_EXE_TYPE} ${Q3_SRCS})
+TARGET_SOURCES(${DNAME}${BINEXT} PRIVATE $<TARGET_OBJECTS:qcommon_engine_shared>)
 TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} qcommon_ded botlib)
 # Headless uses the same win_syscon.c (in Q3_SRCS) as client; the
 # Sys_ConsoleInput stdin reader path is gated #ifdef HEADLESS so only
@@ -1479,12 +1690,12 @@ IF(USE_LUA)
 
 	# Headless Lua runtime lives in qcommon/wired/core/scripting/ — used by both client and headless server
 	AUX_SOURCE_DIRECTORY(code/qcommon/wired/core/scripting QCOMMON_SCRIPTING_SRCS)
-	TARGET_SOURCES(qcommon PRIVATE ${QCOMMON_SCRIPTING_SRCS})
-	TARGET_SOURCES(qcommon_ded PRIVATE ${QCOMMON_SCRIPTING_SRCS})
+	WIRED_ROUTE_QCOMMON_SOURCES(${QCOMMON_SCRIPTING_SRCS})
 
 	# LuaJIT headers needed by qcommon (both targets) and client
 	TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE ${LUAJIT_DIR}/src)
 	TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE ${LUAJIT_DIR}/src)
+	TARGET_INCLUDE_DIRECTORIES(qcommon_engine_shared PRIVATE ${LUAJIT_DIR}/src)
 	TARGET_INCLUDE_DIRECTORIES(client PRIVATE ${LUAJIT_DIR}/src)
 
 	# Link LuaJIT to both client and headless server executables
@@ -1732,6 +1943,7 @@ IF(BUILD_GAME_LIBRARIES)
 	STRING(TIMESTAMP Q3NOW_GAMEDATE "%b %d %Y" UTC)
 	TARGET_COMPILE_DEFINITIONS(qcommon PRIVATE Q3NOW_GAMEDATE="${Q3NOW_GAMEDATE}")
 	TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE Q3NOW_GAMEDATE="${Q3NOW_GAMEDATE}")
+	TARGET_COMPILE_DEFINITIONS(qcommon_engine_shared PRIVATE Q3NOW_GAMEDATE="${Q3NOW_GAMEDATE}")
 	TARGET_COMPILE_DEFINITIONS(client PRIVATE Q3NOW_GAMEDATE="${Q3NOW_GAMEDATE}")
 	# Per-build stamp values, computed BEFORE basegame so the game VM targets
 	# (gamecl/gamesv native + WASM, stamped in basegame.cmake) see the same id/date
@@ -1779,5 +1991,30 @@ IF(CLANG_FORMAT_EXE)
 		VERBATIM
 	)
 ENDIF()
+
+# Materialize the exact engine partition after every conditional source cohort
+# has been routed. qcommon_shared_graph_contract consumes these configure-time
+# manifests and rejects missing, duplicated, or mis-owned compile edges.
+GET_PROPERTY(_QCOMMON_SHARED_MANIFEST GLOBAL PROPERTY QCOMMON_SHARED_SOURCE_INVENTORY)
+GET_PROPERTY(_QCOMMON_VARIANT_MANIFEST GLOBAL PROPERTY QCOMMON_VARIANT_SOURCE_INVENTORY)
+LIST(REMOVE_DUPLICATES _QCOMMON_SHARED_MANIFEST)
+LIST(REMOVE_DUPLICATES _QCOMMON_VARIANT_MANIFEST)
+FOREACH(_manifest_kind SHARED VARIANT)
+	SET(_manifest_values ${_QCOMMON_${_manifest_kind}_MANIFEST})
+	IF(_manifest_kind STREQUAL "SHARED")
+		SET(_manifest_path "${CMAKE_BINARY_DIR}/qcommon_engine_shared_sources.txt")
+	ELSE()
+		SET(_manifest_path "${CMAKE_BINARY_DIR}/qcommon_engine_variant_sources.txt")
+	ENDIF()
+	FILE(WRITE "${_manifest_path}" "")
+	FOREACH(_manifest_src IN LISTS _manifest_values)
+		IF(IS_ABSOLUTE "${_manifest_src}")
+			SET(_manifest_abs "${_manifest_src}")
+		ELSE()
+			SET(_manifest_abs "${CMAKE_SOURCE_DIR}/${_manifest_src}")
+		ENDIF()
+		FILE(APPEND "${_manifest_path}" "${_manifest_abs}\n")
+	ENDFOREACH()
+ENDFOREACH()
 
 ADD_SUBDIRECTORY(tools/extract-meta)

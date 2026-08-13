@@ -3,7 +3,8 @@
 // Selected-server detail popup. Phase 5a §7.3 pattern: a popup-style
 // modal with a label-and-value table sourced from the SERVERSTATUS
 // feeder (feeder 13 in legacy, feeder "serverstatus" symbolic).
-// Triggered from servers.wui's Server Info footer button.
+// Triggered from the browser or from an active network match.  Connected-origin
+// opens hide browser-only navigation/actions in product code.
 
 menuDef {
 	name "serverinfo"
@@ -55,7 +56,7 @@ menuDef {
 				type 0
 				rect 0 0 1 0.03
 				height FIT
-				text "Status / map / players / version (live from selected server)"
+				text "Status / map / players / version (live server query)"
 				textalign 0
 				font $font_mono 11
 				forecolor $boneDim

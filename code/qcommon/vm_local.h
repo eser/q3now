@@ -72,6 +72,8 @@ struct vm_s {
 	void		*owner;				// app-instance handle for the multi-client per-app VM model;
 									// consumed since 5.2.2.3 by the owner-guarded dedup in VM_Create
 									// (zero-initialized by the VM_Create/VM_Free memset path).
+	vmInterpret_t requestedInterpret;	// caller policy at VM_Create entry
+	vmInterpret_t effectiveInterpret;	// live backend policy; restart authority
 
 	// for dynamic linked modules
 	void		*dllHandle;
@@ -133,7 +135,7 @@ struct vm_s {
 
 
 #if FEAT_WASM
-qboolean VM_WasmLoad( vm_t *vm );
+qboolean VM_WasmLoad( vm_t *vm, qboolean allowAot );
 int32_t VM_CallWasm( vm_t *vm, int nargs, int32_t *args );
 void VM_WasmDestroy( vm_t *vm );
 #endif

@@ -10,6 +10,7 @@ cl_wired_feeders.c — Wired UI feeder implementations
 #include "cl_wired_ui_hud_state.h"
 #include "../../../qcommon/menudef.h"
 #include "../../../qcommon/maps/meta.h"
+#include <inttypes.h>
 LOG_DECLARE_CHANNEL( ch_ui, "ui" );
 
 #if FEAT_WIRED_UI
@@ -541,6 +542,15 @@ typedef enum {
 static wiredServerStatusState_t wui_serverStatusState = WIRED_SERVERSTATUS_IDLE;
 static unsigned int wui_serverStatusStartTime = 0;
 static char wui_serverStatusAddress[MAX_STRING_CHARS];
+typedef enum {
+	WIRED_SERVERSTATUS_ORIGIN_NONE = 0,
+	WIRED_SERVERSTATUS_ORIGIN_BROWSER,
+	WIRED_SERVERSTATUS_ORIGIN_CONNECTED
+} wiredServerStatusOrigin_t;
+static wiredServerStatusOrigin_t wui_serverStatusOrigin = WIRED_SERVERSTATUS_ORIGIN_NONE;
+static uint64_t wui_serverStatusOwnerGeneration = 0;
+static netadr_t wui_serverStatusConnectedAddress;
+static conn_handle_t wui_serverStatusConnectedHandle = CONN_INVALID;
 
 static void WiredFeeder_AddStatusRow( const char *key, const char *value ) {
 	wiredServerStatusRow_t *row;
@@ -791,35 +801,106 @@ static const char *WiredFeeder_ServerStatusItemText( int feederID, int index, in
 	return "";
 }
 
-qboolean WiredFeeder_ServerStatusBegin( void ) {
-	char currentAddress[MAX_STRING_CHARS];
+static qboolean WiredFeeder_ServerStatusStart( const char *currentAddress ) {
 	char response[BIG_INFO_STRING];
-	if ( !WiredFeeder_GetSelectedServerAddress( currentAddress, sizeof( currentAddress ) ) ) {
-		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: server status refused without current selection\n" );
-		return qfalse;
-	}
 	if ( wui_serverStatusAddress[0] ) {
 		CL_ServerStatus( wui_serverStatusAddress, NULL, 0 );
 	}
 	CL_ServerStatus( currentAddress, NULL, 0 );
 	wui_serverStatusGeneration++;
-	wui_serverStatusSelectionGeneration = wui_serverSelectionGeneration;
 	wui_serverStatusRowCount = 0;
 	wui_serverStatusState = WIRED_SERVERSTATUS_PENDING;
 	wui_serverStatusStartTime = (unsigned int)Sys_Milliseconds();
 	Q_strncpyz( wui_serverStatusAddress, currentAddress, sizeof( wui_serverStatusAddress ) );
 	WiredFeeder_AddStatusRow( "Status", "Contacting server..." );
 	(void) CL_ServerStatus( wui_serverStatusAddress, response, sizeof( response ) );
-	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
-		"WiredUI: server status request generation=%d selection_generation=%d address=%s\n",
-		wui_serverStatusGeneration, wui_serverStatusSelectionGeneration, wui_serverStatusAddress );
-	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
-		"WiredUI: server status state=pending generation=%d selection_generation=%d address=%s rows=1\n",
-		wui_serverStatusGeneration, wui_serverStatusSelectionGeneration, wui_serverStatusAddress );
+	if ( wui_serverStatusOrigin == WIRED_SERVERSTATUS_ORIGIN_CONNECTED ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: connected server status request generation=%d owner_generation=%" PRIu64 " address=%s\n",
+			wui_serverStatusGeneration, wui_serverStatusOwnerGeneration,
+			wui_serverStatusAddress );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: connected server status state=pending generation=%d owner_generation=%" PRIu64 " address=%s rows=1\n",
+			wui_serverStatusGeneration, wui_serverStatusOwnerGeneration,
+			wui_serverStatusAddress );
+	} else {
+		/* Browser-origin marker ABI is consumed by the existing browser gates. */
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: server status request generation=%d selection_generation=%d address=%s\n",
+			wui_serverStatusGeneration, wui_serverStatusSelectionGeneration, wui_serverStatusAddress );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: server status state=pending generation=%d selection_generation=%d address=%s rows=1\n",
+			wui_serverStatusGeneration, wui_serverStatusSelectionGeneration, wui_serverStatusAddress );
+	}
 	return qtrue;
 }
 
+qboolean WiredFeeder_ServerStatusBegin( void ) {
+	char currentAddress[MAX_STRING_CHARS];
+	if ( !WiredFeeder_GetSelectedServerAddress( currentAddress, sizeof( currentAddress ) ) ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: server status refused without current selection\n" );
+		return qfalse;
+	}
+	wui_serverStatusOrigin = WIRED_SERVERSTATUS_ORIGIN_BROWSER;
+	wui_serverStatusSelectionGeneration = wui_serverSelectionGeneration;
+	wui_serverStatusOwnerGeneration = 0;
+	memset( &wui_serverStatusConnectedAddress, 0, sizeof( wui_serverStatusConnectedAddress ) );
+	wui_serverStatusConnectedHandle = CONN_INVALID;
+	return WiredFeeder_ServerStatusStart( currentAddress );
+}
+
+qboolean WiredFeeder_ServerStatusBeginConnected( void ) {
+	const netadr_t *activeAddress;
+	char currentAddress[MAX_STRING_CHARS];
+
+	if ( !clientActiveApp || clientActiveApp->state != CA_ACTIVE
+	     || clientActiveApp->clc.demoplaying
+	     || clientActiveApp->clc.serverAddress.type == NA_BAD
+	     || clientActiveApp->clc.quic_conn == CONN_INVALID
+	     || clientActiveApp->connectionGeneration == 0 ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: connected server status refused without active network connection\n" );
+		return qfalse;
+	}
+	activeAddress = &clientActiveApp->clc.serverAddress;
+	Q_strncpyz( currentAddress, NET_AdrToStringwPort( activeAddress ), sizeof( currentAddress ) );
+	if ( !currentAddress[0] ) return qfalse;
+
+	wui_serverStatusOrigin = WIRED_SERVERSTATUS_ORIGIN_CONNECTED;
+	wui_serverStatusOwnerGeneration = clientActiveApp->connectionGeneration;
+	wui_serverStatusConnectedAddress = *activeAddress;
+	wui_serverStatusConnectedHandle = clientActiveApp->clc.quic_conn;
+	wui_serverStatusSelectionGeneration = -1;
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: connected server status open owner_generation=%" PRIu64 " address=%s\n",
+		wui_serverStatusOwnerGeneration, currentAddress );
+	return WiredFeeder_ServerStatusStart( currentAddress );
+}
+
 qboolean WiredFeeder_ServerStatusRetry( void ) {
+	if ( wui_serverStatusOrigin == WIRED_SERVERSTATUS_ORIGIN_CONNECTED ) {
+		char currentAddress[MAX_STRING_CHARS];
+		if ( !clientActiveApp || clientActiveApp->state != CA_ACTIVE
+		     || clientActiveApp->clc.demoplaying
+		     || clientActiveApp->clc.quic_conn == CONN_INVALID
+		     || clientActiveApp->clc.quic_conn != wui_serverStatusConnectedHandle
+		     || clientActiveApp->connectionGeneration != wui_serverStatusOwnerGeneration
+		     || !NET_CompareAdr( &wui_serverStatusConnectedAddress,
+			&clientActiveApp->clc.serverAddress ) ) {
+			Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+				"WiredUI: connected server status retry refused owner_generation=%" PRIu64 " reason=stale-connection\n",
+				wui_serverStatusOwnerGeneration );
+			WiredFeeder_ServerStatusCancel();
+			WiredUI_PopMenu();
+			return qfalse;
+		}
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: connected server status retry owner_generation=%" PRIu64 " prior_generation=%d address=%s\n",
+			wui_serverStatusOwnerGeneration, wui_serverStatusGeneration,
+			wui_serverStatusAddress );
+		Q_strncpyz( currentAddress, wui_serverStatusAddress, sizeof( currentAddress ) );
+		return WiredFeeder_ServerStatusStart( currentAddress );
+	}
 	return WiredFeeder_ServerStatusBegin();
 }
 
@@ -828,15 +909,36 @@ void WiredFeeder_ServerStatusPoll( void ) {
 	char response[BIG_INFO_STRING];
 	const char *failureReason = NULL;
 	if ( wui_serverStatusState != WIRED_SERVERSTATUS_PENDING ) return;
-	if ( !WiredFeeder_GetSelectedServerAddress( currentAddress, sizeof( currentAddress ) )
-	     || wui_serverStatusSelectionGeneration != wui_serverSelectionGeneration
-	     || Q_stricmp( wui_serverStatusAddress, currentAddress ) ) {
+	if ( wui_serverStatusOrigin == WIRED_SERVERSTATUS_ORIGIN_CONNECTED ) {
+		if ( !clientActiveApp || clientActiveApp->state != CA_ACTIVE
+		     || clientActiveApp->clc.demoplaying
+		     || clientActiveApp->clc.quic_conn == CONN_INVALID
+		     || clientActiveApp->clc.quic_conn != wui_serverStatusConnectedHandle
+		     || clientActiveApp->connectionGeneration != wui_serverStatusOwnerGeneration
+		     || !NET_CompareAdr( &wui_serverStatusConnectedAddress,
+			&clientActiveApp->clc.serverAddress ) ) {
+			Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+				"WiredUI: connected server status invalidated owner_generation=%" PRIu64 " reason=stale-connection\n",
+				wui_serverStatusOwnerGeneration );
+			WiredFeeder_ServerStatusCancel();
+			WiredUI_PopMenu();
+			return;
+		}
+	} else if ( !WiredFeeder_GetSelectedServerAddress( currentAddress, sizeof( currentAddress ) )
+	            || wui_serverStatusSelectionGeneration != wui_serverSelectionGeneration
+	            || Q_stricmp( wui_serverStatusAddress, currentAddress ) ) {
 		WiredFeeder_ServerStatusCancel();
 		return;
 	}
 	if ( CL_ServerStatus( wui_serverStatusAddress, response, sizeof( response ) ) ) {
 		if ( WiredFeeder_ParseServerStatus( response, &failureReason ) ) {
 			wui_serverStatusState = WIRED_SERVERSTATUS_READY;
+			if ( wui_serverStatusOrigin == WIRED_SERVERSTATUS_ORIGIN_CONNECTED ) {
+				Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+					"WiredUI: connected server status ready generation=%d owner_generation=%" PRIu64 " address=%s rows=%d\n",
+					wui_serverStatusGeneration, wui_serverStatusOwnerGeneration,
+					wui_serverStatusAddress, wui_serverStatusRowCount );
+			}
 		} else {
 			CL_ServerStatus( wui_serverStatusAddress, NULL, 0 );
 			WiredFeeder_ServerStatusFail( WIRED_SERVERSTATUS_MALFORMED,
@@ -852,6 +954,12 @@ void WiredFeeder_ServerStatusPoll( void ) {
 }
 
 void WiredFeeder_ServerStatusCancel( void ) {
+	if ( wui_serverStatusOrigin == WIRED_SERVERSTATUS_ORIGIN_CONNECTED ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+			"WiredUI: connected server status cancel owner_generation=%" PRIu64 " generation=%d address=%s\n",
+			wui_serverStatusOwnerGeneration, wui_serverStatusGeneration,
+			wui_serverStatusAddress[0] ? wui_serverStatusAddress : "none" );
+	}
 	if ( wui_serverStatusAddress[0] ) {
 		CL_ServerStatus( wui_serverStatusAddress, NULL, 0 );
 	}
@@ -861,8 +969,48 @@ void WiredFeeder_ServerStatusCancel( void ) {
 	wui_serverStatusRowCount = 0;
 	wui_serverStatusSelectionGeneration = -1;
 	wui_serverStatusAddress[0] = '\0';
+	wui_serverStatusOrigin = WIRED_SERVERSTATUS_ORIGIN_NONE;
+	wui_serverStatusOwnerGeneration = 0;
+	memset( &wui_serverStatusConnectedAddress, 0, sizeof( wui_serverStatusConnectedAddress ) );
+	wui_serverStatusConnectedHandle = CONN_INVALID;
 	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
 		"WiredUI: server status cancelled generation=%d rows=0\n", wui_serverStatusGeneration );
+}
+
+void WiredFeeder_ServerStatusCancelForCloseAll( void ) {
+	const char *state;
+
+	switch ( wui_serverStatusState ) {
+	case WIRED_SERVERSTATUS_PENDING: state = "pending"; break;
+	case WIRED_SERVERSTATUS_READY: state = "ready"; break;
+	case WIRED_SERVERSTATUS_NO_RESPONSE: state = "no-response"; break;
+	case WIRED_SERVERSTATUS_MALFORMED: state = "malformed"; break;
+	case WIRED_SERVERSTATUS_IDLE:
+	default: state = "idle"; break;
+	}
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: server status dispose reason=close-all prior_state=%s generation=%d selection_generation=%d address=%s\n",
+		state, wui_serverStatusGeneration, wui_serverStatusSelectionGeneration,
+		wui_serverStatusAddress[0] ? wui_serverStatusAddress : "none" );
+	WiredFeeder_ServerStatusCancel();
+}
+
+void WiredFeeder_ServerStatusTrace( void ) {
+	const char *state;
+
+	switch ( wui_serverStatusState ) {
+	case WIRED_SERVERSTATUS_PENDING: state = "pending"; break;
+	case WIRED_SERVERSTATUS_READY: state = "ready"; break;
+	case WIRED_SERVERSTATUS_NO_RESPONSE: state = "no-response"; break;
+	case WIRED_SERVERSTATUS_MALFORMED: state = "malformed"; break;
+	case WIRED_SERVERSTATUS_IDLE:
+	default: state = "idle"; break;
+	}
+	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
+		"WiredUI: server status snapshot state=%s generation=%d selection_generation=%d address=%s count=%d\n",
+		state, wui_serverStatusGeneration, wui_serverStatusSelectionGeneration,
+		wui_serverStatusAddress[0] ? wui_serverStatusAddress : "none",
+		wui_serverStatusRowCount );
 }
 
 // ── demo feeder ───────────────────────────────────────────────────────
@@ -1450,30 +1598,34 @@ static void WiredFeeder_PlayerSelection( int feederID, int index ) {
 }
 
 // ── bot-only feeder (FEEDER_BOTS) ────────────────────────────────────
-// Presentation authority comes from the game-owned CS_PLAYERS `skill` key.
-// The final removal authority remains the server's execution-time NA_BOT check
-// in `botkick`; this client model exists to keep humans out of Remove Bot UI.
+// Presentation authority starts with the game-owned CS_PLAYERS `skill` key,
+// then binds the row to one atomic server snapshot. Final removal authority is
+// the server's execution-time NA_BOT + allocation-id recheck in `botkick`.
 
 typedef struct {
-	int  clientNum;
-	char name[MAX_NAME_LENGTH];
+	int      clientNum;
+	uint64_t allocationId;
+	char     name[MAX_NAME_LENGTH];
 } wuiBotRow_t;
 
 static wuiBotRow_t wui_botRows[MAX_CLIENTS];
 static int         wui_botRowCount;
 static int         wui_botRosterGeneration;
 static int         wui_botSelectedClient = -1;
+static uint64_t    wui_botSelectedAllocationId;
 static int         wui_botSelectionGeneration = -1;
 static char        wui_botSelectedName[MAX_NAME_LENGTH];
 
-static qboolean WiredFeeder_ClientBotInfo( int clientNum, char *name, int nameSize ) {
+static qboolean WiredFeeder_ClientBotInfo( int clientNum, wuiBotRow_t *row ) {
 	int ofs;
 	const char *info;
 	const char *skill;
 	const char *displayName;
+	svBotIdentitySnapshot_t serverIdentity = { 0 };
+	wuiBotRow_t verified = { 0 };
 	float skillValue;
 
-	if ( !clientActiveApp || clientActiveApp->state < CA_PRIMED ) return qfalse;
+	if ( !row || !clientActiveApp || clientActiveApp->state < CA_PRIMED ) return qfalse;
 	if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) return qfalse;
 	ofs = clientActiveApp->cl.gameState.stringOffsets[CS_PLAYERS + clientNum];
 	if ( ofs <= 0 ) return qfalse;
@@ -1484,9 +1636,14 @@ static qboolean WiredFeeder_ClientBotInfo( int clientNum, char *name, int nameSi
 	if ( skillValue < 1.0f || skillValue > 5.0f ) return qfalse;
 
 	displayName = Info_ValueForKey( info, "n" );
-	if ( name && nameSize > 0 ) {
-		Q_strncpyz( name, ( displayName && displayName[0] ) ? displayName : "???", nameSize );
-	}
+	if ( !displayName || !displayName[0]
+	  || !SV_BotIdentityForClient( clientNum, &serverIdentity )
+	  || serverIdentity.clientNum != clientNum
+	  || Q_stricmp( displayName, serverIdentity.name ) != 0 ) return qfalse;
+	verified.clientNum = clientNum;
+	verified.allocationId = serverIdentity.allocationId;
+	Q_strncpyz( verified.name, displayName, sizeof( verified.name ) );
+	*row = verified;
 	return qtrue;
 }
 
@@ -1497,16 +1654,17 @@ static void WiredFeeder_RefreshBotRows( void ) {
 	memset( next, 0, sizeof( next ) );
 
 	for ( int clientNum = 0; clientNum < MAX_CLIENTS; clientNum++ ) {
-		char name[MAX_NAME_LENGTH];
-		if ( !WiredFeeder_ClientBotInfo( clientNum, name, sizeof( name ) ) ) continue;
-		next[nextCount].clientNum = clientNum;
-		Q_strncpyz( next[nextCount].name, name, sizeof( next[nextCount].name ) );
+		wuiBotRow_t verified = { 0 };
+		if ( !WiredFeeder_ClientBotInfo( clientNum, &verified ) ) continue;
+		next[nextCount] = verified;
 		nextCount++;
 	}
 
 	changed = ( nextCount != wui_botRowCount );
-	if ( !changed && nextCount > 0 ) {
-		changed = ( memcmp( next, wui_botRows, (size_t)nextCount * sizeof( next[0] ) ) != 0 );
+	for ( int i = 0; !changed && i < nextCount; i++ ) {
+		changed = next[i].clientNum != wui_botRows[i].clientNum
+			|| next[i].allocationId != wui_botRows[i].allocationId
+			|| Q_stricmp( next[i].name, wui_botRows[i].name ) != 0;
 	}
 	if ( !changed ) return;
 
@@ -1514,6 +1672,7 @@ static void WiredFeeder_RefreshBotRows( void ) {
 	wui_botRowCount = nextCount;
 	wui_botRosterGeneration++;
 	wui_botSelectedClient = -1;
+	wui_botSelectedAllocationId = 0;
 	wui_botSelectionGeneration = -1;
 	wui_botSelectedName[0] = '\0';
 	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
@@ -1523,6 +1682,7 @@ static void WiredFeeder_RefreshBotRows( void ) {
 
 void WiredFeeder_ClearBotSelection( void ) {
 	wui_botSelectedClient = -1;
+	wui_botSelectedAllocationId = 0;
 	wui_botSelectionGeneration = -1;
 	wui_botSelectedName[0] = '\0';
 }
@@ -1546,23 +1706,36 @@ static void WiredFeeder_BotSelection( int feederID, int index ) {
 		return;
 	}
 	wui_botSelectedClient = wui_botRows[index].clientNum;
+	wui_botSelectedAllocationId = wui_botRows[index].allocationId;
 	wui_botSelectionGeneration = wui_botRosterGeneration;
 	Q_strncpyz( wui_botSelectedName, wui_botRows[index].name, sizeof( wui_botSelectedName ) );
 	Q_strncpyz( cleanName, wui_botSelectedName, sizeof( cleanName ) );
 	Q_CleanStr( cleanName );
 	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
-		"WiredUI: bot feeder selection row=%d client=%d generation=%d name=%s\n",
-		index, wui_botSelectedClient, wui_botSelectionGeneration, cleanName );
+		"WiredUI: bot feeder selection row=%d client=%d allocation=%" PRIu64 " generation=%d name=%s\n",
+		index, wui_botSelectedClient, wui_botSelectedAllocationId,
+		wui_botSelectionGeneration, cleanName );
 }
 
-qboolean WiredFeeder_GetSelectedBotClientNum( int *clientNum ) {
+qboolean WiredFeeder_GetSelectedBotIdentity( wuiBotSelection_t *selection ) {
+	svBotIdentitySnapshot_t currentIdentity = { 0 };
+	wuiBotSelection_t verified = { 0 };
 	WiredFeeder_RefreshBotRows();
-	if ( wui_botSelectedClient < 0
+	if ( !selection || wui_botSelectedClient < 0
+	  || wui_botSelectedAllocationId == 0
 	  || wui_botSelectionGeneration != wui_botRosterGeneration ) return qfalse;
+	if ( !SV_BotIdentityForClient( wui_botSelectedClient, &currentIdentity )
+	  || currentIdentity.allocationId != wui_botSelectedAllocationId
+	  || Q_stricmp( currentIdentity.name, wui_botSelectedName ) != 0 ) return qfalse;
 	for ( int i = 0; i < wui_botRowCount; i++ ) {
 		if ( wui_botRows[i].clientNum != wui_botSelectedClient ) continue;
+		if ( wui_botRows[i].allocationId != wui_botSelectedAllocationId ) return qfalse;
 		if ( Q_stricmp( wui_botRows[i].name, wui_botSelectedName ) != 0 ) return qfalse;
-		if ( clientNum ) *clientNum = wui_botSelectedClient;
+		verified.clientNum = wui_botSelectedClient;
+		verified.allocationId = wui_botSelectedAllocationId;
+		verified.rosterGeneration = wui_botSelectionGeneration;
+		Q_strncpyz( verified.name, wui_botSelectedName, sizeof( verified.name ) );
+		*selection = verified;
 		return qtrue;
 	}
 	return qfalse;
@@ -1571,15 +1744,16 @@ qboolean WiredFeeder_GetSelectedBotClientNum( int *clientNum ) {
 void WiredFeeder_BotTrace( void ) {
 	WiredFeeder_RefreshBotRows();
 	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
-		"WiredUI: bot feeder trace generation=%d count=%d selected_client=%d\n",
-		wui_botRosterGeneration, wui_botRowCount, wui_botSelectedClient );
+		"WiredUI: bot feeder trace generation=%d count=%d selected_client=%d selected_allocation=%" PRIu64 "\n",
+		wui_botRosterGeneration, wui_botRowCount, wui_botSelectedClient,
+		wui_botSelectedAllocationId );
 	for ( int i = 0; i < wui_botRowCount; i++ ) {
 		char cleanName[MAX_NAME_LENGTH];
 		Q_strncpyz( cleanName, wui_botRows[i].name, sizeof( cleanName ) );
 		Q_CleanStr( cleanName );
 		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
-			"WiredUI: bot feeder row=%d client=%d name=%s\n",
-			i, wui_botRows[i].clientNum, cleanName );
+			"WiredUI: bot feeder row=%d client=%d allocation=%" PRIu64 " name=%s\n",
+			i, wui_botRows[i].clientNum, wui_botRows[i].allocationId, cleanName );
 	}
 }
 

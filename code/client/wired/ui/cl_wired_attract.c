@@ -166,9 +166,19 @@ static void Attract_DispatchCurrent( void ) {
 		 * panel visible over the scene. Attract owning the demo-overlay is its
 		 * OWN chrome, not the user menu — the menu still hides attract. */
 		wiredMenuDef_t *panel;
+		int dispatchedIndex = wui_attract.currentIndex;
 		wui_attract.ownsDemo = qtrue;
 		/* source is already validated — safe to use in command */
 		Cbuf_ExecuteText( EXEC_NOW, va( "demo %s\n", item->source ) );
+		/* The demo command reads its first frame synchronously.  A malformed
+		 * attract-owned demo can therefore fail and advance the playlist before
+		 * this dispatch returns.  Do not let the stale dispatch install its
+		 * overlay or overwrite the successor's TRANSITIONING state. */
+		if ( wui_attract.currentIndex != dispatchedIndex ||
+		     wui_attract.state != ATTRACT_STATE_STARTING ||
+		     !wui_attract.ownsDemo ) {
+			return;
+		}
 		panel = WiredUI_FindMenu( "attract_demo_overlay" );
 		if ( panel ) {
 			panel->visible = qtrue;
@@ -254,6 +264,8 @@ static void Attract_Status_f( void ) {
 	            wui_attract.cvVolume ? wui_attract.cvVolume->value : 0.0f );
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "  ownsDemo      : %d (demoplaying=%d)\n",
 	            wui_attract.ownsDemo, clientActiveApp->clc.demoplaying );
+	Com_Log( SEV_INFO, LOG_CH(ch_ui), "  pushedPanel   : %s\n",
+	            wui_attract.pushedPanel[0] != '\0' ? wui_attract.pushedPanel : "none" );
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "  wiredHealthy  : %d\n", WiredUI_IsHealthy() );
 	Com_Log( SEV_INFO, LOG_CH(ch_ui), "  recoveryFail  : %d ms ago\n",
 	            WiredUI_GetLastRecoveryFailTime() != 0
@@ -613,6 +625,21 @@ qboolean WiredAttract_OnDemoCompleted( void ) {
 
 	wui_attract.ownsDemo = qfalse;
 	Attract_Advance();
+	return qtrue;
+}
+
+qboolean WiredAttract_OnDemoFailed( void ) {
+	/* The first demo frames are read synchronously while the scheduler is still
+	 * STARTING, so the normal PLAYING-only completion callback cannot own this
+	 * transition.  Ownership is the authority: consume it once and advance. */
+	if ( !wui_attract.initialized ) return qfalse;
+	if ( !wui_attract.ownsDemo )    return qfalse;
+	wui_attract.ownsDemo = qfalse;
+	Attract_Advance();
+	/* Never dispatch the successor recursively from this callback.  The first
+	 * demo frame is read synchronously inside Attract_DispatchCurrent; a
+	 * zero-transition looping playlist of malformed demos would otherwise
+	 * recurse until stack exhaustion.  WiredAttract_Frame owns continuation. */
 	return qtrue;
 }
 

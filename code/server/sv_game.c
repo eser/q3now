@@ -2014,16 +2014,22 @@ Called on a map_restart, but not on a normal map change
 ===================
 */
 void SV_RestartGameProgs( void ) {
+	vm_t *restarting;
+
 	if ( !gvm ) {
 		return;
 	}
 	VM_Call( gvm, 1, GAME_SHUTDOWN, qtrue );
 
-	// do a restart instead of a free
-	gvm = VM_Restart( gvm );
-	if ( !gvm ) {
+	// VM_Restart is destructive: clear the published pointer before entering it
+	// so a load failure/longjmp cannot leave a freed VM reachable through gvm.
+	restarting = gvm;
+	gvm = NULL;
+	restarting = VM_Restart( restarting );
+	if ( !restarting ) {
 		Com_Terminate( TERM_CLIENT_DROP, "VM_Restart on game failed" );
 	}
+	gvm = restarting;
 
 	SV_InitGameVM( qtrue );
 

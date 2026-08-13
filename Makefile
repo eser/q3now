@@ -253,6 +253,21 @@ PAK_OUT := $(BUILD_DIR)/base/pax21.sw3z
         test-wiredui-external-actions-self test-wiredui-bot-actions \
         test-wiredui-bot-actions-self test-wiredui-connect-action \
         test-wiredui-connect-action-self test-wiredui-demo-play test-wiredui-demo-play-self \
+        test-wiredui-demo-malformed test-wiredui-demo-malformed-self \
+        test-wiredui-demo-io-fault test-wiredui-demo-io-fault-self \
+        test-wiredui-demo-disappeared test-wiredui-demo-disappeared-self \
+        test-bot-slot-restart test-bot-slot-restart-self \
+        test-wasm-map-restart test-wasm-map-restart-self \
+        test-vmi-bytecode-gui test-vmi-bytecode-gui-self \
+        test-reload-wasm-refusal test-reload-wasm-refusal-self \
+        test-vmi-pack-runtime test-vmi-pack-runtime-self \
+        test-wiredui-demo-semantic-continuation test-wiredui-demo-semantic-continuation-self \
+        test-directed-ping-queue test-directed-ping-queue-self \
+		test-ping-owner-browser test-ping-owner-browser-self \
+		test-ping-owner-offscreen test-ping-owner-offscreen-self \
+		test-ping-owner-expired-offscreen test-ping-owner-expired-offscreen-self \
+		test-ping-owner-capacity test-ping-owner-capacity-self \
+        test-lan-discovery-timeout test-lan-discovery-timeout-self \
         test-vm test-quic-game test-fs-dedup bench diff-api lint help
 
 # Default target: a CONSISTENT DEPLOYABLE WORLD, not just compiled objects.
@@ -1075,6 +1090,93 @@ test-wiredui-demo-play-self:
 
 .PHONY: test-wiredui-demo-play test-wiredui-demo-play-self
 
+test-wiredui-demo-malformed:
+	@test -n "$${WIRED}" || { echo "usage: make $@ WIRED=/absolute/path/to/wired"; exit 64; }
+	@bash tests/wiredui-demo-malformed-check.sh "$${WIRED}"
+
+test-wiredui-demo-malformed-self:
+	@bash tests/wiredui-demo-malformed-check.sh --self-test
+
+.PHONY: test-wiredui-demo-malformed test-wiredui-demo-malformed-self
+
+test-wiredui-demo-io-fault:
+	@test -n "$${WIRED}" || { echo "usage: make $@ WIRED=/absolute/path/to/wired"; exit 64; }
+	@bash tests/wiredui-demo-io-fault-check.sh "$${WIRED}"
+
+test-wiredui-demo-io-fault-self:
+	@bash tests/wiredui-demo-io-fault-check.sh --self-test
+
+.PHONY: test-wiredui-demo-io-fault test-wiredui-demo-io-fault-self
+
+# Loose-demo inventory race.  A watcher removes the selected authored demo
+# before Play; product recovery must rebuild Demos without disconnecting.
+test-wiredui-demo-disappeared:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/wiredui-demo-disappeared-check.sh "$${WIRED}"
+
+test-wiredui-demo-disappeared-self:
+	@bash tests/wiredui-demo-disappeared-check.sh --self-test
+
+.PHONY: test-wiredui-demo-disappeared test-wiredui-demo-disappeared-self
+
+# Process-lifetime bot allocation identity across a real stopserver/map cycle.
+test-bot-slot-restart:
+	@test -n "$${WIRED_HEADLESS:-}" || { echo "ERROR: WIRED_HEADLESS=<assembled-headless-binary> is required"; exit 2; }
+	@bash tests/bot-slot-restart-check.sh "$${WIRED_HEADLESS}"
+
+test-bot-slot-restart-self:
+	@bash tests/bot-slot-restart-check.sh --self-test
+
+.PHONY: test-bot-slot-restart test-bot-slot-restart-self
+
+# Explicit vm_game=1 (.wasm-only) policy across two real map_restart cycles.
+test-wasm-map-restart:
+	@test -n "$${WIRED_HEADLESS:-}" || { echo "ERROR: WIRED_HEADLESS=<assembled-headless-binary> is required"; exit 2; }
+	@bash tests/wasm-map-restart-check.sh "$${WIRED_HEADLESS}"
+
+test-wasm-map-restart-self:
+	@bash tests/wasm-map-restart-check.sh --self-test
+
+.PHONY: test-wasm-map-restart test-wasm-map-restart-self
+
+# Public VMI_BYTECODE policy across the paired gamesv/gamecl live GUI path.
+test-vmi-bytecode-gui:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/vmi-bytecode-gui-check.sh "$${WIRED}"
+
+test-vmi-bytecode-gui-self:
+	@bash tests/vmi-bytecode-gui-check.sh --self-test
+
+.PHONY: test-vmi-bytecode-gui test-vmi-bytecode-gui-self
+
+test-reload-wasm-refusal:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/reload-wasm-refusal-check.sh "$${WIRED}"
+
+test-reload-wasm-refusal-self:
+	@bash tests/reload-wasm-refusal-check.sh --self-test
+
+.PHONY: test-reload-wasm-refusal test-reload-wasm-refusal-self
+
+# Shipped-pax-only paired VM runtime provenance and exact SW3Z VM inventory.
+test-vmi-pack-runtime:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/vmi-pack-runtime-check.sh "$${WIRED}"
+
+test-vmi-pack-runtime-self:
+	@bash tests/vmi-pack-runtime-check.sh --self-test
+
+.PHONY: test-vmi-pack-runtime test-vmi-pack-runtime-self
+
+test-wiredui-demo-semantic-continuation:
+	@test -n "$${WIRED}" || { echo "usage: make $@ WIRED=/absolute/path/to/wired"; exit 64; }
+	@bash tests/wiredui-demo-semantic-continuation-check.sh "$${WIRED}"
+
+test-wiredui-demo-semantic-continuation-self:
+	@bash tests/wiredui-demo-semantic-continuation-check.sh --self-test
+
+.PHONY: test-wiredui-demo-semantic-continuation test-wiredui-demo-semantic-continuation-self
+
 # Specify Server action gate.  The product target starts an isolated loopback
 # headless server and drives the real GUI editfield/action path; the self target
 # exercises the strict analyzer and its injected-fault fixtures without an
@@ -1100,6 +1202,40 @@ test-wiredui-server-browser-self:
 
 .PHONY: test-wiredui-server-browser test-wiredui-server-browser-self
 
+# Protected browser password prompt cancellation companion.  One isolated GUI
+# process keeps the same READY Server Info owner while real pointer Cancel,
+# menu ESC and edit-mode ESC each erase the prompt-owned secret.
+test-wiredui-password-cancel:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/wiredui-password-cancel-check.sh "$${WIRED}"
+
+test-wiredui-password-cancel-self:
+	@bash tests/wiredui-password-cancel-check.sh --self-test
+
+.PHONY: test-wiredui-password-cancel test-wiredui-password-cancel-self
+
+# Active-match Server Info authority.  Browser selection A remains a negative
+# fixture while the popup must query the connected headless endpoint B.
+test-wiredui-ingame-serverinfo:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/wiredui-ingame-serverinfo-check.sh "$${WIRED}"
+
+test-wiredui-ingame-serverinfo-self:
+	@bash tests/wiredui-ingame-serverinfo-check.sh --self-test
+
+.PHONY: test-wiredui-ingame-serverinfo test-wiredui-ingame-serverinfo-self
+
+# A console-started integrated listen server remains connected across an
+# authored in-game ESC/Resume pause longer than the client idle timeout.
+test-local-listen-timeout:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/local-listen-timeout-check.sh "$${WIRED}"
+
+test-local-listen-timeout-self:
+	@bash tests/local-listen-timeout-check.sh --self-test
+
+.PHONY: test-local-listen-timeout test-local-listen-timeout-self
+
 # Real global-browser discovery through an authorized loopback master and
 # challenge-bound directed info responses. Deliberately excludes Connect.
 test-wiredui-global-browser:
@@ -1110,6 +1246,69 @@ test-wiredui-global-browser-self:
 	@bash tests/wiredui-global-browser-check.sh --self-test
 
 .PHONY: test-wiredui-global-browser test-wiredui-global-browser-self
+
+test-directed-ping-timeout:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/directed-ping-timeout-check.sh "$${WIRED}"
+
+test-directed-ping-timeout-self:
+	@bash tests/directed-ping-timeout-check.sh --self-test
+
+.PHONY: test-directed-ping-timeout test-directed-ping-timeout-self
+
+test-directed-ping-queue:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/directed-ping-queue-check.sh "$${WIRED}"
+
+test-directed-ping-queue-self:
+	@bash tests/directed-ping-queue-check.sh --self-test
+
+.PHONY: test-directed-ping-queue test-directed-ping-queue-self
+
+test-ping-owner-browser:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/ping-owner-browser-check.sh "$${WIRED}"
+
+test-ping-owner-browser-self:
+	@bash tests/ping-owner-browser-check.sh --self-test
+
+.PHONY: test-ping-owner-browser test-ping-owner-browser-self
+
+test-ping-owner-offscreen:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/ping-owner-offscreen-check.sh "$${WIRED}"
+
+test-ping-owner-offscreen-self:
+	@bash tests/ping-owner-offscreen-check.sh --self-test
+
+.PHONY: test-ping-owner-offscreen test-ping-owner-offscreen-self
+
+test-ping-owner-expired-offscreen:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/ping-owner-expired-offscreen-check.sh "$${WIRED}"
+
+test-ping-owner-expired-offscreen-self:
+	@bash tests/ping-owner-expired-offscreen-check.sh --self-test
+
+.PHONY: test-ping-owner-expired-offscreen test-ping-owner-expired-offscreen-self
+
+test-ping-owner-capacity:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/ping-owner-capacity-check.sh "$${WIRED}"
+
+test-ping-owner-capacity-self:
+	@bash tests/ping-owner-capacity-check.sh --self-test
+
+.PHONY: test-ping-owner-capacity test-ping-owner-capacity-self
+
+test-lan-discovery-timeout:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/lan-discovery-timeout-check.sh "$${WIRED}"
+
+test-lan-discovery-timeout-self:
+	@bash tests/lan-discovery-timeout-check.sh --self-test
+
+.PHONY: test-lan-discovery-timeout test-lan-discovery-timeout-self
 
 # ── QUIC game transport smoke test ───────────────────────────────────────────
 

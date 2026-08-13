@@ -1,23 +1,22 @@
 # WASM VM Backend
 
-Wired supports WebAssembly (WASM) as a game module execution backend via
-[WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) (WebAssembly
-Micro Runtime). Game modules (qagame, cgame) can run as `.wasm` files
-alongside or instead of traditional QVM bytecode. (Legacy q3_ui has been
-removed in favour of Wired UI; only qagame and cgame are WASM-built today.)
+Wired runs the server game (`gamesv`) and client game (`gamecl`) modules as
+WebAssembly through [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime)
+(WebAssembly Micro Runtime). Legacy QVM execution and q3_ui are not part of the
+current runtime; menus and HUDs are owned by Wired UI.
 
 ## Architecture
 
 ```
 Engine (Client/Server)
     |
-VM_Create() -> auto-detect priority (vm_game 2):
+VM_Create() -> requested policy:
     |
-+------------+----------+----------+------------+------------+
-| VMI_NATIVE | WASM     | WASM     | VMI_COMPILED| VMI_BYTECODE|
-| (DLL/SO)   | (.aot)   | (.wasm)  | (QVM JIT)  | (QVM interp)|
-+------------+----------+----------+------------+------------+
-              ^-- FEAT_WASM -------^  ^-- FEAT_LEGACY_QVM --^
++----------------+------------------------+-------------------------+
+| 0 VMI_NATIVE   | 1 VMI_BYTECODE         | 2 VMI_COMPILED          |
+| DLL/dylib      | .wasm only             | .aot, then .wasm        |
+| then 2 fallback| WAMR interpreter       | WAMR AOT/interpreter    |
++----------------+------------------------+-------------------------+
 
 Syscall bridge:
   WASM module imports env.syscall(i32 x 13) -> i32
@@ -25,8 +24,13 @@ Syscall bridge:
   vm_t* retrieved via wasm_runtime_get_user_data(exec_env)
 ```
 
-With `vm_game 2` (auto-detect), the engine tries in order: `.aot` > `.wasm` > `.qvm`.
-If `.wasm` is not found, it silently falls back to `.qvm`.
+The same policy applies to `vm_game` and `vm_cgame`. Mode `1` never probes an
+AOT file. Mode `2` prefers `.aot` and falls back to `.wasm`; mode `0` first
+tries the platform-native module and then uses mode `2` as its fallback. A
+live VM records its effective selection policy, so `map_restart` recreates a
+mode-1 VM as interpreter-only instead of silently changing it to AOT-first.
+For compatibility, integer values above `2` currently follow mode `2`; negative
+values are rejected. The public, documented choices remain `0`, `1`, and `2`.
 
 ## Building
 
@@ -96,7 +100,7 @@ If `.wasm` is not found, it silently falls back to `.qvm`.
 # Build engine + WASM modules (USE_WASM=1 in Makefile, FEAT_WASM=1 in q_feats.h)
 make build-debug
 
-# Run with WASM modules (auto-detect: prefers .wasm over .qvm)
+# Run with the shipped WASM policy (mode 2: .aot then .wasm)
 make run-game VM=1
 
 # Run WASM smoke test
@@ -112,8 +116,8 @@ make test-wasm
 When `USE_WASM=ON`, cmake:
 1. Builds WAMR as a static library (`vmlib`)
 2. Links it into the engine and headless server
-3. Compiles `qagame` and `cgame` to `.wasm` via wasi-sdk (output:
-   `<build>/<config>/base/vm/{qagame,cgame}.wasm`)
+3. Compiles `gamesv` and `gamecl` to `.wasm` via wasi-sdk (output:
+   `<build>/<config>/base/vm/{gamesv,gamecl}.wasm`)
 
 ### Feature flags
 
@@ -123,16 +127,9 @@ code paths. When `0`, all WASM code is compiled out — zero binary impact.
 `FEAT_WASM` and `USE_WASM` must match. Mismatch produces a link error (fails
 loudly).
 
-`FEAT_LEGACY_QVM` controls the legacy QVM bytecode interpreter and JIT compiler.
-Set to `0` to remove all QVM support — the engine then only runs WASM and/or
-native DLL modules.
-
-| FEAT_LEGACY_QVM | FEAT_WASM | Result |
-|-----------------|-----------|--------|
-| 1 | 1 | Both backends, auto-detect prefers WASM |
-| 0 | 1 | WASM only, ~6500 lines of QVM code compiled out |
-| 1 | 0 | QVM only (original behavior) |
-| 0 | 0 | Native DLL only, no VM sandboxing |
+Current production builds use native modules and WAMR only. If `FEAT_WASM` is
+disabled, modes `1` and `2` cannot load a module; mode `0` can still load the
+platform-native module.
 
 ## Runtime: WAMR
 
@@ -141,7 +138,8 @@ Bytecode Alliance.
 
 - Pure C, designed for embedding
 - Interpreter + AOT modes
-- Pre-allocated linear memory maps to QVM's `dataMask` model
+- Pre-allocated linear memory is exposed through the VM data bounds used by
+  the engine syscall bridge
 - Vendored at `src/libs/wamr/`
 
 ### WAMR build flags
@@ -235,7 +233,8 @@ game code needs beyond what `bg_lib.c` provides. The WASI imports
 | `code/game/q_feats.h` | `FEAT_WASM` flag |
 | `code/qcommon/qcommon.h` | `vmInterpret_t` enum |
 | `code/qcommon/vm_local.h` | WASM fields in `vm_s`, function declarations |
-| `code/qcommon/vm.c` | VM_Create auto-detect, VM_Call dispatch, vminfo, reload_wasm |
+| `code/qcommon/vm.c` | VM creation/restart, VM_Call dispatch, vminfo, reload_wasm |
+| `code/qcommon/vm_interpret_policy.c` | production mode-to-candidate policy |
 | `code/qcommon/vm_wasm.c` | Core backend: load, call, destroy, syscall bridge |
 | `code/qcommon/q_platform.h` | WASM platform definitions |
 | `code/wasm/wasm_bridge.c` | Varargs adapter compiled into WASM modules |
@@ -249,8 +248,8 @@ game code needs beyond what `bg_lib.c` provides. The WASI imports
 
 | Command | Description |
 |---------|-------------|
-| `vminfo` | Shows module type (QVM JIT / WASM Interp / WASM AOT), memory size |
-| `reload_wasm` | Force-unload WASM modules (reload on next map) |
+| `vminfo` | Shows the loaded module type and memory size |
+| `reload_wasm` | Diagnostic-only safety command: refuses while any WASM VM is live; otherwise reports a no-op |
 
 ## Limitations
 
@@ -258,14 +257,13 @@ game code needs beyond what `bg_lib.c` provides. The WASI imports
   AOT produces near-native performance but requires per-platform compilation.
 - **No WASM GDB debugging** — deferred until mod authors need it.
 - **No multi-language support** — game modules are C-only. Rust/Zig deferred.
-- **No hot-reload file watcher** — `/reload_wasm` is manual. Automatic
-  file-watching hot-reload is a future TODO.
+- **No live hot reload or state migration** — `/reload_wasm` never unloads a
+  live module. Map/server lifecycle transitions remain the only supported VM
+  recreation boundary.
 
-## Migration Roadmap
+## Shipped policy
 
-| Phase | Default | FEAT_WASM | Status |
-|-------|---------|-----------|--------|
-| **Ship** | QVM (`vm_*=2`) | `0` | WASM testing, auto-detect finds .wasm |
-| **Stabilize** | QVM (`vm_*=2`) | `1` | WASM promoted to mature |
-| **Flip** | WASM preferred | `1` | .wasm ships in pak files |
-| **Deprecate** | WASM only | `1` | QVM legacy, eventually removed |
+Production defaults use mode `2`: AOT is preferred when a compatible artifact
+is present, otherwise the packaged `.wasm` runs in the WAMR interpreter. Mode
+`1` is the explicit interpreter-only policy. Both modes are preserved across
+VM recreation; neither implies persistence of WASM linear memory.

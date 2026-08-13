@@ -920,9 +920,12 @@ qboolean WiredFeeder_GetSelectedDemo( char *name, size_t nameSize );
 void     WiredFeeder_LoadMods( void );
 void     WiredFeeder_RebuildServerDisplayList( void );
 qboolean WiredFeeder_ServerStatusBegin( void );
+qboolean WiredFeeder_ServerStatusBeginConnected( void );
 qboolean WiredFeeder_ServerStatusRetry( void );
 void     WiredFeeder_ServerStatusPoll( void );
 void     WiredFeeder_ServerStatusCancel( void );
+void     WiredFeeder_ServerStatusCancelForCloseAll( void );
+void     WiredFeeder_ServerStatusTrace( void );
 qboolean WiredFeeder_GetSelectedServerAddress( char *out, int outSize );
 qboolean WiredFeeder_GetSelectedServerConnection( char *address, int addressSize,
 	char *displayName, int displayNameSize, qboolean *needPassword,
@@ -936,7 +939,13 @@ qboolean WiredFeeder_ServerFixtureInstall( int sentinelPort, int targetPort,
 void     WiredFeeder_ServerFixtureClear( void );
 qboolean WiredFeeder_ServerFixtureActive( void );
 void     WiredFeeder_ClearBotSelection( void );
-qboolean WiredFeeder_GetSelectedBotClientNum( int *clientNum );
+typedef struct {
+	int clientNum;
+	uint64_t allocationId;
+	int rosterGeneration;
+	char name[MAX_NAME_LENGTH];
+} wuiBotSelection_t;
+qboolean WiredFeeder_GetSelectedBotIdentity( wuiBotSelection_t *selection );
 void     WiredFeeder_BotTrace( void );
 
 // ── menu stack ────────────────────────────────────────────────────────

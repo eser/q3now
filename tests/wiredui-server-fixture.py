@@ -2,6 +2,7 @@
 """Bounded loopback OOB fixture for the WiredUI server-browser contract."""
 
 import argparse
+import hashlib
 import json
 import select
 import signal
@@ -50,6 +51,7 @@ def main():
     parser.add_argument("--target-external", action="store_true")
     parser.add_argument("--lan-discovery", action="store_true")
     parser.add_argument("--upstream-port", type=int)
+    parser.add_argument("--serverinfo-connect", action="store_true")
     parser.add_argument("--protocol", type=int, default=74)
     parser.add_argument("--events", required=True)
     parser.add_argument("--timeout", type=float, default=120.0)
@@ -98,7 +100,7 @@ def main():
         target_socket = next((sock for sock, role in sockets.items() if role == "target"), None)
         probe_socket = target_socket or next(iter(sockets))
         probe_port = args.upstream_port or args.target_port
-        if args.target_external or args.upstream_port:
+        if (args.target_external or args.upstream_port) and not args.serverinfo_connect:
             probe_socket.sendto(OOB + b"rcon q0browser_probe", ("127.0.0.1", probe_port))
             emit("disallowed_probe", command="rcon", target_port=probe_port)
         held_response = None
@@ -116,9 +118,24 @@ def main():
         status_requests = 0
         challenges = []
         upstream_ordinal = 0
+        serverinfo_connect_response = None
+        serverinfo_connect_due = None
         started = time.monotonic()
         while not stop and time.monotonic() - started < args.timeout:
             now = time.monotonic()
+            if (serverinfo_connect_response is not None
+                    and serverinfo_connect_due is not None
+                    and client_peer is not None
+                    and now >= serverinfo_connect_due):
+                target_socket.sendto(serverinfo_connect_response, client_peer)
+                emit("serverinfo_connect_late_response",
+                     source_port=args.target_port, peer_port=client_peer[1],
+                     elapsed_ms=int((now - started) * 1000),
+                     length=len(serverinfo_connect_response),
+                     packet_hex=serverinfo_connect_response.hex(),
+                     sha256=hashlib.sha256(serverinfo_connect_response).hexdigest())
+                serverinfo_connect_response = None
+                serverinfo_connect_due = None
             if (lan_socket is not None and not lan_scan_started
                     and lan_unsolicited_attempts < 80 and now >= lan_unsolicited_next):
                 lan_socket.sendto(
@@ -134,11 +151,27 @@ def main():
                 data, peer = sock.recvfrom(65535)
                 body = data[4:] if data.startswith(OOB) else data
                 command = body.split(None, 1)[0].decode("ascii", "replace") if body else ""
+                if (args.serverinfo_connect and role == "target"
+                        and peer[1] != args.upstream_port
+                        and (not data.startswith(OOB) or command != "getstatus")):
+                    # The proxy phase proves only the status ownership/lifetime
+                    # boundary.  Ignore attempted transport datagrams without
+                    # introducing generic request evidence.
+                    continue
                 if role == "target" and args.upstream_port and peer[1] == args.upstream_port:
                     if command != "statusResponse":
                         emit("unexpected_upstream", command=command, peer_port=peer[1])
                         continue
-                    if upstream_ordinal == 1 and held_response is None:
+                    if args.serverinfo_connect and client_peer is not None:
+                        target_socket.sendto(data, client_peer)
+                        serverinfo_connect_response = data
+                        serverinfo_connect_due = time.monotonic() + 0.75
+                        emit("serverinfo_connect_current_response",
+                             source_port=args.target_port, peer_port=client_peer[1], length=len(data),
+                             elapsed_ms=int((time.monotonic() - started) * 1000),
+                             packet_hex=data.hex(),
+                             sha256=hashlib.sha256(data).hexdigest())
+                    elif upstream_ordinal == 1 and held_response is None:
                         held_response = data
                         emit("held_stale_response", request_number=status_requests)
                     elif upstream_ordinal == 2 and client_peer is not None:
@@ -236,7 +269,15 @@ def main():
                     if args.upstream_port:
                         status_requests += 1
                         client_peer = peer
-                        if ordinal in (1, 2):
+                        if args.serverinfo_connect:
+                            upstream_ordinal = ordinal
+                            sock.sendto(data, ("127.0.0.1", args.upstream_port))
+                            emit("serverinfo_connect_upstream_request",
+                                 request_number=status_requests, ordinal=ordinal,
+                                 target_port=args.target_port, peer_port=peer[1],
+                                 elapsed_ms=int((time.monotonic() - started) * 1000),
+                                 upstream_port=args.upstream_port)
+                        elif ordinal in (1, 2):
                             upstream_ordinal = ordinal
                             sock.sendto(data, ("127.0.0.1", args.upstream_port))
                             emit("upstream_request", request_number=status_requests,
@@ -272,6 +313,11 @@ def main():
                         emit("status_response", role=role, peer_port=peer[1])
                 elif command == "getstatus":
                     emit("wrong_target_status", role=role, peer_port=peer[1])
+                elif args.serverinfo_connect and role == "target" and args.upstream_port:
+                    # This fixture owns only the OOB status lifecycle.  QUIC is
+                    # deliberately not relayed: the companion direct-endpoint
+                    # phase proves transport/gameplay admission separately.
+                    pass
 
         emit("stopped", reason="signal" if stop else "timeout")
 
