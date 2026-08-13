@@ -28,6 +28,7 @@ This directory contains two deliberately separate evidence layers:
 | `vm_interpret_policy_contract` | always | Wired VM | production VM candidate policy: bytecode `.wasm` only, compiled `.aot` then `.wasm`, native DLL then compiled fallback | contract | `host-only`, `subsystem`, `owner.wired-vm`, `failure.contract`, `feature.always` |
 | `cvar_value_contract` | always | Wired cvars | production typed bool/int/float/enum lexical and range validator | security contract | `host-only`, `subsystem`, `owner.wired-cvars`, `failure.security-contract`, `feature.always` |
 | `fs_qpath_contract` | always | Wired VFS | production lexical qpath parent-component and legacy `::` rejection before host I/O | security contract | `host-only`, `subsystem`, `owner.wired-vfs`, `failure.security-contract`, `feature.always` |
+| `release_provenance_contract` | always | q3now release | production Makefile recursive bundle tuple, exact artifact postcondition, pack stamp, and macOS runtime-artifact staging exclusion across Darwin/Linux/MSYS2 recipe branches | package provenance | `host-only`, `infrastructure`, `owner.build`, `failure.package-provenance` |
 | `nav_coord_contract` | `USE_RECAST_NAVMESH=ON` | Wired nav | exact Quake/Recast axis, handedness and round-trip conversion | contract | `host-only`, `subsystem`, `owner.wired-nav`, `failure.contract`, `feature.recast` |
 | `wired_scene` | `USE_LUA=ON` | Wired scene | Lua scene-table loader | contract | `host-only`, `subsystem`, `owner.wired-scene`, `failure.contract`, `feature.lua` |
 

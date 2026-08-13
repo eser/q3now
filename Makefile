@@ -186,8 +186,15 @@ CMAKE_BUILD        := cmake --build $(BUILD_DIR) --parallel $(JOBS)
 # Code signing identity (default: ad-hoc).
 CODESIGN_IDENTITY ?= -
 
+# Release provenance is captured once by the outer make.  The build applies
+# source-controlled submodule patches, so recomputing git state in a recursive
+# bundle make would incorrectly add "-dirty" to the artifact and pack stamp.
+SOURCE_VERSION := $(shell git describe --always --dirty)
+BUILD_DATE      := $(shell date +%Y%m%d)
+BUILD_DATE_ISO  := $(shell date +%Y-%m-%d)
+VERSION         := $(BUILD_DATE)-$(SOURCE_VERSION)
+
 # DMG packaging (macOS only)
-VERSION     := $(shell date +%Y%m%d)-$(shell git describe --always --dirty)
 DMG_NAME    := $(APP_NAME)-$(VERSION)-$(UNAME_M)
 DMG_STAGING := $(BUILD_DIR)/dmg-staging
 DMG_OUT     := $(BUILD_DIR)/$(DMG_NAME).dmg
@@ -452,7 +459,7 @@ $(PAK_OUT): Makefile $(PAK_VM_MODULES) $(PAK_CONTENT_SRC) $(SW3Z_BIN)
 	mkdir -p $(PAK_STAGING)/vm
 	cp $(PAK_VM_MODULES) $(PAK_STAGING)/vm/
 	@echo "==> Stamping version..."
-	echo "$(APP_NAME) $$(git describe --always --dirty) ($$(date +%Y-%m-%d))" > $(PAK_STAGING)/description.txt
+	echo "$(APP_NAME) $(SOURCE_VERSION) ($(BUILD_DATE_ISO))" > $(PAK_STAGING)/description.txt
 	@echo "==> Creating $(PAK_OUT)..."
 	$(SW3Z_BIN) a -x "**/.DS_Store" -x ".DS_Store" "$(PAK_OUT)" $(PAK_STAGING)
 	@echo "==> $(PAK_OUT) ready"
@@ -598,14 +605,23 @@ define install_app_skeleton
 	@# --delete purges stale skeleton files, but the install dir also holds
 	@# artifacts OTHER targets own — renderer/dependency dylibs (copy-libs),
 	@# the mod pack under Resources/base (copy-packs), and the launcher
-	@# binary. Without the excludes, a standalone `make copy-build` silently
-	@# stripped all of them and left an unbootable bundle.
+	@# binary. Runtime gates may also leave a noncanonical MacOS/base tree or
+	@# JSONL diagnostics in the CMake app; hide those on the sender only so
+	@# --delete removes stale copies from a reused release destination.
+	@# Without the owner excludes, a standalone `make copy-build` silently
+	@# stripped separately-installed artifacts and left an unbootable bundle.
 	rsync -a --checksum --delete \
+	  --filter='H /Contents/MacOS/base/' \
+	  --filter='H /Contents/MacOS/*.jsonl' \
 	  --exclude='libSDL3*' --exclude='libMoltenVK*' --exclude='libcrypto*' \
 	  --exclude='$(CMAKE_APP_NAME)_*$(RENDEXT).dylib' \
 	  --exclude='Resources/base/' \
 	  --exclude='q3now-launcher' \
 	  "$(BUILT_APP)/" "$(Q3DIR)/"
+	@test ! -e "$(Q3DIR)/Contents/MacOS/base" || { \
+	  echo "ERROR: runtime base directory leaked into release MacOS staging"; exit 1; }
+	@set -- "$(Q3DIR)"/Contents/MacOS/*.jsonl; [ ! -e "$$1" ] || { \
+	  echo "ERROR: runtime JSONL diagnostic leaked into release MacOS staging: $$1"; exit 1; }
 	@# CFBundleExecutable must point at something that exists: the launcher
 	@# when present, the engine binary otherwise — the old unconditional
 	@# rewrite left a clean-clone bundle pointing at a missing launcher.
@@ -955,11 +971,14 @@ endif
 
 release: check create-launcher copy-all bundle-codesign
 ifeq ($(UNAME_S),Darwin)
-	$(MAKE) bundle-dmg
+	$(MAKE) bundle-dmg VERSION="$(VERSION)" SOURCE_VERSION="$(SOURCE_VERSION)" BUILD_DATE_ISO="$(BUILD_DATE_ISO)"
+	@test -f "$(DMG_OUT)" || { echo "ERROR: expected release artifact missing: $(DMG_OUT)"; exit 1; }
 else ifdef IS_WINDOWS
-	$(MAKE) bundle-zip
+	$(MAKE) bundle-zip VERSION="$(VERSION)" SOURCE_VERSION="$(SOURCE_VERSION)" BUILD_DATE_ISO="$(BUILD_DATE_ISO)"
+	@test -f "$(ZIP_OUT)" || { echo "ERROR: expected release artifact missing: $(ZIP_OUT)"; exit 1; }
 else
-	$(MAKE) bundle-tar
+	$(MAKE) bundle-tar VERSION="$(VERSION)" SOURCE_VERSION="$(SOURCE_VERSION)" BUILD_DATE_ISO="$(BUILD_DATE_ISO)"
+	@test -f "$(TAR_OUT)" || { echo "ERROR: expected release artifact missing: $(TAR_OUT)"; exit 1; }
 endif
 	@echo ""
 	@echo "  ┌─────────────────────────────────────┐"
