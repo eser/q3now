@@ -1472,6 +1472,12 @@ void SV_PacketEvent( const netadr_t *from, msg_t *msg );
 int SV_FrameMsec( void );
 qboolean SV_GameCommand( void );
 int SV_SendQueuedPackets( void );
+typedef struct {
+	int clientNum;
+	uint64_t allocationId;
+	char name[MAX_NAME_LENGTH];
+} svBotIdentitySnapshot_t;
+qboolean SV_BotIdentityForClient( int clientNum, svBotIdentitySnapshot_t *snapshot );
 
 void SV_AddDedicatedCommands( void );
 void SV_RemoveDedicatedCommands( void );

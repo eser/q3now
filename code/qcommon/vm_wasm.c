@@ -148,7 +148,7 @@ static int VM_WasmReadModule( arena_t *arena, const char *path, byte **outBuf,
 /*  VM_WasmLoad                                                          */
 /* ────────────────────────────────────────────────────────────────────── */
 
-qboolean VM_WasmLoad( vm_t *vm )
+qboolean VM_WasmLoad( vm_t *vm, qboolean allowAot )
 {
 	VM_WasmInitRuntime();
 	if ( !wamr_initialized )
@@ -164,9 +164,12 @@ qboolean VM_WasmLoad( vm_t *vm )
 	char filename[MAX_QPATH];
 	Com_sprintf( filename, sizeof( filename ), "vm/%s.aot", vm->name );
 	byte *buf = NULL;
-	int fileLen = VM_WasmReadModule( vm->vmArena, filename, &buf,
-	                                 vm->loadPath, sizeof( vm->loadPath ) );
-	if ( fileLen > 0 && buf ) {
+	int fileLen = -1;
+	if ( allowAot ) {
+		fileLen = VM_WasmReadModule( vm->vmArena, filename, &buf,
+		                                 vm->loadPath, sizeof( vm->loadPath ) );
+	}
+	if ( allowAot && fileLen > 0 && buf ) {
 		isAot = qtrue;
 	} else {
 		/* ── Fall back to .wasm (interpreter) ────────────────────── */

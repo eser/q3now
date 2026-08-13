@@ -1931,6 +1931,8 @@ static void SV_VerifyPaks_f( client_t *cl ) {
 
 		if ( bGood ) {
 			cl->pureAuthentic = qtrue;
+			Com_Log( SEV_DEBUG, LOG_CH(ch_server),
+			         "SV_VerifyPaks: accepted client=%s\n", cl->name );
 		} else {
 			cl->pureAuthentic = qfalse;
 			// Field-diagnosable kicks: a purity rejection is rare and almost

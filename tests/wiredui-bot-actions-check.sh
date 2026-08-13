@@ -59,6 +59,18 @@ if bad:
 
 messages = [str(row.get("msg", "")).rstrip("\r\n") for row in product]
 
+def exact_family(prefix, patterns, severity, category):
+    matches = [(index, row, messages[index]) for index, row in enumerate(product)
+               if messages[index].startswith(prefix)]
+    if len(matches) != len(patterns):
+        raise SystemExit(f"FAIL exact family {prefix}: cardinality {len(matches)}")
+    for (_, row, message), pattern in zip(matches, patterns):
+        if str(row.get("sev", "")).upper() != severity \
+                or str(row.get("cat", "")).lower() != category \
+                or re.fullmatch(pattern, message) is None:
+            raise SystemExit(f"FAIL exact family {prefix}: metadata/message {message}")
+    return matches
+
 def require(name, pattern):
     if not any(re.search(pattern, message) for message in messages):
         raise SystemExit(f"FAIL contract: missing {name}")
@@ -80,6 +92,120 @@ require("arena7 navmesh readiness",
 require("Grunt eligibility and resolved primary asset",
         r"CL_Characters: bot profile 'grunt' eligible "
         r"primary=characters/visor/models/lower\.md3\b")
+
+roster_events = exact_family("WiredUI: bot feeder roster generation=", [
+    r"WiredUI: bot feeder roster generation=\d+ count=2",
+    r"WiredUI: bot feeder roster generation=\d+ count=1",
+    r"WiredUI: bot feeder roster generation=\d+ count=2",
+    r"WiredUI: bot feeder roster generation=\d+ count=1",
+    r"WiredUI: bot feeder roster generation=\d+ count=2",
+    r"WiredUI: bot feeder roster generation=\d+ count=1",
+], "DEBUG", "ui")
+roster_generations = [int(re.fullmatch(
+    r"WiredUI: bot feeder roster generation=(\d+) count=[12]", event[2]).group(1))
+    for event in roster_events]
+if roster_generations != list(range(roster_generations[0], roster_generations[0] + 6)):
+    raise SystemExit(f"FAIL bot roster generations: {roster_generations}")
+row_events = exact_family("WiredUI: bot feeder row=", [
+    r"WiredUI: bot feeder row=0 client=2 allocation=1 name=(?:\^3)?Visor",
+    r"WiredUI: bot feeder row=1 client=3 allocation=2 name=(?:\^1)?Grunt",
+    r"WiredUI: bot feeder row=0 client=2 allocation=1 name=(?:\^3)?Visor",
+    r"WiredUI: bot feeder row=0 client=2 allocation=1 name=(?:\^3)?Visor",
+    r"WiredUI: bot feeder row=1 client=3 allocation=3 name=CustomGrunt",
+    r"WiredUI: bot feeder row=0 client=2 allocation=1 name=(?:\^3)?Visor",
+    r"WiredUI: bot feeder row=1 client=3 allocation=3 name=CustomGrunt",
+    r"WiredUI: bot feeder row=0 client=2 allocation=1 name=(?:\^3)?Visor",
+], "DEBUG", "ui")
+selection_events = exact_family("WiredUI: bot feeder selection row=", [
+    r"WiredUI: bot feeder selection row=0 client=2 allocation=1 generation=\d+ name=(?:\^3)?Visor",
+    r"WiredUI: bot feeder selection row=1 client=3 allocation=2 generation=\d+ name=(?:\^1)?Grunt",
+    r"WiredUI: bot feeder selection row=1 client=3 allocation=3 generation=\d+ name=CustomGrunt",
+    r"WiredUI: bot feeder selection row=1 client=3 allocation=4 generation=\d+ name=CustomGrunt",
+], "DEBUG", "ui")
+selection_generations = [int(re.search(r" generation=(\d+) ", event[2]).group(1))
+                         for event in selection_events]
+if selection_generations != [roster_generations[0], roster_generations[0],
+                             roster_generations[2], roster_generations[4]]:
+    raise SystemExit(f"FAIL bot selection generations: {selection_generations}")
+trace_events = exact_family("WiredUI: bot feeder trace generation=", [
+    r"WiredUI: bot feeder trace generation=\d+ count=2 selected_client=-1 selected_allocation=0",
+    r"WiredUI: bot feeder trace generation=\d+ count=1 selected_client=-1 selected_allocation=0",
+    r"WiredUI: bot feeder trace generation=\d+ count=2 selected_client=-1 selected_allocation=0",
+    r"WiredUI: bot feeder trace generation=\d+ count=2 selected_client=-1 selected_allocation=0",
+    r"WiredUI: bot feeder trace generation=\d+ count=1 selected_client=-1 selected_allocation=0",
+], "DEBUG", "ui")
+trace_generations = [int(re.search(r"generation=(\d+)", event[2]).group(1))
+                     for event in trace_events]
+if trace_generations != [roster_generations[0], roster_generations[1],
+                         roster_generations[2], roster_generations[2],
+                         roster_generations[5]]:
+    raise SystemExit(f"FAIL bot trace generations: {trace_generations}")
+queue_events = exact_family("WiredUI: queued verified bot kick", [
+    r"WiredUI: queued verified bot kick client=3 allocation=2",
+    r"WiredUI: queued verified bot kick client=3 allocation=4",
+], "DEBUG", "ui")
+ui_kick_refusals = exact_family("WiredUI: bot kick refused", [
+    r"WiredUI: bot kick refused without a current bot selection",
+], "DEBUG", "ui")
+botkick_events = exact_family("botkick:", [
+    r"botkick: refused non-bot client=1 name=.*",
+    r"botkick: removed bot client=3 allocation=2 name=(?:\^1)?Grunt",
+    r"botkick: removed bot client=3 allocation=3 name=CustomGrunt",
+    r"botkick: refused stale bot identity client=3 expected=3 actual=4",
+    r"botkick: removed bot client=3 allocation=4 name=CustomGrunt",
+], "INFO", "server")
+custom_add_queue_index = next(i for i, message in enumerate(messages)
+                              if message == "WiredUI: queued validated custom bot add "
+                              "profile=grunt name=CustomGrunt skill=4 team=free")
+custom_server_enters = [(i, row, messages[i]) for i, row in enumerate(product)
+                        if str(row.get("cat", "")).lower() == "server"
+                        and "CustomGrunt" in messages[i]
+                        and "has entered the game" in messages[i]]
+custom_cgame_enters = [(i, row, messages[i]) for i, row in enumerate(product)
+                       if str(row.get("cat", "")).lower() == "cgame"
+                       and "CustomGrunt" in messages[i]
+                       and "has entered the game" in messages[i]]
+if len(custom_server_enters) != 2 or len(custom_cgame_enters) != 2:
+    raise SystemExit(f"FAIL CustomGrunt enter cardinality: "
+                     f"server={custom_server_enters} cgame={custom_cgame_enters}")
+for _, row, message in custom_server_enters:
+    if str(row.get("sev", "")).upper() != "INFO" or re.fullmatch(
+            r'broadcast: print "(?:\^2)?CustomGrunt(?:\^7)? has entered the game\\n"',
+            message) is None:
+        raise SystemExit(f"FAIL CustomGrunt server-enter metadata/message: {message}")
+for _, row, message in custom_cgame_enters:
+    if str(row.get("sev", "")).upper() != "INFO" or re.fullmatch(
+            r"(?:\^2)?CustomGrunt(?:\^7)? has entered the game", message) is None:
+        raise SystemExit(f"FAIL CustomGrunt cgame-enter metadata/message: {message}")
+stale_button_focus = next(i for i in range(roster_events[4][0] + 1, len(messages))
+                          if "focused item 'btn_kick_bot'" in messages[i])
+stale_enter = next(i for i in range(stale_button_focus + 1, len(messages))
+                   if messages[i] == "wui_menu_nav: K_ENTER dispatched")
+fresh_botlist_focus = next(i for i in range(botkick_events[3][0] + 1, len(messages))
+                           if "focused item 'botlist'" in messages[i])
+fresh_down = next(i for i in range(fresh_botlist_focus + 1, len(messages))
+                  if messages[i] == "wui_menu_nav: K_DOWNARROW dispatched")
+fresh_button_focus = next(i for i in range(fresh_down + 1, len(messages))
+                          if "focused item 'btn_kick_bot'" in messages[i])
+fresh_enter = next(i for i in range(queue_events[1][0] + 1, len(messages))
+                   if messages[i] == "wui_menu_nav: K_ENTER dispatched")
+aba_botlist_focus = next(i for i in range(roster_events[2][0] + 1, len(messages))
+                         if "focused item 'botlist'" in messages[i])
+aba_down = next(i for i in range(selection_events[2][0] + 1, len(messages))
+                if messages[i] == "wui_menu_nav: K_DOWNARROW dispatched")
+if not (queue_events[0][0] < botkick_events[1][0]
+        < custom_add_queue_index < custom_server_enters[0][0]
+        < custom_cgame_enters[0][0] < roster_events[2][0]
+        < selection_events[2][0] < aba_botlist_focus < aba_down
+        < botkick_events[2][0]
+        < roster_events[3][0] < custom_server_enters[1][0]
+        < custom_cgame_enters[1][0] < roster_events[4][0]
+        < stale_button_focus < ui_kick_refusals[0][0] < stale_enter
+        < botkick_events[3][0] < selection_events[3][0]
+        < fresh_botlist_focus < fresh_down < fresh_button_focus
+        < queue_events[1][0] < fresh_enter < botkick_events[4][0]
+        < roster_events[5][0]):
+    raise SystemExit("FAIL bot ABA authority cursor")
 
 grunt_loads = [message for message in messages
                if "CG_LoadCharacter: loaded profile=grunt" in message]
@@ -106,6 +232,8 @@ if any(grunt_failure.search(message) for message in messages):
     raise SystemExit("FAIL render: Grunt missing-part, fallback, or eligibility failure observed")
 
 ordered([
+    ("navmesh ready before bot actions",
+     r"\[NAV\] navmesh ready for 'arena7' \((?:built|from cache)\)"),
     ("headless human slot",
      r"spawn_headless_client: client slot 1 connecting\b"),
     ("human botkick refusal",
@@ -128,23 +256,23 @@ ordered([
     ("Grunt Enter return", r"wui_menu_nav: K_ENTER dispatched"),
     ("Grunt entered", r"(?:\^1)?Grunt(?:\^7)? has entered the game"),
     ("two-bot trace count", r"WiredUI: bot feeder trace .*count=2\b"),
-    ("Visor trace row", r"WiredUI: bot feeder row=0 client=2 name=(?:\^3)?Visor\b"),
-    ("Grunt trace row", r"WiredUI: bot feeder row=1 client=3 name=(?:\^1)?Grunt\b"),
+    ("Visor trace row", r"WiredUI: bot feeder row=0 client=2 allocation=1 name=(?:\^3)?Visor\b"),
+    ("Grunt trace row", r"WiredUI: bot feeder row=1 client=3 allocation=2 name=(?:\^1)?Grunt\b"),
     ("remove-bot button", r"focused item 'btn_removebot'"),
     ("remove dialog", r"WiredUI: push menu 'removebots' \(depth 2\)"),
     ("row-zero callback",
-     r"WiredUI: bot feeder selection row=0 client=2 .*name=(?:\^3)?Visor\b"),
+     r"WiredUI: bot feeder selection row=0 client=2 allocation=1 .*name=(?:\^3)?Visor\b"),
     ("bot list focus", r"focused item 'botlist'"),
     ("row-one callback",
-     r"WiredUI: bot feeder selection row=1 client=3 .*name=(?:\^1)?Grunt\b"),
+     r"WiredUI: bot feeder selection row=1 client=3 allocation=2 .*name=(?:\^1)?Grunt\b"),
     ("real Down return", r"wui_menu_nav: K_DOWNARROW dispatched"),
     ("kick button", r"focused item 'btn_kick_bot'"),
-    ("verified kick queued", r"WiredUI: queued verified bot kick client=3\b"),
+    ("verified kick queued", r"WiredUI: queued verified bot kick client=3 allocation=2\b"),
     ("kick Enter", r"wui_menu_nav: K_ENTER dispatched"),
-    ("server removed selected Grunt", r"botkick: removed bot client=3 name=(?:\^1)?Grunt\b"),
+    ("server removed selected Grunt", r"botkick: removed bot client=3 allocation=2 name=(?:\^1)?Grunt\b"),
     ("selected Grunt kicked broadcast", r"(?:\^1)?Grunt(?:\^7)? was kicked"),
     ("post-kick bot count", r"WiredUI: bot feeder trace .*count=1\b"),
-    ("post-kick surviving Visor", r"WiredUI: bot feeder row=0 client=2 name=(?:\^3)?Visor\b"),
+    ("post-kick surviving Visor", r"WiredUI: bot feeder row=0 client=2 allocation=1 name=(?:\^3)?Visor\b"),
     ("remove dialog Back", r"WiredUI: pop menu \(depth 1\)"),
     ("remove dialog Back dispatch", r"wui_menu_nav: K_ESCAPE dispatched"),
     ("custom add button", r"focused item 'btn_addbot'"),
@@ -178,8 +306,8 @@ ordered([
     ("custom submit Enter", r"wui_menu_nav: K_ENTER dispatched"),
     ("CustomGrunt entered", r"CustomGrunt(?:\^7)? has entered the game"),
     ("custom final bot count", r"WiredUI: bot feeder trace .*count=2\b"),
-    ("custom final Visor row", r"WiredUI: bot feeder row=0 client=2 name=(?:\^3)?Visor\b"),
-    ("custom final row", r"WiredUI: bot feeder row=1 client=3 name=CustomGrunt\b"),
+    ("custom final Visor row", r"WiredUI: bot feeder row=0 client=2 allocation=1 name=(?:\^3)?Visor\b"),
+    ("custom final row", r"WiredUI: bot feeder row=1 client=3 allocation=3 name=CustomGrunt\b"),
     ("negative add button", r"focused item 'btn_addbot'"),
     ("negative add dialog", r"WiredUI: push menu 'addbots' \(depth 2\)"),
     ("negative initial Visor selection",
@@ -202,13 +330,30 @@ ordered([
     ("stale profile rejected",
      r"WiredUI: custom bot add rejected stale profile selection"),
     ("stale-selection menu retained", r"focused item 'btn_add_custom'"),
+    ("ABA remove dialog", r"WiredUI: push menu 'removebots' \(depth 2\)"),
+    ("ABA selected original allocation",
+     r"WiredUI: bot feeder selection row=1 client=3 allocation=3 .*name=CustomGrunt"),
+    ("ABA original removed",
+     r"botkick: removed bot client=3 allocation=3 name=CustomGrunt"),
+    ("ABA replacement entered", r"CustomGrunt(?:\^7)? has entered the game"),
+    ("stale UI selection refused",
+     r"WiredUI: bot kick refused without a current bot selection"),
+    ("stale recycled-slot kick rejected",
+     r"botkick: refused stale bot identity client=3 expected=3 actual=4"),
+    ("ABA selected replacement allocation",
+     r"WiredUI: bot feeder selection row=1 client=3 allocation=4 .*name=CustomGrunt"),
+    ("ABA fresh kick queued",
+     r"WiredUI: queued verified bot kick client=3 allocation=4"),
+    ("ABA replacement removed",
+     r"botkick: removed bot client=3 allocation=4 name=CustomGrunt"),
+    ("ABA final survivor count", r"WiredUI: bot feeder trace .*count=1\b"),
 ])
 
 if any(re.search(r"\bclientkick\b", message, re.IGNORECASE) for message in messages):
     raise SystemExit("FAIL boundary: legacy clientkick appeared in product evidence")
 
-post_kick_count = max(i for i, message in enumerate(messages)
-                      if re.search(r"WiredUI: bot feeder trace .*count=1\b", message))
+post_kick_count = next(i for i, message in enumerate(messages)
+                       if re.search(r"WiredUI: bot feeder trace .*count=1\b", message))
 valid_custom_queue = next(i for i, message in enumerate(messages[post_kick_count + 1:],
                                                         post_kick_count + 1)
                           if "queued validated custom bot add" in message)
@@ -240,6 +385,9 @@ valid_result_count = next(i for i, message in enumerate(messages[valid_custom_qu
                           if re.search(r"WiredUI: bot feeder trace .*count=2\b", message))
 custom_final_count = max(i for i, message in enumerate(messages)
                          if re.search(r"WiredUI: bot feeder trace .*count=2\b", message))
+aba_remove_dialog = next(i for i, message in enumerate(messages[custom_final_count + 1:],
+                                                         custom_final_count + 1)
+                         if message == "WiredUI: push menu 'removebots' (depth 2)")
 invalid_reject = next(i for i, message in enumerate(messages)
                       if message == "WiredUI: custom bot add rejected invalid display name")
 reload_index = next(i for i, message in enumerate(messages)
@@ -266,16 +414,20 @@ if len(backspaces) != 5:
     raise SystemExit(f"FAIL negative selection: expected five real backspaces, got {backspaces}")
 
 final_rows = []
-for message in messages[custom_final_count + 1:]:
-    match = re.fullmatch(r"WiredUI: bot feeder row=(\d+) client=(\d+) name=(.*)", message)
+for message in messages[custom_final_count + 1:aba_remove_dialog]:
+    match = re.fullmatch(r"WiredUI: bot feeder row=(\d+) client=(\d+) allocation=(\d+) name=(.*)", message)
     if match:
-        final_rows.append((int(match.group(1)), int(match.group(2)), match.group(3)))
+        final_rows.append((int(match.group(1)), int(match.group(2)),
+                           int(match.group(3)), match.group(4)))
 if len(final_rows) != 2:
     raise SystemExit(f"FAIL result: custom final trace has unexpected rows {final_rows}")
-if not re.fullmatch(r"(?:\^3)?Visor", final_rows[0][2]) or final_rows[0][:2] != (0, 2):
+if not re.fullmatch(r"(?:\^3)?Visor", final_rows[0][3]) or final_rows[0][:3] != (0, 2, 1):
     raise SystemExit(f"FAIL result: custom final Visor row mismatch {final_rows[0]}")
-if final_rows[1] != (1, 3, "CustomGrunt"):
+if final_rows[1] != (1, 3, 3, "CustomGrunt"):
     raise SystemExit(f"FAIL result: custom final row mismatch {final_rows[1]}")
+if not any(re.fullmatch(r"WiredUI: bot feeder row=0 client=2 allocation=1 name=(?:\^3)?Visor", message)
+           for message in messages[aba_remove_dialog:]):
+    raise SystemExit("FAIL ABA result: final Visor survivor row missing")
 if any(re.search(r"botkick: removed bot client=(?:0|1|2)\b", message) for message in messages):
     raise SystemExit("FAIL safety: host, headless human, or Visor was removed")
 
@@ -293,6 +445,12 @@ game_steps = [
     ("custom profile",
      r"ClientUserinfoChanged: 3 .*n\\CustomGrunt\\t\\0\\char\\grunt\\skin\\default.*\\skill\\4\.00\b"),
     ("custom begin", r"ClientBegin: 3\b"),
+    ("ABA original disconnect", r"ClientDisconnect: 3\b"),
+    ("ABA replacement connect", r"ClientConnect: 3\b"),
+    ("ABA replacement profile",
+     r"ClientUserinfoChanged: 3 .*n\\CustomGrunt\\t\\0\\char\\grunt\\skin\\default.*\\skill\\4\.00\b"),
+    ("ABA replacement begin", r"ClientBegin: 3\b"),
+    ("ABA replacement disconnect", r"ClientDisconnect: 3\b"),
 ]
 cursor = 0
 for name, pattern in game_steps:
@@ -302,9 +460,9 @@ for name, pattern in game_steps:
     cursor += match.end()
 if re.search(r"ClientDisconnect: (?:0|1|2)\b", game):
     raise SystemExit("FAIL game log: a protected/surviving client disconnected")
-if len(re.findall(r"ClientConnect: 3\b", game)) != 2 \
-        or len(re.findall(r"ClientBegin: 3\b", game)) != 2 \
-        or len(re.findall(r"ClientDisconnect: 3\b", game)) != 1:
+if len(re.findall(r"ClientConnect: 3\b", game)) != 3 \
+        or len(re.findall(r"ClientBegin: 3\b", game)) != 3 \
+        or len(re.findall(r"ClientDisconnect: 3\b", game)) != 3:
     raise SystemExit("FAIL game log: rejected custom attempts changed the client lifecycle")
 
 focused = sorted(
@@ -339,6 +497,7 @@ print("  PASS add: named quick actions created Visor client2 and Grunt client3")
 print("  PASS render: Grunt eligibility resolved Visor assets and all handles are nonzero")
 print("  PASS remove: real bot-feeder row0 -> Down -> row1 removed only Grunt client3")
 print("  PASS custom: Visor -> Grunt selection created CustomGrunt at skill4/free")
+print("  PASS ABA: stale Grunt allocation could not remove same-slot CustomGrunt")
 print("  PASS negative: invalid name and stale registry generation retained the form")
 print("  PASS safety: host/client1/client2 survived; no legacy clientkick")
 PYEOF
@@ -355,7 +514,7 @@ messages = [
     "[NAV] navmesh ready for 'arena7' (built)",
     "CL_Characters: bot profile 'grunt' eligible primary=characters/visor/models/lower.md3",
     "spawn_headless_client: client slot 1 connecting (handle 8)",
-    "botkick: refused non-bot client=1",
+    "botkick: refused non-bot client=1 name=HeadlessClient",
     "WiredUI: push menu 'ingame' (depth 1)",
     "wui_menu_nav focus: focused item 'btn_addbot' (top index -1)",
     "WiredUI: push menu 'addbots' (depth 2)",
@@ -372,22 +531,24 @@ messages = [
     "wui_menu_nav: K_ENTER dispatched",
     "broadcast: print \"^2^1Grunt^7 has entered the game\\n\"",
     "CG_LoadCharacter: loaded profile=grunt parts=3 legs=31 torso=32 head=33 icon=34 skin=35",
-    "WiredUI: bot feeder trace generation=3 count=2 selected_client=-1",
-    "WiredUI: bot feeder row=0 client=2 name=^3Visor",
-    "WiredUI: bot feeder row=1 client=3 name=^1Grunt",
+    "WiredUI: bot feeder roster generation=3 count=2",
+    "WiredUI: bot feeder trace generation=3 count=2 selected_client=-1 selected_allocation=0",
+    "WiredUI: bot feeder row=0 client=2 allocation=1 name=^3Visor",
+    "WiredUI: bot feeder row=1 client=3 allocation=2 name=^1Grunt",
     "wui_menu_nav focus: focused item 'btn_removebot' (top index -1)",
     "WiredUI: push menu 'removebots' (depth 2)",
-    "WiredUI: bot feeder selection row=0 client=2 name=^3Visor",
+    "WiredUI: bot feeder selection row=0 client=2 allocation=1 generation=3 name=^3Visor",
     "wui_menu_nav focus: focused item 'botlist' (top index -1)",
-    "WiredUI: bot feeder selection row=1 client=3 name=^1Grunt",
+    "WiredUI: bot feeder selection row=1 client=3 allocation=2 generation=3 name=^1Grunt",
     "wui_menu_nav: K_DOWNARROW dispatched",
     "wui_menu_nav focus: focused item 'btn_kick_bot' (top index -1)",
-    "WiredUI: queued verified bot kick client=3",
+    "WiredUI: queued verified bot kick client=3 allocation=2",
     "wui_menu_nav: K_ENTER dispatched",
-    "botkick: removed bot client=3 name=^1Grunt",
+    "botkick: removed bot client=3 allocation=2 name=^1Grunt",
     "broadcast: print \"^1Grunt^7 was kicked\\n\"",
-    "WiredUI: bot feeder trace generation=4 count=1 selected_client=-1",
-    "WiredUI: bot feeder row=0 client=2 name=^3Visor",
+    "WiredUI: bot feeder roster generation=4 count=1",
+    "WiredUI: bot feeder trace generation=4 count=1 selected_client=-1 selected_allocation=0",
+    "WiredUI: bot feeder row=0 client=2 allocation=1 name=^3Visor",
     "WiredUI: pop menu (depth 1)",
     "wui_menu_nav: K_ESCAPE dispatched",
     "wui_menu_nav focus: focused item 'btn_addbot' (top index -1)",
@@ -417,9 +578,11 @@ messages = [
     "WiredUI: pop menu (depth 1)",
     "wui_menu_nav: K_ENTER dispatched",
     "broadcast: print \"CustomGrunt has entered the game\\n\"",
-    "WiredUI: bot feeder trace generation=6 count=2 selected_client=-1",
-    "WiredUI: bot feeder row=0 client=2 name=^3Visor",
-    "WiredUI: bot feeder row=1 client=3 name=CustomGrunt",
+    "^2CustomGrunt^7 has entered the game",
+    "WiredUI: bot feeder roster generation=5 count=2",
+    "WiredUI: bot feeder trace generation=5 count=2 selected_client=-1 selected_allocation=0",
+    "WiredUI: bot feeder row=0 client=2 allocation=1 name=^3Visor",
+    "WiredUI: bot feeder row=1 client=3 allocation=3 name=CustomGrunt",
     "wui_menu_nav focus: focused item 'btn_addbot' (top index -1)",
     "WiredUI: push menu 'addbots' (depth 2)",
     "WiredUI: custom bot profile selected profile=visor generation=7",
@@ -450,9 +613,37 @@ messages = [
     "WiredUI: custom bot add rejected stale profile selection",
     "wui_menu_nav: K_ENTER dispatched",
     "wui_menu_nav focus: focused item 'btn_add_custom' (top index -1)",
-    "WiredUI: bot feeder trace generation=7 count=2 selected_client=-1",
-    "WiredUI: bot feeder row=0 client=2 name=^3Visor",
-    "WiredUI: bot feeder row=1 client=3 name=CustomGrunt",
+    "WiredUI: bot feeder trace generation=5 count=2 selected_client=-1 selected_allocation=0",
+    "WiredUI: bot feeder row=0 client=2 allocation=1 name=^3Visor",
+    "WiredUI: bot feeder row=1 client=3 allocation=3 name=CustomGrunt",
+    "WiredUI: pop menu (depth 1)",
+    "wui_menu_nav: K_ESCAPE dispatched",
+    "wui_menu_nav focus: focused item 'btn_removebot' (top index -1)",
+    "WiredUI: push menu 'removebots' (depth 2)",
+    "WiredUI: bot feeder selection row=1 client=3 allocation=3 generation=5 name=CustomGrunt",
+    "wui_menu_nav focus: focused item 'botlist' (top index -1)",
+    "wui_menu_nav: K_DOWNARROW dispatched",
+    "botkick: removed bot client=3 allocation=3 name=CustomGrunt",
+    "broadcast: print \"CustomGrunt was kicked\\n\"",
+    "WiredUI: bot feeder roster generation=6 count=1",
+    "broadcast: print \"CustomGrunt has entered the game\\n\"",
+    "^2CustomGrunt^7 has entered the game",
+    "WiredUI: bot feeder roster generation=7 count=2",
+    "wui_menu_nav focus: focused item 'btn_kick_bot' (top index -1)",
+    "WiredUI: bot kick refused without a current bot selection",
+    "wui_menu_nav: K_ENTER dispatched",
+    "botkick: refused stale bot identity client=3 expected=3 actual=4",
+    "WiredUI: bot feeder selection row=1 client=3 allocation=4 generation=7 name=CustomGrunt",
+    "wui_menu_nav focus: focused item 'botlist' (top index -1)",
+    "wui_menu_nav: K_DOWNARROW dispatched",
+    "wui_menu_nav focus: focused item 'btn_kick_bot' (top index -1)",
+    "WiredUI: queued verified bot kick client=3 allocation=4",
+    "wui_menu_nav: K_ENTER dispatched",
+    "botkick: removed bot client=3 allocation=4 name=CustomGrunt",
+    "broadcast: print \"CustomGrunt was kicked\\n\"",
+    "WiredUI: bot feeder roster generation=8 count=1",
+    "WiredUI: bot feeder trace generation=8 count=1 selected_client=-1 selected_allocation=0",
+    "WiredUI: bot feeder row=0 client=2 allocation=1 name=^3Visor",
     "WiredUI: shutdown",
 ]
 game = "\n".join([
@@ -467,6 +658,11 @@ game = "\n".join([
     "  0:05 ClientConnect: 3",
     r"  0:05 ClientUserinfoChanged: 3 n\CustomGrunt\t\0\char\grunt\skin\default\c1\4\skill\4.00",
     "  0:05 ClientBegin: 3", "",
+    "  0:06 ClientDisconnect: 3",
+    "  0:07 ClientConnect: 3",
+    r"  0:07 ClientUserinfoChanged: 3 n\CustomGrunt\t\0\char\grunt\skin\default\c1\4\skill\4.00",
+    "  0:07 ClientBegin: 3",
+    "  0:08 ClientDisconnect: 3", "",
 ])
 layout = []
 for frame, (menu, region) in enumerate([
@@ -532,22 +728,36 @@ elif mode == "wrong-grunt-skill":
     line = next(line for line in game.splitlines() if "ClientUserinfoChanged: 3" in line)
     game = game.replace(line, line.replace(r"\skill\3.00", r"\skill\4.00"))
 elif mode == "wrong-trace-client":
-    messages[messages.index("WiredUI: bot feeder row=0 client=2 name=^3Visor")] = \
-        "WiredUI: bot feeder row=0 client=1 name=human"
+    messages[messages.index("WiredUI: bot feeder row=0 client=2 allocation=1 name=^3Visor")] = \
+        "WiredUI: bot feeder row=0 client=1 allocation=1 name=human"
 elif mode == "missing-row0": remove("bot feeder selection row=0")
 elif mode == "missing-down": remove("K_DOWNARROW")
 elif mode == "wrong-row1":
-    messages[messages.index("WiredUI: bot feeder selection row=1 client=3 name=^1Grunt")] = \
-        "WiredUI: bot feeder selection row=1 client=2 name=^1Grunt"
+    messages[messages.index("WiredUI: bot feeder selection row=1 client=3 allocation=2 generation=3 name=^1Grunt")] = \
+        "WiredUI: bot feeder selection row=1 client=2 allocation=2 generation=3 name=^1Grunt"
+elif mode == "wrong-initial-visor-selection":
+    idx = messages.index("WiredUI: bot feeder selection row=0 client=2 allocation=1 generation=3 name=^3Visor")
+    messages[idx] = "WiredUI: bot feeder selection row=0 client=3 allocation=1 generation=3 name=^3Visor"
 elif mode == "wrong-grunt-trace":
-    messages[messages.index("WiredUI: bot feeder row=1 client=3 name=^1Grunt")] = \
-        "WiredUI: bot feeder row=1 client=3 name=^3Visor"
+    messages[messages.index("WiredUI: bot feeder row=1 client=3 allocation=2 name=^1Grunt")] = \
+        "WiredUI: bot feeder row=1 client=3 allocation=2 name=^3Visor"
 elif mode == "missing-queued": remove("queued verified bot kick")
+elif mode == "wrong-queued-allocation":
+    idx = next(i for i, message in enumerate(messages) if "queued verified bot kick" in message)
+    messages[idx] = messages[idx].replace("allocation=2", "allocation=1")
 elif mode == "legacy-clientkick": messages.insert(-1, "clientkick 3")
 elif mode == "missing-removed": remove("botkick: removed")
+elif mode == "missing-stale-bot-refusal": remove("refused stale bot identity")
+elif mode == "wrong-stale-actual":
+    idx = next(i for i, message in enumerate(messages) if "refused stale bot identity" in message)
+    messages[idx] = messages[idx].replace("actual=4", "actual=2")
+elif mode == "stale-accepted":
+    idx = next(i for i, message in enumerate(messages) if "refused stale bot identity" in message)
+    messages[idx] = "botkick: removed bot client=3 allocation=2 name=CustomGrunt"
+    game += "  0:06 ClientDisconnect: 3\n"
 elif mode == "missing-disconnect": game = game.replace("  0:04 ClientDisconnect: 3\n", "")
 elif mode == "human-disconnect": game += "  0:05 ClientDisconnect: 1\n"
-elif mode == "residual-client3": messages.insert(-1, "WiredUI: bot feeder row=1 client=3 name=^1Grunt")
+elif mode == "residual-client3": messages.insert(-1, "WiredUI: bot feeder row=1 client=3 allocation=2 name=^1Grunt")
 elif mode == "ui-warn":
     pass
 elif mode == "renderer-error":
@@ -579,13 +789,69 @@ elif mode == "wrong-custom-userinfo":
 elif mode == "missing-custom-begin":
     game = game.replace("  0:05 ClientBegin: 3\n", "")
 elif mode == "missing-custom-entered": remove("CustomGrunt has entered")
+elif mode == "missing-b-cgame-enter":
+    idx = max(i for i, message in enumerate(messages)
+              if message == "^2CustomGrunt^7 has entered the game")
+    del messages[idx]
+elif mode == "additive-b-enter":
+    idx = max(i for i, message in enumerate(messages)
+              if message == "^2CustomGrunt^7 has entered the game")
+    messages.insert(idx + 1, messages[idx])
 elif mode == "wrong-custom-final-count":
-    idx = next(i for i, message in enumerate(messages) if "generation=6 count=2" in message)
+    idx = next(i for i, message in enumerate(messages) if "generation=5 count=2" in message)
     messages[idx] = messages[idx].replace("count=2", "count=1")
 elif mode == "wrong-custom-final-name":
     idx = max(i for i, message in enumerate(messages)
-              if message == "WiredUI: bot feeder row=1 client=3 name=CustomGrunt")
-    messages[idx] = "WiredUI: bot feeder row=1 client=3 name=Grunt"
+              if message == "WiredUI: bot feeder row=1 client=3 allocation=3 name=CustomGrunt")
+    messages[idx] = "WiredUI: bot feeder row=1 client=3 allocation=3 name=Grunt"
+elif mode == "wrong-custom-final-allocation":
+    idx = max(i for i, message in enumerate(messages)
+              if message == "WiredUI: bot feeder row=1 client=3 allocation=3 name=CustomGrunt")
+    messages[idx] = "WiredUI: bot feeder row=1 client=3 allocation=2 name=CustomGrunt"
+elif mode == "additive-bot-row":
+    messages.insert(-1, "WiredUI: bot feeder row=1 client=3 allocation=99 name=CustomGrunt")
+elif mode == "additive-bot-selection":
+    messages.insert(-1, "WiredUI: bot feeder selection row=1 client=3 allocation=4 generation=8 name=CustomGrunt")
+elif mode == "additive-botkick":
+    messages.insert(-1, "botkick: refused stale bot identity client=3 expected=3 actual=4")
+elif mode == "additive-bot-trace":
+    messages.insert(-1, "WiredUI: bot feeder trace generation=8 count=1 selected_client=-1 selected_allocation=0")
+elif mode == "duplicate-ui-kick-refusal":
+    idx = next(i for i, message in enumerate(messages)
+               if message == "WiredUI: bot kick refused without a current bot selection")
+    messages.insert(idx + 1, messages[idx])
+elif mode == "wrong-aba-selection-id":
+    idx = next(i for i, message in enumerate(messages)
+               if "selection row=1 client=3 allocation=3 generation=5" in message)
+    messages[idx] = messages[idx].replace("allocation=3", "allocation=99")
+elif mode == "wrong-aba-selection-generation":
+    idx = next(i for i, message in enumerate(messages)
+               if "selection row=1 client=3 allocation=3 generation=5" in message)
+    messages[idx] = messages[idx].replace("generation=5", "generation=4")
+elif mode == "missing-aba-focus":
+    indices = [i for i, message in enumerate(messages) if "focused item 'btn_kick_bot'" in message]
+    del messages[indices[-2]]
+elif mode == "missing-aba-enter":
+    refusal = messages.index("WiredUI: bot kick refused without a current bot selection")
+    idx = next(i for i in range(refusal + 1, len(messages))
+               if messages[i] == "wui_menu_nav: K_ENTER dispatched")
+    del messages[idx]
+elif mode == "missing-fresh-down":
+    idx = max(i for i, message in enumerate(messages)
+              if message == "wui_menu_nav: K_DOWNARROW dispatched")
+    del messages[idx]
+elif mode == "focus-before-selection-a":
+    selection = next(i for i, message in enumerate(messages)
+                     if "selection row=1 client=3 allocation=3 generation=5" in message)
+    focus = next(i for i in range(selection + 1, len(messages))
+                 if "focused item 'botlist'" in messages[i])
+    messages[selection], messages[focus] = messages[focus], messages[selection]
+elif mode == "focus-before-selection-b":
+    selection = next(i for i, message in enumerate(messages)
+                     if "selection row=1 client=3 allocation=4 generation=7" in message)
+    focus = next(i for i in range(selection + 1, len(messages))
+                 if "focused item 'botlist'" in messages[i])
+    messages[selection], messages[focus] = messages[focus], messages[selection]
 elif mode == "missing-custom-layout": layout = [row for row in layout if row["region"] != "btn_add_custom"]
 elif mode == "missing-negative-type": remove("typed 5 printable")
 elif mode == "missing-invalid-name-reject": remove("rejected invalid display name")
@@ -603,12 +869,28 @@ elif mode == "extra-custom-client": game += "  0:06 ClientConnect: 3\n  0:06 Cli
 
 rows = []
 for message in messages:
-    category = "cgame" if message.startswith("CG_LoadCharacter:") else \
-        ("client" if message.startswith("CL_Characters:") else "ui")
-    severity = "WARN" if mode == "grunt-missing-part" and "part 'lower' not found" in message else "DEBUG"
+    category = "cgame" if message.startswith("CG_LoadCharacter:") \
+        or message.startswith("^2CustomGrunt^7 has entered") else \
+        ("client" if message.startswith("CL_Characters:") else
+         ("server" if message.startswith("botkick:")
+          or message.startswith("broadcast:") else "ui"))
+    severity = "WARN" if mode == "grunt-missing-part" and "part 'lower' not found" in message else \
+        ("INFO" if message.startswith("botkick:") or message.startswith("broadcast:")
+         or message.startswith("^2CustomGrunt^7 has entered") else "DEBUG")
     rows.append({"sev": severity, "cat": category, "msg": message})
 if mode == "ui-warn": rows.append({"sev": "WARN", "cat": "ui", "msg": "generic warning"})
 if mode == "renderer-error": rows.append({"sev": "ERROR", "cat": "renderer", "msg": "renderer failed"})
+if mode == "wrong-botkick-category":
+    idx = next(i for i, row in enumerate(rows) if row["msg"].startswith("botkick:"))
+    rows[idx]["cat"] = "ui"
+if mode == "wrong-ui-refusal-category":
+    idx = next(i for i, row in enumerate(rows)
+               if row["msg"] == "WiredUI: bot kick refused without a current bot selection")
+    rows[idx]["cat"] = "server"
+if mode == "wrong-b-enter-category":
+    indices = [i for i, row in enumerate(rows)
+               if row["msg"] == "^2CustomGrunt^7 has entered the game"]
+    rows[indices[-1]]["cat"] = "ui"
 with open(log_path, "w", encoding="utf-8") as out:
     for row in rows: out.write(json.dumps(row) + "\n")
 with open(layout_path, "w", encoding="utf-8") as out:
@@ -625,7 +907,7 @@ if [ "${1:-}" = "--self-test" ]; then
     write_fixture clean "$ROOT/clean.jsonl" "$ROOT/clean-layout.jsonl" "$ROOT/clean-games.log"
     analyze_contract "$ROOT/clean.jsonl" "$ROOT/clean-layout.jsonl" "$ROOT/clean-games.log" \
         || { echo "FAIL: clean fixture rejected"; rc=1; }
-    defects="missing-first wrong-map missing-nav missing-headless missing-human-begin missing-refusal missing-visor-action missing-visor-queue missing-grunt-action missing-grunt-queue wrong-grunt-profile missing-second-enter missing-grunt-eligibility wrong-grunt-primary missing-grunt-render zero-grunt-render wrong-grunt-parts grunt-missing-part grunt-fallback wrong-grunt-char wrong-grunt-skill wrong-grunt-trace wrong-trace-client missing-row0 missing-down wrong-row1 missing-queued legacy-clientkick missing-removed missing-disconnect human-disconnect residual-client3 ui-warn renderer-error missing-layout missing-grunt-layout missing-custom-init missing-custom-select wrong-custom-generation missing-custom-type wrong-custom-queue-profile wrong-custom-queue-name wrong-custom-queue-skill wrong-custom-queue-team missing-custom-reconnect wrong-custom-userinfo missing-custom-begin missing-custom-entered wrong-custom-final-count wrong-custom-final-name missing-custom-layout missing-negative-type missing-invalid-name-reject missing-invalid-retain missing-name-restore missing-character-reload missing-stale-reject missing-stale-retain extra-custom-accept extra-custom-client"
+    defects="missing-first wrong-map missing-nav missing-headless missing-human-begin missing-refusal missing-visor-action missing-visor-queue missing-grunt-action missing-grunt-queue wrong-grunt-profile missing-second-enter missing-grunt-eligibility wrong-grunt-primary missing-grunt-render zero-grunt-render wrong-grunt-parts grunt-missing-part grunt-fallback wrong-grunt-char wrong-grunt-skill wrong-grunt-trace wrong-trace-client missing-row0 missing-down wrong-row1 wrong-initial-visor-selection missing-queued wrong-queued-allocation legacy-clientkick missing-removed missing-stale-bot-refusal wrong-stale-actual stale-accepted missing-disconnect human-disconnect residual-client3 ui-warn renderer-error missing-layout missing-grunt-layout missing-custom-init missing-custom-select wrong-custom-generation missing-custom-type wrong-custom-queue-profile wrong-custom-queue-name wrong-custom-queue-skill wrong-custom-queue-team missing-custom-reconnect wrong-custom-userinfo missing-custom-begin missing-custom-entered missing-b-cgame-enter additive-b-enter wrong-b-enter-category wrong-custom-final-count wrong-custom-final-name wrong-custom-final-allocation additive-bot-row additive-bot-selection additive-botkick additive-bot-trace duplicate-ui-kick-refusal wrong-aba-selection-id wrong-aba-selection-generation wrong-botkick-category wrong-ui-refusal-category missing-aba-focus missing-aba-enter missing-fresh-down focus-before-selection-a focus-before-selection-b missing-custom-layout missing-negative-type missing-invalid-name-reject missing-invalid-retain missing-name-restore missing-character-reload missing-stale-reject missing-stale-retain extra-custom-accept extra-custom-client"
     for defect in $defects; do
         write_fixture "$defect" "$ROOT/$defect.jsonl" "$ROOT/$defect-layout.jsonl" "$ROOT/$defect-games.log"
         if analyze_contract "$ROOT/$defect.jsonl" "$ROOT/$defect-layout.jsonl" "$ROOT/$defect-games.log" >/dev/null 2>&1; then
@@ -635,7 +917,7 @@ if [ "${1:-}" = "--self-test" ]; then
             echo "  PASS rejected $defect"
         fi
     done
-    [ "$rc" -eq 0 ] && echo "==> SELF-TEST PASS: clean accepted; sixty defects rejected"
+    [ "$rc" -eq 0 ] && echo "==> SELF-TEST PASS: clean accepted; eighty-three defects rejected"
     exit "$rc"
 fi
 
@@ -688,10 +970,13 @@ set activeAction "exec wiredui-bot-actions-live.cfg"
 map arena7
 CFGEOF
 cat >"$HOME_ROOT/base/wiredui-bot-actions-live.cfg" <<'CFGEOF'
-wait 120
+# A cold isolated home builds arena7's navmesh asynchronously.  Bot add commands
+# issued while that bake is in flight are deferred, so make readiness an explicit
+# precondition of this identity/ABA contract rather than racing the bake.
+waitms 10000
 spawn_headless_client
 wait 300
-botkick 1
+botkick 1 1
 wait 30
 wui_push ingame
 wait 30
@@ -804,6 +1089,30 @@ wait 20
 wui_menu_nav enter
 wait 10
 wui_menu_nav focus btn_add_custom
+wui_bot_trace
+wait 10
+wui_menu_nav back
+wait 20
+wui_menu_nav focus btn_removebot
+wui_menu_nav enter
+wait 100
+wui_menu_nav focus botlist
+wui_menu_nav down
+wait 10
+botkick 3 3
+wait 100
+addbot "grunt" 4 free 0 "CustomGrunt"
+wait 300
+wui_menu_nav focus btn_kick_bot
+wui_menu_nav enter
+wait 20
+botkick 3 3
+wait 20
+wui_menu_nav focus botlist
+wui_menu_nav down
+wui_menu_nav focus btn_kick_bot
+wui_menu_nav enter
+wait 100
 wui_bot_trace
 wait 10
 quit

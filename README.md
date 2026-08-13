@@ -79,8 +79,9 @@ Built on [Quake3e](https://github.com/ec-/Quake3e), with significant additions:
   replacement for Q3Minimizer)
 - **\video-pipe** - to use external ffmpeg binary as an encoder for better
   quality and smaller output files
-- significantly reworked VM system (WASM via WAMR, legacy QVM fallback)
-- game modules run as `.wasm` with auto-detect fallback ([details](WASM.md))
+- significantly reworked VM system (WASM via WAMR, with native-module fallback)
+- game modules run as `.wasm` or platform AOT, with explicit interpreter-only
+  and AOT-preferred policies ([details](WASM.md))
 - improved server-side DoS protection, much reduced memory usage
 - raised filesystem limits (up to 20,000 maps can be handled in a single
   directory)

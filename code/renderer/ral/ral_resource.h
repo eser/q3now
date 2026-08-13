@@ -296,7 +296,8 @@ typedef enum {
 	RAL_BIND_SAMPLED_TEXTURE,
 	RAL_BIND_STORAGE_TEXTURE,
 	RAL_BIND_SAMPLER,
-	RAL_BIND_TEXTURE_ARRAY      // bindless sampled-texture array (count == 0 → unbounded)
+	RAL_BIND_TEXTURE_ARRAY,     // bindless sampled-texture array (count == 0 → unbounded)
+	RAL_BIND_COMBINED_TEXTURE_SAMPLER
 } ralBindType_t;
 
 typedef struct {
@@ -385,6 +386,7 @@ void             *Ral_GetFramebufferHandle( const ralFramebuffer_t *fb );
 //   *_BUFFER          → buffer, bufferOffset, bufferRange
 //   SAMPLED/STORAGE_TEXTURE → textureView
 //   SAMPLER           → sampler
+//   COMBINED_TEXTURE_SAMPLER → textureView + sampler
 //   TEXTURE_ARRAY     → textureArray[0..textureArrayCount)
 typedef struct {
 	uint32_t                       binding;

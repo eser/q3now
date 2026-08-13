@@ -4,6 +4,9 @@
 // cl_main.c  -- client main loop
 
 #include "client.h"
+#include "cl_demo_frame.h"
+#include "cl_info_challenge.h"
+#include "cl_ping_queue.h"
 #include "wired/ui/cl_wired_ui.h"
 #include "wired/ui/cl_wired_viewport.h"
 #include "wired/ui/cl_wired_compositor.h"
@@ -15,6 +18,7 @@
 #include "../qcommon/util/crypto.h"
 #include "../qcommon/maps/meta.h"
 #include "../qcommon/wired/net/wn_public.h"
+#include <errno.h>
 #include <limits.h>
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 LOG_DECLARE_CHANNEL( ch_renderer, "renderer" );
@@ -100,6 +104,13 @@ cvar_t *cl_drawBuffer;
 // were retired).
 clientApp_t			clientApps[MAX_LOCAL_CGAME_VMS];
 clientApp_t			*clientActiveApp = &clientApps[0];
+static uint64_t		cl_connectionGenerationIssuer;
+
+static uint64_t CL_NextConnectionGeneration( void ) {
+	cl_connectionGenerationIssuer++;
+	if ( cl_connectionGenerationIssuer == 0 ) cl_connectionGenerationIssuer++;
+	return cl_connectionGenerationIssuer;
+}
 
 // The app currently being serviced this frame — the "faulting-app cursor". A
 // recoverable error (TERM_CLIENT_DROP/LEAVE/KICK) inside an app's per-frame
@@ -813,6 +824,150 @@ static void CL_DemoCompleted( void ) {
 	CL_NextDemo();
 }
 
+typedef struct {
+	clientApp_t *app;
+	fileHandle_t file;
+} clDemoFileReadContext_t;
+
+static void CL_ClearDemoReadFault( clientApp_t *app ) {
+	app->demoReadFaultArmed = qfalse;
+	app->demoReadFaultAfterBytes = 0;
+	app->demoReadFaultRemaining = 0;
+}
+
+static int CL_DemoFileRead( void *context, void *buffer, size_t length ) {
+	clDemoFileReadContext_t *readContext = context;
+	clientApp_t *app = readContext->app;
+	int count;
+
+	if ( length > (size_t)INT_MAX ) return -1;
+	if ( app->demoReadFaultArmed ) {
+		if ( app->demoReadFaultRemaining == 0 ) {
+			const int afterBytes = app->demoReadFaultAfterBytes;
+			CL_ClearDemoReadFault( app );
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+				"Demo read fault injected after_bytes=%d requested=%zu\n",
+				afterBytes, length );
+			return -1;
+		}
+		if ( length > (size_t)app->demoReadFaultRemaining ) {
+			length = (size_t)app->demoReadFaultRemaining;
+		}
+	}
+
+	count = FS_Read( buffer, (int)length, readContext->file );
+	if ( count > 0 && app->demoReadFaultArmed ) {
+		if ( count > app->demoReadFaultRemaining ) {
+			CL_ClearDemoReadFault( app );
+			return -1;
+		}
+		app->demoReadFaultRemaining -= count;
+	}
+	return count;
+}
+
+static void CL_DemoReadFault_f( void ) {
+	char *parseEnd = NULL;
+	long afterBytes;
+
+	if ( !com_automated || !com_automated->integer ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_client),
+			"Demo read fault refused automated=0\n" );
+		return;
+	}
+	if ( Cmd_Argc() != 2 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_client),
+			"demo_read_fault <after-bytes>\n" );
+		return;
+	}
+
+	errno = 0;
+	afterBytes = strtol( Cmd_Argv( 1 ), &parseEnd, 10 );
+	if ( errno == ERANGE || !parseEnd || parseEnd == Cmd_Argv( 1 ) || *parseEnd
+	  || afterBytes < 0 || afterBytes > MAX_MSGLEN_BUF ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_client),
+			"Demo read fault rejected invalid_budget=1\n" );
+		return;
+	}
+
+	clientActiveApp->demoReadFaultArmed = qtrue;
+	clientActiveApp->demoReadFaultAfterBytes = (int)afterBytes;
+	clientActiveApp->demoReadFaultRemaining = (int)afterBytes;
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+		"Demo read fault armed after_bytes=%ld\n", afterBytes );
+}
+
+static const char *CL_DemoFailureText( clDemoFrameStatus_t status ) {
+	switch ( status ) {
+	case CL_DEMO_FRAME_MISSING_TERMINATOR:
+		return "The demo ended without its required terminator.";
+	case CL_DEMO_FRAME_TRUNCATED_SEQUENCE:
+		return "The demo has a truncated message sequence.";
+	case CL_DEMO_FRAME_TRUNCATED_LENGTH:
+		return "The demo has a truncated message length.";
+	case CL_DEMO_FRAME_INVALID_TERMINATOR:
+		return "The demo has an invalid end marker.";
+	case CL_DEMO_FRAME_INVALID_LENGTH:
+		return "The demo has an invalid message length.";
+	case CL_DEMO_FRAME_EMPTY_PAYLOAD:
+		return "The demo contains an empty message payload.";
+	case CL_DEMO_FRAME_OVERSIZE:
+		return "The demo contains a message larger than the protocol limit.";
+	case CL_DEMO_FRAME_TRUNCATED_PAYLOAD:
+		return "The demo has a truncated message payload.";
+	case CL_DEMO_FRAME_IO_ERROR:
+	default:
+		return "The demo could not be read.";
+	}
+}
+
+static void CL_DemoFailedWithText( const char *reason, const char *message ) {
+	char nextDemo[MAX_CVAR_VALUE_STRING];
+	qboolean attractOwned;
+	qboolean scriptedContinuation;
+
+	Cvar_VariableStringBuffer( "nextdemo", nextDemo, sizeof( nextDemo ) );
+	attractOwned = WiredAttract_IsDemoOverlayActive();
+	scriptedContinuation = nextDemo[0] != '\0';
+	Com_Log( SEV_INFO, LOG_CH(ch_client),
+		"Demo playback rejected reason=%s continuation=%d\n",
+		reason, ( attractOwned || scriptedContinuation ) ? 1 : 0 );
+	Com_SetLastError( "%s", message );
+	CL_Disconnect( clientActiveApp, qfalse );
+
+	if ( attractOwned ) {
+		Com_ClearLastError();
+		if ( WiredAttract_OnDemoFailed() ) return;
+		Com_SetLastError( "%s", message );
+	}
+	if ( scriptedContinuation ) {
+		Com_ClearLastError();
+		CL_NextDemo();
+		return;
+	}
+
+	if ( cls.uiStarted ) {
+		WiredUI_SetActiveMenu( UIMENU_MAIN );
+		WiredUI_PushMenu( "demos", WUI_BG_INTENT_SCENE );
+		if ( com_automated && com_automated->integer ) {
+			Com_ClearLastError();
+			Com_Log( SEV_INFO, LOG_CH(ch_client),
+				"Demo playback recovery reason=%s depth=%d popup=0 automated=1\n",
+				reason, WiredUI_GetMenuStackDepth() );
+		} else {
+			CL_WiredUI_ShowError( "Demo Playback Failed", message, qfalse );
+			Com_Log( SEV_INFO, LOG_CH(ch_client),
+				"Demo playback recovery reason=%s depth=%d popup=1 automated=0\n",
+				reason, WiredUI_GetMenuStackDepth() );
+		}
+	}
+}
+
+static void CL_DemoFailed( clDemoFrameStatus_t status ) {
+	CL_DemoFailedWithText( CL_DemoFrameStatusName( status ),
+		CL_DemoFailureText( status ) );
+}
+
 
 /*
 =================
@@ -822,52 +977,71 @@ CL_ReadDemoMessage
 void CL_ReadDemoMessage( void ) {
 	msg_t		buf;
 	byte		bufData[ MAX_MSGLEN_BUF ];
+	clDemoFrame_t frame;
+	clDemoFrameStatus_t frameStatus;
+	clDemoFileReadContext_t readContext;
 
 	if ( clientActiveApp->clc.demofile == FS_INVALID_HANDLE ) {
 		CL_DemoCompleted();
 		return;
 	}
 
-	// get the sequence number
-	int s;
-	int r = FS_Read( &s, 4, clientActiveApp->clc.demofile );
-	if ( r != 4 ) {
-		CL_DemoCompleted();
-		return;
-	}
-	clientActiveApp->clc.serverMessageSequence = LittleLong( s );
-
-	// init the message
 	MSG_Init( &buf, bufData, MAX_MSGLEN );
-
-	// get the length
-	r = FS_Read( &buf.cursize, 4, clientActiveApp->clc.demofile );
-	if ( r != 4 ) {
+	readContext.app = clientActiveApp;
+	readContext.file = clientActiveApp->clc.demofile;
+	frameStatus = CL_DemoFrameRead( CL_DemoFileRead,
+		&readContext, buf.data, (size_t)buf.maxsize, &frame );
+	if ( frameStatus == CL_DEMO_FRAME_END ) {
 		CL_DemoCompleted();
 		return;
 	}
-	buf.cursize = LittleLong( buf.cursize );
-	if ( buf.cursize < 0 ) {
-		CL_DemoCompleted();
+	if ( frameStatus != CL_DEMO_FRAME_MESSAGE ) {
+		CL_DemoFailed( frameStatus );
 		return;
 	}
-	if ( buf.cursize > buf.maxsize ) {
-		Com_Terminate( TERM_CLIENT_DROP, "CL_ReadDemoMessage: demoMsglen > MAX_MSGLEN");
-	}
-	r = FS_Read( buf.data, buf.cursize, clientActiveApp->clc.demofile );
-	if ( r != buf.cursize ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "Demo file was truncated.\n");
-		CL_DemoCompleted();
-		return;
-	}
+	clientActiveApp->clc.serverMessageSequence = frame.sequence;
+	buf.cursize = (int)frame.payloadLength;
 
 	clientActiveApp->clc.lastPacketTime = cls.realtime;
 	buf.readcount = 0;
 
 	clientActiveApp->clc.demoCommandSequence = clientActiveApp->clc.serverCommandSequence;
 
-	// Demo playback parses into the active app (the one playing the demo).
+	// Demo playback parses into the active app. The frame envelope may be valid
+	// while its payload contains a bounded typed semantic failure (currently an
+	// illegal top-level svc or an oversized snapshot areamask declaration). Arm a
+	// file-local recovery boundary only for this parse; live network messages stay
+	// on the generic TERM_CLIENT_DROP path in CL_ParseServerMessage.
+	clientActiveApp->demoMessageAbortArmed = qtrue;
+	clientActiveApp->demoMessageAbortCommand = -1;
+	clientActiveApp->demoMessageAbortKind = DEMO_MESSAGE_ABORT_NONE;
+	clientActiveApp->demoMessageAbortDetail = -1;
+	if ( Q_setjmp( clientActiveApp->demoMessageAbort ) ) {
+		const int recoveredCommand = clientActiveApp->demoMessageAbortCommand;
+		const demoMessageAbortKind_t recoveredKind = clientActiveApp->demoMessageAbortKind;
+		const int recoveredDetail = clientActiveApp->demoMessageAbortDetail;
+		clientActiveApp->demoMessageAbortArmed = qfalse;
+		clientActiveApp->demoMessageAbortCommand = -1;
+		clientActiveApp->demoMessageAbortKind = DEMO_MESSAGE_ABORT_NONE;
+		clientActiveApp->demoMessageAbortDetail = -1;
+		if ( recoveredKind == DEMO_MESSAGE_ABORT_SNAPSHOT_AREAMASK ) {
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+				"Demo semantic parse recovered command=%d detail=snapshot-areamask areabytes=%d generic_teardown=0\n",
+				recoveredCommand, recoveredDetail );
+		} else {
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+				"Demo semantic parse recovered command=%d generic_teardown=0\n",
+				recoveredCommand );
+		}
+		CL_DemoFailedWithText( "semantic-payload",
+			"The demo contains an invalid server message." );
+		return;
+	}
 	CL_ParseServerMessage( clientActiveApp, &buf );
+	clientActiveApp->demoMessageAbortArmed = qfalse;
+	clientActiveApp->demoMessageAbortCommand = -1;
+	clientActiveApp->demoMessageAbortKind = DEMO_MESSAGE_ABORT_NONE;
+	clientActiveApp->demoMessageAbortDetail = -1;
 
 	if ( clientActiveApp->clc.demorecording ) {
 		// track changes and write new message
@@ -1047,14 +1221,64 @@ void CL_SetState( clientApp_t *app, connstate_t newState ) {
 
 /*
 ====================
-CL_PlayDemo_f
+CL_DemoOpenFailed
+
+Preserve the historical console/demo-reel behaviour, but give an authored
+Demos-menu launch a local recovery when its loose file disappeared after the
+feeder snapshot was built.  The UI branch deliberately does not echo the
+qpath: it is an inventory race, not a path diagnostic.
+
+====================
+*/
+static void CL_DemoOpenFailed( qboolean uiOwned, const char *stage,
+	qboolean disconnected, const char *name ) {
+	char nextDemo[MAX_CVAR_VALUE_STRING];
+
+	CL_ClearDemoReadFault( clientActiveApp );
+	Cvar_VariableStringBuffer( "nextdemo", nextDemo, sizeof( nextDemo ) );
+	if ( uiOwned ) {
+		const char *message = "The selected demo is no longer available.";
+
+		/* A continuation left by a previous/demo-reel owner must not hijack an
+		 * authored Demos-menu activation.  UI origin owns its own bounded
+		 * recovery; the direct `demo` command retains historical nextdemo. */
+		if ( nextDemo[0] ) {
+			Cvar_Set( "nextdemo", "" );
+		}
+		Com_Log( SEV_INFO, LOG_CH(ch_client),
+			"Demo playback open rejected origin=demo-ui stage=%s continuation=0 disconnect=%d\n",
+			stage, disconnected ? 1 : 0 );
+		Com_SetLastError( "%s", message );
+		if ( cls.uiStarted ) {
+			WiredUI_SetActiveMenu( UIMENU_MAIN );
+			WiredUI_PushMenu( "demos", WUI_BG_INTENT_SCENE );
+			CL_WiredUI_ShowError( "Demo Playback Failed", message, qfalse );
+			Com_Log( SEV_INFO, LOG_CH(ch_client),
+				"Demo playback open recovery origin=demo-ui stage=%s depth=%d popup=%d\n",
+				stage, WiredUI_GetMenuStackDepth(),
+				( com_automated && com_automated->integer ) ? 0 : 1 );
+		}
+		return;
+	}
+
+	// Direct `demo` and any authored `nextdemo` continuation retain their
+	// established diagnostic and successor behaviour.
+	COM_WARN( LOG_CH(ch_client), "couldn't open %s\n", name );
+	CL_NextDemo();
+}
+
+/*
+====================
+CL_PlayDemoCommand
 
 demo <demoname>
 
 ====================
 */
-static void CL_PlayDemo_f( void ) {
+static void CL_PlayDemoCommand( qboolean uiOwned ) {
 	char		name[MAX_OSPATH];
+	qboolean	preserveReadFault;
+	int		readFaultAfterBytes;
 
 	if ( Cmd_Argc() != 2 ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "demo <demoname>\n" );
@@ -1107,10 +1331,7 @@ static void CL_PlayDemo_f( void ) {
 		protocol = CL_WalkDemoExt( arg, name, sizeof( name ), &hFile );
 
 	if ( hFile == FS_INVALID_HANDLE ) {
-		COM_WARN( LOG_CH(ch_client), "couldn't open %s\n", name );
-		// Honor the "nextdemo" cvar even if the current demo fails to
-		// open so that a queued demo reel keeps advancing.
-		CL_NextDemo();
+		CL_DemoOpenFailed( uiOwned, "probe", qfalse, name );
 		return;
 	}
 
@@ -1121,17 +1342,24 @@ static void CL_PlayDemo_f( void ) {
 	// 2 means don't force disconnect of local client
 	Cvar_Set( "sv_killserver", "2" );
 
+	preserveReadFault = clientActiveApp->demoReadFaultArmed;
+	readFaultAfterBytes = clientActiveApp->demoReadFaultAfterBytes;
 	CL_Disconnect( clientActiveApp, qtrue );
-
-	// clc.demofile will be closed during CL_Disconnect so reopen it
-	if ( FS_FOpenFileRead( name, &clientActiveApp->clc.demofile, qtrue ) == -1 )
-	{
-		// drop this time
-		COM_WARN( LOG_CH(ch_client), "couldn't open %s\n", name );
-		// Honor the "nextdemo" cvar so a demo reel can progress past a
-		// missing entry rather than tearing down with an ERR_DROP.
-		CL_NextDemo();
+	/* Preserve the historical FS-generation boundary: disconnect may restore
+	 * fs_game/pure state, so the playback handle is acquired only afterwards. */
+	FS_BypassPure();
+	FS_FOpenFileRead( name, &hFile, qtrue );
+	FS_RestorePure();
+	if ( hFile == FS_INVALID_HANDLE ) {
+		CL_DemoOpenFailed( uiOwned, "playback", qtrue, name );
 		return;
+	}
+	clientActiveApp->clc.demofile = hFile;
+	hFile = FS_INVALID_HANDLE;
+	if ( preserveReadFault ) {
+		clientActiveApp->demoReadFaultArmed = qtrue;
+		clientActiveApp->demoReadFaultAfterBytes = readFaultAfterBytes;
+		clientActiveApp->demoReadFaultRemaining = readFaultAfterBytes;
 	}
 
 	const char *slash, *shortname;
@@ -1167,6 +1395,14 @@ static void CL_PlayDemo_f( void ) {
 	clientActiveApp->clc.firstDemoFrameSkipped = qfalse;
 }
 
+static void CL_PlayDemo_f( void ) {
+	CL_PlayDemoCommand( qfalse );
+}
+
+static void CL_PlayDemoUI_f( void ) {
+	CL_PlayDemoCommand( qtrue );
+}
+
 
 /*
 ==================
@@ -1186,8 +1422,12 @@ static void CL_NextDemo( void ) {
 	}
 
 	Cvar_Set( "nextdemo", "" );
-	Cbuf_AddText( v );
-	Cbuf_AddText( "\n" );
+	// A demo can complete or fail synchronously while its `demo` command is
+	// itself executing from a cfg. Appending puts the successor behind that
+	// cfg's remaining commands (including a possible `quit`), so it may never
+	// run. Insert makes the documented continuation the immediate next command;
+	// the nested execute then stops naturally at any authored wait.
+	Cbuf_InsertText( v );
 	Cbuf_Execute();
 }
 
@@ -1513,6 +1753,16 @@ qboolean CL_Disconnect( clientApp_t *app, qboolean showMainMenu ) {
 	// loading-screen state are single per process) belong to the input-focused
 	// app; a non-focused app's disconnect tears down only its own connection.
 	qboolean isFocused = ( app == clientActiveApp );
+
+	// A generic parser failure can leave CL_ReadDemoMessage through the outer
+	// per-app error boundary instead of its narrow semantic-payload boundary.
+	// Invalidate that stack-owned jump target before every disconnect exit,
+	// including uninitialised and re-entrant teardown paths.
+	app->demoMessageAbortArmed = qfalse;
+	app->demoMessageAbortCommand = -1;
+	app->demoMessageAbortKind = DEMO_MESSAGE_ABORT_NONE;
+	app->demoMessageAbortDetail = -1;
+	CL_ClearDemoReadFault( app );
 
 	if ( !com_cl_running || !com_cl_running->integer ) {
 		return cl_restarted;
@@ -1921,6 +2171,7 @@ static void CL_SpawnHeadlessApp_f( void ) {
 	memset( &app->clc, 0, sizeof( app->clc ) );
 	memset( &app->cl, 0, sizeof( app->cl ) );
 	app->clc.quic_conn = handle;
+	app->connectionGeneration = CL_NextConnectionGeneration();
 	app->cgvm = NULL;                 /* runtime-headless: no cgame VM */
 	Q_strncpyz( app->servername, "localhost", sizeof( app->servername ) );
 	CL_SetState( app, CA_CONNECTING );
@@ -2864,6 +3115,9 @@ static void CL_CheckForResend( void ) {
 						NET_AdrToString( &clientActiveApp->clc.serverAddress ),
 						(int)BigShort( clientActiveApp->clc.serverAddress.port ),
 						info );
+					if ( clientActiveApp->clc.quic_conn != CONN_INVALID ) {
+						clientActiveApp->connectionGeneration = CL_NextConnectionGeneration();
+					}
 					handedOff = qtrue;
 				}
 			}
@@ -5106,6 +5360,8 @@ void CL_Init( void ) {
 	Cmd_SetCommandCompletionFunc( "record", CL_CompleteRecordName );
 	Cmd_AddCommand ("demo", CL_PlayDemo_f);
 	Cmd_SetCommandCompletionFunc( "demo", CL_CompleteDemoName );
+	Cmd_AddCommand ("demo_ui", CL_PlayDemoUI_f);
+	Cmd_AddCommand( "demo_read_fault", CL_DemoReadFault_f );
 	Cmd_AddCommand ("cinematic", CL_PlayCinematic_f);
 	Cmd_AddCommand ("stoprecord", CL_StopRecord_f);
 	Cmd_AddCommand ("connect", CL_Connect_f);
@@ -5203,6 +5459,8 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	Cmd_RemoveCommand ("disconnect");
 	Cmd_RemoveCommand ("record");
 	Cmd_RemoveCommand ("demo");
+	Cmd_RemoveCommand ("demo_ui");
+	Cmd_RemoveCommand( "demo_read_fault" );
 	Cmd_RemoveCommand ("cinematic");
 	Cmd_RemoveCommand ("stoprecord");
 	Cmd_RemoveCommand ("connect");
@@ -5290,28 +5548,66 @@ static qboolean CL_SetServerInfo( serverInfo_t *server, const char *info, int pi
 }
 
 
-static void CL_SetServerInfoByAddress(const netadr_t *from, const char *info, int ping) {
+static qboolean CL_SetServerInfoByAddressForOwner( const netadr_t *from,
+	const char *info, int ping, clPingOwner_t owner ) {
 	qboolean globalChanged = qfalse;
-	for (int i = 0; i < MAX_OTHER_SERVERS; i++) {
-		if (NET_CompareAdr(from, &cls.localServers[i].adr) ) {
-			CL_SetServerInfo(&cls.localServers[i], info, ping);
-		}
-	}
+	qboolean changed = qfalse;
+	int source;
 
-	for (int i = 0; i < cls.numglobalservers; i++) {
-		if (NET_CompareAdr(from, &cls.globalServers[i].adr)) {
-			if ( CL_SetServerInfo( &cls.globalServers[i], info, ping ) ) {
-				globalChanged = qtrue;
+	if ( !from || !CL_PingOwnerBrowserSource( owner, &source ) ) return qfalse;
+	if ( source == AS_LOCAL ) {
+		for ( int i = 0; i < cls.numlocalservers; i++ ) {
+			if ( NET_CompareAdr( from, &cls.localServers[i].adr ) ) {
+				changed |= CL_SetServerInfo( &cls.localServers[i], info, ping );
 			}
 		}
+		return changed;
 	}
-	if ( globalChanged ) CL_BumpGlobalServerGeneration();
 
-	for (int i = 0; i < MAX_OTHER_SERVERS; i++) {
-		if (NET_CompareAdr(from, &cls.favoriteServers[i].adr)) {
-			CL_SetServerInfo(&cls.favoriteServers[i], info, ping);
+	if ( source == AS_GLOBAL ) {
+		for ( int i = 0; i < cls.numglobalservers; i++ ) {
+			if ( NET_CompareAdr( from, &cls.globalServers[i].adr ) ) {
+				if ( CL_SetServerInfo( &cls.globalServers[i], info, ping ) ) {
+					globalChanged = qtrue;
+				}
+			}
+		}
+		if ( globalChanged ) CL_BumpGlobalServerGeneration();
+		return globalChanged;
+	}
+
+	for ( int i = 0; i < cls.numfavoriteservers; i++ ) {
+		if ( NET_CompareAdr( from, &cls.favoriteServers[i].adr ) ) {
+			changed |= CL_SetServerInfo( &cls.favoriteServers[i], info, ping );
 		}
 	}
+	return changed;
+}
+
+static int CL_RetirePingOwner( clPingOwner_t owner, const char *reason ) {
+	int retired = 0;
+	int retainedDirect = 0;
+	unsigned int now = (unsigned int)Sys_Milliseconds();
+
+	for ( int i = 0; i < ARRAY_LEN( cl_pinglist ); i++ ) {
+		ping_t *ping = &cl_pinglist[i];
+		if ( !ping->adr.port || ping->owner != owner ) continue;
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+			"Ping transaction retired slot=%d owner=%s generation=%u reason=%s state=%s age=%ums address=%s\n",
+			i, CL_PingOwnerName( ping->owner ), ping->generation, reason,
+			ping->time > 0 ? "completed" : "pending", now - ping->start,
+			NET_AdrToStringwPort( &ping->adr ) );
+		memset( ping, 0, sizeof( *ping ) );
+		retired++;
+	}
+	for ( int i = 0; i < ARRAY_LEN( cl_pinglist ); i++ ) {
+		if ( cl_pinglist[i].adr.port
+		  && cl_pinglist[i].owner == CL_PING_OWNER_MANUAL ) retainedDirect++;
+	}
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+		"Ping owner refresh owner=%s reason=%s retired=%d retained_direct=%d\n",
+		CL_PingOwnerName( owner ), reason, retired, retainedDirect );
+	return retired;
 }
 
 static int CL_ServerInfoNetType( const netadr_t *from ) {
@@ -5333,19 +5629,26 @@ static unsigned int CL_ElapsedMilliseconds( unsigned int start ) {
 	return (unsigned int)Sys_Milliseconds() - start;
 }
 
+_Static_assert( AS_LOCAL == CL_PING_BROWSER_SOURCE_LOCAL,
+	"local browser source ABI drift" );
+_Static_assert( AS_GLOBAL == CL_PING_BROWSER_SOURCE_GLOBAL,
+	"global browser source ABI drift" );
+_Static_assert( AS_FAVORITES == CL_PING_BROWSER_SOURCE_FAVORITES,
+	"favorites browser source ABI drift" );
+
 static void CL_NewInfoChallenge( char challenge[CL_INFO_CHALLENGE_CHARS + 1],
 	unsigned int *generation ) {
-	static const char hex[] = "0123456789abcdef";
 	byte random[CL_INFO_CHALLENGE_BYTES];
-	Com_RandomBytes( random, sizeof( random ) );
-	for ( size_t i = 0; i < sizeof( random ); i++ ) {
-		challenge[i * 2] = hex[random[i] >> 4];
-		challenge[i * 2 + 1] = hex[random[i] & 15];
-	}
-	challenge[CL_INFO_CHALLENGE_CHARS] = '\0';
+	unsigned int allocatedGeneration;
+
 	cl_infoChallengeGeneration++;
 	if ( cl_infoChallengeGeneration == 0 ) cl_infoChallengeGeneration++;
-	if ( generation ) *generation = cl_infoChallengeGeneration;
+	allocatedGeneration = cl_infoChallengeGeneration;
+	Com_RandomBytes( random, sizeof( random ) );
+	/* Some platform RNG fallbacks can repeat within one weak, same-second seed.
+	 * Mix the monotonic generation into all bytes without reducing entropy. */
+	CL_InfoChallengeDerive( random, allocatedGeneration, challenge );
+	if ( generation ) *generation = allocatedGeneration;
 }
 
 
@@ -5358,9 +5661,11 @@ static void CL_ServerInfoPacket( const netadr_t *from, msg_t *msg ) {
 	char	info[MAX_INFO_STRING];
 	serverInfo_t parsed;
 	ping_t *pingRequest = NULL;
+	ping_t *pingFallback = NULL;
 	const char *expectedChallenge;
 	unsigned int requestGeneration;
 	unsigned int elapsed;
+	qboolean localChallengeMatch;
 
 	/* Read the complete packet payload before applying the MAX_INFO_STRING
 	 * contract; MSG_ReadString would silently return a valid-looking 1023-byte
@@ -5373,16 +5678,23 @@ static void CL_ServerInfoPacket( const netadr_t *from, msg_t *msg ) {
 	}
 	Q_strncpyz( info, infoString, sizeof( info ) );
 
-	/* An address alone is not response authority.  Prefer a live directed-ping
-	 * transaction for that address; otherwise only an active local broadcast
-	 * generation may admit a previously unknown row. */
+	/* Resolve response ownership by its untrusted-but-correlated token before
+	 * falling back to address.  A manual ping and local broadcast can target the
+	 * same endpoint concurrently; address-first routing would let either one
+	 * shadow the other's response. */
+	localChallengeMatch = cl_localDiscovery.active && cl_localDiscovery.challenge[0]
+		&& CL_ServerInfoChallengeMatches( info, cl_localDiscovery.challenge );
 	for ( int i = 0; i < MAX_PINGREQUESTS; i++ ) {
 		if ( cl_pinglist[i].adr.port && !cl_pinglist[i].time
 		  && NET_CompareAdr( from, &cl_pinglist[i].adr ) ) {
-			pingRequest = &cl_pinglist[i];
-			break;
+			if ( !pingFallback ) pingFallback = &cl_pinglist[i];
+			if ( CL_ServerInfoChallengeMatches( info, cl_pinglist[i].challenge ) ) {
+				pingRequest = &cl_pinglist[i];
+				break;
+			}
 		}
 	}
+	if ( !pingRequest && !localChallengeMatch ) pingRequest = pingFallback;
 	if ( pingRequest ) {
 		elapsed = CL_ElapsedMilliseconds( pingRequest->start );
 		if ( elapsed >= pingRequest->timeout ) {
@@ -5401,10 +5713,16 @@ static void CL_ServerInfoPacket( const netadr_t *from, msg_t *msg ) {
 			return;
 		}
 		elapsed = CL_ElapsedMilliseconds( cl_localDiscovery.start );
-		if ( !cl_localDiscovery.active || elapsed >= cl_localDiscovery.timeout ) {
-			cl_localDiscovery.active = qfalse;
+		if ( !cl_localDiscovery.active ) {
 			Com_Log( SEV_DEBUG, LOG_CH(ch_client),
 				"Ignored unsolicited infoResponse from %s\n", NET_AdrToStringwPort( from ) );
+			return;
+		}
+		if ( elapsed >= cl_localDiscovery.timeout ) {
+			cl_localDiscovery.active = qfalse;
+			Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+				"Ignored expired local discovery infoResponse generation=%u elapsed=%ums from %s\n",
+				cl_localDiscovery.generation, elapsed, NET_AdrToStringwPort( from ) );
 			return;
 		}
 		expectedChallenge = cl_localDiscovery.challenge;
@@ -5443,7 +5761,6 @@ static void CL_ServerInfoPacket( const netadr_t *from, msg_t *msg ) {
 
 			// save of info
 			Q_strncpyz( pingRequest->info, info, sizeof( pingRequest->info ) );
-			CL_SetServerInfoByAddress( from, pingRequest->info, pingRequest->time );
 
 			return;
 	}
@@ -5699,6 +6016,9 @@ CL_LocalServers_f
 static void CL_LocalServers_f( void ) {
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "Scanning for servers on the local network...\n");
 
+	// A new local generation owns only local-browser transactions. Manual,
+	// global and favorite requests share capacity but are independent lifecycles.
+	CL_RetirePingOwner( CL_PING_OWNER_BROWSER_LOCAL, "local-refresh" );
 	// reset the list, waiting for response
 	cls.numlocalservers = 0;
 	cls.pingUpdateSource = AS_LOCAL;
@@ -5880,7 +6200,7 @@ static void CL_GlobalServers_f( void ) {
 
 	memset( cls.globalServers, 0, sizeof( cls.globalServers ) );
 	memset( cls.globalServerAddresses, 0, sizeof( cls.globalServerAddresses ) );
-	memset( cl_pinglist, 0, sizeof( cl_pinglist ) );
+	CL_RetirePingOwner( CL_PING_OWNER_BROWSER_GLOBAL, "global-refresh" );
 	cls.numglobalservers = 0;
 	cls.numGlobalServerAddresses = 0;
 	cls.pingUpdateSource = AS_GLOBAL;
@@ -5933,8 +6253,16 @@ static void CL_GlobalServers_f( void ) {
 CL_GetPing
 ==================
 */
-void CL_GetPing( int n, char *buf, int buflen, int *pingtime )
+static void CL_GetPingForConsumer( int n, char *buf, int buflen, int *pingtime,
+	const char *consumer )
 {
+	const char *outcome = NULL;
+	const char *cacheAction = "none";
+	qboolean cacheMatched = qfalse;
+	clPingCacheAction_t requestedCacheAction;
+	ping_t *ping;
+	unsigned int elapsed;
+
 	if (n < 0 || n >= MAX_PINGREQUESTS || !cl_pinglist[n].adr.port)
 	{
 		// empty or invalid slot
@@ -5942,29 +6270,53 @@ void CL_GetPing( int n, char *buf, int buflen, int *pingtime )
 		*pingtime = 0;
 		return;
 	}
+	ping = &cl_pinglist[n];
 
-	const char *str = NET_AdrToStringwPort( &cl_pinglist[n].adr );
+	const char *str = NET_AdrToStringwPort( &ping->adr );
 	Q_strncpyz( buf, str, buflen );
 
-	int time = cl_pinglist[n].time;
+	int time = ping->time;
 	if ( time == 0 )
 	{
 		// check for timeout
-		unsigned int elapsed = CL_ElapsedMilliseconds( cl_pinglist[n].start );
-		if ( elapsed < cl_pinglist[n].timeout )
+		elapsed = CL_ElapsedMilliseconds( ping->start );
+		if ( elapsed < ping->timeout )
 		{
 			// not timed out yet
 			time = 0;
 		} else {
 			time = (int)elapsed;
-			CL_SetServerInfoByAddress( &cl_pinglist[n].adr, NULL, 0 );
+			outcome = "expired";
+			requestedCacheAction = CL_PingOwnerTerminalCacheAction(
+				ping->owner, false );
+			if ( requestedCacheAction == CL_PING_CACHE_CLEAR ) {
+				cacheMatched = CL_SetServerInfoByAddressForOwner(
+					&ping->adr, NULL, 0, ping->owner );
+				cacheAction = "clear";
+			}
 		}
 	} else {
-		CL_SetServerInfoByAddress( &cl_pinglist[n].adr,
-			cl_pinglist[n].info, cl_pinglist[n].time );
+		outcome = "completed";
+		requestedCacheAction = CL_PingOwnerTerminalCacheAction( ping->owner, true );
+		if ( requestedCacheAction == CL_PING_CACHE_PUBLISH ) {
+			cacheMatched = CL_SetServerInfoByAddressForOwner( &ping->adr,
+				ping->info, ping->time, ping->owner );
+			cacheAction = "publish";
+		}
 	}
 
 	*pingtime = time;
+	if ( outcome ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+			"Ping result consumed slot=%d owner=%s generation=%u outcome=%s time=%dms cache_action=%s matched=%d consumer=%s address=%s\n",
+			n, CL_PingOwnerName( ping->owner ), ping->generation, outcome,
+			time, cacheAction, cacheMatched ? 1 : 0, consumer,
+			NET_AdrToStringwPort( &ping->adr ) );
+	}
+}
+
+void CL_GetPing( int n, char *buf, int buflen, int *pingtime ) {
+	CL_GetPingForConsumer( n, buf, buflen, pingtime, "public" );
 }
 
 
@@ -5992,14 +6344,29 @@ void CL_GetPingInfo( int n, char *buf, int buflen )
 CL_ClearPing
 ==================
 */
-void CL_ClearPing( int n )
+static qboolean CL_ClearPingIdentity( int n, clPingOwner_t expectedOwner,
+	unsigned int expectedGeneration )
 {
+	ping_t *ping;
+	unsigned int age;
+	const char *state;
+
 	if (n < 0 || n >= MAX_PINGREQUESTS)
-		return;
+		return qfalse;
+	ping = &cl_pinglist[n];
+	if ( !ping->adr.port || !CL_PingIdentityMatches( ping->owner, ping->generation,
+		expectedOwner, expectedGeneration ) ) return qfalse;
+	age = CL_ElapsedMilliseconds( ping->start );
+	state = ping->time > 0 ? "completed"
+		: age >= ping->timeout ? "expired" : "pending";
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+		"Ping transaction cleared slot=%d owner=%s generation=%u state=%s age=%ums address=%s\n",
+		n, CL_PingOwnerName( ping->owner ), ping->generation, state, age,
+		NET_AdrToStringwPort( &ping->adr ) );
 
-	memset( &cl_pinglist[n], 0, sizeof( cl_pinglist[n] ) );
+	memset( ping, 0, sizeof( *ping ) );
+	return qtrue;
 }
-
 
 /*
 ==================
@@ -6029,63 +6396,120 @@ CL_GetFreePing
 static ping_t* CL_GetFreePing( void )
 {
 	unsigned int msec = (unsigned int)Sys_Milliseconds();
-	ping_t* pingptr = cl_pinglist;
-	for ( int i = 0; i < ARRAY_LEN( cl_pinglist ); i++, pingptr++ )
-	{
-		// find free ping slot
-		if ( pingptr->adr.port )
-		{
-			if ( pingptr->time == 0 )
-			{
-				if ( msec - pingptr->start < pingptr->timeout )
-				{
-					// still waiting for response
-					continue;
-				}
-			}
-			else if ( pingptr->time < 500 )
-			{
-				// results have not been queried
-				continue;
-			}
-		}
+	clPingQueueEntry_t entries[ARRAY_LEN( cl_pinglist )];
+	clPingQueueSelection_t selection;
+	ping_t *pingptr;
+	const char *reason;
+	const char *state;
+	char address[MAX_STRING_CHARS];
 
-		// clear it
-		memset( pingptr, 0, sizeof( *pingptr ) );
-		return pingptr;
-	}
-
-	// use oldest entry
-	pingptr = cl_pinglist;
-	ping_t* best = cl_pinglist;
-	unsigned int oldest = 0;
-	for ( int i = 0; i < ARRAY_LEN( cl_pinglist ); i++, pingptr++ )
-	{
-		// scan for oldest
-		unsigned int time = msec - pingptr->start;
-		if ( time > oldest )
-		{
-			oldest = time;
-			best   = pingptr;
+	for ( int i = 0; i < ARRAY_LEN( cl_pinglist ); i++ ) {
+		if ( !CL_PingQueueDescribe( cl_pinglist[i].adr.port != 0,
+			cl_pinglist[i].start, cl_pinglist[i].timeout, cl_pinglist[i].time,
+			&entries[i] ) ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_client),
+				"Ping queue allocation failed reason=invalid-result-time slot=%d\n", i );
+			return NULL;
 		}
 	}
-	memset( best, 0, sizeof( *best ) );
-	return best;
+	if ( !CL_PingQueueSelect( entries, ARRAY_LEN( entries ), msec, &selection ) ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_client),
+			"Ping queue allocation failed reason=invalid-state\n" );
+		return NULL;
+	}
+
+	pingptr = &cl_pinglist[selection.index];
+	Q_strncpyz( address, pingptr->adr.port
+		? NET_AdrToStringwPort( &pingptr->adr ) : "none", sizeof( address ) );
+	switch ( selection.reason ) {
+	case CL_PING_QUEUE_REUSE_FREE:
+		reason = "free";
+		state = "empty";
+		break;
+	case CL_PING_QUEUE_REUSE_EXPIRED:
+		reason = "expired";
+		state = "pending";
+		break;
+	case CL_PING_QUEUE_REUSE_COMPLETED:
+		reason = "completed";
+		state = "completed";
+		break;
+	case CL_PING_QUEUE_REUSE_OLDEST_PENDING:
+	default:
+		reason = "oldest-pending";
+		state = "pending";
+		break;
+	}
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+		"Ping queue allocation slot=%u reason=%s previous_generation=%u previous_state=%s age=%ums address=%s\n",
+		(unsigned int)selection.index, reason, pingptr->generation, state,
+		selection.age, address );
+	if ( selection.reason == CL_PING_QUEUE_REUSE_EXPIRED
+	  || selection.reason == CL_PING_QUEUE_REUSE_OLDEST_PENDING ) {
+		CL_SetServerInfoByAddressForOwner( &pingptr->adr, NULL, 0, pingptr->owner );
+	} else if ( selection.reason == CL_PING_QUEUE_REUSE_COMPLETED
+	       && CL_PingOwnerTerminalCacheAction( pingptr->owner, true )
+	          == CL_PING_CACHE_PUBLISH ) {
+		qboolean matched = CL_SetServerInfoByAddressForOwner( &pingptr->adr,
+			pingptr->info, pingptr->time, pingptr->owner );
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+			"Ping result consumed slot=%u owner=%s generation=%u outcome=completed time=%dms cache_action=publish matched=%d consumer=capacity address=%s\n",
+			(unsigned int)selection.index, CL_PingOwnerName( pingptr->owner ),
+			pingptr->generation, pingptr->time, matched ? 1 : 0, address );
+	}
+	if ( pingptr->adr.port ) {
+		Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+			"Ping transaction retired slot=%u owner=%s generation=%u reason=capacity-%s state=%s age=%ums address=%s\n",
+			(unsigned int)selection.index, CL_PingOwnerName( pingptr->owner ),
+			pingptr->generation, reason, state, selection.age, address );
+	}
+	memset( pingptr, 0, sizeof( *pingptr ) );
+	return pingptr;
 }
 
-static void CL_BeginPingRequest( ping_t *ping, const netadr_t *address ) {
-	if ( !ping || !address ) return;
+static void CL_BeginPingRequest( ping_t *ping, const netadr_t *address,
+	clPingOwner_t owner ) {
+	if ( !ping || !address
+	  || ( owner != CL_PING_OWNER_MANUAL && !CL_PingOwnerIsBrowser( owner ) ) ) return;
 	memset( ping, 0, sizeof( *ping ) );
 	ping->adr = *address;
+	ping->owner = owner;
 	ping->start = (unsigned int)Sys_Milliseconds();
 	ping->timeout = (unsigned int)Cvar_VariableIntegerValue( "cl_maxPing" );
 	CL_NewInfoChallenge( ping->challenge, &ping->generation );
-	CL_SetServerInfoByAddress( &ping->adr, NULL, 0 );
 	NET_OutOfBandPrint( NS_CLIENT, &ping->adr, "getinfo %s", ping->challenge );
+	Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+		"Ping transaction started owner=%s generation=%u address=%s\n",
+		CL_PingOwnerName( ping->owner ), ping->generation,
+		NET_AdrToStringwPort( &ping->adr ) );
 	Com_Log( SEV_DEBUG, LOG_CH(ch_client),
 		"Ping request generation=%u challenge=%s timeout=%ums address=%s\n",
 		ping->generation, ping->challenge, ping->timeout,
 		NET_AdrToStringwPort( &ping->adr ) );
+}
+
+static qboolean CL_ReapTerminalBrowserPings( clPingOwner_t activeOwner ) {
+	qboolean activeReaped = qfalse;
+
+	for ( int i = 0; i < MAX_PINGREQUESTS; i++ ) {
+		clPingOwner_t expectedOwner;
+		unsigned int expectedGeneration;
+		char buff[MAX_STRING_CHARS];
+		int pingTime;
+		ping_t *ping = &cl_pinglist[i];
+		if ( !ping->adr.port || !CL_PingOwnerIsBrowser( ping->owner ) ) continue;
+		if ( ping->time == 0
+		  && CL_ElapsedMilliseconds( ping->start ) < ping->timeout ) continue;
+		expectedOwner = ping->owner;
+		expectedGeneration = ping->generation;
+		CL_GetPingForConsumer( i, buff, sizeof( buff ), &pingTime,
+			ping->owner == activeOwner ? "current" : "offscreen" );
+		if ( pingTime != 0
+		  && CL_ClearPingIdentity( i, expectedOwner, expectedGeneration ) ) {
+			if ( expectedOwner == activeOwner ) activeReaped = qtrue;
+		}
+	}
+	return activeReaped;
 }
 
 
@@ -6131,8 +6555,7 @@ static void CL_Ping_f( void ) {
 	}
 
 	ping_t* pingptr = CL_GetFreePing();
-
-	CL_BeginPingRequest( pingptr, &to );
+	if ( pingptr ) CL_BeginPingRequest( pingptr, &to, CL_PING_OWNER_MANUAL );
 }
 
 
@@ -6143,12 +6566,20 @@ CL_UpdateVisiblePings_f
 */
 qboolean CL_UpdateVisiblePings_f(int source) {
 	qboolean status = qfalse;
+	qboolean currentOwnerWork = qfalse;
+	clPingOwner_t owner;
 
-	if (source < 0 || source > AS_FAVORITES) {
+	if ( !CL_PingOwnerFromBrowserSource( source, &owner ) ) {
 		return qfalse;
 	}
 
 	cls.pingUpdateSource = source;
+
+	/* Every browser terminal result has a source-specific cache destination, so
+	 * it may be reaped before scheduling the active source without cross-tab
+	 * mutation. Direct requests and live browser transactions remain shared
+	 * pressure and are never consumed here. */
+	status |= CL_ReapTerminalBrowserPings( owner );
 
 	int slots = CL_GetPingQueueCount();
 	if (slots < MAX_PINGREQUESTS) {
@@ -6177,14 +6608,20 @@ qboolean CL_UpdateVisiblePings_f(int source) {
 					int j;
 
 					if (slots >= MAX_PINGREQUESTS) {
+						Com_Log( SEV_DEBUG, LOG_CH(ch_client),
+							"Ping browser scheduling deferred owner=%s reason=capacity-full slots=%d address=%s\n",
+							CL_PingOwnerName( owner ), slots,
+							NET_AdrToStringwPort( &server[i].adr ) );
 						break;
 					}
 					for (j = 0; j < MAX_PINGREQUESTS; j++) {
 						if (!cl_pinglist[j].adr.port) {
 							continue;
 						}
-						if (NET_CompareAdr( &cl_pinglist[j].adr, &server[i].adr)) {
+						if ( cl_pinglist[j].owner == owner
+						  && NET_CompareAdr( &cl_pinglist[j].adr, &server[i].adr ) ) {
 							// already on the list
+							currentOwnerWork = qtrue;
 							break;
 						}
 					}
@@ -6192,8 +6629,9 @@ qboolean CL_UpdateVisiblePings_f(int source) {
 						status = qtrue;
 						for (j = 0; j < MAX_PINGREQUESTS; j++) {
 							if (!cl_pinglist[j].adr.port) {
-								CL_BeginPingRequest( &cl_pinglist[j], &server[i].adr );
+								CL_BeginPingRequest( &cl_pinglist[j], &server[i].adr, owner );
 								slots++;
+								currentOwnerWork = qtrue;
 								break;
 							}
 						}
@@ -6217,21 +6655,7 @@ qboolean CL_UpdateVisiblePings_f(int source) {
 		}
 	}
 
-	if (slots) {
-		status = qtrue;
-	}
-	for (int i = 0; i < MAX_PINGREQUESTS; i++) {
-		if (!cl_pinglist[i].adr.port) {
-			continue;
-		}
-		char buff[MAX_STRING_CHARS];
-		int pingTime;
-		CL_GetPing( i, buff, MAX_STRING_CHARS, &pingTime );
-		if (pingTime != 0) {
-			CL_ClearPing(i);
-			status = qtrue;
-		}
-	}
+	if ( currentOwnerWork ) status = qtrue;
 
 	return status;
 }

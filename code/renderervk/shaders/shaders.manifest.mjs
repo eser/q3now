@@ -82,9 +82,12 @@ export default [
 	// ── Tonemap post-process variants ─────────────────────────
 	// scene-radiance effects (tonemap operator, colour grading, sunrays) live on
 	// tonemap.frag now. gamma.frag is the thin display-encoding pass.
-	// USE_SSAO variants removed: the legacy per-pixel tonemap SSAO path is fully
-	// retired (GTAO is the sole AO path), so the TONEMAP_VAR_SSAO bit is never set
-	// and its variants are never selected. Only BASE / CG / SUNRAYS combos remain.
+	// The dedicated USE_SHOW_AO module reads the denoised GTAO texture directly;
+	// it is a diagnostic isolation view, not the retired per-pixel SSAO composite.
+	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_SHOW_AO'], output: 'tonemap_ao_frag_spv' },
+	// Legacy USE_SSAO combinatorials stay retired: GTAO is the sole AO path.
+	// TONEMAP_VAR_SSAO's standalone slot is now only the USE_SHOW_AO diagnostic;
+	// normal scene variants remain BASE / CG / SUNRAYS combinations.
 	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_TONEMAP'],                                             output: 'tonemap_tonemap_frag_spv'        },
 	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_COLOR_GRADING'],                                       output: 'tonemap_colorgrade_frag_spv'     },
 	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_TONEMAP', 'USE_COLOR_GRADING'],                        output: 'tonemap_tonemap_cg_frag_spv'     },
@@ -94,7 +97,8 @@ export default [
 	// surviving feature cvars (r_tonemap=2 / r_colorGrading=4 / r_sunRays=8) are
 	// INDEPENDENT toggles, so vk_create_post_process_pipeline(5) can compute any
 	// varIdx in {0,2,4,6,8,10,12,14} and index vk.tonemap_variant_fs[varIdx]
-	// (odd indices — the SSAO bit — are never produced). varIdx 0 is the separate
+	// (odd indices other than the standalone AO diagnostic slot are never produced).
+	// varIdx 0 is the separate
 	// "default" pipeline at case 6. tonemap.frag's feature defines are independent
 	// #ifdefs, so every combo compiles.
 	{ stage: 'frag', source: 'tonemap.frag', defines: ['USE_TONEMAP', 'USE_SUNRAYS'],                             output: 'tonemap_sunrays_tm_frag_spv'      },  // varIdx 10

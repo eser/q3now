@@ -191,6 +191,7 @@ static VkDescriptorType ralVk_DescType( ralBindType_t t ) {
 	case RAL_BIND_STORAGE_BUFFER:  return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	case RAL_BIND_STORAGE_TEXTURE: return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 	case RAL_BIND_SAMPLER:         return VK_DESCRIPTOR_TYPE_SAMPLER;
+	case RAL_BIND_COMBINED_TEXTURE_SAMPLER: return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	case RAL_BIND_SAMPLED_TEXTURE:
 	case RAL_BIND_TEXTURE_ARRAY:
 	default:                       return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
@@ -1362,6 +1363,14 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 		case RAL_BIND_SAMPLED_TEXTURE:
 			if ( ni >= RAL_VK_MAX_BG_IMAGES || !val->textureView ) continue;
 			RAL_ZERO( imgs[ni] ); imgs[ni].imageView = val->textureView->view; imgs[ni].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			w->descriptorCount = 1; w->pImageInfo = &imgs[ni]; ni++;
+			break;
+		case RAL_BIND_COMBINED_TEXTURE_SAMPLER:
+			if ( ni >= RAL_VK_MAX_BG_IMAGES || !val->textureView || !val->sampler ) continue;
+			RAL_ZERO( imgs[ni] );
+			imgs[ni].imageView = val->textureView->view;
+			imgs[ni].sampler = val->sampler->sampler;
+			imgs[ni].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 			w->descriptorCount = 1; w->pImageInfo = &imgs[ni]; ni++;
 			break;
 		case RAL_BIND_TEXTURE_ARRAY: {

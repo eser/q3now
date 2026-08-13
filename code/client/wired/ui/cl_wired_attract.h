@@ -67,4 +67,5 @@ qboolean            WiredAttract_IsDemoOverlayActive( void );
 
 // ── completion callbacks (called from engine when content finishes) ───
 qboolean WiredAttract_OnDemoCompleted( void );      // qtrue = attract handled it
+qboolean WiredAttract_OnDemoFailed( void );         // qtrue = owned failure advanced
 qboolean WiredAttract_OnCinematicCompleted( void ); // qtrue = attract handled it

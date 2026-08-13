@@ -222,6 +222,7 @@ typedef struct client_s {
 
 	conn_handle_t	quic_conn;            /* QUIC connection handle — replaces netchan.remoteAddress for QUIC clients */
 	uint64_t        quic_allocation_id;   /* exact transport allocation paired with quic_conn */
+	uint64_t        bot_allocation_id;    /* server-owned identity for this bot slot allocation */
 
 } client_t;
 

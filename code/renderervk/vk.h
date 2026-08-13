@@ -3081,10 +3081,9 @@ typedef struct {
 	// gamma.frag. GAMMA_VAR_TONEMAP became TONEMAP_VAR_BASE per the
 	// rename spec (represents the base USE_TONEMAP variant).
 	// Bit 0 = SSAO (RETIRED), Bit 1 = TONEMAP (BASE), Bit 2 = COLOR_GRADING, Bit 3 = SUNRAYS.
-	// TONEMAP_VAR_SSAO is retired: the legacy per-pixel tonemap SSAO path is gone
-	// (GTAO is the sole AO path, applied in the base pass), so the bit is never set
-	// at selection time and its variant slots (the odd indices) stay NULL. The
-	// define is kept to document bit 0 as reserved and to keep the array width at 16.
+	// Bit 0 is reserved for the diagnostic-only denoised-GTAO isolation view. It
+	// does not restore the retired per-pixel tonemap SSAO path and is never combined
+	// with normal scene-radiance variants.
 #define TONEMAP_VAR_SSAO    1
 #define TONEMAP_VAR_BASE    2
 #define TONEMAP_VAR_CG      4

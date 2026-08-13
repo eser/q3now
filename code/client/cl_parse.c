@@ -219,7 +219,6 @@ static void CL_ParseSnapshot( clientApp_t *app, msg_t *msg ) {
 	if ( newSnap.deltaNum <= 0 ) {
 		newSnap.valid = qtrue;		// uncompressed frame
 		old = NULL;
-		app->clc.demowaiting = qfalse;	// we can start recording now
 	} else {
 		old = &app->cl.snapshots[newSnap.deltaNum & PACKET_MASK];
 		if ( !old->valid ) {
@@ -241,6 +240,12 @@ static void CL_ParseSnapshot( clientApp_t *app, msg_t *msg ) {
 
 	if ( newSnap.areabytes > sizeof(newSnap.areamask) )
 	{
+		if ( app->demoMessageAbortArmed && app->clc.demoplaying ) {
+			app->demoMessageAbortCommand = svc_snapshot;
+			app->demoMessageAbortKind = DEMO_MESSAGE_ABORT_SNAPSHOT_AREAMASK;
+			app->demoMessageAbortDetail = newSnap.areabytes;
+			Q_longjmp( app->demoMessageAbort, 1 );
+		}
 		Com_Terminate( TERM_CLIENT_DROP,"CL_ParseSnapshot: Invalid size %d for areamask", newSnap.areabytes );
 		return;
 	}
@@ -281,6 +286,9 @@ static void CL_ParseSnapshot( clientApp_t *app, msg_t *msg ) {
 
 	// copy to the current good spot
 	app->cl.snap = newSnap;
+	if ( newSnap.deltaNum <= 0 ) {
+		app->clc.demowaiting = qfalse;	// we can start recording now
+	}
 	app->cl.snap.ping = 999;
 	// calculate ping time
 	for ( int i = 0 ; i < PACKET_BACKUP ; i++ ) {
@@ -1328,6 +1336,11 @@ void CL_ParseServerMessage( clientApp_t *app, msg_t *msg ) {
 		// other commands
 		switch ( cmd ) {
 		default:
+			if ( app->demoMessageAbortArmed && app->clc.demoplaying ) {
+				app->demoMessageAbortCommand = cmd;
+				app->demoMessageAbortKind = DEMO_MESSAGE_ABORT_ILLEGAL_SVC;
+				Q_longjmp( app->demoMessageAbort, 1 );
+			}
 			Com_Terminate( TERM_CLIENT_DROP,"%s: Illegible server message", __func__ );
 			break;
 		case svc_nop:

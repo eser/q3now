@@ -20,6 +20,11 @@
 // + framebuffer-bit-depth dither" pass.
 
 layout(set = 0, binding = 0) uniform sampler2D texture0;
+#ifdef USE_SHOW_AO
+// Diagnostic-only GTAO isolation input. This is the denoised visibility field
+// produced by the RAL compute pass, not the final scene colour.
+layout(set = 3, binding = 0) uniform sampler2D aoMap;
+#endif
 #ifdef USE_SUNRAYS
 layout(set = 1, binding = 0) uniform sampler2D depthMap;
 #endif
@@ -360,6 +365,11 @@ vec3 sampleChromatic( vec2 uv ) {
 }
 
 void main() {
+#ifdef USE_SHOW_AO
+	float ao = clamp( texture( aoMap, frag_tex_coord ).r, 0.0, 1.0 );
+	out_color = vec4( ao, ao, ao, 1.0 );
+	return;
+#endif
 	// Chromatic aberration acts here, at the input read (a per-channel radial
 	// UV offset), before exposure / tonemap / grade / saturation run on `base`.
 	// strength 0 (default) keeps the single-sample path — byte-identical to no

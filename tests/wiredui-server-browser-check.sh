@@ -65,6 +65,8 @@ if any(row["sev"].upper() in {"ERROR", "FATAL"} for row in server):
 
 messages = [row["msg"] for row in product]
 server_messages = [row["msg"] for row in server]
+product_cats = [row["cat"].lower() for row in product]
+product_sevs = [row["sev"].upper() for row in product]
 e_sentinel = re.escape(sentinel)
 e_target = re.escape(target)
 
@@ -97,7 +99,9 @@ for phase in phase_names[:-1]:
     begin, end = phase_ranges[phase]
     phase_messages = messages[begin:end + 1]
     if any("listbox click phase=double" in msg
-           or "queued validated connect origin=browser" in msg
+           or "Browser connect attempt armed " in msg
+           or "started validated connect origin=browser" in msg
+           or re.fullmatch(rf"{re.escape(target)} resolved to {re.escape(target)}\n?", msg)
            or "close all postcondition" in msg for msg in phase_messages):
         raise SystemExit(f"FAIL doubleclick negative {phase}: action escaped phase")
 
@@ -168,11 +172,12 @@ ordered([
     ("generation end", r"^Q0_DBL_GENERATION_END$"),
     ("positive begin", r"^Q0_DBL_POSITIVE_BEGIN$"),
     ("positive double", r"WiredUI: listbox click phase=double input=K_MOUSE1 menu=servers item=serverlist feeder=2 row=1 "),
-    ("positive queue", rf"WiredUI: queued validated connect origin=browser address={e_target}"),
-    ("terminal pointer release", r"WiredUI: pointer phase=release reason=close-all was_down=1 pointer_down=0"),
+    ("positive armed", rf"Browser connect attempt armed target={e_target} selection_generation=[1-9][0-9]* credential_present=0"),
+    ("positive resolution", rf"{e_target} resolved to {e_target}"),
+    ("positive started", rf"WiredUI: started validated connect origin=browser address={e_target} selection_generation=[1-9][0-9]* credential_present=0"),
+    ("terminal pointer release", r"WiredUI: pointer phase=release reason=close-all was_down=0 pointer_down=0"),
     ("positive close", r"WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0"),
     ("positive end", r"^Q0_DBL_POSITIVE_END$"),
-    ("positive resolution", rf"{e_target} resolved to {e_target}"),
     ("positive accept", r"QUIC client: TLV ACCEPT received"),
     ("positive FIRST", r"FIRST GAMEPLAY FRAME mapname=maps/arena7\.bsp\b"),
     ("shutdown", r"WiredUI: shutdown"),
@@ -180,8 +185,26 @@ ordered([
 
 if sum("listbox click phase=double" in msg for msg in messages) != 1:
     raise SystemExit("FAIL doubleclick: expected exactly one accepted gesture")
-if sum("queued validated connect origin=browser" in msg for msg in messages) != 1:
-    raise SystemExit("FAIL doubleclick: expected exactly one browser queue")
+armed_rows=[(i,re.fullmatch(rf"Browser connect attempt armed target={e_target} selection_generation=([1-9][0-9]*) credential_present=0\n?",msg))
+            for i,msg in enumerate(messages)]
+armed_rows=[row for row in armed_rows if row[1]]
+started_rows=[(i,re.fullmatch(rf"WiredUI: started validated connect origin=browser address={e_target} selection_generation=([1-9][0-9]*) credential_present=0\n?",msg))
+              for i,msg in enumerate(messages)]
+started_rows=[row for row in started_rows if row[1]]
+resolve_rows=[i for i,msg in enumerate(messages)
+              if re.fullmatch(rf"{e_target} resolved to {e_target}\n?",msg)]
+if len(armed_rows)!=1 or len(started_rows)!=1 or len(resolve_rows)!=1 \
+        or armed_rows[0][1].group(1)!=started_rows[0][1].group(1) \
+        or (product_sevs[armed_rows[0][0]],product_cats[armed_rows[0][0]]) != ("DEBUG","client") \
+        or (product_sevs[started_rows[0][0]],product_cats[started_rows[0][0]]) != ("DEBUG","ui") \
+        or (product_sevs[resolve_rows[0]],product_cats[resolve_rows[0]]) != ("INFO","client"):
+    raise SystemExit("FAIL doubleclick: current browser connect ABI identity/metadata")
+for prefix,count in (("Browser connect attempt armed ",1),
+                     ("WiredUI: started validated connect ",1)):
+    if sum(msg.startswith(prefix) for msg in messages)!=count:
+        raise SystemExit(f"FAIL doubleclick: additive current marker {prefix}")
+if sum(" resolved to " in msg for msg in messages)!=1:
+    raise SystemExit("FAIL doubleclick: additive resolution marker")
 if sum("close all postcondition" in msg for msg in messages) != 1:
     raise SystemExit("FAIL doubleclick: expected exactly one CloseAll")
 if sum("FIRST GAMEPLAY FRAME" in msg for msg in messages) != 1:
@@ -219,6 +242,8 @@ if arms[0].group(1) != callbacks[0].group(1) \
 if int(callbacks[1].group(3)) <= int(callbacks[0].group(3)) \
         or not 0 <= int(doubles[0].group(4)) < 300:
     raise SystemExit("FAIL doubleclick positive: selection epoch/elapsed contract broken")
+if armed_rows[0][1].group(1) != doubles[0].group(3):
+    raise SystemExit("FAIL doubleclick positive: connect attempt not bound to accepted gesture")
 
 serverlist = [row for row in layout
               if row["menu"] == "servers" and row["region"] == "serverlist"
@@ -265,7 +290,7 @@ begin = [i for i, msg in enumerate(segment) if re.search(rf"ClientBegin: {slot}\
 if len(connect) != 1 or len(begin) != 1 \
         or not conn[0] < connect[0] < assigned_index < begin[0]:
     raise SystemExit("FAIL doubleclick server: post-VM admission incomplete/out of order")
-if any("Invalid password" in msg or "game rejected connection" in msg for msg in segment):
+if any("game rejected connection" in msg for msg in segment):
     raise SystemExit("FAIL doubleclick server: unprotected admission rejected")
 
 print("  PASS doubleclick negatives: Enter/single/missing-release/timeout/row/lifecycle/generation queue nothing")
@@ -360,6 +385,21 @@ if server_bad:
 messages = [row["msg"] for row in product]
 wrong_messages = [row["msg"] for row in wrong]
 
+def normalized_message(value):
+    return value[:-1] if value.endswith("\n") else value
+
+def claimed_candidate_indices(values, prefixes=(), contains=(), label="semantic"):
+    candidates=[]
+    for index,value in enumerate(values):
+        lines=re.split(r"[\r\n]",value)
+        claimed=any(line.startswith(prefixes) for line in lines) \
+            or any(token in line for line in lines for token in contains)
+        if not claimed: continue
+        if "\r" in value or "\n" in value:
+            raise SystemExit(f"FAIL {label}: claimed marker embedded in multiline record")
+        candidates.append(index)
+    return candidates
+
 def ordered(steps):
     cursor = 0
     for name, pattern in steps:
@@ -384,6 +424,39 @@ e_sentinel = re.escape(sentinel)
 e_target = re.escape(target)
 e_connect = re.escape(connect_target)
 e_lan = re.escape(lan_address)
+
+def current_connect_abi(rows,label):
+    normalized=[]
+    for row in rows:
+        value=row["msg"][:-1] if row["msg"].endswith("\n") else row["msg"]
+        normalized.append(value)
+    patterns=(
+      ("armed",rf"Browser connect attempt armed target={e_connect} selection_generation=([1-9][0-9]*) credential_present=1","DEBUG","client"),
+      ("resolve",rf"{e_connect} resolved to {e_connect}","INFO","client"),
+      ("started",rf"WiredUI: started validated connect origin=browser address={e_connect} selection_generation=([1-9][0-9]*) credential_present=1","DEBUG","ui"),
+    )
+    found={}
+    for name,pattern,sev,cat in patterns:
+        matches=[(i,re.fullmatch(pattern,value)) for i,value in enumerate(normalized)]
+        matches=[item for item in matches if item[1]]
+        if len(matches)!=1 or rows[matches[0][0]]["sev"].upper()!=sev \
+                or rows[matches[0][0]]["cat"].lower()!=cat:
+            raise SystemExit(f"FAIL {label}: current connect {name} cardinality/metadata")
+        found[name]=matches[0]
+    if found["armed"][1].group(1)!=found["started"][1].group(1) \
+            or not found["armed"][0] < found["resolve"][0] < found["started"][0]:
+        raise SystemExit(f"FAIL {label}: current connect identity/order")
+    if len(claimed_candidate_indices(normalized,
+            prefixes=("Browser connect attempt armed ",),label=label))!=1 \
+            or len(claimed_candidate_indices(normalized,
+                prefixes=("WiredUI: started validated connect ",),label=label))!=1 \
+            or len(claimed_candidate_indices(normalized,
+                contains=(" resolved to ",),label=label))!=1:
+        raise SystemExit(f"FAIL {label}: additive current connect family")
+    return found["armed"][1].group(1)
+
+wrong_connect_generation=current_connect_abi(wrong,"wrong-password")
+product_connect_generation=current_connect_abi(product,"protected browser")
 ordered_wrong([
     ("wrong-password browser", r"WiredUI: push menu 'servers' \(depth 1\)"),
     ("wrong-password protected fixture",
@@ -403,20 +476,118 @@ ordered_wrong([
     ("wrong-password edit commit", r"wui_menu_nav: K_ENTER dispatched"),
     ("wrong-password masked render", r"WiredUI: password render trace length=7 masked=1"),
     ("wrong-password submit focus", r"wui_menu_nav focus: focused item 'btn_connect'"),
-    ("wrong-password accepted by UI validator",
-     rf"WiredUI: password submit accepted address={e_connect} selection_generation=[0-9]+"),
-    ("wrong-password canonical queue",
-     rf"WiredUI: queued validated connect origin=browser address={e_connect}"),
+    ("wrong-password armed",
+     rf"Browser connect attempt armed target={e_connect} selection_generation=[0-9]+ credential_present=1"),
+    ("wrong-password resolution", rf"{e_connect} resolved to {e_connect}"),
+    ("wrong-password started",
+     rf"WiredUI: started validated connect origin=browser address={e_connect} selection_generation=[0-9]+ credential_present=1"),
     ("wrong-password CloseAll",
      r"WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0"),
     ("wrong-password submit Enter", r"wui_menu_nav: K_ENTER dispatched"),
-    ("wrong-password resolution", rf"{e_connect} resolved to {e_connect}"),
-    ("wrong-password transport accepted", r"QUIC client: TLV ACCEPT received"),
+    ("wrong-password credential disposal",
+     rf"Browser connect credential disposed target={e_connect} stage=client-handoff"),
+    ("wrong-password transport refusal",
+     r"QUIC connect refused class=2 deferred_disconnect=1"),
+    ("wrong-password deferred failure",
+     r"Connect failed kind=2 browser_retry=1"),
+    ("wrong-password retry popup", r"WiredUI: push menu 'password' \(depth 3\)"),
+    ("wrong-password retry identity",
+     rf"WiredUI: authentication retry opened address={e_connect} selection_generation=[0-9]+"),
 ])
-if sum("queued validated connect origin=browser" in msg for msg in wrong_messages) != 1:
-    raise SystemExit("FAIL wrong-password: expected exactly one canonical UI queue")
-if any("FIRST GAMEPLAY FRAME" in msg for msg in wrong_messages):
-    raise SystemExit("FAIL wrong-password: invalid credential reached gameplay")
+wrong_normalized = [msg[:-1] if msg.endswith("\n") else msg for msg in wrong_messages]
+def exact_wrong_family(prefix, pattern, severity, category):
+    candidates = [(index, wrong_normalized[index]) for index in
+                  claimed_candidate_indices(wrong_normalized,prefixes=(prefix,),
+                                            label="wrong-password")]
+    exact = [(index, re.fullmatch(pattern, value)) for index, value in candidates]
+    exact = [item for item in exact if item[1]]
+    if len(candidates) != 1 or len(exact) != 1:
+        raise SystemExit(f"FAIL wrong-password: {prefix} family cardinality/format")
+    index, match = exact[0]
+    if wrong[index]["sev"].upper() != severity or wrong[index]["cat"].lower() != category:
+        raise SystemExit(f"FAIL wrong-password: {prefix} metadata")
+    return index, match
+
+wrong_started = next(index for index, value in enumerate(wrong_normalized)
+                     if re.fullmatch(
+                         rf"WiredUI: started validated connect origin=browser address={e_connect} "
+                         rf"selection_generation={wrong_connect_generation} credential_present=1",
+                         value))
+wrong_dispose, _ = exact_wrong_family(
+    "Browser connect credential disposed ",
+    rf"Browser connect credential disposed target={e_connect} stage=client-handoff",
+    "DEBUG", "client")
+wrong_refuse, _ = exact_wrong_family(
+    "QUIC connect refused ", r"QUIC connect refused class=2 deferred_disconnect=1",
+    "WARN", "network")
+wrong_failure, _ = exact_wrong_family(
+    "Connect failed kind=", r"Connect failed kind=2 browser_retry=1",
+    "WARN", "client")
+wrong_retry, wrong_retry_match = exact_wrong_family(
+    "WiredUI: authentication retry opened ",
+    rf"WiredUI: authentication retry opened address={e_connect} selection_generation=([1-9][0-9]*)",
+    "DEBUG", "ui")
+if wrong_retry_match.group(1) != wrong_connect_generation \
+        or not wrong_started < wrong_dispose < wrong_refuse < wrong_failure < wrong_retry:
+    raise SystemExit("FAIL wrong-password: refusal/retry identity or causal order")
+if any("TLV ACCEPT" in msg or "FIRST GAMEPLAY FRAME" in msg for msg in wrong_messages):
+    raise SystemExit("FAIL wrong-password: invalid credential was accepted")
+def password_ingress_identity(rows, label, connect_generation):
+    values = [normalized_message(row["msg"]) for row in rows]
+    preflight_candidates=claimed_candidate_indices(
+        values,prefixes=("WiredUI: password required origin=browser ",),label=label)
+    preflight = [(index, match) for index, value in enumerate(values)
+                 if (match := re.fullmatch(
+                     rf"WiredUI: password required origin=browser address={e_connect} "
+                     r"selection_generation=([1-9][0-9]*)", value))]
+    if len(preflight_candidates) != 1 or len(preflight) != 1 \
+            or preflight_candidates[0] != preflight[0][0]:
+        raise SystemExit(f"FAIL {label}: password preflight cardinality")
+    preflight_index, preflight_match = preflight[0]
+    if rows[preflight_index]["sev"].upper() != "DEBUG" \
+            or rows[preflight_index]["cat"].lower() != "ui":
+        raise SystemExit(f"FAIL {label}: password preflight metadata")
+    selections = [(index, match) for index, value in enumerate(values[:preflight_index])
+                  if (match := re.fullmatch(
+                      rf"WiredUI: server selection display_row=1 raw=[01] source=0 "
+                      rf"list_generation=[1-9][0-9]* selection_generation=([1-9][0-9]*) "
+                      rf"address={e_connect} name=Z0 WIRED Q0 TARGET map=arena7", value))]
+    if not selections:
+        raise SystemExit(f"FAIL {label}: selected target identity unavailable")
+    selection_index, selection_match = selections[-1]
+    if rows[selection_index]["sev"].upper() != "DEBUG" \
+            or rows[selection_index]["cat"].lower() != "ui" \
+            or selection_match.group(1) != preflight_match.group(1) \
+            or preflight_match.group(1) != connect_generation:
+        raise SystemExit(f"FAIL {label}: selection/preflight/connect generation drift")
+    armed = [index for index, value in enumerate(values)
+             if re.fullmatch(
+                 rf"Browser connect attempt armed target={e_connect} "
+                 rf"selection_generation={connect_generation} credential_present=1", value)]
+    typed = [index for index, value in enumerate(values)
+             if value == "wui_menu_nav: typed 7 printable character(s)"]
+    masked = [index for index, value in enumerate(values)
+              if value == "WiredUI: password render trace length=7 masked=1"]
+    if len(armed) != 1 or len(typed) != 1 or len(masked) != 1:
+        raise SystemExit(f"FAIL {label}: password input/armed cardinality")
+    submit_focus = [index for index, value in enumerate(values[:armed[0]])
+                    if value == "wui_menu_nav focus: focused item 'btn_connect' (top index -1)"]
+    action_enter = [index for index, value in enumerate(values[armed[0] + 1:], armed[0] + 1)
+                    if value == "wui_menu_nav: K_ENTER dispatched"]
+    if not submit_focus or not action_enter \
+            or not preflight_index < typed[0] < masked[0] < submit_focus[-1] \
+                   < armed[0] < action_enter[0]:
+        raise SystemExit(f"FAIL {label}: password input/focus/action causal order")
+    semantic = (typed[0], masked[0], submit_focus[-1], action_enter[0])
+    if any(rows[index]["sev"].upper() != "DEBUG"
+           or rows[index]["cat"].lower() != "ui" for index in semantic):
+        raise SystemExit(f"FAIL {label}: password input/focus/action metadata")
+    return selection_index, preflight_index
+
+wrong_selection, wrong_preflight = password_ingress_identity(
+    wrong, "wrong-password", wrong_connect_generation)
+if not wrong_selection < wrong_preflight < wrong_started:
+    raise SystemExit("FAIL wrong-password: selection/preflight/connect order")
 if any("reconnect" in msg.lower() for msg in wrong_messages) \
         or any(re.search(rf"{e_sentinel} resolved to {e_sentinel}", msg)
                for msg in wrong_messages):
@@ -567,12 +738,11 @@ ordered([
     ("password edit commit", r"wui_menu_nav: K_ENTER dispatched"),
     ("password render masking", r"WiredUI: password render trace length=7 masked=1"),
     ("password submit focus", r"wui_menu_nav focus: focused item 'btn_connect'"),
-    ("password submit accepted",
-     rf"WiredUI: password submit accepted address={e_connect} selection_generation=[0-9]+"),
-    ("validated browser queue", rf"WiredUI: queued validated connect origin=browser address={e_connect}"),
+    ("browser attempt armed", rf"Browser connect attempt armed target={e_connect} selection_generation=[0-9]+ credential_present=1"),
+    ("engine resolution", rf"{e_connect} resolved to {e_connect}"),
+    ("validated browser start", rf"WiredUI: started validated connect origin=browser address={e_connect} selection_generation=[0-9]+ credential_present=1"),
     ("close all", r"WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0"),
     ("password submit Enter returns", r"wui_menu_nav: K_ENTER dispatched"),
-    ("engine resolution", rf"{e_connect} resolved to {e_connect}"),
     ("QUIC accept", r"QUIC client: TLV ACCEPT received"),
     ("first gameplay", r"FIRST GAMEPLAY FRAME mapname=maps/arena7\.bsp\b"),
     ("clean UI shutdown", r"WiredUI: shutdown"),
@@ -599,26 +769,28 @@ if not row_focus_frames or not submit_focus_frames \
         or min(row_focus_frames) >= max(submit_focus_frames):
     raise SystemExit("FAIL layout: password editfield focus did not precede submit focus")
 
-if sum("queued validated connect origin=browser" in msg for msg in messages) != 1:
-    raise SystemExit("FAIL: expected exactly one validated browser Connect queue")
 if sum("password required origin=browser" in msg for msg in messages) != 1:
     raise SystemExit("FAIL: expected exactly one password preflight")
 if sum("password submit refused reason=invalid-credential" in msg for msg in messages) != 1:
     raise SystemExit("FAIL: expected exactly one empty-password refusal")
-if sum("password submit accepted address=" in msg for msg in messages) != 1:
-    raise SystemExit("FAIL: expected exactly one password submit acceptance")
 if sum(msg.strip() == "WiredUI: password render trace length=7 masked=1"
        for msg in messages) != 1:
     raise SystemExit("FAIL: expected exactly one masked password render trace")
-preflight_match = re.search(
-    rf"password required origin=browser address={e_connect} selection_generation=([0-9]+)",
-    "\n".join(messages))
-accepted_match = re.search(
-    rf"password submit accepted address={e_connect} selection_generation=([0-9]+)",
-    "\n".join(messages))
-if not preflight_match or not accepted_match \
-        or preflight_match.group(1) != accepted_match.group(1):
-    raise SystemExit("FAIL: password submit was not bound to the preflight selection generation")
+product_selection, product_preflight = password_ingress_identity(
+    product, "protected browser", product_connect_generation)
+product_started = next(index for index, value in enumerate(messages)
+                       if re.fullmatch(
+                           rf"WiredUI: started validated connect origin=browser address={e_connect} "
+                           rf"selection_generation={product_connect_generation} credential_present=1",
+                           value[:-1] if value.endswith("\n") else value))
+if not product_selection < product_preflight < product_started:
+    raise SystemExit("FAIL: protected selection/preflight/connect order")
+for label, rows in (("protected browser", product), ("wrong-password", wrong)):
+    logical_lines = [line for row in rows
+                     for line in re.split(r"[\r\n]", row["msg"][:-1]
+                                          if row["msg"].endswith("\n") else row["msg"])]
+    if any(line.startswith("WiredUI: password submit accepted ") for line in logical_lines):
+        raise SystemExit(f"FAIL {label}: obsolete password submit marker present")
 if any("reconnect" in msg.lower() for msg in messages):
     raise SystemExit("FAIL: password path used reconnect state")
 if any(re.search(rf"{e_sentinel} resolved to {e_sentinel}", msg) for msg in messages):
@@ -714,12 +886,23 @@ if len(arm_indices) != 1 or len(needpass_indices) != 1 \
         f"got needpass={needpass_indices} arm={arm_indices}")
 wrong_conn = [index for index, msg in enumerate(wrong_server)
               if "SV_OnPlayerConnect: conn=" in msg]
-wrong_reject = [index for index, msg in enumerate(wrong_server)
-                if re.search(r"QUIC: game rejected connection .*: Invalid password$", msg)]
+server_values = [msg[:-1] if msg.endswith("\n") else msg for msg in server_messages]
+server_severities = [row["sev"].upper() for row in server]
+server_categories = [row["cat"].lower() for row in server]
+wrong_reject_family = [index for index, value in enumerate(server_values[:boundary_index])
+                       if any(line.startswith("QUIC: game rejected connection ")
+                              for line in re.split(r"[\r\n]", value))]
+wrong_reject = [index for index in wrong_reject_family
+                if re.fullmatch(r"QUIC: game rejected connection from .* class=2",
+                                server_values[index])]
 if not wrong_conn or len(wrong_reject) != len(wrong_conn):
     raise SystemExit(
         "FAIL wrong-password server contract: every attempted connection must be "
         f"rejected by the game (conn={len(wrong_conn)} reject={len(wrong_reject)})")
+if len(wrong_reject_family) != len(wrong_reject) \
+        or any(server_severities[index] != "INFO" or server_categories[index] != "server"
+               for index in wrong_reject):
+    raise SystemExit("FAIL wrong-password server contract: refusal family format/metadata")
 if wrong_conn[0] <= arm_indices[0]:
     raise SystemExit("FAIL protected server: wrong-password attempt preceded readiness marker")
 for ordinal, conn_index in enumerate(wrong_conn):
@@ -733,7 +916,7 @@ if any("SV_OnPlayerConnect: slot " in msg for msg in wrong_attempt_tail) \
                for msg in wrong_attempt_tail):
     raise SystemExit("FAIL wrong-password server contract: rejected client reached admission")
 
-if any("Invalid password" in msg or "game rejected connection" in msg
+if any("game rejected connection" in msg
        for msg in correct_server):
     raise SystemExit("FAIL password recovery: correct credential was rejected")
 assigned = []
@@ -785,6 +968,351 @@ print("  PASS password-negative: wrong credential -> game rejection -> no admiss
 print("  PASS password-recovery: fresh correct client -> masked edit -> accepted game admission")
 print("  PASS connect: protected cache -> canonical queue -> CloseAll -> QUIC ACCEPT -> arena7 FIRST")
 print("  PASS lifecycle: status cancel/return -> gameplay -> controlled client/server shutdown")
+PYEOF
+}
+
+analyze_serverinfo_connect_contract() {
+    python3 - "$1" "$2" "$3" "$4" "$5" "$6" "$7" <<'PYEOF'
+import hashlib,json,math,re,sys
+product_path,fixture_path,server_path,layout_path,sentinel_port,target_port,mode=sys.argv[1:8]
+if mode not in {"proxy","direct"}: raise SystemExit("FAIL serverinfo-connect: invalid analyzer mode")
+sentinel=f"127.0.0.1:{sentinel_port}"
+target=f"127.0.0.1:{target_port}"
+
+def read(path, fields):
+    rows=[]
+    with open(path,encoding="utf-8",errors="strict") as stream:
+        for number,line in enumerate(stream,1):
+            if not line.strip(): continue
+            try: row=json.loads(line)
+            except ValueError as exc: raise SystemExit(f"FAIL serverinfo-connect {path}:{number}: {exc}")
+            if not isinstance(row,dict) or any(field not in row for field in fields):
+                raise SystemExit(f"FAIL serverinfo-connect {path}:{number}: malformed row")
+            rows.append(row)
+    if not rows: raise SystemExit(f"FAIL serverinfo-connect: empty {path}")
+    return rows
+
+product=read(product_path,("sev","cat","msg"))
+fixture=read(fixture_path,("event",)) if mode=="proxy" else []
+server=read(server_path,("sev","cat","msg")) if mode=="direct" else []
+layout=read(layout_path,("menu","region","frame","focused","x","y","w","h"))
+if any(row["sev"].upper() in {"ERROR","FATAL"}
+       or (row["sev"].upper()=="WARN" and row["cat"].lower()=="ui") for row in product):
+    raise SystemExit("FAIL serverinfo-connect: bad product severity")
+if any(row["sev"].upper() in {"ERROR","FATAL"} for row in server):
+    raise SystemExit("FAIL serverinfo-connect: bad server severity")
+
+def msg(row):
+    value=str(row["msg"])
+    if value.endswith("\n"): value=value[:-1]
+    return value
+
+def claimed_candidate_indices(values,prefixes=(),contains=(),label="semantic"):
+    candidates=[]
+    for index,value in enumerate(values):
+        lines=re.split(r"[\r\n]",value)
+        claimed=any(line.startswith(prefixes) for line in lines) \
+            or any(token in line for line in lines for token in contains)
+        if not claimed: continue
+        if "\r" in value or "\n" in value:
+            raise SystemExit(f"FAIL serverinfo-connect: {label} embedded in multiline record")
+        candidates.append(index)
+    return candidates
+
+messages=[msg(row) for row in product]
+cats=[str(row["cat"]).lower() for row in product]
+sevs=[str(row["sev"]).upper() for row in product]
+e_target=re.escape(target); e_sentinel=re.escape(sentinel)
+
+families={
+ "push_servers": (r"WiredUI: push menu 'servers' \(depth 1\)","ui"),
+ "selection_sentinel": (rf"WiredUI: server selection display_row=0 raw=[01] source=0 list_generation=([1-9][0-9]*) selection_generation=([1-9][0-9]*) address={e_sentinel} name=A0 WIRED Q0 SENTINEL map=arena1","ui"),
+ "selection": (rf"WiredUI: server selection display_row=1 raw=[01] source=0 list_generation=([1-9][0-9]*) selection_generation=([1-9][0-9]*) address={e_target} name=Z0 WIRED Q0 TARGET map=arena7","ui"),
+ "serverlist_focus": (r"wui_menu_nav focus: focused item 'serverlist' \(top index [0-9-]+\)","ui"),
+ "info_focus": (r"wui_menu_nav focus: focused item 'btn_info' \(top index -1\)","ui"),
+ "request": (rf"WiredUI: server status request generation=([1-9][0-9]*) selection_generation=([1-9][0-9]*) address={e_target}","ui"),
+ "pending": (rf"WiredUI: server status state=pending generation=([1-9][0-9]*) selection_generation=([1-9][0-9]*) address={e_target} rows=1","ui"),
+ "push_info": (r"WiredUI: push menu 'serverinfo' \(depth 2\)","ui"),
+ "stored": (rf"CL_ServerStatusResponse: stored response from {e_target} bytes=([1-9][0-9]*)","client"),
+ "ready": (rf"WiredUI: server status loaded generation=([1-9][0-9]*) selection_generation=([1-9][0-9]*) address={e_target} rows=9","ui"),
+ "loaded_0": (rf"WiredUI: server status row=0 key=Address value={e_target}","ui"),
+ "loaded_1": (r"WiredUI: server status row=1 key=Server value=Z0 WIRED Q0 TARGET","ui"),
+ "loaded_2": (r"WiredUI: server status row=2 key=Map value=arena7","ui"),
+ "loaded_3": (r"WiredUI: server status row=3 key=Players value=1/8","ui"),
+ "loaded_4": (r"WiredUI: server status row=4 key=Game type value=0","ui"),
+ "loaded_5": (r"WiredUI: server status row=5 key=Game value=q3now","ui"),
+ "loaded_6": (r"WiredUI: server status row=6 key=Protocol value=74","ui"),
+ "loaded_7": (r"WiredUI: server status row=7 key=Version value=.+","ui"),
+ "loaded_8": (r"WiredUI: server status row=8 key=Player 1 value=StatusBot . score 0, ping 0","ui"),
+ "registry": (r"WiredUI: server status registry feeder=13 count=9","ui"),
+ "address": (rf"WiredUI: server status registry row=0 key=Address value={e_target}","ui"),
+ "registry_1": (r"WiredUI: server status registry row=1 key=Server value=Z0 WIRED Q0 TARGET","ui"),
+ "registry_2": (r"WiredUI: server status registry row=2 key=Map value=arena7","ui"),
+ "registry_3": (r"WiredUI: server status registry row=3 key=Players value=1/8","ui"),
+ "registry_4": (r"WiredUI: server status registry row=4 key=Game type value=0","ui"),
+ "registry_5": (r"WiredUI: server status registry row=5 key=Game value=q3now","ui"),
+ "registry_6": (r"WiredUI: server status registry row=6 key=Protocol value=74","ui"),
+ "registry_7": (r"WiredUI: server status registry row=7 key=Version value=.+","ui"),
+ "registry_8": (r"WiredUI: server status registry row=8 key=Player 1 value=StatusBot . score 0, ping 0","ui"),
+ "list_focus": (r"wui_menu_nav focus: focused item 'statuslist' \(top index [0-9-]+\)","ui"),
+ "connect_focus": (r"wui_menu_nav focus: focused item 'btn_connect' \(top index -1\)","ui"),
+ "armed": (rf"Browser connect attempt armed target={e_target} selection_generation=([1-9][0-9]*) credential_present=0","client"),
+ "started": (rf"WiredUI: started validated connect origin=browser address={e_target} selection_generation=([1-9][0-9]*) credential_present=0","ui"),
+ "dispose": (rf"WiredUI: server status dispose reason=close-all prior_state=ready generation=([1-9][0-9]*) selection_generation=([1-9][0-9]*) address={e_target}","ui"),
+ "close": (r"WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0","ui"),
+ "late": (rf"CL_ServerStatusResponse: ignored unrequested response from {e_target}","client"),
+ "resolve": (rf"{e_target} resolved to {e_target}","client"),
+ "accept": (r"QUIC client: TLV ACCEPT received","network"),
+ "first": (r"cls\.state: -> CA_ACTIVE \(FIRST GAMEPLAY FRAME mapname=maps/arena7\.bsp serverTime=[0-9]+ numEntities=[0-9]+ framecount=[1-9][0-9]*\)","client"),
+}
+if mode=="proxy":
+    for name in ("accept","first"): families.pop(name)
+else:
+    families.pop("late")
+found={}
+for name,(pattern,category) in families.items():
+    matches=[]
+    for index,value in enumerate(messages):
+        match=re.fullmatch(pattern,value)
+        if match:
+            expected_severity="INFO" if name in {"resolve","first"} else "DEBUG"
+            if cats[index] != category or sevs[index] != expected_severity:
+                raise SystemExit(f"FAIL serverinfo-connect: {name} metadata")
+            matches.append((index,match))
+    if len(matches)!=1: raise SystemExit(f"FAIL serverinfo-connect: {name} cardinality {len(matches)}")
+    found[name]=matches[0]
+expected_cancel_generation=int(found["dispose"][1].group(1))+1
+cancel_matches=[]
+for index,value in enumerate(messages):
+    match=re.fullmatch(rf"WiredUI: server status cancelled generation=({expected_cancel_generation}) rows=0",value)
+    if match and cats[index]=="ui" and sevs[index]=="DEBUG": cancel_matches.append((index,match))
+if len(cancel_matches)!=1: raise SystemExit(f"FAIL serverinfo-connect: owner cancel cardinality {len(cancel_matches)}")
+found["cancel"]=cancel_matches[0]
+
+order=["push_servers","selection_sentinel","serverlist_focus","selection","info_focus","request","pending",
+       "push_info","stored","ready","loaded_0","loaded_1","loaded_2","loaded_3","loaded_4",
+       "loaded_5","loaded_6","loaded_7","loaded_8","registry","address","registry_1","registry_2",
+       "registry_3","registry_4","registry_5","registry_6","registry_7","registry_8","list_focus",
+       "connect_focus","armed"]
+order += ["resolve"]
+order += ["started","dispose","cancel","close"]
+if mode=="proxy":
+    # The delayed proxy packet is deliberately delivered after CloseAll.
+    order += ["late"]
+else:
+    order += ["accept","first"]
+if [found[name][0] for name in order] != sorted(found[name][0] for name in order):
+    raise SystemExit("FAIL serverinfo-connect: causal order")
+nav=[(i,value) for i,value in enumerate(messages) if value.startswith("wui_menu_nav: K_")]
+expected=["wui_menu_nav: K_DOWNARROW dispatched","wui_menu_nav: K_ENTER dispatched",
+          "wui_menu_nav: K_ENTER dispatched"]
+if [value for _,value in nav] != expected or any(cats[i]!="ui" or sevs[i]!="DEBUG" for i,_ in nav):
+    raise SystemExit("FAIL serverinfo-connect: authored key inventory")
+if not (found["selection_sentinel"][0] < found["serverlist_focus"][0] < found["selection"][0]
+        < nav[0][0] < found["info_focus"][0]
+        < found["request"][0] < found["push_info"][0] < nav[1][0]
+        < found["ready"][0] < found["connect_focus"][0] < found["armed"][0]
+        < found["close"][0] < nav[2][0]):
+    raise SystemExit("FAIL serverinfo-connect: authored Enter action order")
+selection_generation=found["selection"][1].group(2)
+if found["selection_sentinel"][1].group(1) != found["selection"][1].group(1) \
+        or int(found["selection_sentinel"][1].group(2))+1 != int(selection_generation):
+    raise SystemExit("FAIL serverinfo-connect: selection epoch drift")
+if any(found[name][1].group(group) != selection_generation
+	   for name,group in (("request",2),("pending",2),("ready",2),("armed",1),("started",1),("dispose",2))):
+    raise SystemExit("FAIL serverinfo-connect: selection generation drift")
+if found["request"][1].group(1) != found["ready"][1].group(1) \
+	   or found["request"][1].group(1) != found["pending"][1].group(1) \
+	   or found["request"][1].group(1) != found["dispose"][1].group(1):
+    raise SystemExit("FAIL serverinfo-connect: status generation drift")
+if int(found["cancel"][1].group(1)) != int(found["request"][1].group(1))+1:
+    raise SystemExit("FAIL serverinfo-connect: cancel generation drift")
+closed_prefixes={
+ "WiredUI: push menu ": {found["push_servers"][0],found["push_info"][0]},
+ "WiredUI: server selection ": {found["selection_sentinel"][0],found["selection"][0]},
+ "wui_menu_nav focus:": {found[name][0] for name in ("serverlist_focus","info_focus","list_focus","connect_focus")},
+ "WiredUI: server status row=": {found[f"loaded_{i}"][0] for i in range(9)},
+ "WiredUI: server status request ": {found["request"][0]},
+ "WiredUI: server status state=": {found["pending"][0]},
+ "WiredUI: server status loaded ": {found["ready"][0]},
+ "WiredUI: server status registry": {found["registry"][0],found["address"][0],
+     *(found[f"registry_{i}"][0] for i in range(1,9))},
+ "Browser connect attempt armed ": {found["armed"][0]},
+ "WiredUI: started validated connect ": {found["started"][0]},
+ "WiredUI: server status dispose ": {found["dispose"][0]},
+ "WiredUI: close all postcondition ": {found["close"][0]},
+}
+closed_prefixes["CL_ServerStatusResponse:"]={found["stored"][0]} \
+    | ({found["late"][0]} if mode=="proxy" else set())
+if mode=="direct":
+    closed_prefixes.update({
+      f"{target} resolved to ": {found["resolve"][0]},
+      "QUIC client: TLV ACCEPT": {found["accept"][0]},
+      "cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME": {found["first"][0]},
+    })
+if [i for i,value in enumerate(messages) if " resolved to " in value] != [found["resolve"][0]]:
+    raise SystemExit("FAIL serverinfo-connect: additive resolve family")
+if any(value.startswith("WiredUI: pop menu ") for value in messages):
+    raise SystemExit("FAIL serverinfo-connect: popup escaped CloseAll ownership")
+claimed_prefixes=tuple(closed_prefixes) + ("wui_menu_nav: K_",)
+claimed_candidate_indices(messages,prefixes=claimed_prefixes,
+                          contains=(" resolved to ",),label="claimed semantic marker")
+for prefix,expected_indices in closed_prefixes.items():
+    actual={index for index,value in enumerate(messages) if value.startswith(prefix)}
+    if actual != expected_indices: raise SystemExit(f"FAIL serverinfo-connect: additive semantic family {prefix}")
+if any(re.fullmatch(rf"CL_ServerStatusResponse: stored response from {e_target} bytes=[1-9][0-9]*",value)
+       and index > found["cancel"][0] for index,value in enumerate(messages)):
+    raise SystemExit("FAIL serverinfo-connect: late response stored after cancel")
+if any("password required origin=browser" in value or "credential_present=1" in value
+       or re.search(rf"{e_sentinel} resolved to {e_sentinel}",value) for value in messages):
+    raise SystemExit("FAIL serverinfo-connect: credential/sentinel path contamination")
+
+if mode=="proxy":
+    events=[row["event"] for row in fixture]
+    expected_events=["ready","request","challenge_seen",
+                     "serverinfo_connect_upstream_request","serverinfo_connect_current_response",
+                     "serverinfo_connect_late_response","stopped"]
+    if events != expected_events:
+        raise SystemExit(f"FAIL serverinfo-connect fixture: exact event inventory/order {events}")
+    for event in ("ready","challenge_seen","serverinfo_connect_upstream_request",
+                  "serverinfo_connect_current_response","serverinfo_connect_late_response","stopped"):
+        if events.count(event)!=1: raise SystemExit(f"FAIL serverinfo-connect fixture: {event}")
+    ready=next(row for row in fixture if row["event"]=="ready")
+    generic=next(row for row in fixture if row["event"]=="request")
+    challenge=next(row for row in fixture if row["event"]=="challenge_seen")
+    request=next(row for row in fixture if row["event"]=="serverinfo_connect_upstream_request")
+    current=next(row for row in fixture if row["event"]=="serverinfo_connect_current_response")
+    late=next(row for row in fixture if row["event"]=="serverinfo_connect_late_response")
+    stopped=next(row for row in fixture if row["event"]=="stopped")
+    if stopped.get("reason")!="signal": raise SystemExit("FAIL serverinfo-connect fixture: uncontrolled stop")
+    expected_ready={"client_port":current.get("peer_port"),"sentinel_port":int(sentinel_port),
+                    "target_port":int(target_port),"protocol":74}
+    if any(ready.get(key)!=value for key,value in expected_ready.items()) \
+            or generic.get("role")!="target" or generic.get("command")!="getstatus" \
+            or generic.get("peer_port")!=ready.get("client_port") \
+            or challenge.get("ordinal")!=1 or not re.fullmatch(r"[0-9a-f]{16}",str(challenge.get("challenge",""))) \
+            or request.get("request_number")!=1 or request.get("ordinal")!=1 \
+            or request.get("target_port")!=int(target_port) or request.get("peer_port")!=ready.get("client_port") \
+            or not isinstance(request.get("upstream_port"),int) or request["upstream_port"]<=0 \
+            or any(not isinstance(row.get("elapsed_ms"),int) or row["elapsed_ms"]<0
+                   for row in (request,current,late)) \
+            or not request["elapsed_ms"] <= current["elapsed_ms"] < late["elapsed_ms"] \
+            or late["elapsed_ms"]-current["elapsed_ms"] < 700:
+        raise SystemExit("FAIL serverinfo-connect fixture: ready/request authority")
+    fixture_order=[events.index(name) for name in ("ready","request","challenge_seen","serverinfo_connect_upstream_request",
+                                                    "serverinfo_connect_current_response",
+                                                    "serverinfo_connect_late_response","stopped")]
+    if fixture_order != sorted(fixture_order): raise SystemExit("FAIL serverinfo-connect fixture: causal order")
+    if not isinstance(current.get("length"),int) or current["length"]<=0 \
+            or not re.fullmatch(r"[0-9a-f]{64}",str(current.get("sha256",""))) \
+            or not re.fullmatch(r"[0-9a-f]+",str(current.get("packet_hex",""))) \
+            or current.get("packet_hex") != late.get("packet_hex") \
+            or (current["length"],current["sha256"],current.get("source_port"),current.get("peer_port")) != \
+               (late.get("length"),late.get("sha256"),late.get("source_port"),late.get("peer_port")) \
+            or len(bytes.fromhex(current["packet_hex"])) != current["length"] \
+            or hashlib.sha256(bytes.fromhex(current["packet_hex"])).hexdigest() != current["sha256"] \
+            or current.get("source_port")!=int(target_port):
+        raise SystemExit("FAIL serverinfo-connect fixture: late packet not byte-identical/current-peer bound")
+    packet=bytes.fromhex(current["packet_hex"])
+    challenge_bytes=str(challenge["challenge"]).encode("ascii")
+    if not packet.startswith(b"\xff\xff\xff\xffstatusResponse\n") \
+            or b"\\challenge\\"+challenge_bytes not in packet \
+            or b"\\sv_hostname\\Z0 WIRED Q0 TARGET" not in packet \
+            or b"\\mapname\\arena7" not in packet or b"\\sv_maxclients\\8" not in packet \
+            or b"\\sv_gamename\\q3now" not in packet or b"\\protocol\\74" not in packet:
+        raise SystemExit("FAIL serverinfo-connect fixture: status packet semantic envelope")
+
+info_rows=[row for row in layout if row["menu"]=="serverinfo"]
+viewport_rows=[row for row in info_rows if row["region"]=="serverinfo"]
+viewports={(row["frame"],float(row["w"]),float(row["h"])) for row in viewport_rows
+           if row["x"]==0 and row["y"]==0 and row["w"]>0 and row["h"]>0}
+viewport_by_frame={frame:(width,height) for frame,width,height in viewports}
+if not viewport_by_frame or len(viewport_by_frame)!=len(viewport_rows):
+    raise SystemExit("FAIL serverinfo-connect layout: viewport authority")
+if any(not isinstance(row.get("frame"),int) or row["frame"]<0
+       or any(not isinstance(row[field],(int,float)) or not math.isfinite(row[field])
+              for field in ("x","y","w","h"))
+       or row["x"]<0 or row["y"]<0 or row["w"]<=0 or row["h"]<=0
+       or row["frame"] not in viewport_by_frame
+       or row["x"]+row["w"]>viewport_by_frame[row["frame"]][0]+.01
+       or row["y"]+row["h"]>viewport_by_frame[row["frame"]][1]+.01 for row in info_rows):
+    raise SystemExit("FAIL serverinfo-connect layout: nonfinite/outside viewport")
+for region in ("serverinfo","serverinfo_root","statuslist","btn_connect"):
+    rows=[row for row in info_rows if row["region"]==region]
+    if not rows or any(not isinstance(row[field],(int,float)) for row in rows for field in ("x","y","w","h")) \
+            or any(row["w"]<=0 or row["h"]<=0 for row in rows):
+        raise SystemExit(f"FAIL serverinfo-connect layout: {region}")
+focus=[row for row in info_rows if row["region"]=="btn_connect" and row["focused"]==1]
+if not focus or any(not all(any(candidate["frame"]==row["frame"] and candidate["region"]==region
+                                for candidate in info_rows)
+                            for region in ("serverinfo","serverinfo_root","statuslist"))
+                    or sum(1 for candidate in info_rows
+                        if candidate["frame"]==row["frame"] and candidate["focused"]==1)!=1 for row in focus):
+    raise SystemExit("FAIL serverinfo-connect layout: unique btn_connect focus")
+
+if mode=="proxy":
+    if any("TLV ACCEPT" in value or "FIRST GAMEPLAY FRAME" in value for value in messages):
+        raise SystemExit("FAIL serverinfo-connect proxy: gameplay contamination")
+    print("  PASS serverinfo proxy: READY popup -> validated attempt -> CloseAll cancellation -> byte-identical late no-store")
+else:
+    server_messages=[msg(row) for row in server]
+    server_cats=[str(row["cat"]).lower() for row in server]
+    server_sevs=[str(row["sev"]).upper() for row in server]
+    def server_family(pattern,severity,category):
+        rows=[i for i,value in enumerate(server_messages) if re.fullmatch(pattern,value)]
+        if len(rows)!=1 or server_sevs[rows[0]]!=severity or server_cats[rows[0]]!=category:
+            raise SystemExit(f"FAIL serverinfo-connect server family: {pattern}")
+        return rows
+    listening=server_family(rf"WiredNet: listening on port {target_port} \(IPv4\), ALPN: [^,]+, max clients: [1-9][0-9]*, cert=.+ key=.+","INFO","network")
+    arena=server_family(r"Server: arena7","INFO","server")
+    needpass=server_family(r"g_needpass\s+0","INFO","system")
+    conn=[(i,match.group(1)) for i,value in enumerate(server_messages)
+          if (match:=re.fullmatch(r"SV_OnPlayerConnect: conn=([1-9][0-9]*)",value))]
+    assigned=[(i,int(match.group(1)),match.group(2)) for i,value in enumerate(server_messages)
+              if (match:=re.fullmatch(r"SV_OnPlayerConnect: slot ([1-9][0-9]*) assigned to conn=([1-9][0-9]*) \(127\.0\.0\.1\)",value))]
+    if len(conn)!=1 or len(assigned)!=1: raise SystemExit("FAIL serverinfo-connect server: admission cardinality")
+    assigned_i,slot,assigned_conn=assigned[0]
+    all_connect=[(i,int(match.group(1))) for i,value in enumerate(server_messages)
+                 if (match:=re.fullmatch(r"ClientConnect: ([0-9]+)",value))]
+    all_begin=[(i,int(match.group(1))) for i,value in enumerate(server_messages)
+               if (match:=re.fullmatch(r"ClientBegin: ([0-9]+)",value))]
+    if sum(value.startswith("ClientConnect:") for value in server_messages)!=2 \
+            or sum(value.startswith("ClientBegin:") for value in server_messages)!=2:
+        raise SystemExit("FAIL serverinfo-connect server: additive ClientConnect/ClientBegin family")
+    connect=[i for i,value in enumerate(server_messages) if value==f"ClientConnect: {slot}"]
+    begin=[i for i,value in enumerate(server_messages) if value==f"ClientBegin: {slot}"]
+    shutdown=[i for i,value in enumerate(server_messages) if value=="----- Server Shutdown (Server quit) -----"]
+    transport=[i for i,value in enumerate(server_messages) if value=="QUIC transport shut down."]
+    boundary=[i for i,value in enumerate(server_messages) if value=="Q0_SERVERINFO_DIRECT_PHASE_COMPLETE"]
+    quit_request=[i for i,value in enumerate(server_messages) if value=="Q0_SERVERINFO_DIRECT_QUIT_REQUESTED"]
+    if any(len(rows)!=1 for rows in (listening,arena,needpass,connect,begin,shutdown,transport,boundary,quit_request)) \
+            or len(all_connect)!=2 or len(all_begin)!=2 \
+            or all_connect[0][1] != all_begin[0][1] or all_connect[0][1] == slot \
+            or all_connect[1][1] != slot or all_begin[1][1] != slot \
+            or conn[0][1] != assigned_conn \
+            or not listening[0] < arena[0] < all_connect[0][0] < all_begin[0][0] < needpass[0] \
+            < conn[0][0] < connect[0] < assigned_i \
+            < begin[0] < boundary[0] < quit_request[0] < shutdown[0] < transport[0]:
+        raise SystemExit("FAIL serverinfo-connect server: VM admission/shutdown order")
+    if any("game rejected connection" in value for value in server_messages):
+        raise SystemExit("FAIL serverinfo-connect server: unexpected rejection")
+    expected_metadata={
+      conn[0][0]:("DEBUG","server"), assigned_i:("DEBUG","server"),
+      all_connect[0][0]:("INFO","game"), all_begin[0][0]:("INFO","game"),
+      connect[0]:("INFO","game"), begin[0]:("INFO","game"),
+      boundary[0]:("INFO","system"), quit_request[0]:("INFO","system"),
+      shutdown[0]:("INFO","server"), transport[0]:("INFO","network"),
+    }
+    if any((server_sevs[index],server_cats[index])!=metadata for index,metadata in expected_metadata.items()):
+        raise SystemExit("FAIL serverinfo-connect server: semantic metadata")
+    prefix_counts={"WiredNet: listening on port ":1,"SV_OnPlayerConnect: conn=":1,
+                   "SV_OnPlayerConnect: slot ":1,"Q0_SERVERINFO_DIRECT_PHASE_COMPLETE":1,
+                   "Q0_SERVERINFO_DIRECT_QUIT_REQUESTED":1,"----- Server Shutdown (":1,
+                   "QUIC transport shut down.":1}
+    for prefix,count in prefix_counts.items():
+        if sum(value.startswith(prefix) for value in server_messages)!=count:
+            raise SystemExit(f"FAIL serverinfo-connect server: additive family {prefix}")
+    print("  PASS serverinfo direct: READY popup -> CloseAll cancellation -> same endpoint QUIC/VM/FIRST -> controlled shutdown")
 PYEOF
 }
 
@@ -933,18 +1461,25 @@ msgs = [
  "wui_menu_nav: K_ENTER dispatched",
  "WiredUI: password render trace length=7 masked=1",
  "wui_menu_nav focus: focused item 'btn_connect' (top index -1)",
- "WiredUI: password submit accepted address=127.0.0.1:28003 selection_generation=5",
- "WiredUI: queued validated connect origin=browser address=127.0.0.1:28003",
+ "Browser connect attempt armed target=127.0.0.1:28003 selection_generation=5 credential_present=1",
+ "127.0.0.1:28003 resolved to 127.0.0.1:28003",
+ "WiredUI: started validated connect origin=browser address=127.0.0.1:28003 selection_generation=5 credential_present=1",
  "WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0",
  "wui_menu_nav: K_ENTER dispatched",
- "127.0.0.1:28003 resolved to 127.0.0.1:28003",
- "QUIC client: TLV ACCEPT received slot=0 sv_fps=20",
+ "QUIC client: TLV ACCEPT received",
  "cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp serverTime=100 numEntities=3 framecount=1)",
  "WiredUI: shutdown",
 ]
 with open(product, "w", encoding="utf-8") as out:
-    for msg in msgs: out.write(json.dumps({"sev":"DEBUG","cat":"ui","msg":msg})+"\n")
+    for msg in msgs:
+        sev,cat="DEBUG","ui"
+        if msg.startswith("Browser connect attempt armed "): cat="client"
+        elif " resolved to " in msg: sev,cat="INFO","client"
+        elif msg.startswith("QUIC client: TLV ACCEPT"): cat="network"
+        elif "FIRST GAMEPLAY FRAME" in msg: sev,cat="INFO","client"
+        out.write(json.dumps({"sev":sev,"cat":cat,"msg":msg})+"\n")
 wrong_msgs = [
+ "Unrelated startup banner line one\nline two",
  "WiredUI: push menu 'servers' (depth 1)",
  "WiredUI: server fixture installed sentinel=127.0.0.1:28001 target=127.0.0.1:28003 target_needpass=1 raw_order=target,sentinel",
  "wui_menu_nav focus: focused item 'serverlist' (top index 1)",
@@ -960,15 +1495,28 @@ wrong_msgs = [
  "wui_menu_nav: K_ENTER dispatched",
  "WiredUI: password render trace length=7 masked=1",
  "wui_menu_nav focus: focused item 'btn_connect' (top index -1)",
- "WiredUI: password submit accepted address=127.0.0.1:28003 selection_generation=2",
- "WiredUI: queued validated connect origin=browser address=127.0.0.1:28003",
+ "Browser connect attempt armed target=127.0.0.1:28003 selection_generation=2 credential_present=1",
+ "127.0.0.1:28003 resolved to 127.0.0.1:28003",
+ "WiredUI: started validated connect origin=browser address=127.0.0.1:28003 selection_generation=2 credential_present=1",
  "WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0",
  "wui_menu_nav: K_ENTER dispatched",
- "127.0.0.1:28003 resolved to 127.0.0.1:28003",
- "QUIC client: TLV ACCEPT received slot=0 sv_fps=20",
+ "Browser connect credential disposed target=127.0.0.1:28003 stage=client-handoff",
+ "QUIC connect refused class=2 deferred_disconnect=1",
+ "Connect failed kind=2 browser_retry=1",
+ "WiredUI: push menu 'main' (depth 1)",
+ "WiredUI: push menu 'servers' (depth 2)",
+ "WiredUI: push menu 'password' (depth 3)",
+ "WiredUI: authentication retry opened address=127.0.0.1:28003 selection_generation=2",
 ]
 with open(wrong, "w", encoding="utf-8") as out:
-    for msg in wrong_msgs: out.write(json.dumps({"sev":"DEBUG","cat":"ui","msg":msg})+"\n")
+    for msg in wrong_msgs:
+        sev,cat="DEBUG","ui"
+        if msg.startswith("Browser connect attempt armed "): cat="client"
+        elif msg.startswith("Browser connect credential disposed "): cat="client"
+        elif " resolved to " in msg: sev,cat="INFO","client"
+        elif msg.startswith("QUIC connect refused "): sev,cat="WARN","network"
+        elif msg.startswith("Connect failed kind="): sev,cat="WARN","client"
+        out.write(json.dumps({"sev":sev,"cat":cat,"msg":msg})+"\n")
 layout = []
 for frame, focused in ((800, "row_password"), (801, "row_password"),
                        (802, "btn_connect"), (803, "btn_connect")):
@@ -1039,7 +1587,7 @@ server_msgs = [
  "SVC_Status: request from 127.0.0.1:28003",
  "SVC_Status: request from 127.0.0.1:28003",
  "SV_OnPlayerConnect: conn=11",
- "QUIC: game rejected connection from 127.0.0.1:28000: Invalid password",
+ "QUIC: game rejected connection from 127.0.0.1:28000 class=2",
  "Q0_WRONG_PASSWORD_PHASE_COMPLETE",
  "SV_OnPlayerConnect: conn=17",
  "  0:10 ClientConnect: 2",
@@ -1049,7 +1597,9 @@ server_msgs = [
  "QUIC transport shut down.",
 ]
 with open(server, "w", encoding="utf-8") as out:
-    for msg in server_msgs: out.write(json.dumps({"sev":"DEBUG","cat":"server","msg":msg})+"\n")
+    for msg in server_msgs:
+        sev = "INFO" if msg.startswith("QUIC: game rejected connection ") else "DEBUG"
+        out.write(json.dumps({"sev":sev,"cat":"server","msg":msg})+"\n")
 double_server_msgs = [
  "WiredNet: listening on port 28004 (IPv4), ALPN: q3v69",
  "Server: arena7",
@@ -1069,6 +1619,260 @@ with open(double_server, "w", encoding="utf-8") as out:
     for msg in double_server_msgs:
         out.write(json.dumps({"sev":"DEBUG","cat":"server","msg":msg})+"\n")
 PYEOF
+    CLEAN_INFO_PRODUCT="$ROOT/serverinfo-product.jsonl"
+    CLEAN_INFO_PROXY_PRODUCT="$ROOT/serverinfo-proxy-product.jsonl"
+    CLEAN_INFO_DIRECT_PRODUCT="$ROOT/serverinfo-direct-product.jsonl"
+    CLEAN_INFO_FIXTURE="$ROOT/serverinfo-fixture.jsonl"
+    CLEAN_INFO_SERVER="$ROOT/serverinfo-server.jsonl"
+    CLEAN_INFO_LAYOUT="$ROOT/serverinfo-layout.jsonl"
+    python3 - "$CLEAN_INFO_PRODUCT" "$CLEAN_INFO_FIXTURE" "$CLEAN_INFO_SERVER" "$CLEAN_INFO_LAYOUT" <<'PYEOF'
+import json,sys
+product,fixture,server,layout=sys.argv[1:5]
+s,t="127.0.0.1:28001","127.0.0.1:28005"
+challenge_value="0123456789abcdef"
+packet=(b"\xff\xff\xff\xffstatusResponse\n"
+        + f"\\challenge\\{challenge_value}\\sv_hostname\\Z0 WIRED Q0 TARGET\\mapname\\arena7"
+          "\\sv_maxclients\\8\\g_gametype\\0\\sv_gamename\\q3now\\protocol\\74"
+          "\\version\\Q0 fixture 28005\n7 23 \"StatusBot\"\n".encode("ascii"))
+packet_hex=packet.hex()
+packet_hash=__import__("hashlib").sha256(packet).hexdigest()
+packet_len=len(packet)
+rows=[
+ ("DEBUG","ui",f"WiredUI: server fixture installed sentinel={s} target={t} raw_order=target,sentinel"),
+ ("DEBUG","ui","WiredUI: push menu 'servers' (depth 1)"),
+ ("DEBUG","ui",f"WiredUI: server selection display_row=0 raw=1 source=0 list_generation=4 selection_generation=4 address={s} name=A0 WIRED Q0 SENTINEL map=arena1"),
+ ("DEBUG","ui","wui_menu_nav focus: focused item 'serverlist' (top index 0)"),
+ ("DEBUG","ui",f"WiredUI: server selection display_row=1 raw=0 source=0 list_generation=4 selection_generation=5 address={t} name=Z0 WIRED Q0 TARGET map=arena7"),
+ ("DEBUG","ui","wui_menu_nav: K_DOWNARROW dispatched"),
+ ("DEBUG","ui","wui_menu_nav focus: focused item 'btn_info' (top index -1)"),
+ ("DEBUG","ui",f"WiredUI: server status request generation=7 selection_generation=5 address={t}"),
+ ("DEBUG","ui",f"WiredUI: server status state=pending generation=7 selection_generation=5 address={t} rows=1"),
+ ("DEBUG","ui","WiredUI: push menu 'serverinfo' (depth 2)"),
+ ("DEBUG","ui","wui_menu_nav: K_ENTER dispatched"),
+ ("DEBUG","client",f"CL_ServerStatusResponse: stored response from {t} bytes={packet_len}"),
+ ("DEBUG","ui",f"WiredUI: server status loaded generation=7 selection_generation=5 address={t} rows=9"),
+ ("DEBUG","ui",f"WiredUI: server status row=0 key=Address value={t}"),
+ ("DEBUG","ui","WiredUI: server status row=1 key=Server value=Z0 WIRED Q0 TARGET"),
+ ("DEBUG","ui","WiredUI: server status row=2 key=Map value=arena7"),
+ ("DEBUG","ui","WiredUI: server status row=3 key=Players value=1/8"),
+ ("DEBUG","ui","WiredUI: server status row=4 key=Game type value=0"),
+ ("DEBUG","ui","WiredUI: server status row=5 key=Game value=q3now"),
+ ("DEBUG","ui","WiredUI: server status row=6 key=Protocol value=74"),
+ ("DEBUG","ui","WiredUI: server status row=7 key=Version value=Wired 0.80.77 macos-arm64 Aug 11 2026"),
+ ("DEBUG","ui","WiredUI: server status row=8 key=Player 1 value=StatusBot — score 0, ping 0"),
+ ("DEBUG","ui","WiredUI: server status registry feeder=13 count=9"),
+ ("DEBUG","ui",f"WiredUI: server status registry row=0 key=Address value={t}"),
+ ("DEBUG","ui","WiredUI: server status registry row=1 key=Server value=Z0 WIRED Q0 TARGET"),
+ ("DEBUG","ui","WiredUI: server status registry row=2 key=Map value=arena7"),
+ ("DEBUG","ui","WiredUI: server status registry row=3 key=Players value=1/8"),
+ ("DEBUG","ui","WiredUI: server status registry row=4 key=Game type value=0"),
+ ("DEBUG","ui","WiredUI: server status registry row=5 key=Game value=q3now"),
+ ("DEBUG","ui","WiredUI: server status registry row=6 key=Protocol value=74"),
+ ("DEBUG","ui","WiredUI: server status registry row=7 key=Version value=Wired 0.80.77 macos-arm64 Aug 11 2026"),
+ ("DEBUG","ui","WiredUI: server status registry row=8 key=Player 1 value=StatusBot — score 0, ping 0"),
+ ("DEBUG","ui","wui_menu_nav focus: focused item 'statuslist' (top index 1)"),
+ ("DEBUG","ui","wui_menu_nav focus: focused item 'btn_connect' (top index -1)"),
+ ("DEBUG","client",f"Browser connect attempt armed target={t} selection_generation=5 credential_present=0"),
+ ("INFO","client",f"{t} resolved to {t}"),
+ ("DEBUG","ui",f"WiredUI: started validated connect origin=browser address={t} selection_generation=5 credential_present=0"),
+ ("DEBUG","ui",f"WiredUI: server status dispose reason=close-all prior_state=ready generation=7 selection_generation=5 address={t}"),
+ ("DEBUG","ui","WiredUI: server status cancelled generation=8 rows=0"),
+ ("DEBUG","ui","WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0"),
+ ("DEBUG","ui","wui_menu_nav: K_ENTER dispatched"),
+ ("DEBUG","client",f"CL_ServerStatusResponse: ignored unrequested response from {t}"),
+ ("DEBUG","network","QUIC client: TLV ACCEPT received"),
+ ("INFO","client","cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp serverTime=100 numEntities=3 framecount=1)"),
+]
+with open(product,"w",encoding="utf-8") as out:
+    for sev,cat,msg in rows: out.write(json.dumps({"sev":sev,"cat":cat,"msg":msg})+"\n")
+events=[
+ {"event":"ready","client_port":28000,"sentinel_port":28001,"target_port":28005,"protocol":74},
+ {"event":"request","role":"target","command":"getstatus","peer_port":28000},
+ {"event":"challenge_seen","ordinal":1,"challenge":challenge_value},
+ {"event":"serverinfo_connect_upstream_request","request_number":1,"ordinal":1,"target_port":28005,"peer_port":28000,"upstream_port":28006,"elapsed_ms":100},
+ {"event":"serverinfo_connect_current_response","source_port":28005,"peer_port":28000,"elapsed_ms":110,"length":packet_len,"packet_hex":packet_hex,"sha256":packet_hash},
+ {"event":"serverinfo_connect_late_response","source_port":28005,"peer_port":28000,"elapsed_ms":860,"length":packet_len,"packet_hex":packet_hex,"sha256":packet_hash},
+ {"event":"stopped","reason":"signal"},
+]
+with open(fixture,"w",encoding="utf-8") as out:
+    for row in events: out.write(json.dumps(row)+"\n")
+server_rows=[
+ ("INFO","network","WiredNet: listening on port 28005 (IPv4), ALPN: q3v69, max clients: 8, cert=test-cert key=test-key"),
+ ("INFO","server","Server: arena7"),
+ ("INFO","game","ClientConnect: 0"),
+ ("INFO","game","ClientBegin: 0"),
+ ("INFO","system","g_needpass           0"),
+ ("DEBUG","server","SV_OnPlayerConnect: conn=7"),
+ ("INFO","game","ClientConnect: 2"),
+ ("DEBUG","server","SV_OnPlayerConnect: slot 2 assigned to conn=7 (127.0.0.1)"),
+ ("INFO","game","ClientBegin: 2"),
+ ("INFO","system","Q0_SERVERINFO_DIRECT_PHASE_COMPLETE"),
+ ("INFO","system","Q0_SERVERINFO_DIRECT_QUIT_REQUESTED"),
+ ("INFO","server","----- Server Shutdown (Server quit) -----"),
+ ("INFO","network","QUIC transport shut down."),
+]
+with open(server,"w",encoding="utf-8") as out:
+    for sev,cat,msg in server_rows: out.write(json.dumps({"sev":sev,"cat":cat,"msg":msg})+"\n")
+layout_rows=[]
+for region,rect in (("serverinfo",(0,0,1280,720)),("serverinfo_root",(256,108,768,504)),
+                    ("statuslist",(280,180,720,320)),("btn_connect",(720,530,160,36))):
+    x,y,w,h=rect
+    layout_rows.append({"menu":"serverinfo","region":region,"frame":500,
+                        "focused":int(region=="btn_connect"),"x":x,"y":y,"w":w,"h":h})
+with open(layout,"w",encoding="utf-8") as out:
+    for row in layout_rows: out.write(json.dumps(row)+"\n")
+PYEOF
+    python3 - "$CLEAN_INFO_PRODUCT" "$CLEAN_INFO_PROXY_PRODUCT" "$CLEAN_INFO_DIRECT_PRODUCT" <<'PYEOF'
+import json,sys
+source,proxy,direct=sys.argv[1:4]
+rows=[json.loads(line) for line in open(source,encoding="utf-8")]
+with open(proxy,"w",encoding="utf-8") as out:
+    for row in rows:
+        if not any(token in row["msg"] for token in ("TLV ACCEPT","FIRST GAMEPLAY FRAME")):
+            out.write(json.dumps(row)+"\n")
+with open(direct,"w",encoding="utf-8") as out:
+    for row in rows:
+        if "ignored unrequested response" not in row["msg"]:
+            out.write(json.dumps(row)+"\n")
+PYEOF
+    analyze_serverinfo_connect_contract "$CLEAN_INFO_PROXY_PRODUCT" "$CLEAN_INFO_FIXTURE" \
+        "$CLEAN_INFO_SERVER" "$CLEAN_INFO_LAYOUT" 28001 28005 proxy >/dev/null || {
+        echo "FAIL self-test: clean serverinfo proxy fixture rejected"; exit 1; }
+    analyze_serverinfo_connect_contract "$CLEAN_INFO_DIRECT_PRODUCT" "$CLEAN_INFO_FIXTURE" \
+        "$CLEAN_INFO_SERVER" "$CLEAN_INFO_LAYOUT" 28001 28005 direct >/dev/null || {
+        echo "FAIL self-test: clean serverinfo direct fixture rejected"; exit 1; }
+    for defect in info_missing_dispose info_dispose_early info_wrong_state info_wrong_address \
+            info_duplicate_cancel info_late_store info_missing_late info_hash_mismatch \
+            info_missing_focus info_generation_drift info_pending_generation info_cancel_generation \
+            info_additive_started info_missing_enter \
+            info_additive_enter info_wrong_enter_category info_missing_status_row \
+            info_additive_registry info_fixture_protocol info_fixture_peer info_fixture_stop_timeout \
+            info_fixture_packet_semantic info_fixture_bad_challenge info_fixture_additive_event \
+            info_additive_resolve info_multiline_claimed info_cr_smuggle_dispose \
+            info_lf_smuggle_stored info_popup_escape info_layout_outside; do
+        DIR="$ROOT/$defect"; mkdir -p "$DIR"
+        python3 - "$CLEAN_INFO_PROXY_PRODUCT" "$CLEAN_INFO_FIXTURE" "$CLEAN_INFO_SERVER" \
+            "$CLEAN_INFO_LAYOUT" "$DIR/product" "$DIR/fixture" "$DIR/server" "$DIR/layout" "$defect" <<'PYEOF'
+import hashlib,json,sys
+ps,fs,ss,ls,pd,fd,sd,ld,defect=sys.argv[1:10]
+p=[json.loads(x) for x in open(ps,encoding="utf-8")]
+f=[json.loads(x) for x in open(fs,encoding="utf-8")]
+s=[json.loads(x) for x in open(ss,encoding="utf-8")]
+l=[json.loads(x) for x in open(ls,encoding="utf-8")]
+if defect=="info_missing_dispose": p=[r for r in p if "status dispose reason=close-all" not in r["msg"]]
+elif defect=="info_dispose_early":
+    i=next(i for i,r in enumerate(p) if "status dispose reason=close-all" in r["msg"]); row=p.pop(i)
+    i=next(i for i,r in enumerate(p) if "started validated connect" in r["msg"]); p.insert(i,row)
+elif defect=="info_wrong_state":
+    next(r for r in p if "status dispose reason=close-all" in r["msg"])["msg"] = next(r["msg"] for r in p if "status dispose reason=close-all" in r["msg"]).replace("prior_state=ready","prior_state=pending")
+elif defect=="info_wrong_address":
+    r=next(r for r in p if "status dispose reason=close-all" in r["msg"]); r["msg"]=r["msg"].replace("127.0.0.1:28005","127.0.0.1:28001")
+elif defect=="info_duplicate_cancel":
+    i=next(i for i,r in enumerate(p) if "server status cancelled" in r["msg"]); p.insert(i,p[i].copy())
+elif defect=="info_late_store":
+    i=next(i for i,r in enumerate(p) if "ignored unrequested response" in r["msg"]); p[i]["msg"]="CL_ServerStatusResponse: stored response from 127.0.0.1:28005 bytes=180"
+elif defect=="info_missing_late": f=[r for r in f if r["event"]!="serverinfo_connect_late_response"]
+elif defect=="info_hash_mismatch": next(r for r in f if r["event"]=="serverinfo_connect_late_response")["sha256"]="2"*64
+elif defect=="info_missing_focus": l=[r for r in l if r["region"]!="btn_connect"]
+elif defect=="info_generation_drift":
+    r=next(r for r in p if "started validated connect" in r["msg"]); r["msg"]=r["msg"].replace("selection_generation=5","selection_generation=4")
+elif defect=="info_pending_generation":
+    r=next(r for r in p if "server status state=pending" in r["msg"])
+    r["msg"]=r["msg"].replace("selection_generation=5","selection_generation=999")
+elif defect=="info_cancel_generation":
+    r=next(r for r in p if "server status cancelled" in r["msg"]); r["msg"]="WiredUI: server status cancelled generation=999 rows=0"
+elif defect=="info_additive_started":
+    i=next(i for i,r in enumerate(p) if "started validated connect" in r["msg"]); p.insert(i,p[i].copy())
+elif defect=="info_missing_enter":
+    indices=[i for i,r in enumerate(p) if r["msg"]=="wui_menu_nav: K_ENTER dispatched"]; p.pop(indices[-1])
+elif defect=="info_additive_enter":
+    i=next(i for i,r in enumerate(p) if r["msg"]=="wui_menu_nav: K_ENTER dispatched"); p.insert(i,p[i].copy())
+elif defect=="info_wrong_enter_category":
+    next(r for r in p if r["msg"]=="wui_menu_nav: K_ENTER dispatched")["cat"]="client"
+elif defect=="info_missing_status_row": p=[r for r in p if "server status row=4 " not in r["msg"]]
+elif defect=="info_additive_registry":
+    i=next(i for i,r in enumerate(p) if "server status registry row=8 " in r["msg"]); p.insert(i,p[i].copy())
+elif defect=="info_fixture_protocol": next(r for r in f if r["event"]=="ready")["protocol"]=75
+elif defect=="info_fixture_peer": next(r for r in f if r["event"]=="serverinfo_connect_upstream_request")["peer_port"]=1
+elif defect=="info_fixture_stop_timeout": next(r for r in f if r["event"]=="stopped")["reason"]="timeout"
+elif defect=="info_fixture_packet_semantic":
+    current=next(r for r in f if r["event"]=="serverinfo_connect_current_response")
+    packet=bytes.fromhex(current["packet_hex"]).replace(b"\\mapname\\arena7",b"\\mapname\\arena8")
+    for row in f:
+        if row["event"] in {"serverinfo_connect_current_response","serverinfo_connect_late_response"}:
+            row["packet_hex"]=packet.hex(); row["length"]=len(packet); row["sha256"]=hashlib.sha256(packet).hexdigest()
+elif defect=="info_fixture_bad_challenge": next(r for r in f if r["event"]=="challenge_seen")["challenge"]="0"*32
+elif defect=="info_fixture_additive_event": f.insert(-1,{"event":"unexpected_upstream"})
+elif defect=="info_additive_resolve":
+    i=next(i for i,r in enumerate(p) if " resolved to " in r["msg"]); p.insert(i,p[i].copy())
+elif defect=="info_multiline_claimed":
+    r=next(r for r in p if "server status loaded" in r["msg"]); r["msg"] += "\nforged"
+elif defect=="info_cr_smuggle_dispose":
+    p.append({"sev":"DEBUG","cat":"ui",
+              "msg":"benign\rWiredUI: server status dispose reason=close-all prior_state=ready generation=7 selection_generation=5 address=127.0.0.1:28005"})
+elif defect=="info_lf_smuggle_stored":
+    i=next(i for i,r in enumerate(p) if "server status cancelled" in r["msg"])
+    p.insert(i+1,{"sev":"DEBUG","cat":"client",
+                  "msg":"benign\nCL_ServerStatusResponse: stored response from 127.0.0.1:28005 bytes=180"})
+elif defect=="info_popup_escape":
+    i=next(i for i,r in enumerate(p) if "close all postcondition" in r["msg"]); p.insert(i,{"sev":"DEBUG","cat":"ui","msg":"WiredUI: pop menu (depth 1)"})
+elif defect=="info_layout_outside": next(r for r in l if r["region"]=="btn_connect")["x"]=1270
+for path,rows in ((pd,p),(fd,f),(sd,s),(ld,l)):
+    with open(path,"w",encoding="utf-8") as out:
+        for row in rows: out.write(json.dumps(row)+"\n")
+PYEOF
+        if analyze_serverinfo_connect_contract "$DIR/product" "$DIR/fixture" "$DIR/server" \
+                "$DIR/layout" 28001 28005 proxy >/dev/null 2>&1; then
+            echo "FAIL self-test: serverinfo Connect defect '$defect' accepted"; exit 1
+        fi
+        echo "  PASS self-test: rejects $defect"
+    done
+    for defect in info_direct_missing_accept info_direct_conn_mismatch info_direct_wrong_listen \
+            info_direct_missing_shutdown info_direct_wrong_metadata info_direct_resolve_after_close \
+            info_direct_missing_startup_bot info_direct_extra_clientconnect \
+            info_direct_connect_suffix info_direct_begin_suffix \
+            info_direct_wrong_accept_metadata info_direct_wrong_first_metadata \
+            info_direct_late_response; do
+        DIR="$ROOT/$defect"; mkdir -p "$DIR"
+        python3 - "$CLEAN_INFO_DIRECT_PRODUCT" "$CLEAN_INFO_FIXTURE" "$CLEAN_INFO_SERVER" \
+            "$CLEAN_INFO_LAYOUT" "$DIR/product" "$DIR/fixture" "$DIR/server" "$DIR/layout" "$defect" <<'PYEOF'
+import json,sys
+ps,fs,ss,ls,pd,fd,sd,ld,defect=sys.argv[1:10]
+p=[json.loads(x) for x in open(ps,encoding="utf-8")]
+f=[json.loads(x) for x in open(fs,encoding="utf-8")]
+s=[json.loads(x) for x in open(ss,encoding="utf-8")]
+l=[json.loads(x) for x in open(ls,encoding="utf-8")]
+if defect=="info_direct_missing_accept": p=[r for r in p if "TLV ACCEPT" not in r["msg"]]
+elif defect=="info_direct_conn_mismatch":
+    r=next(r for r in s if "slot 2 assigned" in r["msg"]); r["msg"]=r["msg"].replace("conn=7","conn=8")
+elif defect=="info_direct_wrong_listen":
+    r=next(r for r in s if "WiredNet: listening" in r["msg"]); r["msg"]=r["msg"].replace("port 28005","port 28006")
+elif defect=="info_direct_missing_shutdown": s=[r for r in s if "Server Shutdown" not in r["msg"]]
+elif defect=="info_direct_wrong_metadata": next(r for r in s if "QUIC transport shut down" in r["msg"])["cat"]="server"
+elif defect=="info_direct_resolve_after_close":
+    i=next(i for i,r in enumerate(p) if " resolved to " in r["msg"]); row=p.pop(i)
+    i=next(i for i,r in enumerate(p) if "close all postcondition" in r["msg"]); p.insert(i+1,row)
+elif defect=="info_direct_missing_startup_bot":
+    s=[r for r in s if r["msg"] not in {"ClientConnect: 0","ClientBegin: 0"}]
+elif defect=="info_direct_extra_clientconnect":
+    i=next(i for i,r in enumerate(s) if "ClientConnect:" in r["msg"]); row=s[i].copy(); row["msg"]="ClientConnect: 3"; s.insert(i+1,row)
+elif defect=="info_direct_connect_suffix": next(r for r in s if r["msg"]=="ClientConnect: 2")["msg"] += " trailing"
+elif defect=="info_direct_begin_suffix": next(r for r in s if r["msg"]=="ClientBegin: 2")["msg"] += " trailing"
+elif defect=="info_direct_wrong_accept_metadata": next(r for r in p if "TLV ACCEPT" in r["msg"])["cat"]="client"
+elif defect=="info_direct_wrong_first_metadata": next(r for r in p if "FIRST GAMEPLAY FRAME" in r["msg"])["sev"]="DEBUG"
+elif defect=="info_direct_late_response":
+    i=next(i for i,r in enumerate(p) if "TLV ACCEPT" in r["msg"])
+    p.insert(i,{"sev":"DEBUG","cat":"client","msg":"CL_ServerStatusResponse: ignored unrequested response from 127.0.0.1:28005"})
+for path,rows in ((pd,p),(fd,f),(sd,s),(ld,l)):
+    with open(path,"w",encoding="utf-8") as out:
+        for row in rows: out.write(json.dumps(row)+"\n")
+PYEOF
+        if analyze_serverinfo_connect_contract "$DIR/product" "$DIR/fixture" "$DIR/server" \
+                "$DIR/layout" 28001 28005 direct >/dev/null 2>&1; then
+            echo "FAIL self-test: serverinfo direct defect '$defect' accepted"; exit 1
+        fi
+        echo "  PASS self-test: rejects $defect"
+    done
     CLEAN_DOUBLE="$ROOT/double.jsonl"
     CLEAN_DOUBLE_LAYOUT="$ROOT/double-layout.jsonl"
     python3 - "$CLEAN_DOUBLE" "$CLEAN_DOUBLE_LAYOUT" <<'PYEOF'
@@ -1143,24 +1947,30 @@ move(1, 6, 340); helper_click(); callback(1, 0, 6, 13); arm(1, 0, 6, 13); releas
 move(1, 6, 340); helper_click(); callback(1, 0, 6, 14)
 msgs += [
  "WiredUI: listbox click phase=double input=K_MOUSE1 menu=servers item=serverlist feeder=2 row=1 raw=0 source=0 list_generation=6 selection_generation=14 elapsed=33",
- f"WiredUI: queued validated connect origin=browser address={t}",
- "WiredUI: pointer phase=release reason=close-all was_down=1 pointer_down=0",
+ f"Browser connect attempt armed target={t} selection_generation=14 credential_present=0",
+ f"{t} resolved to {t}",
+ f"WiredUI: started validated connect origin=browser address={t} selection_generation=14 credential_present=0",
+ "WiredUI: pointer phase=release reason=close-all was_down=0 pointer_down=0",
  "WiredUI: close all postcondition depth=0 active=none catcher_ui=0 paused=0",
  "Q0_DBL_POSITIVE_END",
- f"{t} resolved to {t}",
- "QUIC client: TLV ACCEPT received slot=0 sv_fps=20",
+ "QUIC client: TLV ACCEPT received",
  "cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp serverTime=100 numEntities=3 framecount=1)",
  "WiredUI: shutdown",
 ]
 with open(product, "w", encoding="utf-8") as out:
     for msg in msgs:
-        out.write(json.dumps({"sev":"DEBUG", "cat":"ui", "msg":msg}) + "\n")
+        sev,cat="DEBUG","ui"
+        if msg.startswith("Browser connect attempt armed "): cat="client"
+        elif " resolved to " in msg: sev,cat="INFO","client"
+        elif msg.startswith("QUIC client: TLV ACCEPT"): cat="network"
+        elif "FIRST GAMEPLAY FRAME" in msg: sev,cat="INFO","client"
+        out.write(json.dumps({"sev":sev, "cat":cat, "msg":msg}) + "\n")
 with open(layout, "w", encoding="utf-8") as out:
     out.write(json.dumps({"region":"serverlist", "menu":"servers", "frame":100,
                           "focused":1, "x":80, "y":220, "w":1120, "h":320}) + "\n")
 PYEOF
     analyze_doubleclick_contract "$CLEAN_DOUBLE" "$CLEAN_DOUBLE_LAYOUT" "$CLEAN_DOUBLE_SERVER" 28001 28004 >/dev/null || { echo "FAIL self-test: clean doubleclick fixture rejected"; exit 1; }
-    for defect in dbl_missing_enter dbl_enter_callback dbl_enter_arm dbl_missing_move dbl_fake_move dbl_missing_click dbl_fake_click dbl_missing_callback dbl_wrong_callback dbl_missing_arm dbl_missing_release dbl_missing_edge_down dbl_missing_release_reset dbl_missing_timeout_reset dbl_missing_row_reset dbl_missing_pop_reset dbl_missing_roster_reset dbl_reused_generation dbl_missing_double dbl_duplicate_double dbl_bad_elapsed dbl_early_queue dbl_duplicate_queue dbl_missing_terminal_release dbl_bad_pointer_down dbl_no_close dbl_no_first dbl_wrong_first dbl_missing_server_conn dbl_missing_server_assign dbl_missing_server_begin dbl_missing_boundary dbl_missing_unprotected dbl_missing_quit_request dbl_missing_server_shutdown dbl_missing_transport_shutdown dbl_shutdown_before_boundary dbl_shared_server dbl_server_reject dbl_severity dbl_malformed dbl_missing_layout dbl_pointer_outside; do
+    for defect in dbl_missing_enter dbl_enter_callback dbl_enter_arm dbl_missing_move dbl_fake_move dbl_missing_click dbl_fake_click dbl_missing_callback dbl_wrong_callback dbl_missing_arm dbl_missing_release dbl_missing_edge_down dbl_missing_release_reset dbl_missing_timeout_reset dbl_missing_row_reset dbl_missing_pop_reset dbl_missing_roster_reset dbl_reused_generation dbl_missing_double dbl_duplicate_double dbl_bad_elapsed dbl_early_connect dbl_duplicate_connect dbl_connect_generation dbl_missing_terminal_release dbl_bad_pointer_down dbl_no_close dbl_no_first dbl_wrong_first dbl_missing_server_conn dbl_missing_server_assign dbl_missing_server_begin dbl_missing_boundary dbl_missing_unprotected dbl_missing_quit_request dbl_missing_server_shutdown dbl_missing_transport_shutdown dbl_shutdown_before_boundary dbl_shared_server dbl_server_reject dbl_severity dbl_malformed dbl_missing_layout dbl_pointer_outside; do
         DIR="$ROOT/$defect"; mkdir -p "$DIR"
         python3 - "$CLEAN_DOUBLE" "$CLEAN_DOUBLE_LAYOUT" "$CLEAN_DOUBLE_SERVER" \
             "$DIR/product" "$DIR/layout" "$DIR/server" "$defect" <<'PYEOF'
@@ -1234,14 +2044,17 @@ elif defect == "dbl_duplicate_double":
 elif defect == "dbl_bad_elapsed":
     row = next(r for r in p if "listbox click phase=double" in r["msg"])
     row["msg"] = row["msg"].replace("elapsed=33", "elapsed=300")
-elif defect == "dbl_early_queue":
-    index = next(i for i,r in enumerate(p) if "queued validated connect" in r["msg"])
+elif defect == "dbl_early_connect":
+    index = next(i for i,r in enumerate(p) if "Browser connect attempt armed" in r["msg"])
     row = p.pop(index)
     begin = next(i for i,r in enumerate(p) if r["msg"] == "Q0_DBL_SINGLE_BEGIN")
     p.insert(begin + 1, row)
-elif defect == "dbl_duplicate_queue":
-    index = next(i for i,r in enumerate(p) if "queued validated connect" in r["msg"])
+elif defect == "dbl_duplicate_connect":
+    index = next(i for i,r in enumerate(p) if "Browser connect attempt armed" in r["msg"])
     p.insert(index, p[index].copy())
+elif defect == "dbl_connect_generation":
+    row = next(r for r in p if "started validated connect" in r["msg"])
+    row["msg"] = row["msg"].replace("selection_generation=14", "selection_generation=13")
 elif defect == "dbl_missing_terminal_release": p = [r for r in p if "pointer phase=release reason=close-all" not in r["msg"]]
 elif defect == "dbl_bad_pointer_down":
     row = next(r for r in p if "pointer phase=release reason=close-all" in r["msg"])
@@ -1279,7 +2092,7 @@ elif defect == "dbl_shared_server":
     ]
 elif defect == "dbl_server_reject":
     boundary = next(i for i,r in enumerate(server) if r["msg"] == "Q0_DOUBLECLICK_PHASE_COMPLETE")
-    server.insert(boundary, {"sev":"DEBUG","cat":"server","msg":"QUIC: game rejected connection from 127.0.0.1: Invalid password"})
+    server.insert(boundary, {"sev":"INFO","cat":"server","msg":"QUIC: game rejected connection from 127.0.0.1 class=2"})
 elif defect == "dbl_severity": p.append({"sev":"WARN","cat":"ui","msg":"synthetic"})
 elif defect == "dbl_missing_layout": layout = []
 elif defect == "dbl_pointer_outside":
@@ -1299,7 +2112,7 @@ PYEOF
         echo "  PASS self-test: rejects $defect"
     done
     analyze_contract "$CLEAN_PRODUCT" "$CLEAN_FIXTURE" "$CLEAN_SERVER" "$CLEAN_WRONG" "$CLEAN_LAYOUT" 28001 28002 28003 >/dev/null || { echo "FAIL self-test: clean fixture rejected"; exit 1; }
-    for defect in dirty_roster wrong_order no_down wrong_target no_request no_status count_zero missing_row no_cancel no_return stale_store_accepted stale_response_accepted missing_lan_unsolicited missing_lan_unsolicited_event reused_lan_challenge missing_lan_a_missing missing_lan_wrong_packet missing_lan_wrong_reject missing_lan_malformed_packet missing_lan_malformed_reject false_lan_zero missing_lan_refresh_focus missing_lan_late_packet missing_lan_late_reject missing_lan_current_packet zero_lan_rtt duplicate_lan_discovery missing_lan_duplicate wrong_lan_row missing_lan_callback missing_lan_down extra_lan_scan missing_timeout_pending wrong_pending_row missing_timeout_terminal wrong_timeout_rows wrong_timeout_status missing_timeout_focus missing_timeout_retry timeout_single_drop reused_challenge missing_timeout_stale missing_malformed_pending missing_malformed_terminal malformed_loaded wrong_malformed_reason wrong_malformed_status missing_malformed_focus missing_malformed_retry missing_malformed_stale missing_valid_pending missing_recovery recovery_count_two missing_recovery_focus missing_retry_valid wrong_connect_target no_connect_up no_connect_down no_connect_focus missing_needpass missing_preflight duplicate_preflight direct_queue_before_prompt missing_password_popup missing_empty_refusal missing_password_focus missing_password_type missing_password_commit missing_password_mask bad_password_mask missing_password_submit_focus missing_password_accept stale_password_accept reconnect_path sentinel_reconnect secret_leak missing_wrong_preflight missing_wrong_type missing_wrong_mask bad_wrong_mask missing_wrong_queue wrong_password_first wrong_secret_leak wrong_severity missing_wrong_rejection bad_wrong_rejection wrong_assigned wrong_begin missing_attempt_boundary missing_password_arm bad_password_arm_order wrong_password_needpass password_attempt_before_arm missing_layout_popup wrong_layout_order multiple_layout_focus missing_client_connect missing_client_begin rejected_password missing_connect duplicate_connect bad_close no_accept no_first wrong_first missing_server_connect missing_oob_probe accepted_oob severity server_severity malformed_product malformed_fixture malformed_wrong malformed_layout; do
+    for defect in dirty_roster wrong_order no_down wrong_target no_request no_status count_zero missing_row no_cancel no_return stale_store_accepted stale_response_accepted missing_lan_unsolicited missing_lan_unsolicited_event reused_lan_challenge missing_lan_a_missing missing_lan_wrong_packet missing_lan_wrong_reject missing_lan_malformed_packet missing_lan_malformed_reject false_lan_zero missing_lan_refresh_focus missing_lan_late_packet missing_lan_late_reject missing_lan_current_packet zero_lan_rtt duplicate_lan_discovery missing_lan_duplicate wrong_lan_row missing_lan_callback missing_lan_down extra_lan_scan missing_timeout_pending wrong_pending_row missing_timeout_terminal wrong_timeout_rows wrong_timeout_status missing_timeout_focus missing_timeout_retry timeout_single_drop reused_challenge missing_timeout_stale missing_malformed_pending missing_malformed_terminal malformed_loaded wrong_malformed_reason wrong_malformed_status missing_malformed_focus missing_malformed_retry missing_malformed_stale missing_valid_pending missing_recovery recovery_count_two missing_recovery_focus missing_retry_valid wrong_connect_target no_connect_up no_connect_down no_connect_focus missing_needpass missing_preflight duplicate_preflight direct_connect_before_prompt missing_password_popup missing_empty_refusal missing_password_focus missing_password_type missing_password_commit missing_password_mask bad_password_mask missing_password_submit_focus missing_password_action_enter obsolete_password_submit_marker reconnect_path sentinel_reconnect secret_leak missing_wrong_preflight wrong_cr_smuggle_preflight missing_wrong_type missing_wrong_mask bad_wrong_mask missing_wrong_action_enter wrong_obsolete_password_submit_marker missing_wrong_connect missing_wrong_started wrong_password_first wrong_secret_leak wrong_severity missing_wrong_dispose missing_wrong_transport_refusal bad_wrong_transport_refusal wrong_transport_refusal_metadata wrong_transport_refusal_suffix missing_wrong_failure bad_wrong_failure wrong_failure_metadata wrong_failure_suffix missing_wrong_retry bad_wrong_retry_target bad_wrong_retry_generation wrong_retry_metadata wrong_retry_suffix wrong_retry_order wrong_arm_cr_smuggle wrong_refusal_lf_smuggle missing_wrong_rejection bad_wrong_rejection wrong_server_refusal_metadata wrong_server_refusal_suffix wrong_assigned wrong_begin missing_attempt_boundary missing_password_arm bad_password_arm_order wrong_password_needpass password_attempt_before_arm missing_layout_popup wrong_layout_order multiple_layout_focus missing_client_connect missing_client_begin rejected_password missing_connect missing_started bad_connect_generation wrong_connect_metadata duplicate_connect bad_close no_accept no_first wrong_first missing_server_connect missing_oob_probe accepted_oob severity server_severity malformed_product malformed_fixture malformed_wrong malformed_layout; do
         DIR="$ROOT/$defect"; mkdir -p "$DIR"
         cp "$CLEAN_SERVER" "$DIR/server"
         python3 - "$CLEAN_PRODUCT" "$CLEAN_FIXTURE" "$CLEAN_WRONG" "$CLEAN_LAYOUT" "$DIR/product" "$DIR/fixture" "$DIR/server" "$DIR/wrong" "$DIR/layout" "$defect" <<'PYEOF'
@@ -1441,9 +2254,9 @@ elif defect == "missing_preflight":
 elif defect == "duplicate_preflight":
     index = next(i for i,r in enumerate(p) if "password required origin=browser" in r["msg"])
     p.insert(index, p[index].copy())
-elif defect == "direct_queue_before_prompt":
-    queue = next(i for i,r in enumerate(p) if "queued validated connect origin=browser" in r["msg"])
-    row = p.pop(queue)
+elif defect == "direct_connect_before_prompt":
+    marker = next(i for i,r in enumerate(p) if "Browser connect attempt armed" in r["msg"])
+    row = p.pop(marker)
     prompt = next(i for i,r in enumerate(p) if "password required origin=browser" in r["msg"])
     p.insert(prompt, row)
 elif defect == "missing_password_popup":
@@ -1464,16 +2277,19 @@ elif defect == "bad_password_mask":
     row = next(r for r in p if "password render trace" in r["msg"])
     row["msg"] = row["msg"].replace("masked=1", "masked=0")
 elif defect == "missing_password_submit_focus":
-    accepted = next(i for i,r in enumerate(p) if "password submit accepted" in r["msg"])
-    focus = max(i for i in range(accepted) if "focused item 'btn_connect'" in p[i]["msg"])
+    armed = next(i for i,r in enumerate(p) if "Browser connect attempt armed" in r["msg"])
+    focus = max(i for i in range(armed) if "focused item 'btn_connect'" in p[i]["msg"])
     p.pop(focus)
-elif defect == "missing_password_accept":
-    p = [r for r in p if "password submit accepted" not in r["msg"]]
-elif defect == "stale_password_accept":
-    row = next(r for r in p if "password submit accepted" in r["msg"])
-    row["msg"] = row["msg"].replace("selection_generation=5", "selection_generation=4")
+elif defect == "missing_password_action_enter":
+    armed = next(i for i,r in enumerate(p) if "Browser connect attempt armed" in r["msg"])
+    enter = next(i for i in range(armed + 1, len(p)) if "K_ENTER dispatched" in p[i]["msg"])
+    p.pop(enter)
+elif defect == "obsolete_password_submit_marker":
+    armed = next(i for i,r in enumerate(p) if "Browser connect attempt armed" in r["msg"])
+    p.insert(armed, {"sev":"DEBUG", "cat":"ui",
+                     "msg":"WiredUI: password submit accepted address=127.0.0.1:28003 selection_generation=5"})
 elif defect == "reconnect_path":
-    index = next(i for i,r in enumerate(p) if "password submit accepted" in r["msg"])
+    index = next(i for i,r in enumerate(p) if "Browser connect attempt armed" in r["msg"])
     p.insert(index, {"sev":"DEBUG", "cat":"ui", "msg":"password action queued reconnect"})
 elif defect == "sentinel_reconnect":
     index = next(i for i,r in enumerate(p) if "127.0.0.1:28003 resolved" in r["msg"])
@@ -1483,6 +2299,9 @@ elif defect == "secret_leak":
     p.append({"sev":"DEBUG", "cat":"ui", "msg":"credential=q0Pass7"})
 elif defect == "missing_wrong_preflight":
     w = [r for r in w if "password required origin=browser" not in r["msg"]]
+elif defect == "wrong_cr_smuggle_preflight":
+    w.append({"sev":"DEBUG","cat":"ui",
+              "msg":"benign\rWiredUI: password required origin=browser address=127.0.0.1:28003 selection_generation=2"})
 elif defect == "missing_wrong_type":
     w = [r for r in w if "typed 7 printable character(s)" not in r["msg"]]
 elif defect == "missing_wrong_mask":
@@ -1490,8 +2309,18 @@ elif defect == "missing_wrong_mask":
 elif defect == "bad_wrong_mask":
     row = next(r for r in w if "password render trace" in r["msg"])
     row["msg"] = row["msg"].replace("masked=1", "masked=0")
-elif defect == "missing_wrong_queue":
-    w = [r for r in w if "queued validated connect origin=browser" not in r["msg"]]
+elif defect == "missing_wrong_action_enter":
+    armed = next(i for i,r in enumerate(w) if "Browser connect attempt armed" in r["msg"])
+    enter = next(i for i in range(armed + 1, len(w)) if "K_ENTER dispatched" in w[i]["msg"])
+    w.pop(enter)
+elif defect == "wrong_obsolete_password_submit_marker":
+    armed = next(i for i,r in enumerate(w) if "Browser connect attempt armed" in r["msg"])
+    w.insert(armed, {"sev":"DEBUG", "cat":"ui",
+                     "msg":"WiredUI: password submit accepted address=127.0.0.1:28003 selection_generation=2"})
+elif defect == "missing_wrong_connect":
+    w = [r for r in w if "Browser connect attempt armed" not in r["msg"]]
+elif defect == "missing_wrong_started":
+    w = [r for r in w if "started validated connect" not in r["msg"]]
 elif defect == "wrong_password_first":
     w.append({"sev":"DEBUG", "cat":"client",
               "msg":"cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp)"})
@@ -1499,11 +2328,58 @@ elif defect == "wrong_secret_leak":
     w.append({"sev":"DEBUG", "cat":"ui", "msg":"credential=q0Wrong"})
 elif defect == "wrong_severity":
     w.append({"sev":"WARN", "cat":"ui", "msg":"synthetic"})
+elif defect == "missing_wrong_dispose":
+    w = [r for r in w if not r["msg"].startswith("Browser connect credential disposed ")]
+elif defect == "missing_wrong_transport_refusal":
+    w = [r for r in w if not r["msg"].startswith("QUIC connect refused ")]
+elif defect == "bad_wrong_transport_refusal":
+    row = next(r for r in w if r["msg"].startswith("QUIC connect refused "))
+    row["msg"] = row["msg"].replace("class=2", "class=1")
+elif defect == "wrong_transport_refusal_metadata":
+    row = next(r for r in w if r["msg"].startswith("QUIC connect refused ")); row["cat"]="client"
+elif defect == "wrong_transport_refusal_suffix":
+    row = next(r for r in w if r["msg"].startswith("QUIC connect refused ")); row["msg"] += " trailing"
+elif defect == "missing_wrong_failure":
+    w = [r for r in w if not r["msg"].startswith("Connect failed kind=")]
+elif defect == "bad_wrong_failure":
+    row = next(r for r in w if r["msg"].startswith("Connect failed kind="))
+    row["msg"] = row["msg"].replace("browser_retry=1", "browser_retry=0")
+elif defect == "wrong_failure_metadata":
+    row = next(r for r in w if r["msg"].startswith("Connect failed kind=")); row["sev"]="INFO"
+elif defect == "wrong_failure_suffix":
+    row = next(r for r in w if r["msg"].startswith("Connect failed kind=")); row["msg"] += " trailing"
+elif defect == "missing_wrong_retry":
+    w = [r for r in w if not r["msg"].startswith("WiredUI: authentication retry opened ")]
+elif defect == "bad_wrong_retry_target":
+    row = next(r for r in w if r["msg"].startswith("WiredUI: authentication retry opened "))
+    row["msg"] = row["msg"].replace("127.0.0.1:28003", "127.0.0.1:28001")
+elif defect == "bad_wrong_retry_generation":
+    row = next(r for r in w if r["msg"].startswith("WiredUI: authentication retry opened "))
+    row["msg"] = row["msg"].replace("selection_generation=2", "selection_generation=99")
+elif defect == "wrong_retry_metadata":
+    row = next(r for r in w if r["msg"].startswith("WiredUI: authentication retry opened ")); row["cat"]="client"
+elif defect == "wrong_retry_suffix":
+    row = next(r for r in w if r["msg"].startswith("WiredUI: authentication retry opened ")); row["msg"] += " trailing"
+elif defect == "wrong_retry_order":
+    retry = next(i for i,r in enumerate(w) if r["msg"].startswith("WiredUI: authentication retry opened "))
+    row = w.pop(retry)
+    failure = next(i for i,r in enumerate(w) if r["msg"].startswith("Connect failed kind="))
+    w.insert(failure, row)
+elif defect == "wrong_arm_cr_smuggle":
+    w.append({"sev":"DEBUG", "cat":"client",
+              "msg":"benign\rBrowser connect attempt armed target=127.0.0.1:28003 selection_generation=2 credential_present=1"})
+elif defect == "wrong_refusal_lf_smuggle":
+    w.append({"sev":"WARN", "cat":"network",
+              "msg":"benign\nQUIC connect refused class=2 deferred_disconnect=1"})
 elif defect == "missing_wrong_rejection":
-    sv = [r for r in sv if "Invalid password" not in r["msg"]]
+    sv = [r for r in sv if "QUIC: game rejected connection" not in r["msg"]]
 elif defect == "bad_wrong_rejection":
-    row = next(r for r in sv if "Invalid password" in r["msg"])
-    row["msg"] = row["msg"].replace("Invalid password", "Server is full")
+    row = next(r for r in sv if "QUIC: game rejected connection" in r["msg"])
+    row["msg"] = row["msg"].replace("class=2", "class=1")
+elif defect == "wrong_server_refusal_metadata":
+    row = next(r for r in sv if "QUIC: game rejected connection" in r["msg"]); row["sev"]="DEBUG"
+elif defect == "wrong_server_refusal_suffix":
+    row = next(r for r in sv if "QUIC: game rejected connection" in r["msg"]); row["msg"] += " trailing"
 elif defect == "wrong_assigned":
     boundary = next(i for i,r in enumerate(sv)
                     if r["msg"] == "Q0_WRONG_PASSWORD_PHASE_COMPLETE")
@@ -1545,11 +2421,17 @@ elif defect == "missing_client_begin":
     sv = [r for r in sv if "ClientBegin: 2" not in r["msg"]]
 elif defect == "rejected_password":
     sv.insert(-2, {"sev":"INFO", "cat":"server",
-                   "msg":"QUIC: game rejected connection from 127.0.0.1: Invalid password"})
-elif defect == "missing_connect": p = [r for r in p if "queued validated connect origin=browser" not in r["msg"]]
+                   "msg":"QUIC: game rejected connection from 127.0.0.1 class=2"})
+elif defect == "missing_connect": p = [r for r in p if "Browser connect attempt armed" not in r["msg"]]
+elif defect == "missing_started": p = [r for r in p if "started validated connect" not in r["msg"]]
+elif defect == "bad_connect_generation":
+    row = next(r for r in p if "started validated connect" in r["msg"])
+    row["msg"] = row["msg"].replace("selection_generation=5", "selection_generation=4")
+elif defect == "wrong_connect_metadata":
+    row = next(r for r in p if "Browser connect attempt armed" in r["msg"]); row["cat"]="ui"
 elif defect == "duplicate_connect":
-    row = next(r.copy() for r in p if "queued validated connect origin=browser" in r["msg"])
-    p.insert(next(i for i,r in enumerate(p) if "queued validated connect origin=browser" in r["msg"]), row)
+    row = next(r.copy() for r in p if "Browser connect attempt armed" in r["msg"])
+    p.insert(next(i for i,r in enumerate(p) if "Browser connect attempt armed" in r["msg"]), row)
 elif defect == "bad_close":
     for r in p:
         if "close all postcondition" in r["msg"]: r["msg"] = r["msg"].replace("catcher_ui=0", "catcher_ui=1")
@@ -1621,30 +2503,53 @@ RUN_ROOT="$(mktemp -d -t wired-q0browser-XXXXXX 2>/dev/null || mktemp -d)"
 HOME_ROOT="$RUN_ROOT/q3now-preview"
 DOUBLE_HOME="$RUN_ROOT/double/q3now-preview"
 DOUBLE_SERVER_HOME="$RUN_ROOT/double-server/q3now-preview"
+INFO_HOME="$RUN_ROOT/serverinfo-connect/q3now-preview"
+INFO_DIRECT_HOME="$RUN_ROOT/serverinfo-connect-direct/q3now-preview"
+INFO_SERVER_HOME="$RUN_ROOT/serverinfo-connect-server/q3now-preview"
 WRONG_HOME="$RUN_ROOT/wrong/q3now-preview"
 SERVER_HOME="$RUN_ROOT/server/q3now-preview"
 PRODUCT_JSON="$HOME_ROOT/qconsole.jsonl"
 DOUBLE_JSON="$DOUBLE_HOME/qconsole.jsonl"
 DOUBLE_SERVER_JSON="$DOUBLE_SERVER_HOME/qconsole.jsonl"
+INFO_JSON="$INFO_HOME/qconsole.jsonl"
+INFO_DIRECT_JSON="$INFO_DIRECT_HOME/qconsole.jsonl"
+INFO_SERVER_JSON="$INFO_SERVER_HOME/qconsole.jsonl"
 WRONG_JSON="$WRONG_HOME/qconsole.jsonl"
 SERVER_JSON="$SERVER_HOME/qconsole.jsonl"
 PRODUCT_STDOUT="$RUN_ROOT/product.stdout"
 DOUBLE_STDOUT="$RUN_ROOT/double.stdout"
 DOUBLE_SERVER_STDOUT="$RUN_ROOT/double-server.stdout"
+INFO_STDOUT="$RUN_ROOT/serverinfo-connect.stdout"
+INFO_DIRECT_STDOUT="$RUN_ROOT/serverinfo-connect-direct.stdout"
+INFO_SERVER_STDOUT="$RUN_ROOT/serverinfo-connect-server.stdout"
 WRONG_STDOUT="$RUN_ROOT/wrong.stdout"
 LAYOUT_JSON="$RUN_ROOT/layoutdump.jsonl"
 DOUBLE_LAYOUT_JSON="$RUN_ROOT/double-run/layoutdump.jsonl"
+INFO_LAYOUT_JSON="$RUN_ROOT/serverinfo-connect-run/layoutdump.jsonl"
+INFO_DIRECT_LAYOUT_JSON="$RUN_ROOT/serverinfo-connect-direct-run/layoutdump.jsonl"
+INFO_FIXTURE_JSON="$RUN_ROOT/serverinfo-connect-fixture.jsonl"
 FIXTURE_JSON="$RUN_ROOT/fixture.jsonl"
 FIXTURE_PID=""
 SERVER_PID=""
 DOUBLE_SERVER_PID=""
+INFO_FIXTURE_PID=""
+INFO_SERVER_PID=""
 SERVER_CONTROL="$RUN_ROOT/server.stdin"
 DOUBLE_SERVER_CONTROL="$RUN_ROOT/double-server.stdin"
+INFO_SERVER_CONTROL="$RUN_ROOT/serverinfo-connect-server.stdin"
 SERVER_CONTROL_OPEN=0
 DOUBLE_SERVER_CONTROL_OPEN=0
+INFO_SERVER_CONTROL_OPEN=0
 DOUBLE_SERVER_FORCED=0
 cleanup() {
     if [ -n "$FIXTURE_PID" ] && kill -0 "$FIXTURE_PID" 2>/dev/null; then kill -TERM "$FIXTURE_PID" 2>/dev/null || true; wait "$FIXTURE_PID" 2>/dev/null || true; fi
+    if [ -n "$INFO_FIXTURE_PID" ] && kill -0 "$INFO_FIXTURE_PID" 2>/dev/null; then kill -TERM "$INFO_FIXTURE_PID" 2>/dev/null || true; wait "$INFO_FIXTURE_PID" 2>/dev/null || true; fi
+    if [ -n "$INFO_SERVER_PID" ] && kill -0 "$INFO_SERVER_PID" 2>/dev/null; then
+        [ "$INFO_SERVER_CONTROL_OPEN" -eq 1 ] && printf '%s\n' quit >&7 2>/dev/null || true
+        for _ in $(seq 1 150); do kill -0 "$INFO_SERVER_PID" 2>/dev/null || break; sleep 0.1; done
+        kill -0 "$INFO_SERVER_PID" 2>/dev/null && kill -TERM "$INFO_SERVER_PID" 2>/dev/null || true
+        wait "$INFO_SERVER_PID" 2>/dev/null || true
+    fi
     if [ -n "$DOUBLE_SERVER_PID" ] && kill -0 "$DOUBLE_SERVER_PID" 2>/dev/null; then
         [ "$DOUBLE_SERVER_CONTROL_OPEN" -eq 1 ] && printf '%s\n' quit >&8 2>/dev/null || true
         for _ in $(seq 1 150); do kill -0 "$DOUBLE_SERVER_PID" 2>/dev/null || break; sleep 0.1; done
@@ -1659,18 +2564,25 @@ cleanup() {
     fi
     [ "$SERVER_CONTROL_OPEN" -eq 1 ] && exec 9>&- || true
     [ "$DOUBLE_SERVER_CONTROL_OPEN" -eq 1 ] && exec 8>&- || true
+    [ "$INFO_SERVER_CONTROL_OPEN" -eq 1 ] && exec 7>&- || true
     if [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ]; then echo "    kept artifacts: $RUN_ROOT"; else rm -rf "$RUN_ROOT"; fi
 }
 trap cleanup EXIT INT TERM
 mkdir -p "$HOME_ROOT/base" "$DOUBLE_HOME/base" "$DOUBLE_SERVER_HOME/base" \
-    "$WRONG_HOME/base" "$SERVER_HOME/base" \
-    "$RUN_ROOT/double-run" "$RUN_ROOT/wrong-run"
+    "$INFO_HOME/base" "$INFO_DIRECT_HOME/base" "$INFO_SERVER_HOME/base" "$WRONG_HOME/base" "$SERVER_HOME/base" \
+    "$RUN_ROOT/double-run" "$RUN_ROOT/serverinfo-connect-run" "$RUN_ROOT/serverinfo-connect-direct-run" "$RUN_ROOT/wrong-run"
 cp "$BASE_ARCHIVE" "$HOME_ROOT/base/" || exit 1
 cp "$PACK_ROOT/base/pax21.sw3z" "$HOME_ROOT/base/pax21.sw3z" || exit 1
 cp "$BASE_ARCHIVE" "$DOUBLE_HOME/base/" || exit 1
 cp "$PACK_ROOT/base/pax21.sw3z" "$DOUBLE_HOME/base/pax21.sw3z" || exit 1
 cp "$BASE_ARCHIVE" "$DOUBLE_SERVER_HOME/base/" || exit 1
 cp "$PACK_ROOT/base/pax21.sw3z" "$DOUBLE_SERVER_HOME/base/pax21.sw3z" || exit 1
+cp "$BASE_ARCHIVE" "$INFO_HOME/base/" || exit 1
+cp "$PACK_ROOT/base/pax21.sw3z" "$INFO_HOME/base/pax21.sw3z" || exit 1
+cp "$BASE_ARCHIVE" "$INFO_DIRECT_HOME/base/" || exit 1
+cp "$PACK_ROOT/base/pax21.sw3z" "$INFO_DIRECT_HOME/base/pax21.sw3z" || exit 1
+cp "$BASE_ARCHIVE" "$INFO_SERVER_HOME/base/" || exit 1
+cp "$PACK_ROOT/base/pax21.sw3z" "$INFO_SERVER_HOME/base/pax21.sw3z" || exit 1
 cp "$BASE_ARCHIVE" "$WRONG_HOME/base/" || exit 1
 cp "$PACK_ROOT/base/pax21.sw3z" "$WRONG_HOME/base/pax21.sw3z" || exit 1
 cp "$BASE_ARCHIVE" "$SERVER_HOME/base/" || exit 1
@@ -1700,12 +2612,18 @@ map arena7
 wait 300
 addbot visor 3 free 0 StatusBot
 CFGEOF
+cat >"$INFO_SERVER_HOME/base/q0browser-serverinfo-server.cfg" <<'CFGEOF'
+set g_password ""
+map arena7
+wait 300
+addbot visor 3 free 0 StatusBot
+CFGEOF
 
-read -r DOUBLE_CLIENT_PORT DOUBLE_SERVER_PORT WRONG_CLIENT_PORT CLIENT_PORT SENTINEL_PORT TARGET_PORT SERVER_PORT <<EOF
+read -r DOUBLE_CLIENT_PORT DOUBLE_SERVER_PORT INFO_CLIENT_PORT INFO_PROXY_PORT INFO_SERVER_PORT WRONG_CLIENT_PORT CLIENT_PORT SENTINEL_PORT TARGET_PORT SERVER_PORT <<EOF
 $(python3 - <<'PYEOF'
 import socket
 s=[]
-for _ in range(7):
+for _ in range(10):
     while True:
         x=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); x.bind(("127.0.0.1",0))
         if not 27960 <= x.getsockname()[1] <= 27963: break
@@ -1922,6 +2840,172 @@ if ! analyze_doubleclick_contract "$DOUBLE_JSON" "$DOUBLE_LAYOUT_JSON" \
         "$DOUBLE_SERVER_JSON" "$SENTINEL_PORT" "$DOUBLE_SERVER_PORT"; then exit 1; fi
 
 case "$(uname -s)" in
+ MINGW*|MSYS*|CYGWIN*) INFO_SERVER_NATIVE="$(cygpath -w "$INFO_SERVER_HOME")" ;;
+ *) INFO_SERVER_NATIVE="$INFO_SERVER_HOME" ;;
+esac
+mkfifo "$INFO_SERVER_CONTROL"; exec 7<>"$INFO_SERVER_CONTROL"; INFO_SERVER_CONTROL_OPEN=1
+( cd "$(dirname "$HEADLESS")" && exec "$HEADLESS" +set fs_homepath "$INFO_SERVER_NATIVE" \
+    +set com_automated 1 +set com_noHardReboot 1 +set log_severity DEBUG +set log_file_severity DEBUG \
+    +set log_file_mode overwrite_synced +set net_ip 127.0.0.1 +set net_port "$INFO_SERVER_PORT" \
+    +set sv_hostname "Z0 WIRED Q0 TARGET" +set sv_pure 0 +set g_autoBots 0 \
+    +exec q0browser-serverinfo-server.cfg <&7 ) >"$INFO_SERVER_STDOUT" 2>&1 &
+INFO_SERVER_PID=$!
+if ! python3 - "$INFO_SERVER_JSON" "$INFO_SERVER_PID" <<'PYEOF'
+import json,os,sys,time
+path,pid=sys.argv[1],int(sys.argv[2]); deadline=time.monotonic()+60
+while time.monotonic()<deadline:
+    try: os.kill(pid,0)
+    except ProcessLookupError: raise SystemExit("FAIL: serverinfo headless exited before readiness")
+    try: rows=[json.loads(line) for line in open(path,encoding="utf-8") if line.strip()]
+    except (OSError,ValueError): rows=[]
+    messages=[str(row.get("msg","")) for row in rows]
+    if any("InitGame:" in value and "\\mapname\\arena7" in value for value in messages) \
+            and any("StatusBot has entered the game" in value for value in messages): break
+    time.sleep(.1)
+else: raise SystemExit("FAIL: serverinfo headless arena7/StatusBot readiness timeout")
+PYEOF
+then exit 1; fi
+printf '%s\n' serverinfo >&7
+if ! python3 - "$INFO_SERVER_JSON" <<'PYEOF'
+import json,re,sys,time
+path=sys.argv[1]; deadline=time.monotonic()+5
+while time.monotonic()<deadline:
+    try: messages=[str(json.loads(line).get("msg","")).strip() for line in open(path,encoding="utf-8") if line.strip()]
+    except (OSError,ValueError): messages=[]
+    if any(re.fullmatch(r"g_needpass\s+0",value) for value in messages): break
+    time.sleep(.05)
+else: raise SystemExit("FAIL: serverinfo headless did not expose g_needpass=0")
+PYEOF
+then exit 1; fi
+
+python3 "$FIXTURE" --client-port "$INFO_CLIENT_PORT" --sentinel-port "$SENTINEL_PORT" \
+    --target-port "$INFO_PROXY_PORT" --upstream-port "$INFO_SERVER_PORT" --serverinfo-connect \
+    --protocol 74 --events "$INFO_FIXTURE_JSON" --timeout 30 &
+INFO_FIXTURE_PID=$!
+if ! python3 - "$INFO_FIXTURE_JSON" "$INFO_FIXTURE_PID" <<'PYEOF'
+import json,os,sys,time
+path,pid=sys.argv[1],int(sys.argv[2]); deadline=time.monotonic()+5
+while time.monotonic()<deadline:
+    try: os.kill(pid,0)
+    except ProcessLookupError: raise SystemExit("FAIL: serverinfo proxy fixture exited before ready")
+    try: rows=[json.loads(line) for line in open(path,encoding="utf-8") if line.strip()]
+    except (OSError,ValueError): rows=[]
+    if any(row.get("event")=="ready" for row in rows): break
+    time.sleep(.05)
+else: raise SystemExit("FAIL: serverinfo proxy fixture readiness timeout")
+PYEOF
+then exit 1; fi
+
+cat >"$INFO_HOME/base/q0browser-serverinfo-proxy.cfg" <<CFGEOF
+set com_maxfps 60
+set password ""
+wait 100
+wui_server_fixture $SENTINEL_PORT $INFO_PROXY_PORT
+wui_push servers
+wait 30
+wui_listbox_sort 0
+wait 10
+wui_menu_nav focus serverlist
+wui_menu_nav down
+wait 5
+wui_menu_nav focus btn_info
+wui_menu_nav enter
+wait 18
+wui_serverstatus_trace
+set r_layoutDump 1
+wait 3
+wui_menu_nav focus statuslist
+wui_menu_nav focus btn_connect
+wait 2
+wui_menu_nav enter
+CFGEOF
+case "$(uname -s)" in
+ Darwin) INFO_NATIVE="$INFO_HOME"; INFO_PLATFORM_ARGS=( -ApplePersistenceIgnoreState YES ) ;;
+ MINGW*|MSYS*|CYGWIN*) INFO_NATIVE="$(cygpath -w "$INFO_HOME")"; INFO_PLATFORM_ARGS=() ;;
+ *) INFO_NATIVE="$INFO_HOME"; INFO_PLATFORM_ARGS=() ;;
+esac
+echo "==> WiredUI Server Info proxy lifecycle: endpoint=$INFO_PROXY_PORT late replay/no-store"
+python3 "$TIMEOUT_RUNNER" --timeout 10 --kill-after 5 --cwd "$RUN_ROOT/serverinfo-connect-run" --stdout "$INFO_STDOUT" -- \
+    "$WIRED" "${INFO_PLATFORM_ARGS[@]}" +set fs_homepath "$INFO_NATIVE" +set com_automated 1 \
+    +set com_noHardReboot 1 +set net_enabled 1 +set net_ip 127.0.0.1 +set net_port "$INFO_CLIENT_PORT" \
+    +set wn_cert_verify 0 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 \
+    +set r_customwidth 1280 +set r_customheight 720 +set log_severity DEBUG \
+    +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec q0browser-serverinfo-proxy.cfg
+info_proxy_rc=$?
+if [ "$info_proxy_rc" -ne 124 ] || [ ! -s "$INFO_JSON" ] || [ ! -s "$INFO_LAYOUT_JSON" ]; then
+    echo "FAIL: serverinfo proxy rc=$info_proxy_rc (expected bounded watchdog rc124) or missing evidence"
+    [ -s "$INFO_STDOUT" ] && tail -40 "$INFO_STDOUT"
+    exit 1
+fi
+kill -TERM "$INFO_FIXTURE_PID" 2>/dev/null || true
+wait "$INFO_FIXTURE_PID" || { echo "FAIL: serverinfo proxy fixture exit was nonzero"; exit 1; }
+INFO_FIXTURE_PID=""
+if ! analyze_serverinfo_connect_contract "$INFO_JSON" "$INFO_FIXTURE_JSON" \
+        "$INFO_SERVER_JSON" "$INFO_LAYOUT_JSON" "$SENTINEL_PORT" "$INFO_PROXY_PORT" proxy; then exit 1; fi
+
+cat >"$INFO_DIRECT_HOME/base/q0browser-serverinfo-direct.cfg" <<CFGEOF
+set activeAction "wait 60 ; quit"
+set com_maxfps 60
+set password ""
+wait 100
+wui_server_fixture $SENTINEL_PORT $INFO_SERVER_PORT
+wui_push servers
+wait 30
+wui_listbox_sort 0
+wait 10
+wui_menu_nav focus serverlist
+wui_menu_nav down
+wait 5
+wui_menu_nav focus btn_info
+wui_menu_nav enter
+wait 18
+wui_serverstatus_trace
+set r_layoutDump 1
+wait 3
+wui_menu_nav focus statuslist
+wui_menu_nav focus btn_connect
+wait 2
+wui_menu_nav enter
+CFGEOF
+case "$(uname -s)" in
+ Darwin) INFO_DIRECT_NATIVE="$INFO_DIRECT_HOME"; INFO_DIRECT_PLATFORM_ARGS=( -ApplePersistenceIgnoreState YES ) ;;
+ MINGW*|MSYS*|CYGWIN*) INFO_DIRECT_NATIVE="$(cygpath -w "$INFO_DIRECT_HOME")"; INFO_DIRECT_PLATFORM_ARGS=() ;;
+ *) INFO_DIRECT_NATIVE="$INFO_DIRECT_HOME"; INFO_DIRECT_PLATFORM_ARGS=() ;;
+esac
+echo "==> WiredUI Server Info direct Connect: endpoint=$INFO_SERVER_PORT"
+python3 "$TIMEOUT_RUNNER" --timeout 60 --kill-after 10 --cwd "$RUN_ROOT/serverinfo-connect-direct-run" --stdout "$INFO_DIRECT_STDOUT" -- \
+    "$WIRED" "${INFO_DIRECT_PLATFORM_ARGS[@]}" +set fs_homepath "$INFO_DIRECT_NATIVE" +set com_automated 1 \
+    +set com_noHardReboot 1 +set net_enabled 1 +set net_ip 127.0.0.1 +set net_port "$INFO_CLIENT_PORT" \
+    +set wn_cert_verify 0 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 \
+    +set r_customwidth 1280 +set r_customheight 720 +set log_severity DEBUG \
+    +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec q0browser-serverinfo-direct.cfg
+info_direct_rc=$?
+if [ "$info_direct_rc" -ne 0 ] || [ ! -s "$INFO_DIRECT_JSON" ] || [ ! -s "$INFO_DIRECT_LAYOUT_JSON" ]; then
+    echo "FAIL: serverinfo direct rc=$info_direct_rc or missing evidence"
+    [ -s "$INFO_DIRECT_STDOUT" ] && tail -40 "$INFO_DIRECT_STDOUT"
+    exit 1
+fi
+printf '%s\n' 'echo Q0_SERVERINFO_DIRECT_PHASE_COMPLETE' >&7
+if ! python3 - "$INFO_SERVER_JSON" <<'PYEOF'
+import json,sys,time
+path=sys.argv[1]; deadline=time.monotonic()+5
+while time.monotonic()<deadline:
+    try: messages=[str(json.loads(line).get("msg","")).strip() for line in open(path,encoding="utf-8") if line.strip()]
+    except (OSError,ValueError): messages=[]
+    if "Q0_SERVERINFO_DIRECT_PHASE_COMPLETE" in messages: break
+    time.sleep(.05)
+else: raise SystemExit("FAIL: serverinfo headless did not record direct phase boundary")
+PYEOF
+then exit 1; fi
+printf '%s\n' 'echo Q0_SERVERINFO_DIRECT_QUIT_REQUESTED' quit >&7
+for _ in $(seq 1 150); do kill -0 "$INFO_SERVER_PID" 2>/dev/null || break; sleep 0.1; done
+if kill -0 "$INFO_SERVER_PID" 2>/dev/null; then echo "FAIL: serverinfo headless did not exit after console quit"; exit 1; fi
+if ! wait "$INFO_SERVER_PID"; then echo "FAIL: serverinfo headless exit was nonzero"; exit 1; fi
+INFO_SERVER_PID=""; exec 7>&-; INFO_SERVER_CONTROL_OPEN=0
+if ! analyze_serverinfo_connect_contract "$INFO_DIRECT_JSON" "$INFO_FIXTURE_JSON" \
+        "$INFO_SERVER_JSON" "$INFO_DIRECT_LAYOUT_JSON" "$SENTINEL_PORT" "$INFO_SERVER_PORT" direct; then exit 1; fi
+
+case "$(uname -s)" in
  MINGW*|MSYS*|CYGWIN*) SERVER_NATIVE="$(cygpath -w "$SERVER_HOME")" ;;
  *) SERVER_NATIVE="$SERVER_HOME" ;;
 esac
@@ -2015,17 +3099,50 @@ if [ "$wrong_rc" -ne 124 ] || [ ! -s "$WRONG_JSON" ]; then
     exit 1
 fi
 if ! python3 - "$SERVER_JSON" "$WRONG_JSON" <<'PYEOF'
-import json, sys
+import json, re, sys
 server_path, client_path = sys.argv[1:3]
-def messages(path):
+def rows(path):
     with open(path, encoding="utf-8", errors="replace") as stream:
-        return [json.loads(line).get("msg", "") for line in stream if line.strip()]
-server = messages(server_path)
-client = messages(client_path)
-if not any("QUIC: game rejected connection" in msg and msg.strip().endswith(": Invalid password")
-           for msg in server):
-    raise SystemExit("FAIL: watchdog expired without authoritative Invalid password rejection")
-if any("FIRST GAMEPLAY FRAME" in msg for msg in client):
+        return [json.loads(line) for line in stream if line.strip()]
+server = rows(server_path)
+client = rows(client_path)
+def normalized(row):
+    value = str(row.get("msg", ""))
+    return value[:-1] if value.endswith("\n") else value
+server_values = [normalized(row) for row in server]
+client_values = [normalized(row) for row in client]
+server_refusal = [index for index,value in enumerate(server_values)
+                  if any(line.startswith("QUIC: game rejected connection ")
+                         for line in re.split(r"[\r\n]", value))]
+if len(server_refusal) != 1 \
+        or not re.fullmatch(r"QUIC: game rejected connection from .* class=2",
+                            server_values[server_refusal[0]]) \
+        or server[server_refusal[0]].get("sev", "").upper() != "INFO" \
+        or server[server_refusal[0]].get("cat", "").lower() != "server":
+    raise SystemExit("FAIL: watchdog expired without authoritative fixed-class authentication refusal")
+armed = [(index,match) for index,value in enumerate(client_values)
+         if (match := re.fullmatch(
+             r"Browser connect attempt armed target=([^ ]+) selection_generation=([1-9][0-9]*) credential_present=1",
+             value))]
+if len(armed) != 1:
+    raise SystemExit("FAIL: wrong-password connect identity unavailable")
+target, generation = armed[0][1].group(1), armed[0][1].group(2)
+patterns = (
+    (rf"Browser connect credential disposed target={re.escape(target)} stage=client-handoff", "DEBUG", "client"),
+    (r"QUIC connect refused class=2 deferred_disconnect=1", "WARN", "network"),
+    (r"Connect failed kind=2 browser_retry=1", "WARN", "client"),
+    (rf"WiredUI: authentication retry opened address={re.escape(target)} selection_generation={generation}", "DEBUG", "ui"),
+)
+indices = []
+for pattern,severity,category in patterns:
+    matches = [index for index,value in enumerate(client_values) if re.fullmatch(pattern,value)]
+    if len(matches) != 1 or client[matches[0]].get("sev", "").upper() != severity \
+            or client[matches[0]].get("cat", "").lower() != category:
+        raise SystemExit(f"FAIL: wrong-password current refusal ABI missing: {pattern}")
+    indices.append(matches[0])
+if not armed[0][0] < indices[0] < indices[1] < indices[2] < indices[3]:
+    raise SystemExit("FAIL: wrong-password current refusal ABI out of order")
+if any("TLV ACCEPT" in msg or "FIRST GAMEPLAY FRAME" in msg for msg in client_values):
     raise SystemExit("FAIL: wrong-password negative control reached gameplay")
 PYEOF
 then exit 1; fi
@@ -2116,20 +3233,20 @@ wui_menu_nav focus statuslist
 wui_menu_nav focus btn_retry
 wui_menu_nav enter
 wait 120
-wui_serverstatus_trace
-wui_menu_nav focus statuslist
-wui_menu_nav focus btn_back
-wui_menu_nav enter
-wait 20
-wui_menu_nav focus btn_connect
-wui_server_fixture $SENTINEL_PORT $SERVER_PORT 1
-wait 30
-wui_menu_nav focus serverlist
-wui_menu_nav up
-wui_menu_nav down
-wait 10
-wui_menu_nav focus btn_connect
-wui_menu_nav enter
+  wui_serverstatus_trace
+  wui_menu_nav focus statuslist
+  wui_menu_nav focus btn_back
+  wui_menu_nav enter
+  wait 20
+  wui_menu_nav focus btn_connect
+  wui_server_fixture $SENTINEL_PORT $SERVER_PORT 1
+  wait 30
+  wui_menu_nav focus serverlist
+  wui_menu_nav up
+  wui_menu_nav down
+  wait 10
+  wui_menu_nav focus btn_connect
+  wui_menu_nav enter
 wait 10
 set r_layoutDump 1
 wait 5

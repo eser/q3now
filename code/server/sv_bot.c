@@ -4,6 +4,7 @@
 // sv_bot.c
 
 #include "server.h"
+#include "sv_bot_identity.h"
 #include "../botlib/botlib.h"
 LOG_DECLARE_CHANNEL( ch_botlib, "botlib" );
 LOG_DECLARE_CHANNEL( ch_server, "server" );
@@ -18,6 +19,9 @@ typedef struct bot_debugpoly_s
 
 static bot_debugpoly_t *debugpolygons;
 static int bot_maxdebugpolys;
+/* Process-lifetime issuer: intentionally outside sv/svs so map transitions,
+ * SV_Shutdown and server restarts cannot recycle an old (slot,id) pair. */
+static uint64_t sv_botNextAllocationId;
 
 extern botlib_export_t	*botlib_export;
 int	bot_enable;
@@ -31,6 +35,7 @@ SV_BotAllocateClient
 int SV_BotAllocateClient( void ) {
 	int			i;
 	client_t	*cl;
+	uint64_t	allocationId;
 
 	// Find a client slot. Slot 0 is reserved for the integrated listen-server
 	// host (SV_IsHostClient identity = type NA_LOOPBACK AND slot 0). A bot is
@@ -52,12 +57,21 @@ int SV_BotAllocateClient( void ) {
 		return -1;
 	}
 
+	allocationId = SV_BotIdentityNext( sv_botNextAllocationId );
+	if ( allocationId == 0 ) {
+		Com_Log( SEV_ERROR, LOG_CH(ch_server),
+			"SV_BotAllocateClient: bot allocation identity exhausted\n" );
+		return -1;
+	}
 	cl->gentity = SV_GentityNum( i );
 	cl->gentity->s.number = i;
+	cl->netchan.remoteAddress.type = NA_BOT;
+	sv_botNextAllocationId = allocationId;
+	cl->bot_allocation_id = allocationId;
+	/* Publish active only after the complete identity is installed. */
 	cl->state = CS_ACTIVE;
 	cl->lastPacketTime = svs.time;
 	cl->snapshotMsec = 1000 / sv_fps->integer;
-	cl->netchan.remoteAddress.type = NA_BOT;
 	cl->rate = 0;
 
 	cl->tld[0] = '\0';
@@ -80,11 +94,28 @@ void SV_BotFreeClient( int clientNum ) {
 	}
 
 	cl = &svs.clients[clientNum];
+	cl->bot_allocation_id = 0;
 	cl->state = CS_FREE;
 	cl->name[0] = '\0';
 	if ( cl->gentity ) {
 		cl->gentity->r.svFlags &= ~SVF_BOT;
 	}
+}
+
+qboolean SV_BotIdentityForClient( int clientNum, svBotIdentitySnapshot_t *snapshot ) {
+	client_t *cl;
+	svBotIdentitySnapshot_t current = { 0 };
+
+	if ( !snapshot || !svs.clients
+	  || clientNum < 0 || clientNum >= sv.maxclients ) return qfalse;
+	cl = &svs.clients[clientNum];
+	if ( cl->state < CS_CONNECTED || cl->netchan.remoteAddress.type != NA_BOT
+	  || cl->bot_allocation_id == 0 || !cl->name[0] ) return qfalse;
+	current.clientNum = clientNum;
+	current.allocationId = cl->bot_allocation_id;
+	Q_strncpyz( current.name, cl->name, sizeof( current.name ) );
+	*snapshot = current;
+	return qtrue;
 }
 
 

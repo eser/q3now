@@ -17,6 +17,7 @@ and one exported function: Perform
 */
 
 #include "vm_local.h"
+#include "vm_interpret_policy.h"
 #include "q_feats.h"
 #include "crash.h"
 LOG_DECLARE_CHANNEL( ch_system, "system" );
@@ -194,21 +195,44 @@ void VM_CheckBounds3( const vm_t *vm, unsigned int address, unsigned int count, 
 #if FEAT_WASM
 /*
 ==============
-Cmd_ReloadWasm_f — force reload WASM modules
+Cmd_ReloadWasm_f
+
+There is no safe live-state migration contract for game VMs.  In particular,
+freeing one slot while another remains live would publish a partially torn-down
+world to the engine.  Inspect every slot first and refuse the command as one
+atomic decision whenever any WASM VM is live.  Normal map/server lifecycle code
+remains the sole owner of VM recreation.
 ==============
 */
 static void Cmd_ReloadWasm_f( void ) {
 	vm_t *all[ VM_COUNT + MAX_LOCAL_CGAME_VMS ];
-	int n = VM_AllSlots( all );
+	char identities[ 256 ] = { 0 };
+	qstring_t identitiesQs = QS_WrapExisting( identities, sizeof( identities ) );
+	const int n = VM_AllSlots( all );
+	int liveWasmCount = 0;
+
 	for ( int i = 0; i < n; i++ ) {
-		vm_t *vm = all[i];
+		const vm_t *vm = all[i];
 		if ( vm->name && vm->isWasm ) {
-			Com_Log( SEV_INFO, LOG_CH(ch_system), "Reloading %s...\n", vm->name );
-			VM_Free( vm );
-			vm->name = NULL;  // allow VM_Create to recreate
+			if ( liveWasmCount > 0 ) {
+				QS_Append( &identitiesQs, "," );
+			}
+			QS_Appendf( &identitiesQs, "%s[%s:%d:%s]", vm->name,
+				vm->index == VM_GAME ? "game" : "cgame", vm->cgameInstance,
+				vm->isWasmAot ? "aot" : "interpreter" );
+			liveWasmCount++;
 		}
 	}
-	Com_Log( SEV_INFO, LOG_CH(ch_system), "WASM modules unloaded. They will reload on next map.\n" );
+
+	if ( liveWasmCount > 0 ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_system),
+			"reload_wasm: refused live_wasm_count=%d identities=%s\n",
+			liveWasmCount, identities );
+		return;
+	}
+
+	Com_Log( SEV_INFO, LOG_CH(ch_system),
+		"reload_wasm: no-op live_wasm_count=0\n" );
 }
 #endif
 
@@ -442,29 +466,52 @@ Dlls will call this directly
 =================
 VM_Restart
 
-Reload the data, but leave everything else in place
-This allows a server to do a map_restart without changing memory allocation
+Recreate the loaded backend while preserving its engine-side identity and call
+bridge. This allows a server map_restart without changing server ownership.
 =================
 */
 vm_t *VM_Restart( vm_t *vm ) {
-	// DLL's can't be restarted in place
+	vmInterpret_t interpret = vm->effectiveInterpret;
+	qboolean supported = qfalse;
+	vmIndex_t index = vm->index;
+	int cgameInstance = vm->cgameInstance;
+	void *owner = vm->owner;
+	syscall_t systemCall = vm->systemCall;
+	dllSyscall_t dllSyscall = vm->dllSyscall;
+
+	// Restart means a complete backend re-creation. Preserve the backend class
+	// that is actually live rather than consulting a possibly changed cvar.
+	// VM_WasmLoad handles any allowed AOT-to-interpreter fallback. The saved
+	// effective mode therefore preserves BYTECODE's .wasm-only policy too.
 	if ( vm->dllHandle ) {
-		vmIndex_t index = vm->index;
-		void *owner = vm->owner;
-		syscall_t systemCall = vm->systemCall;
-		dllSyscall_t dllSyscall = vm->dllSyscall;
+#if FEAT_WASM
+		if ( !vm->isWasm )
+#endif
+		{
+			interpret = vm->effectiveInterpret;
+			supported = qtrue;
+		}
+	}
+#if FEAT_WASM
+	else if ( vm->isWasm ) {
+		interpret = vm->effectiveInterpret;
+		supported = qtrue;
+	}
+#endif
 
-		VM_Free( vm );
-
-		// Only the game VM (DLL) restarts in place today; cgameInstance is
-		// ignored for VM_GAME. (A cgame restart would need its own instance.)
-		vm = VM_Create( index, VM_APP_SLOT_PRIMARY, owner, systemCall, dllSyscall, VMI_NATIVE );
-		return vm;
+	if ( !supported ) {
+		COM_WARN( LOG_CH(ch_system), "VM_Restart: unknown backend for %s; freeing.\n",
+			vm->name ? vm->name : "?" );
 	}
 
-	COM_WARN( LOG_CH(ch_system), "WASM module cannot restart in place; freeing.\n" );
+	// Destructive ownership boundary: every live backend is freed exactly once.
+	// All fields needed by VM_Create were copied above because VM_Free wipes vm.
 	VM_Free( vm );
-	return NULL;
+	if ( !supported ) {
+		return NULL;
+	}
+
+	return VM_Create( index, cgameInstance, owner, systemCall, dllSyscall, interpret );
 }
 
 
@@ -511,6 +558,8 @@ Loads a native shared library (VMI_NATIVE) or a WASM module
 ================
 */
 vm_t *VM_Create( vmIndex_t index, int cgameInstance, void *owner, syscall_t systemCalls, dllSyscall_t dllSyscalls, vmInterpret_t interpret ) {
+	vmInterpret_t requestedInterpret = interpret;
+	vmInterpretPolicy_t policy;
 	if ( !systemCalls ) {
 		Com_Terminate( TERM_UNRECOVERABLE, "VM_Create: bad parms" );
 	}
@@ -550,6 +599,7 @@ vm_t *VM_Create( vmIndex_t index, int cgameInstance, void *owner, syscall_t syst
 	vm->systemCall = systemCalls;
 	vm->dllSyscall = dllSyscalls;
 	vm->privateFlag = CVAR_PRIVATE;
+	vm->requestedInterpret = requestedInterpret;
 
 	// Per-VM arena: created before any backend load so the module file buffer
 	// (allocated from it in the backend loader) never lives on the Hunk temp
@@ -563,12 +613,22 @@ vm_t *VM_Create( vmIndex_t index, int cgameInstance, void *owner, syscall_t syst
 			interpret = VMI_COMPILED;
 		}
 	}
+	if ( !VM_InterpretPolicy( interpret, &policy ) ) {
+		COM_WARN( LOG_CH(ch_system), "VM_Create: invalid interpret mode %d for %s.\n",
+			(int)interpret, name );
+		VM_Free( vm );
+		return NULL;
+	}
 
-	if ( interpret == VMI_NATIVE ) {
+	if ( policy.tryNative ) {
 		// try to load as a system dll
 		Com_Log( SEV_INFO, LOG_CH(ch_system), "Loading dll file %s.\n", name );
 		vm->dllHandle = VM_LoadDll( name, &vm->entryPoint, dllSyscalls, vm->loadPath, sizeof( vm->loadPath ) );
 		if ( vm->dllHandle ) {
+			vm->effectiveInterpret = VMI_NATIVE;
+			Com_Log( SEV_DEBUG, LOG_CH(ch_system),
+				"VM_Create policy module=%s requested=%d effective=%d backend=native\n",
+				name, (int)vm->requestedInterpret, (int)vm->effectiveInterpret );
 			vm->privateFlag = 0; // allow reading private cvars
 			vm->dataAlloc = ~0U;
 			vm->dataMask = ~0U;
@@ -579,13 +639,17 @@ vm_t *VM_Create( vmIndex_t index, int cgameInstance, void *owner, syscall_t syst
 		}
 
 		Com_Log( SEV_DEBUG, LOG_CH(ch_system), "Failed to load dll, falling back to WASM.\n" );
-		interpret = VMI_COMPILED;
 	}
 
 #if FEAT_WASM
-	if ( interpret >= VMI_COMPILED ) {
+	{
 		// Auto-detect: prefer AOT (.aot), fall back to WASM interpreter (.wasm)
-		if ( VM_WasmLoad( vm ) ) {
+		if ( VM_WasmLoad( vm, policy.allowAot ) ) {
+			vm->effectiveInterpret = policy.wasmInterpret;
+			Com_Log( SEV_DEBUG, LOG_CH(ch_system),
+				"VM_Create policy module=%s requested=%d effective=%d backend=%s\n",
+				name, (int)vm->requestedInterpret, (int)vm->effectiveInterpret,
+				vm->isWasmAot ? "wasm-aot" : "wasm-interpreter" );
 			Crash_SaveVMPointer( index, cgameInstance, vm );
 			Crash_SaveVMChecksum( index, cgameInstance, 0 );
 			return vm;

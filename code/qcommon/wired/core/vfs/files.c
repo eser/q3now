@@ -1552,6 +1552,20 @@ static qboolean FS_GeneralRef( const char *filename )
 }
 
 
+/* Keep archive reference classification independent of the container format.
+ * Pure negotiation consumes FS_CGAME_REF for the client VM; applying this in
+ * one place prevents PK3, SW3Z, and the explicit touch path from disagreeing
+ * about the same qpath. gamesv retains the existing non-general policy above. */
+static void FS_MarkPakReferenced( pack_t *pak, const char *filename ) {
+	if ( !( pak->referenced & FS_GENERAL_REF ) && FS_GeneralRef( filename ) ) {
+		pak->referenced |= FS_GENERAL_REF;
+	}
+	if ( !( pak->referenced & FS_CGAME_REF ) && !strcmp( filename, "vm/gamecl.wasm" ) ) {
+		pak->referenced |= FS_CGAME_REF;
+	}
+}
+
+
 /*
 ===========
 FS_BypassPure
@@ -1679,10 +1693,7 @@ static int FS_OpenFileInSW3Z( fileHandle_t *file, pack_t *pak, fileInPack_t *pak
 	Q_strncpyz( f->name, pakFile->name, sizeof( f->name ) );
 
 
-	/* reference tracking */
-	if ( !( pak->referenced & FS_GENERAL_REF ) && FS_GeneralRef( pakFile->name ) ) {
-		pak->referenced |= FS_GENERAL_REF;
-	}
+	FS_MarkPakReferenced( pak, pakFile->name );
 
 	if ( fs_debug->integer ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_filesystem), "FS_FOpenFileRead: %s (found in '%s' [sw3z])\n",
@@ -1702,12 +1713,7 @@ static int FS_OpenFileInPak( fileHandle_t *file, pack_t *pak, fileInPack_t *pakF
 	// these are loaded from all pk3s
 	// from every pk3 file.
 
-	if ( !( pak->referenced & FS_GENERAL_REF ) && FS_GeneralRef( pakFile->name ) ) {
-		pak->referenced |= FS_GENERAL_REF;
-	}
-	if ( !( pak->referenced & FS_CGAME_REF ) && !strcmp( pakFile->name, "vm/gamecl.wasm" ) ) {
-		pak->referenced |= FS_CGAME_REF;
-	}
+	FS_MarkPakReferenced( pak, pakFile->name );
 
 	if ( !PACK_ZIP_HANDLE(pak) ) {
 		PACK_ZIP_HANDLE(pak) = unzOpen( pak->pakFilename );
@@ -1969,12 +1975,7 @@ void FS_TouchFileInPak( const char *filename ) {
 				// case and separator insensitive comparisons
 				if ( !FS_FilenameCompare( pakFile->name, filename ) ) {
 					// found it!
-					if ( !( pak->referenced & FS_GENERAL_REF ) && FS_GeneralRef( filename ) ) {
-						pak->referenced |= FS_GENERAL_REF;
-					}
-					if ( !( pak->referenced & FS_CGAME_REF ) && !strcmp( filename, "vm/gamecl.wasm" ) ) {
-						pak->referenced |= FS_CGAME_REF;
-					}
+					FS_MarkPakReferenced( pak, filename );
 					return;
 				}
 				pakFile = pakFile->next;

@@ -3,8 +3,10 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "server.h"
+#include "sv_bot_identity.h"
 #include "../qcommon/cm_local.h"
 #include "../qcommon/wired/protocol.h"
+#include <inttypes.h>
 LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 static int s_sv_reload_mod = -1;
@@ -459,34 +461,60 @@ static void SV_KickNum_f( void ) {
 }
 
 /* Bot-only numeric removal for the in-game Remove Bot UI. The client feeder
- * narrows presentation, but this execution-time NA_BOT check is the authority:
- * a recycled slot or stale queued command must never remove a human. */
+ * narrows presentation, but the execution-time NA_BOT + allocation-id checks
+ * are authoritative: a recycled slot or stale command cannot remove its
+ * replacement (or a human that later occupies the slot). */
 static void SV_KickBotNum_f( void ) {
 	client_t *cl;
 	int clientNum;
+	uint64_t expectedAllocationId;
 	char name[ sizeof( svs.clients[0].name ) ];
 
 	if ( !com_sv_running->integer ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server is not running.\n" );
 		return;
 	}
-	if ( Cmd_Argc() != 2 ) {
-		Com_Log( SEV_INFO, LOG_CH(ch_server), "Usage: botkick <client number>\n" );
+	if ( Cmd_Argc() != 3 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_server),
+			"Usage: botkick <client number> <allocation id>\n" );
+		return;
+	}
+	if ( !SV_BotIdentityParse( Cmd_Argv( 2 ), &expectedAllocationId ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_server), "botkick: invalid allocation identity\n" );
 		return;
 	}
 
-	cl = SV_GetPlayerByNum();
-	if ( !cl ) return;
-	clientNum = (int)( cl - svs.clients );
+	{
+		if ( !SV_BotSlotParse( Cmd_Argv( 1 ), (unsigned int)sv.maxclients,
+			&clientNum ) ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_server), "botkick: invalid client slot\n" );
+			return;
+		}
+		cl = &svs.clients[clientNum];
+		if ( cl->state < CS_CONNECTED ) {
+			Com_Log( SEV_INFO, LOG_CH(ch_server),
+				"botkick: inactive client slot=%d\n", clientNum );
+			return;
+		}
+	}
 	if ( cl->netchan.remoteAddress.type != NA_BOT ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_server),
 			"botkick: refused non-bot client=%d name=%s\n", clientNum, cl->name );
 		return;
 	}
+	if ( !SV_BotIdentityMatches( qtrue, cl->bot_allocation_id,
+		expectedAllocationId ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_server),
+			"botkick: refused stale bot identity client=%d expected=%" PRIu64
+			" actual=%" PRIu64 "\n", clientNum, expectedAllocationId,
+			cl->bot_allocation_id );
+		return;
+	}
 
 	Q_strncpyz( name, cl->name, sizeof( name ) );
 	Com_Log( SEV_INFO, LOG_CH(ch_server),
-		"botkick: removed bot client=%d name=%s\n", clientNum, name );
+		"botkick: removed bot client=%d allocation=%" PRIu64 " name=%s\n",
+		clientNum, expectedAllocationId, name );
 	SV_DropClient( cl, "was kicked" );
 }
 
