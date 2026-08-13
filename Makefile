@@ -317,7 +317,7 @@ build: _build-stamp $(BUILD_DIR)/CMakeCache.txt
 	# stale witness (the 2026-07-23/24 stale-pak trap, twice).  $(PAK_OUT) is a
 	# file target keyed on the VM modules, so this repacks ONLY when they changed
 	# (idempotent) and, being the same target create-packs uses, never double-packs.
-	$(MAKE) $(PAK_OUT)
+	$(MAKE) $(PAK_OUT) VERSION="$(VERSION)" SOURCE_VERSION="$(SOURCE_VERSION)" BUILD_DATE_ISO="$(BUILD_DATE_ISO)"
 
 # ── per-build stamp (content-gated counter + timestamp) ───────────────────────
 # Bump a monotonic build counter (.build_number at the REPO ROOT so `make clean`
