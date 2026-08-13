@@ -45,7 +45,11 @@ if(NOT DEFINED WASI_SDK_PATH)
     endif()
 endif()
 
-if(WIN32)
+# wasi-sdk clang is a HOST tool: it runs on the build machine regardless of
+# the target platform. CMAKE_HOST_WIN32 (not WIN32) is the correct guard —
+# plain WIN32 is also TRUE when CROSS-compiling FOR Windows from macOS/Linux
+# and would look for clang.exe inside a native wasi-sdk.
+if(CMAKE_HOST_WIN32)
     set(WASI_CC "${WASI_SDK_PATH}/bin/clang.exe")
 else()
     set(WASI_CC "${WASI_SDK_PATH}/bin/clang")
