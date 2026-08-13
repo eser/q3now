@@ -32,7 +32,7 @@ run_case() {
   local output recursive_row artifact_row summary_row description_rows rsync_rows
 
   output=$(
-    "$MAKE_BIN" --no-print-directory -n -C "$ROOT" -f "$MAKEFILE_PATH" release \
+    "$MAKE_BIN" --no-print-directory --always-make -n -C "$ROOT" -f "$MAKEFILE_PATH" release \
       UNAME_S="$uname_s" UNAME_M="$uname_m" JOBS=1 \
       VERSION="$PROBE_VERSION" SOURCE_VERSION="$PROBE_SOURCE" \
       BUILD_DATE_ISO="$PROBE_DATE" 2>&1
