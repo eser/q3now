@@ -504,20 +504,13 @@ void VectorRotate( const vec3_t in, const vec3_t matrix[3], vec3_t out )
 }
 
 //============================================================================
-#ifdef _MSC_SSE2
-#include <intrin.h>
-#endif
 
 /*
 ** float Q_rsqrt( float number )
 */
 float Q_rsqrt( float number )
 {
-#if defined(_MSC_SSE2)
-	float ret;
-	_mm_store_ss( &ret, _mm_rsqrt_ss( _mm_load_ss( &number ) ) );
-	return ret;
-#elif defined(_GCC_SSE2)
+#if defined(_GCC_SSE2)
 	/* writing it this way allows gcc to recognize that rsqrt can be used with -ffast-math */
 	return 1.0f / sqrtf( number );
 #elif defined(_GCC_VSX)

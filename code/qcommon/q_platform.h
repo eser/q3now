@@ -7,12 +7,9 @@
 
 #define QDECL
 
-// QDECL_TLS — portable thread-local storage. MSVC checked first because it
-// defines __STDC_VERSION__ inconsistently; __STDC_NO_THREADS__ guards
+// QDECL_TLS — portable thread-local storage. __STDC_NO_THREADS__ guards
 // freestanding C11 targets that opt out of threads.
-#if defined(_MSC_VER)
-# define QDECL_TLS __declspec(thread)
-#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
 # define QDECL_TLS _Thread_local
 #elif defined(__GNUC__) || defined(__clang__)
 # define QDECL_TLS __thread
@@ -43,9 +40,7 @@
 #define _WIN32_WINNT 0x0501
 #endif
 
-#if defined( _MSC_VER ) && _MSC_VER >= 1400 // MSVC++ 8.0 at least
-#define OS_STRING "win_msvc"
-#elif defined __MINGW32__
+#if defined __MINGW32__
 #define OS_STRING "win_mingw"
 #elif defined __MINGW64__
 #define OS_STRING "win_mingw64"
@@ -77,7 +72,7 @@
 #endif
 #endif
 
-#if defined( _M_ARM64 )
+#if defined( _M_ARM64 ) || defined( __aarch64__ )
 #define ARCH_STRING "arm64"
 #undef arm64
 #define arm64 1
@@ -86,7 +81,7 @@
 #endif
 #endif
 
-#if defined( _M_ARM )
+#if defined( _M_ARM ) || defined( __arm__ )
 #define ARCH_STRING "arm32"
 #undef arm32
 #define arm32 1
@@ -241,11 +236,7 @@
 #endif
 
 #if idx64
-#ifdef _MSC_VER
-#define _MSC_SSE2
-#else
 #define _GCC_SSE2
-#endif
 #endif // idx64
 
 #if defined(__VSX__)
@@ -271,18 +262,6 @@
 #endif
 #endif
 
-// Thread-local storage qualifier. MSVC must be first: it defines
-// __STDC_VERSION__ inconsistently. __STDC_NO_THREADS__ covers freestanding
-// C11 compilers that opt out of threads.h. Error on unknown compilers rather
-// than silently producing non-thread-local globals.
-#if defined(_MSC_VER)
-# define QDECL_TLS __declspec(thread)
-#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
-# define QDECL_TLS _Thread_local
-#elif defined(__GNUC__) || defined(__clang__)
-# define QDECL_TLS __thread
-#else
-# error "QDECL_TLS: no thread-local storage keyword available on this compiler"
-#endif
+// QDECL_TLS (thread-local storage) is defined once at the top of this file.
 
 #endif // __Q_PLATFORM_H

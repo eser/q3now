@@ -4,10 +4,6 @@
 // tr_extensions.c - extensions needed by the renderer not in sdl_glimp.c
 
 
-#ifdef _MSC_VER
-#pragma warning (disable : 4054 )
-#endif
-
 #define SDL_GL_GetProcAddress( a ) ri.GL_GetProcAddress( a )
 
 #include "tr_local.h"
@@ -306,6 +302,3 @@ void GLimp_InitExtraExtensions( void )
 
 #undef GLE
 }
-#ifdef _MSC_VER
-#pragma warning (default : 4054 )
-#endif

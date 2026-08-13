@@ -33,11 +33,11 @@ Sys_LowPhysicalMemory
 ==================
 */
 qboolean Sys_LowPhysicalMemory( void ) {
-#if	_MSC_VER < 1600 // MSVC 2008 and lower, assume win9x compatibility builds
-	MEMORYSTATUS stat;
-	GlobalMemoryStatus( &stat );
-	return (stat.dwTotalPhys <= MEM_THRESHOLD) ? qtrue : qfalse;
-#else
+	// NOTE: until 2026-08 a bare-token `#if _MSC_VER < 1600` evaluated to
+	// `0 < 1600` under MinGW, so the shipping Windows build silently used the
+	// legacy MEMORYSTATUS API (saturates at ~4 GB). MEMORYSTATUSEX is the
+	// correct modern query; with MEM_THRESHOLD at 96 MB both return qfalse on
+	// any machine that can run the engine, so behaviour is effectively equal.
 	MEMORYSTATUSEX stat;
 	stat.dwLength = sizeof(stat);
 
@@ -46,7 +46,6 @@ qboolean Sys_LowPhysicalMemory( void ) {
 	}
 
 	return (stat.ullAvailPhys <= MEM_THRESHOLD) ? qtrue : qfalse;
-#endif
 }
 
 

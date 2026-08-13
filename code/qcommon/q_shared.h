@@ -41,37 +41,6 @@
 
 #define DEMOEXT	"dm_"			// standard demo extension
 
-#ifdef _MSC_VER
-
-#pragma warning(disable : 4018)     // signed/unsigned mismatch
-//#pragma warning(disable : 4032)
-//#pragma warning(disable : 4051)
-#pragma warning(disable : 4057)		// slightly different base types
-#pragma warning(disable : 4100)		// unreferenced formal parameter
-//#pragma warning(disable : 4115)
-#pragma warning(disable : 4125)		// decimal digit terminates octal escape sequence
-#pragma warning(disable : 4127)		// conditional expression is constant
-//#pragma warning(disable : 4136)
-#pragma warning(disable : 4152)		// nonstandard extension, function/data pointer conversion in expression
-#pragma warning(disable : 4200)		// nonstandard extension used: size-sided array in struct/union
-//#pragma warning(disable : 4201)
-#pragma warning(disable : 4206)		// nonstandard extension used: translation unit is empty
-//#pragma warning(disable : 4214)
-#pragma warning(disable : 4267)		// conversion from 'size_t' to 'int', possible loss of data
-#pragma warning(disable : 4244)
-#pragma warning(disable : 4142)		// benign redefinition
-//#pragma warning(disable : 4305)		// truncation from const double to float
-//#pragma warning(disable : 4310)		// cast truncates constant value
-//#pragma warning(disable:  4505) 	// unreferenced local function has been removed
-//#pragma warning(disable : 4514)
-#pragma warning(disable : 4702)		// unreachable code
-#pragma warning(disable : 4711)		// selected for automatic inline expansion
-#pragma warning(disable : 4220)		// varargs matches remaining parameters
-#pragma warning(disable : 4324)		// 'q_jpeg_error_mgr_s' : structure was padded due to alignment specifier
-#pragma warning(disable : 4091)		// 'typedef': ignored on lef of <..> when no variable is declared
-//#pragma intrinsic( memset, memcpy )
-#endif
-
 //Ignore __attribute__ on non-gcc/clang platforms
 #if !defined(__GNUC__) && !defined(__clang__)
 #ifndef __attribute__
@@ -85,9 +54,7 @@
 #define UNUSED_VAR
 #endif
 
-#if (defined _MSC_VER)
-#define Q_EXPORT __declspec(dllexport)
-#elif (defined __SUNPRO_C)
+#if (defined __SUNPRO_C)
 #define Q_EXPORT __global
 #elif ((__GNUC__ >= 3) && (!__EMX__) && (!sun))
 #define Q_EXPORT __attribute__((visibility("default")))
@@ -98,10 +65,6 @@
 #if defined(__GNUC__) || defined(__clang__)
 #define NORETURN __attribute__((noreturn))
 #define NORETURN_PTR __attribute__((noreturn))
-#elif defined(_MSC_VER)
-#define NORETURN __declspec(noreturn)
-// __declspec doesn't work on function pointers
-#define NORETURN_PTR /* nothing */
 #else
 #define NORETURN /* nothing */
 #define NORETURN_PTR /* nothing */
@@ -187,8 +150,6 @@ static ID_INLINE uint16_t Q_bswap16( uint16_t x )
 {
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_bswap16( x );
-#elif defined(_MSC_VER)
-    return _byteswap_ushort( x );
 #else
     return (uint16_t)( (x >> 8) | (x << 8) );
 #endif
@@ -198,8 +159,6 @@ static ID_INLINE uint32_t Q_bswap32( uint32_t x )
 {
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_bswap32( x );
-#elif defined(_MSC_VER)
-    return _byteswap_ulong( x );
 #else
     return ( x >> 24 )
          | ( (x >> 8) & 0x0000FF00u )
@@ -212,8 +171,6 @@ static ID_INLINE uint64_t Q_bswap64( uint64_t x )
 {
 #if defined(__GNUC__) || defined(__clang__)
     return __builtin_bswap64( x );
-#elif defined(_MSC_VER)
-    return _byteswap_uint64( x );
 #else
     x = ( (x & 0x00000000FFFFFFFFull) << 32 ) | ( (x & 0xFFFFFFFF00000000ull) >> 32 );
     x = ( (x & 0x0000FFFF0000FFFFull) << 16 ) | ( (x & 0xFFFF0000FFFF0000ull) >> 16 );
@@ -267,40 +224,18 @@ static ID_INLINE float   BigFloat( float x ) {
 
 //=============================================================
 
-#if defined (_MSC_VER) && !defined(__clang__)
-	typedef __int64 int64_t;
-	typedef __int32 int32_t;
-	typedef __int16 int16_t;
-	typedef signed __int8 int8_t;
-	typedef unsigned __int64 uint64_t;
-	typedef unsigned __int32 uint32_t;
-	typedef unsigned __int16 uint16_t;
-	typedef unsigned __int8 uint8_t;
-#else
-	#include <stdint.h>
-#endif
+#include <stdint.h>
 
-// Function-like on purpose: the non-standard argument types the Windows
-// branches need ((void **) for the GCC builtins, (void *) for the MSVC
-// custom impls) are cast HERE, so every call site passes a plain jmp_buf.
-// The casts used to live at the call sites, which poisoned the POSIX path:
-// setjmp(jmp_buf) receiving (void **) is a warning under clang and a hard
-// ERROR under gcc >= 14 (first caught by the Docker/trixie CI job).
+// Function-like on purpose: the non-standard argument type the Windows branch
+// needs ((void **) for the GCC/Clang builtins) is cast HERE, so every call site
+// passes a plain jmp_buf. The casts used to live at the call sites, which
+// poisoned the POSIX path: setjmp(jmp_buf) receiving (void **) is a warning
+// under clang and a hard ERROR under gcc >= 14 (first caught by the
+// Docker/trixie CI job).
 #if defined (_WIN32)
-#if !defined(_MSC_VER)
-// use GCC/Clang builtins (MinGW CRT setjmp/longjmp unwinding is unreliable)
+// MinGW: use GCC/Clang builtins (MinGW CRT setjmp/longjmp unwinding is unreliable)
 #define Q_setjmp(env)      __builtin_setjmp((void **)(env))
 #define Q_longjmp(env, v)  __builtin_longjmp((void **)(env), (v))
-#elif idx64 && (_MSC_VER >= 1910)
-// use custom setjmp()/longjmp() implementations
-#define Q_setjmp(env)      Q_setjmp_c((void *)(env))
-#define Q_longjmp(env, v)  Q_longjmp_c((void *)(env), (v))
-int Q_setjmp_c(void *);
-int Q_longjmp_c(void *, int);
-#else // !idx64 || MSVC<2017
-#define Q_setjmp(env)      setjmp(env)
-#define Q_longjmp(env, v)  longjmp((env), (v))
-#endif
 #else // !_WIN32
 #define Q_setjmp(env)      setjmp(env)
 #define Q_longjmp(env, v)  longjmp((env), (v))

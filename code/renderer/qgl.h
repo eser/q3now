@@ -9,14 +9,6 @@
 #define __QGL_H__
 
 #if defined( _WIN32 )
-#if _MSC_VER
-#pragma warning (disable: 4201)
-#pragma warning (disable: 4214)
-#pragma warning (disable: 4514)
-#pragma warning (disable: 4032)
-#pragma warning (disable: 4201)
-#pragma warning (disable: 4214)
-#endif
 #include <windows.h>
 #include <GL/gl.h>
 #elif defined( __linux__ ) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined( __sun )
