@@ -1,0 +1,83 @@
+--- a/picoquic/sockloop.c
++++ b/picoquic/sockloop.c
+@@ -36,8 +36,8 @@
+ #ifdef _WINDOWS
+ #define WIN32_LEAN_AND_MEAN
+ #include <errno.h>
+-#include <WinSock2.h>
+-#include <Windows.h>
++#include <winsock2.h>
++#include <windows.h>
+ #include <assert.h>
+ #include <iphlpapi.h>
+ #include <stdint.h>
+--- a/picoquic/util.c
++++ b/picoquic/util.c
+@@ -24,9 +24,9 @@
+ /* Simple set of utilities */
+ #ifdef _WINDOWS
+ #define WIN32_LEAN_AND_MEAN
+-#include <Windows.h>
+-#include <WinSock2.h>
+-#include <Ws2def.h>
++#include <windows.h>
++#include <winsock2.h>
++#include <ws2def.h>
+ #else
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+--- a/picoquic/winsockloop.c
++++ b/picoquic/winsockloop.c
+@@ -48,8 +48,8 @@
+ }
+ #else
+ #define WIN32_LEAN_AND_MEAN
+-#include <WinSock2.h>
+-#include <Windows.h>
++#include <winsock2.h>
++#include <windows.h>
+ #include <assert.h>
+ #include <iphlpapi.h>
+ #include <stdint.h>
+--- a/picoquic/picosocks.h
++++ b/picoquic/picosocks.h
+@@ -25,11 +25,11 @@
+ #ifdef _WINDOWS
+ /* clang-format off */
+ #define WIN32_LEAN_AND_MEAN
+-#include <Windows.h>
+-#include <Ws2def.h>
+-#include <WinSock2.h>
++#include <windows.h>
++#include <ws2def.h>
++#include <winsock2.h>
+ #include <ws2ipdef.h>
+-#include <Mswsock.h>
++#include <mswsock.h>
+ #include <assert.h>
+ #include <iphlpapi.h>
+ #include <stdint.h>
+--- a/picoquic/picoquic.h
++++ b/picoquic/picoquic.h
+@@ -25,8 +25,8 @@
+ #include <stdint.h>
+ #include <stdarg.h>
+ #ifdef _WINDOWS
+-#include <WS2tcpip.h>
+-#include <Ws2def.h>
++#include <ws2tcpip.h>
++#include <ws2def.h>
+ #include <winsock2.h>
+ #else
+ #include <arpa/inet.h>
+--- a/picoquic/wincompat.h
++++ b/picoquic/wincompat.h
+@@ -24,7 +24,7 @@
+ 
+ #include <stdint.h>
+ #define ssize_t int
+-#include <Winsock2.h>
++#include <winsock2.h>
+ #include <ws2tcpip.h>
+ 
+ #ifndef gettimeofday

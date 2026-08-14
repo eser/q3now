@@ -1,0 +1,13 @@
+diff --git a/picotlsvs/picotls/wincompat.h b/picotlsvs/picotls/wincompat.h
+index 8c9c084..b5e6310 100644
+--- a/picotlsvs/picotls/wincompat.h
++++ b/picotlsvs/picotls/wincompat.h
+@@ -3,7 +3,7 @@
+ 
+ #include <stdint.h>
+ #define ssize_t int
+-#include <Winsock2.h>
++#include <winsock2.h>
+ #include <ws2tcpip.h>
+ #include <malloc.h>
+ 
