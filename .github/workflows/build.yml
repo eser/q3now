@@ -461,7 +461,11 @@ jobs:
         # falls back to its mingw64 personality — point it (and the launcher's
         # cgo link) at the clang64 prefix explicitly.
         export MSYSTEM=CLANG64
-        export PKG_CONFIG_PATH="${{ runner.temp }}/msys64/clang64/lib/pkgconfig"
+        # RUNNER_TEMP is Windows-form (D:\a\_temp); pkgconf can't walk a
+        # backslash path from bash — convert \ -> / first (same treatment
+        # WASI_HOME gets below).
+        MSYS_ROOT="${RUNNER_TEMP//\\//}/msys64"
+        export PKG_CONFIG_PATH="$MSYS_ROOT/clang64/lib/pkgconfig"
         WASI_HOME="${USERPROFILE//\\//}/wasi-sdk"
         RELEASE_VERSION="${{ needs.prepare.outputs.version }}"
         make release SKIP_HOST_TESTS=1 CHANNEL=public Q3DIR=dist/q3now WASI_SDK_PATH="$WASI_HOME" ${RELEASE_VERSION:+VERSION=$RELEASE_VERSION}
