@@ -1623,6 +1623,7 @@ ENDFUNCTION()
 # CRT workarounds that would not apply against a POSIX build.
 IF(WIN32)
 	WIRED_APPLY_SUBMODULE_PATCHES(picoquic src/libs/picoquic patches/picoquic-mingw)
+	WIRED_APPLY_SUBMODULE_PATCHES(picotls src/libs/picotls patches/picotls-mingw)
 ENDIF()
 
 FILE(GLOB PICOQUIC_SRCS src/libs/picoquic/picoquic/*.c)
