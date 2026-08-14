@@ -385,9 +385,10 @@ jobs:
     - uses: actions/setup-go@v7
       with:
         go-version: '1.26.1'
-        cache-dependency-path: |
-          launcher/go.sum
-          tools/quic-probe/go.sum
+        # cache: false — GOCACHE stores cgo link flags computed under the old
+        # MINGW64 prefix; the go.sum-derived key never changes, so the stale
+        # -L/mingw64/lib kept resurrecting after the CLANG64 switch.
+        cache: false
 
     - uses: actions/setup-node@v7
       with:
