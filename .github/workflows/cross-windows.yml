@@ -1,15 +1,17 @@
 # Linux → Windows x86_64 cross build with llvm-mingw (clang), the clang-based
-# successor of the classic ioq3 mingw-gcc cross recipe. Manual trigger only —
-# this is a toolchain probe lane, not a release lane.
-#
-# KNOWN GATE: goes green only after the deferred cross fixes land in
-# CMakeLists.txt (LuaJIT HOST_CC/TARGET_SYS/CROSS args, stringify host-tool
-# split) and the picoquic include fixes (patches/picoquic candidate). See
-# cmake/toolchains/llvm-mingw-x86_64.cmake header for the full workaround list.
+# successor of the classic ioq3 mingw-gcc cross recipe. A toolchain probe
+# lane, not a release lane: runs on manual dispatch (default-branch only,
+# GitHub limitation) and on pushes that touch the cross toolchain itself.
 name: cross-windows
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - docker/cross-windows/**
+      - cmake/toolchains/**
+      - .github/workflows/cross-windows.yml
+      - patches/picoquic-mingw/**
 
 jobs:
   cross-windows:
