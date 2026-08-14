@@ -114,16 +114,27 @@ jobs:
         sudo ln -sf "$(command -v clang-tidy-22)" /usr/local/bin/clang-tidy
         clang-tidy --version
 
+    - name: Cache SDL3
+      uses: actions/cache@v6
+      with:
+        path: /tmp/sdl3-prefix
+        key: sdl3-release-3.4.14-ubuntu24
+
     - name: Install SDL3
       run: |
         # find_package(SDL3 REQUIRED) — not in Ubuntu 24.04 repos, build from
         # source, pinned to the release the project builds against locally.
-        git clone --depth 1 --branch release-3.4.14 \
-          https://github.com/libsdl-org/SDL.git /tmp/SDL3
-        cmake -S /tmp/SDL3 -B /tmp/SDL3/build -G Ninja \
-          -DCMAKE_BUILD_TYPE=Release -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
-        cmake --build /tmp/SDL3/build --parallel
-        sudo cmake --install /tmp/SDL3/build
+        # The installed prefix is cached; a hit skips the ~3 min source build.
+        if [ ! -d /tmp/sdl3-prefix ]; then
+          git clone --depth 1 --branch release-3.4.14 \
+            https://github.com/libsdl-org/SDL.git /tmp/SDL3
+          cmake -S /tmp/SDL3 -B /tmp/SDL3/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+          cmake --build /tmp/SDL3/build --parallel
+          DESTDIR=/tmp/sdl3-stage cmake --install /tmp/SDL3/build
+          mv /tmp/sdl3-stage/usr/local /tmp/sdl3-prefix
+        fi
+        sudo cp -a /tmp/sdl3-prefix/. /usr/local/
 
     - name: Configure (generate compile_commands.json)
       run: |
@@ -174,17 +185,15 @@ jobs:
       if: github.event_name != 'pull_request'
       shell: bash
       run: |
-        # Accumulate failures instead of dying on the first bad file — under
-        # bash -e a plain loop aborts at the first nonzero clang-tidy, so
-        # each CI run used to reveal only ONE failing file per push. One run
-        # now reports the complete finding list.
-        fail=0
-        while IFS= read -r f; do
-          clang-tidy -p . "$f" || fail=1
-        done < <(find code/cgame code/game code/qcommon code/server code/client code/sdl \
+        # Parallel sweep across all cores (the serial per-file loop pegged one
+        # of the runner's vCPUs and dominated the ~28 min job). xargs exits
+        # nonzero if ANY clang-tidy invocation fails, and every file is still
+        # processed — the complete finding list survives, same as the old
+        # fail-accumulator loop.
+        find code/cgame code/game code/qcommon code/server code/client code/sdl \
              code/botlib code/renderer code/renderer2 code/renderervk code/renderercommon \
-             -name '*.c' | grep -vE 'sv_rankings\.c|g_rankings\.c')
-        exit $fail
+             -name '*.c' | grep -vE 'sv_rankings\.c|g_rankings\.c' \
+          | xargs -P "$(nproc)" -n 1 clang-tidy -p .
 
   linux-x86_64:
     name: Linux x86_64
@@ -227,14 +236,28 @@ jobs:
           libpipewire-0.3-dev libpulse-dev libegl-dev libdrm-dev libgbm-dev \
           libwebkit2gtk-4.1-dev libgtk-3-dev \
           libopus-dev libopusfile-dev
+
+    - name: Cache SDL3
+      uses: actions/cache@v6
+      with:
+        path: /tmp/sdl3-prefix
+        key: sdl3-release-3.4.14-ubuntu24
+
+    - name: Install SDL3
+      run: |
         # SDL3 is not in Ubuntu 24.04 repos — build from source, pinned to the
         # release the project builds against locally (was: unpinned HEAD).
-        git clone --depth 1 --branch release-3.4.14 \
-          https://github.com/libsdl-org/SDL.git /tmp/SDL3
-        cmake -S /tmp/SDL3 -B /tmp/SDL3/build -G Ninja \
-          -DCMAKE_BUILD_TYPE=Release -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
-        cmake --build /tmp/SDL3/build --parallel
-        sudo cmake --install /tmp/SDL3/build
+        # The installed prefix is cached; a hit skips the ~3 min source build.
+        if [ ! -d /tmp/sdl3-prefix ]; then
+          git clone --depth 1 --branch release-3.4.14 \
+            https://github.com/libsdl-org/SDL.git /tmp/SDL3
+          cmake -S /tmp/SDL3 -B /tmp/SDL3/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+          cmake --build /tmp/SDL3/build --parallel
+          DESTDIR=/tmp/sdl3-stage cmake --install /tmp/SDL3/build
+          mv /tmp/sdl3-stage/usr/local /tmp/sdl3-prefix
+        fi
+        sudo cp -a /tmp/sdl3-prefix/. /usr/local/
 
     - name: Install wasi-sdk
       run: |
@@ -486,3 +509,29 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+
+  cross-windows:
+    name: Linux → Windows x86_64 (llvm-mingw)
+    needs: [prepare]
+    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: recursive
+
+    - name: Build toolchain image
+      run: docker build -t wired-cross-windows docker/cross-windows
+
+    - name: Cross build
+      run: docker run --rm -v "$PWD:/src" wired-cross-windows /src/docker/cross-windows/build.sh
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: cross-windows-x86_64
+        path: |
+          build/cross-windows-docker/*.exe
+          build/cross-windows-docker/*.dll
+          build/cross-windows-docker/Release/base/vm/*.wasm
+        if-no-files-found: error
