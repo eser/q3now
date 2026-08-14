@@ -433,7 +433,10 @@ ADD_TEST(NAME ral_retired_feature_rejected
 )
 SET_TESTS_PROPERTIES(ral_retired_feature_rejected PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;failure.configuration"
-	TIMEOUT 30
+	# 300s, not 30: this check EXECUTE_PROCESSes a full cmake configure of the
+	# tree (compiler probing included) before the retired-feature gate can
+	# reject — the Windows CI runner needs well over 30s just for the probes.
+	TIMEOUT 300
 )
 
 ADD_TEST(NAME ral_public_surface_contract
