@@ -7,7 +7,9 @@
 #include "libc_errno.h"
 #include "win_util.h"
 
-#include "PathCch.h"
+/* mingw-w64 ships this header lowercase; the CamelCase spelling only works
+ * on case-insensitive filesystems (Windows/macOS hosts, not Linux cross). */
+#include "pathcch.h"
 
 #pragma comment(lib, "Pathcch.lib")
 
