@@ -50,3 +50,33 @@ RUN set -e; \
 
 ENV LLVM_MINGW_ROOT=/opt/llvm-mingw \
     PATH=/opt/llvm-mingw/bin:$PATH
+
+# ── cross-built dependencies, baked as image layers ──────────────────────────
+# OpenSSL + SDL3 change only when the pins below change; with buildx + GHA
+# layer cache every CI run gets them for free instead of ~3-4 min of rebuild.
+ARG OPENSSL_VER=3.5.4
+RUN set -e; cd /tmp; \
+    curl -sLO "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VER}/openssl-${OPENSSL_VER}.tar.gz"; \
+    tar xf "openssl-${OPENSSL_VER}.tar.gz"; cd "openssl-${OPENSSL_VER}"; \
+    ./Configure mingw64 no-shared no-tests no-apps \
+        --prefix=/opt/cross-prefix --cross-compile-prefix=x86_64-w64-mingw32- >/dev/null; \
+    make -j"$(nproc)" >/dev/null 2>&1; make install_sw >/dev/null 2>&1; \
+    rm -rf /tmp/openssl-*
+
+ARG SDL_TAG=release-3.4.14
+RUN set -e; \
+    git clone -q --depth 1 --branch "$SDL_TAG" https://github.com/libsdl-org/SDL.git /tmp/SDL; \
+    cmake -S /tmp/SDL -B /tmp/SDL/build -G Ninja \
+        -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+        -DCMAKE_C_COMPILER=/opt/llvm-mingw/bin/x86_64-w64-mingw32-clang \
+        -DCMAKE_CXX_COMPILER=/opt/llvm-mingw/bin/x86_64-w64-mingw32-clang++ \
+        -DCMAKE_RC_COMPILER=/opt/llvm-mingw/bin/windres \
+        -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+        -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+        -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/cross-prefix \
+        -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF \
+        -DSDL_INSTALL_TESTS=OFF >/dev/null; \
+    cmake --build /tmp/SDL/build --parallel >/dev/null; \
+    cmake --install /tmp/SDL/build >/dev/null; \
+    rm -rf /tmp/SDL
