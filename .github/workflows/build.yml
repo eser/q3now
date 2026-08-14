@@ -367,7 +367,9 @@ jobs:
 
   windows-x86_64:
     name: Windows x86_64
-    needs: [prepare]
+    # Engine binaries come from the cross-windows artifact (single-toolchain
+    # plan, step D): this job only builds the launcher and packages the zip.
+    needs: [prepare, cross-windows]
     if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
     runs-on: windows-latest
 
@@ -422,6 +424,12 @@ jobs:
           mingw-w64-clang-x86_64-pkg-config
           mingw-w64-clang-x86_64-sdl3
         path-type: inherit
+
+    - name: Download engine artifacts
+      uses: actions/download-artifact@v8
+      with:
+        name: cross-windows-x86_64
+        path: build/release
 
     - name: Install wasi-sdk
       shell: pwsh
@@ -478,7 +486,7 @@ jobs:
         cp "$MSYS_ROOT/clang64/bin/clang.exe" "$MSYS_ROOT/clang64/bin/gcc.exe"
         WASI_HOME="${USERPROFILE//\\//}/wasi-sdk"
         RELEASE_VERSION="${{ needs.prepare.outputs.version }}"
-        make release SKIP_HOST_TESTS=1 CHANNEL=public Q3DIR=dist/q3now WASI_SDK_PATH="$WASI_HOME" ${RELEASE_VERSION:+VERSION=$RELEASE_VERSION}
+        make release WIRED_PREBUILT=1 SKIP_HOST_TESTS=1 CHANNEL=public Q3DIR=dist/q3now ${RELEASE_VERSION:+VERSION=$RELEASE_VERSION}
 
     - uses: actions/upload-artifact@v7
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'

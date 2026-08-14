@@ -302,6 +302,17 @@ $(BUILD_DIR)/CMakeCache.txt: CMakeLists.txt
 
 configure: $(BUILD_DIR)/CMakeCache.txt
 
+# WIRED_PREBUILT=1: engine binaries were placed into $(BUILD_DIR) by an
+# external builder (CI downloads them from the cross-windows artifact) —
+# verify presence and refresh the pak from the shipped VM modules instead of
+# compiling. Everything downstream (create-packs, copy-all, bundle-*) reads
+# the same paths either way.
+ifdef WIRED_PREBUILT
+build:
+	@test -f "$(ENGINE_BIN)" || { echo "ERROR: WIRED_PREBUILT set but engine binary missing: $(ENGINE_BIN)"; exit 1; }
+	@echo "==> WIRED_PREBUILT: using externally built engine binaries"
+	$(MAKE) $(PAK_OUT) VERSION="$(VERSION)" SOURCE_VERSION="$(SOURCE_VERSION)" BUILD_DATE_ISO="$(BUILD_DATE_ISO)"
+else
 build: _build-stamp $(BUILD_DIR)/CMakeCache.txt
 	$(CMAKE_BUILD)
 	# Native game modules must rebuild with the engine so the shared viewport
@@ -319,6 +330,7 @@ build: _build-stamp $(BUILD_DIR)/CMakeCache.txt
 	# file target keyed on the VM modules, so this repacks ONLY when they changed
 	# (idempotent) and, being the same target create-packs uses, never double-packs.
 	$(MAKE) $(PAK_OUT) VERSION="$(VERSION)" SOURCE_VERSION="$(SOURCE_VERSION)" BUILD_DATE_ISO="$(BUILD_DATE_ISO)"
+endif
 
 # ── per-build stamp (content-gated counter + timestamp) ───────────────────────
 # Bump a monotonic build counter (.build_number at the REPO ROOT so `make clean`
