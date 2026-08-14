@@ -1,0 +1,17 @@
+diff --git a/picoquic/ech.c b/picoquic/ech.c
+index 6c46602..8b0fc02 100644
+--- a/picoquic/ech.c
++++ b/picoquic/ech.c
+@@ -28,9 +28,9 @@
+ #endif
+ #include <picotls.h>
+ #ifdef _WINDOWS
+-#include <picotls\pembase64.h>
+-#include <picotls\minicrypto.h>
+-#include <picotls\asn1.h>
++#include <picotls/pembase64.h>
++#include <picotls/minicrypto.h>
++#include <picotls/asn1.h>
+ #else
+ #include <picotls/pembase64.h>
+ #include <picotls/minicrypto.h>
