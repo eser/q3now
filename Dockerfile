@@ -26,8 +26,10 @@ COPY .wasi-sdk-version /tmp/wasi-sdk-version
 # processes the client/window-system target definitions which call
 # find_package(SDL3 REQUIRED), even though the headless server itself never
 # links against the SDL window system.
+# clang: single-toolchain policy (2026-08-14) — every build lane compiles
+# with clang; trixie ships clang 19, close enough for this container check.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
+        build-essential clang \
         cmake \
         ninja-build \
         ca-certificates \
@@ -56,7 +58,7 @@ COPY . .
 # Configure: headless server only (no renderers). The window system is SDL3
 # (configure-time dependency only; the headless target does not link it).
 # WASM enabled for portable game module support.
-RUN cmake -S . -B build -G Ninja \
+RUN CC=clang CXX=clang++ cmake -S . -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DUSE_OPENGL=OFF \
     -DUSE_VULKAN=OFF \
