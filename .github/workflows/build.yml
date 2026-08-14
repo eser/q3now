@@ -406,14 +406,20 @@ jobs:
 
     - uses: msys2/setup-msys2@v2
       with:
-        msystem: MINGW64
+        # CLANG64: single-toolchain policy (2026-08-14) — the packaging build
+        # compiles with clang like every other lane. The clang64 repo carries
+        # the same library set under the mingw-w64-clang-x86_64-* prefix and
+        # the environment provides cc/gcc shims pointing at clang.
+        msystem: CLANG64
         update: false
         install: >-
-          mingw-w64-x86_64-openssl
-          mingw-w64-x86_64-opus
-          mingw-w64-x86_64-opusfile
-          mingw-w64-x86_64-pkg-config
-          mingw-w64-x86_64-sdl3
+          mingw-w64-clang-x86_64-toolchain
+          mingw-w64-clang-x86_64-cmake
+          mingw-w64-clang-x86_64-openssl
+          mingw-w64-clang-x86_64-opus
+          mingw-w64-clang-x86_64-opusfile
+          mingw-w64-clang-x86_64-pkg-config
+          mingw-w64-clang-x86_64-sdl3
         path-type: inherit
 
     - name: Install wasi-sdk
@@ -432,7 +438,7 @@ jobs:
     - name: Build and package
       shell: bash
       env:
-        OPENSSL_ROOT_DIR: "${{ runner.temp }}/msys64/mingw64"
+        OPENSSL_ROOT_DIR: "${{ runner.temp }}/msys64/clang64"
       # PATH adjustments and quirks:
       #
       # (1) Strawberry Perl is preinstalled on windows-2025 runners and ships
@@ -440,7 +446,7 @@ jobs:
       #     PATH, '.' not in PATH." regardless of what's actually being
       #     queried. Wails' `Generating bindings` step invokes CGo on
       #     gopkg.in/hraban/opus.v2 which calls pkg-config; Strawberry's
-      #     wrapper is found first and fails. Prepend MSYS2's mingw64/bin
+      #     wrapper is found first and fails. Prepend MSYS2's clang64/bin
       #     so the real pkg-config.exe (which can find opus.pc / opusfile.pc
       #     installed via mingw-w64-x86_64-{opus,opusfile,pkg-config}) wins.
       #
@@ -449,7 +455,7 @@ jobs:
       #     (\U, \r) and corrupts the path. Convert \ → / via bash parameter
       #     expansion so cmake sees a clean forward-slash path.
       run: |
-        export PATH="${{ runner.temp }}/msys64/mingw64/bin:$PATH"
+        export PATH="${{ runner.temp }}/msys64/clang64/bin:$PATH"
         WASI_HOME="${USERPROFILE//\\//}/wasi-sdk"
         RELEASE_VERSION="${{ needs.prepare.outputs.version }}"
         make release SKIP_HOST_TESTS=1 CHANNEL=public Q3DIR=dist/q3now WASI_SDK_PATH="$WASI_HOME" ${RELEASE_VERSION:+VERSION=$RELEASE_VERSION}
