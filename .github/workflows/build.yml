@@ -572,6 +572,7 @@ jobs:
         path: |
           build/cross-windows-docker/wired*.exe
           build/cross-windows-docker/*.dll
+          build/cross-windows-docker/Release/base/*.dll
           build/cross-windows-docker/Release/base/vm/*.wasm
         if-no-files-found: error
 
