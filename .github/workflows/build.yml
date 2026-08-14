@@ -580,8 +580,16 @@ jobs:
       with:
         submodules: recursive
 
+    - uses: docker/setup-buildx-action@v4
+
     - name: Build toolchain image
-      run: docker build -t wired-cross-windows docker/cross-windows
+      uses: docker/build-push-action@v7
+      with:
+        context: docker/cross-windows
+        tags: wired-cross-windows
+        load: true
+        cache-from: type=gha,scope=cross-windows
+        cache-to: type=gha,scope=cross-windows,mode=max
 
     - name: Cross build
       run: docker run --rm -v "$PWD:/src" wired-cross-windows /src/docker/cross-windows/build.sh
