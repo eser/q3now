@@ -157,7 +157,9 @@ if (WAMR_BUILD_WASM_CACHE EQUAL 1)
 endif ()
 
 if (MINGW)
-  target_link_libraries(vmlib INTERFACE -lWs2_32 -lwsock32)
+  # lowercase: mingw ships libws2_32.a; the CamelCase -lWs2_32 only resolves
+  # on case-insensitive filesystems (breaks Linux-hosted cross builds)
+  target_link_libraries(vmlib INTERFACE -lws2_32 -lwsock32)
   target_link_libraries(vmlib PRIVATE ws2_32)
 endif ()
 
