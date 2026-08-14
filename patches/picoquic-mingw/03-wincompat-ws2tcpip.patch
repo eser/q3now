@@ -5,7 +5,8 @@ index 024aed37..3df04de6 100644
 @@ -25,6 +25,7 @@
  #include <stdint.h>
  #define ssize_t int
- #include <Winsock2.h>
+-#include <Winsock2.h>
++#include <winsock2.h>
 +#include <ws2tcpip.h>
  
  #ifndef gettimeofday
