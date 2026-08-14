@@ -1029,7 +1029,9 @@ test-sanitize-host:
 # The two codesign probes stay ADVISORY (no fail): `release` runs check
 # BEFORE bundle-codesign, so failing on an unsigned tree would deadlock the
 # release flow; bundle-codesign itself errors if signing fails.
-check: create-packs test-host
+# SKIP_HOST_TESTS=1: CI's Windows job sets this — its host-test coverage
+# moved to the windows-test lane (cross-built exes run on a bare runner).
+check: create-packs $(if $(SKIP_HOST_TESTS),,test-host)
 	@fail=0; \
 	echo "==> Verifying build..."; \
 	if ls $(MODULE_DIR)/vm/gamecl.wasm  > /dev/null 2>&1; then echo "  gamecl VM:    OK"; else echo "  gamecl VM:    MISSING (wasi-sdk not found?)"; fail=1; fi; \

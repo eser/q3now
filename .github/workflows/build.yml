@@ -452,7 +452,7 @@ jobs:
         export PATH="${{ runner.temp }}/msys64/mingw64/bin:$PATH"
         WASI_HOME="${USERPROFILE//\\//}/wasi-sdk"
         RELEASE_VERSION="${{ needs.prepare.outputs.version }}"
-        make release CHANNEL=public Q3DIR=dist/q3now WASI_SDK_PATH="$WASI_HOME" ${RELEASE_VERSION:+VERSION=$RELEASE_VERSION}
+        make release SKIP_HOST_TESTS=1 CHANNEL=public Q3DIR=dist/q3now WASI_SDK_PATH="$WASI_HOME" ${RELEASE_VERSION:+VERSION=$RELEASE_VERSION}
 
     - uses: actions/upload-artifact@v7
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'
