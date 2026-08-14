@@ -12,6 +12,9 @@ on:
       - cmake/toolchains/**
       - .github/workflows/cross-windows.yml
       - patches/picoquic-mingw/**
+      # WAMR compiles into the cross build's engine; its platform/windows
+      # files are exactly where case-sensitivity bites (PathCch.h, 2026-08-14).
+      - src/libs/wamr/**
 
 jobs:
   cross-windows:

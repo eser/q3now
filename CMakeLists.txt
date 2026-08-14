@@ -1109,7 +1109,10 @@ ADD_TEST(NAME ral_profile_host_policy_contract
 )
 SET_TESTS_PROPERTIES(ral_profile_host_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;owner.tools;failure.build-graph;feature.imgui"
-	TIMEOUT 30
+	# 120s, not 30: the check scans build.ninja + compile_commands.json and the
+	# Windows CI runner's filesystem pushed it past 30s (content passes there
+	# once given time — Linux/mac finish well under the old limit).
+	TIMEOUT 120
 )
 
 ADD_EXECUTABLE(wired_curve_test
