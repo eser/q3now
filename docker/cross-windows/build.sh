@@ -55,6 +55,8 @@ cmake -S . -B "$BUILD" -G Ninja \
 
 # ── engine build ─────────────────────────────────────────────────────────────
 cmake --build "$BUILD" --parallel
+# native game modules ship in the zip alongside the wasm pair
+cmake --build "$BUILD" --target gamecl_base gamesv_base
 
 echo "── artifacts ──"
 ls -la "$BUILD"/wired*.exe "$BUILD"/*.dll
