@@ -67,6 +67,14 @@ if(NOT EXISTS "${_wired_bin}/${_wired_triple}-clang")
 		"Or pass -DLLVM_MINGW_ROOT=<path>.")
 endif()
 
+# ── 2b. Fully static executables ────────────────────────────────────────────
+# The engine exes already pass -static as a target option, but TEST exes and
+# any future tool exe do not — C++ ones then import libc++.dll/libunwind.dll
+# from the toolchain, which no runner or user machine has (silent 0xC0000135
+# on launch, caught 2026-08-14 by the windows-test lane). Make it the default
+# for every executable this toolchain links.
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-static")
+
 # ── 3. Compilers ─────────────────────────────────────────────────────────────
 # The *-mingw32-* wrappers are clang-target-wrapper shims that inject
 #   -target x86_64-w64-mingw32 -rtlib=compiler-rt -unwindlib=libunwind
