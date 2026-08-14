@@ -1035,6 +1035,10 @@ ADD_EXECUTABLE(wired_profile_telemetry_udp_test
 TARGET_INCLUDE_DIRECTORIES(wired_profile_telemetry_udp_test PRIVATE
 	code/tools/profile_imgui code/renderer/ral code/renderercommon)
 TARGET_COMPILE_FEATURES(wired_profile_telemetry_udp_test PRIVATE cxx_std_17)
+IF(WIN32)
+	# winsock: socket/htons/WSAStartup live in ws2_32 on Windows
+	TARGET_LINK_LIBRARIES(wired_profile_telemetry_udp_test PRIVATE ws2_32)
+ENDIF()
 ADD_TEST(NAME wired_profile_telemetry_udp_contract COMMAND wired_profile_telemetry_udp_test)
 SET_TESTS_PROPERTIES(wired_profile_telemetry_udp_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.tools;failure.contract" TIMEOUT 30)
