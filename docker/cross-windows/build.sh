@@ -6,9 +6,6 @@
 # Produces build/cross-windows-docker/ inside the mount: wired.x64.exe,
 # wired-headless.x64.exe, renderer DLLs, gamecl/gamesv.wasm.
 #
-# Probe-era workarounds applied here are the same set documented in
-# cmake/toolchains/llvm-mingw-x86_64.cmake — as the corresponding CMakeLists /
-# patches/ fixes land, delete them from this script.
 set -euo pipefail
 
 SRC=/src
@@ -54,11 +51,7 @@ cmake -S . -B "$BUILD" -G Ninja \
     -DWIRED_CROSS_PREFIX="$PREFIX" \
     -DCMAKE_INSTALL_PREFIX="$BUILD/stage" \
     -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
-    -DUSE_WASM=ON -DWAMR_BUILD_PLATFORM=windows
-
-# ── workaround: stringify is a host tool (see toolchain file notes) ──────────
-cmake --build "$BUILD" --target stringify 2>/dev/null || true
-cc -O2 code/renderer2/stringify.c -o "$BUILD/stringify.exe"
+    -DUSE_WASM=ON
 
 # ── engine build ─────────────────────────────────────────────────────────────
 cmake --build "$BUILD" --parallel

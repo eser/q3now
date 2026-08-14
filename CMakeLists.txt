@@ -186,7 +186,7 @@ ENDIF()
 # own code (wired uses _WIN32 throughout). Applied globally before any target
 # is created so every TU that transitively includes picoquic.h sees it.
 # See docs/health.md "picoquic _WINDOWS guards do not match MinGW".
-IF(WIN32 AND NOT MSVC)
+IF(WIN32)
 	ADD_COMPILE_DEFINITIONS(_WINDOWS)
 ENDIF()
 IF(CMAKE_SYSTEM_PROCESSOR MATCHES AMD64|x86|i*86)
@@ -1476,6 +1476,11 @@ IF(USE_WASM)
 	SET(WAMR_BUILD_SIMD 0)
 	SET(WAMR_DISABLE_HW_BOUND_CHECK 1)
 	SET(WAMR_BUILD_LOAD_CUSTOM_SECTION 1)
+	# WAMR's CMakeLists defaults WAMR_BUILD_PLATFORM from CMAKE_HOST_SYSTEM_NAME,
+	# which is wrong when cross-compiling — pin it to the TARGET system.
+	IF(CMAKE_CROSSCOMPILING AND NOT DEFINED WAMR_BUILD_PLATFORM)
+		STRING(TOLOWER ${CMAKE_SYSTEM_NAME} WAMR_BUILD_PLATFORM)
+	ENDIF()
 	ADD_SUBDIRECTORY(src/libs/wamr)
 	IF(WIN32)
     	target_compile_definitions(vmlib PRIVATE
@@ -1622,10 +1627,9 @@ SET(PICOTLS_SRCS
 )
 
 # Windows: picoquic+picotls call gettimeofday(), which wincompat.h remaps to
-# wintimeofday(). The implementation lives in picotls' Visual-Studio project
+# wintimeofday(). The implementation lives in picotls' Visual-Studio-era
 # subdirectory (picotlsvs/picotls/wintimeofday.c) and is not in the default
-# library source list. MSVC builds compile it via the .vcxproj; we add it
-# explicitly here so MinGW + any future MSVC-via-CMake build link cleanly.
+# library source list; add it explicitly so the MinGW link resolves.
 IF(WIN32)
 	list(APPEND PICOTLS_SRCS src/libs/picotls/picotlsvs/picotls/wintimeofday.c)
 ENDIF()
@@ -1644,7 +1648,7 @@ SET(WIREDNET_MATERIAL_SRCS ${PICOQUIC_SRCS} ${PICOTLS_SRCS} ${MPACK_SRCS})
 # multiple definitions of imaxabs. -fgnu-inline restores the GNU inline
 # semantics for these TUs only without raising the C standard floor.
 # See docs/health.md "picoquic _WINDOWS guards do not match MinGW".
-IF(WIN32 AND NOT MSVC)
+IF(WIN32)
 	set_source_files_properties(${PICOQUIC_SRCS} ${PICOTLS_SRCS}
 		PROPERTIES COMPILE_OPTIONS "-fgnu89-inline")
 ENDIF()
@@ -2030,7 +2034,7 @@ TARGET_INCLUDE_DIRECTORIES(ral_vulkan PRIVATE
 IF(USE_RENDERER_DLOPEN)
 	TARGET_COMPILE_DEFINITIONS(ral_vulkan PRIVATE USE_RENDERER_DLOPEN)
 ENDIF()
-IF(WIN32 AND NOT MSVC)
+IF(WIN32)
 	# match the relaxation the renderer DLLs get (legacy const-correctness patterns)
 	TARGET_COMPILE_OPTIONS(ral_vulkan PRIVATE -Wno-error=incompatible-pointer-types -Wno-error=int-conversion)
 ENDIF()
@@ -2066,10 +2070,7 @@ ENDIF()
 # the DLL; also puts code/renderer/ral/ on the target's include path.
 FUNCTION(WIRED_LINK_RAL_VULKAN _target)
 	TARGET_INCLUDE_DIRECTORIES(${_target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral)
-	IF(MSVC)
-		TARGET_LINK_LIBRARIES(${_target} ral_vulkan)
-		TARGET_LINK_OPTIONS(${_target} PRIVATE "/WHOLEARCHIVE:ral_vulkan")
-	ELSEIF(APPLE)
+	IF(APPLE)
 		# Apple ld64 has no --whole-archive; -force_load takes the archive path
 		# directly and is the exact equivalent for a single archive.
 		TARGET_LINK_LIBRARIES(${_target} ral_vulkan)
@@ -2128,9 +2129,6 @@ IF(WIRED_BUILD_SHADER_XLATE)
 		TARGET_LINK_LIBRARIES(shader_xlate spirv-cross-msl spirv-cross-glsl spirv-cross-core)
 		TARGET_INCLUDE_DIRECTORIES(shader_xlate PRIVATE "${SPIRV_CROSS_DIR}")
 		SET_TARGET_PROPERTIES(shader_xlate PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-		IF(MSVC)
-			TARGET_COMPILE_OPTIONS(shader_xlate PRIVATE /EHsc)
-		ENDIF()
 
 		# Build artefacts: build/translated_shaders/ is where compile_xlate.mjs
 		# (Phase 7.3c — runtime integration) will land the per-backend outputs.
@@ -2149,8 +2147,26 @@ ENDIF()
 # GL2: stringify is a host tool, not a library source — remove it from the list
 LIST(REMOVE_ITEM RENDERER_GL2_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/renderer2/stringify.c)
 
-# GL2: build the stringify tool and use it to generate fallback C strings from GLSL files
-ADD_EXECUTABLE(stringify code/renderer2/stringify.c)
+# GL2: build the stringify tool and use it to generate fallback C strings from
+# GLSL files. stringify RUNS ON THE BUILD MACHINE, so when cross-compiling it
+# must be built with a host compiler — the target-built .exe cannot execute.
+IF(CMAKE_CROSSCOMPILING)
+	SET(STRINGIFY_BIN "${CMAKE_CURRENT_BINARY_DIR}/stringify_host")
+	FIND_PROGRAM(WIRED_HOST_CC NAMES cc gcc clang REQUIRED
+		DOC "host C compiler for build-machine tools in cross builds")
+	ADD_CUSTOM_COMMAND(
+		OUTPUT ${STRINGIFY_BIN}
+		COMMAND ${WIRED_HOST_CC} -O2 ${CMAKE_CURRENT_SOURCE_DIR}/code/renderer2/stringify.c -o ${STRINGIFY_BIN}
+		DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/code/renderer2/stringify.c
+		COMMENT "Building host stringify (cross build)"
+	)
+	ADD_CUSTOM_TARGET(stringify_host_build DEPENDS ${STRINGIFY_BIN})
+	SET(STRINGIFY_DEP stringify_host_build)
+ELSE()
+	ADD_EXECUTABLE(stringify code/renderer2/stringify.c)
+	SET(STRINGIFY_BIN stringify)
+	SET(STRINGIFY_DEP stringify)
+ENDIF()
 
 FILE(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/renderer2_glsl")
 FILE(GLOB RENDERER_GL2_GLSL_FILES "${CMAKE_CURRENT_SOURCE_DIR}/code/renderer2/glsl/*.glsl")
@@ -2163,8 +2179,8 @@ FOREACH(GLSL_FILE ${RENDERER_GL2_GLSL_FILES})
 	SET(GENERATED_C "${CMAKE_CURRENT_BINARY_DIR}/renderer2_glsl/${GLSL_BASE}.c")
 	ADD_CUSTOM_COMMAND(
 		OUTPUT ${GENERATED_C}
-		COMMAND stringify ${GLSL_FILE} ${GENERATED_C}
-		DEPENDS stringify ${GLSL_FILE}
+		COMMAND ${STRINGIFY_BIN} ${GLSL_FILE} ${GENERATED_C}
+		DEPENDS ${STRINGIFY_DEP} ${GLSL_FILE}
 		COMMENT "Generating fallbackShader_${GLSL_BASE}"
 	)
 	LIST(APPEND RENDERER_GL2_FALLBACK_SRCS ${GENERATED_C})
@@ -2231,7 +2247,7 @@ IF(USE_RENDERER_DLOPEN)
 	# platform-detection block (~line 642), so they don't inherit the relaxation.
 	# Apply the same flags explicitly here. Mirrors the legacy char**/const char**
 	# patterns the qcommon-side relaxation accommodates.
-	IF(WIN32 AND NOT MSVC)
+	IF(WIN32)
 		TARGET_COMPILE_OPTIONS(${RENDERER_PREFIX}_opengl${RENDEXT}  PRIVATE -Wno-error=incompatible-pointer-types -Wno-error=int-conversion)
 		TARGET_COMPILE_OPTIONS(${RENDERER_PREFIX}_opengl2${RENDEXT} PRIVATE -Wno-error=incompatible-pointer-types -Wno-error=int-conversion)
 		TARGET_COMPILE_OPTIONS(${RENDERER_PREFIX}_vulkan${RENDEXT}  PRIVATE -Wno-error=incompatible-pointer-types -Wno-error=int-conversion)
@@ -2280,18 +2296,13 @@ ELSEIF(WIN32)
 	# logs, terminal redirection etc. all see stdout/stderr). See
 	# docs/health.md "wired-headless Windows GUI-subsystem blocks smoke output capture"
 	# and docs/launcher.md (analogous launcher CLI dual-mode pattern).
-	SET(EXE_TYPE_CLIENT WIN32) # GUI subsystem (-mwindows / /SUBSYSTEM:WINDOWS)
+	SET(EXE_TYPE_CLIENT WIN32) # GUI subsystem (-mwindows)
 	SET(EXE_TYPE_DED    "")    # Console subsystem (default, no flag)
-	IF(MSVC)
-		SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /MANIFEST:NO")
-		ADD_COMPILE_DEFINITIONS(_CRT_SECURE_NO_WARNINGS) # v3.12+
-	ELSE()
-		# MinGW: windres needs the source root to resolve relative paths in .rc files
-		SET(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -I${CMAKE_SOURCE_DIR}")
-		# GCC 14+ treats incompatible-pointer-types as error; Quake3 codebase uses
-		# legacy char**/const char** patterns that are safe but technically incorrect.
-		ADD_COMPILE_OPTIONS(-Wno-error=incompatible-pointer-types -Wno-error=int-conversion)
-	ENDIF()
+	# MinGW: windres needs the source root to resolve relative paths in .rc files
+	SET(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -I${CMAKE_SOURCE_DIR}")
+	# GCC 14+ treats incompatible-pointer-types as error; Quake3 codebase uses
+	# legacy char**/const char** patterns that are safe but technically incorrect.
+	ADD_COMPILE_OPTIONS(-Wno-error=incompatible-pointer-types -Wno-error=int-conversion)
 
 	# Q3_SRCS holds files that go into BOTH executables. After phase 3 of
 	# the Windows-console modernization (2026-05-05), win_syscon.c is a
@@ -2319,12 +2330,10 @@ ADD_COMPILE_DEFINITIONS($<$<CONFIG:Debug>:_DEBUG>)
 
 ADD_LIBRARY(windowSystem OBJECT ${WINDOW_SYSTEM_SRCS})
 
-IF(NOT MSVC)
-	IF(NOT TARGET SDL3::SDL3)
-		find_package(SDL3 REQUIRED)
-	ENDIF()
-	TARGET_LINK_LIBRARIES(windowSystem SDL3::SDL3)
+IF(NOT TARGET SDL3::SDL3)
+	find_package(SDL3 REQUIRED)
 ENDIF()
+TARGET_LINK_LIBRARIES(windowSystem SDL3::SDL3)
 
 IF(USE_OPENGL)
 	TARGET_COMPILE_DEFINITIONS(windowSystem PRIVATE USE_OPENGL_API)
@@ -2420,6 +2429,15 @@ IF(USE_LUA)
 			SET(LUAJIT_XCFLAGS "-DLUAJIT_ENABLE_GC64")
 		ENDIF()
 	ENDIF()
+	# Cross-compile (llvm-mingw): LuaJIT builds host minilua/buildvm with
+	# HOST_CC and the target library with $(CROSS)gcc; TARGET_SYS overrides
+	# the uname-based host detection (which otherwise demands
+	# MACOSX_DEPLOYMENT_TARGET on a mac host).
+	SET(LUAJIT_CROSS_ARGS "")
+	IF(CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_NAME STREQUAL "Windows")
+		SET(LUAJIT_MAKE_ENV ${CMAKE_COMMAND} -E env MACOSX_DEPLOYMENT_TARGET=11.0)
+		SET(LUAJIT_CROSS_ARGS HOST_CC=cc TARGET_SYS=Windows "CROSS=${LLVM_MINGW_ROOT}/bin/x86_64-w64-mingw32-")
+	ENDIF()
 
 	INCLUDE(ProcessorCount)
 	PROCESSORCOUNT(_LUAJIT_JOBS)
@@ -2432,13 +2450,16 @@ IF(USE_LUA)
 	# ever fired when the .a was missing. copy_directory only refreshes files
 	# whose content changed, so LuaJIT's own mtime-based make stays incremental
 	# across reruns.
+	# HAZARD: never run make IN-TREE under src/libs/luajit — leftover host .o
+	# files get copied here and poison other-platform builds (lld: "unknown
+	# file type"). If that happens: git -C src/libs/luajit clean -fdx.
 	FILE(GLOB_RECURSE LUAJIT_SOURCES
 		${LUAJIT_DIR}/src/*.c ${LUAJIT_DIR}/src/*.h
 		${LUAJIT_DIR}/src/*.lua ${LUAJIT_DIR}/src/Makefile ${LUAJIT_DIR}/Makefile)
 	add_custom_command(
 		OUTPUT ${LUAJIT_LIB}
 		COMMAND ${CMAKE_COMMAND} -E copy_directory ${LUAJIT_DIR} ${LUAJIT_BUILD_DIR}
-		COMMAND ${LUAJIT_MAKE_ENV} make -j${_LUAJIT_JOBS} -C ${LUAJIT_BUILD_DIR}/src BUILDMODE=static "XCFLAGS=${LUAJIT_XCFLAGS}"
+		COMMAND ${LUAJIT_MAKE_ENV} make -j${_LUAJIT_JOBS} -C ${LUAJIT_BUILD_DIR}/src BUILDMODE=static "XCFLAGS=${LUAJIT_XCFLAGS}" ${LUAJIT_CROSS_ARGS}
 		DEPENDS ${LUAJIT_SOURCES}
 		COMMENT "Building LuaJIT (static, -j${_LUAJIT_JOBS})"
 	)
@@ -2506,12 +2527,10 @@ IF(WIN32)
 		TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} pathcch bcrypt)
 		TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} pathcch bcrypt)
 	ENDIF()
-	IF(NOT MSVC)
-		# MinGW: statically link runtime libs (libwinpthread, libgcc, libstdc++)
-		# so end users don't need MinGW DLLs in PATH
-		TARGET_LINK_OPTIONS(${CNAME}${BINEXT} PRIVATE -static)
-		TARGET_LINK_OPTIONS(${DNAME}${BINEXT} PRIVATE -static)
-	ENDIF()
+	# MinGW: statically link runtime libs (libwinpthread, libgcc, libstdc++)
+	# so end users don't need MinGW DLLs in PATH
+	TARGET_LINK_OPTIONS(${CNAME}${BINEXT} PRIVATE -static)
+	TARGET_LINK_OPTIONS(${DNAME}${BINEXT} PRIVATE -static)
 ELSE()
 	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} m ${CMAKE_DL_LIBS})
 	TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} m ${CMAKE_DL_LIBS})
