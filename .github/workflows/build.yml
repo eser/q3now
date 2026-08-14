@@ -466,6 +466,11 @@ jobs:
         # WASI_HOME gets below).
         MSYS_ROOT="${RUNNER_TEMP//\\//}/msys64"
         export PKG_CONFIG_PATH="$MSYS_ROOT/clang64/lib/pkgconfig"
+        # cgo must use the SAME toolchain as the libraries it links: the
+        # runner's preinstalled C:\mingw64 gcc mixes its crt2.o with clang64's
+        # runtime and dies on __mingw_oldexcpt_handler. clang64/bin is first
+        # in PATH, so plain "clang" resolves to the right one.
+        export CC=clang CXX=clang++
         WASI_HOME="${USERPROFILE//\\//}/wasi-sdk"
         RELEASE_VERSION="${{ needs.prepare.outputs.version }}"
         make release SKIP_HOST_TESTS=1 CHANNEL=public Q3DIR=dist/q3now WASI_SDK_PATH="$WASI_HOME" ${RELEASE_VERSION:+VERSION=$RELEASE_VERSION}
