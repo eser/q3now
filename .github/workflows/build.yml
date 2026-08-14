@@ -549,3 +549,32 @@ jobs:
         name: cross-windows-tests
         path: build/cross-windows-docker/*_test.exe
         if-no-files-found: error
+
+  windows-test:
+    name: Windows x86_64 (cross-artifact tests)
+    needs: [cross-windows]
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/download-artifact@v8
+      with:
+        name: cross-windows-tests
+        path: tests-bin
+
+    # Step C of the single-toolchain plan: execute the clang/llvm-mingw
+    # cross-built test executables on real Windows. This is the runtime half
+    # of the evidence the native MinGW-gcc job used to provide; script-based
+    # CTest checks (cmake -P policy gates) already run in the Linux/mac jobs.
+    # Runs alongside the native Windows job until parity is proven, then the
+    # native job's builder role retires (step D moves packaging to the cross
+    # lane).
+    - name: Run tests
+      shell: bash
+      run: |
+        cd tests-bin
+        fail=0
+        for t in *_test.exe; do
+          echo "== $t"
+          ./"$t" || { echo "FAILED: $t"; fail=1; }
+        done
+        exit $fail
