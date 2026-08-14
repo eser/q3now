@@ -14,10 +14,13 @@ ARG LLVM_MINGW_VER=20260616
 # Image arch decides the toolchain host build: TARGETARCH is amd64 or arm64.
 ARG TARGETARCH
 
+# gcc + libc6-dev: HOST compiler for build-machine tools (stringify_host,
+# LuaJIT's minilua/buildvm via HOST_CC) — without it FIND_PROGRAM falls
+# through to llvm-mingw's bare clang, which has no Linux sysroot.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl xz-utils git \
         cmake ninja-build make perl pkg-config \
-        nasm python3 golang \
+        gcc libc6-dev nasm python3 golang \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -e; \
