@@ -471,6 +471,11 @@ jobs:
         # runtime and dies on __mingw_oldexcpt_handler. clang64/bin is first
         # in PATH, so plain "clang" resolves to the right one.
         export CC=clang CXX=clang++
+        # Belt and braces: something in the wails/go chain resolves the bare
+        # name "gcc" from PATH (ignoring $CC) and was landing on the runner's
+        # preinstalled C:\mingw64. clang64 ships no gcc.exe, so give it one —
+        # clang invoked as "gcc" runs its gcc-compatible driver.
+        cp "$MSYS_ROOT/clang64/bin/clang.exe" "$MSYS_ROOT/clang64/bin/gcc.exe"
         WASI_HOME="${USERPROFILE//\\//}/wasi-sdk"
         RELEASE_VERSION="${{ needs.prepare.outputs.version }}"
         make release SKIP_HOST_TESTS=1 CHANNEL=public Q3DIR=dist/q3now WASI_SDK_PATH="$WASI_HOME" ${RELEASE_VERSION:+VERSION=$RELEASE_VERSION}
