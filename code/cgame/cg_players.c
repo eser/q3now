@@ -2430,23 +2430,15 @@ Adds a piece with modifications or duplications for powerups
 Also called by CG_Missile for quad rockets, but nobody can tell...
 ===============
 */
-void CG_AddRefEntityWithPowerups( centity_t *cent, refEntity_t *ent, entityState_t *state, qboolean isPlayerPart, int team ) {
+void CG_AddRefEntityWithPowerups( centity_t *cent, refEntity_t *ent,
+		entityState_t *state, qboolean isPlayerPart, int team,
+		refEntityMotionRole_t baseRole ) {
 
 	if ( isPlayerPart && CG_IsPlayerInvisible(cent) ) {
 		ent->customShader = cgs.media.invisShader;
 		trap_R_AddRefEntityToScene( ent );
 	} else {
-		/*
-		if ( state->eFlags & EF_KAMIKAZE ) {
-			if (team == TEAM_BLUE)
-				ent->customShader = cgs.media.blueKamikazeShader;
-			else
-				ent->customShader = cgs.media.redKamikazeShader;
-			trap_R_AddRefEntityToScene( ent );
-		}
-		else {*/
-			trap_R_AddRefEntityToScene( ent );
-		//}
+		CG_AddRefEntityTemporalBase( cent, ent, baseRole );
 
 		if ( state->powerups & ( 1 << PW_QUAD ) )
 		{
@@ -2568,7 +2560,8 @@ the original behavior exactly.
 */
 void CG_CharacterMesh( centity_t *cent, refEntity_t *body, qhandle_t hModel,
 	qhandle_t customShader, qhandle_t customSkin, int frame, int oldframe,
-	float backlerp, vec3_t axis[3], int renderfx, int alpha, int team ) {
+	float backlerp, vec3_t axis[3], int renderfx, int alpha, int team,
+	refEntityMotionRole_t temporalRole ) {
 
 	memset( body, 0, sizeof(*body) );
 
@@ -2597,7 +2590,8 @@ void CG_CharacterMesh( centity_t *cent, refEntity_t *body, qhandle_t hModel,
 #endif
 #endif
 
-	CG_AddRefEntityWithPowerups( cent, body, &cent->currentState, qtrue, team );
+	CG_AddRefEntityWithPowerups( cent, body, &cent->currentState, qtrue, team,
+		temporalRole );
 }
 #endif // FEAT_IQM
 
@@ -2746,7 +2740,7 @@ void CG_Player( centity_t *cent ) {
 		CG_CharacterMesh( cent, &body, ci->bodyModel,
 			ci->bodyShader, ci->bodyShader ? 0 : ci->bodySkin,
 			legs.frame, legs.oldframe, legs.backlerp, legs.axis,
-			rfx, alpha, ci->team );
+			rfx, alpha, ci->team, REF_ENTITY_MOTION_ROLE_PLAYER_BODY );
 
 		if ( !body.hModel ) {
 			return;
@@ -2789,7 +2783,8 @@ void CG_Player( centity_t *cent ) {
 			legs.characterSkin, legs.shaderRGBA[0], legs.shaderRGBA[1], legs.shaderRGBA[2], legs.shaderRGBA[3],
 			legs.renderfx, legs.customShader); }
 	}
-	CG_AddRefEntityWithPowerups( cent, &legs, &cent->currentState, qtrue, ci->team );
+	CG_AddRefEntityWithPowerups( cent, &legs, &cent->currentState, qtrue,
+		ci->team, REF_ENTITY_MOTION_ROLE_PLAYER_LEGS );
 
 	// if the model failed, allow the default nullmodel to be displayed
 	if (!legs.hModel) {
@@ -2829,7 +2824,8 @@ void CG_Player( centity_t *cent ) {
 			torso.characterSkin, torso.shaderRGBA[0], torso.shaderRGBA[1], torso.shaderRGBA[2], torso.shaderRGBA[3],
 			torso.renderfx, torso.customShader); }
 	}
-	CG_AddRefEntityWithPowerups( cent, &torso, &cent->currentState, qtrue, ci->team );
+	CG_AddRefEntityWithPowerups( cent, &torso, &cent->currentState, qtrue,
+		ci->team, REF_ENTITY_MOTION_ROLE_PLAYER_TORSO );
 
 	if ( cent->currentState.eFlags & EF_KAMIKAZE ) {
 
@@ -3040,7 +3036,8 @@ void CG_Player( centity_t *cent ) {
 			head.characterSkin, head.shaderRGBA[0], head.shaderRGBA[1], head.shaderRGBA[2], head.shaderRGBA[3],
 			head.renderfx, head.customShader); }
 	}
-	CG_AddRefEntityWithPowerups( cent, &head, &cent->currentState, qtrue, ci->team );
+	CG_AddRefEntityWithPowerups( cent, &head, &cent->currentState, qtrue,
+		ci->team, REF_ENTITY_MOTION_ROLE_PLAYER_HEAD );
 
 	CG_BreathPuffs(cent, &head);
 	CG_BubblePuffs(cent, &head);

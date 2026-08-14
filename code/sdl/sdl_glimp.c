@@ -994,6 +994,11 @@ void *VK_GetInstanceProcAddr( VkInstance instance, const char *name )
 	return qvkGetInstanceProcAddr( instance, name );
 }
 
+const char *const *VK_GetInstanceExtensions( uint32_t *count )
+{
+	return SDL_Vulkan_GetInstanceExtensions( count );
+}
+
 
 /*
 ===============

@@ -39,6 +39,7 @@ R_InitNextFrame
 void R_InitNextFrame( void ) {
 
 	backEndData->commands.used = 0;
+	R_TemporalCommandBatchReset();
 
 	r_firstSceneDrawSurf = 0;
 #ifdef USE_PMLIGHT
@@ -239,10 +240,27 @@ void RE_AddRefEntityToScene( const refEntity_t *ent, qboolean intShaderTime ) {
 	}
 
 	backEndData->entities[r_numentities].e = *ent;
+	RefEntityMotion_ClearOwned( &backEndData->entities[r_numentities].motion,
+		&backEndData->entities[r_numentities].hasTemporal );
+	memset( &backEndData->entities[r_numentities].temporalReceipt, 0,
+		sizeof( backEndData->entities[r_numentities].temporalReceipt ) );
 	backEndData->entities[r_numentities].lightingCalculated = qfalse;
 	backEndData->entities[r_numentities].intShaderTime = intShaderTime;
 
 	r_numentities++;
+}
+
+void RE_AddRefEntityToSceneTemporal( const refEntity_t *ent,
+		const refEntityMotion_t *motion ) {
+	int before;
+	if ( !RefEntityMotion_CanAppend( ent, motion,
+			(uint32_t)r_numentities, MAX_REFENTITIES ) ) return;
+	before = r_numentities;
+	RE_AddRefEntityToScene( ent, qfalse );
+	if ( r_numentities == before + 1 ) {
+		RefEntityMotion_CopyOwned( &backEndData->entities[before].motion,
+			&backEndData->entities[before].hasTemporal, motion );
+	}
 }
 
 
@@ -1305,12 +1323,18 @@ void RE_RenderScene( const refdef_t *fd, int worldIndex ) {
 	}
 
 	startTime = ri.Milliseconds();
+	if ( fd->rdflags & RDF_HYPERSPACE ) {
+		R_TemporalMarkCameraCut( worldIndex );
+	}
 
 	// Select the rendering app's world slot. A world scene reads its app's loaded
 	// world; a worldless scene (UI/menu 3D, RDF_NOWORLDMODEL) leaves tr.world as-is
 	// since it has no world to read. Single app: slot 0 is the only loaded world,
 	// so this resolves tr.world to exactly what RE_LoadWorldMap published.
 	if ( !( fd->rdflags & RDF_NOWORLDMODEL ) ) {
+		if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) {
+			worldIndex = 0;
+		}
 		R_SetWorldSlot( worldIndex );
 	}
 
@@ -1460,6 +1484,7 @@ void RE_RenderScene( const refdef_t *fd, int worldIndex ) {
 	parms.scissorHeight = parms.viewportHeight;
 
 	parms.portalView = PV_NONE;
+	parms.temporalWorldIndex = ( fd->rdflags & RDF_NOWORLDMODEL ) ? -1 : worldIndex;
 
 #ifdef USE_PMLIGHT
 	parms.dlights = tr.refdef.dlights;

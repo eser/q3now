@@ -5,6 +5,7 @@
 #define __TR_PUBLIC_H
 
 #include "tr_types.h"
+#include "r_profile_telemetry.h"
 #include "vulkan/vulkan.h"
 #include "../qcommon/asset_load_log.h"
 #include "../qcommon/wired/render/primitives.h"
@@ -18,7 +19,7 @@ typedef struct mapFile_s mapFile_t;
  * (wired.x64). The renderer DLL only sees the opaque pointer. */
 typedef struct arena_s arena_t;
 
-#define	REF_API_VERSION		16	/* DrawMenuBackdrop added (WiredUI SCENE procedural backdrop) */
+#define	REF_API_VERSION		19	/* optional atomic temporal entity identity export added */
 
 // Number of concurrent world slots the renderer holds — one per local client
 // app. Must be >= the engine's MAX_LOCAL_CGAME_VMS (the app-instance count); the
@@ -250,6 +251,17 @@ typedef struct {
 	// additive; full rebuild after adding). NULL on renderers without the pool.
 	void	(*AddRailRibbonToScene)( const railRibbonDesc_t *desc );
 
+	// Optional pointer-free pull of the newest completed GPU timestamp sample.
+	// The engine calls this only after EndFrame while the renderer DLL remains
+	// loaded. NULL on renderers without semantic GPU profiling.
+	qboolean (*GetGpuProfileSample)( refGpuProfileSample_t *out );
+
+	// Optional atomic entity + temporal identity submission. The renderer owns
+	// a copy of both PODs on return. Invalid motion metadata rejects the whole
+	// submission; clients lacking discovery support keep using AddRefEntityToScene.
+	void (*AddRefEntityToSceneTemporal)( const refEntity_t *re,
+		const refEntityMotion_t *motion );
+
 } refexport_t;
 
 //
@@ -380,6 +392,7 @@ typedef struct {
 	void	(*VKimp_Init)( glconfig_t *config );
 	void	(*VKimp_Shutdown)( qboolean unloadDLL );
 	void*	(*VK_GetInstanceProcAddr)( VkInstance instance, const char *name );
+	const char *const *(*VK_GetInstanceExtensions)( uint32_t *count );
 	qboolean (*VK_CreateSurface)( VkInstance instance, VkSurfaceKHR *pSurface );
 
 	const cmSkin_t *(*GetCharacterSkin)( qhandle_t handle );

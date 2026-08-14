@@ -3,6 +3,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "cg_local.h"
+#include "cg_refentity_temporal.h"
 #include "../qcommon/wired/render/traps.h"
 
 #ifdef WASM_MODULE
@@ -272,6 +273,23 @@ void	trap_R_ClearScene( void ) {
 
 void	trap_R_AddRefEntityToScene( const refEntity_t *re ) {
 	syscall( CG_R_ADDREFENTITYTOSCENE, re );
+}
+
+static void CG_TemporalEntityCall( int trap, const refEntity_t *entity,
+		const refEntityMotion_t *identity ) {
+	if ( identity ) syscall( trap, entity, identity );
+	else syscall( trap, entity );
+}
+
+void trap_R_AddRefEntityToSceneTemporal( const refEntity_t *re,
+		const refEntityMotion_t *motion ) {
+	static cgTemporalEntityDispatch_t dispatch = {
+		CG_REFENTITY_TEMPORAL_UNKNOWN, UINT32_MAX
+	};
+	CG_TemporalEntityDispatch( &dispatch, re, motion,
+		CG_R_ADDREFENTITYTOSCENE, CG_R_ADDREFENTITYTOSCENETEMPORAL,
+		(uint32_t)cgs.cachedGlconfigGeneration,
+		trap_GetValue, CG_TemporalEntityCall );
 }
 
 void	trap_R_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t *verts ) {

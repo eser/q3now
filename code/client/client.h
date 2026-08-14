@@ -708,6 +708,11 @@ void CL_SaveConsoleHistory( void );
 void	SCR_Init( void );
 void	SCR_Done( void );
 void	SCR_UpdateScreen( void );
+void CL_ProfileTelemetry_Init( void );
+void CL_ProfileTelemetry_AfterEndFrame( const refexport_t *renderer );
+void CL_ProfileTelemetry_RendererStarted( void );
+void CL_ProfileTelemetry_RendererStopping( void );
+void CL_ProfileTelemetry_Shutdown( void );
 
 void	SCR_DebugGraph( float value );
 
@@ -934,5 +939,6 @@ void	*GL_GetProcAddress( const char *name );
 void	VKimp_Init( glconfig_t *config );
 void	VKimp_Shutdown( qboolean unloadDLL );
 void	*VK_GetInstanceProcAddr( VkInstance instance, const char *name );
+const char *const *VK_GetInstanceExtensions( uint32_t *count );
 qboolean VK_CreateSurface( VkInstance instance, VkSurfaceKHR* pSurface );
 #endif

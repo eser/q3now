@@ -28,10 +28,12 @@
 //#define USE_TESS_NEEDS_ST2
 
 #include "../qcommon/q_shared.h"
+#include "tr_temporal_batch_request.h"
 #include "../qcommon/qfiles.h"
 #include "../qcommon/qcommon.h"
 #include "../renderercommon/tr_public.h"
 #include "tr_common.h"
+#include "tr_temporal_entity_cache.h"
 #include "../renderercommon/tr_screenshot.h"
 #if FEAT_IQM
 #include "iqm.h"
@@ -116,6 +118,9 @@ typedef struct dlight_s {
 // the client game, as well as some locally derived info
 typedef struct {
 	refEntity_t	e;
+	refEntityMotion_t motion;
+	qboolean hasTemporal;
+	temporalEntityPoseReceipt_t temporalReceipt;
 
 	float		axisLength;		// compensate for non-normalized axis
 	qboolean	lightingCalculated;
@@ -736,6 +741,9 @@ typedef struct {
 	orientationr_t	world;
 	vec3_t		pvsOrigin;			// may be different than or.origin for portals
 	portalView_t portalView;
+	int temporalWorldIndex;       // primary-world temporal state owner; -1 for UI/worldless views
+	uint64_t temporalFrameId;     // pending history receipt; backend publishes only after submit
+	temporalCameraPoseReceipt_t temporalCameraReceipt; // unjittered current/previous camera
 	int			frameSceneNum;		// copied from tr.frameSceneNum
 	int			frameCount;			// copied from tr.frameCount
 	cplane_t	portalPlane;		// clip anything behind this if mirroring
@@ -1687,6 +1695,7 @@ extern	cvar_t	*r_drawWorld;			// disable/enable world rendering
 extern	cvar_t	*r_speeds;				// various levels of information display
 extern	cvar_t	*r_gpuSpeeds;			// per-pass GPU timestamp report
 extern	cvar_t	*r_profileMarkers;		// semantic RAL dynamic-rendering GPU labels
+extern	cvar_t	*r_temporalInputTest;		// default-off projection-jitter diagnostic consumer
 extern	cvar_t	*r_vkDebugTiming;		// 200-frame Vulkan host-side timing averages
 extern	cvar_t	*r_frameSpikeUs;		// per-frame host-side stage-timing spike report
 extern  cvar_t	*r_detailTextures;		// enables/disables detail texturing stages
@@ -1784,6 +1793,20 @@ extern cvar_t	*r_particles;
 void R_SwapBuffers( int );
 
 void R_RenderView( const viewParms_t *parms );
+uint64_t R_TemporalProjectionPrepare( viewParms_t *view );
+void R_TemporalProjectionFinish( int worldIndex, uint64_t frameId, qboolean queued );
+void R_TemporalBackendRecorded( int worldIndex, uint64_t frameId );
+qboolean R_TemporalBackendEntityReceiptsBegin( void );
+void R_TemporalBackendEntityReceipts( uint32_t drawSurfs,
+	uint32_t visibleTemporal, uint32_t accepted, uint32_t previous, uint32_t rejected,
+	const temporalEntityPoseReceipt_t *sample );
+void R_TemporalBackendSubmitted( qboolean submitted );
+void R_TemporalMarkCameraCut( int worldIndex );
+void R_TemporalCancelQueuedFrames( void );
+void R_TemporalProjectionDump( void );
+void R_TemporalWorldLoaded( int worldIndex );
+void R_TemporalHistoryShutdown( void );
+void vk_temporal_history_store_shutdown( void );
 
 void R_AddMD3Surfaces( trRefEntity_t *e );
 void R_AddNullModelSurfaces( trRefEntity_t *e );
@@ -2163,9 +2186,12 @@ SCENE GENERATION
 */
 
 void R_InitNextFrame( void );
+void R_TemporalCommandBatchReset( void );
 
 void RE_ClearScene( void );
 void RE_AddRefEntityToScene( const refEntity_t *ent, qboolean intShaderTime );
+void RE_AddRefEntityToSceneTemporal( const refEntity_t *ent,
+	const refEntityMotion_t *motion );
 void RE_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t *verts, int num );
 void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );
@@ -2399,7 +2425,8 @@ RENDERER BACK END FUNCTIONS
 =============================================================
 */
 
-void RB_ExecuteRenderCommands( const void *data );
+void RB_ExecuteRenderCommands( const void *data,
+	const temporalBatchRequest_t *temporalRequest );
 
 /*
 =============================================================
@@ -2414,6 +2441,7 @@ RENDERER BACK END COMMAND QUEUE
 typedef struct {
 	byte	cmds[MAX_RENDER_COMMANDS];
 	int		used;
+	temporalBatchRequest_t temporalRequest;
 } renderCommandList_t;
 
 typedef struct {
@@ -2424,6 +2452,7 @@ typedef struct {
 typedef struct {
 	int		commandId;
 	int		buffer;
+	uint64_t temporalRequestToken;
 } drawBufferCommand_t;
 
 typedef struct {
@@ -2580,13 +2609,14 @@ extern	int		max_polyverts;
 
 extern	backEndData_t	*backEndData;
 
-void RB_ExecuteRenderCommands( const void *data );
+void RB_ExecuteRenderCommands( const void *data,
+	const temporalBatchRequest_t *temporalRequest );
 void RB_TakeScreenshot( int x, int y, int width, int height, const char *fileName );
 void RB_TakeScreenshotJPEG( int x, int y, int width, int height, const char *fileName );
 void RB_TakeScreenshotBMP( int x, int y, int width, int height, const char *fileName, int clipboard );
 void RB_TakeScreenshotPNG( int x, int y, int width, int height, const char *fileName, int clipboard );
 
-void R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs );
+qboolean R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs );
 
 void RE_SetColor( const float *rgba );
 void RE_SetClipRegion( const float *region );

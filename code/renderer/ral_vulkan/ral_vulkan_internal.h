@@ -11,10 +11,9 @@
 // IMPORTANT: this backend is deliberately *independent* of code/renderervk/.
 // It owns its own VkInstance / VkPhysicalDevice / VkDevice / VkQueues — they
 // are never shared with the legacy Vulkan renderer (per phase-7-ral-design.md).
-// It does reuse the engine's platform Vulkan loader
-// entry point (ri.VK_GetInstanceProcAddr) and the engine's logging / allocation
-// imports (the refimport_t `ri`), because the backend is statically linked into
-// the same renderer DLL.
+// Host loader/surface/log services arrive through ralHostImports_t. The core
+// archive has no renderer-global import dependency and can be linked by an
+// isolated tool host.
 
 #ifndef WIRED_RAL_VULKAN_INTERNAL_H
 #define WIRED_RAL_VULKAN_INTERNAL_H
@@ -28,21 +27,21 @@
 #include "../../renderercommon/vulkan/vulkan.h"
 
 #include "../ral/ral.h"                       // q_shared.h + the public RAL surface
+#include "../ral/ral_host.h"                  // backend-neutral host contract helpers
 #include "ral_vulkan_bridge.h"                // backend-native migration seam (not portable RAL)
 #include "ral_vulkan_translate.h"             // exact pure RAL-enum → Vulkan mapping
-#include "../../renderercommon/tr_public.h"   // refimport_t, extern refimport_t ri
-#include "../../renderercommon/r_log.h"       // rilog-channel-mechanism — R_LOG / R_LOG_DECLARE_CHANNEL
-
 #include <string.h>
 #include <stdlib.h>   // backend internal allocations use stdlib malloc/free (not ri.Malloc) so RAL state survives ri.FreeAll() inside R_InitImages.
+#include <stdarg.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // ── per-backend Vulkan dispatch table ───────────────────────────────────
-// Global-level fns come from ri.VK_GetInstanceProcAddr(VK_NULL_HANDLE, ...);
-// instance-level from ri.VK_GetInstanceProcAddr(instance, ...); device-level
+// Global-level fns come from host.getProcAddress(NULL, ...); instance-level
+// from host.getProcAddress(instance, ...); device-level
 // from vkGetDeviceProcAddr(device, ...).
 typedef struct {
 	// global
@@ -73,9 +72,12 @@ typedef struct {
 
 	// surface PFNs (instance-level; needed by
 	// Ral_CreateBackend's owned-instance path to create + later destroy
-	// VkSurfaceKHR via ri.VK_CreateSurface).
+	// VkSurfaceKHR via the host surface callback).
 	PFN_vkDestroySurfaceKHR                     DestroySurfaceKHR;
 	PFN_vkGetPhysicalDeviceSurfaceSupportKHR    GetPhysicalDeviceSurfaceSupportKHR;
+	PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR GetPhysicalDeviceSurfaceCapabilitiesKHR;
+	PFN_vkGetPhysicalDeviceSurfaceFormatsKHR    GetPhysicalDeviceSurfaceFormatsKHR;
+	PFN_vkGetPhysicalDeviceSurfacePresentModesKHR GetPhysicalDeviceSurfacePresentModesKHR;
 
 	// device — core lifecycle
 	PFN_vkDestroyDevice                         DestroyDevice;
@@ -398,27 +400,35 @@ typedef enum {
 	RAL_VK_CMD_SUBMITTED        // handed to a queue
 } ralVkCmdState_t;
 
-// RAL-side swapchain wrapper. Adopts an
-// externally-created VkSurfaceKHR (renderer-owned via ri.VK_CreateSurface;
-// ownsSurface=qfalse) and owns its own VkSwapchainKHR + image array. Each
-// swapchain image is wrapped in an adopted ralTexture_t (ownsImage=qfalse) so
-// renderer-side reverse-lookups (vk_ral_lookup_texture) find them. HDR
+// RAL-side swapchain wrapper. References the backend-owned surface and owns its
+// VkSwapchainKHR, dynamic image/view arrays, and canonical borrowed texture
+// wrappers. HDR
 // metadata cached in hdrMetadata + hasHdrMetadata flag (set by
 // Ral_SetSwapchainHdrMetadata; replayed on swapchain recreate if needed).
-#define MAX_RAL_SWAPCHAIN_IMAGES 8u   // matches renderer-side MAX_SWAPCHAIN_IMAGES (vk.h:11)
+typedef enum {
+	RAL_VK_SWAPCHAIN_IMAGE_AVAILABLE = 0,
+	RAL_VK_SWAPCHAIN_IMAGE_ACQUIRED,
+	RAL_VK_SWAPCHAIN_IMAGE_PREPARED
+} ralVkSwapchainImageState_t;
 
 struct ralSwapchain_s {
 	ralBackend_t    *backend;
-	VkSurfaceKHR     surface;          // adopted from renderer; lifecycle stays with renderer's ri.VK_CreateSurface / qvkDestroySurfaceKHR
-	qboolean         ownsSurface;      // qfalse on adoption — Ral_DestroySwapchain does NOT call qvkDestroySurfaceKHR
+	uint64_t         generation;
+	VkSurfaceKHR     surface;          // borrowed from backend; backend owns its lifetime
 	VkSwapchainKHR   swapchain;        // RAL-owned; created via b->vk.CreateSwapchainKHR; destroyed via b->vk.DestroySwapchainKHR
 	VkFormat         vkFormat;
+	ralFormat_t      format;
 	VkColorSpaceKHR  vkColorSpace;
+	ralColorSpace_t  colorSpace;
 	VkPresentModeKHR vkPresentMode;
+	ralPresentMode_t presentMode;
 	VkExtent2D       extent;
+	ralTextureUsage_t usage;
 	uint32_t         imageCount;
-	VkImage          images[ MAX_RAL_SWAPCHAIN_IMAGES ];
-	ralTexture_t    *adoptedImages[ MAX_RAL_SWAPCHAIN_IMAGES ];   // Ral_AdoptTexture wrappers (ownsImage=qfalse)
+	VkImage         *images;
+	VkImageView     *imageViews;
+	ralTexture_t   **adoptedImages;   // canonical wrappers; image/view remain swapchain-owned
+	uint8_t          *imageStates;     // 0 available, 1 acquired, 2 prepared for present
 	qboolean         hasHdrMetadata;
 	VkHdrMetadataEXT hdrMetadata;
 };
@@ -444,6 +454,7 @@ struct ralCommandBuffer_s {
 	// (the renderer's existing pool owns lifetime). Wrappers created by
 	// Ral_AcquireCommandBuffer have ownsBuffer == qtrue (legacy RAL path).
 	qboolean            ownsBuffer;
+	qboolean            externalLifecycle; // renderer-only legacy begin/end/reset bridge
 };
 
 // ── deferred-destroy queue (lifecycle) ──────────────────────────────────
@@ -478,6 +489,9 @@ struct ralBackend_s {
 	ralBackendType_t  type;            // always RAL_BACKEND_VULKAN for this implementation
 	uint32_t          flags;           // RAL_FLAG_DEBUG_LABELS
 	uint32_t          instanceApiVersion;   // version the VkInstance was created at
+	ralHostImports_t  host;            // value-copied host contract; never renderer-global
+	void             *platformHandle;
+	qboolean          allowAsyncTextureUploads;
 
 	ralVkFuncs_t      vk;
 
@@ -496,7 +510,7 @@ struct ralBackend_s {
 
 	VkDebugUtilsMessengerEXT debugMessenger;   // VK_NULL_HANDLE unless validation requested + available
 
-	// RAL-owned surface (created via ri.VK_CreateSurface
+	// RAL-owned surface (created via ralHostImports_t::createSurface
 	// in Ral_CreateBackend's owned-instance path; VK_NULL_HANDLE in imported
 	// mode where the renderer retains surface lifecycle).
 	VkSurfaceKHR      surface;
@@ -532,6 +546,7 @@ struct ralBackend_s {
 	qboolean          haveDepthClamp;        // depthClamp core feature enabled → pipeline depthClampEnable legal (read into caps.depthClamp by ralVk_FillCaps, which survives the caps memset)
 	qboolean          haveWideLines;         // wideLines core feature enabled → pipeline lineWidth != 1.0 legal (read into caps.wideLines by ralVk_FillCaps)
 	qboolean          haveVertexFragmentStores; // vertexPipelineStoresAndAtomics + fragmentStoresAndAtomics both enabled → shader image/SSBO stores legal (read into caps.vertexFragmentStores by ralVk_FillCaps)
+	qboolean          haveIndependentBlend; // independentBlend core feature enabled; imported mode stays false without caller proof
 
 	ralCaps_t         caps;
 
@@ -543,6 +558,7 @@ struct ralBackend_s {
 
 	// ── per-frame lifecycle + deferred destroy ──
 	uint64_t          currentFrame;          // advanced by Ral_BeginFrame
+	uint64_t          nextSwapchainGeneration; // monotonically assigned to each fully materialized swapchain
 	VkFence           frameFences[ RAL_VK_MAX_FRAMES_IN_FLIGHT ];   // signaled by Ral_EndFrame's empty submit; waited by Ral_BeginFrame
 	ralVkPendingDestroy_t *pendingDestroy;   // malloc'd ring of RAL_VK_PENDING_DESTROY_MAX entries
 	uint32_t          numPendingDestroy;
@@ -568,6 +584,19 @@ struct ralBackend_s {
 	volatile int          pollThreadStop;
 };
 
+// Bounded, backend-owned log formatter.  A NULL sink is intentionally silent;
+// backend correctness must never depend on diagnostic output being present.
+void ralVk_Logf( const ralBackend_t *b, ralLogSeverity_t severity,
+	             const char *fmt, ... ) FORMAT_PRINTF( 3, 4 );
+
+// Keep call sites compact while every message is routed through the backend
+// value-copy of ralHostImports_t.  Unlike renderercommon's R_LOG this macro
+// has no global import/channel dependency; `b` is deliberately the explicit
+// backend variable in each Vulkan RAL function.
+#define RAL_VK_LOG( severity, ... ) ralVk_Logf( b, (ralLogSeverity_t)(severity), __VA_ARGS__ )
+#define RAL_VK_LOG_ON( backend, severity, ... ) \
+	ralVk_Logf( (backend), (ralLogSeverity_t)(severity), __VA_ARGS__ )
+
 // ── once-per-method-per-process stub log ────────────────────────────────
 // rilog-channel-mechanism Turn B — route through R_LOG on the renderer.ral
 // channel; every TU that expands these macros must (and does) declare a
@@ -577,7 +606,7 @@ struct ralBackend_s {
 		static qboolean ral_stub_logged_ = qfalse; \
 		if ( !ral_stub_logged_ ) { \
 			ral_stub_logged_ = qtrue; \
-			R_LOG( rch_ral, SEV_DEBUG, "stub: %s -- TODO Phase %s\n", (fnname), (phase) ); \
+			RAL_VK_LOG( SEV_DEBUG, "stub: %s -- TODO Phase %s\n", (fnname), (phase) ); \
 		} \
 	} while ( 0 )
 
@@ -585,7 +614,13 @@ struct ralBackend_s {
 #define RAL_NOTE_ONCE( ... ) \
 	do { \
 		static qboolean ral_note_logged_ = qfalse; \
-		if ( !ral_note_logged_ ) { ral_note_logged_ = qtrue; R_LOG( rch_ral, SEV_DEBUG, __VA_ARGS__ ); } \
+		if ( !ral_note_logged_ ) { ral_note_logged_ = qtrue; RAL_VK_LOG( SEV_DEBUG, __VA_ARGS__ ); } \
+	} while ( 0 )
+
+#define RAL_NOTE_ONCE_ON( backend, ... ) \
+	do { \
+		static qboolean ral_note_logged_ = qfalse; \
+		if ( !ral_note_logged_ ) { ral_note_logged_ = qtrue; RAL_VK_LOG_ON( (backend), SEV_DEBUG, __VA_ARGS__ ); } \
 	} while ( 0 )
 
 #define RAL_ZERO( x )  memset( &(x), 0, sizeof( x ) )
@@ -610,9 +645,16 @@ void               ralVk_QueueUnlock( ralBackend_t *b, ralQueueType_t q );
 qboolean ralVk_InitResourceLayer    ( ralBackend_t *b );
 void     ralVk_ShutdownResourceLayer( ralBackend_t *b );
 void     ralVk_RunResourceTest      ( ralBackend_t *b );
+VkImageUsageFlags ralVk_TextureUsage( ralTextureUsage_t u );
+VkFormatFeatureFlags ralVk_TextureUsageFormatFeatures( ralTextureUsage_t u );
+VkColorComponentFlags ralVk_ColorWriteMask( const ralColorBlendAttachment_t *blend );
+qboolean ralVk_ColorBlendStatesSupported( const ralGraphicsPipelineCreateInfo_t *ci,
+	                                       qboolean independentBlend );
+qboolean ralVk_IndependentBlendEnabled( qboolean backendOwnsDevice,
+	                                     qboolean requested, VkBool32 supported );
 
 // ral_vulkan_command.c — queue submission helper + the \ral_dump async test
-void     ralVk_QueueSubmit2 ( ralBackend_t *b, ralQueueType_t q, const VkSubmitInfo2 *si2, VkFence fence );
+ralResult_t ralVk_QueueSubmit2( ralBackend_t *b, ralQueueType_t q, const VkSubmitInfo2 *si2, VkFence fence );
 void     ralVk_RunAsyncTest ( ralBackend_t *b );
 
 // ral_vulkan_pipeline.c — pipeline layout cache + the \ral_dump pipeline test

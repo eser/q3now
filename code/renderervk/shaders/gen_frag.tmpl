@@ -8,6 +8,10 @@
 #define USE_CL1
 #endif
 
+#if defined(USE_TEMPORAL_MOTION) && (defined(USE_ATEST) || defined(USE_DEPTH_FADE) || defined(USE_DF) || defined(USE_IBL) || defined(USE_SHADOWMAP))
+#error USE_TEMPORAL_MOTION is limited to the admitted opaque generic cohort
+#endif
+
 // The set-0 UBO is unconditional: even with no light/fog/shadow consumer it
 // still carries packed_indices (the per-draw bindless table) at offset 544.
 // The light/env + fog prefix is a fixed 128 B (eyePos + 3-vec4 union + 4 fog),
@@ -133,6 +137,7 @@ layout(location = 9) in vec3 ibl_V;
 layout (constant_id = 14) const int ibl_enabled = 0;
 #endif
 
+
 #ifdef USE_DEPTH_FADE
 layout (constant_id = 11) const float depth_fade_scale = 2.0;
 #endif
@@ -168,6 +173,39 @@ layout(location = 4) in vec2 fog_tex_coord;
 #endif
 #ifdef USE_SHADOWMAP
 layout(location = 7) in vec4 shadowData;   // xyz = world position, w = view-space depth
+#endif
+
+#ifdef USE_TEMPORAL_MOTION
+layout(location = 10) in vec4 temporalCurrentClip;
+layout(location = 11) in vec4 temporalPreviousClip;
+layout(location = 12) flat in uint temporalOutcome;
+layout(location = 1) out vec2 out_temporal_velocity;
+layout(location = 2) out float out_temporal_validity;
+
+bool wiredTemporalFinite4( vec4 value ) {
+	return all( not( isnan( value ) ) ) && all( not( isinf( value ) ) );
+}
+
+void wiredTemporalWriteAux() {
+	out_temporal_velocity = vec2( 0.0 );
+	out_temporal_validity = 0.0;
+#ifndef USE_TEMPORAL_INVALIDATE
+	if ( temporalOutcome != 1u || !wiredTemporalFinite4( temporalCurrentClip )
+			|| !wiredTemporalFinite4( temporalPreviousClip )
+			|| temporalCurrentClip.w <= 1.0e-6
+			|| temporalPreviousClip.w <= 1.0e-6 ) return;
+	vec2 currentNdc = temporalCurrentClip.xy / temporalCurrentClip.w;
+	vec2 previousNdc = temporalPreviousClip.xy / temporalPreviousClip.w;
+	if ( any( isnan( currentNdc ) ) || any( isinf( currentNdc ) )
+			|| any( isnan( previousNdc ) ) || any( isinf( previousNdc ) ) ) return;
+	vec2 currentUv = currentNdc * 0.5 + vec2( 0.5 );
+	vec2 previousUv = previousNdc * 0.5 + vec2( 0.5 );
+	vec2 velocity = currentUv - previousUv;
+	if ( any( isnan( velocity ) ) || any( isinf( velocity ) ) ) return;
+	out_temporal_velocity = velocity;
+	out_temporal_validity = 1.0;
+#endif
+}
 #endif
 
 #ifdef USE_DF
@@ -926,6 +964,10 @@ void main() {
 	gl_FragDepth = gl_FragCoord.z;
 #else
 	out_color = base;
+#endif
+
+#ifdef USE_TEMPORAL_MOTION
+	wiredTemporalWriteAux();
 #endif
 
 }

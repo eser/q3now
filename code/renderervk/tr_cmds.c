@@ -11,6 +11,14 @@ R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 static float re_last_rgba[4]            = { -1.0f, -1.0f, -1.0f, -1.0f };
 static float re_last_outline[10]        = { -1.0f };  // outlineW, outlineColor[4], glowW, glowColor[4]
 static float re_last_shadow[6]          = { -1.0f };  // offsetX, offsetY, color[4]
+static uint64_t re_temporal_batch_token;
+
+void R_TemporalCommandBatchReset( void ) {
+	re_temporal_batch_token++;
+	if ( !re_temporal_batch_token ) re_temporal_batch_token = 1u;
+	R_TemporalBatchRequestReset( &backEndData->commands.temporalRequest,
+		re_temporal_batch_token );
+}
 
 /*
 =====================
@@ -77,24 +85,35 @@ R_IssueRenderCommands
 */
 static void R_IssueRenderCommands( void ) {
 	renderCommandList_t	*cmdList;
+	temporalBatchRequest_t temporalRequest;
 
 	cmdList = &backEndData->commands;
 
 	// add an end-of-list command
 	*(int *)(cmdList->cmds + cmdList->used) = RC_END_OF_LIST;
+	memset( &temporalRequest, 0, sizeof( temporalRequest ) );
+	temporalRequest.state = TEMPORAL_BATCH_REQUEST_CONFLICT;
+	(void)R_TemporalBatchRequestConsume( &cmdList->temporalRequest,
+		&temporalRequest );
+	memset( &cmdList->temporalRequest, 0, sizeof( cmdList->temporalRequest ) );
 
 	// clear it out, in case this is a sync and not a buffer flip
 	cmdList->used = 0;
 
 	if ( backEnd.screenshotMask == 0 ) {
-		if ( ri.CL_IsMinimized() )
+		if ( ri.CL_IsMinimized() ) {
+			R_TemporalCancelQueuedFrames();
 			return; // skip backend when minimized
-		if ( backEnd.throttle )
+		}
+		if ( backEnd.throttle ) {
+			R_TemporalCancelQueuedFrames();
 			return; // or throttled on demand
+		}
 	} else {
 #ifdef USE_VULKAN
 		if ( ri.CL_IsMinimized() && !RE_CanMinimize() ) {
 			backEnd.screenshotMask = 0;
+			R_TemporalCancelQueuedFrames();
 			return;
 		}
 #endif
@@ -103,7 +122,9 @@ static void R_IssueRenderCommands( void ) {
 	// actually start the commands going
 	if ( !r_skipBackEnd->integer ) {
 		// let it start on the new batch
-		RB_ExecuteRenderCommands( cmdList->cmds );
+		RB_ExecuteRenderCommands( cmdList->cmds, &temporalRequest );
+	} else {
+		R_TemporalCancelQueuedFrames();
 	}
 }
 
@@ -155,12 +176,12 @@ void *R_GetCommandBuffer( int bytes ) {
 R_AddDrawSurfCmd
 =============
 */
-void R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs ) {
+qboolean R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	drawSurfsCommand_t	*cmd;
 
 	cmd = R_GetCommandBuffer( sizeof( *cmd ) );
 	if ( !cmd ) {
-		return;
+		return qfalse;
 	}
 	cmd->commandId = RC_DRAW_SURFS;
 
@@ -184,6 +205,7 @@ void R_AddDrawSurfCmd( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 		backEnd.sceneRenderedThisFrame = qtrue;
 	}
 #endif
+	return qtrue;
 }
 
 
@@ -412,6 +434,10 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 
 	tr.frameCount++;
 	tr.frameSceneNum = 0;
+	if ( backEndData->commands.used == 0
+			&& backEndData->commands.temporalRequest.token == 0 ) {
+		R_TemporalCommandBatchReset();
+	}
 
 	// Reset primitive ring write cursors before cgame submissions for
 	// this frame begin. Stereo-guarded: only fire on the first eye (or
@@ -428,6 +454,7 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 		return;
 
 	cmd->commandId = RC_DRAW_BUFFER;
+	cmd->temporalRequestToken = backEndData->commands.temporalRequest.token;
 
 #ifdef USE_VULKAN
 	tr.lastRenderCommand = RC_DRAW_BUFFER;
@@ -492,6 +519,7 @@ void RE_EndFrame( int *frontEndMsec, int *backEndMsec ) {
 
 	cmd = R_GetCommandBufferReserved( sizeof( *cmd ), 0 );
 	if ( !cmd ) {
+		R_TemporalCancelQueuedFrames();
 		return;
 	}
 	cmd->commandId = RC_SWAP_BUFFERS;

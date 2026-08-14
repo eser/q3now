@@ -77,6 +77,7 @@ typedef struct {
 // refdef flags
 #define RDF_NOWORLDMODEL	0x0001		// used for player configuration screen
 #define RDF_HYPERSPACE		0x0004		// teleportation effect
+#define RDF_TEMPORAL_PRIMARY	0x0040		// authoritative full-window gameplay scene
 
 typedef struct {
 	vec3_t		xyz;
@@ -138,6 +139,63 @@ typedef struct {
 	float		radius;
 	float		rotation;
 } refEntity_t;
+
+// Optional cross-frame identity submitted atomically with one refEntity_t.
+// Fixed-width, pointer-free and intentionally separate from refEntity_t so old
+// modules retain their exact ABI and ordinary submissions remain unchanged.
+#define REF_ENTITY_MOTION_VERSION 1u
+#define REF_ENTITY_MOTION_VALID_FLAGS 0u
+// Append-only semantic sub-entity key.  Values are shared by producer and the
+// future renderer history cache; never renumber or reuse an existing value.
+typedef enum {
+	REF_ENTITY_MOTION_ROLE_NONE = 0,
+	REF_ENTITY_MOTION_ROLE_GENERAL = 1,
+	REF_ENTITY_MOTION_ROLE_CREATURE_BODY = 2,
+	REF_ENTITY_MOTION_ROLE_PLAYER_BODY = 3,
+	REF_ENTITY_MOTION_ROLE_PLAYER_LEGS = 4,
+	REF_ENTITY_MOTION_ROLE_PLAYER_TORSO = 5,
+	REF_ENTITY_MOTION_ROLE_PLAYER_HEAD = 6,
+	REF_ENTITY_MOTION_ROLE_ITEM_PRIMARY = 7,
+	REF_ENTITY_MOTION_ROLE_ITEM_BARREL = 8,
+	REF_ENTITY_MOTION_ROLE_ITEM_SECONDARY = 9,
+	REF_ENTITY_MOTION_ROLE_MOVER_PRIMARY = 10,
+	REF_ENTITY_MOTION_ROLE_MOVER_SECONDARY = 11,
+	REF_ENTITY_MOTION_ROLE_GRAPPLE = 12,
+	REF_ENTITY_MOTION_ROLE_COUNT
+} refEntityMotionRole_t;
+typedef struct {
+	uint32_t structSize;
+	uint32_t version;
+	uint32_t ownerId;
+	uint32_t generation;
+	uint32_t role;
+	uint32_t flags;
+} refEntityMotion_t;
+
+static ID_INLINE qboolean RefEntityMotion_IsValid( const refEntityMotion_t *motion ) {
+	return motion && motion->structSize == sizeof( refEntityMotion_t )
+		&& motion->version == REF_ENTITY_MOTION_VERSION
+		&& ( motion->flags & ~REF_ENTITY_MOTION_VALID_FLAGS ) == 0u;
+}
+
+static ID_INLINE void RefEntityMotion_ClearOwned( refEntityMotion_t *owned,
+		qboolean *hasTemporal ) {
+	if ( owned ) memset( owned, 0, sizeof( *owned ) );
+	if ( hasTemporal ) *hasTemporal = qfalse;
+}
+
+static ID_INLINE qboolean RefEntityMotion_CopyOwned( refEntityMotion_t *owned,
+		qboolean *hasTemporal, const refEntityMotion_t *motion ) {
+	if ( !owned || !hasTemporal || !RefEntityMotion_IsValid( motion ) ) return qfalse;
+	*owned = *motion;
+	*hasTemporal = qtrue;
+	return qtrue;
+}
+
+static ID_INLINE qboolean RefEntityMotion_CanAppend( const refEntity_t *entity,
+		const refEntityMotion_t *motion, uint32_t count, uint32_t capacity ) {
+	return entity && count < capacity && RefEntityMotion_IsValid( motion );
+}
 
 
 #define	MAX_RENDER_STRINGS			8

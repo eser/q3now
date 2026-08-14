@@ -49,7 +49,42 @@ typedef struct {
 	                                         // VkPhysicalDeviceFeatures.depthClamp (else the
 	                                         // depthClamp cap stays false → projection-tweak
 	                                         // fallback on backends without native support)
+	qboolean wantIndependentBlend;           // per-colour-attachment blend/write-mask state;
+	                                         // enabled only when the core device feature is supported
 } ralRequestedFeatures_t;
+
+// Host services consumed by a concrete RAL backend.  The public RAL surface
+// deliberately keeps native API handles opaque: standalone tools can provide
+// SDL/platform callbacks without importing the renderer DLL's global `ri`
+// table, while the renderer supplies a thin adapter over its existing imports.
+// The struct is copied by value when a backend is created; userData and the
+// callback targets must remain valid until Ral_DestroyBackend returns.
+typedef enum {
+	RAL_LOG_TRACE = 1,
+	RAL_LOG_DEBUG = 5,
+	RAL_LOG_INFO  = 9,
+	RAL_LOG_WARN  = 13,
+	RAL_LOG_ERROR = 17,
+	RAL_LOG_FATAL = 21
+} ralLogSeverity_t;
+
+typedef void *(*ralHostGetProcAddressFn)( void *userData,
+	                                      void *nativeInstance,
+	                                      const char *name );
+typedef qboolean (*ralHostCreateSurfaceFn)( void *userData,
+	                                        void *platformHandle,
+	                                        void *nativeInstance,
+	                                        uint64_t *outNativeSurface );
+typedef void (*ralHostLogFn)( void *userData,
+	                          ralLogSeverity_t severity,
+	                          const char *message );
+
+typedef struct {
+	void                       *userData;
+	ralHostGetProcAddressFn     getProcAddress;
+	ralHostCreateSurfaceFn      createSurface;
+	ralHostLogFn                log;
+} ralHostImports_t;
 
 // ── creation ────────────────────────────────────────────────────────────
 // Three modes (gated by the letBackendOwn* flags + externalInstance):
@@ -71,6 +106,7 @@ typedef struct {
 	ralBackendType_t type;
 	void            *platformHandle;            // HWND / NSWindow / canvas selector / etc. (NULL = offscreen)
 	uint32_t         flags;                     // RAL_FLAG_DEBUG_LABELS
+	ralHostImports_t host;                      // required host loader/surface/log services
 
 	// imported-mode fields (set all-or-none; NULL externalInstance → standalone)
 	void            *externalInstance;          // VkInstance
@@ -103,6 +139,10 @@ typedef struct {
 	// validation → KHRONOS_validation → none fallback chain during
 	// vkCreateInstance and creates a debug messenger.
 	qboolean         enableValidation;
+	// Host-selected upload policy.  The renderer maps its
+	// r_asyncTextureUpload cvar here; standalone tools choose explicitly and
+	// the RAL core never imports or names an engine cvar.
+	qboolean         allowAsyncTextureUploads;
 	// renderer-requested device features +
 	// platform-specific device extensions. Both feed the owned-device
 	// branch only; ignored when letBackendOwnDevice=qfalse.
@@ -113,6 +153,12 @@ typedef struct {
 	// (HARD-REQUIRED) and VK_EXT_memory_budget (RAL-internal) on top of
 	// the supplied list.
 	ralRequestedFeatures_t requestFeatures;
+	// Exact platform instance extensions required by the surface provider.
+	// Caller-owned immutable strings; the pointer array must outlive the
+	// backend.  RAL validates/deduplicates these against the loader's inventory
+	// instead of enabling every extension whose name happens to end in surface.
+	const char *const *platformInstanceExtensions;
+	uint32_t           platformInstanceExtensionCount;
 	const char *const *platformDeviceExtensions;
 	uint32_t           platformDeviceExtensionCount;
 } ralBackendCreateInfo_t;
@@ -168,6 +214,7 @@ typedef struct {
 	// identity (informational)
 	char     deviceName[256];
 	char     apiVersion[32];            // e.g. "Vulkan 1.3.290"
+	qboolean independentBlend;          // append-only: per-colour-attachment blend/write-mask state enabled
 } ralCaps_t;
 
 const ralCaps_t *Ral_GetCaps( ralBackend_t *b );
@@ -212,7 +259,14 @@ typedef struct {
 	const char      *reason;     // why it's unavailable (NULL if available)
 } ralBackendAvailability_t;
 
-uint32_t Ral_ProbeBackends( ralBackendAvailability_t *out, uint32_t maxOut );
+uint32_t Ral_ProbeBackends( const ralHostImports_t *host,
+	                        ralBackendAvailability_t *out, uint32_t maxOut );
+
+// Backend-owned diagnostic body. Engine console/cvar parsing stays in the
+// renderer adapter; standalone hosts can invoke the same exercise with their
+// own imports and an explicit subcommand.
+void Ral_RunDiagnostic( const ralBackendCreateInfo_t *ci,
+	                    const char *subcommand );
 
 // ── developer diagnostic entry point ────────────────────────────────────
 // Exported from the renderer DLL; the client's "\ral_dump" command resolves

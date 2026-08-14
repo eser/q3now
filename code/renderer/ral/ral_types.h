@@ -34,6 +34,7 @@ typedef enum {
 	ralErrorInitFailed,
 	ralOutOfDate,               // swapchain out of date (surface size/format mismatch); recreate needed. Returned by Ral_AcquireNextImage / Ral_Present.
 	ralSuboptimal,              // swapchain still functional but no longer optimal; renderer SHOULD recreate at frame boundary. Returned by Ral_Present.
+	ralSurfaceLost,             // presentation surface is no longer usable; recreate the surface/backend, not only the swapchain.
 	ralTimeout,                 // Ral_AcquireNextImage: VK_TIMEOUT / VK_NOT_READY. RECOVERABLE: no image was available within the timeout (compositor / RDP / suspend stall), NOT a device error. Caller skips/retries the frame; the swapchain is still valid. Distinct from ralErrorDeviceLost / ralErrorUnknown (genuinely fatal).
 	ralErrorUnknown
 } ralResult_t;

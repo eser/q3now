@@ -4,50 +4,70 @@
 // ral_swapchain.h — presentation surface, HDR metadata.
 // Part of the Wired RAL v1 surface (docs/phase-7-ral-design.md §3.9, §7.8b).
 //
-// The platform surface comes from the renderer via ralSwapchainCreateInfo_t.
-// externalSurface; RAL adopts the VkSurfaceKHR without taking ownership of
-// its lifecycle. Surface creation/destruction stays in the platform layer
-// (ri.VK_CreateSurface / vkDestroySurfaceKHR). HDR10 / scRGB colour spaces
-// depend on caps.hdr10Swapchain / caps.scRGBSwapchain; SDR
-// (RAL_COLORSPACE_SRGB_NONLINEAR) is always available and the default.
+// The presentation surface is backend-owned and was created through
+// ralHostImports_t::createSurface.  Callers describe ordered preferences and
+// hard usage requirements; the backend queries the surface and publishes the
+// selected, renderable swapchain through ralSwapchainInfo_t.
 
 #ifndef WIRED_RAL_SWAPCHAIN_H
 #define WIRED_RAL_SWAPCHAIN_H
 
 #include "ral_types.h"
+#include "ral_resource.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct {
-	uint32_t         width;
-	uint32_t         height;
-	ralFormat_t      format;           // B8G8R8A8_UNORM / A2B10G10R10_UNORM / R16G16B16A16_SFLOAT
-	ralColorSpace_t  colorSpace;
-	ralPresentMode_t presentMode;      // FIFO / MAILBOX / IMMEDIATE
-	uint32_t         minImageCount;    // 0 → backend picks (typ. 2-3)
-	void            *externalSurface;  // VkSurfaceKHR on Vulkan; RAL adopts without taking ownership (renderer's ri.VK_CreateSurface retains lifecycle)
-	// Atomic-handoff swapchain
-	// recreation hint. When non-NULL, passed into
-	// VkSwapchainCreateInfoKHR.oldSwapchain so the new swapchain is created
-	// "in place of" the old. The old VkSwapchainKHR is retired by
-	// vkCreateSwapchainKHR; the caller MUST destroy the old ralSwapchain_t
-	// wrapper AFTER successful create (can no longer use the old handle for
-	// anything except vkDestroySwapchainKHR). NULL on initial boot create.
-	void            *oldExternalSwapchain;
+	ralFormat_t     format;
+	ralColorSpace_t colorSpace;
+} ralSurfaceFormat_t;
+
+typedef struct {
+	uint32_t                  desiredWidth;
+	uint32_t                  desiredHeight;
+	const ralSurfaceFormat_t *formatPreferences;      // ordered, exact format+colour-space pairs
+	uint32_t                  formatPreferenceCount;
+	const ralPresentMode_t   *presentModePreferences; // ordered; include every acceptable fallback
+	uint32_t                  presentModePreferenceCount;
+	uint32_t                  desiredImageCount;      // 0 → backend default, clamped to surface caps
+	ralTextureUsage_t         requiredUsage;          // exact hard requirements; unsupported bits fail
 	// Backend-extension pass-through
 	// for the swapchain create info struct's extension chain. On Vulkan, this
 	// is the VkSwapchainCreateInfoKHR.pNext pointer — used by the renderer's
 	// existing Windows-HDR full-screen-exclusive (FSE) chain at vk.c's
 	// _WIN32 + hdr_display_active branch. NULL on platforms / modes that
 	// don't need an extension chain. Caller-owned (no lifecycle transfer);
-	// must outlive the Ral_CreateSwapchain call.
+	// must outlive the Ral_CreateOrRecreateSwapchain call.
 	const void      *backendExtensionChain;
 } ralSwapchainCreateInfo_t;
 
-ralSwapchain_t *Ral_CreateSwapchain ( ralBackend_t *b, const ralSwapchainCreateInfo_t *ci );
+typedef struct {
+	uint64_t          generation;
+	uint32_t          width;
+	uint32_t          height;
+	ralFormat_t       format;
+	ralColorSpace_t   colorSpace;
+	ralPresentMode_t  presentMode;
+	uint32_t          imageCount;
+	ralTextureUsage_t usage;
+} ralSwapchainInfo_t;
+
+// Create or recreate an output-authoritative swapchain.  On recreate, Vulkan
+// receives the typed old native handle. Failures discovered during portable
+// preflight (capability/policy selection, zero extent, or wait-idle) preserve
+// *inOut and the old generation. Once vkCreateSwapchainKHR is attempted the old
+// native swapchain may be retired even when that call fails, so the handoff is
+// deliberately one-way: native-attempt/materialisation failure destroys the
+// old wrapper and leaves *inOut NULL. There is no post-attempt rollback.
+ralResult_t     Ral_CreateOrRecreateSwapchain( ralBackend_t *b,
+	                                            const ralSwapchainCreateInfo_t *ci,
+	                                            ralSwapchain_t **inOut );
 void            Ral_DestroySwapchain( ralSwapchain_t *sc );
+
+qboolean        Ral_GetSwapchainInfo( const ralSwapchain_t *sc, ralSwapchainInfo_t *outInfo );
+ralTexture_t   *Ral_GetSwapchainImage( const ralSwapchain_t *sc, uint32_t imageIndex );
 
 // Cached swapchain image extent (surface currentExtent at create time = physical
 // swapchain pixels). The correct render-target size for the final present-blit
@@ -73,7 +93,8 @@ typedef struct {
 // (per-frame ring's ralSemaphore_t) — RAL signals it but doesn't manage
 // lifecycle. Returns ralSuccess on normal acquire; ralOutOfDate /
 // ralSuboptimal indicate the renderer should drive a swapchain recreate
-// via its existing vk_restart_swapchain path.
+// via its existing vk_restart_swapchain path. ralSurfaceLost requires a
+// surface/backend rebuild; retrying the same swapchain surface is invalid.
 ralResult_t Ral_AcquireNextImage( ralSwapchain_t *sc,
                                   uint64_t        timeoutNs,
                                   ralSemaphore_t *signalSem,
@@ -83,7 +104,7 @@ ralResult_t Ral_AcquireNextImage( ralSwapchain_t *sc,
 // Typed Present (replaces the earlier
 // stub's flat 2-arg signature). Returns ralSuccess on normal present;
 // ralOutOfDate / ralSuboptimal indicate the renderer should drive a
-// swapchain recreate.
+// swapchain recreate. ralSurfaceLost requires a surface/backend rebuild.
 ralResult_t Ral_Present( ralBackend_t *b, const ralPresentInfo_t *info );
 
 // HDR static metadata for HDR10 swapchains. Coordinates

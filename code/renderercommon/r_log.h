@@ -31,6 +31,7 @@ Channel taxonomy registered at engine boot (cl_main.c CL_InitRef):
     renderer.fbo        — framebuffer / render-pass / attachment lifecycle
     renderer.timing     — fence / acquire / submit / present timing
     renderer.cmd        — per-frame command-buffer recording
+    renderer.temporal   — default-off temporal sequencing/projection diagnostics
 
 Severity inheritance: a sub-channel without its own explicit override
 inherits its effective threshold from the nearest registered ancestor —

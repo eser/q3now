@@ -241,6 +241,7 @@ void SCR_UpdateScreen( void ) {
 		} else {
 			CL_PROF(endframe, re.EndFrame( NULL, NULL ));
 		}
+		CL_ProfileTelemetry_AfterEndFrame( &re );
 	}
 
 	scr_updateActive = qfalse;

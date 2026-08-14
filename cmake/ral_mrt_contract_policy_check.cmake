@@ -1,0 +1,73 @@
+FILE(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_backend.c" BACKEND)
+FILE(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_caps.c" CAPS)
+FILE(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_pipeline.c" PIPELINE)
+FILE(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_resource.c" RESOURCE)
+
+FOREACH(needle
+    "ci->requestFeatures.wantIndependentBlend"
+    "f2enable.features.independentBlend = VK_TRUE"
+    "b->haveIndependentBlend = qfalse")
+    STRING(FIND "${BACKEND}" "${needle}" pos)
+    IF(pos EQUAL -1)
+        MESSAGE(FATAL_ERROR "RAL MRT contract missing backend seam: ${needle}")
+    ENDIF()
+ENDFOREACH()
+
+# There are exactly two RAL-owned device-creation branches: the production
+# owned-instance/device path uses f2support, and the legacy standalone path
+# uses f2query. Pin the full operands so qtrue->qfalse, request substitution,
+# or an unrelated feature-support bit cannot false-green this policy.
+STRING(REGEX REPLACE "[ \t\r\n]" "" BACKEND_COMPACT "${BACKEND}")
+STRING(REGEX MATCHALL "ralVk_IndependentBlendEnabled\\(" owned_helper_calls "${BACKEND_COMPACT}")
+LIST(LENGTH owned_helper_calls owned_helper_call_count)
+IF(NOT owned_helper_call_count EQUAL 2)
+    MESSAGE(FATAL_ERROR "RAL MRT requires exactly two owned independentBlend helper calls")
+ENDIF()
+SET(expected_owned_primary
+    "ralVk_IndependentBlendEnabled(qtrue,ci->requestFeatures.wantIndependentBlend,f2support.features.independentBlend)")
+SET(expected_owned_standalone
+    "ralVk_IndependentBlendEnabled(qtrue,ci->requestFeatures.wantIndependentBlend,f2query.features.independentBlend)")
+FOREACH(expected IN ITEMS "${expected_owned_primary}" "${expected_owned_standalone}")
+    STRING(FIND "${BACKEND_COMPACT}" "${expected}" expected_pos)
+    IF(expected_pos EQUAL -1)
+        MESSAGE(FATAL_ERROR "RAL MRT owned feature gate operands changed: ${expected}")
+    ENDIF()
+ENDFOREACH()
+
+STRING(FIND "${CAPS}" "c->independentBlend         = b->haveIndependentBlend" caps_pos)
+IF(caps_pos EQUAL -1)
+    MESSAGE(FATAL_ERROR "RAL MRT contract does not mirror enabled independentBlend into caps")
+ENDIF()
+STRING(REGEX MATCHALL "c->independentBlend[ \t]*=" caps_writes "${CAPS}")
+LIST(LENGTH caps_writes caps_write_count)
+IF(NOT caps_write_count EQUAL 1)
+    MESSAGE(FATAL_ERROR "RAL MRT independentBlend cap must have one authoritative assignment")
+ENDIF()
+STRING(REGEX MATCHALL "b->caps\.independentBlend[ \t]*=" backend_caps_writes "${BACKEND}")
+LIST(LENGTH backend_caps_writes backend_caps_write_count)
+IF(NOT backend_caps_write_count EQUAL 0)
+    MESSAGE(FATAL_ERROR "RAL MRT backend must not overwrite the FillCaps authority")
+ENDIF()
+STRING(FIND "${PIPELINE}" "ralVk_ColorWriteMask( src )" mask_pos)
+IF(mask_pos EQUAL -1)
+    MESSAGE(FATAL_ERROR "RAL pipeline does not use the exact write-mask policy")
+ENDIF()
+STRING(FIND "${PIPELINE}"
+    "if ( !ralVk_ColorBlendStatesSupported( ci, b->caps.independentBlend ) ) {" blend_gate_pos)
+STRING(FIND "${PIPELINE}" "// ── pipeline layout" layout_pos)
+STRING(FIND "${PIPELINE}" "modVert = ralVk_MakeShaderModule" shader_pos)
+IF(blend_gate_pos EQUAL -1 OR layout_pos EQUAL -1 OR shader_pos EQUAL -1)
+    MESSAGE(FATAL_ERROR "RAL MRT pipeline fail-closed gate/order anchors are missing")
+ENDIF()
+IF(NOT blend_gate_pos LESS layout_pos OR NOT blend_gate_pos LESS shader_pos)
+    MESSAGE(FATAL_ERROR "RAL MRT blend gate must run before layout and shader creation")
+ENDIF()
+STRING(SUBSTRING "${PIPELINE}" ${blend_gate_pos} 500 gate_body)
+STRING(FIND "${gate_body}" "return NULL;" gate_return_pos)
+IF(gate_return_pos EQUAL -1)
+    MESSAGE(FATAL_ERROR "RAL MRT incompatible blend gate does not immediately reject")
+ENDIF()
+STRING(FIND "${RESOURCE}" "ralVk_TextureUsage( ci->usage )" usage_pos)
+IF(usage_pos EQUAL -1)
+    MESSAGE(FATAL_ERROR "RAL texture creation no longer shares the audited usage expansion")
+ENDIF()

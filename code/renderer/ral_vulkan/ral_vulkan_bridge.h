@@ -28,6 +28,10 @@ void     Ral_GetEnabledDeviceExtensions( const ralBackend_t *b,
                                          uint32_t *outCount );
 
 void *Ral_GetCommandBufferHandle( const ralCommandBuffer_t *cb );
+// Renderer-only migration bridge. The current persistent renderer rings still
+// use qvkBegin/End/Reset on their RAL-allocated handles. New portable RAL
+// consumers keep the default strict lifecycle and must not enable this.
+void Ral_SetCommandBufferExternalLifecycle( ralCommandBuffer_t *cb, qboolean enabled );
 
 ralFence_t *Ral_AdoptFence( ralBackend_t *b, void *externalFence, const char *debugName );
 void       *Ral_GetFenceHandle( const ralFence_t *fence );

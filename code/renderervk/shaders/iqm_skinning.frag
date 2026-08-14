@@ -15,6 +15,10 @@ layout(location = 1) in vec3 frag_normal;
 layout(location = 2) in vec4 frag_tangent;  // tangent (xyz) + bitangent sign (w)
 
 layout(location = 0) out vec4 out_color;
+#ifdef USE_TEMPORAL_INVALIDATE
+layout(location = 1) out vec2 out_temporal_velocity;
+layout(location = 2) out float out_temporal_validity;
+#endif
 
 // Precise piecewise sRGB <-> linear conversion.
 // Duplicated in every fragment shader per the engine-wide
@@ -43,4 +47,8 @@ void main() {
 	// byte content). Alpha stays raw (alpha is not sRGB-encoded).
 	vec4 tex = texture(texture0, frag_tex_coord);
 	out_color = vec4( sRGBToLinear( tex.rgb ), tex.a );
+#ifdef USE_TEMPORAL_INVALIDATE
+	out_temporal_velocity = vec2( 0.0 );
+	out_temporal_validity = 0.0;
+#endif
 }

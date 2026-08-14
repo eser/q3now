@@ -10,21 +10,25 @@
 
 #include "ral_vulkan_internal.h"
 
-R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
-
 #define RAL_VK_MAX_SUBMIT_CBS   16u
 #define RAL_VK_MAX_SUBMIT_SEMS  16u
 
 // ════════════════════════════════════════════════════════════════════════
 // queue submission helper (mutex-guarded; vkQueueSubmit2 is not thread-safe)
 // ════════════════════════════════════════════════════════════════════════
-void ralVk_QueueSubmit2( ralBackend_t *b, ralQueueType_t q, const VkSubmitInfo2 *si2, VkFence fence ) {
+ralResult_t ralVk_QueueSubmit2( ralBackend_t *b, ralQueueType_t q, const VkSubmitInfo2 *si2, VkFence fence ) {
 	VkResult r;
+	if ( !b || !si2 || (uint32_t)q > RAL_QUEUE_TRANSFER ) return ralErrorInvalidArgument;
 	ralVk_QueueLock( b, q );
 	r = b->vk.QueueSubmit2( b->queues[q], 1, si2, fence );
 	ralVk_QueueUnlock( b, q );
-	if ( r != VK_SUCCESS )
-		R_LOG( rch_ral, SEV_WARN, "vkQueueSubmit2 (queue %d) failed (VkResult %d)\n", (int)q, (int)r );
+	if ( r != VK_SUCCESS ) {
+		RAL_VK_LOG( SEV_WARN, "vkQueueSubmit2 (queue %d) failed (VkResult %d)\n", (int)q, (int)r );
+		if ( r == VK_ERROR_DEVICE_LOST ) return ralErrorDeviceLost;
+		if ( r == VK_ERROR_OUT_OF_HOST_MEMORY || r == VK_ERROR_OUT_OF_DEVICE_MEMORY ) return ralErrorOutOfMemory;
+		return ralErrorUnknown;
+	}
+	return ralSuccess;
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -62,7 +66,7 @@ ralCommandBuffer_t *Ral_AcquireCommandBuffer( ralBackend_t *b, ralQueueType_t q 
 	ralVk_QueueLock( b, q );
 	if ( b->vk.AllocateCommandBuffers( b->device, &ai, &vcb ) != VK_SUCCESS ) vcb = VK_NULL_HANDLE;
 	ralVk_QueueUnlock( b, q );
-	if ( vcb == VK_NULL_HANDLE ) { R_LOG( rch_ral, SEV_WARN, "Ral_AcquireCommandBuffer: vkAllocateCommandBuffers failed (queue %d)\n", (int)q ); return NULL; }
+	if ( vcb == VK_NULL_HANDLE ) { RAL_VK_LOG( SEV_WARN, "Ral_AcquireCommandBuffer: vkAllocateCommandBuffers failed (queue %d)\n", (int)q ); return NULL; }
 	cb = (ralCommandBuffer_t *)malloc( sizeof( *cb ) );
 	if ( !cb ) { ralVk_QueueLock( b, q ); b->vk.FreeCommandBuffers( b->device, b->cmdPools[q], 1, &vcb ); ralVk_QueueUnlock( b, q ); return NULL; }
 	RAL_ZERO( *cb );
@@ -114,16 +118,15 @@ void Ral_SubmitAndDispose( ralCommandBuffer_t *cb ) {
 	b = cb->backend;
 	Ral_EndCommandBuffer( cb );
 	fence = Ral_CreateFence( b );
+	if ( !fence ) { Ral_DestroyCommandBuffer( cb ); return; }
 	RAL_ZERO( si );
 	cbs[ 0 ]              = cb;
 	si.commandBuffers     = cbs;
 	si.numCommandBuffers  = 1;
 	si.signalFence        = fence;
-	Ral_Submit( b, cb->queue, &si );
-	if ( fence ) {
-		Ral_WaitFence   ( fence, ~( uint64_t )0 );
-		Ral_DestroyFence( fence );
-	}
+	if ( Ral_Submit( b, cb->queue, &si ) == ralSuccess )
+		Ral_WaitFence( fence, ~( uint64_t )0 );
+	Ral_DestroyFence( fence );
 	// ownsBuffer=qtrue → returns the VkCommandBuffer to the pool + frees wrapper.
 	Ral_DestroyCommandBuffer( cb );
 }
@@ -131,11 +134,11 @@ void Ral_SubmitAndDispose( ralCommandBuffer_t *cb ) {
 void Ral_BeginCommandBuffer( ralCommandBuffer_t *cb ) {
 	VkCommandBufferBeginInfo bi;
 	if ( !cb ) return;
-	if ( cb->state != RAL_VK_CMD_IDLE ) { R_LOG( rch_ral, SEV_WARN, "Ral_BeginCommandBuffer: command buffer not IDLE (state %d)\n", (int)cb->state ); return; }
+	if ( cb->state != RAL_VK_CMD_IDLE ) { RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_BeginCommandBuffer: command buffer not IDLE (state %d)\n", (int)cb->state ); return; }
 	RAL_ZERO( bi );
 	bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	if ( cb->backend->vk.BeginCommandBuffer( cb->cb, &bi ) != VK_SUCCESS ) { R_LOG( rch_ral, SEV_WARN, "Ral_BeginCommandBuffer: vkBeginCommandBuffer failed\n" ); return; }
+	if ( cb->backend->vk.BeginCommandBuffer( cb->cb, &bi ) != VK_SUCCESS ) { RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_BeginCommandBuffer: vkBeginCommandBuffer failed\n" ); return; }
 	cb->renderingDebugLabelActive = qfalse;
 	cb->debugLabelBeginCount = 0;
 	cb->debugLabelEndCount = 0;
@@ -144,13 +147,18 @@ void Ral_BeginCommandBuffer( ralCommandBuffer_t *cb ) {
 
 void Ral_EndCommandBuffer( ralCommandBuffer_t *cb ) {
 	if ( !cb ) return;
-	if ( cb->state != RAL_VK_CMD_RECORDING ) { R_LOG( rch_ral, SEV_WARN, "Ral_EndCommandBuffer: command buffer not RECORDING (state %d)\n", (int)cb->state ); return; }
-	if ( cb->backend->vk.EndCommandBuffer( cb->cb ) != VK_SUCCESS ) { R_LOG( rch_ral, SEV_WARN, "Ral_EndCommandBuffer: vkEndCommandBuffer failed\n" ); return; }
+	if ( cb->state != RAL_VK_CMD_RECORDING ) { RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_EndCommandBuffer: command buffer not RECORDING (state %d)\n", (int)cb->state ); return; }
+	if ( cb->backend->vk.EndCommandBuffer( cb->cb ) != VK_SUCCESS ) { RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_EndCommandBuffer: vkEndCommandBuffer failed\n" ); return; }
 	cb->state = RAL_VK_CMD_PENDING_SUBMIT;
 }
 
 void *Ral_GetCommandBufferHandle( const ralCommandBuffer_t *cb ) {
 	return cb ? (void *)cb->cb : NULL;
+}
+
+void Ral_SetCommandBufferExternalLifecycle( ralCommandBuffer_t *cb, qboolean enabled ) {
+	if ( !cb ) return;
+	cb->externalLifecycle = enabled ? qtrue : qfalse;
 }
 
 void Ral_DestroyCommandBuffer( ralCommandBuffer_t *cb ) {
@@ -183,13 +191,18 @@ void Ral_PoolReset( ralBackend_t *b, ralQueueType_t q ) {
 // ════════════════════════════════════════════════════════════════════════
 // Ral_Submit — VkSubmitInfo2 with command-buffer + wait/signal semaphore arrays
 // ════════════════════════════════════════════════════════════════════════
-void Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t *si ) {
+ralResult_t Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t *si ) {
 	VkCommandBufferSubmitInfo cbis[ RAL_VK_MAX_SUBMIT_CBS ];
 	VkSemaphoreSubmitInfo     waitInfos[ RAL_VK_MAX_SUBMIT_SEMS ], signalInfos[ RAL_VK_MAX_SUBMIT_SEMS ];
 	VkSubmitInfo2             si2;
 	uint32_t                  i, nCb, nWait, nSig;
 	VkFence                   fence;
-	if ( !b || !si || (uint32_t)q > RAL_QUEUE_TRANSFER ) return;
+	ralResult_t result;
+	if ( !b || !si || (uint32_t)q > RAL_QUEUE_TRANSFER ) return ralErrorInvalidArgument;
+	if ( ( si->numCommandBuffers && !si->commandBuffers )
+	  || ( si->numWaitSemaphores && !si->waitSemaphores )
+	  || ( si->numSignalSemaphores && !si->signalSemaphores ) )
+		return ralErrorInvalidArgument;
 
 	// The per-submit fixed-capacity scratch arrays are intentional (16 is
 	// generous for every renderer submission path). Refuse — rather than
@@ -200,24 +213,27 @@ void Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t *si ) 
 	if ( si->numCommandBuffers  > RAL_VK_MAX_SUBMIT_CBS  ||
 	     si->numWaitSemaphores   > RAL_VK_MAX_SUBMIT_SEMS ||
 	     si->numSignalSemaphores > RAL_VK_MAX_SUBMIT_SEMS ) {
-		R_LOG( rch_ral, SEV_ERROR, "Ral_Submit: over-capacity (cbs %u/%u, wait %u/%u, signal %u/%u) — refusing submit (would truncate; raise RAL_VK_MAX_SUBMIT_* if this is legitimate)\n",
+		RAL_VK_LOG( SEV_ERROR, "Ral_Submit: over-capacity (cbs %u/%u, wait %u/%u, signal %u/%u) — refusing submit (would truncate; raise RAL_VK_MAX_SUBMIT_* if this is legitimate)\n",
 		        si->numCommandBuffers, RAL_VK_MAX_SUBMIT_CBS,
 		        si->numWaitSemaphores, RAL_VK_MAX_SUBMIT_SEMS,
 		        si->numSignalSemaphores, RAL_VK_MAX_SUBMIT_SEMS );
-		return;
+		return ralErrorInvalidArgument;
 	}
 
 	nCb = si->numCommandBuffers;
 	for ( i = 0; i < nCb; i++ ) {
 		ralCommandBuffer_t *cb = si->commandBuffers[i];
+		if ( !cb || cb->backend != b || cb->cb == VK_NULL_HANDLE
+		  || ( !cb->externalLifecycle && cb->state != RAL_VK_CMD_PENDING_SUBMIT ) )
+			return ralErrorInvalidArgument;
 		RAL_ZERO( cbis[i] );
 		cbis[i].sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-		cbis[i].commandBuffer = cb ? cb->cb : VK_NULL_HANDLE;
-		if ( cb ) { cb->state = RAL_VK_CMD_SUBMITTED; cb->frame = b->currentFrame; }
+		cbis[i].commandBuffer = cb->cb;
 	}
 	nWait = si->numWaitSemaphores;
 	for ( i = 0; i < nWait; i++ ) {
 		ralSemaphore_t *s = si->waitSemaphores[i];
+		if ( !s || s->backend != b || s->sem == VK_NULL_HANDLE ) return ralErrorInvalidArgument;
 		RAL_ZERO( waitInfos[i] );
 		waitInfos[i].sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
 		waitInfos[i].semaphore = s ? s->sem : VK_NULL_HANDLE;
@@ -227,20 +243,30 @@ void Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t *si ) 
 	nSig = si->numSignalSemaphores;
 	for ( i = 0; i < nSig; i++ ) {
 		ralSemaphore_t *s = si->signalSemaphores[i];
+		if ( !s || s->backend != b || s->sem == VK_NULL_HANDLE ) return ralErrorInvalidArgument;
 		RAL_ZERO( signalInfos[i] );
 		signalInfos[i].sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
 		signalInfos[i].semaphore = s ? s->sem : VK_NULL_HANDLE;
 		signalInfos[i].value     = ( s && s->type == RAL_SEMAPHORE_TIMELINE && si->signalValues ) ? si->signalValues[i] : 0;
 		signalInfos[i].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 	}
-	fence = ( si->signalFence && si->signalFence->fence != VK_NULL_HANDLE ) ? si->signalFence->fence : VK_NULL_HANDLE;
+	if ( si->signalFence && ( si->signalFence->backend != b || si->signalFence->fence == VK_NULL_HANDLE ) )
+		return ralErrorInvalidArgument;
+	fence = si->signalFence ? si->signalFence->fence : VK_NULL_HANDLE;
 
 	RAL_ZERO( si2 );
 	si2.sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
 	si2.waitSemaphoreInfoCount   = nWait;  si2.pWaitSemaphoreInfos   = nWait ? waitInfos   : NULL;
 	si2.commandBufferInfoCount   = nCb;    si2.pCommandBufferInfos   = nCb   ? cbis        : NULL;
 	si2.signalSemaphoreInfoCount = nSig;   si2.pSignalSemaphoreInfos = nSig  ? signalInfos : NULL;
-	ralVk_QueueSubmit2( b, q, &si2, fence );
+	result = ralVk_QueueSubmit2( b, q, &si2, fence );
+	if ( result != ralSuccess ) return result;
+	for ( i = 0; i < nCb; i++ ) {
+		if ( !si->commandBuffers[i]->externalLifecycle )
+			si->commandBuffers[i]->state = RAL_VK_CMD_SUBMITTED;
+		si->commandBuffers[i]->frame = b->currentFrame;
+	}
+	return ralSuccess;
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -394,7 +420,7 @@ void Ral_CmdBindPipeline( ralCommandBuffer_t *cb, ralPipeline_t *p ) {
 void Ral_CmdBindBindGroup( ralCommandBuffer_t *cb, uint32_t setIndex, ralBindGroup_t *g ) {
 	if ( !cb || !g || cb->currentLayout == VK_NULL_HANDLE ) {
 		if ( cb && cb->currentLayout == VK_NULL_HANDLE )
-			R_LOG( rch_ral, SEV_WARN, "Ral_CmdBindBindGroup: no pipeline bound (call Ral_CmdBindPipeline first)\n" );
+			RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_CmdBindBindGroup: no pipeline bound (call Ral_CmdBindPipeline first)\n" );
 		return;
 	}
 	cb->backend->vk.CmdBindDescriptorSets( cb->cb, cb->currentBindPoint, cb->currentLayout,
@@ -422,7 +448,7 @@ void Ral_CmdPushConstants( ralCommandBuffer_t *cb, uint32_t stageFlags, uint32_t
 	VkShaderStageFlags vkStages = 0;
 	if ( !cb || !data || size == 0 || cb->currentLayout == VK_NULL_HANDLE ) {
 		if ( cb && cb->currentLayout == VK_NULL_HANDLE )
-			R_LOG( rch_ral, SEV_WARN, "Ral_CmdPushConstants: no pipeline bound\n" );
+			RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_CmdPushConstants: no pipeline bound\n" );
 		return;
 	}
 	// Require a bound pipeline so we have an authoritative pushConstantSize to
@@ -430,13 +456,13 @@ void Ral_CmdPushConstants( ralCommandBuffer_t *cb, uint32_t stageFlags, uint32_t
 	// is uint32 and wraps — e.g. offset=0xFFFFFFF0,size=0x20 → 0x10, slipping a
 	// huge offset past the bound and recording an out-of-range vkCmdPushConstants).
 	if ( !cb->currentPipeline ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CmdPushConstants: no pipeline bound (cannot bound-check range)\n" );
+		RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_CmdPushConstants: no pipeline bound (cannot bound-check range)\n" );
 		return;
 	}
 	{
 		uint32_t limit = cb->currentPipeline->pushConstantSize;
 		if ( size > limit || offset > limit - size ) {
-			R_LOG( rch_ral, SEV_WARN, "Ral_CmdPushConstants: range [offset=%u size=%u] exceeds pipeline's pushConstantSize %u\n",
+			RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_CmdPushConstants: range [offset=%u size=%u] exceeds pipeline's pushConstantSize %u\n",
 			        offset, size, limit );
 			return;
 		}
@@ -480,8 +506,8 @@ void Ral_CmdDrawIndexedIndirectCount( ralCommandBuffer_t *cb, ralBuffer_t *argBu
 	// caps.drawIndirectCount and provide a non-indirect-count fallback path
 	// when the device lacks it.
 	if ( !cb->backend->caps.drawIndirectCount || !cb->backend->vk.CmdDrawIndexedIndirectCount ) {
-		RAL_NOTE_ONCE( "Ral_CmdDrawIndexedIndirectCount called but caps.drawIndirectCount=false; consumer must branch on caps before calling. Call is a no-op (no degraded substitute).\n" );
-		R_LOG( rch_ral, SEV_ERROR, "Ral_CmdDrawIndexedIndirectCount: caps.drawIndirectCount=false but called anyway — refusing to substitute vkCmdDrawIndexedIndirect (would render the wrong primitive count). Consumer must cap-branch.\n" );
+		RAL_NOTE_ONCE_ON( cb->backend, "Ral_CmdDrawIndexedIndirectCount called but caps.drawIndirectCount=false; consumer must branch on caps before calling. Call is a no-op (no degraded substitute).\n" );
+		RAL_VK_LOG_ON( cb->backend, SEV_ERROR, "Ral_CmdDrawIndexedIndirectCount: caps.drawIndirectCount=false but called anyway — refusing to substitute vkCmdDrawIndexedIndirect (would render the wrong primitive count). Consumer must cap-branch.\n" );
 		return;
 	}
 	cb->backend->vk.CmdDrawIndexedIndirectCount( cb->cb, argBuf->buffer, (VkDeviceSize)argOffset,
@@ -564,7 +590,7 @@ void Ral_CmdPipelineBarrierFull( ralCommandBuffer_t *cb, const ralPipelineBarrie
 	if ( m  > ARRAY_LEN( memBarriers    ) ||
 	     b  > ARRAY_LEN( bufferBarriers ) ||
 	     im > ARRAY_LEN( imageBarriers  ) ) {
-		R_LOG( rch_ral, SEV_ERROR, "Ral_CmdPipelineBarrierFull: over-capacity (mem %u/%u, buffer %u/%u, image %u/%u) — refusing barrier (would truncate; split the batch or raise the scratch caps)\n",
+		RAL_VK_LOG_ON( cb->backend, SEV_ERROR, "Ral_CmdPipelineBarrierFull: over-capacity (mem %u/%u, buffer %u/%u, image %u/%u) — refusing barrier (would truncate; split the batch or raise the scratch caps)\n",
 		        m,  (uint32_t)ARRAY_LEN( memBarriers    ),
 		        b,  (uint32_t)ARRAY_LEN( bufferBarriers ),
 		        im, (uint32_t)ARRAY_LEN( imageBarriers  ) );
@@ -642,6 +668,77 @@ void Ral_CmdTransitionTexture( ralCommandBuffer_t *cb, ralTexture_t *tex,
 	                                    0, 0, NULL, 0, NULL, 1, &ib );
 	// Atomic with the barrier: tracked layout can never desync from the GPU.
 	tex->currentLayout = (VkImageLayout)newVkLayout;
+}
+
+ralResult_t Ral_PrepareSwapchainImageForPresent( ralCommandBuffer_t *cb,
+	                                              ralSwapchain_t *swapchain,
+	                                              uint32_t imageIndex ) {
+	ralTexture_t *tex;
+	VkImageMemoryBarrier ib;
+	VkPipelineStageFlags srcStage;
+	VkAccessFlags srcAccess;
+
+	if ( !cb || !swapchain || cb->backend != swapchain->backend
+	  || ( !cb->externalLifecycle && cb->state != RAL_VK_CMD_RECORDING )
+	  || imageIndex >= swapchain->imageCount || !swapchain->adoptedImages
+	  || !swapchain->imageStates
+	  || swapchain->imageStates[imageIndex] != RAL_VK_SWAPCHAIN_IMAGE_ACQUIRED )
+		return ralErrorInvalidArgument;
+	tex = swapchain->adoptedImages[imageIndex];
+	if ( !tex || tex->backend != cb->backend || tex->image == VK_NULL_HANDLE )
+		return ralErrorInvalidArgument;
+	if ( tex->currentLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR ) {
+		swapchain->imageStates[imageIndex] = RAL_VK_SWAPCHAIN_IMAGE_PREPARED;
+		return ralSuccess;
+	}
+
+	switch ( tex->currentLayout ) {
+		case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+			srcStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			srcAccess = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			break;
+		case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+			srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+			srcAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
+			break;
+		case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+			srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+			srcAccess = VK_ACCESS_TRANSFER_READ_BIT;
+			break;
+		case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+			srcStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+			srcAccess = VK_ACCESS_SHADER_READ_BIT;
+			break;
+		case VK_IMAGE_LAYOUT_GENERAL:
+			srcStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+			srcAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+			break;
+		case VK_IMAGE_LAYOUT_UNDEFINED:
+			srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+			srcAccess = 0;
+			break;
+		default:
+			return ralErrorInvalidArgument;
+	}
+
+	RAL_ZERO( ib );
+	ib.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	ib.srcAccessMask = srcAccess;
+	ib.dstAccessMask = 0;
+	ib.oldLayout = tex->currentLayout;
+	ib.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	ib.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	ib.image = tex->image;
+	ib.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	ib.subresourceRange.levelCount = 1;
+	ib.subresourceRange.layerCount = 1;
+	cb->backend->vk.CmdPipelineBarrier( cb->cb, srcStage,
+		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
+		0, NULL, 0, NULL, 1, &ib );
+	tex->currentLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	swapchain->imageStates[imageIndex] = RAL_VK_SWAPCHAIN_IMAGE_PREPARED;
+	return ralSuccess;
 }
 
 void Ral_CmdCopyImage( ralCommandBuffer_t *cb, ralTexture_t *src, ralTexture_t *dst,
@@ -766,7 +863,7 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 	if ( !cb || !ri_ ) return;
 	if ( ri_->numColorAttachments > RAL_MAX_COLOR_ATTACHMENTS ) return;
 	if ( cb->renderingDebugLabelActive ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_BeginRendering: prior debug-label scope still active\n" );
+		RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_BeginRendering: prior debug-label scope still active\n" );
 		Ral_EndDebugLabel( cb );
 		cb->renderingDebugLabelActive = qfalse;
 	}
@@ -860,7 +957,7 @@ void Ral_EndRendering( ralCommandBuffer_t *cb ) {
 	cb->backend->vk.CmdEndRendering( cb->cb );
 	if ( cb->renderingDebugLabelActive ) {
 		if ( !Ral_EndDebugLabel( cb ) )
-			R_LOG( rch_ral, SEV_WARN, "Ral_EndRendering: active debug-label scope could not close\n" );
+			RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_EndRendering: active debug-label scope could not close\n" );
 		cb->renderingDebugLabelActive = qfalse;
 	}
 }
@@ -895,8 +992,8 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 	ralQueryPool_t       *qpool = NULL;
 	uint32_t              i;
 
-	R_LOG( rch_ral, SEV_INFO, "===== RAL async test (Phase 7.3) =====\n" );
-	R_LOG( rch_ral, SEV_INFO, "  queues: graphics fam %u, compute fam %u (%s), transfer fam %u (%s)\n",
+	RAL_VK_LOG( SEV_INFO, "===== RAL async test (Phase 7.3) =====\n" );
+	RAL_VK_LOG( SEV_INFO, "  queues: graphics fam %u, compute fam %u (%s), transfer fam %u (%s)\n",
 	        b->queueFamily[RAL_QUEUE_GRAPHICS],
 	        b->queueFamily[RAL_QUEUE_COMPUTE],  b->caps.asyncCompute  ? "dedicated" : "shared-with-graphics",
 	        b->queueFamily[RAL_QUEUE_TRANSFER], b->caps.asyncTransfer ? "dedicated" : "shared-with-graphics" );
@@ -915,8 +1012,8 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 			Ral_Submit( b, RAL_QUEUE_GRAPHICS, &si );
 			Ral_WaitFence( f, ~0ull );
 			post = Ral_FenceSignaled( f );
-			R_LOG( rch_ral, SEV_INFO, "  fence cycle: pre-wait signaled=%s, post-wait signaled=%s  (expect post=yes)\n", pre ? "yes" : "no", post ? "yes" : "no" );
-		} else R_LOG( rch_ral, SEV_WARN, "  fence cycle: setup failed\n" );
+			RAL_VK_LOG( SEV_INFO, "  fence cycle: pre-wait signaled=%s, post-wait signaled=%s  (expect post=yes)\n", pre ? "yes" : "no", post ? "yes" : "no" );
+		} else RAL_VK_LOG( SEV_WARN, "  fence cycle: setup failed\n" );
 		if ( cb ) Ral_DestroyCommandBuffer( cb );
 		if ( f )  Ral_DestroyFence( f );
 	}
@@ -930,16 +1027,16 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 		byte *data = (byte *)malloc( BIG );
 		ralFence_t *uf;
 		if ( !data ) {
-			R_LOG( rch_ral, SEV_WARN, "  async buffer upload: malloc(%u) failed — skipping\n", BIG );
+			RAL_VK_LOG( SEV_WARN, "  async buffer upload: malloc(%u) failed — skipping\n", BIG );
 		} else {
 		for ( i = 0; i < BIG; i++ ) data[i] = (byte)( i & 0xFF );
 		uf = Ral_BufferUploadAsync( buf, 0, data, BIG );
 		if ( uf ) {
-			R_LOG( rch_ral, SEV_INFO, "  Ral_BufferUploadAsync: 1 MiB on %s queue; fence signaled=%s (synchronous internal wait — async streaming is Phase 7.15)\n",
+			RAL_VK_LOG( SEV_INFO, "  Ral_BufferUploadAsync: 1 MiB on %s queue; fence signaled=%s (synchronous internal wait — async streaming is Phase 7.15)\n",
 			        b->caps.asyncTransfer ? "transfer" : "graphics", Ral_FenceSignaled( uf ) ? "yes" : "no" );
 			Ral_WaitFence( uf, ~0ull );
 			Ral_DestroyFence( uf );
-		} else R_LOG( rch_ral, SEV_WARN, "  Ral_BufferUploadAsync failed\n" );
+		} else RAL_VK_LOG( SEV_WARN, "  Ral_BufferUploadAsync failed\n" );
 		free( data );
 		}
 	}
@@ -988,15 +1085,15 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 			b->vk.DeviceWaitIdle( b->device );   // guarantee the transfer-queue copy is host-visible before mapping
 			tv = Ral_GetTimelineValue( timeline );
 			m = (byte *)Ral_MapBuffer( readback );
-			R_LOG( rch_ral, SEV_INFO, "  cross-queue (transfer→graphics→compute): timeline value=%llu (expect ≥4 after host signal); queue-ownership barriers (transfer fam %u → graphics fam %u) recorded\n",
+			RAL_VK_LOG( SEV_INFO, "  cross-queue (transfer→graphics→compute): timeline value=%llu (expect ≥4 after host signal); queue-ownership barriers (transfer fam %u → graphics fam %u) recorded\n",
 			        (unsigned long long)tv, b->queueFamily[RAL_QUEUE_TRANSFER], b->queueFamily[RAL_QUEUE_GRAPHICS] );
-			R_LOG( rch_ral, SEV_INFO, "  readback after transfer-queue copy: byte[0..3] = %u %u %u %u  (expect 0 1 2 3)\n", m ? m[0] : 255, m ? m[1] : 255, m ? m[2] : 255, m ? m[3] : 255 );
+			RAL_VK_LOG( SEV_INFO, "  readback after transfer-queue copy: byte[0..3] = %u %u %u %u  (expect 0 1 2 3)\n", m ? m[0] : 255, m ? m[1] : 255, m ? m[2] : 255, m ? m[3] : 255 );
 			Ral_UnmapBuffer( readback );
-		} else R_LOG( rch_ral, SEV_WARN, "  cross-queue: command buffer acquisition failed\n" );
+		} else RAL_VK_LOG( SEV_WARN, "  cross-queue: command buffer acquisition failed\n" );
 		if ( cbC ) Ral_DestroyCommandBuffer( cbC );
 		if ( cbG ) Ral_DestroyCommandBuffer( cbG );
 		if ( cbT ) Ral_DestroyCommandBuffer( cbT );
-	} else R_LOG( rch_ral, SEV_WARN, "  cross-queue: timeline semaphore creation failed\n" );
+	} else RAL_VK_LOG( SEV_WARN, "  cross-queue: timeline semaphore creation failed\n" );
 
 	// ── (4) GPU timestamps ─────────────────────────────────────────────
 	{
@@ -1029,13 +1126,13 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 			if ( Ral_GetQueryResults( qpool, 0, 4, res, qtrue ) ) {
 				d10 = (double)( res[1] - res[0] ) * (double)b->caps.timestampPeriodNs / 1000.0;   // µs
 				d30 = (double)( res[3] - res[0] ) * (double)b->caps.timestampPeriodNs / 1000.0;
-				R_LOG( rch_ral, SEV_INFO, "  timestamps: ts1-ts0 = %.3f us, ts3-ts0 = %.3f us  (timestampPeriod = %.3f ns/tick; expect microsecond-range)\n", d10, d30, (double)b->caps.timestampPeriodNs );
-			} else R_LOG( rch_ral, SEV_WARN, "  timestamps: Ral_GetQueryResults returned not-ready\n" );
+				RAL_VK_LOG( SEV_INFO, "  timestamps: ts1-ts0 = %.3f us, ts3-ts0 = %.3f us  (timestampPeriod = %.3f ns/tick; expect microsecond-range)\n", d10, d30, (double)b->caps.timestampPeriodNs );
+			} else RAL_VK_LOG( SEV_WARN, "  timestamps: Ral_GetQueryResults returned not-ready\n" );
 			Ral_ResetQueryPool( qpool, 0, 4 );   // host-side reset (exercise the public API)
-		} else R_LOG( rch_ral, SEV_WARN, "  timestamps: setup failed\n" );
+		} else RAL_VK_LOG( SEV_WARN, "  timestamps: setup failed\n" );
 		if ( cb ) Ral_DestroyCommandBuffer( cb );
 		if ( f )  Ral_DestroyFence( f );
-	} else R_LOG( rch_ral, SEV_INFO, "  timestamps: skipped (timestampPeriod=%.3f)\n", (double)b->caps.timestampPeriodNs );
+	} else RAL_VK_LOG( SEV_INFO, "  timestamps: skipped (timestampPeriod=%.3f)\n", (double)b->caps.timestampPeriodNs );
 
 	// ── (5) deferred-destroy stress: 100 frames × create+destroy a 256 KiB buffer ──
 	{
@@ -1049,7 +1146,7 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 			Ral_EndFrame( b );
 		}
 		for ( i = 0; i < RAL_VK_MAX_FRAMES_IN_FLIGHT + 1u; i++ ) { Ral_BeginFrame( b ); Ral_EndFrame( b ); }   // drain the tail
-		R_LOG( rch_ral, SEV_INFO, "  deferred destroy: 100 frames × (create+destroy 256 KiB buffer); pending was %u, now %u; RAL footprint %u KiB / %u allocations  (no OOM — drain works)\n",
+		RAL_VK_LOG( SEV_INFO, "  deferred destroy: 100 frames × (create+destroy 256 KiB buffer); pending was %u, now %u; RAL footprint %u KiB / %u allocations  (no OOM — drain works)\n",
 		        pending0, b->numPendingDestroy, (unsigned)( b->ralDeviceLocalBytes >> 10 ), b->numAllocations );
 	}
 
@@ -1070,10 +1167,10 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 			}
 			peakPending = b->numPendingDestroy;
 			for ( i = 0; i < RAL_VK_MAX_FRAMES_IN_FLIGHT + 1u; i++ ) { Ral_BeginFrame( b ); Ral_EndFrame( b ); }   // drain all 1000
-			R_LOG( rch_ral, SEV_INFO, "  BindGroup cycle: 1000 × (create+destroy 1-UBO bind group); %u alloc failures (expect 0); peak pending-destroy %u; after drain %u  (descriptor-set free path works, no pool exhaustion)\n",
+			RAL_VK_LOG( SEV_INFO, "  BindGroup cycle: 1000 × (create+destroy 1-UBO bind group); %u alloc failures (expect 0); peak pending-destroy %u; after drain %u  (descriptor-set free path works, no pool exhaustion)\n",
 			        failed, peakPending, b->numPendingDestroy );
 			Ral_DestroyBindGroupLayout( bgl );
-		} else R_LOG( rch_ral, SEV_WARN, "  BindGroup cycle: layout creation failed\n" );
+		} else RAL_VK_LOG( SEV_WARN, "  BindGroup cycle: layout creation failed\n" );
 	}
 
 	// ── teardown ───────────────────────────────────────────────────────
@@ -1083,7 +1180,7 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 	if ( readback ) Ral_DestroyBuffer( readback );
 	if ( buf )      Ral_DestroyBuffer( buf );
 	for ( i = 0; i < RAL_VK_MAX_FRAMES_IN_FLIGHT + 1u; i++ ) { Ral_BeginFrame( b ); Ral_EndFrame( b ); }
-	R_LOG( rch_ral, SEV_INFO, "  teardown: %u pending destroys, %u live allocations, RAL footprint %u KiB device-local  (expect ~0)\n",
+	RAL_VK_LOG( SEV_INFO, "  teardown: %u pending destroys, %u live allocations, RAL footprint %u KiB device-local  (expect ~0)\n",
 	        b->numPendingDestroy, b->numAllocations, (unsigned)( b->ralDeviceLocalBytes >> 10 ) );
-	R_LOG( rch_ral, SEV_INFO, "===== end RAL async test =====\n" );
+	RAL_VK_LOG( SEV_INFO, "===== end RAL async test =====\n" );
 }

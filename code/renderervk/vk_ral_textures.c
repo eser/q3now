@@ -291,17 +291,74 @@ static const char *const kPlatformDeviceExts[] = {
 #endif
 };
 
+static void *vk_ral_host_get_proc( void *userData, void *nativeInstance,
+	                               const char *name ) {
+	(void)userData;
+	return ri.VK_GetInstanceProcAddr
+	     ? ri.VK_GetInstanceProcAddr( (VkInstance)nativeInstance, name ) : NULL;
+}
+
+static qboolean vk_ral_host_create_surface( void *userData, void *platformHandle,
+	                                         void *nativeInstance,
+	                                         uint64_t *outNativeSurface ) {
+	VkSurfaceKHR surface = VK_NULL_HANDLE;
+	(void)userData;
+	// The engine adapter intentionally preserves the existing main-window
+	// callback.  A standalone SDL host supplies its own callback and consumes
+	// platformHandle directly; RAL itself never reaches the engine-global window.
+	(void)platformHandle;
+	if ( outNativeSurface ) *outNativeSurface = 0;
+	if ( !outNativeSurface || !ri.VK_CreateSurface
+	  || !ri.VK_CreateSurface( (VkInstance)nativeInstance, &surface )
+	  || surface == VK_NULL_HANDLE ) return qfalse;
+	*outNativeSurface = (uint64_t)(uintptr_t)surface;
+	return qtrue;
+}
+
+static void vk_ral_host_log( void *userData, ralLogSeverity_t severity,
+	                         const char *message ) {
+	log_severity_t engineSeverity;
+	(void)userData;
+	switch ( severity ) {
+		case RAL_LOG_TRACE:
+		case RAL_LOG_DEBUG: engineSeverity = SEV_DEBUG; break;
+		case RAL_LOG_INFO:  engineSeverity = SEV_INFO;  break;
+		case RAL_LOG_WARN:  engineSeverity = SEV_WARN;  break;
+		case RAL_LOG_ERROR: engineSeverity = SEV_ERROR; break;
+		case RAL_LOG_FATAL: engineSeverity = SEV_FATAL; break;
+		default:            engineSeverity = SEV_ERROR; break;
+	}
+	if ( message ) R_LOG( rch_ral, engineSeverity, "%s", message );
+}
+
 qboolean vk_ral_boot_backend( void ) {
 	ralBackendCreateInfo_t bci;
 	cvar_t                *r_device, *r_anisotropic;
+	uint32_t               platformInstanceExtensionCount = 0;
+	const char *const     *platformInstanceExtensions = NULL;
 
 	if ( s_ral_backend != NULL ) return qtrue;                // idempotent (vid_restart re-entry)
 
 	memset( &bci, 0, sizeof( bci ) );
 	bci.type  = RAL_BACKEND_VULKAN;
 	bci.flags = RAL_FLAG_DEBUG_LABELS;
+	bci.host.userData       = NULL;
+	bci.host.getProcAddress = vk_ral_host_get_proc;
+	bci.host.createSurface  = vk_ral_host_create_surface;
+	bci.host.log            = vk_ral_host_log;
 	bci.letBackendOwnInstance = qtrue;
 	bci.letBackendOwnDevice   = qtrue;
+	if ( !ri.VK_GetInstanceExtensions ) {
+		R_LOG( rch_ral, SEV_ERROR, "vk_ral_boot_backend: platform instance-extension provider unavailable\n" );
+		return qfalse;
+	}
+	platformInstanceExtensions = ri.VK_GetInstanceExtensions( &platformInstanceExtensionCount );
+	if ( !platformInstanceExtensions || platformInstanceExtensionCount == 0 ) {
+		R_LOG( rch_ral, SEV_ERROR, "vk_ral_boot_backend: platform instance-extension list is empty\n" );
+		return qfalse;
+	}
+	bci.platformInstanceExtensions     = platformInstanceExtensions;
+	bci.platformInstanceExtensionCount = platformInstanceExtensionCount;
 	r_device = ri.Cvar_Get ? ri.Cvar_Get( "r_device", "-1", 0 ) : NULL;
 	bci.preferredDeviceIndex  = r_device ? r_device->integer : -1;
 	// Vulkan validation layers + the debug-utils messenger are gated on the
@@ -315,6 +372,10 @@ qboolean vk_ral_boot_backend( void ) {
 	{
 		cvar_t *vkValidate = ri.Cvar_Get ? ri.Cvar_Get( "r_vkValidate", "0", CVAR_ARCHIVE | CVAR_LATCH ) : NULL;
 		bci.enableValidation = ( vkValidate && vkValidate->integer ) ? qtrue : qfalse;
+	}
+	{
+		cvar_t *asyncUpload = ri.Cvar_Get ? ri.Cvar_Get( "r_asyncTextureUpload", "1", CVAR_ARCHIVE ) : NULL;
+		bci.allowAsyncTextureUploads = ( asyncUpload && asyncUpload->integer ) ? qtrue : qfalse;
 	}
 
 	// Renderer-requested device features. Single intent per bundle —
@@ -332,6 +393,7 @@ qboolean vk_ral_boot_backend( void ) {
 	bci.requestFeatures.want8BitStorage           = qtrue;
 	bci.requestFeatures.wantFragmentShadingRate   = qtrue;   // pipeline-rate VRS; enabled only if the device supports it (cap stays false otherwise)
 	bci.requestFeatures.wantDepthClamp            = qtrue;   // near/far depth-clamp raster state (free); enabled only if the device supports it (cap stays false → projection-tweak fallback). r_depthClamp gates runtime use, not the device request.
+	bci.requestFeatures.wantIndependentBlend      = qtrue;   // per-attachment MRT state; runtime users still cap-gate before creating heterogeneous pipelines.
 	r_anisotropic = ri.Cvar_Get ? ri.Cvar_Get( "r_ext_texture_filter_anisotropic", "1", 0 ) : NULL;
 	bci.requestFeatures.wantSamplerAnisotropy     = ( r_anisotropic && r_anisotropic->integer != 0 ) ? qtrue : qfalse;
 
@@ -1190,6 +1252,8 @@ void vk_ral_textures_shutdown( qboolean destroyWindow ) {
 	if ( !destroyWindow ) {
 		return;
 	}
+	vk_temporal_history_store_shutdown();
+	R_TemporalHistoryShutdown();
 	// legacy-mainpath-retire STEP 1 half-init safety. When vk_initialize
 	// declined (caps decline), vk.active stays qfalse and most of the state
 	// the full-teardown branch touches (the bindless layout/set, the
@@ -2430,6 +2494,38 @@ void vk_ral_unregister_buffer( VkBuffer key ) {
 	// register sites (none expected but defensive).
 }
 
+static void vk_ral_fill_diagnostic_create_info( ralBackendCreateInfo_t *ci ) {
+	cvar_t *vkValidate;
+	cvar_t *asyncUpload;
+	memset( ci, 0, sizeof( *ci ) );
+	ci->type                = RAL_BACKEND_VULKAN;
+	ci->flags               = RAL_FLAG_DEBUG_LABELS;
+	ci->host.userData       = NULL;
+	ci->host.getProcAddress = vk_ral_host_get_proc;
+	ci->host.createSurface  = vk_ral_host_create_surface;
+	ci->host.log            = vk_ral_host_log;
+	vkValidate = ri.Cvar_Get ? ri.Cvar_Get( "r_vkValidate", "0", CVAR_ARCHIVE | CVAR_LATCH ) : NULL;
+	asyncUpload = ri.Cvar_Get ? ri.Cvar_Get( "r_asyncTextureUpload", "1", CVAR_ARCHIVE ) : NULL;
+	ci->enableValidation = ( vkValidate && vkValidate->integer ) ? qtrue : qfalse;
+	ci->allowAsyncTextureUploads = ( asyncUpload && asyncUpload->integer ) ? qtrue : qfalse;
+}
+
+// Engine-facing console wrappers stay renderer-owned.  The RAL archive sees
+// only explicit arguments/imports and therefore remains linkable by a future
+// standalone SDL3 tool without Cmd_Argv/Cvar/global-ri stubs.
+Q_EXPORT void Ral_Dump( void ) {
+	ralBackendCreateInfo_t ci;
+	const char *sub = ( ri.Cmd_Argc && ri.Cmd_Argc() > 1 ) ? ri.Cmd_Argv( 1 ) : NULL;
+	vk_ral_fill_diagnostic_create_info( &ci );
+	Ral_RunDiagnostic( &ci, sub );
+}
+
+void Ral_RunPipelineDiagnostic( void ) {
+	ralBackendCreateInfo_t ci;
+	vk_ral_fill_diagnostic_create_info( &ci );
+	Ral_RunDiagnostic( &ci, "pipeline" );
+}
+
 // ── "\ral_dump live" — dump the renderer-owned (imported-mode) backend ─
 // Q_EXPORT'd so the client's Sys_LoadFunction in cl_main.c can resolve it.
 // Reports caps, memory budget, and the texture/buffer registration state
@@ -2448,6 +2544,14 @@ Q_EXPORT void Ral_DumpLive( void ) {
 	}
 	if ( ri.Cmd_Argc() > 2 && Q_stricmp( ri.Cmd_Argv( 2 ), "profile" ) == 0 ) {
 		vk_gpu_profile_dump();
+		return;
+	}
+	if ( ri.Cmd_Argc() > 2 && Q_stricmp( ri.Cmd_Argv( 2 ), "swapchain" ) == 0 ) {
+		vk_request_swapchain_recreate();
+		return;
+	}
+	if ( ri.Cmd_Argc() > 2 && Q_stricmp( ri.Cmd_Argv( 2 ), "temporal" ) == 0 ) {
+		R_TemporalProjectionDump();
 		return;
 	}
 

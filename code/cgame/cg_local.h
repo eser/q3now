@@ -8,6 +8,7 @@
 #include "../renderercommon/tr_types.h"
 #include "../game/bg_public.h"
 #include "cg_public.h"
+#include "cg_temporal_identity.h"
 #include "../qcommon/wired/scene/wired_scene_eval.h"   /* cinematic-scene POD + evaluator (runs cgame-side) */
 
 // Quake3e compat: refEntity_t renamed shaderRGBA[4] to shader (color4ub_t with .rgba[4])
@@ -226,6 +227,10 @@ typedef struct centity_s {
 	// exact interpolated position of entity on this frame
 	vec3_t			lerpOrigin;
 	vec3_t			lerpAngles;
+
+	// Stable cross-snapshot identity for opaque final-pose temporal producers.
+	// The predicted local player borrows the matching cg_entities[] state.
+	cgTemporalIdentity_t temporalIdentity;
 } centity_t;
 
 
@@ -1208,6 +1213,7 @@ typedef struct {
 
 	int				serverCommandSequence;	// reliable command stream counter
 	int				processedSnapshotNum;// the number of snapshots cgame has requested
+	int				temporalAcceptedSnapshotNum; // last accepted snapshot identity cohort
 
 	qboolean		localServer;		// detected on startup by checking sv_running
 
@@ -1618,7 +1624,12 @@ void CG_ModernDrawFrame( float x, float y, float w, float h, const float *border
 //
 void CG_Player( centity_t *cent );
 void CG_ResetPlayerEntity( centity_t *cent );
-void CG_AddRefEntityWithPowerups( centity_t *cent, refEntity_t *ent, entityState_t *state, qboolean isPlayerPart, int team );
+void CG_AddRefEntityTemporalBase( centity_t *cent, const refEntity_t *ent,
+	cgTemporalRole_t role );
+void CG_TemporalIdentityMarkAllDiscontinuous( void );
+void CG_AddRefEntityWithPowerups( centity_t *cent, refEntity_t *ent,
+	entityState_t *state, qboolean isPlayerPart, int team,
+	cgTemporalRole_t baseRole );
 void CG_NewClientInfo( int clientNum );
 #if FEAT_IQM
 // Shared single-mesh render core: builds a body refEntity (model/skin/origin/frame/
@@ -1629,7 +1640,8 @@ void CG_NewClientInfo( int clientNum );
 // when renderfx carries RF_FORCE_ENT_ALPHA.
 void CG_CharacterMesh( centity_t *cent, refEntity_t *body, qhandle_t hModel,
 	qhandle_t customShader, qhandle_t customSkin, int frame, int oldframe,
-	float backlerp, vec3_t axis[3], int renderfx, int alpha, int team );
+	float backlerp, vec3_t axis[3], int renderfx, int alpha, int team,
+	refEntityMotionRole_t temporalRole );
 #endif
 
 //
@@ -2026,6 +2038,8 @@ qhandle_t	trap_R_RegisterPrimitiveShader( const char *name );		// returns all wh
 // Nothing is drawn until R_RenderScene is called.
 void		trap_R_ClearScene( void );
 void		trap_R_AddRefEntityToScene( const refEntity_t *re );
+void		trap_R_AddRefEntityToSceneTemporal( const refEntity_t *re,
+			const refEntityMotion_t *motion );
 
 // polys are intended for simple wall marks, not really for doing
 // significant construction

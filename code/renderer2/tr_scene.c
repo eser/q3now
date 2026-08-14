@@ -212,6 +212,8 @@ void RE_AddRefEntityToScene( const refEntity_t *ent, qboolean intShaderTime ) {
 	}
 
 	backEndData->entities[r_numentities].e = *ent;
+	RefEntityMotion_ClearOwned( &backEndData->entities[r_numentities].motion,
+		&backEndData->entities[r_numentities].hasTemporal );
 	backEndData->entities[r_numentities].lightingCalculated = qfalse;
 	backEndData->entities[r_numentities].intShaderTime = intShaderTime;
 
@@ -219,6 +221,19 @@ void RE_AddRefEntityToScene( const refEntity_t *ent, qboolean intShaderTime ) {
 	backEndData->entities[r_numentities].mirrored = (DotProduct(ent->axis[2], cross) < 0.f);
 
 	r_numentities++;
+}
+
+void RE_AddRefEntityToSceneTemporal( const refEntity_t *ent,
+		const refEntityMotion_t *motion ) {
+	int before;
+	if ( !RefEntityMotion_CanAppend( ent, motion,
+			(uint32_t)r_numentities, MAX_REFENTITIES ) ) return;
+	before = r_numentities;
+	RE_AddRefEntityToScene( ent, qfalse );
+	if ( r_numentities == before + 1 ) {
+		RefEntityMotion_CopyOwned( &backEndData->entities[before].motion,
+			&backEndData->entities[before].hasTemporal, motion );
+	}
 }
 
 

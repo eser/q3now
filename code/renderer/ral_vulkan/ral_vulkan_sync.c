@@ -10,8 +10,6 @@
 
 #include "ral_vulkan_internal.h"
 
-R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
-
 // ── fences ──────────────────────────────────────────────────────────────
 ralFence_t *Ral_CreateFence( ralBackend_t *b ) {
 	VkFenceCreateInfo  fi;
@@ -26,7 +24,7 @@ ralFence_t *Ral_CreateFence( ralBackend_t *b ) {
 	RAL_ZERO( fi );
 	fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 	if ( b->vk.CreateFence( b->device, &fi, NULL, &f->fence ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateFence: vkCreateFence failed\n" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateFence: vkCreateFence failed\n" );
 		free( f ); return NULL;
 	}
 	return f;
@@ -87,7 +85,7 @@ ralSemaphore_t *Ral_CreateSemaphore( ralBackend_t *b, ralSemaphoreType_t type ) 
 	ralSemaphore_t           *s;
 	if ( !b ) return NULL;
 	if ( type == RAL_SEMAPHORE_TIMELINE && !b->caps.timelineSemaphores ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateSemaphore: timeline semaphores requested but caps.timelineSemaphores is false\n" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateSemaphore: timeline semaphores requested but caps.timelineSemaphores is false\n" );
 		return NULL;
 	}
 	s = (ralSemaphore_t *)malloc( sizeof( *s ) );
@@ -104,7 +102,7 @@ ralSemaphore_t *Ral_CreateSemaphore( ralBackend_t *b, ralSemaphoreType_t type ) 
 		sci.pNext = &tci;
 	}
 	if ( b->vk.CreateSemaphore( b->device, &sci, NULL, &s->sem ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateSemaphore: vkCreateSemaphore failed\n" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateSemaphore: vkCreateSemaphore failed\n" );
 		free( s ); return NULL;
 	}
 	return s;

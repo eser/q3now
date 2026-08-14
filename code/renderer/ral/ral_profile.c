@@ -3,6 +3,7 @@
 
 #include "ral_profile.h"
 
+#include <math.h>
 #include <string.h>
 
 void Ral_ProfileAccumulatorInit( ralProfileAccumulator_t *accumulator ) {
@@ -26,7 +27,8 @@ int Ral_ProfileAccumulatorAdd( ralProfileAccumulator_t *accumulator,
 		|| laneCount > RAL_PROFILE_MAX_LANES )
 		return -1;
 	for ( i = 0; i < laneCount; ++i ) {
-		if ( !labels[i] || !labels[i][0] || !( durationMs[i] >= 0.0 ) )
+		if ( !labels[i] || !labels[i][0] || !isfinite( durationMs[i] )
+			|| durationMs[i] < 0.0 )
 			return -1;
 	}
 

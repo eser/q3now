@@ -10,6 +10,10 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define RAL_PROFILE_MAX_LANES 16
 #define RAL_PROFILE_HISTORY_CAPACITY 120
 
@@ -55,5 +59,9 @@ int Ral_ProfileAccumulatorSnapshot( const ralProfileAccumulator_t *accumulator,
 // of copied frames; invalid/empty requests return zero without touching output.
 uint32_t Ral_ProfileAccumulatorCopyHistory( const ralProfileAccumulator_t *accumulator,
 		double *historyMs, uint32_t capacityFrames );
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // WIRED_RAL_PROFILE_H

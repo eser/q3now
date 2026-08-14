@@ -134,6 +134,12 @@ typedef struct {
 } ralTextureUploadDesc_t;
 
 ralTexture_t     *Ral_CreateTexture     ( ralBackend_t *b, const ralTextureCreateInfo_t *ci );
+// Reports whether an optimal-tiling image of `format` supports every usage
+// bit the Vulkan backend will actually place on the image. The backend's
+// default sampled/upload/readback expansion is included, so this query is
+// never more optimistic than Ral_CreateTexture's VkImageCreateInfo.
+qboolean          Ral_TextureFormatSupports( ralBackend_t *b, ralFormat_t format,
+	                                          ralTextureUsage_t usage );
 void              Ral_DestroyTexture    ( ralTexture_t *tex );
 uint32_t          Ral_GetTextureMipLevelCount( const ralTexture_t *tex );
 ralTextureView_t *Ral_CreateTextureView ( ralBackend_t *b, const ralTextureViewCreateInfo_t *ci );

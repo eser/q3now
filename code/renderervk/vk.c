@@ -4,9 +4,18 @@
 
 #include "tr_local.h"
 #include "vk.h"
+#include "vk_ral_attachment_translate.h"
+#include "vk_generic_specialization_contract.h"
+#include "vk_temporal_pipeline_cohort.h"
+#include "vk_temporal_pipeline_factory.h"
+#include "vk_temporal_entmat_runtime.h"
+#include "vk_temporal_motion_materialization.h"
+#include "vk_temporal_generic_recipe_table.h"
+#include "tr_temporal_history.h"
 #include "../renderercommon/r_log.h"  // R_LOG / R_LOG_DECLARE_CHANNEL
 #include "vk_ral_textures.h"   // parallel-paths RAL texture migration lifecycle
 #include "../renderer/ral/ral.h"   // Ral_CreateGraphics/ComputePipeline + Ral_DestroyPipeline
+#include "../renderer/ral_vulkan/ral_vulkan_bridge.h"
 #ifndef _WIN32
 #include <pthread.h>
 #endif
@@ -14,6 +23,11 @@
 #include "smaa_search_texture.h"
 #include "blue_noise_texture.h"
 #include "../qcommon/q_feats.h"
+
+_Static_assert( WIRED_FOG_PUSH_OFFSET == VK_TEMPORAL_FOG_PUSH_OFFSET,
+	"ordinary and temporal fog push offsets must remain ABI-identical" );
+_Static_assert( WIRED_FOG_PUSH_SIZE == VK_TEMPORAL_FOG_PUSH_SIZE,
+	"ordinary and temporal fog push sizes must remain ABI-identical" );
 
 #if FEAT_IQM
 // Bone UBO size: 128 joints * 3 vec4 rows = 6144 bytes
@@ -71,6 +85,57 @@ static struct {
 	uint64_t mask;
 } vk_profile_marker_audit;
 static qboolean vk_profile_markers_were_enabled;
+static volatile int vk_swapchain_recreate_requested;
+static vkTemporalEntMatRuntime_t vk_temporal_entmat_runtime;
+static vkTemporalMotionMaterialization_t vk_temporal_motion_materialization;
+static vkTemporalGenericRecipeTable_t vk_temporal_generic_recipe_table;
+
+static void *vk_temporal_recipe_alloc( size_t bytes ) { return ri.Malloc( bytes ); }
+static void vk_temporal_recipe_free( void *memory ) { ri.Free( memory ); }
+static vkTemporalRecipeTableOps_t vk_temporal_recipe_ops( void ) {
+	vkTemporalRecipeTableOps_t ops = {
+		vk_temporal_recipe_alloc, vk_temporal_recipe_free
+	};
+	return ops;
+}
+
+static qboolean vk_temporal_motion_has_live( void ) {
+	return VK_TemporalMotionMaterializationHasLive(
+		&vk_temporal_motion_materialization )
+		|| VK_TemporalEntMatRuntimeHasLive( &vk_temporal_entmat_runtime );
+}
+
+static vkTemporalLayoutOps_t vk_temporal_layout_ops( void );
+
+static void vk_temporal_entmat_release_after_idle( const char *reason ) {
+	vkTemporalLayoutOps_t layoutOps;
+	qboolean materializationLive = VK_TemporalMotionMaterializationHasLive(
+		&vk_temporal_motion_materialization );
+	qboolean entmatLive = VK_TemporalEntMatRuntimeHasLive(
+		&vk_temporal_entmat_runtime );
+	if ( !materializationLive && !entmatLive ) return;
+	layoutOps = vk_temporal_layout_ops();
+	if ( materializationLive && !VK_TemporalMotionMaterializationReleaseAfterIdle(
+			&vk_temporal_motion_materialization, qtrue, &layoutOps ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal materialization release failed at idle boundary (%s)", reason );
+	}
+	if ( entmatLive && !VK_TemporalEntMatRuntimeReleaseAfterIdle(
+			&vk_temporal_entmat_runtime, qtrue ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal entMat release failed at idle boundary (%s)", reason );
+	}
+	if ( Ral_WaitIdleAndDrainDeferred( vk_ral_get_backend() ) != ralSuccess ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal entMat deferred drain failed (%s)", reason );
+	}
+}
+
+void vk_temporal_motion_release_before_ral_shutdown( void ) {
+	if ( !vk_temporal_motion_has_live() ) return;
+	vk_wait_idle();
+	vk_temporal_entmat_release_after_idle( "pre-RAL-shutdown" );
+}
 
 static void vk_profile_rendering_marker( ralRenderingInfo_t *riInfo, const char *name, uint64_t bit ) {
 	if ( !riInfo || !ri.Cvar_VariableIntegerValue( "r_profileMarkers" ) )
@@ -89,6 +154,11 @@ static uint32_t vk_profile_marker_popcount( uint64_t value ) {
 		value >>= 1;
 	}
 	return count;
+}
+
+void vk_request_swapchain_recreate( void ) {
+	vk_swapchain_recreate_requested = 1;
+	R_LOG( rch_ral, SEV_INFO, "RAL swapchain recreate: action=requested\n" );
 }
 
 void vk_profile_markers_arm( void ) {
@@ -192,6 +262,7 @@ typedef struct {
 } vk_diag_v2_t;
 
 static vk_diag_swapchain_identity_t vk_diag_swapchain_identity;
+static uint64_t vk_swapchain_receipt_pending_generation;
 static vk_diag_v2_t vk_diag_v2;
 static qboolean vk_diag_attempt_active;
 static qboolean vk_diag_attempt_acquired;
@@ -248,7 +319,16 @@ static const sceneDepthConsumer_t s_sceneDepthConsumers[] = {
 	// (which was empty at frame-end) is retired. preFog=qfalse: the reduce is a
 	// next-frame consumer, so the natural SS_FOG copy + frame-end fallback suffice.
 	{ "forwardplus", &r_forwardPlus,    qfalse },
+	// Temporal history needs a final, post-world depth snapshot. It deliberately
+	// refreshes the shared copy at the scene-finish seam so early soft-particle
+	// consumers cannot become its depth authority.
+	{ "temporal",    &r_temporalInputTest, qfalse },
 };
+
+// Last resolved 0/non-zero union state.  Seeded from the actual boot
+// attachment topology in vk_initialize so the first live toggle cannot be
+// mistaken for initialization and silently skip its required rebuild.
+static int s_sceneDepthConsumerState = -1;
 
 // Union of the registered consumers' enable cvars (the FBO requirement is left
 // to the callers, matching the original hand-written predicates). This is the
@@ -268,6 +348,22 @@ static qboolean vk_scene_depth_any_consumer( void ) {
 // every site that previously hand-wrote the predicate.
 static void vk_scene_depth_recompute_active( void ) {
 	vk.sceneDepth.active = ( vk.fboActive && vk_scene_depth_any_consumer() ) ? qtrue : qfalse;
+}
+
+// Observe the consumer union only at vk_begin_frame's post-fence safe boundary.
+// Publishing .active earlier would let the current command buffer use an
+// attachment topology that has not been rebuilt yet.
+static void vk_scene_depth_watch_consumers( void ) {
+	int consumer = ( vk.fboActive && vk_scene_depth_any_consumer() ) ? 1 : 0;
+	if ( s_sceneDepthConsumerState == -1 ) {
+		s_sceneDepthConsumerState = consumer;
+		return;
+	}
+	if ( s_sceneDepthConsumerState != consumer ) {
+		s_sceneDepthConsumerState = consumer;
+		vk.sceneDepth.active = consumer ? qtrue : qfalse;
+		vk.sceneDepth.pendingRebuild = qtrue;
+	}
 }
 
 // True if any ACTIVE consumer draws before the SS_FOG copy boundary, i.e. the
@@ -412,12 +508,39 @@ static PFN_vkResetFences								qvkResetFences;
 static PFN_vkUnmapMemory								qvkUnmapMemory;
 static PFN_vkUpdateDescriptorSets						qvkUpdateDescriptorSets;
 static PFN_vkWaitForFences								qvkWaitForFences;
-static PFN_vkAcquireNextImageKHR						qvkAcquireNextImageKHR;
-static PFN_vkCreateSwapchainKHR							qvkCreateSwapchainKHR;
-static PFN_vkDestroySwapchainKHR						qvkDestroySwapchainKHR;
-static PFN_vkGetSwapchainImagesKHR						qvkGetSwapchainImagesKHR;
-static PFN_vkQueuePresentKHR							qvkQueuePresentKHR;
-static PFN_vkSetHdrMetadataEXT							qvkSetHdrMetadataEXT;	// NULL unless VK_EXT_hdr_metadata enabled
+// Swapchain create/enumerate/acquire/present + HDR metadata dispatch lives in
+// ral_vulkan. The renderer consumes only typed RAL swapchain operations.
+
+static VkResult vk_temporal_layout_create_raw( VkDevice device,
+		const VkPipelineLayoutCreateInfo *ci, VkPipelineLayout *outLayout ) {
+	return qvkCreatePipelineLayout( device, ci, NULL, outLayout );
+}
+
+static void vk_temporal_layout_destroy_raw( VkDevice device,
+		VkPipelineLayout layout ) {
+	qvkDestroyPipelineLayout( device, layout, NULL );
+}
+
+static void *vk_temporal_layout_get_bgl(
+		const ralBindGroupLayout_t *layout ) {
+	return Ral_GetBindGroupLayoutHandle( layout );
+}
+
+static ralPipelineLayout_t *vk_temporal_layout_adopt( ralBackend_t *backend,
+		void *raw, const char *debugName ) {
+	return Ral_AdoptPipelineLayout( backend, raw, debugName );
+}
+
+static vkTemporalLayoutOps_t vk_temporal_layout_ops( void ) {
+	vkTemporalLayoutOps_t ops;
+	memset( &ops, 0, sizeof( ops ) );
+	ops.createRaw = vk_temporal_layout_create_raw;
+	ops.destroyRaw = vk_temporal_layout_destroy_raw;
+	ops.getBindGroupLayoutHandle = vk_temporal_layout_get_bgl;
+	ops.adoptRaw = vk_temporal_layout_adopt;
+	ops.destroyAdopted = Ral_DestroyPipelineLayout;
+	return ops;
+}
 
 static PFN_vkGetBufferMemoryRequirements2KHR			qvkGetBufferMemoryRequirements2KHR;
 static PFN_vkGetImageMemoryRequirements2KHR				qvkGetImageMemoryRequirements2KHR;
@@ -480,6 +603,10 @@ struct vk_ral_special_pipeline_params_s {
 	ralFormat_t                 depthFormat;
 	uint32_t                    numColorAttachments;
 	qboolean                    depthOnly;   // explicit "0 color attachments" signal for shadow caster (overrides the helper's default-to-1 fallback).
+	// Optional exact heterogeneous attachment contract. NULL preserves the
+	// historical scalar single-color path above (including zero mask => ALL).
+	// Non-NULL is authoritative; no count/format/blend inference occurs.
+	const vkRalAttachmentContract_t *exactAttachments;
 
 	// VkSpecializationInfo support.
 	// Existing call sites zero-initialise via memset; numSpecConstants = 0
@@ -511,6 +638,9 @@ static struct ralPipeline_s *vk_ral_create_special_pipeline( const vk_ral_specia
 static struct ralPipeline_s *vk_ral_create_pipeline_from_gpinfo( const VkGraphicsPipelineCreateInfo *ci_vk,
 		struct ralPipelineLayout_s *layout, ralFormat_t colorFormat, ralFormat_t depthFormat,
 		const char *debugName );
+static struct ralPipeline_s *vk_ral_create_pipeline_from_gpinfo_exact( const VkGraphicsPipelineCreateInfo *ci_vk,
+		struct ralPipelineLayout_s *layout, const ralFormat_t *colorFormats, uint32_t numColorFormats,
+		ralFormat_t depthFormat, const char *debugName );
 
 qboolean vk_shader_blob_lookup( VkShaderModule handle, const uint8_t **out_bytes, uint32_t *out_size );
 
@@ -1054,6 +1184,8 @@ ralFormat_t vk_attachment_format_to_ral( VkFormat f ) {
 	case VK_FORMAT_A2R10G10B10_UNORM_PACK32: return RAL_FORMAT_A2R10G10B10_UNORM;
 	case VK_FORMAT_R16G16B16A16_SFLOAT:      return RAL_FORMAT_R16G16B16A16_SFLOAT;
 	case VK_FORMAT_R16G16B16A16_UNORM:       return RAL_FORMAT_R16G16B16A16_UNORM;
+	case VK_FORMAT_R16G16_SFLOAT:             return RAL_FORMAT_R16G16_SFLOAT;
+	case VK_FORMAT_R8_UNORM:                  return RAL_FORMAT_R8_UNORM;
 	case VK_FORMAT_R8G8_UNORM:               return RAL_FORMAT_R8G8_UNORM;
 	case VK_FORMAT_D16_UNORM:                return RAL_FORMAT_D16_UNORM;
 	case VK_FORMAT_D24_UNORM_S8_UINT:        return RAL_FORMAT_D24_UNORM_S8_UINT;
@@ -1140,19 +1272,18 @@ static ralPresentMode_t Vk_to_RalPresentMode( VkPresentModeKHR pm ) {
 }
 
 static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice device, VkSurfaceKHR surface, VkSurfaceFormatKHR surface_format, qboolean verbose ) {
-	VkImageViewCreateInfo view;
 	VkSurfaceCapabilitiesKHR surface_caps;
 	VkExtent2D image_extent;
 	uint32_t present_mode_count, i;
 	VkPresentModeKHR present_mode;
 	VkPresentModeKHR *present_modes;
 	uint32_t image_count;
-	VkSwapchainCreateInfoKHR desc;
 	qboolean mailbox_supported = qfalse;
 	qboolean immediate_supported = qfalse;
 	qboolean fifo_relaxed_supported = qfalse;
 	qboolean fifo_latest_ready_supported = qfalse;
 	int v;
+	(void)device;
 
 	VK_CHECK( qvkGetPhysicalDeviceSurfaceCapabilitiesKHR( physical_device, surface, &surface_caps ) );
 
@@ -1247,30 +1378,6 @@ static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice devi
 		R_LOG( rch_vk, SEV_INFO, "...selected presentation mode: %s, image count: %i\n", pmode_to_str( present_mode ), image_count );
 	}
 
-	// create swap chain
-	desc.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-	desc.pNext = NULL;
-	desc.flags = 0;
-	desc.surface = surface;
-	desc.minImageCount = image_count;
-	desc.imageFormat = surface_format.format;
-	desc.imageColorSpace = surface_format.colorSpace;
-	desc.imageExtent = image_extent;
-	desc.imageArrayLayers = 1;
-	desc.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-	if ( !vk.fboActive ) {
-		desc.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-	}
-	desc.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	desc.queueFamilyIndexCount = 0;
-	desc.pQueueFamilyIndices = NULL;
-	desc.preTransform = surface_caps.currentTransform;
-	//desc.compositeAlpha = get_composite_alpha( surface_caps.supportedCompositeAlpha );
-	desc.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-	desc.presentMode = present_mode;
-	desc.clipped = VK_TRUE;
-	desc.oldSwapchain = VK_NULL_HANDLE;
-
 #if defined( _WIN32 )
 	// When the negotiated swapchain colorspace is HDR10, chain
 	// the FSE info (allowed + target HMONITOR) into swapchain creation too —
@@ -1296,47 +1403,88 @@ static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice devi
 	}
 #endif
 
-	// RAL owns the
-	// VkSwapchainKHR via vk.ral_swapchain; consumers read the underlying
-	// handle inline via Ral_GetSwapchainHandle( vk.ral_swapchain ). The
-	// legacy vk.swapchain alias field was retired.
+	// RAL owns the surface query, native swapchain, image views and canonical
+	// texture wrappers. The renderer keeps its existing policy choice as an
+	// ordered single format preference and a present-mode preference with FIFO
+	// as the spec-guaranteed fallback; RAL re-queries and validates all surface
+	// capabilities before it publishes the new generation.
 	{
-		ralSwapchain_t *oldRalSc = vk.ral_swapchain;
-		VkSwapchainKHR  oldRalVk = ( oldRalSc != NULL ) ? (VkSwapchainKHR)Ral_GetSwapchainHandle( oldRalSc ) : VK_NULL_HANDLE;
+		ralSurfaceFormat_t     formatPreference;
+		ralPresentMode_t       presentPreferences[2];
 		ralSwapchainCreateInfo_t sci;
+		ralSwapchainInfo_t       actual;
+		ralResult_t              result;
+		uint32_t                 preferenceCount = 1;
+		uint32_t                 renderableCount = 0;
+		const qboolean           recreating = vk.ral_swapchain != NULL ? qtrue : qfalse;
+
+		formatPreference.format     = Vk_to_RalFormat( surface_format.format );
+		formatPreference.colorSpace = Vk_to_RalColorSpace( surface_format.colorSpace );
+		presentPreferences[0]       = Vk_to_RalPresentMode( present_mode );
+		if ( presentPreferences[0] != RAL_PRESENT_FIFO ) {
+			presentPreferences[1] = RAL_PRESENT_FIFO;
+			preferenceCount = 2;
+		}
 		memset( &sci, 0, sizeof( sci ) );
-		sci.width                   = image_extent.width;
-		sci.height                  = image_extent.height;
-		sci.format                  = Vk_to_RalFormat    ( surface_format.format     );
-		sci.colorSpace              = Vk_to_RalColorSpace( surface_format.colorSpace );
-		sci.presentMode             = Vk_to_RalPresentMode( present_mode );
-		sci.minImageCount           = image_count;
-		sci.externalSurface         = (void *)surface;
-		sci.oldExternalSwapchain    = (void *)oldRalVk;
+		sci.desiredWidth            = image_extent.width;
+		sci.desiredHeight           = image_extent.height;
+		sci.formatPreferences       = &formatPreference;
+		sci.formatPreferenceCount   = 1;
+		sci.presentModePreferences  = presentPreferences;
+		sci.presentModePreferenceCount = preferenceCount;
+		sci.desiredImageCount       = image_count;
+		// vk_read_pixels captures the presented image in every FBO mode, so
+		// transfer-source support is a hard product requirement rather than an
+		// optional bit RAL may silently add. Non-FBO mode additionally needs
+		// transfer-destination for direct clears.
+		sci.requiredUsage           = RAL_TEXTURE_USAGE_COLOR_ATTACHMENT
+		                            | RAL_TEXTURE_USAGE_TRANSFER_SRC;
+		if ( !vk.fboActive ) {
+			sci.requiredUsage |= RAL_TEXTURE_USAGE_TRANSFER_DST;
+		}
 #if defined( _WIN32 )
 		sci.backendExtensionChain   = fseExtensionChain;
 #else
 		sci.backendExtensionChain   = NULL;
 #endif
-		vk.ral_swapchain = Ral_CreateSwapchain( vk_ral_get_backend(), &sci );
-		if ( vk.ral_swapchain == NULL ) {
-			ri.Terminate( TERM_UNRECOVERABLE, "vk_create_swapchain: Ral_CreateSwapchain returned NULL" );
+		result = Ral_CreateOrRecreateSwapchain( vk_ral_get_backend(), &sci,
+		                                       &vk.ral_swapchain );
+		if ( result != ralSuccess || vk.ral_swapchain == NULL
+		  || !Ral_GetSwapchainInfo( vk.ral_swapchain, &actual ) ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"vk_create_swapchain: Ral_CreateOrRecreateSwapchain failed (%d)",
+				(int)result );
 		}
-		// Destroy the OLD wrapper AFTER successful new create. The
-		// oldSwapchain handoff retired the old VkSwapchainKHR; the wrapper
-		// destroy invokes vkDestroySwapchainKHR on the retired handle —
-		// safe per Vulkan spec. On boot (oldRalSc == NULL) this branch
-		// skips.
-		if ( oldRalSc != NULL ) {
-			Ral_DestroySwapchain( oldRalSc );
+		if ( actual.imageCount > MAX_SWAPCHAIN_IMAGES ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"vk_create_swapchain: RAL image count %u exceeds legacy renderer alias capacity %u",
+				actual.imageCount, MAX_SWAPCHAIN_IMAGES );
 		}
-	}
-
-	{
-		VkSwapchainKHR vkSc = (VkSwapchainKHR)Ral_GetSwapchainHandle( vk.ral_swapchain );
-		VK_CHECK( qvkGetSwapchainImagesKHR( vk.device, vkSc, &vk.swapchain_image_count, NULL ) );
-		vk.swapchain_image_count = MIN( vk.swapchain_image_count, MAX_SWAPCHAIN_IMAGES );
-		VK_CHECK( qvkGetSwapchainImagesKHR( vk.device, vkSc, &vk.swapchain_image_count, vk.swapchain_images ) );
+		vk.swapchain_image_count = actual.imageCount;
+		image_extent.width        = actual.width;
+		image_extent.height       = actual.height;
+		switch ( actual.presentMode ) {
+			case RAL_PRESENT_MAILBOX:           present_mode = VK_PRESENT_MODE_MAILBOX_KHR; break;
+			case RAL_PRESENT_IMMEDIATE:         present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR; break;
+			case RAL_PRESENT_FIFO_RELAXED:      present_mode = VK_PRESENT_MODE_FIFO_RELAXED_KHR; break;
+			case RAL_PRESENT_FIFO_LATEST_READY: present_mode = VK_PRESENT_MODE_FIFO_LATEST_READY_EXT; break;
+			case RAL_PRESENT_FIFO:
+			default:                            present_mode = VK_PRESENT_MODE_FIFO_KHR; break;
+		}
+		for ( i = 0; i < actual.imageCount; i++ ) {
+			ralTexture_t *image = Ral_GetSwapchainImage( vk.ral_swapchain, i );
+			if ( image == NULL ) {
+				ri.Terminate( TERM_UNRECOVERABLE,
+					"vk_create_swapchain: RAL image %u is NULL", i );
+			}
+			vk.swapchain_images[i] = (VkImage)Ral_GetTextureImageHandle( image );
+			renderableCount++;
+		}
+		R_LOG( rch_ral, SEV_INFO,
+			"RAL swapchain ready: recreate=%d extent=%ux%u images=%u format=%d colorSpace=%d presentMode=%d usage=0x%x renderable=%u\n",
+			recreating ? 1 : 0, actual.width, actual.height, actual.imageCount,
+			(int)actual.format, (int)actual.colorSpace, (int)actual.presentMode,
+			(unsigned)actual.usage, renderableCount );
 	}
 
 	/* Diagnostic identity is updated only after a complete, queryable swapchain
@@ -1353,39 +1501,6 @@ static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice devi
 	// Attach the HDR10 mastering metadata to the freshly-
 	// created swapchain (no-op unless an HDR colorspace was negotiated).
 	vk_apply_hdr_metadata();
-
-	for ( i = 0; i < vk.swapchain_image_count; i++ ) {
-		view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		view.pNext = NULL;
-		view.flags = 0;
-		view.image = vk.swapchain_images[i];
-		view.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		view.format = vk.present_format.format;
-		view.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-		view.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-		view.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-		view.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-		view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		view.subresourceRange.baseMipLevel = 0;
-		view.subresourceRange.levelCount = 1;
-		view.subresourceRange.baseArrayLayer = 0;
-		view.subresourceRange.layerCount = 1;
-
-		VK_CHECK( qvkCreateImageView( vk.device, &view, NULL, &vk.swapchain_image_views[i] ) );
-
-		SET_OBJECT_NAME( vk.swapchain_images[i], va( "swapchain image %i", i ), VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_EXT );
-		SET_OBJECT_NAME( vk.swapchain_image_views[i], va( "swapchain image %i", i ), VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_VIEW_EXT );
-
-		// Adopt the swapchain image as a dynamic-rendering color target for the
-		// gamma (present) pass — same adopt-trio as the 8 offscreen images, view
-		// sourced from the just-created swapchain_image_views[i]. Re-runs on every
-		// swapchain (re)create (same lifecycle as the semaphores below); idempotent
-		// destroy-first so recreate is safe.
-		vk_ral_adopt_one_texture( vk.swapchain_images[i], vk.swapchain_image_views[i],
-			vk.present_format.format, &vk.ral_swapchain_textures[i],
-			image_extent.width, image_extent.height, VK_IMAGE_ASPECT_COLOR_BIT,
-			"wired-img-swapchain" );
-	}
 
 	for ( i = 0; i < vk.swapchain_image_count; i++ ) {
 		VkSemaphoreCreateInfo s;
@@ -1413,14 +1528,9 @@ static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice devi
 	// UNDEFINED->PRESENT_SRC loop here violated that rule (a transition outside the
 	// acquire/present pair) and the RAL tracker makes it redundant, so it is gone.
 
-	// Ral_CreateSwapchain delivered
-	// above (see the block before the swapchain-image enumeration).
-	// vk.swapchain is now an alias of vk.ral_swapchain->swapchain via
-	// Ral_GetSwapchainHandle; the legacy qvkCreateSwapchainKHR/Destroy
-	// pair is retired. Recreate paths (vk_restart_swapchain,
-	// vk_rebuild_for_fbo_change) call vk_destroy_swapchain(qtrue) +
-	// vk_create_swapchain → the latter passes the old VkSwapchainKHR
-	// through oldExternalSwapchain for atomic handoff.
+	// RAL created the complete renderable generation above. Recreate paths keep
+	// the typed old wrapper until Ral_CreateOrRecreateSwapchain performs Vulkan's
+	// one-way old-swapchain handoff; rollback is deliberately not promised.
 }
 
 
@@ -2690,11 +2800,6 @@ static qboolean init_vulkan_library( void )
 	INIT_DEVICE_FUNCTION(vkUnmapMemory)
 	INIT_DEVICE_FUNCTION(vkUpdateDescriptorSets)
 	INIT_DEVICE_FUNCTION(vkWaitForFences)
-	INIT_DEVICE_FUNCTION(vkAcquireNextImageKHR)
-	INIT_DEVICE_FUNCTION(vkCreateSwapchainKHR)
-	INIT_DEVICE_FUNCTION(vkDestroySwapchainKHR)
-	INIT_DEVICE_FUNCTION(vkGetSwapchainImagesKHR)
-	INIT_DEVICE_FUNCTION(vkQueuePresentKHR)
 
 	// First pick the swapchain surface format on
 	// the RAL-owned surface (vk_select_surface_format
@@ -2741,7 +2846,7 @@ static qboolean init_vulkan_library( void )
 			if ( !ext ) continue;
 
 			if ( Q_stricmp( ext, VK_EXT_HDR_METADATA_EXTENSION_NAME ) == 0 ) {
-				INIT_DEVICE_FUNCTION_EXT(vkSetHdrMetadataEXT)
+				// RAL owns vkSetHdrMetadataEXT dispatch and typed metadata replay.
 			} else if ( Q_stricmp( ext, VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME ) == 0 ) {
 				vk.dedicatedAllocation = qtrue;
 			} else if ( Q_stricmp( ext, VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME ) == 0 ) {
@@ -2888,11 +2993,6 @@ static void deinit_device_functions( void )
 	qvkUnmapMemory								= NULL;
 	qvkUpdateDescriptorSets						= NULL;
 	qvkWaitForFences							= NULL;
-	qvkAcquireNextImageKHR						= NULL;
-	qvkCreateSwapchainKHR						= NULL;
-	qvkDestroySwapchainKHR						= NULL;
-	qvkGetSwapchainImagesKHR					= NULL;
-	qvkQueuePresentKHR							= NULL;
 
 	qvkGetBufferMemoryRequirements2KHR			= NULL;
 	qvkGetImageMemoryRequirements2KHR			= NULL;
@@ -4204,9 +4304,11 @@ void vk_init_descriptors( void )
 			SET_OBJECT_NAME( vk.engineResources.descriptor, "engine-resources set (shadowMap)", VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_EXT );
 		}
 
-		if ( vk.sceneDepth.active ) {
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.sceneDepth.descriptor ) );
-		}
+		// Reserve the scene-depth sampler set whenever the FBO exists, even when
+		// the consumer union is initially off.  A live 0->1 transition rebinds
+		// this persistent set after creating the depth-copy image; allocating it
+		// only under .active made the first isolated toggle update a NULL set.
+		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.sceneDepth.descriptor ) );
 
 #if FEAT_SHADOW_MAPPING
 		// vk.shadowMap.descriptor — the single alloc site for the shadow sampler
@@ -10559,6 +10661,188 @@ qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size )
 #include "shaders/spirv/shader_data.c"
 #define SHADER_MODULE(name) SHADER_MODULE(name,sizeof(name))
 
+typedef struct {
+	uint32_t extent[2];
+	float zNear;
+	float zFar;
+} vkTemporalHistoryPush_t;
+
+typedef struct {
+	uint32_t allocationGeneration;
+	ralTextureView_t *currentColorView;
+	ralTextureView_t *currentDepthView;
+	ralSampler_t *sampler;
+	ralBindGroupLayout_t *layout;
+	ralBindGroup_t *writeGroups[2];
+	ralPipeline_t *pipeline;
+} vkTemporalHistoryStore_t;
+
+static vkTemporalHistoryStore_t s_temporalHistoryStore;
+
+void vk_temporal_history_store_shutdown( void )
+{
+	if ( s_temporalHistoryStore.pipeline )
+		Ral_DestroyPipeline( s_temporalHistoryStore.pipeline );
+	for ( unsigned i = 0; i < 2; ++i ) {
+		if ( s_temporalHistoryStore.writeGroups[i] )
+			Ral_DestroyBindGroup( s_temporalHistoryStore.writeGroups[i] );
+	}
+	if ( s_temporalHistoryStore.layout )
+		Ral_DestroyBindGroupLayout( s_temporalHistoryStore.layout );
+	if ( s_temporalHistoryStore.sampler )
+		Ral_DestroySampler( s_temporalHistoryStore.sampler );
+	if ( s_temporalHistoryStore.currentColorView )
+		Ral_DestroyTextureView( s_temporalHistoryStore.currentColorView );
+	if ( s_temporalHistoryStore.currentDepthView )
+		Ral_DestroyTextureView( s_temporalHistoryStore.currentDepthView );
+	memset( &s_temporalHistoryStore, 0, sizeof( s_temporalHistoryStore ) );
+}
+
+static qboolean vk_temporal_history_store_ensure(
+		const temporalHistoryResources_t *history )
+{
+	ralBackend_t *backend = vk_ral_get_backend();
+	ralTextureViewCreateInfo_t vci;
+	ralSamplerCreateInfo_t sci;
+	ralBindEntry_t entries[5];
+	ralBindGroupLayoutCreateInfo_t lci;
+	ralComputePipelineCreateInfo_t pci;
+	const ralBindGroupLayout_t *layouts[1];
+
+	if ( !backend || !history || !history->ready || !vk.ral_color_image
+			|| !vk.sceneDepth.ral_image ) return qfalse;
+	if ( s_temporalHistoryStore.pipeline
+			&& s_temporalHistoryStore.allocationGeneration
+				== history->allocationGeneration ) return qtrue;
+
+	vk_temporal_history_store_shutdown();
+	memset( &vci, 0, sizeof( vci ) );
+	vci.viewType = RAL_TEXTURE_2D;
+	vci.format = RAL_FORMAT_UNDEFINED;
+	vci.texture = vk.ral_color_image;
+	s_temporalHistoryStore.currentColorView = Ral_CreateTextureView( backend, &vci );
+	vci.texture = vk.sceneDepth.ral_image;
+	s_temporalHistoryStore.currentDepthView = Ral_CreateTextureView( backend, &vci );
+
+	memset( &sci, 0, sizeof( sci ) );
+	sci.minFilter = RAL_FILTER_NEAREST;
+	sci.magFilter = RAL_FILTER_NEAREST;
+	sci.mipmapMode = RAL_MIPMAP_NEAREST;
+	sci.addressU = sci.addressV = sci.addressW = RAL_ADDRESS_CLAMP_TO_EDGE;
+	sci.maxAnisotropy = 1.0f;
+	sci.debugName = "wired-temporal-history-sampler";
+	s_temporalHistoryStore.sampler = Ral_CreateSampler( backend, &sci );
+
+	memset( entries, 0, sizeof( entries ) );
+	entries[0] = (ralBindEntry_t){ 0, RAL_BIND_SAMPLED_TEXTURE, 1, RAL_STAGE_COMPUTE };
+	entries[1] = (ralBindEntry_t){ 1, RAL_BIND_SAMPLED_TEXTURE, 1, RAL_STAGE_COMPUTE };
+	entries[2] = (ralBindEntry_t){ 2, RAL_BIND_SAMPLER,         1, RAL_STAGE_COMPUTE };
+	entries[3] = (ralBindEntry_t){ 3, RAL_BIND_STORAGE_TEXTURE, 1, RAL_STAGE_COMPUTE };
+	entries[4] = (ralBindEntry_t){ 4, RAL_BIND_STORAGE_TEXTURE, 1, RAL_STAGE_COMPUTE };
+	memset( &lci, 0, sizeof( lci ) );
+	lci.entries = entries;
+	lci.numEntries = ARRAY_LEN( entries );
+	lci.debugName = "wired-temporal-history-store-bgl";
+	s_temporalHistoryStore.layout = Ral_CreateBindGroupLayout( backend, &lci );
+
+	if ( s_temporalHistoryStore.currentColorView
+			&& s_temporalHistoryStore.currentDepthView
+			&& s_temporalHistoryStore.sampler && s_temporalHistoryStore.layout ) {
+		for ( unsigned i = 0; i < 2; ++i ) {
+			ralBindingValue_t values[5];
+			ralBindGroupCreateInfo_t gci;
+			memset( values, 0, sizeof( values ) );
+			values[0] = (ralBindingValue_t){ .binding = 0, .type = RAL_BIND_SAMPLED_TEXTURE,
+				.textureView = s_temporalHistoryStore.currentColorView };
+			values[1] = (ralBindingValue_t){ .binding = 1, .type = RAL_BIND_SAMPLED_TEXTURE,
+				.textureView = s_temporalHistoryStore.currentDepthView };
+			values[2] = (ralBindingValue_t){ .binding = 2, .type = RAL_BIND_SAMPLER,
+				.sampler = s_temporalHistoryStore.sampler };
+			values[3] = (ralBindingValue_t){ .binding = 3, .type = RAL_BIND_STORAGE_TEXTURE,
+				.textureView = history->colorView[i] };
+			values[4] = (ralBindingValue_t){ .binding = 4, .type = RAL_BIND_STORAGE_TEXTURE,
+				.textureView = history->depthView[i] };
+			memset( &gci, 0, sizeof( gci ) );
+			gci.layout = s_temporalHistoryStore.layout;
+			gci.values = values;
+			gci.numValues = ARRAY_LEN( values );
+			gci.debugName = i ? "wired-temporal-history-store-bg-1"
+				: "wired-temporal-history-store-bg-0";
+			s_temporalHistoryStore.writeGroups[i] = Ral_CreateBindGroup( backend, &gci );
+		}
+	}
+
+	if ( s_temporalHistoryStore.writeGroups[0]
+			&& s_temporalHistoryStore.writeGroups[1] ) {
+		layouts[0] = s_temporalHistoryStore.layout;
+		memset( &pci, 0, sizeof( pci ) );
+		pci.computeSpirv = (const uint32_t *)temporal_history_store_comp_spv;
+		pci.computeSpirvSize = sizeof( temporal_history_store_comp_spv );
+		pci.bindGroupLayouts = layouts;
+		pci.numBindGroupLayouts = 1;
+		pci.pushConstantSize = sizeof( vkTemporalHistoryPush_t );
+		pci.debugName = "wired-temporal-history-store-cs";
+		s_temporalHistoryStore.pipeline = Ral_CreateComputePipeline( backend, &pci );
+	}
+	if ( !s_temporalHistoryStore.pipeline ) {
+		vk_temporal_history_store_shutdown();
+		return qfalse;
+	}
+	s_temporalHistoryStore.allocationGeneration = history->allocationGeneration;
+	return qtrue;
+}
+
+void vk_temporal_history_store_record( void )
+{
+	const ralTemporalFramePlan_t *plan;
+	temporalHistoryResources_t *history;
+	vkTemporalHistoryPush_t push;
+	int worldIndex = backEnd.viewParms.temporalWorldIndex;
+	uint64_t frameId = backEnd.viewParms.temporalFrameId;
+
+	if ( !R_TemporalBackendGetPending( worldIndex, frameId, &plan, &history ) ) return;
+	// The allocation domain is the physical scene target. Multi/letterboxed views
+	// need an explicit viewport-region contract and are rejected by this first leaf.
+	if ( backEnd.viewParms.viewportX != 0 || backEnd.viewParms.viewportY != 0
+			|| backEnd.viewParms.viewportWidth != glConfig.vidWidth
+			|| backEnd.viewParms.viewportHeight != glConfig.vidHeight ) return;
+	if ( vk.cmd->open_dynamic_pass == VK_DYN_PASS_NONE ) return;
+
+	// Force a final post-world snapshot. Early soft-particle consumers may have
+	// copied depth already, but they cannot define temporal history depth.
+	vk_scene_depth_copy_final();
+	vk_forwardplus_depth_copy();
+	if ( vk.cmd->open_dynamic_pass != VK_DYN_PASS_NONE ) vk_end_render_pass();
+	if ( !vk_temporal_history_store_ensure( history ) ) return;
+
+	Ral_CmdTransitionTexture( vk.cmd->ral_cmd, history->color[plan->historyWriteIndex],
+		RAL_PIPELINE_STAGE_TOP_OF_PIPE_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_GENERAL );
+	Ral_CmdTransitionTexture( vk.cmd->ral_cmd, history->depth[plan->historyWriteIndex],
+		RAL_PIPELINE_STAGE_TOP_OF_PIPE_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_GENERAL );
+	memset( &push, 0, sizeof( push ) );
+	push.extent[0] = history->width;
+	push.extent[1] = history->height;
+	push.zNear = r_znear->value;
+	push.zFar = backEnd.viewParms.zFar;
+	Ral_CmdBindPipeline( vk.cmd->ral_cmd, s_temporalHistoryStore.pipeline );
+	Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0,
+		s_temporalHistoryStore.writeGroups[plan->historyWriteIndex] );
+	Ral_CmdPushConstants( vk.cmd->ral_cmd, RAL_STAGE_COMPUTE, 0, sizeof( push ), &push );
+	Ral_CmdDispatch( vk.cmd->ral_cmd, ( history->width + 7u ) / 8u,
+		( history->height + 7u ) / 8u, 1 );
+	Ral_CmdTransitionTexture( vk.cmd->ral_cmd, history->color[plan->historyWriteIndex],
+		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	Ral_CmdTransitionTexture( vk.cmd->ral_cmd, history->depth[plan->historyWriteIndex],
+		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	vk.cmd->last_pipeline = VK_NULL_HANDLE;
+	vk.cmd->last_ral_pipeline = NULL;
+	R_TemporalBackendMarkHistoryRecorded( worldIndex, frameId, qfalse );
+}
+
 // SHADER_MODULE_BL macro retired.
 // The legacy non-_bindless gen_*/light_* SPIR-V variants are gone (manifest
 // entries dropped, templates collapsed to the bindless body unconditionally);
@@ -10995,6 +11279,7 @@ static void vk_create_shader_modules( void )
 	SET_OBJECT_NAME( vk.modules.q1_ls_vs,       "lightstyle vertex module",         VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.q1_ls_fs,       "lightstyle fragment module",       VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.q1_ls_array_fs, "lightstyle array fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+
 }
 
 
@@ -11433,6 +11718,7 @@ static void setup_surface_formats( VkPhysicalDevice physical_device );
 static void vk_create_sync_primitives( void );
 static void vk_destroy_sync_primitives( void );
 static void vk_destroy_swapchain( qboolean preserveRal );  // preserveRal=qtrue preserves vk.ral_swapchain for atomic-handoff recreate; qfalse destroys it (fresh teardown).
+static void vk_recreate_swapchain_generation( void );
 // SMAA option (ii) live release / re-alloc.
 // Bodies live near vk_create_attachments so all of SMAA's lifecycle
 // is together. Called from vk_create_attachments / vk_destroy_attachments
@@ -11441,6 +11727,7 @@ static void vk_destroy_swapchain( qboolean preserveRal );  // preserveRal=qtrue 
 static void vk_smaa_alloc_resources( void );
 static void vk_smaa_release_resources( void );
 static void vk_create_bluenoise_texture( void );
+static void vk_shutdown_entmat_buffers( void );
 // shadow-map resource lifecycle, same shape as
 // SMAA's. Bodies live near vk_create_attachments. Called from vk_create_
 // attachments / vk_destroy_attachments (cold start + r_fbo / r_hdr flip) and
@@ -12387,7 +12674,7 @@ static void vk_rebuild_for_fbo_change( void )
 	vk_destroy_framebuffers();
 	vk_destroy_render_passes();
 	vk_destroy_attachments();
-	vk_destroy_swapchain( qtrue );   // preserveRal=qtrue — recreate path; next vk_create_swapchain passes the surviving vk.ral_swapchain through oldExternalSwapchain for atomic handoff.
+	vk_destroy_swapchain( qtrue );   // keep typed old wrapper for RAL's one-way recreate handoff
 	vk_destroy_sync_primitives();
 
 	// Update FBO state + dependent flags BEFORE rebuilding so the
@@ -12443,6 +12730,11 @@ static void vk_rebuild_for_fbo_change( void )
 		// Same for the decal projector's binding-2 sampler array, cleared by the
 		// pool reset; without this the first decal draw hits an unwritten descriptor.
 		vk_init_decal_textures();
+		{
+			int sl6d;
+			for ( sl6d = 0; sl6d < NUM_COMMAND_BUFFERS; sl6d++ )
+				vk.tess[sl6d].entMatDesc = VK_NULL_HANDLE;
+		}
 #if FEAT_SHADOW_MAPPING
 		// This pool reset invalidated the shadow per-frame descriptors (entity-matrix
 		// SSBO + cascadeMVP UBO); the buffers survive. Null so vk_render_shadow_map
@@ -12451,7 +12743,6 @@ static void vk_rebuild_for_fbo_change( void )
 			int sl6d;
 			for ( sl6d = 0; sl6d < NUM_COMMAND_BUFFERS; sl6d++ ) {
 				vk.tess[sl6d].shadowEntMatDesc      = VK_NULL_HANDLE;
-				vk.tess[sl6d].entMatDesc            = VK_NULL_HANDLE; // pool reset invalidated it; re-allocated next frame
 				vk.shadowMap.cascadeMvpDesc[sl6d]   = VK_NULL_HANDLE;
 			}
 		}
@@ -12647,24 +12938,6 @@ void vk_update_post_process_pipelines( void )
 			s_r_smaa_value = r_smaa->integer;
 		} else {
 			s_r_smaa_value = r_smaa->integer;
-		}
-	}
-
-	// Live scene-depth consumer toggle. sceneDepth.active gates the depth-copy
-	// image, the main-depth STORE op (baked into the render pass), and the variant's
-	// set-1 sampler — attachment/render-pass state that cannot be rebuilt inline here
-	// (the in-flight command buffer still references the resources). When the consumer
-	// set (s_sceneDepthConsumers) crosses the 0/non-0 boundary, request a rebuild that
-	// vk_begin_frame performs at the next safe frame boundary. No-op when another consumer
-	// keeps the copy active across the toggle — then only the variant pipeline below swaps.
-	if ( vk.fboActive ) {
-		static int s_sceneDepthConsumerState = -1;
-		int consumer = vk_scene_depth_any_consumer() ? 1 : 0;
-		if ( s_sceneDepthConsumerState == -1 ) {
-			s_sceneDepthConsumerState = consumer;
-		} else if ( s_sceneDepthConsumerState != consumer ) {
-			vk.sceneDepth.pendingRebuild = qtrue;
-			s_sceneDepthConsumerState = consumer;
 		}
 	}
 
@@ -14963,12 +15236,8 @@ static void vk_create_sync_primitives( void ) {
 
 		// swapchain image acquired
 		VK_CHECK( qvkCreateSemaphore( vk.device, &desc, NULL, &vk.tess[i].image_acquired ) );
-		// per-frame ring adoption of
-		// image_acquired. Consumed by the atomic switchover as the signalSem
-		// arg to Ral_AcquireNextImage. Currently dormant (renderer still
-		// calls qvkAcquireNextImageKHR with the legacy VkSemaphore at
-		// vk.c:19312); the adopted wrapper exists so a later call-
-		// site flip is a 1-line edit.
+		// Per-frame image-acquired semaphore wrapper consumed directly by
+		// Ral_AcquireNextImage.
 		vk.tess[i].ral_image_acquired = Ral_AdoptSemaphore( vk_ral_get_backend(),
 			(void *)vk.tess[i].image_acquired, RAL_SEMAPHORE_BINARY,
 			"wired-frame-image-acquired" );
@@ -15013,6 +15282,9 @@ static void vk_create_sync_primitives( void ) {
 		// acquired-state, or the next frame's acquire/fence-reset faults on a fresh,
 		// never-submitted primitive (DEVICE_LOST). Mirrors the destroy reset.
 		vk.tess[i].swapchain_image_acquired = qfalse;
+		vk.tess[i].swapchain_image = NULL;
+		vk.tess[i].swapchain_image_prepared = qfalse;
+		vk.tess[i].swapchain_generation = 0;
 
 		SET_OBJECT_NAME( vk.tess[i].image_acquired, va( "image_acquired semaphore %i", i ), VK_DEBUG_REPORT_OBJECT_TYPE_SEMAPHORE_EXT );
 #ifdef USE_UPLOAD_QUEUE
@@ -15084,6 +15356,9 @@ static void vk_destroy_sync_primitives( void  ) {
 		qvkDestroyFence( vk.device, vk.tess[i].rendering_finished_fence, NULL );
 		vk.tess[i].waitForFence = qfalse;
 		vk.tess[i].swapchain_image_acquired = qfalse;
+		vk.tess[i].swapchain_image = NULL;
+		vk.tess[i].swapchain_image_prepared = qfalse;
+		vk.tess[i].swapchain_generation = 0;
 	}
 
 #ifdef USE_UPLOAD_QUEUE
@@ -15115,34 +15390,18 @@ static void vk_destroy_framebuffers( void ) {
 static void vk_destroy_swapchain( qboolean preserveRal ) {
 	uint32_t i;
 
-	// preserveRal=qtrue
-	// keeps vk.ral_swapchain alive across the destroy so the next
-	// vk_create_swapchain can pass its VkSwapchainKHR through
-	// oldExternalSwapchain for atomic handoff (recreate paths:
+	// preserveRal=qtrue keeps vk.ral_swapchain alive across this renderer-side
+	// dependent-resource teardown so the next create can pass the typed wrapper
+	// into RAL's one-way Vulkan oldSwapchain handoff (recreate paths:
 	// vk_restart_swapchain, vk_rebuild_for_fbo_change). preserveRal=qfalse
 	// is the fresh-teardown path (vk_shutdown): destroy the wrapper here.
-	// vk.swapchain itself is just an alias of the RAL-owned handle — no
-	// separate qvkDestroySwapchainKHR call: Ral_DestroySwapchain owns
-	// destruction when preserveRal=qfalse; the new vkCreateSwapchainKHR
-	// inside Ral_CreateSwapchain handles the retired-via-oldSwapchain case
-	// when preserveRal=qtrue.
+	// There is no separate renderer native-swapchain destroy call.
 	if ( !preserveRal && vk.ral_swapchain ) {
 		Ral_DestroySwapchain( vk.ral_swapchain );
 		vk.ral_swapchain = NULL;
 	}
 
 	for ( i = 0; i < vk.swapchain_image_count; i++ ) {
-		// Adopted texture wrapper goes BEFORE the VkImageView it wraps
-		// (ownsImage=qfalse → wrapper-only free; the qvkDestroyImageView below owns
-		// the native view/image).
-		if ( vk.ral_swapchain_textures[i] ) {
-			Ral_DestroyTexture( vk.ral_swapchain_textures[i] );
-			vk.ral_swapchain_textures[i] = NULL;
-		}
-		if ( vk.swapchain_image_views[i] != VK_NULL_HANDLE ) {
-			qvkDestroyImageView( vk.device, vk.swapchain_image_views[i], NULL );
-			vk.swapchain_image_views[i] = VK_NULL_HANDLE;
-		}
 		// adopted wrapper goes
 		// BEFORE underlying VkSemaphore. ownsSemaphore=qfalse → wrapper-
 		// only free; the qvkDestroySemaphore below owns the native handle.
@@ -15156,14 +15415,49 @@ static void vk_destroy_swapchain( qboolean preserveRal ) {
 		}
 	}
 
-	// qvkDestroySwapchainKHR retired.
-	// RAL owns the VkSwapchainKHR via vk.ral_swapchain. When preserveRal=qfalse
-	// the Ral_DestroySwapchain above destroyed both the wrapper AND the
-	// underlying VkSwapchainKHR. When preserveRal=qtrue the next
-	// Ral_CreateSwapchain in vk_create_swapchain will retire this swapchain
-	// via oldExternalSwapchain handoff — DO NOT destroy the handle here.
+	// When preserveRal=qtrue the next Ral_CreateOrRecreateSwapchain owns both
+	// retirement and destruction of this typed old generation.
 	memset( vk.swapchain_images, 0, sizeof( vk.swapchain_images ) );
 	vk.swapchain_image_count = 0;
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		vk.tess[i].swapchain_image = NULL;
+		vk.tess[i].swapchain_image_acquired = qfalse;
+		vk.tess[i].swapchain_image_prepared = qfalse;
+		vk.tess[i].swapchain_generation = 0;
+	}
+}
+
+/*
+================
+vk_recreate_swapchain_generation
+
+Diagnostic, same-window generation handoff used by the RAL lifecycle gate.
+Unlike vk_restart_swapchain(), this intentionally leaves the renderer's
+offscreen attachments, render passes and pipelines intact: their format and
+extent policy did not change.  The seam therefore exercises exactly the
+portable RAL old-generation handoff, image enumeration/view materialisation,
+and renderer semaphore aliases without conflating it with the much broader
+vid/out-of-date rebuild graph.
+
+Real resize/out-of-date remains owned by vk_restart_swapchain().  It is a
+separate runtime contract because those events may also change attachment and
+pipeline policy.
+================
+*/
+static void vk_recreate_swapchain_generation( void ) {
+	uint32_t i;
+
+	vk_wait_idle();
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		qvkResetCommandBuffer( vk.tess[i].command_buffer, 0 );
+		vk.tess[i].open_dynamic_pass = VK_DYN_PASS_NONE;
+	}
+
+	vk_destroy_swapchain( qtrue );
+	vk_create_swapchain( vk.physical_device, vk.device,
+		(VkSurfaceKHR)Ral_GetSurfaceHandle( vk_ral_get_backend() ),
+		vk.present_format, qfalse );
+	vk_swapchain_receipt_pending_generation = vk_diag_swapchain_identity.generation;
 }
 
 static void vk_destroy_attachments( void );
@@ -15205,7 +15499,7 @@ static void vk_restart_swapchain( const char *funcname, VkResult res )
 	vk_destroy_framebuffers();
 	vk_destroy_render_passes();
 	vk_destroy_attachments();
-	vk_destroy_swapchain( qtrue );   // preserveRal=qtrue — out-of-date recovery recreate path; atomic-handoff via oldExternalSwapchain at next create.
+	vk_destroy_swapchain( qtrue );   // preserve typed old generation for RAL's one-way recreate handoff
 	vk_destroy_sync_primitives();
 
 	vk_select_surface_format( vk.physical_device, (VkSurfaceKHR)Ral_GetSurfaceHandle( vk_ral_get_backend() ) );
@@ -18416,6 +18710,7 @@ qboolean vk_initialize( void )
 	// The scene-depth copy needs the FBO; the consumer set (depth fade, SSAO,
 	// god rays, lens occlusion) lives in s_sceneDepthConsumers.
 	vk_scene_depth_recompute_active();
+	s_sceneDepthConsumerState = vk.sceneDepth.active ? 1 : 0;
 
 #if FEAT_SHADOW_MAPPING
 	{
@@ -18667,6 +18962,7 @@ qboolean vk_initialize( void )
 			if ( vk.tess[i].ral_cmd == NULL ) {
 				ri.Terminate( TERM_UNRECOVERABLE, "vk_initialize: Ral_AcquireCommandBuffer(GRAPHICS) returned NULL for per-frame slot %u", (unsigned)i );
 			}
+			Ral_SetCommandBufferExternalLifecycle( vk.tess[i].ral_cmd, qtrue );
 			vk.tess[i].command_buffer = (VkCommandBuffer)Ral_GetCommandBufferHandle( vk.tess[i].ral_cmd );
 		}
 	}
@@ -18688,6 +18984,7 @@ qboolean vk_initialize( void )
 		if ( vk.ral_staging_cmd == NULL ) {
 			ri.Terminate( TERM_UNRECOVERABLE, "vk_initialize: Ral_AcquireCommandBuffer(GRAPHICS) returned NULL for staging cb; RAL backend must be up" );
 		}
+		Ral_SetCommandBufferExternalLifecycle( vk.ral_staging_cmd, qtrue );
 		vk.staging_command_buffer = (VkCommandBuffer)Ral_GetCommandBufferHandle( vk.ral_staging_cmd );
 		SET_OBJECT_NAME( vk.staging_command_buffer, "staging command buffer (RAL)", VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT );
 	}
@@ -19433,7 +19730,7 @@ static void vk_destroy_render_passes( void )
 
 static void vk_destroy_pipelines( qboolean resetCounter )
 {
-	uint32_t i, j;
+	uint32_t i, j, k;
 
 	// [PIPE-PIN] temporary runtime probe for the shutdown vkDestroyPipeline
 	// garbage-handle VUID. Logs the destroy range + every non-NULL handle, and
@@ -19443,6 +19740,9 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 	R_LOG( rch_vk, SEV_WARN, "[PIPE-PIN] vk_destroy_pipelines: reset=%d count=%u world_base=%u\n",
 		(int)resetCounter, vk.pipelines_count, vk.pipelines_world_base );
 
+	if ( vk_temporal_generic_recipe_table.records )
+		(void)VK_TemporalGenericRecipeTableEvictRange(
+			&vk_temporal_generic_recipe_table, 0, vk.pipelines_count );
 	for ( i = 0; i < vk.pipelines_count; i++ ) {
 		for ( j = 0; j < RENDER_PASS_COUNT; j++ ) {
 			if ( vk.pipelines[i].handle[j] != VK_NULL_HANDLE ) {
@@ -19460,12 +19760,23 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 				vk.pipelines[i].ral_handle[j] = NULL;
 			}
 		}
+		for ( k = 0; k < VK_TEMPORAL_PIPELINE_COHORT_COUNT; k++ ) {
+			if ( vk.pipelines[i].ral_temporal_handle[k] != NULL ) {
+				Ral_DestroyPipeline( vk.pipelines[i].ral_temporal_handle[k] );
+				vk.pipelines[i].ral_temporal_handle[k] = NULL;
+			}
+		}
 	}
 
 	// [PIPE-PIN] final count after the destroy loop, before any reset memset.
 	R_LOG( rch_vk, SEV_WARN, "[PIPE-PIN] vk_destroy_pipelines: loop done, count=%u\n", vk.pipelines_count );
 
 	if ( resetCounter ) {
+		if ( vk_temporal_generic_recipe_table.records ) {
+			vkTemporalRecipeTableOps_t recipeOps = vk_temporal_recipe_ops();
+			(void)VK_TemporalGenericRecipeTableRelease(
+				&vk_temporal_generic_recipe_table, &recipeOps );
+		}
 		memset( &vk.pipelines, 0, sizeof( vk.pipelines ) );
 		vk.pipelines_count = 0;
 	}
@@ -19550,7 +19861,7 @@ void vk_shutdown( refShutdownCode_t code )
 	// on a partially-initialized instance.
 	memset( &vk_hdr_state, 0, sizeof( vk_hdr_state ) );
 
-	if ( qvkQueuePresentKHR == NULL ) { // not fully initialized
+	if ( vk_ral_get_backend() == NULL ) { // Vulkan/RAL loader never initialized
 		goto __cleanup;
 	}
 
@@ -19581,8 +19892,10 @@ void vk_shutdown( refShutdownCode_t code )
 	// retarget was the other site; this is vk_shutdown's
 	// direct call).
 	Ral_WaitQueueIdle( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
+	vk_wait_idle();
 	vk_fence_thread_stop();
 	vk_gpu_ts_shutdown();
+	vk_temporal_entmat_release_after_idle( "full-shutdown" );
 
 	vk_destroy_framebuffers();
 
@@ -19765,6 +20078,7 @@ void vk_shutdown( refShutdownCode_t code )
 	vk_clean_staging_buffer();
 
 	vk_release_geometry_buffers();
+	vk_shutdown_entmat_buffers();
 
 #if FEAT_SHADOW_MAPPING
 	vk_shutdown_shadow_snap(); // per-cmd-slot snapshot buffers + CPU arrays
@@ -20124,6 +20438,10 @@ void vk_release_resources( void ) {
 	// Remove once the mechanism is pinned.
 	R_LOG( rch_vk, SEV_WARN, "[PIPE-PIN] vk_release_resources rewind: count=%u -> world_base=%u\n",
 		vk.pipelines_count, vk.pipelines_world_base );
+	if ( vk_temporal_generic_recipe_table.records )
+		(void)VK_TemporalGenericRecipeTableEvictRange(
+			&vk_temporal_generic_recipe_table, vk.pipelines_world_base,
+			vk.pipelines_count );
 	for ( i = vk.pipelines_world_base; i < vk.pipelines_count; i++ ) {
 		for ( j = 0; j < RENDER_PASS_COUNT; j++ ) {
 			if ( vk.pipelines[i].handle[j] != VK_NULL_HANDLE ) {
@@ -20138,11 +20456,23 @@ void vk_release_resources( void ) {
 				vk.pipelines[i].ral_handle[j] = NULL;
 			}
 		}
+		for ( j = 0; j < VK_TEMPORAL_PIPELINE_COHORT_COUNT; j++ ) {
+			if ( vk.pipelines[i].ral_temporal_handle[j] != NULL ) {
+				Ral_DestroyPipeline( vk.pipelines[i].ral_temporal_handle[j] );
+				vk.pipelines[i].ral_temporal_handle[j] = NULL;
+			}
+		}
 		memset( &vk.pipelines[i], 0, sizeof( vk.pipelines[0] ) );
 	}
 	vk.pipelines_count = vk.pipelines_world_base;
 
 	VK_CHECK( qvkResetDescriptorPool( vk.device, vk.descriptor_pool, 0 ) );
+	{
+		int sl6d;
+		for ( sl6d = 0; sl6d < NUM_COMMAND_BUFFERS; sl6d++ ) {
+			vk.tess[sl6d].entMatDesc = VK_NULL_HANDLE;
+		}
+	}
 
 #if FEAT_SHADOW_MAPPING
 	// The pool reset invalidated the shadow per-frame descriptors
@@ -20153,7 +20483,6 @@ void vk_release_resources( void ) {
 		int sl6d;
 		for ( sl6d = 0; sl6d < NUM_COMMAND_BUFFERS; sl6d++ ) {
 			vk.tess[sl6d].shadowEntMatDesc    = VK_NULL_HANDLE;
-			vk.tess[sl6d].entMatDesc          = VK_NULL_HANDLE; // pool reset invalidated it; re-allocated next frame
 			vk.shadowMap.cascadeMvpDesc[sl6d] = VK_NULL_HANDLE;
 		}
 	}
@@ -22318,34 +22647,6 @@ static ralStencilOp_t vk_ral_xlate_stencil_op( VkStencilOp o ) {
 	}
 }
 
-static ralBlendFactor_t vk_ral_xlate_blend_factor( VkBlendFactor f ) {
-	switch ( f ) {
-	case VK_BLEND_FACTOR_ONE:                  return RAL_BLEND_ONE;
-	case VK_BLEND_FACTOR_SRC_COLOR:            return RAL_BLEND_SRC_COLOR;
-	case VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR:  return RAL_BLEND_ONE_MINUS_SRC_COLOR;
-	case VK_BLEND_FACTOR_DST_COLOR:            return RAL_BLEND_DST_COLOR;
-	case VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR:  return RAL_BLEND_ONE_MINUS_DST_COLOR;
-	case VK_BLEND_FACTOR_SRC_ALPHA:            return RAL_BLEND_SRC_ALPHA;
-	case VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA:  return RAL_BLEND_ONE_MINUS_SRC_ALPHA;
-	case VK_BLEND_FACTOR_DST_ALPHA:            return RAL_BLEND_DST_ALPHA;
-	case VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA:  return RAL_BLEND_ONE_MINUS_DST_ALPHA;
-	case VK_BLEND_FACTOR_SRC_ALPHA_SATURATE:   return RAL_BLEND_SRC_ALPHA_SATURATE;
-	case VK_BLEND_FACTOR_ZERO:
-	default:                                   return RAL_BLEND_ZERO;
-	}
-}
-
-static ralBlendOp_t vk_ral_xlate_blend_op( VkBlendOp o ) {
-	switch ( o ) {
-	case VK_BLEND_OP_SUBTRACT:         return RAL_BLEND_OP_SUBTRACT;
-	case VK_BLEND_OP_REVERSE_SUBTRACT: return RAL_BLEND_OP_REVERSE_SUBTRACT;
-	case VK_BLEND_OP_MIN:              return RAL_BLEND_OP_MIN;
-	case VK_BLEND_OP_MAX:              return RAL_BLEND_OP_MAX;
-	case VK_BLEND_OP_ADD:
-	default:                           return RAL_BLEND_OP_ADD;
-	}
-}
-
 static ralCullMode_t vk_ral_xlate_cull_mode( VkCullModeFlags c ) {
 	switch ( c ) {
 	case VK_CULL_MODE_FRONT_BIT: return RAL_CULL_FRONT;
@@ -22406,39 +22707,98 @@ static void vk_ral_xlate_stencil_face( ralStencilOpState_t *out, const VkStencil
 	out->reference   = in->reference;
 }
 
+static qboolean vk_ral_exact_temporal_base_valid( const VkGraphicsPipelineCreateInfo *ci ) {
+	uint32_t i;
+	const VkPipelineMultisampleStateCreateInfo *ms;
+	const VkPipelineDynamicStateCreateInfo *dyn;
+	if ( !ci || !ci->pViewportState || !ci->pMultisampleState || !ci->pDynamicState
+			|| !ci->pStages[0].pName || strcmp(ci->pStages[0].pName,"main")
+			|| !ci->pStages[1].pName || strcmp(ci->pStages[1].pName,"main")
+			|| ci->pNext || ci->flags
+			|| ci->pStages[0].pNext || ci->pStages[0].flags
+			|| ci->pStages[1].pNext || ci->pStages[1].flags
+			|| ci->pVertexInputState->pNext || ci->pVertexInputState->flags
+			|| ci->pInputAssemblyState->pNext || ci->pInputAssemblyState->flags
+			|| ci->pViewportState->pNext || ci->pViewportState->flags
+			|| ci->pRasterizationState->pNext || ci->pRasterizationState->flags
+			|| ci->pMultisampleState->pNext || ci->pMultisampleState->flags
+			|| ci->pDepthStencilState->pNext || ci->pDepthStencilState->flags
+			|| ci->pColorBlendState->pNext || ci->pColorBlendState->flags
+			|| ci->pDynamicState->pNext || ci->pDynamicState->flags
+			|| ci->pTessellationState
+			|| ci->pInputAssemblyState->topology != VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+			|| ci->pInputAssemblyState->primitiveRestartEnable
+			|| ci->pRasterizationState->rasterizerDiscardEnable
+			|| ci->pDepthStencilState->depthBoundsTestEnable
+			|| ci->pColorBlendState->logicOpEnable ) return qfalse;
+	ms=ci->pMultisampleState;dyn=ci->pDynamicState;
+	if ( ms->rasterizationSamples != VK_SAMPLE_COUNT_1_BIT || ms->sampleShadingEnable
+			|| ms->pSampleMask
+			|| ms->alphaToCoverageEnable || ms->alphaToOneEnable
+			|| ci->pViewportState->viewportCount != 1u || ci->pViewportState->scissorCount != 1u
+			|| dyn->dynamicStateCount != 2u || !dyn->pDynamicStates ) return qfalse;
+	if ( !((dyn->pDynamicStates[0]==VK_DYNAMIC_STATE_VIEWPORT && dyn->pDynamicStates[1]==VK_DYNAMIC_STATE_SCISSOR)
+			|| (dyn->pDynamicStates[1]==VK_DYNAMIC_STATE_VIEWPORT && dyn->pDynamicStates[0]==VK_DYNAMIC_STATE_SCISSOR)) ) return qfalse;
+	for(i=0;i<ci->pVertexInputState->vertexBindingDescriptionCount;++i)
+		if(!ci->pVertexInputState->pVertexBindingDescriptions
+				|| ci->pVertexInputState->pVertexBindingDescriptions[i].inputRate!=VK_VERTEX_INPUT_RATE_VERTEX)return qfalse;
+	if(ci->pVertexInputState->vertexAttributeDescriptionCount
+			&& !ci->pVertexInputState->pVertexAttributeDescriptions)return qfalse;
+	for(i=0;i<ci->pVertexInputState->vertexAttributeDescriptionCount;++i){
+		switch(ci->pVertexInputState->pVertexAttributeDescriptions[i].format){
+		case VK_FORMAT_R32_SFLOAT: case VK_FORMAT_R32G32_SFLOAT:
+		case VK_FORMAT_R32G32B32_SFLOAT: case VK_FORMAT_R32G32B32A32_SFLOAT:
+		case VK_FORMAT_R8G8B8A8_UNORM: case VK_FORMAT_R8G8B8A8_UINT: break;
+		default:return qfalse;
+		}
+	}
+	return qtrue;
+}
+
 // Build the RAL dynamic-rendering sibling of a main-pass pipeline from the fully
 // assembled legacy VkGraphicsPipelineCreateInfo. The caller supplies the RAL
 // pipeline layout (identity-shared with the legacy VkPipelineLayout) plus the
 // dynamic-rendering attachment formats explicitly. RAL_MAX_* sized scratch keeps
 // the vertex bindings/attributes + spec constants alive across the call.
-static ralPipeline_t *vk_ral_create_pipeline_from_gpinfo( const VkGraphicsPipelineCreateInfo *ci_vk,
-		ralPipelineLayout_t *layout, ralFormat_t colorFormat, ralFormat_t depthFormat,
+static ralPipeline_t *vk_ral_create_pipeline_from_gpinfo_exact_core( const VkGraphicsPipelineCreateInfo *ci_vk,
+		ralPipelineLayout_t *layout, const ralFormat_t *colorFormats, uint32_t numColorFormats,
+		ralFormat_t depthFormat, const vkTemporalSpirvOverrides_t *overrides,
 		const char *debugName ) {
 	ralGraphicsPipelineCreateInfo_t   ci;
 	ralVertexBinding_t                vbinds[8];
 	ralVertexAttribute_t              vattrs[8];
-	ralColorBlendAttachment_t         blendAtt;
-	ralSpecConstant_t                 specs[18];
+	vkRalAttachmentContract_t         attachments;
+	ralSpecConstant_t                 specs[VK_GENERIC_TRANSLATOR_SPEC_CAPACITY];
 	const uint8_t                    *vsBytes = NULL, *fsBytes = NULL;
 	uint32_t                          vsSize = 0, fsSize = 0;
-	const VkPipelineVertexInputStateCreateInfo   *vi = ci_vk->pVertexInputState;
-	const VkPipelineRasterizationStateCreateInfo *rs = ci_vk->pRasterizationState;
-	const VkPipelineDepthStencilStateCreateInfo  *ds = ci_vk->pDepthStencilState;
-	// Depth-only pipelines (the shadow caster) carry no color attachment: the
-	// legacy gpInfo has pColorBlendState->attachmentCount == 0 / pAttachments NULL,
-	// and the caller passes colorFormat == RAL_FORMAT_UNDEFINED. Detect that and
-	// skip the blend-attachment deref + emit zero color formats. The color cohort
-	// (world/screenmap/iqm/primitives, attachmentCount == 1) takes the unchanged
-	// path below — this branch is purely additive.
-	const VkPipelineColorBlendStateCreateInfo    *cbs = ci_vk->pColorBlendState;
-	const qboolean depthOnly = ( colorFormat == RAL_FORMAT_UNDEFINED )
-	                        || ( cbs == NULL )
-	                        || ( cbs->attachmentCount == 0 );
-	const VkPipelineColorBlendAttachmentState    *ba = depthOnly ? NULL : &cbs->pAttachments[0];
+	const VkPipelineVertexInputStateCreateInfo   *vi;
+	const VkPipelineRasterizationStateCreateInfo *rs;
+	const VkPipelineDepthStencilStateCreateInfo  *ds;
+	const VkPipelineColorBlendStateCreateInfo    *cbs;
 	uint32_t i;
 
-	if ( !vk_shader_blob_lookup( ci_vk->pStages[0].module, &vsBytes, &vsSize ) ) return NULL;
-	if ( !vk_shader_blob_lookup( ci_vk->pStages[1].module, &fsBytes, &fsSize ) ) return NULL;
+	if ( !ci_vk || !layout || !ci_vk->pVertexInputState || !ci_vk->pRasterizationState
+			|| !ci_vk->pInputAssemblyState || !ci_vk->pDepthStencilState
+			|| !ci_vk->pColorBlendState || ci_vk->stageCount != 2 || !ci_vk->pStages
+			|| ci_vk->pStages[0].stage != VK_SHADER_STAGE_VERTEX_BIT
+			|| ci_vk->pStages[1].stage != VK_SHADER_STAGE_FRAGMENT_BIT
+			|| ci_vk->pVertexInputState->vertexBindingDescriptionCount > ARRAY_LEN(vbinds)
+			|| ci_vk->pVertexInputState->vertexAttributeDescriptionCount > ARRAY_LEN(vattrs) ) return NULL;
+	vi = ci_vk->pVertexInputState; rs = ci_vk->pRasterizationState;
+	ds = ci_vk->pDepthStencilState; cbs = ci_vk->pColorBlendState;
+	if ( !VK_RalAttachmentContractFromVk( colorFormats, numColorFormats,
+	                                      depthFormat, cbs, &attachments ) ) return NULL;
+	if ( overrides ) {
+		if ( !vk_ral_exact_temporal_base_valid( ci_vk ) ) return NULL;
+		if ( !overrides->vertex.bytes || !overrides->vertex.size
+				|| (overrides->vertex.size & 3u) || !overrides->fragment.bytes
+				|| !overrides->fragment.size || (overrides->fragment.size & 3u) ) return NULL;
+		vsBytes = overrides->vertex.bytes; vsSize = overrides->vertex.size;
+		fsBytes = overrides->fragment.bytes; fsSize = overrides->fragment.size;
+	} else {
+		if ( !vk_shader_blob_lookup( ci_vk->pStages[0].module, &vsBytes, &vsSize ) ) return NULL;
+		if ( !vk_shader_blob_lookup( ci_vk->pStages[1].module, &fsBytes, &fsSize ) ) return NULL;
+	}
 
 	memset( &ci, 0, sizeof( ci ) );
 	ci.vertexSpirv       = (const uint32_t *)vsBytes;
@@ -22484,32 +22844,11 @@ static ralPipeline_t *vk_ral_create_pipeline_from_gpinfo( const VkGraphicsPipeli
 	vk_ral_xlate_stencil_face( &ci.depthStencil.stencilFront, &ds->front );
 	vk_ral_xlate_stencil_face( &ci.depthStencil.stencilBack,  &ds->back  );
 
-	// Blend — independent alpha (matches legacy where alpha==color, but threaded
-	// through the independent path so the RAL pipeline is faithful regardless).
-	// Depth-only pipelines have no color attachment → no blend state, no color
-	// format (numColorBlends/numColorFormats stay 0).
-	if ( !depthOnly ) {
-		memset( &blendAtt, 0, sizeof( blendAtt ) );
-		blendAtt.blendEnable = ba->blendEnable ? qtrue : qfalse;
-		blendAtt.srcColor    = vk_ral_xlate_blend_factor( ba->srcColorBlendFactor );
-		blendAtt.dstColor    = vk_ral_xlate_blend_factor( ba->dstColorBlendFactor );
-		blendAtt.colorOp     = vk_ral_xlate_blend_op( ba->colorBlendOp );
-		blendAtt.srcAlpha    = vk_ral_xlate_blend_factor( ba->srcAlphaBlendFactor );
-		blendAtt.dstAlpha    = vk_ral_xlate_blend_factor( ba->dstAlphaBlendFactor );
-		blendAtt.alphaOp     = vk_ral_xlate_blend_op( ba->alphaBlendOp );
-		blendAtt.writeMask   = ba->colorWriteMask;   // VkColorComponentFlags bits == RAL_COLOR_WRITE_* bits
-		ci.colorBlends    = &blendAtt;
-		ci.numColorBlends = 1;
-	}
-
-	// Dynamic-rendering attachment formats — caller-supplied color + combined
-	// depth (stencilAttachmentFormat derived backend-side from the combined depth).
-	// Depth-only: numColorFormats stays 0 (the shadow caster writes depth only).
-	if ( !depthOnly ) {
-		ci.colorFormats[0] = colorFormat;
-		ci.numColorFormats = 1;
-	}
-	ci.depthFormat     = depthFormat;
+	ci.colorBlends    = attachments.numColorAttachments ? attachments.colorBlends : NULL;
+	ci.numColorBlends = attachments.numColorAttachments;
+	memcpy( ci.colorFormats, attachments.colorFormats, sizeof( ci.colorFormats ) );
+	ci.numColorFormats = attachments.numColorAttachments;
+	ci.depthFormat     = attachments.depthFormat;
 	ci.sampleCount     = 1;
 
 	// Spec constants — gather from BOTH stages into the single RAL spec list (the
@@ -22519,13 +22858,19 @@ static ralPipeline_t *vk_ral_create_pipeline_from_gpinfo( const VkGraphicsPipeli
 	// each entry is a 4-byte value. specs[] is sized with headroom above this total.
 	{
 		uint32_t s, n = 0;
-		for ( s = 0; s < 2 && n < ARRAY_LEN( specs ); s++ ) {
+		for ( s = 0; s < 2; s++ ) {
 			const VkSpecializationInfo *si = ci_vk->pStages[s].pSpecializationInfo;
 			if ( si == NULL ) continue;
-			for ( i = 0; i < si->mapEntryCount && n < ARRAY_LEN( specs ); i++, n++ ) {
+			if ( si->mapEntryCount > ARRAY_LEN(specs) - n
+					|| (si->mapEntryCount && (!si->pMapEntries || !si->pData)) ) return NULL;
+			for ( i = 0; i < si->mapEntryCount; i++, n++ ) {
 				const VkSpecializationMapEntry *e = &si->pMapEntries[i];
+				uint32_t value;
+				if ( e->size != sizeof(value) || e->offset > si->dataSize
+						|| sizeof(value) > si->dataSize - e->offset ) return NULL;
+				memcpy( &value, (const uint8_t *)si->pData + e->offset, sizeof(value) );
 				specs[n].constantId = e->constantID;
-				specs[n].value      = *(const uint32_t *)( (const uint8_t *)si->pData + e->offset );
+				specs[n].value      = value;
 			}
 		}
 		if ( n > 0 ) {
@@ -22540,6 +22885,78 @@ static ralPipeline_t *vk_ral_create_pipeline_from_gpinfo( const VkGraphicsPipeli
 	ci.debugName          = debugName;
 
 	return Ral_CreateGraphicsPipeline( (ralBackend_t *)vk_ral_get_backend(), &ci );
+}
+
+ralPipeline_t *vk_ral_create_pipeline_from_gpinfo_exact_spirv(
+		const VkGraphicsPipelineCreateInfo *ci, ralPipelineLayout_t *layout,
+		const ralFormat_t *formats, uint32_t count, ralFormat_t depth,
+		const vkTemporalSpirvOverrides_t *overrides, const char *debugName ) {
+	if ( !overrides ) return NULL;
+	return vk_ral_create_pipeline_from_gpinfo_exact_core( ci, layout, formats,
+		count, depth, overrides, debugName );
+}
+
+qboolean vk_temporal_pipeline_lookup_blob( VkShaderModule module,
+		vkTemporalShaderBlob_t *out ) {
+	const uint8_t *bytes = NULL;
+	uint32_t size = 0;
+	if ( !out || !vk_shader_blob_lookup( module, &bytes, &size ) ) return qfalse;
+	out->bytes = bytes;
+	out->size = size;
+	return qtrue;
+}
+
+static void vk_temporal_capture_generic_main_recipe( uint32_t slot,
+		const VkGraphicsPipelineCreateInfo *base ) {
+	vkTemporalShaderBlob_t ordinaryVertex, ordinaryFragment;
+	vkTemporalGenericRecipeCaptureInput_t input;
+	vkTemporalGenericRecipeReceipt_t receipt;
+	if ( !vk_temporal_generic_recipe_table.armed || !base
+			|| slot >= vk.pipelines_count || base->stageCount != 2u
+			|| !base->pStages || base->layout != vk.pipeline_layout
+			|| !vk_temporal_pipeline_lookup_blob(
+				base->pStages[0].module, &ordinaryVertex )
+			|| !vk_temporal_pipeline_lookup_blob(
+				base->pStages[1].module, &ordinaryFragment ) ) return;
+	memset( &input, 0, sizeof( input ) );
+	if ( !VK_TemporalGenericCatalogIdentify( ordinaryVertex, ordinaryFragment,
+			&input.key, &input.catalogId ) ) return;
+	input.slot = slot;
+	input.base = base;
+	input.sceneFormat = vk_attachment_format_to_ral( vk.color_format );
+	input.depthFormat = vk_attachment_format_to_ral( vk.depth_format );
+	input.layoutClass = VK_TEMPORAL_RECIPE_LAYOUT_GENERIC_MAIN;
+	(void)VK_TemporalGenericRecipeTableCapture(
+		&vk_temporal_generic_recipe_table, &input, &receipt );
+}
+
+static ralPipeline_t *vk_ral_create_pipeline_from_gpinfo_exact( const VkGraphicsPipelineCreateInfo *ci_vk,
+		ralPipelineLayout_t *layout, const ralFormat_t *colorFormats, uint32_t numColorFormats,
+		ralFormat_t depthFormat, const char *debugName ) {
+	return vk_ral_create_pipeline_from_gpinfo_exact_core( ci_vk, layout, colorFormats,
+		numColorFormats, depthFormat, NULL, debugName );
+}
+
+// Compatibility wrapper for the 17 existing one-color/depth-only sites. All
+// validation and translation remains in the exact array core above.
+static ralPipeline_t *vk_ral_create_pipeline_from_gpinfo( const VkGraphicsPipelineCreateInfo *ci_vk,
+		ralPipelineLayout_t *layout, ralFormat_t colorFormat, ralFormat_t depthFormat,
+		const char *debugName ) {
+	if ( colorFormat == RAL_FORMAT_UNDEFINED )
+		return vk_ral_create_pipeline_from_gpinfo_exact( ci_vk, layout, NULL, 0,
+		                                                 depthFormat, debugName );
+	return vk_ral_create_pipeline_from_gpinfo_exact( ci_vk, layout, &colorFormat, 1,
+	                                                 depthFormat, debugName );
+}
+
+qboolean vk_temporal_build_preserve_pipeline(
+		const VkGraphicsPipelineCreateInfo *base,
+		ralPipelineLayout_t *layout, ralFormat_t sceneFormat,
+		const char *debugName, ralPipeline_t **outPipeline ) {
+	ralBackend_t *backend = vk_ral_get_backend();
+	return VK_TemporalPreservePipelineCreate( backend, base, layout,
+		sceneFormat, vk_attachment_format_to_ral( vk.depth_format ), debugName,
+		vk_ral_create_pipeline_from_gpinfo_exact, outPipeline );
 }
 
 
@@ -22610,7 +23027,7 @@ static ralPipeline_t *vk_ral_create_special_pipeline( const vk_ral_special_pipel
 	ralGraphicsPipelineCreateInfo_t ci;
 	const uint8_t *vsBytes = NULL, *fsBytes = NULL;
 	uint32_t       vsSize  = 0,    fsSize  = 0;
-	ralColorBlendAttachment_t      blendAtt;
+	vkRalAttachmentContract_t      authored, attachments;
 
 	if ( !p ) return NULL;
 	if ( !vk_shader_blob_lookup( p->vs_module, &vsBytes, &vsSize ) ) return NULL;
@@ -22639,25 +23056,35 @@ static ralPipeline_t *vk_ral_create_special_pipeline( const vk_ral_special_pipel
 	ci.depthStencil.depthCompareOp    = p->depthCompareOp;
 	ci.depthStencil.stencilTestEnable = qfalse;
 
-	memset( &blendAtt, 0, sizeof( blendAtt ) );
-	blendAtt.blendEnable = p->blendEnable;
-	blendAtt.srcColor    = p->srcColor;
-	blendAtt.dstColor    = p->dstColor;
-	blendAtt.colorOp     = p->blendOp;
-	blendAtt.srcAlpha    = p->srcColor;
-	blendAtt.dstAlpha    = p->dstColor;
-	blendAtt.alphaOp     = p->blendOp;
-	blendAtt.writeMask   = p->colorWriteMask ? p->colorWriteMask : RAL_COLOR_WRITE_ALL;
-	ci.colorBlends    = &blendAtt;
-	ci.numColorBlends = ( p->numColorAttachments > 0 || !p->depthOnly ) ? 1 : 0;
-
-	if ( p->depthOnly ) {
-		ci.numColorFormats = 0;
+	if ( p->exactAttachments ) {
+		if ( !VK_RalAttachmentContractCopy( p->exactAttachments, &attachments ) ) return NULL;
 	} else {
-		ci.colorFormats[0] = p->colorFormat;
-		ci.numColorFormats = ( p->numColorAttachments > 0 ) ? p->numColorAttachments : 1;
+		// Historical scalar mode is deliberately single-color only. Its zero mask
+		// keeps the old WRITE_ALL default; exact mode is required for explicit zero
+		// or heterogeneous attachment state.
+		if ( p->numColorAttachments > 1 ) return NULL;
+		memset( &authored, 0, sizeof( authored ) );
+		authored.depthFormat = p->depthFormat;
+		if ( !p->depthOnly ) {
+			authored.numColorAttachments = p->numColorAttachments ? p->numColorAttachments : 1;
+			authored.colorFormats[0] = p->colorFormat;
+			authored.colorBlends[0].blendEnable = p->blendEnable;
+			authored.colorBlends[0].srcColor = p->srcColor;
+			authored.colorBlends[0].dstColor = p->dstColor;
+			authored.colorBlends[0].colorOp  = p->blendOp;
+			authored.colorBlends[0].srcAlpha = p->srcColor;
+			authored.colorBlends[0].dstAlpha = p->dstColor;
+			authored.colorBlends[0].alphaOp  = p->blendOp;
+			authored.colorBlends[0].writeMask = p->colorWriteMask ? p->colorWriteMask : RAL_COLOR_WRITE_ALL;
+			authored.colorBlends[0].writeMaskExplicit = qtrue;
+		}
+		if ( !VK_RalAttachmentContractCopy( &authored, &attachments ) ) return NULL;
 	}
-	ci.depthFormat = p->depthFormat;
+	ci.colorBlends = attachments.numColorAttachments ? attachments.colorBlends : NULL;
+	ci.numColorBlends = attachments.numColorAttachments;
+	memcpy( ci.colorFormats, attachments.colorFormats, sizeof( ci.colorFormats ) );
+	ci.numColorFormats = attachments.numColorAttachments;
+	ci.depthFormat = attachments.depthFormat;
 	ci.sampleCount = ( p->sampleCount > 0 ) ? p->sampleCount : 1;
 
 	if ( p->numBgls > 0 )
@@ -22687,12 +23114,8 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	VkShaderModule *fs_module = NULL;
 	qboolean dfadeSelected = qfalse;   // a soft-particle depth-fade fragment module was chosen below
 	floatint_t vert_spec_data;             // constant id 16 — entity-matrix SSBO transform source
-	VkSpecializationMapEntry vert_spec_entry;
-	VkSpecializationInfo vert_spec_info;
 	floatint_t frag_spec_data[15]; // blob slots: 0:alpha-test-func, 1:alpha-test-value, 2:depth-fragment, 3:alpha-to-coverage, 4:color_mode, 5:abs_light, 6:multitexture mode, 7:discard mode, 8:ident.color, 9:ident.alpha, 10:acff, 11:depth_fade_scale, 12:normal_format (constant id 15 — light_frag.tmpl USE_PARALLAX), 13:ibl_enabled (constant id 14 — gen_frag.tmpl USE_IBL), 14:lightmap_slot (constant id 26 — gen_frag.tmpl world overbright operand)
-	VkSpecializationMapEntry spec_entries[16]; // [0] = vertex clip_plane (disabled), [1..12] = fragment constant IDs 0..11, [13] = fragment constant id 15 (normal_format), [14] = fragment constant id 14 (ibl_enabled), [15] = fragment constant id 26 (lightmap_slot)
-	//VkSpecializationInfo vert_spec_info;
-	VkSpecializationInfo frag_spec_info;
+	vkGenericSpecializationGraph_t specialization;
 	VkPipelineVertexInputStateCreateInfo vertex_input_state;
 	VkPipelineInputAssemblyStateCreateInfo input_assembly_state;
 	VkPipelineRasterizationStateCreateInfo rasterization_state;
@@ -23296,91 +23719,13 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	// byte-identical OFF pipeline. Harmlessly ignored by vertex shaders that
 	// don't declare id 16.
 	vert_spec_data.i = ( r_entitySSBO && r_entitySSBO->integer ) ? 1 : 0;
-	vert_spec_entry.constantID = 16;
-	vert_spec_entry.offset     = 0;
-	vert_spec_entry.size       = sizeof( int32_t );
-	vert_spec_info.mapEntryCount = 1;
-	vert_spec_info.pMapEntries   = &vert_spec_entry;
-	vert_spec_info.dataSize      = sizeof( int32_t );
-	vert_spec_info.pData         = &vert_spec_data;
-	shader_stages[0].pSpecializationInfo = &vert_spec_info;
-
-	//
-	// fragment module specialization data
-	//
-
-	spec_entries[1].constantID = 0;  // alpha-test-function
-	spec_entries[1].offset = 0 * sizeof( int32_t );
-	spec_entries[1].size = sizeof( int32_t );
-
-	spec_entries[2].constantID = 1; // alpha-test-value
-	spec_entries[2].offset = 1 * sizeof( int32_t );
-	spec_entries[2].size = sizeof( float );
-
-	spec_entries[3].constantID = 2; // depth-fragment
-	spec_entries[3].offset = 2 * sizeof( int32_t );
-	spec_entries[3].size = sizeof( float );
-
-	spec_entries[4].constantID = 3; // alpha-to-coverage
-	spec_entries[4].offset = 3 * sizeof( int32_t );
-	spec_entries[4].size = sizeof( int32_t );
-
-	spec_entries[5].constantID = 4; // color_mode
-	spec_entries[5].offset = 4 * sizeof( int32_t );
-	spec_entries[5].size = sizeof( int32_t );
-
-	spec_entries[6].constantID = 5; // abs_light
-	spec_entries[6].offset = 5 * sizeof( int32_t );
-	spec_entries[6].size = sizeof( int32_t );
-
-	spec_entries[7].constantID = 6; // multitexture mode
-	spec_entries[7].offset = 6 * sizeof( int32_t );
-	spec_entries[7].size = sizeof( int32_t );
-
-	spec_entries[8].constantID = 7; // discard mode
-	spec_entries[8].offset = 7 * sizeof( int32_t );
-	spec_entries[8].size = sizeof( int32_t );
-
-	spec_entries[9].constantID = 8; // fixed color
-	spec_entries[9].offset = 8 * sizeof( int32_t );
-	spec_entries[9].size = sizeof( float );
-
-	spec_entries[10].constantID = 9; // fixed alpha
-	spec_entries[10].offset = 9 * sizeof( int32_t );
-	spec_entries[10].size = sizeof( float );
-
-	spec_entries[11].constantID = 10; // acff
-	spec_entries[11].offset = 10 * sizeof( int32_t );
-	spec_entries[11].size = sizeof( int32_t );
-
-	spec_entries[12].constantID = 11; // depth_fade_scale
-	spec_entries[12].offset = 11 * sizeof( int32_t );
-	spec_entries[12].size = sizeof( float );
-
-	// blob slot 12 -> fragment constant id 15 = normal_format
-	// (light_frag.tmpl USE_PARALLAX). Reuses the id-15 hole the earlier srgb
-	// constant left behind; harmlessly ignored by every shader that doesn't
-	// declare id 15.
-	spec_entries[13].constantID = 15; // normal_format
-	spec_entries[13].offset = 12 * sizeof( int32_t );
-	spec_entries[13].size = sizeof( int32_t );
-
-	// Blob slot 13 -> fragment constant id 14 = ibl_enabled (gen_frag.tmpl
-	// USE_IBL). Harmlessly ignored by every shader that doesn't declare id 14.
-	spec_entries[14].constantID = 14; // ibl_enabled
-	spec_entries[14].offset = 13 * sizeof( int32_t );
-	spec_entries[14].size = sizeof( int32_t );
-
-	// Blob slot 14 -> fragment constant id 26 = lightmap_slot (gen_frag.tmpl world
-	// overbright operand). Harmlessly ignored by every shader that doesn't declare id 26.
-	spec_entries[15].constantID = 26; // lightmap_slot
-	spec_entries[15].offset = 14 * sizeof( int32_t );
-	spec_entries[15].size = sizeof( int32_t );
-
-	frag_spec_info.mapEntryCount = 15;
-	frag_spec_info.pMapEntries = spec_entries + 1;
-	frag_spec_info.dataSize = sizeof( int32_t ) * 15;
-	frag_spec_info.pData = &frag_spec_data[0];
+	if ( !VK_GenericSpecializationAuthor( &specialization,
+			&vert_spec_data, frag_spec_data ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"create_pipeline: generic specialization author rejected owned storage" );
+		return VK_NULL_HANDLE;
+	}
+	shader_stages[0].pSpecializationInfo = &specialization.vertexInfo;
 
 	// MSDF fragment shader has its own specialization layout (constant_id=0 is
 	// msdf_distance_range, not alpha-test-function). Shader compiled-in default
@@ -23389,7 +23734,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	  || def->shader_type == TYPE_LIGHTSTYLES_ARRAY )
 		shader_stages[1].pSpecializationInfo = NULL;
 	else
-		shader_stages[1].pSpecializationInfo = &frag_spec_info;
+		shader_stages[1].pSpecializationInfo = &specialization.fragmentInfo;
 
 	//
 	// Vertex input
@@ -24057,6 +24402,11 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 				vk_attachment_format_to_ral( vk.color_format ),
 				vk_attachment_format_to_ral( vk.depth_format ),
 				va( "ral-world def#%i pass#%i", def_index, (int)renderPassIndex ) );
+		if ( renderPassIndex == RENDER_PASS_MAIN
+				&& vk.pipelines[ def_index ].ral_handle[ renderPassIndex ] != NULL
+				&& vk_temporal_generic_recipe_table.armed )
+			vk_temporal_capture_generic_main_recipe( def_index, &create_info );
+
 	}
 
 	return pipeline;
@@ -24070,12 +24420,18 @@ static uint32_t vk_alloc_pipeline( const Vk_Pipeline_Def *def ) {
 		return 0;
 	}
 	int j;
+	if ( vk_temporal_generic_recipe_table.records )
+		(void)VK_TemporalGenericRecipeTableEvictRange(
+			&vk_temporal_generic_recipe_table, vk.pipelines_count,
+			vk.pipelines_count + 1u );
 	pipeline	  = &vk.pipelines[vk.pipelines_count];
 	pipeline->def = *def;
 	for ( j = 0; j < RENDER_PASS_COUNT; j++ ) {
 		pipeline->handle[j] = VK_NULL_HANDLE;
 		pipeline->ral_handle[j] = NULL;
 	}
+	for ( j = 0; j < VK_TEMPORAL_PIPELINE_COHORT_COUNT; j++ )
+		pipeline->ral_temporal_handle[j] = NULL;
 	return vk.pipelines_count++;
 }
 
@@ -25015,7 +25371,6 @@ void vk_bind_pipeline( uint32_t pipeline ) {
 	vkpipe  = vk_gen_pipeline( pipeline );
 	ralpipe = vk.pipelines[ pipeline ].ral_handle[ vk.renderPassIndex ];
 	worldPass = vk_is_world_render_pass( vk.renderPassIndex );
-
 	// Flag whether this draw uses a soft-particle depth-fade variant so
 	// vk_push_bindless_indices overrides bindless role 4 with the scene-depth
 	// copy for it (and only it). Set unconditionally — the dedup gate below may
@@ -25113,7 +25468,6 @@ void vk_bind_pipeline( uint32_t pipeline ) {
 	vk_world.dirty_depth_attachment |= ( vk.pipelines[ pipeline ].def.state_bits & GLS_DEPTHMASK_TRUE );
 }
 
-
 // r_entitySSBO path: whether the per-entity matrix storage buffer is the active
 // transform-delivery for this frame. Latched, so it is stable across the frame.
 qboolean vk_entmat_active( void )
@@ -25159,7 +25513,11 @@ void vk_entmat_ensure_buffer( void )
 			VkMemoryAllocateInfo ma;
 			VkDeviceSize         sz = 65536; // 512-slot floor at 128 B/slot (64 KiB)
 			while ( sz < need ) sz <<= 1;
+			const qboolean replacingRawParent =
+				vk.cmd->entMatBuf != VK_NULL_HANDLE ? qtrue : qfalse;
 			vk_wait_idle();
+			if ( replacingRawParent )
+				vk_temporal_entmat_release_after_idle( "raw-buffer-grow" );
 			if ( vk.cmd->entMatMapped ) { qvkUnmapMemory( vk.device, vk.cmd->entMatMem ); vk.cmd->entMatMapped = NULL; }
 			if ( vk.cmd->entMatBuf )    { vk_ral_unregister_buffer( vk.cmd->entMatBuf ); qvkDestroyBuffer( vk.device, vk.cmd->entMatBuf, NULL ); vk.cmd->entMatBuf = VK_NULL_HANDLE; }
 			if ( vk.cmd->entMatMem )    { qvkFreeMemory( vk.device, vk.cmd->entMatMem, NULL );    vk.cmd->entMatMem = VK_NULL_HANDLE; }
@@ -25180,6 +25538,9 @@ void vk_entmat_ensure_buffer( void )
 			                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 			                        "vk.cmd.entMatBuf" );
 			SET_OBJECT_NAME( vk.cmd->entMatBuf, "entity model matrices", VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT );
+			if ( vk.cmd->entMatAllocationGeneration != UINT32_MAX ) {
+				vk.cmd->entMatAllocationGeneration++;
+			}
 		}
 		{
 			VkDescriptorSetAllocateInfo dsAlloc;
@@ -25388,7 +25749,7 @@ void vk_begin_main_render_pass( void )
 	if ( vk.fboActive ) {
 		ri.colorAttachments[0] = vk.ral_color_image;
 	} else {
-		ri.colorAttachments[0] = vk.ral_swapchain_textures[ vk.cmd->swapchain_image_index ];
+		ri.colorAttachments[0] = vk.cmd->swapchain_image;
 	}
 	ri.colorLoadOps[0]     = RAL_LOAD_OP_CLEAR;          // USE_BUFFER_CLEAR
 	ri.colorStoreOps[0]    = RAL_STORE_OP_STORE;
@@ -25446,7 +25807,6 @@ void vk_begin_main_render_pass( void )
 	vk.cmd->open_dynamic_pass = VK_DYN_PASS_MAIN;
 	vk_world.dirty_depth_attachment = 0;
 }
-
 
 void vk_begin_post_bloom_render_pass( void )
 {
@@ -25608,7 +25968,8 @@ void vk_tonemap( void )
 	// DEPTH_STENCIL_ATTACHMENT (vk_end_render_pass's MAIN hand-off keeps it there).
 	// It ends the open pass, copies depth->SHADER_READ_ONLY, and re-opens the scene
 	// pass, which the vk_end_render_pass below then closes.
-	if ( vk.sceneDepth.active && !vk.sceneDepth.copied ) {
+	if ( vk.cmd->open_dynamic_pass != VK_DYN_PASS_NONE
+			&& vk.sceneDepth.active && !vk.sceneDepth.copied ) {
 		vk_scene_depth_copy();
 	}
 
@@ -25618,12 +25979,14 @@ void vk_tonemap( void )
 	// the scene pass is open + the RAL depth tracker is at DEPTH_STENCIL_ATTACHMENT.
 	// It re-opens the scene pass, which the vk_end_render_pass below then closes.
 	// Self-gates on r_forwardPlus + fpActive + the reduce subsystem → no-op when off.
-	vk_forwardplus_depth_copy();
+	if ( vk.cmd->open_dynamic_pass != VK_DYN_PASS_NONE )
+		vk_forwardplus_depth_copy();
 
 	// End the open scene pass (post_bloom from vk_bloom, or render_pass.main
 	// from vk_begin_frame when bloom is off; or the scene pass the forced
 	// depth-fade copy above re-opened).
-	vk_end_render_pass();
+	if ( vk.cmd->open_dynamic_pass != VK_DYN_PASS_NONE )
+		vk_end_render_pass();
 
 	vk.renderWidth = glConfig.vidWidth;
 	vk.renderHeight = glConfig.vidHeight;
@@ -26109,11 +26472,12 @@ then begin the depth fade render pass (which loads color+depth without clearing)
 This is called at the opaque->transparent transition to enable soft particle rendering.
 ================
 */
-void vk_scene_depth_copy( void )
+static void vk_scene_depth_copy_internal( qboolean forceFinal,
+		qboolean dispatchDepthConsumers )
 {
 	VkImageMemoryBarrier barriers[2];
 
-	if ( !vk.sceneDepth.active || vk.sceneDepth.copied )
+	if ( !vk.sceneDepth.active || ( vk.sceneDepth.copied && !forceFinal ) )
 		return;
 
 	// End the (dynamic) main pass. This lands color_image in SHADER_READ_ONLY and
@@ -26224,7 +26588,7 @@ void vk_scene_depth_copy( void )
 	// (vk_gtao_async_begin at frame start) already handled it from the PREVIOUS
 	// frame's snapshot, so skip to avoid a double dispatch.
 	vk.sceneDepth.copied = qtrue;   // set before dispatch: vk_gtao_dispatch's guard reads it
-	if ( !vk.gtaoAsyncActive )
+	if ( dispatchDepthConsumers && !vk.gtaoAsyncActive )
 		vk_gtao_dispatch( vk.cmd->ral_cmd );
 
 	// Lens-glow occlusion oracle — same seam, same SHADER_READ_ONLY depth copy.
@@ -26233,8 +26597,10 @@ void vk_scene_depth_copy( void )
 	// (the 1-frame coord delay, matching the dot-probe); writes visibility into the
 	// lens SSBO that this frame's halo draw reads. Reset the count after dispatch so
 	// the oracle re-arms only when RB_RenderFlares uploads sources again this frame.
-	vk_lens_dispatch( vk.cmd->ral_cmd );
-	vk.lensSourceCount = 0;
+	if ( dispatchDepthConsumers ) {
+		vk_lens_dispatch( vk.cmd->ral_cmd );
+		vk.lensSourceCount = 0;
+	}
 
 	// Re-open the scene pass as dynamic rendering, LOADing color + depth (the
 	// soft-transparent geometry that follows binds the same dynamic MAIN-slot
@@ -26303,6 +26669,16 @@ void vk_scene_depth_copy( void )
 	// so NEXT frame's vk_gtao_async_begin can read it (cross-frame source). Stays set
 	// for the device lifetime once the first copy lands.
 	vk.gtaoSnapshotValid = qtrue;
+}
+
+void vk_scene_depth_copy( void )
+{
+	vk_scene_depth_copy_internal( qfalse, qtrue );
+}
+
+void vk_scene_depth_copy_final( void )
+{
+	vk_scene_depth_copy_internal( qtrue, qfalse );
 }
 
 
@@ -26961,24 +27337,12 @@ void vk_end_render_pass( void )
 			// handler below. Depth was transient (DONT_CARE store) and is not read,
 			// so it needs no transition; skip the color→SHADER_READ barrier and the
 			// FBO trackers entirely (color_image is NULL in this mode).
-			VkImageMemoryBarrier toPresent;
-			memset( &toPresent, 0, sizeof( toPresent ) );
-			toPresent.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-			toPresent.srcAccessMask       = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-			toPresent.dstAccessMask       = 0;
-			toPresent.oldLayout           = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-			toPresent.newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-			toPresent.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			toPresent.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			toPresent.image               = vk.swapchain_images[ vk.cmd->swapchain_image_index ];
-			toPresent.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-			toPresent.subresourceRange.levelCount = 1;
-			toPresent.subresourceRange.layerCount = 1;
-			qvkCmdPipelineBarrier( vk.cmd->command_buffer,
-				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-				VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-				0, 0, NULL, 0, NULL, 1, &toPresent );
-			Ral_SetTextureLayout( vk.ral_swapchain_textures[ vk.cmd->swapchain_image_index ], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR );
+			if ( Ral_PrepareSwapchainImageForPresent( vk.cmd->ral_cmd,
+					vk.ral_swapchain, vk.cmd->swapchain_image_index ) != ralSuccess ) {
+				ri.Terminate( TERM_UNRECOVERABLE,
+					"vk_end_render_pass: failed to prepare non-FBO swapchain image for present" );
+			}
+			vk.cmd->swapchain_image_prepared = qtrue;
 
 			vk.cmd->open_dynamic_pass = VK_DYN_PASS_NONE;
 			return;
@@ -27100,26 +27464,13 @@ void vk_end_render_pass( void )
 		// Ral_BeginRendering transitions PRESENT_SRC → COLOR_ATTACHMENT (its helper's
 		// default oldLayout branch — TOP_OF_PIPE/0 — is valid here since loadOp=CLEAR
 		// discards prior contents and the acquire semaphore gates availability).
-		VkImageMemoryBarrier toPresent;
 		Ral_EndRendering( vk.cmd->ral_cmd );
-
-		memset( &toPresent, 0, sizeof( toPresent ) );
-		toPresent.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		toPresent.srcAccessMask       = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-		toPresent.dstAccessMask       = 0;
-		toPresent.oldLayout           = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-		toPresent.newLayout           = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-		toPresent.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		toPresent.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		toPresent.image               = vk.swapchain_images[ vk.cmd->swapchain_image_index ];
-		toPresent.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		toPresent.subresourceRange.levelCount = 1;
-		toPresent.subresourceRange.layerCount = 1;
-		qvkCmdPipelineBarrier( vk.cmd->command_buffer,
-			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-			0, 0, NULL, 0, NULL, 1, &toPresent );
-		Ral_SetTextureLayout( vk.ral_swapchain_textures[ vk.cmd->swapchain_image_index ], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR );
+		if ( Ral_PrepareSwapchainImageForPresent( vk.cmd->ral_cmd,
+				vk.ral_swapchain, vk.cmd->swapchain_image_index ) != ralSuccess ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"vk_end_render_pass: failed to prepare gamma swapchain image for present" );
+		}
+		vk.cmd->swapchain_image_prepared = qtrue;
 
 		vk.cmd->open_dynamic_pass = VK_DYN_PASS_NONE;
 		return;
@@ -27565,6 +27916,10 @@ static struct {
 } vk_gpu_ts_inflight[ NUM_COMMAND_BUFFERS ];
 
 static ralProfileAccumulator_t vk_gpu_ts_accum;
+static uint32_t vk_gpu_ts_generation_counter;
+static uint32_t vk_gpu_ts_generation;
+static uint64_t vk_gpu_ts_sequence;
+static uint64_t vk_gpu_ts_produced_usec;
 
 static void vk_gpu_ts_format_topology( char *buffer, int bufferSize,
 		const char *const *labels, uint32_t laneCount )
@@ -27595,6 +27950,11 @@ static void vk_gpu_ts_init( void )
 	vk_gpu_ts_ral_pool = NULL;
 	vk_gpu_ts_count = 0;
 	Ral_ProfileAccumulatorInit( &vk_gpu_ts_accum );
+	vk_gpu_ts_generation = ++vk_gpu_ts_generation_counter;
+	if ( !vk_gpu_ts_generation )
+		vk_gpu_ts_generation = ++vk_gpu_ts_generation_counter;
+	vk_gpu_ts_sequence = 0;
+	vk_gpu_ts_produced_usec = 0;
 	memset( vk_gpu_ts_inflight, 0, sizeof( vk_gpu_ts_inflight ) );
 
 	if ( !vk.timestampSupported ) {
@@ -27633,6 +27993,54 @@ static void vk_gpu_ts_shutdown( void )
 		vk_gpu_ts_ral_pool = NULL;
 	}
 	vk_gpu_ts_active = qfalse;
+	vk_gpu_ts_sequence = 0;
+}
+
+qboolean vk_gpu_profile_sample( refGpuProfileSample_t *out )
+{
+	refGpuProfileSample_t result;
+	ralProfileSnapshot_t snapshot;
+	uint32_t i;
+
+	if ( !out || out->structSize != sizeof( *out ) )
+		return qfalse;
+	memset( &result, 0, sizeof( result ) );
+	result.structSize = sizeof( result );
+	result.version = R_PROFILE_TELEMETRY_SAMPLE_VERSION;
+	result.producerGeneration = vk_gpu_ts_generation;
+	result.producedUsec = vk_gpu_ts_produced_usec;
+	if ( !vk.timestampSupported || !vk_gpu_ts_active ) {
+		result.status = R_PROFILE_STATUS_UNAVAILABLE;
+		*out = result;
+		return qtrue;
+	}
+	if ( !r_gpuSpeeds || !r_gpuSpeeds->integer ) {
+		result.status = R_PROFILE_STATUS_SAMPLING_DISABLED;
+		*out = result;
+		return qtrue;
+	}
+	if ( !vk_gpu_ts_sequence || !Ral_ProfileAccumulatorSnapshot( &vk_gpu_ts_accum, &snapshot ) ) {
+		result.status = R_PROFILE_STATUS_WAITING;
+		*out = result;
+		return qtrue;
+	}
+	result.status = R_PROFILE_STATUS_ACTIVE;
+	result.sequence = vk_gpu_ts_sequence;
+	result.topologyEpoch = snapshot.topologyEpoch;
+	result.laneCount = snapshot.laneCount;
+	for ( i = 0; i < snapshot.laneCount; ++i ) {
+		size_t length;
+		if ( !snapshot.labels[i] || !snapshot.labels[i][0]
+			|| !isfinite( snapshot.latestMs[i] ) || snapshot.latestMs[i] < 0.0 )
+			return qfalse;
+		length = strlen( snapshot.labels[i] );
+		if ( length >= R_PROFILE_TELEMETRY_LABEL_BYTES )
+			return qfalse;
+		memcpy( result.labels[i], snapshot.labels[i], length + 1 );
+		result.durationMs[i] = snapshot.latestMs[i];
+	}
+	*out = result;
+	return qtrue;
 }
 
 void vk_gpu_profile_dump( void )
@@ -27692,16 +28100,24 @@ static void vk_gpu_ts_frame_begin( void )
 			// Accumulate inter-timestamp deltas: label[i] covers [i-1 .. i].
 			sampleLanes = vk_gpu_ts_inflight[ slot ].count - 1;
 			for ( i = 1; i < vk_gpu_ts_inflight[ slot ].count; i++ ) {
-				double delta_ns = (double)( results[i] - results[i-1] ) * (double)vk.timestampPeriodNs;
+				double delta_ns;
+				if ( results[i] < results[i - 1] ) {
+					sampleLanes = 0;
+					break;
+				}
+				delta_ns = (double)( results[i] - results[i-1] ) * (double)vk.timestampPeriodNs;
 				sampleMs[i - 1] = delta_ns * 1e-6;
 				sampleLabels[i - 1] = vk_gpu_ts_inflight[ slot ].labels[i];
 			}
-			accumulateResult = Ral_ProfileAccumulatorAdd( &vk_gpu_ts_accum,
-				sampleLabels, sampleMs, sampleLanes );
+			accumulateResult = sampleLanes ? Ral_ProfileAccumulatorAdd( &vk_gpu_ts_accum,
+				sampleLabels, sampleMs, sampleLanes ) : -1;
 			if ( accumulateResult < 0 ) {
 				R_LOG( rch_timing, SEV_WARN, "gpuProfile: action=sample-rejected reason=invalid-semantic-layout\n" );
 			} else {
 				sampleReady = qtrue;
+				vk_gpu_ts_sequence++;
+				if ( !vk_gpu_ts_sequence ) vk_gpu_ts_sequence++;
+				vk_gpu_ts_produced_usec = (uint64_t)ri.Microseconds();
 				if ( accumulateResult == 0 && vk_gpu_ts_accum.topologyEpoch == 1
 					&& vk_gpu_ts_accum.sampleFrames == 1 ) {
 					vk_gpu_ts_format_topology( topology, sizeof( topology ),
@@ -27825,11 +28241,13 @@ static void vk_gpu_ts_frame_end( void )
 
 // ---------------------------------------------------------------------------
 
-void vk_begin_frame( void )
+void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 {
 	VkCommandBufferBeginInfo begin_info;
 	VkResult res;
 
+	if ( vk_temporal_generic_recipe_table.armed )
+		VK_TemporalGenericRecipeTableDisarm( &vk_temporal_generic_recipe_table );
 	if ( vk.frame_count++ ) // might happen during stereo rendering
 		return;
 
@@ -27929,22 +28347,45 @@ void vk_begin_frame( void )
 	// intentionally outlive a normal frame and would otherwise retain the old attachment
 	// generation.  Handle that narrow resource family separately after the same GPU-idle
 	// boundary.
-	if ( vk.fboActive && vk.sceneDepth.pendingRebuild ) {
+	vk_scene_depth_watch_consumers();
+	if ( vk_swapchain_recreate_requested ) {
+		vk_swapchain_recreate_requested = 0;
+		vk_recreate_swapchain_generation();
+		R_LOG( rch_ral, SEV_INFO, "RAL swapchain recreate: action=complete\n" );
+	} else if ( vk.fboActive && vk.sceneDepth.pendingRebuild ) {
 		vk.sceneDepth.pendingRebuild = qfalse;
 #if FEAT_SHADOW_MAPPING
 		vk.dlightShadow.pendingRebuild = qfalse;
 #endif
 		vk_wait_idle();
+		// The attachment generation is about to be replaced.  Tear down every
+		// RAL object that owns a view or wrapper over those native images before
+		// destroying them; temporal's current-color/current-depth views are not
+		// part of the older static-adoption sweep, so close that dependent first.
+		vk_temporal_history_store_shutdown();
+		vk_ral_destroy_adopted_internal_textures();
+		// RAL destroy calls above enqueue native image views/descriptors.  A GPU
+		// idle wait alone does not reclaim them; drain the complete deferred
+		// queue before destroying their parent raw VkImages below.
+		if ( Ral_WaitIdleAndDrainDeferred( vk_ral_get_backend() ) != ralSuccess )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"RAL attachment rebuild: idle-proven deferred drain failed" );
 		vk_destroy_framebuffers();
 		vk_destroy_render_passes();
 		vk_destroy_attachments();
 		vk_create_attachments();        // (re)allocs the dlight-shadow atlas from the cvars
 		vk_create_render_passes();
 		vk_create_framebuffers();
-		vk_update_attachment_descriptors();
+		// Re-adopt the complete new attachment generation, then rebuild all
+		// attachment-dependent RAL views/descriptors/pipelines.  The adoption
+		// sweep finishes by refreshing legacy and RAL descriptor bindings.
+		vk_ral_adopt_static_internal_textures();
 		// The post-process pipelines bind to the just-recreated render passes; rebuild
 		// them (and the variant) so none retain a freed render-pass reference.
 		vk_update_post_process_pipelines();
+		R_LOG( rch_ral, SEV_INFO,
+			"scene-depth live rebuild active=%d deferred-drained=1 attachments-rebound=1 temporal-store-reset=1\n",
+			vk.sceneDepth.active ? 1 : 0 );
 	}
 #if FEAT_SHADOW_MAPPING
 	else if ( vk.fboActive && vk.dlightShadow.pendingRebuild ) {
@@ -27956,6 +28397,105 @@ void vk_begin_frame( void )
 	}
 #endif
 
+	// A2a active-only prerequisite. The request is a pointer-free snapshot of
+	// this exact command batch, delivered through its matching DRAW_BUFFER.
+	// NONE/CONFLICT retain existing owners; a disabled exact plan tears down
+	// once at an idle boundary. Materialization remains draw/bind inert.
+	if ( R_TemporalBatchRequestValidateExact( temporalRequest )
+			&& !temporalRequest->enabled ) {
+		if ( vk_temporal_generic_recipe_table.records ) {
+			vkTemporalRecipeTableOps_t recipeOps = vk_temporal_recipe_ops();
+			(void)VK_TemporalGenericRecipeTableRelease(
+				&vk_temporal_generic_recipe_table, &recipeOps );
+		}
+		if ( vk_temporal_motion_has_live() ) {
+			vk_wait_idle();
+			vk_temporal_entmat_release_after_idle( "disabled-exact-request" );
+		}
+	}
+
+	// The ordinary set-3 buffer is still unconditional. It now exists before
+	// acquire and command-buffer begin, so a growth/idle path cannot occur while
+	// recording. Descriptor-only recreation does not change allocation identity.
+	if ( R_TemporalBatchRequestValidateExact( temporalRequest )
+			&& temporalRequest->enabled
+			&& vk_temporal_motion_materialization.initialized ) {
+		VK_TemporalMotionMaterializationInvalidateReceipt(
+			&vk_temporal_motion_materialization );
+	}
+	vk_entmat_ensure_buffer();
+	if ( R_TemporalBatchRequestValidateExact( temporalRequest )
+			&& temporalRequest->enabled && vk_entmat_active()
+			&& vk.cmd->entMatBuf != VK_NULL_HANDLE
+			&& vk.cmd->entMatAllocationGeneration
+			&& vk.cmd->entMatAllocationGeneration != UINT32_MAX ) {
+		const uint64_t capacity64 = (uint64_t)vk.cmd->entMatSize
+			/ (uint64_t)ENTITY_MATRIX_SLOT_BYTES;
+		if ( ( (uint64_t)vk.cmd->entMatSize
+				% (uint64_t)ENTITY_MATRIX_SLOT_BYTES ) == 0
+				&& capacity64 > 0
+				&& capacity64 <= TEMPORAL_MOTION_PAYLOAD_MAX_SLOTS ) {
+			if ( !vk_temporal_entmat_runtime.initialized )
+				VK_TemporalEntMatRuntimeInit( &vk_temporal_entmat_runtime );
+			if ( VK_TemporalEntMatRuntimeEnsureAfterFence(
+				&vk_temporal_entmat_runtime, vk_ral_get_backend(),
+				NUM_COMMAND_BUFFERS, (uint32_t)vk.cmd_index,
+				(void *)vk.cmd->entMatBuf, (size_t)vk.cmd->entMatSize,
+				vk.cmd->entMatAllocationGeneration, (uint32_t)capacity64 )
+					&& temporalRequest->width == (uint32_t)vk.renderWidth
+					&& temporalRequest->height == (uint32_t)vk.renderHeight ) {
+				vkTemporalMotionMaterializationInput_t input;
+				vkTemporalLayoutOps_t layoutOps = vk_temporal_layout_ops();
+				qboolean idleProven = qfalse;
+				memset( &input, 0, sizeof( input ) );
+				input.backend = vk_ral_get_backend();
+				input.device = vk.device;
+				input.borrowedSets[0] = vk.set_layout_uniform;
+				input.borrowedSets[1] = (VkDescriptorSetLayout)
+					Ral_GetBindGroupLayoutHandle( vk_ral_get_bindless_layout() );
+				input.borrowedSets[2] = vk.set_layout_engine_resources;
+				input.payload = &vk_temporal_entmat_runtime.payload;
+				input.worldIndex = temporalRequest->worldIndex;
+				input.width = temporalRequest->width;
+				input.height = temporalRequest->height;
+				input.topologyEpoch = temporalRequest->topologyEpoch;
+				input.planGeneration = temporalRequest->planGeneration;
+#if FEAT_FOG_SYSTEM
+				input.fog = qtrue;
+#else
+				input.fog = qfalse;
+#endif
+				if ( !vk_temporal_motion_materialization.initialized )
+					VK_TemporalMotionMaterializationInit(
+						&vk_temporal_motion_materialization );
+				if ( VK_TemporalMotionMaterializationNeedsIdle(
+						&vk_temporal_motion_materialization, &input ) ) {
+					vk_wait_idle();
+					idleProven = qtrue;
+				}
+				if ( VK_TemporalMotionMaterializationEnsureAfterFence(
+						&vk_temporal_motion_materialization, &input,
+						idleProven, &layoutOps ) ) {
+					vkTemporalMotionMaterializationReceipt_t materializationReceipt;
+					if ( VK_TemporalMotionMaterializationGetReceipt(
+							&vk_temporal_motion_materialization,
+							&materializationReceipt ) ) {
+						vkTemporalRecipeBatchAuthority_t authority;
+						vkTemporalRecipeTableOps_t recipeOps = vk_temporal_recipe_ops();
+						authority.token = temporalRequest->token;
+						authority.frameId = temporalRequest->frameId;
+						authority.planGeneration = temporalRequest->planGeneration;
+						authority.materializationGeneration =
+							materializationReceipt.allocationGeneration;
+						(void)VK_TemporalGenericRecipeTablePrepare(
+							&vk_temporal_generic_recipe_table, MAX_VK_PIPELINES,
+							&authority, &recipeOps );
+					}
+				}
+			}
+		}
+	}
+
 	if ( !ri.CL_IsMinimized() && !vk.cmd->swapchain_image_acquired ) {
 		int t_acquire = ri.Milliseconds();
 		int64_t t_acquire_us = ri.Microseconds();
@@ -27963,29 +28503,32 @@ void vk_begin_frame( void )
 		qboolean acquireTimedOut = qfalse;
 _retry:
 		{
-			// Retired
-			// qvkAcquireNextImageKHR; vk.cmd->ral_image_acquired (per-frame
-			// ring adopted at sync_primitives init) is signaled by RAL on
-			// success. The returned ralTexture_t is unused beyond this call —
-			// downstream code reads vk.swapchain_image_index directly to
-			// index vk.swapchain_images[] / vk.framebuffers.main/gamma[].
-			ralTexture_t *acquiredImage = NULL;
+			// Retired qvkAcquireNextImageKHR. The canonical borrowed texture
+			// returned here carries RAL's owned image view and becomes this frame's
+			// direct dynamic-rendering target; no renderer-side re-adoption exists.
+			vk.cmd->swapchain_image = NULL;
+			vk.cmd->swapchain_image_prepared = qfalse;
+			vk.cmd->swapchain_recreate_after_present = qfalse;
+			vk.cmd->swapchain_generation = 0;
 			ralResult_t  ralRes = Ral_AcquireNextImage( vk.ral_swapchain,
 				1ULL * 1000000000ULL,
 				vk.cmd->ral_image_acquired,
 				&vk.cmd->swapchain_image_index,
-				&acquiredImage );
-			(void)acquiredImage;
-			if ( ralRes == ralOutOfDate || ralRes == ralSuboptimal ) {
+				&vk.cmd->swapchain_image );
+			if ( ralRes == ralOutOfDate ) {
 				if ( retry == qfalse ) {
 					retry = qtrue;
-					// Map ral-result back to VkResult for vk_restart_swapchain's
-					// existing signature; preserves the legacy log shape.
-					vk_restart_swapchain( __func__, ( ralRes == ralSuboptimal ) ? VK_SUBOPTIMAL_KHR : VK_ERROR_OUT_OF_DATE_KHR );
+					vk_restart_swapchain( __func__, VK_ERROR_OUT_OF_DATE_KHR );
 					goto _retry;
 				}
 				ri.Terminate( TERM_UNRECOVERABLE, "Ral_AcquireNextImage returned ralOutOfDate twice" );
 			}
+			if ( ralRes == ralSurfaceLost )
+				ri.Terminate( TERM_UNRECOVERABLE, "Ral_AcquireNextImage reported surface loss; backend rebuild required" );
+			// SUBOPTIMAL still returns an acquired image and signals the binary
+			// semaphore. Consume/present that image before the frame-boundary
+			// recreate; abandoning it would poison the semaphore lifecycle.
+			if ( ralRes == ralSuboptimal ) vk.cmd->swapchain_recreate_after_present = qtrue;
 			// VK_TIMEOUT / VK_NOT_READY (ralTimeout) is RECOVERABLE: no
 			// swapchain image became available within the 1s acquire timeout
 			// (compositor / RDP / suspend stall). The legacy code treated these
@@ -27996,10 +28539,16 @@ _retry:
 			if ( ralRes == ralTimeout ) {
 				R_LOG( rch_vk, SEV_WARN, "Ral_AcquireNextImage timed out (compositor/RDP/suspend stall) — skipping this frame\n" );
 				acquireTimedOut = qtrue;
-			} else if ( ralRes != ralSuccess ) {
+			} else if ( ralRes != ralSuccess && ralRes != ralSuboptimal ) {
 				// Genuinely fatal device error (ralErrorDeviceLost / unknown).
 				ri.Terminate( TERM_UNRECOVERABLE, "Ral_AcquireNextImage returned %d", (int)ralRes );
 			}
+			if ( ( ralRes == ralSuccess || ralRes == ralSuboptimal ) && vk.cmd->swapchain_image == NULL ) {
+				ri.Terminate( TERM_UNRECOVERABLE,
+					"Ral_AcquireNextImage returned success without a renderable image" );
+			}
+			if ( ralRes == ralSuccess )
+				vk.cmd->swapchain_generation = vk_diag_swapchain_identity.generation;
 			res = VK_SUCCESS;
 		}
 		if ( !acquireTimedOut )
@@ -28443,11 +28992,6 @@ _retry:
 	vk_gtao_async_begin();
 
 	// Ensure the per-entity matrix storage buffer + descriptor here, in the
-	// pre-pass seam, because a grow calls vk_wait_idle() which is illegal once the
-	// render pass below is open. The descriptor publish happens later (after the
-	// per-frame descriptor_set memset). No-op on the OFF path.
-	vk_entmat_ensure_buffer();
-
 	if ( vk_find_screenmap_drawsurfs() ) {
 		if ( vk.frame_count <= 3 )
 			R_LOG( rch_fbo, SEV_TRACE, "Frame %d: screenmap pass selected\n", vk.frame_count );
@@ -28552,10 +29096,16 @@ void vk_end_frame( void )
 		return;
 
 	vk.frame_count = 0;
+	if ( vk_temporal_generic_recipe_table.armed )
+		VK_TemporalGenericRecipeTableDisarm( &vk_temporal_generic_recipe_table );
 	vk_frame_t_rec_end = ri.Microseconds();
 
 	if ( vk.geometry_buffer_size_new )
 	{
+		// This frame's command buffer is discarded rather than submitted.  Any
+		// queued temporal plan must remain unreadable; otherwise the next frame
+		// can observe a history slot that was never written by the GPU.
+		R_TemporalCancelQueuedFrames();
 		vk_resize_geometry_buffer();
 		// issue: one frame may be lost during video recording
 		// solution: re-record all commands again? (might be complicated though)
@@ -28583,6 +29133,7 @@ void vk_end_frame( void )
 		// composited frame — leave it for the pass-closing chain below.
 		if ( !backEnd.doneUIPass )
 		{
+			vk_temporal_history_store_record();
 			if ( r_bloom->integer && backEnd.doneSurfaces )
 				vk_bloom();
 			vk_tonemap(); // ends main/post_bloom + does tonemap + ends render_pass.tonemap → no pass open
@@ -28735,7 +29286,7 @@ void vk_end_frame( void )
 				ralViewport_t      vp;
 				ralRect_t          sc;
 				memset( &ri, 0, sizeof( ri ) );
-				ri.colorAttachments[0] = vk.ral_swapchain_textures[ vk.cmd->swapchain_image_index ];
+				ri.colorAttachments[0] = vk.cmd->swapchain_image;
 				ri.colorLoadOps[0]     = RAL_LOAD_OP_CLEAR;
 				ri.colorStoreOps[0]    = RAL_STORE_OP_STORE;
 				ri.numColorAttachments = 1;
@@ -28917,8 +29468,12 @@ void vk_end_frame( void )
 
 	{
 		int t_submit = ri.Milliseconds();
+		ralResult_t submitResult;
 		vk_frame_t_submit_start = ri.Microseconds();
-		Ral_Submit( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS, &ralSubmit );
+		submitResult = Ral_Submit( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS, &ralSubmit );
+		R_TemporalBackendSubmitted( submitResult == ralSuccess );
+		if ( submitResult != ralSuccess )
+			ri.Terminate( TERM_UNRECOVERABLE, "Ral_Submit failed" );
 		vk_diag_submit_ms += ri.Milliseconds() - t_submit;
 		vk_frame_t_after_submit = ri.Microseconds();
 		vk_diag_v2.submit_total_us += (uint64_t)( vk_frame_t_after_submit - vk_frame_t_submit_start );
@@ -29022,14 +29577,34 @@ void vk_present_frame( void )
 		t_present = ri.Milliseconds();
 		vk_frame_t_present_start = ri.Microseconds();
 		ralRes = Ral_Present( vk_ral_get_backend(), &pi );
+		if ( ralRes == ralSuccess
+		  && vk_swapchain_receipt_pending_generation != 0
+		  && vk.cmd->swapchain_generation == vk_swapchain_receipt_pending_generation
+		  && vk.cmd->swapchain_image_prepared
+		  && vk_diag_attempt_submitted
+		  && vk.cmd->swapchain_image == Ral_GetSwapchainImage( vk.ral_swapchain,
+			vk.cmd->swapchain_image_index ) ) {
+			R_LOG( rch_ral, SEV_INFO,
+				"RAL swapchain frame: generation=%llu image=%u acquire=success target=canonical prepare=success submit=issued present=success\n",
+				(unsigned long long)vk.cmd->swapchain_generation,
+				(unsigned)vk.cmd->swapchain_image_index );
+			vk_swapchain_receipt_pending_generation = 0;
+		}
+		// Borrowed image lifetime is generation-bound; presentation ends this
+		// frame's ownership window. The next acquire republishes it.
+		vk.cmd->swapchain_image = NULL;
+		vk.cmd->swapchain_image_prepared = qfalse;
+		vk.cmd->swapchain_generation = 0;
 		vk_diag_present_ms += ri.Milliseconds() - t_present;
 		vk_frame_t_after_present = ri.Microseconds();
 		vk_diag_v2.present_call_total_us += (uint64_t)( vk_frame_t_after_present - vk_frame_t_present_start );
 		vk_frame_present_done = qtrue;
 
-		if ( ralRes == ralOutOfDate || ralRes == ralSuboptimal ) {
+		if ( ralRes == ralSurfaceLost )
+			ri.Terminate( TERM_UNRECOVERABLE, "Ral_Present reported surface loss; backend rebuild required" );
+		if ( ralRes == ralOutOfDate || ralRes == ralSuboptimal || vk.cmd->swapchain_recreate_after_present ) {
 			// swapchain re-creation needed
-			vk_restart_swapchain( __func__, ( ralRes == ralSuboptimal ) ? VK_SUBOPTIMAL_KHR : VK_ERROR_OUT_OF_DATE_KHR );
+			vk_restart_swapchain( __func__, ( ralRes == ralSuboptimal || vk.cmd->swapchain_recreate_after_present ) ? VK_SUBOPTIMAL_KHR : VK_ERROR_OUT_OF_DATE_KHR );
 			vk_diag_attempt_finish( qfalse );
 			return;
 		}
@@ -29940,6 +30515,29 @@ static void vk_shadow_snap_release_cpu( void ) {
 	shadowIqmCasterCount     = shadowIqmCasterCap     = 0;
 }
 
+static void vk_shutdown_entmat_buffers( void ) {
+	int i;
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
+		if ( vk.tess[i].entMatMapped ) {
+			qvkUnmapMemory( vk.device, vk.tess[i].entMatMem );
+			vk.tess[i].entMatMapped = NULL;
+		}
+		if ( vk.tess[i].entMatBuf ) {
+			vk_ral_unregister_buffer( vk.tess[i].entMatBuf );
+			qvkDestroyBuffer( vk.device, vk.tess[i].entMatBuf, NULL );
+			vk.tess[i].entMatBuf = VK_NULL_HANDLE;
+		}
+		if ( vk.tess[i].entMatMem ) {
+			qvkFreeMemory( vk.device, vk.tess[i].entMatMem, NULL );
+			vk.tess[i].entMatMem = VK_NULL_HANDLE;
+		}
+		vk.tess[i].entMatSize = 0;
+		vk.tess[i].entMatDesc = VK_NULL_HANDLE;
+		vk.tess[i].entMatSlot = 0;
+		vk.tess[i].entMatAllocationGeneration = 0;
+	}
+}
+
 static void vk_shutdown_shadow_snap( void ) {
 	int i;
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
@@ -29953,12 +30551,6 @@ static void vk_shutdown_shadow_snap( void ) {
 		if ( vk.tess[i].shadowEntMatMem )    { qvkFreeMemory( vk.device, vk.tess[i].shadowEntMatMem, NULL );    vk.tess[i].shadowEntMatMem = VK_NULL_HANDLE; }
 		vk.tess[i].shadowEntMatSize = 0;
 		vk.tess[i].shadowEntMatDesc = VK_NULL_HANDLE;
-		// main-path per-entity matrix SSBO (the descriptor is freed by the pool).
-		if ( vk.tess[i].entMatMapped ) { qvkUnmapMemory( vk.device, vk.tess[i].entMatMem ); vk.tess[i].entMatMapped = NULL; }
-		if ( vk.tess[i].entMatBuf )    { vk_ral_unregister_buffer( vk.tess[i].entMatBuf ); qvkDestroyBuffer( vk.device, vk.tess[i].entMatBuf, NULL ); vk.tess[i].entMatBuf = VK_NULL_HANDLE; }
-		if ( vk.tess[i].entMatMem )    { qvkFreeMemory( vk.device, vk.tess[i].entMatMem, NULL );    vk.tess[i].entMatMem = VK_NULL_HANDLE; }
-		vk.tess[i].entMatSize = 0;
-		vk.tess[i].entMatDesc = VK_NULL_HANDLE;
 	}
 	vk_shadow_snap_release_cpu();
 }
@@ -31337,7 +31929,8 @@ qboolean vk_bloom( void )
 		return qfalse;
 	}
 
-	vk_end_render_pass(); // end main
+	if ( vk.cmd->open_dynamic_pass != VK_DYN_PASS_NONE )
+		vk_end_render_pass(); // end main unless temporal ingest already closed it
 	vk_gpu_ts_write( "world_done" ); // outside render pass — MoltenVK timestamps only resolve at encoder boundaries
 
 #ifdef __APPLE__

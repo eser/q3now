@@ -6,6 +6,7 @@
 
 #include "../renderercommon/vulkan/vulkan.h"
 #include "tr_common.h"
+#include "tr_temporal_batch_request.h"
 #include "../qcommon/q_feats.h"
 #include "../renderer/ral/ral_types.h"   // ralFormat_t (renderer attachment-format helpers)
 
@@ -449,6 +450,16 @@ typedef enum {
 	RENDER_PASS_COUNT
 } renderPass_t;
 
+// Inert structural slots for the future temporal-MAIN pipeline cohort.  These
+// never alias ral_handle[RENDER_PASS_MAIN]: ordinary MAIN/SCREENMAP selection
+// remains authoritative until a later runtime leaf explicitly opts in.
+typedef enum {
+	VK_TEMPORAL_PIPELINE_PRESERVE = 0,
+	VK_TEMPORAL_PIPELINE_WRITE,
+	VK_TEMPORAL_PIPELINE_INVALIDATE,
+	VK_TEMPORAL_PIPELINE_COHORT_COUNT
+} vkTemporalPipelineCohortSlot_t;
+
 typedef struct {
 	Vk_Shader_Type shader_type;
 	unsigned int state_bits; // GLS_XXX flags
@@ -514,6 +525,10 @@ typedef struct VK_Pipeline {
 	// which stays on the legacy VkRenderPass. Bound via Ral_CmdBindPipeline when
 	// rendering the main or screenmap pass.
 	struct ralPipeline_s *ral_handle[ RENDER_PASS_COUNT ];
+	// Exact three-attachment {scene, RG16F velocity, R8 validity} siblings.
+	// Prerequisite A only provides the unreachable PRESERVE constructor; WRITE
+	// and INVALIDATE remain NULL structural ownership slots for the next leaf.
+	struct ralPipeline_s *ral_temporal_handle[ VK_TEMPORAL_PIPELINE_COHORT_COUNT ];
 } VK_Pipeline_t;
 
 // this structure must be in sync with shader uniforms!
@@ -577,6 +592,8 @@ typedef struct vkUniform_s {
 	// agrees. .yzw reserved for future world-lighting globals. 16 B, 16-aligned.
 	float    worldLightParams[4];                    // offset 592, 16 B
 } vkUniform_t;
+_Static_assert( sizeof( vkUniform_t ) == 608,
+	"ordinary draw UBO ABI must remain 608 bytes" );
 
 #define TESS_XYZ   (1)
 #define TESS_RGBA0 (2)
@@ -756,6 +773,14 @@ void vk_destroy_samplers( void );
 uint32_t vk_find_pipeline_ext( uint32_t base, const Vk_Pipeline_Def *def, qboolean use );
 void vk_get_pipeline_def( uint32_t pipeline, Vk_Pipeline_Def *def );
 
+// Unreachable prerequisite-A constructor. It authors one exact three-target
+// PRESERVE sibling from an already assembled ordinary world pipeline and
+// publishes it output-atomically. No draw/pass path calls it yet.
+qboolean vk_temporal_build_preserve_pipeline(
+	const VkGraphicsPipelineCreateInfo *base,
+	struct ralPipelineLayout_s *layout, ralFormat_t sceneFormat,
+	const char *debugName, struct ralPipeline_s **outPipeline );
+
 void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_t height );
 void vk_create_pipelines( void );
 
@@ -765,15 +790,21 @@ void vk_create_pipelines( void );
 
 void vk_clear_color( const vec4_t color );
 void vk_clear_depth( qboolean clear_stencil );
-void vk_begin_frame( void );
+void vk_begin_frame( const temporalBatchRequest_t *temporalRequest );
+void vk_temporal_motion_release_before_ral_shutdown( void );
 void vk_end_frame( void );
 void vk_profile_markers_arm( void );
 void vk_gpu_profile_dump( void );
+qboolean vk_gpu_profile_sample( refGpuProfileSample_t *out );
+void vk_request_swapchain_recreate( void );
 void vk_present_frame( void );
 
 void vk_end_render_pass( void );
 void vk_begin_main_render_pass( void );
 void vk_scene_depth_copy( void );
+void vk_scene_depth_copy_final( void );
+void vk_temporal_history_store_record( void );
+void vk_temporal_history_store_shutdown( void );
 // True when an active scene-depth consumer draws BEFORE the SS_FOG copy point,
 // so the backend must force the copy earlier than the natural SS_FOG boundary.
 qboolean vk_scene_depth_early_produce( void );
@@ -950,7 +981,11 @@ typedef struct vk_tess_s {
 	VkSemaphore image_acquired;
 	struct ralSemaphore_s *ral_image_acquired;  // adopted sibling for typed Ral_AcquireNextImage's signalSem arg
 	uint32_t	swapchain_image_index;
+	struct ralTexture_s *swapchain_image;        // borrowed canonical image returned by Ral_AcquireNextImage; valid until swapchain recreation
 	qboolean	swapchain_image_acquired;
+	qboolean	swapchain_image_prepared;
+	qboolean	swapchain_recreate_after_present;
+	uint64_t	swapchain_generation;
 	// Which bloom_image index the currently-open dynamic bloom pass writes (set at
 	// the extract/blur begin, read by vk_end_render_pass's BLOOM_EXTRACT/BLUR
 	// handlers to barrier the just-written image to SHADER_READ). Extract → 0;
@@ -1054,6 +1089,7 @@ typedef struct vk_tess_s {
 	VkDeviceSize    entMatSize;
 	VkDescriptorSet entMatDesc;
 	uint32_t        entMatSlot;
+	uint32_t        entMatAllocationGeneration;
 
 #if FEAT_SHADOW_MAPPING
 	// Per-command-buffer-slot host-coherent buffer that
@@ -1557,11 +1593,12 @@ typedef struct {
 	// Read via (VkSwapchainKHR)Ral_GetSwapchainHandle( vk.ral_swapchain ).
 	struct ralSwapchain_s *ral_swapchain;  // RAL-owned swapchain wrapper.
 	uint32_t swapchain_image_count;
+	// Native-image aliases retained only for the still-unmigrated screenshot /
+	// destroy guards. RAL owns enumeration, image views and canonical texture
+	// wrappers; render/present code consumes vk_tess_s::swapchain_image directly.
 	VkImage swapchain_images[MAX_SWAPCHAIN_IMAGES];
-	VkImageView swapchain_image_views[MAX_SWAPCHAIN_IMAGES];
 	VkSemaphore swapchain_rendering_finished[MAX_SWAPCHAIN_IMAGES];
 	struct ralSemaphore_s *ral_swapchain_rendering_finished[MAX_SWAPCHAIN_IMAGES];  // adopted per-swapchain-image siblings for typed ralPresentInfo_t.waitSemaphores[]
-	struct ralTexture_s   *ral_swapchain_textures[MAX_SWAPCHAIN_IMAGES];            // adopted per-swapchain-image dynamic-rendering color targets for the gamma pass (view from swapchain_image_views[])
 	//uint32_t swapchain_image_index;
 
 	// VkCommandPool command_pool field

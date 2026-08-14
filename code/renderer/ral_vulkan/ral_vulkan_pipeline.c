@@ -22,8 +22,6 @@
 #include "ral_vulkan_internal.h"
 #include "pipeline_test_spv.h"   // embedded SPIR-V for the \ral_dump pipeline smoke test
 
-R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
-
 #include <stdio.h>     // fopen/fwrite/fread/fclose for the pipeline-cache file
 
 // ════════════════════════════════════════════════════════════════════════
@@ -115,6 +113,7 @@ static VkBlendOp ralVk_BlendOp( ralBlendOp_t o ) {
 	default:                            return VK_BLEND_OP_ADD;
 	}
 }
+
 // Variable-rate-shading rate → fragment-size VkExtent2D. 1x1 (default) is never
 // passed here (the caller only builds the VRS state for a coarser rate). Unknown
 // rates fall back to 1x1 (a no-op fragment size).
@@ -153,12 +152,12 @@ qboolean ralVk_InitPipelineLayer( ralBackend_t *b ) {
 	// Start empty; Ral_LoadPipelineCache may seed it later. Some drivers
 	// reject zero initialData explicitly, but `nullptr/0` is spec-legal.
 	if ( b->vk.CreatePipelineCache( b->device, &pci, NULL, &b->pipelineCache ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "ralVk_InitPipelineLayer: vkCreatePipelineCache failed\n" );
+		RAL_VK_LOG( SEV_WARN, "ralVk_InitPipelineLayer: vkCreatePipelineCache failed\n" );
 		b->pipelineCache = VK_NULL_HANDLE;   // pipelines still build; just no cache hits
 	}
 	b->layoutCache    = (ralVkLayoutCacheEntry_t *)malloc( RAL_VK_LAYOUT_CACHE_MAX * sizeof( ralVkLayoutCacheEntry_t ) );
 	if ( !b->layoutCache ) {
-		R_LOG( rch_ral, SEV_WARN, "ralVk_InitPipelineLayer: layoutCache malloc failed\n" );
+		RAL_VK_LOG( SEV_WARN, "ralVk_InitPipelineLayer: layoutCache malloc failed\n" );
 		return qfalse;
 	}
 	memset( b->layoutCache, 0, RAL_VK_LAYOUT_CACHE_MAX * sizeof( ralVkLayoutCacheEntry_t ) );
@@ -187,11 +186,11 @@ uint32_t Ral_GetPipelineLayoutCacheSlotCount( ralBackend_t *b ) {
 void Ral_DumpPipelineLayoutCache( ralBackend_t *b ) {
 	uint32_t i, j, liveSlots = 0;
 	if ( !b ) {
-		R_LOG( rch_ral, SEV_INFO, "===== pipeline-layout cache slots (backend NULL) =====\n" );
+		RAL_VK_LOG( SEV_INFO, "===== pipeline-layout cache slots (backend NULL) =====\n" );
 		return;
 	}
-	R_LOG( rch_ral, SEV_INFO, "===== pipeline-layout cache slots =====\n" );
-	R_LOG( rch_ral, SEV_INFO, "  slot count (high-water): %u of %u max\n",
+	RAL_VK_LOG( SEV_INFO, "===== pipeline-layout cache slots =====\n" );
+	RAL_VK_LOG( SEV_INFO, "  slot count (high-water): %u of %u max\n",
 	        b->numLayoutCache, (unsigned)RAL_VK_LAYOUT_CACHE_MAX );
 	for ( i = 0; i < b->numLayoutCache; i++ ) {
 		const ralVkLayoutCacheEntry_t *e = &b->layoutCache[i];
@@ -200,7 +199,7 @@ void Ral_DumpPipelineLayoutCache( ralBackend_t *b ) {
 		char setHandles[256];
 		int  setOff = 0;
 		if ( e->layout == VK_NULL_HANDLE ) {
-			R_LOG( rch_ral, SEV_INFO, "    [%u] (defer-destroyed slot — refCount=%u)\n", i, e->refCount );
+			RAL_VK_LOG( SEV_INFO, "    [%u] (defer-destroyed slot — refCount=%u)\n", i, e->refCount );
 			continue;
 		}
 		liveSlots++;
@@ -218,17 +217,17 @@ void Ral_DumpPipelineLayoutCache( ralBackend_t *b ) {
 		// against vk.ral_bgl_sampler.layout etc. if needed).
 		setHandles[0] = '\0';
 		for ( j = 0; j < e->numSetLayouts && setOff < (int)sizeof( setHandles ) - 24; j++ ) {
-			int n = Com_sprintf( setHandles + setOff, sizeof( setHandles ) - setOff,
+			int n = snprintf( setHandles + setOff, sizeof( setHandles ) - setOff,
 			                     "%s%p", ( j > 0 ) ? ", " : "", (void *)e->setLayouts[j] );
 			if ( n > 0 ) setOff += n;
 		}
-		R_LOG( rch_ral, SEV_INFO,
+		RAL_VK_LOG( SEV_INFO,
 			"    [%u] push_const=%uB (%s), set_layouts=%u [%s], usage=%u\n",
 			i, e->pushConstantSize, stageTags, e->numSetLayouts, setHandles, e->refCount );
 	}
-	R_LOG( rch_ral, SEV_INFO, "  live slots: %u; defer-destroyed holes: %u\n",
+	RAL_VK_LOG( SEV_INFO, "  live slots: %u; defer-destroyed holes: %u\n",
 	        liveSlots, b->numLayoutCache - liveSlots );
-	R_LOG( rch_ral, SEV_INFO, "===== end pipeline-layout cache slots =====\n" );
+	RAL_VK_LOG( SEV_INFO, "===== end pipeline-layout cache slots =====\n" );
 }
 
 void ralVk_ShutdownPipelineLayer( ralBackend_t *b ) {
@@ -320,12 +319,12 @@ uint32_t ralVk_GetOrCreatePipelineLayout( ralBackend_t *b,
 			if ( b->layoutCache[i].layout == VK_NULL_HANDLE ) { slot = i; break; }
 		}
 		if ( slot >= RAL_VK_LAYOUT_CACHE_MAX ) {
-			R_LOG( rch_ral, SEV_WARN, "ralVk_GetOrCreatePipelineLayout: cache full (%u entries) — refusing\n", RAL_VK_LAYOUT_CACHE_MAX );
+			RAL_VK_LOG( SEV_WARN, "ralVk_GetOrCreatePipelineLayout: cache full (%u entries) — refusing\n", RAL_VK_LAYOUT_CACHE_MAX );
 			return 0xFFFFFFFFu;
 		}
 		r = b->vk.CreatePipelineLayout( b->device, &plci, NULL, &layout );
 		if ( r != VK_SUCCESS || layout == VK_NULL_HANDLE ) {
-			R_LOG( rch_ral, SEV_WARN, "ralVk_GetOrCreatePipelineLayout: vkCreatePipelineLayout failed (VkResult %d)\n", (int)r );
+			RAL_VK_LOG( SEV_WARN, "ralVk_GetOrCreatePipelineLayout: vkCreatePipelineLayout failed (VkResult %d)\n", (int)r );
 			return 0xFFFFFFFFu;
 		}
 		e = &b->layoutCache[slot];
@@ -362,7 +361,7 @@ static VkShaderModule ralVk_MakeShaderModule( ralBackend_t *b, const uint32_t *s
 	VkShaderModuleCreateInfo smci;
 	VkShaderModule           mod = VK_NULL_HANDLE;
 	if ( !spirv || spirvSize == 0 || ( spirvSize & 3u ) != 0 ) {
-		R_LOG( rch_ral, SEV_WARN, "ralVk_MakeShaderModule: bad SPIR-V size %u (must be non-zero multiple of 4)\n", spirvSize );
+		RAL_VK_LOG( SEV_WARN, "ralVk_MakeShaderModule: bad SPIR-V size %u (must be non-zero multiple of 4)\n", spirvSize );
 		return VK_NULL_HANDLE;
 	}
 	RAL_ZERO( smci );
@@ -370,7 +369,7 @@ static VkShaderModule ralVk_MakeShaderModule( ralBackend_t *b, const uint32_t *s
 	smci.codeSize = spirvSize;
 	smci.pCode    = spirv;
 	if ( b->vk.CreateShaderModule( b->device, &smci, NULL, &mod ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "ralVk_MakeShaderModule: vkCreateShaderModule failed (%u bytes)\n", spirvSize );
+		RAL_VK_LOG( SEV_WARN, "ralVk_MakeShaderModule: vkCreateShaderModule failed (%u bytes)\n", spirvSize );
 		return VK_NULL_HANDLE;
 	}
 	return mod;
@@ -438,7 +437,7 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 
 	if ( !b || !ci ) return NULL;
 	if ( !ci->vertexSpirv || ci->vertexSpirvSize == 0 || !ci->fragmentSpirv || ci->fragmentSpirvSize == 0 ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateGraphicsPipeline: missing vertex or fragment SPIR-V (%s)\n", ci->debugName ? ci->debugName : "?" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateGraphicsPipeline: missing vertex or fragment SPIR-V (%s)\n", ci->debugName ? ci->debugName : "?" );
 		return NULL;
 	}
 	if ( ci->numVertexBindings   > RAL_VK_MAX_VERT_BINDINGS   ||
@@ -447,12 +446,21 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 	     ci->numColorFormats     > RAL_MAX_COLOR_ATTACHMENTS  ||
 	     ci->numBindGroupLayouts > RAL_VK_MAX_PIPELINE_SETS   ||
 	     ci->numSpecConstants    > RAL_VK_MAX_SPEC_CONSTS ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateGraphicsPipeline: input array(s) over the backend's per-pipeline ceiling (%s)\n", ci->debugName ? ci->debugName : "?" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateGraphicsPipeline: input array(s) over the backend's per-pipeline ceiling (%s)\n", ci->debugName ? ci->debugName : "?" );
 		return NULL;
 	}
 	if ( ci->pushConstantSize > b->caps.maxPushConstantSize ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateGraphicsPipeline: pushConstantSize %u > maxPushConstantSize %u (%s)\n",
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateGraphicsPipeline: pushConstantSize %u > maxPushConstantSize %u (%s)\n",
 		        ci->pushConstantSize, b->caps.maxPushConstantSize, ci->debugName ? ci->debugName : "?" );
+		return NULL;
+	}
+	// Vulkan requires every VkPipelineColorBlendAttachmentState to be
+	// identical when independentBlend was not enabled (VUID 00605). Reject
+	// before layout or shader-module creation, using effective defaults and
+	// the explicit-zero write-mask contract.
+	if ( !ralVk_ColorBlendStatesSupported( ci, b->caps.independentBlend ) ) {
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateGraphicsPipeline: distinct color attachment states require independentBlend (%s)\n",
+		        ci->debugName ? ci->debugName : "?" );
 		return NULL;
 	}
 
@@ -575,7 +583,7 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 			cbAtt[i].srcAlphaBlendFactor = ralVk_BlendFactor( src->srcAlpha );
 			cbAtt[i].dstAlphaBlendFactor = ralVk_BlendFactor( src->dstAlpha );
 			cbAtt[i].alphaBlendOp        = ralVk_BlendOp    ( src->alphaOp  );
-			cbAtt[i].colorWriteMask      = src->writeMask ? src->writeMask : RAL_COLOR_WRITE_ALL;
+			cbAtt[i].colorWriteMask      = ralVk_ColorWriteMask( src );
 		} else {
 			cbAtt[i].colorWriteMask = RAL_COLOR_WRITE_ALL;
 		}
@@ -655,7 +663,7 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 	b->vk.DestroyShaderModule( b->device, modVert, NULL );
 	b->vk.DestroyShaderModule( b->device, modFrag, NULL );
 	if ( r != VK_SUCCESS || vkPipe == VK_NULL_HANDLE ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateGraphicsPipeline: vkCreateGraphicsPipelines failed (VkResult %d) — %s\n", (int)r, ci->debugName ? ci->debugName : "?" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateGraphicsPipeline: vkCreateGraphicsPipelines failed (VkResult %d) — %s\n", (int)r, ci->debugName ? ci->debugName : "?" );
 		ralVk_ReleasePipelineLayout( b, layoutCacheIdx );
 		return NULL;
 	}
@@ -702,15 +710,15 @@ ralPipeline_t *Ral_CreateComputePipeline( ralBackend_t *b, const ralComputePipel
 
 	if ( !b || !ci ) return NULL;
 	if ( !ci->computeSpirv || ci->computeSpirvSize == 0 ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateComputePipeline: missing compute SPIR-V (%s)\n", ci->debugName ? ci->debugName : "?" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateComputePipeline: missing compute SPIR-V (%s)\n", ci->debugName ? ci->debugName : "?" );
 		return NULL;
 	}
 	if ( ci->numBindGroupLayouts > RAL_VK_MAX_PIPELINE_SETS || ci->numSpecConstants > RAL_VK_MAX_SPEC_CONSTS ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateComputePipeline: input array over per-pipeline ceiling (%s)\n", ci->debugName ? ci->debugName : "?" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateComputePipeline: input array over per-pipeline ceiling (%s)\n", ci->debugName ? ci->debugName : "?" );
 		return NULL;
 	}
 	if ( ci->pushConstantSize > b->caps.maxPushConstantSize ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateComputePipeline: pushConstantSize %u > maxPushConstantSize %u (%s)\n",
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateComputePipeline: pushConstantSize %u > maxPushConstantSize %u (%s)\n",
 		        ci->pushConstantSize, b->caps.maxPushConstantSize, ci->debugName ? ci->debugName : "?" );
 		return NULL;
 	}
@@ -746,7 +754,7 @@ ralPipeline_t *Ral_CreateComputePipeline( ralBackend_t *b, const ralComputePipel
 	r = b->vk.CreateComputePipelines( b->device, b->pipelineCache, 1, &cpci, NULL, &vkPipe );
 	b->vk.DestroyShaderModule( b->device, mod, NULL );
 	if ( r != VK_SUCCESS || vkPipe == VK_NULL_HANDLE ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateComputePipeline: vkCreateComputePipelines failed (VkResult %d) — %s\n", (int)r, ci->debugName ? ci->debugName : "?" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateComputePipeline: vkCreateComputePipelines failed (VkResult %d) — %s\n", (int)r, ci->debugName ? ci->debugName : "?" );
 		ralVk_ReleasePipelineLayout( b, layoutCacheIdx );
 		return NULL;
 	}
@@ -790,28 +798,28 @@ void Ral_SavePipelineCache( ralBackend_t *b, const char *path ) {
 	VkResult     r;
 	FILE        *f;
 	if ( !b || !path || b->pipelineCache == VK_NULL_HANDLE ) {
-		R_LOG( rch_ral, SEV_INFO, "Ral_SavePipelineCache: entry skipped (b=%p, path=%s, cache=%s)\n",
+		RAL_VK_LOG( SEV_INFO, "Ral_SavePipelineCache: entry skipped (b=%p, path=%s, cache=%s)\n",
 			(void *)b, path ? path : "(null)",
 			( b && b->pipelineCache != VK_NULL_HANDLE ) ? "live" : "NULL_HANDLE" );
 		return;
 	}
 	r = b->vk.GetPipelineCacheData( b->device, b->pipelineCache, &sz, NULL );
-	R_LOG( rch_ral, SEV_INFO, "Ral_SavePipelineCache: entered (path='%s', cache size probe=%u bytes, VkResult=%d)\n",
+	RAL_VK_LOG( SEV_INFO, "Ral_SavePipelineCache: entered (path='%s', cache size probe=%u bytes, VkResult=%d)\n",
 		path, (unsigned)sz, (int)r );
 	if ( r != VK_SUCCESS || sz == 0 ) {
-		R_LOG( rch_ral, SEV_INFO, "Ral_SavePipelineCache: no pipelines created this session, cache empty, no-op (VkResult %d)\n", (int)r );
+		RAL_VK_LOG( SEV_INFO, "Ral_SavePipelineCache: no pipelines created this session, cache empty, no-op (VkResult %d)\n", (int)r );
 		return;
 	}
 	data = malloc( sz );
 	if ( !data ) return;
 	r = b->vk.GetPipelineCacheData( b->device, b->pipelineCache, &sz, data );
-	if ( r != VK_SUCCESS ) { free( data ); R_LOG( rch_ral, SEV_WARN, "Ral_SavePipelineCache: vkGetPipelineCacheData failed (%d)\n", (int)r ); return; }
+	if ( r != VK_SUCCESS ) { free( data ); RAL_VK_LOG( SEV_WARN, "Ral_SavePipelineCache: vkGetPipelineCacheData failed (%d)\n", (int)r ); return; }
 	f = fopen( path, "wb" );
-	if ( !f ) { free( data ); R_LOG( rch_ral, SEV_WARN, "Ral_SavePipelineCache: cannot open '%s' for writing\n", path ); return; }
+	if ( !f ) { free( data ); RAL_VK_LOG( SEV_WARN, "Ral_SavePipelineCache: cannot open '%s' for writing\n", path ); return; }
 	(void)fwrite( data, 1, sz, f );
 	fclose( f );
 	free( data );
-	R_LOG( rch_ral, SEV_INFO, "Ral_SavePipelineCache: wrote %u bytes to '%s'\n", (unsigned)sz, path );
+	RAL_VK_LOG( SEV_INFO, "Ral_SavePipelineCache: wrote %u bytes to '%s'\n", (unsigned)sz, path );
 }
 
 void Ral_LoadPipelineCache( ralBackend_t *b, const char *path ) {
@@ -822,12 +830,12 @@ void Ral_LoadPipelineCache( ralBackend_t *b, const char *path ) {
 	VkPipelineCache            newCache = VK_NULL_HANDLE;
 	if ( !b || !path ) return;
 	f = fopen( path, "rb" );
-	if ( !f ) { R_LOG( rch_ral, SEV_INFO, "Ral_LoadPipelineCache: '%s' not present — pipeline cache regenerating from scratch\n", path ); return; }
+	if ( !f ) { RAL_VK_LOG( SEV_INFO, "Ral_LoadPipelineCache: '%s' not present — pipeline cache regenerating from scratch\n", path ); return; }
 	fseek( f, 0, SEEK_END ); sz = ftell( f ); fseek( f, 0, SEEK_SET );
-	if ( sz <= 0 ) { fclose( f ); R_LOG( rch_ral, SEV_INFO, "Ral_LoadPipelineCache: '%s' empty — regenerating\n", path ); return; }
+	if ( sz <= 0 ) { fclose( f ); RAL_VK_LOG( SEV_INFO, "Ral_LoadPipelineCache: '%s' empty — regenerating\n", path ); return; }
 	data = malloc( (size_t)sz );
 	if ( !data ) { fclose( f ); return; }
-	if ( fread( data, 1, (size_t)sz, f ) != (size_t)sz ) { free( data ); fclose( f ); R_LOG( rch_ral, SEV_WARN, "Ral_LoadPipelineCache: short read on '%s' — regenerating\n", path ); return; }
+	if ( fread( data, 1, (size_t)sz, f ) != (size_t)sz ) { free( data ); fclose( f ); RAL_VK_LOG( SEV_WARN, "Ral_LoadPipelineCache: short read on '%s' — regenerating\n", path ); return; }
 	fclose( f );
 	RAL_ZERO( pci );
 	pci.sType           = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
@@ -838,7 +846,7 @@ void Ral_LoadPipelineCache( ralBackend_t *b, const char *path ) {
 	// silently regenerate (VK_SUCCESS, internal cache reset). VK_ERROR_*
 	// here means we can't seed at all — leave the old cache in place.
 	if ( b->vk.CreatePipelineCache( b->device, &pci, NULL, &newCache ) != VK_SUCCESS || newCache == VK_NULL_HANDLE ) {
-		R_LOG( rch_ral, SEV_INFO, "Ral_LoadPipelineCache: vkCreatePipelineCache rejected seed data — pipeline cache regenerating\n" );
+		RAL_VK_LOG( SEV_INFO, "Ral_LoadPipelineCache: vkCreatePipelineCache rejected seed data — pipeline cache regenerating\n" );
 		free( data );
 		return;
 	}
@@ -854,7 +862,7 @@ void Ral_LoadPipelineCache( ralBackend_t *b, const char *path ) {
 	}
 	b->pipelineCache = newCache;
 	free( data );
-	R_LOG( rch_ral, SEV_INFO, "Ral_LoadPipelineCache: seeded %ld bytes from '%s'\n", sz, path );
+	RAL_VK_LOG( SEV_INFO, "Ral_LoadPipelineCache: seeded %ld bytes from '%s'\n", sz, path );
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -938,8 +946,8 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 	const ralFormat_t  DEPTH_FMT  = RAL_FORMAT_D32_SFLOAT;
 	const uint32_t     RT_SIZE    = RAL_PIPELINE_TEST_RT_SIZE;
 
-	R_LOG( rch_ral, SEV_INFO, "===== RAL pipeline test (Phase 7.3c) =====\n" );
-	R_LOG( rch_ral, SEV_INFO, "  pipelineCache present: %s; layoutCache slots in use: %u\n",
+	RAL_VK_LOG( SEV_INFO, "===== RAL pipeline test (Phase 7.3c) =====\n" );
+	RAL_VK_LOG( SEV_INFO, "  pipelineCache present: %s; layoutCache slots in use: %u\n",
 	        ( b->pipelineCache != VK_NULL_HANDLE ) ? "yes" : "no", b->numLayoutCache );
 
 	// slot dump (pre-test snapshot).
@@ -961,12 +969,12 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 		distinctLayouts1 = b->numLayoutCache;
 		for ( i = 0; i < 100; i++ ) if ( pipes[i] ) { sharedSlot = pipes[i]->layoutCacheIndex; break; }
 		if ( sharedSlot != 0xFFFFFFFFu ) refCountSeen = b->layoutCache[sharedSlot].refCount;
-		R_LOG( rch_ral, SEV_INFO, "  layout-cache share: %u/100 pipelines created; distinct layout-cache entries grew %u → %u (expect +1); shared-slot refCount = %u (expect == created)\n",
+		RAL_VK_LOG( SEV_INFO, "  layout-cache share: %u/100 pipelines created; distinct layout-cache entries grew %u → %u (expect +1); shared-slot refCount = %u (expect == created)\n",
 		        nCreated, distinctLayouts0, distinctLayouts1, refCountSeen );
 		for ( i = 0; i < 100; i++ ) if ( pipes[i] ) Ral_DestroyPipeline( pipes[i] );
 		// drain the destroys
 		for ( i = 0; i < RAL_VK_MAX_FRAMES_IN_FLIGHT + 1u; i++ ) { Ral_BeginFrame( b ); Ral_EndFrame( b ); }
-		R_LOG( rch_ral, SEV_INFO, "  layout-cache share: after destroy, shared-slot refCount = %u (expect 0; layout VkHandle = %s)\n",
+		RAL_VK_LOG( SEV_INFO, "  layout-cache share: after destroy, shared-slot refCount = %u (expect 0; layout VkHandle = %s)\n",
 		        ( sharedSlot != 0xFFFFFFFFu ) ? b->layoutCache[sharedSlot].refCount : 99u,
 		        ( sharedSlot != 0xFFFFFFFFu && b->layoutCache[sharedSlot].layout == VK_NULL_HANDLE ) ? "VK_NULL_HANDLE (defer-destroyed)" : "still live" );
 	}
@@ -1085,12 +1093,12 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 						const uint8_t *p = (const uint8_t *)map + k * 4u;
 						if ( p[0] > 32 || p[1] > 32 || p[2] > 32 ) brightPixels++;
 					}
-					R_LOG( rch_ral, SEV_INFO, "  draw: pixel(32,32) RGBA = %u %u %u %u (expect non-grey: triangle interior); pixel(0,0) = %u %u %u %u (expect ~26 = 0.1×255 clear); bright (>0.125) pixels = %u/%u (expect a substantial fraction inside the centred triangle)\n",
+					RAL_VK_LOG( SEV_INFO, "  draw: pixel(32,32) RGBA = %u %u %u %u (expect non-grey: triangle interior); pixel(0,0) = %u %u %u %u (expect ~26 = 0.1×255 clear); bright (>0.125) pixels = %u/%u (expect a substantial fraction inside the centred triangle)\n",
 					        px[0], px[1], px[2], px[3], clearPx[0], clearPx[1], clearPx[2], clearPx[3], brightPixels, RT_SIZE * RT_SIZE );
 					Ral_UnmapBuffer( readback );
-				} else R_LOG( rch_ral, SEV_WARN, "  draw: readback map failed\n" );
-			} else R_LOG( rch_ral, SEV_WARN, "  draw: command buffer / fence acquisition failed\n" );
-		} else R_LOG( rch_ral, SEV_WARN, "  draw: resource creation failed (vb=%p ib=%p readback=%p color=%p depth=%p pipe=%p)\n",
+				} else RAL_VK_LOG( SEV_WARN, "  draw: readback map failed\n" );
+			} else RAL_VK_LOG( SEV_WARN, "  draw: command buffer / fence acquisition failed\n" );
+		} else RAL_VK_LOG( SEV_WARN, "  draw: resource creation failed (vb=%p ib=%p readback=%p color=%p depth=%p pipe=%p)\n",
 		                (void*)vb, (void*)ib, (void*)readback, (void*)color, (void*)depth, (void*)pipe );
 		(void)vbStaging; (void)ibStaging;
 		if ( pipe )     Ral_DestroyPipeline( pipe );
@@ -1175,15 +1183,15 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 						}
 					}
 					if ( badCount == 0 )
-						R_LOG( rch_ral, SEV_INFO, "  compute: 256 elements all match idx*3+7 — data[10]=%u (expect 37), data[200]=%u (expect 607), data[255]=%u (expect 772)\n",
+						RAL_VK_LOG( SEV_INFO, "  compute: 256 elements all match idx*3+7 — data[10]=%u (expect 37), data[200]=%u (expect 607), data[255]=%u (expect 772)\n",
 						        data[10], data[200], data[255] );
 					else
-						R_LOG( rch_ral, SEV_WARN, "  compute: %u/%u elements mismatch — first bad at idx %u (expect %u, got %u)\n",
+						RAL_VK_LOG( SEV_WARN, "  compute: %u/%u elements mismatch — first bad at idx %u (expect %u, got %u)\n",
 						        badCount, COUNT, sampleBad, sampleExpect, sampleGot );
 					Ral_UnmapBuffer( cReadback );
-				} else R_LOG( rch_ral, SEV_WARN, "  compute: readback map failed\n" );
-			} else R_LOG( rch_ral, SEV_WARN, "  compute: command buffer / fence acquisition failed\n" );
-		} else R_LOG( rch_ral, SEV_WARN, "  compute: setup failed (ssbo=%p readback=%p layout=%p bg=%p pipe=%p)\n", (void*)ssbo, (void*)cReadback, (void*)bgl, (void*)bg, (void*)pipe );
+				} else RAL_VK_LOG( SEV_WARN, "  compute: readback map failed\n" );
+			} else RAL_VK_LOG( SEV_WARN, "  compute: command buffer / fence acquisition failed\n" );
+		} else RAL_VK_LOG( SEV_WARN, "  compute: setup failed (ssbo=%p readback=%p layout=%p bg=%p pipe=%p)\n", (void*)ssbo, (void*)cReadback, (void*)bgl, (void*)bg, (void*)pipe );
 
 		if ( cb )        Ral_DestroyCommandBuffer( cb );
 		if ( f )         Ral_DestroyFence( f );
@@ -1306,7 +1314,7 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 				acquireTicket.graphicsAcquireRequired = qtrue;
 				acquired = Ral_TextureAcquireBatchToGraphics( b, &acquireTicket, 1u );
 			}
-			R_LOG( rch_ral, acquired ? SEV_INFO : SEV_WARN,
+			RAL_VK_LOG( acquired ? SEV_INFO : SEV_WARN,
 			       "  residency acquire: baseMip=2 mipCount=1 baseLayer=0 layerCount=1 readySemaphore=%u result=%s\n",
 			       readySemaphore ? 1u : 0u, acquired ? "ok" : "failed" );
 			// The group starts on mip0 red; the portable sparse update must make
@@ -1326,14 +1334,14 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 					const uint32_t *packed = (const uint32_t *)Ral_MapBuffer( sampleReadback );
 					if ( packed ) {
 						const uint32_t rgba = *packed;
-						R_LOG( rch_ral, SEV_INFO,
+						RAL_VK_LOG( SEV_INFO,
 						       "  residency view: baseMip=2 sample RGBA = %u %u %u %u (expect coarse green; mip0 is red)\n",
 						       rgba & 255u, ( rgba >> 8u ) & 255u, ( rgba >> 16u ) & 255u, ( rgba >> 24u ) & 255u );
 						Ral_UnmapBuffer( sampleReadback );
-					} else R_LOG( rch_ral, SEV_WARN, "  residency view: readback map failed\n" );
+					} else RAL_VK_LOG( SEV_WARN, "  residency view: readback map failed\n" );
 				}
 			}
-		} else R_LOG( rch_ral, SEV_WARN, "  residency view: setup failed (tex=%p full=%p coarse=%p sampler=%p out=%p readback=%p layout=%p group=%p pipe=%p)\n",
+		} else RAL_VK_LOG( SEV_WARN, "  residency view: setup failed (tex=%p full=%p coarse=%p sampler=%p out=%p readback=%p layout=%p group=%p pipe=%p)\n",
 		                (void *)tex, (void *)fullView, (void *)coarseView, (void *)sampler, (void *)sampleOut,
 		                (void *)sampleReadback, (void *)layout, (void *)group, (void *)pipe );
 		if ( fence ) Ral_DestroyFence( fence );
@@ -1363,7 +1371,7 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 			size = ftell( vf );
 			fclose( vf );
 		}
-		R_LOG( rch_ral, SEV_INFO, "  pipeline cache: saved '%s' (%ld bytes, %s)\n", path, size, ( size >= 32 ) ? "looks plausible: 32-byte header + driver-specific blob" : "EMPTY/missing" );
+		RAL_VK_LOG( SEV_INFO, "  pipeline cache: saved '%s' (%ld bytes, %s)\n", path, size, ( size >= 32 ) ? "looks plausible: 32-byte header + driver-specific blob" : "EMPTY/missing" );
 		Ral_LoadPipelineCache( b, path );   // exercises seed path; logs SEV_INFO if the cache regenerated
 		remove( path );                     // cleanup the test artifact
 	}
@@ -1374,9 +1382,9 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 		for ( i = 0; i < RAL_VK_MAX_FRAMES_IN_FLIGHT + 1u; i++ ) { Ral_BeginFrame( b ); Ral_EndFrame( b ); }
 		for ( i = 0; i < b->numLayoutCache; i++ )
 			if ( b->layoutCache[i].layout != VK_NULL_HANDLE ) liveLayouts++;
-		R_LOG( rch_ral, SEV_INFO,
+		RAL_VK_LOG( SEV_INFO,
 		       "  teardown: %u pending destroys, %u live allocations, %u live layout-cache slots (%u high-water)\n",
 		       b->numPendingDestroy, b->numAllocations, liveLayouts, b->numLayoutCache );
 	}
-	R_LOG( rch_ral, SEV_INFO, "===== end RAL pipeline test =====\n" );
+	RAL_VK_LOG( SEV_INFO, "===== end RAL pipeline test =====\n" );
 }

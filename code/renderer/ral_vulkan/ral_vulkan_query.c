@@ -11,8 +11,6 @@
 
 #include "ral_vulkan_internal.h"
 
-R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
-
 static VkQueryType ralVk_QueryType( ralQueryType_t t ) {
 	switch ( t ) {
 	case RAL_QUERY_OCCLUSION:            return VK_QUERY_TYPE_OCCLUSION;
@@ -39,7 +37,7 @@ ralQueryPool_t *Ral_CreateQueryPool( ralBackend_t *b, const ralQueryPoolCreateIn
 		                       | VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT
 		                       | VK_QUERY_PIPELINE_STATISTIC_CLIPPING_INVOCATIONS_BIT;
 	if ( b->vk.CreateQueryPool( b->device, &qpi, NULL, &qp->pool ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateQueryPool: vkCreateQueryPool failed (type %d, count %u)\n", (int)ci->type, ci->count );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateQueryPool: vkCreateQueryPool failed (type %d, count %u)\n", (int)ci->type, ci->count );
 		free( qp ); return NULL;
 	}
 	ralVk_SetObjectName( b, RAL_VK_H2U( qp->pool ), VK_OBJECT_TYPE_QUERY_POOL, ci->debugName );
@@ -66,7 +64,7 @@ void Ral_ResetQueryPool( ralQueryPool_t *pool, uint32_t firstQuery, uint32_t que
 	// above, so (pool->count - firstQuery) is a safe non-negative remainder.
 	if ( queryCount > pool->count - firstQuery ) queryCount = pool->count - firstQuery;
 	if ( !pool->backend->haveHostQueryReset ) {
-		RAL_NOTE_ONCE( "Ral_ResetQueryPool: hostQueryReset feature unavailable -- record a vkCmdResetQueryPool in a command buffer instead\n" );
+		RAL_NOTE_ONCE_ON( pool->backend, "Ral_ResetQueryPool: hostQueryReset feature unavailable -- record a vkCmdResetQueryPool in a command buffer instead\n" );
 		return;
 	}
 	pool->backend->vk.ResetQueryPool( pool->backend->device, pool->pool, firstQuery, queryCount );

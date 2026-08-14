@@ -7,6 +7,32 @@
 #include "cg_local.h"
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
+void CG_AddRefEntityTemporalBase( centity_t *cent, const refEntity_t *ent,
+		refEntityMotionRole_t role ) {
+	centity_t *owner = cent;
+	int entityNumber;
+
+	if ( !cent || !ent ) {
+		return;
+	}
+	if ( ent->renderfx & RF_FORCE_ENT_ALPHA ) {
+		// Explicit vertex-alpha fading is not an opaque temporal producer.
+		trap_R_AddRefEntityToScene( ent );
+		return;
+	}
+	entityNumber = cent->currentState.number;
+	if ( entityNumber < 0 || entityNumber >= MAX_GENTITIES ) {
+		trap_R_AddRefEntityToScene( ent );
+		return;
+	}
+	if ( cent == &cg.predictedPlayerEntity ) {
+		owner = &cg_entities[entityNumber];
+	}
+	CG_TemporalIdentitySubmit( &owner->temporalIdentity,
+		(uint32_t)entityNumber, role, ent,
+		trap_R_AddRefEntityToScene, trap_R_AddRefEntityToSceneTemporal );
+}
+
 
 /*
 ======================
@@ -191,7 +217,7 @@ static void CG_General( centity_t *cent ) {
 	CG_Q1_MaybeEmitTrail( cent );
 
 	// add to refresh list
-	trap_R_AddRefEntityToScene (&ent);
+	CG_AddRefEntityTemporalBase( cent, &ent, REF_ENTITY_MOTION_ROLE_GENERAL );
 }
 
 /*
@@ -367,7 +393,8 @@ static void CG_Item( centity_t *cent ) {
 	}
 
 	// add to refresh list
-	trap_R_AddRefEntityToScene(&ent);
+	CG_AddRefEntityTemporalBase( cent, &ent,
+		REF_ENTITY_MOTION_ROLE_ITEM_PRIMARY );
 
 	if ( item->giType == IT_WEAPON && wi && wi->barrelModel && !(es->eFlags & EF_BACKPACK) ) {
 		refEntity_t	barrel;
@@ -389,7 +416,8 @@ static void CG_Item( centity_t *cent ) {
 
 		barrel.nonNormalizedAxes = ent.nonNormalizedAxes;
 
-		trap_R_AddRefEntityToScene( &barrel );
+		CG_AddRefEntityTemporalBase( cent, &barrel,
+			REF_ENTITY_MOTION_ROLE_ITEM_BARREL );
 	}
 
 	// accompanying rings / spheres for powerups
@@ -541,7 +569,8 @@ static void CG_Missile( centity_t *cent ) {
 	}
 
 	// add to refresh list, possibly with quad glow
-	CG_AddRefEntityWithPowerups( cent, &ent, s1, qfalse, TEAM_FREE );
+	CG_AddRefEntityWithPowerups( cent, &ent, s1, qfalse, TEAM_FREE,
+		REF_ENTITY_MOTION_ROLE_NONE );
 }
 
 /*
@@ -594,7 +623,8 @@ static void CG_Grapple( centity_t *cent ) {
 		ent.axis[0][2] = 1;
 	}
 
-	trap_R_AddRefEntityToScene( &ent );
+	CG_AddRefEntityTemporalBase( cent, &ent,
+		REF_ENTITY_MOTION_ROLE_GRAPPLE );
 }
 
 /*
@@ -649,13 +679,15 @@ static void CG_Mover( centity_t *cent ) {
 	}
 
 	// add to refresh list
-	trap_R_AddRefEntityToScene(&ent);
+	CG_AddRefEntityTemporalBase( cent, &ent,
+		REF_ENTITY_MOTION_ROLE_MOVER_PRIMARY );
 
 	// add the secondary model
 	if ( s1->modelindex2 ) {
 		ent.skinNum = 0;
 		ent.hModel = cgs.gameModels[s1->modelindex2];
-		trap_R_AddRefEntityToScene(&ent);
+		CG_AddRefEntityTemporalBase( cent, &ent,
+			REF_ENTITY_MOTION_ROLE_MOVER_SECONDARY );
 	}
 
 }

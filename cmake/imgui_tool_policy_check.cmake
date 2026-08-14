@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
-FOREACH(_required SOURCE_ROOT COMPILE_COMMANDS BUILD_NINJA)
+FOREACH(_required SOURCE_ROOT COMPILE_COMMANDS BUILD_NINJA TOOLS_ENABLED)
 	IF(NOT DEFINED ${_required})
 		MESSAGE(FATAL_ERROR "${_required} is required")
 	ENDIF()
@@ -9,9 +9,11 @@ ENDFOREACH()
 IF(NOT EXISTS "${COMPILE_COMMANDS}" OR NOT EXISTS "${BUILD_NINJA}")
 	MESSAGE(FATAL_ERROR "ImGui tool policy inputs are missing")
 ENDIF()
+FILE(READ "${BUILD_NINJA}" _ninja)
 
 SET(_expected_relative
 	code/tools/profile_imgui/wired_profile_imgui.cpp
+	code/tools/profile_imgui/wired_profile_imgui_ral.cpp
 	code/tools/profile_imgui/wired_profile_imgui_sdl3.cpp
 	src/libs/recastnavigation/RecastDemo/Contrib/imgui/imgui.cpp
 	src/libs/recastnavigation/RecastDemo/Contrib/imgui/imgui_draw.cpp
@@ -33,6 +35,11 @@ FOREACH(_index RANGE 0 ${_last})
 	IF(_owner_index GREATER -1)
 		STRING(JSON _output GET "${_commands}" ${_index} output)
 		STRING(JSON _command GET "${_commands}" ${_index} command)
+		IF(_output MATCHES "CMakeFiles/wired_profile_imgui_ral_test\\.dir/")
+			# The focused fake-RAL contract recompiles production adapter + ImGui
+			# against recorder symbols; it is not a shipping/archive consumer.
+			CONTINUE()
+		ENDIF()
 		IF(NOT _output MATCHES "CMakeFiles/wired_profile_imgui\\.dir/")
 			MESSAGE(FATAL_ERROR "ImGui tool source leaked outside its adapter target: ${_file} -> ${_output}")
 		ENDIF()
@@ -48,14 +55,33 @@ IF(NOT _seen STREQUAL _expected_absolute)
 	MESSAGE(FATAL_ERROR "ImGui adapter compile ownership mismatch")
 ENDIF()
 
-# In the testing graph exactly one consumer may link the adapter: the isolated
-# host contract. Shipping GUI/headless must not gain a transitive ImGui link.
+# The isolated CPU contract always consumes the archive; the standalone tool
+# is the only additional tools-on consumer. Shipping GUI/headless must never
+# gain a transitive ImGui link.
 FILE(STRINGS "${BUILD_NINJA}" _imgui_link_lines
 	REGEX "^[ \\t]*LINK_LIBRARIES = .*libwired_profile_imgui\\.a")
 LIST(LENGTH _imgui_link_lines _imgui_link_count)
-IF(NOT _imgui_link_count EQUAL 1)
+IF(TOOLS_ENABLED)
+	SET(_expected_consumers 2)
+ELSE()
+	SET(_expected_consumers 1)
+ENDIF()
+IF(NOT _imgui_link_count EQUAL _expected_consumers)
 	MESSAGE(FATAL_ERROR
-		"tool-only ImGui archive must have exactly one test consumer, got ${_imgui_link_count}")
+		"tool-only ImGui archive consumer mismatch: expected ${_expected_consumers}, got ${_imgui_link_count}")
+ENDIF()
+IF(NOT _ninja MATCHES "build ral_profile_imgui_test:[^\n]*libwired_profile_imgui\\.a")
+	MESSAGE(FATAL_ERROR "ImGui CPU contract is not an exact archive consumer")
+ENDIF()
+IF(TOOLS_ENABLED)
+	IF(NOT _ninja MATCHES "build wired_profile_host:[^\n]*libwired_profile_imgui\\.a")
+		MESSAGE(FATAL_ERROR "tools-on profile host is not an exact ImGui archive consumer")
+	ENDIF()
+ELSEIF(_ninja MATCHES "build wired_profile_host:")
+	MESSAGE(FATAL_ERROR "tools-off graph contains the profile host")
+ENDIF()
+IF(_ninja MATCHES "build (wired[.]arm64|wired-headless[.]arm64|wired_(opengl|opengl2|vulkan)_arm64[.]dylib):[^\n]*libwired_profile_imgui\\.a")
+	MESSAGE(FATAL_ERROR "tool-only ImGui archive leaked into a shipping target")
 ENDIF()
 
-MESSAGE(STATUS "ImGui tool policy PASS: 6 sources isolated; shipping links absent")
+MESSAGE(STATUS "ImGui tool policy PASS: 7 sources isolated; exact tool/test consumers")
