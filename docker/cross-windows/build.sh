@@ -50,12 +50,14 @@ cmake -S . -B "$BUILD" -G Ninja \
     -DLLVM_MINGW_ROOT="$LLVM_MINGW_ROOT" \
     -DWIRED_CROSS_PREFIX="$PREFIX" \
     -DCMAKE_INSTALL_PREFIX="$BUILD/stage" \
-    -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+    -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
     -DUSE_WASM=ON
 
 # ── engine build ─────────────────────────────────────────────────────────────
 cmake --build "$BUILD" --parallel
 
 echo "── artifacts ──"
-ls -la "$BUILD"/*.exe "$BUILD"/*.dll
+ls -la "$BUILD"/wired*.exe "$BUILD"/*.dll
 find "$BUILD" -name '*.wasm' -maxdepth 4
+echo "── test executables ──"
+ls "$BUILD"/*_test.exe | wc -l

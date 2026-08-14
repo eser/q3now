@@ -536,7 +536,16 @@ jobs:
       with:
         name: cross-windows-x86_64
         path: |
-          build/cross-windows-docker/*.exe
+          build/cross-windows-docker/wired*.exe
           build/cross-windows-docker/*.dll
           build/cross-windows-docker/Release/base/vm/*.wasm
+        if-no-files-found: error
+
+    # Step B of the single-toolchain plan: the cross lane also builds the
+    # host-test executables; a Windows runner job will download and execute
+    # them (step C), replacing the native MinGW-gcc test build.
+    - uses: actions/upload-artifact@v7
+      with:
+        name: cross-windows-tests
+        path: build/cross-windows-docker/*_test.exe
         if-no-files-found: error
