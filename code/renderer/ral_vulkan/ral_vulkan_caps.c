@@ -22,8 +22,8 @@ void ralVk_FillCaps( ralBackend_t *b ) {
 	memset( c, 0, sizeof( *c ) );
 
 	// ── identity ───────────────────────────────────────────────────────
-	Q_strncpyz( c->deviceName, b->physProps.deviceName, sizeof( c->deviceName ) );
-	Com_sprintf( c->apiVersion, sizeof( c->apiVersion ), "Vulkan %u.%u.%u",
+	snprintf( c->deviceName, sizeof( c->deviceName ), "%s", b->physProps.deviceName );
+	snprintf( c->apiVersion, sizeof( c->apiVersion ), "Vulkan %u.%u.%u",
 	             VK_API_VERSION_MAJOR( apiV ), VK_API_VERSION_MINOR( apiV ), VK_API_VERSION_PATCH( apiV ) );
 
 	// ── limits straight from VkPhysicalDeviceLimits ────────────────────
@@ -118,6 +118,7 @@ void ralVk_FillCaps( ralBackend_t *b ) {
 	c->wideLines                = b->haveWideLines;
 	c->vertexFragmentStores     = b->haveVertexFragmentStores;
 	c->samplerAnisotropyEnabled = b->haveSamplerAnisotropy;
+	c->independentBlend         = b->haveIndependentBlend;
 	// drawIndirectCount reflects what was ENABLED at device
 	// creation (b->haveDrawIndirectCount), not just version/extension presence
 	// — extension visible but feature not enabled would still mean callers

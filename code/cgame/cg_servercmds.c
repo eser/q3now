@@ -611,6 +611,7 @@ static void CG_MapRestart( void ) {
 
 	CG_InitLocalEntities();
 	CG_ClearParticles ();
+	CG_TemporalIdentityMarkAllDiscontinuous();
 
 	// make sure the "3 frags left" warnings play again
 	cg.scorelimitWarnings = 0;

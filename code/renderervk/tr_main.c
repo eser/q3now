@@ -1842,7 +1842,7 @@ void R_ReleaseCompositeOrderStatics( void )
 R_SortDrawSurfs
 =================
 */
-static void R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
+static qboolean R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	shader_t		*shader;
 	int				fogNum;
 	int				entityNum;
@@ -1852,8 +1852,7 @@ static void R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	// it is possible for some views to not have any surfaces
 	if ( numDrawSurfs < 1 ) {
 		// we still need to add it for hyperspace cases
-		R_AddDrawSurfCmd( drawSurfs, numDrawSurfs );
-		return;
+		return R_AddDrawSurfCmd( drawSurfs, numDrawSurfs );
 	}
 
 	// sort the drawsurfs by sort type, then orientation, then shader
@@ -1886,7 +1885,7 @@ static void R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 		if ( R_MirrorViewBySurface( (drawSurfs+i), entityNum) ) {
 			// this is a debug option to see exactly what is being mirrored
 			if ( r_portalOnly->integer ) {
-				return;
+				return qfalse;
 			}
 #if defined (USE_VULKAN) && !defined (USE_BUFFER_CLEAR)
 			if ( r_fastsky->integer == 0 || !vk.clearAttachment ) {
@@ -1913,7 +1912,7 @@ static void R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	}
 #endif // USE_PMLIGHT
 
-	R_AddDrawSurfCmd( drawSurfs, numDrawSurfs );
+	return R_AddDrawSurfCmd( drawSurfs, numDrawSurfs );
 }
 
 
@@ -2049,6 +2048,8 @@ or a mirror / remote location
 void R_RenderView( const viewParms_t *parms ) {
 	int		firstDrawSurf;
 	int		numDrawSurfs;
+	uint64_t temporalFrameId;
+	qboolean queued;
 
 	if ( parms->viewportWidth <= 0 || parms->viewportHeight <= 0 ) {
 		return;
@@ -2069,6 +2070,11 @@ void R_RenderView( const viewParms_t *parms ) {
 
 	R_GenerateDrawSurfs();
 
+	// Diagnostic-only Phase 7.10 consumer: keep culling/LOD on the canonical
+	// unjittered projection, then jitter only the command snapshot consumed by
+	// the backend. Portal and UI/worldless views are rejected by the helper.
+	temporalFrameId = R_TemporalProjectionPrepare( &tr.viewParms );
+
 	// if we overflowed MAX_DRAWSURFS, the drawsurfs
 	// wrapped around in the buffer and we will be missing
 	// the first surfaces, not the last ones
@@ -2077,5 +2083,8 @@ void R_RenderView( const viewParms_t *parms ) {
 		numDrawSurfs = MAX_DRAWSURFS;
 	}
 
-	R_SortDrawSurfs( tr.refdef.drawSurfs + firstDrawSurf, numDrawSurfs - firstDrawSurf );
+	queued = R_SortDrawSurfs( tr.refdef.drawSurfs + firstDrawSurf,
+		numDrawSurfs - firstDrawSurf );
+	R_TemporalProjectionFinish( tr.viewParms.temporalWorldIndex,
+		temporalFrameId, queued );
 }

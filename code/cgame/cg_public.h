@@ -333,6 +333,13 @@ typedef enum {
 	// monster animation path (mirrors CG_R_GETIQMANIMS). { VARG_INT, VARG_VMPTR,
 	// VARG_INT } like the IQM query. FULL REBUILD required after this change.
 
+	CG_R_ADDREFENTITYTOSCENETEMPORAL = 232,
+	// Optional; discover with trap_GetValue key
+	// "trap_R_AddRefEntityToSceneTemporal". Atomically submits refEntity_t +
+	// fixed 24-byte refEntityMotion_t as two VARG_VMPTR arguments. Old engines
+	// do not advertise this slot and the cgame wrapper falls back to the ordinary
+	// entity submission without changing refEntity_t.
+
 	CG_TRAP_GETVALUE = COM_TRAP_GETVALUE,
 
 } cgameImport_t;

@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Wired Engine contributors
+
+#version 450
+
+// Phase 7.10 history-ingest seam. This is deliberately not a TAA resolve:
+// it stores the final HDR scene and a pinned linear-depth convention into the
+// frame plan's write slot. Previous-slot consumption belongs to the later
+// motion/reprojection resolve; pretending to consume it through an identity
+// mix would be optimizable and therefore not evidence.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform texture2D currentColor;
+layout(set = 0, binding = 1) uniform texture2D currentDeviceDepth;
+layout(set = 0, binding = 2) uniform sampler nearestSampler;
+layout(rgba16f, set = 0, binding = 3) uniform writeonly image2D outputColor;
+layout(r32f, set = 0, binding = 4) uniform writeonly image2D outputLinearDepth;
+
+layout(push_constant) uniform TemporalHistoryPush {
+	uvec2 extent;
+	float zNear;
+	float zFar;
+} pc;
+
+float linearizeDepth(float z) {
+	return pc.zNear * pc.zFar / (pc.zNear + z * (pc.zFar - pc.zNear));
+}
+
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(pixel, ivec2(pc.extent)))) return;
+	vec2 uv = (vec2(pixel) + 0.5) / vec2(pc.extent);
+	vec4 color = textureLod(sampler2D(currentColor, nearestSampler), uv, 0.0);
+	float depth = linearizeDepth(textureLod(
+		sampler2D(currentDeviceDepth, nearestSampler), uv, 0.0).r);
+	imageStore(outputColor, pixel, color);
+	imageStore(outputLinearDepth, pixel, vec4(depth));
+}

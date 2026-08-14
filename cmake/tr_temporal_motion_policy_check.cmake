@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Wired Engine contributors
+
+if(NOT DEFINED ROOT)
+	message(FATAL_ERROR "ROOT is required")
+endif()
+
+file(READ "${ROOT}/code/renderervk/tr_temporal_motion.c" MOTION)
+file(READ "${ROOT}/code/renderervk/tr_temporal_input.c" INPUT)
+file(READ "${ROOT}/code/renderervk/tr_temporal_entity_cache.c" CACHE)
+file(READ "${ROOT}/code/renderervk/tr_main.c" MAIN)
+file(READ "${ROOT}/code/renderervk/tr_local.h" LOCAL)
+file(READ "${ROOT}/code/renderervk/tr_backend.c" BACKEND)
+file(READ "${ROOT}/code/renderervk/vk.c" VK)
+file(READ "${ROOT}/CMakeLists.txt" BUILD)
+
+function(require_text haystack needle label)
+	string(FIND "${${haystack}}" "${needle}" pos)
+	if(pos EQUAL -1)
+		message(FATAL_ERROR "missing ${label}: ${needle}")
+	endif()
+endfunction()
+
+function(forbid_text haystack needle label)
+	string(FIND "${${haystack}}" "${needle}" pos)
+	if(NOT pos EQUAL -1)
+		message(FATAL_ERROR "forbidden ${label}: ${needle}")
+	endif()
+endfunction()
+
+require_text(INPUT "R_TemporalEntityCacheStageCamera" "camera receipt staging")
+require_text(INPUT "R_TemporalProjectionApply" "live projection jitter")
+string(FIND "${INPUT}" "R_TemporalEntityCacheStageCamera" stage_pos)
+string(FIND "${INPUT}" "R_TemporalProjectionApply" jitter_pos)
+if(stage_pos GREATER jitter_pos)
+	message(FATAL_ERROR "camera receipt must be staged before live projection jitter")
+endif()
+
+require_text(VK "proj[5] = -p[5]" "single Vulkan Y flip")
+require_text(VK "myGlMultMatrix( vk_world.modelview_transform, proj, mvp )" "Vulkan P*V order")
+require_text(VK "static void get_viewport(VkViewport *viewport, Vk_Depth_Range depth_range)" "standard viewport helper")
+require_text(VK "viewport->height = (float)r.extent.height" "standard positive-height viewport")
+string(FIND "${VK}" "static void get_viewport(VkViewport *viewport, Vk_Depth_Range depth_range)" viewport_pos)
+string(FIND "${VK}" "viewport->height = (float)r.extent.height" viewport_height_pos)
+if(viewport_height_pos LESS viewport_pos)
+	message(FATAL_ERROR "positive viewport height must belong to standard get_viewport")
+endif()
+require_text(MAIN "glMatrix[0] = or->axis[0][0]" "Q3 model axis layout")
+require_text(MAIN "glMatrix[12] = or->origin[0]" "Q3 model origin layout")
+require_text(MAIN "myGlMultMatrix( glMatrix, viewParms->world.modelMatrix, or->modelMatrix )" "Q3 V*M order")
+
+require_text(CACHE "a->hModel == b->hModel" "model handle compatibility")
+require_text(CACHE "a->modelToken == b->modelToken" "model object compatibility")
+require_text(CACHE "a->modelDataToken == b->modelDataToken" "model data compatibility")
+require_text(CACHE "a->modelType == b->modelType" "model type compatibility")
+require_text(CACHE "a->modelTopology == b->modelTopology" "model topology compatibility")
+require_text(LOCAL "MOD_BAD,\n\tMOD_BRUSH,\n\tMOD_MESH," "stable MOD_BRUSH numeric prefix")
+require_text(MOTION "#define TEMPORAL_MOTION_MOD_BRUSH_MODEL_TYPE 1u" "host-pure MOD_BRUSH pin")
+
+# This bounded leaf is receipt-only.  Runtime view state and draw integration
+# are deliberate future seams, not alternate inputs to the pure math contract.
+forbid_text(MOTION "backEnd.viewParms" "live backend view dependency")
+forbid_text(MOTION "view->projectionMatrix" "live frontend projection dependency")
+forbid_text(BACKEND "R_TemporalMotion" "runtime backend integration")
+forbid_text(VK "R_TemporalMotion" "runtime Vulkan integration")
+
+require_text(BUILD "AUX_SOURCE_DIRECTORY(code/renderervk RENDERER_VK_SRCS)" "production renderer ownership")
+require_text(BUILD "ADD_EXECUTABLE(tr_temporal_motion_test" "focused host target")
+string(REGEX MATCHALL "code/renderervk/tr_temporal_motion\\.c" motion_sources "${BUILD}")
+list(LENGTH motion_sources motion_source_count)
+if(NOT motion_source_count EQUAL 1)
+	message(FATAL_ERROR "expected exactly one explicit host-test source owner, found ${motion_source_count}")
+endif()
+
+message(STATUS "Temporal motion source policy contract: ok")

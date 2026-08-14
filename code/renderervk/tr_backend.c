@@ -1397,9 +1397,11 @@ static void RB_TransitionToUI( void )
 		return;
 	}
 
-	// Gameplay frame, scene finished: bloom → tonemap → SMAA → open the
+	// Gameplay frame, scene finished: temporal history ingest → bloom →
+	// tonemap → SMAA → open the
 	// LOAD-mode UI pass on img 265 so the HUD blends on top of the
 	// tonemapped (+ anti-aliased) scene.
+	vk_temporal_history_store_record();
 	if ( r_bloom->integer )
 		vk_bloom();
 	vk_tonemap();
@@ -2000,6 +2002,139 @@ static void RB_DebugGraphics( void ) {
 	ri.CM_DrawDebugSurface( RB_DebugPolygon );
 }
 
+static uint32_t RB_TemporalTopologyFold( uint32_t hash, uint32_t value ) {
+	return ( hash ^ value ) * 16777619u;
+}
+
+#if FEAT_IQM
+static uint32_t RB_TemporalIQMTopology( const iqmData_t *data ) {
+	uint32_t hash = 2166136261u;
+	if ( !data || data->num_frames < 0 || data->num_joints < 0
+			|| data->num_poses < 0 || data->num_surfaces < 0
+			|| data->num_vertexes < 0 || data->num_triangles < 0 ) return 0;
+	hash = RB_TemporalTopologyFold( hash, (uint32_t)data->num_frames );
+	hash = RB_TemporalTopologyFold( hash, (uint32_t)data->num_joints );
+	hash = RB_TemporalTopologyFold( hash, (uint32_t)data->num_poses );
+	hash = RB_TemporalTopologyFold( hash, (uint32_t)data->num_surfaces );
+	hash = RB_TemporalTopologyFold( hash, (uint32_t)data->num_vertexes );
+	hash = RB_TemporalTopologyFold( hash, (uint32_t)data->num_triangles );
+	return hash ? hash : 1u;
+}
+#endif
+
+static void RB_TemporalPoseFromEntity( const refEntity_t *entity,
+		temporalEntityPose_t *pose ) {
+	model_t *model;
+	memset( pose, 0, sizeof( *pose ) );
+	pose->hModel = entity->hModel;
+	model = R_GetModelByHandle( entity->hModel );
+	pose->modelToken = (uintptr_t)model;
+	pose->modelDataToken = (uintptr_t)( model ? model->modelData : NULL );
+	pose->modelType = model ? (uint32_t)model->type : 0u;
+	if ( model ) {
+#if FEAT_IQM
+		if ( model->type == MOD_IQM ) {
+			pose->modelTopology = RB_TemporalIQMTopology(
+				(const iqmData_t *)model->modelData );
+		} else
+#endif
+		{
+			pose->modelTopology = RB_TemporalTopologyFold(
+				(uint32_t)model->dataSize + 1u, (uint32_t)model->numLods );
+			if ( !pose->modelTopology ) pose->modelTopology = 1u;
+		}
+	}
+	pose->frame = entity->frame;
+	pose->oldframe = entity->oldframe;
+	pose->backlerp = entity->backlerp;
+	memcpy( pose->origin, entity->origin, sizeof( pose->origin ) );
+	memcpy( pose->axis, entity->axis, sizeof( pose->axis ) );
+	pose->nonNormalizedAxes = (uint32_t)( entity->nonNormalizedAxes != qfalse );
+}
+
+// Prefer one stable local-player witness for diagnostics. The MD3 torso is
+// retained when the legs briefly leave the visible draw-surface set; IQM uses
+// the single PLAYER_BODY role. Other entities retain deterministic tuple order.
+static uint32_t RB_TemporalReceiptRoleRank( uint32_t role ) {
+	switch ( role ) {
+	case REF_ENTITY_MOTION_ROLE_PLAYER_BODY: return 0u;
+	case REF_ENTITY_MOTION_ROLE_PLAYER_TORSO: return 1u;
+	case REF_ENTITY_MOTION_ROLE_PLAYER_LEGS: return 2u;
+	case REF_ENTITY_MOTION_ROLE_PLAYER_HEAD: return 3u;
+	default: return 16u + role;
+	}
+}
+
+static qboolean RB_TemporalReceiptPrecedes(
+		const temporalEntityPoseReceipt_t *candidate,
+		const temporalEntityPoseReceipt_t *current ) {
+	uint32_t candidateRank, currentRank;
+	if ( !current->valid ) return qtrue;
+	if ( candidate->identity.ownerId != current->identity.ownerId )
+		return candidate->identity.ownerId < current->identity.ownerId;
+	if ( candidate->identity.generation != current->identity.generation )
+		return candidate->identity.generation < current->identity.generation;
+	candidateRank = RB_TemporalReceiptRoleRank( candidate->identity.role );
+	currentRank = RB_TemporalReceiptRoleRank( current->identity.role );
+	return candidateRank < currentRank;
+}
+
+static void RB_RecordTemporalEntityReceipts( const drawSurfsCommand_t *cmd ) {
+	byte seen[(MAX_REFENTITIES + 7) / 8];
+	uint32_t seenCount = 0, accepted = 0, previous = 0, rejected = 0;
+	qboolean failed = qfalse;
+	temporalEntityPoseReceipt_t sample;
+
+	if ( !cmd->viewParms.temporalFrameId
+			|| !( cmd->refdef.rdflags & RDF_TEMPORAL_PRIMARY ) ) return;
+	if ( !R_TemporalBackendEntityReceiptsBegin() ) return;
+	memset( &sample, 0, sizeof( sample ) );
+	memset( seen, 0, sizeof( seen ) );
+	for ( int i = 0; i < cmd->refdef.num_entities; ++i ) {
+		memset( &cmd->refdef.entities[i].temporalReceipt, 0,
+			sizeof( cmd->refdef.entities[i].temporalReceipt ) );
+	}
+	for ( int i = 0; i < cmd->numDrawSurfs; ++i ) {
+		int entityNum, fogNum, dlighted;
+		shader_t *shader;
+		trRefEntity_t *entity;
+		temporalEntityPose_t pose;
+		R_DecomposeSort( cmd->drawSurfs[i].sort, &entityNum, &shader,
+			&fogNum, &dlighted );
+		if ( entityNum == REFENTITYNUM_WORLD || entityNum < 0
+				|| entityNum >= cmd->refdef.num_entities ) continue;
+		if ( seen[entityNum >> 3] & ( 1u << ( entityNum & 7 ) ) ) continue;
+		seen[entityNum >> 3] |= (byte)( 1u << ( entityNum & 7 ) );
+		entity = &cmd->refdef.entities[entityNum];
+		if ( !entity->hasTemporal || entity->e.reType != RT_MODEL ) continue;
+		seenCount++;
+		RB_TemporalPoseFromEntity( &entity->e, &pose );
+		if ( !R_TemporalEntityCacheRecord(
+				cmd->viewParms.temporalWorldIndex,
+				cmd->viewParms.temporalFrameId, (uintptr_t)entity,
+				&entity->motion, &pose, &entity->temporalReceipt ) ) {
+			rejected++;
+			failed = qtrue;
+			continue;
+		}
+		accepted++;
+		if ( RB_TemporalReceiptPrecedes( &entity->temporalReceipt, &sample ) ) {
+			sample = entity->temporalReceipt;
+		}
+		if ( entity->temporalReceipt.previousValid ) previous++;
+	}
+	if ( failed ) {
+		for ( int i = 0; i < cmd->refdef.num_entities; ++i ) {
+			memset( &cmd->refdef.entities[i].temporalReceipt, 0,
+				sizeof( cmd->refdef.entities[i].temporalReceipt ) );
+		}
+		accepted = previous = 0;
+		memset( &sample, 0, sizeof( sample ) );
+	}
+	R_TemporalBackendEntityReceipts( (uint32_t)cmd->numDrawSurfs, seenCount,
+		accepted, previous, rejected, &sample );
+}
+
 
 /*
 =============
@@ -2016,6 +2151,11 @@ static const void *RB_DrawSurfs( const void *data ) {
 
 	backEnd.refdef = cmd->refdef;
 	backEnd.viewParms = cmd->viewParms;
+	if ( cmd->viewParms.temporalFrameId ) {
+		R_TemporalBackendRecorded( cmd->viewParms.temporalWorldIndex,
+			cmd->viewParms.temporalFrameId );
+	}
+	RB_RecordTemporalEntityReceipts( cmd );
 
 #if defined(USE_VULKAN) && FEAT_SHADOW_MAPPING
 	// Capture the budgeted dlight-shadow light while viewParms.dlights is LIVE (the
@@ -2174,13 +2314,22 @@ static const void *RB_DrawSurfs( const void *data ) {
 RB_DrawBuffer
 =============
 */
-static const void *RB_DrawBuffer( const void *data ) {
+static const void *RB_DrawBuffer( const void *data,
+		const temporalBatchRequest_t *temporalRequest,
+		qboolean *temporalRequestDelivered ) {
 	const drawBufferCommand_t	*cmd;
 
 	cmd = (const drawBufferCommand_t *)data;
 
 #ifdef USE_VULKAN
-	vk_begin_frame();
+	if ( temporalRequest && temporalRequestDelivered
+			&& !*temporalRequestDelivered
+			&& cmd->temporalRequestToken == temporalRequest->token ) {
+		vk_begin_frame( temporalRequest );
+		*temporalRequestDelivered = qtrue;
+	} else {
+		vk_begin_frame( NULL );
+	}
 
 	tess.depthRange = DEPTH_RANGE_NORMAL;
 
@@ -2606,7 +2755,9 @@ static const void *RB_SwapBuffers( const void *data ) {
 RB_ExecuteRenderCommands
 ====================
 */
-void RB_ExecuteRenderCommands( const void *data ) {
+void RB_ExecuteRenderCommands( const void *data,
+		const temporalBatchRequest_t *temporalRequest ) {
+	qboolean temporalRequestDelivered = qfalse;
 
 	backEnd.pc.msec = ri.Milliseconds();
 
@@ -2639,7 +2790,8 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			data = RB_DrawSurfs( data );
 			break;
 		case RC_DRAW_BUFFER:
-			data = RB_DrawBuffer( data );
+			data = RB_DrawBuffer( data, temporalRequest,
+				&temporalRequestDelivered );
 			break;
 		case RC_SWAP_BUFFERS:
 			data = RB_SwapBuffers( data );

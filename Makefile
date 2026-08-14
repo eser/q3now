@@ -1307,6 +1307,24 @@ test-ral-profile-layout-self:
 
 .PHONY: test-ral-profile-layout test-ral-profile-layout-self
 
+test-ral-profile-host:
+	@test -n "$${WIRED_PROFILE_HOST}" || { echo "usage: make test-ral-profile-host WIRED_PROFILE_HOST=/absolute/path/to/wired_profile_host"; exit 64; }
+	@bash tests/ral-profile-host-lifecycle-check.sh "$${WIRED_PROFILE_HOST}"
+
+test-ral-profile-host-self:
+	@bash tests/ral-profile-host-lifecycle-check.sh --self-test
+
+.PHONY: test-ral-profile-host test-ral-profile-host-self
+
+test-ral-profile-live:
+	@test -n "$${WIRED_PROFILE_HOST}" -a -n "$${WIRED}" || { echo "usage: make test-ral-profile-live WIRED_PROFILE_HOST=/absolute/path/to/wired_profile_host WIRED=/absolute/path/to/wired [WIRED_CONTENT_ROOT=/absolute/content-root]"; exit 64; }
+	@bash tests/ral-profile-live-telemetry-check.sh "$${WIRED_PROFILE_HOST}" "$${WIRED}"
+
+test-ral-profile-live-self:
+	@bash tests/ral-profile-live-telemetry-check.sh --self-test
+
+.PHONY: test-ral-profile-live test-ral-profile-live-self
+
 # Real global-browser discovery through an authorized loopback master and
 # challenge-bound directed info responses. Deliberately excludes Connect.
 test-wiredui-global-browser:

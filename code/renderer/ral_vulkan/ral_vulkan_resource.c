@@ -17,8 +17,6 @@
 
 #include "ral_vulkan_internal.h"
 
-R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
-
 // Practical bindless-array size used for layouts whose entry count is 0
 // (unbounded). The device cap (caps.maxBindlessTextures) can be far larger;
 // this picks a portable fixed size. The descriptor pool is sized to match.
@@ -77,15 +75,6 @@ static VkBufferUsageFlags ralVk_BufferUsage( ralBufferUsage_t u ) {
 	if ( u & RAL_BUFFER_UNIFORM )  v |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 	if ( u & RAL_BUFFER_STORAGE )  v |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 	if ( u & RAL_BUFFER_INDIRECT)  v |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-	return v;
-}
-
-static VkImageUsageFlags ralVk_TextureUsage( ralTextureUsage_t u ) {
-	// SAMPLED + TRANSFER are always on (default view sampling, upload, mip-gen blit, readback).
-	VkImageUsageFlags v = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-	if ( u & RAL_TEXTURE_USAGE_STORAGE                  )  v |= VK_IMAGE_USAGE_STORAGE_BIT;
-	if ( u & RAL_TEXTURE_USAGE_COLOR_ATTACHMENT         )  v |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-	if ( u & RAL_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT )  v |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 	return v;
 }
 
@@ -331,14 +320,14 @@ ralBuffer_t *Ral_CreateBuffer( ralBackend_t *b, const ralBufferCreateInfo_t *ci 
 	bci.usage       = ralVk_BufferUsage( ci->usage );
 	bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	if ( b->vk.CreateBuffer( b->device, &bci, NULL, &buf->buffer ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBuffer: vkCreateBuffer failed (%llu bytes)\n", (unsigned long long)ci->size );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateBuffer: vkCreateBuffer failed (%llu bytes)\n", (unsigned long long)ci->size );
 		free( buf ); return NULL;
 	}
 	b->vk.GetBufferMemoryRequirements( b->device, buf->buffer, &req );
 	buf->alloc = ralVk_Alloc( b, req, ralVk_MemProps( ci->memory ) );
 	if ( !buf->alloc ) { b->vk.DestroyBuffer( b->device, buf->buffer, NULL ); free( buf ); return NULL; }
 	if ( b->vk.BindBufferMemory( b->device, buf->buffer, buf->alloc->memory, 0 ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBuffer: vkBindBufferMemory failed\n" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateBuffer: vkBindBufferMemory failed\n" );
 		ralVk_Free( b, buf->alloc ); b->vk.DestroyBuffer( b->device, buf->buffer, NULL ); free( buf ); return NULL;
 	}
 	buf->hostVisible = ( buf->alloc->propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT  ) ? qtrue : qfalse;
@@ -358,7 +347,7 @@ ralBuffer_t *Ral_CreateBuffer( ralBackend_t *b, const ralBufferCreateInfo_t *ci 
 ralBuffer_t *Ral_AdoptBuffer( ralBackend_t *b, void *vkBuffer, size_t size, const char *debugName ) {
 	ralBuffer_t *buf;
 	if ( !b || vkBuffer == NULL ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_AdoptBuffer: bad args (b=%p, vkBuffer=%p)\n",
+		RAL_VK_LOG( SEV_WARN, "Ral_AdoptBuffer: bad args (b=%p, vkBuffer=%p)\n",
 		        (void *)b, vkBuffer );
 		return NULL;
 	}
@@ -395,8 +384,10 @@ void Ral_DestroyBuffer( ralBuffer_t *buf ) {
 }
 
 void *Ral_MapBuffer( ralBuffer_t *buf ) {
+	ralBackend_t *b;
 	if ( !buf ) return NULL;
-	if ( !buf->hostVisible ) { R_LOG( rch_ral, SEV_WARN, "Ral_MapBuffer: buffer is not host-visible\n" ); return NULL; }
+	b = buf->backend;
+	if ( !buf->hostVisible ) { RAL_VK_LOG( SEV_WARN, "Ral_MapBuffer: buffer is not host-visible\n" ); return NULL; }
 	return ralVk_Map( buf->alloc );
 }
 void Ral_UnmapBuffer( ralBuffer_t *buf ) { if ( buf ) ralVk_Unmap( buf->alloc ); }
@@ -492,7 +483,7 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 	tex->currentLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
 	tex->ownsImage            = qtrue;   // native RAL allocation owns the VkImage; Ral_AdoptTexture flips this to qfalse for adopted handles.
 	if ( tex->vkFormat == VK_FORMAT_UNDEFINED ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateTexture: unsupported ralFormat %d\n", (int)ci->format );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateTexture: unsupported ralFormat %d\n", (int)ci->format );
 		free( tex ); return NULL;
 	}
 
@@ -537,14 +528,14 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 	tex->concurrentTransfer = ( ci->concurrentGraphicsTransfer && b->transferFamily != b->graphicsFamily && ici.sharingMode == VK_SHARING_MODE_CONCURRENT ) ? qtrue : qfalse;
 	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	if ( b->vk.CreateImage( b->device, &ici, NULL, &tex->image ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateTexture: vkCreateImage failed (%ux%u, %u mips, fmt %d)\n", tex->width, tex->height, mips, (int)ci->format );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateTexture: vkCreateImage failed (%ux%u, %u mips, fmt %d)\n", tex->width, tex->height, mips, (int)ci->format );
 		free( tex ); return NULL;
 	}
 	b->vk.GetImageMemoryRequirements( b->device, tex->image, &req );
 	tex->alloc = ralVk_Alloc( b, req, ralVk_MemProps( ci->memory ) );
 	if ( !tex->alloc ) { b->vk.DestroyImage( b->device, tex->image, NULL ); free( tex ); return NULL; }
 	if ( b->vk.BindImageMemory( b->device, tex->image, tex->alloc->memory, 0 ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateTexture: vkBindImageMemory failed\n" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateTexture: vkBindImageMemory failed\n" );
 		ralVk_Free( b, tex->alloc ); b->vk.DestroyImage( b->device, tex->image, NULL ); free( tex ); return NULL;
 	}
 
@@ -559,7 +550,7 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 	vci.subresourceRange.baseArrayLayer = 0;
 	vci.subresourceRange.layerCount     = layers;
 	if ( b->vk.CreateImageView( b->device, &vci, NULL, &tex->defaultView ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateTexture: vkCreateImageView failed\n" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateTexture: vkCreateImageView failed\n" );
 		ralVk_Free( b, tex->alloc ); b->vk.DestroyImage( b->device, tex->image, NULL ); free( tex ); return NULL;
 	}
 	if ( ci->debugName ) {
@@ -709,7 +700,7 @@ ralTextureView_t *Ral_CreateTextureView( ralBackend_t *b, const ralTextureViewCr
 	if ( !b || !ci || !ci->texture ) return NULL;
 	tex = ci->texture;
 	if ( ci->baseMipLevel >= tex->mipLevels || ci->baseArrayLayer >= tex->arrayLayers ) {
-		R_LOG( rch_ral, SEV_WARN,
+		RAL_VK_LOG( SEV_WARN,
 		       "Ral_CreateTextureView: base range out of bounds (mip %u/%u, layer %u/%u)\n",
 		       ci->baseMipLevel, tex->mipLevels, ci->baseArrayLayer, tex->arrayLayers );
 		return NULL;
@@ -718,7 +709,7 @@ ralTextureView_t *Ral_CreateTextureView( ralBackend_t *b, const ralTextureViewCr
 	layerCount = ci->arrayLayerCount ? ci->arrayLayerCount : ( tex->arrayLayers - ci->baseArrayLayer );
 	if ( levelCount > tex->mipLevels - ci->baseMipLevel ||
 	     layerCount > tex->arrayLayers - ci->baseArrayLayer ) {
-		R_LOG( rch_ral, SEV_WARN,
+		RAL_VK_LOG( SEV_WARN,
 		       "Ral_CreateTextureView: range exceeds texture (mips %u+%u/%u, layers %u+%u/%u)\n",
 		       ci->baseMipLevel, levelCount, tex->mipLevels,
 		       ci->baseArrayLayer, layerCount, tex->arrayLayers );
@@ -743,7 +734,7 @@ ralTextureView_t *Ral_CreateTextureView( ralBackend_t *b, const ralTextureViewCr
 	vci.subresourceRange.baseArrayLayer = ci->baseArrayLayer;
 	vci.subresourceRange.layerCount     = layerCount;
 	if ( b->vk.CreateImageView( b->device, &vci, NULL, &view->view ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateTextureView: vkCreateImageView failed\n" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateTextureView: vkCreateImageView failed\n" );
 		free( view ); return NULL;
 	}
 	return view;
@@ -962,7 +953,7 @@ static ralFence_t *ralVk_TextureUploadTransferNoWait( ralTexture_t *tex, const r
 		static qboolean loggedQueue = qfalse;
 		if ( !loggedQueue ) {
 			loggedQueue = qtrue;
-			R_LOG( rch_ral, SEV_INFO, "async texture upload uses transfer queue family %u (graphics family %u)\n",
+			RAL_VK_LOG( SEV_INFO, "async texture upload uses transfer queue family %u (graphics family %u)\n",
 			        b->queueFamily[ RAL_QUEUE_TRANSFER ], b->queueFamily[ RAL_QUEUE_GRAPHICS ] );
 		}
 	}
@@ -1105,7 +1096,7 @@ ralUploadTicket_t Ral_TextureUploadBegin( ralTexture_t *tex, const ralTextureUpl
 		qboolean      needsMipGen = ( !region->suppressMipGeneration && !isSubRegion && region->mipLevel == 0 && region->arrayLayer == 0 && tex->mipLevels > 1
 		                              && tex->aspect == VK_IMAGE_ASPECT_COLOR_BIT
 		                              && b->formatBlitGen[ tex->ralFormat ] && tex->arrayLayers == 1 ) ? qtrue : qfalse;
-		qboolean      wantAsync   = ( ri.Cvar_VariableIntegerValue( "r_asyncTextureUpload" ) != 0 ) ? qtrue : qfalse;
+		qboolean      wantAsync   = b->allowAsyncTextureUploads;
 		if ( wantAsync && region->suppressMipGeneration && !isSubRegion ) {
 			ralFence_t *f = ralVk_TextureUploadGraphicsNoWait( tex, region );
 			if ( f ) { ticket.fence = f; ticket.synchronous = qfalse; return ticket; }
@@ -1151,7 +1142,7 @@ qboolean Ral_TextureAcquireBatchToGraphics( ralBackend_t *b, const ralUploadTick
 		if ( !ticket->readySemaphore || !t || ticket->mipLevelCount == 0 || ticket->arrayLayerCount == 0 ||
 		     ticket->baseMipLevel >= t->mipLevels || ticket->mipLevelCount > t->mipLevels - ticket->baseMipLevel ||
 		     ticket->baseArrayLayer >= t->arrayLayers || ticket->arrayLayerCount > t->arrayLayers - ticket->baseArrayLayer ) {
-			R_LOG( rch_ral, SEV_WARN, "Ral_TextureAcquireBatchToGraphics: invalid upload ticket range\n" );
+			RAL_VK_LOG( SEV_WARN, "Ral_TextureAcquireBatchToGraphics: invalid upload ticket range\n" );
 			return qfalse;
 		}
 		waitCount++;
@@ -1226,7 +1217,7 @@ ralSampler_t *Ral_CreateSampler( ralBackend_t *b, const ralSamplerCreateInfo_t *
 	sci.maxLod           = ( ci->maxLod > 0.0f ) ? ci->maxLod : VK_LOD_CLAMP_NONE;
 	sci.borderColor      = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
 	if ( b->vk.CreateSampler( b->device, &sci, NULL, &s->sampler ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateSampler: vkCreateSampler failed\n" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateSampler: vkCreateSampler failed\n" );
 		free( s ); return NULL;
 	}
 	ralVk_SetObjectName( b, (uint64_t)s->sampler, VK_OBJECT_TYPE_SAMPLER, ci->debugName );
@@ -1274,13 +1265,13 @@ ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *b, const ralBindG
 	uint32_t                              i, lastUnbounded = 0xFFFFFFFFu;
 	qboolean                              anyUpdateAfterBind = qfalse;
 	if ( !b || !ci || ci->numEntries == 0 || ci->numEntries > RAL_VK_MAX_LAYOUT_ENTRIES ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBindGroupLayout: bad/too-many entries (%u)\n", ci ? ci->numEntries : 0u );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateBindGroupLayout: bad/too-many entries (%u)\n", ci ? ci->numEntries : 0u );
 		return NULL;
 	}
 	if ( ci->bindless ) {
 		for ( i = 0; i < ci->numEntries; i++ ) if ( ci->entries[i].count == 0 ) { lastUnbounded = i; }
 		if ( lastUnbounded != 0xFFFFFFFFu && !b->caps.bindlessTextures ) {
-			R_LOG( rch_ral, SEV_WARN, "Ral_CreateBindGroupLayout: bindless layout requested but caps.bindlessTextures is false\n" );
+			RAL_VK_LOG( SEV_WARN, "Ral_CreateBindGroupLayout: bindless layout requested but caps.bindlessTextures is false\n" );
 			return NULL;   // ralUnsupported equivalent for a handle-returning call
 		}
 	}
@@ -1329,7 +1320,7 @@ ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *b, const ralBindG
 		lci.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
 	}
 	if ( b->vk.CreateDescriptorSetLayout( b->device, &lci, NULL, &L->layout ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBindGroupLayout: vkCreateDescriptorSetLayout failed\n" );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateBindGroupLayout: vkCreateDescriptorSetLayout failed\n" );
 		free( L ); return NULL;
 	}
 	ralVk_SetObjectName( b, (uint64_t)L->layout, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, ci->debugName );
@@ -1351,7 +1342,7 @@ ralBindGroupLayout_t *Ral_AdoptBindGroupLayout( ralBackend_t *b,
 	ralBindGroupLayout_t *L;
 	uint32_t              i;
 	if ( !b || !externalLayout || numEntries > RAL_VK_MAX_LAYOUT_ENTRIES ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_AdoptBindGroupLayout: bad args (externalLayout=%p, numEntries=%u, max=%u)\n",
+		RAL_VK_LOG( SEV_WARN, "Ral_AdoptBindGroupLayout: bad args (externalLayout=%p, numEntries=%u, max=%u)\n",
 		        externalLayout, numEntries, (unsigned)RAL_VK_MAX_LAYOUT_ENTRIES );
 		return NULL;
 	}
@@ -1408,14 +1399,40 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 	uint32_t                    nw = 0, ni = 0, nb = 0, v;
 	ralBindGroup_t             *bg;
 	VkResult                    r;
-	if ( !b || !ci || !ci->layout ) return NULL;
+	if ( !b || !ci || !ci->layout || ci->layout->backend != b ) return NULL;
+	for ( v = 0; v < ci->numValues; v++ ) {
+		const ralBindingValue_t *val = &ci->values[v];
+		switch ( val->type ) {
+		case RAL_BIND_UNIFORM_BUFFER:
+		case RAL_BIND_STORAGE_BUFFER:
+			if ( val->buffer && val->buffer->backend != b ) return NULL;
+			break;
+		case RAL_BIND_SAMPLER:
+			if ( val->sampler && val->sampler->backend != b ) return NULL;
+			break;
+		case RAL_BIND_SAMPLED_TEXTURE:
+		case RAL_BIND_STORAGE_TEXTURE:
+			if ( val->textureView && val->textureView->backend != b ) return NULL;
+			break;
+		case RAL_BIND_COMBINED_TEXTURE_SAMPLER:
+			if ( ( val->textureView && val->textureView->backend != b )
+			  || ( val->sampler && val->sampler->backend != b ) ) return NULL;
+			break;
+		case RAL_BIND_TEXTURE_ARRAY:
+			for ( uint32_t k = 0; k < val->textureArrayCount; k++ )
+				if ( val->textureArray && val->textureArray[k]
+				  && val->textureArray[k]->backend != b ) return NULL;
+			break;
+		default: break;
+		}
+	}
 
 	// Refuse rather than silently truncate: the write loop caps at
 	// RAL_VK_MAX_BG_WRITES and would otherwise return a descriptor set with
 	// bindings past the cap left UNwritten (uninitialized), which the caller
 	// has no way to detect. Mirror Ral_Submit's over-capacity hard-fail.
 	if ( ci->numValues > RAL_VK_MAX_BG_WRITES ) {
-		R_LOG( rch_ral, SEV_ERROR, "Ral_CreateBindGroup: over-capacity (values %u > max %u) — refusing (would truncate)\n",
+		RAL_VK_LOG( SEV_ERROR, "Ral_CreateBindGroup: over-capacity (values %u > max %u) — refusing (would truncate)\n",
 			ci->numValues, (unsigned)RAL_VK_MAX_BG_WRITES );
 		return NULL;
 	}
@@ -1433,7 +1450,7 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 	dai.pSetLayouts        = &ci->layout->layout;
 	r = b->vk.AllocateDescriptorSets( b->device, &dai, &bg->set );
 	if ( r != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_CreateBindGroup: vkAllocateDescriptorSets failed (VkResult %d -- pool may be exhausted)\n", (int)r );
+		RAL_VK_LOG( SEV_WARN, "Ral_CreateBindGroup: vkAllocateDescriptorSets failed (VkResult %d -- pool may be exhausted)\n", (int)r );
 		free( bg ); return NULL;
 	}
 
@@ -1569,7 +1586,7 @@ ralBindGroup_t *Ral_AdoptBindGroup( ralBackend_t *b,
                                     const char *debugName ) {
 	ralBindGroup_t *g;
 	if ( !b || !externalSet || !layout ) {
-		R_LOG( rch_ral, SEV_WARN, "Ral_AdoptBindGroup: bad args (b=%p, externalSet=%p, layout=%p)\n",
+		RAL_VK_LOG( SEV_WARN, "Ral_AdoptBindGroup: bad args (b=%p, externalSet=%p, layout=%p)\n",
 		        (void *)b, externalSet, (const void *)layout );
 		return NULL;
 	}
@@ -1606,7 +1623,7 @@ static void ralVk_BindGroupSetImageViewAt( ralBindGroup_t *g, uint32_t slot, VkI
 	b = g->backend;
 	for ( i = 0; g->layout && i < g->layout->numEntries; i++ )
 		if ( g->layout->entries[i].vkType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ) { binding = g->layout->entries[i].binding; break; }
-	if ( binding == 0xFFFFFFFFu ) { R_LOG( rch_ral, SEV_WARN, "%s: layout has no SAMPLED_IMAGE binding\n", caller ); return; }
+	if ( binding == 0xFFFFFFFFu ) { RAL_VK_LOG( SEV_WARN, "%s: layout has no SAMPLED_IMAGE binding\n", caller ); return; }
 	RAL_ZERO( img );
 	img.imageView   = imageView;
 	img.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1686,7 +1703,7 @@ void Ral_BindGroupSetSamplerAt( ralBindGroup_t *g, uint32_t slot, ralSampler_t *
 	b = g->backend;
 	for ( i = 0; g->layout && i < g->layout->numEntries; i++ )
 		if ( g->layout->entries[i].vkType == VK_DESCRIPTOR_TYPE_SAMPLER ) { binding = g->layout->entries[i].binding; break; }
-	if ( binding == 0xFFFFFFFFu ) { R_LOG( rch_ral, SEV_WARN, "Ral_BindGroupSetSamplerAt: layout has no SAMPLER binding\n" ); return; }
+	if ( binding == 0xFFFFFFFFu ) { RAL_VK_LOG( SEV_WARN, "Ral_BindGroupSetSamplerAt: layout has no SAMPLER binding\n" ); return; }
 	RAL_ZERO( img );
 	img.sampler = s->sampler;
 	RAL_ZERO( w );
@@ -1733,7 +1750,7 @@ qboolean ralVk_InitResourceLayer( ralBackend_t *b ) {
 	dpi.poolSizeCount = (uint32_t)( sizeof( sizes ) / sizeof( sizes[0] ) );
 	dpi.pPoolSizes    = sizes;
 	if ( b->vk.CreateDescriptorPool( b->device, &dpi, NULL, &b->descriptorPool ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "ralVk_InitResourceLayer: vkCreateDescriptorPool failed\n" );
+		RAL_VK_LOG( SEV_WARN, "ralVk_InitResourceLayer: vkCreateDescriptorPool failed\n" );
 		return qfalse;
 	}
 
@@ -1755,7 +1772,7 @@ void ralVk_ShutdownResourceLayer( ralBackend_t *b ) {
 	if ( b->descriptorPool != VK_NULL_HANDLE ) { b->vk.DestroyDescriptorPool( b->device, b->descriptorPool, NULL ); b->descriptorPool = VK_NULL_HANDLE; }
 	if ( b->allocations ) {
 		ralVkAllocation_t *a = b->allocations;
-		R_LOG( rch_ral, SEV_WARN, "ralVk_ShutdownResourceLayer: %u allocation(s) still live -- freeing\n", b->numAllocations );
+		RAL_VK_LOG( SEV_WARN, "ralVk_ShutdownResourceLayer: %u allocation(s) still live -- freeing\n", b->numAllocations );
 		while ( a ) { ralVkAllocation_t *n = a->next; if ( a->mapped ) b->vk.UnmapMemory( b->device, a->memory ); b->vk.FreeMemory( b->device, a->memory, NULL ); free( a ); a = n; }
 		b->allocations = NULL; b->numAllocations = 0; b->ralDeviceLocalBytes = 0; b->ralHostVisibleBytes = 0;
 	}
@@ -1821,7 +1838,7 @@ void ralVk_RunResourceTest( ralBackend_t *b ) {
 	ralBindGroup_t        *bg = NULL;
 	ralBindGroupLayout_t  *bgl = NULL;
 
-	R_LOG( rch_ral, SEV_INFO, "===== RAL resource test (Phase 7.2) =====\n" );
+	RAL_VK_LOG( SEV_INFO, "===== RAL resource test (Phase 7.2) =====\n" );
 	Ral_QueryMemoryBudget( b, &before );
 
 	RAL_ZERO( tci );
@@ -1829,8 +1846,8 @@ void ralVk_RunResourceTest( ralBackend_t *b ) {
 	tci.width = W; tci.height = H; tci.depthOrArrayLayers = 1; tci.mipLevels = 0; tci.sampleCount = 1;
 	tci.usage = RAL_TEXTURE_USAGE_SAMPLED; tci.memory = RAL_MEMORY_DEVICE_LOCAL; tci.debugName = "ral-test-tex";
 	tex = Ral_CreateTexture( b, &tci );
-	if ( !tex ) { R_LOG( rch_ral, SEV_WARN, "  Ral_CreateTexture failed\n" ); R_LOG( rch_ral, SEV_INFO, "===== end RAL resource test =====\n" ); return; }
-	R_LOG( rch_ral, SEV_INFO, "  texture: %ux%u RGBA8_UNORM, %u mip levels, GPU-mip-gen=%s\n",
+	if ( !tex ) { RAL_VK_LOG( SEV_WARN, "  Ral_CreateTexture failed\n" ); RAL_VK_LOG( SEV_INFO, "===== end RAL resource test =====\n" ); return; }
+	RAL_VK_LOG( SEV_INFO, "  texture: %ux%u RGBA8_UNORM, %u mip levels, GPU-mip-gen=%s\n",
 	        W, H, tex->mipLevels, b->formatBlitGen[ RAL_FORMAT_R8G8B8A8_UNORM ] ? "yes" : "no" );
 
 	// 1px red/blue checkerboard as mip 0
@@ -1842,8 +1859,8 @@ void ralVk_RunResourceTest( ralBackend_t *b ) {
 	}
 	RAL_ZERO( up ); up.mipLevel = 0; up.arrayLayer = 0; up.data = checker; up.dataSize = (uint64_t)W * H * 4u;
 	f = Ral_TextureUploadAsync( tex, &up );
-	if ( f ) { R_LOG( rch_ral, SEV_INFO, "  Ral_TextureUploadAsync: ok (mip 0 uploaded%s)\n", tex->mipLevels > 1 ? " + GPU mips generated" : "" ); Ral_DestroyFence( f ); }
-	else     { R_LOG( rch_ral, SEV_WARN, "  Ral_TextureUploadAsync failed\n" ); }
+	if ( f ) { RAL_VK_LOG( SEV_INFO, "  Ral_TextureUploadAsync: ok (mip 0 uploaded%s)\n", tex->mipLevels > 1 ? " + GPU mips generated" : "" ); Ral_DestroyFence( f ); }
+	else     { RAL_VK_LOG( SEV_WARN, "  Ral_TextureUploadAsync failed\n" ); }
 	free( checker );
 
 	Ral_QueryMemoryBudget( b, &after );
@@ -1857,7 +1874,7 @@ void ralVk_RunResourceTest( ralBackend_t *b ) {
 		if ( m == 0 || m >= tex->mipLevels ) continue;
 		mw = ( W >> m ) ? ( W >> m ) : 1u; mh = ( H >> m ) ? ( H >> m ) : 1u;
 		ralVk_ReadbackMip( b, tex, m, px, sizeof( px ) );
-		R_LOG( rch_ral, SEV_INFO, "  mip %u (%ux%u) pixel[0,0] = R%u G%u B%u A%u%s\n",
+		RAL_VK_LOG( SEV_INFO, "  mip %u (%ux%u) pixel[0,0] = R%u G%u B%u A%u%s\n",
 		        m, mw, mh, px[0], px[1], px[2], px[3],
 		        ( idx == 0 ) ? "  (expect ~127/0/~127/255 = averaged red+blue)" : "" );
 	}
@@ -1867,23 +1884,23 @@ void ralVk_RunResourceTest( ralBackend_t *b ) {
 	RAL_ZERO( lci ); lci.entries = &be; lci.numEntries = 1; lci.bindless = qtrue; lci.debugName = "ral-test-bindless-layout";
 	bgl = Ral_CreateBindGroupLayout( b, &lci );
 	if ( !bgl ) {
-		R_LOG( rch_ral, SEV_INFO, "  bindless: skipped (caps.bindlessTextures=%s)\n", b->caps.bindlessTextures ? "yes-but-layout-failed" : "no" );
+		RAL_VK_LOG( SEV_INFO, "  bindless: skipped (caps.bindlessTextures=%s)\n", b->caps.bindlessTextures ? "yes-but-layout-failed" : "no" );
 	} else {
 		ralBindGroupCreateInfo_t bci2;
 		RAL_ZERO( bci2 ); bci2.layout = bgl; bci2.values = NULL; bci2.numValues = 0; bci2.debugName = "ral-test-bindless-bg";
 		bg = Ral_CreateBindGroup( b, &bci2 );
 		if ( !bg ) {
-			R_LOG( rch_ral, SEV_WARN, "  bindless BindGroup creation failed\n" );
+			RAL_VK_LOG( SEV_WARN, "  bindless BindGroup creation failed\n" );
 		} else {
 			Ral_BindGroupSetTextureAt( bg, 0, tex );
 			Ral_BindGroupSetTextureAt( bg, 1, tex );
-			R_LOG( rch_ral, SEV_INFO, "  bindless BindGroup: %u-slot SAMPLED_IMAGE array created; slots 0+1 populated with the test texture\n", RAL_VK_BINDLESS_LAYOUT_COUNT );
+			RAL_VK_LOG( SEV_INFO, "  bindless BindGroup: %u-slot SAMPLED_IMAGE array created; slots 0+1 populated with the test texture\n", RAL_VK_BINDLESS_LAYOUT_COUNT );
 		}
 	}
 
-	R_LOG( rch_ral, SEV_INFO, "  memory: vk-reported device-local used: before=%u MiB  after=%u MiB\n",
+	RAL_VK_LOG( SEV_INFO, "  memory: vk-reported device-local used: before=%u MiB  after=%u MiB\n",
 	        (unsigned)( before.deviceLocalUsed >> 20 ), (unsigned)( after.deviceLocalUsed >> 20 ) );
-	R_LOG( rch_ral, SEV_INFO, "  memory: RAL-tracked device-local footprint = %u KiB across %u allocation(s) (texture + mip chain still live)\n",
+	RAL_VK_LOG( SEV_INFO, "  memory: RAL-tracked device-local footprint = %u KiB across %u allocation(s) (texture + mip chain still live)\n",
 	        (unsigned)( b->ralDeviceLocalBytes >> 10 ), b->numAllocations );
 
 	// teardown
@@ -1891,7 +1908,7 @@ void ralVk_RunResourceTest( ralBackend_t *b ) {
 	if ( bgl ) Ral_DestroyBindGroupLayout( bgl );
 	Ral_DestroyTexture( tex );
 	Ral_QueryMemoryBudget( b, &teardown );
-	R_LOG( rch_ral, SEV_INFO, "  teardown: RAL-tracked device-local footprint = %u KiB across %u allocation(s) [back to baseline]; vk-reported device-local used = %u MiB\n",
+	RAL_VK_LOG( SEV_INFO, "  teardown: RAL-tracked device-local footprint = %u KiB across %u allocation(s) [back to baseline]; vk-reported device-local used = %u MiB\n",
 	        (unsigned)( b->ralDeviceLocalBytes >> 10 ), b->numAllocations, (unsigned)( teardown.deviceLocalUsed >> 20 ) );
-	R_LOG( rch_ral, SEV_INFO, "===== end RAL resource test =====\n" );
+	RAL_VK_LOG( SEV_INFO, "===== end RAL resource test =====\n" );
 }

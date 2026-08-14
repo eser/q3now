@@ -188,7 +188,8 @@ void CG_Creature( centity_t *cent ) {
 	CG_CharacterMesh( cent, &body, ci->bodyModel,
 		ci->bodyShader, ci->bodyShader ? 0 : ci->bodySkin,
 		frame, oldframe, backlerp, axis,
-		0 /*renderfx*/, 0 /*alpha*/, TEAM_FREE );
+		0 /*renderfx*/, 0 /*alpha*/, TEAM_FREE,
+		REF_ENTITY_MOTION_ROLE_CREATURE_BODY );
 }
 
 #endif // FEAT_IQM

@@ -85,7 +85,8 @@ typedef struct {
 	ralBlendOp_t     colorOp;
 	ralBlendFactor_t srcAlpha, dstAlpha;
 	ralBlendOp_t     alphaOp;
-	uint32_t         writeMask;        // RAL_COLOR_WRITE_*
+	uint32_t         writeMask;        // RAL_COLOR_WRITE_*; zero retains the legacy write-all default
+	qboolean         writeMaskExplicit;// qtrue makes writeMask authoritative, including exact zero
 } ralColorBlendAttachment_t;
 
 // stencil op detail. v1 deferred this;
@@ -238,7 +239,7 @@ void Ral_LoadPipelineCache( ralBackend_t *b, const char *path );
 // pipeline-layout cache observability.
 // SlotCount: read-only accessor for the high-water slot index. Consumers can
 // branch on >0 / read in summary lines.
-// DumpToLog: prints the per-slot state via ri.Log (SEV_INFO). Backend stays
+// DumpToLog: prints the per-slot state via the backend host log sink. Backend stays
 // the slot-table owner — this function reaches into it on the consumer's
 // behalf so renderer-side dump commands don't need backend-private headers.
 uint32_t Ral_GetPipelineLayoutCacheSlotCount( ralBackend_t *b );

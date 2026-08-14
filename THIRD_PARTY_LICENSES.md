@@ -636,10 +636,15 @@ misrepresented as being the original software.
 3. This notice may not be removed or altered from any source distribution.
 ```
 
-recastnavigation's `RecastDemo/` subtree (which Wired does not build into
-its release artifacts) bundles development-only deps such as Dear ImGui
-and SDL — Wired's release binaries don't link to those, so attribution is
-not required for Wired's distribution.
+recastnavigation's `RecastDemo/` subtree also bundles development-only
+dependencies. Wired's default GUI/headless release binaries do not link
+those demo dependencies. The opt-in `WIRED_BUILD_IMGUI_TOOLS` developer
+graph does, however, compile Dear ImGui (Copyright (c) 2014-2026 Omar
+Cornut and contributors, MIT License) into `wired_profile_host`; source or
+binary distributions of that tool must retain Dear ImGui's notice from
+`RecastDemo/Contrib/imgui/LICENSE.txt`. The tool also dynamically links
+SDL3 under SDL's zlib license. Neither dependency enters the default game
+or dedicated-server package graph.
 
 ### 3.12 curl (removed 2026-08-10)
 

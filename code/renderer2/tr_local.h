@@ -67,6 +67,8 @@ typedef struct dlight_s {
 // the client game, as well as some locally derived info
 typedef struct {
 	refEntity_t	e;
+	refEntityMotion_t motion;
+	qboolean hasTemporal;
 
 	float		axisLength;		// compensate for non-normalized axis
 
@@ -2325,6 +2327,8 @@ void R_InitNextFrame( void );
 
 void RE_ClearScene( void );
 void RE_AddRefEntityToScene( const refEntity_t *ent, qboolean intShaderTime );
+void RE_AddRefEntityToSceneTemporal( const refEntity_t *ent,
+	const refEntityMotion_t *motion );
 void RE_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t *verts, int num );
 void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );

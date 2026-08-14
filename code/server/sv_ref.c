@@ -542,6 +542,8 @@ static void SVR_ClearScene( void ) {}
 static void SVR_AddRefEntityToScene( const refEntity_t *re, qboolean intShaderTime ) {
 	(void)re; (void)intShaderTime;
 }
+static void SVR_AddRefEntityToSceneTemporal( const refEntity_t *re,
+		const refEntityMotion_t *motion ) { (void)re; (void)motion; }
 static void SVR_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts, int num ) {
 	(void)hShader; (void)numVerts; (void)verts; (void)num;
 }
@@ -790,6 +792,7 @@ void GetRefAPI_Headless( refexport_t *re ) {
 
 	re->ClearScene = SVR_ClearScene;
 	re->AddRefEntityToScene = SVR_AddRefEntityToScene;
+	re->AddRefEntityToSceneTemporal = SVR_AddRefEntityToSceneTemporal;
 	re->AddPolyToScene = SVR_AddPolyToScene;
 	re->LightForPoint = SVR_LightForPoint;
 	re->AddLightToScene = SVR_AddLightToScene;

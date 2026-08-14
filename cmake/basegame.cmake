@@ -35,6 +35,7 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_predict.c
     ${SOURCE_DIR}/cgame/cg_servercmds.c
     ${SOURCE_DIR}/cgame/cg_snapshot.c
+    ${SOURCE_DIR}/cgame/cg_temporal_identity.c
     ${SOURCE_DIR}/cgame/cg_view.c
     ${SOURCE_DIR}/cgame/cg_weapons.c
     ${SOURCE_DIR}/cgame/cg_znudge.c

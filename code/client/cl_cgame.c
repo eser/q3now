@@ -589,6 +589,25 @@ static int FloatAsInt( float f ) {
 	return fi.i;
 }
 
+typedef struct {
+	uint32_t glconfigGeneration;
+	qboolean initialized;
+	qboolean capabilityLogged;
+	uint32_t slotGeneration[MAX_GENTITIES][REF_ENTITY_MOTION_ROLE_COUNT];
+} clTemporalIngressReceiptState_t;
+
+static clTemporalIngressReceiptState_t s_temporalIngressReceipts;
+
+static void CL_TemporalIngressReceiptGeneration( void ) {
+	uint32_t generation = (uint32_t)cls.glconfigGeneration;
+	if ( !s_temporalIngressReceipts.initialized
+			|| s_temporalIngressReceipts.glconfigGeneration != generation ) {
+		memset( &s_temporalIngressReceipts, 0, sizeof( s_temporalIngressReceipts ) );
+		s_temporalIngressReceipts.initialized = qtrue;
+		s_temporalIngressReceipts.glconfigGeneration = generation;
+	}
+}
+
 
 static void *VM_ArgPtr( intptr_t intValue ) {
 
@@ -602,6 +621,18 @@ static void *VM_ArgPtr( intptr_t intValue ) {
 
 
 static qboolean CL_GetValue( char* value, int valueSize, const char* key ) {
+	if ( !Q_stricmp( key, "trap_R_AddRefEntityToSceneTemporal" )
+			&& re.AddRefEntityToSceneTemporal ) {
+		CL_TemporalIngressReceiptGeneration();
+		Com_sprintf( value, valueSize, "%i", CG_R_ADDREFENTITYTOSCENETEMPORAL );
+		if ( !s_temporalIngressReceipts.capabilityLogged ) {
+			s_temporalIngressReceipts.capabilityLogged = qtrue;
+			Com_Log( SEV_INFO, LOG_CH(ch_cgame),
+				"temporal-entity-capability glconfig-generation=%u key=trap_R_AddRefEntityToSceneTemporal expected=232 discovered=232 route=native-syscall export=1\n",
+				s_temporalIngressReceipts.glconfigGeneration );
+		}
+		return qtrue;
+	}
 
 	if ( !Q_stricmp( key, "trap_R_AddRefEntityToScene2" ) ) {
 		Com_sprintf( value, valueSize, "%i", CG_R_ADDREFENTITYTOSCENE2 );
@@ -921,6 +952,10 @@ static const vmSyscallDesc_t cl_desc_CG_R_ADDREFENTITYTOSCENE = {
 };
 static const vmSyscallDesc_t cl_desc_CG_R_ADDREFENTITYTOSCENE2 = {
 	CG_R_ADDREFENTITYTOSCENE2, "CG_R_ADDREFENTITYTOSCENE2", 1, { VARG_VMPTR }
+};
+static const vmSyscallDesc_t cl_desc_CG_R_ADDREFENTITYTOSCENETEMPORAL = {
+	CG_R_ADDREFENTITYTOSCENETEMPORAL, "CG_R_ADDREFENTITYTOSCENETEMPORAL", 2,
+	{ VARG_VMPTR, VARG_VMPTR }
 };
 static const vmSyscallDesc_t cl_desc_CG_R_ADDPOLYTOSCENE = {
 	CG_R_ADDPOLYTOSCENE, "CG_R_ADDPOLYTOSCENE", 3, { VARG_INT, VARG_INT, VARG_VMPTR }
@@ -1612,6 +1647,33 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 	case CG_R_ADDREFENTITYTOSCENE: {
 		CL_RSND( &cl_desc_CG_R_ADDREFENTITYTOSCENE, 1 );
 		re.AddRefEntityToScene( t[0].p, qfalse );
+		return 0;
+	}
+	case CG_R_ADDREFENTITYTOSCENETEMPORAL: {
+		const refEntityMotion_t *motion;
+		VM_CHECKBOUNDS( VM_ActiveNativeVM(), args[1], sizeof( refEntity_t ) );
+		VM_CHECKBOUNDS( VM_ActiveNativeVM(), args[2], sizeof( refEntityMotion_t ) );
+		CL_RSND( &cl_desc_CG_R_ADDREFENTITYTOSCENETEMPORAL, 2 );
+		motion = (const refEntityMotion_t *)t[1].p;
+		if ( t[0].p && RefEntityMotion_IsValid( motion ) ) {
+			if ( re.AddRefEntityToSceneTemporal ) {
+				CL_TemporalIngressReceiptGeneration();
+				if ( motion->ownerId < MAX_GENTITIES
+						&& motion->role < REF_ENTITY_MOTION_ROLE_COUNT
+						&& s_temporalIngressReceipts.slotGeneration[motion->ownerId][motion->role]
+							!= motion->generation ) {
+					s_temporalIngressReceipts.slotGeneration[motion->ownerId][motion->role]
+						= motion->generation;
+					Com_Log( SEV_INFO, LOG_CH(ch_cgame),
+						"temporal-entity-slot glconfig-generation=%u trap=232 owner=%u entity-generation=%u role=%u accepted=1 export=1\n",
+						s_temporalIngressReceipts.glconfigGeneration,
+						motion->ownerId, motion->generation, motion->role );
+				}
+				re.AddRefEntityToSceneTemporal( t[0].p, t[1].p );
+			} else {
+				re.AddRefEntityToScene( t[0].p, qfalse );
+			}
+		}
 		return 0;
 	}
 	case CG_R_ADDPOLYTOSCENE: {

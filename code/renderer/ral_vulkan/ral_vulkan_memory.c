@@ -11,8 +11,6 @@
 
 #include "ral_vulkan_internal.h"
 
-R_LOG_DECLARE_CHANNEL( rch_ral, "renderer.ral" );
-
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN
@@ -111,7 +109,7 @@ ralVkAllocation_t *ralVk_Alloc( ralBackend_t *b, VkMemoryRequirements req, VkMem
 			if ( req.memoryTypeBits & ( 1u << i ) ) { typeIndex = i; break; }
 	}
 	if ( typeIndex == 0xFFFFFFFFu ) {
-		R_LOG( rch_ral, SEV_WARN, "ralVk_Alloc: no compatible memory type (typeBits=0x%x, props=0x%x)\n",
+		RAL_VK_LOG( SEV_WARN, "ralVk_Alloc: no compatible memory type (typeBits=0x%x, props=0x%x)\n",
 		        req.memoryTypeBits, (unsigned)props );
 		return NULL;
 	}
@@ -124,7 +122,7 @@ ralVkAllocation_t *ralVk_Alloc( ralBackend_t *b, VkMemoryRequirements req, VkMem
 	ai.allocationSize  = req.size;
 	ai.memoryTypeIndex = typeIndex;
 	if ( b->vk.AllocateMemory( b->device, &ai, NULL, &a->memory ) != VK_SUCCESS ) {
-		R_LOG( rch_ral, SEV_WARN, "ralVk_Alloc: vkAllocateMemory failed (%llu bytes, type %u)\n",
+		RAL_VK_LOG( SEV_WARN, "ralVk_Alloc: vkAllocateMemory failed (%llu bytes, type %u)\n",
 		        (unsigned long long)req.size, typeIndex );
 		free( a );
 		return NULL;
@@ -160,11 +158,13 @@ void ralVk_Free( ralBackend_t *b, ralVkAllocation_t *a ) {
 }
 
 void *ralVk_Map( ralVkAllocation_t *a ) {
+	ralBackend_t *b;
 	// `a` must be a HOST_VISIBLE allocation. Persistent map.
 	if ( !a ) return NULL;
+	b = a->backend;
 	if ( a->mapped ) return a->mapped;
 	if ( !( a->propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT ) ) {
-		R_LOG( rch_ral, SEV_WARN, "ralVk_Map: allocation is not host-visible\n" );
+		RAL_VK_LOG( SEV_WARN, "ralVk_Map: allocation is not host-visible\n" );
 		return NULL;
 	}
 	if ( a->backend->vk.MapMemory( a->backend->device, a->memory, 0, VK_WHOLE_SIZE, 0, &a->mapped ) != VK_SUCCESS )
@@ -327,5 +327,5 @@ void Ral_SetPressureCallback( ralBackend_t *b, ralPressureCallback_t cb, void *u
 	}
 #endif
 	if ( !b->pollThread )
-		R_LOG( rch_ral, SEV_WARN, "Ral_SetPressureCallback: could not start polling thread; pressure events disabled\n" );
+		RAL_VK_LOG( SEV_WARN, "Ral_SetPressureCallback: could not start polling thread; pressure events disabled\n" );
 }

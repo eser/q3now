@@ -21,6 +21,59 @@
 // are referenced by those exact names in vk.c — do not rename
 // without updating vk.c in lockstep.
 
+const temporalTxFamilies = [
+	{ tx: 0, families: ['plain', 'ident', 'fixed', 'ent'] },
+	{ tx: 1, families: ['plain', 'ident', 'fixed', 'cl'] },
+	{ tx: 2, families: ['plain', 'cl'] },
+];
+
+function txDefines(tx) { return tx === 0 ? [] : [`USE_TX${tx}`]; }
+function familyDefines(family, tx) {
+	return family === 'ident' ? ['USE_CLX_IDENT']
+		: family === 'fixed' ? ['USE_FIXED_COLOR']
+		: family === 'ent' ? ['USE_ENT_COLOR']
+		: family === 'cl' ? [tx === 2 ? 'USE_CL2' : 'USE_CL1']
+		: [];
+}
+function stem(stage, tx, family, env, fog) {
+	const vertexFamily = stage === 'vert' && family === 'ent' ? 'fixed' : family;
+	return `${stage}_tx${tx}${vertexFamily === 'plain' ? '' : vertexFamily === 'ident' ? '_ident1' : `_${vertexFamily}`}`
+		+ `${stage === 'vert' && env ? '_env' : ''}${fog ? '_fog' : ''}`;
+}
+function ordinaryName(stage, tx, family, env, fog) {
+	return stem(stage, tx, family, env, fog) + (stage === 'frag' ? '_bindless' : '');
+}
+function temporalName(kind, stage, tx, family, env, fog) {
+	return stem(stage, tx, family, env, fog)
+		+ (kind === 'vertex' ? '_temporal_motion' : kind === 'write' ? '_temporal_write_bindless' : '_temporal_invalidate_bindless');
+}
+
+export const temporalGenericPairs = [];
+const temporalGenericShaderEntries = [];
+const temporalSeen = new Set();
+for (const { tx, families } of temporalTxFamilies) {
+	for (const family of families) for (const env of [false, true]) for (const fog of [false, true]) {
+		const vertexFamily = family === 'ent' ? 'fixed' : family;
+		const vDefines = [...txDefines(tx), ...familyDefines(vertexFamily, tx), ...(env ? ['USE_ENV'] : []), ...(fog ? ['USE_FOG'] : [])];
+		const fDefines = [...txDefines(tx), ...familyDefines(family, tx), ...(fog ? ['USE_FOG'] : [])];
+		const ordinaryVertex = ordinaryName('vert', tx, family, env, fog);
+		const ordinaryFragment = ordinaryName('frag', tx, family, false, fog);
+		const temporalVertex = temporalName('vertex', 'vert', tx, family, env, fog);
+		const temporalWriteFragment = temporalName('write', 'frag', tx, family, false, fog);
+		const temporalInvalidateFragment = temporalName('invalidate', 'frag', tx, family, false, fog);
+		temporalGenericPairs.push({ tx, family, env, shaderFog: fog, ordinaryVertex, ordinaryFragment,
+			temporalVertex, temporalWriteFragment, temporalInvalidateFragment });
+		for (const entry of [
+			{ stage: 'vert', source: 'gen_vert.tmpl', defines: [...vDefines, 'USE_TEMPORAL_MOTION'], output: temporalVertex },
+			{ stage: 'frag', source: 'gen_frag.tmpl', defines: [...fDefines, 'USE_TEMPORAL_MOTION'], output: temporalWriteFragment },
+			{ stage: 'frag', source: 'gen_frag.tmpl', defines: [...fDefines, 'USE_TEMPORAL_MOTION', 'USE_TEMPORAL_INVALIDATE'], output: temporalInvalidateFragment },
+		]) if (!temporalSeen.has(entry.output)) { temporalSeen.add(entry.output); temporalGenericShaderEntries.push(entry); }
+	}
+}
+
+if (temporalGenericPairs.length !== 40 || temporalGenericShaderEntries.length !== 76)
+	throw new Error('temporal generic cohort cardinality drift');
+
 export default [
 	// ── Auto-discovered single-file shaders (legacy compile.sh
 	//    `for f in *.vert/*.frag` loops, after filtering smaa_*,
@@ -78,6 +131,7 @@ export default [
 	{ stage: 'comp', source: 'forwardplus_tile.comp',    output: 'forwardplus_tile_comp_spv'    },
 	{ stage: 'comp', source: 'forwardplus_depth_reduce.comp', output: 'forwardplus_depth_reduce_comp_spv' },
 	{ stage: 'comp', source: 'lens_occlusion.comp',      output: 'lens_occlusion_comp_spv'      },
+	{ stage: 'comp', source: 'temporal_history_store.comp', output: 'temporal_history_store_comp_spv' },
 
 	// ── Tonemap post-process variants ─────────────────────────
 	// scene-radiance effects (tonemap operator, colour grading, sunrays) live on
@@ -221,6 +275,7 @@ export default [
 	// ── IQM GPU skinning ──────────────────────────────────────
 	{ stage: 'vert', source: 'iqm_skinning.vert', output: 'iqm_skinning_vert_spv' },
 	{ stage: 'frag', source: 'iqm_skinning.frag', output: 'iqm_skinning_frag_spv' },
+	{ stage: 'frag', source: 'iqm_skinning.frag', defines: ['USE_TEMPORAL_INVALIDATE'], output: 'iqm_skinning_temporal_invalidate_frag_spv' },
 
 	// ── MSDF text ─────────────────────────────────────────────
 	{ stage: 'vert', source: 'msdf.vert',         output: 'msdf_vert_spv'         },
@@ -248,6 +303,9 @@ export default [
 	{ stage: 'frag', source: 'gen_frag.tmpl', defines: ['USE_ENT_COLOR', 'USE_ATEST', 'USE_FOG'],                      output: 'frag_tx0_ent_fog_bindless'          },
 	{ stage: 'frag', source: 'gen_frag.tmpl', defines: ['USE_CLX_IDENT', 'USE_ATEST', 'USE_DF'],                       output: 'frag_tx0_df_bindless'               },
 	{ stage: 'frag', source: 'gen_frag.tmpl', defines: ['USE_TX1'],                                                    output: 'frag_tx1_bindless'                  },
+	// Definition-only temporal opaque generic cohort: generated from the exact
+	// 40-pair SSOT above (36 unique VS, 20 WRITE FS, 20 INVALIDATE FS).
+	...temporalGenericShaderEntries,
 	{ stage: 'frag', source: 'gen_frag.tmpl', defines: ['USE_TX1', 'USE_FOG'],                                         output: 'frag_tx1_fog_bindless'              },
 	{ stage: 'frag', source: 'gen_frag.tmpl', defines: ['USE_CLX_IDENT', 'USE_TX1'],                                   output: 'frag_tx1_ident1_bindless'           },
 	{ stage: 'frag', source: 'gen_frag.tmpl', defines: ['USE_CLX_IDENT', 'USE_TX1', 'USE_FOG'],                        output: 'frag_tx1_ident1_fog_bindless'       },

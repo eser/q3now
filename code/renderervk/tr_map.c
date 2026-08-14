@@ -3459,6 +3459,7 @@ void RE_LoadWorldMap( const mapFile_t *bsp, int worldIndex ) {
 		worldIndex = 0;
 	s_worldDataSlots[ worldIndex ] = s_worldData;
 	tr.world = &s_worldDataSlots[ worldIndex ];
+	R_TemporalWorldLoaded( worldIndex );
 
 	// A real sun exists only if a shader's sun/q3map_sun keyword moved tr.sunDirection
 	// off the engine default set above. Computed once here from the final post-shader

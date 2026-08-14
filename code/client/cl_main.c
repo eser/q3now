@@ -4114,6 +4114,7 @@ static void CL_ShutdownRef( refShutdownCode_t code ) {
 	// freed resources.
 	SCR_Done();
 
+	CL_ProfileTelemetry_RendererStopping();
 	if ( re.Shutdown ) {
 		re.Shutdown( code );
 	}
@@ -4549,6 +4550,7 @@ static void CL_InitRef( void ) {
 		(void)Log_GetChannel( "renderer.fbo"     );
 		(void)Log_GetChannel( "renderer.timing"  );
 		(void)Log_GetChannel( "renderer.cmd"     );
+		(void)Log_GetChannel( "renderer.temporal" );
 		(void)Log_GetChannel( "renderer.screenshot" );
 	}
 	rimp.Terminate = Com_Terminate;
@@ -4643,6 +4645,7 @@ static void CL_InitRef( void ) {
 	rimp.VKimp_Init = VKimp_Init;
 	rimp.VKimp_Shutdown = VKimp_Shutdown;
 	rimp.VK_GetInstanceProcAddr = VK_GetInstanceProcAddr;
+	rimp.VK_GetInstanceExtensions = VK_GetInstanceExtensions;
 	rimp.VK_CreateSurface = VK_CreateSurface;
 #endif
 
@@ -4655,6 +4658,7 @@ static void CL_InitRef( void ) {
 	}
 
 	re = *ret;
+	CL_ProfileTelemetry_RendererStarted();
 #ifdef USE_RENDERER_DLOPEN
 	// Keep a pointer to the DLL's static refexport_t so the post-
 	// BeginRegistration poll can observe the renderer's recoverable
@@ -5227,6 +5231,7 @@ void CL_Init( void ) {
 	cls.realtime = 0;
 
 	CL_InitInput();
+	CL_ProfileTelemetry_Init();
 
 #if FEAT_WIRED_UI
 	/* Compositor lifecycle lives at
@@ -5444,6 +5449,7 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	S_DisableSounds();
 
 	CL_ShutdownVMs();
+	CL_ProfileTelemetry_Shutdown();
 
 	CL_ShutdownRef( quit ? REF_UNLOAD_DLL : REF_DESTROY_WINDOW );
 

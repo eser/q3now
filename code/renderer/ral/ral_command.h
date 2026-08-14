@@ -42,6 +42,15 @@ void Ral_EndFrame  ( ralBackend_t *b );
 // resources is complete. NULL-safe / no-op until the frame layer is up.
 void Ral_DrainDeferred( ralBackend_t *b );
 
+// Ral_WaitIdleAndDrainDeferred — synchronously wait for every queue on the
+// backend device to become idle, then reclaim the complete deferred-destroy
+// queue before returning.  This is deliberately stronger than the normal
+// per-frame drain above: use it only at a topology boundary where native
+// parent objects are about to be destroyed and every deferred RAL child must
+// already be gone (for example, attachment-generation replacement).  The
+// queue is left untouched if the device-idle wait fails.
+ralResult_t Ral_WaitIdleAndDrainDeferred( ralBackend_t *b );
+
 // ── command buffer lifecycle ────────────────────────────────────────────
 ralCommandBuffer_t *Ral_AcquireCommandBuffer ( ralBackend_t *b, ralQueueType_t q );
 void                Ral_BeginCommandBuffer   ( ralCommandBuffer_t *cb );
@@ -99,7 +108,10 @@ typedef struct {
 	ralFence_t          *signalFence;        // optional
 } ralSubmitInfo_t;
 
-void Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t *si );
+// Checked submission. The command buffers enter SUBMITTED state only after
+// the backend queue call succeeds. Callers must not wait on signal objects or
+// present a frame when this returns anything other than ralSuccess.
+ralResult_t Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t *si );
 
 // Host-side wait until all work
 // previously submitted on the specified queue completes. Equivalent to
@@ -424,6 +436,13 @@ void Ral_CmdTransitionTexture( ralCommandBuffer_t *cb, ralTexture_t *tex,
                                ralPipelineStageFlags_t srcStage,
                                ralPipelineStageFlags_t dstStage,
                                uint32_t newVkLayout );
+
+// Transition one canonical swapchain-image wrapper to the backend's present
+// layout.  The typed index is validated against the live swapchain, and the
+// tracked texture layout is updated atomically with the recorded barrier.
+ralResult_t Ral_PrepareSwapchainImageForPresent( ralCommandBuffer_t *cb,
+	                                             ralSwapchain_t *swapchain,
+	                                             uint32_t imageIndex );
 
 // Image-to-image / blit / buffer-to-image multi-region transfers.
 void Ral_CmdCopyImage         ( ralCommandBuffer_t *cb, ralTexture_t *src, ralTexture_t *dst,

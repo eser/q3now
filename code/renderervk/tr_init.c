@@ -220,6 +220,7 @@ cvar_t	*r_drawWorld;
 cvar_t	*r_speeds;
 cvar_t	*r_gpuSpeeds;
 cvar_t	*r_profileMarkers;
+cvar_t	*r_temporalInputTest;
 cvar_t	*r_vkDebugTiming;
 cvar_t	*r_frameSpikeUs;
 cvar_t	*r_fullbright;
@@ -2062,6 +2063,13 @@ static void R_Register( void )
 		"Emit semantic RAL dynamic-rendering GPU debug labels when Vulkan debug-utils is available.\n"
 		" 0: off (default)\n 1: on\n"
 		"Use `ral_dump live markers` for a one-frame backend receipt." );
+	r_temporalInputTest = ri.Cvar_Get( "r_temporalInputTest", "0", CVAR_CHEAT );
+	ri.Cvar_CheckRange( r_temporalInputTest, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_temporalInputTest,
+		"Default-off Phase 7.10 projection-jitter diagnostic. This is not a TAA resolve.\n"
+		" 0: canonical unjittered renderer path (default)\n"
+		" 1: primary world views consume the backend-neutral temporal sequence\n"
+		"Use `ral_dump live temporal` for the latest committed receipt." );
 	r_vkDebugTiming = ri.Cvar_Get( "r_vkDebugTiming", "0", CVAR_CHEAT );
 	ri.Cvar_SetDescription( r_vkDebugTiming, "Print Vulkan host-side timing averages every 200 frames.\n 0: off\n 1: on (fence, acquire, submit, present, draw calls, pipeline binds)" );
 	r_frameSpikeUs = ri.Cvar_Get( "r_frameSpikeUs", "0", CVAR_CHEAT );
@@ -3219,6 +3227,12 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	// frame in this window — it would reference freed GPU resources mid-tear-down.
 	R_DeleteTextures();
 #ifdef USE_VULKAN
+	if ( code != REF_LEVEL_ONLY ) {
+		// Temporal's active-only generic layout borrows the RAL bindless BGL.
+		// Release layout -> targets -> A2a payload/adoption while that parent and
+		// the backend are still alive; raw entMat teardown remains in vk_shutdown.
+		vk_temporal_motion_release_before_ral_shutdown();
+	}
 	// destroyWindow gate threaded through
 	// so REF_LEVEL_ONLY (map-transition partial teardown) leaves the RAL
 	// backend + sibling pipelines + adopted bindgroups alive across the
@@ -3345,6 +3359,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 
 	re.BeginFrame = RE_BeginFrame;
 	re.EndFrame = RE_EndFrame;
+	re.GetGpuProfileSample = vk_gpu_profile_sample;
 
 	re.MarkFragments = R_MarkFragments;
 	re.LerpTag = R_LerpTag;
@@ -3352,6 +3367,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 
 	re.ClearScene = RE_ClearScene;
 	re.AddRefEntityToScene = RE_AddRefEntityToScene;
+	re.AddRefEntityToSceneTemporal = RE_AddRefEntityToSceneTemporal;
 	re.AddPolyToScene = RE_AddPolyToScene;
 	re.LightForPoint = R_LightForPoint;
 	re.AddLightToScene = RE_AddLightToScene;

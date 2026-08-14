@@ -718,12 +718,17 @@ void CG_DrawActive( stereoFrame_t stereoView ) {
 
 	// WA-1: the imperative 3D crosshair (CG_DrawCrosshair3D RT_SPRITE) is retired.
 	// The Wired UI crosshair element now draws the crosshair in ALL modes at the
-	// cgame-staged world-anchored offset (0,0 = center in first person). stereoView
-	// is unused for the crosshair now (the per-eye 2D Wired crosshair handles it).
-	(void)stereoView;
+	// cgame-staged world-anchored offset (0,0 = center in first person). The
+	// temporal primary marker is center-eye only; per-eye scenes remain ordinary.
 
 	// draw 3D view
+	if ( stereoView == STEREO_CENTER && !cl_splitScreen.integer ) {
+		cg.refdef.rdflags |= RDF_TEMPORAL_PRIMARY;
+	} else {
+		cg.refdef.rdflags &= ~RDF_TEMPORAL_PRIMARY;
+	}
 	trap_R_RenderScene( &cg.refdef );
+	cg.refdef.rdflags &= ~RDF_TEMPORAL_PRIMARY;
 
 	// draw status bar and other floating elements
  	CG_Draw2D(stereoView);

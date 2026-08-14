@@ -8,6 +8,20 @@
 #include "cg_local.h"
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 
+static uint32_t CG_TemporalContinuityForState( const entityState_t *state ) {
+	if ( cg.snap && state && state->eType == ET_PLAYER
+			&& state->number == cg.snap->ps.clientNum ) {
+		return (uint32_t)cg.snap->ps.persistant[PERS_SPAWN_COUNT];
+	}
+	return 0u;
+}
+
+void CG_TemporalIdentityMarkAllDiscontinuous( void ) {
+	for ( int i = 0; i < MAX_GENTITIES; ++i ) {
+		CG_TemporalIdentityMarkDiscontinuity( &cg_entities[i].temporalIdentity );
+	}
+}
+
 
 
 /*
@@ -39,8 +53,12 @@ cent->nextState is moved to cent->currentState and events are fired
 ===============
 */
 static void CG_TransitionEntity( centity_t *cent ) {
+	qboolean discontinuity = !cent->interpolate;
+
 	cent->currentState = cent->nextState;
 	cent->currentValid = qtrue;
+	CG_TemporalIdentityObserve( &cent->temporalIdentity, &cent->currentState,
+		CG_TemporalContinuityForState( &cent->currentState ), discontinuity );
 
 	// reset if the entity wasn't in the last frame or was teleported
 	if ( !cent->interpolate ) {
@@ -70,6 +88,11 @@ void CG_SetInitialSnapshot( snapshot_t *snap ) {
 	cg.snap = snap;
 
 	BG_PlayerStateToEntityState( &snap->ps, &cg_entities[ snap->ps.clientNum ].currentState, qfalse );
+	CG_TemporalIdentityObserve(
+		&cg_entities[snap->ps.clientNum].temporalIdentity,
+		&cg_entities[snap->ps.clientNum].currentState,
+		(uint32_t)snap->ps.persistant[PERS_SPAWN_COUNT], qfalse );
+	cgs.temporalAcceptedSnapshotNum = cgs.processedSnapshotNum;
 
 	// sort out solid entities
 	CG_BuildSolidList();
@@ -88,6 +111,9 @@ void CG_SetInitialSnapshot( snapshot_t *snap ) {
 		//cent->currentState = *state;
 		cent->interpolate = qfalse;
 		cent->currentValid = qtrue;
+		CG_TemporalIdentityObserve( &cent->temporalIdentity,
+			&cent->currentState, CG_TemporalContinuityForState( &cent->currentState ),
+			qfalse );
 
 		CG_ResetEntity( cent );
 
@@ -119,10 +145,6 @@ static void CG_TransitionSnapshot( void ) {
 	// execute any server string commands before transitioning entities
 	CG_ExecuteNewServerCommands( cg.nextSnap->serverCommandSequence );
 
-	// if we had a map_restart, set everything with initial
-	if ( cg.mapRestart ) {
-	}
-
 	// clear the currentValid flag for all entities in the existing snapshot
 	for ( i = 0 ; i < cg.snap->numEntities ; i++ ) {
 		cent = &cg_entities[ cg.snap->entities[ i ].number ];
@@ -135,6 +157,11 @@ static void CG_TransitionSnapshot( void ) {
 
 	BG_PlayerStateToEntityState( &cg.snap->ps, &cg_entities[ cg.snap->ps.clientNum ].currentState, qfalse );
 	cg_entities[ cg.snap->ps.clientNum ].interpolate = qfalse;
+	CG_TemporalIdentityObserve(
+		&cg_entities[cg.snap->ps.clientNum].temporalIdentity,
+		&cg_entities[cg.snap->ps.clientNum].currentState,
+		(uint32_t)cg.snap->ps.persistant[PERS_SPAWN_COUNT],
+		cg.nextFrameTeleport );
 
 	for ( i = 0 ; i < cg.snap->numEntities ; i++ ) {
 		cent = &cg_entities[ cg.snap->entities[ i ].number ];
@@ -180,6 +207,13 @@ static void CG_SetNextSnap( snapshot_t *snap ) {
 	entityState_t		*es;
 	centity_t			*cent;
 
+	if ( cgs.temporalAcceptedSnapshotNum != 0
+			&& cgs.processedSnapshotNum > cgs.temporalAcceptedSnapshotNum + 1 ) {
+		// Missing accepted snapshots can hide remove/reuse transitions.  Cut all
+		// observed histories conservatively instead of guessing continuity.
+		CG_TemporalIdentityMarkAllDiscontinuous();
+	}
+	cgs.temporalAcceptedSnapshotNum = cgs.processedSnapshotNum;
 	cg.nextSnap = snap;
 
 	BG_PlayerStateToEntityState( &snap->ps, &cg_entities[ snap->ps.clientNum ].nextState, qfalse );
@@ -218,6 +252,7 @@ static void CG_SetNextSnap( snapshot_t *snap ) {
 	// if changing server restarts, don't interpolate
 	if ( ( cg.nextSnap->snapFlags ^ cg.snap->snapFlags ) & SNAPFLAG_SERVERCOUNT ) {
 		cg.nextFrameTeleport = qtrue;
+		CG_TemporalIdentityMarkAllDiscontinuous();
 	}
 
 	// sort out solid entities
