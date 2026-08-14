@@ -1588,33 +1588,58 @@ FUNCTION(WIRED_APPLY_SUBMODULE_PATCHES _label _submodule_dir _patch_dir)
 		SET(_dir_flag "--directory=${_submodule_dir}")
 	ENDIF()
 	LIST(SORT _patches)
-	FOREACH(_patch ${_patches})
-		GET_FILENAME_COMPONENT(_patch_name "${_patch}" NAME)
-		EXECUTE_PROCESS(
-			COMMAND "${_GIT_EXE}" apply ${_dir_flag} --check --reverse --ignore-whitespace "${_patch}"
-			WORKING_DIRECTORY "${_apply_cwd}"
-			RESULT_VARIABLE _rc_already
-			OUTPUT_QUIET ERROR_QUIET)
-		IF(_rc_already EQUAL 0)
-			MESSAGE(STATUS "${_label} patch already applied: ${_patch_name}")
-		ELSE()
+	# Two attempts. A patch-series EDIT (a hunk folded into an earlier patch,
+	# a patch renumbered) leaves previously-patched working trees in a state
+	# where neither the already-applied check nor a fresh apply can succeed.
+	# The series is the single source of truth for local submodule content
+	# (see the policy note above), so in repo mode the recovery is mechanical:
+	# reset the submodule tree and re-run the series once from scratch.
+	# Plain-tree mode (container) has no git metadata to reset — it always
+	# starts from a pristine checkout anyway, so a failure there is real.
+	FOREACH(_attempt RANGE 1)
+		SET(_series_failed FALSE)
+		FOREACH(_patch ${_patches})
+			GET_FILENAME_COMPONENT(_patch_name "${_patch}" NAME)
 			EXECUTE_PROCESS(
-				COMMAND "${_GIT_EXE}" apply ${_dir_flag} --ignore-whitespace "${_patch}"
+				COMMAND "${_GIT_EXE}" apply ${_dir_flag} --check --reverse --ignore-whitespace "${_patch}"
 				WORKING_DIRECTORY "${_apply_cwd}"
-				RESULT_VARIABLE _rc_apply
-				OUTPUT_VARIABLE _out_apply
-				ERROR_VARIABLE _err_apply)
-			IF(NOT _rc_apply EQUAL 0)
-				MESSAGE(FATAL_ERROR
-					"Failed to apply ${_patch_name}:\n${_err_apply}\n"
-					"This usually means the ${_label} submodule has unrelated "
-					"local modifications that conflict with the patch hunks.\n"
-					"To recover:\n"
-					"  git -C ${_submodule_dir} reset --hard\n"
-					"  rm -rf build/release  # or build/debug\n"
-					"  re-run cmake / make")
+				RESULT_VARIABLE _rc_already
+				OUTPUT_QUIET ERROR_QUIET)
+			IF(_rc_already EQUAL 0)
+				MESSAGE(STATUS "${_label} patch already applied: ${_patch_name}")
+			ELSE()
+				EXECUTE_PROCESS(
+					COMMAND "${_GIT_EXE}" apply ${_dir_flag} --ignore-whitespace "${_patch}"
+					WORKING_DIRECTORY "${_apply_cwd}"
+					RESULT_VARIABLE _rc_apply
+					OUTPUT_VARIABLE _out_apply
+					ERROR_VARIABLE _err_apply)
+				IF(NOT _rc_apply EQUAL 0)
+					IF(_attempt EQUAL 0 AND _dir_flag STREQUAL "")
+						MESSAGE(STATUS
+							"${_label}: ${_patch_name} does not fit the current working "
+							"tree (patch-series drift) — resetting the submodule tree "
+							"and reapplying the series from scratch")
+						EXECUTE_PROCESS(
+							COMMAND "${_GIT_EXE}" checkout -- .
+							WORKING_DIRECTORY "${_apply_cwd}")
+						SET(_series_failed TRUE)
+						BREAK()
+					ENDIF()
+					MESSAGE(FATAL_ERROR
+						"Failed to apply ${_patch_name}:\n${_err_apply}\n"
+						"This usually means the ${_label} submodule has unrelated "
+						"local modifications that conflict with the patch hunks.\n"
+						"To recover:\n"
+						"  git -C ${_submodule_dir} reset --hard\n"
+						"  rm -rf build/release  # or build/debug\n"
+						"  re-run cmake / make")
+				ENDIF()
+				MESSAGE(STATUS "applied ${_label} patch: ${_patch_name}")
 			ENDIF()
-			MESSAGE(STATUS "applied ${_label} patch: ${_patch_name}")
+		ENDFOREACH()
+		IF(NOT _series_failed)
+			BREAK()
 		ENDIF()
 	ENDFOREACH()
 ENDFUNCTION()

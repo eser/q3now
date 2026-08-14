@@ -70,14 +70,3 @@
  #include <winsock2.h>
  #else
  #include <arpa/inet.h>
---- a/picoquic/wincompat.h
-+++ b/picoquic/wincompat.h
-@@ -24,7 +24,7 @@
- 
- #include <stdint.h>
- #define ssize_t int
--#include <Winsock2.h>
-+#include <winsock2.h>
- #include <ws2tcpip.h>
- 
- #ifndef gettimeofday
