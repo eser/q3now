@@ -31,5 +31,19 @@ RUN set -e; \
     printf '#!/bin/sh\nexec "$(dirname "$0")/x86_64-w64-mingw32-windres" "$@"\n' > /opt/llvm-mingw/bin/windres; \
     chmod +x /opt/llvm-mingw/bin/windres
 
+# wasi-sdk: game modules (gamecl/gamesv.wasm) are built with the wasi
+# toolchain regardless of the engine target. /opt/wasi-sdk is one of
+# wasm_tools.cmake's auto-detect candidates, so no env var is needed.
+# Version pin mirrors .wasi-sdk-version at the repo root.
+ARG WASI_SDK_VER=33.0
+RUN set -e; \
+    case "$TARGETARCH" in \
+      arm64) WASIARCH=arm64 ;; \
+      *)     WASIARCH=x86_64 ;; \
+    esac; \
+    curl -sL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VER%%.*}/wasi-sdk-${WASI_SDK_VER}-${WASIARCH}-linux.tar.gz" \
+      | tar xz -C /opt; \
+    ln -s "/opt/wasi-sdk-${WASI_SDK_VER}-${WASIARCH}-linux" /opt/wasi-sdk
+
 ENV LLVM_MINGW_ROOT=/opt/llvm-mingw \
     PATH=/opt/llvm-mingw/bin:$PATH
