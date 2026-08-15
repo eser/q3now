@@ -25,51 +25,74 @@ Two toolchain pieces are needed beyond a C/C++ compiler on every platform:
 
 ### windows/cmake
 
-Wired uses CMake as its build system. **MSYS2 MINGW64 is the canonical Windows toolchain** — it's vendor-neutral, community-owned, and is the profile actively built and verified. MSVC is not supported: the legacy MSVC project files and MSVC-only code paths were removed in 2026-08 (they had no build-system consumers). A community contributor wishing to build an MSVC profile would need to reintroduce those paths from git history and maintain them end to end.
+Wired uses CMake as its build system, and **clang is the only compiler family across every platform**: Apple clang on macOS, clang on Linux, and llvm-mingw clang for Windows targets. MSVC is not supported.
 
-**Using `make` from MSYS2 MINGW64:**
+**Windows binaries are cross-compiled from Linux.** The shipped `wired.x64.exe` comes from the `cross-windows` CI job (llvm-mingw inside a Debian container), not from compiling on a Windows machine. The Windows CI job consumes that artifact: it runs the cross-built tests, then builds only the launcher and packages the zip. See [Cross-compiling Windows binaries](#cross-compiling-windows-binaries-linux-windows) for the exact command.
+
+**Building on Windows directly** remains supported for local development via MSYS2 CLANG64 (see [windows/msys2](#windowsmsys2)):
 ```
 make
 ```
 
-This wraps `cmake` + `ninja` and produces `wired.x64.exe` and `wired-headless.x64.exe` in `build/release/` along with renderer DLLs and game modules. Copy resulting binaries from the created `build` directory.
+This wraps `cmake` + `ninja` and produces `wired.x64.exe` and `wired-headless.x64.exe` in `build/release/` along with renderer DLLs and game modules. Copy resulting binaries from the created `build` directory. This path is not the one CI seals — if your results differ from a release build, reproduce with the cross container before filing.
 
 **Platform backend:** the window/input/surface backend is SDL3 (`code/sdl`) on every platform; SDL3 is a required build dependency. Audio is handled by miniaudio across all platforms.
 
 ---
 
-### windows/msys2
+### Cross-compiling Windows binaries (Linux → Windows)
 
-Install the build dependencies:
+The canonical path for shipping Windows artifacts. Needs only Docker:
 
-`MSYS2 MSYS`
+```
+docker build -t wired-cross-windows docker/cross-windows
+docker run --rm -v "$PWD:/src" wired-cross-windows /src/docker/cross-windows/build.sh
+```
 
-* pacman -Syu
-* pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-nasm mingw-w64-x86_64-sdl3 mingw-w64-x86_64-go mingw-w64-x86_64-nodejs mingw-w64-x86_64-opus mingw-w64-x86_64-opusfile mingw-w64-x86_64-clang-tools-extra make git
+Output lands in `build/cross-windows-docker/`: `wired.x64.exe`, `wired-headless.x64.exe`, the three renderer DLLs, `gamecl.wasm` / `gamesv.wasm`, and the `*_test.exe` suite (the container configures with `BUILD_TESTING=ON`).
 
-Use `MSYS2 MINGW32` or `MSYS2 MINGW64` depending on your target system, then copy resulting binaries from created `build` directory or use command:
+The image pins llvm-mingw (UCRT flavour) and wasi-sdk; submodule patches under `patches/` are applied automatically at configure time. The toolchain file is `cmake/toolchains/llvm-mingw-x86_64.cmake`.
 
-`make install DESTDIR=<path_to_game_files>`
+**A cross build proves compilation, not execution** — the resulting `.exe` cannot run on the build host. Runtime verification happens in the Windows CI job, which downloads the cross artifacts and runs the test executables *before* packaging, so a binary whose tests fail never reaches the zip.
+
+**UCRT vs msvcrt:** llvm-mingw links against UCRT. This is the only meaningful runtime difference from the historical MSYS2-gcc builds, and it is a non-issue on Windows 10 and later.
 
 ---
 
-### windows/mingw
+### windows/msys2
 
-All build dependencies (libraries, headers) are bundled-in
+Use the **CLANG64** environment, not MINGW64 — the single-toolchain policy (2026-08-14) means every
+lane compiles with clang. The `clang64` repo carries the same library set under the
+`mingw-w64-clang-x86_64-*` prefix, and the environment provides `cc`/`gcc` shims that point at clang.
 
-Build with either `make ARCH=x86` or `make ARCH=x86_64` commands depending on your target system, then copy resulting binaries from created `build` directory or use command:
+Install the build dependencies from an `MSYS2 MSYS` shell:
+
+* pacman -Syu
+* pacman -S mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-cmake mingw-w64-clang-x86_64-sdl3 mingw-w64-clang-x86_64-openssl mingw-w64-clang-x86_64-opus mingw-w64-clang-x86_64-opusfile mingw-w64-clang-x86_64-pkg-config make git
+
+The set above mirrors what CI installs. A local engine build additionally needs `nasm`, and the
+launcher needs `go` and `nodejs` — install those from the same `mingw-w64-clang-x86_64-*` prefix.
+
+Then build from the `MSYS2 CLANG64` shell and copy the resulting binaries from the created `build`
+directory, or install them directly:
 
 `make install DESTDIR=<path_to_game_files>`
+
+This produces a locally compiled engine. Release artifacts come from the cross container instead —
+see [Cross-compiling Windows binaries](#cross-compiling-windows-binaries-linux-windows).
 
 ---
 
 ### generic/ubuntu linux/bsd
 
-You may need to run the following commands to install packages (using fresh ubuntu-18.04 installation as example):
+You may need to run the following commands to install packages (using a fresh Ubuntu installation as example):
 
-* sudo apt install make gcc libssl-dev mesa-common-dev
+* sudo apt install make clang cmake ninja-build libssl-dev mesa-common-dev
 * sudo apt install libxxf86dga-dev libxrandr-dev libxxf86vm-dev libasound-dev
 * sudo apt install libsdl3-dev
+
+CI builds this lane with clang (installed from apt.llvm.org, matching the pinned clang-tidy major).
+gcc is not exercised by the build system.
 
 Build with: `make`
 
