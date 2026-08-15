@@ -30,11 +30,8 @@ build/
 dist/
 cmake-*
 
-# engine runtime (created if run from project dir)
-base/
-
 # todos
-docs/
+backlog/
 TODOS.md
 
 # Python bytecode caches
