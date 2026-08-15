@@ -7,7 +7,12 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 command -v glslangValidator >/dev/null 2>&1 || exit 77
 command -v spirv-val >/dev/null 2>&1 || exit 77
 command -v spirv-dis >/dev/null 2>&1 || exit 77
-(cd "$shader_dir" && node compile.mjs --check)
+# compile.mjs uses a fixed local scratch name while checking all committed
+# outputs. Run freshness validation from a private copy so read-only source
+# mounts and concurrent CI jobs never contend for shaders/spirv/data.spv.
+check_shader_dir="$tmp/check-shaders"
+cp -R "$shader_dir" "$check_shader_dir"
+(cd "$check_shader_dir" && node compile.mjs --check)
 awk 'NR==1 { print; print "#extension GL_GOOGLE_include_directive : require"; next } { print }' \
 	"$shader_dir/gen_frag.tmpl" > "$tmp/gen_frag.glsl"
 glslangValidator -S vert -V -DUSE_TX1 -DUSE_TEMPORAL_MOTION -o "$tmp/v.spv" "$shader_dir/gen_vert.tmpl" >/dev/null

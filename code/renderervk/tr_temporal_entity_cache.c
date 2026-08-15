@@ -60,6 +60,8 @@ static qboolean PoseEqual( const temporalEntityPose_t *a,
 	return a->hModel == b->hModel && a->modelToken == b->modelToken
 		&& a->modelDataToken == b->modelDataToken
 		&& a->modelType == b->modelType && a->modelTopology == b->modelTopology
+		&& a->modelAllocationGeneration == b->modelAllocationGeneration
+		&& a->modelContentDigest == b->modelContentDigest
 		&& a->frame == b->frame && a->oldframe == b->oldframe
 		&& a->backlerp == b->backlerp
 		&& a->nonNormalizedAxes == b->nonNormalizedAxes
@@ -71,7 +73,9 @@ static qboolean ModelCompatible( const temporalEntityPose_t *a,
 		const temporalEntityPose_t *b ) {
 	return a->hModel == b->hModel && a->modelToken == b->modelToken
 		&& a->modelDataToken == b->modelDataToken
-		&& a->modelType == b->modelType && a->modelTopology == b->modelTopology;
+		&& a->modelType == b->modelType && a->modelTopology == b->modelTopology
+		&& a->modelAllocationGeneration == b->modelAllocationGeneration
+		&& a->modelContentDigest == b->modelContentDigest;
 }
 
 static qboolean CameraValid( const temporalCameraPose_t *pose ) {

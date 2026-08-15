@@ -103,7 +103,10 @@ qboolean R_TemporalMotionPayloadEnsure( temporalMotionPayloadOwner_t *owner,
 	if ( frame->allocationGeneration == UINT32_MAX ) return qfalse;
 	nextGeneration = frame->allocationGeneration + 1u;
 	replaceBuffer = ( !frame->ready || frame->capacity < capacity ) ? qtrue : qfalse;
-	replacementResetAuthority = frame->ready ? frame->resetAfterFence : qfalse;
+	// First materialization has no prior in-flight payload allocation.  The
+	// caller reached Ensure from the completed-fence seam, so publish the same
+	// one-shot begin authority that a reused frame receives via ResetAfterFence.
+	replacementResetAuthority = frame->ready ? frame->resetAfterFence : qtrue;
 	if ( !owner->layout ) {
 		if ( owner->layoutAllocationGeneration == UINT32_MAX ) return qfalse;
 		nextLayoutGeneration = owner->layoutAllocationGeneration + 1u;

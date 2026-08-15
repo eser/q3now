@@ -25,6 +25,7 @@ typedef struct {
 	uint32_t resourceGeneration;
 	qboolean resourcesReady;
 	qboolean historyRecorded;
+	temporalHistoryPendingWriteReceipt_t pendingHistoryWrite;
 	qboolean previousSlotRead;
 	uint32_t entityReceiptAttempts;
 	uint32_t entityReceiptScans;
@@ -44,17 +45,32 @@ static ralTemporalState_t s_temporalStates[ MAX_RENDER_WORLDS ];
 static uint32_t s_temporalTopologyEpochs[ MAX_RENDER_WORLDS ];
 static temporalProjectionDiagnostic_t s_temporalDiagnostics[ MAX_RENDER_WORLDS ];
 static temporalHistoryResources_t s_temporalHistory[ MAX_RENDER_WORLDS ];
+static temporalHistoryCommittedReceipt_t s_temporalCommittedHistory[ MAX_RENDER_WORLDS ][2];
 static qboolean s_temporalCameraCutPending[ MAX_RENDER_WORLDS ];
 static int s_temporalBackendWorld = -1;
 static uint64_t s_temporalBackendFrame;
+static temporalBackendSubmitQuery_t s_temporalBackendExpectation =
+	TEMPORAL_BACKEND_SUBMIT_NONE;
+static temporalBackendSubmitQuery_t s_temporalDeliveredExpectation =
+	TEMPORAL_BACKEND_SUBMIT_NONE;
+static temporalBatchRequest_t s_temporalDeliveredRequest;
 
 void R_TemporalHistoryShutdown( void ) {
 	R_TemporalEntityCacheResetAll();
 	memset( s_temporalCameraCutPending, 0, sizeof( s_temporalCameraCutPending ) );
+	vk_temporal_history_store_shutdown();
 	for ( int i = 0; i < MAX_RENDER_WORLDS; ++i ) {
 		R_TemporalHistoryRelease( &s_temporalHistory[i] );
 		R_TemporalHistoryInit( &s_temporalHistory[i] );
+		memset( s_temporalCommittedHistory[i], 0,
+			sizeof( s_temporalCommittedHistory[i] ) );
 	}
+	s_temporalBackendWorld = -1;
+	s_temporalBackendFrame = 0;
+	s_temporalBackendExpectation = TEMPORAL_BACKEND_SUBMIT_NONE;
+	s_temporalDeliveredExpectation = TEMPORAL_BACKEND_SUBMIT_NONE;
+	memset( &s_temporalDeliveredRequest, 0,
+		sizeof( s_temporalDeliveredRequest ) );
 }
 
 void R_TemporalMarkCameraCut( int worldIndex ) {
@@ -72,6 +88,8 @@ void R_TemporalWorldLoaded( int worldIndex ) {
 	}
 	vk_temporal_history_store_shutdown();
 	R_TemporalHistoryRelease( &s_temporalHistory[ worldIndex ] );
+	memset( s_temporalCommittedHistory[worldIndex], 0,
+		sizeof( s_temporalCommittedHistory[worldIndex] ) );
 	if ( s_temporalTopologyEpochs[ worldIndex ] == UINT32_MAX ) {
 		Ral_TemporalInit( &s_temporalStates[ worldIndex ] );
 		s_temporalTopologyEpochs[ worldIndex ] = 1u;
@@ -85,6 +103,12 @@ void R_TemporalWorldLoaded( int worldIndex ) {
 		sizeof( s_temporalDiagnostics[ worldIndex ] ) );
 	s_temporalCameraCutPending[worldIndex] = qfalse;
 	R_TemporalEntityCacheResetWorld( worldIndex );
+	s_temporalBackendWorld = -1;
+	s_temporalBackendFrame = 0;
+	s_temporalBackendExpectation = TEMPORAL_BACKEND_SUBMIT_NONE;
+	s_temporalDeliveredExpectation = TEMPORAL_BACKEND_SUBMIT_NONE;
+	memset( &s_temporalDeliveredRequest, 0,
+		sizeof( s_temporalDeliveredRequest ) );
 }
 
 uint64_t R_TemporalProjectionPrepare( viewParms_t *view ) {
@@ -152,7 +176,12 @@ uint64_t R_TemporalProjectionPrepare( viewParms_t *view ) {
 			return 0;
 		}
 	} else {
+		// Descriptor/bind-group children borrow the history views.  Tear them
+		// down before releasing their physical parents on an exact disable.
+		vk_temporal_history_store_shutdown();
 		R_TemporalHistoryRelease( &s_temporalHistory[ worldIndex ] );
+		memset( s_temporalCommittedHistory[worldIndex], 0,
+			sizeof( s_temporalCommittedHistory[worldIndex] ) );
 	}
 	if ( !R_TemporalEntityCacheBegin( worldIndex, input.topologyEpoch,
 			plan.generation, frameId ) ) {
@@ -231,6 +260,11 @@ void R_TemporalProjectionFinish( int worldIndex, uint64_t frameId,
 }
 
 void R_TemporalBackendRecorded( int worldIndex, uint64_t frameId ) {
+	if ( s_temporalBackendExpectation == TEMPORAL_BACKEND_SUBMIT_INVALID ) return;
+	if ( s_temporalBackendExpectation == TEMPORAL_BACKEND_SUBMIT_EXACT
+			&& s_temporalBackendWorld == worldIndex
+			&& s_temporalBackendFrame == frameId ) return;
+	s_temporalBackendExpectation = TEMPORAL_BACKEND_SUBMIT_INVALID;
 	if ( !frameId || worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS ) return;
 	if ( !s_temporalStates[ worldIndex ].pending
 			|| s_temporalStates[ worldIndex ].pendingPlan.frameId != frameId ) return;
@@ -239,6 +273,31 @@ void R_TemporalBackendRecorded( int worldIndex, uint64_t frameId ) {
 			s_temporalStates[worldIndex].pendingPlan.generation, frameId ) ) return;
 	s_temporalBackendWorld = worldIndex;
 	s_temporalBackendFrame = frameId;
+	s_temporalBackendExpectation = TEMPORAL_BACKEND_SUBMIT_EXACT;
+}
+
+static qboolean R_TemporalBatchRequestEqualExact(
+		const temporalBatchRequest_t *a, const temporalBatchRequest_t *b ) {
+	return R_TemporalBatchRequestValidateExact( a )
+		&& R_TemporalBatchRequestValidateExact( b )
+		&& a->token == b->token && a->worldIndex == b->worldIndex
+		&& a->frameId == b->frameId && a->width == b->width
+		&& a->height == b->height && a->topologyEpoch == b->topologyEpoch
+		&& a->planGeneration == b->planGeneration
+		&& a->enabled == b->enabled ? qtrue : qfalse;
+}
+
+void R_TemporalBackendRequestDelivered(
+		const temporalBatchRequest_t *request ) {
+	if ( s_temporalDeliveredExpectation == TEMPORAL_BACKEND_SUBMIT_INVALID )
+		return;
+	if ( s_temporalDeliveredExpectation == TEMPORAL_BACKEND_SUBMIT_EXACT
+			&& R_TemporalBatchRequestEqualExact(
+				&s_temporalDeliveredRequest, request ) ) return;
+	s_temporalDeliveredExpectation = TEMPORAL_BACKEND_SUBMIT_INVALID;
+	if ( !R_TemporalBatchRequestValidateExact( request ) ) return;
+	s_temporalDeliveredRequest = *request;
+	s_temporalDeliveredExpectation = TEMPORAL_BACKEND_SUBMIT_EXACT;
 }
 
 void R_TemporalBackendEntityReceipts( uint32_t drawSurfs,
@@ -338,33 +397,295 @@ qboolean R_TemporalBackendGetPending( int worldIndex, uint64_t frameId,
 	return qtrue;
 }
 
-void R_TemporalBackendMarkHistoryRecorded( int worldIndex, uint64_t frameId,
+qboolean R_TemporalBackendStageHistoryWrite( int worldIndex, uint64_t frameId,
+		const temporalHistoryPendingWriteReceipt_t *pending,
 		qboolean previousSlotRead ) {
+	temporalProjectionDiagnostic_t *diagnostic;
 	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS
 			|| s_temporalBackendWorld != worldIndex
-			|| s_temporalBackendFrame != frameId ) return;
-	s_temporalDiagnostics[worldIndex].historyRecorded = qtrue;
-	s_temporalDiagnostics[worldIndex].previousSlotRead = previousSlotRead;
+			|| s_temporalBackendFrame != frameId || !pending || !pending->valid )
+		return qfalse;
+	diagnostic = &s_temporalDiagnostics[worldIndex];
+	if ( diagnostic->historyRecorded ) return qfalse;
+	if ( pending->write.frameId != frameId
+			|| pending->write.worldIndex != worldIndex
+			|| pending->write.planGeneration != diagnostic->plan.generation
+			|| pending->write.historyIndex != diagnostic->plan.historyWriteIndex )
+		return qfalse;
+	diagnostic->pendingHistoryWrite = *pending;
+	diagnostic->historyRecorded = qtrue;
+	diagnostic->previousSlotRead = previousSlotRead;
+	return qtrue;
 }
 
-void R_TemporalBackendSubmitted( qboolean submitted ) {
+qboolean R_TemporalBackendGetPendingHistoryWrite(
+		temporalHistoryPendingWriteReceipt_t *outPending ) {
+	const temporalProjectionDiagnostic_t *diagnostic;
+	if ( !outPending || s_temporalBackendWorld < 0
+			|| s_temporalBackendWorld >= MAX_RENDER_WORLDS
+			|| !s_temporalBackendFrame ) return qfalse;
+	diagnostic = &s_temporalDiagnostics[s_temporalBackendWorld];
+	if ( !diagnostic->historyRecorded || !diagnostic->pendingHistoryWrite.valid )
+		return qfalse;
+	*outPending = diagnostic->pendingHistoryWrite;
+	return qtrue;
+}
+
+void R_TemporalBackendMarkPreviousSlotRead( int worldIndex, uint64_t frameId ) {
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS
+			|| s_temporalBackendWorld != worldIndex
+			|| s_temporalBackendFrame != frameId
+			|| !s_temporalDiagnostics[worldIndex].historyRecorded ) return;
+	s_temporalDiagnostics[worldIndex].previousSlotRead = qtrue;
+}
+
+qboolean R_TemporalBackendGetCommittedHistory(
+		int worldIndex, uint32_t historyIndex,
+		temporalHistoryCommittedReceipt_t *outReceipt ) {
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS || historyIndex > 1
+			|| !outReceipt
+			|| !s_temporalCommittedHistory[worldIndex][historyIndex].valid ) return qfalse;
+	*outReceipt = s_temporalCommittedHistory[worldIndex][historyIndex];
+	return qtrue;
+}
+
+static qboolean R_TemporalHistoryPublishable( int worldIndex,
+		const temporalProjectionDiagnostic_t *diagnostic ) {
+	const temporalHistoryResources_t *history;
+	const void *textures[4], *views[4];
+	temporalHistoryPendingWriteReceipt_t rebuilt;
+	if ( worldIndex < 0 || worldIndex >= MAX_RENDER_WORLDS || !diagnostic
+			|| !diagnostic->plan.enabled || !diagnostic->historyRecorded
+			|| !diagnostic->resourcesReady || !diagnostic->plan.frameId
+			|| !diagnostic->plan.generation || diagnostic->plan.historyWriteIndex > 1 )
+		return qfalse;
+	history = &s_temporalHistory[worldIndex];
+	if ( !history->ready || !history->backend
+			|| diagnostic->resourceGeneration != history->allocationGeneration
+			|| diagnostic->width != history->width || diagnostic->height != history->height
+			|| history->topologyEpoch != s_temporalTopologyEpochs[worldIndex] ) return qfalse;
+	textures[0]=history->color[0]; textures[1]=history->depth[0];
+	textures[2]=history->color[1]; textures[3]=history->depth[1];
+	views[0]=history->colorView[0]; views[1]=history->depthView[0];
+	views[2]=history->colorView[1]; views[3]=history->depthView[1];
+	for ( unsigned i=0; i<4; ++i ) {
+		if ( !textures[i] || !views[i] ) return qfalse;
+		for ( unsigned j=i+1; j<4; ++j )
+			if ( textures[i]==textures[j] || views[i]==views[j] ) return qfalse;
+	}
+	if ( !R_TemporalHistoryBuildPendingWrite( history, &diagnostic->plan,
+			worldIndex, &diagnostic->pendingHistoryWrite.write.source, &rebuilt ) )
+		return qfalse;
+	return R_TemporalHistoryPendingWriteEqualExact(
+		&rebuilt, &diagnostic->pendingHistoryWrite );
+}
+
+static qboolean R_TemporalFramePlanEqualExact(
+		const ralTemporalFramePlan_t *a, const ralTemporalFramePlan_t *b ) {
+	return a && b && a->frameId == b->frameId
+		&& a->generation == b->generation && a->resetMask == b->resetMask
+		&& a->enabled == b->enabled && a->historyValid == b->historyValid
+		&& a->historyReadIndex == b->historyReadIndex
+		&& a->historyWriteIndex == b->historyWriteIndex
+		&& a->jitterPhase == b->jitterPhase
+		&& memcmp( a->sceneJitterPixels, b->sceneJitterPixels,
+			sizeof( a->sceneJitterPixels ) ) == 0
+		&& memcmp( a->sceneJitterUv, b->sceneJitterUv,
+			sizeof( a->sceneJitterUv ) ) == 0
+		&& memcmp( a->previousJitterPixels, b->previousJitterPixels,
+			sizeof( a->previousJitterPixels ) ) == 0
+		&& memcmp( a->uiJitterPixels, b->uiJitterPixels,
+			sizeof( a->uiJitterPixels ) ) == 0 ? qtrue : qfalse;
+}
+
+static qboolean R_TemporalBackendSubmitAuthorityExact(
+		const temporalBackendSubmitAuthority_t *authority ) {
+	const temporalProjectionDiagnostic_t *diagnostic;
+	const ralTemporalState_t *state;
+	qboolean recordedExact, disabledDeliveredOnly;
+	if ( !authority || !authority->valid
+			|| authority->worldIndex < 0
+			|| authority->worldIndex >= MAX_RENDER_WORLDS
+			|| !authority->frameId || !authority->planGeneration
+			|| !authority->topologyEpoch || authority->historyWriteIndex > 1u
+			|| !authority->width || !authority->height
+			|| s_temporalDeliveredExpectation != TEMPORAL_BACKEND_SUBMIT_EXACT )
+		return qfalse;
+	recordedExact = s_temporalBackendExpectation == TEMPORAL_BACKEND_SUBMIT_EXACT
+		&& s_temporalBackendWorld == authority->worldIndex
+		&& s_temporalBackendFrame == authority->frameId ? qtrue : qfalse;
+	disabledDeliveredOnly = !authority->enabled
+		&& s_temporalBackendExpectation == TEMPORAL_BACKEND_SUBMIT_NONE
+		&& s_temporalBackendWorld < 0 && !s_temporalBackendFrame ? qtrue : qfalse;
+	if ( !recordedExact && !disabledDeliveredOnly ) return qfalse;
+	diagnostic = &s_temporalDiagnostics[authority->worldIndex];
+	state = &s_temporalStates[authority->worldIndex];
+	if ( authority->recorded != recordedExact ) return qfalse;
+	if ( disabledDeliveredOnly && ( diagnostic->historyRecorded
+			|| diagnostic->pendingHistoryWrite.valid
+			|| diagnostic->pendingHistoryWrite.write.valid
+			|| diagnostic->previousSlotRead
+			|| diagnostic->entityReceiptAttempts
+			|| diagnostic->entityReceiptScans
+			|| diagnostic->entityDrawSurfs
+			|| diagnostic->entityVisibleTemporal
+			|| diagnostic->entityAccepted
+			|| diagnostic->entityPrevious
+			|| diagnostic->entityRejected
+			|| diagnostic->entityReceiptsRecorded
+			|| diagnostic->entityCommitted ) ) return qfalse;
+	return state->pending
+		&& R_TemporalBackendSubmitAuthorityMatchesRequest(
+			authority, &s_temporalDeliveredRequest )
+		&& authority->width == diagnostic->width
+		&& authority->height == diagnostic->height
+		&& R_TemporalFramePlanEqualExact( &authority->plan, &diagnostic->plan )
+		&& R_TemporalFramePlanEqualExact( &authority->plan, &state->pendingPlan )
+		&& state->pendingPlan.frameId == authority->frameId
+		&& state->pendingPlan.generation == authority->planGeneration
+		&& state->pendingPlan.historyWriteIndex == authority->historyWriteIndex
+		&& state->pendingTopologyEpoch == authority->topologyEpoch
+		&& diagnostic->valid && diagnostic->queued
+		&& diagnostic->plan.frameId == authority->frameId
+		&& diagnostic->plan.generation == authority->planGeneration
+		&& diagnostic->plan.historyWriteIndex == authority->historyWriteIndex
+		? qtrue : qfalse;
+}
+
+temporalBackendSubmitQuery_t R_TemporalBackendQuerySubmitAuthority(
+		temporalBackendSubmitAuthority_t *outAuthority ) {
+	temporalBackendSubmitAuthority_t authority;
+	temporalBackendSubmitQuery_t query;
+	uint32_t pendingCount = 0u;
+	qboolean backendPresent;
+	memset( &authority, 0, sizeof( authority ) );
+	if ( !outAuthority ) return TEMPORAL_BACKEND_SUBMIT_INVALID;
+	for ( int worldIndex = 0; worldIndex < MAX_RENDER_WORLDS; ++worldIndex ) {
+		if ( s_temporalStates[worldIndex].pending ) pendingCount++;
+	}
+	backendPresent = s_temporalBackendWorld >= 0 || s_temporalBackendFrame
+		|| s_temporalBackendExpectation != TEMPORAL_BACKEND_SUBMIT_NONE
+		|| s_temporalDeliveredExpectation != TEMPORAL_BACKEND_SUBMIT_NONE
+		? qtrue : qfalse;
+	if ( s_temporalDeliveredExpectation == TEMPORAL_BACKEND_SUBMIT_EXACT
+			&& s_temporalDeliveredRequest.worldIndex >= 0
+			&& s_temporalDeliveredRequest.worldIndex < MAX_RENDER_WORLDS ) {
+		const int worldIndex = s_temporalDeliveredRequest.worldIndex;
+		const temporalProjectionDiagnostic_t *diagnostic =
+			&s_temporalDiagnostics[worldIndex];
+		authority.batchToken = s_temporalDeliveredRequest.token;
+		authority.frameId = s_temporalDeliveredRequest.frameId;
+		authority.worldIndex = worldIndex;
+		authority.planGeneration = diagnostic->plan.generation;
+		authority.topologyEpoch =
+			s_temporalStates[worldIndex].pendingTopologyEpoch;
+		authority.width = diagnostic->width;
+		authority.height = diagnostic->height;
+		authority.historyWriteIndex = diagnostic->plan.historyWriteIndex;
+		authority.enabled = diagnostic->plan.enabled ? 1u : 0u;
+		authority.plan = diagnostic->plan;
+		authority.recorded = s_temporalBackendExpectation ==
+			TEMPORAL_BACKEND_SUBMIT_EXACT ? qtrue : qfalse;
+		authority.valid = qtrue;
+	}
+	query = R_TemporalHistoryClassifyBackendSubmitAuthority(
+		pendingCount, backendPresent,
+		R_TemporalBackendSubmitAuthorityExact( &authority ) );
+	if ( s_temporalBackendExpectation == TEMPORAL_BACKEND_SUBMIT_INVALID )
+		query = TEMPORAL_BACKEND_SUBMIT_INVALID;
+	if ( s_temporalDeliveredExpectation == TEMPORAL_BACKEND_SUBMIT_INVALID )
+		query = TEMPORAL_BACKEND_SUBMIT_INVALID;
+	if ( query == TEMPORAL_BACKEND_SUBMIT_EXACT ) *outAuthority = authority;
+	return query;
+}
+
+qboolean R_TemporalBackendCanResolveSubmit(
+		const temporalBackendSubmitAuthority_t *authority, qboolean submitted,
+		const temporalHistoryPendingWriteReceipt_t *authorizedWrite ) {
+	const temporalProjectionDiagnostic_t *diagnostic;
+	const ralTemporalState_t *state;
+	qboolean historyPublishable, stagedWriteValid, authorityExact;
+	temporalHistorySubmitDecision_t decision;
+	if ( !R_TemporalBackendSubmitAuthorityExact( authority ) ) return qfalse;
+	diagnostic = &s_temporalDiagnostics[authority->worldIndex];
+	state = &s_temporalStates[authority->worldIndex];
+	if ( !state->pending || state->pendingPlan.frameId != authority->frameId
+			|| diagnostic->plan.frameId != authority->frameId ) return qfalse;
+	stagedWriteValid = diagnostic->historyRecorded
+		&& diagnostic->pendingHistoryWrite.valid
+		&& diagnostic->pendingHistoryWrite.write.valid;
+	historyPublishable = diagnostic->plan.enabled
+		? R_TemporalHistoryPublishable( authority->worldIndex, diagnostic ) : qtrue;
+	authorityExact = authorizedWrite && stagedWriteValid
+		&& R_TemporalHistoryPendingWriteEqualExact(
+			authorizedWrite, &diagnostic->pendingHistoryWrite );
+	decision = R_TemporalHistoryChooseSubmitDecision( submitted,
+		diagnostic->plan.enabled, diagnostic->historyRecorded,
+		stagedWriteValid, authorizedWrite ? qtrue : qfalse,
+		authorityExact, historyPublishable );
+	return decision != TEMPORAL_HISTORY_SUBMIT_REJECT ? qtrue : qfalse;
+}
+
+qboolean R_TemporalBackendSubmitted(
+		const temporalBackendSubmitAuthority_t *authority, qboolean submitted,
+		const temporalHistoryPendingWriteReceipt_t *authorizedWrite,
+		qboolean *outHistoryCommitted,
+		temporalHistoryCommittedReceipt_t *outCommitted ) {
 	temporalProjectionDiagnostic_t *diagnostic;
+	qboolean historyPublishable, stagedWriteValid, authorityExact;
+	temporalHistorySubmitDecision_t decision;
 	int committed;
-	if ( s_temporalBackendWorld < 0 || s_temporalBackendWorld >= MAX_RENDER_WORLDS
-			|| !s_temporalBackendFrame ) return;
-	diagnostic = &s_temporalDiagnostics[ s_temporalBackendWorld ];
-	committed = submitted && ( !diagnostic->plan.enabled || diagnostic->historyRecorded )
-		? Ral_TemporalCommitFrame( &s_temporalStates[ s_temporalBackendWorld ], s_temporalBackendFrame )
-		: Ral_TemporalCancelFrame( &s_temporalStates[ s_temporalBackendWorld ], s_temporalBackendFrame );
-	diagnostic->committed = (qboolean)( submitted
-		&& ( !diagnostic->plan.enabled || diagnostic->historyRecorded ) && committed );
+	if ( outHistoryCommitted ) *outHistoryCommitted = qfalse;
+	if ( outCommitted ) memset( outCommitted, 0, sizeof( *outCommitted ) );
+	if ( !outHistoryCommitted
+			|| !R_TemporalBackendCanResolveSubmit(
+				authority, submitted, authorizedWrite ) )
+		return qfalse;
+	diagnostic = &s_temporalDiagnostics[ authority->worldIndex ];
+	historyPublishable = diagnostic->plan.enabled
+		? R_TemporalHistoryPublishable( authority->worldIndex, diagnostic ) : qtrue;
+	stagedWriteValid = diagnostic->historyRecorded
+		&& diagnostic->pendingHistoryWrite.valid
+		&& diagnostic->pendingHistoryWrite.write.valid;
+	authorityExact = authorizedWrite && stagedWriteValid
+		&& R_TemporalHistoryPendingWriteEqualExact(
+			authorizedWrite, &diagnostic->pendingHistoryWrite );
+	decision = R_TemporalHistoryChooseSubmitDecision( submitted,
+		diagnostic->plan.enabled, diagnostic->historyRecorded,
+		stagedWriteValid, authorizedWrite ? qtrue : qfalse,
+		authorityExact, historyPublishable );
+	if ( decision == TEMPORAL_HISTORY_SUBMIT_REJECT ) return qfalse;
+	committed = decision == TEMPORAL_HISTORY_SUBMIT_COMMIT_HISTORY
+			|| decision == TEMPORAL_HISTORY_SUBMIT_COMMIT_FRAME
+		? Ral_TemporalCommitFrame( &s_temporalStates[ authority->worldIndex ], authority->frameId )
+		: Ral_TemporalCancelFrame( &s_temporalStates[ authority->worldIndex ], authority->frameId );
+	if ( !committed ) return qfalse;
+	diagnostic->committed = (qboolean)( decision ==
+		TEMPORAL_HISTORY_SUBMIT_COMMIT_HISTORY
+		|| decision == TEMPORAL_HISTORY_SUBMIT_COMMIT_FRAME );
 	diagnostic->entityCommitted = R_TemporalEntityCacheFinish(
-		s_temporalBackendWorld, s_temporalBackendFrame, diagnostic->committed );
+		authority->worldIndex, authority->frameId,
+		diagnostic->committed && authority->recorded ? qtrue : qfalse );
 	if ( diagnostic->committed ) {
-		s_temporalCameraCutPending[s_temporalBackendWorld] = qfalse;
+		if ( diagnostic->plan.enabled && historyPublishable ) {
+			temporalHistoryCommittedReceipt_t receipt = authorizedWrite->write;
+			s_temporalCommittedHistory[authority->worldIndex][receipt.historyIndex] = receipt;
+			if ( outCommitted ) *outCommitted = receipt;
+		} else {
+			memset( s_temporalCommittedHistory[authority->worldIndex], 0,
+				sizeof( s_temporalCommittedHistory[authority->worldIndex] ) );
+		}
+		s_temporalCameraCutPending[authority->worldIndex] = qfalse;
 	}
 	s_temporalBackendWorld = -1;
 	s_temporalBackendFrame = 0;
+	s_temporalBackendExpectation = TEMPORAL_BACKEND_SUBMIT_NONE;
+	s_temporalDeliveredExpectation = TEMPORAL_BACKEND_SUBMIT_NONE;
+	memset( &s_temporalDeliveredRequest, 0,
+		sizeof( s_temporalDeliveredRequest ) );
+	*outHistoryCommitted = decision == TEMPORAL_HISTORY_SUBMIT_COMMIT_HISTORY
+		? qtrue : qfalse;
+	return qtrue;
 }
 
 void R_TemporalCancelQueuedFrames( void ) {
@@ -383,6 +704,10 @@ void R_TemporalCancelQueuedFrames( void ) {
 	}
 	s_temporalBackendWorld = -1;
 	s_temporalBackendFrame = 0;
+	s_temporalBackendExpectation = TEMPORAL_BACKEND_SUBMIT_NONE;
+	s_temporalDeliveredExpectation = TEMPORAL_BACKEND_SUBMIT_NONE;
+	memset( &s_temporalDeliveredRequest, 0,
+		sizeof( s_temporalDeliveredRequest ) );
 }
 
 void R_TemporalProjectionDump( void ) {

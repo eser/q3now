@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
+#include "tr_temporal_iqm_motion.h"
 #include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn B — renderer.cmd
 #include "../qcommon/q_feats.h"
 #include "../renderer/ral/ral.h"       // Ral_Cmd* — RB_MenuBackdrop's fullscreen RAL draw
@@ -608,7 +609,21 @@ static void RB_RenderForwardPlusUnion( void );
 RB_RenderDrawSurfList
 ==================
 */
-static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
+#ifdef USE_VULKAN
+static void RB_InvokeDrawSurf( drawSurf_t *drawSurf, uint32_t absoluteOrdinal,
+		qboolean temporalPrimaryCommand ) {
+	if ( temporalPrimaryCommand )
+		vk_temporal_iqm_publish_drawsurf_ordinal( absoluteOrdinal );
+	rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+	if ( temporalPrimaryCommand ) vk_temporal_iqm_reset_drawsurf_ordinal();
+}
+#endif
+
+static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs
+#ifdef USE_VULKAN
+		, qboolean temporalPrimaryCommand
+#endif
+		) {
 	shader_t		*shader, *oldShader;
 	int				fogNum;
 	int				entityNum, oldEntityNum;
@@ -649,7 +664,12 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	for (i = 0, drawSurf = drawSurfs ; i < numDrawSurfs ; i++, drawSurf++) {
 		if ( drawSurf->sort == oldSort ) {
 			// fast path, same as previous sort
+#ifdef USE_VULKAN
+			RB_InvokeDrawSurf( drawSurf, (uint32_t)i,
+				temporalPrimaryCommand );
+#else
 			rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+#endif
 			continue;
 		}
 
@@ -835,7 +855,12 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 		}
 
 		// add the triangles for this surface
+#ifdef USE_VULKAN
+		RB_InvokeDrawSurf( drawSurf, (uint32_t)i,
+			temporalPrimaryCommand );
+#else
 		rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
+#endif
 	}
 
 	// draw the contents of the last shader batch
@@ -1401,7 +1426,13 @@ static void RB_TransitionToUI( void )
 	// tonemap → SMAA → open the
 	// LOAD-mode UI pass on img 265 so the HUD blends on top of the
 	// tonemapped (+ anti-aliased) scene.
-	vk_temporal_history_store_record();
+	// Seal the command-wide motion/activation receipt before any history or
+	// postprocess consumer can inspect it. vk_end_frame repeats this as an
+	// idempotent fallback for gameplay frames that never transition to UI.
+	{
+		(void)vk_temporal_motion_seal_primary();
+		vk_temporal_recursive_record();
+	}
 	if ( r_bloom->integer )
 		vk_bloom();
 	vk_tonemap();
@@ -2006,22 +2037,6 @@ static uint32_t RB_TemporalTopologyFold( uint32_t hash, uint32_t value ) {
 	return ( hash ^ value ) * 16777619u;
 }
 
-#if FEAT_IQM
-static uint32_t RB_TemporalIQMTopology( const iqmData_t *data ) {
-	uint32_t hash = 2166136261u;
-	if ( !data || data->num_frames < 0 || data->num_joints < 0
-			|| data->num_poses < 0 || data->num_surfaces < 0
-			|| data->num_vertexes < 0 || data->num_triangles < 0 ) return 0;
-	hash = RB_TemporalTopologyFold( hash, (uint32_t)data->num_frames );
-	hash = RB_TemporalTopologyFold( hash, (uint32_t)data->num_joints );
-	hash = RB_TemporalTopologyFold( hash, (uint32_t)data->num_poses );
-	hash = RB_TemporalTopologyFold( hash, (uint32_t)data->num_surfaces );
-	hash = RB_TemporalTopologyFold( hash, (uint32_t)data->num_vertexes );
-	hash = RB_TemporalTopologyFold( hash, (uint32_t)data->num_triangles );
-	return hash ? hash : 1u;
-}
-#endif
-
 static void RB_TemporalPoseFromEntity( const refEntity_t *entity,
 		temporalEntityPose_t *pose ) {
 	model_t *model;
@@ -2034,8 +2049,23 @@ static void RB_TemporalPoseFromEntity( const refEntity_t *entity,
 	if ( model ) {
 #if FEAT_IQM
 		if ( model->type == MOD_IQM ) {
-			pose->modelTopology = RB_TemporalIQMTopology(
-				(const iqmData_t *)model->modelData );
+			const iqmData_t *data = (const iqmData_t *)model->modelData;
+			int normalizedFrame, normalizedOldFrame;
+			float normalizedBacklerp;
+			if ( data && data->temporalH5Eligible
+					&& R_TemporalIqmNormalizeFrameTuple(
+						(uint32_t)data->num_frames, entity->frame,
+						entity->oldframe, entity->backlerp,
+						&normalizedFrame, &normalizedOldFrame,
+						&normalizedBacklerp ) ) {
+				pose->modelTopology = data->temporalTopologyGeneration;
+				pose->modelAllocationGeneration =
+					data->temporalModelAllocationGeneration;
+				pose->modelContentDigest = data->temporalContentDigest;
+				pose->frame = normalizedFrame;
+				pose->oldframe = normalizedOldFrame;
+				pose->backlerp = normalizedBacklerp;
+			}
 		} else
 #endif
 		{
@@ -2044,9 +2074,11 @@ static void RB_TemporalPoseFromEntity( const refEntity_t *entity,
 			if ( !pose->modelTopology ) pose->modelTopology = 1u;
 		}
 	}
-	pose->frame = entity->frame;
-	pose->oldframe = entity->oldframe;
-	pose->backlerp = entity->backlerp;
+	if ( model && model->type != MOD_IQM ) {
+		pose->frame = entity->frame;
+		pose->oldframe = entity->oldframe;
+		pose->backlerp = entity->backlerp;
+	}
 	memcpy( pose->origin, entity->origin, sizeof( pose->origin ) );
 	memcpy( pose->axis, entity->axis, sizeof( pose->axis ) );
 	pose->nonNormalizedAxes = (uint32_t)( entity->nonNormalizedAxes != qfalse );
@@ -2143,6 +2175,9 @@ RB_DrawSurfs
 */
 static const void *RB_DrawSurfs( const void *data ) {
 	const drawSurfsCommand_t *cmd;
+#ifdef USE_VULKAN
+	qboolean temporalPrimaryCommand = qfalse;
+#endif
 
 	// finish any 2D drawing if needed
 	RB_EndSurface();
@@ -2156,6 +2191,16 @@ static const void *RB_DrawSurfs( const void *data ) {
 			cmd->viewParms.temporalFrameId );
 	}
 	RB_RecordTemporalEntityReceipts( cmd );
+#ifdef USE_VULKAN
+	temporalPrimaryCommand = vk_temporal_motion_begin_primary_command();
+#if FEAT_IQM
+	if ( temporalPrimaryCommand ) {
+		(void)vk_temporal_iqm_prescan_primary_command(
+			cmd->drawSurfs, cmd->numDrawSurfs );
+		(void)vk_temporal_iqm_bind_primary_command();
+	}
+#endif
+#endif
 
 #if defined(USE_VULKAN) && FEAT_SHADOW_MAPPING
 	// Capture the budgeted dlight-shadow light while viewParms.dlights is LIVE (the
@@ -2194,7 +2239,11 @@ static const void *RB_DrawSurfs( const void *data ) {
 	// clear the z buffer, set the modelview, etc
 	RB_BeginDrawingView();
 
-	RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
+	RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs
+#ifdef USE_VULKAN
+		, temporalPrimaryCommand
+#endif
+		);
 
 #ifdef USE_VBO
 	VBO_UnBind();
@@ -2305,6 +2354,10 @@ static const void *RB_DrawSurfs( const void *data ) {
 	//TODO Maybe check for rdf_noworld stuff but q3mme has full 3d ui
 	backEnd.doneSurfaces = qtrue; // for bloom
 
+#ifdef USE_VULKAN
+	vk_temporal_motion_end_primary_command( temporalPrimaryCommand );
+#endif
+
 	return (const void *)(cmd + 1);
 }
 
@@ -2318,14 +2371,27 @@ static const void *RB_DrawBuffer( const void *data,
 		const temporalBatchRequest_t *temporalRequest,
 		qboolean *temporalRequestDelivered ) {
 	const drawBufferCommand_t	*cmd;
+#ifdef USE_VULKAN
+	temporalBackendSubmitQuery_t temporalDelivery;
+#endif
 
 	cmd = (const drawBufferCommand_t *)data;
 
 #ifdef USE_VULKAN
-	if ( temporalRequest && temporalRequestDelivered
-			&& !*temporalRequestDelivered
-			&& cmd->temporalRequestToken == temporalRequest->token ) {
+	temporalDelivery = R_TemporalHistoryClassifyBatchDelivery(
+		temporalRequest ? qtrue : qfalse,
+		temporalRequest && cmd->temporalRequestToken == temporalRequest->token
+			? qtrue : qfalse,
+		temporalRequest ? temporalRequest->state : TEMPORAL_BATCH_REQUEST_NONE );
+	if ( temporalRequestDelivered && !*temporalRequestDelivered
+			&& temporalDelivery == TEMPORAL_BACKEND_SUBMIT_EXACT ) {
+		R_TemporalBackendRequestDelivered( temporalRequest );
 		vk_begin_frame( temporalRequest );
+		*temporalRequestDelivered = qtrue;
+	} else if ( temporalRequestDelivered && !*temporalRequestDelivered
+			&& temporalDelivery == TEMPORAL_BACKEND_SUBMIT_INVALID ) {
+		R_TemporalBackendRequestDelivered( NULL );
+		vk_begin_frame( NULL );
 		*temporalRequestDelivered = qtrue;
 	} else {
 		vk_begin_frame( NULL );

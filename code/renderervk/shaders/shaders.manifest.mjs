@@ -132,6 +132,8 @@ export default [
 	{ stage: 'comp', source: 'forwardplus_depth_reduce.comp', output: 'forwardplus_depth_reduce_comp_spv' },
 	{ stage: 'comp', source: 'lens_occlusion.comp',      output: 'lens_occlusion_comp_spv'      },
 	{ stage: 'comp', source: 'temporal_history_store.comp', output: 'temporal_history_store_comp_spv' },
+	{ stage: 'comp', source: 'temporal_history_consume.comp', output: 'temporal_history_consume_comp_spv' },
+	{ stage: 'comp', source: 'temporal_resolve.comp', output: 'temporal_resolve_comp_spv' },
 
 	// ── Tonemap post-process variants ─────────────────────────
 	// scene-radiance effects (tonemap operator, colour grading, sunrays) live on
@@ -276,6 +278,9 @@ export default [
 	{ stage: 'vert', source: 'iqm_skinning.vert', output: 'iqm_skinning_vert_spv' },
 	{ stage: 'frag', source: 'iqm_skinning.frag', output: 'iqm_skinning_frag_spv' },
 	{ stage: 'frag', source: 'iqm_skinning.frag', defines: ['USE_TEMPORAL_INVALIDATE'], output: 'iqm_skinning_temporal_invalidate_frag_spv' },
+	{ stage: 'vert', source: 'iqm_temporal_exact3.vert', output: 'iqm_temporal_exact3_vert_spv' },
+	{ stage: 'frag', source: 'iqm_temporal_exact3.frag', output: 'iqm_temporal_exact3_write_frag_spv' },
+	{ stage: 'frag', source: 'iqm_temporal_exact3.frag', defines: ['USE_TEMPORAL_INVALIDATE'], output: 'iqm_temporal_exact3_invalidate_frag_spv' },
 
 	// ── MSDF text ─────────────────────────────────────────────
 	{ stage: 'vert', source: 'msdf.vert',         output: 'msdf_vert_spv'         },

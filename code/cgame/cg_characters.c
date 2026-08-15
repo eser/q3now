@@ -214,7 +214,13 @@ qboolean CG_LoadCharacter( clientInfo_t *ci, const char *charName ) {
 	}
 
 	// ── Animations ──────────────────────────────────────────────────────────
-	memcpy( ci->animations, mf.animations, sizeof( ci->animations ) );
+	// A manifest-selected IQM body remains authoritative for its embedded named
+	// animations.  The manifest table is an MD3/legacy fallback; copying it over
+	// an IQM body produces frame indices outside the IQM palette frame range.
+#if FEAT_IQM
+	if ( !ci->iqmModel || !CG_ParseIQMAnimations( charName, ci ) )
+#endif
+		memcpy( ci->animations, mf.animations, sizeof( ci->animations ) );
 
 	ci->newAnims = qfalse;
 	if ( ci->torsoModel ) {

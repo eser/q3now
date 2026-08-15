@@ -73,7 +73,10 @@ static qboolean ModelCompatible( const temporalEntityPose_t *current,
 		&& current->modelToken == previous->modelToken
 		&& current->modelDataToken == previous->modelDataToken
 		&& current->modelType == previous->modelType
-		&& current->modelTopology == previous->modelTopology;
+		&& current->modelTopology == previous->modelTopology
+		&& current->modelAllocationGeneration
+			== previous->modelAllocationGeneration
+		&& current->modelContentDigest == previous->modelContentDigest;
 }
 
 static qboolean EntityReceiptValid( const temporalCameraPoseReceipt_t *camera,
@@ -103,18 +106,48 @@ static void EntityModelMatrix( const temporalEntityPose_t *pose, float out[16] )
 
 static qboolean BuildOne( const temporalCameraPose_t *camera,
 		const temporalEntityPose_t *entity, float out[16] ) {
-	float projection[16];
-	float model[16];
-	float modelView[16];
-	memcpy( projection, camera->projection, sizeof( projection ) );
-	// This is the single Y conversion used by get_mvp_transform.
-	projection[5] = -projection[5];
+	float candidate[16];
+	if ( !camera || !out ) return qfalse;
 	if ( entity ) {
-		EntityModelMatrix( entity, model );
-		if ( !Multiply( model, camera->worldModel, modelView ) ) return qfalse;
-		return Multiply( modelView, projection, out );
+		if ( !R_TemporalMotionBuildCanonicalEntityMvp( camera->projection,
+				camera->worldModel, entity, candidate ) ) return qfalse;
+		memcpy( out, candidate, sizeof( candidate ) );
+		return qtrue;
 	}
-	return Multiply( camera->worldModel, projection, out );
+	return R_TemporalMotionBuildCanonicalMvp( camera->worldModel,
+		camera->projection, out );
+}
+
+qboolean R_TemporalMotionBuildCanonicalMvp( const float modelView[16],
+		const float projection[16], float outMvp[16] ) {
+	float canonicalProjection[16], candidate[16];
+	if ( !modelView || !projection || !outMvp
+			|| !FiniteFloats( modelView, 16 )
+			|| !FiniteFloats( projection, 16 ) ) return qfalse;
+	memcpy( canonicalProjection, projection, sizeof( canonicalProjection ) );
+	canonicalProjection[5] = -canonicalProjection[5];
+	if ( !Multiply( modelView, canonicalProjection, candidate ) ) return qfalse;
+	CanonicalizeSignedZero( candidate, 16 );
+	memcpy( outMvp, candidate, sizeof( candidate ) );
+	return qtrue;
+}
+
+qboolean R_TemporalMotionBuildCanonicalEntityMvp(
+		const float projection[16], const float cameraWorldModel[16],
+		const temporalEntityPose_t *entity, float outMvp[16] ) {
+	float model[16], modelView[16], candidate[16];
+	if ( !projection || !cameraWorldModel || !entity || !outMvp
+			|| !FiniteFloats( projection, 16 )
+			|| !FiniteFloats( cameraWorldModel, 16 )
+			|| !EntityPoseValid( entity ) ) return qfalse;
+	EntityModelMatrix( entity, model );
+	if ( !Multiply( model, cameraWorldModel, modelView )
+			|| !R_TemporalMotionBuildCanonicalMvp( modelView, projection,
+				candidate ) ) {
+		return qfalse;
+	}
+	memcpy( outMvp, candidate, sizeof( candidate ) );
+	return qtrue;
 }
 
 temporalMotionOutcome_t R_TemporalMotionClassify(

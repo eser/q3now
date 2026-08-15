@@ -96,6 +96,7 @@ file(GLOB PRODUCT_TUS "${ROOT}/code/renderervk/*.c")
 foreach(tu IN LISTS PRODUCT_TUS)
   file(READ "${tu}" text)
   if(NOT tu STREQUAL "${ROOT}/code/renderervk/vk.c" AND
+     NOT tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_generic_recipe_table.c" AND
      NOT tu STREQUAL "${ROOT}/code/renderervk/vk_generic_specialization_contract.c" AND
      text MATCHES "VK_GenericSpecializationAuthor")
     message(FATAL_ERROR "author authority leaked outside vk.c: ${tu}")

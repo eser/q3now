@@ -141,6 +141,48 @@ qboolean VK_TemporalMotionMaterializationGetReceipt(
 	return qtrue;
 }
 
+qboolean VK_TemporalMotionMaterializationGetProductView(
+		const vkTemporalMotionMaterialization_t *owner,
+		const vkTemporalMotionMaterializationReceipt_t *receipt,
+		ralTexture_t *scene, ralTexture_t *depth,
+		vkTemporalMotionMaterializationProductView_t *outView ) {
+	vkTemporalMotionMaterializationReceipt_t current;
+	vkTemporalMotionMaterializationProductView_t view;
+	if ( !owner || !receipt || !outView || !scene || !depth
+			|| !VK_TemporalMotionMaterializationGetReceipt( owner, &current )
+			|| !receipt->ready
+			|| receipt->worldIndex != current.worldIndex
+			|| receipt->width != current.width || receipt->height != current.height
+			|| receipt->topologyEpoch != current.topologyEpoch
+			|| receipt->planGeneration != current.planGeneration
+			|| receipt->payloadLayoutGeneration != current.payloadLayoutGeneration
+			|| receipt->targetAllocationGeneration != current.targetAllocationGeneration
+			|| receipt->pipelineLayoutAllocationGeneration !=
+				current.pipelineLayoutAllocationGeneration
+			|| receipt->allocationGeneration != current.allocationGeneration
+			|| !owner->targets.velocity || !owner->targets.velocityView
+			|| !owner->targets.validity || !owner->targets.validityView
+			|| owner->targets.velocity == owner->targets.validity
+			|| owner->targets.velocityView == owner->targets.validityView
+			|| owner->pipelineLayout.raw == VK_NULL_HANDLE
+			|| !owner->pipelineLayout.adopted ) return qfalse;
+	memset( &view, 0, sizeof( view ) );
+	view.scene = scene;
+	view.depth = depth;
+	view.velocity = owner->targets.velocity;
+	view.velocityView = owner->targets.velocityView;
+	view.validity = owner->targets.validity;
+	view.validityView = owner->targets.validityView;
+	view.pipelineLayout = owner->pipelineLayout.adopted;
+	view.rawPipelineLayout = owner->pipelineLayout.raw;
+	view.targetAllocationGeneration = current.targetAllocationGeneration;
+	view.pipelineLayoutAllocationGeneration =
+		current.pipelineLayoutAllocationGeneration;
+	view.allocationGeneration = current.allocationGeneration;
+	*outView = view;
+	return qtrue;
+}
+
 void VK_TemporalMotionMaterializationInvalidateReceipt(
 		vkTemporalMotionMaterialization_t *owner ) {
 	if ( owner && owner->initialized ) owner->ready = qfalse;

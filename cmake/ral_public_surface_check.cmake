@@ -137,7 +137,9 @@ ENDFOREACH()
 LIST(SORT _bridge_include_owners)
 SET(_expected_bridge_include_owners
 	"code/renderer/ral_vulkan/ral_vulkan_internal.h"
+	"code/renderervk/vk.c"
 	"code/renderervk/vk_ral_textures.h"
+	"code/renderervk/vk_temporal_entmat_runtime.c"
 )
 LIST(SORT _expected_bridge_include_owners)
 IF(NOT _bridge_include_owners STREQUAL _expected_bridge_include_owners)

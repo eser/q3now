@@ -3,11 +3,38 @@
 #include "ral_vulkan_internal.h"
 
 #include <stdio.h>
+#include <stddef.h>
 #include <string.h>
 
 static int failures;
 static VkFormatFeatureFlags fakeFeatures;
 static VkFormat fakeLastFormat;
+
+qboolean ralVk_HasExtension( const VkExtensionProperties *exts,
+		uint32_t count, const char *name ) {
+	(void)exts; (void)count; (void)name; return qfalse;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL FakeEnumerateDeviceExtensions(
+		VkPhysicalDevice physicalDevice, const char *layerName,
+		uint32_t *count, VkExtensionProperties *properties ) {
+	(void)physicalDevice; (void)layerName; (void)properties; *count = 0; return VK_SUCCESS;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL FakeEnumerateInstanceExtensions(
+		const char *layerName, uint32_t *count, VkExtensionProperties *properties ) {
+	(void)layerName; (void)properties; *count = 0; return VK_SUCCESS;
+}
+
+static VKAPI_ATTR void VKAPI_CALL FakeGetPhysicalDeviceFeatures2(
+		VkPhysicalDevice physicalDevice, VkPhysicalDeviceFeatures2 *features ) {
+	(void)physicalDevice; (void)features;
+}
+
+static VKAPI_ATTR void VKAPI_CALL FakeGetPhysicalDeviceProperties2(
+		VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties2 *properties ) {
+	(void)physicalDevice; (void)properties;
+}
 
 #define CHECK(expr) do { \
 	if ( !( expr ) ) { \
@@ -154,11 +181,30 @@ static void TestFormatUsage( void ) {
 	CHECK( !Ral_TextureFormatSupports( &backend, RAL_FORMAT_R8_UNORM, requested ) );
 }
 
+static void TestStorageRangeCap( void ) {
+	ralBackend_t backend;
+	memset( &backend, 0, sizeof( backend ) );
+	backend.physProps.apiVersion = VK_API_VERSION_1_3;
+	backend.physProps.limits.maxStorageBufferRange = UINT32_MAX;
+	backend.physProps.limits.maxPerStageDescriptorSampledImages = 1;
+	backend.vk.EnumerateDeviceExtensionProperties = FakeEnumerateDeviceExtensions;
+	backend.vk.EnumerateInstanceExtensionProperties = FakeEnumerateInstanceExtensions;
+	backend.vk.GetPhysicalDeviceFeatures2 = FakeGetPhysicalDeviceFeatures2;
+	backend.vk.GetPhysicalDeviceProperties2 = FakeGetPhysicalDeviceProperties2;
+	ralVk_FillCaps( &backend );
+	CHECK( backend.caps.maxStorageBufferRange == (uint64_t)UINT32_MAX );
+	CHECK( offsetof( ralCaps_t, maxStorageBufferRange )
+		> offsetof( ralCaps_t, independentBlend ) );
+	CHECK( offsetof( ralCaps_t, maxStorageBufferRange )
+		+ sizeof( backend.caps.maxStorageBufferRange ) == sizeof( ralCaps_t ) );
+}
+
 int main( void ) {
 	TestWriteMask();
 	TestIndependentBlend();
 	TestPipelineBlendGate();
 	TestFormatUsage();
+	TestStorageRangeCap();
 	if ( failures ) return 1;
 	puts( "PASS RAL MRT write-mask, independent-blend and exact format-usage contract" );
 	return 0;

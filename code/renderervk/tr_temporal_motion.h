@@ -42,6 +42,21 @@ typedef struct {
 	float previousMvp[16];
 } temporalMotionMatrices_t;
 
+// Lowest shared primitive for ordinary and temporal IQM raster transforms.
+// `modelView` is already composed. The helper copies `projection`, performs
+// exactly one Vulkan Y flip, and multiplies in historical myGlMultMatrix order.
+qboolean R_TemporalMotionBuildCanonicalMvp( const float modelView[16],
+	const float projection[16], float outMvp[16] );
+
+// Shared Vulkan-clip-space entity MVP authority. `projection` may be either
+// the canonical unjittered camera projection or the exact current raster
+// projection. The helper copies it, applies the renderer's single Y flip, and
+// evaluates entity-model * camera-world * projection in the historical
+// myGlMultMatrix order. Failure leaves `outMvp` byte-identical.
+qboolean R_TemporalMotionBuildCanonicalEntityMvp(
+	const float projection[16], const float cameraWorldModel[16],
+	const temporalEntityPose_t *entity, float outMvp[16] );
+
 typedef struct {
 	float currentClip[4];
 	float previousClip[4];

@@ -87,7 +87,7 @@ Map embedded IQM animation names to Q3 animation enums.
 Returns qtrue if at least one animation was successfully mapped.
 ======================
 */
-static qboolean CG_ParseIQMAnimations( const char *modelName, clientInfo_t *ci ) {
+qboolean CG_ParseIQMAnimations( const char *modelName, clientInfo_t *ci ) {
 	iqmAnimInfo_t	iqmAnims[MAX_IQM_ANIMS];
 	int		numAnims;
 	int		i, j;

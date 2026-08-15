@@ -506,7 +506,10 @@ static void DestroyGenericCandidates( ralPipeline_t **p, uint32_t count,
 
 static qboolean GenericEntryEqual( const vkTemporalGenericCatalogEntry_t *a,
 		const vkTemporalGenericCatalogEntry_t *b ) {
-	return memcmp(&a->key,&b->key,sizeof(a->key)) == 0
+	return a->key.textureCount == b->key.textureCount
+		&& a->key.family == b->key.family
+		&& a->key.environment == b->key.environment
+		&& a->key.shaderFog == b->key.shaderFog
 		&& BlobEqual(a->ordinaryVertex,b->ordinaryVertex)
 		&& BlobEqual(a->ordinaryFragment,b->ordinaryFragment)
 		&& BlobEqual(a->temporalVertex,b->temporalVertex)
@@ -538,6 +541,7 @@ qboolean VK_TemporalGenericPipelineFactoryEnsure( vkTemporalGenericPipelineFacto
 	uint32_t i,nextGeneration;
 	if(!owner||!layoutOwner||!layoutOwner->ready||!layoutOwner->adopted||!base||!input||!ops
 			||!ops->create||!ops->destroy||!ops->drain||!ops->lookup
+			||!layoutOwner->leases
 			||!input->pipelineGeneration||!input->topologyGeneration||!input->catalogGeneration
 			||input->sceneFormat==RAL_FORMAT_UNDEFINED||input->depthFormat==RAL_FORMAT_UNDEFINED
 			||input->alphaTested||input->depthOnly||input->blended||input->special||input->dynamicDiscard
@@ -588,6 +592,12 @@ qboolean VK_TemporalGenericPipelineFactoryEnsure( vkTemporalGenericPipelineFacto
 		for(uint32_t j=0;j<i;++j)if(candidate[i]==candidate[j])goto fail;
 		if(owner->ready&&(candidate[i]==owner->pipelines[0]||candidate[i]==owner->pipelines[1]
 				||candidate[i]==owner->pipelines[2]))goto fail;
+		if(ops->candidateAllowed
+				&& !ops->candidateAllowed(candidate[i],ops->candidateContext)){
+			// A rejected candidate is an alias of a live pipeline owned outside
+			// this factory. Never route that borrowed handle through cleanup.
+			candidate[i]=NULL;goto fail;
+		}
 	}
 	if(!VK_TemporalPipelineLayoutAcquire(layoutOwner))goto fail;
 	nextGeneration=owner->allocationGeneration+1u;
@@ -600,8 +610,12 @@ qboolean VK_TemporalGenericPipelineFactoryEnsure( vkTemporalGenericPipelineFacto
 	owner->topologyGeneration=input->topologyGeneration;owner->catalogGeneration=input->catalogGeneration;
 	owner->allocationGeneration=nextGeneration;owner->layoutAllocationGeneration=layoutOwner->allocationGeneration;
 	owner->baseFingerprint=fingerprint;owner->sceneFormat=input->sceneFormat;owner->depthFormat=input->depthFormat;owner->ready=qtrue;
-	if(owner->retiringLease&&ops->drain(owner->retiringLayout->backend)){
-		VK_TemporalPipelineLayoutReleaseLease(owner->retiringLayout);owner->retiringLayout=NULL;owner->retiringLease=qfalse;
+	if(owner->retiringLease){
+		// Publication is not reported complete while retired children still hold
+		// their parent lease. A later Ensure/Release retries the same drain.
+		if(!ops->drain(owner->retiringLayout->backend))return qfalse;
+		VK_TemporalPipelineLayoutReleaseLease(owner->retiringLayout);
+		owner->retiringLayout=NULL;owner->retiringLease=qfalse;
 	}
 	return qtrue;
 fail:
@@ -611,12 +625,47 @@ fail:
 qboolean VK_TemporalGenericPipelineFactoryRelease( vkTemporalGenericPipelineFactoryOwner_t *owner,
 		const vkTemporalPipelineFactoryOps_t *ops ) {
 	if(!owner||!ops||!ops->destroy||!ops->drain)return qfalse;
-	if(owner->retiringLease){if(!ops->drain(owner->retiringLayout->backend))return qfalse;
-		VK_TemporalPipelineLayoutReleaseLease(owner->retiringLayout);owner->retiringLease=qfalse;owner->retiringLayout=NULL;}
-	if(owner->ready){DestroyGenericCandidates(owner->pipelines,3u,ops,NULL);owner->retiringLayout=owner->layoutOwner;owner->retiringLease=qtrue;owner->ready=qfalse;}
-	if(owner->retiringLease){if(!ops->drain(owner->retiringLayout->backend))return qfalse;
-		VK_TemporalPipelineLayoutReleaseLease(owner->retiringLayout);}
-	memset(owner,0,sizeof(*owner));return qtrue;
+	if(!VK_TemporalGenericPipelineFactoryRetire(owner,ops))return qfalse;
+	if(owner->retiringLease&&!ops->drain(owner->retiringLayout->backend))return qfalse;
+	return VK_TemporalGenericPipelineFactoryFinalizeAfterDrain(owner);
+}
+
+qboolean VK_TemporalGenericPipelineFactoryRetire(
+		vkTemporalGenericPipelineFactoryOwner_t *owner,
+		const vkTemporalPipelineFactoryOps_t *ops ) {
+	if(!owner||!ops||!ops->destroy||!ops->drain)return qfalse;
+	if(owner->retiringLease){
+		// An earlier Retire already enqueued this owner's children. The table's
+		// shared drain must cover all such owners exactly once.
+		if(!owner->ready)return qtrue;
+		// A replacement whose first drain failed remains readable but cannot be
+		// retired until the old generation's deferred children are flushed.
+		if(!owner->retiringLayout
+				||!ops->drain(owner->retiringLayout->backend))return qfalse;
+		if(!VK_TemporalPipelineLayoutReleaseLease(owner->retiringLayout))return qfalse;
+		owner->retiringLayout=NULL;owner->retiringLease=qfalse;
+	}
+	if(!owner->ready)return qtrue;
+	DestroyGenericCandidates(owner->pipelines,3u,ops,NULL);
+	owner->pipelines[0]=owner->pipelines[1]=owner->pipelines[2]=NULL;
+	owner->retiringLayout=owner->layoutOwner;
+	owner->retiringLease=owner->retiringLayout?qtrue:qfalse;
+	owner->ready=qfalse;
+	return owner->retiringLease;
+}
+
+qboolean VK_TemporalGenericPipelineFactoryFinalizeAfterDrain(
+		vkTemporalGenericPipelineFactoryOwner_t *owner ) {
+	uint32_t generation;
+	if(!owner||owner->ready)return qfalse;
+	if(owner->retiringLease){
+		if(!owner->retiringLayout
+				||!VK_TemporalPipelineLayoutReleaseLease(owner->retiringLayout))return qfalse;
+	}
+	generation=owner->allocationGeneration;
+	memset(owner,0,sizeof(*owner));
+	owner->allocationGeneration=generation;
+	return qtrue;
 }
 
 void VK_TemporalIqmPipelineFactoryInit( vkTemporalIqmPipelineFactoryOwner_t *owner ) {

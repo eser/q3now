@@ -44,6 +44,7 @@ void *Ral_GetSwapchainHandle( const ralSwapchain_t *swapchain );
 ralBuffer_t *Ral_AdoptBuffer( ralBackend_t *b, void *externalBuffer,
                               size_t size, const char *debugName );
 void *Ral_GetBufferHandle( const ralBuffer_t *buffer );
+uint64_t Ral_GetBufferSize( const ralBuffer_t *buffer );
 
 ralTexture_t *Ral_AdoptTexture( ralBackend_t *b, void *externalImage,
                                 void *externalView, ralFormat_t format,
@@ -56,6 +57,7 @@ ralTexture_t *Ral_AdoptArrayTexture( ralBackend_t *b, void *externalImage,
                                      uint32_t width, uint32_t height, uint32_t aspect,
                                      const char *debugName );
 void *Ral_GetTextureImageHandle( const ralTexture_t *texture );
+void *Ral_GetTextureDefaultViewHandle( const ralTexture_t *texture );
 void *Ral_GetTextureViewHandle( const ralTextureView_t *view );
 void  Ral_SetTextureLayout( ralTexture_t *texture, uint32_t vkLayout );
 

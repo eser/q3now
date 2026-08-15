@@ -35,6 +35,7 @@ void ralVk_FillCaps( ralBackend_t *b ) {
 	c->maxPushConstantSize       = L->maxPushConstantsSize;
 	c->minUniformBufferAlignment = (uint64_t)L->minUniformBufferOffsetAlignment;
 	c->minStorageBufferAlignment = (uint64_t)L->minStorageBufferOffsetAlignment;
+	c->maxStorageBufferRange     = (uint64_t)L->maxStorageBufferRange;
 	c->timestampPeriodNs         = L->timestampPeriod;
 	c->maxSamplerAnisotropy      = b->haveSamplerAnisotropy ? L->maxSamplerAnisotropy : 1.0f;
 

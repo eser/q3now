@@ -229,7 +229,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get -qq update
-        sudo apt-get -y install cmake ninja-build libssl-dev \
+        sudo apt-get -y install cmake ninja-build glslang-tools spirv-tools libssl-dev \
           mesa-common-dev libxxf86dga-dev libxrandr-dev libxxf86vm-dev \
           libasound-dev libxss-dev libxcursor-dev libxi-dev libxinerama-dev \
           libxfixes-dev libxkbcommon-dev libwayland-dev libdecor-0-dev \
@@ -331,7 +331,7 @@ jobs:
       # openssl@3 is a hard configure requirement (picoquic TLS); listed
       # explicitly even though runners preinstall it, so the dependency is
       # visible and survives a runner-image change.
-      run: brew install cmake ninja sdl3 molten-vk openssl@3 create-dmg opus opusfile
+      run: brew install cmake ninja glslang spirv-tools sdl3 molten-vk openssl@3 create-dmg opus opusfile
 
     - name: Install wasi-sdk
       run: |
@@ -612,4 +612,3 @@ jobs:
         name: cross-windows-tests
         path: build/cross-windows-docker/*_test.exe
         if-no-files-found: error
-

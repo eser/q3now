@@ -215,6 +215,7 @@ typedef struct {
 	char     deviceName[256];
 	char     apiVersion[32];            // e.g. "Vulkan 1.3.290"
 	qboolean independentBlend;          // append-only: per-colour-attachment blend/write-mask state enabled
+	uint64_t maxStorageBufferRange;      // append-only: maximum legal storage-buffer descriptor range
 } ralCaps_t;
 
 const ralCaps_t *Ral_GetCaps( ralBackend_t *b );

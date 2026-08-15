@@ -151,6 +151,8 @@ int main( void ) {
 	changed = Pose( 2.0f ); changed.modelDataToken++; CHECK( !TopologyCutsPrevious( changed ) );
 	changed = Pose( 2.0f ); changed.modelType++; CHECK( !TopologyCutsPrevious( changed ) );
 	changed = Pose( 2.0f ); changed.modelTopology++; CHECK( !TopologyCutsPrevious( changed ) );
+	changed = Pose( 2.0f ); changed.modelAllocationGeneration = 1; CHECK( !TopologyCutsPrevious( changed ) );
+	changed = Pose( 2.0f ); changed.modelContentDigest = 1; CHECK( !TopologyCutsPrevious( changed ) );
 	CHECK( !CacheGenerationCutsPrevious( 4, 5 ) );
 	CHECK( !CacheGenerationCutsPrevious( 3, 6 ) );
 

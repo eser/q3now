@@ -14,6 +14,9 @@
 
 static int textureCreates, viewCreates, textureDestroys, viewDestroys;
 static int failTextureCreate, failViewCreate;
+static int aliasTextureCreate;
+static ralTexture_t *aliasTexture;
+static ralCaps_t fakeCaps = { .maxTextureDimension2D = 8192 };
 struct ralTexture_s { int id; };
 struct ralTextureView_s { int id; };
 static struct ralTexture_s fakeTextures[32];
@@ -23,6 +26,7 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 	(void)b; (void)ci;
 	textureCreates++;
 	if ( textureCreates == failTextureCreate ) return NULL;
+	if ( textureCreates == aliasTextureCreate ) return aliasTexture;
 	fakeTextures[textureCreates].id = textureCreates;
 	return &fakeTextures[textureCreates];
 }
@@ -35,6 +39,15 @@ ralTextureView_t *Ral_CreateTextureView( ralBackend_t *b, const ralTextureViewCr
 }
 void Ral_DestroyTexture( ralTexture_t *t ) { if ( t ) textureDestroys++; }
 void Ral_DestroyTextureView( ralTextureView_t *v ) { if ( v ) viewDestroys++; }
+const ralCaps_t *Ral_GetCaps( ralBackend_t *b ) { return b ? &fakeCaps : NULL; }
+qboolean Ral_TextureFormatSupports( ralBackend_t *b, ralFormat_t format,
+		ralTextureUsage_t usage ) {
+	const ralTextureUsage_t exact = RAL_TEXTURE_USAGE_SAMPLED
+		| RAL_TEXTURE_USAGE_STORAGE | RAL_TEXTURE_USAGE_TRANSFER_SRC
+		| RAL_TEXTURE_USAGE_TRANSFER_DST;
+	return b && ( format == RAL_FORMAT_R16G16B16A16_SFLOAT
+		|| format == RAL_FORMAT_R32_SFLOAT ) && usage == exact ? qtrue : qfalse;
+}
 
 static ralTemporalFrameInput_t Input( uint64_t frameId, uint32_t width,
 		uint32_t height, uint32_t viewId, uint32_t topologyEpoch,
@@ -58,6 +71,10 @@ int main( void ) {
 	float firstJitter[2];
 	float projection[16], projectionBefore[16], ndc[2], ndcBefore[2];
 	temporalHistoryResources_t history, historyBefore;
+	temporalHistoryCommittedReceipt_t committed, committedBefore;
+	temporalHistoryFrameView_t frameView, frameViewBefore;
+	temporalHistoryFeedbackSource_t feedbackSource;
+	temporalHistoryPendingWriteReceipt_t pendingWrite, pendingBefore;
 	ralBackend_t *fakeBackend = (ralBackend_t *)(uintptr_t)1;
 
 	R_TemporalHistoryInit( &history );
@@ -79,6 +96,140 @@ int main( void ) {
 	failTextureCreate = 0;
 	CHECK( R_TemporalHistoryEnsure( &history, fakeBackend, 1600, 900, 2 ) );
 	CHECK( history.allocationGeneration == 3 && history.topologyEpoch == 2 );
+	memset( &plan, 0, sizeof( plan ) );
+	plan.enabled = 1; plan.frameId = 20; plan.generation = 7;
+	plan.historyValid = 1; plan.historyReadIndex = 0; plan.historyWriteIndex = 1;
+	memset( &committed, 0, sizeof( committed ) );
+	committed.valid = qtrue; committed.frameId = 19; committed.worldIndex = 3;
+	committed.planGeneration = plan.generation;
+	committed.allocationGeneration = history.allocationGeneration;
+	committed.historyIndex = 0; committed.width = history.width;
+	committed.height = history.height; committed.topologyEpoch = history.topologyEpoch;
+	committed.color = history.color[0]; committed.colorView = history.colorView[0];
+	committed.depth = history.depth[0]; committed.depthView = history.depthView[0];
+	committed.source.backend = fakeBackend;
+	committed.source.sourceSceneColor = &fakeTextures[29];
+	committed.source.sourcePostprocessGroup = (ralBindGroup_t *)&fakeViews[26];
+	committed.source.sourceHistogramGroup = (ralBindGroup_t *)&fakeViews[27];
+	committed.source.sourceColor = &fakeTextures[30];
+	committed.source.sourceColorView = &fakeViews[30];
+	committed.source.postprocessGroup = (ralBindGroup_t *)&fakeViews[28];
+	committed.source.histogramGroup = (ralBindGroup_t *)&fakeViews[29];
+	committed.source.batchToken = 99;
+	committed.source.frameId = committed.frameId;
+	committed.source.contentSerial = 199;
+	committed.source.commandSlot = 0;
+	committed.source.frameCount = 3;
+	committed.source.worldIndex = 3;
+	committed.source.width = history.width;
+	committed.source.height = history.height;
+	committed.source.topologyEpoch = history.topologyEpoch;
+	committed.source.planGeneration = plan.generation;
+	committed.source.sceneColorAttachmentGeneration = 8;
+	committed.source.targetAllocationGeneration = 9;
+	committed.source.resolveOwnerAllocationGeneration = 6;
+	committed.source.storeOwnerAllocationGeneration = 5;
+	committed.source.sceneFormat = RAL_FORMAT_R16G16B16A16_SFLOAT;
+	committed.source.producer = TEMPORAL_HISTORY_WRITE_RESOLVED_FEEDBACK;
+	CHECK( R_TemporalHistoryBuildFrameView( &history, &plan, &committed, 3, &frameView ) );
+	CHECK( frameView.historyValid && frameView.readIndex == 0 && frameView.writeIndex == 1 );
+	CHECK( frameView.readColor == committed.color && frameView.writeColor == history.color[1] );
+	frameViewBefore = frameView; committedBefore = committed;
+	committed.color = history.color[1];
+	CHECK( !R_TemporalHistoryBuildFrameView( &history, &plan, &committed, 3, &frameView ) );
+	CHECK( memcmp( &frameView, &frameViewBefore, sizeof( frameView ) ) == 0 );
+	committed = committedBefore; plan.historyValid = 0;
+	memset( &frameView, 0xa5, sizeof( frameView ) );
+	CHECK( R_TemporalHistoryBuildFrameView( &history, &plan, NULL, 3, &frameView ) );
+	CHECK( !frameView.historyValid && !frameView.committed.valid
+		&& frameView.readIndex != frameView.writeIndex );
+	memset( &feedbackSource, 0, sizeof( feedbackSource ) );
+	feedbackSource.backend = fakeBackend;
+	feedbackSource.sourceSceneColor = &fakeTextures[29];
+	feedbackSource.sourcePostprocessGroup = (ralBindGroup_t *)&fakeViews[26];
+	feedbackSource.sourceHistogramGroup = (ralBindGroup_t *)&fakeViews[27];
+	feedbackSource.sourceColor = &fakeTextures[30];
+	feedbackSource.sourceColorView = &fakeViews[30];
+	feedbackSource.postprocessGroup = (ralBindGroup_t *)&fakeViews[28];
+	feedbackSource.histogramGroup = (ralBindGroup_t *)&fakeViews[29];
+	feedbackSource.batchToken = 100;
+	feedbackSource.frameId = plan.frameId;
+	feedbackSource.contentSerial = 200;
+	feedbackSource.commandSlot = 1;
+	feedbackSource.frameCount = 3;
+	feedbackSource.worldIndex = 3;
+	feedbackSource.width = history.width;
+	feedbackSource.height = history.height;
+	feedbackSource.topologyEpoch = history.topologyEpoch;
+	feedbackSource.planGeneration = plan.generation;
+	feedbackSource.sceneColorAttachmentGeneration = 8;
+	feedbackSource.targetAllocationGeneration = 9;
+	feedbackSource.storeOwnerAllocationGeneration = 5;
+	feedbackSource.sceneFormat = RAL_FORMAT_R16G16B16A16_SFLOAT;
+	feedbackSource.producer = TEMPORAL_HISTORY_WRITE_CURRENT_SEED;
+	memset( &pendingWrite, 0xa5, sizeof( pendingWrite ) );
+	CHECK( R_TemporalHistoryBuildPendingWrite( &history, &plan, 3,
+		&feedbackSource, &pendingWrite ) );
+	CHECK( pendingWrite.valid && pendingWrite.write.valid
+		&& pendingWrite.write.frameId == plan.frameId
+		&& pendingWrite.write.historyIndex == plan.historyWriteIndex
+		&& pendingWrite.write.color == history.color[plan.historyWriteIndex]
+		&& pendingWrite.write.depth == history.depth[plan.historyWriteIndex]
+		&& pendingWrite.write.source.producer ==
+			TEMPORAL_HISTORY_WRITE_CURRENT_SEED );
+	pendingBefore = pendingWrite;
+	CHECK( R_TemporalHistoryPendingWriteEqualExact( &pendingWrite, &pendingBefore ) );
+	feedbackSource.resolveOwnerAllocationGeneration = 7;
+	CHECK( !R_TemporalHistoryBuildPendingWrite( &history, &plan, 3,
+		&feedbackSource, &pendingWrite ) );
+	CHECK( memcmp( &pendingWrite, &pendingBefore, sizeof( pendingWrite ) ) == 0 );
+	feedbackSource.resolveOwnerAllocationGeneration = 0;
+	feedbackSource.sourceColor = history.color[0];
+	CHECK( !R_TemporalHistoryBuildPendingWrite( &history, &plan, 3,
+		&feedbackSource, &pendingWrite ) );
+	CHECK( memcmp( &pendingWrite, &pendingBefore, sizeof( pendingWrite ) ) == 0 );
+	feedbackSource.sourceColor = &fakeTextures[30];
+	feedbackSource.commandSlot = feedbackSource.frameCount;
+	CHECK( !R_TemporalHistoryBuildPendingWrite( &history, &plan, 3,
+		&feedbackSource, &pendingWrite ) );
+	CHECK( memcmp( &pendingWrite, &pendingBefore, sizeof( pendingWrite ) ) == 0 );
+	feedbackSource.commandSlot = 1;
+	plan.historyValid = 1;
+	feedbackSource.producer = TEMPORAL_HISTORY_WRITE_RESOLVED_FEEDBACK;
+	feedbackSource.resolveOwnerAllocationGeneration = 7;
+	CHECK( R_TemporalHistoryBuildPendingWrite( &history, &plan, 3,
+		&feedbackSource, &pendingWrite ) );
+	CHECK( pendingWrite.write.source.resolveOwnerAllocationGeneration == 7
+		&& pendingWrite.write.source.producer ==
+			TEMPORAL_HISTORY_WRITE_RESOLVED_FEEDBACK );
+	pendingBefore = pendingWrite;
+	feedbackSource.producer = TEMPORAL_HISTORY_WRITE_CURRENT_SEED;
+	CHECK( !R_TemporalHistoryBuildPendingWrite( &history, &plan, 3,
+		&feedbackSource, &pendingWrite ) );
+	CHECK( memcmp( &pendingWrite, &pendingBefore, sizeof( pendingWrite ) ) == 0 );
+	feedbackSource.producer = TEMPORAL_HISTORY_WRITE_RESOLVED_FEEDBACK;
+	feedbackSource.resolveOwnerAllocationGeneration = 0;
+	CHECK( !R_TemporalHistoryBuildPendingWrite( &history, &plan, 3,
+		&feedbackSource, &pendingWrite ) );
+	CHECK( memcmp( &pendingWrite, &pendingBefore, sizeof( pendingWrite ) ) == 0 );
+	pendingWrite.write.source.contentSerial++;
+	CHECK( !R_TemporalHistoryPendingWriteEqualExact( &pendingWrite, &pendingBefore ) );
+	fakeCaps.maxTextureDimension2D = 1024;
+	historyBefore = history;
+	CHECK( !R_TemporalHistoryEnsure( &history, fakeBackend, 1600, 901, 2 ) );
+	CHECK( memcmp( &history, &historyBefore, sizeof( history ) ) == 0 );
+	fakeCaps.maxTextureDimension2D = 8192;
+	historyBefore = history;
+	aliasTexture = history.color[0]; aliasTextureCreate = textureCreates + 1;
+	{
+		const int beforeTextureDestroys = textureDestroys;
+		const int beforeViewDestroys = viewDestroys;
+		CHECK( !R_TemporalHistoryEnsure( &history, fakeBackend, 1600, 900, 3 ) );
+		CHECK( memcmp( &history, &historyBefore, sizeof( history ) ) == 0 );
+		CHECK( textureDestroys == beforeTextureDestroys
+			&& viewDestroys == beforeViewDestroys );
+	}
+	aliasTextureCreate = 0; aliasTexture = NULL;
 	R_TemporalHistoryRelease( &history );
 	CHECK( !history.ready && history.allocationGeneration == 3 );
 	CHECK( !R_TemporalHistoryEnsure( &history, NULL, 1, 1, 1 ) );

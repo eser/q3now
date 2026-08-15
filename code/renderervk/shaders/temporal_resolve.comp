@@ -1,0 +1,162 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Wired Engine contributors
+
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform texture2D currentColor;
+layout(set = 0, binding = 1) uniform texture2D currentDeviceDepth;
+layout(set = 0, binding = 2) uniform texture2D previousColor;
+layout(set = 0, binding = 3) uniform texture2D previousLinearDepth;
+layout(set = 0, binding = 4) uniform texture2D motionVelocity;
+layout(set = 0, binding = 5) uniform texture2D motionValidity;
+layout(set = 0, binding = 6) uniform sampler nearestSampler;
+layout(rgba16f, set = 0, binding = 7) uniform writeonly image2D resolvedColor;
+
+layout(push_constant) uniform TemporalResolvePush {
+	uvec2 extent;
+	vec2 currentEffectiveJitterUv;
+	vec2 previousEffectiveJitterUv;
+	float zNear;
+	float zFar;
+	float depthThresholdAbsolute;
+	float depthThresholdRelative;
+	float historyWeight;
+	uint historyReadIndex;
+} pc;
+
+bool finite1(float v) { return !isnan(v) && !isinf(v); }
+bool finite2(vec2 v) { return all(not(isnan(v))) && all(not(isinf(v))); }
+bool finite4(vec4 v) { return all(not(isnan(v))) && all(not(isinf(v))); }
+
+float linearizeDepth(float z) {
+	precise float range = pc.zFar - pc.zNear;
+	precise float scaled = z * range;
+	precise float denominator = pc.zNear + scaled;
+	precise float numerator = pc.zNear * pc.zFar;
+	precise float result = numerator / denominator;
+	return result;
+}
+
+float mixPrecise(float x, float y, float a) {
+	precise float oneMinus = 1.0 - a;
+	precise float left = x * oneMinus;
+	precise float right = y * a;
+	precise float result = left + right;
+	return result;
+}
+
+vec3 mixPrecise(vec3 x, vec3 y, float a) {
+	precise float oneMinus = 1.0 - a;
+	precise vec3 left = x * oneMinus;
+	precise vec3 right = y * a;
+	precise vec3 result = left + right;
+	return result;
+}
+
+vec4 mixPrecise(vec4 x, vec4 y, float a) {
+	precise float oneMinus = 1.0 - a;
+	precise vec4 left = x * oneMinus;
+	precise vec4 right = y * a;
+	precise vec4 result = left + right;
+	return result;
+}
+
+vec4 sampleCurrent(ivec2 pixel) {
+	ivec2 bounded = clamp(pixel, ivec2(0), ivec2(pc.extent) - ivec2(1));
+	return texelFetch(sampler2D(currentColor, nearestSampler), bounded, 0);
+}
+
+vec4 samplePreviousColorLinear(vec2 texel) {
+	vec2 baseFloat = floor(texel);
+	ivec2 base = ivec2(baseFloat);
+	precise vec2 f = texel - baseFloat;
+	ivec2 hi = ivec2(pc.extent) - ivec2(1);
+	vec4 c00 = texelFetch(sampler2D(previousColor, nearestSampler),
+		clamp(base, ivec2(0), hi), 0);
+	vec4 c10 = texelFetch(sampler2D(previousColor, nearestSampler),
+		clamp(base + ivec2(1, 0), ivec2(0), hi), 0);
+	vec4 c01 = texelFetch(sampler2D(previousColor, nearestSampler),
+		clamp(base + ivec2(0, 1), ivec2(0), hi), 0);
+	vec4 c11 = texelFetch(sampler2D(previousColor, nearestSampler),
+		clamp(base + ivec2(1, 1), ivec2(0), hi), 0);
+	precise vec4 top = mixPrecise(c00, c10, f.x);
+	precise vec4 bottom = mixPrecise(c01, c11, f.x);
+	return mixPrecise(top, bottom, f.y);
+}
+
+float samplePreviousDepthLinear(vec2 texel) {
+	vec2 baseFloat = floor(texel);
+	ivec2 base = ivec2(baseFloat);
+	precise vec2 f = texel - baseFloat;
+	ivec2 hi = ivec2(pc.extent) - ivec2(1);
+	float d00 = texelFetch(sampler2D(previousLinearDepth, nearestSampler),
+		clamp(base, ivec2(0), hi), 0).r;
+	float d10 = texelFetch(sampler2D(previousLinearDepth, nearestSampler),
+		clamp(base + ivec2(1, 0), ivec2(0), hi), 0).r;
+	float d01 = texelFetch(sampler2D(previousLinearDepth, nearestSampler),
+		clamp(base + ivec2(0, 1), ivec2(0), hi), 0).r;
+	float d11 = texelFetch(sampler2D(previousLinearDepth, nearestSampler),
+		clamp(base + ivec2(1, 1), ivec2(0), hi), 0).r;
+	precise float top = mixPrecise(d00, d10, f.x);
+	precise float bottom = mixPrecise(d01, d11, f.x);
+	return mixPrecise(top, bottom, f.y);
+}
+
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(pixel, ivec2(pc.extent)))) return;
+	vec4 current = texelFetch(
+		sampler2D(currentColor, nearestSampler), pixel, 0);
+	vec4 result = current;
+	float valid = texelFetch(
+		sampler2D(motionValidity, nearestSampler), pixel, 0).r;
+	vec2 velocity = texelFetch(
+		sampler2D(motionVelocity, nearestSampler), pixel, 0).xy;
+	precise vec2 jitterDelta =
+		pc.previousEffectiveJitterUv - pc.currentEffectiveJitterUv;
+	precise vec2 jitterTexel = jitterDelta * vec2(pc.extent);
+	precise vec2 motionTexel = velocity * vec2(pc.extent);
+	precise vec2 unjitteredPreviousTexel = vec2(pixel) - motionTexel;
+	precise vec2 previousTexel = unjitteredPreviousTexel + jitterTexel;
+	precise vec2 previousCenter = previousTexel + 0.5;
+	bool inside = all(greaterThanEqual(previousCenter, vec2(0.0)))
+		&& all(lessThan(previousCenter, vec2(pc.extent)));
+
+	if (finite4(current) && finite1(valid) && valid > 0.5
+			&& finite2(velocity) && finite2(previousTexel) && inside) {
+		float currentDevice = texelFetch(
+			sampler2D(currentDeviceDepth, nearestSampler), pixel, 0).r;
+		float currentLinear = linearizeDepth(currentDevice);
+		float priorLinear = samplePreviousDepthLinear(previousTexel);
+		float depthLimit = max(pc.depthThresholdAbsolute,
+			pc.depthThresholdRelative * max(currentLinear, priorLinear));
+		if (finite1(currentLinear) && finite1(priorLinear)
+				&& currentLinear > 0.0 && priorLinear > 0.0
+				&& abs(currentLinear - priorLinear) <= depthLimit) {
+			vec4 prior = samplePreviousColorLinear(previousTexel);
+			vec3 neighborhoodMin = vec3(3.402823466e+38);
+			vec3 neighborhoodMax = vec3(-3.402823466e+38);
+			for (int y = -1; y <= 1; ++y) {
+				for (int x = -1; x <= 1; ++x) {
+					vec3 c = sampleCurrent(pixel + ivec2(x, y)).rgb;
+					neighborhoodMin = min(neighborhoodMin, c);
+					neighborhoodMax = max(neighborhoodMax, c);
+				}
+			}
+			if (finite4(prior) && all(not(isnan(neighborhoodMin)))
+					&& all(not(isinf(neighborhoodMin)))
+					&& all(not(isnan(neighborhoodMax)))
+					&& all(not(isinf(neighborhoodMax)))) {
+				vec3 clampedPrior = clamp(
+					prior.rgb, neighborhoodMin, neighborhoodMax);
+				precise vec3 resolvedRgb = mixPrecise(current.rgb, clampedPrior,
+					clamp(pc.historyWeight, 0.0, 1.0));
+				result = vec4(resolvedRgb, current.a);
+			}
+		}
+	}
+	if (!finite4(result)) result = vec4(0.0);
+	imageStore(resolvedColor, pixel, result);
+}

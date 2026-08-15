@@ -522,6 +522,7 @@ WIRED_CONFIGURE_HOST_TEST(ral_vulkan_translate_test ral_vulkan_translate_contrac
 
 ADD_EXECUTABLE(ral_mrt_contract_test
 	tests/ral_mrt_contract_test.c
+	code/renderer/ral_vulkan/ral_vulkan_caps.c
 	code/renderer/ral_vulkan/ral_vulkan_mrt_policy.c
 	code/renderer/ral_vulkan/ral_vulkan_translate.c
 )
@@ -648,7 +649,8 @@ SET_TESTS_PROPERTIES(vk_temporal_pipeline_factory_source_policy_contract PROPERT
 ADD_TEST(NAME vk_temporal_shader_reflection_contract
 	COMMAND sh ${CMAKE_SOURCE_DIR}/tests/vk-temporal-shader-check.sh ${CMAKE_SOURCE_DIR})
 SET_TESTS_PROPERTIES(vk_temporal_shader_reflection_contract PROPERTIES
-	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always" TIMEOUT 180)
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
+	SKIP_RETURN_CODE 77 TIMEOUT 180)
 
 ADD_TEST(NAME vk_temporal_shader_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
@@ -679,6 +681,31 @@ SET_TESTS_PROPERTIES(vk_temporal_generic_recipe_table_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.renderer;failure.contract;feature.always" TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(vk_temporal_generic_recipe_table_test
 	vk_temporal_generic_recipe_table_contract)
+
+ADD_EXECUTABLE(vk_temporal_generic_pipeline_table_test
+	tests/vk_temporal_generic_pipeline_table_test.c
+	code/renderervk/vk_temporal_generic_pipeline_table.c
+	code/renderervk/vk_temporal_generic_recipe_table.c
+	code/renderervk/vk_temporal_pipeline_factory.c
+	code/renderervk/vk_temporal_shader_cohort.c
+	code/renderervk/vk_temporal_generic_catalog.c
+	code/renderervk/vk_generic_specialization_contract.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_generic_pipeline_table_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon code/renderervk)
+ADD_TEST(NAME vk_temporal_generic_pipeline_table_contract
+	COMMAND vk_temporal_generic_pipeline_table_test)
+SET_TESTS_PROPERTIES(vk_temporal_generic_pipeline_table_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_generic_pipeline_table_test
+	vk_temporal_generic_pipeline_table_contract)
+ADD_TEST(NAME vk_temporal_generic_pipeline_table_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_generic_pipeline_table_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_temporal_generic_pipeline_table_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+
 ADD_TEST(NAME vk_temporal_generic_recipe_table_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
 		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_generic_recipe_table_policy_check.cmake)
@@ -884,6 +911,153 @@ SET_TESTS_PROPERTIES(vk_temporal_entmat_runtime_contract PROPERTIES
 WIRED_CONFIGURE_HOST_TEST(vk_temporal_entmat_runtime_test
 	vk_temporal_entmat_runtime_contract)
 
+ADD_EXECUTABLE(vk_temporal_motion_recording_test
+	tests/vk_temporal_motion_recording_test.c
+	code/renderervk/vk_temporal_motion_sequence.c
+	code/renderervk/vk_temporal_motion_recording.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_motion_recording_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon code/renderervk)
+ADD_TEST(NAME vk_temporal_motion_recording_contract
+	COMMAND vk_temporal_motion_recording_test)
+SET_TESTS_PROPERTIES(vk_temporal_motion_recording_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_motion_recording_test
+	vk_temporal_motion_recording_contract)
+
+ADD_EXECUTABLE(vk_temporal_motion_sequence_test
+	tests/vk_temporal_motion_sequence_test.c
+	code/renderervk/vk_temporal_motion_sequence.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_motion_sequence_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon code/renderervk)
+ADD_TEST(NAME vk_temporal_motion_sequence_contract
+	COMMAND vk_temporal_motion_sequence_test)
+SET_TESTS_PROPERTIES(vk_temporal_motion_sequence_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_motion_sequence_test
+	vk_temporal_motion_sequence_contract)
+ADD_TEST(NAME vk_temporal_motion_recording_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_motion_recording_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_temporal_motion_recording_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+
+ADD_EXECUTABLE(vk_temporal_main_activation_test
+	tests/vk_temporal_main_activation_test.c
+	code/renderervk/vk_temporal_main_activation.c
+	code/renderervk/vk_temporal_motion_sequence.c
+	code/renderervk/vk_temporal_iqm_payload_authoring.c
+	code/renderervk/vk_temporal_iqm_payload.c
+	code/renderervk/tr_temporal_iqm_motion.c
+	code/renderervk/tr_temporal_motion.c
+	code/renderervk/vk_bindless_publication.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_main_activation_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon code/renderervk)
+ADD_TEST(NAME vk_temporal_main_activation_contract
+	COMMAND vk_temporal_main_activation_test)
+SET_TESTS_PROPERTIES(vk_temporal_main_activation_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_main_activation_test
+	vk_temporal_main_activation_contract)
+
+ADD_EXECUTABLE(vk_temporal_motion_readback_test
+	tests/vk_temporal_motion_readback_test.c
+	code/renderervk/vk_temporal_motion_readback.c
+	code/renderervk/vk_temporal_motion_sequence.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_motion_readback_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon code/renderervk)
+ADD_TEST(NAME vk_temporal_motion_readback_contract
+	COMMAND vk_temporal_motion_readback_test)
+SET_TESTS_PROPERTIES(vk_temporal_motion_readback_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_motion_readback_test
+	vk_temporal_motion_readback_contract)
+
+ADD_EXECUTABLE(vk_temporal_history_consume_test
+	tests/vk_temporal_history_consume_test.c
+	code/renderervk/vk_temporal_history_consume.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_history_consume_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon code/renderervk)
+ADD_TEST(NAME vk_temporal_history_consume_contract
+	COMMAND vk_temporal_history_consume_test)
+SET_TESTS_PROPERTIES(vk_temporal_history_consume_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_history_consume_test
+	vk_temporal_history_consume_contract)
+
+ADD_EXECUTABLE(vk_temporal_history_store_test
+	tests/vk_temporal_history_store_test.c
+	code/renderervk/vk_temporal_history_store.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_history_store_test PRIVATE
+	code/qcommon code/renderer code/renderer/ral code/renderercommon code/renderervk)
+ADD_TEST(NAME vk_temporal_history_store_contract
+	COMMAND vk_temporal_history_store_test)
+SET_TESTS_PROPERTIES(vk_temporal_history_store_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_history_store_test
+	vk_temporal_history_store_contract)
+ADD_EXECUTABLE(tr_temporal_submit_test
+	tests/tr_temporal_submit_test.c
+	code/renderervk/tr_temporal_submit.c
+	code/renderervk/tr_temporal_batch_request.c)
+TARGET_INCLUDE_DIRECTORIES(tr_temporal_submit_test PRIVATE
+	code/qcommon code/renderer code/renderer/ral code/renderercommon code/renderervk)
+ADD_TEST(NAME tr_temporal_submit_contract COMMAND tr_temporal_submit_test)
+SET_TESTS_PROPERTIES(tr_temporal_submit_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(tr_temporal_submit_test tr_temporal_submit_contract)
+ADD_TEST(NAME vk_temporal_history_store_shader_reflection_contract
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/vk-temporal-history-store-shader-check.sh
+		${CMAKE_SOURCE_DIR})
+SET_TESTS_PROPERTIES(vk_temporal_history_store_shader_reflection_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	SKIP_RETURN_CODE 77 TIMEOUT 60)
+ADD_TEST(NAME vk_temporal_history_consume_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_history_consume_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_temporal_history_consume_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+
+ADD_TEST(NAME vk_temporal_motion_readback_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_motion_readback_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_temporal_motion_readback_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+
+ADD_EXECUTABLE(vk_temporal_main_rendering_test
+	tests/vk_temporal_main_rendering_test.c
+	code/renderervk/vk_temporal_main_rendering.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_main_rendering_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon code/renderervk)
+ADD_TEST(NAME vk_temporal_main_rendering_contract
+	COMMAND vk_temporal_main_rendering_test)
+SET_TESTS_PROPERTIES(vk_temporal_main_rendering_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_main_rendering_test
+	vk_temporal_main_rendering_contract)
+ADD_TEST(NAME vk_temporal_main_activation_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_main_activation_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_temporal_main_activation_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME vk_temporal_main_rendering_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_main_rendering_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_temporal_main_rendering_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+
 ADD_EXECUTABLE(vk_temporal_motion_materialization_test
 	tests/vk_temporal_motion_materialization_test.c
 	code/renderervk/vk_temporal_motion_materialization.c
@@ -910,6 +1084,86 @@ ADD_TEST(NAME vk_temporal_motion_materialization_source_policy_contract
 SET_TESTS_PROPERTIES(vk_temporal_motion_materialization_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
 	TIMEOUT 30)
+
+ADD_EXECUTABLE(vk_temporal_resolved_hdr_test
+	tests/vk_temporal_resolved_hdr_test.c
+	code/renderervk/vk_temporal_resolved_hdr.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_resolved_hdr_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon code/renderervk)
+ADD_TEST(NAME vk_temporal_resolved_hdr_contract
+	COMMAND vk_temporal_resolved_hdr_test)
+SET_TESTS_PROPERTIES(vk_temporal_resolved_hdr_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_resolved_hdr_test
+	vk_temporal_resolved_hdr_contract)
+ADD_TEST(NAME vk_temporal_resolved_hdr_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_resolved_hdr_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_temporal_resolved_hdr_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+
+ADD_EXECUTABLE(vk_temporal_resolve_authority_test
+	tests/vk_temporal_resolve_authority_test.c
+	code/renderervk/vk_temporal_resolve_authority.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_resolve_authority_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon code/renderervk)
+ADD_TEST(NAME vk_temporal_resolve_authority_contract
+	COMMAND vk_temporal_resolve_authority_test)
+SET_TESTS_PROPERTIES(vk_temporal_resolve_authority_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_resolve_authority_test
+	vk_temporal_resolve_authority_contract)
+ADD_TEST(NAME vk_temporal_resolve_authority_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_resolve_authority_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_temporal_resolve_authority_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+
+ADD_EXECUTABLE(vk_temporal_resolve_test
+	tests/vk_temporal_resolve_test.c
+	code/renderervk/vk_temporal_resolve.c
+	code/renderervk/vk_temporal_resolved_hdr.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_resolve_test PRIVATE
+	code/qcommon code/renderer code/renderer/ral code/renderercommon code/renderervk)
+ADD_TEST(NAME vk_temporal_resolve_contract COMMAND vk_temporal_resolve_test)
+SET_TESTS_PROPERTIES(vk_temporal_resolve_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_resolve_test vk_temporal_resolve_contract)
+ADD_EXECUTABLE(vk_temporal_resolve_readback_test
+	tests/vk_temporal_resolve_readback_test.c
+	code/renderervk/vk_temporal_resolve_readback.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_resolve_readback_test PRIVATE
+	code/qcommon code/renderer code/renderer/ral code/renderercommon code/renderervk)
+ADD_TEST(NAME vk_temporal_resolve_readback_contract
+	COMMAND vk_temporal_resolve_readback_test)
+SET_TESTS_PROPERTIES(vk_temporal_resolve_readback_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_resolve_readback_test
+	vk_temporal_resolve_readback_contract)
+ADD_TEST(NAME vk_temporal_resolve_readback_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_resolve_readback_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_temporal_resolve_readback_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME vk_temporal_resolve_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_resolve_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_temporal_resolve_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME vk_temporal_resolve_shader_reflection_contract
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/vk-temporal-resolve-shader-check.sh
+		${CMAKE_SOURCE_DIR})
+SET_TESTS_PROPERTIES(vk_temporal_resolve_shader_reflection_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	SKIP_RETURN_CODE 77 TIMEOUT 60)
 
 ADD_TEST(NAME vk_temporal_entmat_runtime_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
@@ -965,6 +1219,189 @@ SET_TESTS_PROPERTIES(tr_temporal_motion_contract PROPERTIES
 	TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(tr_temporal_motion_test
 	tr_temporal_motion_contract)
+
+ADD_EXECUTABLE(tr_temporal_iqm_motion_test
+	tests/tr_temporal_iqm_motion_test.c
+	code/renderervk/tr_temporal_iqm_motion.c
+	code/renderervk/tr_temporal_motion.c
+	code/renderervk/vk_bindless_publication.c
+)
+TARGET_INCLUDE_DIRECTORIES(tr_temporal_iqm_motion_test PRIVATE
+	code/qcommon
+	code/renderercommon
+	code/renderervk
+)
+ADD_TEST(NAME tr_temporal_iqm_motion_contract
+	COMMAND tr_temporal_iqm_motion_test)
+SET_TESTS_PROPERTIES(tr_temporal_iqm_motion_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(tr_temporal_iqm_motion_test
+	tr_temporal_iqm_motion_contract)
+
+ADD_EXECUTABLE(vk_temporal_iqm_geometry_test
+	tests/vk_temporal_iqm_geometry_test.c
+	code/renderervk/vk_temporal_iqm_geometry.c
+)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_geometry_test PRIVATE
+	code/qcommon
+	code/renderercommon
+	code/renderer/ral
+	code/renderervk
+)
+ADD_TEST(NAME vk_temporal_iqm_geometry_contract
+	COMMAND vk_temporal_iqm_geometry_test)
+SET_TESTS_PROPERTIES(vk_temporal_iqm_geometry_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_iqm_geometry_test
+	vk_temporal_iqm_geometry_contract)
+
+ADD_EXECUTABLE(vk_bindless_publication_test
+	tests/vk_bindless_publication_test.c
+	code/renderervk/vk_bindless_publication.c
+)
+TARGET_INCLUDE_DIRECTORIES(vk_bindless_publication_test PRIVATE
+	code/qcommon
+	code/renderervk
+)
+ADD_TEST(NAME vk_bindless_publication_contract
+	COMMAND vk_bindless_publication_test)
+SET_TESTS_PROPERTIES(vk_bindless_publication_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_bindless_publication_test
+	vk_bindless_publication_contract)
+
+ADD_TEST(NAME vk_bindless_publication_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_bindless_publication_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_bindless_publication_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30)
+
+ADD_EXECUTABLE(vk_bindless_cohort_test
+	tests/vk_bindless_cohort_test.c
+	code/renderervk/vk_bindless_cohort.c
+	code/renderervk/vk_bindless_publication.c)
+TARGET_INCLUDE_DIRECTORIES(vk_bindless_cohort_test PRIVATE
+	code/qcommon code/renderervk)
+ADD_TEST(NAME vk_bindless_cohort_contract
+	COMMAND vk_bindless_cohort_test)
+SET_TESTS_PROPERTIES(vk_bindless_cohort_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_bindless_cohort_test
+	vk_bindless_cohort_contract)
+
+ADD_EXECUTABLE(vk_temporal_iqm_payload_test
+	tests/vk_temporal_iqm_payload_test.c
+	code/renderervk/vk_temporal_iqm_payload.c
+	code/renderervk/tr_temporal_iqm_motion.c
+	code/renderervk/tr_temporal_motion.c
+	code/renderervk/vk_bindless_publication.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_payload_test PRIVATE
+	code/qcommon code/renderercommon code/renderervk code/renderer/ral)
+ADD_TEST(NAME vk_temporal_iqm_payload_contract
+	COMMAND vk_temporal_iqm_payload_test)
+SET_TESTS_PROPERTIES(vk_temporal_iqm_payload_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_iqm_payload_test
+	vk_temporal_iqm_payload_contract)
+
+ADD_TEST(NAME vk_temporal_iqm_payload_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_iqm_payload_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_temporal_iqm_payload_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30)
+
+ADD_EXECUTABLE(vk_temporal_iqm_payload_authoring_test
+	tests/vk_temporal_iqm_payload_authoring_test.c
+	code/renderervk/vk_temporal_iqm_payload_authoring.c
+	code/renderervk/vk_temporal_iqm_payload.c
+	code/renderervk/tr_temporal_iqm_motion.c
+	code/renderervk/tr_temporal_motion.c
+	code/renderervk/vk_bindless_publication.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_payload_authoring_test PRIVATE
+	code/qcommon code/renderercommon code/renderervk code/renderer/ral)
+ADD_TEST(NAME vk_temporal_iqm_payload_authoring_contract
+	COMMAND vk_temporal_iqm_payload_authoring_test)
+SET_TESTS_PROPERTIES(vk_temporal_iqm_payload_authoring_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_iqm_payload_authoring_test
+	vk_temporal_iqm_payload_authoring_contract)
+
+ADD_TEST(NAME vk_temporal_iqm_payload_authoring_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_iqm_payload_authoring_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_temporal_iqm_payload_authoring_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30)
+
+ADD_EXECUTABLE(vk_temporal_iqm_exact3_factory_test
+	tests/vk_temporal_iqm_exact3_factory_test.c
+	code/renderervk/vk_temporal_iqm_exact3_factory.c
+	code/renderervk/vk_temporal_iqm_payload.c
+	code/renderervk/tr_temporal_iqm_motion.c
+	code/renderervk/tr_temporal_motion.c
+	code/renderervk/vk_bindless_publication.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_exact3_factory_test PRIVATE
+	code/qcommon code/renderercommon code/renderervk code/renderer/ral)
+ADD_TEST(NAME vk_temporal_iqm_exact3_factory_contract
+	COMMAND vk_temporal_iqm_exact3_factory_test)
+SET_TESTS_PROPERTIES(vk_temporal_iqm_exact3_factory_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_iqm_exact3_factory_test
+	vk_temporal_iqm_exact3_factory_contract)
+
+ADD_EXECUTABLE(vk_temporal_iqm_command_test
+	tests/vk_temporal_iqm_command_test.c
+	code/renderervk/vk_temporal_iqm_command.c
+	code/renderervk/vk_temporal_main_rendering.c
+	code/renderervk/tr_temporal_iqm_motion.c
+	code/renderervk/tr_temporal_motion.c
+	code/renderervk/vk_bindless_publication.c)
+TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_command_test PRIVATE
+	code/qcommon code/renderercommon code/renderervk code/renderer/ral)
+ADD_TEST(NAME vk_temporal_iqm_command_contract
+	COMMAND vk_temporal_iqm_command_test)
+SET_TESTS_PROPERTIES(vk_temporal_iqm_command_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_temporal_iqm_command_test
+	vk_temporal_iqm_command_contract)
+
+ADD_TEST(NAME vk_temporal_iqm_exact3_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_iqm_exact3_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_temporal_iqm_exact3_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+
+ADD_TEST(NAME vk_temporal_iqm_exact3_shader_reflection_contract
+	COMMAND sh ${CMAKE_SOURCE_DIR}/tests/vk-temporal-iqm-exact3-shader-check.sh
+		${CMAKE_SOURCE_DIR})
+SET_TESTS_PROPERTIES(vk_temporal_iqm_exact3_shader_reflection_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
+	SKIP_RETURN_CODE 77 TIMEOUT 180)
+
+ADD_TEST(NAME tr_temporal_iqm_motion_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/tr_temporal_iqm_motion_policy_check.cmake)
+SET_TESTS_PROPERTIES(tr_temporal_iqm_motion_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30)
+
+ADD_TEST(NAME vk_temporal_iqm_resource_product_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/vk_temporal_iqm_resource_product_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_temporal_iqm_resource_product_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
 
 ADD_TEST(NAME tr_temporal_motion_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
@@ -1082,25 +1519,9 @@ ADD_TEST(NAME imgui_tool_policy_contract
 )
 SET_TESTS_PROPERTIES(imgui_tool_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;owner.tools;failure.build-graph;feature.imgui"
+	SKIP_REGULAR_EXPRESSION "SKIP: ImGui ownership policy requires a Ninja build"
 	TIMEOUT 30
 )
-
-# ── RAL-PARK: temporarily disabled contract tests ────────────────────────────
-# The RAL/temporal work was parked mid-migration (2026-08-14) with these
-# contract checks knowingly red; CI runs test-host on every push, so leaving
-# them enabled turns every pipeline red and hides NEW regressions behind
-# known-red noise. DELETE THIS BLOCK when resuming the RAL work — the checks
-# themselves are untouched and re-arm the moment the block is gone.
-# (Two are environment-dependent beyond the park itself, worth knowing when
-# resuming: vk_temporal_shader_reflection_contract passes on a local mac but
-# fails on CI runners; imgui_tool_policy_contract fails only on Windows CI.)
-SET_TESTS_PROPERTIES(
-	ral_public_surface_contract
-	vk_temporal_shader_reflection_contract
-	vk_temporal_entmat_runtime_source_policy_contract
-	ref_entity_motion_source_policy_contract
-	imgui_tool_policy_contract
-	PROPERTIES DISABLED TRUE)
 
 ADD_TEST(NAME ral_profile_host_policy_contract
 	COMMAND ${CMAKE_COMMAND}
@@ -1112,6 +1533,7 @@ ADD_TEST(NAME ral_profile_host_policy_contract
 )
 SET_TESTS_PROPERTIES(ral_profile_host_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;owner.tools;failure.build-graph;feature.imgui"
+	SKIP_REGULAR_EXPRESSION "SKIP: RAL profile host ownership policy requires a Ninja build"
 	# 120s, not 30: the check scans build.ninja + compile_commands.json and the
 	# Windows CI runner's filesystem pushed it past 30s (content passes there
 	# once given time — Linux/mac finish well under the old limit).

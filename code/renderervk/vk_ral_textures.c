@@ -43,6 +43,9 @@ static ralBackend_t         *s_ral_backend;
 static ralBindGroupLayout_t *s_ral_bindless_layout;
 static ralBindGroup_t       *s_ral_bindless_set;
 static uint32_t              s_ral_bindless_capacity;     // resolved bindless slot count (= min(RAL caps, requested))
+static vkBindlessPublicationLedger_t s_bindless_publication;
+static qboolean              s_bindless_publication_initialized;
+static uint64_t              s_bindless_owner_generation;
 // 2D bindless slot allocator (Phase 7.15.2). Replaces the old tr.numImages-1
 // monotonic source so slots can be recycled once eviction (7.15.4) frees them.
 // s_ral_bindless_next is the high-water mark for never-yet-used slots; the
@@ -196,9 +199,225 @@ void                        vk_ral_adopt_static_pipeline_layouts( void );      /
 static ralBindGroup_t      *s_adopted_bgs[ VK_RAL_MAX_ADOPTED_BGS ];
 static uint32_t             s_adopted_bgs_count;
 
+static qboolean vk_ral_bindless_ledger_activate( void );
+
 // ── lifecycle ───────────────────────────────────────────────────────────
 qboolean vk_ral_textures_available( void ) {
 	return ( s_ral_backend && s_ral_bindless_set ) ? qtrue : qfalse;
+}
+
+qboolean vk_ral_bindless_get_cohort(
+		vkRalBindlessCohortReceipt_t *outReceipt ) {
+	if ( !outReceipt || !s_ral_backend || !s_ral_bindless_layout
+			|| !s_ral_bindless_set || !vk_ral_bindless_ledger_activate() )
+		return qfalse;
+	return VK_BindlessCohortBuild( s_ral_backend, s_ral_bindless_layout,
+		s_ral_bindless_set, Ral_GetBindGroupLayoutHandle( s_ral_bindless_layout ),
+		Ral_GetBindGroupHandle( s_ral_bindless_set ),
+		s_bindless_publication_initialized, &s_bindless_publication, outReceipt );
+}
+
+static uint64_t vk_ral_bindless_sampler_digest( const Vk_Sampler_Def *definition ) {
+	uint64_t h = 1469598103934665603ull;
+	uint32_t fields[5];
+	uint32_t i, j;
+	if ( !definition ) return 0;
+	fields[0] = (uint32_t)definition->address_mode;
+	fields[1] = (uint32_t)definition->gl_mag_filter;
+	fields[2] = (uint32_t)definition->gl_min_filter;
+	fields[3] = (uint32_t)definition->max_lod_1_0;
+	fields[4] = (uint32_t)definition->noAnisotropy;
+	for ( i = 0; i < 5; ++i ) for ( j = 0; j < 4; ++j ) {
+		h ^= ( fields[i] >> ( j * 8u ) ) & 0xffu;
+		h *= 1099511628211ull;
+	}
+	return h ? h : 1u;
+}
+
+static qboolean vk_ral_bindless_ledger_activate( void ) {
+	if ( !s_ral_bindless_set ) return qfalse;
+	if ( !s_bindless_publication_initialized ) {
+		VK_BindlessPublicationInit( &s_bindless_publication );
+		s_bindless_publication_initialized = qtrue;
+	}
+	if ( s_bindless_publication.samplerPoolIdentity != (uintptr_t)&vk.samplers
+			&& !VK_BindlessPublicationActivateSamplerPool(
+				&s_bindless_publication, &vk.samplers ) ) return qfalse;
+	if ( s_bindless_publication.setIdentity != (uintptr_t)s_ral_bindless_set
+			&& !VK_BindlessPublicationActivateSet(
+				&s_bindless_publication, s_ral_bindless_set ) ) return qfalse;
+	return qtrue;
+}
+
+static qboolean vk_ral_bindless_image_owner( image_t *image ) {
+	if ( !image ) return qfalse;
+	if ( image->bindlessOwnerGeneration ) return qtrue;
+	if ( s_bindless_owner_generation == UINT64_MAX ) return qfalse;
+	image->bindlessOwnerGeneration = ++s_bindless_owner_generation;
+	return image->bindlessOwnerGeneration ? qtrue : qfalse;
+}
+
+static void vk_ral_bindless_poison_active( void ) {
+	if ( s_bindless_publication_initialized && s_ral_bindless_set
+			&& s_bindless_publication.setIdentity == (uintptr_t)s_ral_bindless_set )
+		(void)VK_BindlessPublicationPoisonSetAfterWrite(
+			&s_bindless_publication, s_ral_bindless_set );
+}
+
+static qboolean vk_ral_bindless_record_views( image_t *const *images,
+		const uint32_t *slots, const void *const *nativeViews,
+		const vkBindlessPublicationKind_t *kinds, uint32_t count ) {
+	const void *owners[VK_RAL_MATERIAL_PLANES];
+	const void *descriptors[VK_RAL_MATERIAL_PLANES];
+	uint64_t generations[VK_RAL_MATERIAL_PLANES];
+	uint32_t i;
+	if ( !images || !slots || !nativeViews || !kinds || !count
+			|| count > VK_RAL_MATERIAL_PLANES || !vk_ral_bindless_ledger_activate() ) {
+		vk_ral_bindless_poison_active(); return qfalse;
+	}
+	for ( i = 0; i < count; ++i ) {
+		if ( !vk_ral_bindless_image_owner( images[i] ) ) {
+			vk_ral_bindless_poison_active(); return qfalse;
+		}
+		owners[i] = images[i];
+		descriptors[i] = images[i]->descriptor
+			? (const void *)images[i]->descriptor : (const void *)images[i];
+		generations[i] = images[i]->bindlessOwnerGeneration;
+	}
+	if ( VK_BindlessPublicationViews( &s_bindless_publication,
+			s_ral_bindless_set, slots, nativeViews, owners, descriptors,
+			generations, kinds, count ) ) return qtrue;
+	vk_ral_bindless_poison_active();
+	return qfalse;
+}
+
+qboolean vk_ral_bindless_publish_texture_view( image_t *image,
+		uint32_t slot, ralTextureView_t *view,
+		vkBindlessPublicationKind_t kind ) {
+	const void *nativeView;
+	image_t *images[1] = { image };
+	if ( !s_ral_bindless_set || !view ) return qfalse;
+	nativeView = Ral_GetTextureViewHandle( view );
+	if ( !nativeView ) return qfalse;
+	Ral_BindGroupSetTextureViewAt( s_ral_bindless_set, slot, view );
+	return vk_ral_bindless_record_views( images, &slot, &nativeView, &kind, 1 );
+}
+
+qboolean vk_ral_bindless_publish_texture_views( image_t *const *images,
+		const uint32_t *slots, ralTextureView_t *const *views,
+		const vkBindlessPublicationKind_t *kinds, uint32_t count ) {
+	const void *nativeViews[VK_RAL_MATERIAL_PLANES];
+	uint32_t i;
+	if ( !images || !slots || !views || !kinds || !count
+			|| count > VK_RAL_MATERIAL_PLANES || !s_ral_bindless_set ) return qfalse;
+	for ( i = 0; i < count; ++i ) {
+		nativeViews[i] = Ral_GetTextureViewHandle( views[i] );
+		if ( !nativeViews[i] ) return qfalse;
+	}
+	if ( !Ral_BindGroupSetTextureViewsAt( s_ral_bindless_set, slots, views, count ) )
+		return qfalse;
+	return vk_ral_bindless_record_views( images, slots, nativeViews, kinds, count );
+}
+
+qboolean vk_ral_bindless_publish_texture( image_t *image, uint32_t slot,
+		ralTexture_t *texture, vkBindlessPublicationKind_t kind ) {
+	const void *nativeView;
+	image_t *images[1] = { image };
+	if ( !s_ral_bindless_set || !texture ) return qfalse;
+	nativeView = Ral_GetTextureDefaultViewHandle( texture );
+	if ( !nativeView ) return qfalse;
+	Ral_BindGroupSetTextureAt( s_ral_bindless_set, slot, texture );
+	return vk_ral_bindless_record_views( images, &slot, &nativeView, &kind, 1 );
+}
+
+qboolean vk_ral_bindless_publish_sampler( uint32_t slot, VkSampler sampler,
+		const Vk_Sampler_Def *definition ) {
+	ralSampler_t *adopted;
+	const void *identity = (const void *)sampler;
+	uint64_t digest;
+	if ( !sampler || !definition || !s_ral_backend || !s_ral_bindless_set ) return qfalse;
+	digest = vk_ral_bindless_sampler_digest( definition );
+	adopted = Ral_AdoptSampler( s_ral_backend, (void *)identity,
+		"vk-bindless-sampler-ledger" );
+	if ( !adopted ) return qfalse;
+	Ral_BindGroupSetSamplerAt( s_ral_bindless_set, slot, adopted );
+	Ral_DestroySampler( adopted );
+	if ( !vk_ral_bindless_ledger_activate()
+			|| !VK_BindlessPublicationSamplers( &s_bindless_publication,
+				s_ral_bindless_set, &vk.samplers, &slot, &identity, &digest, 1 ) ) {
+		vk_ral_bindless_poison_active();
+		return qfalse;
+	}
+	return qtrue;
+}
+
+qboolean vk_ral_bindless_record_raw_image( image_t *image, uint32_t slot,
+		VkImageView view, vkBindlessPublicationKind_t kind ) {
+	const void *nativeView = (const void *)view;
+	image_t *images[1] = { image };
+	if ( !view ) { vk_ral_bindless_poison_active(); return qfalse; }
+	return vk_ral_bindless_record_views( images, &slot, &nativeView, &kind, 1 );
+}
+
+qboolean vk_ral_bindless_record_legacy_exact( image_t *image,
+		uint32_t slot, VkImageView view ) {
+	if ( !image || !image->descriptor ) {
+		vk_ral_bindless_poison_active(); return qfalse;
+	}
+	return vk_ral_bindless_record_raw_image( image, slot, view,
+		VK_BINDLESS_PUBLICATION_LEGACY_EXACT );
+}
+
+qboolean vk_ral_bindless_record_reserved( uint32_t slot, VkImageView view,
+		const void *ownerIdentity, const void *descriptorIdentity ) {
+	const void *nativeView = (const void *)view;
+	uint64_t generation;
+	vkBindlessPublicationKind_t kind = VK_BINDLESS_PUBLICATION_RESERVED;
+	if ( !view || !ownerIdentity || !descriptorIdentity
+			|| s_bindless_owner_generation == UINT64_MAX
+			|| !vk_ral_bindless_ledger_activate() ) {
+		vk_ral_bindless_poison_active(); return qfalse;
+	}
+	generation = ++s_bindless_owner_generation;
+	if ( VK_BindlessPublicationViews( &s_bindless_publication,
+			s_ral_bindless_set, &slot, &nativeView, &ownerIdentity,
+			&descriptorIdentity, &generation, &kind, 1 ) ) return qtrue;
+	vk_ral_bindless_poison_active();
+	return qfalse;
+}
+
+qboolean vk_ral_bindless_tombstone( uint32_t slot ) {
+	if ( !vk_ral_bindless_ledger_activate() ) return qfalse;
+	Ral_BindGroupSetTextureAt( s_ral_bindless_set, slot, NULL );
+	if ( VK_BindlessPublicationTombstoneImage(
+			&s_bindless_publication, s_ral_bindless_set, slot ) ) return qtrue;
+	(void)VK_BindlessPublicationPoisonSetAfterWrite(
+		&s_bindless_publication, s_ral_bindless_set );
+	return qfalse;
+}
+
+qboolean vk_ral_bindless_query_ordinary( const image_t *image,
+		vkBindlessOrdinaryReceipt_t *outReceipt ) {
+	int samplerSlot;
+	if ( !image || !outReceipt || image->ralBindlessSlot < 0
+			|| image->bindlessSamplerSlot < 0 || !image->bindlessOwnerGeneration
+			|| image->view == VK_NULL_HANDLE || image->descriptor == VK_NULL_HANDLE )
+		return qfalse;
+	samplerSlot = image->bindlessSamplerSlot;
+	if ( samplerSlot >= vk.samplers.count ) return qfalse;
+	return VK_BindlessPublicationQueryOrdinary( &s_bindless_publication,
+		s_ral_bindless_set, &vk.samplers, (uint32_t)image->ralBindlessSlot,
+		(const void *)image->view, image, (const void *)image->descriptor,
+		image->bindlessOwnerGeneration, (uint32_t)samplerSlot,
+		(const void *)vk.samplers.handle[samplerSlot],
+		vk_ral_bindless_sampler_digest( &vk.samplers.def[samplerSlot] ), outReceipt );
+}
+
+void vk_ral_bindless_sampler_pool_invalidate( void ) {
+	if ( s_bindless_publication_initialized
+			&& s_bindless_publication.samplerPoolIdentity == (uintptr_t)&vk.samplers )
+		(void)VK_BindlessPublicationInvalidateSamplerPool(
+			&s_bindless_publication, &vk.samplers );
 }
 
 // backend accessor for vk.c::create_pipeline +
@@ -635,6 +854,12 @@ void vk_ral_textures_init( void ) {
 			// created; leave the shared owned backend alone (see above).
 			R_LOG( rch_ral_texture, SEV_WARN, "Ral_CreateBindGroup failed; declining RAL texture infrastructure\n" );
 			Ral_DestroyBindGroupLayout( s_ral_bindless_layout );  s_ral_bindless_layout = NULL;
+			return;
+		}
+		if ( !vk_ral_bindless_ledger_activate() ) {
+			R_LOG( rch_ral_texture, SEV_WARN, "bindless publication ledger activation failed; declining RAL texture infrastructure\n" );
+			Ral_DestroyBindGroup( s_ral_bindless_set ); s_ral_bindless_set = NULL;
+			Ral_DestroyBindGroupLayout( s_ral_bindless_layout ); s_ral_bindless_layout = NULL;
 			return;
 		}
 	}
@@ -1103,6 +1328,10 @@ void vk_ral_adopt_static_internal_textures( void )
 	// views, and sampler exist, otherwise the bindings stay unwritten until a later
 	// descriptor refresh and the base-pass IBL term reads zero on a fresh boot.
 	vk_update_attachment_descriptors();
+	// H2a scene identity is usable only after the raw color attachment, adopted
+	// texture, postprocess group and histogram group belong to this same sweep.
+	// Publishing earlier would let pointer reuse satisfy a stale target receipt.
+	vk_temporal_scene_color_attachment_published();
 }
 
 
@@ -1346,7 +1575,12 @@ void vk_ral_textures_shutdown( qboolean destroyWindow ) {
 		#undef KILL_PIPE
 		#undef KILL_BGL
 	}
-	if ( s_ral_bindless_set    ) { Ral_DestroyBindGroup      ( s_ral_bindless_set    ); s_ral_bindless_set    = NULL; }
+	if ( s_ral_bindless_set    ) {
+		if ( s_bindless_publication_initialized )
+			(void)VK_BindlessPublicationInvalidateSet(
+				&s_bindless_publication, s_ral_bindless_set );
+		Ral_DestroyBindGroup( s_ral_bindless_set ); s_ral_bindless_set = NULL;
+	}
 	if ( s_ral_bindless_layout ) { Ral_DestroyBindGroupLayout( s_ral_bindless_layout ); s_ral_bindless_layout = NULL; }
 	// Ral_DestroyBackend moved
 	// out into vk_ral_backend_shutdown (called from vk_shutdown's tail). Was
@@ -1501,9 +1735,10 @@ static void vk_ral_material_reset( qboolean restoreViews ) {
 		}
 		if ( restoreViews && s_ral_material_images[i] && s_ral_material_images[i]->ralResidencyView &&
 		     s_ral_material_images[i]->ralBindlessSlot >= 0 )
-			Ral_BindGroupSetTextureViewAt( s_ral_bindless_set,
+			(void)vk_ral_bindless_publish_texture_view( s_ral_material_images[i],
 				(uint32_t)s_ral_material_images[i]->ralBindlessSlot,
-				s_ral_material_images[i]->ralResidencyView );
+				s_ral_material_images[i]->ralResidencyView,
+				VK_BINDLESS_PUBLICATION_RESIDENT );
 		if ( s_ral_material_coarse[i] ) Ral_DestroyTextureView( s_ral_material_coarse[i] );
 		s_ral_material_images[i] = NULL;
 		s_ral_material_coarse[i] = NULL;
@@ -1583,7 +1818,9 @@ qboolean vk_ral_residency_material_test( qboolean restore ) {
 	{
 		uint32_t slots[2] = { (uint32_t)images[0]->ralBindlessSlot, (uint32_t)images[1]->ralBindlessSlot };
 		ralTextureView_t *views[2] = { s_ral_material_coarse[0], s_ral_material_coarse[1] };
-		if ( !Ral_BindGroupSetTextureViewsAt( s_ral_bindless_set, slots, views, 2 ) ) {
+		const vkBindlessPublicationKind_t kinds[2] = {
+			VK_BINDLESS_PUBLICATION_COARSE, VK_BINDLESS_PUBLICATION_COARSE };
+		if ( !vk_ral_bindless_publish_texture_views( images, slots, views, kinds, 2 ) ) {
 			R_LOG( rch_ral_texture, SEV_WARN,
 			       "RAL residency material: unavailable reason=atomic-parent-bind\n" );
 			vk_ral_material_reset( qtrue ); return qfalse;
@@ -1744,7 +1981,8 @@ void vk_ral_register_image( image_t *image, byte *pic, int width, int height ) {
 		// those skip the placeholder bind and rely on the real-texture bind
 		// below, which is unchanged behaviour.
 		if ( tr.defaultImage && tr.defaultImage != image && tr.defaultImage->ral ) {
-			Ral_BindGroupSetTextureAt( s_ral_bindless_set, slot, tr.defaultImage->ral );
+			(void)vk_ral_bindless_publish_texture( image, slot,
+				tr.defaultImage->ral, VK_BINDLESS_PUBLICATION_PLACEHOLDER );
 			placeholderBound = qtrue;
 		}
 	}
@@ -1831,7 +2069,8 @@ void vk_ral_register_image( image_t *image, byte *pic, int width, int height ) {
 	if ( slot < s_ral_bindless_capacity ) {
 		if ( resident ) {
 			if ( vk_ral_whole_texture_promotion_ready( image ) )
-				Ral_BindGroupSetTextureViewAt( s_ral_bindless_set, slot, image->ralResidencyView );
+				(void)vk_ral_bindless_publish_texture_view( image, slot,
+					image->ralResidencyView, VK_BINDLESS_PUBLICATION_RESIDENT );
 			else
 				R_LOG( rch_ral_texture, SEV_WARN, "RAL residency promotion refused for '%s' (incomplete coherence group or parent fallback)\n", image->imgName );
 		}
@@ -1881,7 +2120,8 @@ void vk_ral_drain_pending_uploads( void ) {
 			     ( p->image->ralResidencyMipCount == 0 ||
 			       vk_ral_mip_mark_resident( p->image, 0, (uint32_t)tr.frameCount ) ) &&
 			     vk_ral_whole_texture_promotion_ready( p->image ) ) {
-				Ral_BindGroupSetTextureViewAt( s_ral_bindless_set, p->slot, p->image->ralResidencyView );
+				(void)vk_ral_bindless_publish_texture_view( p->image, p->slot,
+					p->image->ralResidencyView, VK_BINDLESS_PUBLICATION_RESIDENT );
 			}
 			vk_ral_release_upload_ticket( &p->ticket );
 			// Remove by swapping the last entry into this slot (order doesn't matter).
@@ -1903,9 +2143,10 @@ void vk_ral_drain_pending_uploads( void ) {
 			int heldFrames = tr.frameCount - s_ral_mip_test_start_frame;
 			int uploadFrames = tr.frameCount - s_ral_mip_test_upload_frame;
 			int sampleAge = tr.frameCount - image->frameUsed;
-			Ral_BindGroupSetTextureViewAt( s_ral_bindless_set,
+			(void)vk_ral_bindless_publish_texture_view( image,
 			                                   (uint32_t)image->ralBindlessSlot,
-			                                   image->ralResidencyView );
+			                                   image->ralResidencyView,
+			                                   VK_BINDLESS_PUBLICATION_RESIDENT );
 			R_LOG( rch_ral_texture, SEV_WARN,
 			       "RAL residency mip test: action=upload-promote class=texture resource=%d slot=%d childLevel=0 parentLevel=1 baseMip=0 levelCount=%u bytes=%llu synchronous=%d fenceSignaled=1 heldFrames=%d uploadFrames=%d sampleAge=%d fallback=parent source=decoded name=%s\n",
 			       s_ral_mip_test_resource, image->ralBindlessSlot, mipLevels,
@@ -1946,6 +2187,8 @@ void vk_ral_drain_pending_uploads( void ) {
 			ralResidencyPageRecord_t nextRecords[VK_RAL_MATERIAL_PLANES];
 			ralResidencyPageRecord_t nextGroup = s_ral_material_group;
 			uint32_t slots[2]; ralTextureView_t *views[2];
+			const vkBindlessPublicationKind_t kinds[2] = {
+				VK_BINDLESS_PUBLICATION_RESIDENT, VK_BINDLESS_PUBLICATION_RESIDENT };
 			qboolean ready = qtrue;
 			for ( j = 0; j < VK_RAL_MATERIAL_PLANES; ++j ) {
 				image_t *image = s_ral_material_images[j];
@@ -1960,7 +2203,8 @@ void vk_ral_drain_pending_uploads( void ) {
 			if ( ready && Ral_ResidencyPageRecordTransition( &nextGroup,
 				RAL_RESIDENCY_RESIDENT, s_ral_material_completed, 1,
 				(uint32_t)tr.frameCount ) &&
-			     Ral_BindGroupSetTextureViewsAt( s_ral_bindless_set, slots, views, 2 ) ) {
+			     vk_ral_bindless_publish_texture_views( s_ral_material_images,
+				     slots, views, kinds, 2 ) ) {
 				for ( j = 0; j < VK_RAL_MATERIAL_PLANES; ++j )
 					s_ral_material_images[j]->ralMipResidency[0] = nextRecords[j];
 				s_ral_material_group = nextGroup;
@@ -1996,7 +2240,9 @@ qboolean vk_ral_residency_mip_test( qboolean restore ) {
 			       "RAL residency mip test: restore refused (page state transition failed)\n" );
 			return qfalse;
 		}
-		Ral_BindGroupSetTextureViewAt( s_ral_bindless_set, (uint32_t)image->ralBindlessSlot, image->ralResidencyView );
+		(void)vk_ral_bindless_publish_texture_view( image,
+			(uint32_t)image->ralBindlessSlot, image->ralResidencyView,
+			VK_BINDLESS_PUBLICATION_RESIDENT );
 		mipLevels = Ral_GetTextureMipLevelCount( image->ral );
 		R_LOG( rch_ral_texture, SEV_WARN,
 		       "RAL residency mip test: action=promote class=texture resource=%d slot=%d childLevel=0 parentLevel=1 baseMip=0 levelCount=%u heldFrames=%d sampleAge=%d fallback=parent name=%s\n",
@@ -2063,7 +2309,9 @@ qboolean vk_ral_residency_mip_test( qboolean restore ) {
 		       "RAL residency mip test: hold refused (persistent page state/address mismatch)\n" );
 		return qfalse;
 	}
-	Ral_BindGroupSetTextureViewAt( s_ral_bindless_set, (uint32_t)image->ralBindlessSlot, image->ralCoarseResidencyView );
+	(void)vk_ral_bindless_publish_texture_view( image,
+		(uint32_t)image->ralBindlessSlot, image->ralCoarseResidencyView,
+		VK_BINDLESS_PUBLICATION_COARSE );
 	s_ral_mip_test_image = image;
 	s_ral_mip_test_start_frame = tr.frameCount;
 	R_LOG( rch_ral_texture, SEV_WARN,
@@ -2252,7 +2500,7 @@ void vk_ral_unregister_image( image_t *image ) {
 		}
 	}
 	if ( image->ralBindlessSlot >= 0 && s_ral_bindless_set ) {
-		Ral_BindGroupSetTextureAt( s_ral_bindless_set, (uint32_t)image->ralBindlessSlot, NULL );
+		(void)vk_ral_bindless_tombstone( (uint32_t)image->ralBindlessSlot );
 		// Return the slot to the free-list so a later registration can reuse it
 		// (Phase 7.15.2 release plumbing for the 7.15.4 eviction path). This is
 		// DARK in 7.15.2: R_DeleteTextures unregisters every image on a map
@@ -2552,6 +2800,18 @@ Q_EXPORT void Ral_DumpLive( void ) {
 	}
 	if ( ri.Cmd_Argc() > 2 && Q_stricmp( ri.Cmd_Argv( 2 ), "temporal" ) == 0 ) {
 		R_TemporalProjectionDump();
+		return;
+	}
+	if ( ri.Cmd_Argc() > 2 && Q_stricmp( ri.Cmd_Argv( 2 ), "temporal-motion-arm" ) == 0 ) {
+		vk_temporal_motion_readback_arm();
+		return;
+	}
+	if ( ri.Cmd_Argc() > 2 && Q_stricmp( ri.Cmd_Argv( 2 ), "temporal-history-arm" ) == 0 ) {
+		vk_temporal_history_consume_arm();
+		return;
+	}
+	if ( ri.Cmd_Argc() > 2 && Q_stricmp( ri.Cmd_Argv( 2 ), "temporal-resolve-arm" ) == 0 ) {
+		vk_temporal_resolve_readback_arm();
 		return;
 	}
 

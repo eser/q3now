@@ -68,6 +68,46 @@ int main( void ) {
 	key.textureCount=0; key.family=(vkTemporalGenericFamily_t)99;
 	CHECK(!VK_TemporalGenericCatalogSelect(&key,&out) && memcmp(&out,&before,sizeof(out))==0);
 	CHECK(!VK_TemporalGenericCatalogSelect(NULL,&out)); CHECK(!VK_TemporalGenericCatalogSelect(&key,NULL));
+
+	// The inverse resolver is generation-bound and proves a unique exact
+	// pointer+size match for both ordinary stages. Byte-equal impostors, a
+	// duplicate record, an incomplete generation or a stale size fail closed.
+	key=(vkTemporalGenericKey_t){1,VK_TEMPORAL_GENERIC_PLAIN,qfalse,qfalse};
+	CHECK(VK_TemporalGenericCatalogSelect(&key,&out));
+	{
+		vkTemporalShaderModuleRecord_t records[3];
+		vkTemporalShaderModuleRegistryView_t registry;
+		VkShaderModule vs=(VkShaderModule)(uintptr_t)0x101;
+		VkShaderModule fs=(VkShaderModule)(uintptr_t)0x202;
+		VkShaderModule gotVs=(VkShaderModule)(uintptr_t)0xA5;
+		VkShaderModule gotFs=(VkShaderModule)(uintptr_t)0x5A;
+		uint32_t generation=0xDEADBEEFu;
+		memset(records,0,sizeof(records));memset(&registry,0,sizeof(registry));
+		records[0].module=vs;records[0].blob=out.ordinaryVertex;
+		records[1].module=fs;records[1].blob=out.ordinaryFragment;
+		registry.records=records;registry.count=2;registry.generation=7;
+		registry.ready=qtrue;registry.complete=qtrue;
+		CHECK(VK_TemporalGenericCatalogResolveOrdinaryModules(&out,&registry,
+			&gotVs,&gotFs,&generation));
+		CHECK(gotVs==vs&&gotFs==fs&&generation==7u);
+		registry.ready=qfalse;gotVs=(VkShaderModule)(uintptr_t)0xA5;
+		gotFs=(VkShaderModule)(uintptr_t)0x5A;generation=0xDEADBEEFu;
+		CHECK(!VK_TemporalGenericCatalogResolveOrdinaryModules(&out,&registry,
+			&gotVs,&gotFs,&generation));
+		CHECK(gotVs==(VkShaderModule)(uintptr_t)0xA5
+			&&gotFs==(VkShaderModule)(uintptr_t)0x5A&&generation==0xDEADBEEFu);
+		registry.ready=qtrue;registry.complete=qfalse;
+		CHECK(!VK_TemporalGenericCatalogResolveOrdinaryModules(&out,&registry,
+			&gotVs,&gotFs,&generation));
+		registry.complete=qtrue;records[1].blob.size-=4u;
+		CHECK(!VK_TemporalGenericCatalogResolveOrdinaryModules(&out,&registry,
+			&gotVs,&gotFs,&generation));
+		records[1].blob=out.ordinaryFragment;
+		records[2]=records[0];records[2].module=(VkShaderModule)(uintptr_t)0x303;
+		registry.count=3;
+		CHECK(!VK_TemporalGenericCatalogResolveOrdinaryModules(&out,&registry,
+			&gotVs,&gotFs,&generation));
+	}
 	puts("vk temporal generic catalog contract: PASS");
 	return 0;
 }

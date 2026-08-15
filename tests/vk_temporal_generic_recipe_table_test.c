@@ -177,13 +177,15 @@ int main( void ) {
 	vkTemporalRecipeBatchAuthority_t auth={11,12,13,14}, badAuth;
 	vkTemporalGenericRecipeCaptureInput_t in;
 	vkTemporalGenericRecipe_t got, gotAgain, gotBefore;
+	vkTemporalGenericRecipe_t badRecipe;
+	vkTemporalGenericRecipeView_t view, viewBefore;
 	vkTemporalGenericCatalogEntry_t entry;
 	vkTemporalGenericKey_t identified, key={1,VK_TEMPORAL_GENERIC_PLAIN,qfalse,qfalse};
 	Fixture f, equivalentFixture;
 	vkTemporalGenericRecipe_t equivalentRecipe;
 	vkTemporalGenericRecipeReceipt_t receipt, receiptBefore;
 	uint32_t id, gen, epoch, tx, family, env, fog, accepted=0;
-	qboolean seen[VK_TEMPORAL_GENERIC_CATALOG_COUNT];
+	qboolean seen[VK_TEMPORAL_GENERIC_CATALOG_COUNT + 1u];
 
 	CHECK(MakeFixture(&f));
 	CHECK(VK_TemporalGenericCatalogSelect(&key,&entry));
@@ -198,7 +200,7 @@ int main( void ) {
 			if(!expected)continue;
 			CHECK(VK_TemporalGenericCatalogIdentify(loopEntry.ordinaryVertex,
 				loopEntry.ordinaryFragment,&loopFound,&loopId));
-			CHECK(loopId<VK_TEMPORAL_GENERIC_CATALOG_COUNT&&!seen[loopId]);seen[loopId]=qtrue;
+			CHECK(loopId>0u&&loopId<=VK_TEMPORAL_GENERIC_CATALOG_COUNT&&!seen[loopId]);seen[loopId]=qtrue;
 			CHECK(loopFound.textureCount==tx&&loopFound.family==(vkTemporalGenericFamily_t)family
 				&&loopFound.environment==(qboolean)env&&loopFound.shaderFog==(qboolean)fog);
 			// Every admitted vertex identity rejects a deliberately foreign
@@ -230,7 +232,7 @@ int main( void ) {
 	CHECK(VK_TemporalGenericCatalogIdentify(entry.ordinaryVertex,entry.ordinaryFragment,&identified,&id));
 	CHECK(identified.textureCount==key.textureCount&&identified.family==key.family
 		&&identified.environment==key.environment&&identified.shaderFog==key.shaderFog
-		&&id<VK_TEMPORAL_GENERIC_CATALOG_COUNT);
+		&&id>0u&&id<=VK_TEMPORAL_GENERIC_CATALOG_COUNT);
 	{ vkTemporalGenericKey_t kbefore=identified;uint32_t ibefore=id;
 		vkTemporalShaderBlob_t wrong=entry.ordinaryVertex;wrong.size-=4;
 		CHECK(!VK_TemporalGenericCatalogIdentify(wrong,entry.ordinaryFragment,&identified,&id));
@@ -261,6 +263,38 @@ int main( void ) {
 		&&got.entryGeneration==gen&&got.numBindings==2&&got.numAttributes==2
 		&&got.specializationWords[0]==1&&got.sceneBlend.colorWriteMask==f.attachment.colorWriteMask
 		&&got.capturedAuthority.frameId==auth.frameId);
+	CHECK(VK_TemporalGenericRecipeBuildView(&got,
+		(VkShaderModule)(uintptr_t)101,(VkShaderModule)(uintptr_t)102,
+		(VkPipelineLayout)(uintptr_t)103,&view));
+	CHECK(view.gp.pStages==view.stages
+		&&view.gp.pVertexInputState==&view.vertexInput
+		&&view.gp.pInputAssemblyState==&view.inputAssembly
+		&&view.gp.pViewportState==&view.viewport
+		&&view.gp.pRasterizationState==&view.rasterization
+		&&view.gp.pMultisampleState==&view.multisample
+		&&view.gp.pDepthStencilState==&view.depthStencil
+		&&view.gp.pColorBlendState==&view.colorBlend
+		&&view.gp.pDynamicState==&view.dynamic
+		&&view.stages[0].pSpecializationInfo==&view.specialization.vertexInfo
+		&&view.stages[1].pSpecializationInfo==&view.specialization.fragmentInfo
+		&&view.specialization.vertexInfo.pMapEntries==view.specialization.vertexMap
+		&&view.specialization.fragmentInfo.pMapEntries==view.specialization.fragmentMaps
+		&&view.specialization.vertexInfo.pData==&view.vertexWord
+		&&view.specialization.fragmentInfo.pData==view.fragmentWords
+		&&view.vertexInput.pVertexBindingDescriptions==view.bindings
+		&&view.vertexInput.pVertexAttributeDescriptions==view.attributes
+		&&view.colorBlend.pAttachments==&view.sceneBlend
+		&&view.dynamic.pDynamicStates==view.dynamicStates
+		&&view.stages[0].module==(VkShaderModule)(uintptr_t)101
+		&&view.stages[1].module==(VkShaderModule)(uintptr_t)102
+		&&view.gp.layout==(VkPipelineLayout)(uintptr_t)103);
+	{ vkGenericSpecializationFacts_t facts={got.key.textureCount,got.key.shaderFog};
+		CHECK(VK_GenericTemporalSpecializationValidate(&view.gp,&facts,NULL)); }
+	badRecipe=got;badRecipe.valid=qfalse;memset(&view,0xA5,sizeof(view));viewBefore=view;
+	CHECK(!VK_TemporalGenericRecipeBuildView(&badRecipe,
+		(VkShaderModule)(uintptr_t)101,(VkShaderModule)(uintptr_t)102,
+		(VkPipelineLayout)(uintptr_t)103,&view));
+	CHECK(memcmp(&view,&viewBefore,sizeof(view))==0);
 	// The recipe owns every nested array/value: poison all borrowed graph seams
 	// after capture and prove the retrieved record is unchanged field-wise.
 	f.bindings[0].stride=999;f.bindings[1].binding=99;

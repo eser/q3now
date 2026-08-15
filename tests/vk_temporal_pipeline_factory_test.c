@@ -196,8 +196,9 @@ int main(void){
 		s_iqmCatalog.invalidateFragment=B(b7,sizeof(b7));s_iqmCatalog.generation=1;
 		s_splitMode=1;s_createPipeCount=0;s_genericLayout=lo.adopted;s_iqmLayout=(ralPipelineLayout_t*)9;
 		VK_TemporalGenericPipelineFactoryInit(&go);VK_TemporalIqmPipelineFactoryInit(&io);
+		CHECK(VK_TemporalPipelineLayoutAcquire(&lo)); /* table-level candidate guard */
 		CHECK(VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops));
-		CHECK(go.ready&&go.pipelines[0]&&go.pipelines[1]&&go.pipelines[2]&&lo.leases==1&&s_createPipeCount==3);
+		CHECK(go.ready&&go.pipelines[0]&&go.pipelines[1]&&go.pipelines[2]&&lo.leases==2&&s_createPipeCount==3);
 		// Every production specialization admission gate rejects before any
 		// candidate create and leaves the live three-pipeline owner unchanged.
 #define SPLIT_REJECT_SLOT(slot,bad) do { \
@@ -258,7 +259,9 @@ int main(void){
 			{1,VK_TEMPORAL_GENERIC_PLAIN,qtrue,qfalse},
 			{2,VK_TEMPORAL_GENERIC_CL,qfalse,qfalse}};uint32_t k;
 			for(k=0;k<3;k++){gi.key=keys[k];gi.pipelineGeneration++;CHECK(VK_TemporalGenericCatalogSelect(&gi.key,&s_splitEntry));
-				s_createPipeCount=0;s_drainFails=(k==0);CHECK(VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops));
+				s_createPipeCount=0;s_drainFails=(k==0);
+				if(k==0)CHECK(!VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops));
+				else CHECK(VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops));
 				CHECK(s_createPipeCount==3&&go.ready);if(k==0){CHECK(go.retiringLease);CHECK(VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops));CHECK(!go.retiringLease);}}
 		}
 		io.allocationGeneration=UINT32_MAX;creates=s_createPipeCount;
@@ -268,7 +271,15 @@ int main(void){
 		CHECK(VK_TemporalIqmPipelineFactoryEnsure(&io,(ralBackend_t*)1,(ralPipelineLayout_t*)9,1,&iqm,1,1,
 			RAL_FORMAT_R16G16B16A16_SFLOAT,RAL_FORMAT_D32_SFLOAT,&s_iqmCatalog,&pops));
 		CHECK(io.ready&&s_createPipeCount==4);
-		CHECK(VK_TemporalGenericPipelineFactoryRelease(&go,&pops)&&lo.leases==0);
+		// A failed replacement drain never reports a clean publication, and an
+		// immediate disable can retry without wedging ready+retiring ownership.
+		gi.pipelineGeneration++;s_createPipeCount=0;s_drainFails=1;
+		CHECK(!VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops));
+		CHECK(go.ready&&go.retiringLease&&lo.leases==3);
+		s_drainFails=1;CHECK(!VK_TemporalGenericPipelineFactoryRelease(&go,&pops));
+		CHECK(go.ready&&go.retiringLease&&lo.leases==3);
+		CHECK(VK_TemporalGenericPipelineFactoryRelease(&go,&pops)&&lo.leases==1);
+		CHECK(VK_TemporalPipelineLayoutReleaseLease(&lo)&&lo.leases==0);
 		s_drainFails=1;CHECK(!VK_TemporalIqmPipelineFactoryRelease(&io,(ralBackend_t*)1,&pops));
 		CHECK(!io.ready&&io.pendingDrain);CHECK(VK_TemporalIqmPipelineFactoryRelease(&io,(ralBackend_t*)1,&pops));
 		s_splitMode=0;
@@ -282,11 +293,13 @@ int main(void){
 		memset(&gi,0,sizeof(gi));gi.key=(vkTemporalGenericKey_t){2,VK_TEMPORAL_GENERIC_PLAIN,qfalse,qfalse};
 		gi.pipelineGeneration=gi.topologyGeneration=gi.catalogGeneration=1;gi.sceneFormat=RAL_FORMAT_R16G16B16A16_SFLOAT;gi.depthFormat=RAL_FORMAT_D32_SFLOAT;
 		s_splitMode=1;s_genericLayout=lo.adopted;VK_TemporalGenericPipelineFactoryInit(&go);
+		CHECK(VK_TemporalPipelineLayoutAcquire(&lo)); /* table-level candidate guard */
 		for(shaderFog=0;shaderFog<2;shaderFog++){gi.key.shaderFog=(qboolean)shaderFog;fragmentSpecWords[10]=shaderFog;gi.pipelineGeneration++;
 			CHECK(VK_TemporalGenericCatalogSelect(&gi.key,&s_splitEntry));s_createPipeCount=0;
 			CHECK(VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops));CHECK(go.ready&&s_createPipeCount==3);}
 		fragmentSpecWords[10]=0u;
-		CHECK(VK_TemporalGenericPipelineFactoryRelease(&go,&pops));s_splitMode=0; }
+		CHECK(VK_TemporalGenericPipelineFactoryRelease(&go,&pops));
+		CHECK(VK_TemporalPipelineLayoutReleaseLease(&lo));s_splitMode=0; }
 	CHECK(VK_TemporalPipelineLayoutRelease(&lo,&lops));
 	// Layout candidate failures are output-atomic.
 	VK_TemporalPipelineLayoutInit(&lo);before=fo;s_failRaw=1;CHECK(!VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,sets,payload,1,qfalse,&lops));CHECK(!lo.ready);s_failRaw=0;s_failAdopt=1;CHECK(!VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,sets,payload,1,qfalse,&lops));CHECK(!lo.ready);s_failAdopt=0;

@@ -27,6 +27,8 @@
 #ifdef USE_VULKAN
 
 #include "../renderer/ral_vulkan/ral_vulkan_bridge.h"
+#include "vk_bindless_publication.h"
+#include "vk_bindless_cohort.h"
 
 struct image_s;     // forward — from tr_local.h
 struct ralTexture_s;
@@ -149,6 +151,30 @@ void vk_ral_adopt_one_texture( VkImage vkImage, VkImageView vkView, VkFormat fmt
 // did not come up (caps not advertised / Ral_CreateBindGroup failure).
 struct ralBindGroupLayout_s *vk_ral_get_bindless_layout( void );
 struct ralBindGroup_s       *vk_ral_get_bindless_set   ( void );
+qboolean vk_ral_bindless_get_cohort(
+	vkRalBindlessCohortReceipt_t *outReceipt );
+
+qboolean vk_ral_bindless_publish_texture_view( struct image_s *image,
+	uint32_t slot, struct ralTextureView_s *view,
+	vkBindlessPublicationKind_t kind );
+qboolean vk_ral_bindless_publish_texture_views( struct image_s *const *images,
+	const uint32_t *slots, struct ralTextureView_s *const *views,
+	const vkBindlessPublicationKind_t *kinds, uint32_t count );
+qboolean vk_ral_bindless_publish_texture( struct image_s *image,
+	uint32_t slot, struct ralTexture_s *texture,
+	vkBindlessPublicationKind_t kind );
+qboolean vk_ral_bindless_publish_sampler( uint32_t slot,
+	VkSampler sampler, const Vk_Sampler_Def *definition );
+qboolean vk_ral_bindless_record_legacy_exact( struct image_s *image,
+	uint32_t slot, VkImageView view );
+qboolean vk_ral_bindless_record_raw_image( struct image_s *image,
+	uint32_t slot, VkImageView view, vkBindlessPublicationKind_t kind );
+qboolean vk_ral_bindless_record_reserved( uint32_t slot, VkImageView view,
+	const void *ownerIdentity, const void *descriptorIdentity );
+qboolean vk_ral_bindless_tombstone( uint32_t slot );
+qboolean vk_ral_bindless_query_ordinary( const struct image_s *image,
+	vkBindlessOrdinaryReceipt_t *outReceipt );
+void vk_ral_bindless_sampler_pool_invalidate( void );
 
 // Per-image registration. `pic` is the original RGBA8 source (after any
 // up-front resampling done by R_CreateImageArray's caller); a NULL pic

@@ -153,6 +153,7 @@ int main( void ) {
 	vkTemporalMotionMaterialization_t owner, before;
 	vkTemporalMotionMaterializationInput_t input;
 	vkTemporalMotionMaterializationReceipt_t receipt, receiptBefore;
+	vkTemporalMotionMaterializationProductView_t productView, productViewBefore;
 	vkTemporalLayoutOps_t ops;
 	uint32_t stableGeneration;
 	int tc, vc, cc, sc, lc, td, vd, ld;
@@ -189,6 +190,24 @@ int main( void ) {
 		&& receipt.targetAllocationGeneration == 1
 		&& receipt.pipelineLayoutAllocationGeneration == 1
 		&& receipt.allocationGeneration == 1 );
+	memset( &productView, 0xa5, sizeof( productView ) );
+	CHECK( VK_TemporalMotionMaterializationGetProductView( &owner, &receipt,
+		(ralTexture_t *)(uintptr_t)0x7000, (ralTexture_t *)(uintptr_t)0x8000,
+		&productView ) );
+	CHECK( productView.scene == (ralTexture_t *)(uintptr_t)0x7000
+		&& productView.depth == (ralTexture_t *)(uintptr_t)0x8000
+		&& productView.velocity == owner.targets.velocity
+		&& productView.velocityView == owner.targets.velocityView
+		&& productView.validity == owner.targets.validity
+		&& productView.validityView == owner.targets.validityView
+		&& productView.pipelineLayout == owner.pipelineLayout.adopted
+		&& productView.rawPipelineLayout == owner.pipelineLayout.raw );
+	productViewBefore = productView; receipt.allocationGeneration++;
+	CHECK( !VK_TemporalMotionMaterializationGetProductView( &owner, &receipt,
+		(ralTexture_t *)(uintptr_t)0x7000, (ralTexture_t *)(uintptr_t)0x8000,
+		&productView )
+		&& memcmp( &productView, &productViewBefore, sizeof( productView ) ) == 0 );
+	receipt.allocationGeneration--;
 
 	tc=s_textureCreates;vc=s_viewCreates;cc=s_capsCalls;sc=s_supportCalls;lc=s_layoutCreates;
 	CHECK( VK_TemporalMotionMaterializationEnsureAfterFence(

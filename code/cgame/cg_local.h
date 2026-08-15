@@ -1626,6 +1626,9 @@ void CG_Player( centity_t *cent );
 void CG_ResetPlayerEntity( centity_t *cent );
 void CG_AddRefEntityTemporalBase( centity_t *cent, const refEntity_t *ent,
 	cgTemporalRole_t role );
+#if FEAT_IQM
+qboolean CG_ParseIQMAnimations( const char *modelName, clientInfo_t *ci );
+#endif
 void CG_TemporalIdentityMarkAllDiscontinuous( void );
 void CG_AddRefEntityWithPowerups( centity_t *cent, refEntity_t *ent,
 	entityState_t *state, qboolean isPlayerPart, int team,
