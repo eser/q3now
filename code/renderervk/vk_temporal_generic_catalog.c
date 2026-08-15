@@ -61,7 +61,7 @@ qboolean VK_TemporalGenericCatalogIdentify( vkTemporalShaderBlob_t ordinaryVerte
 			foundKey.family = VK_TEMPORAL_GENERIC_##fam; \
 			foundKey.environment = (env) ? qtrue : qfalse; \
 			foundKey.shaderFog = (fog) ? qtrue : qfalse; \
-			foundId = id; matches++; \
+			foundId = id + 1u; matches++; \
 		} \
 		id++; \
 	} while ( 0 );
@@ -87,6 +87,40 @@ qboolean VK_TemporalGenericCatalogKeyId( const vkTemporalGenericKey_t *key,
 			|| identified.environment != key->environment
 			|| identified.shaderFog != key->shaderFog ) return qfalse;
 	*outCatalogId = id;
+	return qtrue;
+}
+
+qboolean VK_TemporalGenericCatalogResolveOrdinaryModules(
+		const vkTemporalGenericCatalogEntry_t *entry,
+		const vkTemporalShaderModuleRegistryView_t *registry,
+		VkShaderModule *outVertex, VkShaderModule *outFragment,
+		uint32_t *outRegistryGeneration ) {
+	VkShaderModule vertex = VK_NULL_HANDLE;
+	VkShaderModule fragment = VK_NULL_HANDLE;
+	uint32_t vertexMatches = 0, fragmentMatches = 0, i;
+	if ( !entry || !registry || !registry->records || !registry->count
+			|| !registry->generation || !registry->ready || !registry->complete
+			|| !entry->ordinaryVertex.bytes || !entry->ordinaryVertex.size
+			|| !entry->ordinaryFragment.bytes || !entry->ordinaryFragment.size
+			|| !outVertex || !outFragment || !outRegistryGeneration ) return qfalse;
+	for ( i = 0; i < registry->count; ++i ) {
+		const vkTemporalShaderModuleRecord_t *record = &registry->records[i];
+		if ( record->module == VK_NULL_HANDLE ) continue;
+		if ( BlobEqual( record->blob, entry->ordinaryVertex ) ) {
+			vertex = record->module;
+			vertexMatches++;
+		}
+		if ( BlobEqual( record->blob, entry->ordinaryFragment ) ) {
+			fragment = record->module;
+			fragmentMatches++;
+		}
+	}
+	if ( vertexMatches != 1u || fragmentMatches != 1u
+			|| vertex == VK_NULL_HANDLE || fragment == VK_NULL_HANDLE
+			|| vertex == fragment ) return qfalse;
+	*outVertex = vertex;
+	*outFragment = fragment;
+	*outRegistryGeneration = registry->generation;
 	return qtrue;
 }
 

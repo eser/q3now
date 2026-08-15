@@ -11,6 +11,17 @@
 #include "vk_temporal_entmat_runtime.h"
 #include "vk_temporal_motion_materialization.h"
 #include "vk_temporal_generic_recipe_table.h"
+#include "vk_temporal_generic_pipeline_table.h"
+#include "vk_temporal_motion_recording.h"
+#include "vk_temporal_main_activation.h"
+#include "vk_temporal_main_rendering.h"
+#include "vk_temporal_iqm_command.h"
+#include "vk_temporal_motion_readback.h"
+#include "vk_temporal_history_consume.h"
+#include "vk_temporal_history_store.h"
+#include "vk_temporal_resolved_hdr.h"
+#include "vk_temporal_resolve.h"
+#include "vk_temporal_resolve_readback.h"
 #include "tr_temporal_history.h"
 #include "../renderercommon/r_log.h"  // R_LOG / R_LOG_DECLARE_CHANNEL
 #include "vk_ral_textures.h"   // parallel-paths RAL texture migration lifecycle
@@ -76,7 +87,9 @@ enum {
 	VK_PM_CAPTURE               = 1ull << 12,
 	VK_PM_PRESENT               = 1ull << 13,
 	VK_PM_CASCADE_SHADOW        = 1ull << 14,
-	VK_PM_DLIGHT_SHADOW         = 1ull << 15
+	VK_PM_DLIGHT_SHADOW         = 1ull << 15,
+	VK_PM_TEMPORAL_MAIN         = 1ull << 16,
+	VK_PM_TEMPORAL_MAIN_RESUME  = 1ull << 17
 };
 
 static struct {
@@ -89,6 +102,534 @@ static volatile int vk_swapchain_recreate_requested;
 static vkTemporalEntMatRuntime_t vk_temporal_entmat_runtime;
 static vkTemporalMotionMaterialization_t vk_temporal_motion_materialization;
 static vkTemporalGenericRecipeTable_t vk_temporal_generic_recipe_table;
+static vkTemporalGenericPipelineTable_t vk_temporal_generic_pipeline_table;
+static vkTemporalMotionRecordingOwner_t vk_temporal_motion_recording;
+static vkTemporalMainActivationOwner_t vk_temporal_main_activation;
+static vkTemporalMotionReadbackOwner_t vk_temporal_motion_readback;
+static vkTemporalHistoryConsumeOwner_t vk_temporal_history_consume;
+static vkTemporalHistoryStoreOwner_t vk_temporal_history_store_owner;
+static vkTemporalResolvedHdrOwner_t vk_temporal_resolved_hdr;
+static vkTemporalResolveOwner_t vk_temporal_resolve;
+static vkTemporalResolveReadbackOwner_t vk_temporal_resolve_readback;
+static vkTemporalIqmPayloadOwner_t vk_temporal_iqm_payload;
+static vkTemporalIqmExact3FactoryOwner_t vk_temporal_iqm_exact3_factory;
+static uint32_t vk_temporal_iqm_geometry_live_count;
+#if FEAT_IQM
+static qboolean vk_temporal_iqm_geometry_frame_ready;
+typedef struct {
+	temporalIqmDrawFacts_t draws[TEMPORAL_IQM_MAX_DRAWS];
+	iqmData_t *models[TEMPORAL_IQM_MAX_DRAWS];
+	image_t *images[TEMPORAL_IQM_MAX_DRAWS];
+	temporalIqmSequence_t sequence;
+	vkTemporalIqmPayloadAuthor_t author;
+	vkTemporalIqmPayloadContentReceipt_t content;
+	uint32_t drawCount;
+	uint32_t currentDrawSurfOrdinal;
+	qboolean prepared;
+	qboolean bound;
+} vkTemporalIqmPrimaryContext_t;
+static vkTemporalIqmPrimaryContext_t vk_temporal_iqm_primary;
+_Static_assert( sizeof( vkTemporalIqmPrimaryContext_t ) <= 524288u,
+	"active IQM primary context must remain bounded" );
+#endif
+static uint32_t vk_scene_color_attachment_generation_counter;
+static uint32_t vk_scene_color_attachment_generation;
+static qboolean vk_temporal_motion_seal_attempted;
+
+static void vk_temporal_iqm_resources_release_after_idle(
+	const char *reason );
+
+static struct {
+	vkHdrPostprocessSource_t current;
+	vkHdrPostprocessSource_t route;
+	vkTemporalResolvedHdrReceipt_t target;
+	vkTemporalResolvedHdrContentReceipt_t recorded;
+	vkTemporalResolvedHdrContentReceipt_t submitted;
+	vkTemporalResolvedHdrContentReceipt_t prevalidated;
+	uint64_t contentSerial;
+	qboolean prepared;
+	qboolean copied;
+	qboolean producerPrevalidated;
+} vk_temporal_resolved_hdr_frame;
+static struct {
+	vkTemporalResolveAuthorityReceipt_t authority;
+	vkTemporalResolveProductView_t products;
+	vkTemporalResolveOwnerReceipt_t owner;
+	vkTemporalResolveTicket_t recorded;
+	vkTemporalResolveTicket_t submitted;
+	vkTemporalResolveTicket_t prevalidated;
+	qboolean prepared;
+	qboolean recordedCommands;
+	qboolean readbackRecorded;
+} vk_temporal_resolve_frame;
+static uint32_t vk_temporal_bound_pipeline_slot = UINT32_MAX;
+
+static vkTemporalResolveReadbackDepthEncoding_t
+vk_temporal_resolve_readback_depth_encoding( VkFormat format );
+static qboolean vk_temporal_history_store_materialize_after_fence(
+	const temporalHistoryResources_t *history, int worldIndex,
+	const vkTemporalResolvedHdrReceipt_t *resolved );
+static void vk_temporal_history_store_release_after_idle( void );
+static qboolean vk_temporal_entmat_ring_ready_exact(
+	uint32_t requiredSlots );
+static qboolean vk_temporal_entmat_ring_is_ready( void );
+static qboolean vk_temporal_diagnostic_arm_ready( qboolean requireResolved );
+static void vk_temporal_entmat_ring_invalidate( void );
+
+static void vk_temporal_resolved_hdr_reset_frame( void ) {
+	memset( &vk_temporal_resolved_hdr_frame.current, 0,
+		sizeof( vk_temporal_resolved_hdr_frame.current ) );
+	memset( &vk_temporal_resolved_hdr_frame.route, 0,
+		sizeof( vk_temporal_resolved_hdr_frame.route ) );
+	memset( &vk_temporal_resolved_hdr_frame.target, 0,
+		sizeof( vk_temporal_resolved_hdr_frame.target ) );
+	memset( &vk_temporal_resolved_hdr_frame.recorded, 0,
+		sizeof( vk_temporal_resolved_hdr_frame.recorded ) );
+	vk_temporal_resolved_hdr_frame.prepared = qfalse;
+	vk_temporal_resolved_hdr_frame.copied = qfalse;
+	memset( &vk_temporal_resolved_hdr_frame.prevalidated, 0,
+		sizeof( vk_temporal_resolved_hdr_frame.prevalidated ) );
+	vk_temporal_resolved_hdr_frame.producerPrevalidated = qfalse;
+	memset( &vk_temporal_resolve_frame.authority, 0,
+		sizeof( vk_temporal_resolve_frame.authority ) );
+	memset( &vk_temporal_resolve_frame.products, 0,
+		sizeof( vk_temporal_resolve_frame.products ) );
+	memset( &vk_temporal_resolve_frame.owner, 0,
+		sizeof( vk_temporal_resolve_frame.owner ) );
+	memset( &vk_temporal_resolve_frame.recorded, 0,
+		sizeof( vk_temporal_resolve_frame.recorded ) );
+	vk_temporal_resolve_frame.prepared = qfalse;
+	vk_temporal_resolve_frame.recordedCommands = qfalse;
+	vk_temporal_resolve_frame.readbackRecorded = qfalse;
+	memset( &vk_temporal_resolve_frame.prevalidated, 0,
+		sizeof( vk_temporal_resolve_frame.prevalidated ) );
+}
+
+static void vk_temporal_resolve_readback_cancel_recorded( void ) {
+	if ( !vk_temporal_resolve_frame.readbackRecorded ) return;
+	if ( !VK_TemporalResolveReadbackResolveSubmit(
+		&vk_temporal_resolve_readback,
+		vk_temporal_resolve_frame.recorded.authority.commandSlot,
+		qfalse, NULL, NULL ) )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal resolve readback diagnostic cancel failed" );
+	vk_temporal_resolve_frame.readbackRecorded = qfalse;
+}
+
+static qboolean vk_temporal_submit_has_command_local_residue(
+		uint32_t commandSlot ) {
+	if ( vk_temporal_resolved_hdr_frame.prepared
+			|| vk_temporal_resolved_hdr_frame.copied
+			|| vk_temporal_resolved_hdr_frame.producerPrevalidated
+			|| vk_temporal_resolve_frame.prepared
+			|| vk_temporal_resolve_frame.recordedCommands
+			|| vk_temporal_resolve_frame.readbackRecorded
+			|| vk_temporal_main_activation.submissionPending ) return qtrue;
+	if ( vk_temporal_history_consume.initialized
+			&& commandSlot < vk_temporal_history_consume.frameCount
+			&& vk_temporal_history_consume.slots[commandSlot].state >=
+				VK_TEMPORAL_HISTORY_CONSUME_RECORDED ) return qtrue;
+	if ( vk_temporal_motion_readback.initialized
+			&& commandSlot < vk_temporal_motion_readback.frameCount
+			&& vk_temporal_motion_readback.slots[commandSlot].state >=
+				VK_TEMPORAL_READBACK_RECORDED ) return qtrue;
+	if ( vk_temporal_resolve_readback.initialized
+			&& commandSlot < vk_temporal_resolve_readback.frameCount
+			&& vk_temporal_resolve_readback.slots[commandSlot].state >=
+				VK_TEMPORAL_RESOLVE_READBACK_RECORDED ) return qtrue;
+	return qfalse;
+}
+
+static const vkHdrPostprocessSource_t *vk_temporal_postprocess_route( void ) {
+	return vk_temporal_resolved_hdr_frame.copied
+		&& vk_temporal_resolved_hdr_frame.route.resolved
+		? &vk_temporal_resolved_hdr_frame.route : NULL;
+}
+
+static qboolean vk_temporal_resolved_hdr_prepare_frame(
+		const temporalBatchRequest_t *request,
+		const vkTemporalResolvedHdrReceipt_t *target ) {
+	vkHdrPostprocessSource_t current;
+	if ( !R_TemporalBatchRequestValidateExact( request ) || !request->enabled
+			|| !target || !target->ready || !vk.cmd ) return qfalse;
+	memset( &current, 0, sizeof( current ) );
+	current.backend = vk_ral_get_backend();
+	current.attachment = vk.ral_color_image;
+	current.postprocessGroup = vk.ral_color_descriptor;
+	current.histogramGroup = vk.ral_histogram_descriptor;
+	current.batchToken = request->token;
+	current.frameId = request->frameId;
+	current.commandSlot = (uint32_t)vk.cmd_index;
+	current.frameCount = NUM_COMMAND_BUFFERS;
+	current.worldIndex = request->worldIndex;
+	current.width = request->width;
+	current.height = request->height;
+	current.topologyEpoch = request->topologyEpoch;
+	current.planGeneration = request->planGeneration;
+	current.sceneColorAttachmentGeneration =
+		vk_scene_color_attachment_generation;
+	current.sceneFormat = RAL_FORMAT_R16G16B16A16_SFLOAT;
+	if ( !VK_TemporalResolvedHdrRouteSource(
+			&current, target, NULL, &vk_temporal_resolved_hdr_frame.route ) )
+		return qfalse;
+	vk_temporal_resolved_hdr_frame.current = current;
+	vk_temporal_resolved_hdr_frame.target = *target;
+	vk_temporal_resolved_hdr_frame.prepared = qtrue;
+	return qtrue;
+}
+
+void vk_temporal_resolved_hdr_record_copy( void ) {
+	vkTemporalResolvedHdrContentReceipt_t content;
+	vkHdrPostprocessSource_t route;
+	ralImageCopy_t region;
+	uint64_t serial;
+	if ( !vk_temporal_resolved_hdr_frame.prepared
+			|| vk_temporal_resolved_hdr_frame.copied || !vk.cmd
+			|| vk.cmd->open_dynamic_pass != VK_DYN_PASS_NONE
+			|| vk_temporal_resolved_hdr_frame.current.width !=
+				(uint32_t)glConfig.vidWidth
+			|| vk_temporal_resolved_hdr_frame.current.height !=
+				(uint32_t)glConfig.vidHeight ) return;
+	if ( vk_temporal_resolved_hdr_frame.contentSerial == UINT64_MAX ) return;
+	serial = vk_temporal_resolved_hdr_frame.contentSerial + 1u;
+	if ( !VK_TemporalResolvedHdrBuildContentReceipt(
+			&vk_temporal_resolved_hdr_frame.current,
+			&vk_temporal_resolved_hdr_frame.target, serial, &content )
+			|| !VK_TemporalResolvedHdrRouteSource(
+				&vk_temporal_resolved_hdr_frame.current,
+				&vk_temporal_resolved_hdr_frame.target, &content, &route )
+			|| !route.resolved ) return;
+
+	memset( &region, 0, sizeof( region ) );
+	region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	region.srcSubresource.layerCount = 1;
+	region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	region.dstSubresource.layerCount = 1;
+	region.extent.width = route.width;
+	region.extent.height = route.height;
+	region.extent.depth = 1;
+	Ral_CmdTransitionTexture( vk.cmd->ral_cmd,
+		vk_temporal_resolved_hdr_frame.current.attachment,
+		RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+			| RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		RAL_PIPELINE_STAGE_TRANSFER_BIT,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
+	Ral_CmdTransitionTexture( vk.cmd->ral_cmd, route.attachment,
+		RAL_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+		RAL_PIPELINE_STAGE_TRANSFER_BIT,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL );
+	Ral_CmdCopyImage( vk.cmd->ral_cmd,
+		vk_temporal_resolved_hdr_frame.current.attachment,
+		route.attachment, 1, &region );
+	Ral_CmdTransitionTexture( vk.cmd->ral_cmd,
+		vk_temporal_resolved_hdr_frame.current.attachment,
+		RAL_PIPELINE_STAGE_TRANSFER_BIT,
+		RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+			| RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	Ral_CmdTransitionTexture( vk.cmd->ral_cmd, route.attachment,
+		RAL_PIPELINE_STAGE_TRANSFER_BIT,
+		RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+			| RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	vk_temporal_resolved_hdr_frame.contentSerial = serial;
+	vk_temporal_resolved_hdr_frame.recorded = content;
+	vk_temporal_resolved_hdr_frame.route = route;
+	vk_temporal_resolved_hdr_frame.copied = qtrue;
+}
+
+static qboolean vk_temporal_history_prevalidate_submit(
+		const temporalHistoryPendingWriteReceipt_t *pending ) {
+	const temporalHistoryFeedbackSource_t *source;
+	const vkTemporalResolvedHdrContentReceipt_t *content;
+	if ( !pending || !pending->valid || !pending->write.valid ) return qfalse;
+	source = &pending->write.source;
+	content = &vk_temporal_resolved_hdr_frame.recorded;
+	if ( !content->valid || content->submitted
+			|| content->backend != source->backend
+			|| content->sourceSceneColor != source->sourceSceneColor
+			|| content->sourcePostprocessGroup !=
+				source->sourcePostprocessGroup
+			|| content->sourceHistogramGroup != source->sourceHistogramGroup
+			|| content->target != source->sourceColor
+			|| content->targetView != source->sourceColorView
+			|| content->postprocessGroup != source->postprocessGroup
+			|| content->histogramGroup != source->histogramGroup
+			|| content->batchToken != source->batchToken
+			|| content->frameId != source->frameId
+			|| content->contentSerial != source->contentSerial
+			|| content->commandSlot != source->commandSlot
+			|| content->frameCount != source->frameCount
+			|| content->worldIndex != source->worldIndex
+			|| content->width != source->width
+			|| content->height != source->height
+			|| content->topologyEpoch != source->topologyEpoch
+			|| content->planGeneration != source->planGeneration
+			|| content->sceneColorAttachmentGeneration !=
+				source->sceneColorAttachmentGeneration
+			|| content->targetAllocationGeneration !=
+				source->targetAllocationGeneration
+			|| content->sceneFormat != source->sceneFormat ) return qfalse;
+	if ( source->producer == TEMPORAL_HISTORY_WRITE_CURRENT_SEED ) {
+		if ( !source->resolveOwnerAllocationGeneration
+			&& content->producer == VK_TEMPORAL_RESOLVED_HDR_PRODUCER_COPY
+			&& VK_TemporalResolvedHdrResolveContentSubmit(
+				content, qtrue,
+				&vk_temporal_resolved_hdr_frame.prevalidated ) ) {
+			vk_temporal_resolved_hdr_frame.producerPrevalidated = qtrue;
+			return qtrue;
+		}
+		return qfalse;
+	}
+	if ( source->producer == TEMPORAL_HISTORY_WRITE_RESOLVED_FEEDBACK ) {
+		vkTemporalMainActivationReceipt_t activation;
+		vkTemporalResolveOwnerReceipt_t owner;
+		vkTemporalResolvedHdrReceipt_t target;
+		if ( vk_temporal_resolve_frame.recordedCommands
+			&& content->producer ==
+				VK_TEMPORAL_RESOLVED_HDR_PRODUCER_TEMPORAL_RESOLVE
+			&& source->resolveOwnerAllocationGeneration ==
+				vk_temporal_resolve_frame.recorded.ownerAllocationGeneration
+			&& VK_TemporalMainActivationPeekPendingReceipt(
+				&vk_temporal_main_activation, &activation )
+			&& VK_TemporalResolveGetReceipt( &vk_temporal_resolve, &owner )
+			&& VK_TemporalResolvedHdrGetReceipt(
+				&vk_temporal_resolved_hdr, &target )
+			&& VK_TemporalResolveResolveSubmit(
+				&vk_temporal_resolve_frame.recorded, &owner, &activation,
+				&pending->write, &target, qtrue,
+				&vk_temporal_resolve_frame.prevalidated ) ) {
+			vk_temporal_resolved_hdr_frame.prevalidated =
+				vk_temporal_resolve_frame.prevalidated.content;
+			vk_temporal_resolved_hdr_frame.producerPrevalidated = qtrue;
+			return qtrue;
+		}
+		return qfalse;
+	}
+	return qfalse;
+}
+
+static qboolean vk_temporal_content_matches_feedback_source(
+		const vkTemporalResolvedHdrContentReceipt_t *content,
+		const temporalHistoryFeedbackSource_t *source ) {
+	return content && source && content->valid && content->submitted
+		&& content->backend == source->backend
+		&& content->sourceSceneColor == source->sourceSceneColor
+		&& content->sourcePostprocessGroup == source->sourcePostprocessGroup
+		&& content->sourceHistogramGroup == source->sourceHistogramGroup
+		&& content->target == source->sourceColor
+		&& content->targetView == source->sourceColorView
+		&& content->postprocessGroup == source->postprocessGroup
+		&& content->histogramGroup == source->histogramGroup
+		&& content->batchToken == source->batchToken
+		&& content->frameId == source->frameId
+		&& content->contentSerial == source->contentSerial
+		&& content->commandSlot == source->commandSlot
+		&& content->frameCount == source->frameCount
+		&& content->worldIndex == source->worldIndex
+		&& content->width == source->width && content->height == source->height
+		&& content->topologyEpoch == source->topologyEpoch
+		&& content->planGeneration == source->planGeneration
+		&& content->sceneColorAttachmentGeneration ==
+			source->sceneColorAttachmentGeneration
+		&& content->targetAllocationGeneration ==
+			source->targetAllocationGeneration
+		&& content->sceneFormat == source->sceneFormat ? qtrue : qfalse;
+}
+
+static qboolean vk_temporal_resolved_hdr_resolve_submit(
+		qboolean submitted, qboolean historyCommitted,
+		const temporalHistoryCommittedReceipt_t *committedWrite ) {
+	vkTemporalResolvedHdrContentReceipt_t receipt;
+	vkTemporalResolvedHdrContentReceipt_t publishedReceipt;
+	qboolean published = qfalse, exactCommitted = qtrue;
+	memset( &publishedReceipt, 0, sizeof( publishedReceipt ) );
+	if ( !vk_temporal_resolved_hdr_frame.copied ) {
+		vk_temporal_resolved_hdr_reset_frame();
+		return historyCommitted ? qfalse : qtrue;
+	}
+	if ( vk_temporal_resolve_frame.recordedCommands ) {
+		vkTemporalResolveTicket_t promoted =
+			vk_temporal_resolve_frame.prevalidated;
+		vkTemporalResolveReadbackTicket_t readbackTicket;
+		qboolean readbackPromoted = qfalse;
+		memset( &readbackTicket, 0, sizeof( readbackTicket ) );
+		if ( submitted && historyCommitted
+				&& vk_temporal_resolved_hdr_frame.producerPrevalidated
+				&& promoted.recorded && promoted.submitted
+				&& promoted.content.submitted ) {
+			{
+				temporalHistoryPendingWriteReceipt_t expected, actual;
+				memset( &expected, 0, sizeof( expected ) );
+				memset( &actual, 0, sizeof( actual ) );
+				expected.write = promoted.committedWriteExpected;
+				expected.valid = qtrue;
+				if ( committedWrite ) actual.write = *committedWrite;
+				actual.valid = committedWrite && committedWrite->valid;
+				exactCommitted = R_TemporalHistoryPendingWriteEqualExact(
+					&expected, &actual );
+			}
+			if ( !exactCommitted || !committedWrite
+					|| !vk_temporal_content_matches_feedback_source(
+						&promoted.content, &committedWrite->source ) ) {
+				vk_temporal_resolve_readback_cancel_recorded();
+				vk_temporal_resolved_hdr_reset_frame();
+				return qfalse;
+			}
+			if ( vk_temporal_resolve_frame.readbackRecorded ) {
+				if ( !VK_TemporalResolveReadbackResolveSubmit(
+						&vk_temporal_resolve_readback,
+						promoted.authority.commandSlot, qtrue,
+						&promoted, &readbackTicket ) ) {
+					vk_temporal_resolved_hdr_reset_frame();
+					return qfalse;
+				}
+				readbackPromoted = qtrue;
+			}
+			vk_temporal_resolve_frame.submitted = promoted;
+			vk_temporal_resolved_hdr_frame.submitted = promoted.content;
+			publishedReceipt = promoted.content;
+			published = qtrue;
+			if ( readbackPromoted ) {
+				R_LOG( rch_ral, SEV_INFO,
+						"temporal-resolve-readback schema=1 action=submitted token=%llu frame=%llu previous=%llu content=%llu world=%d extent=%ux%u topology=%u plan=%u scene=%u history=%u:%u motion-materialization=%u motion-target=%u motion-layout=%u table=%u prior-producer=%u prior-token=%llu prior-frame=%llu prior-content=%llu prior-scene=%u prior-target=%u prior-resolve-owner=%u prior-store-owner=%u prior-slot=%u prior-frame-count=%u target=%u owner=%u slot=%u serial=%u depth=%u segments=%u written=%u invalidated=%u sequence=%016llx:%016llx:%u outer-submit=1 content-submit=1\n",
+						(unsigned long long)promoted.authority.batchToken,
+						(unsigned long long)promoted.authority.frameId,
+						(unsigned long long)promoted.authority.previousFrameId,
+						(unsigned long long)promoted.content.contentSerial,
+						promoted.authority.worldIndex,
+						promoted.authority.width, promoted.authority.height,
+						promoted.authority.topologyEpoch,
+						promoted.authority.planGeneration,
+						promoted.authority.sceneColorAttachmentGeneration,
+						promoted.authority.historyAllocationGeneration,
+						promoted.authority.historyReadIndex,
+						promoted.authority.motionMaterializationGeneration,
+						promoted.authority.motionTargetAllocationGeneration,
+						promoted.authority.motionPipelineLayoutAllocationGeneration,
+						promoted.authority.pipelineTableGeneration,
+						(unsigned)promoted.authority.previousHistorySource.producer,
+						(unsigned long long)promoted.authority.previousHistorySource.batchToken,
+						(unsigned long long)promoted.authority.previousHistorySource.frameId,
+						(unsigned long long)promoted.authority.previousHistorySource.contentSerial,
+						promoted.authority.previousHistorySource.sceneColorAttachmentGeneration,
+						promoted.authority.previousHistorySource.targetAllocationGeneration,
+						promoted.authority.previousHistorySource.resolveOwnerAllocationGeneration,
+						promoted.authority.previousHistorySource.storeOwnerAllocationGeneration,
+						promoted.authority.previousHistorySource.commandSlot,
+						promoted.authority.previousHistorySource.frameCount,
+						promoted.authority.resolvedTargetAllocationGeneration,
+						promoted.ownerAllocationGeneration,
+						readbackTicket.commandSlot,
+						readbackTicket.captureSerial,
+						(unsigned)readbackTicket.currentDepthEncoding,
+						promoted.authority.temporalSegments,
+						promoted.authority.written,
+						promoted.authority.invalidated,
+						(unsigned long long)promoted.authority.drawSequence.lane0,
+						(unsigned long long)promoted.authority.drawSequence.lane1,
+						promoted.authority.drawSequence.count );
+			}
+			R_LOG( rch_ral, SEV_INFO,
+				"temporal-resolved-hdr schema=3 token=%llu frame=%llu previous=%llu world=%d extent=%ux%u topology=%u plan=%u scene=%u target=%u resolve-owner=%u slot=%u serial=%llu history=%u:%u prior-producer=%u prior-token=%llu prior-frame=%llu prior-content=%llu prior-scene=%u prior-target=%u prior-resolve-owner=%u prior-store-owner=%u prior-slot=%u prior-frame-count=%u producer=resolve submit=1\n",
+				(unsigned long long)promoted.content.batchToken,
+				(unsigned long long)promoted.content.frameId,
+				(unsigned long long)promoted.authority.previousFrameId,
+				promoted.content.worldIndex, promoted.content.width,
+				promoted.content.height, promoted.content.topologyEpoch,
+				promoted.content.planGeneration,
+				promoted.content.sceneColorAttachmentGeneration,
+				promoted.content.targetAllocationGeneration,
+				promoted.ownerAllocationGeneration,
+				promoted.content.commandSlot,
+				(unsigned long long)promoted.content.contentSerial,
+				promoted.authority.historyAllocationGeneration,
+				promoted.authority.historyReadIndex,
+				(unsigned)promoted.authority.previousHistorySource.producer,
+				(unsigned long long)promoted.authority.previousHistorySource.batchToken,
+				(unsigned long long)promoted.authority.previousHistorySource.frameId,
+				(unsigned long long)promoted.authority.previousHistorySource.contentSerial,
+				promoted.authority.previousHistorySource.sceneColorAttachmentGeneration,
+				promoted.authority.previousHistorySource.targetAllocationGeneration,
+				promoted.authority.previousHistorySource.resolveOwnerAllocationGeneration,
+				promoted.authority.previousHistorySource.storeOwnerAllocationGeneration,
+				promoted.authority.previousHistorySource.commandSlot,
+				promoted.authority.previousHistorySource.frameCount );
+		} else vk_temporal_resolve_readback_cancel_recorded();
+		vk_temporal_resolved_hdr_reset_frame();
+		goto finish;
+	}
+	if ( submitted && vk_temporal_resolved_hdr_frame.producerPrevalidated
+			&& vk_temporal_resolved_hdr_frame.prevalidated.submitted ) {
+		receipt = vk_temporal_resolved_hdr_frame.prevalidated;
+		if ( historyCommitted && ( !committedWrite || !committedWrite->valid
+				|| !vk_temporal_content_matches_feedback_source(
+					&receipt, &committedWrite->source ) ) ) {
+			vk_temporal_resolved_hdr_reset_frame();
+			return qfalse;
+		}
+		vk_temporal_resolved_hdr_frame.submitted = receipt;
+		publishedReceipt = receipt;
+		published = qtrue;
+		R_LOG( rch_ral, SEV_INFO,
+			"temporal-resolved-hdr schema=2 token=%llu frame=%llu world=%d extent=%ux%u topology=%u plan=%u scene=%u target=%u slot=%u serial=%llu producer=copy submit=1\n",
+			(unsigned long long)receipt.batchToken,
+			(unsigned long long)receipt.frameId, receipt.worldIndex,
+			receipt.width, receipt.height, receipt.topologyEpoch,
+			receipt.planGeneration, receipt.sceneColorAttachmentGeneration,
+			receipt.targetAllocationGeneration, receipt.commandSlot,
+			(unsigned long long)receipt.contentSerial );
+	}
+	vk_temporal_resolved_hdr_reset_frame();
+finish:
+	if ( historyCommitted ) {
+		const temporalHistoryFeedbackSource_t *source;
+		const char *producer;
+		if ( !submitted || !published || !exactCommitted || !committedWrite
+				|| !committedWrite->valid ) return qfalse;
+		source = &committedWrite->source;
+		if ( !vk_temporal_content_matches_feedback_source(
+				&publishedReceipt, source ) ) return qfalse;
+		producer = source->producer == TEMPORAL_HISTORY_WRITE_CURRENT_SEED
+			? "current-seed" : source->producer ==
+				TEMPORAL_HISTORY_WRITE_RESOLVED_FEEDBACK
+			? "resolved-feedback" : NULL;
+		if ( !producer ) return qfalse;
+		R_LOG( rch_ral, SEV_INFO,
+			"temporal-history-feedback schema=1 token=%llu frame=%llu world=%d extent=%ux%u topology=%u plan=%u producer=%s content=%llu scene=%u target=%u resolve-owner=%u store-owner=%u history=%u:%u slot=%u frame-count=%u commit=1\n",
+			(unsigned long long)source->batchToken,
+			(unsigned long long)source->frameId, source->worldIndex,
+			source->width, source->height, source->topologyEpoch,
+			source->planGeneration, producer,
+			(unsigned long long)source->contentSerial,
+			source->sceneColorAttachmentGeneration,
+			source->targetAllocationGeneration,
+			source->resolveOwnerAllocationGeneration,
+			source->storeOwnerAllocationGeneration,
+			committedWrite->allocationGeneration,
+			committedWrite->historyIndex, source->commandSlot,
+			source->frameCount );
+	}
+	return qtrue;
+}
+
+void vk_temporal_scene_color_attachment_published( void ) {
+	// Publish the scene cohort only after the raw image has a live adopted RAL
+	// texture and both current-scene consumer groups have been rebuilt. A raw
+	// allocation alone is not usable H2 authority.
+	if ( !vk.color_image || !vk.color_image_view || !vk.ral_color_image
+			|| !vk.ral_color_descriptor || !vk.ral_bgl_sampler
+			|| !vk.ral_histogram_bgl || !vk.ral_histogram_buffer
+			|| !vk.ral_histogram_descriptor ) {
+		vk_scene_color_attachment_generation = 0;
+		return;
+	}
+	if ( vk_scene_color_attachment_generation_counter == UINT32_MAX )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"scene-color attachment generation exhausted" );
+	vk_scene_color_attachment_generation =
+		++vk_scene_color_attachment_generation_counter;
+}
 
 static void *vk_temporal_recipe_alloc( size_t bytes ) { return ri.Malloc( bytes ); }
 static void vk_temporal_recipe_free( void *memory ) { ri.Free( memory ); }
@@ -99,22 +640,409 @@ static vkTemporalRecipeTableOps_t vk_temporal_recipe_ops( void ) {
 	return ops;
 }
 
+static void *vk_temporal_pipeline_table_alloc( size_t bytes ) { return ri.Malloc( bytes ); }
+static void vk_temporal_pipeline_table_free( void *memory ) { ri.Free( memory ); }
+static vkTemporalGenericPipelineTableMemoryOps_t vk_temporal_pipeline_table_memory_ops( void ) {
+	vkTemporalGenericPipelineTableMemoryOps_t ops = {
+		vk_temporal_pipeline_table_alloc, vk_temporal_pipeline_table_free
+	};
+	return ops;
+}
+
+static qboolean vk_temporal_pipeline_drain( ralBackend_t *backend ) {
+	return Ral_WaitIdleAndDrainDeferred( backend ) == ralSuccess ? qtrue : qfalse;
+}
+
+static vkTemporalPipelineFactoryOps_t vk_temporal_pipeline_factory_ops( void ) {
+	vkTemporalPipelineFactoryOps_t ops;
+	memset( &ops, 0, sizeof( ops ) );
+	ops.create = vk_ral_create_pipeline_from_gpinfo_exact_spirv;
+	ops.destroy = Ral_DestroyPipeline;
+	ops.drain = vk_temporal_pipeline_drain;
+	ops.lookup = vk_temporal_pipeline_lookup_blob;
+	return ops;
+}
+
 static qboolean vk_temporal_motion_has_live( void ) {
 	return VK_TemporalMotionMaterializationHasLive(
 		&vk_temporal_motion_materialization )
-		|| VK_TemporalEntMatRuntimeHasLive( &vk_temporal_entmat_runtime );
+		|| ( vk_temporal_resolve.initialized
+			&& VK_TemporalResolveHasLive( &vk_temporal_resolve ) )
+		|| ( vk_temporal_resolved_hdr.initialized
+			&& VK_TemporalResolvedHdrHasLive( &vk_temporal_resolved_hdr ) )
+		|| VK_TemporalEntMatRuntimeHasLive( &vk_temporal_entmat_runtime )
+		|| VK_TemporalMotionReadbackHasLive( &vk_temporal_motion_readback )
+		|| ( vk_temporal_resolve_readback.initialized
+			&& VK_TemporalResolveReadbackHasLive(
+				&vk_temporal_resolve_readback ) )
+		|| ( vk_temporal_history_consume.initialized
+			&& VK_TemporalHistoryConsumeHasLive(
+				&vk_temporal_history_consume ) )
+		|| ( vk_temporal_history_store_owner.initialized
+			&& VK_TemporalHistoryStoreHasLive(
+				&vk_temporal_history_store_owner ) )
+		|| VK_TemporalGenericPipelineTableHasLive(
+			&vk_temporal_generic_pipeline_table )
+		|| VK_TemporalIqmPayloadHasLive( &vk_temporal_iqm_payload )
+		|| vk_temporal_iqm_exact3_factory.ready
+		|| vk_temporal_iqm_exact3_factory.pendingDrain
+		|| vk_temporal_iqm_geometry_live_count;
 }
 
 static vkTemporalLayoutOps_t vk_temporal_layout_ops( void );
 
+static void vk_temporal_motion_readback_log_content(
+		const vkTemporalMotionReadbackContentReceipt_t *r ) {
+	const vkTemporalMotionRecordingAuthority_t *a;
+	if ( !r || !r->fenceComplete ) return;
+	a = &r->ticket.activation.authority;
+	R_LOG( rch_ral, SEV_INFO,
+		"temporal-motion-content schema=1 token=%llu frame=%llu world=%d extent=%ux%u topology=%u plan=%u materialization=%u target=%u layout=%u table=%u slot=%u serial=%u roi=%u,%u,%ux%u segments=%u written=%u invalidated=%u sequence=%016llx:%016llx:%u submit=1 fence=1 pixels=%u validity-zero=%u validity-full=%u validity-other=%u finite=%u nonfinite=%u nonzero-valid=%u nonzero-invalid=%u velocity-hash=%016llx validity-hash=%016llx ready=%d\n",
+		(unsigned long long)a->token, (unsigned long long)a->frameId,
+		a->worldIndex, a->width, a->height, a->topologyEpoch,
+		a->planGeneration, a->materializationGeneration,
+		a->targetAllocationGeneration, a->pipelineLayoutAllocationGeneration,
+		a->pipelineTableGeneration, r->ticket.commandSlot,
+		r->ticket.captureSerial, r->ticket.roiX, r->ticket.roiY,
+		r->ticket.roiWidth, r->ticket.roiHeight,
+		r->ticket.activation.temporalSegments, r->ticket.activation.written,
+		r->ticket.activation.invalidated,
+		(unsigned long long)r->ticket.activation.drawSequence.lane0,
+		(unsigned long long)r->ticket.activation.drawSequence.lane1,
+		r->ticket.activation.drawSequence.count, r->pixels,
+		r->validityZero, r->validityFull, r->validityOther,
+		r->finiteVelocity, r->nonfiniteVelocity,
+		r->nonzeroValidVelocity, r->nonzeroInvalidVelocity,
+		(unsigned long long)r->velocityHash,
+		(unsigned long long)r->validityHash, r->ready ? 1 : 0 );
+	if ( r->ticket.iqmRecordCount )
+		R_LOG( rch_ral, SEV_INFO,
+			"temporal-iqm-payload schema=1 token=%llu frame=%llu slot=%u serial=%u records=%u owner=%u slot-generation=%u prepare=%u content=%016llx current=%016llx previous=%016llx raster=%08x:%08x:%08x:%08x:%08x:%08x:%08x:%08x:%08x:%08x:%08x:%08x:%08x:%08x:%08x:%08x submit=1 fence=1\n",
+			(unsigned long long)a->token, (unsigned long long)a->frameId,
+			r->ticket.commandSlot, r->ticket.captureSerial,
+			r->ticket.iqmRecordCount,
+			r->ticket.activation.iqm.content.payload.ownerAllocationGeneration,
+			r->ticket.activation.iqm.content.payload.slotAllocationGeneration,
+			r->ticket.activation.iqm.content.payload.prepareGeneration,
+			(unsigned long long)r->ticket.activation.iqm.content.contentDigest,
+			(unsigned long long)r->ticket.iqmCurrentPaletteHash,
+			(unsigned long long)r->ticket.iqmPreviousPaletteHash,
+			r->ticket.iqmRasterMvpBits[0], r->ticket.iqmRasterMvpBits[1],
+			r->ticket.iqmRasterMvpBits[2], r->ticket.iqmRasterMvpBits[3],
+			r->ticket.iqmRasterMvpBits[4], r->ticket.iqmRasterMvpBits[5],
+			r->ticket.iqmRasterMvpBits[6], r->ticket.iqmRasterMvpBits[7],
+			r->ticket.iqmRasterMvpBits[8], r->ticket.iqmRasterMvpBits[9],
+			r->ticket.iqmRasterMvpBits[10], r->ticket.iqmRasterMvpBits[11],
+			r->ticket.iqmRasterMvpBits[12], r->ticket.iqmRasterMvpBits[13],
+			r->ticket.iqmRasterMvpBits[14], r->ticket.iqmRasterMvpBits[15] );
+}
+
+static void vk_temporal_motion_readback_log_submit(
+		const vkTemporalMotionReadbackTicket_t *t ) {
+	const vkTemporalMotionRecordingAuthority_t *a;
+	if ( !t || !t->submitted ) return;
+	a = &t->activation.authority;
+	R_LOG( rch_ral, SEV_INFO,
+		"temporal-main-activation schema=1 token=%llu frame=%llu world=%d extent=%ux%u topology=%u plan=%u materialization=%u target=%u layout=%u table=%u slot=%u serial=%u segments=%u written=%u invalidated=%u preserved=%u sequence=%016llx:%016llx:%u submit=1\n",
+		(unsigned long long)a->token, (unsigned long long)a->frameId,
+		a->worldIndex, a->width, a->height, a->topologyEpoch,
+		a->planGeneration, a->materializationGeneration,
+		a->targetAllocationGeneration, a->pipelineLayoutAllocationGeneration,
+		a->pipelineTableGeneration, t->commandSlot, t->captureSerial,
+		t->activation.temporalSegments, t->activation.written,
+		t->activation.invalidated, t->activation.preserved,
+		(unsigned long long)t->activation.drawSequence.lane0,
+		(unsigned long long)t->activation.drawSequence.lane1,
+		t->activation.drawSequence.count );
+	if ( t->activation.iqm.ready ) R_LOG( rch_ral, SEV_INFO,
+		"temporal-iqm-activation schema=1 token=%llu frame=%llu slot=%u serial=%u iqm=%u:%u:%u:%u:%016llx tagged=%016llx:%016llx:%u:%u:%u factory=%u:%u:%u payload-layout=%u scene-format=%u depth-format=%u reversed=%d submit=1\n",
+		(unsigned long long)a->token, (unsigned long long)a->frameId,
+		t->commandSlot, t->captureSerial,
+		t->activation.iqm.prepared, t->activation.iqm.written,
+		t->activation.iqm.invalidated, t->activation.iqm.entityCount,
+		(unsigned long long)t->activation.iqm.sequenceDigest,
+		(unsigned long long)t->activation.taggedSequence.lane0,
+		(unsigned long long)t->activation.taggedSequence.lane1,
+		t->activation.taggedSequence.count,
+		t->activation.taggedSequence.genericCount,
+		t->activation.taggedSequence.iqmCount,
+		t->activation.iqm.factory.allocationGeneration,
+		t->activation.iqm.factory.pipelineGeneration,
+		t->activation.iqm.factory.topologyGeneration,
+		t->activation.iqm.factory.payloadLayoutGeneration,
+		(unsigned)t->activation.iqm.pass.sceneFormat,
+		(unsigned)t->activation.iqm.pass.depthFormat,
+		t->activation.iqm.pass.reversedDepth ? 1 : 0 );
+}
+
+static void vk_temporal_motion_readback_collect_slot(
+		uint32_t frameIndex, qboolean fenceProven ) {
+	vkTemporalMotionReadbackContentReceipt_t receipt;
+	if ( VK_TemporalMotionReadbackCompleteAfterFence(
+			&vk_temporal_motion_readback, frameIndex, fenceProven, &receipt ) )
+		vk_temporal_motion_readback_log_content( &receipt );
+}
+
+static void vk_temporal_motion_readback_collect_all_after_idle( void ) {
+	uint32_t i;
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i )
+		vk_temporal_motion_readback_collect_slot( i, qtrue );
+}
+
+void vk_temporal_motion_readback_arm( void ) {
+	uint32_t slot, genericMain = 0, recipeAttempted = 0;
+	uint32_t recipeReady = 0, exact3Ready = 0;
+	for ( slot = 0; slot < vk.pipelines_count; ++slot ) {
+		qboolean attempted = qfalse, valid = qfalse;
+		if ( vk.pipelines[slot].def.shader_type >= TYPE_GENERIC_BEGIN
+				&& vk.pipelines[slot].def.shader_type <= TYPE_GENERIC_END
+				&& vk.pipelines[slot].ral_handle[RENDER_PASS_MAIN] )
+			genericMain++;
+		if ( vk_temporal_generic_recipe_table.records
+				&& VK_TemporalGenericRecipeTableGetSlotState(
+					&vk_temporal_generic_recipe_table, slot,
+					&attempted, &valid ) ) {
+			if ( attempted ) recipeAttempted++;
+			if ( valid ) recipeReady++;
+		}
+		if ( VK_TemporalGenericPipelineTableSlotReady(
+				&vk_temporal_generic_pipeline_table, slot ) )
+			exact3Ready++;
+	}
+	if ( vk_temporal_diagnostic_arm_ready( qfalse )
+			&& VK_TemporalMotionReadbackArm(
+				&vk_temporal_motion_readback, 2u ) )
+		R_LOG( rch_ral, SEV_INFO,
+			"temporal-motion-readback schema=1 action=armed captures=2\n" );
+	else
+		R_LOG( rch_ral, SEV_WARN,
+			"temporal-motion-readback schema=1 action=refused\n" );
+	R_LOG( rch_ral, SEV_INFO,
+		"temporal-motion-debug schema=1 phase=arm pipelines=%u generic-main=%u recipe-attempted=%u recipe-ready=%u exact3-ready=%u\n",
+		vk.pipelines_count, genericMain, recipeAttempted, recipeReady,
+		exact3Ready );
+}
+
+void vk_temporal_history_consume_arm( void ) {
+	if ( VK_TemporalHistoryConsumeArm( &vk_temporal_history_consume, 2u ) )
+		R_LOG( rch_ral, SEV_INFO,
+			"temporal-history-consume schema=1 action=armed captures=2\n" );
+	else
+		R_LOG( rch_ral, SEV_WARN,
+			"temporal-history-consume schema=1 action=refused\n" );
+}
+
+void vk_temporal_resolve_readback_arm( void ) {
+	if ( vk_temporal_diagnostic_arm_ready( qtrue )
+			&& VK_TemporalResolveReadbackArm(
+			&vk_temporal_resolve_readback, 2u ) )
+		R_LOG( rch_ral, SEV_INFO,
+			"temporal-resolve-readback schema=1 action=armed captures=2\n" );
+	else
+		R_LOG( rch_ral, SEV_WARN,
+			"temporal-resolve-readback schema=1 action=refused\n" );
+}
+
+static void vk_temporal_resolve_readback_log_content(
+		const vkTemporalResolveReadbackContentReceipt_t *r ) {
+	const vkTemporalResolveAuthorityReceipt_t *a;
+	if ( !r || !r->fenceComplete ) return;
+	a = &r->ticket.resolve.authority;
+	R_LOG( rch_ral, SEV_INFO,
+		"temporal-resolve-content schema=1 token=%llu frame=%llu previous=%llu content=%llu world=%d extent=%ux%u topology=%u plan=%u scene=%u history=%u:%u motion-materialization=%u motion-target=%u motion-layout=%u table=%u prior-producer=%u prior-token=%llu prior-frame=%llu prior-content=%llu prior-scene=%u prior-target=%u prior-resolve-owner=%u prior-store-owner=%u prior-slot=%u prior-frame-count=%u target=%u owner=%u slot=%u serial=%u depth=%u segments=%u written=%u invalidated=%u sequence=%016llx:%016llx:%u capture=%u,%u,%ux%u core=%u,%u,%ux%u outer-submit=1 content-submit=1 fence=1 core-pixels=%u eligible=%u accepted=%u accepted-match=%u accepted-influence=%u accepted-motion=%u fallback=%u/%u invalid=%u/%u zero=%u/%u unsupported=%u nonfinite=%u validity=%u:%u:%u planes=%d mismatches=%u hashes=%016llx:%016llx:%016llx:%016llx:%016llx:%016llx:%016llx ready=%d\n",
+		(unsigned long long)a->batchToken, (unsigned long long)a->frameId,
+		(unsigned long long)a->previousFrameId,
+		(unsigned long long)r->ticket.resolve.content.contentSerial,
+		a->worldIndex,
+		a->width, a->height, a->topologyEpoch, a->planGeneration,
+		a->sceneColorAttachmentGeneration,
+		a->historyAllocationGeneration, a->historyReadIndex,
+		a->motionMaterializationGeneration,
+		a->motionTargetAllocationGeneration,
+		a->motionPipelineLayoutAllocationGeneration,
+		a->pipelineTableGeneration,
+		(unsigned)a->previousHistorySource.producer,
+		(unsigned long long)a->previousHistorySource.batchToken,
+		(unsigned long long)a->previousHistorySource.frameId,
+		(unsigned long long)a->previousHistorySource.contentSerial,
+		a->previousHistorySource.sceneColorAttachmentGeneration,
+		a->previousHistorySource.targetAllocationGeneration,
+		a->previousHistorySource.resolveOwnerAllocationGeneration,
+		a->previousHistorySource.storeOwnerAllocationGeneration,
+		a->previousHistorySource.commandSlot,
+		a->previousHistorySource.frameCount,
+		a->resolvedTargetAllocationGeneration,
+		r->ticket.resolve.ownerAllocationGeneration,
+		r->ticket.commandSlot, r->ticket.captureSerial,
+		(unsigned)r->ticket.currentDepthEncoding,
+		a->temporalSegments, a->written, a->invalidated,
+		(unsigned long long)a->drawSequence.lane0,
+		(unsigned long long)a->drawSequence.lane1,
+		a->drawSequence.count,
+		r->ticket.captureX, r->ticket.captureY,
+		r->ticket.captureWidth, r->ticket.captureHeight,
+		r->ticket.coreX, r->ticket.coreY,
+		r->ticket.coreWidth, r->ticket.coreHeight,
+		r->corePixels, r->oracleEligible, r->accepted,
+		r->acceptedMatches, r->acceptedInfluence,
+		r->acceptedNonzeroVelocity, r->fallbackExact, r->fallbackExpected,
+		r->invalidFallbackExact, r->invalidFallbackExpected,
+		r->zeroFallbackExact, r->zeroFallbackExpected,
+		r->unsupportedFootprint, r->nonfiniteInputs,
+		r->validityZero, r->validityFull, r->validityOther,
+		r->planesPopulated ? 1 : 0, r->mismatches,
+		(unsigned long long)r->currentColorHash,
+		(unsigned long long)r->currentDepthHash,
+		(unsigned long long)r->previousColorHash,
+		(unsigned long long)r->previousDepthHash,
+		(unsigned long long)r->velocityHash,
+		(unsigned long long)r->validityHash,
+		(unsigned long long)r->resolvedHash, r->ready ? 1 : 0 );
+	R_LOG( rch_ral, SEV_INFO,
+		"temporal-resolve-sample schema=1 token=%llu frame=%llu slot=%u serial=%u pixel=%u,%u color=%04x:%04x:%04x:%04x depth=%u:%08x velocity=%04x:%04x validity=%u resolved=%04x:%04x:%04x:%04x submit=1 fence=1\n",
+		(unsigned long long)a->batchToken, (unsigned long long)a->frameId,
+		r->ticket.commandSlot, r->ticket.captureSerial,
+		r->centerX, r->centerY, r->centerCurrentColor[0],
+		r->centerCurrentColor[1], r->centerCurrentColor[2],
+		r->centerCurrentColor[3], (unsigned)r->ticket.currentDepthEncoding,
+		r->centerDepthRaw, r->centerVelocity[0], r->centerVelocity[1],
+		r->centerValidity, r->centerResolvedColor[0],
+		r->centerResolvedColor[1], r->centerResolvedColor[2],
+		r->centerResolvedColor[3] );
+	R_LOG( rch_ral, SEV_INFO,
+		"temporal-resolve-rejection schema=1 frame=%llu slot=%u core=%u accepted=%u current-nonfinite=%u validity=%u velocity-nonfinite=%u outside=%u unsupported=%u depth-nonfinite=%u depth-nonpositive=%u depth-threshold=%u prior-nonfinite=%u neighborhood-nonfinite=%u\n",
+		(unsigned long long)a->frameId, r->ticket.commandSlot,
+		r->corePixels, r->accepted, r->rejectedCurrentNonfinite,
+		r->rejectedValidity, r->rejectedVelocityNonfinite,
+		r->rejectedOutside, r->unsupportedFootprint,
+		r->rejectedDepthNonfinite, r->rejectedDepthNonpositive,
+		r->rejectedDepthThreshold, r->rejectedPriorNonfinite,
+		r->rejectedNeighborhoodNonfinite );
+	if ( r->mismatches ) {
+		uint32_t i;
+		R_LOG( rch_ral, SEV_INFO,
+			"temporal-resolve-mismatch schema=1 frame=%llu slot=%u total=%u gpu-current=%u blended=%u max-half-step=%u eligible=%u samples=%u\n",
+			(unsigned long long)a->frameId, r->ticket.commandSlot,
+			r->mismatches, r->mismatchGpuCurrentFallback,
+			r->mismatchBlended, r->mismatchMaxHalfDistance, r->oracleEligible,
+			r->mismatchSampleCount );
+		for ( i = 0; i < r->mismatchSampleCount; ++i ) {
+			const vkTemporalResolveReadbackMismatchSample_t *s =
+				&r->mismatchSamples[i];
+			R_LOG( rch_ral, SEV_INFO,
+				"temporal-resolve-mismatch-sample schema=1 frame=%llu slot=%u index=%u pixel=%u,%u channel=%u expected=%04x:%u actual=%04x current=%04x gpu-current=%u\n",
+				(unsigned long long)a->frameId, r->ticket.commandSlot, i,
+				s->x, s->y, (unsigned)s->channel,
+				(unsigned)s->expectedBits, s->halfDistance,
+				(unsigned)s->actualBits, (unsigned)s->currentBits,
+				(unsigned)s->gpuCurrentFallback );
+		}
+	}
+}
+
+static void vk_temporal_resolve_readback_collect_slot(
+		uint32_t frameIndex, qboolean fenceProven ) {
+	vkTemporalResolveReadbackContentReceipt_t receipt;
+	if ( VK_TemporalResolveReadbackCompleteAfterFence(
+			&vk_temporal_resolve_readback, frameIndex, fenceProven, &receipt ) )
+		vk_temporal_resolve_readback_log_content( &receipt );
+}
+
+static void vk_temporal_history_consume_log(
+		const vkTemporalHistoryConsumeReceipt_t *r ) {
+	if ( !r || !r->fenceComplete ) return;
+	R_LOG( rch_ral, SEV_INFO,
+		"temporal-history-content schema=1 world=%d frame=%llu plan=%u allocation=%u read=%u write=%u extent=%ux%u topology=%u slot=%u serial=%u history-valid=%d current=%08x:%08x:%08x previous=%08x:%08x:%08x submit=1 fence=1 ready=%d\n",
+		r->ticket.worldIndex, (unsigned long long)r->ticket.frameId,
+		r->ticket.planGeneration, r->ticket.historyAllocationGeneration,
+		r->ticket.historyReadIndex, r->ticket.historyWriteIndex,
+		r->ticket.width, r->ticket.height, r->ticket.topologyEpoch,
+		r->ticket.commandSlot, r->ticket.captureSerial,
+		r->ticket.historyValid ? 1 : 0,
+		r->currentColorRG, r->currentColorBA, r->currentDepth,
+		r->previousColorRG, r->previousColorBA, r->previousDepth,
+		r->ready ? 1 : 0 );
+}
+
+static void vk_temporal_history_consume_collect_slot(
+		uint32_t frameIndex, qboolean fenceProven ) {
+	vkTemporalHistoryConsumeReceipt_t receipt;
+	if ( VK_TemporalHistoryConsumeCompleteAfterFence(
+			&vk_temporal_history_consume, frameIndex, fenceProven, &receipt ) )
+		vk_temporal_history_consume_log( &receipt );
+}
+
+static void vk_temporal_history_consume_collect_all_after_idle( void ) {
+	for ( uint32_t i = 0; i < NUM_COMMAND_BUFFERS; ++i )
+		vk_temporal_history_consume_collect_slot( i, qtrue );
+}
+
+static void vk_temporal_pipeline_table_release_after_idle( const char *reason ) {
+	vkTemporalPipelineFactoryOps_t factoryOps;
+	vkTemporalGenericPipelineTableMemoryOps_t memoryOps;
+	if ( !VK_TemporalGenericPipelineTableHasLive(
+			&vk_temporal_generic_pipeline_table ) ) return;
+	factoryOps = vk_temporal_pipeline_factory_ops();
+	memoryOps = vk_temporal_pipeline_table_memory_ops();
+	if ( !VK_TemporalGenericPipelineTableReleaseAfterIdle(
+			&vk_temporal_generic_pipeline_table, vk_ral_get_backend(),
+			&factoryOps, &memoryOps ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal exact3 release failed at idle boundary (%s)", reason );
+	}
+}
+
+static void vk_temporal_resolve_release_after_idle( const char *reason ) {
+	uint32_t i;
+	if ( vk_temporal_resolve_readback.initialized
+			&& VK_TemporalResolveReadbackHasLive(
+				&vk_temporal_resolve_readback ) ) {
+		for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
+			vkTemporalResolveReadbackContentReceipt_t receipt;
+			if ( VK_TemporalResolveReadbackCompleteAfterFence(
+					&vk_temporal_resolve_readback, i, qtrue, &receipt ) )
+				vk_temporal_resolve_readback_log_content( &receipt );
+		}
+		if ( !VK_TemporalResolveReadbackReleaseAfterIdle(
+				&vk_temporal_resolve_readback, qtrue ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal resolve readback release failed at idle boundary (%s)",
+				reason );
+	}
+	memset( &vk_temporal_resolve_frame, 0,
+		sizeof( vk_temporal_resolve_frame ) );
+	if ( !vk_temporal_resolve.initialized
+			|| !VK_TemporalResolveHasLive( &vk_temporal_resolve ) ) return;
+	if ( !VK_TemporalResolveReleaseAfterIdle(
+			&vk_temporal_resolve, qtrue ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal resolve release failed at idle boundary (%s)", reason );
+	}
+}
+
 static void vk_temporal_entmat_release_after_idle( const char *reason ) {
 	vkTemporalLayoutOps_t layoutOps;
+	qboolean readbackLive = VK_TemporalMotionReadbackHasLive(
+		&vk_temporal_motion_readback );
+	qboolean pipelineTableLive = VK_TemporalGenericPipelineTableHasLive(
+		&vk_temporal_generic_pipeline_table );
 	qboolean materializationLive = VK_TemporalMotionMaterializationHasLive(
 		&vk_temporal_motion_materialization );
 	qboolean entmatLive = VK_TemporalEntMatRuntimeHasLive(
 		&vk_temporal_entmat_runtime );
-	if ( !materializationLive && !entmatLive ) return;
+	vk_temporal_resolve_release_after_idle( reason );
+	if ( !readbackLive && !pipelineTableLive && !materializationLive
+			&& !entmatLive ) return;
 	layoutOps = vk_temporal_layout_ops();
+	vk_temporal_motion_readback_collect_all_after_idle();
+	if ( readbackLive
+			&& !VK_TemporalMotionReadbackReleaseAfterIdle(
+				&vk_temporal_motion_readback, qtrue ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal motion readback release failed at idle boundary (%s)", reason );
+	}
+	if ( pipelineTableLive )
+		vk_temporal_pipeline_table_release_after_idle( reason );
 	if ( materializationLive && !VK_TemporalMotionMaterializationReleaseAfterIdle(
 			&vk_temporal_motion_materialization, qtrue, &layoutOps ) ) {
 		ri.Terminate( TERM_UNRECOVERABLE,
@@ -131,9 +1059,32 @@ static void vk_temporal_entmat_release_after_idle( const char *reason ) {
 	}
 }
 
+
+static void vk_temporal_resolved_hdr_release_after_idle( const char *reason ) {
+	// H3/H1/Store children borrow H2 target/history/motion parents. Enqueue the
+	// complete child cohort first, then H2, and drain this idle transaction once.
+	vk_temporal_history_store_release_after_idle();
+	vk_temporal_resolved_hdr_reset_frame();
+	memset( &vk_temporal_resolved_hdr_frame.submitted, 0,
+		sizeof( vk_temporal_resolved_hdr_frame.submitted ) );
+	if ( vk_temporal_resolved_hdr.initialized
+			&& VK_TemporalResolvedHdrHasLive( &vk_temporal_resolved_hdr )
+			&& !VK_TemporalResolvedHdrReleaseAfterIdle(
+				&vk_temporal_resolved_hdr, qtrue ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal resolved HDR release failed at idle boundary (%s)", reason );
+	}
+	if ( Ral_WaitIdleAndDrainDeferred( vk_ral_get_backend() ) != ralSuccess ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal resolved HDR deferred drain failed (%s)", reason );
+	}
+}
+
 void vk_temporal_motion_release_before_ral_shutdown( void ) {
 	if ( !vk_temporal_motion_has_live() ) return;
 	vk_wait_idle();
+	vk_temporal_iqm_resources_release_after_idle( "pre-RAL-shutdown" );
+	vk_temporal_resolved_hdr_release_after_idle( "pre-RAL-shutdown" );
 	vk_temporal_entmat_release_after_idle( "pre-RAL-shutdown" );
 }
 
@@ -447,6 +1398,7 @@ static PFN_vkCmdClearAttachments						qvkCmdClearAttachments;
 static PFN_vkCmdCopyBuffer								qvkCmdCopyBuffer;
 static PFN_vkCmdCopyBufferToImage						qvkCmdCopyBufferToImage;
 static PFN_vkCmdCopyImage								qvkCmdCopyImage;
+static PFN_vkCmdCopyImageToBuffer						qvkCmdCopyImageToBuffer;
 static PFN_vkCmdDispatch								qvkCmdDispatch;
 static PFN_vkCmdFillBuffer								qvkCmdFillBuffer;
 static PFN_vkCmdDraw									qvkCmdDraw;
@@ -2741,6 +3693,7 @@ static qboolean init_vulkan_library( void )
 	INIT_DEVICE_FUNCTION(vkCmdCopyBuffer)
 	INIT_DEVICE_FUNCTION(vkCmdCopyBufferToImage)
 	INIT_DEVICE_FUNCTION(vkCmdCopyImage)
+	INIT_DEVICE_FUNCTION(vkCmdCopyImageToBuffer)
 	INIT_DEVICE_FUNCTION(vkCmdDispatch)
 	INIT_DEVICE_FUNCTION(vkCmdFillBuffer)
 	INIT_DEVICE_FUNCTION(vkCmdDraw)
@@ -2934,6 +3887,7 @@ static void deinit_device_functions( void )
 	qvkCmdCopyBuffer							= NULL;
 	qvkCmdCopyBufferToImage						= NULL;
 	qvkCmdCopyImage								= NULL;
+	qvkCmdCopyImageToBuffer						= NULL;
 	qvkCmdDispatch								= NULL;
 	qvkCmdFillBuffer							= NULL;
 	qvkCmdDraw									= NULL;
@@ -3007,18 +3961,18 @@ static void deinit_device_functions( void )
 // (which runs at vid_init and again on every vid_restart). Sized for the
 // renderervk shader module count (~138 modules; 256 leaves headroom).
 #define VK_SHADER_BLOB_CAPACITY 256
-typedef struct {
-	VkShaderModule  handle;
-	const uint8_t  *bytes;
-	uint32_t        size;
-} vk_shader_blob_record_t;
-static vk_shader_blob_record_t vk_shader_blob_table[ VK_SHADER_BLOB_CAPACITY ];
+static vkTemporalShaderModuleRecord_t vk_shader_blob_table[ VK_SHADER_BLOB_CAPACITY ];
 static uint32_t                vk_shader_blob_count;
+static uint32_t                vk_shader_blob_generation;
+static qboolean                vk_shader_blob_ready;
 static qboolean                vk_shader_blob_full_warned;
 
 static void vk_shader_blob_reset( void ) {
 	memset( vk_shader_blob_table, 0, sizeof( vk_shader_blob_table ) );
 	vk_shader_blob_count = 0;
+	vk_shader_blob_ready = qfalse;
+	if ( vk_shader_blob_generation != UINT32_MAX )
+		vk_shader_blob_generation++;
 	vk_shader_blob_full_warned = qfalse;
 }
 
@@ -3030,9 +3984,9 @@ static void vk_shader_blob_record( VkShaderModule handle, const uint8_t *bytes, 
 		}
 		return;
 	}
-	vk_shader_blob_table[ vk_shader_blob_count ].handle = handle;
-	vk_shader_blob_table[ vk_shader_blob_count ].bytes  = bytes;
-	vk_shader_blob_table[ vk_shader_blob_count ].size   = size;
+	vk_shader_blob_table[ vk_shader_blob_count ].module = handle;
+	vk_shader_blob_table[ vk_shader_blob_count ].blob.bytes = bytes;
+	vk_shader_blob_table[ vk_shader_blob_count ].blob.size = size;
 	vk_shader_blob_count++;
 }
 
@@ -3043,9 +3997,9 @@ static void vk_shader_blob_record( VkShaderModule handle, const uint8_t *bytes, 
 qboolean vk_shader_blob_lookup( VkShaderModule handle, const uint8_t **out_bytes, uint32_t *out_size ) {
 	uint32_t i;
 	for ( i = 0; i < vk_shader_blob_count; i++ ) {
-		if ( vk_shader_blob_table[i].handle == handle ) {
-			if ( out_bytes ) *out_bytes = vk_shader_blob_table[i].bytes;
-			if ( out_size  ) *out_size  = vk_shader_blob_table[i].size;
+		if ( vk_shader_blob_table[i].module == handle ) {
+			if ( out_bytes ) *out_bytes = vk_shader_blob_table[i].blob.bytes;
+			if ( out_size  ) *out_size  = vk_shader_blob_table[i].blob.size;
 			return qtrue;
 		}
 	}
@@ -3228,6 +4182,7 @@ static VkSampler vk_find_sampler( const Vk_Sampler_Def *def ) {
 
 void vk_destroy_samplers( void )
 {
+	vk_ral_bindless_sampler_pool_invalidate();
 	for ( int i = 0; i < vk.samplers.count; i++ ) {
 		qvkDestroySampler( vk.device, vk.samplers.handle[i], NULL );
 		memset( &vk.samplers.def[i], 0x0, sizeof( vk.samplers.def[i] ) );
@@ -3361,17 +4316,8 @@ static void vk_ral_register_screenmap_view( VkImageView view, const Vk_Sampler_D
 		R_LOG( rch_fbo, SEV_WARN, "screenmap sampler dedup-slot lookup failed (count=%d) — falling back to slot 0\n", vk.samplers.count );
 		vk.bindless_screenmap_sampler_slot = 0;
 	} else {
-		// Write the dedup-pool VkSampler into the bindless sampler-array
-		// binding at smIdx. The adopted wrapper is transient: ownsSampler=
-		// qfalse so Ral_DestroySampler frees only the wrapper struct.
-		ralBackend_t *ralBackend = vk_ral_get_backend();
-		if ( ralBackend ) {
-			ralSampler_t *adopted = Ral_AdoptSampler( ralBackend, (void *)vk.samplers.handle[smIdx], "vk-bindless-sampler-screenmap" );
-			if ( adopted ) {
-				Ral_BindGroupSetSamplerAt( ralSet, (uint32_t)smIdx, adopted );
-				Ral_DestroySampler( adopted );
-			}
-		}
+		(void)vk_ral_bindless_publish_sampler( (uint32_t)smIdx,
+			vk.samplers.handle[smIdx], &vk.samplers.def[smIdx] );
 		vk.bindless_screenmap_sampler_slot = smIdx;
 	}
 
@@ -3389,6 +4335,8 @@ static void vk_ral_register_screenmap_view( VkImageView view, const Vk_Sampler_D
 	imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 	imgWrite.pImageInfo      = &imgInfo;
 	qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+	(void)vk_ral_bindless_record_reserved( WIRED_BINDLESS_SCREENMAP_SLOT,
+		view, &vk.screenMap, (const void *)ralVkSet );
 
 	R_LOG( rch_fbo, SEV_DEBUG, "screenmap view bound to bindless slot %u (sampler dedup slot %d)\n",
 	       (unsigned)WIRED_BINDLESS_SCREENMAP_SLOT, vk.bindless_screenmap_sampler_slot );
@@ -3451,17 +4399,14 @@ static void vk_ral_register_depthfade_view( void ) {
 		vk.sceneDepth.bindlessSamplerSlot = -1;
 		return;
 	}
-	{
-		ralSampler_t *adopted = Ral_AdoptSampler( ralBackend, (void *)vk.samplers.handle[smIdx], "vk-bindless-sampler-scenedepth" );
-		if ( adopted ) {
-			Ral_BindGroupSetSamplerAt( ralSet, (uint32_t)smIdx, adopted );
-			Ral_DestroySampler( adopted );
-		}
-	}
+	(void)vk_ral_bindless_publish_sampler( (uint32_t)smIdx,
+		vk.samplers.handle[smIdx], &vk.samplers.def[smIdx] );
 	vk.sceneDepth.bindlessSamplerSlot = smIdx;
 
 	// RAL-native bindless image write — the depth view into the reserved slot.
 	Ral_BindGroupSetTextureAt( ralSet, WIRED_BINDLESS_SCENEDEPTH_SLOT, vk.sceneDepth.ral_image );
+	(void)vk_ral_bindless_record_reserved( WIRED_BINDLESS_SCENEDEPTH_SLOT,
+		vk.sceneDepth.view, &vk.sceneDepth, (const void *)ralSet );
 
 	R_LOG( rch_fbo, SEV_DEBUG, "depthfade view bound to bindless slot %u (sampler dedup slot %d)\n",
 	       (unsigned)WIRED_BINDLESS_SCENEDEPTH_SLOT, vk.sceneDepth.bindlessSamplerSlot );
@@ -3511,6 +4456,9 @@ void vk_register_black_sentinel( void ) {
 	imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 	imgWrite.pImageInfo      = &imgInfo;
 	qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+	(void)vk_ral_bindless_record_raw_image( tr.blackImage,
+		WIRED_BINDLESS_BLACK_TEX_SENTINEL, tr.blackImage->view,
+		VK_BINDLESS_PUBLICATION_RESERVED );
 
 	R_LOG( rch_fbo, SEV_DEBUG, "black sun-mask sentinel bound to bindless slot %u\n",
 	       (unsigned)WIRED_BINDLESS_BLACK_TEX_SENTINEL );
@@ -3557,6 +4505,9 @@ void vk_register_white_sentinel( void ) {
 	imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 	imgWrite.pImageInfo      = &imgInfo;
 	qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+	(void)vk_ral_bindless_record_raw_image( tr.whiteImage,
+		WIRED_BINDLESS_WHITE_TEX_SENTINEL, tr.whiteImage->view,
+		VK_BINDLESS_PUBLICATION_RESERVED );
 
 	R_LOG( rch_fbo, SEV_DEBUG, "white texture sentinel bound to bindless slot %u\n",
 	       (unsigned)WIRED_BINDLESS_WHITE_TEX_SENTINEL );
@@ -3668,9 +4619,8 @@ void vk_update_attachment_descriptors( void ) {
 			// disable the role-4 override (its gate). NULL is a documented no-op
 			// write that leaves the slot stale-but-unsampled.
 			if ( vk.sceneDepth.bindlessSamplerSlot >= 0 ) {
-				ralBindGroup_t *bset = vk_ral_get_bindless_set();
-				if ( bset )
-					Ral_BindGroupSetTextureAt( bset, WIRED_BINDLESS_SCENEDEPTH_SLOT, NULL );
+				(void)vk_ral_bindless_tombstone(
+					WIRED_BINDLESS_SCENEDEPTH_SLOT );
 				vk.sceneDepth.bindlessSamplerSlot = -1;
 			}
 		}
@@ -10405,6 +11355,7 @@ qboolean vk_create_iqm_vbo( VkBuffer *outVertBuf, VkDeviceMemory *outVertMem,
 		ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
 		if ( rcmd == NULL ) {
 			R_LOG( rch_ral, SEV_ERROR, "%s: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping IQM VBO+IDX upload\n", __func__ );
+			vk_destroy_iqm_vbo( outVertBuf, outVertMem, outIdxBuf, outIdxMem );
 			return qfalse;
 		}
 		cmdBuf = (VkCommandBuffer)Ral_GetCommandBufferHandle( rcmd );
@@ -10658,189 +11609,1427 @@ qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size )
 }
 #endif
 
-#include "shaders/spirv/shader_data.c"
-#define SHADER_MODULE(name) SHADER_MODULE(name,sizeof(name))
-
-typedef struct {
-	uint32_t extent[2];
-	float zNear;
-	float zFar;
-} vkTemporalHistoryPush_t;
-
-typedef struct {
-	uint32_t allocationGeneration;
-	ralTextureView_t *currentColorView;
-	ralTextureView_t *currentDepthView;
-	ralSampler_t *sampler;
-	ralBindGroupLayout_t *layout;
-	ralBindGroup_t *writeGroups[2];
-	ralPipeline_t *pipeline;
-} vkTemporalHistoryStore_t;
-
-static vkTemporalHistoryStore_t s_temporalHistoryStore;
-
-void vk_temporal_history_store_shutdown( void )
-{
-	if ( s_temporalHistoryStore.pipeline )
-		Ral_DestroyPipeline( s_temporalHistoryStore.pipeline );
-	for ( unsigned i = 0; i < 2; ++i ) {
-		if ( s_temporalHistoryStore.writeGroups[i] )
-			Ral_DestroyBindGroup( s_temporalHistoryStore.writeGroups[i] );
-	}
-	if ( s_temporalHistoryStore.layout )
-		Ral_DestroyBindGroupLayout( s_temporalHistoryStore.layout );
-	if ( s_temporalHistoryStore.sampler )
-		Ral_DestroySampler( s_temporalHistoryStore.sampler );
-	if ( s_temporalHistoryStore.currentColorView )
-		Ral_DestroyTextureView( s_temporalHistoryStore.currentColorView );
-	if ( s_temporalHistoryStore.currentDepthView )
-		Ral_DestroyTextureView( s_temporalHistoryStore.currentDepthView );
-	memset( &s_temporalHistoryStore, 0, sizeof( s_temporalHistoryStore ) );
+#if FEAT_IQM
+static ralBuffer_t *vk_temporal_iqm_geometry_adopt( ralBackend_t *backend,
+		void *native, size_t bytes, const char *debugName ) {
+	return Ral_AdoptBuffer( backend, native, bytes, debugName );
 }
 
-static qboolean vk_temporal_history_store_ensure(
-		const temporalHistoryResources_t *history )
-{
-	ralBackend_t *backend = vk_ral_get_backend();
-	ralTextureViewCreateInfo_t vci;
-	ralSamplerCreateInfo_t sci;
-	ralBindEntry_t entries[5];
-	ralBindGroupLayoutCreateInfo_t lci;
-	ralComputePipelineCreateInfo_t pci;
-	const ralBindGroupLayout_t *layouts[1];
+static qboolean vk_temporal_iqm_geometry_candidate_owned(
+		ralBuffer_t *candidate, const void *context ) {
+	(void)context;
+	return candidate && Ral_GetBufferHandle( candidate )
+		&& Ral_GetBufferSize( candidate ) ? qtrue : qfalse;
+}
 
-	if ( !backend || !history || !history->ready || !vk.ral_color_image
-			|| !vk.sceneDepth.ral_image ) return qfalse;
-	if ( s_temporalHistoryStore.pipeline
-			&& s_temporalHistoryStore.allocationGeneration
-				== history->allocationGeneration ) return qtrue;
+static qboolean vk_temporal_iqm_geometry_matches_native(
+		const ralBuffer_t *candidate, const void *native, size_t bytes ) {
+	return candidate && native && bytes
+		&& Ral_GetBufferHandle( candidate ) == native
+		&& Ral_GetBufferSize( candidate ) == (uint64_t)bytes ? qtrue : qfalse;
+}
 
-	vk_temporal_history_store_shutdown();
-	memset( &vci, 0, sizeof( vci ) );
-	vci.viewType = RAL_TEXTURE_2D;
-	vci.format = RAL_FORMAT_UNDEFINED;
-	vci.texture = vk.ral_color_image;
-	s_temporalHistoryStore.currentColorView = Ral_CreateTextureView( backend, &vci );
-	vci.texture = vk.sceneDepth.ral_image;
-	s_temporalHistoryStore.currentDepthView = Ral_CreateTextureView( backend, &vci );
+static vkTemporalIqmGeometryOps_t vk_temporal_iqm_geometry_ops( void ) {
+	vkTemporalIqmGeometryOps_t ops;
+	memset( &ops, 0, sizeof( ops ) );
+	ops.adopt = vk_temporal_iqm_geometry_adopt;
+	ops.destroy = Ral_DestroyBuffer;
+	ops.candidateOwned = vk_temporal_iqm_geometry_candidate_owned;
+	ops.matchesNative = vk_temporal_iqm_geometry_matches_native;
+	return ops;
+}
 
-	memset( &sci, 0, sizeof( sci ) );
-	sci.minFilter = RAL_FILTER_NEAREST;
-	sci.magFilter = RAL_FILTER_NEAREST;
-	sci.mipmapMode = RAL_MIPMAP_NEAREST;
-	sci.addressU = sci.addressV = sci.addressW = RAL_ADDRESS_CLAMP_TO_EDGE;
-	sci.maxAnisotropy = 1.0f;
-	sci.debugName = "wired-temporal-history-sampler";
-	s_temporalHistoryStore.sampler = Ral_CreateSampler( backend, &sci );
-
-	memset( entries, 0, sizeof( entries ) );
-	entries[0] = (ralBindEntry_t){ 0, RAL_BIND_SAMPLED_TEXTURE, 1, RAL_STAGE_COMPUTE };
-	entries[1] = (ralBindEntry_t){ 1, RAL_BIND_SAMPLED_TEXTURE, 1, RAL_STAGE_COMPUTE };
-	entries[2] = (ralBindEntry_t){ 2, RAL_BIND_SAMPLER,         1, RAL_STAGE_COMPUTE };
-	entries[3] = (ralBindEntry_t){ 3, RAL_BIND_STORAGE_TEXTURE, 1, RAL_STAGE_COMPUTE };
-	entries[4] = (ralBindEntry_t){ 4, RAL_BIND_STORAGE_TEXTURE, 1, RAL_STAGE_COMPUTE };
-	memset( &lci, 0, sizeof( lci ) );
-	lci.entries = entries;
-	lci.numEntries = ARRAY_LEN( entries );
-	lci.debugName = "wired-temporal-history-store-bgl";
-	s_temporalHistoryStore.layout = Ral_CreateBindGroupLayout( backend, &lci );
-
-	if ( s_temporalHistoryStore.currentColorView
-			&& s_temporalHistoryStore.currentDepthView
-			&& s_temporalHistoryStore.sampler && s_temporalHistoryStore.layout ) {
-		for ( unsigned i = 0; i < 2; ++i ) {
-			ralBindingValue_t values[5];
-			ralBindGroupCreateInfo_t gci;
-			memset( values, 0, sizeof( values ) );
-			values[0] = (ralBindingValue_t){ .binding = 0, .type = RAL_BIND_SAMPLED_TEXTURE,
-				.textureView = s_temporalHistoryStore.currentColorView };
-			values[1] = (ralBindingValue_t){ .binding = 1, .type = RAL_BIND_SAMPLED_TEXTURE,
-				.textureView = s_temporalHistoryStore.currentDepthView };
-			values[2] = (ralBindingValue_t){ .binding = 2, .type = RAL_BIND_SAMPLER,
-				.sampler = s_temporalHistoryStore.sampler };
-			values[3] = (ralBindingValue_t){ .binding = 3, .type = RAL_BIND_STORAGE_TEXTURE,
-				.textureView = history->colorView[i] };
-			values[4] = (ralBindingValue_t){ .binding = 4, .type = RAL_BIND_STORAGE_TEXTURE,
-				.textureView = history->depthView[i] };
-			memset( &gci, 0, sizeof( gci ) );
-			gci.layout = s_temporalHistoryStore.layout;
-			gci.values = values;
-			gci.numValues = ARRAY_LEN( values );
-			gci.debugName = i ? "wired-temporal-history-store-bg-1"
-				: "wired-temporal-history-store-bg-0";
-			s_temporalHistoryStore.writeGroups[i] = Ral_CreateBindGroup( backend, &gci );
-		}
-	}
-
-	if ( s_temporalHistoryStore.writeGroups[0]
-			&& s_temporalHistoryStore.writeGroups[1] ) {
-		layouts[0] = s_temporalHistoryStore.layout;
-		memset( &pci, 0, sizeof( pci ) );
-		pci.computeSpirv = (const uint32_t *)temporal_history_store_comp_spv;
-		pci.computeSpirvSize = sizeof( temporal_history_store_comp_spv );
-		pci.bindGroupLayouts = layouts;
-		pci.numBindGroupLayouts = 1;
-		pci.pushConstantSize = sizeof( vkTemporalHistoryPush_t );
-		pci.debugName = "wired-temporal-history-store-cs";
-		s_temporalHistoryStore.pipeline = Ral_CreateComputePipeline( backend, &pci );
-	}
-	if ( !s_temporalHistoryStore.pipeline ) {
-		vk_temporal_history_store_shutdown();
-		return qfalse;
-	}
-	s_temporalHistoryStore.allocationGeneration = history->allocationGeneration;
+static qboolean vk_temporal_iqm_geometry_key( const iqmData_t *data,
+		vkTemporalIqmGeometryKey_t *outKey ) {
+	vkTemporalIqmGeometryKey_t key;
+	if ( !data || !outKey || data->temporalH5Eligible != qtrue
+			|| data->vk_gpu_skinning != qtrue
+			|| !data->vk_vertex_buffer || !data->vk_index_buffer
+			|| !data->vk_vertex_bytes || !data->vk_index_bytes
+			|| !data->temporalModelAllocationGeneration
+			|| !data->temporalGeometryGeneration
+			|| !data->temporalContentDigest ) return qfalse;
+	memset( &key, 0, sizeof( key ) );
+	key.backend = vk_ral_get_backend();
+	key.nativeVertexBuffer = (void *)data->vk_vertex_buffer;
+	key.nativeIndexBuffer = (void *)data->vk_index_buffer;
+	key.vertexBytes = data->vk_vertex_bytes;
+	key.indexBytes = data->vk_index_bytes;
+	key.modelAllocationGeneration = data->temporalModelAllocationGeneration;
+	key.geometryGeneration = data->temporalGeometryGeneration;
+	key.contentDigest = data->temporalContentDigest;
+	if ( !key.backend ) return qfalse;
+	*outKey = key;
 	return qtrue;
 }
 
-void vk_temporal_history_store_record( void )
+qboolean vk_temporal_iqm_geometry_ensure_after_idle(
+		iqmData_t *data, qboolean idleProven ) {
+	vkTemporalIqmGeometryKey_t key;
+	vkTemporalIqmGeometryOps_t ops = vk_temporal_iqm_geometry_ops();
+	qboolean wasLive;
+	if ( !vk_temporal_iqm_geometry_key( data, &key ) ) return qfalse;
+	wasLive = data->temporalGeometry.receipt.ready;
+	if ( !wasLive && vk_temporal_iqm_geometry_live_count == UINT32_MAX )
+		return qfalse;
+	if ( !VK_TemporalIqmGeometryEnsureAfterIdle(
+			&data->temporalGeometry, &key, idleProven, &ops ) ) return qfalse;
+	if ( !wasLive ) {
+		++vk_temporal_iqm_geometry_live_count;
+	}
+	return qtrue;
+}
+
+qboolean vk_temporal_iqm_geometry_get_receipt(
+		const iqmData_t *data, vkTemporalIqmGeometryReceipt_t *outReceipt ) {
+	vkTemporalIqmGeometryOps_t ops = vk_temporal_iqm_geometry_ops();
+	return data && VK_TemporalIqmGeometryGetReceipt(
+		&data->temporalGeometry, outReceipt, &ops );
+}
+
+qboolean vk_temporal_iqm_geometry_release_after_idle(
+		iqmData_t *data, qboolean idleProven ) {
+	vkTemporalIqmGeometryOps_t ops = vk_temporal_iqm_geometry_ops();
+	qboolean wasLive;
+	if ( !data ) return qfalse;
+	wasLive = data->temporalGeometry.receipt.ready;
+	if ( !VK_TemporalIqmGeometryReleaseAfterIdle(
+			&data->temporalGeometry, idleProven, &ops ) ) return qfalse;
+	if ( wasLive ) {
+		if ( !vk_temporal_iqm_geometry_live_count ) return qfalse;
+		--vk_temporal_iqm_geometry_live_count;
+	}
+	return qtrue;
+}
+
+static void vk_temporal_iqm_primary_clear( void ) {
+	if ( vk_temporal_iqm_primary.author.initialized
+			&& vk_temporal_iqm_primary.author.active )
+		(void)VK_TemporalIqmPayloadAuthorCancel(
+			&vk_temporal_iqm_primary.author );
+	vk_temporal_iqm_primary.drawCount = 0;
+	vk_temporal_iqm_primary.prepared = qfalse;
+	vk_temporal_iqm_primary.bound = qfalse;
+	vk_temporal_iqm_primary.currentDrawSurfOrdinal = UINT32_MAX;
+	vk_temporal_iqm_primary.sequence.ready = qfalse;
+	vk_temporal_iqm_primary.sequence.drawCount = 0;
+	vk_temporal_iqm_primary.sequence.entityCount = 0;
+	vk_temporal_iqm_primary.content.ready = qfalse;
+	vk_temporal_iqm_primary.author.initialized = qfalse;
+	vk_temporal_iqm_primary.author.active = qfalse;
+	vk_temporal_iqm_primary.author.poisoned = qfalse;
+	vk_temporal_iqm_primary.author.sealed = qfalse;
+	vk_temporal_iqm_primary.author.nextRecordIndex = 0;
+}
+
+static qboolean vk_temporal_iqm_primary_poison( void ) {
+	// Once bound, the activation verifier borrows `sequence` through FinishIqm.
+	// Preserve the complete context byte-for-byte even on rejection; the seal
+	// owns final cancellation and clear. Before Bind there is no borrower.
+	if ( !vk_temporal_iqm_primary.bound )
+		vk_temporal_iqm_primary_clear();
+	else
+		vk_temporal_iqm_primary.currentDrawSurfOrdinal = UINT32_MAX;
+	VK_TemporalMotionRecordingPoison( &vk_temporal_motion_recording );
+	VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
+	return qfalse;
+}
+
+static qboolean vk_temporal_iqm_opaque_stage0_exact(
+		const shader_t *shader, const shaderStage_t *stage,
+		const trRefEntity_t *entity, int fogNum, int dlighted,
+		const image_t *ordinaryImage ) {
+	return shader && stage && entity && ordinaryImage
+		&& shader->sort == SS_OPAQUE && shader->numUnfoggedPasses == 1
+		&& shader->stages[0] == stage && !shader->stages[1]
+		&& stage->active == qtrue && stage->numTexBundles == 1u
+		&& stage->bundle[0].image[0] == ordinaryImage
+		&& ( stage->stateBits & GLS_DEPTHMASK_TRUE )
+		&& !( stage->stateBits & ( GLS_ATEST_BITS | GLS_BLEND_BITS ) )
+		&& shader->numDeforms == 0 && shader->polygonOffset == qfalse
+		&& shader->isSky == qfalse && shader->entityMergable == qfalse
+		// FinishShader assigns FP_EQUAL to every opaque shader. The actual
+		// zero-fog draw fact below is the authority that excludes a fog pass.
+		&& stage->depthFragment == qfalse
+		&& fogNum == 0 && dlighted == 0
+		&& !( entity->e.renderfx & ( RF_DEPTHHACK | RF_CROSSHAIR ) )
+		? qtrue : qfalse;
+}
+
+qboolean vk_temporal_iqm_prescan_primary_command(
+		const drawSurf_t *drawSurfs, int numDrawSurfs ) {
+	const vkTemporalMotionRecordingAuthority_t *recording =
+		&vk_temporal_motion_recording.authority;
+	temporalIqmSequenceAuthority_t authority;
+	vkTemporalIqmPayloadReceipt_t payload;
+	uint32_t iqmSurfaceCount = 0;
+
+	vk_temporal_iqm_primary_clear();
+	if ( !drawSurfs || numDrawSurfs < 0
+			|| !VK_TemporalMotionRecordingIsActive(
+				&vk_temporal_motion_recording )
+			|| !vk_temporal_motion_recording.primaryCommandActive
+			|| !vk_temporal_main_activation.active )
+		return vk_temporal_iqm_primary_poison();
+
+	for ( int i = 0; i < numDrawSurfs; ++i ) {
+		const drawSurf_t *drawSurf = &drawSurfs[i];
+		temporalIqmProductAdmissionFacts_t admissionFacts;
+		temporalIqmProductAdmission_t admission;
+		temporalIqmDrawFacts_t *facts;
+		vkTemporalIqmGeometryReceipt_t geometry;
+		vkBindlessOrdinaryReceipt_t bindless;
+		temporalIqmModelView_t modelView;
+		shader_t *shader = NULL;
+		shaderStage_t *stage = NULL;
+		trRefEntity_t *entity = NULL;
+		model_t *model = NULL;
+		srfIQModel_t *surface = NULL;
+		iqmData_t *data = NULL;
+		image_t *ordinaryImage = NULL;
+		int entityNum = -1, fogNum = 0, dlighted = 0;
+		uint64_t firstIndex64 = 0, indexCount64 = 0;
+
+		if ( !drawSurf->surface || *drawSurf->surface != SF_IQM ) continue;
+		memset( &admissionFacts, 0, sizeof( admissionFacts ) );
+		memset( &geometry, 0, sizeof( geometry ) );
+		memset( &bindless, 0, sizeof( bindless ) );
+		memset( &modelView, 0, sizeof( modelView ) );
+		admissionFacts.primaryCommand = qtrue;
+		admissionFacts.iqmSurface = qtrue;
+		R_DecomposeSort( drawSurf->sort, &entityNum, &shader,
+			&fogNum, &dlighted );
+		if ( entityNum >= 0 && entityNum < backEnd.refdef.num_entities )
+			entity = &backEnd.refdef.entities[entityNum];
+		surface = (srfIQModel_t *)drawSurf->surface;
+		data = surface ? surface->data : NULL;
+		admissionFacts.entityIndex = entityNum;
+		admissionFacts.worldEntityIndex = REFENTITYNUM_WORLD;
+		admissionFacts.gpuDirect = data && data->vk_gpu_skinning
+			&& data->num_poses > 0 ? qtrue : qfalse;
+		if ( R_TemporalIqmClassifyProductSurface( &admissionFacts )
+				== TEMPORAL_IQM_PRODUCT_NONE ) continue;
+		if ( entity && entity->e.reType == RT_MODEL )
+			model = R_GetModelByHandle( entity->e.hModel );
+		if ( shader ) stage = shader->stages[0];
+		ordinaryImage = R_IqmOrdinaryImageForShader( shader );
+
+		admissionFacts.ordinaryAvailable = vk.iqmGpu.available
+			&& !vk.geometry_buffer_size_new ? qtrue : qfalse;
+		admissionFacts.h5Eligible = data
+			&& data->temporalH5Eligible == qtrue
+			&& vk_temporal_iqm_geometry_frame_ready ? qtrue : qfalse;
+		admissionFacts.entityExact = entity && entityNum >= 0
+			&& entityNum != REFENTITYNUM_WORLD
+			&& entityNum < (int)TEMPORAL_IQM_ENTITY_INDEX_LIMIT
+			&& entity->hasTemporal == qtrue
+			&& entity->temporalReceipt.valid == qtrue
+			&& entity->temporalReceipt.frameId == recording->frameId
+			&& RefEntityMotion_IsValid(
+				&entity->temporalReceipt.identity ) ? qtrue : qfalse;
+		admissionFacts.modelExact = model && model->type == MOD_IQM
+			&& model->modelData == data && data && data->surfaces
+			&& surface >= data->surfaces
+			&& surface < data->surfaces + data->num_surfaces
+			&& R_IqmTemporalModelView( data, &modelView )
+			&& modelView.modelDataToken == (uintptr_t)data
+			&& modelView.contentDigest == data->temporalContentDigest
+			&& modelView.topologyGeneration
+				== data->temporalTopologyGeneration
+			&& modelView.modelAllocationGeneration
+				== data->temporalModelAllocationGeneration ? qtrue : qfalse;
+		admissionFacts.geometryExact = data
+			&& vk_temporal_iqm_geometry_get_receipt( data, &geometry )
+			&& geometry.key.nativeVertexBuffer
+				== (void *)data->vk_vertex_buffer
+			&& geometry.key.nativeIndexBuffer
+				== (void *)data->vk_index_buffer
+			&& geometry.key.vertexBytes == data->vk_vertex_bytes
+			&& geometry.key.indexBytes == data->vk_index_bytes
+			&& geometry.key.modelAllocationGeneration
+				== data->temporalModelAllocationGeneration
+			&& geometry.key.geometryGeneration
+				== data->temporalGeometryGeneration
+			&& geometry.key.contentDigest == data->temporalContentDigest
+			? qtrue : qfalse;
+		admissionFacts.opaqueStage0Exact =
+			vk_temporal_iqm_opaque_stage0_exact( shader, stage, entity,
+				fogNum, dlighted, ordinaryImage );
+		admissionFacts.bindlessExact = ordinaryImage
+			&& vk_ral_bindless_query_ordinary( ordinaryImage, &bindless )
+			&& VK_BindlessPublicationReceiptExact( &bindless, &bindless )
+			? qtrue : qfalse;
+		admission = R_TemporalIqmClassifyProductSurface( &admissionFacts );
+		if ( admission == TEMPORAL_IQM_PRODUCT_NONE ) continue;
+		if ( admission != TEMPORAL_IQM_PRODUCT_ADMIT )
+			return vk_temporal_iqm_primary_poison();
+		if ( ++iqmSurfaceCount > TEMPORAL_IQM_MAX_DRAWS )
+			return vk_temporal_iqm_primary_poison();
+		if ( surface->first_triangle < 0 || surface->num_triangles <= 0 )
+			return vk_temporal_iqm_primary_poison();
+		firstIndex64 = (uint64_t)(uint32_t)surface->first_triangle * 3u;
+		indexCount64 = (uint64_t)(uint32_t)surface->num_triangles * 3u;
+		if ( firstIndex64 > UINT32_MAX || indexCount64 > UINT32_MAX )
+			return vk_temporal_iqm_primary_poison();
+
+		facts = &vk_temporal_iqm_primary.draws[
+			vk_temporal_iqm_primary.drawCount];
+		memset( facts, 0, sizeof( *facts ) );
+		facts->ordinal = vk_temporal_iqm_primary.drawCount;
+		facts->sourceDrawSurfOrdinal = (uint32_t)i;
+		facts->entityIndex = (uint32_t)entityNum;
+		facts->identity = entity->temporalReceipt.identity;
+		facts->currentPose = entity->temporalReceipt.current;
+		facts->previousValid = entity->temporalReceipt.previousValid;
+		facts->previousPose = facts->previousValid
+			? entity->temporalReceipt.previous : facts->currentPose;
+		facts->modelContentDigest = data->temporalContentDigest;
+		facts->modelTopologyGeneration = data->temporalTopologyGeneration;
+		facts->modelAllocationGeneration =
+			data->temporalModelAllocationGeneration;
+		facts->surfaceIndex = (uint32_t)( surface - data->surfaces );
+		facts->firstIndex = (uint32_t)firstIndex64;
+		facts->indexCount = (uint32_t)indexCount64;
+		facts->rawVertexBuffer =
+			(uintptr_t)geometry.key.nativeVertexBuffer;
+		facts->rawIndexBuffer =
+			(uintptr_t)geometry.key.nativeIndexBuffer;
+		facts->ralVertexBuffer = (uintptr_t)geometry.vertex;
+		facts->ralIndexBuffer = (uintptr_t)geometry.index;
+		facts->vertexBufferBytes = geometry.key.vertexBytes;
+		facts->indexBufferBytes = geometry.key.indexBytes;
+		facts->geometryBackend = (uintptr_t)geometry.key.backend;
+		facts->geometryGeneration = geometry.key.geometryGeneration;
+		facts->geometryAllocationGeneration =
+			geometry.allocationGeneration;
+		facts->textureSlot = bindless.imageSlot;
+		facts->samplerSlot = bindless.samplerSlot;
+		facts->bindless = bindless;
+		facts->outcome = facts->previousValid
+			? TEMPORAL_MOTION_WRITE_VALID
+			: TEMPORAL_MOTION_INVALIDATE_OPAQUE;
+		vk_temporal_iqm_primary.models[facts->ordinal] = data;
+		vk_temporal_iqm_primary.images[facts->ordinal] = ordinaryImage;
+		vk_temporal_iqm_primary.drawCount++;
+	}
+
+	if ( !vk_temporal_iqm_primary.drawCount ) return qtrue;
+	{
+		const uint64_t item = PAD( (uint32_t)IQM_UBO_TOTAL_SIZE,
+			vk.uniform_alignment );
+		const uint64_t start = PAD( vk.iqmGpu.offset[vk.cmd_index],
+			vk.uniform_alignment );
+		if ( !item || start + item * vk_temporal_iqm_primary.drawCount
+				> (uint64_t)vk.iqmGpu.ring_size )
+			return vk_temporal_iqm_primary_poison();
+	}
+	memset( &authority, 0, sizeof( authority ) );
+	authority.token = recording->token;
+	authority.frameId = recording->frameId;
+	authority.worldIndex = recording->worldIndex;
+	authority.commandSlot = recording->frameIndex;
+	authority.frameCount = NUM_COMMAND_BUFFERS;
+	VK_TemporalIqmPayloadAuthorInit( &vk_temporal_iqm_primary.author );
+	if ( !R_TemporalIqmSequenceBuild( &authority,
+			vk_temporal_iqm_primary.draws,
+			vk_temporal_iqm_primary.drawCount,
+			&vk_temporal_iqm_primary.sequence )
+			|| !VK_TemporalIqmPayloadGetReceipt( &vk_temporal_iqm_payload,
+				authority.commandSlot, &payload )
+			|| !VK_TemporalIqmPayloadAuthorBegin(
+				&vk_temporal_iqm_primary.author,
+				&vk_temporal_iqm_primary.sequence, &payload,
+				&backEnd.viewParms.temporalCameraReceipt,
+				backEnd.viewParms.projectionMatrix ) )
+		return vk_temporal_iqm_primary_poison();
+	for ( uint32_t recordIndex = 0;
+			recordIndex < vk_temporal_iqm_primary.sequence.entityCount;
+			++recordIndex ) {
+		uint32_t drawIndex = UINT32_MAX;
+		temporalIqmModelView_t modelView;
+		for ( uint32_t i = 0; i < vk_temporal_iqm_primary.drawCount; ++i ) {
+			if ( vk_temporal_iqm_primary.sequence.entries[i].recordIndex
+					== recordIndex ) { drawIndex = i; break; }
+		}
+		if ( drawIndex == UINT32_MAX
+				|| !R_IqmTemporalModelView(
+					vk_temporal_iqm_primary.models[drawIndex], &modelView )
+				|| !VK_TemporalIqmPayloadAuthorWrite(
+					&vk_temporal_iqm_primary.author, recordIndex,
+					&modelView ) )
+			return vk_temporal_iqm_primary_poison();
+	}
+	if ( !VK_TemporalIqmPayloadAuthorSeal(
+			&vk_temporal_iqm_primary.author,
+			&vk_temporal_iqm_primary.content ) )
+		return vk_temporal_iqm_primary_poison();
+	vk_temporal_iqm_primary.prepared = qtrue;
+	return qtrue;
+}
+
+static qboolean vk_temporal_iqm_revalidate_geometry( void *context,
+		const temporalIqmDrawFacts_t *expected,
+		vkTemporalIqmGeometryReceipt_t *outCurrent ) {
+	const vkTemporalIqmPrimaryContext_t *primary =
+		(const vkTemporalIqmPrimaryContext_t *)context;
+	if ( !primary || !expected || !outCurrent
+			|| expected->ordinal >= primary->drawCount
+			|| !primary->models[expected->ordinal] ) return qfalse;
+	return vk_temporal_iqm_geometry_get_receipt(
+		primary->models[expected->ordinal], outCurrent );
+}
+
+static qboolean vk_temporal_iqm_revalidate_bindless( void *context,
+		const temporalIqmDrawFacts_t *expected,
+		vkBindlessOrdinaryReceipt_t *outCurrent ) {
+	const vkTemporalIqmPrimaryContext_t *primary =
+		(const vkTemporalIqmPrimaryContext_t *)context;
+	if ( !primary || !expected || !outCurrent
+			|| expected->ordinal >= primary->drawCount
+			|| !primary->images[expected->ordinal] ) return qfalse;
+	return vk_ral_bindless_query_ordinary(
+		primary->images[expected->ordinal], outCurrent );
+}
+
+static const vkTemporalMainIqmActivationOps_t vk_temporal_iqm_revalidate_ops = {
+	vk_temporal_iqm_revalidate_geometry,
+	vk_temporal_iqm_revalidate_bindless
+};
+
+qboolean vk_temporal_iqm_bind_primary_command( void ) {
+	vkTemporalIqmExact3FactoryReceipt_t factory;
+	vkTemporalMainIqmPassReceipt_t pass;
+	if ( !vk_temporal_iqm_primary.prepared ) return qtrue;
+	if ( vk_temporal_iqm_primary.bound
+			|| !VK_TemporalIqmExact3FactoryGetReceipt(
+				&vk_temporal_iqm_exact3_factory, &factory ) )
+		return vk_temporal_iqm_primary_poison();
+	memset( &pass, 0, sizeof( pass ) );
+	pass.topologyGeneration =
+		vk_temporal_motion_recording.authority.topologyEpoch;
+	pass.sceneFormat = vk_attachment_format_to_ral( vk.color_format );
+	pass.depthFormat = vk_attachment_format_to_ral( vk.depth_format );
+#ifdef USE_REVERSED_DEPTH
+	pass.reversedDepth = qtrue;
+#else
+	pass.reversedDepth = qfalse;
+#endif
+	pass.ready = qtrue;
+	if ( !VK_TemporalMainActivationBindIqm(
+			&vk_temporal_main_activation,
+			&vk_temporal_iqm_primary.sequence,
+			&vk_temporal_iqm_primary.content,
+			&vk_temporal_iqm_payload, &factory, &pass,
+			&vk_temporal_iqm_primary,
+			&vk_temporal_iqm_revalidate_ops ) )
+		return vk_temporal_iqm_primary_poison();
+	vk_temporal_iqm_primary.bound = qtrue;
+	return qtrue;
+}
+
+static qboolean vk_temporal_iqm_build_observed_facts( iqmData_t *data,
+		const srfIQModel_t *surface, image_t *ordinaryImage,
+		temporalIqmDrawFacts_t *outFacts ) {
+	temporalIqmDrawFacts_t facts;
+	temporalIqmModelView_t modelView;
+	vkTemporalIqmGeometryReceipt_t geometry;
+	vkBindlessOrdinaryReceipt_t bindless;
+	const trRefEntity_t *entity;
+	uint32_t ordinal = UINT32_MAX;
+	uint32_t entityIndex = UINT32_MAX;
+	uint32_t surfaceIndex = UINT32_MAX;
+	uint64_t firstIndex, indexCount;
+	if ( !outFacts || !vk_temporal_iqm_primary.bound
+			|| vk_temporal_iqm_primary.currentDrawSurfOrdinal == UINT32_MAX
+			|| !data || !surface || surface->data != data || !ordinaryImage
+			|| !backEnd.currentEntity || !backEnd.refdef.entities ) return qfalse;
+	for ( uint32_t i = 0; i < vk_temporal_iqm_primary.sequence.drawCount; ++i ) {
+		if ( vk_temporal_iqm_primary.sequence.entries[i].facts.sourceDrawSurfOrdinal
+				== vk_temporal_iqm_primary.currentDrawSurfOrdinal ) {
+			ordinal = i;
+			break;
+		}
+	}
+	for ( int i = 0; i < backEnd.refdef.num_entities; ++i ) {
+		if ( backEnd.currentEntity == &backEnd.refdef.entities[i] ) {
+			entityIndex = (uint32_t)i;
+			break;
+		}
+	}
+	for ( uint32_t i = 0; data->surfaces && data->num_surfaces > 0
+			&& i < (uint32_t)data->num_surfaces; ++i ) {
+		if ( surface == &data->surfaces[i] ) {
+			surfaceIndex = i;
+			break;
+		}
+	}
+	if ( ordinal == UINT32_MAX || ordinal >= vk_temporal_iqm_primary.drawCount
+			|| entityIndex == UINT32_MAX || surfaceIndex == UINT32_MAX
+			|| surface->first_triangle < 0 || surface->num_triangles <= 0
+			|| !R_IqmTemporalModelView( data, &modelView )
+			|| !vk_temporal_iqm_geometry_get_receipt( data, &geometry )
+			|| !vk_ral_bindless_query_ordinary( ordinaryImage, &bindless )
+			|| bindless.ordinaryDescriptorIdentity
+				!= (uintptr_t)ordinaryImage->descriptor ) return qfalse;
+	entity = backEnd.currentEntity;
+	if ( entity->hasTemporal != qtrue || entity->temporalReceipt.valid != qtrue
+			|| entity->temporalReceipt.frameId
+				!= vk_temporal_motion_recording.authority.frameId ) return qfalse;
+	firstIndex = (uint64_t)(uint32_t)surface->first_triangle * 3u;
+	indexCount = (uint64_t)(uint32_t)surface->num_triangles * 3u;
+	if ( firstIndex > UINT32_MAX || indexCount > UINT32_MAX ) return qfalse;
+	memset( &facts, 0, sizeof( facts ) );
+	facts.ordinal = ordinal;
+	facts.sourceDrawSurfOrdinal =
+		vk_temporal_iqm_primary.currentDrawSurfOrdinal;
+	facts.entityIndex = entityIndex;
+	facts.identity = entity->temporalReceipt.identity;
+	facts.currentPose = entity->temporalReceipt.current;
+	facts.previousValid = entity->temporalReceipt.previousValid;
+	facts.previousPose = facts.previousValid
+		? entity->temporalReceipt.previous : facts.currentPose;
+	facts.modelContentDigest = modelView.contentDigest;
+	facts.modelTopologyGeneration = modelView.topologyGeneration;
+	facts.modelAllocationGeneration = modelView.modelAllocationGeneration;
+	facts.surfaceIndex = surfaceIndex;
+	facts.firstIndex = (uint32_t)firstIndex;
+	facts.indexCount = (uint32_t)indexCount;
+	facts.rawVertexBuffer = (uintptr_t)geometry.key.nativeVertexBuffer;
+	facts.rawIndexBuffer = (uintptr_t)geometry.key.nativeIndexBuffer;
+	facts.ralVertexBuffer = (uintptr_t)geometry.vertex;
+	facts.ralIndexBuffer = (uintptr_t)geometry.index;
+	facts.vertexBufferBytes = geometry.key.vertexBytes;
+	facts.indexBufferBytes = geometry.key.indexBytes;
+	facts.geometryBackend = (uintptr_t)geometry.key.backend;
+	facts.geometryGeneration = geometry.key.geometryGeneration;
+	facts.geometryAllocationGeneration = geometry.allocationGeneration;
+	facts.textureSlot = bindless.imageSlot;
+	facts.samplerSlot = bindless.samplerSlot;
+	facts.bindless = bindless;
+	facts.outcome = facts.previousValid
+		? TEMPORAL_MOTION_WRITE_VALID : TEMPORAL_MOTION_INVALIDATE_OPAQUE;
+	if ( !R_TemporalIqmDrawFactsValid( &facts ) ) return qfalse;
+	*outFacts = facts;
+	return qtrue;
+}
+
+void vk_temporal_iqm_reject_current_draw( void ) {
+	if ( vk_temporal_iqm_primary.bound )
+		(void)vk_temporal_iqm_primary_poison();
+}
+
+void vk_temporal_iqm_publish_drawsurf_ordinal( uint32_t ordinal ) {
+	if ( vk_temporal_iqm_primary.prepared )
+		vk_temporal_iqm_primary.currentDrawSurfOrdinal = ordinal;
+}
+
+void vk_temporal_iqm_reset_drawsurf_ordinal( void ) {
+	vk_temporal_iqm_primary.currentDrawSurfOrdinal = UINT32_MAX;
+}
+#endif
+
+#include "shaders/spirv/shader_data.c"
+#define SHADER_MODULE(name) SHADER_MODULE(name,sizeof(name))
+#if FEAT_IQM
+
+typedef struct {
+	const void *protectedRal[5];
+	uint32_t protectedCount;
+} vkTemporalIqmExact3ProductCandidateContext_t;
+
+static qboolean vk_temporal_iqm_exact3_candidate_allowed(
+		vkTemporalIqmExact3CandidateRole_t role, const void *candidate,
+		const void *context ) {
+	const vkTemporalIqmExact3ProductCandidateContext_t *c =
+		(const vkTemporalIqmExact3ProductCandidateContext_t *)context;
+	if ( !candidate || !c || !c->protectedCount
+			|| c->protectedCount > ARRAY_LEN( c->protectedRal ) ) return qfalse;
+	if ( role == VK_TEMPORAL_IQM_EXACT3_CANDIDATE_RAW_LAYOUT )
+		return qtrue;
+	if ( role != VK_TEMPORAL_IQM_EXACT3_CANDIDATE_ADOPTED_LAYOUT
+			&& role != VK_TEMPORAL_IQM_EXACT3_CANDIDATE_WRITE_PIPELINE
+			&& role != VK_TEMPORAL_IQM_EXACT3_CANDIDATE_INVALIDATE_PIPELINE )
+		return qfalse;
+	for ( uint32_t i = 0; i < c->protectedCount; ++i )
+		if ( candidate == c->protectedRal[i] ) return qfalse;
+	return qtrue;
+}
+
+static vkTemporalIqmExact3FactoryOps_t vk_temporal_iqm_exact3_factory_ops(
+		const vkTemporalIqmExact3ProductCandidateContext_t *context ) {
+	vkTemporalIqmExact3FactoryOps_t ops;
+	memset( &ops, 0, sizeof( ops ) );
+	ops.getBindGroupLayoutHandle = Ral_GetBindGroupLayoutHandle;
+	ops.createRawLayout = vk_temporal_layout_create_raw;
+	ops.destroyRawLayout = vk_temporal_layout_destroy_raw;
+	ops.adoptRawLayout = vk_temporal_layout_adopt;
+	ops.destroyAdoptedLayout = Ral_DestroyPipelineLayout;
+	ops.createPipeline = Ral_CreateGraphicsPipeline;
+	ops.destroyPipeline = Ral_DestroyPipeline;
+	ops.drain = vk_temporal_pipeline_drain;
+	ops.candidateAllowed = vk_temporal_iqm_exact3_candidate_allowed;
+	ops.candidateContext = context;
+	return ops;
+}
+
+static qboolean vk_temporal_iqm_factory_matches_current(
+		const vkTemporalIqmExact3FactoryInput_t *input,
+		const vkTemporalIqmPayloadReceipt_t *payload ) {
+	vkTemporalIqmExact3FactoryReceipt_t receipt;
+	if ( !input || !payload || !VK_TemporalIqmExact3FactoryGetReceipt(
+			&vk_temporal_iqm_exact3_factory, &receipt ) ) return qfalse;
+	return receipt.backend == input->backend && receipt.device == input->device
+		&& receipt.payloadOwner == &vk_temporal_iqm_payload
+		&& receipt.payloadLayout == payload->layout
+		&& receipt.payloadLayoutGeneration == payload->ownerAllocationGeneration
+		&& receipt.bindless.backend == input->bindless.backend
+		&& receipt.bindless.layout == input->bindless.layout
+		&& receipt.bindless.setIdentity == input->bindless.setIdentity
+		&& receipt.bindless.setGeneration == input->bindless.setGeneration
+		&& receipt.shaderGeneration == 1u
+		&& receipt.pipelineGeneration == input->pipelineGeneration
+		&& receipt.topologyGeneration == input->topologyGeneration
+		&& receipt.sceneFormat == input->sceneFormat
+		&& receipt.depthFormat == input->depthFormat
+		&& receipt.reversedDepth == input->reversedDepth ? qtrue : qfalse;
+}
+
+static qboolean vk_temporal_iqm_geometry_prepare_loaded_after_fence( void ) {
+	vkTemporalIqmGeometryOps_t ops = vk_temporal_iqm_geometry_ops();
+	qboolean found = qfalse;
+	for ( int i = 0; i < tr.numModels; ++i ) {
+		model_t *mod = tr.models[i];
+		vkTemporalIqmGeometryKey_t key;
+		vkTemporalIqmGeometryReceipt_t receipt;
+		iqmData_t *data;
+		if ( !mod || mod->type != MOD_IQM || !mod->modelData ) continue;
+		data = (iqmData_t *)mod->modelData;
+		if ( data->temporalH5Eligible != qtrue ) continue;
+		found = qtrue;
+		if ( !vk_temporal_iqm_geometry_key( data, &key ) ) return qfalse;
+		if ( data->temporalGeometry.receipt.ready ) {
+			if ( VK_TemporalIqmGeometryNeedsIdle(
+					&data->temporalGeometry, &key, &ops ) ) return qfalse;
+			if ( !vk_temporal_iqm_geometry_get_receipt( data, &receipt ) )
+				return qfalse;
+		}
+	}
+	if ( !found ) return qfalse;
+	for ( int i = 0; i < tr.numModels; ++i ) {
+		model_t *mod = tr.models[i];
+		iqmData_t *data;
+		if ( !mod || mod->type != MOD_IQM || !mod->modelData ) continue;
+		data = (iqmData_t *)mod->modelData;
+		if ( data->temporalH5Eligible == qtrue
+				&& !vk_temporal_iqm_geometry_ensure_after_idle(
+					data, qfalse ) ) return qfalse;
+	}
+	return qtrue;
+}
+
+static qboolean vk_temporal_iqm_resources_prepare_after_fence(
+		const temporalBatchRequest_t *request, qboolean slotFenceCompleted ) {
+	ralBackend_t *backend;
+	const ralCaps_t *caps;
+	vkRalBindlessCohortReceipt_t cohort;
+	vkTemporalIqmPayloadKey_t payloadKey;
+	vkTemporalIqmPayloadReceipt_t payloadReceipt;
+	vkTemporalIqmExact3FactoryInput_t input;
+	vkTemporalIqmExact3ShaderCatalog_t catalog;
+	vkTemporalIqmExact3ProductCandidateContext_t candidateContext;
+	vkTemporalIqmExact3FactoryOps_t factoryOps;
+	vkTemporalIqmExact3FactoryReceipt_t factoryReceipt;
+	qboolean idleProven = qfalse;
+
+	if ( !R_TemporalBatchRequestValidateExact( request ) || !request->enabled
+			|| !vk_temporal_iqm_geometry_frame_ready ) return qfalse;
+	backend = vk_ral_get_backend();
+	caps = backend ? Ral_GetCaps( backend ) : NULL;
+	if ( !caps || !R_TemporalIqmStorageRangeSupported(
+			caps->maxStorageBufferRange )
+			|| !vk_ral_bindless_get_cohort( &cohort )
+			|| cohort.ready != qtrue || cohort.backend != backend ) return qfalse;
+
+	memset( &payloadKey, 0, sizeof( payloadKey ) );
+	payloadKey.backend = backend;
+	payloadKey.maxStorageBufferRange = caps->maxStorageBufferRange;
+	payloadKey.frameCount = NUM_COMMAND_BUFFERS;
+	payloadKey.protectedIdentities[0] = cohort.layout;
+	payloadKey.protectedIdentities[1] = cohort.set;
+	payloadKey.protectedCount = 2u;
+	if ( !vk_temporal_iqm_payload.initialized )
+		VK_TemporalIqmPayloadInit( &vk_temporal_iqm_payload );
+	if ( VK_TemporalIqmPayloadNeedsIdle(
+			&vk_temporal_iqm_payload, &payloadKey ) ) {
+		vk_wait_idle();
+		idleProven = qtrue;
+		memset( &candidateContext, 0, sizeof( candidateContext ) );
+		candidateContext.protectedRal[0] = backend;
+		candidateContext.protectedCount = 1u;
+		factoryOps = vk_temporal_iqm_exact3_factory_ops( &candidateContext );
+		if ( ( vk_temporal_iqm_exact3_factory.ready
+				|| vk_temporal_iqm_exact3_factory.pendingDrain )
+				&& !VK_TemporalIqmExact3FactoryRelease(
+					&vk_temporal_iqm_exact3_factory, &factoryOps ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal IQM factory release failed before payload replacement" );
+		if ( !VK_TemporalIqmPayloadReleaseAfterIdle(
+				&vk_temporal_iqm_payload, qtrue ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal IQM payload replacement release failed" );
+	}
+	if ( !VK_TemporalIqmPayloadPrepareAfterFence(
+			&vk_temporal_iqm_payload, &payloadKey, (uint32_t)vk.cmd_index,
+			slotFenceCompleted || idleProven, idleProven )
+			|| !VK_TemporalIqmPayloadGetReceipt(
+				&vk_temporal_iqm_payload, (uint32_t)vk.cmd_index,
+				&payloadReceipt ) ) return qfalse;
+
+	memset( &input, 0, sizeof( input ) );
+	input.backend = backend;
+	input.device = vk.device;
+	input.bindless.backend = cohort.backend;
+	input.bindless.layout = cohort.layout;
+	input.bindless.setIdentity = cohort.set;
+	input.bindless.setGeneration = cohort.setGeneration;
+	input.bindless.ready = qtrue;
+	/* The backend plan generation is stable across ordinary frames and changes
+	 * only when the temporal plan cohort is replaced; it is not a frame id. */
+	input.pipelineGeneration = request->planGeneration;
+	input.topologyGeneration = request->topologyEpoch;
+	input.sceneFormat = vk_attachment_format_to_ral( vk.color_format );
+	input.depthFormat = vk_attachment_format_to_ral( vk.depth_format );
+#ifdef USE_REVERSED_DEPTH
+	input.reversedDepth = qtrue;
+#else
+	input.reversedDepth = qfalse;
+#endif
+	if ( input.sceneFormat != RAL_FORMAT_R16G16B16A16_SFLOAT
+			|| input.depthFormat == RAL_FORMAT_UNDEFINED ) return qfalse;
+	memset( &catalog, 0, sizeof( catalog ) );
+	catalog.vertex.bytes = iqm_temporal_exact3_vert_spv;
+	catalog.vertex.size = sizeof( iqm_temporal_exact3_vert_spv );
+	catalog.writeFragment.bytes = iqm_temporal_exact3_write_frag_spv;
+	catalog.writeFragment.size = sizeof( iqm_temporal_exact3_write_frag_spv );
+	catalog.invalidateFragment.bytes =
+		iqm_temporal_exact3_invalidate_frag_spv;
+	catalog.invalidateFragment.size =
+		sizeof( iqm_temporal_exact3_invalidate_frag_spv );
+	catalog.generation = 1u;
+
+	memset( &candidateContext, 0, sizeof( candidateContext ) );
+	candidateContext.protectedRal[0] = backend;
+	candidateContext.protectedRal[1] = &vk_temporal_iqm_payload;
+	candidateContext.protectedRal[2] = payloadReceipt.layout;
+	candidateContext.protectedRal[3] = cohort.layout;
+	candidateContext.protectedRal[4] = cohort.set;
+	candidateContext.protectedCount = 5u;
+	factoryOps = vk_temporal_iqm_exact3_factory_ops( &candidateContext );
+	if ( !vk_temporal_iqm_exact3_factory.initialized )
+		VK_TemporalIqmExact3FactoryInit( &vk_temporal_iqm_exact3_factory );
+	if ( vk_temporal_iqm_exact3_factory.pendingDrain ) {
+		if ( !idleProven ) { vk_wait_idle(); idleProven = qtrue; }
+		if ( !VK_TemporalIqmExact3FactoryRelease(
+				&vk_temporal_iqm_exact3_factory, &factoryOps ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal IQM pending factory drain failed" );
+	}
+	if ( vk_temporal_iqm_exact3_factory.ready
+			&& !vk_temporal_iqm_factory_matches_current(
+				&input, &payloadReceipt ) ) {
+		if ( !idleProven ) { vk_wait_idle(); idleProven = qtrue; }
+		if ( !VK_TemporalIqmExact3FactoryRelease(
+				&vk_temporal_iqm_exact3_factory, &factoryOps ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal IQM factory replacement release failed" );
+	}
+	if ( !VK_TemporalIqmExact3FactoryEnsure(
+			&vk_temporal_iqm_exact3_factory, &vk_temporal_iqm_payload,
+			&input, &catalog, &factoryOps ) ) {
+		if ( vk_temporal_iqm_exact3_factory.pendingDrain
+				&& !VK_TemporalIqmExact3FactoryRelease(
+					&vk_temporal_iqm_exact3_factory, &factoryOps ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal IQM failed factory candidate drain failed" );
+		return qfalse;
+	}
+	return VK_TemporalIqmExact3FactoryGetReceipt(
+		&vk_temporal_iqm_exact3_factory, &factoryReceipt )
+		&& factoryReceipt.payloadOwner == &vk_temporal_iqm_payload
+		&& factoryReceipt.payloadLayout == payloadReceipt.layout
+		&& factoryReceipt.payloadLayoutGeneration
+			== payloadReceipt.ownerAllocationGeneration
+		&& factoryReceipt.bindless.setIdentity == cohort.set
+		&& factoryReceipt.bindless.setGeneration == cohort.setGeneration
+		? qtrue : qfalse;
+}
+
+static void vk_temporal_iqm_resources_release_after_idle(
+		const char *reason ) {
+	vkTemporalIqmExact3ProductCandidateContext_t candidateContext;
+	vkTemporalIqmExact3FactoryOps_t factoryOps;
+	qboolean hadLive;
+	vk_temporal_iqm_geometry_frame_ready = qfalse;
+	hadLive = vk_temporal_iqm_exact3_factory.ready
+		|| vk_temporal_iqm_exact3_factory.pendingDrain
+		|| VK_TemporalIqmPayloadHasLive( &vk_temporal_iqm_payload )
+		|| vk_temporal_iqm_geometry_live_count ? qtrue : qfalse;
+	if ( !hadLive ) return;
+	memset( &candidateContext, 0, sizeof( candidateContext ) );
+	candidateContext.protectedRal[0] = vk_ral_get_backend();
+	candidateContext.protectedCount = 1u;
+	factoryOps = vk_temporal_iqm_exact3_factory_ops( &candidateContext );
+	if ( ( vk_temporal_iqm_exact3_factory.ready
+			|| vk_temporal_iqm_exact3_factory.pendingDrain )
+			&& !VK_TemporalIqmExact3FactoryRelease(
+				&vk_temporal_iqm_exact3_factory, &factoryOps ) )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal IQM exact3 factory release failed at idle boundary (%s)",
+			reason );
+	if ( VK_TemporalIqmPayloadHasLive( &vk_temporal_iqm_payload )
+			&& !VK_TemporalIqmPayloadReleaseAfterIdle(
+				&vk_temporal_iqm_payload, qtrue ) )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal IQM payload release failed at idle boundary (%s)", reason );
+	if ( vk_temporal_iqm_geometry_live_count ) {
+		for ( int i = 0; i < tr.numModels; ++i ) {
+			model_t *mod = tr.models[i];
+			if ( mod && mod->type == MOD_IQM && mod->modelData ) {
+				iqmData_t *data = (iqmData_t *)mod->modelData;
+				if ( data->temporalGeometry.receipt.ready
+						&& !vk_temporal_iqm_geometry_release_after_idle(
+							data, qtrue ) )
+					ri.Terminate( TERM_UNRECOVERABLE,
+						"temporal IQM geometry release failed at idle boundary (%s)",
+						reason );
+			}
+		}
+		if ( vk_temporal_iqm_geometry_live_count )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal IQM geometry child remained live after idle release (%s)",
+				reason );
+	}
+	if ( Ral_WaitIdleAndDrainDeferred( vk_ral_get_backend() ) != ralSuccess )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal IQM final deferred drain failed before raw parents (%s)",
+			reason );
+}
+#else
+static void vk_temporal_iqm_resources_release_after_idle(
+		const char *reason ) {
+	(void)reason;
+}
+#endif
+
+static struct {
+	const ralTemporalFramePlan_t *plan;
+	temporalHistoryResources_t *history;
+	int worldIndex;
+	uint64_t frameId;
+	qboolean consumeRecorded;
+	vkTemporalResolvedHdrReceipt_t target;
+	vkTemporalHistoryStoreKey_t storeKey;
+	uint32_t storeOwnerAllocationGeneration;
+	float zNear, zFar;
+	qboolean prepared;
+} s_temporalHistoryStoreFrame;
+
+static void vk_temporal_history_store_release_after_idle( void ) {
+	qboolean resolveLive = vk_temporal_resolve.initialized
+		&& VK_TemporalResolveHasLive( &vk_temporal_resolve );
+	qboolean consumeLive = VK_TemporalHistoryConsumeHasLive(
+		&vk_temporal_history_consume );
+	qboolean storeLive = VK_TemporalHistoryStoreHasLive(
+		&vk_temporal_history_store_owner );
+	if ( resolveLive )
+		vk_temporal_resolve_release_after_idle( "history-store-release" );
+	if ( consumeLive ) vk_temporal_history_consume_collect_all_after_idle();
+	if ( consumeLive && !VK_TemporalHistoryConsumeReleaseAfterIdle(
+			&vk_temporal_history_consume, qtrue ) )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal history consumer remained in-flight after device idle" );
+	if ( consumeLive
+			&& VK_TemporalHistoryConsumeHasLive( &vk_temporal_history_consume ) )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal history consumer stayed live after release" );
+	if ( storeLive
+			&& !VK_TemporalHistoryStoreReleaseAfterIdle(
+				&vk_temporal_history_store_owner, qtrue ) )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal history Store release failed after idle" );
+	memset( &s_temporalHistoryStoreFrame, 0,
+		sizeof( s_temporalHistoryStoreFrame ) );
+}
+
+void vk_temporal_history_store_shutdown( void ) {
+	if ( ( vk_temporal_resolve.initialized
+			&& VK_TemporalResolveHasLive( &vk_temporal_resolve ) )
+			|| VK_TemporalHistoryConsumeHasLive( &vk_temporal_history_consume )
+			|| VK_TemporalHistoryStoreHasLive(
+				&vk_temporal_history_store_owner ) ) vk_wait_idle();
+	vk_temporal_history_store_release_after_idle();
+	if ( vk_ral_get_backend()
+			&& Ral_WaitIdleAndDrainDeferred( vk_ral_get_backend() ) != ralSuccess )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal history Store deferred drain failed" );
+}
+
+static qboolean vk_temporal_history_store_build_key(
+		const temporalHistoryResources_t *history, int worldIndex,
+		const vkTemporalResolvedHdrReceipt_t *resolved,
+		vkTemporalHistoryStoreKey_t *outKey ) {
+	vkTemporalHistoryStoreKey_t key;
+	const void *roles[13];
+	uint32_t i, j, n = 0;
+	if ( !history || !history->ready || !resolved || !resolved->ready
+			|| !outKey || resolved->backend != vk_ral_get_backend()
+			|| history->backend != resolved->backend
+			|| resolved->worldIndex != worldIndex
+			|| resolved->width != history->width
+			|| resolved->height != history->height
+			|| resolved->topologyEpoch != history->topologyEpoch
+			|| resolved->sceneFormat != RAL_FORMAT_R16G16B16A16_SFLOAT
+			|| !vk.sceneDepth.ral_image ) return qfalse;
+	memset( &key, 0, sizeof( key ) );
+	key.backend = resolved->backend; key.worldIndex = worldIndex;
+	key.width = history->width; key.height = history->height;
+	key.topologyEpoch = history->topologyEpoch;
+	key.historyAllocationGeneration = history->allocationGeneration;
+	key.sceneColorAttachmentGeneration =
+		resolved->sceneColorAttachmentGeneration;
+	key.resolvedTargetAllocationGeneration = resolved->allocationGeneration;
+	key.sceneFormat = resolved->sceneFormat;
+	key.feedbackColor = resolved->target;
+	key.feedbackColorView = resolved->targetView;
+	key.currentDepth = vk.sceneDepth.ral_image;
+	for ( i = 0; i < 2; ++i ) {
+		key.historyColor[i] = history->color[i];
+		key.historyColorView[i] = history->colorView[i];
+		key.historyDepth[i] = history->depth[i];
+		key.historyDepthView[i] = history->depthView[i];
+	}
+	key.computeSpirv = (const uint32_t *)temporal_history_store_comp_spv;
+	key.computeSpirvSize = sizeof( temporal_history_store_comp_spv );
+	roles[n++] = key.backend; roles[n++] = key.feedbackColor;
+	roles[n++] = key.feedbackColorView; roles[n++] = key.currentDepth;
+	roles[n++] = key.computeSpirv;
+	for ( i = 0; i < 2; ++i ) {
+		roles[n++] = key.historyColor[i]; roles[n++] = key.historyColorView[i];
+		roles[n++] = key.historyDepth[i]; roles[n++] = key.historyDepthView[i];
+	}
+	for ( i = 0; i < n; ++i ) {
+		if ( !roles[i] ) return qfalse;
+		for ( j = i + 1; j < n; ++j )
+			if ( roles[i] == roles[j] ) return qfalse;
+	}
+	*outKey = key;
+	return qtrue;
+}
+
+static qboolean vk_temporal_history_store_materialize_after_fence(
+		const temporalHistoryResources_t *history, int worldIndex,
+		const vkTemporalResolvedHdrReceipt_t *resolved )
+{
+	vkTemporalHistoryStoreKey_t storeKey;
+	qboolean idleProven = qfalse;
+	if ( !vk_temporal_history_store_build_key(
+			history, worldIndex, resolved, &storeKey ) ) return qfalse;
+	if ( !vk_temporal_history_store_owner.initialized )
+		VK_TemporalHistoryStoreInit( &vk_temporal_history_store_owner );
+	if ( VK_TemporalHistoryStoreNeedsIdle(
+			&vk_temporal_history_store_owner, &storeKey ) ) {
+		vk_wait_idle();
+		idleProven = qtrue;
+	}
+	return VK_TemporalHistoryStoreEnsureAfterFence(
+		&vk_temporal_history_store_owner, &storeKey, idleProven );
+}
+
+static qboolean vk_temporal_history_store_ready_exact(
+		const temporalHistoryResources_t *history, int worldIndex,
+		const vkTemporalResolvedHdrReceipt_t *resolved,
+		vkTemporalHistoryStoreKey_t *outKey ) {
+	vkTemporalHistoryStoreKey_t key;
+	if ( !outKey || !vk_temporal_history_store_build_key(
+			history, worldIndex, resolved, &key )
+			|| !VK_TemporalHistoryStoreMatchesExact(
+				&vk_temporal_history_store_owner, &key ) ) return qfalse;
+	*outKey = key;
+	return qtrue;
+}
+
+static qboolean vk_temporal_history_store_prepare( void )
 {
 	const ralTemporalFramePlan_t *plan;
 	temporalHistoryResources_t *history;
-	vkTemporalHistoryPush_t push;
+	temporalHistoryCommittedReceipt_t committed;
+	temporalHistoryFrameView_t frameView;
+	qboolean consumeRecorded = qfalse;
 	int worldIndex = backEnd.viewParms.temporalWorldIndex;
 	uint64_t frameId = backEnd.viewParms.temporalFrameId;
+	memset( &s_temporalHistoryStoreFrame, 0,
+		sizeof( s_temporalHistoryStoreFrame ) );
 
-	if ( !R_TemporalBackendGetPending( worldIndex, frameId, &plan, &history ) ) return;
+	if ( !R_TemporalBackendGetPending( worldIndex, frameId, &plan, &history ) ) return qfalse;
 	// The allocation domain is the physical scene target. Multi/letterboxed views
 	// need an explicit viewport-region contract and are rejected by this first leaf.
 	if ( backEnd.viewParms.viewportX != 0 || backEnd.viewParms.viewportY != 0
 			|| backEnd.viewParms.viewportWidth != glConfig.vidWidth
-			|| backEnd.viewParms.viewportHeight != glConfig.vidHeight ) return;
-	if ( vk.cmd->open_dynamic_pass == VK_DYN_PASS_NONE ) return;
+			|| backEnd.viewParms.viewportHeight != glConfig.vidHeight ) return qfalse;
+	if ( vk.cmd->open_dynamic_pass == VK_DYN_PASS_NONE ) return qfalse;
 
 	// Force a final post-world snapshot. Early soft-particle consumers may have
 	// copied depth already, but they cannot define temporal history depth.
 	vk_scene_depth_copy_final();
 	vk_forwardplus_depth_copy();
 	if ( vk.cmd->open_dynamic_pass != VK_DYN_PASS_NONE ) vk_end_render_pass();
-	if ( !vk_temporal_history_store_ensure( history ) ) return;
+	// The history store always samples the final scene color and copied depth in
+	// compute, even when the explicit H1 witness is not armed.  Make both prior
+	// graphics/transfer writes visible to that shared compute seam here; keeping
+	// these acquires inside the diagnostic-only branch would leave the ordinary
+	// unarmed store with an incomplete synchronization contract.
+	Ral_CmdTransitionTexture( vk.cmd->ral_cmd, vk.ral_color_image,
+		RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	Ral_CmdTransitionTexture( vk.cmd->ral_cmd, vk.sceneDepth.ral_image,
+		RAL_PIPELINE_STAGE_TRANSFER_BIT,
+		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	if ( VK_TemporalHistoryConsumeIsArmed( &vk_temporal_history_consume ) ) {
+		const temporalHistoryCommittedReceipt_t *prior = NULL;
+		if ( plan->historyValid
+				&& R_TemporalBackendGetCommittedHistory( worldIndex,
+					plan->historyReadIndex, &committed ) ) prior=&committed;
+		if ( plan->historyValid && R_TemporalHistoryBuildFrameView( history, plan, prior,
+				worldIndex, &frameView ) ) {
+			Ral_CmdTransitionTexture( vk.cmd->ral_cmd, frameView.readColor,
+				RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+			Ral_CmdTransitionTexture( vk.cmd->ral_cmd, frameView.readDepth,
+				RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+			consumeRecorded = VK_TemporalHistoryConsumeRecord(
+				&vk_temporal_history_consume, vk.cmd->ral_cmd,
+				(uint32_t)vk.cmd_index, plan, &frameView,
+				r_znear->value, backEnd.viewParms.zFar );
+		}
+	}
+	if ( !vk_temporal_history_store_ready_exact( history, worldIndex,
+			&vk_temporal_resolved_hdr_frame.target,
+			&s_temporalHistoryStoreFrame.storeKey ) ) {
+		if ( consumeRecorded ) (void)VK_TemporalHistoryConsumeAcceptStore(
+			&vk_temporal_history_consume, (uint32_t)vk.cmd_index, qfalse );
+		return qfalse;
+	}
+	s_temporalHistoryStoreFrame.plan = plan;
+	s_temporalHistoryStoreFrame.history = history;
+	s_temporalHistoryStoreFrame.worldIndex = worldIndex;
+	s_temporalHistoryStoreFrame.frameId = frameId;
+	s_temporalHistoryStoreFrame.consumeRecorded = consumeRecorded;
+	s_temporalHistoryStoreFrame.target = vk_temporal_resolved_hdr_frame.target;
+	s_temporalHistoryStoreFrame.storeOwnerAllocationGeneration =
+		vk_temporal_history_store_owner.allocationGeneration;
+	s_temporalHistoryStoreFrame.zNear = r_znear->value;
+	s_temporalHistoryStoreFrame.zFar = backEnd.viewParms.zFar;
+	s_temporalHistoryStoreFrame.prepared = qtrue;
+	return qtrue;
+}
 
-	Ral_CmdTransitionTexture( vk.cmd->ral_cmd, history->color[plan->historyWriteIndex],
-		RAL_PIPELINE_STAGE_TOP_OF_PIPE_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		VK_IMAGE_LAYOUT_GENERAL );
-	Ral_CmdTransitionTexture( vk.cmd->ral_cmd, history->depth[plan->historyWriteIndex],
-		RAL_PIPELINE_STAGE_TOP_OF_PIPE_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		VK_IMAGE_LAYOUT_GENERAL );
+static qboolean vk_temporal_history_store_feedback( qboolean recursive )
+{
+	const ralTemporalFramePlan_t *plan = s_temporalHistoryStoreFrame.plan;
+	temporalHistoryResources_t *history = s_temporalHistoryStoreFrame.history;
+	const vkTemporalResolvedHdrContentReceipt_t *content =
+		&vk_temporal_resolved_hdr_frame.recorded;
+	temporalHistoryFeedbackSource_t source;
+	temporalHistoryPendingWriteReceipt_t pending;
+	vkTemporalHistoryStorePush_t push;
+	vkHdrPostprocessSource_t route;
+	qboolean staged;
+	if ( !s_temporalHistoryStoreFrame.prepared || !plan || !history
+			|| !content->valid || content->submitted
+			|| content->target != vk_temporal_history_store_owner.key.feedbackColor
+			|| content->targetView !=
+				vk_temporal_history_store_owner.key.feedbackColorView
+			|| content->sceneColorAttachmentGeneration !=
+				vk_temporal_history_store_owner.key.sceneColorAttachmentGeneration
+			|| content->targetAllocationGeneration !=
+				vk_temporal_history_store_owner.key.resolvedTargetAllocationGeneration
+			|| content->frameId != plan->frameId
+			|| content->worldIndex != s_temporalHistoryStoreFrame.worldIndex
+			|| content->width != history->width || content->height != history->height
+			|| content->topologyEpoch != history->topologyEpoch
+			|| content->planGeneration != plan->generation
+			|| content->sceneFormat != RAL_FORMAT_R16G16B16A16_SFLOAT
+			|| ( recursive && content->producer !=
+				VK_TEMPORAL_RESOLVED_HDR_PRODUCER_TEMPORAL_RESOLVE )
+			|| ( !recursive && content->producer !=
+				VK_TEMPORAL_RESOLVED_HDR_PRODUCER_COPY )
+			|| !VK_TemporalResolvedHdrRouteSource(
+				&vk_temporal_resolved_hdr_frame.current,
+				&s_temporalHistoryStoreFrame.target, content, &route )
+			|| !route.resolved || route.attachment != content->target
+			|| ( recursive && !VK_TemporalResolveTicketValidateRecordedExact(
+				&vk_temporal_resolve_frame.recorded ) ) ) return qfalse;
+	memset( &source, 0, sizeof( source ) );
+	source.backend = content->backend;
+	source.sourceSceneColor = content->sourceSceneColor;
+	source.sourcePostprocessGroup = content->sourcePostprocessGroup;
+	source.sourceHistogramGroup = content->sourceHistogramGroup;
+	source.sourceColor = content->target;
+	source.sourceColorView = content->targetView;
+	source.postprocessGroup = content->postprocessGroup;
+	source.histogramGroup = content->histogramGroup;
+	source.batchToken = content->batchToken;
+	source.frameId = content->frameId;
+	source.contentSerial = content->contentSerial;
+	source.commandSlot = content->commandSlot;
+	source.frameCount = content->frameCount;
+	source.worldIndex = content->worldIndex;
+	source.width = content->width;
+	source.height = content->height;
+	source.topologyEpoch = content->topologyEpoch;
+	source.planGeneration = content->planGeneration;
+	source.sceneColorAttachmentGeneration =
+		content->sceneColorAttachmentGeneration;
+	source.targetAllocationGeneration = content->targetAllocationGeneration;
+	source.resolveOwnerAllocationGeneration = recursive
+		? vk_temporal_resolve_frame.recorded.ownerAllocationGeneration : 0u;
+	source.storeOwnerAllocationGeneration =
+		s_temporalHistoryStoreFrame.storeOwnerAllocationGeneration;
+	source.producer = recursive
+		? TEMPORAL_HISTORY_WRITE_RESOLVED_FEEDBACK
+		: TEMPORAL_HISTORY_WRITE_CURRENT_SEED;
+	source.sceneFormat = content->sceneFormat;
+	if ( recursive ) {
+		vkTemporalResolveTicket_t bound;
+		if ( !VK_TemporalResolveBindStoreExpected(
+				&vk_temporal_resolve_frame.recorded,
+				source.storeOwnerAllocationGeneration, &bound ) ) return qfalse;
+		if ( vk_temporal_resolve_frame.readbackRecorded
+				&& !VK_TemporalResolveReadbackBindStoreExpected(
+					&vk_temporal_resolve_readback,
+					(uint32_t)vk.cmd_index, &bound ) )
+			vk_temporal_resolve_readback_cancel_recorded();
+		vk_temporal_resolve_frame.recorded = bound;
+	}
+	if ( !R_TemporalHistoryBuildPendingWrite( history, plan,
+			s_temporalHistoryStoreFrame.worldIndex, &source, &pending ) ) {
+		vk_temporal_resolve_readback_cancel_recorded();
+		if ( s_temporalHistoryStoreFrame.consumeRecorded )
+			(void)VK_TemporalHistoryConsumeAcceptStore(
+				&vk_temporal_history_consume, (uint32_t)vk.cmd_index, qfalse );
+		memset( &s_temporalHistoryStoreFrame, 0,
+			sizeof( s_temporalHistoryStoreFrame ) );
+		return qfalse;
+	}
 	memset( &push, 0, sizeof( push ) );
 	push.extent[0] = history->width;
 	push.extent[1] = history->height;
-	push.zNear = r_znear->value;
-	push.zFar = backEnd.viewParms.zFar;
-	Ral_CmdBindPipeline( vk.cmd->ral_cmd, s_temporalHistoryStore.pipeline );
-	Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0,
-		s_temporalHistoryStore.writeGroups[plan->historyWriteIndex] );
-	Ral_CmdPushConstants( vk.cmd->ral_cmd, RAL_STAGE_COMPUTE, 0, sizeof( push ), &push );
-	Ral_CmdDispatch( vk.cmd->ral_cmd, ( history->width + 7u ) / 8u,
-		( history->height + 7u ) / 8u, 1 );
-	Ral_CmdTransitionTexture( vk.cmd->ral_cmd, history->color[plan->historyWriteIndex],
-		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
-	Ral_CmdTransitionTexture( vk.cmd->ral_cmd, history->depth[plan->historyWriteIndex],
-		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	push.zNear = s_temporalHistoryStoreFrame.zNear;
+	push.zFar = s_temporalHistoryStoreFrame.zFar;
+	if ( !VK_TemporalHistoryStoreRecord( &vk_temporal_history_store_owner,
+			&s_temporalHistoryStoreFrame.storeKey,
+			s_temporalHistoryStoreFrame.storeOwnerAllocationGeneration,
+			vk.cmd->ral_cmd, plan->historyWriteIndex, &push ) ) {
+		vk_temporal_resolve_readback_cancel_recorded();
+		if ( s_temporalHistoryStoreFrame.consumeRecorded )
+			(void)VK_TemporalHistoryConsumeAcceptStore(
+				&vk_temporal_history_consume, (uint32_t)vk.cmd_index, qfalse );
+		memset( &s_temporalHistoryStoreFrame, 0,
+			sizeof( s_temporalHistoryStoreFrame ) );
+		return qfalse;
+	}
+	staged = R_TemporalBackendStageHistoryWrite(
+		s_temporalHistoryStoreFrame.worldIndex,
+		s_temporalHistoryStoreFrame.frameId, &pending,
+		recursive ? qtrue : qfalse );
+	if ( !staged ) vk_temporal_resolve_readback_cancel_recorded();
 	vk.cmd->last_pipeline = VK_NULL_HANDLE;
 	vk.cmd->last_ral_pipeline = NULL;
-	R_TemporalBackendMarkHistoryRecorded( worldIndex, frameId, qfalse );
+	if ( s_temporalHistoryStoreFrame.consumeRecorded )
+		(void)VK_TemporalHistoryConsumeAcceptStore(
+		&vk_temporal_history_consume, (uint32_t)vk.cmd_index, staged );
+	memset( &s_temporalHistoryStoreFrame, 0,
+		sizeof( s_temporalHistoryStoreFrame ) );
+	return staged;
+}
+
+static qboolean vk_temporal_resolve_ensure_after_fence(
+		const temporalBatchRequest_t *request,
+		const vkTemporalResolvedHdrReceipt_t *resolved ) {
+	const ralTemporalFramePlan_t *plan;
+	temporalHistoryResources_t *history;
+	vkTemporalMotionMaterializationReceipt_t motion;
+	vkTemporalMotionMaterializationProductView_t products;
+	vkTemporalResolveKey_t key;
+	qboolean idleProven = qfalse, ensured;
+	vkTemporalResolveProductView_t readbackProducts;
+	uint32_t i;
+	if ( !R_TemporalBatchRequestValidateExact( request ) || !request->enabled
+			|| !resolved || !resolved->ready || !vk.cmd
+			|| !R_TemporalBackendGetPending( request->worldIndex,
+				request->frameId, &plan, &history )
+			|| !plan->historyValid || !history || !history->ready
+			|| !VK_TemporalMotionMaterializationGetReceipt(
+				&vk_temporal_motion_materialization, &motion )
+			|| !VK_TemporalMotionMaterializationGetProductView(
+				&vk_temporal_motion_materialization, &motion,
+				vk.ral_color_image, vk.sceneDepth.ral_image, &products ) ) return qfalse;
+	memset( &key, 0, sizeof( key ) );
+	key.backend = vk_ral_get_backend();
+	key.width = request->width; key.height = request->height;
+	key.topologyEpoch = request->topologyEpoch;
+	key.sceneColorAttachmentGeneration = vk_scene_color_attachment_generation;
+	key.historyAllocationGeneration = history->allocationGeneration;
+	key.motionTargetAllocationGeneration = motion.targetAllocationGeneration;
+	key.resolvedTargetAllocationGeneration = resolved->allocationGeneration;
+	key.currentColor = vk.ral_color_image;
+	key.currentDepth = vk.sceneDepth.ral_image;
+	for ( i = 0; i < 2; ++i ) {
+		key.historyColor[i] = history->color[i];
+		key.historyColorView[i] = history->colorView[i];
+		key.historyDepth[i] = history->depth[i];
+		key.historyDepthView[i] = history->depthView[i];
+	}
+	key.velocity = products.velocity; key.velocityView = products.velocityView;
+	key.validity = products.validity; key.validityView = products.validityView;
+	key.resolvedTarget = resolved->target;
+	key.resolvedTargetView = resolved->targetView;
+	key.computeSpirv = (const uint32_t *)temporal_resolve_comp_spv;
+	key.computeSpirvSize = sizeof( temporal_resolve_comp_spv );
+	if ( !vk_temporal_resolve.initialized )
+		VK_TemporalResolveInit( &vk_temporal_resolve );
+	if ( VK_TemporalResolveNeedsIdle( &vk_temporal_resolve, &key ) ) {
+		vk_wait_idle();
+		idleProven = qtrue;
+	}
+	ensured = VK_TemporalResolveEnsureAfterFence(
+		&vk_temporal_resolve, &key, idleProven );
+	if ( ensured && vk_temporal_resolve_readback.initialized
+			&& vk_temporal_resolve_readback.capturesRemaining
+			&& vk_temporal_entmat_ring_is_ready() ) {
+		memset( &readbackProducts, 0, sizeof( readbackProducts ) );
+		readbackProducts.backend = key.backend;
+		readbackProducts.currentColor = key.currentColor;
+		readbackProducts.currentDepth = key.currentDepth;
+		readbackProducts.previousColor = key.historyColor[plan->historyReadIndex];
+		readbackProducts.previousColorView = key.historyColorView[plan->historyReadIndex];
+		readbackProducts.previousDepth = key.historyDepth[plan->historyReadIndex];
+		readbackProducts.previousDepthView = key.historyDepthView[plan->historyReadIndex];
+		readbackProducts.velocity = key.velocity;
+		readbackProducts.velocityView = key.velocityView;
+		readbackProducts.validity = key.validity;
+		readbackProducts.validityView = key.validityView;
+		readbackProducts.resolvedTarget = key.resolvedTarget;
+		readbackProducts.resolvedTargetView = key.resolvedTargetView;
+		(void)VK_TemporalResolveReadbackPrepareAfterFence(
+			&vk_temporal_resolve_readback, key.backend, NUM_COMMAND_BUFFERS,
+			(uint32_t)vk.cmd_index, key.width, key.height,
+			vk_temporal_resolve_readback_depth_encoding( vk.depth_format ),
+			&readbackProducts );
+	}
+	return ensured;
+}
+
+static vkTemporalResolveReadbackDepthEncoding_t
+vk_temporal_resolve_readback_depth_encoding( VkFormat format ) {
+	switch ( format ) {
+	case VK_FORMAT_D16_UNORM: return VK_TEMPORAL_RESOLVE_DEPTH_D16;
+	case VK_FORMAT_X8_D24_UNORM_PACK32: return VK_TEMPORAL_RESOLVE_DEPTH_X8_D24;
+	case VK_FORMAT_D24_UNORM_S8_UINT: return VK_TEMPORAL_RESOLVE_DEPTH_D24_S8;
+	case VK_FORMAT_D32_SFLOAT: return VK_TEMPORAL_RESOLVE_DEPTH_D32;
+	case VK_FORMAT_D16_UNORM_S8_UINT: return VK_TEMPORAL_RESOLVE_DEPTH_D16_S8;
+	case VK_FORMAT_D32_SFLOAT_S8_UINT: return VK_TEMPORAL_RESOLVE_DEPTH_D32_S8;
+	default: return (vkTemporalResolveReadbackDepthEncoding_t)0;
+	}
+}
+
+static qboolean vk_temporal_resolve_readback_copy_depth(
+		ralCommandBuffer_t *commandBuffer, ralTexture_t *depth,
+		ralBuffer_t *destination, uint64_t destinationOffset,
+		uint32_t x, uint32_t y, uint32_t width, uint32_t height,
+		vkTemporalResolveReadbackDepthEncoding_t depthEncoding, void *user ) {
+	VkCommandBuffer rawCommand;
+	VkImage rawImage;
+	VkBuffer rawBuffer;
+	VkImageAspectFlags barrierAspects = VK_IMAGE_ASPECT_DEPTH_BIT;
+	VkImageMemoryBarrier barrier;
+	VkBufferImageCopy copy;
+	(void)user;
+	if ( !commandBuffer || depth != vk.sceneDepth.ral_image || !destination
+			|| !width || !height || !qvkCmdCopyImageToBuffer
+			|| depthEncoding !=
+				vk_temporal_resolve_readback_depth_encoding( vk.depth_format ) )
+		return qfalse;
+	rawCommand = (VkCommandBuffer)Ral_GetCommandBufferHandle( commandBuffer );
+	rawImage = (VkImage)Ral_GetTextureImageHandle( depth );
+	rawBuffer = (VkBuffer)Ral_GetBufferHandle( destination );
+	if ( rawCommand == VK_NULL_HANDLE || rawImage == VK_NULL_HANDLE
+			|| rawBuffer == VK_NULL_HANDLE ) return qfalse;
+	if ( depthEncoding == VK_TEMPORAL_RESOLVE_DEPTH_D16_S8
+			|| depthEncoding == VK_TEMPORAL_RESOLVE_DEPTH_D24_S8
+			|| depthEncoding == VK_TEMPORAL_RESOLVE_DEPTH_D32_S8 )
+		barrierAspects |= VK_IMAGE_ASPECT_STENCIL_BIT;
+	memset( &barrier, 0, sizeof( barrier ) );
+	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+	barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.image = rawImage;
+	barrier.subresourceRange.aspectMask = barrierAspects;
+	barrier.subresourceRange.levelCount = 1;
+	barrier.subresourceRange.layerCount = 1;
+	qvkCmdPipelineBarrier( rawCommand,
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &barrier );
+	memset( &copy, 0, sizeof( copy ) );
+	copy.bufferOffset = destinationOffset;
+	copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	copy.imageSubresource.layerCount = 1;
+	copy.imageOffset.x = (int32_t)x; copy.imageOffset.y = (int32_t)y;
+	copy.imageExtent.width = width; copy.imageExtent.height = height;
+	copy.imageExtent.depth = 1;
+	qvkCmdCopyImageToBuffer( rawCommand, rawImage,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, rawBuffer, 1, &copy );
+	barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+	barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	qvkCmdPipelineBarrier( rawCommand, VK_PIPELINE_STAGE_TRANSFER_BIT,
+		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+			| VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		0, 0, NULL, 0, NULL, 1, &barrier );
+	// Both raw barriers intentionally cover depth+stencil for combined formats,
+	// while the copy above is depth-plane only.  Resynchronise typed tracking
+	// after bypassing its transition recorder.
+	Ral_SetTextureLayout( depth, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	return qtrue;
+}
+
+qboolean vk_temporal_resolve_prepare_authority( void ) {
+	const ralTemporalFramePlan_t *plan;
+	temporalHistoryResources_t *history;
+	temporalHistoryCommittedReceipt_t committed;
+	temporalHistoryFrameView_t frameView;
+	vkTemporalMainActivationReceipt_t activation;
+	vkTemporalMotionMaterializationReceipt_t motion;
+	vkTemporalMotionMaterializationProductView_t motionProducts;
+	vkTemporalResolveAuthorityInput_t input;
+	vkTemporalResolveAuthorityReceipt_t authority;
+	vkTemporalResolveProductView_t products;
+	vkTemporalResolveOwnerReceipt_t ownerReceipt;
+	int worldIndex = backEnd.viewParms.temporalWorldIndex;
+	uint64_t frameId = backEnd.viewParms.temporalFrameId;
+	if ( !vk_temporal_resolved_hdr_frame.prepared || !vk.cmd
+			|| !VK_TemporalResolveGetReceipt(
+				&vk_temporal_resolve, &ownerReceipt )
+			|| !VK_TemporalMainActivationPeekPendingReceipt(
+				&vk_temporal_main_activation, &activation )
+			|| !R_TemporalBackendGetPending(
+				worldIndex, frameId, &plan, &history )
+			|| !plan->historyValid
+			|| !R_TemporalBackendGetCommittedHistory(
+				worldIndex, plan->historyReadIndex, &committed )
+			|| !R_TemporalHistoryBuildFrameView(
+				history, plan, &committed, worldIndex, &frameView )
+			|| !VK_TemporalMotionMaterializationGetReceipt(
+				&vk_temporal_motion_materialization, &motion )
+			|| !VK_TemporalMotionMaterializationGetProductView(
+				&vk_temporal_motion_materialization, &motion,
+				vk.ral_color_image, vk.sceneDepth.ral_image,
+				&motionProducts ) ) return qfalse;
+	memset( &input, 0, sizeof( input ) );
+	input.backend = vk_ral_get_backend();
+	input.currentColor = vk.ral_color_image;
+	input.currentDepth = vk.sceneDepth.ral_image;
+	input.sceneColorAttachmentGeneration = vk_scene_color_attachment_generation;
+	input.commandSlot = (uint32_t)vk.cmd_index;
+	input.frameCount = NUM_COMMAND_BUFFERS;
+	input.zNear = r_znear->value;
+	input.zFar = backEnd.viewParms.zFar;
+	input.plan = plan; input.history = &frameView;
+	input.activation = &activation; input.motion = &motion;
+	input.motionProducts = &motionProducts;
+	input.resolved = &vk_temporal_resolved_hdr_frame.target;
+	if ( !VK_TemporalResolveBuildAuthority(
+			&input, &authority, &products ) ) return qfalse;
+	vk_temporal_resolve_frame.authority = authority;
+	vk_temporal_resolve_frame.products = products;
+	vk_temporal_resolve_frame.owner = ownerReceipt;
+	vk_temporal_resolve_frame.prepared = qtrue;
+	return qtrue;
+}
+
+static qboolean vk_temporal_resolve_record_or_copy( void ) {
+	vkTemporalResolveTicket_t ticket;
+	vkHdrPostprocessSource_t route;
+	uint64_t serial;
+	if ( vk_temporal_resolve_frame.prepared
+			&& vk_temporal_resolved_hdr_frame.contentSerial != UINT64_MAX ) {
+		serial = vk_temporal_resolved_hdr_frame.contentSerial + 1u;
+		if ( VK_TemporalResolveRecord(
+				&vk_temporal_resolve, vk.cmd->ral_cmd,
+				&vk_temporal_resolve_frame.authority,
+				&vk_temporal_resolve_frame.products,
+				&vk_temporal_resolved_hdr_frame.current,
+				&vk_temporal_resolved_hdr_frame.target,
+				serial, &ticket )
+				&& VK_TemporalResolvedHdrRouteSource(
+					&vk_temporal_resolved_hdr_frame.current,
+					&vk_temporal_resolved_hdr_frame.target,
+					&ticket.content, &route )
+				&& route.resolved ) {
+			vk_temporal_resolve_frame.recorded = ticket;
+			vk_temporal_resolve_frame.recordedCommands = qtrue;
+			vk_temporal_resolved_hdr_frame.recorded = ticket.content;
+			vk_temporal_resolved_hdr_frame.route = route;
+			vk_temporal_resolved_hdr_frame.contentSerial = serial;
+			vk_temporal_resolved_hdr_frame.copied = qtrue;
+			if ( vk_temporal_resolve_readback.initialized
+					&& vk_temporal_resolve_readback.capturesRemaining
+					&& VK_TemporalResolveReadbackRecord(
+					&vk_temporal_resolve_readback, vk.cmd->ral_cmd,
+					(uint32_t)vk.cmd_index, &ticket,
+					&vk_temporal_resolve_frame.products,
+					vk_temporal_resolve_readback_copy_depth, NULL ) )
+				vk_temporal_resolve_frame.readbackRecorded = qtrue;
+			vk.cmd->last_pipeline = VK_NULL_HANDLE;
+			vk.cmd->last_ral_pipeline = NULL;
+			return qtrue;
+		}
+	}
+	vk_temporal_resolved_hdr_record_copy();
+	return qfalse;
+}
+
+void vk_temporal_recursive_record( void ) {
+	const ralTemporalFramePlan_t *plan = NULL;
+	temporalHistoryResources_t *history = NULL;
+	qboolean recursiveProduced;
+	int worldIndex = backEnd.viewParms.temporalWorldIndex;
+	uint64_t frameId = backEnd.viewParms.temporalFrameId;
+	(void)vk_temporal_resolve_prepare_authority();
+	if ( !vk_temporal_history_store_prepare() ) {
+		vk_temporal_resolved_hdr_record_copy();
+		return;
+	}
+	if ( !R_TemporalBackendGetPending( worldIndex, frameId, &plan, &history )
+			|| !plan || !history ) return;
+	recursiveProduced = vk_temporal_resolve_record_or_copy();
+	if ( ( plan->historyValid && recursiveProduced )
+			|| ( !plan->historyValid
+				&& vk_temporal_resolved_hdr_frame.copied
+				&& vk_temporal_resolved_hdr_frame.recorded.producer ==
+					VK_TEMPORAL_RESOLVED_HDR_PRODUCER_COPY ) )
+		(void)vk_temporal_history_store_feedback(
+			plan->historyValid ? qtrue : qfalse );
 }
 
 // SHADER_MODULE_BL macro retired.
@@ -11279,6 +13468,12 @@ static void vk_create_shader_modules( void )
 	SET_OBJECT_NAME( vk.modules.q1_ls_vs,       "lightstyle vertex module",         VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.q1_ls_fs,       "lightstyle fragment module",       VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.q1_ls_array_fs, "lightstyle array fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
+
+	// Inverse temporal resolution is legal only after the complete eager module
+	// generation has been recorded. Overflow leaves the registry permanently
+	// fail-closed rather than aliasing a prior generation.
+	vk_shader_blob_ready = ( vk_shader_blob_generation != UINT32_MAX
+		&& !vk_shader_blob_full_warned ) ? qtrue : qfalse;
 
 }
 
@@ -12561,6 +14756,7 @@ static void vk_rebuild_fbo_for_hdr_change( void )
 		vk_format_string( vk.color_format ) );
 
 	vk_wait_idle();
+	vk_temporal_resolved_hdr_release_after_idle( "HDR-attachment-rebuild" );
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		qvkResetCommandBuffer( vk.tess[i].command_buffer, 0 );
@@ -12651,6 +14847,7 @@ static void vk_rebuild_for_fbo_change( void )
 		vk.fboActive ? 1 : 0, new_fbo_active ? 1 : 0 );
 
 	vk_wait_idle();
+	vk_temporal_resolved_hdr_release_after_idle( "FBO-attachment-rebuild" );
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		qvkResetCommandBuffer( vk.tess[i].command_buffer, 0 );
@@ -12732,6 +14929,7 @@ static void vk_rebuild_for_fbo_change( void )
 		vk_init_decal_textures();
 		{
 			int sl6d;
+			vk_temporal_entmat_ring_invalidate();
 			for ( sl6d = 0; sl6d < NUM_COMMAND_BUFFERS; sl6d++ )
 				vk.tess[sl6d].entMatDesc = VK_NULL_HANDLE;
 		}
@@ -14914,6 +17112,10 @@ static void vk_create_attachments( void )
 {
 	uint32_t i;
 
+	// A raw allocation is not a published scene cohort. The generation becomes
+	// nonzero only after the new image, RAL wrapper and both consumer groups have
+	// all been rebuilt by vk_ral_adopt_static_internal_textures.
+	vk_scene_color_attachment_generation = 0;
 	vk_clear_attachment_pool();
 
 	// It looks like resulting performance depends from order you're creating/allocating
@@ -15475,6 +17677,8 @@ static void vk_restart_swapchain( const char *funcname, VkResult res )
 #endif
 
 	vk_wait_idle();
+	vk_temporal_resolved_hdr_release_after_idle(
+		"swapchain-attachment-rebuild" );
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		qvkResetCommandBuffer( vk.tess[i].command_buffer, 0 );
@@ -19623,6 +21827,7 @@ void vk_create_pipelines( void )
 static void vk_destroy_attachments( void )
 {
 	uint32_t i;
+	vk_scene_color_attachment_generation = 0;
 
 	if ( vk.bloom_image[0] ) {
 		for ( i = 0; i < ARRAY_LEN( vk.bloom_image ); i++ ) {
@@ -19740,6 +21945,20 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 	R_LOG( rch_vk, SEV_WARN, "[PIPE-PIN] vk_destroy_pipelines: reset=%d count=%u world_base=%u\n",
 		(int)resetCounter, vk.pipelines_count, vk.pipelines_world_base );
 
+	if ( VK_TemporalGenericPipelineTableHasLive(
+			&vk_temporal_generic_pipeline_table ) ) {
+		vkTemporalPipelineFactoryOps_t factoryOps =
+			vk_temporal_pipeline_factory_ops();
+		if ( resetCounter ) {
+			vk_temporal_pipeline_table_release_after_idle(
+				"pipeline-reset" );
+		} else if ( !VK_TemporalGenericPipelineTableReleaseRangeAfterIdle(
+				&vk_temporal_generic_pipeline_table, 0, vk.pipelines_count,
+				vk_ral_get_backend(), &factoryOps ) ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal exact3 range release failed before pipeline destroy" );
+		}
+	}
 	if ( vk_temporal_generic_recipe_table.records )
 		(void)VK_TemporalGenericRecipeTableEvictRange(
 			&vk_temporal_generic_recipe_table, 0, vk.pipelines_count );
@@ -19895,6 +22114,7 @@ void vk_shutdown( refShutdownCode_t code )
 	vk_wait_idle();
 	vk_fence_thread_stop();
 	vk_gpu_ts_shutdown();
+	vk_temporal_resolved_hdr_release_after_idle( "full-shutdown" );
 	vk_temporal_entmat_release_after_idle( "full-shutdown" );
 
 	vk_destroy_framebuffers();
@@ -20405,6 +22625,7 @@ void vk_release_resources( void ) {
 	}
 
 	vk_wait_idle();
+	vk_temporal_iqm_resources_release_after_idle( "release-resources" );
 
 #if FEAT_IQM
 	// destroy per-model IQM GPU skinning VBOs before hunk is reset
@@ -20438,6 +22659,17 @@ void vk_release_resources( void ) {
 	// Remove once the mechanism is pinned.
 	R_LOG( rch_vk, SEV_WARN, "[PIPE-PIN] vk_release_resources rewind: count=%u -> world_base=%u\n",
 		vk.pipelines_count, vk.pipelines_world_base );
+	if ( VK_TemporalGenericPipelineTableHasLive(
+			&vk_temporal_generic_pipeline_table ) ) {
+		vkTemporalPipelineFactoryOps_t factoryOps =
+			vk_temporal_pipeline_factory_ops();
+		if ( !VK_TemporalGenericPipelineTableReleaseRangeAfterIdle(
+				&vk_temporal_generic_pipeline_table, vk.pipelines_world_base,
+				vk.pipelines_count, vk_ral_get_backend(), &factoryOps ) ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal exact3 range release failed before dynamic rewind" );
+		}
+	}
 	if ( vk_temporal_generic_recipe_table.records )
 		(void)VK_TemporalGenericRecipeTableEvictRange(
 			&vk_temporal_generic_recipe_table, vk.pipelines_world_base,
@@ -20469,6 +22701,7 @@ void vk_release_resources( void ) {
 	VK_CHECK( qvkResetDescriptorPool( vk.device, vk.descriptor_pool, 0 ) );
 	{
 		int sl6d;
+		vk_temporal_entmat_ring_invalidate();
 		for ( sl6d = 0; sl6d < NUM_COMMAND_BUFFERS; sl6d++ ) {
 			vk.tess[sl6d].entMatDesc = VK_NULL_HANDLE;
 		}
@@ -20497,7 +22730,7 @@ void vk_release_resources( void ) {
 
 	// Reset geometry buffers offsets
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		vk.tess[i].uniform_read_offset = 0;
+		vk.tess[i].uniform_read_offset = ~0U;
 		vk.tess[i].vertex_buffer_offset = 0;
 	}
 
@@ -21371,16 +23604,9 @@ void vk_update_descriptor_set( image_t *image, qboolean mipmap ) {
 			// transient: ownsSampler=qfalse so Ral_DestroySampler frees only
 			// the wrapper struct; the underlying VkSampler stays owned by
 			// vk.samplers.handle[].
-			ralBindGroup_t *ralSet     = vk_ral_get_bindless_set();
-			ralBackend_t   *ralBackend = vk_ral_get_backend();
 			image->bindlessSamplerSlot = smIdx;
-			if ( ralSet && ralBackend ) {
-				ralSampler_t *adopted = Ral_AdoptSampler( ralBackend, (void *)vk.samplers.handle[smIdx], "vk-bindless-sampler" );
-				if ( adopted ) {
-					Ral_BindGroupSetSamplerAt( ralSet, (uint32_t)smIdx, adopted );
-					Ral_DestroySampler( adopted );
-				}
-			}
+			(void)vk_ral_bindless_publish_sampler( (uint32_t)smIdx,
+				vk.samplers.handle[smIdx], &vk.samplers.def[smIdx] );
 		}
 		// bindless-ral-consolidate — write the renderer's VkImageView (the same
 		// one the legacy COMBINED_IMAGE_SAMPLER binds for sets 1..6) into the
@@ -21408,6 +23634,8 @@ void vk_update_descriptor_set( image_t *image, qboolean mipmap ) {
 				imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 				imgWrite.pImageInfo      = &imgInfo;
 				qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+				(void)vk_ral_bindless_record_legacy_exact( image,
+					(uint32_t)image->ralBindlessSlot, image->view );
 			}
 		}
 	}
@@ -22906,7 +25134,23 @@ qboolean vk_temporal_pipeline_lookup_blob( VkShaderModule module,
 	return qtrue;
 }
 
-static void vk_temporal_capture_generic_main_recipe( uint32_t slot,
+static qboolean vk_temporal_shader_registry_view(
+		vkTemporalShaderModuleRegistryView_t *out ) {
+	vkTemporalShaderModuleRegistryView_t candidate;
+	if ( !out || !vk_shader_blob_ready || vk_shader_blob_full_warned
+			|| !vk_shader_blob_generation || vk_shader_blob_count == 0u
+			|| vk_shader_blob_count > VK_SHADER_BLOB_CAPACITY ) return qfalse;
+	memset( &candidate, 0, sizeof( candidate ) );
+	candidate.records = vk_shader_blob_table;
+	candidate.count = vk_shader_blob_count;
+	candidate.generation = vk_shader_blob_generation;
+	candidate.ready = qtrue;
+	candidate.complete = qtrue;
+	*out = candidate;
+	return qtrue;
+}
+
+static qboolean vk_temporal_capture_generic_main_recipe( uint32_t slot,
 		const VkGraphicsPipelineCreateInfo *base ) {
 	vkTemporalShaderBlob_t ordinaryVertex, ordinaryFragment;
 	vkTemporalGenericRecipeCaptureInput_t input;
@@ -22917,17 +25161,73 @@ static void vk_temporal_capture_generic_main_recipe( uint32_t slot,
 			|| !vk_temporal_pipeline_lookup_blob(
 				base->pStages[0].module, &ordinaryVertex )
 			|| !vk_temporal_pipeline_lookup_blob(
-				base->pStages[1].module, &ordinaryFragment ) ) return;
+				base->pStages[1].module, &ordinaryFragment ) ) {
+		if ( vk_temporal_generic_recipe_table.armed
+				&& slot < vk_temporal_generic_recipe_table.capacity )
+			(void)VK_TemporalGenericRecipeTableMarkAttempted(
+				&vk_temporal_generic_recipe_table, slot );
+		return qfalse;
+	}
 	memset( &input, 0, sizeof( input ) );
 	if ( !VK_TemporalGenericCatalogIdentify( ordinaryVertex, ordinaryFragment,
-			&input.key, &input.catalogId ) ) return;
+			&input.key, &input.catalogId ) ) {
+		(void)VK_TemporalGenericRecipeTableMarkAttempted(
+			&vk_temporal_generic_recipe_table, slot );
+		return qfalse;
+	}
 	input.slot = slot;
 	input.base = base;
 	input.sceneFormat = vk_attachment_format_to_ral( vk.color_format );
 	input.depthFormat = vk_attachment_format_to_ral( vk.depth_format );
 	input.layoutClass = VK_TEMPORAL_RECIPE_LAYOUT_GENERIC_MAIN;
-	(void)VK_TemporalGenericRecipeTableCapture(
+	return VK_TemporalGenericRecipeTableCapture(
 		&vk_temporal_generic_recipe_table, &input, &receipt );
+}
+
+static qboolean vk_temporal_materialize_generic_recipe_slot( uint32_t slot,
+		uint32_t topologyGeneration, ralPipeline_t *retainedOrdinaryPipeline,
+		qboolean *outFactoryAttempted ) {
+	vkTemporalGenericRecipeReceipt_t recipeReceipt;
+	vkTemporalGenericRecipe_t recipe;
+	vkTemporalGenericCatalogEntry_t catalog;
+	vkTemporalShaderModuleRegistryView_t registry;
+	vkTemporalGenericRecipeView_t view;
+	vkTemporalGenericPipelineTableEnsureInput_t input;
+	vkTemporalGenericPipelineReceipt_t pipelineReceipt;
+	VkShaderModule ordinaryVertex = VK_NULL_HANDLE;
+	VkShaderModule ordinaryFragment = VK_NULL_HANDLE;
+	uint32_t moduleGeneration = 0;
+	if ( outFactoryAttempted ) *outFactoryAttempted = qfalse;
+	if ( !topologyGeneration || slot >= vk.pipelines_count
+			|| !vk.pipelines[slot].ral_handle[RENDER_PASS_MAIN]
+			|| !VK_TemporalGenericRecipeTableGetSlotReceipt(
+				&vk_temporal_generic_recipe_table, slot, &recipeReceipt )
+			|| !VK_TemporalGenericRecipeTableGet(
+				&vk_temporal_generic_recipe_table, recipeReceipt.ownerEpoch,
+				recipeReceipt.slot, recipeReceipt.entryGeneration, &recipe )
+			|| !VK_TemporalGenericCatalogSelect( &recipe.key, &catalog )
+			|| !vk_temporal_shader_registry_view( &registry )
+			|| !VK_TemporalGenericCatalogResolveOrdinaryModules( &catalog,
+				&registry, &ordinaryVertex, &ordinaryFragment, &moduleGeneration )
+			|| !VK_TemporalGenericRecipeBuildView( &recipe, ordinaryVertex,
+				ordinaryFragment, vk.pipeline_layout, &view ) ) return qfalse;
+	memset( &input, 0, sizeof( input ) );
+	input.slot = slot;
+	input.recipe = &recipe;
+	input.recipeReceipt = &recipeReceipt;
+	input.base = &view.gp;
+	input.ordinaryPipeline = vk.pipelines[slot].ral_handle[RENDER_PASS_MAIN];
+	input.retainedOrdinaryPipeline = retainedOrdinaryPipeline;
+	input.topologyGeneration = topologyGeneration;
+	input.moduleRegistryGeneration = moduleGeneration;
+	{
+		vkTemporalPipelineFactoryOps_t factoryOps =
+			vk_temporal_pipeline_factory_ops();
+		if ( outFactoryAttempted ) *outFactoryAttempted = qtrue;
+		return VK_TemporalGenericPipelineTableEnsureSlot(
+			&vk_temporal_generic_pipeline_table, &input, &factoryOps,
+			&pipelineReceipt );
+	}
 }
 
 static ralPipeline_t *vk_ral_create_pipeline_from_gpinfo_exact( const VkGraphicsPipelineCreateInfo *ci_vk,
@@ -24412,6 +26712,132 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	return pipeline;
 }
 
+static qboolean vk_temporal_cached_main_needs_recipe( uint32_t slot ) {
+	qboolean attempted = qfalse, valid = qfalse;
+	if ( slot >= vk.pipelines_count
+			|| !vk.pipelines[slot].ral_handle[RENDER_PASS_MAIN]
+			|| vk.pipelines[slot].def.shader_type < TYPE_GENERIC_BEGIN
+			|| vk.pipelines[slot].def.shader_type > TYPE_GENERIC_END
+			|| !vk_temporal_generic_recipe_table.records
+			|| !vk_temporal_generic_recipe_table.armed ) return qfalse;
+	if ( !VK_TemporalGenericRecipeTableGetSlotState(
+			&vk_temporal_generic_recipe_table, slot, &attempted, &valid ) )
+		return qfalse;
+	return !attempted && !valid;
+}
+
+typedef struct {
+	uint32_t slot;
+	uint32_t topologyGeneration;
+} vkTemporalCachedMainRebuildContext_t;
+
+static void vk_temporal_cached_main_create_and_capture( void *opaque ) {
+	vkTemporalCachedMainRebuildContext_t *context =
+		(vkTemporalCachedMainRebuildContext_t *)opaque;
+	(void)create_pipeline( &vk.pipelines[context->slot].def,
+		RENDER_PASS_MAIN, context->slot );
+}
+
+static qboolean vk_temporal_cached_main_capture_state( void *opaque,
+		qboolean *attempted, qboolean *valid ) {
+	const vkTemporalCachedMainRebuildContext_t *context =
+		(const vkTemporalCachedMainRebuildContext_t *)opaque;
+	return VK_TemporalGenericRecipeTableGetSlotState(
+		&vk_temporal_generic_recipe_table, context->slot, attempted, valid );
+}
+
+static vkTemporalCachedMainMaterializeResult_t
+vk_temporal_cached_main_materialize( void *opaque,
+		ralPipeline_t *retainedOrdinaryPipeline ) {
+	const vkTemporalCachedMainRebuildContext_t *context =
+		(const vkTemporalCachedMainRebuildContext_t *)opaque;
+	qboolean factoryAttempted = qfalse;
+	if ( vk_temporal_materialize_generic_recipe_slot( context->slot,
+			context->topologyGeneration, retainedOrdinaryPipeline,
+			&factoryAttempted ) ) return VK_TEMPORAL_CACHED_MAIN_READY;
+	return factoryAttempted ? VK_TEMPORAL_CACHED_MAIN_DEFERRED_FAILURE
+		: VK_TEMPORAL_CACHED_MAIN_REJECTED;
+}
+
+static void vk_temporal_cached_main_destroy( ralPipeline_t *pipeline ) {
+	Ral_DestroyPipeline( pipeline );
+}
+
+static void vk_temporal_cached_main_decline( void *opaque ) {
+	const vkTemporalCachedMainRebuildContext_t *context =
+		(const vkTemporalCachedMainRebuildContext_t *)opaque;
+	(void)VK_TemporalGenericRecipeTableEvictRange(
+		&vk_temporal_generic_recipe_table, context->slot, context->slot + 1u );
+	(void)VK_TemporalGenericRecipeTableMarkAttempted(
+		&vk_temporal_generic_recipe_table, context->slot );
+}
+
+// First-active backfill for ordinary MAIN siblings that were cached before the
+// exact temporal batch armed recipe capture. The old ordinary pipeline remains
+// published until a replacement has captured a catalog-exact recipe and its
+// unreachable exact3 siblings are ready. Every failure restores the old
+// ordinary path and records a one-epoch decline so it cannot retry-thrash.
+static void vk_temporal_reconcile_generic_main_pipelines(
+		uint32_t topologyGeneration ) {
+	uint32_t slot;
+	qboolean needBackfill = qfalse;
+	qboolean deferredWork = qfalse;
+	if ( !topologyGeneration || !vk_temporal_generic_recipe_table.armed
+			|| !vk_temporal_generic_pipeline_table.slots ) return;
+	for ( slot = 0; slot < vk.pipelines_count; ++slot ) {
+		if ( vk_temporal_cached_main_needs_recipe( slot ) ) {
+			needBackfill = qtrue;
+			break;
+		}
+	}
+	if ( needBackfill ) vk_wait_idle();
+
+	for ( slot = 0; slot < vk.pipelines_count; ++slot ) {
+		vkTemporalGenericRecipeReceipt_t receipt;
+		if ( VK_TemporalGenericRecipeTableGetSlotReceipt(
+				&vk_temporal_generic_recipe_table, slot, &receipt ) ) {
+			if ( !VK_TemporalGenericPipelineTableSlotReady(
+					&vk_temporal_generic_pipeline_table, slot ) ) {
+				qboolean factoryAttempted = qfalse;
+				if ( !vk_temporal_materialize_generic_recipe_slot( slot,
+						topologyGeneration, NULL, &factoryAttempted ) ) {
+					// Fail closed for this recipe-owner epoch. Deterministic
+					// pre-factory rejection does not force a pointless drain, while
+					// a factory attempt gets exactly one shared cleanup drain.
+					(void)VK_TemporalGenericRecipeTableMarkAttempted(
+						&vk_temporal_generic_recipe_table, slot );
+					if ( factoryAttempted ) deferredWork = qtrue;
+				}
+			}
+			continue;
+		}
+		if ( vk_temporal_cached_main_needs_recipe( slot ) ) {
+			vkTemporalCachedMainRebuildContext_t context;
+			vkTemporalCachedMainRebuildOps_t rebuildOps;
+			qboolean transactionDeferred = qfalse;
+			memset( &context, 0, sizeof( context ) );
+			context.slot = slot;
+			context.topologyGeneration = topologyGeneration;
+			memset( &rebuildOps, 0, sizeof( rebuildOps ) );
+			rebuildOps.createAndCapture = vk_temporal_cached_main_create_and_capture;
+			rebuildOps.captureState = vk_temporal_cached_main_capture_state;
+			rebuildOps.materialize = vk_temporal_cached_main_materialize;
+			rebuildOps.destroy = vk_temporal_cached_main_destroy;
+			rebuildOps.decline = vk_temporal_cached_main_decline;
+			(void)VK_TemporalCachedMainRebuild(
+				&vk.pipelines[slot].ral_handle[RENDER_PASS_MAIN],
+				&vk.pipelines[slot].depthFade, &vk.pipeline_create_count,
+				&context, &rebuildOps, &transactionDeferred );
+			if ( transactionDeferred ) deferredWork = qtrue;
+		}
+	}
+	if ( deferredWork && Ral_WaitIdleAndDrainDeferred(
+			vk_ral_get_backend() ) != ralSuccess ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal generic MAIN reconciliation drain failed" );
+	}
+}
+
 
 static uint32_t vk_alloc_pipeline( const Vk_Pipeline_Def *def ) {
 	VK_Pipeline_t *pipeline;
@@ -24420,6 +26846,13 @@ static uint32_t vk_alloc_pipeline( const Vk_Pipeline_Def *def ) {
 		return 0;
 	}
 	int j;
+	if ( vk_temporal_generic_pipeline_table.slots
+			&& VK_TemporalGenericPipelineTableSlotReady(
+			&vk_temporal_generic_pipeline_table, vk.pipelines_count ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal exact3 slot reused before lifecycle eviction" );
+		return 0;
+	}
 	if ( vk_temporal_generic_recipe_table.records )
 		(void)VK_TemporalGenericRecipeTableEvictRange(
 			&vk_temporal_generic_recipe_table, vk.pipelines_count,
@@ -25368,6 +27801,7 @@ void vk_bind_pipeline( uint32_t pipeline ) {
 	ralPipeline_t *ralpipe;
 	qboolean worldPass;
 
+	vk_temporal_bound_pipeline_slot = pipeline;
 	vkpipe  = vk_gen_pipeline( pipeline );
 	ralpipe = vk.pipelines[ pipeline ].ral_handle[ vk.renderPassIndex ];
 	worldPass = vk_is_world_render_pass( vk.renderPassIndex );
@@ -25489,11 +27923,251 @@ qboolean vk_entmat_active( void )
 // this MUST run in the pre-pass seam (before vk_begin_main_render_pass), like the
 // shadow caster SSBO ensure. The publish (slot reset + fold-slot write) runs
 // after the per-frame descriptor_set memset instead, so it is not wiped.
-void vk_entmat_ensure_buffer( void )
+typedef struct {
+	uint32_t requiredCapacity;
+	VkDeviceSize byteSize;
+	VkBuffer buffer[NUM_COMMAND_BUFFERS];
+	VkDeviceMemory memory[NUM_COMMAND_BUFFERS];
+	void *mapped[NUM_COMMAND_BUFFERS];
+	VkDescriptorSet descriptor[NUM_COMMAND_BUFFERS];
+	uint32_t allocationGeneration[NUM_COMMAND_BUFFERS];
+	qboolean ready;
+} vkTemporalEntMatRingReceipt_t;
+
+static vkTemporalEntMatRingReceipt_t vk_temporal_entmat_ring;
+
+static void vk_temporal_entmat_ring_invalidate( void ) {
+	vk_temporal_entmat_ring.ready = qfalse;
+}
+
+static VkDeviceSize vk_entmat_capacity_bytes( uint32_t requiredSlots ) {
+	const uint32_t floorSlots = requiredSlots > 1024u ? requiredSlots : 1024u;
+	const VkDeviceSize need = (VkDeviceSize)floorSlots * ENTITY_MATRIX_SLOT_BYTES;
+	VkDeviceSize size = 65536u;
+	while ( size < need ) size <<= 1u;
+	return size;
+}
+
+static qboolean vk_temporal_entmat_ring_ready_exact(
+		uint32_t requiredSlots ) {
+	const VkDeviceSize bytes = vk_entmat_capacity_bytes( requiredSlots );
+	uint32_t i;
+	if ( !requiredSlots || !vk_temporal_entmat_ring.ready
+			|| vk_temporal_entmat_ring.requiredCapacity != requiredSlots
+			|| vk_temporal_entmat_ring.byteSize != bytes ) return qfalse;
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
+		const vk_tess_t *slot = &vk.tess[i];
+		uint32_t j;
+		if ( !slot->entMatBuf || !slot->entMatMem || !slot->entMatMapped
+				|| !slot->entMatDesc || slot->entMatSize != bytes
+				|| !slot->entMatAllocationGeneration
+				|| slot->entMatAllocationGeneration == UINT32_MAX
+				|| vk_temporal_entmat_ring.buffer[i] != slot->entMatBuf
+				|| vk_temporal_entmat_ring.memory[i] != slot->entMatMem
+				|| vk_temporal_entmat_ring.mapped[i] != slot->entMatMapped
+				|| vk_temporal_entmat_ring.descriptor[i] != slot->entMatDesc
+				|| vk_temporal_entmat_ring.allocationGeneration[i]
+					!= slot->entMatAllocationGeneration ) return qfalse;
+		for ( j = 0; j < i; ++j )
+			if ( slot->entMatBuf == vk.tess[j].entMatBuf
+					|| slot->entMatMem == vk.tess[j].entMatMem
+					|| slot->entMatMapped == vk.tess[j].entMatMapped
+					|| slot->entMatDesc == vk.tess[j].entMatDesc ) return qfalse;
+	}
+	return qtrue;
+}
+
+static qboolean vk_temporal_entmat_ring_is_ready( void ) {
+	return vk_temporal_entmat_ring.ready
+		&& vk_temporal_entmat_ring.requiredCapacity
+		&& vk_temporal_entmat_ring_ready_exact(
+			vk_temporal_entmat_ring.requiredCapacity ) ? qtrue : qfalse;
+}
+
+static qboolean vk_temporal_diagnostic_arm_ready(
+		qboolean requireResolved ) {
+	vkTemporalMotionMaterializationReceipt_t motion;
+	vkTemporalResolvedHdrReceipt_t resolved;
+	if ( !vk_temporal_entmat_ring_is_ready()
+			|| !VK_TemporalMotionMaterializationHasLive(
+				&vk_temporal_motion_materialization )
+			|| !VK_TemporalMotionMaterializationGetReceipt(
+				&vk_temporal_motion_materialization, &motion )
+			|| !motion.ready ) return qfalse;
+	if ( requireResolved && ( !vk_temporal_resolved_hdr.initialized
+			|| !VK_TemporalResolvedHdrHasLive( &vk_temporal_resolved_hdr )
+			|| !VK_TemporalResolvedHdrGetReceipt(
+				&vk_temporal_resolved_hdr, &resolved )
+			|| !resolved.ready ) ) return qfalse;
+	return qtrue;
+}
+
+static void vk_entmat_materialize_slot_after_idle(
+		vk_tess_t *slot, VkDeviceSize bytes ) {
+	const qboolean replace = !slot->entMatBuf || !slot->entMatMem
+		|| !slot->entMatMapped || slot->entMatSize != bytes
+		|| !slot->entMatAllocationGeneration;
+	if ( replace ) {
+		VkBufferCreateInfo bd;
+		VkMemoryRequirements mr;
+		VkMemoryAllocateInfo ma;
+		if ( slot->entMatMapped ) {
+			qvkUnmapMemory( vk.device, slot->entMatMem );
+			slot->entMatMapped = NULL;
+		}
+		if ( slot->entMatBuf ) {
+			vk_ral_unregister_buffer( slot->entMatBuf );
+			qvkDestroyBuffer( vk.device, slot->entMatBuf, NULL );
+			slot->entMatBuf = VK_NULL_HANDLE;
+		}
+		if ( slot->entMatMem ) {
+			qvkFreeMemory( vk.device, slot->entMatMem, NULL );
+			slot->entMatMem = VK_NULL_HANDLE;
+		}
+		memset( &bd, 0, sizeof( bd ) );
+		bd.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bd.size = bytes;
+		bd.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		bd.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		VK_CHECK( qvkCreateBuffer( vk.device, &bd, NULL, &slot->entMatBuf ) );
+		qvkGetBufferMemoryRequirements( vk.device, slot->entMatBuf, &mr );
+		memset( &ma, 0, sizeof( ma ) );
+		ma.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		ma.allocationSize = mr.size;
+		ma.memoryTypeIndex = find_memory_type( mr.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+			| VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		VK_CHECK( qvkAllocateMemory( vk.device, &ma, NULL, &slot->entMatMem ) );
+		VK_CHECK( qvkBindBufferMemory(
+			vk.device, slot->entMatBuf, slot->entMatMem, 0 ) );
+		VK_CHECK( qvkMapMemory( vk.device, slot->entMatMem, 0,
+			VK_WHOLE_SIZE, 0, &slot->entMatMapped ) );
+		slot->entMatSize = bytes;
+		vk_ral_register_buffer( slot->entMatBuf, bytes,
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+			| VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			"vk.tess.entMatBuf" );
+		SET_OBJECT_NAME( slot->entMatBuf, "entity model matrices",
+			VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT );
+		slot->entMatAllocationGeneration++;
+	}
+	if ( slot->entMatDesc == VK_NULL_HANDLE ) {
+		VkDescriptorSetAllocateInfo dsAlloc;
+		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
+		dsAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		dsAlloc.descriptorPool = vk.descriptor_pool;
+		dsAlloc.descriptorSetCount = 1;
+		dsAlloc.pSetLayouts = &vk.set_layout_entmat;
+		VK_CHECK( qvkAllocateDescriptorSets(
+			vk.device, &dsAlloc, &slot->entMatDesc ) );
+	}
+	{
+		VkWriteDescriptorSet w;
+		VkDescriptorBufferInfo bi;
+		memset( &bi, 0, sizeof( bi ) );
+		bi.buffer = slot->entMatBuf;
+		bi.range = VK_WHOLE_SIZE;
+		memset( &w, 0, sizeof( w ) );
+		w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		w.dstSet = slot->entMatDesc;
+		w.dstBinding = 0;
+		w.descriptorCount = 1;
+		w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		w.pBufferInfo = &bi;
+		qvkUpdateDescriptorSets( vk.device, 1, &w, 0, NULL );
+	}
+}
+
+static void vk_entmat_ensure_temporal_ring( uint32_t requiredSlots ) {
+	const VkDeviceSize bytes = vk_entmat_capacity_bytes( requiredSlots );
+	uint32_t i;
+	qboolean repair[NUM_COMMAND_BUFFERS] = { qfalse };
+	qboolean anyRepair = qfalse;
+	qboolean repairTouchesExisting = qfalse;
+	if ( !requiredSlots
+			|| requiredSlots > TEMPORAL_MOTION_PAYLOAD_MAX_SLOTS )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal entMat ring capacity request was invalid" );
+	if ( vk_temporal_entmat_ring_ready_exact( requiredSlots ) ) return;
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
+		const vk_tess_t *slot = &vk.tess[i];
+		uint32_t j;
+		const qboolean replace = !slot->entMatBuf || !slot->entMatMem
+			|| !slot->entMatMapped || slot->entMatSize != bytes
+			|| !slot->entMatAllocationGeneration;
+		repair[i] = replace || !slot->entMatDesc ? qtrue : qfalse;
+		if ( repair[i] ) anyRepair = qtrue;
+		if ( repair[i] && ( slot->entMatBuf || slot->entMatMem
+				|| slot->entMatMapped || slot->entMatDesc ) )
+			repairTouchesExisting = qtrue;
+		if ( slot->entMatAllocationGeneration == UINT32_MAX
+				|| ( replace && slot->entMatAllocationGeneration
+					>= UINT32_MAX - 1u ) )
+				ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal entMat ring generation exhausted before replacement" );
+		for ( j = 0; j < i; ++j )
+			if ( ( slot->entMatBuf
+						&& slot->entMatBuf == vk.tess[j].entMatBuf )
+					|| ( slot->entMatMem
+						&& slot->entMatMem == vk.tess[j].entMatMem )
+					|| ( slot->entMatMapped
+						&& slot->entMatMapped == vk.tess[j].entMatMapped )
+					|| ( slot->entMatDesc
+						&& slot->entMatDesc == vk.tess[j].entMatDesc ) )
+				ri.Terminate( TERM_UNRECOVERABLE,
+					"temporal entMat ring contained aliased slot roles" );
+	}
+	if ( !anyRepair && ( vk_temporal_entmat_ring.requiredCapacity
+			|| vk_temporal_entmat_ring.byteSize ) ) {
+		qboolean metadataExact =
+			vk_temporal_entmat_ring.byteSize == bytes ? qtrue : qfalse;
+		for ( i = 0; i < NUM_COMMAND_BUFFERS && metadataExact; ++i ) {
+			const vk_tess_t *slot = &vk.tess[i];
+			if ( vk_temporal_entmat_ring.buffer[i] != slot->entMatBuf
+					|| vk_temporal_entmat_ring.memory[i] != slot->entMatMem
+					|| vk_temporal_entmat_ring.mapped[i] != slot->entMatMapped
+					|| vk_temporal_entmat_ring.descriptor[i] != slot->entMatDesc
+					|| vk_temporal_entmat_ring.allocationGeneration[i]
+						!= slot->entMatAllocationGeneration )
+				metadataExact = qfalse;
+		}
+		if ( !metadataExact )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal entMat ring identity drifted without a repairable role" );
+	}
+	vk_temporal_entmat_ring.ready = qfalse;
+	if ( repairTouchesExisting ) {
+		vk_wait_idle();
+		vk_temporal_entmat_release_after_idle( "raw-ring-materialize" );
+	}
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i )
+		if ( repair[i] )
+			vk_entmat_materialize_slot_after_idle( &vk.tess[i], bytes );
+	memset( &vk_temporal_entmat_ring, 0,
+		sizeof( vk_temporal_entmat_ring ) );
+	vk_temporal_entmat_ring.requiredCapacity = requiredSlots;
+	vk_temporal_entmat_ring.byteSize = bytes;
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i )
+	{
+		vk_temporal_entmat_ring.buffer[i] = vk.tess[i].entMatBuf;
+		vk_temporal_entmat_ring.memory[i] = vk.tess[i].entMatMem;
+		vk_temporal_entmat_ring.mapped[i] = vk.tess[i].entMatMapped;
+		vk_temporal_entmat_ring.descriptor[i] = vk.tess[i].entMatDesc;
+		vk_temporal_entmat_ring.allocationGeneration[i] =
+			vk.tess[i].entMatAllocationGeneration;
+	}
+	vk_temporal_entmat_ring.ready = qtrue;
+	if ( !vk_temporal_entmat_ring_ready_exact( requiredSlots ) )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal entMat ring publication was not exact" );
+}
+
+void vk_entmat_ensure_buffer( uint32_t requiredSlots )
 {
 	// Floor covers a busy scene's main draw count (world batches + entities);
 	// grows on overflow. One slot = ENTITY_MATRIX_SLOT_BYTES.
-	const uint32_t     floorSlots = 1024u;
+	const uint32_t     floorSlots = requiredSlots > 1024u ? requiredSlots : 1024u;
 	const VkDeviceSize need       = (VkDeviceSize)floorSlots * ENTITY_MATRIX_SLOT_BYTES;
 
 	// Allocate + bind UNCONDITIONALLY (not gated on r_entitySSBO). Every main
@@ -25515,6 +28189,7 @@ void vk_entmat_ensure_buffer( void )
 			while ( sz < need ) sz <<= 1;
 			const qboolean replacingRawParent =
 				vk.cmd->entMatBuf != VK_NULL_HANDLE ? qtrue : qfalse;
+			vk_temporal_entmat_ring.ready = qfalse;
 			vk_wait_idle();
 			if ( replacingRawParent )
 				vk_temporal_entmat_release_after_idle( "raw-buffer-grow" );
@@ -25580,7 +28255,543 @@ void vk_entmat_ensure_buffer( void )
 void vk_entmat_begin_frame( void )
 {
 	vk.cmd->entMatSlot = 0;
+	vk.cmd->entMatLastUniformOffset = ~0U;
 }
+
+qboolean vk_temporal_motion_begin_primary_command( void )
+{
+	const vkTemporalMotionRecordingAuthority_t *authority =
+		&vk_temporal_motion_recording.authority;
+	if ( !VK_TemporalMotionRecordingIsActive( &vk_temporal_motion_recording )
+			|| vk.renderPassIndex != RENDER_PASS_MAIN
+			|| !( backEnd.refdef.rdflags & RDF_TEMPORAL_PRIMARY )
+			|| backEnd.refdef.needScreenMap
+			|| ( backEnd.refdef.rdflags & RDF_NOWORLDMODEL )
+			|| backEnd.viewParms.portalView != PV_NONE
+			|| backEnd.viewParms.stereoFrame != STEREO_CENTER
+			|| backEnd.viewParms.temporalFrameId != authority->frameId
+			|| backEnd.viewParms.temporalWorldIndex != authority->worldIndex
+			|| backEnd.viewParms.viewportX != 0 || backEnd.viewParms.viewportY != 0
+			|| backEnd.viewParms.viewportWidth != (int)authority->width
+			|| backEnd.viewParms.viewportHeight != (int)authority->height
+			|| vk.renderWidth != (int)authority->width
+			|| vk.renderHeight != (int)authority->height ) return qfalse;
+	return VK_TemporalMotionRecordingBeginPrimaryCommand(
+		&vk_temporal_motion_recording );
+}
+
+void vk_temporal_motion_end_primary_command( qboolean admitted )
+{
+	if ( admitted ) VK_TemporalMotionRecordingEndPrimaryCommand(
+		&vk_temporal_motion_recording );
+}
+
+static qboolean vk_temporal_motion_prepare_bound_draw( uint32_t pipelineSlot )
+{
+	temporalMotionDrawFacts_t facts;
+	const temporalEntityPoseReceipt_t *entityReceipt = NULL;
+	const Vk_Pipeline_Def *def;
+	const shader_t *shader = tess.shader;
+	const trRefEntity_t *entity = backEnd.currentEntity;
+	model_t *model = NULL;
+	uint32_t stateBits;
+	uint32_t rejectedBefore;
+	qboolean prepared;
+	if ( !VK_TemporalMotionRecordingIsActive( &vk_temporal_motion_recording )
+			|| !vk_temporal_motion_recording.primaryCommandActive ) return qfalse;
+	if ( pipelineSlot >= vk.pipelines_count || vk.renderPassIndex != RENDER_PASS_MAIN
+			|| !shader ) return qfalse;
+	def = &vk.pipelines[pipelineSlot].def;
+	if ( def->shader_type < TYPE_GENERIC_BEGIN || def->shader_type > TYPE_GENERIC_END
+			|| vk.pipelines[pipelineSlot].depthFade
+			|| !vk.pipelines[pipelineSlot].ral_handle[RENDER_PASS_MAIN] ) return qfalse;
+	if ( !VK_TemporalGenericPipelineTableSlotReady(
+			&vk_temporal_generic_pipeline_table, pipelineSlot ) ) {
+		vkTemporalGenericRecipeReceipt_t recipeReceipt;
+		if ( VK_TemporalGenericRecipeTableGetSlotReceipt(
+				&vk_temporal_generic_recipe_table, pipelineSlot, &recipeReceipt ) ) {
+			VK_TemporalMotionRecordingPoison( &vk_temporal_motion_recording );
+		}
+		return qfalse;
+	}
+	stateBits = def->state_bits;
+	if ( stateBits & GLS_ATEST_BITS ) return qfalse;
+	memset( &facts, 0, sizeof( facts ) );
+	facts.visible = qtrue;
+	facts.opaque = shader->sort <= SS_OPAQUE ? qtrue : qfalse;
+	facts.depthAuthoritative = ( stateBits & GLS_DEPTHMASK_TRUE ) ? qtrue : qfalse;
+	facts.vertexDeformed = shader->numDeforms > 0 ? qtrue : qfalse;
+	facts.blended = ( stateBits & GLS_BLEND_BITS ) ? qtrue : qfalse;
+	facts.transparent = shader->sort > SS_OPAQUE ? qtrue : qfalse;
+	facts.decal = shader->sort == SS_DECAL ? qtrue : qfalse;
+	facts.additive = ( ( stateBits & GLS_SRCBLEND_BITS ) == GLS_SRCBLEND_ONE
+		&& ( stateBits & GLS_DSTBLEND_BITS ) == GLS_DSTBLEND_ONE ) ? qtrue : qfalse;
+	facts.ui = backEnd.projection2D;
+	facts.sky = shader->isSky;
+	facts.polygonOffset = def->polygon_offset;
+	if ( entity ) {
+		facts.depthHack = ( entity->e.renderfx & RF_DEPTHHACK ) ? qtrue : qfalse;
+		facts.crosshair = ( entity->e.renderfx & RF_CROSSHAIR ) ? qtrue : qfalse;
+	}
+	if ( entity == &tr.worldEntity ) {
+		facts.geometry = TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC;
+	} else if ( entity && entity->e.reType == RT_MODEL
+			&& !shader->entityMergable ) {
+		model = R_GetModelByHandle( entity->e.hModel );
+		if ( model && model->type == MOD_BRUSH ) {
+			facts.geometry = TEMPORAL_MOTION_GEOMETRY_MOD_BRUSH_RIGID;
+			entityReceipt = &entity->temporalReceipt;
+		}
+	}
+	rejectedBefore = vk_temporal_motion_recording.rejected;
+	prepared = VK_TemporalMotionRecordingPrepareDraw(
+		&vk_temporal_motion_recording, &vk_temporal_generic_pipeline_table,
+		pipelineSlot, vk.pipelines[pipelineSlot].ral_handle[RENDER_PASS_MAIN],
+		&facts, &backEnd.viewParms.temporalCameraReceipt, entityReceipt );
+	if ( !prepared && VK_TemporalMotionReadbackIsArmed(
+			&vk_temporal_motion_readback )
+			&& vk_temporal_motion_recording.rejected != rejectedBefore ) {
+		const vkTemporalGenericPipelineSlot_t *entry =
+			&vk_temporal_generic_pipeline_table.slots[pipelineSlot];
+		R_LOG( rch_ral, SEV_INFO,
+			"temporal-motion-debug schema=1 phase=draw-rejected slot=%u outcome=%u table=%u entry=%u recipe=%u:%u factory=%u ordinary-match=%d\n",
+			pipelineSlot, (uint32_t)R_TemporalMotionClassify( &facts ),
+			vk_temporal_generic_pipeline_table.allocationGeneration,
+			entry->entryGeneration, entry->recipeOwnerEpoch,
+			entry->recipeEntryGeneration,
+			entry->factory.allocationGeneration,
+			entry->ordinaryPipeline ==
+				vk.pipelines[pipelineSlot].ral_handle[RENDER_PASS_MAIN] ? 1 : 0 );
+	}
+	return prepared;
+}
+
+typedef struct {
+	vkTemporalMotionMaterializationProductView_t materialization;
+	vkTemporalEntMatRuntimeFrameBinding_t frameBinding;
+	VkDescriptorSet sets[4];
+	uint32_t uniformOffset;
+} vkTemporalMainSegmentResources_t;
+
+static qboolean vk_temporal_activation_preflight( void *context,
+		uint32_t pipelineSlot, const ralPipeline_t *ordinaryPipeline,
+		vkTemporalGenericPipelineReceipt_t *outReceipt,
+		ralPipeline_t *outPipelines[3] ) {
+	return VK_TemporalGenericPipelineTablePreflightSlot(
+		(const vkTemporalGenericPipelineTable_t *)context, pipelineSlot,
+		ordinaryPipeline, outReceipt, outPipelines );
+}
+
+static const vkTemporalMainActivationOps_t vk_temporal_activation_ops = {
+	vk_temporal_activation_preflight
+};
+
+static qboolean vk_temporal_main_get_segment_resources(
+		const vkTemporalMainActivationPlan_t *plan,
+		vkTemporalMainSegmentResources_t *outResources ) {
+	vkTemporalMotionMaterializationReceipt_t receipt;
+	vkTemporalMainSegmentResources_t resources;
+	const vkTemporalMotionRecordingAuthority_t *authority;
+	if ( !plan || !outResources || !plan->beginExact3 || !plan->pipeline
+			|| !vk.fboActive || vk.renderPassIndex != RENDER_PASS_MAIN
+			|| vk.cmd->open_dynamic_pass != VK_DYN_PASS_MAIN
+			|| !VK_TemporalMotionMaterializationGetReceipt(
+				&vk_temporal_motion_materialization, &receipt ) ) return qfalse;
+	authority = &plan->authority;
+	if ( receipt.worldIndex != authority->worldIndex
+			|| receipt.width != authority->width || receipt.height != authority->height
+			|| receipt.topologyEpoch != authority->topologyEpoch
+			|| receipt.planGeneration != authority->planGeneration
+			|| receipt.payloadLayoutGeneration != authority->payloadLayoutGeneration
+			|| receipt.targetAllocationGeneration != authority->targetAllocationGeneration
+			|| receipt.pipelineLayoutAllocationGeneration !=
+				authority->pipelineLayoutAllocationGeneration
+			|| receipt.allocationGeneration != authority->materializationGeneration )
+		return qfalse;
+	memset( &resources, 0, sizeof( resources ) );
+	if ( !VK_TemporalMotionMaterializationGetProductView(
+			&vk_temporal_motion_materialization, &receipt,
+			vk.ral_color_image, vk.ral_depth_image,
+			&resources.materialization )
+			|| !VK_TemporalEntMatRuntimeGetFrameBinding(
+				&vk_temporal_entmat_runtime,
+				&vk_temporal_motion_recording.runtimeReceipt,
+				&resources.frameBinding ) ) return qfalse;
+	resources.sets[0] = vk.cmd->uniform_descriptor;
+	resources.sets[1] = (VkDescriptorSet)Ral_GetBindGroupHandle(
+		vk_ral_get_bindless_set() );
+	resources.sets[2] = vk.engineResources.descriptor;
+	resources.sets[3] = (VkDescriptorSet)Ral_GetBindGroupHandle(
+		resources.frameBinding.compositeGroup );
+	resources.uniformOffset = vk.cmd->descriptor_set.offset[VK_DESC_UNIFORM];
+	if ( resources.materialization.rawPipelineLayout == VK_NULL_HANDLE
+			|| !resources.materialization.pipelineLayout
+			|| !resources.sets[0] || !resources.sets[1]
+			|| !resources.sets[2] || !resources.sets[3] ) return qfalse;
+	*outResources = resources;
+	return qtrue;
+}
+
+static void vk_temporal_main_attachment_barrier( void ) {
+	ralMemoryBarrier_t memory;
+	ralPipelineBarrierInfo_t barrier;
+	if ( VK_TemporalMainRenderingBuildAttachmentBarrier( &memory, &barrier ) )
+		Ral_CmdPipelineBarrierFull( vk.cmd->ral_cmd, &barrier );
+}
+
+static void vk_temporal_main_set_dynamic_state( Vk_Depth_Range depthRange ) {
+	VkViewport rawViewport;
+	VkRect2D rawScissor;
+	ralViewport_t vp;
+	ralRect_t sc;
+	get_viewport( &rawViewport, depthRange );
+	get_scissor_rect( &rawScissor );
+	vp.x = rawViewport.x; vp.y = rawViewport.y;
+	vp.width = rawViewport.width; vp.height = rawViewport.height;
+	vp.minDepth = rawViewport.minDepth; vp.maxDepth = rawViewport.maxDepth;
+	Ral_CmdSetViewport( vk.cmd->ral_cmd, &vp );
+	sc.x = rawScissor.offset.x; sc.y = rawScissor.offset.y;
+	sc.width = rawScissor.extent.width; sc.height = rawScissor.extent.height;
+	Ral_CmdSetScissor( vk.cmd->ral_cmd, &sc );
+#ifdef USE_REVERSED_DEPTH
+	Ral_CmdSetDepthBias( vk.cmd->ral_cmd, -r_offsetUnits->value, 0.0f,
+		-r_offsetFactor->value );
+#else
+	Ral_CmdSetDepthBias( vk.cmd->ral_cmd, r_offsetUnits->value, 0.0f,
+		r_offsetFactor->value );
+#endif
+}
+
+static void vk_temporal_main_reset_bind_cache( void ) {
+	vk.cmd->last_pipeline = VK_NULL_HANDLE;
+	vk.cmd->last_ral_pipeline = NULL;
+	vk.cmd->last_pipeline_layout = VK_NULL_HANDLE;
+	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
+	vk.cmd->depthFadeDraw = qfalse;
+	if ( vk.cmd->descriptor_set.start > VK_DESC_UNIFORM )
+		vk.cmd->descriptor_set.start = VK_DESC_UNIFORM;
+	if ( vk.cmd->descriptor_set.end < WIRED_ENGINE_RES_SET )
+		vk.cmd->descriptor_set.end = WIRED_ENGINE_RES_SET;
+}
+
+#if FEAT_IQM
+typedef struct {
+	iqmData_t *data;
+	const srfIQModel_t *surface;
+	image_t *ordinaryImage;
+	const float (*currentBones)[4];
+	const float *rasterMvp;
+} vkTemporalIqmProductCommandContext_t;
+
+static qboolean vk_temporal_iqm_command_preflight( void *context,
+		const vkTemporalMainIqmActivationPlan_t *plan,
+		const vkTemporalIqmCommandResources_t *resources ) {
+	const vkTemporalIqmProductCommandContext_t *c =
+		(const vkTemporalIqmProductCommandContext_t *)context;
+	temporalIqmSequenceEntry_t actualEntry;
+	temporalIqmGpuRecord_t *record;
+	vkTemporalIqmPayloadReceipt_t payload;
+	if ( !c || !plan || !resources || resources->commandBuffer != vk.cmd->ral_cmd
+			|| !vk.fboActive || vk.renderPassIndex != RENDER_PASS_MAIN
+			|| vk.cmd->open_dynamic_pass != VK_DYN_PASS_MAIN
+			|| !vk_temporal_iqm_primary.bound
+			|| !vk_temporal_iqm_build_observed_facts( c->data, c->surface,
+				c->ordinaryImage, &actualEntry.facts )
+			|| actualEntry.facts.ordinal
+				>= vk_temporal_iqm_primary.sequence.drawCount ) return qfalse;
+	actualEntry.recordIndex = vk_temporal_iqm_primary.sequence.entries[
+		actualEntry.facts.ordinal].recordIndex;
+	if ( !R_TemporalIqmSequenceEntryEqual( &actualEntry, &plan->entry )
+			|| !VK_TemporalIqmPayloadGetReceipt( &vk_temporal_iqm_payload,
+				plan->authority.frameIndex, &payload )
+			|| !VK_TemporalIqmPayloadReceiptExact(
+				&payload, &vk_temporal_iqm_primary.content.payload )
+			|| !VK_TemporalIqmPayloadContentRevalidate(
+				&vk_temporal_iqm_primary.content, &vk_temporal_iqm_payload )
+			|| Ral_GetBufferHandle( resources->vertexBuffer )
+				!= (void *)plan->entry.facts.rawVertexBuffer
+			|| Ral_GetBufferHandle( resources->indexBuffer )
+				!= (void *)plan->entry.facts.rawIndexBuffer
+			|| Ral_GetBufferSize( resources->vertexBuffer )
+				!= plan->entry.facts.vertexBufferBytes
+			|| Ral_GetBufferSize( resources->indexBuffer )
+				!= plan->entry.facts.indexBufferBytes ) return qfalse;
+	record = (temporalIqmGpuRecord_t *)( (unsigned char *)payload.mappedIdentity
+		+ (size_t)plan->recordIndex * TEMPORAL_IQM_RECORD_SIZE );
+	return c->currentBones && c->rasterMvp
+		&& !memcmp( record->currentBones, c->currentBones,
+			sizeof( record->currentBones ) )
+		&& !memcmp( record->rasterMvp, c->rasterMvp,
+			sizeof( record->rasterMvp ) ) ? qtrue : qfalse;
+}
+
+static void vk_temporal_iqm_command_end_ordinary( void *context ) {
+	(void)context;
+	Ral_EndRendering( vk.cmd->ral_cmd );
+	vk.cmd->open_dynamic_pass = VK_DYN_PASS_NONE;
+}
+
+static void vk_temporal_iqm_command_barrier( void *context ) {
+	(void)context;
+	vk_temporal_main_attachment_barrier();
+}
+
+static void vk_temporal_iqm_command_begin_exact( void *context,
+		const ralRenderingInfo_t *info ) {
+	ralRenderingInfo_t marked = *info;
+	(void)context;
+	vk_profile_rendering_marker( &marked, "wired.temporal-iqm",
+		VK_PM_TEMPORAL_MAIN );
+	Ral_BeginRendering( vk.cmd->ral_cmd, &marked );
+	vk.cmd->open_dynamic_pass = VK_DYN_PASS_TEMPORAL_MAIN;
+}
+
+static void vk_temporal_iqm_command_dynamic( void *context ) {
+	(void)context;
+	vk_temporal_main_set_dynamic_state( DEPTH_RANGE_NORMAL );
+}
+
+static void vk_temporal_iqm_command_pipeline( void *context,
+		ralPipeline_t *pipeline ) {
+	(void)context;
+	Ral_CmdBindPipeline( vk.cmd->ral_cmd, pipeline );
+}
+
+static void vk_temporal_iqm_command_group( void *context, uint32_t setIndex,
+		ralBindGroup_t *group ) {
+	(void)context;
+	Ral_CmdBindBindGroup( vk.cmd->ral_cmd, setIndex, group );
+}
+
+static void vk_temporal_iqm_command_push( void *context,
+		const vkTemporalIqmExact3Push_t *push ) {
+	(void)context;
+	Ral_CmdPushConstants( vk.cmd->ral_cmd, RAL_STAGE_FRAGMENT, 0,
+		sizeof( *push ), push );
+}
+
+static void vk_temporal_iqm_command_vertex( void *context,
+		ralBuffer_t *buffer ) {
+	(void)context;
+	Ral_CmdBindVertexBuffer( vk.cmd->ral_cmd, 0, buffer, 0 );
+}
+
+static void vk_temporal_iqm_command_index( void *context,
+		ralBuffer_t *buffer ) {
+	(void)context;
+	Ral_CmdBindIndexBuffer( vk.cmd->ral_cmd, buffer, 0, RAL_INDEX_UINT32 );
+}
+
+static void vk_temporal_iqm_command_draw( void *context, uint32_t indexCount,
+		uint32_t firstIndex, uint32_t firstInstance ) {
+	(void)context;
+	Ral_CmdDrawIndexed( vk.cmd->ral_cmd, indexCount, 1, firstIndex, 0,
+		firstInstance );
+	vk_diag_drawcalls++;
+}
+
+static void vk_temporal_iqm_command_end_exact( void *context ) {
+	(void)context;
+	Ral_EndRendering( vk.cmd->ral_cmd );
+	vk.cmd->open_dynamic_pass = VK_DYN_PASS_NONE;
+}
+
+static void vk_temporal_iqm_command_begin_resume( void *context,
+		const ralRenderingInfo_t *info ) {
+	ralRenderingInfo_t marked = *info;
+	(void)context;
+	vk_profile_rendering_marker( &marked, "wired.temporal-iqm-resume",
+		VK_PM_TEMPORAL_MAIN_RESUME );
+	Ral_BeginRendering( vk.cmd->ral_cmd, &marked );
+	vk.cmd->open_dynamic_pass = VK_DYN_PASS_MAIN;
+}
+
+static void vk_temporal_iqm_command_reset( void *context ) {
+	(void)context;
+	vk_temporal_main_reset_bind_cache();
+}
+
+static const vkTemporalIqmCommandOps_t vk_temporal_iqm_command_ops = {
+	vk_temporal_iqm_command_preflight,
+	vk_temporal_iqm_command_end_ordinary,
+	vk_temporal_iqm_command_barrier,
+	vk_temporal_iqm_command_begin_exact,
+	vk_temporal_iqm_command_dynamic,
+	vk_temporal_iqm_command_pipeline,
+	vk_temporal_iqm_command_group,
+	vk_temporal_iqm_command_push,
+	vk_temporal_iqm_command_vertex,
+	vk_temporal_iqm_command_index,
+	vk_temporal_iqm_command_draw,
+	vk_temporal_iqm_command_end_exact,
+	vk_temporal_iqm_command_begin_resume,
+	vk_temporal_iqm_command_reset
+};
+#endif
+
+static void vk_issue_geometry_draws( qboolean indexed, uint32_t firstInstance ) {
+#ifdef USE_VBO
+	if ( tess.vboIndex )
+		VBO_RenderIBOItems( firstInstance );
+	else
+#endif
+	if ( indexed ) {
+		qvkCmdDrawIndexed( vk.cmd->command_buffer, vk.cmd->num_indexes, 1,
+			0, 0, firstInstance );
+	} else {
+		qvkCmdDraw( vk.cmd->command_buffer, tess.numVertexes, 1,
+			0, firstInstance );
+	}
+	vk_diag_drawcalls++;
+}
+
+static qboolean vk_temporal_main_issue_exact_segment(
+		const vkTemporalMainActivationPlan_t *plan,
+		const vkTemporalMainSegmentResources_t *resources,
+		Vk_Depth_Range depthRange, qboolean indexed, uint32_t firstInstance ) {
+	ralRenderingInfo_t exactInfo, resumeInfo;
+	if ( !plan || !resources || !plan->pipeline
+			|| firstInstance != plan->absoluteEntMatSlot
+			|| !VK_TemporalMainRenderingBuildExact3(
+				resources->materialization.scene,
+				resources->materialization.velocity,
+				resources->materialization.validity,
+				resources->materialization.depth,
+				plan->authority.width, plan->authority.height,
+				glConfig.stencilBits > 0 ? qtrue : qfalse,
+				plan->clearAuxiliary, &exactInfo )
+			|| !VK_TemporalMainRenderingBuildResume(
+				resources->materialization.scene,
+				resources->materialization.depth,
+				plan->authority.width, plan->authority.height,
+				glConfig.stencilBits > 0 ? qtrue : qfalse, &resumeInfo ) )
+		return qfalse;
+	// Every fallible check is above this line. Once the ordinary pass is ended,
+	// the exact segment and LOAD resume are an infallible command-emission unit;
+	// callers may therefore fall back to the ordinary draw only on the preflight
+	// failure above and can never replay a draw after exact3 commands were emitted.
+	Ral_EndRendering( vk.cmd->ral_cmd );
+	vk.cmd->open_dynamic_pass = VK_DYN_PASS_NONE;
+	vk_temporal_main_attachment_barrier();
+	vk_profile_rendering_marker( &exactInfo, "wired.temporal-main",
+		VK_PM_TEMPORAL_MAIN );
+	Ral_BeginRendering( vk.cmd->ral_cmd, &exactInfo );
+	vk.cmd->open_dynamic_pass = VK_DYN_PASS_TEMPORAL_MAIN;
+	vk_temporal_main_set_dynamic_state( depthRange );
+	Ral_CmdBindPipeline( vk.cmd->ral_cmd, plan->pipeline );
+	qvkCmdBindDescriptorSets( vk.cmd->command_buffer,
+		VK_PIPELINE_BIND_POINT_GRAPHICS,
+		resources->materialization.rawPipelineLayout,
+		0, 4, resources->sets, 1, &resources->uniformOffset );
+	vk_issue_geometry_draws( indexed, firstInstance );
+	Ral_EndRendering( vk.cmd->ral_cmd );
+	vk.cmd->open_dynamic_pass = VK_DYN_PASS_NONE;
+	vk_temporal_main_attachment_barrier();
+	vk_profile_rendering_marker( &resumeInfo, "wired.temporal-main-resume",
+		VK_PM_TEMPORAL_MAIN_RESUME );
+	Ral_BeginRendering( vk.cmd->ral_cmd, &resumeInfo );
+	vk.cmd->open_dynamic_pass = VK_DYN_PASS_MAIN;
+	vk_temporal_main_set_dynamic_state( depthRange );
+	vk_temporal_main_reset_bind_cache();
+	return qtrue;
+}
+
+#if FEAT_IQM
+static qboolean vk_temporal_iqm_get_command_resources(
+		const vkTemporalMainIqmActivationPlan_t *plan,
+		vkTemporalIqmCommandResources_t *outResources ) {
+	vkTemporalMotionMaterializationReceipt_t receipt;
+	vkTemporalMotionMaterializationProductView_t view;
+	vkTemporalIqmCommandResources_t resources;
+	const vkTemporalMotionRecordingAuthority_t *authority;
+	if ( !plan || !outResources || !plan->beginExact3
+			|| !VK_TemporalMotionMaterializationGetReceipt(
+				&vk_temporal_motion_materialization, &receipt ) ) return qfalse;
+	authority = &plan->authority;
+	if ( receipt.worldIndex != authority->worldIndex
+			|| receipt.width != authority->width
+			|| receipt.height != authority->height
+			|| receipt.topologyEpoch != authority->topologyEpoch
+			|| receipt.planGeneration != authority->planGeneration
+			|| receipt.payloadLayoutGeneration
+				!= authority->payloadLayoutGeneration
+			|| receipt.targetAllocationGeneration
+				!= authority->targetAllocationGeneration
+			|| receipt.pipelineLayoutAllocationGeneration
+				!= authority->pipelineLayoutAllocationGeneration
+			|| receipt.allocationGeneration
+				!= authority->materializationGeneration
+			|| !VK_TemporalMotionMaterializationGetProductView(
+				&vk_temporal_motion_materialization, &receipt,
+				vk.ral_color_image, vk.ral_depth_image, &view ) ) return qfalse;
+	memset( &resources, 0, sizeof( resources ) );
+	resources.commandBuffer = vk.cmd->ral_cmd;
+	resources.scene = view.scene;
+	resources.velocity = view.velocity;
+	resources.validity = view.validity;
+	resources.depth = view.depth;
+	resources.payloadGroup = plan->payloadGroup;
+	resources.bindlessGroup =
+		(ralBindGroup_t *)plan->factory.bindless.setIdentity;
+	resources.vertexBuffer =
+		(ralBuffer_t *)plan->entry.facts.ralVertexBuffer;
+	resources.indexBuffer =
+		(ralBuffer_t *)plan->entry.facts.ralIndexBuffer;
+	if ( !VK_TemporalIqmExact3FactoryGetReceipt(
+			&vk_temporal_iqm_exact3_factory, &resources.currentFactory ) )
+		return qfalse;
+	resources.width = authority->width;
+	resources.height = authority->height;
+	resources.hasStencil = glConfig.stencilBits > 0 ? qtrue : qfalse;
+	resources.ordinaryOpen = vk.renderPassIndex == RENDER_PASS_MAIN
+		&& vk.cmd->open_dynamic_pass == VK_DYN_PASS_MAIN ? qtrue : qfalse;
+	*outResources = resources;
+	return qtrue;
+}
+
+qboolean vk_temporal_iqm_draw_exact( iqmData_t *data,
+		const srfIQModel_t *surface, image_t *ordinaryImage,
+		const float currentBones[TEMPORAL_IQM_BONE_ROWS][4],
+		const float rasterMvp[16] ) {
+	temporalIqmDrawFacts_t observed;
+	vkTemporalMainIqmActivationPlan_t plan;
+	vkTemporalIqmCommandResources_t resources;
+	vkTemporalIqmProductCommandContext_t context;
+	if ( !vk_temporal_iqm_primary.bound ) return qfalse;
+	// A same-sort CPU tess batch must be committed before this direct segment so
+	// the shared online generic/IQM receipt follows actual command order.
+	RB_EndSurface();
+	memset( &observed, 0, sizeof( observed ) );
+	memset( &plan, 0, sizeof( plan ) );
+	memset( &resources, 0, sizeof( resources ) );
+	memset( &context, 0, sizeof( context ) );
+	if ( !vk_temporal_iqm_build_observed_facts(
+			data, surface, ordinaryImage, &observed )
+			|| !VK_TemporalMainActivationPlanIqmDraw(
+				&vk_temporal_main_activation, &observed, &plan )
+			|| !vk_temporal_iqm_get_command_resources( &plan, &resources ) ) {
+		VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
+		return qfalse;
+	}
+	context.data = data;
+	context.surface = surface;
+	context.ordinaryImage = ordinaryImage;
+	context.currentBones = currentBones;
+	context.rasterMvp = rasterMvp;
+	if ( !VK_TemporalIqmCommandExecute(
+			&plan, &resources, &context, &vk_temporal_iqm_command_ops ) ) {
+		VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
+		return qfalse;
+	}
+	if ( !VK_TemporalMainActivationCommitIqmDraw(
+			&vk_temporal_main_activation, &plan ) )
+		VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
+	// The exact draw has already completed and MAIN is open again. Even a late
+	// receipt failure must never replay the ordinary draw; poisoning prevents
+	// this frame from becoming temporal history while preserving scene output.
+	return qtrue;
+}
+#endif
 
 static void vk_update_depth_range( Vk_Depth_Range depth_range )
 {
@@ -25604,12 +28815,23 @@ static void vk_update_depth_range( Vk_Depth_Range depth_range )
 
 
 void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
+	const uint32_t temporalPipelineSlot = vk_temporal_bound_pipeline_slot;
+	qboolean temporalPrepared = qfalse;
+	qboolean activationPlanned = qfalse;
+	qboolean exactResourcesReady = qfalse;
+	vkTemporalEntMatSlotPlan_t entMatPlan;
+	vkTemporalMainActivationPlan_t activationPlan;
+	vkTemporalMainSegmentResources_t segmentResources;
+	qboolean entMatPlanValid = qfalse;
+	memset( &activationPlan, 0, sizeof( activationPlan ) );
+	memset( &segmentResources, 0, sizeof( segmentResources ) );
+	vk_temporal_bound_pipeline_slot = UINT32_MAX;
 
 	if ( vk.geometry_buffer_size_new ) {
 		// geometry buffer overflow happened this frame
+		VK_TemporalMotionRecordingPoison( &vk_temporal_motion_recording );
 		return;
 	}
-
 	vk_bind_descriptor_sets();
 
 	// Pack + write the per-draw bindless index table. Reads the per-role images
@@ -25623,6 +28845,54 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 
 	// configure pipeline's dynamic state
 	vk_update_depth_range( depth_range );
+	if ( vk_entmat_active() && vk.cmd->entMatMapped
+			&& vk.cmd->entMatSize / ENTITY_MATRIX_SLOT_BYTES <= UINT32_MAX ) {
+		entMatPlanValid = VK_TemporalEntMatPlanUniformSlot(
+			vk.cmd->uniform_read_offset, vk.cmd->entMatLastUniformOffset,
+			vk.cmd->entMatSlot,
+			(uint32_t)( vk.cmd->entMatSize / ENTITY_MATRIX_SLOT_BYTES ),
+			&entMatPlan );
+	}
+	if ( VK_TemporalMotionRecordingIsActive( &vk_temporal_motion_recording )
+			&& vk_temporal_motion_recording.primaryCommandActive
+			&& !entMatPlanValid ) {
+		VK_TemporalMotionRecordingPoison( &vk_temporal_motion_recording );
+	}
+	if ( entMatPlanValid && entMatPlan.fresh
+			&& VK_TemporalMotionRecordingIsActive( &vk_temporal_motion_recording )
+			&& vk_temporal_motion_recording.primaryCommandActive ) {
+		temporalPrepared = vk_temporal_motion_prepare_bound_draw(
+			temporalPipelineSlot );
+		if ( temporalPrepared && vk_temporal_main_activation.active ) {
+			temporalMotionOutcome_t outcome;
+			uint32_t pendingPipelineSlot;
+			if ( VK_TemporalMotionRecordingPeekPendingDraw(
+					&vk_temporal_motion_recording, &outcome,
+					&pendingPipelineSlot )
+					&& pendingPipelineSlot == temporalPipelineSlot
+					&& temporalPipelineSlot < vk.pipelines_count
+					&& VK_TemporalMainActivationPlanDraw(
+						&vk_temporal_main_activation, outcome,
+						entMatPlan.slot, temporalPipelineSlot,
+						vk.pipelines[temporalPipelineSlot].ral_handle[RENDER_PASS_MAIN],
+						&vk_temporal_generic_pipeline_table,
+						&vk_temporal_activation_ops, &activationPlan ) ) {
+				activationPlanned = qtrue;
+				if ( activationPlan.beginExact3 ) {
+					exactResourcesReady = vk_temporal_main_get_segment_resources(
+						&activationPlan, &segmentResources );
+					if ( !exactResourcesReady ) {
+						VK_TemporalMainActivationPoison(
+							&vk_temporal_main_activation );
+						activationPlanned = qfalse;
+					}
+				}
+			} else {
+				VK_TemporalMainActivationPoison(
+					&vk_temporal_main_activation );
+			}
+		}
+	}
 
 	// r_entitySSBO path: copy THIS draw's transform (the mvp the bindless write
 	// just wrote next to, plus modelMatrix under shadows) out of this draw's
@@ -25636,34 +28906,62 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 	// (a draw that can't write its slot reads slot 0 — degraded but bounded, and
 	// the geometry-overflow early-return above usually pre-empts it).
 	uint32_t firstInstance = 0;
-	if ( vk_entmat_active() && vk.cmd->uniform_read_offset != ~0U && vk.cmd->entMatMapped ) {
-		const uint32_t slot     = vk.cmd->entMatSlot;
-		const VkDeviceSize byteOff = (VkDeviceSize)slot * ENTITY_MATRIX_SLOT_BYTES;
-		if ( byteOff + ENTITY_MATRIX_SLOT_BYTES <= vk.cmd->entMatSize ) {
+	if ( entMatPlanValid ) {
+		if ( !entMatPlan.fresh ) {
+			// A repeated physical sibling (depthFragment and legacy fog overlay)
+			// deliberately reuses the base draw's uniform item. Reuse its exact
+			// ordinary entMat instance without appending or advancing the absolute
+			// slot cursor a second time.
+			firstInstance = entMatPlan.slot;
+		} else {
+			const uint32_t slot = entMatPlan.slot;
+			const VkDeviceSize byteOff = (VkDeviceSize)slot * ENTITY_MATRIX_SLOT_BYTES;
+			if ( byteOff + ENTITY_MATRIX_SLOT_BYTES <= vk.cmd->entMatSize ) {
 			const vkUniform_t *item = (const vkUniform_t *)( vk.cmd->vertex_buffer_ptr + vk.cmd->uniform_read_offset );
 			byte *dst = (byte *)vk.cmd->entMatMapped + byteOff;
+			// Inert temporal payload is committed first. The following mapped raw
+			// copies cannot fail, so both buffers publish the same absolute slot.
+			if ( temporalPrepared && !VK_TemporalMotionRecordingConsumeAt(
+					&vk_temporal_motion_recording, &vk_temporal_entmat_runtime,
+					slot ) ) {
+				VK_TemporalMotionRecordingPoison( &vk_temporal_motion_recording );
+				VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
+				activationPlanned = qfalse;
+			}
 			memcpy( dst, item->mvp, 64 );
 #if FEAT_SHADOW_MAPPING
 			memcpy( dst + 64, item->modelMatrix, 64 );
 #endif
 			firstInstance = slot;
+			vk.cmd->entMatLastUniformOffset = vk.cmd->uniform_read_offset;
 			vk.cmd->entMatSlot = slot + 1;
+			} else if ( temporalPrepared ) {
+				VK_TemporalMotionRecordingPoison( &vk_temporal_motion_recording );
+				VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
+			}
 		}
+	} else if ( temporalPrepared ) {
+		VK_TemporalMotionRecordingPoison( &vk_temporal_motion_recording );
 	}
 
-	// issue draw call(s)
-#ifdef USE_VBO
-	if ( tess.vboIndex )
-		VBO_RenderIBOItems( firstInstance );
-	else
-#endif
-	if ( indexed ) {
-		qvkCmdDrawIndexed( vk.cmd->command_buffer, vk.cmd->num_indexes, 1, 0, 0, firstInstance );
+	// Exact temporal draws are issued once inside a bounded three-attachment
+	// segment; PRESERVE and every fail-closed path remain in the ordinary pass.
+	if ( activationPlanned && activationPlan.beginExact3
+			&& exactResourcesReady ) {
+		if ( !vk_temporal_main_issue_exact_segment( &activationPlan,
+				&segmentResources, depth_range, indexed, firstInstance ) ) {
+			VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
+			vk_issue_geometry_draws( indexed, firstInstance );
+		} else if ( !VK_TemporalMainActivationCommitDraw(
+				&vk_temporal_main_activation, &activationPlan ) ) {
+			VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
+		}
 	} else {
-		qvkCmdDraw( vk.cmd->command_buffer, tess.numVertexes, 1, 0, firstInstance );
+		vk_issue_geometry_draws( indexed, firstInstance );
+		if ( activationPlanned && !VK_TemporalMainActivationCommitDraw(
+				&vk_temporal_main_activation, &activationPlan ) )
+			VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
 	}
-	// NOLINTNEXTLINE(readability-misleading-indentation) — Q3 split-else-if / preprocessor-conditional idiom; statement is at correct enclosing scope
-	vk_diag_drawcalls++;
 	if ( vk_diag_msdf_active )
 		vk_diag_msdf_draws++;
 }
@@ -25719,7 +29017,7 @@ void vk_draw_forwardplus( Vk_Depth_Range depth_range )
 
 void vk_begin_main_render_pass( void )
 {
-	ralRenderingInfo_t ri;
+	ralRenderingInfo_t renderingInfo;
 	ralViewport_t      vp;
 	ralRect_t          sc;
 
@@ -25745,41 +29043,34 @@ void vk_begin_main_render_pass( void )
 	// pass's swapchain bind), carrying 3D + 2D/HUD in the single pass. The end-of-
 	// pass barrier (vk_end_render_pass) then transitions it COLOR_ATTACHMENT →
 	// PRESENT_SRC instead of → SHADER_READ_ONLY, since nothing samples it after.
-	memset( &ri, 0, sizeof( ri ) );
-	if ( vk.fboActive ) {
-		ri.colorAttachments[0] = vk.ral_color_image;
-	} else {
-		ri.colorAttachments[0] = vk.cmd->swapchain_image;
+	if ( !VK_TemporalMainRenderingBuildInitial(
+			vk.fboActive ? vk.ral_color_image : vk.cmd->swapchain_image,
+			vk.ral_depth_image, (uint32_t)vk.renderWidth,
+			(uint32_t)vk.renderHeight,
+			glConfig.stencilBits > 0 ? qtrue : qfalse,
+			( r_bloom->integer || vk.sceneDepth.active
+				|| ( vk.fboActive
+					&& VK_TemporalMainActivationRequiresDepthStencilStore(
+						&vk_temporal_main_activation ) ) ) ? qtrue : qfalse,
+			&renderingInfo ) ) {
+		R_LOG( rch_ral, SEV_FATAL,
+			"temporal MAIN rendering recipe invalid\n" );
+		return;
 	}
-	ri.colorLoadOps[0]     = RAL_LOAD_OP_CLEAR;          // USE_BUFFER_CLEAR
-	ri.colorStoreOps[0]    = RAL_STORE_OP_STORE;
-	ri.colorClears[0].color[0] = 0.0f;
-	ri.colorClears[0].color[1] = 0.0f;
-	ri.colorClears[0].color[2] = 0.0f;
-	ri.colorClears[0].color[3] = 0.0f;
-	ri.numColorAttachments = 1;
-	ri.depthAttachment     = vk.ral_depth_image;
-	ri.depthLoadOp         = RAL_LOAD_OP_CLEAR;
+	renderingInfo.colorClears[0].color[0] = 0.0f;
+	renderingInfo.colorClears[0].color[1] = 0.0f;
+	renderingInfo.colorClears[0].color[2] = 0.0f;
+	renderingInfo.colorClears[0].color[3] = 0.0f;
 #ifdef USE_REVERSED_DEPTH
-	ri.depthClear          = 0.0f;
+	renderingInfo.depthClear          = 0.0f;
 #else
-	ri.depthClear          = 1.0f;
+	renderingInfo.depthClear          = 1.0f;
 #endif
-	ri.depthStoreOp        = ( r_bloom->integer || vk.sceneDepth.active ) ? RAL_STORE_OP_STORE : RAL_STORE_OP_DONT_CARE;
 	if ( glConfig.stencilBits ) {
-		ri.stencilLoadOp   = RAL_LOAD_OP_CLEAR;
-		ri.stencilStoreOp  = ( r_bloom->integer || vk.sceneDepth.active ) ? RAL_STORE_OP_STORE : RAL_STORE_OP_DONT_CARE;
-		ri.stencilClear    = 0;
-	} else {
-		ri.stencilLoadOp   = RAL_LOAD_OP_DONT_CARE;
-		ri.stencilStoreOp  = RAL_STORE_OP_DONT_CARE;
+		renderingInfo.stencilClear    = 0;
 	}
-	ri.renderArea.x        = 0;
-	ri.renderArea.y        = 0;
-	ri.renderArea.width    = vk.renderWidth;
-	ri.renderArea.height   = vk.renderHeight;
-	vk_profile_rendering_marker( &ri, "wired.main", VK_PM_MAIN );
-	Ral_BeginRendering( vk.cmd->ral_cmd, &ri );
+	vk_profile_rendering_marker( &renderingInfo, "wired.main", VK_PM_MAIN );
+	Ral_BeginRendering( vk.cmd->ral_cmd, &renderingInfo );
 
 	vp.x = 0.0f; vp.y = 0.0f;
 	vp.width  = (float)vk.renderWidth;
@@ -25810,6 +29101,7 @@ void vk_begin_main_render_pass( void )
 
 void vk_begin_post_bloom_render_pass( void )
 {
+	const vkHdrPostprocessSource_t *postRoute = vk_temporal_postprocess_route();
 	ralRenderingInfo_t ri;
 	ralViewport_t      vp;
 	ralRect_t          sc;
@@ -25823,8 +29115,9 @@ void vk_begin_post_bloom_render_pass( void )
 	//vk.renderScaleY = (float)vk.renderHeight / (float)glConfig.vidHeight;
 	vk.renderScaleX = vk.renderScaleY = 1.0f;
 
-	// Dynamic-rendering post_bloom (bloom-blend) pass — writes into the SAME
-	// vk.color_image / vk.depth_image as the main pass (vk.framebuffers.main).
+	// Dynamic-rendering post_bloom (bloom-blend) pass writes into the same
+	// source cohort bloom extract, histogram and tonemap consume. Legacy frames
+	// keep vk.color_image; an exact H2b copy receipt selects resolved HDR.
 	// Mirrors render_pass.post_bloom's baked ops: color LOAD/STORE (additively
 	// blend bloom onto the scene), depth LOAD / DONT_CARE-store + stencil LOAD.
 	// open_dynamic_pass = VK_DYN_PASS_MAIN: the target image is color_image, so the
@@ -25832,7 +29125,7 @@ void vk_begin_post_bloom_render_pass( void )
 	// tonemap, depth → DEPTH_STENCIL_ATTACHMENT) is exactly the right hand-off —
 	// vk_tonemap() closes this pass via that same path.
 	memset( &ri, 0, sizeof( ri ) );
-	ri.colorAttachments[0] = vk.ral_color_image;
+	ri.colorAttachments[0] = postRoute ? postRoute->attachment : vk.ral_color_image;
 	ri.colorLoadOps[0]     = RAL_LOAD_OP_LOAD;
 	ri.colorStoreOps[0]    = RAL_STORE_OP_STORE;
 	ri.numColorAttachments = 1;
@@ -25859,7 +29152,8 @@ void vk_begin_post_bloom_render_pass( void )
 	vk.cmd->last_pipeline = VK_NULL_HANDLE;
 	vk.cmd->last_ral_pipeline = NULL;
 	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
-	vk.cmd->open_dynamic_pass = VK_DYN_PASS_MAIN;
+	vk.cmd->open_dynamic_pass = postRoute
+		? VK_DYN_PASS_TEMPORAL_POST_BLOOM : VK_DYN_PASS_MAIN;
 }
 
 
@@ -25887,6 +29181,7 @@ when !fboActive.
 */
 void vk_tonemap( void )
 {
+	const vkHdrPostprocessSource_t *postRoute = vk_temporal_postprocess_route();
 	int varIdx = 0;
 #if FEAT_SSAO
 	static qboolean s_showAoRouteLogged = qfalse;
@@ -26163,14 +29458,17 @@ void vk_tonemap( void )
 		// Make the scene's colour writes available to the compute sampler read.
 		// No layout change (already SHADER_READ_ONLY) — this is the atomic
 		// barrier-plus-tracker-update GAP-A path.
-		Ral_CmdTransitionTexture( vk.cmd->ral_cmd, vk.ral_color_image,
-			RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+		if ( !postRoute )
+			Ral_CmdTransitionTexture( vk.cmd->ral_cmd, vk.ral_color_image,
+				RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+				RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 
 		dims[0] = (uint32_t)glConfig.vidWidth;
 		dims[1] = (uint32_t)glConfig.vidHeight;
 		Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.ral_histogram_pipeline );
-		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0, vk.ral_histogram_descriptor );
+		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0,
+			postRoute ? postRoute->histogramGroup : vk.ral_histogram_descriptor );
 		Ral_CmdPushConstants( vk.cmd->ral_cmd, RAL_STAGE_COMPUTE, 0, sizeof( dims ), dims );
 		Ral_CmdDispatch( vk.cmd->ral_cmd, groupsX, groupsY, 1 );
 
@@ -26340,7 +29638,8 @@ void vk_tonemap( void )
 		// Bind the post-process descriptors through RAL: the bound RAL pipeline
 		// supplies the layout (cb->currentLayout). Set 0 = scene sampler, set 2
 		// = the per-frame exposure UBO (both adopted bind-groups).
-		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0, vk.ral_color_descriptor );
+		Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0,
+			postRoute ? postRoute->postprocessGroup : vk.ral_color_descriptor );
 		// Set 1 = the depth sampler, declared only by the sunrays variant layout
 		// (ral_pipeline_layout_sunrays). The default post-process layout has no set
 		// 1, so bind it ONLY for the sunrays variant — binding a set the bound
@@ -27370,6 +30669,25 @@ void vk_end_render_pass( void )
 		vk.cmd->open_dynamic_pass = VK_DYN_PASS_NONE;
 		return;
 	}
+	if ( vk.cmd->open_dynamic_pass == VK_DYN_PASS_TEMPORAL_POST_BLOOM ) {
+		const vkHdrPostprocessSource_t *postRoute =
+			vk_temporal_postprocess_route();
+		Ral_EndRendering( vk.cmd->ral_cmd );
+		if ( !postRoute || !postRoute->attachment ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"vk_end_render_pass: temporal post-bloom route disappeared" );
+		}
+		Ral_CmdTransitionTexture( vk.cmd->ral_cmd, postRoute->attachment,
+			RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+				| RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+		vk.cmd->last_pipeline = VK_NULL_HANDLE;
+		vk.cmd->last_ral_pipeline = NULL;
+		vk.cmd->depth_range = DEPTH_RANGE_COUNT;
+		vk.cmd->open_dynamic_pass = VK_DYN_PASS_NONE;
+		return;
+	}
 	if ( vk.cmd->open_dynamic_pass == VK_DYN_PASS_UI ) {
 		// End the dynamic UI pass; land tonemapped_image in SHADER_READ_ONLY for
 		// the gamma/capture passes (mirrors render_pass.ui's finalLayout).
@@ -27568,6 +30886,8 @@ static pthread_cond_t    vk_ft_cwork  = PTHREAD_COND_INITIALIZER;  // main -> th
 static pthread_cond_t    vk_ft_cready = PTHREAD_COND_INITIALIZER;  // thread -> main: slot free
 static qboolean          vk_ft_running;
 static qboolean          vk_slot_ready[ NUM_COMMAND_BUFFERS ];
+static VkResult          vk_slot_wait_result[ NUM_COMMAND_BUFFERS ];
+static VkResult          vk_slot_reset_result[ NUM_COMMAND_BUFFERS ];
 static vk_fence_work_t   vk_ft_queue[ NUM_COMMAND_BUFFERS * 2 ];
 static int               vk_ft_head;
 static int               vk_ft_tail;
@@ -27594,6 +30914,8 @@ static void *vk_fence_worker( void *arg )
 		int64_t wait_end_us;
 		int64_t reset_end_us;
 		uint64_t work_diag_epoch;
+		VkResult wait_result;
+		VkResult reset_result;
 
 		while ( vk_ft_head == vk_ft_tail && vk_ft_running )
 			pthread_cond_wait( &vk_ft_cwork, &vk_ft_mutex );
@@ -27610,9 +30932,10 @@ static void *vk_fence_worker( void *arg )
 		pthread_mutex_unlock( &vk_ft_mutex );
 
 		wait_start_us = ri.Microseconds();
-		qvkWaitForFences( vk.device, 1, &fen, VK_FALSE, (uint64_t)10000000000ULL );
+		wait_result = qvkWaitForFences( vk.device, 1, &fen, VK_FALSE,
+			(uint64_t)10000000000ULL );
 		wait_end_us = ri.Microseconds();
-		qvkResetFences( vk.device, 1, &fen );
+		reset_result = qvkResetFences( vk.device, 1, &fen );
 		reset_end_us = ri.Microseconds();
 		pthread_mutex_lock( &vk_ft_mutex );
 		if ( work_diag_epoch == vk_ft_diag_epoch ) {
@@ -27621,6 +30944,8 @@ static void *vk_fence_worker( void *arg )
 			vk_ft_diag_reset_us += (uint64_t)( reset_end_us - wait_end_us );
 			vk_ft_diag_work_count++;
 		}
+		vk_slot_wait_result[ slot ] = wait_result;
+		vk_slot_reset_result[ slot ] = reset_result;
 		vk_slot_ready[ slot ] = qtrue;
 		pthread_cond_broadcast( &vk_ft_cready );
 	}
@@ -27636,8 +30961,11 @@ static void vk_fence_thread_start( void )
 	vk_ft_diag_work_count = vk_ft_diag_max_queue = 0;
 	vk_ft_diag_epoch = 1;
 	vk_ft_running = qtrue;
-	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ )
+	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		vk_slot_ready[ i ] = qfalse; // set to qtrue by fence thread after each vkResetFences
+		vk_slot_wait_result[ i ] = VK_NOT_READY;
+		vk_slot_reset_result[ i ] = VK_NOT_READY;
+	}
 	pthread_attr_init( &attr );
 #ifdef __APPLE__
 	// Boost to user-interactive QoS so macOS schedules this thread on a performance
@@ -27706,13 +31034,24 @@ static void vk_fence_diag_new_epoch( void )
 }
 
 // Called at start of vk_begin_frame: wait (usually instant) for slot to be free.
-static void vk_slot_wait( int slot )
+static qboolean vk_slot_wait( int slot,
+		VkResult *waitResult, VkResult *resetResult )
 {
+	VkResult wait_result;
+	VkResult reset_result;
 	pthread_mutex_lock( &vk_ft_mutex );
 	while ( !vk_slot_ready[ slot ] )
 		pthread_cond_wait( &vk_ft_cready, &vk_ft_mutex );
+	wait_result = vk_slot_wait_result[ slot ];
+	reset_result = vk_slot_reset_result[ slot ];
 	vk_slot_ready[ slot ] = qfalse;
+	vk_slot_wait_result[ slot ] = VK_NOT_READY;
+	vk_slot_reset_result[ slot ] = VK_NOT_READY;
 	pthread_mutex_unlock( &vk_ft_mutex );
+	if ( waitResult ) *waitResult = wait_result;
+	if ( resetResult ) *resetResult = reset_result;
+	return wait_result == VK_SUCCESS && reset_result == VK_SUCCESS
+		? qtrue : qfalse;
 }
 
 #else
@@ -27721,7 +31060,13 @@ static void vk_slot_wait( int slot )
 static void vk_fence_thread_start( void ) {}
 static void vk_fence_thread_stop( void )  {}
 static void vk_fence_submit( int slot, VkFence fence ) { (void)slot; (void)fence; }
-static void vk_slot_wait( int slot ) { (void)slot; }
+static qboolean vk_slot_wait( int slot,
+		VkResult *waitResult, VkResult *resetResult ) {
+	(void)slot;
+	if ( waitResult ) *waitResult = VK_SUCCESS;
+	if ( resetResult ) *resetResult = VK_SUCCESS;
+	return qtrue;
+}
 static void vk_fence_diag_snapshot( uint64_t *queue_us, uint64_t *wait_us,
 	uint64_t *reset_us, uint32_t *work_count, uint32_t *max_queue )
 {
@@ -28245,11 +31590,18 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 {
 	VkCommandBufferBeginInfo begin_info;
 	VkResult res;
+	uint32_t temporalRequiredSlots = 0;
+	qboolean temporalCapacityExact = qfalse;
+	qboolean temporalCapacityRequested = qfalse;
+	qboolean slotFenceCompleted = qfalse;
 
 	if ( vk_temporal_generic_recipe_table.armed )
 		VK_TemporalGenericRecipeTableDisarm( &vk_temporal_generic_recipe_table );
 	if ( vk.frame_count++ ) // might happen during stereo rendering
 		return;
+#if FEAT_IQM
+	vk_temporal_iqm_geometry_frame_ready = qfalse;
+#endif
 
 	vk_frame_t_start = ri.Microseconds();
 	vk_frame_present_done = qfalse;
@@ -28260,6 +31612,10 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 #endif
 
 	vk.cmd = &vk.tess[ vk.cmd_index ];
+	vk_temporal_motion_seal_attempted = qfalse;
+	if ( vk_temporal_resolved_hdr_frame.prepared
+			|| vk_temporal_resolved_hdr_frame.copied )
+		vk_temporal_resolved_hdr_reset_frame();
 
 	{
 		int t_diag = ri.Milliseconds();
@@ -28277,11 +31633,21 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 				}
 			}
 			VK_CHECK( qvkResetFences( vk.device, 1, &vk.cmd->rendering_finished_fence ) );
+			if ( res == VK_SUCCESS ) slotFenceCompleted = qtrue;
 #else
 			// Background fence thread already waited + reset the fence.
 			// This call is normally short because the worker started waiting as
 			// soon as the prior submit handed off this slot's fence.
-			vk_slot_wait( vk.cmd_index );
+			{
+				VkResult wait_result, reset_result;
+				if ( !vk_slot_wait( vk.cmd_index, &wait_result, &reset_result ) ) {
+					ri.Terminate( TERM_UNRECOVERABLE,
+						"Vulkan fence worker wait/reset failed: wait=%s reset=%s",
+						vk_result_string( wait_result ),
+						vk_result_string( reset_result ) );
+				}
+			}
+			slotFenceCompleted = qtrue;
 #endif
 		}
 		{
@@ -28297,6 +31663,15 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 		}
 		vk_frame_t_after_fence = ri.Microseconds();
 	}
+	if ( vk_temporal_motion_readback.initialized && slotFenceCompleted )
+		vk_temporal_motion_readback_collect_slot(
+			(uint32_t)vk.cmd_index, slotFenceCompleted );
+	if ( vk_temporal_resolve_readback.initialized && slotFenceCompleted )
+		vk_temporal_resolve_readback_collect_slot(
+			(uint32_t)vk.cmd_index, slotFenceCompleted );
+	if ( vk_temporal_history_consume.initialized && slotFenceCompleted )
+		vk_temporal_history_consume_collect_slot(
+			(uint32_t)vk.cmd_index, slotFenceCompleted );
 
 	// GPU timestamp readback: fence above guarantees this slot's GPU work is done.
 	vk_gpu_ts_frame_begin();
@@ -28358,11 +31733,10 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 		vk.dlightShadow.pendingRebuild = qfalse;
 #endif
 		vk_wait_idle();
-		// The attachment generation is about to be replaced.  Tear down every
-		// RAL object that owns a view or wrapper over those native images before
-		// destroying them; temporal's current-color/current-depth views are not
-		// part of the older static-adoption sweep, so close that dependent first.
-		vk_temporal_history_store_shutdown();
+		vk_temporal_resolved_hdr_release_after_idle(
+			"scene-depth-attachment-rebuild" );
+		// The attachment generation is about to be replaced. The resolved-HDR
+		// release above already closed and drained every temporal child.
 		vk_ral_destroy_adopted_internal_textures();
 		// RAL destroy calls above enqueue native image views/descriptors.  A GPU
 		// idle wait alone does not reclaim them; drain the complete deferred
@@ -28403,16 +31777,31 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 	// once at an idle boundary. Materialization remains draw/bind inert.
 	if ( R_TemporalBatchRequestValidateExact( temporalRequest )
 			&& !temporalRequest->enabled ) {
+		if ( vk_temporal_motion_has_live() ) {
+			vk_wait_idle();
+			vk_temporal_iqm_resources_release_after_idle(
+				"disabled-exact-request" );
+			vk_temporal_resolved_hdr_release_after_idle(
+				"disabled-exact-request" );
+			vk_temporal_entmat_release_after_idle( "disabled-exact-request" );
+		}
 		if ( vk_temporal_generic_recipe_table.records ) {
 			vkTemporalRecipeTableOps_t recipeOps = vk_temporal_recipe_ops();
 			(void)VK_TemporalGenericRecipeTableRelease(
 				&vk_temporal_generic_recipe_table, &recipeOps );
 		}
-		if ( vk_temporal_motion_has_live() ) {
-			vk_wait_idle();
-			vk_temporal_entmat_release_after_idle( "disabled-exact-request" );
-		}
 	}
+#if FEAT_IQM
+	if ( R_TemporalBatchRequestValidateExact( temporalRequest )
+			&& temporalRequest->enabled ) {
+		vk_temporal_iqm_geometry_frame_ready =
+			vk_temporal_iqm_geometry_prepare_loaded_after_fence();
+		if ( vk_temporal_iqm_geometry_frame_ready )
+			vk_temporal_iqm_geometry_frame_ready =
+				vk_temporal_iqm_resources_prepare_after_fence(
+					temporalRequest, slotFenceCompleted );
+	}
+#endif
 
 	// The ordinary set-3 buffer is still unconditional. It now exists before
 	// acquire and command-buffer begin, so a growth/idle path cannot occur while
@@ -28423,9 +31812,83 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 		VK_TemporalMotionMaterializationInvalidateReceipt(
 			&vk_temporal_motion_materialization );
 	}
-	vk_entmat_ensure_buffer();
+	if ( vk.uniform_item_size != 0 ) {
+		const uint64_t required64 = (uint64_t)vk.geometry_buffer_size
+			/ (uint64_t)vk.uniform_item_size;
+		if ( required64 > 0
+				&& required64 <= TEMPORAL_MOTION_PAYLOAD_MAX_SLOTS ) {
+			temporalRequiredSlots = (uint32_t)required64;
+			temporalCapacityExact = qtrue;
+		}
+	}
+	temporalCapacityRequested =
+		R_TemporalBatchRequestValidateExact( temporalRequest )
+		&& temporalRequest->enabled && vk_entmat_active()
+		&& temporalCapacityExact ? qtrue : qfalse;
+	if ( temporalCapacityRequested )
+		vk_entmat_ensure_temporal_ring( temporalRequiredSlots );
+	// H1 explicit-arm only. Materialize the exact previous-history sampler and
+	// this command slot's witness after the completed-fence/rebuild boundary and
+	// before acquire/BeginCB. Active-but-unarmed and default OFF do no work here.
+	if ( VK_TemporalHistoryConsumeIsArmed( &vk_temporal_history_consume )
+			&& R_TemporalBatchRequestValidateExact( temporalRequest )
+			&& temporalRequest->enabled ) {
+		const ralTemporalFramePlan_t *historyPlan = NULL;
+		temporalHistoryResources_t *history = NULL;
+		temporalHistoryCommittedReceipt_t committed;
+		temporalHistoryFrameView_t frameView;
+		if ( R_TemporalBackendGetPending( temporalRequest->worldIndex,
+				temporalRequest->frameId, &historyPlan, &history )
+				&& historyPlan && historyPlan->historyValid && history && history->ready
+				&& R_TemporalBackendGetCommittedHistory(
+					temporalRequest->worldIndex, historyPlan->historyReadIndex, &committed )
+				&& R_TemporalHistoryBuildFrameView( history, historyPlan, &committed,
+					temporalRequest->worldIndex, &frameView ) ) {
+			vkTemporalHistoryConsumeKey_t key;
+			memset( &key, 0, sizeof( key ) );
+			key.backend = vk_ral_get_backend();
+			key.worldIndex = temporalRequest->worldIndex;
+			key.width = history->width; key.height = history->height;
+			key.topologyEpoch = history->topologyEpoch;
+			key.historyAllocationGeneration = history->allocationGeneration;
+			key.currentColor = vk.ral_color_image;
+			key.currentDepth = vk.sceneDepth.ral_image;
+			for ( uint32_t i = 0; i < 2; ++i ) {
+				key.historyColor[i] = history->color[i];
+				key.historyColorView[i] = history->colorView[i];
+				key.historyDepth[i] = history->depth[i];
+				key.historyDepthView[i] = history->depthView[i];
+			}
+			(void)VK_TemporalHistoryConsumeEnsureAfterFence(
+				&vk_temporal_history_consume, &key, NUM_COMMAND_BUFFERS,
+				(uint32_t)vk.cmd_index,
+				(const uint32_t *)temporal_history_consume_comp_spv,
+				sizeof( temporal_history_consume_comp_spv ) );
+		}
+	}
+	if ( !temporalCapacityRequested )
+		vk_entmat_ensure_buffer( 1024u );
+	else if ( !vk_temporal_entmat_ring_ready_exact( temporalRequiredSlots ) )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"temporal entMat ring lost exactness before materialization" );
+	// The scalar cursor belongs to the completed-fence/pre-command-buffer seam.
+	// Reset it before payload Begin so both owners publish the same absolute-slot
+	// epoch; the old post-render-pass reset is intentionally removed below.
+	vk_entmat_begin_frame();
+	vk_temporal_bound_pipeline_slot = UINT32_MAX;
+	if ( vk_temporal_main_activation.active ) {
+		VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
+		(void)VK_TemporalMainActivationFinish(
+			&vk_temporal_main_activation, NULL );
+	}
+	if ( vk_temporal_main_activation.submissionPending )
+		(void)VK_TemporalMainActivationResolveSubmit(
+			&vk_temporal_main_activation, qfalse );
+	if ( VK_TemporalMotionRecordingIsActive( &vk_temporal_motion_recording ) )
+		VK_TemporalMotionRecordingFinish( &vk_temporal_motion_recording );
 	if ( R_TemporalBatchRequestValidateExact( temporalRequest )
-			&& temporalRequest->enabled && vk_entmat_active()
+			&& temporalRequest->enabled && temporalCapacityRequested
+			&& vk_entmat_active()
 			&& vk.cmd->entMatBuf != VK_NULL_HANDLE
 			&& vk.cmd->entMatAllocationGeneration
 			&& vk.cmd->entMatAllocationGeneration != UINT32_MAX ) {
@@ -28441,7 +31904,7 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 				&vk_temporal_entmat_runtime, vk_ral_get_backend(),
 				NUM_COMMAND_BUFFERS, (uint32_t)vk.cmd_index,
 				(void *)vk.cmd->entMatBuf, (size_t)vk.cmd->entMatSize,
-				vk.cmd->entMatAllocationGeneration, (uint32_t)capacity64 )
+				vk.cmd->entMatAllocationGeneration, temporalRequiredSlots )
 					&& temporalRequest->width == (uint32_t)vk.renderWidth
 					&& temporalRequest->height == (uint32_t)vk.renderHeight ) {
 				vkTemporalMotionMaterializationInput_t input;
@@ -28471,6 +31934,14 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 				if ( VK_TemporalMotionMaterializationNeedsIdle(
 						&vk_temporal_motion_materialization, &input ) ) {
 					vk_wait_idle();
+					vk_temporal_resolve_release_after_idle(
+						"A2b-resource-replacement" );
+					vk_temporal_pipeline_table_release_after_idle(
+						"A2b-resource-replacement" );
+					if ( Ral_WaitIdleAndDrainDeferred(
+							vk_ral_get_backend() ) != ralSuccess )
+						ri.Terminate( TERM_UNRECOVERABLE,
+							"temporal A2b child drain failed before parent replacement" );
 					idleProven = qtrue;
 				}
 				if ( VK_TemporalMotionMaterializationEnsureAfterFence(
@@ -28480,6 +31951,70 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 					if ( VK_TemporalMotionMaterializationGetReceipt(
 							&vk_temporal_motion_materialization,
 							&materializationReceipt ) ) {
+						// H2a target materialization + H2b command-local handoff
+						// preparation. The target remains unreachable until the later
+						// closed-scope full-extent copy publishes an exact route.
+						if ( vk.color_format == VK_FORMAT_R16G16B16A16_SFLOAT
+								&& vk_scene_color_attachment_generation
+								&& vk.ral_color_image && vk.ral_color_descriptor
+								&& vk.ral_bgl_sampler && vk.ral_histogram_bgl
+								&& vk.ral_histogram_buffer
+								&& vk.ral_histogram_descriptor ) {
+							vkTemporalResolvedHdrInput_t resolvedInput;
+							qboolean resolvedIdle = qfalse;
+							memset( &resolvedInput, 0, sizeof( resolvedInput ) );
+							resolvedInput.backend = vk_ral_get_backend();
+							resolvedInput.currentSceneColor = vk.ral_color_image;
+							resolvedInput.currentPostprocessGroup =
+								vk.ral_color_descriptor;
+							resolvedInput.currentHistogramGroup =
+								vk.ral_histogram_descriptor;
+							resolvedInput.postprocessLayout = vk.ral_bgl_sampler;
+							resolvedInput.histogramLayout = vk.ral_histogram_bgl;
+							resolvedInput.histogramBuffer = vk.ral_histogram_buffer;
+							resolvedInput.worldIndex = temporalRequest->worldIndex;
+							resolvedInput.width = temporalRequest->width;
+							resolvedInput.height = temporalRequest->height;
+							resolvedInput.topologyEpoch = temporalRequest->topologyEpoch;
+							resolvedInput.planGeneration = temporalRequest->planGeneration;
+							resolvedInput.sceneColorAttachmentGeneration =
+								vk_scene_color_attachment_generation;
+							resolvedInput.sceneFormat = RAL_FORMAT_R16G16B16A16_SFLOAT;
+							resolvedInput.filter = vk.blitFilter == GL_LINEAR
+								? RAL_FILTER_LINEAR : RAL_FILTER_NEAREST;
+							if ( !vk_temporal_resolved_hdr.initialized )
+								VK_TemporalResolvedHdrInit( &vk_temporal_resolved_hdr );
+							if ( VK_TemporalResolvedHdrNeedsIdle(
+									&vk_temporal_resolved_hdr, &resolvedInput ) ) {
+								vk_wait_idle();
+								vk_temporal_resolved_hdr_release_after_idle(
+									"H2-resource-replacement" );
+								resolvedIdle = qtrue;
+							}
+							if ( VK_TemporalResolvedHdrEnsureAfterFence(
+									&vk_temporal_resolved_hdr, &resolvedInput,
+									resolvedIdle ) ) {
+								vkTemporalResolvedHdrReceipt_t targetReceipt;
+								if ( VK_TemporalResolvedHdrGetReceipt(
+										&vk_temporal_resolved_hdr, &targetReceipt ) ) {
+									const ralTemporalFramePlan_t *storePlan = NULL;
+									temporalHistoryResources_t *storeHistory = NULL;
+									if ( R_TemporalBackendGetPending(
+											temporalRequest->worldIndex,
+											temporalRequest->frameId,
+											&storePlan, &storeHistory )
+											&& storePlan && storeHistory
+											&& vk_temporal_history_store_materialize_after_fence(
+												storeHistory, temporalRequest->worldIndex,
+												&targetReceipt ) ) {
+										(void)vk_temporal_resolve_ensure_after_fence(
+											temporalRequest, &targetReceipt );
+										(void)vk_temporal_resolved_hdr_prepare_frame(
+											temporalRequest, &targetReceipt );
+									}
+								}
+							}
+						}
 						vkTemporalRecipeBatchAuthority_t authority;
 						vkTemporalRecipeTableOps_t recipeOps = vk_temporal_recipe_ops();
 						authority.token = temporalRequest->token;
@@ -28487,9 +32022,79 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 						authority.planGeneration = temporalRequest->planGeneration;
 						authority.materializationGeneration =
 							materializationReceipt.allocationGeneration;
-						(void)VK_TemporalGenericRecipeTablePrepare(
-							&vk_temporal_generic_recipe_table, MAX_VK_PIPELINES,
-							&authority, &recipeOps );
+						if ( VK_TemporalGenericRecipeTablePrepare(
+								&vk_temporal_generic_recipe_table, MAX_VK_PIPELINES,
+								&authority, &recipeOps ) ) {
+							vkTemporalGenericPipelineTableMemoryOps_t memoryOps =
+								vk_temporal_pipeline_table_memory_ops();
+							if ( VK_TemporalGenericPipelineTablePrepare(
+									&vk_temporal_generic_pipeline_table,
+									MAX_VK_PIPELINES,
+									&vk_temporal_motion_materialization.pipelineLayout,
+									&memoryOps ) ) {
+								vk_temporal_reconcile_generic_main_pipelines(
+									materializationReceipt.topologyEpoch );
+								{
+									vkTemporalEntMatRuntimeFrameReceipt_t payloadReceipt;
+									vkTemporalMotionRecordingAuthority_t recordAuthority;
+									memset( &recordAuthority, 0, sizeof( recordAuthority ) );
+									if ( VK_TemporalEntMatRuntimePeekFrameReceipt(
+											&vk_temporal_entmat_runtime,
+											(uint32_t)vk.cmd_index, &payloadReceipt ) ) {
+										recordAuthority.token = temporalRequest->token;
+										recordAuthority.frameId = temporalRequest->frameId;
+										recordAuthority.worldIndex = temporalRequest->worldIndex;
+										recordAuthority.width = temporalRequest->width;
+										recordAuthority.height = temporalRequest->height;
+										recordAuthority.topologyEpoch = temporalRequest->topologyEpoch;
+										recordAuthority.planGeneration = temporalRequest->planGeneration;
+										recordAuthority.geometryBufferSize =
+											(uint64_t)vk.geometry_buffer_size;
+										recordAuthority.uniformItemSize = vk.uniform_item_size;
+										recordAuthority.requiredCapacity = temporalRequiredSlots;
+										recordAuthority.rawEntMatCapacity = (uint32_t)capacity64;
+										recordAuthority.rawEntMatAllocationGeneration =
+											vk.cmd->entMatAllocationGeneration;
+										recordAuthority.payloadAllocationGeneration =
+											payloadReceipt.payloadAllocationGeneration;
+										recordAuthority.payloadLayoutGeneration =
+											payloadReceipt.payloadLayoutGeneration;
+										recordAuthority.targetAllocationGeneration =
+											materializationReceipt.targetAllocationGeneration;
+										recordAuthority.pipelineLayoutAllocationGeneration =
+											materializationReceipt.pipelineLayoutAllocationGeneration;
+										recordAuthority.materializationGeneration =
+											materializationReceipt.allocationGeneration;
+										recordAuthority.pipelineTableGeneration =
+											vk_temporal_generic_pipeline_table.allocationGeneration;
+										recordAuthority.frameIndex = (uint32_t)vk.cmd_index;
+									if ( vk_temporal_entmat_ring_ready_exact(
+											temporalRequiredSlots )
+										&& VK_TemporalMotionRecordingBegin(
+											&vk_temporal_motion_recording,
+											&vk_temporal_entmat_runtime, &recordAuthority,
+											&materializationReceipt,
+											&vk_temporal_generic_pipeline_table )
+												&& vk.fboActive ) {
+										if ( VK_TemporalMainActivationBegin(
+											&vk_temporal_main_activation,
+											&recordAuthority )
+												&& VK_TemporalMotionReadbackIsArmed(
+													&vk_temporal_motion_readback )
+												&& !VK_TemporalMotionReadbackPrepareAfterFence(
+												&vk_temporal_motion_readback,
+												vk_ral_get_backend(), NUM_COMMAND_BUFFERS,
+												(uint32_t)vk.cmd_index,
+												recordAuthority.width, recordAuthority.height ) )
+											R_LOG( rch_ral, SEV_WARN,
+												"temporal-motion-readback diagnostic=prepare-rejected frame=%llu slot=%u\n",
+												(unsigned long long)recordAuthority.frameId,
+												(unsigned)vk.cmd_index );
+										}
+									}
+								}
+							}
+						}
 					}
 				}
 			}
@@ -29003,7 +32608,7 @@ _retry:
 	}
 
 	// dynamic vertex buffer layout
-	vk.cmd->uniform_read_offset = 0;
+	vk.cmd->uniform_read_offset = ~0U;
 	vk.cmd->vertex_buffer_offset = 0;
 	vk.msdf.offset[ vk.cmd_index ] = 0; // reset the MSDF per-draw UBO ring cursor
 	vk.effectsUbo.offset[ vk.cmd_index ] = 0; // reset the shared effects per-draw UBO ring cursor
@@ -29041,12 +32646,6 @@ _retry:
 		}
 	}
 
-	// r_entitySSBO path: (re)size this slot's per-entity matrix storage buffer,
-	// reset its per-frame slot cursor, and publish its descriptor into the
-	// freshly-zeroed set-3 fold slot. No-op (leaves set 3 NULL) on the OFF path,
-	// where the post-memset above already cleared current[WIRED_ENTITY_MAT_SET].
-	vk_entmat_begin_frame();
-
 	memset( &vk.cmd->scissor_rect, 0, sizeof( vk.cmd->scissor_rect ) );
 
 	// other stats
@@ -29077,6 +32676,78 @@ static void vk_resize_geometry_buffer( void )
 }
 
 
+qboolean vk_temporal_motion_seal_primary( void )
+{
+	vkTemporalMotionRecordingReceipt_t recordingReceipt;
+	qboolean recordingReady = qfalse;
+
+	if ( vk_temporal_motion_seal_attempted )
+		return vk_temporal_main_activation.submissionPending ? qtrue : qfalse;
+	vk_temporal_motion_seal_attempted = qtrue;
+	if ( VK_TemporalMotionRecordingIsActive( &vk_temporal_motion_recording ) ) {
+		if ( vk.geometry_buffer_size_new )
+			VK_TemporalMotionRecordingPoison( &vk_temporal_motion_recording );
+		VK_TemporalMotionRecordingFinish( &vk_temporal_motion_recording );
+		recordingReady = VK_TemporalMotionRecordingGetReceipt(
+			&vk_temporal_motion_recording, &recordingReceipt );
+		if ( VK_TemporalMotionReadbackIsArmed(
+				&vk_temporal_motion_readback ) && !recordingReady ) {
+			R_LOG( rch_ral, SEV_INFO,
+				"temporal-motion-debug schema=1 phase=recording-refused poisoned=%d primary=%u prepared=%u appended=%u preserved=%u invalidated=%u deferred=%u rejected=%u\n",
+				vk_temporal_motion_recording.poisoned ? 1 : 0,
+				vk_temporal_motion_recording.primaryCommandCount,
+				vk_temporal_motion_recording.prepared,
+				vk_temporal_motion_recording.appended,
+				vk_temporal_motion_recording.preserved,
+				vk_temporal_motion_recording.invalidated,
+				vk_temporal_motion_recording.deferred,
+				vk_temporal_motion_recording.rejected );
+		}
+		if ( vk_temporal_main_activation.active ) {
+			if ( !recordingReady )
+				VK_TemporalMainActivationPoison(
+					&vk_temporal_main_activation );
+#if FEAT_IQM
+			if ( vk_temporal_iqm_primary.bound ) {
+				vkTemporalIqmExact3FactoryReceipt_t factory;
+				qboolean factoryReady =
+					VK_TemporalIqmExact3FactoryGetReceipt(
+						&vk_temporal_iqm_exact3_factory, &factory );
+				if ( !factoryReady )
+					VK_TemporalMainActivationPoison(
+						&vk_temporal_main_activation );
+				(void)VK_TemporalMainActivationFinishIqm(
+					&vk_temporal_main_activation,
+					recordingReady ? &recordingReceipt : NULL,
+					&vk_temporal_iqm_primary.sequence,
+					&vk_temporal_iqm_payload,
+					factoryReady ? &factory : NULL );
+			} else
+#endif
+			{
+				(void)VK_TemporalMainActivationFinish(
+					&vk_temporal_main_activation,
+					recordingReady ? &recordingReceipt : NULL );
+			}
+		}
+	} else {
+		if ( vk_temporal_main_activation.active ) {
+			VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
+			(void)VK_TemporalMainActivationFinish(
+				&vk_temporal_main_activation, NULL );
+		}
+		if ( VK_TemporalMotionReadbackIsArmed(
+				&vk_temporal_motion_readback ) )
+			R_LOG( rch_ral, SEV_INFO,
+				"temporal-motion-debug schema=1 phase=recording-inactive\n" );
+	}
+#if FEAT_IQM
+	vk_temporal_iqm_primary_clear();
+#endif
+	vk_frame_t_rec_end = ri.Microseconds();
+	return vk_temporal_main_activation.submissionPending ? qtrue : qfalse;
+}
+
 void vk_end_frame( void )
 {
 	// per-frame submit migrated to Ral_Submit.
@@ -29098,7 +32769,7 @@ void vk_end_frame( void )
 	vk.frame_count = 0;
 	if ( vk_temporal_generic_recipe_table.armed )
 		VK_TemporalGenericRecipeTableDisarm( &vk_temporal_generic_recipe_table );
-	vk_frame_t_rec_end = ri.Microseconds();
+	(void)vk_temporal_motion_seal_primary();
 
 	if ( vk.geometry_buffer_size_new )
 	{
@@ -29106,6 +32777,19 @@ void vk_end_frame( void )
 		// queued temporal plan must remain unreadable; otherwise the next frame
 		// can observe a history slot that was never written by the GPU.
 		R_TemporalCancelQueuedFrames();
+		if ( vk_temporal_main_activation.submissionPending )
+			(void)VK_TemporalMainActivationResolveSubmit(
+				&vk_temporal_main_activation, qfalse );
+		(void)VK_TemporalMotionReadbackResolveSubmit(
+			&vk_temporal_motion_readback, (uint32_t)vk.cmd_index,
+			qfalse, NULL, NULL );
+		(void)VK_TemporalHistoryConsumeResolveSubmit(
+			&vk_temporal_history_consume, (uint32_t)vk.cmd_index,
+			qfalse, NULL, NULL );
+		if ( vk_temporal_resolved_hdr_frame.prepared
+				|| vk_temporal_resolved_hdr_frame.copied )
+			(void)vk_temporal_resolved_hdr_resolve_submit(
+				qfalse, qfalse, NULL );
 		vk_resize_geometry_buffer();
 		// issue: one frame may be lost during video recording
 		// solution: re-record all commands again? (might be complicated though)
@@ -29133,7 +32817,7 @@ void vk_end_frame( void )
 		// composited frame — leave it for the pass-closing chain below.
 		if ( !backEnd.doneUIPass )
 		{
-			vk_temporal_history_store_record();
+			vk_temporal_recursive_record();
 			if ( r_bloom->integer && backEnd.doneSurfaces )
 				vk_bloom();
 			vk_tonemap(); // ends main/post_bloom + does tonemap + ends render_pass.tonemap → no pass open
@@ -29360,6 +33044,27 @@ void vk_end_frame( void )
 		vk_end_render_pass();
 	}
 
+	// Diagnostic A2c4c readback. Every rendering scope is closed here. Persist
+	// the authored activation candidate into the command-slot ticket, copy the
+	// bounded RG16F/R8 ROI, and restore both tracked target layouts before EndCB.
+	if ( VK_TemporalMotionReadbackIsArmed( &vk_temporal_motion_readback )
+			&& vk_temporal_entmat_ring_is_ready() ) {
+		vkTemporalMainActivationReceipt_t pendingActivation;
+		vkTemporalMotionMaterializationReceipt_t materializationReceipt;
+		vkTemporalMotionMaterializationProductView_t view;
+		if ( VK_TemporalMainActivationPeekPendingReceipt(
+				&vk_temporal_main_activation, &pendingActivation )
+				&& VK_TemporalMotionMaterializationGetReceipt(
+					&vk_temporal_motion_materialization, &materializationReceipt )
+				&& VK_TemporalMotionMaterializationGetProductView(
+					&vk_temporal_motion_materialization, &materializationReceipt,
+					vk.ral_color_image, vk.sceneDepth.ral_image, &view ) ) {
+			(void)VK_TemporalMotionReadbackRecord(
+				&vk_temporal_motion_readback, vk.cmd->ral_cmd,
+				(uint32_t)vk.cmd_index, &pendingActivation, &view );
+		}
+	}
+
 	vk_gpu_ts_write( "present_prep" ); // must be before EndCommandBuffer; render passes are all closed above
 	vk_gpu_ts_frame_end();
 
@@ -29469,9 +33174,95 @@ void vk_end_frame( void )
 	{
 		int t_submit = ri.Milliseconds();
 		ralResult_t submitResult;
+		temporalBackendSubmitAuthority_t backendAuthority;
+		temporalBackendSubmitQuery_t backendQuery;
+		temporalHistoryPendingWriteReceipt_t pendingWrite;
+		temporalHistoryCommittedReceipt_t committedWrite;
+		qboolean havePendingWrite, producerAccepted, activationApplied = qtrue;
+		qboolean backendApplied, historyCommitted = qfalse;
 		vk_frame_t_submit_start = ri.Microseconds();
+		memset( &backendAuthority, 0, sizeof( backendAuthority ) );
+		memset( &pendingWrite, 0, sizeof( pendingWrite ) );
+		memset( &committedWrite, 0, sizeof( committedWrite ) );
+		backendQuery = R_TemporalBackendQuerySubmitAuthority( &backendAuthority );
+		havePendingWrite = R_TemporalBackendGetPendingHistoryWrite( &pendingWrite );
+		if ( backendQuery == TEMPORAL_BACKEND_SUBMIT_INVALID
+				|| ( backendQuery == TEMPORAL_BACKEND_SUBMIT_NONE
+					&& ( havePendingWrite
+						|| vk_temporal_submit_has_command_local_residue(
+							(uint32_t)vk.cmd_index ) ) )
+				|| ( backendQuery == TEMPORAL_BACKEND_SUBMIT_EXACT
+					&& !backendAuthority.recorded
+					&& ( havePendingWrite
+						|| vk_temporal_submit_has_command_local_residue(
+							(uint32_t)vk.cmd_index ) ) ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal submit authority invalid before graphics submit" );
 		submitResult = Ral_Submit( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS, &ralSubmit );
-		R_TemporalBackendSubmitted( submitResult == ralSuccess );
+		producerAccepted = submitResult == ralSuccess && havePendingWrite
+			? vk_temporal_history_prevalidate_submit( &pendingWrite ) : qtrue;
+		if ( backendQuery == TEMPORAL_BACKEND_SUBMIT_EXACT
+				&& submitResult == ralSuccess && !havePendingWrite
+				&& vk_temporal_resolved_hdr_frame.copied
+				&& !vk_temporal_resolve_frame.recordedCommands
+				&& VK_TemporalResolvedHdrResolveContentSubmit(
+					&vk_temporal_resolved_hdr_frame.recorded, qtrue,
+					&vk_temporal_resolved_hdr_frame.prevalidated ) )
+			vk_temporal_resolved_hdr_frame.producerPrevalidated = qtrue;
+		backendApplied = backendQuery == TEMPORAL_BACKEND_SUBMIT_EXACT
+			? R_TemporalBackendSubmitted( &backendAuthority,
+				submitResult == ralSuccess,
+				havePendingWrite && producerAccepted ? &pendingWrite : NULL,
+				&historyCommitted, &committedWrite ) : qtrue;
+		if ( !backendApplied )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal backend submit decision failed after graphics submit" );
+		if ( backendQuery == TEMPORAL_BACKEND_SUBMIT_EXACT
+				&& submitResult == ralSuccess && havePendingWrite && producerAccepted
+				&& !historyCommitted )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal authorized history write was not committed" );
+		if ( backendQuery == TEMPORAL_BACKEND_SUBMIT_EXACT
+				&& vk_temporal_main_activation.submissionPending )
+			activationApplied = VK_TemporalMainActivationResolveSubmit(
+				&vk_temporal_main_activation,
+				submitResult == ralSuccess ? qtrue : qfalse );
+		if ( !activationApplied )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal activation publication failed after backend decision" );
+		if ( backendQuery == TEMPORAL_BACKEND_SUBMIT_EXACT ) {
+			temporalHistoryCommittedReceipt_t committedHistory[2];
+			vkTemporalHistoryConsumeTicket_t historyTicket;
+			memset( committedHistory, 0, sizeof( committedHistory ) );
+			(void)R_TemporalBackendGetCommittedHistory(
+				backEnd.viewParms.temporalWorldIndex, 0, &committedHistory[0] );
+			(void)R_TemporalBackendGetCommittedHistory(
+				backEnd.viewParms.temporalWorldIndex, 1, &committedHistory[1] );
+			(void)VK_TemporalHistoryConsumeResolveSubmit(
+				&vk_temporal_history_consume, (uint32_t)vk.cmd_index,
+				historyCommitted,
+				committedHistory, &historyTicket );
+		}
+		if ( backendQuery == TEMPORAL_BACKEND_SUBMIT_EXACT ) {
+			vkTemporalMainActivationReceipt_t resolvedActivation;
+			vkTemporalMotionReadbackTicket_t ticket;
+			qboolean gotActivation = VK_TemporalMainActivationGetReceipt(
+				&vk_temporal_main_activation, &resolvedActivation );
+			if ( VK_TemporalMotionReadbackResolveSubmit(
+					&vk_temporal_motion_readback, (uint32_t)vk.cmd_index,
+					submitResult == ralSuccess ? qtrue : qfalse,
+					gotActivation ? &resolvedActivation : NULL, &ticket ) )
+				vk_temporal_motion_readback_log_submit( &ticket );
+		}
+		if ( backendQuery == TEMPORAL_BACKEND_SUBMIT_EXACT
+				&& ( vk_temporal_resolved_hdr_frame.prepared
+				|| vk_temporal_resolved_hdr_frame.copied )
+				&& !vk_temporal_resolved_hdr_resolve_submit(
+				submitResult == ralSuccess ? qtrue : qfalse,
+				historyCommitted,
+				historyCommitted ? &committedWrite : NULL ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"temporal producer publication did not match committed history" );
 		if ( submitResult != ralSuccess )
 			ri.Terminate( TERM_UNRECOVERABLE, "Ral_Submit failed" );
 		vk_diag_submit_ms += ri.Milliseconds() - t_submit;
@@ -30517,6 +34308,7 @@ static void vk_shadow_snap_release_cpu( void ) {
 
 static void vk_shutdown_entmat_buffers( void ) {
 	int i;
+	vk_temporal_entmat_ring.ready = qfalse;
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
 		if ( vk.tess[i].entMatMapped ) {
 			qvkUnmapMemory( vk.device, vk.tess[i].entMatMem );
@@ -31917,6 +35709,7 @@ void vk_render_dlight_shadow( void )
 
 qboolean vk_bloom( void )
 {
+	const vkHdrPostprocessSource_t *postRoute = vk_temporal_postprocess_route();
 	uint32_t i;
 
 	if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP )
@@ -31936,7 +35729,7 @@ qboolean vk_bloom( void )
 #ifdef __APPLE__
 	// MoltenVK/TBDR: subpass external deps alone don't flush tile cache on Apple Silicon.
 	// Explicit barrier makes main-pass writes to color_image visible to bloom_extract's sampler.
-	if ( r_vkApplePinkBarrier->integer ) {
+	if ( r_vkApplePinkBarrier->integer && !postRoute ) {
 		VkImageMemoryBarrier b;
 		memset( &b, 0, sizeof( b ) );
 		b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -31972,7 +35765,8 @@ qboolean vk_bloom( void )
 	vk_begin_bloom_extract_render_pass();
 	// RAL-only: fully-RAL bind+draw (set 0 = scene sampler, set 2 = exposure UBO).
 	Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.ral_bloom_extract_pipeline );
-	Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0, vk.ral_color_descriptor );
+	Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 0,
+		postRoute ? postRoute->postprocessGroup : vk.ral_color_descriptor );
 	Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 2, vk.exposure.ral_descriptor[ vk.cmd_index ] );
 	Ral_CmdDraw( vk.cmd->ral_cmd, 4, 1, 0, 0 );
 	vk_end_render_pass();

@@ -247,6 +247,7 @@ qboolean VK_TemporalGenericRecipeTableCapture(
 	if ( !owner || !owner->records || !owner->armed
 			|| !AuthorityValid( &owner->authority ) || !input
 			|| !outReceipt || input->slot >= owner->capacity ) return qfalse;
+	owner->records[input->slot].captureAttempted = qtrue;
 	owner->records[input->slot].valid = qfalse;
 	if ( owner->lastEntryGeneration == UINT32_MAX
 			|| !NormalizeRecipe( input, &candidate ) ) return qfalse;
@@ -254,6 +255,7 @@ qboolean VK_TemporalGenericRecipeTableCapture(
 	candidate.ownerEpoch = owner->ownerEpoch; candidate.slot = input->slot;
 	candidate.entryGeneration = nextGeneration;
 	candidate.capturedAuthority = owner->authority; candidate.valid = qtrue;
+	candidate.captureAttempted = qtrue;
 	owner->records[input->slot] = candidate;
 	owner->lastEntryGeneration = nextGeneration;
 	receipt.ownerEpoch = owner->ownerEpoch; receipt.slot = input->slot;
@@ -288,13 +290,157 @@ qboolean VK_TemporalGenericRecipeTableGet(
 	*outRecipe = owner->records[slot]; return qtrue;
 }
 
+qboolean VK_TemporalGenericRecipeTableMarkAttempted(
+		vkTemporalGenericRecipeTable_t *owner, uint32_t slot ) {
+	if ( !owner || !owner->records || !owner->armed
+			|| slot >= owner->capacity ) return qfalse;
+	owner->records[slot].captureAttempted = qtrue;
+	owner->records[slot].valid = qfalse;
+	return qtrue;
+}
+
+qboolean VK_TemporalGenericRecipeTableGetSlotState(
+		const vkTemporalGenericRecipeTable_t *owner, uint32_t slot,
+		qboolean *outAttempted, qboolean *outValid ) {
+	qboolean attempted, valid;
+	if ( !owner || !owner->records || slot >= owner->capacity
+			|| !outAttempted || !outValid ) return qfalse;
+	attempted = owner->records[slot].captureAttempted;
+	valid = owner->records[slot].valid;
+	*outAttempted = attempted;
+	*outValid = valid;
+	return qtrue;
+}
+
+static void RepairViewPointers( vkTemporalGenericRecipeView_t *view ) {
+	view->specialization.vertexInfo.pMapEntries = view->specialization.vertexMap;
+	view->specialization.vertexInfo.pData = &view->vertexWord;
+	view->specialization.fragmentInfo.pMapEntries = view->specialization.fragmentMaps;
+	view->specialization.fragmentInfo.pData = view->fragmentWords;
+	view->stages[0].pName = "main";
+	view->stages[0].pSpecializationInfo = &view->specialization.vertexInfo;
+	view->stages[1].pName = "main";
+	view->stages[1].pSpecializationInfo = &view->specialization.fragmentInfo;
+	view->vertexInput.pVertexBindingDescriptions = view->bindings;
+	view->vertexInput.pVertexAttributeDescriptions = view->attributes;
+	view->colorBlend.pAttachments = &view->sceneBlend;
+	view->dynamic.pDynamicStates = view->dynamicStates;
+	view->gp.pStages = view->stages;
+	view->gp.pVertexInputState = &view->vertexInput;
+	view->gp.pInputAssemblyState = &view->inputAssembly;
+	view->gp.pViewportState = &view->viewport;
+	view->gp.pRasterizationState = &view->rasterization;
+	view->gp.pMultisampleState = &view->multisample;
+	view->gp.pDepthStencilState = &view->depthStencil;
+	view->gp.pColorBlendState = &view->colorBlend;
+	view->gp.pDynamicState = &view->dynamic;
+}
+
+qboolean VK_TemporalGenericRecipeBuildView(
+		const vkTemporalGenericRecipe_t *recipe, VkShaderModule ordinaryVertex,
+		VkShaderModule ordinaryFragment, VkPipelineLayout layout,
+		vkTemporalGenericRecipeView_t *outView ) {
+	vkTemporalGenericRecipeView_t candidate;
+	vkTemporalGenericCatalogEntry_t catalog;
+	vkGenericSpecializationFacts_t facts;
+	uint32_t expectedCatalogId;
+	if ( !recipe || !outView || !recipe->valid || !recipe->ownerEpoch
+			|| !recipe->entryGeneration || !ordinaryVertex || !ordinaryFragment
+			|| !layout || recipe->layoutClass != VK_TEMPORAL_RECIPE_LAYOUT_GENERIC_MAIN
+			|| recipe->numBindings > VK_TEMPORAL_RECIPE_MAX_VERTEX_BINDINGS
+			|| recipe->numAttributes > VK_TEMPORAL_RECIPE_MAX_VERTEX_ATTRIBUTES
+			|| recipe->sceneFormat == RAL_FORMAT_UNDEFINED
+			|| recipe->depthFormat == RAL_FORMAT_UNDEFINED
+			|| !VK_TemporalGenericCatalogKeyId( &recipe->key, &expectedCatalogId )
+			|| expectedCatalogId != recipe->catalogId
+			|| !VK_TemporalGenericCatalogSelect( &recipe->key, &catalog ) ) return qfalse;
+	memset( &candidate, 0, sizeof(candidate) );
+	candidate.vertexWord = recipe->specializationWords[0];
+	memcpy( candidate.fragmentWords, &recipe->specializationWords[1],
+		sizeof(candidate.fragmentWords) );
+	if ( !VK_GenericSpecializationAuthor( &candidate.specialization,
+			&candidate.vertexWord, candidate.fragmentWords ) ) return qfalse;
+	candidate.stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	candidate.stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	candidate.stages[0].module = ordinaryVertex;
+	candidate.stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	candidate.stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	candidate.stages[1].module = ordinaryFragment;
+	candidate.vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	candidate.vertexInput.vertexBindingDescriptionCount = recipe->numBindings;
+	candidate.vertexInput.vertexAttributeDescriptionCount = recipe->numAttributes;
+	memcpy( candidate.bindings, recipe->bindings,
+		recipe->numBindings * sizeof(candidate.bindings[0]) );
+	memcpy( candidate.attributes, recipe->attributes,
+		recipe->numAttributes * sizeof(candidate.attributes[0]) );
+	candidate.inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	candidate.inputAssembly.topology = recipe->topology;
+	candidate.inputAssembly.primitiveRestartEnable = recipe->primitiveRestart;
+	candidate.viewport.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	candidate.viewport.viewportCount = 1u;
+	candidate.viewport.scissorCount = 1u;
+	candidate.rasterization.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	candidate.rasterization.depthClampEnable = recipe->depthClampEnable;
+	candidate.rasterization.rasterizerDiscardEnable = recipe->rasterizerDiscardEnable;
+	candidate.rasterization.polygonMode = recipe->polygonMode;
+	candidate.rasterization.cullMode = recipe->cullMode;
+	candidate.rasterization.frontFace = recipe->frontFace;
+	candidate.rasterization.depthBiasEnable = recipe->depthBiasEnable;
+	candidate.rasterization.depthBiasConstantFactor = recipe->depthBiasConstant;
+	candidate.rasterization.depthBiasClamp = recipe->depthBiasClamp;
+	candidate.rasterization.depthBiasSlopeFactor = recipe->depthBiasSlope;
+	candidate.rasterization.lineWidth = recipe->lineWidth;
+	candidate.multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	candidate.multisample.rasterizationSamples = recipe->sampleCount;
+	candidate.multisample.sampleShadingEnable = recipe->sampleShadingEnable;
+	candidate.multisample.minSampleShading = recipe->minSampleShading;
+	candidate.multisample.alphaToCoverageEnable = recipe->alphaToCoverageEnable;
+	candidate.multisample.alphaToOneEnable = recipe->alphaToOneEnable;
+	candidate.depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	candidate.depthStencil.depthTestEnable = recipe->depthTestEnable;
+	candidate.depthStencil.depthWriteEnable = recipe->depthWriteEnable;
+	candidate.depthStencil.depthCompareOp = recipe->depthCompareOp;
+	candidate.depthStencil.depthBoundsTestEnable = recipe->depthBoundsTestEnable;
+	candidate.depthStencil.stencilTestEnable = recipe->stencilTestEnable;
+	candidate.depthStencil.front = recipe->stencilFront;
+	candidate.depthStencil.back = recipe->stencilBack;
+	candidate.depthStencil.minDepthBounds = recipe->minDepthBounds;
+	candidate.depthStencil.maxDepthBounds = recipe->maxDepthBounds;
+	candidate.sceneBlend = recipe->sceneBlend;
+	candidate.colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	candidate.colorBlend.logicOpEnable = recipe->logicOpEnable;
+	candidate.colorBlend.logicOp = recipe->logicOp;
+	candidate.colorBlend.attachmentCount = 1u;
+	memcpy( candidate.colorBlend.blendConstants, recipe->blendConstants,
+		sizeof(candidate.colorBlend.blendConstants) );
+	candidate.dynamicStates[0] = recipe->dynamicStates[0];
+	candidate.dynamicStates[1] = recipe->dynamicStates[1];
+	candidate.dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	candidate.dynamic.dynamicStateCount = 2u;
+	candidate.gp.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	candidate.gp.stageCount = 2u;
+	candidate.gp.layout = layout;
+	candidate.gp.renderPass = VK_NULL_HANDLE;
+	candidate.gp.basePipelineHandle = VK_NULL_HANDLE;
+	candidate.gp.basePipelineIndex = -1;
+	RepairViewPointers( &candidate );
+	facts.textureCount = recipe->key.textureCount;
+	facts.shaderFog = recipe->key.shaderFog;
+	if ( !VK_GenericTemporalSpecializationValidate( &candidate.gp, &facts, NULL ) )
+		return qfalse;
+	*outView = candidate;
+	RepairViewPointers( outView );
+	return qtrue;
+}
+
 qboolean VK_TemporalGenericRecipeTableEvictRange(
 		vkTemporalGenericRecipeTable_t *owner, uint32_t first, uint32_t end ) {
 	uint32_t i;
 	if ( !owner || first > end ) return qfalse;
 	if ( !owner->records ) return qtrue;
 	if ( end > owner->capacity ) return qfalse;
-	for ( i = first; i < end; ++i ) owner->records[i].valid = qfalse;
+	for ( i = first; i < end; ++i )
+		memset( &owner->records[i], 0, sizeof( owner->records[i] ) );
 	return qtrue;
 }
 

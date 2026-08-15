@@ -35,6 +35,20 @@ typedef struct {
 } vkTemporalMotionMaterializationReceipt_t;
 
 typedef struct {
+	ralTexture_t *scene;
+	ralTexture_t *depth;
+	ralTexture_t *velocity;
+	ralTextureView_t *velocityView;
+	ralTexture_t *validity;
+	ralTextureView_t *validityView;
+	ralPipelineLayout_t *pipelineLayout;
+	VkPipelineLayout rawPipelineLayout;
+	uint32_t targetAllocationGeneration;
+	uint32_t pipelineLayoutAllocationGeneration;
+	uint32_t allocationGeneration;
+} vkTemporalMotionMaterializationProductView_t;
+
+typedef struct {
 	temporalMotionTargets_t targets;
 	vkTemporalPipelineLayoutOwner_t pipelineLayout;
 	vkTemporalMotionMaterializationInput_t key;
@@ -67,6 +81,15 @@ qboolean VK_TemporalMotionMaterializationEnsureAfterFence(
 qboolean VK_TemporalMotionMaterializationGetReceipt(
 	const vkTemporalMotionMaterialization_t *owner,
 	vkTemporalMotionMaterializationReceipt_t *outReceipt );
+
+// Generation-bound product view for conditional MAIN segmentation. The caller
+// supplies the exact aggregate receipt; resources are borrowed and remain valid
+// only while that receipt and the owner remain ready.
+qboolean VK_TemporalMotionMaterializationGetProductView(
+	const vkTemporalMotionMaterialization_t *owner,
+	const vkTemporalMotionMaterializationReceipt_t *receipt,
+	ralTexture_t *scene, ralTexture_t *depth,
+	vkTemporalMotionMaterializationProductView_t *outView );
 
 void VK_TemporalMotionMaterializationInvalidateReceipt(
 	vkTemporalMotionMaterialization_t *owner );

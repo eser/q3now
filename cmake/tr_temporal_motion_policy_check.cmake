@@ -57,12 +57,17 @@ require_text(CACHE "a->modelTopology == b->modelTopology" "model topology compat
 require_text(LOCAL "MOD_BAD,\n\tMOD_BRUSH,\n\tMOD_MESH," "stable MOD_BRUSH numeric prefix")
 require_text(MOTION "#define TEMPORAL_MOTION_MOD_BRUSH_MODEL_TYPE 1u" "host-pure MOD_BRUSH pin")
 
-# This bounded leaf is receipt-only.  Runtime view state and draw integration
-# are deliberate future seams, not alternate inputs to the pure math contract.
+# This bounded leaf remains receipt-only. Runtime integration may consume the
+# pure classifier once, but must not introduce alternate view-state inputs.
 forbid_text(MOTION "backEnd.viewParms" "live backend view dependency")
 forbid_text(MOTION "view->projectionMatrix" "live frontend projection dependency")
 forbid_text(BACKEND "R_TemporalMotion" "runtime backend integration")
-forbid_text(VK "R_TemporalMotion" "runtime Vulkan integration")
+require_text(VK "R_TemporalMotionClassify( &facts )" "single pure Vulkan motion classification")
+string(REGEX MATCHALL "R_TemporalMotion[A-Za-z0-9_]*[ \t\r\n]*\\(" vk_motion_calls "${VK}")
+list(LENGTH vk_motion_calls vk_motion_call_count)
+if(NOT vk_motion_call_count EQUAL 1)
+	message(FATAL_ERROR "expected exactly one pure Vulkan motion classifier call, found ${vk_motion_call_count}")
+endif()
 
 require_text(BUILD "AUX_SOURCE_DIRECTORY(code/renderervk RENDERER_VK_SRCS)" "production renderer ownership")
 require_text(BUILD "ADD_EXECUTABLE(tr_temporal_motion_test" "focused host target")

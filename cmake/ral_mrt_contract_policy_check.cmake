@@ -2,6 +2,7 @@ FILE(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_backend.c" BACKEND)
 FILE(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_caps.c" CAPS)
 FILE(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_pipeline.c" PIPELINE)
 FILE(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_resource.c" RESOURCE)
+FILE(READ "${ROOT}/code/renderer/ral/ral_backend.h" RAL_BACKEND_H)
 
 FOREACH(needle
     "ci->requestFeatures.wantIndependentBlend"
@@ -47,6 +48,47 @@ STRING(REGEX MATCHALL "b->caps\.independentBlend[ \t]*=" backend_caps_writes "${
 LIST(LENGTH backend_caps_writes backend_caps_write_count)
 IF(NOT backend_caps_write_count EQUAL 0)
     MESSAGE(FATAL_ERROR "RAL MRT backend must not overwrite the FillCaps authority")
+ENDIF()
+
+STRING(REGEX MATCHALL "uint64_t[ \t]+maxStorageBufferRange" storage_tail_fields "${RAL_BACKEND_H}")
+LIST(LENGTH storage_tail_fields storage_tail_field_count)
+IF(NOT storage_tail_field_count EQUAL 1)
+    MESSAGE(FATAL_ERROR "RAL caps must expose one uint64_t maxStorageBufferRange field")
+ENDIF()
+STRING(FIND "${RAL_BACKEND_H}"
+    "qboolean independentBlend;          // append-only: per-colour-attachment blend/write-mask state enabled\n\tuint64_t maxStorageBufferRange;"
+    storage_tail_pos)
+IF(storage_tail_pos EQUAL -1)
+    MESSAGE(FATAL_ERROR "maxStorageBufferRange must remain the terminal append-only cap after independentBlend")
+ENDIF()
+STRING(REGEX MATCHALL "c->maxStorageBufferRange[ \t]*=" storage_cap_writes "${CAPS}")
+LIST(LENGTH storage_cap_writes storage_cap_write_count)
+IF(NOT storage_cap_write_count EQUAL 1)
+    MESSAGE(FATAL_ERROR "maxStorageBufferRange needs one FillCaps authority")
+ENDIF()
+STRING(FIND "${CAPS}"
+    "c->maxStorageBufferRange     = (uint64_t)L->maxStorageBufferRange;"
+    storage_assignment_pos)
+IF(storage_assignment_pos EQUAL -1)
+    MESSAGE(FATAL_ERROR "FillCaps maxStorageBufferRange assignment drifted")
+ENDIF()
+STRING(FIND "${BACKEND}" "ralVk_FillCaps( b );" fill_caps_pos)
+IF(fill_caps_pos EQUAL -1)
+	MESSAGE(FATAL_ERROR "usable Vulkan backend must converge through one FillCaps call")
+ENDIF()
+STRING(LENGTH "${BACKEND}" backend_length)
+MATH(EXPR fill_caps_tail_pos "${fill_caps_pos}+21")
+MATH(EXPR fill_caps_tail_length "${backend_length}-${fill_caps_tail_pos}")
+STRING(SUBSTRING "${BACKEND}" ${fill_caps_tail_pos} ${fill_caps_tail_length} fill_caps_tail)
+STRING(FIND "${fill_caps_tail}" "ralVk_FillCaps( b );" second_fill_caps_pos)
+IF(NOT second_fill_caps_pos EQUAL -1)
+	MESSAGE(FATAL_ERROR "usable Vulkan backend has multiple FillCaps authorities")
+ENDIF()
+STRING(FIND "${BACKEND}"
+    "maxStorageBufferRange   : %llu bytes\\n\", (unsigned long long)c->maxStorageBufferRange"
+    storage_diag_pos)
+IF(storage_diag_pos EQUAL -1)
+    MESSAGE(FATAL_ERROR "maxStorageBufferRange diagnostic format/cast drifted")
 ENDIF()
 STRING(FIND "${PIPELINE}" "ralVk_ColorWriteMask( src )" mask_pos)
 IF(mask_pos EQUAL -1)

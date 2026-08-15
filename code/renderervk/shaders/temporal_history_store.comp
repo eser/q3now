@@ -3,11 +3,10 @@
 
 #version 450
 
-// Phase 7.10 history-ingest seam. This is deliberately not a TAA resolve:
-// it stores the final HDR scene and a pinned linear-depth convention into the
-// frame plan's write slot. Previous-slot consumption belongs to the later
-// motion/reprojection resolve; pretending to consume it through an identity
-// mix would be optimizable and therefore not evidence.
+// H4 history commit Store. The exact H2 producer target is either the bootstrap
+// current-scene copy or H3's resolved feedback; this shader stores that target
+// plus the same frame's current linear depth into the staged write slot. It
+// does not recursively transform depth or claim a post-bloom source.
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) uniform texture2D currentColor;
@@ -29,10 +28,9 @@ float linearizeDepth(float z) {
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(pixel, ivec2(pc.extent)))) return;
-	vec2 uv = (vec2(pixel) + 0.5) / vec2(pc.extent);
-	vec4 color = textureLod(sampler2D(currentColor, nearestSampler), uv, 0.0);
-	float depth = linearizeDepth(textureLod(
-		sampler2D(currentDeviceDepth, nearestSampler), uv, 0.0).r);
+	vec4 color = texelFetch(sampler2D(currentColor, nearestSampler), pixel, 0);
+	float depth = linearizeDepth(texelFetch(
+		sampler2D(currentDeviceDepth, nearestSampler), pixel, 0).r);
 	imageStore(outputColor, pixel, color);
 	imageStore(outputLinearDepth, pixel, vec4(depth));
 }

@@ -29,6 +29,7 @@
 
 #include "../qcommon/q_shared.h"
 #include "tr_temporal_batch_request.h"
+#include "tr_temporal_history.h"
 #include "../qcommon/qfiles.h"
 #include "../qcommon/qcommon.h"
 #include "../renderercommon/tr_public.h"
@@ -37,6 +38,7 @@
 #include "../renderercommon/tr_screenshot.h"
 #if FEAT_IQM
 #include "iqm.h"
+#include "tr_temporal_iqm_motion.h"
 #endif // FEAT_IQM
 
 struct q1AnimChain_s; // defined in renderercommon/r_q1_texture.h
@@ -44,6 +46,7 @@ struct q1AnimChain_s; // defined in renderercommon/r_q1_texture.h
 
 #ifdef USE_VULKAN
 #include "vk.h"
+#include "vk_temporal_iqm_geometry.h"
 #include "../renderer/ral/ral_residency.h"
 // GL constants substitutions
 typedef enum {
@@ -649,6 +652,7 @@ typedef struct image_s {
 	// vk_find_sampler; -1 when not resolved yet (bindless path not active, or
 	// image not yet uploaded).
 	int		bindlessSamplerSlot;
+	uint64_t	bindlessOwnerGeneration;
 #else
 	GLuint		texnum;				// gl texture binding
 	GLint		internalFormat;
@@ -969,8 +973,27 @@ typedef struct {
 	int		vk_total_vertexes;  // total vertex count across all surfaces
 	int		vk_total_indexes;   // total index count (num_triangles * 3)
 	qboolean	vk_gpu_skinning;    // qtrue if GPU skinning VBOs are ready
+	uint64_t	vk_vertex_bytes;
+	uint64_t	vk_index_bytes;
+	uint64_t	temporalContentDigest;
+	uint32_t	temporalTopologyGeneration;
+	uint32_t	temporalModelAllocationGeneration;
+	uint32_t	temporalGeometryGeneration;
+	qboolean	temporalStructuralValidated;
+	qboolean	temporalH5Eligible;
+	vkTemporalIqmGeometryOwner_t temporalGeometry;
 #endif
 } iqmData_t;
+
+qboolean vk_temporal_iqm_geometry_ensure_after_idle(
+	iqmData_t *data, qboolean idleProven );
+qboolean vk_temporal_iqm_geometry_get_receipt(
+	const iqmData_t *data, vkTemporalIqmGeometryReceipt_t *outReceipt );
+qboolean vk_temporal_iqm_geometry_release_after_idle(
+	iqmData_t *data, qboolean idleProven );
+qboolean R_IqmTemporalModelView( const iqmData_t *data,
+	temporalIqmModelView_t *outView );
+image_t *R_IqmOrdinaryImageForShader( const shader_t *shader );
 
 // inter-quake-model surface
 typedef struct srfIQModel_s {
@@ -982,6 +1005,13 @@ typedef struct srfIQModel_s {
 	int		first_triangle, num_triangles;
 	int		first_influence, num_influences;
 } srfIQModel_t;
+#ifdef USE_VULKAN
+qboolean vk_temporal_iqm_draw_exact( iqmData_t *data,
+	const srfIQModel_t *surface, image_t *ordinaryImage,
+	const float currentBones[TEMPORAL_IQM_BONE_ROWS][4],
+	const float rasterMvp[16] );
+void vk_temporal_iqm_reject_current_draw( void );
+#endif
 #endif // FEAT_IQM
 
 
@@ -1796,11 +1826,17 @@ void R_RenderView( const viewParms_t *parms );
 uint64_t R_TemporalProjectionPrepare( viewParms_t *view );
 void R_TemporalProjectionFinish( int worldIndex, uint64_t frameId, qboolean queued );
 void R_TemporalBackendRecorded( int worldIndex, uint64_t frameId );
+void R_TemporalBackendRequestDelivered(
+	const temporalBatchRequest_t *request );
 qboolean R_TemporalBackendEntityReceiptsBegin( void );
 void R_TemporalBackendEntityReceipts( uint32_t drawSurfs,
 	uint32_t visibleTemporal, uint32_t accepted, uint32_t previous, uint32_t rejected,
 	const temporalEntityPoseReceipt_t *sample );
-void R_TemporalBackendSubmitted( qboolean submitted );
+qboolean R_TemporalBackendSubmitted(
+	const temporalBackendSubmitAuthority_t *authority, qboolean submitted,
+	const temporalHistoryPendingWriteReceipt_t *authorizedWrite,
+	qboolean *outHistoryCommitted,
+	temporalHistoryCommittedReceipt_t *outCommitted );
 void R_TemporalMarkCameraCut( int worldIndex );
 void R_TemporalCancelQueuedFrames( void );
 void R_TemporalProjectionDump( void );

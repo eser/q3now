@@ -107,6 +107,13 @@ foreach(tu IN LISTS PRODUCT_TUS)
     continue()
   endif()
   file(READ "${tu}" text)
+  if(tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_generic_pipeline_table.c")
+    if(NOT text MATCHES "VK_TemporalGenericPipelineFactoryEnsure" OR
+       text MATCHES "VK_TemporalPipelineFactoryEnsure|VK_TemporalIqmPipelineFactoryEnsure|vk_ral_create_pipeline_from_gpinfo_exact_spirv")
+      message(FATAL_ERROR "A2c2b table may own only the split generic exact3 factory")
+    endif()
+    continue()
+  endif()
   if(tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_motion_materialization.c")
     if(NOT text MATCHES "VK_TemporalPipelineLayoutEnsure" OR
        text MATCHES "VK_TemporalPipelineFactoryEnsure|VK_TemporalGenericPipelineFactoryEnsure|VK_TemporalIqmPipelineFactoryEnsure|vk_ral_create_pipeline_from_gpinfo_exact_spirv")

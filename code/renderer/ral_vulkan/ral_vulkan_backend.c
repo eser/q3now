@@ -1762,6 +1762,7 @@ void Ral_RunDiagnostic( const ralBackendCreateInfo_t *hostCi,
 		RAL_VK_LOG( SEV_INFO, "  maxTextureArrayLayers    : %u\n", c->maxTextureArrayLayers );
 		RAL_VK_LOG( SEV_INFO, "  maxPushConstantSize      : %u bytes\n", c->maxPushConstantSize );
 		RAL_VK_LOG( SEV_INFO, "  minUBO / minSSBO align   : %u / %u bytes\n", (unsigned)c->minUniformBufferAlignment, (unsigned)c->minStorageBufferAlignment );
+		RAL_VK_LOG( SEV_INFO, "  maxStorageBufferRange   : %llu bytes\n", (unsigned long long)c->maxStorageBufferRange );
 		RAL_VK_LOG( SEV_INFO, "  timestampPeriod          : %.3f ns/tick\n", c->timestampPeriodNs );
 
 		Ral_QueryMemoryBudget( b, &mb );

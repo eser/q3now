@@ -61,6 +61,10 @@ typedef struct {
 	vkTemporalPipelineDestroyFn destroy;
 	qboolean (*drain)( ralBackend_t * );
 	qboolean (*lookup)( VkShaderModule, vkTemporalShaderBlob_t * );
+	// False means the returned pointer aliases externally-live ownership; the
+	// factory rejects it without destroying that borrowed handle.
+	qboolean (*candidateAllowed)( ralPipeline_t *, const void * );
+	const void *candidateContext;
 } vkTemporalPipelineFactoryOps_t;
 
 #if defined(WIRED_TEMPORAL_REPRESENTATIVE_FACTORY_TEST_ONLY)
@@ -152,6 +156,15 @@ qboolean VK_TemporalGenericPipelineFactoryEnsure( vkTemporalGenericPipelineFacto
 	const vkTemporalPipelineFactoryOps_t *ops );
 qboolean VK_TemporalGenericPipelineFactoryRelease( vkTemporalGenericPipelineFactoryOwner_t *owner,
 	const vkTemporalPipelineFactoryOps_t *ops );
+// Batch lifecycle seam. The caller must hold an external parent-layout lease
+// across Ensure (including candidate failure). Retire only enqueues child
+// destruction; after one same-backend drain, FinalizeAfterDrain releases this
+// owner's lease. Both calls are retry-safe.
+qboolean VK_TemporalGenericPipelineFactoryRetire(
+	vkTemporalGenericPipelineFactoryOwner_t *owner,
+	const vkTemporalPipelineFactoryOps_t *ops );
+qboolean VK_TemporalGenericPipelineFactoryFinalizeAfterDrain(
+	vkTemporalGenericPipelineFactoryOwner_t *owner );
 
 typedef struct {
 	vkTemporalShaderBlob_t ordinaryVertex, ordinaryFragment;

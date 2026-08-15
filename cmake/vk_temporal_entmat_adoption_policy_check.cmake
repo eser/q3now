@@ -104,7 +104,7 @@ endforeach()
 
 # W-41: ordinary draw payload and the existing raw entMat lifecycle stay exact.
 require_text(VKH "float    worldLightParams[4];                    // offset 592, 16 B\n} vkUniform_t;" "unchanged 608-byte ordinary draw UBO")
-require_text(VKC "void vk_entmat_ensure_buffer( void )" "raw entMat owner")
+require_text(VKC "void vk_entmat_ensure_buffer( uint32_t requiredSlots )" "raw entMat bounded-capacity owner")
 
 require_text(BUILD "AUX_SOURCE_DIRECTORY(code/renderervk RENDERER_VK_SRCS)" "renderer product source ownership")
 require_text(BUILD "ADD_EXECUTABLE(vk_temporal_entmat_adoption_test" "compiled owner contract")

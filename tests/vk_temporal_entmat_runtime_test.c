@@ -70,6 +70,10 @@ void Ral_DestroyBindGroup( ralBindGroup_t *group ) { (void)group; groupDestroys+
 int main( void ) {
 	struct ralBackend_s backend = { 7 };
 	vkTemporalEntMatRuntime_t runtime, before, ceilingRuntime;
+	vkTemporalEntMatRuntimeFrameReceipt_t frameReceipt, receiptBefore;
+	vkTemporalEntMatRuntimeFrameBinding_t frameBinding, frameBindingBefore;
+	temporalMotionMatrices_t matrices;
+	uint32_t writtenSlot;
 	int native0, native1, native2;
 	int a, c, g, b, u, gd, ld, base;
 
@@ -117,6 +121,23 @@ int main( void ) {
 		&& runtime.payload.frames[0].entityBuffer
 			== runtime.adoption.slots[0].adopted );
 	CHECK( !runtime.payload.frames[0].begun );
+	CHECK( VK_TemporalEntMatRuntimePeekFrameReceipt( &runtime, 0, &frameReceipt ) );
+	CHECK( VK_TemporalEntMatRuntimeBeginFrame( &runtime, 0, &frameReceipt ) );
+	CHECK( runtime.payload.frames[0].begun
+		&& !runtime.payload.frames[0].resetAfterFence
+		&& !runtime.adoption.slots[0].resetAfterFence );
+	CHECK( VK_TemporalEntMatRuntimeGetFrameBinding(
+		&runtime, &frameReceipt, &frameBinding ) );
+	CHECK( frameBinding.compositeGroup == runtime.payload.frames[0].bindGroup
+		&& frameBinding.receipt.payloadAllocationGeneration
+			== frameReceipt.payloadAllocationGeneration );
+	frameBindingBefore = frameBinding; frameReceipt.payloadLayoutGeneration++;
+	CHECK( !VK_TemporalEntMatRuntimeGetFrameBinding(
+		&runtime, &frameReceipt, &frameBinding )
+		&& memcmp( &frameBinding, &frameBindingBefore,
+			sizeof( frameBinding ) ) == 0 );
+	frameReceipt.payloadLayoutGeneration--;
+	CHECK( !VK_TemporalEntMatRuntimeBeginFrame( &runtime, 0, &frameReceipt ) );
 
 	before = runtime; a = adopts; c = creates; g = groupsCreated;
 	CHECK( VK_TemporalEntMatRuntimeEnsureAfterFence( &runtime, &backend, 4, 0,
@@ -159,6 +180,32 @@ int main( void ) {
 		(void *)( (char *)&native2 + 2 ), 4096, 1, 32 ) );
 	CHECK( runtime.adoption.slots[0].ready && runtime.adoption.slots[1].ready
 		&& runtime.adoption.slots[2].ready && runtime.adoption.slots[3].ready );
+
+	// A2c3 generation-bound begin/append: preflight is non-consuming and
+	// output-atomic, Begin consumes the fence grant, and absolute slots are exact.
+	memset( &receiptBefore, 0x5a, sizeof( receiptBefore ) );
+	frameReceipt = receiptBefore;
+	CHECK( !VK_TemporalEntMatRuntimePeekFrameReceipt( &runtime, 4, &frameReceipt ) );
+	CHECK( memcmp( &frameReceipt, &receiptBefore, sizeof( frameReceipt ) ) == 0 );
+	CHECK( VK_TemporalEntMatRuntimePeekFrameReceipt( &runtime, 0, &frameReceipt ) );
+	CHECK( frameReceipt.frameIndex == 0 && frameReceipt.capacity == 32
+		&& frameReceipt.entityAllocationGeneration == 3
+		&& frameReceipt.payloadAllocationGeneration
+		&& frameReceipt.payloadLayoutGeneration );
+	CHECK( VK_TemporalEntMatRuntimeBeginFrame( &runtime, 0, &frameReceipt ) );
+	memset( &matrices, 0, sizeof( matrices ) );
+	for ( int i = 0; i < 16; ++i )
+		matrices.currentMvp[i] = matrices.previousMvp[i] = ( i % 5 == 0 ) ? 1.0f : 0.0f;
+	writtenSlot = UINT32_MAX;
+	CHECK( VK_TemporalEntMatRuntimeAppendAt( &runtime, &frameReceipt, 7,
+		TEMPORAL_MOTION_WRITE_VALID, &matrices, &writtenSlot ) );
+	CHECK( writtenSlot == 7 );
+	{ vkTemporalEntMatRuntimeFrameReceipt_t stale = frameReceipt;
+		stale.payloadAllocationGeneration++;
+		writtenSlot = 123;
+		CHECK( !VK_TemporalEntMatRuntimeAppendAt( &runtime, &stale, 8,
+			TEMPORAL_MOTION_WRITE_VALID, &matrices, &writtenSlot ) );
+		CHECK( writtenSlot == 123 ); }
 
 	// Release requires explicit idle proof, resets every payload frame, detaches
 	// groups before adopted wrappers, then releases temporal buffers/layout.

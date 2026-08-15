@@ -211,10 +211,9 @@ int main( void ) {
 	CHECK( owner.frames[1].allocationGeneration == 1
 		&& owner.frames[1].buffer != owner.frames[0].buffer
 		&& owner.frames[1].bindGroup != owner.frames[0].bindGroup );
-	beforeOwner = owner; gd = groupDestroys;
-	CHECK( !R_TemporalMotionPayloadDetachEntityBuffer( &owner, 1, &entityC, 1 ) );
-	CHECK( memcmp( &owner, &beforeOwner, sizeof( owner ) ) == 0
-		&& groupDestroys == gd );
+	// First materialization is authored at the completed-fence seam and now
+	// carries the same one-shot reset authority as a reused frame.
+	CHECK( owner.frames[1].resetAfterFence && !owner.frames[1].begun );
 
 	// Borrowed identity is allocation pointer + generation. Reusing the same
 	// wrapper at a new generation rebuilds only the composite group.
@@ -243,6 +242,7 @@ int main( void ) {
 		&entityC, 3 ) );
 	CHECK( memcmp( &owner, &beforeOwner, sizeof( owner ) ) == 0
 		&& bufferCalls == bc && groupCalls == gc );
+	CHECK( R_TemporalMotionPayloadBeginFrame( &owner, 0 ) );
 	CHECK( !R_TemporalMotionPayloadBeginFrame( &owner, 0 ) );
 	CHECK( R_TemporalMotionPayloadResetAfterFence( &owner, 0 ) );
 	CHECK( R_TemporalMotionPayloadBeginFrame( &owner, 0 ) );

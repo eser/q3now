@@ -25,8 +25,12 @@ require_text("code/client/cl_cgame.c" "re.AddRefEntityToScene( t[0].p, qfalse )"
 file(READ "${ROOT}/code/client/cl_cgame.c" client_source)
 string(FIND "${client_source}" "VM_CHECKBOUNDS( VM_ActiveNativeVM(), args[1], sizeof( refEntity_t ) )" entity_bounds)
 string(FIND "${client_source}" "VM_CHECKBOUNDS( VM_ActiveNativeVM(), args[2], sizeof( refEntityMotion_t ) )" motion_bounds)
-string(FIND "${client_source}" "RefEntityMotion_IsValid( (const refEntityMotion_t *)t[1].p )" motion_validate)
-if(entity_bounds GREATER_EQUAL motion_bounds OR motion_bounds GREATER_EQUAL motion_validate)
+string(FIND "${client_source}" "motion = (const refEntityMotion_t *)t[1].p;" motion_assign)
+string(FIND "${client_source}" "RefEntityMotion_IsValid( motion )" motion_validate)
+if(entity_bounds LESS 0 OR motion_bounds LESS 0 OR motion_assign LESS 0
+		OR motion_validate LESS 0 OR entity_bounds GREATER_EQUAL motion_bounds
+		OR motion_bounds GREATER_EQUAL motion_assign
+		OR motion_assign GREATER_EQUAL motion_validate)
   message(FATAL_ERROR "client temporal syscall must bounds-check both raw VM pointers before dereferencing motion")
 endif()
 

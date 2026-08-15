@@ -792,6 +792,10 @@ void vk_clear_color( const vec4_t color );
 void vk_clear_depth( qboolean clear_stencil );
 void vk_begin_frame( const temporalBatchRequest_t *temporalRequest );
 void vk_temporal_motion_release_before_ral_shutdown( void );
+void vk_temporal_scene_color_attachment_published( void );
+void vk_temporal_motion_readback_arm( void );
+void vk_temporal_history_consume_arm( void );
+void vk_temporal_resolve_readback_arm( void );
 void vk_end_frame( void );
 void vk_profile_markers_arm( void );
 void vk_gpu_profile_dump( void );
@@ -803,7 +807,10 @@ void vk_end_render_pass( void );
 void vk_begin_main_render_pass( void );
 void vk_scene_depth_copy( void );
 void vk_scene_depth_copy_final( void );
-void vk_temporal_history_store_record( void );
+void vk_temporal_recursive_record( void );
+qboolean vk_temporal_motion_seal_primary( void );
+qboolean vk_temporal_resolve_prepare_authority( void );
+void vk_temporal_resolved_hdr_record_copy( void );
 void vk_temporal_history_store_shutdown( void );
 // True when an active scene-depth consumer draws BEFORE the SS_FOG copy point,
 // so the backend must force the copy earlier than the natural SS_FOG boundary.
@@ -876,9 +883,11 @@ void vk_bind_index_buffer( VkBuffer buffer, uint32_t offset );
 #ifdef USE_VBO
 void vk_draw_indexed( uint32_t indexCount, uint32_t firstIndex, uint32_t firstInstance );
 qboolean vk_entmat_active( void );
-void vk_entmat_ensure_buffer( void );
+void vk_entmat_ensure_buffer( uint32_t requiredSlots );
 void vk_entmat_begin_frame( void );
 #endif
+qboolean vk_temporal_motion_begin_primary_command( void );
+void vk_temporal_motion_end_primary_command( qboolean admitted );
 void vk_reset_descriptor( int index );
 void vk_update_descriptor( int index, VkDescriptorSet descriptor );
 
@@ -951,6 +960,7 @@ qboolean vk_cull_host_derive_visible( const cplane_t frustum[4], const vec3_t vi
 
 #if FEAT_IQM
 // IQM GPU skinning
+struct drawSurf_s;
 void vk_init_iqm_gpu_skinning( void );
 void vk_shutdown_iqm_gpu_skinning( void );
 qboolean vk_create_iqm_vbo( VkBuffer *outVertBuf, VkDeviceMemory *outVertMem,
@@ -964,6 +974,11 @@ void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
 	const float *boneMats, int numBones,
 	VkDescriptorSet textureDescriptor,
 	const float *mvp );
+qboolean vk_temporal_iqm_prescan_primary_command(
+	const struct drawSurf_s *drawSurfs, int numDrawSurfs );
+qboolean vk_temporal_iqm_bind_primary_command( void );
+void vk_temporal_iqm_publish_drawsurf_ordinal( uint32_t ordinal );
+void vk_temporal_iqm_reset_drawsurf_ordinal( void );
 #endif
 
 typedef struct vk_tess_s {
@@ -1047,7 +1062,7 @@ typedef struct vk_tess_s {
 	// which uses this to pick Ral_EndRendering + the right attachment hand-off
 	// barrier (different target image per pass). Raw VkRenderPass command recording
 	// is retired; 0 means no pass is open and ending it is a fail-closed error.
-	enum { VK_DYN_PASS_NONE = 0, VK_DYN_PASS_MAIN, VK_DYN_PASS_UI, VK_DYN_PASS_SCREENMAP, VK_DYN_PASS_CAPTURE, VK_DYN_PASS_GAMMA, VK_DYN_PASS_BLOOM_EXTRACT, VK_DYN_PASS_BLUR } open_dynamic_pass;
+	enum { VK_DYN_PASS_NONE = 0, VK_DYN_PASS_MAIN, VK_DYN_PASS_TEMPORAL_MAIN, VK_DYN_PASS_TEMPORAL_POST_BLOOM, VK_DYN_PASS_UI, VK_DYN_PASS_SCREENMAP, VK_DYN_PASS_CAPTURE, VK_DYN_PASS_GAMMA, VK_DYN_PASS_BLOOM_EXTRACT, VK_DYN_PASS_BLUR } open_dynamic_pass;
 	VkPipeline			last_pipeline;
 	/* The RAL world-pipeline (MAIN/SCREENMAP) most-recently bound this pass.
 	 * The world passes have no legacy VkPipeline (last_pipeline is NULL for
@@ -1089,6 +1104,7 @@ typedef struct vk_tess_s {
 	VkDeviceSize    entMatSize;
 	VkDescriptorSet entMatDesc;
 	uint32_t        entMatSlot;
+	uint32_t        entMatLastUniformOffset;
 	uint32_t        entMatAllocationGeneration;
 
 #if FEAT_SHADOW_MAPPING

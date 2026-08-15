@@ -14,6 +14,8 @@ typedef struct {
 	uintptr_t modelDataToken;
 	uint32_t modelType;
 	uint32_t modelTopology;
+	uint32_t modelAllocationGeneration;
+	uint64_t modelContentDigest;
 	int32_t frame;
 	int32_t oldframe;
 	float backlerp;

@@ -5,6 +5,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "tr_local.h"
+#include "tr_temporal_iqm_motion.h"
 #include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn B — renderer.assets
 
 R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
@@ -20,12 +21,151 @@ static float identityMatrix[12] = {
 	0, 0, 1, 0
 };
 
+static uint32_t s_iqmTemporalModelGeneration;
+
+_Static_assert( sizeof( iqmTransform_t ) == sizeof( temporalIqmTransform_t ),
+	"IQM temporal transform size parity" );
+_Static_assert( offsetof( iqmTransform_t, translate )
+	== offsetof( temporalIqmTransform_t, translate ), "IQM translate parity" );
+_Static_assert( offsetof( iqmTransform_t, rotate )
+	== offsetof( temporalIqmTransform_t, rotate ), "IQM rotate parity" );
+_Static_assert( offsetof( iqmTransform_t, scale )
+	== offsetof( temporalIqmTransform_t, scale ), "IQM scale parity" );
+_Static_assert( IQM_UBYTE == TEMPORAL_IQM_SCALAR_UBYTE,
+	"IQM UBYTE scalar parity" );
+_Static_assert( IQM_INT == TEMPORAL_IQM_SCALAR_INT,
+	"IQM INT scalar parity" );
+_Static_assert( IQM_FLOAT == TEMPORAL_IQM_SCALAR_FLOAT,
+	"IQM FLOAT scalar parity" );
+
 static qboolean IQM_CheckRange( iqmHeader_t *header, uint32_t offset,
 				uint32_t count, size_t size ) {
 	// return true if the range specified by offset, count and size
 	// doesn't fit into the file
 	return count == 0 || offset == 0 ||
 		(uint64_t)offset + (uint64_t)count * size > header->filesize;
+}
+
+static qboolean IQM_Finite( const float *values, size_t count ) {
+	if ( !values ) return qfalse;
+	for ( size_t i = 0; i < count; ++i ) if ( !isfinite( values[i] ) ) return qfalse;
+	return qtrue;
+}
+
+static uint64_t IQM_DigestBytes( uint64_t hash, const void *data, size_t size ) {
+	const byte *bytes = (const byte *)data;
+	for ( size_t i = 0; i < size; ++i ) {
+		hash ^= bytes[i];
+		hash *= UINT64_C(1099511628211);
+	}
+	return hash;
+}
+
+static qboolean IQM_TemporalPaletteValid( const iqmData_t *data ) {
+	if ( !data || data->num_frames <= 0 || data->num_joints <= 0
+			|| data->num_joints > (int)TEMPORAL_IQM_MAX_JOINTS
+			|| data->num_poses != data->num_joints
+			|| data->num_frames > INT_MAX / data->num_poses
+			|| !IQM_Finite( data->bindJoints, (size_t)data->num_joints * 12u )
+			|| !IQM_Finite( data->invBindJoints,
+				(size_t)data->num_joints * 12u ) ) return qfalse;
+	for ( int i = 0; i < data->num_joints; ++i ) {
+		if ( data->jointParents[i] < -1 || data->jointParents[i] >= i ) return qfalse;
+	}
+	for ( int i = 0; i < data->num_frames * data->num_poses; ++i ) {
+		const iqmTransform_t *pose = &data->poses[i];
+		if ( !IQM_Finite( pose->translate, 3 ) || !IQM_Finite( pose->rotate, 4 )
+				|| !IQM_Finite( pose->scale, 3 ) ) return qfalse;
+	}
+	return qtrue;
+}
+
+static qboolean IQM_TemporalH5Valid( const iqmData_t *data ) {
+	if ( !IQM_TemporalPaletteValid( data ) || data->num_vertexes <= 0
+			|| data->num_triangles <= 0 || data->num_surfaces <= 0
+			|| !IQM_Finite( data->positions, (size_t)data->num_vertexes * 3u )
+			|| !IQM_Finite( data->normals, (size_t)data->num_vertexes * 3u )
+			|| !IQM_Finite( data->texcoords, (size_t)data->num_vertexes * 2u )
+			|| ( data->tangents && !IQM_Finite( data->tangents,
+				(size_t)data->num_vertexes * 4u ) ) || !data->influences
+			|| !data->influenceBlendIndexes ) return qfalse;
+	for ( int i = 0; i < data->num_surfaces; ++i ) {
+		const srfIQModel_t *surface = &data->surfaces[i];
+		uint32_t firstVertex = (uint32_t)surface->first_vertex;
+		uint32_t vertexEnd = firstVertex + (uint32_t)surface->num_vertexes;
+		if ( surface->first_vertex < 0 || surface->num_vertexes <= 0
+				|| surface->first_triangle < 0 || surface->num_triangles <= 0
+				|| vertexEnd < firstVertex
+				|| vertexEnd > (uint32_t)data->num_vertexes
+				|| (uint32_t)surface->first_triangle
+					+ (uint32_t)surface->num_triangles
+					> (uint32_t)data->num_triangles ) return qfalse;
+		for ( int j = 0; j < surface->num_triangles * 3; ++j ) {
+			int index = data->triangles[surface->first_triangle * 3 + j];
+			if ( index < surface->first_vertex || (uint32_t)index >= vertexEnd )
+				return qfalse;
+		}
+		for ( int j = 0; j < surface->num_vertexes; ++j ) {
+			int influence = data->influences[surface->first_vertex + j];
+			if ( influence < surface->first_influence
+					|| influence >= surface->first_influence
+						+ surface->num_influences ) return qfalse;
+		}
+	}
+	return qtrue;
+}
+
+static uint64_t IQM_TemporalContentDigest( const iqmData_t *data ) {
+	uint64_t hash = UINT64_C(1469598103934665603);
+	const uint32_t counts[] = {
+		(uint32_t)data->num_frames, (uint32_t)data->num_joints,
+		(uint32_t)data->num_poses, (uint32_t)data->num_surfaces,
+		(uint32_t)data->num_vertexes, (uint32_t)data->num_triangles
+	};
+	hash = IQM_DigestBytes( hash, counts, sizeof( counts ) );
+	hash = IQM_DigestBytes( hash, data->jointParents,
+		(size_t)data->num_joints * sizeof( data->jointParents[0] ) );
+	hash = IQM_DigestBytes( hash, data->bindJoints,
+		(size_t)data->num_joints * 12u * sizeof( float ) );
+	hash = IQM_DigestBytes( hash, data->invBindJoints,
+		(size_t)data->num_joints * 12u * sizeof( float ) );
+	for ( int i = 0; i < data->num_frames * data->num_poses; ++i ) {
+		hash = IQM_DigestBytes( hash, data->poses[i].translate,
+			sizeof( data->poses[i].translate ) );
+		hash = IQM_DigestBytes( hash, data->poses[i].rotate,
+			sizeof( data->poses[i].rotate ) );
+		hash = IQM_DigestBytes( hash, data->poses[i].scale,
+			sizeof( data->poses[i].scale ) );
+	}
+	for ( int i = 0; i < data->num_surfaces; ++i ) {
+		const uint32_t range[] = {
+			(uint32_t)data->surfaces[i].first_vertex,
+			(uint32_t)data->surfaces[i].num_vertexes,
+			(uint32_t)data->surfaces[i].first_triangle,
+			(uint32_t)data->surfaces[i].num_triangles
+		};
+		hash = IQM_DigestBytes( hash, range, sizeof( range ) );
+	}
+	hash = IQM_DigestBytes( hash, data->positions,
+		(size_t)data->num_vertexes * 3u * sizeof( float ) );
+	hash = IQM_DigestBytes( hash, data->normals,
+		(size_t)data->num_vertexes * 3u * sizeof( float ) );
+	hash = IQM_DigestBytes( hash, data->texcoords,
+		(size_t)data->num_vertexes * 2u * sizeof( float ) );
+	if ( data->tangents ) hash = IQM_DigestBytes( hash, data->tangents,
+		(size_t)data->num_vertexes * 4u * sizeof( float ) );
+	hash = IQM_DigestBytes( hash, data->triangles,
+		(size_t)data->num_triangles * 3u * sizeof( data->triangles[0] ) );
+	hash = IQM_DigestBytes( hash, data->influences,
+		(size_t)data->num_vertexes * sizeof( data->influences[0] ) );
+	hash = IQM_DigestBytes( hash, data->influenceBlendIndexes,
+		(size_t)data->num_influences * 4u );
+	if ( data->blendWeightsType == IQM_FLOAT )
+		hash = IQM_DigestBytes( hash, data->influenceBlendWeights.f,
+			(size_t)data->num_influences * 4u * sizeof( float ) );
+	else hash = IQM_DigestBytes( hash, data->influenceBlendWeights.b,
+		(size_t)data->num_influences * 4u );
+	return hash ? hash : 1u;
 }
 // "multiply" 3x4 matrices, these are assumed to be the top 3 rows
 // of a 4x4 matrix with the last row = (0 0 0 1)
@@ -227,6 +367,15 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	LL( header->ofs_comment );
 	LL( header->num_extensions );
 	LL( header->ofs_extensions );
+	if ( ( header->num_vertexarrays && ( header->ofs_vertexarrays & 3u ) )
+			|| ( header->num_triangles && ( header->ofs_triangles & 3u ) )
+			|| ( header->num_meshes && ( header->ofs_meshes & 3u ) )
+			|| ( header->num_joints && ( header->ofs_joints & 3u ) )
+			|| ( header->num_poses && ( header->ofs_poses & 3u ) )
+			|| ( header->num_anims && ( header->ofs_anims & 3u ) )
+			|| ( header->ofs_bounds && ( header->ofs_bounds & 3u ) )
+			|| ( header->num_framechannels && ( header->ofs_frames & 1u ) ) )
+		return qfalse;
 
 	// check ioq3 joint limit
 	if ( header->num_joints > IQM_MAX_JOINTS ) {
@@ -279,7 +428,8 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			case IQM_UINT:
 			case IQM_FLOAT:
 				// 4-byte swap
-				if( IQM_CheckRange( header, vertexarray->offset,
+				if( ( vertexarray->offset & 3u )
+						|| IQM_CheckRange( header, vertexarray->offset,
 						    header->num_vertexes, vertexarray->size * sizeof(int) ) ) {
 					return qfalse;
 				}
@@ -347,6 +497,13 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 				}
 				break;
 			}
+			if ( vertexarray->format == IQM_FLOAT
+					&& ( vertexarray->type == IQM_POSITION
+						|| vertexarray->type == IQM_NORMAL
+						|| vertexarray->type == IQM_TANGENT
+						|| vertexarray->type == IQM_TEXCOORD )
+					&& !IQM_Finite( (const float *)((const byte *)header
+						+ vertexarray->offset), (size_t)n ) ) return qfalse;
 		}
 
 		// check for required vertex arrays
@@ -359,6 +516,20 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			if( vertexArrayFormat[IQM_BLENDINDEXES] == -1 || vertexArrayFormat[IQM_BLENDWEIGHTS] == -1 ) {
 				R_LOG( rch_assets, SEV_WARN, "R_LoadIQM: %s is missing IQM_BLENDINDEXES and/or IQM_BLENDWEIGHTS array.\n", mod_name );
 				return qfalse;
+			}
+			for ( i = 0; i < (int)header->num_vertexes; ++i ) {
+				byte decodedIndices[4];
+				float decodedWeights[4];
+				if ( !R_TemporalIqmDecodeInfluence(
+						(uint32_t)vertexArrayFormat[IQM_BLENDINDEXES], blendIndexes,
+						(uint32_t)vertexArrayFormat[IQM_BLENDWEIGHTS], blendWeights.b,
+						(uint32_t)i, header->num_joints, decodedIndices,
+						decodedWeights ) ) {
+					R_LOG( rch_assets, SEV_WARN,
+						"R_LoadIQM: %s has invalid GPU skinning influence %d.\n",
+						mod_name, i );
+					return qfalse;
+				}
 			}
 		} else {
 			// ignore blend arrays if present
@@ -434,26 +605,26 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			if( header->num_joints ) {
 				for( j = 0; j < mesh->num_vertexes; j++ ) {
 					int vtx = mesh->first_vertex + j;
+					byte vtxIndices[4];
+					float vtxWeights[4];
+					if ( !R_TemporalIqmDecodeInfluence(
+							(uint32_t)vertexArrayFormat[IQM_BLENDINDEXES], blendIndexes,
+							(uint32_t)vertexArrayFormat[IQM_BLENDWEIGHTS], blendWeights.b,
+							(uint32_t)vtx, header->num_joints, vtxIndices,
+							vtxWeights ) ) return qfalse;
 
 					for( k = 0; k < j; k++ ) {
 						int influence = mesh->first_vertex + k;
-
-						if( *(int*)&blendIndexes[4*influence] != *(int*)&blendIndexes[4*vtx] ) {
-							continue;
-						}
-
-						if( vertexArrayFormat[IQM_BLENDWEIGHTS] == IQM_FLOAT ) {
-							if ( blendWeights.f[4*influence+0] == blendWeights.f[4*vtx+0] &&
-							     blendWeights.f[4*influence+1] == blendWeights.f[4*vtx+1] &&
-							     blendWeights.f[4*influence+2] == blendWeights.f[4*vtx+2] &&
-							     blendWeights.f[4*influence+3] == blendWeights.f[4*vtx+3] ) {
-								break;
-							}
-						} else {
-							if ( *(int*)&blendWeights.b[4*influence] == *(int*)&blendWeights.b[4*vtx] ) {
-								break;
-							}
-						}
+						byte priorIndices[4];
+						float priorWeights[4];
+						if ( !R_TemporalIqmDecodeInfluence(
+								(uint32_t)vertexArrayFormat[IQM_BLENDINDEXES], blendIndexes,
+								(uint32_t)vertexArrayFormat[IQM_BLENDWEIGHTS], blendWeights.b,
+								(uint32_t)influence, header->num_joints, priorIndices,
+								priorWeights ) ) return qfalse;
+						if ( memcmp( priorIndices, vtxIndices, sizeof( vtxIndices ) ) == 0
+								&& memcmp( priorWeights, vtxWeights,
+									sizeof( vtxWeights ) ) == 0 ) break;
 					}
 
 					if ( k == j ) {
@@ -486,7 +657,8 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			LL( anim->framerate );
 			LL( anim->flags );
 
-			if( anim->name >= header->num_text ) {
+			if( anim->name >= header->num_text || !isfinite( anim->framerate )
+					|| anim->framerate < 0.0f ) {
 				return qfalse;
 			}
 			if( anim->first_frame + anim->num_frames > header->num_frames ) {
@@ -521,9 +693,13 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			LL( joint->scale[1] );
 			LL( joint->scale[2] );
 
-			if( joint->parent < -1 ||
-				joint->parent >= (int)header->num_joints ||
-				joint->name >= header->num_text ) {
+			if( joint->parent < -1 || joint->parent >= i
+				|| joint->name >= header->num_text
+				|| !IQM_Finite( joint->translate, 3 )
+				|| !IQM_Finite( joint->rotate, 4 )
+				|| !IQM_Finite( joint->scale, 3 )
+				|| joint->scale[0] == 0.0f || joint->scale[1] == 0.0f
+				|| joint->scale[2] == 0.0f ) {
 				return qfalse;
 			}
 			joint_names += strlen( (char *)header + header->ofs_text +
@@ -540,6 +716,7 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			return qfalse;
 		}
 		pose = (iqmPose_t *)((byte *)header + header->ofs_poses);
+		uint64_t channelCount = 0u;
 		for( i = 0; i < header->num_poses; i++, pose++ ) {
 			LL( pose->parent );
 			LL( pose->mask );
@@ -563,7 +740,47 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			LL( pose->channelscale[7] );
 			LL( pose->channelscale[8] );
 			LL( pose->channelscale[9] );
+			if ( pose->parent != ((iqmJoint_t *)((byte *)header
+					+ header->ofs_joints))[i].parent || ( pose->mask & ~0x3ffu )
+					|| !IQM_Finite( pose->channeloffset, 10 )
+					|| !IQM_Finite( pose->channelscale, 10 ) ) return qfalse;
+			for ( j = 0; j < 10; ++j )
+				if ( pose->mask & ( 1u << j ) ) ++channelCount;
 		}
+		if ( channelCount != header->num_framechannels
+				|| (uint64_t)header->num_frames * header->num_framechannels
+					> UINT32_MAX
+				|| IQM_CheckRange( header, header->ofs_frames,
+					(uint32_t)((uint64_t)header->num_frames
+						* header->num_framechannels), sizeof( unsigned short ) ) )
+			return qfalse;
+		{
+			const unsigned short *channel = (const unsigned short *)(
+				(const byte *)header + header->ofs_frames );
+			for ( uint32_t frameIndex = 0; frameIndex < header->num_frames;
+					++frameIndex ) {
+				pose = (iqmPose_t *)((byte *)header + header->ofs_poses);
+				for ( uint32_t poseIndex = 0; poseIndex < header->num_poses;
+						++poseIndex, ++pose ) {
+					float decoded[10];
+					for ( uint32_t component = 0; component < 10; ++component ) {
+						float value = pose->channeloffset[component];
+						if ( pose->mask & ( 1u << component ) )
+							value += (float)*channel++ * pose->channelscale[component];
+						if ( !isfinite( value ) ) return qfalse;
+						decoded[component] = value;
+					}
+					{
+						float quaternionLength = decoded[3] * decoded[3]
+							+ decoded[4] * decoded[4] + decoded[5] * decoded[5]
+							+ decoded[6] * decoded[6];
+						if ( !isfinite( quaternionLength ) ) return qfalse;
+					}
+				}
+			}
+		}
+	} else if ( header->num_framechannels ) {
+		return qfalse;
 	}
 
 	if (header->ofs_bounds)
@@ -583,6 +800,8 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			LL(bounds->bbmax[0]);
 			LL(bounds->bbmax[1]);
 			LL(bounds->bbmax[2]);
+			if ( !IQM_Finite( bounds->bbmin, 3 )
+					|| !IQM_Finite( bounds->bbmax, 3 ) ) return qfalse;
 
 			bounds++;
 		}
@@ -852,19 +1071,29 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 
 				for( j = 0; j < surface->num_vertexes; j++ ) {
 					vtx = surface->first_vertex + j;
+					byte decodedIndices[4] = { 0, 0, 0, 0 };
+					float decodedWeights[4] = { 0, 0, 0, 0 };
+					// The same immutable raw tuple was exhaustively validated before
+					// model publication; this pass only authors its canonical copy.
+					(void)R_TemporalIqmDecodeInfluence(
+							(uint32_t)vertexArrayFormat[IQM_BLENDINDEXES], blendIndexes,
+							(uint32_t)vertexArrayFormat[IQM_BLENDWEIGHTS], blendWeights.b,
+							(uint32_t)vtx, header->num_joints, decodedIndices,
+							decodedWeights );
 
 					for( k = 0; k < surface->num_influences; k++ ) {
 						influence = surface->first_influence + k;
 
-						if( *(int*)&iqmData->influenceBlendIndexes[4*influence] != *(int*)&blendIndexes[4*vtx] ) {
+						if( memcmp( &iqmData->influenceBlendIndexes[4*influence],
+								decodedIndices, sizeof( decodedIndices ) ) != 0 ) {
 							continue;
 						}
 
 						if( vertexArrayFormat[IQM_BLENDWEIGHTS] == IQM_FLOAT ) {
-							if ( iqmData->influenceBlendWeights.f[4*influence+0] == blendWeights.f[4*vtx+0] &&
-							     iqmData->influenceBlendWeights.f[4*influence+1] == blendWeights.f[4*vtx+1] &&
-							     iqmData->influenceBlendWeights.f[4*influence+2] == blendWeights.f[4*vtx+2] &&
-							     iqmData->influenceBlendWeights.f[4*influence+3] == blendWeights.f[4*vtx+3] ) {
+							if ( iqmData->influenceBlendWeights.f[4*influence+0] == decodedWeights[0] &&
+							     iqmData->influenceBlendWeights.f[4*influence+1] == decodedWeights[1] &&
+							     iqmData->influenceBlendWeights.f[4*influence+2] == decodedWeights[2] &&
+							     iqmData->influenceBlendWeights.f[4*influence+3] == decodedWeights[3] ) {
 								break;
 							}
 						} else {
@@ -879,10 +1108,8 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 					if( k == surface->num_influences ) {
 						influence = surface->first_influence + k;
 
-						iqmData->influenceBlendIndexes[4*influence+0] = blendIndexes[4*vtx+0];
-						iqmData->influenceBlendIndexes[4*influence+1] = blendIndexes[4*vtx+1];
-						iqmData->influenceBlendIndexes[4*influence+2] = blendIndexes[4*vtx+2];
-						iqmData->influenceBlendIndexes[4*influence+3] = blendIndexes[4*vtx+3];
+						memcpy( &iqmData->influenceBlendIndexes[4*influence],
+							decodedIndices, sizeof( decodedIndices ) );
 
 						if( vertexArrayFormat[IQM_BLENDWEIGHTS] == IQM_FLOAT ) {
 							iqmData->influenceBlendWeights.f[4*influence+0] = blendWeights.f[4*vtx+0];
@@ -1033,6 +1260,18 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	}
 
 #ifdef USE_VULKAN
+	iqmData->temporalStructuralValidated = IQM_TemporalPaletteValid( iqmData );
+	if ( iqmData->temporalStructuralValidated && IQM_TemporalH5Valid( iqmData )
+			&& s_iqmTemporalModelGeneration < UINT32_MAX - 1u ) {
+		iqmData->temporalContentDigest = IQM_TemporalContentDigest( iqmData );
+		iqmData->temporalModelAllocationGeneration =
+			++s_iqmTemporalModelGeneration;
+		iqmData->temporalTopologyGeneration = (uint32_t)(
+			iqmData->temporalContentDigest
+			^ ( iqmData->temporalContentDigest >> 32 ) );
+		if ( !iqmData->temporalTopologyGeneration )
+			iqmData->temporalTopologyGeneration = 1u;
+	}
 	// ── GPU skinning VBO creation ────────────────────────────────────
 	// Build an interleaved vertex buffer for GPU skinning:
 	//   position (vec3, 12B) + normal (vec3, 12B) + texcoord (vec2, 8B)
@@ -1043,6 +1282,8 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	iqmData->vk_vertex_memory = VK_NULL_HANDLE;
 	iqmData->vk_index_buffer  = VK_NULL_HANDLE;
 	iqmData->vk_index_memory  = VK_NULL_HANDLE;
+	iqmData->temporalH5Eligible = qfalse;
+	VK_TemporalIqmGeometryInit( &iqmData->temporalGeometry );
 
 	if ( header->num_meshes && header->num_joints && blendIndexes && vk.iqmGpu.available ) {
 		int numVerts = header->num_vertexes;
@@ -1060,6 +1301,17 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 		for ( i = 0; i < numVerts; i++ ) {
 			byte *dst = vertBuf + i * vertStride;
 			float *fDst = (float *)dst;
+			int influence = iqmData->influences[i];
+			const byte *decodedIndices =
+				&iqmData->influenceBlendIndexes[4 * influence];
+			float decodedWeights[4];
+			if ( iqmData->blendWeightsType == IQM_FLOAT )
+				memcpy( decodedWeights,
+					&iqmData->influenceBlendWeights.f[4 * influence],
+					sizeof( decodedWeights ) );
+			else for ( j = 0; j < 4; ++j )
+				decodedWeights[j] = (float)iqmData->influenceBlendWeights.b[
+					4 * influence + j] / 255.0f;
 
 			// position (3 floats, 12 bytes at offset 0)
 			fDst[0] = iqmData->positions[i*3+0];
@@ -1090,33 +1342,12 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			}
 
 			// bone weights (4 floats, 16 bytes at offset 48)
-			if ( vertexArrayFormat[IQM_BLENDWEIGHTS] == IQM_FLOAT ) {
-				fDst[12] = blendWeights.f[i*4+0];
-				fDst[13] = blendWeights.f[i*4+1];
-				fDst[14] = blendWeights.f[i*4+2];
-				fDst[15] = blendWeights.f[i*4+3];
-			} else {
-				fDst[12] = (float)blendWeights.b[i*4+0] / 255.0f;
-				fDst[13] = (float)blendWeights.b[i*4+1] / 255.0f;
-				fDst[14] = (float)blendWeights.b[i*4+2] / 255.0f;
-				fDst[15] = (float)blendWeights.b[i*4+3] / 255.0f;
-			}
+			fDst[12] = decodedWeights[0]; fDst[13] = decodedWeights[1];
+			fDst[14] = decodedWeights[2]; fDst[15] = decodedWeights[3];
 
 			// bone indices (4 bytes at offset 64)
 			// blendIndexes can be IQM_INT (4 bytes each) or IQM_UBYTE (1 byte each)
-			if ( vertexArrayFormat[IQM_BLENDINDEXES] == IQM_UBYTE ) {
-				dst[64] = blendIndexes[i*4+0];
-				dst[65] = blendIndexes[i*4+1];
-				dst[66] = blendIndexes[i*4+2];
-				dst[67] = blendIndexes[i*4+3];
-			} else {
-				// IQM_INT — stored as 4-byte ints, cast to bytes
-				int *intIdx = (int *)blendIndexes;
-				dst[64] = (byte)intIdx[i*4+0];
-				dst[65] = (byte)intIdx[i*4+1];
-				dst[66] = (byte)intIdx[i*4+2];
-				dst[67] = (byte)intIdx[i*4+3];
-			}
+			memcpy( dst + 64, decodedIndices, 4u );
 		}
 
 		// build index buffer (absolute vertex indices)
@@ -1133,9 +1364,28 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			idxBuf, idxBufSize ) ) {
 			iqmData->vk_total_vertexes = numVerts;
 			iqmData->vk_total_indexes = numTris * 3;
-			iqmData->vk_gpu_skinning = qtrue;
-			R_LOG( rch_assets, SEV_DEBUG, "IQM GPU skinning VBO: %d verts, %d tris (%s)\n",
-				numVerts, numTris, mod_name );
+			iqmData->vk_vertex_bytes = (uint64_t)vertBufSize;
+			iqmData->vk_index_bytes = (uint64_t)idxBufSize;
+			iqmData->vk_gpu_skinning =
+				iqmData->temporalStructuralValidated == qtrue ? qtrue : qfalse;
+			if ( !iqmData->vk_gpu_skinning ) {
+				vk_destroy_iqm_vbo( &iqmData->vk_vertex_buffer,
+					&iqmData->vk_vertex_memory, &iqmData->vk_index_buffer,
+					&iqmData->vk_index_memory );
+				iqmData->vk_vertex_bytes = iqmData->vk_index_bytes = 0u;
+			} else if ( iqmData->temporalContentDigest
+					&& iqmData->temporalModelAllocationGeneration ) {
+				iqmData->temporalGeometryGeneration =
+					iqmData->temporalModelAllocationGeneration;
+				iqmData->temporalH5Eligible = qtrue;
+				R_LOG( rch_assets, SEV_DEBUG,
+					"IQM GPU skinning VBO: %d verts, %d tris (%s)\n",
+					numVerts, numTris, mod_name );
+			} else {
+				R_LOG( rch_assets, SEV_WARN,
+					"IQM H5 eligibility rejected; ordinary GPU skinning retained: %s\n",
+					mod_name );
+			}
 		}
 
 		ri.Free( vertBuf );
@@ -1392,6 +1642,40 @@ static void ComputePoseMats( iqmData_t *data, int frame, int oldframe,
 	}
 }
 
+#ifdef USE_VULKAN
+qboolean R_IqmTemporalModelView( const iqmData_t *data,
+		temporalIqmModelView_t *out ) {
+	temporalIqmModelView_t candidate;
+	if ( !data || !out || data->temporalStructuralValidated != qtrue )
+		return qfalse;
+	memset( &candidate, 0, sizeof( candidate ) );
+	candidate.modelDataToken = (uintptr_t)data;
+	candidate.contentDigest = data->temporalContentDigest;
+	candidate.topologyGeneration = data->temporalTopologyGeneration;
+	candidate.modelAllocationGeneration = data->temporalModelAllocationGeneration;
+	candidate.numFrames = (uint32_t)data->num_frames;
+	candidate.numJoints = (uint32_t)data->num_joints;
+	candidate.numPoses = (uint32_t)data->num_poses;
+	candidate.jointParents = (const int32_t *)data->jointParents;
+	candidate.bindJoints = data->bindJoints;
+	candidate.inverseBindJoints = data->invBindJoints;
+	candidate.poses = (const temporalIqmTransform_t *)data->poses;
+	candidate.validated = qtrue;
+	*out = candidate;
+	return qtrue;
+}
+
+image_t *R_IqmOrdinaryImageForShader( const shader_t *shader ) {
+	if ( shader && shader->stages[0]
+			&& shader->stages[0]->bundle[0].image[0] )
+		return shader->stages[0]->bundle[0].image[0];
+	if ( tr.defaultShader->stages[0]
+			&& tr.defaultShader->stages[0]->bundle[0].image[0] )
+		return tr.defaultShader->stages[0]->bundle[0].image[0];
+	return tr.whiteImage;
+}
+#endif
+
 static void ComputeJointMats( iqmData_t *data, int frame, int oldframe,
 			      float backlerp, float *mat ) {
 	float	*mat1;
@@ -1454,36 +1738,54 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 	if ( data->vk_gpu_skinning && data->num_poses > 0 ) {
 		float boneMatsGpu[IQM_MAX_JOINTS * 12];
 		float mvp[16];
-		VkDescriptorSet texDescriptor;
+		qboolean temporalExactDrawn;
+		temporalIqmModelView_t temporalModel;
+		int normalizedFrame, normalizedOldFrame;
+		float normalizedBacklerp;
+		image_t *ordinaryImage;
 
-		// compute interpolated bone matrices
-		ComputePoseMats( data, frame, oldframe, backlerp, boneMatsGpu );
-
-		// compute model-view-projection matrix
-		myGlMultMatrix( backEnd.or.modelMatrix,
-			backEnd.viewParms.projectionMatrix, mvp );
-
-		// get the texture descriptor from the surface shader
-		if ( tess.shader && tess.shader->stages[0] &&
-			tess.shader->stages[0]->bundle[0].image[0] ) {
-			texDescriptor = tess.shader->stages[0]->bundle[0].image[0]->descriptor;
-		} else if ( tr.defaultShader->stages[0] &&
-			tr.defaultShader->stages[0]->bundle[0].image[0] ) {
-			texDescriptor = tr.defaultShader->stages[0]->bundle[0].image[0]->descriptor;
-		} else {
-			texDescriptor = tr.whiteImage->descriptor;
+		// Ordinary and temporal IQM use the exact same loader-authoritative
+		// palette and canonical Vulkan raster transform.
+		if ( !R_TemporalMotionBuildCanonicalMvp( backEnd.or.modelMatrix,
+				backEnd.viewParms.projectionMatrix, mvp )
+				|| !R_IqmTemporalModelView( data, &temporalModel )
+				|| !R_TemporalIqmNormalizeFrameTuple( temporalModel.numFrames,
+					backEnd.currentEntity->e.frame,
+					backEnd.currentEntity->e.oldframe, backlerp,
+					&normalizedFrame, &normalizedOldFrame,
+					&normalizedBacklerp )
+				|| !R_TemporalIqmBuildPaletteTuple( &temporalModel,
+					normalizedFrame, normalizedOldFrame, normalizedBacklerp,
+					(float (*)[4])boneMatsGpu ) ) {
+			vk_temporal_iqm_reject_current_draw();
+			return;
 		}
 
-		// issue GPU draw call for this surface
-		vk_draw_iqm_gpu(
-			data->vk_vertex_buffer,
-			data->vk_index_buffer,
-			surf->first_triangle * 3,  // firstIndex (into the global index buffer)
-			surf->num_triangles * 3,   // numIndexes
-			boneMatsGpu,
-			data->num_poses,
-			texDescriptor,
-			mvp );
+		// Resolve through the same helper the active temporal pre-scan uses.
+		// This preserves the ordinary fallback order while making material
+		// identity a single exact seam.
+		ordinaryImage = R_IqmOrdinaryImageForShader( tess.shader );
+		if ( !ordinaryImage ) {
+			vk_temporal_iqm_reject_current_draw();
+			return;
+		}
+
+		// The exact path intercepts before ordinary UBO/ring/pipeline state is
+		// touched. A pre-emission rejection falls back to the unchanged ordinary
+		// draw; a completed exact segment returns true and is never replayed.
+		temporalExactDrawn = vk_temporal_iqm_draw_exact( data, surf,
+			ordinaryImage, (const float (*)[4])boneMatsGpu, mvp );
+		if ( !temporalExactDrawn ) {
+			vk_draw_iqm_gpu(
+				data->vk_vertex_buffer,
+				data->vk_index_buffer,
+				surf->first_triangle * 3,
+				surf->num_triangles * 3,
+				boneMatsGpu,
+				data->num_poses,
+				ordinaryImage->descriptor,
+				mvp );
+		}
 
 		// Shadow caster capture. This GPU-skin path returns before tess.xyz is
 		// touched, so the deformed-mesh snapshot (vk_shadow_capture_mesh) never

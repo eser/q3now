@@ -370,6 +370,10 @@ void *Ral_GetBufferHandle( const ralBuffer_t *buf ) {
 	return buf ? (void *)buf->buffer : NULL;
 }
 
+uint64_t Ral_GetBufferSize( const ralBuffer_t *buf ) {
+	return buf ? (uint64_t)buf->size : 0u;
+}
+
 void Ral_DestroyBuffer( ralBuffer_t *buf ) {
 	ralBackend_t *b;
 	if ( !buf ) return;
@@ -673,6 +677,10 @@ ralTexture_t *Ral_AdoptArrayTexture( ralBackend_t *b,
 
 void *Ral_GetTextureImageHandle( const ralTexture_t *tex ) {
 	return tex ? (void *)tex->image : NULL;
+}
+
+void *Ral_GetTextureDefaultViewHandle( const ralTexture_t *tex ) {
+	return tex ? (void *)tex->defaultView : NULL;
 }
 
 uint32_t Ral_GetTextureMipLevelCount( const ralTexture_t *tex ) {

@@ -61,6 +61,7 @@ typedef struct {
 	ralFormat_t sceneFormat, depthFormat;
 	vkTemporalRecipeLayoutClass_t layoutClass;
 	vkTemporalRecipeBatchAuthority_t capturedAuthority;
+	qboolean captureAttempted;
 	qboolean valid;
 } vkTemporalGenericRecipe_t;
 
@@ -94,6 +95,29 @@ typedef struct {
 	vkTemporalRecipeLayoutClass_t layoutClass;
 } vkTemporalGenericRecipeCaptureInput_t;
 
+// Synchronous, self-contained Vulkan view rebuilt from one pointer-free
+// recipe. Every pointer in gp targets storage owned by this view; no pointer
+// reaches back into the recipe or the original create_pipeline stack graph.
+typedef struct {
+	VkPipelineShaderStageCreateInfo stages[2];
+	VkPipelineVertexInputStateCreateInfo vertexInput;
+	VkPipelineInputAssemblyStateCreateInfo inputAssembly;
+	VkPipelineViewportStateCreateInfo viewport;
+	VkPipelineRasterizationStateCreateInfo rasterization;
+	VkPipelineMultisampleStateCreateInfo multisample;
+	VkPipelineDepthStencilStateCreateInfo depthStencil;
+	VkPipelineColorBlendAttachmentState sceneBlend;
+	VkPipelineColorBlendStateCreateInfo colorBlend;
+	VkPipelineDynamicStateCreateInfo dynamic;
+	vkGenericSpecializationGraph_t specialization;
+	uint32_t vertexWord;
+	uint32_t fragmentWords[VK_GENERIC_FRAGMENT_SPEC_COUNT];
+	VkVertexInputBindingDescription bindings[VK_TEMPORAL_RECIPE_MAX_VERTEX_BINDINGS];
+	VkVertexInputAttributeDescription attributes[VK_TEMPORAL_RECIPE_MAX_VERTEX_ATTRIBUTES];
+	VkDynamicState dynamicStates[2];
+	VkGraphicsPipelineCreateInfo gp;
+} vkTemporalGenericRecipeView_t;
+
 void VK_TemporalGenericRecipeTableInit( vkTemporalGenericRecipeTable_t *owner );
 qboolean VK_TemporalGenericRecipeTablePrepare(
 	vkTemporalGenericRecipeTable_t *owner, uint32_t capacity,
@@ -111,6 +135,15 @@ qboolean VK_TemporalGenericRecipeTableGet(
 	const vkTemporalGenericRecipeTable_t *owner, uint32_t ownerEpoch,
 	uint32_t slot, uint32_t entryGeneration,
 	vkTemporalGenericRecipe_t *outRecipe );
+qboolean VK_TemporalGenericRecipeTableMarkAttempted(
+	vkTemporalGenericRecipeTable_t *owner, uint32_t slot );
+qboolean VK_TemporalGenericRecipeTableGetSlotState(
+	const vkTemporalGenericRecipeTable_t *owner, uint32_t slot,
+	qboolean *outAttempted, qboolean *outValid );
+qboolean VK_TemporalGenericRecipeBuildView(
+	const vkTemporalGenericRecipe_t *recipe, VkShaderModule ordinaryVertex,
+	VkShaderModule ordinaryFragment, VkPipelineLayout layout,
+	vkTemporalGenericRecipeView_t *outView );
 qboolean VK_TemporalGenericRecipeTableEvictRange(
 	vkTemporalGenericRecipeTable_t *owner, uint32_t first, uint32_t end );
 qboolean VK_TemporalGenericRecipeTableRelease(
