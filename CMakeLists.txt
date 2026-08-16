@@ -403,6 +403,53 @@ SET_TESTS_PROPERTIES(release_provenance_contract PROPERTIES
 	TIMEOUT 30
 )
 
+# HiDPI (#4) analyzer contract.  The live wiredui-layout-checks gate needs a real
+# window to CAPTURE a layout dump, but the DPI DECISION it makes is a pure
+# function of the dump: dpiScale must equal vidWidthPx/logicalWidth.  This runs
+# the same analyzer over synthetic dumps, so the analyzer half is covered with no
+# display, no GPU and no pak set — including the Retina dpiScale=4 case that made
+# the live gate reject a CORRECT engine before d00a6afd.  The capture half stays
+# owner-gated; this pins the half that actually decides pass/fail.
+ADD_TEST(NAME wiredui_dpi_analyzer_contract
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/wiredui-layout-checks.sh
+		--dpi-self-test
+)
+SET_TESTS_PROPERTIES(wiredui_dpi_analyzer_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 60
+)
+
+# Second-map Z_Free (#96) analyzer contract.  The live gate needs a BSP-bearing
+# content pak (licensed asset pipeline output), but the crash CLASSIFIER is a
+# pure function of the log: it must reject every zone-consistency terminate
+# (common.c), the "Server crashed" funnel (log.c:878), a FATAL record, a
+# truncated map chain and a non-zero exit.  This runs that classifier over
+# synthetic logs — no engine, no packs, no display — so a gate that could not
+# catch #96 fails the build.
+ADD_TEST(NAME headless_map_transition_analyzer_contract
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/headless-map-transition-zonecheck.sh
+		--self-test
+)
+SET_TESTS_PROPERTIES(headless_map_transition_analyzer_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-server;failure.contract;feature.always"
+	TIMEOUT 60
+)
+
+# Screenshots come from vk.capture.image when supersampling is on and from the
+# swapchain otherwise; only the former is display-independent, so on a HiDPI
+# display the two disagree about size.  The gate also refuses a blank frame —
+# during bring-up every macOS capture came back correctly sized and completely
+# black, and the size alone was briefly mistaken for success.  Self-test only:
+# analyzer over synthetic PNGs, no engine and no display.
+ADD_TEST(NAME visual_supersample_parity_contract
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/visual-supersample-parity.sh
+		--self-test
+)
+SET_TESTS_PROPERTIES(visual_supersample_parity_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 60
+)
+
 ADD_TEST(NAME ral_feature_policy_contract
 	COMMAND ${CMAKE_COMMAND}
 		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
@@ -410,6 +457,20 @@ ADD_TEST(NAME ral_feature_policy_contract
 )
 SET_TESTS_PROPERTIES(ral_feature_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;failure.contract"
+	TIMEOUT 30
+)
+
+# W-103: every DEFAULT resolution is 16:9. A 4:3 capture does not match the
+# player's framing, so HUD/FOV evidence read off one is false evidence. Scoped
+# to cvar defaults, the SDL headless fallback, and harness extent expectations
+# -- NOT the virtual 640x480 UI space or the user-selectable mode list.
+ADD_TEST(NAME widescreen_default_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/widescreen_default_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(widescreen_default_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;failure.contract"
 	TIMEOUT 30
 )
 
@@ -1783,6 +1844,23 @@ SET_TESTS_PROPERTIES(cl_demo_frame_contract PROPERTIES
 	TIMEOUT 30
 )
 WIRED_CONFIGURE_HOST_TEST(cl_demo_frame_test cl_demo_frame_contract)
+
+# Console ownership: only the user (`~`) or a user-initiated session entry may
+# take the console away. Compiles the exact dependency-free decision the
+# CL_SetState transition observer consumes — attract reels and local \map loads
+# soft-close (KEYCATCH_CONSOLE preserved), typed \connect/\demo and remote
+# server-pushed map changes hard-close, non-session edges do nothing.
+ADD_EXECUTABLE(cl_console_close_policy_test
+	tests/cl_console_close_policy_test.c
+	code/client/cl_console_close_policy.c
+)
+TARGET_INCLUDE_DIRECTORIES(cl_console_close_policy_test PRIVATE code/client)
+ADD_TEST(NAME cl_console_close_policy_contract COMMAND cl_console_close_policy_test)
+SET_TESTS_PROPERTIES(cl_console_close_policy_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(cl_console_close_policy_test cl_console_close_policy_contract)
 
 # Local bot-slot allocation identity. Compiles the exact production parser and
 # match seam so a queued removal cannot authorize a replacement bot in a reused

@@ -2402,10 +2402,12 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_ext_alpha_to_coverage, "Enables alpha-to-coverage multisampling, requires \\r_fbo 1." );
 #endif
 
-	r_renderWidth = ri.Cvar_Get( "r_renderWidth", "800", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	// W-103: widescreen-only defaults. 1280x720 is the canonical 16:9 baseline;
+	// a 4:3 default makes screenshot evidence disagree with the player's framing.
+	r_renderWidth = ri.Cvar_Get( "r_renderWidth", "1280", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_renderWidth, "96", NULL, CV_INTEGER );
 	ri.Cvar_SetDescription( r_renderWidth, "Video width to render to when \\r_renderScale > 0." );
-	r_renderHeight = ri.Cvar_Get( "r_renderHeight", "600", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
+	r_renderHeight = ri.Cvar_Get( "r_renderHeight", "720", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_renderHeight, "72", NULL, CV_INTEGER );
 	ri.Cvar_SetDescription( r_renderHeight, "Video height to render to when \\r_renderScale > 0." );
 

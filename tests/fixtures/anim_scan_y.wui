@@ -1,0 +1,31 @@
+// anim_scan_y.wui — LOOP_LINEAR vertical-sweep runtime PoC.
+//
+// Loaded via `wui_test_anim_scan` console command. Centres a thin
+// accent-coloured strip with the `animation "scan-y"` built-in
+// (LOOP_LINEAR, offset -1.0 → 1.0, 3500ms loop). The compositor's
+// lazy-create path resolves the built-in via WUI_AnimFindBuiltin,
+// routes the output into animOffsetY, and the slide-family emit gate
+// multiplies it by viewport height so the strip visibly sweeps top to
+// bottom and wraps.
+//
+// Models the Claude-Design-v2 `qwscan` keyframe (qw-screens.jsx:891 —
+// the scanning beam over the ScreenCampaign map preview).
+
+menuDef {
+	name "anim_scan_y"
+	layer "menu"
+	fullScreen 1
+	rect 0 0 1 1
+	visible 1
+	style 1
+	backcolor 0.05 0.05 0.10 1
+
+	itemDef {
+		name "anim_scan_y_beam"
+		rect 0.30 0.50 0.40 0.004
+		backcolor $accent
+		animation "scan-y"
+		visible 1
+		decoration
+	}
+}
