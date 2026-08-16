@@ -5661,26 +5661,6 @@ void WiredUI_CompositorEmitFrame( void )
 			 * layered scene rects and the procedural backdrop — end up on the
 			 * same zIndex competing on emit order; as layers they simply
 			 * stack. */
-			/* The dim scrim belongs to the menu surface rather than to a
-			 * background layer: it darkens the live match the menu is sitting
-			 * on, so it has to land above the game and below the panel. */
-			if ( L == WUI_LAYER_MENU && wui_clay_menu_scrim ) {
-				WUI_DrawBackgroundDim( 0.0f, 0.0f,
-					(float) cls.glconfig.vidWidth, (float) cls.glconfig.vidHeight );
-			}
-
-			if ( L == WUI_LAYER_BG_DARK || L == WUI_LAYER_BG_ANIMATED ) {
-				float bw = (float) cls.glconfig.vidWidth;
-				float bh = (float) cls.glconfig.vidHeight;
-				/* Dark is the opaque base fill on its own; animated adds the
-				 * composed scene over it. Splitting the flag set this way is
-				 * what makes "hide the scene but keep a floor" expressible —
-				 * previously both arrived together from one menu item. */
-				WUI_DrawBackgroundLayered( 0.0f, 0.0f, bw, bh,
-					( L == WUI_LAYER_BG_DARK ) ? WUI_BG_LAYER_BASE
-					                           : ( WUI_BG_DEMO_BACKDROP & ~WUI_BG_LAYER_BASE ) );
-				continue;
-			}
 
 			if ( L == WUI_LAYER_MENU ) {
 				m = WiredUI_GetActiveMenu();
@@ -5912,6 +5892,24 @@ void WiredUI_CompositorEmitFrame( void )
 
 		/* (3b) Emit panel + record (id, item, panel) tuples. */
 		Clay_BeginLayout();
+
+		/* Background layers first, inside the open layout — CLAY() needs one,
+		 * and emitting from the panel-collection walk above silently dropped
+		 * every rect because no layout was open yet. Guarded to the first
+		 * panel so a multi-panel layer does not repaint the backdrop per
+		 * panel. */
+		if ( i == 0 ) {
+			float bw = (float) cls.glconfig.vidWidth;
+			float bh = (float) cls.glconfig.vidHeight;
+			if ( WiredUI_LayerVisible( WUI_LAYER_BG_DARK ) )
+				WUI_DrawBackgroundLayered( 0.0f, 0.0f, bw, bh, WUI_BG_LAYER_BASE );
+			if ( WiredUI_LayerVisible( WUI_LAYER_BG_ANIMATED ) )
+				WUI_DrawBackgroundLayered( 0.0f, 0.0f, bw, bh,
+					WUI_BG_DEMO_BACKDROP & ~WUI_BG_LAYER_BASE );
+			if ( wui_clay_menu_scrim )
+				WUI_DrawBackgroundDim( 0.0f, 0.0f, bw, bh );
+		}
+
 		wui_clay_emit_panel( menu );
 		cmds = Clay_EndLayout();
 
