@@ -40,3 +40,18 @@ __pycache__/
 tools/visual_regression/__pycache__/
 .scratch/
 tools/png2raw/png2raw
+
+# Visual-gate harness vendor tree (built by tests/visual/scripts/vendor_sync.mjs).
+# Reproducible local artifact: React UMD + repo-local fonts + design JSX compiled
+# to plain JS. The design JSX originates in the PRIVATE wiki repo, so it must not
+# be committed to this PUBLIC repo — regenerate it instead.
+tests/visual/vendor/
+
+# Agent/tool state and visual-test output: machine-local artifacts that also
+# carried absolute personal paths into a public repo (result.json baseline/impl/diff).
+.eser/
+tests/visual/results/
+
+# Go build artifacts for the visual tooling (produced by `go build`).
+tools/visual-compare/vcompare
+tools/visual-diff/vdiff
