@@ -30,16 +30,22 @@
 #if FEAT_WIRED_UI
 
 typedef enum {
-	/* Nothing behind the menu — fullscreen console, error dialogs. */
-	WUI_BG_PRESET_NONE = 0,
+	/* The composed backdrop — dark base plus the animated scene. Deep menus
+	 * use this, and it is the default for any menu that declares nothing.
+	 *
+	 * Deliberately zero: menuDef is zero-initialised, so a menu that never
+	 * says `background` lands here rather than on whatever happened to be
+	 * first in the enum. An undeclared field falling into "draw nothing"
+	 * would be a black screen that looks like a bug and reads like a
+	 * deliberate choice. */
+	WUI_BG_PRESET_ANIMATED = 0,
 	/* Let the attract reel show through. The main menu's look: Quake 1 drew
 	 * its menu straight over whatever the attract demo was doing. */
 	WUI_BG_PRESET_INVISIBLE,
-	/* The composed backdrop — dark base plus the animated scene. Deep menus
-	 * use this, and it is the default for any menu that declares nothing. */
-	WUI_BG_PRESET_ANIMATED,
 	/* Live gameplay with a scrim over it — the in-game menu. */
 	WUI_BG_PRESET_DIM,
+	/* Nothing behind the menu — fullscreen console, error dialogs. */
+	WUI_BG_PRESET_NONE,
 
 	WUI_BG_PRESET_COUNT
 } wuiBgPreset_t;

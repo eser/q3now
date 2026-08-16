@@ -7,6 +7,7 @@ cl_wired_parse.c — Wired UI: menu file parser
 
 #include "../../client.h"
 #include "cl_wired_ui.h"
+#include "policy/wui_bg_preset.h"
 #include "cl_wired_compositor.h"
 #include "cl_wired_customdraw.h"
 #include "cl_wired_bg.h"
@@ -2810,6 +2811,29 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 		}
 		else if ( !Q_stricmp( token.string, "composite" ) ) {
 			WiredPC_ParseCompositeInto( handle, &menu->compositeMode );
+		}
+		else if ( !Q_stricmp( token.string, "backdrop" ) ) {
+			/* What this menu wants behind it: invisible | animated | dim |
+			 * none. A preset, never a layer name — the preset->layer mapping
+			 * lives in one table (policy/wui_bg_preset.c), so inserting a
+			 * layer later changes behaviour without touching any .wui.
+			 *
+			 * Spelled `backdrop`, not `background`: menuDef already has a
+			 * `background` string field (s_menuProps) that the field table
+			 * claims before this branch is reached, and itemDefs use
+			 * `background "layered" effects` for authored chrome. Rather than
+			 * overload a name three ways, the layer request gets its own. */
+			if ( WiredPC_String( handle, &str ) ) {
+				wuiBgPreset_t preset;
+				if ( WUI_BgPresetParse( str, &preset ) ) {
+					menu->bgPreset = preset;
+				} else {
+					Com_Log( SEV_WARN, LOG_CH(ch_ui),
+						"WiredUI: unknown background preset '%s' on menu '%s'"
+						" — defaulting to animated\n", str, menu->name );
+					menu->bgPreset = WUI_BG_PRESET_ANIMATED;
+				}
+			}
 		}
 		else if ( !Q_stricmp( token.string, "layer" ) ) {
 			/* panel layer assignment. String → wuiLayer_t.
