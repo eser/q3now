@@ -15,7 +15,9 @@ REGIONS="$ROOT/visual/regions/${ARTBOARD}.json"
 RUN_DIR="$ROOT/visual/results/${ARTBOARD}_${MODE}_${ACCENT}/$TIMESTAMP"
 IMPL_PNG="$RUN_DIR/impl.png"
 IMPL_CLAY="$RUN_DIR/impl_clay.json"
-VCOMPARE="$ROOT/../tools/visual-compare/vcompare.exe"
+. "$ROOT/lib/wired_paths.sh"
+# .exe only on Windows; wired_find_tool tries both.
+VCOMPARE="$(wired_find_tool tools/visual-compare/vcompare || true)"
 
 [ -f "$VCOMPARE" ]    || { echo "vcompare binary missing: $VCOMPARE" >&2; exit 2; }
 [ -f "$BASELINE_PNG" ] || { echo "baseline PNG missing (run regen first): $BASELINE_PNG" >&2; exit 2; }

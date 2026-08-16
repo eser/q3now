@@ -695,7 +695,7 @@ if [ ! -x "$WIRED" ]; then echo "SKIP: binary not executable: $WIRED"; exit 77; 
 case "$WIRED" in /*) : ;; *) WIRED="$PWD/$WIRED" ;; esac
 WIRED_DIR="$(cd "$(dirname "$WIRED")" && pwd)"; WIRED="$WIRED_DIR/$(basename "$WIRED")"
 if [ ! -f "$TIMEOUT_RUNNER" ] || ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,8) else 1)' 2>/dev/null; then echo "SKIP: Python >=3.8 and timeout runner required"; exit 77; fi
-HEADLESS="${WIRED_HEADLESS:-}"
+HEADLESS="${WIRED_BINARY_HEADLESS:-}"
 if [ -z "$HEADLESS" ]; then
     gui_name="$(basename "$WIRED")"; suffix="${gui_name#wired}"
     for candidate in "$WIRED_DIR/wired-headless$suffix" "$WIRED_DIR/wired-headless.arm64" "$WIRED_DIR/wired-headless.aarch64" "$WIRED_DIR/wired-headless.x86_64" "$WIRED_DIR/wired-headless.x64.exe" "$WIRED_DIR/../../../wired-headless$suffix" "$WIRED_DIR/../../../wired-headless.arm64" "$WIRED_DIR/../../../wired-headless.x86_64"; do

@@ -2476,7 +2476,7 @@ WIRED="${1:-}"
 if [ -z "$WIRED" ] || [ ! -x "$WIRED" ]; then echo "SKIP: pass an assembled Wired GUI binary"; exit 77; fi
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")"
 WIRED_DIR="$(dirname "$WIRED")"
-HEADLESS="${WIRED_HEADLESS:-}"
+HEADLESS="${WIRED_BINARY_HEADLESS:-}"
 if [ -z "$HEADLESS" ]; then
     gui_name="$(basename "$WIRED")"; suffix="${gui_name#wired}"
     for candidate in "$WIRED_DIR/wired-headless$suffix" "$WIRED_DIR/../../../wired-headless$suffix" \

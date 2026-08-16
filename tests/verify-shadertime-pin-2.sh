@@ -2,7 +2,8 @@
 # c2-shadertime-pin-2 determinism check: 6 cold-cache captures × 5 viewpoints.
 # Saves PNGs + reports md5/mean per (run, vp). Cleans up at end.
 set -u
-PRODUCT_DIR="/c/Users/eser/wired/q3now-preview"
+. "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
+PRODUCT_DIR="${PRODUCT_DIR:-$WIRED_HOME}"
 JSONL="$PRODUCT_DIR/qconsole.jsonl"
 SS_DIR="$PRODUCT_DIR/base/screenshots"
 WIRED="build/debug/wired.x64.exe"

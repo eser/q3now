@@ -4,8 +4,9 @@
 # pinned harness, then (2) runs a verification cold-cache smoke. Sequential,
 # no parallelism. Single call site so the harness only spawns one outer task.
 set -u
+. "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
 
-PRODUCT_DIR="/c/Users/eser/wired/q3now-preview"
+PRODUCT_DIR="${PRODUCT_DIR:-$WIRED_HOME}"
 WIRED="build/debug/wired.x64.exe"
 
 echo "==== STEP 1: re-bless goldens (SMOKE_UPDATE_GOLDEN=1, cold cache) ===="

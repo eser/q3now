@@ -3,7 +3,8 @@
 # capture-time fade alpha against captured brightness. Just the Phase-1 part
 # of the smoke (1 wired launch = 2 captures) suffices to probe.
 set -u
-PRODUCT_DIR="/c/Users/eser/wired/q3now-preview"
+. "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
+PRODUCT_DIR="${PRODUCT_DIR:-$WIRED_HOME}"
 WIRED_DIR=$(pwd)/build/debug
 RUN_LABEL="${1:-run}"
 
@@ -26,7 +27,7 @@ timeout 240 ./wired.x64.exe \
     +wait 30 +map arena17 +waitForMap +wait 60 +setviewpos 488 1096 378 -90 +wait 120 +screenshot \
     +wait 30 +quit \
     > "/tmp/probe-${RUN_LABEL}-wired.log" 2>&1
-cd /c/Users/eser/projects/eser/q3now
+cd "$WIRED_SOURCE"
 
 JSONL="$PRODUCT_DIR/qconsole.jsonl"
 

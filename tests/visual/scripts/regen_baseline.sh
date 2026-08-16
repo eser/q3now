@@ -2,8 +2,18 @@
 # Renders the React mockup for ARTBOARD/MODE/ACCENT into baselines/:
 #   - <artboard>_<mode>_<accent>.png      via --screenshot
 #   - <artboard>_<mode>_<accent>_dom.json via --dump-dom + script-tag extraction
-# Both inputs feed vcompare; native resolution comes from the artboard's
-# design size (1440x900 for V1_Monolith).
+# Both inputs feed vcompare; the render resolution must match capture_impl.sh
+# exactly or every comparison is meaningless.
+#
+# !!! WARNING — REGENERATING BASELINES INVALIDATES THE CALIBRATED THRESHOLDS !!!
+# The per-region ssim/deltaE thresholds in tests/visual/regions/*.json were all
+# measured against 1440x900 (16:10) captures. Re-rendering baselines at any
+# other resolution makes those numbers stale: they no longer describe the
+# cross-renderer floor of the new baseline/impl pair. After a regen the
+# thresholds MUST be re-measured and re-calibrated (measure run -> per-region
+# floor -> recalibrate) before any PASS from this gate can be trusted. A PASS
+# against freshly regenerated baselines with the old thresholds is not
+# evidence — treat it as UNCALIBRATED.
 set -euo pipefail
 ARTBOARD="${ARTBOARD:?ARTBOARD required}"
 MODE="${MODE:-dark}"
@@ -12,9 +22,17 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HARNESS="$ROOT/visual/scripts/artboard_${ARTBOARD}.html"
 OUT_PNG="$ROOT/visual/baselines/${ARTBOARD}_${MODE}_${ACCENT}.png"
 OUT_DOM="$ROOT/visual/baselines/${ARTBOARD}_${MODE}_${ACCENT}_dom.json"
+# Artboard-native render resolution — must match capture_impl.sh exactly.
+#
+# 2026-08-16: briefly moved to 1280x720 on the false premise that the mockup was
+# resolution-independent; reverted. The artboard container is fixed pixels with
+# overflow:hidden (qw-screens.jsx:1043 `width:1440, height:900`), so a smaller
+# root crops the HUD rather than reflowing it. W-103's 16:9 rule governs the
+# engine; reconciling it with this 16:10 artboard is open — see TASK-70.
 W="${WIDTH:-1440}"
 H="${HEIGHT:-900}"
-CHROME="${CHROME:-/c/Program Files/Google/Chrome/Application/chrome.exe}"
+. "$(cd "$(dirname "$0")/../.." && pwd)/lib/wired_paths.sh"
+CHROME="${CHROME:-$(wired_find_chrome)}"
 
 [ -f "$HARNESS" ] || { echo "harness not found: $HARNESS" >&2; exit 2; }
 mkdir -p "$(dirname "$OUT_PNG")"

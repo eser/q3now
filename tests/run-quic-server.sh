@@ -9,12 +9,13 @@
 #   WIRED_MAP=q3dm6 WIRED_SV_MAXCLIENTS=4 ./tests/run-quic-server.sh
 
 set -euo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$PROJECT_DIR/build/quic-test"
 BINARY="$BUILD_DIR/wired-headless.arm64.app/Contents/MacOS/wired-headless.arm64"
-ASSETS_DIR="${WIRED_BASEPATH:-/Users/eser/q3now/old-q3}"
+ASSETS_DIR="${WIRED_BASEPATH:-$WIRED_GAMEDATA}"
 
 if [ ! -f "$BINARY" ]; then
     echo "ERROR: Binary not found at $BINARY"
@@ -36,7 +37,7 @@ export WIRED_SV_QUIC="${WIRED_SV_QUIC:-1}"
 export WIRED_SV_QUICAUTHTOKEN="${WIRED_SV_QUICAUTHTOKEN:-observer:member:user:testtoken,observer:leader:admin:admintoken}"
 export WIRED_SV_QUICMAXCLIENTS="${WIRED_SV_QUICMAXCLIENTS:-8}"
 export WIRED_MAP="${WIRED_MAP:-arena7}"
-export WIRED_HEADLESS="${WIRED_HEADLESS:-1}"
+export WIRED_BINARY_HEADLESS="${WIRED_BINARY_HEADLESS:-1}"
 export WIRED_NET_PORT="${WIRED_NET_PORT:-27960}"
 export WIRED_COM_HUNKMEGS="${WIRED_COM_HUNKMEGS:-128}"
 

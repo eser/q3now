@@ -105,6 +105,53 @@ default is `~/wired/q3now-preview/`. The names are set at the top of
 live. Do **not** override `fs_installpath` to work around a missing map — the
 game resolves its own asset paths, and overriding it produces `Can't find map`.
 
+The install root differs per platform, and `Q3DIR` in the Makefile (`:137-157`)
+is the authority:
+
+| | install root | binaries | paks |
+|---|---|---|---|
+| macOS | `/Applications/<app>.app` | `Contents/MacOS/` | `Contents/Resources/base/` |
+| Windows | `%LOCALAPPDATA%/Programs/<app>` | same dir | `base/` |
+| Linux | `~/.local/share/<app>` | same dir | `base/` |
+
+`~/wired/<product><channel>/` (the home dir above) is **the same shape on every
+platform** — only `$HOME` changes. Binaries carry an arch suffix: `wired.arm64`,
+`wired.x64[.exe]`.
+
+### Writing a script that needs these paths
+
+Source the helper — do not re-derive, and never hardcode:
+
+```bash
+. "$(git rev-parse --show-toplevel)/tests/lib/wired_paths.sh"
+echo "$WIRED_BASE"      # ~/wired/q3now-preview/base — screenshots, qconsole.jsonl
+echo "$WIRED_BINARY"    # GUI binary, arch- and platform-resolved
+echo "$WIRED_BINARY_HEADLESS"  # headless binary
+echo "$WIRED_GAMEDATA"   # installed paks
+```
+
+Every value honours a pre-set environment variable, so a caller can still point
+a run elsewhere without editing the script.
+
+This helper exists because ~14 test scripts each invented their own answer and
+most baked in one developer's Windows layout (`/c/Users/<name>/...`). That broke
+every non-Windows run and leaked a personal directory structure into a public
+repo. If you find yourself typing an absolute path into a script, that is the
+bug — the layout is fixed and documented, so there is nothing to guess.
+
+Two related traps, both of which have cost real debugging time:
+
+- **Do not hand-assemble a run** (copying paks into a scratch dir, setting
+  `fs_homepath` yourself, writing a `.cfg` and `+exec`-ing it). Use
+  `make run-game` / `make run-headless`, or call an existing script in `tests/`.
+  If none fits, extend one (add a `--mode`) rather than starting a new one.
+- **`_DEBUG`-only functionality is invisible in release builds.** `USE_ZONE_ID`
+  (`common.c:409-412`) and `wui_test_dump_clay` are compiled out, so a release
+  binary cannot witness a zone-consistency failure or emit a Clay dump. A probe
+  that "found nothing" on release found nothing because nothing could be found.
+  Check with `strings <binary> | grep -c '<the assertion text>'` before trusting
+  a green result.
+
 ---
 
 ## 5. Walkthrough

@@ -6,8 +6,9 @@
 # reports the verdict. No background tasks, no parallelism — strictly
 # sequential. Single call site.
 set -u
+. "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
 
-PRODUCT_DIR="/c/Users/eser/wired/q3now-preview"
+PRODUCT_DIR="${PRODUCT_DIR:-$WIRED_HOME}"
 WIRED="build/debug/wired.x64.exe"
 
 echo "=== Cold-cache state ==="

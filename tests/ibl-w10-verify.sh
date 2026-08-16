@@ -24,10 +24,11 @@
 #   tests/ibl-w10-verify.sh discover                 # dump shaderlist + spawn shot
 #   tests/ibl-w10-verify.sh capture <fromShader> <viewpos x y z yaw>
 set -u
+. "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PNG2RAW="${PNG2RAW:-$REPO_ROOT/tools/png2raw/png2raw.exe}"
-HOME_DIR="${WIRED_HOME:-/c/Users/eser/wired/q3now-preview}"
+HOME_DIR="$WIRED_HOME"
 BASE_DIR="$HOME_DIR/base"
 SHOT_DIR="$BASE_DIR/screenshots"
 JSONL="$HOME_DIR/qconsole.jsonl"

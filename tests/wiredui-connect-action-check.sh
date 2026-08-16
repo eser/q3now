@@ -318,7 +318,7 @@ fi
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")"
 WIRED_DIR="$(dirname "$WIRED")"
 
-HEADLESS="${WIRED_HEADLESS:-}"
+HEADLESS="${WIRED_BINARY_HEADLESS:-}"
 if [ -z "$HEADLESS" ]; then
     gui_name="$(basename "$WIRED")"
     suffix="${gui_name#wired}"
@@ -335,7 +335,7 @@ if [ -z "$HEADLESS" ]; then
     done
 fi
 if [ -z "$HEADLESS" ] || [ ! -x "$HEADLESS" ]; then
-    echo "SKIP: sibling wired-headless binary unavailable (or set WIRED_HEADLESS)"
+    echo "SKIP: sibling wired-headless binary unavailable (or set WIRED_BINARY_HEADLESS)"
     exit 77
 fi
 HEADLESS="$(cd "$(dirname "$HEADLESS")" && pwd)/$(basename "$HEADLESS")"
