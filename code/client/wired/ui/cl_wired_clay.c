@@ -29,6 +29,7 @@ together with the modality + loading-screen migration.
 #include "../../client.h"
 #include "cl_wired_compositor.h"
 #include "cl_wired_ui.h"
+#include "policy/wui_bg_preset.h"
 #include "cl_wired_widget_core.h"   /* 5-state resolver, focus-ring, state colours */
 #include "cl_wired_anim.h"
 #include "cl_wired_bg.h"
@@ -5579,6 +5580,37 @@ static void wui_clay_emit_modal_scrim( const wiredMenuDef_t *menu )
  *        c. Clay_EndLayout → capture Clay_Hovered() into panel state.
  *        d. Walk the render command array → dispatch through backend.
  */
+/* Per-frame layer-state resolve. Split out so the emit walk reads state rather
+ * than deciding it, and so the background family's preset lookup has one home. */
+static void wui_clay_resolve_layer_states( void )
+{
+	const wiredMenuDef_t *top = WiredUI_GetActiveMenu();
+	wuiBgLayerState_t     bg;
+	qboolean              isLoading;
+	int                   L;
+
+	/* A menu is "on top" for preset purposes whenever one is showing at all —
+	 * including the implicit-root case where main is active without ever
+	 * having been pushed. That path is precisely what the old slot model
+	 * could not see. */
+	isLoading = ( clientActiveApp && clientActiveApp->state == CA_LOADING ) ? qtrue : qfalse;
+
+	WUI_BgPresetEval( top ? top->bgPreset : WUI_BG_PRESET_ANIMATED,
+	                  top ? qtrue : qfalse, isLoading, &bg );
+
+	WiredUI_LayerStateSet( WUI_LAYER_BG_DARK,     bg.darkVisible,     qfalse );
+	WiredUI_LayerStateSet( WUI_LAYER_BG_ANIMATED, bg.animatedVisible, !bg.animatedVisible );
+	WiredUI_LayerStateSet( WUI_LAYER_BG_ATTRACT,  bg.attractVisible,  bg.attractPaused );
+
+	/* The rest keep their own predicates; recording the answer here gives
+	 * every layer a uniform queryable state and a clock. */
+	for ( L = 0; L < WUI_LAYER_COUNT; L++ ) {
+		if ( L == WUI_LAYER_BG_DARK || L == WUI_LAYER_BG_ANIMATED
+		  || L == WUI_LAYER_BG_ATTRACT ) continue;
+		WiredUI_LayerStateSet( (wuiLayer_t) L, wui_layer_active( (wuiLayer_t) L ), qfalse );
+	}
+}
+
 void WiredUI_CompositorEmitFrame( void )
 {
 	int                       i;
@@ -5586,6 +5618,14 @@ void WiredUI_CompositorEmitFrame( void )
 	const wiredMenuDef_t     *menu;
 
 	if ( !wui_clay_initialized ) return;
+
+	/* Resolve every layer's visible/paused state for this frame before any
+	 * emit reads it. The background family answers to the stack-top menu's
+	 * declared preset; everything else keeps its own connection-state
+	 * predicate. Asking here, once, is what replaces the old write-on-push
+	 * intent slot — there is no transition to miss because there is no
+	 * transition, only a fresh answer each frame. */
+	wui_clay_resolve_layer_states();
 
 	/* (1) Build the visible-panels list. This replaces the
 	 * single-active-menu hook with a 6-layer walk (back-to-front z-order):

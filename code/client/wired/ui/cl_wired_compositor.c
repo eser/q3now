@@ -306,6 +306,68 @@ qboolean WiredUI_LayerForceOverrideTest( int layer )
 	     ? qtrue : qfalse;
 }
 
+/* ── per-layer state ──────────────────────────────────────────────────
+ *
+ * One record per layer, recomputed once per frame at the top of the emit walk.
+ * Nothing here is written at a transition; the values are answers to "what is
+ * true right now", which is what makes a missed transition impossible to
+ * express. The background family gets its answer from the stack-top menu's
+ * preset (policy/wui_bg_preset.h); every other layer keeps its own
+ * connection-state predicate.
+ *
+ * `clockMs` advances only while a layer is visible and unpaused, so a hidden
+ * backdrop genuinely stops rather than merely being skipped at draw time —
+ * that is the difference between saving the draw and saving the work. */
+typedef struct {
+	qboolean visible;
+	qboolean paused;
+	int      clockMs;      /* accumulated running time, ms */
+	int      lastTickMs;   /* cls.realtime at the previous advance */
+} wuiLayerState_t;
+
+static wuiLayerState_t wui_layer_state[ WUI_LAYER_COUNT ];
+
+void WiredUI_LayerStateSet( int layer, qboolean visible, qboolean paused )
+{
+	wuiLayerState_t *st;
+
+	if ( layer < 0 || layer >= WUI_LAYER_COUNT ) return;
+	st = &wui_layer_state[ layer ];
+
+	/* Advance the clock for the interval that just elapsed, using the state
+	 * it was in during that interval — then adopt the new state. Sampling
+	 * after the change would credit or skip a frame at every transition. */
+	if ( st->lastTickMs > 0 && st->visible && !st->paused ) {
+		int delta = cls.realtime - st->lastTickMs;
+		if ( delta > 0 && delta < 1000 )   /* ignore hitches and rewinds */
+			st->clockMs += delta;
+	}
+	st->lastTickMs = cls.realtime;
+	st->visible    = visible;
+	st->paused     = paused;
+}
+
+qboolean WiredUI_LayerVisible( int layer )
+{
+	if ( layer < 0 || layer >= WUI_LAYER_COUNT ) return qfalse;
+	return wui_layer_state[ layer ].visible;
+}
+
+qboolean WiredUI_LayerPaused( int layer )
+{
+	if ( layer < 0 || layer >= WUI_LAYER_COUNT ) return qfalse;
+	return wui_layer_state[ layer ].paused;
+}
+
+/* Milliseconds this layer has actually been running. Content animated off this
+ * instead of cls.realtime freezes when the layer is paused and resumes where
+ * it left off, rather than jumping to wherever wall-clock got to meanwhile. */
+int WiredUI_LayerClockMs( int layer )
+{
+	if ( layer < 0 || layer >= WUI_LAYER_COUNT ) return 0;
+	return wui_layer_state[ layer ].clockMs;
+}
+
 /* Whole-mask accessor — used by the SCR_DrawScreenField CA_DISCONNECTED
  * carve-out. Production default mask=0 makes the carve-out
  * a no-op; when any dev-command bit is set, SCR skips the legacy main-menu

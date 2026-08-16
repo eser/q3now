@@ -301,6 +301,17 @@ qboolean WiredUI_LayerForceOverrideTest( int layer );
  * CA_DISCONNECTED carve-out (cl_scrn.c). Returns 0 in production (the
  * carve-out then no-ops, byte-identical to the prior behaviour).
  * Half-life: deletes alongside SCR_DrawScreenField. */
+/* Per-layer visible/paused state, recomputed once per frame by the emit walk.
+ * Read by content that needs to know whether it is on screen, and by anything
+ * animating off WiredUI_LayerClockMs so a paused layer genuinely stops. */
+/* int rather than wuiLayer_t: this header is included ahead of cl_wired_ui.h
+ * in several TUs, and the sibling override-mask accessors already take the
+ * plain type for the same reason. */
+void     WiredUI_LayerStateSet( int layer, qboolean visible, qboolean paused );
+qboolean WiredUI_LayerVisible ( int layer );
+qboolean WiredUI_LayerPaused  ( int layer );
+int      WiredUI_LayerClockMs ( int layer );
+
 uint32_t WiredUI_LayerForceOverrideMask( void );
 
 /* ── exclusive-mode accessor ───────────────────────────────────────────
