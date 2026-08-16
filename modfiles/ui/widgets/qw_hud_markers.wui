@@ -1,5 +1,5 @@
 // qw_hud_markers — WA-2a world-anchored marker overlay
-// Interface: #include once into the modern composer menuDef body.
+// Interface: #include once into the HUD composer menuDef body.
 //
 // The `markerlist` hudElement (WA-2a infra) draws a variable-count list of
 // world-anchored text markers at their ABSOLUTE staged pixel positions. cgame

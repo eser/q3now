@@ -1,40 +1,12 @@
-// classic — the 2026-08-10 HUD, kept as a separate variant.
+// classic — the in-game HUD.
 //
-// Identical to modern except for the ammo readout: this one keeps the
-// bottom-right block WITH its gauge and icon, which the mockup-aligned revision
-// dropped. Switch at runtime with `hud classic` (the cvar reloads the
-// layout on change, cl_wired_ui.c:4126).
-//
-// Why two variants rather than one "fixed" HUD: the mockup and the running game
-// disagree about the bottom-centre slot — the artboard puts ammo there, the game
-// puts the weapon-select bar there, and they collide. Rather than pick a winner
-// by fiat, both layouts ship and the cvar decides.
-// modern.wui — q3now V2_HUD_Active in-game HUD composer (skeleton)
-//
-// Activated by the `hud` cvar: `set hud modern` loads this file in
-// place of ui/default.wui (the legacy Q3-style HUD). default.wui stays the
-// shipped default and coexists; the V2 chain (dispatches 5.21-5.25) builds
-// this composer up widget-by-widget, then the dispatch-5.25 cleanup decides
-// the retire/swap of default.wui.
-//
-// Dispatch 5.21 (P1): health + armor + ammo + crosshair.
-// Dispatch 5.23 (P2): qw_hud_weapon_carousel (weaponlist hudElement).
-// Dispatch 5.24 (P2 complete): qw_hud_scoreboard_bar via the rank-sorted
-//   game.scores.<si>.* WiredStore keys (0 engine LoC; un-HALTs 5.23 S3) +
-//   carousel selected-slot outline (border ItemToConfig mapping).
-// Dispatch 5.25 (P3): qw_hud_telemetry (fps + netstats) + qw_hud_holdables_strip
-//   (holdablelist) + qw_hud_weapon_placeholder (static panel).
-// Dispatch 5.26 (P4): qw_hud_scoreboard_overlay (scorelist_widget) + ammo
-//   weapon-name label via player.weapon.name.
-// Dispatch 5.27: qw_hud_kill_feed — cgame now pushes name-resolved obituary
-//   lines (cg_event.c), the client stages hud.feed.<N>.text, the widget binds
-//   them. ALL 11 HUD elements present. V2 LANDED gating is dispatch 5.28.
-//
-// Layer "hud": the compositor's WUI_LAYER_HUD walk emits every itemDef each
-// frame; hudElement leaves dispatch through the unified custom-draw registry.
-
-#include "ui/wmenumacros.h"
-
+// Loaded by the `hud` cvar (`hud classic`). This was briefly one of two
+// variants; the other ("modern") chased the V2 artboard and lost to it in play
+// — it put the ammo readout under the weapon-select bar and dropped the ammo
+// gauge and icon because the artboard draws neither. Eser compared them live:
+// "hud modern sanki hud classic'in yanlis surumu gibi. direkt modern'i
+// silebiliriz. classic default'umuz olsun." So it did, and this is the only
+// HUD now.
 menuDef {
 	name "classic"
 	rect 0 0 1 1
@@ -51,7 +23,7 @@ menuDef {
 	#include "ui/widgets/qw_hud_telemetry.wui"
 	#include "ui/widgets/qw_hud_health_panel.wui"
 	#include "ui/widgets/qw_hud_armor_panel.wui"
-	#include "ui/widgets/qw_hud_ammo_readout_classic.wui"
+	#include "ui/widgets/qw_hud_ammo_readout.wui"
 	#include "ui/widgets/qw_hud_weapon_carousel.wui"
 	#include "ui/widgets/qw_hud_holdables_strip.wui"
 	// HUD redesign (Eser, minimalist): the weapon-viewmodel PLACEHOLDER box is

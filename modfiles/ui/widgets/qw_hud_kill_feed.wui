@@ -1,5 +1,5 @@
 // qw_hud_kill_feed — V2_HUD_Active top-left kill feed
-// Interface: #include once into the modern composer menuDef body.
+// Interface: #include once into the HUD composer menuDef body.
 // Source: docs/wui-claude-design-canonical-v2/project/qw-screens.jsx:1144-1183
 //   (top:80 left:24 maxWidth:380; recent obituary rows, left accent bar).
 //

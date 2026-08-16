@@ -3697,7 +3697,10 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	WiredUI_ResetAssetGlobalsDefaults();
 
 	// register 'hud' cvar before menu load so WiredUI_LoadHudFromCvar is safe to call
-	wired_hud = Cvar_Get( "hud", "default", CVAR_ARCHIVE );
+	// "classic" (ui/classic.wui) is the V2 HUD and what the game opens with.
+	// ui/default.wui is the older competitive layout, still selectable with
+	// `hud default` for anyone who prefers it.
+	wired_hud = Cvar_Get( "hud", "classic", CVAR_ARCHIVE );
 	Q_strncpyz( wui_hud_lastLoaded, wired_hud->string, sizeof( wui_hud_lastLoaded ) );
 
 	// register feeder data sources first — the menu parser resolves
