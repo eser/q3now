@@ -1984,9 +1984,18 @@ TARGET_INCLUDE_DIRECTORIES(botlib      PRIVATE code/qcommon/util)
 # Submodule: src/libs/zlib-ng  —  cmake -B build -DUSE_ZLIB_NG=ON
 IF(USE_ZLIB_NG)
     SET(ZLIB_COMPAT         ON  CACHE BOOL "" FORCE)
-    SET(ZLIB_ENABLE_TESTS   OFF CACHE BOOL "" FORCE)
     SET(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    # zlib-ng deprecated ZLIB_ENABLE_TESTS in favour of BUILD_TESTING and warns
+    # on every configure when it is defined. BUILD_TESTING cannot simply be left
+    # alone, though: it is a GLOBAL option and ours is ON, which would switch
+    # zlib-ng's own test and gtest targets back on (zlib-ng/CMakeLists.txt:56).
+    # Shadow it with a directory-scoped variable for the subdirectory only, then
+    # restore, so our own BUILD_TESTING keeps its value for everything after.
+    SET(_WIRED_SAVED_BUILD_TESTING ${BUILD_TESTING})
+    SET(BUILD_TESTING OFF)
     ADD_SUBDIRECTORY(src/libs/zlib-ng EXCLUDE_FROM_ALL)
+    SET(BUILD_TESTING ${_WIRED_SAVED_BUILD_TESTING})
+    UNSET(_WIRED_SAVED_BUILD_TESTING)
     TARGET_INCLUDE_DIRECTORIES(qcommon     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/libs/zlib-ng
         ${CMAKE_CURRENT_BINARY_DIR}/src/libs/zlib-ng)
