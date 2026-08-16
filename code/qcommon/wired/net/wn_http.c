@@ -41,7 +41,7 @@ Endpoints:
 #endif
 
 #define HTTP_MAX_REQUEST    4096
-#define HTTP_MAX_RESPONSE   8192
+#define HTTP_MAX_RESPONSE   16384
 #define WN_STATUS_RESP_MAX  65536       // max /status.json response body (64KB)
 #define WN_FILE_SIZE_LIMIT  (1024*1024) // 1MB static file size limit
 
@@ -270,10 +270,42 @@ static void WN_HttpHandleHealth( wn_http_ctx_t *ctx )
 
 /*
 ====================
+WN_HttpMetricAppend
+
+Bounded append helper for the exposition builder.
+
+Com_sprintf returns the length the format *wanted* (vsnprintf semantics), not
+the length written. Accumulating that return value directly would push offset
+past the buffer once the body is full, and the next call would then receive a
+negative size. Clamp here so a full buffer truncates instead.
+====================
+*/
+static void QDECL WN_HttpMetricAppend( char *body, int cap, int *offset, const char *fmt, ... )
+{
+	if ( *offset >= cap - 1 ) {
+		return;
+	}
+
+	va_list argptr;
+	va_start( argptr, fmt );
+	const int want = vsnprintf( body + *offset, (size_t)( cap - *offset ), fmt, argptr );
+	va_end( argptr );
+
+	if ( want < 0 ) {
+		return;
+	}
+
+	*offset += ( want >= cap - *offset ) ? ( cap - *offset - 1 ) : want;
+}
+
+
+/*
+====================
 WN_HttpHandleMetrics
 
 GET /metrics → Prometheus exposition format.
-Exposes QUIC connection stats for Grafana dashboards.
+Exposes QUIC connection stats and, when FEAT_MEMSTATS is on, the per-tag and
+allocator memory counters, for Grafana dashboards.
 ====================
 */
 static void WN_HttpHandleMetrics( wn_http_ctx_t *ctx )
@@ -308,8 +340,70 @@ static void WN_HttpHandleMetrics( wn_http_ctx_t *ctx )
 	offset += Com_sprintf( body + offset, sizeof(body) - offset,
 		"# HELP wired_server_uptime_ms Server uptime in milliseconds.\n"
 		"# TYPE wired_server_uptime_ms gauge\n"
-		"wired_server_uptime_ms %d\n",
+		"wired_server_uptime_ms %d\n\n",
 		Sys_Milliseconds() );
+
+#if FEAT_MEMSTATS
+	// Per-tag allocation counters, then the two allocator summaries. Emitted as
+	// labelled series (one metric name, one label value per tag) rather than a
+	// metric name per tag: that is the Prometheus convention and keeps the
+	// exposition stable when MEMTAG_* gains entries.
+	WN_HttpMetricAppend( body, (int)sizeof(body), &offset,
+		"# HELP wired_mem_tag_bytes Current bytes allocated per subsystem tag.\n"
+		"# TYPE wired_mem_tag_bytes gauge\n" );
+	for ( int tag = 0; tag < MEMTAG_COUNT; tag++ ) {
+		WN_HttpMetricAppend( body, (int)sizeof(body), &offset,
+			"wired_mem_tag_bytes{tag=\"%s\"} %lld\n",
+			MemTag_Names[tag], (long long)memStats[tag].currentBytes );
+	}
+
+	WN_HttpMetricAppend( body, (int)sizeof(body), &offset,
+		"\n# HELP wired_mem_tag_peak_bytes Peak bytes allocated per subsystem tag.\n"
+		"# TYPE wired_mem_tag_peak_bytes gauge\n" );
+	for ( int tag = 0; tag < MEMTAG_COUNT; tag++ ) {
+		WN_HttpMetricAppend( body, (int)sizeof(body), &offset,
+			"wired_mem_tag_peak_bytes{tag=\"%s\"} %lld\n",
+			MemTag_Names[tag], (long long)memStats[tag].peakBytes );
+	}
+
+	WN_HttpMetricAppend( body, (int)sizeof(body), &offset,
+		"\n# HELP wired_mem_tag_allocations Live allocation count per subsystem tag.\n"
+		"# TYPE wired_mem_tag_allocations gauge\n" );
+	for ( int tag = 0; tag < MEMTAG_COUNT; tag++ ) {
+		WN_HttpMetricAppend( body, (int)sizeof(body), &offset,
+			"wired_mem_tag_allocations{tag=\"%s\"} %d\n",
+			MemTag_Names[tag], memStats[tag].currentCount );
+	}
+
+	{
+		const hunkStats_t hunk = Hunk_GetStats();
+		const zoneStats_t zone = Zone_GetStats();
+
+		WN_HttpMetricAppend( body, (int)sizeof(body), &offset,
+			"\n# HELP wired_hunk_bytes Hunk allocator byte breakdown.\n"
+			"# TYPE wired_hunk_bytes gauge\n"
+			"wired_hunk_bytes{state=\"total\"} %d\n"
+			"wired_hunk_bytes{state=\"permanent\"} %d\n"
+			"wired_hunk_bytes{state=\"temp\"} %d\n"
+			"wired_hunk_bytes{state=\"free\"} %d\n"
+			"wired_hunk_bytes{state=\"peak_used\"} %d\n\n",
+			hunk.totalBytes, hunk.permanentLowBytes + hunk.permanentHighBytes,
+			hunk.tempBytes, hunk.freeBytes, hunk.peakUsedBytes );
+
+		WN_HttpMetricAppend( body, (int)sizeof(body), &offset,
+			"# HELP wired_zone_bytes Zone allocator byte breakdown.\n"
+			"# TYPE wired_zone_bytes gauge\n"
+			"wired_zone_bytes{state=\"total\"} %d\n"
+			"wired_zone_bytes{state=\"used\"} %d\n"
+			"wired_zone_bytes{state=\"free\"} %d\n"
+			"wired_zone_bytes{state=\"largest_free_block\"} %d\n\n"
+			"# HELP wired_zone_allocations Live zone allocation count.\n"
+			"# TYPE wired_zone_allocations gauge\n"
+			"wired_zone_allocations %d\n",
+			zone.totalBytes, zone.usedBytes, zone.freeBytes,
+			zone.largestFreeBlock, zone.allocCount );
+	}
+#endif // FEAT_MEMSTATS
 
 	WN_HttpCtxSendStr( ctx, 200, "OK",
 		"text/plain; version=0.0.4; charset=utf-8", body );
