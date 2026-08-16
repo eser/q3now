@@ -1862,6 +1862,22 @@ SET_TESTS_PROPERTIES(cl_console_close_policy_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(cl_console_close_policy_test cl_console_close_policy_contract)
 
+# Attract-state first-input promotion. The console-close policy above is right
+# to leave KEYCATCH_CONSOLE with the user after a soft close, but the promotion
+# test in cl_keys.c used to read that catcher as "console is in the way" — so
+# opening and closing the console once over attract killed keyboard input to the
+# menu for good. A second clause required !com_sv_running, which a local map
+# leaves set. Both were silent: nothing logged, keys just stopped working.
+ADD_EXECUTABLE(attract_input_promotion_test
+	tests/attract-input-promotion-test.c
+)
+ADD_TEST(NAME attract_input_promotion_contract COMMAND attract_input_promotion_test)
+SET_TESTS_PROPERTIES(attract_input_promotion_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(attract_input_promotion_test attract_input_promotion_contract)
+
 # Local bot-slot allocation identity. Compiles the exact production parser and
 # match seam so a queued removal cannot authorize a replacement bot in a reused
 # physical client slot.
