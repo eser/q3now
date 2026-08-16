@@ -4267,30 +4267,16 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 		 * WHOLE tree, so gating on bgLayerFlags is what keeps the emit to a
 		 * single pass — without it, DIM/SCENE would fire for every nested item
 		 * (thousands of scene emits → Clay element-count overflow). */
-		if ( item->bgLayerFlags ) {
-			wuiBgIntent_t bgIntent = WiredUI_GetActiveBgIntent( panel );
-			switch ( bgIntent ) {
-				case WUI_BG_INTENT_DIM:
-					/* Dark scrim only — no layered scene — so live gameplay
-					 * behind the menu shows through. The concrete new behavior. */
-					WUI_DrawBackgroundDim( x, y, w, h );
-					break;
-				case WUI_BG_INTENT_NONE:
-					/* Emit no background at all. */
-					break;
-				case WUI_BG_INTENT_SCENE:
-					/* Phase 2: the full depth-parallax DemoBackdrop scene —
-					 * per-layer speed by distance + mouse + transition response,
-					 * regardless of the menu's authored effects flags. */
-					WUI_DrawBackgroundScene( x, y, w, h );
-					break;
-				case WUI_BG_INTENT_INHERIT:
-				default:
-					/* Authored background — unchanged from before this seam. */
-					WUI_DrawBackgroundLayered( x, y, w, h, item->bgLayerFlags );
-					break;
-			}
-		}
+		/* The item-level background hook is gone. It let whichever menu item
+		 * happened to carry `background "layered"` decide what the whole
+		 * screen looked like, which is how the backdrop ended up owned by the
+		 * menu tree rather than by a layer — and how two emitters wound up on
+		 * the same zIndex arguing about precedence.
+		 *
+		 * Backgrounds now belong to WUI_LAYER_BG_DARK / _BG_ANIMATED and are
+		 * requested by the stack-top menu's `backdrop` preset. The authored
+		 * bgLayerFlags remain parsed and are still read by the layer emit for
+		 * their content; nothing draws from here. */
 
 		/* Two CLAY emit blocks because Clay's CLAY({...}) macro is a for-loop
 		 * that opens + configures + closes around its body — there's no
@@ -5580,6 +5566,10 @@ static void wui_clay_emit_modal_scrim( const wiredMenuDef_t *menu )
  *        c. Clay_EndLayout → capture Clay_Hovered() into panel state.
  *        d. Walk the render command array → dispatch through backend.
  */
+/* Does the stack-top menu want a scrim over the game? Resolved with the rest
+ * of the layer state and read by the MENU layer's emit. */
+static qboolean wui_clay_menu_scrim = qfalse;
+
 /* Per-frame layer-state resolve. Split out so the emit walk reads state rather
  * than deciding it, and so the background family's preset lookup has one home. */
 static void wui_clay_resolve_layer_states( void )
@@ -5598,6 +5588,7 @@ static void wui_clay_resolve_layer_states( void )
 	WUI_BgPresetEval( top ? top->bgPreset : WUI_BG_PRESET_ANIMATED,
 	                  top ? qtrue : qfalse, isLoading, &bg );
 
+	wui_clay_menu_scrim = bg.menuScrim;
 	WiredUI_LayerStateSet( WUI_LAYER_BG_DARK,     bg.darkVisible,     qfalse );
 	WiredUI_LayerStateSet( WUI_LAYER_BG_ANIMATED, bg.animatedVisible, !bg.animatedVisible );
 	WiredUI_LayerStateSet( WUI_LAYER_BG_ATTRACT,  bg.attractVisible,  bg.attractPaused );
@@ -5670,6 +5661,14 @@ void WiredUI_CompositorEmitFrame( void )
 			 * layered scene rects and the procedural backdrop — end up on the
 			 * same zIndex competing on emit order; as layers they simply
 			 * stack. */
+			/* The dim scrim belongs to the menu surface rather than to a
+			 * background layer: it darkens the live match the menu is sitting
+			 * on, so it has to land above the game and below the panel. */
+			if ( L == WUI_LAYER_MENU && wui_clay_menu_scrim ) {
+				WUI_DrawBackgroundDim( 0.0f, 0.0f,
+					(float) cls.glconfig.vidWidth, (float) cls.glconfig.vidHeight );
+			}
+
 			if ( L == WUI_LAYER_BG_DARK || L == WUI_LAYER_BG_ANIMATED ) {
 				float bw = (float) cls.glconfig.vidWidth;
 				float bh = (float) cls.glconfig.vidHeight;

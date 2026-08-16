@@ -1553,12 +1553,6 @@ static int       wui_menuStackDepth = 0;
  * with default/first-focus as before). Cleared on CloseAllMenus. */
 static wiredItemDef_t *wui_returnFocus[WIRED_MENU_STACK_DEPTH];
 
-/* Per-stack-entry background intent (parallel to wui_menuStack, keyed by the
- * same depth). Set at push time; the compositor reads the stack-top entry's
- * value via WiredUI_GetActiveBgIntent when emitting that menu's background.
- * WUI_BG_INTENT_INHERIT (0) = use the .wui-authored flags (today's behavior);
- * the array zero-inits, so any unset slot is INHERIT. */
-static wuiBgIntent_t wui_menuBgIntent[WIRED_MENU_STACK_DEPTH];
 
 // Pool/compositor health flag — set qtrue at the end of WiredUI_Init and
 // on successful SafeReload; set qfalse in WiredUI_Shutdown and on failing
@@ -2584,27 +2578,6 @@ void WiredUI_GetCursorNorm( float *nx, float *ny ) {
 	if ( ny ) *ny = ( vh > 0.0f ) ? ( wui_cursorY / vh ) * 2.0f - 1.0f : 0.0f;
 }
 
-wuiBgIntent_t WiredUI_GetActiveBgIntent( const wiredMenuDef_t *panel ) {
-	if ( !panel )
-		return WUI_BG_INTENT_INHERIT;
-
-	/* The LOADING layer (state-driven, not on the menu stack) is a SCENE variant
-	 * of the menu-background system: while a map loads, the parallax DemoBackdrop
-	 * plays behind the progress + map content — matching the standalone menus
-	 * routed SCENE in F4. Resolve SCENE when this panel is the bound loading menu. */
-	if ( wui_loading_menu_path[ 0 ]
-	  && panel == WiredUI_FindMenuByPath( wui_loading_menu_path ) )
-		return WUI_BG_INTENT_SCENE;
-
-	/* Otherwise the push-time intent applies only to the stack-top MENU-layer
-	 * panel. Popups and multi-panel layers keep their authored background, so
-	 * return INHERIT unless `panel` is exactly the current stack top. */
-	if ( wui_menuStackDepth <= 0 )
-		return WUI_BG_INTENT_INHERIT;
-	if ( panel != WiredUI_FindMenu( wui_menuStack[ wui_menuStackDepth - 1 ] ) )
-		return WUI_BG_INTENT_INHERIT;
-	return wui_menuBgIntent[ wui_menuStackDepth - 1 ];
-}
 
 // ── health + recovery ─────────────────────────────────────────────────
 
@@ -2684,7 +2657,7 @@ void WiredUI_Activate( void ) {
 	// we're already visible — just let the error dialog layer if needed.
 	if ( wui_activeMenu != UIMENU_MAIN || wui_menuStackDepth == 0 ) {
 		WiredUI_SetActiveMenu( UIMENU_MAIN ); // sets KEYCATCH_UI
-		WiredUI_PushMenu( "main", WUI_BG_INTENT_SCENE );
+		WiredUI_PushMenu( "main" );
 	}
 
 	// If an error is pending, surface it as a dialog on top of main.
@@ -2768,21 +2741,25 @@ static void WiredUI_PushMenu_f( void ) {
 	wuiBgIntent_t intent = WUI_BG_INTENT_INHERIT;
 	if ( Cmd_Argc() < 2 ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_ui),
-			"usage: wui_push <menu_name> [scene|dim|none]\n" );
+			"usage: wui_push <menu_name> [invisible|animated|dim|none]\n" );
 		return;
 	}
-	/* Optional 2nd arg selects the background intent (for testing the seam);
-	 * absent → INHERIT, reproducing the menu's authored background. */
+	/* Optional 2nd arg overrides the menu's own `backdrop` declaration for
+	 * this push — a testing affordance, not something production uses. It sets
+	 * the menu's preset rather than passing one alongside, because the
+	 * evaluator reads the declaration and nothing else. */
 	if ( Cmd_Argc() >= 3 ) {
-		const char *k = Cmd_Argv( 2 );
-		if      ( !Q_stricmp( k, "scene" ) ) intent = WUI_BG_INTENT_SCENE;
-		else if ( !Q_stricmp( k, "dim" )   ) intent = WUI_BG_INTENT_DIM;
-		else if ( !Q_stricmp( k, "none" )  ) intent = WUI_BG_INTENT_NONE;
-		else if ( !Q_stricmp( k, "inherit" ) ) intent = WUI_BG_INTENT_INHERIT;
-		else Com_Log( SEV_WARN, LOG_CH(ch_ui),
-			"wui_push: unknown intent '%s' (scene|dim|none|inherit) — using inherit\n", k );
+		wiredMenuDef_t *m = WiredUI_FindMenu( Cmd_Argv( 1 ) );
+		wuiBgPreset_t   p;
+		if ( !WUI_BgPresetParse( Cmd_Argv( 2 ), &p ) ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_ui),
+				"wui_push: unknown backdrop '%s' (invisible|animated|dim|none)\n",
+				Cmd_Argv( 2 ) );
+		} else if ( m ) {
+			m->bgPreset = p;
+		}
 	}
-	WiredUI_PushMenu( Cmd_Argv( 1 ), intent );
+	WiredUI_PushMenu( Cmd_Argv( 1 ) );
 }
 
 /* enter the keybind capture state programmatically.
@@ -3926,7 +3903,6 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 					/* Intent isn't persisted across save/restore — restored
 					 * entries use the authored background (INHERIT), and this
 					 * clears any stale value left in the slot from a prior push. */
-					wui_menuBgIntent[wui_menuStackDepth] = WUI_BG_INTENT_INHERIT;
 					wui_menuStackDepth++;
 				}
 				if ( !*p ) break;
@@ -4173,7 +4149,7 @@ void WiredUI_TickFrame( int realtime ) {
 					wui_activeMenu = UIMENU_MAIN;
 					Key_SetCatcher( Key_GetCatcher() | KEYCATCH_UI );
 
-					WiredUI_PushMenu( m->name, WUI_BG_INTENT_INHERIT );
+					WiredUI_PushMenu( m->name );
 					Com_Log( SEV_INFO, LOG_CH(ch_ui), "ui_testall: [%d/%d] %s\n",
 						testall_menuIndex + 1, menuCount, m->name );
 				}
@@ -4294,7 +4270,7 @@ static void WiredScript_Open( wiredMenuDef_t *menu, wiredItemDef_t *item, int nu
 		else if ( !Q_stricmp( args[1], "dim"   ) ) intent = WUI_BG_INTENT_DIM;
 		else if ( !Q_stricmp( args[1], "none"  ) ) intent = WUI_BG_INTENT_NONE;
 	}
-	WiredUI_PushMenu( args[0], intent );
+	WiredUI_PushMenu( args[0] );
 }
 
 static void WiredScript_Close( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
@@ -5157,7 +5133,7 @@ static void WiredScript_JoinServer( wiredMenuDef_t *menu, wiredItemDef_t *item, 
 		Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
 			"WiredUI: password required origin=browser address=%s selection_generation=%d\n",
 			normalized, selectionGeneration );
-		WiredUI_PushMenu( "password", WUI_BG_INTENT_INHERIT );
+		WiredUI_PushMenu( "password" );
 		return;
 	}
 	if ( passwordSubmit ) {
@@ -5235,7 +5211,7 @@ qboolean CL_WiredUI_ShowJoinPasswordRetry( const char *target,
 
 	WiredUI_CloseAllMenus();
 	WiredUI_SetActiveMenu( UIMENU_MAIN );
-	WiredUI_PushMenu( "servers", WUI_BG_INTENT_SCENE );
+	WiredUI_PushMenu( "servers" );
 	WiredScript_ResetPasswordPrompt( qtrue );
 	wui_passwordPrompt.valid = qtrue;
 	Q_strncpyz( wui_passwordPrompt.address, normalized,
@@ -5244,7 +5220,7 @@ qboolean CL_WiredUI_ShowJoinPasswordRetry( const char *target,
 	WiredUI_StateSetString( "ui_password_server_name", normalized );
 	WiredUI_StateSetString( "ui_joinPasswordError",
 		"Authentication failed. Enter the server password again." );
-	WiredUI_PushMenu( "password", WUI_BG_INTENT_INHERIT );
+	WiredUI_PushMenu( "password" );
 	Com_Log( SEV_DEBUG, LOG_CH(ch_ui),
 		"WiredUI: authentication retry opened address=%s selection_generation=%d\n",
 		normalized, selectionGeneration );
@@ -5407,7 +5383,7 @@ static void WiredScript_ServerStatusOpen( wiredMenuDef_t *menu, wiredItemDef_t *
 		WiredFeeder_ServerStatusCancel();
 		return;
 	}
-	WiredUI_PushMenu( "serverinfo", WUI_BG_INTENT_SCENE );
+	WiredUI_PushMenu( "serverinfo" );
 }
 
 static void WiredScript_ServerStatusOpenConnected( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
@@ -5418,7 +5394,7 @@ static void WiredScript_ServerStatusOpenConnected( wiredMenuDef_t *menu, wiredIt
 		WiredFeeder_ServerStatusCancel();
 		return;
 	}
-	WiredUI_PushMenu( "serverinfo", WUI_BG_INTENT_DIM );
+	WiredUI_PushMenu( "serverinfo" );
 }
 
 static void WiredScript_ServerStatusCancel( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
@@ -5503,9 +5479,9 @@ static void WiredScript_SetColor( wiredMenuDef_t *menu, wiredItemDef_t *item, in
 static void WiredScript_ConditionalOpen( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	if ( numArgs < 3 ) return;
 	if ( Cvar_VariableIntegerValue( args[0] ) != 0 ) {
-		WiredUI_PushMenu( args[1], WUI_BG_INTENT_INHERIT );
+		WiredUI_PushMenu( args[1] );
 	} else {
-		WiredUI_PushMenu( args[2], WUI_BG_INTENT_INHERIT );
+		WiredUI_PushMenu( args[2] );
 	}
 }
 
@@ -5663,7 +5639,7 @@ static void WiredScript_UiScript( wiredMenuDef_t *menu, wiredItemDef_t *item, in
 		/* controls is a settings-cluster tab (SCENE everywhere via the settings
 		 * nav) — this alternate uiScript entry matches that so the tab is never
 		 * the bare authored grid. */
-		WiredUI_PushMenu( "controls", WUI_BG_INTENT_SCENE );
+		WiredUI_PushMenu( "controls" );
 	} else if ( !Q_stricmp( args[0], "clearError" ) ) {
 		// noop
 	} else if ( !Q_stricmp( args[0], "ServerSort" ) && numArgs >= 2 ) {
@@ -5867,7 +5843,7 @@ static void WiredUI_RunScript( wiredMenuDef_t *menu, wiredItemDef_t *item, const
 
 // ── menu stack ────────────────────────────────────────────────────────
 
-void WiredUI_PushMenu( const char *name, wuiBgIntent_t bgIntent ) {
+void WiredUI_PushMenu( const char *name ) {
 	if ( !name || !name[0] ) return;
 
 	// check if menu exists
@@ -5889,10 +5865,12 @@ void WiredUI_PushMenu( const char *name, wuiBgIntent_t bgIntent ) {
 	 * its own analogous dedup at ShowError; this generalises the rule.) */
 	if ( wui_menuStackDepth > 0
 	     && Q_stricmp( wui_menuStack[ wui_menuStackDepth - 1 ], name ) == 0 ) {
-		/* Already on top — refresh its background intent so a re-open with a
+		/* Already on top — collapse. (The background intent that used to be
+		 * refreshed here is gone: it now comes from the menu's own `backdrop`
+		 * declaration, asked fresh every frame.) */
+		/* legacy note: a re-open with a
 		 * different intent (e.g. INHERIT→DIM when entering from gameplay) takes
 		 * effect without stacking a duplicate. */
-		wui_menuBgIntent[ wui_menuStackDepth - 1 ] = bgIntent;
 		Com_Log( SEV_DEBUG, LOG_CH(ch_ui), "WiredUI: push menu '%s' collapsed (already on top, depth %d)\n", name, wui_menuStackDepth );
 		Key_SetCatcher( Key_GetCatcher() | KEYCATCH_UI );
 		return;
@@ -5912,13 +5890,12 @@ void WiredUI_PushMenu( const char *name, wuiBgIntent_t bgIntent ) {
 	wui_returnFocus[ wui_menuStackDepth ] = wui_focusedItemPtr;
 
 	Q_strncpyz( wui_menuStack[wui_menuStackDepth], name, sizeof( wui_menuStack[0] ) );
-	wui_menuBgIntent[wui_menuStackDepth] = bgIntent;   /* record how this menu was opened */
 	wui_menuStackDepth++;
 	/* SCENE menus get a one-shot parallax nudge so switching between them feels
 	 * like the scene shifts and settles (no-op for the flat/dim/none intents). */
-	if ( bgIntent == WUI_BG_INTENT_SCENE ) {
-		WiredUI_NotifyBgTransition();
-	}
+	/* Scene nudge on menu change: the backdrop layer is persistent now, so
+	 * this is a transition effect rather than a rebuild. */
+	WiredUI_NotifyBgTransition();
 	wui_focusItem = -1;
 	wui_focusedItemPtr = NULL;
 	wui_hoveredItemPtr = NULL;
@@ -6221,7 +6198,7 @@ void CL_WiredUI_ShowError( const char *title, const char *message, qboolean retr
 		return;
 	}
 
-	WiredUI_PushMenu( "error_popup", WUI_BG_INTENT_INHERIT );
+	WiredUI_PushMenu( "error_popup" );
 }
 
 static wiredItemDef_t *WiredUI_FindItemByName( wiredMenuDef_t *menu, const char *name ) {
@@ -6291,7 +6268,7 @@ static void WiredUI_DropdownTest_f( void ) {
 	 * against it; push it if it isn't already the top. */
 	if ( wui_menuStackDepth == 0 ||
 	     Q_stricmp( wui_menuStack[ wui_menuStackDepth - 1 ], menuName ) != 0 ) {
-		WiredUI_PushMenu( menuName, WUI_BG_INTENT_INHERIT );
+		WiredUI_PushMenu( menuName );
 	}
 	if ( WiredUI_OpenMultiDropdown( item ) ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_ui),
@@ -8085,7 +8062,7 @@ void WiredUI_SetActiveMenu( int menu ) {
 			// came up on black. Opening any submenu pushed properly and fixed it,
 			// which is what made the bug look specific to main. The guard is not
 			// needed — PushMenu already collapses a redundant push.
-			WiredUI_PushMenu( "main", WUI_BG_INTENT_SCENE );
+			WiredUI_PushMenu( "main" );
 		} else if ( menu == UIMENU_INGAME ) {
 			/* Fire the ingame root's onOpen when activating via SetActiveMenu
 			 * alone (it lives behind the stack fallback, not pushed). */
@@ -8283,7 +8260,7 @@ void WiredUI_ReloadMenus( void ) {
 
 	// re-open the menu that was active before reload
 	if ( currentMenu[0] && WiredUI_FindMenu( currentMenu ) ) {
-		WiredUI_PushMenu( currentMenu, WUI_BG_INTENT_INHERIT );
+		WiredUI_PushMenu( currentMenu );
 	}
 }
 

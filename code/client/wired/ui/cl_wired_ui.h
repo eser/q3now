@@ -16,7 +16,7 @@ cl_wired_ui.h — Wired UI: unified menu/HUD system (client-side)
 #include "../../../qcommon/wired/core/scripting/wired_scripting.h"
 #include "cl_wired_layout.h"
 #include "cl_wired_fonts.h"
-#include "cl_wired_bg.h"        /* wuiBgIntent_t (WiredUI_PushMenu background intent) */
+#include "cl_wired_bg.h"        /* background layer flags + draw entrypoints */
 
 // ── public API (called from cl_ui.c, cl_keys.c, cl_scrn.c, etc.) ─────
 
@@ -1006,7 +1006,11 @@ void     WiredFeeder_BotTrace( void );
 
 /* bgIntent decides how the pushed menu's background is emitted
  * (WUI_BG_INTENT_INHERIT reproduces today's authored-flags behavior). */
-void     WiredUI_PushMenu( const char *name, wuiBgIntent_t bgIntent );
+/* Push a menu onto the stack. What it wants behind it is not passed here — it
+ * is declared on the menu itself with `backdrop <preset>` and asked for fresh
+ * every frame. Threading it through the push was the old model, and any caller
+ * that showed a menu without pushing left it unset. */
+void     WiredUI_PushMenu( const char *name );
 void     WiredUI_PopMenu( void );
 void     WiredUI_CloseAllMenus( void );
 wiredMenuDef_t *WiredUI_GetActiveMenu( void );
@@ -1015,7 +1019,6 @@ wiredMenuDef_t *WiredUI_GetActiveMenu( void );
  * Returns the intent recorded at push time IF `panel` is the stack-top
  * menu; otherwise WUI_BG_INTENT_INHERIT (so popups / loading / multi-panel
  * layers keep their authored background — byte-identical). */
-wuiBgIntent_t WiredUI_GetActiveBgIntent( const wiredMenuDef_t *panel );
 
 /* Cursor position normalized to [-1..1] about the viewport centre (for the
  * background parallax layer's mouse response). Pass NULL for an axis to skip. */

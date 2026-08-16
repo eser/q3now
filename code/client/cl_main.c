@@ -949,7 +949,7 @@ static void CL_DemoFailedWithText( const char *reason, const char *message ) {
 
 	if ( cls.uiStarted ) {
 		WiredUI_SetActiveMenu( UIMENU_MAIN );
-		WiredUI_PushMenu( "demos", WUI_BG_INTENT_SCENE );
+		WiredUI_PushMenu( "demos" );
 		if ( com_automated && com_automated->integer ) {
 			Com_ClearLastError();
 			Com_Log( SEV_INFO, LOG_CH(ch_client),
@@ -1282,7 +1282,7 @@ static void CL_DemoOpenFailed( qboolean uiOwned, const char *stage,
 		Com_SetLastError( "%s", message );
 		if ( cls.uiStarted ) {
 			WiredUI_SetActiveMenu( UIMENU_MAIN );
-			WiredUI_PushMenu( "demos", WUI_BG_INTENT_SCENE );
+			WiredUI_PushMenu( "demos" );
 			CL_WiredUI_ShowError( "Demo Playback Failed", message, qfalse );
 			Com_Log( SEV_INFO, LOG_CH(ch_client),
 				"Demo playback open recovery origin=demo-ui stage=%s depth=%d popup=%d\n",
