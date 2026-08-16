@@ -4143,7 +4143,11 @@ void WiredUI_TickFrame( int realtime ) {
 	WUI_AnimTick( realtime );
 
 	// attract scheduler tick + transition overlay draw
-	WiredAttract_Frame( realtime );
+	/* Skip the reel entirely while its layer is paused. Hiding it was never
+	 * the expensive part — advancing the schedule and playing a demo behind
+	 * an opaque backdrop is, and that is the work `paused` exists to skip. */
+	if ( !WiredUI_LayerPaused( WUI_LAYER_BG_ATTRACT ) )
+		WiredAttract_Frame( realtime );
 
 	// delayed screenshot — fire once after N seconds
 	if ( wired_screenshotDelay && wired_screenshotDelay->integer > 0 && !wui_screenshotTaken ) {
