@@ -1547,14 +1547,23 @@ static void WiredFeeder_ScoreSelection( int feederID, int index ) {
 	wui_selectedScore = index;
 }
 
-// ── player-list feeder (FEEDER_PLAYER_LIST) ───────────────────────────
-// Backs the kick / leader listboxes in callvote.wui and the kick listbox in
+// ── player-list feeders (FEEDER_PLAYER_LIST / FEEDER_TEAM_LIST) ───────
+// Back the kick / leader listboxes in callvote.wui and the kick listbox in
 // removebots.wui. Data source is the same as the scoreboard feeder
 // (wiredHud->scores[] + wiredHud->clients[]); spectators (team 3) are excluded
 // since they can't be kicked/led as active players. The selection callback
-// deposits the client NUMBER (not name) into state key ui_selectedPlayerNum,
-// which the vote/kick handlers read for the numeric console path
-// (clientkick <n> / callteamvote leader <n>).
+// deposits the client NUMBER (not name) into a state key, which the vote/kick
+// handlers read for the numeric console path (clientkick <n> /
+// callteamvote leader <n>).
+//
+// TWO feeder IDs share these row callbacks on purpose. callvote.wui shows a
+// kick list and a leader list on the SAME screen; when both used
+// FEEDER_PLAYER_LIST they also shared the single ui_selectedPlayerNum key, so
+// picking a player in one list silently overwrote the other list's selection
+// and the wrong client could be voted on. FEEDER_TEAM_LIST (menudef.h:92,
+// "team members for team voting") is the semantically correct second ID and
+// was defined-but-unused; it now carries the leader list and deposits into its
+// own key. Identical rows, independent selection state.
 
 static int WiredFeeder_PlayerCount( int feederID ) {
 	int count = 0;
@@ -1593,7 +1602,9 @@ static void WiredFeeder_PlayerSelection( int feederID, int index ) {
 		count++;
 	}
 	if ( i >= wiredHud->numScores || i >= WIRED_HUD_MAX_SCORES ) return;
-	WiredFeeder_StateSetString( "ui_selectedPlayerNum",
+	WiredFeeder_StateSetString(
+		feederID == FEEDER_TEAM_LIST ? "ui_selectedTeamPlayerNum"
+		                             : "ui_selectedPlayerNum",
 		va( "%d", wiredHud->scores[i].client ) );
 }
 
@@ -1901,6 +1912,9 @@ void WiredUI_RegisterCoreFeeders( void ) {
 	WiredUI_RegisterFeeder( FEEDER_BLUETEAM_LIST, "players_blue_team", WiredFeeder_ScoreCount,
 		WiredFeeder_ScoreItemText, WiredFeeder_ScoreSelection );
 	WiredUI_RegisterFeeder( FEEDER_PLAYER_LIST, "players", WiredFeeder_PlayerCount,
+		WiredFeeder_PlayerItemText, WiredFeeder_PlayerSelection );
+	/* same rows, separate selection key — see the feeder comment above */
+	WiredUI_RegisterFeeder( FEEDER_TEAM_LIST, "players_team_vote", WiredFeeder_PlayerCount,
 		WiredFeeder_PlayerItemText, WiredFeeder_PlayerSelection );
 	WiredUI_RegisterFeeder( FEEDER_BOTS, "bots", WiredFeeder_BotCount,
 		WiredFeeder_BotItemText, WiredFeeder_BotSelection );

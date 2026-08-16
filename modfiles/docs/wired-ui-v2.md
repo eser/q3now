@@ -1,0 +1,198 @@
+# Wired UI v2 Design System Reference
+
+The v2 design system (Claude-Design QuakeWired handoff) layers three
+modder-facing additions on top of the layout engine documented in
+`wired-layout.md`: a **design-token table**, a **theme overlay chain**
+(mode x accent), and a **primitive glyph library**. This file documents
+those three, plus the built-in **animation registry**.
+
+Scope note: the `repeat`, `if` and `bind="lua:"` keywords are documented
+separately and are not repeated here.
+
+---
+
+## 1. Design Tokens
+
+`ui/_tokens.wui` declares a flat table of named values. It is loaded
+implicitly at the entry of every `.wui` parse, so any menu may reference
+a token without an explicit include.
+
+```
+token <name> <value>
+```
+
+Reference a token with a `$` prefix. The parser substitutes it at parse
+time, so a token is a authoring-time constant, not a runtime binding:
+
+```
+forecolor $accent
+gap       $spacing_md
+font      $font_mono 10
+border    1px $line
+```
+
+Values may be a hex colour (`#0a0908`), an `rgba(...)` / `rgb(...)`
+function, a bare number (`0.02`), or a unit-suffixed length (`1.78vh`).
+
+### Override rules
+
+Mods may **override** an existing token value but may **not** introduce
+new top-level token names: the base table latches after first load and
+subsequent `token` declarations run through
+`WiredToken_Set( allowNew = qfalse )`. A new name is rejected with a
+parse-time error. To add a value, override an existing token or use a
+literal.
+
+Because substitution happens at parse time, changing a token requires a
+menu reload to take effect (`WiredUI_ReloadMenus`); the palette cvars
+below trigger that reload automatically.
+
+### Token families
+
+| Family | Examples | Use |
+|---|---|---|
+| Mode surface | `$ink` `$panel` `$panelDeep` `$line` `$lineBright` `$bone` `$boneDim` | Backgrounds, borders, text |
+| Accent | `$accent` `$accentDim` `$accentSoft` `$accentWash` | Active state, highlights |
+| Typography | `$font_sans` `$font_sans_bold` `$font_sans_medium` `$font_mono` `$font_accent` `$font_icon` | MSDF atlas slot names |
+| Type scale | `$text_xs_size` ... `$text_hero_size` | Normalized text sizes |
+| Spacing | `$spacing_xxs` ... `$spacing_xxl`, `$spacing_card_padding_v` | Gaps and padding |
+| Decoration | `$radius_sm/md/lg`, `$border_thin/med/thick` | Corners and strokes |
+| HUD | `$hud_panel_bg` `$hud_panel_bg60` | In-game panel fills |
+
+Prefer a token over a literal colour: a literal opts that item out of
+the entire theme system.
+
+---
+
+## 2. Theme Overlays (mode x accent)
+
+The active palette is the product of two cvars, both `CVAR_ARCHIVE`:
+
+| Cvar | Values | Default |
+|---|---|---|
+| `ui_palette_mode` | `dark`, `light` | `dark` |
+| `ui_palette_accent` | `amber`, `blood`, `toxic`, `cyan`, `violet` | `amber` |
+
+Both are registered as enum cvars, so an invalid value is rejected at
+the cvar layer rather than producing a silently broken palette.
+
+On change, `cl_wired_palette.c` re-applies the overlay chain and calls
+`WiredUI_ReloadMenus()` so every parse-time `$` substitution is redone:
+
+```
+ui/_tokens.wui                      <- base (all names declared here)
+ui/themes/<mode>/_tokens.wui        <- overrides 19 surface tokens
+ui/themes/<accent>/_tokens.wui      <- overrides 4 accent tokens
+```
+
+Later files win. Because `allowNew=qfalse` applies after the base latch,
+**every** token a theme wants to override must already be declared in
+the base `ui/_tokens.wui` — that is why the v2 palette names are
+declared there with dark+amber defaults.
+
+### Adding an accent
+
+Create `ui/themes/<name>/_tokens.wui` overriding exactly the four accent
+tokens, then extend the `ui_palette_accent` enum in
+`cl_wired_palette.c`. Keeping the key set identical across accents is
+what makes the overlays interchangeable:
+
+```
+token accent      "#f4a03a"
+token accentDim   "#8a6230"
+token accentSoft  "#c87a2a"
+token accentWash  "rgba(244,160,58,0.34)"
+```
+
+A mode overlay follows the same rule against the 19 surface tokens;
+`dark` and `light` currently declare identical key sets.
+
+---
+
+## 3. Primitive Glyph Library
+
+v2 ships vector primitives as MSDF glyphs in the `wui_icons` atlas
+(`$font_icon`), addressed by canonical name rather than codepoint:
+
+```
+itemDef {
+    iconText "qw_sigil"
+    font $font_icon 10
+    forecolor $accent
+}
+```
+
+An unrecognised name logs `SEV_ERROR` at parse time and renders nothing,
+so a typo is loud rather than invisible.
+
+| Name | Description |
+|---|---|
+| `qw_sigil` | QuakeWired brand sigil |
+| `rune_0` ... `rune_9` | Ten decorative runes |
+| `helmet` | Champion avatar mark |
+| `weapon_gnt` `weapon_mg` `weapon_sg` `weapon_gl` `weapon_rl` `weapon_lg` `weapon_rg` `weapon_pg` `weapon_bfg` | Nine weapon icons |
+| `diamond` | Card / eyebrow header bullet |
+| `card_status` `status_connection` `nav_play` `nav_multi` `nav_settings` `nav_quit` `arrow_right` | Pre-v2 UI icons |
+
+The glyph set is generated by `tools/msdf/build_wui_icons.py`
+(`CANONICAL_ICONS`); the parser's name table mirrors it. Adding a
+primitive means regenerating the atlas **and** extending that table.
+
+---
+
+## 4. Animation Registry
+
+```
+animation "<name>" [duration <ms> | speed <scalar>] [curve <name>] [loop]
+```
+
+`duration` is milliseconds; `speed` is a scalar against a 12s base
+period (smaller = faster). Both are optional — each built-in carries its
+own default. `loop` forces looping on a non-looping built-in.
+
+| Name | Effect | Target | Default |
+|---|---|---|---|
+| `scroll-x` | Horizontal scroll, 1.0 -> -1.0 | x offset | 12000ms, loop |
+| `fade-in` / `fade-out` | Alpha 0->1 / 1->0 | alpha | 400ms |
+| `slide-up` / `slide-down` | Vertical entry offset -> 0 | y offset | 500ms |
+| `pulse` | Alpha 0.3 -> 1.0 -> 0.3 half-sine | alpha | 2000ms, loop |
+| `blink` | Alpha square wave (step) | alpha | 600ms, loop |
+| `scan-y` | Vertical sweep -1.0 -> 1.0 | y offset | 3500ms, loop |
+
+Offsets are normalized against the viewport, so a `scan-y` sweep of
+-1 -> 1 crosses the full screen; scope it to a panel by shortening
+`duration` and placing the strip inside that panel.
+
+An animation drives exactly one scalar — an x offset, a y offset, or an
+alpha multiplier. There is no multi-property or keyframe-sequence form.
+
+```
+itemDef {
+    name "map_scan_beam"
+    rect 0 0 1 0.004
+    backcolor $accent
+    animation "scan-y" duration 3500
+    decoration
+    visible 1
+}
+```
+
+Dev commands `wui_test_anim_step` and `wui_test_anim_scan` load fixture
+menus that exercise the step and sweep curves.
+
+### Design curves without an engine analogue
+
+Four keyframes in the v2 design source map onto the engine as follows.
+Only `qwscan` has an analogue; it shipped as `scan-y`. The other three
+are **deliberately not implemented** — each needs a renderer primitive
+the UI path does not have:
+
+| Design keyframe | Status | Reason |
+|---|---|---|
+| `qwscan` | Implemented as `scan-y` | Pure translateY; maps onto the y-offset slot |
+| `qwgscan` | Not implemented | Animates `background-position`; no scrolling-fill concept exists |
+| `qwglitch` | Not implemented | Needs simultaneous x+y jitter plus `clip-path`; one anim drives one scalar, and there is no per-item clip |
+| `qwdash` | Not implemented | Animates SVG `stroke-dashoffset`; there is no stroked-path primitive |
+
+Implementing the latter three is a renderer change, not an animation
+change.

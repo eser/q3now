@@ -4321,7 +4321,8 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 				 * full-width by convention). */
 				animX += item->animOffsetX * (float) wui_clay_lastWidth;
 			} else if ( !Q_stricmp( item->animationName, "slide-up" )
-			         || !Q_stricmp( item->animationName, "slide-down" ) ) {
+			         || !Q_stricmp( item->animationName, "slide-down" )
+			         || !Q_stricmp( item->animationName, "scan-y" ) ) {
 				animY += item->animOffsetY * (float) wui_clay_lastHeight;
 			}
 		}

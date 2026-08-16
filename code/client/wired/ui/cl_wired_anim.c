@@ -84,6 +84,18 @@ static const wuiAnimBuiltin_t s_builtins[] = {
 	 * recognises the name and applies the multiplier through to the
 	 * forecolor alpha. */
 	{ "blink",        1.0f,  0.0f,   600, WUI_ANIM_CURVE_STEP,        WUI_ANIM_FLAG_LOOP },
+	/* `scan-y` LOOP_LINEAR — vertical sweep of a decoration strip across
+	 * its container: the Claude-Design-v2 `qwscan` keyframe (translateY
+	 * -100% → 100%, 3.5s linear infinite; qw-screens.jsx:891, the scanning
+	 * beam over the ScreenCampaign map preview). Routes through the same
+	 * animOffsetY emit slot as slide-up/slide-down, so from/to are
+	 * normalized against viewport height and a -1 → 1 sweep crosses the
+	 * full screen; a consumer scopes the beam to a panel by overriding
+	 * `duration` and clamping the strip inside that panel. LOOP because
+	 * the beam never settles. The three sibling v2 keyframes (qwgscan /
+	 * qwglitch / qwdash) have NO engine analogue and are deliberately not
+	 * modelled — see modfiles/docs/wired-ui-v2.md §"Animation curves". */
+	{ "scan-y",      -1.0f,  1.0f,  3500, WUI_ANIM_CURVE_LOOP_LINEAR, WUI_ANIM_FLAG_LOOP },
 	{ NULL, 0, 0, 0, 0, 0 }
 };
 
