@@ -1,9 +1,27 @@
 // teamorders.wui -- q3now Team Orders dialog (Phase 5d canonical)
 //
-// In-game popup (§7.4 cluster). Centered overlay — header + 5
-// voice-command quick-action buttons + Cancel. Reached from
+// In-game popup (§7.4 cluster). Centered overlay — header + 6
+// team-task quick-action buttons + Cancel. Reached from
 // in-game team comms hotkey OR ESC menu shortcut during team
 // modes.
+//
+// Buttons issue `cmd teamtask <n>`, NOT `cmd vsay_team <x>`. Rationale:
+// `cmd` forwards verbatim to the server (CL_ForwardToServer_f,
+// code/client/cl_main.c:5389), bypassing the cgame command table entirely.
+// The server dispatches `teamtask` -> Cmd_TeamTask_f UNGATED
+// (code/game/g_cmds.c:2593 + :472), whereas `vsay_team` sits behind
+// `#if FEAT_TA_VOICECHAT` (g_cmds.c:2536-2565), which is 0 because
+// MISSIONPACK is defined nowhere in the build. The old vsay_team buttons
+// were therefore silently inert — this screen shipped dead.
+//
+// The cgame-side `taskOffense`/`taskDefense`/... commands are NOT a usable
+// target either: they live behind `#if FEAT_TA_UI`
+// (code/cgame/cg_consolecmds.c:455-475), also 0, so they are not registered.
+// Going straight at the server's numeric `teamtask` is the only live path.
+//
+// <n> values are teamtask_t (code/game/bg_public.h:588-597):
+//   1 OFFENSE  2 DEFENSE  3 PATROL  4 FOLLOW  5 RETRIEVE  6 ESCORT  7 CAMP
+// Bots read the resulting userinfo `teamtask` key (code/game/ai_dmq3.c:361).
 
 menuDef {
 	name "teamorders"
@@ -26,7 +44,7 @@ menuDef {
 		itemDef {
 			name "teamorders_root"
 			type container
-			rect 0 0 0.3 0.5
+			rect 0 0 0.3 0.62
 			direction column
 			padding $popup_padding
 			gap $spacing_md
@@ -34,10 +52,10 @@ menuDef {
 			border 1px $line_strong
 			radius $radius_md
 			width PERCENT 0.3
-			height PERCENT 0.5
+			height PERCENT 0.62
 
 			itemDef { name "header"    type 0 rect 0 0 1 0.06 height FIT text "Team Orders" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
-			itemDef { name "subheader" type 0 rect 0 0 1 0.03 height FIT text "Issue a team-wide voice order." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { name "subheader" type 0 rect 0 0 1 0.03 height FIT text "Set your team task. Bots respond to it." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
 
 			itemDef {
 				name "form_content"
@@ -49,11 +67,13 @@ menuDef {
 				height GROW
 				padding 0.005 0.01
 
-				itemDef { name "btn_getflag"  type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Get Flag"  textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd vsay_team getflag"  ; close } }
-				itemDef { name "btn_offense"  type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Offense"   textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd vsay_team offense"  ; close } }
-				itemDef { name "btn_defend"   type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Defend"    textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd vsay_team defend"   ; close } }
-				itemDef { name "btn_patrol"   type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Patrol"    textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd vsay_team patrol"   ; close } }
-				itemDef { name "btn_followme" type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Follow Me" textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd vsay_team followme" ; close } }
+				itemDef { name "btn_getflag"  type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Get Flag"  textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 5" ; close } }
+				itemDef { name "btn_offense"  type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Offense"   textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 1" ; close } }
+				itemDef { name "btn_defend"   type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Defend"    textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 2" ; close } }
+				itemDef { name "btn_patrol"   type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Patrol"    textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 3" ; close } }
+				itemDef { name "btn_followme" type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Follow Me" textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 4" ; close } }
+				itemDef { name "btn_escort"   type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Escort"    textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 6" ; close } }
+				itemDef { name "btn_camp"     type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Camp"      textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 7" ; close } }
 				itemDef { name "btn_cancel"   type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Cancel"    textalign 0 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
 			}
 		}

@@ -1,16 +1,21 @@
 // qw_hud_overlay_messages — V2_HUD_Active overlay text feed (vote / follow / spectator)
 // HUD redesign (Eser) Phase E — overlay layer (CTF-less scope, Eser-ratified).
-// Three transient text states, all TOP-LEFT (the only empty corner now that the
-// kill-feed moved to TR). hudElement rects are FULL-VIEWPORT; the three stack
-// downward (vote on top, follow/spec below) — only one or two are ever active at
+// Four transient text states, all TOP-LEFT (the only empty corner now that the
+// kill-feed moved to TR). hudElement rects are FULL-VIEWPORT; the four stack
+// downward (votes on top, follow/spec below) — only one or two are ever active at
 // once so they don't collide in practice.
 //   votemessageworld : "VOTE(N): <text>  yes(F1):N  no(F2):N" + 30s countdown.
 //                       Engine reads cgs.vote* via compat (cl_wired_hud_elem_vmw.c);
 //                       visible during a call-vote in any gametype.
+//   teamvotemessageworld : "TEAMVOTE(N): <text>  yes(F5):N  no(F6):N" — same shape,
+//                       fed by cgs.teamVote* (cl_wired_hud_elem_tvmw.c). The cgame
+//                       bridge resolves the local player's red/blue slot, so this is
+//                       only ever the vote the viewer can actually answer.
 //   followmessage    : "Following ^7<name>" — when spectating/following a player.
 //   specmessage      : "^1SPECTATOR" — when the local client is a spectator.
-// All three self-gate in the engine (vote active / CG_IsFollowing / IsSpectator),
-// so they render nothing during normal play. No bind needed — compat-fed.
+// All four self-gate in the engine (vote active / team vote active /
+// CG_IsFollowing / IsSpectator), so they render nothing during normal play.
+// No bind needed — compat-fed.
 // Tokens: $bone $boneDim $primary_red $font_sans.
 itemDef {
 	name "hud_active_overlay_messages_root"
@@ -30,10 +35,21 @@ itemDef {
 		decoration
 		visible 1
 	}
-	// "Following <name>" — under the vote line
+	// team-vote line — directly under the call-vote line
+	itemDef { hudElement "teamvotemessageworld"
+		anchor TOP_LEFT
+		rect 0.018 0.185 0 0
+		font $font_sans
+		fontsize 16 20
+		textalign 0
+		forecolor $bone
+		decoration
+		visible 1
+	}
+	// "Following <name>" — under the vote lines
 	itemDef { hudElement "followmessage"
 		anchor TOP_LEFT
-		rect 0.018 0.205 0 0
+		rect 0.018 0.230 0 0
 		font $font_sans
 		fontsize 16 20
 		textalign 0
@@ -44,7 +60,7 @@ itemDef {
 	// "SPECTATOR" — under the follow line, red accent (engine text already has ^1)
 	itemDef { hudElement "specmessage"
 		anchor TOP_LEFT
-		rect 0.018 0.250 0 0
+		rect 0.018 0.275 0 0
 		font $font_sans
 		fontsize 18 22
 		textalign 0

@@ -136,6 +136,11 @@ typedef struct {
 	qboolean    voteModified;
 	int         voteTime, voteYes, voteNo;
 	char        voteString[256];
+	// team vote — already resolved to the local player's team slot by the
+	// cgame bridge, so this is a flat block (cgame-side cgs.teamVote* is [2]).
+	qboolean    teamVoteModified;
+	int         teamVoteTime, teamVoteYes, teamVoteNo;
+	char        teamVoteString[256];
 	glconfig_t  glconfig;
 
 	struct {

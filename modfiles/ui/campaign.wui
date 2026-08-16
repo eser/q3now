@@ -1,0 +1,230 @@
+// campaign.wui — CAMPAIGN screen (handoff-v2 ScreenCampaign artboard)
+//
+// ⚠ HONESTY GATE — READ BEFORE RESTORING MOCKUP CONTENT.
+// The v2 artboard (qw-screens.jsx:7 ScreenCampaign) draws a seven-chapter
+// campaign with per-chapter completion %, a "34% campaign" meter, a resumable
+// save slot ("CHAPTER III · TRIAL 04", "4h 28m played"), six collectible runes
+// and a last-attempt scoreboard. Every one of those numbers is a hardcoded
+// literal in the mockup's `chapters` / rune / stat arrays — there is no data
+// source behind any of them, and there is none in the engine either:
+//
+//   · No campaign-progress struct exists. g_save_world.c:410-414 says so in
+//     as many words ("there is NO campaign-progress struct in the game yet
+//     … the campaign-progress SEAM is a Phase-6 / objectives-binding
+//     follow-up. No struct is invented here."), and writes a zero-length
+//     section marker where that state would go.
+//   · Objectives are IN-SESSION ONLY — g_objectives.c:14-18: "NOT serialized,
+//     NOT savegame-persisted, and NOT wired to cross-map campaign
+//     progression".
+//   · There is no chapter/mission/tier table anywhere in code/ or modfiles/,
+//     no campaign map list, and no UI path that sets GF_CAMPAIGN (the flag is
+//     read by the game/botlib but nothing in the client or the .wui files
+//     ever writes g_gameflags).
+//
+// So a populated chapter list would be pure fiction rendered as if it were
+// save data — the player would be told they are 34% through a campaign that
+// does not exist, and CONTINUE would have nothing to continue. That is the
+// exact failure mode teamorders.wui just got fixed for (a shipping screen
+// whose buttons called a command compiled out of the build).
+//
+// WHAT THIS SCREEN DOES INSTEAD: it keeps the artboard's frame — breadcrumb,
+// oversized two-tone title, mono strapline, bracketed hero panel, footer
+// action row — and fills it with the one true statement available: campaign
+// content is not in the alpha, and here is what to play instead. The two
+// offered routes (host a match vs. join one) are real screens that work today.
+// No progress meter, no chapter rows, no save slot, no rune grid: those
+// return when there is state to back them.
+//
+// Reached from main.wui's CAMPAIGN menu item.
+// Tokens: $accent $bone $boneDim $ink $line $panel $panelDeep $font_sans
+//         $font_sans_bold $font_mono $spacing_*.
+
+menuDef {
+	name "campaign"
+	layer "menu"
+	rect 0 0 1 1
+	fullScreen 1
+	visible 1
+	style 1
+
+	itemDef {
+		name "campaign_root"
+		position absolute
+		rect 0 0 1 1
+		type container
+		direction column
+		background "layered" effects "demo"
+
+		#include "ui/widgets/qw_title_bar.wui"
+
+		// ── breadcrumb — mockup's "QUAKEWIRED / CAMPAIGN" rail ──────
+		itemDef {
+			name "breadcrumb"
+			type container
+			rect 0 0 1 0.03
+			height FIT
+			direction row
+			alignY center
+			gap $spacing_sm
+			padding $spacing_sm 5vw
+
+			itemDef { name "crumb_root" type 0 rect 0 0 0.12 0.025 height FIT text "QUAKEWIRED" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { name "crumb_sep"  type 0 rect 0 0 0.01 0.025 height FIT text "/"          textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { name "crumb_here" type 0 rect 0 0 0.12 0.025 height FIT text "CAMPAIGN"   textalign 0 font $font_mono 10 forecolor $accent  decoration visible 1 grow 0 }
+		}
+
+		// ── title — mockup's two-tone display pair ("THE DESCENT") ──
+		// Reworded to the truth: the descent has not been built yet.
+		itemDef {
+			name "campaign_title_row"
+			type container
+			rect 0 0 1 0.10
+			height FIT
+			direction row
+			alignY center
+			gap $spacing_md
+			padding $spacing_xs 5vw
+
+			itemDef { name "title_the"     type 0 rect 0 0 0.20 0.09 height FIT text "NO"       textalign 0 font $font_sans 72 forecolor $bone   decoration visible 1 grow 0 }
+			itemDef { name "title_descent" type 0 rect 0 0 0.45 0.09 height FIT text "CAMPAIGN" textalign 0 font $font_sans 72 forecolor $accent decoration visible 1 grow 0 }
+		}
+
+		itemDef {
+			name "campaign_strapline"
+			type 0
+			rect 0 0 1 0.03
+			height FIT
+			text "single-player campaign content is not part of this alpha · no chapters, no saves, no progression"
+			textalign 0
+			font $font_mono 10
+			forecolor $boneDim
+			decoration
+			visible 1
+			grow 0
+			padding 0 5vw
+		}
+
+		// ── hero panel — the artboard's bracketed "next mission" slab,
+		// carrying the honest status instead of a fabricated trial.
+		itemDef {
+			name "campaign_body"
+			type container
+			rect 0 0 1 0.55
+			direction column
+			padding $spacing_lg 5vw
+			gap $spacing_card_gap
+			grow 1
+			height GROW
+
+			itemDef {
+				name "status_panel"
+				type container
+				rect 0 0 1 0.32
+				height FIT
+				direction column
+				gap $spacing_sm
+				padding $spacing_card_padding_v $spacing_card_padding_h
+				background $panelDeep
+				border 1px $line
+
+				itemDef { name "status_kicker" type 0 rect 0 0 1 0.025 height FIT text "◆ STATUS" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 }
+
+				itemDef { name "status_head" type 0 rect 0 0 1 0.05 height FIT text "ARENA COMBAT ONLY" textalign 0 font $font_sans_bold 32 forecolor $bone decoration visible 1 grow 0 }
+
+				itemDef {
+					name "status_body"
+					type 0
+					rect 0 0 1 0.04
+					height FIT
+					text "This build ships the multiplayer arena: deathmatch, duel, king of the hill, last man standing, team deathmatch, capture the flag and one flag CTF — against bots or other players."
+					textalign 0
+					font $font_sans 13
+					forecolor $boneDim
+					decoration
+					visible 1
+					grow 0
+				}
+
+				itemDef {
+					name "status_note"
+					type 0
+					rect 0 0 1 0.03
+					height FIT
+					text "Chapters, saves and campaign progression are not implemented — they are not hidden or locked, they do not exist yet."
+					textalign 0
+					font $font_mono 10
+					forecolor $boneDim
+					decoration
+					visible 1
+					grow 0
+				}
+			}
+
+			// ── the two routes that actually work today ─────────────
+			itemDef {
+				name "routes_label"
+				type 0
+				rect 0 0 1 0.025
+				height FIT
+				text "PLAY INSTEAD"
+				textalign 0
+				font $font_mono 10
+				forecolor $boneDim
+				decoration
+				visible 1
+				grow 0
+			}
+
+			itemDef {
+				name "route_host"
+				type container
+				rect 0 0 1 0.09
+				height FIT
+				direction column
+				gap $spacing_xxs
+				padding $spacing_menu_row_padding_v $spacing_menu_row_padding_h
+				background $panel
+				border 1px $line
+				action { open "startserver" scene }
+
+				itemDef { name "route_host_title" type 0 rect 0 0 1 0.035 height FIT text "HOST A MATCH" textalign 0 font $font_sans 20 forecolor $bone forecolor.active $accent visible 1 grow 0 }
+				itemDef { name "route_host_sub"   type 0 rect 0 0 1 0.025 height FIT text "pick a map and gametype · fill it with bots" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+			}
+
+			itemDef {
+				name "route_join"
+				type container
+				rect 0 0 1 0.09
+				height FIT
+				direction column
+				gap $spacing_xxs
+				padding $spacing_menu_row_padding_v $spacing_menu_row_padding_h
+				background $panel
+				border 1px $line
+				action { open "servers" scene }
+
+				itemDef { name "route_join_title" type 0 rect 0 0 1 0.035 height FIT text "JOIN BATTLE" textalign 0 font $font_sans 20 forecolor $bone forecolor.active $accent visible 1 grow 0 }
+				itemDef { name "route_join_sub"   type 0 rect 0 0 1 0.025 height FIT text "browse running servers" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+			}
+
+			itemDef { name "body_spacer" type container grow 1 decoration visible 1 }
+		}
+
+		// ── footer action row — mockup's "◀ BACK" corner ────────────
+		itemDef {
+			name "campaign_footer"
+			type container
+			rect 0 0 1 0.06
+			direction row
+			alignY center
+			gap $spacing_md
+			padding $spacing_sm 5vw
+
+			itemDef { name "btn_back" type 1 rect 0 0 0.14 0.04 height FIT text "◀ Back" textalign 0 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+			itemDef { name "footer_spacer" type container rect 0 0 0 0 grow 1 decoration visible 1 }
+			itemDef { name "hint_back" type 0 rect 0 0 0.1 0.025 height FIT text "ESC back" textalign 2 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+		}
+	}
+
+	onESC { close }
+}

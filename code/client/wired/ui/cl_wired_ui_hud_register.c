@@ -190,6 +190,10 @@ static const wiredHudElementDef_t wiredHudElementDefs[] = {
 	{ "teamcount_nme", SE_SIDES_ONLY, CG_ModernHUDElementTeamCountNMECreate, CG_ModernHUDElementTeamCountRoutine, NULL },
 	{ "teamcount_own", SE_SIDES_ONLY, CG_ModernHUDElementTeamCountOWNCreate, CG_ModernHUDElementTeamCountRoutine, NULL },
 	{ "votemessageworld", SE_IM | SE_SPECT | SE_DEAD, CG_ModernHUDElementVMWCreate, CG_ModernHUDElementVMWRoutine, NULL },
+	// SE_SIDES_ONLY ("teamonly") in addition to the regular vote's flags: a
+	// team vote only exists in team gametypes, and the bridge already zeroes
+	// the block for anyone not resolved onto TEAM_RED / TEAM_BLUE.
+	{ "teamvotemessageworld", SE_IM | SE_SIDES_ONLY | SE_SPECT | SE_DEAD, CG_ModernHUDElementTVMWCreate, CG_ModernHUDElementTVMWRoutine, NULL },
 	{ "warmupinfo", 0, CG_ModernHUDElementWarmupInfoCreate, CG_ModernHUDElementWarmupInfoRoutine, NULL },
 	{ "weaponlist",    0, CG_ModernHUDElementWeaponListCreate,    CG_ModernHUDElementWeaponListRoutine,    NULL },
 	{ "holdablelist",  0, CG_ModernHUDElementHoldableListCreate,  CG_ModernHUDElementHoldableListRoutine,  NULL },
