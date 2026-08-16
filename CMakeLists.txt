@@ -1878,6 +1878,27 @@ SET_TESTS_PROPERTIES(attract_input_promotion_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(attract_input_promotion_test attract_input_promotion_contract)
 
+# Background preset evaluator. A menu declares what it wants behind it and the
+# preset table decides which layers answer; menus never name a layer, so the
+# mapping lives in one place and adding a layer touches no .wui file. Compiles
+# the production TU so the real table is under test.
+#
+# The decisive case is pop-re-application. The model this replaces wrote an
+# intent into the menu-stack slot at push time, so any path that showed a menu
+# without pushing left it unwritten — coming back from a map put the main menu
+# up on black. Evaluating from the stack top every frame has no write to skip.
+ADD_EXECUTABLE(bg_preset_eval_test
+	tests/bg-preset-eval-test.c
+	code/client/wired/ui/policy/wui_bg_preset.c
+)
+TARGET_INCLUDE_DIRECTORIES(bg_preset_eval_test PRIVATE code/client/wired/ui)
+ADD_TEST(NAME bg_preset_eval_contract COMMAND bg_preset_eval_test)
+SET_TESTS_PROPERTIES(bg_preset_eval_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(bg_preset_eval_test bg_preset_eval_contract)
+
 # Menu background intent. The scene behind the menus is recorded per stack slot
 # at push time, not carried by the panel, so anything that skips the push loses
 # it silently — which is how the main menu came back from a map on black.
