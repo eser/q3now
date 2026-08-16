@@ -41,6 +41,9 @@
 
 menuDef {
 	name "ingame"
+	// The match stays visible under a scrim: this menu is an overlay on a
+	// live game, not a place you leave it behind.
+	backdrop dim
 	layer "menu"
 	rect 0 0 1 1
 	fullScreen 1
