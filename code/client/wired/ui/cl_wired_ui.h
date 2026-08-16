@@ -241,6 +241,8 @@ typedef struct {
  *
  * Loading sits above the game and below the menu on purpose: it covers a map
  * as it loads, but a menu opened during a load still draws on top of it. */
+#include "policy/wui_bg_preset.h"
+
 typedef enum {
 	/* Opaque base fill. Its own layer so "there is always something behind
 	 * the scene" is structural rather than a colour someone remembered to
@@ -840,6 +842,11 @@ typedef struct wiredMenuDef_s {
 	 * earlier panels). Drives the per-layer emit walk + modality
 	 * input gating in WiredUI_CompositorEmitFrame. */
 	wuiLayer_t        layer;
+	/* What this menu wants behind it. Declared with `background <preset>`;
+	 * resolved fresh every frame from the stack top, never stored per push.
+	 * Undeclared menus default to the composed backdrop, which is what deep
+	 * menus looked like before presets existed. */
+	wuiBgPreset_t     bgPreset;
 	/* parse-end check uses this to emit a SEV_WARN
 	 * (escalating to SEV_ERROR) when a menuDef omits the layer
 	 * keyword. Defaults qfalse; set qtrue when the `layer` keyword
