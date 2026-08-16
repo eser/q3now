@@ -2705,6 +2705,8 @@ static qboolean WiredUI_ParseItemProperties( int handle,
 // transition; a later change renames the 39 .wui files to use `menu`.
 wuiLayer_t WiredUI_ParseLayerName( const char *str ) {
 	if ( !str || !*str ) return WUI_LAYER_COUNT;
+	if ( !Q_stricmp( str, "bg_dark"        ) ) return WUI_LAYER_BG_DARK;
+	if ( !Q_stricmp( str, "bg_animated"    ) ) return WUI_LAYER_BG_ANIMATED;
 	if ( !Q_stricmp( str, "bg_attract"     ) ) return WUI_LAYER_BG_ATTRACT;
 	if ( !Q_stricmp( str, "loading"        ) ) return WUI_LAYER_LOADING;
 	if ( !Q_stricmp( str, "world_viewport" ) ) return WUI_LAYER_WORLD_VIEWPORT;

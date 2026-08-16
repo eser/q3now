@@ -22,6 +22,10 @@
 
 #if FEAT_WIRED_UI
 
+/* Declared by the stack-top menu's background preset rather than by
+ * connection state; see policy/bg_dark.c. */
+qboolean bg_dark_policy_isActive       ( void );
+qboolean bg_animated_policy_isActive   ( void );
 qboolean bg_attract_policy_isActive    ( void );
 qboolean loading_policy_isActive       ( void );
 qboolean world_viewport_policy_isActive( void );
