@@ -3,27 +3,96 @@
 <head>
 <meta charset="utf-8"/>
 <title>v2_hud_active</title>
-<link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<!--
+  Offline harness. Everything it loads lives under tests/visual/vendor/, built by
+  `node tests/visual/scripts/vendor_sync.mjs`. No network, so this renders in CI.
+
+  Previously this file loaded React/Babel from unpkg, fonts from Google Fonts, and
+  JSX from ../../../docs/wui-claude-design-canonical-v2/ — a directory that was
+  never committed. Every render came out as a single flat colour.
+
+  Resolution comes from the viewport (see #root below), not a hardcoded size, so
+  the harness follows whatever --window-size the driving script passes.
+-->
 <style>
-  html, body { margin:0; padding:0; background:#0a0908; color:#e8dfd0; font-family:'Oxanium',system-ui,sans-serif; overflow:hidden; }
-  #root { width:1440px; height:900px; }
+  /* Repo-local fonts; replaces the Google Fonts stylesheet. Weights map onto the
+     Oxanium TTFs actually present in assets/fonts/. */
+  @font-face { font-family:'Oxanium'; font-weight:300; font-style:normal; font-display:block;
+               src:url('../vendor/fonts/Oxanium-Light.ttf') format('truetype'); }
+  @font-face { font-family:'Oxanium'; font-weight:400; font-style:normal; font-display:block;
+               src:url('../vendor/fonts/Oxanium-Regular.ttf') format('truetype'); }
+  @font-face { font-family:'Oxanium'; font-weight:500; font-style:normal; font-display:block;
+               src:url('../vendor/fonts/Oxanium-Medium.ttf') format('truetype'); }
+  @font-face { font-family:'Oxanium'; font-weight:600; font-style:normal; font-display:block;
+               src:url('../vendor/fonts/Oxanium-SemiBold.ttf') format('truetype'); }
+  @font-face { font-family:'Oxanium'; font-weight:700; font-style:normal; font-display:block;
+               src:url('../vendor/fonts/Oxanium-Bold.ttf') format('truetype'); }
+  @font-face { font-family:'Oxanium'; font-weight:800; font-style:normal; font-display:block;
+               src:url('../vendor/fonts/Oxanium-ExtraBold.ttf') format('truetype'); }
+  @font-face { font-family:'JetBrains Mono'; font-weight:400; font-style:normal; font-display:block;
+               src:url('../vendor/fonts/JetBrainsMono-Regular.ttf') format('truetype'); }
+  /* The design references these two weights; synthesised from the one Regular TTF
+     available in-repo, which is what the previous Google Fonts load did anyway for
+     any weight the CDN did not serve. */
+  @font-face { font-family:'JetBrains Mono'; font-weight:500; font-style:normal; font-display:block;
+               src:url('../vendor/fonts/JetBrainsMono-Regular.ttf') format('truetype'); }
+  @font-face { font-family:'JetBrains Mono'; font-weight:700; font-style:normal; font-display:block;
+               src:url('../vendor/fonts/JetBrainsMono-Regular.ttf') format('truetype'); }
+  @font-face { font-family:'Share Tech Mono'; font-weight:400; font-style:normal; font-display:block;
+               src:url('../vendor/fonts/ShareTechMono-Regular.ttf') format('truetype'); }
+
+  html, body { margin:0; padding:0; background:#0a0908; color:#e8dfd0;
+               font-family:'Oxanium',system-ui,sans-serif; overflow:hidden; }
+  /* Artboard-native 1440x900 (16:10). The ScreenHUD container is fixed-pixel with
+     overflow:hidden, so a smaller root CROPS the HUD instead of reflowing it —
+     measured at 1280x720 the health/armor panels, weapon carousel and ammo value
+     all fall outside the frame. Fill the viewport rather than hardcoding, so the
+     harness always agrees with the driving script's --window-size; the script
+     below pins an exact px box (default 1440x900, override via ?w=&h=).
+     W-103 (16:9) governs player-facing captures; cmake/widescreen_default_policy_check.cmake
+     explicitly exempts tests/visual/ for exactly this reason. */
+  html, body { width:100%; height:100%; }
+  #root { width:100vw; height:100vh; }
 </style>
-<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<script src="../vendor/lib/react.development.js"></script>
+<script src="../vendor/lib/react-dom.development.js"></script>
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel" src="../../../docs/wui-claude-design-canonical-v2/project/qw-shared.jsx"></script>
-<script type="text/babel" src="../../../docs/wui-claude-design-canonical-v2/project/qw-screens.jsx"></script>
-<script type="text/babel">
-  const qs = new URLSearchParams(location.search);
-  const mode = qs.get('mode') || 'dark';
-  const accent = qs.get('accent') || 'amber';
-  setQWTheme(mode, accent);
-  ReactDOM.createRoot(document.getElementById('root')).render(<ScreenHUD />);
+<!--
+  Precompiled by vendor_sync.mjs (JSX -> React.createElement) using the @babel/core
+  already in launcher/frontend/node_modules. Plain <script> rather than
+  type="text/babel", which fetches over XHR and is CORS-blocked under file://.
+-->
+<script src="../vendor/jsx/qw-shared.js"></script>
+<script src="../vendor/jsx/qw-screens.js"></script>
+<script>
+  (function () {
+    var qs = new URLSearchParams(location.search);
+    var mode = qs.get('mode') || 'dark';
+    var accent = qs.get('accent') || 'amber';
+
+    // Pin the layout box to the capture size. Chrome's --window-size counts
+    // browser chrome, so the visual viewport comes back a bit shorter than the
+    // screenshot (e.g. 720 requested -> 639 of innerHeight) — leaving #root on
+    // 100vh would make the DOM dump's rects disagree with the PNG and corrupt
+    // the structural diff against the Clay tree. Default to artboard-native
+    // resolution; ?w=&h= overrides for callers capturing at another size.
+    var w = parseInt(qs.get('w') || '', 10) || 1440;
+    var h = parseInt(qs.get('h') || '', 10) || 900;
+    var root = document.getElementById('root');
+    root.style.width = w + 'px';
+    root.style.height = h + 'px';
+
+    setQWTheme(mode, accent);
+    ReactDOM.createRoot(document.getElementById('root'))
+      .render(React.createElement(ScreenHUD));
+  })();
 </script>
 <script>
+// W-17 dispatch 5b S5: DOM walker. Runs after React mount; emits a Clay-mirror
+// JSON tree (see tests/visual/README.md "DOM-Clay mapping") into a script
+// element that `--dump-dom` retrieves.
 function hexFromCss(s) {
   if (!s) return '';
   const m = s.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/);
@@ -74,6 +143,7 @@ function emitDump() {
   tag.textContent = JSON.stringify(tree);
   document.body.appendChild(tag);
 }
+// Delay until after React mount + font load. virtual-time-budget covers it.
 setTimeout(emitDump, 2000);
 </script>
 </body>
