@@ -14,9 +14,10 @@
 menuDef {
 	name "main"
 	// Quake 1's main menu drew straight over whatever the attract demo was
-	// doing; this restores that. The backdrop layers stay off so the reel
-	// shows through — deep menus turn them on instead.
-	backdrop invisible
+	// doing; this restores that, with a scrim so the menu text stays legible
+	// over a moving reel. The backdrop layers stay off so the reel shows
+	// through — deep menus turn them on instead.
+	backdrop dim
 	layer "menu"
 	rect 0 0 1 1
 	fullScreen 1
