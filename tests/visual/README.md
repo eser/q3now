@@ -89,6 +89,32 @@ DOM extraction (`scripts/artboard_*.html` walker) and Clay dump (`wui_test_dump_
 
 Node-match criterion (per Zhang-Shasha relabel cost = 0): exact `type` match + rect overlap > 50% + `style.color` ΔE_00 < 10 + text content equal (for text nodes).
 
+## Harness prerequisites (`vendor/`)
+
+The `scripts/artboard_*.html` harnesses render **fully offline**. They load React,
+the fonts, and the design components from `tests/visual/vendor/`, which is
+gitignored and must be built once before any baseline run:
+
+```
+node tests/visual/scripts/vendor_sync.mjs            # default design source
+node tests/visual/scripts/vendor_sync.mjs --design-src <dir>
+QW_DESIGN_SRC=<dir> node tests/visual/scripts/vendor_sync.mjs
+```
+
+That script (a) copies the React 18.3.1 UMD builds out of
+`launcher/frontend/node_modules`, (b) copies Oxanium / JetBrains Mono / Share Tech
+Mono TTFs out of `assets/fonts` + `tools/msdf/fonts`, and (c) compiles the design
+JSX to plain `React.createElement` JS using the `@babel/core` already vendored
+under `launcher/frontend/node_modules`.
+
+The design JSX lives in a **separate private repo**, so it is deliberately not
+committed here — `vendor/` is a reproducible local artifact, never a commit. If
+`vendor/` is missing or stale the harness renders an empty `#root`, which shows up
+as a PNG with a single distinct colour.
+
+Harness resolution follows the pipeline (W-103: 1280x720) and is not hardcoded;
+pass `?w=&h=` to capture at another size.
+
 ## Adding an artboard
 
 1. Add `scripts/artboard_<name>.html` mounting the component + DOM walker.
