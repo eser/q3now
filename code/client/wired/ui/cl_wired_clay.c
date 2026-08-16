@@ -5659,7 +5659,29 @@ void WiredUI_CompositorEmitFrame( void )
 
 		for ( layerIdx = 0; layerIdx < WUI_LAYER_COUNT; layerIdx++ ) {
 			wuiLayer_t L = (wuiLayer_t) layerIdx;
-			if ( !wui_layer_active( L ) ) continue;
+			/* Read the state resolved at the top of the frame rather than
+			 * re-asking the predicate: the background family's answer comes
+			 * from the stack-top preset, which wui_layer_active() cannot see. */
+			if ( !WiredUI_LayerVisible( L ) ) continue;
+
+			/* The two background layers own their content directly instead of
+			 * riding on whichever menu item happened to carry bgLayerFlags.
+			 * That indirection is what let two different emitters — the
+			 * layered scene rects and the procedural backdrop — end up on the
+			 * same zIndex competing on emit order; as layers they simply
+			 * stack. */
+			if ( L == WUI_LAYER_BG_DARK || L == WUI_LAYER_BG_ANIMATED ) {
+				float bw = (float) cls.glconfig.vidWidth;
+				float bh = (float) cls.glconfig.vidHeight;
+				/* Dark is the opaque base fill on its own; animated adds the
+				 * composed scene over it. Splitting the flag set this way is
+				 * what makes "hide the scene but keep a floor" expressible —
+				 * previously both arrived together from one menu item. */
+				WUI_DrawBackgroundLayered( 0.0f, 0.0f, bw, bh,
+					( L == WUI_LAYER_BG_DARK ) ? WUI_BG_LAYER_BASE
+					                           : ( WUI_BG_DEMO_BACKDROP & ~WUI_BG_LAYER_BASE ) );
+				continue;
+			}
 
 			if ( L == WUI_LAYER_MENU ) {
 				m = WiredUI_GetActiveMenu();
