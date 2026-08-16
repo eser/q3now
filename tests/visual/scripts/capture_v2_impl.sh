@@ -73,6 +73,9 @@ set cg_crosshairSize 48
 // missing", "player owns 0 holdables"). Neither was: the panels render fine,
 // the gun was simply sitting on top of them.
 set cg_drawGun 0
+// cg_drawGun is CVAR_ARCHIVE, so this write lands in the player's config.cfg
+// and survives the run. Restored before quit below — a capture harness must
+// not leave the game configured differently than it found it.
 set hud ${HUD:-classic}
 set ui_palette_mode $MODE
 set ui_palette_accent $ACCENT
@@ -85,6 +88,9 @@ setviewpos ${VIEWPOS:-216 1328 24 90}
 wait 500
 screenshot
 wait 200
+// Undo the archived cvars this capture changed (see cg_drawGun above).
+set cg_drawGun 1
+wait 100
 quit
 EOF
 
