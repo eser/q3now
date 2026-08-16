@@ -223,28 +223,73 @@ typedef struct {
  * (backward-compatible with all earlier panels). This generalizes the
  * older WiredUI_GetActiveMenu single-panel narrow to a per-layer walk
  * with activation rules per cls.state. */
+/* The stack is a Photoshop stack: fixed slots, each independently visible and
+ * pausable, painted back to front. Enum order IS z-order — the compositor walks
+ * 0..COUNT and that is the only ordering anywhere.
+ *
+ * The enum stays dense; the canonical indices below are the design's spacing,
+ * kept as documentation so a future layer has an obvious home without
+ * renumbering anything:
+ *
+ *    0   dark background      safe base fill
+ *    1   animated background  the composed scene
+ *    5   attract              the demo reel
+ *   20   game                 world viewport
+ *   45   loading              above the game, below the menu
+ *   50   menu                 modal stack, popups, debug overlays
+ *   90   console
+ *
+ * Loading sits above the game and below the menu on purpose: it covers a map
+ * as it loads, but a menu opened during a load still draws on top of it. */
 typedef enum {
-	WUI_LAYER_BG_ATTRACT      = 0,
-	WUI_LAYER_LOADING         = 1,
+	/* Opaque base fill. Its own layer so "there is always something behind
+	 * the scene" is structural rather than a colour someone remembered to
+	 * clear to. */
+	WUI_LAYER_BG_DARK         = 0,
+	/* The composed backdrop — sky, silhouettes, embers, fog, parallax. Split
+	 * from BG_DARK so it can be hidden and paused on its own while the base
+	 * fill stays. */
+	WUI_LAYER_BG_ANIMATED     = 1,
+	WUI_LAYER_BG_ATTRACT      = 2,
 	/* 3D world viewport — apps register render callbacks via
 	 * WiredUI_RegisterViewportProvider; the compositor's emit walk
 	 * invokes them from within this layer. Painter's
 	 * order: world geometry under HUD + menus + console. */
-	WUI_LAYER_WORLD_VIEWPORT  = 2,
-	WUI_LAYER_HUD             = 3,
+	WUI_LAYER_WORLD_VIEWPORT  = 3,
+	WUI_LAYER_HUD             = 4,
+	/* Moved above WORLD_VIEWPORT (canonical index 45). It used to sit at 1,
+	 * beneath the game, which only worked because nothing was drawn behind it
+	 * yet; with the background layers present it has to cover them. */
+	WUI_LAYER_LOADING         = 5,
 	/* Modal menu stack. Renamed from WUI_LAYER_MENU_STACK (the _STACK
 	 * suffix is retired — there's only one menu semantic). */
-	WUI_LAYER_MENU            = 4,
-	WUI_LAYER_POPUP           = 5,
-	WUI_LAYER_DEBUG_OVERLAY   = 6,
+	WUI_LAYER_MENU            = 6,
+	WUI_LAYER_POPUP           = 7,
+	WUI_LAYER_DEBUG_OVERLAY   = 8,
 	/* Cursor sprite + hover tooltip + transient floating overlays
 	 * (multi-dropdown). Gated on Key_GetCatcher() & KEYCATCH_UI. */
-	WUI_LAYER_OVERLAY         = 7,
+	WUI_LAYER_OVERLAY         = 9,
 	/* Console panel — KEYCATCH_CONSOLE or con_immediate. Highest Z,
 	 * draws above debug overlays + cursor + tooltip. */
-	WUI_LAYER_CONSOLE         = 8,
+	WUI_LAYER_CONSOLE         = 10,
 	WUI_LAYER_COUNT
 } wuiLayer_t;
+
+/* Order contract. Enum order is z-order, so reintroducing the old arrangement
+ * (loading beneath the game, no background layers) fails to compile rather
+ * than quietly painting the stack wrong. */
+_Static_assert( WUI_LAYER_BG_DARK        < WUI_LAYER_BG_ANIMATED,
+	"the base fill must sit under the animated scene" );
+_Static_assert( WUI_LAYER_BG_ANIMATED    < WUI_LAYER_BG_ATTRACT,
+	"the attract reel draws over the backdrop, not under it" );
+_Static_assert( WUI_LAYER_BG_ATTRACT     < WUI_LAYER_WORLD_VIEWPORT,
+	"a live match covers the attract reel" );
+_Static_assert( WUI_LAYER_WORLD_VIEWPORT < WUI_LAYER_LOADING,
+	"loading covers the map it is loading" );
+_Static_assert( WUI_LAYER_LOADING        < WUI_LAYER_MENU,
+	"a menu opened during a load draws over the loading screen" );
+_Static_assert( WUI_LAYER_MENU           < WUI_LAYER_CONSOLE,
+	"the console is always on top" );
 
 /* Default font size used as a fallback when wiredItemDef_t.fontPointSize <= 0.
  * Shared between the legacy SCR text path (cl_wired_ui.c) and the compositor

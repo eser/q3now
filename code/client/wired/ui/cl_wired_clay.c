@@ -297,6 +297,8 @@ int         WiredUI_EmitContextLayer( void ) { return s_wui_emit_layer; }
 static const char *wui_layer_name_of( int layer )
 {
 	switch ( layer ) {
+	case WUI_LAYER_BG_DARK:        return "bg_dark";
+	case WUI_LAYER_BG_ANIMATED:    return "bg_animated";
 	case WUI_LAYER_BG_ATTRACT:     return "bg_attract";
 	case WUI_LAYER_LOADING:        return "loading";
 	case WUI_LAYER_WORLD_VIEWPORT: return "world_viewport";
@@ -728,6 +730,8 @@ static qboolean wui_layer_active( wuiLayer_t layer )
 	}
 
 	switch ( layer ) {
+	case WUI_LAYER_BG_DARK:        return bg_dark_policy_isActive();
+	case WUI_LAYER_BG_ANIMATED:    return bg_animated_policy_isActive();
 	case WUI_LAYER_BG_ATTRACT:     return bg_attract_policy_isActive();
 	case WUI_LAYER_LOADING:        return loading_policy_isActive();
 	case WUI_LAYER_WORLD_VIEWPORT: return world_viewport_policy_isActive();
