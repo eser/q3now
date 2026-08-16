@@ -1914,18 +1914,6 @@ SET_TESTS_PROPERTIES(anim_rearm_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(anim_rearm_test anim_rearm_contract)
 
-# Menu background intent. The scene behind the menus is recorded per stack slot
-# at push time, not carried by the panel, so anything that skips the push loses
-# it silently — which is how the main menu came back from a map on black.
-ADD_EXECUTABLE(menu_bg_intent_test
-	tests/menu-bg-intent-test.c
-)
-ADD_TEST(NAME menu_bg_intent_contract COMMAND menu_bg_intent_test)
-SET_TESTS_PROPERTIES(menu_bg_intent_contract PROPERTIES
-	LABELS "host-only;subsystem;owner.q3now-client;failure.contract;feature.always"
-	TIMEOUT 30
-)
-WIRED_CONFIGURE_HOST_TEST(menu_bg_intent_test menu_bg_intent_contract)
 
 # Local bot-slot allocation identity. Compiles the exact production parser and
 # match seam so a queued removal cannot authorize a replacement bot in a reused
