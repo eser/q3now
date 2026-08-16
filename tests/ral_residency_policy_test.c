@@ -186,6 +186,145 @@ static void testBoundedFairSelection( void ) {
 	}
 }
 
+/*
+Multi-frame fairness under sustained oversubscription.
+
+testBoundedFairSelection proves one selection is bounded and ordered. It cannot
+prove fairness: fairness is a property of the sequence, not of a single drain.
+This drives repeated drains with a candidate set whose demand permanently
+exceeds the per-frame budget, advancing waitFrames on everything not served,
+which is what the production drain does between frames.
+
+Asserted: (1) no frame ever exceeds maxPages or maxBytes; (2) every class is
+served, so a class with permanently low screen error is not starved out by
+high-error textures; (3) the starvation ceiling actually fires — the worst
+observed wait stays bounded rather than growing without limit.
+*/
+static void testMultiFrameFairnessAndStarvationCeiling( void ) {
+	enum { NUM_CANDIDATES = 8, NUM_FRAMES = 400 };
+	ralResidencyCandidate_t c[NUM_CANDIDATES];
+	ralResidencyBudget_t    budget;
+	ralResidencyPolicy_t    policy = ralResidencyDefaultPolicy;
+	size_t                  servedPerClass[RAL_RESIDENCY_CLASS_COUNT];
+	uint32_t                worstWait = 0;
+	size_t                  i, frame;
+
+	// Demand outstrips supply every frame: four classes compete, textures carry
+	// far higher screen error than the rest, so without a fairness rule the
+	// other three classes would never be selected.
+	c[0] = candidate( RAL_RESIDENCY_CLASS_TEXTURE,     0, RAL_RESIDENCY_TIER_VISIBLE,    900, 20, 64 );
+	c[1] = candidate( RAL_RESIDENCY_CLASS_TEXTURE,     1, RAL_RESIDENCY_TIER_VISIBLE,    880, 20, 64 );
+	c[2] = candidate( RAL_RESIDENCY_CLASS_TEXTURE,     2, RAL_RESIDENCY_TIER_VISIBLE,    860, 20, 64 );
+	c[3] = candidate( RAL_RESIDENCY_CLASS_TEXTURE,     3, RAL_RESIDENCY_TIER_VISIBLE,    840, 20, 64 );
+	c[4] = candidate( RAL_RESIDENCY_CLASS_SHADOW,      0, RAL_RESIDENCY_TIER_PREDICTED,   40, 20, 64 );
+	c[5] = candidate( RAL_RESIDENCY_CLASS_SHADOW,      1, RAL_RESIDENCY_TIER_PREDICTED,   30, 20, 64 );
+	c[6] = candidate( RAL_RESIDENCY_CLASS_IRRADIANCE,  0, RAL_RESIDENCY_TIER_BACKGROUND,  10, 20, 64 );
+	c[7] = candidate( RAL_RESIDENCY_CLASS_ASSET_CHUNK, 0, RAL_RESIDENCY_TIER_BACKGROUND,   1, 20, 64 );
+
+	// Fairness is carried by the per-class quota pass in
+	// Ral_ResidencySelectRequests ("first honor bounded per-class fairness"),
+	// not by the comparator: the comparator orders by tier before it looks at
+	// the starvation ceiling, so a BACKGROUND page can never out-rank a VISIBLE
+	// one on wait alone. Reserving one slot per class is what lets the low-error
+	// classes progress at all.
+	memset( &budget, 0, sizeof( budget ) );
+	budget.maxPages = 4;   // eight candidates, four slots: permanent contention
+	budget.maxBytes = 256; // exactly four 64-byte pages
+	for ( i = 0; i < RAL_RESIDENCY_CLASS_COUNT; i++ ) {
+		budget.minPerClass[i] = 1;
+	}
+
+	memset( servedPerClass, 0, sizeof( servedPerClass ) );
+
+	for ( frame = 0; frame < NUM_FRAMES; frame++ ) {
+		size_t   out[NUM_CANDIDATES];
+		uint8_t  scratch[NUM_CANDIDATES];
+		uint64_t frameBytes = 0;
+		size_t   n = Ral_ResidencySelectRequests( c, NUM_CANDIDATES, &policy,
+			&budget, out, NUM_CANDIDATES, scratch );
+
+		// (1) bounded update: the drain never overruns either cap.
+		CHECK( n <= budget.maxPages );
+		for ( i = 0; i < n; i++ ) {
+			frameBytes += c[out[i]].costBytes;
+		}
+		CHECK( frameBytes <= budget.maxBytes );
+
+		// Advance the queue the way the production drain does: selected entries
+		// are dispatched (wait resets), everything else waits one more frame.
+		for ( i = 0; i < NUM_CANDIDATES; i++ ) {
+			size_t k;
+			int    selected = 0;
+			for ( k = 0; k < n; k++ ) {
+				if ( out[k] == i ) { selected = 1; break; }
+			}
+			if ( selected ) {
+				servedPerClass[c[i].id.classId]++;
+				c[i].waitFrames = 0;
+			} else {
+				c[i].waitFrames++;
+				if ( c[i].waitFrames > worstWait ) {
+					worstWait = c[i].waitFrames;
+				}
+			}
+		}
+	}
+
+	// (2) no class is starved out, including the permanently lowest-error one.
+	for ( i = 0; i < RAL_RESIDENCY_CLASS_COUNT; i++ ) {
+		CHECK( servedPerClass[i] > 0 );
+	}
+
+	// (1b) page cap and byte cap must each bind on their own. The loop above
+	// sizes maxBytes to exactly maxPages worth of pages, so the byte check
+	// alone could satisfy it and a broken page cap would go unnoticed. Re-run
+	// one drain with the byte budget deliberately slack so only maxPages can
+	// stop the selection.
+	{
+		size_t  out[NUM_CANDIDATES];
+		uint8_t scratch[NUM_CANDIDATES];
+		size_t  n;
+		ralResidencyBudget_t pageBound = budget;
+
+		pageBound.maxPages = 3;
+		pageBound.maxBytes = 1u << 20; // far above total candidate cost
+		for ( i = 0; i < NUM_CANDIDATES; i++ ) {
+			c[i].waitFrames = 0;
+		}
+		n = Ral_ResidencySelectRequests( c, NUM_CANDIDATES, &policy, &pageBound,
+			out, NUM_CANDIDATES, scratch );
+		CHECK( n == pageBound.maxPages );
+	}
+
+	// (1c) and the mirror case: byte cap binding while the page cap is slack.
+	{
+		size_t  out[NUM_CANDIDATES];
+		uint8_t scratch[NUM_CANDIDATES];
+		size_t  n, k;
+		uint64_t bytes = 0;
+		ralResidencyBudget_t byteBound = budget;
+
+		byteBound.maxPages = NUM_CANDIDATES; // never the limiting factor
+		byteBound.maxBytes = 128;            // two 64-byte pages
+		for ( i = 0; i < NUM_CANDIDATES; i++ ) {
+			c[i].waitFrames = 0;
+		}
+		n = Ral_ResidencySelectRequests( c, NUM_CANDIDATES, &policy, &byteBound,
+			out, NUM_CANDIDATES, scratch );
+		for ( k = 0; k < n; k++ ) {
+			bytes += c[out[k]].costBytes;
+		}
+		CHECK( bytes <= byteBound.maxBytes );
+		CHECK( n == 2 );
+	}
+
+	// (3) the ceiling bounds the worst case instead of letting it grow with the
+	// run length. Allow one full ceiling plus a drain margin for the backlog.
+	CHECK( policy.starvationFrames > 0 );
+	CHECK( worstWait < policy.starvationFrames + NUM_CANDIDATES );
+	CHECK( worstWait < NUM_FRAMES ); // guards against "never served" passing (2)
+}
+
 int main( void ) {
 	testLifecycle();
 	testScoreAndRank();
@@ -193,6 +332,7 @@ int main( void ) {
 	testAtomicPromotionAndFallback();
 	testPersistentPageRecord();
 	testBoundedFairSelection();
+	testMultiFrameFairnessAndStarvationCeiling();
 	if ( failures ) return 1;
 	puts( "ral residency policy contract: PASS" );
 	return 0;

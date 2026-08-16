@@ -291,20 +291,22 @@ int main( void ) {
 	memset( projection, 0, sizeof( projection ) );
 	projection[8] = 0.125f;
 	projection[9] = -0.25f;
-	CHECK( R_TemporalProjectionApply( projection, 800, 600,
+	// W-103: the fixture extent is arbitrary, so it uses the canonical 16:9
+	// baseline (1280x720) rather than a 4:3 one.
+	CHECK( R_TemporalProjectionApply( projection, 1280, 720,
 		(float[2]){ 0.25f, -0.5f }, ndc ) );
-	CHECK( CLOSE( ndc[0], 0.000625f ) );
-	CHECK( CLOSE( ndc[1], 1.0f / 600.0f ) );
+	CHECK( CLOSE( ndc[0], 0.000390625f ) );
+	CHECK( CLOSE( ndc[1], 1.0f / 720.0f ) );
 	CHECK( CLOSE( projection[8], 0.125f - ndc[0] ) );
 	CHECK( CLOSE( projection[9], -0.25f - ndc[1] ) );
 	memcpy( projectionBefore, projection, sizeof( projection ) );
 	ndcBefore[0] = ndc[0];
 	ndcBefore[1] = ndc[1];
-	CHECK( !R_TemporalProjectionApply( projection, 0, 600,
+	CHECK( !R_TemporalProjectionApply( projection, 0, 720,
 		(float[2]){ 0.25f, -0.5f }, ndc ) );
 	CHECK( memcmp( projection, projectionBefore, sizeof( projection ) ) == 0 );
 	CHECK( memcmp( ndc, ndcBefore, sizeof( ndc ) ) == 0 );
-	CHECK( !R_TemporalProjectionApply( projection, 800, 600,
+	CHECK( !R_TemporalProjectionApply( projection, 1280, 720,
 		(float[2]){ NAN, 0.0f }, ndc ) );
 	CHECK( memcmp( projection, projectionBefore, sizeof( projection ) ) == 0 );
 	CHECK( memcmp( ndc, ndcBefore, sizeof( ndc ) ) == 0 );
