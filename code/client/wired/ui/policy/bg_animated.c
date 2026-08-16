@@ -13,19 +13,20 @@
 // without pushing left it unwritten and the backdrop silently vanished. A
 // predicate that asks rather than remembers has nothing to lose.
 //
-// Until the compositor wiring lands (step 3 of the layer refactor) this
-// reports qfalse, so the layer exists and is addressable by the dev override
-// (wui_layer_test_single) without yet changing what anyone sees.
+// The compositor resolves the preset at the top of each frame and records the
+// answer; this predicate reports that record. It is deliberately a plain read:
+// deciding here as well would give two places an opinion about the same layer.
 
 #include "../../../client.h"
 #include "../cl_wired_ui.h"
+#include "../cl_wired_compositor.h"
 #include "wui_layer_policy.h"
 
 #if FEAT_WIRED_UI
 
 qboolean bg_animated_policy_isActive( void )
 {
-	return qfalse;
+	return WiredUI_LayerVisible( WUI_LAYER_BG_ANIMATED );
 }
 
 #endif /* FEAT_WIRED_UI */
