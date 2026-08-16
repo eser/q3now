@@ -1,5 +1,5 @@
 // qw_hud_health_panel — V2_HUD_Active bottom-left HEALTH panel
-// Interface: #include once into the modern composer menuDef body.
+// Interface: #include once into the HUD composer menuDef body.
 //
 // HUD redesign (Eser, 2026-06-30): caption RESTORED above the value. The caption
 // ("HEALTH") is a Clay column-flow text node — that IS the coordinate space where

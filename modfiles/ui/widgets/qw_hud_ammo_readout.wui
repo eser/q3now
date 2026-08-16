@@ -1,68 +1,44 @@
-// qw_hud_ammo_readout — V2_HUD_Active bottom-RIGHT ammo readout
-// Interface: #include once into the modern composer menuDef body.
+// qw_hud_ammo_readout — bottom-right ammo block: label, value, gauge, icon.
 //
-// Placement (2026-08-16, Eser live review): bottom-RIGHT, right-aligned.
+// Interface: #include once into the classic composer menuDef body.
 //
-// This block spent one revision at the mockup's bottom-CENTRE slot, chasing the
-// regions-JSON window at x640 y716. Playing it showed why that is wrong: the
-// weapon-select bar also lives at bottom-centre, so the ammo count and the
-// carousel ran into each other. Eser: "sag altta ammo ile ilgili bolum olmali o
-// yok, onun yerine ortada ammo count ve weapon select bar ile birbirine giriyor.
-// normalde saga yasli bir ammo bolumu olmali sag-alt'ta ve oradaki gauge'lar ve
-// degerler tam tersine saga yasli olmali."
+// Mirrors the health/armor pair on the left: right-aligned (textalign 2), the
+// gauge filling right-to-left (direction L), panel chrome and accent edge to
+// match. Sits clear of the weapon-select bar at bottom-centre.
 //
-// So the readout goes back to bottom-right, and — unlike the health/armor
-// panels, which keep their content left-aligned even on the right side — the
-// label and the value are both RIGHT-aligned (textalign 2), growing leftward
-// from the screen edge. That is the mirror the panel pair was missing.
-//
-// The vcompare region for ammo_readout is still anchored to the mockup's centre
-// slot, so this placement scores badly there. That is expected and accepted:
-// the gate measures agreement with a mockup, and the mockup's own layout
-// collides with a widget it does not draw. Playability wins over the artboard.
-//
-// 🔴 FULL-VIEWPORT LEAF RULE (hud-v2-redesign.md:26 — hard constraint):
-// `hudElement` leaf rects do NOT resolve against their container. The .wui
-// rect is back-filled straight to screen pixels against the FULL viewport
-// (cl_wired_parse.c:1067-1070 WUI_BackfillToScreen: UNIT_NORM -> value *
-// vidWidth/vidHeight), and the Clay-resolved x/y/w/h are then DISCARDED by
-// the custom-draw adapter (cl_wired_ui_hud_register.c:493-495) — the legacy
-// routine reads only its own config.rect. So moving this readout is TWO
-// synchronized edits: the CONTAINER offsets AND every leaf rect. Both are
-// applied below; the container positions the flow-text caption, and the leaf
-// is hand-placed with an independent full-viewport rect to land inside it.
-//
-// Container: right 1.94vw / bottom 4vh — the same right inset the armor panel
-// uses (11.6vw from its own left edge lands on the same margin), sitting above
-// the panel row. NO background and NO border: bare text over the arena.
-// Tokens: $accent $font_mono $font_sans.
+// A 2026-08-16 revision moved this to bottom-CENTRE and dropped the gauge and
+// icon, on the grounds that the V2 artboard draws neither there. Playing it
+// showed both to be regressions: the readout collided with the weapon bar, and
+// the gauge is how remaining ammo reads without parsing digits. Reverted; that
+// variant is gone.
 itemDef {
-	name "hud_active_ammo_readout"
+	name "hud_ammo_readout"
 	type container
 	position absolute
 	right 1.94vw
 	bottom 4vh
-	width 11.11vw
-	height 5.56vh
+	width 11.5vw
+	height 11.56vh
 	direction column
+	padding 0.7vh 1.1vw
 	alignX end
-	grow 0
+	background $hud_panel_bg60
+	borderRight 3px $accent
 
-	// Caption — flow text at the block top, mirroring the mockup's Mono label.
-	// Kept on player.weapon.shortname (fed already-uppercased by
-	// cg_wired_bridge.c:694-703); the mockup prints the FULL uppercase name, but
-	// bg_weaponlist[].name is mixed-case ("Rocket Launcher", bg_misc.c:272) and
-	// upper-casing it is a FEEDER change (engine LoC) deliberately out of scope
-	// here. Explicit width PERCENT (NOT width FIT) keeps the proven bound-text
-	// pattern — a FIT-width bound text node mis-measures into garbled glyphs.
-	itemDef { type 0 rect 0 0 11.11vw 1.07vh height FIT width PERCENT 11.11vw bind "player.weapon.shortname" text "WPN" textalign 2 font $font_mono 8 letterspacing 3.2 forecolor $accent decoration visible 1 grow 0 }
+	// D3 fix (2026-06-30): caption now binds the SHORT uppercase weapon tag
+	// (player.weapon.shortname, e.g. "RL") — the full .name ("Rocket Launcher")
+	// overran this compact panel. Uses explicit width PERCENT (NOT width FIT) to
+	// match the proven bound-text pattern in qw_hud_scoreboard_bar / qw_hud_kill_feed
+	// (a FIT-width bound text node mis-measured → garbled glyphs).
+	itemDef { type 0 rect 0 0 6vw 2.2vh height FIT width PERCENT 6vw bind "player.weapon.shortname" text "WPN" textalign 2 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
 
-	// Value — right-aligned at x0.972 (the 1.94vw inset expressed in normalised
-	// full-viewport units, per the leaf rule above), baseline y0.885 to match the
-	// health/armor value row. textalign 2 = RIGHT: the digits grow leftward from
-	// the edge instead of spilling toward the weapon bar. fontsize 40x46 is the
-	// sibling panels' size, so all three bottom readouts now share one scale.
-	// The mockup draws a bar and an icon in neither this block nor its own; both
-	// leaves stay dropped.
-	itemDef { hudElement "statusbar_value" bind "ammo" anchor BOTTOM_RIGHT rect 0.972 0.885 0 0 font $font_sans fontsize 40 46 textalign 2 forecolor $accent decoration visible 1 }
+	// HUD redesign (Eser, 2026-06-30): VALUE on the LEFT (right-aligned) with the BAR
+	// stacked UNDER it, ICON on the RIGHT — (value / bar) [icon]. The icon draws in its
+	// NATURAL color (no forecolor tint — this is why the red RL icon no longer greys
+	// out). value/bar keep the amber forecolor. digit right-edge 0.934, icon 0.944–0.962
+	// (≈10px gap, no collision even for '999'); bar 0.882–0.934 under the digit (clear of
+	// the icon). The bar binds player.ammo.percent (= ammo/200, ∞-weapons → full).
+	itemDef { hudElement "statusbar_value" bind "ammo" anchor BOTTOM_RIGHT rect 0.934 0.885 0 0 font $font_sans fontsize 40 46 textalign 2 forecolor $accent decoration visible 1 }
+	itemDef { hudElement "statusbar_bar"   bind "ammo" anchor BOTTOM_RIGHT rect 0.882 0.925 0.052 0.004 direction L forecolor $accent decoration visible 1 }
+	itemDef { hudElement "statusbar_icon"  bind "ammo" anchor BOTTOM_RIGHT rect 0.944 0.892 0.018 0.030 decoration visible 1 }
 }

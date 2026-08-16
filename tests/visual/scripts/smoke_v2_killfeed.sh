@@ -52,7 +52,7 @@ set bot_minplayers 0
 set g_gametype 0
 set g_forcerespawn 2
 set cg_drawCrosshair 1
-set hud ${HUD:-modern}
+set hud ${HUD:-classic}
 set ui_palette_mode $MODE
 set ui_palette_accent $ACCENT
 menu_reload

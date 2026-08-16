@@ -1,5 +1,5 @@
 // qw_hud_crosshair — V2_HUD_Active center crosshair
-// Interface: #include once into the modern composer menuDef body.
+// Interface: #include once into the HUD composer menuDef body.
 // Source: docs/wui-claude-design-canonical-v2/project/qw-screens.jsx:1097-1106
 //   (viewport-center crosshair: circle dot + 4 ticks).
 // ABI: the existing `crosshair` hudElement dispatches the engine's

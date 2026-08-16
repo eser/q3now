@@ -1,5 +1,5 @@
 // qw_hud_weapon_placeholder — V2_HUD_Active bottom-right weapon-model panel
-// Interface: #include once into the modern composer menuDef body.
+// Interface: #include once into the HUD composer menuDef body.
 // Source: docs/wui-claude-design-canonical-v2/project/qw-screens.jsx:1086-1095
 //   (right:120 bottom:60, 340x240; dark gradient panel + scanlines + label).
 //
