@@ -8068,12 +8068,20 @@ void WiredUI_SetActiveMenu( int menu ) {
 		 * closes the menu entirely and unpauses; pushing it would defeat that. Its
 		 * onOpen is fired manually below as before. */
 		if ( menu == UIMENU_MAIN ) {
-			if ( wui_menuStackDepth == 0 ) {
-				// PushMenu fires main's onOpen (initial focus seed) + re-asserts
-				// KEYCATCH_UI; the top-of-stack guard makes a redundant explicit
-				// `open "main"` (cl_wired_ui.c:2330) collapse instead of duplicating.
-				WiredUI_PushMenu( "main", WUI_BG_INTENT_SCENE );
-			}
+			// PushMenu fires main's onOpen (initial focus seed) + re-asserts
+			// KEYCATCH_UI; its own top-of-stack guard makes a redundant explicit
+			// `open "main"` (cl_wired_ui.c:2330) collapse instead of duplicating,
+			// and REFRESHES the background intent while collapsing (:5891).
+			//
+			// This used to be wrapped in `if ( wui_menuStackDepth == 0 )`, which
+			// skipped the push whenever anything was left on the stack. Coming
+			// back from a map that is exactly what happens: the menu appeared via
+			// the stack fallback, but WUI_BG_INTENT_SCENE was never recorded for
+			// the top slot, so the parallax scene did not draw and the main menu
+			// came up on black. Opening any submenu pushed properly and fixed it,
+			// which is what made the bug look specific to main. The guard is not
+			// needed — PushMenu already collapses a redundant push.
+			WiredUI_PushMenu( "main", WUI_BG_INTENT_SCENE );
 		} else if ( menu == UIMENU_INGAME ) {
 			/* Fire the ingame root's onOpen when activating via SetActiveMenu
 			 * alone (it lives behind the stack fallback, not pushed). */
