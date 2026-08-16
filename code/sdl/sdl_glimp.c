@@ -268,7 +268,8 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 
 		// find out to which display our window belongs to
 		// according to previously stored \vid_xpos and \vid_ypos coordinates
-		displayID = FindNearestDisplay( &x, &y, 640, 480 );
+		// W-103: probe with a 16:9 extent (1280x720), never a 4:3 one.
+		displayID = FindNearestDisplay( &x, &y, 1280, 720 );
 
 		//Com_Log( SEV_INFO, LOG_CH(ch_client), "Selected display: %u\n", displayID );
 	}
@@ -283,14 +284,18 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		}
 		else
 		{
-			glw_state.desktop_width = 640;
-			glw_state.desktop_height = 480;
+			// W-103: the desktop query fails exactly on the headless/CI path,
+			// so this fallback IS the resolution the evidence is captured at.
+			// It must be 16:9 (1280x720), never 4:3.
+			glw_state.desktop_width = 1280;
+			glw_state.desktop_height = 720;
 		}
 	}
 	else
 	{
-		glw_state.desktop_width = 640;
-		glw_state.desktop_height = 480;
+		// W-103: 16:9 fallback, see above.
+		glw_state.desktop_width = 1280;
+		glw_state.desktop_height = 720;
 	}
 
 	// For BORDERED windowed mode, clamp to usable display area so the

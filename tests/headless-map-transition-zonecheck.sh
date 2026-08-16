@@ -1,0 +1,360 @@
+#!/usr/bin/env bash
+# headless-map-transition-zonecheck.sh — display-free second-map Z_Free gate (#96).
+#
+# #96 is the "FATAL: Server crashed" that fired on the FIRST FRAME OF THE SECOND
+# MAP (originally Windows, 2026-06-15). The zone allocator's consistency
+# terminate is `Z_Free: freed a pointer without ZONEID` (code/qcommon/common.c:740).
+#
+# WHY THIS IS HEADLESS-ABLE (the whole point of this file):
+#   The suspect path is server-side memory lifetime across a map change. The GUI
+#   and headless binaries share the SAME object code for it — qcommon_engine_shared
+#   (CMakeLists.txt:245-249) is injected byte-identically into both (:2872, :2903),
+#   and the transition's zone work is unguarded:
+#     code/server/sv_init.c:434-435  Hunk_ClearLevel(); CM_ClearMap();  (no #ifndef HEADLESS)
+#     code/server/sv_init.c:531      CM_LoadMap()                       (unconditional)
+#     code/server/sv_init.c:115,344,371,1116  the Z_Free() call sites
+#   FEAT_HEADLESS_RENDERER is 0 (code/qcommon/q_feats.h:95), so no renderer is
+#   linked or reachable. A GPU is NOT required to exercise this crash class.
+#
+# 🔴 BUILD-CONFIG CONTRACT — READ BEFORE TRUSTING A PASS:
+#   The ZONEID assertion is compiled ONLY into _DEBUG builds:
+#     code/qcommon/common.c:409-412   #ifdef _DEBUG / #define USE_ZONE_ID / #endif
+#     code/qcommon/common.c:739-743   the terminate is #ifdef USE_ZONE_ID
+#   and _DEBUG is set only for Debug (CMakeLists.txt:2835). In a RELEASE build the
+#   check does not exist, so a release run cannot witness #96 — it would corrupt
+#   silently instead. This gate therefore REFUSES a binary without the assertion
+#   (fail-closed, exit 1) rather than reporting a vacuous PASS. Point it at a
+#   DEBUG wired-headless.
+#
+# The chain is arena1 -> e1m1 -> arena7: three loads, two transitions, and e1m1
+# crosses the Q1 BSP format (code/qcommon/cm_q1.c is dense with Z_Free), matching
+# the recorded probe in the wiki (alpha-ux-defect-sweep, 2026-08-11).
+#
+# NOTE: `+waitForMap` is CLIENT-ONLY (registered at code/client/cl_main.c:5430),
+# so a headless run must gate with bare `+wait N` (cmd.c:1287).
+#
+# Usage:   tests/headless-map-transition-zonecheck.sh /path/to/wired-headless
+#          tests/headless-map-transition-zonecheck.sh --self-test
+#          tests/headless-map-transition-zonecheck.sh --analyze <qconsole> <stdout> <rc>
+#          tests/headless-map-transition-zonecheck.sh --flag-inventory <binary> [maps...]
+# Exit:    0 PASS   1 FAIL   64 usage   77 SKIP (no binary / no packs)
+#
+# --flag-inventory reuses this script's pack discovery + scratch-home setup to
+# answer a DIFFERENT question: which team-game flag entities does a given map
+# actually spawn? It exists because that question kept getting answered by hand,
+# and because `modfiles/maps/*.ent` is a REPO-LOCAL OVERRIDE set (one file,
+# arena1) — not the shipped map list. The BSPs live in pax01.sw3z, so grepping
+# the repo systematically under-reports and had already produced one wrong
+# conclusion ("arena1 is the only shipped map, so CTF cannot work").
+# Unlike the #96 gate this mode does NOT require a debug build: entity spawning
+# is independent of USE_ZONE_ID.
+
+set -uo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+MAP_CHAIN="arena1 e1m1 arena7"
+
+# The zone allocator's consistency terminates (code/qcommon/common.c) plus the
+# crash funnel string emitted by log.c:878.
+ZONE_RE='Z_Free: freed a pointer without ZONEID|Z_Free: freed a freed pointer|Z_Free: memory block wrote past end|Z_CheckHeap: block size does not touch the next block|Z_CheckHeap: next block does not have proper back link|Z_CheckHeap: two consecutive free blocks'
+CRASH_RE='Server crashed|Server fatal crashed'
+
+# ── analyzer ─────────────────────────────────────────────────────────────────
+# Pure function of (qconsole.jsonl, stdout, rc). Factored out so --self-test can
+# feed it synthetic logs with no engine. Echoes a report; returns 0 PASS / 1 FAIL.
+analyze_contract() {
+    local LOG="$1" OUT="$2" RC="$3"
+    local rows fail=0
+
+    [ -s "$LOG" ] || { echo "  FAIL: qconsole.jsonl absent/empty — the engine did not run this invocation"; return 1; }
+
+    # 1. every map in the chain actually loaded (a silent no-op must not pass).
+    # Parsed as JSON rather than grepped: the msg is `Server: arena1\n`, and an
+    # exact token match keeps `arena1` from being satisfied by `arena17`.
+    local MISSING
+    MISSING="$(python3 - "$LOG" $MAP_CHAIN <<'PYEOF' 2>/dev/null
+import json,sys
+log,maps=sys.argv[1],sys.argv[2:]
+seen=set()
+for line in open(log):
+    line=line.strip()
+    if not line: continue
+    try: row=json.loads(line)
+    except ValueError: continue
+    msg=str(row.get("msg","")).strip()
+    if msg.startswith("Server: "):
+        seen.add(msg[len("Server: "):].strip())
+print(" ".join(m for m in maps if m not in seen))
+PYEOF
+)"
+    if [ -n "$MISSING" ]; then
+        local m
+        for m in $MISSING; do
+            echo "  FAIL: map '$m' never loaded (chain did not complete)"
+        done
+        fail=1
+    fi
+
+    # 2. zone-consistency complaints anywhere (log or stdout)
+    local ZHIT
+    ZHIT="$( { cat "$LOG"; [ -f "$OUT" ] && cat "$OUT"; } 2>/dev/null | grep -nE "$ZONE_RE" )"
+    if [ -n "$ZHIT" ]; then
+        echo "  FAIL: zone-consistency complaint (#96 class) —"
+        printf '%s\n' "$ZHIT" | sed 's/^/      /'
+        fail=1
+    fi
+
+    # 3. server crash funnel
+    local CHIT
+    CHIT="$( { cat "$LOG"; [ -f "$OUT" ] && cat "$OUT"; } 2>/dev/null | grep -nE "$CRASH_RE" )"
+    if [ -n "$CHIT" ]; then
+        echo "  FAIL: server crash —"
+        printf '%s\n' "$CHIT" | sed 's/^/      /'
+        fail=1
+    fi
+
+    # 4. no FATAL severity records
+    local SEV
+    SEV="$(python3 - "$LOG" <<'PYEOF' 2>/dev/null
+import json,sys
+n=0
+for line in open(sys.argv[1]):
+    line=line.strip()
+    if not line: continue
+    try: row=json.loads(line)
+    except ValueError: continue
+    if str(row.get("sev","")).upper() in ("FATAL",): n+=1
+print(n)
+PYEOF
+)"
+    if [ "${SEV:-0}" -gt 0 ]; then
+        echo "  FAIL: $SEV FATAL severity record(s) in qconsole.jsonl"
+        fail=1
+    fi
+
+    # 5. clean shutdown
+    if [ "$RC" -ne 0 ]; then
+        echo "  FAIL: exit code $RC (want 0 — clean +quit)"
+        fail=1
+    fi
+
+    [ "$fail" -eq 0 ] || return 1
+    echo "  PASS: 3 loads / 2 transitions (incl. the Q1-format e1m1 leg), zero zone complaints, clean rc=0"
+    return 0
+}
+
+if [ "${1:-}" = "--analyze" ]; then
+    [ "$#" -eq 4 ] || { echo "usage: $0 --analyze <qconsole> <stdout> <rc>"; exit 64; }
+    analyze_contract "$2" "$3" "$4"; exit $?
+fi
+
+# ── self-test (gate-has-teeth, no engine, no packs, no display) ───────────────
+# Builds a clean synthetic log, asserts the analyzer ACCEPTS it, then mutates it
+# one defect at a time and asserts the analyzer REJECTS each. A gate that cannot
+# reject the crash it was written for is worthless.
+write_self() {
+    local log="$1" out="$2" mode="$3"
+    : > "$out"
+    python3 - "$log" "$mode" <<'PYEOF'
+import json,sys
+log,mode=sys.argv[1],sys.argv[2]
+rows=[]
+def add(sev,cat,msg): rows.append({"sev":sev,"cat":cat,"msg":msg+"\n"})
+for m in ("arena1","e1m1","arena7"):
+    add("INFO","server",f"Server: {m}")
+    add("INFO","game",f"InitGame: \\mapname\\{m}\\protocol\\74")
+add("INFO","server","----- Server Shutdown (Server quit) -----")
+
+if mode=="zoneid":
+    rows.insert(3,{"sev":"FATAL","cat":"system","msg":"Z_Free: freed a pointer without ZONEID\n"})
+elif mode=="freed-freed":
+    rows.insert(3,{"sev":"FATAL","cat":"system","msg":"Z_Free: freed a freed pointer\n"})
+elif mode=="past-end":
+    rows.insert(3,{"sev":"FATAL","cat":"system","msg":"Z_Free: memory block wrote past end\n"})
+elif mode=="checkheap":
+    rows.insert(3,{"sev":"FATAL","cat":"system","msg":"Z_CheckHeap: two consecutive free blocks\n"})
+elif mode=="crashed":
+    rows.insert(4,{"sev":"INFO","cat":"server","msg":"----- Server Shutdown (Server crashed: Z_Free: freed a pointer without ZONEID) -----\n"})
+elif mode=="fatal-sev":
+    rows.insert(3,{"sev":"FATAL","cat":"system","msg":"unspecified fatal\n"})
+elif mode=="missing-second":
+    rows=[r for r in rows if "e1m1" not in r["msg"]]
+elif mode=="missing-third":
+    rows=[r for r in rows if "arena7" not in r["msg"]]
+elif mode=="empty":
+    rows=[]
+
+with open(log,"w") as f:
+    for r in rows: f.write(json.dumps(r)+"\n")
+PYEOF
+    # stdout-channel defect: the crash can surface outside the JSONL sink.
+    if [ "$mode" = "stdout-zone" ]; then
+        printf 'Server fatal crashed: Z_Free: freed a pointer without ZONEID\n' > "$out"
+    fi
+}
+
+if [ "${1:-}" = "--self-test" ]; then
+    echo "==> headless map-transition zonecheck SELF-TEST (gate-has-teeth, engine-free)"
+    ST="$(mktemp -d -t hmtz-self-XXXXXX 2>/dev/null || mktemp -d)"
+    trap 'rm -rf "$ST"' EXIT INT TERM
+
+    write_self "$ST/clean.jsonl" "$ST/clean.out" clean
+    if ! analyze_contract "$ST/clean.jsonl" "$ST/clean.out" 0 >"$ST/clean.report" 2>&1; then
+        echo "  FAIL: analyzer rejected a CLEAN log"; sed 's/^/      /' "$ST/clean.report"; exit 1
+    fi
+    echo "  ok   clean                        accepted"
+
+    # Each defect must be REJECTED. rc-nonzero is checked via the rc argument.
+    defects="zoneid freed-freed past-end checkheap crashed fatal-sev missing-second missing-third empty stdout-zone"
+    fails=0; n=0
+    for d in $defects; do
+        n=$((n+1))
+        write_self "$ST/$d.jsonl" "$ST/$d.out" "$d"
+        if analyze_contract "$ST/$d.jsonl" "$ST/$d.out" 0 >"$ST/$d.report" 2>&1; then
+            echo "  FAIL $d — analyzer ACCEPTED a defective log"; fails=$((fails+1))
+        else
+            printf '  ok   %-28s rejected\n' "$d"
+        fi
+    done
+
+    # rc mutation: a clean log but a non-zero exit must still fail.
+    n=$((n+1))
+    if analyze_contract "$ST/clean.jsonl" "$ST/clean.out" 1 >"$ST/rc.report" 2>&1; then
+        echo "  FAIL nonzero-rc — analyzer ACCEPTED rc=1"; fails=$((fails+1))
+    else
+        printf '  ok   %-28s rejected\n' "nonzero-rc"
+    fi
+
+    if [ "$fails" -eq 0 ]; then
+        echo "==> SELF-TEST PASS: clean accepted, $n mutations rejected (gate has teeth)"
+        exit 0
+    fi
+    echo "==> SELF-TEST FAIL: $fails/$n mutations wrongly accepted"
+    exit 1
+fi
+
+# ── flag inventory mode ──────────────────────────────────────────────────────
+# Boots each map headless and reports which team-game flag entities the server
+# actually spawned, read from the engine's own log rather than inferred from
+# repo files. Informational: exits 0 whenever every map loaded, because "this
+# map has no neutral flag" is a map property, not a defect.
+FLAG_INVENTORY=0
+if [ "${1:-}" = "--flag-inventory" ]; then
+    FLAG_INVENTORY=1
+    shift
+fi
+
+# ── product run ──────────────────────────────────────────────────────────────
+HEADLESS="${1:-}"
+[ -n "$HEADLESS" ] || { echo "usage: $0 /absolute/path/to/wired-headless | --self-test"; exit 64; }
+[ -x "$HEADLESS" ] || { echo "SKIP: wired-headless not executable: $HEADLESS"; exit 77; }
+HEADLESS="$(cd "$(dirname "$HEADLESS")" && pwd)/$(basename "$HEADLESS")"
+WD="$(dirname "$HEADLESS")"
+
+# Pack discovery mirrors the sibling headless gates: pax21 is build-produced,
+# pax01 carries the BSPs and comes from the launcher asset pipeline.
+PACK=""
+for candidate in "$WD" "$WD/../Resources" "$REPO_ROOT/build/release" "$REPO_ROOT/build/debug"; do
+    [ -f "$candidate/base/pax21.sw3z" ] && PACK="$(cd "$candidate" && pwd)" && break
+done
+[ -n "$PACK" ] || { echo "SKIP: current pax21 unavailable"; exit 77; }
+CONTENT="${WIRED_CONTENT_ROOT:-$PACK}"
+if   [ -f "$CONTENT/base/pax01.sw3z" ]; then BASE="$CONTENT/base/pax01.sw3z"
+elif [ -f "$CONTENT/base/pak0.pk3"   ]; then BASE="$CONTENT/base/pak0.pk3"
+else echo "SKIP: no BSP-bearing content pak (set WIRED_CONTENT_ROOT)"; exit 77; fi
+
+# 🔴 Fail-closed build-config gate. A release binary has no ZONEID assertion
+# (common.c:409-412), so it CANNOT witness #96 — passing one would manufacture a
+# vacuous green. Refuse it loudly instead of skipping.
+# `grep -q` exits early and SIGPIPEs `strings`, which `pipefail` would then
+# report as a failure of the whole pipeline — count matches instead.
+# Not applied to --flag-inventory: entity spawning does not depend on
+# USE_ZONE_ID, so that mode runs on a release binary too.
+ZONEID_HITS="$(strings "$HEADLESS" 2>/dev/null | grep -c "freed a pointer without ZONEID" || true)"
+if [ "$FLAG_INVENTORY" = 0 ] && [ "${ZONEID_HITS:-0}" -lt 1 ]; then
+    echo "FAIL: '$HEADLESS' has no ZONEID assertion — USE_ZONE_ID is _DEBUG-only"
+    echo "      (code/qcommon/common.c:409-412; _DEBUG set only for Debug, CMakeLists.txt:2835)."
+    echo "      A release build cannot witness #96. Point this gate at a DEBUG wired-headless."
+    exit 1
+fi
+
+ROOT="$(mktemp -d -t hmtz-XXXXXX 2>/dev/null || mktemp -d)"
+HOME_DIR="$ROOT/home/q3now-preview"
+cleanup(){ local status=$?; trap - EXIT INT TERM; [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT"; exit "$status"; }
+trap cleanup EXIT; trap 'exit 130' INT; trap 'exit 143' TERM
+
+mkdir -p "$HOME_DIR/base"
+cp "$PACK/base/pax21.sw3z" "$HOME_DIR/base/" || exit 1
+cp "$BASE"                 "$HOME_DIR/base/" || exit 1
+
+if [ "$FLAG_INVENTORY" = 1 ]; then
+    shift || true
+    INV_MAPS="${*:-arena1 arenat2 arenat4 arenat7 arena7 e1m1}"
+    echo "==> flag-entity inventory: $INV_MAPS"
+    echo "    binary : $HEADLESS"
+    echo "    content: $BASE"
+    printf '\n    %-12s %-6s %-6s %-8s %s\n' map red blue NEUTRAL 1FCTF-playable
+    printf '    %s\n' "------------------------------------------------------------"
+    INV_RC=0
+    for m in $INV_MAPS; do
+        MLOG="$HOME_DIR/qconsole.jsonl"
+        rm -f "$MLOG"
+        ( cd "$WD" && exec "$HEADLESS" \
+            +set fs_homepath "$HOME_DIR" +set com_automated 1 \
+            +set com_noHardReboot 1 +set sv_pure 0 \
+            +set log_severity DEBUG +set log_file_severity DEBUG \
+            +set log_file_mode overwrite_synced \
+            +set g_gametype 6 +map "$m" +wait 400 +quit ) >"$ROOT/stdout.$m" 2>&1 || true
+        BLOB="$( { cat "$MLOG"; cat "$ROOT/stdout.$m"; } 2>/dev/null )"
+        # Did the map load at all? A missing BSP must not read as "no flags".
+        if ! printf '%s' "$BLOB" | grep -qiE "Server: *$m|spawning server|$m\.bsp"; then
+            printf '    %-12s %s\n' "$m" "(map did not load — inconclusive)"
+            INV_RC=1
+            continue
+        fi
+        # 🔴 POLARITY: the entity name appears in the game's ABSENCE warning too
+        # ("WARNING: No team_CTF_neutralflag in map", g_team.c:571). Counting bare
+        # occurrences reads a missing flag as a present one — an earlier revision
+        # of this mode did exactly that and reported every map as 1FCTF-playable.
+        # Presence is therefore the ABSENCE of the warning, on a map that loaded.
+        absent() { printf '%s' "$BLOB" | grep -qiE "No $1 in map|without ${2} Flag"; }
+        absent team_CTF_redflag     "Red"     && R="no" || R="yes"
+        absent team_CTF_blueflag    "Blue"    && B="no" || B="yes"
+        absent team_CTF_neutralflag "Neutral" && N="no" || N="yes"
+        if   [ "$N" = yes ]; then PLAY="yes"
+        elif [ "$R" = yes ] || [ "$B" = yes ]; then PLAY="NO (CTF map, needs centre fallback)"
+        else PLAY="NO (no flags at all)"; fi
+        printf '    %-12s %-6s %-6s %-8s %s\n' "$m" "$R" "$B" "$N" "$PLAY"
+    done
+    echo
+    echo "    A 'NO (CTF map, no neutral flag)' row is exactly the case the"
+    echo "    centre-of-map neutral-flag fallback is meant to cover."
+    exit "$INV_RC"
+fi
+
+echo "==> headless map-transition zonecheck (#96): $MAP_CHAIN"
+echo "    binary : $HEADLESS"
+echo "    content: $BASE"
+
+# com_noHardReboot 1 keeps the watchdog from RELAUNCHING on a crash and masking
+# it (code/unix/unix_main.c:1087-1098). +wait, not +waitForMap (client-only).
+LAUNCH_ARGS=(
+    +set fs_homepath "$HOME_DIR"
+    +set com_automated 1
+    +set com_noHardReboot 1
+    +set sv_pure 0
+    +set log_severity DEBUG
+    +set log_file_severity DEBUG
+    +set log_file_mode overwrite_synced
+)
+for m in $MAP_CHAIN; do LAUNCH_ARGS+=( +map "$m" +wait 250 ); done
+LAUNCH_ARGS+=( +quit )
+
+RC=0
+( cd "$WD" && exec "$HEADLESS" "${LAUNCH_ARGS[@]}" ) >"$ROOT/stdout" 2>&1 || RC=$?
+
+LOG="$HOME_DIR/qconsole.jsonl"
+analyze_contract "$LOG" "$ROOT/stdout" "$RC" || exit 1
+echo "==> PASS headless map-transition zonecheck (#96 not reproduced on this build)"
+exit 0

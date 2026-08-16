@@ -4,6 +4,7 @@
 // cl_main.c  -- client main loop
 
 #include "client.h"
+#include "cl_console_close_policy.h"
 #include "cl_demo_frame.h"
 #include "cl_info_challenge.h"
 #include "cl_ping_queue.h"
@@ -1138,11 +1139,41 @@ visually while preserving KEYCATCH_CONSOLE — the same idiom the map-change pat
 closes (CL_PlayDemo_f, CL_ParseGamestate, CL_WiredNetBootstrapResetState).
 ====================
 */
+static qboolean CL_LocalMapLoadInFlight( void );
+
 void CL_ConsoleCloseForConnect( void ) {
-	if ( WiredAttract_IsActive() )
-		Con_SoftClose();   // reel transition — layer survives, user still owns ~
-	else
+	clConsoleCloseInput_t in;
+	in.sessionEntryEdge = 1;   // every caller here is already on a session-entry edge
+	in.attractActive    = WiredAttract_IsActive() ? 1 : 0;
+	in.localMapLoad     = CL_LocalMapLoadInFlight() ? 1 : 0;
+
+	switch ( CL_ConsoleCloseDecision( &in ) ) {
+	case CL_CONCLOSE_SOFT:
+		Con_SoftClose();   // reel/map transition — layer survives, user still owns ~
+		break;
+	case CL_CONCLOSE_HARD:
 		Con_Close();        // user-initiated connect/demo — drop the console
+		break;
+	case CL_CONCLOSE_NONE:
+	default:
+		break;
+	}
+}
+
+
+/*
+====================
+CL_LocalMapLoadInFlight
+
+True while a LOCAL server map spawn owns the current transition. CL_MapLoading
+soft-closes the console on purpose (the "watch the log wall" idiom) and then
+sets CA_CONNECTING/CA_CONNECTED itself; without this predicate the observer
+would hard-close over that soft-close and silently kill the idiom. A REMOTE
+server-pushed map change leaves the local spawn idle, so it still hard-closes.
+====================
+*/
+static qboolean CL_LocalMapLoadInFlight( void ) {
+	return ( !SV_IsSpawnIdle() ) ? qtrue : qfalse;
 }
 
 
@@ -4928,7 +4959,7 @@ static const cvarDesc_t glimpDescs[] = {
 	/* 6  */ CVAR_BOOL(   "r_noborder",          "0",               CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH,  "Setting to 1 will remove window borders and title bar in windowed mode, hold ALT to drag & drop it with opened console." ),
 	/* 7  */ CVAR_BOOL(   "r_customPixelAspect", "1",               CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH,  "Enables custom aspect of the screen, with \\r_mode -1." ),
 	/* 8  */ CVAR_INT(    "r_customWidth",       "1600",            CVAR_ARCHIVE | CVAR_LATCH,     "Custom width to use with \\r_mode -1.", 0, 0 ),
-	/* 9  */ CVAR_INT(    "r_customHeight",      "1024",            CVAR_ARCHIVE | CVAR_LATCH,     "Custom height to use with \\r_mode -1.", 0, 0 ),
+	/* 9  */ CVAR_INT(    "r_customHeight",      "900",             CVAR_ARCHIVE | CVAR_LATCH,     "Custom height to use with \\r_mode -1.", 0, 0 ),
 	/* 10 */ CVAR_INT(    "r_colorbits",         "0",               CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH,  "Sets color bit depth, set to 0 to use desktop settings.", 0, 32 ),
 	/* 11 */ CVAR_INT(    "r_stencilBits",       "8",               CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH,  "Stencil buffer size, required to be 8 for stencil shadows.", 0, 8 ),
 	/* 12 */ CVAR_INT(    "r_depthBits",         "0",               CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH,  "Sets precision of Z-buffer.", 0, 32 ),
