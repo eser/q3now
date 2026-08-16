@@ -93,22 +93,50 @@ void main() {
 	// Aspect-corrected space so cells + shapes are round, not stretched.
 	vec2 asp = vec2( aspect, 1.0 );
 
-	// Subtle parallax: shift the whole field by the smoothed cursor + the
-	// one-shot transition nudge. Small amplitudes — tasteful, not swimmy.
+	// ── Parallax base offset + per-plane depth ────────────────────────
+	// ONE shared base offset (smoothed cursor + the one-shot menu-transition
+	// nudge); each visual plane below multiplies it by its own DEPTH factor, so
+	// planes travel at DIFFERENT speeds rather than sliding as one flat sheet.
+	// That speed differential IS the depth cue — a uniform shift moves every
+	// plane in lockstep and reads as a single pane sliding, not as distance.
+	//
+	// Depth factors run 0 (infinitely far, pinned) → 1 (nearest, leads). They
+	// mirror the scene's own back-to-front stacking: the dusk gradient is the
+	// far backdrop, the warm glow sits mid-field, the constellation is the near
+	// foreground, and the vignette is the fixed frame (pinned by definition —
+	// it is the screen border, not part of the world, so it must NOT drift or
+	// the illusion collapses).
+	//
+	// Absolute amplitudes stay small (base ≈ ±2% of UV at the screen edge) so
+	// the near plane leads without swimming; the far planes move so little they
+	// register as depth rather than motion.
 	vec2 par = vec2( u.mouseX * 0.020 + u.transition * 0.030, u.mouseY * 0.014 );
 
+	const float DEPTH_SKY  = 0.10;   // far dusk gradient — barely creeps
+	const float DEPTH_GLOW = 0.42;   // mid-field warm bloom
+	const float DEPTH_STAR = 1.00;   // near constellation — leads the motion
+
 	// ── 1. Warm dusk gradient (real gradient, no bands) ───────────────
-	// Sky ramps top→low over the upper ~62%, then eases into the floor tone.
-	float g = smoothstep( 0.0, 0.62, uv.y );
+	// FARTHEST plane: shifts by DEPTH_SKY, so it creeps ~10x slower than the
+	// constellation. The ramp is purely vertical, so only the Y component can
+	// register — an X shift on a horizontally-uniform field is a no-op. The
+	// horizon line therefore rises/falls a hair as the cursor moves, which is
+	// exactly how a distant skyline behaves.
+	float skyY = uv.y + par.y * DEPTH_SKY;
+	float g = smoothstep( 0.0, 0.62, skyY );
 	vec3  col = mix( SKY_TOP, SKY_LOW, g );
-	float floorMix = smoothstep( 0.60, 1.0, uv.y );
+	float floorMix = smoothstep( 0.60, 1.0, skyY );
 	col = mix( col, FLOOR_COL, floorMix );
 
 	// ── 2. Soft radial warm glow (the plasma/ember soul) ──────────────
-	// A broad amber bloom low-center + a fainter high pool, smooth falloff.
-	vec2  gp   = ( uv - vec2( 0.5, 0.66 ) ) * asp;
+	// MID plane: shifts by DEPTH_GLOW — visibly faster than the sky, clearly
+	// slower than the constellation, which is what separates the three depths.
+	// Both pools share one offset so they stay locked as a single plane; the
+	// radial falloff makes this shift read directly as the light source moving.
+	vec2  guv  = uv + par * DEPTH_GLOW;
+	vec2  gp   = ( guv - vec2( 0.5, 0.66 ) ) * asp;
 	float glow = exp( -dot( gp, gp ) * 6.5 );
-	glow += 0.35 * exp( -dot( (uv - vec2(0.5,0.30)) * asp, (uv - vec2(0.5,0.30)) * asp ) * 9.0 );
+	glow += 0.35 * exp( -dot( (guv - vec2(0.5,0.30)) * asp, (guv - vec2(0.5,0.30)) * asp ) * 9.0 );
 	// gentle breathing so the warmth pulses with the continuous clock.
 	glow *= 0.85 + 0.15 * sin( u.time * 0.6 );
 	col += EMBER * glow * 0.11;
@@ -117,8 +145,10 @@ void main() {
 	// Work in a cell grid over aspect-corrected, parallax-shifted UV. Each
 	// cell owns one drifting point; we test the 3x3 neighborhood so points +
 	// lines cross cell borders seamlessly.
+	// NEAREST plane: full base offset (DEPTH_STAR == 1.0) — this is the layer
+	// that leads the motion and gives the scene its foreground.
 	const float CELLS = 7.0;                     // ~7 wide → launcher-sparse density
-	vec2  suv  = ( uv + par ) * asp * CELLS;      // constellation space
+	vec2  suv  = ( uv + par * DEPTH_STAR ) * asp * CELLS;   // constellation space
 	vec2  cell = floor( suv );
 	vec2  f    = fract( suv );
 
@@ -179,6 +209,10 @@ void main() {
 	col += STAR_COL * clamp( dotAcc,  0.0, 1.0 ) * 0.55;
 
 	// ── 4. Vignette (frame it — launcher radial ellipse) ──────────────
+	// DELIBERATELY PINNED (no parallax term): the vignette is the screen frame,
+	// not a plane in the world. Drifting it would slide the dark corners away
+	// from the actual corners and break the framing — so it reads as depth-0 by
+	// intent, not by omission.
 	vec2  vp   = ( uv - 0.5 ) * asp;
 	float vig  = smoothstep( 1.05, 0.35, length( vp ) );   // 1 at center → 0 at corners
 	col *= mix( 0.55, 1.0, vig );
