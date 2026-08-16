@@ -40,54 +40,126 @@ if [ "${1:-}" = "--dpi-self-test" ]; then
     echo "==> WiredUI DPI gate SELF-TEST (gate-has-teeth)"
     ST="$(mktemp -d -t wired-dpist-XXXXXX 2>/dev/null || mktemp -d)"
     trap 'rm -rf "$ST"' EXIT INT TERM
-    EXPECT=2.0
-    # GOOD dump: dpiScale=2.0 (the correct physical/logical result).
-    printf '%s\n' \
-      '{"region":"main","kind":"menu","dpiScale":2.0,"frame":1,"menu":"main"}' \
-      '{"region":"row","kind":"item","fontPointSize":14,"dpiScale":2.0,"focused":1,"activeCvar":"","hasActiveBackcolor":0,"frame":1,"menu":"main"}' \
-      > "$ST/good.jsonl"
-    # BROKEN dump: dpiScale=1.0 (the stub/broken-wiring value) while expecting 2.0.
-    printf '%s\n' \
-      '{"region":"main","kind":"menu","dpiScale":1.0,"frame":1,"menu":"main"}' \
-      '{"region":"row","kind":"item","fontPointSize":14,"dpiScale":1.0,"focused":1,"activeCvar":"","hasActiveBackcolor":0,"frame":1,"menu":"main"}' \
-      > "$ST/broken.jsonl"
-    rc_good=0; rc_broken=0
-    echo "  -- GOOD dump (dpiScale 2.0, expect 2.0) → expect PASS --"
-    bash "$0" --dpi-analyze "$ST/good.jsonl"   "$EXPECT" || rc_good=$?
-    echo "  -- BROKEN dump (dpiScale 1.0, expect 2.0 = broken wiring) → expect FAIL --"
-    bash "$0" --dpi-analyze "$ST/broken.jsonl" "$EXPECT" || rc_broken=$?
-    if [ "$rc_good" -eq 0 ] && [ "$rc_broken" -ne 0 ]; then
-        echo "==> DPI SELF-TEST PASS: gate accepts correct dpiScale AND rejects a broken (stub 1.0) value (it has teeth)"
+
+    # dump <file> <vidWidthPx|-> <dpiScale...>  — one menu row + one item row per
+    # dpiScale given (two values = the "inconsistent across items" shape).
+    dump() {
+        local f="$1" vid="$2"; shift 2
+        local vidfield=""; [ "$vid" != "-" ] && vidfield=",\"vidWidthPx\":$vid"
+        : > "$f"
+        local first=1
+        for d in "$@"; do
+            [ "$first" = 1 ] && printf '{"region":"main","kind":"menu","dpiScale":%s,"frame":1,"menu":"main"%s}\n' "$d" "$vidfield" >> "$f"
+            printf '{"region":"row","kind":"item","fontPointSize":14,"dpiScale":%s,"focused":1,"activeCvar":"","hasActiveBackcolor":0,"frame":1,"menu":"main"%s}\n' "$d" "$vidfield" >> "$f"
+            first=0
+        done
+    }
+
+    # Each case: name | logical | fallback | want-rc | vidWidthPx | dpiScale(s)
+    # want-rc 0 = the gate must ACCEPT; 1 = the gate must REJECT.
+    #
+    # The dpi4-retina case is the regression that made the LIVE gate fail a
+    # CORRECT engine (wiki 2026-08-11 / fix d00a6afd): 5120 backing over a 1280
+    # logical request is a genuine dpiScale=4, and a gate that assumed 2 was
+    # wrong. Deriving from vidWidthPx is exactly what this fixture pins.
+    cases="
+good-2x|1280|2.0|0|2560|2.0
+dpi4-retina|1280|2.0|0|5120|4.0
+non-hidpi-1x|1280|1.0|0|1280|1.0
+stub-1x-on-2x-display|1280|2.0|1|2560|1.0
+stub-2x-on-dpi4-display|1280|2.0|1|5120|2.0
+inconsistent-across-items|1280|2.0|1|2560|2.0 4.0
+zero-dpi|1280|2.0|1|2560|0.0
+negative-dpi|1280|2.0|1|2560|-2.0
+legacy-dump-no-vidpx-good|1280|2.0|0|-|2.0
+legacy-dump-no-vidpx-broken|1280|2.0|1|-|1.0
+"
+    fails=0; ran=0
+    while IFS='|' read -r name logical fallback want vid dpis; do
+        [ -n "$name" ] || continue
+        ran=$((ran+1))
+        # shellcheck disable=SC2086 # dpis is an intentional word-split list
+        dump "$ST/$name.jsonl" "$vid" $dpis
+        rc=0
+        bash "$0" --dpi-analyze "$ST/$name.jsonl" "$logical" "$fallback" >"$ST/$name.out" 2>&1 || rc=$?
+        [ "$rc" -ne 0 ] && rc=1
+        if [ "$rc" -eq "$want" ]; then
+            printf '  ok   %-28s rc=%s (want %s)\n' "$name" "$rc" "$want"
+        else
+            printf '  FAIL %-28s rc=%s (want %s)\n' "$name" "$rc" "$want"
+            sed 's/^/         | /' "$ST/$name.out"
+            fails=$((fails+1))
+        fi
+    done <<EOF
+$cases
+EOF
+
+    if [ "$fails" -eq 0 ]; then
+        echo "==> DPI SELF-TEST PASS: $ran fixtures — gate accepts correct dpiScale (incl. the Retina dpiScale=4 case) AND rejects broken wiring (it has teeth)"
         exit 0
     fi
-    echo "==> DPI SELF-TEST FAIL: good_rc=$rc_good (want 0), broken_rc=$rc_broken (want !=0)"
+    echo "==> DPI SELF-TEST FAIL: $fails/$ran fixtures behaved wrongly"
     exit 1
 fi
 
 # Sub-invocation used by --dpi-self-test: run ONLY the #4 dpiScale assertion on a
-# given dump with a given expected ratio. Exit 0 PASS / 1 FAIL.
+# given dump. Exit 0 PASS / 1 FAIL.
+#
+#   $2  layout dump (.jsonl)
+#   $3  LOGICAL width the session was launched with
+#   $4  fallback expected ratio, used only when the dump carries no vidWidthPx
+#
+# Expectation derivation mirrors the live gate (see the "HiDPI correction" block
+# below): when the dump records vidWidthPx — the backing width the engine really
+# got — the expectation is vidWidthPx/LOGICAL_W. That is the half the live gate
+# got WRONG before d00a6afd: on Retina a 1280 logical request backs at 2560 (or
+# 5120 for the dpiScale=4 case), so assuming physical/logical == 2 FAILED a
+# CORRECT engine. Deriving from the dump is what makes this fixture-checkable.
 if [ "${1:-}" = "--dpi-analyze" ]; then
-    python3 - "$2" "$3" <<'PYEOF'
+    python3 - "$2" "$3" "${4:-}" <<'PYEOF'
 import json, sys
-path, exp = sys.argv[1], float(sys.argv[2])
+path = sys.argv[1]
+logical = float(sys.argv[2])
+fallback = sys.argv[3]
 rows=[json.loads(l) for l in open(path) if l.strip()]
 last=max(o.get("frame",0) for o in rows)
 fr=[o for o in rows if o.get("frame")==last]
+
+# Derive the expectation the same way the live gate does: prefer the engine's
+# own reported backing width, fall back to the caller's ratio for older dumps.
+vid=[int(o["vidWidthPx"]) for o in fr if "vidWidthPx" in o and int(o.get("vidWidthPx",0))>0]
+if vid:
+    if len(set(vid))!=1:
+        print(f"  FAIL #4: vidWidthPx inconsistent {sorted(set(vid))}"); sys.exit(1)
+    if logical<=0.0:
+        print(f"  FAIL #4: logical width non-positive {logical:g}"); sys.exit(1)
+    exp=vid[0]/logical
+    src=f"vidWidthPx {vid[0]} / logical {logical:g}"
+elif fallback:
+    exp=float(fallback); src=f"caller fallback (no vidWidthPx in dump)"
+else:
+    print("  FAIL #4: dump has no vidWidthPx and no fallback ratio given"); sys.exit(1)
+
 dpis=sorted({round(float(o.get("dpiScale",-1.0)),6) for o in fr if "dpiScale" in o})
-print(f"  [#4 dpi] dpiScale observed = {dpis} (expected physical/logical = {exp:g})")
+print(f"  [#4 dpi] dpiScale observed = {dpis} (expected {exp:g} from {src})")
 if not dpis or any(d<=0.0 for d in dpis):
     print(f"  FAIL #4: dpiScale missing/non-positive {dpis}"); sys.exit(1)
 if len(dpis)!=1:
     print(f"  FAIL #4: dpiScale inconsistent {dpis}"); sys.exit(1)
 if abs(dpis[0]-exp)>1e-3:
-    print(f"  FAIL #4: dpiScale={dpis[0]} != real physical/logical {exp:g} — broken DPI wiring"); sys.exit(1)
-print(f"  PASS #4: dpiScale={dpis[0]:g} == physical/logical {exp:g}"); sys.exit(0)
+    print(f"  FAIL #4: dpiScale={dpis[0]} != real {exp:g} — broken DPI wiring"); sys.exit(1)
+print(f"  PASS #4: dpiScale={dpis[0]:g} == {exp:g}"); sys.exit(0)
 PYEOF
     exit $?
 fi
 
-WIRED="${1:-$REPO_ROOT/build/debug/wired.x64.exe}"
-if [ ! -x "$WIRED" ] && [ -x "$WIRED.exe" ]; then WIRED="$WIRED.exe"; fi
+# Default resolved, not hardcoded. This used to default to wired.x64.exe — a
+# WINDOWS binary name — so on every other platform the gate SKIPped, and the
+# skip was mistaken for "this criterion needs a Windows machine". It does not:
+# the DPI wiring under test is platform-independent, and a Retina Mac is a
+# BETTER host for it than a 1x display (dpiScale != 1 is the interesting case).
+. "$REPO_ROOT/tests/lib/wired_paths.sh"
+WIRED="${1:-${WIRED_BINARY:-}}"
 if [ ! -x "$WIRED" ]; then
     echo "SKIP: wired binary not found: $WIRED"
     exit 77
@@ -123,7 +195,10 @@ fi
 
 CONTENT_ROOT=""
 BASE_ARCHIVE=""
-for candidate in "${WIRED_CONTENT_ROOT:-}" "$PACK_ROOT"; do
+# $WIRED_HOME is where the launcher actually puts pax01.sw3z on every platform
+# (GAME-DATA.md §4); without it in this list the gate SKIPped on a machine that
+# had the content all along.
+for candidate in "${WIRED_CONTENT_ROOT:-}" "$PACK_ROOT" "${WIRED_HOME:-}" "${WIRED_INSTALL:-}"; do
     [ -n "$candidate" ] || continue
     if [ -f "$candidate/base/pax01.sw3z" ]; then
         CONTENT_ROOT="$(cd "$candidate" && pwd)"

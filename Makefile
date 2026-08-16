@@ -1092,6 +1092,33 @@ test-wiredui-menu-functional:
 
 .PHONY: test-wiredui-menu-functional
 
+# WiredUI layout/HiDPI gate.  The product target CAPTURES a layout dump from a
+# real window (owner-gated: needs a display).  The -self target runs only the
+# HiDPI (#4) ANALYZER over synthetic dumps — no engine, no display, no packs —
+# and is wired into ctest as wiredui_dpi_analyzer_contract.
+test-wiredui-layout:
+	@test -n "$${WIRED:-}" || { echo "ERROR: WIRED=<assembled-gui-binary> is required"; exit 2; }
+	@bash tests/wiredui-layout-checks.sh "$${WIRED}"
+
+test-wiredui-layout-self:
+	@bash tests/wiredui-layout-checks.sh --dpi-self-test
+
+.PHONY: test-wiredui-layout test-wiredui-layout-self
+
+# Second-map Z_Free (#96) gate, display-free. WIRED_HEADLESS must be a DEBUG
+# build: the ZONEID assertion is _DEBUG-only (common.c:409-412), so a release
+# binary cannot witness the crash and the gate refuses it fail-closed.
+# WIRED_CONTENT_ROOT supplies the BSP-bearing pak. The -self target is the
+# engine-free analyzer mutation suite (wired into ctest).
+test-headless-map-transition:
+	@test -n "$${WIRED_HEADLESS:-}" || { echo "ERROR: WIRED_HEADLESS=<debug wired-headless> is required"; exit 2; }
+	@bash tests/headless-map-transition-zonecheck.sh "$${WIRED_HEADLESS}"
+
+test-headless-map-transition-self:
+	@bash tests/headless-map-transition-zonecheck.sh --self-test
+
+.PHONY: test-headless-map-transition test-headless-map-transition-self
+
 # External-data action gate.  Unlike the analyzer-only target, the product
 # target is fail-closed and requires an explicit assembled GUI binary; licensed
 # base content is supplied through WIRED_CONTENT_ROOT.
@@ -1455,8 +1482,23 @@ test-fs-dedup: build $(SW3Z_BIN)
 # vdiff is a self-contained Go tool: pixel-diff with per-region thresholds.
 # Baselines are rendered from the canonical React mockup via headless Chrome;
 # implementation screenshots come from a scripted engine boot at the same
-# native render resolution as the baseline (artboard design native is the
-# source of truth; for V1_Monolith that is 1440x900 — see qw-variants.jsx).
+# render resolution as the baseline: the artboard's native 1440x900.
+#
+# 2026-08-16 — a 1280x720 (16:9) move was attempted here and REVERTED. The
+# premise was that the React mockup is resolution-independent because the
+# backdrop uses viewBox + width:'100%'. That holds only for the backdrop svg.
+# The artboard container itself is fixed pixels with overflow:hidden —
+# qw-screens.jsx:1043 reads `width:1440, height:900, overflow:'hidden'` and
+# every HUD element is absolutely positioned against that box. A smaller root
+# therefore CROPS the HUD rather than reflowing it; measured at 1280x720 the
+# health/armor panels, the 9-entry weapon carousel, the telemetry row and the
+# ammo value all fall outside the frame entirely.
+#
+# W-103 (16:9 everywhere) governs the ENGINE and is unaffected. Reconciling the
+# 16:10 artboard with the 16:9 engine is an open design decision tracked in
+# TASK-70: render baselines at 1440x900 and scale the engine capture, fit the
+# harness with a transform, or re-author the artboard for 16:9.
+# What matters mechanically is that baseline and impl share ONE resolution.
 
 ARTBOARD     ?= v1_monolith
 MODE         ?= dark
@@ -1489,11 +1531,27 @@ visual-baseline:
 	@ARTBOARD=$(ARTBOARD) MODE=$(MODE) ACCENT=$(ACCENT) \
 	  bash tests/visual/scripts/regen_baseline.sh
 
+# Which capture script an artboard needs depends on what it depicts. Menu
+# artboards (v1_monolith and friends) are captured off the attract screen;
+# v2_hud_active is an IN-GAME HUD, so it needs a loaded map and a pinned
+# viewpoint — capture_v2_impl.sh does `map $(MAP)` + setviewpos, capture_impl.sh
+# does not. Before this split, `make visual-test ARTBOARD=v2_hud_active` ran the
+# menu capture and compared the attract screen against a HUD baseline, which
+# reads as a ~83% global delta: a wrong-scene artifact, not a visual regression.
+VISUAL_CAPTURE = $(if $(filter v2_%,$(ARTBOARD)),capture_v2_impl.sh,capture_impl.sh)
+
+# ENGINE_BINARY is deliberately NOT set here. It used to point at
+# $(BUILD_DIR)/wired, but the capture scripts run the engine from the user data
+# root, and a raw build-tree binary launched from there resolves only one pak
+# and dies with "Couldn't load default.cfg" (GAME-DATA.md §1: default.cfg ships
+# inside pax21.sw3z, not on disk). Left unset, tests/lib/wired_paths.sh resolves
+# the INSTALLED binary, which sits beside its paks. Run `make copy-all` first so
+# the install reflects the build under test.
+
 visual-test: build $(VDIFF_BIN)
 	@TS=$$(date +%Y%m%d_%H%M%S); \
 	  ARTBOARD=$(ARTBOARD) MODE=$(MODE) ACCENT=$(ACCENT) TIMESTAMP=$$TS \
-	  ENGINE_EXE="$(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)" \
-	  bash tests/visual/scripts/capture_impl.sh && \
+	  bash tests/visual/scripts/$(VISUAL_CAPTURE) && \
 	  ARTBOARD=$(ARTBOARD) MODE=$(MODE) ACCENT=$(ACCENT) TIMESTAMP=$$TS \
 	  bash tests/visual/scripts/compare.sh
 
@@ -1504,14 +1562,13 @@ visual-test: build $(VDIFF_BIN)
 # `|| true` masked every failure).
 visual-test-all: build $(VDIFF_BIN)
 	@fail=0; pass=0; total=0; first_fail=""; \
-	ENGINE="$(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)"; \
 	for cfg in $(VISUAL_CFGS); do \
 	  m=$${cfg%%:*}; a=$${cfg##*:}; \
 	  total=$$((total+1)); \
 	  TS=$$(date +%Y%m%d_%H%M%S)_$$total; \
 	  echo "==> [$$total] visual-test ARTBOARD=$(ARTBOARD) MODE=$$m ACCENT=$$a"; \
-	  if ARTBOARD=$(ARTBOARD) MODE=$$m ACCENT=$$a TIMESTAMP=$$TS ENGINE_EXE="$$ENGINE" \
-	       bash tests/visual/scripts/capture_impl.sh \
+	  if ARTBOARD=$(ARTBOARD) MODE=$$m ACCENT=$$a TIMESTAMP=$$TS \
+	       bash tests/visual/scripts/$(VISUAL_CAPTURE) \
 	     && ARTBOARD=$(ARTBOARD) MODE=$$m ACCENT=$$a TIMESTAMP=$$TS \
 	       bash tests/visual/scripts/compare.sh; then \
 	    pass=$$((pass+1)); \
@@ -1530,21 +1587,20 @@ visual-test-all: build $(VDIFF_BIN)
 visual-compare: build $(VCOMPARE_BIN)
 	@TS=$$(date +%Y%m%d_%H%M%S); \
 	  ARTBOARD=$(ARTBOARD) MODE=$(MODE) ACCENT=$(ACCENT) TIMESTAMP=$$TS \
-	  ENGINE_EXE="$(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)" \
+	  ENGINE_BINARY="$(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)" \
 	  bash tests/visual/scripts/capture_impl.sh && \
 	  ARTBOARD=$(ARTBOARD) MODE=$(MODE) ACCENT=$(ACCENT) TIMESTAMP=$$TS \
 	  bash tests/visual/scripts/vcompare_run.sh
 
 visual-compare-all: build $(VCOMPARE_BIN)
 	@fail=0; pass=0; total=0; first_fail=""; \
-	ENGINE="$(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)"; \
 	for cfg in $(VISUAL_CFGS); do \
 	  m=$${cfg%%:*}; a=$${cfg##*:}; \
 	  total=$$((total+1)); \
 	  TS=$$(date +%Y%m%d_%H%M%S)_$$total; \
 	  echo "==> [$$total] visual-compare ARTBOARD=$(ARTBOARD) MODE=$$m ACCENT=$$a"; \
-	  if ARTBOARD=$(ARTBOARD) MODE=$$m ACCENT=$$a TIMESTAMP=$$TS ENGINE_EXE="$$ENGINE" \
-	       bash tests/visual/scripts/capture_impl.sh \
+	  if ARTBOARD=$(ARTBOARD) MODE=$$m ACCENT=$$a TIMESTAMP=$$TS \
+	       bash tests/visual/scripts/$(VISUAL_CAPTURE) \
 	     && ARTBOARD=$(ARTBOARD) MODE=$$m ACCENT=$$a TIMESTAMP=$$TS \
 	       bash tests/visual/scripts/vcompare_run.sh; then \
 	    pass=$$((pass+1)); \

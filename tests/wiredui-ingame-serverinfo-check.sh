@@ -177,7 +177,7 @@ fi
 command -v python3 >/dev/null 2>&1 && [ -f "$FIXTURE" ] && [ -f "$TIMEOUT_RUNNER" ] || { echo "SKIP: Python fixture/watchdog unavailable"; exit 77; }
 WIRED="${1:-}"; [ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "SKIP: assembled GUI binary required"; exit 77; }
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")"; WD="$(dirname "$WIRED")"
-HEADLESS="${WIRED_HEADLESS:-}"; [ -n "$HEADLESS" ] || HEADLESS="$WD/wired-headless.arm64"; [ -x "$HEADLESS" ] || { echo "SKIP: sibling wired-headless required"; exit 77; }
+HEADLESS="${WIRED_BINARY_HEADLESS:-}"; [ -n "$HEADLESS" ] || HEADLESS="$WD/wired-headless.arm64"; [ -x "$HEADLESS" ] || { echo "SKIP: sibling wired-headless required"; exit 77; }
 PACK=""; for c in "$WD" "$WD/../Resources"; do [ -f "$c/base/pax21.sw3z" ] && PACK="$c" && break; done; [ -n "$PACK" ] || { echo "SKIP: current pax21 unavailable"; exit 77; }
 CONTENT="${WIRED_CONTENT_ROOT:-$PACK}"; if [ -f "$CONTENT/base/pax01.sw3z" ]; then BASE="$CONTENT/base/pax01.sw3z"; elif [ -f "$CONTENT/base/pak0.pk3" ]; then BASE="$CONTENT/base/pak0.pk3"; else echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; fi
 ROOT="$(mktemp -d -t wired-ingame-info-XXXXXX 2>/dev/null || mktemp -d)"; GUI_HOME="$ROOT/gui/q3now-preview"; SERVER_HOME="$ROOT/server/q3now-preview"; RUN="$ROOT/run"; EVENTS="$ROOT/stale.jsonl"; LAYOUT="$RUN/layoutdump.jsonl"; SERVER_CONTROL="$ROOT/server-control.fifo"; SPID=""; FPID=""; SERVER_CONTROL_OPEN=0

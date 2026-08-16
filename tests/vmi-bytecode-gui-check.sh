@@ -148,10 +148,11 @@ if [ "${1:-}" = --self-test ]; then
  echo "PASS vmi-bytecode-gui analyzer self-test (${#defects[@]} mutations)"; exit 0
 fi
 
-WIRED="${1:-}"; [ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "usage: $0 /absolute/path/to/wired"; exit 64; }
+. "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
+WIRED="${1:-${WIRED_BINARY:-}}"; [ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "usage: $0 /absolute/path/to/wired"; exit 64; }
 [ -f "$TIMEOUT_RUNNER" ] || { echo "SKIP: missing timeout runner"; exit 77; }
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")"; WD="$(dirname "$WIRED")"
-HEADLESS="${WIRED_HEADLESS:-}"; if [ -z "$HEADLESS" ]; then
+HEADLESS="${WIRED_BINARY_HEADLESS:-}"; if [ -z "$HEADLESS" ]; then
  suffix="$(basename "$WIRED")"; suffix="${suffix#wired}"
  for candidate in "$WD/wired-headless$suffix" "$WD/wired-headless.arm64" "$WD/wired-headless.x86_64" "$WD/../../../wired-headless$suffix"; do [ -x "$candidate" ] && HEADLESS="$candidate" && break; done
 fi
@@ -159,7 +160,17 @@ fi
 HEADLESS="$(cd "$(dirname "$HEADLESS")" && pwd)/$(basename "$HEADLESS")"
 PACK=""; for candidate in "$WD" "$WD/../Resources" "$WD/../../.."; do [ -f "$candidate/base/pax21.sw3z" ] && PACK="$(cd "$candidate" && pwd)" && break; done
 [ -n "$PACK" ] || { echo "SKIP: current pax21 unavailable"; exit 77; }
-CONTENT="${WIRED_CONTENT_ROOT:-$PACK}"; if [ -f "$CONTENT/base/pax01.sw3z" ]; then BASE="$CONTENT/base/pax01.sw3z"; elif [ -f "$CONTENT/base/pak0.pk3" ]; then BASE="$CONTENT/base/pak0.pk3"; else echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; fi
+# Search every root that can legitimately hold the content pack, not just one.
+# $WIRED_HOME is where the launcher writes pax01.sw3z on all platforms
+# (GAME-DATA.md §4); omitting it made this SKIP on machines that had the
+# content, and the SKIP was then misread as "needs another platform".
+BASE=""
+for _c in "${WIRED_CONTENT_ROOT:-}" "$PACK" "${WIRED_HOME:-}" "${WIRED_INSTALL:-}"; do
+    [ -n "$_c" ] || continue
+    if   [ -f "$_c/base/pax01.sw3z" ]; then BASE="$_c/base/pax01.sw3z"; break
+    elif [ -f "$_c/base/pak0.pk3"   ]; then BASE="$_c/base/pak0.pk3";   break; fi
+done
+[ -n "$BASE" ] || { echo "SKIP: no content pack found (set WIRED_CONTENT_ROOT)"; exit 77; }
 ROOT="$(mktemp -d -t vmi-bytecode-gui-XXXXXX 2>/dev/null || mktemp -d)"; CLIENT_HOME="$ROOT/client/q3now-preview"; SERVER_HOME="$ROOT/server/q3now-preview"; FIFO="$ROOT/server.stdin"; SERVER_PID=""; OPEN=0; FORCED=0
 cleanup(){ local status=$?; trap - EXIT INT TERM; [ "$OPEN" -eq 1 ] && exec 9>&- || true; [ -n "$SERVER_PID" ] && kill -TERM "$SERVER_PID" 2>/dev/null || true; [ -n "$SERVER_PID" ] && wait "$SERVER_PID" 2>/dev/null || true; [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT"; exit "$status"; }
 trap cleanup EXIT; trap 'exit 130' INT; trap 'exit 143' TERM

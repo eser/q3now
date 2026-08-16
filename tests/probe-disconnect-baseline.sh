@@ -11,8 +11,9 @@
 # Desktop discipline: exactly one window, briefly, then +quit (+ a timeout guard).
 # Never touches the user's real homepath/install/paks.
 set -uo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
 
-ROOT="/c/Users/eser/projects/eser/q3now"
+ROOT="$WIRED_SOURCE"
 WIRED_DIR="$ROOT/build/debug"
 WIRED_NAME="wired.x64.exe"
 [ -x "$WIRED_DIR/$WIRED_NAME" ] || { echo "FAIL: $WIRED_DIR/$WIRED_NAME not found"; exit 1; }

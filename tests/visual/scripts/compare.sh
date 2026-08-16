@@ -18,7 +18,9 @@ RESULTS_DIR="$ROOT/visual/results/${ARTBOARD}_${MODE}_${ACCENT}/$TIMESTAMP"
 IMPL="$RESULTS_DIR/impl.png"
 DIFF="$RESULTS_DIR/diff.png"
 SUMMARY="$RESULTS_DIR/result.json"
-VDIFF="$ROOT/../tools/visual-diff/vdiff.exe"
+. "$ROOT/lib/wired_paths.sh"
+# .exe only exists on Windows; wired_find_tool tries both.
+VDIFF="$(wired_find_tool tools/visual-diff/vdiff || true)"
 
 [ -f "$VDIFF" ] || { echo "vdiff binary missing: $VDIFF" >&2; exit 2; }
 [ -f "$BASELINE" ] || { echo "baseline missing (run regen first): $BASELINE" >&2; exit 2; }

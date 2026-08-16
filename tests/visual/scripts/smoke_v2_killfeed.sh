@@ -25,8 +25,11 @@ ACCENT="${ACCENT:-cyan}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TIMESTAMP="${TIMESTAMP:-$(date +%Y%m%d_%H%M%S)}"
 RESULTS_DIR="$ROOT/visual/results/${ARTBOARD}_${MODE}_${ACCENT}/${TIMESTAMP}_killscenario"
-PREVIEW_BASE="${PREVIEW_BASE:-/c/Users/eser/wired/q3now-preview/base}"
-ENGINE_EXE="${ENGINE_EXE:-$ROOT/../build/debug/wired.x64.exe}"
+. "$ROOT/lib/wired_paths.sh"
+PREVIEW_BASE="${PREVIEW_BASE:-$WIRED_BASE}"
+ENGINE_BINARY="${ENGINE_BINARY:-$WIRED_BINARY}"
+# Artboard-native, in lockstep with capture_v2_impl.sh / regen_baseline.sh.
+# (1280x720 move reverted 2026-08-16 — artboard is fixed-pixel 16:10.)
 W="${WIDTH:-1440}"
 H="${HEIGHT:-900}"
 MAP="${MAP:-arena1}"
@@ -34,7 +37,7 @@ MAP="${MAP:-arena1}"
 mkdir -p "$RESULTS_DIR"
 SHOTS_DIR="$PREVIEW_BASE/screenshots"
 mkdir -p "$SHOTS_DIR"
-BEFORE=$(ls -t "$SHOTS_DIR" 2>/dev/null | head -1 || echo "")
+SHOT_MARKER="$(wired_shot_marker)"
 
 CFG_PATH="$PREVIEW_BASE/dispatch_smoke_killfeed_${MODE}_${ACCENT}.cfg"
 cat > "$CFG_PATH" <<EOF
@@ -70,14 +73,13 @@ EOF
 
 (
   cd "$PREVIEW_BASE/.."
-  "$ENGINE_EXE" +set fs_installpath "$PREVIEW_BASE/.." +set fs_homepath "$PREVIEW_BASE/.." +exec "$(basename "$CFG_PATH")" >/dev/null 2>&1 || true
+  "$ENGINE_BINARY" +exec "$(basename "$CFG_PATH")" >/dev/null 2>&1 || true
 ) || true
 
-AFTER=$(ls -t "$SHOTS_DIR" 2>/dev/null | head -5)
-NEW=$(echo "$AFTER" | grep -v "^$BEFORE\$" | head -1)
+NEW="$(wired_newest_shot "$SHOT_MARKER" "$SHOTS_DIR")" || NEW=""
 if [ -z "$NEW" ]; then
   echo "no new screenshot found after boot" >&2
   exit 1
 fi
-cp "$SHOTS_DIR/$NEW" "$RESULTS_DIR/impl.png"
+cp "$NEW" "$RESULTS_DIR/impl.png"
 echo "impl: $RESULTS_DIR/impl.png"

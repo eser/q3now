@@ -166,7 +166,7 @@ fi
 WIRED="${1:-}";[ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "usage: $0 /absolute/path/to/wired";exit 64; }
 [ -f "$TIMEOUT_RUNNER" ] || { echo "SKIP: timeout runner unavailable";exit 77; }
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")";WD="$(dirname "$WIRED")"
-HEADLESS="${WIRED_HEADLESS:-}";if [ -z "$HEADLESS" ];then suffix="$(basename "$WIRED")";suffix="${suffix#wired}";for candidate in "$WD/wired-headless$suffix" "$WD/wired-headless.arm64" "$WD/wired-headless.x86_64" "$WD/../../../wired-headless$suffix";do [ -x "$candidate" ] && HEADLESS="$candidate" && break;done;fi
+HEADLESS="${WIRED_BINARY_HEADLESS:-}";if [ -z "$HEADLESS" ];then suffix="$(basename "$WIRED")";suffix="${suffix#wired}";for candidate in "$WD/wired-headless$suffix" "$WD/wired-headless.arm64" "$WD/wired-headless.x86_64" "$WD/../../../wired-headless$suffix";do [ -x "$candidate" ] && HEADLESS="$candidate" && break;done;fi
 [ -n "$HEADLESS" ] && [ -x "$HEADLESS" ] || { echo "SKIP: sibling wired-headless unavailable";exit 77; };HEADLESS="$(cd "$(dirname "$HEADLESS")" && pwd)/$(basename "$HEADLESS")"
 PACK="";for candidate in "$WD" "$WD/../Resources" "$WD/../../..";do [ -f "$candidate/base/pax21.sw3z" ] && PACK="$(cd "$candidate" && pwd)" && break;done;[ -n "$PACK" ] || { echo "SKIP: current pax21 unavailable";exit 77; }
 CONTENT="${WIRED_CONTENT_ROOT:-$PACK}";if [ -f "$CONTENT/base/pax01.sw3z" ];then BASE="$CONTENT/base/pax01.sw3z";elif [ -f "$CONTENT/base/pak0.pk3" ];then BASE="$CONTENT/base/pak0.pk3";else echo "SKIP: set WIRED_CONTENT_ROOT";exit 77;fi

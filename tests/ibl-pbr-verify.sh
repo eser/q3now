@@ -14,10 +14,11 @@
 # line the engine strips the leading '+' as its run-command marker. So this writes
 # a cfg into the engine home and +exec's it.
 set -u
+. "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PNG2RAW="${PNG2RAW:-$REPO_ROOT/tools/png2raw/png2raw}"
-HOME_DIR="${WIRED_HOME:-/c/Users/eser/wired/q3now-preview}"
+HOME_DIR="$WIRED_HOME"
 BASE_DIR="$HOME_DIR/base"
 SHOT_DIR="$BASE_DIR/screenshots"
 FRAME_W=1280

@@ -37,7 +37,7 @@ set -euo pipefail
 
 # ── args ──────────────────────────────────────────────────────────────────
 ENGINE=""
-HEADLESS="${WIRED_HEADLESS:-}"
+HEADLESS="${WIRED_BINARY_HEADLESS:-}"
 MAP="arena1"
 BOTS=6
 TAG="head"
