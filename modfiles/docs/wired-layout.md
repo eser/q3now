@@ -5,6 +5,10 @@ flexbox-based layout, aspect ratio constraints, transitions, responsive
 breakpoints, and developer tools. All layout files use the `.wmenu` extension
 and are parsed by the Wired UI parser (`cl_wired_parse.c`).
 
+For the v2 design system layered on top of this -- design tokens, the
+mode x accent theme overlays, the primitive glyph library and the
+built-in animation registry -- see `wired-ui-v2.md`.
+
 ---
 
 ## 1. Coordinate Units

@@ -2457,6 +2457,25 @@ static void WiredUI_TestAnimStep_f( void ) {
 	}
 }
 
+/* Dev workflow: exercise the LOOP_LINEAR vertical sweep built-in
+ * (`scan-y`). Loose-loads tests/fixtures/anim_scan_y.wui (a thin accent
+ * strip with `animation "scan-y"`) and pushes the menu. Visual
+ * verification: the strip sweeps from above the viewport to below it
+ * over each 3500ms cycle and wraps with no easing. Models the
+ * Claude-Design-v2 `qwscan` keyframe. */
+static void WiredUI_TestAnimScan_f( void ) {
+	if ( WiredUI_LoadMenuFile( "tests/fixtures/anim_scan_y.wui" ) ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"wui_test_anim_scan: loaded fixture (menus=%d); pushing 'anim_scan_y'\n",
+			WiredUI_GetMenuCount() );
+		Cbuf_InsertText( "wui_push anim_scan_y\n" );
+	} else {
+		Com_Log( SEV_WARN, LOG_CH(ch_ui),
+			"wui_test_anim_scan: failed to load tests/fixtures/anim_scan_y.wui — "
+			"is the file under fs_installpath or fs_homepath?\n" );
+	}
+}
+
 /* v2 primitive library demos — each loose-loads its fixture menu and
  * pushes it. Kept in-tree alongside wui_test_repeat[_image] /
  * wui_test_anim_step / wui_test_font_jbmono as permanent dev utilities
@@ -3777,6 +3796,7 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	Cmd_AddCommand( "wui_test_repeat", WiredUI_TestRepeat_f );
 	Cmd_AddCommand( "wui_test_repeat_image", WiredUI_TestRepeatImage_f );
 	Cmd_AddCommand( "wui_test_anim_step", WiredUI_TestAnimStep_f );
+	Cmd_AddCommand( "wui_test_anim_scan", WiredUI_TestAnimScan_f );
 	Cmd_AddCommand( "wui_test_font_jbmono", WiredUI_TestFontJBMono_f );
 	Cmd_AddCommand( "wui_test_primitive_qw_sigil",      WiredUI_TestPrimitiveQwSigil_f );
 	Cmd_AddCommand( "wui_test_primitive_runes",         WiredUI_TestPrimitiveRunes_f );
@@ -4886,10 +4906,13 @@ static void WiredScript_ClearMapPool( wiredMenuDef_t *menu, wiredItemDef_t *item
 // handlers to read the value and dispatch the real console command. (q3now has
 // no $-cvar expansion in WiredScript args, so the value must round-trip through
 // the state dict — same convention as StartServer's ui_selectedMap flow.)
-// Map vote reads ui_selectedMap (deposited by the allmaps feeder); kick/leader
-// read ui_selectedPlayerNum (the client NUMBER deposited by the player-list
-// feeder), since the game's robust vote path is numeric (clientkick <n> /
-// callteamvote leader <n>).
+// Map vote reads ui_selectedMap (deposited by the allmaps feeder). Kick reads
+// ui_selectedPlayerNum and leader reads ui_selectedTeamPlayerNum — the client
+// NUMBER deposited by the two player-list feeders (FEEDER_PLAYER_LIST and
+// FEEDER_TEAM_LIST respectively), since the game's robust vote path is numeric
+// (clientkick <n> / callteamvote leader <n>). The keys are DISTINCT because
+// both listboxes live on the same callvote.wui screen; sharing one key made a
+// selection in either list overwrite the other's.
 
 static void WiredScript_VoteMap( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	char buf[MAX_QPATH];
@@ -4905,7 +4928,7 @@ static void WiredScript_VoteKick( wiredMenuDef_t *menu, wiredItemDef_t *item, in
 
 static void WiredScript_VoteLeader( wiredMenuDef_t *menu, wiredItemDef_t *item, int numArgs, const char **args ) {
 	char buf[MAX_QPATH];
-	WiredUI_StateGetString( "ui_selectedPlayerNum", buf, sizeof( buf ) );
+	WiredUI_StateGetString( "ui_selectedTeamPlayerNum", buf, sizeof( buf ) );
 	if ( buf[0] ) Cbuf_ExecuteText( EXEC_APPEND, va( "callteamvote leader %s\n", buf ) );
 }
 

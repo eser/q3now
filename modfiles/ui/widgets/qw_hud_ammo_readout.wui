@@ -1,43 +1,88 @@
-// qw_hud_ammo_readout — V2_HUD_Active bottom-right AMMO readout
+// qw_hud_ammo_readout — V2_HUD_Active bottom-center-above AMMO readout
 // Interface: #include once into the qw_hud_active composer menuDef body.
 //
-// HUD redesign (Eser, 2026-06-30): caption RESTORED, mirroring the vitals panels.
-// The caption is the live weapon name (store-bound to player.weapon.name) as a
-// flex-flow text node at the panel top — that IS where flow text renders; the
-// ammo digit is a FULL-VIEWPORT statusbar_value leaf pulled UP to y0.88 so it sits
-// right under the name (gap reduced, name visible). Right-aligned to match the
-// right-anchored panel. Dark fill + amber right stripe keep the amber digit
-// readable over the bottom-right viewmodel HDR glow. ∞ for infinite weapons.
-// Panel box: right 1.94vw, bottom 4vh, 11.5vw × 11.56vh. digit x0.962 textalign 2.
-// Tokens: $hud_panel_bg $accent $boneDim $font_mono $font_sans.
+// Mockup realignment (2026-08-16, TASK-70 acceptance #4 "Layout cascade"):
+// the readout is moved BACK to the mockup's bottom-CENTER-ABOVE slot. The
+// regions JSON (tests/visual/regions/v2_hud_active.json, ammo_readout) is
+// anchored to the mockup at x640 y716 w160 h56; the bottom-right placement
+// this widget carried (container right 1.94vw, digit leaf x0.934 y0.885)
+// rendered the value ~75px BELOW and far right of that window, scoring
+// SSIM 0.1105 against the 0.45 floor — by far the worst region in the gate.
+//
+// Canonical geometry — qw-screens.jsx:1290-1296 ("BOTTOM-CENTER-ABOVE —
+// ammo big readout"), authored on the 1440x900 artboard:
+//   :1291  container  position absolute, bottom:128, left:50% translateX(-50%)
+//   :1293  label      Mono size={8} letter="0.4em"  "◆ ROCKET LAUNCHER ◆"
+//   :1294  spacer     marginTop:2
+//   :1295  value      DisplayText size={40} weight={700} letter="-0.02em" "88"
+// Mono (qw-shared.jsx:233) = JetBrains Mono, uppercase, letterSpacing .18em
+// default overridden to .4em here; DisplayText (qw-shared.jsx:222) = Oxanium,
+// lineHeight 0.95. So the block stacks bottom-up from y=900-128=772:
+//   value  40*0.95 = 38px tall -> top y734  (734/900 = 0.8156)
+//   label  8*1.2   = 9.6px     -> top y722  (722.4/900 = 0.8027) + 2px margin
+// That reproduces the regions JSON's measured mockup '88' bbox (y721..764)
+// and its 160px-wide window (the 19-char label at ~8px/char advance = ~152px).
+//
+// 🔴 FULL-VIEWPORT LEAF RULE (hud-v2-redesign.md:26 — hard constraint):
+// `hudElement` leaf rects do NOT resolve against their container. The .wui
+// rect is back-filled straight to screen pixels against the FULL viewport
+// (cl_wired_parse.c:1067-1070 WUI_BackfillToScreen: UNIT_NORM -> value *
+// vidWidth/vidHeight), and the Clay-resolved x/y/w/h are then DISCARDED by
+// the custom-draw adapter (cl_wired_ui_hud_register.c:493-495) — the legacy
+// routine reads only its own config.rect. So moving this readout is TWO
+// synchronized edits: the CONTAINER offsets AND every leaf rect. Both are
+// applied below; the container positions the flow-text caption, and the leaf
+// is hand-placed with an independent full-viewport rect to land inside it.
+//
+// Panel box: bottom 14.22vh (=128/900), left 44.44vw, 11.11vw x 5.56vh —
+// the mockup's centered 160x50 block (640..800 x 722..772). NO background and
+// NO border: the mockup's ammo block is bare text over the arena (unlike the
+// health/armor panels, which do carry $hud_panel_bg60 chrome). The previous
+// bottom-right revision's panel fill + amber right stripe existed only to keep
+// the digit readable over the viewmodel HDR glow; at the mockup's centre-screen
+// slot there is no viewmodel behind it, and any fill would be unmatched ink
+// inside the scoring window.
+// Tokens: $accent $font_mono $font_sans.
 itemDef {
 	name "hud_active_ammo_readout"
 	type container
 	position absolute
-	right 1.94vw
-	bottom 4vh
-	width 11.5vw
-	height 11.56vh
+	left 44.44vw
+	bottom 14.22vh
+	width 11.11vw
+	height 5.56vh
 	direction column
-	padding 0.7vh 1.1vw
-	alignX end
-	background $hud_panel_bg60
-	borderRight 3px $accent
+	alignX center
+	grow 0
 
-	// D3 fix (2026-06-30): caption now binds the SHORT uppercase weapon tag
-	// (player.weapon.shortname, e.g. "RL") — the full .name ("Rocket Launcher")
-	// overran this compact panel. Uses explicit width PERCENT (NOT width FIT) to
-	// match the proven bound-text pattern in qw_hud_scoreboard_bar / qw_hud_kill_feed
-	// (a FIT-width bound text node mis-measured → garbled glyphs).
-	itemDef { type 0 rect 0 0 6vw 2.2vh height FIT width PERCENT 6vw bind "player.weapon.shortname" text "WPN" textalign 2 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+	// Caption — flow text at the block top, mirroring the mockup's Mono label.
+	// Kept on player.weapon.shortname (fed already-uppercased by
+	// cg_wired_bridge.c:694-703); the mockup prints the FULL uppercase name, but
+	// bg_weaponlist[].name is mixed-case ("Rocket Launcher", bg_misc.c:272) and
+	// upper-casing it is a FEEDER change (engine LoC) deliberately out of scope
+	// here. Explicit width PERCENT (NOT width FIT) keeps the proven bound-text
+	// pattern — a FIT-width bound text node mis-measures into garbled glyphs.
+	itemDef { type 0 rect 0 0 11.11vw 1.07vh height FIT width PERCENT 11.11vw bind "player.weapon.shortname" text "WPN" textalign 1 font $font_mono 8 letterspacing 3.2 forecolor $accent decoration visible 1 grow 0 }
 
-	// HUD redesign (Eser, 2026-06-30): VALUE on the LEFT (right-aligned) with the BAR
-	// stacked UNDER it, ICON on the RIGHT — (value / bar) [icon]. The icon draws in its
-	// NATURAL color (no forecolor tint — this is why the red RL icon no longer greys
-	// out). value/bar keep the amber forecolor. digit right-edge 0.934, icon 0.944–0.962
-	// (≈10px gap, no collision even for '999'); bar 0.882–0.934 under the digit (clear of
-	// the icon). The bar binds player.ammo.percent (= ammo/200, ∞-weapons → full).
-	itemDef { hudElement "statusbar_value" bind "ammo" anchor BOTTOM_RIGHT rect 0.934 0.885 0 0 font $font_sans fontsize 40 46 textalign 2 forecolor $accent decoration visible 1 }
-	itemDef { hudElement "statusbar_bar"   bind "ammo" anchor BOTTOM_RIGHT rect 0.882 0.925 0.052 0.004 direction L forecolor $accent decoration visible 1 }
-	itemDef { hudElement "statusbar_icon"  bind "ammo" anchor BOTTOM_RIGHT rect 0.944 0.892 0.018 0.030 decoration visible 1 }
+	// Value — the mockup's DisplayText 40 "88", horizontally CENTERED on the
+	// artboard midline (x720 = 0.5) and topped at y734 (= 0.8156). textalign 1
+	// (CENTER) makes x the centre anchor; fontsize h drops 46 -> 40 to match the
+	// mockup size exactly (the old 46 was the health/armor panel size, and is the
+	// "~2x taller" term in the regions JSON diagnosis). Width term keeps the
+	// sibling panels' 40:46 w:h ratio -> 35.
+	// The mockup draws NO bar and NO icon in this block (qw-screens.jsx:1292-1296
+	// is label + value only), so both leaves are dropped rather than relocated —
+	// they were bottom-right-panel chrome with no mockup counterpart, and leaving
+	// them would put unmatched ink inside the 160x56 scoring window.
+	// 2026-08-16: y 0.8156 -> 0.7912 was tried (moving the digits ~22px up to
+	// match where the mockup's amber mass peaks) and REVERTED — it aligned the
+	// row profile but SSIM went 0.2089 -> 0.2021, i.e. slightly worse. The
+	// position is not what this region is failing on. Measured ink coverage
+	// inside the 160x56 scoring window: mockup 41.3%, engine 1.5% — 27x. The
+	// mockup composes a full block there (weapon label, framing chrome, a large
+	// two-digit value); the engine draws one small number. No amount of nudging
+	// or resizing a single text node closes a structural gap that large, so the
+	// value stays where the layout intends and the region is documented as a
+	// content gap rather than a placement bug. See TASK-70 notes.
+	itemDef { hudElement "statusbar_value" bind "ammo" anchor BOTTOM_CENTER rect 0.5 0.8156 0 0 font $font_sans fontsize 35 40 textalign 1 forecolor $accent decoration visible 1 }
 }
