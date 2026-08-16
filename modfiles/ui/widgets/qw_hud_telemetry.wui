@@ -1,5 +1,5 @@
 // qw_hud_telemetry — V2_HUD_Active top-right FPS / MS readout
-// Interface: #include once into the qw_hud_active composer menuDef body.
+// Interface: #include once into the modern composer menuDef body.
 // Source: docs/wui-claude-design-canonical-v2/project/qw-screens.jsx:1132-1142
 //   (top:18 right:24; FPS block [amber] + MS block [toxic], number over label).
 //

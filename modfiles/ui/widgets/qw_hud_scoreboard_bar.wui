@@ -1,5 +1,5 @@
 // qw_hud_scoreboard_bar — V2_HUD_Active top-center scoreboard bar
-// Interface: #include once into the qw_hud_active composer menuDef body.
+// Interface: #include once into the modern composer menuDef body.
 // Source: docs/wui-claude-design-canonical-v2/project/qw-screens.jsx:1108-1130
 //   (top:18, centered w:480, grid leader | 130px timer | runner-up).
 //

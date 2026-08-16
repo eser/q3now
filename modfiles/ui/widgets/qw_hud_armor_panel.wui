@@ -1,5 +1,5 @@
 // qw_hud_armor_panel — V2_HUD_Active bottom-left ARMOR panel (right of HEALTH)
-// Interface: #include once into the qw_hud_active composer menuDef body.
+// Interface: #include once into the modern composer menuDef body.
 //
 // HUD redesign (Eser, 2026-06-30): mirrors the health panel. Caption RESTORED
 // ("ARMOR") as a flex-flow text node at the panel top; value/icon/bar are

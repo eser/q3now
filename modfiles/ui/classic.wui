@@ -1,17 +1,17 @@
-// qw_hud_classic — the 2026-08-10 HUD, kept as a separate variant.
+// classic — the 2026-08-10 HUD, kept as a separate variant.
 //
-// Identical to qw_hud_active except for the ammo readout: this one keeps the
+// Identical to modern except for the ammo readout: this one keeps the
 // bottom-right block WITH its gauge and icon, which the mockup-aligned revision
-// dropped. Switch at runtime with `hud qw_hud_classic` (the cvar reloads the
+// dropped. Switch at runtime with `hud classic` (the cvar reloads the
 // layout on change, cl_wired_ui.c:4126).
 //
 // Why two variants rather than one "fixed" HUD: the mockup and the running game
 // disagree about the bottom-centre slot — the artboard puts ammo there, the game
 // puts the weapon-select bar there, and they collide. Rather than pick a winner
 // by fiat, both layouts ship and the cvar decides.
-// qw_hud_active.wui — q3now V2_HUD_Active in-game HUD composer (skeleton)
+// modern.wui — q3now V2_HUD_Active in-game HUD composer (skeleton)
 //
-// Activated by the `hud` cvar: `set hud qw_hud_active` loads this file in
+// Activated by the `hud` cvar: `set hud modern` loads this file in
 // place of ui/default.wui (the legacy Q3-style HUD). default.wui stays the
 // shipped default and coexists; the V2 chain (dispatches 5.21-5.25) builds
 // this composer up widget-by-widget, then the dispatch-5.25 cleanup decides
@@ -36,7 +36,7 @@
 #include "ui/wmenumacros.h"
 
 menuDef {
-	name "qw_hud_classic"
+	name "classic"
 	rect 0 0 1 1
 	fullScreen 0
 	visible 1

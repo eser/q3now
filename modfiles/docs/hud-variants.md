@@ -3,8 +3,8 @@
 The in-game HUD ships as two layouts. Switch at runtime:
 
 ```
-hud qw_hud_classic     # bottom-right ammo block with gauge + icon
-hud qw_hud_active      # mockup-aligned, bare ammo text
+hud classic     # bottom-right ammo block with gauge + icon
+hud modern      # mockup-aligned, bare ammo text
 ```
 
 The `hud` cvar is archived and reloads the layout as soon as it changes
@@ -37,7 +37,7 @@ Rather than pick a winner by fiat, both layouts ship.
 
 ---
 
-## `qw_hud_classic`
+## `classic`
 
 The 2026-08-10 layout, kept verbatim.
 
@@ -48,7 +48,7 @@ The 2026-08-10 layout, kept verbatim.
 
 Widget: `ui/widgets/qw_hud_ammo_readout_classic.wui`
 
-## `qw_hud_active`
+## `modern`
 
 The mockup-aligned layout.
 

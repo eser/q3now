@@ -7,10 +7,10 @@
 // altta ammo ile ilgili bolum... oradaki gauge'lar ve degerler tam tersine saga
 // yasli". The gauge was already here; chasing artboard parity threw it away.
 //
-// Selected via `hud qw_hud_classic`. See qw_hud_active for the mockup-aligned
+// Selected via `hud classic`. See modern for the mockup-aligned
 // variant and modfiles/docs/hud-variants.md for the split.
 // qw_hud_ammo_readout — V2_HUD_Active bottom-right AMMO readout
-// Interface: #include once into the qw_hud_active composer menuDef body.
+// Interface: #include once into the modern composer menuDef body.
 //
 // HUD redesign (Eser, 2026-06-30): caption RESTORED, mirroring the vitals panels.
 // The caption is the live weapon name (store-bound to player.weapon.name) as a

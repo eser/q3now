@@ -1,5 +1,5 @@
 // qw_hud_ammo_readout — V2_HUD_Active bottom-RIGHT ammo readout
-// Interface: #include once into the qw_hud_active composer menuDef body.
+// Interface: #include once into the modern composer menuDef body.
 //
 // Placement (2026-08-16, Eser live review): bottom-RIGHT, right-aligned.
 //

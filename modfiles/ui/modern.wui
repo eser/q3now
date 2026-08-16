@@ -1,6 +1,6 @@
-// qw_hud_active.wui — q3now V2_HUD_Active in-game HUD composer (skeleton)
+// modern.wui — q3now V2_HUD_Active in-game HUD composer (skeleton)
 //
-// Activated by the `hud` cvar: `set hud qw_hud_active` loads this file in
+// Activated by the `hud` cvar: `set hud modern` loads this file in
 // place of ui/default.wui (the legacy Q3-style HUD). default.wui stays the
 // shipped default and coexists; the V2 chain (dispatches 5.21-5.25) builds
 // this composer up widget-by-widget, then the dispatch-5.25 cleanup decides
