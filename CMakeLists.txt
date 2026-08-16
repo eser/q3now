@@ -2485,7 +2485,19 @@ ELSEIF(USE_JPEG_TURBO)
 	IF(NOT _JPEGTURBO_PATCHED STREQUAL _JPEGTURBO_SRC)
 		FILE(WRITE "${_JPEGTURBO_CML}" "${_JPEGTURBO_PATCHED}")
 	ENDIF()
+	# CMake 4.4 added CMP0219 (macro arguments keep their backslashes). The
+	# vendored libjpeg-turbo predates it and feeds a C snippet containing "\\n"
+	# to check_c_source_runs(), so configure prints a long policy warning about
+	# a file we do not maintain. OLD is also the behaviour that snippet was
+	# written for — it wants the escapes interpreted — so pinning it keeps the
+	# right-shift probe correct rather than merely silencing the message.
+	# CMAKE_POLICY_DEFAULT_*, not CMAKE_POLICY(SET): the submodule calls
+	# cmake_minimum_required() itself, which resets policies to that version's
+	# defaults, so a SET here is discarded at the subdirectory boundary. The
+	# DEFAULT_ variable survives it. Unset afterwards to keep the scope tight.
+	SET(CMAKE_POLICY_DEFAULT_CMP0219 OLD)
 	ADD_SUBDIRECTORY(src/libs/libjpeg-turbo EXCLUDE_FROM_ALL)
+	UNSET(CMAKE_POLICY_DEFAULT_CMP0219)
 	ADD_LIBRARY(client OBJECT ${CLIENT_SRCS})
 	TARGET_INCLUDE_DIRECTORIES(client PRIVATE
 		${CMAKE_CURRENT_SOURCE_DIR}/src/libs/libjpeg-turbo/src
