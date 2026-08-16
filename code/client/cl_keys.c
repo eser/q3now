@@ -920,11 +920,25 @@ static void CL_KeyDownEvent( int key, unsigned time )
 	 * CA_DISCONNECTED). The console key + screenshot key already
 	 * short-circuited above. Mouse motion is not routed through
 	 * CL_KeyDownEvent, so cursor wobble does not trip this. */
+	/* Two of these conditions used to be wrong in ways that only surface once
+	 * you have actually played a round:
+	 *
+	 * KEYCATCH_CONSOLE alone is not evidence the console is in the way. A SOFT
+	 * close collapses it visually but deliberately leaves the catcher with the
+	 * user (cl_console_close_policy.h) — that policy is right, but it meant
+	 * that after opening and closing the console over attract, no keypress ever
+	 * raised the menu again. Ask whether the console is actually ON SCREEN.
+	 *
+	 * com_sv_running stays 1 after a local map: disconnect is client-only and
+	 * deliberately leaves the server up (cl_main.c:2119). So "no server
+	 * running" also meant "you loaded a map once, no menu for you". What the
+	 * test is really guarding is not stealing a keypress from a live session,
+	 * and CA_DISCONNECTED above already establishes that. */
 	if ( key != K_ESCAPE
 	  && clientActiveApp->state == CA_DISCONNECTED
-	  && !( Key_GetCatcher() & ( KEYCATCH_UI | KEYCATCH_CONSOLE | KEYCATCH_CGAME | KEYCATCH_MESSAGE ) )
-	  && UI_VM_ACTIVE
-	  && !com_sv_running->integer ) {
+	  && !( Key_GetCatcher() & ( KEYCATCH_UI | KEYCATCH_CGAME | KEYCATCH_MESSAGE ) )
+	  && Con_GetDisplayFrac() <= 0.0f
+	  && UI_VM_ACTIVE ) {
 		S_StopAllSounds();
 		UI_CALL_SET_ACTIVE( UIMENU_MAIN );
 		Key_ClearStates();
