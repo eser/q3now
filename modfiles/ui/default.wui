@@ -524,6 +524,16 @@ menuDef {
 			textalign 0
 			forecolor 1 1 0 1
 		}
+
+		// team vote (leader vote etc.) — same shape, one line lower.
+		itemDef { hudElement "teamvotemessageworld"
+			anchor CENTER_LEFT
+			rect 0.003 0.152 0 0.025
+			font "defaultMonoFont"
+			fontsize 6 10
+			textalign 0
+			forecolor 1 1 0 1
+		}
 	}
 
 	// ── Powerups ────────────────────────────────────────────

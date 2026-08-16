@@ -268,6 +268,39 @@ void CG_WiredHudPushState( void ) {
 	state.voteNo       = cgs.voteNo;
 	state.voteModified = cgs.voteModified;
 	Q_strncpyz( state.voteString, cgs.voteString, sizeof( state.voteString ) );
+
+	// ── team vote ────────────────────────────────────────────────────
+	// cgs.teamVote*[] is a 2-slot array keyed by the CS_TEAMVOTE_* offset
+	// convention from g_main.c:CheckTeamVote (0 = TEAM_RED, 1 = TEAM_BLUE).
+	// Resolve the local player's slot here so the client HUD only ever sees
+	// "is there a team vote *I* can answer". Players on neither team get a
+	// zeroed block, which the element treats as inactive.
+	{
+		int voteTeam = cgs.clientinfo[cg.clientNum].team;
+
+		// while following, show the followed player's team vote
+		if ( voteTeam == TEAM_SPECTATOR && cg.snap ) {
+			voteTeam = cgs.clientinfo[cg.snap->ps.clientNum].team;
+		}
+
+		if ( voteTeam == TEAM_RED || voteTeam == TEAM_BLUE ) {
+			int slot = ( voteTeam == TEAM_RED ) ? 0 : 1;
+
+			state.teamVoteTime     = cgs.teamVoteTime[slot];
+			state.teamVoteYes      = cgs.teamVoteYes[slot];
+			state.teamVoteNo       = cgs.teamVoteNo[slot];
+			state.teamVoteModified = cgs.teamVoteModified[slot];
+			Q_strncpyz( state.teamVoteString, cgs.teamVoteString[slot],
+				sizeof( state.teamVoteString ) );
+		} else {
+			state.teamVoteTime      = 0;
+			state.teamVoteYes       = 0;
+			state.teamVoteNo        = 0;
+			state.teamVoteModified  = qfalse;
+			state.teamVoteString[0] = '\0';
+		}
+	}
+
 	Q_strncpyz( state.killerName, cg.killerName, sizeof( state.killerName ) );
 
 	// ── client info ──────────────────────────────────────────────────

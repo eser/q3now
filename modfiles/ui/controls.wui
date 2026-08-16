@@ -780,6 +780,74 @@ menuDef {
 							visible 1
 							grow 0
 						}
+
+						// Vote yes/no. Bound to F1/F2 in default.cfg:61-62 but
+						// previously unreachable from any menu. Multi-word bind
+						// targets are the established idiom here — see the
+						// "weapon 1".."weapon 8" rows above.
+						itemDef {
+							name "row_vote_yes"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Vote Yes"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "vote yes"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_vote_no"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Vote No"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "vote no"
+							visible 1
+							grow 0
+						}
+
+						// Team votes (leader vote etc.) answer with `teamvote`,
+						// a separate server command from `vote` (g_cmds.c:2613).
+						// default.cfg binds these to F5/F6 — F3 was already
+						// taken by ui_teamorders.
+						itemDef {
+							name "row_teamvote_yes"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Team Vote Yes"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "teamvote yes"
+							visible 1
+							grow 0
+						}
+
+						itemDef {
+							name "row_teamvote_no"
+							type 13
+							rect 0 0 1 0
+							height FIXED 38px
+							width PERCENT 1
+							text "Team Vote No"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "teamvote no"
+							visible 1
+							grow 0
+						}
 					}
 
 					// ── CHAT group box ──────────────────────────

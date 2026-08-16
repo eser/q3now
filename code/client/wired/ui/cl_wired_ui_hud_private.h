@@ -558,6 +558,9 @@ void CG_ModernHUDElementTargetStatusRoutine(void* context);
 void* CG_ModernHUDElementVMWCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementVMWRoutine(void* context);
 
+void* CG_ModernHUDElementTVMWCreate(const modernhudConfig_t* config);
+void CG_ModernHUDElementTVMWRoutine(void* context);
+
 void* CG_ModernHUDElementFragMessageCreate(const modernhudConfig_t* config);
 void CG_ModernHUDElementFragMessageRoutine(void* context);
 

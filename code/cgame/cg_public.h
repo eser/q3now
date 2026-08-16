@@ -563,6 +563,13 @@ typedef struct {
 	int         voteTime, voteYes, voteNo;
 	qboolean    voteModified;
 	char        voteString[256];
+	// team vote — mirrors the regular vote block above, but only the local
+	// player's own team slot is published (cgs.teamVote*[] is indexed by
+	// 0=TEAM_RED / 1=TEAM_BLUE; cgame resolves the slot so the client never
+	// has to know the team mapping). teamVoteTime == 0 means "no team vote".
+	int         teamVoteTime, teamVoteYes, teamVoteNo;
+	qboolean    teamVoteModified;
+	char        teamVoteString[256];
 	char        killerName[MAX_QPATH];
 
 	// client info

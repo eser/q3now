@@ -128,6 +128,11 @@ void WiredHud_SyncCompat( void ) {
 	wired_cgs.voteNo         = wiredHud->voteNo;
 	wired_cgs.voteModified   = wiredHud->voteModified;
 	Q_strncpyz( wired_cgs.voteString, wiredHud->voteString, sizeof( wired_cgs.voteString ) );
+	wired_cgs.teamVoteTime     = wiredHud->teamVoteTime;
+	wired_cgs.teamVoteYes      = wiredHud->teamVoteYes;
+	wired_cgs.teamVoteNo       = wiredHud->teamVoteNo;
+	wired_cgs.teamVoteModified = wiredHud->teamVoteModified;
+	Q_strncpyz( wired_cgs.teamVoteString, wiredHud->teamVoteString, sizeof( wired_cgs.teamVoteString ) );
 
 	// glconfig — copy from client
 	memcpy( &wired_cgs.glconfig, &cls.glconfig, sizeof( glconfig_t ) );

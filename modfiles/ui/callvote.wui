@@ -96,8 +96,22 @@ menuDef {
 				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 32px width PERCENT 0.95 text "Vote Scorelimit" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "callvote g_scorelimit $ui_voteScorelimit" ; close } }
 
 				// ── Gametype vote — one literal callvote per type (fully wired)
-				// Numbers/names track startserver's ui_netGameType list (0-5).
+				// Numbers/names track startserver's ui_netGameType list (0-6).
 				// callvote g_gametype <n> is validated in Cmd_CallVote_f:1537.
+				// One Flag CTF (6) is NOT listed. It carries no feature gate
+				// (bg_gametypes.c:74 is unconditional and the game-side paths in
+				// g_team.c / g_items.c / ai_dmq3.c all compile in), so it is
+				// implemented — but it is not PLAYABLE on anything we ship:
+				// no shipped map spawns team_CTF_neutralflag, so the server logs
+				// "Warning: One Flag CTF without Neutral Flag" (g_team.c:571) and
+				// there is nothing to capture. Measured 2026-08-16 with
+				// tests/headless-map-transition-zonecheck.sh --flag-inventory.
+				// It returns once TASK-157 (centre-of-map neutral-flag fallback,
+				// Q1) lands. NOTE: Capture the Flag (5) below has the SAME gap and
+				// is left as-is only because it was already shipping.
+				// Overload (7) and Harvester (8) stay out for a different reason —
+				// FEAT_OVERLOAD/FEAT_HARVESTER are 0 (MISSIONPACK undefined), so
+				// their entities are compiled away entirely.
 				itemDef { name "cat_gametype_label" type 0 rect 0 0 1 0.025 height FIT text "GAMETYPE VOTE" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
 				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Deathmatch" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 0" ; close } }
@@ -161,6 +175,10 @@ menuDef {
 				// Uses the TEAM vote path: `callteamvote leader <player>`
 				// (Cmd_TeamVote_f, code/game/g_cmds.c:1736). Only meaningful in
 				// team gametypes; the engine rejects it in non-team modes.
+				// feeder 8 = FEEDER_TEAM_LIST, deliberately NOT the kick list's
+				// feeder 7: same rows, but its own selection key
+				// (ui_selectedTeamPlayerNum). Sharing feeder 7 made a pick in
+				// either list overwrite the other one's selection.
 				itemDef { name "cat_leader_label" type 0 rect 0 0 1 0.025 height FIT text "LEADER VOTE (team games)" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
 				itemDef {
@@ -173,7 +191,7 @@ menuDef {
 					forecolor $bone
 					backcolor $panelDeep
 					style 1
-					feeder 7
+					feeder 8
 					elementheight 22
 					columns 1 0 420 32
 					visible 1
