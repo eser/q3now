@@ -31,7 +31,7 @@ set cg_drawCrosshair 1
 set cg_crosshairHealth 0
 set cg_crosshairColor "0.957 0.627 0.227"
 set cg_crosshairSize 48
-set hud qw_hud_active
+set hud modern
 set ui_palette_mode $MODE
 set ui_palette_accent $ACCENT
 menu_reload

@@ -1,5 +1,5 @@
 // qw_hud_holdables_strip — V2_HUD_Active holdable-items strip
-// Interface: #include once into the qw_hud_active composer menuDef body.
+// Interface: #include once into the modern composer menuDef body.
 // Source: docs/wui-claude-design-canonical-v2/project/qw-screens.jsx:1207-1237
 //   (right:28 bottom:144; owned holdable icons; equipped slot emphasized).
 //

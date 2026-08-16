@@ -1,5 +1,5 @@
 // qw_hud_scoreboard_overlay — V2_HUD_Active TAB-hold scoreboard table
-// Interface: #include once into the qw_hud_active composer menuDef body.
+// Interface: #include once into the modern composer menuDef body.
 // Source: docs/wui-claude-design-canonical-v2/project/qw-screens.jsx:1299-1345
 //   (top:140, centered, w:900; ◆ DEATHMATCH + ARENA GATE header, sorted
 //    rank/player/score/K-D/EFF/DMG/ACC/PING rows, footer).

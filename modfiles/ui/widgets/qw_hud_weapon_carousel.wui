@@ -1,5 +1,5 @@
 // qw_hud_weapon_carousel — V2_HUD_Active bottom-center weapon carousel
-// Interface: #include once into the qw_hud_active composer menuDef body.
+// Interface: #include once into the modern composer menuDef body.
 // Source: docs/wui-claude-design-canonical-v2/project/qw-screens.jsx:1262-1288
 //   (bottom-center horizontal weapon row; equipped slot emphasized).
 //
