@@ -59,11 +59,19 @@ static const wuiBgPresetRow_t wui_bg_preset_table[ WUI_BG_PRESET_COUNT ] = {
 		qfalse, qtrue,
 		qfalse } },
 
-	/* DIM — live gameplay with a scrim. No backdrop layers: the whole point
-	 * is that the match stays visible underneath. */
+	/* DIM — whatever is behind, with a scrim over it. Deliberately not
+	 * "gameplay with a scrim": the scrim lives on the MENU layer and darkens
+	 * whatever it lands on, so the same preset covers the in-game menu (match
+	 * underneath) and the main menu (attract underneath). Making it specific
+	 * to one of those would have meant two presets that differ only in which
+	 * layer happens to be lit.
+	 *
+	 * Attract is left VISIBLE and RUNNING here — the point is to see it
+	 * through the scrim. The backdrop layers stay off so they do not cover
+	 * whatever we are dimming. */
 	[ WUI_BG_PRESET_DIM ] = { "dim", {
 		qfalse, qfalse,
-		qfalse, qtrue,
+		qtrue,  qfalse,
 		qtrue } },
 };
 

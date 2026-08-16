@@ -67,8 +67,12 @@ int main( void )
 	WUI_BgPresetEval( WUI_BG_PRESET_ANIMATED, qtrue, qfalse, &s );
 	CheckState( "animated: backdrop on, attract paused", &s, 1, 1, 0, 1, 0 );
 
+	/* dim darkens whatever is behind, not specifically the game: the scrim
+	 * lives on the menu layer, so the same preset serves the in-game menu
+	 * (match underneath) and the main menu (attract underneath). Attract is
+	 * left running because seeing it through the scrim is the point. */
 	WUI_BgPresetEval( WUI_BG_PRESET_DIM, qtrue, qfalse, &s );
-	CheckState( "dim: game visible under a scrim", &s, 0, 0, 0, 1, 1 );
+	CheckState( "dim: whatever is behind, scrimmed", &s, 0, 0, 1, 0, 1 );
 
 	WUI_BgPresetEval( WUI_BG_PRESET_NONE, qtrue, qfalse, &s );
 	CheckState( "none: nothing behind", &s, 0, 0, 0, 1, 0 );
