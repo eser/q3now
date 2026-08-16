@@ -241,13 +241,13 @@ static void wui_bg_init_embers( void ) {
 }
 
 static void wui_bg_ensure_anims( void ) {
-	if ( wui_bg_grid_drift_id == 0 ) {
+	if ( !WUI_AnimIsLive( wui_bg_grid_drift_id ) ) {
 		wui_bg_grid_drift_id = WUI_AnimCreate(
 			"bg_grid_drift", &wui_bg_grid_drift_t,
 			0.0f, 1.0f, WUI_BG_GRID_DRIFT_DURATION_MS,
 			WUI_ANIM_CURVE_LOOP_LINEAR, WUI_ANIM_FLAG_LOOP );
 	}
-	if ( wui_bg_scanline_sweep_id == 0 ) {
+	if ( !WUI_AnimIsLive( wui_bg_scanline_sweep_id ) ) {
 		wui_bg_scanline_sweep_id = WUI_AnimCreate(
 			"bg_scanline_sweep", &wui_bg_scanline_sweep_t,
 			0.0f, 1.0f, WUI_BG_SCANLINE_DURATION_MS,
@@ -678,9 +678,9 @@ static float wui_bg_parallax_offset( float w ) {
 void WUI_DrawBackgroundLayered( float x, float y, float w, float h, int flags ) {
 	if ( w <= 0 || h <= 0 ) return;
 
-	/* Lazy-arm anim slots on first emit. WUI_AnimStopAll resets the id
-	 * trackers via WiredUI_Shutdown path so a subsequent boot re-arms
-	 * cleanly. */
+	/* Lazy-arm anim slots on first emit. WUI_AnimStopAll clears the pool but
+	 * not the trackers below, so liveness is asked of the pool rather than
+	 * inferred from a remembered id. */
 	if ( ( flags & WUI_BG_LAYER_GRID ) || ( flags & WUI_BG_LAYER_SCANLINES ) ) {
 		wui_bg_ensure_anims();
 	}
@@ -692,7 +692,7 @@ void WUI_DrawBackgroundLayered( float x, float y, float w, float h, int flags ) 
 	if ( flags & ( WUI_BG_LAYER_SKY | WUI_BG_LAYER_ARENA_SILHOUETTE
 	             | WUI_BG_LAYER_EMBERS | WUI_BG_LAYER_PLASMA
 	             | WUI_BG_MODIFIER_PARALLAX | WUI_BG_MODIFIER_ANIMATED ) ) {
-		if ( wui_bg_parallax_id == 0 ) {
+		if ( !WUI_AnimIsLive( wui_bg_parallax_id ) ) {
 			wui_bg_parallax_id = WUI_AnimCreate(
 				"bg_parallax", &wui_bg_parallax_t,
 				0.0f, 1.0f, WUI_BG_PARALLAX_DURATION_MS,

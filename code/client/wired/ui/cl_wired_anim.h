@@ -93,6 +93,11 @@ void WUI_AnimStop( int id );
  * (menu hot-reload). */
 void WUI_AnimStopAll( void );
 
+/* Is this id still a live pool slot? Use instead of `id == 0` when re-arming
+ * a cached id: WUI_AnimStopAll clears the pool but cannot reach a caller's own
+ * tracker, so a wiped id still reads nonzero and the re-arm never fires. */
+qboolean WUI_AnimIsLive( int id );
+
 /* Per-frame tick. Called from WiredUI_TickFrame BEFORE the compositor
  * walk so emit sees fresh interpolated values. */
 void WUI_AnimTick( int realtime );

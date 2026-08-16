@@ -1899,6 +1899,21 @@ SET_TESTS_PROPERTIES(bg_preset_eval_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(bg_preset_eval_test bg_preset_eval_contract)
 
+# Re-arming a cached anim id. `if ( id == 0 )` cannot tell a live id from one
+# WUI_AnimStopAll wiped — the pool is cleared but the caller's tracker still
+# holds the old number — so the re-arm never fires and the value it drove stays
+# frozen. The menu background's parallax died to this after every hot reload,
+# silently.
+ADD_EXECUTABLE(anim_rearm_test
+	tests/anim-rearm-test.c
+)
+ADD_TEST(NAME anim_rearm_contract COMMAND anim_rearm_test)
+SET_TESTS_PROPERTIES(anim_rearm_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(anim_rearm_test anim_rearm_contract)
+
 # Menu background intent. The scene behind the menus is recorded per stack slot
 # at push time, not carried by the panel, so anything that skips the push loses
 # it silently — which is how the main menu came back from a map on black.

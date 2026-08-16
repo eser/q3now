@@ -172,6 +172,28 @@ void WUI_AnimStopAll( void )
 	s_active = 0;
 }
 
+/* Is this id still a live slot?
+ *
+ * Callers cache an anim id across frames and re-arm with `if ( id == 0 )`.
+ * That predicate cannot tell a live id from one WUI_AnimStopAll wiped: the
+ * pool is memset but the caller's own tracker still holds the old number, so
+ * the re-arm never fires and whatever the anim drove stays frozen for the rest
+ * of the session. The menu background lost its parallax to exactly this after
+ * every menu hot-reload, silently — nothing logs, the value simply stops.
+ *
+ * Asking the pool instead of trusting a remembered number closes it. */
+qboolean WUI_AnimIsLive( int id )
+{
+	int i;
+
+	if ( id == 0 ) return qfalse;
+
+	for ( i = 0; i < WUI_ANIM_POOL_MAX; i++ ) {
+		if ( s_anims[ i ].id == id ) return qtrue;
+	}
+	return qfalse;
+}
+
 int WUI_AnimActiveCount( void )
 {
 	return s_active;
