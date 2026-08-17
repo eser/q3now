@@ -2592,11 +2592,28 @@ static void wui_clay_emit_listbox( const wiredItemDef_t *item,
 			 * Selected row wins over hover below (selectedRow paints last),
 			 * so a hovered-but-unselected row lights faintly and the selected
 			 * row keeps its stronger fill. */
-			if ( cursorX >= x && cursorX < x + rowSpan &&
-			     cursorY >= y + headerH && cursorY < y + h ) {
-				int hv = firstVis + (int)( ( cursorY - ( y + headerH ) ) / rowH );
-				if ( hv >= firstVis && hv < lastVis && hv < totalItems ) {
-					hoverRow = hv;
+			/* Hit-test against the RENDERED box, not the legacy rect. Rows are
+			 * positioned relative to their container (rowY is an offset inside
+			 * the CLAY block), so the drawing lives in Clay's coordinate space
+			 * while `x`/`y` are the pre-layout guess. On the start-server map
+			 * list the two were 493px apart vertically — about twelve rows —
+			 * so the highlight tracked a row nowhere near the cursor. */
+			{
+				float           hitX = x, hitY = y, hitH = h;
+				Clay_ElementId  _hvid; Clay_ElementData _hvd;
+				_hvid.id = clayId;
+				_hvd = Clay_GetElementData( _hvid );
+				if ( _hvd.found && _hvd.boundingBox.height > 1.0f ) {
+					hitX = _hvd.boundingBox.x + (float) borderW;
+					hitY = _hvd.boundingBox.y + (float) borderW;
+					hitH = _hvd.boundingBox.height - 2.0f * (float) borderW;
+				}
+				if ( cursorX >= hitX && cursorX < hitX + rowSpan &&
+				     cursorY >= hitY + headerH && cursorY < hitY + hitH ) {
+					int hv = firstVis + (int)( ( cursorY - ( hitY + headerH ) ) / rowH );
+					if ( hv >= firstVis && hv < lastVis && hv < totalItems ) {
+						hoverRow = hv;
+					}
 				}
 			}
 
