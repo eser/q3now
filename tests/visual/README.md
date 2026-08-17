@@ -5,7 +5,66 @@ Two coexisting gates per the W-17 strict regime:
 - **`vdiff`** (`tools/visual-diff/`) — per-pixel diff with per-region thresholds. Audit-trail tool; `vdiff` exit code is no longer the active V1_Monolith gate after dispatch 5b.
 - **`vcompare`** (`tools/visual-compare/`) — perceptual (SSIM + ΔE_00) + structural (Zhang-Shasha tree edit distance) AND-combined gate. **Active gate** for V1_Monolith.
 
-Exit codes (both tools): 0 = PASS, 1 = FAIL, 2 = HALT (ceiling violation / threshold-up without flag / resolution mismatch / missing structural input).
+Exit codes (both tools): 0 = PASS, 1 = FAIL, 2 = HALT (ceiling violation / threshold-up without flag / resolution mismatch / missing structural input / empty gating region).
+
+## The ink check: a gating region must contain engine ink
+
+A region anchored where the engine draws nothing cannot fail an image
+comparison — it scores background against background, and passes. That is a
+false green, and it is worse than a red, because it reads as coverage while
+verifying nothing. Four of the nine V2_HUD_Active gating regions were in
+exactly that state (`kill_feed` SSIM 0.3653, `holdables_strip` 0.5086,
+`weapon_carousel` 0.3245, `scoreboard_overlay` 0.6058 — all at **0.000% ink**),
+because the regions file was authored against the `modern` HUD variant that
+commit 2a397bf3 deleted.
+
+So in-game captures now take **two** screenshots in one engine session at one
+pinned viewpoint: `impl.png` with the HUD, and `impl_nohud.png` with `hud none`.
+Differencing them isolates exactly the pixels the HUD drew. `vcompare
+--impl-nohud` measures that per region and **errors** (exit 2) on any gating
+region below `inkFloorPct` (0.5%). Measured separation on V2_HUD_Active is two
+orders of magnitude: real regions 9.1–90.8%, empty regions 0.000%.
+
+A region that is legitimately empty has three honest options — never a
+threshold tweak:
+
+| situation | what to do |
+|---|---|
+| region points at the wrong place | re-anchor it to where the engine draws |
+| widget not shipped (`#include` commented out) | `gating: false` with the reason |
+| widget correct, content state-conditional | `allow_empty` + `empty_reason` (required together) |
+
+The pair is also checked as a whole: a valid HUD-on/HUD-off pair differs by only
+the overlay (measured 3.24–3.26% of the frame across all five palette configs),
+so a pair differing by more than `maxFrameInkPct` (25%) is rejected outright.
+This is not hypothetical — a run whose engine hung before the map loaded paired
+a **menu** screenshot with a HUD frame, every gating region measured 60–100%
+"ink", and the config was recorded PASS on a menu-versus-arena comparison
+(frame difference: 94.83%). Proving each region has ink is not sufficient on its
+own; the two frames must also be the same scene.
+
+Known limit: ink proves *something* drew in the rect, not that the *intended*
+widget did. `weapon_placeholder` measures 4.24% ink while not being shipped at
+all — every one of those pixels is the ammo panel overlapping its corner.
+Overlapping rects still need a human to confirm which widget they measure.
+
+## When the perceptual metrics do not gate
+
+`pixel_metrics_gated: false` records SSIM/ΔE/structural as audit-trail numbers
+while the verdict rests on the ink check. It requires
+`pixel_metrics_ungated_reason`, and it requires `--impl-nohud` (with the metrics
+ungated and no ink check there would be nothing left gating at all).
+
+V2_HUD_Active sets it, on measurement rather than convenience. With every
+region correctly anchored and ink-verified, SSIM measured 0.168–0.279 for the
+four content-bearing panels — while three control regions containing **no HUD
+on either side** measured 0.405, 0.621 and 0.634. Absence outscores presence:
+the baseline is a flat vector artboard over a smooth gradient and the impl is a
+live 3D arena, so SSIM collapses on the background disagreement regardless of
+HUD fidelity. No threshold separates "the HUD regressed" from "the arena is
+textured". The structural fix is an **engine-blessed baseline** (a previous
+engine capture) rather than the mockup; until that decision is taken, the
+mockup stays the design reference and these numbers stay recorded, not gating.
 
 ## Layout
 
@@ -13,7 +72,7 @@ Exit codes (both tools): 0 = PASS, 1 = FAIL, 2 = HALT (ceiling violation / thres
 - `baselines/<artboard>_<mode>_<accent>.png` — Chrome headless render of the React mockup
 - `baselines/<artboard>_<mode>_<accent>_dom.json` — DOM tree (Clay-mirror schema) for structural diff
 - `regions/<artboard>.json` (+ optional `_<mode>` override) — per-region thresholds + optional vcompare per-metric overrides
-- `results/<artboard>_<mode>_<accent>/<timestamp>/` — impl.png, impl_clay.json, result.json (+ diff.png for vdiff runs)
+- `results/<artboard>_<mode>_<accent>/<timestamp>/` — impl.png, impl_nohud.png (in-game artboards), impl_clay.json, result.json (+ diff.png for vdiff runs)
 - `scripts/artboard_<artboard>.html` — isolated React harness per artboard (includes DOM walker)
 - `scripts/regen_baseline.sh` — chrome headless render → baselines/ (PNG + DOM JSON)
 - `scripts/capture_impl.sh` — engine boot + `screenshot` + `wui_test_dump_clay`
@@ -27,6 +86,23 @@ Exit codes (both tools): 0 = PASS, 1 = FAIL, 2 = HALT (ceiling violation / thres
 - `make visual-test-all` — vdiff fan-out across `VISUAL_CFGS`
 - `make visual-compare ARTBOARD=v1_monolith MODE=dark ACCENT=amber` — vcompare gate (perceptual + structural)
 - `make visual-compare-all` — vcompare fan-out
+- `make visual-tools-test` — Go unit tests for vdiff/vcompare themselves (no engine, no display, ~1s)
+
+## Prior-run selection
+
+Both tools reject a threshold that is looser than the most recent prior run for
+the same artboard/config. "Most recent prior run" means a `result.json` **this
+tool itself wrote**, identified by a `"tool"` field, selected by file mtime.
+
+Both rules exist because both were violated. The tools share one results tree
+with disjoint schemas, and selection was by directory *name*-sort: an ad-hoc
+probe directory (`v2b`) whose `result.json` came from vcompare sorted last, so
+vdiff adopted it, unmarshalled every field to zero, and rejected the run's real
+thresholds as a loosening — exit 2 before comparing a single pixel. The
+symmetric case is quieter and worse: vcompare reading a vdiff result gets zero
+thresholds, which its `oldVal == 0` short-circuit skips, leaving the loosen
+guard silently disarmed. A `result.json` without the marker is not adopted
+either — an unidentifiable file cannot be proven to be ours.
 
 ## Threshold policy (dispatch 5a re-pin + 5b extension)
 

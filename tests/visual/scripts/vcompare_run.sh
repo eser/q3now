@@ -14,6 +14,7 @@ REGIONS="$ROOT/visual/regions/${ARTBOARD}.json"
 [ -f "$ROOT/visual/regions/${ARTBOARD}_${MODE}.json" ] && REGIONS="$ROOT/visual/regions/${ARTBOARD}_${MODE}.json"
 RUN_DIR="$ROOT/visual/results/${ARTBOARD}_${MODE}_${ACCENT}/$TIMESTAMP"
 IMPL_PNG="$RUN_DIR/impl.png"
+IMPL_NOHUD_PNG="$RUN_DIR/impl_nohud.png"
 IMPL_CLAY="$RUN_DIR/impl_clay.json"
 . "$ROOT/lib/wired_paths.sh"
 # .exe only on Windows; wired_find_tool tries both.
@@ -35,6 +36,13 @@ ARGS=(
 )
 if [ -f "$BASELINE_DOM" ] && [ -f "$IMPL_CLAY" ]; then
   ARGS+=( --baseline-tree "$BASELINE_DOM" --impl-tree "$IMPL_CLAY" )
+fi
+# HUD-off reference frame (in-game artboards only — the capture script takes it
+# in the same engine session at the same pinned viewpoint). It lets vcompare
+# prove each gating region actually contains engine ink, instead of scoring
+# background against background and calling it a pass.
+if [ -f "$IMPL_NOHUD_PNG" ]; then
+  ARGS+=( --impl-nohud "$IMPL_NOHUD_PNG" )
 fi
 # Opt-in (default off, so the strict W-7.22 threshold-up guard is preserved for
 # every other artboard). Set ALLOW_THRESHOLD_UP=1 only for a ratified per-region

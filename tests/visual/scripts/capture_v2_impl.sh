@@ -88,6 +88,25 @@ setviewpos ${VIEWPOS:-216 1328 24 90}
 wait 500
 screenshot
 wait 200
+// HUD-OFF REFERENCE FRAME.
+//
+// The same pinned viewpoint with the HUD suppressed. Differencing the two
+// frames isolates exactly the pixels the HUD drew, which is what lets the gate
+// prove a region has engine content rather than assume it. Without this, a
+// region anchored over empty background scores against the arena on BOTH sides
+// and can PASS on emptiness — four of the nine V2 gating regions did exactly
+// that, which is a false green, not a gate.
+//
+// "hud none" names no menu, so the HUD composer loads nothing; the 3D scene is
+// untouched. The viewpoint is already fixed by setviewpos above and the arena
+// is static at this spawn, so the two frames differ only by the HUD.
+// (No backticks in this heredoc — it is unquoted, so they would run as
+// commands rather than read as prose.)
+set hud none
+wait 300
+screenshot
+wait 200
+set hud ${HUD:-classic}
 // Undo the archived cvars this capture changed (see cg_drawGun above).
 set cg_drawGun 1
 wait 100
@@ -99,11 +118,22 @@ EOF
   "$ENGINE_BINARY" +exec "$(basename "$CFG_PATH")" >/dev/null 2>&1 || true
 ) || true
 
+# Two shots, in order: impl.png (HUD on) then impl_nohud.png (HUD off).
+# wired_prev_shot must run FIRST — wired_newest_shot consumes the marker.
+PREV="$(wired_prev_shot "$SHOT_MARKER" "$SHOTS_DIR")" || PREV=""
 NEW="$(wired_newest_shot "$SHOT_MARKER" "$SHOTS_DIR")" || NEW=""
 if [ -z "$NEW" ]; then
   echo "no new screenshot found after boot" >&2
   exit 1
 fi
-cp "$NEW" "$RESULTS_DIR/impl.png"
+if [ -z "$PREV" ]; then
+  echo "only one screenshot produced; the HUD-off reference frame is missing." >&2
+  echo "Without it the gate cannot prove a region contains engine ink." >&2
+  exit 1
+fi
+# PREV is the older of the pair = the HUD-ON frame; NEW is the HUD-OFF one.
+cp "$PREV" "$RESULTS_DIR/impl.png"
+cp "$NEW"  "$RESULTS_DIR/impl_nohud.png"
 
-echo "impl: $RESULTS_DIR/impl.png"
+echo "impl:       $RESULTS_DIR/impl.png"
+echo "impl_nohud: $RESULTS_DIR/impl_nohud.png"

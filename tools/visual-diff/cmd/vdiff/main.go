@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 type Region struct {
@@ -45,7 +46,19 @@ type RegionResult struct {
 	Pass         bool    `json:"pass"`
 }
 
+// toolMarker identifies which tool wrote a result.json. vdiff and vcompare
+// write their results into the SAME results/<artboard>_<mode>_<accent>/
+// directory tree, and their RunResult schemas share no fields. Without a
+// marker, findPriorResult happily unmarshals a vcompare result.json into
+// vdiff's struct: every field misses, GlobalThresholdPct silently becomes 0,
+// and the threshold-up guard then reads any real threshold as a loosening and
+// HALTs (exit 2) before a single pixel is compared. Encoding is not a
+// substitute for identification — a prior run is only a prior run of THIS
+// tool.
+const toolMarker = "vdiff"
+
 type RunResult struct {
+	Tool               string         `json:"tool"`
 	Baseline           string         `json:"baseline"`
 	Impl               string         `json:"impl"`
 	Diff               string         `json:"diff"`
@@ -162,9 +175,68 @@ func loadCeilingConfig(path string) (*CeilingConfig, error) {
 	return &c, nil
 }
 
-// Walk the sibling timestamp directories of outResult's parent and return the
-// most recent prior result.json (excluding outResult itself). Returns nil if
-// none exists — first-run case.
+// scanPriorResults walks the sibling run directories of currentDir's parent and
+// returns every result.json this tool itself wrote, most recent first.
+//
+// Two rules make a directory a prior run of THIS tool, and both are load-bearing:
+//
+//  1. The result must carry `"tool": "vdiff"`. A result.json written by
+//     vcompare — or by any future tool sharing the results tree — is a
+//     different schema, not a prior run. Unmarshalling it here yields zeroes
+//     for every vdiff field, which the threshold-up guard reads as a prior of
+//     0.00 and rejects the current run against. Results predating the marker
+//     are also skipped: an unidentifiable file cannot be proven to be ours.
+//
+//  2. Ordering is by file modification time, not by directory name. Run dirs
+//     are named with a timestamp only by convention; an ad-hoc probe directory
+//     ("v2b", "scratch") sorts wherever its name falls, and name-sort picked it
+//     as "most recent". mtime is a property of the write, not of the name.
+func scanPriorResults(currentDir string) ([]string, error) {
+	cfgDir := filepath.Dir(currentDir)
+	cur := filepath.Base(currentDir)
+	entries, err := os.ReadDir(cfgDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	type cand struct {
+		path string
+		mod  time.Time
+	}
+	var cands []cand
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == cur {
+			continue
+		}
+		p := filepath.Join(cfgDir, e.Name(), "result.json")
+		fi, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var probe struct {
+			Tool string `json:"tool"`
+		}
+		if err := json.Unmarshal(b, &probe); err != nil || probe.Tool != toolMarker {
+			continue
+		}
+		cands = append(cands, cand{p, fi.ModTime()})
+	}
+	sort.SliceStable(cands, func(i, j int) bool { return cands[i].mod.After(cands[j].mod) })
+	paths := make([]string, 0, len(cands))
+	for _, c := range cands {
+		paths = append(paths, c.path)
+	}
+	return paths, nil
+}
+
+// findPriorResult returns the most recent prior vdiff result.json for the same
+// artboard/config, or nil when there is none — the first-run case.
 func findPriorResult(outResult string) (*RunResult, string, error) {
 	if outResult == "" {
 		return nil, "", nil
@@ -173,30 +245,14 @@ func findPriorResult(outResult string) (*RunResult, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	currentTSDir := filepath.Dir(abs)
-	cfgDir := filepath.Dir(currentTSDir)
-	entries, err := os.ReadDir(cfgDir)
+	paths, err := scanPriorResults(filepath.Dir(abs))
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, "", nil
-		}
 		return nil, "", err
 	}
-	var candidates []string
-	for _, e := range entries {
-		if !e.IsDir() || filepath.Base(currentTSDir) == e.Name() {
-			continue
-		}
-		p := filepath.Join(cfgDir, e.Name(), "result.json")
-		if _, err := os.Stat(p); err == nil {
-			candidates = append(candidates, p)
-		}
-	}
-	if len(candidates) == 0 {
+	if len(paths) == 0 {
 		return nil, "", nil
 	}
-	sort.Strings(candidates)
-	priorPath := candidates[len(candidates)-1]
+	priorPath := paths[0]
 	b, err := os.ReadFile(priorPath)
 	if err != nil {
 		return nil, "", err
@@ -327,6 +383,7 @@ func main() {
 	globalDelta := 100.0 * float64(mismatched) / float64(total)
 
 	rr := RunResult{
+		Tool:               toolMarker,
 		Baseline:           *baselinePath,
 		Impl:               *implPath,
 		Diff:               *outDiff,

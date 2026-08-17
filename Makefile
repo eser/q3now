@@ -1527,6 +1527,17 @@ png-perturb: $(PNG_PERTURB_BIN)
 $(VCOMPARE_BIN):
 	cd tools/visual-compare && go build -o vcompare$(EXEEXT) ./cmd/vcompare
 
+# Unit tests for the gate tooling itself. Pure Go — no engine, no display, no
+# game data — so they run anywhere in about a second. They cover the parts of
+# the gate that decide whether a run is even comparable, notably prior-run
+# selection: trusting a foreign tool's result.json once made vdiff exit 2
+# before it compared a single pixel.
+visual-tools-test:
+	cd tools/visual-diff && go test ./...
+	cd tools/visual-compare && go test ./...
+
+.PHONY: visual-tools-test
+
 visual-baseline:
 	@ARTBOARD=$(ARTBOARD) MODE=$(MODE) ACCENT=$(ACCENT) \
 	  bash tests/visual/scripts/regen_baseline.sh
@@ -1584,11 +1595,21 @@ visual-test-all: build $(VDIFF_BIN)
 # vcompare is the active gate for V1_Monolith and future artboards. Runs
 # SSIM + ΔE_00 + Zhang-Shasha tree edit distance, AND-combined verdict.
 # vdiff retained as audit-trail tool, not invoked by these targets.
+# Uses $(VISUAL_CAPTURE), like visual-compare-all: an in-game artboard needs the
+# HUD capture, not the menu one. This target used to hardcode capture_impl.sh,
+# so `make visual-compare ARTBOARD=v2_hud_active` captured the attract screen
+# and compared it against a HUD baseline — the same wrong-scene artifact the
+# visual-test comment above describes, and it read as a visual regression.
+#
+# ENGINE_BINARY is likewise NOT set here (it used to point into $(BUILD_DIR)):
+# the capture runs the engine from the user data root, where a raw build-tree
+# binary resolves one pak and dies with "Couldn't load default.cfg". Left unset,
+# wired_paths.sh resolves the INSTALLED binary beside its paks. Run
+# `make copy-all` first so the install reflects the build under test.
 visual-compare: build $(VCOMPARE_BIN)
 	@TS=$$(date +%Y%m%d_%H%M%S); \
 	  ARTBOARD=$(ARTBOARD) MODE=$(MODE) ACCENT=$(ACCENT) TIMESTAMP=$$TS \
-	  ENGINE_BINARY="$(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)" \
-	  bash tests/visual/scripts/capture_impl.sh && \
+	  bash tests/visual/scripts/$(VISUAL_CAPTURE) && \
 	  ARTBOARD=$(ARTBOARD) MODE=$(MODE) ACCENT=$(ACCENT) TIMESTAMP=$$TS \
 	  bash tests/visual/scripts/vcompare_run.sh
 
