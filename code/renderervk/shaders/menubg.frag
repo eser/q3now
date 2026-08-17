@@ -38,11 +38,26 @@ layout(set = 2, binding = 0) uniform MenuBgBlock {
 } u;
 
 // ── Warm dusk palette (normalized from cl_wired_bg.c WUI_BG_V2_*) ──────
-const vec3 SKY_TOP   = vec3( 0.227, 0.094, 0.031 );  // $demoSky1 #3a1808
-const vec3 SKY_LOW   = vec3( 0.102, 0.035, 0.020 );  // $demoSky2 #1a0905
-const vec3 FLOOR_COL = vec3( 0.055, 0.026, 0.016 );  // deeper than $demoFloor, so the floor reads as ground
-const vec3 EMBER     = vec3( 0.957, 0.627, 0.227 );  // $accent amber #f4a03a — radial glow accent
-const vec3 STAR_COL  = vec3( 0.784, 0.251, 0.188 );  // launcher constellation #c84030 (warm red-orange)
+// These are sRGB (display-space) values — they are the same #rrggbb design
+// tokens the .wui palette carries. This pass writes into the LINEAR UI colour
+// buffer, which gamma.frag later encodes back to sRGB on present, so every
+// constant has to be DECODED to linear first. Using them raw made the whole
+// backdrop come out at roughly value^(1/2.2) — a washed-out mid-brown that
+// swallowed the menu's contrast instead of the dark dusk the design calls for.
+// This mirrors the discipline the Clay rect dispatch already applies via
+// wui_srgb_to_linear (cl_wired_clay.c); the shader was the one emitter that
+// skipped it.
+vec3 srgbToLinear( vec3 c ) {
+	return mix( c * ( 1.0 / 12.92 ),
+	            pow( ( c + 0.055 ) * ( 1.0 / 1.055 ), vec3( 2.4 ) ),
+	            step( vec3( 0.04045 ), c ) );
+}
+
+const vec3 SKY_TOP_S   = vec3( 0.227, 0.094, 0.031 );  // $demoSky1 #3a1808
+const vec3 SKY_LOW_S   = vec3( 0.102, 0.035, 0.020 );  // $demoSky2 #1a0905
+const vec3 FLOOR_COL_S = vec3( 0.055, 0.026, 0.016 );  // deeper than $demoFloor, so the floor reads as ground
+const vec3 EMBER_S     = vec3( 0.957, 0.627, 0.227 );  // $accent amber #f4a03a — radial glow accent
+const vec3 STAR_COL_S  = vec3( 0.784, 0.251, 0.188 );  // launcher constellation #c84030 (warm red-orange)
 
 // Hash helpers (Inigo Quilez style — deterministic, no state).
 float hash11( float n ) { return fract( sin( n ) * 43758.5453123 ); }
@@ -82,6 +97,13 @@ float sdTriangle( vec2 p, float r ) {
 }
 
 void main() {
+	// Linear-space working copies of the sRGB-authored palette above.
+	vec3 SKY_TOP   = srgbToLinear( SKY_TOP_S   );
+	vec3 SKY_LOW   = srgbToLinear( SKY_LOW_S   );
+	vec3 FLOOR_COL = srgbToLinear( FLOOR_COL_S );
+	vec3 EMBER     = srgbToLinear( EMBER_S     );
+	vec3 STAR_COL  = srgbToLinear( STAR_COL_S  );
+
 	vec2 res = vec2( u.resX, u.resY );
 	if ( res.x < 1.0 || res.y < 1.0 ) res = vec2( 1280.0, 720.0 );
 	float aspect = res.x / res.y;
