@@ -137,9 +137,20 @@ void WiredUI_CompositorInit( void )
 	 * seam. Falls back to the physical size when neither is set (dpiScale 1.0). */
 	wui_logical_size( wui_windowRect.widthPx, wui_windowRect.heightPx,
 	                  &wui_windowRect.widthLog, &wui_windowRect.heightLog );
-	wui_windowRect.dpiScale  = wui_windowRect.widthLog > 0
-	                         ? (float) wui_windowRect.widthPx / (float) wui_windowRect.widthLog
-	                         : 1.0f;
+	/* Take the VERTICAL ratio, not the horizontal one. The two only agree when
+	 * the logical size keeps the physical aspect, and on macOS it often does
+	 * not: a 1600x900 request backed by a 2880x1800 drawable gives scaleX 1.80
+	 * against scaleY 2.00. Font size is one scalar, so feeding it the narrower
+	 * ratio set glyphs 10% short of the pixel density they were rasterised
+	 * into — text came out horizontally squeezed with MSDF sampled off its
+	 * intended rate, which reads as furry edges. Type is laid out down the
+	 * page and its rasterisation follows the vertical density, so that is the
+	 * axis to track. */
+	wui_windowRect.dpiScale  = wui_windowRect.heightLog > 0
+	                         ? (float) wui_windowRect.heightPx / (float) wui_windowRect.heightLog
+	                         : ( wui_windowRect.widthLog > 0
+	                           ? (float) wui_windowRect.widthPx / (float) wui_windowRect.widthLog
+	                           : 1.0f );
 	wui_windowRect.generation = 0;
 	wui_windowRect.valid     = qfalse;
 
@@ -192,7 +203,11 @@ void WiredUI_CompositorFrame( int realtimeMs )
 			wui_windowRect.heightPx  = hPx;
 			wui_windowRect.widthLog  = wLog;
 			wui_windowRect.heightLog = hLog;
-			wui_windowRect.dpiScale  = wLog > 0 ? (float) wPx / (float) wLog : 1.0f;
+			/* Vertical ratio — see the rationale at the init-time assignment.
+			 * This is the live path that runs every frame, so a fix applied
+			 * only at init would be overwritten on the first resize. */
+			wui_windowRect.dpiScale  = hLog > 0 ? (float) hPx / (float) hLog
+			                         : ( wLog > 0 ? (float) wPx / (float) wLog : 1.0f );
 			wui_windowRect.generation++;
 		}
 	}
