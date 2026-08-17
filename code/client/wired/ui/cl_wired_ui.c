@@ -3158,6 +3158,37 @@ static void WiredUI_MenuNav_f( void ) {
  * next frame) then shows the gold focus-highlight moved to the hovered item and
  * still exactly one item focused (no second highlight). Scripted-proof
  * affordance like wui_menu_nav; inert unless invoked. */
+/* wui_pointer <x> <y> — plant the cursor at an absolute PHYSICAL-pixel
+ * position and run the genuine hover path, exactly as wui_hover_test does for
+ * a named item. The difference is that this takes raw coordinates, so it can
+ * reach places no itemDef covers — over a transient popup, for instance.
+ *
+ * That was the gap that made the dropdown z-order untestable: the popup could
+ * be opened headless (wui_dropdown_test) but the cursor always stayed at its
+ * boot position, far from it, so no captured frame ever had the two
+ * overlapping and the ordering could not be witnessed either way. */
+static void WiredUI_Pointer_f( void ) {
+	float x, y;
+
+	if ( Cmd_Argc() != 3 ) {
+		Com_Log( SEV_INFO, LOG_CH(ch_ui),
+			"Usage: wui_pointer <x> <y>   (physical pixels)\n" );
+		return;
+	}
+
+	x = atof( Cmd_Argv( 1 ) );
+	y = atof( Cmd_Argv( 2 ) );
+
+	/* Same two steps the item-targeted hover test performs: plant, then run a
+	 * zero-delta move so the Clay hit-test re-resolves at this position. */
+	wui_cursorX = x;
+	wui_cursorY = y;
+	WiredUI_MouseEvent( 0.0f, 0.0f );
+
+	Com_Log( SEV_INFO, LOG_CH(ch_ui),
+		"wui_pointer: cursor at (%.0f,%.0f)\n", wui_cursorX, wui_cursorY );
+}
+
 static void WiredUI_HoverTest_f( void ) {
 	wiredMenuDef_t *menu;
 	wiredItemDef_t *target = NULL;
@@ -3880,6 +3911,7 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	// key event via the same WiredUI_KeyEvent entry CL_KeyEvent uses;
 	// focus <name> walks the active menu's item tree recursively.
 	Cmd_AddCommand( "wui_menu_nav",       WiredUI_MenuNav_f );
+	Cmd_AddCommand( "wui_pointer",        WiredUI_Pointer_f );
 	Cmd_AddCommand( "wui_hover_test",     WiredUI_HoverTest_f );
 	Cmd_AddCommand( "wui_pointer_item",   WiredUI_PointerItem_f );
 	Cmd_AddCommand( "wui_pointer_listbox", WiredUI_PointerListbox_f );
