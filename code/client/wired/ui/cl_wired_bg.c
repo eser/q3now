@@ -143,10 +143,22 @@ static const Clay_Color WUI_BG_V2_PLASMA_COOL    = {  40,  16,   8,  60 };  /* p
  * the background painting AFTER (over) the content — and the opaque underpaint
  * would hide it. A negative zIndex pins every background quad strictly behind
  * the zIndex-0 content root, so the scene is always the backmost layer regardless
- * of emit order. This is the single choke point: all v2 scene layers route
- * through wui_bg_emit_rect, so setting it here fixes SCENE/DIM/loading uniformly.
- * (WUI_BG_SCENE_ZINDEX is defined in cl_wired_bg.h so cl_wired_clay.c's SCENE
- * backdrop emit pins the procedural pass to the same backmost layer.) */
+ * of emit order. (WUI_BG_SCENE_ZINDEX is defined in cl_wired_bg.h so
+ * cl_wired_clay.c's SCENE backdrop emit pins the procedural pass to the same
+ * backmost layer.)
+ *
+ * EVERY background quad has to carry it, not only the v2 layers that route
+ * through wui_bg_emit_rect. The legacy six (base / grid / scanlines / glow_rays /
+ * noise / vignette) open CLAY() inline and used to leave .zIndex at its 0
+ * default. Clay sorts floating roots by zIndex before painting, so those legacy
+ * quads sorted IN FRONT of the entire zIndex -10 v2 stack no matter which order
+ * they were emitted in. With bg_dark and bg_animated both visible — what the
+ * default preset gives a menu opened over attract — the legacy BASE fill is an
+ * opaque full-viewport rgba(8,12,16,255), so it repainted the whole animated
+ * backdrop to near-black and the background read as "not rendering at all". The
+ * v2 quads were always being drawn; they were being drawn underneath an opaque
+ * one. Emit order is the intended painter's order here, so one shared zIndex is
+ * what lets the stable sort preserve it. */
 
 /* Anim state. `grid_drift_t` and `scanline_sweep_t` are written by
  * WUI_AnimTick each frame (LOOP_LINEAR sweep across [0, 1)). The bg
@@ -263,7 +275,8 @@ static void wui_bg_emit_base( float x, float y, float w, float h ) {
 		.floating = {
 			.attachTo    = CLAY_ATTACH_TO_ROOT,
 			.offset      = { x, y },
-			.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP }
+			.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP },
+			.zIndex      = WUI_BG_SCENE_ZINDEX
 		},
 		.backgroundColor = wui_bg_resolve( "bg", WUI_BG_COLOR_BASE )
 	}) {}
@@ -291,7 +304,8 @@ static void wui_bg_emit_grid_pass( float x, float y, float w, float h,
 			.floating = {
 				.attachTo    = CLAY_ATTACH_TO_ROOT,
 				.offset      = { gx, y },
-				.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP }
+				.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP },
+				.zIndex      = WUI_BG_SCENE_ZINDEX
 			},
 			.backgroundColor = col
 		}) {}
@@ -303,7 +317,8 @@ static void wui_bg_emit_grid_pass( float x, float y, float w, float h,
 			.floating = {
 				.attachTo    = CLAY_ATTACH_TO_ROOT,
 				.offset      = { x, gy },
-				.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP }
+				.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP },
+				.zIndex      = WUI_BG_SCENE_ZINDEX
 			},
 			.backgroundColor = col
 		}) {}
@@ -353,7 +368,8 @@ static void wui_bg_emit_scanlines( float x, float y, float w, float h ) {
 		.floating = {
 			.attachTo    = CLAY_ATTACH_TO_ROOT,
 			.offset      = { x, gy },
-			.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP }
+			.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP },
+			.zIndex      = WUI_BG_SCENE_ZINDEX
 		},
 		.backgroundColor = scan
 	}) {}
@@ -376,7 +392,8 @@ static void wui_bg_emit_glow_rays( float x, float y, float w, float h ) {
 			.floating = {
 				.attachTo    = CLAY_ATTACH_TO_ROOT,
 				.offset      = { positions[i][0], positions[i][1] },
-				.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP }
+				.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP },
+				.zIndex      = WUI_BG_SCENE_ZINDEX
 			},
 			.backgroundColor = glow,
 			.cornerRadius    = { side * 0.5f, side * 0.5f, side * 0.5f, side * 0.5f }
@@ -404,7 +421,8 @@ static void wui_bg_emit_noise( float x, float y, float w, float h ) {
 			.floating = {
 				.attachTo    = CLAY_ATTACH_TO_ROOT,
 				.offset      = { x + dx * w, y + dy * h },
-				.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP }
+				.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP },
+				.zIndex      = WUI_BG_SCENE_ZINDEX
 			},
 			.backgroundColor = noise
 		}) {}
@@ -438,7 +456,8 @@ static void wui_bg_emit_vignette( float x, float y, float w, float h ) {
 			.floating = {
 				.attachTo    = CLAY_ATTACH_TO_ROOT,
 				.offset      = { positions[i][0], positions[i][1] },
-				.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP }
+				.attachPoints = { CLAY_ATTACH_POINT_LEFT_TOP, CLAY_ATTACH_POINT_LEFT_TOP },
+				.zIndex      = WUI_BG_SCENE_ZINDEX
 			},
 			.backgroundColor = base,
 			.cornerRadius    = { side * 0.5f, side * 0.5f, side * 0.5f, side * 0.5f }
