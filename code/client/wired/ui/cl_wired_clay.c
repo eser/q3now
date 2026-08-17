@@ -2322,8 +2322,17 @@ static void wui_clay_emit_listbox( const wiredItemDef_t *item,
 	Clay_FloatingAttachToElement attachMode = parentIsContainer
 	                                        ? CLAY_ATTACH_TO_NONE
 	                                        : CLAY_ATTACH_TO_ROOT;
+	/* GROW with an upper bound of the width layout already resolved for this
+	 * item, not an unbounded GROW(0). The box is FLOATING (see the
+	 * floating-cell rationale above), so Clay does not constrain it against
+	 * its parent the way an in-flow child is constrained: an unbounded grow
+	 * let the character and skin lists widen past the panel that contains
+	 * them and paint over the panel beside it. `w` is the parent-resolved
+	 * width, so bounding by it keeps the list inside its own panel while
+	 * still letting it fill that panel. Height keeps the unbounded grow —
+	 * only the visible slice is emitted, so it cannot overflow downward. */
 	Clay_SizingAxis              sizeW      = parentIsContainer
-	                                        ? CLAY_SIZING_GROW( 0 )
+	                                        ? CLAY_SIZING_GROW( 0, w )
 	                                        : CLAY_SIZING_FIXED( w );
 	Clay_SizingAxis              sizeH      = parentIsContainer
 	                                        ? CLAY_SIZING_GROW( 0 )
@@ -2506,9 +2515,18 @@ static void wui_clay_emit_listbox( const wiredItemDef_t *item,
 				_ed = Clay_GetElementData( _eid );
 				if ( _ed.found ) {
 					/* boundingBox.width spans border-to-border; the inner content
-					 * area is inset by borderW on each side. */
+					 * area is inset by borderW on each side.
+					 *
+					 * Adopt it in BOTH directions. This used to widen only
+					 * (`if ( inner > contentW )`), which fixed rows hugging the
+					 * left edge but left the opposite case broken: when Clay
+					 * resolves the box NARROWER than the stale `w` — which is
+					 * what happens once the grow is bounded — the rows kept the
+					 * old wider span and painted past the panel edge onto the
+					 * one beside it. The rendered box is the authority either
+					 * way; `w` is only a starting guess. */
 					float inner = _ed.boundingBox.width - 2.0f * (float) borderW;
-					if ( inner > contentW ) contentW = inner;
+					if ( inner > 1.0f ) contentW = inner;
 				}
 			}
 			int   maxScrollI;
