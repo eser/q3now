@@ -1068,6 +1068,7 @@ void		Info_Print( const char *s );
 
 #include "wired/core/logging/log.h"
 #include "wired/core/logging/log_buffer.h"
+#include "wired/core/logging/playtest.h"
 #include "wired/core/core.h"
 void 		Com_Quit_f( void );
 

@@ -89,6 +89,23 @@ static void signal_handler( int sig )
 
 	WriteCrashLog( sig );
 
+	/* Snapshot the playtest breadcrumb ring before teardown.
+	 *
+	 * Without this a crashed session leaves NO evidence artefact at all: the
+	 * ordinary flush hangs off Com_Shutdown, which a signal never reaches.
+	 * Measured on the arena1->e1m1->arena7 chain, where a nav-bake SIGSEGV
+	 * produced a complete qconsole.jsonl and no playtest trail whatsoever —
+	 * exactly backwards, because the crashed session is the one whose
+	 * timeline someone actually needs.
+	 *
+	 * Placed after WriteCrashLog so the backtrace — the more important
+	 * artefact, and the one on the strictly safer code path — is already on
+	 * disk should this flush itself fault. Writing through the VFS here is
+	 * not async-signal-safe, but this handler already calls
+	 * backtrace_symbols() and SV_Shutdown(); the established posture is
+	 * best-effort evidence capture from a process that is ending anyway. */
+	Playtest_Flush( NULL );
+
 	sprintf( msg, "Signal caught (%d)", sig );
 	VM_Forced_Unload_Start();
 #ifndef HEADLESS

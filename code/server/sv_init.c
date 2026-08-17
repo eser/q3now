@@ -424,6 +424,15 @@ void SV_SpawnServer_Tick( void ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "------ Server Initialization ------\n" );
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "Server: %s\n", mapname );
 
+		/* Playtest lifecycle. Which map a session was on is the first thing a
+		 * "no crash, but what happened?" report needs, so the transition is
+		 * BRACKETED: map_load here, map_loaded when phase 5 reaches SS_GAME.
+		 * An unclosed pair is itself the evidence — it says the session died
+		 * during the transition rather than after it, which is exactly the
+		 * distinction the artefact exists to preserve. */
+		Playtest_SetMap( mapname );
+		Playtest_Emit( PT_EV_MAP_LOAD, "\"phase\":\"p1_teardown\"" );
+
 		Sys_SetStatus( "Initializing server..." );
 
 #ifndef HEADLESS
@@ -708,6 +717,12 @@ void SV_SpawnServer_Tick( void ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_server), "-----------------------------------\n" );
 
 		Sys_SetStatus( "Running map %s", svs.spawn.mapname );
+
+		/* Closes the map_load bracket opened in phase 1. `clients` is the
+		 * configured slot count, not an identity — no player data rides out. */
+		Playtest_EmitFmt( PT_EV_MAP_LOADED, "\"clients\":%d,\"gametype\":%d",
+			sv_maxclients ? sv_maxclients->integer : 0,
+			Cvar_VariableIntegerValue( "g_gametype" ) );
 
 		Com_FrameInit();
 

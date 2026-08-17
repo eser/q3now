@@ -37,6 +37,16 @@
 #define WIRED_BUILD_DATE "unknown"
 #endif
 
+// Source revision (`git describe --always --dirty`) this binary was built
+// from, written by the same _build-stamp target as the id and date above.
+// Carried into the wired_playtest.jsonl envelope's `head` field so an alpha
+// evidence artefact names the exact tree that produced it — a session report
+// that cannot be tied back to a revision is far harder to act on. The
+// fallback keeps a bare / SDK-less compile (no generated header) building.
+#ifndef WIRED_SOURCE_REVISION
+#define WIRED_SOURCE_REVISION "unknown"
+#endif
+
 #define WIRED_BUILD_TU_DATE  ( __DATE__ " " __TIME__ )
 
 // WIRED_BUILD_ID arrives as a bare integer token; stringize it for cvar / printf.

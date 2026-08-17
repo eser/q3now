@@ -178,6 +178,251 @@ if [ "${1:-}" = "--analyze" ]; then
     analyze_contract "$2" "$3" "$4"; exit $?
 fi
 
+# ── playtest evidence analyzer (TASK-120 #3) ─────────────────────────────────
+# The map-race consumer of wired_playtest.jsonl v1. Where analyze_contract
+# above reads the free-text console transcript looking for one crash class,
+# this reads the TYPED artefact and asks whether the session it describes can
+# be reconstructed at all: does every record carry the v1 envelope, is the
+# order intact, did each map in the chain get bracketed by a load/loaded pair,
+# and — the part that makes the artefact trustworthy — does the file's own
+# drop accounting say it is complete?
+#
+# Pure function of (artefact, expected map chain), for the same reason
+# analyze_contract is: --playtest-self-test feeds it synthetic files with no
+# engine, so the gate can be shown to have teeth on a machine with no packs.
+analyze_playtest() {
+    local ART="$1"; shift
+    local WANT_MAPS="$*"
+    local fail=0
+
+    [ -s "$ART" ] || {
+        echo "  FAIL: $ART absent/empty — no playtest evidence was produced"
+        return 1
+    }
+
+    local REPORT
+    REPORT="$(python3 - "$ART" $WANT_MAPS <<'PYEOF' 2>&1
+import json, sys
+
+art, want_maps = sys.argv[1], sys.argv[2:]
+rows, bad = [], 0
+for n, line in enumerate(open(art), 1):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        rows.append(json.loads(line))
+    except ValueError:
+        bad += 1
+        print(f"FAIL: line {n} is not valid JSON")
+
+if bad:
+    print(f"FAIL: {bad} unparseable line(s) — the artefact is not JSONL")
+if not rows:
+    print("FAIL: artefact contains no records")
+    sys.exit(0)
+
+# 1. v1 envelope on EVERY record. This is the promise a consumer is given;
+#    if it does not hold, nothing downstream can rely on anything.
+REQUIRED = ("v", "seq", "t", "sid", "build", "head", "plat", "app", "map", "ev")
+missing = {}
+for r in rows:
+    for k in REQUIRED:
+        if k not in r:
+            missing[k] = missing.get(k, 0) + 1
+for k, n in sorted(missing.items()):
+    print(f"FAIL: envelope field '{k}' missing from {n} record(s)")
+
+# 2. schema version is the one this consumer understands.
+vers = {r.get("v") for r in rows}
+if vers != {1}:
+    print(f"FAIL: expected schema v1 throughout, saw {sorted(vers)}")
+
+# 3. one session, and the ordering guarantee the contract states.
+sids = {r.get("sid") for r in rows}
+if len(sids) != 1:
+    print(f"FAIL: artefact mixes {len(sids)} sessions: {sorted(sids)}")
+
+seqs = [r.get("seq") for r in rows]
+if seqs != sorted(seqs):
+    print("FAIL: seq is not monotonic — the ordering guarantee is broken")
+ts = [r.get("t") for r in rows]
+if ts != sorted(ts):
+    print("FAIL: t is not non-decreasing — timeline is not reconstructible")
+
+# 4. the session opened and closed.
+evs = [r.get("ev") for r in rows]
+if "lifecycle.session_begin" not in evs:
+    print("FAIL: no lifecycle.session_begin — session start is unknown")
+if evs[-1] != "lifecycle.session_end":
+    print(f"FAIL: last record is '{evs[-1]}', want lifecycle.session_end")
+
+# 5. every map in the chain was bracketed load -> loaded. An unclosed
+#    bracket is the signature of dying mid-transition, which is exactly the
+#    distinction this artefact exists to preserve.
+loaded = {r.get("map") for r in rows if r.get("ev") == "lifecycle.map_loaded"}
+for m in want_maps:
+    if m not in loaded:
+        print(f"FAIL: map '{m}' never reached lifecycle.map_loaded")
+
+# 6. the artefact's self-report: is it complete, and does it agree with
+#    what is actually in the file?
+end = rows[-1] if evs[-1] == "lifecycle.session_end" else None
+if end:
+    for k in ("records_written", "seq_first", "seq_last",
+              "dropped_overwritten", "dropped_refused",
+              "ring_capacity", "complete"):
+        if k not in end:
+            print(f"FAIL: session_end lacks drop-accounting field '{k}'")
+    if end.get("dropped_overwritten", 0) or end.get("dropped_refused", 0):
+        print("WARN: session is INCOMPLETE — "
+              f"{end.get('dropped_overwritten')} overwritten, "
+              f"{end.get('dropped_refused')} refused")
+    body = len(rows) - 1
+    if end.get("records_written") != body:
+        print(f"FAIL: session_end claims {end.get('records_written')} records, "
+              f"file carries {body}")
+
+fams = sorted({e.split(".")[0] for e in evs})
+print(f"INFO: {len(rows)} records, families: {', '.join(fams)}")
+print(f"INFO: build={rows[0].get('build')} head={rows[0].get('head')} "
+      f"plat={rows[0].get('plat')} app={rows[0].get('app')}")
+if end:
+    print(f"INFO: complete={end.get('complete')} "
+          f"overwritten={end.get('dropped_overwritten')} "
+          f"refused={end.get('dropped_refused')} "
+          f"capacity={end.get('ring_capacity')}")
+PYEOF
+)"
+
+    printf '%s\n' "$REPORT" | sed 's/^/      /'
+    printf '%s' "$REPORT" | grep -q '^FAIL:' && fail=1
+
+    [ "$fail" -eq 0 ] || return 1
+    return 0
+}
+
+if [ "${1:-}" = "--analyze-playtest" ]; then
+    [ "$#" -ge 2 ] || { echo "usage: $0 --analyze-playtest <artefact> [maps...]"; exit 64; }
+    ART="$2"; shift 2
+    analyze_playtest "$ART" "${*:-$MAP_CHAIN}"; exit $?
+fi
+
+# ── playtest consumer self-test (engine-free, gate-has-teeth) ─────────────────
+# Same discipline as --self-test above: build a clean synthetic artefact, prove
+# the analyzer ACCEPTS it, then break one property at a time and prove it
+# REJECTS each. An evidence gate that cannot reject corrupt evidence would
+# certify every artefact, including the ones that lost records.
+write_playtest_self() {
+    local art="$1" mode="$2"
+    python3 - "$art" "$mode" <<'PYEOF'
+import json, sys
+art, mode = sys.argv[1], sys.argv[2]
+
+def env(seq, t, ev, mapname="arena1", **payload):
+    r = {"v": 1, "seq": seq, "t": t, "sid": "deadbeefcafe0001",
+         "build": "999", "head": "abc1234", "plat": "macos-arm64",
+         "app": "server", "map": mapname, "ev": ev}
+    r.update(payload)
+    return r
+
+rows = [
+    env(0, 10, "lifecycle.session_begin"),
+    env(1, 10, "lifecycle.map_load", phase="p1_teardown"),
+    env(2, 900, "lifecycle.map_loaded", clients=8, gametype=0),
+    env(3, 900, "perf.frame_marker", svtime=450, msec=50, residual=0),
+    env(4, 900, "route.progress", svtime=450, clients=0),
+    env(5, 1200, "death.player", victim=1, attacker=2, mod=22),
+    env(6, 1300, "weapon.fired", attacker=2, victim=1, damage=75, mod=3, sample=16),
+    env(7, 1400, "ai.decision", bot=1, kind="strafejump", p1=1, p2=320),
+    env(8, 2000, "lifecycle.map_load", mapname="e1m1", phase="p1_teardown"),
+    env(9, 3000, "lifecycle.map_loaded", mapname="e1m1", clients=8, gametype=0),
+]
+end = env(10, 3100, "lifecycle.session_end", mapname="e1m1",
+          records_written=10, seq_first=0, seq_last=9,
+          dropped_overwritten=0, dropped_refused=0,
+          ring_capacity=4096, complete=True)
+
+if mode == "no-begin":
+    rows = [r for r in rows if r["ev"] != "lifecycle.session_begin"]
+    end["records_written"] = len(rows)
+elif mode == "seq-scrambled":
+    rows[3]["seq"], rows[4]["seq"] = rows[4]["seq"], rows[3]["seq"]
+    rows[3], rows[4] = rows[4], rows[3]
+    rows[3]["seq"], rows[4]["seq"] = rows[4]["seq"], rows[3]["seq"]
+elif mode == "time-goes-backwards":
+    rows[5]["t"] = 5
+elif mode == "missing-envelope-field":
+    del rows[4]["sid"]
+elif mode == "wrong-schema-version":
+    rows[6]["v"] = 2
+elif mode == "unclosed-map":
+    rows = [r for r in rows if not (r["ev"] == "lifecycle.map_loaded"
+                                    and r["map"] == "e1m1")]
+    end["records_written"] = len(rows)
+elif mode == "no-session-end":
+    end = None
+elif mode == "accounting-mismatch":
+    end["records_written"] = 999
+elif mode == "accounting-field-missing":
+    del end["dropped_overwritten"]
+elif mode == "two-sessions":
+    rows[7]["sid"] = "deadbeefcafe0002"
+elif mode == "corrupt-json":
+    with open(art, "w") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+        f.write("{not json at all\n")
+        f.write(json.dumps(end) + "\n")
+    sys.exit(0)
+elif mode == "empty":
+    open(art, "w").close()
+    sys.exit(0)
+
+with open(art, "w") as f:
+    for r in rows:
+        f.write(json.dumps(r) + "\n")
+    if end is not None:
+        f.write(json.dumps(end) + "\n")
+PYEOF
+}
+
+if [ "${1:-}" = "--playtest-self-test" ]; then
+    echo "==> playtest evidence consumer SELF-TEST (gate-has-teeth, engine-free)"
+    PST="$(mktemp -d -t pt-self-XXXXXX 2>/dev/null || mktemp -d)"
+    trap 'rm -rf "$PST"' EXIT INT TERM
+
+    write_playtest_self "$PST/clean.jsonl" clean
+    if ! analyze_playtest "$PST/clean.jsonl" arena1 e1m1 >"$PST/clean.report" 2>&1; then
+        echo "  FAIL: analyzer rejected a CLEAN artefact"
+        sed 's/^/      /' "$PST/clean.report"
+        exit 1
+    fi
+    echo "  ok   clean                          accepted"
+
+    pt_defects="no-begin seq-scrambled time-goes-backwards missing-envelope-field
+                wrong-schema-version unclosed-map no-session-end accounting-mismatch
+                accounting-field-missing two-sessions corrupt-json empty"
+    pt_fails=0; pt_n=0
+    for d in $pt_defects; do
+        pt_n=$((pt_n+1))
+        write_playtest_self "$PST/$d.jsonl" "$d"
+        if analyze_playtest "$PST/$d.jsonl" arena1 e1m1 >"$PST/$d.report" 2>&1; then
+            echo "  FAIL $d — analyzer ACCEPTED a defective artefact"
+            pt_fails=$((pt_fails+1))
+        else
+            printf '  ok   %-30s rejected\n' "$d"
+        fi
+    done
+
+    if [ "$pt_fails" -eq 0 ]; then
+        echo "==> PLAYTEST SELF-TEST PASS: clean accepted, $pt_n mutations rejected"
+        exit 0
+    fi
+    echo "==> PLAYTEST SELF-TEST FAIL: $pt_fails/$pt_n wrongly accepted"
+    exit 1
+fi
+
 # ── self-test (gate-has-teeth, no engine, no packs, no display) ───────────────
 # Builds a clean synthetic log, asserts the analyzer ACCEPTS it, then mutates it
 # one defect at a time and asserts the analyzer REJECTS each. A gate that cannot

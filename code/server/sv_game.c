@@ -1808,9 +1808,38 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	// trap_WN_Emit*() which triggers a VM syscall to this handler.
 	case G_WIREDNET_EMIT_KILL:
 		WN_EmitKill( args[1], args[2], args[3], VMA(4), VMA(5) );
+		/* Playtest death family. Tapped HERE, at the syscall dispatch, and
+		 * not inside WN_EmitKill: that function early-returns on
+		 * !wn.initialized (wn_events.c:162), which is the normal state of a
+		 * run with no QUIC observer attached — a producer placed inside it
+		 * would be silently dead in exactly the headless sessions this
+		 * artefact is for. Slot NUMBERS only, never names: identity is
+		 * WN_EmitKill's business, not the evidence file's. */
+		Playtest_EmitFmt( PT_EV_DEATH_PLAYER,
+			"\"victim\":%d,\"attacker\":%d,\"mod\":%d",
+			(int)args[2], (int)args[1], (int)args[3] );
 		return 0;
 	case G_WIREDNET_EMIT_DAMAGE:
 		WN_EmitDamage( args[1], args[2], args[3], args[4], VMA(5), VMA(6) );
+		/* Playtest weapon family. `mod` is the means-of-death, i.e. which
+		 * weapon did it, so damage is the honest weapon-use signal.
+		 *
+		 * SAMPLED: a firefight produces damage events far faster than
+		 * deaths, and an unsampled tap here would wrap the ring on combat
+		 * alone and bury the lifecycle records a report needs most. One in
+		 * PLAYTEST_WEAPON_SAMPLE_N keeps the weapon mix visible at bounded
+		 * cost; the sampling is declared in the payload so a consumer never
+		 * mistakes these for a complete damage count. */
+		{
+			static unsigned s_dmgSeen = 0;
+
+			if ( ( s_dmgSeen++ % PLAYTEST_WEAPON_SAMPLE_N ) == 0 ) {
+				Playtest_EmitFmt( PT_EV_WEAPON_FIRED,
+					"\"attacker\":%d,\"victim\":%d,\"damage\":%d,\"mod\":%d,\"sample\":%d",
+					(int)args[1], (int)args[2], (int)args[3], (int)args[4],
+					PLAYTEST_WEAPON_SAMPLE_N );
+			}
+		}
 		return 0;
 	case G_WIREDNET_EMIT_ITEM_PICKUP:
 		WN_EmitItemPickup( args[1], VMA(2), VMA(3) );
@@ -1829,6 +1858,25 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		return 0;
 	case G_WIREDNET_EMIT_BOT_EVENT:
 		WN_EmitBotEvent( args[1], VMA(2), args[3], args[4], VMA(5) );
+		/* Playtest AI family. `event_type` is a short game-authored token
+		 * ("goal", "retreat", ...) — escaped anyway, because it crosses the
+		 * VM boundary and this file does not get to assume it is clean. */
+		{
+			const char *bot_ev = (const char *)VMA(2);
+			char        raw[64];
+			char        esc[64 * 6];
+
+			if ( !bot_ev ) bot_ev = "";
+			/* Bound first, then JSON-escape. Q_strncpyz alone would let a
+			 * quote in the token terminate the string field early and
+			 * corrupt the whole line — JsonEscapeBody is the same escaper
+			 * the file sink uses, so both formats agree on the rules. */
+			Q_strncpyz( raw, bot_ev, sizeof( raw ) );
+			JsonEscapeBody( raw, (int)strlen( raw ), esc, (int)sizeof( esc ) );
+			Playtest_EmitFmt( PT_EV_AI_DECISION,
+				"\"bot\":%d,\"kind\":\"%s\",\"p1\":%d,\"p2\":%d",
+				(int)args[1], esc, (int)args[3], (int)args[4] );
+		}
 		return 0;
 #endif
 
