@@ -34,9 +34,15 @@
 # so a headless run must gate with bare `+wait N` (cmd.c:1287).
 #
 # Usage:   tests/headless-map-transition-zonecheck.sh /path/to/wired-headless
+#          tests/headless-map-transition-zonecheck.sh --repeat N /path/to/wired-headless
 #          tests/headless-map-transition-zonecheck.sh --self-test
 #          tests/headless-map-transition-zonecheck.sh --analyze <qconsole> <stdout> <rc>
 #          tests/headless-map-transition-zonecheck.sh --flag-inventory <binary> [maps...]
+#
+# --repeat N runs the chain N times, each a fresh process with a fresh log, and
+# fails if ANY iteration fails. The class this gate targets is lifecycle/race,
+# which a single run cannot bound: see the "repeat mode" block below for what
+# actually varies between iterations.
 # Exit:    0 PASS   1 FAIL   64 usage   77 SKIP (no binary / no packs)
 #
 # --flag-inventory reuses this script's pack discovery + scratch-home setup to
@@ -59,6 +65,20 @@ MAP_CHAIN="arena1 e1m1 arena7"
 # crash funnel string emitted by log.c:878.
 ZONE_RE='Z_Free: freed a pointer without ZONEID|Z_Free: freed a freed pointer|Z_Free: memory block wrote past end|Z_CheckHeap: block size does not touch the next block|Z_CheckHeap: next block does not have proper back link|Z_CheckHeap: two consecutive free blocks'
 CRASH_RE='Server crashed|Server fatal crashed'
+
+# 🔴 A hard fault is NOT covered by CRASH_RE. When the process takes SIGSEGV/
+# SIGBUS the platform signal handler prints its own backtrace and funnels
+# through a DIFFERENT string — `Signal caught (N)`, at INFO severity, via
+# `----- Server Shutdown (Signal caught (10)) -----`:
+#   code/unix/linux_signals.c:72,88,92   (=== CRASH BACKTRACE / Received signal / Signal caught)
+#   code/win32/win_main.c:855            (Exception Code: <NAME>)
+# None of that is a FATAL record, none of it says "Server crashed", and every
+# map in the chain can already have logged its `Server:` line before the fault
+# lands. A SIGBUS in CM_TraceThroughTree on the first frame of the third map
+# therefore passed all five original checks — the exact lifecycle class this
+# gate exists for, reported green. Matched on BOTH channels because the
+# backtrace goes to stderr while the shutdown line goes to the JSONL sink.
+SIGNAL_RE='CRASH BACKTRACE \(signal|Received signal [0-9]+, exiting|Signal caught \([0-9]+\)|crash log written to|Exception Code:'
 
 # ── analyzer ─────────────────────────────────────────────────────────────────
 # Pure function of (qconsole.jsonl, stdout, rc). Factored out so --self-test can
@@ -111,6 +131,15 @@ PYEOF
     if [ -n "$CHIT" ]; then
         echo "  FAIL: server crash —"
         printf '%s\n' "$CHIT" | sed 's/^/      /'
+        fail=1
+    fi
+
+    # 3b. hard fault: signal handler / structured exception. See SIGNAL_RE.
+    local SIGHIT
+    SIGHIT="$( { cat "$LOG"; [ -f "$OUT" ] && cat "$OUT"; } 2>/dev/null | grep -nE "$SIGNAL_RE" )"
+    if [ -n "$SIGHIT" ]; then
+        echo "  FAIL: process took a fatal signal / structured exception —"
+        printf '%s\n' "$SIGHIT" | head -6 | sed 's/^/      /'
         fail=1
     fi
 
@@ -182,6 +211,11 @@ elif mode=="missing-second":
     rows=[r for r in rows if "e1m1" not in r["msg"]]
 elif mode=="missing-third":
     rows=[r for r in rows if "arena7" not in r["msg"]]
+elif mode=="signal-shutdown":
+    # A hard fault funnels through the shutdown line at INFO severity, AFTER
+    # every map in the chain already logged its `Server:` line. Nothing else
+    # in the log distinguishes it from a clean run.
+    rows.append({"sev":"INFO","cat":"server","msg":"----- Server Shutdown (Signal caught (10)) -----\n"})
 elif mode=="empty":
     rows=[]
 
@@ -191,6 +225,11 @@ PYEOF
     # stdout-channel defect: the crash can surface outside the JSONL sink.
     if [ "$mode" = "stdout-zone" ]; then
         printf 'Server fatal crashed: Z_Free: freed a pointer without ZONEID\n' > "$out"
+    fi
+    # A hard fault writes its backtrace to STDERR only — the JSONL sink never
+    # sees it. Verbatim shape from code/unix/linux_signals.c:72-88.
+    if [ "$mode" = "stdout-signal" ]; then
+        printf '=== CRASH BACKTRACE (signal 10) ===\n0   wired-headless.arm64  0x0 CM_TraceThroughTree + 128\n=== crash log written to /tmp/wired_crash.txt ===\nReceived signal 10, exiting...\n' > "$out"
     fi
 }
 
@@ -206,7 +245,7 @@ if [ "${1:-}" = "--self-test" ]; then
     echo "  ok   clean                        accepted"
 
     # Each defect must be REJECTED. rc-nonzero is checked via the rc argument.
-    defects="zoneid freed-freed past-end checkheap crashed fatal-sev missing-second missing-third empty stdout-zone"
+    defects="zoneid freed-freed past-end checkheap crashed fatal-sev missing-second missing-third empty stdout-zone signal-shutdown stdout-signal"
     fails=0; n=0
     for d in $defects; do
         n=$((n+1))
@@ -243,6 +282,34 @@ FLAG_INVENTORY=0
 if [ "${1:-}" = "--flag-inventory" ]; then
     FLAG_INVENTORY=1
     shift
+fi
+
+# ── repeat mode ──────────────────────────────────────────────────────────────
+# `--repeat N` runs the whole chain N times, each in a FRESH process with a
+# FRESH scratch home, and fails if ANY iteration fails.
+#
+# WHY REPEATS ARE NOT JUST A LOOP: the defect class here is lifecycle/race, not
+# a deterministic assertion. One pass proves nothing about it — the SIGBUS in
+# CM_TraceThroughTree on the first frame after the second transition reproduces
+# INTERMITTENTLY on the same binary and the same map chain. What varies between
+# iterations is the engine's own nondeterminism, not the harness input: each
+# process re-seeds bot/game RNG, re-allocates hunk and zone from a fresh
+# address space (ASLR), re-bakes the navmesh on a background thread whose join
+# point floats against the main thread's map load, and re-runs the async QUIC
+# transport bring-up. The map chain, the cvars and the wait counts are held
+# IDENTICAL on purpose, so a divergence between iteration k and iteration k+1
+# is attributable to engine state lifetime rather than to a changed stimulus.
+#
+# Each iteration is scored by the same analyze_contract() the single-shot mode
+# uses, so a repeat run cannot pass on a weaker gate than a normal run.
+REPEAT=1
+if [ "${1:-}" = "--repeat" ]; then
+    REPEAT="${2:-}"
+    case "$REPEAT" in
+        ''|*[!0-9]*) echo "usage: $0 --repeat <positive-integer> <binary>"; exit 64 ;;
+    esac
+    [ "$REPEAT" -ge 1 ] || { echo "usage: $0 --repeat <positive-integer> <binary>"; exit 64; }
+    shift 2
 fi
 
 # ── product run ──────────────────────────────────────────────────────────────
@@ -336,6 +403,7 @@ fi
 echo "==> headless map-transition zonecheck (#96): $MAP_CHAIN"
 echo "    binary : $HEADLESS"
 echo "    content: $BASE"
+echo "    repeats: $REPEAT"
 
 # com_noHardReboot 1 keeps the watchdog from RELAUNCHING on a crash and masking
 # it (code/unix/unix_main.c:1087-1098). +wait, not +waitForMap (client-only).
@@ -351,10 +419,40 @@ LAUNCH_ARGS=(
 for m in $MAP_CHAIN; do LAUNCH_ARGS+=( +map "$m" +wait 250 ); done
 LAUNCH_ARGS+=( +quit )
 
-RC=0
-( cd "$WD" && exec "$HEADLESS" "${LAUNCH_ARGS[@]}" ) >"$ROOT/stdout" 2>&1 || RC=$?
-
 LOG="$HOME_DIR/qconsole.jsonl"
-analyze_contract "$LOG" "$ROOT/stdout" "$RC" || exit 1
-echo "==> PASS headless map-transition zonecheck (#96 not reproduced on this build)"
+PASSES=0
+FAILED_ITERS=""
+
+i=1
+while [ "$i" -le "$REPEAT" ]; do
+    # Fresh process AND fresh log. `log_file_mode overwrite_synced` already
+    # truncates, but removing the file first makes "the engine never wrote a
+    # log this iteration" distinguishable from "iteration k-1's log survived" —
+    # analyze_contract's first check treats an absent log as a failure, so a
+    # process that dies before opening its sink cannot inherit a stale PASS.
+    rm -f "$LOG"
+    ITER_OUT="$ROOT/stdout.$i"
+
+    RC=0
+    ( cd "$WD" && exec "$HEADLESS" "${LAUNCH_ARGS[@]}" ) >"$ITER_OUT" 2>&1 || RC=$?
+
+    if [ "$REPEAT" -gt 1 ]; then printf '  -- iteration %d/%d --\n' "$i" "$REPEAT"; fi
+    if analyze_contract "$LOG" "$ITER_OUT" "$RC"; then
+        PASSES=$((PASSES + 1))
+    else
+        FAILED_ITERS="$FAILED_ITERS $i"
+        # Keep the evidence for the failing iteration; a later green iteration
+        # must not be able to overwrite the artefact that proves the defect.
+        cp "$LOG" "$ROOT/qconsole.fail.$i.jsonl" 2>/dev/null || true
+    fi
+    i=$((i + 1))
+done
+
+if [ -n "$FAILED_ITERS" ]; then
+    echo "==> FAIL headless map-transition zonecheck: $PASSES/$REPEAT iterations passed"
+    echo "    failing iterations:$FAILED_ITERS"
+    echo "    (re-run with WIRED_KEEP_ARTIFACTS=1 to retain $ROOT)"
+    exit 1
+fi
+echo "==> PASS headless map-transition zonecheck: $PASSES/$REPEAT iterations clean (#96 not reproduced on this build)"
 exit 0
