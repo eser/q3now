@@ -915,11 +915,19 @@ static void CL_KeyDownEvent( int key, unsigned time )
 	/* Attract-state first-input promotion. At CA_DISCONNECTED with no
 	 * catcher set the bg_attract layer is the sole visible surface; the
 	 * first discrete keypress / mouse click brings up the main menu over
-	 * it. ESC is intentionally excluded (acts as a no-op via the ESC
-	 * handler below, which falls through its !KEYCATCH_UI block for
-	 * CA_DISCONNECTED). The console key + screenshot key already
-	 * short-circuited above. Mouse motion is not routed through
-	 * CL_KeyDownEvent, so cursor wobble does not trip this. */
+	 * it. ESC is included: it already closes the menu back to attract, so
+	 * excluding it here made it the one key that could not perform the
+	 * opposite move — the pair reads as a toggle, and a toggle that only
+	 * works one way is just a dead key. The console key + screenshot key
+	 * already short-circuited above. Mouse motion is not routed through
+	 * CL_KeyDownEvent, so cursor wobble does not trip this.
+	 *
+	 * WiredUI_IsHealthy gates the promotion rather than UI_VM_ACTIVE, which
+	 * is a literal 1 and guards nothing. Without it, admitting ESC here
+	 * would shadow the recovery branch in the ESC handler below — the one
+	 * that revives WiredUI from the fullscreen fallback console — because
+	 * this block returns before the handler is ever reached. When the UI is
+	 * dead there is no menu to promote to, so falling through is correct. */
 	/* Two of these conditions used to be wrong in ways that only surface once
 	 * you have actually played a round:
 	 *
@@ -934,11 +942,10 @@ static void CL_KeyDownEvent( int key, unsigned time )
 	 * running" also meant "you loaded a map once, no menu for you". What the
 	 * test is really guarding is not stealing a keypress from a live session,
 	 * and CA_DISCONNECTED above already establishes that. */
-	if ( key != K_ESCAPE
-	  && clientActiveApp->state == CA_DISCONNECTED
+	if ( clientActiveApp->state == CA_DISCONNECTED
 	  && !( Key_GetCatcher() & ( KEYCATCH_UI | KEYCATCH_CGAME | KEYCATCH_MESSAGE ) )
 	  && Con_GetDisplayFrac() <= 0.0f
-	  && UI_VM_ACTIVE ) {
+	  && WiredUI_IsHealthy() ) {
 		S_StopAllSounds();
 		UI_CALL_SET_ACTIVE( UIMENU_MAIN );
 		Key_ClearStates();

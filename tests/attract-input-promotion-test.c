@@ -29,19 +29,27 @@ typedef struct {
 	int   catcherCgame;     /* KEYCATCH_CGAME                       */
 	int   catcherMessage;   /* KEYCATCH_MESSAGE                     */
 	float consoleFrac;      /* Con_GetDisplayFrac(): >0 == on screen */
-	int   uiActive;         /* UI_VM_ACTIVE                         */
+	int   uiHealthy;        /* WiredUI_IsHealthy()                  */
 	int   svRunning;        /* com_sv_running                       */
 } promotionInput_t;
 
 static int ShouldPromote( const promotionInput_t *in )
 {
-	if ( in->isEscape )                 return 0;
+	/* isEscape is deliberately NOT consulted: ESC promotes like any other
+	 * key. It already closes the menu back to attract, so excluding it made
+	 * it the single key that could not perform the opposite move. The pair
+	 * is meant to read as a toggle. */
 	if ( !in->disconnected )            return 0;
 	if ( in->catcherUI )                return 0;
 	if ( in->catcherCgame )             return 0;
 	if ( in->catcherMessage )           return 0;
 	if ( in->consoleFrac > 0.0f )       return 0;   /* on screen, not merely owned */
-	if ( !in->uiActive )                return 0;
+	/* Health, not the old UI_VM_ACTIVE — that macro is a literal 1 and
+	 * guarded nothing. It matters now that ESC is admitted: this block
+	 * returns before the ESC handler runs, so promoting a dead UI would
+	 * shadow the recovery branch that revives WiredUI from the fullscreen
+	 * fallback console. */
+	if ( !in->uiHealthy )               return 0;
 	return 1;                                        /* svRunning deliberately unused */
 }
 
@@ -64,7 +72,7 @@ int main( void )
 	/* Baseline: sitting on attract, nothing owns input. */
 	memset( &in, 0, sizeof( in ) );
 	in.disconnected = 1;
-	in.uiActive     = 1;
+	in.uiHealthy    = 1;
 	Check( "plain attract keypress promotes", ShouldPromote( &in ), 1 );
 
 	/* 🔴 The console regression. Console was opened and closed; the soft close
@@ -92,10 +100,21 @@ int main( void )
 	in.catcherConsole = 0;
 	in.svRunning      = 0;
 
-	/* Conditions that must keep suppressing it. */
+	/* 🔴 ESC is a toggle, not a dead key. Pressing it over attract raises the
+	 * menu; pressing it in the menu drops back to attract. It used to be the
+	 * one key excluded here, which left the return leg working and the
+	 * outbound leg silently doing nothing. */
 	in.isEscape = 1;
-	Check( "escape does not promote", ShouldPromote( &in ), 0 );
-	in.isEscape = 0;
+	Check( "escape promotes like any other key", ShouldPromote( &in ), 1 );
+
+	/* The other half of the toggle: with the menu up, ESC must NOT promote —
+	 * it belongs to the menu's own close path. catcherUI already covers this,
+	 * but pin it with ESC specifically so a future ESC special-case cannot
+	 * reintroduce a promote-on-top-of-the-menu. */
+	in.catcherUI = 1;
+	Check( "escape with menu up does not promote", ShouldPromote( &in ), 0 );
+	in.catcherUI = 0;
+	in.isEscape  = 0;
 
 	in.catcherUI = 1;
 	Check( "menu already up does not promote", ShouldPromote( &in ), 0 );
@@ -113,9 +132,16 @@ int main( void )
 	Check( "in a session does not promote", ShouldPromote( &in ), 0 );
 	in.disconnected = 1;
 
-	in.uiActive = 0;
-	Check( "no UI vm, no promote", ShouldPromote( &in ), 0 );
-	in.uiActive = 1;
+	/* A dead UI has no menu to promote to. This matters more than it reads:
+	 * because this block returns before the ESC handler, promoting here with
+	 * a dead UI would swallow the ESC that is supposed to revive WiredUI from
+	 * the fullscreen fallback console. */
+	in.uiHealthy = 0;
+	Check( "dead UI does not promote", ShouldPromote( &in ), 0 );
+	in.isEscape  = 1;
+	Check( "dead UI leaves escape for recovery", ShouldPromote( &in ), 0 );
+	in.isEscape  = 0;
+	in.uiHealthy = 1;
 
 	if ( failures ) {
 		printf( "==> FAIL: %d case(s)\n", failures );
