@@ -5827,7 +5827,18 @@ void WiredUI_CompositorEmitFrame( void )
 		if ( WiredUI_LayerVisible( WUI_LAYER_BG_DARK ) )
 			WUI_DrawBackgroundLayered( 0.0f, 0.0f, bw, bh, WUI_BG_LAYER_BASE );
 		if ( WiredUI_LayerVisible( WUI_LAYER_BG_ANIMATED ) )
-			WUI_DrawBackgroundLayered( 0.0f, 0.0f, bw, bh, WUI_BG_DEMO_BACKDROP );
+			/* The ANIMATED layer is the procedural SCENE pass (menubg.frag), NOT
+			 * the WUI_BG_DEMO_BACKDROP rect stack. That rect stack was retired
+			 * when the scene became one shader (see WUI_DrawBackgroundScene) —
+			 * but when the background layers were given their own content the
+			 * retired constant was wired in here instead of the live emitter, so
+			 * every `backdrop animated` menu got ~190 near-black Clay rects and
+			 * no animation at all. The rect stack has no clock: sky/fog/floor are
+			 * static bands, and only the 14 embers move, at alpha ~4/255 over a
+			 * #0a0403 underpaint — which is why the composed backdrop measured as
+			 * an empty black screen while the shader that was supposed to draw it
+			 * had zero callers. */
+			WUI_DrawBackgroundScene( 0.0f, 0.0f, bw, bh );
 		if ( wui_clay_menu_scrim )
 			WUI_DrawBackgroundDim( 0.0f, 0.0f, bw, bh );
 		bgCmds = Clay_EndLayout();

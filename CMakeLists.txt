@@ -1926,6 +1926,39 @@ SET_TESTS_PROPERTIES(bg_layer_zorder_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(bg_layer_zorder_test bg_layer_zorder_contract)
 
+# WHICH emitter the ANIMATED background layer reaches. The composed backdrop was
+# rewritten from ~200 Clay rects (WUI_BG_DEMO_BACKDROP) into one procedural pass
+# (menubg.frag, via WUI_DrawBackgroundScene), and the rect stack was left behind
+# as dead code. When the background layers were given their own content, the
+# ANIMATED emit site was wired to the RETIRED constant — both call the same
+# public API, both compile, both dispatch. But the rect stack has no clock: its
+# sky/fog/floor are static bands and only 14 ember quads move, at alpha ~4/255
+# over a near-black underpaint. Every `backdrop animated` menu (preferences plus
+# the ten settings panels that take the same default preset) drew a backdrop that
+# was neither animated nor visible — 0.1% warm coverage against 99.8% once the
+# scene pass is emitted.
+#
+# Nothing at runtime catches it: both paths draw, and the failure is "the screen
+# is dark", not an error. So this reads the production source and requires the
+# ANIMATED arm to reach the scene emitter and the retired constant to have no
+# emitter left. It also pins menubg.frag's sRGB->linear palette decode, whose
+# absence is equally invisible (the backdrop just washes out).
+ADD_EXECUTABLE(bg_animated_emitter_test
+	tests/bg-animated-emitter-test.c
+)
+TARGET_COMPILE_DEFINITIONS(bg_animated_emitter_test PRIVATE
+	WUI_CLAY_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/code/client/wired/ui/cl_wired_clay.c"
+	WUI_BG_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/code/client/wired/ui/cl_wired_bg.c"
+	WUI_BG_HEADER="${CMAKE_CURRENT_SOURCE_DIR}/code/client/wired/ui/cl_wired_bg.h"
+	WUI_MENUBG_SHADER="${CMAKE_CURRENT_SOURCE_DIR}/code/renderervk/shaders/menubg.frag"
+)
+ADD_TEST(NAME bg_animated_emitter_contract COMMAND bg_animated_emitter_test)
+SET_TESTS_PROPERTIES(bg_animated_emitter_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(bg_animated_emitter_test bg_animated_emitter_contract)
+
 # How MUCH the background draws, as opposed to where it sorts. Every layer is a
 # stack of quads whose count is a compile-time literal — the sky is a 64-band
 # gradient, the fog 16, the floor fade 24, plus fixed dot and particle counts —
