@@ -146,8 +146,8 @@ menuDef {
 						radius $radius_md
 						grow 0
 						visible 1
-						cvarTest "ui_mapPoolAction"
-						showCvar { "Add to Pool" }
+						stateTest "ui_mapPoolAction"
+						showState { "Add to Pool" }
 						action { ToggleMapPool }
 					}
 					itemDef {
@@ -168,8 +168,8 @@ menuDef {
 						radius $radius_md
 						grow 0
 						visible 1
-						cvarTest "ui_mapPoolAction"
-						showCvar { "Remove from Pool" }
+						stateTest "ui_mapPoolAction"
+						showState { "Remove from Pool" }
 						action { ToggleMapPool }
 					}
 					itemDef {
@@ -210,8 +210,8 @@ menuDef {
 						radius $radius_md
 						grow 0
 						visible 1
-						cvarTest "ui_favMapAction"
-						showCvar { "Favorite" }
+						stateTest "ui_favMapAction"
+						showState { "Favorite" }
 						action { ToggleFavorite }
 					}
 					itemDef {
@@ -232,8 +232,8 @@ menuDef {
 						radius $radius_md
 						grow 0
 						visible 1
-						cvarTest "ui_favMapAction"
-						showCvar { "Unfavorite" }
+						stateTest "ui_favMapAction"
+						showState { "Unfavorite" }
 						action { ToggleFavorite }
 					}
 				}
@@ -457,8 +457,8 @@ menuDef {
 					font $font_mono 11
 					forecolor $boneDim
 					decoration
-					cvarTest "ui_netGameType"
-					showCvar { 4 5 }
+					stateTest "ui_netGameType"
+					showState { 4 5 }
 					visible 1
 					grow 0
 				}
@@ -473,8 +473,8 @@ menuDef {
 					font $font_sans 13
 					forecolor $bone
 					cvar "g_friendlyfire"
-					cvarTest "ui_netGameType"
-					showCvar { 4 5 }
+					stateTest "ui_netGameType"
+					showState { 4 5 }
 					visible 1
 					grow 0
 				}
@@ -489,8 +489,8 @@ menuDef {
 					font $font_sans 13
 					forecolor $bone
 					cvar "g_teamForceBalance"
-					cvarTest "ui_netGameType"
-					showCvar { 4 5 }
+					stateTest "ui_netGameType"
+					showState { 4 5 }
 					visible 1
 					grow 0
 				}
@@ -505,8 +505,8 @@ menuDef {
 					font $font_sans 13
 					forecolor $bone
 					cvar "g_allowvote"
-					cvarTest "ui_netGameType"
-					showCvar { 4 5 }
+					stateTest "ui_netGameType"
+					showState { 4 5 }
 					visible 1
 					grow 0
 				}
@@ -522,8 +522,8 @@ menuDef {
 					forecolor $bone
 					cvar "g_localTeamPref"
 					cvarFloatList { "Auto" 0 "Red" 1 "Blue" 2 }
-					cvarTest "ui_netGameType"
-					showCvar { 4 5 }
+					stateTest "ui_netGameType"
+					showState { 4 5 }
 					visible 1
 					grow 0
 				}
