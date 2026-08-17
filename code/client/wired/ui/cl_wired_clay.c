@@ -5775,6 +5775,49 @@ void WiredUI_CompositorEmitFrame( void )
 	 * Clay_SetLayoutDimensions inside an open layout bracket would not re-resolve. */
 	WiredUI_ClayFrame( cls.glconfig.vidWidth, cls.glconfig.vidHeight );
 
+	/* (2c) Background layers, in a layout pass of their own, before any panel.
+	 *
+	 * These cannot ride along inside a panel's layout. Each panel opens its own
+	 * Clay_BeginLayout/EndLayout and dispatches that list immediately, so a rect
+	 * emitted into panel N's list is drawn in panel N's turn and nowhere else.
+	 * Attaching the backdrop to the first panel therefore tied it to whichever
+	 * panel happened to be first — always `attract_brand` — with two
+	 * consequences: a menu emitted in a later pass (preferences, any submenu)
+	 * got no backdrop at all, and when a preset hid attract the backdrop
+	 * vanished with the panel that was carrying it. That is exactly the
+	 * "options has no animated background" report.
+	 *
+	 * Its own pass has no such coupling: it is dispatched first, so every panel
+	 * lands on top of it regardless of which panels exist this frame.
+	 *
+	 * Sized from cls.glconfig, the same pair fed to WiredUI_ClayFrame just
+	 * above — Clay's coordinate space here is the physical framebuffer, so with
+	 * r_ext_supersample this is 2560x1440 and not the 1280x720 of the
+	 * screenshot. */
+	if ( WiredUI_LayerVisible( WUI_LAYER_BG_DARK )
+	  || WiredUI_LayerVisible( WUI_LAYER_BG_ANIMATED )
+	  || wui_clay_menu_scrim ) {
+		float                    bw = (float) cls.glconfig.vidWidth;
+		float                    bh = (float) cls.glconfig.vidHeight;
+		Clay_RenderCommandArray  bgCmds;
+		int                      j;
+
+		Clay_BeginLayout();
+		if ( WiredUI_LayerVisible( WUI_LAYER_BG_DARK ) )
+			WUI_DrawBackgroundLayered( 0.0f, 0.0f, bw, bh, WUI_BG_LAYER_BASE );
+		if ( WiredUI_LayerVisible( WUI_LAYER_BG_ANIMATED ) )
+			WUI_DrawBackgroundLayered( 0.0f, 0.0f, bw, bh, WUI_BG_DEMO_BACKDROP );
+		if ( wui_clay_menu_scrim )
+			WUI_DrawBackgroundDim( 0.0f, 0.0f, bw, bh );
+		bgCmds = Clay_EndLayout();
+
+		wui_scissor_depth = 0;
+		for ( j = 0; j < bgCmds.length; j++ ) {
+			Clay_RenderCommand *rc = Clay_RenderCommandArray_Get( &bgCmds, j );
+			if ( rc ) wui_clay_dispatch_command( rc );
+		}
+	}
+
 	/* (3) Per-panel work. */
 	for ( i = 0; i < wui_visible_panel_count; i++ ) {
 		Clay_Vector2          pointer;
@@ -5892,23 +5935,6 @@ void WiredUI_CompositorEmitFrame( void )
 
 		/* (3b) Emit panel + record (id, item, panel) tuples. */
 		Clay_BeginLayout();
-
-		/* Background layers first, inside the open layout — CLAY() needs one,
-		 * and emitting from the panel-collection walk above silently dropped
-		 * every rect because no layout was open yet. Guarded to the first
-		 * panel so a multi-panel layer does not repaint the backdrop per
-		 * panel. */
-		if ( i == 0 ) {
-			float bw = (float) cls.glconfig.vidWidth;
-			float bh = (float) cls.glconfig.vidHeight;
-			if ( WiredUI_LayerVisible( WUI_LAYER_BG_DARK ) )
-				WUI_DrawBackgroundLayered( 0.0f, 0.0f, bw, bh, WUI_BG_LAYER_BASE );
-			if ( WiredUI_LayerVisible( WUI_LAYER_BG_ANIMATED ) )
-				WUI_DrawBackgroundLayered( 0.0f, 0.0f, bw, bh,
-					WUI_BG_DEMO_BACKDROP & ~WUI_BG_LAYER_BASE );
-			if ( wui_clay_menu_scrim )
-				WUI_DrawBackgroundDim( 0.0f, 0.0f, bw, bh );
-		}
 
 		wui_clay_emit_panel( menu );
 		cmds = Clay_EndLayout();
