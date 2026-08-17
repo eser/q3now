@@ -1926,6 +1926,28 @@ SET_TESTS_PROPERTIES(bg_layer_zorder_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(bg_layer_zorder_test bg_layer_zorder_contract)
 
+# How MUCH the background draws, as opposed to where it sorts. Every layer is a
+# stack of quads whose count is a compile-time literal — the sky is a 64-band
+# gradient, the fog 16, the floor fade 24, plus fixed dot and particle counts —
+# and the composed ANIMATED preset comes to ~194 quads a frame. Raising one of
+# those literals, or adding another band stack, costs frame time and produces no
+# runtime complaint whatsoever: the frame just draws more. This reads the
+# production constants and holds the composed total to a budget, with a separate
+# bound on the sky because a gradient is the easiest layer to quietly enlarge.
+ADD_EXECUTABLE(bg_emit_budget_test
+	tests/bg-emit-budget-test.c
+)
+TARGET_COMPILE_DEFINITIONS(bg_emit_budget_test PRIVATE
+	WUI_BG_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/code/client/wired/ui/cl_wired_bg.c"
+	WUI_BG_HEADER="${CMAKE_CURRENT_SOURCE_DIR}/code/client/wired/ui/cl_wired_bg.h"
+)
+ADD_TEST(NAME bg_emit_budget_contract COMMAND bg_emit_budget_test)
+SET_TESTS_PROPERTIES(bg_emit_budget_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(bg_emit_budget_test bg_emit_budget_contract)
+
 # Re-arming a cached anim id. `if ( id == 0 )` cannot tell a live id from one
 # WUI_AnimStopAll wiped — the pool is cleared but the caller's tracker still
 # holds the old number — so the re-arm never fires and the value it drove stays
