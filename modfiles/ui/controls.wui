@@ -944,7 +944,7 @@ menuDef {
 	}
 
 	onOpen {
-		setcvar "ui_settingsSection" "controls"
+		setstate ui_settingsSection controls
 	}
 	onESC {
 		close

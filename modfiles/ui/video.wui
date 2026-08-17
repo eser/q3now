@@ -421,7 +421,7 @@ menuDef {
 	}
 
 	onOpen {
-		setcvar "ui_settingsSection" "video"
+		setstate ui_settingsSection video
 	}
 	onESC {
 		close

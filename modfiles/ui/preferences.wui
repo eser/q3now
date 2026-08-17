@@ -161,6 +161,6 @@ menuDef {
 		QW_SETTINGS_BOTTOMBAR("click to toggle")
 	}
 
-	onOpen { setcvar "ui_settingsSection" "preferences" }
+	onOpen { setstate ui_settingsSection preferences }
 	onESC  { close }
 }

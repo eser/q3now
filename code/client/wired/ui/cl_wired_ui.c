@@ -167,6 +167,12 @@ static const wiredUiStateDefault_t wui_uiStateDefaults[] = {
 	{ "ui_selectedMod", "" },
 	{ "ui_confirmText", "" },
 	{ "ui_confirmAction", "" },
+	/* Which settings category is open. Store state, not a cvar: it is
+	 * meaningless to persist across sessions or to set from the console, and as
+	 * a cvar it never got created at all — `setcvar` in the seven target menus'
+	 * onOpen blocks wrote nothing, so `active ui_settingsSection` matched no row
+	 * and the rail stayed stuck on the first tab whichever one was open. */
+	{ "ui_settingsSection", "sound" },
 	{ "ui_voteTimelimit", "20" },
 	{ "ui_voteScorelimit", "0" },
 	{ "ui_botCount", "0" },
@@ -235,6 +241,11 @@ static qboolean WiredUI_IsPersistedStateKey( const char *key ) {
 	  || !Q_stricmp( key, "ui_selectedServerName" )
 	  || !Q_stricmp( key, "ui_selectedDemo" )
 	  || !Q_stricmp( key, "ui_joinPasswordError" ) ) {
+		return qfalse;
+	}
+	if ( !Q_stricmp( key, "ui_settingsSection" ) ) {
+		/* Reopening the settings menu should land on its own default tab, not
+		 * on whatever was open when the game was last closed. */
 		return qfalse;
 	}
 	if ( !Q_stricmp( key, "ui_palette_mode" )

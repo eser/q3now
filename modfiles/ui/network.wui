@@ -159,6 +159,6 @@ menuDef {
 		QW_SETTINGS_BOTTOMBAR("left/right to adjust")
 	}
 
-	onOpen { setcvar "ui_settingsSection" "network" }
+	onOpen { setstate ui_settingsSection network }
 	onESC  { close }
 }
