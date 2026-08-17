@@ -3597,8 +3597,8 @@ void WiredUI_LuaInit( void ) {
 	WiredAttract_LuaInit();   /* registers attract.* global    */
 }
 
-#ifdef _DEBUG
 static void WiredUI_DropdownTest_f( void );   /* defined after WiredUI_FindItemByName */
+#ifdef _DEBUG
 static void WiredUI_ScoresTest_f( void );      /* defined alongside DropdownTest_f      */
 #endif
 
@@ -3832,13 +3832,21 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 	// to capture the "Press a key..." visual state.
 	Cmd_AddCommand( "wui_capture_key", WiredUI_CaptureKey_f );
 
-#ifdef _DEBUG
 	// Dev/test: open a multi-select dropdown popup non-interactively so a
-	// headless smoke can pixel-verify the floating panel render (the
-	// interactive path needs a mouse click). Drives the SAME singleton open
-	// state as the click handler via WiredUI_OpenMultiDropdown — adds no new
-	// rendering logic, only a state-set hook. Removed in release builds.
+	// headless run can pixel-verify the floating panel render (the interactive
+	// path needs a mouse click). Drives the SAME singleton open state as the
+	// click handler via WiredUI_OpenMultiDropdown — adds no new rendering
+	// logic, only a state-set hook.
+	//
+	// Registered in RELEASE too, deliberately. While it was _DEBUG-only, the
+	// dropdown's z-order could not be measured on the binary that ships: every
+	// headless probe ran with the popup closed, so the sub-pass returned
+	// early and each attempted fix was verified against a code path that never
+	// drew anything. That is the GAME-DATA.md §4 "_DEBUG-only functionality is
+	// invisible in release" trap, and it cost several rounds of guessing.
 	Cmd_AddCommand( "wui_dropdown_test", WiredUI_DropdownTest_f );
+
+#ifdef _DEBUG
 
 	// Dev/test: drive the cgame scoreboard-hold (+scores) non-interactively so
 	// a headless smoke can pixel-verify the V2 scoreboard chrome. The +scores
@@ -6260,7 +6268,6 @@ static wiredItemDef_t *WiredUI_FindItemByName( wiredMenuDef_t *menu, const char 
 	return NULL;
 }
 
-#ifdef _DEBUG
 /* the deep item-by-name walk this test hook needs is already provided by
  * wui_find_item_recursive (defined above, always compiled) — menu->items[]
  * holds only TOP-LEVEL children, so the real controls live nested in
@@ -6337,6 +6344,7 @@ static void WiredUI_DropdownTest_f( void ) {
  * restages it into wiredHud->showScores each frame, flipping the gametype
  * scoreboard menu visible via the engine name-gate. Drives existing cgame
  * state only — no VM-memory poke, no new render logic. _DEBUG-only. */
+#ifdef _DEBUG
 static void WiredUI_ScoresTest_f( void ) {
 	qboolean down = qtrue;
 
