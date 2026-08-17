@@ -71,8 +71,19 @@ const char *WUI_BgPresetName( wuiBgPreset_t preset );
 
 /* The frame evaluation. `hasMenu` is false when no menu is up at all (bare
  * attract), in which case the preset is ignored and attract runs alone.
- * `isLoading` forces the composed backdrop: a map load shows the scene behind
- * its progress panel regardless of which menu was on top when it started. */
+ *
+ * `isLoading` forces the composed backdrop and is tested BEFORE `hasMenu`,
+ * because during a load hasMenu is always false: CL_MapLoading drains the menu
+ * stack (KEYCATCH_UI must be 0 at CA_LOADING) and the loading panel lives on
+ * WUI_LAYER_LOADING rather than in the stack. Behind the !hasMenu early-out
+ * the loading branch was dead code in production, and the loading screen drew
+ * over bare attract with no backdrop at all.
+ *
+ * `isLoading` means "the loading panel is up", not "state == CA_LOADING": the
+ * caller passes loading_policy_isActive(), the same predicate that decides
+ * whether WUI_LAYER_LOADING draws, so the backdrop spans the whole
+ * CONNECTING..PRIMED stretch the user reads as one load rather than the single
+ * state in the middle of it. */
 void WUI_BgPresetEval( wuiBgPreset_t preset, qboolean hasMenu,
                        qboolean isLoading, wuiBgLayerState_t *out );
 

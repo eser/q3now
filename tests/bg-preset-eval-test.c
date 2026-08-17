@@ -13,6 +13,16 @@
 // Evaluating from the stack top every frame has no write to skip: after a pop
 // the parent's own declaration is simply asked again. That property is what
 // the sequence case below pins.
+//
+// The second thing pinned here is the LOADING screen, and it is the case an
+// earlier version of this file got wrong by testing a shape production never
+// produces. Its two loading cases both passed hasMenu=qtrue; a real load never
+// has a menu, because CL_MapLoading drains the stack before it starts. Every
+// frame of every load is hasMenu=qfalse + isLoading=qtrue, which went untested,
+// and behind the !hasMenu early-out the isLoading branch was unreachable — the
+// loading screen drew over bare attract with no backdrop at all. A test whose
+// inputs cannot occur cannot catch anything, so the cases below use the shape
+// the engine actually passes.
 
 #include <stdio.h>
 #include <string.h>
@@ -106,6 +116,112 @@ int main( void )
 
 	WUI_BgPresetEval( WUI_BG_PRESET_DIM, qtrue, qtrue, &s );
 	CheckState( "loading overrides dim", &s, 1, 1, 0, 1, 0 );
+
+	/* ── 🔴 loading with NO menu: the only shape this ever has ─────── */
+
+	/* The two cases above pass hasMenu=qtrue, which never happens during a
+	 * real load and is why they went on passing while the loading screen drew
+	 * on bare attract. CL_MapLoading calls WiredUI_CloseAllMenus() before the
+	 * load — it has to, or a surviving stack re-asserts KEYCATCH_UI and trips
+	 * the cgame's "KEYCATCH_UI is 0 at CA_LOADING" invariant — and that drain
+	 * empties the stack AND sets the root to UIMENU_NONE. So every frame of
+	 * every load arrives here as hasMenu=qfalse, isLoading=qtrue.
+	 *
+	 * Measured on this exact combination before the fix (map arena1, release
+	 * build, WIRED_BGPROBE in wui_clay_resolve_layer_states):
+	 *
+	 *   state=6(CA_LOADING) isLoading=1 top=<null> dark=0 anim=0 attract=1/p0
+	 *   bgCmds=SKIPPED (no bg layer visible)
+	 *
+	 * and after:
+	 *
+	 *   state=6(CA_LOADING) isLoading=1 top=<null> dark=1 anim=1 attract=0/p1
+	 *   bgCmds=190
+	 *
+	 * The fix is purely one of ORDER — isLoading is asked before !hasMenu.
+	 * Swapping the two branches back makes this case, and only this case,
+	 * fail. */
+	WUI_BgPresetEval( WUI_BG_PRESET_ANIMATED, qfalse, qtrue, &s );
+	CheckState( "loading with no menu: composed backdrop", &s, 1, 1, 0, 1, 0 );
+
+	/* The preset argument is dead during a load whatever it holds — the value
+	 * left over from the menu that launched the map must not leak through.
+	 * INVISIBLE is the one that matters: it is what `main` declares, so it is
+	 * the stale value a real load actually carries, and it is the one preset
+	 * whose own answer (attract visible, no backdrop) is exactly the broken
+	 * behaviour measured above. */
+	{
+		int           i;
+		wuiBgLayerState_t want;
+		int           ok = 1;
+
+		WUI_BgPresetEval( WUI_BG_PRESET_ANIMATED, qfalse, qtrue, &want );
+		for ( i = 0; i < WUI_BG_PRESET_COUNT; i++ ) {
+			WUI_BgPresetEval( (wuiBgPreset_t) i, qfalse, qtrue, &s );
+			if ( memcmp( &s, &want, sizeof( s ) ) != 0 ) ok = 0;
+			WUI_BgPresetEval( (wuiBgPreset_t) i, qtrue,  qtrue, &s );
+			if ( memcmp( &s, &want, sizeof( s ) ) != 0 ) ok = 0;
+		}
+		CheckInt( "loading ignores preset and hasMenu alike", ok, 1 );
+	}
+
+	/* Attract must be hidden AND paused behind the loading screen. An attract
+	 * reel still advancing behind an opaque backdrop burns a demo playback for
+	 * pixels nobody sees, and the reel would be mid-slide when the map lands. */
+	WUI_BgPresetEval( WUI_BG_PRESET_INVISIBLE, qfalse, qtrue, &s );
+	CheckInt( "loading hides attract", !s.attractVisible, 1 );
+	CheckInt( "loading pauses attract", s.attractPaused, 1 );
+
+	/* Nothing scrims the loading screen: the composed backdrop is the
+	 * loading look, not a dimmed something-else. */
+	CheckInt( "loading is never scrimmed", !s.menuScrim, 1 );
+
+	/* A load with no menu must differ from bare attract with no menu — the
+	 * assertion that isLoading is actually consulted on this path rather than
+	 * being shadowed by the !hasMenu early-out, which is the whole defect. */
+	{
+		wuiBgLayerState_t bare, loading;
+
+		WUI_BgPresetEval( WUI_BG_PRESET_INVISIBLE, qfalse, qfalse, &bare );
+		WUI_BgPresetEval( WUI_BG_PRESET_INVISIBLE, qfalse, qtrue,  &loading );
+
+		CheckInt( "no-menu load differs from no-menu attract",
+			memcmp( &bare, &loading, sizeof( bare ) ) != 0, 1 );
+	}
+
+	/* The whole load, state by state. loading_policy_isActive() answers qtrue
+	 * for CONNECTING / CHALLENGING / CONNECTED / LOADING / PRIMED, and the
+	 * caller passes that same predicate as isLoading — so the backdrop must be
+	 * identical across the run rather than appearing only in the middle of it.
+	 * The earlier caller derived isLoading from `state == CA_LOADING` alone,
+	 * which left CONNECTING and PRIMED (measured: bgCmds=SKIPPED at state=3
+	 * and state=7) showing the loading panel over bare attract. */
+	{
+		wuiBgLayerState_t seq[ 5 ];
+		int i, ok = 1;
+
+		for ( i = 0; i < 5; i++ )
+			WUI_BgPresetEval( WUI_BG_PRESET_INVISIBLE, qfalse, qtrue, &seq[ i ] );
+		for ( i = 1; i < 5; i++ )
+			if ( memcmp( &seq[ 0 ], &seq[ i ], sizeof( seq[ 0 ] ) ) != 0 ) ok = 0;
+
+		CheckInt( "backdrop is stable across the whole load", ok, 1 );
+		CheckInt( "and it is the composed one",
+			seq[ 0 ].darkVisible && seq[ 0 ].animatedVisible, 1 );
+	}
+
+	/* Leaving the load restores bare attract with nothing carried over — the
+	 * loading backdrop must not outlive the load it belonged to. */
+	{
+		wuiBgLayerState_t coldBare, afterLoad;
+
+		WUI_BgPresetEval( WUI_BG_PRESET_INVISIBLE, qfalse, qfalse, &coldBare );
+		WUI_BgPresetEval( WUI_BG_PRESET_INVISIBLE, qfalse, qtrue,  &s );
+		WUI_BgPresetEval( WUI_BG_PRESET_INVISIBLE, qfalse, qfalse, &afterLoad );
+
+		CheckInt( "load leaves nothing behind",
+			memcmp( &coldBare, &afterLoad, sizeof( coldBare ) ) == 0, 1 );
+	}
 
 	/* ── 🔴 the regression this design exists to make impossible ───── */
 

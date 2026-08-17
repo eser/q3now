@@ -101,23 +101,38 @@ void WUI_BgPresetEval( wuiBgPreset_t preset, qboolean hasMenu,
 {
 	if ( !out ) return;
 
-	/* No menu at all — bare attract. The preset argument is whatever the last
-	 * menu happened to hold and is deliberately ignored, so a stale value can
-	 * never leak into the no-menu case. */
+	/* A map load owns the backdrop, and it is asked FIRST — before the no-menu
+	 * case, not after it.
+	 *
+	 * Ordering these the other way round is what left the loading screen on
+	 * bare attract with no backdrop at all. CL_MapLoading calls
+	 * WiredUI_CloseAllMenus() before the load — it must, or a surviving stack
+	 * re-asserts KEYCATCH_UI on the next frame and trips the cgame's
+	 * "KEYCATCH_UI is 0 at CA_LOADING" invariant. That drain empties the stack
+	 * AND sets the root to UIMENU_NONE, so WiredUI_GetActiveMenu() returns
+	 * NULL and hasMenu is ALWAYS false while a map loads. An isLoading branch
+	 * sitting behind the !hasMenu early-out is therefore unreachable in
+	 * production: it can only fire for a caller that has a menu and a load at
+	 * once, which the drain makes impossible.
+	 *
+	 * The loading panel is not a menu-stack entry — it lives on its own layer
+	 * (WUI_LAYER_LOADING, above the world viewport, below the menu). That is
+	 * exactly why "is a menu up" is the wrong question to ask ahead of "is a
+	 * map loading": the thing that needs the backdrop is not a menu. */
+	if ( isLoading ) {
+		*out = wui_bg_preset_table[ WUI_BG_PRESET_ANIMATED ].state;
+		return;
+	}
+
+	/* No menu and no load — bare attract. The preset argument is whatever the
+	 * last menu happened to hold and is deliberately ignored, so a stale value
+	 * can never leak into the no-menu case. */
 	if ( !hasMenu ) {
 		out->darkVisible     = qfalse;
 		out->animatedVisible = qfalse;
 		out->attractVisible  = qtrue;
 		out->attractPaused   = qfalse;
 		out->menuScrim       = qfalse;
-		return;
-	}
-
-	/* A map load owns the backdrop regardless of which menu was on top when
-	 * it started: the loading panel is drawn over the composed scene, and the
-	 * menu that launched the load is gone by then anyway. */
-	if ( isLoading ) {
-		*out = wui_bg_preset_table[ WUI_BG_PRESET_ANIMATED ].state;
 		return;
 	}
 
