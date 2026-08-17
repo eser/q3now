@@ -25,14 +25,21 @@
 /* Live theme token table lookup (defined in cl_wired_parse.c). */
 extern const char *WiredToken_Find( const char *name );
 
-/* Set outColor RGB from a theme token (alpha preserved by caller), falling
- * back to the passed cyan literal so the focus ring stays theme-driven and
- * matches the menu focuscolor default (also $primary_cyan). */
+/* Set outColor RGB from a theme token (alpha preserved by caller) so the focus
+ * ring stays theme-driven and matches the menu focuscolor default (also
+ * $accent — see WiredUI_ParseMenu).
+ *
+ * FIX 2026-08-17: this read $primary_cyan, a v1 token no v2 accent overlay
+ * rewrites, so the keyboard focus ring stayed cyan under every accent. Worse,
+ * the menu focuscolor default it claims to match had already been repointed at
+ * $accent, so the two drifted apart: a menu that authored no focuscolor drew an
+ * amber wash behind a cyan ring. Read $accent and fall back to the shipped
+ * amber default. */
 static void wui_widget_focus_ring_color( vec4_t outColor ) {
-	const char *v = WiredToken_Find( "primary_cyan" );
+	const char *v = WiredToken_Find( "accent" );
 	unsigned    r, g, b;
-	/* baked $primary_cyan #00b4d8 fallback */
-	outColor[0] = 0.0f; outColor[1] = 0.706f; outColor[2] = 0.847f; outColor[3] = 1.0f;
+	/* baked $accent #f4a03a fallback */
+	outColor[0] = 0.957f; outColor[1] = 0.627f; outColor[2] = 0.227f; outColor[3] = 1.0f;
 	if ( v && v[0] == '#' && ( strlen( v ) == 7 || strlen( v ) == 9 )
 	     && sscanf( v + 1, "%2x%2x%2x", &r, &g, &b ) == 3 ) {
 		outColor[0] = (float) r / 255.0f;
@@ -210,13 +217,13 @@ qboolean WiredUI_FocusRingFor( const wiredMenuDef_t *panel,
 		if ( panel ) {
 			Vector4Copy( panel->focuscolor, outColor );
 		} else {
-			/* accent cyan ($primary_cyan), theme-driven; was off-theme amber */
+			/* theme accent ($accent), theme-driven */
 			wui_widget_focus_ring_color( outColor );
 		}
 		/* focuscolor may be authored as {0,0,0,0}; give a sane default so the
 		 * ring is visible even on menus that never set focuscolor. */
 		if ( outColor[3] <= 0.0f ) {
-			/* accent cyan ($primary_cyan), theme-driven; was off-theme amber */
+			/* theme accent ($accent), theme-driven */
 			wui_widget_focus_ring_color( outColor );
 		}
 	}

@@ -25,3 +25,8 @@ token demoArchB             "rgba(26,12,8,0.5)"
 token vignette              "rgba(0,0,0,0.55)"
 token vignetteHard          "rgba(0,0,0,0.85)"
 token grain                 "rgba(0,0,0,0.25)"
+
+// Loading-screen structural rules — derived from $line / $lineBright so the
+// backdrop grid and divider stay legible against $ink in this mode.
+token loading_grid_line     "rgba(42,37,32,0.55)"
+token loading_divider       "rgba(58,50,42,0.50)"

@@ -24,3 +24,8 @@ token demoArchB             "rgba(106,74,48,0.5)"
 token vignette              "rgba(60,40,20,0.35)"
 token vignetteHard          "rgba(40,28,12,0.55)"
 token grain                 "rgba(60,40,20,0.15)"
+
+// Loading-screen structural rules — light-mode $line / $lineBright. Without
+// these the grid kept its dark-mode navy and vanished against the pale $ink.
+token loading_grid_line     "rgba(168,158,138,0.55)"
+token loading_divider       "rgba(134,121,106,0.50)"

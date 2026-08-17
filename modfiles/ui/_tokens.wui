@@ -236,5 +236,29 @@ token attract_ink_lo        "#8a827a"   // 0.54 0.51 0.48 1  (dimmer tertiary te
 token team_red_text         "rgba(1.0,0.85,0.85,0.95)"   // red-team player name tint
 token team_blue_text        "rgba(0.85,0.85,1.0,0.95)"   // blue-team player name tint
 
-// Loading-screen background grid rows (faint cyan-family rules, ~23×).
-token loading_grid_line     "rgba(0.12,0.22,0.30,0.18)"
+// ── Loading screen (ScreenLoading) ──────────────────────────────────
+// v1→v2 colour migration, 2026-08-17. These were untokenised literals in
+// ui/loading_screen.wui baked to the v1 cyan family (#00b4d8 / 0.12 0.22 0.30),
+// so the loading screen stayed cyan under every ui_palette_accent while the rest
+// of the UI followed the accent. qw-screens.jsx ScreenLoading (the canonical v2
+// artboard) draws this screen entirely in P.amber / P.bone / P.boneDim / P.line,
+// i.e. the accent plus the mode-driven surface tokens — there is no v1 cyan and
+// no per-screen palette in the v2 design.
+//
+// Each ui/themes/<accent>/_tokens.wui overrides the four accent-derived entries
+// below; the structural rules ride $line, which the MODE overlay drives, so the
+// grid inverts correctly in light mode instead of staying a dark-mode navy.
+
+// Faint horizontal rules across the backdrop (~23×). Rides the mode-driven
+// $line surface token rather than an accent wash: in the v2 artboard these read
+// as structure (P.line), not as accent decoration.
+token loading_grid_line     "rgba(42,37,32,0.55)"
+// Two low-alpha corner washes behind the panels. Accent-derived, boot default
+// amber (244,160,58); each accent overlay rewrites it.
+token loading_glow          "rgba(244,160,58,0.05)"
+// Vertical divider: dim segments top/bottom, full-accent segment in the middle.
+token loading_divider       "rgba(58,50,42,0.50)"
+token loading_divider_hi    "rgba(244,160,58,0.90)"
+// Overall progress-bar fill. Solid accent (the v2 bars panel fills with P.amber).
+token loading_bar_fill      "rgba(244,160,58,1.0)"
+token loading_bar_track     "rgba(255,255,255,0.04)"

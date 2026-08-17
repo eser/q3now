@@ -4,3 +4,7 @@ token accentDim             "#2a6a78"
 token accentSoft            "#308898"
 // Low-alpha accent wash — equipped weapon-carousel slot FILL (see amber/_tokens.wui).
 token accentWash            "rgba(70,196,216,0.34)"
+// Loading-screen accent-derived tints (see base ui/_tokens.wui).
+token loading_glow          "rgba(70,196,216,0.05)"
+token loading_divider_hi    "rgba(70,196,216,0.90)"
+token loading_bar_fill      "rgba(70,196,216,1.0)"
