@@ -104,7 +104,7 @@ menuDef {
 				padding 0.006 0
 
 				QW_BUTTON_BLOCK("btn_resume",   "Resume",      $accent,  { close })
-				QW_BUTTON_BLOCK("btn_options",  "Options",     $bone,    { open "preferences" scene })
+				QW_BUTTON_BLOCK("btn_options",  "Options",     $bone,    { open "sound" scene })
 				QW_BUTTON_BLOCK("btn_callvote", "Call Vote",   $bone,    { open "callvote" dim })
 				QW_BUTTON_BLOCK("btn_leave",    "Leave Match", $boneDim, { exec "disconnect" })
 				QW_BUTTON_BLOCK("btn_quit",     "Quit",        $boneDim, { exec "quit" })
