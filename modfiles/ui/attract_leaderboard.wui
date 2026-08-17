@@ -38,6 +38,8 @@ menuDef {
 	// ── header: TOP / TIMES (offset-stacked) + map stamp ─────────────
 	itemDef {
 		name "lb_header"
+		stateTest "ui_menuUp"
+		hideState { 1 }
 		type container
 		position absolute
 		top 8vh
@@ -72,6 +74,8 @@ menuDef {
 	// rule gives the poster grid. No nested flex without sizing → no collapse.
 	itemDef {
 		name "lb_row1"
+		stateTest "ui_menuUp"
+		hideState { 1 }
 		type container
 		position absolute
 		left 6vw
@@ -88,6 +92,8 @@ menuDef {
 	}
 	itemDef {
 		name "lb_row2"
+		stateTest "ui_menuUp"
+		hideState { 1 }
 		type container
 		position absolute
 		left 6vw
@@ -104,6 +110,8 @@ menuDef {
 	}
 	itemDef {
 		name "lb_row3"
+		stateTest "ui_menuUp"
+		hideState { 1 }
 		type container
 		position absolute
 		left 6vw
@@ -120,6 +128,8 @@ menuDef {
 	}
 	itemDef {
 		name "lb_row4"
+		stateTest "ui_menuUp"
+		hideState { 1 }
 		type container
 		position absolute
 		left 6vw
@@ -136,6 +146,8 @@ menuDef {
 	}
 	itemDef {
 		name "lb_row5"
+		stateTest "ui_menuUp"
+		hideState { 1 }
 		type container
 		position absolute
 		left 6vw
