@@ -1139,7 +1139,12 @@ static const wuiPropDef_t s_itemProps[] = {
 	 * (`background $token` / `background rgba(...)` / `background #hex`)
 	 * from legacy shader-name form (`background "gfx/path"`). */
 	WP_S( "cvar",             wiredItemDef_t, cvar             ),
+	/* cvarTest reads a CVAR, stateTest reads a UI-STATE STORE key. Separate
+	 * fields on purpose: the two namespaces can hold the same name meaning
+	 * different things, so an item declares which one it is testing rather
+	 * than leaving a resolver to guess. Pairs with setcvar / setstate. */
 	WP_S( "cvarTest",         wiredItemDef_t, cvarTest         ),
+	WP_S( "stateTest",        wiredItemDef_t, stateTest        ),
 	WP_S( "populateCallback", wiredItemDef_t, populateCallback ),
 	WP_S( "asset_model",      wiredItemDef_t, assetModel       ),
 	WP_S( "asset_shader",     wiredItemDef_t, assetShader      ),
@@ -1915,9 +1920,20 @@ static qboolean WiredUI_ParseItemProperties( int handle,
 			}
 			if ( !WiredPC_CaptureBracedScript( handle, item->execKeyAction, WIRED_MAX_SCRIPT_LEN ) ) continue;
 		}
-		else if ( !Q_stricmp( token.string, "showCvar" ) || !Q_stricmp( token.string, "hideCvar" ) ) {
-			char *dest    = !Q_stricmp( token.string, "showCvar" ) ? item->showCvar  : item->hideCvar;
-			int destSize  = !Q_stricmp( token.string, "showCvar" ) ? sizeof( item->showCvar ) : sizeof( item->hideCvar );
+		/* showCvar/hideCvar match against a CVAR (paired with cvarTest);
+		 * showState/hideState match against a UI-STATE STORE key (paired with
+		 * stateTest). Four fields, no overlap — the same name can exist in both
+		 * namespaces meaning different things, so the .wui declares which. */
+		else if ( !Q_stricmp( token.string, "showCvar" )  || !Q_stricmp( token.string, "hideCvar" )
+		       || !Q_stricmp( token.string, "showState" ) || !Q_stricmp( token.string, "hideState" ) ) {
+			qboolean isState = ( !Q_stricmp( token.string, "showState" )
+			                  || !Q_stricmp( token.string, "hideState" ) );
+			qboolean isShow  = ( !Q_stricmp( token.string, "showCvar" )
+			                  || !Q_stricmp( token.string, "showState" ) );
+			char *dest   = isState ? ( isShow ? item->showState : item->hideState )
+			                       : ( isShow ? item->showCvar  : item->hideCvar  );
+			int destSize = isState ? ( isShow ? (int) sizeof( item->showState ) : (int) sizeof( item->hideState ) )
+			                       : ( isShow ? (int) sizeof( item->showCvar  ) : (int) sizeof( item->hideCvar  ) );
 			if ( !WiredPC_CaptureBracedScript( handle, dest, destSize ) ) continue;
 		}
 		// ── flex container keywords ──────────────────────────────────

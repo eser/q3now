@@ -473,8 +473,19 @@ typedef struct wiredItemDef_s {
 	qboolean        visible;
 	qboolean        decoration;
 	char            cvarTest[64];
+	/* stateTest names a UI-STATE STORE key; cvarTest names a CVAR. Two fields,
+	 * not two spellings of one: a store key and a cvar of the same name are
+	 * different things, and an item must say which it means. Exactly one of the
+	 * pair is used per item — whichever the .wui declared. */
+	char            stateTest[64];
 	char            showCvar[256];
 	char            hideCvar[256];
+	/* Store-key counterparts of showCvar/hideCvar. Separate fields for the same
+	 * reason stateTest is separate from cvarTest: a value list matched against
+	 * a store key and one matched against a cvar are different tests, and the
+	 * .wui says which. */
+	char            showState[256];
+	char            hideState[256];
 	char            enableCvar[256];        // v6: enable when cvarTest matches
 	char            disableCvar[256];       // v6: disable when cvarTest matches
 	int             ownerdraw;
