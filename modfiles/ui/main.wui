@@ -108,7 +108,7 @@ menuDef {
 				QW_MENU_ITEM("menu_join",     "join",     "JOIN BATTLE",  "2,148 live",           { open "servers" scene })
 				QW_MENU_ITEM("menu_host",     "host",     "HOST A MATCH", "configure · invite",   { open "startserver" scene })
 				QW_MENU_ITEM("menu_demos",    "demos",    "DEMOS",        "watch · replay",        { open "demos" scene })
-				QW_MENU_ITEM("menu_options",  "options",  "OPTIONS",      "configure",            { open "preferences" scene })
+				QW_MENU_ITEM("menu_options",  "options",  "OPTIONS",      "configure",            { open "sound" scene })
 				QW_MENU_ITEM("menu_quit",     "quit",     "QUIT",         "exit to shell",        { exec "quit" })
 			}
 
