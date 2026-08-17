@@ -5682,6 +5682,11 @@ static void wui_clay_resolve_layer_states( void )
 	WUI_BgPresetEval( top ? top->bgPreset : WUI_BG_PRESET_ANIMATED,
 	                  top ? qtrue : qfalse, isLoading, &bg );
 
+	/* Publish "a menu is up" for .wui gating. One writer, derived from the same
+	 * stack top the presets read, so it cannot drift out of sync the way seven
+	 * scattered onOpen writes did. The attract wordmark hides on it. */
+	WiredUI_StateSetString( "ui_menuUp", top ? "1" : "0" );
+
 	wui_clay_menu_scrim  = bg.menuScrim;
 	wui_clay_scrim_drawn    = qfalse;
 	wui_clay_dropdown_drawn = qfalse;

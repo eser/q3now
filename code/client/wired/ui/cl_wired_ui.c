@@ -167,6 +167,11 @@ static const wiredUiStateDefault_t wui_uiStateDefaults[] = {
 	{ "ui_selectedMod", "" },
 	{ "ui_confirmText", "" },
 	{ "ui_confirmAction", "" },
+	/* Whether a real menu is up over the attract reel. Published by the engine
+	 * every frame (single writer, derived from the menu stack) so .wui items
+	 * can gate on it with hideCvar — the attract wordmark uses it to step
+	 * aside for the main menu's own hero instead of overprinting it. */
+	{ "ui_menuUp", "0" },
 	/* Which settings category is open. Store state, not a cvar: it is
 	 * meaningless to persist across sessions or to set from the console, and as
 	 * a cvar it never got created at all — `setcvar` in the seven target menus'
@@ -241,6 +246,11 @@ static qboolean WiredUI_IsPersistedStateKey( const char *key ) {
 	  || !Q_stricmp( key, "ui_selectedServerName" )
 	  || !Q_stricmp( key, "ui_selectedDemo" )
 	  || !Q_stricmp( key, "ui_joinPasswordError" ) ) {
+		return qfalse;
+	}
+	if ( !Q_stricmp( key, "ui_menuUp" ) ) {
+		/* Derived from the menu stack every frame; persisting it would restore
+		 * a stale answer for one frame at boot. */
 		return qfalse;
 	}
 	if ( !Q_stricmp( key, "ui_settingsSection" ) ) {
@@ -1003,16 +1013,38 @@ qboolean WiredUI_StateListContainsValue( const char *list, const char *value ) {
 
 
 qboolean WiredUI_ItemVisibleByCvarRules( const wiredItemDef_t *item ) {
+	/* cvarTest reads the CVAR SYSTEM ONLY.
+	 *
+	 * It used to go through WiredUI_StateGetString, which checks the UI-state
+	 * store first and only falls back to cvars — so a key registered in the
+	 * store silently shadowed the cvar of the same name, and an item saying
+	 * `cvarTest` could be reading either. Splitting the two makes each keyword
+	 * mean exactly one namespace. */
 	if ( item->cvarTest[0] ) {
 		char testBuf[256];
 
-		WiredUI_StateGetString( item->cvarTest, testBuf, sizeof( testBuf ) );
+		Cvar_VariableStringBuffer( item->cvarTest, testBuf, sizeof( testBuf ) );
 
 		if ( item->showCvar[0] ) {
 			if ( !WiredUI_StateListContainsValue( item->showCvar, testBuf ) ) return qfalse;
 		}
 		if ( item->hideCvar[0] ) {
 			if ( WiredUI_StateListContainsValue( item->hideCvar, testBuf ) ) return qfalse;
+		}
+	}
+
+	/* stateTest reads the UI-STATE STORE ONLY — the counterpart of setstate,
+	 * as cvarTest is the counterpart of setcvar. */
+	if ( item->stateTest[0] ) {
+		char testBuf[256];
+
+		WiredUI_StateGetString( item->stateTest, testBuf, sizeof( testBuf ) );
+
+		if ( item->showState[0] ) {
+			if ( !WiredUI_StateListContainsValue( item->showState, testBuf ) ) return qfalse;
+		}
+		if ( item->hideState[0] ) {
+			if ( WiredUI_StateListContainsValue( item->hideState, testBuf ) ) return qfalse;
 		}
 	}
 
