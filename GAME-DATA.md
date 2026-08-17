@@ -151,6 +151,17 @@ Two related traps, both of which have cost real debugging time:
   that "found nothing" on release found nothing because nothing could be found.
   Check with `strings <binary> | grep -c '<the assertion text>'` before trusting
   a green result.
+- **Screenshots always land in `$WIRED_BASE/screenshots/`** —
+  `~/wired/q3now-preview/base/screenshots/`, no matter which directory the
+  engine was launched from. The `screenshot` command logs a path relative to
+  `fs_homepath` (`Screenshot saved as screenshots/<stamp>.png`), which reads
+  like a cwd-relative path and is not one. Go straight to the fixed location;
+  do not go hunting for it with `find`. Two ways this has cost real time:
+  reading a truncated `ls | head` as an empty directory and concluding the
+  write had failed, and treating the "saved" line as proof a file exists — it
+  is printed without checking `FS_WriteFile`'s result
+  (`renderervk/tr_init.c:1164`), so it says the write was *attempted*, not that
+  it landed. Stat the file.
 
 ---
 
