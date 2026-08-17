@@ -2495,7 +2495,25 @@ static void wui_clay_emit_listbox( const wiredItemDef_t *item,
 			 * it and one fewer row is visible. */
 			qboolean hasHeader = ( item->columnHeaderCount > 0 );
 			float    headerH   = hasHeader ? rowH : 0.0f;
-			int   visibleRows = rowH > 0.0f ? (int)( ( h - headerH ) / rowH ) : 0;
+			/* Row count comes from the RENDERED height, not the legacy rect.
+			 * In the flex path Clay grows the box to fill its parent, so `h`
+			 * is only a starting guess — on the start-server map list Clay
+			 * resolved 888px while `h` still said 403, and the list drew 9
+			 * rows in a box with space for 22, leaving most of it empty down
+			 * to the Clear Pool button. Same previous-frame bounding box the
+			 * width already trusts, so the two axes now agree on which
+			 * geometry is authoritative. */
+			float contentH    = h;
+			{
+				Clay_ElementId  _hid; Clay_ElementData _hd;
+				_hid.id = clayId;
+				_hd = Clay_GetElementData( _hid );
+				if ( _hd.found ) {
+					float innerH = _hd.boundingBox.height - 2.0f * (float) borderW;
+					if ( innerH > 1.0f ) contentH = innerH;
+				}
+			}
+			int   visibleRows = rowH > 0.0f ? (int)( ( contentH - headerH ) / rowH ) : 0;
 			float contentW    = w;
 			int   firstVis, lastVis;
 

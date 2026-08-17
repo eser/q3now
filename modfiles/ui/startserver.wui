@@ -89,6 +89,13 @@ menuDef {
 					name "maplist"
 					type 6
 					rect 0 0 1 0.50
+					// GROW on both axes so the list fills the column exactly like
+					// the map preview above it. PERCENT 1 was not enough: the
+					// listbox emits FLOATING, and a percentage resolves against
+					// the legacy rect rather than the box Clay actually gives
+					// the parent, so it stayed at its `columns` pixel span while
+					// the preview filled the panel.
+					width GROW
 					height GROW
 					font $font_mono 12
 					forecolor $bone
