@@ -1899,6 +1899,33 @@ SET_TESTS_PROPERTIES(bg_preset_eval_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(bg_preset_eval_test bg_preset_eval_contract)
 
+# Background z-plane pinning. Every background quad is a Clay floating
+# attach-to-root element, so Clay sorts each one as its own tree root by zIndex
+# and only preserves emit order within a single zIndex. The v2 layers routed
+# through wui_bg_emit_rect and carried WUI_BG_SCENE_ZINDEX; the legacy six
+# opened CLAY() inline and left .zIndex at its 0 default, so the opaque legacy
+# base fill — emitted FIRST — sorted to the FRONT of the whole -10 stack and
+# repainted the animated backdrop to near-black. ~190 quads drew every frame
+# underneath one opaque quad, which reads as "the background does not render".
+#
+# Nothing at runtime can catch that: the zIndex is a literal at each call site,
+# a mis-pinned quad still draws, and the result is a picture rather than an
+# error. So this reads the production source and requires every `.floating`
+# block in it to name the constant.
+ADD_EXECUTABLE(bg_layer_zorder_test
+	tests/bg-layer-zorder-test.c
+)
+TARGET_COMPILE_DEFINITIONS(bg_layer_zorder_test PRIVATE
+	WUI_BG_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/code/client/wired/ui/cl_wired_bg.c"
+	WUI_BG_HEADER="${CMAKE_CURRENT_SOURCE_DIR}/code/client/wired/ui/cl_wired_bg.h"
+)
+ADD_TEST(NAME bg_layer_zorder_contract COMMAND bg_layer_zorder_test)
+SET_TESTS_PROPERTIES(bg_layer_zorder_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(bg_layer_zorder_test bg_layer_zorder_contract)
+
 # Re-arming a cached anim id. `if ( id == 0 )` cannot tell a live id from one
 # WUI_AnimStopAll wiped — the pool is cleared but the caller's tracker still
 # holds the old number — so the re-arm never fires and the value it drove stays
