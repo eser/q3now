@@ -55,10 +55,20 @@ menuDef {
 	}
 
 	// ── wordmark (oversized, offset-stacked QUAKE / WIRED) ───────────
+	//
+	// Hidden while a menu is up. main.wui draws its OWN hero wordmark in the
+	// same corner, and `backdrop dim` deliberately leaves the reel visible
+	// underneath, so both were painting "QUAKE WIRED" over each other — two
+	// typographic hierarchies competing in one screen. The scrim cannot
+	// separate them: both are foreground text. Standing the reel's wordmark
+	// down leaves the menu one clear identity, and the reel keeps its role as
+	// the moving backdrop plus its right-hand cards and bottom strip.
 	itemDef {
 		name "brand_title"
 		type container
 		position absolute
+		stateTest "ui_menuUp"
+		hideState { 1 }
 		top 20vh
 		left 7vw
 		width 80vw
