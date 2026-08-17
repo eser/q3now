@@ -1,54 +1,77 @@
 {
-  "_doc": "V2_HUD_Active DARK regions JSON (dispatch 5.28 finale). Mockup-anchored rects (qw-screens.jsx ScreenHUD 1041-1346), tightened to element bounds, cross-checked vs tests/visual/baselines/v2_hud_active_dark_cyan.png at 1440x900. HUD-region-only verdict: gating_regions_only=true makes global metrics informational (BG-confounded over the live arena); the 4 bg_* regions are gating:false; only the 11 HUD-element regions gate. Per-region ssim_threshold calibrated to the measured fixed-viewpoint floor across the 3 DARK configs (amber/cyan/toxic) at measured-min x ~0.95 (V1 dispatch 5.18 Eser-ratified per-region variance Option B), floored at the 0.20 absolute floor. Regions clearing the 0.45 region default carry NO override (top_scoreboard_bar, scoreboard_overlay). ammo_readout + crosshair measure below the 0.20 floor (real fidelity gaps, deltaE-confirmed colour divergence) and are FLAGGED — NOT rubber-stamped: they retain the 0.45 default and FAIL pending a follow-up fix dispatch (crosshair colour/size is already a deferred bucket item; ammo_readout layout/colour divergence). deltaE2000 left at the region default 35 (V1 pattern — no per-region deltaE). Calibration applied with --allow-threshold-up (downward calibration mechanically trips vcompare's threshold-up guard; authorized by the dispatch's explicit V1-5.18-ratified downward-calibration instruction; each value within measured-floor+buffer, no rubber-stamp). threshold_pct/fuzz_pct/global_threshold_pct are legacy vdiff fields ignored by vcompare.",
+  "_doc": "V2_HUD_Active regions (mode-agnostic fallback; the _dark / _light files take precedence when present). RE-AUTHORED against the SHIPPED `classic` HUD (2026-08-17). The previous revision was authored against the `modern` HUD variant, which commit 2a397bf3 deleted; its rects described a layout the engine no longer draws. Every rect below is MEASURED from the engine, not derived from the mockup: an ink bounding-box pass over a HUD-on / HUD-off capture pair (same session, same pinned viewpoint) at 1440x900 returned exactly five clusters — 28,760,276,104 (health+armor), 1246,760,166,104 (ammo), 480,18,480,44 (scoreboard bar), 1393,19,23,109 (kill-feed accent stripe), 1325,18,28,11 (telemetry). Nothing else. See `ink_check` below for why SSIM no longer gates.",
+
+  "_ink_check": "Every gating region is required to contain engine ink, measured by differencing impl.png against impl_nohud.png (vcompare --impl-nohud; the capture script takes both shots in one session). A region drawing 0% ink cannot fail an SSIM comparison — it scores background against background — so four regions in the previous revision were recorded PASS while the engine drew nothing in them at all (kill_feed 0.3653, holdables_strip 0.5086, weapon_carousel 0.3245, scoreboard_overlay 0.6058, all at 0.000% ink). That is a false green, and it is now a hard error rather than a pass.",
+
+  "_ssim_not_gating": "SSIM against the mockup is RECORDED BUT NOT GATED, and this is a measurement, not a concession. With every region correctly anchored and ink-verified (9-91% ink), SSIM measured 0.168-0.279 for the four content-bearing panels. Three control regions containing NO HUD on either side measured 0.405, 0.621 and 0.634 — HIGHER than every real HUD region. Under SSIM-against-this-mockup, drawing the HUD LOWERS the score: the baseline is a flat vector artboard over a smooth gradient, the impl is a live 3D arena, and SSIM is a local-structure metric that collapses on the background disagreement everywhere regardless of HUD fidelity. No threshold can separate 'the HUD regressed' from 'the arena is textured' when absence outscores presence. Gating on it would either rubber-stamp (thresholds under 0.17) or fail permanently. The structural fix is an ENGINE-BLESSED baseline — a previous engine capture rather than the mockup — which is a separate decision recorded for Eser. Until then the mockup remains the design reference and SSIM/deltaE stay as recorded audit-trail numbers.",
 
   "global_threshold_pct": 5.0,
   "fuzz_pct": 12.0,
   "gating_regions_only": true,
+  "pixel_metrics_gated": false,
+  "pixel_metrics_ungated_reason": "Measured 2026-08-17 at engine-native anchors with ink verified 9-91%: SSIM 0.168-0.279 for the four content-bearing panels, while three control regions containing NO HUD on either side scored 0.405/0.621/0.634. Absence outscores presence, so the metric cannot separate a HUD regression from the flat-artboard-vs-live-3D-arena background disagreement. Recorded as audit-trail numbers; the verdict rests on the ink check until an engine-blessed baseline replaces the mockup.",
 
   "regions": [
-    { "name": "top_scoreboard_bar",     "x": 480, "y":  18, "w": 480, "h":  37, "threshold_pct": 10.0,
-      "rationale": "leader|timer|runner-up grid, top:18, centered 480..960; pad8+8 + DisplayText22 = 37. Measured dark-min 0.457 — clears the 0.45 region default; NO override (gates at 0.45)." },
+    { "name": "top_scoreboard_bar", "x": 480, "y": 18, "w": 480, "h": 44,
+      "threshold_pct": 10.0,
+      "rationale": "Leader | timer | runner-up bar. qw_hud_scoreboard_bar.wui: top 2vh, left 33.33vw, width 33.33vw, height 4.9vh = 480,18,480,44 at 1440x900 — confirmed by the measured ink cluster at exactly 480,18,480,44. This is the one region whose engine position still matches the mockup. Measured ink 18.2% (panel chrome + the gametime glyph; leader/runner-up cells are blank in single-player, which is correct per the widget's own note)." },
 
-    { "name": "top_right_telemetry",    "x":1303, "y":  18, "w": 113, "h":  30, "ssim_threshold": 0.21, "threshold_pct": 10.0,
-      "rationale": "FPS/MS pair, top:18, right:24, content ~113x30. Measured dark-min 0.229; calibrated 0.21 (=0.229*0.95). Small mono-digit region; cross-renderer rasterization floor." },
+    { "name": "top_right_telemetry", "x": 1320, "y": 14, "w": 100, "h": 22,
+      "threshold_pct": 10.0,
+      "rationale": "FPS + ms readout. qw_hud_telemetry.wui places fps at x0.940 and netstats at x0.978, both y0.020, right-aligned. Measured ink cluster 1325,18,28,11; the rect is widened to 1320,14,100,22 to cover the fps digits, the ms suffix and the ping number as one unit. Was 1303,18,113,30 — close, but authored from the mockup rather than from the elements. Measured ink 9.1% (small mono digits over a large-ish rect)." },
 
-    { "name": "kill_feed",              "x":  24, "y":  80, "w": 380, "h": 150, "ssim_threshold": 0.27, "threshold_pct": 10.0,
-      "rationale": "feed messages, top:80, left:24, maxWidth:380. Measured dark-min 0.286; calibrated 0.27 (=0.286*0.95). DYNAMIC-CONTENT: mockup shows a full 5-message feed; single-player capture is sparse/empty — gates that the panel (accent bars, layout) renders correctly when sparse, NOT full-feed parity (deltaE 13.8 confirms colour correct)." },
+    { "name": "health_panel", "x": 28, "y": 760, "w": 137, "h": 104,
+      "threshold_pct": 10.0,
+      "rationale": "HEALTH panel, bottom-left. qw_hud_health_panel.wui: left 1.94vw, bottom 4vh, 9.5vw x 11.56vh = 28,760,137,104. Was 28,778,172,86 — right position, wrong extent (the mockup panel is shorter and wider than the engine's). Measured ink 40.7%." },
 
-    { "name": "health_panel",           "x":  28, "y": 778, "w": 172, "h":  86, "ssim_threshold": 0.25, "threshold_pct": 10.0,
-      "rationale": "HEALTH bottom-left, left:28, bottom:36. Measured dark-min 0.271; calibrated 0.25 (=0.271*0.95). clip-path notch corner stylization absent in engine (renders plain rect) — accepted floor pending shader work." },
+    { "name": "armor_panel", "x": 167, "y": 760, "w": 137, "h": 104,
+      "threshold_pct": 10.0,
+      "rationale": "ARMOR panel — bottom-LEFT, immediately right of health. qw_hud_armor_panel.wui: left 11.6vw, bottom 4vh, 9.5vw x 11.56vh = 167,760,137,104. The previous rect (1240,778) was the MOCKUP's bottom-right mirror position and is a different widget's territory in the shipped HUD: it measured 44.3% ink, which looked healthy but was the AMMO panel bleeding into it. A region can be wrong while reading non-empty — anchoring must be verified against the widget, not just against the ink floor. Measured ink at the correct rect: 90.8%." },
 
-    { "name": "armor_panel",            "x":1240, "y": 778, "w": 172, "h":  86, "ssim_threshold": 0.26, "threshold_pct": 10.0,
-      "rationale": "ARMOR bottom-right mirror, right:28, bottom:36. Measured dark-min 0.279; calibrated 0.26 (=0.279*0.95). armor stat 0 at arena1 spawn; clip-path mirror corner absent (plain rect)." },
+    { "name": "ammo_readout", "x": 1246, "y": 760, "w": 166, "h": 104,
+      "threshold_pct": 10.0,
+      "rationale": "Ammo block (weapon tag, value, gauge, icon) — bottom-RIGHT. qw_hud_ammo_readout.wui: right 1.94vw, bottom 4vh, 11.5vw x 11.56vh = 1246,760,166,104; confirmed by the measured ink cluster at exactly 1246,760,166,104. The previous rect (640,716, bottom-centre) was the mockup position and measured 0.000% ink. The widget's own header records that the bottom-centre variant was tried in the engine and REVERTED because it collided with the weapon bar — so the mockup layout is the one that lost, and the region was gating the loser. Measured ink 50.7%." },
 
-    { "name": "holdables_strip",        "x":1262, "y": 710, "w": 150, "h":  46, "ssim_threshold": 0.36, "threshold_pct": 10.0,
-      "rationale": "holdables right:28, bottom:144, 3*46+2*6=150. Measured dark-min 0.383; calibrated 0.36 (=0.383*0.95). Player owns 0 holdables at spawn (empty render)." },
+    { "name": "kill_feed", "x": 1036, "y": 27, "w": 380, "h": 162,
+      "gating": false,
+      "threshold_pct": 10.0,
+      "rationale": "NON-GATING. Two independent reasons. (1) MOVED: qw_hud_kill_feed.wui was relocated top-left -> top-RIGHT (top 3vh, right 1.67vw, 26.39vw x 18vh = 1036,27,380,162); the old rect at 24,80 measured 0.000% ink. (2) CONTENT IS EVENT-DRIVEN: rows bind hud.feed.<N>.text, staged only by obituary events (cl_wired_ui_hud_state.c:196-217). At a no-combat spawn all five rows are blank and the region contains only the accent stripe — 0.333% ink, below the 0.5% floor. Gating it would require the capture to stage a kill, which the harness cannot do deterministically today. Rect corrected so the region is measured in the right place when that becomes possible." },
 
-    { "name": "weapon_carousel",        "x": 438, "y": 792, "w": 564, "h":  72, "ssim_threshold": 0.20, "threshold_pct": 10.0,
-      "rationale": "bottom-center, 8*56+RL68+8*6=564, centered 438..1002, raised RL top 792. Measured dark-min 0.211; calibrated 0.20 (=0.211*0.95, AT the 0.20 absolute floor — BORDERLINE). 9-weapon icon detail vs mockup is a low-but-above-floor cross-renderer match; the 5.25 placeholder-overlap artifact is resolved by the tight rect (carousel right edge 1002 = placeholder left edge)." },
+    { "name": "holdables_strip", "x": 1369, "y": 342, "w": 66, "h": 41,
+      "gating": false,
+      "threshold_pct": 10.0,
+      "rationale": "NON-GATING. Two independent reasons. (1) MOVED: qw_hud_holdables_strip.wui is anchored CENTER_RIGHT at rect 0.951 0.38 0.046 0.046 = 1369,342,66,41 (Phase D moved holdables to the right edge, above the powerup stack); the old rect at 1262,710 measured 0.043% ink. (2) INVENTORY-CONDITIONAL: the holdablelist element loops over OWNED holdables (cl_wired_hud_elem_holdablelist.c HoldableListSetup; count = owned), and the player owns none at the arena1 spawn, so it correctly draws nothing. Empty here is the right render, not a defect — but a region that is always empty must not be allowed to PASS, so it is non-gating rather than exempted." },
 
-    { "name": "ammo_readout",           "x": 640, "y": 716, "w": 160, "h":  56, "threshold_pct": 10.0,
-      "rationale": "FLAGGED REAL FIDELITY GAP — NOT calibrated, gates at the 0.45 default and FAILS. Mockup: '◆ ROCKET LAUNCHER ◆' label + DisplayText40 '88', bottom:128, centered. The rect is correctly mockup-anchored (mockup '88' bbox x643..793 y721..764 fits inside), but the engine renders its ammo '88' ~75px lower / ~30px right / ~2x taller — a real hudElement LAYOUT divergence no rect can reconcile. Measured dark-min 0.117 << 0.20 absolute floor (SSIM-only FAIL; deltaE ~30.5 is elevated vs ~7.7 for well-matched regions and corroborates the divergence, but PASSES its 35 threshold). Fix is engine/widget work (out of dispatch-5.28 0-engine-LoC scope) -> follow-up fix dispatch." },
+    { "name": "weapon_carousel", "x": 654, "y": 684, "w": 132, "h": 96,
+      "gating": false,
+      "threshold_pct": 10.0,
+      "rationale": "NON-GATING — the widget is CORRECT and the emptiness is by design. cl_wired_hud_elem_weaponlist.c:259-277 gates the carousel on the weapon-select timer: weaponSelectTime <= 0 ('never switched') draws nothing, and dt > WLIST_SHOW_TIME + WLIST_FADE_TIME (1250+400ms) draws nothing 'during normal play'. It is a transient selection indicator, vanilla Q3 behaviour, not a persistent element — so a capture that never switches weapons sees 0.000% ink and that is the correct result. Rect re-anchored to the engine's BOTTOM_CENTER 0.5,0.80,0.071,0.071 (=720,720 centre, 102x64) with margin, so that if the capture is ever taught to trigger a switch and pin the fade window, the region already measures the right place. Gating it today would require timing the 1650ms window deterministically." },
 
-    { "name": "scoreboard_overlay",     "x": 270, "y": 140, "w": 900, "h": 195, "threshold_pct": 10.0,
-      "rationale": "TAB-hold board, top:140, centered 270..1170, header+columns+4rows+footer ~195. Measured dark-min 0.484 — clears the 0.45 region default; NO override (gates at 0.45). DYNAMIC-CONTENT resolved by rect tightening (380->195 tall excludes the empty lower rows; 0.40->0.48); gates the board chrome (frame/brackets/header/columns)." },
+    { "name": "scoreboard_overlay", "x": 270, "y": 140, "w": 900, "h": 195,
+      "gating": false,
+      "threshold_pct": 10.0,
+      "rationale": "NON-GATING — the widget IS NOT SHIPPED. classic.wui comments out `#include ui/widgets/qw_hud_scoreboard_overlay.wui` (chain 6.x S1): the always-on nested copy covered screen-centre during play and was removed in favour of the standalone ingame_scoreboard_* menus, which the engine shows only on +scores / TAB-hold. Measured 0.000% ink while recorded PASS at SSIM 0.6058 — the single worst false green in the previous revision, the best-scoring gating region in the table while drawing literally nothing. Kept as a non-gating placeholder because the TAB-hold board is real and a future capture mode could hold +scores; the rect is left at the mockup's, unverified, since there is no engine render to measure it against." },
 
-    { "name": "crosshair",              "x": 696, "y": 426, "w":  48, "h":  48, "gating": false, "threshold_pct": 10.0,
-      "rationale": "EXTRACTED to the procedural-crosshair-system subsystem (dispatch 6.0 S0). The static-PNG crosshair (which renders 0px here — a crosshair-content-PNG-specific issue, see chain 5.31) is being replaced by a PROCEDURAL solid-color quad/ring reticle with its own future gate. gating:false = extraction to a separate subsystem, NOT a rubber-stamp — the V2 HUD-layout gate now evaluates the non-crosshair regions only." },
+    { "name": "weapon_placeholder", "x": 1002, "y": 588, "w": 326, "h": 264,
+      "gating": false,
+      "threshold_pct": 10.0,
+      "rationale": "NON-GATING — the widget IS NOT SHIPPED and was DELIBERATELY removed. classic.wui comments out `#include ui/widgets/qw_hud_weapon_placeholder.wui`: 'the real 3D viewmodel already renders in that region; the empty dark panel only added clutter and ate field-of-view'. Recorded PASS at SSIM 0.3934. Its ink reads 4.24%, which clears the 0.5% floor and would have passed the ink check too — but decomposition shows ALL of it comes from the ammo panel overlapping this rect's bottom-right corner (the sub-rect excluding the ammo overlap measures 0.000%). This is the ink check's known limit: it proves SOMETHING drew in the rect, not that the INTENDED widget drew. Overlapping rects still need a human to confirm which widget they measure." },
 
-    { "name": "weapon_placeholder",     "x":1002, "y": 588, "w": 326, "h": 264, "ssim_threshold": 0.28, "threshold_pct": 10.0,
-      "rationale": "weapon model placeholder, right:120, bottom:60, 340x240, rotate(-4deg) (engine renders 0deg). Raw rotated bbox 972..1328 x 588..852; LEFT clipped to 1002 (carousel renders on top). Measured dark-min 0.304; calibrated 0.28 (=0.304*0.95)." },
+    { "name": "crosshair", "x": 696, "y": 426, "w": 48, "h": 48,
+      "gating": false,
+      "threshold_pct": 10.0,
+      "rationale": "NON-GATING (unchanged). Extracted to the procedural-crosshair-system subsystem (dispatch 6.0 S0); the static-PNG crosshair is being replaced by a procedural reticle with its own gate. Measured ink 1.39% — the engine does draw a small reticle here." },
 
-    { "name": "bg_sky_band",            "x":   0, "y":   0, "w":1440, "h": 380, "gating": false, "threshold_pct": 10.0,
-      "rationale": "sky gradient y0..380. NON-GATING (live-arena BG; informational only)." },
+    { "name": "bg_sky_band", "x": 0, "y": 0, "w": 1440, "h": 380, "gating": false, "threshold_pct": 10.0,
+      "rationale": "NON-GATING (live-arena BG; informational only)." },
 
-    { "name": "bg_floor_band",          "x":   0, "y": 380, "w":1440, "h": 520, "gating": false, "threshold_pct": 10.0,
-      "rationale": "floor fill y380..900. NON-GATING (live-arena BG; informational only)." },
+    { "name": "bg_floor_band", "x": 0, "y": 380, "w": 1440, "h": 520, "gating": false, "threshold_pct": 10.0,
+      "rationale": "NON-GATING (live-arena BG; informational only)." },
 
-    { "name": "bg_arena_architecture",  "x":   0, "y": 180, "w":1440, "h": 200, "gating": false, "threshold_pct": 10.0,
-      "rationale": "arch group union bbox y180..380. NON-GATING (live-arena BG; informational only)." },
+    { "name": "bg_arena_architecture", "x": 0, "y": 180, "w": 1440, "h": 200, "gating": false, "threshold_pct": 10.0,
+      "rationale": "NON-GATING (live-arena BG; informational only)." },
 
-    { "name": "bg_atmospheric_tint",    "x":   0, "y":   0, "w":1440, "h": 900, "gating": false, "threshold_pct": 10.0,
-      "rationale": "warm radial tint + scanline, full frame. NON-GATING (full-frame / global proxy; excluded from the verdict)." }
+    { "name": "bg_atmospheric_tint", "x": 0, "y": 0, "w": 1440, "h": 900, "gating": false, "threshold_pct": 10.0,
+      "rationale": "NON-GATING (full-frame / global proxy; excluded from the verdict)." }
   ]
 }

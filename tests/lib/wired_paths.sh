@@ -125,6 +125,33 @@ EOF
     printf '%s' "$newest"
 }
 
+# Second-newest screenshot since the marker — for a capture that takes TWO
+# shots in one engine session (a HUD-on frame, then a HUD-off reference frame
+# of the same pinned viewpoint, so the harness can prove the HUD drew anything
+# at all). Returns non-zero when fewer than two shots exist, so a caller that
+# expects a pair fails loudly instead of silently comparing a frame with itself.
+#
+# Ordering is by mtime via `-nt`, never by filename: the screenshot stamp has
+# 1-second granularity and two shots taken 200ms apart can collide on name.
+# The marker is NOT consumed here — call this BEFORE wired_newest_shot.
+wired_prev_shot() {
+    # $1 = marker file from wired_shot_marker; $2 = dir (default $WIRED_BASE/screenshots)
+    local marker="$1" dir="${2:-$WIRED_BASE/screenshots}" newest="" second=""
+    [ -d "$dir" ] || return 1
+    while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        if [ -z "$newest" ] || [ "$f" -nt "$newest" ]; then
+            second="$newest"; newest="$f"
+        elif [ -z "$second" ] || [ "$f" -nt "$second" ]; then
+            second="$f"
+        fi
+    done <<EOF
+$(find "$dir" -type f -name '*.png' -newer "$marker" 2>/dev/null)
+EOF
+    [ -n "$second" ] || return 1
+    printf '%s' "$second"
+}
+
 # Tools that live outside the repo. Prefer whatever is on PATH; fall back to
 # each platform's usual install spot. Never assume one platform's location.
 wired_find_chrome() {
