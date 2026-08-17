@@ -5660,6 +5660,9 @@ static qboolean wui_clay_menu_scrim = qfalse;
 /* Per-frame latch so a multi-panel menu layer gets one scrim, not one per
  * panel — stacking them would darken by 1-(1-a)^n instead of a. */
 static qboolean wui_clay_scrim_drawn = qfalse;
+/* Per-frame latch for the dropdown sub-pass, so it dispatches once even when
+ * several overlay-or-higher panels are visible. */
+static qboolean wui_clay_dropdown_drawn = qfalse;
 
 /* Per-frame layer-state resolve. Split out so the emit walk reads state rather
  * than deciding it, and so the background family's preset lookup has one home. */
@@ -5680,7 +5683,8 @@ static void wui_clay_resolve_layer_states( void )
 	                  top ? qtrue : qfalse, isLoading, &bg );
 
 	wui_clay_menu_scrim  = bg.menuScrim;
-	wui_clay_scrim_drawn = qfalse;
+	wui_clay_scrim_drawn    = qfalse;
+	wui_clay_dropdown_drawn = qfalse;
 	WiredUI_LayerStateSet( WUI_LAYER_BG_DARK,     bg.darkVisible,     qfalse );
 	WiredUI_LayerStateSet( WUI_LAYER_BG_ANIMATED, bg.animatedVisible, !bg.animatedVisible );
 	WiredUI_LayerStateSet( WUI_LAYER_BG_ATTRACT,  bg.attractVisible,  bg.attractPaused );
@@ -5693,6 +5697,45 @@ static void wui_clay_resolve_layer_states( void )
 		WiredUI_LayerStateSet( (wuiLayer_t) L, wui_layer_active( (wuiLayer_t) L ), qfalse );
 	}
 }
+
+/* Transient multi-dropdown sub-pass. Dispatched from inside the panel walk,
+ * immediately BEFORE the overlay layer, so the popup covers every panel
+ * beneath it while the cursor sprite — which lives on the overlay — still
+ * draws on top. Running it after the whole walk put it above the overlay
+ * too, and the cursor vanished behind any open dropdown. */
+static void wui_clay_dispatch_multidropdown( void )
+	{
+		Clay_RenderCommandArray ddCmds;
+		int                     j;
+		Clay_Vector2            ddPointer;
+
+		if ( wui_compositor_pointer_x >= 0.0f && wui_compositor_pointer_y >= 0.0f ) {
+			ddPointer.x = wui_compositor_pointer_x;
+			ddPointer.y = wui_compositor_pointer_y;
+			Clay_SetPointerState( ddPointer, wui_compositor_mouse_down );
+		}
+
+		s_wui_emit_menu  = "multidropdown";
+		s_wui_emit_layer = (int) WUI_LAYER_OVERLAY;
+		s_wui_emit_item  = NULL;
+		wui_compositor_panel_alpha = 1.0f;
+
+		Clay_BeginLayout();
+		wui_clay_emit_multidropdown();
+		ddCmds = Clay_EndLayout();
+
+		wui_scissor_depth = 0;
+		for ( j = 0; j < ddCmds.length; j++ ) {
+			Clay_RenderCommand *rc = Clay_RenderCommandArray_Get( &ddCmds, j );
+			if ( !rc ) continue;
+			wui_clay_dispatch_command( rc );
+		}
+		if ( wui_scissor_depth > 0 && wui_compositor_emit_to_swapchain ) {
+			re.SetClipRegion( NULL );
+			wui_scissor_depth = 0;
+		}
+	}
+
 
 void WiredUI_CompositorEmitFrame( void )
 {
@@ -6060,6 +6103,22 @@ void WiredUI_CompositorEmitFrame( void )
 		 * sits under the dialog. No-op for non-modal / fullscreen-overlay menus. */
 		wui_clay_emit_modal_scrim( menu );
 
+		/* An open dropdown belongs above every panel EXCEPT the overlay, which
+		 * carries the cursor sprite. Dispatch it once, just before the first
+		 * overlay-or-higher panel, so it covers everything beneath while the
+		 * cursor still lands on top.
+		 *
+		 * It has to happen BEFORE this panel opens its layout. The sub-pass
+		 * runs its own Clay_BeginLayout/EndLayout, and starting a new layout
+		 * invalidates the command array from the previous one — calling it
+		 * between the panel's EndLayout and its dispatch left the overlay
+		 * holding a dead `cmds` and the cursor stopped drawing entirely. */
+		if ( !wui_clay_dropdown_drawn && menu
+		  && (int) menu->layer >= (int) WUI_LAYER_OVERLAY ) {
+			wui_clay_dropdown_drawn = qtrue;
+			wui_clay_dispatch_multidropdown();
+		}
+
 		/* (3b) Emit panel + record (id, item, panel) tuples. */
 		Clay_BeginLayout();
 
@@ -6171,41 +6230,19 @@ void WiredUI_CompositorEmitFrame( void )
 	 * a follow-up; the comment block here documents the
 	 * sub-pass z-ordering contract that the future split must preserve.
 	 *
-	 * Transient multi-dropdown sub-pass: emitted AFTER the panel walk so
-	 * it renders above every visible panel. State + geometry come from
-	 * cl_wired_ui.c via WiredUI_QueryMultiDropdownRender; the helper
-	 * returns info.open=qfalse when no dropdown is open and
-	 * Clay_BeginLayout/EndLayout for an empty tree is cheap. */
-	{
-		Clay_RenderCommandArray ddCmds;
-		int                     j;
-		Clay_Vector2            ddPointer;
-
-		if ( wui_compositor_pointer_x >= 0.0f && wui_compositor_pointer_y >= 0.0f ) {
-			ddPointer.x = wui_compositor_pointer_x;
-			ddPointer.y = wui_compositor_pointer_y;
-			Clay_SetPointerState( ddPointer, wui_compositor_mouse_down );
-		}
-
-		s_wui_emit_menu  = "multidropdown";
-		s_wui_emit_layer = (int) WUI_LAYER_OVERLAY;
-		s_wui_emit_item  = NULL;
-		wui_compositor_panel_alpha = 1.0f;
-
-		Clay_BeginLayout();
-		wui_clay_emit_multidropdown();
-		ddCmds = Clay_EndLayout();
-
-		wui_scissor_depth = 0;
-		for ( j = 0; j < ddCmds.length; j++ ) {
-			Clay_RenderCommand *rc = Clay_RenderCommandArray_Get( &ddCmds, j );
-			if ( !rc ) continue;
-			wui_clay_dispatch_command( rc );
-		}
-		if ( wui_scissor_depth > 0 && wui_compositor_emit_to_swapchain ) {
-			re.SetClipRegion( NULL );
-			wui_scissor_depth = 0;
-		}
+	 * Transient multi-dropdown sub-pass. It normally dispatches inside the
+	 * panel walk, just before the overlay layer, so the popup sits above every
+	 * panel but under the cursor. This tail call is ONLY the fallback for a
+	 * frame with no overlay-or-higher panel.
+	 *
+	 * The latch matters: without it this ran a SECOND time after the walk, on
+	 * top of everything — including the console — so the popup was always the
+	 * last thing painted and the cursor stayed buried no matter where the
+	 * in-loop call was moved. Two dispatches of the same popup also meant the
+	 * work was done twice. */
+	if ( !wui_clay_dropdown_drawn ) {
+		wui_clay_dropdown_drawn = qtrue;
+		wui_clay_dispatch_multidropdown();
 	}
 }
 
