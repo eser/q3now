@@ -5897,11 +5897,26 @@ void WiredUI_PushMenu( const char *name ) {
 
 	Q_strncpyz( wui_menuStack[wui_menuStackDepth], name, sizeof( wui_menuStack[0] ) );
 	wui_menuStackDepth++;
-	/* SCENE menus get a one-shot parallax nudge so switching between them feels
-	 * like the scene shifts and settles (no-op for the flat/dim/none intents). */
-	/* Scene nudge on menu change: the backdrop layer is persistent now, so
-	 * this is a transition effect rather than a rebuild. */
-	WiredUI_NotifyBgTransition();
+	/* Nudge the scene only when the backdrop actually CHANGES.
+	 *
+	 * This used to fire on every push. Switching settings tabs is a close +
+	 * open of two menus declaring the SAME preset, so the backdrop was kicked
+	 * and re-settled across a transition where nothing behind the menu
+	 * differed — visible as the background restarting on every tab. It was
+	 * inert while WUI_DrawBackgroundScene had no callers; wiring the live
+	 * emitter back up made the nudge real, and with it the complaint.
+	 *
+	 * Comparing presets rather than menu names keeps the effect for the case it
+	 * exists to serve: main (dim) -> a deep menu (animated) still shifts and
+	 * settles, because there the scene genuinely arrives. */
+	{
+		const wiredMenuDef_t *prev = ( wui_menuStackDepth >= 2 )
+		                           ? WiredUI_FindMenu( wui_menuStack[ wui_menuStackDepth - 2 ] )
+		                           : NULL;
+		const wiredMenuDef_t *cur  = WiredUI_FindMenu( name );
+		if ( !prev || !cur || prev->bgPreset != cur->bgPreset )
+			WiredUI_NotifyBgTransition();
+	}
 	wui_focusItem = -1;
 	wui_focusedItemPtr = NULL;
 	wui_hoveredItemPtr = NULL;
