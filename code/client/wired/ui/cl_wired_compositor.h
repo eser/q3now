@@ -33,7 +33,7 @@ See docs/wiredui-compositor-spec.md for the authoritative migration spec.
 typedef struct {
 	int      widthPx,  heightPx;   /* device-pixel size — FBO + layout canonical */
 	int      widthLog, heightLog;  /* logical-point size — input coords / DPI-relative */
-	float    dpiScale;             /* widthPx / widthLog; 1.0 on non-HiDPI */
+	float    dpiScale;             /* heightPx / heightLog; 1.0 on non-HiDPI */
 	int      generation;           /* bumped per publish */
 	qboolean valid;                /* false until platform layer's first publish */
 } wuiWindowRect_t;
