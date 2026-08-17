@@ -5590,6 +5590,9 @@ static void wui_clay_emit_modal_scrim( const wiredMenuDef_t *menu )
 /* Does the stack-top menu want a scrim over the game? Resolved with the rest
  * of the layer state and read by the MENU layer's emit. */
 static qboolean wui_clay_menu_scrim = qfalse;
+/* Per-frame latch so a multi-panel menu layer gets one scrim, not one per
+ * panel — stacking them would darken by 1-(1-a)^n instead of a. */
+static qboolean wui_clay_scrim_drawn = qfalse;
 
 /* Per-frame layer-state resolve. Split out so the emit walk reads state rather
  * than deciding it, and so the background family's preset lookup has one home. */
@@ -5609,7 +5612,8 @@ static void wui_clay_resolve_layer_states( void )
 	WUI_BgPresetEval( top ? top->bgPreset : WUI_BG_PRESET_ANIMATED,
 	                  top ? qtrue : qfalse, isLoading, &bg );
 
-	wui_clay_menu_scrim = bg.menuScrim;
+	wui_clay_menu_scrim  = bg.menuScrim;
+	wui_clay_scrim_drawn = qfalse;
 	WiredUI_LayerStateSet( WUI_LAYER_BG_DARK,     bg.darkVisible,     qfalse );
 	WiredUI_LayerStateSet( WUI_LAYER_BG_ANIMATED, bg.animatedVisible, !bg.animatedVisible );
 	WiredUI_LayerStateSet( WUI_LAYER_BG_ATTRACT,  bg.attractVisible,  bg.attractPaused );
@@ -5839,8 +5843,6 @@ void WiredUI_CompositorEmitFrame( void )
 			 * an empty black screen while the shader that was supposed to draw it
 			 * had zero callers. */
 			WUI_DrawBackgroundScene( 0.0f, 0.0f, bw, bh );
-		if ( wui_clay_menu_scrim )
-			WUI_DrawBackgroundDim( 0.0f, 0.0f, bw, bh );
 		bgCmds = Clay_EndLayout();
 
 		wui_scissor_depth = 0;
@@ -5857,6 +5859,32 @@ void WiredUI_CompositorEmitFrame( void )
 		int                   j;
 
 		menu = wui_visible_panels[ i ];
+
+		/* The scrim darkens whatever is BEHIND the menu, so it has to be
+		 * dispatched between that content and the menu itself — not with the
+		 * background layers. Those are emitted in their own pass before the
+		 * panel walk, and attract is a panel, so a scrim drawn back there
+		 * lands underneath the reel and darkens nothing: the main menu read
+		 * as its text tangled with a full-brightness attract poster. Emitting
+		 * it here, once, immediately before the first panel at or above the
+		 * menu layer, puts it over attract and under the menu. */
+		if ( wui_clay_menu_scrim && !wui_clay_scrim_drawn
+		  && menu && (int) menu->layer >= (int) WUI_LAYER_MENU ) {
+			Clay_RenderCommandArray scrimCmds;
+			int                     k;
+
+			wui_clay_scrim_drawn = qtrue;
+			Clay_BeginLayout();
+			WUI_DrawBackgroundDim( 0.0f, 0.0f,
+				(float) cls.glconfig.vidWidth, (float) cls.glconfig.vidHeight );
+			scrimCmds = Clay_EndLayout();
+
+			wui_scissor_depth = 0;
+			for ( k = 0; k < scrimCmds.length; k++ ) {
+				Clay_RenderCommand *rc = Clay_RenderCommandArray_Get( &scrimCmds, k );
+				if ( rc ) wui_clay_dispatch_command( rc );
+			}
+		}
 
 		/* source-attribution: surface the menu currently being
 		 * emitted so wui_clay_error_handler can blame Clay layout errors
