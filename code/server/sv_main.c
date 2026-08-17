@@ -1297,6 +1297,44 @@ void SV_Frame( int msec ) {
 	if ( transport && transport->frame )
 		transport->frame( msec );
 
+	/* Playtest perf marker + route progress.
+	 *
+	 * SAMPLED, never per-frame. A 4096-record ring filled at 40Hz holds about
+	 * 100 seconds of session; a run that then hit trouble would already have
+	 * overwritten its own approach to it, which defeats the artefact. One
+	 * marker per PLAYTEST_PERF_INTERVAL_MS keeps a long session inside the
+	 * ring while still resolving a hitch, and if the tradeoff is ever wrong
+	 * the drop counters in session_end say so out loud.
+	 *
+	 * route.progress rides the same tick because on the server the useful
+	 * notion of "how far has this session got" is the map's own clock. */
+	if ( sv.state == SS_GAME ) {
+		static int s_playtestNextMarker = 0;
+
+		/* sv.time restarts near 0 on every new map, so a marker scheduled in
+		 * the previous map's future would silence the whole next map. Rearm
+		 * whenever the schedule sits further ahead than one full interval. */
+		if ( s_playtestNextMarker - sv.time > PLAYTEST_PERF_INTERVAL_MS )
+			s_playtestNextMarker = 0;
+
+		if ( sv.time >= s_playtestNextMarker ) {
+			int i, connected = 0;
+			for ( i = 0; i < sv_maxclients->integer; i++ ) {
+				if ( svs.clients[i].state >= CS_CONNECTED )
+					connected++;
+			}
+
+			Playtest_EmitFmt( PT_EV_PERF_FRAME_MARKER,
+				"\"svtime\":%d,\"msec\":%d,\"residual\":%d",
+				sv.time, msec, sv.timeResidual );
+			Playtest_EmitFmt( PT_EV_ROUTE_PROGRESS,
+				"\"svtime\":%d,\"clients\":%d",
+				sv.time, connected );
+
+			s_playtestNextMarker = sv.time + PLAYTEST_PERF_INTERVAL_MS;
+		}
+	}
+
 	WiredCoreEvents_DispatchSimple( WCE_FRAME_END, -1 );
 
 	// send a heartbeat to the master if needed

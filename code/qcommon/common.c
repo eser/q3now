@@ -2973,6 +2973,20 @@ void Com_Init( char *commandLine ) {
 
 	Log_InitChannels();
 	LogBuffer_Init();
+	// Playtest evidence ring (wired_playtest.jsonl v1). Opt-in by
+	// construction: with playtest_enabled 0 nothing is recorded and the ring
+	// is never even allocated, so initialising it unconditionally costs two
+	// cvar registrations and a session id.
+	//
+	// The app identity is passed FROM HERE because this file is on the
+	// QCOMMON_VARIANT_ALLOWLIST (CMakeLists.txt:107-127) and so is compiled
+	// once per binary — HEADLESS is real here. playtest.c is shared-compiled
+	// and could not tell the two apart.
+#ifdef HEADLESS
+	Playtest_Init( "server" );
+#else
+	Playtest_Init( "client" );
+#endif
 
 	// TTY sink only needs cvars (con_severity / con_timestamp). Register it now
 	// so FS_InitFilesystem, Map_Init, and WiredScript_Init all emit with a
@@ -3787,6 +3801,11 @@ Com_Shutdown
 */
 void Com_Shutdown( void ) {
 	AssetLog_Flush( NULL );
+
+	// Orderly shutdown flush of the playtest ring. Must precede the
+	// filesystem teardown below — the artefact is written through the VFS,
+	// so a later placement would produce no file on a clean quit.
+	Playtest_Shutdown();
 
 	LogBuffer_Shutdown();
 	WiredCore_Shutdown();

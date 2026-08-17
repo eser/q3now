@@ -435,6 +435,24 @@ SET_TESTS_PROPERTIES(headless_map_transition_analyzer_contract PROPERTIES
 	TIMEOUT 60
 )
 
+# wired_playtest.jsonl consumer contract (TASK-120 #3). The map-race harness is
+# the artefact's first real consumer, and what it must do is decide whether a
+# session can be reconstructed from the evidence file alone: v1 envelope on
+# every record, intact seq/time order, one session, each map bracketed
+# load->loaded, and drop accounting that agrees with what the file actually
+# carries. Like the analyzer above this is a pure function of the artefact, so
+# it runs over synthetic files with no engine, no packs and no display — an
+# evidence gate that could not reject corrupt evidence would certify every
+# artefact, including the ones that quietly lost records.
+ADD_TEST(NAME playtest_evidence_analyzer_contract
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/headless-map-transition-zonecheck.sh
+		--playtest-self-test
+)
+SET_TESTS_PROPERTIES(playtest_evidence_analyzer_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-server;failure.contract;feature.always"
+	TIMEOUT 60
+)
+
 # Screenshots come from vk.capture.image when supersampling is on and from the
 # swapchain otherwise; only the former is display-independent, so on a HiDPI
 # display the two disagree about size.  The gate also refuses a blank frame —
@@ -1912,6 +1930,30 @@ WIRED_CONFIGURE_HOST_TEST(bg_preset_eval_test bg_preset_eval_contract)
 # a mis-pinned quad still draws, and the result is a picture rather than an
 # error. So this reads the production source and requires every `.floating`
 # block in it to name the constant.
+# wired_playtest.jsonl v1 evidence envelope (TASK-120 #1). The artefact is
+# consumed by PROGRAMS — the alpha map-race harness dispatches on `ev` — so the
+# schema is an interface, and an unpinned interface drifts silently: a renamed
+# envelope field or a reordered event-name table still compiles, still runs,
+# and still writes a plausible-looking file that means something different to
+# every reader. Reads the production source rather than linking it, because
+# playtest.c reaches the filesystem, the cvar registry and the mutex layer;
+# everything worth pinning (frozen version, envelope fields, dictionary order,
+# drop accounting, opt-in default) is statically present in the text. Same
+# tactic and same reason as bg_layer_zorder_test below.
+ADD_EXECUTABLE(playtest_envelope_test
+	tests/playtest-envelope-test.c
+)
+TARGET_COMPILE_DEFINITIONS(playtest_envelope_test PRIVATE
+	PLAYTEST_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/code/qcommon/wired/core/logging/playtest.c"
+	PLAYTEST_HEADER="${CMAKE_CURRENT_SOURCE_DIR}/code/qcommon/wired/core/logging/playtest.h"
+)
+ADD_TEST(NAME playtest_envelope_contract COMMAND playtest_envelope_test)
+SET_TESTS_PROPERTIES(playtest_envelope_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.wired-logging;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(playtest_envelope_test playtest_envelope_contract)
+
 ADD_EXECUTABLE(bg_layer_zorder_test
 	tests/bg-layer-zorder-test.c
 )
