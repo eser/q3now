@@ -277,6 +277,6 @@ menuDef {
 		QW_SETTINGS_BOTTOMBAR("left/right to adjust")
 	}
 
-	onOpen { setcvar "ui_settingsSection" "player" }
+	onOpen { setstate ui_settingsSection player }
 	onESC  { close }
 }

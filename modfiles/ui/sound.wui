@@ -302,7 +302,7 @@ menuDef {
 	}
 
 	onOpen {
-		setcvar "ui_settingsSection" "sound"
+		setstate ui_settingsSection sound
 	}
 	onESC {
 		close

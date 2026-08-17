@@ -3188,7 +3188,21 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 	 * immediate qfalse short-circuit. */
 	qboolean isActive = qfalse;
 	if ( item->activeCvar[ 0 ] ) {
-		const char *cv = Cvar_VariableString( item->activeCvar );
+		/* Store-backed keys resolve through the store, everything else through
+		 * the cvar system. Without this branch a key that lives in the store
+		 * reads as the empty string here — no row matches and the highlight
+		 * sticks on whichever row happens to be first, which is exactly how
+		 * the settings rail failed. Keeping one predicate that knows both
+		 * homes means an author writes `active <key> <value>` without caring
+		 * which side the key is on. */
+		char        buf[ MAX_CVAR_VALUE_STRING ];
+		const char *cv;
+		if ( WiredUI_IsStoreStateKey( item->activeCvar ) ) {
+			WiredUI_StateGetString( item->activeCvar, buf, sizeof( buf ) );
+			cv = buf;
+		} else {
+			cv = Cvar_VariableString( item->activeCvar );
+		}
 		if ( cv && !strcmp( cv, item->activeValue ) ) {
 			isActive = qtrue;
 		}
