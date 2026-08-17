@@ -162,6 +162,22 @@ Two related traps, both of which have cost real debugging time:
   is printed without checking `FS_WriteFile`'s result
   (`renderervk/tr_init.c:1164`), so it says the write was *attempted*, not that
   it landed. Stat the file.
+- **Never put two quoted strings next to each other in a `.wui`.** botlib
+  concatenates adjacent quoted strings the way C concatenates string literals
+  (`botlib/l_precomp.c:2756`, inside `PC_ReadToken`), and it does so
+  recursively — a run of four collapses into *one* token, not two pairs. So
+  `setstate "ui_settingsSection" "network"` reaches the handler as a single
+  argument `ui_settingsSectionnetwork`, and handlers that guard with
+  `if ( numArgs < 2 ) return;` do nothing at all, without a warning. The same
+  fusion empties `cvarStrList { "Label" "value" ... }` lists and collapses
+  `showCvar { "4" "5" }` into `45`, which matches neither value.
+
+  Write list entries and script arguments **unquoted**
+  (`setstate ui_settingsSection network`, `showCvar { 4 5 }`). A bare token
+  between two quoted ones also breaks the run, which is why
+  `cvarFloatList { "Beginner" 1 "Casual" 2 }` is unaffected — the numbers
+  separate the strings. `cvarStrList` now warns when it ends up empty; the
+  other shapes are still silent.
 
 ---
 

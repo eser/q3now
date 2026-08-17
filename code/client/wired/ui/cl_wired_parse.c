@@ -1408,6 +1408,22 @@ static qboolean WiredUI_ParseItemProperties( int handle,
 						sizeof( item->multiData->strValues[0] ) );
 					item->multiData->count++;
 				}
+				/* An empty list is always an authoring error — a control with no
+				 * choices cannot be operated. It warrants a warning because the
+				 * usual cause is invisible: botlib concatenates ADJACENT QUOTED
+				 * STRINGS the way C concatenates string literals
+				 * (l_precomp.c:2756, inside PC_ReadToken), so
+				 *   cvarStrList { "Bilinear" "GL_LINEAR" "Trilinear" "GL_LINEAR2" }
+				 * arrives as ONE fused token: the loop takes it as a label, hits
+				 * `}` while looking for its value, and breaks with count 0.
+				 * Nothing else reports it — the menu parses, the control draws,
+				 * and it simply has nothing in it. Write entries UNQUOTED. */
+				if ( item->multiData->count == 0 ) {
+					Com_Log( SEV_WARN, LOG_CH(ch_ui),
+						"WiredUI: cvarStrList on item '%s' is empty — write the"
+						" entries unquoted; adjacent quoted strings fuse into a"
+						" single token\n", item->name[0] ? item->name : "(unnamed)" );
+				}
 			}
 		}
 		else if ( !Q_stricmp( token.string, "cvarFloatList" ) ) {
