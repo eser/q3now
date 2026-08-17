@@ -55,3 +55,6 @@ tests/visual/results/
 # Go build artifacts for the visual tooling (produced by `go build`).
 tools/visual-compare/vcompare
 tools/visual-diff/vdiff
+
+# Agent worktrees (transient, never committed)
+.claude/worktrees/
