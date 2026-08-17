@@ -253,7 +253,7 @@ menuDef {
 							font $font_sans 13
 							forecolor $bone
 							cvar "r_textureMode"
-							cvarStrList { "Bilinear" "GL_LINEAR_MIPMAP_NEAREST" "Trilinear" "GL_LINEAR_MIPMAP_LINEAR" }
+							cvarStrList { Bilinear GL_LINEAR_MIPMAP_NEAREST Trilinear GL_LINEAR_MIPMAP_LINEAR }
 							visible 1
 							grow 0
 						}
