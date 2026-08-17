@@ -256,6 +256,57 @@ int main( void )
 			memcmp( &fresh, &returned, sizeof( fresh ) ) == 0, 1 );
 	}
 
+	/* The sequence Eser reported, in the preset main actually ships.
+	 *
+	 * The map-return case above pins it for `invisible`, which no shipped menu
+	 * declares. main.wui says `backdrop dim`, and dim is the row where "the
+	 * background" is not a backdrop layer at all — both are off, and what the
+	 * user sees behind the scrim is the attract reel. A map-return that
+	 * resolved dim differently from a cold boot would therefore read as the
+	 * black main menu even with every backdrop layer behaving perfectly, so the
+	 * preset the bug was reported against needs its own case rather than a
+	 * sibling's.
+	 *
+	 * Measured against the engine (boot -> map arena1 -> disconnect, release
+	 * build, per-frame probe in wui_clay_resolve_layer_states): the returning
+	 * main menu resolves
+	 *
+	 *   top=main preset=dim dark=0 anim=0 attract=1/p0 scrim=1
+	 *   panels [attract_brand, main, overlay]   bg pass cmds=1
+	 *
+	 * byte-identical to the cold-boot menu three stages earlier, and reached
+	 * with no submenu detour. */
+	{
+		wuiBgLayerState_t coldBoot, duringMap, afterMap;
+
+		WUI_BgPresetEval( WUI_BG_PRESET_DIM, qtrue, qfalse, &coldBoot );
+		WUI_BgPresetEval( WUI_BG_PRESET_DIM, qtrue, qtrue,  &duringMap );
+		WUI_BgPresetEval( WUI_BG_PRESET_DIM, qtrue, qfalse, &afterMap );
+
+		CheckInt( "main (dim) after a map matches a cold boot",
+			memcmp( &coldBoot, &afterMap, sizeof( coldBoot ) ) == 0, 1 );
+
+		/* The map really did take the backdrop over in between — otherwise the
+		 * equality above would hold for the trivial reason that nothing ever
+		 * changed, and the case would pin nothing. */
+		CheckInt( "the map load really did take it over",
+			memcmp( &coldBoot, &duringMap, sizeof( coldBoot ) ) != 0, 1 );
+
+		/* And what it returns to is specifically "attract running, scrimmed".
+		 *
+		 * This absolute check is the one that carries the block. The equality
+		 * above can pass while the behaviour is broken: a resolve that hides
+		 * attract for every DIM call after any load leaves coldBoot and
+		 * afterMap equally wrong, and comparing them to each other reports
+		 * agreement. Verified by mutation rather than assumed — that exact
+		 * regression was injected and the equality case still passed while
+		 * this one failed. On main the attract reel IS the background scene,
+		 * so naming the state it must return to is what makes "unchanged"
+		 * mean "unchanged and correct". */
+		CheckState( "main returns to a running, scrimmed attract",
+			&afterMap, 0, 0, 1, 0, 1 );
+	}
+
 	/* ── parsing ───────────────────────────────────────────────────── */
 
 	CheckInt( "parse 'invisible'",
