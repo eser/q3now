@@ -12,13 +12,25 @@
 // indicator, not a hover cue. qw_menu_item's `.active` = transient FOCUS, so
 // there it switches to $bone. The two rails still share ONE chevron treatment.
 //
-// CHEVRON (BUG-2 fix, 2026-07-07): the resting chevron is a warm mid-grey at
-// alpha 0 (0.541 0.459 0.376 0, the $boneDim rgb) — NOT the old near-black
-// `0.1 0.05 0.03 0`. On a HOVERED-but-unselected row the solid accent-cyan
-// focus-wash sits under the alpha-0 chevron; with a near-black rgb the leak
-// read as a stark black ">" inside the row. The warm-grey rgb makes any leak a
-// faint neutral instead. Same rgb is used in qw_menu_item.wui so the two rails
-// render the chevron identically.
+// CHEVRON: resting is $boneDim (a warm mid-grey), and the SELECTED row's
+// chevron swaps to $accent via `forecolor.active` + the same
+// `active ui_settingsSection SECTION` predicate the label carries — so the
+// chevron marks the open tab alongside the label, matching the v2 artboard
+// (qw-screens.jsx ScreenOptions category rail: a trailing ▶ per row, accent
+// when active, boneDim otherwise).
+//
+// The BUG-2 class this file previously guarded against (2026-07-07) was a
+// near-black `0.1 0.05 0.03` resting rgb leaking through the solid accent
+// focus-wash on a hovered-but-unselected row as a stark black ">". $boneDim is
+// a warm neutral, so any leak reads as a faint grey instead. qw_menu_item.wui
+// uses the same resting colour, so the two rails render the chevron alike —
+// they differ only in what `.active` MEANS (persistent selection here,
+// transient focus there), which is why the active colours differ ($accent vs
+// $bone).
+//
+// NOTE (2026-08-17): the chevron carried `text ""` and so drew NOTHING, while
+// this comment block described the treatment above — the docs and the markup
+// had drifted apart. Restored to the documented ">" glyph.
 //
 //   QW_SETTINGS_NAV("nav_video", "video", "Video", "video")
 // Args:
@@ -47,6 +59,6 @@
 		active ui_settingsSection SECTION \
 		action { setcvar "ui_settingsSection" SECTION ; close ; open SUBMENU scene } \
 		\
-		itemDef { type 0 rect 0 0 1vw 3vh height FIT width PERCENT 1vw text "" textalign 0 font $font_sans 24 forecolor $boneDim decoration visible 1 grow 0 } \
+		itemDef { type 0 rect 0 0 1vw 3vh height FIT width PERCENT 1vw text ">" textalign 0 font $font_sans 24 forecolor $boneDim forecolor.active $accent active ui_settingsSection SECTION decoration visible 1 grow 0 } \
 		itemDef { type 0 rect 0 0 16vw 3vh height FIT width PERCENT 16vw text LABEL textalign 0 font $font_sans 22 forecolor $bone forecolor.active $accent active ui_settingsSection SECTION decoration visible 1 grow 0 } \
 	}

@@ -2754,19 +2754,25 @@ static qboolean WiredUI_ParseMenu( int handle ) {
 	menu->visible = qtrue;
 	menu->anchor = ANCHOR_NONE;
 	menu->cinematicHandle = -1;
-	/* Default focus-gradient tint = accent cyan ($primary_cyan #00b4d8),
-	 * matching the segmented control / active-state hue. A .wui menu overrides
-	 * per-theme with `focuscolor $<token>`; the old amber default clashed with
-	 * the cyan/bone theme. Read the live token so the default follows
-	 * ui_palette_accent (the implicit ui/_tokens.wui include runs before any
-	 * menu block parses, so the table is populated here); fall back to the
-	 * baked cyan literal if the token is missing/unparseable. */
-	menu->focuscolor[0] = 0.0f;
-	menu->focuscolor[1] = 0.706f;
-	menu->focuscolor[2] = 0.847f;
+	/* Default focus-gradient tint = the live theme accent. A .wui menu
+	 * overrides per-theme with `focuscolor $<token>`.
+	 *
+	 * FIX 2026-08-17: this read the token named "primary_cyan", and its comment
+	 * claimed the default "follows ui_palette_accent". It did not. The v2 accent
+	 * overlays (ui/themes/<accent>/_tokens.wui) only override `accent` /
+	 * `accentDim` / `accentSoft` / `accentWash`; `primary_cyan` is a v1 token no
+	 * overlay touches, so it stayed #00b4d8 under every accent and the focus
+	 * wash rendered cyan even with ui_palette_accent amber (observed on the
+	 * settings category rail). Read `accent` — the token the overlay chain
+	 * actually rewrites. The fallback literal is the amber boot default
+	 * (_tokens.wui `token accent "#f4a03a"`), so a missing token degrades to the
+	 * shipped default instead of back to v1 cyan. */
+	menu->focuscolor[0] = 0.957f;
+	menu->focuscolor[1] = 0.627f;
+	menu->focuscolor[2] = 0.227f;
 	menu->focuscolor[3] = 1.0f;
 	{
-		const char *focusTok = WiredToken_Find( "primary_cyan" );
+		const char *focusTok = WiredToken_Find( "accent" );
 		if ( focusTok ) WiredPC_DecodeColorString( focusTok, menu->focuscolor );
 	}
 	/* default layer is MENU — backward-compatible with
