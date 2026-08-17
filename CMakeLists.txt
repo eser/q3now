@@ -2063,6 +2063,152 @@ SET_TESTS_PROPERTIES(wired_connection_identity_contract PROPERTIES
 	TIMEOUT 30
 )
 WIRED_CONFIGURE_HOST_TEST(wn_identity_test wired_connection_identity_contract)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROCESS-LEVEL RELEASE SMOKES  (TASK-122 #10, #11)
+#
+# Everything above this line is `host-only`: pure, in-process, no engine
+# launch. The registrations below LAUNCH REAL PROCESSES, so they carry the
+# `process` label instead — a different layer with different failure modes and
+# a different cost profile. Keeping them off `host-only` is deliberate: the
+# existing `make test-host` gate (`ctest -L host-only`) must keep meaning
+# exactly what it meant before, and CI reports the two layers separately
+# (TASK-122 #12).
+#
+# 🔴 THE SKIP CONTRACT. A process smoke depends on artefacts CMake does not
+# build: launcher-produced content paks, an installed launcher binary. Those
+# are absent on an asset-free CI runner. Each script therefore exits 77 when
+# its prerequisites are missing and every registration sets SKIP_RETURN_CODE
+# 77, so a runner without content reports NOTASRUN rather than red. The
+# scripts SKIP only on missing prerequisites — never to dodge a real defect;
+# a script that finds its prerequisites and then sees a broken engine exits 1.
+#
+# Single command that satisfies #10 (launcher + network + map transition):
+#     ctest --test-dir <build> -L process
+#
+# ── the map-transition binary is a DEBUG-build dependency ────────────────────
+# The map-transition smoke is fail-closed against a release binary: the
+# ZONEID zone-consistency assertion it needs is compiled only under _DEBUG
+# (code/qcommon/common.c:409-412), so pointing it at a release build would
+# manufacture a vacuous green and the script refuses with exit 1, not 77.
+# That means it can only be REGISTERED in a Debug tree. In a Release tree it
+# is registered in its engine-free `--self-test` form (the analyzer mutation
+# suite), which is where the gate's teeth live and which needs neither a
+# debug binary nor content.
+SET(WIRED_PROCESS_SMOKE_TIMEOUT 300)
+
+# launcher — CLI dispatch + the fail-closed EULA licence gate. No display, no
+# network, no content: the assertion is that `assets download` REFUSES.
+ADD_TEST(NAME launcher_process_smoke
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/smoke-launcher.sh
+)
+SET_TESTS_PROPERTIES(launcher_process_smoke PROPERTIES
+	LABELS "process;owner.launcher;failure.smoke;feature.always"
+	SKIP_RETURN_CODE 77
+	TIMEOUT 120
+)
+
+# network — QUIC game transport must reach the listening state. The smoke
+# requires the wn_main.c:582 "WiredNet: listening on port N (IPv4), ALPN:"
+# line, which is reachable only after picoquic_create succeeded.
+#
+# 🔴 NO $<TARGET_FILE:...> HERE, DELIBERATELY. The freshly linked binary in the
+# build tree is NOT a runnable install on macOS: FS_GetInstallResourcePath()
+# resolves paks under <root>/Contents/Resources (qcommon.h:945-956), so a flat
+# `build/release/base/pax21.sw3z` is never searched and the engine aborts with
+# "Couldn't load default.cfg" before the transport initialises. Passing the
+# build-tree target therefore produces a red that says nothing about QUIC.
+# The scripts resolve the ASSEMBLED install through tests/lib/wired_paths.sh
+# (`make copy-all` output) and SKIP 77 when it is absent.
+ADD_TEST(NAME network_quic_process_smoke
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/smoke-quic-game.sh
+)
+SET_TESTS_PROPERTIES(network_quic_process_smoke PROPERTIES
+	LABELS "process;owner.wired-network;failure.smoke;feature.always"
+	SKIP_RETURN_CODE 77
+	TIMEOUT ${WIRED_PROCESS_SMOKE_TIMEOUT}
+	# Binds a UDP port. Serialised against the other port-binding smokes via a
+	# shared resource lock so a parallel `ctest -j` cannot make them collide.
+	RESOURCE_LOCK wired_net_port
+)
+
+# engine bring-up — headless server loads a map with a bot and shuts down
+# clean. Needs a BSP-bearing content pak; exits 77 without one.
+# Same reason as above for not passing $<TARGET_FILE:...>: the assembled
+# install is the only layout the engine can resolve its paks from on macOS.
+ADD_TEST(NAME headless_engine_process_smoke
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/smoke.sh
+)
+SET_TESTS_PROPERTIES(headless_engine_process_smoke PROPERTIES
+	LABELS "process;owner.q3now-server;failure.smoke;feature.always"
+	SKIP_RETURN_CODE 77
+	TIMEOUT ${WIRED_PROCESS_SMOKE_TIMEOUT}
+	# No Q3DIR here on purpose: the script resolves the install root and the
+	# engine home through tests/lib/wired_paths.sh, which derives them from
+	# PRODUCT_NAME/CHANNEL_SUFFIX rather than from a literal baked in twice.
+	RESOURCE_LOCK wired_net_port
+)
+
+# map transition — N-run lifecycle/race gate (#11).
+#
+# WHY N=10 AND NOT 1: the target class is lifecycle/race, which a single run
+# cannot bound. Each iteration is a fresh process over an IDENTICAL map chain
+# and identical cvars; what varies is engine-side nondeterminism only (RNG
+# re-seed, ASLR, the background navmesh bake's join point against the main
+# thread's map load, async QUIC bring-up). Holding the stimulus fixed makes a
+# divergence between iterations attributable to state lifetime rather than to
+# a changed input. Every iteration is scored by the same analyzer the
+# single-shot mode uses, so repeats cannot pass on a weaker gate.
+SET(WIRED_MAP_TRANSITION_REPEATS 10 CACHE STRING
+	"Iterations for the map-transition lifecycle/race smoke (TASK-122 #11; must be >= 10)")
+IF(WIRED_MAP_TRANSITION_REPEATS LESS 10)
+	MESSAGE(FATAL_ERROR
+		"WIRED_MAP_TRANSITION_REPEATS must be >= 10 — TASK-122 #11 requires at least "
+		"10 repeats for the lifecycle/race class to be exercised at all "
+		"(got ${WIRED_MAP_TRANSITION_REPEATS}).")
+ENDIF()
+
+IF(CMAKE_BUILD_TYPE STREQUAL "Debug")
+	# Debug tree only: the gate needs the _DEBUG-only ZONEID assertion.
+	# Each iteration loads 3 maps with +wait gating, so the budget scales
+	# with the repeat count rather than being a flat number.
+	MATH(EXPR WIRED_MAP_TRANSITION_TIMEOUT "${WIRED_MAP_TRANSITION_REPEATS} * 180")
+	# $<TARGET_FILE:...> IS right here, unlike the two smokes above: this
+	# script does not launch the binary in place. It assembles its own scratch
+	# fs_homepath from the discovered pax21 + pax01 and points the engine at
+	# it, so the bundle-vs-flat layout difference does not apply — and it
+	# specifically needs THIS tree's debug binary, not whatever is installed.
+	ADD_TEST(NAME map_transition_process_smoke
+		COMMAND bash ${CMAKE_SOURCE_DIR}/tests/headless-map-transition-zonecheck.sh
+			--repeat ${WIRED_MAP_TRANSITION_REPEATS}
+			$<TARGET_FILE:${DNAME}${BINEXT}>
+	)
+	SET_TESTS_PROPERTIES(map_transition_process_smoke PROPERTIES
+		LABELS "process;owner.q3now-server;failure.lifecycle;feature.always"
+		SKIP_RETURN_CODE 77
+		TIMEOUT ${WIRED_MAP_TRANSITION_TIMEOUT}
+		# The BSP-bearing pak (pax01) is launcher-produced and lands in the
+		# engine HOME dir, not in the build tree or the install (GAME-DATA.md
+		# §2). Point the script's content probe there; without it the script
+		# SKIPs 77 rather than running a chain it has no maps for.
+		ENVIRONMENT "WIRED_CONTENT_ROOT=$ENV{HOME}/wired/${PRODUCT_NAME}${CHANNEL_SUFFIX}"
+		RESOURCE_LOCK wired_net_port
+	)
+ELSE()
+	# Release tree: register the engine-free analyzer mutation suite under the
+	# `process` label so `ctest -L process` still reports on the map-transition
+	# gate here — as the teeth check it can honestly run, not as a vacuous
+	# pass of a gate whose assertion is compiled out.
+	ADD_TEST(NAME map_transition_analyzer_teeth
+		COMMAND bash ${CMAKE_SOURCE_DIR}/tests/headless-map-transition-zonecheck.sh
+			--self-test
+	)
+	SET_TESTS_PROPERTIES(map_transition_analyzer_teeth PROPERTIES
+		LABELS "process;owner.q3now-server;failure.contract;feature.always"
+		SKIP_RETURN_CODE 77
+		TIMEOUT 120
+	)
+ENDIF()
 ENDIF()
 
 # wired/scene — cinematic-scene definition + Lua-table loader. Pure CPU +

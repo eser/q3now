@@ -1029,6 +1029,33 @@ test-sanitize-host:
 
 .PHONY: test-host test-sanitize-host
 
+# ── process-level release smokes (TASK-122 #10, #11) ────────────────────────
+# The launcher, network and map-transition PROCESS smokes, run through the SAME
+# CTest verdict as the host contracts — one command, one report:
+#
+#     ctest --test-dir $(BUILD_DIR) -L process
+#
+# They carry a separate LABEL rather than being extra `host-only` entries
+# because they launch real processes: different cost, different failure modes,
+# and CI reports the two layers separately (TASK-122 #12). `test-host` keeps
+# its exact prior meaning and its exact prior test count.
+#
+# Prerequisites are resolved by the scripts through tests/lib/wired_paths.sh and
+# each SKIPs (exit 77 -> CTest NOTRUN) when its artefacts are absent, so an
+# asset-free runner reports skipped rather than red. `copy-all` runs first
+# because the smokes exercise the ASSEMBLED install, not the raw build tree: on
+# macOS the engine resolves paks under Contents/Resources (qcommon.h:945-956),
+# so a flat build dir cannot satisfy it.
+#
+# The map-transition repeat gate (#11) is registered ONLY in a Debug tree: its
+# ZONEID assertion is _DEBUG-only (common.c:409-412), so a Release tree gets the
+# engine-free analyzer teeth check instead of a vacuous green. Build a debug
+# tree for the N-run gate.
+test-process: build copy-all
+	ctest --test-dir $(BUILD_DIR) --output-on-failure --no-tests=error -L process
+
+.PHONY: test-process
+
 # ── check ────────────────────────────────────────────────────────────────────
 # Verifies all build outputs are present and host subsystem contracts pass.
 
