@@ -1562,6 +1562,14 @@ static int       wui_activeMenu = UIMENU_NONE;
 static char      wui_menuStack[WIRED_MENU_STACK_DEPTH][64];
 static int       wui_menuStackDepth = 0;
 
+/* Backdrop preset of the last menu actually SHOWN, so the scene nudge can ask
+ * "did the backdrop change on screen?" rather than "does this menu differ from
+ * the stack entry below it?". The two answers diverge on a close+open pair —
+ * a settings tab click — where the stack momentarily unwinds to a menu the
+ * user never saw. Survives across the close, which is the whole point. */
+static wuiBgPreset_t wui_lastShownPreset      = WUI_BG_PRESET_ANIMATED;
+static qboolean      wui_lastShownPresetValid = qfalse;
+
 /* WiredUI F4 (return-focus): the focused item on the menu that was on top when
  * a new menu was pushed OVER it. On pop, WiredUI_PopMenu restores focus to this
  * item so closing a dialog returns the caret to the control that opened it.
@@ -5919,14 +5927,23 @@ void WiredUI_PushMenu( const char *name ) {
 	 *
 	 * Comparing presets rather than menu names keeps the effect for the case it
 	 * exists to serve: main (dim) -> a deep menu (animated) still shifts and
-	 * settles, because there the scene genuinely arrives. */
+	 * settles, because there the scene genuinely arrives.
+	 *
+	 * The comparison is against the LAST MENU SHOWN, not against the entry
+	 * below this one on the stack. A settings tab click is `close` then
+	 * `open`: the close drops the stack to main, so at push time the entry
+	 * below is main (dim) while the incoming tab is animated — the presets
+	 * differ and the nudge fired anyway, which is why gating on the stack
+	 * alone did not stop it. Remembering what was actually on screen sees
+	 * animated -> animated and stays quiet. */
 	{
-		const wiredMenuDef_t *prev = ( wui_menuStackDepth >= 2 )
-		                           ? WiredUI_FindMenu( wui_menuStack[ wui_menuStackDepth - 2 ] )
-		                           : NULL;
-		const wiredMenuDef_t *cur  = WiredUI_FindMenu( name );
-		if ( !prev || !cur || prev->bgPreset != cur->bgPreset )
+		const wiredMenuDef_t *cur = WiredUI_FindMenu( name );
+		if ( !cur || !wui_lastShownPresetValid || wui_lastShownPreset != cur->bgPreset )
 			WiredUI_NotifyBgTransition();
+		if ( cur ) {
+			wui_lastShownPreset      = cur->bgPreset;
+			wui_lastShownPresetValid = qtrue;
+		}
 	}
 	wui_focusItem = -1;
 	wui_focusedItemPtr = NULL;
