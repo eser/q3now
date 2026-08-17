@@ -6,3 +6,7 @@ token accentSoft            "#c87a2a"
 // line-art over a SOLID accent reads as a bright "empty box"; this wash lets the
 // icon dominate while the full-opacity accent border still marks the slot.
 token accentWash            "rgba(244,160,58,0.34)"
+// Loading-screen accent-derived tints (see base ui/_tokens.wui).
+token loading_glow          "rgba(244,160,58,0.05)"
+token loading_divider_hi    "rgba(244,160,58,0.90)"
+token loading_bar_fill      "rgba(244,160,58,1.0)"

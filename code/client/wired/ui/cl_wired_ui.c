@@ -1422,17 +1422,23 @@ void WiredUI_ResetAssetGlobalsDefaults( void ) {
 	wui_assetGlobals.fadeAmount = 0.2f;
 	Vector4Set( wui_assetGlobals.shadowColor, 0.1f, 0.1f, 0.1f, 0.25f );
 	Q_strncpyz( wui_assetGlobals.focusSound, "sound/misc/menu2.opus", sizeof( wui_assetGlobals.focusSound ) );
-	/* Accent-cyan focus default ($primary_cyan #00b4d8; was amber, off-theme).
-	 * Read the live token so this default follows ui_palette_accent. NOTE:
-	 * this init runs before the implicit ui/_tokens.wui include, so the token
-	 * table is usually empty here — the guarded read leaves the baked cyan
-	 * literal in place (which equals $primary_cyan), and becomes theme-driven
-	 * only if this reset is re-invoked after tokens load. .wui menus can also
-	 * override per-theme with `focuscolor $primary_cyan`. */
-	Vector4Set( wui_assetGlobals.focusColor, 0.0f, 0.706f, 0.847f, 1.0f );
+	/* Focus default = the live theme accent ($accent). NOTE: this init runs
+	 * before the implicit ui/_tokens.wui include, so the token table is
+	 * usually empty here — the guarded read leaves the baked literal in place,
+	 * and becomes theme-driven only if this reset is re-invoked after tokens
+	 * load. .wui menus can also override per-theme with `focuscolor $accent`.
+	 *
+	 * FIX 2026-08-17: this read $primary_cyan while claiming to follow
+	 * ui_palette_accent. It did not — the v2 accent overlays only rewrite
+	 * accent/accentDim/accentSoft/accentWash, so primary_cyan stayed v1
+	 * #00b4d8 under every accent. Because this default is the one that
+	 * survives (the token table is empty at this point), the baked literal is
+	 * what actually shipped: v1 cyan, on every theme. Read $accent and bake
+	 * the shipped amber default (#f4a03a). */
+	Vector4Set( wui_assetGlobals.focusColor, 0.957f, 0.627f, 0.227f, 1.0f );
 	{
 		extern const char *WiredToken_Find( const char *name );
-		const char *v = WiredToken_Find( "primary_cyan" );
+		const char *v = WiredToken_Find( "accent" );
 		unsigned    r, g, b;
 		if ( v && v[0] == '#' && ( strlen( v ) == 7 || strlen( v ) == 9 )
 		     && sscanf( v + 1, "%2x%2x%2x", &r, &g, &b ) == 3 ) {

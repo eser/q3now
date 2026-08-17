@@ -8,11 +8,11 @@ All six layers emit as Clay primitives so the existing dispatch (rect /
 border / image) handles them without renderer-side additions. Layer
 shapes:
   base        — solid colour fill (token $bg)
-  grid        — double-stride cyan grid (120 px major + 24 px minor),
+  grid        — double-stride $accent grid (120 px major + 24 px minor),
                 breathing drift offset driven by a LOOP_LINEAR anim
-  scanlines   — single 2 px horizontal cyan line sweeping top-to-bottom
+  scanlines   — single 2 px horizontal $accent line sweeping top-to-bottom
                 via a LOOP_LINEAR anim
-  glow_rays   — 4 corner radial-feel rectangles tinted $primary_cyan
+  glow_rays   — 4 corner radial-feel rectangles tinted $accent
   noise       — sparse cyan dots distributed pseudo-randomly
   vignette    — 4 corner radius-quad darken pieces
 
@@ -112,10 +112,13 @@ static Clay_Color wui_bg_resolve( const char *name, Clay_Color fallback ) {
  * many-rows implementation since a single sweeping line is far less
  * visually dense than a static stripe field. */
 static const Clay_Color WUI_BG_COLOR_BASE        = {   8,  12,  16, 255 };  /* #080c10 — opaque base */
-static const Clay_Color WUI_BG_COLOR_GRID_MAJOR  = {   0, 180, 216,  12 };  /* primary_cyan @ ~5% */
-static const Clay_Color WUI_BG_COLOR_GRID_MINOR  = {   0, 180, 216,   0 };  /* minor stride disabled — single weave reads cleaner than overlapped double stride */
-static const Clay_Color WUI_BG_COLOR_SCANLINES   = {   0, 180, 216,  20 };  /* primary_cyan @ ~8% */
-static const Clay_Color WUI_BG_COLOR_GLOW        = {   0, 180, 216,   8 };  /* primary_cyan @ ~3% */
+/* RGB here is only the fallback when the `accent` token is missing; the live
+ * value is resolved per frame by wui_bg_resolve. Baked to the shipped amber
+ * default (#f4a03a) as of 2026-08-17 — these were v1 cyan (0,180,216). */
+static const Clay_Color WUI_BG_COLOR_GRID_MAJOR  = { 244, 160,  58,  12 };  /* $accent @ ~5% */
+static const Clay_Color WUI_BG_COLOR_GRID_MINOR  = { 244, 160,  58,   0 };  /* minor stride disabled — single weave reads cleaner than overlapped double stride */
+static const Clay_Color WUI_BG_COLOR_SCANLINES   = { 244, 160,  58,  20 };  /* $accent @ ~8% */
+static const Clay_Color WUI_BG_COLOR_GLOW        = { 244, 160,  58,   8 };  /* $accent @ ~3% */
 static const Clay_Color WUI_BG_COLOR_NOISE       = { 232, 244, 253,   4 };  /* text @ ~1.5% */
 static const Clay_Color WUI_BG_COLOR_VIGNETTE    = {   0,   0,   0,  16 };  /* #000 @ ~6% — the corner quads sit on top of any bg colour, so the alpha must stay low enough that they read as faint corner darkening rather than the "4 opaque black corner rectangles" they appeared as in light-mode palettes at the previous ~25% alpha. */
 
@@ -335,11 +338,16 @@ static void wui_bg_emit_grid( float x, float y, float w, float h ) {
 	float offX  = sinf( phase ) * amp;
 	float offY  = cosf( phase ) * amp;
 
-	/* Resolve the grid tint from the live `primary_cyan` token so it
-	 * follows ui_palette_accent, but keep each layer's baked alpha (the
-	 * #rrggbb token form is opaque; wui_bg_resolve would clobber a→255). */
-	Clay_Color major = wui_bg_resolve( "primary_cyan", WUI_BG_COLOR_GRID_MAJOR );
-	Clay_Color minor = wui_bg_resolve( "primary_cyan", WUI_BG_COLOR_GRID_MINOR );
+	/* Resolve the grid tint from the live `accent` token so it follows
+	 * ui_palette_accent, but keep each layer's baked alpha (the #rrggbb token
+	 * form is opaque; wui_bg_resolve would clobber a→255).
+	 *
+	 * FIX 2026-08-17: this named `primary_cyan` while the comment claimed it
+	 * followed ui_palette_accent. It did not — the v2 accent overlays only
+	 * rewrite accent/accentDim/accentSoft/accentWash, so the grid weave stayed
+	 * v1 cyan under every accent. */
+	Clay_Color major = wui_bg_resolve( "accent", WUI_BG_COLOR_GRID_MAJOR );
+	Clay_Color minor = wui_bg_resolve( "accent", WUI_BG_COLOR_GRID_MINOR );
 	major.a = WUI_BG_COLOR_GRID_MAJOR.a;
 	minor.a = WUI_BG_COLOR_GRID_MINOR.a;
 
@@ -361,7 +369,9 @@ static void wui_bg_emit_scanlines( float x, float y, float w, float h ) {
 	 * (LOOP_LINEAR 0 → 1 wraps). The line traverses the full panel
 	 * height each cycle. */
 	float gy = y + wui_bg_scanline_sweep_t * h;
-	Clay_Color scan = wui_bg_resolve( "primary_cyan", WUI_BG_COLOR_SCANLINES );
+	/* FIX 2026-08-17: was `primary_cyan` (a v1 token no accent overlay
+	 * rewrites); read `accent` so the sweep follows ui_palette_accent. */
+	Clay_Color scan = wui_bg_resolve( "accent", WUI_BG_COLOR_SCANLINES );
 	scan.a = WUI_BG_COLOR_SCANLINES.a;
 	CLAY({
 		.layout = { .sizing = { CLAY_SIZING_FIXED( w ), CLAY_SIZING_FIXED( (float) WUI_BG_SCANLINE_THICK_PX ) } },
@@ -377,7 +387,9 @@ static void wui_bg_emit_scanlines( float x, float y, float w, float h ) {
 
 static void wui_bg_emit_glow_rays( float x, float y, float w, float h ) {
 	float side = ( ( w < h ) ? w : h ) * WUI_BG_GLOW_CORNER_FRACTION;
-	Clay_Color glow = wui_bg_resolve( "primary_cyan", WUI_BG_COLOR_GLOW );
+	/* FIX 2026-08-17: was `primary_cyan` (a v1 token no accent overlay
+	 * rewrites); read `accent` so the corner glow follows ui_palette_accent. */
+	Clay_Color glow = wui_bg_resolve( "accent", WUI_BG_COLOR_GLOW );
 	glow.a = WUI_BG_COLOR_GLOW.a;
 	float positions[ 4 ][ 2 ] = {
 		{ x,             y             },

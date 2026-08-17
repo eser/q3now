@@ -98,8 +98,8 @@ menuDef {
 	// as backdrop texture.
 	// ── Backdrop group (grid lines + glow washes + divider) ─────────
 	// Addressable identity for the deleted Loading_DrawBackground
-	// visual restoration: 23 horizontal accent lines, two low-alpha
-	// cyan glow washes, and the tri-segment vertical divider at
+	// visual restoration: 23 horizontal structural rules, two low-alpha
+	// accent glow washes, and the tri-segment vertical divider at
 	// x≈0.519. The leaves preserve their absolute rects verbatim —
 	// rect-direct render is mandatory because the SCR legacy path
 	// at cl_loading_ui.c renders pixel-for-pixel against the same
@@ -141,27 +141,27 @@ menuDef {
 		itemDef { name "loading_grid_y88" rect 0 0.88  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
 		itemDef { name "loading_grid_y92" rect 0 0.92  1 0.0015 backcolor $loading_grid_line decoration visible 1 }
 
-		itemDef { name "loading_glow_left"  rect 0.10 0.30 0.40 0.40 backcolor 0.00 0.45 0.55 0.05 decoration visible 1 }
-		itemDef { name "loading_glow_right" rect 0.50 0.30 0.40 0.40 backcolor 0.00 0.45 0.55 0.05 decoration visible 1 }
+		itemDef { name "loading_glow_left"  rect 0.10 0.30 0.40 0.40 backcolor $loading_glow decoration visible 1 }
+		itemDef { name "loading_glow_right" rect 0.50 0.30 0.40 0.40 backcolor $loading_glow decoration visible 1 }
 
 		itemDef {
 			name "loading_divider_top"
 			rect 0.519 0.075 0.001 0.350
-			backcolor 0.118 0.227 0.290 0.50
+			backcolor $loading_divider
 			decoration
 			visible 1
 		}
 		itemDef {
 			name "loading_divider_accent"
 			rect 0.518 0.425 0.003 0.150
-			backcolor 0.000 0.706 0.847 0.90
+			backcolor $loading_divider_hi
 			decoration
 			visible 1
 		}
 		itemDef {
 			name "loading_divider_bottom"
 			rect 0.519 0.575 0.001 0.325
-			backcolor 0.118 0.227 0.290 0.50
+			backcolor $loading_divider
 			decoration
 			visible 1
 		}
@@ -246,14 +246,14 @@ menuDef {
 		itemDef {
 			name "loading_overall_bar_bg"
 			rect 0.542 0.7708 0.436 0.004
-			backcolor 1 1 1 0.04
+			backcolor $loading_bar_track
 			decoration
 			visible 1
 		}
 		itemDef {
 			name "loading_overall_bar_fill"
 			rect 0.542 0.7708 0.436 0.004
-			backcolor 0 0.71 0.85 1
+			backcolor $loading_bar_fill
 			bindwidth "loading.overall"
 			decoration
 			visible 1

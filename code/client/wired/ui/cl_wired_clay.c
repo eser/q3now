@@ -1515,7 +1515,7 @@ static void wui_clay_emit_radio( const wiredItemDef_t *item,
 	float        labelPct   = item->text[0] ? ( 1.0f - WUI_RADIO_BAND_FRACTION ) : 0.0f;
 	float        bandPct    = item->text[0] ? WUI_RADIO_BAND_FRACTION : 1.0f;
 
-	vec4_t   accentVec = { 0.0f, 0.706f, 0.847f, 1.0f };   /* $primary_cyan #00b4d8 fallback */
+	vec4_t   accentVec = { 0.957f, 0.627f, 0.227f, 1.0f };  /* $accent #f4a03a fallback */
 	vec4_t   restVec   = { 0.16f, 0.16f, 0.18f, 0.85f };
 	vec4_t   hoverVec  = { 0.28f, 0.28f, 0.32f, 0.9f };
 	vec4_t   segBdVec  = { 0.45f, 0.45f, 0.5f, 0.9f };
@@ -1527,8 +1527,17 @@ static void wui_clay_emit_radio( const wiredItemDef_t *item,
 	float      ringPx    = 0.0f;
 	qboolean   haveRing;
 
-	/* accent pill fill is theme-driven; follows ui_palette_accent per frame */
-	wui_clay_token_rgb( "primary_cyan", accentVec );
+	/* Selected-segment pill fill = the live theme accent; re-read per frame so
+	 * it follows ui_palette_accent.
+	 *
+	 * FIX 2026-08-17: this read "primary_cyan" while the comment claimed it
+	 * followed ui_palette_accent. It did not — the v2 accent overlays
+	 * (ui/themes/<accent>/_tokens.wui) only rewrite accent/accentDim/
+	 * accentSoft/accentWash, so primary_cyan stayed v1 #00b4d8 under every
+	 * accent and the selected pill rendered cyan even on amber. Read `accent`,
+	 * the token the overlay chain actually rewrites, and fall back to the
+	 * shipped amber default rather than back to v1 cyan. */
+	wui_clay_token_rgb( "accent", accentVec );
 	uint16_t   ringW     = 0;
 	Clay_Color ringColor = borderColor;
 
@@ -1765,18 +1774,22 @@ static void wui_clay_token_rgb( const char *tokenName, float outRGB[3] )
 	/* else: leave the caller's fallback RGB in place */
 }
 
-/* Selection + hover tints are the theme accent ($primary_cyan) at two alphas
- * so the two states read as distinct. RGB comes from the token (theme-driven);
- * only the alpha is authored here. Was an off-theme purple/grey hardcode. */
-static vec4_t wui_listbox_sel_color   = { 0.00f, 0.706f, 0.847f, 0.35f };
-static vec4_t wui_listbox_hover_color = { 0.00f, 0.706f, 0.847f, 0.12f };
+/* Selection + hover tints are the theme accent ($accent) at two alphas so the
+ * two states read as distinct. RGB comes from the token (theme-driven); only
+ * the alpha is authored here. Was an off-theme purple/grey hardcode.
+ *
+ * FIX 2026-08-17: the RGB fallbacks and the token name were v1 $primary_cyan,
+ * which no v2 accent overlay rewrites — so both tints stayed cyan under every
+ * accent. Fallbacks are now the shipped amber default (#f4a03a). */
+static vec4_t wui_listbox_sel_color   = { 0.957f, 0.627f, 0.227f, 0.35f };
+static vec4_t wui_listbox_hover_color = { 0.957f, 0.627f, 0.227f, 0.12f };
 
 /* Refresh the accent-derived listbox tints from the current theme token.
  * Called each frame before the listbox emits (cheap: one token lookup ×2). */
 static void wui_clay_refresh_listbox_theme_colors( void )
 {
-	wui_clay_token_rgb( "primary_cyan", wui_listbox_sel_color );
-	wui_clay_token_rgb( "primary_cyan", wui_listbox_hover_color );
+	wui_clay_token_rgb( "accent", wui_listbox_sel_color );
+	wui_clay_token_rgb( "accent", wui_listbox_hover_color );
 }
 
 /* ── checkbox geometry (single source of truth) ──────────────────────
@@ -2555,13 +2568,17 @@ static void wui_clay_emit_listbox( const wiredItemDef_t *item,
 			if ( hasHeader ) {
 				int   activeSortCol = -1, activeSortDir = 0;
 				vec4_t hdrBgVec   = { 1.0f, 1.0f, 1.0f, 0.05f };
-				/* Active-sort column header text = accent cyan ($primary_cyan
-				 * #00b4d8), the same active-state hue the segmented control uses.
+				/* Active-sort column header text = the theme accent ($accent),
+				 * the same active-state hue the segmented control uses.
 				 * Readable on the dark header band. NOT selColor: that is the
-				 * selected-ROW fill (translucent purple) and reads as invisible
-				 * dark-on-dark on the header band. */
-				vec4_t     hdrAccentVec = { 0.0f, 0.706f, 0.847f, 1.0f };  /* $primary_cyan fallback */
-				wui_clay_token_rgb( "primary_cyan", hdrAccentVec );        /* theme-driven; follows ui_palette_accent */
+				 * selected-ROW fill (a low-alpha wash of the same accent) and
+				 * reads as invisible dark-on-dark on the header band.
+				 *
+				 * FIX 2026-08-17: was $primary_cyan, a v1 token no accent
+				 * overlay rewrites — the active-sort header stayed cyan under
+				 * every accent. Fallback is the shipped amber default. */
+				vec4_t     hdrAccentVec = { 0.957f, 0.627f, 0.227f, 1.0f };  /* $accent #f4a03a fallback */
+				wui_clay_token_rgb( "accent", hdrAccentVec );                /* theme-driven; follows ui_palette_accent */
 				Clay_Color hdrBg     = wui_clay_color_of( hdrBgVec, wui_compositor_panel_alpha );
 				Clay_Color hdrAccent = wui_clay_color_of( hdrAccentVec, wui_compositor_panel_alpha );
 
@@ -3658,9 +3675,13 @@ static void wui_clay_emit_item( const wiredMenuDef_t *panel,
 				float      trackHpx  = WUI_SLIDER_TRACK_H_PX * dpi;
 				uint32_t   trackId   = wui_clay_slider_track_id_for_item( item );
 				vec4_t     trackVec  = { 0.3f, 0.3f, 0.3f, 0.6f };
-				vec4_t     fillVec   = { 0.0f, 0.706f, 0.847f, 1.0f };  /* $primary_cyan #00b4d8 fallback */
-				vec4_t     thumbVec  = { 0.85f, 0.92f, 0.96f, 1.0f };   /* light handle */
-				wui_clay_token_rgb( "primary_cyan", fillVec );          /* theme-driven; follows ui_palette_accent */
+				/* Filled portion of the slider track = the theme accent.
+				 * FIX 2026-08-17: was $primary_cyan, a v1 token no accent
+				 * overlay rewrites — every slider fill stayed cyan under every
+				 * accent. Fallback is the shipped amber default. */
+				vec4_t     fillVec   = { 0.957f, 0.627f, 0.227f, 1.0f };  /* $accent #f4a03a fallback */
+				vec4_t     thumbVec  = { 0.85f, 0.92f, 0.96f, 1.0f };     /* light handle */
+				wui_clay_token_rgb( "accent", fillVec );                  /* theme-driven; follows ui_palette_accent */
 				Clay_Color trackBg   = wui_clay_color_of( trackVec, wui_compositor_panel_alpha );
 				Clay_Color fillBg    = wui_clay_color_of( fillVec,  wui_compositor_panel_alpha );
 				Clay_Color thumbBg   = wui_clay_color_of( thumbVec, wui_compositor_panel_alpha );
