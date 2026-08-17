@@ -28,9 +28,13 @@
 // transient focus there), which is why the active colours differ ($accent vs
 // $bone).
 //
-// NOTE (2026-08-17): the chevron carried `text ""` and so drew NOTHING, while
-// this comment block described the treatment above — the docs and the markup
-// had drifted apart. Restored to the documented ">" glyph.
+// NOTE (2026-08-17): the empty `text ""` above is DELIBERATE. Eser asked for
+// these rows to read as plain menu items / vertical tabs, so the glyph was
+// dropped on purpose; the open tab is marked by its fill and label colour
+// alone. Everything this block says about chevron colour is inherited prose
+// describing the treatment that WOULD apply if one came back — it is not a
+// description of what ships. Re-adding `text ">"` on the strength of it has
+// been tried once and reverted. Do not "fix" the empty string.
 //
 //   QW_SETTINGS_NAV("nav_video", "video", "Video", "video")
 // Args:
@@ -59,6 +63,6 @@
 		active ui_settingsSection SECTION \
 		action { setcvar "ui_settingsSection" SECTION ; close ; open SUBMENU scene } \
 		\
-		itemDef { type 0 rect 0 0 1vw 3vh height FIT width PERCENT 1vw text ">" textalign 0 font $font_sans 24 forecolor $boneDim forecolor.active $accent active ui_settingsSection SECTION decoration visible 1 grow 0 } \
+		itemDef { type 0 rect 0 0 1vw 3vh height FIT width PERCENT 1vw text "" textalign 0 font $font_sans 24 forecolor $boneDim decoration visible 1 grow 0 } \
 		itemDef { type 0 rect 0 0 16vw 3vh height FIT width PERCENT 16vw text LABEL textalign 0 font $font_sans 22 forecolor $bone forecolor.active $accent active ui_settingsSection SECTION decoration visible 1 grow 0 } \
 	}

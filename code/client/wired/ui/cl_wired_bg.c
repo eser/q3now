@@ -770,11 +770,21 @@ void WUI_DrawBackgroundLayered( float x, float y, float w, float h, int flags ) 
 
 void WUI_DrawBackgroundDim( float x, float y, float w, float h ) {
 	if ( w <= 0.0f || h <= 0.0f ) return;
-	/* Single dark scrim, no layered scene — the WUI_BG_INTENT_DIM path for a
-	 * menu opened over live gameplay. Clay_Color channels are 0..255; alpha 140
-	 * ≈ 0.55 matches the in-game scrim token. Same floating attach-to-root quad
-	 * as the layered base pass so it sits behind the menu's foreground children. */
-	wui_bg_emit_rect( x, y, w, h, (Clay_Color){ 0.0f, 0.0f, 0.0f, 140.0f } );
+	/* Single dark scrim, no layered scene — the DIM preset, for a menu opened
+	 * over live gameplay or over the attract reel. Clay_Color channels are
+	 * 0..255. Same floating attach-to-root quad as the layered base pass so it
+	 * sits behind the menu's foreground children.
+	 *
+	 * Raised from 140 (~0.55) to 215 (~0.84) on 2026-08-17. Measured over the
+	 * attract reel's own headline band, the 98th-percentile brightness falls
+	 * 148 -> 117 across that range, so the scrim does bite — the earlier
+	 * reading that alpha changed nothing was taken from the wrong band.
+	 *
+	 * What the scrim CANNOT fix is the main menu's headline sitting on top of
+	 * attract's own headline: both are foreground text, so dimming what is
+	 * behind never separates them. That is a composition clash, tracked
+	 * separately, not a reason to push this alpha higher. */
+	wui_bg_emit_rect( x, y, w, h, (Clay_Color){ 0.0f, 0.0f, 0.0f, 215.0f } );
 }
 
 // ── F2 depth-parallax scene (SCENE intent path) ─────────────────────
