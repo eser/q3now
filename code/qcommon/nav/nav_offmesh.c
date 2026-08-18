@@ -819,6 +819,21 @@ static void buildWaterEdgeOmcs( const navGeom_t *geom, navOmcInput_t *out )
     if ( !geom || geom->numTris <= 0 || geom->numVerts <= 0 )
         return;
 
+    /* No liquid anywhere on this map => no water seam to reconnect, so every cell
+     * scanned below would be traced only to be discarded. That scan is expensive:
+     * it rasterises the whole map XY extent and column-traces each covered cell
+     * with up to NAV_WATEREDGE_ZSAMPLES CM_BoxTrace calls — and it runs on the MAIN
+     * THREAD, before the bake worker spawns, because collision is not thread-safe
+     * and cannot move off it. On a large dry arena that is minutes of frozen
+     * process during map spawn: the engine looks hung with the connect screen up,
+     * since the server never reaches the point of sending a gamestate. One
+     * whole-map contents query removes the whole cost. */
+    if ( !CM_HasLiquid() ) {
+        Com_Log( SEV_DEBUG, LOG_CH(ch_nav_build),
+            "water-edge OMC: map has no liquid, skipping the column scan\n" );
+        return;
+    }
+
     /* Grid bounds from the geom XY extent (Quake). */
     float minx = 1e30f, maxx = -1e30f, miny = 1e30f, maxy = -1e30f;
     float minz = 1e30f, maxz = -1e30f;
