@@ -107,6 +107,8 @@ vmCvar_t	cg_debugAnim;
 vmCvar_t	cg_debugPosition;
 vmCvar_t	cg_debugEvents;
 vmCvar_t	cg_debugCharacterSkin;
+vmCvar_t	cg_drawBBox;
+vmCvar_t	cg_drawBBoxEnt;
 vmCvar_t	cg_errorDecay;
 vmCvar_t	cg_nopredict;
 vmCvar_t	cg_noPlayerAnims;
@@ -276,6 +278,15 @@ static cvarTable_t cvarTable[] = {
 	{ &cg_debugPosition, "cg_debugposition", "0", CVAR_CHEAT },
 	{ &cg_debugEvents, "cg_debugevents", "0", CVAR_CHEAT },
 	{ &cg_debugCharacterSkin, "cg_debugCharacterSkin", "0", CVAR_CHEAT },
+	/* 0 off, 1 depth-tested boxes, 2 also an inflated translucent box. CVAR_CHEAT
+	   (needs sv_cheats 1) and deliberately NOT _DEBUG-gated: the automated capture
+	   harness runs whatever build is installed, and a debug aid the harness cannot
+	   reach is a debug aid that never gets used — see poscheck, which is _DEBUG-only
+	   and therefore simply absent whenever a release binary is under test. */
+	{ &cg_drawBBox, "cg_drawBBox", "0", CVAR_CHEAT },
+	/* -1 = every entity; otherwise only this entity number, as printed by the
+	   server's `poscheck` area list. */
+	{ &cg_drawBBoxEnt, "cg_drawBBoxEnt", "-1", CVAR_CHEAT },
 	{ &cg_errorDecay, "cg_errordecay", "100", 0 },
 	{ &cg_nopredict, "cg_nopredict", "0", 0 },
 	{ &cg_noPlayerAnims, "cg_noplayeranims", "0", CVAR_CHEAT },

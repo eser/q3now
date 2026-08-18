@@ -1353,6 +1353,8 @@ extern	vmCvar_t		cg_debugAnim;
 extern	vmCvar_t		cg_debugPosition;
 extern	vmCvar_t		cg_debugEvents;
 extern	vmCvar_t		cg_debugCharacterSkin;
+extern	vmCvar_t		cg_drawBBox;
+extern	vmCvar_t		cg_drawBBoxEnt;
 extern	vmCvar_t		cg_errorDecay;
 extern	vmCvar_t		cg_nopredict;
 extern	vmCvar_t		cg_noPlayerAnims;
@@ -1680,6 +1682,19 @@ void CG_AdjustEarthquakes( const vec3_t delta );
 //
 void CG_SetEntitySoundPosition( centity_t *cent );
 void CG_AddPacketEntities( void );
+
+/* How far the cg_drawBBox 2 "x-ray" box is grown past the real bounds. cgame
+   cannot disable depth testing for polys, so seeing a box that is inside or
+   behind geometry relies on inflating it until it protrudes. 24 units clears
+   typical floor/wall thickness without swamping neighbouring entities. */
+#define CG_BBOX_XRAY_INFLATE  24.0f
+/* Half-thickness of a wireframe edge. cgame has no line primitive, so each of the
+   box's 12 edges is drawn as a thin camera-facing quad; this is how thin. It is a
+   world-space width, not a screen-space one, so it shrinks with distance — hence
+   wide enough to survive across an arena, still narrow enough not to obscure the
+   model it surrounds. */
+#define CG_BBOX_EDGE_HALFWIDTH  1.2f
+void CG_DrawEntityBoxes( void );
 void CG_Beam( centity_t *cent );
 void CG_AdjustPositionForMover(const vec3_t in, int moverNum, int fromTime, int toTime, vec3_t out, vec3_t angles_in, vec3_t angles_out);
 

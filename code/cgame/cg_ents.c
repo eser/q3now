@@ -1213,7 +1213,266 @@ void CG_AddPacketEntities( void ) {
 		CG_AddCEntity( cent );
 	}
 
+	CG_DrawEntityBoxes();
+
 #if FEAT_SCREENSHOT_TOOLS
 	cg.time += cg.serverOffset;
 #endif
+}
+
+
+/*
+===============
+CG_BoxColorForEntity
+
+Give each entity a stable, distinguishable colour so several boxes in one frame
+can be told apart, and so the same entity keeps its colour across frames. Derived
+from the entity number (not the index into the snapshot, which shifts frame to
+frame) via a small hash spread across the six saturated hue corners.
+===============
+*/
+static void CG_BoxColorForEntity( int entityNum, byte rgba[4], byte alpha ) {
+	static const byte hues[6][3] = {
+		{ 255,  64,  64 },   /* red    */
+		{  64, 255,  64 },   /* green  */
+		{  64, 160, 255 },   /* blue   */
+		{ 255, 255,  64 },   /* yellow */
+		{ 255,  64, 255 },   /* magenta*/
+		{  64, 255, 255 },   /* cyan   */
+	};
+	const byte *h = hues[ ((unsigned) entityNum * 2654435761u >> 13) % 6 ];
+
+	rgba[0] = h[0];
+	rgba[1] = h[1];
+	rgba[2] = h[2];
+	rgba[3] = alpha;
+}
+
+
+/*
+===============
+CG_AddBoxQuads
+
+Emit an axis-aligned box as a WIREFRAME: 12 edges, each a thin camera-agnostic
+quad, rather than 6 solid faces.
+
+Solid faces were the first attempt and they defeat the tool's own purpose: the
+near face covers the very model you are trying to look at, so "is the model
+inside this box?" becomes unanswerable exactly when you need to ask it. Even at
+low alpha, a translucent face washes the model out to a faint smear. Edges leave
+the interior clear and still convey position and extent.
+
+Polys are the only geometry primitive cgame can hand to the renderer
+(trap_R_AddPolyToScene), and they are added as SF_POLY draw surfs owned by
+REFENTITYNUM_WORLD, so they depth-test against the world like ordinary geometry.
+There is no line primitive and no nodepth shader available here, hence edges are
+drawn as thin quads.
+
+Each edge is a separate 4-vert poly rather than one big submission because
+RE_AddPolyToScene treats a multi-poly submission as a flat array of
+numPolys * numVerts and requires every poly to share numVerts.
+===============
+*/
+static void CG_AddBoxQuads( const vec3_t mins, const vec3_t maxs, const byte rgba[4] ) {
+	/* The 8 corners, indexed by bit: x = bit0, y = bit1, z = bit2. */
+	vec3_t corner[8];
+	/* The 12 edges, as pairs of corner indices. */
+	static const int edges[12][2] = {
+		{ 0,1 }, { 2,3 }, { 4,5 }, { 6,7 },   /* along x */
+		{ 0,2 }, { 1,3 }, { 4,6 }, { 5,7 },   /* along y */
+		{ 0,4 }, { 1,5 }, { 2,6 }, { 3,7 },   /* along z */
+	};
+	polyVert_t verts[4];
+	int i, e, v;
+
+	for ( i = 0; i < 8; i++ ) {
+		corner[i][0] = ( i & 1 ) ? maxs[0] : mins[0];
+		corner[i][1] = ( i & 2 ) ? maxs[1] : mins[1];
+		corner[i][2] = ( i & 4 ) ? maxs[2] : mins[2];
+	}
+
+	for ( e = 0; e < 12; e++ ) {
+		const float *a = corner[ edges[e][0] ];
+		const float *b = corner[ edges[e][1] ];
+		vec3_t dir, up, side;
+		int axis;
+
+		VectorSubtract( b, a, dir );
+		if ( VectorNormalize( dir ) < 0.001f ) {
+			continue;   /* zero-extent axis: the box is flat here, skip */
+		}
+		/* Widen the edge perpendicular to BOTH the edge and the view direction, so
+		   the quad always faces the camera. Widening along a fixed world axis
+		   instead — the obvious first try — makes every edge that happens to lie in
+		   the plane containing that axis and the eye present itself edge-on, so it
+		   thins to nothing: the box shows up as one or two stray bars and reads as a
+		   broken box rather than a thin one. */
+		CrossProduct( dir, cg.refdef.viewaxis[0], side );
+		if ( VectorNormalize( side ) < 0.001f ) {
+			/* Edge points straight at the eye; any perpendicular is as good as any
+			   other. Pick the world axis it runs along least so the cross product
+			   stays well-conditioned. */
+			axis = ( fabs( dir[0] ) < fabs( dir[1] ) ) ? 0 : 1;
+			if ( fabs( dir[2] ) < fabs( dir[axis] ) ) {
+				axis = 2;
+			}
+			VectorClear( up );
+			up[axis] = 1.0f;
+			CrossProduct( dir, up, side );
+			VectorNormalize( side );
+		}
+		VectorScale( side, CG_BBOX_EDGE_HALFWIDTH, side );
+
+		VectorAdd( a, side, verts[0].xyz );
+		VectorSubtract( a, side, verts[1].xyz );
+		VectorSubtract( b, side, verts[2].xyz );
+		VectorAdd( b, side, verts[3].xyz );
+
+		for ( v = 0; v < 4; v++ ) {
+			verts[v].st[0] = ( v == 1 || v == 2 ) ? 1.0f : 0.0f;
+			verts[v].st[1] = ( v >= 2 ) ? 1.0f : 0.0f;
+			verts[v].modulate.rgba[0] = rgba[0];
+			verts[v].modulate.rgba[1] = rgba[1];
+			verts[v].modulate.rgba[2] = rgba[2];
+			verts[v].modulate.rgba[3] = rgba[3];
+		}
+		trap_R_AddPolyToScene( cgs.media.whiteShader, 4, verts );
+
+		/* Again with the winding reversed. The default shader is single-sided, and
+		   which way an edge quad happens to wind depends on the edge direction and
+		   where the camera is — so roughly half the edges get backface-culled and the
+		   box appears as one or two stray bars. Submitting both windings is cheaper
+		   and more predictable than reasoning about the sign per edge. 12 edges x 2
+		   = 24 polys per box, against an 8192 budget. */
+		{
+			polyVert_t flipped[4];
+			flipped[0] = verts[3];
+			flipped[1] = verts[2];
+			flipped[2] = verts[1];
+			flipped[3] = verts[0];
+			trap_R_AddPolyToScene( cgs.media.whiteShader, 4, flipped );
+		}
+	}
+}
+
+
+/*
+===============
+CG_DrawEntityBoxes
+
+cg_drawBBox: draw a box at every entity the client received this frame.
+
+WHY THIS EXISTS. Debugging "the entity is missing" previously had no instrument
+that was independent of the entity's own material and lighting. Turning the world
+off (r_drawWorld 0) only shows an entity that happens to be bright enough to see,
+so "not in the world", "outside the frustum" and "too dark to notice" all produce
+the same black frame and cannot be told apart. A box is drawn from geometry we
+compute here, in a flat unlit colour, so it appears whenever the entity is in
+front of the camera — whatever its shader does.
+
+TWO PASSES, and the pair is the point:
+
+  cg_drawBBox 1   depth-tested. The box is occluded by world geometry exactly as
+                  the entity is. Box visible => the entity is unoccluded.
+  cg_drawBBox 2   also draws a second, larger, translucent box. Polys cannot
+                  disable depth testing from cgame (no nodepth shader exists, and
+                  RF_DEPTHHACK is a refEntity flag that does not apply to polys),
+                  so "see it through walls" is approximated by inflating the box
+                  until it pokes out of whatever encloses it.
+
+Reading the result:
+  neither box     the entity is not in the frame at all — look at the camera,
+                  the snapshot, or whether it spawned. Not a render bug.
+  outline only    the entity is in the frame but its model is not drawing —
+                  a model/shader/lighting problem.
+  both + model    everything is working.
+
+BOUNDS SOURCE. trap_R_ModelBounds on the entity's model, NOT the encoded
+entityState_t.solid bbox. solid carries the *collision* extent and is zero for
+anything without CONTENTS_SOLID|CONTENTS_BODY — a CTF flag is a trigger, so its
+solid box is a 30-unit cube that has nothing to do with how big the model looks,
+and other items have no solid box at all. Model bounds are what "where is it on
+screen" actually depends on. Entities with no model (ET_PLAYER composes several,
+speakers and triggers have none) fall back to a small fixed marker cube so their
+position is still visible.
+===============
+*/
+void CG_DrawEntityBoxes( void ) {
+	int num;
+	int only;
+
+	if ( !cg_drawBBox.integer ) {
+		return;
+	}
+
+	/* cg_drawBBoxEnt isolates one entity number. A busy arena puts a box on every
+	   item, and one large box (a player, a mover) covers the rest — which defeats
+	   the tool exactly when the scene is complicated enough to need it. Entity
+	   numbers come from `poscheck`, whose area list prints them. -1 = show all. */
+	only = cg_drawBBoxEnt.integer;
+
+	for ( num = 0; num < cg.snap->numEntities; num++ ) {
+		const entityState_t *es = &cg.snap->entities[ num ];
+		const centity_t     *cent = &cg_entities[ es->number ];
+		vec3_t    mins, maxs, org;
+		byte      rgba[4];
+		qhandle_t hModel;
+		int       i;
+
+		if ( only >= 0 && es->number != only ) {
+			continue;
+		}
+
+		VectorCopy( cent->lerpOrigin, org );
+
+		/* modelindex means different things per entity type, and getting this wrong
+		   fails silently — every lookup returns handle 0, every entity falls back to
+		   the marker cube, and the tool looks like it is working while showing
+		   uniform boxes that have nothing to do with the models. For ET_ITEM the
+		   index is into bg_itemlist and the model lives in cg_items[]; elsewhere it
+		   indexes the configstring models in cgs.gameModels[]. */
+		hModel = 0;
+		if ( es->modelindex > 0 ) {
+			if ( es->eType == ET_ITEM ) {
+				if ( es->modelindex < bg_numItems ) {
+					hModel = cg_items[ es->modelindex ].models[0];
+				}
+			} else if ( es->modelindex < MAX_MODELS ) {
+				hModel = cgs.gameModels[ es->modelindex ];
+			}
+		}
+
+		if ( hModel ) {
+			trap_R_ModelBounds( hModel, mins, maxs );
+		} else {
+			VectorSet( mins, -8, -8, -8 );
+			VectorSet( maxs,  8,  8,  8 );
+		}
+
+		/* A model with degenerate bounds would emit a zero-area box that is
+		   invisible — the exact failure this tool exists to rule out. Give it the
+		   fallback marker instead so "no box" always means "no entity here". */
+		if ( maxs[0] - mins[0] < 1.0f && maxs[1] - mins[1] < 1.0f && maxs[2] - mins[2] < 1.0f ) {
+			VectorSet( mins, -8, -8, -8 );
+			VectorSet( maxs,  8,  8,  8 );
+		}
+
+		for ( i = 0; i < 3; i++ ) {
+			mins[i] += org[i];
+			maxs[i] += org[i];
+		}
+
+		CG_BoxColorForEntity( es->number, rgba, 255 );
+		CG_AddBoxQuads( mins, maxs, rgba );
+
+		if ( cg_drawBBox.integer >= 2 ) {
+			vec3_t bigMins, bigMaxs;
+			for ( i = 0; i < 3; i++ ) {
+				bigMins[i] = mins[i] - CG_BBOX_XRAY_INFLATE;
+				bigMaxs[i] = maxs[i] + CG_BBOX_XRAY_INFLATE;
+			}
+			CG_BoxColorForEntity( es->number, rgba, 96 );
+			CG_AddBoxQuads( bigMins, bigMaxs, rgba );
+		}
+	}
 }
