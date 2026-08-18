@@ -26,7 +26,7 @@ timeout 240 ./wired.x64.exe \
     +map arena1 +waitForMap +wait 60 +setviewpos 1052 1432 50 135 +wait 120 +screenshot \
     +wait 30 +map arena17 +waitForMap +wait 60 +setviewpos 488 1096 378 -90 +wait 120 +screenshot \
     +wait 30 +quit \
-    > "/tmp/probe-${RUN_LABEL}-wired.log" 2>&1
+    > "$WIRED_TMP/probe-${RUN_LABEL}-wired.log" 2>&1
 cd "$WIRED_SOURCE"
 
 JSONL="$PRODUCT_DIR/qconsole.jsonl"

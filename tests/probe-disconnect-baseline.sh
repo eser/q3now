@@ -61,7 +61,7 @@ done
 echo "  testmod staged : $(ls "$PROBE_HOME/testmod" | tr '\n' ' ')"
 
 JSONL="$PROBE_HOME/qconsole.jsonl"
-LOG="/c/msys64/tmp/claude/probe-disconnect.log"
+LOG="${LOG:-$WIRED_TMP/probe-disconnect.log}"
 mkdir -p "$(dirname "$LOG")"
 rm -f "$LOG" "$JSONL"
 

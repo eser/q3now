@@ -27,7 +27,10 @@ set -u
 . "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PNG2RAW="${PNG2RAW:-$REPO_ROOT/tools/png2raw/png2raw.exe}"
+# Bare name first, .exe second — the same probe every sibling script uses. Hardcoding
+# .exe made this check resolvable only on Windows.
+PNG2RAW="${PNG2RAW:-$REPO_ROOT/tools/png2raw/png2raw}"
+[ -x "$PNG2RAW" ] || { [ -x "$PNG2RAW.exe" ] && PNG2RAW="$PNG2RAW.exe"; }
 HOME_DIR="$WIRED_HOME"
 BASE_DIR="$HOME_DIR/base"
 SHOT_DIR="$BASE_DIR/screenshots"
@@ -43,7 +46,7 @@ run_game() {
     # $1 = extra engine args after the pinned render setup.
     ( cd "$REPO_ROOT" && make run-game DEV=1 \
         EXTRA_ARGS="+set r_mode -1 +set r_customwidth $FRAME_W +set r_customheight $FRAME_H +set r_fullscreen 0 +set com_automated 1 +set r_brightness 1 +set r_pinShaderTime 1.0 +set r_hdrAutoExposure 0 +log renderer.shaders info $1" \
-        >/tmp/ibl-w10-$2.log 2>&1 || true )
+        >"$WIRED_TMP/ibl-w10-$2.log" 2>&1 || true )
 }
 
 cmd="${1:-}"
@@ -217,7 +220,7 @@ CFG
     rm -f "$JSONL"
     ( cd "$REPO_ROOT" && make run-game DEV=1 \
         EXTRA_ARGS="+set r_mode -1 +set r_customwidth $FRAME_W +set r_customheight $FRAME_H +set r_fullscreen 0 +set com_automated 1 +set r_brightness 1 +set r_pinShaderTime 1.0 +set r_hdrAutoExposure 0 +log renderer.shaders info +log renderer.timing debug +map $MAP +waitForMap +wait 80 +exec w10prof.cfg" \
-        >/tmp/ibl-w10-profile.log 2>&1 || true )
+        >"$WIRED_TMP/ibl-w10-profile.log" 2>&1 || true )
     rm -f "$write"
     echo "== GPU 200f-avg lines (renderer.timing) =="
     grep -E '"cat":"renderer.timing"' "$JSONL" 2>/dev/null \

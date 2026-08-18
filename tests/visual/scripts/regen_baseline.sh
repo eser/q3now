@@ -41,7 +41,7 @@ URL="file://$HARNESS?mode=$MODE&accent=$ACCENT"
 
 # Single Chrome invocation: --screenshot writes PNG to file; --dump-dom writes
 # serialized HTML to stdout. Both produced in one render pass.
-DOM_HTML="$(mktemp /tmp/qw_dom_html.XXXXXX)"
+DOM_HTML="$(mktemp "$WIRED_TMP/qw_dom_html.XXXXXX")"
 "$CHROME" --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
   --window-size="$W,$H" --virtual-time-budget=30000 --allow-file-access-from-files \
   --force-device-scale-factor=1 \

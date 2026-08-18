@@ -31,8 +31,8 @@
 #
 # Environment:
 #   Q3DIR  path to game installation with base/pak*.pk3 or
-#          base/pa[xk]*.sw3z (default: /Applications/q3now on macOS,
-#          $HOME/q3now elsewhere). Used only for the SKIP probe — the
+#          base/pa[xk]*.sw3z (default: WIRED_INSTALL from
+#          tests/lib/wired_paths.sh). Used only for the SKIP probe — the
 #          run itself uses Sys_Pwd for fs_installpath.
 #
 # Exit codes:
@@ -50,6 +50,11 @@ set -uo pipefail
 # the `make smoke-map-transition` prerequisite; resolve it repo-relative.
 SMOKE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SMOKE_SCRIPT_DIR/.." && pwd)"
+# shellcheck source=tests/lib/wired_paths.sh
+. "$SMOKE_SCRIPT_DIR/lib/wired_paths.sh"
+# Scratch root for this harness's intermediate logs / diff tables. Honours a
+# pre-set SMT_TMP; otherwise the system temp root from the shared helper.
+SMT_TMP="${SMT_TMP:-$WIRED_TMP}"
 PNG2RAW="${PNG2RAW:-$REPO_ROOT/tools/png2raw/png2raw}"
 if [ ! -x "$PNG2RAW" ] && [ -x "$PNG2RAW.exe" ]; then PNG2RAW="$PNG2RAW.exe"; fi
 if [ ! -x "$PNG2RAW" ]; then
@@ -77,7 +82,7 @@ if [ "${1:-}" = "--self-test" ]; then
     g="$GOLDEN_DIR/A_spawn.png"
     [ -s "$g" ] || { echo "SKIP: no golden $g"; exit 77; }
     [ -x "$PERTURB" ] || { echo "SKIP: png-perturb not built ($PERTURB) — build: cd tools/png-perturb && go build -o png-perturb.exe ."; exit 77; }
-    tmp="/tmp/smoke-mt-selftest-perturb.png"
+    tmp="$SMT_TMP/smoke-mt-selftest-perturb.png"
     "$PERTURB" "$g" "$tmp" 40 || { echo "FAIL: perturb failed"; exit 1; }
     verdict() {
         tiled_diff "$1" "$2" | awk -v margin="$TILE_MARGIN" -v floor="$TILE_FLOOR" '
@@ -96,11 +101,11 @@ fi
 
 # ── arg / env resolution ─────────────────────────────────────────────────────
 WIRED="${1:-wired}"
-case "$(uname -s)" in
-    Darwin*) Q3DIR_DEFAULT="/Applications/q3now" ;;
-    *)       Q3DIR_DEFAULT="$HOME/q3now" ;;
-esac
-Q3DIR="${Q3DIR:-$Q3DIR_DEFAULT}"
+# Install root from the shared helper, never a literal: the old defaults
+# (`/Applications/q3now`, `$HOME/q3now`) are not the installed bundle name —
+# that is <PRODUCT_NAME><CHANNEL_SUFFIX>. Same fix as smoke-quic-game.sh.
+# Used only for the SKIP probe; the run itself uses Sys_Pwd.
+Q3DIR="${Q3DIR:-$WIRED_INSTALL}"
 
 # Resolve the wired binary's containing directory (its dir is used as the
 # launch CWD, so Sys_Pwd → fs_installpath finds the adjacent base/).
@@ -428,7 +433,7 @@ LAUNCH_TIMEOUT=${LAUNCH_TIMEOUT:-180}
 run_wired() {
     local tag="$1"; shift
     local timeout_s="$1"; shift
-    local logfile="/tmp/smoke-mt-$tag.log"
+    local logfile="$SMT_TMP/smoke-mt-$tag.log"
     rm -f "$JSONL"
     rm -f "$logfile"
     # Wipe the isolated homepath's config.cfg per launch so CVAR_ARCHIVE
@@ -831,10 +836,10 @@ for entry in "${VPS[@]}"; do
         FAIL=1; continue
     fi
 
-    nf_ab="/tmp/smoke-mt-nf-${id}-ab.txt"
-    nf_ac="/tmp/smoke-mt-nf-${id}-ac.txt"
-    nf_bc="/tmp/smoke-mt-nf-${id}-bc.txt"
-    pair_file="/tmp/smoke-mt-pair-$id.txt"
+    nf_ab="$SMT_TMP/smoke-mt-nf-${id}-ab.txt"
+    nf_ac="$SMT_TMP/smoke-mt-nf-${id}-ac.txt"
+    nf_bc="$SMT_TMP/smoke-mt-nf-${id}-bc.txt"
+    pair_file="$SMT_TMP/smoke-mt-pair-$id.txt"
     tiled_diff "$shot_a" "$shot_b" > "$nf_ab"
     tiled_diff "$shot_a" "$shot_c" > "$nf_ac"
     tiled_diff "$shot_b" "$shot_c" > "$nf_bc"

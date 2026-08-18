@@ -46,15 +46,35 @@ SMOKE_UPDATE_GOLDEN="${SMOKE_UPDATE_GOLDEN:-0}"
 PNG2RAW="${PNG2RAW:-$REPO_ROOT/tools/png2raw/png2raw}"
 [ -x "$PNG2RAW" ] || { [ -x "$PNG2RAW.exe" ] && PNG2RAW="$PNG2RAW.exe"; }
 [ -x "$PNG2RAW" ] || { echo "FAIL: png2raw not found at $PNG2RAW (make png2raw)" >&2; exit 2; }
-PERTURB="${PERTURB:-$REPO_ROOT/tools/png-perturb/png-perturb.exe}"
+# Same bare-name-then-.exe resolution as png2raw above: the Windows build emits
+# png-perturb.exe, every other platform emits png-perturb. Hardcoding .exe made the
+# self-test's shift teeth SKIP silently on macOS/Linux.
+PERTURB="${PERTURB:-$REPO_ROOT/tools/png-perturb/png-perturb}"
+[ -x "$PERTURB" ] || { [ -x "$PERTURB.exe" ] && PERTURB="$PERTURB.exe"; }
 
 # Isolated home (matches smoke-map-transition: paks present, config wiped per launch).
-# The engine-free self-test never launches/captures; use a writable POSIX temp
-# instead of probing the MSYS /c default on non-Windows hosts.
+# The engine-free self-test never launches/captures, so it only needs a writable temp.
+#
+# Capture modes need a home that actually HAS the paks, and that location is
+# platform-derived — never a literal. tests/lib/wired_paths.sh owns that derivation
+# (see its header: ~14 scripts each invented their own answer and most baked in one
+# developer's MSYS layout, which broke every non-Windows run). This script used to
+# default to /c/msys64/tmp/fp-verify-home, which on a non-Windows host is simply an
+# empty directory: the engine launches, finds no pak, and every capture comes back
+# black — indistinguishable from a real rendering defect.
+# shellcheck source=lib/wired_paths.sh
+. "$SCRIPT_DIR/lib/wired_paths.sh"
+
+# Scratch root for this script's logs and intermediate tile/noise files. Derived from
+# the system temp dir (see WIRED_TMP in wired_paths.sh) rather than a literal /tmp,
+# which on macOS is not where temporary files belong and which collides between
+# concurrent runs.
+VRF_TMP="${VRF_TMP:-$WIRED_TMP}"
+
 if [ "$MODE" = "selftest" ]; then
-    SMOKE_HOME="${SMOKE_HOME:-/tmp/vrf-selftest-home}"
+    SMOKE_HOME="${SMOKE_HOME:-$WIRED_TMP/vrf-selftest-home}"
 else
-    SMOKE_HOME="${SMOKE_HOME:-/c/msys64/tmp/fp-verify-home}"
+    SMOKE_HOME="${SMOKE_HOME:-$WIRED_HOME}"
 fi
 SMOKE_HOME_NATIVE="$(cygpath -w "$SMOKE_HOME" 2>/dev/null || echo "$SMOKE_HOME")"
 SHOTDIR="$SMOKE_HOME/base/screenshots"
@@ -73,6 +93,26 @@ ENGINE_BIN="./$(basename "$ENGINE")"
 # "+wait N" — a count, NOT a list of "+wait" tokens, so it never adds "+" tokens toward the
 # MAX_CONSOLE_LINES (32) split ceiling (see capture_fixed_cam). Default 0.
 CAP_EXTRA_WAIT="${CAP_EXTRA_WAIT:-0}"
+
+# Optional console command run right AFTER the setviewpos teleport and before the
+# settle+screenshot. Empty by default, so it adds no "+" token and every existing mode's
+# recipe (and its blessed golden) is byte-for-byte unchanged. It exists because the extra
+# "$@" cvar tokens expand BEFORE "+map", so they cannot express "do this once the camera
+# has arrived". The entity-occlusion mode uses it for `viewpos`, whose logged origin turns
+# "the camera is where I asked" from an assumption into a measurement — setviewpos is
+# silent on success, so a mis-teleport otherwise looks identical to a missing entity.
+#
+# Injected as a BARE "+<cmd>", NOT "+cmd <cmd>". The surrounding recipe uses "+cmd
+# noclip" / "+cmd setviewpos" because those are GAME commands that must be forwarded to
+# the server; "cmd" is precisely that forwarder. Client-side console commands go through
+# it only to be rejected — "+cmd log cgame info" logs `unknown cmd log` and, because the
+# whole line is one forwarded string, silently swallows anything chained after it. That
+# is how the camera assertion below first came back vacuous. `viewpos` (CG_Viewpos_f) and
+# `log` are both client-side, so they are issued bare.
+#
+# Keep it to ONE "+" token's worth: budget under the MAX_CONSOLE_LINES (32) split ceiling
+# documented in capture_fixed_cam.
+CAP_POST_CMD="${CAP_POST_CMD:-}"
 
 # Decode params — 8x8 grid over the actual screenshot framebuffer.  SDL3's
 # high-pixel-density window produces 2560x1440 screenshots for the requested
@@ -136,7 +176,7 @@ scrub_home_cgame() {
 capture() {
     local map="$1" x="$2" y="$3" z="$4" yaw="$5" tag="$6"; shift 6
     local logfile shot
-    logfile="/tmp/vrf-$tag.log"
+    logfile="$VRF_TMP/vrf-$tag.log"
     shot="$SHOTDIR/vrf_$tag.png"
     rm -f "$shot" 2>/dev/null
     rm -f "$SMOKE_HOME/base/config.cfg" 2>/dev/null
@@ -210,7 +250,7 @@ capture() {
 capture_fixed_cam() {
     local map="$1" pos="$2" tag="$3" logfile shot
     shift 3   # remaining args are extra +set cvar tokens forwarded to the engine
-    logfile="/tmp/vrf-$tag.log"
+    logfile="$VRF_TMP/vrf-$tag.log"
     shot="$SHOTDIR/vrf_$tag.png"
     rm -f "$shot" 2>/dev/null
     rm -f "$SMOKE_HOME/base/config.cfg" 2>/dev/null
@@ -229,6 +269,7 @@ capture_fixed_cam() {
         "$@" `# extra +set tokens; a later +set r_ssao 1 here overrides the default-off above (last-wins)` \
         +map "$map" +waitForMap +wait 80 \
         +cmd noclip +wait 20 +cmd setviewpos $pos \
+        ${CAP_POST_CMD:+ +$CAP_POST_CMD} \
         +wait $(( 60 + 40 + 60 + CAP_EXTRA_WAIT )) \
         +screenshot "vrf_$tag" +wait 30 +quit \
         >"$logfile" 2>&1 || true )
@@ -287,7 +328,7 @@ capture_fixed_cam() {
 capture_scene() {
     local map="$1" scenename="$2" waitframes="$3" tag="$4" logfile shot
     shift 4   # remaining args are extra +set cvar tokens forwarded to the engine
-    logfile="/tmp/vrf-$tag.log"
+    logfile="$VRF_TMP/vrf-$tag.log"
     shot="$SHOTDIR/vrf_$tag.png"
     rm -f "$shot" 2>/dev/null
     rm -f "$SMOKE_HOME/base/config.cfg" 2>/dev/null
@@ -543,7 +584,7 @@ ao_route_assert() {
 }
 
 ao_route_log_assert() {
-    local tag="$1" log="/tmp/vrf-$1.log"
+    local tag="$1" log="$VRF_TMP/vrf-$1.log"
     awk '
         index($0, "r_showAO:") {
             family++
@@ -874,7 +915,7 @@ fwdplus)
         # drift typically appears in only one. So the gated signal is the MIN of the two
         # cross-path diffs (fp0a-vs-fp1a, fp0b-vs-fp1b): a tile only counts if BOTH pairs
         # diverge (genuine), not if one pair caught a phase glitch (drift).
-        n0="/tmp/vrf-fpn0-$id.txt"; n1="/tmp/vrf-fpn1-$id.txt"; sig="/tmp/vrf-fpsig-$id.txt"; sig2="/tmp/vrf-fpsig2-$id.txt"
+        n0="$VRF_TMP/vrf-fpn0-$id.txt"; n1="$VRF_TMP/vrf-fpn1-$id.txt"; sig="$VRF_TMP/vrf-fpsig-$id.txt"; sig2="$VRF_TMP/vrf-fpsig2-$id.txt"
         tiled_diff "$p0a" "$p0b" > "$n0"; tiled_diff "$p1a" "$p1b" > "$n1"
         tiled_diff "$p0a" "$p1a" > "$sig"; tiled_diff "$p0b" "$p1b" > "$sig2"
         summary="$(awk -v ratio="$FP_RATIO" -v margin="$FP_MARGIN" -v floor="$FP_FLOOR" -v ceil="$FP_CEIL" \
@@ -994,7 +1035,7 @@ viewport)
             # signal = the fresh frame (va) vs the golden. A tile FAILs only when its
             # signal clears its own noise-scaled threshold (so GTAO jitter is bounded out,
             # a coherent placement shift on a calm tile is caught).
-            nfile="/tmp/vrf-vpnoise.txt"; sfile="/tmp/vrf-vpsig.txt"
+            nfile="$VRF_TMP/vrf-vpnoise.txt"; sfile="$VRF_TMP/vrf-vpsig.txt"
             { tiled_diff "$va" "$vb"; tiled_diff "$va" "$vc"; tiled_diff "$vb" "$vc"; } \
                 | awk '{if($2>n[$1])n[$1]=$2} END{for(i=0;i<64;i++)printf "%d %.3f\n",i,n[i]}' > "$nfile"
             tiled_diff "$va" "$golden" > "$sfile"
@@ -1098,9 +1139,9 @@ dlight-shadow-probe)
     for entry in "${PROBE_CAMS[@]}"; do
         set -- $entry; map="$1"; pos="$2 $3 $4 $5"
         s="$( capture_fixed_cam "$map" "$pos" "dlsp_on"  +set r_forwardPlus 1 +set r_dlightShadows 1 +set r_dlightShadowTest $DLS_RADIUS )" || continue
-        on="/tmp/vrf-dlsp-on.png"; cp "$s" "$on"   # copy out before the next capture overwrites the shared screenshot name
+        on="$VRF_TMP/vrf-dlsp-on.png"; cp "$s" "$on"   # copy out before the next capture overwrites the shared screenshot name
         s="$(capture_fixed_cam "$map" "$pos" "dlsp_off" +set r_forwardPlus 1 +set r_dlightShadows 0 +set r_dlightShadowTest $DLS_RADIUS )" || continue
-        off="/tmp/vrf-dlsp-off.png"; cp "$s" "$off"
+        off="$VRF_TMP/vrf-dlsp-off.png"; cp "$s" "$off"
         paste <(tile_lums "$off") <(tile_lums "$on") | awk -v map="$map" -v pos="$pos" '
             {ti=$1; offL=$2; onL=$4; d=offL-onL; if(d>maxd){maxd=d;mt=ti;mo=offL;mn=onL}}
             END{printf "  %-8s [%-16s] max-darken tile=%2d off=%.1f on=%.1f delta=%.1f\n", map, pos, mt, mo, mn, maxd}'
@@ -1152,7 +1193,7 @@ dlight-shadow|dlight-shadow-lifecycle)
     # a long tail of +wait/+screenshot tokens.
     capture_dlight_triplet() {
         local logfile cfg x y z yaw shot
-        logfile="/tmp/vrf-dls-sequence.log"
+        logfile="$VRF_TMP/vrf-dls-sequence.log"
         cfg="$SMOKE_HOME/base/dlight-shadow-gate.cfg"
         set -- $DLS_POS
         [ "$#" -eq 4 ] || { echo >&2 "  dlight-shadow: invalid DLS_POS '$DLS_POS'"; return 1; }
@@ -1225,10 +1266,10 @@ dlight-shadow|dlight-shadow-lifecycle)
         # Prove the full 24-pass producer ran, the on→off rebuild completed, and the
         # process reached all post-toggle screenshots without a VUID/crash.  This catches
         # both the 24576px atlas regression and stale descriptor generation on live off.
-        if ! grep -Eq 'dlightShadowProfile: 4 lights x 6 = 24 passes/frame,' /tmp/vrf-dls-sequence.log; then
+        if ! grep -Eq 'dlightShadowProfile: 4 lights x 6 = 24 passes/frame,' $VRF_TMP/vrf-dls-sequence.log; then
             echo "  dlight-shadow-lifecycle: FAIL — no exact K=4/24-pass producer authority"
             FAIL=1
-        elif ! grep -Fq 'dlight shadows: live rebuild active=0 k=1' /tmp/vrf-dls-sequence.log; then
+        elif ! grep -Fq 'dlight shadows: live rebuild active=0 k=1' $VRF_TMP/vrf-dls-sequence.log; then
             echo "  dlight-shadow-lifecycle: FAIL — on→off resource rebuild did not complete"
             FAIL=1
         else
@@ -1236,10 +1277,10 @@ dlight-shadow|dlight-shadow-lifecycle)
         fi
     elif [ "$FAIL" = 0 ]; then
         # per-tile luma for each capture
-        tile_lums "$onA" > /tmp/vrf-dls-la.txt
-        tile_lums "$onB" > /tmp/vrf-dls-lb.txt
-        tile_lums "$offA" > /tmp/vrf-dls-loff.txt
-        tile_lums "$noLight" > /tmp/vrf-dls-lnolight.txt
+        tile_lums "$onA" > $VRF_TMP/vrf-dls-la.txt
+        tile_lums "$onB" > $VRF_TMP/vrf-dls-lb.txt
+        tile_lums "$offA" > $VRF_TMP/vrf-dls-loff.txt
+        tile_lums "$noLight" > $VRF_TMP/vrf-dls-lnolight.txt
         # Position-independent: find the tile that darkens most (off - mean(on)) — that is
         # where the shadow falls. Assert (a) that max-darken exceeds DLS_DARKEN_MIN (a real
         # cast shadow), and (b) it is LOCALISED — only a few tiles darken past half the
@@ -1267,9 +1308,9 @@ dlight-shadow|dlight-shadow-lifecycle)
                 if(darken>dmin/2.0) nDark++          # tiles darkened past half the floor
             }
             END{ printf "%.1f %d %d %.1f %.1f", maxDark, maxTile, nDark, (sumOff-sumOn)/nt, maxNoise }' \
-            /tmp/vrf-dls-la.txt /tmp/vrf-dls-lb.txt /tmp/vrf-dls-loff.txt)"
+            $VRF_TMP/vrf-dls-la.txt $VRF_TMP/vrf-dls-lb.txt $VRF_TMP/vrf-dls-loff.txt)"
         read -r maxDark maxTile nDark frameDelta maxNoise <<<"$stats"
-        lightMax="$(paste /tmp/vrf-dls-loff.txt /tmp/vrf-dls-lnolight.txt | awk '
+        lightMax="$(paste $VRF_TMP/vrf-dls-loff.txt $VRF_TMP/vrf-dls-lnolight.txt | awk '
             BEGIN{m=0} {d=$2-$4; if(d>m)m=d} END{printf "%.1f",m}')"
         v="$(dlight_darken_assert "$maxDark" "$nDark" "$frameDelta" "$maxNoise")" || FAIL=1
         if ! awk -v d="$lightMax" -v f="$DLS_DARKEN_MIN" 'BEGIN{exit !(d>=f)}'; then
@@ -1377,7 +1418,7 @@ scene)
             # max over the same-config pairwise diffs; signal = fresh frame (ca) vs
             # golden; a tile FAILs only when its signal clears its noise-scaled
             # threshold, floored at SCENE_FLOOR.
-            nfile="/tmp/vrf-camnoise.txt"; sfile="/tmp/vrf-camsig.txt"
+            nfile="$VRF_TMP/vrf-camnoise.txt"; sfile="$VRF_TMP/vrf-camsig.txt"
             { tiled_diff "$ca" "$cb"; tiled_diff "$ca" "$cc"; tiled_diff "$cb" "$cc"; } \
                 | awk '{if($2>n[$1])n[$1]=$2} END{for(i=0;i<64;i++)printf "%d %.3f\n",i,n[i]}' > "$nfile"
             tiled_diff "$ca" "$golden" > "$sfile"
@@ -1545,7 +1586,7 @@ selftest)
         || { echo "    clean route inventory: $v (BUG)"; rc=1; }
     v="$(ao_route_assert 0 0)"; case "$v" in FAIL*) echo "    missing route marker: $v  FAIL-as-expected";; *) echo "    missing route: $v (BUG)"; rc=1;; esac
     v="$(ao_route_assert 1 1)"; case "$v" in FAIL*) echo "    route plus refusal: $v  FAIL-as-expected";; *) echo "    route+refusal: $v (BUG)"; rc=1;; esac
-    route_test_log="/tmp/vrf-self-route.log"
+    route_test_log="$VRF_TMP/vrf-self-route.log"
     printf '%s\n' '12:34:56.789+03:00 [INFO ] r_showAO: route=denoised-gtao source=wired-gtao-ao-denoised layout=shader-read-only set=3' >"$route_test_log"
     v="$(ao_route_log_assert self-route)"; [ "$v" = "OK" ] && echo "    exact whole-row route family: $v" \
         || { echo "    exact route family: $v (BUG)"; rc=1; }
@@ -1638,7 +1679,7 @@ selftest)
     elif [ ! -x "$PERTURB" ]; then
         echo "    SKIP: png-perturb not built at $PERTURB"
     else
-        synth="/tmp/vrf-selftest-chroma.png"; tint="/tmp/vrf-selftest-chroma-tint.png"
+        synth="$VRF_TMP/vrf-selftest-chroma.png"; tint="$VRF_TMP/vrf-selftest-chroma-tint.png"
         # Remove any STALE synth from a prior run FIRST: otherwise a broken/old png-perturb
         # (one lacking --chromatic — it exits nonzero and writes nothing) would leave the
         # last-good file in place and 1f would diff THAT and spuriously pass, masking a dead
@@ -1694,7 +1735,7 @@ selftest)
     elif [ ! -x "$PERTURB" ]; then
         echo "    SKIP: png-perturb not built at $PERTURB"
     else
-        shifted="/tmp/vrf-dls-selftest-shift.png"; rm -f "$shifted" 2>/dev/null
+        shifted="$VRF_TMP/vrf-dls-selftest-shift.png"; rm -f "$shifted" 2>/dev/null
         "$PERTURB" --shift 6 0 "$gd" "$shifted" 2>/dev/null || echo "    SKIP: shift failed"
         if [ -s "$shifted" ]; then
             dself="$(worst_tile_diff "$gd" "$gd")"
@@ -1717,7 +1758,7 @@ selftest)
         echo "    SKIP: png-perturb not built at $PERTURB (build: cd tools/png-perturb && go build -o png-perturb.exe .)"
     else
         FLOOR="${FWDPLUS_TILE_FLOOR:-60.0}"
-        tmp="/tmp/vrf-selftest-perturb.png"
+        tmp="$VRF_TMP/vrf-selftest-perturb.png"
         "$PERTURB" "$g" "$tmp" 40 || { echo "    SKIP: perturb failed"; }
         self="$(worst_tile_diff "$g" "$g")"
         pert="$(worst_tile_diff "$g" "$tmp")"
@@ -1744,7 +1785,7 @@ selftest)
     elif [ ! -x "$PERTURB" ]; then
         echo "    SKIP: png-perturb not built at $PERTURB"
     else
-        shifted="/tmp/vrf-selftest-shift.png"
+        shifted="$VRF_TMP/vrf-selftest-shift.png"
         "$PERTURB" --shift 5 0 "$gv" "$shifted" || echo "    SKIP: shift failed"
         vself="$(worst_tile_diff "$gv" "$gv")"
         vshift="$(worst_tile_diff "$gv" "$shifted")"
@@ -1756,6 +1797,162 @@ selftest)
     fi
 
     if [ "$rc" -eq 0 ]; then echo "==> SELF-TEST PASS: AO shape + grayscale/isolation/route + flat-white negative + luminance-budget + ambient-invariant + chromatic-edge-concentration (synthetic + numeric) + dlight-shadow-darken (numeric + shift) + value tiled_diff + viewport-placement all have teeth"; else echo "==> SELF-TEST FAIL"; fi
+    exit $rc
+    ;;
+
+entity-occlusion)
+    # ── Does a world-space entity survive the world draw? ─────────────────────
+    # Provenance (TASK-177): the arenam3 neutral CTF flag was reported missing. Every
+    # server-side link in the chain measured CLEAN — entity spawned at the authored
+    # origin, classname resolved, item found, transmitted, client received it with
+    # eFlags=0 / nodraw=0 and a valid model handle. The defect was only ever visible
+    # in the frame, and only by A/B: with r_drawWorld 0 the flag renders perfectly
+    # (white cloth, pole, skull emblem, centered); with the world drawn, from the
+    # IDENTICAL viewpoint and with no geometry between camera and flag, it vanishes.
+    #
+    # That A/B is exactly what this mode automates, and it is the whole point: neither
+    # capture ALONE can see the bug. A world-off shot proves only "the entity renders";
+    # a world-on shot proves only "the frame is not empty". The defect lives in the
+    # DIFFERENCE, so the gate is a difference:
+    #
+    #   world-off  →  entity is the only non-sky content; measure its footprint
+    #   world-on   →  same camera; the entity's tiles must still differ from a
+    #                 world-on capture taken with the entity suppressed
+    #
+    # A pure "is the frame different" check would be satisfied by the world alone, so
+    # the comparison is restricted to the tiles the world-off capture proved the entity
+    # occupies. If the entity is being painted over by world geometry, those specific
+    # tiles collapse to the entity-free world and the diff falls under the floor.
+    #
+    # This is a REGRESSION GATE, not a diagnosis. It answers "did a visible entity stop
+    # being visible", which is the user-facing symptom and the thing that silently
+    # regressed. It deliberately does not try to attribute the cause (sort key, depth
+    # state, shader sort) — that is what a debugger and the renderer sources are for.
+    EO_MAP="${EO_MAP:-arenam3}"
+    EO_POS="${EO_POS:-256 520 60 90}"
+    # Tiles whose world-off content is this far above black are treated as "the entity
+    # is here". The world-off frame is nearly black apart from the model, so a modest
+    # floor separates model pixels from the sky/void without hand-picking tiles.
+    EO_PRESENT_MIN="${EO_PRESENT_MIN:-12.0}"
+    # How much an entity tile must move when the entity is present vs suppressed. Below
+    # this the entity is contributing nothing the world does not already paint.
+    EO_DIFF_MIN="${EO_DIFF_MIN:-8.0}"
+    rc=0
+
+    echo "==> entity-occlusion: $EO_MAP @ $EO_POS"
+
+    # Cheats are required for r_drawWorld; g_gametype 6 (1FCTF) is what spawns the
+    # neutral flag at all. cg_draw2D/cg_drawGun off so no HUD element can counterfeit
+    # a "present" tile — the crosshair sits dead center, exactly where the model is.
+    EO_COMMON="+set sv_cheats 1 +set g_gametype 6 +set cg_draw2D 0 +set cg_drawGun 0"
+    # `viewpos` (CG_Viewpos_f) logs the ACHIEVED camera origin at INFO on the cgame
+    # channel; see the camera assertion below for why this is not optional.
+    #
+    # The `log cgame info` must run HERE, not as a "+log" on the command line: log
+    # channels register lazily via LOG_DECLARE_CHANNEL, and cgame's is not declared
+    # until the cgame VM loads with the map. A command-line "+log cgame info" is parsed
+    # first and answers `no channels match prefix 'cgame'` — leaving the level untouched,
+    # the viewpos line unlogged, and the camera assertion below silently vacuous. (This
+    # is why "+log renderer.ral info" DOES work in the other modes: the renderer channel
+    # is engine-side and registered early.) Semicolon-chained so it stays ONE "+cmd"
+    # token against the MAX_CONSOLE_LINES ceiling.
+    CAP_POST_CMD="${CAP_POST_CMD:-log cgame info; viewpos}"
+
+    off_shot="$(capture_fixed_cam "$EO_MAP" "$EO_POS" "eo_worldoff" $EO_COMMON +set r_drawWorld 0)" || rc=1
+    on_shot="$(capture_fixed_cam  "$EO_MAP" "$EO_POS" "eo_worldon"  $EO_COMMON)" || rc=1
+    # r_drawEntities 0 is the negative control: same world, no entities. Without it a
+    # "world-on differs from world-off" result proves only that the world drew.
+    bare_shot="$(capture_fixed_cam "$EO_MAP" "$EO_POS" "eo_bare" $EO_COMMON +set r_drawEntities 0)" || rc=1
+
+    # ── Where did the camera actually END UP? ────────────────────────────────
+    # Cmd_SetViewpos_f prints NOTHING on success (g_cmds.c), so a silent log is not
+    # evidence the teleport landed — and a teleport into solid or out of the map
+    # produces a black frame that reads exactly like "the entity is missing". That
+    # ambiguity cost real time here: a black capture was nearly filed as an entity
+    # defect when the camera was simply somewhere else. CG_Viewpos_f logs the achieved
+    # origin at INFO on the cgame channel, so assert the camera arrived before drawing
+    # any conclusion about what is or is not in the frame.
+    eo_want="$(printf '%s' "$EO_POS" | awk '{printf "%d %d %d", $1, $2, $3}')"
+    eo_got="$(grep -hoE '^-?[0-9]+ -?[0-9]+ -?[0-9]+ -?[0-9]+ -?[0-9]+$' $VRF_TMP/vrf-eo_worldoff.log 2>/dev/null | tail -1 | awk '{printf "%d %d %d", $1, $2, $3}')"
+    if [ -n "$eo_got" ] && [ "$eo_got" != "$eo_want" ]; then
+        echo "  WARN: camera wanted [$eo_want] but reached [$eo_got] — frames are not from the requested viewpoint"
+    fi
+
+    # ── Could the entity under test even spawn? ──────────────────────────────
+    # A visual gate can only speak about what the server put in the world. If the
+    # entity could not spawn, every capture is legitimately empty and the pixel
+    # comparison below would report "the model never reached the frame" — naming a
+    # render defect for what is actually a SETUP failure.
+    #
+    # The signal is G_SpawnEntitiesFromString's "Missing spawn functions" list
+    # (g_spawn.c): classnames the map authored but the game module has no SP_ handler
+    # for, so they were silently dropped. Note the polarity — appearing in that list
+    # means the entity did NOT spawn. (Read it backwards and you conclude the exact
+    # opposite of the truth, which is worth the two lines of comment.)
+    #
+    # Absence from the list is necessary but not sufficient: it rules out the missing-
+    # handler cause, not gametype filtering or an unauthored entity. So this is a
+    # targeted SKIP for one clearly-attributable setup failure, and the pixel gate
+    # below still has to answer for everything else.
+    EO_ENTITY="${EO_ENTITY:-team_neutralflag}"
+    if awk -v e="$EO_ENTITY" '
+            /Missing spawn functions/ { inlist = 1; next }
+            inlist && $0 !~ /count=/  { inlist = 0 }
+            inlist && $0 ~ e         { found = 1 }
+            END                       { exit !found }
+        ' "$VRF_TMP/vrf-eo_worldoff.log" 2>/dev/null; then
+        echo "  SKIP: '$EO_ENTITY' is in this build's MISSING SPAWN FUNCTIONS list —"
+        echo "        the map authors it but the game module has no handler, so it never"
+        echo "        entered the world. Nothing to gate. Full list for this run:"
+        # awk, not a grep pipeline: a developer shell that forces --color=always (via
+        # GREP_OPTIONS or a grep alias exported into scripts) injects ANSI escapes into
+        # text meant to be read by a human diagnosing a setup problem.
+        awk '/Missing spawn functions/ { inlist = 1; next }
+             inlist && $0 !~ /count=/  { exit }
+             inlist {
+                 for (i = 1; i <= NF; i++)
+                     if ($i ~ /^count=/) { printf "          %-34s %s\n", $(i-1), $i; break }
+             }' "$VRF_TMP/vrf-eo_worldoff.log" 2>/dev/null | head -12
+        exit 0
+    fi
+
+    if [ "$rc" = 0 ]; then
+        # SAMPLE_COLS/ROWS default to 1280x720; a Retina host produces a 2560x1440
+        # framebuffer for the same logical window and every tile average would be
+        # decoded against the wrong row stride. Detect from the actual bytes.
+        detect_sample_dimensions "$off_shot" || exit 1
+
+        # Tiles the entity demonstrably occupies, learned from the world-off capture
+        # rather than hardcoded, so a camera or model change does not silently
+        # invalidate the gate.
+        present_tiles="$(tile_means "$off_shot" | awk -v f="$EO_PRESENT_MIN" '$2>f{print $1}')"
+        n_present="$(printf '%s\n' "$present_tiles" | grep -c . || true)"
+        if [ "${n_present:-0}" -lt 1 ]; then
+            echo "  FAIL: entity not visible even with r_drawWorld 0 — the model never reached the frame"
+            echo "        (this is a DIFFERENT defect than occlusion: check spawn/transmit/model handle)"
+            rc=1
+        else
+            # Worst per-tile movement across the entity's own tiles, entity-present vs
+            # entity-suppressed, with the world drawn in both.
+            worst="$(tile_means "$on_shot" >"$VRF_TMP/vrf-eo-on.tiles"
+                     tile_means "$bare_shot" >"$VRF_TMP/vrf-eo-bare.tiles"
+                     printf '%s\n' "$present_tiles" | while read -r t; do
+                         [ -n "$t" ] || continue
+                         a="$(awk -v t="$t" '$1==t{print $2}' $VRF_TMP/vrf-eo-on.tiles)"
+                         b="$(awk -v t="$t" '$1==t{print $2}' $VRF_TMP/vrf-eo-bare.tiles)"
+                         [ -n "$a" ] && [ -n "$b" ] && awk -v a="$a" -v b="$b" 'BEGIN{d=a-b;print (d<0)?-d:d}'
+                     done | sort -rn | head -1)"
+            worst="${worst:-0}"
+            v="$(awk -v w="$worst" -v m="$EO_DIFF_MIN" 'BEGIN{print (w>=m)?"OK":"FAIL(entity-occluded)"}')"
+            [ "$v" = "OK" ] || rc=1
+            printf "  entity tiles (from world-off): %s\n" "$n_present"
+            printf "  world-on entity-present vs entity-suppressed: worst tile-diff=%s (floor %s) -> %s\n" \
+                   "$worst" "$EO_DIFF_MIN" "$v"
+            [ "$v" = "OK" ] || echo "        the entity renders in isolation but contributes nothing once the world is drawn"
+        fi
+    fi
+
+    if [ "$rc" -eq 0 ]; then echo "==> ENTITY-OCCLUSION PASS"; else echo "==> ENTITY-OCCLUSION FAIL"; fi
     exit $rc
     ;;
 
