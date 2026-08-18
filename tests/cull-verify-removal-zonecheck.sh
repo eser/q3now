@@ -24,6 +24,8 @@
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=tests/lib/wired_paths.sh
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 
 # The zone allocator's _DEBUG consistency terminate strings (common.c).
 ZONE_RE='Z_Free: freed a pointer without ZONEID|Z_Free: memory block wrote past end|Z_CheckHeap: block size does not touch the next block|Z_CheckHeap: next block doesn'\''t have proper back link|Z_CheckHeap: two consecutive free blocks|freed a pointer without ZONEID|two consecutive free blocks'
@@ -109,7 +111,7 @@ case "$(uname -s)" in
     *)                    SMOKE_HOME_NATIVE="$SMOKE_HOME" ;;
 esac
 JSONL="$SMOKE_HOME/qconsole.jsonl"
-LOG="/tmp/zonechk-stdout.log"
+LOG="${LOG:-$WIRED_TMP/zonechk-stdout.log}"
 
 echo "==> A2.4.x cull-verify-removal zone-consistency check"
 echo "    binary    : $WIRED"

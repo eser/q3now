@@ -62,8 +62,15 @@ set -euo pipefail
 # force byte-clean output regardless of the caller's colour policy.
 grep() { command grep --color=never "$@"; }
 
+# shellcheck source=tests/lib/wired_paths.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/wired_paths.sh"
+
 DED="${1:-wired-headless}"
-Q3DIR="${Q3DIR:-/Applications/q3now}"
+# Install root from the shared helper, never a literal: the old default
+# `/Applications/q3now` is not the installed bundle name (that is
+# <PRODUCT_NAME><CHANNEL_SUFFIX>.app), so it named a directory that does not
+# exist. Same fix as smoke-quic-game.sh.
+Q3DIR="${Q3DIR:-$WIRED_INSTALL}"
 NAV_SEED="${NAV_SEED:-1337}"
 NAV_MAP="${NAV_MAP:-arena1}"
 NAV_MODE="${NAV_MODE:-nav}"
@@ -202,7 +209,7 @@ PY
 }
 
 if [ "${1:-}" = "--self-test" ]; then
-  fixture_dir="$(mktemp -d /tmp/q3now-nav-semantic-selftest-XXXXXX)"
+  fixture_dir="$(mktemp -d "$WIRED_TMP"/q3now-nav-semantic-selftest-XXXXXX)"
   golden_fixture="$fixture_dir/golden.trace"
   fresh_fixture="$fixture_dir/fresh.trace"
   printf '%s\n' \
@@ -376,9 +383,9 @@ if ! command -v "$DED" >/dev/null 2>&1 && [ ! -x "$DED" ]; then
   fi
 fi
 
-STDOUT="$(mktemp /tmp/q3now-navgate-log-XXXXXX)"
-FRESH="$(mktemp /tmp/q3now-navgate-trace-XXXXXX)"
-NAV_HOME="$(mktemp -d /tmp/q3now-navgate-home-XXXXXX)"
+STDOUT="$(mktemp "$WIRED_TMP"/q3now-navgate-log-XXXXXX)"
+FRESH="$(mktemp "$WIRED_TMP"/q3now-navgate-trace-XXXXXX)"
+NAV_HOME="$(mktemp -d "$WIRED_TMP"/q3now-navgate-home-XXXXXX)"
 ACT=""
 OFC=""
 PLAY=""
@@ -606,8 +613,8 @@ fi
 # that the current single-goal model does not do — that is future goal-tree work,
 # not this chain. The exit distance, when derivable, is printed as context only.
 if [ "$NAV_MODE" = "activation" ]; then
-  ACT="$(mktemp /tmp/q3now-navgate-act-XXXXXX)"
-  OFC="$(mktemp /tmp/q3now-navgate-offfloor-XXXXXX)"
+  ACT="$(mktemp "$WIRED_TMP"/q3now-navgate-act-XXXXXX)"
+  OFC="$(mktemp "$WIRED_TMP"/q3now-navgate-offfloor-XXXXXX)"
   grep -aE 'gate door=[0-9]+ ->|button pressed: ent=[0-9]+|button [0-9]+/[0-9]+ fired|gate door=[0-9]+ opened|ordered -> exit goal|idle -> exit goal|client [0-9]+ pos \(' "$STDOUT" \
     | sed -E 's/^[0-9:.+-]+ +\[[A-Z ]+\] +//' > "$ACT"
   echo "    captured $(wc -l < "$ACT") activation telemetry lines"
@@ -774,7 +781,7 @@ EOF2
 fi
 
 if [ "$NAV_MODE" = "playthrough" ]; then
-  PLAY="$(mktemp /tmp/q3now-navgate-play-XXXXXX)"
+  PLAY="$(mktemp "$WIRED_TMP"/q3now-navgate-play-XXXXXX)"
   grep -aE 'monster [0-9]+ killed by |level: [0-9]+ monsters spawned|client [0-9]+ pos \(|ordered -> exit goal|idle -> exit goal|exit reached:' "$STDOUT" \
     | sed -E 's/^[0-9:.+-]+ +\[[A-Z ]+\] +//' > "$PLAY"
   echo "    captured $(wc -l < "$PLAY") gameplay telemetry lines"

@@ -96,7 +96,7 @@ run_capture() {
 	local tag="$1" pbr="$2"
 	rm -f "$SHOT_DIR"/ibl_${tag}_*.png 2>/dev/null
 	write_cfg "$tag" "$pbr"
-	( cd "$REPO_ROOT" && make run-game DEV=1 EXTRA_ARGS="+map arena7 +waitForMap +wait 60 +exec iblcap.cfg" >/tmp/ibl-$tag.log 2>&1 || true )
+	( cd "$REPO_ROOT" && make run-game DEV=1 EXTRA_ARGS="+map arena7 +waitForMap +wait 60 +exec iblcap.cfg" >"$WIRED_TMP/ibl-$tag.log" 2>&1 || true )
 }
 
 echo "== capturing r_pbr 0 =="

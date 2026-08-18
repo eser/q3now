@@ -25,7 +25,7 @@ VPS=(
     "E_low    arena17   488 1096 200 -90"
 )
 
-OUTDIR=/tmp/shadertime-pin-2
+OUTDIR="${OUTDIR:-$WIRED_TMP/shadertime-pin-2}"
 mkdir -p "$OUTDIR"
 rm -f "$OUTDIR"/*.png "$OUTDIR"/tiles_*.txt
 

@@ -24,6 +24,7 @@
 #   WIRED_GAMEDATA   paks          (macOS: Contents/Resources/base)
 #   WIRED_BINARY    GUI engine binary, arch-suffixed
 #   WIRED_BINARY_HEADLESS  headless binary
+#   WIRED_TMP       system temp root, asked of the system (POSIX), never a literal
 #
 # Every value honours a pre-set environment variable, so callers can still
 # point a run somewhere else without editing scripts.
@@ -33,6 +34,28 @@ WIRED_CHANNEL="${WIRED_CHANNEL:--preview}"
 WIRED_APP="${WIRED_APP:-${WIRED_PRODUCT}${WIRED_CHANNEL}}"
 
 WIRED_SOURCE="${WIRED_SOURCE:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+
+# System temp root — asked of the system, not spelled out. `mktemp -d` is the POSIX
+# way to find where temporary files belong: it honours TMPDIR, falls back to the
+# platform default, and is correct on MSYS (where /tmp maps into the MSYS root) as
+# well as macOS (where TMPDIR is a per-user directory, not /tmp). Scripts that need a
+# STABLE location across runs — capture homes, warmup caches — should use
+# "$WIRED_TMP/<fixed-name>"; scripts that need a throwaway should keep calling
+# mktemp directly. Deriving the root once here is what keeps literals like
+# /c/msys64/tmp out of individual scripts; that particular literal silently produced
+# an empty, pak-free home on every non-Windows host, so captures came back black and
+# read as rendering defects.
+if [ -z "${WIRED_TMP:-}" ]; then
+    _wired_tmp_probe="$(mktemp -d 2>/dev/null)" || _wired_tmp_probe=""
+    if [ -n "$_wired_tmp_probe" ]; then
+        WIRED_TMP="$(dirname "$_wired_tmp_probe")"
+        rmdir "$_wired_tmp_probe" 2>/dev/null || true
+    else
+        WIRED_TMP="${TMPDIR:-/tmp}"
+    fi
+    unset _wired_tmp_probe
+fi
+WIRED_TMP="${WIRED_TMP%/}"
 
 WIRED_HOME="${WIRED_HOME:-$HOME/wired/$WIRED_APP}"
 WIRED_BASE="${WIRED_BASE:-$WIRED_HOME/base}"

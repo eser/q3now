@@ -25,6 +25,8 @@
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=tests/lib/wired_paths.sh
+. "$SCRIPT_DIR/lib/wired_paths.sh"
 
 W="${VR_W:-1280}"; H="${VR_H:-720}"
 BLK_N="${BLK_N:-24}"
@@ -51,7 +53,11 @@ GOLDEN="${GOLDEN:-$GOLDEN_DEFAULT}"
 
 # Analysis program written to a temp .py (NOT a `python3 -` heredoc): the heredoc
 # would BE stdin, leaving nothing for the raw image the program reads from stdin.
-ASSERT_PY="$(mktemp -t wired-corner-XXXXXX.py 2>/dev/null || echo /tmp/wired-corner.py)"
+# mktemp needs XXXXXX at the END of the template; `-t wired-corner-XXXXXX.py`
+# put a suffix after it, which on BSD/macOS is taken as a literal name — the
+# file is created verbatim and the NEXT run refuses because it already exists.
+# Generate first, then add the .py suffix (same fix as smoke.sh).
+ASSERT_PY="$(mktemp "$WIRED_TMP/wired-corner-XXXXXX")".py
 SELF_TMP=""
 cleanup() { rm -f "$ASSERT_PY"; [ -n "$SELF_TMP" ] && rm -rf "$SELF_TMP"; }
 trap cleanup EXIT INT TERM
