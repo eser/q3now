@@ -14,6 +14,10 @@
 
 //setup the deathmatch AI
 void BotSetupDeathmatchAI(void);
+//re-resolve the CTF/1FCTF flag goals against the entities present now; needed
+//when a flag appears after bot setup ran (1FCTF centre-of-map fallback flag on
+//a cold navmesh cache). No-op once the goals are resolved.
+void BotRefreshFlagGoals(void);
 //shutdown the deathmatch AI
 void BotShutdownDeathmatchAI(void);
 //let the bot live within its deathmatch AI net

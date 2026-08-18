@@ -4935,12 +4935,15 @@ int BotGetAlternateRouteGoal(bot_state_t *bs, int base) {
 BotSetupAlternateRouteGoals
 ==================
 */
+static qboolean BotResolveFlagGoal( const char *classname, const char *pickupName,
+									bot_goal_t *goal );
+
 void BotSetupAlternativeRouteGoals(void) {
 
 	if (altroutegoals_setup)
 		return;
 	if (gametype == GT_CTF) {
-		if (trap_BotGetLevelItemGoal(-1, "Neutral Flag", &ctf_neutralflag) < 0)
+		if (!BotResolveFlagGoal("team_CTF_neutralflag", "Neutral Flag", &ctf_neutralflag))
 			BotAI_Print(PRT_WARNING, "No alt routes without Neutral Flag\n");
 		if (ctf_neutralflag.areanum) {
 			// TODO: Recast-native alternative routes. No alternatives for now;
@@ -4950,7 +4953,7 @@ void BotSetupAlternativeRouteGoals(void) {
 		}
 	}
 	else if (gametype == GT_1FCTF) {
-		if (trap_BotGetLevelItemGoal(-1, "Neutral Flag", &neutralobelisk) < 0)
+		if (!BotResolveFlagGoal("team_CTF_neutralflag", "Neutral Flag", &neutralobelisk))
 			BotAI_Print(PRT_WARNING, "One Flag CTF without Neutral Flag\n");
 		// TODO: Recast-native alternative routes. No alternatives for now;
 		// the bot falls back to its normal single optimal route.
@@ -5350,6 +5353,106 @@ void BotSetEntityNumForGoalWithActivator(bot_goal_t *goal, char *classname) {
 
 /*
 ==================
+BotResolveFlagGoal
+
+Fill a flag bot_goal_t from the live flag ENTITY when the botlib level-item
+database cannot answer.
+
+Why this is needed at all: under Recast (FEAT_RECAST_NAVMESH) AAS is never
+loaded, so BotInitLevelItems() early-returns and the level-item database is
+permanently EMPTY — see be_interface.c Export_BotLibLoadMap and be_ai_goal.c.
+trap_BotGetLevelItemGoal therefore returns -1 for every flag on every map, and
+ctf_redflag/ctf_blueflag/ctf_neutralflag stay zeroed. Since all the CTF/1FCTF
+team-AI branches gate on `.areanum` being nonzero, bots never pursue a flag at
+all. This resolves the goal from the entity instead, which also happens to be
+what makes a RUNTIME-spawned flag (the 1FCTF centre-of-map fallback) usable as
+a bot goal: the fallback entity carries the authored classname and is found the
+same way an authored one is.
+
+Under Recast, areanum is a Detour poly ref from BotPointAreaNum, i.e. "there is
+walkable navmesh near this point" — a validity gate, not a routing key, since
+BotNav_MoveToGoal steers on goal.origin alone. A flag sitting exactly on the
+floor can miss the poly, so probe upward the way the WiredIntel item-seek path
+does before giving up.
+
+Returns qtrue if the goal is now usable.
+==================
+*/
+static qboolean BotResolveFlagGoal( const char *classname, const char *pickupName,
+									bot_goal_t *goal ) {
+	gentity_t	*ent = NULL;
+	int			area;
+	vec3_t		probe;
+
+	if (trap_BotGetLevelItemGoal(-1, pickupName, goal) >= 0 && goal->areanum) {
+		return qtrue;		// botlib answered (non-Recast build)
+	}
+
+	while ((ent = G_Find(ent, FOFS(classname), classname)) != NULL) {
+		if (ent->s.eFlags & EF_DROPPED_ITEM)
+			continue;		// a dropped flag is transient, not the base position
+		break;
+	}
+	if (!ent) {
+		return qfalse;
+	}
+
+	area = BotPointAreaNum(ent->r.currentOrigin);
+	if (area <= 0) {
+		VectorCopy(ent->r.currentOrigin, probe);
+		probe[2] += 24.0f;
+		area = BotPointAreaNum(probe);
+		if (area <= 0) {
+			probe[2] = ent->r.currentOrigin[2] + 48.0f;
+			area = BotPointAreaNum(probe);
+		}
+	}
+	if (area <= 0) {
+		return qfalse;		// no walkable navmesh near the flag
+	}
+
+	memset(goal, 0, sizeof(*goal));
+	VectorCopy(ent->r.currentOrigin, goal->origin);
+	goal->areanum   = area;
+	goal->entitynum = (int)(ent - g_entities);
+	goal->flags     = GFL_ITEM;
+	VectorSet(goal->mins, -16, -16, -16);
+	VectorSet(goal->maxs,  16,  16,  16);
+	if (ent->item) {
+		goal->iteminfo = (int)(ent->item - bg_itemlist);
+	}
+	return qtrue;
+}
+
+/*
+==================
+BotRefreshFlagGoals
+
+Re-resolve the flag goals against the entities that exist NOW.
+
+BotSetupDeathmatchAI runs once, from G_InitGame. On a cold navmesh cache the
+1FCTF centre-of-map fallback flag cannot be placed that early (the mesh is
+still baking), so it appears several seconds into the round — after bot setup
+has already concluded there was no flag and left ctf_neutralflag zeroed, which
+disables every 1FCTF bot branch for the rest of the map. Calling this when the
+fallback flag finally lands repairs that, and it is a no-op when the goals were
+already resolved.
+==================
+*/
+void BotRefreshFlagGoals(void) {
+	if (gametype == GT_CTF) {
+		BotResolveFlagGoal("team_CTF_redflag", "Red Flag", &ctf_redflag);
+		BotResolveFlagGoal("team_CTF_blueflag", "Blue Flag", &ctf_blueflag);
+	}
+	else if (gametype == GT_1FCTF) {
+		BotResolveFlagGoal("team_CTF_neutralflag", "Neutral Flag", &ctf_neutralflag);
+		BotResolveFlagGoal("team_CTF_redflag", "Red Flag", &ctf_redflag);
+		BotResolveFlagGoal("team_CTF_blueflag", "Blue Flag", &ctf_blueflag);
+	}
+}
+
+/*
+==================
 BotSetupDeathmatchAI
 ==================
 */
@@ -5363,17 +5466,17 @@ void BotSetupDeathmatchAI(void) {
 	trap_Cvar_Register(&sv_botDirectiveTTL, "sv_botDirectiveTTL", "30000", CVAR_ARCHIVE);
 	//
 	if (gametype == GT_CTF) {
-		if (trap_BotGetLevelItemGoal(-1, "Red Flag", &ctf_redflag) < 0)
+		if (!BotResolveFlagGoal("team_CTF_redflag", "Red Flag", &ctf_redflag))
 			BotAI_Print(PRT_WARNING, "CTF without Red Flag\n");
-		if (trap_BotGetLevelItemGoal(-1, "Blue Flag", &ctf_blueflag) < 0)
+		if (!BotResolveFlagGoal("team_CTF_blueflag", "Blue Flag", &ctf_blueflag))
 			BotAI_Print(PRT_WARNING, "CTF without Blue Flag\n");
 	}
 	else if (gametype == GT_1FCTF) {
-		if (trap_BotGetLevelItemGoal(-1, "Neutral Flag", &ctf_neutralflag) < 0)
+		if (!BotResolveFlagGoal("team_CTF_neutralflag", "Neutral Flag", &ctf_neutralflag))
 			BotAI_Print(PRT_WARNING, "One Flag CTF without Neutral Flag\n");
-		if (trap_BotGetLevelItemGoal(-1, "Red Flag", &ctf_redflag) < 0)
+		if (!BotResolveFlagGoal("team_CTF_redflag", "Red Flag", &ctf_redflag))
 			BotAI_Print(PRT_WARNING, "One Flag CTF without Red Flag\n");
-		if (trap_BotGetLevelItemGoal(-1, "Blue Flag", &ctf_blueflag) < 0)
+		if (!BotResolveFlagGoal("team_CTF_blueflag", "Blue Flag", &ctf_blueflag))
 			BotAI_Print(PRT_WARNING, "One Flag CTF without Blue Flag\n");
 	}
 #if FEAT_OVERLOAD

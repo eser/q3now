@@ -556,6 +556,152 @@ void Team_CheckHurtCarrier(gentity_t *targ, gentity_t *attacker)
 }
 
 
+#if FEAT_RECAST_NAVMESH
+void Team_ResetFlags( void );		/* defined below */
+/* ai_dmq3.h pulls the botlib headers in; this is the only symbol needed here. */
+void BotRefreshFlagGoals( void );
+
+/*
+==================
+Team_TrySpawnFallbackNeutralFlag
+
+1FCTF on a map whose author never placed a team_CTF_neutralflag: put one on the
+floor at the most central spot a player can stand on, so the gametype is
+playable on ordinary (even flagless) maps.
+
+AUTHORED ALWAYS WINS.  The caller only reaches this after a G_Find for
+"team_CTF_neutralflag" came back empty, and this function re-checks that itself
+before spawning — so it is structurally impossible for the fallback to displace
+or duplicate an authored flag, no matter who calls it or how often.
+
+The spawned entity is a NORMAL item entity built by G_SpawnItem +
+FinishSpawningItem, with the authored classname. Everything downstream —
+Team_ResetFlag's G_Find, Team_TouchFlag's classname compare, the bot item-goal
+DB fed from FinishSpawningItem — therefore cannot tell it apart from an
+authored one, which is the property criteria 3 and 6 depend on.
+
+Returns qtrue once a flag exists (or already existed).
+==================
+*/
+static qboolean Team_TrySpawnFallbackNeutralFlag( void ) {
+	gentity_t	*ent;
+	gitem_t		*item;
+	vec3_t		center;
+
+	// Authored flag present → never engage. Re-checked here, not just by the
+	// caller, so this remains true structurally.
+	if ( G_Find( NULL, FOFS(classname), "team_CTF_neutralflag" ) != NULL ) {
+		return qtrue;
+	}
+
+	if ( !trap_Nav_GetWalkableCenter( center ) ) {
+		return qfalse;
+	}
+
+	item = BG_FindItem( "Neutral Flag" );
+	if ( !item ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_game),
+			"1FCTF fallback flag: 'Neutral Flag' item not found\n" );
+		return qfalse;
+	}
+
+	ent = G_Spawn();
+	if ( !ent ) {
+		return qfalse;
+	}
+
+	ent->classname = "team_CTF_neutralflag";
+	// The centre sits ON the floor; lift the item by its bbox half-height so it
+	// rests on the surface rather than sinking into it. FinishSpawningItem drops
+	// it the rest of the way and rejects a start-solid placement.
+	VectorCopy( center, ent->s.origin );
+	ent->s.origin[2] += 16;
+	VectorCopy( ent->s.origin, ent->s.pos.trBase );
+	VectorCopy( ent->s.origin, ent->r.currentOrigin );
+
+	G_SpawnItem( ent, item );
+	// G_SpawnItem defers the real work to FinishSpawningItem two frames out (so
+	// map items can ride movers). Nothing has to ride anything here and the round
+	// is starting now, so run it immediately — this is what makes the flag exist
+	// for Team_ResetFlags() on THIS frame instead of two frames into the round.
+	ent->nextthink = 0;
+	ent->think = NULL;
+	FinishSpawningItem( ent );
+
+	// FinishSpawningItem FREES the entity if the placement is start-solid, so the
+	// spawn is only real if the entity survived. Verified by lookup rather than by
+	// reading ent (a freed entity has been memset, and reporting its zeroed origin
+	// as a success is exactly the false green this check exists to prevent).
+	if ( G_Find( NULL, FOFS(classname), "team_CTF_neutralflag" ) == NULL ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_game),
+			"1FCTF fallback flag: placement at %.0f %.0f %.0f was rejected (start-solid)\n",
+			center[0], center[1], center[2] + 16 );
+		return qfalse;
+	}
+
+	Com_Log( SEV_INFO, LOG_CH(ch_game),
+		"1FCTF: no team_CTF_neutralflag in map — spawned fallback at %.0f %.0f %.0f\n",
+		ent->s.origin[0], ent->s.origin[1], ent->s.origin[2] );
+	return qtrue;
+}
+
+/*
+==================
+G_CheckFallbackNeutralFlag
+
+Drives the fallback, handling the fact that the navmesh may not be ready yet.
+
+Nav_LoadMap runs before the game VM is initialised, but only a CACHE HIT is
+ready by then; a cache miss bakes on a background thread and flips ready in a
+later Nav_Frame(), long after G_InitGame. So this is called from G_InitGame AND
+retried per frame, and gives up for good once the bake finishes-and-fails —
+the same IsBaking()-not-IsReady() rule G_AddBot uses to defer bot fill, and for
+the same reason: on a map with no nav geometry the mesh never becomes ready, so
+a bare !IsReady retry would spin forever.
+==================
+*/
+void G_CheckFallbackNeutralFlag( void ) {
+	if ( g_gametype.integer != GT_1FCTF ) {
+		return;
+	}
+	if ( level.fallbackNeutralFlagDone ) {
+		return;
+	}
+
+	if ( !trap_Nav_IsReady() ) {
+		if ( trap_Nav_IsBaking() ) {
+			return;		// retry next frame
+		}
+		// Bake finished-and-failed, or the map has no nav geometry: there is no
+		// walkable set to take a centre of. Stop retrying and say so once.
+		level.fallbackNeutralFlagDone = qtrue;
+		if ( G_Find( NULL, FOFS(classname), "team_CTF_neutralflag" ) == NULL ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_game),
+				"1FCTF: no neutral flag and no navmesh — cannot place a fallback flag\n" );
+		}
+		return;
+	}
+
+	// Latch REGARDLESS of the outcome. The navmesh is ready, so the answer this
+	// frame is the answer for this map: retrying cannot produce a different
+	// centre, and a placement that came back start-solid would otherwise burn an
+	// entity slot every frame for the rest of the round.
+	level.fallbackNeutralFlagDone = qtrue;
+
+	if ( Team_TrySpawnFallbackNeutralFlag() ) {
+		// Put the (possibly just-created) flag into its at-base state and publish
+		// the flag status, so a flag that appeared after the round began is not
+		// left in limbo.
+		Team_ResetFlags();
+		// Bot setup may already have run and concluded there was no flag (cold
+		// navmesh cache). Re-resolve so the 1FCTF bot branches, which all gate on
+		// ctf_neutralflag.areanum, actually engage.
+		BotRefreshFlagGoals();
+	}
+}
+#endif /* FEAT_RECAST_NAVMESH */
+
+
 gentity_t *Team_ResetFlag( int team ) {
 	char *c;
 	gentity_t *ent, *rent = NULL;

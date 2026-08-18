@@ -1038,6 +1038,10 @@ qboolean trap_Nav_GetRandomPoint( int areaFilter, vec3_t posOut ) {
 	return (qboolean)syscall( G_NAV_GET_RANDOM_POINT, areaFilter, posOut );
 }
 
+qboolean trap_Nav_GetWalkableCenter( vec3_t posOut ) {
+	return (qboolean)syscall( G_NAV_GET_WALKABLE_CENTER, posOut );
+}
+
 int trap_Nav_AddCrowdAgent( int entityNum, vec3_t origin, int agentType ) {
 	return syscall( G_NAV_ADD_CROWD_AGENT, entityNum, origin, agentType );
 }

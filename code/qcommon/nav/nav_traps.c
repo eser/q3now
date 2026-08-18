@@ -92,6 +92,11 @@ intptr_t Nav_HandleTrap( int trap, const intptr_t *args, byte *vmBase )
             (int)args[1],
             (float *)Nav_VMA( args[2], vmBase ) );
 
+    case G_NAV_GET_WALKABLE_CENTER:
+        /* args[1]=posOut */
+        return (intptr_t)Nav_GetWalkableCenter(
+            (float *)Nav_VMA( args[1], vmBase ) );
+
     /* DetourCrowd — stubs */
     case G_NAV_ADD_CROWD_AGENT:
         return -1;

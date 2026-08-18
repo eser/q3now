@@ -581,6 +581,12 @@ navPolyRef_t Nav_FindNearestPoly( const float *qOrigin, const float *qExtents );
 int          Nav_GetPolyAreaFlags( navPolyRef_t polyRef );
 qboolean     Nav_GetRandomPoint( int areaFilter, float *qPosOut );
 
+/* Most central spot a player can stand on: area-weighted centroid of the
+ * reachable walkable surface, snapped to real navmesh (medoid fallback when the
+ * centroid falls outside it, e.g. a doughnut map) and settled onto the floor.
+ * qfalse if the mesh is not ready or has no reachable ground polys. */
+qboolean     Nav_GetWalkableCenter( float *qPosOut );
+
 /* Set or clear poly flags for all polys belonging to the named door entity.
  * Called from g_mover.c via trap at each door state transition.
  * Returns silently if targetname is NULL or not found in doorEntries. */

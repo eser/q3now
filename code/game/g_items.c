@@ -698,6 +698,17 @@ void G_CheckTeamItems( void ) {
 	// Set up team stuff
 	Team_InitGame();
 
+#if FEAT_RECAST_NAVMESH
+	// 1FCTF on a map with no authored neutral flag: place one at the centre of
+	// the walkable area. Deliberately BEFORE the missing-flag reporting below, so
+	// the warning describes the state the round actually starts in rather than a
+	// gap that has already been filled. Needs Team_InitGame to have run. On a cold
+	// navmesh cache the mesh is still baking here and this is a no-op; G_RunFrame
+	// retries until it lands (and the warning below is then accurate for that
+	// moment — the flag genuinely does not exist yet).
+	G_CheckFallbackNeutralFlag();
+#endif
+
 	if( g_gametype.integer == GT_CTF ) {
 		gitem_t	*item;
 

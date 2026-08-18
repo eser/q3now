@@ -726,7 +726,11 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	}
 #endif
 
-	// make sure we have flags for CTF, etc
+	// make sure we have flags for CTF, etc. G_CheckTeamItems also places the
+	// 1FCTF centre-of-map fallback flag (before it reports missing flags, so the
+	// warning describes the final state) and runs before SaveRegisteredItems so
+	// the flag's model/sounds reach the configstring, and before BotAILoadMap
+	// below so bot goal setup sees the entity.
 	if( g_gametype.integer >= GT_TDM ) {
 		G_CheckTeamItems();
 	}
@@ -2876,6 +2880,11 @@ void G_RunFrame( int levelTime ) {
 		}
 		level.navWasReady = navReady;
 	}
+
+	// Same async-bake story for the 1FCTF centre-of-map fallback flag: G_InitGame
+	// could not place it while the mesh was baking. Self-latching, so this is a
+	// cheap predicate check on every frame after the question is settled.
+	G_CheckFallbackNeutralFlag();
 #endif
 
 #if FEAT_GAME_MEETING

@@ -4233,6 +4233,250 @@ static int Nav_FinalizeGroundPolyStandability( void )
     return blocked;
 }
 
+/* Can a player-sized box actually rest at this Quake-space point?
+ *
+ * Being on the navmesh is NOT sufficient. Recast can emit a walkable poly on a
+ * ledge or shelf whose surface a player box cannot occupy, and a point that
+ * merely passes the query filter is exactly what FinishSpawningItem rejects
+ * with "startsolid" (measured on arenat2: the medoid landed on a raised
+ * platform at z=160 and the flag was freed instead of spawned). So test the
+ * real player box against the real collision world, the same shape the item
+ * spawn path will use — box mins/maxs from bg_public.h.
+ *
+ * Reports the floor rest-z through outRestZ so the caller can settle onto it. */
+static bool Nav_CenterStandable( const float *q, float *outRestZ )
+{
+    const vec3_t mins = { -15.0f, -15.0f, -24.0f };
+    const vec3_t maxs = {  15.0f,  15.0f,  32.0f };
+    trace_t tr;
+
+    /* Drop a player box from just above the candidate onto the floor below. */
+    vec3_t start = { q[0], q[1], q[2] + 32.0f };
+    vec3_t end   = { q[0], q[1], q[2] - 64.0f };
+    CM_BoxTrace( &tr, start, end, mins, maxs, 0, MASK_PLAYERSOLID, qfalse );
+    if ( tr.startsolid || tr.allsolid || tr.fraction >= 1.0f )
+        return false;
+
+    /* And confirm the box genuinely fits where it came to rest. */
+    trace_t at;
+    vec3_t rest = { tr.endpos[0], tr.endpos[1], tr.endpos[2] };
+    CM_BoxTrace( &at, rest, rest, mins, maxs, 0, MASK_PLAYERSOLID, qfalse );
+    if ( at.startsolid || at.allsolid )
+        return false;
+
+    if ( outRestZ ) *outRestZ = tr.endpos[2];
+    return true;
+}
+
+/*
+ * Nav_GetWalkableCenter — "the most central spot a player can stand on".
+ *
+ * Used by the game module to place an item (the 1FCTF neutral flag) on a map
+ * whose author never placed one.  Definition, and why it is defensible:
+ *
+ *  1. POPULATION: every ground poly in the REACHABLE component — the same
+ *     spawn-anchored flood NavVal_BuildReachableSet gives the validator.  So an
+ *     unreachable vault or a sealed island cannot pull the answer toward itself,
+ *     and NAVPOLY_BLOCKED polys (the ones the standability finalize proved a
+ *     player cannot rest on) are excluded outright.
+ *
+ *  2. CANDIDATE: the AREA-WEIGHTED centroid of that population.  Area weighting
+ *     matters because Recast's polys vary hugely in size; an unweighted mean of
+ *     poly centroids is really a mean of tessellation density and drifts toward
+ *     whichever corner got chopped finest.
+ *
+ *  3. SNAP: the raw centroid is a point in space, not a place — on an L-shaped or
+ *     doughnut map it can land in a wall or over the void.  So it is never used
+ *     directly: findNearestPoly pulls it onto real navmesh, and the result is
+ *     accepted only if it is IN the reachable component.
+ *
+ *  4. FALLBACK (this is the part that makes the non-convex case honest): if the
+ *     snap misses, or lands outside the reachable set, pick the reachable ground
+ *     poly whose own centroid is CLOSEST to the ideal centroid — a medoid.  A
+ *     medoid is by construction a real walkable location, so a doughnut map gets
+ *     the point on the ring nearest the (unreachable) hole centre instead of the
+ *     hole itself.  Horizontal distance dominates the comparison so a stacked
+ *     map does not pick a spot directly above/below the centre by accident.
+ *
+ *  5. FLOOR: a candidate is accepted by BOTH passes only if a real player box
+ *     can come to rest there (Nav_CenterStandable below), and the z returned is
+ *     that collision-world rest height — not the poly's z.  Being on the navmesh
+ *     is not enough on its own: measured on arenat2, the medoid sat on a poly at
+ *     z=160 that a player box cannot occupy, and the flag placed there was
+ *     rejected as start-solid and freed.  Because the returned z is a real
+ *     resting surface, the caller can place an item at a fixed offset above it
+ *     and know it is on a floor.
+ *
+ * Returns qfalse (leaving qPosOut untouched) if the mesh is not ready, or if no
+ * reachable ground poly is both present and standable — the caller must handle
+ * that rather than place an item at the origin.
+ */
+
+qboolean Nav_GetWalkableCenter( float *qPosOut )
+{
+    if ( !nav.ready || !nav.mesh || !nav.query || !qPosOut ) return qfalse;
+
+    const dtNavMesh *mesh = (const dtNavMesh *)nav.mesh;
+    const int maxTiles = mesh->getMaxTiles();
+
+    int *comp = NULL, *tilePolyBase = NULL, totalDense = 0, reachComp = -1, numComp = 0;
+    if ( !NavVal_BuildReachableSet( &comp, &tilePolyBase, &totalDense, &reachComp, &numComp ) )
+        return qfalse;
+    (void)numComp;
+
+    /* Pass 1: area-weighted centroid over reachable ground polys (Quake space). */
+    double accum[3] = { 0.0, 0.0, 0.0 };
+    double totalArea = 0.0;
+    int    considered = 0;
+
+    for ( int ti = 0; ti < maxTiles; ti++ ) {
+        const dtMeshTile *t = mesh->getTile( ti );
+        if ( !t || !t->header ) continue;
+        for ( int pi = 0; pi < t->header->polyCount; pi++ ) {
+            const dtPoly *p = &t->polys[pi];
+            if ( p->getType() == DT_POLYTYPE_OFFMESH_CONNECTION ) continue;
+            if ( p->vertCount < 3 ) continue;
+            if ( comp[ tilePolyBase[ti] + pi ] != reachComp ) continue;
+            if ( p->flags & (unsigned short)NAVPOLY_BLOCKED ) continue;
+
+            float rc[3] = { 0, 0, 0 };
+            for ( int v = 0; v < p->vertCount; v++ ) {
+                const float *rv = &t->verts[p->verts[v] * 3];
+                rc[0] += rv[0]; rc[1] += rv[1]; rc[2] += rv[2];
+            }
+            const float inv = 1.0f / (float)p->vertCount;
+            rc[0] *= inv; rc[1] *= inv; rc[2] *= inv;
+
+            /* Fan-triangulate for area; Recast X/Z is the horizontal plane. */
+            double area = 0.0;
+            const float *v0 = &t->verts[p->verts[0] * 3];
+            for ( int v = 1; v + 1 < p->vertCount; v++ ) {
+                const float *v1 = &t->verts[p->verts[v] * 3];
+                const float *v2 = &t->verts[p->verts[v + 1] * 3];
+                const double ax = v1[0] - v0[0], az = v1[2] - v0[2];
+                const double bx = v2[0] - v0[0], bz = v2[2] - v0[2];
+                area += fabs( ax * bz - az * bx ) * 0.5;
+            }
+            if ( area <= 0.0 ) continue;
+
+            float qc[3];
+            Nav_RecastToQuake( rc, qc );
+            accum[0] += (double)qc[0] * area;
+            accum[1] += (double)qc[1] * area;
+            accum[2] += (double)qc[2] * area;
+            totalArea += area;
+            considered++;
+        }
+    }
+
+    if ( considered == 0 || totalArea <= 0.0 ) {
+        Z_Free( comp );
+        Z_Free( tilePolyBase );
+        Com_Log( SEV_INFO, LOG_CH(ch_nav),
+            "[NAV] walkable-center: no reachable ground polys on '%s'\n",
+            nav.mapname[0] ? nav.mapname : "(none)" );
+        return qfalse;
+    }
+
+    float ideal[3];
+    ideal[0] = (float)( accum[0] / totalArea );
+    ideal[1] = (float)( accum[1] / totalArea );
+    ideal[2] = (float)( accum[2] / totalArea );
+
+    /* Pass 2: snap the ideal onto real navmesh, and require the reachable set. */
+    float chosen[3] = { ideal[0], ideal[1], ideal[2] };
+    qboolean haveChosen = qfalse;
+
+    {
+        float rIdeal[3];
+        Nav_QuakeToRecast( ideal, rIdeal );
+        dtPolyRef ref = 0; float nearPt[3];
+        nav.query->findNearestPoly( rIdeal, kDefaultExtents, GetFilter(), &ref, nearPt );
+        if ( ref ) {
+            unsigned int rs, rt, rp;
+            nav.mesh->decodePolyId( ref, rs, rt, rp ); (void)rs;
+            if ( (int)rt < maxTiles ) {
+                const int dense = tilePolyBase[rt] + (int)rp;
+                if ( dense >= 0 && dense < totalDense && comp[dense] == reachComp ) {
+                    float cand[3];
+                    Nav_RecastToQuake( nearPt, cand );
+                    float restZ;
+                    /* Only accept the snap if a player box can rest here; otherwise
+                     * leave haveChosen false and let the medoid pass find a spot
+                     * that a player can actually occupy. */
+                    if ( Nav_CenterStandable( cand, &restZ ) ) {
+                        chosen[0] = cand[0]; chosen[1] = cand[1]; chosen[2] = restZ;
+                        haveChosen = qtrue;
+                    }
+                }
+            }
+        }
+    }
+
+    /* Pass 3: medoid fallback for non-convex maps (snap missed or left the set). */
+    if ( !haveChosen ) {
+        double bestScore = 1e300;
+        for ( int ti = 0; ti < maxTiles; ti++ ) {
+            const dtMeshTile *t = mesh->getTile( ti );
+            if ( !t || !t->header ) continue;
+            for ( int pi = 0; pi < t->header->polyCount; pi++ ) {
+                const dtPoly *p = &t->polys[pi];
+                if ( p->getType() == DT_POLYTYPE_OFFMESH_CONNECTION ) continue;
+                if ( p->vertCount < 3 ) continue;
+                if ( comp[ tilePolyBase[ti] + pi ] != reachComp ) continue;
+                if ( p->flags & (unsigned short)NAVPOLY_BLOCKED ) continue;
+
+                float rc[3] = { 0, 0, 0 };
+                for ( int v = 0; v < p->vertCount; v++ ) {
+                    const float *rv = &t->verts[p->verts[v] * 3];
+                    rc[0] += rv[0]; rc[1] += rv[1]; rc[2] += rv[2];
+                }
+                const float inv = 1.0f / (float)p->vertCount;
+                rc[0] *= inv; rc[1] *= inv; rc[2] *= inv;
+                float qc[3];
+                Nav_RecastToQuake( rc, qc );
+
+                /* Horizontal distance dominates; z is a light tie-breaker so a
+                 * stacked map cannot win purely by being directly overhead. */
+                const double dx = (double)qc[0] - ideal[0];
+                const double dy = (double)qc[1] - ideal[1];
+                const double dz = (double)qc[2] - ideal[2];
+                const double score = dx * dx + dy * dy + 0.25 * dz * dz;
+                if ( score < bestScore ) {
+                    /* Standability is the expensive test (two collision traces),
+                     * so it runs only for a candidate that would actually win —
+                     * turning a per-poly cost into a per-improvement one. */
+                    float restZ;
+                    if ( !Nav_CenterStandable( qc, &restZ ) ) continue;
+                    bestScore = score;
+                    chosen[0] = qc[0]; chosen[1] = qc[1]; chosen[2] = restZ;
+                    haveChosen = qtrue;
+                }
+            }
+        }
+    }
+
+    Z_Free( comp );
+    Z_Free( tilePolyBase );
+
+    if ( !haveChosen ) return qfalse;
+
+    /* chosen[2] is already the collision-world rest-z reported by
+     * Nav_CenterStandable for whichever pass won, so the point is on the surface
+     * a player box actually comes to rest on — no further settling to do. */
+
+    qPosOut[0] = chosen[0];
+    qPosOut[1] = chosen[1];
+    qPosOut[2] = chosen[2];
+
+    Com_Log( SEV_INFO, LOG_CH(ch_nav),
+        "[NAV] walkable-center on '%s': %.0f %.0f %.0f (ideal %.0f %.0f %.0f, %d polys, area %.0f)\n",
+        nav.mapname[0] ? nav.mapname : "(none)",
+        chosen[0], chosen[1], chosen[2], ideal[0], ideal[1], ideal[2],
+        considered, totalArea );
+    return qtrue;
+}
+
 static void Nav_ValidateCmd( void )
 {
     if ( !nav.ready || !nav.mesh ) {

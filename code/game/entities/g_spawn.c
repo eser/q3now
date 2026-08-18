@@ -687,8 +687,30 @@ void G_SpawnGEntityFromSpawnVars( void ) {
 
 	if( G_SpawnString( "gametype", NULL, &value ) ) {
 		if( g_gametype.integer >= GT_DEATHMATCH && g_gametype.integer < GT_MAX_GAME_TYPE ) {
-			s = strstr( value, bg_gametypelist[g_gametype.integer].shortname );
-			if( !s ) {
+			// The key is a space-separated token list ("ctf oneflag"). Match each
+			// token against the gametype's parseTokens aliases rather than doing a
+			// substring search for shortname alone. Two reasons this matters:
+			//
+			//  - id/Team Arena content spells One Flag CTF as "oneflag", never as
+			//    our shortname "1fctf" (arenam3 tags all three of its flags that
+			//    way). A shortname-only strstr therefore FREED every authored flag
+			//    on the one shipped 1FCTF map, which is why the map reported "No
+			//    team_CTF_neutralflag in map" despite the BSP containing one.
+			//  - strstr matches substrings, so a token list is also matched by any
+			//    string that merely CONTAINS the shortname. BG_GametypeBits compares
+			//    whole tokens (Q_stricmp), so "ctf" can no longer match "1fctf".
+			const int	wantBit = 1 << g_gametype.integer;
+			char		tokens[MAX_TOKEN_CHARS];
+			qboolean	matched = qfalse;
+
+			Q_strncpyz( tokens, value, sizeof( tokens ) );
+			for( s = strtok( tokens, " \t\r\n" ); s; s = strtok( NULL, " \t\r\n" ) ) {
+				if( BG_GametypeBits( s ) & wantBit ) {
+					matched = qtrue;
+					break;
+				}
+			}
+			if( !matched ) {
 				ADJUST_AREAPORTAL();
 				G_FreeEntity( ent );
 				return;
