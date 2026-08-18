@@ -78,7 +78,7 @@ BASEPATH_NATIVE=$(to_native "$BASEPATH")
 HOMEPATH_NATIVE=$(to_native "$HOMEPATH")
 
 # ── run engine, capture output ──────────────────────────────────────────────
-LOGFILE=$(mktemp -t q3now-fs-dedup-XXXXXX.log)
+LOGFILE="$(mktemp -t q3now-fs-dedup)".log   # suffix after mktemp; see smoke.sh
 trap "rm -f $LOGFILE" EXIT
 
 echo "==> Running FS dedup smoke"
