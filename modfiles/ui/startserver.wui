@@ -285,13 +285,12 @@ menuDef {
 				// Game-type / bots / skill (one row each)
 				// Values are raw gametype_t indices — WiredScript_StartServer copies
 				// ui_netGameType straight into g_gametype (cl_wired_ui.c:5061), no remap.
-				// One Flag CTF (6) is omitted: it is ungated and fully implemented
-				// (bg_gametypes.c:74 + the g_team.c / g_items.c / ai_dmq3.c paths all
-				// compile in), but NOT playable on anything we ship — no shipped map
-				// spawns team_CTF_neutralflag, so there is nothing to capture.
-				// Measured 2026-08-16 via
+				// One Flag CTF (6) is listed again: TASK-157 landed, so a map with
+				// no team_CTF_neutralflag now gets one spawned at the centre of its
+				// walkable area (G_CheckFallbackNeutralFlag), and a map that DOES
+				// author one keeps the authored position. Verified on arena1 /
+				// arenat2 / arenat7 (centre fallback) and arenam3 (authored) via
 				// tests/headless-map-transition-zonecheck.sh --flag-inventory.
-				// Returns when TASK-157 (centre-of-map fallback, Q1) lands.
 				// Overload (7) and Harvester (8) stay omitted for a different reason:
 				// FEAT_OVERLOAD / FEAT_HARVESTER are 0 without MISSIONPACK.
 				itemDef {
@@ -305,7 +304,7 @@ menuDef {
 					font $font_sans 13
 					forecolor $bone
 					cvar "ui_netGameType"
-					cvarFloatList { "Deathmatch" 0 "Duel" 1 "King of the Hill" 2 "Last Man Standing" 3 "Team Deathmatch" 4 "Capture the Flag" 5 }
+					cvarFloatList { "Deathmatch" 0 "Duel" 1 "King of the Hill" 2 "Last Man Standing" 3 "Team Deathmatch" 4 "Capture the Flag" 5 "One Flag CTF" 6 }
 					visible 1
 					grow 0
 					action { UpdateGameType }
