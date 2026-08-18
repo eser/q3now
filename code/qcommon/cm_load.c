@@ -1154,6 +1154,51 @@ int CM_NumClusters( void ) {
 }
 
 
+/*
+==================
+CM_HasLiquid
+
+Does this map contain ANY water/slime/lava volume?
+
+A whole-map yes/no answered from data already in memory, so a caller can skip an
+expensive liquid-related sweep entirely on a dry map instead of discovering the
+emptiness one probe at a time. The navmesh water-edge pass is the motivating
+caller: it rasterises the full map XY extent and column-traces every covered
+cell — hundreds of thousands of CM_BoxTrace calls — to reconnect floor
+components split by a shallow wade. On a map with no liquid that work cannot
+produce a single connection, yet it ran in full, on the main thread, during map
+spawn.
+
+Both formats answer from their own storage: Q3 from brush contents, Q1 from the
+per-leaf contents captured at load (CMQ1_StoreLeafContents). Conservative by
+construction — true if any brush or leaf carries a liquid bit — so it is a fast
+rejection, not a substitute for the caller's own CM_PointContents tests.
+==================
+*/
+qboolean CM_HasLiquid( void ) {
+	const int liquidBits = CONTENTS_WATER | CONTENTS_SLIME | CONTENTS_LAVA;
+	int i;
+
+	/* Q1: per-leaf contents, stored at load. */
+	if ( cm.q1.leafContents && cm.q1.numLeafs > 0 ) {
+		for ( i = 0; i < cm.q1.numLeafs; i++ ) {
+			if ( cm.q1.leafContents[i] & liquidBits ) {
+				return qtrue;
+			}
+		}
+	}
+
+	/* Q3: brush contents. */
+	for ( i = 0; i < cm.world.numBrushes; i++ ) {
+		if ( cm.world.brushes[i].contents & liquidBits ) {
+			return qtrue;
+		}
+	}
+
+	return qfalse;
+}
+
+
 int CM_NumInlineModels( void ) {
 	return cm.numSubModels;
 }

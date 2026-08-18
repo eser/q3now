@@ -14,6 +14,10 @@ void		CM_ModelBounds( clipHandle_t model, vec3_t mins, vec3_t maxs );
 
 int			CM_NumClusters (void);
 int			CM_NumInlineModels( void );
+/* Whole-map "is there any water/slime/lava?", answered from loaded brush/leaf
+   contents. Lets a caller skip a liquid-only sweep on a dry map. Conservative:
+   true means somewhere, not here — per-point tests still need CM_PointContents. */
+qboolean	CM_HasLiquid( void );
 char		*CM_EntityString (void);
 
 // returns an ORed contents mask
