@@ -54,6 +54,11 @@
 # conclusion ("arena1 is the only shipped map, so CTF cannot work").
 # Unlike the #96 gate this mode does NOT require a debug build: entity spawning
 # is independent of USE_ZONE_ID.
+#
+# It is also a GATE, not merely informational: since the engine now places a
+# neutral flag at the centre of the walkable area on maps that lack one, a map
+# reporting NEUTRAL=no is a real defect (1FCTF unplayable there) and exits 1.
+# NEUTRAL=via-fb is that fallback having engaged; NEUTRAL=yes is an authored flag.
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -609,6 +614,13 @@ if [ "$FLAG_INVENTORY" = 1 ]; then
     printf '\n    %-12s %-6s %-6s %-8s %s\n' map red blue NEUTRAL 1FCTF-playable
     printf '    %s\n' "------------------------------------------------------------"
     INV_RC=0
+    # +wait 900, not 400: each map gets a FRESH scratch home, so every navmesh
+    # bake here is a COLD one, and the centre-of-map fallback flag cannot be
+    # placed until the mesh is ready. A wait shorter than the bake measures the
+    # pre-fallback moment and reports a playable map as unplayable — e1m1 (a Q1
+    # BSP, ~2030 reachable polys) does not settle within 400 frames. 900 costs
+    # ~45s per map; raise it if a slower machine starts reporting NEUTRAL=no on a
+    # map whose log shows the bake still running at +quit.
     for m in $INV_MAPS; do
         MLOG="$HOME_DIR/qconsole.jsonl"
         rm -f "$MLOG"
@@ -617,31 +629,67 @@ if [ "$FLAG_INVENTORY" = 1 ]; then
             +set com_noHardReboot 1 +set sv_pure 0 \
             +set log_severity DEBUG +set log_file_severity DEBUG \
             +set log_file_mode overwrite_synced \
-            +set g_gametype 6 +map "$m" +wait 400 +quit ) >"$ROOT/stdout.$m" 2>&1 || true
+            +set g_gametype 6 +map "$m" +wait 900 +quit ) >"$ROOT/stdout.$m" 2>&1 || true
         BLOB="$( { cat "$MLOG"; cat "$ROOT/stdout.$m"; } 2>/dev/null )"
         # Did the map load at all? A missing BSP must not read as "no flags".
-        if ! printf '%s' "$BLOB" | grep -qiE "Server: *$m|spawning server|$m\.bsp"; then
+        # 🔴 grep -c, not grep -q: `-q` exits at the first match and SIGPIPEs the
+        # upstream printf, which `set -o pipefail` (line 57) then reports as a
+        # failed pipeline — so a map that DID load read as "did not load". Same
+        # hazard, and the same fix, as the ZONEID probe above.
+        if [ "$( printf '%s' "$BLOB" | grep -ciE "Server: *$m|spawning server|$m\.bsp" || true )" -lt 1 ]; then
             printf '    %-12s %s\n' "$m" "(map did not load — inconclusive)"
             INV_RC=1
             continue
         fi
         # 🔴 POLARITY: the entity name appears in the game's ABSENCE warning too
-        # ("WARNING: No team_CTF_neutralflag in map", g_team.c:571). Counting bare
-        # occurrences reads a missing flag as a present one — an earlier revision
-        # of this mode did exactly that and reported every map as 1FCTF-playable.
-        # Presence is therefore the ABSENCE of the warning, on a map that loaded.
-        absent() { printf '%s' "$BLOB" | grep -qiE "No $1 in map|without ${2} Flag"; }
-        absent team_CTF_redflag     "Red"     && R="no" || R="yes"
-        absent team_CTF_blueflag    "Blue"    && B="no" || B="yes"
-        absent team_CTF_neutralflag "Neutral" && N="no" || N="yes"
-        if   [ "$N" = yes ]; then PLAY="yes"
+        # ("WARNING: No team_CTF_neutralflag in map", g_items.c:707-728). Counting
+        # bare occurrences reads a missing flag as a present one — an earlier
+        # revision of this mode did exactly that and reported every map as
+        # 1FCTF-playable. Presence is therefore the ABSENCE of the warning, on a
+        # map that loaded.
+        #
+        # 🔴 Match ONLY the item-level warning (g_items.c G_CheckTeamItems, "No
+        # team_CTF_neutralflag in map"). The botlib warning ("One Flag CTF without
+        # Neutral Flag", ai_dmq3.c) answers a DIFFERENT question — whether the bot
+        # could resolve a goal — and is emitted when the navmesh is still baking
+        # even though the flag ENTITY exists. Treating the two as one signal made
+        # arenam3, the one shipped map with an authored neutral flag, report "no
+        # flags at all" on a cold navmesh cache.
+        # grep -c for the same SIGPIPE reason as the load check above.
+        absent() { [ "$( printf '%s' "$BLOB" | grep -ciE "No $1 in map" || true )" -ge 1 ]; }
+        absent team_CTF_redflag     && R="no" || R="yes"
+        absent team_CTF_blueflag    && B="no" || B="yes"
+        absent team_CTF_neutralflag && N="no" || N="yes"
+
+        # The AUTHORED-flag warning above is a point-in-time signal, emitted during
+        # G_InitGame. 1FCTF playability is an END-STATE property: when the map has
+        # no authored neutral flag the engine spawns one at the centre of the
+        # walkable area. On a WARM navmesh cache that happens before the warning is
+        # even reached (so N is already "yes"), but on a COLD cache the mesh is
+        # still baking at G_InitGame and the flag lands a few seconds later — the
+        # warning is honest at the time it prints, and would nonetheless read as
+        # "unplayable" for a round that is in fact playable.
+        #
+        # So a fallback spawn counts as a neutral flag, and is reported distinctly
+        # from an authored one: they are equally playable but not the same fact,
+        # and collapsing them would hide a map silently losing its authored flag.
+        FB="no"
+        if [ "$( printf '%s' "$BLOB" | grep -ciE "spawned fallback at" || true )" -ge 1 ]; then FB="yes"; fi
+        if [ "$N" = no ] && [ "$FB" = yes ]; then N="via-fb"; fi
+
+        if   [ "$N" = yes ];    then PLAY="yes (authored)"
+        elif [ "$N" = via-fb ]; then PLAY="yes (centre fallback)"
         elif [ "$R" = yes ] || [ "$B" = yes ]; then PLAY="NO (CTF map, needs centre fallback)"
         else PLAY="NO (no flags at all)"; fi
+        # A map that reports no neutral flag AND no fallback is the regression this
+        # mode exists to catch, now that the fallback is supposed to cover it.
+        if [ "$N" = no ]; then INV_RC=1; fi
         printf '    %-12s %-6s %-6s %-8s %s\n' "$m" "$R" "$B" "$N" "$PLAY"
     done
     echo
-    echo "    A 'NO (CTF map, no neutral flag)' row is exactly the case the"
-    echo "    centre-of-map neutral-flag fallback is meant to cover."
+    echo "    NEUTRAL=via-fb means the map had no authored neutral flag and the"
+    echo "    engine placed one at the centre of the walkable area. A NEUTRAL=no"
+    echo "    row means neither happened — 1FCTF is unplayable there."
     exit "$INV_RC"
 fi
 

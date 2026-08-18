@@ -723,6 +723,12 @@ typedef struct {
 	// no-ops, so we re-apply them once the mesh becomes ready. This latches the
 	// previous frame's readiness to fire the reconcile exactly on the transition.
 	qboolean	navWasReady;
+
+	// 1FCTF centre-of-map fallback flag: latched once the question is settled,
+	// either because a flag now exists (authored or spawned) or because there is
+	// no navmesh to derive a centre from. Keeps G_CheckFallbackNeutralFlag's
+	// per-frame retry from re-running after it has done its job.
+	qboolean	fallbackNeutralFlagDone;
 #endif
 } level_locals_t;
 
@@ -1431,6 +1437,7 @@ navPolyRef_t trap_Nav_FindNearestPoly( vec3_t origin, vec3_t searchExtents );
 int          trap_Nav_GetPolyAreaFlags( navPolyRef_t polyRef );
 void         trap_Nav_TriggerOffMeshLink( navPolyRef_t linkRef );
 qboolean     trap_Nav_GetRandomPoint( int areaFilter, vec3_t posOut );
+qboolean     trap_Nav_GetWalkableCenter( vec3_t posOut );
 int          trap_Nav_AddCrowdAgent( int entityNum, vec3_t origin, int agentType );
 void         trap_Nav_UpdateCrowdAgent( int agentId, vec3_t desiredTarget );
 void         trap_Nav_RemoveCrowdAgent( int agentId );

@@ -448,6 +448,14 @@ typedef enum {
 	// once the bake finishes-and-fails (returns qfalse then, like a no-nav map).
 	// Appended after the nav block (before the =1000 pin) so the ABI is unchanged.
 
+	G_NAV_GET_WALKABLE_CENTER,
+	// ( vec3_t posOut ) -> qboolean; qtrue = a central standable point was found.
+	// Area-weighted centroid of the REACHABLE walkable surface, snapped to real
+	// navmesh (medoid fallback when the centroid lies off-mesh, e.g. a doughnut
+	// map) and settled onto the floor a player rests on. Used to place the 1FCTF
+	// neutral flag on maps whose author never placed one.
+	// Appended after the nav block (before the =1000 pin) so the ABI is unchanged.
+
 	// ── WiredCoreEvents generic emit ─────────────────────────────────────
 	// Single ABI entry point. Event type is encoded in the payload (arg 1).
 	// Adding new event types requires no ABI change — only an enum value and

@@ -1958,6 +1958,7 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	case G_NAV_GET_POLY_AREA_FLAGS:
 	case G_NAV_TRIGGER_OFF_MESH_LINK:
 	case G_NAV_GET_RANDOM_POINT:
+	case G_NAV_GET_WALKABLE_CENTER:
 	case G_NAV_ADD_CROWD_AGENT:
 	case G_NAV_UPDATE_CROWD_AGENT:
 	case G_NAV_REMOVE_CROWD_AGENT:

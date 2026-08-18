@@ -2054,6 +2054,23 @@ SET_TESTS_PROPERTIES(bot_slot_identity_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(bot_slot_identity_test bot_slot_identity_contract)
 
+# Entity "gametype" key filtering. Compiles the production gametype table and
+# BG_GametypeBits so a map entity tagged with a legacy alias ("oneflag", which is
+# how id/Team Arena content spells One Flag CTF) cannot be freed at spawn again,
+# and so matching stays whole-token rather than the substring test that let "ctf"
+# match "1fctf".
+ADD_EXECUTABLE(gametype_entity_filter_test
+	tests/gametype_entity_filter_test.c
+	code/game/bg_gametypes.c
+)
+TARGET_INCLUDE_DIRECTORIES(gametype_entity_filter_test PRIVATE code/qcommon code/game)
+ADD_TEST(NAME gametype_entity_filter_contract COMMAND gametype_entity_filter_test)
+SET_TESTS_PROPERTIES(gametype_entity_filter_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.q3now-game;failure.contract;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(gametype_entity_filter_test gametype_entity_filter_contract)
+
 # Public VM interpretation semantics. Compiles the exact dependency-free
 # production policy consumed by VM_Create: BYTECODE is .wasm-only, COMPILED is
 # .aot then .wasm, and NATIVE is DLL then compiled-WASM fallback.

@@ -66,4 +66,11 @@ qboolean Team_GetLocationMsg(gentity_t *ent, char *loc, int loclen);
 void TeamplayInfoMessage( gentity_t *ent );
 void CheckTeamStatus(void);
 
+#if FEAT_RECAST_NAVMESH
+// 1FCTF: place a neutral flag at the centre of the walkable area when the map
+// has none. Safe to call every frame; latches itself once settled. An authored
+// team_CTF_neutralflag always wins — the fallback re-checks and stands down.
+void G_CheckFallbackNeutralFlag(void);
+#endif
+
 int Pickup_Team( gentity_t *ent, gentity_t *other );
