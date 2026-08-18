@@ -528,11 +528,16 @@ fi
 # actually spawned, read from the engine's own log rather than inferred from
 # repo files. Informational: exits 0 whenever every map loaded, because "this
 # map has no neutral flag" is a map property, not a defect.
+# Accept --flag-inventory in ANY argument position, not just $1. Recognising it
+# only as the first token meant the natural `<binary> --flag-inventory` left the
+# flag unset, fell through to the ZONEID gate, and failed with a message about
+# debug builds that had nothing to do with the actual mistake.
 FLAG_INVENTORY=0
-if [ "${1:-}" = "--flag-inventory" ]; then
-    FLAG_INVENTORY=1
-    shift
-fi
+_zc_args=()
+for _a in "$@"; do
+    if [ "$_a" = "--flag-inventory" ]; then FLAG_INVENTORY=1; else _zc_args+=( "$_a" ); fi
+done
+set -- "${_zc_args[@]:-}"
 
 # ── repeat mode ──────────────────────────────────────────────────────────────
 # `--repeat N` runs the whole chain N times, each in a FRESH process with a
@@ -636,7 +641,19 @@ if [ "$FLAG_INVENTORY" = 1 ]; then
         # upstream printf, which `set -o pipefail` (line 57) then reports as a
         # failed pipeline — so a map that DID load read as "did not load". Same
         # hazard, and the same fix, as the ZONEID probe above.
-        if [ "$( printf '%s' "$BLOB" | grep -ciE "Server: *$m|spawning server|$m\.bsp" || true )" -lt 1 ]; then
+        # 🔴 A map that FAILED to load must not satisfy this. `$m\.bsp` alone
+        # does: the engine's own failure line is `Can't find map maps/<m>.bsp`,
+        # which contains that exact substring. Combined with the absence-based
+        # flag detection below — a map that never loads emits no warnings, so
+        # every flag reads as present — that turned an unreachable-content run
+        # into a full green table. Reject the failure line explicitly, and
+        # require positive evidence the server actually came up.
+        if [ "$( printf '%s' "$BLOB" | grep -ciE "Can't find map .*$m\.bsp" || true )" -ge 1 ]; then
+            printf '    %-12s %-6s %-6s %-8s %s\n' "$m" "-" "-" "-" "MAP NOT FOUND"
+            INV_RC=1
+            continue
+        fi
+        if [ "$( printf '%s' "$BLOB" | grep -ciE "Server: *$m|spawning server" || true )" -lt 1 ]; then
             printf '    %-12s %s\n' "$m" "(map did not load — inconclusive)"
             INV_RC=1
             continue
