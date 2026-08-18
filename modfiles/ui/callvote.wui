@@ -98,17 +98,12 @@ menuDef {
 				// ── Gametype vote — one literal callvote per type (fully wired)
 				// Numbers/names track startserver's ui_netGameType list (0-6).
 				// callvote g_gametype <n> is validated in Cmd_CallVote_f:1537.
-				// One Flag CTF (6) is NOT listed. It carries no feature gate
-				// (bg_gametypes.c:74 is unconditional and the game-side paths in
-				// g_team.c / g_items.c / ai_dmq3.c all compile in), so it is
-				// implemented — but it is not PLAYABLE on anything we ship:
-				// no shipped map spawns team_CTF_neutralflag, so the server logs
-				// "Warning: One Flag CTF without Neutral Flag" (g_team.c:571) and
-				// there is nothing to capture. Measured 2026-08-16 with
+				// One Flag CTF (6) is listed again: TASK-157 landed. A map with no
+				// team_CTF_neutralflag now gets one spawned at the centre of its
+				// walkable area (G_CheckFallbackNeutralFlag); a map that authors
+				// one keeps the authored position. Verified on arena1 / arenat2 /
+				// arenat7 (centre fallback) and arenam3 (authored) with
 				// tests/headless-map-transition-zonecheck.sh --flag-inventory.
-				// It returns once TASK-157 (centre-of-map neutral-flag fallback,
-				// Q1) lands. NOTE: Capture the Flag (5) below has the SAME gap and
-				// is left as-is only because it was already shipping.
 				// Overload (7) and Harvester (8) stay out for a different reason —
 				// FEAT_OVERLOAD/FEAT_HARVESTER are 0 (MISSIONPACK undefined), so
 				// their entities are compiled away entirely.
@@ -120,6 +115,7 @@ menuDef {
 				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Last Man Standing" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 3" ; close } }
 				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Team Deathmatch" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 4" ; close } }
 				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Capture the Flag" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 5" ; close } }
+				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "One Flag CTF" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 6" ; close } }
 
 				// ── Kick vote — connected-player feeder + submit ───────────
 				// feeder 7 = FEEDER_PLAYER_LIST (same as removebots.wui). The
