@@ -877,6 +877,54 @@ fileHandle_t FS_SV_FOpenFileWrite( const char *filename ) {
 
 /*
 ===========
+FS_FOpenAbsoluteWrite
+
+Open an ABSOLUTE host path for writing, outside the search path.
+
+The SV_ helpers below deliberately root everything at fs_homepath, which is the
+right default for engine state. This exists for the one case that needs to
+escape it: a diagnostic artefact whose destination the operator names outright
+(log_file_path). Keeping it separate means the search-path rules stay untouched
+for everything else — this call does not consult, extend or reorder them.
+
+`append` continues an existing file; otherwise the file is truncated. Returns
+FS_INVALID_HANDLE if the path cannot be opened, including after trying to
+create its parent directory.
+===========
+*/
+fileHandle_t FS_FOpenAbsoluteWrite( const char *ospath, qboolean append ) {
+	fileHandle_t      f;
+	fileHandleData_t *fd;
+
+	if ( !ospath || !*ospath ) {
+		return FS_INVALID_HANDLE;
+	}
+
+	f  = FS_HandleForFile();
+	fd = &fsh[ f ];
+	FS_InitHandle( fd );
+
+	fd->handleFiles.file.o = Sys_FOpen( ospath, append ? "ab" : "wb" );
+	if ( !fd->handleFiles.file.o ) {
+		if ( FS_CreatePath( (char *)ospath ) ) {
+			return FS_INVALID_HANDLE;
+		}
+		fd->handleFiles.file.o = Sys_FOpen( ospath, append ? "ab" : "wb" );
+		if ( !fd->handleFiles.file.o ) {
+			return FS_INVALID_HANDLE;
+		}
+	}
+
+	Q_strncpyz( fd->name, ospath, sizeof( fd->name ) );
+	fd->handleSync = qfalse;
+	fd->zipFile    = qfalse;
+
+	return f;
+}
+
+
+/*
+===========
 FS_SV_FOpenFileAppend
 
 Opens a file for appending in fs_homepath, ignoring fs_game.
