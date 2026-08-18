@@ -755,7 +755,10 @@ static void wui_layer_test_activate_one( const wui_layer_fixture_t *f )
 	wui_layer_force_override_mask |= ( 1U << (uint32_t) f->enumValue );
 
 	if ( f->enumValue == WUI_LAYER_MENU ) {
-		WiredUI_PushMenu( f->fixtureName, WUI_BG_INTENT_INHERIT );
+		/* WUI_BG_INTENT_INHERIT was the second argument before PushMenu dropped it; it
+		   is the enum's zero value and the behaviour PushMenu already takes, so this is
+		   the same call it always was. */
+		WiredUI_PushMenu( f->fixtureName );
 		wui_layer_test_menu_pushed = qtrue;
 	} else if ( f->enumValue == WUI_LAYER_POPUP ) {
 		WiredUI_PushPopup( f->fixtureName );
@@ -865,7 +868,10 @@ static void WiredUI_LayerTestStack_f( void )
 		const wui_layer_fixture_t *f = &wui_layer_fixtures[ i ];
 
 		if ( f->enumValue == WUI_LAYER_MENU ) {
-			WiredUI_PushMenu( f->fixtureName, WUI_BG_INTENT_INHERIT );
+			/* WUI_BG_INTENT_INHERIT was the second argument before PushMenu dropped it; it
+		   is the enum's zero value and the behaviour PushMenu already takes, so this is
+		   the same call it always was. */
+		WiredUI_PushMenu( f->fixtureName );
 			wui_layer_test_menu_pushed = qtrue;
 		} else if ( f->enumValue == WUI_LAYER_POPUP ) {
 			WiredUI_PushPopup( f->fixtureName );
