@@ -811,6 +811,7 @@ qboolean FS_ResetReadOnlyAttribute( const char *filename );
 
 qboolean FS_SV_FileExists( const char *file );
 
+fileHandle_t FS_FOpenAbsoluteWrite( const char *ospath, qboolean append );
 fileHandle_t FS_SV_FOpenFileWrite( const char *filename );
 fileHandle_t FS_SV_FOpenFileAppend( const char *filename );
 int		FS_SV_FOpenFileRead( const char *filename, fileHandle_t *fp );

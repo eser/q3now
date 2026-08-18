@@ -259,6 +259,7 @@ log_sink_t *Log_RegisterFileSink( void )
     cvar_t     *enabled_cvar;
     cvar_t     *mode_cvar;
     cvar_t     *fs_homepath;
+    cvar_t     *log_file_path_cvar;
     qboolean    do_append, do_sync;
     char        logPath[MAX_OSPATH];
     const char *logName = "qconsole.jsonl";
@@ -311,21 +312,50 @@ log_sink_t *Log_RegisterFileSink( void )
         do_sync = s_resumeDoSync;
     }
 
-    if ( do_append )
+    /* log_file_path names an ABSOLUTE destination for this artefact. Empty (the
+     * default) keeps the historical behaviour exactly: fs_homepath/qconsole.jsonl
+     * through the search path.
+     *
+     * It exists so a harness can separate its log WITHOUT redirecting
+     * fs_homepath. Moving the home is what used to be required, and it drags
+     * the whole content layer along: the install layer resolves relative to it,
+     * so a scratch home silently loses the downloaded content pak, and every
+     * script then copied archives back in and had to know which archive held
+     * what. One narrow knob for the one thing that actually needed to move. */
+    log_file_path_cvar = Cvar_Get( "log_file_path", "", CVAR_INIT );
+
+    if ( log_file_path_cvar->string[0] ) {
+        s_fileSinkCtx.fh = FS_FOpenAbsoluteWrite( log_file_path_cvar->string, do_append );
+        if ( s_fileSinkCtx.fh == FS_INVALID_HANDLE ) {
+            /* Say so rather than falling back silently: a run that asked for a
+             * specific artefact path and got a different one is worse than a
+             * run that fails loudly, because the caller will read the wrong
+             * file and believe it. */
+            Com_Log( SEV_WARN, LOG_CH(ch_system),
+                     "log_sink_file: cannot open log_file_path '%s'\n",
+                     log_file_path_cvar->string );
+            return NULL;
+        }
+    } else if ( do_append ) {
         s_fileSinkCtx.fh = FS_SV_FOpenFileAppend( logName );
-    else
+    } else {
         s_fileSinkCtx.fh = FS_SV_FOpenFileWrite( logName );
+    }
 
     if ( s_fileSinkCtx.fh == FS_INVALID_HANDLE )
         return NULL;
 
     s_fileSinkCtx.do_sync = do_sync;
 
-    // log_path: ROM display-only introspection showing where the file lives.
-    fs_homepath = Cvar_Get( "fs_homepath", "", 0 );
-    Com_sprintf( logPath, sizeof( logPath ), "%s/%s",
-                 fs_homepath->string, logName );
-    Cvar_Get( "log_file_path", logPath, CVAR_ROM );
+    /* Publish where the file actually landed. When the operator named a path we
+     * echo it back unchanged; otherwise report the resolved homepath location,
+     * which is the same introspection this cvar has always provided. */
+    if ( !log_file_path_cvar->string[0] ) {
+        fs_homepath = Cvar_Get( "fs_homepath", "", 0 );
+        Com_sprintf( logPath, sizeof( logPath ), "%s/%s",
+                     fs_homepath->string, logName );
+        Cvar_Set( "log_file_path", logPath );
+    }
 
     s_fileSink.emit          = FileSink_Emit;
     s_fileSink.ctx           = &s_fileSinkCtx;
