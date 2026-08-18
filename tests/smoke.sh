@@ -79,7 +79,11 @@ if ! command -v "$DED" >/dev/null 2>&1 && [ ! -x "$DED" ]; then
   exit 1
 fi
 
-LOGFILE=$(mktemp /tmp/q3now-smoke-XXXXXX.log)
+# mktemp needs XXXXXX at the END of the template. With a suffix after it
+# macOS treats the whole string as a literal name, creates /tmp/q3now-smoke-XXXXXX.log
+# verbatim, and then REFUSES on the next run because the target exists — the
+# smoke blocks itself with its own leftover. Generate first, then add the suffix.
+LOGFILE="$(mktemp /tmp/q3now-smoke-XXXXXX)".log
 trap "rm -f $LOGFILE" EXIT
 
 echo "==> Starting smoke test: $DED +map arena1"

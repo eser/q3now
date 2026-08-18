@@ -40,7 +40,7 @@ if [ -z "$DED" ] || { [ ! -x "$DED" ] && ! command -v "$DED" >/dev/null 2>&1; };
   fi
 fi
 
-LOGFILE=$(mktemp /tmp/q3now-quic-game-XXXXXX.log)
+LOGFILE="$(mktemp /tmp/q3now-quic-game-XXXXXX)".log   # suffix after mktemp; see smoke.sh
 trap "rm -f $LOGFILE" EXIT
 
 # 🔴 DO NOT force fs_installpath. The previous version passed
