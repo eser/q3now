@@ -581,10 +581,11 @@ for candidate in "$WD" "$WD/../Resources" "$REPO_ROOT/build/release" "$REPO_ROOT
     [ -f "$candidate/base/pax21.sw3z" ] && PACK="$(cd "$candidate" && pwd)" && break
 done
 [ -n "$PACK" ] || { echo "SKIP: current pax21 unavailable"; exit 77; }
-CONTENT="${WIRED_CONTENT_ROOT:-$PACK}"
-if   [ -f "$CONTENT/base/pax01.sw3z" ]; then BASE="$CONTENT/base/pax01.sw3z"
-elif [ -f "$CONTENT/base/pak0.pk3"   ]; then BASE="$CONTENT/base/pak0.pk3"
-else echo "SKIP: no BSP-bearing content pak (set WIRED_CONTENT_ROOT)"; exit 77; fi
+# No archive-name check. Which file carries the BSPs is an asset-pipeline
+# detail the engine cannot observe — it mounts every sw3z/pk3 it finds as one
+# namespace — and asserting `pax01` here made this gate SKIP on installs that
+# were perfectly complete. Content reachability is proven where it matters:
+# the per-map load check below fails loudly if a map does not open.
 
 # 🔴 Fail-closed build-config gate. A release binary has no ZONEID assertion
 # (common.c:409-412), so it CANNOT witness #96 — passing one would manufacture a
@@ -606,16 +607,27 @@ HOME_DIR="$ROOT/home/q3now-preview"
 cleanup(){ local status=$?; trap - EXIT INT TERM; [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT"; exit "$status"; }
 trap cleanup EXIT; trap 'exit 130' INT; trap 'exit 143' TERM
 
-mkdir -p "$HOME_DIR/base"
-cp "$PACK/base/pax21.sw3z" "$HOME_DIR/base/" || exit 1
-cp "$BASE"                 "$HOME_DIR/base/" || exit 1
+# No scratch home, and nothing copied. The engine's own defaults already
+# resolve BOTH content layers — install Resources plus ~/wired/<app>/base — so a
+# run that overrides nothing mounts everything (measured: 2228 files in 2 paks,
+# arena1 loads). Redirecting fs_homepath was what broke that: the content layer
+# resolves relative to it, so a scratch home silently lost the downloaded pak,
+# and the copying below existed only to put it back — which in turn forced this
+# script to know which archive held the maps.
+#
+# The one thing that genuinely needed isolating is the LOG, so each map gets its
+# own artefact instead of appending to the user's. That is now a narrow knob:
+# log_file_path names an absolute destination and leaves the filesystem alone.
+# A headless run does not write config.cfg (measured: hash unchanged), so there
+# is nothing else here worth isolating.
+mkdir -p "$HOME_DIR"
 
 if [ "$FLAG_INVENTORY" = 1 ]; then
     shift || true
     INV_MAPS="${*:-arena1 arenat2 arenat4 arenat7 arena7 e1m1}"
     echo "==> flag-entity inventory: $INV_MAPS"
     echo "    binary : $HEADLESS"
-    echo "    content: $BASE"
+    echo "    content: engine defaults (install + $HOME/wired/<app>)"
     printf '\n    %-12s %-6s %-6s %-8s %s\n' map red blue NEUTRAL 1FCTF-playable
     printf '    %s\n' "------------------------------------------------------------"
     INV_RC=0
@@ -630,7 +642,7 @@ if [ "$FLAG_INVENTORY" = 1 ]; then
         MLOG="$HOME_DIR/qconsole.jsonl"
         rm -f "$MLOG"
         ( cd "$WD" && exec "$HEADLESS" \
-            +set fs_homepath "$HOME_DIR" +set com_automated 1 \
+            +set log_file_path "$MLOG" +set com_automated 1 \
             +set com_noHardReboot 1 +set sv_pure 0 \
             +set log_severity DEBUG +set log_file_severity DEBUG \
             +set log_file_mode overwrite_synced \
@@ -712,7 +724,7 @@ fi
 
 echo "==> headless map-transition zonecheck (#96): $MAP_CHAIN"
 echo "    binary : $HEADLESS"
-echo "    content: $BASE"
+echo "    content: engine defaults (install + $HOME/wired/<app>)"
 echo "    repeats: $REPEAT"
 
 # com_noHardReboot 1 keeps the watchdog from RELAUNCHING on a crash and masking
