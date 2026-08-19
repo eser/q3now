@@ -726,92 +726,6 @@ static const char *GetExceptionName( DWORD code )
 	return buf;
 }
 
-
-/*
-==================
-WriteMinidump
-
-Best-effort minidump writer. Uses MiniDumpWriteDump from dbghelp.dll loaded
-dynamically so that release builds don't have a hard link dependency when
-the SDK library is missing. Silently returns on failure — we're already
-crashing, there's nothing reasonable to do if the dump can't be written.
-==================
-*/
-static void WriteMinidump( struct _EXCEPTION_POINTERS *ExceptionInfo )
-{
-	typedef BOOL (WINAPI *PFN_MiniDumpWriteDump)(
-		HANDLE hProcess, DWORD ProcessId, HANDLE hFile,
-		MINIDUMP_TYPE DumpType,
-		PMINIDUMP_EXCEPTION_INFORMATION ExceptionParam,
-		PMINIDUMP_USER_STREAM_INFORMATION UserStreamParam,
-		PMINIDUMP_CALLBACK_INFORMATION CallbackParam );
-
-	HMODULE dbg;
-	PFN_MiniDumpWriteDump pMiniDumpWriteDump;
-	HANDLE dumpFile;
-	char dumpName[ MAX_OSPATH * 2 ];
-	char dumpDir[ MAX_OSPATH ];
-	const char *homepath;
-	SYSTEMTIME lt;
-	MINIDUMP_EXCEPTION_INFORMATION mei;
-
-	dbg = LoadLibraryA( "dbghelp.dll" );
-	if ( dbg == NULL ) {
-		return;
-	}
-	pMiniDumpWriteDump = (PFN_MiniDumpWriteDump)GetProcAddress( dbg, "MiniDumpWriteDump" );
-	if ( pMiniDumpWriteDump == NULL ) {
-		FreeLibrary( dbg );
-		return;
-	}
-
-	/* The dump belongs beside the other two artefacts of the same crash.
-	 * It used to be written to a bare filename, which lands it in whatever
-	 * the process CWD happens to be while Crash_WriteReport writes its JSON
-	 * to fs_homepath — one crash, two directories, and the evidence checker
-	 * (tests/crash-evidence-check.sh) reporting "no minidump present" for a
-	 * run that produced one. Resolved the same way Crash_WriteReport resolves
-	 * its own path: fs_homepath, never a hardcoded location. */
-	homepath = Cvar_VariableString( "fs_homepath" );
-	if ( homepath == NULL || homepath[ 0 ] == '\0' ) {
-		FreeLibrary( dbg );
-		return;
-	}
-
-	/* crashdb/ is where the evidence checker looks for dumps, and where the
-	 * out-of-process backend keeps its own — one place to collect, whichever
-	 * mechanism produced the file. */
-	Com_sprintf( dumpDir, sizeof( dumpDir ), "%s%c%s", homepath, PATH_SEP, "crashdb" );
-	CreateDirectoryA( dumpDir, NULL );
-
-	GetLocalTime( &lt );
-	Com_sprintf( dumpName, sizeof( dumpName ),
-		"%s%c" "crash_%04d%02d%02d_%02d%02d%02d.dmp", dumpDir, PATH_SEP,
-		lt.wYear, lt.wMonth, lt.wDay, lt.wHour, lt.wMinute, lt.wSecond );
-
-	dumpFile = CreateFileA( dumpName,
-		GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
-		FILE_ATTRIBUTE_NORMAL, NULL );
-	if ( dumpFile == INVALID_HANDLE_VALUE ) {
-		FreeLibrary( dbg );
-		return;
-	}
-
-	mei.ThreadId = GetCurrentThreadId();
-	mei.ExceptionPointers = ExceptionInfo;
-	mei.ClientPointers = FALSE;
-
-	pMiniDumpWriteDump(
-		GetCurrentProcess(), GetCurrentProcessId(),
-		dumpFile,
-		(MINIDUMP_TYPE)( MiniDumpNormal | MiniDumpWithIndirectlyReferencedMemory ),
-		&mei, NULL, NULL );
-
-	CloseHandle( dumpFile );
-	FreeLibrary( dbg );
-}
-
-
 /*
 ==================
 ExceptionFilter
@@ -889,10 +803,12 @@ static LONG WINAPI ExceptionFilter( struct _EXCEPTION_POINTERS *ExceptionInfo )
 
 		// Structured crash report (JSON).
 		Crash_WriteReport( reasonText, addressText, basename && *basename ? basename : "" );
+		/* The minidump comes from the out-of-process sentry backend, which is
+		 * the single producer on every platform. Windows used to write its own
+		 * with MiniDumpWriteDump — deleted, because one crash pipeline that
+		 * behaves the same everywhere is worth more than a second, divergent
+		 * writer that only one platform had. See crash_sentry.c. */
 
-		// Best-effort full minidump — lets the user share a .dmp file
-		// alongside the JSON for offline triage.
-		WriteMinidump( ExceptionInfo );
 
 		/* Playtest breadcrumbs. The ordinary flush hangs off Com_Shutdown,
 		 * which an unhandled exception never reaches, so without this a crashed
