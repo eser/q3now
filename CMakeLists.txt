@@ -485,6 +485,20 @@ SET_TESTS_PROPERTIES(playtest_evidence_analyzer_contract PROPERTIES
 	TIMEOUT 60
 )
 
+# The same discipline for crash evidence: this runs the validator's self-test,
+# not a real crash. It builds artefacts with one planted defect each — missing
+# build identity, an absolute path in the cvar block, a truncated minidump — and
+# requires every one to be refused. A validator that cannot reject is a validator
+# that certifies corrupt evidence, and privacy defects in particular are silent:
+# a leaked home directory reads as a perfectly valid report.
+ADD_TEST(NAME crash_evidence_analyzer_contract
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/crash-evidence-check.sh --self-test
+)
+SET_TESTS_PROPERTIES(crash_evidence_analyzer_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.build;failure.security-contract;feature.always"
+	TIMEOUT 60
+)
+
 # Screenshots come from vk.capture.image when supersampling is on and from the
 # swapchain otherwise; only the former is display-independent, so on a HiDPI
 # display the two disagree about size.  The gate also refuses a blank frame —
