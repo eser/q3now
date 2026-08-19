@@ -45,6 +45,15 @@ size_t   Arena_Used( const arena_t *arena );   /* bytes consumed */
 size_t   Arena_Size( const arena_t *arena );   /* block capacity */
 size_t   Arena_Peak( const arena_t *arena );   /* high-water mark */
 
+/* Does this arena's whole block sit below 2^47?
+ *
+ * For consumers that reject high addresses — LuaJIT packs GC pointers into
+ * tagged values and refuses anything above 47 bits — Arena_Create tries to
+ * secure a low block but cannot promise one on every platform. Such a consumer
+ * must ASK rather than assume: a false answer means "use a different strategy",
+ * not "this arena is broken". Every other caller can ignore this. */
+qboolean Arena_IsLowAddress( const arena_t *arena );
+
 /* Debug lock (used by Test 3.5 — assert no access during CL_ShutdownLevel) */
 #ifdef HUNK_DEBUG
 void     Arena_Lock( arena_t *arena );         /* assert on alloc while locked */

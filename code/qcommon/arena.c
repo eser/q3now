@@ -26,6 +26,8 @@ struct arena_s {
     byte  *ptr;          /* next free byte (bump pointer) */
     byte  *end;          /* one past last byte of block */
     size_t peak;         /* high-water mark */
+    size_t blockBytes;   /* header + data, as passed to mmap (munmap needs it) */
+    qboolean mapped;     /* block came from mmap, so free it with munmap */
     uint32_t magic;
 #ifdef HUNK_DEBUG
     qboolean locked;
@@ -38,18 +40,111 @@ static int      s_registryCount;
 
 
 /*
+===========================================================================
+Low-address backing
+
+Some consumers cannot use memory from just anywhere in the address space.
+LuaJIT is the concrete case: it packs GC pointers into tagged values and
+refuses any allocation above 47 bits outright (lj_def.h checkptr47, enforced
+at lj_state.c:266). A block from plain malloc is therefore accepted or refused
+depending on where the platform's heap happens to sit — measured working on
+macOS arm64 and failing in a Linux aarch64 container with the same binary.
+Nothing about that is specific to Lua; it is a property any address-sensitive
+consumer can have, so the guarantee belongs here rather than in one subsystem.
+
+The strategy mirrors LuaJIT's own (lj_alloc.c mmap_probe), because no portable
+flag asks for a low address — MAP_32BIT is Linux/x86-64 only, and far below a
+47-bit window anyway. So: ask, check what came back, keep it if it fits,
+release and retry with a higher hint if not.
+
+Failure is deliberately NOT fatal. Falling back to malloc leaves every arena
+that does not care behaving exactly as before, including on platforms where
+probing is unavailable; only an address-sensitive consumer would notice, and
+Arena_IsLowAddress lets it check rather than assume.
+===========================================================================
+*/
+#if defined( _WIN32 )
+#	define ARENA_HAS_MMAP 0
+#else
+#	define ARENA_HAS_MMAP 1
+#	include <sys/mman.h>
+#	include <errno.h>
+#endif
+
+/* LuaJIT's limit in GC64 mode (lj_alloc.c LJ_ALLOC_MBITS). It is the strictest
+   real consumer here; a tighter bound would reject usable addresses. */
+#define ARENA_ADDR_BITS      47
+#define ARENA_PROBE_ATTEMPTS 32
+/* Start above the lowest pages so a mapping never lands where a NULL
+   dereference is meant to fault. Mirrors LJ_ALLOC_MMAP_PROBE_LOWER. */
+#define ARENA_PROBE_LOWEST   ( (uintptr_t)0x10000 )
+
+static qboolean Arena_AddrFits( const void *p, size_t size )
+{
+    uintptr_t a = (uintptr_t)p;
+    return ( ( a >> ARENA_ADDR_BITS ) == 0
+          && ( ( a + size ) >> ARENA_ADDR_BITS ) == 0 ) ? qtrue : qfalse;
+}
+
+/* Returns a block whose whole extent fits below 2^ARENA_ADDR_BITS when it can,
+   otherwise whatever malloc gives. *outMapped reports whether the result came
+   from mmap, and so must be munmap'd rather than freed. */
+static void *Arena_AllocBlock( size_t total, qboolean *outMapped )
+{
+    *outMapped = qfalse;
+
+#if ARENA_HAS_MMAP
+    {
+        uintptr_t hint = ARENA_PROBE_LOWEST;
+        int       attempt;
+
+        for ( attempt = 0; attempt < ARENA_PROBE_ATTEMPTS; attempt++ ) {
+            void *p = mmap( (void *)hint, total, PROT_READ | PROT_WRITE,
+                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0 );
+
+            if ( p == MAP_FAILED ) {
+                /* Genuinely out of memory: stop probing and let the malloc path
+                   below produce one clear failure. A rejected hint is not an
+                   error — the kernel may place the mapping wherever it likes. */
+                if ( errno == ENOMEM ) {
+                    break;
+                }
+                hint += 0x1000000;
+                continue;
+            }
+            if ( Arena_AddrFits( p, total ) ) {
+                *outMapped = qtrue;
+                return p;
+            }
+            /* Unusable: hand it straight back. Leaking here would cost the
+               process a full arena's worth of address space per attempt. */
+            munmap( p, total );
+            hint += 0x1000000;
+            if ( ( ( hint + total ) >> ARENA_ADDR_BITS ) != 0 ) {
+                hint = ARENA_PROBE_LOWEST;   /* walked past the window; restart */
+            }
+        }
+    }
+#endif
+
+    return malloc( total );
+}
+
+/*
 =============
 Arena_Create
 =============
 */
 arena_t *Arena_Create( const char *name, size_t size )
 {
+    qboolean mapped;
+
     if ( !name || size == 0 ) {
         Com_Terminate( TERM_UNRECOVERABLE, "Arena_Create: bad parameters" );
     }
 
     /* Allocate the arena header and the data block together for locality */
-    byte *block = (byte *)malloc( sizeof(arena_t) + size );
+    byte *block = (byte *)Arena_AllocBlock( sizeof(arena_t) + size, &mapped );
     if ( !block ) {
         Com_Terminate( TERM_UNRECOVERABLE, "Arena_Create: failed to allocate %zu bytes for '%s'", size, name );
     }
@@ -61,6 +156,8 @@ arena_t *Arena_Create( const char *name, size_t size )
     a->ptr   = a->base;
     a->end   = a->base + size;
     a->peak  = 0;
+    a->blockBytes = sizeof(arena_t) + size;
+    a->mapped     = mapped;
     a->magic = ARENA_GUARD_MAGIC;
 
     Arena_Register( a );
@@ -79,8 +176,26 @@ void Arena_Destroy( arena_t *arena )
         return;
     }
     Arena_Unregister( arena );
-    arena->magic = 0;
-    free( arena );   /* frees header + data block together */
+    {
+        /* Read both out before clearing magic: the release below invalidates
+           the header, so nothing may be read from it afterwards. mmap and
+           malloc blocks must be released by their matching call — mixing them
+           is undefined behaviour, not merely untidy. */
+        qboolean mapped = arena->mapped;
+        size_t   bytes  = arena->blockBytes;
+
+        arena->magic = 0;
+#if ARENA_HAS_MMAP
+        if ( mapped ) {
+            munmap( arena, bytes );
+            return;
+        }
+#else
+        (void)mapped;
+        (void)bytes;
+#endif
+        free( arena );   /* frees header + data block together */
+    }
 }
 
 
@@ -187,6 +302,25 @@ size_t Arena_Peak( const arena_t *arena )
         return 0;
     }
     return arena->peak;
+}
+
+
+/*
+=============
+Arena_IsLowAddress
+
+Re-checks the real extent rather than trusting the mapped flag: a malloc block
+can land low by luck, and that is just as usable to a caller who only cares
+about the address. Answering from the flag would refuse a perfectly good block
+purely because of how it was obtained.
+=============
+*/
+qboolean Arena_IsLowAddress( const arena_t *arena )
+{
+    if ( !arena || arena->magic != ARENA_GUARD_MAGIC ) {
+        return qfalse;
+    }
+    return Arena_AddrFits( arena, arena->blockBytes );
 }
 
 
