@@ -12,8 +12,9 @@
 #
 #   WIRED_SOURCE    this source checkout              (git rev-parse)
 #   WIRED_HOME      engine home: config, screenshots, qconsole.jsonl, navmesh
-#                   ~/wired/<product><channel>/       (q_shared.h:19 — same
-#                   shape on every platform; only $HOME differs)
+#                   <home-root>/wired/<product><channel>/  (q_shared.h:19 — same
+#                   shape on every platform; the ROOT differs, and on Windows it
+#                   is USERPROFILE rather than $HOME. See WIRED_HOME_ROOT below.)
 #   WIRED_BASE      $WIRED_HOME/base — where the engine actually writes
 #   WIRED_INSTALL   install root: engine binary + paks
 #                   macOS   /Applications/<app>.app
@@ -57,7 +58,33 @@ if [ -z "${WIRED_TMP:-}" ]; then
 fi
 WIRED_TMP="${WIRED_TMP%/}"
 
-WIRED_HOME="${WIRED_HOME:-$HOME/wired/$WIRED_APP}"
+# The engine's home root, resolved the way the ENGINE resolves it — not the way
+# the shell does. On Windows Sys_DefaultHomePath (win32/win_shared.c) reads
+# USERPROFILE, and under MSYS that is NOT $HOME: $HOME is the MSYS root
+# (/home/<user>) while the engine writes to C:/Users/<user>. Deriving this from
+# $HOME sent every Windows harness looking for artefacts in a directory the
+# engine never writes to, and the isolated-home helper below then linked no paks
+# because it found no base/ to link from — a map that exists reads as "Can't find
+# map". POSIX hosts have no such split, so $HOME stays correct there.
+if [ -z "${WIRED_HOME_ROOT:-}" ]; then
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*)
+            _up="${USERPROFILE:-}"
+            if [ -n "$_up" ] && command -v cygpath >/dev/null 2>&1; then
+                WIRED_HOME_ROOT="$(cygpath -u "$_up")"
+            else
+                WIRED_HOME_ROOT="${_up:-$HOME}"
+            fi
+            unset _up
+            ;;
+        *)
+            WIRED_HOME_ROOT="$HOME"
+            ;;
+    esac
+fi
+WIRED_HOME_ROOT="${WIRED_HOME_ROOT%/}"
+
+WIRED_HOME="${WIRED_HOME:-$WIRED_HOME_ROOT/wired/$WIRED_APP}"
 WIRED_BASE="${WIRED_BASE:-$WIRED_HOME/base}"
 
 case "$(uname -s)" in
