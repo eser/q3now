@@ -749,7 +749,9 @@ static void WriteMinidump( struct _EXCEPTION_POINTERS *ExceptionInfo )
 	HMODULE dbg;
 	PFN_MiniDumpWriteDump pMiniDumpWriteDump;
 	HANDLE dumpFile;
-	char dumpName[ MAX_OSPATH ];
+	char dumpName[ MAX_OSPATH * 2 ];
+	char dumpDir[ MAX_OSPATH ];
+	const char *homepath;
 	SYSTEMTIME lt;
 	MINIDUMP_EXCEPTION_INFORMATION mei;
 
@@ -763,9 +765,28 @@ static void WriteMinidump( struct _EXCEPTION_POINTERS *ExceptionInfo )
 		return;
 	}
 
+	/* The dump belongs beside the other two artefacts of the same crash.
+	 * It used to be written to a bare filename, which lands it in whatever
+	 * the process CWD happens to be while Crash_WriteReport writes its JSON
+	 * to fs_homepath — one crash, two directories, and the evidence checker
+	 * (tests/crash-evidence-check.sh) reporting "no minidump present" for a
+	 * run that produced one. Resolved the same way Crash_WriteReport resolves
+	 * its own path: fs_homepath, never a hardcoded location. */
+	homepath = Cvar_VariableString( "fs_homepath" );
+	if ( homepath == NULL || homepath[ 0 ] == '\0' ) {
+		FreeLibrary( dbg );
+		return;
+	}
+
+	/* crashdb/ is where the evidence checker looks for dumps, and where the
+	 * out-of-process backend keeps its own — one place to collect, whichever
+	 * mechanism produced the file. */
+	Com_sprintf( dumpDir, sizeof( dumpDir ), "%s%c%s", homepath, PATH_SEP, "crashdb" );
+	CreateDirectoryA( dumpDir, NULL );
+
 	GetLocalTime( &lt );
 	Com_sprintf( dumpName, sizeof( dumpName ),
-		"crash_%04d%02d%02d_%02d%02d%02d.dmp",
+		"%s%c" "crash_%04d%02d%02d_%02d%02d%02d.dmp", dumpDir, PATH_SEP,
 		lt.wYear, lt.wMonth, lt.wDay, lt.wHour, lt.wMinute, lt.wSecond );
 
 	dumpFile = CreateFileA( dumpName,
