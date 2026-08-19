@@ -1,16 +1,17 @@
 diff --git a/src/backends/native/sentry_crash_daemon.c b/src/backends/native/sentry_crash_daemon.c
-index 68a95e1d..6ae34e9e 100644
+index 68a95e1d..8342b8db 100644
 --- a/src/backends/native/sentry_crash_daemon.c
 +++ b/src/backends/native/sentry_crash_daemon.c
-@@ -2805,15 +2805,34 @@ is_parent_alive(pid_t parent_pid)
+@@ -2805,15 +2805,51 @@ is_parent_alive(pid_t parent_pid)
      // Send signal 0 to check if process exists
      return kill(parent_pid, 0) == 0 || errno != ESRCH;
  #elif defined(SENTRY_PLATFORM_WINDOWS)
 -    // Open handle to process with minimum rights
+-    HANDLE hProcess = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
 +    // Mirror of the POSIX rule above, which reports dead ONLY for ESRCH ("no
 +    // such process") and treats every other failure as still alive. The
 +    // Windows path used to collapse "the process is gone" and "I could not
-+    // ask" into a single `return false`, so any failure to open the handle
++    // ask" into a single `return false`, so any failure to query the parent
 +    // ended the daemon.
 +    //
 +    // That asymmetry is not cosmetic, because the two mistakes do not cost the
@@ -20,15 +21,32 @@ index 68a95e1d..6ae34e9e 100644
 +    // destroyed. Wrongly reporting alive only keeps a small daemon running a
 +    // little longer, and the parent-exit path is not the only way it ends.
 +    // When in doubt, therefore, report alive.
-     HANDLE hProcess = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
++    //
++    // PROCESS_QUERY_LIMITED_INFORMATION is what GetExitCodeProcess actually
++    // requires; SYNCHRONIZE alone is not enough, and asking for too little is
++    // how this check quietly stopped working. Measured against a live engine,
++    // an exited engine and an unused pid:
++    //
++    //   live process      OpenProcess succeeds, exit code STILL_ACTIVE
++    //   exited process    OpenProcess STILL SUCCEEDS — Windows keeps the
++    //                     process object alive while any handle to it exists,
++    //                     so the id is not recycled and "gone" is not an open
++    //                     failure the way ESRCH is on POSIX. Only
++    //                     GetExitCodeProcess can tell the two apart, and with
++    //                     SYNCHRONIZE only it failed with ERROR_ACCESS_DENIED,
++    //                     which under the rule below reads as "alive" — making
++    //                     parent-exit detection unreachable in practice.
++    //   unused pid        OpenProcess fails, ERROR_INVALID_PARAMETER
++    HANDLE hProcess = OpenProcess(
++        SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, parent_pid);
      if (!hProcess) {
 -        return false; // Process doesn't exist or can't be accessed
 -    }
 -    // Check if process has exited
 +        // ERROR_INVALID_PARAMETER is the true counterpart of ESRCH: no process
-+        // carries that id. Anything else — ERROR_ACCESS_DENIED above all, the
-+        // counterpart of EPERM — means the process exists but is not open to
-+        // us, which is precisely the case POSIX keeps alive.
++        // carries that id. Anything else — ERROR_ACCESS_DENIED, the counterpart
++        // of EPERM — means the process exists but is not open to us, which is
++        // precisely the case POSIX keeps alive.
 +        return GetLastError() != ERROR_INVALID_PARAMETER;
 +    }
 +    // A failed GetExitCodeProcess does not mean the process exited; it means
