@@ -478,6 +478,18 @@ extern void Sys_InstallCrashHandler( void );
 
 void Crash_InstallHandlers( void )
 {
+	/* sentry first, and only if it actually takes ownership. Its installer is
+	   fail-soft by contract (crash_sentry.c): a missing handler executable or an
+	   unwritable home returns qfalse rather than half-installing, and we fall
+	   back to the platform handler below. The one unacceptable outcome is no
+	   crash capture at all, so the fallback is unconditional.
+
+	   Compiled out entirely unless USE_SENTRY_CRASH=ON, in which case this call
+	   is a stub returning qfalse and nothing changes. */
+	if ( Crash_SentryInstall() ) {
+		return;
+	}
+
 	Sys_InstallCrashHandler();
 }
 

@@ -248,6 +248,12 @@ SW3Z_BIN := $(SW3Z_DIR)/cmd/sw3z/sw3z
 PAK_STAGING := $(BUILD_DIR)/pak-staging
 PAK_OUT := $(BUILD_DIR)/base/pax21.sw3z
 
+# Out-of-process crash handler (USE_SENTRY_CRASH=ON only). Path is the same on
+# every platform because it comes from the vendored library's build tree, not
+# from the platform app skeleton; the copy steps test for it and skip silently
+# when the feature is off, so a default build is unaffected.
+SENTRY_HANDLER_BIN := $(BUILD_DIR)/src/libs/sentry-native/sentry-crash$(EXEEXT)
+
 # ── Phony targets ─────────────────────────────────────────────────────────────
 
 .PHONY: all configure build _build-stamp clean clean-launcher clean-all rebuild shaders \
@@ -632,7 +638,20 @@ define install_app_skeleton
 	  --exclude='$(CMAKE_APP_NAME)_*$(RENDEXT).dylib' \
 	  --exclude='Resources/base/' \
 	  --exclude='q3now-launcher' \
+	  --exclude='sentry-crash' \
 	  "$(BUILT_APP)/" "$(Q3DIR)/"
+	@# sentry-crash — the out-of-process crash handler. Built only when
+	@# USE_SENTRY_CRASH=ON, and it lands under the sentry-native build dir rather
+	@# than in the app skeleton, so it needs the same own-then-restore treatment
+	@# as the launcher below. Without the --exclude above, --delete removed it on
+	@# every copy; the engine then logged "handler not found" and fell back to the
+	@# platform handler. That fallback is soft by design, which is precisely why
+	@# the missing file would otherwise go unnoticed.
+	@if test -f "$(SENTRY_HANDLER_BIN)"; then \
+	  cp "$(SENTRY_HANDLER_BIN)" "$(Q3DIR)/Contents/MacOS/sentry-crash"; \
+	  codesign --force --options runtime --sign "-" \
+	    "$(Q3DIR)/Contents/MacOS/sentry-crash" >/dev/null 2>&1 || true; \
+	fi
 	@test ! -e "$(Q3DIR)/Contents/MacOS/base" || { \
 	  echo "ERROR: runtime base directory leaked into release MacOS staging"; exit 1; }
 	@set -- "$(Q3DIR)"/Contents/MacOS/*.jsonl; [ ! -e "$$1" ] || { \

@@ -24,4 +24,12 @@ void Crash_SaveVMChecksum( vmIndex_t vmIndex, int cgameInstance, unsigned int cr
 void Crash_PrintVMStackTracesASS( int fd );
 #endif
 
+// sentry-native out-of-process crash capture (crash_sentry.c).
+// Install returns qfalse when it declines — missing handler binary, unwritable
+// home, or FEAT_SENTRY_CRASH=0 — and the caller must then fall back to the
+// per-platform handler. Always linked; a stub when the feature is off, so
+// callers need no #if of their own.
+qboolean Crash_SentryInstall( void );
+void     Crash_SentryShutdown( void );
+
 #endif // QCOMMON_CRASH_H

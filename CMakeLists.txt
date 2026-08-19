@@ -2710,6 +2710,61 @@ TARGET_INCLUDE_DIRECTORIES(qcommon_ded PRIVATE ${WIREDNET_INCLUDE_DIRS})
 TARGET_LINK_LIBRARIES(qcommon_ded PRIVATE OpenSSL::Crypto)
 
 
+# ── Crash capture backend (sentry-native) ───────────────────────────────────
+# Out-of-process crash capture with real minidumps, replacing three divergent
+# per-platform paths (POSIX signal + backtrace, Windows SEH + MiniDumpWriteDump)
+# with one contract. See wiki crash-evidence-pipeline / TASK-81.
+#
+# Why sentry-native's "native" backend and not Crashpad directly:
+#   * No crashpad/breakpad submodule — those stay unfetched, so the licence
+#     surface is sentry-native's MIT alone. Crashpad would add Apache-2.0, which
+#     escalates against GPL-2.0-only consumers.
+#   * SENTRY_TRANSPORT=none compiles out HTTP entirely: no libcurl, no WinHTTP,
+#     nothing that can phone home. Crash evidence stays local, which is the
+#     policy this project wants and also the smallest attack surface.
+#   * Mach exception ports on macOS. This is the load-bearing reason. On
+#     Ventura+/Apple Silicon a POSIX signal handler is not a reliable crash hook:
+#     backtrace() inside one no longer yields a usable trace, and for some faults
+#     the signal is never delivered at all. Consolidating the existing
+#     hand-rolled signal path would therefore have bought very little on macOS.
+#   * Out-of-process by construction (a small `sentry-crash` daemon), so the
+#     "handler must not deadlock or recurse into allocation" requirement is
+#     satisfied structurally rather than by careful coding in a fault handler.
+#
+# Measured before adopting: builds offline from the pinned submodule with no
+# network access at configure time, on macOS arm64 (libsentry.dylib 325 KB +
+# sentry-crash 336 KB) and on Debian arm64 under Docker (libsentry.so +
+# sentry-crash, 4 MB build tree).
+#
+# Default OFF for now: the engine-side adapter lands before the switch is
+# flipped, so a half-wired backend can never displace the working per-platform
+# handlers.
+OPTION(USE_SENTRY_CRASH "Use sentry-native for crash capture" OFF)
+IF(NOT USE_SENTRY_CRASH)
+	ADD_COMPILE_DEFINITIONS(FEAT_SENTRY_CRASH=0)
+ELSEIF(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/libs/sentry-native/CMakeLists.txt)
+	MESSAGE(FATAL_ERROR
+		"USE_SENTRY_CRASH=ON but the submodule is absent: "
+		"git submodule update --init src/libs/sentry-native")
+ELSE()
+	ADD_COMPILE_DEFINITIONS(FEAT_SENTRY_CRASH=1)
+	SET(SENTRY_BACKEND        "native" CACHE STRING "" FORCE)
+	SET(SENTRY_TRANSPORT      "none"   CACHE STRING "" FORCE)
+	SET(SENTRY_BUILD_TESTS    OFF      CACHE BOOL   "" FORCE)
+	SET(SENTRY_BUILD_EXAMPLES OFF      CACHE BOOL   "" FORCE)
+	# Same BUILD_TESTING shadowing as zlib-ng and googletest: sentry-native reads
+	# the global option for its own suite.
+	SET(_WIRED_SAVED_BUILD_TESTING ${BUILD_TESTING})
+	SET(BUILD_TESTING OFF)
+	ADD_SUBDIRECTORY(src/libs/sentry-native EXCLUDE_FROM_ALL)
+	SET(BUILD_TESTING ${_WIRED_SAVED_BUILD_TESTING})
+	UNSET(_WIRED_SAVED_BUILD_TESTING)
+
+	TARGET_LINK_LIBRARIES(qcommon                PRIVATE sentry)
+	TARGET_LINK_LIBRARIES(qcommon_ded            PRIVATE sentry)
+	TARGET_LINK_LIBRARIES(qcommon_engine_shared  PRIVATE sentry)
+ENDIF()
+
 # ── Recast/Detour navmesh (replaces AAS when USE_RECAST_NAVMESH=ON) ──
 OPTION(USE_RECAST_NAVMESH "Use Recast/Detour/DetourCrowd navmesh (replaces AAS)" ON)
 IF(NOT USE_RECAST_NAVMESH)

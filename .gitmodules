@@ -25,3 +25,6 @@
 [submodule "src/libs/googletest"]
 	path = src/libs/googletest
 	url = https://github.com/google/googletest.git
+[submodule "src/libs/sentry-native"]
+	path = src/libs/sentry-native
+	url = https://github.com/getsentry/sentry-native.git
