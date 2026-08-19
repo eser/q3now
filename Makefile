@@ -138,6 +138,7 @@ ifeq ($(UNAME_S),Darwin)
 else
   JOBS        ?= $(shell nproc 2>/dev/null || echo 4)
   ENGINE_BIN  := $(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)
+  BUILT_DED   := $(BUILD_DIR)/$(CMAKE_APP_NAME)-headless$(BINEXT)$(EXEEXT)
   ifdef IS_WINDOWS
   	Q3DIR     ?= $(LOCALAPPDATA)/Programs/$(APP_NAME)
   else
@@ -152,9 +153,18 @@ ifeq ($(UNAME_S),Darwin)
   # macOS bundle conventions: code in Contents/MacOS/, data in Contents/Resources/.
   Q3BINDIR   := $(Q3DIR)/Contents/MacOS
   Q3DATADIR  := $(Q3DIR)/Contents/Resources/base
+  # Installed binary names, which callers depend on: Info.plist's
+  # CFBundleExecutable points at the arch-suffixed engine, while run-headless and
+  # the codesign step address the headless binary WITHOUT a suffix. That
+  # asymmetry is longstanding and load-bearing, so it is named here rather than
+  # normalised — the point is that install_engine stays one recipe.
+  INSTALLED_ENGINE   := $(CMAKE_APP_NAME)$(BINEXT)
+  INSTALLED_HEADLESS := $(CMAKE_APP_NAME)-headless
 else
   Q3BINDIR   := $(Q3DIR)
   Q3DATADIR  := $(Q3DIR)/base
+  INSTALLED_ENGINE   := $(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)
+  INSTALLED_HEADLESS := $(CMAKE_APP_NAME)-headless$(BINEXT)$(EXEEXT)
 endif
 
 # Use Ninja if available — much faster incremental builds
@@ -590,37 +600,42 @@ endif
 # The macros take only the varying values as arguments and reference the
 # rest of the globals directly.
 
-# install_engine($(1)=dstbin, $(2)=dstdata) — copies engine + ded binaries
-# and game modules into the destination.  On macOS the engine lives inside
-# cmake's per-target .app bundle; elsewhere it's a flat file under BUILD_DIR.
-ifeq ($(UNAME_S),Darwin)
+# install_sentry_handler — copies the out-of-process crash daemon next to the
+# engine binary. ONE definition for every platform: sentry is the single
+# minidump producer everywhere, so "where does the daemon go" must have exactly
+# one answer. It previously had two — a copy inside the macOS bundle step and
+# nothing at all for Windows and Linux — and the gap went unnoticed because
+# Crash_SentryInstall is fail-soft: no daemon means no dumps, quietly.
+#
+# $(1) is the directory holding the engine binary. The only platform-specific
+# part is the ad-hoc signature macOS needs to let the daemon run, applied when
+# codesign exists rather than under an ifeq, so this stays a single rule.
+define install_sentry_handler
+	@if test -f "$(SENTRY_HANDLER_BIN)"; then \
+	  cp "$(SENTRY_HANDLER_BIN)" "$(1)/sentry-crash$(EXEEXT)"; \
+	  command -v codesign >/dev/null 2>&1 && codesign --force --options runtime \
+	    --sign "-" "$(1)/sentry-crash$(EXEEXT)" >/dev/null 2>&1 || true; \
+	fi
+endef
+
+# install_engine($(1)=dstbin, $(2)=dstdata) — copies engine + ded binaries and
+# game modules into the destination. ONE definition for every platform. Two
+# things do differ by platform — where the built binaries LIVE (macOS keeps them
+# inside cmake's .app bundle, everyone else has flat files under BUILD_DIR) and
+# what they are CALLED once installed (the bundle drops the arch suffix) — but
+# each of those differences has a name: ENGINE_BIN / BUILT_DED and
+# INSTALLED_ENGINE / INSTALLED_HEADLESS. They belong in those variables, not in
+# a second copy of this recipe. Two recipes doing the same job is how the sentry
+# daemon ended up installed on macOS and nowhere else.
 define install_engine
 	@echo "==> Installing engine + game modules into $(1) ..."
 	@mkdir -p "$(1)" "$(2)"
-	cp "$(BUILT_APP)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)" "$(1)/"
-	@test -f "$(BUILT_DED)" && cp "$(BUILT_DED)" "$(1)/$(CMAKE_APP_NAME)-headless" || true
+	cp "$(ENGINE_BIN)" "$(1)/$(INSTALLED_ENGINE)"
+	@test -f "$(BUILT_DED)" && cp "$(BUILT_DED)" "$(1)/$(INSTALLED_HEADLESS)" || true
 	cp "$(BUILD_DIR)/$(BUILD_CFG)/base/gamecl$(_GAME_MODULE_EXT)"  "$(2)/"
 	cp "$(BUILD_DIR)/$(BUILD_CFG)/base/gamesv$(_GAME_MODULE_EXT)" "$(2)/"
+	$(call install_sentry_handler,$(1))
 endef
-else
-define install_engine
-	@echo "==> Installing engine + game modules into $(1) ..."
-	@mkdir -p "$(1)" "$(2)"
-	cp "$(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)$(EXEEXT)" "$(1)/"
-	@test -f "$(BUILD_DIR)/$(CMAKE_APP_NAME)-headless$(BINEXT)$(EXEEXT)" && \
-	  cp "$(BUILD_DIR)/$(CMAKE_APP_NAME)-headless$(BINEXT)$(EXEEXT)" "$(1)/" || true
-	cp "$(BUILD_DIR)/$(BUILD_CFG)/base/gamecl$(_GAME_MODULE_EXT)"  "$(2)/"
-	cp "$(BUILD_DIR)/$(BUILD_CFG)/base/gamesv$(_GAME_MODULE_EXT)" "$(2)/"
-	@# sentry-crash — the out-of-process crash handler, and now the ONLY minidump
-	@# producer on every platform. It has to sit beside the engine binary or
-	@# Crash_SentryInstall declines and the install silently loses its dumps.
-	@# The macOS branch above has carried this copy since the backend landed;
-	@# Windows and Linux did not, which is exactly the kind of gap a fail-soft
-	@# installer hides.
-	@test -f "$(SENTRY_HANDLER_BIN)" && \
-	  cp "$(SENTRY_HANDLER_BIN)" "$(1)/" || true
-endef
-endif
 
 # install_app_skeleton — installs the launcher binary into Q3DIR.  macOS
 # rsyncs the engine .app skeleton (Contents/Info.plist, Resources/, etc.)
@@ -655,11 +670,7 @@ define install_app_skeleton
 	@# every copy; the engine then logged "handler not found" and fell back to the
 	@# platform handler. That fallback is soft by design, which is precisely why
 	@# the missing file would otherwise go unnoticed.
-	@if test -f "$(SENTRY_HANDLER_BIN)"; then \
-	  cp "$(SENTRY_HANDLER_BIN)" "$(Q3DIR)/Contents/MacOS/sentry-crash"; \
-	  codesign --force --options runtime --sign "-" \
-	    "$(Q3DIR)/Contents/MacOS/sentry-crash" >/dev/null 2>&1 || true; \
-	fi
+	$(call install_sentry_handler,$(Q3DIR)/Contents/MacOS)
 	@test ! -e "$(Q3DIR)/Contents/MacOS/base" || { \
 	  echo "ERROR: runtime base directory leaked into release MacOS staging"; exit 1; }
 	@set -- "$(Q3DIR)"/Contents/MacOS/*.jsonl; [ ! -e "$$1" ] || { \
