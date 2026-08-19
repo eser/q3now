@@ -827,9 +827,19 @@ void GLimp_Init( glconfig_t *config )
 {
 	rserr_t err;
 
-#ifndef _WIN32
-	InitSig();
-#endif
+	/* InitSig() used to be called here (and in VKimp_Init below), and it
+	 * OVERWROTE the crash handler that Crash_Init -> Sys_InstallCrashHandler
+	 * installs earlier in startup. The handler it replaced writes the structured
+	 * JSON crash report; the one it installed writes only a text backtrace to a
+	 * fixed /tmp path. Renderer init runs after Crash_Init, so the weaker handler
+	 * always won: on macOS and Linux a GUI client crash produced NO crash_*.json
+	 * at all, while Windows — excluded from this call by the old #ifndef _WIN32 —
+	 * did produce one. Measured with the `crash` command: signal 11, text log
+	 * only, no report.
+	 *
+	 * Removed rather than reordered. The crash handler needs exactly one owner,
+	 * and renderer startup is not it; a second installer would silently win again
+	 * the next time startup order changes. */
 
 	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "GLimp_Init()\n" );
 
@@ -922,9 +932,8 @@ void VKimp_Init( glconfig_t *config )
 {
 	rserr_t err;
 
-#ifndef _WIN32
-	InitSig();
-#endif
+	/* InitSig() removed — see the note in GLimp_Init above. This was the path
+	 * that actually ran for the Vulkan client, i.e. the shipping one. */
 
 	Com_Log( SEV_DEBUG, LOG_CH(ch_client), "VKimp_Init()\n" );
 
