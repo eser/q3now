@@ -611,6 +611,14 @@ define install_engine
 	  cp "$(BUILD_DIR)/$(CMAKE_APP_NAME)-headless$(BINEXT)$(EXEEXT)" "$(1)/" || true
 	cp "$(BUILD_DIR)/$(BUILD_CFG)/base/gamecl$(_GAME_MODULE_EXT)"  "$(2)/"
 	cp "$(BUILD_DIR)/$(BUILD_CFG)/base/gamesv$(_GAME_MODULE_EXT)" "$(2)/"
+	@# sentry-crash — the out-of-process crash handler, and now the ONLY minidump
+	@# producer on every platform. It has to sit beside the engine binary or
+	@# Crash_SentryInstall declines and the install silently loses its dumps.
+	@# The macOS branch above has carried this copy since the backend landed;
+	@# Windows and Linux did not, which is exactly the kind of gap a fail-soft
+	@# installer hides.
+	@test -f "$(SENTRY_HANDLER_BIN)" && \
+	  cp "$(SENTRY_HANDLER_BIN)" "$(1)/" || true
 endef
 endif
 
