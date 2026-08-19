@@ -242,6 +242,26 @@ qboolean Crash_SentryInstall( void )
 	sentry_options_set_database_path( options, dbPath );
 	sentry_options_set_handler_path( options, handlerPath );
 
+	/* Dump scope, pinned rather than left at the default.
+	 *
+	 * sentry defaults to SENTRY_MINIDUMP_MODE_SMART (stack + surrounding heap),
+	 * which it documents as ~5-10 MB. That estimate holds where sentry writes
+	 * the dump itself, but NOT on Windows: there the writer is a thin wrapper
+	 * over the OS MiniDumpWriteDump, and the same SMART mode measured 49.8 MB —
+	 * ~340x the macOS dump from an identical setting. A crash artefact is
+	 * something an alpha tester has to hand over, so a scope that swings by two
+	 * orders of magnitude between platforms is not one to inherit silently.
+	 *
+	 * STACK_ONLY is what sentry recommends for production and is documented at
+	 * ~100KB-1MB. It carries the thread and module data a minidump is actually
+	 * read for; what it drops is heap around the crash site, which the JSON
+	 * report's engine context covers better anyway (map, renderer and VM state
+	 * are named there, not reconstructed from memory).
+	 *
+	 * Pinning it also makes the three platforms produce comparable artefacts,
+	 * which is the whole point of having one crash pipeline rather than three. */
+	sentry_options_set_minidump_mode( options, SENTRY_MINIDUMP_MODE_STACK_ONLY );
+
 	/* release identifies the build, in the same terms the crash report and
 	   wired_playtest.jsonl already use, so all three name the same binary. */
 	sentry_options_set_release( options, WIRED_SOURCE_REVISION );
