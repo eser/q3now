@@ -306,20 +306,38 @@ static void Crash_WriteCvar( const char *name )
 	JSON_StringValue( name, value );
 }
 
+/*
+==================
+Crash_WriteKeyCvars
+
+The crash report's cvar ALLOWLIST — not a sample, a contract.
+
+A crash report is sent to someone else, so every field here is a disclosure
+decision. The rule is: a cvar belongs in this list only if it describes the
+SITUATION (what mode, what map, what renderer) and cannot describe the PERSON.
+
+fs_installpath used to be in this list and was removed: it is an absolute path
+("/Users/<name>/…", "C:\Users\<name>\…") and therefore leaks the operator's
+account name into every report, for no diagnostic gain that fs_game and the
+engine build stamp do not already provide. Anything path-shaped is out for the
+same reason; add a derived, non-identifying summary instead if a path's
+*structure* ever turns out to matter.
+==================
+*/
 static void Crash_WriteKeyCvars( void )
 {
 	JSON_BeginNamedObject( "cvars" );
+	/* Listed once each: this is JSON, and a repeated key is undefined behaviour
+	   across parsers (sv_running appeared twice before). */
 	Crash_WriteCvar( "sv_running" );
 	Crash_WriteCvar( "sv_hostListed" );
 	Crash_WriteCvar( "fs_game" );
-	Crash_WriteCvar( "fs_installpath" );
 	Crash_WriteCvar( "mapname" );
 	Crash_WriteCvar( "r_mode" );
 	Crash_WriteCvar( "r_customwidth" );
 	Crash_WriteCvar( "r_customheight" );
 	Crash_WriteCvar( "cl_renderer" );
 	Crash_WriteCvar( "cl_running" );
-	Crash_WriteCvar( "sv_running" );
 	Crash_WriteCvar( "sv_maxclients" );
 	Crash_WriteCvar( "com_gamename" );
 	Crash_WriteCvar( "protocol" );
@@ -340,8 +358,25 @@ static void Crash_WriteEngineInfo( const char *reason, const char *address, cons
 	JSON_StringValue( "engine_version", WIRED_ENGINE_TITLE );
 	JSON_StringValue( "engine_platform", PLATFORM_STRING );
 	JSON_StringValue( "engine_arch", ARCH_STRING );
-	JSON_StringValue( "engine_build_date", __DATE__ );
-	JSON_StringValue( "engine_build_time", __TIME__ );
+	/* Build IDENTITY, not just build time.
+	 *
+	 * __DATE__/__TIME__ answer "when was this translation unit compiled", which
+	 * does not identify a build: two machines compiling the same commit disagree,
+	 * and one machine compiling two different commits can agree. Neither can be
+	 * matched against anything.
+	 *
+	 * build_id / source_revision are the same values wired_playtest.jsonl already
+	 * stamps on every record (playtest.c), so a crash report and the breadcrumb
+	 * trail from the same session can be tied together — and to a commit. That
+	 * pairing is the whole point of a shared envelope; without it the two
+	 * artefacts are separate stories about an unknown binary.
+	 *
+	 * The TU compile time is kept as well: when source_revision reads "-dirty" it
+	 * is the only thing distinguishing two builds of the same tree. */
+	JSON_IntegerValue( "engine_build_id", WIRED_BUILD_ID );
+	JSON_StringValue( "engine_source_revision", WIRED_SOURCE_REVISION );
+	JSON_StringValue( "engine_build_stamp", WIRED_BUILD_DATE );
+	JSON_StringValue( "engine_build_tu_date", WIRED_BUILD_TU_DATE );
 #ifdef HEADLESS
 	JSON_BooleanValue( "engine_dedicated_server", qtrue );
 #else
