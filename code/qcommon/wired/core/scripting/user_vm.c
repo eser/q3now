@@ -6,10 +6,12 @@
 user_vm.c — Untrusted Lua User VM
 
 Single lua_State shared by bot AI, rcon scripts, and future mod code.
-Custom allocator enforces a configurable cap (user_vm_memory_mb, default
-50 MB).  Rcon invocations run in per-call coroutines isolated via
-lua_newthread; admin-context flag prevents bot scripts from invoking
-rcon-privileged bindings.
+The memory cap (user_vm_memory_mb, default 50 MB) is enforced from the
+instruction hook rather than a custom allocator — LuaJIT's own allocator is
+used, because a custom one must return addresses below 47 bits and malloc
+does not promise that on every platform (see UserVM_Init).  Rcon invocations
+run in per-call coroutines isolated via lua_newthread; admin-context flag
+prevents bot scripts from invoking rcon-privileged bindings.
 ===========================================================================
 */
 
@@ -30,11 +32,6 @@ LOG_DECLARE_CHANNEL( ch_scripting, "scripting" );
 /* ---- Internal types -------------------------------------------------- */
 
 typedef struct {
-    size_t  used;
-    size_t  limit;
-} uvm_alloc_ctx_t;
-
-typedef struct {
     char    *output;
     int      outputLen;
     int      length;
@@ -44,7 +41,6 @@ typedef struct {
 /* ---- Module state ---------------------------------------------------- */
 
 static lua_State          *s_L             = NULL;
-static uvm_alloc_ctx_t     s_allocCtx;
 static qboolean            s_adminCtx      = qfalse;
 static uvm_capture_t      *s_capture       = NULL;
 
@@ -59,53 +55,38 @@ static cvar_t             *s_insnLimitCvar = NULL;
 static int                 s_uvm_chunkArrayIdx    = 0;
 static int                 s_uvm_chunkErrorWarned = 0;
 
-/* ---- Custom allocator ------------------------------------------------ */
-
-static void *uvm_alloc( void *ud, void *ptr, size_t osize, size_t nsize ) {
-    uvm_alloc_ctx_t *ctx = (uvm_alloc_ctx_t *)ud;
-
-    if ( nsize == 0 ) {
-        if ( ptr ) {
-            if ( ctx->used >= osize ) {
-                ctx->used -= osize;
-            } else {
-                ctx->used = 0;
-            }
-            free( ptr );
-        }
-        return NULL;
-    }
-
-    if ( nsize > osize ) {
-        size_t grow = nsize - osize;
-        void  *np;
-        if ( ctx->used + grow > ctx->limit ) {
-            return NULL;
-        }
-        /* Commit the grow to the cap counter ONLY after realloc succeeds — a
-         * NULL return (true system OOM, distinct from the cap rejection above)
-         * must not permanently inflate ctx->used for memory never allocated. */
-        np = realloc( ptr, nsize );
-        if ( np ) {
-            ctx->used += grow;
-        }
-        return np;
-    } else {
-        size_t shrink = osize - nsize;
-        if ( ctx->used >= shrink ) {
-            ctx->used -= shrink;
-        } else {
-            ctx->used = 0;
-        }
-    }
-
-    return realloc( ptr, nsize );
-}
-
 /* ---- Instruction hook (set per rcon coroutine) ----------------------- */
 
 static void uvm_hook( lua_State *L, lua_Debug *ar ) {
     (void)ar;
+
+    /* Memory budget, checked here rather than inside an allocator.
+     *
+     * The VM uses LuaJIT's internal allocator (see UserVM_Init), so there is no
+     * per-allocation hook left to reject an oversized request. This hook fires
+     * every s_insnLimitCvar instructions, which bounds how far past the budget
+     * a script can get: it cannot escape the limit, only overshoot it between
+     * two checks — and a script allocating fast enough to matter reaches the
+     * instruction limit almost immediately anyway.
+     *
+     * LUA_GCCOUNT reports kilobytes, hence the comparison in kilobytes. */
+    if ( s_memoryMbCvar ) {
+        int usedKb  = lua_gc( L, LUA_GCCOUNT, 0 );
+        int limitKb = s_memoryMbCvar->integer * 1024;
+
+        if ( limitKb > 0 && usedKb > limitKb ) {
+            /* Collect before giving up: LUA_GCCOUNT counts what is allocated,
+               not what is reachable, so a script that merely churns garbage
+               would otherwise be killed for memory it had already abandoned. */
+            lua_gc( L, LUA_GCCOLLECT, 0 );
+            usedKb = lua_gc( L, LUA_GCCOUNT, 0 );
+            if ( usedKb > limitKb ) {
+                luaL_error( L, "user VM memory budget exceeded (%d KB > %d KB)",
+                    usedKb, limitKb );
+            }
+        }
+    }
+
     luaL_error( L, "user VM instruction limit exceeded" );
 }
 
@@ -183,51 +164,32 @@ void UserVM_Init( void ) {
         memLimit = (size_t)DEFAULT_MEMORY_MB * 1024u * 1024u;
     }
 
-    s_allocCtx.used  = 0;
-    s_allocCtx.limit = memLimit;
-
-    s_L = lua_newstate( uvm_alloc, &s_allocCtx );
+    /* LuaJIT's OWN allocator, not ours, and the reason is portability.
+     *
+     * A custom allocator has to satisfy a constraint that is easy to miss:
+     * LuaJIT packs GC pointers into tagged values and refuses any block above
+     * 47 bits (lj_def.h checkptr47, enforced at lj_state.c:266 — it frees the
+     * block and returns NULL). Plain malloc makes no such promise, so passing
+     * uvm_alloc worked on macOS arm64 and failed in a Linux aarch64 container
+     * with the identical binary, reporting only "not enough memory".
+     *
+     * luaL_newstate uses LuaJIT's internal allocator, which mmaps low memory
+     * itself (lj_alloc.c mmap_probe) and therefore works everywhere. Writing
+     * our own low-address allocator would duplicate that, on the hot path bot
+     * AI runs through, with memory-corruption bugs as the failure mode.
+     *
+     * The budget moves to the instruction hook instead — see uvm_hook. That
+     * makes it enforced at call boundaries rather than at every allocation.
+     * The weaker guarantee is deliberate: a script cannot escape the limit,
+     * it can only exceed it briefly between checks, and in exchange the
+     * allocation path costs nothing. */
+    s_L = luaL_newstate();
     if ( !s_L ) {
-        /* The budget is NOT the cause, and naming it was actively misleading —
-         * the old message pointed debugging at a number never involved here.
-         *
-         * LuaJIT validates the ADDRESS our allocator returns, not merely that it
-         * returned something:
-         *
-         *   lj_state.c:264   GG = allocf(...);              // malloc succeeds
-         *   lj_state.c:266   if (!checkptrGC(GG)) {         // address rejected
-         *   lj_state.c:267       allocf(allocd, GG, ..., 0);//   handed straight back
-         *   lj_state.c:268       return NULL;
-         *
-         *   lj_def.h:110     checkptrGC = LJ_GC64 ? checkptr47 : checkptr31
-         *   lj_def.h:109     checkptr47(x) = ((uintptr_t)(x) >> 47) == 0
-         *
-         * So even with GC64 on — and it is always on for arm64 — pointers must
-         * fit in 47 bits, because LuaJIT packs them into its tagged values.
-         * Whether malloc obliges is a property of the platform's heap placement,
-         * not of this code: macOS arm64 hands back low addresses and works,
-         * while a Linux aarch64 container returned 0xaaaadb231610, whose bit 47
-         * is set, and LuaJIT refused it.
-         *
-         * Note the SHAPE of the failure. The allocation succeeds and is then
-         * freed again, so ctx->used is back to 0 by the time control reaches
-         * here — which makes "the allocator was never called" a tempting and
-         * wrong reading of the state.
-         *
-         * The engine's other Lua state (wired_scripting.c) survives because
-         * luaL_newstate uses LuaJIT's internal allocator, which mmaps low memory
-         * itself rather than trusting malloc. Fixing this one means doing the
-         * same, or dropping the custom allocator and enforcing the budget
-         * through lua_gc accounting instead. */
         Com_Terminate( TERM_UNRECOVERABLE,
-            "UserVM_Init: lua_newstate rejected our allocator; the %zu MB budget "
-            "is NOT the cause. LuaJIT requires allocations within 47 bits "
-            "(lj_def.h checkptr47) and malloc returned a higher address, so "
-            "LuaJIT freed it and returned NULL. Platform-dependent: macOS arm64 "
-            "returns low addresses, Linux aarch64 need not. Fix by backing the "
-            "allocator with a low mmap arena, or by using LuaJIT's internal "
-            "allocator and enforcing the budget via lua_gc. See TASK-181.",
-            memLimit / ( 1024u * 1024u ) );
+            "UserVM_Init: luaL_newstate failed - LuaJIT could not create a VM "
+            "state. Unlike the old custom-allocator path this does not depend "
+            "on malloc's address range, so this is a genuine allocation "
+            "failure." );
         return;
     }
 
@@ -274,8 +236,6 @@ void UserVM_Shutdown( void ) {
         lua_close( s_L );
         s_L = NULL;
     }
-    s_allocCtx.used  = 0;
-    s_allocCtx.limit = 0;
     s_adminCtx       = qfalse;
     s_capture        = NULL;
     s_numRegistrars  = 0;
