@@ -188,36 +188,45 @@ void UserVM_Init( void ) {
 
     s_L = lua_newstate( uvm_alloc, &s_allocCtx );
     if ( !s_L ) {
-        /* Do NOT blame the budget. A NULL here almost never means the cap was
-         * exhausted: nothing has been allocated yet, so uvm_alloc would have to
-         * reject the very first request for that to be the cause. The old
-         * message named the cap and sent debugging at a number that was never
-         * involved.
+        /* The budget is NOT the cause, and naming it was actively misleading —
+         * the old message pointed debugging at a number never involved here.
          *
-         * lua_newstate returns NULL for several unrelated reasons and reports
-         * none of them — LuaJIT's own source says as much about the PRNG path:
-         * "Can only return NULL here, so this errors with 'not enough memory'"
-         * (lj_state.c). So the honest message is the list of candidates.
+         * LuaJIT validates the ADDRESS our allocator returns, not merely that it
+         * returned something:
          *
-         * OBSERVED: fails on linux/aarch64 in a container, succeeds on macOS
-         * arm64, same commit. Two hypotheses were tested against that and BOTH
-         * were disproved — recorded so nobody re-runs them:
-         *   - "custom allocator needs low 32-bit addresses (LJ_64 && !LJ_GC64)":
-         *     no. lj_arch.h sets LJ_TARGET_GC64=1 for arm64, so LJ_GC64 is
-         *     always on there and that constraint never applies.
-         *   - "secure PRNG seeding fails in the sandbox": no. /dev/urandom reads
-         *     fine inside the container, and lj_prng.c falls back to it when
-         *     SYS_getrandom is unavailable.
-         * Note also that the engine's OTHER Lua state — created moments earlier
-         * with LuaJIT's internal allocator — initialises fine in the same
-         * process, so whatever this is, it is specific to passing a custom
-         * allocator on that platform. See TASK-181. */
+         *   lj_state.c:264   GG = allocf(...);              // malloc succeeds
+         *   lj_state.c:266   if (!checkptrGC(GG)) {         // address rejected
+         *   lj_state.c:267       allocf(allocd, GG, ..., 0);//   handed straight back
+         *   lj_state.c:268       return NULL;
+         *
+         *   lj_def.h:110     checkptrGC = LJ_GC64 ? checkptr47 : checkptr31
+         *   lj_def.h:109     checkptr47(x) = ((uintptr_t)(x) >> 47) == 0
+         *
+         * So even with GC64 on — and it is always on for arm64 — pointers must
+         * fit in 47 bits, because LuaJIT packs them into its tagged values.
+         * Whether malloc obliges is a property of the platform's heap placement,
+         * not of this code: macOS arm64 hands back low addresses and works,
+         * while a Linux aarch64 container returned 0xaaaadb231610, whose bit 47
+         * is set, and LuaJIT refused it.
+         *
+         * Note the SHAPE of the failure. The allocation succeeds and is then
+         * freed again, so ctx->used is back to 0 by the time control reaches
+         * here — which makes "the allocator was never called" a tempting and
+         * wrong reading of the state.
+         *
+         * The engine's other Lua state (wired_scripting.c) survives because
+         * luaL_newstate uses LuaJIT's internal allocator, which mmaps low memory
+         * itself rather than trusting malloc. Fixing this one means doing the
+         * same, or dropping the custom allocator and enforcing the budget
+         * through lua_gc accounting instead. */
         Com_Terminate( TERM_UNRECOVERABLE,
-            "UserVM_Init: lua_newstate returned NULL. The %zu MB budget is almost "
-            "certainly NOT the cause - nothing had been allocated yet. Known to "
-            "happen on linux/aarch64 while working on macOS arm64 with the same "
-            "source. Root cause still open (see TASK-181); GC64 address limits "
-            "and PRNG seeding have both been ruled out.",
+            "UserVM_Init: lua_newstate rejected our allocator; the %zu MB budget "
+            "is NOT the cause. LuaJIT requires allocations within 47 bits "
+            "(lj_def.h checkptr47) and malloc returned a higher address, so "
+            "LuaJIT freed it and returned NULL. Platform-dependent: macOS arm64 "
+            "returns low addresses, Linux aarch64 need not. Fix by backing the "
+            "allocator with a low mmap arena, or by using LuaJIT's internal "
+            "allocator and enforcing the budget via lua_gc. See TASK-181.",
             memLimit / ( 1024u * 1024u ) );
         return;
     }
