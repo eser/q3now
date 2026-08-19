@@ -2,6 +2,16 @@
 build/
 dist/
 
+# Host-built tool binaries. These are gitignored build products, but COPY . .
+# does not consult .gitignore — so a macOS build of the sw3z archiver was copied
+# into a linux/arm64 image, Make saw an up-to-date file and skipped rebuilding
+# it, and the pak step died with "Exec format error" while trying to run a
+# Mach-O binary under Linux. Excluding them forces the in-container Go build.
+tools/sw3z-archiver/cmd/sw3z/sw3z
+tools/png2raw/png2raw
+tools/png-perturb/png-perturb
+tools/msdf-atlas-gen/build/
+
 # Visual-regression golden frames and capture output — ~2.1 GB of PNGs that
 # dominate the build context and that this image cannot use: it builds the
 # HEADLESS server, which renders nothing and compares no screenshots. Without
