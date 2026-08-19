@@ -2195,6 +2195,25 @@ WIRED_ADD_GTEST(cvar_value_gtest cvar_value
 		code/qcommon/wired/core/cvars/cvar_value.c
 )
 
+# Command tokenizer + registration/dispatch. Unlike the seams above, cmd.c has
+# never been carved out for testing, so this links a stub TU for the console,
+# cvar, filesystem and game-dispatch symbols it references — see
+# tests/cmd_gtest_stubs.c for why that tradeoff was taken here and why it is not
+# the default pattern. q_shared.c is the REAL implementation, not a stub: the
+# tokenizer's behaviour depends on its string helpers, and substituting them
+# would test the substitute.
+WIRED_ADD_GTEST(cmd_gtest cmd
+	"host-only;subsystem;owner.wired-shell;failure.contract;feature.always"
+	SOURCES
+		tests/cmd_gtest.cpp
+		tests/cmd_gtest_stubs.c
+		code/qcommon/wired/core/shell/cmd.c
+		code/qcommon/q_shared.c
+		code/qcommon/q_string.c
+		code/qcommon/q_math.c
+		code/qcommon/util/string.c
+)
+
 # VFS qpaths must reject exact parent-directory components before any handle
 # allocation or host-filesystem call. Compiles the exact production lexical
 # seam used by both qcommon targets; symlink/junction containment is out of scope.
