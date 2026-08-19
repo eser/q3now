@@ -324,23 +324,36 @@ same reason; add a derived, non-identifying summary instead if a path's
 *structure* ever turns out to matter.
 ==================
 */
+/* THE allowlist. One table, deliberately, because there are now two consumers:
+   the JSON report written here and the sentry annotation set in crash_sentry.c.
+   Two copies of a privacy contract drift — a cvar added to one and not the other
+   is either a silent leak or a silent blind spot, and neither shows up until
+   someone reads a report and notices. Listed once each: repeated JSON keys are
+   undefined across parsers (sv_running appeared twice before this). */
+const char *const crash_cvarAllowlist[] = {
+	"sv_running",
+	"sv_hostListed",
+	"fs_game",
+	"mapname",
+	"r_mode",
+	"r_customwidth",
+	"r_customheight",
+	"cl_renderer",
+	"cl_running",
+	"sv_maxclients",
+	"com_gamename",
+	"protocol",
+	NULL
+};
+
 static void Crash_WriteKeyCvars( void )
 {
+	int i;
+
 	JSON_BeginNamedObject( "cvars" );
-	/* Listed once each: this is JSON, and a repeated key is undefined behaviour
-	   across parsers (sv_running appeared twice before). */
-	Crash_WriteCvar( "sv_running" );
-	Crash_WriteCvar( "sv_hostListed" );
-	Crash_WriteCvar( "fs_game" );
-	Crash_WriteCvar( "mapname" );
-	Crash_WriteCvar( "r_mode" );
-	Crash_WriteCvar( "r_customwidth" );
-	Crash_WriteCvar( "r_customheight" );
-	Crash_WriteCvar( "cl_renderer" );
-	Crash_WriteCvar( "cl_running" );
-	Crash_WriteCvar( "sv_maxclients" );
-	Crash_WriteCvar( "com_gamename" );
-	Crash_WriteCvar( "protocol" );
+	for ( i = 0; crash_cvarAllowlist[i] != NULL; i++ ) {
+		Crash_WriteCvar( crash_cvarAllowlist[i] );
+	}
 	JSON_EndObject();
 }
 
@@ -391,6 +404,17 @@ static void Crash_WriteEngineInfo( const char *reason, const char *address, cons
 	JSON_StringValue( "reason", reason ? reason : "" );
 	JSON_StringValue( "exception_address", address ? address : "" );
 	JSON_StringValue( "exception_module", module ? module : "" );
+
+	/* Where the machine-level evidence for this crash lives, if any.
+	 *
+	 * The minidump and this report are produced by different mechanisms — the
+	 * dump by an out-of-process handler, this file in-process — and land as
+	 * separate files with unrelated names. Someone reading a report needs to
+	 * know whether a dump exists at all and where to look; without this they
+	 * have a description of a crash and no way to find its dump. Empty when the
+	 * sentry backend is not active, which is itself the answer to "is there a
+	 * dump?": no. */
+	JSON_StringValue( "minidump_database", Crash_MinidumpDatabasePath() );
 }
 
 /*
@@ -478,19 +502,40 @@ extern void Sys_InstallCrashHandler( void );
 
 void Crash_InstallHandlers( void )
 {
-	/* sentry first, and only if it actually takes ownership. Its installer is
-	   fail-soft by contract (crash_sentry.c): a missing handler executable or an
-	   unwritable home returns qfalse rather than half-installing, and we fall
-	   back to the platform handler below. The one unacceptable outcome is no
-	   crash capture at all, so the fallback is unconditional.
-
-	   Compiled out entirely unless USE_SENTRY_CRASH=ON, in which case this call
-	   is a stub returning qfalse and nothing changes. */
-	if ( Crash_SentryInstall() ) {
-		return;
-	}
-
+	/* BOTH, not either/or.
+	 *
+	 * The two produce different evidence and neither subsumes the other:
+	 *   sentry  -> a minidump: threads, registers, loaded modules. The machine's
+	 *              view, captured out-of-process so it survives a corrupted heap.
+	 *   platform-> the JSON report: map, renderer, VM state, build identity. The
+	 *              engine's view, which a minidump cannot express.
+	 *
+	 * Installing sentry INSTEAD of the platform handler was the first shape of
+	 * this and it lost the JSON report entirely — measured: a crash produced a
+	 * 7 MB dump and no crash_*.json. That matters more than it looks, because the
+	 * native backend does not currently attach our scope to the dump either (see
+	 * Crash_SentryAnnotate), so the JSON report is the ONLY carrier of engine
+	 * context. Suppressing it traded the answer to "what was the game doing" for
+	 * the answer to "what was the CPU doing".
+	 *
+	 * Sentry's installer is fail-soft (crash_sentry.c): a missing handler binary
+	 * or an unwritable home declines rather than half-installing, and the
+	 * platform handler below is installed regardless, so the worst case is
+	 * exactly the behaviour that shipped before sentry existed.
+	 *
+	 * ORDER MATTERS, and it is the opposite of the obvious one. Both install
+	 * process-wide fault handlers, so the LAST installer wins the signal.
+	 * Installing sentry first and the platform handler second gave neither
+	 * artefact: sentry's hook was displaced (no dump) and the platform handler
+	 * ran but never reached its JSON write. The platform handler goes first so
+	 * sentry's out-of-process hook is the live one; the JSON report is then
+	 * written from Crash_WriteReport, which sentry's handler path still reaches.
+	 * This is the same overwrite trap that made sdl_glimp.c's InitSig() silently
+	 * disable JSON reports on macOS — two owners of one handler slot.
+	 *
+	 * Compiled out unless USE_SENTRY_CRASH=ON, where the call is a stub. */
 	Sys_InstallCrashHandler();
+	Crash_SentryInstall();
 }
 
 /*

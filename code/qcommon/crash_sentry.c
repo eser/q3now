@@ -116,6 +116,87 @@ static qboolean Crash_SentryHandlerPresent( const char *ospath )
 
 /*
 ==================
+Crash_MinidumpDatabasePath
+
+The directory a minidump for this session would be written to, or "" when no
+out-of-process backend is active.
+
+Deliberately reports only when sentry is RUNNING, not merely compiled in: a path
+in the crash report is a promise that something may be there, and pointing at an
+empty directory sends the reader looking for a file that was never going to
+exist.
+==================
+*/
+const char *Crash_MinidumpDatabasePath( void )
+{
+	const char *path;
+
+	if ( !s_sentryStarted ) {
+		return "";
+	}
+	path = Crash_SentryDatabasePath();
+	return path ? path : "";
+}
+
+/*
+==================
+Crash_SentryAnnotate
+
+Attach the engine state a minidump cannot carry.
+
+A minidump holds threads, registers and loaded modules — the machine's view. It
+says nothing about which map was loaded, which renderer was active, or whether
+this was a client or a server, and those are usually the first questions asked
+of a crash report.
+
+The cvar set is crash_cvarAllowlist (crash.c) — the SAME table the JSON report
+uses, read here rather than copied. That is what keeps one privacy contract
+instead of two: adding a cvar to the table discloses it in both artefacts, and
+removing it withdraws it from both.
+
+Safe to call repeatedly; each call overwrites the previous values, so refreshing
+after a map change simply replaces the snapshot.
+==================
+*/
+void Crash_SentryAnnotate( void )
+{
+	int i;
+
+	if ( !s_sentryStarted ) {
+		return;
+	}
+
+	/* Written as TAGS, not as a context, and that is not a style choice.
+	 *
+	 * Measured against this vendored version: the native backend's scope flush
+	 * (src/backends/sentry_backend_native.c, native_backend_flush_scope) copies
+	 * user, tags and extra onto the crash event, but of the contexts it copies
+	 * only "os" and "device" — a custom context is silently dropped. A
+	 * sentry_set_context("wired.cvars", …) therefore looks correct, compiles,
+	 * runs, and produces a dump with none of it attached. Tags survive, so the
+	 * allowlist goes through tags.
+	 *
+	 * Revisit when the native backend matures ("experimental and under active
+	 * development" is its own startup warning): a context reads better than a
+	 * flat tag namespace, and this is the only reason it is not one. */
+	for ( i = 0; crash_cvarAllowlist[i] != NULL; i++ ) {
+		const char *name  = crash_cvarAllowlist[i];
+		const char *value = Cvar_VariableString( name );
+		char key[ 64 ];
+
+		Com_sprintf( key, sizeof( key ), "wired.%s", name );
+		sentry_set_tag( key, value ? value : "" );
+	}
+
+	/* Build identity — the same values the JSON crash report and
+	   wired_playtest.jsonl carry, so a dump, a report and a breadcrumb trail
+	   can be matched to each other and to a commit. */
+	sentry_set_tag( "wired.source_revision", WIRED_SOURCE_REVISION );
+	sentry_set_tag( "wired.build_stamp",     WIRED_BUILD_DATE );
+}
+
+/*
+==================
 Crash_SentryInstall
 
 Returns qtrue if sentry took ownership of crash capture.
@@ -184,6 +265,7 @@ qboolean Crash_SentryInstall( void )
 	sentry_set_tag( "engine.arch",      ARCH_STRING );
 
 	s_sentryStarted = qtrue;
+	Crash_SentryAnnotate();
 	Com_Log( SEV_INFO, LOG_CH(ch_crash_sentry),
 		"sentry: out-of-process crash capture active (local-only, db '%s')\n", dbPath );
 	return qtrue;
@@ -210,5 +292,7 @@ void Crash_SentryShutdown( void )
 
 qboolean Crash_SentryInstall( void ) { return qfalse; }
 void     Crash_SentryShutdown( void ) { }
+void     Crash_SentryAnnotate( void ) { }
+const char *Crash_MinidumpDatabasePath( void ) { return ""; }
 
 #endif

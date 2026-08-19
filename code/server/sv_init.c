@@ -6,6 +6,7 @@
 #include "../qcommon/maps/map_format_registry.h"
 #include "../qcommon/maps/meta.h"
 #include "../qcommon/wired/core/scripting/user_vm.h"
+#include "../qcommon/crash.h"   // Crash_SentryAnnotate on map load
 #include "../qcommon/q_feats.h"
 
 #include "../qcommon/wired/net/wn_public.h"
@@ -544,6 +545,12 @@ void SV_SpawnServer_Tick( void ) {
 
 		Cvar_Set( "mapname", mapname );
 		Cvar_SetIntegerValue( "sv_mapChecksum", checksum );
+
+		/* Refresh the crash context now that the map is known. Without this the
+		   snapshot attached to a dump is whatever was true at startup — an empty
+		   mapname — and "which map" is usually the first question asked of a
+		   crash report. No-op when sentry is not the active backend. */
+		Crash_SentryAnnotate();
 
 		sv.serverId = com_frameTime;
 		sv.restartedServerId = sv.serverId;
