@@ -157,15 +157,37 @@ minidump_checks() {
 # same entry point every other harness uses, so a capture cannot drift from how
 # the engine is actually started.
 #
-# The fault is delivered from OUTSIDE with kill -SEGV rather than by building a
-# crash command into the binary. A test-only crash path would have to exist in
-# release builds to be reachable here, which means shipping a way to crash the
-# shipped engine in order to test it — the wrong trade. An external signal
-# exercises the same handler with nothing added to the product.
+# The fault is delivered from OUTSIDE rather than by building a crash command
+# into the binary. A test-only crash path would have to exist in release builds
+# to be reachable here, which means shipping a way to crash the shipped engine
+# in order to test it — the wrong trade. An external fault exercises the same
+# handler with nothing added to the product.
+#
+# Only two things differ per platform: how the engine PID is found, and how the
+# fault is delivered. Everything else below is shared.
+#
+#   POSIX    pgrep -n            + kill -SEGV
+#   Windows  tools/win-fault-inject (CreateRemoteThread into an unexecutable
+#            address — a real access violation raised inside the target, so
+#            SetUnhandledExceptionFilter runs exactly as for a genuine fault)
+#
+# Windows has no kill -SEGV, and the obvious substitute is wrong: taskkill
+# terminates without raising a structured exception, so the filter never runs
+# and the capture would measure nothing while looking like a handler defect.
 if [ "$MODE" = "capture" ]; then
     REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
     LOG="${WIRED_TMP}/crash-capture-$$.log"
-    HOME_PATH="$WIRED_HOME"
+    # An isolated home, NOT the player's: this mode moves crash artefacts aside
+    # and the engine writes config.cfg on exit. See wired_isolated_home in
+    # lib/wired_paths.sh for why no capture may run in the player's home.
+    #
+    # The home is redirected by handing the engine a different home ROOT (see
+    # the launch below), and the engine appends wired/<app>/ to it itself. So
+    # the isolated home has to sit at that same depth for the two to agree:
+    # <root>/wired/<app>/. Asking the helper for "wired/<app>" under a capture
+    # root produces exactly that, and keeps one definition of the layout.
+    CAPTURE_ROOT="$WIRED_TMP/crash-capture-root"
+    HOME_PATH="$( wired_isolated_home "crash-capture-root/wired/$WIRED_APP" )"
 
     echo "==> capturing a real crash (map=$CAPTURE_MAP)"
 
@@ -182,17 +204,37 @@ if [ "$MODE" = "capture" ]; then
     # com_noHardReboot 1 defeats the relaunch described in the header comment.
     # Without it the watchdog's second session overwrites the crashed one's
     # playtest artefact and the capture silently measures a clean boot.
-    ( cd "$REPO_ROOT" && make run-headless MAP="$CAPTURE_MAP" \
-        EXTRA_ARGS="+set playtest_enabled 1 +set com_noHardReboot 1" >"$LOG" 2>&1 ) &
+    # The home is redirected through the ENVIRONMENT, not through +set.
+    # `make run-headless` appends EXTRA_ARGS after +map, and a +set fs_homepath
+    # arriving after the map command is too late: the map is resolved against
+    # the default home, which on a machine whose paks live in the real home
+    # reads as "Can't find map maps/<map>.bsp" for a map that is present.
+    # fs_homepath is CVAR_INIT anyway, so the engine takes it from the
+    # environment before any command runs — HOME on POSIX, USERPROFILE on
+    # Windows (win32/win_shared.c Sys_DefaultHomePath). Both are set so the
+    # same line works either side, and the engine appends wired/<app>/ itself,
+    # so the ROOT is what gets handed over.
+    CAPTURE_ROOT_NATIVE="$( cygpath -w "$CAPTURE_ROOT" 2>/dev/null || echo "$CAPTURE_ROOT" )"
+    ( cd "$REPO_ROOT" && HOME="$CAPTURE_ROOT" USERPROFILE="$CAPTURE_ROOT_NATIVE" \
+        make run-headless MAP="$CAPTURE_MAP" \
+        EXTRA_ARGS="+set playtest_enabled 1 +set com_noHardReboot 1" \
+        >"$LOG" 2>&1 ) &
     MAKE_PID=$!
 
-    # Wait for the server to be fully up, not merely loading. 'Sending
-    # heartbeat' is emitted after spawn completes; anything earlier risks the
-    # map=nomap reading described in the header.
+    # Wait for the server to be fully up, not merely loading — anything earlier
+    # risks the map=nomap reading described in the header.
+    #
+    # The marker is the navmesh line, which names the map and is emitted after
+    # the spawn that loads it. The two markers used before were both wrong:
+    # 'Server Initialization Complete' appears nowhere in the source, and
+    # 'Sending heartbeat' (sv_main.c) only fires once a master server RESOLVES,
+    # so on a host with no reachable master — any offline or CI machine — it
+    # never arrives and the capture times out on a server that booted fine.
+    # This is the same marker tests/bot-slot-restart-check.sh gates on.
     booted=0
     for _ in $( seq 1 150 ); do
         sleep 2
-        if grep -qE 'Sending heartbeat|Server Initialization Complete' "$LOG" 2>/dev/null; then
+        if grep -qE "navmesh ready for '$CAPTURE_MAP'" "$LOG" 2>/dev/null; then
             booted=1
             break
         fi
@@ -206,22 +248,47 @@ if [ "$MODE" = "capture" ]; then
     fi
 
     # $! is the make/watchdog parent, not the engine — resolve the real child.
-    ENGINE_PID=$( pgrep -n 'wired-headless|q3now' 2>/dev/null | tail -1 )
-    if [ -z "$ENGINE_PID" ]; then
-        echo "FAIL: engine process not found after boot"
-        kill "$MAKE_PID" 2>/dev/null
-        exit 1
-    fi
-
-    echo "  faulting engine pid $ENGINE_PID with SIGSEGV"
-    kill -SEGV "$ENGINE_PID" 2>/dev/null
+    case "$( uname -s )" in
+        MINGW*|MSYS*|CYGWIN*)
+            # The injector finds the newest matching image itself (the same
+            # "newest, not first" rule as pgrep -n, so a leftover engine from an
+            # earlier run is never the one faulted) and reports the pid it hit.
+            INJECTOR="$( wired_find_tool tools/win-fault-inject/win-fault-inject )"
+            if [ -z "$INJECTOR" ]; then
+                echo "FAIL: tools/win-fault-inject not built — run:"
+                echo "    (cd tools/win-fault-inject && go build -o win-fault-inject.exe .)"
+                kill "$MAKE_PID" 2>/dev/null
+                exit 1
+            fi
+            echo "  faulting engine with an access violation (win-fault-inject)"
+            if ! "$INJECTOR" -name "wired-headless.x64.exe"; then
+                echo "FAIL: could not deliver the fault"
+                kill "$MAKE_PID" 2>/dev/null
+                exit 1
+            fi
+            ;;
+        *)
+            ENGINE_PID=$( pgrep -n 'wired-headless|q3now' 2>/dev/null | tail -1 )
+            if [ -z "$ENGINE_PID" ]; then
+                echo "FAIL: engine process not found after boot"
+                kill "$MAKE_PID" 2>/dev/null
+                exit 1
+            fi
+            echo "  faulting engine pid $ENGINE_PID with SIGSEGV"
+            kill -SEGV "$ENGINE_PID" 2>/dev/null
+            ;;
+    esac
 
     # Let the handler write its report, flush the playtest ring, and let any
     # out-of-process backend finish its dump.
     sleep 10
     kill "$MAKE_PID" 2>/dev/null
 
-    if ! grep -q 'Wired crash' "$LOG" 2>/dev/null; then
+    # The handler announces itself differently on each side: the POSIX signal
+    # handler prints a '=== Wired crash ===' banner, the Windows filter reports
+    # the exception it caught. Either proves the engine's own handler ran rather
+    # than the process simply dying.
+    if ! grep -qE 'Wired crash|Unhandled exception caught' "$LOG" 2>/dev/null; then
         echo "FAIL: no crash handler signature in the log — the engine's handler never ran"
         exit 1
     fi
