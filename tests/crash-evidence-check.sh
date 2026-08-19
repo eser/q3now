@@ -10,15 +10,34 @@
 # a report whose cvar block leaks the operator's home directory all look like
 # success from the outside.
 #
-# Two modes, and the self-test is not optional:
+# Three modes, and the self-test is not optional:
 #
 #   --analyze <homepath>   Validate the artefacts a real crash left in a home.
 #   --self-test            Prove this validator can REJECT bad evidence.
+#   --capture              Crash a real engine on purpose, then analyze it.
 #
 # The self-test exists because a gate that cannot fail certifies everything,
 # including the artefacts that quietly lost their contents. It builds corrupt
 # artefacts on purpose and requires each one to be refused. (Same discipline as
 # --playtest-self-test in tests/headless-map-transition-zonecheck.sh.)
+#
+# --capture is what makes the other two mean something. --analyze can only
+# judge artefacts somebody already produced by hand, and doing that by hand is
+# where the measurement itself goes wrong: three separate mistakes were made
+# taking this reading manually, each of which produced a plausible-looking but
+# WRONG result, and none of which announced itself —
+#
+#   1. The watchdog relaunches the engine after the fault, and the second
+#      session overwrites the first session's playtest artefact. Evidence of
+#      the crash silently becomes evidence of a clean boot.
+#   2. The artefacts land in fs_homepath, NOT the base/ subdirectory beneath
+#      it. Looking in base/ reports "no artefacts" for a run that produced a
+#      complete set.
+#   3. Faulting before the server finishes spawning yields a report whose
+#      map is "nomap" — which passes every check while proving nothing about
+#      map context reaching the artefact, the very thing under test.
+#
+# Encoding the procedure is therefore the deliverable, not a convenience.
 
 set -u
 
@@ -26,16 +45,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/wired_paths.sh
 . "$SCRIPT_DIR/lib/wired_paths.sh"
 
+USAGE="usage: $0 --analyze <homepath> | --self-test | --capture [--map <name>]"
+
 MODE=""
 TARGET=""
+CAPTURE_MAP="arena7"
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --analyze)   MODE="analyze"; TARGET="${2:-}"; shift 2 ;;
         --self-test) MODE="selftest"; shift ;;
-        *) echo "usage: $0 --analyze <homepath> | --self-test" >&2; exit 64 ;;
+        --capture)   MODE="capture"; shift ;;
+        --map)       CAPTURE_MAP="${2:-}"; shift 2 ;;
+        *) echo "$USAGE" >&2; exit 64 ;;
     esac
 done
-[ -n "$MODE" ] || { echo "usage: $0 --analyze <homepath> | --self-test" >&2; exit 64; }
+[ -n "$MODE" ] || { echo "$USAGE" >&2; exit 64; }
 
 # ── the checks ──────────────────────────────────────────────────────────────
 # Emits FAIL: lines for defects and INFO: lines for facts. The caller decides
@@ -126,6 +150,103 @@ minidump_checks() {
     fi
     echo "INFO: minidump $(basename "$dump"): ${size} bytes, MDMP signature present"
 }
+
+# ── capture ─────────────────────────────────────────────────────────────────
+# Produce a real crash and hand the result to --analyze. Deliberately NOT a
+# hand-assembled run: the engine is launched through `make run-headless`, the
+# same entry point every other harness uses, so a capture cannot drift from how
+# the engine is actually started.
+#
+# The fault is delivered from OUTSIDE with kill -SEGV rather than by building a
+# crash command into the binary. A test-only crash path would have to exist in
+# release builds to be reachable here, which means shipping a way to crash the
+# shipped engine in order to test it — the wrong trade. An external signal
+# exercises the same handler with nothing added to the product.
+if [ "$MODE" = "capture" ]; then
+    REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+    LOG="${WIRED_TMP}/crash-capture-$$.log"
+    HOME_PATH="$WIRED_HOME"
+
+    echo "==> capturing a real crash (map=$CAPTURE_MAP)"
+
+    # Move any pre-existing artefacts aside so the analysis below can only see
+    # what THIS run produced. Renamed, never deleted: a previous capture may be
+    # the evidence somebody is still working from.
+    STAMP="$( date +%Y%m%d-%H%M%S )"
+    for old in "$HOME_PATH"/crash_*.json "$HOME_PATH/wired_playtest.jsonl"; do
+        [ -e "$old" ] || continue
+        mv "$old" "$old.pre-$STAMP" 2>/dev/null || true
+    done
+    [ -d "$HOME_PATH/crashdb" ] && mv "$HOME_PATH/crashdb" "$HOME_PATH/crashdb.pre-$STAMP" 2>/dev/null
+
+    # com_noHardReboot 1 defeats the relaunch described in the header comment.
+    # Without it the watchdog's second session overwrites the crashed one's
+    # playtest artefact and the capture silently measures a clean boot.
+    ( cd "$REPO_ROOT" && make run-headless MAP="$CAPTURE_MAP" \
+        EXTRA_ARGS="+set playtest_enabled 1 +set com_noHardReboot 1" >"$LOG" 2>&1 ) &
+    MAKE_PID=$!
+
+    # Wait for the server to be fully up, not merely loading. 'Sending
+    # heartbeat' is emitted after spawn completes; anything earlier risks the
+    # map=nomap reading described in the header.
+    booted=0
+    for _ in $( seq 1 150 ); do
+        sleep 2
+        if grep -qE 'Sending heartbeat|Server Initialization Complete' "$LOG" 2>/dev/null; then
+            booted=1
+            break
+        fi
+        kill -0 "$MAKE_PID" 2>/dev/null || break
+    done
+    if [ "$booted" != 1 ]; then
+        echo "FAIL: engine never finished booting; last lines of $LOG:"
+        tail -5 "$LOG" | sed 's/^/    /'
+        kill "$MAKE_PID" 2>/dev/null
+        exit 1
+    fi
+
+    # $! is the make/watchdog parent, not the engine — resolve the real child.
+    ENGINE_PID=$( pgrep -n 'wired-headless|q3now' 2>/dev/null | tail -1 )
+    if [ -z "$ENGINE_PID" ]; then
+        echo "FAIL: engine process not found after boot"
+        kill "$MAKE_PID" 2>/dev/null
+        exit 1
+    fi
+
+    echo "  faulting engine pid $ENGINE_PID with SIGSEGV"
+    kill -SEGV "$ENGINE_PID" 2>/dev/null
+
+    # Let the handler write its report, flush the playtest ring, and let any
+    # out-of-process backend finish its dump.
+    sleep 10
+    kill "$MAKE_PID" 2>/dev/null
+
+    if ! grep -q 'Wired crash' "$LOG" 2>/dev/null; then
+        echo "FAIL: no crash handler signature in the log — the engine's handler never ran"
+        exit 1
+    fi
+    echo "  handler ran; analyzing $HOME_PATH"
+    "$0" --analyze "$HOME_PATH"
+    analyze_rc=$?
+
+    # --analyze judges artefact QUALITY; it has no idea which run produced them
+    # or when. A capture additionally has to prove it measured what it set out
+    # to measure, so assert the map here: a report saying map=nomap means the
+    # fault landed during load, and every check would still pass while the
+    # capture proved nothing about map context surviving into the report.
+    newest=$( find "$HOME_PATH" -maxdepth 1 -name 'crash_*.json' 2>/dev/null | sort | tail -1 )
+    if [ -z "$newest" ]; then
+        echo "==> CAPTURE FAIL: the crash produced no report"
+        exit 1
+    fi
+    if ! grep -q "\"$CAPTURE_MAP\"" "$newest" 2>/dev/null; then
+        echo "==> CAPTURE FAIL: $(basename "$newest") does not name map '$CAPTURE_MAP'"
+        echo "    the fault landed before the map spawned, so map context is unproven"
+        exit 1
+    fi
+    echo "==> CAPTURE OK: $(basename "$newest") carries map '$CAPTURE_MAP'"
+    exit "$analyze_rc"
+fi
 
 # ── analyze ─────────────────────────────────────────────────────────────────
 if [ "$MODE" = "analyze" ]; then
