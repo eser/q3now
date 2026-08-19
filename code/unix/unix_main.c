@@ -411,6 +411,36 @@ static void Sys_CrashSignal( int sig, siginfo_t *info, void *ucontext )
 	}
 	Crash_WriteReport( reason, addressText, "" );
 
+	/* Playtest breadcrumbs. The ordinary flush hangs off Com_Shutdown, which a
+	 * signal never reaches, so without this a crashed session leaves a crash
+	 * report and no timeline — backwards, since the crashed session is precisely
+	 * the one whose timeline someone needs.
+	 *
+	 * linux_signals.c's handler has this call too, but that handler stopped being
+	 * the installed one when sdl_glimp.c's InitSig() was removed so that
+	 * Sys_InstallCrashHandler could be the single owner (see crash.c). That change
+	 * gained the structured JSON report and silently lost the breadcrumb flush,
+	 * because the flush lived only in the handler it displaced. Measured: SIGSEGV
+	 * produced a crash report and no wired_playtest.jsonl, with sentry disabled —
+	 * so no backend was involved, only the handler swap.
+	 *
+	 * Placed after Crash_WriteReport for the same reason it follows WriteCrashLog
+	 * in the other handler: the report is the more important artefact and sits on
+	 * the safer path, so it is already on disk should this flush itself fault.
+	 * Writing through the VFS here is not async-signal-safe, but this handler
+	 * already calls backtrace_symbols(); the posture is best-effort capture from a
+	 * process that is ending regardless.
+	 *
+	 * The fault record goes in FIRST, and it is not decoration: Playtest_Flush
+	 * appends a lifecycle.session_end whether it was called from shutdown or
+	 * from here, so an artefact written on this path would otherwise claim a
+	 * clean termination. Measured — a SIGSEGV produced an artefact reading
+	 * "termination: clean (complete=True)". This record is what makes the two
+	 * distinguishable to anyone reading the file afterwards. */
+	Playtest_EmitFmt( PT_EV_SESSION_FAULT, "\"signal\":%d,\"reason\":\"%s\"",
+		sig, reason );
+	Playtest_Flush( NULL );
+
 	/* Re-raise with the default disposition to get a core file. */
 	signal( sig, SIG_DFL );
 	raise( sig );

@@ -137,6 +137,15 @@ typedef enum {
     PT_EV_AI_DECISION,         // "ai.decision"
     PT_EV_NET_EVENT,           // "net.event"
     PT_EV_PERF_FRAME_MARKER,   // "perf.frame_marker"
+    // Emitted from a fault handler, immediately before the crash flush. It is
+    // what separates "this session crashed" from "this session ended", because
+    // the flush appends a lifecycle.session_end either way — so without this
+    // record a crashed artefact reads as a clean shutdown, which is the exact
+    // opposite of what a reader needs from it.
+    // APPENDED, never inserted: these ids are index-aligned with the name table
+    // and with tests/playtest-envelope-test.c, so a new value in the middle
+    // would silently re-map every event after it.
+    PT_EV_SESSION_FAULT,       // "lifecycle.session_fault"
 
     PT_EV_COUNT
 } playtest_event_t;
