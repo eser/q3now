@@ -35,9 +35,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         git \
+        golang-go \
         libssl-dev \
         libsdl3-dev \
     && rm -rf /var/lib/apt/lists/*
+# golang-go builds tools/sw3z-archiver, which packs pax21.sw3z. Without the pak
+# the image has no default.cfg and the server refuses to start — see the pak
+# build step below.
 
 # Install wasi-sdk for WASM game module compilation
 # Detect host architecture for correct wasi-sdk variant
@@ -82,6 +86,26 @@ RUN ARCH=$(uname -m) && \
       gamesv_wasm gamecl_wasm \
       --parallel $(nproc) && \
     cp "build/wired-headless${BINEXT}" /tmp/wired-headless
+
+# Pack pax21.sw3z — default.cfg, scripts and the VM modules.
+#
+# This step used to be missing, and the omission was invisible: the runtime stage
+# copies build/Release/base/, CMake never creates that directory, and COPY of a
+# non-existent directory is not an error. The image built and published happily,
+# then every `docker run` died with "Couldn't load default.cfg" (files.c) — a
+# message that reads like missing game data rather than a broken image.
+#
+# The pak is a Makefile target, not a CMake one, because packing runs through the
+# Go archiver in tools/sw3z-archiver. BUILD_DIR must match what the cmake step
+# above used, so the Makefile writes the pak where the runtime stage looks for it.
+#
+# The explicit test is the point: it converts "the pak silently did not appear"
+# into a build failure, here, instead of a runtime failure in the operator's
+# terminal.
+RUN make create-packs BUILD_DIR=build DEV=0 \
+    && test -f build/base/pax21.sw3z \
+    && mkdir -p build/Release/base \
+    && cp build/base/pax21.sw3z build/Release/base/
 
 # ── Stage 2: Runtime ────────────────────────────────────────────────────────
 FROM debian:trixie-slim
