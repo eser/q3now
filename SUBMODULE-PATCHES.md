@@ -53,6 +53,18 @@ and calls it once per patched submodule:
 |---|---|---|
 | `src/libs/picoquic` | `patches/picoquic-mingw/` | Windows only (`IF(WIN32)`) |
 | `src/libs/recastnavigation` | `patches/recastnavigation/` | all platforms |
+| `src/libs/sentry-native` | `patches/sentry-native/` | when `USE_SENTRY_CRASH=ON` (the default) |
+
+`sentry-native` carries one patch, `01-chain-previous-crash-handler.patch`.
+sentry's signal handler saves the previously installed handler in
+`g_previous_handlers` and then terminates via `raise()` without ever calling
+it — so enabling sentry silently disabled ours, and a crash produced only a
+minidump: no JSON crash report, no playtest timeline, and nothing in the log
+saying why. Measured on macOS, Linux and Windows alike. The patch chains to the
+saved handler immediately before `raise()` (there are two exit paths, and both
+needed it), which turns enabling sentry into *adding* a minidump rather than
+trading the other two artefacts away for one. Upstreamable: nothing in it is
+specific to this engine.
 
 Behaviour:
 

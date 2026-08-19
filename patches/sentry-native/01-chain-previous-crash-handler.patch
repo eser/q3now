@@ -1,0 +1,71 @@
+diff --git a/src/backends/native/sentry_crash_handler.c b/src/backends/native/sentry_crash_handler.c
+index 8807621d..b6706c6d 100644
+--- a/src/backends/native/sentry_crash_handler.c
++++ b/src/backends/native/sentry_crash_handler.c
+@@ -240,6 +240,43 @@ safe_build_stack_path(
+ }
+ #    endif
+ 
++/**
++ * Chain to the handler that was installed before us (signal-safe).
++ *
++ * Without this, installing sentry SILENTLY DISABLES any pre-existing crash
++ * handler: we save it in g_previous_handlers below and then terminate via
++ * raise(), so it is recorded and never invoked. An embedder whose own handler
++ * writes a crash report or flushes a breadcrumb trail loses those artefacts the
++ * moment sentry is enabled, with nothing to indicate why.
++ *
++ * Called immediately BEFORE raise(), because raise() with SIG_DFL installed
++ * terminates the process — nothing after it runs.
++ */
++static void
++chain_previous_handler(int signum, siginfo_t *info, void *context)
++{
++    for (size_t i = 0; i < g_crash_signal_count; i++) {
++        if (g_crash_signals[i] != signum) {
++            continue;
++        }
++
++        const struct sigaction *prev = &g_previous_handlers[i];
++
++        // SIG_DFL / SIG_IGN carry no handler to call. sa_handler and
++        // sa_sigaction may share storage in a union, so the flag decides which
++        // member is the live one.
++        if (prev->sa_flags & SA_SIGINFO) {
++            if (prev->sa_sigaction != NULL) {
++                prev->sa_sigaction(signum, info, context);
++            }
++        } else if (prev->sa_handler != SIG_DFL && prev->sa_handler != SIG_IGN
++            && prev->sa_handler != NULL) {
++            prev->sa_handler(signum);
++        }
++        return;
++    }
++}
++
+ /**
+  * Signal handler (signal-safe)
+  */
+@@ -258,7 +295,9 @@ crash_signal_handler(int signum, siginfo_t *info, void *context)
+ 
+     sentry_crash_ipc_t *ipc = g_crash_ipc;
+     if (!ipc || !ipc->shmem) {
+-        // No IPC available, just re-raise
++        // No IPC available: nothing of ours will be written, so the previously
++        // installed handler is the only thing that can still produce evidence.
++        chain_previous_handler(signum, info, context);
+         raise(signum);
+         return;
+     }
+@@ -684,6 +723,11 @@ daemon_handling:
+         }
+     }
+ 
++    // Our dump is on disk; give the previously installed handler its turn
++    // before the process dies, so an embedder's own crash artefacts are still
++    // produced alongside the minidump rather than instead of it.
++    chain_previous_handler(signum, info, context);
++
+     raise(signum);
+ }
+ 

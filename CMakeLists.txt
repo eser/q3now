@@ -2750,10 +2750,27 @@ TARGET_LINK_LIBRARIES(qcommon_ded PRIVATE OpenSSL::Crypto)
 # sentry-crash 336 KB) and on Debian arm64 under Docker (libsentry.so +
 # sentry-crash, 4 MB build tree).
 #
-# Default OFF for now: the engine-side adapter lands before the switch is
-# flipped, so a half-wired backend can never displace the working per-platform
-# handlers.
-OPTION(USE_SENTRY_CRASH "Use sentry-native for crash capture" OFF)
+# Default ON. It was OFF while the engine-side adapter was being built, so a
+# half-wired backend could never displace the working per-platform handlers.
+# Both conditions that kept it off are now met: the adapter is in place, and
+# the vendor patch below stops sentry from dropping our own handler out of the
+# chain — so enabling it ADDS a minidump rather than trading the JSON report
+# and the playtest timeline away for one.
+#
+# This is what makes minidump production uniform. Windows used to carry its own
+# in-engine MiniDumpWriteDump path while macOS and Linux had none, so "is there
+# a dump?" had a different answer per platform and per configuration. That
+# writer is gone; sentry is the single producer everywhere.
+#
+# Cost, measured on macOS arm64 (headless, arena7, each figure repeated):
+#   engine RSS   88.5 MB with sentry vs 90.0 MB without — no increase; the
+#                difference is noise, and the 0.99 MB crash context is SHARED
+#                memory that lands mostly on the daemon's side
+#   daemon RSS   ~6 MB, in a SEPARATE process, so the engine's own memory
+#                budget (arenas, VM, GC) is untouched
+#   footprint    531 KB macOS / 1.2 MB Windows, most of it the daemon binary
+#   network      none: SENTRY_TRANSPORT=none, dumps are local files only
+OPTION(USE_SENTRY_CRASH "Use sentry-native for crash capture" ON)
 IF(NOT USE_SENTRY_CRASH)
 	ADD_COMPILE_DEFINITIONS(FEAT_SENTRY_CRASH=0)
 ELSEIF(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/libs/sentry-native/CMakeLists.txt)
@@ -2762,6 +2779,16 @@ ELSEIF(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/libs/sentry-native/CMakeLists.
 		"git submodule update --init src/libs/sentry-native")
 ELSE()
 	ADD_COMPILE_DEFINITIONS(FEAT_SENTRY_CRASH=1)
+
+	# sentry's own signal handler saves the previously installed one and then
+	# never calls it, terminating via raise() instead. Enabling sentry therefore
+	# SILENTLY DISABLED our handler: the JSON crash report and the playtest
+	# timeline both stopped being written, leaving only a minidump, and nothing
+	# in the log said why. Measured on macOS, Linux and Windows before the patch.
+	# The patch chains to the saved handler immediately before raise().
+	# See SUBMODULE-PATCHES.md.
+	WIRED_APPLY_SUBMODULE_PATCHES(sentry-native src/libs/sentry-native patches/sentry-native)
+
 	SET(SENTRY_BACKEND        "native" CACHE STRING "" FORCE)
 	SET(SENTRY_TRANSPORT      "none"   CACHE STRING "" FORCE)
 	SET(SENTRY_BUILD_TESTS    OFF      CACHE BOOL   "" FORCE)
