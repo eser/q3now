@@ -894,6 +894,27 @@ static LONG WINAPI ExceptionFilter( struct _EXCEPTION_POINTERS *ExceptionInfo )
 		// alongside the JSON for offline triage.
 		WriteMinidump( ExceptionInfo );
 
+		/* Playtest breadcrumbs. The ordinary flush hangs off Com_Shutdown,
+		 * which an unhandled exception never reaches, so without this a crashed
+		 * Windows session leaves a crash report and no timeline — backwards,
+		 * since the crashed session is precisely the one whose timeline someone
+		 * needs. The unix handler (unix_main.c, Sys_CrashSignal) has carried this
+		 * call since the handler consolidation; this side never did.
+		 *
+		 * Placed AFTER the report and the dump for the reason the unix side
+		 * gives: the flush writes through the VFS and is the most likely of the
+		 * three to fault a second time, so the other two artefacts are already on
+		 * disk should that happen.
+		 *
+		 * The fault record goes in FIRST, and it is not decoration: Playtest_Flush
+		 * appends a lifecycle.session_end whether it was called from shutdown or
+		 * from here, so an artefact written on this path would otherwise claim a
+		 * clean termination. This record is what makes the two distinguishable to
+		 * anyone reading the file afterwards. */
+		Playtest_EmitFmt( PT_EV_SESSION_FAULT, "\"code\":%u,\"reason\":\"%s\"",
+			(unsigned)ExceptionInfo->ExceptionRecord->ExceptionCode, reasonText );
+		Playtest_Flush( NULL );
+
 		Com_Terminate( TERM_CLIENT_DROP, "Unhandled exception caught\n%s", msg );
 	}
 
