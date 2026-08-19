@@ -372,6 +372,38 @@ ENDIF()
 IF(BUILD_TESTING)
 ADD_CUSTOM_TARGET(host_tests)
 
+# ── GoogleTest ──────────────────────────────────────────────────────────────
+# Vendored as a pinned submodule (src/libs/googletest, v1.17.0), consumed the
+# same way as every other third-party tree here: ADD_SUBDIRECTORY + EXCLUDE_FROM_ALL,
+# no FetchContent. FetchContent appears nowhere in this repo and would make
+# `cmake` reach the network at configure time, so an offline or air-gapped
+# configure would start failing — the vendoring is deliberate, not incidental.
+#
+# It lives INSIDE IF(BUILD_TESTING): with testing off the subdirectory is never
+# added, so gtest is not built, not linked, and cannot reach a shipping target.
+#
+# The BUILD_TESTING save/restore mirrors the zlib-ng block below (see its comment
+# for the full rationale): googletest reads BUILD_TESTING for its OWN test suite,
+# and ours is ON, so leaving it alone would build gtest's internal tests as part
+# of our tree.
+IF(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/libs/googletest/CMakeLists.txt)
+	SET(_WIRED_SAVED_BUILD_TESTING ${BUILD_TESTING})
+	SET(BUILD_TESTING OFF)
+	SET(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+	# Windows: match the CRT the rest of the tree uses instead of gtest's default
+	# static CRT, otherwise test targets fail to link with mismatched runtimes.
+	SET(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+	ADD_SUBDIRECTORY(src/libs/googletest EXCLUDE_FROM_ALL)
+	SET(BUILD_TESTING ${_WIRED_SAVED_BUILD_TESTING})
+	UNSET(_WIRED_SAVED_BUILD_TESTING)
+	INCLUDE(GoogleTest)
+	SET(WIRED_HAVE_GTEST ON)
+ELSE()
+	SET(WIRED_HAVE_GTEST OFF)
+	MESSAGE(STATUS "googletest submodule absent — gtest suites skipped "
+		"(git submodule update --init src/libs/googletest)")
+ENDIF()
+
 # Build-graph contract for the first qcommon dedup cohort. The engine variants
 # must consume one shared vendor-material archive while extract-meta retains
 # its curated, tool-private LZ4 compilation. Reading compile_commands makes an
@@ -568,6 +600,59 @@ FUNCTION(WIRED_CONFIGURE_HOST_TEST target test_name)
 		SET_PROPERTY(TEST ${test_name} APPEND PROPERTY LABELS "sanitizer.asan-ubsan")
 		SET_PROPERTY(TEST ${test_name} PROPERTY ENVIRONMENT
 			"ASAN_OPTIONS=abort_on_error=1:detect_leaks=0;UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1")
+	ENDIF()
+ENDFUNCTION()
+
+# GoogleTest counterpart of WIRED_CONFIGURE_HOST_TEST.
+#
+#   WIRED_ADD_GTEST(<target> <ctest_prefix> <labels> SOURCES <src>...)
+#
+# The two cannot share one function because gtest_discover_tests registers its
+# CTest entries at BUILD time — one per TEST() macro, named by the framework —
+# whereas WIRED_CONFIGURE_HOST_TEST writes properties onto a single name known at
+# configure time. So the work is split: per-test properties (LABELS, TIMEOUT) go
+# through gtest_discover_tests' own PROPERTIES argument, which applies them to
+# every discovered case, while the target-level half (host_tests dependency,
+# sanitizer compile/link flags) is done here directly.
+#
+# The target name must end in _test: the Windows CI job does not run ctest at all,
+# it globs *_test.exe and checks exit codes (.github/workflows/build.yml). A gtest
+# binary satisfies that — it returns non-zero on failure — but only if it is named
+# so the glob finds it.
+FUNCTION(WIRED_ADD_GTEST target ctest_prefix labels)
+	CMAKE_PARSE_ARGUMENTS(ARG "" "" "SOURCES" ${ARGN})
+	IF(NOT WIRED_HAVE_GTEST)
+		RETURN()
+	ENDIF()
+
+	ADD_EXECUTABLE(${target} ${ARG_SOURCES})
+	TARGET_INCLUDE_DIRECTORIES(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/code/qcommon)
+	# gtest_main supplies main(); GTest::gtest is linked to THIS TARGET ONLY, never
+	# to an engine or shipping target — that is TASK-122 #8's actual requirement.
+	TARGET_LINK_LIBRARIES(${target} PRIVATE GTest::gtest GTest::gtest_main)
+	TARGET_COMPILE_FEATURES(${target} PRIVATE cxx_std_17)
+
+	gtest_discover_tests(${target}
+		TEST_PREFIX "${ctest_prefix}."
+		PROPERTIES
+			LABELS "${labels}"
+			TIMEOUT 30
+		DISCOVERY_TIMEOUT 30)
+
+	ADD_DEPENDENCIES(host_tests ${target})
+	IF(WIRED_HOST_SANITIZERS)
+		IF(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+			MESSAGE(FATAL_ERROR
+				"WIRED_HOST_SANITIZERS requires GCC or Clang; compiler is ${CMAKE_CXX_COMPILER_ID}")
+		ENDIF()
+		TARGET_COMPILE_OPTIONS(${target} PRIVATE
+			-fsanitize=address,undefined
+			-fno-omit-frame-pointer
+			-fno-sanitize-recover=all)
+		TARGET_LINK_OPTIONS(${target} PRIVATE
+			-fsanitize=address,undefined
+			-fno-omit-frame-pointer
+			-fno-sanitize-recover=all)
 	ENDIF()
 ENDFUNCTION()
 
@@ -2112,6 +2197,18 @@ SET_TESTS_PROPERTIES(fs_qpath_contract PROPERTIES
 	TIMEOUT 30
 )
 WIRED_CONFIGURE_HOST_TEST(fs_qpath_test fs_qpath_contract)
+
+# Same seam, parameterised: one CTest entry per input instead of one for the
+# whole set, so a regression names the offending path. Kept ALONGSIDE the C
+# contract rather than replacing it — the C one is the dependency-free spelling
+# that runs even when the googletest submodule is not checked out, and losing
+# that would make a security contract conditional on a vendored library.
+WIRED_ADD_GTEST(fs_qpath_gtest fs_qpath
+	"host-only;subsystem;owner.wired-vfs;failure.security-contract;feature.always"
+	SOURCES
+		tests/fs_qpath_gtest.cpp
+		code/qcommon/wired/core/vfs/fs_qpath.c
+)
 
 # Recyclable game-connection handles must be paired with their monotonic
 # allocation identity before a pending CONNECT/READY event can be consumed.
