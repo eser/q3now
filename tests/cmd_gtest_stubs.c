@@ -106,8 +106,16 @@ void CL_ForwardCommandToServer( const char *string ) {
 // The zone allocator is replaced with plain malloc/free. cmd.c only needs
 // allocation to behave like allocation; zone bookkeeping (tags, hunk marks) is
 // not observable through any command-layer contract.
-void *Z_MallocDebug( size_t size, const char *label, const char *file, int line ) {
-	(void) label; (void) file; (void) line;
+//
+// The zone exposes TWO MUTUALLY EXCLUSIVE surfaces (qcommon.h, ZONE_DEBUG): a
+// debug build turns Z_Malloc/S_Malloc/Z_TagMalloc into macros over the
+// *Debug entry points, while a release build declares them as plain functions
+// and the *Debug names do not exist at all. A stub that provides only one
+// surface therefore links in exactly one configuration and fails in the other
+// — which is what happened here: the debug-only stubs left cmd_gtest with an
+// undefined _S_Malloc in Release. Mirror the same #if so whichever surface
+// cmd.c was compiled against is the one that gets defined.
+static void *Stub_Alloc( size_t size ) {
 	void *p = calloc( 1, size );
 	if ( !p ) {
 		abort();
@@ -115,9 +123,35 @@ void *Z_MallocDebug( size_t size, const char *label, const char *file, int line 
 	return p;
 }
 
-void *S_MallocDebug( size_t size, const char *label, const char *file, int line ) {
-	return Z_MallocDebug( size, label, file, line );
+#ifdef ZONE_DEBUG
+void *Z_MallocDebug( size_t size, const char *label, const char *file, int line ) {
+	(void) label; (void) file; (void) line;
+	return Stub_Alloc( size );
 }
+
+void *S_MallocDebug( size_t size, const char *label, const char *file, int line ) {
+	(void) label; (void) file; (void) line;
+	return Stub_Alloc( size );
+}
+
+void *Z_TagMallocDebug( size_t size, memtag_t tag, const char *label, const char *file, int line ) {
+	(void) tag; (void) label; (void) file; (void) line;
+	return Stub_Alloc( size );
+}
+#else
+void *Z_Malloc( size_t size ) {
+	return Stub_Alloc( size );
+}
+
+void *S_Malloc( size_t size ) {
+	return Stub_Alloc( size );
+}
+
+void *Z_TagMalloc( size_t size, memtag_t tag ) {
+	(void) tag;
+	return Stub_Alloc( size );
+}
+#endif
 
 void Z_Free( void *ptr ) {
 	free( ptr );
