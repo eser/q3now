@@ -1,3 +1,48 @@
+diff --git a/src/backends/native/sentry_crash_daemon.c b/src/backends/native/sentry_crash_daemon.c
+index 68a95e1d..6ae34e9e 100644
+--- a/src/backends/native/sentry_crash_daemon.c
++++ b/src/backends/native/sentry_crash_daemon.c
+@@ -2805,15 +2805,34 @@ is_parent_alive(pid_t parent_pid)
+     // Send signal 0 to check if process exists
+     return kill(parent_pid, 0) == 0 || errno != ESRCH;
+ #elif defined(SENTRY_PLATFORM_WINDOWS)
+-    // Open handle to process with minimum rights
++    // Mirror of the POSIX rule above, which reports dead ONLY for ESRCH ("no
++    // such process") and treats every other failure as still alive. The
++    // Windows path used to collapse "the process is gone" and "I could not
++    // ask" into a single `return false`, so any failure to open the handle
++    // ended the daemon.
++    //
++    // That asymmetry is not cosmetic, because the two mistakes do not cost the
++    // same. Wrongly reporting dead makes the daemon break out of its wait loop
++    // and finalize the session, so a crash arriving afterwards finds the run
++    // slot already closed and NO MINIDUMP IS EVER WRITTEN — the evidence is
++    // destroyed. Wrongly reporting alive only keeps a small daemon running a
++    // little longer, and the parent-exit path is not the only way it ends.
++    // When in doubt, therefore, report alive.
+     HANDLE hProcess = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
+     if (!hProcess) {
+-        return false; // Process doesn't exist or can't be accessed
+-    }
+-    // Check if process has exited
++        // ERROR_INVALID_PARAMETER is the true counterpart of ESRCH: no process
++        // carries that id. Anything else — ERROR_ACCESS_DENIED above all, the
++        // counterpart of EPERM — means the process exists but is not open to
++        // us, which is precisely the case POSIX keeps alive.
++        return GetLastError() != ERROR_INVALID_PARAMETER;
++    }
++    // A failed GetExitCodeProcess does not mean the process exited; it means
++    // the exit status could not be read. Same rule: only a definite answer of
++    // "not STILL_ACTIVE" counts as dead.
+     DWORD exit_code;
+-    bool alive
+-        = GetExitCodeProcess(hProcess, &exit_code) && exit_code == STILL_ACTIVE;
++    bool alive = GetExitCodeProcess(hProcess, &exit_code)
++        ? (exit_code == STILL_ACTIVE)
++        : true;
+     CloseHandle(hProcess);
+     return alive;
+ #endif
 diff --git a/src/backends/native/sentry_crash_handler.c b/src/backends/native/sentry_crash_handler.c
 index 8807621d..ed6600db 100644
 --- a/src/backends/native/sentry_crash_handler.c

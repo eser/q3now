@@ -81,6 +81,22 @@ In both, the double-fault early exit deliberately does *not* chain — a handler
 is already running there. Together they turn enabling sentry into *adding* a
 minidump rather than trading the other two artefacts away for one.
 
+The same patch carries a second, related fix in `sentry_crash_daemon.c`.
+`is_parent_alive()` decides whether the daemon should stop waiting, and its two
+platform branches disagreed about what a failed query means. POSIX reports dead
+only for `ESRCH` and treats every other error — `EPERM` above all — as still
+alive; the Windows branch collapsed "the process is gone" and "I could not ask"
+into one `return false`, so any failure to open the handle ended the daemon.
+
+That asymmetry destroys evidence rather than merely shortening a process: the
+daemon breaks out of its wait loop, finalizes the session, and a crash arriving
+afterwards finds the run slot closed, so no minidump is ever written. Observed
+on Windows — the session was stamped `"status":"crashed"` while the engine was
+still healthy, ten seconds before the real fault. The Windows branch now mirrors
+the POSIX rule: only `ERROR_INVALID_PARAMETER` (no process carries that id, the
+counterpart of `ESRCH`) counts as dead, and a `GetExitCodeProcess` that fails
+outright is treated as "unknown", not as "exited".
+
 Upstreamable: nothing in it is specific to this engine.
 
 Behaviour:
