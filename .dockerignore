@@ -2,6 +2,15 @@
 build/
 dist/
 
+# Visual-regression golden frames and capture output — ~2.1 GB of PNGs that
+# dominate the build context and that this image cannot use: it builds the
+# HEADLESS server, which renders nothing and compares no screenshots. Without
+# these lines every `docker build` (CI's image job included) shipped a 2.4 GB
+# context before the first instruction ran.
+tests/golden/
+tests/visual/
+tests/screenshots/
+
 # Version control
 .git/
 .gitignore
