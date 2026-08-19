@@ -97,6 +97,25 @@ the POSIX rule: only `ERROR_INVALID_PARAMETER` (no process carries that id, the
 counterpart of `ESRCH`) counts as dead, and a `GetExitCodeProcess` that fails
 outright is treated as "unknown", not as "exited".
 
+Measured on Windows against a live engine, an exited engine and an unused pid,
+because the obvious model of this API is wrong in a way that matters:
+
+| target | `OpenProcess` | `GetExitCodeProcess` |
+|---|---|---|
+| live process | succeeds | `STILL_ACTIVE` |
+| exited process | **succeeds** | fails with `ERROR_ACCESS_DENIED` under `SYNCHRONIZE` alone |
+| unused pid | fails, `ERROR_INVALID_PARAMETER` | — |
+
+`OpenProcess` succeeding on an *exited* process is not a quirk: Windows keeps
+the process object alive while any handle to it exists, so the id is not
+recycled and "gone" is not an open failure the way `ESRCH` is on POSIX. The
+distinction therefore lives entirely in `GetExitCodeProcess` — which needs
+`PROCESS_QUERY_LIMITED_INFORMATION`, not the `SYNCHRONIZE` the original code
+asked for. With too little access that call failed, the rule above read the
+failure as "alive", and parent-exit detection became unreachable rather than
+merely conservative. The patch asks for both rights, so the check answers the
+question it was written to answer.
+
 Upstreamable: nothing in it is specific to this engine.
 
 Behaviour:
