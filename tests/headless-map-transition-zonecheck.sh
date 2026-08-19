@@ -313,6 +313,106 @@ if [ "${1:-}" = "--analyze-playtest" ]; then
     analyze_playtest "$ART" "${*:-$MAP_CHAIN}"; exit $?
 fi
 
+# ── playtest timeline (TASK-120 #5) ──────────────────────────────────────────
+#
+# --analyze-playtest asks "is this artefact intact?" — a gate, pass or fail.
+# This asks the question someone actually has when a playtester sends a file
+# after a crash: WHAT HAPPENED? Which build, which map, how far in, and what was
+# the last thing the engine did before it stopped.
+#
+# Deliberately a separate mode. A validator that also narrated would have to
+# decide whether a missing session_end is a defect — it is, for the gate — or
+# simply the shape of a crashed session, which it also is, for a timeline.
+# Conflating the two makes one of the answers wrong.
+#
+# Reads ONLY the artefact: no engine, no source tree, no companion log, because
+# the artefact is the one thing a reporter can actually send.
+playtest_timeline() {
+    local artefact="$1"
+
+    [ -f "$artefact" ] || { echo "FAIL: no artefact at '$artefact'"; return 1; }
+
+    python3 - "$artefact" <<'PYEOF'
+import json, sys
+
+path = sys.argv[1]
+rows, bad = [], 0
+with open(path) as fh:
+    for line in fh:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            # A crash can cut the file mid-line. That is evidence about how the
+            # session ended, not a reason to refuse to read the rest.
+            bad += 1
+
+if not rows:
+    print("FAIL: artefact holds no readable records")
+    sys.exit(1)
+
+first = rows[0]
+print("=== session ===")
+print(f"  build          : {first.get('build')}  (rev {first.get('head')})")
+print(f"  platform       : {first.get('plat')}   app: {first.get('app')}")
+print(f"  session id     : {first.get('sid')}")
+print(f"  records        : {len(rows)}" + (f"  (+{bad} unreadable)" if bad else ""))
+
+# The last lifecycle.session_end carries the ring's own accounting. Its ABSENCE
+# is the strongest signal the artefact holds that the process died rather than
+# exited — which is exactly the case this mode exists for.
+end = next((r for r in reversed(rows) if r.get("ev") == "lifecycle.session_end"), None)
+if end is None:
+    print("  termination    : NO session_end — the process did not shut down cleanly")
+else:
+    complete = end.get("complete")
+    print(f"  termination    : clean (complete={complete})")
+    if complete is False:
+        print(f"                   ring overflowed: {end.get('dropped_overwritten')} record(s) "
+              f"overwritten, timeline starts at seq {end.get('seq_first')}")
+
+# Map progression in order, with the time each load landed: the build->map->
+# failure spine the criterion asks for.
+print("=== map progression ===")
+seen_any = False
+for r in rows:
+    ev = r.get("ev")
+    if ev == "lifecycle.map_load":
+        print(f"  {r.get('t'):>8} ms  loading {r.get('map') or '?'}"
+              + (f"  [{r.get('phase')}]" if r.get("phase") else ""))
+        seen_any = True
+    elif ev == "lifecycle.map_loaded":
+        print(f"  {r.get('t'):>8} ms  LOADED  {r.get('map') or '?'}")
+        seen_any = True
+if not seen_any:
+    print("  (no map lifecycle events — the session ended before loading a map)")
+
+# What the engine was doing last. On a crashed session this is the closest thing
+# to a cause the artefact can offer, so it is printed even when it looks dull.
+print("=== final activity ===")
+tail = [r for r in rows if r.get("ev") != "lifecycle.session_end"][-8:]
+for r in tail:
+    extra = {k: v for k, v in r.items()
+             if k not in ("v", "seq", "t", "sid", "build", "head", "plat", "app", "map", "ev")}
+    detail = ("  " + " ".join(f"{k}={v}" for k, v in extra.items())) if extra else ""
+    print(f"  {r.get('t'):>8} ms  {r.get('ev')}{detail}")
+
+last = tail[-1] if tail else first
+print("=== summary ===")
+print(f"  Build {first.get('build')} ({first.get('head')}) on {first.get('plat')}, "
+      f"last map '{last.get('map') or '?'}', "
+      f"ran {last.get('t')} ms, ended on '{last.get('ev')}'"
+      + ("" if end is not None else ", NO clean shutdown"))
+PYEOF
+}
+
+if [ "${1:-}" = "--playtest-timeline" ]; then
+    [ "$#" -ge 2 ] || { echo "usage: $0 --playtest-timeline <artefact>"; exit 64; }
+    playtest_timeline "$2"; exit $?
+fi
+
 # ── playtest consumer self-test (engine-free, gate-has-teeth) ─────────────────
 # Same discipline as --self-test above: build a clean synthetic artefact, prove
 # the analyzer ACCEPTS it, then break one property at a time and prove it
