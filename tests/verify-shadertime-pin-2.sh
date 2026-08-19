@@ -3,7 +3,12 @@
 # Saves PNGs + reports md5/mean per (run, vp). Cleans up at end.
 set -u
 . "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
-PRODUCT_DIR="${PRODUCT_DIR:-$WIRED_HOME}"
+# Isolated capture home, NOT the player's: this script deletes files under
+# base/ and passes CVAR_ARCHIVE cvars (r_mode, r_customwidth, r_brightness)
+# as +set, which a clean exit persists into config.cfg.
+# See wired_isolated_home in lib/wired_paths.sh.
+PRODUCT_DIR="${PRODUCT_DIR:-$( wired_isolated_home shadertime-pin-home )}"
+PRODUCT_DIR_NATIVE="$(cygpath -w "$PRODUCT_DIR" 2>/dev/null || echo "$PRODUCT_DIR")"
 JSONL="$PRODUCT_DIR/qconsole.jsonl"
 SS_DIR="$PRODUCT_DIR/base/screenshots"
 WIRED="build/debug/wired.x64.exe"
@@ -38,6 +43,7 @@ capture() {
     (
         cd "$WIRED_DIR"
         timeout 180 "./$WIRED_NAME" \
+            +set fs_homepath "$PRODUCT_DIR_NATIVE" \
             +set sv_pure 0 +set sv_cheats 1 +set r_brightness 1 \
             +set vm_game 0 +set vm_cgame 0 +set log_file_mode overwrite_synced \
             +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 \

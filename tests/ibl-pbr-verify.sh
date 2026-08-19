@@ -18,7 +18,11 @@ set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PNG2RAW="${PNG2RAW:-$REPO_ROOT/tools/png2raw/png2raw}"
-HOME_DIR="$WIRED_HOME"
+# Isolated capture home, NOT the player's: the capture cfgs below set
+# CVAR_ARCHIVE cvars (cg_drawGun, r_pbr, ...) and a clean exit writes them
+# back into config.cfg. See wired_isolated_home in lib/wired_paths.sh.
+HOME_DIR="${HOME_DIR:-$( wired_isolated_home ibl-pbr-home )}"
+HOME_DIR_NATIVE="$(cygpath -w "$HOME_DIR" 2>/dev/null || echo "$HOME_DIR")"
 BASE_DIR="$HOME_DIR/base"
 SHOT_DIR="$BASE_DIR/screenshots"
 FRAME_W=1280
@@ -96,7 +100,7 @@ run_capture() {
 	local tag="$1" pbr="$2"
 	rm -f "$SHOT_DIR"/ibl_${tag}_*.png 2>/dev/null
 	write_cfg "$tag" "$pbr"
-	( cd "$REPO_ROOT" && make run-game DEV=1 EXTRA_ARGS="+map arena7 +waitForMap +wait 60 +exec iblcap.cfg" >"$WIRED_TMP/ibl-$tag.log" 2>&1 || true )
+	( cd "$REPO_ROOT" && make run-game DEV=1 EXTRA_ARGS="+set fs_homepath \"$HOME_DIR_NATIVE\" +map arena7 +waitForMap +wait 60 +exec iblcap.cfg" >"$WIRED_TMP/ibl-$tag.log" 2>&1 || true )
 }
 
 echo "== capturing r_pbr 0 =="

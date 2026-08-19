@@ -8,7 +8,10 @@
 set -u
 . "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
 
-PRODUCT_DIR="${PRODUCT_DIR:-$WIRED_HOME}"
+# Scratch home: this script only clears a stale pipeline cache before
+# delegating to smoke-map-transition.sh, which runs in its own isolated
+# home — so there is no reason for the deletion to land in the player's.
+PRODUCT_DIR="${PRODUCT_DIR:-$( wired_isolated_home verify-step3-5-home )}"
 WIRED="build/debug/wired.x64.exe"
 
 echo "=== Cold-cache state ==="

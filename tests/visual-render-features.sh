@@ -73,23 +73,12 @@ VRF_TMP="${VRF_TMP:-$WIRED_TMP}"
 # the real home — those are SYMLINKED, never copied: a copy is a second stale
 # artifact to keep in sync, and hand-assembling a run out of copied paks is exactly
 # the failure mode the engine's own path derivation exists to prevent.
-vrf_link_paks() {
-    local home="$1" real="$WIRED_BASE" f
-    mkdir -p "$home/base" || return 1
-    [ -d "$real" ] || return 0
-    for f in "$real"/*.sw3z "$real"/*.pk3; do
-        [ -e "$f" ] || continue
-        ln -sfn "$f" "$home/base/$( basename "$f" )"
-    done
-}
-
 if [ "$MODE" = "selftest" ]; then
     # The engine-free self-test never launches or captures; it only needs a
     # writable scratch dir.
     SMOKE_HOME="${SMOKE_HOME:-$WIRED_TMP/vrf-selftest-home}"
 else
-    SMOKE_HOME="${SMOKE_HOME:-$WIRED_TMP/vrf-home}"
-    vrf_link_paks "$SMOKE_HOME"
+    SMOKE_HOME="${SMOKE_HOME:-$( wired_isolated_home vrf-home )}"
 fi
 SMOKE_HOME_NATIVE="$(cygpath -w "$SMOKE_HOME" 2>/dev/null || echo "$SMOKE_HOME")"
 SHOTDIR="$SMOKE_HOME/base/screenshots"
