@@ -99,7 +99,11 @@ static const struct {
 	{ "PT_EV_WEAPON_FIRED",      "weapon.fired"            },
 	{ "PT_EV_AI_DECISION",       "ai.decision"             },
 	{ "PT_EV_NET_EVENT",         "net.event"               },
-	{ "PT_EV_PERF_FRAME_MARKER", "perf.frame_marker"       }
+	{ "PT_EV_PERF_FRAME_MARKER", "perf.frame_marker"       },
+	/* Emitted by the fault handler before the crash flush. Without it a crashed
+	   artefact is indistinguishable from a clean one, because Playtest_Flush
+	   appends lifecycle.session_end on every path. */
+	{ "PT_EV_SESSION_FAULT",     "lifecycle.session_fault" }
 };
 #define DICT_COUNT ( (int)( sizeof( k_dictionary ) / sizeof( k_dictionary[0] ) ) )
 

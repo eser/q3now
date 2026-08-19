@@ -363,8 +363,17 @@ print(f"  records        : {len(rows)}" + (f"  (+{bad} unreadable)" if bad else 
 # The last lifecycle.session_end carries the ring's own accounting. Its ABSENCE
 # is the strongest signal the artefact holds that the process died rather than
 # exited — which is exactly the case this mode exists for.
+# A fault record beats the session_end record. The crash handler emits one and
+# THEN flushes, and the flush always appends a session_end — so an artefact from
+# a crashed process carries both, and reading only the session_end would report
+# a clean shutdown for a process that segfaulted.
+fault = next((r for r in reversed(rows) if r.get("ev") == "lifecycle.session_fault"), None)
 end = next((r for r in reversed(rows) if r.get("ev") == "lifecycle.session_end"), None)
-if end is None:
+if fault is not None:
+    detail = ", ".join(f"{k}={v}" for k, v in fault.items()
+                       if k in ("signal", "reason"))
+    print(f"  termination    : CRASHED at {fault.get('t')} ms ({detail})")
+elif end is None:
     print("  termination    : NO session_end — the process did not shut down cleanly")
 else:
     complete = end.get("complete")
@@ -404,7 +413,8 @@ print("=== summary ===")
 print(f"  Build {first.get('build')} ({first.get('head')}) on {first.get('plat')}, "
       f"last map '{last.get('map') or '?'}', "
       f"ran {last.get('t')} ms, ended on '{last.get('ev')}'"
-      + ("" if end is not None else ", NO clean shutdown"))
+      + (f", CRASHED (signal {fault.get('signal')})" if fault is not None
+         else "" if end is not None else ", NO clean shutdown"))
 PYEOF
 }
 

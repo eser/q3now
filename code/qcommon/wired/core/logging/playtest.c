@@ -60,7 +60,8 @@ static const char *s_eventNames[PT_EV_COUNT] = {
     "weapon.fired",
     "ai.decision",
     "net.event",
-    "perf.frame_marker"
+    "perf.frame_marker",
+    "lifecycle.session_fault"
 };
 
 const char *Playtest_EventName( playtest_event_t ev )
