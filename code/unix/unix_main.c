@@ -1364,10 +1364,19 @@ int main( int argc, const char* argv[] )
 		}
 	}
 
-#ifdef HEADLESS
-	// init here for dedicated, as we don't have GLimp_Init
-	InitSig();
-#endif
+	/* InitSig() was called here for the dedicated server, on the reasoning that
+	 * "we don't have GLimp_Init". That reasoning expired when GLimp_Init and
+	 * VKimp_Init stopped calling it too (see sdl_glimp.c): Crash_Init now
+	 * installs Sys_CrashSignal on every path, so there is nothing left for this
+	 * to compensate for.
+	 *
+	 * Keeping it actively hurt. InitSig installs linux_signals.c's handler,
+	 * which writes only a text backtrace — no Crash_WriteReport — so a headless
+	 * crash produced no structured JSON report at all. Measured in the container:
+	 * a SIGSEGV logged "=== CRASH BACKTRACE ===" and left no crash_*.json, while
+	 * the same source on macOS wrote one, purely because the GUI path no longer
+	 * reaches InitSig and this path did. Same overwrite trap as sdl_glimp.c,
+	 * hiding under a different #ifdef. */
 
 	while (1)
 	{
