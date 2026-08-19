@@ -33,7 +33,4 @@ extern glwstate_t glw_state;
 void IN_Init( void );
 void IN_Shutdown( void );
 
-// signals.c
-void InitSig( void );
-
 #endif

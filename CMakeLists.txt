@@ -3386,8 +3386,7 @@ ENDIF()
 IF(UNIX)
 	SET (Q3_SRCS
 		code/unix/unix_main.c
-		code/unix/unix_shared.c
-		code/unix/linux_signals.c)
+		code/unix/unix_shared.c)
 
 	# The window/input/surface backend is SDL3 on every platform (code/sdl).
 	AUX_SOURCE_DIRECTORY(code/sdl WINDOW_SYSTEM_SRCS)

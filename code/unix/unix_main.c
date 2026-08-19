@@ -416,9 +416,9 @@ static void Sys_CrashSignal( int sig, siginfo_t *info, void *ucontext )
 	 * report and no timeline — backwards, since the crashed session is precisely
 	 * the one whose timeline someone needs.
 	 *
-	 * linux_signals.c's handler has this call too, but that handler stopped being
-	 * the installed one when sdl_glimp.c's InitSig() was removed so that
-	 * Sys_InstallCrashHandler could be the single owner (see crash.c). That change
+	 * The old unix handler (deleted in TASK-183) carried this call too, but it
+	 * stopped being the installed one when sdl_glimp.c's InitSig() was removed so
+	 * that Sys_InstallCrashHandler could be the single owner (see crash.c). That change
 	 * gained the structured JSON report and silently lost the breadcrumb flush,
 	 * because the flush lived only in the handler it displaced. Measured: SIGSEGV
 	 * produced a crash report and no wired_playtest.jsonl, with sentry disabled —
@@ -1364,19 +1364,19 @@ int main( int argc, const char* argv[] )
 		}
 	}
 
-	/* InitSig() was called here for the dedicated server, on the reasoning that
-	 * "we don't have GLimp_Init". That reasoning expired when GLimp_Init and
-	 * VKimp_Init stopped calling it too (see sdl_glimp.c): Crash_Init now
-	 * installs Sys_CrashSignal on every path, so there is nothing left for this
-	 * to compensate for.
+	/* A second signal handler used to be installed here for the dedicated
+	 * server, on the reasoning that "we don't have GLimp_Init". It wrote only a
+	 * text backtrace and never called Crash_WriteReport, so it silently
+	 * downgraded every headless crash: measured in the container, a SIGSEGV
+	 * logged "=== CRASH BACKTRACE ===" and left no crash_*.json, while the same
+	 * source on macOS wrote one — purely because the GUI path had already
+	 * stopped installing it and this path had not.
 	 *
-	 * Keeping it actively hurt. InitSig installs linux_signals.c's handler,
-	 * which writes only a text backtrace — no Crash_WriteReport — so a headless
-	 * crash produced no structured JSON report at all. Measured in the container:
-	 * a SIGSEGV logged "=== CRASH BACKTRACE ===" and left no crash_*.json, while
-	 * the same source on macOS wrote one, purely because the GUI path no longer
-	 * reaches InitSig and this path did. Same overwrite trap as sdl_glimp.c,
-	 * hiding under a different #ifdef. */
+	 * Crash_Init -> Sys_InstallCrashHandler is now the single installer on
+	 * every path, and the old handler has been deleted outright (TASK-183)
+	 * rather than left uncalled: a worse crash handler sitting one call away
+	 * from being reinstated is a hazard, not clutter. Both removals happened
+	 * because someone added that call in good faith. */
 
 	while (1)
 	{

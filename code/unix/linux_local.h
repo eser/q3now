@@ -6,14 +6,11 @@
 
 // Unix OS-tier header. The X11 window/input/surface backend has been retired in
 // favour of the SDL3 backend (code/sdl); what remains here is what the OS-tier
-// files (unix_main.c, unix_shared.c, linux_signals.c) share.
+// files (unix_main.c, unix_shared.c) share.
 
 // pumped each frame by unix_main.c's game loop; provided by the SDL backend.
 void IN_Frame (void);
 
 char *strlwr (char *s);
-
-// linux_signals.c
-void InitSig(void);
 
 #endif // __LINUX_LOCAL_H__
