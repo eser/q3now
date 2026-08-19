@@ -2184,6 +2184,17 @@ SET_TESTS_PROPERTIES(cvar_value_contract PROPERTIES
 )
 WIRED_CONFIGURE_HOST_TEST(cvar_value_test cvar_value_contract)
 
+# Same seam, widened: per-input CTest entries plus the boundary families the C
+# contract does not reach — inclusive range ends, huge magnitudes that must not
+# wrap back into range, and nan/inf, which strtof accepts and which defeat every
+# naive min/max comparison once they are in a cvar.
+WIRED_ADD_GTEST(cvar_value_gtest cvar_value
+	"host-only;subsystem;owner.wired-cvars;failure.security-contract;feature.always"
+	SOURCES
+		tests/cvar_value_gtest.cpp
+		code/qcommon/wired/core/cvars/cvar_value.c
+)
+
 # VFS qpaths must reject exact parent-directory components before any handle
 # allocation or host-filesystem call. Compiles the exact production lexical
 # seam used by both qcommon targets; symlink/junction containment is out of scope.
