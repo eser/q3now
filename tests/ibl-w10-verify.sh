@@ -31,7 +31,14 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # .exe made this check resolvable only on Windows.
 PNG2RAW="${PNG2RAW:-$REPO_ROOT/tools/png2raw/png2raw}"
 [ -x "$PNG2RAW" ] || { [ -x "$PNG2RAW.exe" ] && PNG2RAW="$PNG2RAW.exe"; }
-HOME_DIR="$WIRED_HOME"
+# Isolated capture home, NOT the player's: this script writes
+# "set cg_draw2D 0" / "set cg_drawGun 0" into its cfgs, and a clean exit
+# persists those CVAR_ARCHIVE values — which is exactly how a capture run
+# once left the real game with no HUD and no weapon. The restore lines
+# below are kept, but they only help when a run reaches them; an isolated
+# home also covers the run that dies first.
+HOME_DIR="${HOME_DIR:-$( wired_isolated_home ibl-w10-home )}"
+HOME_DIR_NATIVE="$(cygpath -w "$HOME_DIR" 2>/dev/null || echo "$HOME_DIR")"
 BASE_DIR="$HOME_DIR/base"
 SHOT_DIR="$BASE_DIR/screenshots"
 JSONL="$HOME_DIR/qconsole.jsonl"
@@ -45,7 +52,7 @@ mkdir -p "$SHOT_DIR"
 run_game() {
     # $1 = extra engine args after the pinned render setup.
     ( cd "$REPO_ROOT" && make run-game DEV=1 \
-        EXTRA_ARGS="+set r_mode -1 +set r_customwidth $FRAME_W +set r_customheight $FRAME_H +set r_fullscreen 0 +set com_automated 1 +set r_brightness 1 +set r_pinShaderTime 1.0 +set r_hdrAutoExposure 0 +log renderer.shaders info $1" \
+        EXTRA_ARGS="+set fs_homepath \"$HOME_DIR_NATIVE\" +set r_mode -1 +set r_customwidth $FRAME_W +set r_customheight $FRAME_H +set r_fullscreen 0 +set com_automated 1 +set r_brightness 1 +set r_pinShaderTime 1.0 +set r_hdrAutoExposure 0 +log renderer.shaders info $1" \
         >"$WIRED_TMP/ibl-w10-$2.log" 2>&1 || true )
 }
 
@@ -219,7 +226,7 @@ CFG
     # Enable renderer.timing debug so the gpu-avg lines reach the jsonl.
     rm -f "$JSONL"
     ( cd "$REPO_ROOT" && make run-game DEV=1 \
-        EXTRA_ARGS="+set r_mode -1 +set r_customwidth $FRAME_W +set r_customheight $FRAME_H +set r_fullscreen 0 +set com_automated 1 +set r_brightness 1 +set r_pinShaderTime 1.0 +set r_hdrAutoExposure 0 +log renderer.shaders info +log renderer.timing debug +map $MAP +waitForMap +wait 80 +exec w10prof.cfg" \
+        EXTRA_ARGS="+set fs_homepath \"$HOME_DIR_NATIVE\" +set r_mode -1 +set r_customwidth $FRAME_W +set r_customheight $FRAME_H +set r_fullscreen 0 +set com_automated 1 +set r_brightness 1 +set r_pinShaderTime 1.0 +set r_hdrAutoExposure 0 +log renderer.shaders info +log renderer.timing debug +map $MAP +waitForMap +wait 80 +exec w10prof.cfg" \
         >"$WIRED_TMP/ibl-w10-profile.log" 2>&1 || true )
     rm -f "$write"
     echo "== GPU 200f-avg lines (renderer.timing) =="

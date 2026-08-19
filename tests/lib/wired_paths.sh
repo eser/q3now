@@ -190,3 +190,40 @@ wired_find_chrome() {
     done
     return 1
 }
+
+# ── isolated capture homes ──────────────────────────────────────────────────
+# wired_isolated_home <name> — print a scratch fs_homepath with the real paks
+# symlinked into base/, creating it if needed.
+#
+# WHY NO CAPTURE SCRIPT MAY USE THE PLAYER'S HOME
+# A capture harness does two things that are harmless in a scratch directory
+# and destructive in ~/wired/<product>/:
+#
+#   1. It deletes config.cfg before a launch to force a known starting state.
+#      In the player's home that silently erases their settings.
+#   2. It passes CVAR_ARCHIVE cvars (cg_draw2D, cg_drawGun, r_*) as +set. A
+#      CLEAN EXIT WRITES THOSE BACK to config.cfg — so the harness leaves the
+#      game with the HUD and weapon switched off and nothing on screen saying
+#      why. This actually happened, and it is the reason this helper exists.
+#
+# Per-script "restore afterwards" logic does not fix (2): a run that dies
+# before its restore still leaves the player's config altered, and every new
+# capture script has to remember to write that logic correctly. An isolated
+# home makes the hazard structurally unreachable instead of conditionally
+# survivable.
+#
+# The paks are SYMLINKED, not copied: they are ~14 MB each and read-only to
+# the engine, so copying would cost real time per run and add a second, stale
+# copy of the game data that could silently diverge from the built one.
+wired_isolated_home() {
+    local name="${1:-capture}" home f
+    home="$WIRED_TMP/$name"
+    mkdir -p "$home/base" || return 1
+    if [ -d "$WIRED_BASE" ]; then
+        for f in "$WIRED_BASE"/*.sw3z "$WIRED_BASE"/*.pk3; do
+            [ -e "$f" ] || continue
+            ln -sfn "$f" "$home/base/$( basename "$f" )"
+        done
+    fi
+    printf '%s' "$home"
+}
