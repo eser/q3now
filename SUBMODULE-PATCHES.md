@@ -60,11 +60,28 @@ sentry's signal handler saves the previously installed handler in
 `g_previous_handlers` and then terminates via `raise()` without ever calling
 it — so enabling sentry silently disabled ours, and a crash produced only a
 minidump: no JSON crash report, no playtest timeline, and nothing in the log
-saying why. Measured on macOS, Linux and Windows alike. The patch chains to the
-saved handler immediately before `raise()` (there are two exit paths, and both
-needed it), which turns enabling sentry into *adding* a minidump rather than
-trading the other two artefacts away for one. Upstreamable: nothing in it is
-specific to this engine.
+saying why. Measured on macOS, Linux and Windows alike.
+
+sentry has **two** handler paths with the same defect, one per platform family,
+and both are patched:
+
+- POSIX — `g_previous_handlers` is saved by `sigaction` and never called; the
+  handler ends at `raise()`, which with `SIG_DFL` installed terminates the
+  process, so the chain call has to come immediately before it.
+- Windows — `g_previous_filter` is saved by `SetUnhandledExceptionFilter` and
+  only touched again at shutdown. Returning `EXCEPTION_CONTINUE_SEARCH` is *not*
+  equivalent to calling it: that API holds a single slot rather than a chain, so
+  whoever installs last replaces the previous filter outright and
+  `CONTINUE_SEARCH` proceeds to the system default instead. The displaced filter
+  runs only if called explicitly, and its verdict is returned to the caller
+  because a filter answering `EXCEPTION_EXECUTE_HANDLER` intends to shut the
+  process down its own way.
+
+In both, the double-fault early exit deliberately does *not* chain — a handler
+is already running there. Together they turn enabling sentry into *adding* a
+minidump rather than trading the other two artefacts away for one.
+
+Upstreamable: nothing in it is specific to this engine.
 
 Behaviour:
 

@@ -1,5 +1,5 @@
 diff --git a/src/backends/native/sentry_crash_handler.c b/src/backends/native/sentry_crash_handler.c
-index 8807621d..b6706c6d 100644
+index 8807621d..ed6600db 100644
 --- a/src/backends/native/sentry_crash_handler.c
 +++ b/src/backends/native/sentry_crash_handler.c
 @@ -240,6 +240,43 @@ safe_build_stack_path(
@@ -69,3 +69,63 @@ index 8807621d..b6706c6d 100644
      raise(signum);
  }
  
+@@ -771,6 +815,33 @@ sentry__crash_handler_shutdown(void)
+ static sentry_crash_ipc_t *g_crash_ipc = NULL;
+ static LPTOP_LEVEL_EXCEPTION_FILTER g_previous_filter = NULL;
+ 
++/**
++ * Chain to the filter that was installed before us.
++ *
++ * The Windows twin of chain_previous_handler above, and it exists for the same
++ * reason: g_previous_filter is saved at install time and otherwise only touched
++ * at shutdown, so an embedder's own filter is recorded and never invoked.
++ *
++ * Returning EXCEPTION_CONTINUE_SEARCH is NOT equivalent to calling it.
++ * SetUnhandledExceptionFilter holds a SINGLE slot rather than a chain: whoever
++ * installs last replaces the previous filter outright, and CONTINUE_SEARCH
++ * proceeds to the system default, not to the filter that was displaced. So the
++ * only way the earlier filter runs is to call it explicitly.
++ *
++ * The previous filter's verdict is returned to the caller, because that verdict
++ * is a decision about the process: a filter answering EXCEPTION_EXECUTE_HANDLER
++ * intends to handle the fault and shut down in its own way, and discarding that
++ * in favour of CONTINUE_SEARCH would override it.
++ */
++static LONG
++chain_previous_filter(EXCEPTION_POINTERS *exception_info)
++{
++    if (g_previous_filter == NULL) {
++        return EXCEPTION_CONTINUE_SEARCH;
++    }
++    return g_previous_filter(exception_info);
++}
++
+ /**
+  * Windows exception filter (crash handler)
+  */
+@@ -786,8 +857,10 @@ crash_exception_filter(EXCEPTION_POINTERS *exception_info)
+ 
+     sentry_crash_ipc_t *ipc = g_crash_ipc;
+     if (!ipc || !ipc->shmem) {
+-        // No IPC or shared memory (no logging - exception filter context)
+-        return EXCEPTION_CONTINUE_SEARCH;
++        // No IPC or shared memory: nothing of ours will be written, so the
++        // previously installed filter is the only thing that can still produce
++        // evidence (no logging - exception filter context).
++        return chain_previous_filter(exception_info);
+     }
+ 
+     sentry_crash_context_t *ctx = ipc->shmem;
+@@ -851,8 +924,10 @@ crash_exception_filter(EXCEPTION_POINTERS *exception_info)
+         // Timeout or completion (no logging - exception filter context)
+     }
+ 
+-    // Continue to default handler (which will terminate the process)
+-    return EXCEPTION_CONTINUE_SEARCH;
++    // Our dump work is done; give the previously installed filter its turn
++    // before the process dies, so an embedder's own crash artefacts are still
++    // produced alongside the minidump rather than instead of it.
++    return chain_previous_filter(exception_info);
+ }
+ 
+ int
