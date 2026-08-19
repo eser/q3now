@@ -188,8 +188,37 @@ void UserVM_Init( void ) {
 
     s_L = lua_newstate( uvm_alloc, &s_allocCtx );
     if ( !s_L ) {
-        Com_Terminate( TERM_UNRECOVERABLE, "UserVM_Init: lua_newstate failed (memory cap %zu MB)",
-                   memLimit / ( 1024u * 1024u ) );
+        /* Do NOT blame the budget. A NULL here almost never means the cap was
+         * exhausted: nothing has been allocated yet, so uvm_alloc would have to
+         * reject the very first request for that to be the cause. The old
+         * message named the cap and sent debugging at a number that was never
+         * involved.
+         *
+         * lua_newstate returns NULL for several unrelated reasons and reports
+         * none of them — LuaJIT's own source says as much about the PRNG path:
+         * "Can only return NULL here, so this errors with 'not enough memory'"
+         * (lj_state.c). So the honest message is the list of candidates.
+         *
+         * OBSERVED: fails on linux/aarch64 in a container, succeeds on macOS
+         * arm64, same commit. Two hypotheses were tested against that and BOTH
+         * were disproved — recorded so nobody re-runs them:
+         *   - "custom allocator needs low 32-bit addresses (LJ_64 && !LJ_GC64)":
+         *     no. lj_arch.h sets LJ_TARGET_GC64=1 for arm64, so LJ_GC64 is
+         *     always on there and that constraint never applies.
+         *   - "secure PRNG seeding fails in the sandbox": no. /dev/urandom reads
+         *     fine inside the container, and lj_prng.c falls back to it when
+         *     SYS_getrandom is unavailable.
+         * Note also that the engine's OTHER Lua state — created moments earlier
+         * with LuaJIT's internal allocator — initialises fine in the same
+         * process, so whatever this is, it is specific to passing a custom
+         * allocator on that platform. See TASK-181. */
+        Com_Terminate( TERM_UNRECOVERABLE,
+            "UserVM_Init: lua_newstate returned NULL. The %zu MB budget is almost "
+            "certainly NOT the cause - nothing had been allocated yet. Known to "
+            "happen on linux/aarch64 while working on macOS arm64 with the same "
+            "source. Root cause still open (see TASK-181); GC64 address limits "
+            "and PRNG seeding have both been ruled out.",
+            memLimit / ( 1024u * 1024u ) );
         return;
     }
 

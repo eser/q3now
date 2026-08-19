@@ -99,10 +99,28 @@ RUN ARCH=$(uname -m) && \
 # Go archiver in tools/sw3z-archiver. BUILD_DIR must match what the cmake step
 # above used, so the Makefile writes the pak where the runtime stage looks for it.
 #
-# The explicit test is the point: it converts "the pak silently did not appear"
-# into a build failure, here, instead of a runtime failure in the operator's
-# terminal.
-RUN make create-packs BUILD_DIR=build DEV=0 \
+# The pak is packed by the Go archiver in tools/sw3z-archiver, driven from the
+# Makefile — there is no CMake target for it, which is why the cmake step above
+# cannot produce it and why this step exists at all.
+#
+# `create-packs` is NOT used, even though it is the named entry point: it depends
+# on the `build` target, which configures and compiles the entire tree including
+# the CTest executables. This image needs none of them and cannot link them —
+# the first attempt died on vk_temporal_main_activation_test. Naming the pak file
+# target instead reaches the same rule while skipping the engine graph; its own
+# prerequisites are just the WASM modules the cmake step already built, modfiles/
+# and the archiver, so it still repacks whenever those change.
+#
+# The runtime stage copies build/Release/base/, which is where MODULE_DIR
+# (=$(BUILD_DIR)/$(BUILD_CFG)/base) puts things for this Release configuration;
+# the pak lands one level up in build/base/, hence the explicit copy.
+#
+# The test is the point: it converts "the pak silently did not appear" into a
+# build failure here rather than a runtime failure in the operator's terminal.
+# The original omission was invisible precisely because nothing checked — COPY of
+# a non-existent directory is not an error in Docker, so the image published fine
+# and every run then died with "Couldn't load default.cfg".
+RUN make build/base/pax21.sw3z BUILD_DIR=build DEV=0 \
     && test -f build/base/pax21.sw3z \
     && mkdir -p build/Release/base \
     && cp build/base/pax21.sw3z build/Release/base/
