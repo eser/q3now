@@ -52,16 +52,6 @@ PNG2RAW="${PNG2RAW:-$REPO_ROOT/tools/png2raw/png2raw}"
 PERTURB="${PERTURB:-$REPO_ROOT/tools/png-perturb/png-perturb}"
 [ -x "$PERTURB" ] || { [ -x "$PERTURB.exe" ] && PERTURB="$PERTURB.exe"; }
 
-# Isolated home (matches smoke-map-transition: paks present, config wiped per launch).
-# The engine-free self-test never launches/captures, so it only needs a writable temp.
-#
-# Capture modes need a home that actually HAS the paks, and that location is
-# platform-derived — never a literal. tests/lib/wired_paths.sh owns that derivation
-# (see its header: ~14 scripts each invented their own answer and most baked in one
-# developer's MSYS layout, which broke every non-Windows run). This script used to
-# default to /c/msys64/tmp/fp-verify-home, which on a non-Windows host is simply an
-# empty directory: the engine launches, finds no pak, and every capture comes back
-# black — indistinguishable from a real rendering defect.
 # shellcheck source=lib/wired_paths.sh
 . "$SCRIPT_DIR/lib/wired_paths.sh"
 
@@ -71,16 +61,50 @@ PERTURB="${PERTURB:-$REPO_ROOT/tools/png-perturb/png-perturb}"
 # concurrent runs.
 VRF_TMP="${VRF_TMP:-$WIRED_TMP}"
 
+# ── The capture home is ISOLATED, and must stay that way ────────────────────
+# capture_fixed_cam deletes config.cfg before every launch so each capture starts
+# from a known state, and the capture recipes pass CVAR_ARCHIVE cvars (cg_draw2D,
+# cg_drawGun, …) which a clean exit WRITES BACK into config.cfg. Both behaviours
+# are fine in a scratch home and destructive in the player's: pointing this at
+# ~/wired/<product>/ deletes the player's settings on every run and leaves the HUD
+# and weapon switched off afterwards, with nothing on screen to say why.
+#
+# So the home is under the system temp dir. It still needs the paks, which live in
+# the real home — those are SYMLINKED, never copied: a copy is a second stale
+# artifact to keep in sync, and hand-assembling a run out of copied paks is exactly
+# the failure mode the engine's own path derivation exists to prevent.
+vrf_link_paks() {
+    local home="$1" real="$WIRED_BASE" f
+    mkdir -p "$home/base" || return 1
+    [ -d "$real" ] || return 0
+    for f in "$real"/*.sw3z "$real"/*.pk3; do
+        [ -e "$f" ] || continue
+        ln -sfn "$f" "$home/base/$( basename "$f" )"
+    done
+}
+
 if [ "$MODE" = "selftest" ]; then
+    # The engine-free self-test never launches or captures; it only needs a
+    # writable scratch dir.
     SMOKE_HOME="${SMOKE_HOME:-$WIRED_TMP/vrf-selftest-home}"
 else
-    SMOKE_HOME="${SMOKE_HOME:-$WIRED_HOME}"
+    SMOKE_HOME="${SMOKE_HOME:-$WIRED_TMP/vrf-home}"
+    vrf_link_paks "$SMOKE_HOME"
 fi
 SMOKE_HOME_NATIVE="$(cygpath -w "$SMOKE_HOME" 2>/dev/null || echo "$SMOKE_HOME")"
 SHOTDIR="$SMOKE_HOME/base/screenshots"
 mkdir -p "$SHOTDIR"
 ENGINE_DIR="$(cd "$(dirname "$ENGINE")" && pwd)"
-ENGINE_BIN="./$(basename "$ENGINE")"
+# ABSOLUTE, not "./<name>". On macOS the engine locates its .app bundle — and so
+# its Resources/base paks, which hold default.cfg — from argv[0], and only the
+# RELEASE build repairs a relative launch via _NSGetExecutablePath; the debug build
+# keeps argv[0] verbatim on purpose, for symlinked dev setups (code/unix/unix_main.c
+# "Sys_BinName contract"). So "cd Contents/MacOS && ./wired.arm64" leaves
+# dirname(argv[0]) == "." under a debug binary, no install paks load, and boot dies
+# on "Couldn't load default.cfg" — which reads like missing game data rather than a
+# launch-form problem. The cd stays: the engine still resolves other paths relative
+# to its own directory.
+ENGINE_BIN="$ENGINE_DIR/$(basename "$ENGINE")"
 
 # Optional extra settle frames injected right before +screenshot. Empty by default so
 # the gtao/fwdplus/viewport/shadow_atest recipes (and their blessed goldens) are byte-
@@ -1844,6 +1868,13 @@ entity-occlusion)
     # Cheats are required for r_drawWorld; g_gametype 6 (1FCTF) is what spawns the
     # neutral flag at all. cg_draw2D/cg_drawGun off so no HUD element can counterfeit
     # a "present" tile — the crosshair sits dead center, exactly where the model is.
+    #
+    # cg_draw2D and cg_drawGun are CVAR_ARCHIVE (cg_main.c:242,249), so passing them
+    # as "+set" is NOT confined to the run: a clean exit writes them into the
+    # player's config.cfg and the game stays that way afterwards — HUD and weapon
+    # gone, with nothing to point at why. A harness must leave the game configured
+    # as it found it, so the values are restored on the way out below. (This is the
+    # same hazard tests/visual/scripts/capture_v2_impl.sh already documents.)
     EO_COMMON="+set sv_cheats 1 +set g_gametype 6 +set cg_draw2D 0 +set cg_drawGun 0"
     # `viewpos` (CG_Viewpos_f) logs the ACHIEVED camera origin at INFO on the cgame
     # channel; see the camera assertion below for why this is not optional.
