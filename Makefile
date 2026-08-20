@@ -1406,6 +1406,15 @@ test-ral-profile-markers-self:
 
 .PHONY: test-ral-profile-markers test-ral-profile-markers-self
 
+test-ral-profile-renderdoc:
+	@test -n "$${WIRED}" || { echo "usage: make test-ral-profile-renderdoc WIRED=/absolute/path/to/wired"; exit 64; }
+	@bash tests/ral-profile-renderdoc-check.sh "$${WIRED}"
+
+test-ral-profile-renderdoc-self:
+	@bash tests/ral-profile-renderdoc-check.sh --self-test
+
+.PHONY: test-ral-profile-renderdoc test-ral-profile-renderdoc-self
+
 test-ral-profile-layout:
 	@test -n "$${WIRED}" || { echo "usage: make test-ral-profile-layout WIRED=/absolute/path/to/wired"; exit 64; }
 	@bash tests/ral-profile-layout-check.sh "$${WIRED}"
