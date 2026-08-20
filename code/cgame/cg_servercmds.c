@@ -190,6 +190,19 @@ void CG_ParseServerinfo( void ) {
 	info = CG_ConfigString( CS_SERVERINFO );
 	cgs.gametype = atoi( Info_ValueForKey( info, "g_gametype" ) );
 	cgs.gametypeIsTeamGame = BG_IsTeamGametype( cgs.gametype );
+
+	/* Publish the team-game flag where the menus can read it.
+	 *
+	 * Menus need this to gate team-only controls, and the local g_gametype cvar
+	 * cannot serve: on a pure remote-connect client it is whatever the player
+	 * last hosted with, so a menu gating on it would act on a stale value. The
+	 * authoritative answer arrives here, in CS_SERVERINFO, for host and remote
+	 * client alike — so it is published from here, and re-published on every
+	 * serverinfo change (gametype can switch between maps).
+	 *
+	 * ui_isTeamGame is menu-readable via `enableCvar`; see ingame.wui, which
+	 * documented this exact gap and deferred the gating until it was filled. */
+	trap_Cvar_Set( "ui_isTeamGame", cgs.gametypeIsTeamGame ? "1" : "0" );
 	cgs.gameflags = atoi( Info_ValueForKey( info, "g_gameflags" ) );
 	cgs.noFootsteps = atoi( Info_ValueForKey( info, "g_noFootsteps" ) );
 	cgs.kothGhosts = atoi( Info_ValueForKey( info, "g_kothGhosts" ) );
