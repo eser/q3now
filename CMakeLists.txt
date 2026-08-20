@@ -470,6 +470,18 @@ SET_TESTS_PROPERTIES(shell_portability_contract PROPERTIES
 	TIMEOUT 60
 )
 
+# The analyzer half of the independent-tool marker receipt. The live capture
+# needs a RenderDoc host (Windows/Linux — RenderDoc has no macOS build), but the
+# parsing contract is platform-free, so it runs everywhere and keeps the readout
+# schema honest even on machines that can never take the capture.
+ADD_TEST(NAME ral_profile_renderdoc_analyzer_contract
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/ral-profile-renderdoc-check.sh --self-test
+)
+SET_TESTS_PROPERTIES(ral_profile_renderdoc_analyzer_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.tools;failure.contract;feature.always"
+	TIMEOUT 120
+)
+
 ADD_TEST(NAME headless_map_transition_analyzer_contract
 	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/headless-map-transition-zonecheck.sh
 		--self-test
