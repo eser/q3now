@@ -1976,6 +1976,92 @@ entity-occlusion)
     exit $rc
     ;;
 
+particles)
+    # ── Do GPU particles reach the screen at all? ─────────────────────────────
+    # The narrow question first, because everything else about the particle
+    # system assumes it: an effect that emits, integrates and never rasterises
+    # looks exactly like an effect that was never emitted. The GPU path is
+    # emit-and-forget, so there is no CPU-side list to inspect and no count to
+    # print — the frame IS the evidence.
+    #
+    # The A/B is the same shape entity-occlusion uses, and for the same reason:
+    # one capture proves nothing. A frame with particles is also a frame with a
+    # world in it, so "the frame is not empty" is satisfied by the world alone.
+    # The measurement therefore compares two captures from an IDENTICAL camera
+    # that differ ONLY in whether particles draw:
+    #
+    #   r_particles 1  →  world + particles
+    #   r_particles 0  →  world alone
+    #
+    # Tiles that move between them are tiles the particles painted. If the
+    # emitter, the compute pass or the vertex path is broken, the two frames
+    # collapse to the same image and the diff falls under the floor.
+    #
+    # This is a REGRESSION GATE for visibility, not a check on what the
+    # particles look like. Shape, curve authoring and colour are the contract
+    # test's job (tests/particle_curve_test.c) — pixels cannot tell an ease-out
+    # from a linear ramp without a golden, and a golden here would fail on
+    # unrelated renderer changes.
+    PT_MAP="${PT_MAP:-arena7}"
+    PT_POS="${PT_POS:-0 0 100 0}"
+    # How much a tile must move between particles-on and particles-off before it
+    # counts as painted. Sized above frame-to-frame noise on a pinned-time
+    # capture, which is near zero, but not so low that dither or a stray sky
+    # gradient registers.
+    PT_DIFF_MIN="${PT_DIFF_MIN:-3.0}"
+    # How many tiles must move. One tile could be almost anything; a trail or a
+    # burst covers several. Low enough that a modest effect still passes.
+    PT_TILES_MIN="${PT_TILES_MIN:-3}"
+    rc=0
+
+    echo "==> particles: $PT_MAP @ $PT_POS"
+
+    # Fire a rocket and let the trail develop before the shot. The rocket is the
+    # densest stock particle producer, so it is the strongest available signal
+    # that the whole chain works; a weaker emitter would make a null result
+    # ambiguous.
+    #
+    # cg_draw2D/cg_drawGun off so no HUD element can counterfeit a moved tile —
+    # the crosshair and the weapon model both sit where the trail will be. These
+    # are CVAR_ARCHIVE and a clean exit persists them, which is why the isolated
+    # capture home exists; see capture_fixed_cam.
+    PT_COMMON="+set sv_cheats 1 +set cg_draw2D 0 +set cg_drawGun 0"
+    # Fired through CAP_POST_CMD because +attack is a GAME command: it must be
+    # forwarded to the server after the map is live, not handed to the engine as
+    # a startup token (see the CAP_POST_CMD note above). `give weapon` first, so
+    # the shot does not depend on what the spawn happens to hand out.
+    #
+    # r_pinFrameTime freezes the clock, so the trail cannot develop over real
+    # time — the shot captures whatever the emit itself produced. That is
+    # sufficient for a visibility gate and it keeps the capture deterministic,
+    # which a wait-then-shoot would not be.
+    CAP_POST_CMD="give weapon 5; +attack; wait 10; -attack"
+
+    capture_fixed_cam "$PT_MAP" "$PT_POS" "particles_on" \
+        $PT_COMMON "+set r_particles 1" || rc=1
+    capture_fixed_cam "$PT_MAP" "$PT_POS" "particles_off" \
+        $PT_COMMON "+set r_particles 0" || rc=1
+
+    on="$SHOTDIR/vrf_particles_on.png"
+    off="$SHOTDIR/vrf_particles_off.png"
+
+    if [ ! -s "$on" ] || [ ! -s "$off" ]; then
+        echo "FAIL: capture produced no frame (on=$on off=$off)"
+        rc=1
+    else
+        moved=$( paste -d ' ' <( tile_means "$on" ) <( tile_means "$off" ) \
+            | awk -v tol="$PT_DIFF_MIN" '{ d=$2-$4; if(d<0)d=-d; if(d>=tol) n++ } END{ print n+0 }' )
+        echo "    tiles moved by particles: $moved (need >= $PT_TILES_MIN)"
+        if [ "$moved" -lt "$PT_TILES_MIN" ]; then
+            echo "FAIL: particles painted nothing the world does not already paint"
+            rc=1
+        fi
+    fi
+
+    if [ "$rc" -eq 0 ]; then echo "==> PARTICLES PASS"; else echo "==> PARTICLES FAIL"; fi
+    exit $rc
+    ;;
+
 *) echo "FAIL: unknown mode '$MODE'" >&2; exit 2;;
 esac
 
