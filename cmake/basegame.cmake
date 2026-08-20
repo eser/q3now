@@ -46,6 +46,10 @@ set(CGAME_SOURCES
     # engine/RAL/VM dep); the scene POD ships in via trap, cgame runs Eval locally.
     ${SOURCE_DIR}/qcommon/wired/scene/wired_scene_eval.c
     ${SOURCE_DIR}/qcommon/wired/math/wired_curve.c
+    # particle curve table + parm evaluator: pure plain-C, split out of the
+    # cgame registry so a contract test can compile the exact production
+    # code without stubbing cg_local.h.
+    ${SOURCE_DIR}/qcommon/wired/render/particle_curve.c
 )
 
 set(CGAME_BINARY_SOURCES ${SOURCE_DIR}/cgame/cg_syscalls.c)

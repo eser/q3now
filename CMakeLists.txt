@@ -2231,6 +2231,20 @@ WIRED_ADD_GTEST(cmd_gtest cmd
 # VFS qpaths must reject exact parent-directory components before any handle
 # allocation or host-filesystem call. Compiles the exact production lexical
 # seam used by both qcommon targets; symlink/junction containment is out of scope.
+# Particle curve table + parameter evaluator. Compiles the exact production
+# TU: particle_curve.c is deliberately pure (no cgame, no traps, no cvars) so
+# this test needs no stubs — the alternative would be reaching into
+# cg_local.h and stubbing the cgame surface to test two functions.
+ADD_EXECUTABLE(particle_curve_test
+	tests/particle_curve_test.c
+	code/qcommon/wired/render/particle_curve.c
+)
+ADD_TEST(NAME particle_curve_contract COMMAND particle_curve_test)
+SET_TESTS_PROPERTIES(particle_curve_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30
+)
+
 ADD_EXECUTABLE(fs_qpath_test
 	tests/fs_qpath_test.c
 	code/qcommon/wired/core/vfs/fs_qpath.c
