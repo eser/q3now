@@ -1,0 +1,25 @@
+diff --git a/src/modulefinder/sentry_modulefinder_windows.c b/src/modulefinder/sentry_modulefinder_windows.c
+index ea3d8200..b1a0ef1b 100644
+--- a/src/modulefinder/sentry_modulefinder_windows.c
++++ b/src/modulefinder/sentry_modulefinder_windows.c
+@@ -8,8 +8,18 @@
+ #    include <dbghelp.h>
+ #endif
+ #define PSAPI_VERSION 2
+-#include <Psapi.h>
+-#include <TlHelp32.h>
++/* Lower-case, so this resolves under MinGW as well as MSVC.
++ *
++ * MSVC's filesystem is case-insensitive and its SDK ships "Psapi.h", so the
++ * capitalised spelling works there and only there. MinGW's headers are
++ * lower-case and its lookup is case-sensitive, so a cross build fails with
++ * "fatal error: 'Psapi.h' file not found" — which is exactly what the
++ * llvm-mingw CI job hit the moment sentry started building by default.
++ *
++ * The lower-case spelling resolves under BOTH: MSVC does not care. There is no
++ * trade here, only a spelling that is portable and one that is not. */
++#include <psapi.h>
++#include <tlhelp32.h>
+ 
+ static bool g_initialized = false;
+ static sentry_mutex_t g_mutex = SENTRY__MUTEX_INIT;
