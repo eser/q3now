@@ -2239,6 +2239,9 @@ ADD_EXECUTABLE(particle_curve_test
 	tests/particle_curve_test.c
 	code/qcommon/wired/render/particle_curve.c
 )
+TARGET_COMPILE_DEFINITIONS(particle_curve_test PRIVATE
+	SHADER_DIR="${CMAKE_SOURCE_DIR}/code/renderervk/shaders"
+)
 ADD_TEST(NAME particle_curve_contract COMMAND particle_curve_test)
 SET_TESTS_PROPERTIES(particle_curve_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.renderer;failure.contract;feature.always"

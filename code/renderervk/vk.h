@@ -1225,14 +1225,14 @@ _Static_assert( sizeof( VkPrimitiveStageGPU ) == VK_PRIMITIVE_STAGE_BYTES,
 // itself (buffers / pipelines / descriptor sets / cursors) lives as
 // the `vk.particle` member inside Vk_Instance below.
 //
-// PARTICLE_BYTES (64) and PARTICLE_CLASS_GPU_BYTES (400) are the
+// PARTICLE_BYTES (64) and PARTICLE_CLASS_GPU_BYTES (736) are the
 // std430 sizes computed for the matching GLSL structs in
 // particle_integrate.comp / particle.vert. PARTICLES_PER_POOL is the
 // fixed pool capacity. _Static_assert in vk_init_particle catches
 // any drift between this C layout and the std430 stride.
 #define PARTICLES_PER_POOL          16384u
 #define PARTICLE_BYTES                 64u  // sizeof(GPU Particle), std430
-#define PARTICLE_CLASS_GPU_BYTES      480u  // sizeof(ParticleClassGPU), std430
+#define PARTICLE_CLASS_GPU_BYTES      736u  // sizeof(ParticleClassGPU), std430
 
 // Host-side mirror of GLSL std430 ParticleClassGPU. Field order +
 // trailing pads MUST exactly match particle_integrate.comp /
@@ -1248,6 +1248,34 @@ _Static_assert( sizeof( VkPrimitiveStageGPU ) == VK_PRIMITIVE_STAGE_BYTES,
 // underlying shader script's blendFunc, matching CPU rendering
 // semantics. The cgame `renderFlags` field still ships through but
 // is informational only; see primitives.h.
+// Host-side mirror of GLSL std430 ParticleParm. 32 B / 2 vec4 — the trailing
+// pads exist to make that exact, so the struct can be embedded in an array
+// without std430 introducing stride surprises.
+//
+// Mirrors particleParm_t in qcommon/wired/render/particle_class.h field for
+// field; the two are copied member-wise in RE_RegisterParticleClass rather
+// than memcpy'd, because the host type uses int/float and this one must be
+// explicit about which lanes the shader reads.
+typedef struct {
+	int32_t  calc;       // particleParmCalc_t
+	int32_t  hasCurve;   // 0 = samples[] unused; 1 = samples[] carries a shape
+	float    val0;
+	float    val1;
+	float    variance;
+	float    parmPad0;
+	float    parmPad1;
+	float    parmPad2;
+	// The curve RESOLVED at registration, not an index into a second buffer.
+	//
+	// Curves are shared on the HOST — CG_RegisterParticleCurve dedups by
+	// name, so editing one reaches every class built on it — but the GPU
+	// receives a flattened copy. That trade is deliberate: an index would
+	// need a second SSBO binding and an indirection per evaluation, on the
+	// hot path, to save 2 KB. Resolving at upload costs 32 B per parm and
+	// nothing per particle.
+	float    samples[8]; // PARTICLE_CURVE_SAMPLES
+} particleParmGPU_t;
+
 typedef struct {
 	uint32_t shader;
 	uint32_t renderFlags;
@@ -1293,7 +1321,20 @@ typedef struct {
 	uint32_t frameCount;             // 464..467
 	uint32_t frameBlend;             // 468..471
 	uint32_t framePad0;              // 472..475
-	uint32_t framePad1;              // 476..479; total stride 480 B (= 30 * vec4)
+	uint32_t framePad1;              // 476..479; ends the 480 B (= 30 * vec4) block
+	// Curve-valued parameters. Appended at the end like every extension
+	// before them, so all prior offsets stay byte-identical. Each mirrors a
+	// particleParm_t and is 32 B (2 * vec4) by construction — the host struct
+	// carries explicit padding for exactly this reason, so no per-field
+	// std430 alignment rules are needed here.
+	//
+	// A parm whose calc is PARM_CONSTANT with val0 == 0 was never authored;
+	// the shader falls back to the scalar field it overrides. That is what
+	// keeps every pre-curve class rendering bit-identically.
+	particleParmGPU_t sizeParm;      // 480..543
+	particleParmGPU_t alphaParm;     // 544..607
+	particleParmGPU_t dragParm;      // 608..671
+	particleParmGPU_t gravityParm;   // 672..735; total stride 736 B (= 46 * vec4)
 } particleClassGPU_t;
 
 // Host-side mirror of GLSL std430 Particle (per-particle pool slot).

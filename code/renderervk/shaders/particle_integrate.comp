@@ -42,6 +42,59 @@ struct Particle {
 	uint  pad5;
 };
 
+struct ParticleParm {
+	int   calc;       // 0=CONSTANT 1=LINEAR 2=CURVE 3=CURVE_TIMES_LINEAR
+	int   hasCurve;   // 0 = samples[] unused
+	float val0;
+	float val1;
+	float variance;
+	float parmPad0;
+	float parmPad1;
+	float parmPad2;
+	float samples[8]; // PARTICLE_CURVE_SAMPLES; resolved host-side
+};
+
+// Evaluate a parm at a normalised lifetime fraction. Mirrors
+// ParticleParm_Eval in qcommon/wired/render/particle_curve.c — the two are
+// pinned against each other by tests/particle_curve_test.c, because a
+// divergence here renders something other than what was authored without
+// ever failing loudly.
+float parmSampleCurve( ParticleParm p, float fraction ) {
+	if ( p.hasCurve == 0 )
+		return 1.0;                       // neutral, never a zeroing surprise
+	if ( fraction <= 0.0 ) return p.samples[0];
+	if ( fraction >= 1.0 ) return p.samples[7];
+	// Samples span 0..1 INCLUSIVE, so the last sample sits AT fraction 1 and
+	// the span is (N-1) intervals. Using N here shifts every curve slightly.
+	float pos  = fraction * 7.0;
+	int   i0   = int( pos );
+	int   i1   = min( i0 + 1, 7 );
+	float frac = pos - float( i0 );
+	return mix( p.samples[i0], p.samples[i1], frac );
+}
+
+float parmEval( ParticleParm p, float fraction, float jitterPick ) {
+	fraction = clamp( fraction, 0.0, 1.0 );
+	float base;
+	if ( p.calc == 1 ) {                  // LINEAR
+		base = mix( p.val0, p.val1, fraction );
+	} else if ( p.calc == 2 ) {           // CURVE
+		base = mix( p.val0, p.val1, parmSampleCurve( p, fraction ) );
+	} else if ( p.calc == 3 ) {           // CURVE_TIMES_LINEAR
+		base = parmSampleCurve( p, fraction ) * mix( p.val0, p.val1, fraction );
+	} else {                              // CONSTANT
+		base = p.val0;
+	}
+	return base + p.variance * jitterPick;
+}
+
+// A parm that was never authored: constant zero. Callers fall back to the
+// scalar field it overrides, which is what keeps pre-curve classes
+// rendering bit-identically.
+bool parmIsUnset( ParticleParm p ) {
+	return p.calc == 0 && p.val0 == 0.0;
+}
+
 struct ParticleClassGPU {
 	uint  shader;
 	uint  renderFlags;
@@ -83,6 +136,14 @@ struct ParticleClassGPU {
 	uint  frameBlend;
 	uint  framePad0;
 	uint  framePad1;
+	// Curve-valued parameters — mirrors particleClassGPU_t. A parm with
+	// calc==0 and val0==0 was never authored; the reader falls back to the
+	// scalar field it overrides, which is what keeps pre-curve classes
+	// rendering bit-identically.
+	ParticleParm sizeParm;
+	ParticleParm alphaParm;
+	ParticleParm dragParm;
+	ParticleParm gravityParm;
 };
 
 layout(set = 0, binding = 0) uniform ParticleFrame {
@@ -150,8 +211,24 @@ void main() {
 	ParticleClassGPU c = classes[p.classHandle - 1u];
 
 	// Integrate. Q3 world is z-up; gravity acts along -Z.
-	p.vel.z += -WORLD_GRAVITY * c.gravityScale * dt;
-	p.vel   *= exp(-c.drag * dt);
+	//
+	// gravityParm / dragParm, when authored, replace the constants. Both are
+	// evaluated at the particle's CURRENT age, so they vary as it lives —
+	// "heavy at first, then float", "slow abruptly at the end" — which a
+	// single constant cannot express at all.
+	//
+	// Unauthored parms take the fallback branch and the arithmetic is
+	// byte-identical to what it was, so classes that never opt in are not
+	// merely visually unchanged: they execute the same instructions.
+	float gScale = parmIsUnset(c.gravityParm)
+	             ? c.gravityScale
+	             : parmEval(c.gravityParm, p.age, p.sizeJitterPick);
+	float dragV  = parmIsUnset(c.dragParm)
+	             ? c.drag
+	             : parmEval(c.dragParm, p.age, p.sizeJitterPick);
+
+	p.vel.z += -WORLD_GRAVITY * gScale * dt;
+	p.vel   *= exp(-dragV * dt);
 	p.pos   += p.vel * dt;
 	p.age   += dt * p.lifetimeInv;
 

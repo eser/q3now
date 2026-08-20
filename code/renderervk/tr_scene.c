@@ -1076,6 +1076,27 @@ qboolean RE_GetLensVisibility( int id, float *outVis ) {
 	return qtrue;
 }
 
+/* One place that spells out the parm field mapping. A loop over an array of
+   parms would be shorter but would lose the compile-time check that both
+   structs still have these exact members. */
+#define COPY_PARM( d, srcParm ) \
+	do { \
+		int cI; \
+		(d).calc     = (int32_t)(srcParm).calc; \
+		(d).val0     = (srcParm).val0; \
+		(d).val1     = (srcParm).val1; \
+		(d).variance = (srcParm).variance; \
+		(d).parmPad0 = 0.0f; \
+		(d).parmPad1 = 0.0f; \
+		(d).parmPad2 = 0.0f; \
+		/* Samples arrive already resolved: the curve table lives on the \
+		   authoring side, and what crosses the boundary is a flat copy. The \
+		   renderer therefore needs no knowledge of curve names or indices. */ \
+		(d).hasCurve = (int32_t)(srcParm).hasCurve; \
+		for ( cI = 0; cI < PARTICLE_CURVE_SAMPLES; cI++ ) \
+			(d).samples[cI] = (srcParm).samples[cI]; \
+	} while ( 0 )
+
 void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass_t *cls ) {
 	particleClassGPU_t *gpuClasses;
 	particleClassGPU_t *dst;
@@ -1156,6 +1177,23 @@ void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass
 	// inert and the single-shader path byte-identical.
 	dst->frameCount = ( cls->frameCount > 1 ) ? (uint32_t)cls->frameCount : 0u;
 	dst->frameBlend = ( cls->frameBlend != 0 ) ? 1u : 0u;
+
+	// ── Curve-valued parameters.
+	//
+	// Copied member-wise rather than memcpy'd: the host type is
+	// particleParm_t (int/float) and this one is explicit about which
+	// lanes the shader reads, so a silent type or ordering change on
+	// either side should be a compile error, not a garbled parm.
+	//
+	// No validation of `curve` here. An out-of-range index is handled
+	// GPU-side by returning a neutral 1.0 sample, so a class referencing
+	// a curve that failed to register still draws — degraded, not blank.
+	// Rejecting it here would instead make the whole class silently
+	// constant, which is harder to notice.
+	COPY_PARM( dst->sizeParm,    cls->sizeParm );
+	COPY_PARM( dst->alphaParm,   cls->alphaParm );
+	COPY_PARM( dst->dragParm,    cls->dragParm );
+	COPY_PARM( dst->gravityParm, cls->gravityParm );
 
 	// ── Resolve class shader → image, write to sampler array.
 	//

@@ -113,16 +113,30 @@ typedef enum {
 
 typedef struct {
 	int     calc;           // particleParmCalc_t
-	int     curve;          // index into the shared curve table; 0 = none
+	int     hasCurve;       // 0 = samples[] unused; 1 = samples[] is authored
 	float   val0;           // constant value, or range start
 	float   val1;           // range end (unused by PARM_CONSTANT)
 	float   variance;       // symmetric per-particle scatter, picked once at
 	                        //   emit and carried on the particle, so a parm
 	                        //   can vary BETWEEN particles as well as over
 	                        //   one particle's life
-	float   parmPad0;       // keeps the struct 32 B / 2 vec4 in std430 so the
+	float   parmPad0;       // keeps the header 32 B / 2 vec4 in std430 so the
 	float   parmPad1;       //   GPU mirror needs no per-field alignment rules
 	float   parmPad2;
+	// The curve, RESOLVED. Curves are shared by NAME on the authoring side
+	// (CG_RegisterParticleCurve dedups, so editing one reaches every class
+	// built on it), but what crosses the VM boundary and reaches the GPU is
+	// a flattened copy.
+	//
+	// That is deliberate. Passing an index instead would mean a second SSBO
+	// binding and one more indirection per evaluation — on the per-particle
+	// hot path — to save two kilobytes. Resolving once at registration costs
+	// 32 bytes per parm and nothing per particle.
+	//
+	// Use CG_ResolveParticleParmCurve() to fill this from a registered curve
+	// rather than writing samples by hand; that keeps the "shared by name"
+	// property intact.
+	float   samples[PARTICLE_CURVE_SAMPLES];
 } particleParm_t;
 
 typedef struct {
@@ -266,6 +280,15 @@ int CG_FindParticleCurve( const char *name );
 // Read back a registered curve. Returns NULL for index 0 or an
 // unregistered index. Used by the renderer upload path and by tests.
 const float *CG_GetParticleCurve( int index );
+
+// Resolve a registered curve into a parm, by name. This is how a class
+// opts into a shared curve: the name is looked up once, the samples are
+// copied in, and the parm becomes self-contained from then on.
+//
+// Returns qfalse (and leaves the parm's curve fields untouched) when the
+// name is unknown, so a class referencing a curve that failed to register
+// keeps its constant behaviour instead of rendering as nothing.
+qboolean CG_ResolveParticleParmCurve( particleParm_t *parm, const char *curveName );
 
 // Evaluate a parameter at a normalised lifetime fraction.
 //

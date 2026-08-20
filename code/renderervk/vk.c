@@ -7978,7 +7978,7 @@ void vk_init_particle( void )
 	// misreads.
 #if defined( __STDC_VERSION__ ) && __STDC_VERSION__ >= 201112L
 	_Static_assert( sizeof( particleClassGPU_t ) == PARTICLE_CLASS_GPU_BYTES,
-		"particleClassGPU_t must be 400 bytes to match GLSL std430 stride" );
+		"particleClassGPU_t must match PARTICLE_CLASS_GPU_BYTES (GLSL std430 stride)" );
 	_Static_assert( sizeof( particleGPU_t ) == PARTICLE_BYTES,
 		"particleGPU_t must be 64 bytes to match GLSL std430 stride" );
 	_Static_assert( sizeof( particleFrame_t ) == 144,

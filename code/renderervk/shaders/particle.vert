@@ -39,6 +39,59 @@ struct Particle {
 	uint  pad5;
 };
 
+struct ParticleParm {
+	int   calc;       // 0=CONSTANT 1=LINEAR 2=CURVE 3=CURVE_TIMES_LINEAR
+	int   hasCurve;   // 0 = samples[] unused
+	float val0;
+	float val1;
+	float variance;
+	float parmPad0;
+	float parmPad1;
+	float parmPad2;
+	float samples[8]; // PARTICLE_CURVE_SAMPLES; resolved host-side
+};
+
+// Evaluate a parm at a normalised lifetime fraction. Mirrors
+// ParticleParm_Eval in qcommon/wired/render/particle_curve.c — the two are
+// pinned against each other by tests/particle_curve_test.c, because a
+// divergence here renders something other than what was authored without
+// ever failing loudly.
+float parmSampleCurve( ParticleParm p, float fraction ) {
+	if ( p.hasCurve == 0 )
+		return 1.0;                       // neutral, never a zeroing surprise
+	if ( fraction <= 0.0 ) return p.samples[0];
+	if ( fraction >= 1.0 ) return p.samples[7];
+	// Samples span 0..1 INCLUSIVE, so the last sample sits AT fraction 1 and
+	// the span is (N-1) intervals. Using N here shifts every curve slightly.
+	float pos  = fraction * 7.0;
+	int   i0   = int( pos );
+	int   i1   = min( i0 + 1, 7 );
+	float frac = pos - float( i0 );
+	return mix( p.samples[i0], p.samples[i1], frac );
+}
+
+float parmEval( ParticleParm p, float fraction, float jitterPick ) {
+	fraction = clamp( fraction, 0.0, 1.0 );
+	float base;
+	if ( p.calc == 1 ) {                  // LINEAR
+		base = mix( p.val0, p.val1, fraction );
+	} else if ( p.calc == 2 ) {           // CURVE
+		base = mix( p.val0, p.val1, parmSampleCurve( p, fraction ) );
+	} else if ( p.calc == 3 ) {           // CURVE_TIMES_LINEAR
+		base = parmSampleCurve( p, fraction ) * mix( p.val0, p.val1, fraction );
+	} else {                              // CONSTANT
+		base = p.val0;
+	}
+	return base + p.variance * jitterPick;
+}
+
+// A parm that was never authored: constant zero. Callers fall back to the
+// scalar field it overrides, which is what keeps pre-curve classes
+// rendering bit-identically.
+bool parmIsUnset( ParticleParm p ) {
+	return p.calc == 0 && p.val0 == 0.0;
+}
+
 struct ParticleClassGPU {
 	uint  shader;
 	uint  renderFlags;
@@ -77,6 +130,14 @@ struct ParticleClassGPU {
 	uint  frameBlend;             // 1 = interpolate adjacent frames
 	uint  framePad0;
 	uint  framePad1;
+	// Curve-valued parameters — mirrors particleClassGPU_t. A parm with
+	// calc==0 and val0==0 was never authored; the reader falls back to the
+	// scalar field it overrides, which is what keeps pre-curve classes
+	// rendering bit-identically.
+	ParticleParm sizeParm;
+	ParticleParm alphaParm;
+	ParticleParm dragParm;
+	ParticleParm gravityParm;
 };
 
 layout(set = 0, binding = 0) uniform ParticleFrame {
@@ -199,12 +260,27 @@ void main() {
 	vec4 endColor   = baseColor * c.colorEndMult;
 	vec4 color      = mix(baseColor, endColor, p.age);
 
+	// alphaParm, when authored, REPLACES the palette lerp's alpha channel.
+	// RGB still comes from the palette — a curve here is about how the
+	// particle fades, not what colour it is, and keeping those separate
+	// means an authored fade can be reused across differently-coloured
+	// classes.
+	if (!parmIsUnset(c.alphaParm))
+		color.a = parmEval(c.alphaParm, p.age, p.sizeJitterPick);
+
 	// Size: lerp (sizeStart + sizeJitterPick) → sizeEnd over lifetime.
 	// sizeJitterPick was picked at emit time as crandom() * cls.sizeJitter
 	// and stored on the particle; classes with sizeJitter == 0 store 0
 	// here, so existing classes lerp identically to before.
 	float effectiveStart = c.sizeStart + p.sizeJitterPick;
 	float size = mix(effectiveStart, c.sizeEnd, p.age);
+
+	// sizeParm, when authored, REPLACES that lerp outright — which is the
+	// point: a start/end pair cannot express "grow then shrink", and a curve
+	// can. The per-particle jitter still rides on top, so authored variety
+	// survives the override.
+	if (!parmIsUnset(c.sizeParm))
+		size = parmEval(c.sizeParm, p.age, p.sizeJitterPick);
 
 	vec3 worldPos = p.pos
 	              + viewLeft.xyz * (sx * size)
