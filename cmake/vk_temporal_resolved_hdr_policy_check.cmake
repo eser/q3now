@@ -362,8 +362,26 @@ require_text(TEST "MUTATE_CURRENT" "valid current-cohort fallback matrix")
 require_text(TEST "INVALID_CURRENT" "invalid current-cohort output atomicity matrix")
 require_text(TEST "const void *roles[8]" "target/current cross-role alias matrix")
 require_text(TEST "const void *currentRoles[4]" "current source cross-role alias matrix")
-require_text(TEST "memcmp( &routed, &current, sizeof( routed ) ) == 0"
+# The legacy-fallback publication assertion, which must keep asserting that a
+# non-matching route republishes `current` unchanged.
+#
+# Spelled SourceEquals rather than memcmp since da317716: the struct is 96 bytes
+# with only 92 bytes of fields, and C11 6.2.6.1p6 leaves the 4 tail-padding
+# bytes unspecified, so a byte comparison was testing the optimiser rather than
+# the routine — it passed under clang and failed under gcc at -O1/-O2/-O3.
+# The guarantee is unchanged and in fact stricter; only its spelling moved.
+require_text(TEST "SourceEquals( &routed, &current )"
 	"exact legacy fallback publication")
+# And the comparator itself must still cover every declared field, or the
+# assertion above would silently weaken as the struct grows.
+require_text(TEST "static qboolean SourceEquals("
+	"field-wise source comparator")
+# Pin the number of fallback-publication sites. require_text alone only proves
+# ONE survives, so deleting three of the four would pass — a gap the previous
+# memcmp spelling had too. Four: the plain fallback, the two matrix macros
+# (MUTATE_CURRENT / INVALID_CURRENT) and the cross-role alias sweep.
+require_count(TEST "SourceEquals\\( &routed, &current \\)" 4
+	"fallback publication asserted at every route site")
 require_text(TEST "memcmp( &owner, &before, sizeof( owner ) ) == 0"
 	"candidate-first byte-stable failure")
 require_text(TEST "VK_TemporalResolvedHdrBuildContentReceipt("
