@@ -175,11 +175,37 @@ fi
 
 OUT="$(mktemp -d)"; trap 'rm -rf "$OUT"' EXIT
 
+# SCENE selects what is on screen when the shot is taken.
+#
+#   attract  (default) the menu/attract screen — pure WiredUI, every size
+#            resolved through WUI_Resolve.
+#   loading  the map-load screen. The interesting case, because it mixes the
+#            two sizing worlds inside ONE element: cl_loading_ui.c passes the
+#            .wui rect through for POSITION, but computes type and padding
+#            straight off cls.glconfig (LOADING_FONT_* = vidHeight * k,
+#            pad = vidWidth * k). Those two agree only while the render target
+#            tracks the window — and r_renderScale, which this gate sets, is
+#            exactly the case where it does not. See TASK-200.
+SCENE="${SCENE:-attract}"
+
 capture_at() {  # $1 = supersample 0|1, $2 = destination png
     local ss="$1" dest="$2"
     local shots="$WIRED_BASE/screenshots"
     mkdir -p "$shots"
     local before; before="$(ls -t "$shots" 2>/dev/null | head -1 || echo "")"
+
+    local scene_cmds
+    case "$SCENE" in
+        loading)
+            # Shoot DURING the load: `map` returns once loading starts, so the
+            # screenshot lands while the loading screen is what is being drawn.
+            # The wait is a settle, not a completion barrier.
+            scene_cmds=$'map arena1\nwait 40\nscreenshot\nwait 200\nquit' ;;
+        attract)
+            scene_cmds=$'set attract_delay 0\nattract_restart\nwait 200\nwui_test_keydown 32\nwait 400\nscreenshot\nwait 200\nquit' ;;
+        *)
+            echo "unknown SCENE '$SCENE' (want attract|loading)" >&2; return 1 ;;
+    esac
 
     local cfg="$WIRED_BASE/supersample_parity_${ss}.cfg"
     cat > "$cfg" <<EOF
@@ -194,14 +220,7 @@ set r_renderScale 1
 set r_ext_supersample $ss
 vid_restart
 wait 300
-set attract_delay 0
-attract_restart
-wait 200
-wui_test_keydown 32
-wait 400
-screenshot
-wait 200
-quit
+$scene_cmds
 EOF
     ( cd "$WIRED_BASE/.." && "$WIRED_BINARY" +exec "$(basename "$cfg")" ) >/dev/null 2>&1 || true
 
