@@ -80,13 +80,41 @@ BOUNDED, WITH DROP ACCOUNTING
     that reads only the artefact can tell whether it is looking at a whole
     session or a truncated one.
 
-PRIVACY (provisional — Eser owns the final policy, criterion #6)
-    Payloads carry no chat text, no player names, no auth tokens, no
-    filesystem paths, no network addresses. Producers pass typed scalars
-    and short enum-like tokens only. Emission is OPT-IN: playtest_enabled
-    defaults to 0, so a build collects nothing unless a run asks for it.
-    These are conservative defaults chosen to make the code work, NOT a
-    ratified retention/export policy.
+PRIVACY, RETENTION AND EXPORT (ratified 2026-08-20)
+    What payloads may carry
+        Typed scalars and short enum-like tokens only. No chat text, no
+        player names, no auth tokens, no filesystem paths, no network
+        addresses. Client SLOT NUMBERS are permitted: a slot is an index
+        into a running server, meaningless once the session ends, and it
+        is what makes "which player got stuck" answerable at all.
+        A producer that needs something not on this list needs a decision
+        first, not a workaround.
+
+    Collection is OPT-IN
+        playtest_enabled defaults to 0, so a build collects nothing until
+        a run asks for it. This holds for alpha builds too — the default
+        is not relaxed because a build is pre-release.
+
+    Retention: one session
+        Each session overwrites the artefact. There is no history and no
+        rotation to reason about: the file always describes the run that
+        just happened, which is the run someone is reporting.
+
+    Size is bounded by construction, not by a separate cap
+        The ring holds playtest_ring_capacity records (default 4096) and
+        a payload cannot exceed PLAYTEST_PAYLOAD_MAX. Worst case is
+        therefore ~2.6 MB, and it is reached by overwriting the OLDEST
+        record — never by refusing new ones, and never silently: see the
+        drop accounting above. No further cap is needed, and adding one
+        would only introduce a second, less informative way to lose data.
+
+    Export: manual, or automatic WITH CONSENT
+        Today the only path out is the `playtestFlush` command — the
+        artefact is written locally and goes nowhere on its own. Automatic
+        upload is approved in principle but MUST be gated on an explicit
+        per-session confirmation from the person running the build; it is
+        not implemented yet. Until it is, nothing in this subsystem may
+        open a network connection.
 ===========================================================================
 */
 #pragma once

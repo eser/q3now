@@ -234,10 +234,20 @@ int main( void )
 		strstr( src, "s_droppedOverwrite++" ) != NULL, 1 );
 
 	// ── 7. privacy posture: opt-in by construction ──────────────────────
-	// Provisional pending Eser's policy call (#6), but pinned so that
-	// flipping the default to opt-out cannot happen unnoticed.
+	// Ratified policy (playtest.h, "PRIVACY, RETENTION AND EXPORT"), pinned
+	// here so that flipping the default to opt-out cannot happen unnoticed —
+	// a change of that kind is a decision, not a tweak, and it should have to
+	// break a test to land.
 	Check( "collection is opt-in (playtest_enabled defaults to 0)",
 		strstr( src, "CVAR_BOOL( \"playtest_enabled\", \"0\"" ) != NULL, 1 );
+
+	// The ratified export rule is "local only until consent-gated upload
+	// exists". Nothing in this subsystem may reach the network, so the absence
+	// of any transport is itself part of the contract: a socket appearing here
+	// would mean the artefact started leaving the machine on its own.
+	Check( "no network transport in the emitter",
+		strstr( src, "socket" ) == NULL && strstr( src, "curl" ) == NULL
+		&& strstr( src, "http" ) == NULL, 1 );
 
 	printf( "\n" );
 	if ( failures ) {
