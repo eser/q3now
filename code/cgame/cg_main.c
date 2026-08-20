@@ -1095,8 +1095,6 @@ static void CG_RegisterGraphics( void ) {
 	// pointer-to-handle, so ordering matters only for completeness
 	// at first frame.
 	CG_RegisterPlayerTrailDefs();
-
-	CG_ClearParticles ();
 /*
 	for (i=1; i<MAX_PARTICLES_AREAS; i++)
 	{
@@ -1386,7 +1384,6 @@ void CG_RenderCameraView( void ) {
 	trap_R_ClearScene();
 	if ( !cg.hyperspace ) {
 		CG_AddPacketEntities();
-		CG_AddParticles();
 		CG_AddLocalEntities();
 		CG_AddRailTrails();
 		CG_AddPlayerTrails();

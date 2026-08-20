@@ -26,7 +26,6 @@ set(CGAME_SOURCES
     ${SOURCE_DIR}/cgame/cg_marks.c
     ${SOURCE_DIR}/cgame/cg_monster.c
     ${SOURCE_DIR}/cgame/cg_creature.c
-    ${SOURCE_DIR}/cgame/cg_particles.c
     ${SOURCE_DIR}/cgame/cg_q1_particles.c
     ${SOURCE_DIR}/cgame/cg_playlist.c
     ${SOURCE_DIR}/cgame/cg_players.c
