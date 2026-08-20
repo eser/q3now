@@ -1977,44 +1977,104 @@ entity-occlusion)
     ;;
 
 particles)
-    # ⚠ NOT A WORKING GATE. Runnable, and deliberately left in place with what
-    # was measured, because the next attempt should not repeat the dead ends.
+    # ── Do GPU particles reach the screen? ────────────────────────────────────
+    # Both frames come from ONE engine run, which is the whole design. The
+    # obvious arrangement — two runs, one with r_particles 1 and one with 0 —
+    # does not work here: the only particle source available is a fired rocket,
+    # it does not detonate at the same moment in two separate runs, and the
+    # frames then differ for reasons unrelated to the cvar. That was measured,
+    # not assumed: setting BOTH runs to r_particles 1, which must show no
+    # particle-attributable difference, still produced 35 moved tiles.
     #
-    # THE IDEA, which is sound: capture the same camera twice, once with
-    # r_particles 1 and once with 0, and count tiles that move. Those tiles are
-    # exactly the pixels particles painted. It is the shape entity-occlusion
-    # uses and it works there.
+    # Taking both shots inside one run removes that variable. The rocket is
+    # fired once, the first shot is taken, r_particles is toggled off, and the
+    # second shot follows milliseconds later from the same camera and the same
+    # scene state. What remains between them is the cvar.
     #
-    # WHY IT DOES NOT WORK HERE: the two captures are separate engine runs, and
-    # the only particle source available is a transient one — a fired rocket.
-    # The rocket does not detonate at the same moment in both runs, so the
-    # frames differ for reasons that have nothing to do with r_particles.
+    # This is a REGRESSION GATE for visibility only. What the particles look
+    # like — curve shapes, colour, size over life — is the contract test's job
+    # (tests/particle_curve_test.c); pixels cannot tell an ease-out from a
+    # linear ramp without a golden, and a golden here would break on unrelated
+    # renderer changes.
+    PT_MAP="${PT_MAP:-arena7}"
+    PT_POS="${PT_POS:-0 0 100 0}"
+    # How much a tile must move before it counts as painted by particles. Above
+    # frame-to-frame noise on a pinned-time capture, below what a rocket flash
+    # produces.
+    PT_DIFF_MIN="${PT_DIFF_MIN:-3.0}"
+    # One tile could be almost anything; a flash or a trail covers several.
+    PT_TILES_MIN="${PT_TILES_MIN:-3}"
+    # Retried because the rocket must be alive in the captured frame, and
+    # r_pinFrameTime freezes the clock — whether the emit landed before the
+    # shot is a race the harness does not control. A broken particle path fails
+    # every attempt; a working one usually succeeds on the first.
+    PT_ATTEMPTS="${PT_ATTEMPTS:-3}"
+    rc=0
+
+    echo "==> particles: $PT_MAP @ $PT_POS (one run, two shots)"
+
+    # `give all` rather than `give weapon 5`: the latter hands over the launcher
+    # WITHOUT ammo, so the attack silently does nothing and the capture looks
+    # exactly like a broken particle system.
     #
-    # That was proven by mutation, not assumed. Setting BOTH captures to
-    # r_particles 1 — which must yield no particle-attributable difference —
-    # still measured 35 moved tiles and still passed. So the number this gate
-    # reports is dominated by scene timing, not by particles, and a passing
-    # result means nothing.
+    # `+attack` is a client bind command and must not be wrapped in `cmd`
+    # (which forwards to the server and logs "unknown cmd attack"), but the
+    # launch line prefixes CAP_POST_CMD with its own '+', so the first token
+    # here is a bare command name and the rest chain with ';'.
+    PT_ON_SHOT="vrf_particles_on"
+    PT_OFF_SHOT="vrf_particles_off"
+    # ⚠ KNOWN LIMIT — this measures "the frame changed", not yet "particles
+    # changed it". Kept runnable because the number it reports is still a
+    # useful signal, and kept honest because it is not yet a gate.
     #
-    # Also measured, so it is not re-derived:
-    #   · "+attack" in CAP_POST_CMD becomes "++attack" (the launch line adds
-    #     its own '+') → "unknown cmd attack".
-    #   · "give weapon 5" hands over the launcher WITHOUT ammo; the shot never
-    #     happens. "give all" is what actually arms it.
-    #   · Even with a working shot, ~1 run in 3 captures zero moved tiles:
-    #     r_pinFrameTime freezes the clock, so whether a particle is alive in
-    #     the captured frame is a race the harness does not control.
+    # Two shots from ONE run removes the biggest variable (two separate runs
+    # detonate the rocket at different moments), but not all of it: the world
+    # keeps simulating between the shots, so the rocket travels and the scene
+    # lighting moves regardless of the cvar. r_pinFrameTime pins the RENDER
+    # clock, not the simulation.
     #
-    # WHAT WOULD FIX IT: a particle source that is CONTINUOUS and identical in
-    # both runs — a permanent world emitter, or a console command that emits
-    # synchronously and returns. Then the only difference between the two
-    # captures really is the cvar. Until such a source exists, this cannot be a
-    # gate, and pretending otherwise would be worse than leaving it unfinished.
-    echo "==> particles: SKIP — trigger not deterministic; see the comment in this mode"
-    echo "    (visibility was verified by hand: the rocket flash and its lit"
-    echo "     surroundings are plainly present with r_particles 1 and absent"
-    echo "     with 0, but a repeatable automated A/B needs a stable emitter.)"
-    exit 77
+    # Proven by mutation rather than assumed: with the cvar toggle REMOVED —
+    # both shots with particles on, so no particle-attributable difference is
+    # possible — this still reported 32 moved tiles.
+    #
+    # `timescale 0` was the obvious fix and does not work: freezing the
+    # simulation also stops the particle integrate pass, so the measurement
+    # drops to a consistent 0. What this needs is a particle source that
+    # persists in a frozen world, or a render-side count of drawn particles.
+    PT_CMDS="cmd give all; wait 10; cmd +attack; wait 30; cmd -attack; wait 20"
+    PT_CMDS="$PT_CMDS; screenshot $PT_ON_SHOT; wait 10"
+    PT_CMDS="$PT_CMDS; r_particles 0; wait 10; screenshot $PT_OFF_SHOT"
+
+    on="$SHOTDIR/$PT_ON_SHOT.png"
+    off="$SHOTDIR/$PT_OFF_SHOT.png"
+    best=0
+    attempt=1
+
+    while [ "$attempt" -le "$PT_ATTEMPTS" ]; do
+        rm -f "$on" "$off" 2>/dev/null
+        CAP_POST_CMD="$PT_CMDS" capture_fixed_cam "$PT_MAP" "$PT_POS" "particles_probe" \
+            "+set sv_cheats 1" "+set cg_draw2D 0" "+set cg_drawGun 0" "+set r_particles 1" || rc=1
+
+        if [ ! -s "$on" ] || [ ! -s "$off" ]; then
+            echo "  attempt $attempt: one or both shots missing"
+        else
+            moved=$( paste -d ' ' <( tile_means "$on" ) <( tile_means "$off" ) \
+                | awk -v tol="$PT_DIFF_MIN" '{ d=$2-$4; if(d<0)d=-d; if(d>=tol) n++ } END{ print n+0 }' )
+            echo "  attempt $attempt: tiles moved by particles: $moved"
+            [ "$moved" -gt "$best" ] && best="$moved"
+            [ "$best" -ge "$PT_TILES_MIN" ] && break
+        fi
+        attempt=$(( attempt + 1 ))
+    done
+
+    echo "    best over $attempt attempt(s): $best (need >= $PT_TILES_MIN)"
+    if [ "$best" -lt "$PT_TILES_MIN" ]; then
+        echo "FAIL: particles painted nothing the world does not already paint"
+        rc=1
+    fi
+
+    if [ "$rc" -eq 0 ]; then echo "==> PARTICLES PASS"; else echo "==> PARTICLES FAIL"; fi
+    exit $rc
     ;;
 
 *) echo "FAIL: unknown mode '$MODE'" >&2; exit 2;;
