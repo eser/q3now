@@ -14,7 +14,25 @@
 #include "wired/store/cl_wired_store.h"     /* loading.overall publisher */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
-// Viewport-relative font sizes
+/* Viewport-relative font sizes.
+ *
+ * These follow the RENDER TARGET, while .wui-authored text follows the window
+ * (fontPointSize × dpiScale) and the console follows cls.con_factor. Measured
+ * at window 1440x900 / target 720x450 (r_renderScale), all three disagree in
+ * the same frame: console text ran 3.2× the height of a HUD label.
+ *
+ * Rewriting these as vidHeightLogical × dpiScale × k does NOT fix it, and the
+ * attempt is recorded here so it is not made twice: dpiScale IS
+ * vidHeight/vidHeightLogical, so the substitution cancels back to the same
+ * number. Verified numerically — identical output in both the matched and the
+ * decoupled case.
+ *
+ * The real divergence is that .wui text is sized in AUTHORED POINTS scaled by
+ * dpiScale, whereas these are a FRACTION OF THE VIEWPORT. Those are different
+ * sizing models, and no change of denominator reconciles them; the loading
+ * screen would have to author its type in points like the rest of the UI.
+ * See TASK-200.
+ */
 #define LOADING_FONT_TITLE   (cls.glconfig.vidHeight * 0.028f)
 #define LOADING_FONT_LABEL   (cls.glconfig.vidHeight * 0.013f)
 #define LOADING_FONT_SMALL   (cls.glconfig.vidHeight * 0.011f)
