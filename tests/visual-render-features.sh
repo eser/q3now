@@ -394,6 +394,28 @@ raw_bgr_rows() {
     "$PNG2RAW" "$1" | od -A n -t u1 -v | tr -s '[:space:]' '\n' | awk 'NF' | paste - - -
 }
 
+# max_pixel_value — brightest byte in a decoded frame, used by the bless paths to
+# refuse a black/void golden.
+#
+# WHY NOT `sort -n | tail -1`
+# That is what both call sites used, and on this machine it returned 99 for a
+# frame whose real maximum is 248 — the answer a LEXICAL sort gives, since "99"
+# outranks "248" one character at a time. The -n was being ignored. Measured
+# stage by stage inside the gate: the pipeline delivered all 11,059,200 lines
+# intact, `sort -n | tail -1` said 99, `awk` said 248, same input, same run.
+#
+# The failure direction is what makes it dangerous rather than annoying: 99 is
+# below the 64-and-up threshold's neighbourhood but above nothing, so a perfectly
+# good frame was rejected as "too dark" — and had the numbers landed the other
+# way, a black frame would have been blessed as the reference instead.
+#
+# awk carries no such ambiguity: one pass, numeric compare, no locale or size
+# sensitivity. It is also faster, since nothing has to be sorted.
+max_pixel_value() {
+    "$PNG2RAW" "$1" | od -A n -t u1 -v | tr -s '[:space:]' '\n' \
+        | awk 'NF { if ($1+0 > m) m = $1+0 } END { print m+0 }'
+}
+
 detect_sample_dimensions() {
     local raw_bytes
     raw_bytes="$("$PNG2RAW" "$1" | wc -c | tr -d '[:space:]')"
@@ -1062,7 +1084,7 @@ viewport)
             # bless-if-sane: only bless a frame that rendered real geometry (max pixel
             # well above black) — a black/void frame can't gate placement. The blessed
             # golden is the SHIP-config (GTAO-on) frame.
-            mx="$("$PNG2RAW" "$va" | od -A n -t u1 -v | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -n | tail -1)"
+            mx="$(max_pixel_value "$va")"
             if [ "${mx:-0}" -ge 64 ]; then
                 cp "$va" "$golden"
                 echo "  blessed viewport golden (r_ssao 1, ship config): $golden (max-pixel=$mx — real geometry)"
@@ -1424,7 +1446,7 @@ scene)
         moved="$(worst_tile_diff "$ca" "$cplayer")"
         # non-black: the cinematic frame rendered real geometry (max pixel well
         # above black), like the viewport bless gate.
-        mx="$("$PNG2RAW" "$ca" | od -A n -t u1 -v | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -n | tail -1)"
+        mx="$(max_pixel_value "$ca")"
 
         if [ "$SMOKE_UPDATE_GOLDEN" = "1" ]; then
             # bless only when BOTH content assertions pass: (a) non-black real
