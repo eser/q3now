@@ -99,7 +99,6 @@ menuDef {
 				itemDef {
 					name "nav_spacer"
 					type container
-					rect 0 0 1 0
 					grow 1
 				}
 			}
@@ -160,7 +159,6 @@ menuDef {
 					itemDef {
 						name "grid_row_1"
 						type container
-						rect 0 0 1 0
 						height FIT
 						width PERCENT 1
 						grow 0
@@ -192,7 +190,6 @@ menuDef {
 						itemDef {
 							name "row_forward"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Forward"
@@ -207,7 +204,6 @@ menuDef {
 						itemDef {
 							name "row_back"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Backpedal"
@@ -222,7 +218,6 @@ menuDef {
 						itemDef {
 							name "row_moveleft"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Move Left"
@@ -237,7 +232,6 @@ menuDef {
 						itemDef {
 							name "row_moveright"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Move Right"
@@ -252,7 +246,6 @@ menuDef {
 						itemDef {
 							name "row_turnleft"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Turn Left"
@@ -267,7 +260,6 @@ menuDef {
 						itemDef {
 							name "row_turnright"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Turn Right"
@@ -282,7 +274,6 @@ menuDef {
 						itemDef {
 							name "row_walk"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Walk"
@@ -297,7 +288,6 @@ menuDef {
 						itemDef {
 							name "row_jump"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Jump"
@@ -312,7 +302,6 @@ menuDef {
 						itemDef {
 							name "row_crouch"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Crouch"
@@ -327,7 +316,6 @@ menuDef {
 						itemDef {
 							name "row_always_run"
 							type checkbox
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Always Run"
@@ -363,7 +351,6 @@ menuDef {
 						itemDef {
 							name "row_weap_gauntlet"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Gauntlet"
@@ -378,7 +365,6 @@ menuDef {
 						itemDef {
 							name "row_weap_machinegun"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Machinegun"
@@ -393,7 +379,6 @@ menuDef {
 						itemDef {
 							name "row_weap_shotgun"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Shotgun"
@@ -408,7 +393,6 @@ menuDef {
 						itemDef {
 							name "row_weap_grenade"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Grenade Launcher"
@@ -423,7 +407,6 @@ menuDef {
 						itemDef {
 							name "row_weap_rocket"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Rocket Launcher"
@@ -438,7 +421,6 @@ menuDef {
 						itemDef {
 							name "row_weap_lightning"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Lightning Gun"
@@ -453,7 +435,6 @@ menuDef {
 						itemDef {
 							name "row_weap_railgun"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Railgun"
@@ -468,7 +449,6 @@ menuDef {
 						itemDef {
 							name "row_weap_plasma"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Plasma Rifle"
@@ -486,7 +466,6 @@ menuDef {
 					itemDef {
 						name "grid_row_2"
 						type container
-						rect 0 0 1 0
 						height FIT
 						width PERCENT 1
 						grow 0
@@ -518,7 +497,6 @@ menuDef {
 						itemDef {
 							name "row_fire"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Fire"
@@ -533,7 +511,6 @@ menuDef {
 						itemDef {
 							name "row_weapnext"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Next Weapon"
@@ -548,7 +525,6 @@ menuDef {
 						itemDef {
 							name "row_weapprev"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Previous Weapon"
@@ -563,7 +539,6 @@ menuDef {
 						itemDef {
 							name "row_autoswitch"
 							type checkbox
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Autoswitch Weapon"
@@ -599,7 +574,6 @@ menuDef {
 						itemDef {
 							name "row_sensitivity"
 							type 10
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Mouse Sensitivity"
@@ -614,7 +588,6 @@ menuDef {
 						itemDef {
 							name "row_invert"
 							type checkbox
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Invert Mouse"
@@ -629,7 +602,6 @@ menuDef {
 						itemDef {
 							name "row_freelook"
 							type checkbox
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Free Look"
@@ -644,7 +616,6 @@ menuDef {
 						itemDef {
 							name "row_smoothmouse"
 							type checkbox
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Smooth Mouse"
@@ -659,7 +630,6 @@ menuDef {
 						itemDef {
 							name "row_zoom"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Zoom View"
@@ -674,7 +644,6 @@ menuDef {
 						itemDef {
 							name "row_centerview"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Center View"
@@ -692,7 +661,6 @@ menuDef {
 					itemDef {
 						name "grid_row_3"
 						type container
-						rect 0 0 1 0
 						height FIT
 						width PERCENT 1
 						grow 0
@@ -724,7 +692,6 @@ menuDef {
 						itemDef {
 							name "row_useitem"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Use Item"
@@ -739,7 +706,6 @@ menuDef {
 						itemDef {
 							name "row_gesture"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Gesture"
@@ -754,7 +720,6 @@ menuDef {
 						itemDef {
 							name "row_scores"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Show Scores"
@@ -769,7 +734,6 @@ menuDef {
 						itemDef {
 							name "row_console"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Toggle Console"
@@ -788,7 +752,6 @@ menuDef {
 						itemDef {
 							name "row_vote_yes"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Vote Yes"
@@ -803,7 +766,6 @@ menuDef {
 						itemDef {
 							name "row_vote_no"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Vote No"
@@ -822,7 +784,6 @@ menuDef {
 						itemDef {
 							name "row_teamvote_yes"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Team Vote Yes"
@@ -837,7 +798,6 @@ menuDef {
 						itemDef {
 							name "row_teamvote_no"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Team Vote No"
@@ -873,7 +833,6 @@ menuDef {
 						itemDef {
 							name "row_chat"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Chat"
@@ -888,7 +847,6 @@ menuDef {
 						itemDef {
 							name "row_chat_team"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Team Chat"
@@ -903,7 +861,6 @@ menuDef {
 						itemDef {
 							name "row_chat_target"
 							type 13
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Target Chat"
