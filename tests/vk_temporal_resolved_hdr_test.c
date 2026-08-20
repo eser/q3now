@@ -125,6 +125,47 @@ static vkTemporalResolvedHdrInput_t MakeInput( void ) {
 	return input;
 }
 
+/* Field-wise equality for vkHdrPostprocessSource_t.
+ *
+ * NOT memcmp over sizeof, and the difference is not pedantry. The struct is 96
+ * bytes but its fields occupy 92 (four pointers and two uint64_ts, then eleven
+ * four-byte fields), so the last 4 bytes are tail padding. C11 6.2.6.1p6 leaves
+ * padding bytes unspecified, and every copy here — `return source;` out of a
+ * Make* helper, `source = *current;` and `*outSource = source;` inside
+ * VK_TemporalResolvedHdrRouteSource — is free to leave them holding whatever
+ * was already there.
+ *
+ * A byte comparison therefore tests the optimiser, not the routine. Measured on
+ * this tree: VK_TemporalResolvedHdrRouteSource returned qtrue and all 92 field
+ * bytes matched, while offsets 92-95 held cc cc cc cc against a0 15 00 00 —
+ * a failure on bytes no field owns. gcc 16.1 copies the padding at -O0 and -Os
+ * but not at -O1/-O2/-O3; clang copies it at every level, which is why this
+ * passed on macOS and failed on Windows release builds.
+ *
+ * Comparing the fields the struct actually declares is both portable and a
+ * stricter statement of intent: it says which values must agree, rather than
+ * asserting that two objects are byte-identical, which C never promised. */
+static qboolean SourceEquals( const vkHdrPostprocessSource_t *a,
+		const vkHdrPostprocessSource_t *b ) {
+	return (qboolean)( a->backend == b->backend
+		&& a->attachment == b->attachment
+		&& a->postprocessGroup == b->postprocessGroup
+		&& a->histogramGroup == b->histogramGroup
+		&& a->batchToken == b->batchToken
+		&& a->frameId == b->frameId
+		&& a->commandSlot == b->commandSlot
+		&& a->frameCount == b->frameCount
+		&& a->worldIndex == b->worldIndex
+		&& a->width == b->width
+		&& a->height == b->height
+		&& a->topologyEpoch == b->topologyEpoch
+		&& a->planGeneration == b->planGeneration
+		&& a->sceneColorAttachmentGeneration == b->sceneColorAttachmentGeneration
+		&& a->targetAllocationGeneration == b->targetAllocationGeneration
+		&& a->sceneFormat == b->sceneFormat
+		&& a->resolved == b->resolved );
+}
+
 static vkHdrPostprocessSource_t MakeCurrent(
 		const vkTemporalResolvedHdrInput_t *input ) {
 	vkHdrPostprocessSource_t source;
@@ -353,7 +394,7 @@ int main( void ) {
 	CHECK( !VK_TemporalResolvedHdrRouteSource( NULL, &receipt, NULL, &routed ) );
 	CHECK( memcmp( &routed, &routedBefore, sizeof( routed ) ) == 0 );
 	CHECK( VK_TemporalResolvedHdrRouteSource( &current, &receipt, NULL, &routed )
-		&& memcmp( &routed, &current, sizeof( routed ) ) == 0 );
+		&& SourceEquals( &routed, &current ) );
 	content = MakeContent( &current, &receipt );
 	memset( &contentMutation, 0xcc, sizeof( contentMutation ) );
 	CHECK( VK_TemporalResolvedHdrBuildContentReceipt(
@@ -467,14 +508,14 @@ int main( void ) {
 		expected.resolved = qtrue;
 		CHECK( VK_TemporalResolvedHdrRouteSource( &current, &receipt,
 			&content, &routed )
-			&& memcmp( &routed, &expected, sizeof( routed ) ) == 0 );
+			&& SourceEquals( &routed, &expected ) );
 	}
 
 #define MUTATE_CONTENT(field, value) do { \
 	contentMutation = content; contentMutation.field = (value); \
 	CHECK( VK_TemporalResolvedHdrRouteSource( &current, &receipt, \
 		&contentMutation, &routed ) && !routed.resolved \
-		&& memcmp( &routed, &current, sizeof( routed ) ) == 0 ); \
+		&& SourceEquals( &routed, &current ) ); \
 } while ( 0 )
 	MUTATE_CONTENT( batchToken, 0 );
 	MUTATE_CONTENT( frameId, 0 );
@@ -509,7 +550,7 @@ int main( void ) {
 	targetMutation = receipt; targetMutation.field = (value); \
 	CHECK( VK_TemporalResolvedHdrRouteSource( &current, &targetMutation, \
 		&content, &routed ) && !routed.resolved \
-		&& memcmp( &routed, &current, sizeof( routed ) ) == 0 ); \
+		&& SourceEquals( &routed, &current ) ); \
 } while ( 0 )
 	MUTATE_TARGET( backend, (ralBackend_t *)(uintptr_t)0x777u );
 	MUTATE_TARGET( target, (ralTexture_t *)(uintptr_t)0x777u );
@@ -555,7 +596,7 @@ int main( void ) {
 				}
 				CHECK( VK_TemporalResolvedHdrRouteSource( &current, &targetMutation,
 					&contentMutation, &routed )
-					&& memcmp( &routed, &current, sizeof( routed ) ) == 0 );
+					&& SourceEquals( &routed, &current ) );
 			}
 		}
 	}
@@ -565,7 +606,7 @@ int main( void ) {
 	currentMutation.field = (value); \
 	CHECK( VK_TemporalResolvedHdrRouteSource( &currentMutation, &receipt, \
 		&content, &routed ) && !routed.resolved \
-		&& memcmp( &routed, &currentMutation, sizeof( routed ) ) == 0 ); \
+		&& SourceEquals( &routed, &currentMutation ) ); \
 } while ( 0 )
 	MUTATE_CURRENT( backend, (ralBackend_t *)(uintptr_t)0x888u );
 	MUTATE_CURRENT( attachment, (ralTexture_t *)(uintptr_t)0x888u );
