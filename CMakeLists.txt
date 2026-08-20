@@ -1133,6 +1133,13 @@ ADD_EXECUTABLE(vk_temporal_main_activation_test
 	code/renderervk/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_main_activation_test PRIVATE
 	code/qcommon code/renderer/ral code/renderercommon code/renderervk)
+# tr_temporal_iqm_motion.c calls acosf/sinf. On macOS libm lives inside libc so
+# this links without asking; on Linux it does not, and the target failed there
+# with "undefined reference to `acosf'" while building clean locally. Same
+# IF(NOT WIN32) guard the other math-using test targets use.
+IF(NOT WIN32)
+	TARGET_LINK_LIBRARIES(vk_temporal_main_activation_test m)
+ENDIF()
 ADD_TEST(NAME vk_temporal_main_activation_contract
 	COMMAND vk_temporal_main_activation_test)
 SET_TESTS_PROPERTIES(vk_temporal_main_activation_contract PROPERTIES
@@ -1409,6 +1416,9 @@ TARGET_INCLUDE_DIRECTORIES(tr_temporal_iqm_motion_test PRIVATE
 	code/renderercommon
 	code/renderervk
 )
+IF(NOT WIN32)
+	TARGET_LINK_LIBRARIES(tr_temporal_iqm_motion_test m)
+ENDIF()
 ADD_TEST(NAME tr_temporal_iqm_motion_contract
 	COMMAND tr_temporal_iqm_motion_test)
 SET_TESTS_PROPERTIES(tr_temporal_iqm_motion_contract PROPERTIES
@@ -1480,6 +1490,9 @@ ADD_EXECUTABLE(vk_temporal_iqm_payload_test
 	code/renderervk/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_payload_test PRIVATE
 	code/qcommon code/renderercommon code/renderervk code/renderer/ral)
+IF(NOT WIN32)
+	TARGET_LINK_LIBRARIES(vk_temporal_iqm_payload_test m)
+ENDIF()
 ADD_TEST(NAME vk_temporal_iqm_payload_contract
 	COMMAND vk_temporal_iqm_payload_test)
 SET_TESTS_PROPERTIES(vk_temporal_iqm_payload_contract PROPERTIES
@@ -1504,6 +1517,9 @@ ADD_EXECUTABLE(vk_temporal_iqm_payload_authoring_test
 	code/renderervk/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_payload_authoring_test PRIVATE
 	code/qcommon code/renderercommon code/renderervk code/renderer/ral)
+IF(NOT WIN32)
+	TARGET_LINK_LIBRARIES(vk_temporal_iqm_payload_authoring_test m)
+ENDIF()
 ADD_TEST(NAME vk_temporal_iqm_payload_authoring_contract
 	COMMAND vk_temporal_iqm_payload_authoring_test)
 SET_TESTS_PROPERTIES(vk_temporal_iqm_payload_authoring_contract PROPERTIES
@@ -1528,6 +1544,9 @@ ADD_EXECUTABLE(vk_temporal_iqm_exact3_factory_test
 	code/renderervk/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_exact3_factory_test PRIVATE
 	code/qcommon code/renderercommon code/renderervk code/renderer/ral)
+IF(NOT WIN32)
+	TARGET_LINK_LIBRARIES(vk_temporal_iqm_exact3_factory_test m)
+ENDIF()
 ADD_TEST(NAME vk_temporal_iqm_exact3_factory_contract
 	COMMAND vk_temporal_iqm_exact3_factory_test)
 SET_TESTS_PROPERTIES(vk_temporal_iqm_exact3_factory_contract PROPERTIES
@@ -1545,6 +1564,9 @@ ADD_EXECUTABLE(vk_temporal_iqm_command_test
 	code/renderervk/vk_bindless_publication.c)
 TARGET_INCLUDE_DIRECTORIES(vk_temporal_iqm_command_test PRIVATE
 	code/qcommon code/renderercommon code/renderervk code/renderer/ral)
+IF(NOT WIN32)
+	TARGET_LINK_LIBRARIES(vk_temporal_iqm_command_test m)
+ENDIF()
 ADD_TEST(NAME vk_temporal_iqm_command_contract
 	COMMAND vk_temporal_iqm_command_test)
 SET_TESTS_PROPERTIES(vk_temporal_iqm_command_contract PROPERTIES
