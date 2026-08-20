@@ -364,19 +364,27 @@ typedef struct {
  *
  * Sized from MEASUREMENT, between two observed ends rather than picked round.
  *
- *   arena7, an ordinary arena: 146,328 covered cells, ~445 traces per cell
- *     (the column scan rarely terminates early), so a full pass is ~65M traces
- *     and takes ~10s at the measured ~152ns per trace. An ordinary map must
- *     PASS — a ceiling that refuses arena7 would disable the feature almost
- *     everywhere while looking like it still worked.
+ *   arena7, an ordinary arena with water: 93,737 scanned cells and 16.8M
+ *     traces once the column scan stops at the ground — about 2.6s at the
+ *     measured ~152ns per trace. An ordinary map must PASS: a ceiling that
+ *     refuses arena7 would disable the feature almost everywhere while still
+ *     looking like it worked.
  *   arenam3: over 150s without finishing, which is the case this bounds.
  *
- * 200M traces is ~30s of scan: three times arena7's full pass, so ordinary maps
- * clear it with room to spare, while the pathological case is cut off long
- * before it can pass for a hang. If a real map trips this, the WARN line names
- * it with both numbers, and the ceiling — not the map — is what to revisit.
- * Silently doing less work is what this replaces. */
-#define NAV_WATEREDGE_TRACE_BUDGET 200000000L
+ * 50M traces is ~7.6s of scan — three times arena7's full pass, so ordinary
+ * maps clear it with room to spare while a pathological one is cut off well
+ * before it can pass for a hang.
+ *
+ * Note this number moved DOWN once the column scan learned to stop at the
+ * ground: sized against the old full-column cost it was 200M, which would now
+ * permit a 30s stall for a map twelve times arena7's size. A budget calibrated
+ * against a cost that has since dropped is a budget that no longer bounds what
+ * it was written to bound.
+ *
+ * If a real map trips this, the WARN line names it with both numbers, and the
+ * ceiling — not the map — is what to revisit. Silently doing less work is what
+ * this replaces. */
+#define NAV_WATEREDGE_TRACE_BUDGET 50000000L
 
 /* Recast joins cross-column floor within this climb; a riser above it fragments
  * the component (floor(NAV_WALKABLE_CLIMB/NAV_CH)*NAV_CH = 6*3).  Two cells are
