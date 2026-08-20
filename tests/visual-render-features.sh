@@ -1019,7 +1019,14 @@ viewport)
     VPP_FLOOR="${VPP_FLOOR:-60.0}"           # above the GTAO noise band (~23), below a 5px shift (~64)
     VPP_CEIL="${VPP_CEIL:-35.0}"             # exclude a tile too GTAO-jittery to gate (none at this camera)
     golden="$GOLDEN_DIR/viewport_${VPP_MAP}.png"
-    SSHIP="+set r_ssao 1"                    # overrides capture_fixed_cam's default-off (last-wins)
+    # r_ssao 1 overrides capture_fixed_cam's default-off (last-wins). cg_draw2D 0 +
+    # cg_drawGun 0 match what --mode gtao already captures with, and they are not
+    # cosmetic here: this gate measures WHERE THE WORLD IS FRAMED, so every 2D layer
+    # drawn on top is noise it must not be sensitive to. The golden this replaced was
+    # captured before the WiredUI render-frame unification landed, so it predates the
+    # HUD being drawn at all — leaving 2D on would have pinned health/armor/ammo/fps
+    # readouts into a placement reference and made every HUD edit fail this gate.
+    SSHIP="+set r_ssao 1 +set cg_draw2D 0 +set cg_drawGun 0"
 
     # Cache-warmup throwaway: the FIRST capture in a fresh home renders a marginally
     # different frame (cold lighting/resource state + GTAO pipeline compile), independent
@@ -1031,6 +1038,25 @@ viewport)
     va="$(capture_fixed_cam "$VPP_MAP" "$VPP_POS" "viewport_${VPP_MAP}_a" $SSHIP)" || FAIL=1
     vb="$(capture_fixed_cam "$VPP_MAP" "$VPP_POS" "viewport_${VPP_MAP}_b" $SSHIP)" || FAIL=1
     vc="$(capture_fixed_cam "$VPP_MAP" "$VPP_POS" "viewport_${VPP_MAP}_c" $SSHIP)" || FAIL=1
+    # Size the tile grid from the frames we actually captured, exactly as --mode gtao
+    # does. This gate did not, so it ran the whole comparison on the 1280x720 default
+    # while macOS handed it 2560x1440 Retina frames: tiled_diff pastes the two byte
+    # streams row-by-row, so a golden of a different size stops lining up after its
+    # last row and every tile average past that point is computed against nothing.
+    # The gate still printed a number — signal=183 against a 60.0 threshold — which
+    # reads as a placement regression rather than "these two images are not the same
+    # shape". A comparison that cannot line up must not report a difference.
+    [ "$FAIL" = 0 ] && { detect_sample_dimensions "$va" || FAIL=1; }
+    if [ "$FAIL" = 0 ] && [ "$SMOKE_UPDATE_GOLDEN" != "1" ] && [ -s "$golden" ]; then
+        gbytes="$("$PNG2RAW" "$golden" | wc -c | tr -d '[:space:]')"
+        fbytes="$("$PNG2RAW" "$va" | wc -c | tr -d '[:space:]')"
+        if [ "$gbytes" != "$fbytes" ]; then
+            echo "  FAIL: golden and fresh frame differ in SIZE (golden ${gbytes}B vs fresh ${fbytes}B)."
+            echo "        These cannot be compared per-pixel. Re-bless on this display:"
+            echo "        SMOKE_UPDATE_GOLDEN=1 $0 --mode viewport --engine <wired>"
+            FAIL=1
+        fi
+    fi
     if [ "$FAIL" = 0 ]; then
         if [ "$SMOKE_UPDATE_GOLDEN" = "1" ]; then
             # bless-if-sane: only bless a frame that rendered real geometry (max pixel
