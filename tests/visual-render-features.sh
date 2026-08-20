@@ -2035,7 +2035,43 @@ particles)
     # time — the shot captures whatever the emit itself produced. That is
     # sufficient for a visibility gate and it keeps the capture deterministic,
     # which a wait-then-shoot would not be.
-    CAP_POST_CMD="give weapon 5; +attack; wait 10; -attack"
+    # NOTE the leading token: the harness prefixes CAP_POST_CMD with a '+' of
+    # its own (see the launch line above), so writing "+attack" here produces
+    # "++attack" and the engine reports "unknown cmd attack" — which it did,
+    # silently, while the gate still passed for an unrelated reason. Chaining
+    # through `cmd` avoids relying on that prefix at all.
+    #
+    # `wait` between press and release gives the server a frame to act on the
+    # button; a same-frame press/release can be swallowed entirely.
+    # ⚠ THE TRIGGER IS NOT SOLVED YET — this mode is not wired into ctest.
+    #
+    # The measurement above is sound: with r_particles 1 vs 0 from an identical
+    # camera, moved tiles are exactly the pixels particles painted. What is not
+    # solved is making particles EXIST at capture time, reproducibly.
+    #
+    # Measured, so the next attempt does not repeat them:
+    #   · "+attack" in CAP_POST_CMD becomes "++attack" (the launch line adds a
+    #     '+' of its own) and the engine logs "unknown cmd attack".
+    #   · "cmd +attack" forwards to the SERVER, which does not know a client
+    #     bind command — same log line.
+    #   · "cmd give weapon 5" alone: 0 tiles.
+    #   · "cmd addbot" + a long wait: 0 tiles.
+    #   · One run of the cmd-wrapped chain DID measure 22 tiles, and repeated
+    #     runs of the identical chain measured 0. So that number was noise, not
+    #     a signal — recorded here precisely because it would otherwise look
+    #     like a working configuration.
+    #
+    # The likely cause is r_pinFrameTime: the capture pins the clock for
+    # determinism, which also stops particles ageing, so whether any are alive
+    # in the captured frame depends on where the emit landed relative to the
+    # screenshot. A transient effect is the wrong signal for a pinned capture;
+    # what this needs is a CONTINUOUS emitter, or a console command that emits
+    # directly and synchronously.
+    #
+    # Left runnable and documented rather than deleted or quietly passing: the
+    # A/B and the tile measurement are the reusable part, and a gate that
+    # passes for an unknown reason is worse than one that says it is unfinished.
+    CAP_POST_CMD="${CAP_POST_CMD:-cmd give weapon 5; wait 5; cmd +attack; wait 30; cmd -attack}"
 
     capture_fixed_cam "$PT_MAP" "$PT_POS" "particles_on" \
         $PT_COMMON "+set r_particles 1" || rc=1
