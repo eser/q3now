@@ -646,12 +646,28 @@ FUNCTION(WIRED_ADD_GTEST target ctest_prefix labels)
 	TARGET_LINK_LIBRARIES(${target} PRIVATE GTest::gtest GTest::gtest_main)
 	TARGET_COMPILE_FEATURES(${target} PRIVATE cxx_std_17)
 
-	gtest_discover_tests(${target}
-		TEST_PREFIX "${ctest_prefix}."
-		PROPERTIES
-			LABELS "${labels}"
-			TIMEOUT 30
-		DISCOVERY_TIMEOUT 30)
+	# gtest_discover_tests RUNS the binary at build time (--gtest_list_tests) to
+	# enumerate its cases. That is fine when host and target match and impossible
+	# when they do not: the llvm-mingw cross build produces Windows .exe files
+	# and the Linux builder tries to execute them, which fails as
+	# "Syntax error: word unexpected" — the shell attempting to interpret a PE
+	# binary. Registering the tests would be pointless there anyway, since ctest
+	# on that host could not run them either.
+	#
+	# The target still BUILDS under cross-compilation, which is the part worth
+	# keeping: a gtest target that stops compiling for Windows should fail the
+	# cross build.
+	IF(CMAKE_CROSSCOMPILING)
+		MESSAGE(STATUS "${target}: built but not registered (cross-compiling; "
+			"the host cannot execute target binaries)")
+	ELSE()
+		gtest_discover_tests(${target}
+			TEST_PREFIX "${ctest_prefix}."
+			PROPERTIES
+				LABELS "${labels}"
+				TIMEOUT 30
+			DISCOVERY_TIMEOUT 30)
+	ENDIF()
 
 	ADD_DEPENDENCIES(host_tests ${target})
 	IF(WIRED_HOST_SANITIZERS)
