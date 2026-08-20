@@ -657,6 +657,16 @@ static struct {
 static void Nav_BakeWorker( void *arg )
 {
     (void)arg;
+
+    /* Water-edge OMCs are produced HERE rather than with the other producers on
+     * the spawn tick: they need only geom and collision (thread-legal), and they
+     * are the expensive ones — an O(cells x column samples) scan that used to
+     * freeze map spawn. Must run BEFORE Nav_Build_Internal, since the OMCs it
+     * appends are bake input. navBake.omc is this thread's to write: the main
+     * thread finished filling it before spawning us and does not touch it again
+     * until it observes NAV_BAKE_DONE. */
+    Nav_OMC_BuildWaterEdge( &navBake.geom, &navBake.omc );
+
     dtNavMesh *mesh = Nav_Build_Internal( &navBake.geom, &navBake.omc );
     navBake.result = mesh;
     navBake.ok     = mesh ? qtrue : qfalse;
@@ -745,8 +755,12 @@ static qboolean Nav_BakeBegin( const char *mapname, int checksum )
         return qtrue;
     }
 
-    /* Thread spawn failed — build inline so the map is still navigable. */
+    /* Thread spawn failed — build inline so the map is still navigable. This
+     * path pays the water-edge scan on the tick, because there is no worker to
+     * pay it on; that is the same cost as before the split and the reason the
+     * trace budget is still enforced. */
     Com_Log( SEV_INFO, LOG_CH(ch_nav), "nav: could not spawn bake thread for '%s', baking inline\n", mapname );
+    Nav_OMC_BuildWaterEdge( &navBake.geom, &navBake.omc );
     nav.mesh = Nav_Build_Internal( &navBake.geom, &navBake.omc );
     Nav_Geom_HeapFree( &navBake.geom );
     navBake.state = NAV_BAKE_IDLE;

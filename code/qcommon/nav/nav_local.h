@@ -349,16 +349,14 @@ typedef struct {
  *
  * The scan is O(covered cells x column samples) and BOTH factors grow with the
  * map: cells with the XY extent at 8-unit resolution, samples with the Z extent
- * at 4-unit resolution (up to 544). It also runs on the MAIN THREAD, in
- * Nav_OMC_Build before the bake worker starts — so an unbounded scan is a
- * frozen process during map spawn, with the connect screen up and no gamestate
- * ever sent. That is exactly how arenam3 presented: not a hang, an unbounded
- * amount of work nobody had put a number on.
+ * at 4-unit resolution (up to 544).
  *
- * (Being on the main thread is a sequencing fact, NOT a collision constraint:
- * CM_BoxTrace is thread-legal since the collision thread-safety work, and
- * Nav_GeneratePhysicsLinks already calls it from the bake worker. Moving this
- * pass off the tick is therefore possible; see TASK-179 #3.)
+ * The scan now runs on the BAKE WORKER (Nav_OMC_BuildWaterEdge), so its cost is
+ * no longer a frozen map spawn — which is how arenam3 presented: not a hang,
+ * an unbounded amount of work nobody had put a number on. The budget survives
+ * that move: it still bounds a pathological map's contribution to bake time,
+ * and the inline fallback (bake thread could not be spawned) pays the scan on
+ * the tick exactly as before.
  *
  * The budget is a REFUSAL, not a throttle: when it is exhausted the producer
  * abandons the water-edge pass entirely rather than emitting links derived from
@@ -668,6 +666,13 @@ struct mapFile_s;
  * to gate + place the door floor-gap off-mesh connections on the real floor. */
 void Nav_OMC_Build( const struct mapFile_s *bsp, const navGeom_t *geom,
                     navOmcInput_t *out );
+
+/* The water-edge producer, split out because it is the only one that needs no
+ * `bsp` — geom and the collision world are enough — and therefore the only one
+ * that can run off the map-spawn tick. Called from the BAKE WORKER, appending to
+ * the same navOmcInput_t the main-thread producers already filled. See the
+ * definition in nav_offmesh.c for why it is worth moving. */
+void Nav_OMC_BuildWaterEdge( const navGeom_t *geom, navOmcInput_t *out );
 
 /* --------------------------------------------------------------------------
    Trap dispatch (nav_traps.c)

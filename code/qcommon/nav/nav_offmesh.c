@@ -611,8 +611,8 @@ static void buildDoorGapOmcs( const entDef_t *defs, int numDefs,
 
    Reconnects two walkable floor components split by the bake at a shallow
    liquid seam (a wade the bake fragmented into a riser staircase above the
-   walk-climb).  Runs on the MAIN THREAD (Nav_OMC_Build, before the bake spawns)
-   so the loaded collision model can be queried; the worker only consumes the
+   walk-climb).  Runs on the BAKE WORKER (Nav_OMC_BuildWaterEdge): it queries the
+   loaded collision model, which is thread-legal, and the bake consumes the
    emitted navOmcEntry_t values in voxel space.  All collision goes through the
    ONE format-agnostic tracer: CM_BoxTrace resolves Q1 hull-1 (CONTENTS_PLAYERCLIP
    selects the hull) and Q3 brushes with no Q1/Q3 branch; CM_PointContents reads
@@ -1315,15 +1315,53 @@ void Nav_OMC_Build( const struct mapFile_s *bsp, const navGeom_t *geom,
     buildDoorGapOmcs(    defs, numDefs, bsp, geom, out );
     int nDoorGaps    = out->count - c0; c0 = out->count;
     buildHatchDescentOmcs( defs, numDefs, bsp, geom, out );
-    int nHatches     = out->count - c0; c0 = out->count;
-    buildWaterEdgeOmcs(  geom, out );
-    int nWaterEdge   = out->count - c0;
+    int nHatches     = out->count - c0;
 
     Com_Log( SEV_INFO, LOG_CH(ch_nav_build), "OMC: %d trigger_push, %d trigger_teleport, "
-                "%d target_push, %d func_plat, %d door_gap, %d hatch_descent, %d water_edge  (total %d)\n",
-                nJumpPads, nTeleporters, nTargetPush, nPlatforms, nDoorGaps, nHatches, nWaterEdge, out->count );
+                "%d target_push, %d func_plat, %d door_gap, %d hatch_descent  (total %d, "
+                "water-edge deferred to the bake worker)\n",
+                nJumpPads, nTeleporters, nTargetPush, nPlatforms, nDoorGaps, nHatches, out->count );
 
     Z_Free( defs );
+}
+
+/*
+=================
+Nav_OMC_BuildWaterEdge
+
+The water-edge producer, split out of Nav_OMC_Build so it can run on the BAKE
+WORKER instead of the map-spawn tick.
+
+WHY IT IS THE ONE THAT MOVES
+Every other producer above needs `bsp` — the entity string, brush models, the
+things that only exist while the map file is loaded on the main thread. This one
+takes only `geom` and the collision world, and CM_BoxTrace has been thread-legal
+since the collision thread-safety work (Nav_GeneratePhysicsLinks already traces
+from the worker). Its place on the main thread was a sequencing accident, not a
+constraint.
+
+WHY MOVING IT MATTERS
+It is also by far the most expensive: an O(cells x column samples) scan that
+measured ~1s on an ordinary arena and, before it was bounded, over 150s on
+arenam3 — all of it inside SV_SpawnServer_Tick, which is a frozen process with
+the connect screen up rather than a longer load. On the worker the map spawns
+immediately and the scan costs wall-clock nobody is waiting on.
+
+The trace budget stays. It is no longer defending the tick, but it still bounds
+a pathological map's contribution to bake time, and it is what keeps a scan from
+running unboundedly on a machine that has already handed the player a playable
+map.
+=================
+*/
+void Nav_OMC_BuildWaterEdge( const navGeom_t *geom, navOmcInput_t *out )
+{
+    const int before = out->count;
+
+    buildWaterEdgeOmcs( geom, out );
+
+    Com_Log( SEV_INFO, LOG_CH(ch_nav_build),
+        "OMC: %d water_edge (bake worker, total %d)\n",
+        out->count - before, out->count );
 }
 
 /* -------------------------------------------------------------------------
