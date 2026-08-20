@@ -129,12 +129,12 @@ qboolean ParticleParm_IsUnset( const particleParm_t *parm ) {
 	return ( parm->calc == PARM_CONSTANT && parm->val0 == 0.0f ) ? qtrue : qfalse;
 }
 
-static float CG_SampleCurve( int curve, float fraction ) {
-	const float *table = CG_GetParticleCurve( curve );
+static float CG_SampleCurve( const particleParm_t *parm, float fraction ) {
+	const float *table = parm->samples;
 	float        pos, frac;
 	int          i0, i1;
 
-	if ( !table )
+	if ( !parm->hasCurve )
 		return 1.0f;   /* no curve => neutral multiplier, never a zeroing surprise */
 
 	if ( fraction <= 0.0f )
@@ -173,12 +173,12 @@ float ParticleParm_Eval( const particleParm_t *parm, float fraction, float jitte
 		/* The table carries the SHAPE in 0..1; val0/val1 place it in range.
 		   Authoring a falloff once and reusing it at different magnitudes is
 		   the reason for that split. */
-		shape = CG_SampleCurve( parm->curve, fraction );
+		shape = CG_SampleCurve( parm, fraction );
 		base  = parm->val0 + ( parm->val1 - parm->val0 ) * shape;
 		break;
 
 	case PARM_CURVE_TIMES_LINEAR:
-		shape = CG_SampleCurve( parm->curve, fraction );
+		shape = CG_SampleCurve( parm, fraction );
 		base  = shape * ( parm->val0 + ( parm->val1 - parm->val0 ) * fraction );
 		break;
 
@@ -194,3 +194,25 @@ float ParticleParm_Eval( const particleParm_t *parm, float fraction, float jitte
 	return base + parm->variance * jitterPick;
 }
 
+
+qboolean CG_ResolveParticleParmCurve( particleParm_t *parm, const char *curveName ) {
+	const float *samples;
+	int          i;
+
+	if ( !parm )
+		return qfalse;
+
+	samples = CG_GetParticleCurve( CG_FindParticleCurve( curveName ) );
+	if ( !samples ) {
+		/* Unknown curve: leave the parm alone rather than zeroing it. A class
+		   whose curve failed to register keeps whatever constant it had, which
+		   still draws — blanking it would turn a registration slip into an
+		   invisible effect. */
+		return qfalse;
+	}
+
+	for ( i = 0; i < PARTICLE_CURVE_SAMPLES; i++ )
+		parm->samples[i] = samples[i];
+	parm->hasCurve = 1;
+	return qtrue;
+}

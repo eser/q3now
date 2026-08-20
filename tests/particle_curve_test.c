@@ -126,9 +126,10 @@ int main( void ) {
 	// shifts every curve slightly — visible in motion, invisible in review.
 	memset( &parm, 0, sizeof( parm ) );
 	parm.calc  = PARM_CURVE;
-	parm.curve = idxRamp;
 	parm.val0  = 0.0f;
 	parm.val1  = 100.0f;
+	Check( "resolving a registered curve into a parm succeeds",
+		CG_ResolveParticleParmCurve( &parm, "ramp" ) );
 	CheckNear( "curve at 0 samples the first entry",  ParticleParm_Eval( &parm, 0.0f, 0.0f ),   0.0f );
 	CheckNear( "curve at 1 samples the last entry",   ParticleParm_Eval( &parm, 1.0f, 0.0f ), 100.0f );
 	CheckNear( "curve at 0.5 interpolates the middle",ParticleParm_Eval( &parm, 0.5f, 0.0f ),  50.0f );
@@ -147,9 +148,21 @@ int main( void ) {
 	// A parm pointing at an unregistered curve must stay usable rather than
 	// collapsing to zero — a missing curve should degrade, not blank the
 	// effect out.
-	parm.curve = PARTICLE_MAX_CURVES + 10;
-	CheckNear( "missing curve degrades to a neutral sample",
-		ParticleParm_Eval( &parm, 0.5f, 0.0f ), 20.0f );
+	// Resolving an UNKNOWN curve must leave the parm alone rather than
+	// zeroing it: a class whose curve failed to register should keep drawing
+	// with whatever constant it had, not vanish.
+	{
+		particleParm_t missing;
+		memset( &missing, 0, sizeof( missing ) );
+		missing.calc = PARM_CURVE;
+		missing.val0 = 5.0f;
+		missing.val1 = 20.0f;
+		Check( "resolving an unknown curve reports failure",
+			!CG_ResolveParticleParmCurve( &missing, "no-such-curve" ) );
+		Check( "a failed resolve leaves hasCurve clear", missing.hasCurve == 0 );
+		CheckNear( "unresolved curve degrades to a neutral sample",
+			ParticleParm_Eval( &missing, 0.5f, 0.0f ), 20.0f );
+	}
 
 	// ── 5. curve × linear ───────────────────────────────────────────────
 	// A shape riding on an independent trend: flicker that also fades,
@@ -161,7 +174,8 @@ int main( void ) {
 
 	memset( &parm, 0, sizeof( parm ) );
 	parm.calc  = PARM_CURVE_TIMES_LINEAR;
-	parm.curve = idxSpike;
+	Check( "second curve resolves into a parm",
+		CG_ResolveParticleParmCurve( &parm, "spike" ) );
 	parm.val0  = 10.0f;
 	parm.val1  = 0.0f;               // fades to nothing
 	CheckNear( "curve*linear at 0 is curve*val0", ParticleParm_Eval( &parm, 0.0f, 0.0f ), 20.0f );
@@ -205,6 +219,65 @@ int main( void ) {
 			filled < PARTICLE_MAX_CURVES + 4 );
 		Check( "an already-registered curve survives exhaustion",
 			CG_FindParticleCurve( "ramp" ) == idxRamp );
+	}
+
+	// ── 8. the GLSL mirror carries the same arithmetic ──────────────────
+	//
+	// The evaluator exists TWICE: in C above, and in GLSL for both the
+	// compute integrate pass and the vertex shader. Nothing at runtime
+	// compares them, and a divergence does not crash — it renders something
+	// other than what was authored, which is the hardest kind of defect to
+	// notice.
+	//
+	// Reading the shader source is a blunt check, but it is the only one
+	// available without a GPU in the test harness, and it catches the
+	// specific mistakes that matter: the sample span, the neutral fallback,
+	// and each calc branch. A shader edit that drops one of these fails here
+	// instead of shipping.
+	{
+		/* Absolute paths from CMake. A relative path would make this check
+		   depend on the working directory, and it silently SKIPped when run
+		   from the build tree — a mirror check that does not run is exactly
+		   the hole it was written to close. */
+#ifndef SHADER_DIR
+#error "SHADER_DIR must be defined (absolute path to code/renderervk/shaders)"
+#endif
+		static const char *shaders[] = {
+			SHADER_DIR "/particle.vert",
+			SHADER_DIR "/particle_integrate.comp"
+		};
+		static const struct { const char *needle, *why; } mirrors[] = {
+			{ "fraction * 7.0",                 "sample span is (N-1), not N" },
+			{ "p.samples[7]",                   "fraction 1 reads the last sample" },
+			{ "clamp( fraction, 0.0, 1.0 )",    "fraction is clamped, not extrapolated" },
+			{ "return 1.0;",                    "a curve-less parm samples neutral" },
+			{ "base = p.val0;",                 "CONSTANT branch" },
+			{ "mix( p.val0, p.val1, fraction )","LINEAR branch" },
+			{ "base + p.variance * jitterPick", "variance applies once, from the carried pick" }
+		};
+		int si, mi;
+
+		for ( si = 0; si < (int)( sizeof( shaders ) / sizeof( shaders[0] ) ); si++ ) {
+			char  buf[65536];
+			FILE *fh = fopen( shaders[si], "rb" );
+			size_t n;
+
+			if ( !fh ) {
+				printf( "  FAIL cannot open %s\n", shaders[si] );
+				failures++;
+				continue;
+			}
+			n = fread( buf, 1, sizeof( buf ) - 1, fh );
+			fclose( fh );
+			buf[n] = '\0';
+
+			for ( mi = 0; mi < (int)( sizeof( mirrors ) / sizeof( mirrors[0] ) ); mi++ ) {
+				char label[160];
+				snprintf( label, sizeof( label ), "%s mirrors: %s",
+					strrchr( shaders[si], '/' ) + 1, mirrors[mi].why );
+				Check( label, strstr( buf, mirrors[mi].needle ) != NULL );
+			}
+		}
 	}
 
 	printf( "\n" );
