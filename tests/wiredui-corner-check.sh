@@ -59,7 +59,20 @@ GOLDEN="${GOLDEN:-$GOLDEN_DEFAULT}"
 # Generate first, then add the .py suffix (same fix as smoke.sh).
 ASSERT_PY="$(mktemp "$WIRED_TMP/wired-corner-XXXXXX")".py
 SELF_TMP=""
-cleanup() { rm -f "$ASSERT_PY"; [ -n "$SELF_TMP" ] && rm -rf "$SELF_TMP"; }
+# WIRED_KEEP_ARTIFACTS=1 keeps the captured menu frame and prints where it is.
+# A corner delta tells you THAT a corner moved; deciding whether the new corner is
+# a legitimate drawing or the very corner-square this gate exists to catch needs
+# the frame itself. Same affordance the ral-*-check.sh gates offer.
+cleanup() {
+	rm -f "$ASSERT_PY"
+	if [ -n "$SELF_TMP" ]; then
+		if [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ]; then
+			echo "  retained: $SELF_TMP"
+		else
+			rm -rf "$SELF_TMP"
+		fi
+	fi
+}
 trap cleanup EXIT INT TERM
 cat > "$ASSERT_PY" <<'PYEOF'
 import sys
