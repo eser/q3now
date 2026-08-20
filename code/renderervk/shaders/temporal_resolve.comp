@@ -63,6 +63,21 @@ vec4 mixPrecise(vec4 x, vec4 y, float a) {
 	return result;
 }
 
+// Multiply two already-clamped weights. Declared AFTER the mixPrecise family on
+// purpose: the reflection contract pins each `precise` result by its generated
+// SPIR-V name (%result, %result_0, …), which is assigned in declaration order,
+// so inserting a function above them renumbers the lot and breaks the gate.
+//
+// It takes plain parameters instead of clamping inline for the same reason
+// mixPrecise does its arithmetic one step at a time: `precise` does not
+// propagate through a builtin such as clamp. Writing `clamp(a,0,1) * b` here
+// yields a bare OpFMul with no NoContraction — verified in the disassembly, not
+// assumed — leaving this one step silently weaker than the rest of the shader.
+float scalePrecise(float weight, float confidence) {
+	precise float scaled = weight * confidence;
+	return scaled;
+}
+
 vec4 sampleCurrent(ivec2 pixel) {
 	ivec2 bounded = clamp(pixel, ivec2(0), ivec2(pc.extent) - ivec2(1));
 	return texelFetch(sampler2D(currentColor, nearestSampler), bounded, 0);
@@ -124,7 +139,17 @@ void main() {
 	bool inside = all(greaterThanEqual(previousCenter, vec2(0.0)))
 		&& all(lessThan(previousCenter, vec2(pc.extent)));
 
-	if (finite4(current) && finite1(valid) && valid > 0.5
+	// `valid` is a continuous confidence, not a flag. Zero still means "no usable
+	// history here" (INVALIDATE): the velocity carries no meaning, so reprojection
+	// is skipped outright. Anything above zero reprojects, and the confidence then
+	// scales how much of the reprojected history survives the blend below.
+	//
+	// It used to be read as `valid > 0.5`, which threw away every intermediate
+	// value the R8 channel can carry. Surfaces that are only partly trustworthy —
+	// alpha-tested cut-outs being the motivating case, where a pixel's coverage
+	// flips between frames — could then only be all-in or all-out. Neither is
+	// right: all-in ghosts, all-out loses the anti-aliasing.
+	if (finite4(current) && finite1(valid) && valid > 0.0
 			&& finite2(velocity) && finite2(previousTexel) && inside) {
 		float currentDevice = texelFetch(
 			sampler2D(currentDeviceDepth, nearestSampler), pixel, 0).r;
@@ -151,8 +176,18 @@ void main() {
 					&& all(not(isinf(neighborhoodMax)))) {
 				vec3 clampedPrior = clamp(
 					prior.rgb, neighborhoodMin, neighborhoodMax);
+				// Scale the history weight by the pixel's confidence. At
+				// valid == 1 this is exactly the previous behaviour
+				// (weight * 1.0), so fully-trusted surfaces are unchanged
+				// and the existing evidence still holds. Below 1 the pixel
+				// keeps proportionally more of its current-frame colour,
+				// which is what suppresses ghosting on partly-trusted
+				// surfaces without disabling temporal accumulation for them.
+				float confidence = clamp(valid, 0.0, 1.0);
+				float baseWeight = clamp(pc.historyWeight, 0.0, 1.0);
+				float weight = scalePrecise(baseWeight, confidence);
 				precise vec3 resolvedRgb = mixPrecise(current.rgb, clampedPrior,
-					clamp(pc.historyWeight, 0.0, 1.0));
+					weight);
 				result = vec4(resolvedRgb, current.a);
 			}
 		}

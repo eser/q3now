@@ -28315,6 +28315,16 @@ static qboolean vk_temporal_motion_prepare_bound_draw( uint32_t pipelineSlot )
 		return qfalse;
 	}
 	stateBits = def->state_bits;
+	// Alpha-tested draws leave here, in front of the classifier.
+	//
+	// Note this shadows the classifier's own TEMPORAL_MOTION_DEFER_ATEST
+	// branch: facts.alphaTested is never set (the memset below leaves it
+	// zero), so that branch is unreachable from production today. The two
+	// are NOT interchangeable — routing ATEST through the classifier instead
+	// would count the draw (prepared/deferred/preserved) and stage a PRESERVE
+	// payload, where this early return stages nothing at all. Swapping them
+	// is a behaviour change that needs GPU evidence, so the reactive-mask
+	// work owns that step; see TASK-197.
 	if ( stateBits & GLS_ATEST_BITS ) return qfalse;
 	memset( &facts, 0, sizeof( facts ) );
 	facts.visible = qtrue;

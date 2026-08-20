@@ -38,6 +38,12 @@ required={
  "%jitterDelta":"OpFSub","%jitterTexel":"OpFMul","%motionTexel":"OpFMul",
  "%unjitteredPreviousTexel":"OpFSub","%previousTexel":"OpFAdd",
  "%previousCenter":"OpFAdd",
+ # scalePrecise: history weight scaled by the pixel's motion confidence.
+ # glslang renames the second `scaled` to %scaled_0 (the first belongs to
+ # linearizeDepth). Pinned because `precise` does NOT survive being written as
+ # clamp(a,0,1) * b — that form compiles to an undecorated OpFMul, which is why
+ # the multiply lives in its own function taking pre-clamped parameters.
+ "%scaled_0":"OpFMul",
 }
 for variable,want in required.items():
     values=stored.get(variable,[])
@@ -49,6 +55,26 @@ if " FMix " in text or " Fract " in text:
 divisions=[result for result,op in opcode.items() if op=="OpFDiv"]
 if divisions!=stored.get("%result",[]):
     raise SystemExit(f"unexpected color-path OpFDiv: {divisions}")
+
+# Motion validity is a CONTINUOUS confidence, not a flag.
+#
+# It used to gate reprojection with `valid > 0.5` and then blend with a constant
+# historyWeight, which collapsed the whole R8 channel to two states. Alpha-tested
+# cut-outs are the motivating case: a pixel's coverage flips between frames, so
+# its history is partly trustworthy — all-in ghosts, all-out loses the AA. The
+# admission test is therefore `> 0` (zero still means "no usable history", where
+# the velocity is meaningless), and the surviving confidence scales the blend.
+#
+# Both halves are pinned here, because either one silently reverts on its own:
+# restore the 0.5 threshold and intermediate confidences never reach the blend;
+# drop the scale and they reach it but change nothing.
+if not re.search(r"%\S+\s*=\s*OpFOrdGreaterThan\s+%bool\s+%\S+\s+%float_0\b",text):
+    raise SystemExit("motion validity is not admitted as a continuous > 0 test")
+if re.search(r"OpFOrdGreaterThan\s+%bool\s+%\S+\s+%float_0_5\b",text):
+    raise SystemExit("motion validity regressed to a binary 0.5 threshold")
+scaled_multiply=stored.get("%scaled_0",[])
+if len(scaled_multiply)!=1:
+    raise SystemExit(f"history weight is not scaled exactly once: {scaled_multiply}")
 PYEOF
 
 grep -Eq '^[[:space:]]*OpExecutionMode %main LocalSize 8 8 1$' "$dis"
