@@ -202,6 +202,22 @@ CONTENT="${WIRED_CONTENT_ROOT:-$PACK}";if [ -f "$CONTENT/base/pax01.sw3z" ];then
 ROOT="$(mktemp -d -t ral-pipeline-runtime-XXXXXX 2>/dev/null || mktemp -d)";HOME_DIR="$ROOT/home";RUN="$ROOT/runtime";FORCED=0
 cleanup(){ local status=$?;trap - EXIT INT TERM;[ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ] || rm -rf "$ROOT";exit "$status";};trap cleanup EXIT;trap 'exit 130' INT;trap 'exit 143' TERM
 mkdir -p "$HOME_DIR/base" "$RUN/Contents/MacOS";cp "$PACK/base/pax21.sw3z" "$HOME_DIR/base/" || exit 1;cp "$BASE" "$HOME_DIR/base/" || exit 1;cp "$WIRED" "$RUN/wired" || exit 1;chmod +x "$RUN/wired";cp "$RENDERER" "$MOLTEN" "$RUN/Contents/MacOS/" || exit 1
+# Anything the binary resolves through @executable_path must sit beside the copy
+# we just made, NOT in Contents/MacOS: the renderer and MoltenVK are dlopen'd on
+# a relative search path, but hard-linked dependencies are looked up by dyld
+# against the executable's own directory. Ask the binary which ones those are
+# instead of hardcoding a list — a shipped bundle links libSDL3/libcrypto, a
+# plain devel build may link neither, and guessing gets it wrong in both
+# directions. Missing files are left alone; the run then fails loudly on its own.
+if command -v otool >/dev/null 2>&1;then
+	otool -L "$WIRED" 2>/dev/null | sed -n 's|^[[:space:]]*@executable_path/\([^ ]*\).*|\1|p' | while read -r dep;do
+		[ -n "$dep" ] || continue
+		for candidate in "$WD" "$WD/Contents/MacOS" "$WD/q3now-preview.arm64.app/Contents/MacOS" "$WD/../MacOS";do
+			[ -f "$candidate/$dep" ] && { cp "$candidate/$dep" "$RUN/";break; }
+		done
+	done
+fi
+
 BOOT="$HOME_DIR/base/ral-pipeline-runtime.cfg";printf '%s\n' 'log renderer.ral info' 'set r_fbo 1' 'set activeAction "ral_pipeline_test ; wait 10 ; ral_dump live swapchain ; wait 10 ; ral_dump live swapchain ; wait 10 ; viewpos ; wait 30 ; echo Q0_RAL_PIPELINE_COMPLETE ; quit"' 'map arena7' >"$BOOT"
 MANIFEST="$ROOT/manifest.jsonl";python3 - "$MANIFEST" "$WIRED" "$RENDERER" "$MOLTEN" "$PACK/base/pax21.sw3z" "$BASE" "$0" "$BOOT" <<'PYEOF'
 import hashlib,json,os,sys
