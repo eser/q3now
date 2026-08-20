@@ -102,19 +102,25 @@ because the obvious model of this API is wrong in a way that matters:
 
 | target | `OpenProcess` | `GetExitCodeProcess` |
 |---|---|---|
-| live process | succeeds | `STILL_ACTIVE` |
-| exited process | **succeeds** | fails with `ERROR_ACCESS_DENIED` under `SYNCHRONIZE` alone |
+| live process | succeeds | `STILL_ACTIVE` (with `SYNCHRONIZE` alone: fails, `ERROR_ACCESS_DENIED`) |
+| exited process | fails, `ERROR_INVALID_PARAMETER` — *unless something still holds a handle* | — |
 | unused pid | fails, `ERROR_INVALID_PARAMETER` | — |
 
-`OpenProcess` succeeding on an *exited* process is not a quirk: Windows keeps
-the process object alive while any handle to it exists, so the id is not
-recycled and "gone" is not an open failure the way `ESRCH` is on POSIX. The
-distinction therefore lives entirely in `GetExitCodeProcess` — which needs
-`PROCESS_QUERY_LIMITED_INFORMATION`, not the `SYNCHRONIZE` the original code
-asked for. With too little access that call failed, the rule above read the
-failure as "alive", and parent-exit detection became unreachable rather than
-merely conservative. The patch asks for both rights, so the check answers the
-question it was written to answer.
+Two things follow, and the second is why the access right matters.
+
+An open *failure* is a reliable "dead", but an open *success* is not a reliable
+"alive": Windows keeps the process object alive while any handle to it exists,
+and the daemon can itself be that holder, so an exited parent may still open
+cleanly. `GetExitCodeProcess` therefore has to be the decider.
+
+That call needs `PROCESS_QUERY_LIMITED_INFORMATION`, not the `SYNCHRONIZE` the
+original code asked for. With too little access it failed even on a live
+process, the rule above read the failure as "alive", and parent-exit detection
+became *unreachable* rather than merely conservative. The patch asks for both
+rights, so the check answers the question it was written to answer.
+
+`tools/win-process-liveness/` reproduces the whole table, including an
+`-access synchronize` flag that restores the original bug on demand.
 
 Upstreamable: nothing in it is specific to this engine.
 
