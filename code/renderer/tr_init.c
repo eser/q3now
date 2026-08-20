@@ -652,13 +652,10 @@ static void InitOpenGL( void )
 			{
 				glConfig.vidWidth *= 2;
 				glConfig.vidHeight *= 2;
-				// Keep the logical size in step with the render target — see the
-				// matching block in code/renderervk/tr_init.c for why: WiredUI
-				// derives its DPI scale from vidHeight / vidHeightLogical, so
-				// doubling only the physical side folds supersampling into that
-				// ratio and double-scales every font.
-				if ( glConfig.vidWidthLogical > 0 )  glConfig.vidWidthLogical  *= 2;
-				if ( glConfig.vidHeightLogical > 0 ) glConfig.vidHeightLogical *= 2;
+				// vidWidthLogical/Height stay untouched on purpose — see the
+				// matching block in code/renderervk/tr_init.c: WiredUI lays out
+				// on the supersampled canvas, so its dpiScale is SUPPOSED to
+				// absorb this factor.
 				ri.CL_SetScaling( 2.0, gls.captureWidth, gls.captureHeight );
 			}
 		}

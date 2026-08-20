@@ -2282,8 +2282,8 @@ static cvar_t *wired_hotreload = NULL;
 static int     wui_lastReloadCheck = 0;
 static cvar_t *wired_debug_layout = NULL;
 
-// ── hud cvar — selects which .whud file to load ───────────────────────
-static cvar_t *wired_hud = NULL;                            // basename only, e.g. "hud_default" → ui/hud_default.whud
+// ── hud cvar — selects which .wui file to load ────────────────────────
+static cvar_t *wired_hud = NULL;                            // basename only, e.g. "hud_default" → ui/hud_default.wui
 static char    wui_hud_lastLoaded[MAX_CVAR_VALUE_STRING]; // last value we actually loaded — string diff drives reloads
 
 /*
@@ -2373,7 +2373,7 @@ static void WiredUI_TestAll_f( void ) {
 /* ad-hoc loose-file menu loader. Bypasses no FS layers — relies on
  * the standard pak+loose search; for any path NOT present in a pak the FS
  * layer resolves to the loose file in homepath or installpath. Useful for
- * fixture .wmenu authoring under test_phase2c2/ etc. without rebuilding paks.
+ * fixture .wui authoring under test_phase2c2/ etc. without rebuilding paks.
  *
  * Kept in tree as a dev workflow utility; a later pass decides whether to gate
  * behind a developer cvar for release. */
@@ -2382,7 +2382,7 @@ static void WiredUI_LoadMenuLoose_f( void ) {
 	if ( Cmd_Argc() < 2 ) {
 		Com_Log( SEV_INFO, LOG_CH(ch_ui),
 			"Usage: wui_load_menu_loose <path>\n"
-			"  e.g. wui_load_menu_loose ui/test_phase2c2/fixture_repeat_lua.wmenu\n" );
+			"  e.g. wui_load_menu_loose ui/test_phase2c2/fixture_repeat_lua.wui\n" );
 		return;
 	}
 	path = Cmd_Argv( 1 );
