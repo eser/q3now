@@ -3,6 +3,12 @@
 # Saves PNGs + reports md5/mean per (run, vp). Cleans up at end.
 set -u
 . "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
+
+# Refuse to measure with byte readers that do not work on this host. Every
+# number this script prints comes out of a png2raw|od|awk pipeline, and when od
+# fails the pipeline yields no rows: awk then prints 0, which reads as "no
+# difference" rather than "nothing was read". Fail loudly instead.
+wired_od_selftest || { echo "FAIL: byte readers unusable on this host — refusing to report zeros as measurements"; exit 1; }
 # Isolated capture home, NOT the player's: this script deletes files under
 # base/ and passes CVAR_ARCHIVE cvars (r_mode, r_customwidth, r_brightness)
 # as +set, which a clean exit persists into config.cfg.
@@ -57,13 +63,13 @@ capture() {
     if [ ! -s "$shot" ]; then printf "  run%d vp=%-8s NO_CAPTURE\n" "$run" "$vp_id"; return; fi
     local mean md5
     mean=$("$PNG2RAW" "$shot" \
-        | od -A n -t u1 -v -w16 \
+        | wired_od_bytes \
         | awk 'BEGIN{tot=0;sum=0} { for (j=1;j<=NF;j++) { tot++; sum+=$j } } END{ printf "%.4f", sum/tot }')
     md5=$(md5sum "$shot" | awk '{print $1}')
     cp "$shot" "$OUTDIR/run${run}_${vp_id}.png"
     # per-tile means
     "$PNG2RAW" "$shot" \
-      | od -A n -t u1 -v -w96 | awk '{print $1, $2, $3}' \
+      | wired_od_sample_rgb 32 \
       | awk -v W=40 -v H=720 -v GW=8 -v GH=8 '
             BEGIN { TW=W/GW; TH=H/GH; for(i=0;i<GW*GH;i++){n[i]=0;s[i]=0} }
             NF>=3 {
