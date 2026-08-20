@@ -173,7 +173,15 @@ fi
 [ -n "${WIRED_BINARY:-}" ] && [ -x "$WIRED_BINARY" ] || {
     echo "SKIP: GUI engine binary not found (see GAME-DATA.md §4)"; exit 77; }
 
-OUT="$(mktemp -d)"; trap 'rm -rf "$OUT"' EXIT
+# WIRED_KEEP_ARTIFACTS=1 keeps the two captures and prints where they are, the
+# same affordance the ral-*-check.sh gates offer. A size/richness verdict tells
+# you THAT two frames differ; investigating WHY needs the frames themselves.
+OUT="$(mktemp -d)"
+if [ "${WIRED_KEEP_ARTIFACTS:-0}" = 1 ]; then
+    trap 'echo "  retained: $OUT"' EXIT
+else
+    trap 'rm -rf "$OUT"' EXIT
+fi
 
 # SCENE selects what is on screen when the shot is taken.
 #
@@ -187,6 +195,25 @@ OUT="$(mktemp -d)"; trap 'rm -rf "$OUT"' EXIT
 #            tracks the window — and r_renderScale, which this gate sets, is
 #            exactly the case where it does not. See TASK-200.
 SCENE="${SCENE:-attract}"
+
+# RENDER_W / RENDER_H — decouple the render target from the window.
+#
+# Everything above keeps them equal, because parity means "same picture from
+# two capture paths". Setting them smaller asks a DIFFERENT question, and it is
+# the one TASK-200 needs answered:
+#
+#   WiredUI derives dpiScale = vidHeight / vidHeightLogical. vidHeight follows
+#   the RENDER TARGET (tr_init.c:693-696 assigns it from r_renderHeight);
+#   vidHeightLogical follows the WINDOW (SDL_GetWindowSize). While the two
+#   match, so do the two sizing worlds inside the loading screen — position
+#   from the .wui rect, type and padding from cls.glconfig. Shrink the render
+#   target alone and they must come apart: authored positions hold, glyphs and
+#   padding shrink with the target.
+#
+#   SCENE=loading RENDER_W=720 RENDER_H=450 tests/visual-supersample-parity.sh
+#
+# Left at the window size by default so the parity gate's own meaning is
+# unchanged; this is an investigation lever, not a new assertion.
 
 capture_at() {  # $1 = supersample 0|1, $2 = destination png
     local ss="$1" dest="$2"
@@ -207,6 +234,11 @@ capture_at() {  # $1 = supersample 0|1, $2 = destination png
             echo "unknown SCENE '$SCENE' (want attract|loading)" >&2; return 1 ;;
     esac
 
+    # RENDER_W/H default to the window size, which is what the parity check
+    # wants: same picture, two capture paths. Setting them SMALLER is the
+    # separate question this gate can also answer — see RENDER_W below.
+    local rw="${RENDER_W:-$W}" rh="${RENDER_H:-$H}"
+
     local cfg="$WIRED_BASE/supersample_parity_${ss}.cfg"
     cat > "$cfg" <<EOF
 set r_mode -1
@@ -214,8 +246,8 @@ set r_customwidth $W
 set r_customheight $H
 set r_fullscreen 0
 set r_fbo 1
-set r_renderWidth $W
-set r_renderHeight $H
+set r_renderWidth $rw
+set r_renderHeight $rh
 set r_renderScale 1
 set r_ext_supersample $ss
 vid_restart
