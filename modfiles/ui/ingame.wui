@@ -22,18 +22,24 @@
 // "IN-MATCH" group under the primary stack, laid out as a 2-column grid of
 // slimmer pills so the panel does not overflow 720p.
 //
-// Gametype gating (DEFERRED — follow-up): Join Team / Team Orders only make
-// sense in a team gametype, and Team Arena disables them in FFA/Duel. The .wui
-// format supports `cvarTest "<cvar>" showCvar { ... }` gating (see
-// startserver.wui gating ui_netGameType on "4" "5"), and team gametypes are
-// g_gametype >= GT_TDM(4) .. GT_FREEZETAG(9). BUT there is no menu-readable cvar
-// for the CURRENT in-match gametype on a pure remote-connect client: the client
-// reads gametype into cgs.gametype from CS_SERVERINFO (cg_servercmds.c:191), not
-// into a local g_gametype cvar. Gating on g_gametype would work when hosting but
-// could wrongly HIDE the team buttons on a connected client where the cvar is
-// stale. Hiding a needed button is worse than showing an inert one, so both are
-// left UNCONDITIONAL for now. Proper gating is a follow-up: publish
-// wiredHud->gametype / isTeamGame to a menu-readable cvar/store key, then gate.
+// Gametype gating (RESOLVED 2026-08-21 — the follow-up below was done).
+//
+// The old note deferred this because there was no menu-readable cvar for the
+// CURRENT in-match gametype: the client reads it into cgs.gametype from
+// CS_SERVERINFO, and gating on the local g_gametype would act on a stale value
+// on a remote-connect client. That gap is now filled — CG_ParseServerinfo
+// publishes `ui_isTeamGame` right where cgs.gametypeIsTeamGame is computed
+// (cg_servercmds.c), so it is authoritative for host and remote client alike and
+// re-published whenever serverinfo changes.
+//
+// Only TEAM ORDERS is gated. Join Team is NOT, and deliberately: team.wui also
+// offers Spectator and Auto Join, which are meaningful in FFA and Duel — it is
+// not a team-only control despite the name.
+//
+// The old note also worried that gating would wrongly HIDE a needed button.
+// `enableMode dim` does not hide: the button stays visible, renders greyed and
+// stops accepting input. "Inert but visible" was exactly the outcome that note
+// called acceptable, so the objection no longer applies.
 // The two rows are still hand-inlined (not QW_BUTTON_BLOCK) to sit in the
 // 2-column grid; the chrome is copied from QW_BUTTON_BLOCK so the language matches.
 
@@ -136,7 +142,7 @@ menuDef {
 					gap $spacing_sm
 					height FIT
 					itemDef { name "btn_team"    type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Join Team"   textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "team" dim } }
-					itemDef { name "btn_orders"  type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Team Orders" textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "teamorders" dim } }
+					itemDef { name "btn_orders"  type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Team Orders" textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 cvarTest "ui_isTeamGame" enableCvar { "1" } enableMode dim action { open "teamorders" dim } }
 				}
 
 				// Row 2 — bot management (available in every gametype).
