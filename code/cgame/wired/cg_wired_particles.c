@@ -451,6 +451,42 @@ void CG_RegisterRocketTrailParticleClass( void ) {
 	cls.gravityScale       = 0.0f;                      // no fall
 	cls.drag               = 0.0f;
 
+	// Curve-authored growth. The linear 8→56 above is what a Start/End pair
+	// can express, and it is wrong for smoke: real smoke expands fast as it
+	// leaves the nozzle and then slows as it dissipates. That shape is an
+	// ease-out, and before curves existed there was no way to say it.
+	//
+	// sizeStart/sizeEnd stay set. They are the fallback for any build where
+	// the curve failed to register, and they document what the effect looked
+	// like before — so this reads as a change with a baseline, not a rewrite.
+	{
+		// Ease-out over the normalised lifetime: most of the growth happens
+		// in the first third. Values are the curve's SHAPE in 0..1; val0/val1
+		// below place it in world units.
+		static const float easeOut[PARTICLE_CURVE_SAMPLES] = {
+			0.00f, 0.45f, 0.70f, 0.84f, 0.92f, 0.96f, 0.99f, 1.00f
+		};
+		// Smoke should hold its opacity while it is still dense and fade late,
+		// rather than starting to disappear immediately. Linear alpha is why
+		// the old trail looked thin near the rocket.
+		static const float lateFade[PARTICLE_CURVE_SAMPLES] = {
+			1.00f, 1.00f, 0.97f, 0.90f, 0.76f, 0.55f, 0.28f, 0.00f
+		};
+
+		CG_RegisterParticleCurve( "ease-out", easeOut );
+		CG_RegisterParticleCurve( "late-fade", lateFade );
+
+		cls.sizeParm.calc = PARM_CURVE;
+		cls.sizeParm.val0 = 8.0f;    // same endpoints as the linear version,
+		cls.sizeParm.val1 = 56.0f;   //   so only the SHAPE between them changed
+		CG_ResolveParticleParmCurve( &cls.sizeParm, "ease-out" );
+
+		cls.alphaParm.calc = PARM_CURVE;
+		cls.alphaParm.val0 = 0.0f;
+		cls.alphaParm.val1 = 1.0f;
+		CG_ResolveParticleParmCurve( &cls.alphaParm, "late-fade" );
+	}
+
 	cgs.media.rocketSmokeClass =
 		(qhandle_t)CG_RegisterParticleClass( "rocket_smoke", &cls );
 }
