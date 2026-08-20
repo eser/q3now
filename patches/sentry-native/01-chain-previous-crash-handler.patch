@@ -1,8 +1,8 @@
 diff --git a/src/backends/native/sentry_crash_daemon.c b/src/backends/native/sentry_crash_daemon.c
-index 68a95e1d..8342b8db 100644
+index 68a95e1d..bcc78bcb 100644
 --- a/src/backends/native/sentry_crash_daemon.c
 +++ b/src/backends/native/sentry_crash_daemon.c
-@@ -2805,15 +2805,51 @@ is_parent_alive(pid_t parent_pid)
+@@ -2805,15 +2805,56 @@ is_parent_alive(pid_t parent_pid)
      // Send signal 0 to check if process exists
      return kill(parent_pid, 0) == 0 || errno != ESRCH;
  #elif defined(SENTRY_PLATFORM_WINDOWS)
@@ -27,15 +27,20 @@ index 68a95e1d..8342b8db 100644
 +    // how this check quietly stopped working. Measured against a live engine,
 +    // an exited engine and an unused pid:
 +    //
-+    //   live process      OpenProcess succeeds, exit code STILL_ACTIVE
-+    //   exited process    OpenProcess STILL SUCCEEDS — Windows keeps the
-+    //                     process object alive while any handle to it exists,
-+    //                     so the id is not recycled and "gone" is not an open
-+    //                     failure the way ESRCH is on POSIX. Only
-+    //                     GetExitCodeProcess can tell the two apart, and with
-+    //                     SYNCHRONIZE only it failed with ERROR_ACCESS_DENIED,
-+    //                     which under the rule below reads as "alive" — making
-+    //                     parent-exit detection unreachable in practice.
++    //   live process      OpenProcess succeeds; with SYNCHRONIZE alone
++    //                     GetExitCodeProcess then failed with
++    //                     ERROR_ACCESS_DENIED, which under the rule below
++    //                     reads as "alive" — so parent-exit detection was not
++    //                     merely conservative, it was UNREACHABLE.
++    //   exited process    OpenProcess normally fails with
++    //                     ERROR_INVALID_PARAMETER, same as an unused id — BUT
++    //                     ONLY once nothing holds a handle to it. Windows keeps
++    //                     the process object alive while any handle exists, and
++    //                     this daemon can itself be that holder, in which case
++    //                     the open succeeds for a process that has exited.
++    //                     So an open failure is a reliable "dead" while an open
++    //                     SUCCESS is not a reliable "alive": GetExitCodeProcess
++    //                     has to be the decider.
 +    //   unused pid        OpenProcess fails, ERROR_INVALID_PARAMETER
 +    HANDLE hProcess = OpenProcess(
 +        SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, parent_pid);
