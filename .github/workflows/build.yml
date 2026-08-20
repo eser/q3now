@@ -598,7 +598,30 @@ jobs:
     - uses: actions/upload-artifact@v7
       with:
         name: cross-windows-tests
-        path: build/cross-windows-docker/*_test.exe
+        # Everything except the tests that READ PROJECT SOURCE FILES.
+        #
+        # Those are source-text contracts: they assert that production code
+        # still contains a particular construct, so a guarantee cannot be
+        # deleted without something noticing. Reading the source IS the test,
+        # and the path is baked in at compile time — which makes them meaningful
+        # only on the machine that compiled them.
+        #
+        # Shipped to the Windows runner they read nothing and report a content
+        # failure that looks like a real defect: "FAIL: compositor source is
+        # non-empty -> got 0, want 1". They still run on every host that builds
+        # them, via ctest, where the path is correct.
+        #
+        # Excluded by name rather than by a naming convention because the list
+        # is short and explicit beats clever here: a new source-contract test
+        # that forgets this line fails loudly on Windows, which is a better
+        # outcome than one silently skipped by a pattern.
+        path: |
+          build/cross-windows-docker/*_test.exe
+          !build/cross-windows-docker/bg_animated_emitter_test.exe
+          !build/cross-windows-docker/bg_emit_budget_test.exe
+          !build/cross-windows-docker/bg_layer_zorder_test.exe
+          !build/cross-windows-docker/particle_curve_test.exe
+          !build/cross-windows-docker/playtest_envelope_test.exe
         if-no-files-found: error
 
   # Single downstream publisher. Previously the Linux, macOS and Windows jobs
