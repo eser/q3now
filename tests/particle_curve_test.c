@@ -204,6 +204,67 @@ int main( void ) {
 		Check( "evaluation is deterministic", a == b );
 	}
 
+	// ── 6b. a curve actually changes the shape ──────────────────────────
+	//
+	// Everything above proves the machinery evaluates; this proves it MATTERS.
+	// A curve whose output tracked the linear ramp would pass every test so far
+	// and buy nothing — the whole point is expressing a shape a Start/End pair
+	// cannot.
+	//
+	// The numbers are the rocket smoke's real authoring: the same 8→56 endpoints
+	// as the linear version it replaced, with an ease-out between them. Endpoints
+	// must MATCH (the effect still starts and ends where it did) while the middle
+	// must diverge substantially (that is the change).
+	{
+		static const float easeOut[PARTICLE_CURVE_SAMPLES] = {
+			0.00f, 0.45f, 0.70f, 0.84f, 0.92f, 0.96f, 0.99f, 1.00f
+		};
+		particleParm_t curved, straight;
+		float          lo, hi, maxGap;
+		int            k;
+
+		CG_RegisterParticleCurve( "ab-ease", easeOut );
+
+		memset( &curved, 0, sizeof( curved ) );
+		curved.calc = PARM_CURVE;
+		curved.val0 = 8.0f;
+		curved.val1 = 56.0f;
+		Check( "A/B curve resolves", CG_ResolveParticleParmCurve( &curved, "ab-ease" ) );
+
+		memset( &straight, 0, sizeof( straight ) );
+		straight.calc = PARM_LINEAR;
+		straight.val0 = 8.0f;
+		straight.val1 = 56.0f;
+
+		CheckNear( "curve and linear agree at birth",
+			ParticleParm_Eval( &curved, 0.0f, 0.0f ),
+			ParticleParm_Eval( &straight, 0.0f, 0.0f ) );
+		CheckNear( "curve and linear agree at death",
+			ParticleParm_Eval( &curved, 1.0f, 0.0f ),
+			ParticleParm_Eval( &straight, 1.0f, 0.0f ) );
+
+		maxGap = 0.0f;
+		for ( k = 1; k < 10; k++ ) {
+			float f = (float)k / 10.0f;
+			float g = ParticleParm_Eval( &curved, f, 0.0f )
+			        - ParticleParm_Eval( &straight, f, 0.0f );
+			if ( g < 0.0f ) g = -g;
+			if ( g > maxGap ) maxGap = g;
+		}
+		// Measured at ~19.8 units at f=0.4. The floor is well under that and
+		// well over float noise: it asks "is this a different shape", not "is
+		// it this exact shape", so re-authoring the curve does not break it.
+		Check( "curve diverges from linear in between (>10 units)", maxGap > 10.0f );
+
+		// Ease-out specifically means FASTER early: at a fifth of its life the
+		// smoke should already be well past the linear value. This is the
+		// direction check — a curve that diverged the other way would satisfy
+		// the magnitude test above while looking wrong.
+		lo = ParticleParm_Eval( &curved,   0.2f, 0.0f );
+		hi = ParticleParm_Eval( &straight, 0.2f, 0.0f );
+		Check( "ease-out grows faster than linear early", lo > hi );
+	}
+
 	// ── 7. table exhaustion is refused, not wrapped ─────────────────────
 	// Wrapping would silently alias a new curve onto an existing index and
 	// change effects that were already authored and correct.
