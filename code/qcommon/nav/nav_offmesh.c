@@ -650,6 +650,13 @@ static qboolean waterEdgePointSolid( float qx, float qy, float qz )
  * the sole floor authority — the geom only says WHERE to look (its z can be a
  * wall/water surface, so it is not trusted for the resting height).  Returns
  * qfalse if the column has no standable floor. */
+/* Traces spent by the current water-edge scan, against NAV_WATEREDGE_TRACE_BUDGET.
+ * File-scope rather than threaded through every helper: the scan is single-
+ * threaded main-thread work (collision is not thread-safe, which is the whole
+ * reason it runs here and not on the bake worker), so there is no second scan to
+ * confuse it with. Reset at the start of each scan. */
+static long s_waterEdgeTraces;
+
 static qboolean waterEdgeColumnFloor( float qx, float qy, float zLo, float zHi,
                                       float *outFootZ, qboolean *outWater )
 {
@@ -660,22 +667,59 @@ static qboolean waterEdgeColumnFloor( float qx, float qy, float zLo, float zHi,
     int   i;
     if ( nz > NAV_WATEREDGE_ZSAMPLES ) nz = NAV_WATEREDGE_ZSAMPLES;
 
-    /* One pass: sample hull-1 solidity up the column. */
-    for ( i = 0; i < nz; i++ )
-        solid[i] = waterEdgePointSolid( qx, qy, zLo + i*step ) ? 1 : 0;
-
-    /* Lowest solid→non-solid transition with a full standing run of clear space
-     * above it (the ground, not a ledge/overhang top). */
+    /* Walk UP the column, sampling only as far as the answer requires.
+     *
+     * What is wanted is the LOWEST solid→non-solid transition carrying a full
+     * standing run of clear space above it — the ground, not the top of a ledge
+     * or overhang. That condition is local: once a transition is found, only the
+     * headSteps samples above it decide the outcome, and nothing higher in the
+     * column can change it. So the scan can stop there.
+     *
+     * The previous shape sampled the ENTIRE column first and searched
+     * afterwards, which made every cell cost the full Z extent regardless of
+     * where its floor was. Measured on arena7 that was ~445 traces per cell
+     * against a 544 ceiling — i.e. the early exit was doing almost nothing,
+     * because there was no early exit. Floors sit near the bottom of a column
+     * far more often than not, so stopping at foot+headroom is the difference
+     * between "scan the map's whole Z range per cell" and "scan until you find
+     * the ground".
+     *
+     * Identical result, not an approximation: same predicate, same first match,
+     * evaluated in the same bottom-up order. */
     const int headSteps = (int)( NAV_WATEREDGE_HEADROOM / step );
     float footZ = 0.0f;
     qboolean haveFloor = qfalse;
-    for ( i = 1; i < nz; i++ ) {
-        if ( solid[i-1] && !solid[i] ) {
-            int j, run = 0;
-            for ( j = i; j < nz && !solid[j]; j++ ) run++;
-            if ( run >= headSteps ) { footZ = zLo + i*step; haveFloor = qtrue; break; }
+    int sampled = 0;
+
+    for ( i = 0; i < nz; i++ ) {
+        solid[i] = waterEdgePointSolid( qx, qy, zLo + i*step ) ? 1 : 0;
+        sampled++;
+
+        if ( i == 0 || !( solid[i-1] && !solid[i] ) )
+            continue;
+
+        /* A transition at i: does clear space run headSteps above it? Sample
+         * only that far — and if the run is broken by solid before reaching
+         * headSteps, this is a ledge top, so resume the outer walk from there
+         * rather than rescanning. */
+        int j, run = 0;
+        for ( j = i; j < nz && run < headSteps; j++ ) {
+            if ( j > i ) {
+                solid[j] = waterEdgePointSolid( qx, qy, zLo + j*step ) ? 1 : 0;
+                sampled++;
+            }
+            if ( solid[j] ) break;
+            run++;
         }
+        if ( run >= headSteps ) {
+            footZ = zLo + i*step;
+            haveFloor = qtrue;
+            break;
+        }
+        i = j - 1;   /* continue above the rejected run; loop's i++ steps past it */
     }
+    s_waterEdgeTraces += sampled;
+
     if ( !haveFloor )
         return qfalse;
 
@@ -876,13 +920,24 @@ static void buildWaterEdgeOmcs( const navGeom_t *geom, navOmcInput_t *out )
      * only liquid-adjacent cells as water.  This is the main-thread collision pass;
      * the worker never runs it. */
     int ix, iy;
-    for ( iy = 0; iy < ny; iy++ ) {
+    int scanned = 0;
+    qboolean overBudget = qfalse;
+    s_waterEdgeTraces = 0;
+    for ( iy = 0; iy < ny && !overBudget; iy++ ) {
         for ( ix = 0; ix < nx; ix++ ) {
             waterEdgeCell_t *cell = &cells[iy*nx + ix];
             if ( !cell->hasFloor ) continue;
+            /* Checked per cell, before the column rather than after: a column is
+             * up to 544 traces, so testing afterwards would overshoot by that
+             * much every time. */
+            if ( s_waterEdgeTraces >= NAV_WATEREDGE_TRACE_BUDGET ) {
+                overBudget = qtrue;
+                break;
+            }
             const float qx = ox + ix*NAV_WATEREDGE_CELL + NAV_WATEREDGE_CELL*0.5f;
             const float qy = oy + iy*NAV_WATEREDGE_CELL + NAV_WATEREDGE_CELL*0.5f;
             float footZ; qboolean water;
+            scanned++;
             if ( waterEdgeColumnFloor( qx, qy, scanLo, scanHi, &footZ, &water ) ) {
                 cell->floorZ = footZ;
                 cell->water  = water ? 1 : 0;
@@ -891,6 +946,23 @@ static void buildWaterEdgeOmcs( const navGeom_t *geom, navOmcInput_t *out )
             }
         }
     }
+
+    if ( overBudget ) {
+        /* Abandon the pass rather than emit links from a partial scan — see the
+         * budget's rationale in nav_local.h. Logged at WARN with the numbers
+         * because the alternative, quietly producing fewer links, is
+         * indistinguishable from a map that simply has fewer water edges. */
+        Com_Log( SEV_WARN, LOG_CH(ch_nav_build),
+            "water-edge OMC: trace budget exhausted (%ld traces, %d/%d cells scanned) "
+            "— skipping the water-edge pass for this map\n",
+            s_waterEdgeTraces, scanned, nx * ny );
+        Z_Free( cells );
+        return;
+    }
+
+    Com_Log( SEV_DEBUG, LOG_CH(ch_nav_build),
+        "water-edge OMC: column scan %d cells, %ld traces (budget %ld)\n",
+        scanned, s_waterEdgeTraces, (long)NAV_WATEREDGE_TRACE_BUDGET );
 
     /* Connected components under the climb rule (4-neighbour, |Δz| ≤ climb).
      * Iterative flood fill using the label array as its own work queue is awkward;

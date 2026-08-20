@@ -345,6 +345,39 @@ typedef struct {
  * from the extracted nav geom (matches the read-only over-fire measurement). */
 #define NAV_WATEREDGE_CELL        8.0f
 
+/* Ceiling on the water-edge column scan, in CM_BoxTrace calls.
+ *
+ * The scan is O(covered cells x column samples) and BOTH factors grow with the
+ * map: cells with the XY extent at 8-unit resolution, samples with the Z extent
+ * at 4-unit resolution (up to 544). It also runs on the MAIN THREAD before the
+ * bake worker exists, because collision is not thread-safe — so an unbounded
+ * scan is a frozen process during map spawn, with the connect screen up and no
+ * gamestate ever sent. That is exactly how arenam3 presented: not a hang, an
+ * unbounded amount of work nobody had put a number on.
+ *
+ * The budget is a REFUSAL, not a throttle: when it is exhausted the producer
+ * abandons the water-edge pass entirely rather than emitting links derived from
+ * a partial scan. Half a scan yields an island graph missing arbitrary cells,
+ * and wade links built from that are worse than none — bots would path into
+ * water that has no exit. Losing the pass costs water-edge OMCs on one map;
+ * keeping a partial one costs correctness everywhere it is used.
+ *
+ * Sized from MEASUREMENT, between two observed ends rather than picked round.
+ *
+ *   arena7, an ordinary arena: 146,328 covered cells, ~445 traces per cell
+ *     (the column scan rarely terminates early), so a full pass is ~65M traces
+ *     and takes ~10s at the measured ~152ns per trace. An ordinary map must
+ *     PASS — a ceiling that refuses arena7 would disable the feature almost
+ *     everywhere while looking like it still worked.
+ *   arenam3: over 150s without finishing, which is the case this bounds.
+ *
+ * 200M traces is ~30s of scan: three times arena7's full pass, so ordinary maps
+ * clear it with room to spare, while the pathological case is cut off long
+ * before it can pass for a hang. If a real map trips this, the WARN line names
+ * it with both numbers, and the ceiling — not the map — is what to revisit.
+ * Silently doing less work is what this replaces. */
+#define NAV_WATEREDGE_TRACE_BUDGET 200000000L
+
 /* Recast joins cross-column floor within this climb; a riser above it fragments
  * the component (floor(NAV_WALKABLE_CLIMB/NAV_CH)*NAV_CH = 6*3).  Two cells are
  * on the same floor component only if their floor z differ by no more than this.
