@@ -52,6 +52,79 @@ typedef enum {
 
 #define PARTICLE_CLASS_MAX_PALETTE 16
 
+/*
+--------------------------------------------------------------------------
+Curve-valued parameters
+
+A particle parameter used to be a plain float, or at best a Start/End pair
+interpolated linearly by age. That is enough for "fades out" and nothing
+else: "fast then abruptly slow", "grow then shrink", "flicker" have no
+representation at all, because linear interpolation between two endpoints
+is the only shape the class can express.
+
+particleParm_t is the fix, and it is deliberately the shape idTech 5 uses
+(idParticleParm in models/particles/jobs/particleparm.h): a small value
+that says HOW a number is derived over the particle's normalised lifetime,
+rather than being the number. Everything reduces to one call:
+
+    value = ParticleParm_Eval( parm, fraction, jitterPick )
+
+where `fraction` is age/lifetime in [0,1]. That signature is the whole
+reason this fits a GPU-resident engine: it is a pure function of a value
+the shader already has (p.age), so evaluation stays on the GPU and
+emit-and-forget is untouched. This is an expressivity change, not an
+architecture change.
+
+Curves live in a SHARED table rather than inside the class — again
+following idTech 5, where idDeclParticle owns `tables` and every stage
+indexes into them. A curve is a resource, not a class's private property:
+one authored falloff can back a dozen effects, and a class that wants a
+constant never touches the table at all (PARM_CONSTANT short-circuits, so
+a class that does not opt in costs exactly what it costs today).
+--------------------------------------------------------------------------
+*/
+
+typedef enum {
+	PARM_CONSTANT = 0,      // val0. Ignores fraction entirely — the default,
+	                        //   and the zero value, so a memset-zero class
+	                        //   keeps its current behaviour bit-identical.
+	PARM_LINEAR,            // mix( val0, val1, fraction ) — what sizeStart/
+	                        //   sizeEnd and colorEndMult already do, now
+	                        //   expressible per parameter.
+	PARM_CURVE,             // table[curve] sampled at fraction, then scaled
+	                        //   into [val0, val1]. The shape lives in the
+	                        //   table; val0/val1 place it in range.
+	PARM_CURVE_TIMES_LINEAR // table[curve] * mix( val0, val1, fraction ).
+	                        //   Lets a shape (flicker, pulse) ride on top of
+	                        //   an independent trend (fade) without authoring
+	                        //   the product as a third curve.
+} particleParmCalc_t;
+
+// Samples per curve. 8 is a deliberate floor, not a guess: it is two
+// vec4s in std430, so a curve is exactly one aligned fetch pair on the
+// GPU, and it resolves the shapes particles actually need (ease, pulse,
+// two-stage falloff). Raising it costs table SSBO size linearly and must
+// be changed in lockstep with the GLSL mirror.
+#define PARTICLE_CURVE_SAMPLES 8
+
+// Curves available to all classes. Indexed by particleParm_t::curve;
+// index 0 is reserved as "no curve" so a zeroed parm is well-defined.
+#define PARTICLE_MAX_CURVES 64
+
+typedef struct {
+	int     calc;           // particleParmCalc_t
+	int     curve;          // index into the shared curve table; 0 = none
+	float   val0;           // constant value, or range start
+	float   val1;           // range end (unused by PARM_CONSTANT)
+	float   variance;       // symmetric per-particle scatter, picked once at
+	                        //   emit and carried on the particle, so a parm
+	                        //   can vary BETWEEN particles as well as over
+	                        //   one particle's life
+	float   parmPad0;       // keeps the struct 32 B / 2 vec4 in std430 so the
+	float   parmPad1;       //   GPU mirror needs no per-field alignment rules
+	float   parmPad2;
+} particleParm_t;
+
 typedef struct {
 	qhandle_t       shader;
 	int             renderFlags;     // PRIM_FLAG_* (additive, etc.)
@@ -117,6 +190,29 @@ typedef struct {
 	qhandle_t       frameShaders[16];  // PARTICLE_CLASS_MAX_FRAMES
 	int             frameCount;        // 0/1 = static (use `shader`); >1 = animate
 	int             frameBlend;        // 0 = stepped; 1 = interpolate adjacent frames
+
+	// Curve-valued parameters. Appended at the end, like every extension
+	// before them, so all prior offsets stay byte-identical.
+	//
+	// Each of these OVERRIDES its scalar counterpart when its calc is not
+	// PARM_CONSTANT with val0 == 0. That rule is what makes the extension
+	// free for existing classes: a memset-zero parm means "not authored",
+	// the old scalar field is used, and the shader takes the same path it
+	// takes today. A class opts in one parameter at a time.
+	//
+	//   sizeParm    overrides the sizeStart→sizeEnd lerp
+	//   alphaParm   scales the palette colour's alpha over life
+	//   dragParm    replaces the constant `drag`
+	//   gravityParm replaces the constant `gravityScale`
+	//
+	// Four, not more, and chosen rather than guessed: these are the
+	// parameters whose constant-ness actually blocks authoring today.
+	// Adding a fifth is a struct-stride change on both sides of the
+	// boundary, so it should follow evidence that an effect needs it.
+	particleParm_t  sizeParm;
+	particleParm_t  alphaParm;
+	particleParm_t  dragParm;
+	particleParm_t  gravityParm;
 } particleClass_t;
 
 // Per-class frame-count cap (rlboom = 8, glboom = 5). Sized to MATCH the
@@ -145,3 +241,46 @@ particleClassHandle_t CG_FindParticleClass( const char *name );
 // Look up a class definition by handle. Returns NULL if the handle
 // is out of range or unregistered. Used by emit-time code paths.
 const particleClass_t *CG_GetParticleClass( particleClassHandle_t handle );
+
+// ── shared curve table ──────────────────────────────────────────────────
+//
+// Register a curve and get the index a particleParm_t::curve field should
+// carry. `samples` is PARTICLE_CURVE_SAMPLES values covering fraction 0..1
+// at even spacing; the GPU interpolates between them, so a curve is a
+// shape, not a step function.
+//
+// Registration is BY NAME and deduplicating: registering the same name
+// twice returns the same index without storing a second copy. That is what
+// makes a curve a shared resource — "smoke-falloff" authored once is the
+// same index in every class that asks for it, and a later change reaches
+// all of them.
+//
+// Returns 0 on failure (table full, NULL inputs, empty name). Index 0 is
+// reserved as "no curve", so 0 is never a valid registered curve and a
+// zeroed particleParm_t is unambiguously "constant, no table".
+int CG_RegisterParticleCurve( const char *name, const float *samples );
+
+// Look up a registered curve index by name. Returns 0 if not found.
+int CG_FindParticleCurve( const char *name );
+
+// Read back a registered curve. Returns NULL for index 0 or an
+// unregistered index. Used by the renderer upload path and by tests.
+const float *CG_GetParticleCurve( int index );
+
+// Evaluate a parameter at a normalised lifetime fraction.
+//
+// `jitterPick` is the particle's own crandom() draw in [-1,1], carried
+// from emit time; it scales `variance` so the same parm yields a
+// different value per particle while staying deterministic for that
+// particle. Pass 0 for the un-jittered value.
+//
+// This is the CPU mirror of the GLSL evaluator. Both must agree: the
+// contract test pins them against each other, because a divergence would
+// mean authored values preview differently from what ships.
+float ParticleParm_Eval( const particleParm_t *parm, float fraction, float jitterPick );
+
+// True when a parm was never authored (memset-zero) and the class's
+// scalar counterpart should be used instead. Kept as a named predicate
+// rather than an inline test so the override rule lives in ONE place —
+// host, renderer and tests all ask the same question.
+qboolean ParticleParm_IsUnset( const particleParm_t *parm );
