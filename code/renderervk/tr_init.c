@@ -705,6 +705,24 @@ static void InitOpenGL( void )
 			{
 				glConfig.vidWidth *= 2;
 				glConfig.vidHeight *= 2;
+				// Keep the LOGICAL size in step with the render target.
+				//
+				// vidWidthLogical/Height come from SDL_GetWindowSize and describe
+				// the window in points; WiredUI divides the two to get its DPI
+				// scale (cl_wired_compositor.c: dpiScale = heightPx / heightLog)
+				// and multiplies font sizes by it. Doubling only the physical
+				// side folded supersampling into that ratio, so on a Retina
+				// display the 2.0 backing scale became 4.0 and glyphs rendered
+				// at twice their intended size — while everything authored in
+				// fixed pixels (paddings, icon boxes, fixed widths) stayed put,
+				// because nothing outside the font path reads the scale. That is
+				// the reported symptom: some HUD elements scale, others do not.
+				//
+				// Supersampling is an internal resolution multiplier, not a
+				// change in how large the window is, so the logical size must
+				// track it. The remaining ratio is then purely the display's.
+				if ( glConfig.vidWidthLogical > 0 )  glConfig.vidWidthLogical  *= 2;
+				if ( glConfig.vidHeightLogical > 0 ) glConfig.vidHeightLogical *= 2;
 				ri.CL_SetScaling( 2.0, gls.captureWidth, gls.captureHeight );
 			}
 		}

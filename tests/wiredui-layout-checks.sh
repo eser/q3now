@@ -62,6 +62,30 @@ if [ "${1:-}" = "--dpi-self-test" ]; then
     # CORRECT engine (wiki 2026-08-11 / fix d00a6afd): 5120 backing over a 1280
     # logical request is a genuine dpiScale=4, and a gate that assumed 2 was
     # wrong. Deriving from vidWidthPx is exactly what this fixture pins.
+    #
+    # The two supersample-* cases pin the OTHER direction, where a 4 is NOT
+    # genuine. r_ext_supersample doubles glConfig.vidWidth/Height as an internal
+    # resolution multiplier; it does not change how large the window is. If it
+    # doubles only the physical side, dpiScale = physical/logical absorbs the
+    # supersample factor on top of the display's own — a 2x Retina panel reports
+    # 4 — and every font renders at twice its intended size while anything
+    # authored in fixed pixels stays put. That asymmetry is the reported bug:
+    # "some HUD elements scale, others do not".
+    #
+    #   supersample-on-2x-display   1280 logical window, 2x display, supersample
+    #                               on: both sides double (2560 logical / 5120
+    #                               backing), dpiScale stays the display's 2.0 → ACCEPT
+    #   supersample-folded-into-dpi same session reporting 4.0 → REJECT
+    #
+    # SCOPE, stated honestly: these fixtures pin the ANALYZER's decision, not the
+    # engine's wiring. They are synthetic dumps — reverting the engine fix in
+    # code/renderer{,vk}/tr_init.c (where the supersample block must scale
+    # vidWidthLogical/Height alongside vidWidth/Height) leaves this self-test
+    # green, because no engine runs here. Verified by doing exactly that.
+    # What they DO buy: if a future change teaches the analyzer to accept a
+    # supersample-inflated ratio as "genuine", that regression is caught here.
+    # Catching the engine half needs a live capture with r_ext_supersample 1,
+    # which belongs to the owner-gated capture path above.
     cases="
 good-2x|1280|2.0|0|2560|2.0
 dpi4-retina|1280|2.0|0|5120|4.0
@@ -73,6 +97,8 @@ zero-dpi|1280|2.0|1|2560|0.0
 negative-dpi|1280|2.0|1|2560|-2.0
 legacy-dump-no-vidpx-good|1280|2.0|0|-|2.0
 legacy-dump-no-vidpx-broken|1280|2.0|1|-|1.0
+supersample-on-2x-display|2560|2.0|0|5120|2.0
+supersample-folded-into-dpi|2560|2.0|1|5120|4.0
 "
     fails=0; ran=0
     while IFS='|' read -r name logical fallback want vid dpis; do
