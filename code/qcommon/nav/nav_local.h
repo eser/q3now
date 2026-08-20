@@ -349,11 +349,16 @@ typedef struct {
  *
  * The scan is O(covered cells x column samples) and BOTH factors grow with the
  * map: cells with the XY extent at 8-unit resolution, samples with the Z extent
- * at 4-unit resolution (up to 544). It also runs on the MAIN THREAD before the
- * bake worker exists, because collision is not thread-safe — so an unbounded
- * scan is a frozen process during map spawn, with the connect screen up and no
- * gamestate ever sent. That is exactly how arenam3 presented: not a hang, an
- * unbounded amount of work nobody had put a number on.
+ * at 4-unit resolution (up to 544). It also runs on the MAIN THREAD, in
+ * Nav_OMC_Build before the bake worker starts — so an unbounded scan is a
+ * frozen process during map spawn, with the connect screen up and no gamestate
+ * ever sent. That is exactly how arenam3 presented: not a hang, an unbounded
+ * amount of work nobody had put a number on.
+ *
+ * (Being on the main thread is a sequencing fact, NOT a collision constraint:
+ * CM_BoxTrace is thread-legal since the collision thread-safety work, and
+ * Nav_GeneratePhysicsLinks already calls it from the bake worker. Moving this
+ * pass off the tick is therefore possible; see TASK-179 #3.)
  *
  * The budget is a REFUSAL, not a throttle: when it is exhausted the producer
  * abandons the water-edge pass entirely rather than emitting links derived from
