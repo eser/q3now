@@ -71,10 +71,32 @@ endif()
 
 require_text(BUILD "AUX_SOURCE_DIRECTORY(code/renderervk RENDERER_VK_SRCS)" "production renderer ownership")
 require_text(BUILD "ADD_EXECUTABLE(tr_temporal_motion_test" "focused host target")
+# The guarantee: host tests compile the PRODUCTION source, never a copy of it.
+# A test-local fork would drift from the renderer silently and then certify the
+# fork instead of the shipping code.
+#
+# This used to be spelled "the path appears exactly once in CMakeLists.txt",
+# which measured the wrong thing. Seven targets now list
+# code/renderervk/tr_temporal_motion.c — and that is the desired state: seven
+# tests exercising ONE production file. Counting occurrences made growth in
+# test coverage read as a policy violation.
+#
+# What actually matters is that no tests/ copy exists to compile instead. Test
+# DRIVERS under tests/ (tr_temporal_motion_test.c and friends) are a different
+# thing and are expected.
+if(EXISTS "${ROOT}/tests/tr_temporal_motion.c")
+	message(FATAL_ERROR
+		"tests/tr_temporal_motion.c exists — host tests must compile the "
+		"production code/renderervk/tr_temporal_motion.c, not a copy that can "
+		"drift from it")
+endif()
+
 string(REGEX MATCHALL "code/renderervk/tr_temporal_motion\\.c" motion_sources "${BUILD}")
 list(LENGTH motion_sources motion_source_count)
-if(NOT motion_source_count EQUAL 1)
-	message(FATAL_ERROR "expected exactly one explicit host-test source owner, found ${motion_source_count}")
+if(motion_source_count LESS 1)
+	message(FATAL_ERROR
+		"no host-test target compiles code/renderervk/tr_temporal_motion.c; "
+		"the contracts would be testing nothing")
 endif()
 
 message(STATUS "Temporal motion source policy contract: ok")

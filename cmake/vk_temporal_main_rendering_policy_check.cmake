@@ -53,6 +53,21 @@ require_text("${VKC}" "VK_TemporalEntMatRuntimeGetFrameBinding(" "generation-bou
 require_text("${VKC}" "VK_TemporalMotionRecordingPeekPendingDraw(" "same A2c3 pending outcome")
 require_text("${VKC}" "VK_TemporalMainActivationResolveSubmit(" "submit-gated publication")
 require_text("${VKC}" "submitResult == ralSuccess ? qtrue : qfalse" "checked submit result")
-require_text("${ACTIVATION}" "if ( submitted ) receipt = owner->pendingReceipt" "success-only receipt promotion")
+# Success-only receipt promotion. The guarantee: a receipt is published ONLY
+# when the submit succeeded — a failed submit must leave the consumer with
+# nothing rather than a stale or half-formed receipt.
+#
+# The spelling moved when the check was STRENGTHENED: promotion now also
+# requires the pending receipt to validate, so the condition reads
+# `submitted && ActivationReceiptValid(...)`. Pinning the old, weaker text
+# would fail on code that is strictly more careful — which is exactly what
+# happened, and is the recurring hazard of text-matching a guarantee rather
+# than its meaning.
+#
+# Both halves are pinned so neither can be dropped alone.
+require_text("${ACTIVATION}" "if ( submitted && ActivationReceiptValid( &owner->pendingReceipt ) )"
+	"success-only receipt promotion")
+require_text("${ACTIVATION}" "receipt = owner->pendingReceipt"
+	"promotion actually publishes the pending receipt")
 
 message(STATUS "vk temporal MAIN rendering policy: PASS")

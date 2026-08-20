@@ -6,6 +6,7 @@ file(READ "${ROOT}/code/renderercommon/tr_types.h" TYPES)
 file(READ "${ROOT}/code/cgame/cg_draw.c" CG_DRAW)
 file(READ "${ROOT}/code/renderervk/tr_temporal_input.c" INPUT)
 file(READ "${ROOT}/code/renderervk/tr_backend.c" BACKEND)
+file(READ "${ROOT}/code/renderervk/tr_model_iqm.c" IQM)
 file(READ "${ROOT}/code/renderervk/tr_scene.c" SCENE)
 file(READ "${ROOT}/code/renderervk/vk.c" VK)
 file(READ "${ROOT}/code/renderervk/tr_cmds.c" COMMANDS)
@@ -48,11 +49,27 @@ require_text(BACKEND "temporalDelivery == TEMPORAL_BACKEND_SUBMIT_EXACT ) {\n\t\
 require_text(BACKEND "temporalDelivery == TEMPORAL_BACKEND_SUBMIT_INVALID ) {\n\t\tR_TemporalBackendRequestDelivered( NULL );\n\t\tvk_begin_frame( NULL );" "invalid DRAW_BUFFER delivery poisoning")
 require_text(BACKEND "R_GetModelByHandle" "renderer model topology stamp")
 require_text(BACKEND "data->num_frames" "IQM frame topology")
-require_text(BACKEND "data->num_joints" "IQM joint topology")
-require_text(BACKEND "data->num_poses" "IQM pose topology")
-require_text(BACKEND "data->num_surfaces" "IQM surface topology")
-require_text(BACKEND "data->num_vertexes" "IQM vertex topology")
-require_text(BACKEND "data->num_triangles" "IQM triangle topology")
+# IQM joint topology validation. The guarantee: a skeletal palette is checked
+# for structural sanity before the GPU is asked to use it.
+#
+# The code MOVED — from tr_backend.c to tr_model_iqm.c
+# (IQM_TemporalPaletteValid) — and grew while it moved: it now bounds the joint
+# count against TEMPORAL_IQM_MAX_JOINTS, requires num_poses == num_joints,
+# guards the frame multiply against overflow, and checks the bind matrices are
+# finite. Pinning the file the code used to live in fails on a strictly better
+# implementation, which is what happened here.
+require_text(IQM "data->num_joints > (int)TEMPORAL_IQM_MAX_JOINTS"
+	"IQM joint topology bounded")
+require_text(IQM "data->num_poses != data->num_joints"
+	"IQM pose/joint consistency")
+# Same move as the joint check above: the IQM topology fields are read in
+# tr_model_iqm.c now, not tr_backend.c. The guarantee is unchanged — the
+# renderer inspects the model's declared topology rather than trusting it —
+# only the file it lives in changed.
+require_text(IQM "data->num_poses" "IQM pose topology")
+require_text(IQM "data->num_surfaces" "IQM surface topology")
+require_text(IQM "data->num_vertexes" "IQM vertex topology")
+require_text(IQM "data->num_triangles" "IQM triangle topology")
 require_text(RENDERER2_TYPES "RDF_NOFOG\t\t0x0008" "renderer2 no-fog bit")
 require_text(RENDERER2_TYPES "RDF_EXTRA\t\t0x0010" "renderer2 extended-refdef bit")
 require_text(RENDERER2_TYPES "RDF_SUNLIGHT    0x0020" "renderer2 sunlight bit")
