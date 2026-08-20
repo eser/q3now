@@ -144,6 +144,17 @@ Behaviour:
 Nothing needs to be run by hand. `make`, `make configure`, and a bare
 `cmake -S . -B build/release` all apply patches as part of configure.
 
+**Verified again at build time.** Applying is a configure-time step, and
+ninja's dependency graph has no edge from a submodule source file to the patch
+that rewrites it — so after a `git checkout` inside a submodule (which §3 below
+tells you to do) or a `git submodule update`, a plain build would happily
+compile the *unpatched* sources. It succeeds, the binary runs, and the patch is
+simply absent; for the sentry patch that means silently reintroducing the exact
+defect it fixes. Every build therefore re-runs the same `--check --reverse` test
+(`cmake/VerifySubmodulePatches.cmake`) and **fails** if a patch has gone
+missing, naming the recovery command. Cost is one `git apply --check` per patch,
+about 40 ms for the whole tree.
+
 ---
 
 ## 3. Adding a patch

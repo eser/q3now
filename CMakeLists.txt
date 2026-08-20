@@ -2544,6 +2544,10 @@ ENDIF()
 # --ignore-whitespace so CRLF/LF drift on Windows working trees (Git's
 # autocrlf converts checked-out files) doesn't fail the patch context
 # match.  Both check and apply pass --ignore-whitespace for symmetry.
+# Umbrella target the per-submodule verifiers hang off. Engine targets depend on
+# this, so a missing patch stops the build instead of producing a quiet binary.
+ADD_CUSTOM_TARGET(wired_verify_patches)
+
 FUNCTION(WIRED_APPLY_SUBMODULE_PATCHES _label _submodule_dir _patch_dir)
 	FILE(GLOB _patches "${CMAKE_SOURCE_DIR}/${_patch_dir}/*.patch")
 	IF(NOT _patches)
@@ -2632,6 +2636,35 @@ FUNCTION(WIRED_APPLY_SUBMODULE_PATCHES _label _submodule_dir _patch_dir)
 			BREAK()
 		ENDIF()
 	ENDFOREACH()
+
+	# Re-verify at BUILD time, not just here.
+	#
+	# Patching is a configure-time side effect, and ninja's dependency graph has
+	# no edge from a submodule source file to the patch that rewrites it. So once
+	# the tree is configured, a plain build never re-checks: after any
+	# `git -C src/libs/<sub> checkout/reset` — which SUBMODULE-PATCHES.md §3
+	# tells you to do while working on a patch, and which `git submodule update`
+	# does on its own — the build succeeds, the binary runs, and the patch is
+	# simply absent. Nothing warns. For the sentry patch that means the crash
+	# handler is silently dropped again, i.e. the exact defect the patch fixes,
+	# reappearing with no signal.
+	#
+	# The check is the same `--check --reverse` test used above: exit 0 means
+	# "already applied". Cheap (one git call per patch) and it fails the BUILD
+	# rather than printing a warning nobody reads, because a silently unpatched
+	# binary is the failure mode this whole directory exists to prevent.
+	STRING(REPLACE "/" "_" _verify_target "wired_verify_patches_${_label}")
+	ADD_CUSTOM_TARGET(${_verify_target}
+		COMMAND "${CMAKE_COMMAND}"
+			-D "GIT_EXE=${_GIT_EXE}"
+			-D "LABEL=${_label}"
+			-D "APPLY_CWD=${_apply_cwd}"
+			-D "DIR_FLAG=${_dir_flag}"
+			-D "PATCHES=${_patches}"
+			-P "${CMAKE_SOURCE_DIR}/cmake/VerifySubmodulePatches.cmake"
+		COMMENT "Verifying ${_label} submodule patches are still applied"
+		VERBATIM)
+	ADD_DEPENDENCIES(wired_verify_patches ${_verify_target})
 ENDFUNCTION()
 
 # MinGW: picoquic + picotls have a handful of MSVC-only assumptions that
@@ -2801,6 +2834,17 @@ ELSE()
 	SET(BUILD_TESTING ${_WIRED_SAVED_BUILD_TESTING})
 	UNSET(_WIRED_SAVED_BUILD_TESTING)
 
+	# The umbrella dependency on qcommon_engine_shared only orders THAT target
+	# against the verifier; sibling targets built from the same patched sources
+	# still run in parallel, so a failed verification can leave stale unpatched
+	# objects behind even though the build as a whole stops. Ordering sentry's
+	# own targets too keeps the failure clean rather than merely loud.
+	FOREACH(_sentry_tgt sentry sentry-crash)
+		IF(TARGET ${_sentry_tgt})
+			ADD_DEPENDENCIES(${_sentry_tgt} wired_verify_patches_sentry-native)
+		ENDIF()
+	ENDFOREACH()
+
 	TARGET_LINK_LIBRARIES(qcommon                PRIVATE sentry)
 	TARGET_LINK_LIBRARIES(qcommon_ded            PRIVATE sentry)
 	TARGET_LINK_LIBRARIES(qcommon_engine_shared  PRIVATE sentry)
@@ -2882,6 +2926,16 @@ ELSE()
 	ENDIF()
 ENDIF()
 
+# Wire the patch verification into the engine's own build. Placed AFTER every
+# WIRED_APPLY_SUBMODULE_PATCHES call so the umbrella target has collected all of
+# them; ADD_DEPENDENCIES resolves late, so attaching it to a library declared
+# far earlier is fine.
+#
+# qcommon_engine_shared is the attachment point because both engine binaries
+# link it, so there is no configuration in which the check is skipped. Without
+# an edge like this the verifier would only run when asked for by name, which is
+# precisely the "you have to remember" failure this replaces.
+ADD_DEPENDENCIES(qcommon_engine_shared wired_verify_patches)
 
 set(OGG_SRCS src/libs/ogg/src/bitwise.c src/libs/ogg/src/framing.c)
 add_library(ogg STATIC ${OGG_SRCS})
