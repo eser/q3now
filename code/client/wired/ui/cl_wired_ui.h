@@ -60,7 +60,7 @@ qboolean CL_WiredUI_ShowJoinPasswordRetry( const char *target,
 int      WiredUI_GetMenuStackDepth( void );       // 0 = nothing on stack
 
 /* ── source-attribution context ───────────────────────────────────────
- * Parse-context: filled by cl_wired_parse.c while a .wmenu / .whud is
+ * Parse-context: filled by cl_wired_parse.c while a .wui file is
  * being parsed. Read by CL_ForwardCommandToServer to annotate "Unknown
  * command" log lines (parser keyword tokens that fall through to the
  * console buffer). NULL outside any parse — production logs unchanged.

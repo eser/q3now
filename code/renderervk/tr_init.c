@@ -705,24 +705,23 @@ static void InitOpenGL( void )
 			{
 				glConfig.vidWidth *= 2;
 				glConfig.vidHeight *= 2;
-				// Keep the LOGICAL size in step with the render target.
+				// vidWidthLogical/Height are deliberately NOT scaled here.
 				//
-				// vidWidthLogical/Height come from SDL_GetWindowSize and describe
-				// the window in points; WiredUI divides the two to get its DPI
-				// scale (cl_wired_compositor.c: dpiScale = heightPx / heightLog)
-				// and multiplies font sizes by it. Doubling only the physical
-				// side folded supersampling into that ratio, so on a Retina
-				// display the 2.0 backing scale became 4.0 and glyphs rendered
-				// at twice their intended size — while everything authored in
-				// fixed pixels (paddings, icon boxes, fixed widths) stayed put,
-				// because nothing outside the font path reads the scale. That is
-				// the reported symptom: some HUD elements scale, others do not.
+				// WiredUI derives dpiScale = vidHeight / vidHeightLogical
+				// (cl_wired_compositor.c) and lays Clay out on a canvas of
+				// vidWidth × vidHeight — the supersampled target. For the UI to
+				// keep the same share of the screen, everything authored in
+				// points has to grow with that canvas, so dpiScale must absorb
+				// the supersample factor: a 2x display with supersampling on
+				// wants 4, not 2. Scaling the logical size alongside would pin
+				// dpiScale to the display's own ratio and leave the entire UI at
+				// half size on the enlarged canvas.
 				//
-				// Supersampling is an internal resolution multiplier, not a
-				// change in how large the window is, so the logical size must
-				// track it. The remaining ratio is then purely the display's.
-				if ( glConfig.vidWidthLogical > 0 )  glConfig.vidWidthLogical  *= 2;
-				if ( glConfig.vidHeightLogical > 0 ) glConfig.vidHeightLogical *= 2;
+				// So the font path is already correct. What is NOT correct is
+				// cls.con_factor: CL_SetScaling's 2.0 reaches only the console
+				// (client/wired/ui/elements/console.c), which is the one surface
+				// that draws in raw character cells rather than through
+				// WUI_Resolve. See TASK-200.
 				ri.CL_SetScaling( 2.0, gls.captureWidth, gls.captureHeight );
 			}
 		}

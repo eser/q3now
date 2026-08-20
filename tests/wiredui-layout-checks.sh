@@ -63,29 +63,27 @@ if [ "${1:-}" = "--dpi-self-test" ]; then
     # logical request is a genuine dpiScale=4, and a gate that assumed 2 was
     # wrong. Deriving from vidWidthPx is exactly what this fixture pins.
     #
-    # The two supersample-* cases pin the OTHER direction, where a 4 is NOT
-    # genuine. r_ext_supersample doubles glConfig.vidWidth/Height as an internal
-    # resolution multiplier; it does not change how large the window is. If it
-    # doubles only the physical side, dpiScale = physical/logical absorbs the
-    # supersample factor on top of the display's own — a 2x Retina panel reports
-    # 4 — and every font renders at twice its intended size while anything
-    # authored in fixed pixels stays put. That asymmetry is the reported bug:
-    # "some HUD elements scale, others do not".
+    # The supersample-* pair pins the SAME rule one step further out, where the
+    # ratio climbs past 4 for a second, equally genuine reason.
     #
-    #   supersample-on-2x-display   1280 logical window, 2x display, supersample
-    #                               on: both sides double (2560 logical / 5120
-    #                               backing), dpiScale stays the display's 2.0 → ACCEPT
-    #   supersample-folded-into-dpi same session reporting 4.0 → REJECT
+    # r_ext_supersample doubles glConfig.vidWidth/Height, and WiredUI lays Clay
+    # out on exactly that canvas (cl_wired_clay.c: WiredUI_ClayFrame is fed
+    # cls.glconfig.vidWidth/Height). For the UI to keep its share of the screen,
+    # everything authored in points has to grow with the canvas — so dpiScale is
+    # SUPPOSED to carry the supersample factor on top of the display's own. A
+    # 1280-point window on a 2x panel with supersampling on backs at 5120 and
+    # wants 4. Anything that "corrects" this back down to the display ratio
+    # leaves the whole UI at half size on the enlarged canvas.
+    #
+    #   supersample-on-2x-display        5120 backing / 1280 logical → 4.0 ACCEPT
+    #   supersample-reports-display-only same session claiming 2.0   → REJECT
     #
     # SCOPE, stated honestly: these fixtures pin the ANALYZER's decision, not the
-    # engine's wiring. They are synthetic dumps — reverting the engine fix in
-    # code/renderer{,vk}/tr_init.c (where the supersample block must scale
-    # vidWidthLogical/Height alongside vidWidth/Height) leaves this self-test
-    # green, because no engine runs here. Verified by doing exactly that.
-    # What they DO buy: if a future change teaches the analyzer to accept a
-    # supersample-inflated ratio as "genuine", that regression is caught here.
-    # Catching the engine half needs a live capture with r_ext_supersample 1,
-    # which belongs to the owner-gated capture path above.
+    # engine's wiring — they are synthetic dumps and no engine runs here. What
+    # they buy is a guard against "fixing" dpiScale in the wrong direction, which
+    # is a real temptation: the ratio looks inflated until you notice the canvas
+    # grew with it. Catching the engine half needs a live capture with
+    # r_ext_supersample 1, which belongs to the owner-gated capture path above.
     cases="
 good-2x|1280|2.0|0|2560|2.0
 dpi4-retina|1280|2.0|0|5120|4.0
@@ -97,8 +95,8 @@ zero-dpi|1280|2.0|1|2560|0.0
 negative-dpi|1280|2.0|1|2560|-2.0
 legacy-dump-no-vidpx-good|1280|2.0|0|-|2.0
 legacy-dump-no-vidpx-broken|1280|2.0|1|-|1.0
-supersample-on-2x-display|2560|2.0|0|5120|2.0
-supersample-folded-into-dpi|2560|2.0|1|5120|4.0
+supersample-on-2x-display|1280|4.0|0|5120|4.0
+supersample-reports-display-only|1280|4.0|1|5120|2.0
 "
     fails=0; ran=0
     while IFS='|' read -r name logical fallback want vid dpis; do
