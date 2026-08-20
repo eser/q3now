@@ -633,6 +633,27 @@ ENDFUNCTION()
 # it globs *_test.exe and checks exit codes (.github/workflows/build.yml). A gtest
 # binary satisfies that — it returns non-zero on failure — but only if it is named
 # so the glob finds it.
+# WIRED_LINK_MATH(<target>...) — link libm where it is a separate library.
+#
+# On macOS and Windows the math functions live in the C runtime, so a target
+# calling floorf/sinf/acosf links without asking. On Linux they are in libm and
+# it does not. The result is a whole class of failure that is INVISIBLE on the
+# machine most of this is developed on and only appears in CI, one target at a
+# time: fix six, push, discover a seventh.
+#
+# This exists so the answer is written once. Adding a target that does maths
+# means adding it here, not rediscovering the rule from a linker error.
+FUNCTION(WIRED_LINK_MATH)
+	IF(WIN32)
+		RETURN()
+	ENDIF()
+	FOREACH(_t IN LISTS ARGN)
+		IF(TARGET ${_t})
+			TARGET_LINK_LIBRARIES(${_t} m)
+		ENDIF()
+	ENDFOREACH()
+ENDFUNCTION()
+
 FUNCTION(WIRED_ADD_GTEST target ctest_prefix labels)
 	CMAKE_PARSE_ARGUMENTS(ARG "" "" "SOURCES" ${ARGN})
 	IF(NOT WIRED_HAVE_GTEST)
@@ -4042,3 +4063,16 @@ FOREACH(_manifest_kind SHARED VARIANT)
 ENDFOREACH()
 
 ADD_SUBDIRECTORY(tools/extract-meta)
+
+# Targets whose sources call into libm. Collected here, after every target
+# exists, so the list is one place rather than a rule rediscovered per target
+# from a Linux-only linker error. See WIRED_LINK_MATH for why this is not
+# needed on macOS or Windows.
+WIRED_LINK_MATH(
+	ral_temporal_test
+	vk_temporal_resolve_authority_test
+	vk_temporal_resolve_readback_test
+	tr_temporal_motion_test
+	particle_curve_test
+	nav_coord_test
+)
