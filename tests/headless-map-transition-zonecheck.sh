@@ -270,7 +270,7 @@ for m in want_maps:
     if m not in loaded:
         print(f"FAIL: map '{m}' never reached lifecycle.map_loaded")
 
-# 6. the artefact's self-report: is it complete, and does it agree with
+# 6. the self-report of the artefact: is it complete, and does it agree with
 #    what is actually in the file?
 end = rows[-1] if evs[-1] == "lifecycle.session_end" else None
 if end:
@@ -360,7 +360,7 @@ print(f"  platform       : {first.get('plat')}   app: {first.get('app')}")
 print(f"  session id     : {first.get('sid')}")
 print(f"  records        : {len(rows)}" + (f"  (+{bad} unreadable)" if bad else ""))
 
-# The last lifecycle.session_end carries the ring's own accounting. Its ABSENCE
+# The last lifecycle.session_end carries the accounting of the ring. Its ABSENCE
 # is the strongest signal the artefact holds that the process died rather than
 # exited — which is exactly the case this mode exists for.
 # A fault record beats the session_end record. The crash handler emits one and

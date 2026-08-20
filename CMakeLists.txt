@@ -458,6 +458,18 @@ SET_TESTS_PROPERTIES(wiredui_dpi_analyzer_contract PROPERTIES
 # truncated map chain and a non-zero exit.  This runs that classifier over
 # synthetic logs — no engine, no packs, no display — so a gate that could not
 # catch #96 fails the build.
+# Test scripts must parse under macOS's system bash 3.2, which the macOS CI
+# runner uses. A developer machine with Homebrew has bash 5 and will not notice
+# the difference until CI does — and the error bash 3.2 reports points at the
+# end of the file rather than the cause. See the script for the full story.
+ADD_TEST(NAME shell_portability_contract
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/shell-portability-check.sh
+)
+SET_TESTS_PROPERTIES(shell_portability_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-server;failure.contract;feature.always"
+	TIMEOUT 60
+)
+
 ADD_TEST(NAME headless_map_transition_analyzer_contract
 	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/headless-map-transition-zonecheck.sh
 		--self-test
