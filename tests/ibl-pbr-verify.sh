@@ -16,6 +16,12 @@
 set -u
 . "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
 
+# Refuse to measure with byte readers that do not work on this host. Every
+# number this script prints comes out of a png2raw|od|awk pipeline, and when od
+# fails the pipeline yields no rows: awk then prints 0, which reads as "no
+# difference" rather than "nothing was read". Fail loudly instead.
+wired_od_selftest || { echo "FAIL: byte readers unusable on this host — refusing to report zeros as measurements"; exit 1; }
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PNG2RAW="${PNG2RAW:-$REPO_ROOT/tools/png2raw/png2raw}"
 # Isolated capture home, NOT the player's: the capture cfgs below set
@@ -31,7 +37,7 @@ band_mean() {
 	local shot="$1" row0="$2" row1="$3"
 	[ -s "$shot" ] || { echo "0"; return; }
 	"$PNG2RAW" "$shot" \
-	  | od -A n -t u1 -v -w16 \
+	  | wired_od_bytes \
 	  | awk -v W="$FRAME_W" -v r0="$row0" -v r1="$row1" '
 	      BEGIN{ stride=W*3; tot=0; sum=0; idx=0 }
 	      { for (i=1;i<=NF;i++){ row=int(idx/stride); if(row>=r0 && row<r1){tot++; sum+=$i} idx++ } }

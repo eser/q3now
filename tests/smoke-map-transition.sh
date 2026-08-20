@@ -71,6 +71,21 @@ fi
 # to a whole-frame value regression — exactly the class a feature fence must catch.
 if [ "${1:-}" = "--self-test" ]; then
     echo "==> smoke-map-transition Phase-2 SELF-TEST (gate-has-teeth)"
+
+    # Check the byte readers FIRST. Everything below compares pixel means, so a
+    # broken reader does not make this self-test fail — it makes every mean come
+    # back 0, which compares equal to every other 0 and passes. That is not a
+    # hypothetical: `od -w` is GNU-only, BSD od rejected it, the failure was
+    # swallowed by the pipeline, and the gate certified frames it had never
+    # actually read.
+    echo "  -- byte readers (wired_od_*) → expect PASS --"
+    if wired_od_selftest; then
+        echo "    readers: PASS"
+    else
+        echo "    readers: FAIL (measurements below would be meaningless)"
+        exit 1
+    fi
+
     GOLDEN_DIR="$SMOKE_SCRIPT_DIR/golden"
     PERTURB="${PERTURB:-$REPO_ROOT/tools/png-perturb/png-perturb.exe}"
     TILE_RATIO=1.5; TILE_MARGIN=5.0; TILE_FLOOR=60.0
@@ -256,7 +271,7 @@ pixel_histogram() {
     local shot="$1"
     if [ ! -s "$shot" ]; then echo "zero%=100.00 mean=0.00"; return; fi
     "$PNG2RAW" "$shot" \
-      | od -A n -t u1 -v -w16 \
+      | wired_od_bytes \
       | awk 'BEGIN{tot=0;zero=0;sum=0}
              { for (i=1;i<=NF;i++) { tot++; sum+=$i; if($i==0)zero++ } }
              END{ if(tot>0) printf "zero%%=%.2f mean=%.2f", zero/tot*100, sum/tot }'
@@ -299,7 +314,7 @@ pixel_histogram_region() {
     local width="${SMOKE_FRAME_WIDTH:-1280}"
     if [ ! -s "$shot" ]; then echo "zero%=100.00 mean=0.00"; return; fi
     "$PNG2RAW" "$shot" \
-      | od -A n -t u1 -v -w16 \
+      | wired_od_bytes \
       | awk -v region="$region" -v stride="$((width*3))" '
              BEGIN{tot=0;zero=0;sum=0;half=int(stride/2);idx=0}
              { for (i=1;i<=NF;i++) {
@@ -369,8 +384,8 @@ SAMPLE_ROWS=720
 tiled_diff() {
     local a="$1" b="$2"
     paste -d ' ' \
-        <("$PNG2RAW" "$a" | od -A n -t u1 -v -w96 | awk '{print $1, $2, $3}') \
-        <("$PNG2RAW" "$b" | od -A n -t u1 -v -w96 | awk '{print $1, $2, $3}') \
+        <("$PNG2RAW" "$a" | wired_od_sample_rgb 32) \
+        <("$PNG2RAW" "$b" | wired_od_sample_rgb 32) \
       | awk -v tol="$DIFF_TOLERANCE" -v W="$SAMPLE_COLS" -v H="$SAMPLE_ROWS" \
             -v GW="$GRID_W" -v GH="$GRID_H" '
             BEGIN {

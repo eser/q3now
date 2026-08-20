@@ -4,6 +4,12 @@
 # of the smoke (1 wired launch = 2 captures) suffices to probe.
 set -u
 . "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
+
+# Refuse to measure with byte readers that do not work on this host. Every
+# number this script prints comes out of a png2raw|od|awk pipeline, and when od
+# fails the pipeline yields no rows: awk then prints 0, which reads as "no
+# difference" rather than "nothing was read". Fail loudly instead.
+wired_od_selftest || { echo "FAIL: byte readers unusable on this host — refusing to report zeros as measurements"; exit 1; }
 # Isolated capture home, NOT the player's: this script deletes files under
 # base/ and passes CVAR_ARCHIVE cvars (r_mode, r_customwidth, r_brightness)
 # as +set, which a clean exit persists into config.cfg.
@@ -40,7 +46,7 @@ JSONL="$PRODUCT_DIR/qconsole.jsonl"
 echo "==== captures from this run ===="
 ls -t "$PRODUCT_DIR/base/screenshots/"*.png 2>/dev/null | head -2 | while read shot; do
     hist=$("$PNG2RAW" "$shot" \
-        | od -A n -t u1 -v -w16 \
+        | wired_od_bytes \
         | awk 'BEGIN{tot=0;sum=0} { for (i=1;i<=NF;i++) { tot++; sum+=$i } } END{ if(tot>0) printf "mean=%.2f", sum/tot }')
     ts=$(stat -c%y "$shot" | awk '{print $2}' | cut -d. -f1)
     echo "  $ts  $(basename $shot)  $hist"

@@ -254,3 +254,98 @@ wired_isolated_home() {
     fi
     printf '%s' "$home"
 }
+
+# ── reading pixels out of a decoded frame ───────────────────────────────────
+# wired_od_bytes — stream a file as decimal byte values, one whitespace-
+# separated run per line, portably.
+#
+# WHY THIS EXISTS
+# The obvious spelling, `od -A n -t u1 -v -w16`, is NOT portable: -w is a GNU
+# coreutils extension and BSD od (the macOS default) rejects it outright:
+#
+#     od: illegal option -- w
+#
+# None of the capture harnesses used `set -o pipefail`, so that failure was
+# swallowed inside the pipeline, awk received empty input, and every band mean
+# came out as 0. The run then reported a clean, plausible number — "lower-band
+# delta = 0.000" — which reads as "no difference detected" rather than "nothing
+# was measured". A check that cannot fail certifies everything, and this one
+# failed INTO the passing direction, on the platform it was being run on.
+#
+# BSD od already defaults to 16 bytes per line, which is exactly what -w16 was
+# asking for, so dropping the flag is not a compromise: the two agree.
+#
+# Callers that need a SAMPLING STRIDE (the old -w96 spelling, i.e. "one sample
+# every 32 pixels") must not reach for a width — that was a side effect of the
+# line grouping, not a documented feature. Use wired_od_sample_rgb below, which
+# states the stride in pixels and computes it from its own index.
+wired_od_bytes() {
+    if ! od -A n -t u1 -v "$@"; then
+        echo "wired_od_bytes: od failed — measurement aborted rather than reported as zero" >&2
+        return 1
+    fi
+}
+
+# wired_od_selftest — prove the byte readers work HERE, on this host's od.
+#
+# The original defect was not that od failed; it was that it failed SILENTLY and
+# the reading came back as a clean zero. So a check that only runs the helper is
+# not enough — it has to assert a known answer. Callers run this before trusting
+# a measurement; it needs no engine, no capture and no golden.
+#
+# Returns 0 on success, 1 with a diagnostic on failure.
+wired_od_selftest() {
+    local probe out want
+    probe="$(mktemp)" || return 1
+    # 4 pixels, values chosen so a truncated or mis-strided read cannot
+    # accidentally produce the expected output.
+    printf '\1\2\3\10\20\30\100\120\140\200\220\240' > "$probe"
+
+    # Every byte must come through: 12 values (1 2 3 8 16 24 64 80 96 128 144
+    # 160) summing to 726.
+    out="$( wired_od_bytes < "$probe" | awk '{for(i=1;i<=NF;i++){n++; s+=$i}} END{print n, s}' )"
+    if [ "$out" != "12 726" ]; then
+        echo "wired_od_selftest: wired_od_bytes returned '$out', expected '12 726'" >&2
+        rm -f "$probe"; return 1
+    fi
+
+    # Stride 2 over 4 pixels must yield pixels 0 and 2.
+    want="1 2 3
+64 80 96"
+    out="$( wired_od_sample_rgb 2 < "$probe" )"
+    if [ "$out" != "$want" ]; then
+        echo "wired_od_selftest: wired_od_sample_rgb stride 2 returned '$out'" >&2
+        rm -f "$probe"; return 1
+    fi
+
+    rm -f "$probe"
+    return 0
+}
+
+# wired_od_sample_rgb [stride_px] — print "R G B" for every stride_px-th pixel
+# of a decoded RGB byte stream read from STDIN.
+#
+# Replaces `od ... -w$((stride*3)) | awk '{print $1,$2,$3}'`, which produced the
+# same result only because od happened to start each line on a pixel boundary.
+# Tracking the byte index directly says what is meant and does not depend on how
+# od chooses to group its output.
+#
+# Reads stdin rather than taking a path, because every caller is a pipeline and
+# the obvious `... | wired_od_sample_rgb /dev/stdin` does NOT work on macOS: od
+# reports "Bad file descriptor" for /dev/stdin when stdin is a pipe. Same class
+# of portability trap as the -w flag this helper exists to remove, and it was
+# caught the same way — by running it rather than assuming.
+wired_od_sample_rgb() {
+    local stride="${1:-32}"
+    od -A n -t u1 -v | awk -v stride="$stride" '
+        BEGIN { idx = 0; step = stride * 3 }
+        {
+            for (i = 1; i <= NF; i++) {
+                off = idx % step
+                if (off == 0)      r = $i
+                else if (off == 1) g = $i
+                else if (off == 2) { print r, g, $i }
+                idx++
+            }
+        }'
+}
