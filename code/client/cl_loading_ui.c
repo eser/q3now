@@ -1141,12 +1141,17 @@ void CL_PublishLoadingState( void ) {
  * path stays intact (cl_scrn.c CA_LOADING branch); both fire during the
  * transitional double-dispatch cycle. Whole file retires once the legacy path is removed.
  *
- * The wrappers ignore the (x, y, w, h) parameters — the underlying
- * Loading_Draw* helpers compute their own coords from cls.glconfig and
- * fixed normalized layout. The wmenu item's rect drives the COMPOSITOR's
- * dispatch bounding box (which is what the rect-binding emits), but the
- * draw itself uses the original coordinate scheme. This preserves
- * pixel-exact parity with the legacy path during the transition.
+ * All seven wrappers now pass (x, y, w, h) through: the .wui item's rect,
+ * resolved to pixels by the compositor, drives POSITION. (This paragraph
+ * used to say the opposite — written before the helpers were
+ * parameterised, and left behind when they were.)
+ *
+ * What still bypasses the rect is SIZE: LOADING_FONT_* and the paddings
+ * are computed straight off cls.glconfig.vidWidth/Height, so within one
+ * element position follows the authored layout while type and spacing
+ * follow the render target. Those two agree only while the render target
+ * tracks the window — r_renderScale, or any path that sets vidHeight
+ * independently of it, pulls them apart. See TASK-200.
  */
 
 static void Loading_CustomDraw_Wireframe( float x, float y, float w, float h, vec4_t color )
