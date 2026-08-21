@@ -893,6 +893,24 @@ const char *WiredUI_BoundValueText( const wiredItemDef_t *item, char *out, int o
 	}
 }
 
+/* The UI root scale — what `1rem` is worth in logical units. See the contract
+ * note on WiredUI_GetRootScale in cl_wired_ui.h for why this is a different
+ * question from dpiScale.
+ *
+ * Read through the cvar on each call rather than cached, matching
+ * WiredUI_GetDpiScale: both are consulted during resolve, and caching would
+ * need an invalidation hook on every path that can change the value (menu,
+ * config exec, console set). ui_rootSize is registered with bounds in
+ * WiredUI_Init; the guard here covers the window before registration and any
+ * caller that reaches this from a fresh process. */
+float WiredUI_GetRootScale( void ) {
+	float root = Cvar_VariableValue( "ui_rootSize" );
+	if ( root <= 0.0f ) {
+		return WUI_DEFAULT_FONT_SIZE;
+	}
+	return root;
+}
+
 float WiredUI_SliderFraction( const wiredItemDef_t *item ) {
 	char  cvarBuf[64];
 	float val, range, frac;
@@ -3738,6 +3756,24 @@ qboolean WiredUI_Init( qboolean inGameUI ) {
 			"WiredUI required for engine boot. 1: fail boot if WiredUI init "
 			"fails. 0: graceful headless fallback (SEV_WARN, engine continues "
 			"without UI mode)." );
+		Cvar_Register( &d );
+	}
+
+	/* ui_rootSize — the UI root scale, what `1rem` is worth in logical units.
+	 * Sizing type against a root instead of in pixels is what makes "scale the
+	 * whole interface" a single number; see WiredUI_GetRootScale's contract in
+	 * cl_wired_ui.h. Default is WUI_DEFAULT_FONT_SIZE so unauthored text is
+	 * exactly 1rem and the shipped look does not move. The bounds keep a typo
+	 * from collapsing every rem-sized box to nothing — which would take the
+	 * console with it and leave no visible way to undo. */
+	{
+		static const cvarDesc_t d = CVAR_FLOAT(
+			"ui_rootSize", "14",
+			CVAR_ARCHIVE,
+			"UI root scale in logical units: the size of 1rem before dpiScale. "
+			"Raise it to make the whole interface larger without editing any "
+			"screen, lower it to fit more on screen.",
+			4.0f, 64.0f );
 		Cvar_Register( &d );
 	}
 

@@ -23,7 +23,12 @@ typedef enum {
 	UNIT_VW,         // fraction of viewport width (0-100)
 	UNIT_VH,         // fraction of viewport height (0-100)
 	UNIT_PX,         // real device pixels
-	UNIT_AUTO        // size determined by content (children or text)
+	UNIT_AUTO,       // size determined by content (children or text)
+	// Multiple of the UI root scale (WiredUI_GetRootScale), then dpiScale —
+	// the model CSS rem uses. Appended last on purpose: the values above are
+	// what already-authored menus carry, and inserting ahead of them would
+	// silently reinterpret existing content.
+	UNIT_REM
 } wuiUnit_t;
 
 // -- Unit-aware value -----------------------------------------------------
