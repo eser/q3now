@@ -10,6 +10,8 @@
 // The submit action reads Store/cvar state and revalidates every field; no
 // authored value is interpolated through generic exec.
 
+#include "ui/widgets/qw_button.wui"
+
 menuDef {
 	name "addbots"
 	layer "popup"
@@ -64,8 +66,8 @@ menuDef {
 					gap $spacing_sm
 					height FIT
 					padding 0.005 0
-					itemDef { name "btn_quick_visor" type 1 rect 0 0 0.3 0.04 height FIT text "Add Visor" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { addquickbot visor ; close } }
-					itemDef { name "btn_quick_grunt" type 1 rect 0 0 0.3 0.04 height FIT text "Add Grunt" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { addquickbot grunt ; close } }
+					QW_BUTTON("btn_quick_visor", "Add Visor", $accent, { addquickbot visor ; close }, 0.3)
+					QW_BUTTON("btn_quick_grunt", "Add Grunt", $accent, { addquickbot grunt ; close }, 0.3)
 				}
 
 				itemDef { name "cat_custom_label" type 0 height FIT text "CUSTOM ADD" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
@@ -73,7 +75,7 @@ menuDef {
 				itemDef { name "row_name" type 4 height FIXED 38px width PERCENT 1 text "Name" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botName" maxChars 31 visible 1 grow 0 }
 				itemDef { name "row_skill" type 12 height FIXED 38px width PERCENT 1 text "Skill" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botSkill" cvarFloatList { "Beginner" 1 "Casual" 2 "Competitive" 3 "Pro" 4 "Nightmare" 5 } visible 1 grow 0 }
 				itemDef { name "row_team" type 12 height FIXED 38px width PERCENT 1 text "Team" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botTeam" cvarStrList { Free free Red red Blue blue } visible 1 grow 0 }
-				itemDef { name "btn_add_custom" type 1 rect 0 0 0.35 0.04 height FIT text "Add Custom Bot" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { addcustombot } }
+				QW_BUTTON("btn_add_custom", "Add Custom Bot", $accent, { addcustombot }, 0.35)
 			}
 
 			itemDef {
@@ -85,7 +87,7 @@ menuDef {
 				alignX end
 				height FIT
 
-				itemDef { name "btn_close" type 1 rect 0 0 0.12 0.04 height FIT text "Close" textalign 1 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+				QW_BUTTON("btn_close", "Close", $boneDim, { close }, 0.12)
 			}
 		}
 	}
