@@ -14,9 +14,6 @@
 itemDef {
 	name "hud_ammo_readout"
 	type container
-	position absolute
-	right 1.94vw
-	bottom 4vh
 	width 11.5vw
 	height 11.56vh
 	direction column
