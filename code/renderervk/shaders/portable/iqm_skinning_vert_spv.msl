@@ -1,0 +1,106 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct BoneMatrices
+{
+    float4 boneMats[384];
+    float4x4 mvp;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant BoneMatrices* m_26 [[id(0)]];
+};
+
+struct main0_out
+{
+    float2 frag_tex_coord [[user(locn0)]];
+    float3 frag_normal [[user(locn1)]];
+    float4 frag_tangent [[user(locn2)]];
+    float4 gl_Position [[position]];
+};
+
+struct main0_in
+{
+    float3 in_position [[attribute(0)]];
+    float3 in_normal [[attribute(1)]];
+    float2 in_tex_coord [[attribute(2)]];
+    float4 in_tangent [[attribute(3)]];
+    float4 in_bone_weights [[attribute(4)]];
+    uint4 in_bone_indices [[attribute(5)]];
+};
+
+static inline __attribute__((always_inline))
+float3 transformByBone(thread const uint& idx, thread const float3& v, constant BoneMatrices& _26)
+{
+    return float3(dot(_26.boneMats[(idx * 3u) + 0u], float4(v, 1.0)), dot(_26.boneMats[(idx * 3u) + 1u], float4(v, 1.0)), dot(_26.boneMats[(idx * 3u) + 2u], float4(v, 1.0)));
+}
+
+static inline __attribute__((always_inline))
+float3 transformNormalByBone(thread const uint& idx, thread const float3& n, constant BoneMatrices& _26)
+{
+    return float3(dot(_26.boneMats[(idx * 3u) + 0u].xyz, n), dot(_26.boneMats[(idx * 3u) + 1u].xyz, n), dot(_26.boneMats[(idx * 3u) + 2u].xyz, n));
+}
+
+vertex main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]])
+{
+    main0_out out = {};
+    float3 pos = float3(0.0);
+    float3 nrm = float3(0.0);
+    float3 _tan = float3(0.0);
+    uint param = in.in_bone_indices.x;
+    float3 param_1 = in.in_position;
+    pos += (transformByBone(param, param_1, (*spvDescriptorSet0.m_26)) * in.in_bone_weights.x);
+    uint param_2 = in.in_bone_indices.x;
+    float3 param_3 = in.in_normal;
+    nrm += (transformNormalByBone(param_2, param_3, (*spvDescriptorSet0.m_26)) * in.in_bone_weights.x);
+    uint param_4 = in.in_bone_indices.x;
+    float3 param_5 = in.in_tangent.xyz;
+    _tan += (transformNormalByBone(param_4, param_5, (*spvDescriptorSet0.m_26)) * in.in_bone_weights.x);
+    if (in.in_bone_weights.y > 0.0)
+    {
+        uint param_6 = in.in_bone_indices.y;
+        float3 param_7 = in.in_position;
+        pos += (transformByBone(param_6, param_7, (*spvDescriptorSet0.m_26)) * in.in_bone_weights.y);
+        uint param_8 = in.in_bone_indices.y;
+        float3 param_9 = in.in_normal;
+        nrm += (transformNormalByBone(param_8, param_9, (*spvDescriptorSet0.m_26)) * in.in_bone_weights.y);
+        uint param_10 = in.in_bone_indices.y;
+        float3 param_11 = in.in_tangent.xyz;
+        _tan += (transformNormalByBone(param_10, param_11, (*spvDescriptorSet0.m_26)) * in.in_bone_weights.y);
+    }
+    if (in.in_bone_weights.z > 0.0)
+    {
+        uint param_12 = in.in_bone_indices.z;
+        float3 param_13 = in.in_position;
+        pos += (transformByBone(param_12, param_13, (*spvDescriptorSet0.m_26)) * in.in_bone_weights.z);
+        uint param_14 = in.in_bone_indices.z;
+        float3 param_15 = in.in_normal;
+        nrm += (transformNormalByBone(param_14, param_15, (*spvDescriptorSet0.m_26)) * in.in_bone_weights.z);
+        uint param_16 = in.in_bone_indices.z;
+        float3 param_17 = in.in_tangent.xyz;
+        _tan += (transformNormalByBone(param_16, param_17, (*spvDescriptorSet0.m_26)) * in.in_bone_weights.z);
+    }
+    if (in.in_bone_weights.w > 0.0)
+    {
+        uint param_18 = in.in_bone_indices.w;
+        float3 param_19 = in.in_position;
+        pos += (transformByBone(param_18, param_19, (*spvDescriptorSet0.m_26)) * in.in_bone_weights.w);
+        uint param_20 = in.in_bone_indices.w;
+        float3 param_21 = in.in_normal;
+        nrm += (transformNormalByBone(param_20, param_21, (*spvDescriptorSet0.m_26)) * in.in_bone_weights.w);
+        uint param_22 = in.in_bone_indices.w;
+        float3 param_23 = in.in_tangent.xyz;
+        _tan += (transformNormalByBone(param_22, param_23, (*spvDescriptorSet0.m_26)) * in.in_bone_weights.w);
+    }
+    out.gl_Position = (*spvDescriptorSet0.m_26).mvp * float4(pos, 1.0);
+    out.frag_tex_coord = in.in_tex_coord;
+    out.frag_normal = fast::normalize(nrm);
+    out.frag_tangent = float4(fast::normalize(_tan), in.in_tangent.w);
+    return out;
+}
+

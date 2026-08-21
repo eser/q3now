@@ -1,0 +1,172 @@
+#pragma clang diagnostic ignored "-Wunused-variable"
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+#include <metal_atomic>
+
+using namespace metal;
+
+struct Reached
+{
+    uint reached[1];
+};
+
+struct Push
+{
+    float4 frustum[4];
+    float4 viewOrigin;
+    uint4 params;
+};
+
+struct SurfAABB
+{
+    float4 mins;
+    float4 maxs;
+    float4 plane;
+    uint4 meta;
+};
+
+struct Aabb
+{
+    SurfAABB surfaces[1];
+};
+
+struct Visible
+{
+    uint visible[1];
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(256u, 1u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    device Reached* m_85 [[id(0)]];
+    device Aabb* m_148 [[id(1)]];
+    device Visible* m_238 [[id(2)]];
+};
+
+static inline __attribute__((always_inline))
+bool reachedBit(thread const uint& i, device Reached& _85)
+{
+    return (_85.reached[i >> 5u] & (1u << (i & 31u))) != 0u;
+}
+
+static inline __attribute__((always_inline))
+bool boxFullyBehind(thread const float3& mins, thread const float3& maxs, thread const float4& plane)
+{
+    float3 n = plane.xyz;
+    float _34;
+    if (n.x >= 0.0)
+    {
+        _34 = maxs.x;
+    }
+    else
+    {
+        _34 = mins.x;
+    }
+    float3 p;
+    p.x = _34;
+    float _48;
+    if (n.y >= 0.0)
+    {
+        _48 = maxs.y;
+    }
+    else
+    {
+        _48 = mins.y;
+    }
+    p.y = _48;
+    float _62;
+    if (n.z >= 0.0)
+    {
+        _62 = maxs.z;
+    }
+    else
+    {
+        _62 = mins.z;
+    }
+    p.z = _62;
+    return (dot(n, p) - plane.w) < 0.0;
+}
+
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant Push& _115 [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint i = gl_GlobalInvocationID.x;
+    uint count = _115.params.x;
+    if (i >= count)
+    {
+        return;
+    }
+    uint flagBase = count + 1u;
+    uint param = i;
+    bool vis = reachedBit(param, (*spvDescriptorSet0.m_85));
+    bool _140;
+    if (vis)
+    {
+        _140 = _115.params.z != 0u;
+    }
+    else
+    {
+        _140 = vis;
+    }
+    if (_140)
+    {
+        float3 mn = (*spvDescriptorSet0.m_148).surfaces[i].mins.xyz;
+        float3 mx = (*spvDescriptorSet0.m_148).surfaces[i].maxs.xyz;
+        for (int p = 0; p < 4; p++)
+        {
+            float3 param_1 = mn;
+            float3 param_2 = mx;
+            float4 param_3 = _115.frustum[p];
+            if (boxFullyBehind(param_1, param_2, param_3))
+            {
+                vis = false;
+                break;
+            }
+        }
+    }
+    bool _192;
+    if (vis)
+    {
+        _192 = _115.params.y != 0u;
+    }
+    else
+    {
+        _192 = vis;
+    }
+    if (_192)
+    {
+        uint ct = ((device uint*)&(*spvDescriptorSet0.m_148).surfaces[i].meta)[0u];
+        if (ct != 2u)
+        {
+            float4 pl = (*spvDescriptorSet0.m_148).surfaces[i].plane;
+            float d = dot(_115.viewOrigin.xyz, pl.xyz);
+            if (ct == 0u)
+            {
+                if (d < (pl.w - 8.0))
+                {
+                    vis = false;
+                }
+            }
+            else
+            {
+                if (d > (pl.w + 8.0))
+                {
+                    vis = false;
+                }
+            }
+        }
+    }
+    (*spvDescriptorSet0.m_238).visible[flagBase + i] = uint(vis);
+    if (vis)
+    {
+        uint _250 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_238).visible[0], 1u, memory_order_relaxed);
+        uint slot = _250;
+        if ((slot + 1u) <= count)
+        {
+            (*spvDescriptorSet0.m_238).visible[1u + slot] = i;
+        }
+    }
+}
+

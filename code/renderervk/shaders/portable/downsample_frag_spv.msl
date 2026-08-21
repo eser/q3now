@@ -1,0 +1,113 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+constant float texel_x_tmp [[function_constant(0)]];
+constant float texel_x = is_function_constant_defined(texel_x_tmp) ? texel_x_tmp : 0.0;
+constant float texel_y_tmp [[function_constant(1)]];
+constant float texel_y = is_function_constant_defined(texel_y_tmp) ? texel_y_tmp : 0.0;
+constant int first_level_tmp [[function_constant(2)]];
+constant int first_level = is_function_constant_defined(first_level_tmp) ? first_level_tmp : 0;
+constant bool _224 = (first_level != 0);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> texture0 [[id(0)]];
+    sampler texture0Smplr [[id(1)]];
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord [[user(locn0)]];
+};
+
+static inline __attribute__((always_inline))
+float karis_luma(thread const float3& c)
+{
+    return dot(c, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+}
+
+static inline __attribute__((always_inline))
+float3 karis_avg(thread const float3& a, thread const float3& b, thread const float3& c, thread const float3& d)
+{
+    float3 param = a;
+    float wa = 1.0 / (1.0 + karis_luma(param));
+    float3 param_1 = b;
+    float wb = 1.0 / (1.0 + karis_luma(param_1));
+    float3 param_2 = c;
+    float wc = 1.0 / (1.0 + karis_luma(param_2));
+    float3 param_3 = d;
+    float wd = 1.0 / (1.0 + karis_luma(param_3));
+    float ws = ((wa + wb) + wc) + wd;
+    return ((((a * wa) + (b * wb)) + (c * wc)) + (d * wd)) / float3(fast::max(ws, 9.9999997473787516355514526367188e-06));
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]])
+{
+    main0_out out = {};
+    float2 uv = in.frag_tex_coord;
+    float2 tx;
+    tx.x = texel_x;
+    tx.y = texel_y;
+    float3 a = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (tx * float2(-1.0)))).xyz;
+    float3 b = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (tx * float2(1.0, -1.0)))).xyz;
+    float3 c = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (tx * float2(-1.0, 1.0)))).xyz;
+    float3 d = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (tx * float2(1.0)))).xyz;
+    float3 e = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (tx * float2(-2.0)))).xyz;
+    float3 f = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (tx * float2(0.0, -2.0)))).xyz;
+    float3 g = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (tx * float2(2.0, -2.0)))).xyz;
+    float3 h = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (tx * float2(-2.0, 0.0)))).xyz;
+    float3 i = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, uv).xyz;
+    float3 j = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (tx * float2(2.0, 0.0)))).xyz;
+    float3 k = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (tx * float2(-2.0, 2.0)))).xyz;
+    float3 l = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (tx * float2(0.0, 2.0)))).xyz;
+    float3 m = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (tx * float2(2.0)))).xyz;
+    float3 result;
+    if (_224)
+    {
+        float3 param = a;
+        float3 param_1 = b;
+        float3 param_2 = c;
+        float3 param_3 = d;
+        float3 group_inner = karis_avg(param, param_1, param_2, param_3);
+        float3 param_4 = e;
+        float3 param_5 = f;
+        float3 param_6 = h;
+        float3 param_7 = i;
+        float3 group_tl = karis_avg(param_4, param_5, param_6, param_7);
+        float3 param_8 = f;
+        float3 param_9 = g;
+        float3 param_10 = i;
+        float3 param_11 = j;
+        float3 group_tr = karis_avg(param_8, param_9, param_10, param_11);
+        float3 param_12 = h;
+        float3 param_13 = i;
+        float3 param_14 = k;
+        float3 param_15 = l;
+        float3 group_bl = karis_avg(param_12, param_13, param_14, param_15);
+        float3 param_16 = i;
+        float3 param_17 = j;
+        float3 param_18 = l;
+        float3 param_19 = m;
+        float3 group_br = karis_avg(param_16, param_17, param_18, param_19);
+        result = (group_inner * 0.5) + ((((group_tl + group_tr) + group_bl) + group_br) * 0.125);
+    }
+    else
+    {
+        result = (((a + b) + c) + d) * 0.125;
+        result += ((((e + g) + k) + m) * 0.03125);
+        result += ((((f + h) + j) + l) * 0.0625);
+        result += (i * 0.125);
+    }
+    out.out_color = float4(result, 1.0);
+    return out;
+}
+

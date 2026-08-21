@@ -55,7 +55,9 @@ vec3 karis_avg( vec3 a, vec3 b, vec3 c, vec3 d )
 void main()
 {
 	vec2 uv = frag_tex_coord;
-	vec2 tx = vec2( texel_x, texel_y );
+	vec2 tx;
+	tx.x = texel_x;
+	tx.y = texel_y;
 
 	// inner 2x2 box (+/-1 texel)
 	vec3 a = texture( texture0, uv + tx * vec2( -1.0, -1.0 ) ).rgb;

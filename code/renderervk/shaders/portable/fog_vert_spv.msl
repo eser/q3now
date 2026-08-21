@@ -1,0 +1,67 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct UBO
+{
+    float4 eyePos;
+    float4 lightPos;
+    float4 lightColor;
+    float4 lightVector;
+    float4 fogDistanceVector;
+    float4 fogDepthVector;
+    float4 fogEyeT;
+    float4 fogColor;
+    float4 _pad_to_mvp[22];
+    float4x4 mvp;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant UBO* m_19 [[id(0)]];
+};
+
+struct main0_out
+{
+    float2 fog_tex_coord [[user(locn4)]];
+    float4 gl_Position [[position]];
+};
+
+struct main0_in
+{
+    float3 in_position [[attribute(0)]];
+};
+
+vertex main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]])
+{
+    main0_out out = {};
+    out.gl_Position = (*spvDescriptorSet0.m_19).mvp * float4(in.in_position, 1.0);
+    float s = dot(in.in_position, (*spvDescriptorSet0.m_19).fogDistanceVector.xyz) + (*spvDescriptorSet0.m_19).fogDistanceVector.w;
+    float t = dot(in.in_position, (*spvDescriptorSet0.m_19).fogDepthVector.xyz) + (*spvDescriptorSet0.m_19).fogDepthVector.w;
+    if ((*spvDescriptorSet0.m_19).fogEyeT.y == 1.0)
+    {
+        if (t < 0.0)
+        {
+            t = 0.03125;
+        }
+        else
+        {
+            t = 0.96875;
+        }
+    }
+    else
+    {
+        if (t < 1.0)
+        {
+            t = 0.03125;
+        }
+        else
+        {
+            t = 0.03125 + ((0.9375 * t) / (t - (*spvDescriptorSet0.m_19).fogEyeT.x));
+        }
+    }
+    out.fog_tex_coord = float2(s, t);
+    return out;
+}
+

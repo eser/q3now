@@ -17,7 +17,9 @@ layout(set = 3, binding = 0, std140) uniform RtMetrics {
 layout(constant_id = 0) const float SMAA_THRESHOLD = 0.1;
 
 layout(location = 0) in vec2 texcoord;
-layout(location = 1) in vec4 offset[3];
+layout(location = 1) in vec4 offset0;
+layout(location = 2) in vec4 offset1;
+layout(location = 3) in vec4 offset2;
 
 layout(location = 0) out vec2 out_edges;
 
@@ -31,12 +33,14 @@ const vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);
 const float SMAA_LUMA_EPSILON = 1e-4;
 
 void main() {
-	vec2 threshold = vec2(SMAA_THRESHOLD);
+	vec2 threshold;
+	threshold.x = SMAA_THRESHOLD;
+	threshold.y = SMAA_THRESHOLD;
 
 	// Calculate lumas
 	float L      = dot(texture(colorTex, texcoord).rgb, lumaWeights);
-	float Lleft  = dot(texture(colorTex, offset[0].xy).rgb, lumaWeights);
-	float Ltop   = dot(texture(colorTex, offset[0].zw).rgb, lumaWeights);
+	float Lleft  = dot(texture(colorTex, offset0.xy).rgb, lumaWeights);
+	float Ltop   = dot(texture(colorTex, offset0.zw).rgb, lumaWeights);
 
 	// Threshold check — relative luma delta (HDR-aware).
 	// divide neighbour delta by center luma so the
@@ -63,15 +67,15 @@ void main() {
 		discard;
 
 	// Calculate right and bottom deltas for local contrast adaptation
-	float Lright  = dot(texture(colorTex, offset[1].xy).rgb, lumaWeights);
-	float Lbottom = dot(texture(colorTex, offset[1].zw).rgb, lumaWeights);
+	float Lright  = dot(texture(colorTex, offset1.xy).rgb, lumaWeights);
+	float Lbottom = dot(texture(colorTex, offset1.zw).rgb, lumaWeights);
 	delta.zw = abs(L - vec2(Lright, Lbottom));
 
 	vec2 maxDelta = max(delta.xy, delta.zw);
 
 	// Left-left and top-top deltas
-	float Lleftleft = dot(texture(colorTex, offset[2].xy).rgb, lumaWeights);
-	float Ltoptop   = dot(texture(colorTex, offset[2].zw).rgb, lumaWeights);
+	float Lleftleft = dot(texture(colorTex, offset2.xy).rgb, lumaWeights);
+	float Ltoptop   = dot(texture(colorTex, offset2.zw).rgb, lumaWeights);
 	delta.zw = abs(vec2(Lleft, Ltop) - vec2(Lleftleft, Ltoptop));
 
 	maxDelta = max(maxDelta, delta.zw);

@@ -14,10 +14,25 @@
 
 static VkResult g_submitResult;
 static uint32_t g_submitCalls;
+static uint32_t g_beginCalls, g_endCalls, g_resetCalls;
 static uint32_t g_barrierCalls;
 static VkImageLayout g_barrierOldLayout;
 static VkImageLayout g_barrierNewLayout;
 static int g_callbackFailed;
+
+static VKAPI_ATTR VkResult VKAPI_CALL fakeBeginCommandBuffer(
+	VkCommandBuffer commandBuffer, const VkCommandBufferBeginInfo *beginInfo ) {
+	(void)commandBuffer; (void)beginInfo; g_beginCalls++; return VK_SUCCESS;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL fakeEndCommandBuffer( VkCommandBuffer commandBuffer ) {
+	(void)commandBuffer; g_endCalls++; return VK_SUCCESS;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL fakeResetCommandBuffer(
+	VkCommandBuffer commandBuffer, VkCommandBufferResetFlags flags ) {
+	(void)commandBuffer; (void)flags; g_resetCalls++; return VK_SUCCESS;
+}
 
 static VKAPI_ATTR VkResult VKAPI_CALL fakeQueueSubmit2(
 	VkQueue queue, uint32_t submitCount, const VkSubmitInfo2 *submits, VkFence fence ) {
@@ -48,11 +63,17 @@ static VKAPI_ATTR void VKAPI_CALL fakeCmdPipelineBarrier(
 }
 
 static void setupBackend( ralBackend_t *b ) {
+	uint32_t q;
 	memset( b, 0, sizeof( *b ) );
 	b->device = HANDLE( VkDevice, 1 );
 	b->queues[RAL_QUEUE_GRAPHICS] = HANDLE( VkQueue, 2 );
 	b->vk.QueueSubmit2 = fakeQueueSubmit2;
+	b->vk.BeginCommandBuffer = fakeBeginCommandBuffer;
+	b->vk.EndCommandBuffer = fakeEndCommandBuffer;
+	b->vk.ResetCommandBuffer = fakeResetCommandBuffer;
 	b->vk.CmdPipelineBarrier = fakeCmdPipelineBarrier;
+	for ( q = RAL_QUEUE_GRAPHICS; q <= RAL_QUEUE_TRANSFER; ++q )
+		Ral_SubmissionLifecycleInit( &b->submissionLifecycle[q], b, (ralQueueType_t)q );
 }
 
 int main( void ) {
@@ -60,6 +81,8 @@ int main( void ) {
 	ralCommandBuffer_t cb;
 	ralCommandBuffer_t *cbs[1];
 	ralSubmitInfo_t submit;
+	ralCommandReceipt_t recording, executable;
+	ralSubmissionReceipt_t submitted, untouched, sentinel;
 	ralSwapchain_t swapchain;
 	ralTexture_t texture;
 	ralTexture_t *images[1];
@@ -83,24 +106,51 @@ int main( void ) {
 	cb.cb = HANDLE( VkCommandBuffer, 3 );
 	cb.queue = RAL_QUEUE_GRAPHICS;
 	cb.state = RAL_VK_CMD_PENDING_SUBMIT;
+	cb.state = RAL_VK_CMD_IDLE;
+	Ral_CommandLifecycleInit( &cb.lifecycle, &backend, &cb, RAL_QUEUE_GRAPHICS );
+	CHECK( Ral_BeginCommandBufferExact( &cb, &recording ) == ralSuccess );
+	CHECK( g_beginCalls == 1 && cb.state == RAL_VK_CMD_RECORDING );
+	CHECK( Ral_EndCommandBufferExact( &cb, &recording, &executable ) == ralSuccess );
+	CHECK( g_endCalls == 1 && cb.state == RAL_VK_CMD_PENDING_SUBMIT );
+	CHECK( Ral_CancelCommandBuffer( &cb, &executable ) == ralSuccess );
+	CHECK( g_resetCalls == 1 && cb.state == RAL_VK_CMD_IDLE );
+	CHECK( Ral_BeginCommandBufferExact( &cb, &recording ) == ralSuccess );
+	CHECK( recording.generation == 2u );
+	CHECK( Ral_EndCommandBufferExact( &cb, &recording, &executable ) == ralSuccess );
 	cbs[0] = &cb;
 	memset( &submit, 0, sizeof( submit ) );
 	submit.commandBuffers = cbs;
 	submit.numCommandBuffers = 1;
 
 	g_submitResult = VK_SUCCESS;
-	CHECK( Ral_Submit( &backend, RAL_QUEUE_GRAPHICS, &submit ) == ralSuccess );
+	CHECK( Ral_SubmitExact( &backend, RAL_QUEUE_GRAPHICS, &submit,
+	                      &executable, &submitted ) == ralSuccess );
 	CHECK( g_submitCalls == 1 && cb.state == RAL_VK_CMD_SUBMITTED );
+	CHECK( Ral_SubmissionReceiptValid( &submitted )
+	    && submitted.commands[0].generation == executable.generation );
+	CHECK( Ral_SubmitExact( &backend, RAL_QUEUE_GRAPHICS, &submit,
+	                      &executable, &submitted ) == ralErrorInvalidArgument );
+	CHECK( g_submitCalls == 1 );
+
+	Ral_CommandLifecycleInit( &cb.lifecycle, &backend, &cb, RAL_QUEUE_GRAPHICS );
+	CHECK( Ral_CommandLifecyclePublishBegin( &cb.lifecycle, &recording ) == ralSuccess );
+	CHECK( Ral_CommandLifecyclePublishEnd( &cb.lifecycle, &recording, &executable ) == ralSuccess );
 	cb.state = RAL_VK_CMD_PENDING_SUBMIT;
 	g_submitResult = VK_ERROR_DEVICE_LOST;
-	CHECK( Ral_Submit( &backend, RAL_QUEUE_GRAPHICS, &submit ) == ralErrorDeviceLost );
+	memset( &sentinel, 0x5a, sizeof( sentinel ) ); untouched = sentinel;
+	CHECK( Ral_SubmitExact( &backend, RAL_QUEUE_GRAPHICS, &submit,
+	                      &executable, &untouched ) == ralErrorDeviceLost );
 	CHECK( g_submitCalls == 2 && cb.state == RAL_VK_CMD_PENDING_SUBMIT );
+	CHECK( cb.lifecycle.state == RAL_COMMAND_EXECUTABLE );
+	CHECK( memcmp( &untouched, &sentinel, sizeof( untouched ) ) == 0 );
 	cb.backend = &otherBackend;
-	CHECK( Ral_Submit( &backend, RAL_QUEUE_GRAPHICS, &submit ) == ralErrorInvalidArgument );
+	CHECK( Ral_SubmitExact( &backend, RAL_QUEUE_GRAPHICS, &submit,
+	                      &executable, &untouched ) == ralErrorInvalidArgument );
 	CHECK( g_submitCalls == 2 );
 	cb.backend = &backend;
 	cb.state = RAL_VK_CMD_IDLE;
-	CHECK( Ral_Submit( &backend, RAL_QUEUE_GRAPHICS, &submit ) == ralErrorInvalidArgument );
+	CHECK( Ral_SubmitExact( &backend, RAL_QUEUE_GRAPHICS, &submit,
+	                      &executable, &untouched ) == ralErrorInvalidArgument );
 	CHECK( g_submitCalls == 2 );
 	Ral_SetCommandBufferExternalLifecycle( &cb, qtrue );
 	CHECK( Ral_Submit( &backend, RAL_QUEUE_GRAPHICS, &submit ) == ralErrorDeviceLost );

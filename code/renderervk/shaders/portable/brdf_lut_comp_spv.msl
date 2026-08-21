@@ -1,0 +1,133 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(16u, 16u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float, access::write> brdfLut [[id(0)]];
+};
+
+static inline __attribute__((always_inline))
+float radicalInverse_VdC(thread uint& bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 1431655765u) << 1u) | ((bits & 2863311530u) >> 1u);
+    bits = ((bits & 858993459u) << 2u) | ((bits & 3435973836u) >> 2u);
+    bits = ((bits & 252645135u) << 4u) | ((bits & 4042322160u) >> 4u);
+    bits = ((bits & 16711935u) << 8u) | ((bits & 4278255360u) >> 8u);
+    return float(bits) * 2.3283064365386962890625e-10;
+}
+
+static inline __attribute__((always_inline))
+float2 hammersley(thread const uint& i, thread const uint& n)
+{
+    uint param = i;
+    float _104 = radicalInverse_VdC(param);
+    return float2(float(i) / float(n), _104);
+}
+
+static inline __attribute__((always_inline))
+float3 importanceSampleGGX(thread const float2& xi, thread const float& roughness, thread const float3& N)
+{
+    float a = roughness * roughness;
+    float phi = 6.283185482025146484375 * xi.x;
+    float cosTheta = sqrt((1.0 - xi.y) / (1.0 + (((a * a) - 1.0) * xi.y)));
+    float sinTheta = sqrt(1.0 - (cosTheta * cosTheta));
+    float3 H;
+    H.x = cos(phi) * sinTheta;
+    H.y = sin(phi) * sinTheta;
+    H.z = cosTheta;
+    float3 up = select(float3(1.0, 0.0, 0.0), float3(0.0, 0.0, 1.0), bool3(abs(N.z) < 0.999000012874603271484375));
+    float3 tangent = fast::normalize(cross(up, N));
+    float3 bitangent = cross(N, tangent);
+    return fast::normalize(((tangent * H.x) + (bitangent * H.y)) + (N * H.z));
+}
+
+static inline __attribute__((always_inline))
+float geometrySchlickGGX_IBL(thread const float& NdotV, thread const float& roughness)
+{
+    float a = roughness;
+    float k = (a * a) / 2.0;
+    return NdotV / ((NdotV * (1.0 - k)) + k);
+}
+
+static inline __attribute__((always_inline))
+float geometrySmith_IBL(thread const float& NdotV, thread const float& NdotL, thread const float& roughness)
+{
+    float param = NdotV;
+    float param_1 = roughness;
+    float param_2 = NdotL;
+    float param_3 = roughness;
+    return geometrySchlickGGX_IBL(param, param_1) * geometrySchlickGGX_IBL(param_2, param_3);
+}
+
+static inline __attribute__((always_inline))
+float2 integrateBRDF(thread const float& NdotV, thread const float& roughness)
+{
+    float3 V;
+    V.x = sqrt(1.0 - (NdotV * NdotV));
+    V.y = 0.0;
+    V.z = NdotV;
+    float A = 0.0;
+    float B = 0.0;
+    float3 N = float3(0.0, 0.0, 1.0);
+    for (uint i = 0u; i < 1024u; i++)
+    {
+        uint param = i;
+        uint param_1 = 1024u;
+        float2 xi = hammersley(param, param_1);
+        float2 param_2 = xi;
+        float param_3 = roughness;
+        float3 param_4 = N;
+        float3 H = importanceSampleGGX(param_2, param_3, param_4);
+        float3 L = fast::normalize((H * (2.0 * dot(V, H))) - V);
+        float NdotL = fast::max(L.z, 0.0);
+        float NdotH = fast::max(H.z, 0.0);
+        float VdotH = fast::max(dot(V, H), 0.0);
+        if (NdotL > 0.0)
+        {
+            float param_5 = NdotV;
+            float param_6 = NdotL;
+            float param_7 = roughness;
+            float G = geometrySmith_IBL(param_5, param_6, param_7);
+            float G_Vis = (G * VdotH) / (NdotH * NdotV);
+            float Fc = powr(1.0 - VdotH, 5.0);
+            A += ((1.0 - Fc) * G_Vis);
+            B += (Fc * G_Vis);
+        }
+    }
+    return float2(A, B) / float2(1024.0);
+}
+
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    int2 size = int2(spvDescriptorSet0.brdfLut.get_width(), spvDescriptorSet0.brdfLut.get_height());
+    int2 coord = int2(gl_GlobalInvocationID.xy);
+    bool _349 = coord.x >= size.x;
+    bool _358;
+    if (!_349)
+    {
+        _358 = coord.y >= size.y;
+    }
+    else
+    {
+        _358 = _349;
+    }
+    if (_358)
+    {
+        return;
+    }
+    float NdotV = (float(coord.x) + 0.5) / float(size.x);
+    float roughness = (float(coord.y) + 0.5) / float(size.y);
+    NdotV = fast::max(NdotV, 9.9999997473787516355514526367188e-05);
+    float param = NdotV;
+    float param_1 = roughness;
+    float2 ab = integrateBRDF(param, param_1);
+    spvDescriptorSet0.brdfLut.write(float4(ab, 0.0, 0.0), uint2(coord));
+}
+

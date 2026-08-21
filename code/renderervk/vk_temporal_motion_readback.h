@@ -52,10 +52,10 @@ typedef struct {
 
 typedef struct {
 	ralBuffer_t *buffer;
-	void *mapped;
 	uint64_t bytes;
 	uint32_t width, height;
 	uint32_t allocationGeneration;
+	qboolean hostReadable;
 	vkTemporalMotionReadbackState_t state;
 	vkTemporalMotionReadbackTicket_t ticket;
 } vkTemporalMotionReadbackSlot_t;
@@ -80,7 +80,8 @@ qboolean VK_TemporalMotionReadbackIsArmed(
 	const vkTemporalMotionReadbackOwner_t *owner );
 
 // Called at the completed command-slot fence boundary. Prepare owns one
-// persistent HOST_COHERENT TRANSFER_DST buffer for the centered bounded ROI.
+// MAP_READ-capable TRANSFER_DST buffer for the centered bounded ROI. Mapping is
+// bounded to CompleteAfterFence and is never live while GPU commands use it.
 qboolean VK_TemporalMotionReadbackPrepareAfterFence(
 	vkTemporalMotionReadbackOwner_t *owner, ralBackend_t *backend,
 	uint32_t frameCount, uint32_t frameIndex, uint32_t width, uint32_t height );

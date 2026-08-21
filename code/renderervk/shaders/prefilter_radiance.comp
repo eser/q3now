@@ -92,9 +92,9 @@ vec3 cubeFaceDir( uint face, vec2 uv )
 
 void main()
 {
-	ivec3 size  = imageSize( dstRadiance );   // (mipW, mipH, 6) for this mip
+	uvec2 size  = uvec2( imageSize( dstRadiance ).xy );
 	ivec3 coord = ivec3( gl_GlobalInvocationID.xyz );
-	if ( coord.x >= size.x || coord.y >= size.y || coord.z >= 6 )
+	if ( uint( coord.x ) >= size.x || uint( coord.y ) >= size.y || uint( coord.z ) >= 6u )
 		return;
 
 	float roughness = ( roughnessMips > 1u )

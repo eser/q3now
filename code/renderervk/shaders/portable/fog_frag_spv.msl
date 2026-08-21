@@ -1,0 +1,70 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T>
+struct spvDescriptor
+{
+    T value;
+};
+
+template<typename T>
+struct spvDescriptorArray
+{
+    spvDescriptorArray(const device spvDescriptor<T>* ptr_) : ptr(&ptr_->value) {}
+    spvDescriptorArray(const device void *ptr_) : spvDescriptorArray(static_cast<const device spvDescriptor<T>*>(ptr_)) {}
+    const device T& operator [] (size_t i) const { return ptr[i]; }
+    const device T* ptr;
+};
+
+struct UBO
+{
+    float4 eyePos;
+    float4 lightPos;
+    float4 lightColor;
+    float4 lightVector;
+    float4 fogDistanceVector;
+    float4 fogDepthVector;
+    float4 fogEyeT;
+    float4 fogColor;
+    float4 _pad_to_packed_indices[26];
+    uint4 packed_indices[3];
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant UBO* m_22 [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    spvDescriptor<texture2d<float>> wired_bindless_images [[id(0)]][1] /* unsized array hack */;
+    // Overlapping binding: spvDescriptor<sampler> wired_bindless_samplers [[id(0)]][1] /* unsized array hack */;
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 fog_tex_coord [[user(locn4)]];
+};
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]])
+{
+    spvDescriptorArray<texture2d<float>> wired_bindless_images {spvDescriptorSet1.wired_bindless_images};
+    spvDescriptorArray<sampler> wired_bindless_samplers {reinterpret_cast<const device spvDescriptor<sampler>*>(&spvDescriptorSet1.wired_bindless_images)};
+
+    main0_out out = {};
+    uint _31 = (*spvDescriptorSet0.m_22).packed_indices[0].w & 4095u;
+    uint _45 = ((*spvDescriptorSet0.m_22).packed_indices[0].w >> uint(12)) & 255u;
+    float4 fog = wired_bindless_images[_31].sample(wired_bindless_samplers[_45], in.fog_tex_coord);
+    out.out_color = fog * (*spvDescriptorSet0.m_22).fogColor;
+    return out;
+}
+

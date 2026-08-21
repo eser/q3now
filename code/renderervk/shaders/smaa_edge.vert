@@ -12,7 +12,9 @@ layout(set = 3, binding = 0, std140) uniform RtMetrics {
 };
 
 layout(location = 0) out vec2 texcoord;
-layout(location = 1) out vec4 offset[3];
+layout(location = 1) out vec4 offset0;
+layout(location = 2) out vec4 offset1;
+layout(location = 3) out vec4 offset2;
 
 out gl_PerVertex { vec4 gl_Position; };
 
@@ -23,7 +25,7 @@ void main() {
 	texcoord = pos;
 
 	// neighbor offsets for edge detection
-	offset[0] = texcoord.xyxy + rtMetrics.xyxy * vec4(-1.0, 0.0, 0.0, -1.0);
-	offset[1] = texcoord.xyxy + rtMetrics.xyxy * vec4( 1.0, 0.0, 0.0,  1.0);
-	offset[2] = texcoord.xyxy + rtMetrics.xyxy * vec4(-2.0, 0.0, 0.0, -2.0);
+	offset0 = texcoord.xyxy + rtMetrics.xyxy * vec4(-1.0, 0.0, 0.0, -1.0);
+	offset1 = texcoord.xyxy + rtMetrics.xyxy * vec4( 1.0, 0.0, 0.0,  1.0);
+	offset2 = texcoord.xyxy + rtMetrics.xyxy * vec4(-2.0, 0.0, 0.0, -2.0);
 }

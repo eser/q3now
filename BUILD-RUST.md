@@ -41,35 +41,27 @@ cargo  --version    # → cargo 1.80+ (or whatever the current stable is)
 rustc  --version
 ```
 
-### Install `naga`
+### Build the pinned `naga`
 
-Two paths — pick one.
-
-**(a) `cargo install` (recommended for development boxes / CI)**
-
-```sh
-cargo install naga-cli --locked
-# Puts `naga` (or `naga.exe`) in ~/.cargo/bin — make sure that's on PATH.
-```
-
-This is the fastest path and is what `shader_xlate` documents as the default.
-
-**(b) Build from the vendored submodule (canonical for the engine repo)**
-
-The Phase 7 plan vendors the
-[`gfx-rs/wgpu`](https://github.com/gfx-rs/wgpu) monorepo as a git submodule at
-`src/libs/wgpu/` (the `naga` crate lives inside it). Once the submodule is in
-place:
+Wired requires the exact identity `30.0.0+wired-portable-v1`. The repository
+builder fetches the published `naga`/`naga-cli` 30.0.0 crates, applies the
+versioned Wired portability patch, builds with the crate's published lockfile,
+and verifies the resulting identity:
 
 ```sh
-cargo build --manifest-path src/libs/wgpu/Cargo.toml \
-            --release -p naga-cli
-# Output: src/libs/wgpu/target/release/naga(.exe).
-# Either copy it onto PATH or add the target/release/ dir to PATH.
+code/tools/shader_xlate/build_pinned_naga.sh build/tools/naga/naga
+export PATH="$PWD/build/tools/naga:$PATH"
+naga --version
+# 30.0.0+wired-portable-v1
 ```
 
-(Adding the submodule is a one-time `git submodule add` — see "Submodules"
-below.)
+An unpatched `cargo install naga-cli` binary is intentionally rejected. The
+Wired patch contains only the SPIR-V portability behavior exercised by the
+canonical corpus: derived scalar specialization operations, deterministic
+combined-image/sampler splitting, and WGSL-compatible storage access widening.
+The C++ wrapper additionally performs the pinned push-data `immediate`→uniform
+rewrite before canonical publication; its binding is exact-joined to the
+portable manifest and covered by freshness checks.
 
 ## Submodules
 
@@ -80,12 +72,8 @@ For an end-to-end set-up matching `phase-7-ral-design.md`:
 git submodule add https://github.com/KhronosGroup/SPIRV-Cross.git src/libs/SPIRV-Cross
 cd src/libs/SPIRV-Cross && git checkout vulkan-sdk-1.4.341.0 && cd ../../..
 
-# wgpu / naga (Rust — required for WGSL output only)
-git submodule add https://github.com/gfx-rs/wgpu.git src/libs/wgpu
-cd src/libs/wgpu && git checkout v22.1.0 && cd ../../..   # or whatever current stable
-
-git add .gitmodules src/libs/SPIRV-Cross src/libs/wgpu
-git commit -m "deps: vendor SPIRV-Cross + wgpu (naga) as submodules for Phase 7.3b"
+git add .gitmodules src/libs/SPIRV-Cross
+git commit -m "deps: vendor SPIRV-Cross for shader translation"
 ```
 
 Then to bring up a fresh clone:
@@ -97,15 +85,10 @@ git submodule update --init --recursive
 
 ## Versions / MSRV
 
-- **Rust**: the latest `naga` crate tracks recent stable Rust; **MSRV ~1.76**
-  as of the wgpu 22.x line. `rustup` defaults to the latest stable, which is
-  always ≥ MSRV.
-- **`naga-cli`**: tag track the wgpu release that vendors it. The engine's
-  pinned tag (the one Phase 7.3c will lock in) is whichever wgpu the
-  submodule check-out resolves to.
-
-A `rust-toolchain.toml` at repo root will pin the exact toolchain in a later
-phase; until then, stable-default is fine.
+- **Rust**: use a stable toolchain accepted by the published Naga 30 lockfile.
+  Rust is build-time-only and does not enter the runtime ABI.
+- **`naga-cli`**: exactly `30.0.0+wired-portable-v1`; both `shader_xlate` and
+  the generated translation catalog record and reject any other identity.
 
 ## What `shader_xlate` does when `naga` is missing
 
@@ -116,8 +99,9 @@ to completion, then logs:
 [xlate] <basename> wgsl=skip(naga unavailable)
 ```
 
-`*.wgsl` files for those shaders simply aren't produced this run. Re-run
-once `naga` is installed and they appear alongside.
+`*.wgsl` files for those shaders simply aren't produced in an optional-target
+run. Canonical generation uses `--require-wgsl`, so missing or unpinned Naga
+fails closed.
 
 ## Cross-reference
 

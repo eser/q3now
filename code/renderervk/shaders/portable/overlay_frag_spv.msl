@@ -1,0 +1,29 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> u_tex [[id(0)]];
+    sampler u_texSmplr [[id(1)]];
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+};
+
+struct main0_in
+{
+    float4 frag_color [[user(locn0)]];
+    float2 frag_tex_coord0 [[user(locn1)]];
+};
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]])
+{
+    main0_out out = {};
+    out.out_color = spvDescriptorSet0.u_tex.sample(spvDescriptorSet0.u_texSmplr, in.frag_tex_coord0) * in.frag_color;
+    return out;
+}
+

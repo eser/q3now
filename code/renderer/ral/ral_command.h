@@ -13,7 +13,9 @@
 #define WIRED_RAL_COMMAND_H
 
 #include "ral_types.h"
+#include "ral_command_lifecycle.h" // generation-bound recording/submission receipts
 #include "ral_resource.h"   // ralFilter_t, ralPipelineLayout_t-forward references for the typed cmd surface
+#include "ral_transition.h" // semantic resource-state transitions; native lowering stays in each backend
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,6 +55,15 @@ ralResult_t Ral_WaitIdleAndDrainDeferred( ralBackend_t *b );
 
 // ── command buffer lifecycle ────────────────────────────────────────────
 ralCommandBuffer_t *Ral_AcquireCommandBuffer ( ralBackend_t *b, ralQueueType_t q );
+ralResult_t          Ral_BeginCommandBufferExact( ralCommandBuffer_t *cb,
+	                                              ralCommandReceipt_t *outRecording );
+ralResult_t          Ral_EndCommandBufferExact( ralCommandBuffer_t *cb,
+	                                            const ralCommandReceipt_t *recording,
+	                                            ralCommandReceipt_t *outExecutable );
+ralResult_t          Ral_GetCommandBufferReceipt( const ralCommandBuffer_t *cb,
+	                                              ralCommandReceipt_t *outReceipt );
+ralResult_t          Ral_CancelCommandBuffer( ralCommandBuffer_t *cb,
+	                                          const ralCommandReceipt_t *authority );
 void                Ral_BeginCommandBuffer   ( ralCommandBuffer_t *cb );
 void                Ral_EndCommandBuffer     ( ralCommandBuffer_t *cb );
 void                Ral_DestroyCommandBuffer ( ralCommandBuffer_t *cb );    // usually superseded by Ral_PoolReset
@@ -112,6 +123,10 @@ typedef struct {
 // the backend queue call succeeds. Callers must not wait on signal objects or
 // present a frame when this returns anything other than ralSuccess.
 ralResult_t Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t *si );
+ralResult_t Ral_SubmitExact( ralBackend_t *b, ralQueueType_t q,
+	                         const ralSubmitInfo_t *si,
+	                         const ralCommandReceipt_t *executableReceipts,
+	                         ralSubmissionReceipt_t *outReceipt );
 
 // Host-side wait until all work
 // previously submitted on the specified queue completes. Equivalent to
@@ -359,6 +374,31 @@ typedef enum {
 } ralBarrierScope_t;
 
 void Ral_CmdPipelineBarrier( ralCommandBuffer_t *cb, ralBarrierScope_t scope );
+
+// Records one output-atomic batch of semantic resource transitions. This
+// initial portable command supports whole-resource ranges whose logical source
+// and destination queues map to one physical queue. Vulkan emits explicit
+// barriers; WebGPU can implement the same contract as pass-boundary validation
+// plus implicit usage transitions on its single GPU queue. Distinct physical
+// queues use the paired generation-bound release/acquire surface below.
+ralResult_t Ral_CmdTransitionResources( ralCommandBuffer_t *cb,
+	                                     const ralResourceTransitionBatch_t *batch );
+ralResult_t Ral_CmdReleaseBufferOwnership( ralCommandBuffer_t *cb,
+	const ralBufferTransition_t *transition,
+	ralQueueTransferReceipt_t *outReceipt );
+ralResult_t Ral_CmdAcquireBufferOwnership( ralCommandBuffer_t *cb,
+	const ralBufferTransition_t *transition,
+	const ralQueueTransferReceipt_t *receipt );
+ralResult_t Ral_CancelBufferOwnershipTransfer( ralBuffer_t *buffer,
+	const ralQueueTransferReceipt_t *receipt );
+ralResult_t Ral_CmdReleaseTextureOwnership( ralCommandBuffer_t *cb,
+	const ralTextureTransition_t *transition,
+	ralQueueTransferReceipt_t *outReceipt );
+ralResult_t Ral_CmdAcquireTextureOwnership( ralCommandBuffer_t *cb,
+	const ralTextureTransition_t *transition,
+	const ralQueueTransferReceipt_t *receipt );
+ralResult_t Ral_CancelTextureOwnershipTransfer( ralTexture_t *texture,
+	const ralQueueTransferReceipt_t *receipt );
 
 // ── GPU timestamps + debug labels (v1 primitives) ───────────────────────
 void Ral_WriteTimestamp ( ralCommandBuffer_t *cb, ralQueryPool_t *pool, uint32_t query );

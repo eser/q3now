@@ -1,0 +1,95 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+constant int ENTITY_SSBO_tmp [[function_constant(16)]];
+constant int ENTITY_SSBO = is_function_constant_defined(ENTITY_SSBO_tmp) ? ENTITY_SSBO_tmp : 0;
+constant bool _15 = (ENTITY_SSBO != 0);
+
+struct EntityMatrices
+{
+    float4x4 entMat[1];
+};
+
+struct UBO
+{
+    float4 eyePos;
+    float4 lightPos;
+    float4 lightColor;
+    float4 lightVector;
+    float4 _pad_to_mvp[26];
+    float4x4 mvp;
+};
+
+struct TemporalPayloadRecord
+{
+    float4x4 currentMvp;
+    float4x4 previousMvp;
+    uint4 outcomeReserved;
+};
+
+struct TemporalPayloadRecord_1
+{
+    float4x4 currentMvp;
+    float4x4 previousMvp;
+    uint4 outcomeReserved;
+};
+
+struct TemporalPayloads
+{
+    TemporalPayloadRecord_1 temporalPayload[1];
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant UBO* ubo [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer3
+{
+    const device EntityMatrices* m_22 [[id(0)]];
+    const device TemporalPayloads* temporalPayloads [[id(1)]];
+};
+
+struct main0_out
+{
+    float2 frag_tex_coord0 [[user(locn1)]];
+    float4 temporalCurrentClip [[user(locn10)]];
+    float4 temporalPreviousClip [[user(locn11)]];
+    uint temporalOutcome [[user(locn12)]];
+    float4 gl_Position [[position]];
+};
+
+struct main0_in
+{
+    float3 in_position [[attribute(0)]];
+    float2 in_tex_coord0 [[attribute(2)]];
+};
+
+vertex main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer3& spvDescriptorSet3 [[buffer(3)]], uint gl_InstanceIndex [[instance_id]])
+{
+    main0_out out = {};
+    float4x4 _16;
+    if (_15)
+    {
+        _16 = (*spvDescriptorSet3.m_22).entMat[int(gl_InstanceIndex) * 2];
+    }
+    else
+    {
+        _16 = (*spvDescriptorSet0.ubo).mvp;
+    }
+    float4x4 mvp = _16;
+    out.gl_Position = mvp * float4(in.in_position, 1.0);
+    TemporalPayloadRecord temporal;
+    temporal.currentMvp = (*spvDescriptorSet3.temporalPayloads).temporalPayload[int(gl_InstanceIndex)].currentMvp;
+    temporal.previousMvp = (*spvDescriptorSet3.temporalPayloads).temporalPayload[int(gl_InstanceIndex)].previousMvp;
+    temporal.outcomeReserved = (*spvDescriptorSet3.temporalPayloads).temporalPayload[int(gl_InstanceIndex)].outcomeReserved;
+    float4 temporalLocalPosition = float4(in.in_position, 1.0);
+    out.temporalCurrentClip = temporal.currentMvp * temporalLocalPosition;
+    out.temporalPreviousClip = temporal.previousMvp * temporalLocalPosition;
+    out.temporalOutcome = temporal.outcomeReserved.x;
+    out.frag_tex_coord0 = in.in_tex_coord0;
+    return out;
+}
+

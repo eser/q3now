@@ -1,0 +1,147 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct ParticleFrame
+{
+    float4x4 mvp;
+    float4 viewLeft;
+    float4 viewUp;
+    float4 eyeWorld;
+    float dt;
+    uint poolSize;
+    uint numClasses;
+    uint pingPongRead;
+    float invResX;
+    float invResY;
+    float depthValid;
+    float exposureBias;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant ParticleFrame* m_28 [[id(0)]];
+    texture2d<float> sceneDepthTex [[id(1)]];
+    sampler sceneDepthTexSmplr [[id(2)]];
+    array<texture2d<float>, 96> particleSamplers [[id(3)]];
+    array<sampler, 96> particleSamplersSmplr [[id(99)]];
+};
+
+struct main0_out
+{
+    float4 outColor [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 fragUV [[user(locn0)]];
+    float4 fragColor [[user(locn1)]];
+    uint particleClassHandle [[user(locn2)]];
+    uint frameSlot0 [[user(locn3)]];
+    uint frameSlot1 [[user(locn4)]];
+    float frameBlend [[user(locn5)]];
+};
+
+static inline __attribute__((always_inline))
+float3 sRGBToLinear(thread float3& c)
+{
+    c = fast::max(c, float3(0.0));
+    bool3 cutoff = c <= float3(0.040449999272823333740234375);
+    float3 lo = c / float3(12.9200000762939453125);
+    float3 hi = powr((c + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return mix(hi, lo, float3(cutoff));
+}
+
+static inline __attribute__((always_inline))
+float4 decodeColorTexel(thread float4& c, thread const uint& domain)
+{
+    if (domain != 0u)
+    {
+        return c;
+    }
+    float3 param = c.xyz;
+    float3 _128 = sRGBToLinear(param);
+    c.x = _128.x;
+    c.y = _128.y;
+    c.z = _128.z;
+    return c;
+}
+
+static inline __attribute__((always_inline))
+float softParticleFade(constant ParticleFrame& _28, thread float4& gl_FragCoord, texture2d<float> sceneDepthTex, sampler sceneDepthTexSmplr)
+{
+    if (_28.depthValid < 0.5)
+    {
+        return 1.0;
+    }
+    float2 screenUV = gl_FragCoord.xy * float2(_28.invResX, _28.invResY);
+    float sceneDepth = sceneDepthTex.sample(sceneDepthTexSmplr, screenUV).x;
+    if (sceneDepth <= 0.0)
+    {
+        return 1.0;
+    }
+    float depthDiff = gl_FragCoord.z - sceneDepth;
+    return smoothstep(0.0, 0.001000000047497451305389404296875, depthDiff);
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    uint domain = in.particleClassHandle >> 31u;
+    float4 texel;
+    if (in.frameSlot0 == 4294967295u)
+    {
+        uint idx = (in.particleClassHandle & 2147483647u) - 1u;
+        float4 param = spvDescriptorSet0.particleSamplers[idx].sample(spvDescriptorSet0.particleSamplersSmplr[idx], in.fragUV);
+        uint param_1 = domain;
+        float4 _171 = decodeColorTexel(param, param_1);
+        texel = _171;
+    }
+    else
+    {
+        float4 param_2 = spvDescriptorSet0.particleSamplers[in.frameSlot0].sample(spvDescriptorSet0.particleSamplersSmplr[in.frameSlot0], in.fragUV);
+        uint param_3 = domain;
+        float4 _182 = decodeColorTexel(param_2, param_3);
+        float4 t0 = _182;
+        if (in.frameBlend > 0.0)
+        {
+            float4 param_4 = spvDescriptorSet0.particleSamplers[in.frameSlot1].sample(spvDescriptorSet0.particleSamplersSmplr[in.frameSlot1], in.fragUV);
+            uint param_5 = domain;
+            float4 _198 = decodeColorTexel(param_4, param_5);
+            float4 t1 = _198;
+            texel = mix(t0, t1, float4(in.frameBlend));
+        }
+        else
+        {
+            texel = t0;
+        }
+    }
+    float _209;
+    if (in.frameSlot0 != 4294967295u)
+    {
+        _209 = 1.0;
+    }
+    else
+    {
+        _209 = softParticleFade((*spvDescriptorSet0.m_28), gl_FragCoord, spvDescriptorSet0.sceneDepthTex, spvDescriptorSet0.sceneDepthTexSmplr);
+    }
+    float fade = _209;
+    float _218;
+    if (in.frameSlot0 != 4294967295u)
+    {
+        _218 = 0.699999988079071044921875 / fast::max((*spvDescriptorSet0.m_28).exposureBias, 0.001000000047497451305389404296875);
+    }
+    else
+    {
+        _218 = 1.0;
+    }
+    float rgbScale = _218;
+    float3 param_6 = in.fragColor.xyz;
+    float3 _237 = sRGBToLinear(param_6);
+    out.outColor = float4((texel.xyz * _237) * rgbScale, (texel.w * in.fragColor.w) * fade);
+    return out;
+}
+

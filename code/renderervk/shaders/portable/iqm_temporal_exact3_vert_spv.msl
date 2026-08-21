@@ -1,0 +1,231 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct TemporalIqmRecord
+{
+    float4 currentBones[384];
+    float4 previousBones[384];
+    float4x4 rasterMvp;
+    float4x4 temporalCurrentMvp;
+    float4x4 temporalPreviousMvp;
+};
+
+struct TemporalIqmPayload
+{
+    TemporalIqmRecord records[1];
+};
+
+struct spvDescriptorSetBuffer0
+{
+    const device TemporalIqmPayload* temporalIqmPayload [[id(0)]];
+};
+
+struct main0_out
+{
+    float2 frag_tex_coord [[user(locn0)]];
+    float3 frag_normal [[user(locn1)]];
+    float4 frag_tangent [[user(locn2)]];
+    float4 temporalCurrentClip [[user(locn10)]];
+    float4 temporalPreviousClip [[user(locn11)]];
+    float4 gl_Position [[position]];
+};
+
+struct main0_in
+{
+    float3 in_position [[attribute(0)]];
+    float3 in_normal [[attribute(1)]];
+    float2 in_tex_coord [[attribute(2)]];
+    float4 in_tangent [[attribute(3)]];
+    float4 in_bone_weights [[attribute(4)]];
+    uint4 in_bone_indices [[attribute(5)]];
+};
+
+static inline __attribute__((always_inline))
+float4 currentBoneRow(thread const uint& recordIndex, thread const uint& index, thread const uint& row, const device TemporalIqmPayload& temporalIqmPayload)
+{
+    uint offset = (index * 3u) + row;
+    return temporalIqmPayload.records[recordIndex].currentBones[offset];
+}
+
+static inline __attribute__((always_inline))
+float3 transformCurrentPosition(thread const uint& recordIndex, thread const uint& index, thread const float3& position, const device TemporalIqmPayload& temporalIqmPayload)
+{
+    uint param = recordIndex;
+    uint param_1 = index;
+    uint param_2 = 0u;
+    uint param_3 = recordIndex;
+    uint param_4 = index;
+    uint param_5 = 1u;
+    uint param_6 = recordIndex;
+    uint param_7 = index;
+    uint param_8 = 2u;
+    return float3(dot(currentBoneRow(param, param_1, param_2, temporalIqmPayload), float4(position, 1.0)), dot(currentBoneRow(param_3, param_4, param_5, temporalIqmPayload), float4(position, 1.0)), dot(currentBoneRow(param_6, param_7, param_8, temporalIqmPayload), float4(position, 1.0)));
+}
+
+static inline __attribute__((always_inline))
+float3 skinCurrentPosition(thread const uint& recordIndex, const device TemporalIqmPayload& temporalIqmPayload, thread float4& in_bone_weights, thread uint4& in_bone_indices, thread float3& in_position)
+{
+    uint param = recordIndex;
+    uint param_1 = in_bone_indices.x;
+    float3 param_2 = in_position;
+    float3 value = transformCurrentPosition(param, param_1, param_2, temporalIqmPayload) * in_bone_weights.x;
+    if (in_bone_weights.y > 0.0)
+    {
+        uint param_3 = recordIndex;
+        uint param_4 = in_bone_indices.y;
+        float3 param_5 = in_position;
+        value += (transformCurrentPosition(param_3, param_4, param_5, temporalIqmPayload) * in_bone_weights.y);
+    }
+    if (in_bone_weights.z > 0.0)
+    {
+        uint param_6 = recordIndex;
+        uint param_7 = in_bone_indices.z;
+        float3 param_8 = in_position;
+        value += (transformCurrentPosition(param_6, param_7, param_8, temporalIqmPayload) * in_bone_weights.z);
+    }
+    if (in_bone_weights.w > 0.0)
+    {
+        uint param_9 = recordIndex;
+        uint param_10 = in_bone_indices.w;
+        float3 param_11 = in_position;
+        value += (transformCurrentPosition(param_9, param_10, param_11, temporalIqmPayload) * in_bone_weights.w);
+    }
+    return value;
+}
+
+static inline __attribute__((always_inline))
+float4 previousBoneRow(thread const uint& recordIndex, thread const uint& index, thread const uint& row, const device TemporalIqmPayload& temporalIqmPayload)
+{
+    uint offset = (index * 3u) + row;
+    return temporalIqmPayload.records[recordIndex].previousBones[offset];
+}
+
+static inline __attribute__((always_inline))
+float3 transformPreviousPosition(thread const uint& recordIndex, thread const uint& index, thread const float3& position, const device TemporalIqmPayload& temporalIqmPayload)
+{
+    uint param = recordIndex;
+    uint param_1 = index;
+    uint param_2 = 0u;
+    uint param_3 = recordIndex;
+    uint param_4 = index;
+    uint param_5 = 1u;
+    uint param_6 = recordIndex;
+    uint param_7 = index;
+    uint param_8 = 2u;
+    return float3(dot(previousBoneRow(param, param_1, param_2, temporalIqmPayload), float4(position, 1.0)), dot(previousBoneRow(param_3, param_4, param_5, temporalIqmPayload), float4(position, 1.0)), dot(previousBoneRow(param_6, param_7, param_8, temporalIqmPayload), float4(position, 1.0)));
+}
+
+static inline __attribute__((always_inline))
+float3 skinPreviousPosition(thread const uint& recordIndex, const device TemporalIqmPayload& temporalIqmPayload, thread float4& in_bone_weights, thread uint4& in_bone_indices, thread float3& in_position)
+{
+    uint param = recordIndex;
+    uint param_1 = in_bone_indices.x;
+    float3 param_2 = in_position;
+    float3 value = transformPreviousPosition(param, param_1, param_2, temporalIqmPayload) * in_bone_weights.x;
+    if (in_bone_weights.y > 0.0)
+    {
+        uint param_3 = recordIndex;
+        uint param_4 = in_bone_indices.y;
+        float3 param_5 = in_position;
+        value += (transformPreviousPosition(param_3, param_4, param_5, temporalIqmPayload) * in_bone_weights.y);
+    }
+    if (in_bone_weights.z > 0.0)
+    {
+        uint param_6 = recordIndex;
+        uint param_7 = in_bone_indices.z;
+        float3 param_8 = in_position;
+        value += (transformPreviousPosition(param_6, param_7, param_8, temporalIqmPayload) * in_bone_weights.z);
+    }
+    if (in_bone_weights.w > 0.0)
+    {
+        uint param_9 = recordIndex;
+        uint param_10 = in_bone_indices.w;
+        float3 param_11 = in_position;
+        value += (transformPreviousPosition(param_9, param_10, param_11, temporalIqmPayload) * in_bone_weights.w);
+    }
+    return value;
+}
+
+static inline __attribute__((always_inline))
+float3 transformDirection(thread const uint& recordIndex, thread const uint& index, thread const float3& direction, const device TemporalIqmPayload& temporalIqmPayload)
+{
+    uint param = recordIndex;
+    uint param_1 = index;
+    uint param_2 = 0u;
+    uint param_3 = recordIndex;
+    uint param_4 = index;
+    uint param_5 = 1u;
+    uint param_6 = recordIndex;
+    uint param_7 = index;
+    uint param_8 = 2u;
+    return float3(dot(currentBoneRow(param, param_1, param_2, temporalIqmPayload).xyz, direction), dot(currentBoneRow(param_3, param_4, param_5, temporalIqmPayload).xyz, direction), dot(currentBoneRow(param_6, param_7, param_8, temporalIqmPayload).xyz, direction));
+}
+
+static inline __attribute__((always_inline))
+float3 skinDirection(thread const uint& recordIndex, thread const float3& direction, const device TemporalIqmPayload& temporalIqmPayload, thread float4& in_bone_weights, thread uint4& in_bone_indices)
+{
+    uint param = recordIndex;
+    uint param_1 = in_bone_indices.x;
+    float3 param_2 = direction;
+    float3 value = transformDirection(param, param_1, param_2, temporalIqmPayload) * in_bone_weights.x;
+    if (in_bone_weights.y > 0.0)
+    {
+        uint param_3 = recordIndex;
+        uint param_4 = in_bone_indices.y;
+        float3 param_5 = direction;
+        value += (transformDirection(param_3, param_4, param_5, temporalIqmPayload) * in_bone_weights.y);
+    }
+    if (in_bone_weights.z > 0.0)
+    {
+        uint param_6 = recordIndex;
+        uint param_7 = in_bone_indices.z;
+        float3 param_8 = direction;
+        value += (transformDirection(param_6, param_7, param_8, temporalIqmPayload) * in_bone_weights.z);
+    }
+    if (in_bone_weights.w > 0.0)
+    {
+        uint param_9 = recordIndex;
+        uint param_10 = in_bone_indices.w;
+        float3 param_11 = direction;
+        value += (transformDirection(param_9, param_10, param_11, temporalIqmPayload) * in_bone_weights.w);
+    }
+    return value;
+}
+
+vertex main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint gl_InstanceIndex [[instance_id]])
+{
+    main0_out out = {};
+    uint recordIndex = uint(int(gl_InstanceIndex));
+    if (recordIndex >= 256u)
+    {
+        out.gl_Position = float4(0.0, 0.0, -2.0, 1.0);
+        out.frag_tex_coord = float2(0.0);
+        out.frag_normal = float3(0.0);
+        out.frag_tangent = float4(0.0);
+        out.temporalCurrentClip = float4(0.0);
+        out.temporalPreviousClip = float4(0.0);
+        return out;
+    }
+    uint param = recordIndex;
+    float3 currentPosition = skinCurrentPosition(param, (*spvDescriptorSet0.temporalIqmPayload), in.in_bone_weights, in.in_bone_indices, in.in_position);
+    uint param_1 = recordIndex;
+    float3 previousPosition = skinPreviousPosition(param_1, (*spvDescriptorSet0.temporalIqmPayload), in.in_bone_weights, in.in_bone_indices, in.in_position);
+    uint param_2 = recordIndex;
+    float3 param_3 = in.in_normal;
+    float3 currentNormal = skinDirection(param_2, param_3, (*spvDescriptorSet0.temporalIqmPayload), in.in_bone_weights, in.in_bone_indices);
+    uint param_4 = recordIndex;
+    float3 param_5 = in.in_tangent.xyz;
+    float3 currentTangent = skinDirection(param_4, param_5, (*spvDescriptorSet0.temporalIqmPayload), in.in_bone_weights, in.in_bone_indices);
+    out.gl_Position = (*spvDescriptorSet0.temporalIqmPayload).records[recordIndex].rasterMvp * float4(currentPosition, 1.0);
+    out.temporalCurrentClip = (*spvDescriptorSet0.temporalIqmPayload).records[recordIndex].temporalCurrentMvp * float4(currentPosition, 1.0);
+    out.temporalPreviousClip = (*spvDescriptorSet0.temporalIqmPayload).records[recordIndex].temporalPreviousMvp * float4(previousPosition, 1.0);
+    out.frag_tex_coord = in.in_tex_coord;
+    out.frag_normal = fast::normalize(currentNormal);
+    out.frag_tangent = float4(fast::normalize(currentTangent), in.in_tangent.w);
+    return out;
+}
+

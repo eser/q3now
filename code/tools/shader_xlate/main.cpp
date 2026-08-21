@@ -6,7 +6,7 @@
 // docs/phase-7-hal-design.md §16.2:
 //
 //   SPIRV-Cross (C++ API, vendored at src/libs/SPIRV-Cross/) → MSL, GLSL, GLSL ES
-//   naga CLI    (shelled out — "Option B2": build-time tool, no Rust at runtime) → WGSL
+//   naga CLI    (direct child process — build-time tool, no Rust at runtime) → WGSL
 //
 // Usage:
 //   shader_xlate <input.spv> <output_dir>
@@ -34,9 +34,26 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
+
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 #include "spirv_glsl.hpp"
 #include "spirv_msl.hpp"
+#include "spirv_reflect.hpp"
+
+#ifndef WIRED_SPIRV_CROSS_REVISION
+#define WIRED_SPIRV_CROSS_REVISION "unknown"
+#endif
+#ifndef WIRED_NAGA_VERSION
+#define WIRED_NAGA_VERSION "unknown"
+#endif
 
 namespace {
 
@@ -68,7 +85,46 @@ std::string base_name( const std::string &path ) {
 
 void write_file( const std::string &path, const std::string &content ) {
 	std::ofstream o( path, std::ios::binary );
+	if ( !o ) throw std::runtime_error( "cannot open output: " + path );
 	o.write( content.data(), (std::streamsize)content.size() );
+	if ( !o ) throw std::runtime_error( "cannot write output: " + path );
+}
+
+std::string read_text_file( const std::string &path ) {
+	std::ifstream input( path, std::ios::binary );
+	if ( !input ) throw std::runtime_error( "cannot open output: " + path );
+	return std::string( std::istreambuf_iterator<char>( input ),
+		std::istreambuf_iterator<char>() );
+}
+
+// Naga represents SPIR-V push constants as the non-WebGPU `immediate` address
+// space. Canonical WGSL instead reserves the first unused group-0 binding and
+// carries the exact same bytes through a uniform buffer, matching
+// ralShaderInlineDataAbi_t. This deterministic rewrite is part of the pinned
+// translator identity; it never guesses a binding at runtime.
+void lower_wgsl_immediate_to_uniform( const std::string &path ) {
+	std::string source = read_text_file( path );
+	const std::string immediate = "var<immediate>";
+	const size_t position = source.find( immediate );
+	if ( position == std::string::npos ) return;
+	if ( source.find( immediate, position + immediate.size() ) != std::string::npos )
+		throw std::runtime_error( "multiple WGSL immediate blocks" );
+	bool used[64] = {};
+	const std::string prefix = "@group(0) @binding(";
+	for ( size_t at = source.find( prefix ); at != std::string::npos;
+			at = source.find( prefix, at + prefix.size() ) ) {
+		const size_t begin = at + prefix.size();
+		char *end = nullptr;
+		const unsigned long value = std::strtoul( source.c_str() + begin, &end, 10 );
+		if ( end != source.c_str() + begin && value < 64u ) used[value] = true;
+	}
+	uint32_t binding = 0;
+	while ( binding < 64u && used[binding] ) ++binding;
+	if ( binding == 64u ) throw std::runtime_error( "no WGSL inline-uniform binding" );
+	const std::string replacement = "@group(0) @binding(" + std::to_string( binding )
+		+ ")\nvar<uniform>";
+	source.replace( position, immediate.size(), replacement );
+	write_file( path, source );
 }
 
 // SPIRV-Cross Compiler instances are single-shot (compile() mutates state).
@@ -101,8 +157,18 @@ bool xlate_msl( const std::vector<uint32_t> &words, const std::string &base, con
 		spirv_cross::CompilerMSL c( words );
 		spirv_cross::CompilerMSL::Options o = c.get_msl_options();
 		o.platform    = spirv_cross::CompilerMSL::Options::macOS;
-		o.msl_version = spirv_cross::CompilerMSL::Options::make_msl_version( 2, 0 );  // texture arrays + argument buffers tier 2 need MSL 2.0+ (macOS 10.13/iOS 11, 2017)
+		// Metal 3 is required by the legacy bindless corpus because image and
+		// sampler descriptor arrays intentionally overlap one Vulkan binding.
+		o.msl_version = spirv_cross::CompilerMSL::Options::make_msl_version( 3, 0 );
+		o.argument_buffers = true;
+		o.argument_buffers_tier = spirv_cross::CompilerMSL::Options::ArgumentBuffersTier::Tier2;
 		c.set_msl_options( o );
+		// Runtime descriptor arrays exist in multiple legacy set roles. A single
+		// deterministic device-address-space policy avoids per-module ABI drift;
+		// the future Metal backend binds the same MTLBuffer-backed argument-buffer
+		// representation for all eight portable RAL set roles.
+		for ( uint32_t set = 0; set < 8u; ++set )
+			c.set_argument_buffer_device_address_space( set, true );
 		std::string src = c.compile();
 		write_file( out_path, src );
 		std::printf( "[xlate] %s msl=ok\n", base.c_str() );
@@ -113,24 +179,73 @@ bool xlate_msl( const std::vector<uint32_t> &words, const std::string &base, con
 	}
 }
 
-// WGSL via the `naga` CLI (B2 build-time tool, no Rust runtime linkage).
-// Returns: 1 = ok, 0 = naga unavailable (skip), -1 = naga failed.
-int xlate_wgsl_via_naga( const std::string &in_path, const std::string &base, const std::string &out_path ) {
-	// probe for the CLI
-	if ( std::system( "naga --version >"
+// WGSL via the exact pinned `naga` CLI (B2 build-time tool, no Rust runtime
+// linkage). Returns: 1 = ok, 0 = unavailable, -1 = translation/version failed.
+int pinned_naga_available() {
+	static int cached = -2;
+	if ( cached != -2 ) return cached;
 #ifdef _WIN32
-		"NUL 2>NUL"
+	FILE *pipe = _popen( "naga --version 2>NUL", "r" );
 #else
-		"/dev/null 2>/dev/null"
+	FILE *pipe = popen( "naga --version 2>/dev/null", "r" );
 #endif
-		) != 0 ) {
+	if ( !pipe ) return cached = 0;
+	char version[128] = {};
+	const bool read_ok = std::fgets( version, sizeof( version ), pipe ) != nullptr;
+#ifdef _WIN32
+	const int close_result = _pclose( pipe );
+#else
+	const int close_result = pclose( pipe );
+#endif
+	if ( !read_ok || close_result != 0 ) return cached = 0;
+	version[ std::strcspn( version, "\r\n" ) ] = '\0';
+	if ( std::strcmp( version, WIRED_NAGA_VERSION ) != 0 ) {
+		std::fprintf( stderr, "[xlate] ERROR: naga version %s, expected %s\n",
+			version, WIRED_NAGA_VERSION );
+		return cached = -1;
+	}
+	return cached = 1;
+}
+
+int run_pinned_naga( const std::string &in_path, const std::string &out_path ) {
+#ifdef _WIN32
+	return static_cast<int>( _spawnlp( _P_WAIT, "naga", "naga",
+		"--capabilities", "all", "--input-kind", "spv",
+		in_path.c_str(), out_path.c_str(), nullptr ) );
+#else
+	const pid_t child = fork();
+	if ( child < 0 ) return -1;
+	if ( child == 0 ) {
+		execlp( "naga", "naga", "--capabilities", "all", "--input-kind", "spv",
+			in_path.c_str(), out_path.c_str(), static_cast<char *>( nullptr ) );
+		_exit( 127 );
+	}
+	int status = 0;
+	if ( waitpid( child, &status, 0 ) != child ) return -1;
+	return WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
+#endif
+}
+
+int xlate_wgsl_via_naga( const std::string &in_path,
+		const std::string &base, const std::string &out_path ) {
+	const int available = pinned_naga_available();
+	if ( available == 0 ) {
 		std::printf( "[xlate] %s wgsl=skip(naga unavailable)\n", base.c_str() );
 		return 0;
 	}
-	std::string cmd = "naga \"" + in_path + "\" \"" + out_path + "\"";
-	int rc = std::system( cmd.c_str() );
+	if ( available < 0 ) return -1;
+	// Wired's pinned Naga patch adds the scalar specialization operations and
+	// combined image/sampler split used by the production corpus. Keeping
+	// SPIR-V as Naga's direct input preserves binding-array, non-uniform and
+	// override semantics instead of inventing an ABI through an intermediate.
+	const int rc = run_pinned_naga( in_path, out_path );
 	if ( rc != 0 ) {
 		std::printf( "[xlate] %s wgsl=FAIL: naga returned %d\n", base.c_str(), rc );
+		return -1;
+	}
+	try { lower_wgsl_immediate_to_uniform( out_path ); }
+	catch ( const std::exception &e ) {
+		std::printf( "[xlate] %s wgsl=FAIL: %s\n", base.c_str(), e.what() );
 		return -1;
 	}
 	std::printf( "[xlate] %s wgsl=ok\n", base.c_str() );
@@ -140,24 +255,78 @@ int xlate_wgsl_via_naga( const std::string &in_path, const std::string &base, co
 } // namespace
 
 int main( int argc, char **argv ) {
-	if ( argc < 3 ) {
-		std::fprintf( stderr,
-			"shader_xlate — offline SPIR-V → MSL / GLSL / GLSL ES / WGSL translator (Phase 7.3b)\n"
-			"usage: %s <input.spv> <output_dir>\n", argv[0] );
+	int arg = 1;
+	bool require_wgsl = false;
+	bool reflect_only = false;
+	bool emit_msl = true;
+	bool emit_glsl430 = true;
+	bool emit_glsles300 = true;
+	bool emit_wgsl = true;
+	while ( arg < argc ) {
+		if ( std::strcmp( argv[arg], "--require-wgsl" ) == 0 ) require_wgsl = true;
+		else if ( std::strcmp( argv[arg], "--reflect-only" ) == 0 ) reflect_only = true;
+		else if ( std::strcmp( argv[arg], "--version" ) == 0 ) {
+			std::printf( "wired-shader-xlate/2 spirv-cross/%s naga/%s\n",
+				WIRED_SPIRV_CROSS_REVISION, WIRED_NAGA_VERSION );
+			return 0;
+		}
+		else if ( std::strcmp( argv[arg], "--targets" ) == 0 ) {
+			if ( ++arg >= argc ) { std::fprintf( stderr, "[xlate] ERROR: --targets needs a value\n" ); return 1; }
+			const std::string targets = "," + std::string( argv[arg] ) + ",";
+			emit_msl = targets.find( ",msl," ) != std::string::npos;
+			emit_glsl430 = targets.find( ",glsl430," ) != std::string::npos;
+			emit_glsles300 = targets.find( ",glsles300," ) != std::string::npos;
+			emit_wgsl = targets.find( ",wgsl," ) != std::string::npos;
+			if ( !emit_msl && !emit_glsl430 && !emit_glsles300 && !emit_wgsl ) {
+				std::fprintf( stderr, "[xlate] ERROR: --targets selected no known target\n" ); return 1;
+			}
+		}
+		else break;
+		arg++;
+	}
+	if ( require_wgsl && reflect_only ) {
+		std::fprintf( stderr, "[xlate] ERROR: --require-wgsl and --reflect-only are mutually exclusive\n" );
 		return 1;
 	}
-	const std::string in_path = argv[1];
-	const std::string out_dir = argv[2];
+	if ( argc - arg < 2 ) {
+		std::fprintf( stderr,
+			"shader_xlate — offline SPIR-V → MSL / GLSL / GLSL ES / WGSL translator (Phase 7.3b)\n"
+			"usage: %s [--require-wgsl] [--targets msl,glsl430,glsles300,wgsl] [--reflect-only] <input.spv> <output-dir|reflection.json>\n", argv[0] );
+		return 1;
+	}
+	const std::string in_path = argv[arg];
+	const std::string out_dir = argv[arg + 1];
 	const std::string base    = base_name( in_path );
 
 	std::vector<uint32_t> words = read_spirv( in_path.c_str() );
+	if ( reflect_only ) {
+		try {
+			spirv_cross::CompilerReflection compiler( words );
+			compiler.set_format( "json" );
+			write_file( out_dir, compiler.compile() );
+			std::printf( "[xlate] %s reflection=ok\n", base.c_str() );
+			return 0;
+		}
+		catch ( const std::exception &e ) {
+			std::printf( "[xlate] %s reflection=FAIL: %s\n", base.c_str(), e.what() );
+			return 2;
+		}
+	}
 
 	int failed = 0;
-	if ( !xlate_msl ( words, base, out_dir + "/" + base + ".msl"        ) )           failed++;
-	if ( !xlate_glsl( words, 430, false, base, out_dir + "/" + base + ".glsl430",   "glsl430"   ) ) failed++;
-	if ( !xlate_glsl( words, 300, true,  base, out_dir + "/" + base + ".glsles300", "glsles300" ) ) failed++;
-	int wgsl = xlate_wgsl_via_naga( in_path, base, out_dir + "/" + base + ".wgsl" );
-	if ( wgsl < 0 ) failed++;  // naga error (not "skip")
+	if ( emit_msl && !xlate_msl( words, base, out_dir + "/" + base + ".msl" ) ) failed++;
+	if ( emit_glsl430 && !xlate_glsl( words, 430, false, base,
+			out_dir + "/" + base + ".glsl430", "glsl430" ) ) failed++;
+	if ( emit_glsles300 && !xlate_glsl( words, 300, true, base,
+			out_dir + "/" + base + ".glsles300", "glsles300" ) ) failed++;
+	if ( emit_wgsl ) {
+		const int wgsl = xlate_wgsl_via_naga( in_path, base,
+			out_dir + "/" + base + ".wgsl" );
+		if ( wgsl < 0 || ( require_wgsl && wgsl == 0 ) ) failed++;
+	} else if ( require_wgsl ) {
+		std::fprintf( stderr, "[xlate] ERROR: --require-wgsl requires wgsl in --targets\n" );
+		failed++;
+	}
 
 	return ( failed > 0 ) ? 2 : 0;
 }

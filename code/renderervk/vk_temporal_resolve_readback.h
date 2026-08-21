@@ -34,7 +34,6 @@ typedef struct {
 	uint32_t captureSerial;
 	uint32_t bufferAllocationGeneration;
 	ralBuffer_t *buffer;
-	void *mapped;
 	uint32_t captureX, captureY, captureWidth, captureHeight;
 	uint32_t coreX, coreY, coreWidth, coreHeight;
 	vkTemporalResolveReadbackDepthEncoding_t currentDepthEncoding;
@@ -107,12 +106,12 @@ typedef struct {
 
 typedef struct {
 	ralBuffer_t *buffer;
-	void *mapped;
 	uint64_t bytes;
 	uint32_t width, height;
 	vkTemporalResolveReadbackDepthEncoding_t depthEncoding;
 	vkTemporalResolveProductView_t products;
 	uint32_t allocationGeneration;
+	qboolean hostReadable;
 	vkTemporalResolveReadbackState_t state;
 	vkTemporalResolveReadbackTicket_t ticket;
 } vkTemporalResolveReadbackSlot_t;

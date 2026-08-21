@@ -17,14 +17,15 @@ struct ralSampler_s { int id; };
 struct ralBindGroupLayout_s { int id; };
 struct ralBindGroup_s { int id; };
 struct ralPipeline_s { int id; };
-struct ralBuffer_s { int id; unsigned char bytes[VK_TEMPORAL_HISTORY_WITNESS_BYTES]; };
+struct ralBuffer_s { int id; unsigned char bytes[VK_TEMPORAL_HISTORY_WITNESS_BYTES];
+	uint32_t usage; ralMemoryType_t memory; };
 
-static int nextId=100, creates, destroys, maps, unmaps, dispatches, barriers;
+static int nextId=100, creates, destroys, maps, unmaps, dispatches, transitions, copies;
 static ralBuffer_t *aliasBuffer;
 static ralTextureView_t *aliasView;
 static ralBindGroup_t *boundGroup;
 static uint32_t pushed[16], pushedSize;
-static uint32_t barrierSrcStage, barrierDstStage, barrierSrcAccess, barrierDstAccess;
+static ralResourceUsage_t transitionBefore[256], transitionAfter[256];
 
 ralTextureView_t *Ral_CreateTextureView(ralBackend_t *b,const ralTextureViewCreateInfo_t *ci){
 	ralTextureView_t *v; (void)b; if(!ci||!ci->texture)return NULL; if(aliasView)return aliasView; v=calloc(1,sizeof(*v)); v->id=nextId++; creates++; return v;
@@ -34,10 +35,10 @@ ralSampler_t *Ral_CreateSampler(ralBackend_t *b,const ralSamplerCreateInfo_t *ci
 void Ral_DestroySampler(ralSampler_t*s){if(s){destroys++;free(s);}}
 ralBindGroupLayout_t *Ral_CreateBindGroupLayout(ralBackend_t*b,const ralBindGroupLayoutCreateInfo_t*ci){ralBindGroupLayout_t*l;(void)b;if(!ci||ci->numEntries!=6)return NULL;l=calloc(1,sizeof(*l));l->id=nextId++;creates++;return l;}
 void Ral_DestroyBindGroupLayout(ralBindGroupLayout_t*l){if(l){destroys++;free(l);}}
-ralBuffer_t *Ral_CreateBuffer(ralBackend_t*b,const ralBufferCreateInfo_t*ci){ralBuffer_t*x;(void)b;if(aliasBuffer)return aliasBuffer;if(!ci||ci->size!=VK_TEMPORAL_HISTORY_WITNESS_BYTES||ci->usage!=RAL_BUFFER_STORAGE||ci->memory!=RAL_MEMORY_HOST_COHERENT)return NULL;x=calloc(1,sizeof(*x));x->id=nextId++;creates++;return x;}
+ralBuffer_t *Ral_CreateBuffer(ralBackend_t*b,const ralBufferCreateInfo_t*ci){ralBuffer_t*x;(void)b;if(aliasBuffer)return aliasBuffer;if(!ci||ci->size!=VK_TEMPORAL_HISTORY_WITNESS_BYTES)return NULL;if(ci->usage==(RAL_BUFFER_STORAGE|RAL_BUFFER_TRANSFER_SRC)){if(ci->memory!=RAL_MEMORY_DEVICE_LOCAL)return NULL;}else if(ci->usage==(RAL_BUFFER_TRANSFER_DST|RAL_BUFFER_MAP_READ)){if(ci->memory!=RAL_MEMORY_HOST_COHERENT)return NULL;}else return NULL;x=calloc(1,sizeof(*x));x->id=nextId++;x->usage=ci->usage;x->memory=ci->memory;creates++;return x;}
 void Ral_DestroyBuffer(ralBuffer_t*b){if(b){destroys++;free(b);}}
-void *Ral_MapBuffer(ralBuffer_t*b){if(!b)return NULL;maps++;return b->bytes;}
-void Ral_UnmapBuffer(ralBuffer_t*b){if(b)unmaps++;}
+ralResult_t Ral_BufferMapBegin(ralBuffer_t*b,const ralBufferMapRequest_t*r,ralBufferMapTicket_t*t){if(!b||!r||!t||b->usage!=(RAL_BUFFER_TRANSFER_DST|RAL_BUFFER_MAP_READ)||r->mode!=RAL_MAP_READ||r->offset!=0||r->size!=VK_TEMPORAL_HISTORY_WITNESS_BYTES)return ralErrorInvalidArgument;memset(t,0,sizeof(*t));t->bufferIdentity=b;t->generation=1;t->request=*r;t->status=RAL_BUFFER_MAP_READY;t->mappedRange=b->bytes;maps++;return ralSuccess;}
+ralResult_t Ral_BufferMapUnmap(ralBuffer_t*b,const ralBufferMapTicket_t*t){if(!b||!t||t->bufferIdentity!=b||t->mappedRange!=b->bytes)return ralErrorInvalidArgument;unmaps++;return ralSuccess;}
 ralBindGroup_t *Ral_CreateBindGroup(ralBackend_t*b,const ralBindGroupCreateInfo_t*ci){ralBindGroup_t*g;(void)b;if(!ci||ci->numValues!=6)return NULL;g=calloc(1,sizeof(*g));g->id=nextId++;creates++;return g;}
 void Ral_DestroyBindGroup(ralBindGroup_t*g){if(g){destroys++;free(g);}}
 ralPipeline_t *Ral_CreateComputePipeline(ralBackend_t*b,const ralComputePipelineCreateInfo_t*ci){ralPipeline_t*p;(void)b;if(!ci||!ci->computeSpirv||!ci->computeSpirvSize||ci->pushConstantSize==0)return NULL;p=calloc(1,sizeof(*p));p->id=nextId++;creates++;return p;}
@@ -46,7 +47,8 @@ void Ral_CmdBindPipeline(ralCommandBuffer_t*c,ralPipeline_t*p){(void)c;(void)p;}
 void Ral_CmdBindBindGroup(ralCommandBuffer_t*c,uint32_t i,ralBindGroup_t*g){(void)c;if(i==0)boundGroup=g;}
 void Ral_CmdPushConstants(ralCommandBuffer_t*c,uint32_t s,uint32_t o,uint32_t z,const void*d){(void)c;(void)s;(void)o;pushedSize=z;memset(pushed,0,sizeof(pushed));if(d&&z<=sizeof(pushed))memcpy(pushed,d,z);}
 void Ral_CmdDispatch(ralCommandBuffer_t*c,uint32_t x,uint32_t y,uint32_t z){(void)c;if(x==1&&y==1&&z==1)dispatches++;}
-void Ral_CmdPipelineBarrierFull(ralCommandBuffer_t*c,const ralPipelineBarrierInfo_t*i){(void)c;if(i&&i->memoryBarrierCount==1){barriers++;barrierSrcStage=i->srcStageMask;barrierDstStage=i->dstStageMask;barrierSrcAccess=i->memoryBarriers[0].srcAccessMask;barrierDstAccess=i->memoryBarriers[0].dstAccessMask;}}
+ralResult_t Ral_CmdTransitionResources(ralCommandBuffer_t*c,const ralResourceTransitionBatch_t*b){(void)c;if(!b||b->bufferTransitionCount!=1||!b->bufferTransitions)return ralErrorInvalidArgument;transitionBefore[transitions]=b->bufferTransitions[0].before.usage;transitionAfter[transitions]=b->bufferTransitions[0].after.usage;transitions++;return ralSuccess;}
+void Ral_CmdCopyBuffer(ralCommandBuffer_t*c,ralBuffer_t*s,ralBuffer_t*d,const ralBufferCopy_t*r){(void)c;if(!s||!d||!r||r->size!=VK_TEMPORAL_HISTORY_WITNESS_BYTES)abort();memcpy(d->bytes,s->bytes,VK_TEMPORAL_HISTORY_WITNESS_BYTES);copies++;}
 
 static void MakeKey(vkTemporalHistoryConsumeKey_t*k,ralBackend_t*b,ralTexture_t*t,ralTextureView_t*v){
 	memset(k,0,sizeof(*k));k->backend=b;k->worldIndex=2;k->width=64;k->height=32;k->topologyEpoch=3;k->historyAllocationGeneration=4;
@@ -75,7 +77,7 @@ int main(void){
 	}
 	CHECK(VK_TemporalHistoryConsumeEnsureAfterFence(&owner,&key,2,0,spirv,sizeof(spirv)));CHECK(owner.ready&&owner.slots[0].state==VK_TEMPORAL_HISTORY_CONSUME_READY);CHECK(VK_TemporalHistoryConsumeHasLive(&owner));before=owner;CHECK(!VK_TemporalHistoryConsumeReleaseAfterIdle(&owner,qfalse));CHECK(memcmp(&owner,&before,sizeof(owner))==0);memcpy(&nearBits,&(float){0.1f},sizeof(nearBits));memcpy(&farBits,&(float){100.f},sizeof(farBits));
 	bootstrap=plan;bootstrap.historyValid=0;before=owner;CHECK(!VK_TemporalHistoryConsumeRecord(&owner,&cb,0,&bootstrap,&view,0.1f,100.f));CHECK(dispatches==0&&memcmp(&owner,&before,sizeof(owner))==0);
-	CHECK(VK_TemporalHistoryConsumeRecord(&owner,&cb,0,&plan,&view,0.1f,100.f));CHECK(dispatches==1&&barriers==1);CHECK(boundGroup==owner.slots[0].groups[0]&&pushedSize==48&&pushed[0]==64&&pushed[1]==32&&pushed[2]==9&&pushed[3]==0&&pushed[4]==2&&pushed[5]==5&&pushed[6]==4&&pushed[7]==1&&pushed[8]==0&&pushed[9]==1&&pushed[10]==nearBits&&pushed[11]==farBits);CHECK(barrierSrcStage==RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT&&barrierDstStage==RAL_PIPELINE_STAGE_HOST_BIT&&barrierSrcAccess==VK_ACCESS_SHADER_WRITE_BIT&&barrierDstAccess==VK_ACCESS_HOST_READ_BIT);CHECK(!VK_TemporalHistoryConsumeAcceptStore(&owner,0,qfalse));CHECK(owner.slots[0].state==VK_TEMPORAL_HISTORY_CONSUME_READY);
+	CHECK(VK_TemporalHistoryConsumeRecord(&owner,&cb,0,&plan,&view,0.1f,100.f));CHECK(dispatches==1&&transitions==5&&copies==1);CHECK(boundGroup==owner.slots[0].groups[0]&&pushedSize==48&&pushed[0]==64&&pushed[1]==32&&pushed[2]==9&&pushed[3]==0&&pushed[4]==2&&pushed[5]==5&&pushed[6]==4&&pushed[7]==1&&pushed[8]==0&&pushed[9]==1&&pushed[10]==nearBits&&pushed[11]==farBits);CHECK(transitionBefore[0]==RAL_RESOURCE_USAGE_UNDEFINED&&transitionAfter[0]==RAL_RESOURCE_USAGE_STORAGE_WRITE&&transitionBefore[1]==RAL_RESOURCE_USAGE_STORAGE_WRITE&&transitionAfter[1]==RAL_RESOURCE_USAGE_COPY_SOURCE&&transitionBefore[2]==RAL_RESOURCE_USAGE_UNDEFINED&&transitionAfter[2]==RAL_RESOURCE_USAGE_COPY_DESTINATION&&transitionBefore[3]==RAL_RESOURCE_USAGE_COPY_DESTINATION&&transitionAfter[3]==RAL_RESOURCE_USAGE_HOST_READ&&transitionBefore[4]==RAL_RESOURCE_USAGE_COPY_SOURCE&&transitionAfter[4]==RAL_RESOURCE_USAGE_STORAGE_WRITE);CHECK(!VK_TemporalHistoryConsumeAcceptStore(&owner,0,qfalse));CHECK(owner.slots[0].state==VK_TEMPORAL_HISTORY_CONSUME_READY);
 	CHECK(VK_TemporalHistoryConsumeRecord(&owner,&cb,0,&plan,&view,0.1f,100.f));CHECK(VK_TemporalHistoryConsumeAcceptStore(&owner,0,qtrue));
 	memset(&sentinel,0xa5,sizeof(sentinel));ticket=sentinel;committed[1]=view.committed;committed[1].frameId=9;committed[1].historyIndex=1;committed[1].color=key.historyColor[1];committed[1].colorView=key.historyColorView[1];committed[1].depth=key.historyDepth[1];committed[1].depthView=key.historyDepthView[1];
 	CHECK(!VK_TemporalHistoryConsumeResolveSubmit(&owner,0,qfalse,NULL,&ticket));CHECK(memcmp(&ticket,&sentinel,sizeof(ticket))==0&&owner.slots[0].state==VK_TEMPORAL_HISTORY_CONSUME_READY&&owner.capturesRemaining==2);
@@ -92,7 +94,7 @@ int main(void){
 	// fence-complete slot 1 is prepared, records the next physical history pair,
 	// and reaches SUBMITTED. Same-key preparation must not serialize all slots.
 	CHECK(VK_TemporalHistoryConsumeEnsureAfterFence(&owner,&key,2,1,spirv,sizeof(spirv)));
-	for(unsigned i=0;i<VK_TEMPORAL_HISTORY_WITNESS_BYTES;i++)CHECK(((unsigned char*)owner.slots[1].mapped)[i]==0x7f);
+	CHECK(owner.slots[1].gpuBuffer&&owner.slots[1].readbackBuffer&&!owner.slots[1].hostReadable);
 	plan2=plan;plan2.frameId=10;plan2.historyReadIndex=1;plan2.historyWriteIndex=0;
 	view2=view;view2.readIndex=1;view2.writeIndex=0;view2.committed=committed[1];
 	view2.readColor=key.historyColor[1];view2.readColorView=key.historyColorView[1];view2.readDepth=key.historyDepth[1];view2.readDepthView=key.historyDepthView[1];
@@ -102,13 +104,13 @@ int main(void){
 	CHECK(VK_TemporalHistoryConsumeResolveSubmit(&owner,1,qtrue,committed,&ticket));CHECK(ticket.previousCommitted.frameId==9&&ticket.historyWriteIndex==0&&owner.capturesRemaining==0);
 	before=owner;CHECK(!VK_TemporalHistoryConsumeReleaseAfterIdle(&owner,qtrue));CHECK(memcmp(&owner,&before,sizeof(owner))==0);
 	memset(&receiptSentinel,0xa5,sizeof(receiptSentinel));receipt=receiptSentinel;CHECK(!VK_TemporalHistoryConsumeCompleteAfterFence(&owner,0,qfalse,&receipt));CHECK(memcmp(&receipt,&receiptSentinel,sizeof(receipt))==0);
-	w=(uint32_t*)owner.slots[0].mapped;memset(w,0,VK_TEMPORAL_HISTORY_WITNESS_BYTES);w[0]=VK_TEMPORAL_HISTORY_WITNESS_MAGIC;w[1]=1;w[2]=9;w[4]=2;w[5]=5;w[6]=4;w[7]=0;w[8]=1;w[9]=64;w[10]=32;w[11]=1;w[13]=0x3f800000u;w[14]=2;w[16]=0x3f800000u;
+	w=(uint32_t*)owner.slots[0].readbackBuffer->bytes;memset(w,0,VK_TEMPORAL_HISTORY_WITNESS_BYTES);w[0]=VK_TEMPORAL_HISTORY_WITNESS_MAGIC;w[1]=1;w[2]=9;w[4]=2;w[5]=5;w[6]=4;w[7]=0;w[8]=1;w[9]=64;w[10]=32;w[11]=1;w[13]=0x3f800000u;w[14]=2;w[16]=0x3f800000u;
 	CHECK(VK_TemporalHistoryConsumeCompleteAfterFence(&owner,0,qtrue,&receipt));CHECK(receipt.ready&&receipt.previousColorRG==2&&owner.slots[1].state==VK_TEMPORAL_HISTORY_CONSUME_SUBMITTED);
-	owner.slots[0].ticket=ticket0;owner.slots[0].state=VK_TEMPORAL_HISTORY_CONSUME_SUBMITTED;memset(owner.slots[0].mapped,0x7f,VK_TEMPORAL_HISTORY_WITNESS_BYTES);CHECK(VK_TemporalHistoryConsumeCompleteAfterFence(&owner,0,qtrue,&receipt));CHECK(!receipt.ready);
-	owner.slots[0].ticket=ticket0;owner.slots[0].state=VK_TEMPORAL_HISTORY_CONSUME_SUBMITTED;w=(uint32_t*)owner.slots[0].mapped;memset(w,0,VK_TEMPORAL_HISTORY_WITNESS_BYTES);w[0]=VK_TEMPORAL_HISTORY_WITNESS_MAGIC;w[1]=1;w[2]=9;w[4]=2;w[5]=5;w[6]=4;w[7]=0;w[8]=1;w[9]=64;w[10]=32;CHECK(VK_TemporalHistoryConsumeCompleteAfterFence(&owner,0,qtrue,&receipt));CHECK(!receipt.ready);
-	owner.slots[0].ticket=ticket0;owner.slots[0].state=VK_TEMPORAL_HISTORY_CONSUME_SUBMITTED;w=(uint32_t*)owner.slots[0].mapped;memset(w,0,VK_TEMPORAL_HISTORY_WITNESS_BYTES);w[0]=VK_TEMPORAL_HISTORY_WITNESS_MAGIC;w[1]=1;w[2]=9;w[4]=2;w[5]=5;w[6]=4;w[7]=0;w[8]=1;w[9]=64;w[10]=32;w[11]=1;w[13]=0x7f800000u;w[14]=2;w[16]=0x3f800000u;CHECK(VK_TemporalHistoryConsumeCompleteAfterFence(&owner,0,qtrue,&receipt));CHECK(!receipt.ready);
-	owner.slots[0].ticket=ticket0;owner.slots[0].state=VK_TEMPORAL_HISTORY_CONSUME_SUBMITTED;w=(uint32_t*)owner.slots[0].mapped;memset(w,0,VK_TEMPORAL_HISTORY_WITNESS_BYTES);w[0]=VK_TEMPORAL_HISTORY_WITNESS_MAGIC;w[1]=1;w[2]=9;w[4]=2;w[5]=5;w[6]=4;w[7]=0;w[8]=1;w[9]=64;w[10]=32;w[11]=1;w[13]=0x3f800000u;w[14]=2;w[16]=0x7f800000u;CHECK(VK_TemporalHistoryConsumeCompleteAfterFence(&owner,0,qtrue,&receipt));CHECK(!receipt.ready);
-	w=(uint32_t*)owner.slots[1].mapped;memset(w,0,VK_TEMPORAL_HISTORY_WITNESS_BYTES);w[0]=VK_TEMPORAL_HISTORY_WITNESS_MAGIC;w[1]=1;w[2]=10;w[4]=2;w[5]=5;w[6]=4;w[7]=1;w[8]=0;w[9]=64;w[10]=32;w[11]=3;w[13]=0x40000000u;w[14]=1;w[16]=0x3f800000u;
+	owner.slots[0].ticket=ticket0;owner.slots[0].state=VK_TEMPORAL_HISTORY_CONSUME_SUBMITTED;memset(owner.slots[0].readbackBuffer->bytes,0x7f,VK_TEMPORAL_HISTORY_WITNESS_BYTES);CHECK(VK_TemporalHistoryConsumeCompleteAfterFence(&owner,0,qtrue,&receipt));CHECK(!receipt.ready);
+	owner.slots[0].ticket=ticket0;owner.slots[0].state=VK_TEMPORAL_HISTORY_CONSUME_SUBMITTED;w=(uint32_t*)owner.slots[0].readbackBuffer->bytes;memset(w,0,VK_TEMPORAL_HISTORY_WITNESS_BYTES);w[0]=VK_TEMPORAL_HISTORY_WITNESS_MAGIC;w[1]=1;w[2]=9;w[4]=2;w[5]=5;w[6]=4;w[7]=0;w[8]=1;w[9]=64;w[10]=32;CHECK(VK_TemporalHistoryConsumeCompleteAfterFence(&owner,0,qtrue,&receipt));CHECK(!receipt.ready);
+	owner.slots[0].ticket=ticket0;owner.slots[0].state=VK_TEMPORAL_HISTORY_CONSUME_SUBMITTED;w=(uint32_t*)owner.slots[0].readbackBuffer->bytes;memset(w,0,VK_TEMPORAL_HISTORY_WITNESS_BYTES);w[0]=VK_TEMPORAL_HISTORY_WITNESS_MAGIC;w[1]=1;w[2]=9;w[4]=2;w[5]=5;w[6]=4;w[7]=0;w[8]=1;w[9]=64;w[10]=32;w[11]=1;w[13]=0x7f800000u;w[14]=2;w[16]=0x3f800000u;CHECK(VK_TemporalHistoryConsumeCompleteAfterFence(&owner,0,qtrue,&receipt));CHECK(!receipt.ready);
+	owner.slots[0].ticket=ticket0;owner.slots[0].state=VK_TEMPORAL_HISTORY_CONSUME_SUBMITTED;w=(uint32_t*)owner.slots[0].readbackBuffer->bytes;memset(w,0,VK_TEMPORAL_HISTORY_WITNESS_BYTES);w[0]=VK_TEMPORAL_HISTORY_WITNESS_MAGIC;w[1]=1;w[2]=9;w[4]=2;w[5]=5;w[6]=4;w[7]=0;w[8]=1;w[9]=64;w[10]=32;w[11]=1;w[13]=0x3f800000u;w[14]=2;w[16]=0x7f800000u;CHECK(VK_TemporalHistoryConsumeCompleteAfterFence(&owner,0,qtrue,&receipt));CHECK(!receipt.ready);
+	w=(uint32_t*)owner.slots[1].readbackBuffer->bytes;memset(w,0,VK_TEMPORAL_HISTORY_WITNESS_BYTES);w[0]=VK_TEMPORAL_HISTORY_WITNESS_MAGIC;w[1]=1;w[2]=10;w[4]=2;w[5]=5;w[6]=4;w[7]=1;w[8]=0;w[9]=64;w[10]=32;w[11]=3;w[13]=0x40000000u;w[14]=1;w[16]=0x3f800000u;
 	CHECK(VK_TemporalHistoryConsumeCompleteAfterFence(&owner,1,qtrue,&receipt2));CHECK(receipt2.ready&&receipt2.previousColorRG==1&&owner.slots[0].state==VK_TEMPORAL_HISTORY_CONSUME_READY);
-	CHECK(VK_TemporalHistoryConsumeReleaseAfterIdle(&owner,qtrue));CHECK(!owner.ready&&unmaps==2&&destroys>0);puts("PASS temporal history consume contract");return 0;
+	CHECK(VK_TemporalHistoryConsumeReleaseAfterIdle(&owner,qtrue));CHECK(!owner.ready&&maps==unmaps&&maps==6&&destroys>0);puts("PASS temporal history consume contract");return 0;
 }

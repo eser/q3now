@@ -126,9 +126,22 @@ static void                  vk_ral_on_memory_pressure( struct ralBackend_s *b, 
 
 static void vk_ral_release_upload_ticket( ralUploadTicket_t *ticket ) {
 	if ( !ticket ) return;
+	// Teardown/unregister may arrive before the per-frame residency poll. A
+	// submitted copy owns its staging/fence/semaphore cohort until the fence
+	// completes; block here before releasing those children or the texture parent.
+	if ( ticket->transfer.state == RAL_TRANSFER_SUBMITTED && ticket->fence
+			&& !Ral_TextureUploadTicketComplete( ticket ) ) {
+		Ral_WaitFence( ticket->fence, RAL_TIMEOUT_INFINITE );
+	}
+	(void)Ral_TextureUploadTicketComplete( ticket );
 	if ( ticket->fence ) Ral_DestroyFence( ticket->fence );
 	if ( ticket->readySemaphore ) Ral_DestroySemaphore( ticket->readySemaphore );
 	memset( ticket, 0, sizeof( *ticket ) );
+}
+
+static qboolean vk_ral_upload_ticket_complete( ralUploadTicket_t *ticket ) {
+	return ticket && ticket->fence && Ral_FenceSignaled( ticket->fence )
+		&& Ral_TextureUploadTicketComplete( ticket );
 }
 
 // ── RAL buffer parallel-paths tracker ─────────────────────
@@ -2104,7 +2117,7 @@ void vk_ral_drain_pending_uploads( void ) {
 	// retry next frame without consuming their binary semaphores.
 	for ( i = 0; i < s_ral_pending_upload_count; i++ ) {
 		vk_ral_pending_upload_t *p = &s_ral_pending_uploads[i];
-		if ( p->ticket.fence && Ral_FenceSignaled( p->ticket.fence ) &&
+		if ( vk_ral_upload_ticket_complete( &p->ticket ) &&
 		     p->slot < s_ral_bindless_capacity && p->image && p->image->ral && p->image->ralResidencyView &&
 		     ( p->image->ralResidencyMipCount == 0 ||
 		       vk_ral_mip_promotion_ready( p->image, 0 ) ) ) {
@@ -2115,7 +2128,7 @@ void vk_ral_drain_pending_uploads( void ) {
 	i = 0;
 	while ( i < s_ral_pending_upload_count ) {
 		vk_ral_pending_upload_t *p = &s_ral_pending_uploads[i];
-		if ( p->ticket.fence && Ral_FenceSignaled( p->ticket.fence ) ) {
+		if ( vk_ral_upload_ticket_complete( &p->ticket ) ) {
 			if ( p->slot < s_ral_bindless_capacity && p->image && p->image->ral && p->image->ralResidencyView &&
 			     ( p->image->ralResidencyMipCount == 0 ||
 			       vk_ral_mip_mark_resident( p->image, 0, (uint32_t)tr.frameCount ) ) &&
@@ -2133,7 +2146,7 @@ void vk_ral_drain_pending_uploads( void ) {
 	// The page-level mip test uses a graphics-queue no-wait copy.  Its parent
 	// view stays bound across frames until this poll observes the real fence;
 	// only then may the exact same slot expose child mip 0 again.
-	if ( s_ral_mip_test_ticket.fence && Ral_FenceSignaled( s_ral_mip_test_ticket.fence ) ) {
+	if ( vk_ral_upload_ticket_complete( &s_ral_mip_test_ticket ) ) {
 		image_t *image = s_ral_mip_test_image;
 		if ( image && image->ral && image->ralResidencyView && image->ralCoarseResidencyView &&
 		     image->ralBindlessSlot >= 0 &&
@@ -2171,8 +2184,7 @@ void vk_ral_drain_pending_uploads( void ) {
 		const uint8_t planeBits[VK_RAL_MATERIAL_PLANES] = { 1u, 4u };
 		uint32_t j;
 		for ( j = 0; j < VK_RAL_MATERIAL_PLANES; ++j ) {
-			if ( s_ral_material_tickets[j].fence &&
-			     Ral_FenceSignaled( s_ral_material_tickets[j].fence ) ) {
+			if ( vk_ral_upload_ticket_complete( &s_ral_material_tickets[j] ) ) {
 				s_ral_material_completed |= planeBits[j];
 				vk_ral_release_upload_ticket( &s_ral_material_tickets[j] );
 				R_LOG( rch_ral_texture, SEV_WARN,

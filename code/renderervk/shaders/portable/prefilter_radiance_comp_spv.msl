@@ -1,0 +1,184 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Push
+{
+    uint roughnessIdx;
+    uint roughnessMips;
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d_array<float, access::write> dstRadiance [[id(0)]];
+    texturecube<float> srcTex [[id(1)]];
+    sampler srcSamp [[id(2)]];
+};
+
+static inline __attribute__((always_inline))
+float3 cubeFaceDir(thread const uint& face, thread const float2& uv)
+{
+    float u = uv.x;
+    float v = uv.y;
+    float3 dir;
+    if (face == 0u)
+    {
+        dir = float3(1.0, -v, -u);
+    }
+    else
+    {
+        if (face == 1u)
+        {
+            dir = float3(-1.0, -v, u);
+        }
+        else
+        {
+            if (face == 2u)
+            {
+                dir = float3(u, 1.0, v);
+            }
+            else
+            {
+                if (face == 3u)
+                {
+                    dir = float3(u, -1.0, -v);
+                }
+                else
+                {
+                    if (face == 4u)
+                    {
+                        dir = float3(u, -v, 1.0);
+                    }
+                    else
+                    {
+                        dir = float3(-u, -v, -1.0);
+                    }
+                }
+            }
+        }
+    }
+    return fast::normalize(dir);
+}
+
+static inline __attribute__((always_inline))
+float radicalInverse_VdC(thread uint& bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 1431655765u) << 1u) | ((bits & 2863311530u) >> 1u);
+    bits = ((bits & 858993459u) << 2u) | ((bits & 3435973836u) >> 2u);
+    bits = ((bits & 252645135u) << 4u) | ((bits & 4042322160u) >> 4u);
+    bits = ((bits & 16711935u) << 8u) | ((bits & 4278255360u) >> 8u);
+    return float(bits) * 2.3283064365386962890625e-10;
+}
+
+static inline __attribute__((always_inline))
+float2 hammersley(thread const uint& i, thread const uint& n)
+{
+    uint param = i;
+    float _93 = radicalInverse_VdC(param);
+    return float2(float(i) / float(n), _93);
+}
+
+static inline __attribute__((always_inline))
+float3 importanceSampleGGX(thread const float2& xi, thread const float& roughness, thread const float3& N)
+{
+    float a = roughness * roughness;
+    float phi = 6.283185482025146484375 * xi.x;
+    float cosTheta = sqrt((1.0 - xi.y) / (1.0 + (((a * a) - 1.0) * xi.y)));
+    float sinTheta = sqrt(1.0 - (cosTheta * cosTheta));
+    float3 H;
+    H.x = cos(phi) * sinTheta;
+    H.y = sin(phi) * sinTheta;
+    H.z = cosTheta;
+    float3 up = select(float3(1.0, 0.0, 0.0), float3(0.0, 0.0, 1.0), bool3(abs(N.z) < 0.999000012874603271484375));
+    float3 tangent = fast::normalize(cross(up, N));
+    float3 bitangent = cross(N, tangent);
+    return fast::normalize(((tangent * H.x) + (bitangent * H.y)) + (N * H.z));
+}
+
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant Push& _295 [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint2 size = uint2(int3(spvDescriptorSet0.dstRadiance.get_width(), spvDescriptorSet0.dstRadiance.get_height(), spvDescriptorSet0.dstRadiance.get_array_size()).xy);
+    int3 coord = int3(gl_GlobalInvocationID);
+    bool _269 = uint(coord.x) >= size.x;
+    bool _279;
+    if (!_269)
+    {
+        _279 = uint(coord.y) >= size.y;
+    }
+    else
+    {
+        _279 = _269;
+    }
+    bool _288;
+    if (!_279)
+    {
+        _288 = uint(coord.z) >= 6u;
+    }
+    else
+    {
+        _288 = _279;
+    }
+    if (_288)
+    {
+        return;
+    }
+    float _301;
+    if (_295.roughnessMips > 1u)
+    {
+        _301 = float(_295.roughnessIdx) / float(_295.roughnessMips - 1u);
+    }
+    else
+    {
+        _301 = 0.0;
+    }
+    float roughness = _301;
+    float2 uv = (((float2(coord.xy) + float2(0.5)) / float2(size)) * 2.0) - float2(1.0);
+    uint param = uint(coord.z);
+    float2 param_1 = uv;
+    float3 R = cubeFaceDir(param, param_1);
+    float3 N = R;
+    float3 V = R;
+    if (roughness <= 0.0)
+    {
+        float3 c = spvDescriptorSet0.srcTex.sample(spvDescriptorSet0.srcSamp, R, level(0.0)).xyz;
+        spvDescriptorSet0.dstRadiance.write(float4(c, 1.0), uint2(coord.xy), uint(coord.z));
+        return;
+    }
+    float3 prefiltered = float3(0.0);
+    float totalWeight = 0.0;
+    for (uint i = 0u; i < 1024u; i++)
+    {
+        uint param_2 = i;
+        uint param_3 = 1024u;
+        float2 xi = hammersley(param_2, param_3);
+        float2 param_4 = xi;
+        float param_5 = roughness;
+        float3 param_6 = N;
+        float3 H = importanceSampleGGX(param_4, param_5, param_6);
+        float3 L = fast::normalize((H * (2.0 * dot(V, H))) - V);
+        float NdotL = fast::max(dot(N, L), 0.0);
+        if (NdotL > 0.0)
+        {
+            prefiltered += (spvDescriptorSet0.srcTex.sample(spvDescriptorSet0.srcSamp, L, level(0.0)).xyz * NdotL);
+            totalWeight += NdotL;
+        }
+    }
+    float3 _430;
+    if (totalWeight > 0.0)
+    {
+        _430 = prefiltered / float3(totalWeight);
+    }
+    else
+    {
+        _430 = spvDescriptorSet0.srcTex.sample(spvDescriptorSet0.srcSamp, R, level(0.0)).xyz;
+    }
+    float3 result = _430;
+    spvDescriptorSet0.dstRadiance.write(float4(result, 1.0), uint2(coord.xy), uint(coord.z));
+}
+

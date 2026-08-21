@@ -1,0 +1,41 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct RtMetrics
+{
+    float4 rtMetrics;
+};
+
+constant int SMAA_MAX_SEARCH_STEPS_tmp [[function_constant(0)]];
+constant int SMAA_MAX_SEARCH_STEPS = is_function_constant_defined(SMAA_MAX_SEARCH_STEPS_tmp) ? SMAA_MAX_SEARCH_STEPS_tmp : 16;
+
+struct spvDescriptorSetBuffer3
+{
+    constant RtMetrics* m_47 [[id(0)]];
+};
+
+struct main0_out
+{
+    float2 texcoord [[user(locn0)]];
+    float2 pixcoord [[user(locn1)]];
+    float4 offset0 [[user(locn2)]];
+    float4 offset1 [[user(locn3)]];
+    float4 offset2 [[user(locn4)]];
+    float4 gl_Position [[position]];
+};
+
+vertex main0_out main0(const device spvDescriptorSetBuffer3& spvDescriptorSet3 [[buffer(3)]], uint gl_VertexIndex [[vertex_id]])
+{
+    main0_out out = {};
+    float2 pos = float2(float((int(gl_VertexIndex) << 1) & 2), float(int(gl_VertexIndex) & 2));
+    out.gl_Position = float4((pos * 2.0) - float2(1.0), 0.0, 1.0);
+    out.texcoord = pos;
+    out.pixcoord = out.texcoord * (*spvDescriptorSet3.m_47).rtMetrics.zw;
+    out.offset0 = out.texcoord.xyxy + ((*spvDescriptorSet3.m_47).rtMetrics.xyxy * float4(-0.25, -0.125, 1.25, -0.125));
+    out.offset1 = out.texcoord.xyxy + ((*spvDescriptorSet3.m_47).rtMetrics.xyxy * float4(-0.125, -0.25, -0.125, 1.25));
+    out.offset2 = float4(out.offset0.xz, out.offset1.yw) + ((float4(-2.0, 2.0, -2.0, 2.0) * (*spvDescriptorSet3.m_47).rtMetrics.xxyy) * float(SMAA_MAX_SEARCH_STEPS));
+    return out;
+}
+

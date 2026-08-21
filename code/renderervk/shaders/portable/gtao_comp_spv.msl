@@ -1,0 +1,351 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct GtaoPush
+{
+    float2 viewportSize;
+    float2 ndcToViewMul;
+    float2 ndcToViewAdd;
+    float zNear;
+    float zFar;
+    float effectRadius;
+    float falloffRange;
+    int sliceCount;
+    int stepsPerSlice;
+    float finalPower;
+    float intensity;
+    float4 sscsSunDirVS;
+    float sscsRadius;
+    int sscsSteps;
+    float sscsStrength;
+    int sscsEnabled;
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> depthTex [[id(0)]];
+    sampler depthSampler [[id(1)]];
+    texture2d<float, access::write> aoImage [[id(2)]];
+};
+
+static inline __attribute__((always_inline))
+float sampleDeviceDepth(thread const float2& uv, texture2d<float> depthTex, sampler depthSampler)
+{
+    return depthTex.sample(depthSampler, uv, level(0.0)).x;
+}
+
+static inline __attribute__((always_inline))
+float linearizeDepth(thread const float& z, constant GtaoPush& pc)
+{
+    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+}
+
+static inline __attribute__((always_inline))
+float3 viewPosFromUV(thread const float2& uv, thread const float& deviceZ, constant GtaoPush& pc)
+{
+    float param = deviceZ;
+    float vz = linearizeDepth(param, pc);
+    float2 ndc = (uv * 2.0) - float2(1.0);
+    float2 vxy = ((ndc * pc.ndcToViewMul) + pc.ndcToViewAdd) * vz;
+    return float3(vxy, vz);
+}
+
+static inline __attribute__((always_inline))
+float3 normalFromDepth(thread const float2& uv, thread const float3& P, thread const float2& texel, constant GtaoPush& pc, texture2d<float> depthTex, sampler depthSampler)
+{
+    float2 param = uv - float2(texel.x, 0.0);
+    float zL = sampleDeviceDepth(param, depthTex, depthSampler);
+    float2 param_1 = uv + float2(texel.x, 0.0);
+    float zR = sampleDeviceDepth(param_1, depthTex, depthSampler);
+    float2 param_2 = uv - float2(0.0, texel.y);
+    float zU = sampleDeviceDepth(param_2, depthTex, depthSampler);
+    float2 param_3 = uv + float2(0.0, texel.y);
+    float zD = sampleDeviceDepth(param_3, depthTex, depthSampler);
+    float2 param_4 = uv - float2(texel.x, 0.0);
+    float param_5 = zL;
+    float3 Pl = viewPosFromUV(param_4, param_5, pc);
+    float2 param_6 = uv + float2(texel.x, 0.0);
+    float param_7 = zR;
+    float3 Pr = viewPosFromUV(param_6, param_7, pc);
+    float2 param_8 = uv - float2(0.0, texel.y);
+    float param_9 = zU;
+    float3 Pu = viewPosFromUV(param_8, param_9, pc);
+    float2 param_10 = uv + float2(0.0, texel.y);
+    float param_11 = zD;
+    float3 Pd = viewPosFromUV(param_10, param_11, pc);
+    float3 _233;
+    if (abs(Pr.z - P.z) < abs(P.z - Pl.z))
+    {
+        _233 = Pr - P;
+    }
+    else
+    {
+        _233 = P - Pl;
+    }
+    float3 dPdx = _233;
+    float3 _258;
+    if (abs(Pd.z - P.z) < abs(P.z - Pu.z))
+    {
+        _258 = Pd - P;
+    }
+    else
+    {
+        _258 = P - Pu;
+    }
+    float3 dPdy = _258;
+    float3 n = cross(dPdx, dPdy);
+    float len = length(n);
+    float3 _279;
+    if (len > 9.9999999392252902907785028219223e-09)
+    {
+        _279 = n / float3(len);
+    }
+    else
+    {
+        _279 = float3(0.0, 0.0, 1.0);
+    }
+    return _279;
+}
+
+static inline __attribute__((always_inline))
+float ign(thread const float2& pix)
+{
+    return fract(52.98291778564453125 * fract(dot(pix, float2(0.067110560834407806396484375, 0.005837149918079376220703125))));
+}
+
+static inline __attribute__((always_inline))
+float fastAcos(thread const float& x)
+{
+    float xa = abs(x);
+    float r = (((-0.15658299624919891357421875) * xa) + 1.57079637050628662109375) * sqrt(1.0 - xa);
+    float _134;
+    if (x >= 0.0)
+    {
+        _134 = r;
+    }
+    else
+    {
+        _134 = 3.1415927410125732421875 - r;
+    }
+    return _134;
+}
+
+static inline __attribute__((always_inline))
+float sscsContact(thread const float3& P, thread const float2& texel, thread const float& _noise, constant GtaoPush& pc, texture2d<float> depthTex, sampler depthSampler)
+{
+    bool _307 = pc.sscsEnabled == 0;
+    bool _315;
+    if (!_307)
+    {
+        _315 = pc.sscsStrength <= 0.0;
+    }
+    else
+    {
+        _315 = _307;
+    }
+    if (_315)
+    {
+        return 1.0;
+    }
+    float3 L = pc.sscsSunDirVS.xyz;
+    float stepLen = pc.sscsRadius / float(max(pc.sscsSteps, 1));
+    float occluded = 0.0;
+    for (int i = 1; i <= pc.sscsSteps; i++)
+    {
+        float t = ((float(i) - 0.5) + _noise) * stepLen;
+        float3 sp = P + (L * t);
+        if (sp.z <= 0.001000000047497451305389404296875)
+        {
+            break;
+        }
+        float2 ndc = ((sp.xy / float2(sp.z)) - pc.ndcToViewAdd) / pc.ndcToViewMul;
+        float2 uvS = (ndc * 0.5) + float2(0.5);
+        bool _389 = uvS.x < 0.0;
+        bool _396;
+        if (!_389)
+        {
+            _396 = uvS.x > 1.0;
+        }
+        else
+        {
+            _396 = _389;
+        }
+        bool _403;
+        if (!_396)
+        {
+            _403 = uvS.y < 0.0;
+        }
+        else
+        {
+            _403 = _396;
+        }
+        bool _410;
+        if (!_403)
+        {
+            _410 = uvS.y > 1.0;
+        }
+        else
+        {
+            _410 = _403;
+        }
+        if (_410)
+        {
+            break;
+        }
+        float2 param = uvS;
+        float zScene = sampleDeviceDepth(param, depthTex, depthSampler);
+        if (zScene <= 0.0)
+        {
+            continue;
+        }
+        float param_1 = zScene;
+        float sceneVz = linearizeDepth(param_1, pc);
+        float diff = sp.z - sceneVz;
+        bool _435 = diff > (stepLen * 0.5);
+        bool _442;
+        if (_435)
+        {
+            _442 = diff < pc.sscsRadius;
+        }
+        else
+        {
+            _442 = _435;
+        }
+        if (_442)
+        {
+            occluded = 1.0;
+            break;
+        }
+    }
+    return mix(1.0, 1.0 - pc.sscsStrength, occluded);
+}
+
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant GtaoPush& pc [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    int2 pix = int2(gl_GlobalInvocationID.xy);
+    int2 dim = int2(pc.viewportSize);
+    bool _473 = pix.x >= dim.x;
+    bool _482;
+    if (!_473)
+    {
+        _482 = pix.y >= dim.y;
+    }
+    else
+    {
+        _482 = _473;
+    }
+    if (_482)
+    {
+        return;
+    }
+    float2 texel = float2(1.0) / pc.viewportSize;
+    float2 uv = (float2(pix) + float2(0.5)) * texel;
+    float2 param = uv;
+    float centerZ = sampleDeviceDepth(param, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+    if (centerZ <= 0.0)
+    {
+        spvDescriptorSet0.aoImage.write(float4(1.0), uint2(pix));
+        return;
+    }
+    float2 param_1 = uv;
+    float param_2 = centerZ;
+    float3 P = viewPosFromUV(param_1, param_2, pc);
+    float2 param_3 = uv;
+    float3 param_4 = P;
+    float2 param_5 = texel;
+    float3 N = normalFromDepth(param_3, param_4, param_5, pc, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+    float3 V = fast::normalize(-P);
+    float tanHalfFovX = 0.5 * abs(pc.ndcToViewMul.x);
+    float screenRadiusUV = fast::clamp(pc.effectRadius / (P.z * fast::max(tanHalfFovX, 9.9999997473787516355514526367188e-05)), texel.x, 0.5);
+    float2 param_6 = float2(pix);
+    float _noise = ign(param_6);
+    float visibility = 0.0;
+    float falloffMul = 1.0 / fast::max(pc.effectRadius * pc.falloffRange, 9.9999997473787516355514526367188e-05);
+    float falloffAdd = ((-pc.effectRadius) * (1.0 - pc.falloffRange)) * falloffMul;
+    for (int slice = 0; slice < pc.sliceCount; slice++)
+    {
+        float sliceK = (float(slice) + _noise) / float(pc.sliceCount);
+        float phi = sliceK * 3.1415927410125732421875;
+        float2 dir = float2(cos(phi), sin(phi));
+        float3 dirVec = float3(dir, 0.0);
+        float3 orthoDir = dirVec - (V * dot(dirVec, V));
+        float3 axis = fast::normalize(cross(orthoDir, V));
+        float3 projN = N - (axis * dot(N, axis));
+        float projLen = length(projN);
+        if (projLen < 9.9999997473787516355514526367188e-06)
+        {
+            continue;
+        }
+        float signN = sign(dot(orthoDir, projN));
+        float cosN = fast::clamp(dot(projN, V) / projLen, -1.0, 1.0);
+        float param_7 = cosN;
+        float n = signN * fastAcos(param_7);
+        float horizonCos0 = cos(n + 1.57079637050628662109375);
+        float horizonCos1 = cos(n - 1.57079637050628662109375);
+        float minS = (1.5 * texel.x) / fast::max(screenRadiusUV, 9.9999997473787516355514526367188e-06);
+        for (int _step = 0; _step < pc.stepsPerSlice; _step++)
+        {
+            float stepNoise = fract(_noise + (float((slice * pc.stepsPerSlice) + _step) * 0.61803400516510009765625));
+            float s = (float(_step) + stepNoise) / float(pc.stepsPerSlice);
+            s = powr(s, 2.0);
+            s += minS;
+            float2 off = (dir * s) * screenRadiusUV;
+            float2 uv0 = uv + off;
+            float2 uv1 = uv - off;
+            float2 param_8 = uv0;
+            float z0 = sampleDeviceDepth(param_8, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+            float2 param_9 = uv1;
+            float z1 = sampleDeviceDepth(param_9, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+            float2 param_10 = uv0;
+            float param_11 = z0;
+            float3 s0 = viewPosFromUV(param_10, param_11, pc);
+            float2 param_12 = uv1;
+            float param_13 = z1;
+            float3 s1 = viewPosFromUV(param_12, param_13, pc);
+            float3 d0 = s0 - P;
+            float3 d1 = s1 - P;
+            float dist0 = length(d0);
+            float dist1 = length(d1);
+            float w0 = fast::clamp((dist0 * falloffMul) + falloffAdd, 0.0, 1.0);
+            float w1 = fast::clamp((dist1 * falloffMul) + falloffAdd, 0.0, 1.0);
+            w0 = 1.0 - w0;
+            w1 = 1.0 - w1;
+            float shc0 = dot(d0 / float3(fast::max(dist0, 9.9999997473787516355514526367188e-06)), V);
+            float shc1 = dot(d1 / float3(fast::max(dist1, 9.9999997473787516355514526367188e-06)), V);
+            if (z0 <= 0.0)
+            {
+                shc0 = horizonCos0;
+            }
+            if (z1 <= 0.0)
+            {
+                shc1 = horizonCos1;
+            }
+            horizonCos0 = fast::max(horizonCos0, mix(horizonCos0, shc0, w0));
+            horizonCos1 = fast::max(horizonCos1, mix(horizonCos1, shc1, w1));
+        }
+        float param_14 = fast::clamp(horizonCos1, -1.0, 1.0);
+        float h0 = -fastAcos(param_14);
+        float param_15 = fast::clamp(horizonCos0, -1.0, 1.0);
+        float h1 = fastAcos(param_15);
+        float iarc0 = ((cosN + ((2.0 * h0) * sin(n))) - cos((2.0 * h0) - n)) * 0.25;
+        float iarc1 = ((cosN + ((2.0 * h1) * sin(n))) - cos((2.0 * h1) - n)) * 0.25;
+        visibility += (projLen * (iarc0 + iarc1));
+    }
+    visibility /= float(pc.sliceCount);
+    visibility = fast::clamp(visibility, 0.0, 1.0);
+    visibility = powr(visibility, pc.finalPower);
+    visibility = mix(1.0, visibility, fast::clamp(pc.intensity, 0.0, 1.0));
+    visibility = fast::max(visibility, 0.0);
+    float3 param_16 = P;
+    float2 param_17 = texel;
+    float param_18 = _noise;
+    visibility *= sscsContact(param_16, param_17, param_18, pc, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+    spvDescriptorSet0.aoImage.write(float4(visibility), uint2(pix));
+}
+

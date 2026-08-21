@@ -123,8 +123,7 @@ vec3 linearToSRGB( vec3 c ) {
 // domain == 0 (CD_SRGB) → decode. Every particle-class image is
 // CD_SRGB today, so this is byte-identical to the prior unconditional
 // sRGBToLinear; the branch is the seam for future channel-map sprites.
-vec4 sampleColorTexBindless( sampler2D s, vec2 uv, uint domain ) {
-	vec4 c = texture( s, uv );
+vec4 decodeColorTexel( vec4 c, uint domain ) {
 	if ( domain != 0u )
 		return c;
 	c.rgb = sRGBToLinear( c.rgb );
@@ -147,15 +146,15 @@ void main() {
 		// Static class (frameCount <= 1): sample by class handle exactly
 		// as before this change — byte-identical path.
 		uint idx = ( particleClassHandle & 0x7FFFFFFFu ) - 1u;
-		texel    = sampleColorTexBindless( particleSamplers[idx], fragUV, domain );
+		texel    = decodeColorTexel( texture( particleSamplers[idx], fragUV ), domain );
 	} else {
 		// Flipbook: sample the selected frame; when frameBlend > 0
 		// interpolate with the next frame in LINEAR domain (the helper
 		// already decodes sRGB→linear when domain == 0), which is
 		// energy-correct for the additive HDR blend.
-		vec4 t0 = sampleColorTexBindless( particleSamplers[frameSlot0], fragUV, domain );
+		vec4 t0 = decodeColorTexel( texture( particleSamplers[frameSlot0], fragUV ), domain );
 		if ( frameBlend > 0.0 ) {
-			vec4 t1 = sampleColorTexBindless( particleSamplers[frameSlot1], fragUV, domain );
+			vec4 t1 = decodeColorTexel( texture( particleSamplers[frameSlot1], fragUV ), domain );
 			texel   = mix( t0, t1, frameBlend );
 		} else {
 			texel   = t0;

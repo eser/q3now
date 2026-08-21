@@ -1,0 +1,119 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+constant float cg_tint_r_tmp [[function_constant(19)]];
+constant float cg_tint_r = is_function_constant_defined(cg_tint_r_tmp) ? cg_tint_r_tmp : 1.0;
+constant float cg_tint_g_tmp [[function_constant(20)]];
+constant float cg_tint_g = is_function_constant_defined(cg_tint_g_tmp) ? cg_tint_g_tmp : 1.0;
+constant float cg_tint_b_tmp [[function_constant(21)]];
+constant float cg_tint_b = is_function_constant_defined(cg_tint_b_tmp) ? cg_tint_b_tmp : 1.0;
+constant float cg_saturation_tmp [[function_constant(22)]];
+constant float cg_saturation = is_function_constant_defined(cg_saturation_tmp) ? cg_saturation_tmp : 1.0;
+constant float cg_contrast_tmp [[function_constant(23)]];
+constant float cg_contrast = is_function_constant_defined(cg_contrast_tmp) ? cg_contrast_tmp : 1.0;
+constant float chromatic_strength_tmp [[function_constant(24)]];
+constant float chromatic_strength = is_function_constant_defined(chromatic_strength_tmp) ? chromatic_strength_tmp : 0.0;
+
+struct ExposureBlock
+{
+    float exposure_bias;
+    float key;
+    float pctLow;
+    float pctHigh;
+    float rateUp;
+    float rateDown;
+    float minExp;
+    float maxExp;
+    int autoEnabled;
+    float brightness;
+    float sunScreenX;
+    float sunScreenY;
+    float sunrayIntensity;
+    float sunrayDecay;
+};
+
+constant float saturation_tmp [[function_constant(2)]];
+constant float saturation = is_function_constant_defined(saturation_tmp) ? saturation_tmp : 1.0;
+constant int hdr_mode_tmp [[function_constant(12)]];
+constant int hdr_mode = is_function_constant_defined(hdr_mode_tmp) ? hdr_mode_tmp : 0;
+constant float hdr_peak_norm_tmp [[function_constant(13)]];
+constant float hdr_peak_norm = is_function_constant_defined(hdr_peak_norm_tmp) ? hdr_peak_norm_tmp : 10.0;
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> texture0 [[id(0)]];
+    sampler texture0Smplr [[id(1)]];
+};
+
+struct spvDescriptorSetBuffer2
+{
+    constant ExposureBlock* eb [[id(0)]];
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord [[user(locn0)]];
+};
+
+static inline __attribute__((always_inline))
+float3 sampleChromatic(thread const float2& uv, texture2d<float> texture0, sampler texture0Smplr)
+{
+    float2 dir = uv - float2(0.5);
+    float radial = length(dir);
+    float2 offset = dir * ((chromatic_strength * radial) * 0.014999999664723873138427734375);
+    float r = texture0.sample(texture0Smplr, fast::clamp(uv + offset, float2(0.0), float2(1.0))).x;
+    float g = texture0.sample(texture0Smplr, uv).y;
+    float b = texture0.sample(texture0Smplr, fast::clamp(uv - offset, float2(0.0), float2(1.0))).z;
+    return float3(r, g, b);
+}
+
+static inline __attribute__((always_inline))
+float3 applyColorGrading(thread float3& color)
+{
+    float3 colorGradeTint;
+    colorGradeTint.x = cg_tint_r;
+    colorGradeTint.y = cg_tint_g;
+    colorGradeTint.z = cg_tint_b;
+    color *= colorGradeTint;
+    float luma = dot(color, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    color = mix(float3(luma), color, float3(cg_saturation));
+    color = ((color - float3(0.5)) * cg_contrast) + float3(0.5);
+    return fast::clamp(color, float3(0.0), float3(1.0));
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer2& spvDescriptorSet2 [[buffer(2)]])
+{
+    main0_out out = {};
+    float3 _117;
+    if (chromatic_strength > 0.0)
+    {
+        float2 param = in.frag_tex_coord;
+        _117 = sampleChromatic(param, spvDescriptorSet0.texture0, spvDescriptorSet0.texture0Smplr);
+    }
+    else
+    {
+        _117 = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, in.frag_tex_coord).xyz;
+    }
+    float3 base = _117;
+    base *= (*spvDescriptorSet2.eb).exposure_bias;
+    float3 param_1 = base;
+    float3 _143 = applyColorGrading(param_1);
+    base = _143;
+    if (saturation != 1.0)
+    {
+        float3 luma = float3(dot(base, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875)));
+        base = mix(luma, base, float3(saturation));
+    }
+    out.out_color = float4(base, 1.0);
+    return out;
+}
+

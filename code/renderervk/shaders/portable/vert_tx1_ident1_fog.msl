@@ -1,0 +1,97 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+constant int ENTITY_SSBO_tmp [[function_constant(16)]];
+constant int ENTITY_SSBO = is_function_constant_defined(ENTITY_SSBO_tmp) ? ENTITY_SSBO_tmp : 0;
+constant bool _15 = (ENTITY_SSBO != 0);
+
+struct EntityMatrices
+{
+    float4x4 entMat[1];
+};
+
+struct UBO
+{
+    float4 eyePos;
+    float4 lightPos;
+    float4 lightColor;
+    float4 lightVector;
+    float4 fogDistanceVector;
+    float4 fogDepthVector;
+    float4 fogEyeT;
+    float4 fogColor;
+    float4 _pad_to_mvp[22];
+    float4x4 mvp;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant UBO* ubo [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer3
+{
+    const device EntityMatrices* m_22 [[id(0)]];
+};
+
+struct main0_out
+{
+    float2 frag_tex_coord0 [[user(locn1)]];
+    float2 frag_tex_coord1 [[user(locn2)]];
+    float2 fog_tex_coord [[user(locn4)]];
+    float4 gl_Position [[position]];
+};
+
+struct main0_in
+{
+    float3 in_position [[attribute(0)]];
+    float2 in_tex_coord0 [[attribute(2)]];
+    float2 in_tex_coord1 [[attribute(3)]];
+};
+
+vertex main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer3& spvDescriptorSet3 [[buffer(3)]], uint gl_InstanceIndex [[instance_id]])
+{
+    main0_out out = {};
+    float4x4 _16;
+    if (_15)
+    {
+        _16 = (*spvDescriptorSet3.m_22).entMat[int(gl_InstanceIndex) * 2];
+    }
+    else
+    {
+        _16 = (*spvDescriptorSet0.ubo).mvp;
+    }
+    float4x4 mvp = _16;
+    out.gl_Position = mvp * float4(in.in_position, 1.0);
+    out.frag_tex_coord0 = in.in_tex_coord0;
+    out.frag_tex_coord1 = in.in_tex_coord1;
+    float s = dot(in.in_position, (*spvDescriptorSet0.ubo).fogDistanceVector.xyz) + (*spvDescriptorSet0.ubo).fogDistanceVector.w;
+    float t = dot(in.in_position, (*spvDescriptorSet0.ubo).fogDepthVector.xyz) + (*spvDescriptorSet0.ubo).fogDepthVector.w;
+    if ((*spvDescriptorSet0.ubo).fogEyeT.y == 1.0)
+    {
+        if (t < 0.0)
+        {
+            t = 0.03125;
+        }
+        else
+        {
+            t = 0.96875;
+        }
+    }
+    else
+    {
+        if (t < 1.0)
+        {
+            t = 0.03125;
+        }
+        else
+        {
+            t = 0.03125 + ((0.9375 * t) / (t - (*spvDescriptorSet0.ubo).fogEyeT.x));
+        }
+    }
+    out.fog_tex_coord = float2(s, t);
+    return out;
+}
+

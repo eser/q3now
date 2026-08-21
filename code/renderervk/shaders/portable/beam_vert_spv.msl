@@ -1,0 +1,269 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct BeamHeader
+{
+    float4 start;
+    float4 end;
+    float4 startColor;
+    float4 endColor;
+    float2 uvScroll;
+    float startWidth;
+    float endWidth;
+    float spawnTime;
+    uint shaderHandle;
+    uint axialCopies;
+    uint flags;
+};
+
+struct BeamHeader_1
+{
+    float4 start;
+    float4 end;
+    float4 startColor;
+    float4 endColor;
+    float2 uvScroll;
+    float startWidth;
+    float endWidth;
+    float spawnTime;
+    uint shaderHandle;
+    uint axialCopies;
+    uint flags;
+};
+
+struct Headers
+{
+    BeamHeader_1 beams[1];
+};
+
+struct EffectsUBO
+{
+    float4x4 mvp;
+    float4 eyeWorld;
+    float4 frameParams;
+    float4 stageParams;
+};
+
+struct StageCounts
+{
+    uint stageCounts[1];
+};
+
+struct PrimitiveStageGPU
+{
+    uint imageSlot;
+    uint blendPacked;
+    uint rgbGen;
+    uint alphaGen;
+    float2 uvScale;
+    float2 uvScroll;
+};
+
+struct PrimitiveStageGPU_1
+{
+    uint imageSlot;
+    uint blendPacked;
+    uint rgbGen;
+    uint alphaGen;
+    float2 uvScale;
+    float2 uvScroll;
+};
+
+struct Stages
+{
+    PrimitiveStageGPU_1 stages[1];
+};
+
+struct spvDescriptorSetBuffer0
+{
+    const device Headers* m_56 [[id(0)]];
+    const device StageCounts* m_109 [[id(1)]];
+    const device Stages* m_130 [[id(2)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    constant EffectsUBO* m_100 [[id(0)]];
+};
+
+struct main0_out
+{
+    float2 fragUV [[user(locn0)]];
+    float4 fragColor [[user(locn1)]];
+    uint fragShaderHandle [[user(locn2)]];
+    uint fragImageSlot [[user(locn3)]];
+    float4 gl_Position [[position]];
+};
+
+static inline __attribute__((always_inline))
+void emitDegenerate(thread float4& gl_Position, thread float2& fragUV, thread float4& fragColor, thread uint& fragShaderHandle, thread uint& fragImageSlot)
+{
+    gl_Position = float4(0.0, 0.0, 2.0, 1.0);
+    fragUV = float2(0.0);
+    fragColor = float4(0.0);
+    fragShaderHandle = 0u;
+    fragImageSlot = 0u;
+}
+
+vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], uint gl_InstanceIndex [[instance_id]], uint gl_VertexIndex [[vertex_id]])
+{
+    main0_out out = {};
+    uint beamIdx = uint(int(gl_InstanceIndex));
+    uint vertexIdx = uint(int(gl_VertexIndex));
+    uint copyIdx = vertexIdx / 6u;
+    uint localIdx = vertexIdx % 6u;
+    BeamHeader hdr;
+    hdr.start = (*spvDescriptorSet0.m_56).beams[beamIdx].start;
+    hdr.end = (*spvDescriptorSet0.m_56).beams[beamIdx].end;
+    hdr.startColor = (*spvDescriptorSet0.m_56).beams[beamIdx].startColor;
+    hdr.endColor = (*spvDescriptorSet0.m_56).beams[beamIdx].endColor;
+    hdr.uvScroll = (*spvDescriptorSet0.m_56).beams[beamIdx].uvScroll;
+    hdr.startWidth = (*spvDescriptorSet0.m_56).beams[beamIdx].startWidth;
+    hdr.endWidth = (*spvDescriptorSet0.m_56).beams[beamIdx].endWidth;
+    hdr.spawnTime = (*spvDescriptorSet0.m_56).beams[beamIdx].spawnTime;
+    hdr.shaderHandle = (*spvDescriptorSet0.m_56).beams[beamIdx].shaderHandle;
+    hdr.axialCopies = (*spvDescriptorSet0.m_56).beams[beamIdx].axialCopies;
+    hdr.flags = (*spvDescriptorSet0.m_56).beams[beamIdx].flags;
+    uint stageIdx = uint((*spvDescriptorSet1.m_100).stageParams.x);
+    uint stageCount = (*spvDescriptorSet0.m_109).stageCounts[hdr.shaderHandle];
+    if (stageIdx >= stageCount)
+    {
+        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.fragShaderHandle, out.fragImageSlot);
+        return out;
+    }
+    uint _136 = (hdr.shaderHandle * 4u) + stageIdx;
+    PrimitiveStageGPU stage;
+    stage.imageSlot = (*spvDescriptorSet0.m_130).stages[_136].imageSlot;
+    stage.blendPacked = (*spvDescriptorSet0.m_130).stages[_136].blendPacked;
+    stage.rgbGen = (*spvDescriptorSet0.m_130).stages[_136].rgbGen;
+    stage.alphaGen = (*spvDescriptorSet0.m_130).stages[_136].alphaGen;
+    stage.uvScale = (*spvDescriptorSet0.m_130).stages[_136].uvScale;
+    stage.uvScroll = (*spvDescriptorSet0.m_130).stages[_136].uvScroll;
+    if (copyIdx >= hdr.axialCopies)
+    {
+        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.fragShaderHandle, out.fragImageSlot);
+        return out;
+    }
+    float3 startW = hdr.start.xyz;
+    float3 endW = hdr.end.xyz;
+    float3 axis = endW - startW;
+    float len = length(axis);
+    if (len < 9.9999997473787516355514526367188e-05)
+    {
+        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.fragShaderHandle, out.fragImageSlot);
+        return out;
+    }
+    float3 axisN = axis / float3(len);
+    float3 center = (startW + endW) * 0.5;
+    float3 toEye = (*spvDescriptorSet1.m_100).eyeWorld.xyz - center;
+    float3 sideRaw = cross(axisN, toEye);
+    float sideLen = length(sideRaw);
+    float3 side;
+    if (sideLen < 9.9999997473787516355514526367188e-05)
+    {
+        float3 ad = abs(axisN);
+        bool _222 = ad.x <= ad.y;
+        bool _231;
+        if (_222)
+        {
+            _231 = ad.x <= ad.z;
+        }
+        else
+        {
+            _231 = _222;
+        }
+        float3 _232;
+        if (_231)
+        {
+            _232 = float3(1.0, 0.0, 0.0);
+        }
+        else
+        {
+            _232 = select(float3(0.0, 0.0, 1.0), float3(0.0, 1.0, 0.0), bool3(ad.y <= ad.z));
+        }
+        float3 fb = _232;
+        side = fast::normalize(cross(axisN, fb));
+    }
+    else
+    {
+        side = sideRaw / float3(sideLen);
+    }
+    float angle = (float(copyIdx) * 3.1415927410125732421875) / float(hdr.axialCopies);
+    float c = cos(angle);
+    float s = sin(angle);
+    float3 rotSide = ((side * c) + (cross(axisN, side) * s)) + ((axisN * dot(axisN, side)) * (1.0 - c));
+    float3 v0 = startW - (rotSide * hdr.startWidth);
+    float3 v1 = startW + (rotSide * hdr.startWidth);
+    float3 v2 = endW - (rotSide * hdr.endWidth);
+    float3 v3 = endW + (rotSide * hdr.endWidth);
+    float3 worldPos;
+    float4 vertColor;
+    float2 uv;
+    switch (localIdx)
+    {
+        case 0u:
+        {
+            worldPos = v0;
+            vertColor = hdr.startColor;
+            uv = float2(0.0);
+            break;
+        }
+        case 1u:
+        {
+            worldPos = v1;
+            vertColor = hdr.startColor;
+            uv = float2(0.0, 1.0);
+            break;
+        }
+        case 2u:
+        {
+            worldPos = v2;
+            vertColor = hdr.endColor;
+            uv = float2(1.0, 0.0);
+            break;
+        }
+        case 3u:
+        {
+            worldPos = v1;
+            vertColor = hdr.startColor;
+            uv = float2(0.0, 1.0);
+            break;
+        }
+        case 4u:
+        {
+            worldPos = v3;
+            vertColor = hdr.endColor;
+            uv = float2(1.0);
+            break;
+        }
+        default:
+        {
+            worldPos = v2;
+            vertColor = hdr.endColor;
+            uv = float2(1.0, 0.0);
+            break;
+        }
+    }
+    out.gl_Position = (*spvDescriptorSet1.m_100).mvp * float4(worldPos, 1.0);
+    float scrollT;
+    if ((hdr.flags & 32u) != 0u)
+    {
+        scrollT = (*spvDescriptorSet1.m_100).frameParams.y;
+    }
+    else
+    {
+        scrollT = fast::max((*spvDescriptorSet1.m_100).frameParams.y - hdr.spawnTime, 0.0);
+    }
+    float2 baseUV = uv * stage.uvScale;
+    float2 totalScroll = stage.uvScroll + hdr.uvScroll;
+    out.fragUV = baseUV + (totalScroll * scrollT);
+    out.fragColor = vertColor;
+    out.fragShaderHandle = hdr.shaderHandle;
+    out.fragImageSlot = stage.imageSlot;
+    return out;
+}
+

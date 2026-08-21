@@ -1,0 +1,121 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+    
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+    
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+    
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+    
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
+struct SpriteHeader
+{
+    float4 originW;
+    float4 rgba;
+    uint shaderHandle;
+    uint flags;
+    uint pad0;
+    uint pad1;
+};
+
+struct SpriteHeader_1
+{
+    float4 originW;
+    float4 rgba;
+    uint shaderHandle;
+    uint flags;
+    uint pad0;
+    uint pad1;
+};
+
+struct Sprites
+{
+    SpriteHeader_1 sprites[1];
+};
+
+struct EffectsUBO
+{
+    float4x4 mvp;
+    float4 viewLeft;
+    float4 viewUp;
+    float4 frameParams;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    const device Sprites* m_16 [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    constant EffectsUBO* m_80 [[id(0)]];
+};
+
+constant spvUnsafeArray<float, 6> _55 = spvUnsafeArray<float, 6>({ 1.0, 1.0, -1.0, -1.0, 1.0, -1.0 });
+constant spvUnsafeArray<float, 6> _62 = spvUnsafeArray<float, 6>({ -1.0, 1.0, -1.0, -1.0, 1.0, 1.0 });
+constant spvUnsafeArray<float2, 6> _121 = spvUnsafeArray<float2, 6>({ float2(0.0, 1.0), float2(0.0), float2(1.0), float2(1.0), float2(0.0), float2(1.0, 0.0) });
+
+struct main0_out
+{
+    float2 fragUV [[user(locn0)]];
+    float4 fragColor [[user(locn1)]];
+    float4 gl_Position [[position]];
+};
+
+vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], uint gl_InstanceIndex [[instance_id]], uint gl_VertexIndex [[vertex_id]])
+{
+    main0_out out = {};
+    SpriteHeader hdr;
+    hdr.originW = (*spvDescriptorSet0.m_16).sprites[int(gl_InstanceIndex)].originW;
+    hdr.rgba = (*spvDescriptorSet0.m_16).sprites[int(gl_InstanceIndex)].rgba;
+    hdr.shaderHandle = (*spvDescriptorSet0.m_16).sprites[int(gl_InstanceIndex)].shaderHandle;
+    hdr.flags = (*spvDescriptorSet0.m_16).sprites[int(gl_InstanceIndex)].flags;
+    hdr.pad0 = (*spvDescriptorSet0.m_16).sprites[int(gl_InstanceIndex)].pad0;
+    hdr.pad1 = (*spvDescriptorSet0.m_16).sprites[int(gl_InstanceIndex)].pad1;
+    uint vertInQuad = uint(int(gl_VertexIndex)) % 6u;
+    float sx = _55[vertInQuad];
+    float uy = _62[vertInQuad];
+    float radius = hdr.originW.w;
+    float3 worldPos = (hdr.originW.xyz + ((*spvDescriptorSet1.m_80).viewLeft.xyz * (sx * radius))) + ((*spvDescriptorSet1.m_80).viewUp.xyz * (uy * radius));
+    out.gl_Position = (*spvDescriptorSet1.m_80).mvp * float4(worldPos, 1.0);
+    out.fragUV = _121[vertInQuad];
+    out.fragColor = hdr.rgba;
+    return out;
+}
+

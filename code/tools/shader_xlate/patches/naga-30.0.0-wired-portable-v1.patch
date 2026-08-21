@@ -1,0 +1,352 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+--- a/naga-30.0.0/src/back/wgsl/writer.rs	2006-07-24 04:21:28
++++ b/naga-30.0.0/src/back/wgsl/writer.rs	2026-08-21 07:45:30
+@@ -1450,6 +1450,13 @@
+             Expression::Override(handle) => {
+                 write!(self.out, "{}", self.names[&NameKey::Override(handle)])?;
+             }
++            Expression::Binary { op, left, right } => {
++                write!(self.out, "(")?;
++                write_expression(self, left)?;
++                write!(self.out, " {} ", back::binary_operation_str(op))?;
++                write_expression(self, right)?;
++                write!(self.out, ")")?;
++            }
+             _ => unreachable!(),
+         }
+ 
+--- a/naga-30.0.0/src/front/spv/function.rs	2006-07-24 04:21:28
++++ b/naga-30.0.0/src/front/spv/function.rs	2026-08-21 07:56:19
+@@ -30,6 +30,7 @@
+         self.lookup_expression.clear();
+         self.lookup_load_override.clear();
+         self.lookup_sampled_image.clear();
++        self.lookup_combined_sampler_expression.clear();
+ 
+         let result_type_id = self.next()?;
+         let fun_id = self.next()?;
+--- a/naga-30.0.0/src/front/spv/image.rs	2006-07-24 04:21:28
++++ b/naga-30.0.0/src/front/spv/image.rs	2026-08-21 07:51:07
+@@ -9,8 +9,8 @@
+ 
+ #[derive(Clone, Debug)]
+ pub(super) struct LookupSampledImage {
+-    image: Handle<crate::Expression>,
+-    sampler: Handle<crate::Expression>,
++    pub(super) image: Handle<crate::Expression>,
++    pub(super) sampler: Handle<crate::Expression>,
+ }
+ 
+ bitflags::bitflags! {
+--- a/naga-30.0.0/src/front/spv/mod.rs	2006-07-24 04:21:28
++++ b/naga-30.0.0/src/front/spv/mod.rs	2026-08-21 08:09:39
+@@ -36,7 +36,7 @@
+ 
+ pub use error::Error;
+ 
+-use alloc::{borrow::ToOwned, string::String, vec, vec::Vec};
++use alloc::{borrow::ToOwned, format, string::String, vec, vec::Vec};
+ use core::{convert::TryInto, mem, num::NonZeroU32};
+ 
+ use half::f16;
+@@ -629,6 +629,9 @@
+     upgrade_atomics: Upgrades,
+ 
+     lookup_type: FastHashMap<spirv::Word, LookupType>,
++    sampled_image_types: FastHashSet<spirv::Word>,
++    combined_sampled_array_types: FastHashSet<spirv::Word>,
++    combined_sampled_pointer_types: FastHashSet<spirv::Word>,
+     lookup_void_type: Option<spirv::Word>,
+     lookup_storage_buffer_types: FastHashMap<Handle<crate::Type>, crate::StorageAccess>,
+     lookup_constant: FastHashMap<spirv::Word, LookupConstant>,
+@@ -637,6 +640,8 @@
+     // Load overrides are used to work around row-major matrices
+     lookup_load_override: FastHashMap<spirv::Word, LookupLoadOverride>,
+     lookup_sampled_image: FastHashMap<spirv::Word, image::LookupSampledImage>,
++    lookup_combined_sampler: FastHashMap<spirv::Word, Handle<crate::GlobalVariable>>,
++    lookup_combined_sampler_expression: FastHashMap<spirv::Word, Handle<crate::Expression>>,
+     lookup_function_type: FastHashMap<spirv::Word, LookupFunctionType>,
+     lookup_function: FastHashMap<spirv::Word, LookupFunction>,
+     lookup_entry_point: FastHashMap<spirv::Word, EntryPoint>,
+@@ -691,6 +696,9 @@
+             lookup_member: FastHashMap::default(),
+             upgrade_atomics: Default::default(),
+             lookup_type: FastHashMap::default(),
++            sampled_image_types: FastHashSet::default(),
++            combined_sampled_array_types: FastHashSet::default(),
++            combined_sampled_pointer_types: FastHashSet::default(),
+             lookup_void_type: None,
+             lookup_storage_buffer_types: FastHashMap::default(),
+             lookup_constant: FastHashMap::default(),
+@@ -698,6 +706,8 @@
+             lookup_expression: FastHashMap::default(),
+             lookup_load_override: FastHashMap::default(),
+             lookup_sampled_image: FastHashMap::default(),
++            lookup_combined_sampler: FastHashMap::default(),
++            lookup_combined_sampler_expression: FastHashMap::default(),
+             lookup_function_type: FastHashMap::default(),
+             lookup_function: FastHashMap::default(),
+             lookup_entry_point: FastHashMap::default(),
+@@ -1546,6 +1556,21 @@
+                     block_id: 0,
+                 },
+             );
++            if let Some(&sampler) = self.lookup_combined_sampler.get(&id) {
++                let sampler_handle = expressions.append(
++                    crate::Expression::GlobalVariable(sampler),
++                    globals.get_span(sampler),
++                );
++                self.lookup_combined_sampler_expression
++                    .insert(id, sampler_handle);
++                self.lookup_sampled_image.insert(
++                    id,
++                    image::LookupSampledImage {
++                        image: handle,
++                        sampler: sampler_handle,
++                    },
++                );
++            }
+         }
+         // register constants
+         for (&id, con) in self.lookup_constant.iter() {
+@@ -1776,6 +1801,7 @@
+                 Op::ConstantFalse | Op::SpecConstantFalse => {
+                     self.parse_bool_constant(inst, false, &mut module)
+                 }
++                Op::SpecConstantOp => self.parse_spec_constant_op(inst, &mut module),
+                 Op::Variable => self.parse_global_variable(inst, &mut module),
+                 Op::Function => {
+                     self.switch(ModuleState::Function, inst.op)?;
+@@ -2314,6 +2340,10 @@
+         let id = self.next()?;
+         let storage_class = self.next()?;
+         let type_id = self.next()?;
++		if self.sampled_image_types.contains(&type_id)
++				|| self.combined_sampled_array_types.contains(&type_id) {
++			self.combined_sampled_pointer_types.insert(id);
++		}
+ 
+         let decor = self.future_decor.remove(&id);
+         let base_lookup_ty = self.lookup_type.lookup(type_id)?;
+@@ -2384,6 +2414,9 @@
+         let id = self.next()?;
+         let type_id = self.next()?;
+         let length_id = self.next()?;
++		if self.sampled_image_types.contains(&type_id) {
++			self.combined_sampled_array_types.insert(id);
++		}
+         let length_const = self.lookup_constant.lookup(length_id)?;
+ 
+         let size = resolve_constant(module.to_ctx(), &length_const.inner)
+@@ -2718,6 +2751,7 @@
+         inst.expect(3)?;
+         let id = self.next()?;
+         let image_id = self.next()?;
++        self.sampled_image_types.insert(id);
+         self.lookup_type.insert(
+             id,
+             LookupType {
+@@ -2910,6 +2944,60 @@
+         );
+ 
+         self.insert_parsed_constant(module, id, type_id, ty, init, span)
++    }
++
++    fn parse_spec_constant_op(
++        &mut self,
++        inst: Instruction,
++        module: &mut crate::Module,
++    ) -> Result<(), Error> {
++        let start = self.data_offset;
++        self.switch(ModuleState::Type, inst.op)?;
++        inst.expect(6)?;
++        let type_id = self.next()?;
++        let id = self.next()?;
++        let operation = spirv::Op::from_u32(self.next()?)
++            .ok_or(Error::UnsupportedInstruction(self.state, inst.op))?;
++        let left_id = self.next()?;
++        let right_id = self.next()?;
++        let operator = match operation {
++            spirv::Op::IEqual => crate::BinaryOperator::Equal,
++            spirv::Op::INotEqual => crate::BinaryOperator::NotEqual,
++            spirv::Op::SLessThanEqual => crate::BinaryOperator::LessEqual,
++            spirv::Op::SGreaterThan => crate::BinaryOperator::Greater,
++            spirv::Op::LogicalOr => crate::BinaryOperator::LogicalOr,
++            spirv::Op::ISub => crate::BinaryOperator::Subtract,
++            spirv::Op::BitwiseAnd => crate::BinaryOperator::And,
++            _ => return Err(Error::UnsupportedInstruction(self.state, operation)),
++        };
++        let span = self.span_from_with_op(start);
++        let left = module.global_expressions.append(
++            self.lookup_constant.lookup(left_id)?.inner.to_expr(), span);
++        let right = module.global_expressions.append(
++            self.lookup_constant.lookup(right_id)?.inner.to_expr(), span);
++        let init = module.global_expressions.append(
++            crate::Expression::Binary { op: operator, left, right }, span);
++        let ty = self.lookup_type.lookup(type_id)?.handle;
++        self.insert_derived_override(module, id, type_id, ty, init, span)
++    }
++
++    fn insert_derived_override(
++        &mut self,
++        module: &mut crate::Module,
++        id: u32,
++        type_id: u32,
++        ty: Handle<crate::Type>,
++        init: Handle<crate::Expression>,
++        span: crate::Span,
++    ) -> Result<(), Error> {
++        let decor = self.future_decor.remove(&id).unwrap_or_default();
++        if decor.specialization_constant_id.is_some() {
++            return Err(Error::UnsupportedInstruction(self.state, spirv::Op::SpecConstantOp));
++        }
++        let derived = crate::Override { name: decor.name, id: None, ty, init: Some(init) };
++        let inner = Constant::Override(module.overrides.append(derived, span));
++        self.lookup_constant.insert(id, LookupConstant { inner, type_id });
++        Ok(())
+     }
+ 
+     fn insert_parsed_constant(
+@@ -2971,6 +3059,13 @@
+         };
+         let span = self.span_from_with_op(start);
+         let dec = self.future_decor.remove(&id).unwrap_or_default();
++        let combined_sampler = self.combined_sampled_pointer_types.contains(&type_id);
++        let combined_binding = if combined_sampler {
++            dec.resource_binding()
++        } else {
++            None
++        };
++        let combined_name = dec.name.clone();
+ 
+         let original_ty = self.lookup_type.lookup(type_id)?.handle;
+         let mut ty = original_ty;
+@@ -3020,6 +3115,12 @@
+             ExtendedClass::Global(mut space) => {
+                 if let crate::AddressSpace::Storage { ref mut access } = space {
+                     *access &= dec.flags.to_storage_access();
++                    // WGSL storage buffers have read or read_write access, never
++                    // write-only. Preserve writes and widen the explicit Vulkan
++                    // NonReadable case to the WebGPU-compatible read_write ABI.
++                    if *access == crate::StorageAccess::STORE {
++                        *access |= crate::StorageAccess::LOAD;
++                    }
+                 }
+                 let var = crate::GlobalVariable {
+                     binding: dec.resource_binding(),
+@@ -3144,6 +3245,49 @@
+         };
+ 
+         let handle = module.global_variables.append(var, span);
++
++        if let Some(binding) = combined_binding {
++            if binding.binding >= 32 {
++                return Err(Error::UnsupportedInstruction(self.state, inst.op));
++            }
++            let sampler_base_ty = module.types.insert(
++                crate::Type {
++                    name: None,
++                    inner: crate::TypeInner::Sampler { comparison: false },
++                },
++                span,
++            );
++            let sampler_ty = match module.types[ty].inner {
++                crate::TypeInner::BindingArray { size, .. } => module.types.insert(
++                    crate::Type {
++                        name: None,
++                        inner: crate::TypeInner::BindingArray {
++                            base: sampler_base_ty,
++                            size,
++                        },
++                    },
++                    span,
++                ),
++                _ => sampler_base_ty,
++            };
++            let sampler = module.global_variables.append(
++                crate::GlobalVariable {
++                    name: combined_name.map(|name| format!("{name}_sampler")),
++                    space: crate::AddressSpace::Handle,
++                    binding: Some(crate::ResourceBinding {
++                        group: binding.group,
++                        binding: binding.binding + 32,
++                    }),
++                    ty: sampler_ty,
++                    init: None,
++                    memory_decorations: crate::MemoryDecorations::empty(),
++                },
++                span,
++            );
++            self.handle_sampling
++                .insert(sampler, image::SamplingFlags::empty());
++            self.lookup_combined_sampler.insert(id, sampler);
++        }
+ 
+         if module.types[ty].inner.can_comparison_sample(module) {
+             log::debug!("\t\ttracking {handle:?} for sampling properties");
+--- a/naga-30.0.0/src/front/spv/next_block.rs	2006-07-24 04:21:28
++++ b/naga-30.0.0/src/front/spv/next_block.rs	2026-08-21 08:09:40
+@@ -268,12 +268,25 @@
+                             load_override: self.lookup_load_override.get(&base_id).cloned(),
+                         }
+                     };
++                    let mut combined_sampler = self
++                        .lookup_combined_sampler_expression
++                        .get(&base_id)
++                        .copied();
+ 
+                     for _ in 4..inst.wc {
+                         let access_id = self.next()?;
+                         log::trace!("\t\t\tlooking up index expr {access_id:?}");
+                         let index_expr = self.lookup_expression.lookup(access_id)?.clone();
+                         let index_expr_handle = get_expr_handle!(access_id, &index_expr);
++                        if let Some(sampler) = combined_sampler {
++                            combined_sampler = Some(ctx.expressions.append(
++                                crate::Expression::Access {
++                                    base: sampler,
++                                    index: index_expr_handle,
++                                },
++                                span,
++                            ));
++                        }
+                         let index_expr_data = &ctx.expressions[index_expr.handle];
+                         let index_maybe = match *index_expr_data {
+                             crate::Expression::Constant(const_handle) => Some(
+@@ -455,6 +468,10 @@
+                         block_id,
+                     };
+                     self.lookup_expression.insert(result_id, lookup_expression);
++                    if let Some(sampler) = combined_sampler {
++                        self.lookup_combined_sampler_expression
++                            .insert(result_id, sampler);
++                    }
+                 }
+                 Op::VectorExtractDynamic => {
+                     inst.expect(5)?;
+@@ -738,6 +755,14 @@
+                     if inst.wc != 4 {
+                         inst.expect(5)?;
+                         let _memory_access = self.next()?;
++                    }
++
++                    if let Some(&sampler) = self.lookup_combined_sampler_expression.get(&pointer_id)
++                    {
++                        let image = self.lookup_expression.lookup(pointer_id)?.handle;
++                        self.lookup_sampled_image
++                            .insert(result_id, image::LookupSampledImage { image, sampler });
++                        continue;
+                     }
+ 
+                     let base_lexp = self.lookup_expression.lookup(pointer_id)?;
+--- a/naga-cli-30.0.0/src/bin/naga.rs	2006-07-24 04:21:28
++++ b/naga-cli-30.0.0/src/bin/naga.rs	2026-08-21 08:09:40
+@@ -499,7 +499,7 @@
+     };
+ 
+     if args.version {
+-        println!("{}", env!("CARGO_PKG_VERSION"));
++        println!("{}+wired-portable-v1", env!("CARGO_PKG_VERSION"));
+         return Ok(());
+     }
+ 

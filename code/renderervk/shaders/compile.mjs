@@ -34,6 +34,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildShaderArtifactRow, renderShaderArtifactCatalog } from './shader_artifact_catalog.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -43,6 +44,7 @@ const TMP_SPV     = join(SPIRV_DIR, 'data.spv');
 const TMP_GLSL    = join(SPIRV_DIR, 'data.expanded.glsl');
 const OUTPUT_PATH = join(SPIRV_DIR, 'shader_data.c');
 const TEMPORAL_CATALOG_PATH = join(SPIRV_DIR, 'temporal_generic_catalog.inc');
+const RAL_ARTIFACT_CATALOG_PATH = join(SPIRV_DIR, 'ral_shader_artifact_catalog.inc');
 const MANIFEST    = join(HERE, 'shaders.manifest.mjs');
 
 // ── argument parsing ─────────────────────────────────────────────────
@@ -224,7 +226,8 @@ async function compileOne(entry) {
 	}
 
 	const spv = readFileSync(TMP_SPV);
-	return { text: bytesToHexC(spv, output), size: spv.length };
+	const sourceBytes = Buffer.from(expanded === null ? readFileSync(source) : expanded, 'utf8');
+	return { text: bytesToHexC(spv, output), size: spv.length, spv, sourceBytes };
 }
 
 // ── main ─────────────────────────────────────────────────────────────
@@ -256,11 +259,15 @@ async function main() {
 
 	let combined = '';
 	const sizes = new Map();
-	for (const entry of shaders) {
+	const artifactRows = [];
+	for (let ordinal = 0; ordinal < shaders.length; ++ordinal) {
+		const entry = shaders[ordinal];
 		const result = await compileOne(entry);
 		combined += result.text;
 		sizes.set(entry.output, result.size);
+		artifactRows.push(buildShaderArtifactRow(entry, result.sourceBytes, result.spv, ordinal));
 	}
+	const artifactCatalog = renderShaderArtifactCatalog(artifactRows);
 	if (!Array.isArray(temporalPairs) || temporalPairs.length !== 40)
 		throw new Error('temporalGenericPairs must contain exactly 40 pairs');
 	const temporalSymbols = new Set();
@@ -292,16 +299,19 @@ async function main() {
 	if (CHECK) {
 		if (!existsSync(OUTPUT_PATH) || readFileSync(OUTPUT_PATH, 'utf8') !== combined
 				|| !existsSync(TEMPORAL_CATALOG_PATH)
-				|| readFileSync(TEMPORAL_CATALOG_PATH, 'utf8') !== temporalCatalog) {
+				|| readFileSync(TEMPORAL_CATALOG_PATH, 'utf8') !== temporalCatalog
+				|| !existsSync(RAL_ARTIFACT_CATALOG_PATH)
+				|| readFileSync(RAL_ARTIFACT_CATALOG_PATH, 'utf8') !== artifactCatalog) {
 			console.error('ERROR: generated shader outputs are stale; run node compile.mjs and commit them.');
 			process.exit(1);
 		}
-		console.log(`==> --check OK: ${shaders.length} shaders compiled and shader_data.c is fresh.`);
+		console.log(`==> --check OK: ${shaders.length} shaders compiled and the generated output set is fresh.`);
 		return;
 	}
 
 	writeFileSync(OUTPUT_PATH, combined);
 	writeFileSync(TEMPORAL_CATALOG_PATH, temporalCatalog);
+	writeFileSync(RAL_ARTIFACT_CATALOG_PATH, artifactCatalog);
 	console.log(`==> Done. Wrote ${OUTPUT_PATH} (${combined.length} bytes).`);
 }
 

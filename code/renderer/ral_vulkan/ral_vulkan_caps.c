@@ -10,6 +10,14 @@
 #include "ral_vulkan_internal.h"
 #include <string.h>
 
+static qboolean ralVk_SampledFormat( ralBackend_t *b, VkFormat format ) {
+	VkFormatProperties properties;
+	memset(&properties,0,sizeof(properties));
+	b->vk.GetPhysicalDeviceFormatProperties(b->physicalDevice,format,&properties);
+	return (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0
+		? qtrue : qfalse;
+}
+
 void ralVk_FillCaps( ralBackend_t *b ) {
 	ralCaps_t                    *c = &b->caps;
 	const VkPhysicalDeviceLimits *L = &b->physProps.limits;
@@ -135,6 +143,12 @@ void ralVk_FillCaps( ralBackend_t *b ) {
 
 	c->asyncCompute  = ( b->computeFamily  != b->graphicsFamily ) ? qtrue : qfalse;
 	c->asyncTransfer = ( b->transferFamily != b->graphicsFamily ) ? qtrue : qfalse;
+	c->textureCompressionBC = ralVk_SampledFormat(b,VK_FORMAT_BC1_RGBA_UNORM_BLOCK)
+		&& ralVk_SampledFormat(b,VK_FORMAT_BC3_UNORM_BLOCK)
+		&& ralVk_SampledFormat(b,VK_FORMAT_BC5_UNORM_BLOCK)
+		&& ralVk_SampledFormat(b,VK_FORMAT_BC7_UNORM_BLOCK);
+	c->textureCompressionASTC = ralVk_SampledFormat(b,VK_FORMAT_ASTC_4x4_UNORM_BLOCK);
+	c->textureCompressionETC2 = ralVk_SampledFormat(b,VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK);
 
 	// ── bindless texture-table size ────────────────────────────────────
 	if ( c->bindlessTextures ) {

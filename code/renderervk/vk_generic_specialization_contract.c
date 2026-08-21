@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "vk_generic_specialization_contract.h"
+#include "../renderer/ral/ral_legacy_material.h"
 
-#include <math.h>
 #include <string.h>
 
 static const uint32_t s_fragmentIds[VK_GENERIC_FRAGMENT_SPEC_COUNT] = {
@@ -52,10 +52,12 @@ qboolean VK_GenericTemporalSpecializationValidate(
 		const vkGenericSpecializationFacts_t *facts,
 		vkGenericSpecializationReceipt_t *out ) {
 	vkGenericSpecializationReceipt_t candidate;
+	ralLegacyMaterialFacts_t materialFacts;
+	ralLegacyMaterialVariant_t materialVariant;
+	ralLegacyMaterialReceipt_t materialReceipt;
 	const VkSpecializationInfo *vs, *fs;
 	static const uint32_t vertexId = 16u;
-	uint32_t depthThresholdBits, texDomainMask;
-	float depthThreshold = 0.85f, fixedColor, fixedAlpha, depthFade;
+	float alphaTestValue, depthFragment, fixedColor, fixedAlpha, depthFade;
 	if ( !base || !facts || facts->textureCount > 2u
 			|| (facts->shaderFog != qfalse && facts->shaderFog != qtrue)
 			|| base->stageCount != 2u || !base->pStages
@@ -73,29 +75,36 @@ qboolean VK_GenericTemporalSpecializationValidate(
 			|| !MapExact( fs->pMapEntries, VK_GENERIC_FRAGMENT_SPEC_COUNT, s_fragmentIds ) ) return qfalse;
 	memcpy( &candidate.vertexWord, vs->pData, sizeof(candidate.vertexWord) );
 	memcpy( candidate.fragmentWords, fs->pData, sizeof(candidate.fragmentWords) );
-	memcpy( &depthThresholdBits, &depthThreshold, sizeof(depthThresholdBits) );
+	if ( candidate.vertexWord > 1u || candidate.fragmentWords[3] > 1u
+			|| candidate.fragmentWords[5] > 1u || candidate.fragmentWords[13] > 1u )
+		return qfalse;
+	memcpy( &alphaTestValue, &candidate.fragmentWords[1], sizeof(alphaTestValue) );
+	memcpy( &depthFragment, &candidate.fragmentWords[2], sizeof(depthFragment) );
 	memcpy( &fixedColor, &candidate.fragmentWords[8], sizeof(fixedColor) );
 	memcpy( &fixedAlpha, &candidate.fragmentWords[9], sizeof(fixedAlpha) );
 	memcpy( &depthFade, &candidate.fragmentWords[11], sizeof(depthFade) );
-	texDomainMask = (1u << (facts->textureCount + 1u)) - 1u;
-	if ( candidate.vertexWord != 1u
-			|| candidate.fragmentWords[0] != 0u
-			|| candidate.fragmentWords[1] != 0u
-			|| candidate.fragmentWords[2] != depthThresholdBits
-			|| candidate.fragmentWords[3] != 0u
-			|| (candidate.fragmentWords[4] & ~texDomainMask) != 0u
-			|| candidate.fragmentWords[5] != 0u
-			|| candidate.fragmentWords[6] > 7u
-			|| (facts->textureCount == 0u && candidate.fragmentWords[6] != 0u)
-			|| candidate.fragmentWords[7] != 0u
-			|| !isfinite(fixedColor) || fixedColor < 0.0f || fixedColor > 1.0f
-			|| !isfinite(fixedAlpha) || fixedAlpha < 0.0f || fixedAlpha > 1.0f
-			|| (!facts->shaderFog && candidate.fragmentWords[10] != 0u)
-			|| (facts->shaderFog && candidate.fragmentWords[10] > 3u)
-			|| !isfinite(depthFade) || depthFade <= 0.0f
-			|| candidate.fragmentWords[12] != 0u
-			|| candidate.fragmentWords[13] != 0u
-			|| candidate.fragmentWords[14] > facts->textureCount + 1u ) return qfalse;
+	memset( &materialFacts, 0, sizeof(materialFacts) );
+	materialFacts.textureCount = facts->textureCount;
+	materialFacts.shaderFog = facts->shaderFog;
+	memset( &materialVariant, 0, sizeof(materialVariant) );
+	materialVariant.entityStorageTransform = candidate.vertexWord ? qtrue : qfalse;
+	materialVariant.alphaTest = (ralLegacyAlphaTest_t)candidate.fragmentWords[0];
+	materialVariant.alphaTestValue = alphaTestValue;
+	materialVariant.depthFragment = depthFragment;
+	materialVariant.alphaToCoverage = candidate.fragmentWords[3] ? qtrue : qfalse;
+	materialVariant.textureDomainMask = candidate.fragmentWords[4];
+	materialVariant.absoluteLight = candidate.fragmentWords[5] ? qtrue : qfalse;
+	materialVariant.combine = (ralLegacyCombine_t)candidate.fragmentWords[6];
+	materialVariant.discardMode = candidate.fragmentWords[7];
+	materialVariant.fixedColor = fixedColor;
+	materialVariant.fixedAlpha = fixedAlpha;
+	materialVariant.fogFactor = candidate.fragmentWords[10];
+	materialVariant.depthFadeScale = depthFade;
+	materialVariant.normalFormat = candidate.fragmentWords[12];
+	materialVariant.iblEnabled = candidate.fragmentWords[13] ? qtrue : qfalse;
+	materialVariant.lightmapSlot = candidate.fragmentWords[14];
+	if ( !Ral_LegacyMaterialResolve(&materialFacts,&materialVariant,&materialReceipt)
+			|| materialReceipt.outcome != RAL_LEGACY_MATERIAL_DIRECT ) return qfalse;
 	if ( out ) *out = candidate;
 	return qtrue;
 }

@@ -44,7 +44,7 @@ layout(constant_id = 11) const int srgb_swapchain = 0;
 layout(constant_id = 12) const int   hdr_mode      = 0;
 layout(constant_id = 13) const float hdr_peak_norm = 10.0;
 
-const int bayerSize = 8;
+const uint bayerSize = 8u;
 const float bayerMatrix[bayerSize * bayerSize] = {
 	0,  32, 8,  40, 2,  34, 10, 42,
 	48, 16, 56, 24, 50, 18, 58, 26,
@@ -58,9 +58,10 @@ const float bayerMatrix[bayerSize * bayerSize] = {
 
 // Ordered (Bayer 8x8) dither threshold in [0,1).
 float orderedThreshold() {
-	ivec2 coordDenormalized = ivec2(gl_FragCoord.xy);
-	ivec2 bayerCoord = coordDenormalized % bayerSize;
-	float bayerSample = bayerMatrix[bayerCoord.x + bayerCoord.y * bayerSize];
+	uvec2 coordDenormalized = uvec2(gl_FragCoord.xy);
+	uvec2 bayerCoord = coordDenormalized % bayerSize;
+	uint bayerIndex = bayerCoord.x + bayerCoord.y * bayerSize;
+	float bayerSample = bayerMatrix[bayerIndex];
 	float threshold = (bayerSample + 0.5) / float(bayerSize * bayerSize);
 	return threshold;
 }
@@ -77,7 +78,10 @@ float blueNoiseThreshold() {
 }
 
 vec3 dither(vec3 color) {
-	ivec3 depth = ivec3(depth_r, depth_g, depth_b);
+	ivec3 depth;
+	depth.x = depth_r;
+	depth.y = depth_g;
+	depth.z = depth_b;
 	float t = ( ditherMode == 2 ) ? blueNoiseThreshold() : orderedThreshold();
 	vec3 cDenormalized = color * depth;
 	vec3 cLow = floor(cDenormalized);
@@ -122,6 +126,10 @@ vec3 sRGBEncode( vec3 linear ) {
 
 void main() {
 	vec3 base = texture(texture0, frag_tex_coord).rgb;
+	vec3 gamma3;
+	gamma3.x = gamma;
+	gamma3.y = gamma;
+	gamma3.z = gamma;
 
 	if ( hdr_mode == 1 ) {
 		// HDR10 (BT.2020 + PQ). tonemap.frag produced scene-referred
@@ -131,7 +139,7 @@ void main() {
 		// the peak to r_hdrPeakLuminance nits, convert to BT.2020, PQ-
 		// encode. Dither below would clamp the [0,1] PQ code to the
 		// swapchain bit depth (10bpc → depth_r/g/b = 1023).
-		vec3 lin  = ( gamma != 1.0 ) ? pow( max( base, vec3(0.0) ), vec3(gamma) ) : max( base, vec3(0.0) );
+		vec3 lin  = ( gamma != 1.0 ) ? pow( max( base, vec3(0.0) ), gamma3 ) : max( base, vec3(0.0) );
 		vec3 nits = lin * GRAPHICS_WHITE_NITS;                 // graphics-white = 1.0 → 100 nits
 		nits = bt709_to_bt2020 * nits;                          // primaries (linear)
 		out_color = vec4( pqEncode( nits / 10000.0 ), 1.0 );    // PQ EOTF^-1 (normalised to 10000 nit)
@@ -144,7 +152,7 @@ void main() {
 		// midtones as r_gamma rises here. Identity r_gamma -> linear
 		// passthrough -> hardware does the encode.
 		if ( gamma != 1.0 ) {
-			out_color = vec4(pow(base, vec3(gamma)), 1);
+			out_color = vec4(pow(base, gamma3), 1);
 		} else {
 			out_color = vec4(base, 1);
 		}
@@ -154,7 +162,7 @@ void main() {
 		// shader must. Apply the user-gamma curve, then the piecewise sRGB
 		// OETF (sRGBEncode) so a software-encoded capture matches the encode
 		// an sRGB-swapchain present gets from hardware.
-		vec3 curved = (gamma != 1.0) ? pow(base, vec3(gamma)) : base;
+		vec3 curved = (gamma != 1.0) ? pow(base, gamma3) : base;
 		out_color = vec4(sRGBEncode(curved), 1);
 	}
 

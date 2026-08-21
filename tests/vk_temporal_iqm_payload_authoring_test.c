@@ -9,6 +9,8 @@
 
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"check failed %s:%d: %s\n",__FILE__,__LINE__,#x); exit(1); } } while(0)
 
+static unsigned char s_payload[TEMPORAL_IQM_SLOT_BYTES];
+
 // Receipt-only host: payload allocation is independently covered by its owner
 // contract, but the linked product implementation retains these RAL references.
 ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *b,
@@ -17,13 +19,30 @@ void Ral_DestroyBindGroupLayout( ralBindGroupLayout_t *l ){(void)l;}
 ralBuffer_t *Ral_CreateBuffer( ralBackend_t *b,const ralBufferCreateInfo_t *ci ){
 	(void)b;(void)ci;return NULL;}
 void Ral_DestroyBuffer( ralBuffer_t *b ){(void)b;}
-void *Ral_MapBuffer( ralBuffer_t *b ){(void)b;return NULL;}
-void Ral_UnmapBuffer( ralBuffer_t *b ){(void)b;}
 ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b,
 		const ralBindGroupCreateInfo_t *ci ){(void)b;(void)ci;return NULL;}
 void Ral_DestroyBindGroup( ralBindGroup_t *g ){(void)g;}
 
-static unsigned char s_payload[TEMPORAL_IQM_SLOT_BYTES];
+struct ralFence_s { int id; };
+static struct ralFence_s s_uploadFence = { 1 };
+static int s_uploadCalls, s_waitCalls, s_destroyFenceCalls;
+static qboolean s_failUpload;
+ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buffer, uint64_t offset,
+		const void *data, uint64_t size ) {
+	(void)buffer;
+	CHECK( offset == 0 && data == s_payload
+		&& size == TEMPORAL_IQM_RECORD_SIZE );
+	s_uploadCalls++;
+	return s_failUpload ? NULL : &s_uploadFence;
+}
+void Ral_WaitFence( ralFence_t *fence, uint64_t timeoutNs ) {
+	CHECK( fence == &s_uploadFence && timeoutNs == ~(uint64_t)0 );
+	s_waitCalls++;
+}
+void Ral_DestroyFence( ralFence_t *fence ) {
+	CHECK( fence == &s_uploadFence );
+	s_destroyFenceCalls++;
+}
 
 static void Identity4( float out[16] ) {
 	memset(out,0,16u*sizeof(float));out[0]=out[5]=out[10]=out[15]=1.0f;
@@ -67,7 +86,7 @@ static temporalIqmDrawFacts_t Draw( temporalMotionOutcome_t outcome ) {
 }
 static vkTemporalIqmPayloadReceipt_t Payload( void ) {
 	vkTemporalIqmPayloadReceipt_t r;memset(&r,0,sizeof(r));r.backend=(void*)0x10;
-	r.layout=(void*)0x20;r.buffer=(void*)0x30;r.mappedIdentity=s_payload;
+	r.layout=(void*)0x20;r.buffer=(void*)0x30;r.cpuShadowIdentity=s_payload;
 	r.group=(void*)0x40;r.descriptorRange=TEMPORAL_IQM_SLOT_BYTES;
 	r.recordCapacity=TEMPORAL_IQM_MAX_RECORDS;r.recordBytes=TEMPORAL_IQM_RECORD_SIZE;
 	r.ownerAllocationGeneration=1;r.slotAllocationGeneration=2;
@@ -79,7 +98,7 @@ static vkTemporalIqmPayloadOwner_t PayloadOwner(
 	owner.key.backend=receipt->backend;owner.key.maxStorageBufferRange=TEMPORAL_IQM_SLOT_BYTES;
 	owner.key.frameCount=receipt->frameCount;owner.layout=receipt->layout;
 	owner.slots[receipt->commandSlot].buffer=receipt->buffer;
-	owner.slots[receipt->commandSlot].mapped=receipt->mappedIdentity;
+	owner.slots[receipt->commandSlot].cpuShadow=receipt->cpuShadowIdentity;
 	owner.slots[receipt->commandSlot].group=receipt->group;
 	owner.slots[receipt->commandSlot].allocationGeneration=receipt->slotAllocationGeneration;
 	owner.slots[receipt->commandSlot].prepareGeneration=receipt->prepareGeneration;
@@ -139,7 +158,16 @@ int main( void ) {
 	memset(s_payload,0,sizeof(s_payload));
 	CHECK(VK_TemporalIqmPayloadAuthorBegin(&author,&sequence,&payload,&camera,jittered));
 	CHECK(VK_TemporalIqmPayloadAuthorWrite(&author,0,&model));
+	s_failUpload=qtrue;before=author;memset(&receipt,0xa5,sizeof(receipt));
+	CHECK(!VK_TemporalIqmPayloadAuthorSeal(&author,&receipt));
+	CHECK(author.poisoned&&s_uploadCalls==1&&s_waitCalls==0&&s_destroyFenceCalls==0);
+	CHECK(((unsigned char*)&receipt)[0]==0xa5);
+	CHECK(VK_TemporalIqmPayloadAuthorCancel(&author));
+	s_failUpload=qfalse;memset(s_payload,0,sizeof(s_payload));
+	CHECK(VK_TemporalIqmPayloadAuthorBegin(&author,&sequence,&payload,&camera,jittered));
+	CHECK(VK_TemporalIqmPayloadAuthorWrite(&author,0,&model));
 	CHECK(VK_TemporalIqmPayloadAuthorSeal(&author,&receipt));
+	CHECK(s_uploadCalls==2&&s_waitCalls==1&&s_destroyFenceCalls==1);
 	CHECK(receipt.ready&&receipt.recordCount==1&&receipt.sequenceDigest==sequence.orderedDigest);
 	CHECK(VK_TemporalIqmPayloadContentReceiptExact(&receipt,&receipt));
 	CHECK(VK_TemporalIqmPayloadContentRevalidate(&receipt,&payloadOwner));

@@ -17,6 +17,22 @@ static uint64_t HashBytes( const unsigned char *p, uint64_t bytes ) {
 	return hash;
 }
 
+static qboolean TransitionReadback( ralCommandBuffer_t *commandBuffer,
+		ralBuffer_t *buffer, uint64_t bytes, ralResourceUsage_t before,
+		ralResourceUsage_t after ) {
+	ralBufferTransition_t transition;
+	ralResourceTransitionBatch_t batch;
+	if ( !commandBuffer || !buffer || !bytes ) return qfalse;
+	memset( &transition, 0, sizeof( transition ) );
+	transition.buffer = buffer; transition.size = bytes;
+	transition.before.usage = before; transition.after.usage = after;
+	transition.sourceQueue = transition.destinationQueue = RAL_QUEUE_GRAPHICS;
+	memset( &batch, 0, sizeof( batch ) );
+	batch.bufferTransitions = &transition; batch.bufferTransitionCount = 1u;
+	return Ral_CmdTransitionResources( commandBuffer, &batch ) == ralSuccess
+		? qtrue : qfalse;
+}
+
 static qboolean SnapshotIqmPayload(
 		const vkTemporalMainActivationReceipt_t *activation,
 		vkTemporalMotionReadbackTicket_t *ticket ) {
@@ -32,12 +48,12 @@ static qboolean SnapshotIqmPayload(
 			|| activation->iqm.entityCount > TEMPORAL_IQM_MAX_RECORDS
 			|| activation->iqm.content.recordCount
 				!= activation->iqm.entityCount
-			|| !payload->ready || !payload->mappedIdentity
+			|| !payload->ready || !payload->cpuShadowIdentity
 			|| payload->recordBytes != TEMPORAL_IQM_RECORD_SIZE
 			|| payload->recordCapacity != TEMPORAL_IQM_MAX_RECORDS
 			|| payload->descriptorRange < (uint64_t)activation->iqm.entityCount
 				* TEMPORAL_IQM_RECORD_SIZE ) return qfalse;
-	mapped = (const unsigned char *)payload->mappedIdentity;
+	mapped = (const unsigned char *)payload->cpuShadowIdentity;
 	for ( i = 0; i < activation->iqm.entityCount; ++i ) {
 		const unsigned char *record = mapped
 			+ (uint64_t)i * TEMPORAL_IQM_RECORD_SIZE;
@@ -174,7 +190,6 @@ qboolean VK_TemporalMotionReadbackPrepareAfterFence(
 	vkTemporalMotionReadbackSlot_t *slot;
 	ralBufferCreateInfo_t bci;
 	ralBuffer_t *candidate;
-	void *mapped;
 	uint32_t roiW, roiH;
 	uint64_t velocityBytes, validityOffset, totalBytes;
 	if ( !owner || !owner->initialized || !owner->capturesRemaining || !backend
@@ -189,9 +204,8 @@ qboolean VK_TemporalMotionReadbackPrepareAfterFence(
 	slot = &owner->slots[frameIndex];
 	if ( slot->state == VK_TEMPORAL_READBACK_RECORDED
 			|| slot->state == VK_TEMPORAL_READBACK_SUBMITTED ) return qfalse;
-	if ( slot->buffer && slot->mapped && slot->bytes == totalBytes
+	if ( slot->buffer && slot->bytes == totalBytes
 			&& slot->width == width && slot->height == height ) {
-		memset( slot->mapped, 0x7f, (size_t)totalBytes );
 		memset( &slot->ticket, 0, sizeof( slot->ticket ) );
 		slot->state = VK_TEMPORAL_READBACK_READY;
 		return qtrue;
@@ -199,7 +213,7 @@ qboolean VK_TemporalMotionReadbackPrepareAfterFence(
 	if ( slot->allocationGeneration == UINT32_MAX ) return qfalse;
 	memset( &bci, 0, sizeof( bci ) );
 	bci.size = totalBytes;
-	bci.usage = RAL_BUFFER_TRANSFER_DST;
+	bci.usage = RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ;
 	bci.memory = RAL_MEMORY_HOST_COHERENT;
 	bci.debugName = "wired-temporal-motion-readback";
 	candidate = Ral_CreateBuffer( backend, &bci );
@@ -209,27 +223,13 @@ qboolean VK_TemporalMotionReadbackPrepareAfterFence(
 		for ( i = 0; i < VK_TEMPORAL_READBACK_MAX_FRAMES; ++i )
 			if ( owner->slots[i].buffer == candidate ) return qfalse;
 	}
-	mapped = Ral_MapBuffer( candidate );
-	if ( !mapped ) { Ral_DestroyBuffer( candidate ); return qfalse; }
-	{
-		uint32_t i;
-		for ( i = 0; i < VK_TEMPORAL_READBACK_MAX_FRAMES; ++i ) {
-			if ( owner->slots[i].mapped == mapped ) {
-				Ral_UnmapBuffer( candidate );
-				Ral_DestroyBuffer( candidate );
-				return qfalse;
-			}
-		}
-	}
-	if ( slot->mapped ) Ral_UnmapBuffer( slot->buffer );
 	if ( slot->buffer ) Ral_DestroyBuffer( slot->buffer );
 	slot->buffer = candidate;
-	slot->mapped = mapped;
 	slot->bytes = totalBytes;
 	slot->width = width;
 	slot->height = height;
 	slot->allocationGeneration++;
-	memset( slot->mapped, 0x7f, (size_t)totalBytes );
+	slot->hostReadable = qfalse;
 	slot->state = VK_TEMPORAL_READBACK_READY;
 	memset( &slot->ticket, 0, sizeof( slot->ticket ) );
 	return qtrue;
@@ -273,7 +273,7 @@ qboolean VK_TemporalMotionReadbackRecord(
 				&velocityBytes, &validityOffset, &totalBytes ) ) return qfalse;
 	slot = &owner->slots[frameIndex];
 	if ( slot->state != VK_TEMPORAL_READBACK_READY || !slot->buffer
-			|| !slot->mapped || slot->bytes != totalBytes
+			|| slot->bytes != totalBytes
 			|| slot->width != pendingActivation->authority.width
 			|| slot->height != pendingActivation->authority.height
 			|| owner->nextCaptureSerial == UINT32_MAX ) return qfalse;
@@ -289,6 +289,10 @@ qboolean VK_TemporalMotionReadbackRecord(
 	ticket.validityOffset = validityOffset;
 	ticket.totalBytes = totalBytes;
 	if ( !SnapshotIqmPayload( pendingActivation, &ticket ) ) return qfalse;
+	if ( !TransitionReadback( commandBuffer, slot->buffer, slot->bytes,
+			slot->hostReadable ? RAL_RESOURCE_USAGE_HOST_READ
+			                   : RAL_RESOURCE_USAGE_UNDEFINED,
+			RAL_RESOURCE_USAGE_COPY_DESTINATION ) ) return qfalse;
 
 	Ral_CmdTransitionTexture( commandBuffer, view->velocity,
 		RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -312,6 +316,9 @@ qboolean VK_TemporalMotionReadbackRecord(
 	barrier.memoryBarrierCount = 1;
 	barrier.memoryBarriers = &memory;
 	Ral_CmdPipelineBarrierFull( commandBuffer, &barrier );
+	if ( !TransitionReadback( commandBuffer, slot->buffer, slot->bytes,
+			RAL_RESOURCE_USAGE_COPY_DESTINATION,
+			RAL_RESOURCE_USAGE_HOST_READ ) ) return qfalse;
 	Ral_CmdTransitionTexture( commandBuffer, view->velocity,
 		RAL_PIPELINE_STAGE_TRANSFER_BIT,
 		RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -322,6 +329,7 @@ qboolean VK_TemporalMotionReadbackRecord(
 		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
 	owner->nextCaptureSerial = ticket.captureSerial;
 	slot->ticket = ticket;
+	slot->hostReadable = qtrue;
 	slot->state = VK_TEMPORAL_READBACK_RECORDED;
 	return qtrue;
 }
@@ -359,18 +367,24 @@ qboolean VK_TemporalMotionReadbackCompleteAfterFence(
 	vkTemporalMotionReadbackContentReceipt_t receipt;
 	const unsigned char *velocity, *validity;
 	const uint16_t *halfs;
+	ralBufferMapRequest_t mapRequest;
+	ralBufferMapTicket_t mapTicket;
 	uint32_t i;
 	if ( !owner || !owner->initialized || !fenceProven
 			|| frameIndex >= owner->frameCount )
 		return qfalse;
 	slot = &owner->slots[frameIndex];
-	if ( slot->state != VK_TEMPORAL_READBACK_SUBMITTED || !slot->mapped
+	if ( slot->state != VK_TEMPORAL_READBACK_SUBMITTED || !slot->hostReadable
 			|| !slot->ticket.submitted
 			|| !TicketMatchesSlot( slot, frameIndex, &slot->ticket ) ) return qfalse;
+	memset( &mapRequest, 0, sizeof( mapRequest ) );
+	mapRequest.mode = RAL_MAP_READ; mapRequest.size = slot->bytes;
+	if ( Ral_BufferMapBegin( slot->buffer, &mapRequest, &mapTicket ) != ralSuccess
+			|| !mapTicket.mappedRange ) return qfalse;
 	memset( &receipt, 0, sizeof( receipt ) );
 	receipt.ticket = slot->ticket;
 	receipt.pixels = slot->ticket.roiWidth * slot->ticket.roiHeight;
-	velocity = (const unsigned char *)slot->mapped;
+	velocity = (const unsigned char *)mapTicket.mappedRange;
 	validity = velocity + slot->ticket.validityOffset;
 	halfs = (const uint16_t *)velocity;
 	receipt.velocityHash = HashBytes( velocity, slot->ticket.velocityBytes );
@@ -396,6 +410,7 @@ qboolean VK_TemporalMotionReadbackCompleteAfterFence(
 		&& receipt.validityFull > 0
 		&& receipt.nonzeroValidVelocity > 0
 		&& receipt.nonzeroInvalidVelocity == 0 ? qtrue : qfalse;
+	if ( Ral_BufferMapUnmap( slot->buffer, &mapTicket ) != ralSuccess ) return qfalse;
 	owner->latest = receipt;
 	memset( &slot->ticket, 0, sizeof( slot->ticket ) );
 	slot->state = VK_TEMPORAL_READBACK_READY;
@@ -437,7 +452,6 @@ qboolean VK_TemporalMotionReadbackReleaseAfterIdle(
 	serial = owner->nextCaptureSerial;
 	for ( i = 0; i < VK_TEMPORAL_READBACK_MAX_FRAMES; ++i ) {
 		vkTemporalMotionReadbackSlot_t *slot = &owner->slots[i];
-		if ( slot->mapped ) Ral_UnmapBuffer( slot->buffer );
 		if ( slot->buffer ) Ral_DestroyBuffer( slot->buffer );
 	}
 	memset( owner, 0, sizeof( *owner ) );

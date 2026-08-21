@@ -1,0 +1,132 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T>
+struct spvDescriptor
+{
+    T value;
+};
+
+template<typename T>
+struct spvDescriptorArray
+{
+    spvDescriptorArray(const device spvDescriptor<T>* ptr_) : ptr(&ptr_->value) {}
+    spvDescriptorArray(const device void *ptr_) : spvDescriptorArray(static_cast<const device spvDescriptor<T>*>(ptr_)) {}
+    const device T& operator [] (size_t i) const { return ptr[i]; }
+    const device T* ptr;
+};
+
+struct MsdfUBO
+{
+    float4x4 mvp;
+    float outlineWidth;
+    float glowWidth;
+    float2 shadowOffset;
+    float4 outlineColor;
+    float4 glowColor;
+    float4 shadowColor;
+    uint bindless_packed_slot;
+};
+
+constant float msdf_distance_range_tmp [[function_constant(0)]];
+constant float msdf_distance_range = is_function_constant_defined(msdf_distance_range_tmp) ? msdf_distance_range_tmp : 8.0;
+
+struct spvDescriptorSetBuffer1
+{
+    spvDescriptor<texture2d<float>> wired_bindless_images [[id(0)]][1] /* unsized array hack */;
+    // Overlapping binding: spvDescriptor<sampler> wired_bindless_samplers [[id(0)]][1] /* unsized array hack */;
+};
+
+struct spvDescriptorSetBuffer3
+{
+    constant MsdfUBO* pc [[id(0)]];
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+};
+
+struct main0_in
+{
+    float4 frag_color0 [[user(locn0)]];
+    float2 frag_tex_coord0 [[user(locn1)]];
+};
+
+static inline __attribute__((always_inline))
+float3 sRGBToLinear(thread float3& c)
+{
+    c = fast::max(c, float3(0.0));
+    bool3 cutoff = c <= float3(0.040449999272823333740234375);
+    float3 lo = c / float3(12.9200000762939453125);
+    float3 hi = powr((c + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return mix(hi, lo, float3(cutoff));
+}
+
+static inline __attribute__((always_inline))
+float median(thread const float& r, thread const float& g, thread const float& b)
+{
+    return fast::max(fast::min(r, g), fast::min(fast::max(r, g), b));
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], const device spvDescriptorSetBuffer3& spvDescriptorSet3 [[buffer(3)]])
+{
+    spvDescriptorArray<texture2d<float>> wired_bindless_images {spvDescriptorSet1.wired_bindless_images};
+    spvDescriptorArray<sampler> wired_bindless_samplers {reinterpret_cast<const device spvDescriptor<sampler>*>(&spvDescriptorSet1.wired_bindless_images)};
+
+    main0_out out = {};
+    float3 param = in.frag_color0.xyz;
+    float3 _75 = sRGBToLinear(param);
+    float3 fillColor = _75;
+    uint _94 = (*spvDescriptorSet3.pc).bindless_packed_slot & 4095u;
+    uint _108 = ((*spvDescriptorSet3.pc).bindless_packed_slot >> uint(12)) & 255u;
+    float3 msd = wired_bindless_images[_94].sample(wired_bindless_samplers[_108], in.frag_tex_coord0).xyz;
+    float param_1 = msd.x;
+    float param_2 = msd.y;
+    float param_3 = msd.z;
+    float sd = median(param_1, param_2, param_3);
+    uint _138 = (*spvDescriptorSet3.pc).bindless_packed_slot & 4095u;
+    uint _145 = ((*spvDescriptorSet3.pc).bindless_packed_slot >> uint(12)) & 255u;
+    float2 atlasSize = float2(int2(wired_bindless_images[_138].get_width(), wired_bindless_images[_138].get_height()));
+    float2 unitRange;
+    unitRange.x = msdf_distance_range / atlasSize.x;
+    unitRange.y = msdf_distance_range / atlasSize.y;
+    float2 screenTexSize = float2(1.0) / fwidth(in.frag_tex_coord0);
+    float screenPxRange = fast::max(0.5 * dot(unitRange, screenTexSize), 1.0);
+    float fillDist = screenPxRange * (sd - 0.5);
+    float outlineDist = screenPxRange * ((sd - 0.5) + (*spvDescriptorSet3.pc).outlineWidth);
+    float glowDist = screenPxRange * (((sd - 0.5) + (*spvDescriptorSet3.pc).outlineWidth) + (*spvDescriptorSet3.pc).glowWidth);
+    float fillAlpha = fast::clamp(fillDist + 0.5, 0.0, 1.0);
+    float outlineAlpha = fast::clamp(outlineDist + 0.5, 0.0, 1.0);
+    float glowAlpha = fast::clamp(glowDist + 0.5, 0.0, 1.0);
+    uint _224 = (*spvDescriptorSet3.pc).bindless_packed_slot & 4095u;
+    uint _231 = ((*spvDescriptorSet3.pc).bindless_packed_slot >> uint(12)) & 255u;
+    float2 shadowUV = in.frag_tex_coord0 - ((*spvDescriptorSet3.pc).shadowOffset / float2(int2(wired_bindless_images[_224].get_width(), wired_bindless_images[_224].get_height())));
+    uint _244 = (*spvDescriptorSet3.pc).bindless_packed_slot & 4095u;
+    uint _251 = ((*spvDescriptorSet3.pc).bindless_packed_slot >> uint(12)) & 255u;
+    float3 shadowMsd = wired_bindless_images[_244].sample(wired_bindless_samplers[_251], shadowUV).xyz;
+    float param_4 = shadowMsd.x;
+    float param_5 = shadowMsd.y;
+    float param_6 = shadowMsd.z;
+    float shadowSd = median(param_4, param_5, param_6);
+    float shadowAlpha = fast::clamp((screenPxRange * (shadowSd - 0.5)) + 0.5, 0.0, 1.0) * (*spvDescriptorSet3.pc).shadowColor.w;
+    float4 fill = float4(fillColor, in.frag_color0.w * fillAlpha);
+    float4 outline = float4((*spvDescriptorSet3.pc).outlineColor.xyz, (*spvDescriptorSet3.pc).outlineColor.w * outlineAlpha);
+    float4 glow = float4((*spvDescriptorSet3.pc).glowColor.xyz, ((*spvDescriptorSet3.pc).glowColor.w * glowAlpha) * (1.0 - outlineAlpha));
+    float4 shadow = float4((*spvDescriptorSet3.pc).shadowColor.xyz, shadowAlpha);
+    float3 col = shadow.xyz * shadow.w;
+    float a = shadow.w;
+    col = (col * (1.0 - glow.w)) + (glow.xyz * glow.w);
+    a = (a * (1.0 - glow.w)) + glow.w;
+    col = (col * (1.0 - outline.w)) + (outline.xyz * outline.w);
+    a = (a * (1.0 - outline.w)) + outline.w;
+    col = (col * (1.0 - fill.w)) + (fill.xyz * fill.w);
+    a = (a * (1.0 - fill.w)) + fill.w;
+    out.out_color = float4(col, a);
+    return out;
+}
+

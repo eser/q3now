@@ -51,7 +51,7 @@ static qboolean ralVk_FormatIsDepthOrInteger( ralFormat_t f ) {
 	}
 }
 
-static uint32_t ralVk_FormatBPP( ralFormat_t f ) {   // uncompressed only; bytes per pixel
+uint32_t ralVk_FormatBPP( ralFormat_t f ) {   // uncompressed only; zero rejects compressed readback
 	switch ( f ) {
 	case RAL_FORMAT_R8_UNORM:                                  return 1;
 	case RAL_FORMAT_R8G8_UNORM: case RAL_FORMAT_R16_UNORM: case RAL_FORMAT_R16_SFLOAT: case RAL_FORMAT_D16_UNORM:
@@ -60,11 +60,13 @@ static uint32_t ralVk_FormatBPP( ralFormat_t f ) {   // uncompressed only; bytes
 	case RAL_FORMAT_R8G8B8A8_UNORM: case RAL_FORMAT_R8G8B8A8_SRGB: case RAL_FORMAT_B8G8R8A8_UNORM:
 	case RAL_FORMAT_B8G8R8A8_SRGB: case RAL_FORMAT_A2B10G10R10_UNORM: case RAL_FORMAT_A2R10G10B10_UNORM: case RAL_FORMAT_R16G16_SFLOAT:
 	case RAL_FORMAT_R11G11B10_UFLOAT: case RAL_FORMAT_R32_SFLOAT: case RAL_FORMAT_D32_SFLOAT: case RAL_FORMAT_D24_UNORM_S8_UINT:
+	case RAL_FORMAT_D16_UNORM_S8_UINT: case RAL_FORMAT_X8_D24_UNORM: case RAL_FORMAT_R8G8B8A8_UINT:
 		return 4;
-	case RAL_FORMAT_R16G16B16A16_SFLOAT: case RAL_FORMAT_R16G16B16A16_UNORM:  return 8;
+	case RAL_FORMAT_R16G16B16A16_SFLOAT: case RAL_FORMAT_R16G16B16A16_UNORM:
+	case RAL_FORMAT_R32G32_SFLOAT: case RAL_FORMAT_D32_SFLOAT_S8_UINT: return 8;
 	case RAL_FORMAT_R32G32B32_SFLOAT:                          return 12;   // vec3 — vertex-attribute-only on most hw (no optimal-tiling colour rendering)
 	case RAL_FORMAT_R32G32B32A32_SFLOAT:                       return 16;
-	default:                                                   return 4;   // best-effort fallback
+	default:                                                   return 0;
 	}
 }
 
@@ -194,22 +196,27 @@ static qboolean ralVk_BeginUploadCmd( ralBackend_t *b, ralQueueType_t q, VkComma
 // Ends + submits `cb` on queue `q` with a fence, waits for completion, then
 // frees `cb`. If `keepFence` is non-NULL the fence (now signaled) is written
 // there and NOT destroyed — the caller owns it; otherwise it is destroyed.
-static void ralVk_SubmitUploadCmdAndWait( ralBackend_t *b, ralQueueType_t q, VkCommandBuffer cb, VkFence *keepFence ) {
+static qboolean ralVk_SubmitUploadCmdAndWait( ralBackend_t *b, ralQueueType_t q, VkCommandBuffer cb, VkFence *keepFence ) {
 	VkCommandBufferSubmitInfo cbi;
 	VkSubmitInfo2             si2;
 	VkFenceCreateInfo         fi;
 	VkFence                   fence = VK_NULL_HANDLE;
-	b->vk.EndCommandBuffer( cb );
+	if ( b->vk.EndCommandBuffer( cb ) != VK_SUCCESS ) goto fail;
 	RAL_ZERO( fi ); fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-	b->vk.CreateFence( b->device, &fi, NULL, &fence );
+	if ( b->vk.CreateFence( b->device, &fi, NULL, &fence ) != VK_SUCCESS ) goto fail;
 	RAL_ZERO( cbi ); cbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO; cbi.commandBuffer = cb;
 	RAL_ZERO( si2 ); si2.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2; si2.commandBufferInfoCount = 1; si2.pCommandBufferInfos = &cbi;
-	ralVk_QueueSubmit2( b, q, &si2, fence );
-	if ( fence != VK_NULL_HANDLE ) b->vk.WaitForFences( b->device, 1, &fence, VK_TRUE, ~0ull );
-	else                           b->vk.DeviceWaitIdle( b->device );   // fence creation failed — fall back
+	if ( ralVk_QueueSubmit2( b, q, &si2, fence ) != ralSuccess ) goto fail;
+	if ( b->vk.WaitForFences( b->device, 1, &fence, VK_TRUE, ~0ull ) != VK_SUCCESS ) goto fail;
 	ralVk_QueueLock( b, q ); b->vk.FreeCommandBuffers( b->device, b->cmdPools[q], 1, &cb ); ralVk_QueueUnlock( b, q );
 	if ( keepFence ) *keepFence = fence;
 	else if ( fence != VK_NULL_HANDLE ) b->vk.DestroyFence( b->device, fence, NULL );
+	return qtrue;
+fail:
+	if ( fence != VK_NULL_HANDLE ) b->vk.DestroyFence( b->device, fence, NULL );
+	ralVk_QueueLock( b, q ); b->vk.FreeCommandBuffers( b->device, b->cmdPools[q], 1, &cb ); ralVk_QueueUnlock( b, q );
+	if ( keepFence ) *keepFence = VK_NULL_HANDLE;
+	return qfalse;
 }
 
 // Ends + submits `cb` on queue `q` with a fresh fence and returns WITHOUT waiting.
@@ -217,16 +224,17 @@ static void ralVk_SubmitUploadCmdAndWait( ralBackend_t *b, ralQueueType_t q, VkC
 // buffer is registered for deferred free at the next frame boundary; by the time the
 // frame-in-flight window has elapsed the submission has completed, so freeing it then
 // is safe. Used by the async-transfer upload path (no blocking wait on submit).
-static void ralVk_SubmitUploadCmdNoWait( ralBackend_t *b, ralQueueType_t q, VkCommandBuffer cb,
+static qboolean ralVk_SubmitUploadCmdNoWait( ralBackend_t *b, ralQueueType_t q, VkCommandBuffer cb,
 	VkSemaphore signalSemaphore, VkFence *outFence ) {
 	VkCommandBufferSubmitInfo cbi;
 	VkSemaphoreSubmitInfo     signalInfo;
 	VkSubmitInfo2             si2;
 	VkFenceCreateInfo         fi;
 	VkFence                   fence = VK_NULL_HANDLE;
-	b->vk.EndCommandBuffer( cb );
+	if ( outFence ) *outFence = VK_NULL_HANDLE;
+	if ( b->vk.EndCommandBuffer( cb ) != VK_SUCCESS ) goto fail;
 	RAL_ZERO( fi ); fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-	b->vk.CreateFence( b->device, &fi, NULL, &fence );
+	if ( b->vk.CreateFence( b->device, &fi, NULL, &fence ) != VK_SUCCESS ) goto fail;
 	RAL_ZERO( cbi ); cbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO; cbi.commandBuffer = cb;
 	RAL_ZERO( si2 ); si2.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2; si2.commandBufferInfoCount = 1; si2.pCommandBufferInfos = &cbi;
 	if ( signalSemaphore != VK_NULL_HANDLE ) {
@@ -237,11 +245,16 @@ static void ralVk_SubmitUploadCmdNoWait( ralBackend_t *b, ralQueueType_t q, VkCo
 		si2.signalSemaphoreInfoCount = 1;
 		si2.pSignalSemaphoreInfos = &signalInfo;
 	}
-	ralVk_QueueSubmit2( b, q, &si2, fence );
+	if ( ralVk_QueueSubmit2( b, q, &si2, fence ) != ralSuccess ) goto fail;
 	// Defer the command-buffer free to the frame-in-flight boundary; the submission
 	// is complete well within that window, so this never frees an in-flight buffer.
 	ralVk_DeferDestroy( b, RAL_RES_CMD_BUFFER, RAL_VK_H2U( cb ), (uint64_t)q, NULL );
 	if ( outFence ) *outFence = fence;
+	return qtrue;
+fail:
+	if ( fence != VK_NULL_HANDLE ) b->vk.DestroyFence( b->device, fence, NULL );
+	ralVk_QueueLock( b, q ); b->vk.FreeCommandBuffers( b->device, b->cmdPools[q], 1, &cb ); ralVk_QueueUnlock( b, q );
+	return qfalse;
 }
 
 // Wraps a (real) VkFence in a ralFence_t the caller owns. fence may be
@@ -257,7 +270,13 @@ static void ralVk_SubmitUploadCmdNoWait( ralBackend_t *b, ralQueueType_t q, VkCo
 // Surfaced at vkDestroyDevice once fix3 unblocked the shutdown crash.
 static ralFence_t *ralVk_WrapFence( ralBackend_t *b, VkFence fence ) {
 	ralFence_t *f = (ralFence_t *)malloc( sizeof( *f ) );
-	if ( !f ) { if ( fence != VK_NULL_HANDLE ) b->vk.DestroyFence( b->device, fence, NULL ); return NULL; }
+	if ( !f ) {
+		if ( fence != VK_NULL_HANDLE ) {
+			(void)b->vk.WaitForFences( b->device, 1, &fence, VK_TRUE, ~0ull );
+			b->vk.DestroyFence( b->device, fence, NULL );
+		}
+		return NULL;
+	}
 	RAL_ZERO( *f );
 	f->backend     = b;
 	f->fence       = fence;
@@ -304,6 +323,7 @@ ralBuffer_t *Ral_CreateBuffer( ralBackend_t *b, const ralBufferCreateInfo_t *ci 
 	VkBufferCreateInfo    bci;
 	VkMemoryRequirements  req;
 	ralBuffer_t          *buf;
+	ralAllocationClass_t allocationClass;
 	if ( !b || !ci || ci->size == 0 ) return NULL;
 
 	buf = (ralBuffer_t *)malloc( sizeof( *buf ) );
@@ -313,6 +333,12 @@ ralBuffer_t *Ral_CreateBuffer( ralBackend_t *b, const ralBufferCreateInfo_t *ci 
 	buf->backend         = b;
 	buf->size            = ci->size;
 	buf->memoryType      = ci->memory;
+	buf->usage           = ci->usage;
+	buf->portableStateKnown = qtrue;
+	buf->portableState.usage = RAL_RESOURCE_USAGE_UNDEFINED;
+	buf->portableOwnerQueue = RAL_QUEUE_GRAPHICS;
+	Ral_QueueTransferLifecycleInit( &buf->queueTransfer );
+	Ral_BufferMapLifecycleInit( &buf->mapLifecycle );
 
 	RAL_ZERO( bci );
 	bci.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -324,9 +350,15 @@ ralBuffer_t *Ral_CreateBuffer( ralBackend_t *b, const ralBufferCreateInfo_t *ci 
 		free( buf ); return NULL;
 	}
 	b->vk.GetBufferMemoryRequirements( b->device, buf->buffer, &req );
-	buf->alloc = ralVk_Alloc( b, req, ralVk_MemProps( ci->memory ) );
+	allocationClass = ci->memory == RAL_MEMORY_DEVICE_LOCAL ? RAL_ALLOCATION_DEVICE_LOCAL
+		: ((ci->usage & RAL_BUFFER_MAP_READ) && (ci->usage & RAL_BUFFER_TRANSFER_DST))
+			? RAL_ALLOCATION_READBACK : RAL_ALLOCATION_UPLOAD;
+	buf->alloc = ralVk_Alloc( b, req, ralVk_MemProps( ci->memory ), allocationClass,
+		RAL_ALLOCATION_RESIDENCY_PERMANENT, (uintptr_t)buf,
+		RAL_VK_ALLOC_RESOURCE_BUFFER );
 	if ( !buf->alloc ) { b->vk.DestroyBuffer( b->device, buf->buffer, NULL ); free( buf ); return NULL; }
-	if ( b->vk.BindBufferMemory( b->device, buf->buffer, buf->alloc->memory, 0 ) != VK_SUCCESS ) {
+	if ( b->vk.BindBufferMemory( b->device, buf->buffer, buf->alloc->memory,
+			buf->alloc->offset ) != VK_SUCCESS ) {
 		RAL_VK_LOG( SEV_WARN, "Ral_CreateBuffer: vkBindBufferMemory failed\n" );
 		ralVk_Free( b, buf->alloc ); b->vk.DestroyBuffer( b->device, buf->buffer, NULL ); free( buf ); return NULL;
 	}
@@ -360,6 +392,13 @@ ralBuffer_t *Ral_AdoptBuffer( ralBackend_t *b, void *vkBuffer, size_t size, cons
 	buf->alloc           = NULL;          // engine-owned memory; RAL never frees it
 	buf->size            = (VkDeviceSize)size;
 	buf->ownsBuffer      = qfalse;
+	// The external producer owns the native state before adoption. A portable
+	// transition may not guess it; a later explicit import-state API will make
+	// adopted resources eligible without leaking native state upward.
+	buf->portableStateKnown = qfalse;
+	buf->portableOwnerQueue = RAL_QUEUE_GRAPHICS;
+	Ral_QueueTransferLifecycleInit( &buf->queueTransfer );
+	Ral_BufferMapLifecycleInit( &buf->mapLifecycle );
 	if ( debugName ) {
 		ralVk_SetObjectName( b, (uint64_t)buf->buffer, VK_OBJECT_TYPE_BUFFER, debugName );
 	}
@@ -389,22 +428,50 @@ void Ral_DestroyBuffer( ralBuffer_t *buf ) {
 
 void *Ral_MapBuffer( ralBuffer_t *buf ) {
 	ralBackend_t *b;
+	void *mapped;
 	if ( !buf ) return NULL;
 	b = buf->backend;
 	if ( !buf->hostVisible ) { RAL_VK_LOG( SEV_WARN, "Ral_MapBuffer: buffer is not host-visible\n" ); return NULL; }
-	return ralVk_Map( buf->alloc );
+	if ( !Ral_BufferMapLifecycleGpuUseAllowed( &buf->mapLifecycle ) ) return NULL;
+	mapped = ralVk_Map( buf->alloc );
+	// The legacy API does not say whether the mapping is read- or write-only.
+	// Do not invent a HOST_READ/HOST_WRITE state: WebGPU requires that access
+	// mode to be explicit. A future typed map/unmap surface can re-enter portable
+	// tracking with the correct semantic state.
+	if ( mapped ) {
+		buf->portableStateKnown = qfalse;
+		buf->legacyMapped = qtrue;
+	}
+	return mapped;
 }
-void Ral_UnmapBuffer( ralBuffer_t *buf ) { if ( buf ) ralVk_Unmap( buf->alloc ); }
+void Ral_UnmapBuffer( ralBuffer_t *buf ) {
+	if ( buf && buf->legacyMapped ) {
+		ralVk_Unmap( buf->alloc );
+		buf->legacyMapped = qfalse;
+	}
+}
 void Ral_FlushBuffer( ralBuffer_t *buf, uint64_t offset, uint64_t size ) {
 	if ( !buf || buf->coherent ) return;   // coherent → no flush needed
 	ralVk_Flush( buf->alloc, (VkDeviceSize)offset, (VkDeviceSize)size );
+}
+
+static qboolean ralVk_WriteStagingBuffer( ralBuffer_t *buffer,
+	                                      const void *data, uint64_t size ) {
+	ralBufferMapRequest_t request;
+	ralBufferMapTicket_t ticket;
+	if ( !buffer || !data || size == 0 ) return qfalse;
+	RAL_ZERO( request );
+	request.mode = RAL_MAP_WRITE;
+	request.size = size;
+	if ( Ral_BufferMapBegin( buffer, &request, &ticket ) != ralSuccess ) return qfalse;
+	memcpy( ticket.mappedRange, data, (size_t)size );
+	return Ral_BufferMapUnmap( buffer, &ticket ) == ralSuccess ? qtrue : qfalse;
 }
 
 ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buf, uint64_t offset, const void *data, uint64_t size ) {
 	ralBackend_t        *b;
 	ralBufferCreateInfo_t sci;
 	ralBuffer_t          *staging;
-	void                 *mapped;
 	VkCommandBuffer       cb;
 	VkBufferCopy          region;
 	VkFence               fence = VK_NULL_HANDLE;
@@ -414,17 +481,15 @@ ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buf, uint64_t offset, const void
 	q = ralVk_UploadQueue( b );
 	RAL_NOTE_ONCE( "Ral_BufferUploadAsync runs on the transfer queue when available but still waits internally before returning -- async streaming (no internal wait) is Phase 7.15\n" );
 
-	RAL_ZERO( sci ); sci.size = size; sci.usage = RAL_BUFFER_TRANSFER_SRC; sci.memory = RAL_MEMORY_HOST_COHERENT; sci.debugName = "ral-staging-buf-upload";
+	RAL_ZERO( sci ); sci.size = size; sci.usage = RAL_BUFFER_TRANSFER_SRC | RAL_BUFFER_MAP_WRITE; sci.memory = RAL_MEMORY_HOST_COHERENT; sci.debugName = "ral-staging-buf-upload";
 	staging = Ral_CreateBuffer( b, &sci );
 	if ( !staging ) return NULL;
-	mapped = Ral_MapBuffer( staging );
-	if ( !mapped ) { Ral_DestroyBuffer( staging ); return NULL; }
-	memcpy( mapped, data, (size_t)size );
-	Ral_UnmapBuffer( staging );
+	if ( !ralVk_WriteStagingBuffer( staging, data, size ) ) { Ral_DestroyBuffer( staging ); return NULL; }
 
 	if ( !ralVk_BeginUploadCmd( b, q, &cb ) ) { Ral_DestroyBuffer( staging ); return NULL; }
 	RAL_ZERO( region ); region.srcOffset = 0; region.dstOffset = offset; region.size = size;
 	b->vk.CmdCopyBuffer( cb, staging->buffer, buf->buffer, 1, &region );
+	buf->portableStateKnown = qfalse;
 	// Queue-ownership release: if this ran on a dedicated transfer family, hand
 	// `buf` to the graphics family. The matching acquire is the consumer's job
 	// (renderer migration, future) — until then nothing uses RAL buffers on
@@ -442,7 +507,7 @@ ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buf, uint64_t offset, const void
 		bar.size                = VK_WHOLE_SIZE;
 		b->vk.CmdPipelineBarrier( cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 1, &bar, 0, NULL );
 	}
-	ralVk_SubmitUploadCmdAndWait( b, q, cb, &fence );   // submits, waits, keeps the fence (signaled) for the caller
+	if ( !ralVk_SubmitUploadCmdAndWait( b, q, cb, &fence ) ) { Ral_DestroyBuffer( staging ); return NULL; }
 	Ral_DestroyBuffer( staging );
 	return ralVk_WrapFence( b, fence );
 }
@@ -477,6 +542,7 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 	tex->vkFormat             = ralVk_TranslateFormat( ci->format );
 	tex->ralFormat            = ci->format;
 	tex->type                 = ci->type;
+	tex->usage                = ci->usage;
 	tex->width                = ci->width;
 	tex->height               = ci->height ? ci->height : 1;
 	tex->depthOrArrayLayers   = ci->depthOrArrayLayers ? ci->depthOrArrayLayers : 1;
@@ -486,6 +552,10 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 	tex->aspect               = ralVk_FormatAspect( ci->format );
 	tex->currentLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
 	tex->ownsImage            = qtrue;   // native RAL allocation owns the VkImage; Ral_AdoptTexture flips this to qfalse for adopted handles.
+	tex->portableStateKnown   = qtrue;
+	tex->portableState.usage  = RAL_RESOURCE_USAGE_UNDEFINED;
+	tex->portableOwnerQueue   = RAL_QUEUE_GRAPHICS;
+	Ral_QueueTransferLifecycleInit( &tex->queueTransfer );
 	if ( tex->vkFormat == VK_FORMAT_UNDEFINED ) {
 		RAL_VK_LOG( SEV_WARN, "Ral_CreateTexture: unsupported ralFormat %d\n", (int)ci->format );
 		free( tex ); return NULL;
@@ -536,9 +606,14 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 		free( tex ); return NULL;
 	}
 	b->vk.GetImageMemoryRequirements( b->device, tex->image, &req );
-	tex->alloc = ralVk_Alloc( b, req, ralVk_MemProps( ci->memory ) );
+	tex->alloc = ralVk_Alloc( b, req, ralVk_MemProps( ci->memory ),
+		ci->memory == RAL_MEMORY_LAZY_ALLOC ? RAL_ALLOCATION_TRANSIENT : RAL_ALLOCATION_DEVICE_LOCAL,
+		ci->memory == RAL_MEMORY_LAZY_ALLOC ? RAL_ALLOCATION_RESIDENCY_TRANSIENT
+			: RAL_ALLOCATION_RESIDENCY_PERMANENT, (uintptr_t)tex,
+		RAL_VK_ALLOC_RESOURCE_IMAGE );
 	if ( !tex->alloc ) { b->vk.DestroyImage( b->device, tex->image, NULL ); free( tex ); return NULL; }
-	if ( b->vk.BindImageMemory( b->device, tex->image, tex->alloc->memory, 0 ) != VK_SUCCESS ) {
+	if ( b->vk.BindImageMemory( b->device, tex->image, tex->alloc->memory,
+			tex->alloc->offset ) != VK_SUCCESS ) {
 		RAL_VK_LOG( SEV_WARN, "Ral_CreateTexture: vkBindImageMemory failed\n" );
 		ralVk_Free( b, tex->alloc ); b->vk.DestroyImage( b->device, tex->image, NULL ); free( tex ); return NULL;
 	}
@@ -567,6 +642,10 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 void Ral_DestroyTexture( ralTexture_t *tex ) {
 	ralBackend_t *b;
 	if ( !tex ) return;
+	// Aliased images and their shared allocation are one cohort-owned lifetime.
+	// Releasing an individual wrapper would leave the cohort with a dangling
+	// child and could retire shared memory before its sibling images.
+	if ( tex->transientCohortOwned ) return;
 	if ( tex->header.refCount > 1 ) { tex->header.refCount--; return; }
 	b = tex->backend;
 	// ownsImage=qfalse on Ral_AdoptTexture-created wrappers
@@ -620,6 +699,9 @@ ralTexture_t *Ral_AdoptTexture( ralBackend_t *b,
 	tex->aspect          = (VkImageAspectFlags)aspect;
 	tex->currentLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
 	tex->ownsImage       = qfalse;
+	tex->portableStateKnown = qfalse;
+	tex->portableOwnerQueue = RAL_QUEUE_GRAPHICS;
+	Ral_QueueTransferLifecycleInit( &tex->queueTransfer );
 	if ( debugName ) ralVk_SetObjectName( b, (uint64_t)tex->image, VK_OBJECT_TYPE_IMAGE, debugName );
 	return tex;
 }
@@ -669,6 +751,9 @@ ralTexture_t *Ral_AdoptArrayTexture( ralBackend_t *b,
 	tex->aspect          = (VkImageAspectFlags)aspect;
 	tex->currentLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
 	tex->ownsImage       = qfalse;
+	tex->portableStateKnown = qfalse;
+	tex->portableOwnerQueue = RAL_QUEUE_GRAPHICS;
+	Ral_QueueTransferLifecycleInit( &tex->queueTransfer );
 	tex->layerViews      = (const VkImageView *)layerViews;
 	tex->numLayerViews   = layerCount;
 	if ( debugName ) ralVk_SetObjectName( b, (uint64_t)tex->image, VK_OBJECT_TYPE_IMAGE, debugName );
@@ -698,6 +783,7 @@ void *Ral_GetSamplerHandle( const ralSampler_t *s ) {
 void Ral_SetTextureLayout( ralTexture_t *tex, uint32_t vkLayout ) {
 	if ( !tex ) return;
 	tex->currentLayout = (VkImageLayout)vkLayout;
+	tex->portableStateKnown = qfalse;
 }
 
 ralTextureView_t *Ral_CreateTextureView( ralBackend_t *b, const ralTextureViewCreateInfo_t *ci ) {
@@ -764,7 +850,6 @@ ralFence_t *Ral_TextureUploadAsync( ralTexture_t *tex, const ralTextureUploadDes
 	ralBackend_t        *b;
 	ralBufferCreateInfo_t sci;
 	ralBuffer_t          *staging;
-	void                 *mapped;
 	VkCommandBuffer       cb;
 	VkBufferImageCopy     bic;
 	VkFence               fence = VK_NULL_HANDLE;
@@ -800,13 +885,10 @@ ralFence_t *Ral_TextureUploadAsync( ralTexture_t *tex, const ralTextureUploadDes
 	// transfer ownership.  The no-wait residency path below uses graphics too.
 	q = ( genMips || isSubRegion || region->suppressMipGeneration ) ? RAL_QUEUE_GRAPHICS : ralVk_UploadQueue( b );
 
-	RAL_ZERO( sci ); sci.size = region->dataSize; sci.usage = RAL_BUFFER_TRANSFER_SRC; sci.memory = RAL_MEMORY_HOST_COHERENT; sci.debugName = "ral-staging-tex-upload";
+	RAL_ZERO( sci ); sci.size = region->dataSize; sci.usage = RAL_BUFFER_TRANSFER_SRC | RAL_BUFFER_MAP_WRITE; sci.memory = RAL_MEMORY_HOST_COHERENT; sci.debugName = "ral-staging-tex-upload";
 	staging = Ral_CreateBuffer( b, &sci );
 	if ( !staging ) return NULL;
-	mapped = Ral_MapBuffer( staging );
-	if ( !mapped ) { Ral_DestroyBuffer( staging ); return NULL; }
-	memcpy( mapped, region->data, (size_t)region->dataSize );
-	Ral_UnmapBuffer( staging );
+	if ( !ralVk_WriteStagingBuffer( staging, region->data, region->dataSize ) ) { Ral_DestroyBuffer( staging ); return NULL; }
 
 	if ( !ralVk_BeginUploadCmd( b, q, &cb ) ) { Ral_DestroyBuffer( staging ); return NULL; }
 
@@ -881,6 +963,7 @@ ralFence_t *Ral_TextureUploadAsync( ralTexture_t *tex, const ralTextureUploadDes
 		                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 		                  VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT );
 		tex->currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		tex->portableStateKnown = qfalse;
 		releaseBaseMip = 0; releaseMipCount = tex->mipLevels; releaseBaseLayer = 0; releaseLayerCount = 1;
 	} else {
 		// single mip uploaded: TRANSFER_DST → SHADER_READ_ONLY.
@@ -897,6 +980,7 @@ ralFence_t *Ral_TextureUploadAsync( ralTexture_t *tex, const ralTextureUploadDes
 		                  VK_PIPELINE_STAGE_TRANSFER_BIT, dstStage,
 		                  VK_ACCESS_TRANSFER_WRITE_BIT, dstAcc );
 		tex->currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;   // approximation when not all mips written
+		tex->portableStateKnown = qfalse;
 		releaseBaseMip = region->mipLevel; releaseMipCount = 1; releaseBaseLayer = region->arrayLayer; releaseLayerCount = 1;
 	}
 	// Queue-ownership release: if this ran on a dedicated transfer family, hand
@@ -926,7 +1010,7 @@ ralFence_t *Ral_TextureUploadAsync( ralTexture_t *tex, const ralTextureUploadDes
 		bar.subresourceRange.layerCount     = releaseLayerCount;
 		b->vk.CmdPipelineBarrier( cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &bar );
 	}
-	ralVk_SubmitUploadCmdAndWait( b, q, cb, &fence );
+	if ( !ralVk_SubmitUploadCmdAndWait( b, q, cb, &fence ) ) { Ral_DestroyBuffer( staging ); return NULL; }
 	Ral_DestroyBuffer( staging );
 	return ralVk_WrapFence( b, fence );
 }
@@ -946,7 +1030,6 @@ static ralFence_t *ralVk_TextureUploadTransferNoWait( ralTexture_t *tex, const r
 	ralBackend_t         *b = tex->backend;
 	ralBufferCreateInfo_t  sci;
 	ralBuffer_t           *staging;
-	void                  *mapped;
 	VkCommandBuffer        cb;
 	VkBufferImageCopy      bic;
 	VkFence                fence = VK_NULL_HANDLE;
@@ -966,15 +1049,12 @@ static ralFence_t *ralVk_TextureUploadTransferNoWait( ralTexture_t *tex, const r
 		}
 	}
 
-	RAL_ZERO( sci ); sci.size = region->dataSize; sci.usage = RAL_BUFFER_TRANSFER_SRC; sci.memory = RAL_MEMORY_HOST_COHERENT; sci.debugName = "ral-staging-tex-upload-async";
+	RAL_ZERO( sci ); sci.size = region->dataSize; sci.usage = RAL_BUFFER_TRANSFER_SRC | RAL_BUFFER_MAP_WRITE; sci.memory = RAL_MEMORY_HOST_COHERENT; sci.debugName = "ral-staging-tex-upload-async";
 	staging = Ral_CreateBuffer( b, &sci );
 	if ( !staging ) return NULL;
 	ready = Ral_CreateSemaphore( b, RAL_SEMAPHORE_BINARY );
 	if ( !ready ) { Ral_DestroyBuffer( staging ); return NULL; }
-	mapped = Ral_MapBuffer( staging );
-	if ( !mapped ) { Ral_DestroySemaphore( ready ); Ral_DestroyBuffer( staging ); return NULL; }
-	memcpy( mapped, region->data, (size_t)region->dataSize );
-	Ral_UnmapBuffer( staging );
+	if ( !ralVk_WriteStagingBuffer( staging, region->data, region->dataSize ) ) { Ral_DestroySemaphore( ready ); Ral_DestroyBuffer( staging ); return NULL; }
 
 	if ( !ralVk_BeginUploadCmd( b, q, &cb ) ) { Ral_DestroySemaphore( ready ); Ral_DestroyBuffer( staging ); return NULL; }
 
@@ -1003,8 +1083,11 @@ static ralFence_t *ralVk_TextureUploadTransferNoWait( ralTexture_t *tex, const r
 	                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
 	                  VK_ACCESS_TRANSFER_WRITE_BIT, 0 );
 	tex->currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	tex->portableStateKnown = qfalse;
 
-	ralVk_SubmitUploadCmdNoWait( b, q, cb, ready->sem, &fence );
+	if ( !ralVk_SubmitUploadCmdNoWait( b, q, cb, ready->sem, &fence ) ) {
+		Ral_DestroySemaphore( ready );Ral_DestroyBuffer( staging );return NULL;
+	}
 	// The staging buffer must outlive the in-flight copy: Ral_DestroyBuffer defers the
 	// VkBuffer destroy to the frame-in-flight boundary (the same window the command
 	// buffer is freed in), by which time the transfer has completed.
@@ -1023,7 +1106,6 @@ static ralFence_t *ralVk_TextureUploadGraphicsNoWait( ralTexture_t *tex, const r
 	ralBackend_t          *b = tex->backend;
 	ralBufferCreateInfo_t  sci;
 	ralBuffer_t           *staging;
-	void                  *mapped;
 	VkCommandBuffer        cb;
 	VkBufferImageCopy      bic;
 	VkFence                fence = VK_NULL_HANDLE;
@@ -1033,15 +1115,12 @@ static ralFence_t *ralVk_TextureUploadGraphicsNoWait( ralTexture_t *tex, const r
 	miph = tex->height >> region->mipLevel; if ( miph == 0 ) miph = 1;
 	RAL_ZERO( sci );
 	sci.size = region->dataSize;
-	sci.usage = RAL_BUFFER_TRANSFER_SRC;
+	sci.usage = RAL_BUFFER_TRANSFER_SRC | RAL_BUFFER_MAP_WRITE;
 	sci.memory = RAL_MEMORY_HOST_COHERENT;
 	sci.debugName = "ral-staging-tex-mip-stream";
 	staging = Ral_CreateBuffer( b, &sci );
 	if ( !staging ) return NULL;
-	mapped = Ral_MapBuffer( staging );
-	if ( !mapped ) { Ral_DestroyBuffer( staging ); return NULL; }
-	memcpy( mapped, region->data, (size_t)region->dataSize );
-	Ral_UnmapBuffer( staging );
+	if ( !ralVk_WriteStagingBuffer( staging, region->data, region->dataSize ) ) { Ral_DestroyBuffer( staging ); return NULL; }
 
 	if ( !ralVk_BeginUploadCmd( b, RAL_QUEUE_GRAPHICS, &cb ) ) {
 		Ral_DestroyBuffer( staging );
@@ -1071,7 +1150,10 @@ static ralFence_t *ralVk_TextureUploadGraphicsNoWait( ralTexture_t *tex, const r
 	                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 	                  VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT );
 	tex->currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	ralVk_SubmitUploadCmdNoWait( b, RAL_QUEUE_GRAPHICS, cb, VK_NULL_HANDLE, &fence );
+	tex->portableStateKnown = qfalse;
+	if ( !ralVk_SubmitUploadCmdNoWait( b, RAL_QUEUE_GRAPHICS, cb, VK_NULL_HANDLE, &fence ) ) {
+		Ral_DestroyBuffer( staging );return NULL;
+	}
 	// Deferred buffer destruction uses the same frame-in-flight retirement as
 	// other no-wait uploads, so staging outlives the GPU copy.
 	Ral_DestroyBuffer( staging );
@@ -1087,8 +1169,48 @@ static ralFence_t *ralVk_TextureUploadGraphicsNoWait( ralTexture_t *tex, const r
 // already-signaled fence) and reports the texture resident-on-return — byte-identical
 // to the historical path. Uploads that need mip-gen / sub-region always take the
 // synchronous path (the transfer queue can't run those).
+static qboolean ralVk_TextureTransferPrepared( ralTexture_t *tex,
+		const ralTextureUploadDesc_t *region, ralQueueType_t queue,
+		uint64_t generation, ralTransferReceipt_t *out ) {
+	ralAllocationReceipt_t allocation;
+	ralTransferRequest_t request;
+	uint32_t width, height, depth;
+	if ( !tex || !region || !region->data || region->dataSize == 0u
+			|| region->mipLevel >= tex->mipLevels || region->arrayLayer >= tex->arrayLayers
+			|| !Ral_TextureGetAllocationReceipt( tex, &allocation ) ) return qfalse;
+	width = region->regionWidth ? region->regionWidth : tex->width >> region->mipLevel;
+	height = region->regionHeight ? region->regionHeight : tex->height >> region->mipLevel;
+	if ( width == 0u ) width = 1u;
+	if ( height == 0u ) height = 1u;
+	depth = tex->type == RAL_TEXTURE_3D ? tex->depthOrArrayLayers >> region->mipLevel : 1u;
+	if ( depth == 0u ) depth = 1u;
+	if ( region->offsetX > UINT32_MAX - width || region->offsetY > UINT32_MAX - height
+			|| region->offsetX + width > ( tex->width >> region->mipLevel ? tex->width >> region->mipLevel : 1u )
+			|| region->offsetY + height > ( tex->height >> region->mipLevel ? tex->height >> region->mipLevel : 1u ) ) return qfalse;
+	RAL_ZERO( request );
+	request.backendType = RAL_BACKEND_VULKAN;
+	request.direction = RAL_TRANSFER_UPLOAD;
+	request.resourceKind = RAL_TRANSFER_TEXTURE;
+	request.resourceIdentity = (uintptr_t)tex;
+	request.resourceGeneration = allocation.allocationGeneration;
+	request.byteSize = region->dataSize;
+	request.byteBudget = allocation.committedSize;
+	request.mipLevel = region->mipLevel;
+	request.arrayLayer = region->arrayLayer;
+	request.offsetX = region->offsetX;
+	request.offsetY = region->offsetY;
+	request.width = width;
+	request.height = height;
+	request.depth = depth;
+	request.queue = queue;
+	return Ral_TransferPrepare( &request, generation, out );
+}
+
 ralUploadTicket_t Ral_TextureUploadBegin( ralTexture_t *tex, const ralTextureUploadDesc_t *region ) {
 	ralUploadTicket_t ticket;
+	ralTransferReceipt_t prepared, published;
+	uint64_t generation;
+	RAL_ZERO( ticket );
 	ticket.texture       = tex;
 	ticket.synchronous   = qtrue;
 	ticket.fence         = NULL;
@@ -1105,28 +1227,67 @@ ralUploadTicket_t Ral_TextureUploadBegin( ralTexture_t *tex, const ralTextureUpl
 		                              && tex->aspect == VK_IMAGE_ASPECT_COLOR_BIT
 		                              && b->formatBlitGen[ tex->ralFormat ] && tex->arrayLayers == 1 ) ? qtrue : qfalse;
 		qboolean      wantAsync   = b->allowAsyncTextureUploads;
+		if ( b->nextTransferGeneration >= UINT64_MAX - 1u ) return ticket;
+		generation = b->nextTransferGeneration + 1u;
 		if ( wantAsync && region->suppressMipGeneration && !isSubRegion ) {
-			ralFence_t *f = ralVk_TextureUploadGraphicsNoWait( tex, region );
-			if ( f ) { ticket.fence = f; ticket.synchronous = qfalse; return ticket; }
+			ralFence_t *f = NULL;
+			if ( ralVk_TextureTransferPrepared( tex, region, RAL_QUEUE_GRAPHICS, generation, &prepared )
+					&& Ral_TransferPublish( &prepared, RAL_TRANSFER_OUTCOME_NATIVE_ASYNC,
+						generation, &published ) ) f = ralVk_TextureUploadGraphicsNoWait( tex, region );
+			if ( f ) { ticket.fence = f; ticket.synchronous = qfalse; ticket.transfer = published;
+				b->nextTransferGeneration = generation; return ticket; }
 			// fall through to the synchronous graphics path on failure
 		}
 		if ( wantAsync && b->caps.asyncTransfer && tex->concurrentTransfer && !needsMipGen && !isSubRegion ) {
 			ralSemaphore_t *ready = NULL;
-			ralFence_t *f = ralVk_TextureUploadTransferNoWait( tex, region, &ready );
+			ralFence_t *f = NULL;
+			if ( ralVk_TextureTransferPrepared( tex, region, RAL_QUEUE_TRANSFER, generation, &prepared )
+					&& Ral_TransferPublish( &prepared, RAL_TRANSFER_OUTCOME_NATIVE_ASYNC,
+						generation, &published ) ) f = ralVk_TextureUploadTransferNoWait( tex, region, &ready );
 			if ( f ) {
 				ticket.fence = f;
 				ticket.readySemaphore = ready;
 				ticket.synchronous = qfalse;
 				ticket.graphicsAcquireRequired = qtrue;
+				ticket.transfer = published;
+				b->nextTransferGeneration = generation;
 				return ticket;
 			}
 			if ( ready ) Ral_DestroySemaphore( ready );
 			// fall through to the synchronous path on failure
 		}
+		{
+			ralQueueType_t queue = ( needsMipGen || isSubRegion || region->suppressMipGeneration )
+				? RAL_QUEUE_GRAPHICS : ralVk_UploadQueue( b );
+			if ( !ralVk_TextureTransferPrepared( tex, region, queue, generation, &prepared )
+					|| !Ral_TransferPublish( &prepared, RAL_TRANSFER_OUTCOME_SYNCHRONOUS,
+						generation, &published ) ) return ticket;
+			ticket.fence = Ral_TextureUploadAsync( tex, region );
+			if ( ticket.fence ) { ticket.transfer = published;b->nextTransferGeneration = generation; }
+		}
 	}
-	ticket.fence       = Ral_TextureUploadAsync( tex, region );
-	ticket.synchronous = qtrue;
 	return ticket;
+}
+
+qboolean Ral_TextureUploadTicketComplete( ralUploadTicket_t *ticket ) {
+	ralTransferReceipt_t completed;
+	if ( !ticket || !Ral_TransferReceiptExact( &ticket->transfer, &ticket->transfer ) ) return qfalse;
+	if ( ticket->transfer.state == RAL_TRANSFER_COMPLETED ) return qtrue;
+	if ( ticket->transfer.state != RAL_TRANSFER_SUBMITTED || !ticket->fence
+			|| !Ral_FenceSignaled( ticket->fence ) ) return qfalse;
+	if ( !Ral_TransferComplete( &ticket->transfer, ticket->transfer.submissionGeneration,
+			qtrue, &completed ) ) return qfalse;
+	ticket->transfer = completed;
+	return qtrue;
+}
+
+qboolean Ral_TextureUploadTicketGetReceipt( const ralUploadTicket_t *ticket,
+		ralTransferReceipt_t *out ) {
+	ralTransferReceipt_t candidate;
+	if ( !ticket || !out || !Ral_TransferReceiptExact( &ticket->transfer, &ticket->transfer ) ) return qfalse;
+	candidate = ticket->transfer;
+	*out = candidate;
+	return qtrue;
 }
 
 // Make a batch of async-uploaded ranges visible to graphics/compute sampling. Each
@@ -1146,8 +1307,20 @@ qboolean Ral_TextureAcquireBatchToGraphics( ralBackend_t *b, const ralUploadTick
 	for ( i = 0; i < count; i++ ) {
 		const ralUploadTicket_t *ticket = &tickets[i];
 		const ralTexture_t *t = ticket->texture;
+		ralAllocationReceipt_t allocation;
 		if ( !ticket->graphicsAcquireRequired ) continue;
-		if ( !ticket->readySemaphore || !t || ticket->mipLevelCount == 0 || ticket->arrayLayerCount == 0 ||
+		if ( !ticket->readySemaphore || !t || t->backend != b
+			|| !Ral_TransferReceiptExact( &ticket->transfer, &ticket->transfer )
+			|| ticket->transfer.state != RAL_TRANSFER_COMPLETED
+			|| ticket->transfer.request.direction != RAL_TRANSFER_UPLOAD
+			|| ticket->transfer.request.resourceKind != RAL_TRANSFER_TEXTURE
+			|| ticket->transfer.request.resourceIdentity != (uintptr_t)t
+			|| ticket->transfer.request.queue != RAL_QUEUE_TRANSFER
+			|| ticket->transfer.request.mipLevel != ticket->baseMipLevel
+			|| ticket->transfer.request.arrayLayer != ticket->baseArrayLayer
+			|| !Ral_TextureGetAllocationReceipt( t, &allocation )
+			|| ticket->transfer.request.resourceGeneration != allocation.allocationGeneration
+			|| ticket->mipLevelCount == 0 || ticket->arrayLayerCount == 0 ||
 		     ticket->baseMipLevel >= t->mipLevels || ticket->mipLevelCount > t->mipLevels - ticket->baseMipLevel ||
 		     ticket->baseArrayLayer >= t->arrayLayers || ticket->arrayLayerCount > t->arrayLayers - ticket->baseArrayLayer ) {
 			RAL_VK_LOG( SEV_WARN, "Ral_TextureAcquireBatchToGraphics: invalid upload ticket range\n" );
@@ -1176,6 +1349,7 @@ qboolean Ral_TextureAcquireBatchToGraphics( ralBackend_t *b, const ralUploadTick
 		                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 		                  0, VK_ACCESS_SHADER_READ_BIT );
 		t->currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		t->portableStateKnown = qfalse;
 	}
 	b->vk.EndCommandBuffer( cb );
 	RAL_ZERO( cbi ); cbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO; cbi.commandBuffer = cb;
@@ -1450,6 +1624,7 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 	RAL_ZERO( *bg );
 	bg->header.refCount = 1; bg->backend = b; bg->layout = ci->layout;
 	bg->ownsSet = qtrue;   // native RAL allocation owns the set (Ral_AdoptBindGroup flips this to qfalse for adopted handles).
+	bg->bufferTrackingComplete = qtrue;
 
 	RAL_ZERO( dai );
 	dai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -1475,6 +1650,14 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 		case RAL_BIND_UNIFORM_BUFFER:
 		case RAL_BIND_STORAGE_BUFFER:
 			if ( nb >= RAL_VK_MAX_BG_BUFFERS || !val->buffer ) continue;
+			{
+				uint32_t tracked;
+				for ( tracked = 0; tracked < bg->bufferCount; ++tracked )
+					if ( bg->buffers[tracked] == val->buffer ) break;
+				if ( tracked == bg->bufferCount
+				  && bg->bufferCount < RAL_VK_MAX_TRACKED_BIND_GROUP_BUFFERS )
+					bg->buffers[bg->bufferCount++] = val->buffer;
+			}
 			RAL_ZERO( bufs[nb] );
 			bufs[nb].buffer = val->buffer->buffer;
 			bufs[nb].offset = val->bufferOffset;
@@ -1779,11 +1962,20 @@ qboolean ralVk_InitResourceLayer( ralBackend_t *b ) {
 void ralVk_ShutdownResourceLayer( ralBackend_t *b ) {
 	if ( b->descriptorPool != VK_NULL_HANDLE ) { b->vk.DestroyDescriptorPool( b->device, b->descriptorPool, NULL ); b->descriptorPool = VK_NULL_HANDLE; }
 	if ( b->allocations ) {
-		ralVkAllocation_t *a = b->allocations;
 		RAL_VK_LOG( SEV_WARN, "ralVk_ShutdownResourceLayer: %u allocation(s) still live -- freeing\n", b->numAllocations );
-		while ( a ) { ralVkAllocation_t *n = a->next; if ( a->mapped ) b->vk.UnmapMemory( b->device, a->memory ); b->vk.FreeMemory( b->device, a->memory, NULL ); free( a ); a = n; }
-		b->allocations = NULL; b->numAllocations = 0; b->ralDeviceLocalBytes = 0; b->ralHostVisibleBytes = 0;
+		while ( b->allocations ) ralVk_Free( b, b->allocations );
 	}
+	if ( b->memoryBlocks )
+		RAL_VK_LOG( SEV_WARN, "ralVk_ShutdownResourceLayer: reusable memory block leak detected -- freeing\n" );
+	while ( b->memoryBlocks ) {
+		ralVkMemoryBlock_t *block = b->memoryBlocks;
+		b->memoryBlocks = block->next;
+		if ( block->mappedBase ) b->vk.UnmapMemory( b->device, block->memory );
+		b->vk.FreeMemory( b->device, block->memory, NULL );
+		free( block );
+	}
+	b->ralDeviceLocalBytes = 0;
+	b->ralHostVisibleBytes = 0;
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1794,9 +1986,11 @@ void ralVk_ShutdownResourceLayer( ralBackend_t *b ) {
 static void ralVk_ReadbackMip( ralBackend_t *b, ralTexture_t *tex, uint32_t mip, byte *out, uint32_t outSize ) {
 	ralBufferCreateInfo_t bci;
 	ralBuffer_t          *rb;
+	ralBufferMapRequest_t mapRequest;
+	ralBufferMapTicket_t  mapTicket;
 	VkCommandBuffer       cb;
 	VkBufferImageCopy     bic;
-	void                 *mapped;
+	VkBufferMemoryBarrier hostBarrier;
 	uint32_t              mw  = ( tex->width  >> mip ) ? ( tex->width  >> mip ) : 1u;
 	uint32_t              mh  = ( tex->height >> mip ) ? ( tex->height >> mip ) : 1u;
 	uint32_t              bpp = ralVk_FormatBPP( tex->ralFormat );
@@ -1806,7 +2000,7 @@ static void ralVk_ReadbackMip( ralBackend_t *b, ralTexture_t *tex, uint32_t mip,
 	uint32_t              bufBytes  = ( copyBytes > outSize ) ? copyBytes : outSize;
 	if ( bufBytes < 64u ) bufBytes = 64u;
 	memset( out, 0, outSize );
-	RAL_ZERO( bci ); bci.size = bufBytes; bci.usage = RAL_BUFFER_TRANSFER_DST; bci.memory = RAL_MEMORY_HOST_COHERENT; bci.debugName = "ral-test-readback";
+	RAL_ZERO( bci ); bci.size = bufBytes; bci.usage = RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ; bci.memory = RAL_MEMORY_HOST_COHERENT; bci.debugName = "ral-test-readback";
 	rb = Ral_CreateBuffer( b, &bci );
 	if ( !rb ) return;
 	if ( !ralVk_BeginUploadCmd( b, RAL_QUEUE_GRAPHICS, &cb ) ) { Ral_DestroyBuffer( rb ); return; }   // graphics queue — same as the upload/mip-gen that produced the data
@@ -1820,15 +2014,33 @@ static void ralVk_ReadbackMip( ralBackend_t *b, ralTexture_t *tex, uint32_t mip,
 	bic.imageSubresource.layerCount = 1;
 	bic.imageExtent.width  = ew; bic.imageExtent.height = eh; bic.imageExtent.depth = 1;
 	b->vk.CmdCopyImageToBuffer( cb, tex->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, rb->buffer, 1, &bic );
+	RAL_ZERO( hostBarrier );
+	hostBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+	hostBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	hostBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+	hostBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	hostBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	hostBarrier.buffer = rb->buffer;
+	hostBarrier.offset = 0;
+	hostBarrier.size = rb->size;
+	b->vk.CmdPipelineBarrier( cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+		0, 0, NULL, 1, &hostBarrier, 0, NULL );
 	ralVk_ImgBarrier( b, cb, tex->image, tex->aspect, 0, tex->mipLevels, 0, tex->arrayLayers,
 	                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 	                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 	                  VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT );
 	ralVk_SubmitUploadCmdAndWait( b, RAL_QUEUE_GRAPHICS, cb, NULL );
 	tex->currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	mapped = Ral_MapBuffer( rb );
-	if ( mapped ) memcpy( out, mapped, ( copyBytes < outSize ) ? copyBytes : outSize );
-	Ral_UnmapBuffer( rb );
+	tex->portableStateKnown = qfalse;
+	rb->portableStateKnown = qtrue;
+	rb->portableState.usage = RAL_RESOURCE_USAGE_HOST_READ;
+	rb->portableState.shaderStages = 0;
+	rb->portableOwnerQueue = RAL_QUEUE_GRAPHICS;
+	RAL_ZERO( mapRequest ); mapRequest.mode = RAL_MAP_READ; mapRequest.size = rb->size;
+	if ( Ral_BufferMapBegin( rb, &mapRequest, &mapTicket ) == ralSuccess ) {
+		memcpy( out, mapTicket.mappedRange, ( copyBytes < outSize ) ? copyBytes : outSize );
+		(void)Ral_BufferMapUnmap( rb, &mapTicket );
+	}
 	Ral_DestroyBuffer( rb );
 }
 

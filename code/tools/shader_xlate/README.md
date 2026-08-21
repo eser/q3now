@@ -16,15 +16,19 @@ backend translated-shader corpus.
 | `<base>.msl`      | `CompilerMSL` (`platform = macOS`)       | Metal Shading Lang. |
 | `<base>.glsl430`  | `CompilerGLSL` (`version=430, es=false, vulkan_semantics=false`) | Desktop OpenGL 4.3 |
 | `<base>.glsles300`| `CompilerGLSL` (`version=300, es=true`)  | WebGL 2 (GLSL ES 3) |
-| `<base>.wgsl`     | `naga` CLI (shelled out)                  | WebGPU (WGSL)       |
+| `<base>.wgsl`     | pinned `naga` CLI (direct child process)  | WebGPU (WGSL)       |
 
 Push constants → uniform blocks for the GLSL paths (`vulkan_semantics=false`
 in SPIRV-Cross gives this automatically); MSL keeps them as argument-buffer
-push constants; naga promotes them per its WGSL output rules. See
+push constants; the pinned translator rewrites Naga's non-WebGPU `immediate`
+address space to the first free group-0 uniform binding, exactly matching the
+resolved portable manifest. See
 `docs/phase-7-ral-design.md §8.3`.
 
-If the `naga` CLI is not on `PATH` (no Rust toolchain installed), the WGSL
-step is skipped with a one-line note — see `BUILD-RUST.md` to install it.
+Canonical WGSL generation requires Wired's pinned
+`naga 30.0.0+wired-portable-v1`; build it with `build_pinned_naga.sh` as
+documented in `BUILD-RUST.md`. Optional target runs may omit WGSL, but
+`--require-wgsl` fails closed on a missing or wrong identity.
 
 ## Build
 
@@ -47,6 +51,15 @@ a clear warning + skips the target if the submodule is absent.
 # Single shader:
 build/debug/shader_xlate path/to/shader.spv path/to/output_dir/
 
+# fail closed instead of accepting a missing naga/WGSL artifact:
+build/debug/shader_xlate --require-wgsl path/to/shader.spv path/to/output_dir/
+
+# build the exact translator identity consumed above:
+code/tools/shader_xlate/build_pinned_naga.sh build/tools/naga/naga
+
+# deterministic SPIRV-Cross JSON reflection (no target-language emission):
+build/debug/shader_xlate --reflect-only path/to/shader.spv path/to/reflection.json
+
 # All shaders in shader_data.c (the way compile.mjs emits the corpus):
 node code/tools/shader_xlate/extract_spv.mjs \
      code/renderervk/shaders/spirv/shader_data.c \
@@ -55,6 +68,26 @@ mkdir -p build/debug/translated_shaders/
 for f in build/debug/spv_extracted/*.spv; do
     build/debug/shader_xlate "$f" build/debug/translated_shaders/
 done
+
+# Deterministic manifest-driven corpus orchestration (one symbol shown):
+node code/renderervk/shaders/compile_xlate.mjs \
+  --translator build/debug/shader_xlate \
+  --output-dir build/debug/translated_shaders \
+  --symbol color_vert_spv
+
+# Reflect the canonical 292-artifact corpus into the native-free ABI catalog:
+node code/renderervk/shaders/compile_reflect.mjs \
+  --translator build/debug/shader_xlate \
+  --output code/renderervk/shaders/spirv/ral_shader_reflection_catalog.json \
+  --check
+
+# Resolve every explicit portability decision and verify the committed corpus:
+node code/renderervk/shaders/compile_portable_manifest.mjs \
+  --translation-dir code/renderervk/shaders/portable --check
+node code/renderervk/shaders/compile_xlate.mjs \
+  --translator build/debug/shader_xlate \
+  --output-dir code/renderervk/shaders/portable \
+  --targets msl,wgsl --require-wgsl --check
 ```
 
 Output per shader is a parseable one-liner per backend:
@@ -73,6 +106,7 @@ Exit codes: `0` = all SPIRV-Cross targets succeeded, `1` = input unreadable,
 ## Files
 
 - `main.cpp` — the translator (C++ 17, links `spirv-cross-{msl,glsl,core}`).
+- `build_pinned_naga.sh` + `patches/` — reproducible pinned WGSL translator.
 - `extract_spv.mjs` — node helper that splits the C-array form (`shader_data.c`)
   into individual `.spv` files. Mirrors the spike's helper byte-for-byte;
   python3 isn't on the dev image, the project already uses node for

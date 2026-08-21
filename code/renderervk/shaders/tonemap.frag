@@ -209,11 +209,26 @@ vec3 tonemapAgX( vec3 color ) {
 // All five parameters are spec constants (IDs 28-32), so b and c
 // fold to constants after pipeline specialisation.
 vec3 tonemapLottes( vec3 color ) {
-	vec3 a      = vec3( lottes_contrast );
-	vec3 d      = vec3( lottes_shoulder );
-	vec3 hdrMax = vec3( lottes_hdr_max );
-	vec3 midIn  = vec3( lottes_mid_in );
-	vec3 midOut = vec3( lottes_mid_out );
+	vec3 a;
+	vec3 d;
+	vec3 hdrMax;
+	vec3 midIn;
+	vec3 midOut;
+	a.x = lottes_contrast;
+	a.y = lottes_contrast;
+	a.z = lottes_contrast;
+	d.x = lottes_shoulder;
+	d.y = lottes_shoulder;
+	d.z = lottes_shoulder;
+	hdrMax.x = lottes_hdr_max;
+	hdrMax.y = lottes_hdr_max;
+	hdrMax.z = lottes_hdr_max;
+	midIn.x = lottes_mid_in;
+	midIn.y = lottes_mid_in;
+	midIn.z = lottes_mid_in;
+	midOut.x = lottes_mid_out;
+	midOut.y = lottes_mid_out;
+	midOut.z = lottes_mid_out;
 
 	vec3 b = ( -pow( midIn, a ) + pow( hdrMax, a ) * midOut ) /
 	         ( ( pow( hdrMax, a * d ) - pow( midIn, a * d ) ) * midOut );
@@ -284,7 +299,11 @@ vec3 applyTonemap( vec3 color ) {
 
 #ifdef USE_COLOR_GRADING
 vec3 applyColorGrading( vec3 color ) {
-	color *= vec3( cg_tint_r, cg_tint_g, cg_tint_b );
+	vec3 colorGradeTint;
+	colorGradeTint.r = cg_tint_r;
+	colorGradeTint.g = cg_tint_g;
+	colorGradeTint.b = cg_tint_b;
+	color *= colorGradeTint;
 
 	float luma = dot( color, vec3( 0.2126, 0.7152, 0.0722 ) );
 	color = mix( vec3( luma ), color, cg_saturation );
@@ -324,7 +343,11 @@ vec3 computeSunRays() {
 		// Bright-pass: per-channel excess above the threshold, so only the over-bright
 		// sky/sun survive and mid-tone sky contributes nothing.
 		vec3 sceneColor = texture( texture0, uv ).rgb;
-		vec3 bright = max( sceneColor - vec3( sunrays_threshold ), vec3( 0.0 ) );
+		vec3 threshold;
+		threshold.x = sunrays_threshold;
+		threshold.y = sunrays_threshold;
+		threshold.z = sunrays_threshold;
+		vec3 bright = max( sceneColor - threshold, vec3( 0.0 ) );
 
 		illumination += bright * isSky * weight;
 		weight *= eb.sunrayDecay;

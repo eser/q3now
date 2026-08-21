@@ -1,0 +1,45 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct TemporalHistoryPush
+{
+    uint2 extent;
+    float zNear;
+    float zFar;
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> currentColor [[id(0)]];
+    sampler nearestSampler [[id(1)]];
+    texture2d<float> currentDeviceDepth [[id(2)]];
+    texture2d<float, access::write> outputColor [[id(3)]];
+    texture2d<float, access::write> outputLinearDepth [[id(4)]];
+};
+
+static inline __attribute__((always_inline))
+float linearizeDepth(thread const float& z, constant TemporalHistoryPush& pc)
+{
+    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+}
+
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant TemporalHistoryPush& pc [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    int2 pixel = int2(gl_GlobalInvocationID.xy);
+    if (any(pixel >= int2(pc.extent)))
+    {
+        return;
+    }
+    float4 color = spvDescriptorSet0.currentColor.read(uint2(pixel), 0);
+    float param = spvDescriptorSet0.currentDeviceDepth.read(uint2(pixel), 0).x;
+    float depth = linearizeDepth(param, pc);
+    spvDescriptorSet0.outputColor.write(color, uint2(pixel));
+    spvDescriptorSet0.outputLinearDepth.write(float4(depth), uint2(pixel));
+}
+

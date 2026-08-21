@@ -1,0 +1,69 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+constant float SMAA_THRESHOLD_tmp [[function_constant(0)]];
+constant float SMAA_THRESHOLD = is_function_constant_defined(SMAA_THRESHOLD_tmp) ? SMAA_THRESHOLD_tmp : 0.100000001490116119384765625;
+
+struct RtMetrics
+{
+    float4 rtMetrics;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> colorTex [[id(0)]];
+    sampler colorTexSmplr [[id(1)]];
+};
+
+struct main0_out
+{
+    float2 out_edges [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 texcoord [[user(locn0)]];
+    float4 offset0 [[user(locn1)]];
+    float4 offset1 [[user(locn2)]];
+    float4 offset2 [[user(locn3)]];
+};
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]])
+{
+    main0_out out = {};
+    float2 threshold;
+    threshold.x = SMAA_THRESHOLD;
+    threshold.y = SMAA_THRESHOLD;
+    float L = dot(spvDescriptorSet0.colorTex.sample(spvDescriptorSet0.colorTexSmplr, in.texcoord).xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float Lleft = dot(spvDescriptorSet0.colorTex.sample(spvDescriptorSet0.colorTexSmplr, in.offset0.xy).xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float Ltop = dot(spvDescriptorSet0.colorTex.sample(spvDescriptorSet0.colorTexSmplr, in.offset0.zw).xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float2 _59 = abs(float2(L) - float2(Lleft, Ltop));
+    float4 delta;
+    delta.x = _59.x;
+    delta.y = _59.y;
+    float2 relDelta = delta.xy / float2(fast::max(L, 9.9999997473787516355514526367188e-05));
+    float2 edges = step(threshold, relDelta);
+    if (dot(edges, float2(1.0)) == 0.0)
+    {
+        discard_fragment();
+    }
+    float Lright = dot(spvDescriptorSet0.colorTex.sample(spvDescriptorSet0.colorTexSmplr, in.offset1.xy).xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float Lbottom = dot(spvDescriptorSet0.colorTex.sample(spvDescriptorSet0.colorTexSmplr, in.offset1.zw).xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float2 _107 = abs(float2(L) - float2(Lright, Lbottom));
+    delta.z = _107.x;
+    delta.w = _107.y;
+    float2 maxDelta = fast::max(delta.xy, delta.zw);
+    float Lleftleft = dot(spvDescriptorSet0.colorTex.sample(spvDescriptorSet0.colorTexSmplr, in.offset2.xy).xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float Ltoptop = dot(spvDescriptorSet0.colorTex.sample(spvDescriptorSet0.colorTexSmplr, in.offset2.zw).xyz, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float2 _142 = abs(float2(Lleft, Ltop) - float2(Lleftleft, Ltoptop));
+    delta.z = _142.x;
+    delta.w = _142.y;
+    maxDelta = fast::max(maxDelta, delta.zw);
+    float finalDelta = fast::max(maxDelta.x, maxDelta.y);
+    edges *= step(float2(finalDelta), delta.xy * 2.0);
+    out.out_edges = edges;
+    return out;
+}
+

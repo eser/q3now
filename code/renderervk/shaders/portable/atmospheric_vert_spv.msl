@@ -1,0 +1,167 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+    
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+    
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+    
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+    
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
+struct AtmFrame
+{
+    float4x4 mvp;
+    float4 viewLeft;
+    float4 viewUp;
+    float4 eyeWorld;
+    float dt;
+    float time;
+    uint poolSize;
+    uint pingPongRead;
+    float4 boundsMin;
+    float4 boundsMax;
+    float2 worldMins;
+    float2 worldMaxs;
+    float2 invGridStep;
+    uint gridSize;
+    uint atmType;
+    float _distance;
+    float invResX;
+    float invResY;
+    float depthValid;
+};
+
+struct AtmParticle
+{
+    float3 pos;
+    float seed;
+    float3 vel;
+    float flags;
+};
+
+struct AtmParticle_1
+{
+    packed_float3 pos;
+    float seed;
+    packed_float3 vel;
+    float flags;
+};
+
+struct Pool
+{
+    AtmParticle_1 particles[1];
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant AtmFrame* m_44 [[id(0)]];
+    const device Pool* m_71 [[id(1)]];
+};
+
+constant spvUnsafeArray<float, 6> _100 = spvUnsafeArray<float, 6>({ -1.0, -1.0, 1.0, 1.0, -1.0, 1.0 });
+constant spvUnsafeArray<float, 6> _107 = spvUnsafeArray<float, 6>({ 1.0, -1.0, 1.0, 1.0, -1.0, -1.0 });
+constant spvUnsafeArray<float2, 6> _180 = spvUnsafeArray<float2, 6>({ float2(0.0), float2(0.0, 1.0), float2(1.0, 0.0), float2(1.0, 0.0), float2(0.0, 1.0), float2(1.0) });
+
+struct main0_out
+{
+    float2 fragUV [[user(locn0)]];
+    float4 fragColor [[user(locn1)]];
+    float4 gl_Position [[position]];
+};
+
+static inline __attribute__((always_inline))
+void emitDegenerate(thread float4& gl_Position, thread float2& fragUV, thread float4& fragColor)
+{
+    gl_Position = float4(0.0, 0.0, 0.0, 1.0);
+    fragUV = float2(0.0);
+    fragColor = float4(0.0);
+}
+
+vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint gl_InstanceIndex [[instance_id]], uint gl_VertexIndex [[vertex_id]])
+{
+    main0_out out = {};
+    uint idx = uint(int(gl_InstanceIndex));
+    uint vertInQuad = uint(int(gl_VertexIndex)) % 6u;
+    bool _49 = idx >= (*spvDescriptorSet0.m_44).poolSize;
+    bool _58;
+    if (!_49)
+    {
+        _58 = (*spvDescriptorSet0.m_44).atmType == 0u;
+    }
+    else
+    {
+        _58 = _49;
+    }
+    if (_58)
+    {
+        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor);
+        return out;
+    }
+    AtmParticle p;
+    p.pos = float3((*spvDescriptorSet0.m_71).particles[idx].pos);
+    p.seed = (*spvDescriptorSet0.m_71).particles[idx].seed;
+    p.vel = float3((*spvDescriptorSet0.m_71).particles[idx].vel);
+    p.flags = (*spvDescriptorSet0.m_71).particles[idx].flags;
+    if (p.flags < 0.5)
+    {
+        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor);
+        return out;
+    }
+    float sx = _100[vertInQuad];
+    float uy = _107[vertInQuad];
+    float3 worldPos;
+    float4 color;
+    if ((*spvDescriptorSet0.m_44).atmType == 1u)
+    {
+        float3 right = (*spvDescriptorSet0.m_44).viewLeft.xyz * (sx * 0.60000002384185791015625);
+        float3 down = (float3(0.0, 0.0, 1.0) * ((uy * 0.5) - 0.5)) * 18.0;
+        worldPos = (p.pos + right) + down;
+        color = float4(0.5, 0.5, 0.550000011920928955078125, 0.5);
+    }
+    else
+    {
+        worldPos = (p.pos + ((*spvDescriptorSet0.m_44).viewLeft.xyz * (sx * 1.5))) + ((*spvDescriptorSet0.m_44).viewUp.xyz * (uy * 1.5));
+        color = float4(1.0, 1.0, 1.0, 0.800000011920928955078125);
+    }
+    out.gl_Position = (*spvDescriptorSet0.m_44).mvp * float4(worldPos, 1.0);
+    out.fragUV = _180[vertInQuad];
+    out.fragColor = color;
+    return out;
+}
+

@@ -1,0 +1,56 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+constant int extract_mode_tmp [[function_constant(5)]];
+constant int extract_mode = is_function_constant_defined(extract_mode_tmp) ? extract_mode_tmp : 0;
+constant bool _26 = (extract_mode == 1);
+constant float threshold_tmp [[function_constant(3)]];
+constant float threshold = is_function_constant_defined(threshold_tmp) ? threshold_tmp : 0.319999992847442626953125;
+constant bool _51 = (extract_mode == 2);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> texture0 [[id(0)]];
+    sampler texture0Smplr [[id(1)]];
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord [[user(locn0)]];
+};
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]])
+{
+    main0_out out = {};
+    float3 base = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, in.frag_tex_coord).xyz;
+    float3 excess;
+    if (_26)
+    {
+        float m = dot(base, float3(0.3333333432674407958984375));
+        float over = fast::max(m - threshold, 0.0);
+        excess = base * (over / fast::max(m, 9.9999997473787516355514526367188e-06));
+    }
+    else
+    {
+        if (_51)
+        {
+            float m_1 = dot(float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875), base);
+            float over_1 = fast::max(m_1 - threshold, 0.0);
+            excess = base * (over_1 / fast::max(m_1, 9.9999997473787516355514526367188e-06));
+        }
+        else
+        {
+            excess = fast::max(base - float3(threshold), float3(0.0));
+        }
+    }
+    out.out_color = float4(excess, 1.0);
+    return out;
+}
+

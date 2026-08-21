@@ -1,0 +1,90 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct DenoisePush
+{
+    float2 viewportSize;
+    float zNear;
+    float zFar;
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> depthTex [[id(0)]];
+    sampler depthSampler [[id(1)]];
+    texture2d<float> aoIn [[id(2)]];
+    texture2d<float, access::write> aoOut [[id(3)]];
+};
+
+static inline __attribute__((always_inline))
+float linearizeDepth(thread const float& z, constant DenoisePush& pc)
+{
+    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+}
+
+static inline __attribute__((always_inline))
+float linearAt(thread const int2& p, constant DenoisePush& pc, texture2d<float> depthTex, sampler depthSampler)
+{
+    float2 uv = (float2(p) + float2(0.5)) / pc.viewportSize;
+    float param = depthTex.sample(depthSampler, uv, level(0.0)).x;
+    return linearizeDepth(param, pc);
+}
+
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant DenoisePush& pc [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    int2 pix = int2(gl_GlobalInvocationID.xy);
+    int2 dim = int2(pc.viewportSize);
+    bool _95 = pix.x >= dim.x;
+    bool _105;
+    if (!_95)
+    {
+        _105 = pix.y >= dim.y;
+    }
+    else
+    {
+        _105 = _95;
+    }
+    if (_105)
+    {
+        return;
+    }
+    int2 param = pix;
+    float centerLin = linearAt(param, pc, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+    float depthScale = 1.0 / fast::max(centerLin * 0.0500000007450580596923828125, 0.001000000047497451305389404296875);
+    float sum = 0.0;
+    float wsum = 0.0;
+    for (int dy = -2; dy <= 2; dy++)
+    {
+        for (int dx = -2; dx <= 2; dx++)
+        {
+            int2 q = clamp(pix + int2(dx, dy), int2(0), dim - int2(1));
+            float ao = spvDescriptorSet0.aoIn.read(uint2(q)).x;
+            int2 param_1 = q;
+            float dl = linearAt(param_1, pc, spvDescriptorSet0.depthTex, spvDescriptorSet0.depthSampler);
+            float wd = exp((-float((dx * dx) + (dy * dy))) * 0.5);
+            float ddiff = abs(dl - centerLin) * depthScale;
+            float we = exp((-ddiff) * ddiff);
+            float w = wd * we;
+            sum += (ao * w);
+            wsum += w;
+        }
+    }
+    float _208;
+    if (wsum > 9.9999997473787516355514526367188e-06)
+    {
+        _208 = sum / wsum;
+    }
+    else
+    {
+        _208 = spvDescriptorSet0.aoIn.read(uint2(pix)).x;
+    }
+    float result = _208;
+    spvDescriptorSet0.aoOut.write(float4(result), uint2(pix));
+}
+

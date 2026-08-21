@@ -23,7 +23,9 @@ layout(constant_id = 2) const int SMAA_CORNER_ROUNDING = 25;
 
 layout(location = 0) in vec2 texcoord;
 layout(location = 1) in vec2 pixcoord;
-layout(location = 2) in vec4 offset[3];
+layout(location = 2) in vec4 offset0;
+layout(location = 3) in vec4 offset1;
+layout(location = 4) in vec4 offset2;
 
 layout(location = 0) out vec4 out_weights;
 
@@ -255,15 +257,15 @@ void main() {
 			vec3 coords;
 
 			// Find the distance to the left
-			coords.x = SMAASearchXLeft(offset[0].xy, offset[2].x);
-			coords.y = offset[1].y;
+			coords.x = SMAASearchXLeft(offset0.xy, offset2.x);
+			coords.y = offset1.y;
 			d.x = coords.x;
 
 			// Fetch the left crossing edges
 			float e1 = textureLod(edgesTex, coords.xy, 0.0).r;
 
 			// Find the distance to the right
-			coords.z = SMAASearchXRight(offset[0].zw, offset[2].y);
+			coords.z = SMAASearchXRight(offset0.zw, offset2.y);
 			d.y = coords.z;
 
 			// Convert to pixel units
@@ -289,15 +291,15 @@ void main() {
 		vec3 coords;
 
 		// Find the distance to the top
-		coords.y = SMAASearchYUp(offset[1].xy, offset[2].z);
-		coords.x = offset[0].x;
+		coords.y = SMAASearchYUp(offset1.xy, offset2.z);
+		coords.x = offset0.x;
 		d.x = coords.y;
 
 		// Fetch the top crossing edges
 		float e1 = textureLod(edgesTex, coords.xy, 0.0).g;
 
 		// Find the distance to the bottom
-		coords.z = SMAASearchYDown(offset[1].zw, offset[2].w);
+		coords.z = SMAASearchYDown(offset1.zw, offset2.w);
 		d.y = coords.z;
 
 		// Convert to pixel units

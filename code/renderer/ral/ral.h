@@ -61,7 +61,20 @@
 
 #include "ral_types.h"      // result codes, opaque handles, enums, small structs
 #include "ral_backend.h"    // backend lifecycle, caps, memory budget, availability probe
+#include "ral_capability.h" // versioned backend-neutral support/fallback profile
+#include "ral_allocation.h" // generation-bound logical placement and pressure receipt
+#include "ral_memory_recovery.h" // bounded OOM/fragmentation/device-loss decisions
+#include "ral_suballocation.h" // deterministic aligned block slices and coalescing
+#include "ral_transient.h" // bounded alias planning and fence/cancel lifecycle
+#include "ral_transient_texture.h" // candidate-first physical transient texture cohorts
+#include "ral_transfer.h" // generation-bound upload/readback authority
+#include "ral_readback.h" // generation-bound staging/submission/map owner
+#include "ral_buffer_map.h" // typed READ/WRITE map tickets; Vulkan-ready/WebGPU-pending lifecycle
+#include "ral_command_lifecycle.h" // generation-bound encoder/submit authority
 #include "ral_resource.h"   // buffers, textures, samplers, bind groups
+#include "ral_transition.h" // portable resource usages, ranges and logical queue transitions
+#include "ral_shader_abi.h" // versioned reflection/artifact schema and semantic keys
+#include "ral_legacy_material.h" // backend-neutral legacy material variants/fallbacks
 #include "ral_pipeline.h"   // graphics / compute pipelines, pipeline cache
 #include "ral_command.h"    // command buffers, submission, dynamic rendering, draw/dispatch/copy/barrier
 #include "ral_sync.h"       // fences, semaphores (binary + timeline)

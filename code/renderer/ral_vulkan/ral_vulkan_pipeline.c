@@ -434,8 +434,20 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 	uint32_t                                i, nSetLayouts;
 	VkResult                                r;
 	VkPipeline                              vkPipe = VK_NULL_HANDLE;
+	ralShaderPipelineKey_t                  semanticKey;
+	qboolean                                hasSemanticKey = qfalse;
 
 	if ( !b || !ci ) return NULL;
+	if ( ( ci->shaderAbi == NULL ) != ( ci->shaderVariant == NULL ) ) return NULL;
+	if ( ci->shaderAbi ) {
+		if ( !Ral_ShaderAbiMatchesGraphicsPipeline( ci->shaderAbi, ci->shaderVariant,
+		                                           ci, &semanticKey ) ) {
+			RAL_VK_LOG( SEV_WARN, "Ral_CreateGraphicsPipeline: shader ABI mismatch (%s)\n",
+			        ci->debugName ? ci->debugName : "?" );
+			return NULL;
+		}
+		hasSemanticKey = qtrue;
+	}
 	if ( !ci->vertexSpirv || ci->vertexSpirvSize == 0 || !ci->fragmentSpirv || ci->fragmentSpirvSize == 0 ) {
 		RAL_VK_LOG( SEV_WARN, "Ral_CreateGraphicsPipeline: missing vertex or fragment SPIR-V (%s)\n", ci->debugName ? ci->debugName : "?" );
 		return NULL;
@@ -679,6 +691,8 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 	p->bindPoint           = VK_PIPELINE_BIND_POINT_GRAPHICS;
 	p->pushConstantSize    = ci->pushConstantSize;
 	p->pushConstantStages  = ralVk_PushConstantStages( ci->pushConstantStages );
+	p->hasSemanticKey      = hasSemanticKey;
+	if ( hasSemanticKey ) p->semanticKey = semanticKey;
 	ralVk_SetObjectName( b, (uint64_t)vkPipe, VK_OBJECT_TYPE_PIPELINE, ci->debugName );
 	return p;
 
@@ -707,8 +721,20 @@ ralPipeline_t *Ral_CreateComputePipeline( ralBackend_t *b, const ralComputePipel
 	uint32_t                           i;
 	VkResult                           r;
 	VkPipeline                         vkPipe = VK_NULL_HANDLE;
+	ralShaderPipelineKey_t             semanticKey;
+	qboolean                           hasSemanticKey = qfalse;
 
 	if ( !b || !ci ) return NULL;
+	if ( ( ci->shaderAbi == NULL ) != ( ci->shaderVariant == NULL ) ) return NULL;
+	if ( ci->shaderAbi ) {
+		if ( !Ral_ShaderAbiMatchesComputePipeline( ci->shaderAbi, ci->shaderVariant,
+		                                          ci, &semanticKey ) ) {
+			RAL_VK_LOG( SEV_WARN, "Ral_CreateComputePipeline: shader ABI mismatch (%s)\n",
+			        ci->debugName ? ci->debugName : "?" );
+			return NULL;
+		}
+		hasSemanticKey = qtrue;
+	}
 	if ( !ci->computeSpirv || ci->computeSpirvSize == 0 ) {
 		RAL_VK_LOG( SEV_WARN, "Ral_CreateComputePipeline: missing compute SPIR-V (%s)\n", ci->debugName ? ci->debugName : "?" );
 		return NULL;
@@ -770,6 +796,8 @@ ralPipeline_t *Ral_CreateComputePipeline( ralBackend_t *b, const ralComputePipel
 	p->bindPoint           = VK_PIPELINE_BIND_POINT_COMPUTE;
 	p->pushConstantSize    = ci->pushConstantSize;
 	p->pushConstantStages  = VK_SHADER_STAGE_COMPUTE_BIT;
+	p->hasSemanticKey      = hasSemanticKey;
+	if ( hasSemanticKey ) p->semanticKey = semanticKey;
 	ralVk_SetObjectName( b, (uint64_t)vkPipe, VK_OBJECT_TYPE_PIPELINE, ci->debugName );
 	return p;
 }
@@ -995,7 +1023,7 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 		RAL_ZERO( bci ); bci.size = sizeof( ral_pipeline_test_indices ); bci.usage = RAL_BUFFER_INDEX | RAL_BUFFER_TRANSFER_DST; bci.memory = RAL_MEMORY_DEVICE_LOCAL; bci.debugName = "ral-pipeline-test-ib";
 		ib = Ral_CreateBuffer( b, &bci );
 		// readback buffer for the color target
-		RAL_ZERO( bci ); bci.size = RT_SIZE * RT_SIZE * 4u; bci.usage = RAL_BUFFER_TRANSFER_DST; bci.memory = RAL_MEMORY_HOST_COHERENT; bci.debugName = "ral-pipeline-test-readback";
+		RAL_ZERO( bci ); bci.size = RT_SIZE * RT_SIZE * 4u; bci.usage = RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ; bci.memory = RAL_MEMORY_HOST_COHERENT; bci.debugName = "ral-pipeline-test-readback";
 		readback = Ral_CreateBuffer( b, &bci );
 		// targets
 		RAL_ZERO( tci ); tci.type = RAL_TEXTURE_2D; tci.format = COLOR_FMT; tci.width = RT_SIZE; tci.height = RT_SIZE;
@@ -1019,6 +1047,7 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 			fence = Ral_CreateFence( b );
 			if ( cb && fence ) {
 				ralCommandBuffer_t   *cbs[1]; ralSubmitInfo_t si;
+				ralBufferMapTicket_t  mapTicket;
 				ralRenderingInfo_t    ri2;
 				ralViewport_t         vp;
 				ralRect_t             sc;
@@ -1077,14 +1106,18 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 				btc.imageRect.y       = 0;
 				btc.imageRect.width   = RT_SIZE;
 				btc.imageRect.height  = RT_SIZE;
+				ralVk_TransitionWholeBuffer( cb, readback, RAL_RESOURCE_USAGE_UNDEFINED,
+				                             RAL_RESOURCE_USAGE_COPY_DESTINATION );
 				Ral_CmdCopyTextureToBuffer( cb, color, readback, &btc );
+				ralVk_TransitionWholeBuffer( cb, readback, RAL_RESOURCE_USAGE_COPY_DESTINATION,
+				                             RAL_RESOURCE_USAGE_HOST_READ );
 				Ral_EndCommandBuffer( cb );
 
 				cbs[0] = cb; RAL_ZERO( si ); si.commandBuffers = cbs; si.numCommandBuffers = 1; si.signalFence = fence;
 				Ral_Submit( b, RAL_QUEUE_GRAPHICS, &si );
 				Ral_WaitFence( fence, ~0ull );
 
-				map = Ral_MapBuffer( readback );
+				map = ralVk_MapReadbackBuffer( readback, &mapTicket );
 				if ( map ) {
 					const uint8_t *px = (const uint8_t *)map + ( RT_SIZE / 2u ) * ( RT_SIZE * 4u ) + ( RT_SIZE / 2u ) * 4u;
 					const uint8_t *clearPx = (const uint8_t *)map;   // (0,0) is outside the triangle → should still be ~0.1 grey
@@ -1095,7 +1128,7 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 					}
 					RAL_VK_LOG( SEV_INFO, "  draw: pixel(32,32) RGBA = %u %u %u %u (expect non-grey: triangle interior); pixel(0,0) = %u %u %u %u (expect ~26 = 0.1×255 clear); bright (>0.125) pixels = %u/%u (expect a substantial fraction inside the centred triangle)\n",
 					        px[0], px[1], px[2], px[3], clearPx[0], clearPx[1], clearPx[2], clearPx[3], brightPixels, RT_SIZE * RT_SIZE );
-					Ral_UnmapBuffer( readback );
+					Ral_BufferMapUnmap( readback, &mapTicket );
 				} else RAL_VK_LOG( SEV_WARN, "  draw: readback map failed\n" );
 			} else RAL_VK_LOG( SEV_WARN, "  draw: command buffer / fence acquisition failed\n" );
 		} else RAL_VK_LOG( SEV_WARN, "  draw: resource creation failed (vb=%p ib=%p readback=%p color=%p depth=%p pipe=%p)\n",
@@ -1131,7 +1164,7 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 
 		RAL_ZERO( bci ); bci.size = COUNT * sizeof( uint32_t ); bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_SRC; bci.memory = RAL_MEMORY_DEVICE_LOCAL; bci.debugName = "ral-pipeline-test-ssbo";
 		ssbo = Ral_CreateBuffer( b, &bci );
-		RAL_ZERO( bci ); bci.size = COUNT * sizeof( uint32_t ); bci.usage = RAL_BUFFER_TRANSFER_DST; bci.memory = RAL_MEMORY_HOST_COHERENT; bci.debugName = "ral-pipeline-test-ssbo-readback";
+		RAL_ZERO( bci ); bci.size = COUNT * sizeof( uint32_t ); bci.usage = RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ; bci.memory = RAL_MEMORY_HOST_COHERENT; bci.debugName = "ral-pipeline-test-ssbo-readback";
 		cReadback = Ral_CreateBuffer( b, &bci );
 
 		RAL_ZERO( be ); be.binding = 0; be.type = RAL_BIND_STORAGE_BUFFER; be.count = 1; be.stageFlags = RAL_STAGE_COMPUTE;
@@ -1159,19 +1192,24 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 			f  = Ral_CreateFence( b );
 			if ( cb && f ) {
 				ralCommandBuffer_t *cbs[1]; ralSubmitInfo_t si; ralBufferCopy_t copy;
+				ralBufferMapTicket_t mapTicket;
 				Ral_BeginCommandBuffer( cb );
 				Ral_CmdBindPipeline ( cb, pipe );
 				Ral_CmdBindBindGroup( cb, 0, bg );
 				Ral_CmdPushConstants( cb, RAL_STAGE_COMPUTE, 0, sizeof( COUNT ), &COUNT );
 				Ral_CmdDispatch     ( cb, ( COUNT + 63u ) / 64u, 1, 1 );
 				Ral_CmdPipelineBarrier( cb, RAL_BARRIER_COMPUTE_TO_TRANSFER );   // compute write → transfer read
+				ralVk_TransitionWholeBuffer( cb, cReadback, RAL_RESOURCE_USAGE_UNDEFINED,
+				                             RAL_RESOURCE_USAGE_COPY_DESTINATION );
 				RAL_ZERO( copy ); copy.size = COUNT * sizeof( uint32_t );
 				Ral_CmdCopyBuffer( cb, ssbo, cReadback, &copy );
+				ralVk_TransitionWholeBuffer( cb, cReadback, RAL_RESOURCE_USAGE_COPY_DESTINATION,
+				                             RAL_RESOURCE_USAGE_HOST_READ );
 				Ral_EndCommandBuffer( cb );
 				cbs[0] = cb; RAL_ZERO( si ); si.commandBuffers = cbs; si.numCommandBuffers = 1; si.signalFence = f;
 				Ral_Submit( b, RAL_QUEUE_GRAPHICS, &si );
 				Ral_WaitFence( f, ~0ull );
-				map = Ral_MapBuffer( cReadback );
+				map = ralVk_MapReadbackBuffer( cReadback, &mapTicket );
 				if ( map ) {
 					const uint32_t *data = (const uint32_t *)map;
 					uint32_t k, badCount = 0, sampleBad = 0xFFFFFFFFu, sampleExpect = 0, sampleGot = 0;
@@ -1188,7 +1226,7 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 					else
 						RAL_VK_LOG( SEV_WARN, "  compute: %u/%u elements mismatch — first bad at idx %u (expect %u, got %u)\n",
 						        badCount, COUNT, sampleBad, sampleExpect, sampleGot );
-					Ral_UnmapBuffer( cReadback );
+					Ral_BufferMapUnmap( cReadback, &mapTicket );
 				} else RAL_VK_LOG( SEV_WARN, "  compute: readback map failed\n" );
 			} else RAL_VK_LOG( SEV_WARN, "  compute: command buffer / fence acquisition failed\n" );
 		} else RAL_VK_LOG( SEV_WARN, "  compute: setup failed (ssbo=%p readback=%p layout=%p bg=%p pipe=%p)\n", (void*)ssbo, (void*)cReadback, (void*)bgl, (void*)bg, (void*)pipe );
@@ -1262,7 +1300,7 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 		RAL_ZERO( bci ); bci.size = sizeof( uint32_t ); bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_SRC;
 		bci.memory = RAL_MEMORY_DEVICE_LOCAL; bci.debugName = "ral-pipeline-test-residency-output";
 		sampleOut = Ral_CreateBuffer( b, &bci );
-		RAL_ZERO( bci ); bci.size = sizeof( uint32_t ); bci.usage = RAL_BUFFER_TRANSFER_DST;
+		RAL_ZERO( bci ); bci.size = sizeof( uint32_t ); bci.usage = RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ;
 		bci.memory = RAL_MEMORY_HOST_COHERENT; bci.debugName = "ral-pipeline-test-residency-readback";
 		sampleReadback = Ral_CreateBuffer( b, &bci );
 
@@ -1324,20 +1362,25 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 			fence = Ral_CreateFence( b );
 			if ( cb && fence ) {
 				ralCommandBuffer_t *cbs[1]; ralSubmitInfo_t si; ralBufferCopy_t copy;
+				ralBufferMapTicket_t mapTicket;
 				Ral_BeginCommandBuffer( cb );
 				Ral_CmdBindPipeline( cb, pipe ); Ral_CmdBindBindGroup( cb, 0u, group ); Ral_CmdDispatch( cb, 1u, 1u, 1u );
 				Ral_CmdPipelineBarrier( cb, RAL_BARRIER_COMPUTE_TO_TRANSFER );
+				ralVk_TransitionWholeBuffer( cb, sampleReadback, RAL_RESOURCE_USAGE_UNDEFINED,
+				                             RAL_RESOURCE_USAGE_COPY_DESTINATION );
 				RAL_ZERO( copy ); copy.size = sizeof( uint32_t ); Ral_CmdCopyBuffer( cb, sampleOut, sampleReadback, &copy );
+				ralVk_TransitionWholeBuffer( cb, sampleReadback, RAL_RESOURCE_USAGE_COPY_DESTINATION,
+				                             RAL_RESOURCE_USAGE_HOST_READ );
 				Ral_EndCommandBuffer( cb ); cbs[0] = cb; RAL_ZERO( si ); si.commandBuffers = cbs; si.numCommandBuffers = 1u; si.signalFence = fence;
 				Ral_Submit( b, RAL_QUEUE_GRAPHICS, &si ); Ral_WaitFence( fence, ~0ull );
 				{
-					const uint32_t *packed = (const uint32_t *)Ral_MapBuffer( sampleReadback );
+					const uint32_t *packed = (const uint32_t *)ralVk_MapReadbackBuffer( sampleReadback, &mapTicket );
 					if ( packed ) {
 						const uint32_t rgba = *packed;
 						RAL_VK_LOG( SEV_INFO,
 						       "  residency view: baseMip=2 sample RGBA = %u %u %u %u (expect coarse green; mip0 is red)\n",
 						       rgba & 255u, ( rgba >> 8u ) & 255u, ( rgba >> 16u ) & 255u, ( rgba >> 24u ) & 255u );
-						Ral_UnmapBuffer( sampleReadback );
+						Ral_BufferMapUnmap( sampleReadback, &mapTicket );
 					} else RAL_VK_LOG( SEV_WARN, "  residency view: readback map failed\n" );
 				}
 			}

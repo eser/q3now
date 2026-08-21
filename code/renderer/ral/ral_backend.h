@@ -216,6 +216,9 @@ typedef struct {
 	char     apiVersion[32];            // e.g. "Vulkan 1.3.290"
 	qboolean independentBlend;          // append-only: per-colour-attachment blend/write-mask state enabled
 	uint64_t maxStorageBufferRange;      // append-only: maximum legal storage-buffer descriptor range
+	qboolean textureCompressionBC;      // append-only: sampled BC1/3/5/7 family available
+	qboolean textureCompressionASTC;    // append-only: sampled ASTC 4x4 available
+	qboolean textureCompressionETC2;    // append-only: sampled ETC2 RGBA8 available
 } ralCaps_t;
 
 const ralCaps_t *Ral_GetCaps( ralBackend_t *b );

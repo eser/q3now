@@ -20,7 +20,7 @@ typedef struct {
 
 typedef struct {
 	ralBuffer_t *buffer;
-	void *mapped;
+	void *cpuShadow;
 	ralBindGroup_t *group;
 	uint32_t allocationGeneration;
 	uint32_t prepareGeneration;
@@ -45,7 +45,7 @@ typedef struct {
 	ralBackend_t *backend;
 	ralBindGroupLayout_t *layout;
 	ralBuffer_t *buffer;
-	void *mappedIdentity;
+	void *cpuShadowIdentity;
 	ralBindGroup_t *group;
 	uint64_t descriptorRange;
 	uint32_t recordCapacity;

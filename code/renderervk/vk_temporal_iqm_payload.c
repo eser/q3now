@@ -4,6 +4,7 @@
 #include "vk_temporal_iqm_payload.h"
 
 #include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 
 static qboolean KeyValid( const vkTemporalIqmPayloadKey_t *key ) {
@@ -41,7 +42,7 @@ static qboolean Protected( const vkTemporalIqmPayloadKey_t *key,
 }
 
 static qboolean SlotEmpty( const vkTemporalIqmPayloadSlot_t *slot ) {
-	return slot && !slot->buffer && !slot->mapped && !slot->group
+	return slot && !slot->buffer && !slot->cpuShadow && !slot->group
 		&& !slot->allocationGeneration && !slot->prepareGeneration ? qtrue : qfalse;
 }
 
@@ -53,7 +54,7 @@ static qboolean RolesDistinct( const vkTemporalIqmPayloadOwner_t *owner ) {
 	for ( uint32_t i = 0; i < owner->key.frameCount; ++i ) {
 		if ( !( owner->readySlotMask & ( 1u << i ) ) ) continue;
 		roles[count++] = owner->slots[i].buffer;
-		roles[count++] = owner->slots[i].mapped;
+		roles[count++] = owner->slots[i].cpuShadow;
 		roles[count++] = owner->slots[i].group;
 	}
 	for ( uint32_t i = 0; i < count; ++i ) {
@@ -77,7 +78,7 @@ static qboolean OwnerValid( const vkTemporalIqmPayloadOwner_t *owner ) {
 	for ( uint32_t i = 0; i < VK_TEMPORAL_IQM_PAYLOAD_MAX_FRAMES; ++i ) {
 		const vkTemporalIqmPayloadSlot_t *slot = &owner->slots[i];
 		if ( i < owner->key.frameCount && ( owner->readySlotMask & ( 1u << i ) ) ) {
-			if ( !slot->buffer || !slot->mapped || !slot->group
+			if ( !slot->buffer || !slot->cpuShadow || !slot->group
 					|| !slot->allocationGeneration
 					|| slot->allocationGeneration == UINT32_MAX
 					|| !slot->prepareGeneration
@@ -92,7 +93,7 @@ static qboolean AnyRole( const vkTemporalIqmPayloadOwner_t *owner,
 	if ( !owner || !identity ) return qfalse;
 	if ( identity == owner->layout ) return qtrue;
 	for ( uint32_t i = 0; i < VK_TEMPORAL_IQM_PAYLOAD_MAX_FRAMES; ++i )
-		if ( identity == owner->slots[i].buffer || identity == owner->slots[i].mapped
+		if ( identity == owner->slots[i].buffer || identity == owner->slots[i].cpuShadow
 				|| identity == owner->slots[i].group ) return qtrue;
 	return qfalse;
 }
@@ -100,7 +101,7 @@ static qboolean AnyRole( const vkTemporalIqmPayloadOwner_t *owner,
 static void DestroySlot( vkTemporalIqmPayloadSlot_t *slot ) {
 	if ( !slot ) return;
 	if ( slot->group ) Ral_DestroyBindGroup( slot->group );
-	if ( slot->mapped ) Ral_UnmapBuffer( slot->buffer );
+	free( slot->cpuShadow );
 	if ( slot->buffer ) Ral_DestroyBuffer( slot->buffer );
 	memset( slot, 0, sizeof( *slot ) );
 }
@@ -147,17 +148,18 @@ static qboolean CreateSlot( vkTemporalIqmPayloadOwner_t *candidate,
 	vkTemporalIqmPayloadSlot_t slot;
 	memset( &slot, 0, sizeof( slot ) );
 	memset( &bci, 0, sizeof( bci ) ); bci.size = TEMPORAL_IQM_SLOT_BYTES;
-	bci.usage = RAL_BUFFER_STORAGE; bci.memory = RAL_MEMORY_HOST_COHERENT;
+	bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST;
+	bci.memory = RAL_MEMORY_DEVICE_LOCAL;
 	bci.debugName = "wired-temporal-iqm-payload";
 	slot.buffer = Ral_CreateBuffer( candidate->key.backend, &bci );
 	if ( !slot.buffer || Protected( &candidate->key, slot.buffer )
 			|| AnyRole( live, slot.buffer ) || AnyRole( candidate, slot.buffer ) )
 		return qfalse;
-	slot.mapped = Ral_MapBuffer( slot.buffer );
-	if ( !slot.mapped || Protected( &candidate->key, slot.mapped )
-			|| AnyRole( live, slot.mapped ) || AnyRole( candidate, slot.mapped )
-			|| slot.mapped == (void *)slot.buffer ) {
-		if ( slot.mapped ) Ral_UnmapBuffer( slot.buffer );
+	slot.cpuShadow = calloc( 1, TEMPORAL_IQM_SLOT_BYTES );
+	if ( !slot.cpuShadow || Protected( &candidate->key, slot.cpuShadow )
+			|| AnyRole( live, slot.cpuShadow ) || AnyRole( candidate, slot.cpuShadow )
+			|| slot.cpuShadow == (void *)slot.buffer ) {
+		free( slot.cpuShadow );
 		Ral_DestroyBuffer( slot.buffer ); return qfalse;
 	}
 	memset( &value, 0, sizeof( value ) ); value.binding = 0;
@@ -168,12 +170,12 @@ static qboolean CreateSlot( vkTemporalIqmPayloadOwner_t *candidate,
 	slot.group = Ral_CreateBindGroup( candidate->key.backend, &gci );
 	if ( !slot.group || Protected( &candidate->key, slot.group )
 			|| AnyRole( live, slot.group ) || AnyRole( candidate, slot.group )
-			|| (void *)slot.group == (void *)slot.buffer || (void *)slot.group == slot.mapped ) {
+			|| (void *)slot.group == (void *)slot.buffer || (void *)slot.group == slot.cpuShadow ) {
 		if ( slot.group && (void *)slot.group != (void *)slot.buffer
-				&& (void *)slot.group != slot.mapped && !Protected( &candidate->key, slot.group )
+				&& (void *)slot.group != slot.cpuShadow && !Protected( &candidate->key, slot.group )
 				&& !AnyRole( live, slot.group ) && !AnyRole( candidate, slot.group ) )
 			Ral_DestroyBindGroup( slot.group );
-		Ral_UnmapBuffer( slot.buffer ); Ral_DestroyBuffer( slot.buffer ); return qfalse;
+		free( slot.cpuShadow ); Ral_DestroyBuffer( slot.buffer ); return qfalse;
 	}
 	if ( candidate->nextSlotAllocationGeneration[commandSlot] >= UINT32_MAX - 1u ) {
 		DestroySlot( &slot ); return qfalse;
@@ -209,7 +211,7 @@ qboolean VK_TemporalIqmPayloadPrepareAfterFence(
 		owner->preparedSlot = commandSlot;
 		owner->slots[commandSlot].prepareGeneration =
 			++owner->nextPrepareGeneration[commandSlot];
-		memset( owner->slots[commandSlot].mapped, 0, TEMPORAL_IQM_SLOT_BYTES );
+		memset( owner->slots[commandSlot].cpuShadow, 0, TEMPORAL_IQM_SLOT_BYTES );
 		return qtrue;
 	}
 	if ( replacing ) {
@@ -244,7 +246,7 @@ qboolean VK_TemporalIqmPayloadPrepareAfterFence(
 		return qfalse;
 	}
 	*owner = candidate;
-	memset( owner->slots[commandSlot].mapped, 0, TEMPORAL_IQM_SLOT_BYTES );
+	memset( owner->slots[commandSlot].cpuShadow, 0, TEMPORAL_IQM_SLOT_BYTES );
 	if ( replacing ) DestroyLive( &live );
 	return qtrue;
 }
@@ -258,7 +260,7 @@ qboolean VK_TemporalIqmPayloadGetReceipt(
 			|| !( owner->readySlotMask & ( 1u << commandSlot ) ) ) return qfalse;
 	memset( &candidate, 0, sizeof( candidate ) ); candidate.backend = owner->key.backend;
 	candidate.layout = owner->layout; candidate.buffer = owner->slots[commandSlot].buffer;
-	candidate.mappedIdentity = owner->slots[commandSlot].mapped;
+	candidate.cpuShadowIdentity = owner->slots[commandSlot].cpuShadow;
 	candidate.group = owner->slots[commandSlot].group;
 	candidate.descriptorRange = TEMPORAL_IQM_SLOT_BYTES;
 	candidate.recordCapacity = TEMPORAL_IQM_MAX_RECORDS;
@@ -272,7 +274,7 @@ qboolean VK_TemporalIqmPayloadGetReceipt(
 
 static qboolean ReceiptValid( const vkTemporalIqmPayloadReceipt_t *r ) {
 	return r && r->ready == qtrue && r->backend && r->layout && r->buffer
-		&& r->mappedIdentity && r->group
+		&& r->cpuShadowIdentity && r->group
 		&& r->descriptorRange == TEMPORAL_IQM_SLOT_BYTES
 		&& r->recordCapacity == TEMPORAL_IQM_MAX_RECORDS
 		&& r->recordBytes == TEMPORAL_IQM_RECORD_SIZE
@@ -288,7 +290,7 @@ qboolean VK_TemporalIqmPayloadReceiptExact(
 		const vkTemporalIqmPayloadReceipt_t *b ) {
 	if ( !ReceiptValid( a ) || !ReceiptValid( b ) ) return qfalse;
 	return a->backend == b->backend && a->layout == b->layout
-		&& a->buffer == b->buffer && a->mappedIdentity == b->mappedIdentity
+		&& a->buffer == b->buffer && a->cpuShadowIdentity == b->cpuShadowIdentity
 		&& a->group == b->group
 		&& a->descriptorRange == b->descriptorRange
 		&& a->recordCapacity == b->recordCapacity && a->recordBytes == b->recordBytes
@@ -321,7 +323,7 @@ qboolean VK_TemporalIqmPayloadHasLive( const vkTemporalIqmPayloadOwner_t *owner 
 	if ( !owner ) return qfalse;
 	if ( owner->layout ) return qtrue;
 	for ( uint32_t i = 0; i < VK_TEMPORAL_IQM_PAYLOAD_MAX_FRAMES; ++i )
-		if ( owner->slots[i].buffer || owner->slots[i].mapped || owner->slots[i].group )
+		if ( owner->slots[i].buffer || owner->slots[i].cpuShadow || owner->slots[i].group )
 			return qtrue;
 	return qfalse;
 }

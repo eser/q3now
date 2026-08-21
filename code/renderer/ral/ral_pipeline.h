@@ -4,15 +4,18 @@
 // ral_pipeline.h — graphics & compute pipelines, pipeline cache.
 // Part of the Wired RAL v1 surface (docs/phase-7-ral-design.md §3.6, §6.3, §7.4, §8).
 //
-// Pipelines are compiled from SPIR-V — the canonical IR. Backends translate
-// SPIR-V → MSL / WGSL / GLSL at pipeline creation (§8.2). Render passes /
-// framebuffers are NOT part of pipeline state: Wired uses dynamic rendering
-// (§6), so colour-attachment formats + depth format live in the create info.
+// Canonical shader sources are compiled offline into pinned SPIR-V, MSL and
+// WGSL artifacts joined by ralShaderAbiManifest_t. Vulkan still consumes the
+// transitional SPIR-V pointer fields below; Metal/WebGPU consume their
+// committed artifact catalogs and must never translate or compile at runtime.
+// Render passes / framebuffers are NOT part of pipeline state: Wired uses
+// dynamic rendering (§6), so attachment formats live in the create info.
 
 #ifndef WIRED_RAL_PIPELINE_H
 #define WIRED_RAL_PIPELINE_H
 
 #include "ral_types.h"
+#include "ral_shader_abi.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -152,6 +155,10 @@ typedef struct {
 	uint32_t        fragmentSpirvSize;     // bytes
 	const char     *vertexEntry;           // NULL → "main"
 	const char     *fragmentEntry;         // NULL → "main"
+	// Optional exact reflection/artifact contract. Both pointers must be NULL
+	// (legacy compatibility) or both non-NULL and match every create-info field.
+	const ralShaderAbiManifest_t *shaderAbi;
+	const ralShaderVariantAbi_t  *shaderVariant;
 
 	// vertex input
 	const ralVertexBinding_t   *vertexBindings;
@@ -213,6 +220,8 @@ typedef struct {
 	const uint32_t *computeSpirv;
 	uint32_t        computeSpirvSize;      // bytes
 	const char     *computeEntry;          // NULL → "main"
+	const ralShaderAbiManifest_t *shaderAbi;
+	const ralShaderVariantAbi_t  *shaderVariant;
 
 	const ralBindGroupLayout_t *const *bindGroupLayouts;
 	uint32_t                    numBindGroupLayouts;
@@ -227,6 +236,17 @@ typedef struct {
 } ralComputePipelineCreateInfo_t;
 
 ralPipeline_t *Ral_CreateComputePipeline( ralBackend_t *b, const ralComputePipelineCreateInfo_t *ci );
+
+ralResult_t Ral_GraphicsPipelineSemanticDigest(
+	const ralGraphicsPipelineCreateInfo_t *ci, ralShaderDigest_t *outDigest );
+ralResult_t Ral_ComputePipelineSemanticDigest(
+	const ralComputePipelineCreateInfo_t *ci, ralShaderDigest_t *outDigest );
+qboolean Ral_ShaderAbiMatchesGraphicsPipeline(
+	const ralShaderAbiManifest_t *manifest, const ralShaderVariantAbi_t *variant,
+	const ralGraphicsPipelineCreateInfo_t *ci, ralShaderPipelineKey_t *outKey );
+qboolean Ral_ShaderAbiMatchesComputePipeline(
+	const ralShaderAbiManifest_t *manifest, const ralShaderVariantAbi_t *variant,
+	const ralComputePipelineCreateInfo_t *ci, ralShaderPipelineKey_t *outKey );
 
 void Ral_DestroyPipeline( ralPipeline_t *p );
 

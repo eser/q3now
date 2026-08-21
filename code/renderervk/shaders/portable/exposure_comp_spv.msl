@@ -1,0 +1,130 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Histogram
+{
+    uint bins[256];
+};
+
+struct Accumulator
+{
+    float accum;
+};
+
+struct ExposureBlock
+{
+    float exposure_bias;
+    float key;
+    float pctLow;
+    float pctHigh;
+    float rateUp;
+    float rateDown;
+    float minExp;
+    float maxExp;
+    int autoEnabled;
+    float brightness;
+    float sunScreenX;
+    float sunScreenY;
+    float sunrayIntensity;
+    float sunrayDecay;
+};
+
+struct Push
+{
+    float dt;
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(1u);
+
+struct spvDescriptorSetBuffer0
+{
+    device Histogram* m_40 [[id(0)]];
+    device Accumulator* m_60 [[id(1)]];
+    device ExposureBlock* m_68 [[id(2)]];
+};
+
+static inline __attribute__((always_inline))
+float binEV(thread const uint& i)
+{
+    return (-10.0) + ((float(i) / 255.0) * 12.0);
+}
+
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant Push& _195 [[buffer(1)]])
+{
+    float total = 0.0;
+    for (uint i = 1u; i < 256u; i++)
+    {
+        total += float((*spvDescriptorSet0.m_40).bins[i]);
+    }
+    float target;
+    if (total <= 0.0)
+    {
+        target = (*spvDescriptorSet0.m_60).accum;
+    }
+    else
+    {
+        float loW = (*spvDescriptorSet0.m_68).pctLow * total;
+        float hiW = (1.0 - (*spvDescriptorSet0.m_68).pctHigh) * total;
+        if (hiW <= loW)
+        {
+            loW = 0.0;
+            hiW = total;
+        }
+        float cum = 0.0;
+        float wSum = 0.0;
+        float evSum = 0.0;
+        for (uint i_1 = 1u; i_1 < 256u; i_1++)
+        {
+            float w = float((*spvDescriptorSet0.m_40).bins[i_1]);
+            if (w <= 0.0)
+            {
+                continue;
+            }
+            float lo = cum;
+            float hi = cum + w;
+            cum = hi;
+            float a = fast::max(lo, loW);
+            float b = fast::min(hi, hiW);
+            if (b > a)
+            {
+                float clipped = b - a;
+                uint param = i_1;
+                evSum += (binEV(param) * clipped);
+                wSum += clipped;
+            }
+        }
+        float _148;
+        if (wSum > 0.0)
+        {
+            _148 = evSum / wSum;
+        }
+        else
+        {
+            uint param_1 = 128u;
+            _148 = binEV(param_1);
+        }
+        float avgEV = _148;
+        float avgLuma = exp2(avgEV);
+        target = (*spvDescriptorSet0.m_68).key / fast::max(avgLuma, 9.9999997473787516355514526367188e-05);
+        target = fast::clamp(target, (*spvDescriptorSet0.m_68).minExp, (*spvDescriptorSet0.m_68).maxExp);
+    }
+    float _181;
+    if (target > (*spvDescriptorSet0.m_60).accum)
+    {
+        _181 = (*spvDescriptorSet0.m_68).rateUp;
+    }
+    else
+    {
+        _181 = (*spvDescriptorSet0.m_68).rateDown;
+    }
+    float rate = _181;
+    float a_1 = 1.0 - exp((-fast::max(_195.dt, 0.0)) * rate);
+    float smoothed = mix((*spvDescriptorSet0.m_60).accum, target, a_1);
+    (*spvDescriptorSet0.m_60).accum = smoothed;
+    (*spvDescriptorSet0.m_68).exposure_bias = smoothed * (*spvDescriptorSet0.m_68).brightness;
+}
+

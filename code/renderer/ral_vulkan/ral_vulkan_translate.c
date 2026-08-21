@@ -3,6 +3,21 @@
 
 #include "ral_vulkan_translate.h"
 
+static qboolean ralVk_TranslateShaderStages( uint32_t stages,
+	                                         VkPipelineStageFlags *out ) {
+	VkPipelineStageFlags candidate = 0;
+	if ( !out || stages == 0 || ( stages & ~RAL_STAGE_ALL ) != 0 )
+		return qfalse;
+	if ( stages & RAL_STAGE_VERTEX )
+		candidate |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+	if ( stages & RAL_STAGE_FRAGMENT )
+		candidate |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	if ( stages & RAL_STAGE_COMPUTE )
+		candidate |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+	*out = candidate;
+	return qtrue;
+}
+
 VkFormat ralVk_TranslateFormat( ralFormat_t f ) {
 	switch ( f ) {
 	case RAL_FORMAT_R8_UNORM: return VK_FORMAT_R8_UNORM;
@@ -201,4 +216,133 @@ ralVkLayoutTranslation_t ralVk_TranslateDestinationLayout( VkImageLayout layout 
 		out.access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 	}
 	return out;
+}
+
+qboolean ralVk_TranslateBufferResourceState( const ralResourceState_t *state,
+	                                          ralVkResourceStateTranslation_t *out ) {
+	ralVkResourceStateTranslation_t candidate = {
+		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED
+	};
+	if ( !state || !out )
+		return qfalse;
+	switch ( state->usage ) {
+	case RAL_RESOURCE_USAGE_UNDEFINED:
+		if ( state->shaderStages != 0 ) return qfalse;
+		break;
+	case RAL_RESOURCE_USAGE_COPY_SOURCE:
+		if ( state->shaderStages != 0 ) return qfalse;
+		candidate.stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+		candidate.access = VK_ACCESS_TRANSFER_READ_BIT;
+		break;
+	case RAL_RESOURCE_USAGE_COPY_DESTINATION:
+		if ( state->shaderStages != 0 ) return qfalse;
+		candidate.stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+		candidate.access = VK_ACCESS_TRANSFER_WRITE_BIT;
+		break;
+	case RAL_RESOURCE_USAGE_VERTEX_BUFFER:
+		if ( state->shaderStages != 0 ) return qfalse;
+		candidate.stage = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+		candidate.access = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+		break;
+	case RAL_RESOURCE_USAGE_INDEX_BUFFER:
+		if ( state->shaderStages != 0 ) return qfalse;
+		candidate.stage = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+		candidate.access = VK_ACCESS_INDEX_READ_BIT;
+		break;
+	case RAL_RESOURCE_USAGE_INDIRECT_BUFFER:
+		if ( state->shaderStages != 0 ) return qfalse;
+		candidate.stage = VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
+		candidate.access = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+		break;
+	case RAL_RESOURCE_USAGE_UNIFORM_BUFFER:
+		if ( !ralVk_TranslateShaderStages( state->shaderStages, &candidate.stage ) ) return qfalse;
+		candidate.access = VK_ACCESS_UNIFORM_READ_BIT;
+		break;
+	case RAL_RESOURCE_USAGE_STORAGE_READ:
+	case RAL_RESOURCE_USAGE_STORAGE_WRITE:
+	case RAL_RESOURCE_USAGE_STORAGE_READ_WRITE:
+		if ( !ralVk_TranslateShaderStages( state->shaderStages, &candidate.stage ) ) return qfalse;
+		candidate.access = state->usage == RAL_RESOURCE_USAGE_STORAGE_READ
+			? VK_ACCESS_SHADER_READ_BIT
+			: state->usage == RAL_RESOURCE_USAGE_STORAGE_WRITE
+			? VK_ACCESS_SHADER_WRITE_BIT
+			: VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		break;
+	case RAL_RESOURCE_USAGE_HOST_READ:
+	case RAL_RESOURCE_USAGE_HOST_WRITE:
+		if ( state->shaderStages != 0 ) return qfalse;
+		candidate.stage = VK_PIPELINE_STAGE_HOST_BIT;
+		candidate.access = state->usage == RAL_RESOURCE_USAGE_HOST_READ
+			? VK_ACCESS_HOST_READ_BIT : VK_ACCESS_HOST_WRITE_BIT;
+		break;
+	default:
+		return qfalse;
+	}
+	*out = candidate;
+	return qtrue;
+}
+
+qboolean ralVk_TranslateTextureResourceState( const ralResourceState_t *state,
+	                                           ralVkResourceStateTranslation_t *out ) {
+	ralVkResourceStateTranslation_t candidate = {
+		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED
+	};
+	if ( !state || !out )
+		return qfalse;
+	switch ( state->usage ) {
+	case RAL_RESOURCE_USAGE_UNDEFINED:
+		if ( state->shaderStages != 0 ) return qfalse;
+		break;
+	case RAL_RESOURCE_USAGE_COPY_SOURCE:
+	case RAL_RESOURCE_USAGE_COPY_DESTINATION:
+		if ( state->shaderStages != 0 ) return qfalse;
+		candidate.stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+		candidate.access = state->usage == RAL_RESOURCE_USAGE_COPY_SOURCE
+			? VK_ACCESS_TRANSFER_READ_BIT : VK_ACCESS_TRANSFER_WRITE_BIT;
+		candidate.layout = state->usage == RAL_RESOURCE_USAGE_COPY_SOURCE
+			? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		break;
+	case RAL_RESOURCE_USAGE_SAMPLED_TEXTURE:
+		if ( !ralVk_TranslateShaderStages( state->shaderStages, &candidate.stage ) ) return qfalse;
+		candidate.access = VK_ACCESS_SHADER_READ_BIT;
+		candidate.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		break;
+	case RAL_RESOURCE_USAGE_STORAGE_READ:
+	case RAL_RESOURCE_USAGE_STORAGE_WRITE:
+	case RAL_RESOURCE_USAGE_STORAGE_READ_WRITE:
+		if ( !ralVk_TranslateShaderStages( state->shaderStages, &candidate.stage ) ) return qfalse;
+		candidate.access = state->usage == RAL_RESOURCE_USAGE_STORAGE_READ
+			? VK_ACCESS_SHADER_READ_BIT
+			: state->usage == RAL_RESOURCE_USAGE_STORAGE_WRITE
+			? VK_ACCESS_SHADER_WRITE_BIT
+			: VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		candidate.layout = VK_IMAGE_LAYOUT_GENERAL;
+		break;
+	case RAL_RESOURCE_USAGE_COLOR_ATTACHMENT:
+		if ( state->shaderStages != 0 ) return qfalse;
+		candidate.stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		candidate.access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		candidate.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		break;
+	case RAL_RESOURCE_USAGE_DEPTH_STENCIL_READ:
+	case RAL_RESOURCE_USAGE_DEPTH_STENCIL_WRITE:
+		if ( state->shaderStages != 0 ) return qfalse;
+		candidate.stage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+		candidate.access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+		candidate.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+		if ( state->usage == RAL_RESOURCE_USAGE_DEPTH_STENCIL_WRITE ) {
+			candidate.access |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+			candidate.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		}
+		break;
+	case RAL_RESOURCE_USAGE_PRESENT:
+		if ( state->shaderStages != 0 ) return qfalse;
+		candidate.stage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+		candidate.layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		break;
+	default:
+		return qfalse;
+	}
+	*out = candidate;
+	return qtrue;
 }

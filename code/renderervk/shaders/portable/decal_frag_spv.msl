@@ -1,0 +1,128 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct DecalFrame
+{
+    float4x4 mvp;
+    float4 timeCount;
+    float4x4 invMvp;
+    float4 reconParams;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant DecalFrame* m_60 [[id(0)]];
+    texture2d<float> sceneDepthTex [[id(1)]];
+    sampler sceneDepthTexSmplr [[id(2)]];
+    array<texture2d<float>, 64> decalTextures [[id(3)]];
+    array<sampler, 64> decalTexturesSmplr [[id(67)]];
+};
+
+struct main0_out
+{
+    float4 outColor [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 fragUV [[user(locn0)]];
+    float4 fragColor [[user(locn1)]];
+    uint fragTextureIndex [[user(locn2)]];
+    float3 fragDecalOrigin [[user(locn3), flat]];
+    float3 fragDecalTangent [[user(locn4), flat]];
+    float3 fragDecalBitangent [[user(locn5), flat]];
+    float3 fragDecalNormal [[user(locn6), flat]];
+    float fragDecalRadius [[user(locn7), flat]];
+    uint fragNoProject [[user(locn8)]];
+};
+
+static inline __attribute__((always_inline))
+float3 sRGBToLinear(thread float3& c)
+{
+    c = fast::max(c, float3(0.0));
+    bool3 cutoff = c <= float3(0.040449999272823333740234375);
+    float3 lo = c / float3(12.9200000762939453125);
+    float3 hi = powr((c + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return mix(hi, lo, float3(cutoff));
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 decalUV = in.fragUV;
+    bool _69 = (*spvDescriptorSet0.m_60).reconParams.z > 0.5;
+    bool _77;
+    if (_69)
+    {
+        _77 = in.fragNoProject == 0u;
+    }
+    else
+    {
+        _77 = _69;
+    }
+    if (_77)
+    {
+        float2 screenUV = gl_FragCoord.xy * (*spvDescriptorSet0.m_60).reconParams.xy;
+        float sceneDepth = spvDescriptorSet0.sceneDepthTex.sample(spvDescriptorSet0.sceneDepthTexSmplr, screenUV).x;
+        if (sceneDepth <= 0.0)
+        {
+            discard_fragment();
+        }
+        float3 ndc = float3((screenUV * 2.0) - float2(1.0), sceneDepth);
+        float4 worldH = (*spvDescriptorSet0.m_60).invMvp * float4(ndc, 1.0);
+        float3 worldPos = worldH.xyz / float3(worldH.w);
+        float3 local = worldPos - in.fragDecalOrigin;
+        float _146;
+        if (in.fragDecalRadius > 0.0)
+        {
+            _146 = 1.0 / in.fragDecalRadius;
+        }
+        else
+        {
+            _146 = 0.0;
+        }
+        float invR = _146;
+        float u = dot(local, in.fragDecalTangent) * invR;
+        float v = dot(local, in.fragDecalBitangent) * invR;
+        float w = dot(local, in.fragDecalNormal);
+        float halfThickness = in.fragDecalRadius * 0.5;
+        bool _177 = abs(u) > 1.0;
+        bool _184;
+        if (!_177)
+        {
+            _184 = abs(v) > 1.0;
+        }
+        else
+        {
+            _184 = _177;
+        }
+        bool _192;
+        if (!_184)
+        {
+            _192 = abs(w) > halfThickness;
+        }
+        else
+        {
+            _192 = _184;
+        }
+        if (_192)
+        {
+            discard_fragment();
+        }
+        decalUV = (float2(u, v) * 0.5) + float2(0.5);
+    }
+    float4 texel = spvDescriptorSet0.decalTextures[in.fragTextureIndex].sample(spvDescriptorSet0.decalTexturesSmplr[in.fragTextureIndex], decalUV);
+    float3 param = texel.xyz;
+    float3 _217 = sRGBToLinear(param);
+    float3 param_1 = in.fragColor.xyz;
+    float3 _222 = sRGBToLinear(param_1);
+    float3 rgb = _217 * _222;
+    float alpha = texel.w * in.fragColor.w;
+    out.outColor = float4(rgb, alpha);
+    return out;
+}
+

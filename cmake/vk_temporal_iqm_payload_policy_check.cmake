@@ -24,8 +24,10 @@ endforeach()
 foreach(needle IN ITEMS
 	"maxStorageBufferRange < (uint64_t)TEMPORAL_IQM_SLOT_BYTES"
 	"bci.size = TEMPORAL_IQM_SLOT_BYTES"
-	"bci.usage = RAL_BUFFER_STORAGE"
-	"bci.memory = RAL_MEMORY_HOST_COHERENT"
+	"bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST"
+	"bci.memory = RAL_MEMORY_DEVICE_LOCAL"
+	"slot.cpuShadow = calloc( 1, TEMPORAL_IQM_SLOT_BYTES )"
+	"free( slot->cpuShadow )"
 	"value.bufferOffset = 0"
 	"value.bufferRange = TEMPORAL_IQM_SLOT_BYTES"
 	"RAL_BIND_STORAGE_BUFFER, 1u, RAL_STAGE_VERTEX"
@@ -38,6 +40,12 @@ foreach(needle IN ITEMS
 	"VK_TemporalIqmPayloadAcquireLayoutLease"
 	"VK_TemporalIqmPayloadReleaseLayoutLease")
 	require_text("${CORE}" "${needle}" "owner/lifecycle invariant")
+endforeach()
+foreach(forbidden IN ITEMS "Ral_MapBuffer(" "Ral_UnmapBuffer(" "legacyMapped")
+	string(FIND "${CORE}${ABI}" "${forbidden}" forbidden_pos)
+	if(NOT forbidden_pos EQUAL -1)
+		message(FATAL_ERROR "temporal IQM payload regained persistent map surface: ${forbidden}")
+	endif()
 endforeach()
 foreach(forbidden IN ITEMS VK_WHOLE_SIZE Ral_Cmd Ral_CreateGraphicsPipeline
 	Ral_CreateShaderModule VkPipeline vkCmdBind vkCmdDraw)

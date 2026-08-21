@@ -19,22 +19,15 @@ foreach(needle
     "candidate.vertexMap[0].constantID = 16u"
     "candidate.fragmentMaps[i].offset = i * sizeof(uint32_t)"
     "candidate.fragmentInfo.dataSize = VK_GENERIC_FRAGMENT_SPEC_COUNT * sizeof(uint32_t)"
-    "candidate.fragmentWords[0] != 0u"
-    "candidate.fragmentWords[1] != 0u"
-    "candidate.fragmentWords[2] != depthThresholdBits"
-    "candidate.fragmentWords[3] != 0u"
-    "candidate.fragmentWords[4] & ~texDomainMask"
-    "candidate.fragmentWords[5] != 0u"
-    "candidate.fragmentWords[6] > 7u"
-    "facts->textureCount == 0u && candidate.fragmentWords[6] != 0u"
-    "candidate.fragmentWords[7] != 0u"
-    "!isfinite(fixedColor)"
-    "!isfinite(fixedAlpha)"
-    "!facts->shaderFog && candidate.fragmentWords[10] != 0u"
-    "!isfinite(depthFade) || depthFade <= 0.0f"
-    "candidate.fragmentWords[12] != 0u"
-    "candidate.fragmentWords[13] != 0u"
-    "candidate.fragmentWords[14] > facts->textureCount + 1u")
+    "candidate.vertexWord > 1u"
+    "materialVariant.alphaTest = (ralLegacyAlphaTest_t)candidate.fragmentWords[0]"
+    "materialVariant.depthFragment = depthFragment"
+    "materialVariant.textureDomainMask = candidate.fragmentWords[4]"
+    "materialVariant.combine = (ralLegacyCombine_t)candidate.fragmentWords[6]"
+    "materialVariant.fogFactor = candidate.fragmentWords[10]"
+    "materialVariant.lightmapSlot = candidate.fragmentWords[14]"
+    "Ral_LegacyMaterialResolve(&materialFacts,&materialVariant,&materialReceipt)"
+    "materialReceipt.outcome != RAL_LEGACY_MATERIAL_DIRECT")
   string(FIND "${HEADER}\n${CONTRACT}" "${needle}" pos)
   if(pos EQUAL -1)
     message(FATAL_ERROR "generic specialization contract missing: ${needle}")
@@ -87,7 +80,7 @@ foreach(needle
     message(FATAL_ERROR "fixture/mutation coverage missing: ${needle}")
   endif()
 endforeach()
-foreach(forbidden "Cvar" "Ral_" "BeginRendering" "vkCmd" "r_temporal")
+foreach(forbidden "Cvar" "BeginRendering" "vkCmd" "r_temporal")
   if(CONTRACT MATCHES "${forbidden}")
     message(FATAL_ERROR "pure specialization contract gained runtime authority: ${forbidden}")
   endif()

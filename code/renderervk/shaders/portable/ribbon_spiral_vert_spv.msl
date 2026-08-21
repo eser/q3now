@@ -1,0 +1,280 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+    
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+    
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+    
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+    
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
+// Implementation of signed integer mod accurate to SPIR-V specification
+template<typename Tx, typename Ty>
+inline Tx spvSMod(Tx x, Ty y)
+{
+    Tx remainder = x - y * (x / y);
+    return select(Tx(remainder + y), remainder, remainder == 0 || (x >= 0) == (y >= 0));
+}
+
+struct RailRibbonHeader
+{
+    float4 startBeamLen;
+    float4 beamAxisAge;
+    float4 colorDuration;
+    float4 misc;
+    spvUnsafeArray<float4, 36> perpAxis;
+};
+
+struct RailRibbonHeader_1
+{
+    float4 startBeamLen;
+    float4 beamAxisAge;
+    float4 colorDuration;
+    float4 misc;
+    float4 perpAxis[36];
+};
+
+struct Headers
+{
+    RailRibbonHeader_1 headers[1];
+};
+
+struct EffectsUBO
+{
+    float4x4 mvp;
+    float4 eyeWorld;
+    float4 frameParams;
+    float4 _v2;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    const device Headers* m_141 [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    constant EffectsUBO* m_437 [[id(0)]];
+};
+
+constant spvUnsafeArray<uint, 6> _369 = spvUnsafeArray<uint, 6>({ 0u, 1u, 0u, 0u, 1u, 1u });
+constant spvUnsafeArray<float, 6> _380 = spvUnsafeArray<float, 6>({ -1.0, -1.0, 1.0, 1.0, -1.0, 1.0 });
+
+struct main0_out
+{
+    float2 fragUV [[user(locn0)]];
+    float4 fragColor [[user(locn1)]];
+    uint fragShaderHandle [[user(locn2)]];
+    float4 gl_Position [[position]];
+};
+
+static inline __attribute__((always_inline))
+void emitDegenerate(thread float4& gl_Position, thread float2& fragUV, thread float4& fragColor, thread uint& fragShaderHandle)
+{
+    gl_Position = float4(0.0, 0.0, -2.0, 1.0);
+    fragUV = float2(0.0);
+    fragColor = float4(0.0);
+    fragShaderHandle = 0u;
+}
+
+static inline __attribute__((always_inline))
+bool helixPoint(thread const int& j, thread const int& numSegs, thread const float3& start, thread const float3& beamAxis, thread const float& beamLen, thread const float& curRadius, thread const float& curSpacing, thread const float& curWidth, thread const float& frac, thread const float& trailAlpha, thread const RailRibbonHeader& hdr, thread float3& pos, thread float3& normal, thread float& halfW, thread float& alpha)
+{
+    if (j > (numSegs - 1))
+    {
+        return false;
+    }
+    float d = beamLen - (float(j) * curSpacing);
+    if (d < 0.0)
+    {
+        return false;
+    }
+    int ring = spvSMod(j * 2, 36);
+    if (ring < 0)
+    {
+        ring += 36;
+    }
+    float3 perp = hdr.perpAxis[ring].xyz;
+    pos = (start + (beamAxis * d)) + (perp * curRadius);
+    normal = fast::normalize(cross(beamAxis, perp));
+    halfW = curWidth;
+    float segPos = float(j) / float(numSegs - 1);
+    float unwindFade = 1.0 - (frac * (1.0 + segPos));
+    if (unwindFade < 0.0)
+    {
+        unwindFade = 0.0;
+    }
+    alpha = trailAlpha * unwindFade;
+    return true;
+}
+
+vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], uint gl_InstanceIndex [[instance_id]], uint gl_VertexIndex [[vertex_id]])
+{
+    main0_out out = {};
+    RailRibbonHeader hdr;
+    hdr.startBeamLen = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].startBeamLen;
+    hdr.beamAxisAge = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].beamAxisAge;
+    hdr.colorDuration = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].colorDuration;
+    hdr.misc = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].misc;
+    hdr.perpAxis[0] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[0];
+    hdr.perpAxis[1] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[1];
+    hdr.perpAxis[2] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[2];
+    hdr.perpAxis[3] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[3];
+    hdr.perpAxis[4] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[4];
+    hdr.perpAxis[5] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[5];
+    hdr.perpAxis[6] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[6];
+    hdr.perpAxis[7] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[7];
+    hdr.perpAxis[8] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[8];
+    hdr.perpAxis[9] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[9];
+    hdr.perpAxis[10] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[10];
+    hdr.perpAxis[11] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[11];
+    hdr.perpAxis[12] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[12];
+    hdr.perpAxis[13] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[13];
+    hdr.perpAxis[14] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[14];
+    hdr.perpAxis[15] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[15];
+    hdr.perpAxis[16] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[16];
+    hdr.perpAxis[17] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[17];
+    hdr.perpAxis[18] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[18];
+    hdr.perpAxis[19] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[19];
+    hdr.perpAxis[20] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[20];
+    hdr.perpAxis[21] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[21];
+    hdr.perpAxis[22] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[22];
+    hdr.perpAxis[23] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[23];
+    hdr.perpAxis[24] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[24];
+    hdr.perpAxis[25] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[25];
+    hdr.perpAxis[26] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[26];
+    hdr.perpAxis[27] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[27];
+    hdr.perpAxis[28] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[28];
+    hdr.perpAxis[29] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[29];
+    hdr.perpAxis[30] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[30];
+    hdr.perpAxis[31] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[31];
+    hdr.perpAxis[32] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[32];
+    hdr.perpAxis[33] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[33];
+    hdr.perpAxis[34] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[34];
+    hdr.perpAxis[35] = (*spvDescriptorSet0.m_141).headers[int(gl_InstanceIndex)].perpAxis[35];
+    uint vertInQuad = uint(int(gl_VertexIndex)) % 6u;
+    int segIdx = int(uint(int(gl_VertexIndex)) / 6u);
+    float3 start = hdr.startBeamLen.xyz;
+    float beamLen = hdr.startBeamLen.w;
+    float3 beamAxis = hdr.beamAxisAge.xyz;
+    float age = hdr.beamAxisAge.w;
+    float duration = hdr.colorDuration.w;
+    float baseAlpha = hdr.misc.x;
+    float _299;
+    if (duration > 0.0)
+    {
+        _299 = age / duration;
+    }
+    else
+    {
+        _299 = 1.0;
+    }
+    float frac = _299;
+    if (frac < 0.0)
+    {
+        frac = 0.0;
+    }
+    if (frac > 1.0)
+    {
+        frac = 1.0;
+    }
+    float trailAlpha = 1.0 - frac;
+    float easedFrac = 1.0 - ((1.0 - frac) * (1.0 - frac));
+    float curRadius = 2.0 + (easedFrac * 2.0);
+    float curSpacing = 3.0 * (1.0 - (easedFrac * 0.666999995708465576171875));
+    float curWidth = 1.5 * (1.0 + (easedFrac * 1.5));
+    int numSegs = int(beamLen / curSpacing);
+    if (numSegs > 2048)
+    {
+        numSegs = 2048;
+    }
+    if (numSegs < 2)
+    {
+        numSegs = 2;
+    }
+    if (segIdx > (numSegs - 2))
+    {
+        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.fragShaderHandle);
+        return out;
+    }
+    int pi = segIdx + int(_369[vertInQuad]);
+    float sgn = _380[vertInQuad];
+    int param = pi;
+    int param_1 = numSegs;
+    float3 param_2 = start;
+    float3 param_3 = beamAxis;
+    float param_4 = beamLen;
+    float param_5 = curRadius;
+    float param_6 = curSpacing;
+    float param_7 = curWidth;
+    float param_8 = frac;
+    float param_9 = trailAlpha;
+    RailRibbonHeader param_10 = hdr;
+    float3 param_11;
+    float3 param_12;
+    float param_13;
+    float param_14;
+    bool _416 = helixPoint(param, param_1, param_2, param_3, param_4, param_5, param_6, param_7, param_8, param_9, param_10, param_11, param_12, param_13, param_14);
+    float3 pos = param_11;
+    float3 normal = param_12;
+    float halfW = param_13;
+    float alpha = param_14;
+    if (!_416)
+    {
+        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.fragShaderHandle);
+        return out;
+    }
+    float3 worldPos = pos + (normal * (halfW * sgn));
+    out.gl_Position = (*spvDescriptorSet1.m_437).mvp * float4(worldPos, 1.0);
+    float _451;
+    if (numSegs > 1)
+    {
+        _451 = float(numSegs - 1);
+    }
+    else
+    {
+        _451 = 1.0;
+    }
+    float denom = _451;
+    out.fragUV = float2(float(pi) / denom, float(sgn > 0.0));
+    out.fragColor = float4(hdr.colorDuration.xyz, baseAlpha * alpha);
+    out.fragShaderHandle = 0u;
+    return out;
+}
+

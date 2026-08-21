@@ -118,15 +118,8 @@ static qboolean AliasesLiveBuffer( const vkTemporalHistoryConsumeOwner_t *live,
 		const ralBuffer_t *buffer ) {
 	if ( !live || !buffer ) return qfalse;
 	for ( uint32_t i=0; i<VK_TEMPORAL_HISTORY_CONSUME_MAX_FRAMES; ++i )
-		if ( buffer == live->slots[i].buffer ) return qtrue;
-	return qfalse;
-}
-
-static qboolean AliasesLiveMap( const vkTemporalHistoryConsumeOwner_t *live,
-		const void *mapped ) {
-	if ( !live || !mapped ) return qfalse;
-	for ( uint32_t i=0; i<VK_TEMPORAL_HISTORY_CONSUME_MAX_FRAMES; ++i )
-		if ( mapped == live->slots[i].mapped ) return qtrue;
+		if ( buffer == live->slots[i].gpuBuffer
+				|| buffer == live->slots[i].readbackBuffer ) return qtrue;
 	return qfalse;
 }
 
@@ -149,15 +142,17 @@ static void SanitizeCandidateAliases( vkTemporalHistoryConsumeOwner_t *candidate
 	if ( live && candidate->layout == live->layout ) candidate->layout=NULL;
 	if ( live && candidate->pipeline == live->pipeline ) candidate->pipeline=NULL;
 	for(uint32_t i=0;i<VK_TEMPORAL_HISTORY_CONSUME_MAX_FRAMES;++i){
-		if(AliasesLiveBuffer(live,candidate->slots[i].buffer)){
-			candidate->slots[i].buffer=NULL; candidate->slots[i].mapped=NULL;
-		}
+		if(AliasesLiveBuffer(live,candidate->slots[i].gpuBuffer))
+			candidate->slots[i].gpuBuffer=NULL;
+		if(AliasesLiveBuffer(live,candidate->slots[i].readbackBuffer))
+			candidate->slots[i].readbackBuffer=NULL;
 		for(uint32_t r=0;r<2;++r) if(AliasesLiveGroup(live,candidate->slots[i].groups[r]))
 			candidate->slots[i].groups[r]=NULL;
 		for(uint32_t j=0;j<i;++j){
-			if(candidate->slots[i].buffer==candidate->slots[j].buffer){
-				candidate->slots[i].buffer=NULL; candidate->slots[i].mapped=NULL;
-			}
+			if(candidate->slots[i].gpuBuffer==candidate->slots[j].gpuBuffer)
+				candidate->slots[i].gpuBuffer=NULL;
+			if(candidate->slots[i].readbackBuffer==candidate->slots[j].readbackBuffer)
+				candidate->slots[i].readbackBuffer=NULL;
 			for(uint32_t r=0;r<2;++r) for(uint32_t q=0;q<2;++q)
 				if(candidate->slots[i].groups[r]
 						&& candidate->slots[i].groups[r]==candidate->slots[j].groups[q])
@@ -182,9 +177,29 @@ static void DestroyOwner( vkTemporalHistoryConsumeOwner_t *owner ) {
 	if ( owner->currentDepthView && owner->currentDepthView != owner->currentColorView )
 		Ral_DestroyTextureView( owner->currentDepthView );
 	for ( i = 0; i < VK_TEMPORAL_HISTORY_CONSUME_MAX_FRAMES; ++i ) {
-		if ( owner->slots[i].mapped ) Ral_UnmapBuffer( owner->slots[i].buffer );
-		if ( owner->slots[i].buffer ) Ral_DestroyBuffer( owner->slots[i].buffer );
+		if ( owner->slots[i].readbackBuffer )
+			Ral_DestroyBuffer( owner->slots[i].readbackBuffer );
+		if ( owner->slots[i].gpuBuffer )
+			Ral_DestroyBuffer( owner->slots[i].gpuBuffer );
 	}
+}
+
+static qboolean TransitionBuffer( ralCommandBuffer_t *commandBuffer,
+		ralBuffer_t *buffer, ralResourceUsage_t before,
+		ralResourceUsage_t after, uint32_t beforeStages,
+		uint32_t afterStages ) {
+	ralBufferTransition_t transition;
+	ralResourceTransitionBatch_t batch;
+	if ( !commandBuffer || !buffer ) return qfalse;
+	memset( &transition, 0, sizeof( transition ) );
+	transition.buffer = buffer; transition.size = VK_TEMPORAL_HISTORY_WITNESS_BYTES;
+	transition.before.usage = before; transition.before.shaderStages = beforeStages;
+	transition.after.usage = after; transition.after.shaderStages = afterStages;
+	transition.sourceQueue = transition.destinationQueue = RAL_QUEUE_GRAPHICS;
+	memset( &batch, 0, sizeof( batch ) );
+	batch.bufferTransitions = &transition; batch.bufferTransitionCount = 1;
+	return Ral_CmdTransitionResources( commandBuffer, &batch ) == ralSuccess
+		? qtrue : qfalse;
 }
 
 void VK_TemporalHistoryConsumeInit( vkTemporalHistoryConsumeOwner_t *owner ) {
@@ -232,8 +247,6 @@ qboolean VK_TemporalHistoryConsumeEnsureAfterFence(
 		if ( owner->slots[frameIndex].state != VK_TEMPORAL_HISTORY_CONSUME_EMPTY
 				&& owner->slots[frameIndex].state != VK_TEMPORAL_HISTORY_CONSUME_READY )
 			return qfalse;
-		memset( owner->slots[frameIndex].mapped, 0x7f,
-			VK_TEMPORAL_HISTORY_WITNESS_BYTES );
 		memset( &owner->slots[frameIndex].ticket, 0,
 			sizeof( owner->slots[frameIndex].ticket ) );
 		owner->slots[frameIndex].state = VK_TEMPORAL_HISTORY_CONSUME_READY;
@@ -278,16 +291,24 @@ qboolean VK_TemporalHistoryConsumeEnsureAfterFence(
 	for ( i = 0; i < frameCount; ++i ) {
 		ralBufferCreateInfo_t bci;
 		memset( &bci, 0, sizeof( bci ) ); bci.size = VK_TEMPORAL_HISTORY_WITNESS_BYTES;
-		bci.usage = RAL_BUFFER_STORAGE; bci.memory = RAL_MEMORY_HOST_COHERENT;
+		bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_SRC;
+		bci.memory = RAL_MEMORY_DEVICE_LOCAL;
 		bci.debugName = "wired-temporal-history-witness";
-		candidate.slots[i].buffer = Ral_CreateBuffer( key->backend, &bci );
-		if ( !candidate.slots[i].buffer || AliasesLiveBuffer(owner,candidate.slots[i].buffer) ) goto fail;
+		candidate.slots[i].gpuBuffer = Ral_CreateBuffer( key->backend, &bci );
+		if ( !candidate.slots[i].gpuBuffer
+				|| AliasesLiveBuffer(owner,candidate.slots[i].gpuBuffer) ) goto fail;
 		for ( uint32_t j = 0; j < i; ++j )
-			if ( candidate.slots[i].buffer == candidate.slots[j].buffer ) goto fail;
-		candidate.slots[i].mapped = Ral_MapBuffer( candidate.slots[i].buffer );
-		if ( !candidate.slots[i].mapped || AliasesLiveMap(owner,candidate.slots[i].mapped) ) goto fail;
+			if ( candidate.slots[i].gpuBuffer == candidate.slots[j].gpuBuffer ) goto fail;
+		bci.usage = RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ;
+		bci.memory = RAL_MEMORY_HOST_COHERENT;
+		bci.debugName = "wired-temporal-history-witness-readback";
+		candidate.slots[i].readbackBuffer = Ral_CreateBuffer( key->backend, &bci );
+		if ( !candidate.slots[i].readbackBuffer
+				|| candidate.slots[i].readbackBuffer == candidate.slots[i].gpuBuffer
+				|| AliasesLiveBuffer(owner,candidate.slots[i].readbackBuffer) ) goto fail;
 		for ( uint32_t j = 0; j < i; ++j )
-			if ( candidate.slots[i].mapped == candidate.slots[j].mapped ) goto fail;
+			if ( candidate.slots[i].readbackBuffer
+					== candidate.slots[j].readbackBuffer ) goto fail;
 		candidate.slots[i].allocationGeneration = owner->slots[i].allocationGeneration + 1u;
 		if ( !candidate.slots[i].allocationGeneration ) goto fail;
 		for ( r = 0; r < 2; ++r ) {
@@ -298,7 +319,7 @@ qboolean VK_TemporalHistoryConsumeEnsureAfterFence(
 			values[2] = (ralBindingValue_t){ .binding=2, .type=RAL_BIND_SAMPLED_TEXTURE, .textureView=key->historyColorView[r] };
 			values[3] = (ralBindingValue_t){ .binding=3, .type=RAL_BIND_SAMPLED_TEXTURE, .textureView=key->historyDepthView[r] };
 			values[4] = (ralBindingValue_t){ .binding=4, .type=RAL_BIND_SAMPLER, .sampler=candidate.sampler };
-			values[5] = (ralBindingValue_t){ .binding=5, .type=RAL_BIND_STORAGE_BUFFER, .buffer=candidate.slots[i].buffer, .bufferRange=VK_TEMPORAL_HISTORY_WITNESS_BYTES };
+			values[5] = (ralBindingValue_t){ .binding=5, .type=RAL_BIND_STORAGE_BUFFER, .buffer=candidate.slots[i].gpuBuffer, .bufferRange=VK_TEMPORAL_HISTORY_WITNESS_BYTES };
 			memset( &gci, 0, sizeof( gci ) ); gci.layout = candidate.layout;
 			gci.values = values; gci.numValues = 6;
 			gci.debugName = "wired-temporal-history-consume-bg";
@@ -319,7 +340,6 @@ qboolean VK_TemporalHistoryConsumeEnsureAfterFence(
 	candidate.ready = qtrue;
 	DestroyOwner( owner );
 	*owner = candidate;
-	memset( owner->slots[frameIndex].mapped, 0x7f, VK_TEMPORAL_HISTORY_WITNESS_BYTES );
 	owner->slots[frameIndex].state = VK_TEMPORAL_HISTORY_CONSUME_READY;
 	return qtrue;
 fail:
@@ -334,7 +354,7 @@ qboolean VK_TemporalHistoryConsumeRecord(
 		const temporalHistoryFrameView_t *view, float zNear, float zFar ) {
 	vkTemporalHistoryConsumeSlot_t *slot;
 	vkTemporalHistoryConsumePush_t push;
-	ralMemoryBarrier_t memory; ralPipelineBarrierInfo_t barrier;
+	ralBufferCopy_t copy;
 	uint32_t readIndex;
 	if ( !owner || !owner->ready || !owner->capturesRemaining || !commandBuffer
 			|| frameIndex >= owner->frameCount || !plan || !view
@@ -349,22 +369,39 @@ qboolean VK_TemporalHistoryConsumeRecord(
 	readIndex = plan->historyReadIndex;
 	if ( plan->historyValid && plan->historyReadIndex == plan->historyWriteIndex ) return qfalse;
 	slot = &owner->slots[frameIndex];
-	if ( slot->state != VK_TEMPORAL_HISTORY_CONSUME_READY || !slot->buffer
-			|| !slot->mapped || !slot->groups[readIndex] ) return qfalse;
+	if ( slot->state != VK_TEMPORAL_HISTORY_CONSUME_READY || !slot->gpuBuffer
+			|| !slot->readbackBuffer || !slot->groups[readIndex] ) return qfalse;
 	memset( &push, 0, sizeof( push ) ); push.extent[0]=owner->key.width; push.extent[1]=owner->key.height;
 	push.frameLo=(uint32_t)plan->frameId; push.frameHi=(uint32_t)(plan->frameId>>32);
 	push.worldIndex=(uint32_t)owner->key.worldIndex; push.planGeneration=plan->generation;
 	push.allocationGeneration=owner->key.historyAllocationGeneration;
 	push.historyValid=plan->historyValid; push.readIndex=readIndex; push.writeIndex=plan->historyWriteIndex;
 	push.zNear=zNear; push.zFar=zFar;
+	if ( !slot->gpuWritable ) {
+		if ( !TransitionBuffer( commandBuffer, slot->gpuBuffer,
+				RAL_RESOURCE_USAGE_UNDEFINED, RAL_RESOURCE_USAGE_STORAGE_WRITE,
+				0, RAL_STAGE_COMPUTE ) ) return qfalse;
+		slot->gpuWritable = qtrue;
+	}
 	Ral_CmdBindPipeline( commandBuffer, owner->pipeline );
 	Ral_CmdBindBindGroup( commandBuffer, 0, slot->groups[readIndex] );
 	Ral_CmdPushConstants( commandBuffer, RAL_STAGE_COMPUTE, 0, sizeof( push ), &push );
 	Ral_CmdDispatch( commandBuffer, 1, 1, 1 );
-	memset( &memory, 0, sizeof( memory ) ); memory.srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT; memory.dstAccessMask=VK_ACCESS_HOST_READ_BIT;
-	memset( &barrier, 0, sizeof( barrier ) ); barrier.srcStageMask=RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-	barrier.dstStageMask=RAL_PIPELINE_STAGE_HOST_BIT; barrier.memoryBarrierCount=1; barrier.memoryBarriers=&memory;
-	Ral_CmdPipelineBarrierFull( commandBuffer, &barrier );
+	if ( !TransitionBuffer( commandBuffer, slot->gpuBuffer,
+			RAL_RESOURCE_USAGE_STORAGE_WRITE, RAL_RESOURCE_USAGE_COPY_SOURCE,
+			RAL_STAGE_COMPUTE, 0 )
+			|| !TransitionBuffer( commandBuffer, slot->readbackBuffer,
+				slot->hostReadable ? RAL_RESOURCE_USAGE_HOST_READ
+					: RAL_RESOURCE_USAGE_UNDEFINED,
+				RAL_RESOURCE_USAGE_COPY_DESTINATION, 0, 0 ) ) return qfalse;
+	memset( &copy, 0, sizeof( copy ) ); copy.size = VK_TEMPORAL_HISTORY_WITNESS_BYTES;
+	Ral_CmdCopyBuffer( commandBuffer, slot->gpuBuffer, slot->readbackBuffer, &copy );
+	if ( !TransitionBuffer( commandBuffer, slot->readbackBuffer,
+			RAL_RESOURCE_USAGE_COPY_DESTINATION, RAL_RESOURCE_USAGE_HOST_READ, 0, 0 )
+			|| !TransitionBuffer( commandBuffer, slot->gpuBuffer,
+				RAL_RESOURCE_USAGE_COPY_SOURCE, RAL_RESOURCE_USAGE_STORAGE_WRITE,
+				0, RAL_STAGE_COMPUTE ) ) return qfalse;
+	slot->hostReadable = qtrue;
 	memset( &slot->ticket, 0, sizeof( slot->ticket ) );
 	slot->ticket.frameId=plan->frameId; slot->ticket.worldIndex=owner->key.worldIndex;
 	slot->ticket.planGeneration=plan->generation; slot->ticket.historyAllocationGeneration=owner->key.historyAllocationGeneration;
@@ -428,11 +465,17 @@ qboolean VK_TemporalHistoryConsumeCompleteAfterFence(
 		qboolean fenceProven, vkTemporalHistoryConsumeReceipt_t *outReceipt ) {
 	vkTemporalHistoryConsumeSlot_t *slot; vkTemporalHistoryConsumeReceipt_t receipt;
 	const uint32_t *words;
+	ralBufferMapRequest_t mapRequest;
+	ralBufferMapTicket_t mapTicket;
 	if ( !owner || !owner->ready || !fenceProven || frameIndex >= owner->frameCount ) return qfalse;
 	slot=&owner->slots[frameIndex]; if ( slot->state != VK_TEMPORAL_HISTORY_CONSUME_SUBMITTED
-			|| !slot->mapped || !slot->ticket.submitted
+			|| !slot->readbackBuffer || !slot->hostReadable || !slot->ticket.submitted
 			|| !TicketMatchesOwner( owner, frameIndex, &slot->ticket ) ) return qfalse;
-	words=(const uint32_t *)slot->mapped; memset(&receipt,0,sizeof(receipt)); receipt.ticket=slot->ticket;
+	memset( &mapRequest, 0, sizeof( mapRequest ) );
+	mapRequest.mode = RAL_MAP_READ; mapRequest.size = VK_TEMPORAL_HISTORY_WITNESS_BYTES;
+	if ( Ral_BufferMapBegin( slot->readbackBuffer, &mapRequest, &mapTicket )
+			!= ralSuccess || !mapTicket.mappedRange ) return qfalse;
+	words=(const uint32_t *)mapTicket.mappedRange; memset(&receipt,0,sizeof(receipt)); receipt.ticket=slot->ticket;
 	receipt.currentColorRG=words[11]; receipt.currentColorBA=words[12]; receipt.currentDepth=words[13];
 	receipt.previousColorRG=words[14]; receipt.previousColorBA=words[15]; receipt.previousDepth=words[16];
 	receipt.fenceComplete=qtrue;
@@ -450,6 +493,8 @@ qboolean VK_TemporalHistoryConsumeCompleteAfterFence(
 	if ( receipt.ready && slot->ticket.historyValid )
 		receipt.ready = PackedHalf2Finite(words[14])
 			&& PackedHalf2Finite(words[15]) && FloatWordFinitePositive(words[16]);
+	if ( Ral_BufferMapUnmap( slot->readbackBuffer, &mapTicket ) != ralSuccess )
+		return qfalse;
 	owner->latest=receipt; memset(&slot->ticket,0,sizeof(slot->ticket)); slot->state=VK_TEMPORAL_HISTORY_CONSUME_READY;
 	if ( outReceipt ) *outReceipt=receipt; return qtrue;
 }
@@ -460,7 +505,7 @@ qboolean VK_TemporalHistoryConsumeHasLive( const vkTemporalHistoryConsumeOwner_t
 			|| owner->currentColorView || owner->currentDepthView || owner->sampler
 			|| owner->layout || owner->pipeline ) return qtrue;
 	for ( uint32_t i=0; i<VK_TEMPORAL_HISTORY_CONSUME_MAX_FRAMES; ++i )
-		if ( owner->slots[i].buffer || owner->slots[i].mapped
+		if ( owner->slots[i].gpuBuffer || owner->slots[i].readbackBuffer
 				|| owner->slots[i].groups[0] || owner->slots[i].groups[1] ) return qtrue;
 	return qfalse;
 }
