@@ -97,8 +97,13 @@ qboolean Ral_CapabilityProfileFromCaps( ralBackendType_t backendType,
 	Fact(facts,RAL_CAP_MAX_BINDINGS_PER_GROUP,qtrue,64u,qfalse,0u);
 	Fact(facts,RAL_CAP_BINDING_ARRAYS,caps->bindlessTextures,caps->maxBindlessTextures,
 		qtrue,64u);
-	Fact(facts,RAL_CAP_INLINE_DATA,caps->maxPushConstantSize>0u,caps->maxPushConstantSize,
-		qtrue,256u);
+	// Only Vulkan exposes native push constants through this legacy caps field.
+	// Metal/WebGPU/GL lower the same portable inline-data intent to a
+	// backend-owned constant or uniform buffer and must report EMULATED.
+	Fact(facts,RAL_CAP_INLINE_DATA,
+		backendType == RAL_BACKEND_VULKAN && caps->maxPushConstantSize>0u,
+		backendType == RAL_BACKEND_VULKAN ? caps->maxPushConstantSize : 0u,
+		qtrue,caps->maxPushConstantSize >= 128u ? caps->maxPushConstantSize : 256u);
 	Fact(facts,RAL_CAP_SUBMISSION_TIMELINE,caps->timelineSemaphores,1u,qtrue,1u);
 	Fact(facts,RAL_CAP_ASYNC_COMPUTE,caps->asyncCompute,1u,qtrue,1u);
 	Fact(facts,RAL_CAP_ASYNC_TRANSFER,caps->asyncTransfer,1u,qtrue,1u);

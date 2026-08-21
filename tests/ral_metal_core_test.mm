@@ -29,6 +29,8 @@ int main( void ) {
 	CHECK( core != NULL && coreReceipt.backendType == RAL_BACKEND_METAL );
 	CHECK( coreReceipt.caps.dynamicRendering == qtrue );
 	CHECK( coreReceipt.capabilityProfile.backendType == RAL_BACKEND_METAL );
+	CHECK( coreReceipt.capabilityProfile.entries[RAL_CAP_INLINE_DATA].outcome
+		== RAL_CAP_OUTCOME_EMULATED );
 	exactCore = coreReceipt;
 	CHECK( RalMetal_CoreReceiptExact( &coreReceipt, &exactCore ) );
 	exactCore.generation++;

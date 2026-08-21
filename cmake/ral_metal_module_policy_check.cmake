@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+if(NOT DEFINED ROOT)
+	message(FATAL_ERROR "ROOT is required")
+endif()
+set(H "${ROOT}/code/renderer/ral_metal/ral_metal_module.h")
+set(S "${ROOT}/code/renderer/ral_metal/ral_metal_module.mm")
+set(T "${ROOT}/tests/ral_metal_module_test.mm")
+set(C "${ROOT}/CMakeLists.txt")
+set(P "${ROOT}/code/renderercommon/tr_public.h")
+foreach(path IN ITEMS "${H}" "${S}" "${T}" "${C}" "${P}")
+	if(NOT EXISTS "${path}")
+		message(FATAL_ERROR "missing Metal renderer-module contract file: ${path}")
+	endif()
+endforeach()
+file(READ "${H}" HEADER)
+file(READ "${S}" SOURCE)
+file(READ "${T}" TEST)
+file(READ "${C}" CMAKE_SOURCE)
+file(READ "${P}" PUBLIC_ABI)
+string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+20([^0-9]|$)"
+	ref_api_20 "${PUBLIC_ABI}")
+if(NOT ref_api_20)
+	message(FATAL_ERROR "Metal renderer module no longer targets REF_API_VERSION 20")
+endif()
+
+foreach(forbidden IN ITEMS "CAMetalLayer" "MTLDevice" "SDL_Window" "SDL_MetalView"
+	"VkDevice" "VkSwapchain" "WGPUDevice")
+	string(FIND "${HEADER}" "${forbidden}" pos)
+	if(NOT pos EQUAL -1)
+		message(FATAL_ERROR "Metal renderer module header leaked native identity: ${forbidden}")
+	endif()
+endforeach()
+foreach(needle IN ITEMS
+	"WIRED_METAL_MODULE_EXPORT refexport_t *QDECL GetRefAPI"
+	"apiVersion != REF_API_VERSION" "Ral_PresentationHostImportsValid"
+	"RalMetal_CoreCreate" "s_module.imports.PresentationHost.open"
+	"s_module.imports.PresentationHost.borrow"
+	"RalMetal_PresentAdoptBorrowedLayer" "Ral_FrameShellInit"
+	"Ral_FrameShellBegin" "RefreshPresentation"
+	"s_module.imports.PresentationHost.refresh"
+	"RalMetal_PresentAcquire" "RalMetal_PresentClearAndSubmit"
+	"Ral_FrameShellComplete"
+	"Ral_FrameShellCancel" "Ral_FrameShellShutdown"
+	"RalMetal_PresentDestroy( s_module.presentation )"
+	"s_module.imports.PresentationHost.close"
+	"RalMetal_CoreDestroy( s_module.core )" "FillExports( &s_module.exports )")
+	string(FIND "${SOURCE}" "${needle}" pos)
+	if(pos EQUAL -1)
+		message(FATAL_ERROR "Metal renderer module lost ABI/frame lifecycle seam: ${needle}")
+	endif()
+endforeach()
+string(FIND "${SOURCE}" "RalMetal_PresentDestroy( s_module.presentation );" destroy_pos)
+string(FIND "${SOURCE}" "s_module.imports.PresentationHost.close(" close_pos)
+string(FIND "${SOURCE}" "RalMetal_CoreDestroy( s_module.core ); s_module.core = NULL;" core_pos)
+if(destroy_pos EQUAL -1 OR close_pos EQUAL -1 OR core_pos EQUAL -1
+		OR close_pos LESS destroy_pos OR core_pos LESS close_pos)
+	message(FATAL_ERROR "Metal renderer shutdown lost child-before-host-before-core order")
+endif()
+foreach(needle IN ITEMS
+	"dlopen( RAL_METAL_TEST_MODULE" "dlsym( library, \"GetRefAPI\" )"
+	"getRefApi( REF_API_VERSION - 1, &imports ) == NULL"
+	"getRefApi( REF_API_VERSION, &imports ) == NULL"
+	"WiredSdlRalPresentationHost_Create"
+	"getRefApi( REF_API_VERSION, &imports )" "BeginRegistration"
+	"BeginFrame( STEREO_CENTER )" "EndFrame( &frontEnd, &backEnd )"
+	"memcmp( &receipt, &before, sizeof( receipt ) ) == 0"
+	"MUTATE( moduleGeneration )" "MUTATE( frameGeneration )"
+	"MUTATE( host.surfaceGeneration )" "MUTATE( surface.surfaceIdentity )"
+	"WiredSdlRalPresentationHost_RequestResize"
+	"Shutdown( REF_LEVEL_ONLY )" "Shutdown( REF_KEEP_WINDOW )"
+	"Shutdown( REF_UNLOAD_DLL )"
+	"exact.host.ownerIdentity == receipt.host.ownerIdentity"
+	"exports->EndFrame( NULL, NULL )" "exports->initFailed == qtrue")
+	string(FIND "${TEST}" "${needle}" pos)
+	if(pos EQUAL -1)
+		message(FATAL_ERROR "Metal module host lost dynamic ABI/mutation coverage: ${needle}")
+	endif()
+endforeach()
+foreach(needle IN ITEMS
+	"ADD_LIBRARY(\${RENDERER_PREFIX}_metal\${RENDEXT} SHARED"
+	"code/renderer/ral_metal/ral_metal_module.mm"
+	"PROPERTIES LANGUAGE C" "PREFIX \"\""
+	"ADD_EXECUTABLE(ral_metal_module_test tests/ral_metal_module_test.mm)"
+	"ral_sdl_presentation_host"
+	"RAL_METAL_TEST_MODULE=\"$<TARGET_FILE:\${RENDERER_PREFIX}_metal\${RENDEXT}>\"")
+	string(FIND "${CMAKE_SOURCE}" "${needle}" pos)
+	if(pos EQUAL -1)
+		message(FATAL_ERROR "Metal module lost narrow build/host seam: ${needle}")
+	endif()
+endforeach()
+string(FIND "${CMAKE_SOURCE}" "ADD_LIBRARY(\${RENDERER_PREFIX}_metal\${RENDEXT} SHARED" target_begin)
+string(FIND "${CMAKE_SOURCE}" "IF(USE_OPENGL)" target_end)
+if(target_begin EQUAL -1 OR target_end EQUAL -1 OR target_end LESS target_begin)
+	message(FATAL_ERROR "cannot isolate Metal renderer module target")
+endif()
+math(EXPR target_len "${target_end}-${target_begin}")
+string(SUBSTRING "${CMAKE_SOURCE}" ${target_begin} ${target_len} target_span)
+foreach(forbidden IN ITEMS "ral_vulkan" "MoltenVK"
+	"Vulkan.framework" "renderervk" "SDL3::SDL3")
+	string(FIND "${target_span}" "${forbidden}" pos)
+	if(NOT pos EQUAL -1)
+		message(FATAL_ERROR "Metal renderer module gained compatibility backend/clone: ${forbidden}")
+	endif()
+endforeach()
+message(STATUS "RAL Metal renderer-module policy: PASS")

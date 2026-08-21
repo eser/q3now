@@ -242,11 +242,25 @@ typedef enum {
 	RAL_BIND_COMBINED_TEXTURE_SAMPLER
 } ralBindType_t;
 
+// Portable texture-view dimensionality carried by bind-layout entries.  The
+// explicit UNSPECIFIED value keeps legacy initializers source-compatible while
+// allowing WebGPU/Metal backends to reject ambiguous shader interfaces.
+typedef enum {
+	RAL_BIND_TEXTURE_VIEW_UNSPECIFIED = 0,
+	RAL_BIND_TEXTURE_VIEW_1D,
+	RAL_BIND_TEXTURE_VIEW_2D,
+	RAL_BIND_TEXTURE_VIEW_2D_ARRAY,
+	RAL_BIND_TEXTURE_VIEW_CUBE,
+	RAL_BIND_TEXTURE_VIEW_CUBE_ARRAY,
+	RAL_BIND_TEXTURE_VIEW_3D
+} ralBindTextureViewType_t;
+
 typedef struct {
 	uint32_t      binding;
 	ralBindType_t type;
 	uint32_t      count;        // 1 = single; >1 = fixed array; 0 = unbounded (bindless layout only)
 	uint32_t      stageFlags;   // bitmask of RAL_STAGE_*
+	ralBindTextureViewType_t textureViewType; // required for texture entries on portable backends
 } ralBindEntry_t;
 
 typedef struct {

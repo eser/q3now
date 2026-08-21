@@ -4680,6 +4680,13 @@ static void CL_InitRef( void ) {
 	rimp.VK_CreateSurface = VK_CreateSurface;
 #endif
 
+	rimp.PresentationHost.schemaVersion = RAL_PRESENTATION_HOST_SCHEMA_VERSION;
+	rimp.PresentationHost.context = NULL;
+	rimp.PresentationHost.open = RALimp_PresentationOpen;
+	rimp.PresentationHost.refresh = RALimp_PresentationRefresh;
+	rimp.PresentationHost.borrow = RALimp_PresentationBorrow;
+	rimp.PresentationHost.close = RALimp_PresentationClose;
+
 	ret = GetRefAPI( REF_API_VERSION, &rimp );
 
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "-------------------------------\n");

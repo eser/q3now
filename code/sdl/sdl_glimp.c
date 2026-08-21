@@ -3,6 +3,9 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include <SDL3/SDL.h>
+#if defined(__APPLE__)
+#	include <SDL3/SDL_metal.h>
+#endif
 #ifdef USE_VULKAN_API
 #	include <SDL3/SDL_vulkan.h>
 #endif
@@ -34,10 +37,22 @@ typedef enum {
 	RSERR_UNKNOWN
 } rserr_t;
 
+typedef enum {
+	WIRED_WINDOW_API_OPENGL = 1,
+	WIRED_WINDOW_API_VULKAN,
+	WIRED_WINDOW_API_METAL
+} wiredWindowApi_t;
+
 glwstate_t glw_state;
 
 SDL_Window *SDL_window = NULL;
 static SDL_GLContext SDL_glContext = NULL;
+static ralPresentationHostReceipt_t s_ralPresentationReceipt;
+#if defined(__APPLE__)
+static SDL_MetalView s_ralMetalView = NULL;
+static uint64_t s_ralPresentationGeneration;
+static glconfig_t s_ralPresentationConfig;
+#endif
 #ifdef USE_VULKAN_API
 static PFN_vkGetInstanceProcAddr qvkGetInstanceProcAddr;
 #endif
@@ -47,6 +62,20 @@ cvar_t *r_stereoEnabled;
 #if defined(__APPLE__) && defined(USE_VULKAN_API)
 static cvar_t *r_metalHUD;
 #endif
+
+static void RALimp_DestroyMetalView( void ) {
+#if defined(__APPLE__)
+	if ( s_ralMetalView ) {
+		SDL_Metal_DestroyView( s_ralMetalView );
+		s_ralMetalView = NULL;
+	}
+#endif
+}
+
+static void RALimp_ForgetPresentationReceipt( void ) {
+	memset( &s_ralPresentationReceipt, 0,
+		sizeof( s_ralPresentationReceipt ) );
+}
 
 /*
 ===============
@@ -71,6 +100,8 @@ void GLimp_Shutdown( qboolean unloadDLL )
 	}
 
 	if ( SDL_window ) {
+		RALimp_DestroyMetalView();
+		RALimp_ForgetPresentationReceipt();
 		STALLTRACE( "SDL_DestroyWindow", SDL_DestroyWindow( SDL_window ) );
 		SDL_window = NULL;
 	}
@@ -202,7 +233,8 @@ static SDL_HitTestResult SDL_HitTestFunc( SDL_Window *win, const SDL_Point *area
 GLimp_SetMode
 ===============
 */
-static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vulkan )
+static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
+		wiredWindowApi_t windowApi )
 {
 	glconfig_t *config = glw_state.config;
 	int perChannelColorBits;
@@ -213,13 +245,21 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 	int y;
 	SDL_WindowFlags flags = 0; // SDL3: windows are shown by default; SDL_WINDOW_SHOWN removed
 
+	if ( windowApi == WIRED_WINDOW_API_VULKAN ) {
 #ifdef USE_VULKAN_API
-	if ( vulkan ) {
 		flags |= SDL_WINDOW_VULKAN;
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Initializing Vulkan display\n");
-	} else
+#else
+		return RSERR_FATAL_ERROR;
 #endif
-	{
+	} else if ( windowApi == WIRED_WINDOW_API_METAL ) {
+#if defined(__APPLE__)
+		flags |= SDL_WINDOW_METAL;
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Initializing Metal display\n" );
+#else
+		return RSERR_FATAL_ERROR;
+#endif
+	} else {
 		flags |= SDL_WINDOW_OPENGL;
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Initializing OpenGL display\n");
 	}
@@ -350,6 +390,8 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 	{
 		SDL_GetWindowPosition( SDL_window, &x, &y );
 		Com_Log( SEV_DEBUG, LOG_CH(ch_client), "Existing window at %dx%d before being destroyed\n", x, y );
+		RALimp_DestroyMetalView();
+		RALimp_ForgetPresentationReceipt();
 		SDL_DestroyWindow( SDL_window );
 		SDL_window = NULL;
 	}
@@ -448,10 +490,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		else
 			perChannelColorBits = 4;
 
-#ifdef USE_VULKAN_API
-		if ( !vulkan )
-#endif
-		{
+		if ( windowApi == WIRED_WINDOW_API_OPENGL ) {
 
 #ifdef __sgi /* Fix for SGIs grabbing too many bits of color */
 			if (perChannelColorBits == 4)
@@ -549,17 +588,12 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 
 		if ( fullscreen )
 		{
-#ifdef USE_VULKAN_API
-			if ( vulkan )
-			{
+			if ( windowApi != WIRED_WINDOW_API_OPENGL ) {
 				// Vulkan: desktop fullscreen (SDL_WINDOW_FULLSCREEN default) is sufficient —
 				// the swapchain handles resolution and format independently.
 				// Exclusive mode with SDL_SetWindowFullscreenMode fails on macOS/MoltenVK
 				// because SDL_PIXELFORMAT_RGB24 is not a valid display mode format.
-			}
-			else
-#endif
-			{
+			} else {
 				SDL_DisplayMode fsMode;
 				SDL_zero( fsMode );
 
@@ -599,16 +633,11 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 			}
 		}
 
-#ifdef USE_VULKAN_API
-		if ( vulkan )
-		{
+		if ( windowApi != WIRED_WINDOW_API_OPENGL ) {
 			config->colorBits = testColorBits;
 			config->depthBits = testDepthBits;
 			config->stencilBits = testStencilBits;
-		}
-		else
-#endif
-		{
+		} else {
 			if ( !SDL_glContext )
 			{
 				if ( ( SDL_glContext = SDL_GL_CreateContext( SDL_window ) ) == NULL )
@@ -633,7 +662,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 			SDL_GL_GetAttribute( SDL_GL_STENCIL_SIZE, &config->stencilBits );
 
 			config->colorBits = realColorBits[0] + realColorBits[1] + realColorBits[2];
-		} // if ( !vulkan )
+		} // OpenGL context
 
 
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Using %d color bits, %d depth, %d stencil display.\n",	config->colorBits, config->depthBits, config->stencilBits );
@@ -715,7 +744,8 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 GLimp_StartDriverAndSetMode
 ===============
 */
-static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vulkan )
+static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS,
+		qboolean fullscreen, wiredWindowApi_t windowApi )
 {
 	rserr_t err;
 
@@ -723,7 +753,7 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 	// MoltenVK reads this process setting while its Metal objects are created.
 	// Keep the diagnostic opt-in and Vulkan-only; canonical performance runs
 	// therefore carry no HUD observer overhead unless explicitly requested.
-	if ( vulkan )
+	if ( windowApi == WIRED_WINDOW_API_VULKAN )
 	{
 		setenv( "MTL_HUD_ENABLED", r_metalHUD && r_metalHUD->integer ? "1" : "0", 1 );
 	}
@@ -751,7 +781,7 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 		// SDL3: set MoltenVK path via hint BEFORE SDL_Init so SDL can find it.
 		// Homebrew installs MoltenVK separately; the bundled copy (from make install)
 		// lives next to the executable in Contents/MacOS/.
-		if ( vulkan )
+		if ( windowApi == WIRED_WINDOW_API_VULKAN )
 		{
 			static char moltenVKPath[ MAX_OSPATH ];
 			Com_sprintf( moltenVKPath, sizeof( moltenVKPath ), "%s/libMoltenVK.dylib", FS_GetInstallBinaryPath() );
@@ -797,7 +827,7 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "SDL using driver \"%s\"\n", driverName );
 	}
 
-	err = GLW_SetMode( mode, modeFS, fullscreen, vulkan );
+	err = GLW_SetMode( mode, modeFS, fullscreen, windowApi );
 
 	switch ( err )
 	{
@@ -855,7 +885,8 @@ void GLimp_Init( glconfig_t *config )
 	}
 
 	// Create the window and set up the context
-	err = GLimp_StartDriverAndSetMode( r_mode->integer, r_modeFullscreen->string, r_fullscreen->integer, qfalse );
+	err = GLimp_StartDriverAndSetMode( r_mode->integer, r_modeFullscreen->string,
+		r_fullscreen->integer, WIRED_WINDOW_API_OPENGL );
 	if ( err != RSERR_OK )
 	{
 		if ( err == RSERR_FATAL_ERROR )
@@ -867,7 +898,8 @@ void GLimp_Init( glconfig_t *config )
 		if ( r_mode->integer != 3 || ( r_fullscreen->integer && atoi( r_modeFullscreen->string ) != 3 ) )
 		{
 			Com_Log( SEV_INFO, LOG_CH(ch_client), "Setting \\r_mode %d failed, falling back on \\r_mode %d\n", r_mode->integer, 3 );
-			if ( GLimp_StartDriverAndSetMode( 3, "", r_fullscreen->integer, qfalse ) != RSERR_OK )
+			if ( GLimp_StartDriverAndSetMode( 3, "", r_fullscreen->integer,
+					WIRED_WINDOW_API_OPENGL ) != RSERR_OK )
 			{
 				// Nothing worked, give up
 				Com_Terminate( TERM_UNRECOVERABLE, "GLimp_Init() - could not load OpenGL subsystem" );
@@ -956,7 +988,8 @@ void VKimp_Init( glconfig_t *config )
 	glw_state.config = config;
 
 	// Create the window and set up the context
-	err = GLimp_StartDriverAndSetMode( r_mode->integer, r_modeFullscreen->string, r_fullscreen->integer, qtrue /* Vulkan */ );
+	err = GLimp_StartDriverAndSetMode( r_mode->integer, r_modeFullscreen->string,
+		r_fullscreen->integer, WIRED_WINDOW_API_VULKAN );
 	if ( err != RSERR_OK )
 	{
 		if ( err == RSERR_FATAL_ERROR )
@@ -967,7 +1000,8 @@ void VKimp_Init( glconfig_t *config )
 
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Setting r_mode %d failed, falling back on r_mode %d\n", r_mode->integer, 3 );
 
-		err = GLimp_StartDriverAndSetMode( 3, "", r_fullscreen->integer, qtrue /* Vulkan */ );
+		err = GLimp_StartDriverAndSetMode( 3, "", r_fullscreen->integer,
+			WIRED_WINDOW_API_VULKAN );
 		if( err != RSERR_OK )
 		{
 			// Nothing worked, give up
@@ -1052,6 +1086,8 @@ void VKimp_Shutdown( qboolean unloadDLL )
 	}
 
 	if ( SDL_window ) {
+		RALimp_DestroyMetalView();
+		RALimp_ForgetPresentationReceipt();
 		STALLTRACE( "SDL_DestroyWindow", SDL_DestroyWindow( SDL_window ) );
 		SDL_window = NULL;
 	}
@@ -1060,6 +1096,190 @@ void VKimp_Shutdown( qboolean unloadDLL )
 		STALLTRACE( "SDL_QuitSubSystem(VIDEO)", SDL_QuitSubSystem( SDL_INIT_VIDEO ) );
 }
 #endif // USE_VULKAN_API
+
+static qboolean RALimp_NextPresentationGeneration( uint64_t *outGeneration ) {
+#if defined(__APPLE__)
+	if ( !outGeneration || s_ralPresentationGeneration == UINT64_MAX - 1u ) {
+		return qfalse;
+	}
+	*outGeneration = ++s_ralPresentationGeneration;
+	return qtrue;
+#else
+	(void)outGeneration;
+	return qfalse;
+#endif
+}
+
+static qboolean RALimp_BuildPresentationReceipt( uint64_t ownerGeneration,
+		uint64_t surfaceGeneration,
+		ralPresentationHostReceipt_t *outReceipt ) {
+#if defined(__APPLE__)
+	ralPresentationHostReceipt_t receipt;
+	SDL_WindowFlags flags;
+	int logicalWidth = 0, logicalHeight = 0, pixelWidth = 0, pixelHeight = 0;
+	if ( !outReceipt || !SDL_window || !s_ralMetalView
+			|| !SDL_GetWindowSize( SDL_window, &logicalWidth, &logicalHeight )
+			|| !SDL_GetWindowSizeInPixels( SDL_window, &pixelWidth, &pixelHeight )
+			|| logicalWidth <= 0 || logicalHeight <= 0
+			|| pixelWidth <= 0 || pixelHeight <= 0 ) return qfalse;
+	flags = SDL_GetWindowFlags( SDL_window );
+	memset( &receipt, 0, sizeof( receipt ) );
+	receipt.schemaVersion = RAL_PRESENTATION_HOST_SCHEMA_VERSION;
+	receipt.backendType = RAL_BACKEND_METAL;
+	receipt.ownerGeneration = ownerGeneration;
+	receipt.surfaceGeneration = surfaceGeneration;
+	receipt.ownerIdentity = (uintptr_t)SDL_window;
+	receipt.logicalWidth = (uint32_t)logicalWidth;
+	receipt.logicalHeight = (uint32_t)logicalHeight;
+	receipt.pixelWidth = (uint32_t)pixelWidth;
+	receipt.pixelHeight = (uint32_t)pixelHeight;
+	receipt.contentScaleX = (float)pixelWidth / (float)logicalWidth;
+	receipt.contentScaleY = (float)pixelHeight / (float)logicalHeight;
+	receipt.visible = ( flags & ( SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED ) )
+		? qfalse : qtrue;
+	receipt.ready = qtrue;
+	if ( !Ral_PresentationHostReceiptValid( &receipt ) ) return qfalse;
+	*outReceipt = receipt;
+	return qtrue;
+#else
+	(void)ownerGeneration; (void)surfaceGeneration; (void)outReceipt;
+	return qfalse;
+#endif
+}
+
+qboolean RALimp_PresentationOpen( void *context,
+		const ralPresentationHostOpenInfo_t *info,
+		ralPresentationHostReceipt_t *outReceipt ) {
+#if defined(__APPLE__)
+	ralPresentationHostReceipt_t receipt;
+	rserr_t error;
+	uint64_t ownerGeneration, surfaceGeneration;
+	(void)context;
+	if ( !outReceipt || !Ral_PresentationHostOpenInfoValid( info )
+			|| info->backendType != RAL_BACKEND_METAL ) return qfalse;
+	if ( Ral_PresentationHostReceiptValid( &s_ralPresentationReceipt ) ) {
+		if ( info->requestVisible && !s_ralPresentationReceipt.visible ) {
+			if ( !SDL_ShowWindow( SDL_window ) || !SDL_SyncWindow( SDL_window ) ) {
+				return qfalse;
+			}
+		} else if ( !info->requestVisible && s_ralPresentationReceipt.visible ) {
+			if ( !SDL_HideWindow( SDL_window ) || !SDL_SyncWindow( SDL_window ) ) {
+				return qfalse;
+			}
+		}
+		return RALimp_PresentationRefresh( context, &s_ralPresentationReceipt,
+			outReceipt );
+	}
+	if ( SDL_window || s_ralMetalView
+			|| !RALimp_NextPresentationGeneration( &ownerGeneration )
+			|| !RALimp_NextPresentationGeneration( &surfaceGeneration ) ) return qfalse;
+	memset( &s_ralPresentationConfig, 0, sizeof( s_ralPresentationConfig ) );
+	glw_state.config = &s_ralPresentationConfig;
+	error = GLimp_StartDriverAndSetMode( r_mode->integer,
+		r_modeFullscreen->string, r_fullscreen->integer, WIRED_WINDOW_API_METAL );
+	if ( error != RSERR_OK ) return qfalse;
+	s_ralMetalView = SDL_Metal_CreateView( SDL_window );
+	if ( !s_ralMetalView || !SDL_Metal_GetLayer( s_ralMetalView ) ) {
+		GLimp_Shutdown( qtrue );
+		return qfalse;
+	}
+	if ( info->requestVisible && ( SDL_GetWindowFlags( SDL_window ) & SDL_WINDOW_HIDDEN ) ) {
+		if ( !SDL_ShowWindow( SDL_window ) || !SDL_SyncWindow( SDL_window ) ) {
+			GLimp_Shutdown( qtrue );
+			return qfalse;
+		}
+	}
+	IN_Init(); HandleEvents(); Key_ClearStates();
+	if ( !RALimp_BuildPresentationReceipt( ownerGeneration, surfaceGeneration,
+			&receipt ) ) {
+		GLimp_Shutdown( qtrue );
+		return qfalse;
+	}
+	s_ralPresentationReceipt = receipt;
+	*outReceipt = receipt;
+	return qtrue;
+#else
+	(void)context; (void)info; (void)outReceipt;
+	return qfalse;
+#endif
+}
+
+qboolean RALimp_PresentationRefresh( void *context,
+		const ralPresentationHostReceipt_t *currentReceipt,
+		ralPresentationHostReceipt_t *outReceipt ) {
+#if defined(__APPLE__)
+	ralPresentationHostReceipt_t candidate;
+	uint64_t nextGeneration;
+	(void)context;
+	if ( !outReceipt
+			|| !Ral_PresentationHostReceiptExact( currentReceipt,
+				&s_ralPresentationReceipt )
+			|| !RALimp_BuildPresentationReceipt( currentReceipt->ownerGeneration,
+				currentReceipt->surfaceGeneration, &candidate ) ) return qfalse;
+	if ( candidate.logicalWidth != currentReceipt->logicalWidth
+			|| candidate.logicalHeight != currentReceipt->logicalHeight
+			|| candidate.pixelWidth != currentReceipt->pixelWidth
+			|| candidate.pixelHeight != currentReceipt->pixelHeight
+			|| candidate.contentScaleX != currentReceipt->contentScaleX
+			|| candidate.contentScaleY != currentReceipt->contentScaleY
+			|| candidate.visible != currentReceipt->visible ) {
+		if ( !RALimp_NextPresentationGeneration( &nextGeneration )
+				|| !RALimp_BuildPresentationReceipt( currentReceipt->ownerGeneration,
+					nextGeneration, &candidate ) ) return qfalse;
+	}
+	s_ralPresentationReceipt = candidate;
+	*outReceipt = candidate;
+	return qtrue;
+#else
+	(void)context; (void)currentReceipt; (void)outReceipt;
+	return qfalse;
+#endif
+}
+
+qboolean RALimp_PresentationBorrow( void *context,
+		const ralPresentationHostReceipt_t *currentReceipt,
+		ralPresentationSurfaceBorrow_t *outBorrow ) {
+#if defined(__APPLE__)
+	ralPresentationSurfaceBorrow_t borrow;
+	void *layer;
+	(void)context;
+	if ( !outBorrow || !Ral_PresentationHostReceiptExact( currentReceipt,
+			&s_ralPresentationReceipt ) || !s_ralMetalView ) return qfalse;
+	layer = SDL_Metal_GetLayer( s_ralMetalView );
+	if ( !layer ) return qfalse;
+	memset( &borrow, 0, sizeof( borrow ) );
+	borrow.schemaVersion = RAL_PRESENTATION_HOST_SCHEMA_VERSION;
+	borrow.backendType = RAL_BACKEND_METAL;
+	borrow.ownerGeneration = currentReceipt->ownerGeneration;
+	borrow.surfaceGeneration = currentReceipt->surfaceGeneration;
+	borrow.ownerIdentity = currentReceipt->ownerIdentity;
+	borrow.surfaceIdentity = (uintptr_t)layer;
+	borrow.ready = qtrue;
+	if ( !Ral_PresentationSurfaceBorrowValid( &borrow ) ) return qfalse;
+	*outBorrow = borrow;
+	return qtrue;
+#else
+	(void)context; (void)currentReceipt; (void)outBorrow;
+	return qfalse;
+#endif
+}
+
+qboolean RALimp_PresentationClose( void *context,
+		const ralPresentationHostReceipt_t *currentReceipt,
+		ralPresentationHostCloseMode_t mode ) {
+	(void)context;
+	if ( !Ral_PresentationHostReceiptExact( currentReceipt,
+			&s_ralPresentationReceipt )
+			|| ( mode != RAL_PRESENTATION_HOST_KEEP_OWNER
+				&& mode != RAL_PRESENTATION_HOST_DESTROY_OWNER ) ) return qfalse;
+	if ( mode == RAL_PRESENTATION_HOST_KEEP_OWNER ) return qtrue;
+	GLimp_Shutdown( qtrue );
+	RALimp_ForgetPresentationReceipt();
+#if defined(__APPLE__)
+	memset( &s_ralPresentationConfig, 0, sizeof( s_ralPresentationConfig ) );
+#endif
+	return qtrue;
+}
 
 
 /*

@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "ral_metal_core.h"
+#include "ral_metal_internal.h"
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
@@ -23,7 +24,71 @@ struct ralMetalCore_s {
 	ralCaps_t caps;
 	ralCapabilityProfile_t capabilityProfile;
 	ralMemoryFailureLedger_t failureLedger;
+	qboolean deviceLost;
 };
+
+id<MTLDevice> RalMetal_CoreNativeDevice( ralMetalCore_t *core ) {
+	return core ? core->device : nil;
+}
+
+id<MTLCommandQueue> RalMetal_CoreNativeQueue( ralMetalCore_t *core ) {
+	return core ? core->queue : nil;
+}
+
+qboolean RalMetal_CoreMatchesReceipt( ralMetalCore_t *core,
+		const ralMetalCoreReceipt_t *receipt ) {
+	return ( core && core->deviceLost != qtrue && receipt
+		&& RalMetal_CoreReceiptExact( receipt, receipt )
+		&& receipt->generation == core->generation
+		&& receipt->backendIdentity == (uintptr_t)core
+		&& receipt->deviceIdentity == (uintptr_t)(void *)core->device
+		&& receipt->queueIdentity == (uintptr_t)(void *)core->queue ) ? qtrue : qfalse;
+}
+
+qboolean RalMetal_CoreBeginCommand( ralMetalCore_t *core, uint64_t generation,
+		ralCommandLifecycle_t *outLifecycle, ralCommandReceipt_t *outRecording ) {
+	ralCommandLifecycle_t lifecycle;
+	ralCommandReceipt_t recording;
+	uint64_t *token;
+	if ( !core || !outLifecycle || !outRecording || generation == 0u
+			|| generation == UINT64_MAX
+			|| core->deviceLost == qtrue || core->submissionGeneration == UINT64_MAX
+			|| core->commandTokenCursor >= RAL_METAL_MAX_CONFORMANCE_RUNS ) return qfalse;
+	token = &core->commandTokens[core->commandTokenCursor];
+	*token = core->generation + core->commandTokenCursor + 1u;
+	Ral_CommandLifecycleInit( &lifecycle, (const ralBackend_t *)core,
+		(const ralCommandBuffer_t *)token, RAL_QUEUE_GRAPHICS );
+	lifecycle.generation = generation - 1u;
+	if ( Ral_CommandLifecyclePublishBegin( &lifecycle, &recording ) != ralSuccess )
+		return qfalse;
+	*outLifecycle = lifecycle;
+	*outRecording = recording;
+	return qtrue;
+}
+
+qboolean RalMetal_CorePublishSubmission( ralMetalCore_t *core,
+		ralCommandLifecycle_t *commandLifecycle,
+		const ralCommandReceipt_t *executable,
+		ralSubmissionReceipt_t *outSubmission ) {
+	ralSubmissionLifecycle_t submissionLifecycle;
+	ralCommandLifecycle_t *commands[1];
+	ralSubmissionReceipt_t submission;
+	if ( !core || !commandLifecycle || !executable || !outSubmission
+			|| core->commandTokenCursor >= RAL_METAL_MAX_CONFORMANCE_RUNS
+			|| core->submissionGeneration == UINT64_MAX ) return qfalse;
+	if ( commandLifecycle->commandIdentity != (const ralCommandBuffer_t *)
+			&core->commandTokens[core->commandTokenCursor] ) return qfalse;
+	Ral_SubmissionLifecycleInit( &submissionLifecycle, (const ralBackend_t *)core,
+		RAL_QUEUE_GRAPHICS );
+	submissionLifecycle.generation = core->submissionGeneration;
+	commands[0] = commandLifecycle;
+	if ( Ral_SubmissionLifecyclePublish( &submissionLifecycle, commands, executable,
+			1u, &submission ) != ralSuccess ) return qfalse;
+	core->submissionGeneration = submissionLifecycle.generation;
+	core->commandTokenCursor++;
+	*outSubmission = submission;
+	return qtrue;
+}
 
 static qboolean CoreReceiptValid( const ralMetalCoreReceipt_t *receipt ) {
 	return ( receipt && receipt->schemaVersion == RAL_METAL_CORE_SCHEMA_VERSION
@@ -199,6 +264,7 @@ qboolean RalMetal_OffscreenConformance( ralMetalCore_t *core,
 		uint64_t byteCount, ralMetalOffscreenReceipt_t *outReceipt ) {
 	ralMetalOffscreenReceipt_t receipt;
 	if ( !core || !core->device || !core->queue || !outReceipt || byteCount == 0u
+			|| core->deviceLost == qtrue
 			|| byteCount > UINT64_C(1048576)
 			|| core->commandTokenCursor >= RAL_METAL_MAX_CONFORMANCE_RUNS
 			|| core->submissionGeneration >= UINT64_MAX - 1u
@@ -369,13 +435,15 @@ qboolean RalMetal_CorePublishDeviceLoss( ralMetalCore_t *core,
 	ralMemoryFailureLedger_t candidate;
 	ralMemoryFailureReceipt_t receipt;
 	if ( !core || !event || !outReceipt || event->backendType != RAL_BACKEND_METAL
-			|| event->cause != RAL_MEMORY_FAILURE_DEVICE_LOST ) return qfalse;
+			|| event->cause != RAL_MEMORY_FAILURE_DEVICE_LOST
+			|| core->deviceLost == qtrue ) return qfalse;
 	candidate = core->failureLedger;
 	if ( !Ral_MemoryFailureLedgerPublish( &candidate, event )
 			|| !Ral_MemoryFailureLedgerGet( &candidate, &receipt )
 			|| receipt.action != RAL_MEMORY_RECOVERY_RECREATE_BACKEND
 			|| !Ral_MemoryFailureReceiptExact( &receipt, &receipt ) ) return qfalse;
 	core->failureLedger = candidate;
+	core->deviceLost = qtrue;
 	*outReceipt = receipt;
 	return qtrue;
 }
