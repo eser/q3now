@@ -181,6 +181,25 @@ HOME_PARENT="$(mktemp -d -t wired-corner-XXXXXX 2>/dev/null || mktemp -d)"
 HOME_DIR="$HOME_PARENT/q3now-preview"
 SELF_TMP="$HOME_PARENT"   # fold into the EXIT cleanup
 mkdir -p "$HOME_DIR/base/screenshots"
+
+# WIRED_CONTENT_ROOT — run against a pak you just built instead of the installed
+# one.
+#
+# Without this the gate only sets fs_homepath, so the engine loads its content
+# from the INSTALL path and a freshly built pak is never seen. That is silent and
+# it lies in the worst direction: edit a .wui, rebuild the pak, run the gate, and
+# the "before" and "after" frames come out identical — which reads as "the change
+# is harmless" when it actually means "the change never loaded". Measured by
+# renaming a button's label and watching the old label still render.
+#
+# Staging the pak into the sandbox home and pointing fs_basepath at it is the
+# same recipe the ral-*-check.sh gates use.
+if [ -n "${WIRED_CONTENT_ROOT:-}" ]; then
+    for _pak in "$WIRED_CONTENT_ROOT"/base/*.sw3z "$WIRED_CONTENT_ROOT"/base/*.pk3; do
+        [ -e "$_pak" ] && cp "$_pak" "$HOME_DIR/base/"
+    done
+fi
+
 HOME_NATIVE="$HOME_DIR"
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) HOME_NATIVE="$(cygpath -w "$HOME_DIR")" ;; esac
 
@@ -191,6 +210,7 @@ echo "==> WiredUI corner check (SMAA corner-squares, corner-vs-golden, mode=$MOD
     cd "$WIRED_DIR" || exit 1
     timeout 90 "$WIRED" \
         +set fs_homepath "$HOME_NATIVE" \
+        ${WIRED_CONTENT_ROOT:+ +set fs_basepath "$HOME_NATIVE"} \
         +set com_automated 1 +set s_initsound 0 \
         +set r_fullscreen 0 +set r_mode -1 +set r_customwidth "$W" +set r_customheight "$H" \
         +set r_smaa 1 \
