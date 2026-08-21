@@ -10,6 +10,8 @@
 // Wrapper differences from `ingame_scoreboard_ctf`: alignY center +
 // Disconnect/Continue footer (same as `end_scoreboard_tdm`).
 
+#include "ui/widgets/qw_button.wui"
+
 menuDef {
 	name "end_scoreboard_ctf"
 	layer "hud"
@@ -109,8 +111,8 @@ menuDef {
 				height FIT
 				width PERCENT 1.0
 
-				itemDef { name "btn_disconnect" type 1 rect 0 0 0.18 0.04 height FIT text "Disconnect" textalign 1 font $font_sans 13       forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { exec "disconnect" } }
-				itemDef { name "btn_continue"   type 1 rect 0 0 0.18 0.04 height FIT text "Continue"   textalign 1 font $font_sans_bold 13 forecolor $accent  forecolor.active $accent visible 1 grow 0 action { exec "vstr nextmap" } }
+				QW_BUTTON("btn_disconnect", "Disconnect", $boneDim, { exec "disconnect" }, 0.18)
+				QW_BUTTON("btn_continue", "Continue", $accent, { exec "vstr nextmap" }, 0.18)
 			}
 		}
 	}
