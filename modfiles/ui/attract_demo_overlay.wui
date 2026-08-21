@@ -51,8 +51,8 @@ menuDef {
 		borderBottom 1px $poster_red
 		grow 0
 
-		itemDef { type 0 rect 0 0 1 3vh height FIT width 24vw text "[REC] DEMO" textalign 0 font $font_mono 17 forecolor $poster_red decoration visible 1 grow 1 }
-		itemDef { type 0 rect 0 0 1 3vh height FIT width 20vw text "12:04.7"    textalign 2 font $font_mono 17 forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		itemDef { type 0vh height FIT width 24vw text "[REC] DEMO" textalign 0 font $font_mono 17 forecolor $poster_red decoration visible 1 grow 1 }
+		itemDef { type 0vh height FIT width 20vw text "12:04.7"    textalign 2 font $font_mono 17 forecolor $attract_ink_hi decoration visible 1 grow 0 }
 	}
 
 	// ── big red index (bottom-left, poster element) ──────────────────
@@ -87,7 +87,7 @@ menuDef {
 		background 0.039 0.035 0.031 0.42
 		grow 0
 
-		itemDef { type 0 rect 0 0 1 3vh height FIT width 50vw text "Q3DM17 · THE LONGEST YARD" textalign 0 font $font_mono 16 forecolor $bone          decoration visible 1 grow 1 }
-		itemDef { type 0 rect 0 0 1 3vh height FIT width 30vw text "RANGER 14 · KEEL 11"        textalign 2 font $font_mono 16 forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		itemDef { type 0vh height FIT width 50vw text "Q3DM17 · THE LONGEST YARD" textalign 0 font $font_mono 16 forecolor $bone          decoration visible 1 grow 1 }
+		itemDef { type 0vh height FIT width 30vw text "RANGER 14 · KEEL 11"        textalign 2 font $font_mono 16 forecolor $attract_ink_hi decoration visible 1 grow 0 }
 	}
 }

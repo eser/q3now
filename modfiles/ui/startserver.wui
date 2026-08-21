@@ -112,7 +112,7 @@ menuDef {
 				}
 
 				// Vertical gap so the pool button row doesn't touch the map list.
-				itemDef { name "pool_gap" type container rect 0 0 1 0 height FIXED 8px grow 0 visible 1 }
+				itemDef { name "pool_gap" type container height FIXED 8px grow 0 visible 1 }
 
 				// Pool management buttons (cvarTest-gated pairs: Add/Remove share a
 				// slot, Favorite/Unfavorite share a slot — only ~3 show at once).

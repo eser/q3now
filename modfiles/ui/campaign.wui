@@ -127,9 +127,9 @@ menuDef {
 				background $panelDeep
 				border 1px $line
 
-				itemDef { name "status_kicker" type 0 rect 0 0 1 0.025 height FIT text "◆ STATUS" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 }
+				itemDef { name "status_kicker" type 0 height FIT text "◆ STATUS" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 }
 
-				itemDef { name "status_head" type 0 rect 0 0 1 0.05 height FIT text "ARENA COMBAT ONLY" textalign 0 font $font_sans_bold 32 forecolor $bone decoration visible 1 grow 0 }
+				itemDef { name "status_head" type 0 height FIT text "ARENA COMBAT ONLY" textalign 0 font $font_sans_bold 32 forecolor $bone decoration visible 1 grow 0 }
 
 				itemDef {
 					name "status_body"
@@ -187,8 +187,8 @@ menuDef {
 				border 1px $line
 				action { open "startserver" scene }
 
-				itemDef { name "route_host_title" type 0 rect 0 0 1 0.035 height FIT text "HOST A MATCH" textalign 0 font $font_sans 20 forecolor $bone forecolor.active $accent visible 1 grow 0 }
-				itemDef { name "route_host_sub"   type 0 rect 0 0 1 0.025 height FIT text "pick a map and gametype · fill it with bots" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "route_host_title" type 0 height FIT text "HOST A MATCH" textalign 0 font $font_sans 20 forecolor $bone forecolor.active $accent visible 1 grow 0 }
+				itemDef { name "route_host_sub"   type 0 height FIT text "pick a map and gametype · fill it with bots" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 			}
 
 			itemDef {
@@ -203,8 +203,8 @@ menuDef {
 				border 1px $line
 				action { open "servers" scene }
 
-				itemDef { name "route_join_title" type 0 rect 0 0 1 0.035 height FIT text "JOIN BATTLE" textalign 0 font $font_sans 20 forecolor $bone forecolor.active $accent visible 1 grow 0 }
-				itemDef { name "route_join_sub"   type 0 rect 0 0 1 0.025 height FIT text "browse running servers" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "route_join_title" type 0 height FIT text "JOIN BATTLE" textalign 0 font $font_sans 20 forecolor $bone forecolor.active $accent visible 1 grow 0 }
+				itemDef { name "route_join_sub"   type 0 height FIT text "browse running servers" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 			}
 
 			itemDef { name "body_spacer" type container grow 1 decoration visible 1 }

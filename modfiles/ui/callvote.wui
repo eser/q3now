@@ -56,8 +56,8 @@ menuDef {
 			width PERCENT 0.46
 			height PERCENT 0.86
 
-			itemDef { name "header" type 0 rect 0 0 1 0.06 height FIT text "Call Vote" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
-			itemDef { name "subheader" type 0 rect 0 0 1 0.03 height FIT text "Propose a server-wide vote. Active players must agree to pass." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { name "header" type 0 height FIT text "Call Vote" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
+			itemDef { name "subheader" type 0 height FIT text "Propose a server-wide vote. Active players must agree to pass." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
 
 			// Scrollable vote body. `grow 1` + `height GROW` make this box fill
 			// the popup height left after the pinned header/subheader (top) and
@@ -80,14 +80,14 @@ menuDef {
 				padding 0.005 0.01
 
 				// ── Quick votes (no parameter, fire-and-close) ─────────────
-				itemDef { name "cat_quick_label" type 0 rect 0 0 1 0.025 height FIT text "QUICK VOTES" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "cat_quick_label" type 0 height FIT text "QUICK VOTES" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
 				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Restart Map" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote map_restart" ; close } }
 				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Next Map" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote nextmap" ; close } }
 				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Shuffle Teams" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote shuffle" ; close } }
 
 				// ── Parameter votes (spinner picks value, button submits) ──
-				itemDef { name "cat_param_label" type 0 rect 0 0 1 0.025 height FIT text "PARAMETER VOTES" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "cat_param_label" type 0 height FIT text "PARAMETER VOTES" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
 				itemDef { name "row_timelimit" type spinner rect 0.005 0 0.95 0.035 height FIXED 36px width PERCENT 0.95 text "Timelimit" textalign 0 font $font_sans 13 forecolor $bone cvarSpinner "ui_voteTimelimit" 5 5 30 5 visible 1 grow 0 }
 				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 32px width PERCENT 0.95 text "Vote Timelimit" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "callvote g_timelimit $ui_voteTimelimit" ; close } }
@@ -107,7 +107,7 @@ menuDef {
 				// Overload (7) and Harvester (8) stay out for a different reason —
 				// FEAT_OVERLOAD/FEAT_HARVESTER are 0 (MISSIONPACK undefined), so
 				// their entities are compiled away entirely.
-				itemDef { name "cat_gametype_label" type 0 rect 0 0 1 0.025 height FIT text "GAMETYPE VOTE" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "cat_gametype_label" type 0 height FIT text "GAMETYPE VOTE" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
 				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Deathmatch" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 0" ; close } }
 				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Duel" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 1" ; close } }
@@ -122,7 +122,7 @@ menuDef {
 				// submit button issues `callvote kick <player>`, matching the
 				// ListBox-selection → command convention already used by the
 				// parameter-vote submit buttons above.
-				itemDef { name "cat_kick_label" type 0 rect 0 0 1 0.025 height FIT text "KICK VOTE" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "cat_kick_label" type 0 height FIT text "KICK VOTE" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
 				itemDef {
 					name "kicklist"
@@ -145,7 +145,7 @@ menuDef {
 				// ── Map vote — allmaps feeder + submit ─────────────────────
 				// feeder "allmaps" is the same map feeder startserver.wui uses.
 				// callvote map <name> is validated (G_MapExist) in Cmd_CallVote_f:1494.
-				itemDef { name "cat_map_label" type 0 rect 0 0 1 0.025 height FIT text "MAP VOTE" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "cat_map_label" type 0 height FIT text "MAP VOTE" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
 				itemDef {
 					name "maplist"
@@ -175,7 +175,7 @@ menuDef {
 				// feeder 7: same rows, but its own selection key
 				// (ui_selectedTeamPlayerNum). Sharing feeder 7 made a pick in
 				// either list overwrite the other one's selection.
-				itemDef { name "cat_leader_label" type 0 rect 0 0 1 0.025 height FIT text "LEADER VOTE (team games)" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "cat_leader_label" type 0 height FIT text "LEADER VOTE (team games)" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
 				itemDef {
 					name "leaderlist"
