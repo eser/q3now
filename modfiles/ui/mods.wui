@@ -31,7 +31,7 @@ menuDef {
 			borderY 1px $line
 
 			itemDef { name "brand" type 0 rect 0 0 0.22 0.04 height FIT text "q3now / Mods" textalign 0 font $font_sans_bold 14 forecolor $accent decoration visible 1 grow 0 }
-			itemDef { name "top_bar_spacer" type container rect 0 0 0 0 grow 1 }
+			itemDef { name "top_bar_spacer" type container grow 1 }
 			itemDef { name "hint" type 0 rect 0 0 0.2 0.04 height FIT text "double-click to load" textalign 2 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 		}
 

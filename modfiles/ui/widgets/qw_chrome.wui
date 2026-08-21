@@ -15,7 +15,7 @@
 #define QW_TOPBAR(BRAND_TEXT) \
 	itemDef { name "top_bar" type container rect 0 0 1 $top_bar_height direction row padding 0.005 0.02 alignY center background $panel borderY 1px $line visible 1 \
 		itemDef { name "brand" type 0 rect 0 0 0.34 0.04 height FIT text BRAND_TEXT textalign 0 font $font_sans_bold 14 forecolor $accent grow 0 decoration visible 1 } \
-		itemDef { name "top_bar_spacer" type container rect 0 0 0 0 grow 1 visible 1 } \
+		itemDef { name "top_bar_spacer" type container grow 1 visible 1 } \
 		itemDef { name "version" type 0 rect 0 0 0.12 0.04 height FIT text "v0.1-dev" textalign 2 font $font_mono 10 forecolor $boneDim grow 0 decoration visible 1 } \
 		itemDef { name "connection" type 0 rect 0 0 0.10 0.04 height FIT text "OFFLINE" textalign 2 font $font_mono 10 forecolor $boneDim grow 0 decoration visible 1 } \
 	}
@@ -26,7 +26,7 @@
 #define QW_TOPBAR_STATUS(BRAND_TEXT, STATUS_CVAR) \
 	itemDef { name "top_bar" type container rect 0 0 1 $top_bar_height direction row padding 0.005 0.02 alignY center background $panel borderY 1px $line visible 1 \
 		itemDef { name "brand" type 0 rect 0 0 0.34 0.04 height FIT text BRAND_TEXT textalign 0 font $font_sans_bold 14 forecolor $accent grow 0 decoration visible 1 } \
-		itemDef { name "top_bar_spacer" type container rect 0 0 0 0 grow 1 visible 1 } \
+		itemDef { name "top_bar_spacer" type container grow 1 visible 1 } \
 		itemDef { name "version" type 0 rect 0 0 0.12 0.04 height FIT text "v0.1-dev" textalign 2 font $font_mono 10 forecolor $boneDim grow 0 decoration visible 1 } \
 		itemDef { name "status" type 0 rect 0 0 0.20 0.04 height FIT textalign 2 font $font_mono 10 forecolor $boneDim cvar STATUS_CVAR grow 0 decoration visible 1 } \
 	}
@@ -41,4 +41,4 @@
 // Grow spacer that pushes a right-aligned cluster to the far edge of a row —
 // e.g. Back on the left, action buttons on the right of one footer row.
 #define QW_FOOTER_SPACER \
-	itemDef { name "footer_spacer" type container rect 0 0 0 0 grow 1 visible 1 }
+	itemDef { name "footer_spacer" type container grow 1 visible 1 }

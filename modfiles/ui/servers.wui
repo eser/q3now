@@ -105,7 +105,7 @@ menuDef {
 					grow 0
 				}
 
-				itemDef { name "filter_spacer" type container rect 0 0 0 0 grow 1 }
+				itemDef { name "filter_spacer" type container grow 1 }
 
 				itemDef {
 					name "btn_refresh"
@@ -202,7 +202,7 @@ menuDef {
 					grow 0
 				}
 
-				itemDef { name "filter2_spacer" type container rect 0 0 0 0 grow 1 }
+				itemDef { name "filter2_spacer" type container grow 1 }
 
 				itemDef {
 					name "refresh_label"
