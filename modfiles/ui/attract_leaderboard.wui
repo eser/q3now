@@ -43,24 +43,6 @@ menuDef {
 		visible 1
 	}
 
-	// ── header: TOP / TIMES (offset-stacked) + map stamp ─────────────
-	itemDef {
-		name "lb_header"
-		stateTest "ui_menuUp"
-		hideState { 1 }
-		type container
-		position absolute
-		top 8vh
-		left 6vw
-		width 50vw
-		height 22vh
-		direction column
-		gap 0.2vh
-		grow 0
-
-		itemDef { name "lb_top"  type 0vh height FIT width PERCENT 1 text "TOP"   textalign 0 font $font_sans_bold 92 forecolor $bone       decoration visible 1 grow 0 }
-		itemDef { name "lb_time" type 0vh height FIT width PERCENT 1 text "TIMES" textalign 0 font $font_sans_bold 92 forecolor $poster_red decoration visible 1 grow 0 }
-	}
 	itemDef {
 		name "lb_stamp"
 		type 0
@@ -77,18 +59,34 @@ menuDef {
 		visible 1
 	}
 
-	// ── rows (fight-card: red index + bone name + mono time) ─────────
-	// Each row is one absolute container with three sized leaves. A top border
-	// rule gives the poster grid. No nested flex without sizing → no collapse.
-	// Rows live in a resolved-size column band instead of five absolutes.
-	// The band carries the geometry the coordinates used to: 36vh down,
-	// 6vw in, and rows contiguous at 11vh each — same result, one box.
+	// ── body: header + rows (fight-card: red index + bone name + mono time) ──
+	// One resolved-size column band replaces six absolutes. It carries what the
+	// coordinates used to: 8vh down, 6vw in, header 22vh, a 6vh gap, then rows
+	// contiguous at 11vh each. A top border rule on each row gives the poster
+	// grid. Spine and stamp stay absolute above — edge furniture, not flow.
 	itemDef {
 		name "lb_rows"
 		type container
 		direction column
 		grow 1
-		padding 36vh 6vw 0 6vw
+		padding 8vh 6vw 0 6vw
+
+		// ── header: TOP / TIMES (offset-stacked) + map stamp ─────────────
+		itemDef {
+			name "lb_header"
+			stateTest "ui_menuUp"
+			hideState { 1 }
+			type container
+			height FIXED 22vh
+			width PERCENT 0.568
+			direction column
+			gap 0.2vh
+			grow 0
+
+			itemDef { name "lb_top"  type 0vh height FIT width PERCENT 1 text "TOP"   textalign 0 font $font_sans_bold 92 forecolor $bone       decoration visible 1 grow 0 }
+			itemDef { name "lb_time" type 0vh height FIT width PERCENT 1 text "TIMES" textalign 0 font $font_sans_bold 92 forecolor $poster_red decoration visible 1 grow 0 }
+		}
+		itemDef { name "gap_lb_rows" type container height FIXED 6vh grow 0 }
 
 		itemDef {
 			name "lb_row1"
