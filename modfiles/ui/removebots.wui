@@ -9,6 +9,8 @@
 // command — uiScript Kick on legacy CNQ3 reads listSelectedRow
 // from the PLAYER_LIST feeder and dispatches clientkick <id>.
 
+#include "ui/widgets/qw_button.wui"
+
 menuDef {
 	name "removebots"
 	layer "popup"
@@ -70,8 +72,8 @@ menuDef {
 				alignX end
 				height FIT
 
-				itemDef { name "btn_kick_bot" type 1 rect 0 0 0.18 0.04 height FIT text "Remove Selected" textalign 1 font $font_sans_bold 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { uiScript Kick } }
-				itemDef { name "btn_close" type 1 rect 0 0 0.12 0.04 height FIT text "Close" textalign 1 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+				QW_BUTTON("btn_kick_bot", "Remove Selected", $accent, { uiScript Kick }, 0.18)
+				QW_BUTTON("btn_close", "Close", $boneDim, { close }, 0.12)
 			}
 		}
 	}
