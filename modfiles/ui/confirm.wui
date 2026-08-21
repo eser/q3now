@@ -5,6 +5,8 @@
 // open this menu via { open "confirm_popup" }. Yes triggers
 // execConfirm (reads ui_confirmAction state key). ESC = No.
 
+#include "ui/widgets/qw_button.wui"
+
 menuDef {
 	name "confirm_popup"
 	layer "popup"
@@ -49,8 +51,8 @@ menuDef {
 				alignX end
 				height FIT
 
-				itemDef { name "btn_no"  type 1 rect 0 0 0.12 0.04 height FIT text "No"  textalign 1 font $font_sans 13       forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
-				itemDef { name "btn_yes" type 1 rect 0 0 0.12 0.04 height FIT text "Yes" textalign 1 font $font_sans_bold 13 forecolor $accent forecolor.active $accent visible 1 grow 0 defaultButton action { execConfirm ; close } }
+				QW_BUTTON("btn_no", "No", $boneDim, { close }, 0.12)
+				QW_BUTTON("btn_yes", "Yes", $accent, { execConfirm ; close }, 0.12)
 			}
 		}
 	}
