@@ -19,13 +19,19 @@ JSONL schema (one object per line):
    "rgba_forecolor":[r,g,b,a],  // forecolor — text/foreground colour
    "fontPointSize":<authored base pt, 0 = inherits WUI_DEFAULT_FONT_SIZE>,
    "dpiScale":<physical/logical ratio; font px = fontPointSize*dpiScale>,
+   "rootScale":<ui_rootSize; what 1rem is worth before dpiScale>,
    "focused":<0|1; exactly one item per menu may be 1>,
    "frame":<cls.framecount>, "menu":"<owning menu name>"}
 
-The fontPointSize/dpiScale/focused fields back the WiredUI computed checks:
+The fontPointSize/dpiScale/rootScale/focused fields back the WiredUI computed
+checks:
   * DPI (#4): the rendered glyph px size = fontPointSize*dpiScale (the text
     emit path multiplies by the same dpiScale this records), so a consumer
     asserts that relation without a pixel capture.
+  * rem (#8): rem-sized lengths are value*rootScale*dpiScale. Recording the
+    root next to the ratio lets a consumer check that a change of ui_rootSize
+    moves rem-sized text and leaves px-sized text alone — the whole point of
+    having a root, and the one thing that cannot be seen from dpiScale.
   * focus (#2): summing "focused" across a menu's items must be <= 1 — the
     invariant that exactly one (or zero) highlight is drawn.
 
@@ -36,7 +42,7 @@ frame's lines are identical, so the consumer may read the last block.
 
 #include "../../client.h"
 #include "cl_wired_ui.h"
-#include "cl_wired_compositor.h"   /* WiredUI_GetDpiScale — DPI verification field */
+#include "cl_wired_compositor.h"   /* WiredUI_GetDpiScale + GetRootScale — DPI/rem fields */
 
 #if FEAT_WIRED_UI
 
@@ -82,8 +88,9 @@ static void WUI_DumpRegionLine( FILE *f, const char *region, const char *kind,
 	WUI_DumpJsonRGBA( f, "rgba_authored", back );
 	fputc( ',', f );
 	WUI_DumpJsonRGBA( f, "rgba_forecolor", fore );
-	fprintf( f, ",\"fontPointSize\":%.6g,\"dpiScale\":%.6g,\"focused\":%d",
-		(double)fontPointSize, (double)WiredUI_GetDpiScale(), focused );
+	fprintf( f, ",\"fontPointSize\":%.6g,\"dpiScale\":%.6g,\"rootScale\":%.6g,\"focused\":%d",
+		(double)fontPointSize, (double)WiredUI_GetDpiScale(),
+		(double)WiredUI_GetRootScale(), focused );
 	/* Physical backing width: lets the DPI gate derive its expected ratio from
 	 * the window the engine ACTUALLY got. On HiDPI the launch width is the
 	 * LOGICAL size (a 1280 request backs at 2560 on a 2x display), so a gate

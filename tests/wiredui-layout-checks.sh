@@ -17,7 +17,16 @@
 #      1.0f was replaced by a real value AND that the text path multiplies by it
 #      (the emit path and the dump read the same WiredUI_GetDpiScale()).
 #
-# Both run off layoutdump.jsonl (r_layoutDump 1) — no pixel capture, no
+#   #8 (rem root scale): rem-sized lengths are value * rootScale * dpiScale,
+#      where rootScale is ui_rootSize — the user's "how big should the UI be",
+#      as distinct from dpiScale's "how many physical pixels is a logical one".
+#      The dump records the root next to the ratio, so this check asserts it is
+#      present, positive and the SAME for every item. Set EXPECT_ROOT_SCALE to
+#      also assert a specific value — that is how a caller proves a change of
+#      ui_rootSize actually reached the resolvers. Absent from pre-rem dumps,
+#      which are tolerated rather than failed.
+#
+# All three run off layoutdump.jsonl (r_layoutDump 1) — no pixel capture, no
 # RenderDoc, no human. The engine is launched to its main menu (no +map) so the
 # menu layout dumps; we never need a screen.
 #
@@ -139,9 +148,69 @@ fi
 # got WRONG before d00a6afd: on Retina a 1280 logical request backs at 2560 (or
 # 5120 for the dpiScale=4 case), so assuming physical/logical == 2 FAILED a
 # CORRECT engine. Deriving from the dump is what makes this fixture-checkable.
+# ── #8 rem gate self-test (gate-has-teeth, no engine) ─────────────────────────
+# Proves the rem assertion rejects the ways a root scale can be wrong: missing
+# from some items, zero (which collapses every rem length), disagreeing between
+# items, and not matching what the caller asked for (ui_rootSize did not reach
+# the resolvers). Same analyzer, synthetic dumps — no engine.
+if [ "${1:-}" = "--rem-self-test" ]; then
+    echo "==> WiredUI rem gate SELF-TEST (gate-has-teeth)"
+    ST="$(mktemp -d -t wired-remst-XXXXXX 2>/dev/null || mktemp -d)"
+    trap 'rm -rf "$ST"' EXIT INT TERM
+
+    # remdump <file> <rootScale...> — one row per root ("-" omits the field).
+    remdump() {
+        local f="$1"; shift
+        : > "$f"
+        local first=1
+        for r in "$@"; do
+            local rf=""; [ "$r" != "-" ] && rf=",\"rootScale\":$r"
+            [ "$first" = 1 ] && printf '{"region":"main","kind":"menu","dpiScale":2,"vidWidthPx":2560,"frame":1,"menu":"main"%s}\n' "$rf" >> "$f"
+            printf '{"region":"row","kind":"item","fontPointSize":14,"dpiScale":2,"vidWidthPx":2560,"focused":1,"activeCvar":"","hasActiveBackcolor":0,"frame":1,"menu":"main"%s}\n' "$rf" >> "$f"
+            first=0
+        done
+    }
+
+    # name | want-rc | EXPECT_ROOT_SCALE | rootScale(s)
+    # want-rc 0 = must ACCEPT, 1 = must REJECT.
+    cases='
+default-root|0||14
+large-root|0||21
+absent-is-tolerated|0||-
+expectation-met|0|21|21
+expectation-missed|1|14|21
+zero-root|1||0
+negative-root|1||-3
+inconsistent-across-items|1||14 21
+'
+    fails=0; n=0
+    printf '%s\n' "$cases" | while IFS='|' read -r name want expect roots; do
+        [ -z "$name" ] && continue
+        n=$((n+1))
+        # shellcheck disable=SC2086
+        remdump "$ST/$name.jsonl" $roots
+        rc=0
+        EXPECT_ROOT_SCALE="$expect" bash "$0" --dpi-analyze "$ST/$name.jsonl" 1280 >"$ST/$name.out" 2>&1 || rc=$?
+        if [ "$rc" = "$want" ]; then
+            printf '  ok   %-28s rc=%s (want %s)\n' "$name" "$rc" "$want"
+        else
+            printf '  FAIL %-28s rc=%s (want %s)\n' "$name" "$rc" "$want"
+            sed 's/^/       /' "$ST/$name.out"
+            fails=$((fails+1))
+        fi
+        echo "$fails" > "$ST/.fails"
+    done
+    fails="$(cat "$ST/.fails" 2>/dev/null || echo 0)"
+    if [ "${fails:-0}" = 0 ]; then
+        echo "==> REM SELF-TEST PASS: gate accepts a sane root AND rejects zero/inconsistent/unmet-expectation (it has teeth)"
+        exit 0
+    fi
+    echo "==> REM SELF-TEST FAIL: $fails wrong"; exit 1
+fi
+
 if [ "${1:-}" = "--dpi-analyze" ]; then
     python3 - "$2" "$3" "${4:-}" <<'PYEOF'
-import json, sys
+import json, os, sys
 path = sys.argv[1]
 logical = float(sys.argv[2])
 fallback = sys.argv[3]
@@ -172,6 +241,26 @@ if len(dpis)!=1:
     print(f"  FAIL #4: dpiScale inconsistent {dpis}"); sys.exit(1)
 if abs(dpis[0]-exp)>1e-3:
     print(f"  FAIL #4: dpiScale={dpis[0]} != real {exp:g} — broken DPI wiring"); sys.exit(1)
+
+# #8 rem: the root must be present, positive and consistent. It is a separate
+# quantity from dpiScale — the display sets the ratio, the user sets the root —
+# so a dump carrying one but not the other cannot answer "did ui_rootSize take".
+# Older dumps predate the field; absent is tolerated, present-but-broken is not.
+roots=sorted({round(float(o["rootScale"]),6) for o in fr if "rootScale" in o})
+if roots:
+    print(f"  [#8 rem] rootScale observed = {roots}")
+    if any(r<=0.0 for r in roots):
+        print(f"  FAIL #8: rootScale non-positive {roots} — rem lengths collapse"); sys.exit(1)
+    if len(roots)!=1:
+        print(f"  FAIL #8: rootScale inconsistent across items {roots}"); sys.exit(1)
+    want=float(os.environ.get("EXPECT_ROOT_SCALE","") or 0.0)
+    if want>0.0 and abs(roots[0]-want)>1e-3:
+        print(f"  FAIL #8: rootScale={roots[0]:g} != expected {want:g} — ui_rootSize did not take"); sys.exit(1)
+    print(f"  PASS #8: rootScale={roots[0]:g}"
+          + (f" == expected {want:g}" if want>0.0 else " (consistent, no expectation set)"))
+else:
+    print("  [#8 rem] rootScale absent from dump — pre-rem build, skipping")
+
 print(f"  PASS #4: dpiScale={dpis[0]:g} == {exp:g}"); sys.exit(0)
 PYEOF
     exit $?

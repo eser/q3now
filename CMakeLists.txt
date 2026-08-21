@@ -458,6 +458,37 @@ SET_TESTS_PROPERTIES(wiredui_dpi_analyzer_contract PROPERTIES
 	TIMEOUT 60
 )
 
+# rem root-scale (#8) analyzer contract.  Same split as the DPI contract above:
+# capturing a dump needs a window, but deciding whether the root scale is sound
+# is a pure function of the dump.  The fixture that earns this test is
+# expectation-missed — a dump whose rootScale does not match what the caller
+# set, i.e. ui_rootSize never reached the resolvers.  That is the failure mode a
+# root scale has and a DPI ratio does not: nothing else on screen changes to
+# give it away, so a silently-ignored setting would otherwise read as a pass.
+ADD_TEST(NAME wiredui_rem_analyzer_contract
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/wiredui-layout-checks.sh
+		--rem-self-test
+)
+SET_TESTS_PROPERTIES(wiredui_rem_analyzer_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.q3now-client;failure.contract;feature.always"
+	TIMEOUT 60
+)
+
+# Second-map Z_Free (#96) analyzer contract.  The live gate needs a BSP-bearing
+# content pak (licensed asset pipeline output), but the crash CLASSIFIER is a
+# pure function of the log: it must reject every zone-consistency terminate
+# (common.c), the "Server crashed" funnel (log.c:878), a FATAL record, a
+# truncated map chain and a non-zero exit.  This runs that classifier over
+# synthetic logs — no engine, no packs, no display — so a gate that could not
+# catch #96 fails the build.
+# Test scripts must parse under macOS's system bash 3.2, which the macOS CI
+# runner uses. A developer machine with Homebrew has bash 5 and will not notice
+# the difference until CI does — and the error bash 3.2 reports points at the
+# end of the file rather than the cause. See the script for the full story.
+ADD_TEST(NAME shell_portability_contract
+	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/shell-portability-check.sh
+)
+
 # Second-map Z_Free (#96) analyzer contract.  The live gate needs a BSP-bearing
 # content pak (licensed asset pipeline output), but the crash CLASSIFIER is a
 # pure function of the log: it must reject every zone-consistency terminate
