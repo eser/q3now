@@ -57,6 +57,13 @@ GOLDEN="${GOLDEN:-$GOLDEN_DEFAULT}"
 # put a suffix after it, which on BSD/macOS is taken as a literal name — the
 # file is created verbatim and the NEXT run refuses because it already exists.
 # Generate first, then add the .py suffix (same fix as smoke.sh).
+# CORNER_MENU — which menu to push before the shot. The corner golden is blessed
+# against "main", so the gate's own assertion only means anything there; this is
+# an override for USING the capture machinery on another menu (e.g. to produce a
+# before/after of a widget change). Point it elsewhere and the corner verdict is
+# noise — read the retained frame, not the deltas.
+CORNER_MENU="${CORNER_MENU:-main}"
+
 ASSERT_PY="$(mktemp "$WIRED_TMP/wired-corner-XXXXXX")".py
 SELF_TMP=""
 # WIRED_KEEP_ARTIFACTS=1 keeps the captured menu frame and prints where it is.
@@ -187,7 +194,7 @@ echo "==> WiredUI corner check (SMAA corner-squares, corner-vs-golden, mode=$MOD
         +set com_automated 1 +set s_initsound 0 \
         +set r_fullscreen 0 +set r_mode -1 +set r_customwidth "$W" +set r_customheight "$H" \
         +set r_smaa 1 \
-        +wait 80 +wui_push main +wait 60 +screenshot cornercap +wait 30 +quit \
+        +wait 80 +wui_push "$CORNER_MENU" +wait 60 +screenshot cornercap +wait 30 +quit \
         >/dev/null 2>&1
 )
 
