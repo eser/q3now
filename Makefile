@@ -1424,6 +1424,15 @@ test-ral-profile-layout-self:
 
 .PHONY: test-ral-profile-layout test-ral-profile-layout-self
 
+test-ral-frame-graph-runtime:
+	@test -n "$${WIRED}" || { echo "usage: make test-ral-frame-graph-runtime WIRED=/absolute/path/to/wired"; exit 64; }
+	@bash tests/ral-frame-graph-runtime-check.sh "$${WIRED}"
+
+test-ral-frame-graph-runtime-self:
+	@bash tests/ral-frame-graph-runtime-check.sh --self-test
+
+.PHONY: test-ral-frame-graph-runtime test-ral-frame-graph-runtime-self
+
 test-ral-profile-host:
 	@test -n "$${WIRED_PROFILE_HOST}" || { echo "usage: make test-ral-profile-host WIRED_PROFILE_HOST=/absolute/path/to/wired_profile_host"; exit 64; }
 	@bash tests/ral-profile-host-lifecycle-check.sh "$${WIRED_PROFILE_HOST}"

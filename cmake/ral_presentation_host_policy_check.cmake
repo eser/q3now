@@ -65,9 +65,9 @@ foreach(needle IN ITEMS "RAL_BACKEND_WEBGPU" "MUTATE_RECEIPT( ownerGeneration )"
 		message(FATAL_ERROR "presentation-host host test lost mutation/WebGPU coverage: ${needle}")
 	endif()
 endforeach()
-string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+20([^0-9]|$)" api20 "${ABI}")
-if(NOT api20 OR NOT ABI MATCHES "ralPresentationHostImports_t PresentationHost")
-	message(FATAL_ERROR "renderer ABI did not advance to native-free presentation host API 20")
+string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+21([^0-9]|$)" api21 "${ABI}")
+if(NOT api21 OR NOT ABI MATCHES "ralPresentationHostImports_t PresentationHost")
+	message(FATAL_ERROR "renderer ABI did not advance to native-free presentation host API 21")
 endif()
 foreach(needle IN ITEMS
 	"rimp.PresentationHost.schemaVersion = RAL_PRESENTATION_HOST_SCHEMA_VERSION"

@@ -162,7 +162,14 @@ int main( void ) {
 
 	memset(&context,0,sizeof(context));cohort=NULL;
 	CHECK(Ral_TransientTextureCohortCreateWithOps(&ci,&ops,&context,&cohort));
+	CHECK(Ral_TransientTextureCohortReleaseFresh(&cohort));CHECK(cohort==NULL);
+	CHECK(context.destroyTextureCount==3u&&context.destroyAllocationCount==1u);
+	CHECK(!Ral_TransientTextureCohortReleaseFresh(&cohort));
+
+	memset(&context,0,sizeof(context));cohort=NULL;
+	CHECK(Ral_TransientTextureCohortCreateWithOps(&ci,&ops,&context,&cohort));
 	CHECK(Ral_TransientTextureCohortBegin(cohort,0u,&planned));
+	CHECK(!Ral_TransientTextureCohortReleaseFresh(&cohort));CHECK(cohort!=NULL);
 	CHECK(Ral_TransientTextureCohortCancel(cohort,&planned,&terminal));
 	CHECK(Ral_TransientTextureCohortReleaseTerminal(&cohort,&terminal));CHECK(cohort==NULL);
 	puts("ral transient texture cohort: PASS");return 0;

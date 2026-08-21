@@ -938,9 +938,9 @@ void	*GL_GetProcAddress( const char *name );
 #ifdef USE_VULKAN_API
 void	VKimp_Init( glconfig_t *config );
 void	VKimp_Shutdown( qboolean unloadDLL );
-void	*VK_GetInstanceProcAddr( VkInstance instance, const char *name );
+void	*VK_GetInstanceProcAddr( void *nativeInstance, const char *name );
 const char *const *VK_GetInstanceExtensions( uint32_t *count );
-qboolean VK_CreateSurface( VkInstance instance, VkSurfaceKHR* pSurface );
+qboolean VK_CreateSurface( void *nativeInstance, uint64_t *outNativeSurface );
 #endif
 
 qboolean RALimp_PresentationOpen( void *context,

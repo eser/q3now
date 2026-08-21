@@ -3602,13 +3602,13 @@ static const char *renderer_name( const VkPhysicalDeviceProperties *props ) {
 // RAL owns the VkInstance; vk.instance is the
 // alias-preserved read-back populated by vk_ral_boot_backend.
 #define INIT_INSTANCE_FUNCTION(func) \
-	q##func = /*(PFN_ ## func)*/ ri.VK_GetInstanceProcAddr(vk.instance, #func); \
+	q##func = /*(PFN_ ## func)*/ ri.VK_GetInstanceProcAddr((void *)vk.instance, #func); \
 	if (q##func == NULL) {											\
 		ri.Terminate( TERM_UNRECOVERABLE, "Failed to find entrypoint %s", #func);	\
 	}
 
 #define INIT_INSTANCE_FUNCTION_EXT(func) \
-	q##func = /*(PFN_ ## func)*/ ri.VK_GetInstanceProcAddr(vk.instance, #func);
+	q##func = /*(PFN_ ## func)*/ ri.VK_GetInstanceProcAddr((void *)vk.instance, #func);
 
 
 #define INIT_DEVICE_FUNCTION(func) \

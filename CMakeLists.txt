@@ -632,6 +632,27 @@ SET_TESTS_PROPERTIES(ral_public_surface_reintroduction_rejected PROPERTIES
 	TIMEOUT 30
 )
 
+ADD_TEST(NAME ral_raw_api_boundary_source_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/ral_raw_api_boundary_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(ral_raw_api_boundary_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.webgpu"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME ral_raw_api_boundary_reintroduction_rejected
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
+		-DPROBE_ROOT=${CMAKE_BINARY_DIR}/ral-raw-api-boundary-probe
+		-P ${CMAKE_SOURCE_DIR}/cmake/ral_raw_api_boundary_reject_check.cmake
+)
+SET_TESTS_PROPERTIES(ral_raw_api_boundary_reintroduction_rejected PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.webgpu"
+	TIMEOUT 30
+)
+
 ADD_TEST(NAME ral_host_symbol_policy_contract
 	COMMAND ${CMAKE_COMMAND}
 		-DARCHIVE=$<TARGET_FILE:ral_vulkan>
@@ -906,6 +927,25 @@ SET_TESTS_PROPERTIES(ral_frame_graph_execution_contract PROPERTIES
 	TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(ral_frame_graph_execution_test
 	ral_frame_graph_execution_contract)
+ADD_EXECUTABLE(ral_frame_graph_transient_test
+	tests/ral_frame_graph_transient_test.c
+	code/renderer/ral_frame_graph/ral_frame_graph.c
+	code/renderer/ral_frame_graph/ral_frame_graph_execution.c
+	code/renderer/ral_frame_graph/ral_frame_graph_transient.c
+	code/renderer/ral_frame_graph/ral_frame_graph_transient_ral.c
+	code/renderer/ral/ral_allocation.c
+	code/renderer/ral/ral_transient.c
+	code/renderer/ral/ral_transient_texture.c
+	code/renderer/ral/ral_transition.c)
+TARGET_INCLUDE_DIRECTORIES(ral_frame_graph_transient_test PRIVATE
+	code/qcommon code/renderer/ral code/renderer/ral_frame_graph code/renderercommon)
+TARGET_COMPILE_OPTIONS(ral_frame_graph_transient_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_frame_graph_transient_contract COMMAND ral_frame_graph_transient_test)
+SET_TESTS_PROPERTIES(ral_frame_graph_transient_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;frame-graph;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_frame_graph_transient_test
+	ral_frame_graph_transient_contract)
 ADD_EXECUTABLE(ral_frame_graph_record_test
 	tests/ral_frame_graph_record_test.c
 	code/renderer/ral_frame_graph/ral_frame_graph.c
@@ -941,11 +981,30 @@ SET_TESTS_PROPERTIES(ral_frame_graph_submit_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.ral;failure.contract;frame-graph;feature.always"
 	TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(ral_frame_graph_submit_test ral_frame_graph_submit_contract)
+ADD_EXECUTABLE(ral_frame_graph_native_receipt_test
+	tests/ral_frame_graph_native_receipt_test.c
+	code/renderer/ral_frame_graph/ral_frame_graph_native_receipt.c)
+TARGET_INCLUDE_DIRECTORIES(ral_frame_graph_native_receipt_test PRIVATE
+	code/qcommon code/renderer/ral code/renderer/ral_frame_graph code/renderercommon)
+TARGET_COMPILE_OPTIONS(ral_frame_graph_native_receipt_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_frame_graph_native_receipt_contract
+	COMMAND ral_frame_graph_native_receipt_test)
+SET_TESTS_PROPERTIES(ral_frame_graph_native_receipt_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;frame-graph;backend.vulkan"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_frame_graph_native_receipt_test
+	ral_frame_graph_native_receipt_contract)
 ADD_TEST(NAME ral_frame_graph_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_frame_graph_policy_check.cmake)
 SET_TESTS_PROPERTIES(ral_frame_graph_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;failure.contract;frame-graph;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_frame_graph_runtime_analyzer_contract
+	COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/ral-frame-graph-runtime-check.sh
+		--self-test)
+SET_TESTS_PROPERTIES(ral_frame_graph_runtime_analyzer_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;frame-graph;backend.vulkan"
 	TIMEOUT 30)
 
 ADD_EXECUTABLE(ral_frame_shell_test
@@ -4083,6 +4142,17 @@ LIST(REMOVE_ITEM RENDERER_COMMON_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/code/rendererc
 AUX_SOURCE_DIRECTORY(code/renderer RENDERER_GL_SRCS)
 AUX_SOURCE_DIRECTORY(code/renderer2 RENDERER_GL2_SRCS)
 AUX_SOURCE_DIRECTORY(code/renderervk RENDERER_VK_SRCS)
+LIST(APPEND RENDERER_VK_SRCS
+	code/renderer/ral_frame_graph/ral_frame_graph.c
+	code/renderer/ral_frame_graph/ral_frame_graph_execution.c
+	code/renderer/ral_frame_graph/ral_frame_graph_transient.c
+	code/renderer/ral_frame_graph/ral_frame_graph_transient_ral.c
+	code/renderer/ral_frame_graph/ral_frame_graph_record.c
+	code/renderer/ral_frame_graph/ral_frame_graph_record_ral.c
+	code/renderer/ral_frame_graph/ral_frame_graph_submit.c
+	code/renderer/ral_frame_graph/ral_frame_graph_submit_ral.c
+	code/renderer/ral_frame_graph/ral_frame_graph_native.c
+	code/renderer/ral_frame_graph/ral_frame_graph_native_receipt.c)
 
 # ── RAL — mandatory Vulkan renderer backend layer ──────────────────────────
 # code/renderer/ral/        — public RAL surface (headers only)

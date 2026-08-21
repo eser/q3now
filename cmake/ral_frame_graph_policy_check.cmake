@@ -7,22 +7,225 @@ file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph.h" HEADER)
 file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph.c" CORE)
 file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_execution.h" EXEC_HEADER)
 file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_execution.c" EXEC_CORE)
+file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_transient.h" TRANSIENT_HEADER)
+file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_transient.c" TRANSIENT_CORE)
+file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_transient_ral.c" RAL_TRANSIENT)
 file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_record.h" RECORD_HEADER)
 file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_record.c" RECORD_CORE)
 file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_record_ral.c" RAL_RECORD)
 file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_submit.h" SUBMIT_HEADER)
 file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_submit.c" SUBMIT_CORE)
 file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_submit_ral.c" RAL_SUBMIT)
+file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_native.h" NATIVE_HEADER)
+file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_native.c" NATIVE_CORE)
+file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_native_receipt.c" NATIVE_RECEIPT)
 file(READ "${ROOT}/tests/ral_frame_graph_test.c" TEST)
 file(READ "${ROOT}/tests/ral_frame_graph_execution_test.c" EXEC_TEST)
+file(READ "${ROOT}/tests/ral_frame_graph_transient_test.c" TRANSIENT_TEST)
 file(READ "${ROOT}/tests/ral_frame_graph_record_test.c" RECORD_TEST)
 file(READ "${ROOT}/tests/ral_frame_graph_submit_test.c" SUBMIT_TEST)
+file(READ "${ROOT}/tests/ral_frame_graph_native_receipt_test.c" NATIVE_TEST)
+file(READ "${ROOT}/tests/ral-frame-graph-runtime-check.sh" NATIVE_RUNTIME)
+file(READ "${ROOT}/code/renderervk/vk_ral_textures.c" PRODUCT_ADAPTER)
 file(READ "${ROOT}/CMakeLists.txt" CMAKE_TEXT)
+file(READ "${ROOT}/Makefile" MAKE_TEXT)
+file(READ "${ROOT}/tests/README.md" README_TEXT)
 
 foreach(forbidden IN ITEMS "Vk[A-Z]" "VK_" "MTL" "WGPU" "SDL_")
   if(HEADER MATCHES "${forbidden}" OR CORE MATCHES "${forbidden}"
       OR EXEC_HEADER MATCHES "${forbidden}" OR EXEC_CORE MATCHES "${forbidden}")
     message(FATAL_ERROR "above-RAL frame graph leaked native API: ${forbidden}")
+  endif()
+endforeach()
+
+foreach(forbidden IN ITEMS "Vk[A-Z]" "VK_" "MTL" "WGPU" "SDL_")
+  if(NATIVE_HEADER MATCHES "${forbidden}" OR NATIVE_CORE MATCHES "${forbidden}"
+      OR NATIVE_RECEIPT MATCHES "${forbidden}")
+    message(FATAL_ERROR "above-RAL native diagnostic leaked native API: ${forbidden}")
+  endif()
+endforeach()
+
+foreach(needle IN ITEMS
+  "RAL_FRAME_GRAPH_NATIVE_SCHEMA_VERSION 1u"
+  "RAL_FRAME_GRAPH_NATIVE_TEXTURE_COUNT 3u"
+  "RAL_FRAME_GRAPH_NATIVE_PASS_COUNT 6u"
+  "RalFrameGraphNative_Run"
+  "RalFrameGraphNative_ReceiptExact")
+  string(FIND "${NATIVE_HEADER}" "${needle}" pos)
+  if(pos EQUAL -1)
+    message(FATAL_ERROR "frame-graph native contract missing: ${needle}")
+  endif()
+endforeach()
+
+foreach(needle IN ITEMS
+  "ral-frame-graph-native schema=([0-9]+)"
+  "(textures,allocations,passes,submits)!=(3,1,6,1)"
+  "saved!=disjoint-physical"
+  "timeline_final!=timeline_base+1"
+  "(completed,retired,ready)!=(1,1,1)"
+  "run_map arena1"
+  "run_map arena17"
+  "PASS ral-frame-graph-runtime analyzer self-test"
+  "VUID-synthetic"
+  "ral-frame-graph-native-failure generation=1")
+  string(FIND "${NATIVE_RUNTIME}" "${needle}" pos)
+  if(pos EQUAL -1)
+    message(FATAL_ERROR "frame-graph native runtime evidence missing: ${needle}")
+  endif()
+endforeach()
+
+foreach(needle IN ITEMS
+  "ral_frame_graph_runtime_analyzer_contract"
+  "tests/ral-frame-graph-runtime-check.sh")
+  string(FIND "${CMAKE_TEXT}" "${needle}" pos)
+  if(pos EQUAL -1)
+    message(FATAL_ERROR "frame-graph runtime analyzer registration missing: ${needle}")
+  endif()
+endforeach()
+
+foreach(needle IN ITEMS
+  "test-ral-frame-graph-runtime:"
+  "test-ral-frame-graph-runtime-self:"
+  "tests/ral-frame-graph-runtime-check.sh")
+  string(FIND "${MAKE_TEXT}" "${needle}" pos)
+  if(pos EQUAL -1)
+    message(FATAL_ERROR "frame-graph runtime make target missing: ${needle}")
+  endif()
+endforeach()
+
+string(FIND "${README_TEXT}" "make test-ral-frame-graph-runtime WIRED=..." pos)
+if(pos EQUAL -1)
+  message(FATAL_ERROR "frame-graph runtime documentation missing")
+endif()
+
+foreach(needle IN ITEMS
+  "ProbeRequirements(backend,state,generation)"
+  "state->probeReceipt.plan.assignments[i].request"
+  "RalFrameGraph_Compile(description,&state->graphPlan)"
+  "RalFrameGraphTransient_Create(backend,&state->materialCreate)"
+  "RalFrameGraphExecution_Compile(&state->executionDescription"
+  "RalFrameGraphRecord_Record(&state->recordDescription"
+  "RalFrameGraphSubmit_Submit(&state->submitDescription"
+  "Ral_WaitTimeline(timeline,timelineFinal,RAL_TIMEOUT_INFINITE)"
+  "RalFrameGraphTransient_Retire(materialization,&submittedBatch,qtrue"
+  "RalFrameGraphTransient_ReleaseTerminal(&materialization,&terminalBatch)"
+  "Ral_WaitIdleAndDrainDeferred(backend)"
+  "*outReceipt=candidate;success=qtrue")
+  string(FIND "${NATIVE_CORE}" "${needle}" pos)
+  if(pos EQUAL -1)
+    message(FATAL_ERROR "frame-graph native transaction seam missing: ${needle}")
+  endif()
+endforeach()
+
+foreach(needle IN ITEMS
+  "ReceiptValid(a) && ReceiptValid(b)"
+  "receipt->allocationCount!=1u"
+  "receipt->savedBytes!=receipt->disjointEquivalentCommittedBytes"
+  "receipt->timelineFinalValue!=receipt->timelineBaseValue+1u"
+  "receipt->timelineCompleted!=qtrue || receipt->retired!=qtrue")
+  string(FIND "${NATIVE_RECEIPT}" "${needle}" pos)
+  if(pos EQUAL -1)
+    message(FATAL_ERROR "frame-graph native receipt seam missing: ${needle}")
+  endif()
+endforeach()
+
+foreach(needle IN ITEMS
+  "REJECT(mutated.graphGeneration++)"
+  "REJECT(mutated.allocationCount++)"
+  "REJECT(mutated.savedBytes++)"
+  "REJECT(mutated.timelineFinalValue++)"
+  "REJECT(mutated.timelineCompleted=qfalse)"
+  "REJECT(mutated.retired=qfalse)")
+  string(FIND "${NATIVE_TEST}" "${needle}" pos)
+  if(pos EQUAL -1)
+    message(FATAL_ERROR "frame-graph native receipt mutation missing: ${needle}")
+  endif()
+endforeach()
+
+foreach(needle IN ITEMS
+  "Q_stricmp( ri.Cmd_Argv( 2 ), \"framegraph\" ) == 0"
+  "generation=++s_ral_frame_graph_diagnostic_generation"
+  "RalFrameGraphNative_Run(s_ral_backend,generation,&receipt)"
+  "ral-frame-graph-native-failure generation=%llu"
+  "ral-frame-graph-native schema=%u generation=%llu")
+  string(FIND "${PRODUCT_ADAPTER}" "${needle}" pos)
+  if(pos EQUAL -1)
+    message(FATAL_ERROR "frame-graph native product adapter missing: ${needle}")
+  endif()
+endforeach()
+
+foreach(forbidden IN ITEMS "Vk[A-Z]" "VK_" "MTL" "WGPU" "SDL_")
+  if(TRANSIENT_HEADER MATCHES "${forbidden}" OR TRANSIENT_CORE MATCHES "${forbidden}"
+      OR RAL_TRANSIENT MATCHES "${forbidden}")
+    message(FATAL_ERROR "above-RAL frame-graph transient owner leaked native API: ${forbidden}")
+  endif()
+endforeach()
+
+foreach(needle IN ITEMS
+  "RAL_FRAME_GRAPH_TRANSIENT_SCHEMA_VERSION 1u"
+  "ralFrameGraphTransientReceipt_t"
+  "disjointEquivalentCommittedBytes"
+  "physicalCommittedBytes"
+  "savedPermille"
+  "RalFrameGraphTransient_CreateWithOps"
+  "RalFrameGraphTransient_GetExecutionBindings"
+  "RalFrameGraphTransient_ReleaseFresh"
+  "RalFrameGraphTransient_ReleaseTerminal"
+  "RalFrameGraphTransient_RalOps")
+  string(FIND "${TRANSIENT_HEADER}" "${needle}" pos)
+  if(pos EQUAL -1)
+    message(FATAL_ERROR "frame-graph transient contract missing: ${needle}")
+  endif()
+endforeach()
+
+foreach(needle IN ITEMS
+  "RequestShapeMatchesPlan(ci)"
+  "Ral_TransientPlanExact(&candidate->receipt.physical.plan"
+  "FindTransientTextureResource"
+  "ComputeMeasurements(&candidate->receipt.physical"
+  "physical->allocations[slot].allocation.committedSize"
+  "physical->plan.outcome==RAL_TRANSIENT_PLAN_EXPLICIT_ALIAS"
+  "OwnerValid(candidate)"
+  "ops->releaseFresh(context,&physical)"
+  "RalFrameGraph_PlanExact(currentGraphPlan,&owner->boundGraphPlan)")
+  string(FIND "${TRANSIENT_CORE}" "${needle}" pos)
+  if(pos EQUAL -1)
+    message(FATAL_ERROR "frame-graph transient seam missing: ${needle}")
+  endif()
+endforeach()
+
+foreach(needle IN ITEMS
+  "Ral_CreateTransientTextureCohort"
+  "Ral_TransientTextureCohortGetReceipt"
+  "Ral_TransientTextureCohortGetTexture"
+  "Ral_TransientTextureCohortReleaseFresh"
+  "Ral_TransientTextureCohortReleaseTerminal")
+  string(FIND "${RAL_TRANSIENT}" "${needle}" pos)
+  if(pos EQUAL -1)
+    message(FATAL_ERROR "real RAL frame-graph transient adapter missing: ${needle}")
+  endif()
+endforeach()
+
+foreach(needle IN ITEMS
+  "context.returnBorrowedCohort=qtrue"
+  "badRequests[1]=requests[0]"
+  "badRequests[0]=requests[1];badRequests[1]=requests[0]"
+  "RAL_FRAME_GRAPH_RESOURCE_BUFFER,&bufferPlan"
+  "context.failOuterReceipt=qtrue"
+  "context.compatibilityKey=8u"
+  "RalFrameGraphTransient_ReleaseFresh(&owner)"
+  "receipt.disjointEquivalentCommittedBytes==3840u"
+  "receipt.physicalCommittedBytes==1280u&&receipt.savedBytes==2560u"
+  "receipt.savedPermille==666u"
+  "exact.physical.allocations[0].allocation.committedSize++"
+  "RalFrameGraphTransient_GetExecutionBindings(owner,&plan"
+  "RalFrameGraphExecution_Compile(&exec,&execPlan)"
+  "RAL_TRANSIENT_PLAN_MANAGED_DISJOINT"
+  "receipt.physicalCommittedBytes==3840u&&receipt.savedBytes==0u"
+  "RalFrameGraphTransient_Create((ralBackend_t*)&context,&ci)")
+  string(FIND "${TRANSIENT_TEST}" "${needle}" pos)
+  if(pos EQUAL -1)
+    message(FATAL_ERROR "frame-graph transient mutation evidence missing: ${needle}")
   endif()
 endforeach()
 
@@ -280,18 +483,25 @@ endforeach()
 foreach(needle IN ITEMS
   "ral_frame_graph_test"
   "ral_frame_graph_execution_test"
+  "ral_frame_graph_transient_test"
   "ral_frame_graph_record_test"
   "ral_frame_graph_submit_test"
   "code/renderer/ral_frame_graph/ral_frame_graph.c"
   "code/renderer/ral_frame_graph/ral_frame_graph_execution.c"
+  "code/renderer/ral_frame_graph/ral_frame_graph_transient.c"
+  "code/renderer/ral_frame_graph/ral_frame_graph_transient_ral.c"
   "code/renderer/ral_frame_graph/ral_frame_graph_record.c"
   "code/renderer/ral_frame_graph/ral_frame_graph_record_ral.c"
   "code/renderer/ral_frame_graph/ral_frame_graph_submit.c"
   "code/renderer/ral_frame_graph/ral_frame_graph_submit_ral.c"
+  "code/renderer/ral_frame_graph/ral_frame_graph_native.c"
+  "code/renderer/ral_frame_graph/ral_frame_graph_native_receipt.c"
   "ral_frame_graph_contract"
   "ral_frame_graph_execution_contract"
+  "ral_frame_graph_transient_contract"
   "ral_frame_graph_record_contract"
   "ral_frame_graph_submit_contract"
+  "ral_frame_graph_native_receipt_contract"
   "ral_frame_graph_source_policy_contract")
   string(FIND "${CMAKE_TEXT}" "${needle}" pos)
   if(pos EQUAL -1)
@@ -306,17 +516,31 @@ file(GLOB_RECURSE PRODUCT_SOURCES
   "${ROOT}/code/renderervk/*.c" "${ROOT}/code/renderervk/*.h"
   "${ROOT}/code/renderercommon/*.c" "${ROOT}/code/renderercommon/*.h"
   "${ROOT}/code/renderercommon/*.cpp" "${ROOT}/code/renderercommon/*.mm")
+set(NATIVE_PRODUCT_CALL_COUNT 0)
 foreach(path IN LISTS PRODUCT_SOURCES)
   if(path MATCHES "/code/renderer/ral_frame_graph/")
     continue()
   endif()
   file(READ "${path}" text)
+  string(REGEX MATCHALL "RalFrameGraphNative_Run[(]" native_calls "${text}")
+  list(LENGTH native_calls native_call_count)
+  if(native_call_count GREATER 0)
+    if(NOT path STREQUAL "${ROOT}/code/renderervk/vk_ral_textures.c")
+      message(FATAL_ERROR "native frame-graph diagnostic escaped sole product adapter: ${path}")
+    endif()
+    math(EXPR NATIVE_PRODUCT_CALL_COUNT
+      "${NATIVE_PRODUCT_CALL_COUNT}+${native_call_count}")
+  endif()
   if(text MATCHES "RalFrameGraph_(Compile|PlanExact)[(]"
       OR text MATCHES "RalFrameGraphExecution_(Compile|PlanExact)[(]"
       OR text MATCHES "RalFrameGraphRecord_(Record|ReceiptExact|RalOps)[(]"
-      OR text MATCHES "RalFrameGraphSubmit_(Submit|ReceiptExact|FailureReceiptExact|RalOps)[(]")
+      OR text MATCHES "RalFrameGraphSubmit_(Submit|ReceiptExact|FailureReceiptExact|RalOps)[(]"
+      OR text MATCHES "RalFrameGraphTransient_(Create|CreateWithOps|GetReceipt|GetExecutionBindings|Begin|Submit|Retire|Cancel|ReleaseFresh|ReleaseTerminal|RalOps)[(]")
     message(FATAL_ERROR "pure frame-graph compiler gained product execution authority: ${path}")
   endif()
 endforeach()
+if(NOT NATIVE_PRODUCT_CALL_COUNT EQUAL 1)
+  message(FATAL_ERROR "expected exactly one opt-in native frame-graph product call")
+endif()
 
 message(STATUS "ral frame graph source policy: PASS")
