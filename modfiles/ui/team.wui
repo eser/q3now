@@ -49,11 +49,11 @@ menuDef {
 				height GROW
 				padding 0.005 0.01
 
-				itemDef { name "btn_red"       type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Red Team"  textalign 0 font $font_sans 13 forecolor $primary_red    forecolor.active $accent visible 1 grow 0 action { exec "cmd team red" ; close } }
-				itemDef { name "btn_blue"      type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Blue Team" textalign 0 font $font_sans 13 forecolor $accent         forecolor.active $accent visible 1 grow 0 action { exec "cmd team blue" ; close } }
-				itemDef { name "btn_auto"      type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Auto Join" textalign 0 font $font_sans 13 forecolor $bone           forecolor.active $accent visible 1 grow 0 action { exec "cmd team auto" ; close } }
-				itemDef { name "btn_spectator" type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Spectator" textalign 0 font $font_sans 13 forecolor $boneDim        forecolor.active $accent visible 1 grow 0 action { exec "cmd team spectator" ; close } }
-				itemDef { name "btn_cancel"    type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Cancel"    textalign 0 font $font_sans 13 forecolor $boneDim        forecolor.active $accent visible 1 grow 0 action { close } }
+				itemDef { name "btn_red"       type 1 height FIXED 36px width PERCENT 0.95 text "Red Team"  textalign 0 font $font_sans 13 forecolor $primary_red    forecolor.active $accent visible 1 grow 0 action { exec "cmd team red" ; close } }
+				itemDef { name "btn_blue"      type 1 height FIXED 36px width PERCENT 0.95 text "Blue Team" textalign 0 font $font_sans 13 forecolor $accent         forecolor.active $accent visible 1 grow 0 action { exec "cmd team blue" ; close } }
+				itemDef { name "btn_auto"      type 1 height FIXED 36px width PERCENT 0.95 text "Auto Join" textalign 0 font $font_sans 13 forecolor $bone           forecolor.active $accent visible 1 grow 0 action { exec "cmd team auto" ; close } }
+				itemDef { name "btn_spectator" type 1 height FIXED 36px width PERCENT 0.95 text "Spectator" textalign 0 font $font_sans 13 forecolor $boneDim        forecolor.active $accent visible 1 grow 0 action { exec "cmd team spectator" ; close } }
+				itemDef { name "btn_cancel"    type 1 height FIXED 36px width PERCENT 0.95 text "Cancel"    textalign 0 font $font_sans 13 forecolor $boneDim        forecolor.active $accent visible 1 grow 0 action { close } }
 			}
 		}
 	}

@@ -67,14 +67,14 @@ menuDef {
 				height GROW
 				padding 0.005 0.01
 
-				itemDef { name "btn_getflag"  type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Get Flag"  textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 5" ; close } }
-				itemDef { name "btn_offense"  type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Offense"   textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 1" ; close } }
-				itemDef { name "btn_defend"   type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Defend"    textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 2" ; close } }
-				itemDef { name "btn_patrol"   type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Patrol"    textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 3" ; close } }
-				itemDef { name "btn_followme" type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Follow Me" textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 4" ; close } }
-				itemDef { name "btn_escort"   type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Escort"    textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 6" ; close } }
-				itemDef { name "btn_camp"     type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Camp"      textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 7" ; close } }
-				itemDef { name "btn_cancel"   type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Cancel"    textalign 0 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
+				itemDef { name "btn_getflag"  type 1 height FIXED 36px width PERCENT 0.95 text "Get Flag"  textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 5" ; close } }
+				itemDef { name "btn_offense"  type 1 height FIXED 36px width PERCENT 0.95 text "Offense"   textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 1" ; close } }
+				itemDef { name "btn_defend"   type 1 height FIXED 36px width PERCENT 0.95 text "Defend"    textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 2" ; close } }
+				itemDef { name "btn_patrol"   type 1 height FIXED 36px width PERCENT 0.95 text "Patrol"    textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 3" ; close } }
+				itemDef { name "btn_followme" type 1 height FIXED 36px width PERCENT 0.95 text "Follow Me" textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 4" ; close } }
+				itemDef { name "btn_escort"   type 1 height FIXED 36px width PERCENT 0.95 text "Escort"    textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 6" ; close } }
+				itemDef { name "btn_camp"     type 1 height FIXED 36px width PERCENT 0.95 text "Camp"      textalign 0 font $font_sans 13 forecolor $bone    forecolor.active $accent visible 1 grow 0 action { exec "cmd teamtask 7" ; close } }
+				itemDef { name "btn_cancel"   type 1 height FIXED 36px width PERCENT 0.95 text "Cancel"    textalign 0 font $font_sans 13 forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
 			}
 		}
 	}
