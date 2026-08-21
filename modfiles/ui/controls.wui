@@ -183,7 +183,7 @@ menuDef {
 						radius $radius_md
 						alignY start
 
-						itemDef { name "group_movement_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+						itemDef { name "group_movement_hdr" type containervh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "MOVEMENT" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 
@@ -344,7 +344,7 @@ menuDef {
 						radius $radius_md
 						alignY start
 
-						itemDef { name "group_weapons_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+						itemDef { name "group_weapons_hdr" type containervh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "WEAPONS" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 
@@ -490,7 +490,7 @@ menuDef {
 						radius $radius_md
 						alignY start
 
-						itemDef { name "group_combat_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+						itemDef { name "group_combat_hdr" type containervh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "COMBAT" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 
@@ -567,7 +567,7 @@ menuDef {
 						radius $radius_md
 						alignY start
 
-						itemDef { name "group_look_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+						itemDef { name "group_look_hdr" type containervh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "LOOK" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 
@@ -685,7 +685,7 @@ menuDef {
 						radius $radius_md
 						alignY start
 
-						itemDef { name "group_misc_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+						itemDef { name "group_misc_hdr" type containervh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "MISC" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 
@@ -826,7 +826,7 @@ menuDef {
 						radius $radius_md
 						alignY start
 
-						itemDef { name "group_chat_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+						itemDef { name "group_chat_hdr" type containervh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "CHAT" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 

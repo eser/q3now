@@ -86,9 +86,9 @@ menuDef {
 		alignY center
 		borderTop 1px $line
 		grow 0
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 8vw  text "01"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 46vw text "RANGER" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 24vw text "12:34.5" textalign 2 font $font_mono 26     forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		itemDef { type 0vh height FIT width 8vw  text "01"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+		itemDef { type 0vh height FIT width 46vw text "RANGER" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+		itemDef { type 0vh height FIT width 24vw text "12:34.5" textalign 2 font $font_mono 26     forecolor $attract_ink_hi decoration visible 1 grow 0 }
 	}
 	itemDef {
 		name "lb_row2"
@@ -104,9 +104,9 @@ menuDef {
 		alignY center
 		borderTop 1px $line
 		grow 0
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 8vw  text "02"    textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 46vw text "KEEL"  textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 24vw text "13:01.2" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		itemDef { type 0vh height FIT width 8vw  text "02"    textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+		itemDef { type 0vh height FIT width 46vw text "KEEL"  textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+		itemDef { type 0vh height FIT width 24vw text "13:01.2" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
 	}
 	itemDef {
 		name "lb_row3"
@@ -122,9 +122,9 @@ menuDef {
 		alignY center
 		borderTop 1px $line
 		grow 0
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 8vw  text "03"    textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 46vw text "SLASH" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 24vw text "13:48.8" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		itemDef { type 0vh height FIT width 8vw  text "03"    textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+		itemDef { type 0vh height FIT width 46vw text "SLASH" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+		itemDef { type 0vh height FIT width 24vw text "13:48.8" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
 	}
 	itemDef {
 		name "lb_row4"
@@ -140,9 +140,9 @@ menuDef {
 		alignY center
 		borderTop 1px $line
 		grow 0
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 8vw  text "04"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 46vw text "ANARKI" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 24vw text "14:12.1" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		itemDef { type 0vh height FIT width 8vw  text "04"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+		itemDef { type 0vh height FIT width 46vw text "ANARKI" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+		itemDef { type 0vh height FIT width 24vw text "14:12.1" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
 	}
 	itemDef {
 		name "lb_row5"
@@ -158,8 +158,8 @@ menuDef {
 		alignY center
 		borderTop 1px $line
 		grow 0
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 8vw  text "05"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 46vw text "SORLAG" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-		itemDef { type 0 rect 0 0 1 8vh height FIT width 24vw text "14:59.3" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		itemDef { type 0vh height FIT width 8vw  text "05"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+		itemDef { type 0vh height FIT width 46vw text "SORLAG" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+		itemDef { type 0vh height FIT width 24vw text "14:59.3" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
 	}
 }

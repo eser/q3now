@@ -101,8 +101,8 @@ menuDef {
 				grow 1
 				width GROW
 
-				itemDef { name "panel_header" type 0 rect 0 0 1 0.05 height FIT text "Video" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
-				itemDef { name "panel_subheader" type 0 rect 0 0 1 0.025 height FIT text "Display mode / quality / lighting" textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "panel_header" type 0 height FIT text "Video" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
+				itemDef { name "panel_subheader" type 0 height FIT text "Display mode / quality / lighting" textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
 
 				// ── Widget rows ─────────────────────────────────
 				itemDef {
@@ -144,7 +144,7 @@ menuDef {
 						background $panelDeep
 						border 1px $line
 						radius $radius_md
-						itemDef { name "grp_hdr_display_mode" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+						itemDef { name "grp_hdr_display_mode" type containervh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "DISPLAY MODE" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 						itemDef {
@@ -232,7 +232,7 @@ menuDef {
 						background $panelDeep
 						border 1px $line
 						radius $radius_md
-						itemDef { name "grp_hdr_quality" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+						itemDef { name "grp_hdr_quality" type containervh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "QUALITY" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 						itemDef {
@@ -320,7 +320,7 @@ menuDef {
 						background $panelDeep
 						border 1px $line
 						radius $radius_md
-						itemDef { name "grp_hdr_lighting" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+						itemDef { name "grp_hdr_lighting" type containervh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "LIGHTING" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 						itemDef {

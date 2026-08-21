@@ -46,7 +46,7 @@ menuDef {
 				direction column
 				gap $spacing_sm
 
-				itemDef { name "nav_label" type 0 rect 0 0 1 0.025 height FIT text "CATEGORIES" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "nav_label" type 0 height FIT text "CATEGORIES" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 				QW_SETTINGS_NAV("nav_sound",       "sound",       "Sound",       "sound")
 				QW_SETTINGS_NAV("nav_video",       "video",       "Video",       "video")
 				QW_SETTINGS_NAV("nav_display",     "display",     "Display",     "display")
@@ -67,8 +67,8 @@ menuDef {
 				grow 1
 				width GROW
 
-				itemDef { name "panel_header" type 0 rect 0 0 1 0.05 height FIT text "Player" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
-				itemDef { name "panel_subheader" type 0 rect 0 0 1 0.025 height FIT text "Profile / FOV / Crosshair / Rail" textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "panel_header" type 0 height FIT text "Player" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
+				itemDef { name "panel_subheader" type 0 height FIT text "Profile / FOV / Crosshair / Rail" textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
 
 				itemDef {
 					name "panel_content"
@@ -110,13 +110,13 @@ menuDef {
 						radius $radius_md
 						alignY start
 
-						itemDef { name "group_identity_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+						itemDef { name "group_identity_hdr" type containervh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "IDENTITY" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 						itemDef { name "row_name" type 4 height FIXED 38px width PERCENT 1 text "Name" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_Name" maxChars 32 visible 1 grow 0 }
 						itemDef { name "row_fov" type 10 height FIXED 38px width PERCENT 1 text "FOV" textalign 0 font $font_sans 13 forecolor $bone cvarFloat "cg_fov" 100 75 130 visible 1 grow 0 }
 							// ── MODEL sub-label ────────────────────────
-							itemDef { name "model_label" type 0 rect 0 0 1 2vh height FIT text "MODEL" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+							itemDef { name "model_label" type 0vh height FIT text "MODEL" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
 							// Model browser row: portrait preview pane (3D ownerdraw)
 							// on the left, character + skin pickers stacked on the right.
@@ -236,7 +236,7 @@ menuDef {
 						radius $radius_md
 						alignY start
 
-						itemDef { name "group_crosshair_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
+						itemDef { name "group_crosshair_hdr" type containervh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "CROSSHAIR + RAIL" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 						itemDef { name "row_crosshair" type segmented height FIXED 38px width PERCENT 1 text "Crosshair" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_crosshairAlpha" cvarFloatList { "None" 0 "30%" 30 "60%" 60 "100%" 100 } visible 1 grow 0 }

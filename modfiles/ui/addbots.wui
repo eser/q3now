@@ -41,8 +41,8 @@ menuDef {
 			width PERCENT 0.4
 			height PERCENT 0.75
 
-			itemDef { name "header" type 0 rect 0 0 1 0.06 height FIT text "Add Bot" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
-			itemDef { name "subheader" type 0 rect 0 0 1 0.03 height FIT text "Spawn a CPU opponent on the active server." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { name "header" type 0 height FIT text "Add Bot" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
+			itemDef { name "subheader" type 0 height FIT text "Spawn a CPU opponent on the active server." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
 
 			itemDef {
 				name "form_content"
@@ -54,7 +54,7 @@ menuDef {
 				height GROW
 				padding 0.005 0.01
 
-				itemDef { name "cat_quick_label" type 0 rect 0 0 1 0.025 height FIT text "QUICK ADD" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "cat_quick_label" type 0 height FIT text "QUICK ADD" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
 				itemDef {
 					name "quick_row_1"
@@ -68,7 +68,7 @@ menuDef {
 					itemDef { name "btn_quick_grunt" type 1 rect 0 0 0.3 0.04 height FIT text "Add Grunt" textalign 1 font $font_sans 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { addquickbot grunt ; close } }
 				}
 
-				itemDef { name "cat_custom_label" type 0 rect 0 0 1 0.025 height FIT text "CUSTOM ADD" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "cat_custom_label" type 0 height FIT text "CUSTOM ADD" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 				itemDef { name "row_profile" type 12 height FIXED 38px width PERCENT 1 text "Profile" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botProfile" populateCallback "bot_profiles" visible 1 grow 0 action { botprofileselected } }
 				itemDef { name "row_name" type 4 height FIXED 38px width PERCENT 1 text "Name" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botName" maxChars 31 visible 1 grow 0 }
 				itemDef { name "row_skill" type 12 height FIXED 38px width PERCENT 1 text "Skill" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_botSkill" cvarFloatList { "Beginner" 1 "Casual" 2 "Competitive" 3 "Pro" 4 "Nightmare" 5 } visible 1 grow 0 }

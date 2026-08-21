@@ -40,8 +40,8 @@ menuDef {
 			width PERCENT 0.4
 			height PERCENT 0.6
 
-			itemDef { name "header" type 0 rect 0 0 1 0.06 height FIT text "Remove Bot" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
-			itemDef { name "subheader" type 0 rect 0 0 1 0.03 height FIT text "Select a connected bot and remove it from the server." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { name "header" type 0 height FIT text "Remove Bot" textalign 0 font $font_sans_bold 22 forecolor $accent decoration visible 1 grow 0 }
+			itemDef { name "subheader" type 0 height FIT text "Select a connected bot and remove it from the server." textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
 
 			// ── ListBox view of the bot-only feeder.
 			// Single-column row of connected-bot names; double-

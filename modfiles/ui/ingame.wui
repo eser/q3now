@@ -97,8 +97,8 @@ menuDef {
 			width PERCENT 0.30
 			height FIT
 
-			itemDef { name "header"    type 0 rect 0 0 1 0 height FIT text "PAUSED" textalign 0 font $font_sans_bold 20 forecolor $accent letterspacing 3 decoration visible 1 grow 0 }
-			itemDef { name "subheader" type 0 rect 0 0 1 0 height FIT text "Pick an action, or press ESC to resume." textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { name "header"    type 0 height FIT text "PAUSED" textalign 0 font $font_sans_bold 20 forecolor $accent letterspacing 3 decoration visible 1 grow 0 }
+			itemDef { name "subheader" type 0 height FIT text "Pick an action, or press ESC to resume." textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
 			itemDef {
 				name "form_content"
@@ -121,7 +121,7 @@ menuDef {
 			// overflowing the panel. Pill chrome copied from QW_BUTTON_BLOCK
 			// ($lineBright fill / $boneDim border / $accent on hover) so the group
 			// reads in the same visual language as the primary stack above.
-			itemDef { name "cat_inmatch" type 0 rect 0 0 1 0 height FIT text "IN-MATCH" textalign 0 font $font_mono 10 forecolor $boneDim letterspacing 2 decoration visible 1 grow 0 }
+			itemDef { name "cat_inmatch" type 0 height FIT text "IN-MATCH" textalign 0 font $font_mono 10 forecolor $boneDim letterspacing 2 decoration visible 1 grow 0 }
 
 			itemDef {
 				name "inmatch_content"

@@ -40,8 +40,8 @@ menuDef {
 			width PERCENT 0.4
 			height FIT
 
-			itemDef { name "header"  type 0 rect 0 0 1 0.05 height FIT textalign 0 font $font_sans_bold 22 forecolor $primary_red cvar "ui_errorTitle"   decoration visible 1 grow 0 }
-			itemDef { name "message" type 0 rect 0 0 1 0.08 height FIT textalign 0 font $font_sans 14      forecolor $bone         cvar "com_errorMessage" decoration visible 1 grow 0 }
+			itemDef { name "header"  type 0 height FIT textalign 0 font $font_sans_bold 22 forecolor $primary_red cvar "ui_errorTitle"   decoration visible 1 grow 0 }
+			itemDef { name "message" type 0 height FIT textalign 0 font $font_sans 14      forecolor $bone         cvar "com_errorMessage" decoration visible 1 grow 0 }
 
 			itemDef {
 				name "popup_footer"
