@@ -30,7 +30,6 @@ itemDef {
 	itemDef {
 		name "hud_active_scorelist"
 		type scorelist_widget
-		rect 0 0 1 1
 		width PERCENT 1.0
 		height PERCENT 1.0
 		feeder "scoreboard"

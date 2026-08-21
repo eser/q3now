@@ -25,7 +25,6 @@
 menuDef {
 	name "world_main"
 	layer "world_viewport"
-	rect 0 0 1 1
 	fullscreen 1
 	visible 1
 	style 0

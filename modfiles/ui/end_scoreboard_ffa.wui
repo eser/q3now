@@ -18,7 +18,6 @@
 menuDef {
 	name "end_scoreboard_ffa"
 	layer "hud"
-	rect 0 0 1 1
 	fullScreen 1
 	visible 0
 	style 0
@@ -26,7 +25,6 @@ menuDef {
 	itemDef {
 		name "scoreboard_overlay"
 		position absolute
-		rect 0 0 1 1
 		type container
 		direction column
 		alignX center

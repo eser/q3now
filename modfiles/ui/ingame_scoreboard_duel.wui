@@ -15,7 +15,6 @@
 menuDef {
 	name "ingame_scoreboard_duel"
 	layer "hud"
-	rect 0 0 1 1
 	fullScreen 1
 	visible 0
 	style 0
@@ -23,7 +22,6 @@ menuDef {
 	itemDef {
 		name "duel_overlay"
 		position absolute
-		rect 0 0 1 1
 		type container
 		direction column
 		alignX center
@@ -48,7 +46,6 @@ menuDef {
 				name "duelboard"
 				type scorelist_widget
 				group "duel"
-				rect 0 0 1 1
 				width PERCENT 1.0
 				height PERCENT 1.0
 				forecolor $bone
