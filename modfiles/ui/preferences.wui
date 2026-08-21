@@ -81,7 +81,6 @@ menuDef {
 					itemDef {
 						name "grid_row_1"
 						type container
-						rect 0 0 1 0
 						height FIT
 						width PERCENT 1
 						grow 0

@@ -103,7 +103,6 @@ menuDef {
 			itemDef {
 				name "form_content"
 				type container
-				rect 0 0 1 0
 				direction column
 				gap $spacing_sm
 				height FIT
@@ -127,7 +126,6 @@ menuDef {
 			itemDef {
 				name "inmatch_content"
 				type container
-				rect 0 0 1 0
 				direction column
 				gap $spacing_sm
 				height FIT
@@ -137,7 +135,6 @@ menuDef {
 				itemDef {
 					name "inmatch_row_1"
 					type container
-					rect 0 0 1 0
 					direction row
 					gap $spacing_sm
 					height FIT
@@ -149,7 +146,6 @@ menuDef {
 				itemDef {
 					name "inmatch_row_2"
 					type container
-					rect 0 0 1 0
 					direction row
 					gap $spacing_sm
 					height FIT
@@ -161,7 +157,6 @@ menuDef {
 				itemDef {
 					name "inmatch_row_3"
 					type container
-					rect 0 0 1 0
 					direction row
 					gap $spacing_sm
 					height FIT

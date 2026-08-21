@@ -247,7 +247,6 @@ menuDef {
 			itemDef {
 				name "serverlist_frame"
 				type container
-				rect 0 0 1 0
 				direction column
 				grow 1
 				height GROW

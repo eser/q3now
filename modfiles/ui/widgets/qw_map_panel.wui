@@ -17,7 +17,6 @@
 itemDef {
 	name "card_map"
 	type container
-	rect 0 0 1 0
 	height FIT
 	direction column
 	padding $spacing_card_padding_v $spacing_card_padding_h
@@ -45,7 +44,6 @@ itemDef {
 		name "card_map_preview"
 		type 0
 		ownerdraw "net_map_preview"
-		rect 0 0 1 0
 		width PERCENT 1
 		height FIXED 150px
 		backcolor $ink

@@ -86,7 +86,6 @@ menuDef {
 				itemDef {
 					name "nav_spacer"
 					type container
-					rect 0 0 1 0
 					grow 1
 				}
 			}
@@ -122,7 +121,6 @@ menuDef {
 					itemDef {
 						name "grid_row_1"
 						type container
-						rect 0 0 1 0
 						height FIT
 						width PERCENT 1
 						grow 0
@@ -152,7 +150,6 @@ menuDef {
 						itemDef {
 							name "row_resolution"
 							type 12
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Resolution"
@@ -167,7 +164,6 @@ menuDef {
 						itemDef {
 							name "row_fullscreen"
 							type checkbox
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Fullscreen"
@@ -181,7 +177,6 @@ menuDef {
 						itemDef {
 							name "row_gl_ext"
 							type checkbox
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "GL Extensions"
@@ -195,7 +190,6 @@ menuDef {
 						itemDef {
 							name "row_colorbits"
 							type segmented
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Color Depth"
@@ -210,7 +204,6 @@ menuDef {
 						itemDef {
 							name "row_aa"
 							type segmented
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Anti-Aliasing"
@@ -245,7 +238,6 @@ menuDef {
 						itemDef {
 							name "row_tex_filter"
 							type segmented
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Texture Filter"
@@ -260,7 +252,6 @@ menuDef {
 						itemDef {
 							name "row_tex_compress"
 							type checkbox
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Compress Textures"
@@ -274,7 +265,6 @@ menuDef {
 						itemDef {
 							name "row_picmip"
 							type 12
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Texture Detail"
@@ -289,7 +279,6 @@ menuDef {
 						itemDef {
 							name "row_tex_bits"
 							type segmented
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Texture Quality"
@@ -308,7 +297,6 @@ menuDef {
 					itemDef {
 						name "grid_row_2"
 						type container
-						rect 0 0 1 0
 						height FIT
 						width PERCENT 1
 						grow 0
@@ -338,7 +326,6 @@ menuDef {
 						itemDef {
 							name "row_global_preset"
 							type segmented
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Global Preset"
@@ -353,7 +340,6 @@ menuDef {
 						itemDef {
 							name "row_lighting"
 							type segmented
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Lighting"
@@ -368,7 +354,6 @@ menuDef {
 						itemDef {
 							name "row_lod"
 							type segmented
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Geometric Detail"
@@ -383,7 +368,6 @@ menuDef {
 						itemDef {
 							name "row_fastsky"
 							type checkbox
-							rect 0 0 1 0
 							height FIXED 38px
 							width PERCENT 1
 							text "Low Quality Sky"

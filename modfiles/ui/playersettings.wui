@@ -86,7 +86,6 @@ menuDef {
 					itemDef {
 						name "grid_row_1"
 						type container
-						rect 0 0 1 0
 						height FIT
 						width PERCENT 1
 						grow 0
@@ -124,7 +123,6 @@ menuDef {
 							itemDef {
 								name "model_browser"
 								type container
-								rect 0 0 1 0
 								height FIXED 200px
 								width PERCENT 1
 								direction row
@@ -168,7 +166,6 @@ menuDef {
 									itemDef {
 										name "char_frame"
 										type container
-										rect 0 0 1 0
 										direction column
 										grow 1
 										height GROW
@@ -197,7 +194,6 @@ menuDef {
 									itemDef {
 										name "skin_frame"
 										type container
-										rect 0 0 1 0
 										direction column
 										grow 1
 										height GROW
