@@ -2,9 +2,17 @@
 //
 // REBUILT 2026-07-03. The old version authored every row as `rect 0 0 1.0 X`
 // inside nested flex containers with no width/height sizing, so Clay collapsed
-// the whole list to a (0,0) top-left pile (Eser: "ekranlar boktan"). This
-// rebuild uses the shipped hero idiom — position absolute + explicit vw/vh +
-// text leaves with `height FIT` + a real width — so nothing collapses.
+// the whole list to a (0,0) top-left pile (Eser: "ekranlar boktan"). That rebuild
+// used the shipped hero idiom — position absolute + explicit vw/vh + text leaves
+// with `height FIT` + a real width — so nothing collapses.
+//
+// The rows returned to flex on 2026-08-21, and the earlier collapse is worth
+// stating precisely, because it was NOT "flex does not work here": the rows sat
+// in containers with no resolved size, and WUI_LayoutFlex places children inside
+// item->resolvedRect. Give them one band that HAS a resolved size (lb_rows:
+// container + column + grow 1 + padding) and they lay out fine. Verified
+// frame-against-frame: every text band within 1px of the absolute version, header
+// untouched. Spine and stamp stay absolute — edge furniture, not flow.
 //
 // Design: the top-times list read as a fight card. Shared red spine on the left,
 // a huge TOP / TIMES header (bone + red), then rows where each rank is an
