@@ -25,7 +25,6 @@ menuDef {
 
 	itemDef {
 		name "scoreboard_overlay"
-		position absolute
 		type container
 		direction column
 		alignX center

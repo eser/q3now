@@ -32,7 +32,6 @@ menuDef {
 
 	itemDef {
 		name "settings_root"
-		position absolute
 		type container
 		direction column
 		background "layered" effects "base+glow+noise+vignette"

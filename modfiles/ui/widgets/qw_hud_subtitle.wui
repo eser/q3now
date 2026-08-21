@@ -12,7 +12,6 @@
 itemDef {
 	name "hud_active_subtitle"
 	hudElement "subtitle"
-	position absolute
 	anchor BOTTOM_CENTER
 	rect 0.5 0.88 0 0
 	decoration
