@@ -488,21 +488,6 @@ SET_TESTS_PROPERTIES(wiredui_rem_analyzer_contract PROPERTIES
 ADD_TEST(NAME shell_portability_contract
 	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/shell-portability-check.sh
 )
-
-# Second-map Z_Free (#96) analyzer contract.  The live gate needs a BSP-bearing
-# content pak (licensed asset pipeline output), but the crash CLASSIFIER is a
-# pure function of the log: it must reject every zone-consistency terminate
-# (common.c), the "Server crashed" funnel (log.c:878), a FATAL record, a
-# truncated map chain and a non-zero exit.  This runs that classifier over
-# synthetic logs — no engine, no packs, no display — so a gate that could not
-# catch #96 fails the build.
-# Test scripts must parse under macOS's system bash 3.2, which the macOS CI
-# runner uses. A developer machine with Homebrew has bash 5 and will not notice
-# the difference until CI does — and the error bash 3.2 reports points at the
-# end of the file rather than the cause. See the script for the full story.
-ADD_TEST(NAME shell_portability_contract
-	COMMAND bash ${CMAKE_SOURCE_DIR}/tests/shell-portability-check.sh
-)
 SET_TESTS_PROPERTIES(shell_portability_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.q3now-server;failure.contract;feature.always"
 	TIMEOUT 60
@@ -886,6 +871,52 @@ ADD_TEST(NAME ral_capability_profile_source_policy_contract
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_capability_profile_policy_check.cmake)
 SET_TESTS_PROPERTIES(ral_capability_profile_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;failure.contract;feature.always" TIMEOUT 30)
+ADD_TEST(NAME ral_backend_conformance_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_backend_conformance_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_backend_conformance_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.vulkan;backend.metal"
+	TIMEOUT 30)
+
+ADD_EXECUTABLE(ral_frame_shell_test
+	tests/ral_frame_shell_test.c code/renderer/ral/ral_frame_shell.c)
+TARGET_INCLUDE_DIRECTORIES(ral_frame_shell_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon)
+TARGET_COMPILE_OPTIONS(ral_frame_shell_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_frame_shell_contract COMMAND ral_frame_shell_test)
+SET_TESTS_PROPERTIES(ral_frame_shell_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;feature.always" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_frame_shell_test ral_frame_shell_contract)
+
+ADD_EXECUTABLE(ral_presentation_host_test
+	tests/ral_presentation_host_test.c
+	code/renderer/ral/ral_presentation_host.c)
+TARGET_INCLUDE_DIRECTORIES(ral_presentation_host_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon)
+TARGET_COMPILE_OPTIONS(ral_presentation_host_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_presentation_host_contract COMMAND ral_presentation_host_test)
+SET_TESTS_PROPERTIES(ral_presentation_host_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;feature.always" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_presentation_host_test ral_presentation_host_contract)
+ADD_TEST(NAME ral_frame_shell_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_frame_shell_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_frame_shell_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;feature.always" TIMEOUT 30)
+
+ADD_TEST(NAME ral_metal_module_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_metal_module_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_metal_module_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.metal;module.renderer"
+	TIMEOUT 30)
+
+ADD_TEST(NAME ral_presentation_host_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_presentation_host_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_presentation_host_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;feature.always;interop.platform"
+	TIMEOUT 30)
 
 ADD_TEST(NAME ral_metal_core_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
@@ -893,21 +924,89 @@ ADD_TEST(NAME ral_metal_core_source_policy_contract
 SET_TESTS_PROPERTIES(ral_metal_core_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
 
+ADD_TEST(NAME ral_metal_bind_group_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_metal_bind_group_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_metal_bind_group_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
+
+ADD_TEST(NAME ral_metal_render_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_metal_render_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_metal_render_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
+
+ADD_TEST(NAME ral_metal_pipeline_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_metal_pipeline_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_metal_pipeline_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
+
+ADD_TEST(NAME ral_metal_draw_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_metal_draw_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_metal_draw_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
+
+ADD_TEST(NAME ral_metal_present_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_metal_present_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_metal_present_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
+
+ADD_TEST(NAME ral_metal_sdl_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_metal_sdl_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_metal_sdl_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.metal;platform.sdl3" TIMEOUT 30)
+
+ADD_TEST(NAME ral_sdl_presentation_host_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_sdl_presentation_host_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_sdl_presentation_host_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.metal;platform.sdl3"
+	TIMEOUT 30)
+
 IF(APPLE)
 	FIND_LIBRARY(WIRED_METAL_FRAMEWORK Metal REQUIRED)
 	FIND_LIBRARY(WIRED_FOUNDATION_FRAMEWORK Foundation REQUIRED)
+	FIND_LIBRARY(WIRED_QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+	FIND_LIBRARY(WIRED_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
 	ADD_LIBRARY(ral_metal STATIC
 		code/renderer/ral_metal/ral_metal_core.mm
+		code/renderer/ral_metal/ral_metal_bind_group.mm
+		code/renderer/ral_metal/ral_metal_render.mm
+		code/renderer/ral_metal/ral_metal_pipeline.mm
+		code/renderer/ral_metal/ral_metal_draw.mm
+		code/renderer/ral_metal/ral_metal_present.mm
 		code/renderer/ral/ral_allocation.c
+		code/renderer/ral/ral_backend_conformance.c
 		code/renderer/ral/ral_capability.c
 		code/renderer/ral/ral_command_lifecycle.c
+		code/renderer/ral/ral_frame_shell.c
+		code/renderer/ral/ral_presentation_host.c
 		code/renderer/ral/ral_memory_recovery.c
+		code/renderer/ral/ral_shader_abi.c
 		code/renderer/ral/ral_transfer.c)
 	TARGET_INCLUDE_DIRECTORIES(ral_metal PUBLIC
 		code/qcommon code/renderer/ral code/renderer/ral_metal code/renderercommon)
 	TARGET_LINK_LIBRARIES(ral_metal PUBLIC
-		${WIRED_METAL_FRAMEWORK} ${WIRED_FOUNDATION_FRAMEWORK})
+		${WIRED_METAL_FRAMEWORK} ${WIRED_FOUNDATION_FRAMEWORK}
+		${WIRED_QUARTZCORE_FRAMEWORK} ${WIRED_COREGRAPHICS_FRAMEWORK})
 	TARGET_COMPILE_OPTIONS(ral_metal PRIVATE -Wall -Wextra -Werror -fblocks)
+	ADD_LIBRARY(ral_metal_sdl STATIC code/sdl/sdl_metal_ral.mm)
+	TARGET_INCLUDE_DIRECTORIES(ral_metal_sdl PUBLIC
+		code/qcommon code/renderer/ral code/renderer/ral_metal
+		code/renderercommon code/sdl)
+	TARGET_LINK_LIBRARIES(ral_metal_sdl PUBLIC ral_metal SDL3::SDL3)
+	TARGET_COMPILE_OPTIONS(ral_metal_sdl PRIVATE -Wall -Wextra -Werror)
+	ADD_LIBRARY(ral_sdl_presentation_host STATIC
+		code/sdl/sdl_ral_presentation.mm)
+	TARGET_INCLUDE_DIRECTORIES(ral_sdl_presentation_host PUBLIC
+		code/qcommon code/renderer/ral code/renderer/ral_metal
+		code/renderercommon code/sdl)
+	TARGET_LINK_LIBRARIES(ral_sdl_presentation_host PUBLIC ral_metal SDL3::SDL3)
+	TARGET_COMPILE_OPTIONS(ral_sdl_presentation_host PRIVATE -Wall -Wextra -Werror)
 
 	ADD_EXECUTABLE(ral_metal_core_test tests/ral_metal_core_test.mm)
 	TARGET_LINK_LIBRARIES(ral_metal_core_test PRIVATE ral_metal)
@@ -916,11 +1015,111 @@ IF(APPLE)
 	SET_TESTS_PROPERTIES(ral_metal_core_contract PROPERTIES
 		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
 	WIRED_CONFIGURE_HOST_TEST(ral_metal_core_test ral_metal_core_contract)
+	ADD_EXECUTABLE(ral_sdl_presentation_host_test
+		tests/ral_sdl_presentation_host_test.c)
+	TARGET_LINK_LIBRARIES(ral_sdl_presentation_host_test PRIVATE
+		ral_sdl_presentation_host)
+	TARGET_COMPILE_OPTIONS(ral_sdl_presentation_host_test PRIVATE
+		-Wall -Wextra -Werror)
+	ADD_TEST(NAME ral_sdl_presentation_host_contract
+		COMMAND ral_sdl_presentation_host_test)
+	SET_TESTS_PROPERTIES(ral_sdl_presentation_host_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal;platform.sdl3"
+		TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_sdl_presentation_host_test
+		ral_sdl_presentation_host_contract)
+	ADD_EXECUTABLE(ral_metal_bind_group_test tests/ral_metal_bind_group_test.mm)
+	TARGET_LINK_LIBRARIES(ral_metal_bind_group_test PRIVATE ral_metal)
+	TARGET_COMPILE_OPTIONS(ral_metal_bind_group_test PRIVATE -Wall -Wextra -Werror)
+	ADD_TEST(NAME ral_metal_bind_group_contract COMMAND ral_metal_bind_group_test)
+	SET_TESTS_PROPERTIES(ral_metal_bind_group_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_metal_bind_group_test ral_metal_bind_group_contract)
+	ADD_EXECUTABLE(ral_metal_render_test tests/ral_metal_render_test.mm)
+	TARGET_LINK_LIBRARIES(ral_metal_render_test PRIVATE ral_metal)
+	TARGET_COMPILE_OPTIONS(ral_metal_render_test PRIVATE -Wall -Wextra -Werror)
+	ADD_TEST(NAME ral_metal_render_contract COMMAND ral_metal_render_test)
+	SET_TESTS_PROPERTIES(ral_metal_render_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_metal_render_test ral_metal_render_contract)
+
+	SET(RAL_METAL_SHADER_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/metal-shaders")
+	SET(RAL_METAL_OVERLAY_VERT_SOURCE
+		"${CMAKE_CURRENT_SOURCE_DIR}/code/renderervk/shaders/portable/overlay_vert_spv.msl")
+	SET(RAL_METAL_OVERLAY_FRAG_SOURCE
+		"${CMAKE_CURRENT_SOURCE_DIR}/code/renderervk/shaders/portable/overlay_frag_spv.msl")
+	SET(RAL_METAL_OVERLAY_VERT_AIR "${RAL_METAL_SHADER_BUILD_DIR}/overlay_vert_spv.air")
+	SET(RAL_METAL_OVERLAY_FRAG_AIR "${RAL_METAL_SHADER_BUILD_DIR}/overlay_frag_spv.air")
+	SET(RAL_METAL_OVERLAY_VERT_LIBRARY "${RAL_METAL_SHADER_BUILD_DIR}/overlay_vert_spv.metallib")
+	SET(RAL_METAL_OVERLAY_FRAG_LIBRARY "${RAL_METAL_SHADER_BUILD_DIR}/overlay_frag_spv.metallib")
+	ADD_CUSTOM_COMMAND(
+		OUTPUT ${RAL_METAL_OVERLAY_VERT_LIBRARY} ${RAL_METAL_OVERLAY_FRAG_LIBRARY}
+		BYPRODUCTS ${RAL_METAL_OVERLAY_VERT_AIR} ${RAL_METAL_OVERLAY_FRAG_AIR}
+		COMMAND ${CMAKE_COMMAND} -E make_directory ${RAL_METAL_SHADER_BUILD_DIR}
+		COMMAND xcrun -sdk macosx metal -x metal -c ${RAL_METAL_OVERLAY_VERT_SOURCE}
+			-o ${RAL_METAL_OVERLAY_VERT_AIR}
+		COMMAND xcrun -sdk macosx metallib ${RAL_METAL_OVERLAY_VERT_AIR}
+			-o ${RAL_METAL_OVERLAY_VERT_LIBRARY}
+		COMMAND xcrun -sdk macosx metal -x metal -c ${RAL_METAL_OVERLAY_FRAG_SOURCE}
+			-o ${RAL_METAL_OVERLAY_FRAG_AIR}
+		COMMAND xcrun -sdk macosx metallib ${RAL_METAL_OVERLAY_FRAG_AIR}
+			-o ${RAL_METAL_OVERLAY_FRAG_LIBRARY}
+		DEPENDS ${RAL_METAL_OVERLAY_VERT_SOURCE} ${RAL_METAL_OVERLAY_FRAG_SOURCE}
+		VERBATIM)
+	ADD_CUSTOM_TARGET(ral_metal_overlay_metallib DEPENDS
+		${RAL_METAL_OVERLAY_VERT_LIBRARY} ${RAL_METAL_OVERLAY_FRAG_LIBRARY})
+	ADD_EXECUTABLE(ral_metal_pipeline_test tests/ral_metal_pipeline_test.mm)
+	ADD_DEPENDENCIES(ral_metal_pipeline_test ral_metal_overlay_metallib)
+	TARGET_LINK_LIBRARIES(ral_metal_pipeline_test PRIVATE ral_metal)
+	TARGET_COMPILE_OPTIONS(ral_metal_pipeline_test PRIVATE -Wall -Wextra -Werror)
+	TARGET_COMPILE_DEFINITIONS(ral_metal_pipeline_test PRIVATE
+		RAL_METAL_TEST_VERTEX_SOURCE="${RAL_METAL_OVERLAY_VERT_SOURCE}"
+		RAL_METAL_TEST_FRAGMENT_SOURCE="${RAL_METAL_OVERLAY_FRAG_SOURCE}"
+		RAL_METAL_TEST_VERTEX_LIBRARY="${RAL_METAL_OVERLAY_VERT_LIBRARY}"
+		RAL_METAL_TEST_FRAGMENT_LIBRARY="${RAL_METAL_OVERLAY_FRAG_LIBRARY}")
+	ADD_TEST(NAME ral_metal_pipeline_contract COMMAND ral_metal_pipeline_test)
+	SET_TESTS_PROPERTIES(ral_metal_pipeline_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_metal_pipeline_test ral_metal_pipeline_contract)
+	ADD_EXECUTABLE(ral_metal_draw_test tests/ral_metal_draw_test.mm)
+	ADD_DEPENDENCIES(ral_metal_draw_test ral_metal_overlay_metallib)
+	TARGET_LINK_LIBRARIES(ral_metal_draw_test PRIVATE ral_metal)
+	TARGET_COMPILE_OPTIONS(ral_metal_draw_test PRIVATE -Wall -Wextra -Werror)
+	TARGET_COMPILE_DEFINITIONS(ral_metal_draw_test PRIVATE
+		RAL_METAL_TEST_VERTEX_SOURCE="${RAL_METAL_OVERLAY_VERT_SOURCE}"
+		RAL_METAL_TEST_FRAGMENT_SOURCE="${RAL_METAL_OVERLAY_FRAG_SOURCE}"
+		RAL_METAL_TEST_VERTEX_LIBRARY="${RAL_METAL_OVERLAY_VERT_LIBRARY}"
+		RAL_METAL_TEST_FRAGMENT_LIBRARY="${RAL_METAL_OVERLAY_FRAG_LIBRARY}")
+	ADD_TEST(NAME ral_metal_draw_contract COMMAND ral_metal_draw_test)
+	SET_TESTS_PROPERTIES(ral_metal_draw_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_metal_draw_test ral_metal_draw_contract)
+	ADD_EXECUTABLE(ral_metal_present_test tests/ral_metal_present_test.mm)
+	TARGET_LINK_LIBRARIES(ral_metal_present_test PRIVATE ral_metal)
+	TARGET_COMPILE_OPTIONS(ral_metal_present_test PRIVATE -Wall -Wextra -Werror)
+	ADD_TEST(NAME ral_metal_present_contract COMMAND ral_metal_present_test)
+	SET_TESTS_PROPERTIES(ral_metal_present_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal" TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_metal_present_test ral_metal_present_contract)
+	ADD_EXECUTABLE(wired_metal_smoke tests/wired_metal_smoke.mm)
+	TARGET_LINK_LIBRARIES(wired_metal_smoke PRIVATE ral_metal_sdl)
+	TARGET_COMPILE_OPTIONS(wired_metal_smoke PRIVATE -Wall -Wextra -Werror)
+	ADD_TEST(NAME wired_metal_window_smoke COMMAND wired_metal_smoke)
+	SET_TESTS_PROPERTIES(wired_metal_window_smoke PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal;platform.sdl3;smoke"
+		TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(wired_metal_smoke wired_metal_window_smoke)
 	ADD_TEST(NAME ral_metal_link_policy_contract
 		COMMAND ${CMAKE_COMMAND} -DBINARY=$<TARGET_FILE:ral_metal_core_test>
 			-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_metal_link_policy_check.cmake)
 	SET_TESTS_PROPERTIES(ral_metal_link_policy_contract PROPERTIES
 		LABELS "host-only;infrastructure;owner.ral;failure.link-policy;backend.metal" TIMEOUT 30)
+	ADD_TEST(NAME wired_metal_window_link_policy_contract
+		COMMAND ${CMAKE_COMMAND} -DBINARY=$<TARGET_FILE:wired_metal_smoke>
+			-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_metal_window_link_policy_check.cmake)
+	SET_TESTS_PROPERTIES(wired_metal_window_link_policy_contract PROPERTIES
+		LABELS "host-only;infrastructure;owner.ral;failure.link-policy;backend.metal;platform.sdl3"
+		TIMEOUT 30)
 ENDIF()
 
 ADD_EXECUTABLE(ral_allocation_receipt_test
@@ -3828,6 +4027,7 @@ SET(RAL_VK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral_vulkan")
 SET(RAL_VK_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_buffer_map.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_allocation.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_backend_conformance.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_capability.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_command_lifecycle.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_legacy_material.c
@@ -3887,6 +4087,25 @@ IF(UNIX)
 	IF(Threads_FOUND)
 		TARGET_LINK_LIBRARIES(ral_vulkan Threads::Threads)
 	ENDIF()
+ENDIF()
+
+IF(APPLE AND BUILD_TESTING)
+	ADD_EXECUTABLE(ral_backend_conformance_test
+		tests/ral_backend_conformance_test.mm)
+	TARGET_INCLUDE_DIRECTORIES(ral_backend_conformance_test PRIVATE
+		code/qcommon code/renderer/ral code/renderer/ral_metal
+		code/renderer/ral_vulkan code/renderercommon)
+	TARGET_LINK_LIBRARIES(ral_backend_conformance_test PRIVATE
+		ral_vulkan ral_metal SDL3::SDL3)
+	TARGET_COMPILE_OPTIONS(ral_backend_conformance_test PRIVATE
+		-Wall -Wextra -Werror)
+	ADD_TEST(NAME ral_backend_conformance_contract
+		COMMAND ral_backend_conformance_test)
+	SET_TESTS_PROPERTIES(ral_backend_conformance_contract PROPERTIES
+		LABELS "host-only;subsystem;owner.ral;failure.contract;backend.vulkan;backend.metal"
+		TIMEOUT 30)
+	WIRED_CONFIGURE_HOST_TEST(ral_backend_conformance_test
+		ral_backend_conformance_contract)
 ENDIF()
 
 # Standalone Phase 7.12 presentation host. It renders the fixture-backed
@@ -4174,12 +4393,116 @@ ENDIF(UNIX)
 # developer diagnostics compile in (guarded by #ifdef _DEBUG in code).
 ADD_COMPILE_DEFINITIONS($<$<CONFIG:Debug>:_DEBUG>)
 
+# Standalone SDL↔Metal host adapters are linked only into focused Metal
+# hosts. The product owns its main SDL window through sdl_glimp.c and must
+# never compile either private-window adapter into the engine executable.
+LIST(FILTER WINDOW_SYSTEM_SRCS EXCLUDE REGEX
+	"sdl_(metal_ral|ral_presentation)\\.mm$")
 ADD_LIBRARY(windowSystem OBJECT ${WINDOW_SYSTEM_SRCS})
+TARGET_SOURCES(windowSystem PRIVATE code/renderer/ral/ral_presentation_host.c)
 
 IF(NOT TARGET SDL3::SDL3)
 	find_package(SDL3 REQUIRED)
 ENDIF()
 TARGET_LINK_LIBRARIES(windowSystem SDL3::SDL3)
+
+IF(APPLE AND USE_RENDERER_DLOPEN)
+	IF(NOT TARGET ral_metal)
+		FIND_LIBRARY(WIRED_METAL_FRAMEWORK Metal REQUIRED)
+		FIND_LIBRARY(WIRED_FOUNDATION_FRAMEWORK Foundation REQUIRED)
+		FIND_LIBRARY(WIRED_QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+		FIND_LIBRARY(WIRED_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
+		ADD_LIBRARY(ral_metal STATIC
+			code/renderer/ral_metal/ral_metal_core.mm
+			code/renderer/ral_metal/ral_metal_bind_group.mm
+			code/renderer/ral_metal/ral_metal_render.mm
+			code/renderer/ral_metal/ral_metal_pipeline.mm
+			code/renderer/ral_metal/ral_metal_draw.mm
+			code/renderer/ral_metal/ral_metal_present.mm
+			code/renderer/ral/ral_allocation.c
+			code/renderer/ral/ral_backend_conformance.c
+			code/renderer/ral/ral_capability.c
+			code/renderer/ral/ral_command_lifecycle.c
+			code/renderer/ral/ral_frame_shell.c
+			code/renderer/ral/ral_presentation_host.c
+			code/renderer/ral/ral_memory_recovery.c
+			code/renderer/ral/ral_shader_abi.c
+			code/renderer/ral/ral_transfer.c)
+		TARGET_INCLUDE_DIRECTORIES(ral_metal PUBLIC code/qcommon code/renderer/ral
+			code/renderer/ral_metal code/renderercommon)
+		TARGET_LINK_LIBRARIES(ral_metal PUBLIC ${WIRED_METAL_FRAMEWORK}
+			${WIRED_FOUNDATION_FRAMEWORK} ${WIRED_QUARTZCORE_FRAMEWORK}
+			${WIRED_COREGRAPHICS_FRAMEWORK})
+		TARGET_COMPILE_OPTIONS(ral_metal PRIVATE -Wall -Wextra -Werror -fblocks)
+	ENDIF()
+	IF(NOT TARGET ral_metal_sdl)
+		ADD_LIBRARY(ral_metal_sdl STATIC code/sdl/sdl_metal_ral.mm)
+		TARGET_INCLUDE_DIRECTORIES(ral_metal_sdl PUBLIC code/qcommon code/renderer/ral
+			code/renderer/ral_metal code/renderercommon code/sdl)
+		TARGET_LINK_LIBRARIES(ral_metal_sdl PUBLIC ral_metal SDL3::SDL3)
+		TARGET_COMPILE_OPTIONS(ral_metal_sdl PRIVATE -Wall -Wextra -Werror)
+	ENDIF()
+	IF(NOT TARGET ral_sdl_presentation_host)
+		ADD_LIBRARY(ral_sdl_presentation_host STATIC
+			code/sdl/sdl_ral_presentation.mm)
+		TARGET_INCLUDE_DIRECTORIES(ral_sdl_presentation_host PUBLIC code/qcommon
+			code/renderer/ral code/renderer/ral_metal code/renderercommon code/sdl)
+		TARGET_LINK_LIBRARIES(ral_sdl_presentation_host PUBLIC ral_metal SDL3::SDL3)
+		TARGET_COMPILE_OPTIONS(ral_sdl_presentation_host PRIVATE -Wall -Wextra -Werror)
+	ENDIF()
+	ADD_LIBRARY(${RENDERER_PREFIX}_metal${RENDEXT} SHARED
+		code/renderer/ral_metal/ral_metal_module.mm)
+	# The renderer boundary itself is a native-free C ABI. Metal and SDL
+	# ownership remain in their Objective-C++ libraries below that boundary.
+	SET_SOURCE_FILES_PROPERTIES(code/renderer/ral_metal/ral_metal_module.mm
+		PROPERTIES LANGUAGE C)
+	TARGET_INCLUDE_DIRECTORIES(${RENDERER_PREFIX}_metal${RENDEXT} PRIVATE
+		code/qcommon code/renderer/ral code/renderer/ral_metal
+		code/renderercommon code/sdl)
+	TARGET_LINK_LIBRARIES(${RENDERER_PREFIX}_metal${RENDEXT} PRIVATE ral_metal)
+	TARGET_COMPILE_DEFINITIONS(${RENDERER_PREFIX}_metal${RENDEXT} PRIVATE
+		USE_RENDERER_DLOPEN)
+	TARGET_COMPILE_OPTIONS(${RENDERER_PREFIX}_metal${RENDEXT} PRIVATE
+		-Wall -Wextra -Werror)
+	SET_TARGET_PROPERTIES(${RENDERER_PREFIX}_metal${RENDEXT} PROPERTIES PREFIX "")
+	IF(WIRED_HOST_SANITIZERS)
+		FOREACH(_ral_metal_sanitized_target ral_metal ral_metal_sdl
+			ral_sdl_presentation_host
+			${RENDERER_PREFIX}_metal${RENDEXT})
+			TARGET_COMPILE_OPTIONS(${_ral_metal_sanitized_target} PRIVATE
+				-fsanitize=address,undefined -fno-omit-frame-pointer
+				-fno-sanitize-recover=all)
+		ENDFOREACH()
+		TARGET_LINK_OPTIONS(${RENDERER_PREFIX}_metal${RENDEXT} PRIVATE
+			-fsanitize=address,undefined -fno-omit-frame-pointer
+			-fno-sanitize-recover=all)
+	ENDIF()
+	IF(BUILD_TESTING)
+		ADD_EXECUTABLE(ral_metal_module_test tests/ral_metal_module_test.mm)
+		SET_SOURCE_FILES_PROPERTIES(tests/ral_metal_module_test.mm
+			PROPERTIES LANGUAGE C)
+		ADD_DEPENDENCIES(ral_metal_module_test ${RENDERER_PREFIX}_metal${RENDEXT})
+		TARGET_INCLUDE_DIRECTORIES(ral_metal_module_test PRIVATE code/qcommon
+			code/renderer/ral code/renderer/ral_metal code/renderercommon code/sdl)
+		TARGET_LINK_LIBRARIES(ral_metal_module_test PRIVATE
+			ral_sdl_presentation_host)
+		TARGET_COMPILE_DEFINITIONS(ral_metal_module_test PRIVATE USE_RENDERER_DLOPEN
+			RAL_METAL_TEST_MODULE="$<TARGET_FILE:${RENDERER_PREFIX}_metal${RENDEXT}>")
+		TARGET_COMPILE_OPTIONS(ral_metal_module_test PRIVATE -Wall -Wextra -Werror)
+		ADD_TEST(NAME ral_metal_module_contract COMMAND ral_metal_module_test)
+		SET_TESTS_PROPERTIES(ral_metal_module_contract PROPERTIES
+			LABELS "host-only;subsystem;owner.ral;failure.contract;backend.metal;module.renderer"
+			TIMEOUT 30)
+		WIRED_CONFIGURE_HOST_TEST(ral_metal_module_test ral_metal_module_contract)
+		ADD_TEST(NAME ral_metal_module_link_policy_contract
+			COMMAND ${CMAKE_COMMAND}
+				-DBINARY=$<TARGET_FILE:${RENDERER_PREFIX}_metal${RENDEXT}>
+				-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_metal_module_link_policy_check.cmake)
+		SET_TESTS_PROPERTIES(ral_metal_module_link_policy_contract PROPERTIES
+			LABELS "host-only;infrastructure;owner.ral;failure.link-policy;backend.metal;module.renderer"
+			TIMEOUT 30)
+	ENDIF()
+ENDIF()
 
 IF(USE_OPENGL)
 	TARGET_COMPILE_DEFINITIONS(windowSystem PRIVATE USE_OPENGL_API)

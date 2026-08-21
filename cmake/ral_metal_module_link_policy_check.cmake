@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+if(NOT DEFINED BINARY OR NOT EXISTS "${BINARY}")
+	message(FATAL_ERROR "BINARY is required")
+endif()
+execute_process(COMMAND /usr/bin/otool -L "${BINARY}"
+	RESULT_VARIABLE OTOOL_RESULT OUTPUT_VARIABLE LINKS ERROR_VARIABLE OTOOL_ERROR)
+if(NOT OTOOL_RESULT EQUAL 0)
+	message(FATAL_ERROR "otool failed: ${OTOOL_ERROR}")
+endif()
+foreach(required "Metal.framework" "QuartzCore.framework" "CoreGraphics.framework")
+	string(FIND "${LINKS}" "${required}" pos)
+	if(pos EQUAL -1)
+		message(FATAL_ERROR "wired_metal renderer missing linkage: ${required}")
+	endif()
+endforeach()
+foreach(forbidden "MoltenVK" "Vulkan.framework" "libvulkan" "libSDL3")
+	string(FIND "${LINKS}" "${forbidden}" pos)
+	if(NOT pos EQUAL -1)
+		message(FATAL_ERROR "wired_metal renderer gained compatibility linkage: ${forbidden}")
+	endif()
+endforeach()
+execute_process(COMMAND /usr/bin/nm -gU "${BINARY}"
+	RESULT_VARIABLE NM_RESULT OUTPUT_VARIABLE SYMBOLS ERROR_VARIABLE NM_ERROR)
+if(NOT NM_RESULT EQUAL 0)
+	message(FATAL_ERROR "nm failed: ${NM_ERROR}")
+endif()
+foreach(symbol "_GetRefAPI" "_WiredMetal_GetFrameReceipt"
+	"_RalMetal_ModuleFrameReceiptExact")
+	string(REGEX MATCHALL "${symbol}" matches "${SYMBOLS}")
+	list(LENGTH matches count)
+	if(NOT count EQUAL 1)
+		message(FATAL_ERROR "wired_metal renderer expected one exported ${symbol}, got ${count}")
+	endif()
+endforeach()
+message(STATUS "wired_metal renderer symbol/link policy: PASS")

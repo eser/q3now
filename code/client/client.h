@@ -942,3 +942,16 @@ void	*VK_GetInstanceProcAddr( VkInstance instance, const char *name );
 const char *const *VK_GetInstanceExtensions( uint32_t *count );
 qboolean VK_CreateSurface( VkInstance instance, VkSurfaceKHR* pSurface );
 #endif
+
+qboolean RALimp_PresentationOpen( void *context,
+	const ralPresentationHostOpenInfo_t *info,
+	ralPresentationHostReceipt_t *outReceipt );
+qboolean RALimp_PresentationRefresh( void *context,
+	const ralPresentationHostReceipt_t *currentReceipt,
+	ralPresentationHostReceipt_t *outReceipt );
+qboolean RALimp_PresentationBorrow( void *context,
+	const ralPresentationHostReceipt_t *currentReceipt,
+	ralPresentationSurfaceBorrow_t *outBorrow );
+qboolean RALimp_PresentationClose( void *context,
+	const ralPresentationHostReceipt_t *currentReceipt,
+	ralPresentationHostCloseMode_t mode );

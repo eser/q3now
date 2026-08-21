@@ -62,6 +62,7 @@
 #include "ral_types.h"      // result codes, opaque handles, enums, small structs
 #include "ral_backend.h"    // backend lifecycle, caps, memory budget, availability probe
 #include "ral_capability.h" // versioned backend-neutral support/fallback profile
+#include "ral_backend_conformance.h" // live cross-backend ownership/copy/recreate proof
 #include "ral_allocation.h" // generation-bound logical placement and pressure receipt
 #include "ral_memory_recovery.h" // bounded OOM/fragmentation/device-loss decisions
 #include "ral_suballocation.h" // deterministic aligned block slices and coalescing

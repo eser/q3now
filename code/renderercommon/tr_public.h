@@ -7,6 +7,7 @@
 #include "tr_types.h"
 #include "r_profile_telemetry.h"
 #include "vulkan/vulkan.h"
+#include "../renderer/ral/ral_presentation_host.h"
 #include "../qcommon/asset_load_log.h"
 #include "../qcommon/wired/render/primitives.h"
 #include "../qcommon/wired/render/particle_class.h"
@@ -19,7 +20,7 @@ typedef struct mapFile_s mapFile_t;
  * (wired.x64). The renderer DLL only sees the opaque pointer. */
 typedef struct arena_s arena_t;
 
-#define	REF_API_VERSION		19	/* optional atomic temporal entity identity export added */
+#define	REF_API_VERSION		20	/* backend-neutral presentation-host imports added */
 
 // Number of concurrent world slots the renderer holds — one per local client
 // app. Must be >= the engine's MAX_LOCAL_CGAME_VMS (the app-instance count); the
@@ -420,6 +421,12 @@ typedef struct {
 	// ABI to REF_API_VERSION 11.
 	int  (*GetLogChannel)( const char *name );
 	void FORMAT_PRINTF(3, 4) (QDECL *LogCh)( int channel, log_severity_t severity, const char *fmt, ... );
+
+	// Backend-neutral main-surface ownership. The engine/platform layer owns
+	// the window or canvas; renderer modules borrow an opaque native surface
+	// only through this versioned cohort. No SDL, Vulkan, Metal or WebGPU type
+	// crosses the renderer ABI.
+	ralPresentationHostImports_t PresentationHost;
 
 } refimport_t;
 
