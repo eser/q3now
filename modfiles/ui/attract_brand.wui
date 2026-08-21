@@ -42,6 +42,13 @@ menuDef {
 	itemDef {
 		name "brand_stamp"
 		type container
+		// Hidden while a menu is up, for the same reason brand_title is: the
+		// right-hand rail's PROFILE card occupies this exact corner, and both
+		// are small mono caps, so they read as one garbled block. `backdrop dim`
+		// leaves the reel visible on purpose — the scrim separates a moving
+		// backdrop from menu text, it cannot separate two foreground labels.
+		stateTest "ui_menuUp"
+		hideState { 1 }
 		position absolute
 		top 8vh
 		right 5vw
@@ -130,7 +137,13 @@ menuDef {
 		itemDef { name "gap_brand_index" type container height FIXED 4.0vh grow 0 }
 
 		itemDef {
+			// The poster copy below lands on the menu's own action rows
+			// (CAMPAIGN / HOST A MATCH / DEMOS / OPTIONS), so it is stood down
+			// while a menu is up — same call as brand_title above. The reel
+			// keeps its spine, rule and cards, which is what shows through.
 			name "brand_index"
+			stateTest "ui_menuUp"
+			hideState { 1 }
 			type 0
 			width 80vw
 			height 4vh
@@ -147,6 +160,8 @@ menuDef {
 
 		itemDef {
 			name "brand_tags"
+			stateTest "ui_menuUp"
+			hideState { 1 }
 			type 0
 			width 80vw
 			height 4vh
@@ -160,6 +175,8 @@ menuDef {
 
 		itemDef {
 			name "brand_coin"
+			stateTest "ui_menuUp"
+			hideState { 1 }
 			type 0
 			width 40vw
 			height 4vh
@@ -173,6 +190,8 @@ menuDef {
 
 		itemDef {
 			name "brand_spec"
+			stateTest "ui_menuUp"
+			hideState { 1 }
 			type 0
 			width 40vw
 			height 4vh
