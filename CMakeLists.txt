@@ -878,6 +878,76 @@ SET_TESTS_PROPERTIES(ral_backend_conformance_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.vulkan;backend.metal"
 	TIMEOUT 30)
 
+ADD_EXECUTABLE(ral_frame_graph_test
+	tests/ral_frame_graph_test.c
+	code/renderer/ral_frame_graph/ral_frame_graph.c
+	code/renderer/ral/ral_transition.c
+	code/renderer/ral/ral_transient.c)
+TARGET_INCLUDE_DIRECTORIES(ral_frame_graph_test PRIVATE
+	code/qcommon code/renderer/ral code/renderer/ral_frame_graph code/renderercommon)
+TARGET_COMPILE_OPTIONS(ral_frame_graph_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_frame_graph_contract COMMAND ral_frame_graph_test)
+SET_TESTS_PROPERTIES(ral_frame_graph_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;frame-graph;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_frame_graph_test ral_frame_graph_contract)
+ADD_EXECUTABLE(ral_frame_graph_execution_test
+	tests/ral_frame_graph_execution_test.c
+	code/renderer/ral_frame_graph/ral_frame_graph.c
+	code/renderer/ral_frame_graph/ral_frame_graph_execution.c
+	code/renderer/ral/ral_transition.c
+	code/renderer/ral/ral_transient.c)
+TARGET_INCLUDE_DIRECTORIES(ral_frame_graph_execution_test PRIVATE
+	code/qcommon code/renderer/ral code/renderer/ral_frame_graph code/renderercommon)
+TARGET_COMPILE_OPTIONS(ral_frame_graph_execution_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_frame_graph_execution_contract COMMAND ral_frame_graph_execution_test)
+SET_TESTS_PROPERTIES(ral_frame_graph_execution_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;frame-graph;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_frame_graph_execution_test
+	ral_frame_graph_execution_contract)
+ADD_EXECUTABLE(ral_frame_graph_record_test
+	tests/ral_frame_graph_record_test.c
+	code/renderer/ral_frame_graph/ral_frame_graph.c
+	code/renderer/ral_frame_graph/ral_frame_graph_execution.c
+	code/renderer/ral_frame_graph/ral_frame_graph_record.c
+	code/renderer/ral_frame_graph/ral_frame_graph_record_ral.c
+	code/renderer/ral/ral_command_lifecycle.c
+	code/renderer/ral/ral_transition.c
+	code/renderer/ral/ral_transient.c)
+TARGET_INCLUDE_DIRECTORIES(ral_frame_graph_record_test PRIVATE
+	code/qcommon code/renderer/ral code/renderer/ral_frame_graph code/renderercommon)
+TARGET_COMPILE_OPTIONS(ral_frame_graph_record_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_frame_graph_record_contract COMMAND ral_frame_graph_record_test)
+SET_TESTS_PROPERTIES(ral_frame_graph_record_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;frame-graph;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_frame_graph_record_test ral_frame_graph_record_contract)
+ADD_EXECUTABLE(ral_frame_graph_submit_test
+	tests/ral_frame_graph_submit_test.c
+	code/renderer/ral_frame_graph/ral_frame_graph.c
+	code/renderer/ral_frame_graph/ral_frame_graph_execution.c
+	code/renderer/ral_frame_graph/ral_frame_graph_record.c
+	code/renderer/ral_frame_graph/ral_frame_graph_submit.c
+	code/renderer/ral_frame_graph/ral_frame_graph_submit_ral.c
+	code/renderer/ral/ral_command_lifecycle.c
+	code/renderer/ral/ral_transition.c
+	code/renderer/ral/ral_transient.c)
+TARGET_INCLUDE_DIRECTORIES(ral_frame_graph_submit_test PRIVATE
+	code/qcommon code/renderer/ral code/renderer/ral_frame_graph code/renderercommon)
+TARGET_COMPILE_OPTIONS(ral_frame_graph_submit_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_frame_graph_submit_contract COMMAND ral_frame_graph_submit_test)
+SET_TESTS_PROPERTIES(ral_frame_graph_submit_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;frame-graph;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_frame_graph_submit_test ral_frame_graph_submit_contract)
+ADD_TEST(NAME ral_frame_graph_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_frame_graph_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_frame_graph_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;frame-graph;feature.always"
+	TIMEOUT 30)
+
 ADD_EXECUTABLE(ral_frame_shell_test
 	tests/ral_frame_shell_test.c code/renderer/ral/ral_frame_shell.c)
 TARGET_INCLUDE_DIRECTORIES(ral_frame_shell_test PRIVATE
