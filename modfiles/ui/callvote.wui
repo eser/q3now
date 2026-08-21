@@ -82,18 +82,18 @@ menuDef {
 				// ── Quick votes (no parameter, fire-and-close) ─────────────
 				itemDef { name "cat_quick_label" type 0 height FIT text "QUICK VOTES" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Restart Map" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote map_restart" ; close } }
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Next Map" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote nextmap" ; close } }
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 36px width PERCENT 0.95 text "Shuffle Teams" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote shuffle" ; close } }
+				itemDef { type 1 height FIXED 36px width PERCENT 0.95 text "Restart Map" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote map_restart" ; close } }
+				itemDef { type 1 height FIXED 36px width PERCENT 0.95 text "Next Map" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote nextmap" ; close } }
+				itemDef { type 1 height FIXED 36px width PERCENT 0.95 text "Shuffle Teams" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote shuffle" ; close } }
 
 				// ── Parameter votes (spinner picks value, button submits) ──
 				itemDef { name "cat_param_label" type 0 height FIT text "PARAMETER VOTES" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
-				itemDef { name "row_timelimit" type spinner rect 0.005 0 0.95 0.035 height FIXED 36px width PERCENT 0.95 text "Timelimit" textalign 0 font $font_sans 13 forecolor $bone cvarSpinner "ui_voteTimelimit" 5 5 30 5 visible 1 grow 0 }
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 32px width PERCENT 0.95 text "Vote Timelimit" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "callvote g_timelimit $ui_voteTimelimit" ; close } }
+				itemDef { name "row_timelimit" type spinner height FIXED 36px width PERCENT 0.95 text "Timelimit" textalign 0 font $font_sans 13 forecolor $bone cvarSpinner "ui_voteTimelimit" 5 5 30 5 visible 1 grow 0 }
+				itemDef { type 1 height FIXED 32px width PERCENT 0.95 text "Vote Timelimit" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "callvote g_timelimit $ui_voteTimelimit" ; close } }
 
-				itemDef { name "row_scorelimit" type spinner rect 0.005 0 0.95 0.035 height FIXED 36px width PERCENT 0.95 text "Scorelimit" textalign 0 font $font_sans 13 forecolor $bone cvarSpinner "ui_voteScorelimit" 10 10 100 10 visible 1 grow 0 }
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 32px width PERCENT 0.95 text "Vote Scorelimit" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "callvote g_scorelimit $ui_voteScorelimit" ; close } }
+				itemDef { name "row_scorelimit" type spinner height FIXED 36px width PERCENT 0.95 text "Scorelimit" textalign 0 font $font_sans 13 forecolor $bone cvarSpinner "ui_voteScorelimit" 10 10 100 10 visible 1 grow 0 }
+				itemDef { type 1 height FIXED 32px width PERCENT 0.95 text "Vote Scorelimit" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { exec "callvote g_scorelimit $ui_voteScorelimit" ; close } }
 
 				// ── Gametype vote — one literal callvote per type (fully wired)
 				// Numbers/names track startserver's ui_netGameType list (0-6).
@@ -109,13 +109,13 @@ menuDef {
 				// their entities are compiled away entirely.
 				itemDef { name "cat_gametype_label" type 0 height FIT text "GAMETYPE VOTE" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Deathmatch" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 0" ; close } }
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Duel" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 1" ; close } }
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "King of the Hill" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 2" ; close } }
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Last Man Standing" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 3" ; close } }
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Team Deathmatch" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 4" ; close } }
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "Capture the Flag" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 5" ; close } }
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 34px width PERCENT 0.95 text "One Flag CTF" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 6" ; close } }
+				itemDef { type 1 height FIXED 34px width PERCENT 0.95 text "Deathmatch" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 0" ; close } }
+				itemDef { type 1 height FIXED 34px width PERCENT 0.95 text "Duel" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 1" ; close } }
+				itemDef { type 1 height FIXED 34px width PERCENT 0.95 text "King of the Hill" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 2" ; close } }
+				itemDef { type 1 height FIXED 34px width PERCENT 0.95 text "Last Man Standing" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 3" ; close } }
+				itemDef { type 1 height FIXED 34px width PERCENT 0.95 text "Team Deathmatch" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 4" ; close } }
+				itemDef { type 1 height FIXED 34px width PERCENT 0.95 text "Capture the Flag" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 5" ; close } }
+				itemDef { type 1 height FIXED 34px width PERCENT 0.95 text "One Flag CTF" textalign 0 font $font_sans 13 forecolor $bone forecolor.active $accent visible 1 grow 0 action { exec "callvote g_gametype 6" ; close } }
 
 				// ── Kick vote — connected-player feeder + submit ───────────
 				// feeder 7 = FEEDER_PLAYER_LIST (same as removebots.wui). The
@@ -140,7 +140,7 @@ menuDef {
 					visible 1
 					grow 0
 				}
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 32px width PERCENT 0.95 text "Vote Kick Selected" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { voteKick ; close } }
+				itemDef { type 1 height FIXED 32px width PERCENT 0.95 text "Vote Kick Selected" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { voteKick ; close } }
 
 				// ── Map vote — allmaps feeder + submit ─────────────────────
 				// feeder "allmaps" is the same map feeder startserver.wui uses.
@@ -165,7 +165,7 @@ menuDef {
 					visible 1
 					grow 0
 				}
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 32px width PERCENT 0.95 text "Vote Map Selected" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { voteMap ; close } }
+				itemDef { type 1 height FIXED 32px width PERCENT 0.95 text "Vote Map Selected" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { voteMap ; close } }
 
 				// ── Leader vote (team games) — team-player feeder + submit ─
 				// Uses the TEAM vote path: `callteamvote leader <player>`
@@ -193,7 +193,7 @@ menuDef {
 					visible 1
 					grow 0
 				}
-				itemDef { type 1 rect 0.005 0 0.95 0.04 height FIXED 32px width PERCENT 0.95 text "Vote Leader Selected" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { voteLeader ; close } }
+				itemDef { type 1 height FIXED 32px width PERCENT 0.95 text "Vote Leader Selected" textalign 0 font $font_sans 12 forecolor $accent forecolor.active $accent visible 1 grow 0 action { voteLeader ; close } }
 			}
 
 			itemDef {
