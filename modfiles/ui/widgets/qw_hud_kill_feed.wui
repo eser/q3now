@@ -18,9 +18,6 @@ itemDef {
 	// to the RIGHT edge so it faces inward. Lowered to top 3vh to clear telemetry.
 	name "hud_active_kill_feed"
 	type container
-	position absolute
-	top 3vh
-	right 1.67vw
 	width 26.39vw
 	height 18vh
 	direction column

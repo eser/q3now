@@ -24,9 +24,6 @@
 itemDef {
 	name "hud_active_health_panel"
 	type container
-	position absolute
-	left 1.94vw
-	bottom 4vh
 	width 9.5vw
 	height 11.56vh
 	direction column

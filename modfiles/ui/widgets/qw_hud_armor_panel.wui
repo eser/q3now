@@ -15,9 +15,6 @@
 itemDef {
 	name "hud_active_armor_panel"
 	type container
-	position absolute
-	left 11.6vw
-	bottom 4vh
 	width 9.5vw
 	height 11.56vh
 	direction column

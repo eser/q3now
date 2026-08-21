@@ -18,19 +18,52 @@ menuDef {
 	// dark scenes, while still feeling part of the player's heads-up view.
 	composite overlay
 
+
+	// ── 4-corner HUD grid ─────────────────────────────────────────────
+	// HUD elements do not flow past one another: health sits bottom-left,
+	// the kill feed top-right. Expressing that as nested rows/columns with
+	// a growing spacer between them gives the same placement without each
+	// widget pinning itself to the viewport. Only CORNER widgets live here —
+	// the full-screen scoreboard overlay, the full-width hint bar and the
+	// coordinate-free elements (crosshair, objectives, subtitle) keep their
+	// own paths, because they are not corner-anchored.
+	itemDef {
+		name "hud_corner_grid"
+		type container
+		direction column
+		grow 1
+		padding 3vh 1.67vw 4vh 1.94vw
+
+		itemDef { name "hud_row_top" type container direction row grow 0
+			itemDef { name "hud_top_left" type container grow 1 }
+			itemDef { name "hud_top_right" type container direction column gap $spacing_sm grow 0 alignX end 
+				#include "ui/widgets/qw_hud_kill_feed.wui"
+				#include "ui/widgets/qw_hud_telemetry.wui"
+			}
+		}
+
+		itemDef { name "hud_mid_spacer" type container grow 1 }
+
+		itemDef { name "hud_row_bottom" type container direction row grow 0
+			itemDef { name "hud_bottom_left" type container direction column gap $spacing_sm grow 0 alignX start 
+				#include "ui/widgets/qw_hud_health_panel.wui"
+				#include "ui/widgets/qw_hud_armor_panel.wui"
+			}
+			itemDef { name "hud_bottom_gap" type container grow 1 }
+			itemDef { name "hud_bottom_right" type container direction column gap $spacing_sm grow 0 alignX end 
+				#include "ui/widgets/qw_hud_ammo_readout.wui"
+				#include "ui/widgets/qw_hud_weapon_placeholder.wui"
+			}
+		}
+	}
+
 	#include "ui/widgets/qw_hud_scoreboard_bar.wui"
-	#include "ui/widgets/qw_hud_kill_feed.wui"
-	#include "ui/widgets/qw_hud_telemetry.wui"
-	#include "ui/widgets/qw_hud_health_panel.wui"
-	#include "ui/widgets/qw_hud_armor_panel.wui"
-	#include "ui/widgets/qw_hud_ammo_readout.wui"
 	#include "ui/widgets/qw_hud_weapon_carousel.wui"
 	#include "ui/widgets/qw_hud_holdables_strip.wui"
 	// HUD redesign (Eser, minimalist): the weapon-viewmodel PLACEHOLDER box is
 	// removed. The real 3D viewmodel already renders in that region; the empty
 	// dark panel only added clutter and ate field-of-view. Bottom-right is now
 	// free for the ammo readout (moved there — weapon-hand side).
-	// #include "ui/widgets/qw_hud_weapon_placeholder.wui"
 	// Scoreboard occlusion fix (chain 6.x S1): qw_hud_scoreboard_overlay was
 	// always-on (an itemDef nested in this always-visible hud_active menu), so
 	// its scorelist_widget covered screen-centre during normal play. The

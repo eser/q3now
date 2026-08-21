@@ -13,9 +13,6 @@
 itemDef {
 	name "hud_active_weapon_placeholder"
 	type container
-	position absolute
-	right 8.33vw
-	bottom 6.67vh
 	width 23.61vw
 	height 26.67vh
 	direction column
