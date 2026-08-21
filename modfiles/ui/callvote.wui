@@ -125,7 +125,6 @@ menuDef {
 				itemDef {
 					name "kicklist"
 					type 6
-					rect 0 0 0.95 0.18
 					width PERCENT 0.95
 					height FIXED 96px
 					font $font_sans 12
@@ -148,7 +147,6 @@ menuDef {
 				itemDef {
 					name "maplist"
 					type 6
-					rect 0 0 0.95 0.20
 					width PERCENT 0.95
 					height FIXED 120px
 					font $font_mono 12
@@ -178,7 +176,6 @@ menuDef {
 				itemDef {
 					name "leaderlist"
 					type 6
-					rect 0 0 0.95 0.18
 					width PERCENT 0.95
 					height FIXED 96px
 					font $font_sans 12

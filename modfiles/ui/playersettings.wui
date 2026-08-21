@@ -96,7 +96,6 @@ menuDef {
 					itemDef {
 						name "group_identity"
 						type container
-						rect 0 0 0.5 0
 						height FIT
 						width PERCENT 0.5
 						grow 0
@@ -135,7 +134,6 @@ menuDef {
 									name "model_preview"
 									type 0
 									ownerdraw "player_model"
-									rect 0 0 0 1
 									width FIXED 150px
 									height PERCENT 1
 									backcolor 0.03 0.03 0.05 1
@@ -220,7 +218,6 @@ menuDef {
 					itemDef {
 						name "group_crosshair"
 						type container
-						rect 0 0 0.5 0
 						height FIT
 						width PERCENT 0.5
 						grow 0

@@ -38,7 +38,6 @@ menuDef {
 			itemDef {
 				name "team_header"
 				type container
-				rect 0 0 1 0.04
 				direction row
 				gap $spacing_md
 				height FIT
@@ -104,7 +103,6 @@ menuDef {
 			itemDef {
 				name "popup_footer"
 				type container
-				rect 0 0 1 0.05
 				direction row
 				gap $spacing_md
 				alignX end

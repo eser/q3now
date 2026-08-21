@@ -37,7 +37,6 @@ menuDef {
 		itemDef {
 			name "browser_motd"
 			type 0
-			rect 0 0 1 0.025
 			height FIT
 			width PERCENT 1.0
 			padding 0.006 $content_padding_x
@@ -72,7 +71,6 @@ menuDef {
 				itemDef {
 					name "filter_source"
 					type segmented
-					rect 0 0 0.52 0.04
 					height FIXED 36px
 					width PERCENT 0.52
 					text "Source"
@@ -89,7 +87,6 @@ menuDef {
 				itemDef {
 					name "filter_gametype"
 					type 12
-					rect 0 0 0.30 0.04
 					height FIXED 36px
 					width PERCENT 0.30
 					text "Game Type"
@@ -155,7 +152,6 @@ menuDef {
 				itemDef {
 					name "filter_showfull"
 					type checkbox
-					rect 0 0 0.16 0.04
 					height FIXED 36px
 					width PERCENT 0.16
 					text "Show Full"
@@ -171,7 +167,6 @@ menuDef {
 				itemDef {
 					name "filter_showempty"
 					type checkbox
-					rect 0 0 0.16 0.04
 					height FIXED 36px
 					width PERCENT 0.16
 					text "Show Empty"
@@ -187,7 +182,6 @@ menuDef {
 				itemDef {
 					name "filter_maxping"
 					type 4
-					rect 0 0 0.22 0.04
 					height FIXED 36px
 					width PERCENT 0.22
 					text "Max Ping"

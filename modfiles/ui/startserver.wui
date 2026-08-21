@@ -294,7 +294,6 @@ menuDef {
 				itemDef {
 					name "row_gametype"
 					type 12
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Type"
@@ -310,7 +309,6 @@ menuDef {
 				itemDef {
 					name "row_bots"
 					type spinner
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Bots"
@@ -324,7 +322,6 @@ menuDef {
 				itemDef {
 					name "row_skill"
 					type 12
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Skill"
@@ -341,7 +338,6 @@ menuDef {
 				itemDef {
 					name "row_hostname"
 					type 4
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Hostname"
@@ -358,7 +354,6 @@ menuDef {
 				itemDef {
 					name "row_maxclients"
 					type spinner
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Max Players"
@@ -372,7 +367,6 @@ menuDef {
 				itemDef {
 					name "row_scorelimit"
 					type spinner
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Score Limit"
@@ -386,7 +380,6 @@ menuDef {
 				itemDef {
 					name "row_timelimit"
 					type spinner
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Time Limit"
@@ -402,7 +395,6 @@ menuDef {
 				itemDef {
 					name "row_pure"
 					type checkbox
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Pure"
@@ -416,7 +408,6 @@ menuDef {
 				itemDef {
 					name "row_dedicated"
 					type segmented
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Server Listing"
@@ -431,7 +422,6 @@ menuDef {
 				itemDef {
 					name "row_autodownload"
 					type checkbox
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Auto Download"
@@ -462,7 +452,6 @@ menuDef {
 				itemDef {
 					name "row_friendlyfire"
 					type checkbox
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Friendly Fire"
@@ -478,7 +467,6 @@ menuDef {
 				itemDef {
 					name "row_balance"
 					type checkbox
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Force Team Balance"
@@ -494,7 +482,6 @@ menuDef {
 				itemDef {
 					name "row_allowvote"
 					type checkbox
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Allow Vote"
@@ -510,7 +497,6 @@ menuDef {
 				itemDef {
 					name "row_myteam"
 					type segmented
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "My Team"
@@ -529,7 +515,6 @@ menuDef {
 				itemDef {
 					name "row_autobots"
 					type checkbox
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Auto Bots"
@@ -543,7 +528,6 @@ menuDef {
 				itemDef {
 					name "row_minplayers"
 					type spinner
-					rect 0 0 1 0.035
 					height FIXED 28px
 					width PERCENT 0.98
 					text "Min Players"

@@ -93,7 +93,6 @@ menuDef {
 					itemDef {
 						name "group_screen"
 						type container
-						rect 0 0 0.5 0
 						height FIT
 						width PERCENT 0.5
 						grow 0
@@ -117,7 +116,6 @@ menuDef {
 					itemDef {
 						name "group_view"
 						type container
-						rect 0 0 0.5 0
 						height FIT
 						width PERCENT 0.5
 						grow 0
