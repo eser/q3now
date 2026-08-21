@@ -51,7 +51,6 @@ menuDef {
 	// live game, not a place you leave it behind.
 	backdrop dim
 	layer "menu"
-	rect 0 0 1 1
 	fullScreen 1
 	visible 1
 	style 1
@@ -59,7 +58,6 @@ menuDef {
 	itemDef {
 		name "popup_overlay"
 		position absolute
-		rect 0 0 1 1
 		type container
 		direction column
 		alignX center
@@ -73,7 +71,6 @@ menuDef {
 			name "dim_backdrop"
 			type 0
 			position absolute
-			rect 0 0 1 1
 			backcolor 0 0 0 0.55
 			decoration
 			visible 1

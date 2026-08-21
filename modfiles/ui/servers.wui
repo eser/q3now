@@ -17,7 +17,6 @@
 menuDef {
 	name "servers"
 	layer "menu"
-	rect 0 0 1 1
 	fullScreen 1
 	visible 1
 	style 1
@@ -25,7 +24,6 @@ menuDef {
 	itemDef {
 		name "browser_root"
 		position absolute
-		rect 0 0 1 1
 		type container
 		direction column
 		background "layered" effects "base+glow+noise+vignette"
@@ -255,7 +253,6 @@ menuDef {
 				itemDef {
 					name "serverlist"
 					type 6
-					rect 0 0 1 1
 					width PERCENT 1.0
 					height GROW
 					grow 1

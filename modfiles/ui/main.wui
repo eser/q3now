@@ -19,7 +19,6 @@ menuDef {
 	// through — deep menus turn them on instead.
 	backdrop dim
 	layer "menu"
-	rect 0 0 1 1
 	fullScreen 1
 	visible 1
 	style 1
@@ -27,7 +26,6 @@ menuDef {
 	itemDef {
 		name "main_root"
 		position absolute
-		rect 0 0 1 1
 		type container
 		direction column
 		background "layered" effects "demo"

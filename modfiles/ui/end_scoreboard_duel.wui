@@ -16,7 +16,6 @@
 menuDef {
 	name "end_scoreboard_duel"
 	layer "hud"
-	rect 0 0 1 1
 	fullScreen 1
 	visible 0
 	style 0
@@ -24,7 +23,6 @@ menuDef {
 	itemDef {
 		name "duel_overlay"
 		position absolute
-		rect 0 0 1 1
 		type container
 		direction column
 		alignX center
@@ -33,7 +31,6 @@ menuDef {
 		itemDef {
 			name "duel_root"
 			type container
-			rect 0 0 1 1
 			direction column
 			gap $spacing_md
 			padding $spacing_md $spacing_md

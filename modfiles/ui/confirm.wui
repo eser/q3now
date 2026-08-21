@@ -10,7 +10,6 @@
 menuDef {
 	name "confirm_popup"
 	layer "popup"
-	rect 0 0 1 1
 	fullScreen 1
 	visible 1
 	style 1
@@ -19,7 +18,6 @@ menuDef {
 	itemDef {
 		name "popup_overlay"
 		position absolute
-		rect 0 0 1 1
 		type container
 		direction column
 		alignX center

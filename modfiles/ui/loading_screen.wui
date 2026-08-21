@@ -23,7 +23,6 @@
 
 menuDef {
 	name "loading_screen"
-	rect 0 0 1 1
 	fullScreen 1
 	visible 1
 	style 1

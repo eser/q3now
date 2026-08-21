@@ -15,7 +15,6 @@
 
 menuDef {
 	name "debug_graph"
-	rect 0 0 1 1
 	fullscreen 1
 	visible 1
 	layer "debug_overlay"
