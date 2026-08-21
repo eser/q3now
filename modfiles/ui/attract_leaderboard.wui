@@ -72,94 +72,90 @@ menuDef {
 	// ── rows (fight-card: red index + bone name + mono time) ─────────
 	// Each row is one absolute container with three sized leaves. A top border
 	// rule gives the poster grid. No nested flex without sizing → no collapse.
+	// Rows live in a resolved-size column band instead of five absolutes.
+	// The band carries the geometry the coordinates used to: 36vh down,
+	// 6vw in, and rows contiguous at 11vh each — same result, one box.
 	itemDef {
-		name "lb_row1"
-		stateTest "ui_menuUp"
-		hideState { 1 }
+		name "lb_rows"
 		type container
-		position absolute
-		left 6vw
-		top 36vh
-		width 88vw
-		height 11vh
-		direction row
-		alignY center
-		borderTop 1px $line
-		grow 0
-		itemDef { type 0vh height FIT width 8vw  text "01"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-		itemDef { type 0vh height FIT width 46vw text "RANGER" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-		itemDef { type 0vh height FIT width 24vw text "12:34.5" textalign 2 font $font_mono 26     forecolor $attract_ink_hi decoration visible 1 grow 0 }
-	}
-	itemDef {
-		name "lb_row2"
-		stateTest "ui_menuUp"
-		hideState { 1 }
-		type container
-		position absolute
-		left 6vw
-		top 47vh
-		width 88vw
-		height 11vh
-		direction row
-		alignY center
-		borderTop 1px $line
-		grow 0
-		itemDef { type 0vh height FIT width 8vw  text "02"    textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-		itemDef { type 0vh height FIT width 46vw text "KEEL"  textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-		itemDef { type 0vh height FIT width 24vw text "13:01.2" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
-	}
-	itemDef {
-		name "lb_row3"
-		stateTest "ui_menuUp"
-		hideState { 1 }
-		type container
-		position absolute
-		left 6vw
-		top 58vh
-		width 88vw
-		height 11vh
-		direction row
-		alignY center
-		borderTop 1px $line
-		grow 0
-		itemDef { type 0vh height FIT width 8vw  text "03"    textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-		itemDef { type 0vh height FIT width 46vw text "SLASH" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-		itemDef { type 0vh height FIT width 24vw text "13:48.8" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
-	}
-	itemDef {
-		name "lb_row4"
-		stateTest "ui_menuUp"
-		hideState { 1 }
-		type container
-		position absolute
-		left 6vw
-		top 69vh
-		width 88vw
-		height 11vh
-		direction row
-		alignY center
-		borderTop 1px $line
-		grow 0
-		itemDef { type 0vh height FIT width 8vw  text "04"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-		itemDef { type 0vh height FIT width 46vw text "ANARKI" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-		itemDef { type 0vh height FIT width 24vw text "14:12.1" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
-	}
-	itemDef {
-		name "lb_row5"
-		stateTest "ui_menuUp"
-		hideState { 1 }
-		type container
-		position absolute
-		left 6vw
-		top 80vh
-		width 88vw
-		height 11vh
-		direction row
-		alignY center
-		borderTop 1px $line
-		grow 0
-		itemDef { type 0vh height FIT width 8vw  text "05"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
-		itemDef { type 0vh height FIT width 46vw text "SORLAG" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
-		itemDef { type 0vh height FIT width 24vw text "14:59.3" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		direction column
+		grow 1
+		padding 36vh 6vw 0 6vw
+
+		itemDef {
+			name "lb_row1"
+			stateTest "ui_menuUp"
+			hideState { 1 }
+			type container
+			height FIXED 11vh
+			width PERCENT 1
+			direction row
+			alignY center
+			borderTop 1px $line
+			grow 0
+			itemDef { type 0vh height FIT width 8vw  text "01"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+			itemDef { type 0vh height FIT width 46vw text "RANGER" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+			itemDef { type 0vh height FIT width 24vw text "12:34.5" textalign 2 font $font_mono 26     forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		}
+		itemDef {
+			name "lb_row2"
+			stateTest "ui_menuUp"
+			hideState { 1 }
+			type container
+			height FIXED 11vh
+			width PERCENT 1
+			direction row
+			alignY center
+			borderTop 1px $line
+			grow 0
+			itemDef { type 0vh height FIT width 8vw  text "02"    textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+			itemDef { type 0vh height FIT width 46vw text "KEEL"  textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+			itemDef { type 0vh height FIT width 24vw text "13:01.2" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		}
+		itemDef {
+			name "lb_row3"
+			stateTest "ui_menuUp"
+			hideState { 1 }
+			type container
+			height FIXED 11vh
+			width PERCENT 1
+			direction row
+			alignY center
+			borderTop 1px $line
+			grow 0
+			itemDef { type 0vh height FIT width 8vw  text "03"    textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+			itemDef { type 0vh height FIT width 46vw text "SLASH" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+			itemDef { type 0vh height FIT width 24vw text "13:48.8" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		}
+		itemDef {
+			name "lb_row4"
+			stateTest "ui_menuUp"
+			hideState { 1 }
+			type container
+			height FIXED 11vh
+			width PERCENT 1
+			direction row
+			alignY center
+			borderTop 1px $line
+			grow 0
+			itemDef { type 0vh height FIT width 8vw  text "04"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+			itemDef { type 0vh height FIT width 46vw text "ANARKI" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+			itemDef { type 0vh height FIT width 24vw text "14:12.1" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		}
+		itemDef {
+			name "lb_row5"
+			stateTest "ui_menuUp"
+			hideState { 1 }
+			type container
+			height FIXED 11vh
+			width PERCENT 1
+			direction row
+			alignY center
+			borderTop 1px $line
+			grow 0
+			itemDef { type 0vh height FIT width 8vw  text "05"     textalign 0 font $font_sans_bold 56 forecolor $poster_red decoration visible 1 grow 0 }
+			itemDef { type 0vh height FIT width 46vw text "SORLAG" textalign 0 font $font_sans_bold 40 forecolor $bone          decoration visible 1 grow 1 }
+			itemDef { type 0vh height FIT width 24vw text "14:59.3" textalign 2 font $font_mono 26   forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		}
 	}
 }
