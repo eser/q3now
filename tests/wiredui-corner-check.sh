@@ -21,6 +21,16 @@
 #
 # Usage:  tests/wiredui-corner-check.sh [path-to-wired]
 # Exit:   0 PASS   1 FAIL   77 SKIP
+#
+# On macOS the binary defaults to the installed .app — a flat build/ tree cannot
+# run the engine at all (see the WIRED_DEFAULT note below). To capture a menu
+# built from working-tree content:
+#
+#   WIRED_CONTENT_ROOT="$PWD/build/release" WIRED_KEEP_ARTIFACTS=1 \
+#     CORNER_MENU=main tests/wiredui-corner-check.sh
+#
+# For attract panels use CORNER_ATTRACT=<n> instead of CORNER_MENU — pushing them
+# captures a blank frame by design. See the CORNER_ATTRACT note below.
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,6 +73,23 @@ GOLDEN="${GOLDEN:-$GOLDEN_DEFAULT}"
 # before/after of a widget change). Point it elsewhere and the corner verdict is
 # noise — read the retained frame, not the deltas.
 CORNER_MENU="${CORNER_MENU:-main}"
+# CORNER_ATTRACT=<n> — capture the n'th attract playlist item (1-based) instead of
+# pushing a menu. wui_push is the WRONG door for attract panels: it makes the panel
+# the ACTIVE menu, which sets ui_menuUp, and attract content hides itself on that
+# state by design (attract_leaderboard gates six items on it; attract_brand's
+# wordmark, stamp and poster copy likewise). Pushed, they capture as bare
+# background — a frame that proves nothing.
+#
+# In the real flow the scheduler sets panel->visible directly and never touches the
+# menu stack (cl_wired_attract.c), so no menu is active and the panel draws in
+# full. This reproduces that: let attract start on its own (attract_delay 0) and
+# skip forward to the item you want. Item order is modfiles/scripts/attract.lua —
+# 1 = attract_brand, 2 = attract_leaderboard.
+#
+# Panels not on the playlist stay unreachable, attract_demo_overlay among them: it
+# needs an attract-owned demo playing (WiredAttract_IsDemoOverlayActive), and the
+# demo item is currently commented out of the playlist.
+CORNER_ATTRACT="${CORNER_ATTRACT:-}"
 
 ASSERT_PY="$(mktemp "$WIRED_TMP/wired-corner-XXXXXX")".py
 SELF_TMP=""
@@ -234,15 +261,40 @@ echo "==> WiredUI corner check (SMAA corner-squares, corner-vs-golden, mode=$MOD
 # that says which — e.g. "Sys_Error: Failed to load renderer ...". Kept in the
 # sandbox and echoed only on failure, so a passing run stays quiet.
 RUN_LOG="$HOME_PARENT/engine.log"
+
+# How the surface is brought up. Menus get pushed; attract items get skipped to.
+# attract_delay 0 makes the scheduler start on the first frame, so item 1 is
+# already up by the time the waits elapse; each skip advances one item. Skipping
+# beats waiting out the item's own duration (brand is 6s), because +wait counts
+# FRAMES, not seconds — how many frames 6s buys varies by machine.
+if [ -n "$CORNER_ATTRACT" ]; then
+    SURFACE_ARGS="+set attract_enabled 1 +set attract_delay 0 +wait 120"
+    _n=1
+    while [ "$_n" -lt "$CORNER_ATTRACT" ]; do
+        SURFACE_ARGS="$SURFACE_ARGS +attract_skip +wait 40"
+        _n=$(( _n + 1 ))
+    done
+    echo "  surface: attract playlist item $CORNER_ATTRACT (real attract flow, no wui_push)"
+else
+    # attract_enabled 0 for the menu path. main declares `backdrop dim`, which
+    # deliberately lets the attract reel show through, and the reel's left spine
+    # runs into the sampled corners — TL/BL came out Δ28/Δ26 against a golden
+    # blessed without it, so the gate failed every run for a reason that had
+    # nothing to do with corner squares. Silencing the reel puts the measurement
+    # back in the condition the golden was blessed under (TL Δ0.0).
+    SURFACE_ARGS="+set attract_enabled 0 +wait 80 +wui_push $CORNER_MENU +wait 60"
+fi
+
 (
     cd "$WIRED_DIR" || exit 1
+    # shellcheck disable=SC2086  # SURFACE_ARGS is a deliberate argument list
     timeout 90 "$WIRED" \
         +set fs_homepath "$HOME_NATIVE" \
         ${WIRED_CONTENT_ROOT:+ +set fs_basepath "$HOME_NATIVE"} \
         +set com_automated 1 +set s_initsound 0 \
         +set r_fullscreen 0 +set r_mode -1 +set r_customwidth "$W" +set r_customheight "$H" \
         +set r_smaa 1 \
-        +wait 80 +wui_push "$CORNER_MENU" +wait 60 +screenshot cornercap +wait 30 +quit \
+        $SURFACE_ARGS +screenshot cornercap +wait 30 +quit \
         >"$RUN_LOG" 2>&1
 )
 
