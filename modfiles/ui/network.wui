@@ -107,9 +107,9 @@ menuDef {
 						itemDef { name "group_bandwidth_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "BANDWIDTH" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
-						itemDef { name "row_rate" type 12 rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Net Data Rate" textalign 0 font $font_sans 13 forecolor $bone cvar "rate" cvarFloatList { "<=28.8k" 2500 "33.6k" 3000 "56k" 4000 "ISDN" 5000 "LAN/Cable/xDSL" 25000 } visible 1 grow 0 }
-						itemDef { name "row_maxpackets" type 10 rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Max Packets" textalign 0 font $font_sans 13 forecolor $bone cvarFloat "cl_maxpackets" 125 30 125 visible 1 grow 0 }
-						itemDef { name "row_snaps" type 10 rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Snaps" textalign 0 font $font_sans 13 forecolor $bone cvarFloat "snaps" 40 20 125 visible 1 grow 0 }
+						itemDef { name "row_rate" type 12 height FIXED 38px width PERCENT 1 text "Net Data Rate" textalign 0 font $font_sans 13 forecolor $bone cvar "rate" cvarFloatList { "<=28.8k" 2500 "33.6k" 3000 "56k" 4000 "ISDN" 5000 "LAN/Cable/xDSL" 25000 } visible 1 grow 0 }
+						itemDef { name "row_maxpackets" type 10 height FIXED 38px width PERCENT 1 text "Max Packets" textalign 0 font $font_sans 13 forecolor $bone cvarFloat "cl_maxpackets" 125 30 125 visible 1 grow 0 }
+						itemDef { name "row_snaps" type 10 height FIXED 38px width PERCENT 1 text "Snaps" textalign 0 font $font_sans 13 forecolor $bone cvarFloat "snaps" 40 20 125 visible 1 grow 0 }
 					}
 
 					// ── COMPENSATION group box ─────────────────
@@ -131,10 +131,10 @@ menuDef {
 						itemDef { name "group_compensation_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "COMPENSATION" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
-						itemDef { name "row_autodl" type checkbox rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Auto Download" textalign 0 font $font_sans 13 forecolor $bone cvar "cl_allowDownload" visible 1 grow 0 }
-						itemDef { name "row_predict" type checkbox rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Predict Items" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_predictItems" visible 1 grow 0 }
-						itemDef { name "row_delag" type checkbox rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Delag Hitscan" textalign 0 font $font_sans 13 forecolor $bone cvar "g_delagHitscan" visible 1 grow 0 }
-						itemDef { name "row_lagometer" type checkbox rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Network Graph" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_lagometer" visible 1 grow 0 }
+						itemDef { name "row_autodl" type checkbox height FIXED 38px width PERCENT 1 text "Auto Download" textalign 0 font $font_sans 13 forecolor $bone cvar "cl_allowDownload" visible 1 grow 0 }
+						itemDef { name "row_predict" type checkbox height FIXED 38px width PERCENT 1 text "Predict Items" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_predictItems" visible 1 grow 0 }
+						itemDef { name "row_delag" type checkbox height FIXED 38px width PERCENT 1 text "Delag Hitscan" textalign 0 font $font_sans 13 forecolor $bone cvar "g_delagHitscan" visible 1 grow 0 }
+						itemDef { name "row_lagometer" type checkbox height FIXED 38px width PERCENT 1 text "Network Graph" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_lagometer" visible 1 grow 0 }
 					}
 					}
 				}

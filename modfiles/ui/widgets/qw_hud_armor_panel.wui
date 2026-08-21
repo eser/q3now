@@ -25,7 +25,7 @@ itemDef {
 	background $hud_panel_bg60
 	borderLeft 3px $accent
 
-	itemDef { type 0 rect 0 0 0 0 width FIT height FIT text "ARMOR" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { type 0 width FIT height FIT text "ARMOR" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
 
 	// HUD redesign (Eser, 2026-06-30): mirrors health — ICON on the LEFT, VALUE over BAR
 	// to its right. Icon natural color (no tint). All leaves inside the chrome

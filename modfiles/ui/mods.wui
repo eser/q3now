@@ -59,8 +59,8 @@ menuDef {
 				borderY 0 1px $line
 				padding 0.005 0.01
 
-				itemDef { name "h_dir"  type 0 rect 0 0 0.25 0.03 height FIT width PERCENT 0.25 text "DIR"         textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
-				itemDef { name "h_name" type 0 rect 0 0 0.70 0.03 height FIT width PERCENT 0.70 text "DESCRIPTION" textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "h_dir"  type 0 height FIT width PERCENT 0.25 text "DIR"         textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "h_name" type 0 height FIT width PERCENT 0.70 text "DESCRIPTION" textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
 			}
 
 			itemDef {

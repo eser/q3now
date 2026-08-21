@@ -45,4 +45,4 @@
 // active theme only overrides the accent* tokens); the accent enters only on
 // hover + on the caller-chosen primary label color.
 #define QW_BUTTON_BLOCK(NAME, LABEL, COLOR, ACT) \
-	itemDef { name NAME type 1 rect 0 0 1 0 height FIXED 44px width PERCENT 1 alignX center alignY center padding 0 $spacing_md text LABEL textalign 1 font $font_sans_medium 15 forecolor COLOR forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action ACT }
+	itemDef { name NAME type 1 height FIXED 44px width PERCENT 1 alignX center alignY center padding 0 $spacing_md text LABEL textalign 1 font $font_sans_medium 15 forecolor COLOR forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action ACT }

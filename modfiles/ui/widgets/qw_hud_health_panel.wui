@@ -36,7 +36,7 @@ itemDef {
 
 	// caption — flex-flow at the panel top (this renders; full-viewport leaves below
 	// are placed by hand to sit right under it).
-	itemDef { type 0 rect 0 0 0 0 width FIT height FIT text "HEALTH" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { type 0 width FIT height FIT text "HEALTH" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
 
 	// HUD redesign (Eser, 2026-06-30): ICON on the LEFT, then the VALUE stacked OVER
 	// the BAR to its right ([icon] value / bar). The icon draws in its NATURAL color

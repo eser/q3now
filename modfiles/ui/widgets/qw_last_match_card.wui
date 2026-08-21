@@ -39,8 +39,8 @@ itemDef {
 	}
 
 	// Match title + meta
-	itemDef { type 0 rect 0 0 1 2.6vh height FIT width PERCENT 1 text "VERTICAL VEIN" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
-	itemDef { type 0 rect 0 0 1 1.8vh height FIT width PERCENT 1 text "duel · 11m 34s ago" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { type 0vh height FIT width PERCENT 1 text "VERTICAL VEIN" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
+	itemDef { type 0vh height FIT width PERCENT 1 text "duel · 11m 34s ago" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
 
 	// Stats grid — 4 columns (KILLS / DEATHS / ACC / DMG), label-above-value
 	itemDef {
@@ -59,8 +59,8 @@ itemDef {
 			alignX start
 			gap 0.001
 			grow 1
-			itemDef { type 0 rect 0 0 1 1.4vh height FIT width PERCENT 1 text "KILLS" textalign 0 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
-			itemDef { type 0 rect 0 0 1 2.6vh height FIT width PERCENT 1 text "17" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
+			itemDef { type 0vh height FIT width PERCENT 1 text "KILLS" textalign 0 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { type 0vh height FIT width PERCENT 1 text "17" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
 		}
 		itemDef {
 			type container
@@ -70,8 +70,8 @@ itemDef {
 			alignX start
 			gap 0.001
 			grow 1
-			itemDef { type 0 rect 0 0 1 1.4vh height FIT width PERCENT 1 text "DEATHS" textalign 0 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
-			itemDef { type 0 rect 0 0 1 2.6vh height FIT width PERCENT 1 text "12" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
+			itemDef { type 0vh height FIT width PERCENT 1 text "DEATHS" textalign 0 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { type 0vh height FIT width PERCENT 1 text "12" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
 		}
 		itemDef {
 			type container
@@ -81,8 +81,8 @@ itemDef {
 			alignX start
 			gap 0.001
 			grow 1
-			itemDef { type 0 rect 0 0 1 1.4vh height FIT width PERCENT 1 text "ACC" textalign 0 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
-			itemDef { type 0 rect 0 0 1 2.6vh height FIT width PERCENT 1 text "44%" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
+			itemDef { type 0vh height FIT width PERCENT 1 text "ACC" textalign 0 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { type 0vh height FIT width PERCENT 1 text "44%" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
 		}
 		itemDef {
 			type container
@@ -92,8 +92,8 @@ itemDef {
 			alignX start
 			gap 0.001
 			grow 1
-			itemDef { type 0 rect 0 0 1 1.4vh height FIT width PERCENT 1 text "DMG" textalign 0 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
-			itemDef { type 0 rect 0 0 1 2.6vh height FIT width PERCENT 1 text "2.1k" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
+			itemDef { type 0vh height FIT width PERCENT 1 text "DMG" textalign 0 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
+			itemDef { type 0vh height FIT width PERCENT 1 text "2.1k" textalign 0 font $font_sans 18 forecolor $bone decoration visible 1 grow 0 }
 		}
 	}
 

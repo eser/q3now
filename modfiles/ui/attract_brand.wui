@@ -50,8 +50,8 @@ menuDef {
 		direction column
 		grow 0
 
-		itemDef { type 0 rect 0 0 1 3vh height FIT width PERCENT 1 text "ARENA/OS" textalign 2 font $font_mono 15 forecolor $attract_ink_hi decoration visible 1 grow 0 }
-		itemDef { type 0 rect 0 0 1 3vh height FIT width PERCENT 1 text "MMXXVI"   textalign 2 font $font_mono 15 forecolor $attract_ink_lo decoration visible 1 grow 0 }
+		itemDef { type 0vh height FIT width PERCENT 1 text "ARENA/OS" textalign 2 font $font_mono 15 forecolor $attract_ink_hi decoration visible 1 grow 0 }
+		itemDef { type 0vh height FIT width PERCENT 1 text "MMXXVI"   textalign 2 font $font_mono 15 forecolor $attract_ink_lo decoration visible 1 grow 0 }
 	}
 
 	// ── wordmark (oversized, offset-stacked QUAKE / WIRED) ───────────

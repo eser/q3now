@@ -138,8 +138,8 @@ menuDef {
 					direction row
 					gap $spacing_sm
 					height FIT
-					itemDef { name "btn_team"    type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Join Team"   textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "team" dim } }
-					itemDef { name "btn_orders"  type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Team Orders" textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 cvarTest "ui_isTeamGame" enableCvar { "1" } enableMode dim action { open "teamorders" dim } }
+					itemDef { name "btn_team"    type 1 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Join Team"   textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "team" dim } }
+					itemDef { name "btn_orders"  type 1 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Team Orders" textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 cvarTest "ui_isTeamGame" enableCvar { "1" } enableMode dim action { open "teamorders" dim } }
 				}
 
 				// Row 2 — bot management (available in every gametype).
@@ -149,8 +149,8 @@ menuDef {
 					direction row
 					gap $spacing_sm
 					height FIT
-					itemDef { name "btn_addbot"    type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Add Bot"    textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "addbots" dim } }
-					itemDef { name "btn_removebot" type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Remove Bot" textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "removebots" dim } }
+					itemDef { name "btn_addbot"    type 1 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Add Bot"    textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "addbots" dim } }
+					itemDef { name "btn_removebot" type 1 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Remove Bot" textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "removebots" dim } }
 				}
 
 				// Row 3 — info / player (available in every gametype).
@@ -160,8 +160,8 @@ menuDef {
 					direction row
 					gap $spacing_sm
 					height FIT
-					itemDef { name "btn_serverinfo" type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Server Info"     textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { serverstatusopenconnected } }
-					itemDef { name "btn_player"     type 1 rect 0 0 0.5 0 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Player Settings" textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "playersettings" scene } }
+					itemDef { name "btn_serverinfo" type 1 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Server Info"     textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { serverstatusopenconnected } }
+					itemDef { name "btn_player"     type 1 height FIXED 36px width PERCENT 0.5 alignX center alignY center padding 0 $spacing_sm text "Player Settings" textalign 1 font $font_sans_medium 13 forecolor $bone forecolor.active $accent backcolor $lineBright backcolor.active $accentWash border 1px $boneDim bordercolor.active $accent radius $radius_md grow 0 visible 1 action { open "playersettings" scene } }
 				}
 			}
 		}
