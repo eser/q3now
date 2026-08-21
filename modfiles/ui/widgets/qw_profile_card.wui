@@ -53,7 +53,7 @@ itemDef {
 			gap 0.002
 			grow 1
 
-			itemDef { type 0 rect 0 0 1 2.2vh height FIT width PERCENT 1.0 text "LAROUX.POS" textalign 0 font $font_mono 13 forecolor $bone cvar "name" decoration visible 1 grow 0 }
+			itemDef { type 0vh height FIT width PERCENT 1.0 text "LAROUX.POS" textalign 0 font $font_mono 13 forecolor $bone cvar "name" decoration visible 1 grow 0 }
 			itemDef {
 				name "card_profile_role_row"
 				type container
@@ -83,5 +83,5 @@ itemDef {
 	}
 
 	// Experience footer
-	itemDef { type 0 rect 0 0 1 2vh height FIT width PERCENT 1 text "experience                              1,248 / 2,000" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { type 0vh height FIT width PERCENT 1 text "experience                              1,248 / 2,000" textalign 0 font $font_mono 9 forecolor $boneDim decoration visible 1 grow 0 }
 }

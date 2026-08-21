@@ -59,7 +59,7 @@ menuDef {
 				borderY 0 1px $line
 				padding 0.005 0.01
 
-				itemDef { name "h_demo" type 0 rect 0 0 1.0 0.03 height FIT width PERCENT 1.0 text "DEMO FILE" textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
+				itemDef { name "h_demo" type 0 height FIT width PERCENT 1.0 text "DEMO FILE" textalign 0 font $font_mono 11 forecolor $boneDim decoration visible 1 grow 0 }
 			}
 
 			itemDef {

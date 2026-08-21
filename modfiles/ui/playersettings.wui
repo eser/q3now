@@ -113,8 +113,8 @@ menuDef {
 						itemDef { name "group_identity_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "IDENTITY" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
-						itemDef { name "row_name" type 4 rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Name" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_Name" maxChars 32 visible 1 grow 0 }
-						itemDef { name "row_fov" type 10 rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "FOV" textalign 0 font $font_sans 13 forecolor $bone cvarFloat "cg_fov" 100 75 130 visible 1 grow 0 }
+						itemDef { name "row_name" type 4 height FIXED 38px width PERCENT 1 text "Name" textalign 0 font $font_sans 13 forecolor $bone cvar "ui_Name" maxChars 32 visible 1 grow 0 }
+						itemDef { name "row_fov" type 10 height FIXED 38px width PERCENT 1 text "FOV" textalign 0 font $font_sans 13 forecolor $bone cvarFloat "cg_fov" 100 75 130 visible 1 grow 0 }
 							// ── MODEL sub-label ────────────────────────
 							itemDef { name "model_label" type 0 rect 0 0 1 2vh height FIT text "MODEL" textalign 0 font $font_mono 10 forecolor $boneDim decoration visible 1 grow 0 }
 
@@ -239,16 +239,16 @@ menuDef {
 						itemDef { name "group_crosshair_hdr" type container rect 0 0 1 2.2vh height FIT direction row alignY center gap 0.006
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "CROSSHAIR + RAIL" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
-						itemDef { name "row_crosshair" type segmented rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Crosshair" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_crosshairAlpha" cvarFloatList { "None" 0 "30%" 30 "60%" 60 "100%" 100 } visible 1 grow 0 }
+						itemDef { name "row_crosshair" type segmented height FIXED 38px width PERCENT 1 text "Crosshair" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_crosshairAlpha" cvarFloatList { "None" 0 "30%" 30 "60%" 60 "100%" 100 } visible 1 grow 0 }
 						// cg_crosshairSize is a raw pixel width (cg_main.c:254, default 48;
 						// consumed at cg_wired_bridge.c:207). cg_crosshairHealth is a 0/1
 						// toggle (cg_main.c:256, read at cg_wired_bridge.c:184) that swaps
 						// the crosshair to a health-gradient colour, overriding the rail
 						// colour path — so it belongs in this group.
-						itemDef { name "row_crosshair_size" type segmented rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Crosshair Size" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_crosshairSize" cvarFloatList { "Small" 24 "Medium" 48 "Large" 72 } visible 1 grow 0 }
-						itemDef { name "row_crosshair_health" type segmented rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Health Color" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_crosshairHealth" cvarFloatList { "Off" 0 "On" 1 } visible 1 grow 0 }
-						itemDef { name "row_rail_color" type 12 rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Rail Color" textalign 0 font $font_sans 13 forecolor $bone cvar "color1" cvarFloatList { "White" 1 "Red" 2 "Green" 3 "Blue" 4 "Yellow" 5 "Cyan" 6 "Purple" 7 "Orange" 8 } visible 1 grow 0 }
-						itemDef { name "row_rail_style" type segmented rect 0 0 1 0.045 height FIXED 38px width PERCENT 1 text "Rail Style" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_railStyle" cvarFloatList { "Beam" 1 "Spiral" 2 } visible 1 grow 0 }
+						itemDef { name "row_crosshair_size" type segmented height FIXED 38px width PERCENT 1 text "Crosshair Size" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_crosshairSize" cvarFloatList { "Small" 24 "Medium" 48 "Large" 72 } visible 1 grow 0 }
+						itemDef { name "row_crosshair_health" type segmented height FIXED 38px width PERCENT 1 text "Health Color" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_crosshairHealth" cvarFloatList { "Off" 0 "On" 1 } visible 1 grow 0 }
+						itemDef { name "row_rail_color" type 12 height FIXED 38px width PERCENT 1 text "Rail Color" textalign 0 font $font_sans 13 forecolor $bone cvar "color1" cvarFloatList { "White" 1 "Red" 2 "Green" 3 "Blue" 4 "Yellow" 5 "Cyan" 6 "Purple" 7 "Orange" 8 } visible 1 grow 0 }
+						itemDef { name "row_rail_style" type segmented height FIXED 38px width PERCENT 1 text "Rail Style" textalign 0 font $font_sans 13 forecolor $bone cvar "cg_railStyle" cvarFloatList { "Beam" 1 "Spiral" 2 } visible 1 grow 0 }
 					}
 					}
 

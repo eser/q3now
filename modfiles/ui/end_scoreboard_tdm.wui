@@ -50,8 +50,8 @@ menuDef {
 				height FIT
 				width PERCENT 1.0
 
-				itemDef { name "red_label"  type 0 rect 0 0 0.5 0.035 height FIT width PERCENT 0.5 text "RED TEAM"  textalign 1 font $font_sans_bold 18 forecolor $primary_red  decoration visible 1 grow 1 }
-				itemDef { name "blue_label" type 0 rect 0 0 0.5 0.035 height FIT width PERCENT 0.5 text "BLUE TEAM" textalign 1 font $font_sans_bold 18 forecolor $accent decoration visible 1 grow 1 }
+				itemDef { name "red_label"  type 0 height FIT width PERCENT 0.5 text "RED TEAM"  textalign 1 font $font_sans_bold 18 forecolor $primary_red  decoration visible 1 grow 1 }
+				itemDef { name "blue_label" type 0 height FIT width PERCENT 0.5 text "BLUE TEAM" textalign 1 font $font_sans_bold 18 forecolor $accent decoration visible 1 grow 1 }
 			}
 
 			itemDef {

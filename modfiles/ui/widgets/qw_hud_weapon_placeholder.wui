@@ -23,5 +23,5 @@ itemDef {
 	background $hud_panel_bg
 	border 1px $line
 
-	itemDef { type 0 rect 0 0 1 1.4vh height FIT width PERCENT 1 text "v_weapon · rocketlauncher.md3" textalign 0 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
+	itemDef { type 0vh height FIT width PERCENT 1 text "v_weapon · rocketlauncher.md3" textalign 0 font $font_mono 8 forecolor $boneDim decoration visible 1 grow 0 }
 }
