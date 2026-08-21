@@ -131,7 +131,6 @@ menuDef {
 					itemDef {
 						name "group_display"
 						type container
-						rect 0 0 0.5 0
 						height FIT
 						width PERCENT 0.5
 						grow 0
@@ -219,7 +218,6 @@ menuDef {
 					itemDef {
 						name "group_quality"
 						type container
-						rect 0 0 0.5 0
 						height FIT
 						width PERCENT 0.5
 						grow 0
@@ -307,7 +305,6 @@ menuDef {
 					itemDef {
 						name "group_lighting"
 						type container
-						rect 0 0 0.5 0
 						height FIT
 						width PERCENT 0.5
 						grow 0

@@ -169,7 +169,6 @@ menuDef {
 					itemDef {
 						name "group_movement"
 						type container
-						rect 0 0 0.5 0
 						height FIT
 						width PERCENT 0.5
 						grow 0
@@ -330,7 +329,6 @@ menuDef {
 					itemDef {
 						name "group_weapons"
 						type container
-						rect 0 0 0.5 0
 						height FIT
 						width PERCENT 0.5
 						grow 0
@@ -476,7 +474,6 @@ menuDef {
 					itemDef {
 						name "group_combat"
 						type container
-						rect 0 0 0.5 0
 						height FIT
 						width PERCENT 0.5
 						grow 0
@@ -553,7 +550,6 @@ menuDef {
 					itemDef {
 						name "group_look"
 						type container
-						rect 0 0 0.5 0
 						height FIT
 						width PERCENT 0.5
 						grow 0
@@ -671,7 +667,6 @@ menuDef {
 					itemDef {
 						name "group_misc"
 						type container
-						rect 0 0 0.5 0
 						height FIT
 						width PERCENT 0.5
 						grow 0
@@ -812,7 +807,6 @@ menuDef {
 					itemDef {
 						name "group_chat"
 						type container
-						rect 0 0 0.5 0
 						height FIT
 						width PERCENT 0.5
 						grow 0

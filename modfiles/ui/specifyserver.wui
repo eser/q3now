@@ -67,7 +67,6 @@ menuDef {
 			itemDef {
 				name "ip_entry"
 				type 4
-				rect 0 0 1 0.05
 				height FIXED 40px
 				width PERCENT 1.0
 				text "Address"
