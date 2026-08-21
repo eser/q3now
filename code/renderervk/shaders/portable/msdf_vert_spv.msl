@@ -1,0 +1,45 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct MsdfUBO
+{
+    float4x4 mvp;
+    float outlineWidth;
+    float glowWidth;
+    float2 shadowOffset;
+    float4 outlineColor;
+    float4 glowColor;
+    float4 shadowColor;
+    uint bindless_packed_slot;
+};
+
+struct spvDescriptorSetBuffer3
+{
+    constant MsdfUBO* msdf [[id(0)]];
+};
+
+struct main0_out
+{
+    float4 frag_color0 [[user(locn0)]];
+    float2 frag_tex_coord0 [[user(locn1)]];
+    float4 gl_Position [[position]];
+};
+
+struct main0_in
+{
+    float3 in_position [[attribute(0)]];
+    float4 in_color0 [[attribute(1)]];
+    float2 in_tex_coord0 [[attribute(2)]];
+};
+
+vertex main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer3& spvDescriptorSet3 [[buffer(3)]])
+{
+    main0_out out = {};
+    out.gl_Position = (*spvDescriptorSet3.msdf).mvp * float4(in.in_position, 1.0);
+    out.frag_color0 = in.in_color0;
+    out.frag_tex_coord0 = in.in_tex_coord0;
+    return out;
+}
+

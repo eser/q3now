@@ -93,6 +93,7 @@ typedef struct {
 	PFN_vkMapMemory                             MapMemory;
 	PFN_vkUnmapMemory                           UnmapMemory;
 	PFN_vkFlushMappedMemoryRanges               FlushMappedMemoryRanges;
+	PFN_vkInvalidateMappedMemoryRanges          InvalidateMappedMemoryRanges;
 
 	// device — buffers / images / views / samplers
 	PFN_vkCreateBuffer                          CreateBuffer;
@@ -228,21 +229,61 @@ typedef struct {
 } ralResourceHeader_t;
 
 // ── memory suballocator ─────────────────────────────────────────────────
-// one VkDeviceMemory per resource (replaceable later; the API is what
-// matters). The backend owns a linked list of live allocations for memory-
-// budget accounting + leak detection at shutdown.
+// Ordinary resources may occupy aligned slices of reusable, per-memory-type
+// buffer/image blocks. Large, transient-alias and lazy allocations remain
+// dedicated. The backend owns live slice and block lists for accounting.
 //
 // Contract: the VkDeviceMemory must outlive the VkBuffer/VkImage bound to it.
 // Resources destroy themselves (vkDestroyBuffer / vkDestroyImage) and *then*
 // ralVk_Free their allocation. ralVkAllocation_t does not back-reference the
 // bound resource.
+typedef struct {
+	VkImageType imageType;
+	VkFormat format;
+	VkExtent3D extent;
+	uint32_t mipLevels;
+	uint32_t arrayLayers;
+	VkSampleCountFlagBits samples;
+	VkImageUsageFlags usage;
+	VkSharingMode sharingMode;
+	uint32_t queueFamilyIndexCount;
+	uint32_t queueFamilyIndices[3];
+	uint32_t memoryTypeBits;
+} ralVkTransientImageKey_t;
+
+typedef enum {
+	RAL_VK_ALLOC_RESOURCE_BUFFER = 1,
+	RAL_VK_ALLOC_RESOURCE_IMAGE,
+	RAL_VK_ALLOC_RESOURCE_TRANSIENT
+} ralVkAllocationResourceKind_t;
+
+typedef struct ralVkMemoryBlock_s {
+	ralBackend_t *backend;
+	VkDeviceMemory memory;
+	VkDeviceSize size;
+	uint32_t memoryTypeIndex;
+	VkMemoryPropertyFlags propertyFlags;
+	ralVkAllocationResourceKind_t resourceKind;
+	uint64_t generation;
+	ralSuballocator_t allocator;
+	void *mappedBase;
+	uint32_t mapCount;
+	struct ralVkMemoryBlock_s *next;
+} ralVkMemoryBlock_t;
+
 struct ralVkAllocation_s {
 	ralBackend_t          *backend;         // owning backend (for device + dispatch)
 	VkDeviceMemory         memory;
 	VkDeviceSize           size;
+	VkDeviceSize           offset;
 	uint32_t               memoryTypeIndex;
 	VkMemoryPropertyFlags  propertyFlags;   // the type's actual flags (may exceed what was requested)
 	void                  *mapped;          // NULL when not mapped (host-visible only)
+	ralVkMemoryBlock_t    *block;           // non-NULL for reusable-block slices
+	ralSuballocationReceipt_t suballocation;
+	ralAllocationReceipt_t receipt;         // native-free placement/pressure authority
+	qboolean               transientAlias;  // allocation backs one physical transient slot
+	ralVkTransientImageKey_t transientKey;  // exact image cohort, checked again before bind
 	struct ralVkAllocation_s *next;         // backend's live-allocation list
 };
 typedef struct ralVkAllocation_s ralVkAllocation_t;
@@ -255,12 +296,25 @@ struct ralBuffer_s {
 	ralVkAllocation_t  *alloc;
 	VkDeviceSize        size;
 	ralMemoryType_t     memoryType;
+	ralBufferUsage_t    usage;
 	qboolean            hostVisible;     // can be mapped
 	qboolean            coherent;        // skip flush
 	qboolean            ownsBuffer;      // qtrue: Ral_CreateBuffer made the VkBuffer (RAL destroys it).
 	                                     // qfalse: adopted via Ral_AdoptBuffer (engine owns it; RAL
 	                                     // destroys only the wrapper, never the VkBuffer/memory).
+	qboolean            portableStateKnown;
+	ralResourceState_t  portableState;
+	ralQueueType_t      portableOwnerQueue;
+	ralQueueTransferLifecycle_t queueTransfer;
+	ralBufferMapLifecycle_t mapLifecycle;
+	qboolean            legacyMapped;
 };
+
+static inline qboolean ralVk_BufferGpuUseAllowed( const ralBuffer_t *buffer ) {
+	return buffer && !buffer->legacyMapped
+		&& !buffer->queueTransfer.pending.ready
+		&& Ral_BufferMapLifecycleGpuUseAllowed( &buffer->mapLifecycle );
+}
 
 struct ralTexture_s {
 	ralResourceHeader_t header;
@@ -271,6 +325,7 @@ struct ralTexture_s {
 	VkFormat            vkFormat;
 	ralFormat_t         ralFormat;
 	ralTextureType_t    type;
+	ralTextureUsage_t   usage;
 	uint32_t            width, height, depthOrArrayLayers;
 	uint32_t            mipLevels;
 	uint32_t            arrayLayers;     // 1 for non-array (cube = 6); resolved layer count for image views
@@ -278,7 +333,14 @@ struct ralTexture_s {
 	VkImageAspectFlags  aspect;          // COLOR or DEPTH(+STENCIL)
 	VkImageLayout       currentLayout;   // single layout tracked for the whole image (simplification)
 	qboolean            ownsImage;       // qtrue if Ral_CreateTexture owns the VkImage + VkImageView + alloc, qfalse if adopted via Ral_AdoptTexture (caller retains lifetime; Ral_DestroyTexture skips defer-destroy of the underlying image / view / memory).
+	qboolean            transientCohortOwned; // lifecycle belongs to ralTransientTextureCohort_t; ordinary DestroyTexture must not retire it independently.
+	VkMemoryRequirements transientRequirements;
+	ralVkTransientImageKey_t transientKey;
 	qboolean            concurrentTransfer;   // qtrue when created CONCURRENT graphics+transfer — an upload copy on the transfer queue needs no ownership-transfer barrier.
+	qboolean            portableStateKnown;
+	ralResourceState_t  portableState;
+	ralQueueType_t      portableOwnerQueue;
+	ralQueueTransferLifecycle_t queueTransfer;
 	// Per-array-layer attachment views for an adopted 2D-array image (NULL for
 	// non-array / native textures). Supplied caller-owned by Ral_AdoptArrayTexture
 	// (the renderer's existing per-layer VkImageViews — e.g. the shadow cascade
@@ -305,6 +367,9 @@ struct ralSampler_s {
 };
 
 #define RAL_VK_MAX_LAYOUT_ENTRIES 16
+#define RAL_VK_MAX_TRACKED_BIND_GROUP_BUFFERS 64u
+#define RAL_VK_MAX_TRACKED_VERTEX_BUFFERS     16u
+#define RAL_VK_MAX_TRACKED_BIND_GROUPS         8u
 
 typedef struct {
 	uint32_t          binding;
@@ -329,7 +394,27 @@ struct ralBindGroup_s {
 	VkDescriptorSet             set;             // freed via vkFreeDescriptorSets (pool has FREE_DESCRIPTOR_SET_BIT) on deferred-destroy
 	const ralBindGroupLayout_t *layout;
 	qboolean                    ownsSet;         // qtrue if Ral_CreateBindGroup owns the VkDescriptorSet, qfalse if adopted via Ral_AdoptBindGroup (caller's pool retains ownership; Ral_DestroyBindGroup skips vkFreeDescriptorSets).
+	// Weak references used only to enforce WebGPU's "mapped buffers are not
+	// available to GPU commands" rule at bind and draw/dispatch time. Native
+	// RAL groups publish a complete inventory. Adopted compatibility groups do
+	// not have descriptor introspection, so their migration must explicitly
+	// register buffers before this flag can become true.
+	qboolean                    bufferTrackingComplete;
+	uint32_t                    bufferCount;
+	const ralBuffer_t          *buffers[ RAL_VK_MAX_TRACKED_BIND_GROUP_BUFFERS ];
 };
+
+static inline qboolean ralVk_BindGroupBuffersGpuUseAllowed( const ralBindGroup_t *group ) {
+	uint32_t i;
+	if ( !group ) return qfalse;
+	// Compatibility bridge only. The legacy Vulkan descriptor owner remains
+	// authoritative until each adopted set publishes its exact buffer list.
+	if ( !group->bufferTrackingComplete ) return qtrue;
+	for ( i = 0; i < group->bufferCount; ++i ) {
+		if ( !ralVk_BufferGpuUseAllowed( group->buffers[i] ) ) return qfalse;
+	}
+	return qtrue;
+}
 
 struct ralFence_s {
 	ralBackend_t *backend;
@@ -380,6 +465,8 @@ struct ralPipeline_s {
 	VkPipelineBindPoint bindPoint;          // VK_PIPELINE_BIND_POINT_GRAPHICS / _COMPUTE
 	uint32_t            pushConstantSize;   // bytes (host-side, for validation in Ral_CmdPushConstants)
 	uint32_t            pushConstantStages; // VkShaderStageFlags
+	qboolean            hasSemanticKey;
+	ralShaderPipelineKey_t semanticKey;
 };
 
 // typed wrappers around renderer-owned VkPipelineLayout /
@@ -438,14 +525,22 @@ struct ralCommandBuffer_s {
 	VkCommandBuffer     cb;
 	ralQueueType_t      queue;             // which b->cmdPools[]/queues[] this came from
 	ralVkCmdState_t     state;
+	ralCommandLifecycle_t lifecycle;        // native-free generation-bound authority
 	uint64_t            frame;             // currentFrame at submit time (for deferred-destroy association)
 	// last Ral_CmdBindPipeline target — owns the VkPipelineLayout that bind-bind-group / push-constants / draw need.
 	ralPipeline_t      *currentPipeline;   // weak ref (caller guarantees lifetime through Submit)
 	VkPipelineLayout    currentLayout;     // mirror of currentPipeline->layout (also a weak ref)
 	VkPipelineBindPoint currentBindPoint;  // mirror of currentPipeline->bindPoint
+	// Weak refs mirror the current command-buffer binding state. Draw and
+	// dispatch revalidate them immediately before native command emission so a
+	// buffer mapped after an earlier bind cannot escape WebGPU exclusion.
+	ralBuffer_t         *boundVertexBuffers[ RAL_VK_MAX_TRACKED_VERTEX_BUFFERS ];
+	ralBuffer_t         *boundIndexBuffer;
+	ralBindGroup_t      *boundBindGroups[ RAL_VK_MAX_TRACKED_BIND_GROUPS ];
 	// Dynamic-rendering debug-label scope. The counters are reset for each
 	// recording and increment only after real vkCmd*DebugUtilsLabelEXT calls.
 	qboolean            renderingDebugLabelActive;
+	qboolean            renderingActive;       // semantic transition commands are encoder/pass-boundary only
 	uint32_t            debugLabelBeginCount;
 	uint32_t            debugLabelEndCount;
 	// parallel-paths adoption. When ownsBuffer == qfalse the
@@ -456,6 +551,52 @@ struct ralCommandBuffer_s {
 	qboolean            ownsBuffer;
 	qboolean            externalLifecycle; // renderer-only legacy begin/end/reset bridge
 };
+
+static inline qboolean ralVk_CommandBoundBuffersGpuUseAllowed( const ralCommandBuffer_t *cb ) {
+	uint32_t i;
+	if ( !cb ) return qfalse;
+	for ( i = 0; i < RAL_VK_MAX_TRACKED_VERTEX_BUFFERS; ++i ) {
+		if ( cb->boundVertexBuffers[i]
+		  && !ralVk_BufferGpuUseAllowed( cb->boundVertexBuffers[i] ) ) return qfalse;
+	}
+	if ( cb->boundIndexBuffer && !ralVk_BufferGpuUseAllowed( cb->boundIndexBuffer ) ) return qfalse;
+	for ( i = 0; i < RAL_VK_MAX_TRACKED_BIND_GROUPS; ++i ) {
+		if ( cb->boundBindGroups[i]
+		  && !ralVk_BindGroupBuffersGpuUseAllowed( cb->boundBindGroups[i] ) ) return qfalse;
+	}
+	return qtrue;
+}
+
+static inline ralResult_t ralVk_TransitionWholeBuffer( ralCommandBuffer_t *cb,
+	                                                    ralBuffer_t *buffer,
+	                                                    ralResourceUsage_t before,
+	                                                    ralResourceUsage_t after ) {
+	ralBufferTransition_t transition;
+	ralResourceTransitionBatch_t batch;
+	if ( !cb || !buffer ) return ralErrorInvalidArgument;
+	memset( &transition, 0, sizeof( transition ) );
+	transition.buffer = buffer;
+	transition.size = (uint64_t)buffer->size;
+	transition.before.usage = before;
+	transition.after.usage = after;
+	transition.sourceQueue = cb->queue;
+	transition.destinationQueue = cb->queue;
+	memset( &batch, 0, sizeof( batch ) );
+	batch.bufferTransitions = &transition;
+	batch.bufferTransitionCount = 1u;
+	return Ral_CmdTransitionResources( cb, &batch );
+}
+
+static inline void *ralVk_MapReadbackBuffer( ralBuffer_t *buffer,
+	                                         ralBufferMapTicket_t *ticket ) {
+	ralBufferMapRequest_t request;
+	if ( !buffer || !ticket ) return NULL;
+	memset( &request, 0, sizeof( request ) );
+	request.mode = RAL_MAP_READ;
+	request.size = (uint64_t)buffer->size;
+	return Ral_BufferMapBegin( buffer, &request, ticket ) == ralSuccess
+	     ? ticket->mappedRange : NULL;
+}
 
 // ── deferred-destroy queue (lifecycle) ──────────────────────────────────
 #define RAL_VK_MAX_FRAMES_IN_FLIGHT  2
@@ -473,7 +614,8 @@ typedef enum {
 	RAL_RES_QUERY_POOL,       // h1 = VkQueryPool
 	RAL_RES_PIPELINE,         // h1 = VkPipeline
 	RAL_RES_PIPELINE_LAYOUT,  // h1 = VkPipelineLayout     (layout cache refcount → 0)
-	RAL_RES_CMD_BUFFER        // h1 = VkCommandBuffer, h2 = ralQueueType_t (which cmdPool to free from)
+	RAL_RES_CMD_BUFFER,       // h1 = VkCommandBuffer, h2 = ralQueueType_t (which cmdPool to free from)
+	RAL_RES_ALLOCATION_ONLY   // no handle; alloc freed after aliased child images retire
 } ralResourceKind_t;
 
 typedef struct {
@@ -555,10 +697,15 @@ struct ralBackend_s {
 	uint32_t          queueFamily[3];        // family index per queue type
 	VkCommandPool     cmdPools[3];           // one per queue type, RESET_COMMAND_BUFFER_BIT; also used for one-shot upload/readback cmds
 	void             *queueMutex[3];         // boxed CRITICAL_SECTION/pthread_mutex_t — guards pool alloc/free/reset + vkQueueSubmit2 for that queue
+	ralSubmissionLifecycle_t submissionLifecycle[3]; // one monotonic submit authority per logical queue
 
 	// ── per-frame lifecycle + deferred destroy ──
 	uint64_t          currentFrame;          // advanced by Ral_BeginFrame
 	uint64_t          nextSwapchainGeneration; // monotonically assigned to each fully materialized swapchain
+	uint64_t          nextAllocationGeneration; // monotonic owned allocation receipts
+	uint64_t          nextMemoryBlockGeneration;
+	uint64_t          nextTransferGeneration; // monotonic staging upload/readback receipts
+	ralMemoryFailureLedger_t memoryFailures;
 	VkFence           frameFences[ RAL_VK_MAX_FRAMES_IN_FLIGHT ];   // signaled by Ral_EndFrame's empty submit; waited by Ral_BeginFrame
 	ralVkPendingDestroy_t *pendingDestroy;   // malloc'd ring of RAL_VK_PENDING_DESTROY_MAX entries
 	uint32_t          numPendingDestroy;
@@ -566,6 +713,7 @@ struct ralBackend_s {
 	// ── resource layer ──
 	VkDescriptorPool  descriptorPool;        // one big pool, UPDATE_AFTER_BIND | FREE_DESCRIPTOR_SET
 	ralVkAllocation_t *allocations;          // live-allocation list
+	ralVkMemoryBlock_t *memoryBlocks;         // reusable buffer/image blocks
 	uint32_t          numAllocations;
 	VkDeviceSize      ralDeviceLocalBytes;   // sum of device-local allocation sizes (RAL's own footprint)
 	VkDeviceSize      ralHostVisibleBytes;   // sum of host-visible allocation sizes
@@ -630,11 +778,15 @@ void ralVk_Logf( const ralBackend_t *b, ralLogSeverity_t severity,
 void     ralVk_FillCaps( ralBackend_t *b );
 
 // ral_vulkan_memory.c — suballocator, pressure polling, OS mutexes
-ralVkAllocation_t *ralVk_Alloc ( ralBackend_t *b, VkMemoryRequirements req, VkMemoryPropertyFlags props );
+ralVkAllocation_t *ralVk_Alloc ( ralBackend_t *b, VkMemoryRequirements req,
+	VkMemoryPropertyFlags props, ralAllocationClass_t memoryClass,
+	ralAllocationResidency_t residency, uintptr_t ownerIdentity,
+	ralVkAllocationResourceKind_t resourceKind );
 void               ralVk_Free  ( ralBackend_t *b, ralVkAllocation_t *a );
 void              *ralVk_Map   ( ralVkAllocation_t *a );
 void               ralVk_Unmap ( ralVkAllocation_t *a );
 void               ralVk_Flush ( ralVkAllocation_t *a, VkDeviceSize offset, VkDeviceSize size );
+void               ralVk_Invalidate( ralVkAllocation_t *a, VkDeviceSize offset, VkDeviceSize size );
 void               ralVk_StopPollThread( ralBackend_t *b );
 qboolean           ralVk_InitQueueMutexes   ( ralBackend_t *b );   // creates queueMutex[0..2]
 void               ralVk_DestroyQueueMutexes( ralBackend_t *b );
@@ -646,6 +798,7 @@ qboolean ralVk_InitResourceLayer    ( ralBackend_t *b );
 void     ralVk_ShutdownResourceLayer( ralBackend_t *b );
 void     ralVk_RunResourceTest      ( ralBackend_t *b );
 VkImageUsageFlags ralVk_TextureUsage( ralTextureUsage_t u );
+uint32_t ralVk_FormatBPP( ralFormat_t f );
 VkFormatFeatureFlags ralVk_TextureUsageFormatFeatures( ralTextureUsage_t u );
 VkColorComponentFlags ralVk_ColorWriteMask( const ralColorBlendAttachment_t *blend );
 qboolean ralVk_ColorBlendStatesSupported( const ralGraphicsPipelineCreateInfo_t *ci,

@@ -25,7 +25,12 @@ layout(location = 2) out float out_temporal_validity;
 #include "colorspace.glsl"
 
 bool wiredTemporalFinite4( vec4 value ) {
-	return all( not( isnan( value ) ) ) && all( not( isinf( value ) ) );
+	return all( equal( value, value ) )
+		&& all( lessThanEqual( abs( value ), vec4( 3.402823466e38 ) ) );
+}
+bool wiredTemporalFinite2( vec2 value ) {
+	return all( equal( value, value ) )
+		&& all( lessThanEqual( abs( value ), vec2( 3.402823466e38 ) ) );
 }
 
 void main() {
@@ -44,12 +49,12 @@ void main() {
 			|| temporalPreviousClip.w <= 1.0e-6 ) return;
 	vec2 currentNdc = temporalCurrentClip.xy / temporalCurrentClip.w;
 	vec2 previousNdc = temporalPreviousClip.xy / temporalPreviousClip.w;
-	if ( any( isnan( currentNdc ) ) || any( isinf( currentNdc ) )
-			|| any( isnan( previousNdc ) ) || any( isinf( previousNdc ) ) ) return;
+	if ( !wiredTemporalFinite2( currentNdc )
+			|| !wiredTemporalFinite2( previousNdc ) ) return;
 	vec2 currentUv = currentNdc * 0.5 + vec2( 0.5 );
 	vec2 previousUv = previousNdc * 0.5 + vec2( 0.5 );
 	vec2 velocity = currentUv - previousUv;
-	if ( any( isnan( velocity ) ) || any( isinf( velocity ) ) ) return;
+	if ( !wiredTemporalFinite2( velocity ) ) return;
 	out_temporal_velocity = velocity;
 	out_temporal_validity = 1.0;
 #endif

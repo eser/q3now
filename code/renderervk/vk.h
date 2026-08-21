@@ -2339,12 +2339,11 @@ typedef struct {
 	struct ralPipeline_s       *ral_histogram_pipeline;   // the compute pipeline
 	struct ralTextureView_s    *ral_histogram_color_view; // sampling view over color_image
 	struct ralSampler_s        *ral_histogram_sampler;    // nearest/clamp (texelFetch ignores it)
-	// Debug-only readback (r_hdrHistogramDebug): a host-coherent mirror the
-	// dispatch copies the SSBO into, so the CPU can confirm the bins are
-	// populated. histogramReadbackPtr is the persistent mapping; the log reads
-	// it lagged by the in-flight frame count so the copy is GPU-complete.
-	struct ralBuffer_s         *ral_histogram_readback;
-	void                       *histogramReadbackPtr;
+	// Debug-only readback (r_hdrHistogramDebug): one MAP_READ-capable mirror per
+	// command slot. A slot is mapped only after its fence has completed, then
+	// unmapped before that slot is reused as COPY_DESTINATION.
+	struct ralBuffer_s         *ral_histogram_readback[NUM_COMMAND_BUFFERS];
+	qboolean                    histogramReadbackReady[NUM_COMMAND_BUFFERS];
 
 	// Ground-truth ambient occlusion (GTAO). Two RAL compute passes dispatched in
 	// the no-render-pass seam in vk_tonemap (the histogram pattern): the main pass
@@ -2409,7 +2408,9 @@ typedef struct {
 	// bitset) are uploaded each frame. cullSurfaceCount == 0 disables the dispatch.
 	int                          cullSurfaceCount;        // # static world surfaces (== tr.world->numsurfaces at build)
 	struct ralBuffer_s          *ral_cull_aabb;           // per-surface {mins,maxs,plane,meta}, device-local, map-load
-	struct ralBuffer_s          *ral_cull_reached[NUM_COMMAND_BUFFERS]; // per-frame PVS-reached bitset (host-visible upload)
+	void                         *cullAabbCpu;             // CPU authority for host verification; uploaded through queue semantics
+	uint32_t                     *cullReachedCpu;          // reusable CPU bitset; uploaded through queue semantics
+	struct ralBuffer_s          *ral_cull_reached[NUM_COMMAND_BUFFERS]; // per-frame PVS-reached bitset (device-local queue upload)
 	struct ralBuffer_s          *ral_cull_visible;        // per-frame output: visible flags + compacted ids + count
 	struct ralBindGroupLayout_s *ral_cull_bgl;            // set 0: aabb + reached + visible (all STORAGE, COMPUTE)
 	struct ralBindGroup_s       *ral_cull_descriptor[NUM_COMMAND_BUFFERS]; // bound set per frame (reached ring)
@@ -2432,8 +2433,6 @@ typedef struct {
 	struct ralPipeline_s        *ral_fp_pipeline;        // the tile-classification compute pipeline
 	void                        *fpLightsPtr[NUM_COMMAND_BUFFERS];       // persistent mapping of ral_fp_lights (host writes dlights)
 	void                        *fpTileDepthPtr[NUM_COMMAND_BUFFERS];    // persistent mapping of ral_fp_tiledepth
-	struct ralBuffer_s          *ral_fp_readback;        // _DEBUG host-coherent mirror of the tilelights buffer
-	void                        *fpReadbackPtr;          // persistent mapping of ral_fp_readback
 	int                          fpTilesX, fpTilesY;     // current tile grid dims (render extent / TILE_SIZE)
 	int                          fpTileCapacity;         // tiles the buffers were sized for (grow on resize)
 	qboolean                     fpActive;               // r_forwardPlus && pipeline built && a light list this frame
@@ -2532,16 +2531,18 @@ typedef struct {
 // +halo[320,352)).
 #define LENS_TOTAL_SOURCES (LENS_SLOT_CGSOURCES + LENS_MAX_CGSOURCES) // flares + sun + cgame = 609
 #define LENS_SOURCE_VEC4S  2                 // 2 vec4 per record (32 B): rec0 pos/depth, rec1 vis
-	// SINGLE buffer (not per-cmd-buffer): the oracle write (frame N) and the halo
-	// host read (frame N+1) must hit the SAME storage across the 1-frame delay —
-	// exactly the single-buffer semantics of the dot-probe's vk.storage it replaces.
-	struct ralBuffer_s          *ral_lens_sources;      // lens record list (host write + compute write)
-	void                        *lensSourcesPtr;        // persistent host mapping of ral_lens_sources
+	// WebGPU-valid split: CPU owns a shadow, each command slot owns a device-local
+	// storage buffer plus COPY_DEST/MAP_READ readback. A slot is reused only after
+	// its frame fence, so no mapped resource is simultaneously GPU-visible.
+	struct ralBuffer_s          *ral_lens_sources[NUM_COMMAND_BUFFERS];
+	struct ralBuffer_s          *ral_lens_readback[NUM_COMMAND_BUFFERS];
+	qboolean                     lensReadbackReady[NUM_COMMAND_BUFFERS];
+	void                        *lensSourcesPtr;        // CPU shadow; never a GPU mapping
 	int                          lensSourceCount;        // active slot high-water this frame
 	struct ralTextureView_s     *ral_lens_depth_view;   // sampling view over vk.sceneDepth.ral_image (NEAREST)
 	struct ralSampler_s         *ral_lens_sampler;      // NEAREST + clamp (depth not linear-filterable on WebGPU/WebGL2)
 	struct ralBindGroupLayout_s *ral_lens_bgl;          // depth tex(0) + sampler(1) + lens SSBO(2), COMPUTE
-	struct ralBindGroup_s       *ral_lens_descriptor;   // the bound oracle set
+	struct ralBindGroup_s       *ral_lens_descriptor[NUM_COMMAND_BUFFERS];
 	struct ralPipeline_s        *ral_lens_pipeline;     // the N-tap occlusion compute pipeline
 
 	// Static surfaceIndex↔vboItemIndex map + per-vboItem static
@@ -2572,11 +2573,10 @@ typedef struct {
 	struct ralBindGroup_s       *ral_brdf_lut_descriptor;// the bound compute set
 	struct ralPipeline_s        *ral_brdf_lut_pipeline;  // the compute pipeline
 	qboolean                     brdfLutDispatched;       // false until the one-shot boot dispatch is recorded
-	// Debug-only readback (r_brdfLutDebug): a host-coherent mirror the one-shot
-	// dispatch copies the LUT image into, so the CPU can confirm plausible
-	// split-sum values. brdfLutReadbackPtr is the persistent mapping.
+	// Debug-only readback (r_brdfLutDebug): COPY_DEST → HOST_READ, mapped only
+	// after the one-shot copy's in-flight depth has completed.
 	struct ralBuffer_s          *ral_brdf_lut_readback;
-	void                        *brdfLutReadbackPtr;
+	qboolean                     brdfLutReadbackReady;
 	qboolean                     brdfLutReadbackLogged;   // false until the one-time debug log fires
 	// Dedicated LINEAR + CLAMP_TO_EDGE + LINEAR-mipmap sampler the engine-resources
 	// descriptor writes bind alongside the BRDF LUT + probe cube views (set 2,
@@ -2644,15 +2644,15 @@ typedef struct {
 	// Debug-only readback (r_probeSourceDebug / r_probeRadianceDebug): host-coherent
 	// mirrors the one-shot dispatches copy the cubes into, so the CPU can confirm a
 	// plausible directional source sky + a converging convolve (mip0≈source, high-mip
-	// blurred, irradiance smooth). Persistent maps.
+	// blurred, irradiance smooth). Each is bounded MAP_READ after completion.
 	struct ralBuffer_s          *ral_probe_source_readback;
-	void                        *probeSourceReadbackPtr;
+	qboolean                     probeSourceReadbackReady;
 	qboolean                     probeSourceReadbackLogged;
 	struct ralBuffer_s          *ral_probe_radiance_readback;   // mirror of radiance mip0 + an inner mip face
-	void                        *probeRadianceReadbackPtr;
+	qboolean                     probeRadianceReadbackReady;
 	qboolean                     probeRadianceReadbackLogged;
 	struct ralBuffer_s          *ral_probe_irradiance_readback;
-	void                        *probeIrradianceReadbackPtr;
+	qboolean                     probeIrradianceReadbackReady;
 
 	// Dual-filtering bloom pyramid: one image per mip level. Slot 0 is the
 	// extract output (full res); slot k+1 is the level-k mip at captureW/2^(k+1).

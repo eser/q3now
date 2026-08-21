@@ -71,6 +71,7 @@ ralCommandBuffer_t *Ral_AcquireCommandBuffer( ralBackend_t *b, ralQueueType_t q 
 	if ( !cb ) { ralVk_QueueLock( b, q ); b->vk.FreeCommandBuffers( b->device, b->cmdPools[q], 1, &vcb ); ralVk_QueueUnlock( b, q ); return NULL; }
 	RAL_ZERO( *cb );
 	cb->backend = b; cb->cb = vcb; cb->queue = q; cb->state = RAL_VK_CMD_IDLE; cb->frame = b->currentFrame;
+	Ral_CommandLifecycleInit( &cb->lifecycle, b, cb, q );
 	cb->ownsBuffer = qtrue;   // RAL-allocated; matching Free in Ral_DestroyCommandBuffer
 	return cb;
 }
@@ -94,10 +95,14 @@ ralCommandBuffer_t *Ral_AcquireCommandBuffer( ralBackend_t *b, ralQueueType_t q 
 // this turn; the D-shim turn renames it.
 ralCommandBuffer_t *Ral_AcquireBegunCommandBuffer( ralBackend_t *b, ralQueueType_t q ) {
 	ralCommandBuffer_t *cb;
+	ralCommandReceipt_t recording;
 	if ( !b ) return NULL;
 	cb = Ral_AcquireCommandBuffer( b, q );
 	if ( cb == NULL ) return NULL;
-	Ral_BeginCommandBuffer( cb );
+	if ( Ral_BeginCommandBufferExact( cb, &recording ) != ralSuccess ) {
+		Ral_DestroyCommandBuffer( cb );
+		return NULL;
+	}
 	return cb;
 }
 
@@ -131,25 +136,94 @@ void Ral_SubmitAndDispose( ralCommandBuffer_t *cb ) {
 	Ral_DestroyCommandBuffer( cb );
 }
 
-void Ral_BeginCommandBuffer( ralCommandBuffer_t *cb ) {
+ralResult_t Ral_BeginCommandBufferExact( ralCommandBuffer_t *cb,
+	                                     ralCommandReceipt_t *outRecording ) {
 	VkCommandBufferBeginInfo bi;
-	if ( !cb ) return;
-	if ( cb->state != RAL_VK_CMD_IDLE ) { RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_BeginCommandBuffer: command buffer not IDLE (state %d)\n", (int)cb->state ); return; }
+	ralCommandReceipt_t candidate;
+	if ( !cb || !outRecording || cb->externalLifecycle ) return ralErrorInvalidArgument;
+	if ( cb->state != RAL_VK_CMD_IDLE || cb->lifecycle.state != RAL_COMMAND_IDLE
+	  || cb->lifecycle.generation >= UINT64_MAX - 1u ) {
+		RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_BeginCommandBufferExact: command buffer not IDLE\n" );
+		return ralErrorInvalidArgument;
+	}
 	RAL_ZERO( bi );
 	bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	if ( cb->backend->vk.BeginCommandBuffer( cb->cb, &bi ) != VK_SUCCESS ) { RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_BeginCommandBuffer: vkBeginCommandBuffer failed\n" ); return; }
+	if ( cb->backend->vk.BeginCommandBuffer( cb->cb, &bi ) != VK_SUCCESS ) {
+		RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_BeginCommandBufferExact: vkBeginCommandBuffer failed\n" );
+		return ralErrorUnknown;
+	}
+	if ( Ral_CommandLifecyclePublishBegin( &cb->lifecycle, &candidate ) != ralSuccess )
+		return ralErrorUnknown;
 	cb->renderingDebugLabelActive = qfalse;
+	cb->renderingActive = qfalse;
 	cb->debugLabelBeginCount = 0;
 	cb->debugLabelEndCount = 0;
+	memset( cb->boundVertexBuffers, 0, sizeof( cb->boundVertexBuffers ) );
+	memset( cb->boundBindGroups, 0, sizeof( cb->boundBindGroups ) );
+	cb->boundIndexBuffer = NULL;
 	cb->state = RAL_VK_CMD_RECORDING;
+	*outRecording = candidate;
+	return ralSuccess;
+}
+
+ralResult_t Ral_EndCommandBufferExact( ralCommandBuffer_t *cb,
+	                                   const ralCommandReceipt_t *recording,
+	                                   ralCommandReceipt_t *outExecutable ) {
+	ralCommandReceipt_t current, candidate;
+	if ( !cb || !recording || !outExecutable || cb->externalLifecycle
+	  || cb->state != RAL_VK_CMD_RECORDING
+	  || Ral_CommandLifecycleGetReceipt( &cb->lifecycle, &current ) != ralSuccess
+	  || !Ral_CommandReceiptExact( &current, recording )
+	  || recording->state != RAL_COMMAND_RECORDING ) {
+		if ( cb ) RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_EndCommandBufferExact: stale or non-recording authority\n" );
+		return ralErrorInvalidArgument;
+	}
+	if ( cb->backend->vk.EndCommandBuffer( cb->cb ) != VK_SUCCESS ) {
+		RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_EndCommandBufferExact: vkEndCommandBuffer failed\n" );
+		return ralErrorUnknown;
+	}
+	if ( Ral_CommandLifecyclePublishEnd( &cb->lifecycle, recording, &candidate ) != ralSuccess )
+		return ralErrorUnknown;
+	cb->state = RAL_VK_CMD_PENDING_SUBMIT;
+	*outExecutable = candidate;
+	return ralSuccess;
+}
+
+ralResult_t Ral_GetCommandBufferReceipt( const ralCommandBuffer_t *cb,
+	                                     ralCommandReceipt_t *outReceipt ) {
+	if ( !cb || cb->externalLifecycle ) return ralErrorInvalidArgument;
+	return Ral_CommandLifecycleGetReceipt( &cb->lifecycle, outReceipt );
+}
+
+ralResult_t Ral_CancelCommandBuffer( ralCommandBuffer_t *cb,
+	                                 const ralCommandReceipt_t *authority ) {
+	ralCommandReceipt_t current;
+	VkResult result;
+	if ( !cb || !authority || cb->externalLifecycle
+	  || Ral_CommandLifecycleGetReceipt( &cb->lifecycle, &current ) != ralSuccess
+	  || !Ral_CommandReceiptExact( &current, authority )
+	  || ( authority->state != RAL_COMMAND_RECORDING
+	    && authority->state != RAL_COMMAND_EXECUTABLE ) )
+		return ralErrorInvalidArgument;
+	result = cb->backend->vk.ResetCommandBuffer( cb->cb, 0 );
+	if ( result == VK_ERROR_DEVICE_LOST ) return ralErrorDeviceLost;
+	if ( result != VK_SUCCESS ) return ralErrorUnknown;
+	if ( Ral_CommandLifecycleCancel( &cb->lifecycle, authority ) != ralSuccess )
+		return ralErrorUnknown;
+	cb->state = RAL_VK_CMD_IDLE;
+	return ralSuccess;
+}
+
+void Ral_BeginCommandBuffer( ralCommandBuffer_t *cb ) {
+	ralCommandReceipt_t ignored;
+	(void)Ral_BeginCommandBufferExact( cb, &ignored );
 }
 
 void Ral_EndCommandBuffer( ralCommandBuffer_t *cb ) {
-	if ( !cb ) return;
-	if ( cb->state != RAL_VK_CMD_RECORDING ) { RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_EndCommandBuffer: command buffer not RECORDING (state %d)\n", (int)cb->state ); return; }
-	if ( cb->backend->vk.EndCommandBuffer( cb->cb ) != VK_SUCCESS ) { RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_EndCommandBuffer: vkEndCommandBuffer failed\n" ); return; }
-	cb->state = RAL_VK_CMD_PENDING_SUBMIT;
+	ralCommandReceipt_t recording, ignored;
+	if ( Ral_GetCommandBufferReceipt( cb, &recording ) != ralSuccess ) return;
+	(void)Ral_EndCommandBufferExact( cb, &recording, &ignored );
 }
 
 void *Ral_GetCommandBufferHandle( const ralCommandBuffer_t *cb ) {
@@ -191,14 +265,21 @@ void Ral_PoolReset( ralBackend_t *b, ralQueueType_t q ) {
 // ════════════════════════════════════════════════════════════════════════
 // Ral_Submit — VkSubmitInfo2 with command-buffer + wait/signal semaphore arrays
 // ════════════════════════════════════════════════════════════════════════
-ralResult_t Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t *si ) {
+static ralResult_t ralVk_SubmitInternal( ralBackend_t *b, ralQueueType_t q,
+	                                    const ralSubmitInfo_t *si,
+	                                    const ralCommandReceipt_t *executableReceipts,
+	                                    ralSubmissionReceipt_t *outReceipt,
+	                                    qboolean exact ) {
 	VkCommandBufferSubmitInfo cbis[ RAL_VK_MAX_SUBMIT_CBS ];
 	VkSemaphoreSubmitInfo     waitInfos[ RAL_VK_MAX_SUBMIT_SEMS ], signalInfos[ RAL_VK_MAX_SUBMIT_SEMS ];
 	VkSubmitInfo2             si2;
 	uint32_t                  i, nCb, nWait, nSig;
 	VkFence                   fence;
 	ralResult_t result;
+	ralCommandLifecycle_t *lifecycles[ RAL_VK_MAX_SUBMIT_CBS ];
 	if ( !b || !si || (uint32_t)q > RAL_QUEUE_TRANSFER ) return ralErrorInvalidArgument;
+	if ( exact != qfalse && exact != qtrue ) return ralErrorInvalidArgument;
+	if ( exact && ( !executableReceipts || !outReceipt ) ) return ralErrorInvalidArgument;
 	if ( ( si->numCommandBuffers && !si->commandBuffers )
 	  || ( si->numWaitSemaphores && !si->waitSemaphores )
 	  || ( si->numSignalSemaphores && !si->signalSemaphores ) )
@@ -221,15 +302,22 @@ ralResult_t Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t
 	}
 
 	nCb = si->numCommandBuffers;
+	if ( exact && nCb == 0 ) return ralErrorInvalidArgument;
 	for ( i = 0; i < nCb; i++ ) {
 		ralCommandBuffer_t *cb = si->commandBuffers[i];
-		if ( !cb || cb->backend != b || cb->cb == VK_NULL_HANDLE
-		  || ( !cb->externalLifecycle && cb->state != RAL_VK_CMD_PENDING_SUBMIT ) )
+		if ( !cb || cb->backend != b || cb->cb == VK_NULL_HANDLE || cb->queue != q
+		  || ( exact && cb->externalLifecycle )
+		  || ( !exact && !cb->externalLifecycle )
+		  || ( exact && cb->state != RAL_VK_CMD_PENDING_SUBMIT ) )
 			return ralErrorInvalidArgument;
+		lifecycles[i] = &cb->lifecycle;
 		RAL_ZERO( cbis[i] );
 		cbis[i].sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
 		cbis[i].commandBuffer = cb->cb;
 	}
+	if ( exact && !Ral_SubmissionLifecycleCanPublish( &b->submissionLifecycle[q],
+	                                                lifecycles, executableReceipts, nCb ) )
+		return ralErrorInvalidArgument;
 	nWait = si->numWaitSemaphores;
 	for ( i = 0; i < nWait; i++ ) {
 		ralSemaphore_t *s = si->waitSemaphores[i];
@@ -261,12 +349,46 @@ ralResult_t Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t
 	si2.signalSemaphoreInfoCount = nSig;   si2.pSignalSemaphoreInfos = nSig  ? signalInfos : NULL;
 	result = ralVk_QueueSubmit2( b, q, &si2, fence );
 	if ( result != ralSuccess ) return result;
-	for ( i = 0; i < nCb; i++ ) {
-		if ( !si->commandBuffers[i]->externalLifecycle )
-			si->commandBuffers[i]->state = RAL_VK_CMD_SUBMITTED;
-		si->commandBuffers[i]->frame = b->currentFrame;
+	if ( exact ) {
+		result = Ral_SubmissionLifecyclePublish( &b->submissionLifecycle[q], lifecycles,
+		                                       executableReceipts, nCb, outReceipt );
+		if ( result != ralSuccess ) return ralErrorUnknown;
+		for ( i = 0; i < nCb; ++i ) si->commandBuffers[i]->state = RAL_VK_CMD_SUBMITTED;
 	}
+	for ( i = 0; i < nCb; i++ ) si->commandBuffers[i]->frame = b->currentFrame;
 	return ralSuccess;
+}
+
+ralResult_t Ral_SubmitExact( ralBackend_t *b, ralQueueType_t q,
+	                         const ralSubmitInfo_t *si,
+	                         const ralCommandReceipt_t *executableReceipts,
+	                         ralSubmissionReceipt_t *outReceipt ) {
+	return ralVk_SubmitInternal( b, q, si, executableReceipts, outReceipt, qtrue );
+}
+
+ralResult_t Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t *si ) {
+	ralCommandReceipt_t receipts[ RAL_VK_MAX_SUBMIT_CBS ];
+	ralSubmissionReceipt_t ignored;
+	uint32_t i;
+	qboolean external;
+	if ( !b || !si || (uint32_t)q > RAL_QUEUE_TRANSFER
+	  || si->numCommandBuffers > RAL_VK_MAX_SUBMIT_CBS
+	  || ( si->numCommandBuffers && !si->commandBuffers ) )
+		return ralErrorInvalidArgument;
+	// Preserve legacy signal-only / fence-only empty submissions. They carry no
+	// command recording authority, so no ralSubmissionReceipt_t is published.
+	if ( si->numCommandBuffers == 0 )
+		return ralVk_SubmitInternal( b, q, si, NULL, NULL, qfalse );
+	if ( !si->commandBuffers[0] ) return ralErrorInvalidArgument;
+	external = si->numCommandBuffers ? si->commandBuffers[0]->externalLifecycle : qfalse;
+	for ( i = 0; i < si->numCommandBuffers; ++i ) {
+		if ( !si->commandBuffers[i] || si->commandBuffers[i]->externalLifecycle != external )
+			return ralErrorInvalidArgument;
+		if ( !external && Ral_GetCommandBufferReceipt( si->commandBuffers[i], &receipts[i] ) != ralSuccess )
+			return ralErrorInvalidArgument;
+	}
+	if ( external ) return ralVk_SubmitInternal( b, q, si, NULL, NULL, qfalse );
+	return Ral_SubmitExact( b, q, si, receipts, &ignored );
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -274,14 +396,19 @@ ralResult_t Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t
 // ════════════════════════════════════════════════════════════════════════
 void Ral_CmdCopyBuffer( ralCommandBuffer_t *cb, ralBuffer_t *src, ralBuffer_t *dst, const ralBufferCopy_t *region ) {
 	VkBufferCopy r;
-	if ( !cb || !src || !dst || !region ) return;
+	if ( !cb || !src || !dst || !region
+	  || !ralVk_BufferGpuUseAllowed( src ) || !ralVk_BufferGpuUseAllowed( dst ) ) return;
 	RAL_ZERO( r ); r.srcOffset = region->srcOffset; r.dstOffset = region->dstOffset; r.size = region->size;
 	cb->backend->vk.CmdCopyBuffer( cb->cb, src->buffer, dst->buffer, 1, &r );
+	if ( !src->portableStateKnown || src->portableState.usage != RAL_RESOURCE_USAGE_COPY_SOURCE )
+		src->portableStateKnown = qfalse;
+	if ( !dst->portableStateKnown || dst->portableState.usage != RAL_RESOURCE_USAGE_COPY_DESTINATION )
+		dst->portableStateKnown = qfalse;
 }
 
 void Ral_CmdCopyBufferToTexture( ralCommandBuffer_t *cb, ralBuffer_t *src, ralTexture_t *dst, const ralBufferTextureCopy_t *region ) {
 	VkBufferImageCopy bic;
-	if ( !cb || !src || !dst || !region ) return;
+	if ( !cb || !src || !dst || !region || !ralVk_BufferGpuUseAllowed( src ) ) return;
 	RAL_ZERO( bic );
 	bic.bufferOffset                    = region->bufferOffset;
 	bic.imageSubresource.aspectMask     = dst->aspect;
@@ -295,6 +422,10 @@ void Ral_CmdCopyBufferToTexture( ralCommandBuffer_t *cb, ralBuffer_t *src, ralTe
 	bic.imageExtent.depth               = 1;
 	// consumer must have transitioned `dst` to TRANSFER_DST_OPTIMAL via Ral_CmdPipelineBarrier first
 	cb->backend->vk.CmdCopyBufferToImage( cb->cb, src->buffer, dst->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bic );
+	if ( !src->portableStateKnown || src->portableState.usage != RAL_RESOURCE_USAGE_COPY_SOURCE )
+		src->portableStateKnown = qfalse;
+	if ( !dst->portableStateKnown || dst->portableState.usage != RAL_RESOURCE_USAGE_COPY_DESTINATION )
+		dst->portableStateKnown = qfalse;
 }
 
 // Mirror of Ral_CmdCopyBufferToTexture for readback (the early
@@ -302,7 +433,7 @@ void Ral_CmdCopyBufferToTexture( ralCommandBuffer_t *cb, ralBuffer_t *src, ralTe
 // readbacks / screenshot paths can stay on the RAL surface).
 void Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb, ralTexture_t *src, ralBuffer_t *dst, const ralBufferTextureCopy_t *region ) {
 	VkBufferImageCopy bic;
-	if ( !cb || !src || !dst || !region ) return;
+	if ( !cb || !src || !dst || !region || !ralVk_BufferGpuUseAllowed( dst ) ) return;
 	RAL_ZERO( bic );
 	bic.bufferOffset                    = region->bufferOffset;
 	bic.imageSubresource.aspectMask     = src->aspect;
@@ -316,6 +447,10 @@ void Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb, ralTexture_t *src, ralB
 	bic.imageExtent.depth               = 1;
 	// consumer must have transitioned `src` to TRANSFER_SRC_OPTIMAL first
 	cb->backend->vk.CmdCopyImageToBuffer( cb->cb, src->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst->buffer, 1, &bic );
+	if ( !src->portableStateKnown || src->portableState.usage != RAL_RESOURCE_USAGE_COPY_SOURCE )
+		src->portableStateKnown = qfalse;
+	if ( !dst->portableStateKnown || dst->portableState.usage != RAL_RESOURCE_USAGE_COPY_DESTINATION )
+		dst->portableStateKnown = qfalse;
 }
 
 void Ral_CmdPipelineBarrier( ralCommandBuffer_t *cb, ralBarrierScope_t scope ) {
@@ -418,27 +553,33 @@ void Ral_CmdBindPipeline( ralCommandBuffer_t *cb, ralPipeline_t *p ) {
 }
 
 void Ral_CmdBindBindGroup( ralCommandBuffer_t *cb, uint32_t setIndex, ralBindGroup_t *g ) {
-	if ( !cb || !g || cb->currentLayout == VK_NULL_HANDLE ) {
+	if ( !cb || !g || setIndex >= RAL_VK_MAX_TRACKED_BIND_GROUPS
+	  || !ralVk_BindGroupBuffersGpuUseAllowed( g )
+	  || cb->currentLayout == VK_NULL_HANDLE ) {
 		if ( cb && cb->currentLayout == VK_NULL_HANDLE )
 			RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_CmdBindBindGroup: no pipeline bound (call Ral_CmdBindPipeline first)\n" );
 		return;
 	}
 	cb->backend->vk.CmdBindDescriptorSets( cb->cb, cb->currentBindPoint, cb->currentLayout,
 	                                       setIndex, 1, &g->set, 0, NULL );
+	cb->boundBindGroups[setIndex] = g;
 }
 
 
 void Ral_CmdBindVertexBuffer( ralCommandBuffer_t *cb, uint32_t binding, ralBuffer_t *buf, uint64_t offset ) {
 	VkDeviceSize off;
-	if ( !cb || !buf ) return;
+	if ( !cb || binding >= RAL_VK_MAX_TRACKED_VERTEX_BUFFERS
+	  || !ralVk_BufferGpuUseAllowed( buf ) ) return;
 	off = (VkDeviceSize)offset;
 	cb->backend->vk.CmdBindVertexBuffers( cb->cb, binding, 1, &buf->buffer, &off );
+	cb->boundVertexBuffers[binding] = buf;
 }
 
 void Ral_CmdBindIndexBuffer( ralCommandBuffer_t *cb, ralBuffer_t *buf, uint64_t offset, ralIndexType_t type ) {
-	if ( !cb || !buf ) return;
+	if ( !cb || !ralVk_BufferGpuUseAllowed( buf ) ) return;
 	cb->backend->vk.CmdBindIndexBuffer( cb->cb, buf->buffer, (VkDeviceSize)offset,
 	                                    ( type == RAL_INDEX_UINT32 ) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16 );
+	cb->boundIndexBuffer = buf;
 }
 
 // Push constants: vkCmdPushConstants takes stage flags + offset + size + data.
@@ -481,24 +622,26 @@ void Ral_CmdDraw( ralCommandBuffer_t *cb, uint32_t vertexCount, uint32_t instanc
 	// returned NULL for a VkPipeline that has no RAL sibling yet (the matching
 	// Ral_CmdBindPipeline cleared cb->currentPipeline). Legacy qvkCmdDraw on
 	// the renderer's own cmd buffer remains authoritative.
-	if ( !cb->currentPipeline ) return;
+	if ( !cb->currentPipeline || !ralVk_CommandBoundBuffersGpuUseAllowed( cb ) ) return;
 	cb->backend->vk.CmdDraw( cb->cb, vertexCount, instanceCount ? instanceCount : 1, firstVertex, firstInstance );
 }
 
 void Ral_CmdDrawIndexed( ralCommandBuffer_t *cb, uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance ) {
 	if ( !cb ) return;
-	if ( !cb->currentPipeline ) return;   // Same NULL-fallthrough rationale as Ral_CmdDraw above.
+	if ( !cb->currentPipeline || !ralVk_CommandBoundBuffersGpuUseAllowed( cb ) ) return;   // Same NULL-fallthrough rationale as Ral_CmdDraw above.
 	cb->backend->vk.CmdDrawIndexed( cb->cb, indexCount, instanceCount ? instanceCount : 1, firstIndex, vertexOffset, firstInstance );
 }
 
 void Ral_CmdDrawIndexedIndirect( ralCommandBuffer_t *cb, ralBuffer_t *argBuf, uint64_t offset, uint32_t drawCount, uint32_t stride ) {
-	if ( !cb || !argBuf ) return;
+	if ( !cb || !ralVk_BufferGpuUseAllowed( argBuf )
+	  || !ralVk_CommandBoundBuffersGpuUseAllowed( cb ) ) return;
 	cb->backend->vk.CmdDrawIndexedIndirect( cb->cb, argBuf->buffer, (VkDeviceSize)offset, drawCount, stride );
 }
 
 void Ral_CmdDrawIndexedIndirectCount( ralCommandBuffer_t *cb, ralBuffer_t *argBuf, uint64_t argOffset,
                                       ralBuffer_t *countBuf, uint64_t countOffset, uint32_t maxDrawCount, uint32_t stride ) {
-	if ( !cb || !argBuf || !countBuf ) return;
+	if ( !cb || !ralVk_BufferGpuUseAllowed( argBuf ) || !ralVk_BufferGpuUseAllowed( countBuf )
+	  || !ralVk_CommandBoundBuffersGpuUseAllowed( cb ) ) return;
 	// Refuse to silently degrade. The earlier fallback substituted
 	// vkCmdDrawIndexedIndirect with maxDrawCount, which ignores the count
 	// buffer and renders *wrong* output (always maxDrawCount draws regardless
@@ -516,12 +659,13 @@ void Ral_CmdDrawIndexedIndirectCount( ralCommandBuffer_t *cb, ralBuffer_t *argBu
 
 void Ral_CmdDispatch( ralCommandBuffer_t *cb, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ ) {
 	if ( !cb ) return;
-	if ( !cb->currentPipeline ) return;   // NULL-fallthrough (see Ral_CmdDraw).
+	if ( !cb->currentPipeline || !ralVk_CommandBoundBuffersGpuUseAllowed( cb ) ) return;   // NULL-fallthrough (see Ral_CmdDraw).
 	cb->backend->vk.CmdDispatch( cb->cb, groupCountX ? groupCountX : 1, groupCountY ? groupCountY : 1, groupCountZ ? groupCountZ : 1 );
 }
 
 void Ral_CmdDispatchIndirect( ralCommandBuffer_t *cb, ralBuffer_t *argBuf, uint64_t offset ) {
-	if ( !cb || !argBuf ) return;
+	if ( !cb || !ralVk_BufferGpuUseAllowed( argBuf )
+	  || !ralVk_CommandBoundBuffersGpuUseAllowed( cb ) ) return;
 	cb->backend->vk.CmdDispatchIndirect( cb->cb, argBuf->buffer, (VkDeviceSize)offset );
 }
 
@@ -548,12 +692,16 @@ void Ral_CmdBindVertexBuffers( ralCommandBuffer_t *cb, uint32_t firstBinding,
 	uint32_t i;
 	if ( !cb || bindingCount == 0 || !buffers ) return;
 	if ( bindingCount > RAL_VK_MAX_PIPELINE_SETS ) return;
+	if ( firstBinding >= RAL_VK_MAX_TRACKED_VERTEX_BUFFERS
+	  || bindingCount > RAL_VK_MAX_TRACKED_VERTEX_BUFFERS - firstBinding ) return;
 	for ( i = 0; i < bindingCount; i++ ) {
-		if ( !buffers[i] ) return;   // null-fallthrough: missing wrapper → skip
+		if ( !ralVk_BufferGpuUseAllowed( buffers[i] ) ) return;
 		scratchBufs[i] = buffers[i]->buffer;
 	}
 	cb->backend->vk.CmdBindVertexBuffers( cb->cb, firstBinding, bindingCount,
 	                                       scratchBufs, (const VkDeviceSize *)offsets );
+	for ( i = 0; i < bindingCount; ++i )
+		cb->boundVertexBuffers[firstBinding + i] = buffers[i];
 }
 
 void Ral_CmdPushConstantsLayout( ralCommandBuffer_t *cb,
@@ -596,6 +744,10 @@ void Ral_CmdPipelineBarrierFull( ralCommandBuffer_t *cb, const ralPipelineBarrie
 		        im, (uint32_t)ARRAY_LEN( imageBarriers  ) );
 		return;
 	}
+	for ( i = 0; i < b; ++i ) {
+		if ( info->bufferMemoryBarriers[i].buffer
+		  && !ralVk_BufferGpuUseAllowed( info->bufferMemoryBarriers[i].buffer ) ) return;
+	}
 	for ( i = 0; i < m; i++ ) {
 		RAL_ZERO( memBarriers[i] );
 		memBarriers[i].sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -637,6 +789,17 @@ void Ral_CmdPipelineBarrierFull( ralCommandBuffer_t *cb, const ralPipelineBarrie
 	                                     m,  m  ? memBarriers    : NULL,
 	                                     b,  b  ? bufferBarriers : NULL,
 	                                     im, im ? imageBarriers  : NULL );
+	// This native-shaped compatibility surface cannot prove a portable before/
+	// after state. Keep the native command, but force any later semantic caller
+	// to re-establish authority instead of accepting stale tracked state.
+	for ( i = 0; i < b; ++i ) {
+		if ( info->bufferMemoryBarriers[i].buffer )
+			info->bufferMemoryBarriers[i].buffer->portableStateKnown = qfalse;
+	}
+	for ( i = 0; i < im; ++i ) {
+		if ( info->imageMemoryBarriers[i].texture )
+			info->imageMemoryBarriers[i].texture->portableStateKnown = qfalse;
+	}
 }
 
 // Derive the VkAccessFlags a stage uses, for a single-texture transition.
@@ -668,6 +831,7 @@ void Ral_CmdTransitionTexture( ralCommandBuffer_t *cb, ralTexture_t *tex,
 	                                    0, 0, NULL, 0, NULL, 1, &ib );
 	// Atomic with the barrier: tracked layout can never desync from the GPU.
 	tex->currentLayout = (VkImageLayout)newVkLayout;
+	tex->portableStateKnown = qfalse;
 }
 
 ralResult_t Ral_PrepareSwapchainImageForPresent( ralCommandBuffer_t *cb,
@@ -737,6 +901,7 @@ ralResult_t Ral_PrepareSwapchainImageForPresent( ralCommandBuffer_t *cb,
 		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
 		0, NULL, 0, NULL, 1, &ib );
 	tex->currentLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	tex->portableStateKnown = qfalse;
 	swapchain->imageStates[imageIndex] = RAL_VK_SWAPCHAIN_IMAGE_PREPARED;
 	return ralSuccess;
 }
@@ -750,16 +915,25 @@ void Ral_CmdCopyImage( ralCommandBuffer_t *cb, ralTexture_t *src, ralTexture_t *
 	                               src->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 	                               dst->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	                               regionCount, (const VkImageCopy *)regions );
+	if ( !src->portableStateKnown || src->portableState.usage != RAL_RESOURCE_USAGE_COPY_SOURCE )
+		src->portableStateKnown = qfalse;
+	if ( !dst->portableStateKnown || dst->portableState.usage != RAL_RESOURCE_USAGE_COPY_DESTINATION )
+		dst->portableStateKnown = qfalse;
 }
 
 void Ral_CmdCopyBufferToImage( ralCommandBuffer_t *cb, ralBuffer_t *src, ralTexture_t *dst,
                                uint32_t regionCount, const ralBufferImageCopy_t *regions )
 {
-	if ( !cb || !src || !dst || regionCount == 0 || !regions ) return;
+	if ( !cb || !src || !dst || regionCount == 0 || !regions
+	  || !ralVk_BufferGpuUseAllowed( src ) ) return;
 	cb->backend->vk.CmdCopyBufferToImage( cb->cb,
 	                                       src->buffer,
 	                                       dst->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	                                       regionCount, (const VkBufferImageCopy *)regions );
+	if ( !src->portableStateKnown || src->portableState.usage != RAL_RESOURCE_USAGE_COPY_SOURCE )
+		src->portableStateKnown = qfalse;
+	if ( !dst->portableStateKnown || dst->portableState.usage != RAL_RESOURCE_USAGE_COPY_DESTINATION )
+		dst->portableStateKnown = qfalse;
 }
 
 void Ral_CmdBlitImage( ralCommandBuffer_t *cb, ralTexture_t *src, ralTexture_t *dst,
@@ -772,6 +946,10 @@ void Ral_CmdBlitImage( ralCommandBuffer_t *cb, ralTexture_t *src, ralTexture_t *
 	                               dst->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	                               regionCount, (const VkImageBlit *)regions,
 	                               ( filter == RAL_FILTER_LINEAR ) ? VK_FILTER_LINEAR : VK_FILTER_NEAREST );
+	if ( !src->portableStateKnown || src->portableState.usage != RAL_RESOURCE_USAGE_COPY_SOURCE )
+		src->portableStateKnown = qfalse;
+	if ( !dst->portableStateKnown || dst->portableState.usage != RAL_RESOURCE_USAGE_COPY_DESTINATION )
+		dst->portableStateKnown = qfalse;
 }
 
 void Ral_CmdClearAttachments( ralCommandBuffer_t *cb, uint32_t attachmentCount,
@@ -851,6 +1029,7 @@ static void ralVk_RenderTargetTransition( ralCommandBuffer_t *cb, ralTexture_t *
 	bar.subresourceRange.layerCount     = tex->arrayLayers;
 	cb->backend->vk.CmdPipelineBarrier( cb->cb, src.stage, dst.stage, 0, 0, NULL, 0, NULL, 1, &bar );
 	tex->currentLayout = newLayout;
+	tex->portableStateKnown = qfalse;
 }
 
 void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ ) {
@@ -950,11 +1129,13 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 	cb->renderingDebugLabelActive = ri_->debugName
 		? Ral_BeginDebugLabel( cb, ri_->debugName, NULL ) : qfalse;
 	cb->backend->vk.CmdBeginRendering( cb->cb, &info );
+	cb->renderingActive = qtrue;
 }
 
 void Ral_EndRendering( ralCommandBuffer_t *cb ) {
 	if ( !cb ) return;
 	cb->backend->vk.CmdEndRendering( cb->cb );
+	cb->renderingActive = qfalse;
 	if ( cb->renderingDebugLabelActive ) {
 		if ( !Ral_EndDebugLabel( cb ) )
 			RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_EndRendering: active debug-label scope could not close\n" );
@@ -1021,7 +1202,7 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 	// ── (2) async buffer upload (1 MiB device-local) ───────────────────
 	RAL_ZERO( bci ); bci.size = BIG; bci.usage = RAL_BUFFER_STORAGE; bci.memory = RAL_MEMORY_DEVICE_LOCAL; bci.debugName = "ral-async-buf";
 	buf = Ral_CreateBuffer( b, &bci );
-	RAL_ZERO( bci ); bci.size = 256u; bci.usage = RAL_BUFFER_TRANSFER_DST; bci.memory = RAL_MEMORY_HOST_COHERENT; bci.debugName = "ral-async-readback";
+	RAL_ZERO( bci ); bci.size = 256u; bci.usage = RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ; bci.memory = RAL_MEMORY_HOST_COHERENT; bci.debugName = "ral-async-readback";
 	readback = Ral_CreateBuffer( b, &bci );
 	if ( buf ) {
 		byte *data = (byte *)malloc( BIG );
@@ -1053,12 +1234,17 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 			uint64_t            waitVal[1], sigVal[1];
 			ralSubmitInfo_t     si;
 			ralBufferCopy_t     copy; byte *m; uint64_t tv;
+			ralBufferMapTicket_t mapTicket;
 			waitSem[0] = sigSem[0] = timeline;
 			// transfer queue: barrier (upload visibility) + copy buf→readback + release `buf` to graphics; signal timeline@1
 			Ral_BeginCommandBuffer( cbT );
 			Ral_CmdPipelineBarrier( cbT, RAL_BARRIER_ALL );
+			ralVk_TransitionWholeBuffer( cbT, readback, RAL_RESOURCE_USAGE_UNDEFINED,
+			                             RAL_RESOURCE_USAGE_COPY_DESTINATION );
 			RAL_ZERO( copy ); copy.size = 256u;
 			Ral_CmdCopyBuffer( cbT, buf, readback, &copy );
+			ralVk_TransitionWholeBuffer( cbT, readback, RAL_RESOURCE_USAGE_COPY_DESTINATION,
+			                             RAL_RESOURCE_USAGE_HOST_READ );
 			ralVk_BufQfo( b, cbT->cb, buf->buffer, qtrue /*release*/ );
 			Ral_EndCommandBuffer( cbT );
 			one[0] = cbT; RAL_ZERO( si ); si.commandBuffers = one; si.numCommandBuffers = 1;
@@ -1084,11 +1270,11 @@ void ralVk_RunAsyncTest( ralBackend_t *b ) {
 			Ral_SignalTimeline( timeline, 4 );
 			b->vk.DeviceWaitIdle( b->device );   // guarantee the transfer-queue copy is host-visible before mapping
 			tv = Ral_GetTimelineValue( timeline );
-			m = (byte *)Ral_MapBuffer( readback );
+			m = (byte *)ralVk_MapReadbackBuffer( readback, &mapTicket );
 			RAL_VK_LOG( SEV_INFO, "  cross-queue (transfer→graphics→compute): timeline value=%llu (expect ≥4 after host signal); queue-ownership barriers (transfer fam %u → graphics fam %u) recorded\n",
 			        (unsigned long long)tv, b->queueFamily[RAL_QUEUE_TRANSFER], b->queueFamily[RAL_QUEUE_GRAPHICS] );
 			RAL_VK_LOG( SEV_INFO, "  readback after transfer-queue copy: byte[0..3] = %u %u %u %u  (expect 0 1 2 3)\n", m ? m[0] : 255, m ? m[1] : 255, m ? m[2] : 255, m ? m[3] : 255 );
-			Ral_UnmapBuffer( readback );
+			if ( m ) Ral_BufferMapUnmap( readback, &mapTicket );
 		} else RAL_VK_LOG( SEV_WARN, "  cross-queue: command buffer acquisition failed\n" );
 		if ( cbC ) Ral_DestroyCommandBuffer( cbC );
 		if ( cbG ) Ral_DestroyCommandBuffer( cbG );

@@ -1,0 +1,49 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+constant float texel_x_tmp [[function_constant(0)]];
+constant float texel_x = is_function_constant_defined(texel_x_tmp) ? texel_x_tmp : 0.0;
+constant float texel_y_tmp [[function_constant(1)]];
+constant float texel_y = is_function_constant_defined(texel_y_tmp) ? texel_y_tmp : 0.0;
+constant float filter_radius_tmp [[function_constant(2)]];
+constant float filter_radius = is_function_constant_defined(filter_radius_tmp) ? filter_radius_tmp : 1.0;
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> texture0 [[id(0)]];
+    sampler texture0Smplr [[id(1)]];
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord [[user(locn0)]];
+};
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]])
+{
+    main0_out out = {};
+    float2 uv = in.frag_tex_coord;
+    float2 r;
+    r.x = texel_x;
+    r.y = texel_y;
+    r *= filter_radius;
+    float3 s = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (r * float2(-1.0)))).xyz;
+    s += (spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (r * float2(0.0, -1.0)))).xyz * 2.0);
+    s += spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (r * float2(1.0, -1.0)))).xyz;
+    s += (spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (r * float2(-1.0, 0.0)))).xyz * 2.0);
+    s += (spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, uv).xyz * 4.0);
+    s += (spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (r * float2(1.0, 0.0)))).xyz * 2.0);
+    s += spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (r * float2(-1.0, 1.0)))).xyz;
+    s += (spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (r * float2(0.0, 1.0)))).xyz * 2.0);
+    s += spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, (uv + (r * float2(1.0)))).xyz;
+    out.out_color = float4(s * 0.0625, 1.0);
+    return out;
+}
+

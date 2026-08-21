@@ -77,8 +77,8 @@ vec3 linearToSRGB( vec3 c ) {
 // primitive-shader image is CD_SRGB today, so this is byte-identical
 // to the prior unconditional sRGBToLinear; the branch is the seam for
 // future channel-map ribbon content.
-vec4 sampleColorTexBindless( sampler2D s, vec2 uv, uint domain ) {
-	vec4 c = texture( s, uv );
+vec4 sampleColorTexBindless( vec4 sampled, uint domain ) {
+	vec4 c = sampled;
 	if ( domain != 0u )
 		return c;
 	c.rgb = sRGBToLinear( c.rgb );
@@ -95,7 +95,7 @@ void main() {
 	// Out-of-range handles clamp to slot 0 (tr.whiteImage) — keeps
 	// the shader robust against handles that exceed the registry size.
 	uint slot = handle < uint(PRIMITIVE_SHADER_IMAGE_MAX) ? handle : 0u;
-	vec4 texel = sampleColorTexBindless( shaderImages[slot], fragUV, domain );
+	vec4 texel = sampleColorTexBindless( texture( shaderImages[slot], fragUV ), domain );
 
 	// Per-vertex colour decoded to linear (display
 	// domain); texel decoded per its colour domain. The rgb/a-separated

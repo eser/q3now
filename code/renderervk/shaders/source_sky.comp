@@ -88,9 +88,9 @@ vec3 analyticSky( vec3 dir )
 
 void main()
 {
-	ivec3 size  = imageSize( skyImage );   // (w, h, 6)
+	uvec2 size  = uvec2( imageSize( skyImage ).xy );
 	ivec3 coord = ivec3( gl_GlobalInvocationID.xyz );
-	if ( coord.x >= size.x || coord.y >= size.y || coord.z >= 6 )
+	if ( uint( coord.x ) >= size.x || uint( coord.y ) >= size.y || uint( coord.z ) >= 6u )
 		return;
 
 	// Face-local uv at the texel centre, mapped to [-1,1].

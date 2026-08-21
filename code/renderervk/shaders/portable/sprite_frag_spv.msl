@@ -1,0 +1,44 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct EffectsUBO
+{
+    float4x4 mvp;
+    float4 viewLeft;
+    float4 viewUp;
+    float4 frameParams;
+};
+
+struct main0_out
+{
+    float4 outColor [[color(0)]];
+};
+
+struct main0_in
+{
+    float4 fragColor [[user(locn1)]];
+};
+
+static inline __attribute__((always_inline))
+float3 sRGBToLinear(thread float3& c)
+{
+    c = fast::max(c, float3(0.0));
+    bool3 cutoff = c <= float3(0.040449999272823333740234375);
+    float3 lo = c / float3(12.9200000762939453125);
+    float3 hi = powr((c + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return mix(hi, lo, float3(cutoff));
+}
+
+fragment main0_out main0(main0_in in [[stage_in]])
+{
+    main0_out out = {};
+    float3 param = in.fragColor.xyz;
+    float3 _58 = sRGBToLinear(param);
+    out.outColor = float4(_58, in.fragColor.w);
+    return out;
+}
+

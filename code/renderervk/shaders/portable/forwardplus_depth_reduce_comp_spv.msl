@@ -1,0 +1,72 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Push
+{
+    float4 params;
+};
+
+struct TileDepth
+{
+    float tileDepth[1];
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> sceneDepth [[id(0)]];
+    sampler depthSampler [[id(1)]];
+    device TileDepth* m_165 [[id(2)]];
+};
+
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant Push& _25 [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint tx = gl_GlobalInvocationID.x;
+    uint ty = gl_GlobalInvocationID.y;
+    uint tilesX = uint(_25.params.z);
+    uint tilesY = uint(_25.params.w);
+    if ((tx >= tilesX) || (ty >= tilesY))
+    {
+        return;
+    }
+    uint tileIndex = (ty * tilesX) + tx;
+    float screenW = _25.params.x;
+    float screenH = _25.params.y;
+    float x0 = float(tx * 16u);
+    float y0 = float(ty * 16u);
+    float dMin = 1.0;
+    float dMax = 0.0;
+    bool _any = false;
+    for (uint j = 0u; j < 16u; j++)
+    {
+        for (uint i = 0u; i < 16u; i++)
+        {
+            float px = x0 + float(i);
+            float py = y0 + float(j);
+            if ((px >= screenW) || (py >= screenH))
+            {
+                continue;
+            }
+            float2 uv = (float2(px, py) + float2(0.5)) / float2(screenW, screenH);
+            float d = spvDescriptorSet0.sceneDepth.sample(spvDescriptorSet0.depthSampler, uv, level(0.0)).x;
+            if (d <= 0.0)
+            {
+                continue;
+            }
+            dMin = fast::min(dMin, d);
+            dMax = fast::max(dMax, d);
+            _any = true;
+        }
+    }
+    if (!_any)
+    {
+        dMin = 0.0;
+        dMax = 1.0;
+    }
+    (*spvDescriptorSet0.m_165).tileDepth[(2u * tileIndex) + 0u] = dMin;
+    (*spvDescriptorSet0.m_165).tileDepth[(2u * tileIndex) + 1u] = dMax;
+}
+

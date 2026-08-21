@@ -60,12 +60,14 @@ typedef enum {
 } vkTemporalHistoryConsumeSlotState_t;
 
 typedef struct {
-	ralBuffer_t *buffer;
-	void *mapped;
+	ralBuffer_t *gpuBuffer;
+	ralBuffer_t *readbackBuffer;
 	ralBindGroup_t *groups[2];
 	uint32_t allocationGeneration;
 	vkTemporalHistoryConsumeSlotState_t state;
 	vkTemporalHistoryConsumeTicket_t ticket;
+	qboolean gpuWritable;
+	qboolean hostReadable;
 } vkTemporalHistoryConsumeSlot_t;
 
 typedef struct {

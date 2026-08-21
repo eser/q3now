@@ -1,0 +1,140 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+    
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+    
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+    
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+    
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
+struct LensPush
+{
+    float2 viewport;
+    int count;
+    float radiusPx;
+};
+
+struct LensSource
+{
+    float4 screenPosDepth;
+    float4 colorVis;
+};
+
+struct LensSources
+{
+    LensSource lensSources[1];
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(64u, 1u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    device LensSources* m_40 [[id(0)]];
+    texture2d<float> depthTex [[id(1)]];
+    sampler depthSampler [[id(2)]];
+};
+
+constant spvUnsafeArray<float2, 9> _132 = spvUnsafeArray<float2, 9>({ float2(0.0), float2(1.0, 0.0), float2(-1.0, 0.0), float2(0.0, 1.0), float2(0.0, -1.0), float2(0.699999988079071044921875), float2(-0.699999988079071044921875, 0.699999988079071044921875), float2(0.699999988079071044921875, -0.699999988079071044921875), float2(-0.699999988079071044921875) });
+
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant LensPush& _22 [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= uint(_22.count))
+    {
+        return;
+    }
+    float2 uv = (*spvDescriptorSet0.m_40).lensSources[idx].screenPosDepth.xy;
+    float compareZ = ((device float*)&(*spvDescriptorSet0.m_40).lensSources[idx].screenPosDepth)[2u];
+    bool _57 = uv.x < 0.0;
+    bool _65;
+    if (!_57)
+    {
+        _65 = uv.x > 1.0;
+    }
+    else
+    {
+        _65 = _57;
+    }
+    bool _73;
+    if (!_65)
+    {
+        _73 = uv.y < 0.0;
+    }
+    else
+    {
+        _73 = _65;
+    }
+    bool _80;
+    if (!_73)
+    {
+        _80 = uv.y > 1.0;
+    }
+    else
+    {
+        _80 = _73;
+    }
+    if (_80)
+    {
+        ((device float*)&(*spvDescriptorSet0.m_40).lensSources[idx].colorVis)[3u] = 0.0;
+        return;
+    }
+    float2 _92;
+    if (_22.viewport.x > 0.0)
+    {
+        _92 = float2(_22.radiusPx) / _22.viewport;
+    }
+    else
+    {
+        _92 = float2(0.0);
+    }
+    float2 texel = _92;
+    int visible = 0;
+    for (int t = 0; t < 9; t++)
+    {
+        float2 suv = fast::clamp(uv + (_132[t] * texel), float2(0.0), float2(1.0));
+        float scene = spvDescriptorSet0.depthTex.sample(spvDescriptorSet0.depthSampler, suv, level(0.0)).x;
+        if (scene <= (compareZ + 0.0007999999797903001308441162109375))
+        {
+            visible++;
+        }
+    }
+    ((device float*)&(*spvDescriptorSet0.m_40).lensSources[idx].colorVis)[3u] = float(visible) / 9.0;
+}
+

@@ -26,9 +26,10 @@ layout(push_constant) uniform TemporalResolvePush {
 	uint historyReadIndex;
 } pc;
 
-bool finite1(float v) { return !isnan(v) && !isinf(v); }
-bool finite2(vec2 v) { return all(not(isnan(v))) && all(not(isinf(v))); }
-bool finite4(vec4 v) { return all(not(isnan(v))) && all(not(isinf(v))); }
+bool finite1(float v) { return v == v && abs(v) <= 3.402823466e38; }
+bool finite2(vec2 v) { return all(equal(v, v)) && all(lessThanEqual(abs(v), vec2(3.402823466e38))); }
+bool finite3(vec3 v) { return all(equal(v, v)) && all(lessThanEqual(abs(v), vec3(3.402823466e38))); }
+bool finite4(vec4 v) { return all(equal(v, v)) && all(lessThanEqual(abs(v), vec4(3.402823466e38))); }
 
 float linearizeDepth(float z) {
 	precise float range = pc.zFar - pc.zNear;
@@ -170,10 +171,7 @@ void main() {
 					neighborhoodMax = max(neighborhoodMax, c);
 				}
 			}
-			if (finite4(prior) && all(not(isnan(neighborhoodMin)))
-					&& all(not(isinf(neighborhoodMin)))
-					&& all(not(isnan(neighborhoodMax)))
-					&& all(not(isinf(neighborhoodMax)))) {
+			if (finite4(prior) && finite3(neighborhoodMin) && finite3(neighborhoodMax)) {
 				vec3 clampedPrior = clamp(
 					prior.rgb, neighborhoodMin, neighborhoodMax);
 				// Scale the history weight by the pixel's confidence. At

@@ -1,0 +1,74 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct EffectsUBO
+{
+    float4x4 mvp;
+    float4 eyeWorld;
+    float4 frameParams;
+    float4 _v2;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    array<texture2d<float>, 64> shaderImages [[id(0)]];
+    array<sampler, 64> shaderImagesSmplr [[id(64)]];
+};
+
+struct main0_out
+{
+    float4 outColor [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 fragUV [[user(locn0)]];
+    float4 fragColor [[user(locn1)]];
+    uint fragShaderHandle [[user(locn2)]];
+};
+
+static inline __attribute__((always_inline))
+float3 sRGBToLinear(thread float3& c)
+{
+    c = fast::max(c, float3(0.0));
+    bool3 cutoff = c <= float3(0.040449999272823333740234375);
+    float3 lo = c / float3(12.9200000762939453125);
+    float3 hi = powr((c + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return mix(hi, lo, float3(cutoff));
+}
+
+static inline __attribute__((always_inline))
+float4 sampleColorTexBindless(thread const float4& sampled, thread const uint& domain)
+{
+    float4 c = sampled;
+    if (domain != 0u)
+    {
+        return c;
+    }
+    float3 param = c.xyz;
+    float3 _71 = sRGBToLinear(param);
+    c.x = _71.x;
+    c.y = _71.y;
+    c.z = _71.z;
+    return c;
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]])
+{
+    main0_out out = {};
+    uint domain = in.fragShaderHandle >> 31u;
+    uint handle = in.fragShaderHandle & 2147483647u;
+    uint slot = (handle < 64u) ? handle : 0u;
+    float4 param = spvDescriptorSet0.shaderImages[slot].sample(spvDescriptorSet0.shaderImagesSmplr[slot], in.fragUV);
+    uint param_1 = domain;
+    float4 texel = sampleColorTexBindless(param, param_1);
+    float3 param_2 = in.fragColor.xyz;
+    float3 _128 = sRGBToLinear(param_2);
+    out.outColor = float4(texel.xyz * _128, texel.w * in.fragColor.w);
+    return out;
+}
+

@@ -1,0 +1,180 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T>
+struct spvDescriptor
+{
+    T value;
+};
+
+template<typename T>
+struct spvDescriptorArray
+{
+    spvDescriptorArray(const device spvDescriptor<T>* ptr_) : ptr(&ptr_->value) {}
+    spvDescriptorArray(const device void *ptr_) : spvDescriptorArray(static_cast<const device spvDescriptor<T>*>(ptr_)) {}
+    const device T& operator [] (size_t i) const { return ptr[i]; }
+    const device T* ptr;
+};
+
+struct UBO
+{
+    float4 eyePos;
+    float4 lightPos;
+    float4 lightColor;
+    float4 lightVector;
+    float4 fogDistanceVector;
+    float4 fogDepthVector;
+    float4 fogEyeT;
+    float4 fogColor;
+    float4 _pad_to_packed_indices[26];
+    uint4 packed_indices[3];
+    float4 worldLightParams;
+};
+
+constant int tex_domain_tmp [[function_constant(4)]];
+constant int tex_domain = is_function_constant_defined(tex_domain_tmp) ? tex_domain_tmp : 0;
+constant int lightmap_slot_tmp [[function_constant(26)]];
+constant int lightmap_slot = is_function_constant_defined(lightmap_slot_tmp) ? lightmap_slot_tmp : 0;
+constant float identity_color_tmp [[function_constant(8)]];
+constant float identity_color = is_function_constant_defined(identity_color_tmp) ? identity_color_tmp : 1.0;
+constant float identity_alpha_tmp [[function_constant(9)]];
+constant float identity_alpha = is_function_constant_defined(identity_alpha_tmp) ? identity_alpha_tmp : 1.0;
+constant int alpha_test_func_tmp [[function_constant(0)]];
+constant int alpha_test_func = is_function_constant_defined(alpha_test_func_tmp) ? alpha_test_func_tmp : 0;
+constant bool _179 = (alpha_test_func == 1);
+constant float alpha_test_value_tmp [[function_constant(1)]];
+constant float alpha_test_value = is_function_constant_defined(alpha_test_value_tmp) ? alpha_test_value_tmp : 0.0;
+constant bool _191 = (alpha_test_func == 2);
+constant bool _202 = (alpha_test_func == 3);
+constant int discard_mode_tmp [[function_constant(7)]];
+constant int discard_mode = is_function_constant_defined(discard_mode_tmp) ? discard_mode_tmp : 0;
+constant bool _213 = (discard_mode == 1);
+constant bool _223 = (discard_mode == 2);
+constant int alpha_to_coverage_tmp [[function_constant(3)]];
+constant int alpha_to_coverage = is_function_constant_defined(alpha_to_coverage_tmp) ? alpha_to_coverage_tmp : 0;
+
+struct spvDescriptorSetBuffer0
+{
+    constant UBO* m_76 [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    spvDescriptor<texture2d<float>> wired_bindless_images [[id(0)]][1] /* unsized array hack */;
+    // Overlapping binding: spvDescriptor<sampler> wired_bindless_samplers [[id(0)]][1] /* unsized array hack */;
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord0 [[user(locn1), centroid_perspective]];
+};
+
+static inline __attribute__((always_inline))
+float3 sRGBToLinear(thread float3& c)
+{
+    c = fast::max(c, float3(0.0));
+    bool3 cutoff = c <= float3(0.040449999272823333740234375);
+    float3 lo = c / float3(12.9200000762939453125);
+    float3 hi = powr((c + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return mix(hi, lo, float3(cutoff));
+}
+
+static inline __attribute__((always_inline))
+float4 wired_bl_sample_domain(thread const uint& role, thread const float2& uv, thread const int& slot, const spvDescriptorArray<texture2d<float>> wired_bindless_images, constant UBO& _76, const spvDescriptorArray<sampler> wired_bindless_samplers)
+{
+    uint _88 = _76.packed_indices[role / 4u][role % 4u] & 4095u;
+    uint _106 = (_76.packed_indices[role / 4u][role % 4u] >> uint(12)) & 255u;
+    float4 c = wired_bindless_images[_88].sample(wired_bindless_samplers[_106], uv);
+    if ((tex_domain & (1 << slot)) == 0)
+    {
+        float3 param = c.xyz;
+        float3 _126 = sRGBToLinear(param);
+        c.x = _126.x;
+        c.y = _126.y;
+        c.z = _126.z;
+    }
+    if (lightmap_slot == (slot + 1))
+    {
+        float4 _147 = c;
+        float3 _149 = _147.xyz * _76.worldLightParams.x;
+        c.x = _149.x;
+        c.y = _149.y;
+        c.z = _149.z;
+    }
+    return c;
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]])
+{
+    spvDescriptorArray<texture2d<float>> wired_bindless_images {spvDescriptorSet1.wired_bindless_images};
+    spvDescriptorArray<sampler> wired_bindless_samplers {reinterpret_cast<const device spvDescriptor<sampler>*>(&spvDescriptorSet1.wired_bindless_images)};
+
+    main0_out out = {};
+    float4 frag_color;
+    frag_color.x = identity_color;
+    frag_color.y = identity_color;
+    frag_color.z = identity_color;
+    frag_color.w = identity_alpha;
+    uint param = 0u;
+    float2 param_1 = in.frag_tex_coord0;
+    int param_2 = 0;
+    float4 color0 = wired_bl_sample_domain(param, param_1, param_2, wired_bindless_images, (*spvDescriptorSet0.m_76), wired_bindless_samplers) * frag_color;
+    float4 base = color0;
+    if (_179)
+    {
+        if (color0.w == alpha_test_value)
+        {
+            discard_fragment();
+        }
+    }
+    else
+    {
+        if (_191)
+        {
+            if (color0.w >= alpha_test_value)
+            {
+                discard_fragment();
+            }
+        }
+        else
+        {
+            if (_202)
+            {
+                if (color0.w < alpha_test_value)
+                {
+                    discard_fragment();
+                }
+            }
+        }
+    }
+    base = color0;
+    if (_213)
+    {
+        if (base.w == 0.0)
+        {
+            discard_fragment();
+        }
+    }
+    else
+    {
+        if (_223)
+        {
+            if (dot(base.xyz, base.xyz) == 0.0)
+            {
+                discard_fragment();
+            }
+        }
+    }
+    out.out_color = base;
+    return out;
+}
+

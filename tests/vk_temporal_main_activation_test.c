@@ -16,11 +16,14 @@ void Ral_DestroyBindGroupLayout( ralBindGroupLayout_t *l ){(void)l;}
 ralBuffer_t *Ral_CreateBuffer( ralBackend_t *b,const ralBufferCreateInfo_t *ci ){
 	(void)b;(void)ci;return NULL;}
 void Ral_DestroyBuffer( ralBuffer_t *b ){(void)b;}
-void *Ral_MapBuffer( ralBuffer_t *b ){(void)b;return NULL;}
-void Ral_UnmapBuffer( ralBuffer_t *b ){(void)b;}
 ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b,
 		const ralBindGroupCreateInfo_t *ci ){(void)b;(void)ci;return NULL;}
 void Ral_DestroyBindGroup( ralBindGroup_t *g ){(void)g;}
+struct ralFence_s { int id; };
+ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *b, uint64_t o,
+		const void *d, uint64_t s ){(void)b;(void)o;(void)d;(void)s;return NULL;}
+void Ral_WaitFence( ralFence_t *f, uint64_t t ){(void)f;(void)t;}
+void Ral_DestroyFence( ralFence_t *f ){(void)f;}
 
 qboolean VK_TemporalIqmExact3FactoryReceiptExact(
 		const vkTemporalIqmExact3FactoryReceipt_t *a,
@@ -176,7 +179,7 @@ static IqmFixture ValidIqmFixture(
 	payload.backend = (ralBackend_t *)(uintptr_t)draw.geometryBackend;
 	payload.layout = (ralBindGroupLayout_t *)(uintptr_t)0xb200;
 	payload.buffer = (ralBuffer_t *)(uintptr_t)0xb300;
-	payload.mappedIdentity = s_iqmPayload;
+	payload.cpuShadowIdentity = s_iqmPayload;
 	payload.group = (ralBindGroup_t *)(uintptr_t)0xb400;
 	payload.descriptorRange = TEMPORAL_IQM_SLOT_BYTES;
 	payload.recordCapacity = TEMPORAL_IQM_MAX_RECORDS;
@@ -188,7 +191,7 @@ static IqmFixture ValidIqmFixture(
 	f.payloadOwner.key.maxStorageBufferRange = TEMPORAL_IQM_SLOT_BYTES;
 	f.payloadOwner.key.frameCount = 2; f.payloadOwner.layout = payload.layout;
 	f.payloadOwner.slots[payload.commandSlot].buffer = payload.buffer;
-	f.payloadOwner.slots[payload.commandSlot].mapped = payload.mappedIdentity;
+	f.payloadOwner.slots[payload.commandSlot].cpuShadow = payload.cpuShadowIdentity;
 	f.payloadOwner.slots[payload.commandSlot].group = payload.group;
 	f.payloadOwner.slots[payload.commandSlot].allocationGeneration =
 		payload.slotAllocationGeneration;

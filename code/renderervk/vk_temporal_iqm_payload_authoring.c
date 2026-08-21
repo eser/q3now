@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
 #include "vk_temporal_iqm_payload_authoring.h"
+#include "../renderer/ral/ral_sync.h"
 
 #include <math.h>
 #include <string.h>
@@ -163,7 +164,7 @@ qboolean VK_TemporalIqmPayloadAuthorWrite(
 			|| previousValid != entry->facts.previousValid ) {
 		author->poisoned = qtrue; return qfalse;
 	}
-	destination = (unsigned char *)author->payload.mappedIdentity
+	destination = (unsigned char *)author->payload.cpuShadowIdentity
 		+ (size_t)recordIndex * TEMPORAL_IQM_RECORD_SIZE;
 	memcpy( destination, &record, sizeof( record ) );
 	author->contentDigest = FoldBytes( author->contentDigest,
@@ -194,14 +195,21 @@ qboolean VK_TemporalIqmPayloadAuthorSeal(
 		vkTemporalIqmPayloadAuthor_t *author,
 		vkTemporalIqmPayloadContentReceipt_t *outReceipt ) {
 	vkTemporalIqmPayloadContentReceipt_t candidate;
+	ralFence_t *upload;
 	if ( !author || !outReceipt || author->initialized != qtrue
 			|| author->active != qtrue || author->poisoned || author->sealed
 			|| author->nextRecordIndex != author->sequence.entityCount
-			|| author->contentDigest != HashRecords( author->payload.mappedIdentity,
+			|| author->contentDigest != HashRecords( author->payload.cpuShadowIdentity,
 				author->sequence.entityCount ) ) {
 		if ( author && author->active == qtrue ) author->poisoned = qtrue;
 		return qfalse;
 	}
+	upload = Ral_BufferUploadAsync( author->payload.buffer, 0,
+		author->payload.cpuShadowIdentity,
+		(uint64_t)author->sequence.entityCount * TEMPORAL_IQM_RECORD_SIZE );
+	if ( !upload ) { author->poisoned = qtrue; return qfalse; }
+	Ral_WaitFence( upload, ~(uint64_t)0 );
+	Ral_DestroyFence( upload );
 	memset( &candidate, 0, sizeof( candidate ) );
 	candidate.authority = author->sequence.authority;
 	candidate.payload = author->payload; candidate.camera = author->camera;
@@ -238,7 +246,7 @@ qboolean VK_TemporalIqmPayloadContentRevalidate(
 			|| !VK_TemporalIqmPayloadGetReceipt( payloadOwner,
 				receipt->authority.commandSlot, &currentPayload ) ) return qfalse;
 	return VK_TemporalIqmPayloadReceiptExact( &receipt->payload, &currentPayload )
-		&& HashRecords( currentPayload.mappedIdentity, receipt->recordCount )
+		&& HashRecords( currentPayload.cpuShadowIdentity, receipt->recordCount )
 			== receipt->contentDigest ? qtrue : qfalse;
 }
 

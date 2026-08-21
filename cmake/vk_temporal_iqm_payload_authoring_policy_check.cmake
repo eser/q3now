@@ -63,7 +63,7 @@ foreach(needle IN ITEMS
 	"VK_TemporalIqmPayloadGetReceipt( payloadOwner,"
 	"receipt->authority.commandSlot, &currentPayload )"
 	"VK_TemporalIqmPayloadReceiptExact( &receipt->payload, &currentPayload )"
-	"HashRecords( currentPayload.mappedIdentity, receipt->recordCount )")
+	"HashRecords( currentPayload.cpuShadowIdentity, receipt->recordCount )")
 	require_text("${ABI}\n${CORE}" "${needle}" "write-once Begin/Write/Seal authority")
 endforeach()
 foreach(forbidden IN ITEMS Ral_Cmd vkCmd vk_ral_lookup_buffer firstInstance

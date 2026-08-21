@@ -5,6 +5,7 @@
 #define WIRED_RAL_VULKAN_TRANSLATE_H
 
 #include "../ral/ral_command.h"
+#include "../ral/ral_transition.h"
 #include "../../renderercommon/vulkan/vulkan_core.h"
 
 typedef struct {
@@ -19,6 +20,12 @@ typedef struct {
 	VkAccessFlags        access;
 } ralVkLayoutTranslation_t;
 
+typedef struct {
+	VkPipelineStageFlags stage;
+	VkAccessFlags        access;
+	VkImageLayout        layout;
+} ralVkResourceStateTranslation_t;
+
 VkFormat         ralVk_TranslateFormat      ( ralFormat_t f );
 VkColorSpaceKHR  ralVk_TranslateColorSpace  ( ralColorSpace_t cs );
 VkPresentModeKHR ralVk_TranslatePresentMode ( ralPresentMode_t pm );
@@ -29,5 +36,9 @@ VkAccessFlags        ralVk_TranslateStageAccess( ralPipelineStageFlags_t stage )
 ralVkBarrierTranslation_t ralVk_TranslateBarrierScope( ralBarrierScope_t scope );
 ralVkLayoutTranslation_t  ralVk_TranslateSourceLayout( VkImageLayout layout );
 ralVkLayoutTranslation_t  ralVk_TranslateDestinationLayout( VkImageLayout layout );
+qboolean ralVk_TranslateBufferResourceState( const ralResourceState_t *state,
+	                                          ralVkResourceStateTranslation_t *out );
+qboolean ralVk_TranslateTextureResourceState( const ralResourceState_t *state,
+	                                           ralVkResourceStateTranslation_t *out );
 
 #endif

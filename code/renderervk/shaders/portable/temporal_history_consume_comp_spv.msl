@@ -1,0 +1,81 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct HistoryConsumePush
+{
+    uint2 extent;
+    uint frameLo;
+    uint frameHi;
+    uint worldIndex;
+    uint planGeneration;
+    uint allocationGeneration;
+    uint historyValid;
+    uint readIndex;
+    uint writeIndex;
+    float zNear;
+    float zFar;
+};
+
+struct HistoryWitness
+{
+    uint words[20];
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> currentColor [[id(0)]];
+    sampler nearestSampler [[id(1)]];
+    texture2d<float> currentDeviceDepth [[id(2)]];
+    device HistoryWitness* witness [[id(3)]];
+    texture2d<float> previousColor [[id(4)]];
+    texture2d<float> previousLinearDepth [[id(5)]];
+};
+
+static inline __attribute__((always_inline))
+float linearizeDepth(thread const float& z, constant HistoryConsumePush& pc)
+{
+    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+}
+
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant HistoryConsumePush& pc [[buffer(1)]])
+{
+    float2 uv = (float2(pc.extent / uint2(2u)) + float2(0.5)) / float2(pc.extent);
+    float4 current = spvDescriptorSet0.currentColor.sample(spvDescriptorSet0.nearestSampler, uv, level(0.0));
+    float param = spvDescriptorSet0.currentDeviceDepth.sample(spvDescriptorSet0.nearestSampler, uv, level(0.0)).x;
+    float currentDepth = linearizeDepth(param, pc);
+    (*spvDescriptorSet0.witness).words[0] = 1213420593u;
+    (*spvDescriptorSet0.witness).words[1] = pc.historyValid;
+    (*spvDescriptorSet0.witness).words[2] = pc.frameLo;
+    (*spvDescriptorSet0.witness).words[3] = pc.frameHi;
+    (*spvDescriptorSet0.witness).words[4] = pc.worldIndex;
+    (*spvDescriptorSet0.witness).words[5] = pc.planGeneration;
+    (*spvDescriptorSet0.witness).words[6] = pc.allocationGeneration;
+    (*spvDescriptorSet0.witness).words[7] = pc.readIndex;
+    (*spvDescriptorSet0.witness).words[8] = pc.writeIndex;
+    (*spvDescriptorSet0.witness).words[9] = pc.extent.x;
+    (*spvDescriptorSet0.witness).words[10] = pc.extent.y;
+    (*spvDescriptorSet0.witness).words[11] = as_type<uint>(half2(current.xy));
+    (*spvDescriptorSet0.witness).words[12] = as_type<uint>(half2(current.zw));
+    (*spvDescriptorSet0.witness).words[13] = as_type<uint>(currentDepth);
+    if (pc.historyValid != 0u)
+    {
+        float4 previous = spvDescriptorSet0.previousColor.sample(spvDescriptorSet0.nearestSampler, uv, level(0.0));
+        float previousDepth = spvDescriptorSet0.previousLinearDepth.sample(spvDescriptorSet0.nearestSampler, uv, level(0.0)).x;
+        (*spvDescriptorSet0.witness).words[14] = as_type<uint>(half2(previous.xy));
+        (*spvDescriptorSet0.witness).words[15] = as_type<uint>(half2(previous.zw));
+        (*spvDescriptorSet0.witness).words[16] = as_type<uint>(previousDepth);
+    }
+    else
+    {
+        (*spvDescriptorSet0.witness).words[14] = 0u;
+        (*spvDescriptorSet0.witness).words[15] = 0u;
+        (*spvDescriptorSet0.witness).words[16] = 0u;
+    }
+}
+

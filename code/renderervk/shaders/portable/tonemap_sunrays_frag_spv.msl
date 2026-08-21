@@ -1,0 +1,161 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct ExposureBlock
+{
+    float exposure_bias;
+    float key;
+    float pctLow;
+    float pctHigh;
+    float rateUp;
+    float rateDown;
+    float minExp;
+    float maxExp;
+    int autoEnabled;
+    float brightness;
+    float sunScreenX;
+    float sunScreenY;
+    float sunrayIntensity;
+    float sunrayDecay;
+};
+
+constant float sunrays_density_tmp [[function_constant(27)]];
+constant float sunrays_density = is_function_constant_defined(sunrays_density_tmp) ? sunrays_density_tmp : 1.0;
+constant int sunrays_samples_tmp [[function_constant(26)]];
+constant int sunrays_samples = is_function_constant_defined(sunrays_samples_tmp) ? sunrays_samples_tmp : 64;
+constant float sunrays_threshold_tmp [[function_constant(33)]];
+constant float sunrays_threshold = is_function_constant_defined(sunrays_threshold_tmp) ? sunrays_threshold_tmp : 0.319999992847442626953125;
+constant float chromatic_strength_tmp [[function_constant(24)]];
+constant float chromatic_strength = is_function_constant_defined(chromatic_strength_tmp) ? chromatic_strength_tmp : 0.0;
+constant float saturation_tmp [[function_constant(2)]];
+constant float saturation = is_function_constant_defined(saturation_tmp) ? saturation_tmp : 1.0;
+constant int hdr_mode_tmp [[function_constant(12)]];
+constant int hdr_mode = is_function_constant_defined(hdr_mode_tmp) ? hdr_mode_tmp : 0;
+constant float hdr_peak_norm_tmp [[function_constant(13)]];
+constant float hdr_peak_norm = is_function_constant_defined(hdr_peak_norm_tmp) ? hdr_peak_norm_tmp : 10.0;
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> texture0 [[id(0)]];
+    sampler texture0Smplr [[id(1)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    texture2d<float> depthMap [[id(0)]];
+    sampler depthMapSmplr [[id(1)]];
+};
+
+struct spvDescriptorSetBuffer2
+{
+    constant ExposureBlock* eb [[id(0)]];
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord [[user(locn0)]];
+};
+
+static inline __attribute__((always_inline))
+float3 sampleChromatic(thread const float2& uv, texture2d<float> texture0, sampler texture0Smplr)
+{
+    float2 dir = uv - float2(0.5);
+    float radial = length(dir);
+    float2 offset = dir * ((chromatic_strength * radial) * 0.014999999664723873138427734375);
+    float r = texture0.sample(texture0Smplr, fast::clamp(uv + offset, float2(0.0), float2(1.0))).x;
+    float g = texture0.sample(texture0Smplr, uv).y;
+    float b = texture0.sample(texture0Smplr, fast::clamp(uv - offset, float2(0.0), float2(1.0))).z;
+    return float3(r, g, b);
+}
+
+static inline __attribute__((always_inline))
+float3 computeSunRays(thread float2& frag_tex_coord, constant ExposureBlock& eb, texture2d<float> depthMap, sampler depthMapSmplr, texture2d<float> texture0, sampler texture0Smplr)
+{
+    float2 deltaUV = ((frag_tex_coord - float2(eb.sunScreenX, eb.sunScreenY)) * sunrays_density) / float2(float(sunrays_samples));
+    float2 uv = frag_tex_coord;
+    float3 illumination = float3(0.0);
+    float weight = 1.0;
+    float3 threshold;
+    for (int i = 0; i < sunrays_samples; i++)
+    {
+        uv -= deltaUV;
+        bool _67 = uv.x < 0.0;
+        bool _74;
+        if (!_67)
+        {
+            _74 = uv.x > 1.0;
+        }
+        else
+        {
+            _74 = _67;
+        }
+        bool _82;
+        if (!_74)
+        {
+            _82 = uv.y < 0.0;
+        }
+        else
+        {
+            _82 = _74;
+        }
+        bool _89;
+        if (!_82)
+        {
+            _89 = uv.y > 1.0;
+        }
+        else
+        {
+            _89 = _82;
+        }
+        if (_89)
+        {
+            break;
+        }
+        float depth = depthMap.sample(depthMapSmplr, uv).x;
+        float isSky = step(depth, 0.001000000047497451305389404296875);
+        float3 sceneColor = texture0.sample(texture0Smplr, uv).xyz;
+        threshold.x = sunrays_threshold;
+        threshold.y = sunrays_threshold;
+        threshold.z = sunrays_threshold;
+        float3 bright = fast::max(sceneColor - threshold, float3(0.0));
+        illumination += ((bright * isSky) * weight);
+        weight *= eb.sunrayDecay;
+    }
+    illumination /= float3(float(sunrays_samples));
+    return illumination * eb.sunrayIntensity;
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], const device spvDescriptorSetBuffer2& spvDescriptorSet2 [[buffer(2)]])
+{
+    main0_out out = {};
+    float3 _199;
+    if (chromatic_strength > 0.0)
+    {
+        float2 param = in.frag_tex_coord;
+        _199 = sampleChromatic(param, spvDescriptorSet0.texture0, spvDescriptorSet0.texture0Smplr);
+    }
+    else
+    {
+        _199 = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, in.frag_tex_coord).xyz;
+    }
+    float3 base = _199;
+    base *= (*spvDescriptorSet2.eb).exposure_bias;
+    base += computeSunRays(in.frag_tex_coord, (*spvDescriptorSet2.eb), spvDescriptorSet1.depthMap, spvDescriptorSet1.depthMapSmplr, spvDescriptorSet0.texture0, spvDescriptorSet0.texture0Smplr);
+    if (saturation != 1.0)
+    {
+        float3 luma = float3(dot(base, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875)));
+        base = mix(luma, base, float3(saturation));
+    }
+    out.out_color = float4(base, 1.0);
+    return out;
+}
+

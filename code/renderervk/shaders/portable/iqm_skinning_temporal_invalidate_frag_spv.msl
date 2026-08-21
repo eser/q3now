@@ -1,0 +1,47 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct spvDescriptorSetBuffer1
+{
+    texture2d<float> texture0 [[id(0)]];
+    sampler texture0Smplr [[id(1)]];
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+    float2 out_temporal_velocity [[color(1)]];
+    float out_temporal_validity [[color(2)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord [[user(locn0)]];
+};
+
+static inline __attribute__((always_inline))
+float3 sRGBToLinear(thread float3& c)
+{
+    c = fast::max(c, float3(0.0));
+    bool3 cutoff = c <= float3(0.040449999272823333740234375);
+    float3 lo = c / float3(12.9200000762939453125);
+    float3 hi = powr((c + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return mix(hi, lo, float3(cutoff));
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]])
+{
+    main0_out out = {};
+    float4 tex = spvDescriptorSet1.texture0.sample(spvDescriptorSet1.texture0Smplr, in.frag_tex_coord);
+    float3 param = tex.xyz;
+    float3 _68 = sRGBToLinear(param);
+    out.out_color = float4(_68, tex.w);
+    out.out_temporal_velocity = float2(0.0);
+    out.out_temporal_validity = 0.0;
+    return out;
+}
+

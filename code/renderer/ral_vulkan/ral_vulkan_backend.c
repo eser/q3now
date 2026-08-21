@@ -198,6 +198,7 @@ static qboolean ralVk_LoadDeviceFuncs( ralBackend_t *b ) {
 	LOAD_DEV( MapMemory,                      vkMapMemory )
 	LOAD_DEV( UnmapMemory,                    vkUnmapMemory )
 	LOAD_DEV( FlushMappedMemoryRanges,        vkFlushMappedMemoryRanges )
+	LOAD_DEV( InvalidateMappedMemoryRanges,   vkInvalidateMappedMemoryRanges )
 	// buffers / images / views / samplers
 	LOAD_DEV( CreateBuffer,                   vkCreateBuffer )
 	LOAD_DEV( DestroyBuffer,                  vkDestroyBuffer )
@@ -1418,6 +1419,9 @@ initSharedLayers:
 	b->queues[ RAL_QUEUE_GRAPHICS ] = b->graphicsQueue;  b->queueFamily[ RAL_QUEUE_GRAPHICS ] = b->graphicsFamily;
 	b->queues[ RAL_QUEUE_COMPUTE  ] = b->computeQueue;   b->queueFamily[ RAL_QUEUE_COMPUTE  ] = b->computeFamily;
 	b->queues[ RAL_QUEUE_TRANSFER ] = b->transferQueue;  b->queueFamily[ RAL_QUEUE_TRANSFER ] = b->transferFamily;
+	Ral_SubmissionLifecycleInit( &b->submissionLifecycle[ RAL_QUEUE_GRAPHICS ], b, RAL_QUEUE_GRAPHICS );
+	Ral_SubmissionLifecycleInit( &b->submissionLifecycle[ RAL_QUEUE_COMPUTE ], b, RAL_QUEUE_COMPUTE );
+	Ral_SubmissionLifecycleInit( &b->submissionLifecycle[ RAL_QUEUE_TRANSFER ], b, RAL_QUEUE_TRANSFER );
 
 	ralVk_FillCaps( b );
 
@@ -1536,6 +1540,7 @@ static void ralVk_DoDestroyEntry( ralBackend_t *b, const ralVkPendingDestroy_t *
 	case RAL_RES_PIPELINE_LAYOUT: b->vk.DestroyPipelineLayout( b->device, RAL_VK_U2H( VkPipelineLayout, e->h1 ), NULL ); break;
 	case RAL_RES_CMD_BUFFER:      { VkCommandBuffer cb = RAL_VK_U2H( VkCommandBuffer, e->h1 ); ralQueueType_t q = (ralQueueType_t)e->h2;
 	                                ralVk_QueueLock( b, q ); b->vk.FreeCommandBuffers( b->device, b->cmdPools[q], 1, &cb ); ralVk_QueueUnlock( b, q ); break; }
+	case RAL_RES_ALLOCATION_ONLY: break;
 	default: break;
 	}
 	if ( e->alloc ) ralVk_Free( b, e->alloc );

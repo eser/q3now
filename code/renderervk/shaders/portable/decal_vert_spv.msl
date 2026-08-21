@@ -1,0 +1,224 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+    
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+    
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+    
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+    
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
+struct DecalFrame
+{
+    float4x4 mvp;
+    float4 timeCount;
+    float4x4 invMvp;
+    float4 reconParams;
+};
+
+struct Decal
+{
+    float4 originRadius;
+    float4 normalOrient;
+    float4 rgba;
+    uint textureIndex;
+    float spawnTime;
+    float lifetimeInv;
+    uint blendMode;
+};
+
+struct Decal_1
+{
+    float4 originRadius;
+    float4 normalOrient;
+    float4 rgba;
+    uint textureIndex;
+    float spawnTime;
+    float lifetimeInv;
+    uint blendMode;
+};
+
+struct Pool
+{
+    Decal_1 decals[1];
+};
+
+constant uint DECAL_BLEND_MODE_tmp [[function_constant(0)]];
+constant uint DECAL_BLEND_MODE = is_function_constant_defined(DECAL_BLEND_MODE_tmp) ? DECAL_BLEND_MODE_tmp : 0u;
+constant bool _286 = (DECAL_BLEND_MODE == 0u);
+
+struct spvDescriptorSetBuffer0
+{
+    constant DecalFrame* m_57 [[id(0)]];
+    const device Pool* m_76 [[id(1)]];
+};
+
+constant spvUnsafeArray<float2, 6> _235 = spvUnsafeArray<float2, 6>({ float2(-1.0), float2(-1.0, 1.0), float2(1.0, -1.0), float2(1.0, -1.0), float2(-1.0, 1.0), float2(1.0) });
+constant spvUnsafeArray<float2, 6> _279 = spvUnsafeArray<float2, 6>({ float2(0.0), float2(0.0, 1.0), float2(1.0, 0.0), float2(1.0, 0.0), float2(0.0, 1.0), float2(1.0) });
+
+struct main0_out
+{
+    float2 fragUV [[user(locn0)]];
+    float4 fragColor [[user(locn1)]];
+    uint fragTextureIndex [[user(locn2)]];
+    float3 fragDecalOrigin [[user(locn3)]];
+    float3 fragDecalTangent [[user(locn4)]];
+    float3 fragDecalBitangent [[user(locn5)]];
+    float3 fragDecalNormal [[user(locn6)]];
+    float fragDecalRadius [[user(locn7)]];
+    uint fragNoProject [[user(locn8)]];
+    float4 gl_Position [[position]];
+};
+
+static inline __attribute__((always_inline))
+void emitDegenerate(thread float4& gl_Position, thread float2& fragUV, thread float4& fragColor, thread uint& fragTextureIndex, thread float3& fragDecalOrigin, thread float3& fragDecalTangent, thread float3& fragDecalBitangent, thread float3& fragDecalNormal, thread float& fragDecalRadius, thread uint& fragNoProject)
+{
+    gl_Position = float4(0.0, 0.0, 0.0, 1.0);
+    fragUV = float2(0.0);
+    fragColor = float4(0.0);
+    fragTextureIndex = 0u;
+    fragDecalOrigin = float3(0.0);
+    fragDecalTangent = float3(0.0);
+    fragDecalBitangent = float3(0.0);
+    fragDecalNormal = float3(0.0);
+    fragDecalRadius = 0.0;
+    fragNoProject = 0u;
+}
+
+vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint gl_InstanceIndex [[instance_id]], uint gl_VertexIndex [[vertex_id]])
+{
+    main0_out out = {};
+    uint decalIdx = uint(int(gl_InstanceIndex));
+    uint vertInQuad = uint(int(gl_VertexIndex)) % 6u;
+    if (float(decalIdx) >= (*spvDescriptorSet0.m_57).timeCount.y)
+    {
+        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.fragTextureIndex, out.fragDecalOrigin, out.fragDecalTangent, out.fragDecalBitangent, out.fragDecalNormal, out.fragDecalRadius, out.fragNoProject);
+        return out;
+    }
+    Decal d;
+    d.originRadius = (*spvDescriptorSet0.m_76).decals[decalIdx].originRadius;
+    d.normalOrient = (*spvDescriptorSet0.m_76).decals[decalIdx].normalOrient;
+    d.rgba = (*spvDescriptorSet0.m_76).decals[decalIdx].rgba;
+    d.textureIndex = (*spvDescriptorSet0.m_76).decals[decalIdx].textureIndex;
+    d.spawnTime = (*spvDescriptorSet0.m_76).decals[decalIdx].spawnTime;
+    d.lifetimeInv = (*spvDescriptorSet0.m_76).decals[decalIdx].lifetimeInv;
+    d.blendMode = (*spvDescriptorSet0.m_76).decals[decalIdx].blendMode;
+    bool _104 = d.spawnTime == 0.0;
+    bool _110;
+    if (_104)
+    {
+        _110 = d.lifetimeInv == 0.0;
+    }
+    else
+    {
+        _110 = _104;
+    }
+    if (_110)
+    {
+        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.fragTextureIndex, out.fragDecalOrigin, out.fragDecalTangent, out.fragDecalBitangent, out.fragDecalNormal, out.fragDecalRadius, out.fragNoProject);
+        return out;
+    }
+    if (d.blendMode != DECAL_BLEND_MODE)
+    {
+        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.fragTextureIndex, out.fragDecalOrigin, out.fragDecalTangent, out.fragDecalBitangent, out.fragDecalNormal, out.fragDecalRadius, out.fragNoProject);
+        return out;
+    }
+    float fadeAlpha = 1.0;
+    if (d.lifetimeInv > 0.0)
+    {
+        float age = (*spvDescriptorSet0.m_57).timeCount.x - d.spawnTime;
+        float frac = age * d.lifetimeInv;
+        if (frac >= 1.0)
+        {
+            emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.fragTextureIndex, out.fragDecalOrigin, out.fragDecalTangent, out.fragDecalBitangent, out.fragDecalNormal, out.fragDecalRadius, out.fragNoProject);
+            return out;
+        }
+        fadeAlpha = fast::clamp((1.0 - frac) / 0.100000001490116119384765625, 0.0, 1.0);
+    }
+    float3 origin = d.originRadius.xyz;
+    float radius = d.originRadius.w;
+    float3 normal = d.normalOrient.xyz;
+    float roll = d.normalOrient.w;
+    float nlen = length(normal);
+    if (nlen < 9.9999997473787516355514526367188e-05)
+    {
+        emitDegenerate(out.gl_Position, out.fragUV, out.fragColor, out.fragTextureIndex, out.fragDecalOrigin, out.fragDecalTangent, out.fragDecalBitangent, out.fragDecalNormal, out.fragDecalRadius, out.fragNoProject);
+        return out;
+    }
+    normal /= float3(nlen);
+    float3 up = float3(0.0, 0.0, 1.0);
+    float3 tangent = cross(normal, up);
+    if (dot(tangent, tangent) < 9.9999999747524270787835121154785e-07)
+    {
+        tangent = cross(normal, float3(1.0, 0.0, 0.0));
+    }
+    tangent = fast::normalize(tangent);
+    float3 bitangent = fast::normalize(cross(normal, tangent));
+    float cs = cos(roll);
+    float sn = sin(roll);
+    float3 rTangent = (tangent * cs) + (bitangent * sn);
+    float3 rBitangent = (tangent * (-sn)) + (bitangent * cs);
+    float2 c = _235[vertInQuad];
+    float zbias = fast::max(radius * 0.0199999995529651641845703125, 0.5);
+    float3 worldPos = ((origin + (rTangent * (c.x * radius))) + (rBitangent * (c.y * radius))) + (normal * zbias);
+    out.gl_Position = (*spvDescriptorSet0.m_57).mvp * float4(worldPos, 1.0);
+    out.fragUV = _279[vertInQuad];
+    out.fragColor = d.rgba;
+    if (_286)
+    {
+        out.fragColor.w *= fadeAlpha;
+    }
+    else
+    {
+        float4 _296 = out.fragColor;
+        float3 _298 = _296.xyz * fadeAlpha;
+        out.fragColor.x = _298.x;
+        out.fragColor.y = _298.y;
+        out.fragColor.z = _298.z;
+    }
+    out.fragTextureIndex = d.textureIndex & 2147483647u;
+    out.fragNoProject = (d.textureIndex >> 31u) & 1u;
+    out.fragDecalOrigin = origin;
+    out.fragDecalTangent = rTangent;
+    out.fragDecalBitangent = rBitangent;
+    out.fragDecalNormal = normal;
+    out.fragDecalRadius = radius;
+    return out;
+}
+

@@ -1,0 +1,68 @@
+#pragma clang diagnostic ignored "-Wunused-variable"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+#include <metal_atomic>
+
+using namespace metal;
+
+struct Dims
+{
+    uint2 _imageSize;
+};
+
+struct Histogram
+{
+    uint bins[256];
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(16u, 16u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> colorImage [[id(0)]];
+    sampler colorSampler [[id(1)]];
+    device Histogram* m_136 [[id(2)]];
+};
+
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant Dims& _22 [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint2 coord = gl_GlobalInvocationID.xy;
+    bool _28 = coord.x >= _22._imageSize.x;
+    bool _38;
+    if (!_28)
+    {
+        _38 = coord.y >= _22._imageSize.y;
+    }
+    else
+    {
+        _38 = _28;
+    }
+    if (_38)
+    {
+        return;
+    }
+    float3 hdr = spvDescriptorSet0.colorImage.read(uint2(int2(coord)), 0).xyz;
+    float luma = dot(hdr, float3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float2 uv = (float2(coord) + float2(0.5)) / float2(_22._imageSize);
+    float2 fromC = uv - float2(0.5);
+    float dist2 = dot(fromC, fromC);
+    float weight = fast::clamp(1.0 - (2.0 * dist2), 0.0, 1.0);
+    uint bin;
+    if (luma <= 9.9999997473787516355514526367188e-06)
+    {
+        bin = 0u;
+    }
+    else
+    {
+        float ev = log2(luma);
+        float norm = fast::clamp((ev - (-10.0)) / 12.0, 0.0, 1.0);
+        bin = uint((norm * 255.0) + 0.5);
+    }
+    uint fixedWeight = uint((weight * 1024.0) + 0.5);
+    if (fixedWeight > 0u)
+    {
+        uint _141 = atomic_fetch_add_explicit((device atomic_uint*)&(*spvDescriptorSet0.m_136).bins[bin], fixedWeight, memory_order_relaxed);
+    }
+}
+

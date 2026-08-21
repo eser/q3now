@@ -1,0 +1,218 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+    
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+    
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+    
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+    
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
+constant int depth_r_tmp [[function_constant(8)]];
+constant int depth_r = is_function_constant_defined(depth_r_tmp) ? depth_r_tmp : 255;
+constant int depth_g_tmp [[function_constant(9)]];
+constant int depth_g = is_function_constant_defined(depth_g_tmp) ? depth_g_tmp : 255;
+constant int depth_b_tmp [[function_constant(10)]];
+constant int depth_b = is_function_constant_defined(depth_b_tmp) ? depth_b_tmp : 255;
+constant int ditherMode_tmp [[function_constant(7)]];
+constant int ditherMode = is_function_constant_defined(ditherMode_tmp) ? ditherMode_tmp : 0;
+constant bool _174 = (ditherMode == 2);
+constant float gamma_tmp [[function_constant(0)]];
+constant float gamma = is_function_constant_defined(gamma_tmp) ? gamma_tmp : 1.0;
+constant int hdr_mode_tmp [[function_constant(12)]];
+constant int hdr_mode = is_function_constant_defined(hdr_mode_tmp) ? hdr_mode_tmp : 0;
+constant bool _274 = (hdr_mode == 1);
+constant int srgb_swapchain_tmp [[function_constant(11)]];
+constant int srgb_swapchain = is_function_constant_defined(srgb_swapchain_tmp) ? srgb_swapchain_tmp : 0;
+constant bool _324 = (srgb_swapchain == 1);
+constant bool _362 = (ditherMode != 0);
+constant float hdr_peak_norm_tmp [[function_constant(13)]];
+constant float hdr_peak_norm = is_function_constant_defined(hdr_peak_norm_tmp) ? hdr_peak_norm_tmp : 10.0;
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> texture0 [[id(0)]];
+    sampler texture0Smplr [[id(1)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    texture2d<float> blueNoiseTex [[id(0)]];
+    sampler blueNoiseTexSmplr [[id(1)]];
+};
+
+constant spvUnsafeArray<float, 64> _118 = spvUnsafeArray<float, 64>({ 0.0, 32.0, 8.0, 40.0, 2.0, 34.0, 10.0, 42.0, 48.0, 16.0, 56.0, 24.0, 50.0, 18.0, 58.0, 26.0, 12.0, 44.0, 4.0, 36.0, 14.0, 46.0, 6.0, 38.0, 60.0, 28.0, 52.0, 20.0, 62.0, 30.0, 54.0, 22.0, 3.0, 35.0, 11.0, 43.0, 1.0, 33.0, 9.0, 41.0, 51.0, 19.0, 59.0, 27.0, 49.0, 17.0, 57.0, 25.0, 15.0, 47.0, 7.0, 39.0, 13.0, 45.0, 5.0, 37.0, 63.0, 31.0, 55.0, 23.0, 61.0, 29.0, 53.0, 21.0 });
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord [[user(locn0)]];
+};
+
+static inline __attribute__((always_inline))
+float3 pqEncode(thread float3& L)
+{
+    L = fast::clamp(L, float3(0.0), float3(1.0));
+    float3 Lm1 = powr(L, float3(0.1593017578125));
+    return powr((float3(0.8359375) + (Lm1 * 18.8515625)) / (float3(1.0) + (Lm1 * 18.6875)), float3(78.84375));
+}
+
+static inline __attribute__((always_inline))
+float3 sRGBEncode(thread float3& linear)
+{
+    linear = fast::clamp(linear, float3(0.0), float3(1.0));
+    float3 lo = linear * 12.9200000762939453125;
+    float3 hi = (powr(linear, float3(0.4166666567325592041015625)) * 1.05499994754791259765625) - float3(0.054999999701976776123046875);
+    return select(hi, lo, linear < float3(0.003130800090730190277099609375));
+}
+
+static inline __attribute__((always_inline))
+float blueNoiseThreshold(thread float4& gl_FragCoord, texture2d<float> blueNoiseTex, sampler blueNoiseTexSmplr)
+{
+    float2 tile = float2(int2(blueNoiseTex.get_width(), blueNoiseTex.get_height()));
+    float2 uv = (gl_FragCoord.xy + float2(0.5)) / tile;
+    return blueNoiseTex.sample(blueNoiseTexSmplr, uv).x;
+}
+
+static inline __attribute__((always_inline))
+float orderedThreshold(thread float4& gl_FragCoord)
+{
+    uint2 coordDenormalized = uint2(gl_FragCoord.xy);
+    uint2 bayerCoord = coordDenormalized % uint2(8u);
+    uint bayerIndex = bayerCoord.x + (bayerCoord.y * 8u);
+    float bayerSample = _118[bayerIndex];
+    float threshold = (bayerSample + 0.5) / 64.0;
+    return threshold;
+}
+
+static inline __attribute__((always_inline))
+float3 dither(thread const float3& color, thread float4& gl_FragCoord, texture2d<float> blueNoiseTex, sampler blueNoiseTexSmplr)
+{
+    int3 depth;
+    depth.x = depth_r;
+    depth.y = depth_g;
+    depth.z = depth_b;
+    float _175;
+    if (_174)
+    {
+        _175 = blueNoiseThreshold(gl_FragCoord, blueNoiseTex, blueNoiseTexSmplr);
+    }
+    else
+    {
+        _175 = orderedThreshold(gl_FragCoord);
+    }
+    float t = _175;
+    float3 cDenormalized = color * float3(depth);
+    float3 cLow = floor(cDenormalized);
+    float3 cFractional = cDenormalized - cLow;
+    float3 cDithered = cLow + step(float3(t), cFractional);
+    return cDithered / float3(depth);
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float3 base = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, in.frag_tex_coord).xyz;
+    float3 gamma3;
+    gamma3.x = gamma;
+    gamma3.y = gamma;
+    gamma3.z = gamma;
+    if (_274)
+    {
+        float3 _279;
+        if (gamma != 1.0)
+        {
+            _279 = powr(fast::max(base, float3(0.0)), gamma3);
+        }
+        else
+        {
+            _279 = fast::max(base, float3(0.0));
+        }
+        float3 lin = _279;
+        float3 nits = lin * 100.0;
+        nits = float3x3(float3(0.627403914928436279296875, 0.069097287952899932861328125, 0.01639143936336040496826171875), float3(0.3292830288410186767578125, 0.9195404052734375, 0.08801330626010894775390625), float3(0.0433130674064159393310546875, 0.011362315155565738677978515625, 0.895595252513885498046875)) * nits;
+        float3 param = nits / float3(10000.0);
+        float3 _317 = pqEncode(param);
+        out.out_color = float4(_317, 1.0);
+    }
+    else
+    {
+        if (_324)
+        {
+            if (gamma != 1.0)
+            {
+                out.out_color = float4(powr(base, gamma3), 1.0);
+            }
+            else
+            {
+                out.out_color = float4(base, 1.0);
+            }
+        }
+        else
+        {
+            float3 _346;
+            if (gamma != 1.0)
+            {
+                _346 = powr(base, gamma3);
+            }
+            else
+            {
+                _346 = base;
+            }
+            float3 curved = _346;
+            float3 param_1 = curved;
+            float3 _357 = sRGBEncode(param_1);
+            out.out_color = float4(_357, 1.0);
+        }
+    }
+    if (_362)
+    {
+        float3 param_2 = out.out_color.xyz;
+        float3 _368 = dither(param_2, gl_FragCoord, spvDescriptorSet1.blueNoiseTex, spvDescriptorSet1.blueNoiseTexSmplr);
+        out.out_color.x = _368.x;
+        out.out_color.y = _368.y;
+        out.out_color.z = _368.z;
+    }
+    return out;
+}
+

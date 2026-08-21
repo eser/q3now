@@ -81,8 +81,7 @@ vec3 linearToSRGB( vec3 c ) {
 // primitive-shader image is CD_SRGB today, so this is byte-identical
 // to the prior unconditional sRGBToLinear; the branch is the seam for
 // future channel-map beam content.
-vec4 sampleColorTexBindless( sampler2D s, vec2 uv, uint domain ) {
-	vec4 c = texture( s, uv );
+vec4 decodeColorTexel( vec4 c, uint domain ) {
 	if ( domain != 0u )
 		return c;
 	c.rgb = sRGBToLinear( c.rgb );
@@ -97,7 +96,7 @@ void main() {
 	uint domain = fragImageSlot >> 31u;
 	uint handle = fragImageSlot & 0x7FFFFFFFu;
 	uint slot = handle < uint(PRIMITIVE_SHADER_IMAGE_MAX) ? handle : 0u;
-	vec4 texel = sampleColorTexBindless( shaderImages[slot], fragUV, domain );
+	vec4 texel = decodeColorTexel( texture( shaderImages[slot], fragUV ), domain );
 
 	// per-vertex colour decoded to linear. Alpha stays
 	// raw. fragColor is beam.vert's linear interpolation of the

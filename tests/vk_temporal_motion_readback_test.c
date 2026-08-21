@@ -38,7 +38,8 @@ ralBuffer_t *Ral_CreateBuffer( ralBackend_t *backend,
 	ralBuffer_t *b;
 	(void)backend;
 	if ( aliasCreate ) return aliasCreate;
-	if ( !ci || !ci->size || ci->usage != RAL_BUFFER_TRANSFER_DST
+	if ( !ci || !ci->size
+			|| ci->usage != ( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ )
 			|| ci->memory != RAL_MEMORY_HOST_COHERENT ) return NULL;
 	b = (ralBuffer_t *)calloc( 1, sizeof( *b ) );
 	if ( !b ) return NULL;
@@ -51,12 +52,25 @@ void Ral_DestroyBuffer( ralBuffer_t *b ) {
 	if ( !b ) return;
 	destroys++; free( b->memory ); free( b );
 }
-void *Ral_MapBuffer( ralBuffer_t *b ) {
-	if ( !b ) return NULL;
-	maps++;
-	return aliasMap ? aliasMap : b->memory;
+ralResult_t Ral_BufferMapBegin( ralBuffer_t *b,
+		const ralBufferMapRequest_t *request, ralBufferMapTicket_t *ticket ) {
+	if ( !b || !request || !ticket || request->mode != RAL_MAP_READ
+			|| request->offset || request->size != b->size ) return ralErrorInvalidArgument;
+	memset( ticket, 0, sizeof( *ticket ) ); maps++;
+	ticket->bufferIdentity = b; ticket->request = *request;
+	ticket->generation = (uint64_t)maps; ticket->status = RAL_BUFFER_MAP_READY;
+	ticket->mappedRange = aliasMap ? aliasMap : b->memory;
+	return ralSuccess;
 }
-void Ral_UnmapBuffer( ralBuffer_t *b ) { if ( b ) unmaps++; }
+ralResult_t Ral_BufferMapUnmap( ralBuffer_t *b, const ralBufferMapTicket_t *ticket ) {
+	if ( !b || !ticket || ticket->bufferIdentity != b ) return ralErrorInvalidArgument;
+	unmaps++; return ralSuccess;
+}
+ralResult_t Ral_CmdTransitionResources( ralCommandBuffer_t *cb,
+		const ralResourceTransitionBatch_t *batch ) {
+	return cb && batch && batch->bufferTransitionCount == 1u
+		? ralSuccess : ralErrorInvalidArgument;
+}
 void Ral_CmdTransitionTexture( ralCommandBuffer_t *cb, ralTexture_t *tex,
 		ralPipelineStageFlags_t src, ralPipelineStageFlags_t dst,
 		uint32_t layout ) {
@@ -143,7 +157,7 @@ int main( void ) {
 	activation.iqm.entityCount = 1u;
 	activation.iqm.content.recordCount = 1u;
 	activation.iqm.content.payload.ready = qtrue;
-	activation.iqm.content.payload.mappedIdentity = &iqmRecord;
+	activation.iqm.content.payload.cpuShadowIdentity = &iqmRecord;
 	activation.iqm.content.payload.recordBytes = TEMPORAL_IQM_RECORD_SIZE;
 	activation.iqm.content.payload.recordCapacity = TEMPORAL_IQM_MAX_RECORDS;
 	activation.iqm.content.payload.descriptorRange = TEMPORAL_IQM_SLOT_BYTES;
@@ -158,12 +172,7 @@ int main( void ) {
 	CHECK( !VK_TemporalMotionReadbackArm( &owner, 1 ) );
 	CHECK( VK_TemporalMotionReadbackPrepareAfterFence(
 		&owner, &backend, 2, 0, 4, 2 ) );
-	CHECK( creates == 1 && maps == 1 && owner.slots[0].bytes == 40 );
-	{
-		const unsigned char *p = (const unsigned char *)owner.slots[0].mapped;
-		uint32_t i;
-		for ( i = 0; i < 40; ++i ) CHECK( p[i] == 0x7f );
-	}
+	CHECK( creates == 1 && maps == 0 && owner.slots[0].bytes == 40 );
 	aliasCreate = owner.slots[0].buffer;
 	CHECK( !VK_TemporalMotionReadbackPrepareAfterFence(
 		&owner, &backend, 2, 1, 4, 2 ) );
@@ -227,14 +236,15 @@ int main( void ) {
 		&& ticket.iqmCurrentPaletteHash != ticket.iqmPreviousPaletteHash
 		&& memcmp( ticket.iqmRasterMvpBits, iqmRecord.rasterMvp,
 			sizeof( ticket.iqmRasterMvpBits ) ) == 0 );
-	halfs = (uint16_t *)owner.slots[0].mapped;
-	valid = (unsigned char *)owner.slots[0].mapped + ticket.validityOffset;
+	halfs = (uint16_t *)owner.slots[0].buffer->memory;
+	valid = (unsigned char *)owner.slots[0].buffer->memory + ticket.validityOffset;
 	memset( halfs, 0, (size_t)ticket.velocityBytes );
 	halfs[0] = 0x3c00;
 	CHECK( VK_TemporalMotionReadbackCompleteAfterFence(
 		&owner, 0, qtrue, &content ) );
-	CHECK( !content.ready && content.validityOther == 8
-		&& content.nonzeroValidVelocity == 0 );
+	CHECK( !content.ready && content.validityZero == 8
+		&& content.nonzeroValidVelocity == 0
+		&& content.nonzeroInvalidVelocity == 1 );
 	CHECK( VK_TemporalMotionReadbackPrepareAfterFence(
 		&owner, &backend, 2, 0, 4, 2 ) );
 	CHECK( VK_TemporalMotionReadbackRecord(
@@ -242,8 +252,8 @@ int main( void ) {
 	CHECK( VK_TemporalMotionReadbackResolveSubmit(
 		&owner, 0, qtrue, &activation, &ticket ) );
 	CHECK( ticket.captureSerial == 3 );
-	halfs = (uint16_t *)owner.slots[0].mapped;
-	valid = (unsigned char *)owner.slots[0].mapped + ticket.validityOffset;
+	halfs = (uint16_t *)owner.slots[0].buffer->memory;
+	valid = (unsigned char *)owner.slots[0].buffer->memory + ticket.validityOffset;
 	memset( halfs, 0, (size_t)ticket.velocityBytes );
 	memset( valid, 0, 8 );
 	halfs[0] = 0x3c00; valid[0] = 255;
@@ -287,19 +297,9 @@ int main( void ) {
 		&& content.nonzeroValidVelocity == 1
 		&& content.nonzeroInvalidVelocity == 0 );
 	CHECK( VK_TemporalMotionReadbackGetLatest( &owner, &content ) );
-	memset( owner.slots[0].mapped, 0, (size_t)owner.slots[0].bytes );
+	memset( owner.slots[0].buffer->memory, 0, (size_t)owner.slots[0].bytes );
 	CHECK( VK_TemporalMotionReadbackPrepareAfterFence(
 		&owner, &backend, 2, 0, 4, 2 ) );
-	{
-		const unsigned char *p = (const unsigned char *)owner.slots[0].mapped;
-		uint32_t i;
-		for ( i = 0; i < 40; ++i ) CHECK( p[i] == 0x7f );
-	}
-	aliasMap = owner.slots[0].mapped;
-	CHECK( !VK_TemporalMotionReadbackPrepareAfterFence(
-		&owner, &backend, 2, 1, 4, 2 ) );
-	CHECK( owner.slots[1].buffer == NULL );
-	aliasMap = NULL;
 
 	activation.authority.frameIndex = 1;
 	CHECK( VK_TemporalMotionReadbackPrepareAfterFence(
@@ -309,8 +309,8 @@ int main( void ) {
 	CHECK( VK_TemporalMotionReadbackResolveSubmit(
 		&owner, 1, qtrue, &activation, NULL ) );
 	CHECK( !VK_TemporalMotionReadbackArm( &owner, 1 ) );
-	halfs = (uint16_t *)owner.slots[1].mapped;
-	valid = (unsigned char *)owner.slots[1].mapped
+	halfs = (uint16_t *)owner.slots[1].buffer->memory;
+	valid = (unsigned char *)owner.slots[1].buffer->memory
 		+ owner.slots[1].ticket.validityOffset;
 	memset( halfs, 0, (size_t)owner.slots[1].ticket.velocityBytes );
 	memset( valid, 0, 8 );
@@ -323,7 +323,7 @@ int main( void ) {
 	CHECK( !VK_TemporalMotionReadbackIsArmed( &owner ) );
 	CHECK( !VK_TemporalMotionReadbackReleaseAfterIdle( &owner, qfalse ) );
 	CHECK( VK_TemporalMotionReadbackReleaseAfterIdle( &owner, qtrue ) );
-	CHECK( destroys == 3 && unmaps == 3 && !VK_TemporalMotionReadbackHasLive( &owner ) );
+	CHECK( destroys == 2 && unmaps == 3 && !VK_TemporalMotionReadbackHasLive( &owner ) );
 	puts( "PASS vk temporal motion readback contract" );
 	return 0;
 }

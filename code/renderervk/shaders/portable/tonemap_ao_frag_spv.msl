@@ -1,0 +1,57 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+constant float chromatic_strength_tmp [[function_constant(24)]];
+constant float chromatic_strength = is_function_constant_defined(chromatic_strength_tmp) ? chromatic_strength_tmp : 0.0;
+
+struct ExposureBlock
+{
+    float exposure_bias;
+    float key;
+    float pctLow;
+    float pctHigh;
+    float rateUp;
+    float rateDown;
+    float minExp;
+    float maxExp;
+    int autoEnabled;
+    float brightness;
+    float sunScreenX;
+    float sunScreenY;
+    float sunrayIntensity;
+    float sunrayDecay;
+};
+
+constant float saturation_tmp [[function_constant(2)]];
+constant float saturation = is_function_constant_defined(saturation_tmp) ? saturation_tmp : 1.0;
+constant int hdr_mode_tmp [[function_constant(12)]];
+constant int hdr_mode = is_function_constant_defined(hdr_mode_tmp) ? hdr_mode_tmp : 0;
+constant float hdr_peak_norm_tmp [[function_constant(13)]];
+constant float hdr_peak_norm = is_function_constant_defined(hdr_peak_norm_tmp) ? hdr_peak_norm_tmp : 10.0;
+
+struct spvDescriptorSetBuffer3
+{
+    texture2d<float> aoMap [[id(0)]];
+    sampler aoMapSmplr [[id(1)]];
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord [[user(locn0)]];
+};
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer3& spvDescriptorSet3 [[buffer(3)]])
+{
+    main0_out out = {};
+    float ao = fast::clamp(spvDescriptorSet3.aoMap.sample(spvDescriptorSet3.aoMapSmplr, in.frag_tex_coord).x, 0.0, 1.0);
+    out.out_color = float4(ao, ao, ao, 1.0);
+    return out;
+}
+

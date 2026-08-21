@@ -1,0 +1,169 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T>
+struct spvDescriptor
+{
+    T value;
+};
+
+template<typename T>
+struct spvDescriptorArray
+{
+    spvDescriptorArray(const device spvDescriptor<T>* ptr_) : ptr(&ptr_->value) {}
+    spvDescriptorArray(const device void *ptr_) : spvDescriptorArray(static_cast<const device spvDescriptor<T>*>(ptr_)) {}
+    const device T& operator [] (size_t i) const { return ptr[i]; }
+    const device T* ptr;
+};
+
+struct TemporalIqmSurfacePush
+{
+    uint imageSlot;
+    uint samplerSlot;
+};
+
+struct spvDescriptorSetBuffer1
+{
+    spvDescriptor<texture2d<float>> wired_bindless_images [[id(0)]][1] /* unsized array hack */;
+    // Overlapping binding: spvDescriptor<sampler> wired_bindless_samplers [[id(0)]][1] /* unsized array hack */;
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+    float2 out_temporal_velocity [[color(1)]];
+    float out_temporal_validity [[color(2)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord [[user(locn0)]];
+    float4 temporalCurrentClip [[user(locn10)]];
+    float4 temporalPreviousClip [[user(locn11)]];
+};
+
+static inline __attribute__((always_inline))
+float3 sRGBToLinear(thread float3& c)
+{
+    c = fast::max(c, float3(0.0));
+    bool3 cutoff = c <= float3(0.040449999272823333740234375);
+    float3 lo = c / float3(12.9200000762939453125);
+    float3 hi = powr((c + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return mix(hi, lo, float3(cutoff));
+}
+
+static inline __attribute__((always_inline))
+bool wiredTemporalFinite4(thread const float4& value)
+{
+    bool _66 = all(value == value);
+    bool _75;
+    if (_66)
+    {
+        _75 = all(abs(value) <= float4(3.4028234663852885981170418348452e+38));
+    }
+    else
+    {
+        _75 = _66;
+    }
+    return _75;
+}
+
+static inline __attribute__((always_inline))
+bool wiredTemporalFinite2(thread const float2& value)
+{
+    bool _82 = all(value == value);
+    bool _90;
+    if (_82)
+    {
+        _90 = all(abs(value) <= float2(3.4028234663852885981170418348452e+38));
+    }
+    else
+    {
+        _90 = _82;
+    }
+    return _90;
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], constant TemporalIqmSurfacePush& surfacePush [[buffer(2)]])
+{
+    spvDescriptorArray<texture2d<float>> wired_bindless_images {spvDescriptorSet1.wired_bindless_images};
+    spvDescriptorArray<sampler> wired_bindless_samplers {reinterpret_cast<const device spvDescriptor<sampler>*>(&spvDescriptorSet1.wired_bindless_images)};
+
+    main0_out out = {};
+    uint _107 = surfacePush.imageSlot;
+    uint _118 = surfacePush.samplerSlot;
+    float4 sampled = wired_bindless_images[_107].sample(wired_bindless_samplers[_118], in.frag_tex_coord);
+    float3 param = sampled.xyz;
+    float3 _133 = sRGBToLinear(param);
+    out.out_color = float4(_133, sampled.w);
+    out.out_temporal_velocity = float2(0.0);
+    out.out_temporal_validity = 0.0;
+    float4 param_1 = in.temporalCurrentClip;
+    bool _152 = !wiredTemporalFinite4(param_1);
+    bool _161;
+    if (!_152)
+    {
+        float4 param_2 = in.temporalPreviousClip;
+        _161 = !wiredTemporalFinite4(param_2);
+    }
+    else
+    {
+        _161 = _152;
+    }
+    bool _170;
+    if (!_161)
+    {
+        _170 = in.temporalCurrentClip.w <= 9.9999999747524270787835121154785e-07;
+    }
+    else
+    {
+        _170 = _161;
+    }
+    bool _177;
+    if (!_170)
+    {
+        _177 = in.temporalPreviousClip.w <= 9.9999999747524270787835121154785e-07;
+    }
+    else
+    {
+        _177 = _170;
+    }
+    if (_177)
+    {
+        return out;
+    }
+    float2 currentNdc = in.temporalCurrentClip.xy / float2(in.temporalCurrentClip.w);
+    float2 previousNdc = in.temporalPreviousClip.xy / float2(in.temporalPreviousClip.w);
+    float2 param_3 = currentNdc;
+    bool _198 = !wiredTemporalFinite2(param_3);
+    bool _206;
+    if (!_198)
+    {
+        float2 param_4 = previousNdc;
+        _206 = !wiredTemporalFinite2(param_4);
+    }
+    else
+    {
+        _206 = _198;
+    }
+    if (_206)
+    {
+        return out;
+    }
+    float2 currentUv = (currentNdc * 0.5) + float2(0.5);
+    float2 previousUv = (previousNdc * 0.5) + float2(0.5);
+    float2 velocity = currentUv - previousUv;
+    float2 param_5 = velocity;
+    if (!wiredTemporalFinite2(param_5))
+    {
+        return out;
+    }
+    out.out_temporal_velocity = velocity;
+    out.out_temporal_validity = 1.0;
+    return out;
+}
+

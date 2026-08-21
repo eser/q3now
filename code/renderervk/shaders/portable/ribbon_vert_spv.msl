@@ -1,0 +1,214 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+    
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+    
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+    
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+    
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
+struct RibbonHeader
+{
+    uint pointOffset;
+    uint pointCount;
+    uint shaderHandle;
+    uint flags;
+    float2 uvScroll;
+};
+
+struct RibbonHeader_1
+{
+    uint pointOffset;
+    uint pointCount;
+    uint shaderHandle;
+    uint flags;
+    float2 uvScroll;
+};
+
+struct Headers
+{
+    RibbonHeader_1 headers[1];
+};
+
+struct RibbonPoint
+{
+    float4 posW;
+    float4 rgba;
+    float4 normal;
+};
+
+struct RibbonPoint_1
+{
+    float4 posW;
+    float4 rgba;
+    float4 normal;
+};
+
+struct Points
+{
+    RibbonPoint_1 points[1];
+};
+
+struct EffectsUBO
+{
+    float4x4 mvp;
+    float4 eyeWorld;
+    float4 frameParams;
+    float4 _v2;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    const device Headers* m_16 [[id(0)]];
+    const device Points* m_85 [[id(1)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    constant EffectsUBO* m_164 [[id(0)]];
+};
+
+constant spvUnsafeArray<uint, 6> _59 = spvUnsafeArray<uint, 6>({ 0u, 1u, 0u, 0u, 1u, 1u });
+constant spvUnsafeArray<float, 6> _71 = spvUnsafeArray<float, 6>({ -1.0, -1.0, 1.0, 1.0, -1.0, 1.0 });
+
+struct main0_out
+{
+    float2 fragUV [[user(locn0)]];
+    float4 fragColor [[user(locn1)]];
+    uint fragShaderHandle [[user(locn2)]];
+    float4 gl_Position [[position]];
+};
+
+vertex main0_out main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], uint gl_InstanceIndex [[instance_id]], uint gl_VertexIndex [[vertex_id]])
+{
+    main0_out out = {};
+    RibbonHeader hdr;
+    hdr.pointOffset = (*spvDescriptorSet0.m_16).headers[int(gl_InstanceIndex)].pointOffset;
+    hdr.pointCount = (*spvDescriptorSet0.m_16).headers[int(gl_InstanceIndex)].pointCount;
+    hdr.shaderHandle = (*spvDescriptorSet0.m_16).headers[int(gl_InstanceIndex)].shaderHandle;
+    hdr.flags = (*spvDescriptorSet0.m_16).headers[int(gl_InstanceIndex)].flags;
+    hdr.uvScroll = (*spvDescriptorSet0.m_16).headers[int(gl_InstanceIndex)].uvScroll;
+    uint vertInQuad = uint(int(gl_VertexIndex)) % 6u;
+    uint segIdx = uint(int(gl_VertexIndex)) / 6u;
+    uint pi = (hdr.pointOffset + segIdx) + _59[vertInQuad];
+    float sgn = _71[vertInQuad];
+    RibbonPoint p;
+    p.posW = (*spvDescriptorSet0.m_85).points[pi].posW;
+    p.rgba = (*spvDescriptorSet0.m_85).points[pi].rgba;
+    p.normal = (*spvDescriptorSet0.m_85).points[pi].normal;
+    float halfW = p.posW.w;
+    float3 normal;
+    if ((hdr.flags & 16u) != 0u)
+    {
+        normal = p.normal.xyz;
+    }
+    else
+    {
+        float3 a = (*spvDescriptorSet0.m_85).points[hdr.pointOffset + segIdx].posW.xyz;
+        float3 b = (*spvDescriptorSet0.m_85).points[(hdr.pointOffset + segIdx) + 1u].posW.xyz;
+        float3 segAxis = b - a;
+        bool _144 = (hdr.flags & 8u) != 0u;
+        bool _151;
+        if (_144)
+        {
+            _151 = (hdr.flags & 1u) == 0u;
+        }
+        else
+        {
+            _151 = _144;
+        }
+        bool wantUp = _151;
+        float3 _154;
+        if (wantUp)
+        {
+            _154 = float3(0.0, 0.0, 1.0);
+        }
+        else
+        {
+            _154 = a - (*spvDescriptorSet1.m_164).eyeWorld.xyz;
+        }
+        float3 ref = _154;
+        normal = cross(segAxis, ref);
+        if (dot(normal, normal) < 9.9999999600419720025001879548654e-13)
+        {
+            float3 ad = abs(segAxis);
+            bool _188 = ad.x <= ad.y;
+            bool _197;
+            if (_188)
+            {
+                _197 = ad.x <= ad.z;
+            }
+            else
+            {
+                _197 = _188;
+            }
+            float3 _198;
+            if (_197)
+            {
+                _198 = float3(1.0, 0.0, 0.0);
+            }
+            else
+            {
+                _198 = select(float3(0.0, 0.0, 1.0), float3(0.0, 1.0, 0.0), bool3(ad.y <= ad.z));
+            }
+            float3 fb = _198;
+            normal = cross(segAxis, fb);
+        }
+        normal = fast::normalize(normal);
+    }
+    float3 worldPos = p.posW.xyz + (normal * (halfW * sgn));
+    out.gl_Position = (*spvDescriptorSet1.m_164).mvp * float4(worldPos, 1.0);
+    float _246;
+    if (hdr.pointCount > 1u)
+    {
+        _246 = float(hdr.pointCount - 1u);
+    }
+    else
+    {
+        _246 = 1.0;
+    }
+    float denom = _246;
+    float2 baseUV = float2(float(pi - hdr.pointOffset) / denom, float(sgn > 0.0));
+    out.fragUV = fract(baseUV + (hdr.uvScroll * (*spvDescriptorSet1.m_164).frameParams.y));
+    out.fragColor = p.rgba;
+    out.fragShaderHandle = hdr.shaderHandle;
+    return out;
+}
+

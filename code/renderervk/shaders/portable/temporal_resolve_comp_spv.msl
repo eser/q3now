@@ -1,0 +1,417 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T>
+[[clang::optnone]] T spvFMul(T l, T r)
+{
+    return fma(l, r, T(0));
+}
+
+template<typename T, int Cols, int Rows>
+[[clang::optnone]] vec<T, Cols> spvFMulVectorMatrix(vec<T, Rows> v, matrix<T, Cols, Rows> m)
+{
+    vec<T, Cols> res = vec<T, Cols>(0);
+    for (uint i = Rows; i > 0; --i)
+    {
+        vec<T, Cols> tmp(0);
+        for (uint j = 0; j < Cols; ++j)
+        {
+            tmp[j] = m[j][i - 1];
+        }
+        res = fma(tmp, vec<T, Cols>(v[i - 1]), res);
+    }
+    return res;
+}
+
+template<typename T, int Cols, int Rows>
+[[clang::optnone]] vec<T, Rows> spvFMulMatrixVector(matrix<T, Cols, Rows> m, vec<T, Cols> v)
+{
+    vec<T, Rows> res = vec<T, Rows>(0);
+    for (uint i = Cols; i > 0; --i)
+    {
+        res = fma(m[i - 1], vec<T, Rows>(v[i - 1]), res);
+    }
+    return res;
+}
+
+template<typename T, int LCols, int LRows, int RCols, int RRows>
+[[clang::optnone]] matrix<T, RCols, LRows> spvFMulMatrixMatrix(matrix<T, LCols, LRows> l, matrix<T, RCols, RRows> r)
+{
+    matrix<T, RCols, LRows> res;
+    for (uint i = 0; i < RCols; i++)
+    {
+        vec<T, RCols> tmp(0);
+        for (uint j = 0; j < LCols; j++)
+        {
+            tmp = fma(vec<T, RCols>(r[i][j]), l[j], tmp);
+        }
+        res[i] = tmp;
+    }
+    return res;
+}
+
+template<typename T>
+[[clang::optnone]] T spvFAdd(T l, T r)
+{
+    return fma(T(1), l, r);
+}
+
+template<typename T>
+[[clang::optnone]] T spvFSub(T l, T r)
+{
+    return fma(T(-1), r, l);
+}
+
+struct TemporalResolvePush
+{
+    uint2 extent;
+    float2 currentEffectiveJitterUv;
+    float2 previousEffectiveJitterUv;
+    float zNear;
+    float zFar;
+    float depthThresholdAbsolute;
+    float depthThresholdRelative;
+    float historyWeight;
+    uint historyReadIndex;
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(8u, 8u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> currentColor [[id(0)]];
+    sampler nearestSampler [[id(1)]];
+    texture2d<float> previousColor [[id(2)]];
+    texture2d<float> previousLinearDepth [[id(3)]];
+    texture2d<float> motionValidity [[id(4)]];
+    texture2d<float> motionVelocity [[id(5)]];
+    texture2d<float> currentDeviceDepth [[id(6)]];
+    texture2d<float, access::write> resolvedColor [[id(7)]];
+};
+
+static inline __attribute__((always_inline))
+bool finite4(thread const float4& v)
+{
+    bool _119 = all(v == v);
+    bool _127;
+    if (_119)
+    {
+        _127 = all(abs(v) <= float4(3.4028234663852885981170418348452e+38));
+    }
+    else
+    {
+        _127 = _119;
+    }
+    return _127;
+}
+
+static inline __attribute__((always_inline))
+bool finite1(thread const float& v)
+{
+    bool _75 = v == v;
+    bool _82;
+    if (_75)
+    {
+        _82 = abs(v) <= 3.4028234663852885981170418348452e+38;
+    }
+    else
+    {
+        _82 = _75;
+    }
+    return _82;
+}
+
+static inline __attribute__((always_inline))
+bool finite2(thread const float2& v)
+{
+    bool _89 = all(v == v);
+    bool _97;
+    if (_89)
+    {
+        _97 = all(abs(v) <= float2(3.4028234663852885981170418348452e+38));
+    }
+    else
+    {
+        _97 = _89;
+    }
+    return _97;
+}
+
+static inline __attribute__((always_inline))
+float linearizeDepth(thread const float& z, constant TemporalResolvePush& pc)
+{
+    float range = spvFSub(pc.zFar, pc.zNear);
+    float scaled = spvFMul(z, range);
+    float denominator = spvFAdd(pc.zNear, scaled);
+    float numerator = spvFMul(pc.zNear, pc.zFar);
+    float result = numerator / denominator;
+    return result;
+}
+
+static inline __attribute__((always_inline))
+float mixPrecise(thread const float& x, thread const float& y, thread const float& a)
+{
+    float oneMinus = spvFSub(1.0, a);
+    float left = spvFMul(x, oneMinus);
+    float right = spvFMul(y, a);
+    float result = spvFAdd(left, right);
+    return result;
+}
+
+static inline __attribute__((always_inline))
+float samplePreviousDepthLinear(thread const float2& texel, constant TemporalResolvePush& pc, sampler nearestSampler, texture2d<float> previousLinearDepth)
+{
+    float2 baseFloat = floor(texel);
+    int2 base = int2(baseFloat);
+    float2 f = spvFSub(texel, baseFloat);
+    int2 hi = int2(pc.extent) - int2(1);
+    float d00 = previousLinearDepth.read(uint2(clamp(base, int2(0), hi)), 0).x;
+    float d10 = previousLinearDepth.read(uint2(clamp(base + int2(1, 0), int2(0), hi)), 0).x;
+    float d01 = previousLinearDepth.read(uint2(clamp(base + int2(0, 1), int2(0), hi)), 0).x;
+    float d11 = previousLinearDepth.read(uint2(clamp(base + int2(1), int2(0), hi)), 0).x;
+    float param = d00;
+    float param_1 = d10;
+    float param_2 = f.x;
+    float top = mixPrecise(param, param_1, param_2);
+    float param_3 = d01;
+    float param_4 = d11;
+    float param_5 = f.x;
+    float bottom = mixPrecise(param_3, param_4, param_5);
+    float param_6 = top;
+    float param_7 = bottom;
+    float param_8 = f.y;
+    return mixPrecise(param_6, param_7, param_8);
+}
+
+static inline __attribute__((always_inline))
+float4 mixPrecise(thread const float4& x, thread const float4& y, thread const float& a)
+{
+    float oneMinus = spvFSub(1.0, a);
+    float4 left = x * oneMinus;
+    float4 right = y * a;
+    float4 result = spvFAdd(left, right);
+    return result;
+}
+
+static inline __attribute__((always_inline))
+float4 samplePreviousColorLinear(thread const float2& texel, constant TemporalResolvePush& pc, sampler nearestSampler, texture2d<float> previousColor)
+{
+    float2 baseFloat = floor(texel);
+    int2 base = int2(baseFloat);
+    float2 f = spvFSub(texel, baseFloat);
+    int2 hi = int2(pc.extent) - int2(1);
+    float4 c00 = previousColor.read(uint2(clamp(base, int2(0), hi)), 0);
+    float4 c10 = previousColor.read(uint2(clamp(base + int2(1, 0), int2(0), hi)), 0);
+    float4 c01 = previousColor.read(uint2(clamp(base + int2(0, 1), int2(0), hi)), 0);
+    float4 c11 = previousColor.read(uint2(clamp(base + int2(1), int2(0), hi)), 0);
+    float4 param = c00;
+    float4 param_1 = c10;
+    float param_2 = f.x;
+    float4 top = mixPrecise(param, param_1, param_2);
+    float4 param_3 = c01;
+    float4 param_4 = c11;
+    float param_5 = f.x;
+    float4 bottom = mixPrecise(param_3, param_4, param_5);
+    float4 param_6 = top;
+    float4 param_7 = bottom;
+    float param_8 = f.y;
+    return mixPrecise(param_6, param_7, param_8);
+}
+
+static inline __attribute__((always_inline))
+float4 sampleCurrent(thread const int2& pixel, constant TemporalResolvePush& pc, texture2d<float> currentColor, sampler nearestSampler)
+{
+    int2 bounded = clamp(pixel, int2(0), int2(pc.extent) - int2(1));
+    return currentColor.read(uint2(bounded), 0);
+}
+
+static inline __attribute__((always_inline))
+bool finite3(thread const float3& v)
+{
+    bool _104 = all(v == v);
+    bool _112;
+    if (_104)
+    {
+        _112 = all(abs(v) <= float3(3.4028234663852885981170418348452e+38));
+    }
+    else
+    {
+        _112 = _104;
+    }
+    return _112;
+}
+
+static inline __attribute__((always_inline))
+float scalePrecise(thread const float& weight, thread const float& confidence)
+{
+    float scaled = spvFMul(weight, confidence);
+    return scaled;
+}
+
+static inline __attribute__((always_inline))
+float3 mixPrecise(thread const float3& x, thread const float3& y, thread const float& a)
+{
+    float oneMinus = spvFSub(1.0, a);
+    float3 left = x * oneMinus;
+    float3 right = y * a;
+    float3 result = spvFAdd(left, right);
+    return result;
+}
+
+kernel void main0(const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], constant TemporalResolvePush& pc [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    int2 pixel = int2(gl_GlobalInvocationID.xy);
+    if (any(pixel >= int2(pc.extent)))
+    {
+        return;
+    }
+    float4 current = spvDescriptorSet0.currentColor.read(uint2(pixel), 0);
+    float4 result = current;
+    float valid = spvDescriptorSet0.motionValidity.read(uint2(pixel), 0).x;
+    float2 velocity = spvDescriptorSet0.motionVelocity.read(uint2(pixel), 0).xy;
+    float2 jitterDelta = spvFSub(pc.previousEffectiveJitterUv, pc.currentEffectiveJitterUv);
+    float2 jitterTexel = spvFMul(jitterDelta, float2(pc.extent));
+    float2 motionTexel = spvFMul(velocity, float2(pc.extent));
+    float2 unjitteredPreviousTexel = spvFSub(float2(pixel), motionTexel);
+    float2 previousTexel = spvFAdd(unjitteredPreviousTexel, jitterTexel);
+    float2 previousCenter = spvFAdd(previousTexel, float2(0.5));
+    bool _512 = all(previousCenter >= float2(0.0));
+    bool _521;
+    if (_512)
+    {
+        _521 = all(previousCenter < float2(pc.extent));
+    }
+    else
+    {
+        _521 = _512;
+    }
+    bool inside = _521;
+    float4 param = current;
+    bool _524 = finite4(param);
+    bool _530;
+    if (_524)
+    {
+        float param_1 = valid;
+        _530 = finite1(param_1);
+    }
+    else
+    {
+        _530 = _524;
+    }
+    bool _533 = _530 && (valid > 0.0);
+    bool _539;
+    if (_533)
+    {
+        float2 param_2 = velocity;
+        _539 = finite2(param_2);
+    }
+    else
+    {
+        _539 = _533;
+    }
+    bool _545;
+    if (_539)
+    {
+        float2 param_3 = previousTexel;
+        _545 = finite2(param_3);
+    }
+    else
+    {
+        _545 = _539;
+    }
+    if (_545 && inside)
+    {
+        float currentDevice = spvDescriptorSet0.currentDeviceDepth.read(uint2(pixel), 0).x;
+        float param_4 = currentDevice;
+        float currentLinear = linearizeDepth(param_4, pc);
+        float2 param_5 = previousTexel;
+        float priorLinear = samplePreviousDepthLinear(param_5, pc, spvDescriptorSet0.nearestSampler, spvDescriptorSet0.previousLinearDepth);
+        float depthLimit = fast::max(pc.depthThresholdAbsolute, pc.depthThresholdRelative * fast::max(currentLinear, priorLinear));
+        float param_6 = currentLinear;
+        bool _581 = finite1(param_6);
+        bool _587;
+        if (_581)
+        {
+            float param_7 = priorLinear;
+            _587 = finite1(param_7);
+        }
+        else
+        {
+            _587 = _581;
+        }
+        bool _593 = (_587 && (currentLinear > 0.0)) && (priorLinear > 0.0);
+        bool _602;
+        if (_593)
+        {
+            _602 = abs(currentLinear - priorLinear) <= depthLimit;
+        }
+        else
+        {
+            _602 = _593;
+        }
+        if (_602)
+        {
+            float2 param_8 = previousTexel;
+            float4 prior = samplePreviousColorLinear(param_8, pc, spvDescriptorSet0.nearestSampler, spvDescriptorSet0.previousColor);
+            float3 neighborhoodMin = float3(3.4028234663852885981170418348452e+38);
+            float3 neighborhoodMax = float3(-3.4028234663852885981170418348452e+38);
+            for (int y = -1; y <= 1; y++)
+            {
+                for (int x = -1; x <= 1; x++)
+                {
+                    int2 param_9 = pixel + int2(x, y);
+                    float3 c = sampleCurrent(param_9, pc, spvDescriptorSet0.currentColor, spvDescriptorSet0.nearestSampler).xyz;
+                    neighborhoodMin = fast::min(neighborhoodMin, c);
+                    neighborhoodMax = fast::max(neighborhoodMax, c);
+                }
+            }
+            float4 param_10 = prior;
+            bool _652 = finite4(param_10);
+            bool _658;
+            if (_652)
+            {
+                float3 param_11 = neighborhoodMin;
+                _658 = finite3(param_11);
+            }
+            else
+            {
+                _658 = _652;
+            }
+            bool _664;
+            if (_658)
+            {
+                float3 param_12 = neighborhoodMax;
+                _664 = finite3(param_12);
+            }
+            else
+            {
+                _664 = _658;
+            }
+            if (_664)
+            {
+                float3 clampedPrior = fast::clamp(prior.xyz, neighborhoodMin, neighborhoodMax);
+                float confidence = fast::clamp(valid, 0.0, 1.0);
+                float baseWeight = fast::clamp(pc.historyWeight, 0.0, 1.0);
+                float param_13 = baseWeight;
+                float param_14 = confidence;
+                float weight = scalePrecise(param_13, param_14);
+                float3 param_15 = current.xyz;
+                float3 param_16 = clampedPrior;
+                float param_17 = weight;
+                float3 resolvedRgb = mixPrecise(param_15, param_16, param_17);
+                result = float4(resolvedRgb, current.w);
+            }
+        }
+    }
+    float4 param_18 = result;
+    if (!finite4(param_18))
+    {
+        result = float4(0.0);
+    }
+    spvDescriptorSet0.resolvedColor.write(result, uint2(pixel));
+}
+

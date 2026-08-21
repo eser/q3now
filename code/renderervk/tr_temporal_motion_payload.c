@@ -2,9 +2,11 @@
 // SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
 #include "tr_temporal_motion_payload.h"
+#include "../renderer/ral/ral_sync.h"
 
 #include <math.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 static qboolean FiniteMatrices( const temporalMotionMatrices_t *matrices ) {
@@ -71,7 +73,7 @@ qboolean R_TemporalMotionPayloadEnsure( temporalMotionPayloadOwner_t *owner,
 	ralBindGroupLayout_t *candidateLayout = NULL;
 	ralBuffer_t *candidateBuffer = NULL;
 	ralBindGroup_t *candidateGroup = NULL;
-	void *candidateMapped = NULL;
+	byte *candidateShadow = NULL;
 	uint64_t bytes;
 	uint32_t nextGeneration;
 	uint32_t nextLayoutGeneration = 0;
@@ -117,8 +119,8 @@ qboolean R_TemporalMotionPayloadEnsure( temporalMotionPayloadOwner_t *owner,
 		ralBufferCreateInfo_t bci;
 		memset( &bci, 0, sizeof( bci ) );
 		bci.size = bytes;
-		bci.usage = RAL_BUFFER_STORAGE;
-		bci.memory = RAL_MEMORY_HOST_COHERENT;
+		bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST;
+		bci.memory = RAL_MEMORY_DEVICE_LOCAL;
 		bci.debugName = "wired-temporal-motion-payload";
 		candidateBuffer = Ral_CreateBuffer( backend, &bci );
 		if ( !candidateBuffer ) goto fail;
@@ -134,11 +136,11 @@ qboolean R_TemporalMotionPayloadEnsure( temporalMotionPayloadOwner_t *owner,
 				goto fail;
 			}
 		}
-		candidateMapped = Ral_MapBuffer( candidateBuffer );
-		if ( !candidateMapped ) goto fail;
+		candidateShadow = (byte *)calloc( 1, (size_t)bytes );
+		if ( !candidateShadow ) goto fail;
 	} else {
 		candidateBuffer = frame->buffer;
-		candidateMapped = frame->mapped;
+		candidateShadow = frame->cpuShadow;
 	}
 	candidateGroup = CreateCompositeGroup( backend,
 		candidateLayout ? candidateLayout : owner->layout,
@@ -154,7 +156,7 @@ qboolean R_TemporalMotionPayloadEnsure( temporalMotionPayloadOwner_t *owner,
 
 	if ( frame->bindGroup ) Ral_DestroyBindGroup( frame->bindGroup );
 	if ( replaceBuffer && frame->buffer ) {
-		if ( frame->mapped ) Ral_UnmapBuffer( frame->buffer );
+		free( frame->cpuShadow );
 		Ral_DestroyBuffer( frame->buffer );
 	}
 	if ( candidateLayout ) {
@@ -164,7 +166,7 @@ qboolean R_TemporalMotionPayloadEnsure( temporalMotionPayloadOwner_t *owner,
 	}
 	frame->buffer = candidateBuffer;
 	frame->bindGroup = candidateGroup;
-	frame->mapped = candidateMapped;
+	frame->cpuShadow = candidateShadow;
 	frame->entityBuffer = entityBuffer;
 	frame->entityAllocationGeneration = entityAllocationGeneration;
 	if ( replaceBuffer ) frame->capacity = capacity;
@@ -184,7 +186,7 @@ fail:
 		Ral_DestroyBindGroup( candidateGroup );
 	if ( replaceBuffer && candidateBuffer && candidateBuffer != frame->buffer
 			&& candidateBuffer != entityBuffer ) {
-		if ( candidateMapped ) Ral_UnmapBuffer( candidateBuffer );
+		free( candidateShadow );
 		Ral_DestroyBuffer( candidateBuffer );
 	}
 	if ( candidateLayout ) Ral_DestroyBindGroupLayout( candidateLayout );
@@ -244,10 +246,11 @@ qboolean R_TemporalMotionPayloadAppendAt(
 	temporalMotionPayloadFrame_t *frame;
 	temporalMotionGpuPayload_t candidate;
 	uint64_t offset;
+	ralFence_t *upload;
 	if ( !owner || !owner->ready || !outSlot || frameIndex >= owner->frameCount )
 		return qfalse;
 	frame = &owner->frames[frameIndex];
-	if ( !frame->ready || !frame->begun || !frame->bindGroup || !frame->mapped
+	if ( !frame->ready || !frame->begun || !frame->bindGroup || !frame->cpuShadow
 			|| absoluteEntMatSlot >= frame->capacity
 			|| ( frame->hasAppends && absoluteEntMatSlot <= frame->lastSlot ) ) {
 		return qfalse;
@@ -270,8 +273,12 @@ qboolean R_TemporalMotionPayloadAppendAt(
 	candidate.outcome = (uint32_t)outcome;
 	offset = (uint64_t)absoluteEntMatSlot
 		* (uint64_t)sizeof( temporalMotionGpuPayload_t );
-	memcpy( (byte *)frame->mapped + offset, &candidate, sizeof( candidate ) );
-	Ral_FlushBuffer( frame->buffer, offset, sizeof( candidate ) );
+	upload = Ral_BufferUploadAsync( frame->buffer, offset,
+		&candidate, sizeof( candidate ) );
+	if ( !upload ) return qfalse;
+	Ral_WaitFence( upload, ~(uint64_t)0 );
+	Ral_DestroyFence( upload );
+	memcpy( frame->cpuShadow + offset, &candidate, sizeof( candidate ) );
 	frame->lastSlot = absoluteEntMatSlot;
 	frame->hasAppends = qtrue;
 	*outSlot = absoluteEntMatSlot;
@@ -309,8 +316,7 @@ void R_TemporalMotionPayloadRelease( temporalMotionPayloadOwner_t *owner ) {
 	}
 	for ( i = 0; i < TEMPORAL_MOTION_PAYLOAD_MAX_FRAMES; ++i ) {
 		if ( owner->frames[i].buffer ) {
-			if ( owner->frames[i].mapped )
-				Ral_UnmapBuffer( owner->frames[i].buffer );
+			free( owner->frames[i].cpuShadow );
 			Ral_DestroyBuffer( owner->frames[i].buffer );
 		}
 		memset( &owner->frames[i], 0, sizeof( owner->frames[i] ) );

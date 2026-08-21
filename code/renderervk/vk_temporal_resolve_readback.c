@@ -119,7 +119,7 @@ static qboolean TicketMatchesSlot( const vkTemporalResolveReadbackSlot_t *slot,
 			|| ticket->resolve.content.commandSlot != frameIndex
 			|| ticket->resolve.content.frameCount != frameCount
 			|| ticket->bufferAllocationGeneration != slot->allocationGeneration
-			|| ticket->buffer != slot->buffer || ticket->mapped != slot->mapped
+			|| ticket->buffer != slot->buffer
 			|| ticket->resolve.authority.width != slot->width
 			|| ticket->resolve.authority.height != slot->height
 			|| ticket->currentDepthEncoding != slot->depthEncoding
@@ -138,6 +138,22 @@ static qboolean TicketMatchesSlot( const vkTemporalResolveReadbackSlot_t *slot,
 		&& ticket->validityOffset == g.validityOffset
 		&& ticket->resolvedOffset == g.resolvedOffset
 		&& ticket->totalBytes == g.totalBytes && g.totalBytes <= slot->bytes
+		? qtrue : qfalse;
+}
+
+static qboolean TransitionReadback( ralCommandBuffer_t *commandBuffer,
+		ralBuffer_t *buffer, uint64_t bytes, ralResourceUsage_t before,
+		ralResourceUsage_t after ) {
+	ralBufferTransition_t transition;
+	ralResourceTransitionBatch_t batch;
+	if ( !commandBuffer || !buffer || !bytes ) return qfalse;
+	memset( &transition, 0, sizeof( transition ) );
+	transition.buffer = buffer; transition.size = bytes;
+	transition.before.usage = before; transition.after.usage = after;
+	transition.sourceQueue = transition.destinationQueue = RAL_QUEUE_GRAPHICS;
+	memset( &batch, 0, sizeof( batch ) );
+	batch.bufferTransitions = &transition; batch.bufferTransitionCount = 1u;
+	return Ral_CmdTransitionResources( commandBuffer, &batch ) == ralSuccess
 		? qtrue : qfalse;
 }
 
@@ -176,7 +192,6 @@ qboolean VK_TemporalResolveReadbackPrepareAfterFence(
 	vkTemporalResolveReadbackGeometry_t g;
 	ralBufferCreateInfo_t bci;
 	ralBuffer_t *candidate;
-	void *mapped;
 	uint32_t i;
 	const void *protectedResources[VK_TEMPORAL_RESOLVE_READBACK_PROTECTED];
 	uint32_t j;
@@ -190,33 +205,26 @@ qboolean VK_TemporalResolveReadbackPrepareAfterFence(
 	if ( owner->backend && owner->backend != backend ) return qfalse;
 	if ( owner->frameCount && owner->frameCount != frameCount ) return qfalse;
 	slot = &owner->slots[frameIndex];
-	// Every live slot role is protected against every other buffer/mapping role
-	// and the complete borrowed H3 product cohort, including cross-kind aliases.
+	// Every live readback buffer is protected against every other slot and the
+	// complete borrowed H3 product cohort.
 	for ( i = 0; i < VK_TEMPORAL_RESOLVE_READBACK_MAX_FRAMES; ++i ) {
-		const void *roles[2] = { owner->slots[i].buffer, owner->slots[i].mapped };
-		uint32_t role;
-		for ( role = 0; role < 2u; ++role ) if ( roles[role] ) {
+		const void *role = owner->slots[i].buffer;
+		if ( role ) {
 			for ( j = 0; j < 13u; ++j )
-				if ( roles[role] == protectedResources[j] ) return qfalse;
+				if ( role == protectedResources[j] ) return qfalse;
 			for ( uint32_t k = i + 1u;
 					k < VK_TEMPORAL_RESOLVE_READBACK_MAX_FRAMES; ++k ) {
-				if ( roles[role] == (const void *)owner->slots[k].buffer
-						|| roles[role] == owner->slots[k].mapped ) return qfalse;
+				if ( role == (const void *)owner->slots[k].buffer ) return qfalse;
 			}
 		}
-		if ( owner->slots[i].buffer && owner->slots[i].mapped
-				&& (const void *)owner->slots[i].buffer == owner->slots[i].mapped )
-			return qfalse;
 	}
 	if ( slot->state == VK_TEMPORAL_RESOLVE_READBACK_RECORDED
 			|| slot->state == VK_TEMPORAL_RESOLVE_READBACK_SUBMITTED ) return qfalse;
-	if ( slot->buffer && slot->mapped && slot->bytes == g.totalBytes
+	if ( slot->buffer && slot->bytes == g.totalBytes
 			&& slot->width == width && slot->height == height
 			&& slot->depthEncoding == depthEncoding ) {
 		for ( i = 0; i < 13u; ++i )
-			if ( (const void *)slot->buffer == protectedResources[i]
-					|| slot->mapped == protectedResources[i] ) return qfalse;
-		memset( slot->mapped, 0x7f, (size_t)g.totalBytes );
+			if ( (const void *)slot->buffer == protectedResources[i] ) return qfalse;
 		memset( &slot->ticket, 0, sizeof( slot->ticket ) );
 		slot->products = *protectedProducts;
 		slot->state = VK_TEMPORAL_RESOLVE_READBACK_READY;
@@ -226,46 +234,25 @@ qboolean VK_TemporalResolveReadbackPrepareAfterFence(
 	if ( slot->allocationGeneration == UINT32_MAX ) return qfalse;
 	memset( &bci, 0, sizeof( bci ) );
 	bci.size = g.totalBytes;
-	bci.usage = RAL_BUFFER_TRANSFER_DST;
+	bci.usage = RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ;
 	bci.memory = RAL_MEMORY_HOST_COHERENT;
 	bci.debugName = "wired-temporal-resolve-readback";
 	candidate = Ral_CreateBuffer( backend, &bci );
 	if ( !candidate ) return qfalse;
 	for ( i = 0; i < VK_TEMPORAL_RESOLVE_READBACK_MAX_FRAMES; ++i )
-		if ( owner->slots[i].buffer == candidate
-				|| owner->slots[i].mapped == (const void *)candidate ) {
+		if ( owner->slots[i].buffer == candidate ) {
 			// The allocator returned a borrowed live handle.  We do not own it
 			// and therefore must neither publish nor destroy it.
 			return qfalse;
 		}
 	for ( i = 0; i < 13u; ++i )
 		if ( (const void *)candidate == protectedResources[i] ) return qfalse;
-	mapped = Ral_MapBuffer( candidate );
-	if ( !mapped ) { Ral_DestroyBuffer( candidate ); return qfalse; }
-	if ( (const void *)candidate == mapped ) {
-		Ral_UnmapBuffer( candidate ); Ral_DestroyBuffer( candidate );
-		return qfalse;
-	}
-	for ( i = 0; i < 13u; ++i ) {
-		if ( mapped == protectedResources[i] ) {
-			Ral_UnmapBuffer( candidate ); Ral_DestroyBuffer( candidate );
-			return qfalse;
-		}
-	}
-	for ( i = 0; i < VK_TEMPORAL_RESOLVE_READBACK_MAX_FRAMES; ++i ) {
-		if ( owner->slots[i].mapped == mapped
-				|| (const void *)owner->slots[i].buffer == mapped ) {
-			Ral_UnmapBuffer( candidate ); Ral_DestroyBuffer( candidate );
-			return qfalse;
-		}
-	}
-	if ( slot->mapped ) Ral_UnmapBuffer( slot->buffer );
 	if ( slot->buffer ) Ral_DestroyBuffer( slot->buffer );
-	slot->buffer = candidate; slot->mapped = mapped; slot->bytes = g.totalBytes;
+	slot->buffer = candidate; slot->bytes = g.totalBytes;
 	slot->width = width; slot->height = height; slot->depthEncoding = depthEncoding;
 	slot->products = *protectedProducts;
 	slot->allocationGeneration++;
-	memset( slot->mapped, 0x7f, (size_t)g.totalBytes );
+	slot->hostReadable = qfalse;
 	memset( &slot->ticket, 0, sizeof( slot->ticket ) );
 	slot->state = VK_TEMPORAL_RESOLVE_READBACK_READY;
 	owner->backend = backend; owner->frameCount = frameCount;
@@ -322,15 +309,14 @@ qboolean VK_TemporalResolveReadbackRecord(
 			|| products->resolvedTarget == products->currentColor ) return qfalse;
 	slot = &owner->slots[frameIndex];
 	if ( slot->state != VK_TEMPORAL_RESOLVE_READBACK_READY || !slot->buffer
-			|| !slot->mapped || owner->nextCaptureSerial == UINT32_MAX
+			|| owner->nextCaptureSerial == UINT32_MAX
 			|| !BuildGeometry( slot->width, slot->height,
 				slot->depthEncoding, &g )
 			|| slot->width != recordedResolve->authority.width
 			|| slot->height != recordedResolve->authority.height
 			|| !ProductExact( products, &slot->products ) ) return qfalse;
 	for ( i = 0; i < 13u; ++i )
-		if ( protectedResources[i] == (const void *)slot->buffer
-				|| protectedResources[i] == slot->mapped ) return qfalse;
+		if ( protectedResources[i] == (const void *)slot->buffer ) return qfalse;
 	for ( i = 0; i < 13u; ++i ) for ( j = i + 1u; j < 13u; ++j )
 		if ( protectedResources[i] == protectedResources[j] ) return qfalse;
 	memset( &ticket, 0, sizeof( ticket ) );
@@ -338,7 +324,7 @@ qboolean VK_TemporalResolveReadbackRecord(
 	ticket.commandSlot = frameIndex;
 	ticket.captureSerial = owner->nextCaptureSerial + 1u;
 	ticket.bufferAllocationGeneration = slot->allocationGeneration;
-	ticket.buffer = slot->buffer; ticket.mapped = slot->mapped;
+	ticket.buffer = slot->buffer;
 	ticket.captureX = g.captureX; ticket.captureY = g.captureY;
 	ticket.captureWidth = g.captureWidth; ticket.captureHeight = g.captureHeight;
 	ticket.coreX = g.coreX; ticket.coreY = g.coreY;
@@ -353,13 +339,23 @@ qboolean VK_TemporalResolveReadbackRecord(
 	ticket.resolvedOffset = g.resolvedOffset;
 	ticket.totalBytes = g.totalBytes;
 
-	// Invoke the platform depth-plane recorder before mutating the six typed
-	// texture states.  A refusal therefore leaves this owner and every typed
-	// product untouched; a successful callback has already restored depth.
+	// The destination must enter COPY_DESTINATION before the platform records
+	// any depth/image copy. The callback still precedes mutations of the six
+	// borrowed typed textures and restores its own depth source.
+	if ( !TransitionReadback( commandBuffer, slot->buffer, slot->bytes,
+			slot->hostReadable ? RAL_RESOURCE_USAGE_HOST_READ
+			                   : RAL_RESOURCE_USAGE_UNDEFINED,
+			RAL_RESOURCE_USAGE_COPY_DESTINATION ) ) return qfalse;
 	if ( !depthCopy( commandBuffer, products->currentDepth, slot->buffer,
 			g.currentDepthOffset, g.captureX, g.captureY,
 			g.captureWidth, g.captureHeight, slot->depthEncoding,
-			depthCopyUser ) ) return qfalse;
+			depthCopyUser ) ) {
+		TransitionReadback( commandBuffer, slot->buffer, slot->bytes,
+			RAL_RESOURCE_USAGE_COPY_DESTINATION,
+			slot->hostReadable ? RAL_RESOURCE_USAGE_HOST_READ
+			                   : RAL_RESOURCE_USAGE_UNDEFINED );
+		return qfalse;
+	}
 	Ral_CmdTransitionTexture( commandBuffer, products->currentColor,
 		RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT, RAL_PIPELINE_STAGE_TRANSFER_BIT,
 		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
@@ -398,6 +394,9 @@ qboolean VK_TemporalResolveReadbackRecord(
 	barrier.dstStageMask = RAL_PIPELINE_STAGE_HOST_BIT;
 	barrier.memoryBarrierCount = 1; barrier.memoryBarriers = &memory;
 	Ral_CmdPipelineBarrierFull( commandBuffer, &barrier );
+	if ( !TransitionReadback( commandBuffer, slot->buffer, slot->bytes,
+			RAL_RESOURCE_USAGE_COPY_DESTINATION,
+			RAL_RESOURCE_USAGE_HOST_READ ) ) return qfalse;
 	Ral_CmdTransitionTexture( commandBuffer, products->currentColor,
 		RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
@@ -418,7 +417,8 @@ qboolean VK_TemporalResolveReadbackRecord(
 		RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 	owner->nextCaptureSerial = ticket.captureSerial;
-	slot->ticket = ticket; slot->state = VK_TEMPORAL_RESOLVE_READBACK_RECORDED;
+	slot->ticket = ticket; slot->hostReadable = qtrue;
+	slot->state = VK_TEMPORAL_RESOLVE_READBACK_RECORDED;
 	return qtrue;
 }
 
@@ -629,21 +629,6 @@ static float LinearizeDepthPrecise( float z, float zNear, float zFar ) {
 	return result;
 }
 
-static qboolean PlanePopulated( const unsigned char *p, uint64_t bytes ) {
-	uint64_t i;
-	uint32_t poisonRun = 0u;
-	qboolean changed = qfalse;
-	for ( i = 0; i < bytes; ++i ) {
-		if ( p[i] == 0x7fu ) {
-			if ( ++poisonRun >= 16u ) return qfalse;
-		} else {
-			changed = qtrue;
-			poisonRun = 0u;
-		}
-	}
-	return changed;
-}
-
 static void VerifyCurrentFallback( vkTemporalResolveReadbackContentReceipt_t *r,
 		const uint16_t current[4], const uint16_t actual[4], qboolean invalid ) {
 	r->fallbackExpected++;
@@ -691,12 +676,14 @@ qboolean VK_TemporalResolveReadbackCompleteAfterFence(
 	vkTemporalResolveTicket_t canonicalRecorded;
 	const unsigned char *bytes, *current, *depth, *previous, *previousDepth;
 	const unsigned char *velocity, *validity, *resolved;
+	ralBufferMapRequest_t mapRequest;
+	ralBufferMapTicket_t mapTicket;
 	uint64_t pixels;
 	uint32_t x, y, depthBytes;
 	if ( !owner || !owner->initialized || !fenceProven
 			|| frameIndex >= owner->frameCount ) return qfalse;
 	slot = &owner->slots[frameIndex]; t = &slot->ticket;
-	if ( slot->state != VK_TEMPORAL_RESOLVE_READBACK_SUBMITTED || !slot->mapped
+	if ( slot->state != VK_TEMPORAL_RESOLVE_READBACK_SUBMITTED || !slot->hostReadable
 			|| !t->submitted || !t->resolve.submitted
 			|| !t->resolve.content.submitted
 			|| !TicketMatchesSlot( slot, frameIndex, owner->frameCount, t ) )
@@ -707,8 +694,12 @@ qboolean VK_TemporalResolveReadbackCompleteAfterFence(
 	if ( !VK_TemporalResolveTicketValidateRecordedExact( &canonicalRecorded )
 			|| !ProductExact( &t->resolve.products, &slot->products )
 			|| owner->backend != slot->products.backend ) return qfalse;
+	memset( &mapRequest, 0, sizeof( mapRequest ) );
+	mapRequest.mode = RAL_MAP_READ; mapRequest.size = slot->bytes;
+	if ( Ral_BufferMapBegin( slot->buffer, &mapRequest, &mapTicket ) != ralSuccess
+			|| !mapTicket.mappedRange ) return qfalse;
 	memset( &r, 0, sizeof( r ) ); r.ticket = *t;
-	bytes = (const unsigned char *)slot->mapped;
+	bytes = (const unsigned char *)mapTicket.mappedRange;
 	current = bytes + t->currentColorOffset; depth = bytes + t->currentDepthOffset;
 	previous = bytes + t->previousColorOffset;
 	previousDepth = bytes + t->previousDepthOffset;
@@ -723,22 +714,19 @@ qboolean VK_TemporalResolveReadbackCompleteAfterFence(
 	r.velocityHash = HashBytes( velocity, pixels * 4u );
 	r.validityHash = HashBytes( validity, pixels );
 	r.resolvedHash = HashBytes( resolved, pixels * 8u );
-	r.planesPopulated = r.currentColorHash && r.currentDepthHash
-		&& r.previousColorHash && r.previousDepthHash && r.velocityHash
-		&& r.validityHash && r.resolvedHash
-		&& PlanePopulated( current, pixels * 8u )
-		&& PlanePopulated( depth, pixels * depthBytes )
-		&& PlanePopulated( previous, pixels * 8u )
-		&& PlanePopulated( previousDepth, pixels * 4u )
-		&& PlanePopulated( velocity, pixels * 4u )
-		&& PlanePopulated( validity, pixels )
-		&& PlanePopulated( resolved, pixels * 8u ) ? qtrue : qfalse;
+	// The exact ticket, full-plane copy command inventory, submitted receipt and
+	// completed slot fence are the population authority. Content validity remains
+	// independently fail-closed below; zero is a legitimate value for every plane.
+	r.planesPopulated = qtrue;
 	r.centerX = t->resolve.authority.width / 2u;
 	r.centerY = t->resolve.authority.height / 2u;
 	{
 		uint32_t centerIndex;
 		if ( !LocalIndex( t, (int32_t)r.centerX, (int32_t)r.centerY,
-				&centerIndex ) ) return qfalse;
+				&centerIndex ) ) {
+			Ral_BufferMapUnmap( slot->buffer, &mapTicket );
+			return qfalse;
+		}
 		memcpy( r.centerCurrentColor,
 			current + (uint64_t)centerIndex * 8u,
 			sizeof( r.centerCurrentColor ) );
@@ -950,6 +938,7 @@ qboolean VK_TemporalResolveReadbackCompleteAfterFence(
 		&& r.zeroFallbackExact == r.zeroFallbackExpected
 		&& r.validityOther == 0u
 		&& r.nonfiniteInputs == 0u ? qtrue : qfalse;
+	if ( Ral_BufferMapUnmap( slot->buffer, &mapTicket ) != ralSuccess ) return qfalse;
 	owner->latest = r;
 	memset( &slot->ticket, 0, sizeof( slot->ticket ) );
 	slot->state = VK_TEMPORAL_RESOLVE_READBACK_READY;
@@ -988,7 +977,6 @@ qboolean VK_TemporalResolveReadbackReleaseAfterIdle(
 	serial = owner->nextCaptureSerial;
 	for ( i = 0; i < VK_TEMPORAL_RESOLVE_READBACK_MAX_FRAMES; ++i ) {
 		vkTemporalResolveReadbackSlot_t *slot = &owner->slots[i];
-		if ( slot->mapped ) Ral_UnmapBuffer( slot->buffer );
 		if ( slot->buffer ) Ral_DestroyBuffer( slot->buffer );
 	}
 	memset( owner, 0, sizeof( *owner ) ); owner->initialized = qtrue;

@@ -39,7 +39,7 @@ _Static_assert( TEMPORAL_MOTION_INVALIDATE_OPAQUE == 2,
 typedef struct {
 	ralBuffer_t *buffer;
 	ralBindGroup_t *bindGroup;
-	void *mapped;
+	byte *cpuShadow;
 	const ralBuffer_t *entityBuffer;
 	uint32_t entityAllocationGeneration;
 	uint32_t capacity;
@@ -91,7 +91,7 @@ qboolean R_TemporalMotionPayloadDetachEntityBuffer(
 // increase strictly within a begun frame; gaps are intentionally allowed.
 // WRITE_VALID requires finite matrices. INVALIDATE_OPAQUE requires matrices ==
 // NULL and authors canonical all-zero matrices. Other outcomes reject.  The
-// mapped record, owner state and outSlot are unchanged on failure.
+// CPU shadow, GPU record, owner state and outSlot are unchanged on failure.
 qboolean R_TemporalMotionPayloadAppendAt(
 	temporalMotionPayloadOwner_t *owner, uint32_t frameIndex,
 	uint32_t absoluteEntMatSlot, temporalMotionOutcome_t outcome,

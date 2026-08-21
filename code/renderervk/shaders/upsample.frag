@@ -33,7 +33,10 @@ layout(constant_id = 2) const float filter_radius = 1.0;
 void main()
 {
 	vec2 uv = frag_tex_coord;
-	vec2 r  = vec2( texel_x, texel_y ) * filter_radius;
+	vec2 r;
+	r.x = texel_x;
+	r.y = texel_y;
+	r *= filter_radius;
 
 	vec3 s =  texture( texture0, uv + r * vec2( -1.0, -1.0 ) ).rgb;
 	s += 2.0 * texture( texture0, uv + r * vec2(  0.0, -1.0 ) ).rgb;

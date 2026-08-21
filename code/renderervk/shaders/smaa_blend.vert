@@ -15,7 +15,9 @@ layout(constant_id = 0) const int SMAA_MAX_SEARCH_STEPS = 16;
 
 layout(location = 0) out vec2 texcoord;
 layout(location = 1) out vec2 pixcoord;
-layout(location = 2) out vec4 offset[3];
+layout(location = 2) out vec4 offset0;
+layout(location = 3) out vec4 offset1;
+layout(location = 4) out vec4 offset2;
 
 out gl_PerVertex { vec4 gl_Position; };
 
@@ -27,10 +29,10 @@ void main() {
 	pixcoord = texcoord * rtMetrics.zw;
 
 	// Offsets for the searches (see @PSEUDO_GATHER4)
-	offset[0] = texcoord.xyxy + rtMetrics.xyxy * vec4(-0.25, -0.125,  1.25, -0.125);
-	offset[1] = texcoord.xyxy + rtMetrics.xyxy * vec4(-0.125, -0.25, -0.125,  1.25);
+	offset0 = texcoord.xyxy + rtMetrics.xyxy * vec4(-0.25, -0.125,  1.25, -0.125);
+	offset1 = texcoord.xyxy + rtMetrics.xyxy * vec4(-0.125, -0.25, -0.125,  1.25);
 
 	// Search loop end boundaries
-	offset[2] = vec4(offset[0].xz, offset[1].yw) +
+	offset2 = vec4(offset0.xz, offset1.yw) +
 	            vec4(-2.0, 2.0, -2.0, 2.0) * rtMetrics.xxyy * float(SMAA_MAX_SEARCH_STEPS);
 }

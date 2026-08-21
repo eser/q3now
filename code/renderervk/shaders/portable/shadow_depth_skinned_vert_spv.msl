@@ -1,0 +1,83 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct BoneMatrices
+{
+    float4 boneMats[384];
+};
+
+struct CascadeMVP
+{
+    float4x4 cascadeMVP;
+};
+
+struct EntityMatrices
+{
+    float4x4 matrices[1];
+};
+
+struct spvDescriptorSetBuffer0
+{
+    const device EntityMatrices* m_148 [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    constant CascadeMVP* m_141 [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer2
+{
+    constant BoneMatrices* m_21 [[id(0)]];
+};
+
+struct main0_out
+{
+    float4 gl_Position [[position]];
+};
+
+struct main0_in
+{
+    float3 in_position [[attribute(0)]];
+    float4 in_bone_weights [[attribute(4)]];
+    uint4 in_bone_indices [[attribute(5)]];
+};
+
+static inline __attribute__((always_inline))
+float3 transformByBone(thread const uint& idx, thread const float3& v, constant BoneMatrices& _21)
+{
+    return float3(dot(_21.boneMats[(idx * 3u) + 0u], float4(v, 1.0)), dot(_21.boneMats[(idx * 3u) + 1u], float4(v, 1.0)), dot(_21.boneMats[(idx * 3u) + 2u], float4(v, 1.0)));
+}
+
+vertex main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], const device spvDescriptorSetBuffer2& spvDescriptorSet2 [[buffer(2)]], uint gl_InstanceIndex [[instance_id]])
+{
+    main0_out out = {};
+    uint param = in.in_bone_indices.x;
+    float3 param_1 = in.in_position;
+    float3 pos = transformByBone(param, param_1, (*spvDescriptorSet2.m_21)) * in.in_bone_weights.x;
+    if (in.in_bone_weights.y > 0.0)
+    {
+        uint param_2 = in.in_bone_indices.y;
+        float3 param_3 = in.in_position;
+        pos += (transformByBone(param_2, param_3, (*spvDescriptorSet2.m_21)) * in.in_bone_weights.y);
+    }
+    if (in.in_bone_weights.z > 0.0)
+    {
+        uint param_4 = in.in_bone_indices.z;
+        float3 param_5 = in.in_position;
+        pos += (transformByBone(param_4, param_5, (*spvDescriptorSet2.m_21)) * in.in_bone_weights.z);
+    }
+    if (in.in_bone_weights.w > 0.0)
+    {
+        uint param_6 = in.in_bone_indices.w;
+        float3 param_7 = in.in_position;
+        pos += (transformByBone(param_6, param_7, (*spvDescriptorSet2.m_21)) * in.in_bone_weights.w);
+    }
+    out.gl_Position = ((*spvDescriptorSet1.m_141).cascadeMVP * (*spvDescriptorSet0.m_148).matrices[int(gl_InstanceIndex)]) * float4(pos, 1.0);
+    return out;
+}
+

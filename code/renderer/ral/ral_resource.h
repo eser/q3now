@@ -8,6 +8,8 @@
 #define WIRED_RAL_RESOURCE_H
 
 #include "ral_types.h"
+#include "ral_buffer_map.h"
+#include "ral_transfer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,7 +25,12 @@ typedef enum {
 	RAL_BUFFER_STORAGE      = 1 << 3,
 	RAL_BUFFER_INDIRECT     = 1 << 4,
 	RAL_BUFFER_TRANSFER_SRC = 1 << 5,
-	RAL_BUFFER_TRANSFER_DST = 1 << 6
+	RAL_BUFFER_TRANSFER_DST = 1 << 6,
+	// Portable/WebGPU staging capabilities: MAP_READ is paired with
+	// TRANSFER_DST; MAP_WRITE is paired with TRANSFER_SRC. Do not use these as
+	// persistent mappings for vertex/uniform/storage resources.
+	RAL_BUFFER_MAP_READ     = 1 << 7,
+	RAL_BUFFER_MAP_WRITE    = 1 << 8
 } ralBufferUsage_t;
 
 typedef enum {
@@ -48,6 +55,19 @@ void         Ral_DestroyBuffer( ralBuffer_t *buf );
 void *Ral_MapBuffer  ( ralBuffer_t *buf );
 void  Ral_UnmapBuffer( ralBuffer_t *buf );
 void  Ral_FlushBuffer( ralBuffer_t *buf, uint64_t offset, uint64_t size );
+
+// Typed mapping is the portable path. Vulkan completes Begin immediately;
+// WebGPU may return a PENDING ticket and later expose READY through Poll.
+ralResult_t Ral_BufferMapBegin( ralBuffer_t *buf,
+	                            const ralBufferMapRequest_t *request,
+	                            ralBufferMapTicket_t *outTicket );
+ralResult_t Ral_BufferMapPoll( ralBuffer_t *buf,
+	                           const ralBufferMapTicket_t *authority,
+	                           ralBufferMapTicket_t *outTicket );
+ralResult_t Ral_BufferMapUnmap( ralBuffer_t *buf,
+	                            const ralBufferMapTicket_t *readyTicket );
+ralResult_t Ral_BufferMapCancel( ralBuffer_t *buf,
+	                             const ralBufferMapTicket_t *pendingTicket );
 
 // Async upload — first-class in v1. Submits to the transfer queue (§10);
 // returns a fence the caller can wait on / poll. The renderer never writes
@@ -161,6 +181,7 @@ typedef struct {
 	uint32_t        arrayLayerCount;
 	qboolean        synchronous;
 	qboolean        graphicsAcquireRequired;
+	ralTransferReceipt_t transfer;
 } ralUploadTicket_t;
 
 // Begins an upload of `region` into `tex` and returns a residency ticket. The
@@ -170,6 +191,9 @@ typedef struct {
 // callers keep using). The returned fence is owned by the caller (destroy it
 // once residency is observed).
 ralUploadTicket_t Ral_TextureUploadBegin( ralTexture_t *tex, const ralTextureUploadDesc_t *region );
+qboolean Ral_TextureUploadTicketComplete( ralUploadTicket_t *ticket );
+qboolean Ral_TextureUploadTicketGetReceipt( const ralUploadTicket_t *ticket,
+	ralTransferReceipt_t *out );
 
 // Makes a batch of transfer-upload tickets visible to graphics sampling. The
 // acquire waits each ticket's binary readySemaphore and applies a precise

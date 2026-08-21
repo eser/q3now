@@ -1,0 +1,586 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct RtMetrics
+{
+    float4 rtMetrics;
+};
+
+constant int SMAA_MAX_SEARCH_STEPS_DIAG_tmp [[function_constant(1)]];
+constant int SMAA_MAX_SEARCH_STEPS_DIAG = is_function_constant_defined(SMAA_MAX_SEARCH_STEPS_DIAG_tmp) ? SMAA_MAX_SEARCH_STEPS_DIAG_tmp : 8;
+constant int _172 = (SMAA_MAX_SEARCH_STEPS_DIAG - 1);
+constant int _245 = (SMAA_MAX_SEARCH_STEPS_DIAG - 1);
+constant int SMAA_CORNER_ROUNDING_tmp [[function_constant(2)]];
+constant int SMAA_CORNER_ROUNDING = is_function_constant_defined(SMAA_CORNER_ROUNDING_tmp) ? SMAA_CORNER_ROUNDING_tmp : 25;
+constant bool _1010 = (SMAA_MAX_SEARCH_STEPS_DIAG > 0);
+constant int SMAA_MAX_SEARCH_STEPS_tmp [[function_constant(0)]];
+constant int SMAA_MAX_SEARCH_STEPS = is_function_constant_defined(SMAA_MAX_SEARCH_STEPS_tmp) ? SMAA_MAX_SEARCH_STEPS_tmp : 16;
+
+struct spvDescriptorSetBuffer0
+{
+    texture2d<float> edgesTex [[id(0)]];
+    sampler edgesTexSmplr [[id(1)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    texture2d<float> areaTex [[id(0)]];
+    sampler areaTexSmplr [[id(1)]];
+};
+
+struct spvDescriptorSetBuffer2
+{
+    texture2d<float> searchTex [[id(0)]];
+    sampler searchTexSmplr [[id(1)]];
+};
+
+struct spvDescriptorSetBuffer3
+{
+    constant RtMetrics* m_153 [[id(0)]];
+};
+
+struct main0_out
+{
+    float4 out_weights [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 texcoord [[user(locn0)]];
+    float2 pixcoord [[user(locn1)]];
+    float4 offset0 [[user(locn2)]];
+    float4 offset1 [[user(locn3)]];
+    float4 offset2 [[user(locn4)]];
+};
+
+static inline __attribute__((always_inline))
+float2 SMAASearchDiag1(thread const float2& tc, thread const float2& dir, thread float2& e, constant RtMetrics& _153, texture2d<float> edgesTex, sampler edgesTexSmplr)
+{
+    float4 coord = float4(tc, -1.0, 1.0);
+    float3 t = float3(_153.rtMetrics.xy, 1.0);
+    for (;;)
+    {
+        bool _174 = coord.z < float(_172);
+        bool _182;
+        if (_174)
+        {
+            _182 = coord.w > 0.89999997615814208984375;
+        }
+        else
+        {
+            _182 = _174;
+        }
+        if (_182)
+        {
+            float4 _189 = coord;
+            float3 _191 = (t * float3(dir, 1.0)) + _189.xyz;
+            coord.x = _191.x;
+            coord.y = _191.y;
+            coord.z = _191.z;
+            e = edgesTex.sample(edgesTexSmplr, coord.xy, level(0.0)).xy;
+            coord.w = dot(e, float2(0.5));
+            continue;
+        }
+        else
+        {
+            break;
+        }
+    }
+    return coord.zw;
+}
+
+static inline __attribute__((always_inline))
+float4 SMAADecodeDiagBilinearAccess(thread float4& e)
+{
+    float4 _123 = e;
+    float4 _125 = e;
+    float2 _131 = _123.xz * abs((_125.xz * 5.0) - float2(3.75));
+    e.x = _131.x;
+    e.z = _131.y;
+    return round(e);
+}
+
+static inline __attribute__((always_inline))
+void SMAAMovc(thread const bool2& cond, thread float2& variable, thread const float2& value)
+{
+    if (cond.x)
+    {
+        variable.x = value.x;
+    }
+    if (cond.y)
+    {
+        variable.y = value.y;
+    }
+}
+
+static inline __attribute__((always_inline))
+float2 SMAAAreaDiag(thread const float2& dist, thread const float2& e, thread const float& offs, texture2d<float> areaTex, sampler areaTexSmplr)
+{
+    float2 tc = (float2(20.0) * e) + dist;
+    tc = (float2(0.0062500000931322574615478515625, 0.001785714295692741870880126953125) * tc) + float2(0.00312500004656612873077392578125, 0.0008928571478463709354400634765625);
+    tc.x += 0.5;
+    tc.y += (0.14285714924335479736328125 * offs);
+    return areaTex.sample(areaTexSmplr, tc, level(0.0)).xy;
+}
+
+static inline __attribute__((always_inline))
+float2 SMAADecodeDiagBilinearAccess(thread float2& e)
+{
+    e.x *= abs((5.0 * e.x) - 3.75);
+    return round(e);
+}
+
+static inline __attribute__((always_inline))
+float2 SMAASearchDiag2(thread const float2& tc, thread const float2& dir, thread float2& e, constant RtMetrics& _153, texture2d<float> edgesTex, sampler edgesTexSmplr)
+{
+    float4 coord = float4(tc, -1.0, 1.0);
+    coord.x += (0.25 * _153.rtMetrics.x);
+    float3 t = float3(_153.rtMetrics.xy, 1.0);
+    for (;;)
+    {
+        bool _247 = coord.z < float(_245);
+        bool _253;
+        if (_247)
+        {
+            _253 = coord.w > 0.89999997615814208984375;
+        }
+        else
+        {
+            _253 = _247;
+        }
+        if (_253)
+        {
+            float4 _260 = coord;
+            float3 _262 = (t * float3(dir, 1.0)) + _260.xyz;
+            coord.x = _262.x;
+            coord.y = _262.y;
+            coord.z = _262.z;
+            e = edgesTex.sample(edgesTexSmplr, coord.xy, level(0.0)).xy;
+            float2 param = e;
+            float2 _276 = SMAADecodeDiagBilinearAccess(param);
+            e = _276;
+            coord.w = dot(e, float2(0.5));
+            continue;
+        }
+        else
+        {
+            break;
+        }
+    }
+    return coord.zw;
+}
+
+static inline __attribute__((always_inline))
+float2 SMAACalculateDiagWeights(thread const float2& tc, thread const float2& e, constant RtMetrics& _153, texture2d<float> edgesTex, sampler edgesTexSmplr, texture2d<float> areaTex, sampler areaTexSmplr)
+{
+    float2 weights = float2(0.0);
+    float4 d;
+    float2 end;
+    if (e.x > 0.0)
+    {
+        float2 param = tc;
+        float2 param_1 = float2(-1.0, 1.0);
+        float2 param_2;
+        float2 _332 = SMAASearchDiag1(param, param_1, param_2, _153, edgesTex, edgesTexSmplr);
+        end = param_2;
+        d.x = _332.x;
+        d.z = _332.y;
+        d.x += float(end.y > 0.89999997615814208984375);
+    }
+    else
+    {
+        d.x = 0.0;
+        d.z = 0.0;
+    }
+    float2 param_3 = tc;
+    float2 param_4 = float2(1.0, -1.0);
+    float2 param_5;
+    float2 _356 = SMAASearchDiag1(param_3, param_4, param_5, _153, edgesTex, edgesTexSmplr);
+    end = param_5;
+    d.y = _356.x;
+    d.w = _356.y;
+    if ((d.x + d.y) > 2.0)
+    {
+        float4 coords = (float4((-d.x) + 0.25, d.x, d.y, (-d.y) - 0.25) * _153.rtMetrics.xyxy) + tc.xyxy;
+        float2 _400 = edgesTex.sample(edgesTexSmplr, coords.xy, level(0.0), int2(-1, 0)).xy;
+        float4 c;
+        c.x = _400.x;
+        c.y = _400.y;
+        float2 _410 = edgesTex.sample(edgesTexSmplr, coords.zw, level(0.0), int2(1, 0)).xy;
+        c.z = _410.x;
+        c.w = _410.y;
+        float4 param_6 = c;
+        float4 _417 = SMAADecodeDiagBilinearAccess(param_6);
+        c = float4(_417.y, _417.x, _417.w, _417.z);
+        float2 cc = (c.xz * 2.0) + c.yw;
+        bool2 param_7 = step(float2(0.89999997615814208984375), d.zw) != float2(0.0);
+        float2 param_8 = cc;
+        float2 param_9 = float2(0.0);
+        SMAAMovc(param_7, param_8, param_9);
+        cc = param_8;
+        float2 param_10 = d.xy;
+        float2 param_11 = cc;
+        float param_12 = 0.0;
+        weights += SMAAAreaDiag(param_10, param_11, param_12, areaTex, areaTexSmplr);
+    }
+    float2 param_13 = tc;
+    float2 param_14 = float2(-1.0);
+    float2 param_15;
+    float2 _452 = SMAASearchDiag2(param_13, param_14, param_15, _153, edgesTex, edgesTexSmplr);
+    end = param_15;
+    d.x = _452.x;
+    d.z = _452.y;
+    if (edgesTex.sample(edgesTexSmplr, tc, level(0.0), int2(1, 0)).x > 0.0)
+    {
+        float2 param_16 = tc;
+        float2 param_17 = float2(1.0);
+        float2 param_18;
+        float2 _470 = SMAASearchDiag2(param_16, param_17, param_18, _153, edgesTex, edgesTexSmplr);
+        end = param_18;
+        d.y = _470.x;
+        d.w = _470.y;
+        d.y += float(end.y > 0.89999997615814208984375);
+    }
+    else
+    {
+        d.y = 0.0;
+        d.w = 0.0;
+    }
+    if ((d.x + d.y) > 2.0)
+    {
+        float4 coords_1 = (float4(-d.x, -d.x, d.y, d.y) * _153.rtMetrics.xyxy) + tc.xyxy;
+        float4 c_1;
+        c_1.x = edgesTex.sample(edgesTexSmplr, coords_1.xy, level(0.0), int2(-1, 0)).y;
+        c_1.y = edgesTex.sample(edgesTexSmplr, coords_1.xy, level(0.0), int2(0, -1)).x;
+        float2 _534 = edgesTex.sample(edgesTexSmplr, coords_1.zw, level(0.0), int2(1, 0)).yx;
+        c_1.z = _534.x;
+        c_1.w = _534.y;
+        float2 cc_1 = (c_1.xz * 2.0) + c_1.yw;
+        bool2 param_19 = step(float2(0.89999997615814208984375), d.zw) != float2(0.0);
+        float2 param_20 = cc_1;
+        float2 param_21 = float2(0.0);
+        SMAAMovc(param_19, param_20, param_21);
+        cc_1 = param_20;
+        float2 param_22 = d.xy;
+        float2 param_23 = cc_1;
+        float param_24 = 0.0;
+        weights += SMAAAreaDiag(param_22, param_23, param_24, areaTex, areaTexSmplr).yx;
+    }
+    return weights;
+}
+
+static inline __attribute__((always_inline))
+float SMAASearchLength(thread const float2& e, thread const float& offs, texture2d<float> searchTex, sampler searchTexSmplr)
+{
+    float2 scale = float2(33.0, -33.0);
+    float2 bias0 = float2(66.0, 33.0) * float2(offs, 1.0);
+    scale += float2(-1.0, 1.0);
+    bias0 += float2(0.5, -0.5);
+    scale *= float2(0.015625, 0.0625);
+    bias0 *= float2(0.015625, 0.0625);
+    return searchTex.sample(searchTexSmplr, ((scale * e) + bias0), level(0.0)).x;
+}
+
+static inline __attribute__((always_inline))
+float SMAASearchXLeft(thread float2& tc, thread const float& end, constant RtMetrics& _153, texture2d<float> edgesTex, sampler edgesTexSmplr, texture2d<float> searchTex, sampler searchTexSmplr)
+{
+    float2 e = float2(0.0, 1.0);
+    for (;;)
+    {
+        bool _614 = tc.x > end;
+        bool _621;
+        if (_614)
+        {
+            _621 = e.y > 0.828100025653839111328125;
+        }
+        else
+        {
+            _621 = _614;
+        }
+        bool _627;
+        if (_621)
+        {
+            _627 = e.x == 0.0;
+        }
+        else
+        {
+            _627 = _621;
+        }
+        if (_627)
+        {
+            e = edgesTex.sample(edgesTexSmplr, tc, level(0.0)).xy;
+            tc += (float2(-2.0, 0.0) * _153.rtMetrics.xy);
+            continue;
+        }
+        else
+        {
+            break;
+        }
+    }
+    float2 param = e;
+    float param_1 = 0.0;
+    float offs = ((-2.007874011993408203125) * SMAASearchLength(param, param_1, searchTex, searchTexSmplr)) + 3.25;
+    return (_153.rtMetrics.x * offs) + tc.x;
+}
+
+static inline __attribute__((always_inline))
+float SMAASearchXRight(thread float2& tc, thread const float& end, constant RtMetrics& _153, texture2d<float> edgesTex, sampler edgesTexSmplr, texture2d<float> searchTex, sampler searchTexSmplr)
+{
+    float2 e = float2(0.0, 1.0);
+    for (;;)
+    {
+        bool _667 = tc.x < end;
+        bool _673;
+        if (_667)
+        {
+            _673 = e.y > 0.828100025653839111328125;
+        }
+        else
+        {
+            _673 = _667;
+        }
+        bool _679;
+        if (_673)
+        {
+            _679 = e.x == 0.0;
+        }
+        else
+        {
+            _679 = _673;
+        }
+        if (_679)
+        {
+            e = edgesTex.sample(edgesTexSmplr, tc, level(0.0)).xy;
+            tc += (float2(2.0, 0.0) * _153.rtMetrics.xy);
+            continue;
+        }
+        else
+        {
+            break;
+        }
+    }
+    float2 param = e;
+    float param_1 = 0.5;
+    float offs = ((-2.007874011993408203125) * SMAASearchLength(param, param_1, searchTex, searchTexSmplr)) + 3.25;
+    return ((-_153.rtMetrics.x) * offs) + tc.x;
+}
+
+static inline __attribute__((always_inline))
+float2 SMAAArea(thread const float2& dist, thread const float& e1, thread const float& e2, thread const float& offs, texture2d<float> areaTex, sampler areaTexSmplr)
+{
+    float2 tc = (float2(16.0) * round(float2(e1, e2) * 4.0)) + dist;
+    tc = (float2(0.0062500000931322574615478515625, 0.001785714295692741870880126953125) * tc) + float2(0.00312500004656612873077392578125, 0.0008928571478463709354400634765625);
+    tc.y = (0.14285714924335479736328125 * offs) + tc.y;
+    return areaTex.sample(areaTexSmplr, tc, level(0.0)).xy;
+}
+
+static inline __attribute__((always_inline))
+void SMAADetectHorizontalCornerPattern(thread float2& weights, thread const float4& tc, thread const float2& d, texture2d<float> edgesTex, sampler edgesTexSmplr)
+{
+    float2 leftRight = step(d, d.yx);
+    float2 rounding = leftRight * (1.0 - (float(SMAA_CORNER_ROUNDING) / 100.0));
+    rounding /= float2(leftRight.x + leftRight.y);
+    float2 factor = float2(1.0);
+    factor.x -= (rounding.x * edgesTex.sample(edgesTexSmplr, tc.xy, level(0.0), int2(0, 1)).x);
+    factor.x -= (rounding.y * edgesTex.sample(edgesTexSmplr, tc.zw, level(0.0), int2(1)).x);
+    factor.y -= (rounding.x * edgesTex.sample(edgesTexSmplr, tc.xy, level(0.0), int2(0, -2)).x);
+    factor.y -= (rounding.y * edgesTex.sample(edgesTexSmplr, tc.zw, level(0.0), int2(1, -2)).x);
+    weights *= fast::clamp(factor, float2(0.0), float2(1.0));
+}
+
+static inline __attribute__((always_inline))
+float SMAASearchYUp(thread float2& tc, thread const float& end, constant RtMetrics& _153, texture2d<float> edgesTex, sampler edgesTexSmplr, texture2d<float> searchTex, sampler searchTexSmplr)
+{
+    float2 e = float2(1.0, 0.0);
+    for (;;)
+    {
+        bool _718 = tc.y > end;
+        bool _724;
+        if (_718)
+        {
+            _724 = e.x > 0.828100025653839111328125;
+        }
+        else
+        {
+            _724 = _718;
+        }
+        bool _730;
+        if (_724)
+        {
+            _730 = e.y == 0.0;
+        }
+        else
+        {
+            _730 = _724;
+        }
+        if (_730)
+        {
+            e = edgesTex.sample(edgesTexSmplr, tc, level(0.0)).xy;
+            tc += (float2(0.0, -2.0) * _153.rtMetrics.xy);
+            continue;
+        }
+        else
+        {
+            break;
+        }
+    }
+    float2 param = e.yx;
+    float param_1 = 0.0;
+    float offs = ((-2.007874011993408203125) * SMAASearchLength(param, param_1, searchTex, searchTexSmplr)) + 3.25;
+    return (_153.rtMetrics.y * offs) + tc.y;
+}
+
+static inline __attribute__((always_inline))
+float SMAASearchYDown(thread float2& tc, thread const float& end, constant RtMetrics& _153, texture2d<float> edgesTex, sampler edgesTexSmplr, texture2d<float> searchTex, sampler searchTexSmplr)
+{
+    float2 e = float2(1.0, 0.0);
+    for (;;)
+    {
+        bool _768 = tc.y < end;
+        bool _774;
+        if (_768)
+        {
+            _774 = e.x > 0.828100025653839111328125;
+        }
+        else
+        {
+            _774 = _768;
+        }
+        bool _780;
+        if (_774)
+        {
+            _780 = e.y == 0.0;
+        }
+        else
+        {
+            _780 = _774;
+        }
+        if (_780)
+        {
+            e = edgesTex.sample(edgesTexSmplr, tc, level(0.0)).xy;
+            tc += (float2(0.0, 2.0) * _153.rtMetrics.xy);
+            continue;
+        }
+        else
+        {
+            break;
+        }
+    }
+    float2 param = e.yx;
+    float param_1 = 0.5;
+    float offs = ((-2.007874011993408203125) * SMAASearchLength(param, param_1, searchTex, searchTexSmplr)) + 3.25;
+    return ((-_153.rtMetrics.y) * offs) + tc.y;
+}
+
+static inline __attribute__((always_inline))
+void SMAADetectVerticalCornerPattern(thread float2& weights, thread const float4& tc, thread const float2& d, texture2d<float> edgesTex, sampler edgesTexSmplr)
+{
+    float2 leftRight = step(d, d.yx);
+    float2 rounding = leftRight * (1.0 - (float(SMAA_CORNER_ROUNDING) / 100.0));
+    rounding /= float2(leftRight.x + leftRight.y);
+    float2 factor = float2(1.0);
+    factor.x -= (rounding.x * edgesTex.sample(edgesTexSmplr, tc.xy, level(0.0), int2(1, 0)).y);
+    factor.x -= (rounding.y * edgesTex.sample(edgesTexSmplr, tc.zw, level(0.0), int2(1)).y);
+    factor.y -= (rounding.x * edgesTex.sample(edgesTexSmplr, tc.xy, level(0.0), int2(-2, 0)).y);
+    factor.y -= (rounding.y * edgesTex.sample(edgesTexSmplr, tc.zw, level(0.0), int2(-2, 1)).y);
+    weights *= fast::clamp(factor, float2(0.0), float2(1.0));
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], const device spvDescriptorSetBuffer2& spvDescriptorSet2 [[buffer(2)]], const device spvDescriptorSetBuffer3& spvDescriptorSet3 [[buffer(3)]])
+{
+    main0_out out = {};
+    float4 weights = float4(0.0);
+    float2 e = spvDescriptorSet0.edgesTex.sample(spvDescriptorSet0.edgesTexSmplr, in.texcoord).xy;
+    if (e.y > 0.0)
+    {
+        bool skipHorizontal = false;
+        if (_1010)
+        {
+            float2 param = in.texcoord;
+            float2 param_1 = e;
+            float2 _1017 = SMAACalculateDiagWeights(param, param_1, (*spvDescriptorSet3.m_153), spvDescriptorSet0.edgesTex, spvDescriptorSet0.edgesTexSmplr, spvDescriptorSet1.areaTex, spvDescriptorSet1.areaTexSmplr);
+            weights.x = _1017.x;
+            weights.y = _1017.y;
+            skipHorizontal = (weights.x + weights.y) != 0.0;
+            if (skipHorizontal)
+            {
+                e.x = 0.0;
+            }
+        }
+        if (!skipHorizontal)
+        {
+            float2 param_2 = in.offset0.xy;
+            float param_3 = in.offset2.x;
+            float _1047 = SMAASearchXLeft(param_2, param_3, (*spvDescriptorSet3.m_153), spvDescriptorSet0.edgesTex, spvDescriptorSet0.edgesTexSmplr, spvDescriptorSet2.searchTex, spvDescriptorSet2.searchTexSmplr);
+            float3 coords;
+            coords.x = _1047;
+            coords.y = in.offset1.y;
+            float2 d;
+            d.x = coords.x;
+            float e1 = spvDescriptorSet0.edgesTex.sample(spvDescriptorSet0.edgesTexSmplr, coords.xy, level(0.0)).x;
+            float2 param_4 = in.offset0.zw;
+            float param_5 = in.offset2.y;
+            float _1069 = SMAASearchXRight(param_4, param_5, (*spvDescriptorSet3.m_153), spvDescriptorSet0.edgesTex, spvDescriptorSet0.edgesTexSmplr, spvDescriptorSet2.searchTex, spvDescriptorSet2.searchTexSmplr);
+            coords.z = _1069;
+            d.y = coords.z;
+            d = abs(round(((*spvDescriptorSet3.m_153).rtMetrics.zz * d) - in.pixcoord.xx));
+            float2 sqrt_d = sqrt(d);
+            float e2 = spvDescriptorSet0.edgesTex.sample(spvDescriptorSet0.edgesTexSmplr, coords.zy, level(0.0), int2(1, 0)).x;
+            float2 param_6 = sqrt_d;
+            float param_7 = e1;
+            float param_8 = e2;
+            float param_9 = 0.0;
+            float2 _1101 = SMAAArea(param_6, param_7, param_8, param_9, spvDescriptorSet1.areaTex, spvDescriptorSet1.areaTexSmplr);
+            weights.x = _1101.x;
+            weights.y = _1101.y;
+            coords.y = in.texcoord.y;
+            float2 param_10 = weights.xy;
+            float4 param_11 = coords.xyzy;
+            float2 param_12 = d;
+            SMAADetectHorizontalCornerPattern(param_10, param_11, param_12, spvDescriptorSet0.edgesTex, spvDescriptorSet0.edgesTexSmplr);
+            weights.x = param_10.x;
+            weights.y = param_10.y;
+        }
+    }
+    if (e.x > 0.0)
+    {
+        float2 param_13 = in.offset1.xy;
+        float param_14 = in.offset2.z;
+        float _1135 = SMAASearchYUp(param_13, param_14, (*spvDescriptorSet3.m_153), spvDescriptorSet0.edgesTex, spvDescriptorSet0.edgesTexSmplr, spvDescriptorSet2.searchTex, spvDescriptorSet2.searchTexSmplr);
+        float3 coords_1;
+        coords_1.y = _1135;
+        coords_1.x = in.offset0.x;
+        float2 d_1;
+        d_1.x = coords_1.y;
+        float e1_1 = spvDescriptorSet0.edgesTex.sample(spvDescriptorSet0.edgesTexSmplr, coords_1.xy, level(0.0)).y;
+        float2 param_15 = in.offset1.zw;
+        float param_16 = in.offset2.w;
+        float _1156 = SMAASearchYDown(param_15, param_16, (*spvDescriptorSet3.m_153), spvDescriptorSet0.edgesTex, spvDescriptorSet0.edgesTexSmplr, spvDescriptorSet2.searchTex, spvDescriptorSet2.searchTexSmplr);
+        coords_1.z = _1156;
+        d_1.y = coords_1.z;
+        d_1 = abs(round(((*spvDescriptorSet3.m_153).rtMetrics.ww * d_1) - in.pixcoord.yy));
+        float2 sqrt_d_1 = sqrt(d_1);
+        float e2_1 = spvDescriptorSet0.edgesTex.sample(spvDescriptorSet0.edgesTexSmplr, coords_1.xz, level(0.0), int2(0, 1)).y;
+        float2 param_17 = sqrt_d_1;
+        float param_18 = e1_1;
+        float param_19 = e2_1;
+        float param_20 = 0.0;
+        float2 _1187 = SMAAArea(param_17, param_18, param_19, param_20, spvDescriptorSet1.areaTex, spvDescriptorSet1.areaTexSmplr);
+        weights.z = _1187.x;
+        weights.w = _1187.y;
+        coords_1.x = in.texcoord.x;
+        float2 param_21 = weights.zw;
+        float4 param_22 = coords_1.xyxz;
+        float2 param_23 = d_1;
+        SMAADetectVerticalCornerPattern(param_21, param_22, param_23, spvDescriptorSet0.edgesTex, spvDescriptorSet0.edgesTexSmplr);
+        weights.z = param_21.x;
+        weights.w = param_21.y;
+    }
+    out.out_weights = weights;
+    return out;
+}
+

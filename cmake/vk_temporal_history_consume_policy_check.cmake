@@ -10,14 +10,25 @@ file(READ "${ROOT}/code/renderervk/shaders/temporal_history_consume.comp" SHADER
 foreach(needle
     "!plan->historyValid" "!view->committed.valid"
     "previousCommitted=view->committed"
-    "memset( owner->slots[frameIndex].mapped, 0x7f"
     "PackedHalf2Finite(words[14])"
     "FloatWordFinitePositive(words[16])"
-    "RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT"
-    "RAL_PIPELINE_STAGE_HOST_BIT")
+    "RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_SRC"
+    "RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ"
+    "RAL_MEMORY_DEVICE_LOCAL"
+    "RAL_RESOURCE_USAGE_STORAGE_WRITE, RAL_RESOURCE_USAGE_COPY_SOURCE"
+    "RAL_RESOURCE_USAGE_COPY_DESTINATION, RAL_RESOURCE_USAGE_HOST_READ"
+    "Ral_CmdCopyBuffer( commandBuffer, slot->gpuBuffer, slot->readbackBuffer"
+    "Ral_BufferMapBegin( slot->readbackBuffer"
+    "Ral_BufferMapUnmap( slot->readbackBuffer")
   string(FIND "${CONSUMER}" "${needle}" pos)
   if(pos EQUAL -1)
     message(FATAL_ERROR "history consumer missing exact contract: ${needle}")
+  endif()
+endforeach()
+foreach(forbidden "Ral_MapBuffer(" "Ral_UnmapBuffer(" "void *mapped")
+  string(FIND "${CONSUMER}${HEADER}" "${forbidden}" pos)
+  if(NOT pos EQUAL -1)
+    message(FATAL_ERROR "history consumer regained persistent map surface: ${forbidden}")
   endif()
 endforeach()
 foreach(forbidden "motion" "activation" "vk_temporal_main" "vk_temporal_motion")

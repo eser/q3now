@@ -14,6 +14,7 @@ struct ralBackend_s { int id; };
 struct ralBuffer_s { int id; byte *bytes; uint64_t size; qboolean external; };
 struct ralBindGroupLayout_s { int id; };
 struct ralBindGroup_s { int id; };
+struct ralFence_s { int id; };
 
 static struct ralBuffer_s buffers[32];
 static struct ralBindGroupLayout_s layouts[8];
@@ -24,10 +25,11 @@ static ralBindGroupLayoutCreateInfo_t capturedLayout;
 static ralBindingValue_t groupValues[32][2];
 static ralBindGroupCreateInfo_t groupInfos[32];
 static int layoutCalls, bufferCalls, mapCalls, groupCalls;
-static int layoutDestroys, bufferDestroys, unmaps, groupDestroys;
-static int flushCalls;
-static uint64_t flushOffset, flushSize;
-static int failLayoutAt, failBufferAt, failMapAt, failGroupAt;
+static int layoutDestroys, bufferDestroys, groupDestroys;
+static int uploadCalls, fenceWaits, fenceDestroys;
+static uint64_t uploadOffset, uploadSize;
+static int failLayoutAt, failBufferAt, failGroupAt;
+static int failUploadAt;
 static ralBuffer_t *aliasBufferAt;
 static ralBindGroup_t *aliasGroupAt;
 static char destroyEvents[128];
@@ -81,24 +83,20 @@ void Ral_DestroyBuffer( ralBuffer_t *buffer ) {
 	}
 }
 
-void *Ral_MapBuffer( ralBuffer_t *buffer ) {
-	int call = ++mapCalls;
-	if ( call == failMapAt ) return NULL;
-	return ((struct ralBuffer_s *)buffer)->bytes;
+ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buffer, uint64_t offset,
+		const void *data, uint64_t size ) {
+	static struct ralFence_s fence = { 1 };
+	int call = ++uploadCalls;
+	if ( call == failUploadAt || !buffer || !data || !size
+			|| offset > buffer->size || size > buffer->size - offset ) return NULL;
+	memcpy( buffer->bytes + offset, data, (size_t)size );
+	uploadOffset = offset; uploadSize = size;
+	return &fence;
 }
-
-void Ral_UnmapBuffer( ralBuffer_t *buffer ) {
-	(void)buffer;
-	unmaps++;
-	destroyEvents[destroyEventCount++] = 'U';
+void Ral_WaitFence( ralFence_t *fence, uint64_t timeoutNs ) {
+	if ( fence && timeoutNs ) fenceWaits++;
 }
-
-void Ral_FlushBuffer( ralBuffer_t *buffer, uint64_t offset, uint64_t size ) {
-	(void)buffer;
-	flushCalls++;
-	flushOffset = offset;
-	flushSize = size;
-}
+void Ral_DestroyFence( ralFence_t *fence ) { if ( fence ) fenceDestroys++; }
 
 ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *backend,
 		const ralBindGroupCreateInfo_t *ci ) {
@@ -178,7 +176,7 @@ int main( void ) {
 	CHECK( owner.frames[0].ready && owner.frames[0].capacity == 4
 		&& owner.frames[0].allocationGeneration == 1
 		&& owner.frames[0].entityBuffer == &entityA );
-	CHECK( layoutCalls == 1 && bufferCalls == 1 && mapCalls == 1 && groupCalls == 1 );
+	CHECK( layoutCalls == 1 && bufferCalls == 1 && mapCalls == 0 && groupCalls == 1 );
 	CHECK( capturedLayout.numEntries == 2 && !capturedLayout.bindless );
 	CHECK( capturedEntries[0].binding == 0
 		&& capturedEntries[0].type == RAL_BIND_STORAGE_BUFFER
@@ -189,8 +187,8 @@ int main( void ) {
 		&& capturedEntries[1].count == 1
 		&& capturedEntries[1].stageFlags == RAL_STAGE_VERTEX );
 	CHECK( bufferInfos[1].size == 4u * sizeof( temporalMotionGpuPayload_t )
-		&& bufferInfos[1].usage == RAL_BUFFER_STORAGE
-		&& bufferInfos[1].memory == RAL_MEMORY_HOST_COHERENT );
+		&& bufferInfos[1].usage == ( RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST )
+		&& bufferInfos[1].memory == RAL_MEMORY_DEVICE_LOCAL );
 	CHECK( groupValues[1][0].binding == 0
 		&& groupValues[1][0].buffer == &entityA
 		&& groupValues[1][0].type == RAL_BIND_STORAGE_BUFFER );
@@ -253,14 +251,23 @@ int main( void ) {
 	CHECK( R_TemporalMotionPayloadAppendAt( &owner, 0, 1,
 		TEMPORAL_MOTION_WRITE_VALID, &matrices, &out ) );
 	CHECK( out == 1 && memcmp( &matrices, &matrixBefore, sizeof( matrices ) ) == 0 );
-	CHECK( flushCalls == 1 && flushOffset == sizeof( temporalMotionGpuPayload_t )
-		&& flushSize == sizeof( temporalMotionGpuPayload_t ) );
-	records = (temporalMotionGpuPayload_t *)owner.frames[0].mapped;
+	CHECK( uploadCalls == 1 && uploadOffset == sizeof( temporalMotionGpuPayload_t )
+		&& uploadSize == sizeof( temporalMotionGpuPayload_t )
+		&& fenceWaits == 1 && fenceDestroys == 1 );
+	records = (temporalMotionGpuPayload_t *)owner.frames[0].cpuShadow;
 	CHECK( memcmp( records[1].currentMvp, matrices.currentMvp, 64 ) == 0
 		&& memcmp( records[1].previousMvp, matrices.previousMvp, 64 ) == 0
 		&& records[1].outcome == TEMPORAL_MOTION_WRITE_VALID
 		&& records[1].reserved[0] == 0 && records[1].reserved[1] == 0
 		&& records[1].reserved[2] == 0 );
+	memcpy( recordBefore, &records[2], sizeof( recordBefore ) );
+	beforeOwner = owner; out = sentinel; failUploadAt = uploadCalls + 1;
+	CHECK( !R_TemporalMotionPayloadAppendAt( &owner, 0, 2,
+		TEMPORAL_MOTION_WRITE_VALID, &matrices, &out ) );
+	CHECK( out == sentinel && memcmp( &records[2], recordBefore,
+		sizeof( recordBefore ) ) == 0
+		&& memcmp( &owner, &beforeOwner, sizeof( owner ) ) == 0 );
+	failUploadAt = 0;
 	out = sentinel;
 	CHECK( R_TemporalMotionPayloadAppendAt( &owner, 0, 3,
 		TEMPORAL_MOTION_WRITE_VALID, &matrices, &out ) && out == 3 );
@@ -326,20 +333,14 @@ int main( void ) {
 	CHECK( memcmp( &owner, &beforeOwner, sizeof( owner ) ) == 0
 		&& groupDestroys == gd );
 
-	// Growth replaces group then unmaps/destroys the old buffer.
+	// Growth replaces group then frees/destroys the old shadow/buffer.
 	baseEvent = destroyEventCount; beforeOwner = owner;
 	CHECK( R_TemporalMotionPayloadEnsure( &owner, &backendA, 2, 0, 8, &entityB, 2 ) );
 	CHECK( owner.frames[0].capacity == 8
 		&& owner.frames[0].allocationGeneration == beforeOwner.frames[0].allocationGeneration + 1 );
 	CHECK( destroyEvents[baseEvent] == 'G'
-		&& destroyEvents[baseEvent + 1] == 'U'
-		&& destroyEvents[baseEvent + 2] == 'B' );
+		&& destroyEvents[baseEvent + 1] == 'B' );
 	beforeOwner = owner; bd = bufferDestroys; gd = groupDestroys;
-	failMapAt = mapCalls + 1;
-	CHECK( !R_TemporalMotionPayloadEnsure( &owner, &backendA, 2, 0, 16, &entityB, 2 ) );
-	CHECK( memcmp( &owner, &beforeOwner, sizeof( owner ) ) == 0
-		&& bufferDestroys == bd + 1 && groupDestroys == gd );
-	failMapAt = 0;
 	bd = bufferDestroys; gd = groupDestroys; failGroupAt = groupCalls + 1;
 	CHECK( !R_TemporalMotionPayloadEnsure( &owner, &backendA, 2, 0, 16, &entityB, 2 ) );
 	CHECK( memcmp( &owner, &beforeOwner, sizeof( owner ) ) == 0
@@ -398,9 +399,6 @@ int main( void ) {
 		failBufferAt = bufferCalls + 1;
 		CHECK( !R_TemporalMotionPayloadEnsure( &fresh, &backendA, 1, 0, 2, &entityA, 1 ) );
 		CHECK( memcmp( &fresh, &zero, sizeof( fresh ) ) == 0 ); failBufferAt = 0;
-		failMapAt = mapCalls + 1;
-		CHECK( !R_TemporalMotionPayloadEnsure( &fresh, &backendA, 1, 0, 2, &entityA, 1 ) );
-		CHECK( memcmp( &fresh, &zero, sizeof( fresh ) ) == 0 ); failMapAt = 0;
 		failGroupAt = groupCalls + 1;
 		CHECK( !R_TemporalMotionPayloadEnsure( &fresh, &backendA, 1, 0, 2, &entityA, 1 ) );
 		CHECK( memcmp( &fresh, &zero, sizeof( fresh ) ) == 0 ); failGroupAt = 0;

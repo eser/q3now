@@ -1,0 +1,161 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T>
+struct spvDescriptor
+{
+    T value;
+};
+
+template<typename T>
+struct spvDescriptorArray
+{
+    spvDescriptorArray(const device spvDescriptor<T>* ptr_) : ptr(&ptr_->value) {}
+    spvDescriptorArray(const device void *ptr_) : spvDescriptorArray(static_cast<const device spvDescriptor<T>*>(ptr_)) {}
+    const device T& operator [] (size_t i) const { return ptr[i]; }
+    const device T* ptr;
+};
+
+struct UBO
+{
+    float4 eyePos;
+    float4 lightPos;
+    float4 lightColor;
+    float4 lightVector;
+    float4 _pad_to_packed_indices[30];
+    uint4 packed_indices[3];
+};
+
+constant float distortion_scale_tmp [[function_constant(12)]];
+constant float distortion_scale = is_function_constant_defined(distortion_scale_tmp) ? distortion_scale_tmp : 0.0199999995529651641845703125;
+constant int tex_domain_tmp [[function_constant(4)]];
+constant int tex_domain = is_function_constant_defined(tex_domain_tmp) ? tex_domain_tmp : 0;
+constant int _275 = (tex_domain & 1);
+constant bool _276 = (_275 != 0);
+constant float tint_strength_tmp [[function_constant(13)]];
+constant float tint_strength = is_function_constant_defined(tint_strength_tmp) ? tint_strength_tmp : 0.25;
+constant float specular_power_tmp [[function_constant(14)]];
+constant float specular_power = is_function_constant_defined(specular_power_tmp) ? specular_power_tmp : 32.0;
+constant int alpha_test_func_tmp [[function_constant(0)]];
+constant int alpha_test_func = is_function_constant_defined(alpha_test_func_tmp) ? alpha_test_func_tmp : 0;
+constant float alpha_test_value_tmp [[function_constant(1)]];
+constant float alpha_test_value = is_function_constant_defined(alpha_test_value_tmp) ? alpha_test_value_tmp : 0.0;
+constant int alpha_to_coverage_tmp [[function_constant(3)]];
+constant int alpha_to_coverage = is_function_constant_defined(alpha_to_coverage_tmp) ? alpha_to_coverage_tmp : 0;
+constant int abs_light_tmp [[function_constant(5)]];
+constant int abs_light = is_function_constant_defined(abs_light_tmp) ? abs_light_tmp : 0;
+
+struct spvDescriptorSetBuffer0
+{
+    constant UBO* m_180 [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    spvDescriptor<texture2d<float>> wired_bindless_images [[id(0)]][1] /* unsized array hack */;
+    // Overlapping binding: spvDescriptor<sampler> wired_bindless_samplers [[id(0)]][1] /* unsized array hack */;
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord [[user(locn0), centroid_perspective]];
+    float3 N [[user(locn1)]];
+    float4 L [[user(locn2)]];
+    float4 V [[user(locn3)]];
+};
+
+static inline __attribute__((always_inline))
+float hash(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float _noise(thread const float2& p)
+{
+    float2 i = floor(p);
+    float2 f = fract(p);
+    f = (f * f) * (float2(3.0) - (f * 2.0));
+    float2 param = i;
+    float2 param_1 = i + float2(1.0, 0.0);
+    float2 param_2 = i + float2(0.0, 1.0);
+    float2 param_3 = i + float2(1.0);
+    return mix(mix(hash(param), hash(param_1), f.x), mix(hash(param_2), hash(param_3), f.x), f.y);
+}
+
+static inline __attribute__((always_inline))
+float2 rippleNoise(thread const float2& uv)
+{
+    float2 param = uv * 6.0;
+    float2 param_1 = uv * 12.0;
+    float2 n;
+    n.x = (_noise(param) * 0.60000002384185791015625) + (_noise(param_1) * 0.300000011920928955078125);
+    float2 param_2 = (uv * 6.0) + float2(43.0);
+    float2 param_3 = (uv * 12.0) + float2(43.0);
+    n.y = (_noise(param_2) * 0.60000002384185791015625) + (_noise(param_3) * 0.300000011920928955078125);
+    return (n - float2(0.5)) * 2.0;
+}
+
+static inline __attribute__((always_inline))
+float3 sRGBToLinear(thread float3& c)
+{
+    c = fast::max(c, float3(0.0));
+    bool3 cutoff = c <= float3(0.040449999272823333740234375);
+    float3 lo = c / float3(12.9200000762939453125);
+    float3 hi = powr((c + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return mix(hi, lo, float3(cutoff));
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    spvDescriptorArray<texture2d<float>> wired_bindless_images {spvDescriptorSet1.wired_bindless_images};
+    spvDescriptorArray<sampler> wired_bindless_samplers {reinterpret_cast<const device spvDescriptor<sampler>*>(&spvDescriptorSet1.wired_bindless_images)};
+
+    main0_out out = {};
+    uint _189 = (*spvDescriptorSet0.m_180).packed_indices[1].z & 4095u;
+    uint _203 = ((*spvDescriptorSet0.m_180).packed_indices[1].z >> uint(12)) & 255u;
+    int2 screenSize = int2(wired_bindless_images[_189].get_width(), wired_bindless_images[_189].get_height());
+    float2 screenUV = gl_FragCoord.xy / float2(screenSize);
+    float2 param = in.frag_tex_coord;
+    float2 ripple = rippleNoise(param);
+    float2 refractionUV = fast::clamp(screenUV + (ripple * distortion_scale), float2(0.001000000047497451305389404296875), float2(0.999000012874603271484375));
+    uint _241 = (*spvDescriptorSet0.m_180).packed_indices[1].z & 4095u;
+    uint _248 = ((*spvDescriptorSet0.m_180).packed_indices[1].z >> uint(12)) & 255u;
+    float3 refraction = wired_bindless_images[_241].sample(wired_bindless_samplers[_248], refractionUV).xyz;
+    uint _260 = (*spvDescriptorSet0.m_180).packed_indices[0].x & 4095u;
+    uint _267 = ((*spvDescriptorSet0.m_180).packed_indices[0].x >> uint(12)) & 255u;
+    float4 waterTex = wired_bindless_images[_260].sample(wired_bindless_samplers[_267], in.frag_tex_coord);
+    float3 _277;
+    if (_276)
+    {
+        _277 = waterTex.xyz;
+    }
+    else
+    {
+        float3 param_1 = waterTex.xyz;
+        float3 _286 = sRGBToLinear(param_1);
+        _277 = _286;
+    }
+    float3 waterColor = _277;
+    float3 nV = fast::normalize(in.V.xyz);
+    float fresnel = 1.0 - abs(dot(fast::normalize(in.N), nV));
+    fresnel *= fresnel;
+    float3 tinted = mix(refraction, waterColor, float3(tint_strength));
+    float3 finalColor = mix(tinted, waterColor * 1.2999999523162841796875, float3(fresnel * 0.60000002384185791015625));
+    float3 nL = fast::normalize(in.L.xyz);
+    float3 halfVec = fast::normalize(nL + nV);
+    float spec = powr(fast::max(dot(fast::normalize(in.N), halfVec), 0.0), specular_power);
+    finalColor += float3(spec * 0.25);
+    out.out_color = float4(finalColor, waterTex.w);
+    return out;
+}
+

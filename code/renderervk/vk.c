@@ -17778,7 +17778,14 @@ static void vk_gpu_ts_write( const char *label );
 // so the RAL-owned handles don't outlive the device (VUID-vkDestroyDevice-05137).
 void vk_hdr_histogram_shutdown( void )
 {
-	if ( vk.ral_histogram_readback )   { Ral_DestroyBuffer( vk.ral_histogram_readback ); vk.ral_histogram_readback = NULL; vk.histogramReadbackPtr = NULL; }
+	int i;
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.ral_histogram_readback[i] ) {
+			Ral_DestroyBuffer( vk.ral_histogram_readback[i] );
+			vk.ral_histogram_readback[i] = NULL;
+		}
+		vk.histogramReadbackReady[i] = qfalse;
+	}
 	if ( vk.ral_histogram_pipeline )   { Ral_DestroyPipeline( vk.ral_histogram_pipeline ); vk.ral_histogram_pipeline = NULL; }
 	if ( vk.ral_histogram_descriptor ) { Ral_DestroyBindGroup( vk.ral_histogram_descriptor ); vk.ral_histogram_descriptor = NULL; }
 	if ( vk.ral_histogram_bgl )        { Ral_DestroyBindGroupLayout( vk.ral_histogram_bgl ); vk.ral_histogram_bgl = NULL; }
@@ -17894,15 +17901,15 @@ void vk_hdr_histogram_init( ralBackend_t *backend )
 		// soft failure here only disables the readback log, not the dispatch.
 		// Not allocated in release — the cvar and its read+log are fenced out.
 		{
+			int i;
 			ralBufferCreateInfo_t rbci;
 			memset( &rbci, 0, sizeof( rbci ) );
 			rbci.size      = (uint64_t)VK_HDR_HISTOGRAM_BINS * sizeof( uint32_t );
-			rbci.usage     = RAL_BUFFER_TRANSFER_DST;
+			rbci.usage     = RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ;
 			rbci.memory    = RAL_MEMORY_HOST_COHERENT;
 			rbci.debugName = "wired-hdr-histogram-readback";
-			vk.ral_histogram_readback = Ral_CreateBuffer( backend, &rbci );
-			if ( vk.ral_histogram_readback )
-				vk.histogramReadbackPtr = Ral_MapBuffer( vk.ral_histogram_readback );
+			for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
+				vk.ral_histogram_readback[i] = Ral_CreateBuffer( backend, &rbci );
 		}
 #endif
 	} else {
@@ -18436,12 +18443,18 @@ void vk_gtao_async_begin( void )
 // texture-teardown path so no RAL handle outlives the device.
 void vk_lens_shutdown( void )
 {
+	int i;
 	if ( vk.ral_lens_pipeline )    { Ral_DestroyPipeline( vk.ral_lens_pipeline ); vk.ral_lens_pipeline = NULL; }
-	if ( vk.ral_lens_descriptor )  { Ral_DestroyBindGroup( vk.ral_lens_descriptor ); vk.ral_lens_descriptor = NULL; }
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
+		if ( vk.ral_lens_descriptor[i] ) { Ral_DestroyBindGroup( vk.ral_lens_descriptor[i] ); vk.ral_lens_descriptor[i] = NULL; }
+		if ( vk.ral_lens_readback[i] )   { Ral_DestroyBuffer( vk.ral_lens_readback[i] ); vk.ral_lens_readback[i] = NULL; }
+		if ( vk.ral_lens_sources[i] )    { Ral_DestroyBuffer( vk.ral_lens_sources[i] ); vk.ral_lens_sources[i] = NULL; }
+		vk.lensReadbackReady[i] = qfalse;
+	}
 	if ( vk.ral_lens_bgl )         { Ral_DestroyBindGroupLayout( vk.ral_lens_bgl ); vk.ral_lens_bgl = NULL; }
 	if ( vk.ral_lens_sampler )     { Ral_DestroySampler( vk.ral_lens_sampler ); vk.ral_lens_sampler = NULL; }
 	if ( vk.ral_lens_depth_view )  { Ral_DestroyTextureView( vk.ral_lens_depth_view ); vk.ral_lens_depth_view = NULL; }
-	if ( vk.ral_lens_sources )     { Ral_DestroyBuffer( vk.ral_lens_sources ); vk.ral_lens_sources = NULL; vk.lensSourcesPtr = NULL; }
+	if ( vk.lensSourcesPtr )        { free( vk.lensSourcesPtr ); vk.lensSourcesPtr = NULL; }
 	vk.lensSourceCount = 0;
 }
 
@@ -18463,6 +18476,7 @@ void vk_lens_init( ralBackend_t *backend )
 	ralComputePipelineCreateInfo_t cpci;
 	const ralBindGroupLayout_t  *layouts[1];
 	uint64_t                     lensBytes;
+	int                          i;
 
 	vk_lens_shutdown();
 
@@ -18471,18 +18485,24 @@ void vk_lens_init( ralBackend_t *backend )
 		return;
 
 	lensBytes = (uint64_t)LENS_TOTAL_SOURCES * LENS_SOURCE_VEC4S * 4u * sizeof( float ); // flares + sun
-	{
+	vk.lensSourcesPtr = calloc( 1u, (size_t)lensBytes );
+	if ( !vk.lensSourcesPtr ) return;
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
 		ralBufferCreateInfo_t bci;
 		memset( &bci, 0, sizeof( bci ) );
 		bci.size = lensBytes;
-		bci.usage = RAL_BUFFER_STORAGE;
-		bci.memory = RAL_MEMORY_HOST_COHERENT;
+		bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_SRC | RAL_BUFFER_TRANSFER_DST;
+		bci.memory = RAL_MEMORY_DEVICE_LOCAL;
 		bci.debugName = "wired-lens-sources";
-		vk.ral_lens_sources = Ral_CreateBuffer( backend, &bci );
-		if ( !vk.ral_lens_sources ) { vk_lens_shutdown(); return; }
-		vk.lensSourcesPtr = Ral_MapBuffer( vk.ral_lens_sources );
-		if ( vk.lensSourcesPtr )
-			memset( vk.lensSourcesPtr, 0, (size_t)lensBytes );  // visibility 0 until first oracle pass
+		vk.ral_lens_sources[i] = Ral_CreateBuffer( backend, &bci );
+		if ( !vk.ral_lens_sources[i] ) { vk_lens_shutdown(); return; }
+		memset( &bci, 0, sizeof( bci ) );
+		bci.size = lensBytes;
+		bci.usage = RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ;
+		bci.memory = RAL_MEMORY_HOST_COHERENT;
+		bci.debugName = "wired-lens-readback";
+		vk.ral_lens_readback[i] = Ral_CreateBuffer( backend, &bci );
+		if ( !vk.ral_lens_readback[i] ) { vk_lens_shutdown(); return; }
 	}
 
 	// NEAREST sampling view over the depth copy (reversed-Z, not linear-filterable
@@ -18515,20 +18535,20 @@ void vk_lens_init( ralBackend_t *backend )
 	bglci.debugName  = "wired-lens-bgl";
 	vk.ral_lens_bgl = Ral_CreateBindGroupLayout( backend, &bglci );
 
-	if ( vk.ral_lens_depth_view && vk.ral_lens_sampler && vk.ral_lens_bgl && vk.ral_lens_sources ) {
-		memset( bv, 0, sizeof( bv ) );
-		bv[0].binding = 0; bv[0].type = RAL_BIND_SAMPLED_TEXTURE; bv[0].textureView = vk.ral_lens_depth_view;
-		bv[1].binding = 1; bv[1].type = RAL_BIND_SAMPLER;         bv[1].sampler     = vk.ral_lens_sampler;
-		bv[2].binding = 2; bv[2].type = RAL_BIND_STORAGE_BUFFER;  bv[2].buffer      = vk.ral_lens_sources;
-		memset( &bgci, 0, sizeof( bgci ) );
-		bgci.layout    = vk.ral_lens_bgl;
-		bgci.values    = bv;
-		bgci.numValues = 3;
-		bgci.debugName = "wired-lens-bg";
-		vk.ral_lens_descriptor = Ral_CreateBindGroup( backend, &bgci );
+	if ( vk.ral_lens_depth_view && vk.ral_lens_sampler && vk.ral_lens_bgl ) {
+		for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
+			memset( bv, 0, sizeof( bv ) );
+			bv[0].binding = 0; bv[0].type = RAL_BIND_SAMPLED_TEXTURE; bv[0].textureView = vk.ral_lens_depth_view;
+			bv[1].binding = 1; bv[1].type = RAL_BIND_SAMPLER;         bv[1].sampler     = vk.ral_lens_sampler;
+			bv[2].binding = 2; bv[2].type = RAL_BIND_STORAGE_BUFFER;  bv[2].buffer      = vk.ral_lens_sources[i];
+			memset( &bgci, 0, sizeof( bgci ) );
+			bgci.layout = vk.ral_lens_bgl; bgci.values = bv; bgci.numValues = 3; bgci.debugName = "wired-lens-bg";
+			vk.ral_lens_descriptor[i] = Ral_CreateBindGroup( backend, &bgci );
+			if ( !vk.ral_lens_descriptor[i] ) { vk_lens_shutdown(); return; }
+		}
 	}
 
-	if ( vk.ral_lens_bgl && vk.ral_lens_descriptor ) {
+	if ( vk.ral_lens_bgl && vk.ral_lens_descriptor[0] ) {
 		layouts[0] = vk.ral_lens_bgl;
 		memset( &cpci, 0, sizeof( cpci ) );
 		cpci.computeSpirv        = (const uint32_t *)lens_occlusion_comp_spv;
@@ -18557,15 +18577,43 @@ void vk_lens_dispatch( struct ralCommandBuffer_s *cb )
 		int   count;
 		float radiusPx;
 	} push;
+	const uint64_t lensBytes = (uint64_t)LENS_TOTAL_SOURCES * LENS_SOURCE_VEC4S * 4u * sizeof( float );
+	const uint32_t slot = (uint32_t)vk.cmd_index;
+	ralBufferMapRequest_t mapRequest;
+	ralBufferMapTicket_t mapTicket;
+	ralBufferTransition_t transition;
+	ralResourceTransitionBatch_t batch;
+	ralBufferCopy_t copy;
+	ralFence_t *upload;
+	float *shadow = (float *)vk.lensSourcesPtr;
+	uint32_t i;
 
 	if ( !vk.fboActive || !r_lens->integer )
 		return;
-	if ( !vk.ral_lens_pipeline || !vk.ral_lens_descriptor )
+	if ( !vk.ral_lens_pipeline || !vk.ral_lens_descriptor[slot]
+	  || !vk.ral_lens_sources[slot] || !vk.ral_lens_readback[slot] || !shadow )
 		return;
 	if ( !vk.sceneDepth.ral_image || !vk.sceneDepth.copied )
 		return;
 	if ( vk.lensSourceCount <= 0 )
 		return;
+
+	// The current command slot's fence was waited before reuse. Consume only
+	// that slot's prior GPU result, copy visibility into the CPU shadow, then
+	// unmap before any new GPU command can reference the resource.
+	if ( vk.lensReadbackReady[slot] ) {
+		const float *completed;
+		memset( &mapRequest, 0, sizeof( mapRequest ) );
+		mapRequest.mode = RAL_MAP_READ; mapRequest.size = lensBytes;
+		if ( Ral_BufferMapBegin( vk.ral_lens_readback[slot], &mapRequest, &mapTicket ) != ralSuccess ) return;
+		completed = (const float *)mapTicket.mappedRange;
+		for ( i = 0; i < LENS_TOTAL_SOURCES; ++i ) shadow[(size_t)i * 8u + 7u] = completed[(size_t)i * 8u + 7u];
+		if ( Ral_BufferMapUnmap( vk.ral_lens_readback[slot], &mapTicket ) != ralSuccess ) return;
+	}
+	upload = Ral_BufferUploadAsync( vk.ral_lens_sources[slot], 0, shadow, lensBytes );
+	if ( !upload ) return;
+	Ral_WaitFence( upload, ~(uint64_t)0 );
+	Ral_DestroyFence( upload );
 
 	push.viewport[0] = (float)glConfig.vidWidth;
 	push.viewport[1] = (float)glConfig.vidHeight;
@@ -18573,12 +18621,26 @@ void vk_lens_dispatch( struct ralCommandBuffer_s *cb )
 	push.radiusPx    = 1.5f;   // disc radius in depth-copy texels — smooth edge fade
 
 	Ral_CmdBindPipeline( cb, vk.ral_lens_pipeline );
-	Ral_CmdBindBindGroup( cb, 0, vk.ral_lens_descriptor );
+	memset( &transition, 0, sizeof( transition ) );
+	transition.buffer = vk.ral_lens_readback[slot]; transition.size = lensBytes;
+	transition.before.usage = vk.lensReadbackReady[slot] ? RAL_RESOURCE_USAGE_HOST_READ : RAL_RESOURCE_USAGE_UNDEFINED;
+	transition.after.usage = RAL_RESOURCE_USAGE_COPY_DESTINATION;
+	transition.sourceQueue = transition.destinationQueue = RAL_QUEUE_GRAPHICS;
+	memset( &batch, 0, sizeof( batch ) ); batch.bufferTransitions = &transition; batch.bufferTransitionCount = 1u;
+	if ( Ral_CmdTransitionResources( cb, &batch ) != ralSuccess ) return;
+
+	Ral_CmdBindBindGroup( cb, 0, vk.ral_lens_descriptor[slot] );
 	Ral_CmdPushConstants( cb, RAL_STAGE_COMPUTE, 0, sizeof( push ), &push );
 	Ral_CmdDispatch( cb, ( (uint32_t)vk.lensSourceCount + 63u ) / 64u, 1, 1 );
 
-	// Make the visibility write visible to the later host read / graphics pass.
-	Ral_CmdPipelineBarrier( cb, RAL_BARRIER_ALL );
+	// Copy GPU output into the slot-owned readback, then publish HOST_READ for
+	// the next fence-complete reuse of this command slot.
+	Ral_CmdPipelineBarrier( cb, RAL_BARRIER_COMPUTE_TO_TRANSFER );
+	memset( &copy, 0, sizeof( copy ) ); copy.size = lensBytes;
+	Ral_CmdCopyBuffer( cb, vk.ral_lens_sources[slot], vk.ral_lens_readback[slot], &copy );
+	transition.before = transition.after; transition.after.usage = RAL_RESOURCE_USAGE_HOST_READ;
+	if ( Ral_CmdTransitionResources( cb, &batch ) != ralSuccess ) return;
+	vk.lensReadbackReady[slot] = qtrue;
 
 	// The compute bind dirtied the GRAPHICS bound-pipeline trackers (we record onto
 	// the graphics cmd buffer); clear so the following pass re-binds cleanly.
@@ -18616,6 +18678,34 @@ static float vk_half_to_float( uint16_t h )
 	}
 	out.u = bits;
 	return out.f;
+}
+
+static qboolean vk_typed_readback_transition( ralBuffer_t *buffer,
+	                                           ralResourceUsage_t before,
+	                                           ralResourceUsage_t after ) {
+	ralBufferTransition_t transition;
+	ralResourceTransitionBatch_t batch;
+	if ( !buffer || !vk.cmd || !vk.cmd->ral_cmd ) return qfalse;
+	memset( &transition, 0, sizeof( transition ) );
+	transition.buffer = buffer;
+	transition.size = (uint64_t)Ral_GetBufferSize( buffer );
+	transition.before.usage = before;
+	transition.after.usage = after;
+	transition.sourceQueue = transition.destinationQueue = RAL_QUEUE_GRAPHICS;
+	memset( &batch, 0, sizeof( batch ) );
+	batch.bufferTransitions = &transition;
+	batch.bufferTransitionCount = 1u;
+	return Ral_CmdTransitionResources( vk.cmd->ral_cmd, &batch ) == ralSuccess;
+}
+
+static const void *vk_typed_readback_map( ralBuffer_t *buffer, ralBufferMapTicket_t *ticket ) {
+	ralBufferMapRequest_t request;
+	if ( !buffer || !ticket ) return NULL;
+	memset( &request, 0, sizeof( request ) );
+	request.mode = RAL_MAP_READ;
+	request.size = (uint64_t)Ral_GetBufferSize( buffer );
+	return Ral_BufferMapBegin( buffer, &request, ticket ) == ralSuccess
+	     ? ticket->mappedRange : NULL;
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -18665,6 +18755,8 @@ void vk_cull_shutdown( void )
 		if ( vk.ral_cull_reached[i] ) { Ral_DestroyBuffer( vk.ral_cull_reached[i] ); vk.ral_cull_reached[i] = NULL; }
 	}
 	if ( vk.ral_cull_aabb )       { Ral_DestroyBuffer( vk.ral_cull_aabb ); vk.ral_cull_aabb = NULL; }
+	if ( vk.cullAabbCpu )          { free( vk.cullAabbCpu ); vk.cullAabbCpu = NULL; }
+	if ( vk.cullReachedCpu )       { free( vk.cullReachedCpu ); vk.cullReachedCpu = NULL; }
 	vk.cullSurfaceCount = 0;
 	vk_cull_frame.valid = qfalse;
 }
@@ -18736,12 +18828,11 @@ qboolean vk_cull_host_derive_visible( const cplane_t frustum[4], const vec3_t vi
 
 	(void)frustum; // per-surface frustum cull retired (see the loop) — leaf-frustum only
 
-	if ( !vk.ral_cull_aabb || vk.cullSurfaceCount <= 0 || n > vk.cullSurfaceCount )
+	if ( !vk.ral_cull_aabb || !vk.cullAabbCpu
+	  || vk.cullSurfaceCount <= 0 || n > vk.cullSurfaceCount )
 		return qfalse;
 
-	recs = (const vkCullSurf_t *)Ral_MapBuffer( vk.ral_cull_aabb );
-	if ( !recs )
-		return qfalse;
+	recs = (const vkCullSurf_t *)vk.cullAabbCpu;
 
 	for ( i = 0; i < n; i++ ) {
 		qboolean vis;
@@ -18778,7 +18869,6 @@ qboolean vk_cull_host_derive_visible( const cplane_t frustum[4], const vec3_t vi
 		visibleOut[i] = vis ? 1 : 0;
 	}
 
-	Ral_UnmapBuffer( vk.ral_cull_aabb );
 	return qtrue;
 }
 
@@ -18813,12 +18903,14 @@ void vk_cull_init( ralBackend_t *backend )
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		memset( &bci, 0, sizeof( bci ) );
 		bci.size      = (uint64_t)reachedWords * sizeof( uint32_t );
-		bci.usage     = RAL_BUFFER_STORAGE;
-		bci.memory    = RAL_MEMORY_HOST_COHERENT;
+		bci.usage     = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST;
+		bci.memory    = RAL_MEMORY_DEVICE_LOCAL;
 		bci.debugName = "wired-cull-reached";
 		vk.ral_cull_reached[i] = Ral_CreateBuffer( backend, &bci );
 		if ( !vk.ral_cull_reached[i] ) ok = qfalse;
 	}
+	vk.cullReachedCpu = (uint32_t *)calloc( reachedWords, sizeof( uint32_t ) );
+	if ( !vk.cullReachedCpu ) ok = qfalse;
 
 	// Per-frame visible output (device-local; cleared each frame before dispatch).
 	memset( &bci, 0, sizeof( bci ) );
@@ -18898,15 +18990,13 @@ void vk_cull_build_world_aabbs( const msurface_t *surfaces, int numSurfaces )
 
 	recSize = (size_t)numSurfaces * sizeof( vkCullSurf_t );
 
-	// Host-coherent AABB input — written once at map load by a direct map+memcpy.
-	// Static world geometry read once/frame by a cheap compute, so the host-visible
-	// read cost is negligible and this avoids a map-load GPU upload+fence (which
-	// collides with the frame command-buffer recording state). The compute only
-	// reads it; no per-frame writes.
+	// Build the CPU authority first, then publish it through the backend-neutral
+	// upload path. This is WebGPU-valid queue-write/staging semantics: the STORAGE
+	// buffer itself is never host-mapped.
 	memset( &bci, 0, sizeof( bci ) );
 	bci.size      = recSize;
-	bci.usage     = RAL_BUFFER_STORAGE;
-	bci.memory    = RAL_MEMORY_HOST_COHERENT;
+	bci.usage     = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST;
+	bci.memory    = RAL_MEMORY_DEVICE_LOCAL;
 	bci.debugName = "wired-cull-aabb-ssbo";
 	vk.ral_cull_aabb = Ral_CreateBuffer( backend, &bci );
 	if ( !vk.ral_cull_aabb ) {
@@ -18914,15 +19004,26 @@ void vk_cull_build_world_aabbs( const msurface_t *surfaces, int numSurfaces )
 		return;
 	}
 
-	records = (vkCullSurf_t *)Ral_MapBuffer( vk.ral_cull_aabb );
+	records = (vkCullSurf_t *)malloc( recSize );
 	if ( !records ) {
-		R_LOG( rch_ral, SEV_WARN, "cull: AABB SSBO map failed; GPU cull disabled\n" );
+		R_LOG( rch_ral, SEV_WARN, "cull: AABB CPU authority allocation failed; GPU cull disabled\n" );
 		Ral_DestroyBuffer( vk.ral_cull_aabb ); vk.ral_cull_aabb = NULL;
 		return;
 	}
 	for ( i = 0; i < numSurfaces; i++ )
 		vk_cull_surf_record( &surfaces[i], &records[i] );
-	Ral_UnmapBuffer( vk.ral_cull_aabb );
+	{
+		ralFence_t *upload = Ral_BufferUploadAsync( vk.ral_cull_aabb, 0, records, recSize );
+		if ( !upload ) {
+			free( records );
+			Ral_DestroyBuffer( vk.ral_cull_aabb ); vk.ral_cull_aabb = NULL;
+			R_LOG( rch_ral, SEV_WARN, "cull: AABB SSBO queue upload failed; GPU cull disabled\n" );
+			return;
+		}
+		Ral_WaitFence( upload, ~(uint64_t)0 );
+		Ral_DestroyFence( upload );
+	}
+	vk.cullAabbCpu = records;
 
 	vk.cullSurfaceCount = numSurfaces;
 	R_LOG( rch_ral, SEV_INFO, "cull: built per-surface AABB SSBO (%d surfaces, %u KB)\n",
@@ -18975,15 +19076,20 @@ void vk_cull_capture_world( const void *viewParmsPtr, const void *worldPtr, int 
 	vk_cull_frame.surfaceCount     = vk.cullSurfaceCount;
 
 	// Write the PVS-reached bitset into this frame's host-visible buffer.
-	reachedBits = (uint32_t *)Ral_MapBuffer( vk.ral_cull_reached[ vk.cmd_index ] );
+	reachedBits = vk.cullReachedCpu;
 	if ( reachedBits ) {
 		const uint32_t words = ( (uint32_t)vk.cullSurfaceCount + 31u ) / 32u;
+		ralFence_t *upload;
 		memset( reachedBits, 0, (size_t)words * sizeof( uint32_t ) );
 		for ( i = 0; i < vk.cullSurfaceCount; i++ ) {
 			if ( world->surfaces[i].viewCount == viewCount )
 				reachedBits[i >> 5] |= ( 1u << ( i & 31 ) );
 		}
-		Ral_UnmapBuffer( vk.ral_cull_reached[ vk.cmd_index ] );
+		upload = Ral_BufferUploadAsync( vk.ral_cull_reached[ vk.cmd_index ], 0,
+		                               reachedBits, (uint64_t)words * sizeof( uint32_t ) );
+		if ( !upload ) return;
+		Ral_WaitFence( upload, ~(uint64_t)0 );
+		Ral_DestroyFence( upload );
 	}
 
 	vk_cull_frame.valid = qtrue;
@@ -19063,7 +19169,8 @@ void vk_cull_dispatch( void )
 // bind-group references the layout + view, the view references the image).
 void vk_brdf_lut_shutdown( void )
 {
-	if ( vk.ral_brdf_lut_readback )   { Ral_DestroyBuffer( vk.ral_brdf_lut_readback ); vk.ral_brdf_lut_readback = NULL; vk.brdfLutReadbackPtr = NULL; }
+	if ( vk.ral_brdf_lut_readback )   { Ral_DestroyBuffer( vk.ral_brdf_lut_readback ); vk.ral_brdf_lut_readback = NULL; }
+	vk.brdfLutReadbackReady = qfalse;
 	if ( vk.ral_brdf_lut_pipeline )   { Ral_DestroyPipeline( vk.ral_brdf_lut_pipeline ); vk.ral_brdf_lut_pipeline = NULL; }
 	if ( vk.ral_brdf_lut_descriptor ) { Ral_DestroyBindGroup( vk.ral_brdf_lut_descriptor ); vk.ral_brdf_lut_descriptor = NULL; }
 	if ( vk.ral_brdf_lut_bgl )        { Ral_DestroyBindGroupLayout( vk.ral_brdf_lut_bgl ); vk.ral_brdf_lut_bgl = NULL; }
@@ -19150,14 +19257,14 @@ static void vk_forwardplus_tile_dims( int *tilesX, int *tilesY )
 void vk_forwardplus_shutdown( void )
 {
 	int i;
-	if ( vk.ral_fp_readback ) { Ral_DestroyBuffer( vk.ral_fp_readback ); vk.ral_fp_readback = NULL; vk.fpReadbackPtr = NULL; }
 	if ( vk.ral_fp_pipeline ) { Ral_DestroyPipeline( vk.ral_fp_pipeline ); vk.ral_fp_pipeline = NULL; }
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		if ( vk.ral_fp_descriptor[i] ) { Ral_DestroyBindGroup( vk.ral_fp_descriptor[i] ); vk.ral_fp_descriptor[i] = NULL; }
 	}
 	if ( vk.ral_fp_bgl ) { Ral_DestroyBindGroupLayout( vk.ral_fp_bgl ); vk.ral_fp_bgl = NULL; }
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.ral_fp_lights[i] )    { Ral_DestroyBuffer( vk.ral_fp_lights[i] );    vk.ral_fp_lights[i] = NULL;    vk.fpLightsPtr[i] = NULL; }
+		if ( vk.ral_fp_lights[i] )    { Ral_DestroyBuffer( vk.ral_fp_lights[i] );    vk.ral_fp_lights[i] = NULL; }
+		if ( vk.fpLightsPtr[i] )       { free( vk.fpLightsPtr[i] ); vk.fpLightsPtr[i] = NULL; }
 		if ( vk.ral_fp_tiledepth[i] ) { Ral_DestroyBuffer( vk.ral_fp_tiledepth[i] ); vk.ral_fp_tiledepth[i] = NULL; vk.fpTileDepthPtr[i] = NULL; }
 		if ( vk.ral_fp_tilelights[i] ){ Ral_DestroyBuffer( vk.ral_fp_tilelights[i] );vk.ral_fp_tilelights[i] = NULL; }
 	}
@@ -19208,18 +19315,18 @@ static qboolean vk_forwardplus_alloc( ralBackend_t *backend, int tileCount )
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		memset( &bci, 0, sizeof( bci ) );
-		bci.size = lightsBytes; bci.usage = RAL_BUFFER_STORAGE; bci.memory = RAL_MEMORY_HOST_COHERENT;
+		bci.size = lightsBytes; bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST; bci.memory = RAL_MEMORY_DEVICE_LOCAL;
 		bci.debugName = "wired-fp-lights";
 		vk.ral_fp_lights[i] = Ral_CreateBuffer( backend, &bci );
 		if ( !vk.ral_fp_lights[i] ) { ok = qfalse; break; }
-		vk.fpLightsPtr[i] = Ral_MapBuffer( vk.ral_fp_lights[i] );
+		vk.fpLightsPtr[i] = calloc( 1u, (size_t)lightsBytes );
+		if ( !vk.fpLightsPtr[i] ) { ok = qfalse; break; }
 
 		memset( &bci, 0, sizeof( bci ) );
-		bci.size = tileDepthBytes; bci.usage = RAL_BUFFER_STORAGE; bci.memory = RAL_MEMORY_HOST_COHERENT;
+		bci.size = tileDepthBytes; bci.usage = RAL_BUFFER_STORAGE; bci.memory = RAL_MEMORY_DEVICE_LOCAL;
 		bci.debugName = "wired-fp-tiledepth";
 		vk.ral_fp_tiledepth[i] = Ral_CreateBuffer( backend, &bci );
 		if ( !vk.ral_fp_tiledepth[i] ) { ok = qfalse; break; }
-		vk.fpTileDepthPtr[i] = Ral_MapBuffer( vk.ral_fp_tiledepth[i] );
 
 		memset( &bci, 0, sizeof( bci ) );
 		bci.size = tileLightsBytes;
@@ -19450,19 +19557,6 @@ void vk_forwardplus_init( ralBackend_t *backend )
 		return;
 	}
 
-#if defined(_DEBUG)
-	{
-		ralBufferCreateInfo_t bci;
-		memset( &bci, 0, sizeof( bci ) );
-		bci.size = (uint64_t)tileCount * FP_TILELIGHT_STRIDE * sizeof( uint32_t );
-		bci.usage = RAL_BUFFER_TRANSFER_DST; bci.memory = RAL_MEMORY_HOST_COHERENT;
-		bci.debugName = "wired-fp-readback";
-		vk.ral_fp_readback = Ral_CreateBuffer( backend, &bci );
-		if ( vk.ral_fp_readback )
-			vk.fpReadbackPtr = Ral_MapBuffer( vk.ral_fp_readback );
-	}
-#endif
-
 	// Depth-copy + reduce for the per-tile depth-cull tightening (depthValid=1). The
 	// live depth attachment can't be sampled (no SAMPLED usage) so this allocates a
 	// dedicated SAMPLED depth copy, filled at frame END + reduced NEXT frame in the
@@ -19529,7 +19623,6 @@ void vk_forwardplus_capture_dlights( void )
 		vk.fpCapture.lights[i].origin2[2] = dl->origin2[2];
 		vk.fpCapture.lights[i].linear     = dl->linear ? 1 : 0;
 	}
-
 	// Static BSP lights do NOT enter the per-frame screen-tile path: they are uploaded
 	// once at map load into the reserved dlights[] high slots [FP_STATIC_LIGHT_BASE..]
 	// and gathered by the fragment from the WORLD-cluster grid (vk_forwardplus_build_clusters
@@ -19606,6 +19699,14 @@ void vk_forwardplus_dispatch( void )
 		// posRadius2 (tube endpoint + isLine)
 		rec[8]  = vk.fpCapture.lights[i].origin2[0]; rec[9] = vk.fpCapture.lights[i].origin2[1]; rec[10] = vk.fpCapture.lights[i].origin2[2];
 		rec[11] = vk.fpCapture.lights[i].linear ? 1.0f : 0.0f;
+	}
+	{
+		const uint64_t lightsBytes = (uint64_t)FP_MAX_LIGHTS * FP_LIGHT_VEC4S * 4u * sizeof( float );
+		ralFence_t *upload = Ral_BufferUploadAsync( vk.ral_fp_lights[ vk.cmd_index ], 0,
+		                                             lp, lightsBytes );
+		if ( !upload ) return;
+		Ral_WaitFence( upload, ~(uint64_t)0 );
+		Ral_DestroyFence( upload );
 	}
 
 	vk.fpLightCount = n;
@@ -19736,32 +19837,6 @@ void vk_forwardplus_dispatch( void )
 			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 			0, 0, NULL, 1, &rd, 0, NULL );
 	}
-
-#if defined(_DEBUG)
-	// Optional readback for the tile-classification verify (r_forwardPlusDebug):
-	// copy the tile-light list to the host mirror so the CPU can confirm a light
-	// only lands in tiles its sphere reaches.
-	if ( vk.ral_fp_readback && r_forwardPlus->integer ) {
-		VkBuffer tlBuf = (VkBuffer)Ral_GetBufferHandle( vk.ral_fp_tilelights[ vk.cmd_index ] );
-		VkBufferMemoryBarrier toXfer;
-		ralBufferCopy_t copy;
-		memset( &toXfer, 0, sizeof( toXfer ) );
-		toXfer.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-		toXfer.srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT;
-		toXfer.dstAccessMask       = VK_ACCESS_TRANSFER_READ_BIT;
-		toXfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		toXfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		toXfer.buffer              = tlBuf;
-		toXfer.offset              = 0;
-		toXfer.size                = VK_WHOLE_SIZE;
-		qvkCmdPipelineBarrier( vk.cmd->command_buffer,
-			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-			0, 0, NULL, 1, &toXfer, 0, NULL );
-		memset( &copy, 0, sizeof( copy ) );
-		copy.size = (uint64_t)tileCount * FP_TILELIGHT_STRIDE * sizeof( uint32_t );
-		Ral_CmdCopyBuffer( vk.cmd->ral_cmd, vk.ral_fp_tilelights[ vk.cmd_index ], vk.ral_fp_readback, &copy );
-	}
-#endif
 
 	// Prepare the CONSUMER's set-2 descriptor (fpLitSet) for this frame: write the
 	// tileParams UBO {screenW,H,tilesX,tilesY} (host-coherent) + (re)allocate +
@@ -20005,16 +20080,19 @@ void vk_forwardplus_lit_init( ralBackend_t *backend )
 	// the descriptor is never dangling and the fragment's cluster loop is a no-op.
 	{
 		ralBufferCreateInfo_t bci;
-		uint32_t              *fp;
+		uint32_t               empty[FP_CLUSTER_STRIDE];
+		ralFence_t            *upload;
+		memset( empty, 0, sizeof( empty ) );
 		memset( &bci, 0, sizeof( bci ) );
 		bci.size = (uint64_t)FP_CLUSTER_STRIDE * sizeof( uint32_t );
-		bci.usage = RAL_BUFFER_STORAGE;
-		bci.memory = RAL_MEMORY_HOST_COHERENT;
+		bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST;
+		bci.memory = RAL_MEMORY_DEVICE_LOCAL;
 		bci.debugName = "wired-fp-cluster-fallback";
 		vk.ral_fp_clusterfallback = Ral_CreateBuffer( backend, &bci );
 		if ( vk.ral_fp_clusterfallback ) {
-			fp = (uint32_t *)Ral_MapBuffer( vk.ral_fp_clusterfallback );
-			if ( fp ) memset( fp, 0, (size_t)FP_CLUSTER_STRIDE * sizeof( uint32_t ) );  // count=0
+			upload = Ral_BufferUploadAsync( vk.ral_fp_clusterfallback, 0, empty, sizeof( empty ) );
+			if ( upload ) { Ral_WaitFence( upload, ~(uint64_t)0 ); Ral_DestroyFence( upload ); }
+			else { Ral_DestroyBuffer( vk.ral_fp_clusterfallback ); vk.ral_fp_clusterfallback = NULL; }
 		}
 	}
 
@@ -20218,21 +20296,25 @@ void vk_forwardplus_build_clusters( void )
 	// load-time-built list). Single instance (view-independent, constant per map).
 	{
 		ralBufferCreateInfo_t bci;
-		void *dst;
+		ralFence_t *upload;
 		memset( &bci, 0, sizeof( bci ) );
 		bci.size = (uint64_t)w->numClusterCells * FP_CLUSTER_STRIDE * sizeof( uint32_t );
-		bci.usage = RAL_BUFFER_STORAGE;
-		bci.memory = RAL_MEMORY_HOST_COHERENT;
+		bci.usage = RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST;
+		bci.memory = RAL_MEMORY_DEVICE_LOCAL;
 		bci.debugName = "wired-fp-clustergrid";
 		vk.ral_fp_clustergrid = Ral_CreateBuffer( backend, &bci );
 		if ( !vk.ral_fp_clustergrid ) {
 			R_LOG( rch_ral, SEV_WARN, "forward+: cluster grid SSBO alloc failed — static lights disabled\n" );
 			return;
 		}
-		vk.fpClusterGridPtr = Ral_MapBuffer( vk.ral_fp_clustergrid );
-		dst = vk.fpClusterGridPtr;
-		if ( dst )
-			memcpy( dst, w->clusterFlat, (size_t)bci.size );
+		upload = Ral_BufferUploadAsync( vk.ral_fp_clustergrid, 0, w->clusterFlat, bci.size );
+		if ( !upload ) {
+			Ral_DestroyBuffer( vk.ral_fp_clustergrid ); vk.ral_fp_clustergrid = NULL;
+			R_LOG( rch_ral, SEV_WARN, "forward+: cluster grid upload failed — static lights disabled\n" );
+			return;
+		}
+		Ral_WaitFence( upload, ~(uint64_t)0 );
+		Ral_DestroyFence( upload );
 	}
 
 	// (3) Fill the grid-params UBO with the real grid (origin.xyz, cellSize; dims.xyz).
@@ -20375,12 +20457,10 @@ void vk_brdf_lut_init( ralBackend_t *backend )
 			ralBufferCreateInfo_t rbci;
 			memset( &rbci, 0, sizeof( rbci ) );
 			rbci.size      = (uint64_t)VK_BRDF_LUT_SIZE * VK_BRDF_LUT_SIZE * 2u * sizeof( uint16_t );
-			rbci.usage     = RAL_BUFFER_TRANSFER_DST;
+			rbci.usage     = RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ;
 			rbci.memory    = RAL_MEMORY_HOST_COHERENT;
 			rbci.debugName = "wired-brdf-lut-readback";
 			vk.ral_brdf_lut_readback = Ral_CreateBuffer( backend, &rbci );
-			if ( vk.ral_brdf_lut_readback )
-				vk.brdfLutReadbackPtr = Ral_MapBuffer( vk.ral_brdf_lut_readback );
 		}
 #endif
 	} else {
@@ -20403,9 +20483,10 @@ void vk_ibl_probes_shutdown( void )
 	uint32_t i;
 
 	// Readbacks.
-	if ( vk.ral_probe_source_readback )     { Ral_DestroyBuffer( vk.ral_probe_source_readback ); vk.ral_probe_source_readback = NULL; vk.probeSourceReadbackPtr = NULL; }
-	if ( vk.ral_probe_radiance_readback )   { Ral_DestroyBuffer( vk.ral_probe_radiance_readback ); vk.ral_probe_radiance_readback = NULL; vk.probeRadianceReadbackPtr = NULL; }
-	if ( vk.ral_probe_irradiance_readback ) { Ral_DestroyBuffer( vk.ral_probe_irradiance_readback ); vk.ral_probe_irradiance_readback = NULL; vk.probeIrradianceReadbackPtr = NULL; }
+	if ( vk.ral_probe_source_readback )     { Ral_DestroyBuffer( vk.ral_probe_source_readback ); vk.ral_probe_source_readback = NULL; }
+	if ( vk.ral_probe_radiance_readback )   { Ral_DestroyBuffer( vk.ral_probe_radiance_readback ); vk.ral_probe_radiance_readback = NULL; }
+	if ( vk.ral_probe_irradiance_readback ) { Ral_DestroyBuffer( vk.ral_probe_irradiance_readback ); vk.ral_probe_irradiance_readback = NULL; }
+	vk.probeSourceReadbackReady = vk.probeRadianceReadbackReady = vk.probeIrradianceReadbackReady = qfalse;
 
 	// Pipelines + bind-groups (source fill + the two convolves).
 	if ( vk.ral_probe_source_pipeline )     { Ral_DestroyPipeline( vk.ral_probe_source_pipeline ); vk.ral_probe_source_pipeline = NULL; }
@@ -20714,28 +20795,22 @@ void vk_ibl_probes_init( ralBackend_t *backend )
 		{
 			ralBufferCreateInfo_t rbci;
 			memset( &rbci, 0, sizeof( rbci ) );
-			rbci.usage  = RAL_BUFFER_TRANSFER_DST;
+			rbci.usage  = RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ;
 			rbci.memory = RAL_MEMORY_HOST_COHERENT;
 
 			rbci.size      = (uint64_t)VK_PROBE_SOURCE_SIZE * VK_PROBE_SOURCE_SIZE * 6u * 4u * sizeof( uint16_t );
 			rbci.debugName = "wired-ibl-source-readback";
 			vk.ral_probe_source_readback = Ral_CreateBuffer( backend, &rbci );
-			if ( vk.ral_probe_source_readback )
-				vk.probeSourceReadbackPtr = Ral_MapBuffer( vk.ral_probe_source_readback );
 
 			rbci.size      = (uint64_t)VK_PROBE_IRRADIANCE_SIZE * VK_PROBE_IRRADIANCE_SIZE * 6u * 4u * sizeof( uint16_t );
 			rbci.debugName = "wired-ibl-irradiance-readback";
 			vk.ral_probe_irradiance_readback = Ral_CreateBuffer( backend, &rbci );
-			if ( vk.ral_probe_irradiance_readback )
-				vk.probeIrradianceReadbackPtr = Ral_MapBuffer( vk.ral_probe_irradiance_readback );
 
 			// Radiance mirror: mip0 full 6 faces (sharp). One buffer; the readback
 			// copies mip0 only (the highest-resolution, most comparable to source).
 			rbci.size      = (uint64_t)VK_PROBE_RADIANCE_SIZE * VK_PROBE_RADIANCE_SIZE * 6u * 4u * sizeof( uint16_t );
 			rbci.debugName = "wired-ibl-radiance-readback";
 			vk.ral_probe_radiance_readback = Ral_CreateBuffer( backend, &rbci );
-			if ( vk.ral_probe_radiance_readback )
-				vk.probeRadianceReadbackPtr = Ral_MapBuffer( vk.ral_probe_radiance_readback );
 		}
 #endif
 	} else {
@@ -28526,7 +28601,7 @@ static qboolean vk_temporal_iqm_command_preflight( void *context,
 				!= plan->entry.facts.vertexBufferBytes
 			|| Ral_GetBufferSize( resources->indexBuffer )
 				!= plan->entry.facts.indexBufferBytes ) return qfalse;
-	record = (temporalIqmGpuRecord_t *)( (unsigned char *)payload.mappedIdentity
+			record = (temporalIqmGpuRecord_t *)( (unsigned char *)payload.cpuShadowIdentity
 		+ (size_t)plan->recordIndex * TEMPORAL_IQM_RECORD_SIZE );
 	return c->currentBones && c->rasterMvp
 		&& !memcmp( record->currentBones, c->currentBones,
@@ -29488,13 +29563,16 @@ void vk_tonemap( void )
 		// then queue this frame's SSBO into the mirror for a later log. Throttled
 		// to ~1 Hz. No effect on the rendered frame. (Runs first, with its own
 		// COMPUTE→TRANSFER barrier, while the histogram write is fresh.)
-		if ( r_hdrHistogramDebug->integer && vk.ral_histogram_readback && vk.histogramReadbackPtr ) {
+		if ( r_hdrHistogramDebug->integer && vk.ral_histogram_readback[vk.cmd_index] ) {
 			static int lastLogMs = 0;
 			int nowMs = ri.Milliseconds();
-			if ( nowMs - lastLogMs >= 1000 ) {
-				const uint32_t *bins = (const uint32_t *)vk.histogramReadbackPtr;
+			if ( vk.histogramReadbackReady[vk.cmd_index] && nowMs - lastLogMs >= 1000 ) {
+				ralBufferMapTicket_t ticket;
+				const uint32_t *bins = (const uint32_t *)vk_typed_readback_map(
+					vk.ral_histogram_readback[vk.cmd_index], &ticket );
 				uint64_t total = 0;
 				uint32_t peakBin = 0, b;
+				if ( !bins ) goto histogram_readback_copy;
 				for ( b = 0; b < VK_HDR_HISTOGRAM_BINS; b++ ) {
 					total += bins[b];
 					if ( bins[b] > bins[peakBin] ) peakBin = b;
@@ -29516,8 +29594,10 @@ void vk_tonemap( void )
 					}
 					R_LOG( rch_ral, SEV_WARN, "HISTPROF16 %s\n", prof );
 				}
+				Ral_BufferMapUnmap( vk.ral_histogram_readback[vk.cmd_index], &ticket );
 				lastLogMs = nowMs;
 			}
+			histogram_readback_copy:
 			{
 				ralBufferCopy_t       copy;
 				VkBufferMemoryBarrier toTransfer;
@@ -29538,7 +29618,16 @@ void vk_tonemap( void )
 
 				memset( &copy, 0, sizeof( copy ) );
 				copy.size = (uint64_t)VK_HDR_HISTOGRAM_BINS * sizeof( uint32_t );
-				Ral_CmdCopyBuffer( vk.cmd->ral_cmd, vk.ral_histogram_buffer, vk.ral_histogram_readback, &copy );
+				if ( vk_typed_readback_transition( vk.ral_histogram_readback[vk.cmd_index],
+				       vk.histogramReadbackReady[vk.cmd_index] ? RAL_RESOURCE_USAGE_HOST_READ
+				                                                  : RAL_RESOURCE_USAGE_UNDEFINED,
+				       RAL_RESOURCE_USAGE_COPY_DESTINATION ) ) {
+					Ral_CmdCopyBuffer( vk.cmd->ral_cmd, vk.ral_histogram_buffer,
+						vk.ral_histogram_readback[vk.cmd_index], &copy );
+					vk.histogramReadbackReady[vk.cmd_index] = vk_typed_readback_transition(
+						vk.ral_histogram_readback[vk.cmd_index], RAL_RESOURCE_USAGE_COPY_DESTINATION,
+						RAL_RESOURCE_USAGE_HOST_READ );
+				}
 			}
 		}
 #endif
@@ -32265,7 +32354,9 @@ _retry:
 		// since this is a one-shot, log on the NEXT eligible frame). No effect on
 		// the rendered frame. (Runs before the COMPUTE→GRAPHICS barrier, with its
 		// own COMPUTE→TRANSFER transition, while the storage write is fresh.)
-		if ( r_brdfLutDebug->integer && vk.ral_brdf_lut_readback && vk.brdfLutReadbackPtr ) {
+		if ( r_brdfLutDebug->integer && vk.ral_brdf_lut_readback
+		  && vk_typed_readback_transition( vk.ral_brdf_lut_readback,
+		       RAL_RESOURCE_USAGE_UNDEFINED, RAL_RESOURCE_USAGE_COPY_DESTINATION ) ) {
 			ralBufferTextureCopy_t copy;
 
 			// GENERAL (compute write) → TRANSFER_SRC_OPTIMAL for the image→buffer copy.
@@ -32282,6 +32373,8 @@ _retry:
 			copy.imageRect.width    = VK_BRDF_LUT_SIZE;
 			copy.imageRect.height   = VK_BRDF_LUT_SIZE;
 			Ral_CmdCopyTextureToBuffer( vk.cmd->ral_cmd, vk.ral_brdf_lut_image, vk.ral_brdf_lut_readback, &copy );
+			vk.brdfLutReadbackReady = vk_typed_readback_transition( vk.ral_brdf_lut_readback,
+				RAL_RESOURCE_USAGE_COPY_DESTINATION, RAL_RESOURCE_USAGE_HOST_READ );
 
 			// Put the image back to GENERAL so the COMPUTE→GRAPHICS barrier below
 			// leaves it in the layout the storage binding / future sampler expect.
@@ -32315,11 +32408,13 @@ _retry:
 	// not a global tick — so count frames-since-dispatch with our own static.)
 	static int s_brdfLutReadbackDelay = 0;
 	if ( r_brdfLutDebug->integer && vk.brdfLutDispatched && !vk.brdfLutReadbackLogged
-	  && vk.brdfLutReadbackPtr && ++s_brdfLutReadbackDelay > NUM_COMMAND_BUFFERS + 1 ) {
-		const uint16_t *texels = (const uint16_t *)vk.brdfLutReadbackPtr;
+	  && vk.brdfLutReadbackReady && ++s_brdfLutReadbackDelay > NUM_COMMAND_BUFFERS + 1 ) {
+		ralBufferMapTicket_t ticket;
+		const uint16_t *texels = (const uint16_t *)vk_typed_readback_map( vk.ral_brdf_lut_readback, &ticket );
 		// Sample texel centres: (x,y) → row-major index, 2 components (R=A,G=B).
 		struct { int x, y; } pts[3] = { { 255, 0 }, { 128, 128 }, { 0, 255 } };
 		int p;
+		if ( !texels ) goto brdf_readback_done;
 		for ( p = 0; p < 3; p++ ) {
 			size_t idx = ( (size_t)pts[p].y * VK_BRDF_LUT_SIZE + (size_t)pts[p].x ) * 2u;
 			float A = vk_half_to_float( texels[idx + 0] );
@@ -32329,7 +32424,9 @@ _retry:
 				( (float)pts[p].x + 0.5f ) / (float)VK_BRDF_LUT_SIZE,
 				( (float)pts[p].y + 0.5f ) / (float)VK_BRDF_LUT_SIZE, A, B );
 		}
+		Ral_BufferMapUnmap( vk.ral_brdf_lut_readback, &ticket );
 		vk.brdfLutReadbackLogged = qtrue;
+	brdf_readback_done:;
 	}
 #endif
 
@@ -32358,7 +32455,9 @@ _retry:
 #ifndef NDEBUG
 		// Developer sanity readback (r_probeSourceDebug): copy the filled source cube
 		// to the host mirror so the CPU can confirm a plausible directional sky.
-		if ( r_probeSourceDebug->integer && vk.ral_probe_source_readback && vk.probeSourceReadbackPtr ) {
+		if ( r_probeSourceDebug->integer && vk.ral_probe_source_readback
+		  && vk_typed_readback_transition( vk.ral_probe_source_readback,
+		       RAL_RESOURCE_USAGE_UNDEFINED, RAL_RESOURCE_USAGE_COPY_DESTINATION ) ) {
 			uint32_t f;
 			// GENERAL → TRANSFER_SRC_OPTIMAL for the image→buffer copy (all faces).
 			Ral_CmdTransitionTexture( vk.cmd->ral_cmd, vk.ral_probe_source,
@@ -32377,6 +32476,8 @@ _retry:
 				copy.imageRect.height = VK_PROBE_SOURCE_SIZE;
 				Ral_CmdCopyTextureToBuffer( vk.cmd->ral_cmd, vk.ral_probe_source, vk.ral_probe_source_readback, &copy );
 			}
+			vk.probeSourceReadbackReady = vk_typed_readback_transition( vk.ral_probe_source_readback,
+				RAL_RESOURCE_USAGE_COPY_DESTINATION, RAL_RESOURCE_USAGE_HOST_READ );
 			// Back to GENERAL so the COMPUTE→GRAPHICS barrier leaves the expected layout.
 			Ral_CmdTransitionTexture( vk.cmd->ral_cmd, vk.ral_probe_source,
 				RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -32448,7 +32549,9 @@ _retry:
 		// transition to SHADER_READ_ONLY.
 		if ( r_probeRadianceDebug->integer ) {
 			uint32_t f;
-			if ( vk.ral_probe_irradiance_readback && vk.probeIrradianceReadbackPtr ) {
+			if ( vk.ral_probe_irradiance_readback
+			  && vk_typed_readback_transition( vk.ral_probe_irradiance_readback,
+			       RAL_RESOURCE_USAGE_UNDEFINED, RAL_RESOURCE_USAGE_COPY_DESTINATION ) ) {
 				Ral_CmdTransitionTexture( vk.cmd->ral_cmd, vk.ral_probe_irradiance,
 					RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT, RAL_PIPELINE_STAGE_TRANSFER_BIT,
 					VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
@@ -32462,11 +32565,15 @@ _retry:
 					copy.imageRect.height = VK_PROBE_IRRADIANCE_SIZE;
 					Ral_CmdCopyTextureToBuffer( vk.cmd->ral_cmd, vk.ral_probe_irradiance, vk.ral_probe_irradiance_readback, &copy );
 				}
+				vk.probeIrradianceReadbackReady = vk_typed_readback_transition( vk.ral_probe_irradiance_readback,
+					RAL_RESOURCE_USAGE_COPY_DESTINATION, RAL_RESOURCE_USAGE_HOST_READ );
 				Ral_CmdTransitionTexture( vk.cmd->ral_cmd, vk.ral_probe_irradiance,
 					RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 					VK_IMAGE_LAYOUT_GENERAL );
 			}
-			if ( vk.ral_probe_radiance_readback && vk.probeRadianceReadbackPtr ) {
+			if ( vk.ral_probe_radiance_readback
+			  && vk_typed_readback_transition( vk.ral_probe_radiance_readback,
+			       RAL_RESOURCE_USAGE_UNDEFINED, RAL_RESOURCE_USAGE_COPY_DESTINATION ) ) {
 				Ral_CmdTransitionTexture( vk.cmd->ral_cmd, vk.ral_probe_radiance,
 					RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT, RAL_PIPELINE_STAGE_TRANSFER_BIT,
 					VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
@@ -32480,6 +32587,8 @@ _retry:
 					copy.imageRect.height = VK_PROBE_RADIANCE_SIZE;
 					Ral_CmdCopyTextureToBuffer( vk.cmd->ral_cmd, vk.ral_probe_radiance, vk.ral_probe_radiance_readback, &copy );
 				}
+				vk.probeRadianceReadbackReady = vk_typed_readback_transition( vk.ral_probe_radiance_readback,
+					RAL_RESOURCE_USAGE_COPY_DESTINATION, RAL_RESOURCE_USAGE_HOST_READ );
 				Ral_CmdTransitionTexture( vk.cmd->ral_cmd, vk.ral_probe_radiance,
 					RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 					VK_IMAGE_LAYOUT_GENERAL );
@@ -32510,8 +32619,9 @@ _retry:
 	// the -Y face centre (ground-ish, darker), and a +Y corner near the sun. Once.
 	static int s_probeSourceReadbackDelay = 0;
 	if ( r_probeSourceDebug->integer && vk.probeSourceDispatched && !vk.probeSourceReadbackLogged
-	  && vk.probeSourceReadbackPtr && ++s_probeSourceReadbackDelay > NUM_COMMAND_BUFFERS + 1 ) {
-		const uint16_t *texels = (const uint16_t *)vk.probeSourceReadbackPtr;
+	  && vk.probeSourceReadbackReady && ++s_probeSourceReadbackDelay > NUM_COMMAND_BUFFERS + 1 ) {
+		ralBufferMapTicket_t ticket;
+		const uint16_t *texels = (const uint16_t *)vk_typed_readback_map( vk.ral_probe_source_readback, &ticket );
 		const uint32_t  fw = VK_PROBE_SOURCE_SIZE, faceTexels = fw * fw;
 		// (face, x, y) probe points: +Y centre (up), -Y centre (down), +Y near a corner.
 		struct { int face, x, y; const char *label; } pts[3] = {
@@ -32520,6 +32630,7 @@ _retry:
 			{ 2, 4,         4,         "+Y corner" },
 		};
 		int p;
+		if ( !texels ) goto probe_source_readback_done;
 		for ( p = 0; p < 3; p++ ) {
 			size_t idx = ( (size_t)pts[p].face * faceTexels + (size_t)pts[p].y * fw + (size_t)pts[p].x ) * 4u;
 			float r = vk_half_to_float( texels[idx + 0] );
@@ -32528,7 +32639,9 @@ _retry:
 			R_LOG( rch_ral, SEV_WARN,
 				"ibl source readback: %s rgb=(%.4f, %.4f, %.4f)\n", pts[p].label, r, g, b );
 		}
+		Ral_BufferMapUnmap( vk.ral_probe_source_readback, &ticket );
 		vk.probeSourceReadbackLogged = qtrue;
+	probe_source_readback_done:;
 	}
 
 	// IBL convolve readback log (r_probeRadianceDebug): a few frames after the
@@ -32539,10 +32652,11 @@ _retry:
 	// but still distinct sky-vs-ground). Logged once.
 	static int s_probeConvReadbackDelay = 0;
 	if ( r_probeRadianceDebug->integer && vk.probeRadianceDispatched && !vk.probeRadianceReadbackLogged
-	  && vk.probeRadianceReadbackPtr && vk.probeIrradianceReadbackPtr
+	  && vk.probeRadianceReadbackReady && vk.probeIrradianceReadbackReady
 	  && ++s_probeConvReadbackDelay > NUM_COMMAND_BUFFERS + 1 ) {
-		const uint16_t *rad = (const uint16_t *)vk.probeRadianceReadbackPtr;
-		const uint16_t *irr = (const uint16_t *)vk.probeIrradianceReadbackPtr;
+		ralBufferMapTicket_t radTicket, irrTicket;
+		const uint16_t *rad = (const uint16_t *)vk_typed_readback_map( vk.ral_probe_radiance_readback, &radTicket );
+		const uint16_t *irr = rad ? (const uint16_t *)vk_typed_readback_map( vk.ral_probe_irradiance_readback, &irrTicket ) : NULL;
 		const uint32_t  rw = VK_PROBE_RADIANCE_SIZE,   rft = rw * rw;
 		const uint32_t  iw = VK_PROBE_IRRADIANCE_SIZE, ift = iw * iw;
 		// +Y (face 2) and -Y (face 3) face centres.
@@ -32550,6 +32664,10 @@ _retry:
 		size_t rDn   = ( (size_t)3 * rft + (size_t)( rw / 2 ) * rw + ( rw / 2 ) ) * 4u;
 		size_t iUp   = ( (size_t)2 * ift + (size_t)( iw / 2 ) * iw + ( iw / 2 ) ) * 4u;
 		size_t iDn   = ( (size_t)3 * ift + (size_t)( iw / 2 ) * iw + ( iw / 2 ) ) * 4u;
+		if ( !rad || !irr ) {
+			if ( rad ) Ral_BufferMapUnmap( vk.ral_probe_radiance_readback, &radTicket );
+			goto probe_convolve_readback_done;
+		}
 		R_LOG( rch_ral, SEV_WARN,
 			"ibl radiance mip0 readback: +Y up rgb=(%.4f, %.4f, %.4f)  -Y down rgb=(%.4f, %.4f, %.4f)\n",
 			vk_half_to_float( rad[rUp+0] ), vk_half_to_float( rad[rUp+1] ), vk_half_to_float( rad[rUp+2] ),
@@ -32558,7 +32676,10 @@ _retry:
 			"ibl irradiance readback: +Y up rgb=(%.4f, %.4f, %.4f)  -Y down rgb=(%.4f, %.4f, %.4f)\n",
 			vk_half_to_float( irr[iUp+0] ), vk_half_to_float( irr[iUp+1] ), vk_half_to_float( irr[iUp+2] ),
 			vk_half_to_float( irr[iDn+0] ), vk_half_to_float( irr[iDn+1] ), vk_half_to_float( irr[iDn+2] ) );
+		Ral_BufferMapUnmap( vk.ral_probe_irradiance_readback, &irrTicket );
+		Ral_BufferMapUnmap( vk.ral_probe_radiance_readback, &radTicket );
 		vk.probeRadianceReadbackLogged = qtrue;
+	probe_convolve_readback_done:;
 	}
 #endif
 

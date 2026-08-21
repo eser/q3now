@@ -1,0 +1,51 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct UBO
+{
+    float4 eyePos;
+    float4 _pad_light[3];
+    float4 fogDistanceVector;
+    float4 fogDepthVector;
+    float4 fogEyeT;
+    float4 fogColor;
+    float4 _pad_to_modelMatrix[18];
+    float4x4 modelMatrix;
+    float4x4 mvp;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant UBO* m_21 [[id(0)]];
+};
+
+struct main0_out
+{
+    float2 frag_tex_coord [[user(locn0)]];
+    float3 world_pos [[user(locn1)]];
+    float3 world_normal [[user(locn2)]];
+    float3 world_view [[user(locn3)]];
+    float4 gl_Position [[position]];
+};
+
+struct main0_in
+{
+    float3 in_position [[attribute(0)]];
+    float2 in_tex_coord [[attribute(1)]];
+    float3 in_normal [[attribute(2)]];
+};
+
+vertex main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]])
+{
+    main0_out out = {};
+    out.gl_Position = (*spvDescriptorSet0.m_21).mvp * float4(in.in_position, 1.0);
+    out.frag_tex_coord = in.in_tex_coord;
+    float3 wp = ((*spvDescriptorSet0.m_21).modelMatrix * float4(in.in_position, 1.0)).xyz;
+    out.world_pos = wp;
+    out.world_normal = float3x3((*spvDescriptorSet0.m_21).modelMatrix[0].xyz, (*spvDescriptorSet0.m_21).modelMatrix[1].xyz, (*spvDescriptorSet0.m_21).modelMatrix[2].xyz) * in.in_normal;
+    out.world_view = (*spvDescriptorSet0.m_21).eyePos.xyz - wp;
+    return out;
+}
+

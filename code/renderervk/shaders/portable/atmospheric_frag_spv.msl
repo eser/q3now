@@ -1,0 +1,87 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct AtmFrame
+{
+    float4x4 mvp;
+    float4 viewLeft;
+    float4 viewUp;
+    float4 eyeWorld;
+    float dt;
+    float time;
+    uint poolSize;
+    uint pingPongRead;
+    float4 boundsMin;
+    float4 boundsMax;
+    float2 worldMins;
+    float2 worldMaxs;
+    float2 invGridStep;
+    uint gridSize;
+    uint atmType;
+    float _distance;
+    float invResX;
+    float invResY;
+    float depthValid;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant AtmFrame* m_59 [[id(0)]];
+    texture2d<float> sceneDepthTex [[id(1)]];
+    sampler sceneDepthTexSmplr [[id(2)]];
+};
+
+struct main0_out
+{
+    float4 outColor [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 fragUV [[user(locn0)]];
+    float4 fragColor [[user(locn1)]];
+};
+
+static inline __attribute__((always_inline))
+float softParticleFade(constant AtmFrame& _59, thread float4& gl_FragCoord, texture2d<float> sceneDepthTex, sampler sceneDepthTexSmplr)
+{
+    if (_59.depthValid < 0.5)
+    {
+        return 1.0;
+    }
+    float2 screenUV = gl_FragCoord.xy * float2(_59.invResX, _59.invResY);
+    float sceneDepth = sceneDepthTex.sample(sceneDepthTexSmplr, screenUV).x;
+    if (sceneDepth <= 0.0)
+    {
+        return 1.0;
+    }
+    float depthDiff = gl_FragCoord.z - sceneDepth;
+    return smoothstep(0.0, 0.001000000047497451305389404296875, depthDiff);
+}
+
+static inline __attribute__((always_inline))
+float3 sRGBToLinear(thread float3& c)
+{
+    c = fast::max(c, float3(0.0));
+    bool3 cutoff = c <= float3(0.040449999272823333740234375);
+    float3 lo = c / float3(12.9200000762939453125);
+    float3 hi = powr((c + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return mix(hi, lo, float3(cutoff));
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float edge = 1.0 - smoothstep(0.0, 0.5, abs(in.fragUV.x - 0.5));
+    float alpha = (in.fragColor.w * edge) * softParticleFade((*spvDescriptorSet0.m_59), gl_FragCoord, spvDescriptorSet0.sceneDepthTex, spvDescriptorSet0.sceneDepthTexSmplr);
+    float3 param = in.fragColor.xyz;
+    float3 _134 = sRGBToLinear(param);
+    float3 rgb = _134;
+    out.outColor = float4(rgb, alpha);
+    return out;
+}
+

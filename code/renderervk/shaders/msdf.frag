@@ -92,7 +92,10 @@ void main() {
     float sd = median(msd.r, msd.g, msd.b);
 
     // screenPxRange: official msdf-atlas-gen formula
-    vec2 unitRange = vec2(msdf_distance_range) / vec2(textureSize(WIRED_MSDF_ATLAS, 0));
+	vec2 unitRange;
+	vec2 atlasSize = vec2(textureSize(WIRED_MSDF_ATLAS, 0));
+	unitRange.x = msdf_distance_range / atlasSize.x;
+	unitRange.y = msdf_distance_range / atlasSize.y;
     vec2 screenTexSize = vec2(1.0) / fwidth(frag_tex_coord0);
     float screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
 

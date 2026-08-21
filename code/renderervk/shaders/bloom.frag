@@ -53,7 +53,7 @@ void main() {
 	}
 	else // per-channel soft knee (default)
 	{
-		excess = max( base - vec3( threshold ), vec3( 0.0 ) );
+		excess = max( base - threshold, vec3( 0.0 ) );
 	}
 
 	out_color = vec4( excess, 1.0 );

@@ -1,0 +1,33 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct UBO
+{
+    float4 _pad_to_mvp[30];
+    float4x4 mvp;
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant UBO* ubo [[id(0)]];
+};
+
+struct main0_out
+{
+    float4 gl_Position [[position]];
+};
+
+struct main0_in
+{
+    float3 in_position [[attribute(0)]];
+};
+
+vertex main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]])
+{
+    main0_out out = {};
+    out.gl_Position = (*spvDescriptorSet0.ubo).mvp * float4(in.in_position, 1.0);
+    return out;
+}
+

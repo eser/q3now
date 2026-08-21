@@ -1,0 +1,219 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct AtmParticle
+{
+    float3 pos;
+    float seed;
+    float3 vel;
+    float flags;
+};
+
+struct AtmFrame
+{
+    float4x4 mvp;
+    float4 viewLeft;
+    float4 viewUp;
+    float4 eyeWorld;
+    float dt;
+    float time;
+    uint poolSize;
+    uint pingPongRead;
+    float4 boundsMin;
+    float4 boundsMax;
+    float2 worldMins;
+    float2 worldMaxs;
+    float2 invGridStep;
+    uint gridSize;
+    uint atmType;
+    float _distance;
+    float pad0;
+    float pad1;
+    float pad2;
+};
+
+struct AtmParticle_1
+{
+    packed_float3 pos;
+    float seed;
+    packed_float3 vel;
+    float flags;
+};
+
+struct WritePool
+{
+    AtmParticle_1 writeParticles[1];
+};
+
+struct ReadPool
+{
+    AtmParticle_1 readParticles[1];
+};
+
+constant uint3 gl_WorkGroupSize [[maybe_unused]] = uint3(64u, 1u, 1u);
+
+struct spvDescriptorSetBuffer0
+{
+    constant AtmFrame* m_63 [[id(0)]];
+    texture2d<float> heightgrid [[id(1)]];
+    sampler heightgridSmplr [[id(2)]];
+    device WritePool* m_165 [[id(3)]];
+    device ReadPool* m_184 [[id(4)]];
+};
+
+static inline __attribute__((always_inline))
+AtmParticle deadParticle()
+{
+    AtmParticle p;
+    p.pos = float3(0.0);
+    p.seed = 0.0;
+    p.vel = float3(0.0);
+    p.flags = 0.0;
+    return p;
+}
+
+static inline __attribute__((always_inline))
+float hash11(thread uint& x)
+{
+    x ^= (x >> uint(16));
+    x *= 2146121005u;
+    x ^= (x >> uint(15));
+    x *= 2221713035u;
+    x ^= (x >> uint(16));
+    return float(x) * 2.3283064365386962890625e-10;
+}
+
+static inline __attribute__((always_inline))
+float rand01(thread const uint& idx, thread const uint& salt, thread const float& seed, constant AtmFrame& _63)
+{
+    uint t = uint(_63.time * 1000.0) + uint(seed * 4096.0);
+    uint param = ((idx * 747796405u) + (salt * 2891336453u)) + t;
+    float _86 = hash11(param);
+    return _86;
+}
+
+static inline __attribute__((always_inline))
+float groundHeightAt(thread const float2& worldXY, constant AtmFrame& _63, texture2d<float> heightgrid, sampler heightgridSmplr)
+{
+    float2 cell = (worldXY - _63.worldMins) * _63.invGridStep;
+    float2 uv = (cell + float2(0.5)) / float2(float(_63.gridSize));
+    return heightgrid.sample(heightgridSmplr, uv, level(0.0)).x;
+}
+
+kernel void main0(device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= (*spvDescriptorSet0.m_63).poolSize)
+    {
+        return;
+    }
+    if ((*spvDescriptorSet0.m_63).atmType == 0u)
+    {
+        AtmParticle _167 = deadParticle();
+        (*spvDescriptorSet0.m_165).writeParticles[idx].pos = _167.pos;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].seed = _167.seed;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].vel = _167.vel;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].flags = _167.flags;
+        return;
+    }
+    AtmParticle p;
+    p.pos = float3((*spvDescriptorSet0.m_184).readParticles[idx].pos);
+    p.seed = (*spvDescriptorSet0.m_184).readParticles[idx].seed;
+    p.vel = float3((*spvDescriptorSet0.m_184).readParticles[idx].vel);
+    p.flags = (*spvDescriptorSet0.m_184).readParticles[idx].flags;
+    if (p.flags < 0.5)
+    {
+        uint param = idx;
+        uint param_1 = 11u;
+        float param_2 = p.seed;
+        float rx = rand01(param, param_1, param_2, (*spvDescriptorSet0.m_63));
+        uint param_3 = idx;
+        uint param_4 = 23u;
+        float param_5 = p.seed;
+        float ry = rand01(param_3, param_4, param_5, (*spvDescriptorSet0.m_63));
+        uint param_6 = idx;
+        uint param_7 = 31u;
+        float param_8 = p.seed;
+        float rz = rand01(param_6, param_7, param_8, (*spvDescriptorSet0.m_63));
+        float spread = (*spvDescriptorSet0.m_63)._distance;
+        p.pos.x = fast::clamp((*spvDescriptorSet0.m_63).eyeWorld.x + (((rx * 2.0) - 1.0) * spread), (*spvDescriptorSet0.m_63).boundsMin.x, (*spvDescriptorSet0.m_63).boundsMax.x);
+        p.pos.y = fast::clamp((*spvDescriptorSet0.m_63).eyeWorld.y + (((ry * 2.0) - 1.0) * spread), (*spvDescriptorSet0.m_63).boundsMin.y, (*spvDescriptorSet0.m_63).boundsMax.y);
+        p.pos.z = fast::min((*spvDescriptorSet0.m_63).eyeWorld.z + (rz * 800.0), (*spvDescriptorSet0.m_63).boundsMax.z);
+        p.seed = (rx + ry) + rz;
+        if ((*spvDescriptorSet0.m_63).atmType == 1u)
+        {
+            uint param_9 = idx;
+            uint param_10 = 41u;
+            float param_11 = p.seed;
+            p.vel.x = ((rand01(param_9, param_10, param_11, (*spvDescriptorSet0.m_63)) * 2.0) - 1.0) * 30.0;
+            uint param_12 = idx;
+            uint param_13 = 53u;
+            float param_14 = p.seed;
+            p.vel.y = ((rand01(param_12, param_13, param_14, (*spvDescriptorSet0.m_63)) * 2.0) - 1.0) * 30.0;
+            p.vel.z = -880.0;
+        }
+        else
+        {
+            uint param_15 = idx;
+            uint param_16 = 41u;
+            float param_17 = p.seed;
+            p.vel.x = ((rand01(param_15, param_16, param_17, (*spvDescriptorSet0.m_63)) * 2.0) - 1.0) * 20.0;
+            uint param_18 = idx;
+            uint param_19 = 53u;
+            float param_20 = p.seed;
+            p.vel.y = ((rand01(param_18, param_19, param_20, (*spvDescriptorSet0.m_63)) * 2.0) - 1.0) * 20.0;
+            p.vel.z = -160.0;
+        }
+        p.flags = 1.0;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].pos = p.pos;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].seed = p.seed;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].vel = p.vel;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].flags = p.flags;
+        return;
+    }
+    p.pos += (p.vel * (*spvDescriptorSet0.m_63).dt);
+    if ((*spvDescriptorSet0.m_63).atmType == 2u)
+    {
+        p.pos.x += (sin((*spvDescriptorSet0.m_63).time + float(idx)) * 0.5);
+        p.pos.y += (cos(((*spvDescriptorSet0.m_63).time * 1.2999999523162841796875) + float(idx)) * 0.5);
+    }
+    float2 param_21 = p.pos.xy;
+    float ground = groundHeightAt(param_21, (*spvDescriptorSet0.m_63), spvDescriptorSet0.heightgrid, spvDescriptorSet0.heightgridSmplr);
+    if (p.pos.z < ground)
+    {
+        AtmParticle _404 = deadParticle();
+        (*spvDescriptorSet0.m_165).writeParticles[idx].pos = _404.pos;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].seed = _404.seed;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].vel = _404.vel;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].flags = _404.flags;
+        return;
+    }
+    float2 d = p.pos.xy - (*spvDescriptorSet0.m_63).eyeWorld.xy;
+    if (dot(d, d) > ((*spvDescriptorSet0.m_63)._distance * (*spvDescriptorSet0.m_63)._distance))
+    {
+        AtmParticle _436 = deadParticle();
+        (*spvDescriptorSet0.m_165).writeParticles[idx].pos = _436.pos;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].seed = _436.seed;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].vel = _436.vel;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].flags = _436.flags;
+        return;
+    }
+    if (p.pos.z < ((*spvDescriptorSet0.m_63).eyeWorld.z - 500.0))
+    {
+        AtmParticle _457 = deadParticle();
+        (*spvDescriptorSet0.m_165).writeParticles[idx].pos = _457.pos;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].seed = _457.seed;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].vel = _457.vel;
+        (*spvDescriptorSet0.m_165).writeParticles[idx].flags = _457.flags;
+        return;
+    }
+    (*spvDescriptorSet0.m_165).writeParticles[idx].pos = p.pos;
+    (*spvDescriptorSet0.m_165).writeParticles[idx].seed = p.seed;
+    (*spvDescriptorSet0.m_165).writeParticles[idx].vel = p.vel;
+    (*spvDescriptorSet0.m_165).writeParticles[idx].flags = p.flags;
+}
+

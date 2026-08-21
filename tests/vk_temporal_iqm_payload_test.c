@@ -40,8 +40,8 @@ ralBuffer_t *Ral_CreateBuffer( ralBackend_t *backend,
 		const ralBufferCreateInfo_t *ci ) {
 	ralBuffer_t *out; (void)backend;
 	if ( Fail() || !ci || ci->size != TEMPORAL_IQM_SLOT_BYTES
-			|| ci->usage != RAL_BUFFER_STORAGE
-			|| ci->memory != RAL_MEMORY_HOST_COHERENT ) return NULL;
+			|| ci->usage != ( RAL_BUFFER_STORAGE | RAL_BUFFER_TRANSFER_DST )
+			|| ci->memory != RAL_MEMORY_DEVICE_LOCAL ) return NULL;
 	if ( aliasBuffer ) { void *a=aliasBuffer; aliasBuffer=NULL; return a; }
 	out=calloc(1,sizeof(*out)); out->id=nextId++;
 	out->memory=malloc(TEMPORAL_IQM_SLOT_BYTES); lastBuffer=out; creates++; return out;
@@ -103,7 +103,7 @@ int main( void ) {
 	CHECK(!VK_TemporalIqmPayloadHasLive(&owner));
 	ResetFake(); CHECK(VK_TemporalIqmPayloadPrepareAfterFence(&owner,&key,0,qfalse,qfalse));
 	CHECK(VK_TemporalIqmPayloadHasLive(&owner));
-	CHECK(creates==3 && maps==1 && owner.ownerAllocationGeneration==1
+	CHECK(creates==3 && maps==0 && owner.ownerAllocationGeneration==1
 		&& owner.readySlotMask==1u);
 	memset(&receipt,0x5a,sizeof(receipt));
 	CHECK(VK_TemporalIqmPayloadGetReceipt(&owner,0,&receipt));
@@ -116,7 +116,7 @@ int main( void ) {
 	#define MUTATE_RECEIPT(field) do { receiptBefore=receipt; receiptBefore.field++; \
 		CHECK(!VK_TemporalIqmPayloadReceiptExact(&receipt,&receiptBefore)); } while(0)
 	MUTATE_RECEIPT(backend); MUTATE_RECEIPT(layout); MUTATE_RECEIPT(buffer);
-	MUTATE_RECEIPT(mappedIdentity); MUTATE_RECEIPT(group);
+	MUTATE_RECEIPT(cpuShadowIdentity); MUTATE_RECEIPT(group);
 	MUTATE_RECEIPT(descriptorRange); MUTATE_RECEIPT(recordCapacity);
 	MUTATE_RECEIPT(recordBytes); MUTATE_RECEIPT(ownerAllocationGeneration);
 	MUTATE_RECEIPT(slotAllocationGeneration); MUTATE_RECEIPT(prepareGeneration);
@@ -150,8 +150,8 @@ int main( void ) {
 	// Same-key reuse is fence-gated, allocates nothing, and prepares only the slot.
 	ResetFake(); before=owner;
 	CHECK(VK_TemporalIqmPayloadPrepareAfterFence(&owner,&key,1,qfalse,qfalse));
-	CHECK(operation==3 && owner.preparedSlot==1 && owner.readySlotMask==3u
-		&& ((byte*)owner.slots[1].mapped)[0]==0);
+	CHECK(operation==2 && owner.preparedSlot==1 && owner.readySlotMask==3u
+		&& ((byte*)owner.slots[1].cpuShadow)[0]==0);
 	CHECK(VK_TemporalIqmPayloadGetReceipt(&owner,1,&receiptBefore));
 	CHECK(receiptBefore.prepareGeneration==1);
 	before=owner; ResetFake();
@@ -179,8 +179,8 @@ int main( void ) {
 	CHECK(!VK_TemporalIqmPayloadPrepareAfterFence(&owner,&replacement,0,qtrue,qfalse));
 	CHECK(memcmp(&owner,&before,sizeof(owner))==0);
 	{
-		void *oldRoles[7]={owner.layout,owner.slots[0].buffer,owner.slots[0].mapped,
-			owner.slots[0].group,owner.slots[1].buffer,owner.slots[1].mapped,
+		void *oldRoles[7]={owner.layout,owner.slots[0].buffer,owner.slots[0].cpuShadow,
+			owner.slots[0].group,owner.slots[1].buffer,owner.slots[1].cpuShadow,
 			owner.slots[1].group};
 		for(int i=0;i<7;++i){
 			ResetFake(); aliasLayout=oldRoles[i];
@@ -189,26 +189,23 @@ int main( void ) {
 			ResetFake(); aliasBuffer=oldRoles[i];
 			CHECK(!VK_TemporalIqmPayloadPrepareAfterFence(&owner,&replacement,0,qtrue,qtrue));
 			CHECK(memcmp(&owner,&before,sizeof(owner))==0);
-			ResetFake(); aliasMap=oldRoles[i];
-			CHECK(!VK_TemporalIqmPayloadPrepareAfterFence(&owner,&replacement,0,qtrue,qtrue));
-			CHECK(memcmp(&owner,&before,sizeof(owner))==0);
 			ResetFake(); aliasGroup=oldRoles[i];
 			CHECK(!VK_TemporalIqmPayloadPrepareAfterFence(&owner,&replacement,0,qtrue,qtrue));
 			CHECK(memcmp(&owner,&before,sizeof(owner))==0);
 		}
 	}
-	for(int step=1;step<=4;++step){
+	for(int step=1;step<=3;++step){
 		ResetFake(); failAt=step;
 		CHECK(!VK_TemporalIqmPayloadPrepareAfterFence(&owner,&replacement,0,qtrue,qtrue));
 		CHECK(memcmp(&owner,&before,sizeof(owner))==0);
 	}
 	ResetFake(); CHECK(VK_TemporalIqmPayloadPrepareAfterFence(&owner,&replacement,0,qtrue,qtrue));
 	CHECK(owner.ownerAllocationGeneration==2 && owner.readySlotMask==1u
-		&& destroys==5 && unmaps==2);
+		&& destroys==5 && unmaps==0);
 
-	// Every creation/map step fails candidate-first and leaves a fresh owner empty.
+	// Every owned-resource creation step fails candidate-first and leaves a fresh owner empty.
 	CHECK(VK_TemporalIqmPayloadReleaseAfterIdle(&owner,qtrue));
-	for(int step=1;step<=4;++step){
+	for(int step=1;step<=3;++step){
 		ResetFake(); failAt=step; VK_TemporalIqmPayloadInit(&owner); before=owner;
 		CHECK(!VK_TemporalIqmPayloadPrepareAfterFence(&owner,&key,0,qtrue,qfalse));
 		CHECK(memcmp(&owner,&before,sizeof(owner))==0);
@@ -222,18 +219,9 @@ int main( void ) {
 	ResetFake(); VK_TemporalIqmPayloadInit(&owner); aliasLayout=(void*)0x7000u;
 	CHECK(!VK_TemporalIqmPayloadPrepareAfterFence(&owner,&key,0,qtrue,qfalse));
 	CHECK(destroys==0);
-	ResetFake(); VK_TemporalIqmPayloadInit(&owner); aliasMap=(void*)0x7000u;
-	CHECK(!VK_TemporalIqmPayloadPrepareAfterFence(&owner,&key,0,qtrue,qfalse));
-	CHECK(destroys==2 && unmaps==1); /* candidate buffer is unmapped; borrowed map is never freed */
-	ResetFake(); VK_TemporalIqmPayloadInit(&owner); aliasMapToBuffer=qtrue;
-	CHECK(!VK_TemporalIqmPayloadPrepareAfterFence(&owner,&key,0,qtrue,qfalse));
-	CHECK(destroys==2 && unmaps==1);
 	ResetFake(); VK_TemporalIqmPayloadInit(&owner); aliasGroupToBuffer=qtrue;
 	CHECK(!VK_TemporalIqmPayloadPrepareAfterFence(&owner,&key,0,qtrue,qfalse));
-	CHECK(destroys==2 && unmaps==1);
-	ResetFake(); VK_TemporalIqmPayloadInit(&owner); aliasGroupToMap=qtrue;
-	CHECK(!VK_TemporalIqmPayloadPrepareAfterFence(&owner,&key,0,qtrue,qfalse));
-	CHECK(destroys==2 && unmaps==1);
+	CHECK(destroys==2 && unmaps==0);
 
 	// Receipt failure is output-atomic; release requires idle and orders BG before buffer.
 	ResetFake(); VK_TemporalIqmPayloadInit(&owner);
@@ -242,7 +230,7 @@ int main( void ) {
 	CHECK(VK_TemporalIqmPayloadPrepareAfterFence(&owner,&key,0,qtrue,qfalse));
 	{
 		vkTemporalIqmPayloadOwner_t invalid=owner;
-		invalid.slots[0].mapped=NULL;
+		invalid.slots[0].cpuShadow=NULL;
 		CHECK(VK_TemporalIqmPayloadHasLive(&invalid));
 		CHECK(VK_TemporalIqmPayloadNeedsIdle(&invalid,&key));
 		CHECK(!VK_TemporalIqmPayloadReleaseAfterIdle(&invalid,qtrue));
@@ -254,7 +242,7 @@ int main( void ) {
 	CHECK(!VK_TemporalIqmPayloadReleaseAfterIdle(&owner,qfalse));
 	CHECK(memcmp(&owner,&before,sizeof(owner))==0);
 	eventCount=0; CHECK(VK_TemporalIqmPayloadReleaseAfterIdle(&owner,qtrue));
-	for(int i=0;i<6;i+=3) CHECK(events[i]==1 && events[i+1]==2 && events[i+2]==3);
+	for(int i=0;i<4;i+=2) CHECK(events[i]==1 && events[i+1]==3);
 	CHECK(!VK_TemporalIqmPayloadHasLive(&owner));
 	ResetFake(); CHECK(VK_TemporalIqmPayloadPrepareAfterFence(&owner,&key,0,qfalse,qfalse));
 	CHECK(owner.ownerAllocationGeneration==2 && owner.slots[0].allocationGeneration==2

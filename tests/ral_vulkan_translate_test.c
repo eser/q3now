@@ -3,6 +3,7 @@
 
 #include "ral_vulkan_translate.h"
 #include <stdio.h>
+#include <string.h>
 
 #define CHECK(expr) do { if ( !(expr) ) { \
 	fprintf( stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #expr ); return 1; \
@@ -46,6 +47,9 @@ int main( void ) {
 	};
 	static const uint32_t rates[][2] = { {1,1}, {2,2}, {2,4}, {4,2}, {4,4} };
 	uint32_t i;
+	const ralResourceState_t shaderRead = {
+		RAL_RESOURCE_USAGE_STORAGE_READ, RAL_STAGE_VERTEX | RAL_STAGE_COMPUTE
+	};
 
 	CHECK( sizeof( formats ) / sizeof( formats[0] ) == RAL_FORMAT_COUNT );
 	for ( i = 0; i < RAL_FORMAT_COUNT; ++i )
@@ -154,6 +158,159 @@ int main( void ) {
 		       && t.access == ( VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT ) );
 	}
 
-	puts( "PASS exact production RAL-to-Vulkan format/present/render-state/barrier translations" );
+	CHECK( Ral_ResourceStateValidForBuffer( &shaderRead ) );
+	CHECK( Ral_ResourceStateValidForTexture( &shaderRead ) );
+	{
+		typedef struct {
+			ralResourceUsage_t usage;
+			uint32_t stages;
+			VkPipelineStageFlags vkStage;
+			VkAccessFlags vkAccess;
+		} BufferCase;
+		static const BufferCase cases[] = {
+			{ RAL_RESOURCE_USAGE_UNDEFINED, 0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0 },
+			{ RAL_RESOURCE_USAGE_COPY_SOURCE, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT },
+			{ RAL_RESOURCE_USAGE_COPY_DESTINATION, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT },
+			{ RAL_RESOURCE_USAGE_VERTEX_BUFFER, 0, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT },
+			{ RAL_RESOURCE_USAGE_INDEX_BUFFER, 0, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_ACCESS_INDEX_READ_BIT },
+			{ RAL_RESOURCE_USAGE_INDIRECT_BUFFER, 0, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT },
+			{ RAL_RESOURCE_USAGE_UNIFORM_BUFFER, RAL_STAGE_ALL,
+			  VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			  VK_ACCESS_UNIFORM_READ_BIT },
+			{ RAL_RESOURCE_USAGE_STORAGE_READ, RAL_STAGE_COMPUTE, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT },
+			{ RAL_RESOURCE_USAGE_STORAGE_WRITE, RAL_STAGE_COMPUTE, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT },
+			{ RAL_RESOURCE_USAGE_STORAGE_READ_WRITE, RAL_STAGE_COMPUTE, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			  VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT },
+			{ RAL_RESOURCE_USAGE_HOST_READ, 0, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_READ_BIT },
+			{ RAL_RESOURCE_USAGE_HOST_WRITE, 0, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_WRITE_BIT }
+		};
+		for ( i = 0; i < sizeof( cases ) / sizeof( cases[0] ); ++i ) {
+			ralResourceState_t state = { cases[i].usage, cases[i].stages };
+			ralVkResourceStateTranslation_t out;
+			CHECK( Ral_ResourceStateValidForBuffer( &state ) );
+			CHECK( ralVk_TranslateBufferResourceState( &state, &out ) );
+			CHECK( out.stage == cases[i].vkStage && out.access == cases[i].vkAccess );
+			CHECK( out.layout == VK_IMAGE_LAYOUT_UNDEFINED );
+		}
+	}
+	{
+		typedef struct {
+			ralResourceUsage_t usage;
+			uint32_t stages;
+			VkPipelineStageFlags vkStage;
+			VkAccessFlags vkAccess;
+			VkImageLayout vkLayout;
+		} TextureCase;
+		static const TextureCase cases[] = {
+			{ RAL_RESOURCE_USAGE_UNDEFINED, 0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED },
+			{ RAL_RESOURCE_USAGE_COPY_SOURCE, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL },
+			{ RAL_RESOURCE_USAGE_COPY_DESTINATION, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL },
+			{ RAL_RESOURCE_USAGE_SAMPLED_TEXTURE, RAL_STAGE_FRAGMENT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+			{ RAL_RESOURCE_USAGE_STORAGE_READ, RAL_STAGE_COMPUTE, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_GENERAL },
+			{ RAL_RESOURCE_USAGE_STORAGE_WRITE, RAL_STAGE_COMPUTE, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL },
+			{ RAL_RESOURCE_USAGE_STORAGE_READ_WRITE, RAL_STAGE_COMPUTE, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			  VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL },
+			{ RAL_RESOURCE_USAGE_COLOR_ATTACHMENT, 0, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			  VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL },
+			{ RAL_RESOURCE_USAGE_DEPTH_STENCIL_READ, 0,
+			  VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+			  VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL },
+			{ RAL_RESOURCE_USAGE_DEPTH_STENCIL_WRITE, 0,
+			  VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+			  VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+			  VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL },
+			{ RAL_RESOURCE_USAGE_PRESENT, 0, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR }
+		};
+		for ( i = 0; i < sizeof( cases ) / sizeof( cases[0] ); ++i ) {
+			ralResourceState_t state = { cases[i].usage, cases[i].stages };
+			ralVkResourceStateTranslation_t out;
+			CHECK( Ral_ResourceStateValidForTexture( &state ) );
+			CHECK( ralVk_TranslateTextureResourceState( &state, &out ) );
+			CHECK( out.stage == cases[i].vkStage && out.access == cases[i].vkAccess );
+			CHECK( out.layout == cases[i].vkLayout );
+		}
+	}
+	{
+		ralResourceState_t state = { RAL_RESOURCE_USAGE_VERTEX_BUFFER, 0 };
+		ralVkResourceStateTranslation_t out;
+		memset( &out, 0xA5, sizeof( out ) );
+		CHECK( ralVk_TranslateBufferResourceState( &state, &out ) );
+		CHECK( out.stage == VK_PIPELINE_STAGE_VERTEX_INPUT_BIT );
+		CHECK( out.access == VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT );
+		CHECK( out.layout == VK_IMAGE_LAYOUT_UNDEFINED );
+		state.usage = RAL_RESOURCE_USAGE_SAMPLED_TEXTURE;
+		state.shaderStages = RAL_STAGE_FRAGMENT | RAL_STAGE_COMPUTE;
+		CHECK( ralVk_TranslateTextureResourceState( &state, &out ) );
+		CHECK( out.stage == ( VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT ) );
+		CHECK( out.access == VK_ACCESS_SHADER_READ_BIT );
+		CHECK( out.layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+		state.usage = RAL_RESOURCE_USAGE_PRESENT;
+		state.shaderStages = 0;
+		CHECK( ralVk_TranslateTextureResourceState( &state, &out ) );
+		CHECK( out.stage == VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT );
+		CHECK( out.access == 0 );
+		CHECK( out.layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR );
+	}
+	{
+		ralResourceState_t invalid = { RAL_RESOURCE_USAGE_VERTEX_BUFFER, RAL_STAGE_VERTEX };
+		ralVkResourceStateTranslation_t before, after;
+		memset( &before, 0x5A, sizeof( before ) );
+		after = before;
+		CHECK( !Ral_ResourceStateValidForBuffer( &invalid ) );
+		CHECK( !ralVk_TranslateBufferResourceState( &invalid, &after ) );
+		CHECK( memcmp( &before, &after, sizeof( before ) ) == 0 );
+		invalid.usage = RAL_RESOURCE_USAGE_COUNT;
+		invalid.shaderStages = 0;
+		CHECK( !ralVk_TranslateTextureResourceState( &invalid, &after ) );
+		CHECK( memcmp( &before, &after, sizeof( before ) ) == 0 );
+	}
+	{
+		ralBufferTransition_t t;
+		memset( &t, 0, sizeof( t ) );
+		t.buffer = (ralBuffer_t *)(uintptr_t)1;
+		t.offset = 64;
+		t.size = 128;
+		t.before.usage = RAL_RESOURCE_USAGE_COPY_DESTINATION;
+		t.after = shaderRead;
+		t.sourceQueue = RAL_QUEUE_TRANSFER;
+		t.destinationQueue = RAL_QUEUE_GRAPHICS;
+		CHECK( Ral_BufferTransitionValid( &t, 256 ) );
+		// Logical queue classes remain valid even on a future single-queue WebGPU
+		// backend; physical ownership policy is backend-private.
+		t.sourceQueue = RAL_QUEUE_GRAPHICS;
+		CHECK( Ral_BufferTransitionValid( &t, 256 ) );
+		t.size = 193;
+		CHECK( !Ral_BufferTransitionValid( &t, 256 ) );
+		t.size = 128;
+		t.destinationQueue = (ralQueueType_t)99;
+		CHECK( !Ral_BufferTransitionValid( &t, 256 ) );
+	}
+	{
+		ralTextureTransition_t t;
+		memset( &t, 0, sizeof( t ) );
+		t.texture = (ralTexture_t *)(uintptr_t)1;
+		t.aspects = RAL_TEXTURE_ASPECT_COLOR;
+		t.baseMipLevel = 1;
+		t.mipLevelCount = 3;
+		t.baseArrayLayer = 2;
+		t.arrayLayerCount = 4;
+		t.before.usage = RAL_RESOURCE_USAGE_COPY_DESTINATION;
+		t.after.usage = RAL_RESOURCE_USAGE_SAMPLED_TEXTURE;
+		t.after.shaderStages = RAL_STAGE_FRAGMENT;
+		t.sourceQueue = RAL_QUEUE_TRANSFER;
+		t.destinationQueue = RAL_QUEUE_GRAPHICS;
+		CHECK( Ral_TextureTransitionValid( &t, 4, 6, RAL_TEXTURE_ASPECT_COLOR ) );
+		t.mipLevelCount = 4;
+		CHECK( !Ral_TextureTransitionValid( &t, 4, 6, RAL_TEXTURE_ASPECT_COLOR ) );
+		t.mipLevelCount = 3;
+		t.after.usage = RAL_RESOURCE_USAGE_DEPTH_STENCIL_WRITE;
+		t.after.shaderStages = 0;
+		CHECK( !Ral_TextureTransitionValid( &t, 4, 6, RAL_TEXTURE_ASPECT_COLOR ) );
+		t.aspects = RAL_TEXTURE_ASPECT_DEPTH | RAL_TEXTURE_ASPECT_STENCIL;
+		CHECK( Ral_TextureTransitionValid( &t, 4, 6,
+			RAL_TEXTURE_ASPECT_DEPTH | RAL_TEXTURE_ASPECT_STENCIL ) );
+	}
+
+	puts( "PASS portable RAL resource-state validation and exact Vulkan lowering" );
 	return 0;
 }

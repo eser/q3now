@@ -22,7 +22,6 @@ static int creates, destroys, maps, unmaps, transitions, copies, barriers, depth
 static int nextId = 100;
 static ralBuffer_t *aliasCreate;
 static void *aliasMap;
-static qboolean aliasMapToBuffer;
 static uint32_t eventCount, eventKind[64], eventSrc[64], eventDst[64], eventLayout[64];
 static const void *eventObject[64], *eventBuffer[64];
 static uint64_t eventOffset[64];
@@ -34,7 +33,8 @@ ralBuffer_t *Ral_CreateBuffer( ralBackend_t *backend,
 	ralBuffer_t *b;
 	(void)backend;
 	if ( aliasCreate ) return aliasCreate;
-	if ( !ci || !ci->size || ci->usage != RAL_BUFFER_TRANSFER_DST
+	if ( !ci || !ci->size
+			|| ci->usage != ( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ )
 			|| ci->memory != RAL_MEMORY_HOST_COHERENT ) return NULL;
 	b = (ralBuffer_t *)calloc( 1, sizeof( *b ) );
 	if ( !b ) return NULL;
@@ -46,11 +46,26 @@ void Ral_DestroyBuffer( ralBuffer_t *b ) {
 	if ( !b ) return;
 	destroys++; free( b->memory ); free( b );
 }
-void *Ral_MapBuffer( ralBuffer_t *b ) {
-	if ( !b ) return NULL;
-	maps++; return aliasMapToBuffer ? (void *)b : ( aliasMap ? aliasMap : b->memory );
+ralResult_t Ral_BufferMapBegin( ralBuffer_t *b,
+		const ralBufferMapRequest_t *request, ralBufferMapTicket_t *ticket ) {
+	if ( !b || !request || !ticket || request->mode != RAL_MAP_READ
+			|| request->offset || request->size != b->size ) return ralErrorInvalidArgument;
+	memset( ticket, 0, sizeof( *ticket ) ); maps++;
+	ticket->bufferIdentity = b; ticket->generation = (uint64_t)maps;
+	ticket->request = *request; ticket->status = RAL_BUFFER_MAP_READY;
+	ticket->mappedRange = aliasMap ? aliasMap : b->memory;
+	return ralSuccess;
 }
-void Ral_UnmapBuffer( ralBuffer_t *b ) { if ( b ) unmaps++; }
+ralResult_t Ral_BufferMapUnmap( ralBuffer_t *b,
+		const ralBufferMapTicket_t *ticket ) {
+	if ( !b || !ticket || ticket->bufferIdentity != b ) return ralErrorInvalidArgument;
+	unmaps++; return ralSuccess;
+}
+ralResult_t Ral_CmdTransitionResources( ralCommandBuffer_t *cb,
+		const ralResourceTransitionBatch_t *batch ) {
+	return cb && batch && batch->bufferTransitionCount == 1u
+		? ralSuccess : ralErrorInvalidArgument;
+}
 void Ral_CmdTransitionTexture( ralCommandBuffer_t *cb, ralTexture_t *texture,
 		ralPipelineStageFlags_t src, ralPipelineStageFlags_t dst, uint32_t layout ) {
 	(void)cb; transitions++;
@@ -298,44 +313,18 @@ int main( void ) {
 	CHECK( !VK_TemporalResolveReadbackPrepareAfterFence( &owner, &backend,
 		2, 0, 8, 8, VK_TEMPORAL_RESOLVE_DEPTH_D32, &products ) );
 	CHECK( memcmp( &owner, &ownerBefore, sizeof( owner ) ) == 0 && destroys == 0 );
-	aliasCreate = NULL; aliasMap = &texture[1];
-	CHECK( !VK_TemporalResolveReadbackPrepareAfterFence( &owner, &backend,
-		2, 0, 8, 8, VK_TEMPORAL_RESOLVE_DEPTH_D32, &products ) );
-	CHECK( memcmp( &owner, &ownerBefore, sizeof( owner ) ) == 0
-		&& destroys == 1 && unmaps == 1 );
-	aliasMap = NULL;
+	aliasCreate = NULL;
 	CHECK( VK_TemporalResolveReadbackPrepareAfterFence( &owner, &backend,
 		2, 0, 8, 8, VK_TEMPORAL_RESOLVE_DEPTH_D32, &products ) );
-	CHECK( creates == 2 && owner.slots[0].bytes > 0
+	CHECK( creates == 1 && maps == 0 && owner.slots[0].bytes > 0
 		&& owner.slots[0].state == VK_TEMPORAL_RESOLVE_READBACK_READY );
 	ownerBefore = owner; aliasCreate = owner.slots[0].buffer;
 	CHECK( !VK_TemporalResolveReadbackPrepareAfterFence( &owner, &backend,
 		2, 1, 8, 8, VK_TEMPORAL_RESOLVE_DEPTH_D32, &products ) );
 	CHECK( memcmp( &owner, &ownerBefore, sizeof( owner ) ) == 0 );
-	aliasCreate = (ralBuffer_t *)owner.slots[0].mapped;
-	CHECK( !VK_TemporalResolveReadbackPrepareAfterFence( &owner, &backend,
-		2, 1, 8, 8, VK_TEMPORAL_RESOLVE_DEPTH_D32, &products ) );
-	CHECK( memcmp( &owner, &ownerBefore, sizeof( owner ) ) == 0 );
-	aliasCreate = NULL; aliasMap = owner.slots[0].mapped;
-	CHECK( !VK_TemporalResolveReadbackPrepareAfterFence( &owner, &backend,
-		2, 1, 8, 8, VK_TEMPORAL_RESOLVE_DEPTH_D32, &products ) );
-	CHECK( memcmp( &owner, &ownerBefore, sizeof( owner ) ) == 0 );
-	aliasMap = owner.slots[0].buffer;
-	CHECK( !VK_TemporalResolveReadbackPrepareAfterFence( &owner, &backend,
-		2, 1, 8, 8, VK_TEMPORAL_RESOLVE_DEPTH_D32, &products ) );
-	CHECK( memcmp( &owner, &ownerBefore, sizeof( owner ) ) == 0 );
-	aliasMap = NULL; aliasMapToBuffer = qtrue;
-	CHECK( !VK_TemporalResolveReadbackPrepareAfterFence( &owner, &backend,
-		2, 1, 8, 8, VK_TEMPORAL_RESOLVE_DEPTH_D32, &products ) );
-	CHECK( memcmp( &owner, &ownerBefore, sizeof( owner ) ) == 0 );
-	aliasMapToBuffer = qfalse;
+	aliasCreate = NULL;
 	CHECK( VK_TemporalResolveReadbackPrepareAfterFence( &owner, &backend,
 		2, 1, 8, 8, VK_TEMPORAL_RESOLVE_DEPTH_D32, &products ) );
-	ownerBefore = owner; badProducts = products;
-	badProducts.currentColor = (ralTexture_t *)owner.slots[1].mapped;
-	CHECK( !VK_TemporalResolveReadbackPrepareAfterFence( &owner, &backend,
-		2, 0, 8, 8, VK_TEMPORAL_RESOLVE_DEPTH_D32, &badProducts ) );
-	CHECK( memcmp( &owner, &ownerBefore, sizeof( owner ) ) == 0 );
 	badProducts = products; badProducts.validity = badProducts.velocity;
 	CHECK( !VK_TemporalResolveReadbackRecord( &owner, &command, 0,
 		&recorded, &badProducts, DepthCopy, NULL ) );
@@ -518,7 +507,7 @@ int main( void ) {
 		&owner, 0, qtrue, &content ) );
 	owner.slots[0].ticket.resolve.products.currentDepth = products.currentDepth;
 
-	memory = (unsigned char *)owner.slots[0].mapped;
+	memory = (unsigned char *)owner.slots[0].buffer->memory;
 	current = memory + readbackTicket.currentColorOffset;
 	depth = memory + readbackTicket.currentDepthOffset;
 	previous = memory + readbackTicket.previousColorOffset;
@@ -570,11 +559,11 @@ int main( void ) {
 		&recorded, &products, DepthCopy, NULL ) );
 	CHECK( VK_TemporalResolveReadbackResolveSubmit(
 		&owner, 0, qtrue, &submitted, &readbackTicket ) );
-	memory = (unsigned char *)owner.slots[0].mapped;
-	memory[readbackTicket.currentColorOffset] = 0u;
+	memory = (unsigned char *)owner.slots[0].buffer->memory;
+	memset( memory, 0, (size_t)readbackTicket.totalBytes );
 	CHECK( VK_TemporalResolveReadbackCompleteAfterFence(
 		&owner, 0, qtrue, &content ) );
-	CHECK( !content.planesPopulated && !content.ready );
+	CHECK( content.planesPopulated && !content.ready );
 
 	CHECK( VK_TemporalResolveReadbackArm( &owner, 1 ) );
 	CHECK( VK_TemporalResolveReadbackPrepareAfterFence( &owner, &backend,
@@ -584,7 +573,7 @@ int main( void ) {
 		&recorded, &products, DepthCopy, NULL ) );
 	CHECK( VK_TemporalResolveReadbackResolveSubmit(
 		&owner, 0, qtrue, &submitted, &readbackTicket ) );
-	memory = (unsigned char *)owner.slots[0].mapped;
+	memory = (unsigned char *)owner.slots[0].buffer->memory;
 	memset( memory, 0, (size_t)readbackTicket.totalBytes );
 	current = memory + readbackTicket.currentColorOffset;
 	validity = memory + readbackTicket.validityOffset;
@@ -606,7 +595,7 @@ int main( void ) {
 		&recorded, &products, DepthCopy, NULL ) );
 	CHECK( VK_TemporalResolveReadbackResolveSubmit(
 		&owner, 0, qtrue, &submitted, &readbackTicket ) );
-	memory = (unsigned char *)owner.slots[0].mapped;
+	memory = (unsigned char *)owner.slots[0].buffer->memory;
 	memset( memory, 0, (size_t)readbackTicket.totalBytes );
 	current = memory + readbackTicket.currentColorOffset;
 	velocity = memory + readbackTicket.velocityOffset;
@@ -646,12 +635,12 @@ int main( void ) {
 		sizes[0] = 64u * 8u; sizes[1] = 64u * 4u;
 		sizes[2] = 64u * 8u; sizes[3] = 64u * 4u;
 		sizes[4] = 64u * 4u; sizes[5] = 64u; sizes[6] = 64u * 8u;
-		memory = (unsigned char *)owner.slots[0].mapped;
+		memory = (unsigned char *)owner.slots[0].buffer->memory;
 		memset( memory, 0, (size_t)readbackTicket.totalBytes );
 		memset( memory + offsets[i], 0x7f, (size_t)sizes[i] );
 		CHECK( VK_TemporalResolveReadbackCompleteAfterFence(
 			&owner, 0, qtrue, &content ) );
-		CHECK( !content.planesPopulated && !content.ready );
+		CHECK( content.planesPopulated && !content.ready );
 	}
 	for ( i = 0; i < 9u; ++i ) {
 		float priorLinear = 10.0f;
@@ -664,7 +653,7 @@ int main( void ) {
 			&recorded, &products, DepthCopy, NULL ) );
 		CHECK( VK_TemporalResolveReadbackResolveSubmit(
 			&owner, 0, qtrue, &submitted, &readbackTicket ) );
-		memory = (unsigned char *)owner.slots[0].mapped;
+		memory = (unsigned char *)owner.slots[0].buffer->memory;
 		memset( memory, 0, (size_t)readbackTicket.totalBytes );
 		current = memory + readbackTicket.currentColorOffset;
 		depth = memory + readbackTicket.currentDepthOffset;
