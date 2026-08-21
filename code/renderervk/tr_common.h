@@ -7,6 +7,7 @@
 #define USE_VULKAN
 
 #include "../qcommon/q_shared.h"
+#include "../renderercommon/vulkan/vulkan.h"
 #include "../renderercommon/tr_public.h"
 
 #define MAX_TEXTURE_UNITS 8

@@ -109,6 +109,10 @@ qboolean Ral_TransientTextureCohortRetire( ralTransientTextureCohort_t *cohort,
 	ralTransientBatchReceipt_t *out );
 qboolean Ral_TransientTextureCohortCancel( ralTransientTextureCohort_t *cohort,
 	const ralTransientBatchReceipt_t *planned, ralTransientBatchReceipt_t *out );
+// Candidate cleanup authority for an owner that has not begun a batch. This
+// uses create-time destructors and is unavailable after the first Begin.
+qboolean Ral_TransientTextureCohortReleaseFresh(
+	ralTransientTextureCohort_t **cohort );
 qboolean Ral_TransientTextureCohortReleaseTerminal(
 	ralTransientTextureCohort_t **cohort,
 	const ralTransientBatchReceipt_t *terminalBatch );

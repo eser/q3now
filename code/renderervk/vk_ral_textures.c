@@ -37,9 +37,11 @@ R_LOG_DECLARE_CHANNEL( rch_ral_buffer,  "renderer.ral.buffer"  );
 // diagnostics; the renderer never USES the RAL VkImage beyond
 // dumping it). ral/ral.h is the right include for everything else.
 #include "../renderer/ral/ral.h"
+#include "../renderer/ral_frame_graph/ral_frame_graph_native.h"
 
 // ── module state ────────────────────────────────────────────────────────
 static ralBackend_t         *s_ral_backend;
+static uint64_t              s_ral_frame_graph_diagnostic_generation;
 static ralBindGroupLayout_t *s_ral_bindless_layout;
 static ralBindGroup_t       *s_ral_bindless_set;
 static uint32_t              s_ral_bindless_capacity;     // resolved bindless slot count (= min(RAL caps, requested))
@@ -527,13 +529,12 @@ static void *vk_ral_host_get_proc( void *userData, void *nativeInstance,
 	                               const char *name ) {
 	(void)userData;
 	return ri.VK_GetInstanceProcAddr
-	     ? ri.VK_GetInstanceProcAddr( (VkInstance)nativeInstance, name ) : NULL;
+	     ? ri.VK_GetInstanceProcAddr( nativeInstance, name ) : NULL;
 }
 
 static qboolean vk_ral_host_create_surface( void *userData, void *platformHandle,
 	                                         void *nativeInstance,
 	                                         uint64_t *outNativeSurface ) {
-	VkSurfaceKHR surface = VK_NULL_HANDLE;
 	(void)userData;
 	// The engine adapter intentionally preserves the existing main-window
 	// callback.  A standalone SDL host supplies its own callback and consumes
@@ -541,9 +542,8 @@ static qboolean vk_ral_host_create_surface( void *userData, void *platformHandle
 	(void)platformHandle;
 	if ( outNativeSurface ) *outNativeSurface = 0;
 	if ( !outNativeSurface || !ri.VK_CreateSurface
-	  || !ri.VK_CreateSurface( (VkInstance)nativeInstance, &surface )
-	  || surface == VK_NULL_HANDLE ) return qfalse;
-	*outNativeSurface = (uint64_t)(uintptr_t)surface;
+	  || !ri.VK_CreateSurface( nativeInstance, outNativeSurface )
+	  || *outNativeSurface == 0 ) return qfalse;
 	return qtrue;
 }
 
@@ -2824,6 +2824,42 @@ Q_EXPORT void Ral_DumpLive( void ) {
 	}
 	if ( ri.Cmd_Argc() > 2 && Q_stricmp( ri.Cmd_Argv( 2 ), "temporal-resolve-arm" ) == 0 ) {
 		vk_temporal_resolve_readback_arm();
+		return;
+	}
+	if ( ri.Cmd_Argc() > 2 && Q_stricmp( ri.Cmd_Argv( 2 ), "framegraph" ) == 0 ) {
+		ralFrameGraphNativeReceipt_t receipt;
+		uint64_t generation;
+		if ( !s_ral_backend
+				|| s_ral_frame_graph_diagnostic_generation>=UINT64_MAX-1u ) {
+			R_LOG( rch_ral, SEV_WARN,
+				"ral-frame-graph-native-failure reason=backend-or-generation\n" );
+			return;
+		}
+		generation=++s_ral_frame_graph_diagnostic_generation;
+		memset(&receipt,0,sizeof(receipt));
+		if ( !RalFrameGraphNative_Run(s_ral_backend,generation,&receipt) ) {
+			R_LOG( rch_ral, SEV_WARN,
+				"ral-frame-graph-native-failure generation=%llu\n",
+				(unsigned long long)generation );
+			return;
+		}
+		R_LOG( rch_ral, SEV_INFO,
+			"ral-frame-graph-native schema=%u generation=%llu graph=%llu material=%llu batch=%llu recording=%llu submission=%llu native-submission=%llu textures=%u allocations=%u passes=%u submits=%u disjoint=%llu physical=%llu saved=%llu permille=%u timeline=%llu:%llu completed=%d retired=%d ready=%d\n",
+			receipt.schemaVersion,(unsigned long long)receipt.generation,
+			(unsigned long long)receipt.graphGeneration,
+			(unsigned long long)receipt.materializationGeneration,
+			(unsigned long long)receipt.batchGeneration,
+			(unsigned long long)receipt.recordingGeneration,
+			(unsigned long long)receipt.submissionGeneration,
+			(unsigned long long)receipt.nativeSubmissionGeneration,
+			receipt.textureCount,receipt.allocationCount,receipt.passCount,
+			receipt.submissionCount,
+			(unsigned long long)receipt.disjointEquivalentCommittedBytes,
+			(unsigned long long)receipt.physicalCommittedBytes,
+			(unsigned long long)receipt.savedBytes,receipt.savedPermille,
+			(unsigned long long)receipt.timelineBaseValue,
+			(unsigned long long)receipt.timelineFinalValue,
+			(int)receipt.timelineCompleted,(int)receipt.retired,(int)receipt.ready );
 		return;
 	}
 

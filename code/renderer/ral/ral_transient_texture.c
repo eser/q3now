@@ -31,6 +31,8 @@ static qboolean TextureRequestValid( const ralTransientTextureRequest_t *request
 	return texture->type>=RAL_TEXTURE_1D&&texture->type<=RAL_TEXTURE_CUBE_ARRAY
 		&&texture->format>RAL_FORMAT_UNDEFINED&&texture->format<RAL_FORMAT_COUNT
 		&&texture->width>0u&&texture->height>0u&&texture->depthOrArrayLayers>0u
+		&&!(texture->type==RAL_TEXTURE_CUBE_ARRAY
+			&&texture->depthOrArrayLayers>UINT32_MAX/6u)
 		&&(texture->sampleCount==0u||texture->sampleCount==1u||texture->sampleCount==2u
 			||texture->sampleCount==4u||texture->sampleCount==8u)
 		&&texture->usage!=0&&texture->memory==RAL_MEMORY_LAZY_ALLOC
@@ -226,6 +228,21 @@ qboolean Ral_TransientTextureCohortCancel( ralTransientTextureCohort_t *cohort,
 		const ralTransientBatchReceipt_t *planned,ralTransientBatchReceipt_t *out ) {
 	return cohort&&ReceiptValid(&cohort->receipt)
 		?Ral_TransientBatchCancel(&cohort->lifecycle,planned,&cohort->receipt.plan,out):qfalse;
+}
+
+qboolean Ral_TransientTextureCohortReleaseFresh(
+		ralTransientTextureCohort_t **cohortInOut ) {
+	ralTransientTextureCohort_t *cohort;
+	uint32_t i;
+	if ( !cohortInOut || !(cohort=*cohortInOut) || !ReceiptValid(&cohort->receipt)
+			|| cohort->lifecycle.active.state != RAL_TRANSIENT_BATCH_EMPTY
+			|| cohort->lifecycle.nextBatchGeneration != 0u ) return qfalse;
+	for ( i=cohort->receipt.textureCount; i>0u; --i )
+		cohort->ops.destroyTextureCandidate(cohort->context,cohort->textures[i-1u]);
+	for ( i=cohort->receipt.allocationCount; i>0u; --i )
+		cohort->ops.destroyAllocationCandidate(cohort->context,cohort->allocations[i-1u]);
+	memset(&cohort->receipt,0,sizeof(cohort->receipt));
+	free(cohort);*cohortInOut=NULL;return qtrue;
 }
 
 qboolean Ral_TransientTextureCohortReleaseTerminal(

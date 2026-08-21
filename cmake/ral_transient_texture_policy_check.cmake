@@ -29,6 +29,8 @@ foreach(needle
     "binding->resourceGeneration!=assignment->request.resourceGeneration"
     "slot->allocation.ownerGeneration!=slot->allocation.allocationGeneration"
     "Ral_TransientBatchReceiptExact(&cohort->lifecycle.active,terminalBatch)"
+	"Ral_TransientTextureCohortReleaseFresh"
+	"cohort->lifecycle.active.state != RAL_TRANSIENT_BATCH_EMPTY"
     "cohort->ops.retireTexture"
     "cohort->ops.retireAllocation")
   string(FIND "${HEADER}\n${CORE}" "${needle}" pos)
@@ -85,6 +87,8 @@ foreach(needle
     "exact.allocations[0].allocation.allocationGeneration++"
     "CHECK(cohort==NULL)"
     "!memcmp(context.retireOrder,\"TTTA\",4u)"
+	"CHECK(Ral_TransientTextureCohortReleaseFresh(&cohort))"
+	"CHECK(!Ral_TransientTextureCohortReleaseFresh(&cohort))"
     "Ral_TransientTextureCohortCancel")
   string(FIND "${TEST}" "${needle}" pos)
   if(pos EQUAL -1)

@@ -6,7 +6,6 @@
 
 #include "tr_types.h"
 #include "r_profile_telemetry.h"
-#include "vulkan/vulkan.h"
 #include "../renderer/ral/ral_presentation_host.h"
 #include "../qcommon/asset_load_log.h"
 #include "../qcommon/wired/render/primitives.h"
@@ -20,7 +19,7 @@ typedef struct mapFile_s mapFile_t;
  * (wired.x64). The renderer DLL only sees the opaque pointer. */
 typedef struct arena_s arena_t;
 
-#define	REF_API_VERSION		20	/* backend-neutral presentation-host imports added */
+#define	REF_API_VERSION		21	/* native-free Vulkan platform interop callbacks */
 
 // Number of concurrent world slots the renderer holds — one per local client
 // app. Must be >= the engine's MAX_LOCAL_CGAME_VMS (the app-instance count); the
@@ -392,9 +391,9 @@ typedef struct {
 	// Vulkan
 	void	(*VKimp_Init)( glconfig_t *config );
 	void	(*VKimp_Shutdown)( qboolean unloadDLL );
-	void*	(*VK_GetInstanceProcAddr)( VkInstance instance, const char *name );
+	void*	(*VK_GetInstanceProcAddr)( void *nativeInstance, const char *name );
 	const char *const *(*VK_GetInstanceExtensions)( uint32_t *count );
-	qboolean (*VK_CreateSurface)( VkInstance instance, VkSurfaceKHR *pSurface );
+	qboolean (*VK_CreateSurface)( void *nativeInstance, uint64_t *outNativeSurface );
 
 	const cmSkin_t *(*GetCharacterSkin)( qhandle_t handle );
 

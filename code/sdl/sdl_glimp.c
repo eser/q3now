@@ -7,6 +7,7 @@
 #	include <SDL3/SDL_metal.h>
 #endif
 #ifdef USE_VULKAN_API
+#	include "../renderercommon/vulkan/vulkan.h"
 #	include <SDL3/SDL_vulkan.h>
 #endif
 #ifdef _WIN32
@@ -1037,9 +1038,9 @@ void VKimp_Init( glconfig_t *config )
 VK_GetInstanceProcAddr
 ===============
 */
-void *VK_GetInstanceProcAddr( VkInstance instance, const char *name )
+void *VK_GetInstanceProcAddr( void *nativeInstance, const char *name )
 {
-	return qvkGetInstanceProcAddr( instance, name );
+	return qvkGetInstanceProcAddr( (VkInstance)nativeInstance, name );
 }
 
 const char *const *VK_GetInstanceExtensions( uint32_t *count )
@@ -1053,13 +1054,17 @@ const char *const *VK_GetInstanceExtensions( uint32_t *count )
 VK_CreateSurface
 ===============
 */
-qboolean VK_CreateSurface( VkInstance instance, VkSurfaceKHR *surface )
+qboolean VK_CreateSurface( void *nativeInstance, uint64_t *outNativeSurface )
 {
+	VkSurfaceKHR surface = VK_NULL_HANDLE;
+
+	if ( outNativeSurface ) *outNativeSurface = 0;
+	if ( !nativeInstance || !outNativeSurface ) return qfalse;
 	// SDL3: SDL_Vulkan_CreateSurface adds VkAllocationCallbacks* parameter (pass NULL)
-	if ( SDL_Vulkan_CreateSurface( SDL_window, instance, NULL, surface ) )
-		return qtrue;
-	else
-		return qfalse;
+	if ( !SDL_Vulkan_CreateSurface( SDL_window, (VkInstance)nativeInstance,
+		NULL, &surface ) || surface == VK_NULL_HANDLE ) return qfalse;
+	*outNativeSurface = (uint64_t)(uintptr_t)surface;
+	return qtrue;
 }
 
 
