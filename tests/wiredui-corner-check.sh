@@ -166,7 +166,21 @@ GENPY
 fi
 
 # ── live gate: capture a real menu frame, then bless or verify ─────────────────
-WIRED="${1:-$REPO_ROOT/build/debug/wired.x64.exe}"
+# Default binary. On macOS the engine can only run from the INSTALLED .app: the
+# renderer is loaded from FS_GetInstallBinaryPath(), which appends Contents/MacOS
+# (qcommon.h:951-952), and a flat build/ tree has no such subdirectory — every
+# configuration there dies with "Failed to load renderer wired_vulkan_arm64.dylib"
+# before reaching a menu, overriding fs_installpath included. Makefile:994 launches
+# the same way. Elsewhere the flat build dir IS the install layout, so it stands.
+WIRED_DEFAULT="$REPO_ROOT/build/debug/wired.x64.exe"
+if [ "$(uname -s)" = "Darwin" ]; then
+    for _app in /Applications/q3now-preview.app /Applications/q3now.app; do
+        if [ -x "$_app/Contents/MacOS/wired.$(uname -m)" ]; then
+            WIRED_DEFAULT="$_app/Contents/MacOS/wired.$(uname -m)"; break
+        fi
+    done
+fi
+WIRED="${1:-$WIRED_DEFAULT}"
 if [ ! -x "$WIRED" ] && [ -x "$WIRED.exe" ]; then WIRED="$WIRED.exe"; fi
 if [ ! -x "$WIRED" ]; then echo "SKIP: wired binary not found: $WIRED"; exit 77; fi
 case "$WIRED" in /*) : ;; *) WIRED="$PWD/$WIRED" ;; esac
@@ -215,6 +229,11 @@ case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) HOME_NATIVE="$(cygpath -w "$HOME_DIR
 MODE="verify"; [ "${SMOKE_UPDATE_GOLDEN:-0}" = "1" ] && MODE="bless"
 echo "==> WiredUI corner check (SMAA corner-squares, corner-vs-golden, mode=$MODE): $WIRED"
 
+# Keep the run's output. Discarding it makes a CRASH and a menu-that-never-opened
+# report identically as "no menu screenshot captured", which hides the one line
+# that says which — e.g. "Sys_Error: Failed to load renderer ...". Kept in the
+# sandbox and echoed only on failure, so a passing run stays quiet.
+RUN_LOG="$HOME_PARENT/engine.log"
 (
     cd "$WIRED_DIR" || exit 1
     timeout 90 "$WIRED" \
@@ -224,11 +243,21 @@ echo "==> WiredUI corner check (SMAA corner-squares, corner-vs-golden, mode=$MOD
         +set r_fullscreen 0 +set r_mode -1 +set r_customwidth "$W" +set r_customheight "$H" \
         +set r_smaa 1 \
         +wait 80 +wui_push "$CORNER_MENU" +wait 60 +screenshot cornercap +wait 30 +quit \
-        >/dev/null 2>&1
+        >"$RUN_LOG" 2>&1
 )
 
 SHOT="$(ls -t "$HOME_DIR/base/screenshots/"*.png 2>/dev/null | head -1)"
-if [ -z "$SHOT" ]; then echo "FAIL: no menu screenshot captured"; exit 1; fi
+if [ -z "$SHOT" ]; then
+    echo "FAIL: no menu screenshot captured"
+    if grep -qiE 'Sys_Error|FATAL|Assertion failed' "$RUN_LOG" 2>/dev/null; then
+        echo "  the engine died before the shot — last lines:"
+        grep -iE 'Sys_Error|FATAL|Assertion failed|Failed to load' "$RUN_LOG" | tail -4 | sed 's/^/    /'
+    else
+        echo "  the engine ran but produced no shot — is '$CORNER_MENU' pushable with wui_push?"
+        tail -4 "$RUN_LOG" 2>/dev/null | sed 's/^/    /'
+    fi
+    exit 1
+fi
 
 # On HiDPI the requested WxH is the LOGICAL size — the capture backs at the
 # physical pixel size (a 1280 request backs at 2560 on a 2x display). Sampling
