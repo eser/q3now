@@ -53,6 +53,24 @@ arena_t *WiredUI_GetArena( void );
  * render at a consistent physical size across displays. */
 float WiredUI_GetDpiScale( void );
 
+/* ── UI root scale accessor ───────────────────────────────────────────
+ * The logical size that `1rem` means, before dpiScale.
+ *
+ * This is the ONE quantity the UI is sized against. Authoring in rem instead of
+ * px is what makes "scale the whole interface" a single number rather than an
+ * edit to every string — the case a handheld needs, where a 7" 1280x800 panel
+ * and an external 4K want different UI sizes at the same dpiScale.
+ *
+ * It is not the same question as dpiScale. dpiScale answers "how many physical
+ * pixels is a logical one" (a property of the display); the root answers "how
+ * big should the UI be" (a property of the user's preference). Physical size is
+ * the product of the two, so both still apply:  px = rem x root x dpiScale.
+ *
+ * Backed by ui_rootSize (registered with bounds in WiredUI_Init), defaulting to
+ * WUI_DEFAULT_FONT_SIZE so unauthored text is exactly 1rem and the shipped look
+ * does not move. */
+float WiredUI_GetRootScale( void );
+
 /* ── lifecycle ────────────────────────────────────────────────────────
  * Called from WiredUI_Init / WiredUI_Shutdown (cl_wired_ui.c:1697 / 1835).
  * Idempotent on Init (vid_restart safe — compositor survives via the

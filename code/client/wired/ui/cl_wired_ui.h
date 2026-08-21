@@ -297,6 +297,7 @@ _Static_assert( WUI_LAYER_MENU           < WUI_LAYER_CONSOLE,
  * Shared between the legacy SCR text path (cl_wired_ui.c) and the compositor
  * emit path (cl_wired_clay.c) so the same fallback applies in both routes. */
 #define WUI_DEFAULT_FONT_SIZE  14.0f
+
 /* Minimum single-line row height as a multiple of font size. The MSDF draw path
  * top-aligns glyphs with zero leading, so a fixed-height row shorter than the
  * glyph line box (~1.0-1.32 em across shipped faces) lets the next row overlap

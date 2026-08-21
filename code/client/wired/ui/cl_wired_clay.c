@@ -1122,6 +1122,9 @@ static float wui_resolve_unit( wuiValue_t v, float parentSize )
 	 * (cl_wired_layout.c:26). Without this the emit pass under-sized these on
 	 * HiDPI while the layout pass scaled them — the two disagreed. */
 	case UNIT_PX:    return v.value * WiredUI_GetDpiScale();
+	/* Must match WUI_Resolve's UNIT_REM exactly — the two resolvers disagreeing
+	 * is the bug the UNIT_PX note above records. */
+	case UNIT_REM:   return v.value * WiredUI_GetRootScale() * WiredUI_GetDpiScale();
 	case UNIT_VW:    return v.value * (float) wui_clay_lastWidth  / 100.0f;
 	case UNIT_VH:    return v.value * (float) wui_clay_lastHeight / 100.0f;
 	case UNIT_NORM:  return v.value * parentSize;

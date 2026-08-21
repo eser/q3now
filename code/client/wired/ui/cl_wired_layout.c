@@ -24,6 +24,10 @@ float WUI_Resolve( wuiValue_t val, float parentSizePx, float vpWidth, float vpHe
 		 * HiDPI, so glyphs overflowed their rows (cramped line spacing). Scale
 		 * UNIT_PX by the same factor so box geometry tracks the font. */
 		case UNIT_PX:   return val.value * WiredUI_GetDpiScale();
+		/* rem: a multiple of the UI root scale, then dpiScale — px = rem x root
+		 * x dpi. Unlike UNIT_PX this tracks the user's size preference, so a
+		 * rem-sized box grows with the type it holds instead of clipping it. */
+		case UNIT_REM:  return val.value * WiredUI_GetRootScale() * WiredUI_GetDpiScale();
 		case UNIT_AUTO: return 0.0f;  // resolved later by layout engine from content
 		case UNIT_NORM:
 		default:        return val.value * parentSizePx;

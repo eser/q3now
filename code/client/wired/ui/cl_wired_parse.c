@@ -841,6 +841,7 @@ static wuiValue_t WiredPC_ParseValue( int handle ) {
 		if ( *s ) {
 			if      ( !Q_stricmp( s, "vw" ) ) { val.unit = UNIT_VW; return val; }
 			else if ( !Q_stricmp( s, "vh" ) ) { val.unit = UNIT_VH; return val; }
+			else if ( !Q_stricmp( s, "rem" ) ) { val.unit = UNIT_REM; return val; }
 			else if ( !Q_stricmp( s, "px" ) ) { val.unit = UNIT_PX; return val; }
 		}
 	}
@@ -849,6 +850,8 @@ static wuiValue_t WiredPC_ParseValue( int handle ) {
 	if ( WiredPC_ReadToken( handle, &token ) ) {
 		if ( !Q_stricmp( token.string, "vw" ) ) {
 			val.unit = UNIT_VW;
+		} else if ( !Q_stricmp( token.string, "rem" ) ) {
+			val.unit = UNIT_REM;
 		} else if ( !Q_stricmp( token.string, "vh" ) ) {
 			val.unit = UNIT_VH;
 		} else if ( !Q_stricmp( token.string, "px" ) ) {
@@ -868,6 +871,7 @@ static float WUI_BackfillToScreen( wuiValue_t val, float screenDim ) {
 	switch ( val.unit ) {
 		case UNIT_VW:   return ( val.value / 100.0f ) * (float)cls.glconfig.vidWidth;
 		case UNIT_VH:   return ( val.value / 100.0f ) * (float)cls.glconfig.vidHeight;
+		case UNIT_REM:  return val.value * WiredUI_GetRootScale() * WiredUI_GetDpiScale();
 		case UNIT_PX:   return val.value;
 		case UNIT_NORM:
 		default:        return val.value * screenDim;
@@ -3137,7 +3141,8 @@ qboolean WiredUI_LoadMenuFile( const char *filename ) {
 				if ( WiredPC_ReadToken( handle, &unitPeek ) ) {
 					if ( !Q_stricmp( unitPeek.string, "px" )
 					  || !Q_stricmp( unitPeek.string, "vw" )
-					  || !Q_stricmp( unitPeek.string, "vh" ) )
+					  || !Q_stricmp( unitPeek.string, "vh" )
+					  || !Q_stricmp( unitPeek.string, "rem" ) )
 					{
 						qstring_t vbuf_qs2 = QS_WrapExisting( vbuf, sizeof( vbuf ) );
 						QS_Append( &vbuf_qs2, unitPeek.string );
