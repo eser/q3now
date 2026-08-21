@@ -57,7 +57,6 @@ menuDef {
 
 	itemDef {
 		name "popup_overlay"
-		position absolute
 		type container
 		direction column
 		alignX center
@@ -70,7 +69,6 @@ menuDef {
 		itemDef {
 			name "dim_backdrop"
 			type 0
-			position absolute
 			backcolor 0 0 0 0.55
 			decoration
 			visible 1

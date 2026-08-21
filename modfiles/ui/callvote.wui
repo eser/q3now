@@ -34,7 +34,6 @@ menuDef {
 
 	itemDef {
 		name "popup_overlay"
-		position absolute
 		type container
 		direction column
 		alignX center

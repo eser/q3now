@@ -29,7 +29,6 @@ menuDef {
 
 	itemDef {
 		name "popup_root"
-		position absolute
 		rect 0.25 0.39 $popup_width 0.22
 		type container
 		direction column

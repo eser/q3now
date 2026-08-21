@@ -48,7 +48,6 @@ menuDef {
 
 	itemDef {
 		name "campaign_root"
-		position absolute
 		type container
 		direction column
 		background "layered" effects "demo"

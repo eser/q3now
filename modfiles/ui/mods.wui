@@ -15,7 +15,6 @@ menuDef {
 
 	itemDef {
 		name "browser_root"
-		position absolute
 		type container
 		direction column
 		background "layered" effects "base+glow+noise+vignette"

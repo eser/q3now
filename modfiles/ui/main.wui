@@ -25,7 +25,6 @@ menuDef {
 
 	itemDef {
 		name "main_root"
-		position absolute
 		type container
 		direction column
 		background "layered" effects "demo"
