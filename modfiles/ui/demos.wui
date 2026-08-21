@@ -4,6 +4,8 @@
 // 1-column ListBox over FEEDER_DEMOS + Play/Back footer.
 // Double-click plays. Reached from main menu → Demos.
 
+#include "ui/widgets/qw_button.wui"
+
 menuDef {
 	name "demos"
 	layer "menu"
@@ -90,8 +92,8 @@ menuDef {
 				height FIT
 				padding 0.005 0
 
-				itemDef { name "btn_back" type 1 rect 0 0 0.14 0.04 height FIT text "Back" textalign 1 font $font_sans 13       forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { close } }
-				itemDef { name "btn_play_demo" type 1 rect 0 0 0.14 0.04 height FIT text "Play" textalign 1 font $font_sans_bold 13 forecolor $accent forecolor.active $accent visible 1 grow 0 action { rundemo } }
+				QW_BUTTON("btn_back", "Back", $boneDim, { close }, 0.14)
+				QW_BUTTON("btn_play_demo", "Play", $accent, { rundemo }, 0.14)
 			}
 		}
 
