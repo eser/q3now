@@ -170,6 +170,26 @@ menuDef {
 							visible 1
 							grow 0
 						}
+						// Interface size — the UI root scale, what 1rem is worth before
+						// dpiScale. This is the payoff of sizing type in rem rather than
+						// pixels: one number moves the whole interface, with no per-screen
+						// edits. Offered as named steps rather than a slider because the
+						// useful range is small; the cvar takes any value in 4..64 for
+						// anyone who would rather type one.
+						itemDef {
+							name "row_ui_scale"
+							type segmented
+							height FIXED 38px
+							width PERCENT 1
+							text "Interface Size"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "ui_rootSize"
+							cvarFloatList { "Small" 12 "Default" 14 "Large" 17 "Larger" 21 }
+							visible 1
+							grow 0
+						}
 						itemDef {
 							name "row_gl_ext"
 							type checkbox
