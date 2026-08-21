@@ -8,6 +8,8 @@
 //
 // No outOfBoundsClick: error dialogs must be dismissed deliberately.
 
+#include "ui/widgets/qw_button.wui"
+
 menuDef {
 	name "error_popup"
 	layer "popup"
@@ -50,9 +52,9 @@ menuDef {
 				alignX end
 				height FIT
 
-				itemDef { name "btn_copy"  type 1 rect 0 0 0.16 0.04 height FIT text "Copy error"   textalign 1 font $font_sans 13       forecolor $boneDim forecolor.active $accent visible 1 grow 0 action { clipboard cvar:com_errorMessage } }
-				itemDef { name "btn_retry" type 1 rect 0 0 0.12 0.04 height FIT text "Retry"        textalign 1 font $font_sans 13       forecolor $accent forecolor.active $accent visible 1 grow 0 cvarTest "ui_errorRetry" showCvar { "1" } action { exec "reconnect" ; close } }
-				itemDef { name "btn_back"  type 1 rect 0 0 0.18 0.04 height FIT text "Back to menu" textalign 1 font $font_sans_bold 13 forecolor $accent forecolor.active $accent visible 1 grow 0 defaultButton action { exec "disconnect" ; close } }
+				QW_BUTTON("btn_copy", "Copy error", $boneDim, { clipboard cvar:com_errorMessage }, 0.16)
+				QW_BUTTON("btn_retry", "Retry", $accent, { exec "reconnect" ; close }, 0.12)
+				QW_BUTTON("btn_back", "Back to menu", $accent, { exec "disconnect" ; close }, 0.18)
 			}
 		}
 	}
