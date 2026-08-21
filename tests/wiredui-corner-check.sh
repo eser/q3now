@@ -194,6 +194,15 @@ mkdir -p "$HOME_DIR/base/screenshots"
 #
 # Staging the pak into the sandbox home and pointing fs_basepath at it is the
 # same recipe the ral-*-check.sh gates use.
+#
+# Do NOT also override fs_installpath. The renderer is not loaded from basepath:
+# CL_InitRef builds its path from FS_GetInstallBinaryPath(), which the engine
+# derives from argv[0] and which appends Contents/MacOS on macOS. Left alone
+# that self-detection is correct. Pinning fs_installpath to the flat build dir
+# makes it look for build/debug/Contents/MacOS/wired_vulkan_arm64.dylib, which
+# does not exist, and the engine dies before reaching the menu:
+#     Sys_Error: Failed to load renderer wired_vulkan_arm64.dylib
+# Measured both ways. Only the content path belongs in the sandbox.
 if [ -n "${WIRED_CONTENT_ROOT:-}" ]; then
     for _pak in "$WIRED_CONTENT_ROOT"/base/*.sw3z "$WIRED_CONTENT_ROOT"/base/*.pk3; do
         [ -e "$_pak" ] && cp "$_pak" "$HOME_DIR/base/"
