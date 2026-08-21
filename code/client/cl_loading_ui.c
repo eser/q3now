@@ -11,31 +11,38 @@
 #include "wired/ui/cl_wired_text.h"
 #include "wired/ui/cl_wired_background.h"
 #include "wired/ui/cl_wired_customdraw.h"   /* unified registry */
+#include "wired/ui/cl_wired_compositor.h"   /* GetRootScale + GetDpiScale (rem) */
 #include "wired/store/cl_wired_store.h"     /* loading.overall publisher */
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
-/* Viewport-relative font sizes.
+/* Type scale, in rem against the UI root (WiredUI_GetRootScale × dpiScale).
  *
- * These follow the RENDER TARGET, while .wui-authored text follows the window
- * (fontPointSize × dpiScale) and the console follows cls.con_factor. Measured
- * at window 1440x900 / target 720x450 (r_renderScale), all three disagree in
- * the same frame: console text ran 3.2× the height of a HUD label.
+ * These used to be a fraction of the render target (vidHeight × k), which put
+ * the loading screen on a different sizing model from everything else: .wui text
+ * is authored size × dpiScale, and the console is cls.con_factor. All three
+ * agree only while the render target tracks the window, and r_renderScale is
+ * exactly where it does not — measured at window 1440x900 / target 720x450, the
+ * console ran 3.2× the height of a label in the same frame.
  *
- * Rewriting these as vidHeightLogical × dpiScale × k does NOT fix it, and the
- * attempt is recorded here so it is not made twice: dpiScale IS
- * vidHeight/vidHeightLogical, so the substitution cancels back to the same
- * number. Verified numerically — identical output in both the matched and the
- * decoupled case.
+ * Rebasing them onto vidHeightLogical × dpiScale was tried first and is recorded
+ * here so it is not tried again: dpiScale IS vidHeight/vidHeightLogical, so the
+ * substitution cancels back to the same number. Verified numerically. Both sides
+ * were pixel ratios; only introducing a root changes the answer.
  *
- * The real divergence is that .wui text is sized in AUTHORED POINTS scaled by
- * dpiScale, whereas these are a FRACTION OF THE VIEWPORT. Those are different
- * sizing models, and no change of denominator reconciles them; the loading
- * screen would have to author its type in points like the rest of the UI.
- * See TASK-200.
+ * The multiples below reproduce the old pixel sizes at the default root of 14
+ * and a 900pt-tall window, within 0.2px — TITLE 25.20 → 25.20, LABEL 11.70 →
+ * 11.90, SMALL 9.90 → 9.80. So this migration does not redesign the screen; it
+ * changes what the numbers are relative to.
+ *
+ * They are also the screen's unit of measure, not only its font size: line
+ * advance (× 1.6), wrap width (rw / SMALL) and text-extent estimates are all
+ * expressed in them. That is what rem is for, and it is why the macros stay
+ * rather than being inlined at the 36 call sites. See TASK-212.
  */
-#define LOADING_FONT_TITLE   (cls.glconfig.vidHeight * 0.028f)
-#define LOADING_FONT_LABEL   (cls.glconfig.vidHeight * 0.013f)
-#define LOADING_FONT_SMALL   (cls.glconfig.vidHeight * 0.011f)
+#define LOADING_REM          ( WiredUI_GetRootScale() * WiredUI_GetDpiScale() )
+#define LOADING_FONT_TITLE   ( 1.80f * LOADING_REM )
+#define LOADING_FONT_LABEL   ( 0.85f * LOADING_REM )
+#define LOADING_FONT_SMALL   ( 0.70f * LOADING_REM )
 
 // Set to 1 to enable per-function diagnostic prints during loading.
 // Remove or set to 0 once debugging is complete.
@@ -262,9 +269,11 @@ Right: bot difficulty dots if g_autoBots is active.
 static void Loading_DrawTopBar( float rx, float ry, float rw, float rh ) {
 	/* Positions come from the passed rect (legacy fractions were
 	 * `0, 0, vpW, vpH*0.058` — call sites pass these explicitly now).
-	 * vpW/vpH stay for vp-relative font sizing + small absolute padding
-	 * (LOADING_FONT_LABEL = vpH * 0.013) so the visual size stays
-	 * consistent across resolutions, matching legacy byte-for-byte. */
+	 * vpW/vpH stay for the vp-relative LAYOUT ratios — padding, marker radii,
+	 * panel offsets — which are genuinely a share of the viewport. Type is no
+	 * longer among them: LOADING_FONT_* is rem against the UI root now, so it
+	 * tracks the same scale as the rest of the UI rather than the render
+	 * target. See the macro note at the top of this file. */
 	float vpW = (float)cls.glconfig.vidWidth;
 	float vpH = (float)cls.glconfig.vidHeight;
 	float pad  = vpW * 0.0125f;          // vp-relative pad (~8/640)
@@ -1164,12 +1173,14 @@ void CL_PublishLoadingState( void ) {
  * used to say the opposite — written before the helpers were
  * parameterised, and left behind when they were.)
  *
- * What still bypasses the rect is SIZE: LOADING_FONT_* and the paddings
- * are computed straight off cls.glconfig.vidWidth/Height, so within one
- * element position follows the authored layout while type and spacing
- * follow the render target. Those two agree only while the render target
- * tracks the window — r_renderScale, or any path that sets vidHeight
- * independently of it, pulls them apart. See TASK-200.
+ * SIZE no longer bypasses it the way it did. Type is rem against the UI
+ * root (LOADING_FONT_* at the top of this file), the same scale .wui text
+ * uses, so it no longer drifts from the authored layout when the render
+ * target stops tracking the window — which r_renderScale, or any path that
+ * sets vidHeight independently, makes it do.
+ *
+ * The paddings and marker radii are still vp-relative, and deliberately:
+ * they are a share of the viewport, not a share of the type. See TASK-212.
  */
 
 static void Loading_CustomDraw_Wireframe( float x, float y, float w, float h, vec4_t color )
