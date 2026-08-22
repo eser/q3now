@@ -1563,7 +1563,6 @@ static const void *RB_MenuBackdrop( const void *data ) {
 
 			// Invalidate cached binding state so the next tess 2D quad rebinds the
 			// 2D pipeline + descriptors (same cleanup vk_render_beam/sprite do).
-			vk.cmd->last_pipeline     = VK_NULL_HANDLE;
 			vk.cmd->last_ral_pipeline = NULL;
 			vk.cmd->depth_range       = DEPTH_RANGE_COUNT;
 			memset( vk.cmd->descriptor_set.current, 0, sizeof( VkDescriptorSet ) * WIRED_BINDLESS_SET );

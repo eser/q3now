@@ -35,6 +35,30 @@ id<MTLCommandQueue> RalMetal_CoreNativeQueue( ralMetalCore_t *core ) {
 	return core ? core->queue : nil;
 }
 
+qboolean RalMetal_TextureFormatSupportsFeatures( const ralMetalCore_t *core,
+		ralFormat_t format, ralTextureFormatFeatures_t features ) {
+	ralTextureFormatFeatures_t available = 0u;
+	if ( !core || !core->device || core->deviceLost == qtrue || features == 0u
+			|| ( features & ~RAL_TEXTURE_FORMAT_FEATURE_ALL ) != 0u ) return qfalse;
+
+	// Conservative Metal-family table. Publish only capabilities guaranteed by
+	// the pixel-format tables for all devices accepted by this core; optional
+	// families remain false until an exact device gate is added.
+	switch ( format ) {
+	case RAL_FORMAT_R16G16B16A16_SFLOAT:
+		available = RAL_TEXTURE_FORMAT_FEATURE_SAMPLED
+			| RAL_TEXTURE_FORMAT_FEATURE_FILTER_LINEAR
+			| RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT
+			| RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND
+			| RAL_TEXTURE_FORMAT_FEATURE_TRANSFER_SRC
+			| RAL_TEXTURE_FORMAT_FEATURE_TRANSFER_DST;
+		break;
+	default:
+		return qfalse;
+	}
+	return ( available & features ) == features ? qtrue : qfalse;
+}
+
 qboolean RalMetal_CoreMatchesReceipt( ralMetalCore_t *core,
 		const ralMetalCoreReceipt_t *receipt ) {
 	return ( core && core->deviceLost != qtrue && receipt
@@ -135,6 +159,16 @@ static void BuildCaps( id<MTLDevice> device, ralCaps_t *caps ) {
 	caps->maxSamplerAnisotropy = 16.0f;
 	caps->independentBlend = qtrue;
 	caps->maxStorageBufferRange = (uint64_t)device.maxBufferLength;
+	caps->maxSampledTexturesPerShaderStage = 128u;
+	caps->maxBindGroups = 8u;
+	caps->adapterType = RAL_ADAPTER_TYPE_INTEGRATED;
+	caps->offscreenPresentation = qtrue;
+	strncpy( caps->vendorName, "Apple Inc.", sizeof( caps->vendorName ) - 1u );
+	strncpy( caps->driverVersion, "Metal", sizeof( caps->driverVersion ) - 1u );
+	if ( [device respondsToSelector:@selector(recommendedMaxWorkingSetSize)] ) {
+		caps->deviceLocalMemoryBytes = (uint64_t)device.recommendedMaxWorkingSetSize;
+		caps->hostVisibleDeviceLocalMemoryBytes = caps->deviceLocalMemoryBytes;
+	}
 	if ( [device respondsToSelector:@selector(supportsBCTextureCompression)] )
 		caps->textureCompressionBC = device.supportsBCTextureCompression ? qtrue : qfalse;
 	if ( [device respondsToSelector:@selector(supportsFamily:)] ) {

@@ -67,6 +67,7 @@ endforeach()
 
 foreach(needle IN ITEMS
   "SDL_CreateWindow( \"Wired RAL backend conformance\""
+	"1280, 720, SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN"
   "SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN"
   "Ral_CreateBackend( &createInfo )"
   "RalMetal_CoreCreate"

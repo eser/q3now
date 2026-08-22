@@ -273,6 +273,12 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 	// runs at full resolution. On a 1x display logical == pixel, so this is a no-op.
 	flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
+	// Create every window hidden and publish it only after the requested and
+	// actual logical/pixel extents pass the global exact-16:9 contract.  This is
+	// not merely an automated-test rule: no interactive, fallback, archived-mode,
+	// or platform-coerced path may flash a legacy 4:3 window before rejection.
+	flags |= SDL_WINDOW_HIDDEN;
+
 	// Automated (non-interactive) run: open the window in the BACKGROUND z-order,
 	// unactivated, so it does not pop over or steal focus from the user's work — but
 	// keep it a NORMAL, taskbar-visible window the user can alt-tab / click to the
@@ -288,11 +294,8 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 	// (explicitly "not showing in the task bar"). The window stays SHOWN once
 	// SDL_ShowWindow runs (below) so the swapchain keeps rendering for capture — only a
 	// minimized/hidden window stalls the swapchain (gw_minimized gate), and this one is
-	// only momentarily hidden between create and the immediate show. Interactive runs
-	// (com_automated 0) are unaffected.
-	if ( com_automated && com_automated->integer )
-		flags |= SDL_WINDOW_HIDDEN;
-
+	// only momentarily hidden between validation and the immediate show. Interactive
+	// runs use the normal activation hints when they are shown.
 	// If a window exists, note its display
 	if ( SDL_window != NULL )
 	{
@@ -375,6 +378,15 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 	if ( !CL_GetModeInfo( &config->vidWidth, &config->vidHeight, &config->windowAspect, mode, modeFS, glw_state.desktop_width, glw_state.desktop_height, fullscreen ) )
 	{
 		Com_Log( SEV_INFO, LOG_CH(ch_client), " invalid mode\n" );
+		return RSERR_INVALID_MODE;
+	}
+	if ( config->vidWidth <= 0 || config->vidHeight <= 0
+		|| (int64_t)config->vidWidth * 9
+			!= (int64_t)config->vidHeight * 16 )
+	{
+		Com_Log( SEV_INFO, LOG_CH(ch_client),
+			" window mode %dx%d is not exact 16:9; refusing it\n",
+			config->vidWidth, config->vidHeight );
 		return RSERR_INVALID_MODE;
 	}
 
@@ -581,6 +593,11 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 					if ( overflow > 0 && contentH - overflow > 240 )
 					{
 						config->vidHeight = contentH - overflow;
+						/* Preserve the requested 16:9 contract while fitting a
+						 * decorated window below the display edge.  Height-only
+						 * shrinking silently produced non-widescreen harnesses. */
+						config->vidHeight = ( config->vidHeight / 9 ) * 9;
+						config->vidWidth = ( config->vidHeight / 9 ) * 16;
 						SDL_SetWindowSize( SDL_window, config->vidWidth, config->vidHeight );
 					}
 				}
@@ -688,6 +705,44 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 			SDL_DestroySurface( icon );
 		}
 #endif
+		/* Validate every logical and physical window before it becomes visible.
+		 * Refuse platform/config coercion instead of ever showing 4:3. */
+		{
+			int logicalWidth = 0, logicalHeight = 0;
+			int pixelWidth = 0, pixelHeight = 0;
+			SDL_GetWindowSize( SDL_window, &logicalWidth, &logicalHeight );
+			SDL_GetWindowSizeInPixels( SDL_window, &pixelWidth, &pixelHeight );
+			if ( logicalWidth <= 0 || logicalHeight <= 0
+				|| pixelWidth <= 0 || pixelHeight <= 0
+				|| (int64_t)logicalWidth * 9 != (int64_t)logicalHeight * 16
+				|| (int64_t)pixelWidth * 9 != (int64_t)pixelHeight * 16
+				|| ( com_automated && com_automated->integer
+					&& ( logicalWidth < 1280 || logicalHeight < 720
+						|| pixelWidth < 1280 || pixelHeight < 720 ) ) )
+			{
+				if ( com_automated && com_automated->integer
+					&& ( logicalWidth < 1280 || logicalHeight < 720
+						|| pixelWidth < 1280 || pixelHeight < 720 ) )
+				{
+					Com_Log( SEV_INFO, LOG_CH(ch_client),
+						"Automated window extent fell below 1280x720 (logical=%dx%d pixels=%dx%d); refusing it\n",
+						logicalWidth, logicalHeight, pixelWidth, pixelHeight );
+				}
+				else
+				{
+					Com_Log( SEV_INFO, LOG_CH(ch_client),
+						"Window became non-16:9 (logical=%dx%d pixels=%dx%d); refusing it\n",
+						logicalWidth, logicalHeight, pixelWidth, pixelHeight );
+				}
+				SDL_DestroyWindow( SDL_window );
+				SDL_window = NULL;
+				return RSERR_INVALID_MODE;
+			}
+			Com_Log( SEV_INFO, LOG_CH(ch_client),
+				"window-extent schema=2 requested=%dx%d logical=%dx%d pixels=%dx%d exact16x9=1 publish-ready=1\n",
+				config->vidWidth, config->vidHeight,
+				logicalWidth, logicalHeight, pixelWidth, pixelHeight );
+		}
 
 		// Automated run: the window was created HIDDEN (flags above). Show it now
 		// WITHOUT activating it — ACTIVATE_WHEN_SHOWN "0" makes SDL_ShowWindow map to a
@@ -695,13 +750,20 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 		// appears in the BACKGROUND z-order (the user's active window stays in front),
 		// does not take focus, and stays a normal taskbar window (reachable via
 		// alt-tab / click). After this the window is SHOWN, so the swapchain renders
-		// for capture (the #207 contract). The interactive path never set HIDDEN, so
-		// this branch is skipped and the window shows + activates normally.
+		// for capture (the #207 contract). Interactive runs retain the default SDL
+		// activation behavior when the common show below publishes the window.
 		if ( com_automated && com_automated->integer )
 		{
 			SDL_SetHint( SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0" );
 			SDL_SetHint( SDL_HINT_WINDOW_ACTIVATE_WHEN_RAISED, "0" );
-			SDL_ShowWindow( SDL_window );
+		}
+		if ( !SDL_ShowWindow( SDL_window ) )
+		{
+			Com_Log( SEV_INFO, LOG_CH(ch_client),
+				"SDL_ShowWindow failed: %s\n", SDL_GetError() );
+			SDL_DestroyWindow( SDL_window );
+			SDL_window = NULL;
+			return RSERR_INVALID_MODE;
 		}
 	}
 	else
@@ -749,6 +811,7 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS,
 		qboolean fullscreen, wiredWindowApi_t windowApi )
 {
 	rserr_t err;
+	const qboolean automated = com_automated && com_automated->integer;
 
 #if defined(__APPLE__) && defined(USE_VULKAN_API)
 	// MoltenVK reads this process setting while its Metal objects are created.
@@ -762,11 +825,31 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS,
 
 	// An automated (non-interactive) run stays windowed: fullscreen forces the
 	// window to the foreground, which defeats the unfocused-background intent.
-	if ( fullscreen && com_automated && com_automated->integer )
+	if ( fullscreen && automated )
 	{
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Fullscreen not used with \\com_automated 1 (automated runs stay windowed + unfocused)\n");
 		Cvar_Set( "r_fullscreen", "0" );
 		fullscreen = qfalse;
+	}
+
+	/* W-103: an automated client must never create a sub-1280x720 or non-16:9 window, even
+	 * when an archived config or a malformed harness overrides the requested
+	 * mode. Preserve explicit exact-16:9 custom sizes at or above the canonical
+	 * minimum (visual gates use more than one), otherwise select the canonical
+	 * 1280x720 recovery mode before SDL sees the request. */
+	if ( automated
+		&& ( mode != -1
+			|| r_customwidth->integer <= 0
+			|| r_customheight->integer <= 0
+			|| r_customwidth->integer < 1280
+			|| r_customheight->integer < 720
+			|| (int64_t)r_customwidth->integer * 9
+				!= (int64_t)r_customheight->integer * 16 ) )
+	{
+		Com_Log( SEV_INFO, LOG_CH(ch_client),
+			"Automated window request was not explicit 16:9; using 1280x720\n" );
+		mode = 13;
+		modeFS = "";
 	}
 
 	if ( !SDL_WasInit( SDL_INIT_VIDEO ) )
@@ -896,10 +979,14 @@ void GLimp_Init( glconfig_t *config )
 			return;
 		}
 
-		if ( r_mode->integer != 3 || ( r_fullscreen->integer && atoi( r_modeFullscreen->string ) != 3 ) )
+		if ( r_mode->integer != 13 || ( r_fullscreen->integer && atoi( r_modeFullscreen->string ) != 13 ) )
 		{
-			Com_Log( SEV_INFO, LOG_CH(ch_client), "Setting \\r_mode %d failed, falling back on \\r_mode %d\n", r_mode->integer, 3 );
-			if ( GLimp_StartDriverAndSetMode( 3, "", r_fullscreen->integer,
+			// W-103: a failed custom harness window must never silently open
+			// the legacy mode-3 640x480 window. Mode 13 is the canonical
+			// 1280x720 recovery extent; if it also fails, terminate instead of
+			// producing non-widescreen evidence.
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Setting \\r_mode %d failed, falling back on widescreen \\r_mode %d\n", r_mode->integer, 13 );
+			if ( GLimp_StartDriverAndSetMode( 13, "", r_fullscreen->integer,
 					WIRED_WINDOW_API_OPENGL ) != RSERR_OK )
 			{
 				// Nothing worked, give up
@@ -999,9 +1086,11 @@ void VKimp_Init( glconfig_t *config )
 			return;
 		}
 
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "Setting r_mode %d failed, falling back on r_mode %d\n", r_mode->integer, 3 );
+		// W-103: never turn a failed test/custom request into a 640x480
+		// window. Mode 13 is the canonical 1280x720 recovery extent.
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Setting r_mode %d failed, falling back on widescreen r_mode %d\n", r_mode->integer, 13 );
 
-		err = GLimp_StartDriverAndSetMode( 3, "", r_fullscreen->integer,
+		err = GLimp_StartDriverAndSetMode( 13, "", r_fullscreen->integer,
 			WIRED_WINDOW_API_VULKAN );
 		if( err != RSERR_OK )
 		{

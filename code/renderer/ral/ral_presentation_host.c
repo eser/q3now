@@ -15,6 +15,11 @@ static qboolean BackendValid( ralBackendType_t backendType ) {
 		&& backendType <= RAL_BACKEND_WEBGL2 ) ? qtrue : qfalse;
 }
 
+qboolean Ral_PresentationExtentValid( uint32_t width, uint32_t height ) {
+	return ( width > 0u && height > 0u
+		&& (uint64_t)width * 9u == (uint64_t)height * 16u ) ? qtrue : qfalse;
+}
+
 qboolean Ral_PresentationHostOpenInfoValid(
 		const ralPresentationHostOpenInfo_t *info ) {
 	return ( info
@@ -37,6 +42,10 @@ qboolean Ral_PresentationHostReceiptValid(
 		&& receipt->pixelWidth != 0u && receipt->pixelHeight != 0u
 		&& receipt->logicalWidth <= 16384u && receipt->logicalHeight <= 16384u
 		&& receipt->pixelWidth <= 32768u && receipt->pixelHeight <= 32768u
+		&& Ral_PresentationExtentValid( receipt->logicalWidth,
+			receipt->logicalHeight )
+		&& Ral_PresentationExtentValid( receipt->pixelWidth,
+			receipt->pixelHeight )
 		&& isfinite( receipt->contentScaleX )
 		&& isfinite( receipt->contentScaleY )
 		&& receipt->contentScaleX > 0.0f && receipt->contentScaleX <= 16.0f

@@ -84,6 +84,82 @@ static ralResult_t ralVk_QuerySurfaceFormats( ralBackend_t *b, VkSurfaceKHR surf
 	return ralErrorInitFailed;
 }
 
+static ralResult_t ralVk_QuerySurfaceFormats2( ralBackend_t *b, VkSurfaceKHR surface,
+		const void *extensionChain, VkSurfaceFormatKHR **outFormats, uint32_t *outCount ) {
+	VkPhysicalDeviceSurfaceInfo2KHR surfaceInfo;
+	VkSurfaceFormat2KHR *formats2 = NULL;
+	VkSurfaceFormatKHR *formats = NULL;
+	VkResult result;
+	uint32_t count = 0u, i;
+	*outFormats = NULL;
+	*outCount = 0u;
+	if ( !b->vk.GetPhysicalDeviceSurfaceFormats2KHR ) return ralUnsupported;
+	memset( &surfaceInfo, 0, sizeof( surfaceInfo ) );
+	surfaceInfo.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR;
+	surfaceInfo.pNext = extensionChain;
+	surfaceInfo.surface = surface;
+	result = b->vk.GetPhysicalDeviceSurfaceFormats2KHR( b->physicalDevice, &surfaceInfo, &count, NULL );
+	if ( result != VK_SUCCESS ) return ralVk_SwapchainResult( result );
+	if ( count == 0u ) return ralUnsupported;
+	formats2 = (VkSurfaceFormat2KHR *)calloc( count, sizeof( *formats2 ) );
+	formats = (VkSurfaceFormatKHR *)malloc( count * sizeof( *formats ) );
+	if ( !formats2 || !formats ) { free( formats2 ); free( formats ); return ralErrorOutOfMemory; }
+	for ( i = 0u; i < count; ++i ) formats2[i].sType = VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR;
+	result = b->vk.GetPhysicalDeviceSurfaceFormats2KHR( b->physicalDevice, &surfaceInfo, &count, formats2 );
+	if ( result != VK_SUCCESS ) { free( formats2 ); free( formats ); return ralVk_SwapchainResult( result ); }
+	if ( count == 0u ) { free( formats2 ); free( formats ); return ralUnsupported; }
+	for ( i = 0u; i < count; ++i ) formats[i] = formats2[i].surfaceFormat;
+	free( formats2 );
+	*outFormats = formats;
+	*outCount = count;
+	return ralSuccess;
+}
+
+ralResult_t Ral_SelectSurfaceFormat( ralBackend_t *b,
+		const ralSurfaceFormatSelectionInfo_t *info,
+		ralSurfaceFormatSelection_t *outSelection ) {
+	ralSurfaceFormatSelection_t candidate;
+	VkSurfaceFormatKHR *formats = NULL;
+	uint32_t count = 0, p, a;
+	ralResult_t result;
+
+	if ( !b || !info || !outSelection || !info->preferences
+			|| info->preferenceCount == 0u
+			|| ( info->useExtendedQuery != qfalse && info->useExtendedQuery != qtrue )
+			|| ( !info->useExtendedQuery && info->backendExtensionChain ) )
+		return ralErrorInvalidArgument;
+	if ( info->useExtendedQuery ) {
+		result = ralVk_QuerySurfaceFormats2( b, b->surface,
+			info->backendExtensionChain, &formats, &count );
+		if ( result != ralSuccess ) return result;
+	} else {
+		result = ralVk_QuerySurfaceFormats( b, b->surface, &formats, &count );
+		if ( result != ralSuccess ) return result;
+	}
+
+	memset( &candidate, 0, sizeof( candidate ) );
+	for ( p = 0u; p < info->preferenceCount; ++p ) {
+		VkSurfaceFormatKHR wanted;
+		wanted.format = ralVk_TranslateFormat( info->preferences[p].format );
+		wanted.colorSpace = ralVk_TranslateColorSpace( info->preferences[p].colorSpace );
+		if ( wanted.format == VK_FORMAT_UNDEFINED ) continue;
+		for ( a = 0u; a < count; ++a ) {
+			if ( ( formats[a].format == wanted.format || formats[a].format == VK_FORMAT_UNDEFINED )
+					&& formats[a].colorSpace == wanted.colorSpace ) {
+				candidate.selected = info->preferences[p];
+				candidate.selectedPreference = p;
+				candidate.availableFormatCount = count;
+				candidate.extendedQuery = info->useExtendedQuery;
+				free( formats );
+				*outSelection = candidate;
+				return ralSuccess;
+			}
+		}
+	}
+	free( formats );
+	return ralUnsupported;
+}
+
 static ralResult_t ralVk_QueryPresentModes( ralBackend_t *b, VkSurfaceKHR surface,
 	                                       VkPresentModeKHR **outModes, uint32_t *outCount ) {
 	uint32_t attempt;
@@ -133,20 +209,21 @@ static qboolean ralVk_SelectSurfaceFormat( const ralSwapchainCreateInfo_t *ci,
 
 static qboolean ralVk_SelectPresentMode( const ralSwapchainCreateInfo_t *ci,
 	                                    const VkPresentModeKHR *available, uint32_t availableCount,
-	                                    ralPresentMode_t *outRal, VkPresentModeKHR *outVk ) {
-	ralPresentMode_t fifo = RAL_PRESENT_FIFO;
-	const ralPresentMode_t *preferences = ci->presentModePreferences;
-	uint32_t preferenceCount = ci->presentModePreferenceCount;
+	                                    ralPresentPreference_t *outPreference,
+	                                    VkPresentModeKHR *outVk ) {
+	static const ralPresentPreference_t fallback = { RAL_PRESENT_FIFO, 2u, 2u };
+	const ralPresentPreference_t *preferences = ci->presentPreferences;
+	uint32_t preferenceCount = ci->presentPreferenceCount;
 	uint32_t p, a;
 	if ( !preferences || preferenceCount == 0 ) {
-		preferences = &fifo;
+		preferences = &fallback;
 		preferenceCount = 1;
 	}
 	for ( p = 0; p < preferenceCount; p++ ) {
-		VkPresentModeKHR wanted = ralVk_TranslatePresentMode( preferences[p] );
+		VkPresentModeKHR wanted = ralVk_TranslatePresentMode( preferences[p].mode );
 		for ( a = 0; a < availableCount; a++ ) {
 			if ( available[a] == wanted ) {
-				*outRal = preferences[p];
+				*outPreference = preferences[p];
 				*outVk = wanted;
 				return qtrue;
 			}
@@ -231,10 +308,10 @@ static ralResult_t ralVk_MaterializeSwapchainImages( ralSwapchain_t *sc ) {
 		if ( sc->backend->vk.CreateImageView( sc->backend->device, &vci, NULL,
 		                                     &sc->imageViews[attempt] ) != VK_SUCCESS )
 			return ralErrorInitFailed;
-		sc->adoptedImages[attempt] = Ral_AdoptTexture(
+		sc->adoptedImages[attempt] = Ral_AdoptTextureExact(
 			sc->backend, (void *)sc->images[attempt], (void *)sc->imageViews[attempt],
 			sc->format, sc->extent.width, sc->extent.height, VK_IMAGE_ASPECT_COLOR_BIT,
-			"wired-swapchain-image" );
+			sc->usage, "wired-swapchain-image" );
 		if ( !sc->adoptedImages[attempt] ) return ralErrorOutOfMemory;
 	}
 	return ralSuccess;
@@ -260,12 +337,13 @@ ralResult_t Ral_CreateOrRecreateSwapchain( ralBackend_t *b,
 	VkSurfaceFormatKHR *formats = NULL, selectedFormat;
 	VkPresentModeKHR *modes = NULL, selectedMode;
 	ralSurfaceFormat_t selectedRalFormat;
-	ralPresentMode_t selectedRalMode;
+	ralPresentPreference_t selectedPresentPreference;
 	VkCompositeAlphaFlagBitsKHR compositeAlpha;
 	VkImageUsageFlags requiredVkUsage;
 	VkResult r;
 	ralResult_t result;
 	uint32_t formatCount = 0, modeCount = 0, desiredCount;
+	qboolean extendedFormatQuery = qfalse;
 	ralSwapchain_t *old;
 	qboolean recreate;
 
@@ -273,6 +351,19 @@ ralResult_t Ral_CreateOrRecreateSwapchain( ralBackend_t *b,
 	  || ci->formatPreferenceCount == 0
 	  || !( ci->requiredUsage & RAL_TEXTURE_USAGE_COLOR_ATTACHMENT ) )
 		return ralErrorInvalidArgument;
+	if ( ( ci->presentPreferences == NULL ) != ( ci->presentPreferenceCount == 0u ) )
+		return ralErrorInvalidArgument;
+	if ( ci->presentPreferences ) {
+		uint32_t preferenceIndex;
+		for ( preferenceIndex = 0u; preferenceIndex < ci->presentPreferenceCount; ++preferenceIndex ) {
+			const ralPresentPreference_t *preference = &ci->presentPreferences[preferenceIndex];
+			if ( preference->mode < RAL_PRESENT_FIFO
+					|| preference->mode > RAL_PRESENT_FIFO_LATEST_READY
+					|| preference->desiredImageCount > RAL_SWAPCHAIN_MAX_REQUESTED_IMAGES
+					|| preference->unboundedImageCount > RAL_SWAPCHAIN_MAX_REQUESTED_IMAGES )
+				return ralErrorInvalidArgument;
+		}
+	}
 	old = *inOut;
 	recreate = old != NULL;
 	if ( recreate && ( old->backend != b || old->surface != b->surface ) )
@@ -284,12 +375,26 @@ ralResult_t Ral_CreateOrRecreateSwapchain( ralBackend_t *b,
 
 	r = b->vk.GetPhysicalDeviceSurfaceCapabilitiesKHR( b->physicalDevice, b->surface, &caps );
 	if ( r != VK_SUCCESS ) return ralVk_SwapchainResult( r );
-	result = ralVk_QuerySurfaceFormats( b, b->surface, &formats, &formatCount );
+	{
+		uint32_t formatPreferenceIndex;
+		for ( formatPreferenceIndex = 0u; formatPreferenceIndex < ci->formatPreferenceCount;
+				++formatPreferenceIndex ) {
+			if ( ci->formatPreferences[formatPreferenceIndex].colorSpace
+					!= RAL_COLORSPACE_SRGB_NONLINEAR ) {
+				extendedFormatQuery = qtrue;
+				break;
+			}
+		}
+	}
+	result = extendedFormatQuery
+		? ralVk_QuerySurfaceFormats2( b, b->surface, ci->backendExtensionChain,
+			&formats, &formatCount )
+		: ralVk_QuerySurfaceFormats( b, b->surface, &formats, &formatCount );
 	if ( result != ralSuccess ) return result;
 	result = ralVk_QueryPresentModes( b, b->surface, &modes, &modeCount );
 	if ( result != ralSuccess ) { free( formats ); return result; }
 	if ( !ralVk_SelectSurfaceFormat( ci, formats, formatCount, &selectedRalFormat, &selectedFormat )
-	  || !ralVk_SelectPresentMode( ci, modes, modeCount, &selectedRalMode, &selectedMode ) ) {
+	  || !ralVk_SelectPresentMode( ci, modes, modeCount, &selectedPresentPreference, &selectedMode ) ) {
 		free( modes ); free( formats ); return ralUnsupported;
 	}
 	free( modes ); free( formats );
@@ -304,7 +409,7 @@ ralResult_t Ral_CreateOrRecreateSwapchain( ralBackend_t *b,
 	sc->surface = b->surface;
 	sc->format = selectedRalFormat.format;
 	sc->colorSpace = selectedRalFormat.colorSpace;
-	sc->presentMode = selectedRalMode;
+	sc->presentMode = selectedPresentPreference.mode;
 	sc->vkFormat = selectedFormat.format;
 	sc->vkColorSpace = selectedFormat.colorSpace;
 	sc->vkPresentMode = selectedMode;
@@ -322,9 +427,13 @@ ralResult_t Ral_CreateOrRecreateSwapchain( ralBackend_t *b,
 		free( sc );
 		return ralOutOfDate;
 	}
-	desiredCount = ci->desiredImageCount ? ci->desiredImageCount : 2u;
+	desiredCount = selectedPresentPreference.desiredImageCount
+		? selectedPresentPreference.desiredImageCount : 2u;
+	if ( caps.maxImageCount == 0u && selectedPresentPreference.unboundedImageCount != 0u )
+		desiredCount = selectedPresentPreference.unboundedImageCount;
 	desiredCount = ralVk_ClampU32( desiredCount, caps.minImageCount,
 	                             caps.maxImageCount ? caps.maxImageCount : UINT32_MAX );
+	sc->requestedImageCount = desiredCount;
 
 	RAL_ZERO( sci );
 	sci.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -412,6 +521,7 @@ qboolean Ral_GetSwapchainInfo( const ralSwapchain_t *sc, ralSwapchainInfo_t *out
 	outInfo->format = sc->format;
 	outInfo->colorSpace = sc->colorSpace;
 	outInfo->presentMode = sc->presentMode;
+	outInfo->requestedImageCount = sc->requestedImageCount;
 	outInfo->imageCount = sc->imageCount;
 	outInfo->usage = sc->usage;
 	return qtrue;

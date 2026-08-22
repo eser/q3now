@@ -32,6 +32,8 @@ void        Ral_DestroyFence( ralFence_t *f );
 void        Ral_WaitFence    ( ralFence_t *f, uint64_t timeoutNs );  // RAL_TIMEOUT_INFINITE to block
 void        Ral_ResetFence   ( ralFence_t *f );
 qboolean    Ral_FenceSignaled( ralFence_t *f );
+ralResult_t Ral_WaitFenceExact ( ralFence_t *f, uint64_t timeoutNs );
+ralResult_t Ral_ResetFenceExact( ralFence_t *f );
 
 // ── semaphores ──────────────────────────────────────────────────────────
 ralSemaphore_t *Ral_CreateSemaphore ( ralBackend_t *b, ralSemaphoreType_t type );

@@ -4904,9 +4904,11 @@ qboolean CL_GetModeInfo( int *width, int *height, float *windowAspect, int mode,
 	if ( mode >= s_numVidModes )
 		return qfalse;
 
-	// fix unknown desktop resolution
+	// Fix an unknown desktop resolution without reviving the legacy mode-3
+	// 640x480 fallback. W-103 requires every automatic window decision to stay
+	// widescreen; mode 13 is the canonical 1280x720 recovery extent.
 	if ( mode == -2 && (dw == 0 || dh == 0) )
-		mode = 3;
+		mode = 13;
 
 	float pixelAspect;
 	if ( mode == -2 ) { // desktop resolution
@@ -4922,6 +4924,15 @@ qboolean CL_GetModeInfo( int *width, int *height, float *windowAspect, int mode,
 		*width  = vm->width;
 		*height = vm->height;
 		pixelAspect = vm->pixelAspect;
+	}
+
+	/* W-103: CL_GetModeInfo is the common authority for every engine window
+	 * request.  Reject legacy/table/config extents here as well as at the SDL
+	 * publication seam so no caller can carry a 4:3 mode as a valid candidate. */
+	if ( *width <= 0 || *height <= 0
+		|| (int64_t)*width * 9 != (int64_t)*height * 16 )
+	{
+		return qfalse;
 	}
 
 	*windowAspect = (float)*width / ( *height * pixelAspect );

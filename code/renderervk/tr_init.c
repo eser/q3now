@@ -220,6 +220,7 @@ cvar_t	*r_drawWorld;
 cvar_t	*r_speeds;
 cvar_t	*r_gpuSpeeds;
 cvar_t	*r_profileMarkers;
+cvar_t	*r_ralEffectsSmoke;
 cvar_t	*r_temporalInputTest;
 cvar_t	*r_vkDebugTiming;
 cvar_t	*r_frameSpikeUs;
@@ -2080,6 +2081,12 @@ static void R_Register( void )
 		"Emit semantic RAL dynamic-rendering GPU debug labels when Vulkan debug-utils is available.\n"
 		" 0: off (default)\n 1: on\n"
 		"Use `ral_dump live markers` for a one-frame backend receipt." );
+	r_ralEffectsSmoke = ri.Cvar_Get( "r_ralEffectsSmoke", "0", CVAR_CHEAT );
+	ri.Cvar_CheckRange( r_ralEffectsSmoke, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_ralEffectsSmoke,
+		"Default-off native RAL procedural-effects smoke. Injects one ribbon, "
+		"rail ribbon, beam and sprite on the first primary view of each map; "
+		"renderer.ral emits a receipt only after the corresponding RAL draw." );
 	r_temporalInputTest = ri.Cvar_Get( "r_temporalInputTest", "0", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_temporalInputTest, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_temporalInputTest,

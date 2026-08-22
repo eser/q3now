@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "sdl_metal_ral.h"
+#include "ral_presentation_host.h"
 #include "ral_metal_internal.h"
 
 #include <SDL3/SDL.h>
@@ -79,15 +80,17 @@ static qboolean OwnerMatches( const wiredMetalSdl_t *adapter,
 static void BuildSdrCreateInfo( const wiredMetalSdlReceipt_t *current,
 		uint32_t pixelWidth, uint32_t pixelHeight,
 		ralSwapchainCreateInfo_t *outInfo, ralSurfaceFormat_t *outFormat,
-		ralPresentMode_t *outMode ) {
+		ralPresentPreference_t *outPreference ) {
 	memset( outInfo, 0, sizeof( *outInfo ) );
 	outFormat->format = current->presentation.selected.format;
 	outFormat->colorSpace = current->presentation.selected.colorSpace;
-	*outMode = current->presentation.selected.presentMode;
+	*outPreference = (ralPresentPreference_t){
+		current->presentation.selected.presentMode,
+		current->presentation.selected.requestedImageCount,
+		current->presentation.selected.requestedImageCount };
 	outInfo->desiredWidth = pixelWidth; outInfo->desiredHeight = pixelHeight;
 	outInfo->formatPreferences = outFormat; outInfo->formatPreferenceCount = 1u;
-	outInfo->presentModePreferences = outMode; outInfo->presentModePreferenceCount = 1u;
-	outInfo->desiredImageCount = current->presentation.selected.imageCount;
+	outInfo->presentPreferences = outPreference; outInfo->presentPreferenceCount = 1u;
 	outInfo->requiredUsage = current->presentation.selected.usage;
 }
 
@@ -98,11 +101,14 @@ qboolean WiredMetalSdl_Create( ralMetalCore_t *core,
 	wiredMetalSdl_t *candidate;
 	wiredMetalSdlReceipt_t receipt;
 	ralSwapchainCreateInfo_t nativeInfo;
+	int logicalWidth = 0, logicalHeight = 0;
 	int pixelWidth = 0, pixelHeight = 0;
 	void *layer;
 	if ( !outAdapter || !outReceipt || !core || !coreReceipt || !createInfo
 			|| createInfo->desiredWidth == 0u || createInfo->desiredHeight == 0u
 			|| createInfo->desiredWidth > 16384u || createInfo->desiredHeight > 16384u
+			|| !Ral_PresentationExtentValid( createInfo->desiredWidth,
+				createInfo->desiredHeight )
 			|| generation == 0u || generation == UINT64_MAX
 			|| !RalMetal_CoreMatchesReceipt( core, coreReceipt ) ) return qfalse;
 	candidate = (wiredMetalSdl_t *)calloc( 1u, sizeof( *candidate ) );
@@ -119,8 +125,17 @@ qboolean WiredMetalSdl_Create( ralMetalCore_t *core,
 	candidate->view = SDL_Metal_CreateView( candidate->window );
 	if ( !candidate->view ) goto fail;
 	layer = SDL_Metal_GetLayer( candidate->view );
-	if ( !layer || !SDL_GetWindowSizeInPixels( candidate->window,
-			&pixelWidth, &pixelHeight ) || pixelWidth <= 0 || pixelHeight <= 0 ) goto fail;
+	if ( !layer
+			|| !SDL_GetWindowSize( candidate->window,
+				&logicalWidth, &logicalHeight )
+			|| !SDL_GetWindowSizeInPixels( candidate->window,
+				&pixelWidth, &pixelHeight )
+			|| logicalWidth <= 0 || logicalHeight <= 0
+			|| pixelWidth <= 0 || pixelHeight <= 0
+			|| !Ral_PresentationExtentValid( (uint32_t)logicalWidth,
+				(uint32_t)logicalHeight )
+			|| !Ral_PresentationExtentValid( (uint32_t)pixelWidth,
+				(uint32_t)pixelHeight ) ) goto fail;
 	nativeInfo = *createInfo;
 	nativeInfo.desiredWidth = (uint32_t)pixelWidth;
 	nativeInfo.desiredHeight = (uint32_t)pixelHeight;
@@ -153,19 +168,28 @@ qboolean WiredMetalSdl_Resize( wiredMetalSdl_t *adapter,
 	wiredMetalSdlReceipt_t receipt;
 	ralSwapchainCreateInfo_t createInfo;
 	ralSurfaceFormat_t format;
-	ralPresentMode_t mode;
+	ralPresentPreference_t preference;
+	int logicalActualWidth = 0, logicalActualHeight = 0;
 	int pixelWidth = 0, pixelHeight = 0;
 	if ( !outReceipt || !OwnerMatches( adapter, coreReceipt, currentReceipt )
 			|| logicalWidth == 0u || logicalHeight == 0u
 			|| logicalWidth > 16384u || logicalHeight > 16384u
+			|| !Ral_PresentationExtentValid( logicalWidth, logicalHeight )
 			|| generation <= currentReceipt->adapterGeneration
 			|| generation == UINT64_MAX ) return qfalse;
 	if ( !SDL_SetWindowSize( adapter->window, (int)logicalWidth, (int)logicalHeight )
 			|| !SDL_SyncWindow( adapter->window )
+			|| !SDL_GetWindowSize( adapter->window,
+				&logicalActualWidth, &logicalActualHeight )
 			|| !SDL_GetWindowSizeInPixels( adapter->window, &pixelWidth, &pixelHeight )
-			|| pixelWidth <= 0 || pixelHeight <= 0 ) return qfalse;
+			|| logicalActualWidth <= 0 || logicalActualHeight <= 0
+			|| !Ral_PresentationExtentValid( (uint32_t)logicalActualWidth,
+				(uint32_t)logicalActualHeight )
+			|| pixelWidth <= 0 || pixelHeight <= 0
+			|| !Ral_PresentationExtentValid( (uint32_t)pixelWidth,
+				(uint32_t)pixelHeight ) ) return qfalse;
 	BuildSdrCreateInfo( currentReceipt, (uint32_t)pixelWidth, (uint32_t)pixelHeight,
-		&createInfo, &format, &mode );
+		&createInfo, &format, &preference );
 	receipt = *currentReceipt;
 	if ( !RalMetal_PresentReconfigure( adapter->present, coreReceipt,
 			&currentReceipt->presentation, &createInfo, generation,

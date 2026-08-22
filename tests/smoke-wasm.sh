@@ -332,8 +332,8 @@ run_engine "$CLIENT" "$CLIENT_LOG" \
     +set com_automated 1 \
     +set r_fullscreen 0 \
     +set r_mode -1 \
-    +set r_customwidth 640 \
-    +set r_customheight 480 \
+    +set r_customwidth 1280 \
+    +set r_customheight 720 \
     +set sv_pure 0 \
     +set vm_game 2 \
     +set vm_cgame 2 \

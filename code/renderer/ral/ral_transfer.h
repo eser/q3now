@@ -10,6 +10,7 @@ extern "C" {
 #endif
 
 #define RAL_TRANSFER_SCHEMA_VERSION 1u
+#define RAL_BUFFER_UPLOAD_RECEIPT_SCHEMA_VERSION 1u
 
 typedef enum { RAL_TRANSFER_UPLOAD = 1, RAL_TRANSFER_READBACK } ralTransferDirection_t;
 typedef enum { RAL_TRANSFER_BUFFER = 1, RAL_TRANSFER_TEXTURE } ralTransferResourceKind_t;
@@ -42,6 +43,11 @@ typedef struct {
 	uint32_t width;
 	uint32_t height;
 	uint32_t depth;
+	// WebGPU-shaped buffer/texture layout. Texture readbacks always publish an
+	// explicit 256-byte-aligned row pitch; buffer transfers keep both fields 0.
+	// Legacy texture uploads may keep both 0 until their staging paths migrate.
+	uint32_t bytesPerRow;
+	uint32_t rowsPerImage;
 	ralQueueType_t queue;
 } ralTransferRequest_t;
 
@@ -56,6 +62,13 @@ typedef struct {
 	qboolean ready;
 } ralTransferReceipt_t;
 
+typedef struct {
+	uint32_t schemaVersion;
+	ralTransferReceipt_t transfer;
+	uint64_t graphicsVisibilityGeneration;
+	qboolean ready;
+} ralBufferUploadReceipt_t;
+
 qboolean Ral_TransferPrepare( const ralTransferRequest_t *request,
 	uint64_t transferGeneration, ralTransferReceipt_t *out );
 qboolean Ral_TransferPublish( const ralTransferReceipt_t *prepared,
@@ -68,6 +81,10 @@ qboolean Ral_TransferCancel( const ralTransferReceipt_t *prepared,
 	ralTransferReceipt_t *out );
 qboolean Ral_TransferReceiptExact( const ralTransferReceipt_t *a,
 	const ralTransferReceipt_t *b );
+qboolean Ral_BufferUploadReceiptBuild( const ralTransferReceipt_t *completed,
+	uint64_t graphicsVisibilityGeneration, ralBufferUploadReceipt_t *out );
+qboolean Ral_BufferUploadReceiptExact( const ralBufferUploadReceipt_t *a,
+	const ralBufferUploadReceipt_t *b );
 
 #ifdef __cplusplus
 }

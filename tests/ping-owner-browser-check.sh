@@ -231,7 +231,7 @@ wait 10
 quit
 CFGEOF
 case "$(uname -s)" in Darwin) NATIVE="$HOME_DIR"; ARGS=(-ApplePersistenceIgnoreState YES);; MINGW*|MSYS*|CYGWIN*) NATIVE="$(cygpath -w "$HOME_DIR")"; ARGS=();; *) NATIVE="$HOME_DIR"; ARGS=();; esac
-python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 10 --cwd "$WD" --stdout "$STDOUT" -- "$WIRED" "${ARGS[@]}" +set fs_homepath "$NATIVE" +set com_automated 1 +set com_noHardReboot 1 +set net_enabled 1 +set net_ip 127.0.0.1 +set net_port 0 +set sv_master1 "127.0.0.1:$MASTER_PORT" +set s_initsound 0 +set r_fullscreen 0 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec ping-owner.cfg
+python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 10 --cwd "$WD" --stdout "$STDOUT" -- "$WIRED" "${ARGS[@]}" +set fs_homepath "$NATIVE" +set com_automated 1 +set com_noHardReboot 1 +set net_enabled 1 +set net_ip 127.0.0.1 +set net_port 0 +set sv_master1 "127.0.0.1:$MASTER_PORT" +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec ping-owner.cfg
 rc=$?; [ "$rc" -eq 0 ] && [ -s "$HOME_DIR/qconsole.jsonl" ] || { echo "FAIL product rc=$rc"; exit 1; }
 kill -TERM "$PID" 2>/dev/null || true; wait "$PID" || { echo 'FAIL fixture exit'; exit 1; }; PID=""
 analyze "$HOME_DIR/qconsole.jsonl" "$EVENTS" || exit 1

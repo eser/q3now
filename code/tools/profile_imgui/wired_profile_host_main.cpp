@@ -232,7 +232,9 @@ bool RecreateSwapchain( HostContext *host, std::uint32_t width, std::uint32_t he
 		{ RAL_FORMAT_B8G8R8A8_UNORM, RAL_COLORSPACE_SRGB_NONLINEAR },
 		{ RAL_FORMAT_R8G8B8A8_UNORM, RAL_COLORSPACE_SRGB_NONLINEAR }
 	};
-	static const ralPresentMode_t modes[] = { RAL_PRESENT_FIFO };
+	static const ralPresentPreference_t preferences[] = {
+		{ RAL_PRESENT_FIFO, 3u, 3u }
+	};
 	ralSwapchainCreateInfo_t ci{};
 	ralSwapchainInfo_t oldInfo{}, newInfo{};
 	const bool hadOld = host->swapchain && Ral_GetSwapchainInfo( host->swapchain, &oldInfo );
@@ -240,9 +242,8 @@ bool RecreateSwapchain( HostContext *host, std::uint32_t width, std::uint32_t he
 	ci.desiredHeight = height;
 	ci.formatPreferences = formats;
 	ci.formatPreferenceCount = static_cast<std::uint32_t>( sizeof( formats ) / sizeof( formats[0] ) );
-	ci.presentModePreferences = modes;
-	ci.presentModePreferenceCount = 1;
-	ci.desiredImageCount = 3;
+	ci.presentPreferences = preferences;
+	ci.presentPreferenceCount = 1;
 	ci.requiredUsage = RAL_TEXTURE_USAGE_COLOR_ATTACHMENT;
 	const ralResult_t result = Ral_CreateOrRecreateSwapchain( host->backend, &ci, &host->swapchain );
 	if ( result != ralSuccess ) {
@@ -593,9 +594,29 @@ int main( int argc, char **argv ) {
 		std::fprintf( stderr, "SDL_Init failed: %s\n", SDL_GetError() );
 		return 1;
 	}
-	host.window = SDL_CreateWindow( "Wired RAL Profile Host", 640, 360,
-		SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY );
+	host.window = SDL_CreateWindow( "Wired RAL Profile Host", 1280, 720,
+		SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+		| SDL_WINDOW_HIDDEN );
 	if ( !host.window ) { std::fprintf( stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError() ); goto cleanup; }
+	{
+		int logicalWidth = 0, logicalHeight = 0;
+		int pixelWidth = 0, pixelHeight = 0;
+		if ( !SDL_GetWindowSize( host.window, &logicalWidth, &logicalHeight )
+			|| !SDL_GetWindowSizeInPixels( host.window, &pixelWidth, &pixelHeight )
+			|| logicalWidth != 1280 || logicalHeight != 720
+			|| pixelWidth < 1280 || pixelHeight < 720
+			|| static_cast<std::int64_t>( pixelWidth ) * 9
+				!= static_cast<std::int64_t>( pixelHeight ) * 16 ) {
+			std::fprintf( stderr,
+				"refusing non-widescreen profile-host window logical=%dx%d pixels=%dx%d\n",
+				logicalWidth, logicalHeight, pixelWidth, pixelHeight );
+			goto cleanup;
+		}
+		std::fprintf( stdout,
+			"RAL_PROFILE_HOST window-extent logical=%dx%d pixels=%dx%d exact16x9=1 publish-ready=1\n",
+			logicalWidth, logicalHeight, pixelWidth, pixelHeight );
+	}
+	if ( !SDL_ShowWindow( host.window ) ) goto cleanup;
 	if ( !CreateBackend( &host ) ) { std::fprintf( stderr, "Ral_CreateBackend failed\n" ); goto cleanup; }
 	IMGUI_CHECKVERSION();
 	host.imguiContext = ImGui::CreateContext();

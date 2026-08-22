@@ -15,7 +15,7 @@ int main( void ) {
 	ralMetalCoreReceipt_t coreReceipt;
 	ralSurfaceFormat_t format = {
 		RAL_FORMAT_B8G8R8A8_UNORM, RAL_COLORSPACE_SRGB_NONLINEAR };
-	ralPresentMode_t mode = RAL_PRESENT_FIFO;
+	ralPresentPreference_t preference = { RAL_PRESENT_FIFO, 3u, 3u };
 	ralSwapchainCreateInfo_t createInfo;
 	wiredMetalSdl_t *adapter = (wiredMetalSdl_t *)(uintptr_t)0x1234u;
 	wiredMetalSdlReceipt_t receipt, before, exact, resized;
@@ -27,10 +27,9 @@ int main( void ) {
 
 	CHECK( RalMetal_CoreCreate( &coreInfo, &core, &coreReceipt ) );
 	memset( &createInfo, 0, sizeof( createInfo ) );
-	createInfo.desiredWidth = 64u; createInfo.desiredHeight = 48u;
+	createInfo.desiredWidth = 1280u; createInfo.desiredHeight = 720u;
 	createInfo.formatPreferences = &format; createInfo.formatPreferenceCount = 1u;
-	createInfo.presentModePreferences = &mode; createInfo.presentModePreferenceCount = 1u;
-	createInfo.desiredImageCount = 3u;
+	createInfo.presentPreferences = &preference; createInfo.presentPreferenceCount = 1u;
 	createInfo.requiredUsage = RAL_TEXTURE_USAGE_COLOR_ATTACHMENT;
 	memset( &receipt, 0x5a, sizeof( receipt ) ); before = receipt;
 	createInfo.desiredWidth = 0u;
@@ -38,7 +37,7 @@ int main( void ) {
 		&adapter, &receipt ) );
 	CHECK( adapter == (wiredMetalSdl_t *)(uintptr_t)0x1234u
 		&& memcmp( &receipt, &before, sizeof( receipt ) ) == 0 );
-	createInfo.desiredWidth = 64u;
+	createInfo.desiredWidth = 1280u;
 	CHECK( WiredMetalSdl_Create( core, &coreReceipt, &createInfo, 202u,
 		&adapter, &receipt ) );
 	CHECK( receipt.presentation.ownsLayer == qfalse
@@ -70,9 +69,9 @@ int main( void ) {
 
 	before = receipt;
 	CHECK( !WiredMetalSdl_Resize( adapter, &coreReceipt, &receipt,
-		80u, 60u, 202u, &resized ) );
+		1600u, 900u, 202u, &resized ) );
 	CHECK( WiredMetalSdl_Resize( adapter, &coreReceipt, &receipt,
-		80u, 60u, 207u, &resized ) );
+		1600u, 900u, 207u, &resized ) );
 	CHECK( resized.adapterGeneration == 207u
 		&& resized.presentation.presentationGeneration == 207u
 		&& resized.presentation.layerIdentity == receipt.presentation.layerIdentity

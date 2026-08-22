@@ -270,8 +270,8 @@ require_text("${IQM_SCAN}" "R_IqmOrdinaryImageForShader( shader )" "pre-scan mat
 extract_span("${IQM_MODEL}" "\t\tvk_draw_iqm_gpu("
 	"\t\t\tmvp );" ORDINARY_IQM_DRAW)
 require_text("${ORDINARY_IQM_DRAW}"
-    "data->num_poses,\n\t\t\t\tordinaryImage->descriptor,\n"
-    "ordinary IQM draw exact texture descriptor argument")
+    "data->num_poses,\n\t\t\t\tordinaryImage->ralDescriptor,\n"
+    "ordinary IQM draw exact texture bind-group argument")
 require_text("${IQM_MODEL}" "R_IqmTemporalModelView( data, &temporalModel )" "ordinary structural model helper consumer")
 require_text("${IQM_SCAN}" "R_IqmTemporalModelView( data, &modelView )" "pre-scan structural model helper consumer")
 require_text("${IQM_CORE}" "if ( facts->gpuDirect != qtrue ) return TEMPORAL_IQM_PRODUCT_NONE;" "CPU IQM generic classification")

@@ -170,6 +170,14 @@ void          Ral_DestroyBackend( ralBackend_t *b );
 // Filled once at backend creation. Renderer reads via Ral_GetCaps() and
 // caches. Adding fields is backward-compatible (renderer only reads what it
 // knows); removing or reordering is not.
+typedef enum {
+	RAL_ADAPTER_TYPE_UNKNOWN = 0,
+	RAL_ADAPTER_TYPE_INTEGRATED,
+	RAL_ADAPTER_TYPE_DISCRETE,
+	RAL_ADAPTER_TYPE_VIRTUAL,
+	RAL_ADAPTER_TYPE_CPU
+} ralAdapterType_t;
+
 typedef struct {
 	// feature flags
 	qboolean bindlessTextures;          // §4 — large unbounded sampled-texture array
@@ -219,6 +227,20 @@ typedef struct {
 	qboolean textureCompressionBC;      // append-only: sampled BC1/3/5/7 family available
 	qboolean textureCompressionASTC;    // append-only: sampled ASTC 4x4 available
 	qboolean textureCompressionETC2;    // append-only: sampled ETC2 RGBA8 available
+	uint32_t maxSampledTexturesPerShaderStage; // append-only: sampled-texture/sampler stage limit
+	uint32_t maxBindGroups;             // append-only: pipeline bind-group/set layout count
+	ralAdapterType_t adapterType;        // append-only: portable adapter class
+	uint32_t vendorId;                   // append-only: PCI vendor ID when the backend exposes one
+	uint32_t deviceId;                   // append-only: PCI device ID when the backend exposes one
+	uint32_t driverVersionMajor;         // append-only: backend-normalized driver version
+	uint32_t driverVersionMinor;
+	uint32_t driverVersionPatch;
+	uint32_t driverVersionBuild;
+	char     vendorName[64];             // append-only: normalized adapter vendor
+	char     driverVersion[64];          // append-only: normalized human-readable driver version
+	qboolean offscreenPresentation;      // append-only: presentation to offscreen surfaces is reliable
+	uint64_t deviceLocalMemoryBytes;     // append-only: largest device-local heap capacity
+	uint64_t hostVisibleDeviceLocalMemoryBytes; // append-only: largest CPU-visible device-local heap
 } ralCaps_t;
 
 const ralCaps_t *Ral_GetCaps( ralBackend_t *b );

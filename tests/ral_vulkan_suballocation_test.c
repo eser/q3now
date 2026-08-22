@@ -18,6 +18,16 @@ static uint32_t freeCalls;
 static uint32_t mapCalls;
 static uint32_t unmapCalls;
 static uint32_t failNextAllocation;
+static uint32_t imageRequirementsCalls;
+static VkMemoryRequirements fakeImageRequirements;
+
+static VKAPI_ATTR void VKAPI_CALL FakeGetImageMemoryRequirements( VkDevice device,
+		VkImage image, VkMemoryRequirements *outRequirements ) {
+	(void)device;
+	if ( !image || !outRequirements ) return;
+	*outRequirements = fakeImageRequirements;
+	imageRequirementsCalls++;
+}
 
 static VKAPI_ATTR VkResult VKAPI_CALL FakeAllocateMemory( VkDevice device,
 		const VkMemoryAllocateInfo *info, const VkAllocationCallbacks *callbacks,
@@ -76,6 +86,7 @@ void ralVk_Logf( const ralBackend_t *backend, ralLogSeverity_t severity,
 
 static void InitBackend( ralBackend_t *backend ) {
 	memset( backend, 0, sizeof( *backend ) );
+	backend->type = RAL_BACKEND_VULKAN;
 	backend->device = (VkDevice)(uintptr_t)0x1u;
 	backend->memProps.memoryHeapCount = 2u;
 	backend->memProps.memoryHeaps[0].size = 64u * 1024u * 1024u;
@@ -91,16 +102,94 @@ static void InitBackend( ralBackend_t *backend ) {
 	backend->vk.FreeMemory = FakeFreeMemory;
 	backend->vk.MapMemory = FakeMapMemory;
 	backend->vk.UnmapMemory = FakeUnmapMemory;
+	backend->vk.GetImageMemoryRequirements = FakeGetImageMemoryRequirements;
 }
 
 int main( void ) {
 	ralBackend_t backend;
 	ralVkAllocation_t *bufferA, *bufferB, *imageA, *hostA, *hostB, *large, *transient;
+	ralVkAllocation_t *unalignedReadback;
 	ralVkAllocation_t *fallback, *resizeOld, *resizeNew;
 	ralSuballocationReceipt_t receipt;
 	VkMemoryRequirements requirements;
 	void *mapA, *mapB;
 	InitBackend( &backend );
+	{
+		uint32_t typeIndex = 77u, actualProperties = 88u;
+		uint32_t beforeIndex, beforeProperties;
+		CHECK( RalVulkan_FindMemoryType( &backend, 3u,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &typeIndex, &actualProperties ) );
+		CHECK( typeIndex == 0u && actualProperties == VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+		CHECK( RalVulkan_FindMemoryType( &backend, 3u,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			&typeIndex, NULL ) );
+		CHECK( typeIndex == 1u );
+
+		typeIndex = 77u; actualProperties = 88u;
+		beforeIndex = typeIndex; beforeProperties = actualProperties;
+		CHECK( !RalVulkan_FindMemoryType( &backend, 0u,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &typeIndex, &actualProperties ) );
+		CHECK( typeIndex == beforeIndex && actualProperties == beforeProperties );
+		CHECK( !RalVulkan_FindMemoryType( &backend, 1u, 0u,
+			&typeIndex, &actualProperties ) );
+		CHECK( typeIndex == beforeIndex && actualProperties == beforeProperties );
+		CHECK( !RalVulkan_FindMemoryType( &backend, 1u,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &typeIndex, &actualProperties ) );
+		CHECK( typeIndex == beforeIndex && actualProperties == beforeProperties );
+		CHECK( !RalVulkan_FindMemoryType( &backend, 1u, 0x80000000u,
+			&typeIndex, &actualProperties ) );
+		CHECK( typeIndex == beforeIndex && actualProperties == beforeProperties );
+		CHECK( !RalVulkan_FindMemoryType( &backend, 1u,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, NULL, &actualProperties ) );
+		CHECK( actualProperties == beforeProperties );
+		backend.type = RAL_BACKEND_WEBGPU;
+		CHECK( !RalVulkan_FindMemoryType( &backend, 1u,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &typeIndex, &actualProperties ) );
+		CHECK( typeIndex == beforeIndex && actualProperties == beforeProperties );
+		backend.type = RAL_BACKEND_VULKAN;
+		backend.memProps.memoryTypeCount = VK_MAX_MEMORY_TYPES + 1u;
+		CHECK( !RalVulkan_FindMemoryType( &backend, 1u,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &typeIndex, &actualProperties ) );
+		CHECK( typeIndex == beforeIndex && actualProperties == beforeProperties );
+		backend.memProps.memoryTypeCount = 2u;
+	}
+	{
+		ralVulkanMemoryRequirements_t imageRequirements = { 7u, 8u, 9u };
+		ralVulkanMemoryRequirements_t before = imageRequirements;
+		PFN_vkGetImageMemoryRequirements savedQuery;
+
+		memset( &fakeImageRequirements, 0, sizeof( fakeImageRequirements ) );
+		fakeImageRequirements.size = 4096u;
+		fakeImageRequirements.alignment = 256u;
+		fakeImageRequirements.memoryTypeBits = 3u;
+		CHECK( RalVulkan_GetImageMemoryRequirements( &backend,
+			(void *)(uintptr_t)0x1234u, &imageRequirements ) );
+		CHECK( imageRequirements.size == 4096u
+			&& imageRequirements.alignment == 256u
+			&& imageRequirements.memoryTypeBits == 3u
+			&& imageRequirementsCalls == 1u );
+
+		before = imageRequirements;
+		backend.type = RAL_BACKEND_WEBGPU;
+		CHECK( !RalVulkan_GetImageMemoryRequirements( &backend,
+			(void *)(uintptr_t)0x1234u, &imageRequirements ) );
+		CHECK( memcmp( &imageRequirements, &before, sizeof( before ) ) == 0 );
+		backend.type = RAL_BACKEND_VULKAN;
+		CHECK( !RalVulkan_GetImageMemoryRequirements( &backend, NULL,
+			&imageRequirements ) );
+		CHECK( memcmp( &imageRequirements, &before, sizeof( before ) ) == 0 );
+		fakeImageRequirements.size = 0u;
+		CHECK( !RalVulkan_GetImageMemoryRequirements( &backend,
+			(void *)(uintptr_t)0x1234u, &imageRequirements ) );
+		CHECK( memcmp( &imageRequirements, &before, sizeof( before ) ) == 0 );
+		fakeImageRequirements.size = 4096u;
+		savedQuery = backend.vk.GetImageMemoryRequirements;
+		backend.vk.GetImageMemoryRequirements = NULL;
+		CHECK( !RalVulkan_GetImageMemoryRequirements( &backend,
+			(void *)(uintptr_t)0x1234u, &imageRequirements ) );
+		CHECK( memcmp( &imageRequirements, &before, sizeof( before ) ) == 0 );
+		backend.vk.GetImageMemoryRequirements = savedQuery;
+	}
 	memset( &requirements, 0, sizeof( requirements ) );
 	requirements.memoryTypeBits = 1u;
 	requirements.size = 128u * 1024u;
@@ -154,6 +243,22 @@ int main( void ) {
 		(uintptr_t)0x6000u, RAL_VK_ALLOC_RESOURCE_BUFFER );
 	CHECK( large && !large->block && large->offset == 0u
 		&& large->receipt.placement == RAL_ALLOCATION_PLACEMENT_DEDICATED );
+	// Vulkan buffer requirements may report a size that is not a multiple of
+	// the binding alignment. Dedicated memory still has to publish the rounded
+	// committed size required by the backend-neutral allocation receipt.
+	requirements.memoryTypeBits = 2u;
+	requirements.size = 2578752u;
+	requirements.alignment = 256u;
+	unalignedReadback = ralVk_Alloc( &backend, requirements,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		RAL_ALLOCATION_READBACK, RAL_ALLOCATION_RESIDENCY_PERMANENT,
+		(uintptr_t)0x6800u, RAL_VK_ALLOC_RESOURCE_BUFFER );
+	CHECK( unalignedReadback && !unalignedReadback->block
+		&& unalignedReadback->size == 2578944u
+		&& unalignedReadback->receipt.requestedSize == 2578752u
+		&& unalignedReadback->receipt.committedSize == 2578944u );
+	requirements.memoryTypeBits = 1u;
+	requirements.alignment = 256u;
 	requirements.size = 64u * 1024u;
 	transient = ralVk_Alloc( &backend, requirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 		RAL_ALLOCATION_TRANSIENT, RAL_ALLOCATION_RESIDENCY_TRANSIENT,
@@ -195,6 +300,7 @@ int main( void ) {
 	CHECK( freeCalls == 2u );
 	ralVk_Free( &backend, hostB );
 	ralVk_Free( &backend, large );
+	ralVk_Free( &backend, unalignedReadback );
 	ralVk_Free( &backend, transient );
 	ralVk_Free( &backend, fallback );
 	ralVk_Free( &backend, resizeOld );

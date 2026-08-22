@@ -23,6 +23,8 @@ assert.equal(decisions.entries.filter((entry) => entry.inlineUniform).length, 15
 assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.combinedSamplers?.length ?? 0), 0), 91);
 assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.arrayCounts?.length ?? 0), 0), 241);
 assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.vertexFormats?.length ?? 0), 0), 444);
+assert.equal(decisions.entries.reduce((sum, entry) => sum + (entry.dynamicOffsets?.length ?? 0), 0), 7);
+assert.equal(resolved.entries.filter((entry) => entry.reflection.bindings.some((binding) => binding.dynamicOffset)).length, 7);
 const symbols = decisions.entries.map((entry) => entry.symbol);
 assert.deepEqual(symbols, [...symbols].sort()); assert.equal(new Set(symbols).size, 292);
 console.log('RAL shader portable manifest: PASS');

@@ -126,6 +126,15 @@ ralResult_t Ral_CommandLifecycleCancel( ralCommandLifecycle_t *lifecycle,
 	return ralSuccess;
 }
 
+ralResult_t Ral_CommandLifecycleRecycle( ralCommandLifecycle_t *lifecycle,
+	                                     const ralCommandReceipt_t *submitted ) {
+	if ( !ralCommandLifecycleMatches( lifecycle, submitted )
+	  || submitted->state != RAL_COMMAND_SUBMITTED )
+		return ralErrorInvalidArgument;
+	lifecycle->state = RAL_COMMAND_IDLE;
+	return ralSuccess;
+}
+
 void Ral_SubmissionLifecycleInit( ralSubmissionLifecycle_t *lifecycle,
 	                              const ralBackend_t *backend,
 	                              ralQueueType_t queue ) {

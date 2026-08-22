@@ -258,7 +258,7 @@ set activeAction "exec ingame-info-active.cfg"
 connect 127.0.0.1:$ACTIVE_PORT
 CFG
 case "$(uname -s)" in Darwin) ARGS=(-ApplePersistenceIgnoreState YES);; *) ARGS=();; esac
-python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 10 --cwd "$RUN" --stdout "$ROOT/gui.stdout" -- "$WIRED" "${ARGS[@]}" +set fs_homepath "$GUI_HOME" +set com_automated 1 +set com_noHardReboot 1 +set net_ip 127.0.0.1 +set net_port "$CLIENT_PORT" +set s_initsound 0 +set r_fullscreen 0 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec ingame-info.cfg || exit 1
+python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 10 --cwd "$RUN" --stdout "$ROOT/gui.stdout" -- "$WIRED" "${ARGS[@]}" +set fs_homepath "$GUI_HOME" +set com_automated 1 +set com_noHardReboot 1 +set net_ip 127.0.0.1 +set net_port "$CLIENT_PORT" +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec ingame-info.cfg || exit 1
 kill -TERM "$FPID" 2>/dev/null || true; wait "$FPID" || exit 1; FPID=""
 printf '%s\n' 'echo Q0_INGAME_INFO_PHASE_COMPLETE' >&8
 for _ in $(seq 1 100); do grep -Fq 'Q0_INGAME_INFO_PHASE_COMPLETE' "$SERVER_HOME/qconsole.jsonl" 2>/dev/null && break; sleep .05; done

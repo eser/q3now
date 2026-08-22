@@ -55,6 +55,12 @@
           "samplerBinding": 33,
           "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
+      ],
+      "dynamicOffsets": [
+        {
+          "set": 1,
+          "binding": 0
+        }
       ]
     },
     {
@@ -62,7 +68,13 @@
       "spirvDigest": {
         "lane0": "df511ea2143d3083",
         "lane1": "e53fcc7266429849"
-      }
+      },
+      "dynamicOffsets": [
+        {
+          "set": 1,
+          "binding": 0
+        }
+      ]
     },
     {
       "symbol": "bloom_composite_frag_spv",
@@ -4151,6 +4163,12 @@
           "samplerBinding": 34,
           "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
+      ],
+      "dynamicOffsets": [
+        {
+          "set": 1,
+          "binding": 0
+        }
       ]
     },
     {
@@ -4158,14 +4176,26 @@
       "spirvDigest": {
         "lane0": "1f34c6e612e65e0c",
         "lane1": "c0ca50bf878acb5a"
-      }
+      },
+      "dynamicOffsets": [
+        {
+          "set": 1,
+          "binding": 0
+        }
+      ]
     },
     {
       "symbol": "ribbon_vert_spv",
       "spirvDigest": {
         "lane0": "01dfa247d049cc9a",
         "lane1": "50bd5d388354d730"
-      }
+      },
+      "dynamicOffsets": [
+        {
+          "set": 1,
+          "binding": 0
+        }
+      ]
     },
     {
       "symbol": "shadow_depth_atest_frag_spv",
@@ -4369,14 +4399,26 @@
       "spirvDigest": {
         "lane0": "1b5ce87568b0beff",
         "lane1": "fba1b4e6375a88f5"
-      }
+      },
+      "dynamicOffsets": [
+        {
+          "set": 1,
+          "binding": 0
+        }
+      ]
     },
     {
       "symbol": "sprite_vert_spv",
       "spirvDigest": {
         "lane0": "dd7a3010c0ece410",
         "lane1": "788d764e044950b6"
-      }
+      },
+      "dynamicOffsets": [
+        {
+          "set": 1,
+          "binding": 0
+        }
+      ]
     },
     {
       "symbol": "temporal_history_consume_comp_spv",

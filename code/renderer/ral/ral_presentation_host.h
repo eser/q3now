@@ -71,6 +71,7 @@ typedef struct {
 	ralPresentationHostCloseFn close;
 } ralPresentationHostImports_t;
 
+qboolean Ral_PresentationExtentValid( uint32_t width, uint32_t height );
 qboolean Ral_PresentationHostOpenInfoValid(
 	const ralPresentationHostOpenInfo_t *info );
 qboolean Ral_PresentationHostReceiptValid(

@@ -118,6 +118,12 @@ qboolean Ral_TextureTransitionValid( const ralTextureTransition_t *transition,
 	                                 uint32_t mipLevels,
 	                                 uint32_t arrayLayers,
 	                                 ralTextureAspectFlags_t availableAspects );
+// Output-atomic snapshot of the backend-neutral whole-texture state tracked by
+// RAL. Temporary consumers must restore this exact state, not infer it from
+// renderer-side flags.
+qboolean Ral_TextureGetResourceState( const ralTexture_t *texture,
+	                                  ralResourceState_t *outState,
+	                                  ralQueueType_t *outOwnerQueue );
 void Ral_QueueTransferLifecycleInit( ralQueueTransferLifecycle_t *lifecycle );
 qboolean Ral_QueueTransferReceiptExact( const ralQueueTransferReceipt_t *a,
 	                                    const ralQueueTransferReceipt_t *b );

@@ -193,18 +193,17 @@ static void NoopUpload( int width, int height, int columns, int rows,
 
 static void BuildPresentationCreateInfo( uint32_t pixelWidth,
 		uint32_t pixelHeight, ralSwapchainCreateInfo_t *createInfo,
-		ralSurfaceFormat_t *format, ralPresentMode_t *mode ) {
+		ralSurfaceFormat_t *format, ralPresentPreference_t *preference ) {
 	memset( createInfo, 0, sizeof( *createInfo ) );
 	format->format = RAL_FORMAT_B8G8R8A8_UNORM;
 	format->colorSpace = RAL_COLORSPACE_SRGB_NONLINEAR;
-	*mode = RAL_PRESENT_FIFO;
+	*preference = (ralPresentPreference_t){ RAL_PRESENT_FIFO, 3u, 3u };
 	createInfo->desiredWidth = pixelWidth;
 	createInfo->desiredHeight = pixelHeight;
 	createInfo->formatPreferences = format;
 	createInfo->formatPreferenceCount = 1u;
-	createInfo->presentModePreferences = mode;
-	createInfo->presentModePreferenceCount = 1u;
-	createInfo->desiredImageCount = 3u;
+	createInfo->presentPreferences = preference;
+	createInfo->presentPreferenceCount = 1u;
 	createInfo->requiredUsage = RAL_TEXTURE_USAGE_COLOR_ATTACHMENT;
 }
 
@@ -224,7 +223,7 @@ static qboolean InitializeOwners( void ) {
 	ralMetalCoreCreateInfo_t coreInfo;
 	ralPresentationHostOpenInfo_t openInfo;
 	ralSurfaceFormat_t format;
-	ralPresentMode_t mode;
+	ralPresentPreference_t preference;
 	ralSwapchainCreateInfo_t createInfo;
 	uint64_t coreGeneration = NextGeneration();
 	uint64_t presentationGeneration = NextGeneration();
@@ -251,7 +250,7 @@ static qboolean InitializeOwners( void ) {
 			|| !HostSurfaceJoinValid( &s_module.hostReceipt,
 				&s_module.surfaceBorrow ) ) goto fail;
 	BuildPresentationCreateInfo( s_module.hostReceipt.pixelWidth,
-		s_module.hostReceipt.pixelHeight, &createInfo, &format, &mode );
+		s_module.hostReceipt.pixelHeight, &createInfo, &format, &preference );
 	if ( !RalMetal_PresentAdoptBorrowedLayer( s_module.core,
 			&s_module.coreReceipt, &createInfo, presentationGeneration,
 			(void *)s_module.surfaceBorrow.surfaceIdentity,
@@ -320,7 +319,7 @@ static qboolean RefreshPresentation( void ) {
 	ralMetalPresentLayerReceipt_t presentation;
 	ralMetalPresent_t *candidate = NULL;
 	ralSurfaceFormat_t format;
-	ralPresentMode_t mode;
+	ralPresentPreference_t preference;
 	ralSwapchainCreateInfo_t createInfo;
 	uint64_t generation;
 	if ( !s_module.imports.PresentationHost.refresh(
@@ -335,7 +334,7 @@ static qboolean RefreshPresentation( void ) {
 	generation = NextGeneration();
 	if ( !generation ) return qfalse;
 	BuildPresentationCreateInfo( host.pixelWidth, host.pixelHeight,
-		&createInfo, &format, &mode );
+		&createInfo, &format, &preference );
 	if ( surface.surfaceIdentity != s_module.surfaceBorrow.surfaceIdentity ) {
 		if ( !RalMetal_PresentAdoptBorrowedLayer( s_module.core,
 				&s_module.coreReceipt, &createInfo, generation,

@@ -19,6 +19,7 @@ static qboolean BoolValid( qboolean value ) { return value == qfalse || value ==
 
 static qboolean OpsValid( const ralReadbackOps_t *ops ) {
 	return ops && ops->createStaging && ops->submitCopy && ops->submissionCompleted
+		&& ops->submissionWait
 		&& ops->mapBegin && ops->mapPoll && ops->mapUnmap && ops->mapCancel
 		&& ops->candidateAllowed && ops->retireStaging && ops->retireSubmission;
 }
@@ -132,6 +133,14 @@ qboolean Ral_ReadbackComplete( ralReadbackOwner_t *owner ) {
 	owner->receipt.transfer = completed;
 	owner->receipt.ready = qtrue;
 	return ReceiptValid( &owner->receipt );
+}
+
+qboolean Ral_ReadbackWait( ralReadbackOwner_t *owner ) {
+	if ( !owner || owner->mapActive || owner->receipt.ready
+			|| owner->receipt.transfer.state != RAL_TRANSFER_SUBMITTED
+			|| !owner->ops->submissionWait( owner->context,
+				owner->receipt.submissionIdentity ) ) return qfalse;
+	return Ral_ReadbackComplete( owner );
 }
 
 ralResult_t Ral_ReadbackMapBegin( ralReadbackOwner_t *owner,

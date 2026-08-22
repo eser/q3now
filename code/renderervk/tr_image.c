@@ -1062,6 +1062,7 @@ image_t *R_CreateImageArray( const char *name, byte **frames, int numFrames, int
 	image->handle        = VK_NULL_HANDLE;
 	image->view          = VK_NULL_HANDLE;
 	image->descriptor    = VK_NULL_HANDLE;
+	image->ralDescriptor = NULL;
 	image->ral           = NULL;
 	image->ralBindlessSlot     = -1;
 	image->bindlessSamplerSlot = -1;
@@ -1494,6 +1495,7 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 	image->handle = VK_NULL_HANDLE;
 	image->view = VK_NULL_HANDLE;
 	image->descriptor = VK_NULL_HANDLE;
+	image->ralDescriptor = NULL;
 	image->ral = NULL;
 	image->ralResidencyMipCount = 0;
 	image->ralBindlessSlot = -1;
@@ -1829,6 +1831,7 @@ static image_t *R_CreateImageDDS( const char *name, byte *data, int width, int h
 	image->handle     = VK_NULL_HANDLE;
 	image->view       = VK_NULL_HANDLE;
 	image->descriptor = VK_NULL_HANDLE;
+	image->ralDescriptor = NULL;
 	image->ral        = NULL;
 	image->ralBindlessSlot     = -1;
 	image->bindlessSamplerSlot = -1;
@@ -3060,6 +3063,7 @@ void R_DeleteTextures( void ) {
 
 	for ( i = 0; i < tr.numImages; i++ ) {
 		image_t *img = tr.images[ i ];
+		vk_ral_release_image_descriptor( img );
 		// tear down the parallel RAL texture (if any) FIRST so the
 		// bindless slot is cleared while the RAL texture is still alive. Order
 		// against the legacy VkImage destroy doesn't matter (different VkDevice)

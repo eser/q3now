@@ -803,6 +803,23 @@ SET_TESTS_PROPERTIES(ral_vulkan_translate_contract PROPERTIES
 	TIMEOUT 30
 )
 WIRED_CONFIGURE_HOST_TEST(ral_vulkan_translate_test ral_vulkan_translate_contract)
+
+ADD_EXECUTABLE(ral_sampler_policy_test
+	tests/ral_sampler_policy_test.c
+	code/renderer/ral/ral_sampler.c)
+TARGET_INCLUDE_DIRECTORIES(ral_sampler_policy_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon)
+ADD_TEST(NAME ral_sampler_policy_contract COMMAND ral_sampler_policy_test)
+SET_TESTS_PROPERTIES(ral_sampler_policy_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_sampler_policy_test ral_sampler_policy_contract)
+ADD_TEST(NAME ral_sampler_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_sampler_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_sampler_source_policy_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;feature.always"
+	TIMEOUT 30)
 ADD_TEST(NAME ral_transition_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_transition_policy_check.cmake)
@@ -846,6 +863,47 @@ SET_TESTS_PROPERTIES(ral_command_lifecycle_contract PROPERTIES
 	TIMEOUT 30
 )
 WIRED_CONFIGURE_HOST_TEST(ral_command_lifecycle_test ral_command_lifecycle_contract)
+ADD_EXECUTABLE(ral_bind_group_arena_lifecycle_test
+	tests/ral_bind_group_arena_lifecycle_test.c
+	code/renderer/ral/ral_bind_group_arena.c
+)
+TARGET_INCLUDE_DIRECTORIES(ral_bind_group_arena_lifecycle_test PRIVATE
+	code/qcommon
+	code/renderer/ral
+	code/renderercommon
+)
+ADD_TEST(NAME ral_bind_group_arena_lifecycle_contract
+	COMMAND ral_bind_group_arena_lifecycle_test)
+SET_TESTS_PROPERTIES(ral_bind_group_arena_lifecycle_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(ral_bind_group_arena_lifecycle_test
+	ral_bind_group_arena_lifecycle_contract)
+ADD_EXECUTABLE(ral_vulkan_bind_group_arena_test
+	tests/ral_vulkan_bind_group_arena_test.c)
+TARGET_INCLUDE_DIRECTORIES(ral_vulkan_bind_group_arena_test PRIVATE
+	code/qcommon
+	code/renderer/ral
+	code/renderer/ral_vulkan
+	code/renderercommon
+)
+TARGET_LINK_LIBRARIES(ral_vulkan_bind_group_arena_test PRIVATE ral_vulkan)
+ADD_TEST(NAME ral_vulkan_bind_group_arena_contract
+	COMMAND ral_vulkan_bind_group_arena_test)
+SET_TESTS_PROPERTIES(ral_vulkan_bind_group_arena_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(ral_vulkan_bind_group_arena_test
+	ral_vulkan_bind_group_arena_contract)
+ADD_TEST(NAME ral_bind_group_arena_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_bind_group_arena_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_bind_group_arena_source_policy_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.renderer;failure.contract;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30
+)
 ADD_EXECUTABLE(ral_webgpu_command_lifecycle_test
 	tests/ral_webgpu_command_lifecycle_test.c
 	code/renderer/ral/ral_command_lifecycle.c
@@ -1342,6 +1400,34 @@ ADD_TEST(NAME ral_transfer_source_policy_contract
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_transfer_policy_check.cmake)
 SET_TESTS_PROPERTIES(ral_transfer_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.ral;failure.contract;feature.always" TIMEOUT 30)
+ADD_EXECUTABLE(ral_vulkan_buffer_write_test
+	tests/ral_vulkan_buffer_write_test.c)
+TARGET_INCLUDE_DIRECTORIES(ral_vulkan_buffer_write_test PRIVATE
+	code/qcommon code/renderer/ral code/renderer/ral_vulkan code/renderercommon)
+TARGET_LINK_LIBRARIES(ral_vulkan_buffer_write_test PRIVATE ral_vulkan)
+ADD_TEST(NAME ral_vulkan_buffer_write_contract COMMAND ral_vulkan_buffer_write_test)
+SET_TESTS_PROPERTIES(ral_vulkan_buffer_write_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_vulkan_buffer_write_test ral_vulkan_buffer_write_contract)
+ADD_EXECUTABLE(ral_vulkan_clear_storage_test
+	tests/ral_vulkan_clear_storage_test.c)
+TARGET_INCLUDE_DIRECTORIES(ral_vulkan_clear_storage_test PRIVATE
+	code/qcommon code/renderer/ral code/renderer/ral_vulkan code/renderercommon)
+TARGET_LINK_LIBRARIES(ral_vulkan_clear_storage_test PRIVATE ral_vulkan)
+ADD_TEST(NAME ral_vulkan_clear_storage_contract COMMAND ral_vulkan_clear_storage_test)
+SET_TESTS_PROPERTIES(ral_vulkan_clear_storage_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_vulkan_clear_storage_test ral_vulkan_clear_storage_contract)
+ADD_TEST(NAME ral_storage_clear_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_storage_clear_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_storage_clear_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always" TIMEOUT 30)
+ADD_TEST(NAME ral_compute_barrier_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_compute_barrier_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_compute_barrier_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always" TIMEOUT 30)
 ADD_EXECUTABLE(ral_readback_owner_test
 	tests/ral_readback_owner_test.c
 	code/renderer/ral/ral_readback.c
@@ -1357,6 +1443,66 @@ ADD_TEST(NAME ral_webgpu_readback_owner_contract COMMAND ral_readback_owner_test
 SET_TESTS_PROPERTIES(ral_webgpu_readback_owner_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.ral;failure.contract;feature.always;backend.webgpu" TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(ral_readback_owner_test ral_readback_owner_contract)
+ADD_EXECUTABLE(ral_texture_resource_receipt_test
+	tests/ral_texture_resource_receipt_test.c)
+TARGET_INCLUDE_DIRECTORIES(ral_texture_resource_receipt_test PRIVATE
+	code/qcommon code/renderer/ral code/renderer/ral_vulkan code/renderercommon)
+TARGET_LINK_LIBRARIES(ral_texture_resource_receipt_test PRIVATE ral_vulkan)
+ADD_TEST(NAME ral_texture_resource_receipt_contract
+	COMMAND ral_texture_resource_receipt_test)
+SET_TESTS_PROPERTIES(ral_texture_resource_receipt_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_texture_resource_receipt_test
+	ral_texture_resource_receipt_contract)
+ADD_EXECUTABLE(ral_vulkan_texture_copy_test
+	tests/ral_vulkan_texture_copy_test.c)
+TARGET_INCLUDE_DIRECTORIES(ral_vulkan_texture_copy_test PRIVATE
+	code/qcommon code/renderer/ral code/renderer/ral_vulkan code/renderercommon)
+TARGET_LINK_LIBRARIES(ral_vulkan_texture_copy_test PRIVATE ral_vulkan)
+ADD_TEST(NAME ral_vulkan_texture_copy_contract
+	COMMAND ral_vulkan_texture_copy_test)
+SET_TESTS_PROPERTIES(ral_vulkan_texture_copy_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_vulkan_texture_copy_test
+	ral_vulkan_texture_copy_contract)
+ADD_EXECUTABLE(ral_vulkan_buffer_copy_test
+	tests/ral_vulkan_buffer_copy_test.c)
+TARGET_INCLUDE_DIRECTORIES(ral_vulkan_buffer_copy_test PRIVATE
+	code/qcommon code/renderer/ral code/renderer/ral_vulkan code/renderercommon)
+TARGET_LINK_LIBRARIES(ral_vulkan_buffer_copy_test PRIVATE ral_vulkan)
+ADD_TEST(NAME ral_vulkan_buffer_copy_contract
+	COMMAND ral_vulkan_buffer_copy_test)
+SET_TESTS_PROPERTIES(ral_vulkan_buffer_copy_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_vulkan_buffer_copy_test
+	ral_vulkan_buffer_copy_contract)
+ADD_EXECUTABLE(ral_vulkan_buffer_bind_test
+	tests/ral_vulkan_buffer_bind_test.c)
+TARGET_INCLUDE_DIRECTORIES(ral_vulkan_buffer_bind_test PRIVATE
+	code/qcommon code/renderer/ral code/renderer/ral_vulkan code/renderercommon)
+TARGET_LINK_LIBRARIES(ral_vulkan_buffer_bind_test PRIVATE ral_vulkan)
+ADD_TEST(NAME ral_vulkan_buffer_bind_contract
+	COMMAND ral_vulkan_buffer_bind_test)
+SET_TESTS_PROPERTIES(ral_vulkan_buffer_bind_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_vulkan_buffer_bind_test
+	ral_vulkan_buffer_bind_contract)
+ADD_TEST(NAME ral_buffer_bind_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_buffer_bind_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_buffer_bind_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_buffer_copy_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_buffer_copy_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_buffer_copy_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
 ADD_TEST(NAME ral_readback_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_readback_policy_check.cmake)
@@ -1401,6 +1547,20 @@ ADD_TEST(NAME ral_vulkan_suballocation_contract COMMAND ral_vulkan_suballocation
 SET_TESTS_PROPERTIES(ral_vulkan_suballocation_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.ral;failure.contract;feature.always;backend.vulkan" TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(ral_vulkan_suballocation_test ral_vulkan_suballocation_contract)
+ADD_EXECUTABLE(ral_vulkan_bridge_test
+	tests/ral_vulkan_bridge_test.c
+	code/renderer/ral_vulkan/ral_vulkan_bridge.c)
+TARGET_INCLUDE_DIRECTORIES(ral_vulkan_bridge_test PRIVATE
+	code/qcommon code/renderer/ral code/renderer/ral_vulkan code/renderercommon)
+ADD_TEST(NAME ral_vulkan_bridge_contract COMMAND ral_vulkan_bridge_test)
+SET_TESTS_PROPERTIES(ral_vulkan_bridge_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;feature.always;backend.vulkan" TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_vulkan_bridge_test ral_vulkan_bridge_contract)
+ADD_TEST(NAME ral_vulkan_bridge_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_vulkan_bridge_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_vulkan_bridge_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;feature.always;backend.vulkan" TIMEOUT 30)
 TARGET_INCLUDE_DIRECTORIES(ral_shader_abi_test PRIVATE
 	code/qcommon
 	code/renderer/ral
@@ -1581,6 +1741,235 @@ SET_TESTS_PROPERTIES(ral_vulkan_buffer_map_contract PROPERTIES
 	TIMEOUT 30
 )
 WIRED_CONFIGURE_HOST_TEST(ral_vulkan_buffer_map_test ral_vulkan_buffer_map_contract)
+ADD_EXECUTABLE(ral_vulkan_dynamic_bind_test
+	tests/ral_vulkan_dynamic_bind_test.c
+)
+TARGET_INCLUDE_DIRECTORIES(ral_vulkan_dynamic_bind_test PRIVATE
+	code/qcommon
+	code/renderer/ral
+	code/renderer/ral_vulkan
+	code/renderercommon
+)
+ADD_TEST(NAME ral_vulkan_dynamic_bind_contract COMMAND ral_vulkan_dynamic_bind_test)
+SET_TESTS_PROPERTIES(ral_vulkan_dynamic_bind_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30
+)
+WIRED_CONFIGURE_HOST_TEST(ral_vulkan_dynamic_bind_test ral_vulkan_dynamic_bind_contract)
+TARGET_LINK_LIBRARIES(ral_vulkan_dynamic_bind_test PRIVATE ral_vulkan)
+ADD_TEST(NAME ral_iqm_bind_group_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_iqm_bind_group_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_iqm_bind_group_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.iqm"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_forwardplus_bind_group_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_forwardplus_bind_group_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_forwardplus_bind_group_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.forwardplus"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_world_bind_group_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_world_bind_group_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_world_bind_group_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_shadow_bind_group_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_shadow_bind_group_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_shadow_bind_group_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.shadow"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_generic_pipeline_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_generic_pipeline_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_generic_pipeline_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_dynamic_ui_object_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_dynamic_ui_object_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_dynamic_ui_object_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_fog_push_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_fog_push_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_fog_push_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_attachment_clear_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_attachment_clear_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_attachment_clear_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_buffer_registry_source_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_buffer_registry_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_buffer_registry_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_effects_dynamic_bind_source_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_effects_dynamic_bind_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_effects_dynamic_bind_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_effects_dynamic_bind_smoke_analyzer_contract
+	COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/ral-effects-dynamic-bind-smoke.sh --self-test)
+SET_TESTS_PROPERTIES(ral_effects_dynamic_bind_smoke_analyzer_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;failure.contract;backend.vulkan;feature.always"
+	TIMEOUT 30)
+ADD_EXECUTABLE(vk_ral_pool_render_test
+	tests/vk_ral_pool_render_test.c
+	code/renderervk/vk_ral_pool_render.c)
+TARGET_INCLUDE_DIRECTORIES(vk_ral_pool_render_test PRIVATE
+	code/qcommon
+	code/renderer/ral
+	code/renderercommon
+	code/renderervk)
+ADD_TEST(NAME vk_ral_pool_render_contract COMMAND vk_ral_pool_render_test)
+SET_TESTS_PROPERTIES(vk_ral_pool_render_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_ral_pool_render_test vk_ral_pool_render_contract)
+ADD_TEST(NAME ral_pool_render_source_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_pool_render_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_pool_render_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_EXECUTABLE(vk_atmospheric_heightgrid_test
+	tests/vk_atmospheric_heightgrid_test.c
+	code/renderervk/vk_atmospheric_heightgrid.c
+	code/renderer/ral/ral_allocation.c
+	code/renderer/ral/ral_transfer.c)
+TARGET_INCLUDE_DIRECTORIES(vk_atmospheric_heightgrid_test PRIVATE
+	code/qcommon
+	code/renderer/ral
+	code/renderercommon
+	code/renderervk)
+ADD_TEST(NAME vk_atmospheric_heightgrid_contract
+	COMMAND vk_atmospheric_heightgrid_test)
+SET_TESTS_PROPERTIES(vk_atmospheric_heightgrid_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_atmospheric_heightgrid_test
+	vk_atmospheric_heightgrid_contract)
+ADD_TEST(NAME vk_atmospheric_heightgrid_source_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/vk_atmospheric_heightgrid_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_atmospheric_heightgrid_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_EXECUTABLE(vk_atmospheric_pool_test
+	tests/vk_atmospheric_pool_test.c
+	code/renderervk/vk_atmospheric_pool.c
+	code/renderer/ral/ral_allocation.c
+	code/renderer/ral/ral_transfer.c)
+TARGET_INCLUDE_DIRECTORIES(vk_atmospheric_pool_test PRIVATE
+	code/qcommon
+	code/renderer/ral
+	code/renderercommon
+	code/renderervk)
+ADD_TEST(NAME vk_atmospheric_pool_contract COMMAND vk_atmospheric_pool_test)
+SET_TESTS_PROPERTIES(vk_atmospheric_pool_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_atmospheric_pool_test
+	vk_atmospheric_pool_contract)
+ADD_TEST(NAME vk_atmospheric_pool_source_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/vk_atmospheric_pool_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_atmospheric_pool_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_EXECUTABLE(vk_atmospheric_frame_test
+	tests/vk_atmospheric_frame_test.c
+	code/renderervk/vk_atmospheric_frame.c
+	code/renderervk/vk_ral_frame_uniform.c
+	code/renderer/ral/ral_allocation.c
+	code/renderer/ral/ral_transfer.c)
+TARGET_INCLUDE_DIRECTORIES(vk_atmospheric_frame_test PRIVATE
+	code/qcommon
+	code/renderer/ral
+	code/renderercommon
+	code/renderervk)
+ADD_TEST(NAME vk_atmospheric_frame_contract COMMAND vk_atmospheric_frame_test)
+SET_TESTS_PROPERTIES(vk_atmospheric_frame_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_atmospheric_frame_test
+	vk_atmospheric_frame_contract)
+ADD_TEST(NAME vk_atmospheric_frame_source_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/vk_atmospheric_frame_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_atmospheric_frame_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_EXECUTABLE(vk_ral_frame_uniform_test
+	tests/vk_ral_frame_uniform_test.c
+	code/renderervk/vk_ral_frame_uniform.c
+	code/renderer/ral/ral_allocation.c
+	code/renderer/ral/ral_transfer.c)
+TARGET_INCLUDE_DIRECTORIES(vk_ral_frame_uniform_test PRIVATE
+	code/qcommon
+	code/renderer/ral
+	code/renderercommon
+	code/renderervk)
+TARGET_COMPILE_OPTIONS(vk_ral_frame_uniform_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME vk_ral_frame_uniform_contract COMMAND vk_ral_frame_uniform_test)
+SET_TESTS_PROPERTIES(vk_ral_frame_uniform_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_ral_frame_uniform_test
+	vk_ral_frame_uniform_contract)
+ADD_TEST(NAME vk_ral_frame_uniform_source_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/vk_ral_frame_uniform_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_ral_frame_uniform_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_EXECUTABLE(vk_ral_shadow_storage_test
+	tests/vk_ral_shadow_storage_test.c
+	code/renderervk/vk_ral_shadow_storage.c
+	code/renderer/ral/ral_allocation.c
+	code/renderer/ral/ral_transfer.c)
+TARGET_INCLUDE_DIRECTORIES(vk_ral_shadow_storage_test PRIVATE
+	code/qcommon
+	code/renderer/ral
+	code/renderercommon
+	code/renderervk)
+TARGET_COMPILE_OPTIONS(vk_ral_shadow_storage_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME vk_ral_shadow_storage_contract COMMAND vk_ral_shadow_storage_test)
+SET_TESTS_PROPERTIES(vk_ral_shadow_storage_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.renderer;owner.ral;failure.contract;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(vk_ral_shadow_storage_test
+	vk_ral_shadow_storage_contract)
+ADD_TEST(NAME vk_ral_shadow_storage_source_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/vk_ral_shadow_storage_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_ral_shadow_storage_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME vk_effect_frame_uniform_source_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/vk_effect_frame_uniform_policy_check.cmake)
+SET_TESTS_PROPERTIES(vk_effect_frame_uniform_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
 ADD_EXECUTABLE(ral_webgpu_buffer_map_contract_test
 	tests/ral_webgpu_buffer_map_contract_test.c
 	code/renderer/ral/ral_buffer_map.c
@@ -1606,6 +1995,7 @@ SET_TESTS_PROPERTIES(ral_buffer_map_source_policy_contract PROPERTIES
 
 ADD_EXECUTABLE(ral_mrt_contract_test
 	tests/ral_mrt_contract_test.c
+	code/renderer/ral/ral_transition.c
 	code/renderer/ral_vulkan/ral_vulkan_caps.c
 	code/renderer/ral_vulkan/ral_vulkan_mrt_policy.c
 	code/renderer/ral_vulkan/ral_vulkan_translate.c
@@ -1826,6 +2216,18 @@ SET_TESTS_PROPERTIES(ral_swapchain_policy_contract PROPERTIES
 	TIMEOUT 30
 )
 WIRED_CONFIGURE_HOST_TEST(ral_swapchain_policy_test ral_swapchain_policy_contract)
+ADD_TEST(NAME ral_swapchain_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/ral_swapchain_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_swapchain_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_swapchain_reintroduction_rejected
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/ral_swapchain_policy_reject_check.cmake)
+SET_TESTS_PROPERTIES(ral_swapchain_reintroduction_rejected PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.renderer;failure.contract;feature.always"
+	TIMEOUT 30)
 
 ADD_EXECUTABLE(ral_submission_lifecycle_test
 	tests/ral_submission_lifecycle_test.c
@@ -4166,6 +4568,7 @@ LIST(APPEND RENDERER_VK_SRCS
 SET(RAL_VK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral_vulkan")
 SET(RAL_VK_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_buffer_map.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_bind_group_arena.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_allocation.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_backend_conformance.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_capability.c
@@ -4181,9 +4584,11 @@ SET(RAL_VK_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_host.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_profile.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_residency.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_sampler.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_temporal.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_transition.c
 	${RAL_VK_DIR}/ral_vulkan_backend.c
+	${RAL_VK_DIR}/ral_vulkan_bridge.c
 	${RAL_VK_DIR}/ral_vulkan_caps.c
 	${RAL_VK_DIR}/ral_vulkan_memory.c
 	${RAL_VK_DIR}/ral_vulkan_map.c
@@ -4193,6 +4598,7 @@ SET(RAL_VK_SRCS
 	${RAL_VK_DIR}/ral_vulkan_resource.c
 	${RAL_VK_DIR}/ral_vulkan_pipeline.c
 	${RAL_VK_DIR}/ral_vulkan_command.c
+	${RAL_VK_DIR}/ral_vulkan_dynamic_bind.c
 	${RAL_VK_DIR}/ral_vulkan_transition.c
 	${RAL_VK_DIR}/ral_vulkan_transient.c
 	${RAL_VK_DIR}/ral_vulkan_sync.c

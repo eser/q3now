@@ -140,7 +140,7 @@ ralResult_t Ral_BeginCommandBufferExact( ralCommandBuffer_t *cb,
 	                                     ralCommandReceipt_t *outRecording ) {
 	VkCommandBufferBeginInfo bi;
 	ralCommandReceipt_t candidate;
-	if ( !cb || !outRecording || cb->externalLifecycle ) return ralErrorInvalidArgument;
+	if ( !cb || !outRecording ) return ralErrorInvalidArgument;
 	if ( cb->state != RAL_VK_CMD_IDLE || cb->lifecycle.state != RAL_COMMAND_IDLE
 	  || cb->lifecycle.generation >= UINT64_MAX - 1u ) {
 		RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_BeginCommandBufferExact: command buffer not IDLE\n" );
@@ -155,6 +155,9 @@ ralResult_t Ral_BeginCommandBufferExact( ralCommandBuffer_t *cb,
 	}
 	if ( Ral_CommandLifecyclePublishBegin( &cb->lifecycle, &candidate ) != ralSuccess )
 		return ralErrorUnknown;
+	cb->currentPipeline = NULL;
+	cb->currentLayout = VK_NULL_HANDLE;
+	cb->currentBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 	cb->renderingDebugLabelActive = qfalse;
 	cb->renderingActive = qfalse;
 	cb->debugLabelBeginCount = 0;
@@ -171,7 +174,7 @@ ralResult_t Ral_EndCommandBufferExact( ralCommandBuffer_t *cb,
 	                                   const ralCommandReceipt_t *recording,
 	                                   ralCommandReceipt_t *outExecutable ) {
 	ralCommandReceipt_t current, candidate;
-	if ( !cb || !recording || !outExecutable || cb->externalLifecycle
+	if ( !cb || !recording || !outExecutable
 	  || cb->state != RAL_VK_CMD_RECORDING
 	  || Ral_CommandLifecycleGetReceipt( &cb->lifecycle, &current ) != ralSuccess
 	  || !Ral_CommandReceiptExact( &current, recording )
@@ -192,7 +195,7 @@ ralResult_t Ral_EndCommandBufferExact( ralCommandBuffer_t *cb,
 
 ralResult_t Ral_GetCommandBufferReceipt( const ralCommandBuffer_t *cb,
 	                                     ralCommandReceipt_t *outReceipt ) {
-	if ( !cb || cb->externalLifecycle ) return ralErrorInvalidArgument;
+	if ( !cb ) return ralErrorInvalidArgument;
 	return Ral_CommandLifecycleGetReceipt( &cb->lifecycle, outReceipt );
 }
 
@@ -200,7 +203,7 @@ ralResult_t Ral_CancelCommandBuffer( ralCommandBuffer_t *cb,
 	                                 const ralCommandReceipt_t *authority ) {
 	ralCommandReceipt_t current;
 	VkResult result;
-	if ( !cb || !authority || cb->externalLifecycle
+	if ( !cb || !authority
 	  || Ral_CommandLifecycleGetReceipt( &cb->lifecycle, &current ) != ralSuccess
 	  || !Ral_CommandReceiptExact( &current, authority )
 	  || ( authority->state != RAL_COMMAND_RECORDING
@@ -212,6 +215,35 @@ ralResult_t Ral_CancelCommandBuffer( ralCommandBuffer_t *cb,
 	if ( Ral_CommandLifecycleCancel( &cb->lifecycle, authority ) != ralSuccess )
 		return ralErrorUnknown;
 	cb->state = RAL_VK_CMD_IDLE;
+	return ralSuccess;
+}
+
+ralResult_t Ral_RecycleCommandBufferExact( ralCommandBuffer_t *cb,
+	                                        const ralCommandReceipt_t *submitted ) {
+	ralCommandReceipt_t current;
+	VkResult result;
+	if ( !cb || !submitted
+	  || cb->state != RAL_VK_CMD_SUBMITTED
+	  || Ral_CommandLifecycleGetReceipt( &cb->lifecycle, &current ) != ralSuccess
+	  || !Ral_CommandReceiptExact( &current, submitted )
+	  || submitted->state != RAL_COMMAND_SUBMITTED )
+		return ralErrorInvalidArgument;
+	result = cb->backend->vk.ResetCommandBuffer( cb->cb, 0 );
+	if ( result == VK_ERROR_DEVICE_LOST ) return ralErrorDeviceLost;
+	if ( result != VK_SUCCESS ) return ralErrorUnknown;
+	if ( Ral_CommandLifecycleRecycle( &cb->lifecycle, submitted ) != ralSuccess )
+		return ralErrorUnknown;
+	cb->state = RAL_VK_CMD_IDLE;
+	cb->currentPipeline = NULL;
+	cb->currentLayout = VK_NULL_HANDLE;
+	cb->currentBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	memset( cb->boundVertexBuffers, 0, sizeof( cb->boundVertexBuffers ) );
+	cb->boundIndexBuffer = NULL;
+	memset( cb->boundBindGroups, 0, sizeof( cb->boundBindGroups ) );
+	cb->renderingDebugLabelActive = qfalse;
+	cb->renderingActive = qfalse;
+	cb->debugLabelBeginCount = 0u;
+	cb->debugLabelEndCount = 0u;
 	return ralSuccess;
 }
 
@@ -228,11 +260,6 @@ void Ral_EndCommandBuffer( ralCommandBuffer_t *cb ) {
 
 void *Ral_GetCommandBufferHandle( const ralCommandBuffer_t *cb ) {
 	return cb ? (void *)cb->cb : NULL;
-}
-
-void Ral_SetCommandBufferExternalLifecycle( ralCommandBuffer_t *cb, qboolean enabled ) {
-	if ( !cb ) return;
-	cb->externalLifecycle = enabled ? qtrue : qfalse;
 }
 
 void Ral_DestroyCommandBuffer( ralCommandBuffer_t *cb ) {
@@ -305,10 +332,8 @@ static ralResult_t ralVk_SubmitInternal( ralBackend_t *b, ralQueueType_t q,
 	if ( exact && nCb == 0 ) return ralErrorInvalidArgument;
 	for ( i = 0; i < nCb; i++ ) {
 		ralCommandBuffer_t *cb = si->commandBuffers[i];
-		if ( !cb || cb->backend != b || cb->cb == VK_NULL_HANDLE || cb->queue != q
-		  || ( exact && cb->externalLifecycle )
-		  || ( !exact && !cb->externalLifecycle )
-		  || ( exact && cb->state != RAL_VK_CMD_PENDING_SUBMIT ) )
+		if ( !exact || !cb || cb->backend != b || cb->cb == VK_NULL_HANDLE
+		  || cb->queue != q || cb->state != RAL_VK_CMD_PENDING_SUBMIT )
 			return ralErrorInvalidArgument;
 		lifecycles[i] = &cb->lifecycle;
 		RAL_ZERO( cbis[i] );
@@ -370,7 +395,6 @@ ralResult_t Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t
 	ralCommandReceipt_t receipts[ RAL_VK_MAX_SUBMIT_CBS ];
 	ralSubmissionReceipt_t ignored;
 	uint32_t i;
-	qboolean external;
 	if ( !b || !si || (uint32_t)q > RAL_QUEUE_TRANSFER
 	  || si->numCommandBuffers > RAL_VK_MAX_SUBMIT_CBS
 	  || ( si->numCommandBuffers && !si->commandBuffers ) )
@@ -380,38 +404,67 @@ ralResult_t Ral_Submit( ralBackend_t *b, ralQueueType_t q, const ralSubmitInfo_t
 	if ( si->numCommandBuffers == 0 )
 		return ralVk_SubmitInternal( b, q, si, NULL, NULL, qfalse );
 	if ( !si->commandBuffers[0] ) return ralErrorInvalidArgument;
-	external = si->numCommandBuffers ? si->commandBuffers[0]->externalLifecycle : qfalse;
 	for ( i = 0; i < si->numCommandBuffers; ++i ) {
-		if ( !si->commandBuffers[i] || si->commandBuffers[i]->externalLifecycle != external )
-			return ralErrorInvalidArgument;
-		if ( !external && Ral_GetCommandBufferReceipt( si->commandBuffers[i], &receipts[i] ) != ralSuccess )
+		if ( !si->commandBuffers[i]
+		  || Ral_GetCommandBufferReceipt( si->commandBuffers[i], &receipts[i] ) != ralSuccess )
 			return ralErrorInvalidArgument;
 	}
-	if ( external ) return ralVk_SubmitInternal( b, q, si, NULL, NULL, qfalse );
 	return Ral_SubmitExact( b, q, si, receipts, &ignored );
 }
 
 // ════════════════════════════════════════════════════════════════════════
 // trivially-backend command ops
 // ════════════════════════════════════════════════════════════════════════
-void Ral_CmdCopyBuffer( ralCommandBuffer_t *cb, ralBuffer_t *src, ralBuffer_t *dst, const ralBufferCopy_t *region ) {
+qboolean Ral_CmdCopyBufferExact( ralCommandBuffer_t *cb, ralBuffer_t *src,
+		ralBuffer_t *dst, const ralBufferCopy_t *region ) {
 	VkBufferCopy r;
 	if ( !cb || !src || !dst || !region
-	  || !ralVk_BufferGpuUseAllowed( src ) || !ralVk_BufferGpuUseAllowed( dst ) ) return;
+			|| src->backend != cb->backend || dst->backend != cb->backend
+			|| !( src->usage & RAL_BUFFER_TRANSFER_SRC )
+			|| !( dst->usage & RAL_BUFFER_TRANSFER_DST )
+			|| !ralVk_BufferGpuUseAllowed( src ) || !ralVk_BufferGpuUseAllowed( dst )
+			|| cb->state != RAL_VK_CMD_RECORDING
+			|| cb->lifecycle.state != RAL_COMMAND_RECORDING
+			|| region->size == 0u
+			|| region->srcOffset > src->size
+			|| region->size > src->size - region->srcOffset
+			|| region->dstOffset > dst->size
+			|| region->size > dst->size - region->dstOffset ) return qfalse;
+	if ( src == dst
+			&& region->srcOffset < region->dstOffset + region->size
+			&& region->dstOffset < region->srcOffset + region->size ) return qfalse;
 	RAL_ZERO( r ); r.srcOffset = region->srcOffset; r.dstOffset = region->dstOffset; r.size = region->size;
 	cb->backend->vk.CmdCopyBuffer( cb->cb, src->buffer, dst->buffer, 1, &r );
 	if ( !src->portableStateKnown || src->portableState.usage != RAL_RESOURCE_USAGE_COPY_SOURCE )
 		src->portableStateKnown = qfalse;
 	if ( !dst->portableStateKnown || dst->portableState.usage != RAL_RESOURCE_USAGE_COPY_DESTINATION )
 		dst->portableStateKnown = qfalse;
+	return qtrue;
+}
+
+void Ral_CmdCopyBuffer( ralCommandBuffer_t *cb, ralBuffer_t *src,
+		ralBuffer_t *dst, const ralBufferCopy_t *region ) {
+	(void)Ral_CmdCopyBufferExact( cb, src, dst, region );
 }
 
 void Ral_CmdCopyBufferToTexture( ralCommandBuffer_t *cb, ralBuffer_t *src, ralTexture_t *dst, const ralBufferTextureCopy_t *region ) {
 	VkBufferImageCopy bic;
-	if ( !cb || !src || !dst || !region || !ralVk_BufferGpuUseAllowed( src ) ) return;
+	VkImageAspectFlags aspect;
+	uint32_t bpp;
+	if ( !cb || !src || !dst || !region || !ralVk_BufferGpuUseAllowed( src )
+			|| !ralVk_TranslateTextureCopyAspect( region->aspects,
+				dst->aspect, &aspect ) ) return;
+	bpp = ralVk_FormatBPP( dst->ralFormat );
+	if ( ( region->bytesPerRow == 0u ) != ( region->rowsPerImage == 0u )
+			|| ( region->bytesPerRow != 0u && ( bpp == 0u
+				|| region->bytesPerRow % bpp != 0u
+				|| (uint64_t)region->bytesPerRow < (uint64_t)region->imageRect.width * bpp
+				|| region->rowsPerImage < region->imageRect.height ) ) ) return;
 	RAL_ZERO( bic );
 	bic.bufferOffset                    = region->bufferOffset;
-	bic.imageSubresource.aspectMask     = dst->aspect;
+	bic.bufferRowLength                 = region->bytesPerRow ? region->bytesPerRow / bpp : 0u;
+	bic.bufferImageHeight               = region->rowsPerImage;
+	bic.imageSubresource.aspectMask     = aspect;
 	bic.imageSubresource.mipLevel       = region->mipLevel;
 	bic.imageSubresource.baseArrayLayer = region->arrayLayer;
 	bic.imageSubresource.layerCount     = 1;
@@ -431,12 +484,50 @@ void Ral_CmdCopyBufferToTexture( ralCommandBuffer_t *cb, ralBuffer_t *src, ralTe
 // Mirror of Ral_CmdCopyBufferToTexture for readback (the early
 // RAL test went through the raw VK PFN; with this in place renderer
 // readbacks / screenshot paths can stay on the RAL surface).
-void Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb, ralTexture_t *src, ralBuffer_t *dst, const ralBufferTextureCopy_t *region ) {
+qboolean Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb,
+		ralTexture_t *src, ralBuffer_t *dst,
+		const ralBufferTextureCopy_t *region ) {
 	VkBufferImageCopy bic;
-	if ( !cb || !src || !dst || !region || !ralVk_BufferGpuUseAllowed( dst ) ) return;
+	VkImageAspectFlags aspect;
+	uint32_t bpp;
+	if ( !cb || !src || !dst || !region || !cb->backend
+			|| src->backend != cb->backend || dst->backend != cb->backend
+			|| !cb->backend->vk.CmdCopyImageToBuffer
+			|| !ralVk_BufferGpuUseAllowed( dst ) ) return qfalse;
+	if ( region->imageRect.x < 0 || region->imageRect.y < 0
+			|| region->imageRect.width == 0u || region->imageRect.height == 0u
+			|| region->mipLevel >= src->mipLevels
+			|| region->arrayLayer >= src->arrayLayers ) return qfalse;
+	if ( (uint64_t)(uint32_t)region->imageRect.x
+			+ region->imageRect.width
+			> ( (uint64_t)src->width >> region->mipLevel )
+			|| (uint64_t)(uint32_t)region->imageRect.y
+				+ region->imageRect.height
+				> ( (uint64_t)src->height >> region->mipLevel ) ) return qfalse;
+	if ( !ralVk_TranslateTextureCopyAspect( region->aspects,
+			src->aspect, &aspect ) ) return qfalse;
+	bpp = ralVk_FormatBPP( src->ralFormat );
+	if ( bpp == 0u
+			|| ( region->bytesPerRow == 0u ) != ( region->rowsPerImage == 0u )
+			|| ( region->bytesPerRow != 0u && (
+				region->bytesPerRow % bpp != 0u
+				|| (uint64_t)region->bytesPerRow < (uint64_t)region->imageRect.width * bpp
+				|| region->rowsPerImage < region->imageRect.height ) ) ) return qfalse;
+	{
+		const uint64_t rowBytes = region->bytesPerRow
+			? region->bytesPerRow : (uint64_t)region->imageRect.width * bpp;
+		uint64_t requiredBytes;
+		if ( region->imageRect.height > UINT64_MAX / rowBytes ) return qfalse;
+		requiredBytes = rowBytes * region->imageRect.height;
+		if ( region->bufferOffset > (uint64_t)dst->size
+				|| requiredBytes > (uint64_t)dst->size - region->bufferOffset )
+			return qfalse;
+	}
 	RAL_ZERO( bic );
 	bic.bufferOffset                    = region->bufferOffset;
-	bic.imageSubresource.aspectMask     = src->aspect;
+	bic.bufferRowLength                 = region->bytesPerRow ? region->bytesPerRow / bpp : 0u;
+	bic.bufferImageHeight               = region->rowsPerImage;
+	bic.imageSubresource.aspectMask     = aspect;
 	bic.imageSubresource.mipLevel       = region->mipLevel;
 	bic.imageSubresource.baseArrayLayer = region->arrayLayer;
 	bic.imageSubresource.layerCount     = 1;
@@ -451,6 +542,52 @@ void Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb, ralTexture_t *src, ralB
 		src->portableStateKnown = qfalse;
 	if ( !dst->portableStateKnown || dst->portableState.usage != RAL_RESOURCE_USAGE_COPY_DESTINATION )
 		dst->portableStateKnown = qfalse;
+	return qtrue;
+}
+
+qboolean Ral_CmdClearStorageBuffer( ralCommandBuffer_t *cb,
+		ralBuffer_t *buffer, uint64_t offset, uint64_t size ) {
+	VkBufferMemoryBarrier barrier;
+	if ( !cb || !buffer || !cb->backend || buffer->backend != cb->backend
+			|| cb->state != RAL_VK_CMD_RECORDING
+			|| cb->lifecycle.state != RAL_COMMAND_RECORDING
+			|| cb->renderingActive || cb->queue > RAL_QUEUE_TRANSFER
+			|| !cb->backend->vk.CmdFillBuffer
+			|| !cb->backend->vk.CmdPipelineBarrier
+			|| buffer->buffer == VK_NULL_HANDLE
+			|| !( buffer->usage & RAL_BUFFER_STORAGE )
+			|| !( buffer->usage & RAL_BUFFER_TRANSFER_DST )
+			|| !ralVk_BufferGpuUseAllowed( buffer )
+			|| size == 0u || ( offset & 3u ) != 0u || ( size & 3u ) != 0u
+			|| offset > (uint64_t)buffer->size
+			|| size > (uint64_t)buffer->size - offset ) return qfalse;
+
+	// All validation precedes the first backend command. Once recording starts,
+	// the two barriers and zero fill are infallible Vulkan command writes.
+	RAL_ZERO( barrier );
+	barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+	barrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+	barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.buffer = buffer->buffer;
+	barrier.offset = (VkDeviceSize)offset;
+	barrier.size = (VkDeviceSize)size;
+	cb->backend->vk.CmdPipelineBarrier( cb->cb,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+		0, 0, NULL, 1, &barrier, 0, NULL );
+	cb->backend->vk.CmdFillBuffer( cb->cb, buffer->buffer,
+		(VkDeviceSize)offset, (VkDeviceSize)size, 0u );
+	barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+	cb->backend->vk.CmdPipelineBarrier( cb->cb,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		0, 0, NULL, 1, &barrier, 0, NULL );
+	buffer->portableStateKnown = qtrue;
+	buffer->portableState.usage = RAL_RESOURCE_USAGE_STORAGE_READ_WRITE;
+	buffer->portableState.shaderStages = RAL_STAGE_COMPUTE;
+	buffer->portableOwnerQueue = cb->queue;
+	return qtrue;
 }
 
 void Ral_CmdPipelineBarrier( ralCommandBuffer_t *cb, ralBarrierScope_t scope ) {
@@ -553,33 +690,96 @@ void Ral_CmdBindPipeline( ralCommandBuffer_t *cb, ralPipeline_t *p ) {
 }
 
 void Ral_CmdBindBindGroup( ralCommandBuffer_t *cb, uint32_t setIndex, ralBindGroup_t *g ) {
-	if ( !cb || !g || setIndex >= RAL_VK_MAX_TRACKED_BIND_GROUPS
-	  || !ralVk_BindGroupBuffersGpuUseAllowed( g )
-	  || cb->currentLayout == VK_NULL_HANDLE ) {
-		if ( cb && cb->currentLayout == VK_NULL_HANDLE )
-			RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_CmdBindBindGroup: no pipeline bound (call Ral_CmdBindPipeline first)\n" );
-		return;
+	(void)ralVk_CmdBindBindGroupDynamic( cb, setIndex, g, NULL, 0 );
+}
+
+qboolean Ral_CmdBindBindGroupDynamic( ralCommandBuffer_t *cb, uint32_t setIndex,
+ralBindGroup_t *g, const uint32_t *dynamicOffsets, uint32_t dynamicOffsetCount ) {
+return ralVk_CmdBindBindGroupDynamic( cb, setIndex, g,
+dynamicOffsets, dynamicOffsetCount );
+}
+
+qboolean Ral_CmdBindBindGroupDynamicExact( ralCommandBuffer_t *cb,
+uint32_t setIndex, ralBindGroup_t *g, const uint32_t *dynamicOffsets,
+uint32_t dynamicOffsetCount ) {
+return ralVk_CmdBindBindGroupDynamicExact( cb, setIndex, g,
+dynamicOffsets, dynamicOffsetCount );
+}
+
+qboolean Ral_ValidateBindGroupDynamicExact( const ralCommandBuffer_t *cb,
+const ralPipeline_t *pipeline, uint32_t setIndex, const ralBindGroup_t *g,
+const uint32_t *dynamicOffsets, uint32_t dynamicOffsetCount ) {
+return ralVk_ValidateBindGroupDynamicExact( cb, pipeline, setIndex, g,
+dynamicOffsets, dynamicOffsetCount );
+}
+
+
+static qboolean ralVk_CommandRecordsBufferBindings( const ralCommandBuffer_t *cb ) {
+	return cb && cb->backend && cb->cb != VK_NULL_HANDLE
+		&& cb->state == RAL_VK_CMD_RECORDING
+		&& cb->lifecycle.state == RAL_COMMAND_RECORDING;
+}
+
+qboolean Ral_CmdBindVertexBuffersExact( ralCommandBuffer_t *cb,
+		uint32_t firstBinding, uint32_t bindingCount,
+		ralBuffer_t *const *buffers, const uint64_t *offsets ) {
+	VkBuffer scratchBuffers[RAL_VK_MAX_TRACKED_VERTEX_BUFFERS];
+	VkDeviceSize scratchOffsets[RAL_VK_MAX_TRACKED_VERTEX_BUFFERS];
+	uint32_t i;
+	if ( !ralVk_CommandRecordsBufferBindings( cb ) || bindingCount == 0u
+			|| !buffers || !offsets
+			|| firstBinding >= RAL_VK_MAX_TRACKED_VERTEX_BUFFERS
+			|| bindingCount > RAL_VK_MAX_TRACKED_VERTEX_BUFFERS - firstBinding )
+		return qfalse;
+	for ( i = 0u; i < bindingCount; ++i ) {
+		ralBuffer_t *buffer = buffers[i];
+		if ( !buffer || buffer->backend != cb->backend
+				|| !( buffer->usage & RAL_BUFFER_VERTEX )
+				|| !ralVk_BufferGpuUseAllowed( buffer )
+				|| offsets[i] >= buffer->size || ( offsets[i] & 3u ) != 0u )
+			return qfalse;
+		scratchBuffers[i] = buffer->buffer;
+		scratchOffsets[i] = (VkDeviceSize)offsets[i];
 	}
-	cb->backend->vk.CmdBindDescriptorSets( cb->cb, cb->currentBindPoint, cb->currentLayout,
-	                                       setIndex, 1, &g->set, 0, NULL );
-	cb->boundBindGroups[setIndex] = g;
+	cb->backend->vk.CmdBindVertexBuffers( cb->cb, firstBinding, bindingCount,
+		scratchBuffers, scratchOffsets );
+	for ( i = 0u; i < bindingCount; ++i )
+		cb->boundVertexBuffers[firstBinding + i] = buffers[i];
+	return qtrue;
 }
 
-
-void Ral_CmdBindVertexBuffer( ralCommandBuffer_t *cb, uint32_t binding, ralBuffer_t *buf, uint64_t offset ) {
-	VkDeviceSize off;
-	if ( !cb || binding >= RAL_VK_MAX_TRACKED_VERTEX_BUFFERS
-	  || !ralVk_BufferGpuUseAllowed( buf ) ) return;
-	off = (VkDeviceSize)offset;
-	cb->backend->vk.CmdBindVertexBuffers( cb->cb, binding, 1, &buf->buffer, &off );
-	cb->boundVertexBuffers[binding] = buf;
+qboolean Ral_CmdBindVertexBufferExact( ralCommandBuffer_t *cb,
+		uint32_t binding, ralBuffer_t *buf, uint64_t offset ) {
+	ralBuffer_t *buffers[1] = { buf };
+	uint64_t offsets[1] = { offset };
+	return Ral_CmdBindVertexBuffersExact( cb, binding, 1u, buffers, offsets );
 }
 
-void Ral_CmdBindIndexBuffer( ralCommandBuffer_t *cb, ralBuffer_t *buf, uint64_t offset, ralIndexType_t type ) {
-	if ( !cb || !ralVk_BufferGpuUseAllowed( buf ) ) return;
-	cb->backend->vk.CmdBindIndexBuffer( cb->cb, buf->buffer, (VkDeviceSize)offset,
-	                                    ( type == RAL_INDEX_UINT32 ) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16 );
+void Ral_CmdBindVertexBuffer( ralCommandBuffer_t *cb, uint32_t binding,
+		ralBuffer_t *buf, uint64_t offset ) {
+	(void)Ral_CmdBindVertexBufferExact( cb, binding, buf, offset );
+}
+
+qboolean Ral_CmdBindIndexBufferExact( ralCommandBuffer_t *cb,
+		ralBuffer_t *buf, uint64_t offset, ralIndexType_t type ) {
+	uint64_t elementSize;
+	if ( type != RAL_INDEX_UINT16 && type != RAL_INDEX_UINT32 ) return qfalse;
+	elementSize = type == RAL_INDEX_UINT32 ? 4u : 2u;
+	if ( !ralVk_CommandRecordsBufferBindings( cb ) || !buf
+			|| buf->backend != cb->backend || !( buf->usage & RAL_BUFFER_INDEX )
+			|| !ralVk_BufferGpuUseAllowed( buf ) || offset >= buf->size
+			|| ( offset & ( elementSize - 1u ) ) != 0u
+			|| elementSize > buf->size - offset ) return qfalse;
+	cb->backend->vk.CmdBindIndexBuffer( cb->cb, buf->buffer,
+		(VkDeviceSize)offset, type == RAL_INDEX_UINT32
+			? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16 );
 	cb->boundIndexBuffer = buf;
+	return qtrue;
+}
+
+void Ral_CmdBindIndexBuffer( ralCommandBuffer_t *cb, ralBuffer_t *buf,
+		uint64_t offset, ralIndexType_t type ) {
+	(void)Ral_CmdBindIndexBufferExact( cb, buf, offset, type );
 }
 
 // Push constants: vkCmdPushConstants takes stage flags + offset + size + data.
@@ -688,36 +888,47 @@ void Ral_CmdBindVertexBuffers( ralCommandBuffer_t *cb, uint32_t firstBinding,
                                ralBuffer_t *const *buffers,
                                const uint64_t *offsets )
 {
-	VkBuffer scratchBufs[ RAL_VK_MAX_PIPELINE_SETS ];   // reuse the per-bind small-stack constant
+	(void)Ral_CmdBindVertexBuffersExact( cb, firstBinding, bindingCount,
+		buffers, offsets );
+}
+
+qboolean Ral_CmdPushConstantsLayoutExact( ralCommandBuffer_t *cb,
+		ralPipelineLayout_t *layout, uint32_t stageFlags,
+		uint32_t offset, uint32_t size, const void *data ) {
+	VkShaderStageFlags vkStages = 0;
 	uint32_t i;
-	if ( !cb || bindingCount == 0 || !buffers ) return;
-	if ( bindingCount > RAL_VK_MAX_PIPELINE_SETS ) return;
-	if ( firstBinding >= RAL_VK_MAX_TRACKED_VERTEX_BUFFERS
-	  || bindingCount > RAL_VK_MAX_TRACKED_VERTEX_BUFFERS - firstBinding ) return;
-	for ( i = 0; i < bindingCount; i++ ) {
-		if ( !ralVk_BufferGpuUseAllowed( buffers[i] ) ) return;
-		scratchBufs[i] = buffers[i]->buffer;
+	qboolean authorized = qfalse;
+	if ( !ralVk_CommandRecordsBufferBindings( cb ) || !layout || !data
+			|| layout->backend != cb->backend
+			|| layout->vkHandle == VK_NULL_HANDLE
+			|| !cb->backend->vk.CmdPushConstants
+			|| stageFlags == 0u || ( stageFlags & ~RAL_STAGE_ALL ) != 0u
+			|| size == 0u || ( offset & 3u ) != 0u || ( size & 3u ) != 0u )
+		return qfalse;
+	for ( i = 0; i < layout->externalPushRangeCount; ++i ) {
+		const uint32_t rangeOffset = layout->externalPushRanges[i].offset;
+		const uint32_t rangeSize = layout->externalPushRanges[i].size;
+		if ( ( stageFlags & ~layout->externalPushRanges[i].stageFlags ) == 0u
+				&& offset >= rangeOffset && size <= rangeSize
+				&& offset - rangeOffset <= rangeSize - size ) {
+			authorized = qtrue;
+			break;
+		}
 	}
-	cb->backend->vk.CmdBindVertexBuffers( cb->cb, firstBinding, bindingCount,
-	                                       scratchBufs, (const VkDeviceSize *)offsets );
-	for ( i = 0; i < bindingCount; ++i )
-		cb->boundVertexBuffers[firstBinding + i] = buffers[i];
+	if ( !authorized ) return qfalse;
+	if ( stageFlags & RAL_STAGE_VERTEX ) vkStages |= VK_SHADER_STAGE_VERTEX_BIT;
+	if ( stageFlags & RAL_STAGE_FRAGMENT ) vkStages |= VK_SHADER_STAGE_FRAGMENT_BIT;
+	if ( stageFlags & RAL_STAGE_COMPUTE ) vkStages |= VK_SHADER_STAGE_COMPUTE_BIT;
+	cb->backend->vk.CmdPushConstants( cb->cb, layout->vkHandle,
+		vkStages, offset, size, data );
+	return qtrue;
 }
 
 void Ral_CmdPushConstantsLayout( ralCommandBuffer_t *cb,
-                                 ralPipelineLayout_t *layout,
-                                 uint32_t stageFlags,         // VkShaderStageFlags directly — parallel-paths-era variant
-                                 uint32_t offset,
-                                 uint32_t size,
-                                 const void *data )
-{
-	if ( !cb || !layout || size == 0 || !data ) return;
-	// `stageFlags` is passed through as VkShaderStageFlags
-	// (the renderer's call sites use VK_SHADER_STAGE_*_BIT). The existing
-	// Ral_CmdPushConstants (above) uses the RAL_STAGE_* convention for typed
-	// callers. Both coexist during the parallel-paths era.
-	cb->backend->vk.CmdPushConstants( cb->cb, layout->vkHandle,
-	                                   (VkShaderStageFlags)stageFlags, offset, size, data );
+		ralPipelineLayout_t *layout, uint32_t stageFlags,
+		uint32_t offset, uint32_t size, const void *data ) {
+	(void)Ral_CmdPushConstantsLayoutExact( cb, layout, stageFlags,
+		offset, size, data );
 }
 
 void Ral_CmdPipelineBarrierFull( ralCommandBuffer_t *cb, const ralPipelineBarrierInfo_t *info )
@@ -843,7 +1054,8 @@ ralResult_t Ral_PrepareSwapchainImageForPresent( ralCommandBuffer_t *cb,
 	VkAccessFlags srcAccess;
 
 	if ( !cb || !swapchain || cb->backend != swapchain->backend
-	  || ( !cb->externalLifecycle && cb->state != RAL_VK_CMD_RECORDING )
+	  || cb->state != RAL_VK_CMD_RECORDING
+	  || cb->lifecycle.state != RAL_COMMAND_RECORDING
 	  || imageIndex >= swapchain->imageCount || !swapchain->adoptedImages
 	  || !swapchain->imageStates
 	  || swapchain->imageStates[imageIndex] != RAL_VK_SWAPCHAIN_IMAGE_ACQUIRED )
@@ -852,6 +1064,9 @@ ralResult_t Ral_PrepareSwapchainImageForPresent( ralCommandBuffer_t *cb,
 	if ( !tex || tex->backend != cb->backend || tex->image == VK_NULL_HANDLE )
 		return ralErrorInvalidArgument;
 	if ( tex->currentLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR ) {
+		tex->portableState = (ralResourceState_t){ RAL_RESOURCE_USAGE_PRESENT, 0 };
+		tex->portableOwnerQueue = RAL_QUEUE_GRAPHICS;
+		tex->portableStateKnown = qtrue;
 		swapchain->imageStates[imageIndex] = RAL_VK_SWAPCHAIN_IMAGE_PREPARED;
 		return ralSuccess;
 	}
@@ -901,7 +1116,9 @@ ralResult_t Ral_PrepareSwapchainImageForPresent( ralCommandBuffer_t *cb,
 		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
 		0, NULL, 0, NULL, 1, &ib );
 	tex->currentLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-	tex->portableStateKnown = qfalse;
+	tex->portableState = (ralResourceState_t){ RAL_RESOURCE_USAGE_PRESENT, 0 };
+	tex->portableOwnerQueue = RAL_QUEUE_GRAPHICS;
+	tex->portableStateKnown = qtrue;
 	swapchain->imageStates[imageIndex] = RAL_VK_SWAPCHAIN_IMAGE_PREPARED;
 	return ralSuccess;
 }
@@ -952,14 +1169,65 @@ void Ral_CmdBlitImage( ralCommandBuffer_t *cb, ralTexture_t *src, ralTexture_t *
 		dst->portableStateKnown = qfalse;
 }
 
+qboolean Ral_CmdClearAttachmentsExact( ralCommandBuffer_t *cb,
+		uint32_t attachmentCount, const ralClearAttachment_t *attachments,
+		uint32_t rectCount, const ralClearRect_t *rects ) {
+	VkClearAttachment nativeAttachments[RAL_MAX_COLOR_ATTACHMENTS];
+	VkClearRect nativeRects[RAL_MAX_COLOR_ATTACHMENTS];
+	uint32_t i;
+	if ( !ralVk_CommandRecordsBufferBindings( cb ) || !cb->renderingActive
+			|| !cb->backend->vk.CmdClearAttachments
+			|| attachmentCount == 0u || attachmentCount > RAL_MAX_COLOR_ATTACHMENTS
+			|| rectCount == 0u || rectCount > RAL_MAX_COLOR_ATTACHMENTS
+			|| !attachments || !rects )
+		return qfalse;
+	memset( nativeAttachments, 0, sizeof( nativeAttachments ) );
+	memset( nativeRects, 0, sizeof( nativeRects ) );
+	for ( i = 0u; i < attachmentCount; ++i ) {
+		const ralTextureAspectFlags_t aspects = attachments[i].aspectMask;
+		VkImageAspectFlags nativeAspects = 0u;
+		if ( aspects == 0u || ( aspects & ~( RAL_TEXTURE_ASPECT_COLOR
+				| RAL_TEXTURE_ASPECT_DEPTH | RAL_TEXTURE_ASPECT_STENCIL ) ) != 0u
+				|| ( ( aspects & RAL_TEXTURE_ASPECT_COLOR ) != 0u
+					&& aspects != RAL_TEXTURE_ASPECT_COLOR )
+				|| ( ( aspects & RAL_TEXTURE_ASPECT_COLOR ) != 0u
+					&& attachments[i].colorAttachment >= RAL_MAX_COLOR_ATTACHMENTS )
+				|| ( ( aspects & RAL_TEXTURE_ASPECT_COLOR ) == 0u
+					&& attachments[i].colorAttachment != 0u ) )
+			return qfalse;
+		if ( aspects & RAL_TEXTURE_ASPECT_COLOR ) nativeAspects |= VK_IMAGE_ASPECT_COLOR_BIT;
+		if ( aspects & RAL_TEXTURE_ASPECT_DEPTH ) nativeAspects |= VK_IMAGE_ASPECT_DEPTH_BIT;
+		if ( aspects & RAL_TEXTURE_ASPECT_STENCIL ) nativeAspects |= VK_IMAGE_ASPECT_STENCIL_BIT;
+		nativeAttachments[i].aspectMask = nativeAspects;
+		nativeAttachments[i].colorAttachment = attachments[i].colorAttachment;
+		memcpy( &nativeAttachments[i].clearValue, &attachments[i].clearValue,
+			sizeof( nativeAttachments[i].clearValue ) );
+	}
+	for ( i = 0u; i < rectCount; ++i ) {
+		if ( rects[i].rect.x < 0 || rects[i].rect.y < 0
+				|| rects[i].rect.width == 0u || rects[i].rect.height == 0u
+				|| rects[i].layerCount == 0u
+				|| rects[i].rect.width > (uint32_t)INT32_MAX - (uint32_t)rects[i].rect.x
+				|| rects[i].rect.height > (uint32_t)INT32_MAX - (uint32_t)rects[i].rect.y
+				|| rects[i].baseArrayLayer > UINT32_MAX - rects[i].layerCount )
+			return qfalse;
+		nativeRects[i].rect.offset.x = rects[i].rect.x;
+		nativeRects[i].rect.offset.y = rects[i].rect.y;
+		nativeRects[i].rect.extent.width = rects[i].rect.width;
+		nativeRects[i].rect.extent.height = rects[i].rect.height;
+		nativeRects[i].baseArrayLayer = rects[i].baseArrayLayer;
+		nativeRects[i].layerCount = rects[i].layerCount;
+	}
+	cb->backend->vk.CmdClearAttachments( cb->cb, attachmentCount,
+		nativeAttachments, rectCount, nativeRects );
+	return qtrue;
+}
+
 void Ral_CmdClearAttachments( ralCommandBuffer_t *cb, uint32_t attachmentCount,
-                              const ralClearAttachment_t *attachments,
-                              uint32_t rectCount, const ralClearRect_t *rects )
-{
-	if ( !cb || attachmentCount == 0 || !attachments || rectCount == 0 || !rects ) return;
-	cb->backend->vk.CmdClearAttachments( cb->cb,
-	                                      attachmentCount, (const VkClearAttachment *)attachments,
-	                                      rectCount,       (const VkClearRect *)rects );
+		const ralClearAttachment_t *attachments,
+		uint32_t rectCount, const ralClearRect_t *rects ) {
+	(void)Ral_CmdClearAttachmentsExact( cb, attachmentCount, attachments,
+		rectCount, rects );
 }
 
 void Ral_CmdResetQueryPool( ralCommandBuffer_t *cb, ralQueryPool_t *pool,
@@ -996,40 +1264,43 @@ void Ral_CmdWriteTimestamp( ralCommandBuffer_t *cb, uint32_t pipelineStageBits,
 static void ralVk_RenderTargetTransition( ralCommandBuffer_t *cb, ralTexture_t *tex, VkImageLayout newLayout ) {
 	VkImageMemoryBarrier bar;
 	ralVkLayoutTranslation_t src, dst;
-	if ( !tex || tex->currentLayout == newLayout ) return;
-	src = ralVk_TranslateSourceLayout( tex->currentLayout );
-	dst = ralVk_TranslateDestinationLayout( newLayout );
-	RAL_ZERO( bar );
-	bar.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-	bar.srcAccessMask                   = src.access;
-	bar.dstAccessMask                   = dst.access;
-	bar.oldLayout                       = tex->currentLayout;
-	bar.newLayout                       = newLayout;
-	bar.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
-	bar.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
-	bar.image                           = tex->image;
-	// An image-layout transition is WHOLE-IMAGE: for a combined depth+stencil
-	// format both aspects move together, so the barrier subresourceRange must
-	// include the stencil aspect even when the texture was adopted DEPTH-only
-	// (e.g. the cascaded shadow map, rendered depth-only into a D24S8 image)
-	// — without it: VUID-VkImageMemoryBarrier-image-03320, and the never-
-	// transitioned stencil plane trips VUID-vkCmdDraw-None-09600 at draw. This is
-	// distinct from the ATTACHMENT aspect (which stays depth-only — the stencil
-	// auto-bind in Ral_BeginRendering still keys on tex->aspect, so no stencil
-	// attachment is bound). Purely additive: depth-only (D32) + color textures
-	// keep tex->aspect unchanged.
-	bar.subresourceRange.aspectMask     = tex->aspect;
-	if ( tex->vkFormat == VK_FORMAT_D24_UNORM_S8_UINT
-	  || tex->vkFormat == VK_FORMAT_D32_SFLOAT_S8_UINT
-	  || tex->vkFormat == VK_FORMAT_D16_UNORM_S8_UINT )
-		bar.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
-	bar.subresourceRange.baseMipLevel   = 0;
-	bar.subresourceRange.levelCount     = tex->mipLevels;
-	bar.subresourceRange.baseArrayLayer = 0;
-	bar.subresourceRange.layerCount     = tex->arrayLayers;
-	cb->backend->vk.CmdPipelineBarrier( cb->cb, src.stage, dst.stage, 0, 0, NULL, 0, NULL, 1, &bar );
-	tex->currentLayout = newLayout;
-	tex->portableStateKnown = qfalse;
+	if ( !tex ) return;
+	if ( tex->currentLayout != newLayout ) {
+		src = ralVk_TranslateSourceLayout( tex->currentLayout );
+		dst = ralVk_TranslateDestinationLayout( newLayout );
+		RAL_ZERO( bar );
+		bar.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		bar.srcAccessMask                   = src.access;
+		bar.dstAccessMask                   = dst.access;
+		bar.oldLayout                       = tex->currentLayout;
+		bar.newLayout                       = newLayout;
+		bar.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+		bar.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+		bar.image                           = tex->image;
+		// An image-layout transition is WHOLE-IMAGE: for a combined depth+stencil
+		// format both aspects move together, so the barrier subresourceRange must
+		// include the stencil aspect even when the texture was adopted DEPTH-only
+		// (e.g. the cascaded shadow map, rendered depth-only into a D24S8 image)
+		// — without it: VUID-VkImageMemoryBarrier-image-03320, and the never-
+		// transitioned stencil plane trips VUID-vkCmdDraw-None-09600 at draw. This is
+		// distinct from the ATTACHMENT aspect (which stays depth-only — the stencil
+		// auto-bind in Ral_BeginRendering still keys on tex->aspect, so no stencil
+		// attachment is bound). Purely additive: depth-only (D32) + color textures
+		// keep tex->aspect unchanged.
+		bar.subresourceRange.aspectMask     = tex->aspect;
+		if ( tex->vkFormat == VK_FORMAT_D24_UNORM_S8_UINT
+		  || tex->vkFormat == VK_FORMAT_D32_SFLOAT_S8_UINT
+		  || tex->vkFormat == VK_FORMAT_D16_UNORM_S8_UINT )
+			bar.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+		bar.subresourceRange.baseMipLevel   = 0;
+		bar.subresourceRange.levelCount     = tex->mipLevels;
+		bar.subresourceRange.baseArrayLayer = 0;
+		bar.subresourceRange.layerCount     = tex->arrayLayers;
+		cb->backend->vk.CmdPipelineBarrier( cb->cb, src.stage, dst.stage, 0, 0, NULL, 0, NULL, 1, &bar );
+		tex->currentLayout = newLayout;
+	}
+	if ( !ralVk_PublishAttachmentResourceState( cb, tex, newLayout ) )
+		tex->portableStateKnown = qfalse;
 }
 
 void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ ) {
@@ -1048,8 +1319,11 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 	}
 
 	// transitions first — every attachment needs the right layout before vkCmdBeginRendering
-	for ( i = 0; i < ri_->numColorAttachments; i++ )
+	for ( i = 0; i < ri_->numColorAttachments; i++ ) {
 		ralVk_RenderTargetTransition( cb, ri_->colorAttachments[i], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
+		if ( ri_->resolveAttachments[i] )
+			ralVk_RenderTargetTransition( cb, ri_->resolveAttachments[i], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
+	}
 	if ( ri_->depthAttachment )
 		ralVk_RenderTargetTransition( cb, ri_->depthAttachment, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL );
 

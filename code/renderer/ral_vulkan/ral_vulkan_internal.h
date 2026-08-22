@@ -77,6 +77,7 @@ typedef struct {
 	PFN_vkGetPhysicalDeviceSurfaceSupportKHR    GetPhysicalDeviceSurfaceSupportKHR;
 	PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR GetPhysicalDeviceSurfaceCapabilitiesKHR;
 	PFN_vkGetPhysicalDeviceSurfaceFormatsKHR    GetPhysicalDeviceSurfaceFormatsKHR;
+	PFN_vkGetPhysicalDeviceSurfaceFormats2KHR   GetPhysicalDeviceSurfaceFormats2KHR;
 	PFN_vkGetPhysicalDeviceSurfacePresentModesKHR GetPhysicalDeviceSurfacePresentModesKHR;
 
 	// device — core lifecycle
@@ -114,6 +115,7 @@ typedef struct {
 	PFN_vkDestroyDescriptorSetLayout            DestroyDescriptorSetLayout;
 	PFN_vkCreateDescriptorPool                  CreateDescriptorPool;
 	PFN_vkDestroyDescriptorPool                 DestroyDescriptorPool;
+	PFN_vkResetDescriptorPool                   ResetDescriptorPool;
 	PFN_vkAllocateDescriptorSets                AllocateDescriptorSets;
 	PFN_vkFreeDescriptorSets                    FreeDescriptorSets;
 	PFN_vkUpdateDescriptorSets                  UpdateDescriptorSets;
@@ -131,6 +133,7 @@ typedef struct {
 	PFN_vkCmdCopyBufferToImage                  CmdCopyBufferToImage;
 	PFN_vkCmdCopyImageToBuffer                  CmdCopyImageToBuffer;
 	PFN_vkCmdBlitImage                          CmdBlitImage;
+	PFN_vkCmdFillBuffer                         CmdFillBuffer;
 	PFN_vkCmdPipelineBarrier                    CmdPipelineBarrier;
 	PFN_vkCmdSetViewport                        CmdSetViewport;
 	PFN_vkCmdSetScissor                         CmdSetScissor;
@@ -330,6 +333,7 @@ struct ralTexture_s {
 	uint32_t            mipLevels;
 	uint32_t            arrayLayers;     // 1 for non-array (cube = 6); resolved layer count for image views
 	uint32_t            sampleCount;
+	uint64_t            resourceGeneration;
 	VkImageAspectFlags  aspect;          // COLOR or DEPTH(+STENCIL)
 	VkImageLayout       currentLayout;   // single layout tracked for the whole image (simplification)
 	qboolean            ownsImage;       // qtrue if Ral_CreateTexture owns the VkImage + VkImageView + alloc, qfalse if adopted via Ral_AdoptTexture (caller retains lifetime; Ral_DestroyTexture skips defer-destroy of the underlying image / view / memory).
@@ -367,6 +371,7 @@ struct ralSampler_s {
 };
 
 #define RAL_VK_MAX_LAYOUT_ENTRIES 16
+#define RAL_VK_MAX_DYNAMIC_OFFSETS 16u
 #define RAL_VK_MAX_TRACKED_BIND_GROUP_BUFFERS 64u
 #define RAL_VK_MAX_TRACKED_VERTEX_BUFFERS     16u
 #define RAL_VK_MAX_TRACKED_BIND_GROUPS         8u
@@ -376,7 +381,14 @@ typedef struct {
 	VkDescriptorType  vkType;
 	uint32_t          count;             // as supplied (0 = unbounded bindless array)
 	uint32_t          effectiveCount;    // resolved (caps.maxBindlessTextures for the unbounded one)
+	qboolean          dynamicOffset;
 } ralVkBindEntry_t;
+
+struct ralBindGroupArena_s {
+	ralBackend_t *backend;
+	VkDescriptorPool pool;
+	ralBindGroupArenaLifecycle_t lifecycle;
+};
 
 struct ralBindGroupLayout_s {
 	ralResourceHeader_t   header;
@@ -385,8 +397,18 @@ struct ralBindGroupLayout_s {
 	qboolean              bindless;
 	qboolean              ownsLayout;        // qtrue if Ral_CreateBindGroupLayout owns the VkDescriptorSetLayout, qfalse if adopted via Ral_AdoptBindGroupLayout (caller retains ownership; Ral_DestroyBindGroupLayout skips vkDestroyDescriptorSetLayout).
 	uint32_t              numEntries;
+	uint32_t              dynamicOffsetCount;
 	ralVkBindEntry_t      entries[RAL_VK_MAX_LAYOUT_ENTRIES];
 };
+
+typedef struct {
+	uint32_t           binding;
+	VkDescriptorType   vkType;
+	const ralBuffer_t *buffer;
+	uint64_t           baseOffset;
+	uint64_t           range;
+	qboolean           registered;
+} ralVkDynamicBufferBinding_t;
 
 struct ralBindGroup_s {
 	ralResourceHeader_t         header;
@@ -394,6 +416,8 @@ struct ralBindGroup_s {
 	VkDescriptorSet             set;             // freed via vkFreeDescriptorSets (pool has FREE_DESCRIPTOR_SET_BIT) on deferred-destroy
 	const ralBindGroupLayout_t *layout;
 	qboolean                    ownsSet;         // qtrue if Ral_CreateBindGroup owns the VkDescriptorSet, qfalse if adopted via Ral_AdoptBindGroup (caller's pool retains ownership; Ral_DestroyBindGroup skips vkFreeDescriptorSets).
+	const ralBindGroupArena_t  *arena;           // non-NULL for generation-bound arena allocations
+	ralBindGroupArenaReceipt_t  arenaReceipt;
 	// Weak references used only to enforce WebGPU's "mapped buffers are not
 	// available to GPU commands" rule at bind and draw/dispatch time. Native
 	// RAL groups publish a complete inventory. Adopted compatibility groups do
@@ -402,7 +426,17 @@ struct ralBindGroup_s {
 	qboolean                    bufferTrackingComplete;
 	uint32_t                    bufferCount;
 	const ralBuffer_t          *buffers[ RAL_VK_MAX_TRACKED_BIND_GROUP_BUFFERS ];
+	uint32_t                    dynamicOffsetCount;
+	ralVkDynamicBufferBinding_t dynamicBindings[ RAL_VK_MAX_DYNAMIC_OFFSETS ];
 };
+
+static inline qboolean ralVk_BindGroupArenaLive( const ralBindGroup_t *group ) {
+	ralBindGroupArenaReceipt_t current;
+	if ( !group ) return qfalse;
+	if ( !group->arena ) return qtrue;
+	return Ral_GetBindGroupArenaReceipt( group->arena, &current ) == ralSuccess
+		&& Ral_BindGroupArenaReceiptExact( &current, &group->arenaReceipt );
+}
 
 static inline qboolean ralVk_BindGroupBuffersGpuUseAllowed( const ralBindGroup_t *group ) {
 	uint32_t i;
@@ -415,6 +449,14 @@ static inline qboolean ralVk_BindGroupBuffersGpuUseAllowed( const ralBindGroup_t
 	}
 	return qtrue;
 }
+
+qboolean ralVk_CmdBindBindGroupDynamic( ralCommandBuffer_t *cb, uint32_t setIndex,
+ralBindGroup_t *group, const uint32_t *dynamicOffsets, uint32_t dynamicOffsetCount );
+qboolean ralVk_CmdBindBindGroupDynamicExact( ralCommandBuffer_t *cb, uint32_t setIndex,
+ralBindGroup_t *group, const uint32_t *dynamicOffsets, uint32_t dynamicOffsetCount );
+qboolean ralVk_ValidateBindGroupDynamicExact( const ralCommandBuffer_t *cb,
+const ralPipeline_t *pipeline, uint32_t setIndex, const ralBindGroup_t *group,
+const uint32_t *dynamicOffsets, uint32_t dynamicOffsetCount );
 
 struct ralFence_s {
 	ralBackend_t *backend;
@@ -445,6 +487,7 @@ struct ralQueryPool_s {
 // every shader variant for the same bind-set lineage gets its own pipeline.
 #define RAL_VK_MAX_PIPELINE_SETS   8u    // per-pipeline VkDescriptorSetLayouts (Vulkan min maxBoundDescriptorSets=4; 8 is generous)
 #define RAL_VK_LAYOUT_CACHE_MAX  256u    // distinct (set-layouts × push-constants) tuples cached in ralBackend_s.layoutCache
+#define RAL_VK_MAX_EXTERNAL_PUSH_RANGES 4u
 
 typedef struct {
 	uint32_t              numSetLayouts;
@@ -465,6 +508,9 @@ struct ralPipeline_s {
 	VkPipelineBindPoint bindPoint;          // VK_PIPELINE_BIND_POINT_GRAPHICS / _COMPUTE
 	uint32_t            pushConstantSize;   // bytes (host-side, for validation in Ral_CmdPushConstants)
 	uint32_t            pushConstantStages; // VkShaderStageFlags
+	qboolean            bindGroupLayoutsRegistered;
+	uint32_t            numSetLayouts;
+	VkDescriptorSetLayout setLayouts[ RAL_VK_MAX_PIPELINE_SETS ];
 	qboolean            hasSemanticKey;
 	ralShaderPipelineKey_t semanticKey;
 };
@@ -477,6 +523,12 @@ struct ralPipelineLayout_s {
 	ralBackend_t     *backend;
 	VkPipelineLayout  vkHandle;
 	qboolean          ownsHandle;
+	uint32_t          externalPushRangeCount;
+	struct {
+		uint32_t stageFlags; // portable RAL_STAGE_* authority
+		uint32_t offset;
+		uint32_t size;
+	} externalPushRanges[ RAL_VK_MAX_EXTERNAL_PUSH_RANGES ];
 };
 
 // ── command-buffer wrapper ──────────────────────────────────────────────
@@ -511,6 +563,7 @@ struct ralSwapchain_s {
 	ralPresentMode_t presentMode;
 	VkExtent2D       extent;
 	ralTextureUsage_t usage;
+	uint32_t         requestedImageCount;
 	uint32_t         imageCount;
 	VkImage         *images;
 	VkImageView     *imageViews;
@@ -549,7 +602,6 @@ struct ralCommandBuffer_s {
 	// (the renderer's existing pool owns lifetime). Wrappers created by
 	// Ral_AcquireCommandBuffer have ownsBuffer == qtrue (legacy RAL path).
 	qboolean            ownsBuffer;
-	qboolean            externalLifecycle; // renderer-only legacy begin/end/reset bridge
 };
 
 static inline qboolean ralVk_CommandBoundBuffersGpuUseAllowed( const ralCommandBuffer_t *cb ) {
@@ -626,6 +678,11 @@ typedef struct {
 	uint64_t           destroyedAtFrame;
 } ralVkPendingDestroy_t;
 
+typedef struct ralVkLegacyShaderModuleNode_s {
+	VkShaderModule module;
+	struct ralVkLegacyShaderModuleNode_s *next;
+} ralVkLegacyShaderModuleNode_t;
+
 // ── concrete backend object ─────────────────────────────────────────────
 struct ralBackend_s {
 	ralBackendType_t  type;            // always RAL_BACKEND_VULKAN for this implementation
@@ -689,6 +746,7 @@ struct ralBackend_s {
 	qboolean          haveWideLines;         // wideLines core feature enabled → pipeline lineWidth != 1.0 legal (read into caps.wideLines by ralVk_FillCaps)
 	qboolean          haveVertexFragmentStores; // vertexPipelineStoresAndAtomics + fragmentStoresAndAtomics both enabled → shader image/SSBO stores legal (read into caps.vertexFragmentStores by ralVk_FillCaps)
 	qboolean          haveIndependentBlend; // independentBlend core feature enabled; imported mode stays false without caller proof
+	ralVkLegacyShaderModuleNode_t *legacyShaderModules;
 
 	ralCaps_t         caps;
 
@@ -702,6 +760,7 @@ struct ralBackend_s {
 	// ── per-frame lifecycle + deferred destroy ──
 	uint64_t          currentFrame;          // advanced by Ral_BeginFrame
 	uint64_t          nextSwapchainGeneration; // monotonically assigned to each fully materialized swapchain
+	uint64_t          nextTextureGeneration; // monotonically assigned imported texture wrappers
 	uint64_t          nextAllocationGeneration; // monotonic owned allocation receipts
 	uint64_t          nextMemoryBlockGeneration;
 	uint64_t          nextTransferGeneration; // monotonic staging upload/readback receipts
@@ -800,6 +859,7 @@ void     ralVk_RunResourceTest      ( ralBackend_t *b );
 VkImageUsageFlags ralVk_TextureUsage( ralTextureUsage_t u );
 uint32_t ralVk_FormatBPP( ralFormat_t f );
 VkFormatFeatureFlags ralVk_TextureUsageFormatFeatures( ralTextureUsage_t u );
+VkFormatFeatureFlags ralVk_TextureFormatFeatures( ralTextureFormatFeatures_t features );
 VkColorComponentFlags ralVk_ColorWriteMask( const ralColorBlendAttachment_t *blend );
 qboolean ralVk_ColorBlendStatesSupported( const ralGraphicsPipelineCreateInfo_t *ci,
 	                                       qboolean independentBlend );
@@ -828,6 +888,7 @@ void     ralVk_DeferDestroy       ( ralBackend_t *b, ralResourceKind_t kind, uin
 void     ralVk_DrainPendingDestroy( ralBackend_t *b, uint64_t drainBeforeFrame );   // ~0ull → drain everything
 qboolean ralVk_HasExtension       ( const VkExtensionProperties *exts, uint32_t count, const char *name );
 void     ralVk_SetObjectName      ( ralBackend_t *b, uint64_t handle, VkObjectType type, const char *name );
+void     ralVk_DestroyLegacyShaderModules( ralBackend_t *b );
 
 // ── interop bridge (renderer migration) ─────────────────────────────────
 // Renderervk needs raw VkImage / VkImageView / VkDevice handles for the

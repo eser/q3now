@@ -210,10 +210,12 @@ endif()
 string(FIND "${VK}" "void vk_destroy_samplers( void )" sampler_destroy_begin)
 string(SUBSTRING "${VK}" ${sampler_destroy_begin} 700 SAMPLER_DESTROY)
 string(FIND "${SAMPLER_DESTROY}" "vk_ral_bindless_sampler_pool_invalidate();" pool_invalidate_pos)
-string(FIND "${SAMPLER_DESTROY}" "qvkDestroySampler" raw_sampler_destroy_pos)
-if(pool_invalidate_pos EQUAL -1 OR raw_sampler_destroy_pos EQUAL -1
-		OR NOT pool_invalidate_pos LESS raw_sampler_destroy_pos)
-	message(FATAL_ERROR "sampler ledger must invalidate before raw sampler destruction")
+string(FIND "${SAMPLER_DESTROY}" "Ral_DestroySampler( vk.samplers.ral_handle[i] );" owner_destroy_pos)
+string(FIND "${SAMPLER_DESTROY}" "vk.samplers.ral_handle[i] = NULL;" owner_clear_pos)
+if(pool_invalidate_pos EQUAL -1 OR owner_destroy_pos EQUAL -1 OR owner_clear_pos EQUAL -1
+		OR NOT pool_invalidate_pos LESS owner_destroy_pos
+		OR NOT owner_destroy_pos LESS owner_clear_pos)
+	message(FATAL_ERROR "sampler ledger must invalidate before RAL-owner destruction and publication clear")
 endif()
 require_text("${TEXTURES}"
 	"VK_BindlessPublicationInvalidateSet(\n\t\t\t\t&s_bindless_publication, s_ral_bindless_set );\n\t\tRal_DestroyBindGroup( s_ral_bindless_set )"

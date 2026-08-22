@@ -31,6 +31,28 @@ int main( void ) {
 	CHECK( coreReceipt.capabilityProfile.backendType == RAL_BACKEND_METAL );
 	CHECK( coreReceipt.capabilityProfile.entries[RAL_CAP_INLINE_DATA].outcome
 		== RAL_CAP_OUTCOME_EMULATED );
+	{
+		const ralTextureFormatFeatures_t hdrFeatures =
+			RAL_TEXTURE_FORMAT_FEATURE_SAMPLED
+			| RAL_TEXTURE_FORMAT_FEATURE_FILTER_LINEAR
+			| RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT
+			| RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND
+			| RAL_TEXTURE_FORMAT_FEATURE_TRANSFER_SRC
+			| RAL_TEXTURE_FORMAT_FEATURE_TRANSFER_DST;
+		CHECK( RalMetal_TextureFormatSupportsFeatures( core,
+			RAL_FORMAT_R16G16B16A16_SFLOAT, hdrFeatures ) );
+		CHECK( !RalMetal_TextureFormatSupportsFeatures( core,
+			RAL_FORMAT_R16G16B16A16_SFLOAT, 0u ) );
+		CHECK( !RalMetal_TextureFormatSupportsFeatures( core,
+			RAL_FORMAT_R16G16B16A16_SFLOAT, 1u << 31 ) );
+		CHECK( !RalMetal_TextureFormatSupportsFeatures( core,
+			RAL_FORMAT_R16G16B16A16_SFLOAT,
+			hdrFeatures | RAL_TEXTURE_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT ) );
+		CHECK( !RalMetal_TextureFormatSupportsFeatures( core,
+			RAL_FORMAT_UNDEFINED, RAL_TEXTURE_FORMAT_FEATURE_SAMPLED ) );
+		CHECK( !RalMetal_TextureFormatSupportsFeatures( NULL,
+			RAL_FORMAT_R16G16B16A16_SFLOAT, hdrFeatures ) );
+	}
 	exactCore = coreReceipt;
 	CHECK( RalMetal_CoreReceiptExact( &coreReceipt, &exactCore ) );
 	exactCore.generation++;
@@ -96,6 +118,9 @@ int main( void ) {
 	CHECK( loss.preserveLiveParent == qtrue && loss.retryAllowed == qfalse );
 	exactLoss = loss;
 	CHECK( Ral_MemoryFailureReceiptExact( &loss, &exactLoss ) );
+	CHECK( !RalMetal_TextureFormatSupportsFeatures( core,
+		RAL_FORMAT_R16G16B16A16_SFLOAT,
+		RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT ) );
 	exactLoss.failureGeneration++;
 	CHECK( !Ral_MemoryFailureReceiptExact( &loss, &exactLoss ) );
 	exactLoss = loss; exactLoss.action = RAL_MEMORY_RECOVERY_DEFER;

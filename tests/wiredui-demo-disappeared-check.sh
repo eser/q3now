@@ -303,7 +303,7 @@ PYEOF
 python3 "$WATCHER" --log "$HOME_DIR/qconsole.jsonl" --file "$HOME_DIR/base/demos/stale.loose.dm_74" --events "$EVENTS" --marker Q0_DEMO_DISAPPEAR_ARMED & WPID=$!
 for _ in $(seq 1 100); do [ -s "$EVENTS" ] && break; sleep .02; done
 case "$(uname -s)" in Darwin) PLATFORM_ARGS=(-ApplePersistenceIgnoreState YES);; *) PLATFORM_ARGS=();; esac
-python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 10 --cwd "$RUN" --stdout "$ROOT/wired.stdout" -- "$WIRED" "${PLATFORM_ARGS[@]}" +set fs_homepath "$HOME_DIR" +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec wiredui-demo-disappeared.cfg || exit 1
+python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 10 --cwd "$RUN" --stdout "$ROOT/wired.stdout" -- "$WIRED" "${PLATFORM_ARGS[@]}" +set fs_homepath "$HOME_DIR" +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec wiredui-demo-disappeared.cfg || exit 1
 wait "$WPID" || { echo "FAIL watcher"; exit 1; }; WPID=""
 [ ! -e "$HOME_DIR/base/demos/stale.loose.dm_74" ] || { echo "FAIL loose demo remains"; exit 1; }
 analyze_contract "$HOME_DIR/qconsole.jsonl" "$EVENTS"

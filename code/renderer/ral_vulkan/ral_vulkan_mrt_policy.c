@@ -75,22 +75,58 @@ VkFormatFeatureFlags ralVk_TextureUsageFormatFeatures( ralTextureUsage_t u ) {
 	return v;
 }
 
+VkFormatFeatureFlags ralVk_TextureFormatFeatures( ralTextureFormatFeatures_t features ) {
+	VkFormatFeatureFlags v = 0;
+	if ( features & RAL_TEXTURE_FORMAT_FEATURE_SAMPLED )
+		v |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+	if ( features & RAL_TEXTURE_FORMAT_FEATURE_FILTER_LINEAR )
+		v |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+	if ( features & RAL_TEXTURE_FORMAT_FEATURE_STORAGE )
+		v |= VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
+	if ( features & RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT )
+		v |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+	if ( features & RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND )
+		v |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT;
+	if ( features & RAL_TEXTURE_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT )
+		v |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	if ( features & RAL_TEXTURE_FORMAT_FEATURE_TRANSFER_SRC )
+		v |= VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+	if ( features & RAL_TEXTURE_FORMAT_FEATURE_TRANSFER_DST )
+		v |= VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+	return v;
+}
+
+qboolean Ral_TextureFormatSupportsFeatures( ralBackend_t *b, ralFormat_t format,
+	                                          ralTextureFormatFeatures_t features ) {
+	VkFormatProperties props;
+	VkFormat vkFormat;
+	VkFormatFeatureFlags required;
+
+	if ( !b || !b->vk.GetPhysicalDeviceFormatProperties || b->physicalDevice == VK_NULL_HANDLE ) return qfalse;
+	if ( features == 0u || ( features & ~RAL_TEXTURE_FORMAT_FEATURE_ALL ) != 0u ) return qfalse;
+	vkFormat = ralVk_TranslateFormat( format );
+	if ( vkFormat == VK_FORMAT_UNDEFINED ) return qfalse;
+	required = ralVk_TextureFormatFeatures( features );
+	memset( &props, 0, sizeof( props ) );
+	b->vk.GetPhysicalDeviceFormatProperties( b->physicalDevice, vkFormat, &props );
+	return ( props.optimalTilingFeatures & required ) == required ? qtrue : qfalse;
+}
+
 qboolean Ral_TextureFormatSupports( ralBackend_t *b, ralFormat_t format,
 	                                  ralTextureUsage_t usage ) {
 	const uint32_t knownUsage = RAL_TEXTURE_USAGE_SAMPLED | RAL_TEXTURE_USAGE_STORAGE
 	                          | RAL_TEXTURE_USAGE_COLOR_ATTACHMENT
 	                          | RAL_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT
 	                          | RAL_TEXTURE_USAGE_TRANSFER_SRC | RAL_TEXTURE_USAGE_TRANSFER_DST;
-	VkFormatProperties props;
-	VkFormat vkFormat;
-	VkFormatFeatureFlags required;
+	ralTextureFormatFeatures_t required = RAL_TEXTURE_FORMAT_FEATURE_SAMPLED
+		| RAL_TEXTURE_FORMAT_FEATURE_TRANSFER_SRC | RAL_TEXTURE_FORMAT_FEATURE_TRANSFER_DST;
 
-	if ( !b || !b->vk.GetPhysicalDeviceFormatProperties || b->physicalDevice == VK_NULL_HANDLE ) return qfalse;
 	if ( ( (uint32_t)usage & ~knownUsage ) != 0u ) return qfalse;
-	vkFormat = ralVk_TranslateFormat( format );
-	if ( vkFormat == VK_FORMAT_UNDEFINED ) return qfalse;
-	required = ralVk_TextureUsageFormatFeatures( usage );
-	memset( &props, 0, sizeof( props ) );
-	b->vk.GetPhysicalDeviceFormatProperties( b->physicalDevice, vkFormat, &props );
-	return ( props.optimalTilingFeatures & required ) == required ? qtrue : qfalse;
+	if ( usage & RAL_TEXTURE_USAGE_STORAGE )
+		required |= RAL_TEXTURE_FORMAT_FEATURE_STORAGE;
+	if ( usage & RAL_TEXTURE_USAGE_COLOR_ATTACHMENT )
+		required |= RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT;
+	if ( usage & RAL_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT )
+		required |= RAL_TEXTURE_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT;
+	return Ral_TextureFormatSupportsFeatures( b, format, required );
 }

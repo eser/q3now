@@ -209,7 +209,7 @@ CFG="$HOME_DIR/base/ping-owner-capacity.cfg"
  echo 'waitms 200';echo 'wui_menu_nav back';echo 'waitms 500';echo 'wui_menu_nav focus serverlist';echo 'wui_menu_nav down';echo 'wait 10';echo 'wui_menu_nav back';echo 'wait 10';echo 'quit'
 } >"$CFG"
 case "$(uname -s)" in Darwin) NATIVE="$HOME_DIR";ARGS=(-ApplePersistenceIgnoreState YES);;*) NATIVE="$HOME_DIR";ARGS=();;esac
-python3 "$TIMEOUT_RUNNER" --timeout 45 --kill-after 10 --cwd "$WD" --stdout "$ROOT/stdout" -- "$WIRED" "${ARGS[@]}" +set fs_homepath "$NATIVE" +set com_automated 1 +set com_noHardReboot 1 +set net_enabled 1 +set net_ip 127.0.0.1 +set net_port 0 +set sv_master1 "127.0.0.1:$MASTER_PORT" +set s_initsound 0 +set r_fullscreen 0 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec ping-owner-capacity.cfg
+python3 "$TIMEOUT_RUNNER" --timeout 45 --kill-after 10 --cwd "$WD" --stdout "$ROOT/stdout" -- "$WIRED" "${ARGS[@]}" +set fs_homepath "$NATIVE" +set com_automated 1 +set com_noHardReboot 1 +set net_enabled 1 +set net_ip 127.0.0.1 +set net_port 0 +set sv_master1 "127.0.0.1:$MASTER_PORT" +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced +exec ping-owner-capacity.cfg
 rc=$?;[ "$rc" -eq 0 ]&&[ -s "$HOME_DIR/qconsole.jsonl" ]||{ echo "FAIL product rc=$rc";exit 1;}
 kill -TERM "$PID" 2>/dev/null||true;wait "$PID"||{ echo 'FAIL fixture exit';exit 1;};PID=""
 analyze "$HOME_DIR/qconsole.jsonl" "$EVENTS"

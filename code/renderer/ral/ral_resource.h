@@ -8,6 +8,7 @@
 #define WIRED_RAL_RESOURCE_H
 
 #include "ral_types.h"
+#include "ral_bind_group_arena.h"
 #include "ral_buffer_map.h"
 #include "ral_transfer.h"
 
@@ -75,6 +76,39 @@ ralResult_t Ral_BufferMapCancel( ralBuffer_t *buf,
 ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buf, uint64_t offset,
                                    const void *data, uint64_t size );
 
+// Generation-bound buffer upload transaction. The caller owns fence and
+// readySemaphore and destroys them after completion/graphics acquire. A
+// transfer-queue ticket must pass through Ral_BufferAcquireBatchToGraphics
+// before the buffer is consumed on graphics.
+#define RAL_BUFFER_UPLOAD_MAX_BATCH 4096u
+typedef struct {
+	ralFence_t     *fence;
+	ralSemaphore_t *readySemaphore;
+	ralBuffer_t    *buffer;
+	uint64_t        offset;
+	uint64_t        size;
+	qboolean        synchronous;
+	qboolean        graphicsAcquireRequired;
+	qboolean        graphicsAcquired;
+	ralTransferReceipt_t transfer;
+} ralBufferUploadTicket_t;
+
+ralBufferUploadTicket_t Ral_BufferUploadBegin( ralBuffer_t *buffer,
+	uint64_t offset, const void *data, uint64_t size );
+qboolean Ral_BufferUploadTicketComplete( ralBufferUploadTicket_t *ticket );
+qboolean Ral_BufferUploadTicketGetReceipt(
+	const ralBufferUploadTicket_t *ticket, ralBufferUploadReceipt_t *out );
+qboolean Ral_BufferAcquireBatchToGraphics( ralBackend_t *backend,
+	ralBufferUploadTicket_t *tickets, uint32_t count );
+
+// Small, immediate CPU-to-buffer write. The destination must be host-visible
+// and carry TRANSFER_DST in addition to its consumer usage. Vulkan lowers this
+// to a bounded typed host write; a WebGPU backend lowers the same semantic
+// operation to queue.writeBuffer without exposing mapped GPU memory. The
+// completed receipt is allocation-generation/range/graphics-visibility bound.
+qboolean Ral_BufferWriteImmediate( ralBuffer_t *buffer, uint64_t offset,
+	const void *data, uint64_t size, ralBufferUploadReceipt_t *outReceipt );
+
 // ════════════════════════════════════════════════════════════════════════
 // Textures (§3.3) — same shape as buffers + format / extent / mips / views.
 // ════════════════════════════════════════════════════════════════════════
@@ -95,6 +129,30 @@ typedef enum {
 	RAL_TEXTURE_USAGE_TRANSFER_SRC             = 1 << 4,
 	RAL_TEXTURE_USAGE_TRANSFER_DST             = 1 << 5
 } ralTextureUsage_t;
+
+// Portable per-format capabilities. These describe what one concrete texture
+// format can do; ralTextureUsage_t instead describes what one allocation will
+// do. Keeping them separate preserves distinctions shared by Vulkan, Metal and
+// WebGPU (sampled vs filterable, renderable vs blendable).
+typedef enum {
+	RAL_TEXTURE_FORMAT_FEATURE_SAMPLED                  = 1u << 0,
+	RAL_TEXTURE_FORMAT_FEATURE_FILTER_LINEAR            = 1u << 1,
+	RAL_TEXTURE_FORMAT_FEATURE_STORAGE                  = 1u << 2,
+	RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT         = 1u << 3,
+	RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND   = 1u << 4,
+	RAL_TEXTURE_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT = 1u << 5,
+	RAL_TEXTURE_FORMAT_FEATURE_TRANSFER_SRC             = 1u << 6,
+	RAL_TEXTURE_FORMAT_FEATURE_TRANSFER_DST             = 1u << 7
+} ralTextureFormatFeatureBit_t;
+
+typedef uint32_t ralTextureFormatFeatures_t;
+
+#define RAL_TEXTURE_FORMAT_FEATURE_ALL ((ralTextureFormatFeatures_t)( \
+	RAL_TEXTURE_FORMAT_FEATURE_SAMPLED | RAL_TEXTURE_FORMAT_FEATURE_FILTER_LINEAR | \
+	RAL_TEXTURE_FORMAT_FEATURE_STORAGE | RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT | \
+	RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND | \
+	RAL_TEXTURE_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT | \
+	RAL_TEXTURE_FORMAT_FEATURE_TRANSFER_SRC | RAL_TEXTURE_FORMAT_FEATURE_TRANSFER_DST ))
 
 typedef struct {
 	ralTextureType_t  type;
@@ -123,10 +181,41 @@ typedef struct {
 	qboolean          concurrentGraphicsTransfer;
 } ralTextureCreateInfo_t;
 
+#define RAL_TEXTURE_RESOURCE_RECEIPT_SCHEMA_VERSION 1u
+
+// Backend-neutral identity for one materialized texture wrapper. Owned
+// textures bind the resource generation to their allocation generation;
+// imported/swapchain textures receive a monotonically assigned backend
+// generation when the wrapper is published. This lets portable transfers
+// reject a stale imported image without inventing a fake allocation receipt.
+typedef struct {
+	uint32_t          schemaVersion;
+	ralBackendType_t  backendType;
+	uintptr_t         textureIdentity;
+	uint64_t          resourceGeneration;
+	ralTextureType_t  type;
+	ralFormat_t       format;
+	ralTextureUsage_t usage;
+	uint32_t          width;
+	uint32_t          height;
+	uint32_t          mipLevels;
+	uint32_t          arrayLayers;
+	qboolean          imported;
+	qboolean          ready;
+} ralTextureResourceReceipt_t;
+
 typedef struct {
 	const ralTexture_t *texture;
 	ralTextureType_t    viewType;
 	ralFormat_t         format;           // RAL_FORMAT_UNDEFINED → inherit texture format
+	// WebGPU-compatible view-plane selection. ALL inherits the texture's full
+	// resource aspects; depth/stencil-only views select one plane of a combined
+	// depth-stencil resource without weakening whole-resource transition authority.
+	enum {
+		RAL_TEXTURE_VIEW_ASPECT_ALL = 0,
+		RAL_TEXTURE_VIEW_ASPECT_DEPTH_ONLY,
+		RAL_TEXTURE_VIEW_ASPECT_STENCIL_ONLY
+	} aspect;
 	uint32_t            baseMipLevel;
 	uint32_t            mipLevelCount;     // 0 → all remaining
 	uint32_t            baseArrayLayer;
@@ -160,8 +249,18 @@ ralTexture_t     *Ral_CreateTexture     ( ralBackend_t *b, const ralTextureCreat
 // never more optimistic than Ral_CreateTexture's VkImageCreateInfo.
 qboolean          Ral_TextureFormatSupports( ralBackend_t *b, ralFormat_t format,
 	                                          ralTextureUsage_t usage );
+// Exact native-format feature query. A zero mask, unknown bit or undefined
+// format fails closed; every requested bit must be supported.
+qboolean          Ral_TextureFormatSupportsFeatures( ralBackend_t *b,
+	                                                  ralFormat_t format,
+	                                                  ralTextureFormatFeatures_t features );
 void              Ral_DestroyTexture    ( ralTexture_t *tex );
 uint32_t          Ral_GetTextureMipLevelCount( const ralTexture_t *tex );
+qboolean          Ral_TextureGetResourceReceipt( const ralTexture_t *tex,
+	                                               ralTextureResourceReceipt_t *outReceipt );
+qboolean          Ral_TextureResourceReceiptExact(
+	                                               const ralTextureResourceReceipt_t *a,
+	                                               const ralTextureResourceReceipt_t *b );
 ralTextureView_t *Ral_CreateTextureView ( ralBackend_t *b, const ralTextureViewCreateInfo_t *ci );
 void              Ral_DestroyTextureView( ralTextureView_t *view );
 ralFence_t       *Ral_TextureUploadAsync( ralTexture_t *tex, const ralTextureUploadDesc_t *region );
@@ -214,6 +313,12 @@ typedef enum {
 	RAL_ADDRESS_CLAMP_TO_BORDER
 } ralAddressMode_t;
 
+typedef enum {
+	RAL_BORDER_TRANSPARENT_BLACK,
+	RAL_BORDER_OPAQUE_BLACK,
+	RAL_BORDER_OPAQUE_WHITE
+} ralBorderColor_t;
+
 typedef struct {
 	ralFilter_t      minFilter;
 	ralFilter_t      magFilter;
@@ -223,9 +328,11 @@ typedef struct {
 	qboolean         compareEnable;   // shadow sampler
 	ralCompareOp_t   compareOp;
 	float            minLod, maxLod;
+	ralBorderColor_t borderColor;
 	const char      *debugName;
 } ralSamplerCreateInfo_t;
 
+qboolean      Ral_SamplerCreateInfoValid( const ralSamplerCreateInfo_t *ci );
 ralSampler_t *Ral_CreateSampler ( ralBackend_t *b, const ralSamplerCreateInfo_t *ci );
 void          Ral_DestroySampler( ralSampler_t *s );
 
@@ -241,6 +348,34 @@ typedef enum {
 	RAL_BIND_TEXTURE_ARRAY,     // bindless sampled-texture array (count == 0 → unbounded)
 	RAL_BIND_COMBINED_TEXTURE_SAMPLER
 } ralBindType_t;
+
+#define RAL_MAX_BIND_GROUP_ARENA_ENTRIES 16u
+
+typedef struct {
+	ralBindType_t type;
+	uint32_t count;
+	qboolean dynamicOffset;
+} ralBindGroupArenaEntry_t;
+
+typedef struct {
+	const ralBindGroupArenaEntry_t *entries;
+	uint32_t numEntries;
+	uint32_t maxGroups;
+	const char *debugName;
+} ralBindGroupArenaCreateInfo_t;
+
+ralBindGroupArena_t *Ral_CreateBindGroupArena(
+	ralBackend_t *backend,
+	const ralBindGroupArenaCreateInfo_t *createInfo,
+	ralBindGroupArenaReceipt_t *outReceipt );
+ralResult_t Ral_GetBindGroupArenaReceipt(
+	const ralBindGroupArena_t *arena,
+	ralBindGroupArenaReceipt_t *outReceipt );
+ralResult_t Ral_ResetBindGroupArenaExact(
+	ralBindGroupArena_t *arena,
+	const ralBindGroupArenaReceipt_t *current,
+	ralBindGroupArenaReceipt_t *outNext );
+void Ral_DestroyBindGroupArena( ralBindGroupArena_t *arena );
 
 // Portable texture-view dimensionality carried by bind-layout entries.  The
 // explicit UNSPECIFIED value keeps legacy initializers source-compatible while
@@ -261,6 +396,12 @@ typedef struct {
 	uint32_t      count;        // 1 = single; >1 = fixed array; 0 = unbounded (bindless layout only)
 	uint32_t      stageFlags;   // bitmask of RAL_STAGE_*
 	ralBindTextureViewType_t textureViewType; // required for texture entries on portable backends
+	// Dynamic buffer offsets are supplied at command-bind time in ascending
+	// binding order. Portable backends expose the same contract: Vulkan lowers
+	// it to dynamic descriptors and WebGPU to setBindGroup(dynamicOffsets).
+	// Valid only for one-element UNIFORM/STORAGE buffer entries. Kept last so
+	// existing five-field positional initializers retain textureViewType ABI.
+	qboolean      dynamicOffset;
 } ralBindEntry_t;
 
 typedef struct {
@@ -302,6 +443,12 @@ typedef struct {
 	const ralBindingValue_t    *values;
 	uint32_t                    numValues;
 	const char                 *debugName;
+	// Optional generation-bound allocation arena. Both fields must be supplied
+	// together. Groups created from an arena become stale when that arena is
+	// reset; portable backends may lower reset to dropping the old bind-group
+	// cohort rather than mutating a native pool in place.
+	ralBindGroupArena_t         *arena;
+	const ralBindGroupArenaReceipt_t *arenaReceipt;
 } ralBindGroupCreateInfo_t;
 
 ralBindGroup_t *Ral_CreateBindGroup ( ralBackend_t *b, const ralBindGroupCreateInfo_t *ci );

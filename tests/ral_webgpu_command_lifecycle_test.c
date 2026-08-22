@@ -75,6 +75,14 @@ int main( void ) {
 	CHECK( QueueSubmit( &shape, &executable, &submitted ) == ralSuccess );
 	CHECK( Ral_SubmissionReceiptValid( &submitted ) );
 	CHECK( shape.command.state == RAL_COMMAND_SUBMITTED );
+	// WebGPU maps recycle to releasing the completed GPUCommandBuffer and
+	// admitting a fresh encoder generation; no reusable native encoder exists.
+	CHECK( Ral_CommandLifecycleRecycle( &shape.command,
+		&submitted.commands[0] ) == ralSuccess );
+	CHECK( shape.command.state == RAL_COMMAND_IDLE );
+	CHECK( BeginEncoder( &shape, &recording ) == ralSuccess );
+	CHECK( recording.generation == 4u );
+	CHECK( Ral_CommandLifecycleCancel( &shape.command, &recording ) == ralSuccess );
 	puts( "ral WebGPU command lifecycle contract: PASS" );
 	return 0;
 }

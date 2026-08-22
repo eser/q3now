@@ -23,6 +23,101 @@ static int			r_firstScenePoly;
 
 static int			r_numpolyverts;
 
+#ifdef USE_VULKAN
+static char s_ralEffectsSmokeMap[MAX_QPATH];
+
+static void R_InjectRalEffectsSmoke( const refdef_t *fd ) {
+	ribbonPoint_t points[3];
+	ribbonDesc_t ribbon;
+	railRibbonDesc_t rail;
+	beamDesc_t beam;
+	spriteDesc_t sprite;
+	atmosphericDesc_t atmosphere;
+	qhandle_t shader;
+	vec3_t center;
+	int i;
+
+	if ( !r_ralEffectsSmoke || !r_ralEffectsSmoke->integer || !tr.world
+	  || ( fd->rdflags & RDF_NOWORLDMODEL ) ) return;
+	if ( !Q_stricmp( s_ralEffectsSmokeMap, tr.world->baseName ) ) return;
+	if ( !vk.ribbon.available || !vk.railRibbon.available
+	  || !vk.beam.available || !vk.sprite.available
+	  || !vk.atm.available ) return;
+
+	shader = RE_RegisterPrimitiveShader( "gfx/misc/particle" );
+	if ( shader == 0 ) return;
+	VectorMA( fd->vieworg, 72.0f, fd->viewaxis[0], center );
+
+	memset( points, 0, sizeof( points ) );
+	for ( i = 0; i < 3; i++ ) {
+		VectorMA( center, (float)( i - 1 ) * 18.0f, fd->viewaxis[1], points[i].pos );
+		points[i].pos[2] += ( i == 1 ) ? 12.0f : 0.0f;
+		points[i].width = 2.5f;
+		points[i].rgba[0] = 0.2f; points[i].rgba[1] = 0.8f;
+		points[i].rgba[2] = 1.0f; points[i].rgba[3] = 1.0f;
+	}
+	memset( &ribbon, 0, sizeof( ribbon ) );
+	ribbon.points = points; ribbon.numPoints = 3; ribbon.shader = shader;
+	ribbon.flags = PRIM_FLAG_CAMERA_FACING;
+	RE_AddRibbonToScene( &ribbon );
+
+	memset( &beam, 0, sizeof( beam ) );
+	VectorMA( center, -20.0f, fd->viewaxis[2], beam.start );
+	VectorMA( center,  20.0f, fd->viewaxis[2], beam.end );
+	beam.startWidth = 2.0f; beam.endWidth = 1.0f;
+	beam.startColor[0] = beam.endColor[0] = 1.0f;
+	beam.startColor[1] = beam.endColor[1] = 0.5f;
+	beam.startColor[2] = beam.endColor[2] = 0.1f;
+	beam.startColor[3] = beam.endColor[3] = 1.0f;
+	beam.shader = shader; beam.axialCopies = 1;
+	beam.startEntityNum = beam.endEntityNum = -1;
+	RE_AddBeamToScene( &beam );
+
+	memset( &rail, 0, sizeof( rail ) );
+	VectorMA( center, -14.0f, fd->viewaxis[1], rail.start );
+	VectorCopy( fd->viewaxis[0], rail.beamAxis );
+	rail.beamLen = 64.0f; rail.duration = 1.0f; rail.shader = shader;
+	rail.color[0] = 0.5f; rail.color[1] = 0.2f;
+	rail.color[2] = 1.0f; rail.color[3] = 1.0f;
+	for ( i = 0; i < RAIL_RIBBON_RING_COUNT; i++ ) {
+		float a = (float)i * ( 2.0f * (float)M_PI / RAIL_RIBBON_RING_COUNT );
+		VectorScale( fd->viewaxis[1], cosf( a ), rail.perpAxis[i] );
+		VectorMA( rail.perpAxis[i], sinf( a ), fd->viewaxis[2], rail.perpAxis[i] );
+	}
+	RE_AddRailRibbonToScene( &rail );
+
+	memset( &sprite, 0, sizeof( sprite ) );
+	VectorMA( center, 18.0f, fd->viewaxis[2], sprite.origin );
+	sprite.radius = 7.0f; sprite.shader = shader;
+	sprite.rgba[0] = 1.0f; sprite.rgba[1] = 0.25f;
+	sprite.rgba[2] = 0.1f; sprite.rgba[3] = 1.0f;
+	RE_AddSpriteToScene( &sprite );
+
+	// Arm one bounded rain volume for the RAL atmospheric command proof. The
+	// test-only cvar is off by default; production weather remains cgame-owned.
+	// The heightgrid image is already layout-valid at renderer init. Its sampled
+	// values are deliberately outside this command-path receipt's visual scope.
+	memset( &atmosphere, 0, sizeof( atmosphere ) );
+	atmosphere.type = 1;
+	atmosphere.distance = 512.0f;
+	atmosphere.bounds[0] = center[0] - 128.0f;
+	atmosphere.bounds[1] = center[1] - 128.0f;
+	atmosphere.bounds[2] = center[2] - 128.0f;
+	atmosphere.bounds[3] = center[0] + 128.0f;
+	atmosphere.bounds[4] = center[1] + 128.0f;
+	atmosphere.bounds[5] = center[2] + 128.0f;
+	atmosphere.worldMins[0] = atmosphere.bounds[0];
+	atmosphere.worldMins[1] = atmosphere.bounds[1];
+	atmosphere.worldMaxs[0] = atmosphere.bounds[3];
+	atmosphere.worldMaxs[1] = atmosphere.bounds[4];
+	atmosphere.gridSize = 256;
+	RE_SetAtmosphere( &atmosphere );
+
+	Q_strncpyz( s_ralEffectsSmokeMap, tr.world->baseName,
+		sizeof( s_ralEffectsSmokeMap ) );
+}
+#endif
+
 // Lens-source occlusion stash (lens-glow B2). The game adds sources each frame;
 // they are projected + written to the oracle registry at render time (see
 // RB_AddLensSourceFlares), NOT here (backEnd.viewParms is invalid at scene build).
@@ -727,9 +822,7 @@ static void Particle_VelocityPureCube( float cubeJitter, vec3_t out_vel ) {
 }
 
 void RE_EmitParticles( const emitterDesc_t *desc ) {
-	const particleClassGPU_t *gpuClasses;
 	const particleClassGPU_t *cls;
-	particleGPU_t *pool;
 	int            i;
 	uint32_t       pingRead;
 
@@ -742,8 +835,8 @@ void RE_EmitParticles( const emitterDesc_t *desc ) {
 	tr.pc.c_particleEmitters++;
 	tr.pc.c_particleParticles += desc->count;
 
-	gpuClasses = (const particleClassGPU_t *)vk.particle.classes_ptr;
-	cls        = &gpuClasses[ desc->cls - 1 ];
+	if ( !vk_particle_shadow_get_class( (uint32_t)desc->cls - 1u, &cls ) )
+		return;
 
 	// Emit happens during cgame sim, BEFORE vk_begin_frame's
 	// compute dispatch + flip. At emit time, pingPongRead points to
@@ -751,7 +844,6 @@ void RE_EmitParticles( const emitterDesc_t *desc ) {
 	// will read it (integrating these new particles by one frame
 	// before the first render), then write to 1-pingPongRead.
 	pingRead = vk.particle.pingPongRead;
-	pool     = (particleGPU_t *)vk.particle.pool_ptr[ pingRead ];
 
 	for ( i = 0; i < desc->count; i++ ) {
 		particleGPU_t p;
@@ -884,7 +976,8 @@ void RE_EmitParticles( const emitterDesc_t *desc ) {
 		slot                  = vk.particle.nextSlot;
 		vk.particle.nextSlot  = ( slot + 1 ) % PARTICLES_PER_POOL;
 
-		memcpy( &pool[ slot ], &p, sizeof( particleGPU_t ) );
+		if ( !vk_particle_shadow_write_emission( pingRead, slot, &p ) )
+			return;
 	}
 }
 
@@ -973,7 +1066,6 @@ static uint32_t R_ResolveDecalBlendMode( qhandle_t shaderHandle ) {
 // the ring in the main pass. With no cgame call site emitting decals the ring
 // stays empty and nothing changes on screen.
 void RE_AddDecalToScene( const decalDesc_t *desc ) {
-	decalGPU_t *pool;
 	decalGPU_t  d;
 	uint32_t    slot;
 
@@ -1033,8 +1125,10 @@ void RE_AddDecalToScene( const decalDesc_t *desc ) {
 	slot              = vk.decal.nextSlot;
 	vk.decal.nextSlot = ( slot + 1 ) % DECALS_PER_POOL;
 
-	pool = (decalGPU_t *)vk.decal.pool_ptr;
-	memcpy( &pool[ slot ], &d, sizeof( decalGPU_t ) );
+	if ( !vk_decal_shadow_write( slot, &d ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Decal RAL shadow publication failed" );
+	}
 }
 
 // Lens-source occlusion (lens-glow B2 thin channel). The game registers a light
@@ -1098,7 +1192,7 @@ qboolean RE_GetLensVisibility( int id, float *outVis ) {
 	} while ( 0 )
 
 void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass_t *cls ) {
-	particleClassGPU_t *gpuClasses;
+	particleClassGPU_t local;
 	particleClassGPU_t *dst;
 	int i;
 
@@ -1106,9 +1200,9 @@ void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass
 	if ( cls == NULL ) return;
 	if ( handle < 1 || handle > MAX_PARTICLE_CLASSES ) return;
 
-	// Host-coherent SSBO; direct write, no staging.
-	gpuClasses = (particleClassGPU_t *)vk.particle.classes_ptr;
-	dst        = &gpuClasses[ handle - 1 ];
+	// Build one complete element locally, then publish it into the RAL-owned
+	// class shadow as a single dirty slot.
+	dst = &local;
 
 	memset( dst, 0, sizeof( *dst ) );
 
@@ -1301,6 +1395,11 @@ void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass
 		}
 	}
 
+	if ( !vk_particle_shadow_write_class( (uint32_t)handle - 1u, dst ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Particle RAL class-shadow publication failed" );
+		return;
+	}
 	// Registration is monotonic in the static-init use case (handle
 	// equals numClasses + 1), but tolerate re-registration as
 	// overwrite without bumping the counter.
@@ -1432,6 +1531,10 @@ void RE_RenderScene( const refdef_t *fd, int worldIndex ) {
 	// derived info
 
 	tr.refdef.floatTime = (double)tr.refdef.time * 0.001; // -EC-: cast to double
+
+#ifdef USE_VULKAN
+	R_InjectRalEffectsSmoke( fd );
+#endif
 
 	tr.refdef.numDrawSurfs = r_firstSceneDrawSurf;
 	tr.refdef.drawSurfs = backEndData->drawSurfs;

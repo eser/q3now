@@ -105,6 +105,7 @@ static qboolean ralVk_TransientCreateUnbound( void *context,
 	tex->vkFormat = ralVk_TranslateFormat( ci->format );
 	tex->ralFormat = ci->format;
 	tex->type = ci->type;
+	tex->usage = ci->usage;
 	tex->width = ci->width;
 	tex->height = ci->height;
 	tex->depthOrArrayLayers = ci->depthOrArrayLayers;
@@ -231,6 +232,7 @@ static qboolean ralVk_TransientBindComplete( void *context, ralTexture_t *textur
 	if ( b->vk.CreateImageView( b->device, &vci, NULL, &texture->defaultView ) != VK_SUCCESS )
 		return qfalse;
 	texture->alloc = allocation;
+	texture->resourceGeneration = allocation->receipt.allocationGeneration;
 	return qtrue;
 }
 

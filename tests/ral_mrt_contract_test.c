@@ -114,6 +114,11 @@ static void TestPipelineBlendGate( void ) {
 
 static void TestFormatUsage( void ) {
 	ralBackend_t backend;
+	const ralTextureFormatFeatures_t hdrFeatures =
+		RAL_TEXTURE_FORMAT_FEATURE_SAMPLED
+		| RAL_TEXTURE_FORMAT_FEATURE_FILTER_LINEAR
+		| RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT
+		| RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND;
 	const ralTextureUsage_t requested = (ralTextureUsage_t)( RAL_TEXTURE_USAGE_COLOR_ATTACHMENT
 	                                                        | RAL_TEXTURE_USAGE_TRANSFER_SRC );
 	const VkImageUsageFlags actual = ralVk_TextureUsage( requested );
@@ -142,6 +147,71 @@ static void TestFormatUsage( void ) {
 	memset( &backend, 0, sizeof( backend ) );
 	backend.physicalDevice = (VkPhysicalDevice)(uintptr_t)1;
 	backend.vk.GetPhysicalDeviceFormatProperties = FakeGetPhysicalDeviceFormatProperties;
+	{
+		static const VkFormatFeatureFlags hdrRequiredBits[] = {
+			VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT,
+			VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT,
+			VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT,
+			VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT
+		};
+		const VkFormatFeatureFlags hdrRequired = ralVk_TextureFormatFeatures( hdrFeatures );
+		fakeFeatures = hdrRequired;
+		fakeLastFormat = VK_FORMAT_UNDEFINED;
+		CHECK( Ral_TextureFormatSupportsFeatures( &backend,
+			RAL_FORMAT_R16G16B16A16_SFLOAT, hdrFeatures ) );
+		CHECK( fakeLastFormat == VK_FORMAT_R16G16B16A16_SFLOAT );
+		for ( j = 0; j < sizeof( hdrRequiredBits ) / sizeof( hdrRequiredBits[0] ); ++j ) {
+			fakeFeatures = hdrRequired & ~hdrRequiredBits[j];
+			CHECK( !Ral_TextureFormatSupportsFeatures( &backend,
+				RAL_FORMAT_R16G16B16A16_SFLOAT, hdrFeatures ) );
+		}
+		fakeFeatures = hdrRequired;
+		CHECK( !Ral_TextureFormatSupportsFeatures( &backend,
+			RAL_FORMAT_R16G16B16A16_SFLOAT, 0u ) );
+		CHECK( !Ral_TextureFormatSupportsFeatures( &backend,
+			RAL_FORMAT_R16G16B16A16_SFLOAT, 1u << 31 ) );
+		CHECK( !Ral_TextureFormatSupportsFeatures( &backend,
+			RAL_FORMAT_UNDEFINED, hdrFeatures ) );
+		CHECK( !Ral_TextureFormatSupportsFeatures( NULL,
+			RAL_FORMAT_R16G16B16A16_SFLOAT, hdrFeatures ) );
+	}
+	{
+		static const ralFormat_t bcFormats[] = {
+			RAL_FORMAT_BC1_RGB_UNORM, RAL_FORMAT_BC1_RGB_SRGB,
+			RAL_FORMAT_BC2_UNORM, RAL_FORMAT_BC2_SRGB,
+			RAL_FORMAT_BC3_UNORM, RAL_FORMAT_BC3_SRGB,
+			RAL_FORMAT_BC4_UNORM, RAL_FORMAT_BC4_SNORM,
+			RAL_FORMAT_BC5_UNORM, RAL_FORMAT_BC5_SNORM,
+			RAL_FORMAT_BC6H_UFLOAT, RAL_FORMAT_BC6H_SFLOAT,
+			RAL_FORMAT_BC7_UNORM, RAL_FORMAT_BC7_SRGB
+		};
+		static const VkFormat nativeBcFormats[] = {
+			VK_FORMAT_BC1_RGB_UNORM_BLOCK, VK_FORMAT_BC1_RGB_SRGB_BLOCK,
+			VK_FORMAT_BC2_UNORM_BLOCK, VK_FORMAT_BC2_SRGB_BLOCK,
+			VK_FORMAT_BC3_UNORM_BLOCK, VK_FORMAT_BC3_SRGB_BLOCK,
+			VK_FORMAT_BC4_UNORM_BLOCK, VK_FORMAT_BC4_SNORM_BLOCK,
+			VK_FORMAT_BC5_UNORM_BLOCK, VK_FORMAT_BC5_SNORM_BLOCK,
+			VK_FORMAT_BC6H_UFLOAT_BLOCK, VK_FORMAT_BC6H_SFLOAT_BLOCK,
+			VK_FORMAT_BC7_UNORM_BLOCK, VK_FORMAT_BC7_SRGB_BLOCK
+		};
+		const ralTextureFormatFeatures_t bcFeatures =
+			RAL_TEXTURE_FORMAT_FEATURE_SAMPLED
+			| RAL_TEXTURE_FORMAT_FEATURE_FILTER_LINEAR;
+		const VkFormatFeatureFlags nativeBcFeatures =
+			ralVk_TextureFormatFeatures( bcFeatures );
+		CHECK( sizeof( bcFormats ) / sizeof( bcFormats[0] )
+			== sizeof( nativeBcFormats ) / sizeof( nativeBcFormats[0] ) );
+		for ( i = 0u; i < sizeof( bcFormats ) / sizeof( bcFormats[0] ); ++i ) {
+			fakeFeatures = nativeBcFeatures;
+			fakeLastFormat = VK_FORMAT_UNDEFINED;
+			CHECK( Ral_TextureFormatSupportsFeatures( &backend, bcFormats[i], bcFeatures ) );
+			CHECK( fakeLastFormat == nativeBcFormats[i] );
+			fakeFeatures = nativeBcFeatures & ~VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+			CHECK( !Ral_TextureFormatSupportsFeatures( &backend, bcFormats[i], bcFeatures ) );
+			fakeFeatures = nativeBcFeatures & ~VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+			CHECK( !Ral_TextureFormatSupportsFeatures( &backend, bcFormats[i], bcFeatures ) );
+		}
+	}
 	for ( i = 0; i < sizeof( motionFormats ) / sizeof( motionFormats[0] ); ++i ) {
 		fakeFeatures = required;
 		fakeLastFormat = VK_FORMAT_UNDEFINED;
@@ -187,16 +257,60 @@ static void TestStorageRangeCap( void ) {
 	backend.physProps.apiVersion = VK_API_VERSION_1_3;
 	backend.physProps.limits.maxStorageBufferRange = UINT32_MAX;
 	backend.physProps.limits.maxPerStageDescriptorSampledImages = 1;
+	backend.physProps.limits.maxPerStageDescriptorSamplers = 32;
+	backend.physProps.limits.maxBoundDescriptorSets = 8;
+	backend.physProps.limits.timestampComputeAndGraphics = VK_TRUE;
+	backend.physProps.limits.timestampPeriod = 2.5f;
+	backend.physProps.vendorID = 0x10DEu;
+	backend.physProps.deviceID = 0x1234u;
+	backend.physProps.deviceType = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+	backend.physProps.driverVersion = ( 555u << 22 ) | ( 42u << 14 )
+		| ( 7u << 6 ) | 3u;
+	strcpy( backend.physProps.deviceName, "Fake GPU" );
+	backend.memProps.memoryHeapCount = 2u;
+	backend.memProps.memoryHeaps[0].size = 4ull * 1024ull * 1024ull * 1024ull;
+	backend.memProps.memoryHeaps[0].flags = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
+	backend.memProps.memoryHeaps[1].size = 512ull * 1024ull * 1024ull;
+	backend.memProps.memoryHeaps[1].flags = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
+	backend.memProps.memoryTypeCount = 2u;
+	backend.memProps.memoryTypes[0].heapIndex = 0u;
+	backend.memProps.memoryTypes[0].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+	backend.memProps.memoryTypes[1].heapIndex = 1u;
+	backend.memProps.memoryTypes[1].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		| VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 	backend.vk.EnumerateDeviceExtensionProperties = FakeEnumerateDeviceExtensions;
 	backend.vk.EnumerateInstanceExtensionProperties = FakeEnumerateInstanceExtensions;
+	backend.vk.GetPhysicalDeviceFormatProperties = FakeGetPhysicalDeviceFormatProperties;
 	backend.vk.GetPhysicalDeviceFeatures2 = FakeGetPhysicalDeviceFeatures2;
 	backend.vk.GetPhysicalDeviceProperties2 = FakeGetPhysicalDeviceProperties2;
 	ralVk_FillCaps( &backend );
 	CHECK( backend.caps.maxStorageBufferRange == (uint64_t)UINT32_MAX );
+	CHECK( backend.caps.maxSampledTexturesPerShaderStage == 32u );
+	CHECK( backend.caps.maxBindGroups == 8u );
+	CHECK( backend.caps.timestampPeriodNs == 2.5f );
+	CHECK( backend.caps.adapterType == RAL_ADAPTER_TYPE_DISCRETE );
+	CHECK( backend.caps.vendorId == 0x10DEu );
+	CHECK( backend.caps.deviceId == 0x1234u );
+	CHECK( backend.caps.driverVersionMajor == 555u );
+	CHECK( backend.caps.driverVersionMinor == 42u );
+	CHECK( backend.caps.driverVersionPatch == 7u );
+	CHECK( backend.caps.driverVersionBuild == 3u );
+	CHECK( !strcmp( backend.caps.vendorName, "NVIDIA" ) );
+	CHECK( !strcmp( backend.caps.driverVersion, "555.42.7.3" ) );
+	CHECK( backend.caps.offscreenPresentation == qfalse );
+	CHECK( backend.caps.deviceLocalMemoryBytes
+		== 4ull * 1024ull * 1024ull * 1024ull );
+	CHECK( backend.caps.hostVisibleDeviceLocalMemoryBytes
+		== 512ull * 1024ull * 1024ull );
 	CHECK( offsetof( ralCaps_t, maxStorageBufferRange )
 		> offsetof( ralCaps_t, independentBlend ) );
-	CHECK( offsetof( ralCaps_t, maxStorageBufferRange )
-		+ sizeof( backend.caps.maxStorageBufferRange ) == sizeof( ralCaps_t ) );
+	CHECK( offsetof( ralCaps_t, hostVisibleDeviceLocalMemoryBytes )
+		+ sizeof( backend.caps.hostVisibleDeviceLocalMemoryBytes )
+		== sizeof( ralCaps_t ) );
+
+	backend.physProps.limits.timestampComputeAndGraphics = VK_FALSE;
+	ralVk_FillCaps( &backend );
+	CHECK( backend.caps.timestampPeriodNs == 0.0f );
 }
 
 int main( void ) {

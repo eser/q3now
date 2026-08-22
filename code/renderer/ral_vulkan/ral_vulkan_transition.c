@@ -35,6 +35,40 @@ static VkImageAspectFlags ralVk_NativeAspects( ralTextureAspectFlags_t aspects )
 	return out;
 }
 
+// `texture->aspect` describes the attachment/view plane the renderer adopted.
+// A depth-only view of a combined depth-stencil image must not cause RAL to
+// bind stencil as a rendering attachment, but Vulkan still requires whole-
+// resource layout transitions to cover both physical planes.  Derive that
+// resource authority from the actual format without weakening the view
+// contract.  This mirrors WebGPU's separation between texture aspects and
+// view aspect selection.
+static ralTextureAspectFlags_t ralVk_TextureResourceAspects(
+		const ralTexture_t *texture ) {
+	VkImageAspectFlags aspects = texture->aspect;
+	if ( texture->vkFormat == VK_FORMAT_D24_UNORM_S8_UINT
+	  || texture->vkFormat == VK_FORMAT_D32_SFLOAT_S8_UINT
+	  || texture->vkFormat == VK_FORMAT_D16_UNORM_S8_UINT )
+		aspects |= VK_IMAGE_ASPECT_STENCIL_BIT;
+	return ralVk_PortableAspects( aspects );
+}
+
+qboolean Ral_TextureGetResourceState( const ralTexture_t *texture,
+		ralResourceState_t *outState, ralQueueType_t *outOwnerQueue ) {
+	ralResourceState_t state;
+	ralQueueType_t owner;
+	if ( !texture || !outState || !outOwnerQueue || !texture->portableStateKnown
+			|| texture->queueTransfer.pending.ready
+			|| !Ral_ResourceStateValidForTexture( &texture->portableState ) )
+		return qfalse;
+	owner = texture->portableOwnerQueue;
+	if ( owner != RAL_QUEUE_GRAPHICS && owner != RAL_QUEUE_COMPUTE
+			&& owner != RAL_QUEUE_TRANSFER ) return qfalse;
+	state = texture->portableState;
+	*outState = state;
+	*outOwnerQueue = owner;
+	return qtrue;
+}
+
 ralResult_t Ral_CmdTransitionResources( ralCommandBuffer_t *cb,
 	                                     const ralResourceTransitionBatch_t *batch ) {
 	VkBufferMemoryBarrier bufferBarriers[ RAL_VK_TRANSITION_MAX_BUFFERS ];
@@ -44,7 +78,8 @@ ralResult_t Ral_CmdTransitionResources( ralCommandBuffer_t *cb,
 	uint32_t i, j;
 
 	if ( !cb || !batch || !cb->backend
-	  || ( !cb->externalLifecycle && cb->state != RAL_VK_CMD_RECORDING )
+	  || cb->state != RAL_VK_CMD_RECORDING
+	  || cb->lifecycle.state != RAL_COMMAND_RECORDING
 	  || cb->renderingActive
 	  || !cb->backend->vk.CmdPipelineBarrier
 	  || batch->bufferTransitionCount > RAL_VK_TRANSITION_MAX_BUFFERS
@@ -99,7 +134,7 @@ ralResult_t Ral_CmdTransitionResources( ralCommandBuffer_t *cb,
 		ralTextureAspectFlags_t availableAspects;
 		if ( !texture || texture->backend != cb->backend || texture->image == VK_NULL_HANDLE )
 			return ralErrorInvalidArgument;
-		availableAspects = ralVk_PortableAspects( texture->aspect );
+		availableAspects = ralVk_TextureResourceAspects( texture );
 		if ( !texture->portableStateKnown
 		  || texture->queueTransfer.pending.ready
 		  || !Ral_TextureTransitionValid( transition, texture->mipLevels,
@@ -167,7 +202,8 @@ static qboolean ralVk_BufferTransferValid( const ralCommandBuffer_t *cb,
 		const ralBufferTransition_t *transition, qboolean release ) {
 	const ralBuffer_t *buffer = transition ? transition->buffer : NULL;
 	if ( !cb || !transition || !buffer || !cb->backend
-			|| ( !cb->externalLifecycle && cb->state != RAL_VK_CMD_RECORDING )
+			|| cb->state != RAL_VK_CMD_RECORDING
+			|| cb->lifecycle.state != RAL_COMMAND_RECORDING
 			|| cb->renderingActive || !cb->backend->vk.CmdPipelineBarrier
 			|| buffer->backend != cb->backend || buffer->buffer == VK_NULL_HANDLE
 			|| !buffer->portableStateKnown || buffer->legacyMapped
@@ -188,7 +224,8 @@ static qboolean ralVk_TextureTransferValid( const ralCommandBuffer_t *cb,
 		const ralTextureTransition_t *transition, qboolean release ) {
 	const ralTexture_t *texture = transition ? transition->texture : NULL;
 	if ( !cb || !transition || !texture || !cb->backend
-			|| ( !cb->externalLifecycle && cb->state != RAL_VK_CMD_RECORDING )
+			|| cb->state != RAL_VK_CMD_RECORDING
+			|| cb->lifecycle.state != RAL_COMMAND_RECORDING
 			|| cb->renderingActive || !cb->backend->vk.CmdPipelineBarrier
 			|| texture->backend != cb->backend || texture->image == VK_NULL_HANDLE
 			|| !texture->portableStateKnown

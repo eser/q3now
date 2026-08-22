@@ -691,6 +691,12 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 	p->bindPoint           = VK_PIPELINE_BIND_POINT_GRAPHICS;
 	p->pushConstantSize    = ci->pushConstantSize;
 	p->pushConstantStages  = ralVk_PushConstantStages( ci->pushConstantStages );
+	if ( ci->externalLayout == NULL ) {
+		p->bindGroupLayoutsRegistered = qtrue;
+		p->numSetLayouts = nSetLayouts;
+		if ( nSetLayouts ) memcpy( p->setLayouts, setLayouts,
+			nSetLayouts * sizeof( setLayouts[0] ) );
+	}
 	p->hasSemanticKey      = hasSemanticKey;
 	if ( hasSemanticKey ) p->semanticKey = semanticKey;
 	ralVk_SetObjectName( b, (uint64_t)vkPipe, VK_OBJECT_TYPE_PIPELINE, ci->debugName );
@@ -796,6 +802,12 @@ ralPipeline_t *Ral_CreateComputePipeline( ralBackend_t *b, const ralComputePipel
 	p->bindPoint           = VK_PIPELINE_BIND_POINT_COMPUTE;
 	p->pushConstantSize    = ci->pushConstantSize;
 	p->pushConstantStages  = VK_SHADER_STAGE_COMPUTE_BIT;
+	if ( ci->externalLayout == NULL ) {
+		p->bindGroupLayoutsRegistered = qtrue;
+		p->numSetLayouts = ci->numBindGroupLayouts;
+		if ( ci->numBindGroupLayouts ) memcpy( p->setLayouts, setLayouts,
+			ci->numBindGroupLayouts * sizeof( setLayouts[0] ) );
+	}
 	p->hasSemanticKey      = hasSemanticKey;
 	if ( hasSemanticKey ) p->semanticKey = semanticKey;
 	ralVk_SetObjectName( b, (uint64_t)vkPipe, VK_OBJECT_TYPE_PIPELINE, ci->debugName );
@@ -815,6 +827,31 @@ void Ral_DestroyPipeline( ralPipeline_t *p ) {
 		ralVk_DeferDestroy( b, RAL_RES_PIPELINE, RAL_VK_H2U( p->pipeline ), 0, NULL );
 	ralVk_ReleasePipelineLayout( b, p->layoutCacheIndex );
 	free( p );
+}
+
+qboolean Ral_RegisterExternalPipelineBindGroupLayouts(
+		ralPipeline_t *pipeline, uint32_t count,
+		ralBindGroupLayout_t *const *bindGroupLayouts ) {
+	VkDescriptorSetLayout candidate[ RAL_VK_MAX_PIPELINE_SETS ];
+	uint32_t i;
+	if ( !pipeline || !pipeline->backend || !bindGroupLayouts
+			|| pipeline->layoutCacheIndex != 0xFFFFFFFFu
+			|| count == 0u || count > RAL_VK_MAX_PIPELINE_SETS ) return qfalse;
+	for ( i = 0; i < count; ++i ) {
+		if ( !bindGroupLayouts[i]
+				|| bindGroupLayouts[i]->backend != pipeline->backend
+				|| bindGroupLayouts[i]->layout == VK_NULL_HANDLE ) return qfalse;
+		candidate[i] = bindGroupLayouts[i]->layout;
+	}
+	if ( pipeline->bindGroupLayoutsRegistered ) {
+		return pipeline->numSetLayouts == count
+			&& memcmp( pipeline->setLayouts, candidate,
+				count * sizeof( candidate[0] ) ) == 0;
+	}
+	memcpy( pipeline->setLayouts, candidate, count * sizeof( candidate[0] ) );
+	pipeline->numSetLayouts = count;
+	pipeline->bindGroupLayoutsRegistered = qtrue;
+	return qtrue;
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1011,11 +1048,15 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 	{
 		ralBufferCreateInfo_t  bci;
 		ralTextureCreateInfo_t tci;
-		ralBuffer_t           *vb = NULL, *ib = NULL, *readback = NULL, *vbStaging = NULL, *ibStaging = NULL;
+		ralBuffer_t           *vb = NULL, *ib = NULL, *readback = NULL;
 		ralTexture_t          *color = NULL, *depth = NULL;
 		ralPipeline_t         *pipe = NULL;
 		ralFence_t            *fence = NULL;
 		ralCommandBuffer_t    *cb = NULL;
+		ralBufferUploadTicket_t uploadTickets[2];
+		ralBufferUploadReceipt_t uploadReceipts[2];
+		qboolean uploadsReady = qfalse;
+		uint32_t uploadIndex;
 		void                  *map;
 		// vertex + index buffers (device-local, uploaded via staging)
 		RAL_ZERO( bci ); bci.size = sizeof( ral_pipeline_test_verts ); bci.usage = RAL_BUFFER_VERTEX  | RAL_BUFFER_TRANSFER_DST; bci.memory = RAL_MEMORY_DEVICE_LOCAL; bci.debugName = "ral-pipeline-test-vb";
@@ -1035,14 +1076,41 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 		pipe  = ralVk_BuildPipelineTestGraphicsPipeline( b, COLOR_FMT, DEPTH_FMT, "ral-pipeline-test-draw" );
 
 		if ( vb && ib && readback && color && depth && pipe ) {
-			// async upload vertex + index data via staging (the upload path
-			// is exercised by Ral_BufferUploadAsync which returns an already-
-			// signaled fence per the async-upload semantics).
-			ralFence_t *f1 = Ral_BufferUploadAsync( vb, 0, ral_pipeline_test_verts,   sizeof( ral_pipeline_test_verts   ) );
-			ralFence_t *f2 = Ral_BufferUploadAsync( ib, 0, ral_pipeline_test_indices, sizeof( ral_pipeline_test_indices ) );
-			if ( f1 ) { Ral_WaitFence( f1, ~0ull ); Ral_DestroyFence( f1 ); }
-			if ( f2 ) { Ral_WaitFence( f2, ~0ull ); Ral_DestroyFence( f2 ); }
-
+			RAL_ZERO( uploadTickets );
+			RAL_ZERO( uploadReceipts );
+			uploadTickets[0] = Ral_BufferUploadBegin( vb, 0,
+				ral_pipeline_test_verts, sizeof( ral_pipeline_test_verts ) );
+			uploadTickets[1] = Ral_BufferUploadBegin( ib, 0,
+				ral_pipeline_test_indices, sizeof( ral_pipeline_test_indices ) );
+			uploadsReady = uploadTickets[0].fence && uploadTickets[1].fence
+				? qtrue : qfalse;
+			for ( uploadIndex = 0u; uploadIndex < 2u; uploadIndex++ ) {
+				if ( !uploadTickets[uploadIndex].fence ) continue;
+				Ral_WaitFence( uploadTickets[uploadIndex].fence,
+					RAL_TIMEOUT_INFINITE );
+				if ( !Ral_BufferUploadTicketComplete(
+						&uploadTickets[uploadIndex] ) ) uploadsReady = qfalse;
+			}
+			if ( uploadsReady && !Ral_BufferAcquireBatchToGraphics( b,
+					uploadTickets, 2u ) ) uploadsReady = qfalse;
+			for ( uploadIndex = 0u; uploadsReady && uploadIndex < 2u;
+					uploadIndex++ ) {
+				if ( !Ral_BufferUploadTicketGetReceipt(
+						&uploadTickets[uploadIndex], &uploadReceipts[uploadIndex] )
+						|| !Ral_BufferUploadReceiptExact(
+							&uploadReceipts[uploadIndex],
+							&uploadReceipts[uploadIndex] ) ) uploadsReady = qfalse;
+			}
+			for ( uploadIndex = 0u; uploadIndex < 2u; uploadIndex++ ) {
+				if ( uploadTickets[uploadIndex].fence )
+					Ral_DestroyFence( uploadTickets[uploadIndex].fence );
+				if ( uploadTickets[uploadIndex].readySemaphore )
+					Ral_DestroySemaphore( uploadTickets[uploadIndex].readySemaphore );
+			}
+			RAL_VK_LOG( uploadsReady ? SEV_INFO : SEV_WARN,
+				"  buffer upload tickets: count=2 completed=%u graphics-visible=%u\n",
+				uploadsReady ? 2u : 0u, uploadsReady ? 2u : 0u );
+			if ( uploadsReady ) {
 			cb    = Ral_AcquireCommandBuffer( b, RAL_QUEUE_GRAPHICS );
 			fence = Ral_CreateFence( b );
 			if ( cb && fence ) {
@@ -1055,7 +1123,6 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 				VkImageMemoryBarrier  toSrc;
 
 				Ral_BeginCommandBuffer( cb );
-				Ral_CmdPipelineBarrier( cb, RAL_BARRIER_TRANSFER_TO_GRAPHICS );   // ensure the vertex/index uploads are visible to vertex input
 				RAL_ZERO( vp ); vp.x = 0.0f; vp.y = 0.0f; vp.width = (float)RT_SIZE; vp.height = (float)RT_SIZE; vp.minDepth = 0.0f; vp.maxDepth = 1.0f;
 				RAL_ZERO( sc ); sc.x = 0; sc.y = 0; sc.width = RT_SIZE; sc.height = RT_SIZE;
 				Ral_CmdSetViewport( cb, &vp );
@@ -1131,9 +1198,10 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 					Ral_BufferMapUnmap( readback, &mapTicket );
 				} else RAL_VK_LOG( SEV_WARN, "  draw: readback map failed\n" );
 			} else RAL_VK_LOG( SEV_WARN, "  draw: command buffer / fence acquisition failed\n" );
+			} else RAL_VK_LOG( SEV_WARN,
+				"  draw: buffer upload ticket transaction failed\n" );
 		} else RAL_VK_LOG( SEV_WARN, "  draw: resource creation failed (vb=%p ib=%p readback=%p color=%p depth=%p pipe=%p)\n",
 		                (void*)vb, (void*)ib, (void*)readback, (void*)color, (void*)depth, (void*)pipe );
-		(void)vbStaging; (void)ibStaging;
 		if ( pipe )     Ral_DestroyPipeline( pipe );
 		if ( cb )       Ral_DestroyCommandBuffer( cb );
 		if ( fence )    Ral_DestroyFence( fence );
@@ -1262,9 +1330,8 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 		ralBindGroupLayout_t           *layout = NULL;
 		ralBindGroup_t                 *group = NULL;
 		ralPipeline_t                  *pipe = NULL;
-		ralCommandBuffer_t             *cb = NULL, *readyCb = NULL;
+		ralCommandBuffer_t             *cb = NULL;
 		ralFence_t                     *fence = NULL, *uploadFence = NULL;
-		ralSemaphore_t                 *readySemaphore = NULL;
 		ralUploadTicket_t               acquireTicket;
 		qboolean                        acquired = qfalse;
 		uint32_t                        i;
@@ -1279,13 +1346,17 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 		tci.usage = RAL_TEXTURE_USAGE_SAMPLED; tci.memory = RAL_MEMORY_DEVICE_LOCAL;
 		tci.debugName = "ral-pipeline-test-residency-texture";
 		tex = Ral_CreateTexture( b, &tci );
+		RAL_ZERO( acquireTicket );
 		if ( tex ) {
 			RAL_ZERO( upload ); upload.mipLevel = 0u; upload.data = mip0; upload.dataSize = sizeof( mip0 );
 			uploadFence = Ral_TextureUploadAsync( tex, &upload );
 			if ( uploadFence ) { Ral_WaitFence( uploadFence, ~0ull ); Ral_DestroyFence( uploadFence ); uploadFence = NULL; }
 			RAL_ZERO( upload ); upload.mipLevel = 2u; upload.data = mip2; upload.dataSize = sizeof( mip2 );
-			uploadFence = Ral_TextureUploadAsync( tex, &upload );
-			if ( uploadFence ) { Ral_WaitFence( uploadFence, ~0ull ); Ral_DestroyFence( uploadFence ); uploadFence = NULL; }
+			acquireTicket = Ral_TextureUploadBegin( tex, &upload );
+			if ( acquireTicket.fence ) {
+				Ral_WaitFence( acquireTicket.fence, ~0ull );
+				(void)Ral_TextureUploadTicketComplete( &acquireTicket );
+			}
 		}
 		if ( tex ) {
 			RAL_ZERO( vci ); vci.texture = tex; vci.viewType = RAL_TEXTURE_2D; vci.arrayLayerCount = 1u;
@@ -1322,39 +1393,15 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 		cci.bindGroupLayouts = layouts; cci.numBindGroupLayouts = 1u; cci.debugName = "ral-pipeline-test-residency-pipeline";
 		pipe = layout ? Ral_CreateComputePipeline( b, &cci ) : NULL;
 		if ( group && coarseView && pipe && sampleReadback ) {
-			// Exercise the portable transfer-to-graphics handoff with the exact
-			// mip/layer range consumed below.  The signal is produced on the
-			// graphics queue here so this remains valid on single-family devices;
-			// distinct-family ownership is separate platform coverage.
-			readySemaphore = Ral_CreateSemaphore( b, RAL_SEMAPHORE_BINARY );
-			readyCb = Ral_AcquireCommandBuffer( b, RAL_QUEUE_GRAPHICS );
-			if ( readySemaphore && readyCb ) {
-				ralCommandBuffer_t *readyCbs[1];
-				ralSemaphore_t *signals[1];
-				ralSubmitInfo_t readySubmit;
-				Ral_BeginCommandBuffer( readyCb );
-				Ral_EndCommandBuffer( readyCb );
-				readyCbs[0] = readyCb;
-				signals[0] = readySemaphore;
-				RAL_ZERO( readySubmit );
-				readySubmit.commandBuffers = readyCbs;
-				readySubmit.numCommandBuffers = 1u;
-				readySubmit.signalSemaphores = signals;
-				readySubmit.numSignalSemaphores = 1u;
-				Ral_Submit( b, RAL_QUEUE_GRAPHICS, &readySubmit );
-				RAL_ZERO( acquireTicket );
-				acquireTicket.readySemaphore = readySemaphore;
-				acquireTicket.texture = tex;
-				acquireTicket.baseMipLevel = 2u;
-				acquireTicket.mipLevelCount = 1u;
-				acquireTicket.baseArrayLayer = 0u;
-				acquireTicket.arrayLayerCount = 1u;
-				acquireTicket.graphicsAcquireRequired = qtrue;
+			// Exercise the real generation-bound upload ticket. Dedicated-transfer
+			// backends consume its binary semaphore; shared-queue backends validate
+			// the same exact range without inventing a cross-queue signal.
+			if ( acquireTicket.fence ) {
 				acquired = Ral_TextureAcquireBatchToGraphics( b, &acquireTicket, 1u );
 			}
 			RAL_VK_LOG( acquired ? SEV_INFO : SEV_WARN,
 			       "  residency acquire: baseMip=2 mipCount=1 baseLayer=0 layerCount=1 readySemaphore=%u result=%s\n",
-			       readySemaphore ? 1u : 0u, acquired ? "ok" : "failed" );
+			       acquireTicket.readySemaphore ? 1u : 0u, acquired ? "ok" : "failed" );
 			// The group starts on mip0 red; the portable sparse update must make
 			// view-local LOD0 resolve to original mip2 green before dispatch.
 			Ral_BindGroupSetTextureViewAt( group, 0u, coarseView );
@@ -1389,8 +1436,9 @@ void ralVk_RunPipelineTest( ralBackend_t *b ) {
 		                (void *)sampleReadback, (void *)layout, (void *)group, (void *)pipe );
 		if ( fence ) Ral_DestroyFence( fence );
 		if ( cb ) Ral_DestroyCommandBuffer( cb );
-		if ( readyCb ) Ral_DestroyCommandBuffer( readyCb );
-		if ( readySemaphore ) Ral_DestroySemaphore( readySemaphore );
+		if ( acquireTicket.readySemaphore )
+			Ral_DestroySemaphore( acquireTicket.readySemaphore );
+		if ( acquireTicket.fence ) Ral_DestroyFence( acquireTicket.fence );
 		if ( pipe ) Ral_DestroyPipeline( pipe );
 		if ( group ) Ral_DestroyBindGroup( group );
 		if ( layout ) Ral_DestroyBindGroupLayout( layout );

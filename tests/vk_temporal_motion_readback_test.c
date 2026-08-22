@@ -79,7 +79,7 @@ void Ral_CmdTransitionTexture( ralCommandBuffer_t *cb, ralTexture_t *tex,
 	eventOffset[eventCount++] = ( (uint64_t)src << 32 ) | (uint64_t)dst;
 	eventLayout[eventCount - 1] = layout;
 }
-void Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb, ralTexture_t *src,
+qboolean Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb, ralTexture_t *src,
 		ralBuffer_t *dst, const ralBufferTextureCopy_t *copy ) {
 	(void)cb; copies++;
 	eventKind[eventCount] = 2; eventTexture[eventCount] = src ? src->id : 0;
@@ -92,6 +92,7 @@ void Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb, ralTexture_t *src,
 		eventHeight[eventCount] = copy->imageRect.height;
 	}
 	eventCount++;
+	return copy ? qtrue : qfalse;
 }
 void Ral_CmdPipelineBarrierFull( ralCommandBuffer_t *cb,
 		const ralPipelineBarrierInfo_t *info ) {

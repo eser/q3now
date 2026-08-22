@@ -18,13 +18,15 @@ struct ralTexture_s { int id; };
 struct ralTextureView_s { int id; };
 struct ralBuffer_s { void *memory; uint64_t size; int id; };
 
-static int creates, destroys, maps, unmaps, transitions, copies, barriers, depthCopies;
+static int creates, destroys, maps, unmaps, transitions, copies, copyAttempts, barriers, depthCopies;
+static int failCopyAttempt;
 static int nextId = 100;
 static ralBuffer_t *aliasCreate;
 static void *aliasMap;
 static uint32_t eventCount, eventKind[64], eventSrc[64], eventDst[64], eventLayout[64];
 static const void *eventObject[64], *eventBuffer[64];
 static uint64_t eventOffset[64];
+static ralTextureAspectFlags_t eventAspects[64];
 static int32_t eventX[64], eventY[64];
 static uint32_t eventWidth[64], eventHeight[64];
 
@@ -73,16 +75,21 @@ void Ral_CmdTransitionTexture( ralCommandBuffer_t *cb, ralTexture_t *texture,
 	eventSrc[eventCount] = src; eventDst[eventCount] = dst;
 	eventLayout[eventCount++] = layout;
 }
-void Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb, ralTexture_t *src,
+qboolean Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb, ralTexture_t *src,
 		ralBuffer_t *dst, const ralBufferTextureCopy_t *copy ) {
 	(void)cb;
+	copyAttempts++;
+	if ( failCopyAttempt == copyAttempts ) return qfalse;
 	if ( copy && copy->imageRect.width && copy->imageRect.height ) {
 		copies++; eventKind[eventCount] = 2; eventObject[eventCount] = src;
 		eventBuffer[eventCount] = dst; eventOffset[eventCount] = copy->bufferOffset;
 		eventX[eventCount] = copy->imageRect.x; eventY[eventCount] = copy->imageRect.y;
 		eventWidth[eventCount] = copy->imageRect.width;
-		eventHeight[eventCount] = copy->imageRect.height; eventCount++;
+		eventHeight[eventCount] = copy->imageRect.height;
+		eventAspects[eventCount] = copy->aspects; eventCount++;
 	}
+	return copy && copy->imageRect.width && copy->imageRect.height
+		? qtrue : qfalse;
 }
 void Ral_CmdPipelineBarrierFull( ralCommandBuffer_t *cb,
 		const ralPipelineBarrierInfo_t *info ) {
@@ -333,6 +340,14 @@ int main( void ) {
 	CHECK( !VK_TemporalResolveReadbackRecord( &owner, &command, 0,
 		&recorded, &badProducts, DepthCopy, NULL ) );
 	CHECK( transitions == 0 && copies == 0 && depthCopies == 0 );
+	ownerBefore = owner;
+	failCopyAttempt = 3;
+	CHECK( !VK_TemporalResolveReadbackRecord( &owner, &command, 0,
+		&recorded, &products, DepthCopy, NULL ) );
+	CHECK( memcmp( &owner, &ownerBefore, sizeof( owner ) ) == 0
+		&& owner.slots[0].state == VK_TEMPORAL_RESOLVE_READBACK_READY );
+	failCopyAttempt = 0; copyAttempts = 0; transitions = 0; copies = 0;
+	barriers = 0; depthCopies = 0; eventCount = 0;
 	CHECK( VK_TemporalResolveReadbackRecord( &owner, &command, 0,
 		&recorded, &products, DepthCopy, NULL ) );
 	CHECK( depthCopies == 1 && transitions == 12 && copies == 6 && barriers == 1 );
@@ -363,6 +378,11 @@ int main( void ) {
 			owner.slots[0].ticket.validityOffset,
 			owner.slots[0].ticket.resolvedOffset
 		};
+		const ralTextureAspectFlags_t expectedAspects[6] = {
+			RAL_TEXTURE_ASPECT_COLOR, RAL_TEXTURE_ASPECT_COLOR,
+			RAL_TEXTURE_ASPECT_COLOR, RAL_TEXTURE_ASPECT_COLOR,
+			RAL_TEXTURE_ASPECT_COLOR, RAL_TEXTURE_ASPECT_COLOR
+		};
 		for ( i = 0; i < 6; ++i ) {
 			const uint32_t expectedRestoreDst[6] = {
 				RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -381,6 +401,7 @@ int main( void ) {
 				&& eventObject[9 + i] == expectedTexture[i]
 				&& eventBuffer[9 + i] == owner.slots[0].buffer
 				&& eventOffset[9 + i] == expectedOffset[i]
+				&& eventAspects[9 + i] == expectedAspects[i]
 				&& eventX[9 + i] == 0 && eventY[9 + i] == 0
 				&& eventWidth[9 + i] == 8 && eventHeight[9 + i] == 8 );
 			CHECK( eventKind[16 + i] == 1

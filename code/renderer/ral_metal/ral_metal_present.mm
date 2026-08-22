@@ -36,6 +36,30 @@ static qboolean FormatPairValid( ralFormat_t format, ralColorSpace_t colorSpace 
 			&& colorSpace == RAL_COLORSPACE_DISPLAY_P3 ) ) ? qtrue : qfalse;
 }
 
+ralResult_t Ral_SelectSurfaceFormat( ralBackend_t *backend,
+		const ralSurfaceFormatSelectionInfo_t *info,
+		ralSurfaceFormatSelection_t *outSelection ) {
+	ralSurfaceFormatSelection_t candidate;
+	uint32_t i;
+	if ( !backend || !info || !outSelection || !info->preferences
+			|| info->preferenceCount == 0u || info->backendExtensionChain
+			|| ( info->useExtendedQuery != qfalse && info->useExtendedQuery != qtrue ) )
+		return ralErrorInvalidArgument;
+	memset( &candidate, 0, sizeof( candidate ) );
+	for ( i = 0u; i < info->preferenceCount; ++i ) {
+		if ( FormatPairValid( info->preferences[i].format,
+				info->preferences[i].colorSpace ) ) {
+			candidate.selected = info->preferences[i];
+			candidate.selectedPreference = i;
+			candidate.availableFormatCount = 2u;
+			candidate.extendedQuery = info->useExtendedQuery;
+			*outSelection = candidate;
+			return ralSuccess;
+		}
+	}
+	return ralUnsupported;
+}
+
 static qboolean PresentModeValid( ralPresentMode_t mode ) {
 	return mode == RAL_PRESENT_FIFO || mode == RAL_PRESENT_IMMEDIATE ? qtrue : qfalse;
 }
@@ -47,13 +71,10 @@ static qboolean SelectPresentation( const ralSwapchainCreateInfo_t *createInfo,
 	qboolean foundFormat = qfalse, foundMode = qfalse;
 	if ( !createInfo || !outSelected || !createInfo->formatPreferences
 			|| createInfo->formatPreferenceCount == 0u
-			|| !createInfo->presentModePreferences
-			|| createInfo->presentModePreferenceCount == 0u
+			|| !createInfo->presentPreferences
+			|| createInfo->presentPreferenceCount == 0u
 			|| createInfo->desiredWidth == 0u || createInfo->desiredHeight == 0u
 			|| createInfo->desiredWidth > 16384u || createInfo->desiredHeight > 16384u
-			|| ( createInfo->desiredImageCount != 0u
-				&& createInfo->desiredImageCount != 2u
-				&& createInfo->desiredImageCount != 3u )
 			|| createInfo->requiredUsage != RAL_TEXTURE_USAGE_COLOR_ATTACHMENT
 			|| createInfo->backendExtensionChain ) return qfalse;
 	memset( &selected, 0, sizeof( selected ) );
@@ -65,16 +86,28 @@ static qboolean SelectPresentation( const ralSwapchainCreateInfo_t *createInfo,
 			foundFormat = qtrue; break;
 		}
 	}
-	for ( i = 0u; i < createInfo->presentModePreferenceCount; ++i ) {
-		if ( PresentModeValid( createInfo->presentModePreferences[i] ) ) {
-			selected.presentMode = createInfo->presentModePreferences[i];
+	for ( i = 0u; i < createInfo->presentPreferenceCount; ++i ) {
+		const ralPresentPreference_t *preference = &createInfo->presentPreferences[i];
+		if ( ( preference->desiredImageCount != 0u
+				&& preference->desiredImageCount != 2u
+				&& preference->desiredImageCount != 3u )
+			|| ( preference->unboundedImageCount != 0u
+				&& preference->unboundedImageCount != 2u
+				&& preference->unboundedImageCount != 3u ) ) return qfalse;
+	}
+	for ( i = 0u; i < createInfo->presentPreferenceCount; ++i ) {
+		const ralPresentPreference_t *preference = &createInfo->presentPreferences[i];
+		if ( PresentModeValid( preference->mode ) ) {
+			selected.presentMode = preference->mode;
+			selected.requestedImageCount = preference->desiredImageCount
+				? preference->desiredImageCount : 3u;
 			foundMode = qtrue; break;
 		}
 	}
 	if ( !foundFormat || !foundMode ) return qfalse;
 	selected.generation = generation;
 	selected.width = createInfo->desiredWidth; selected.height = createInfo->desiredHeight;
-	selected.imageCount = createInfo->desiredImageCount ? createInfo->desiredImageCount : 3u;
+	selected.imageCount = selected.requestedImageCount;
 	selected.usage = createInfo->requiredUsage;
 	*outSelected = selected;
 	return qtrue;
@@ -91,6 +124,7 @@ static qboolean LayerReceiptValid( const ralMetalPresentLayerReceipt_t *r ) {
 		&& r->selected.width != 0u && r->selected.height != 0u
 		&& FormatPairValid( r->selected.format, r->selected.colorSpace )
 		&& PresentModeValid( r->selected.presentMode )
+		&& r->selected.requestedImageCount == r->selected.imageCount
 		&& ( r->selected.imageCount == 2u || r->selected.imageCount == 3u )
 		&& r->selected.usage == RAL_TEXTURE_USAGE_COLOR_ATTACHMENT
 		&& BoolValid( r->displaySyncEnabled ) && BoolValid( r->extendedDynamicRange )

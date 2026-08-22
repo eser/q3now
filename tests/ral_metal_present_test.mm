@@ -19,8 +19,8 @@ int main( void ) {
 		RAL_FORMAT_R16G16B16A16_SFLOAT, RAL_COLORSPACE_DISPLAY_P3 };
 	ralSurfaceFormat_t unsupportedFormat = {
 		RAL_FORMAT_A2B10G10R10_UNORM, RAL_COLORSPACE_HDR10_ST2084 };
-	ralPresentMode_t fifo = RAL_PRESENT_FIFO;
-	ralPresentMode_t immediate = RAL_PRESENT_IMMEDIATE;
+	ralPresentPreference_t fifo = { RAL_PRESENT_FIFO, 3u, 3u };
+	ralPresentPreference_t immediate = { RAL_PRESENT_IMMEDIATE, 2u, 2u };
 	ralSwapchainCreateInfo_t createInfo;
 	ralMetalPresent_t *present = (ralMetalPresent_t *)(uintptr_t)0x1234u;
 	ralMetalPresentLayerReceipt_t layerReceipt, layerBefore, exactLayer;
@@ -30,12 +30,29 @@ int main( void ) {
 	ralMemoryFailureReceipt_t lossReceipt;
 	float sdrClear[4] = { 0.125f, 0.25f, 0.5f, 1.0f };
 	float hdrClear[4] = { 2.0f, 1.25f, 0.5f, 1.0f };
+	{
+		ralSurfaceFormat_t preferences[2] = { unsupportedFormat, hdrFormat };
+		ralSurfaceFormatSelectionInfo_t query;
+		ralSurfaceFormatSelection_t selected, before;
+		memset( &query, 0, sizeof( query ) );
+		query.preferences = preferences;
+		query.preferenceCount = 2u;
+		CHECK( Ral_SelectSurfaceFormat( (ralBackend_t *)(uintptr_t)1u,
+			&query, &selected ) == ralSuccess );
+		CHECK( selected.selectedPreference == 1u
+			&& selected.selected.format == RAL_FORMAT_R16G16B16A16_SFLOAT
+			&& selected.availableFormatCount == 2u );
+		memset( &selected, 0x5a, sizeof( selected ) ); before = selected;
+		query.backendExtensionChain = (const void *)(uintptr_t)1u;
+		CHECK( Ral_SelectSurfaceFormat( (ralBackend_t *)(uintptr_t)1u,
+			&query, &selected ) == ralErrorInvalidArgument );
+		CHECK( !memcmp( &selected, &before, sizeof( selected ) ) );
+	}
 	CHECK( RalMetal_CoreCreate( &coreInfo, &core, &coreReceipt ) );
 	memset( &createInfo, 0, sizeof( createInfo ) );
 	createInfo.desiredWidth = 16u; createInfo.desiredHeight = 16u;
 	createInfo.formatPreferences = &sdrFormat; createInfo.formatPreferenceCount = 1u;
-	createInfo.presentModePreferences = &fifo; createInfo.presentModePreferenceCount = 1u;
-	createInfo.desiredImageCount = 3u;
+	createInfo.presentPreferences = &fifo; createInfo.presentPreferenceCount = 1u;
 	createInfo.requiredUsage = RAL_TEXTURE_USAGE_COLOR_ATTACHMENT;
 	memset( &layerReceipt, 0x5a, sizeof( layerReceipt ) ); layerBefore = layerReceipt;
 	createInfo.desiredWidth = 0u;
@@ -46,15 +63,19 @@ int main( void ) {
 	createInfo.desiredWidth = 16u; createInfo.formatPreferences = &unsupportedFormat;
 	CHECK( !RalMetal_PresentCreate( core, &coreReceipt, &createInfo, 72u,
 		&present, &layerReceipt ) );
-	createInfo.formatPreferences = &sdrFormat; createInfo.desiredImageCount = 4u;
+	createInfo.formatPreferences = &sdrFormat; fifo.desiredImageCount = 4u;
 	CHECK( !RalMetal_PresentCreate( core, &coreReceipt, &createInfo, 72u,
 		&present, &layerReceipt ) );
-	createInfo.desiredImageCount = 3u;
-	ralPresentMode_t unsupportedMode = RAL_PRESENT_MAILBOX;
-	createInfo.presentModePreferences = &unsupportedMode;
+	fifo.desiredImageCount = 3u;
+	fifo.unboundedImageCount = 4u;
 	CHECK( !RalMetal_PresentCreate( core, &coreReceipt, &createInfo, 72u,
 		&present, &layerReceipt ) );
-	createInfo.presentModePreferences = &fifo;
+	fifo.unboundedImageCount = 3u;
+	ralPresentPreference_t unsupportedMode = { RAL_PRESENT_MAILBOX, 3u, 3u };
+	createInfo.presentPreferences = &unsupportedMode;
+	CHECK( !RalMetal_PresentCreate( core, &coreReceipt, &createInfo, 72u,
+		&present, &layerReceipt ) );
+	createInfo.presentPreferences = &fifo;
 	createInfo.requiredUsage = RAL_TEXTURE_USAGE_SAMPLED;
 	CHECK( !RalMetal_PresentCreate( core, &coreReceipt, &createInfo, 72u,
 		&present, &layerReceipt ) );
@@ -73,6 +94,7 @@ int main( void ) {
 	CHECK( !RalMetal_PresentLayerReceiptExact( &layerReceipt, &exactLayer ) ); } while (0)
 	MUTATE_LAYER( coreGeneration ); MUTATE_LAYER( presentationGeneration );
 	MUTATE_LAYER( selected.width ); MUTATE_LAYER( selected.imageCount );
+	MUTATE_LAYER( selected.requestedImageCount );
 #undef MUTATE_LAYER
 	exactLayer = layerReceipt; exactLayer.ownsLayer = qfalse;
 	CHECK( !RalMetal_PresentLayerReceiptExact( &layerReceipt, &exactLayer ) );
@@ -129,8 +151,7 @@ int main( void ) {
 
 	createInfo.desiredWidth = 32u; createInfo.desiredHeight = 16u;
 	createInfo.formatPreferences = &hdrFormat;
-	createInfo.presentModePreferences = &immediate;
-	createInfo.desiredImageCount = 2u;
+	createInfo.presentPreferences = &immediate;
 	CHECK( RalMetal_PresentReconfigure( present, &coreReceipt, &layerReceipt,
 		&createInfo, 80u, &layerReceipt ) );
 	CHECK( layerReceipt.selected.format == RAL_FORMAT_R16G16B16A16_SFLOAT

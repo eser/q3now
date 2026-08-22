@@ -32,6 +32,7 @@ HOME_DIR_NATIVE="$(cygpath -w "$HOME_DIR" 2>/dev/null || echo "$HOME_DIR")"
 BASE_DIR="$HOME_DIR/base"
 SHOT_DIR="$BASE_DIR/screenshots"
 FRAME_W=1280
+FRAME_H=720
 
 band_mean() {
 	local shot="$1" row0="$2" row1="$3"
@@ -106,7 +107,7 @@ run_capture() {
 	local tag="$1" pbr="$2"
 	rm -f "$SHOT_DIR"/ibl_${tag}_*.png 2>/dev/null
 	write_cfg "$tag" "$pbr"
-	( cd "$REPO_ROOT" && make run-game DEV=1 EXTRA_ARGS="+set fs_homepath \"$HOME_DIR_NATIVE\" +map arena7 +waitForMap +wait 60 +exec iblcap.cfg" >"$WIRED_TMP/ibl-$tag.log" 2>&1 || true )
+	( cd "$REPO_ROOT" && make run-game DEV=1 EXTRA_ARGS="+set fs_homepath \"$HOME_DIR_NATIVE\" +set r_fullscreen 0 +set r_mode -1 +set r_customwidth $FRAME_W +set r_customheight $FRAME_H +map arena7 +waitForMap +wait 60 +exec iblcap.cfg" >"$WIRED_TMP/ibl-$tag.log" 2>&1 || true )
 }
 
 echo "== capturing r_pbr 0 =="

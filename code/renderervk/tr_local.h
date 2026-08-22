@@ -627,6 +627,10 @@ typedef struct image_s {
 	// Descriptor set that contains single descriptor used to access the given image.
 	// It is updated only once during image initialization.
 	VkDescriptorSet descriptor;
+	// Non-owning RAL wrapper for `descriptor`. The renderer descriptor pool still
+	// owns the native set; this child must be released before every pool reset.
+	// Kept on image_t so command paths never need a native-set reverse lookup.
+	struct ralBindGroup_s *ralDescriptor;
 	// When r_useRALTextures=1, a parallel RAL
 	// texture is created alongside the legacy VkImage above. The legacy handle
 	// drives the renderer's descriptor binding / blits / screenshots; the RAL
@@ -1725,6 +1729,7 @@ extern	cvar_t	*r_drawWorld;			// disable/enable world rendering
 extern	cvar_t	*r_speeds;				// various levels of information display
 extern	cvar_t	*r_gpuSpeeds;			// per-pass GPU timestamp report
 extern	cvar_t	*r_profileMarkers;		// semantic RAL dynamic-rendering GPU labels
+extern	cvar_t	*r_ralEffectsSmoke;		// default-off procedural-effects RAL native smoke
 extern	cvar_t	*r_temporalInputTest;		// default-off projection-jitter diagnostic consumer
 extern	cvar_t	*r_vkDebugTiming;		// 200-frame Vulkan host-side timing averages
 extern	cvar_t	*r_frameSpikeUs;		// per-frame host-side stage-timing spike report
@@ -2299,6 +2304,12 @@ void vk_init_decal_textures( void );
 struct image_s;
 void vk_particle_set_class_image( int handle, struct image_s *image );
 void vk_particle_set_frame_image( int frameSlot, struct image_s *image );
+qboolean vk_particle_shadow_get_class( uint32_t classIndex,
+	const particleClassGPU_t **outClass );
+qboolean vk_particle_shadow_write_emission( uint32_t poolIndex,
+	uint32_t slot, const particleGPU_t *particle );
+qboolean vk_particle_shadow_write_class( uint32_t classIndex,
+	const particleClassGPU_t *particleClass );
 
 // vk.c — write one slot of the projector's decal-texture sampler array
 // (binding 2 of the decal render descriptor set) on every per-frame descriptor
@@ -2306,6 +2317,7 @@ void vk_particle_set_frame_image( int frameSlot, struct image_s *image );
 // shader claims a slot. Encapsulates the qvkUpdateDescriptorSets call.
 void vk_decal_set_texture_image( int slot, struct image_s *image );
 void vk_decal_flush_pending_images( void );
+qboolean vk_decal_shadow_write( uint32_t slot, const decalGPU_t *decal );
 
 // vk.c — phase 5: eager populate the per-class sampler array
 // (binding 3) with tr.whiteImage in every slot. Called once from

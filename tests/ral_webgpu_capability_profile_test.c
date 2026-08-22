@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "ral_capability.h"
+#include "ral_resource.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -34,6 +35,21 @@ int main( void ) {
 	CHECK(profile.entries[RAL_CAP_DRAW_INDIRECT_COUNT].outcome==RAL_CAP_OUTCOME_DISABLED);
 	CHECK(profile.entries[RAL_CAP_TEXTURE_COMPRESSION_BC].outcome==RAL_CAP_OUTCOME_EMULATED);
 	CHECK(profile.entries[RAL_CAP_TEXTURE_COMPRESSION_ETC2].outcome==RAL_CAP_OUTCOME_NATIVE);
+	{
+		// WebGPU keeps filterability and blendability as independent per-format
+		// capabilities; the shared RAL vocabulary must retain that distinction.
+		const ralTextureFormatFeatures_t rgba16f =
+			RAL_TEXTURE_FORMAT_FEATURE_SAMPLED
+			| RAL_TEXTURE_FORMAT_FEATURE_FILTER_LINEAR
+			| RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT
+			| RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND;
+		CHECK( ( rgba16f & RAL_TEXTURE_FORMAT_FEATURE_SAMPLED ) != 0u );
+		CHECK( ( rgba16f & RAL_TEXTURE_FORMAT_FEATURE_FILTER_LINEAR ) != 0u );
+		CHECK( ( rgba16f & RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT ) != 0u );
+		CHECK( ( rgba16f & RAL_TEXTURE_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND ) != 0u );
+		CHECK( ( rgba16f & RAL_TEXTURE_FORMAT_FEATURE_STORAGE ) == 0u );
+		CHECK( ( RAL_TEXTURE_FORMAT_FEATURE_ALL & ( 1u << 31 ) ) == 0u );
+	}
 	puts("ral WebGPU capability profile: PASS");
 	return 0;
 }

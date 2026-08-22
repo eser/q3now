@@ -127,6 +127,14 @@ static VkCompareOp ralVk_CompareOp( ralCompareOp_t c ) {
 	default:                        return VK_COMPARE_OP_NEVER;
 	}
 }
+static VkBorderColor ralVk_BorderColor( ralBorderColor_t color ) {
+	switch ( color ) {
+	case RAL_BORDER_OPAQUE_BLACK: return VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+	case RAL_BORDER_OPAQUE_WHITE: return VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+	case RAL_BORDER_TRANSPARENT_BLACK:
+	default:                      return VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+	}
+}
 static VkDescriptorType ralVk_DescType( ralBindType_t t ) {
 	switch ( t ) {
 	case RAL_BIND_UNIFORM_BUFFER:  return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -138,6 +146,81 @@ static VkDescriptorType ralVk_DescType( ralBindType_t t ) {
 	case RAL_BIND_TEXTURE_ARRAY:
 	default:                       return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 	}
+}
+static VkDescriptorType ralVk_DescTypeForEntry( const ralBindEntry_t *entry ) {
+	VkDescriptorType type;
+	if ( !entry ) return VK_DESCRIPTOR_TYPE_MAX_ENUM;
+	type = ralVk_DescType( entry->type );
+	if ( !entry->dynamicOffset ) return type;
+	if ( type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER )
+		return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+	if ( type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER )
+		return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+	return VK_DESCRIPTOR_TYPE_MAX_ENUM;
+}
+
+static qboolean ralVk_DynamicEntryValid( const ralBindEntry_t *entry ) {
+	if ( !entry || ( entry->dynamicOffset != qfalse && entry->dynamicOffset != qtrue ) )
+		return qfalse;
+	if ( !entry->dynamicOffset ) return qtrue;
+	return entry->count == 1u
+		&& ( entry->type == RAL_BIND_UNIFORM_BUFFER
+		  || entry->type == RAL_BIND_STORAGE_BUFFER );
+}
+
+static const ralVkBindEntry_t *ralVk_FindLayoutEntry(
+	const ralBindGroupLayout_t *layout, uint32_t binding ) {
+	uint32_t i;
+	if ( !layout ) return NULL;
+	for ( i = 0; i < layout->numEntries; ++i )
+		if ( layout->entries[i].binding == binding ) return &layout->entries[i];
+	return NULL;
+}
+
+static void ralVk_InitDynamicBindings( ralBindGroup_t *group,
+	const ralBindGroupLayout_t *layout ) {
+	uint32_t i, count = 0;
+	if ( !group || !layout ) return;
+	for ( i = 0; i < layout->numEntries; ++i ) {
+		const ralVkBindEntry_t *entry = &layout->entries[i];
+		uint32_t pos;
+		if ( !entry->dynamicOffset || count >= RAL_VK_MAX_DYNAMIC_OFFSETS ) continue;
+		pos = count;
+		while ( pos > 0 && group->dynamicBindings[pos - 1].binding > entry->binding ) {
+			group->dynamicBindings[pos] = group->dynamicBindings[pos - 1];
+			--pos;
+		}
+		RAL_ZERO( group->dynamicBindings[pos] );
+		group->dynamicBindings[pos].binding = entry->binding;
+		group->dynamicBindings[pos].vkType = entry->vkType;
+		++count;
+	}
+	group->dynamicOffsetCount = count;
+}
+
+static qboolean ralVk_RegisterDynamicBuffer( ralBindGroup_t *group,
+	uint32_t binding, const ralBuffer_t *buffer, uint64_t baseOffset, uint64_t range ) {
+	uint32_t i, tracked;
+	if ( !group || !buffer || buffer->backend != group->backend || range == 0
+	  || baseOffset > buffer->size || range > buffer->size - baseOffset ) return qfalse;
+	for ( i = 0; i < group->dynamicOffsetCount; ++i ) {
+		ralVkDynamicBufferBinding_t *dynamic = &group->dynamicBindings[i];
+		if ( dynamic->binding != binding ) continue;
+		if ( dynamic->registered ) return qfalse;
+		for ( tracked = 0; tracked < group->bufferCount; ++tracked )
+			if ( group->buffers[tracked] == buffer ) break;
+		if ( tracked == group->bufferCount
+		  && group->bufferCount >= RAL_VK_MAX_TRACKED_BIND_GROUP_BUFFERS ) return qfalse;
+		dynamic->buffer = buffer;
+		dynamic->baseOffset = baseOffset;
+		dynamic->range = range;
+		dynamic->registered = qtrue;
+		if ( tracked == group->bufferCount ) {
+			group->buffers[group->bufferCount++] = buffer;
+		}
+		return qtrue;
+	}
+	return qfalse;
 }
 static VkShaderStageFlags ralVk_StageFlags( uint32_t s ) {
 	VkShaderStageFlags v = 0;
@@ -369,20 +452,10 @@ ralBuffer_t *Ral_CreateBuffer( ralBackend_t *b, const ralBufferCreateInfo_t *ci 
 	return buf;
 }
 
-// Wrap an existing engine-owned VkBuffer in a RAL handle without taking
-// ownership of its memory — symmetric with Ral_AdoptBindGroup / Ral_AdoptTexture.
-// ownsBuffer=qfalse, alloc=NULL: Ral_DestroyBuffer frees only this wrapper, never
-// the VkBuffer/VkDeviceMemory (the engine retains that). Used to bring a raw
-// renderer buffer (e.g. the per-frame exposure UBO) into the RAL bind path
-// without re-creating it. The buffer is treated as host-visible+coherent (the
-// renderer maps it directly); RAL mapping/flush are not used on adopted buffers.
-ralBuffer_t *Ral_AdoptBuffer( ralBackend_t *b, void *vkBuffer, size_t size, const char *debugName ) {
+static ralBuffer_t *ralVk_AdoptBuffer( ralBackend_t *b, void *vkBuffer,
+		uint64_t size, ralBufferUsage_t usage, ralMemoryType_t memory,
+		const char *debugName ) {
 	ralBuffer_t *buf;
-	if ( !b || vkBuffer == NULL ) {
-		RAL_VK_LOG( SEV_WARN, "Ral_AdoptBuffer: bad args (b=%p, vkBuffer=%p)\n",
-		        (void *)b, vkBuffer );
-		return NULL;
-	}
 	buf = (ralBuffer_t *)malloc( sizeof( *buf ) );
 	if ( !buf ) return NULL;
 	RAL_ZERO( *buf );
@@ -391,6 +464,12 @@ ralBuffer_t *Ral_AdoptBuffer( ralBackend_t *b, void *vkBuffer, size_t size, cons
 	buf->buffer          = (VkBuffer)vkBuffer;
 	buf->alloc           = NULL;          // engine-owned memory; RAL never frees it
 	buf->size            = (VkDeviceSize)size;
+	buf->usage           = usage;
+	buf->memoryType      = memory;
+	// An adopted wrapper has no RAL-owned allocation to map or flush. Retaining
+	// the memory class is exact creation metadata, not mapping authority.
+	buf->hostVisible     = qfalse;
+	buf->coherent        = qfalse;
 	buf->ownsBuffer      = qfalse;
 	// The external producer owns the native state before adoption. A portable
 	// transition may not guess it; a later explicit import-state API will make
@@ -405,12 +484,51 @@ ralBuffer_t *Ral_AdoptBuffer( ralBackend_t *b, void *vkBuffer, size_t size, cons
 	return buf;
 }
 
+// Wrap an existing engine-owned VkBuffer without taking ownership. This
+// compatibility helper intentionally publishes no portable usage metadata;
+// new migration code should use Ral_AdoptBufferExact.
+ralBuffer_t *Ral_AdoptBuffer( ralBackend_t *b, void *vkBuffer, size_t size,
+		const char *debugName ) {
+	if ( !b || vkBuffer == NULL || size == 0u ) {
+		RAL_VK_LOG( SEV_WARN, "Ral_AdoptBuffer: bad args (b=%p, vkBuffer=%p, size=%llu)\n",
+		        (void *)b, vkBuffer, (unsigned long long)size );
+		return NULL;
+	}
+	return ralVk_AdoptBuffer( b, vkBuffer, size, (ralBufferUsage_t)0,
+		RAL_MEMORY_DEVICE_LOCAL, debugName );
+}
+
+ralBuffer_t *Ral_AdoptBufferExact( ralBackend_t *b, void *vkBuffer,
+		const ralBufferCreateInfo_t *ci ) {
+	const uint32_t knownUsage = RAL_BUFFER_VERTEX | RAL_BUFFER_INDEX
+		| RAL_BUFFER_UNIFORM | RAL_BUFFER_STORAGE | RAL_BUFFER_INDIRECT
+		| RAL_BUFFER_TRANSFER_SRC | RAL_BUFFER_TRANSFER_DST
+		| RAL_BUFFER_MAP_READ | RAL_BUFFER_MAP_WRITE;
+	if ( !b || vkBuffer == NULL || !ci || ci->size == 0u
+			|| ci->usage == 0 || ( (uint32_t)ci->usage & ~knownUsage ) != 0u
+			|| ci->memory < RAL_MEMORY_DEVICE_LOCAL
+			|| ci->memory > RAL_MEMORY_LAZY_ALLOC ) {
+		RAL_VK_LOG( SEV_WARN, "Ral_AdoptBufferExact: invalid native buffer metadata\n" );
+		return NULL;
+	}
+	return ralVk_AdoptBuffer( b, vkBuffer, ci->size, ci->usage, ci->memory,
+		ci->debugName );
+}
+
 void *Ral_GetBufferHandle( const ralBuffer_t *buf ) {
 	return buf ? (void *)buf->buffer : NULL;
 }
 
 uint64_t Ral_GetBufferSize( const ralBuffer_t *buf ) {
 	return buf ? (uint64_t)buf->size : 0u;
+}
+
+ralBufferUsage_t Ral_GetBufferUsage( const ralBuffer_t *buf ) {
+	return buf ? buf->usage : (ralBufferUsage_t)0;
+}
+
+ralMemoryType_t Ral_GetBufferMemoryType( const ralBuffer_t *buf ) {
+	return buf ? buf->memoryType : RAL_MEMORY_DEVICE_LOCAL;
 }
 
 void Ral_DestroyBuffer( ralBuffer_t *buf ) {
@@ -513,6 +631,341 @@ ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buf, uint64_t offset, const void
 }
 
 // ════════════════════════════════════════════════════════════════════════
+static qboolean ralVk_BufferTransferPrepared( ralBuffer_t *buffer,
+		uint64_t offset, const void *data, uint64_t size,
+		ralQueueType_t queue, uint64_t generation,
+		ralTransferReceipt_t *out ) {
+	ralAllocationReceipt_t allocation;
+	ralTransferRequest_t request;
+	if ( !buffer || !data || size == 0u || offset > buffer->size
+			|| size > buffer->size - offset
+			|| !( buffer->usage & RAL_BUFFER_TRANSFER_DST )
+			|| !ralVk_BufferGpuUseAllowed( buffer )
+			|| !Ral_BufferGetAllocationReceipt( buffer, &allocation ) ) return qfalse;
+	RAL_ZERO( request );
+	request.backendType = RAL_BACKEND_VULKAN;
+	request.direction = RAL_TRANSFER_UPLOAD;
+	request.resourceKind = RAL_TRANSFER_BUFFER;
+	request.resourceIdentity = (uintptr_t)buffer;
+	request.resourceGeneration = allocation.allocationGeneration;
+	request.byteOffset = offset;
+	request.byteSize = size;
+	request.byteBudget = allocation.committedSize;
+	request.queue = queue;
+	return Ral_TransferPrepare( &request, generation, out );
+}
+
+static ralFence_t *ralVk_BufferUploadNoWait( ralBuffer_t *buffer,
+		uint64_t offset, const void *data, uint64_t size,
+		ralQueueType_t queue, ralSemaphore_t **outReadySemaphore ) {
+	ralBackend_t *backend = buffer->backend;
+	ralBufferCreateInfo_t stagingInfo;
+	ralBuffer_t *staging;
+	ralSemaphore_t *ready = NULL;
+	VkCommandBuffer commandBuffer;
+	VkBufferCopy copy;
+	VkFence fence = VK_NULL_HANDLE;
+	if ( outReadySemaphore ) *outReadySemaphore = NULL;
+	RAL_ZERO( stagingInfo );
+	stagingInfo.size = size;
+	stagingInfo.usage = RAL_BUFFER_TRANSFER_SRC | RAL_BUFFER_MAP_WRITE;
+	stagingInfo.memory = RAL_MEMORY_HOST_COHERENT;
+	stagingInfo.debugName = "ral-staging-buffer-upload-ticket";
+	staging = Ral_CreateBuffer( backend, &stagingInfo );
+	if ( !staging ) return NULL;
+	if ( queue == RAL_QUEUE_TRANSFER ) {
+		ready = Ral_CreateSemaphore( backend, RAL_SEMAPHORE_BINARY );
+		if ( !ready ) { Ral_DestroyBuffer( staging ); return NULL; }
+	}
+	if ( !ralVk_WriteStagingBuffer( staging, data, size )
+			|| !ralVk_BeginUploadCmd( backend, queue, &commandBuffer ) ) {
+		if ( ready ) Ral_DestroySemaphore( ready );
+		Ral_DestroyBuffer( staging );
+		return NULL;
+	}
+	RAL_ZERO( copy );
+	copy.dstOffset = offset;
+	copy.size = size;
+	backend->vk.CmdCopyBuffer( commandBuffer, staging->buffer, buffer->buffer,
+		1u, &copy );
+	if ( queue == RAL_QUEUE_TRANSFER
+			&& backend->queueFamily[RAL_QUEUE_TRANSFER]
+				!= backend->queueFamily[RAL_QUEUE_GRAPHICS] ) {
+		VkBufferMemoryBarrier release;
+		RAL_ZERO( release );
+		release.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		release.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		release.srcQueueFamilyIndex = backend->queueFamily[RAL_QUEUE_TRANSFER];
+		release.dstQueueFamilyIndex = backend->queueFamily[RAL_QUEUE_GRAPHICS];
+		release.buffer = buffer->buffer;
+		release.offset = offset;
+		release.size = size;
+		backend->vk.CmdPipelineBarrier( commandBuffer,
+			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			0u, 0u, NULL, 1u, &release, 0u, NULL );
+	} else if ( queue == RAL_QUEUE_GRAPHICS ) {
+		VkBufferMemoryBarrier visible;
+		RAL_ZERO( visible );
+		visible.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		visible.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		visible.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		visible.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		visible.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		visible.buffer = buffer->buffer;
+		visible.offset = offset;
+		visible.size = size;
+		backend->vk.CmdPipelineBarrier( commandBuffer,
+			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			0u, 0u, NULL, 1u, &visible, 0u, NULL );
+	}
+	if ( !ralVk_SubmitUploadCmdNoWait( backend, queue, commandBuffer,
+			ready ? ready->sem : VK_NULL_HANDLE, &fence ) ) {
+		if ( ready ) Ral_DestroySemaphore( ready );
+		Ral_DestroyBuffer( staging );
+		return NULL;
+	}
+	buffer->portableStateKnown = qfalse;
+	buffer->portableOwnerQueue = queue;
+	Ral_DestroyBuffer( staging );
+	if ( outReadySemaphore ) *outReadySemaphore = ready;
+	return ralVk_WrapFence( backend, fence );
+}
+
+ralBufferUploadTicket_t Ral_BufferUploadBegin( ralBuffer_t *buffer,
+		uint64_t offset, const void *data, uint64_t size ) {
+	ralBufferUploadTicket_t ticket;
+	ralTransferReceipt_t prepared, published;
+	ralBackend_t *backend;
+	ralQueueType_t queue;
+	uint64_t generation;
+	RAL_ZERO( ticket );
+	if ( !buffer || !data || size == 0u ) return ticket;
+	backend = buffer->backend;
+	if ( !backend || backend->nextTransferGeneration >= UINT64_MAX - 1u ) return ticket;
+	queue = ( backend->allowAsyncTextureUploads && backend->caps.asyncTransfer )
+		? RAL_QUEUE_TRANSFER : RAL_QUEUE_GRAPHICS;
+	generation = backend->nextTransferGeneration + 1u;
+	if ( !ralVk_BufferTransferPrepared( buffer, offset, data, size, queue,
+			generation, &prepared )
+			|| !Ral_TransferPublish( &prepared, RAL_TRANSFER_OUTCOME_NATIVE_ASYNC,
+				generation, &published ) ) return ticket;
+	ticket.fence = ralVk_BufferUploadNoWait( buffer, offset, data, size, queue,
+		&ticket.readySemaphore );
+	if ( !ticket.fence ) {
+		if ( ticket.readySemaphore ) Ral_DestroySemaphore( ticket.readySemaphore );
+		RAL_ZERO( ticket );
+		return ticket;
+	}
+	ticket.buffer = buffer;
+	ticket.offset = offset;
+	ticket.size = size;
+	ticket.synchronous = qfalse;
+	ticket.graphicsAcquireRequired = queue == RAL_QUEUE_TRANSFER ? qtrue : qfalse;
+	ticket.graphicsAcquired = queue == RAL_QUEUE_GRAPHICS ? qtrue : qfalse;
+	ticket.transfer = published;
+	backend->nextTransferGeneration = generation;
+	return ticket;
+}
+
+qboolean Ral_BufferWriteImmediate( ralBuffer_t *buffer, uint64_t offset,
+		const void *data, uint64_t size,
+		ralBufferUploadReceipt_t *outReceipt ) {
+	ralBackend_t *backend;
+	ralTransferReceipt_t prepared, completed;
+	ralBufferUploadReceipt_t candidate;
+	void *mapped;
+	uint64_t generation;
+	if ( !buffer || !data || !outReceipt || size == 0u
+			|| !buffer->backend || !buffer->alloc || !buffer->hostVisible
+			|| buffer->legacyMapped || buffer->alloc->mapped
+			|| !buffer->portableStateKnown
+			|| !ralVk_BufferGpuUseAllowed( buffer )
+			|| !( buffer->usage & RAL_BUFFER_TRANSFER_DST ) ) return qfalse;
+	backend = buffer->backend;
+	if ( backend->nextTransferGeneration >= UINT64_MAX - 1u ) return qfalse;
+	generation = backend->nextTransferGeneration + 1u;
+	if ( !ralVk_BufferTransferPrepared( buffer, offset, data, size,
+			RAL_QUEUE_GRAPHICS, generation, &prepared )
+			|| !Ral_TransferPublish( &prepared,
+				RAL_TRANSFER_OUTCOME_SYNCHRONOUS, generation, &completed )
+			|| !Ral_BufferUploadReceiptBuild( &completed, generation,
+				&candidate ) ) return qfalse;
+	mapped = ralVk_Map( buffer->alloc );
+	if ( !mapped ) return qfalse;
+	memcpy( (unsigned char *)mapped + offset, data, (size_t)size );
+	ralVk_Flush( buffer->alloc, (VkDeviceSize)offset, (VkDeviceSize)size );
+	ralVk_Unmap( buffer->alloc );
+	buffer->portableStateKnown = qtrue;
+	buffer->portableState.usage = RAL_RESOURCE_USAGE_HOST_WRITE;
+	buffer->portableState.shaderStages = 0u;
+	buffer->portableOwnerQueue = RAL_QUEUE_GRAPHICS;
+	backend->nextTransferGeneration = generation;
+	*outReceipt = candidate;
+	return qtrue;
+}
+
+static qboolean ralVk_BufferUploadTicketValid(
+		const ralBufferUploadTicket_t *ticket ) {
+	ralAllocationReceipt_t allocation;
+	const ralTransferRequest_t *request;
+	if ( !ticket || !ticket->buffer || !ticket->fence
+			|| ticket->synchronous != qfalse
+			|| ( ticket->graphicsAcquireRequired != qfalse
+				&& ticket->graphicsAcquireRequired != qtrue )
+			|| ( ticket->graphicsAcquired != qfalse
+				&& ticket->graphicsAcquired != qtrue )
+			|| !ticket->buffer->backend
+			|| ticket->fence->backend != ticket->buffer->backend
+			|| !Ral_TransferReceiptExact( &ticket->transfer,
+				&ticket->transfer )
+			|| ( ticket->transfer.state != RAL_TRANSFER_SUBMITTED
+				&& ticket->transfer.state != RAL_TRANSFER_COMPLETED )
+			|| !Ral_BufferGetAllocationReceipt( ticket->buffer, &allocation ) ) {
+		return qfalse;
+	}
+	request = &ticket->transfer.request;
+	if ( request->direction != RAL_TRANSFER_UPLOAD
+			|| request->resourceKind != RAL_TRANSFER_BUFFER
+			|| request->resourceIdentity != (uintptr_t)ticket->buffer
+			|| request->resourceGeneration != allocation.allocationGeneration
+			|| request->byteOffset != ticket->offset
+			|| request->byteSize != ticket->size
+			|| request->byteBudget != allocation.committedSize
+			|| ticket->size == 0u || ticket->offset > ticket->buffer->size
+			|| ticket->size > ticket->buffer->size - ticket->offset ) {
+		return qfalse;
+	}
+	if ( request->queue == RAL_QUEUE_GRAPHICS ) {
+		return ticket->readySemaphore == NULL
+			&& ticket->graphicsAcquireRequired == qfalse
+			&& ticket->graphicsAcquired == qtrue;
+	}
+	return request->queue == RAL_QUEUE_TRANSFER
+		&& ticket->readySemaphore
+		&& ticket->readySemaphore->backend == ticket->buffer->backend
+		&& ticket->graphicsAcquireRequired == qtrue;
+}
+
+qboolean Ral_BufferUploadTicketComplete( ralBufferUploadTicket_t *ticket ) {
+	ralTransferReceipt_t completed;
+	if ( !ralVk_BufferUploadTicketValid( ticket ) ) return qfalse;
+	if ( ticket->transfer.state == RAL_TRANSFER_COMPLETED ) return qtrue;
+	if ( ticket->transfer.state != RAL_TRANSFER_SUBMITTED
+			|| !Ral_FenceSignaled( ticket->fence ) ) return qfalse;
+	if ( !Ral_TransferComplete( &ticket->transfer,
+			ticket->transfer.submissionGeneration, qtrue, &completed ) ) return qfalse;
+	ticket->transfer = completed;
+	return qtrue;
+}
+
+qboolean Ral_BufferUploadTicketGetReceipt(
+	const ralBufferUploadTicket_t *ticket, ralBufferUploadReceipt_t *out ) {
+	ralBufferUploadReceipt_t candidate;
+	if ( !out || !ralVk_BufferUploadTicketValid( ticket )
+			|| ticket->graphicsAcquired != qtrue
+			|| ticket->transfer.state != RAL_TRANSFER_COMPLETED ) return qfalse;
+	if ( !Ral_BufferUploadReceiptBuild( &ticket->transfer,
+			ticket->transfer.completionGeneration, &candidate ) ) return qfalse;
+	*out = candidate;
+	return qtrue;
+}
+
+qboolean Ral_BufferAcquireBatchToGraphics( ralBackend_t *backend,
+		ralBufferUploadTicket_t *tickets, uint32_t count ) {
+	VkCommandBuffer commandBuffer;
+	VkCommandBufferSubmitInfo commandInfo;
+	VkSemaphoreSubmitInfo *waits;
+	VkSubmitInfo2 submit;
+	uint32_t i, waitCount = 0u;
+	if ( !backend || !tickets || count == 0u
+			|| count > RAL_BUFFER_UPLOAD_MAX_BATCH ) return qfalse;
+	for ( i = 0u; i < count; i++ ) {
+		const ralBufferUploadTicket_t *ticket = &tickets[i];
+		if ( !ralVk_BufferUploadTicketValid( ticket )
+				|| ticket->transfer.state != RAL_TRANSFER_COMPLETED ) return qfalse;
+		if ( ticket->graphicsAcquireRequired == qfalse ) {
+			if ( ticket->graphicsAcquired != qtrue ) return qfalse;
+			continue;
+		}
+		if ( ticket->graphicsAcquireRequired != qtrue
+				|| ticket->graphicsAcquired != qfalse ) return qfalse;
+		if ( ticket->fence->backend != backend
+				|| ticket->readySemaphore->backend != backend
+				|| ticket->buffer->backend != backend
+				|| ticket->transfer.request.queue != RAL_QUEUE_TRANSFER ) return qfalse;
+		waitCount++;
+	}
+	if ( waitCount == 0u ) return qtrue;
+	waits = (VkSemaphoreSubmitInfo *)calloc( waitCount, sizeof( *waits ) );
+	if ( !waits ) return qfalse;
+	if ( !ralVk_BeginUploadCmd( backend, RAL_QUEUE_GRAPHICS, &commandBuffer ) ) {
+		free( waits );
+		return qfalse;
+	}
+	waitCount = 0u;
+	for ( i = 0u; i < count; i++ ) {
+		const ralBufferUploadTicket_t *ticket = &tickets[i];
+		VkBufferMemoryBarrier acquire;
+		if ( !ticket->graphicsAcquireRequired ) continue;
+		RAL_ZERO( waits[waitCount] );
+		waits[waitCount].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+		waits[waitCount].semaphore = ticket->readySemaphore->sem;
+		waits[waitCount].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+		waitCount++;
+		RAL_ZERO( acquire );
+		acquire.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		acquire.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		acquire.srcQueueFamilyIndex = backend->queueFamily[RAL_QUEUE_TRANSFER]
+			== backend->queueFamily[RAL_QUEUE_GRAPHICS]
+			? VK_QUEUE_FAMILY_IGNORED : backend->queueFamily[RAL_QUEUE_TRANSFER];
+		acquire.dstQueueFamilyIndex = backend->queueFamily[RAL_QUEUE_TRANSFER]
+			== backend->queueFamily[RAL_QUEUE_GRAPHICS]
+			? VK_QUEUE_FAMILY_IGNORED : backend->queueFamily[RAL_QUEUE_GRAPHICS];
+		acquire.buffer = ticket->buffer->buffer;
+		acquire.offset = ticket->offset;
+		acquire.size = ticket->size;
+		backend->vk.CmdPipelineBarrier( commandBuffer,
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			0u, 0u, NULL, 1u, &acquire, 0u, NULL );
+	}
+	if ( backend->vk.EndCommandBuffer( commandBuffer ) != VK_SUCCESS ) {
+		free( waits );
+		ralVk_QueueLock( backend, RAL_QUEUE_GRAPHICS );
+		backend->vk.FreeCommandBuffers( backend->device,
+			backend->cmdPools[RAL_QUEUE_GRAPHICS], 1u, &commandBuffer );
+		ralVk_QueueUnlock( backend, RAL_QUEUE_GRAPHICS );
+		return qfalse;
+	}
+	RAL_ZERO( commandInfo );
+	commandInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+	commandInfo.commandBuffer = commandBuffer;
+	RAL_ZERO( submit );
+	submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+	submit.waitSemaphoreInfoCount = waitCount;
+	submit.pWaitSemaphoreInfos = waits;
+	submit.commandBufferInfoCount = 1u;
+	submit.pCommandBufferInfos = &commandInfo;
+	if ( ralVk_QueueSubmit2( backend, RAL_QUEUE_GRAPHICS, &submit,
+			VK_NULL_HANDLE ) != ralSuccess ) {
+		free( waits );
+		ralVk_QueueLock( backend, RAL_QUEUE_GRAPHICS );
+		backend->vk.FreeCommandBuffers( backend->device,
+			backend->cmdPools[RAL_QUEUE_GRAPHICS], 1u, &commandBuffer );
+		ralVk_QueueUnlock( backend, RAL_QUEUE_GRAPHICS );
+		return qfalse;
+	}
+	ralVk_DeferDestroy( backend, RAL_RES_CMD_BUFFER,
+		RAL_VK_H2U( commandBuffer ), (uint64_t)RAL_QUEUE_GRAPHICS, NULL );
+	for ( i = 0u; i < count; i++ ) {
+		if ( tickets[i].graphicsAcquireRequired != qtrue ) continue;
+		tickets[i].buffer->portableOwnerQueue = RAL_QUEUE_GRAPHICS;
+		tickets[i].buffer->portableStateKnown = qfalse;
+		tickets[i].graphicsAcquired = qtrue;
+	}
+	free( waits );
+	return qtrue;
+}
+
 // Texture
 // ════════════════════════════════════════════════════════════════════════
 ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *ci ) {
@@ -612,6 +1065,7 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 			: RAL_ALLOCATION_RESIDENCY_PERMANENT, (uintptr_t)tex,
 		RAL_VK_ALLOC_RESOURCE_IMAGE );
 	if ( !tex->alloc ) { b->vk.DestroyImage( b->device, tex->image, NULL ); free( tex ); return NULL; }
+	tex->resourceGeneration = tex->alloc->receipt.allocationGeneration;
 	if ( b->vk.BindImageMemory( b->device, tex->image, tex->alloc->memory,
 			tex->alloc->offset ) != VK_SUCCESS ) {
 		RAL_VK_LOG( SEV_WARN, "Ral_CreateTexture: vkBindImageMemory failed\n" );
@@ -669,16 +1123,19 @@ void Ral_DestroyTexture( ralTexture_t *tex ) {
 // texture's format on tex->vkFormat / tex->ralFormat so pipelines + views built
 // from the wrapper carry the right format. currentLayout stays UNDEFINED — it is
 // runtime state, re-synced by the consumer via Ral_SetTextureLayout.
-ralTexture_t *Ral_AdoptTexture( ralBackend_t *b,
+ralTexture_t *Ral_AdoptTextureExact( ralBackend_t *b,
                                 void *externalImage,
                                 void *externalView,
                                 ralFormat_t fmt,
                                 uint32_t width, uint32_t height,
                                 uint32_t aspect,
+                                ralTextureUsage_t usage,
                                 const char *debugName )
 {
 	ralTexture_t *tex;
-	if ( !b || !externalImage ) return NULL;
+	uint64_t generation;
+	if ( !b || !externalImage || b->nextTextureGeneration >= UINT64_MAX - 1u ) return NULL;
+	generation = b->nextTextureGeneration + 1u;
 	tex = (ralTexture_t *)malloc( sizeof( *tex ) );
 	if ( !tex ) return NULL;
 	RAL_ZERO( *tex );
@@ -690,12 +1147,14 @@ ralTexture_t *Ral_AdoptTexture( ralBackend_t *b,
 	tex->ralFormat       = fmt;
 	tex->vkFormat        = ( fmt != RAL_FORMAT_UNDEFINED ) ? ralVk_TranslateFormat( fmt ) : VK_FORMAT_UNDEFINED;
 	tex->type            = RAL_TEXTURE_2D;
+	tex->usage           = usage;
 	tex->width           = width;
 	tex->height          = height ? height : 1;
 	tex->depthOrArrayLayers = 1;
 	tex->mipLevels       = 1;
 	tex->arrayLayers     = 1;
 	tex->sampleCount     = 1;
+	tex->resourceGeneration = generation;
 	tex->aspect          = (VkImageAspectFlags)aspect;
 	tex->currentLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
 	tex->ownsImage       = qfalse;
@@ -703,7 +1162,24 @@ ralTexture_t *Ral_AdoptTexture( ralBackend_t *b,
 	tex->portableOwnerQueue = RAL_QUEUE_GRAPHICS;
 	Ral_QueueTransferLifecycleInit( &tex->queueTransfer );
 	if ( debugName ) ralVk_SetObjectName( b, (uint64_t)tex->image, VK_OBJECT_TYPE_IMAGE, debugName );
+	b->nextTextureGeneration = generation;
 	return tex;
+}
+
+ralTexture_t *Ral_AdoptTexture( ralBackend_t *b,
+                                void *externalImage,
+                                void *externalView,
+                                ralFormat_t fmt,
+                                uint32_t width, uint32_t height,
+                                uint32_t aspect,
+                                const char *debugName ) {
+	return Ral_AdoptTextureExact( b, externalImage, externalView, fmt,
+		width, height, aspect, 0, debugName );
+}
+
+qboolean Ral_PublishAdoptedTextureState( ralTexture_t *tex,
+		const ralResourceState_t *state, ralQueueType_t ownerQueue ) {
+	return ralVk_PublishAdoptedTextureResourceState( tex, state, ownerQueue );
 }
 
 // Array-adoption helper. Like Ral_AdoptTexture but for a 2D-ARRAY image rendered
@@ -730,7 +1206,10 @@ ralTexture_t *Ral_AdoptArrayTexture( ralBackend_t *b,
                                      const char *debugName )
 {
 	ralTexture_t *tex;
-	if ( !b || !externalImage || !layerViews || layerCount == 0 ) return NULL;
+	uint64_t generation;
+	if ( !b || !externalImage || !layerViews || layerCount == 0
+			|| b->nextTextureGeneration >= UINT64_MAX - 1u ) return NULL;
+	generation = b->nextTextureGeneration + 1u;
 	tex = (ralTexture_t *)malloc( sizeof( *tex ) );
 	if ( !tex ) return NULL;
 	RAL_ZERO( *tex );
@@ -748,6 +1227,7 @@ ralTexture_t *Ral_AdoptArrayTexture( ralBackend_t *b,
 	tex->mipLevels       = 1;
 	tex->arrayLayers     = layerCount;
 	tex->sampleCount     = 1;
+	tex->resourceGeneration = generation;
 	tex->aspect          = (VkImageAspectFlags)aspect;
 	tex->currentLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
 	tex->ownsImage       = qfalse;
@@ -757,6 +1237,7 @@ ralTexture_t *Ral_AdoptArrayTexture( ralBackend_t *b,
 	tex->layerViews      = (const VkImageView *)layerViews;
 	tex->numLayerViews   = layerCount;
 	if ( debugName ) ralVk_SetObjectName( b, (uint64_t)tex->image, VK_OBJECT_TYPE_IMAGE, debugName );
+	b->nextTextureGeneration = generation;
 	return tex;
 }
 
@@ -770,6 +1251,56 @@ void *Ral_GetTextureDefaultViewHandle( const ralTexture_t *tex ) {
 
 uint32_t Ral_GetTextureMipLevelCount( const ralTexture_t *tex ) {
 	return tex ? tex->mipLevels : 0u;
+}
+
+static qboolean ralVk_TextureResourceReceiptValid(
+		const ralTextureResourceReceipt_t *receipt ) {
+	return receipt
+		&& receipt->schemaVersion == RAL_TEXTURE_RESOURCE_RECEIPT_SCHEMA_VERSION
+		&& receipt->backendType == RAL_BACKEND_VULKAN
+		&& receipt->textureIdentity != 0u
+		&& receipt->resourceGeneration > 0u
+		&& receipt->resourceGeneration < UINT64_MAX
+		&& receipt->type >= RAL_TEXTURE_1D
+		&& receipt->type <= RAL_TEXTURE_CUBE_ARRAY
+		&& receipt->format > RAL_FORMAT_UNDEFINED
+		&& receipt->format < RAL_FORMAT_COUNT
+		&& receipt->width > 0u && receipt->height > 0u
+		&& receipt->mipLevels > 0u && receipt->arrayLayers > 0u
+		&& ( receipt->imported == qfalse || receipt->imported == qtrue )
+		&& receipt->ready == qtrue;
+}
+
+qboolean Ral_TextureGetResourceReceipt( const ralTexture_t *tex,
+		ralTextureResourceReceipt_t *out ) {
+	ralTextureResourceReceipt_t candidate;
+	if ( !tex || !out || !tex->backend || tex->resourceGeneration == 0u
+			|| tex->resourceGeneration == UINT64_MAX ) return qfalse;
+	RAL_ZERO( candidate );
+	candidate.schemaVersion = RAL_TEXTURE_RESOURCE_RECEIPT_SCHEMA_VERSION;
+	candidate.backendType = tex->backend->type;
+	candidate.textureIdentity = (uintptr_t)tex;
+	candidate.resourceGeneration = tex->resourceGeneration;
+	candidate.type = tex->type;
+	candidate.format = tex->ralFormat;
+	candidate.usage = tex->usage;
+	candidate.width = tex->width;
+	candidate.height = tex->height;
+	candidate.mipLevels = tex->mipLevels;
+	candidate.arrayLayers = tex->arrayLayers;
+	candidate.imported = tex->ownsImage ? qfalse : qtrue;
+	candidate.ready = qtrue;
+	if ( !ralVk_TextureResourceReceiptValid( &candidate ) ) return qfalse;
+	*out = candidate;
+	return qtrue;
+}
+
+qboolean Ral_TextureResourceReceiptExact(
+		const ralTextureResourceReceipt_t *a,
+		const ralTextureResourceReceipt_t *b ) {
+	return ralVk_TextureResourceReceiptValid( a )
+		&& ralVk_TextureResourceReceiptValid( b )
+		&& !memcmp( a, b, sizeof( *a ) );
 }
 
 void *Ral_GetTextureViewHandle( const ralTextureView_t *view ) {
@@ -791,8 +1322,12 @@ ralTextureView_t *Ral_CreateTextureView( ralBackend_t *b, const ralTextureViewCr
 	ralTextureView_t     *view;
 	const ralTexture_t   *tex;
 	uint32_t              levelCount, layerCount;
+	VkImageAspectFlags    viewAspects;
 	if ( !b || !ci || !ci->texture ) return NULL;
 	tex = ci->texture;
+	if ( tex->backend != b
+	  || !ralVk_TranslateTextureViewAspect( ci->aspect, tex->aspect,
+			&viewAspects ) ) return NULL;
 	if ( ci->baseMipLevel >= tex->mipLevels || ci->baseArrayLayer >= tex->arrayLayers ) {
 		RAL_VK_LOG( SEV_WARN,
 		       "Ral_CreateTextureView: base range out of bounds (mip %u/%u, layer %u/%u)\n",
@@ -822,7 +1357,7 @@ ralTextureView_t *Ral_CreateTextureView( ralBackend_t *b, const ralTextureViewCr
 	vci.image                           = tex->image;
 	vci.viewType                        = ralVk_ViewType( ci->viewType );
 	vci.format                          = ( ci->format != RAL_FORMAT_UNDEFINED ) ? ralVk_TranslateFormat( ci->format ) : tex->vkFormat;
-	vci.subresourceRange.aspectMask     = tex->aspect;
+	vci.subresourceRange.aspectMask     = viewAspects;
 	vci.subresourceRange.baseMipLevel   = ci->baseMipLevel;
 	vci.subresourceRange.levelCount     = levelCount;
 	vci.subresourceRange.baseArrayLayer = ci->baseArrayLayer;
@@ -1371,7 +1906,7 @@ qboolean Ral_TextureAcquireBatchToGraphics( ralBackend_t *b, const ralUploadTick
 ralSampler_t *Ral_CreateSampler( ralBackend_t *b, const ralSamplerCreateInfo_t *ci ) {
 	VkSamplerCreateInfo  sci;
 	ralSampler_t        *s;
-	if ( !b || !ci ) return NULL;
+	if ( !b || !Ral_SamplerCreateInfoValid( ci ) ) return NULL;
 	s = (ralSampler_t *)malloc( sizeof( *s ) );
 	if ( !s ) return NULL;
 	RAL_ZERO( *s );
@@ -1397,7 +1932,7 @@ ralSampler_t *Ral_CreateSampler( ralBackend_t *b, const ralSamplerCreateInfo_t *
 	sci.compareOp        = ralVk_CompareOp( ci->compareOp );
 	sci.minLod           = ci->minLod;
 	sci.maxLod           = ( ci->maxLod > 0.0f ) ? ci->maxLod : VK_LOD_CLAMP_NONE;
-	sci.borderColor      = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+	sci.borderColor      = ralVk_BorderColor( ci->borderColor );
 	if ( b->vk.CreateSampler( b->device, &sci, NULL, &s->sampler ) != VK_SUCCESS ) {
 		RAL_VK_LOG( SEV_WARN, "Ral_CreateSampler: vkCreateSampler failed\n" );
 		free( s ); return NULL;
@@ -1436,8 +1971,112 @@ ralSampler_t *Ral_AdoptSampler( ralBackend_t *b, void *externalSampler, const ch
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// BindGroupLayout / BindGroup
+// Bind-group arena / layout / group
 // ════════════════════════════════════════════════════════════════════════
+ralBindGroupArena_t *Ral_CreateBindGroupArena(
+		ralBackend_t *backend,
+		const ralBindGroupArenaCreateInfo_t *createInfo,
+		ralBindGroupArenaReceipt_t *outReceipt ) {
+	VkDescriptorPoolSize sizes[ RAL_MAX_BIND_GROUP_ARENA_ENTRIES ];
+	VkDescriptorPoolCreateInfo nativeInfo;
+	ralBindGroupArena_t *arena;
+	ralBindGroupArenaReceipt_t receipt;
+	uint32_t i;
+	if ( !backend || !createInfo || !outReceipt || !createInfo->entries
+	  || !backend->vk.CreateDescriptorPool
+	  || !backend->vk.ResetDescriptorPool
+	  || !backend->vk.DestroyDescriptorPool
+	  || createInfo->numEntries == 0u
+	  || createInfo->numEntries > RAL_MAX_BIND_GROUP_ARENA_ENTRIES
+	  || createInfo->maxGroups == 0u ) return NULL;
+	for ( i = 0u; i < createInfo->numEntries; ++i ) {
+		const ralBindGroupArenaEntry_t *entry = &createInfo->entries[i];
+		VkDescriptorType type;
+		uint32_t j;
+		if ( entry->type < RAL_BIND_UNIFORM_BUFFER
+		  || entry->type > RAL_BIND_COMBINED_TEXTURE_SAMPLER
+		  || entry->count == 0u
+		  || ( entry->dynamicOffset != qfalse && entry->dynamicOffset != qtrue )
+		  || ( entry->dynamicOffset
+		    && entry->type != RAL_BIND_UNIFORM_BUFFER
+		    && entry->type != RAL_BIND_STORAGE_BUFFER ) ) return NULL;
+		type = ralVk_DescType( entry->type );
+		if ( entry->dynamicOffset )
+			type = entry->type == RAL_BIND_UNIFORM_BUFFER
+				? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
+				: VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+		for ( j = 0u; j < i; ++j )
+			if ( sizes[j].type == type ) return NULL;
+		sizes[i].type = type;
+		sizes[i].descriptorCount = entry->count;
+	}
+	arena = (ralBindGroupArena_t *)malloc( sizeof( *arena ) );
+	if ( !arena ) return NULL;
+	RAL_ZERO( *arena );
+	arena->backend = backend;
+	RAL_ZERO( nativeInfo );
+	nativeInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	nativeInfo.maxSets = createInfo->maxGroups;
+	nativeInfo.poolSizeCount = createInfo->numEntries;
+	nativeInfo.pPoolSizes = sizes;
+	if ( backend->vk.CreateDescriptorPool( backend->device, &nativeInfo, NULL,
+			&arena->pool ) != VK_SUCCESS ) {
+		free( arena );
+		return NULL;
+	}
+	if ( createInfo->debugName )
+		ralVk_SetObjectName( backend, (uint64_t)arena->pool,
+			VK_OBJECT_TYPE_DESCRIPTOR_POOL, createInfo->debugName );
+	Ral_BindGroupArenaLifecycleInit( &arena->lifecycle, backend, arena,
+		createInfo->maxGroups );
+	if ( Ral_BindGroupArenaLifecyclePublishCreate( &arena->lifecycle,
+			&receipt ) != ralSuccess ) {
+		backend->vk.DestroyDescriptorPool( backend->device, arena->pool, NULL );
+		free( arena );
+		return NULL;
+	}
+	*outReceipt = receipt;
+	return arena;
+}
+
+ralResult_t Ral_GetBindGroupArenaReceipt(
+		const ralBindGroupArena_t *arena,
+		ralBindGroupArenaReceipt_t *outReceipt ) {
+	if ( !arena ) return ralErrorInvalidArgument;
+	return Ral_BindGroupArenaLifecycleGetReceipt( &arena->lifecycle, outReceipt );
+}
+
+ralResult_t Ral_ResetBindGroupArenaExact(
+		ralBindGroupArena_t *arena,
+		const ralBindGroupArenaReceipt_t *current,
+		ralBindGroupArenaReceipt_t *outNext ) {
+	ralBindGroupArenaReceipt_t live;
+	VkResult result;
+	if ( !arena || !current || !outNext
+	  || arena->lifecycle.generation >= UINT64_MAX - 1u
+	  || Ral_BindGroupArenaLifecycleGetReceipt( &arena->lifecycle, &live ) != ralSuccess
+	  || !Ral_BindGroupArenaReceiptExact( &live, current ) )
+		return ralErrorInvalidArgument;
+	result = arena->backend->vk.ResetDescriptorPool(
+		arena->backend->device, arena->pool, 0u );
+	if ( result == VK_ERROR_DEVICE_LOST ) return ralErrorDeviceLost;
+	if ( result != VK_SUCCESS ) return ralErrorUnknown;
+	return Ral_BindGroupArenaLifecyclePublishReset( &arena->lifecycle,
+		current, outNext );
+}
+
+void Ral_DestroyBindGroupArena( ralBindGroupArena_t *arena ) {
+	if ( !arena ) return;
+	if ( arena->pool != VK_NULL_HANDLE )
+		arena->backend->vk.DestroyDescriptorPool(
+			arena->backend->device, arena->pool, NULL );
+	free( arena );
+}
+
+void *Ral_GetBindGroupArenaHandle( const ralBindGroupArena_t *arena ) {
+	return arena ? (void *)arena->pool : NULL;
+}
+
 ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *b, const ralBindGroupLayoutCreateInfo_t *ci ) {
 	VkDescriptorSetLayoutBinding          binds[ RAL_VK_MAX_LAYOUT_ENTRIES ];
 	VkDescriptorBindingFlags              bflags[ RAL_VK_MAX_LAYOUT_ENTRIES ];
@@ -1446,9 +2085,19 @@ ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *b, const ralBindG
 	ralBindGroupLayout_t                 *L;
 	uint32_t                              i, lastUnbounded = 0xFFFFFFFFu;
 	qboolean                              anyUpdateAfterBind = qfalse;
-	if ( !b || !ci || ci->numEntries == 0 || ci->numEntries > RAL_VK_MAX_LAYOUT_ENTRIES ) {
+	if ( !b || !ci || !ci->entries || ci->numEntries == 0 || ci->numEntries > RAL_VK_MAX_LAYOUT_ENTRIES ) {
 		RAL_VK_LOG( SEV_WARN, "Ral_CreateBindGroupLayout: bad/too-many entries (%u)\n", ci ? ci->numEntries : 0u );
 		return NULL;
+	}
+	for ( i = 0; i < ci->numEntries; ++i ) {
+		uint32_t j;
+		if ( !ralVk_DynamicEntryValid( &ci->entries[i] ) ) {
+			RAL_VK_LOG( SEV_WARN, "Ral_CreateBindGroupLayout: invalid dynamic binding %u\n",
+				ci->entries[i].binding );
+			return NULL;
+		}
+		for ( j = 0; j < i; ++j )
+			if ( ci->entries[j].binding == ci->entries[i].binding ) return NULL;
 	}
 	if ( ci->bindless ) {
 		for ( i = 0; i < ci->numEntries; i++ ) if ( ci->entries[i].count == 0 ) { lastUnbounded = i; }
@@ -1470,7 +2119,7 @@ ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *b, const ralBindG
 		if ( e->count == 0 && cnt > b->caps.maxBindlessTextures && b->caps.maxBindlessTextures > 0 ) cnt = b->caps.maxBindlessTextures;
 		RAL_ZERO( binds[i] );
 		binds[i].binding         = e->binding;
-		binds[i].descriptorType  = ralVk_DescType( e->type );
+		binds[i].descriptorType  = ralVk_DescTypeForEntry( e );
 		binds[i].descriptorCount = cnt;
 		binds[i].stageFlags      = ralVk_StageFlags( e->stageFlags );
 		bflags[i] = 0;
@@ -1487,6 +2136,8 @@ ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *b, const ralBindG
 		L->entries[i].vkType         = binds[i].descriptorType;
 		L->entries[i].count          = e->count;
 		L->entries[i].effectiveCount = cnt;
+		L->entries[i].dynamicOffset  = e->dynamicOffset;
+		if ( e->dynamicOffset ) L->dynamicOffsetCount++;
 	}
 
 	RAL_ZERO( fci );
@@ -1523,10 +2174,17 @@ ralBindGroupLayout_t *Ral_AdoptBindGroupLayout( ralBackend_t *b,
                                                 const char *debugName ) {
 	ralBindGroupLayout_t *L;
 	uint32_t              i;
-	if ( !b || !externalLayout || numEntries > RAL_VK_MAX_LAYOUT_ENTRIES ) {
+	if ( !b || !externalLayout || ( numEntries > 0 && !entries )
+	  || numEntries > RAL_VK_MAX_LAYOUT_ENTRIES ) {
 		RAL_VK_LOG( SEV_WARN, "Ral_AdoptBindGroupLayout: bad args (externalLayout=%p, numEntries=%u, max=%u)\n",
 		        externalLayout, numEntries, (unsigned)RAL_VK_MAX_LAYOUT_ENTRIES );
 		return NULL;
+	}
+	for ( i = 0; i < numEntries; ++i ) {
+		uint32_t j;
+		if ( !ralVk_DynamicEntryValid( &entries[i] ) ) return NULL;
+		for ( j = 0; j < i; ++j )
+			if ( entries[j].binding == entries[i].binding ) return NULL;
 	}
 	L = (ralBindGroupLayout_t *)malloc( sizeof( *L ) );
 	if ( !L ) return NULL;
@@ -1539,9 +2197,11 @@ ralBindGroupLayout_t *Ral_AdoptBindGroupLayout( ralBackend_t *b,
 	L->numEntries      = numEntries;
 	for ( i = 0; i < numEntries; i++ ) {
 		L->entries[i].binding        = entries[i].binding;
-		L->entries[i].vkType         = ralVk_DescType( entries[i].type );
+		L->entries[i].vkType         = ralVk_DescTypeForEntry( &entries[i] );
 		L->entries[i].count          = entries[i].count;
 		L->entries[i].effectiveCount = ( entries[i].count == 0 ) ? 1u : entries[i].count;
+		L->entries[i].dynamicOffset  = entries[i].dynamicOffset;
+		if ( entries[i].dynamicOffset ) L->dynamicOffsetCount++;
 	}
 	if ( debugName ) {
 		// We don't re-name the underlying VkDescriptorSetLayout (caller picked
@@ -1581,7 +2241,41 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 	uint32_t                    nw = 0, ni = 0, nb = 0, v;
 	ralBindGroup_t             *bg;
 	VkResult                    r;
-	if ( !b || !ci || !ci->layout || ci->layout->backend != b ) return NULL;
+	VkDescriptorPool           pool;
+	ralBindGroupArenaReceipt_t arenaLive;
+	if ( !b || !ci || !ci->layout || ci->layout->backend != b
+	  || ( ci->numValues > 0u && !ci->values )
+	  || ( ( ci->arena == NULL ) != ( ci->arenaReceipt == NULL ) ) ) return NULL;
+	pool = b->descriptorPool;
+	if ( ci->arena ) {
+		if ( ci->arena->backend != b
+		  || Ral_GetBindGroupArenaReceipt( ci->arena, &arenaLive ) != ralSuccess
+		  || !Ral_BindGroupArenaReceiptExact( &arenaLive, ci->arenaReceipt ) )
+			return NULL;
+		pool = ci->arena->pool;
+	}
+	for ( v = 0; v < ci->layout->numEntries; ++v ) {
+		const ralVkBindEntry_t *entry = &ci->layout->entries[v];
+		uint32_t valueIndex;
+		if ( !entry->dynamicOffset ) continue;
+		for ( valueIndex = 0; valueIndex < ci->numValues; ++valueIndex ) {
+			const ralBindingValue_t *value = &ci->values[valueIndex];
+			uint64_t range;
+			if ( value->binding != entry->binding ) continue;
+			if ( !value->buffer || value->buffer->backend != b ) return NULL;
+			if ( ( entry->vkType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
+			    && value->type != RAL_BIND_UNIFORM_BUFFER )
+			  || ( entry->vkType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC
+			    && value->type != RAL_BIND_STORAGE_BUFFER ) ) return NULL;
+			if ( value->bufferOffset > value->buffer->size ) return NULL;
+			range = value->bufferRange == 0
+				? value->buffer->size - value->bufferOffset : value->bufferRange;
+			if ( range == 0
+			  || range > value->buffer->size - value->bufferOffset ) return NULL;
+			break;
+		}
+		if ( valueIndex == ci->numValues ) return NULL;
+	}
 	for ( v = 0; v < ci->numValues; v++ ) {
 		const ralBindingValue_t *val = &ci->values[v];
 		switch ( val->type ) {
@@ -1624,11 +2318,14 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 	RAL_ZERO( *bg );
 	bg->header.refCount = 1; bg->backend = b; bg->layout = ci->layout;
 	bg->ownsSet = qtrue;   // native RAL allocation owns the set (Ral_AdoptBindGroup flips this to qfalse for adopted handles).
+	bg->arena = ci->arena;
+	if ( ci->arenaReceipt ) bg->arenaReceipt = *ci->arenaReceipt;
 	bg->bufferTrackingComplete = qtrue;
+	ralVk_InitDynamicBindings( bg, ci->layout );
 
 	RAL_ZERO( dai );
 	dai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-	dai.descriptorPool     = b->descriptorPool;
+	dai.descriptorPool     = pool;
 	dai.descriptorSetCount = 1;
 	dai.pSetLayouts        = &ci->layout->layout;
 	r = b->vk.AllocateDescriptorSets( b->device, &dai, &bg->set );
@@ -1645,7 +2342,10 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 		w->dstSet          = bg->set;
 		w->dstBinding      = val->binding;
 		w->dstArrayElement = 0;
-		w->descriptorType  = ralVk_DescType( val->type );
+		{
+			const ralVkBindEntry_t *entry = ralVk_FindLayoutEntry( ci->layout, val->binding );
+			w->descriptorType = entry ? entry->vkType : ralVk_DescType( val->type );
+		}
 		switch ( val->type ) {
 		case RAL_BIND_UNIFORM_BUFFER:
 		case RAL_BIND_STORAGE_BUFFER:
@@ -1663,6 +2363,19 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 			bufs[nb].offset = val->bufferOffset;
 			bufs[nb].range  = ( val->bufferRange == 0 ) ? VK_WHOLE_SIZE : val->bufferRange;
 			w->descriptorCount = 1; w->pBufferInfo = &bufs[nb]; nb++;
+			{
+				const ralVkBindEntry_t *entry = ralVk_FindLayoutEntry( ci->layout, val->binding );
+				if ( entry && entry->dynamicOffset ) {
+					uint64_t range = val->bufferRange == 0
+						? val->buffer->size - val->bufferOffset : val->bufferRange;
+					if ( !ralVk_RegisterDynamicBuffer( bg, val->binding, val->buffer,
+						val->bufferOffset, range ) ) {
+						if ( !bg->arena )
+							b->vk.FreeDescriptorSets( b->device, b->descriptorPool, 1, &bg->set );
+						free( bg ); return NULL;
+					}
+				}
+			}
 			break;
 		case RAL_BIND_SAMPLER:
 			if ( ni >= RAL_VK_MAX_BG_IMAGES || !val->sampler ) continue;
@@ -1716,7 +2429,7 @@ void Ral_DestroyBindGroup( ralBindGroup_t *g ) {
 	// own descriptor pool — vkFreeDescriptorSets would race with / double-free
 	// against the existing vkResetDescriptorPool / vk_destroy_descriptor_pools
 	// path. Wrapper struct is freed in both cases.
-	if ( g->ownsSet ) {
+	if ( g->ownsSet && !g->arena ) {
 		// the pool has FREE_DESCRIPTOR_SET_BIT — the set is returned to the
 		// pool via vkFreeDescriptorSets after the deferred-destroy delay.
 		ralVk_DeferDestroy( b, RAL_RES_DESC_SET, RAL_VK_H2U( g->set ), 0, NULL );
@@ -1746,17 +2459,29 @@ void *Ral_GetBindGroupHandle( const ralBindGroup_t *g ) {
 // destroy frees only the wrapper and leaves the renderer-owned handle intact.
 // ════════════════════════════════════════════════════════════════════════
 
-ralPipelineLayout_t *Ral_AdoptPipelineLayout( ralBackend_t *b, void *externalLayout, const char *debugName ) {
+static ralPipelineLayout_t *AdoptPipelineLayoutExact( ralBackend_t *b,
+		void *externalLayout, qboolean ownsHandle, const char *debugName ) {
 	ralPipelineLayout_t *pl;
-	if ( !b || !externalLayout ) return NULL;
+	if ( !b || !externalLayout || ( ownsHandle && !b->vk.DestroyPipelineLayout ) )
+		return NULL;
 	pl = (ralPipelineLayout_t *)malloc( sizeof( *pl ) );
 	if ( !pl ) return NULL;
 	RAL_ZERO( *pl );
 	pl->backend    = b;
 	pl->vkHandle   = (VkPipelineLayout)externalLayout;
-	pl->ownsHandle = qfalse;
+	pl->ownsHandle = ownsHandle;
 	if ( debugName ) ralVk_SetObjectName( b, (uint64_t)pl->vkHandle, VK_OBJECT_TYPE_PIPELINE_LAYOUT, debugName );
 	return pl;
+}
+
+ralPipelineLayout_t *Ral_AdoptPipelineLayout( ralBackend_t *b,
+		void *externalLayout, const char *debugName ) {
+	return AdoptPipelineLayoutExact( b, externalLayout, qfalse, debugName );
+}
+
+ralPipelineLayout_t *Ral_AdoptOwnedPipelineLayout( ralBackend_t *b,
+		void *externalLayout, const char *debugName ) {
+	return AdoptPipelineLayoutExact( b, externalLayout, qtrue, debugName );
 }
 
 void Ral_DestroyPipelineLayout( ralPipelineLayout_t *pl ) {
@@ -1769,6 +2494,38 @@ void Ral_DestroyPipelineLayout( ralPipelineLayout_t *pl ) {
 
 void *Ral_GetPipelineLayoutHandle( const ralPipelineLayout_t *pl ) {
 	return pl ? (void *)pl->vkHandle : NULL;
+}
+
+qboolean Ral_RegisterExternalPipelineLayoutPushRange(
+		ralPipelineLayout_t *layout, uint32_t stageFlags,
+		uint32_t offset, uint32_t size ) {
+	uint32_t i;
+	uint32_t limit;
+	if ( !layout || !layout->backend || layout->vkHandle == VK_NULL_HANDLE
+			|| stageFlags == 0u || ( stageFlags & ~RAL_STAGE_ALL ) != 0u
+			|| size == 0u || ( offset & 3u ) != 0u || ( size & 3u ) != 0u )
+		return qfalse;
+	limit = layout->backend->caps.maxPushConstantSize;
+	if ( limit == 0u || size > limit || offset > limit - size ) return qfalse;
+	for ( i = 0; i < layout->externalPushRangeCount; ++i ) {
+		const uint32_t priorEnd = layout->externalPushRanges[i].offset
+			+ layout->externalPushRanges[i].size;
+		const uint32_t candidateEnd = offset + size;
+		if ( layout->externalPushRanges[i].stageFlags == stageFlags
+				&& layout->externalPushRanges[i].offset == offset
+				&& layout->externalPushRanges[i].size == size ) return qtrue;
+		if ( ( layout->externalPushRanges[i].stageFlags & stageFlags ) != 0u
+				&& offset < priorEnd
+				&& layout->externalPushRanges[i].offset < candidateEnd ) return qfalse;
+	}
+	if ( layout->externalPushRangeCount >= RAL_VK_MAX_EXTERNAL_PUSH_RANGES )
+		return qfalse;
+	i = layout->externalPushRangeCount;
+	layout->externalPushRanges[i].stageFlags = stageFlags;
+	layout->externalPushRanges[i].offset = offset;
+	layout->externalPushRanges[i].size = size;
+	layout->externalPushRangeCount = i + 1u;
+	return qtrue;
 }
 
 ralBindGroup_t *Ral_AdoptBindGroup( ralBackend_t *b,
@@ -1789,10 +2546,22 @@ ralBindGroup_t *Ral_AdoptBindGroup( ralBackend_t *b,
 	g->set             = (VkDescriptorSet)externalSet;
 	g->layout          = layout;
 	g->ownsSet         = qfalse;
+	ralVk_InitDynamicBindings( g, layout );
 	if ( debugName ) {
 		ralVk_SetObjectName( b, (uint64_t)g->set, VK_OBJECT_TYPE_DESCRIPTOR_SET, debugName );
 	}
 	return g;
+}
+
+qboolean Ral_RegisterAdoptedBindGroupDynamicBuffer( ralBindGroup_t *group,
+	uint32_t binding, const ralBuffer_t *buffer, uint64_t baseOffset, uint64_t range ) {
+	uint32_t i;
+	if ( !group || group->ownsSet || !ralVk_RegisterDynamicBuffer(
+		group, binding, buffer, baseOffset, range ) ) return qfalse;
+	for ( i = 0; i < group->dynamicOffsetCount; ++i )
+		if ( !group->dynamicBindings[i].registered ) return qtrue;
+	group->bufferTrackingComplete = qtrue;
+	return qtrue;
 }
 
 // `tex == NULL` is a no-op clear. Vulkan doesn't have an
@@ -1810,7 +2579,7 @@ static void ralVk_BindGroupSetImageViewAt( ralBindGroup_t *g, uint32_t slot, VkI
 	VkDescriptorImageInfo img;
 	ralBackend_t         *b;
 	uint32_t              i, binding = 0xFFFFFFFFu;
-	if ( !g || imageView == VK_NULL_HANDLE ) return;
+	if ( !g || imageView == VK_NULL_HANDLE || !ralVk_BindGroupArenaLive( g ) ) return;
 	b = g->backend;
 	for ( i = 0; g->layout && i < g->layout->numEntries; i++ )
 		if ( g->layout->entries[i].vkType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ) { binding = g->layout->entries[i].binding; break; }
@@ -1847,7 +2616,8 @@ int Ral_BindGroupSetTextureViewsAt( ralBindGroup_t *g, const uint32_t *slots,
 	VkDescriptorImageInfo *images;
 	ralBackend_t *b;
 	uint32_t i, binding = 0xFFFFFFFFu, capacity = 0;
-	if ( !g || !slots || !views || count == 0 ) return 0;
+	if ( !g || !slots || !views || count == 0
+	  || !ralVk_BindGroupArenaLive( g ) ) return 0;
 	b = g->backend;
 	for ( i = 0; g->layout && i < g->layout->numEntries; ++i ) {
 		if ( g->layout->entries[i].vkType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ) {
@@ -1890,7 +2660,7 @@ void Ral_BindGroupSetSamplerAt( ralBindGroup_t *g, uint32_t slot, ralSampler_t *
 	VkDescriptorImageInfo img;
 	ralBackend_t         *b;
 	uint32_t              i, binding = 0xFFFFFFFFu;
-	if ( !g || !s ) return;
+	if ( !g || !s || !ralVk_BindGroupArenaLive( g ) ) return;
 	b = g->backend;
 	for ( i = 0; g->layout && i < g->layout->numEntries; i++ )
 		if ( g->layout->entries[i].vkType == VK_DESCRIPTOR_TYPE_SAMPLER ) { binding = g->layout->entries[i].binding; break; }
