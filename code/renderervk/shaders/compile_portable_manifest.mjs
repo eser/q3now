@@ -17,6 +17,13 @@ const DEFAULT_OVERRIDES = join(HERE, 'spirv', 'ral_shader_portability_overrides.
 const DEFAULT_MANIFEST = join(HERE, 'spirv', 'ral_shader_portable_manifest.json');
 const IQM_VEC3 = new Set(['iqm_skinning_vert_spv', 'iqm_temporal_exact3_vert_spv',
 	'shadow_depth_skinned_vert_spv']);
+// These modules share the effects ring at set 1/binding 0. SPIR-V reflection
+// can identify the UBO but not the host's dynamic-offset binding policy, so the
+// portable catalog compiler owns that exact semantic for Vulkan and WebGPU.
+const DYNAMIC_EFFECT_UBO = new Set([
+	'beam_frag_spv', 'beam_vert_spv', 'ribbon_frag_spv', 'ribbon_spiral_vert_spv',
+	'ribbon_vert_spv', 'sprite_frag_spv', 'sprite_vert_spv',
+]);
 
 function parseArgs(argv) {
 	const result = { reflection: DEFAULT_REFLECTION, overrides: DEFAULT_OVERRIDES,
@@ -93,6 +100,13 @@ function buildOverride(entry, wgsl) {
 	if (samplerKinds.length) override.samplerKinds = samplerKinds;
 	if (arrayCounts.length) override.arrayCounts = arrayCounts.sort((a, b) => a.set - b.set || a.binding - b.binding);
 	if (combinedSamplers.length) override.combinedSamplers = combinedSamplers;
+	if (DYNAMIC_EFFECT_UBO.has(entry.symbol)) {
+		const binding = entry.reflection.bindings.find((item) => item.set === 1 && item.binding === 0);
+		if (!binding || binding.bindingClass !== 'RAL_SHADER_BIND_UNIFORM_BUFFER'
+				|| binding.arrayCount !== 1 || binding.minBufferBindingSize !== 112)
+			throw new Error(`effects dynamic UBO mismatch: ${entry.symbol}`);
+		override.dynamicOffsets = [{ set: 1, binding: 0 }];
+	}
 	if (requirements.includes('inline-uniform-binding')) {
 		const occupied = new Set(entry.reflection.bindings.filter((item) => item.set === 0).map((item) => item.binding));
 		for (const item of combinedSamplers) if (item.samplerSet === 0) occupied.add(item.samplerBinding);

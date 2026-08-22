@@ -64,6 +64,12 @@ ralResult_t          Ral_GetCommandBufferReceipt( const ralCommandBuffer_t *cb,
 	                                              ralCommandReceipt_t *outReceipt );
 ralResult_t          Ral_CancelCommandBuffer( ralCommandBuffer_t *cb,
 	                                          const ralCommandReceipt_t *authority );
+// Recycle one completed submitted generation back to IDLE. The caller must
+// first prove completion of the submission carrying `submitted` (for example,
+// an exact fence wait). This shape maps to vkResetCommandBuffer on Vulkan and
+// dropping the finished command buffer/encoder generation on WebGPU.
+ralResult_t          Ral_RecycleCommandBufferExact( ralCommandBuffer_t *cb,
+	                                                 const ralCommandReceipt_t *submitted );
 void                Ral_BeginCommandBuffer   ( ralCommandBuffer_t *cb );
 void                Ral_EndCommandBuffer     ( ralCommandBuffer_t *cb );
 void                Ral_DestroyCommandBuffer ( ralCommandBuffer_t *cb );    // usually superseded by Ral_PoolReset
@@ -259,9 +265,10 @@ typedef struct {
 	ralOffset3D_t               dstOffsets[2];
 } ralImageBlit_t;
 
-// Clear attachment / clear rect — Vk-layout-compatible.
+// Clear attachment / clear rect. Aspect bits are portable RAL_TEXTURE_ASPECT_*
+// values; each backend performs its own native lowering.
 typedef struct {
-	uint32_t        aspectMask;        // == VkImageAspectFlags bits
+	ralTextureAspectFlags_t aspectMask;
 	uint32_t        colorAttachment;
 	ralClearValue_t clearValue;
 } ralClearAttachment_t;
@@ -327,9 +334,38 @@ typedef enum { RAL_INDEX_UINT16, RAL_INDEX_UINT32 } ralIndexType_t;
 
 void Ral_CmdBindPipeline    ( ralCommandBuffer_t *cb, ralPipeline_t *p );
 void Ral_CmdBindBindGroup   ( ralCommandBuffer_t *cb, uint32_t setIndex, ralBindGroup_t *g );
+// Binds one group with the exact dynamic-buffer offset vector declared by its
+// layout. Offsets are uint32/WebGPU-shaped and ordered by ascending binding.
+// Returns qfalse without emitting a backend command when count, alignment,
+// registered range, backend ownership or current-pipeline authority is wrong.
+qboolean Ral_CmdBindBindGroupDynamic( ralCommandBuffer_t *cb, uint32_t setIndex,
+	ralBindGroup_t *g, const uint32_t *dynamicOffsets, uint32_t dynamicOffsetCount );
+// Exact migration form. In addition to the dynamic-buffer checks above, this
+// requires authoritative set-layout metadata on the currently bound pipeline
+// and rejects a group whose layout is not the pipeline's layout at setIndex.
+qboolean Ral_CmdBindBindGroupDynamicExact( ralCommandBuffer_t *cb, uint32_t setIndex,
+	ralBindGroup_t *g, const uint32_t *dynamicOffsets, uint32_t dynamicOffsetCount );
+// Non-emitting counterpart used by pass-boundary transactions. It validates
+// the same exact layout/backend/lifecycle/dynamic-range authority against an
+// explicit target pipeline without changing command state or recording a
+// backend command. A later exact bind is therefore infallible provided the
+// validated cohort remains alive and unchanged.
+qboolean Ral_ValidateBindGroupDynamicExact( const ralCommandBuffer_t *cb,
+	const ralPipeline_t *pipeline, uint32_t setIndex, const ralBindGroup_t *g,
+	const uint32_t *dynamicOffsets, uint32_t dynamicOffsetCount );
 
 void Ral_CmdBindVertexBuffer( ralCommandBuffer_t *cb, uint32_t binding, ralBuffer_t *buf, uint64_t offset );
 void Ral_CmdBindIndexBuffer ( ralCommandBuffer_t *cb, ralBuffer_t *buf, uint64_t offset, ralIndexType_t type );
+// Exact, WebGPU-shaped buffer-binding authority. These variants reject an
+// invalid backend/usage/range/alignment/map/lifecycle cohort before recording
+// or changing the command buffer's tracked bindings.
+qboolean Ral_CmdBindVertexBufferExact( ralCommandBuffer_t *cb, uint32_t binding,
+	ralBuffer_t *buf, uint64_t offset );
+qboolean Ral_CmdBindVertexBuffersExact( ralCommandBuffer_t *cb,
+	uint32_t firstBinding, uint32_t bindingCount,
+	ralBuffer_t *const *buffers, const uint64_t *offsets );
+qboolean Ral_CmdBindIndexBufferExact( ralCommandBuffer_t *cb, ralBuffer_t *buf,
+	uint64_t offset, ralIndexType_t type );
 void Ral_CmdSetViewport     ( ralCommandBuffer_t *cb, const ralViewport_t *vp );
 void Ral_CmdSetScissor      ( ralCommandBuffer_t *cb, const ralRect_t *rect );
 void Ral_CmdSetDepthBias    ( ralCommandBuffer_t *cb, float constant, float clamp, float slope );
@@ -348,17 +384,40 @@ void Ral_CmdDispatchIndirect      ( ralCommandBuffer_t *cb, ralBuffer_t *argBuf,
 typedef struct { uint64_t srcOffset, dstOffset, size; } ralBufferCopy_t;
 typedef struct {
 	uint64_t  bufferOffset;
+	// Zero preserves the legacy tightly-packed Vulkan upload path. Portable
+	// readbacks provide an explicit texel-row pitch; Vulkan lowers it to
+	// bufferRowLength/bufferImageHeight and WebGPU consumes it directly.
+	uint32_t  bytesPerRow;
+	uint32_t  rowsPerImage;
 	uint32_t  mipLevel;
 	uint32_t  arrayLayer;
+	// Portable texture plane selection, matching GPUImageCopyTexture.aspect.
+	// Zero means "all available aspects" and is valid only when that resolves
+	// to one copyable plane (ordinary color/depth-only resources). Combined
+	// depth-stencil resources must select DEPTH or STENCIL explicitly.
+	ralTextureAspectFlags_t aspects;
 	ralRect_t imageRect;     // x/y/width/height of the destination texel region
 } ralBufferTextureCopy_t;
 
+// Exact form returns whether one copy command was emitted. It validates the
+// portable COPY_SRC/COPY_DST capabilities, bounds, non-overlap for same-buffer
+// copies, backend cohort, map state and command recording lifecycle first.
+qboolean Ral_CmdCopyBufferExact( ralCommandBuffer_t *cb, ralBuffer_t *src,
+	                          ralBuffer_t *dst, const ralBufferCopy_t *region );
 void Ral_CmdCopyBuffer          ( ralCommandBuffer_t *cb, ralBuffer_t *src, ralBuffer_t *dst, const ralBufferCopy_t *region );
 void Ral_CmdCopyBufferToTexture ( ralCommandBuffer_t *cb, ralBuffer_t *src, ralTexture_t *dst, const ralBufferTextureCopy_t *region );
 // Readback path — caller must first transition `src` to TRANSFER_SRC_OPTIMAL
 // via a barrier op (the RAL test does this directly today; the renderer
 // migration will route through the same coarse barriers).
-void Ral_CmdCopyTextureToBuffer ( ralCommandBuffer_t *cb, ralTexture_t *src, ralBuffer_t *dst, const ralBufferTextureCopy_t *region );
+qboolean Ral_CmdCopyTextureToBuffer( ralCommandBuffer_t *cb,
+	ralTexture_t *src, ralBuffer_t *dst,
+	const ralBufferTextureCopy_t *region );
+// Zero one aligned range of a STORAGE|TRANSFER_DST buffer and publish the
+// result for immediate compute storage read/write. This deliberately exposes
+// no arbitrary fill pattern: WebGPU's portable counterpart is
+// GPUCommandEncoder.clearBuffer, which is zero-only.
+qboolean Ral_CmdClearStorageBuffer( ralCommandBuffer_t *cb,
+	ralBuffer_t *buffer, uint64_t offset, uint64_t size );
 
 // ── barriers ────────────────────────────────────────────────────────────
 // v1 keeps barriers coarse — named transitions covering the renderer's and
@@ -367,9 +426,11 @@ void Ral_CmdCopyTextureToBuffer ( ralCommandBuffer_t *cb, ralTexture_t *src, ral
 typedef enum {
 	RAL_BARRIER_ALL,                    // full pipeline barrier
 	RAL_BARRIER_COMPUTE_TO_GRAPHICS,    // SSBO/UAV written by compute, read by graphics
+	RAL_BARRIER_COMPUTE_TO_COMPUTE,     // SSBO/UAV written by compute, read/written by compute
 	RAL_BARRIER_COMPUTE_TO_TRANSFER,    // SSBO/UAV written by compute, copied by transfer
 	RAL_BARRIER_GRAPHICS_TO_COMPUTE,
 	RAL_BARRIER_TRANSFER_TO_GRAPHICS,   // upload finished, sampled by graphics
+	RAL_BARRIER_COLOR_ATTACHMENT_TO_FRAGMENT, // attachment write visible to fragment sampling
 	RAL_BARRIER_INDIRECT                // buffer written by compute, consumed as indirect-draw args
 } ralBarrierScope_t;
 
@@ -450,13 +511,20 @@ void Ral_CmdBindVertexBuffers( ralCommandBuffer_t *cb, uint32_t firstBinding,
                                ralBuffer_t *const *buffers,
                                const uint64_t *offsets );
 
-// Push constants with explicit layout (renderer parallel-paths path — the
-// parallel cmd buffer doesn't track cb->currentLayout via Ral_CmdBindPipeline
-// because legacy qvkCmdBindPipeline + RAL parallel pipeline bind take
-// separate paths).
+// Push constants with an explicit layout. External/adopted layouts must first
+// publish their exact portable stage/range authority through the backend
+// migration bridge; the command then rejects lifecycle, backend, alignment,
+// stage and range drift before emission. stageFlags use RAL_STAGE_* on every
+// backend — never native Vulkan stage bits.
+qboolean Ral_CmdPushConstantsLayoutExact( ralCommandBuffer_t *cb,
+                                 ralPipelineLayout_t *layout,
+                                 uint32_t stageFlags,
+                                 uint32_t offset,
+                                 uint32_t size,
+                                 const void *data );
 void Ral_CmdPushConstantsLayout( ralCommandBuffer_t *cb,
                                  ralPipelineLayout_t *layout,
-                                 uint32_t stageFlags,        // raw VkShaderStageFlags (VK_SHADER_STAGE_*_BIT), passed through verbatim by the Vulkan backend — NOT the RAL_STAGE_* convention used by Ral_CmdPushConstants
+                                 uint32_t stageFlags,
                                  uint32_t offset,
                                  uint32_t size,
                                  const void *data );
@@ -493,7 +561,12 @@ void Ral_CmdBlitImage         ( ralCommandBuffer_t *cb, ralTexture_t *src, ralTe
                                 uint32_t regionCount, const ralImageBlit_t *regions,
                                 ralFilter_t filter );
 
-// Clear attachments mid-render-pass.
+// Clear attachments mid-render-pass. The exact form validates the complete
+// command before emission; the compatibility wrapper intentionally discards
+// that result.
+qboolean Ral_CmdClearAttachmentsExact( ralCommandBuffer_t *cb,
+	uint32_t attachmentCount, const ralClearAttachment_t *attachments,
+	uint32_t rectCount, const ralClearRect_t *rects );
 void Ral_CmdClearAttachments( ralCommandBuffer_t *cb, uint32_t attachmentCount,
                               const ralClearAttachment_t *attachments,
                               uint32_t rectCount, const ralClearRect_t *rects );

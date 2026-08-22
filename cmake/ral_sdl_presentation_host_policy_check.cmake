@@ -27,6 +27,8 @@ foreach(forbidden IN ITEMS "SDL_Window" "SDL_MetalView" "CAMetalLayer"
 	endif()
 endforeach()
 foreach(needle IN ITEMS "RAL_BACKEND_WEBGPU"
+	"WiredSdlRalPresentationHost_Create( 1280u, 720u"
+	"WiredSdlRalPresentationHost_RequestResize( host, 1600u, 900u )"
 	"memcmp( &receipt, &beforeReceipt, sizeof( receipt ) ) == 0"
 	"WiredSdlRalPresentationHost_RequestResize"
 	"resized.surfaceGeneration > receipt.surfaceGeneration"
@@ -39,6 +41,9 @@ foreach(needle IN ITEMS "RAL_BACKEND_WEBGPU"
 	endif()
 endforeach()
 foreach(needle IN ITEMS
+	"!Ral_PresentationExtentValid( (uint32_t)logicalWidth"
+	"!Ral_PresentationExtentValid( (uint32_t)pixelWidth"
+	"!Ral_PresentationExtentValid( logicalWidth, logicalHeight )"
 	"SDL_WINDOW_METAL | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN"
 	"SDL_Metal_CreateView( host->window )" "SDL_Metal_GetLayer( host->view )"
 	"receipt.ownerIdentity = (uintptr_t)host->window"

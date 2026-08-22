@@ -44,7 +44,7 @@ require_text(VKC "R_TemporalBatchRequestValidateExact( temporalRequest )" "exact
 require_text(VKC "if ( temporalCapacityRequested )\n\t\tvk_entmat_ensure_temporal_ring( temporalRequiredSlots );" "active ring-wide raw ensure")
 require_text(VKC "if ( !temporalCapacityRequested )\n\t\tvk_entmat_ensure_buffer( 1024u );" "ordinary OFF current-slot ensure")
 require_text(VKC "if ( !ri.CL_IsMinimized() && !vk.cmd->swapchain_image_acquired )" "acquire follows ensure")
-require_text(VKC "VK_CHECK( qvkBeginCommandBuffer" "command begin follows ensure")
+require_text(VKC "vk_ral_begin_command_exact( vk.cmd->ral_cmd, \"vk_begin_frame\" );" "exact RAL command begin follows ensure")
 require_text(VKC "replacingRawParent" "first-slot retention guard")
 require_text(VKC "vk_temporal_entmat_release_after_idle( \"raw-ring-materialize\" );" "aggregate child release before ring raw replacement")
 require_text(VKC "vk_temporal_entmat_release_after_idle( \"full-shutdown\" );" "full shutdown child release")
@@ -74,7 +74,7 @@ string(FIND "${FRAME_BODY}" "vk_frame_t_after_fence" frame_fence)
 string(FIND "${FRAME_BODY}" "vk_entmat_ensure_temporal_ring( temporalRequiredSlots );" frame_ensure)
 string(FIND "${FRAME_BODY}" "VK_TemporalEntMatRuntimeEnsureAfterFence" frame_runtime)
 string(FIND "${FRAME_BODY}" "Ral_AcquireNextImage" frame_acquire)
-string(FIND "${FRAME_BODY}" "qvkBeginCommandBuffer" frame_begin_cb)
+string(FIND "${FRAME_BODY}" "vk_ral_begin_command_exact( vk.cmd->ral_cmd, \"vk_begin_frame\" );" frame_begin_cb)
 if(frame_fence LESS 0 OR frame_ensure LESS frame_fence
 		OR frame_runtime LESS frame_ensure OR frame_acquire LESS frame_runtime
 		OR frame_begin_cb LESS frame_acquire)

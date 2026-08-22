@@ -25,13 +25,42 @@ typedef struct {
 } ralSurfaceFormat_t;
 
 typedef struct {
+	const ralSurfaceFormat_t *preferences;          // ordered exact pairs
+	uint32_t                  preferenceCount;
+	qboolean                  useExtendedQuery;     // request backend colorspace-aware enumeration
+	const void               *backendExtensionChain; // optional backend query pNext/interoperability chain
+} ralSurfaceFormatSelectionInfo_t;
+
+typedef struct {
+	ralSurfaceFormat_t selected;
+	uint32_t           selectedPreference;
+	uint32_t           availableFormatCount;
+	qboolean           extendedQuery;
+} ralSurfaceFormatSelection_t;
+
+#define RAL_SWAPCHAIN_MAX_REQUESTED_IMAGES 16u
+
+// Query the backend-owned presentation surface and select the first supported
+// portable format/colorspace pair. Output is unchanged on rejection/failure.
+// The optional extension chain is backend interop only (for example Vulkan
+// Win32 full-screen-exclusive HDR enumeration); portable callers leave it NULL.
+ralResult_t Ral_SelectSurfaceFormat( ralBackend_t *b,
+	const ralSurfaceFormatSelectionInfo_t *info,
+	ralSurfaceFormatSelection_t *outSelection );
+
+typedef struct {
+	ralPresentMode_t mode;
+	uint32_t desiredImageCount;          // 0 -> backend default
+	uint32_t unboundedImageCount;        // 0 -> desiredImageCount; used when the surface reports no maximum
+} ralPresentPreference_t;
+
+typedef struct {
 	uint32_t                  desiredWidth;
 	uint32_t                  desiredHeight;
 	const ralSurfaceFormat_t *formatPreferences;      // ordered, exact format+colour-space pairs
 	uint32_t                  formatPreferenceCount;
-	const ralPresentMode_t   *presentModePreferences; // ordered; include every acceptable fallback
-	uint32_t                  presentModePreferenceCount;
-	uint32_t                  desiredImageCount;      // 0 → backend default, clamped to surface caps
+	const ralPresentPreference_t *presentPreferences; // ordered; each mode carries its exact image-count policy
+	uint32_t                  presentPreferenceCount;
 	ralTextureUsage_t         requiredUsage;          // exact hard requirements; unsupported bits fail
 	// Backend-extension pass-through
 	// for the swapchain create info struct's extension chain. On Vulkan, this
@@ -50,6 +79,7 @@ typedef struct {
 	ralFormat_t       format;
 	ralColorSpace_t   colorSpace;
 	ralPresentMode_t  presentMode;
+	uint32_t          requestedImageCount; // selected preference after surface-cap clamping
 	uint32_t          imageCount;
 	ralTextureUsage_t usage;
 } ralSwapchainInfo_t;

@@ -49,6 +49,9 @@ int main( void ) {
 	ralPresentationHostReceipt_t exact;
 	ralPresentationSurfaceBorrow_t borrowExact;
 
+	CHECK( Ral_PresentationExtentValid( 1280u, 720u ) );
+	CHECK( !Ral_PresentationExtentValid( 640u, 480u ) );
+	CHECK( !Ral_PresentationExtentValid( 0u, 720u ) );
 	CHECK( Ral_PresentationHostOpenInfoValid( &openInfo ) );
 	CHECK( Ral_PresentationHostReceiptExact( &receipt, &receipt ) );
 	CHECK( Ral_PresentationSurfaceBorrowExact( &borrow, &borrow ) );

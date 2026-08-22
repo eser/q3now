@@ -1783,7 +1783,7 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 				surf->num_triangles * 3,
 				boneMatsGpu,
 				data->num_poses,
-				ordinaryImage->descriptor,
+				ordinaryImage->ralDescriptor,
 				mvp );
 		}
 

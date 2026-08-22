@@ -49,6 +49,7 @@ typedef struct ralTextureView_s      ralTextureView_t;
 typedef struct ralSampler_s          ralSampler_t;
 typedef struct ralBindGroupLayout_s  ralBindGroupLayout_t;
 typedef struct ralBindGroup_s        ralBindGroup_t;
+typedef struct ralBindGroupArena_s   ralBindGroupArena_t;
 typedef struct ralPipeline_s         ralPipeline_t;
 typedef struct ralPipelineLayout_s   ralPipelineLayout_t;   // typed cmd API
 typedef struct ralCommandBuffer_s    ralCommandBuffer_t;
@@ -138,6 +139,16 @@ typedef enum {
 	RAL_FORMAT_ASTC_4x4_SRGB,
 	RAL_FORMAT_ETC2_R8G8B8A8_UNORM,
 	RAL_FORMAT_ETC2_R8G8B8A8_SRGB,
+
+	// Extended BC variants are appended to preserve the numeric identity of the
+	// original public format enum. DDS distinguishes these exact encodings.
+	RAL_FORMAT_BC1_RGB_UNORM,
+	RAL_FORMAT_BC1_RGB_SRGB,
+	RAL_FORMAT_BC2_UNORM,
+	RAL_FORMAT_BC2_SRGB,
+	RAL_FORMAT_BC4_SNORM,
+	RAL_FORMAT_BC5_SNORM,
+	RAL_FORMAT_BC6H_SFLOAT,
 
 	RAL_FORMAT_COUNT
 } ralFormat_t;

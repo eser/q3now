@@ -4,8 +4,17 @@ endif()
 
 file(READ "${ROOT}/code/renderer/ral/ral_readback.h" HEADER)
 file(READ "${ROOT}/code/renderer/ral/ral_readback.c" CORE)
+file(READ "${ROOT}/code/renderer/ral/ral_resource.h" RESOURCE_HEADER)
+file(READ "${ROOT}/code/renderer/ral/ral_transfer.c" TRANSFER)
+file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_command.c" COMMAND)
 file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_readback.c" VULKAN)
+file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_resource.c" RESOURCE)
+file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_swapchain.c" SWAPCHAIN)
+file(READ "${ROOT}/code/renderervk/vk.c" PRODUCT)
 file(READ "${ROOT}/tests/ral_readback_owner_test.c" HOST)
+file(READ "${ROOT}/tests/ral_texture_resource_receipt_test.c" RESOURCE_HOST)
+file(READ "${ROOT}/tests/ral_vulkan_texture_copy_test.c" COPY_HOST)
+file(READ "${ROOT}/tests/ral-readback-runtime-check.sh" RUNTIME)
 
 function(require_text haystack needle label)
   string(FIND "${${haystack}}" "${needle}" pos)
@@ -18,25 +27,51 @@ require_text(HEADER "ralTransferReceipt_t transfer;" "generation-bound transfer 
 require_text(HEADER "ralAllocationReceipt_t stagingAllocation;" "staging allocation receipt")
 require_text(HEADER "uintptr_t submissionIdentity;" "submission identity")
 require_text(HEADER "ralResult_t (*mapCancel)" "managed pending-map cancel")
+require_text(HEADER "qboolean (*submissionWait)" "portable blocking completion seam")
 require_text(HEADER "qboolean (*candidateAllowed)" "typed ownership oracle")
 require_text(CORE "receipt->transfer.request.direction != RAL_TRANSFER_READBACK" "readback-only owner")
 require_text(CORE "allocation.ownerIdentity != (uintptr_t)staging" "staging allocation join")
 require_text(CORE "!live->receipt.ready || live->mapActive" "release completion/map gate")
 require_text(CORE "live->ops->retireStaging" "staging-before-submission release")
 require_text(CORE "live->ops->retireSubmission" "submission release")
+require_text(CORE "qboolean Ral_ReadbackWait(" "exact blocking completion owner")
+require_text(RESOURCE_HEADER "ralTextureResourceReceipt_t" "imported texture resource receipt")
+require_text(RESOURCE_HEADER "uint64_t          resourceGeneration;" "texture resource generation")
+require_text(RESOURCE "tex->resourceGeneration = tex->alloc->receipt.allocationGeneration;" "owned texture allocation generation")
+require_text(RESOURCE "b->nextTextureGeneration = generation;" "imported texture monotonic generation")
+require_text(RESOURCE "qboolean Ral_TextureResourceReceiptExact(" "texture receipt exact comparator")
+require_text(TRANSFER "( request->bytesPerRow & 255u ) != 0u" "WebGPU row alignment")
 require_text(VULKAN "RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ" "portable staging flags")
 require_text(VULKAN "Ral_CmdTransitionResources" "portable transition commands")
 require_text(VULKAN "Ral_CmdCopyBuffer(" "buffer copy command")
 require_text(VULKAN "Ral_CmdCopyTextureToBuffer(" "texture copy command")
 require_text(VULKAN "Ral_SubmitExact(" "exact submission")
 require_text(VULKAN "Ral_FenceSignaled(" "completion fence")
+require_text(VULKAN "Ral_WaitFence( context->fence, RAL_TIMEOUT_INFINITE )" "blocking fence completion")
+require_text(VULKAN "paddedBytesPerRow = ( tightBytesPerRow + 255u )" "padded texture rows")
+require_text(VULKAN "request.bytesPerRow = (uint32_t)paddedBytesPerRow;" "published row pitch")
+require_text(COMMAND "bic.bufferRowLength" "Vulkan row-length lowering")
+require_text(COMMAND "region->bytesPerRow / bpp" "byte-to-texel row conversion")
 require_text(VULKAN "Ral_BufferMapBegin(" "typed read map")
 require_text(VULKAN "Ral_DestroyBuffer( staging )" "staging retirement")
 require_text(VULKAN "RestorePortableState( context )" "failed-record rollback")
 require_text(HOST "ticket.status==RAL_BUFFER_MAP_PENDING" "WebGPU pending map fixture")
 require_text(HOST "Ral_ReadbackMapCancel(owner,&ticket)" "pending-map cancel mutation")
+require_text(HOST "Ral_ReadbackWait(owner)" "blocking completion host")
 require_text(HOST "!Ral_ReadbackRelease(&owner)" "mapped/early release rejection")
 require_text(HOST "!memcmp(f.retired,\"SF\",2)" "child-before-fence retirement")
+require_text(RESOURCE_HOST "receipt.resourceGeneration == 41u" "imported generation receipt")
+require_text(RESOURCE_HOST "bad.resourceGeneration++" "stale texture generation mutation")
+require_text(RESOURCE_HOST "backend.nextTextureGeneration = UINT64_MAX - 1u" "generation saturation")
+require_text(COPY_HOST "captured.bufferRowLength == 64u" "Vulkan padded row lowering")
+require_text(COPY_HOST "bad.bytesPerRow = 255u" "invalid row pitch mutation")
+require_text(COPY_HOST "buffer.size--" "padded staging bounds mutation")
+require_text(RUNTIME "+set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720" "exact 1280x720 native window")
+require_text(RUNTIME "screenshot ral_readback tga silent; screenshot ral_readback png silent" "same-frame dual-format capture")
+require_text(RUNTIME "if tga_rgb != png_rgb:" "decoded RGB parity")
+require_text(RUNTIME "mean <= 5.0 or span <= 16" "dark capture rejection")
+require_text(RUNTIME "requested=1280x720 logical=1280x720" "published widescreen receipt")
+require_text(RUNTIME "VUID-" "validation failure gate")
 
 string(REGEX MATCHALL "Ral_BufferReadbackBegin[(]" BUFFER_BEGIN "${VULKAN}")
 list(LENGTH BUFFER_BEGIN BUFFER_BEGIN_COUNT)
@@ -48,5 +83,54 @@ list(LENGTH TEXTURE_BEGIN TEXTURE_BEGIN_COUNT)
 if(NOT TEXTURE_BEGIN_COUNT EQUAL 1)
   message(FATAL_ERROR "ral readback policy requires exactly one Vulkan texture adapter")
 endif()
+
+# Shipping screenshot readback must remain entirely on the typed owner. The
+# rest of vk.c still has legacy resource creation during unrelated migrations,
+# so isolate the exact function rather than weakening this boundary globally.
+string(FIND "${PRODUCT}" "void vk_read_pixels( byte *buffer" PRODUCT_BEGIN)
+if(PRODUCT_BEGIN EQUAL -1)
+  message(FATAL_ERROR "ral readback policy could not isolate vk_read_pixels")
+endif()
+string(SUBSTRING "${PRODUCT}" ${PRODUCT_BEGIN} -1 PRODUCT_TAIL)
+string(FIND "${PRODUCT_TAIL}" "#if FEAT_SHADOW_MAPPING" PRODUCT_LEN)
+if(PRODUCT_LEN EQUAL -1)
+  message(FATAL_ERROR "ral readback policy could not find vk_read_pixels end")
+endif()
+string(SUBSTRING "${PRODUCT_TAIL}" 0 ${PRODUCT_LEN} PRODUCT_READBACK)
+foreach(required IN ITEMS
+    "!vk.cmd || !vk.cmd->waitForFence"
+    "same frame would then wait forever on an already-consumed fence"
+    "swapchainReceipt.generation != vk.cmd->swapchain_generation"
+    "Ral_TextureGetResourceReceipt( source, &sourceReceipt )"
+    "Ral_TextureReadbackBegin( source, &region, &readbackOwner )"
+    "Ral_ReadbackWait( readbackOwner )"
+    "Ral_ReadbackMapBegin( readbackOwner, &mapTicket )"
+    "Ral_ReadbackMapPoll( readbackOwner, &mapTicket"
+    "rowPitch = readbackReceipt.transfer.request.bytesPerRow;"
+    "Ral_TextureResourceReceiptExact( &sourceReceipt, &currentReceipt )"
+    "Ral_ReadbackMapUnmap( readbackOwner, &mapTicket )"
+    "Ral_ReadbackRelease( &readbackOwner )")
+  string(FIND "${PRODUCT_READBACK}" "${required}" POS)
+  if(POS EQUAL -1)
+    message(FATAL_ERROR "ral readback product seam lost: ${required}")
+  endif()
+endforeach()
+string(FIND "${PRODUCT_READBACK}" "Ral_WaitFence( vk.cmd->ral_rendering_finished_fence" FRAME_FENCE_WAIT)
+if(NOT FRAME_FENCE_WAIT EQUAL -1)
+  message(FATAL_ERROR "vk_read_pixels regained the reset-prone per-frame fence wait")
+endif()
+foreach(forbidden IN ITEMS
+    "qvkCreateImage(" "qvkAllocateMemory(" "qvkBindImageMemory("
+    "qvkCmdCopyImage(" "qvkMapMemory(" "qvkInvalidateMappedMemoryRanges("
+    "qvkDestroyImage(" "qvkFreeMemory(" "record_image_layout_transition(")
+  string(FIND "${PRODUCT_READBACK}" "${forbidden}" POS)
+  if(NOT POS EQUAL -1)
+    message(FATAL_ERROR "vk_read_pixels regained raw Vulkan authority: ${forbidden}")
+  endif()
+endforeach()
+
+require_text(SWAPCHAIN "Ral_AdoptTextureExact(" "swapchain exact texture import")
+require_text(SWAPCHAIN "sc->usage, \"wired-swapchain-image\"" "swapchain creation-time usage")
+require_text(COMMAND "tex->portableState = (ralResourceState_t){ RAL_RESOURCE_USAGE_PRESENT, 0 };" "present portable state publication")
 
 message(STATUS "RAL readback policy: PASS")

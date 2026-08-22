@@ -79,6 +79,21 @@ void vk_ral_backend_shutdown( void );
 // vkUpdateDescriptorSets writes complete. Idempotent: re-init clears the
 // registry then re-adopts.
 void     vk_ral_adopt_static_bindgroups( void );
+// Release every wrapper whose underlying VkDescriptorSet belongs to the
+// renderer descriptor pool. Must run before qvkReset/DestroyDescriptorPool.
+void     vk_ral_release_static_bindgroups( void );
+// Per-slot exact wrapper for the main dynamic UBO descriptor. Geometry-buffer
+// replacement destroys it before the registered buffer and refreshes it after
+// the native descriptor is rewritten.
+qboolean vk_ral_refresh_tess_uniform_bindgroup( uint32_t slot );
+void     vk_ral_release_tess_uniform_bindgroup( uint32_t slot );
+qboolean vk_ral_refresh_entmat_bindgroup( uint32_t slot );
+void     vk_ral_release_entmat_bindgroup( uint32_t slot );
+
+// Per-image legacy sampler-set interop. The native descriptor remains owned by
+// the renderer pool; the wrapper provides typed command authority only.
+qboolean vk_ral_adopt_image_descriptor( image_t *image );
+void     vk_ral_release_image_descriptor( image_t *image );
 
 // VkDescriptorSet → ralBindGroup_t * reverse lookup
 // over the adoption registry. Returns NULL when `vkSet` isn't adopted
@@ -141,7 +156,8 @@ void vk_ral_adopt_one_pipeline_layout( VkPipelineLayout vkLayout,
 // capture image, re-created on swapchain/r_hdr/r_fbo rebuilds). Adopt at creation,
 // KILL the sibling before the VkImage destroy. Idempotent; NULL vkImage no-ops.
 void vk_ral_adopt_one_texture( VkImage vkImage, VkImageView vkView, VkFormat fmt,
-		struct ralTexture_s **ralField, uint32_t w, uint32_t h, uint32_t aspect, const char *label );
+		struct ralTexture_s **ralField, uint32_t w, uint32_t h, uint32_t aspect,
+		ralTextureUsage_t usage, const char *label );
 
 // bindless-ral-consolidate — accessors for the RAL-owned bindless layout + set.
 // The layout's binding shape is image-array (binding=0, unbounded) + sampler
@@ -164,7 +180,7 @@ qboolean vk_ral_bindless_publish_texture( struct image_s *image,
 	uint32_t slot, struct ralTexture_s *texture,
 	vkBindlessPublicationKind_t kind );
 qboolean vk_ral_bindless_publish_sampler( uint32_t slot,
-	VkSampler sampler, const Vk_Sampler_Def *definition );
+	struct ralSampler_s *sampler, const Vk_Sampler_Def *definition );
 qboolean vk_ral_bindless_record_legacy_exact( struct image_s *image,
 	uint32_t slot, VkImageView view );
 qboolean vk_ral_bindless_record_raw_image( struct image_s *image,
@@ -296,13 +312,12 @@ void     vk_ral_upload_counts( uint32_t *syncOut, uint32_t *asyncOut );
 // WIRED_BINDLESS_TEX_ARRAY) picks which to read.
 int vk_ral_alloc_array_bindless_slot( const char *imgName );
 
-// Parallel-paths buffer migration. Each legacy vkCreateBuffer
+// Exact native-buffer adoption bridge. Each legacy vkCreateBuffer
 // site in vk.c calls vk_ral_register_buffer right after qvkBindBufferMemory;
 // the matching qvkDestroyBuffer is preceded by vk_ral_unregister_buffer.
-// `key` is the legacy VkBuffer handle, used to index the parallel RAL
-// buffer in the tracking table (so callers don't need a sibling field on
-// every struct). Cvar-gated by r_useRALBuffers — when 0 the calls are
-// no-ops, identical to the pre-migration behaviour.
+// `key` is both the lookup key and the exact native identity borrowed by the
+// non-owning RAL wrapper; no second GPU buffer is allocated and raw parent
+// destruction remains renderer-owned.
 //
 // Backend-availability handling: register calls made before
 // vk_ral_textures_init has brought up the persistent RAL backend (which
@@ -314,9 +329,7 @@ int vk_ral_alloc_array_bindless_slot( const char *imgName );
 // sites are registered after the backend is live and skip the queue.
 //
 // Helpers translate the legacy VkBufferUsageFlags + VkMemoryPropertyFlags
-// internally — callers in vk.c pass exactly the values they hand to
-// vkCreateBuffer / vkAllocateMemory and let the helper map to the RAL
-// enums. Keeps the renderer .c files free of an ral_resource.h dependency.
+// internally and retain those exact portable capabilities in the wrapper.
 void vk_ral_register_buffer  ( VkBuffer key, uint64_t size,
                                VkBufferUsageFlags vkUsage,
                                VkMemoryPropertyFlags vkMemProps,

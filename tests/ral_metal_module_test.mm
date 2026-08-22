@@ -51,7 +51,7 @@ int main( void ) {
 	CHECK( getRefApi != NULL && getFrameReceipt != NULL && frameReceiptExact != NULL );
 	memset( &imports, 0, sizeof( imports ) );
 	CHECK( getRefApi( REF_API_VERSION, &imports ) == NULL );
-	CHECK( WiredSdlRalPresentationHost_Create( 640u, 360u, qfalse, 701u,
+	CHECK( WiredSdlRalPresentationHost_Create( 1280u, 720u, qfalse, 701u,
 		&presentationHost, &imports.PresentationHost ) );
 	CHECK( getRefApi( REF_API_VERSION - 1, &imports ) == NULL );
 	exports = getRefApi( REF_API_VERSION, &imports );

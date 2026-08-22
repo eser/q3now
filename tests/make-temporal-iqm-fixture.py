@@ -66,6 +66,9 @@ def build_iqm() -> bytes:
     # Animate only the root's lateral Y translation.  The camera and world stay
     # fixed in the runtime contract, so nonzero screen velocity is attributable
     # to this exact two-pose palette chain rather than to camera input.
+    # Frame values are 0 and 8, so 1.0 yields eight world-units of motion.  At
+    # the frozen third-person camera this stays above the runtime motion gate
+    # while keeping the previous footprint inside the bounded readback apron.
     channel_scale = (0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                      0.0, 0.0, 0.0)
     blob.extend(struct.pack("<iI20f", -1, 1 << 1,

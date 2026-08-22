@@ -27,6 +27,10 @@ foreach(forbidden IN ITEMS "CAMetalLayer" "SDL_Window" "SDL_MetalView" "VkInstan
 	endif()
 endforeach()
 foreach(needle IN ITEMS
+	"!Ral_PresentationExtentValid( createInfo->desiredWidth"
+	"!Ral_PresentationExtentValid( logicalWidth, logicalHeight )"
+	"!Ral_PresentationExtentValid( (uint32_t)pixelWidth"
+	"!Ral_PresentationExtentValid( (uint32_t)logicalActualWidth"
 	"SDL_InitSubSystem( SDL_INIT_VIDEO )"
 	"SDL_WINDOW_METAL | SDL_WINDOW_HIDDEN"
 	"SDL_Metal_CreateView( candidate->window )"
@@ -55,8 +59,9 @@ foreach(needle IN ITEMS
 	"receipt.presentation.ownsLayer == qfalse"
 	"adapter == (wiredMetalSdl_t *)(uintptr_t)0x1234u"
 	"memcmp( &receipt, &before, sizeof( receipt ) ) == 0"
+	"createInfo.desiredWidth = 1280u; createInfo.desiredHeight = 720u"
 	"WiredMetalSdl_PresentClear" "203u, 204u" "205u, 206u"
-	"WiredMetalSdl_Resize" "80u, 60u, 207u"
+	"WiredMetalSdl_Resize" "1600u, 900u, 207u"
 	"resized.presentation.layerIdentity == receipt.presentation.layerIdentity"
 	"208u, 209u" "RalMetal_PresentReceiptExact")
 	string(FIND "${TEST}" "${needle}" pos)

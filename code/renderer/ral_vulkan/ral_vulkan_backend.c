@@ -78,6 +78,7 @@ static void ralVk_DestroyBackendInternal( ralBackend_t *b ) {
 	// descriptor pool. Idempotent and cheap.
 	if ( b->device != VK_NULL_HANDLE && b->vk.DeviceWaitIdle )
 		b->vk.DeviceWaitIdle( b->device );
+	ralVk_DestroyLegacyShaderModules( b );
 	ralVk_DrainPendingDestroy( b, ~0ull );   // drain everything still queued
 	ralVk_ShutdownPipelineLayer( b );        // VkPipelineCache + layout cache
 	ralVk_ShutdownResourceLayer( b );        // descriptor pool / live allocations
@@ -173,6 +174,7 @@ static qboolean ralVk_LoadInstanceFuncs( ralBackend_t *b ) {
 	LOAD_OPT( GetPhysicalDeviceSurfaceSupportKHR,     vkGetPhysicalDeviceSurfaceSupportKHR )
 	LOAD_OPT( GetPhysicalDeviceSurfaceCapabilitiesKHR, vkGetPhysicalDeviceSurfaceCapabilitiesKHR )
 	LOAD_OPT( GetPhysicalDeviceSurfaceFormatsKHR,     vkGetPhysicalDeviceSurfaceFormatsKHR )
+	LOAD_OPT( GetPhysicalDeviceSurfaceFormats2KHR,    vkGetPhysicalDeviceSurfaceFormats2KHR )
 	LOAD_OPT( GetPhysicalDeviceSurfacePresentModesKHR, vkGetPhysicalDeviceSurfacePresentModesKHR )
 	return qtrue;
 	#undef LOAD_REQ
@@ -217,6 +219,7 @@ static qboolean ralVk_LoadDeviceFuncs( ralBackend_t *b ) {
 	LOAD_DEV( DestroyDescriptorSetLayout,     vkDestroyDescriptorSetLayout )
 	LOAD_DEV( CreateDescriptorPool,           vkCreateDescriptorPool )
 	LOAD_DEV( DestroyDescriptorPool,          vkDestroyDescriptorPool )
+	LOAD_DEV( ResetDescriptorPool,            vkResetDescriptorPool )
 	LOAD_DEV( AllocateDescriptorSets,         vkAllocateDescriptorSets )
 	LOAD_DEV( FreeDescriptorSets,             vkFreeDescriptorSets )
 	LOAD_DEV( UpdateDescriptorSets,           vkUpdateDescriptorSets )
@@ -233,6 +236,7 @@ static qboolean ralVk_LoadDeviceFuncs( ralBackend_t *b ) {
 	LOAD_DEV( CmdCopyBufferToImage,           vkCmdCopyBufferToImage )
 	LOAD_DEV( CmdCopyImageToBuffer,           vkCmdCopyImageToBuffer )
 	LOAD_DEV( CmdBlitImage,                   vkCmdBlitImage )
+	LOAD_DEV( CmdFillBuffer,                  vkCmdFillBuffer )
 	LOAD_DEV( CmdPipelineBarrier,             vkCmdPipelineBarrier )
 	LOAD_DEV( CmdSetViewport,                 vkCmdSetViewport )
 	LOAD_DEV( CmdSetScissor,                  vkCmdSetScissor )

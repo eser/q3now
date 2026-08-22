@@ -143,13 +143,33 @@ int main( void ) {
 	CHECK( capture.image.newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 	CHECK( texture.currentLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 
+	// A combined depth-stencil resource transitions both native planes even
+	// when later sampling views select only the depth plane.
+	SetupTexture( &texture2, &backend, 0x301u, RAL_RESOURCE_USAGE_UNDEFINED,
+		VK_IMAGE_LAYOUT_UNDEFINED, RAL_QUEUE_GRAPHICS );
+	texture2.aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+	textureTransition.texture = &texture2;
+	textureTransition.aspects = RAL_TEXTURE_ASPECT_DEPTH | RAL_TEXTURE_ASPECT_STENCIL;
+	textureTransition.before.usage = RAL_RESOURCE_USAGE_UNDEFINED;
+	textureTransition.before.shaderStages = 0;
+	textureTransition.after.usage = RAL_RESOURCE_USAGE_COPY_DESTINATION;
+	textureTransition.after.shaderStages = 0;
+	CHECK( Ral_CmdTransitionResources( &command, &batch ) == ralSuccess );
+	CHECK( capture.calls == 3
+		&& capture.image.subresourceRange.aspectMask
+			== ( VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT ) );
+
+	// Restore the color transition fixture for rejection coverage below.
+	textureTransition.texture = &texture;
+	textureTransition.aspects = RAL_TEXTURE_ASPECT_COLOR;
+
 	// Active render/compute pass boundaries reject before any command or state mutation.
 	command.renderingActive = qtrue;
 	textureTransition.before = texture.portableState;
 	textureTransition.after.usage = RAL_RESOURCE_USAGE_STORAGE_READ;
 	textureTransition.after.shaderStages = RAL_STAGE_COMPUTE;
 	CHECK( Ral_CmdTransitionResources( &command, &batch ) == ralErrorInvalidArgument );
-	CHECK( capture.calls == 2 && texture.portableState.usage == RAL_RESOURCE_USAGE_SAMPLED_TEXTURE );
+	CHECK( capture.calls == 3 && texture.portableState.usage == RAL_RESOURCE_USAGE_SAMPLED_TEXTURE );
 	command.renderingActive = qfalse;
 
 	// A batch with one invalid member is output-atomic.
@@ -163,7 +183,7 @@ int main( void ) {
 		batch.bufferTransitionCount = 2;
 		batch.textureTransitionCount = 0;
 		CHECK( Ral_CmdTransitionResources( &command, &batch ) == ralErrorInvalidArgument );
-		CHECK( capture.calls == 2 );
+		CHECK( capture.calls == 3 );
 		CHECK( buffer.portableState.usage == RAL_RESOURCE_USAGE_COPY_DESTINATION );
 	}
 
@@ -176,7 +196,7 @@ int main( void ) {
 	bufferTransition.size = 256;
 	buffer.portableStateKnown = qfalse;
 	CHECK( Ral_CmdTransitionResources( &command, &batch ) == ralErrorInvalidArgument );
-	CHECK( capture.calls == 2 );
+	CHECK( capture.calls == 3 );
 
 	// A generation-bound typed map excludes portable GPU transitions.
 	SetupBuffer( &buffer, &backend, 0x200u, 256, RAL_RESOURCE_USAGE_COPY_DESTINATION, RAL_QUEUE_GRAPHICS );
@@ -194,7 +214,7 @@ int main( void ) {
 		CHECK( Ral_BufferMapLifecyclePublishBegin( &buffer.mapLifecycle, &buffer, 256,
 			&request, qtrue, (void *)(uintptr_t)0x500u, &ticket ) == ralSuccess );
 		CHECK( Ral_CmdTransitionResources( &command, &batch ) == ralErrorInvalidArgument );
-		CHECK( capture.calls == 2 );
+		CHECK( capture.calls == 3 );
 		CHECK( Ral_BufferMapLifecycleUnmap( &buffer.mapLifecycle, &ticket ) == ralSuccess );
 	}
 
@@ -212,7 +232,7 @@ int main( void ) {
 	batch.textureTransitions = &textureTransition;
 	batch.textureTransitionCount = 1;
 	CHECK( Ral_CmdTransitionResources( &command, &batch ) == ralSuccess );
-	CHECK( capture.calls == 3 && texture2.portableOwnerQueue == RAL_QUEUE_GRAPHICS );
+	CHECK( capture.calls == 4 && texture2.portableOwnerQueue == RAL_QUEUE_GRAPHICS );
 
 	// Dedicated Vulkan families need a paired release/acquire slice: fail closed.
 	backend.queueFamily[RAL_QUEUE_TRANSFER] = 7;
@@ -220,7 +240,7 @@ int main( void ) {
 		VK_IMAGE_LAYOUT_UNDEFINED, RAL_QUEUE_GRAPHICS );
 	textureTransition.texture = &texture2;
 	CHECK( Ral_CmdTransitionResources( &command, &batch ) == ralUnsupported );
-	CHECK( capture.calls == 3 && texture2.portableState.usage == RAL_RESOURCE_USAGE_UNDEFINED );
+	CHECK( capture.calls == 4 && texture2.portableState.usage == RAL_RESOURCE_USAGE_UNDEFINED );
 
 	// Dedicated families use one exact generation-bound release/acquire receipt.
 	{
@@ -243,21 +263,21 @@ int main( void ) {
 			&& receipt.resourceIdentity == &buffer
 			&& receipt.resourceType == RAL_QUEUE_TRANSFER_RESOURCE_BUFFER );
 		CHECK( !ralVk_BufferGpuUseAllowed( &buffer ) );
-		CHECK( capture.calls == 4 && capture.buffer.srcQueueFamilyIndex == 7
+		CHECK( capture.calls == 5 && capture.buffer.srcQueueFamilyIndex == 7
 			&& capture.buffer.dstQueueFamilyIndex == 3
 			&& capture.buffer.srcAccessMask == VK_ACCESS_TRANSFER_READ_BIT
 			&& capture.buffer.dstAccessMask == 0 );
 		CHECK( Ral_CmdReleaseBufferOwnership( &sourceCommand,
 			&bufferTransition, &sentinel ) == ralErrorInvalidArgument );
 		CHECK( memcmp( &sentinel, &unchanged, sizeof( sentinel ) ) == 0
-			&& capture.calls == 4 );
+			&& capture.calls == 5 );
 		stale = receipt; stale.generation++;
 		CHECK( Ral_CmdAcquireBufferOwnership( &destinationCommand,
 			&bufferTransition, &stale ) == ralErrorInvalidArgument );
-		CHECK( capture.calls == 4 );
+		CHECK( capture.calls == 5 );
 		CHECK( Ral_CmdAcquireBufferOwnership( &destinationCommand,
 			&bufferTransition, &receipt ) == ralSuccess );
-		CHECK( capture.calls == 5 && capture.buffer.srcAccessMask == 0
+		CHECK( capture.calls == 6 && capture.buffer.srcAccessMask == 0
 			&& capture.buffer.dstAccessMask == VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT
 			&& buffer.portableOwnerQueue == RAL_QUEUE_GRAPHICS
 			&& buffer.portableState.usage == RAL_RESOURCE_USAGE_VERTEX_BUFFER
@@ -296,7 +316,7 @@ int main( void ) {
 		textureTransition.destinationQueue = RAL_QUEUE_GRAPHICS;
 		CHECK( Ral_CmdReleaseTextureOwnership( &sourceCommand,
 			&textureTransition, &receipt ) == ralSuccess );
-		CHECK( capture.calls == 7 && capture.image.srcQueueFamilyIndex == 7
+		CHECK( capture.calls == 8 && capture.image.srcQueueFamilyIndex == 7
 			&& capture.image.dstQueueFamilyIndex == 3
 			&& capture.image.oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
 			&& capture.image.newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
@@ -305,7 +325,7 @@ int main( void ) {
 			&textureTransition, &stale ) == ralErrorInvalidArgument );
 		CHECK( Ral_CmdAcquireTextureOwnership( &destinationCommand,
 			&textureTransition, &receipt ) == ralSuccess );
-		CHECK( capture.calls == 8 && texture2.currentLayout
+		CHECK( capture.calls == 9 && texture2.currentLayout
 			== VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
 			&& texture2.portableOwnerQueue == RAL_QUEUE_GRAPHICS );
 	}
@@ -350,6 +370,123 @@ int main( void ) {
 		CHECK( Ral_CmdReleaseBufferOwnership( &sourceCommand,
 			&bufferTransition, &output ) == ralErrorInvalidArgument );
 		CHECK( memcmp( &output, &unchanged, sizeof( output ) ) == 0 );
+	}
+
+	// Dynamic-rendering color outputs use this exact semantic handoff for UI,
+	// screenmap, bloom, temporal post-bloom and screenshot capture. Pin both
+	// sampled and copy-source lowerings independently of product source policy.
+	{
+		ralTexture_t attachment;
+		ralTextureTransition_t transition;
+		ralResourceTransitionBatch_t transitionBatch;
+
+		SetupBackend( &backend, 3, 3, 3 );
+		SetupCommand( &command, &backend, RAL_QUEUE_GRAPHICS );
+		SetupTexture( &attachment, &backend, 0x440u,
+			RAL_RESOURCE_USAGE_COLOR_ATTACHMENT,
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, RAL_QUEUE_GRAPHICS );
+		memset( &transition, 0, sizeof( transition ) );
+		transition.texture = &attachment;
+		transition.aspects = RAL_TEXTURE_ASPECT_COLOR;
+		transition.mipLevelCount = 1u;
+		transition.arrayLayerCount = 1u;
+		transition.before.usage = RAL_RESOURCE_USAGE_COLOR_ATTACHMENT;
+		transition.after.usage = RAL_RESOURCE_USAGE_SAMPLED_TEXTURE;
+		transition.after.shaderStages = RAL_STAGE_FRAGMENT;
+		transition.sourceQueue = RAL_QUEUE_GRAPHICS;
+		transition.destinationQueue = RAL_QUEUE_GRAPHICS;
+		memset( &transitionBatch, 0, sizeof( transitionBatch ) );
+		transitionBatch.textureTransitions = &transition;
+		transitionBatch.textureTransitionCount = 1u;
+		memset( &capture, 0, sizeof( capture ) );
+		CHECK( Ral_CmdTransitionResources( &command, &transitionBatch ) == ralSuccess );
+		CHECK( capture.calls == 1u
+			&& capture.srcStage == VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+			&& capture.dstStage == VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+			&& capture.image.srcAccessMask
+				== ( VK_ACCESS_COLOR_ATTACHMENT_READ_BIT
+					| VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT )
+			&& capture.image.dstAccessMask == VK_ACCESS_SHADER_READ_BIT
+			&& capture.image.oldLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+			&& capture.image.newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+
+		SetupTexture( &attachment, &backend, 0x441u,
+			RAL_RESOURCE_USAGE_COLOR_ATTACHMENT,
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, RAL_QUEUE_GRAPHICS );
+		transition.texture = &attachment;
+		transition.after.usage = RAL_RESOURCE_USAGE_COPY_SOURCE;
+		transition.after.shaderStages = 0u;
+		memset( &capture, 0, sizeof( capture ) );
+		CHECK( Ral_CmdTransitionResources( &command, &transitionBatch ) == ralSuccess );
+		CHECK( capture.calls == 1u
+			&& capture.srcStage == VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+			&& capture.dstStage == VK_PIPELINE_STAGE_TRANSFER_BIT
+			&& capture.image.srcAccessMask
+				== ( VK_ACCESS_COLOR_ATTACHMENT_READ_BIT
+					| VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT )
+			&& capture.image.dstAccessMask == VK_ACCESS_TRANSFER_READ_BIT
+			&& capture.image.oldLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+			&& capture.image.newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
+	}
+
+	// A depth-only attachment view over a combined D24S8 resource retains its
+	// narrow rendering aspect, while the whole-resource semantic handoff must
+	// cover depth+stencil.  This is the CSM adoption shape and the portability
+	// model WebGPU texture/view aspects require.
+	{
+		ralTexture_t shadow;
+		ralTextureTransition_t transition;
+		ralResourceTransitionBatch_t transitionBatch;
+
+		SetupBackend( &backend, 3, 3, 3 );
+		SetupCommand( &command, &backend, RAL_QUEUE_GRAPHICS );
+		memset( &shadow, 0, sizeof( shadow ) );
+		shadow.backend = &backend;
+		shadow.image = (VkImage)(uintptr_t)0x450u;
+		shadow.vkFormat = VK_FORMAT_D24_UNORM_S8_UINT;
+		shadow.mipLevels = 1u;
+		shadow.arrayLayers = 4u;
+		shadow.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+		shadow.currentLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		shadow.portableStateKnown = qtrue;
+		shadow.portableState.usage = RAL_RESOURCE_USAGE_DEPTH_STENCIL_WRITE;
+		shadow.portableOwnerQueue = RAL_QUEUE_GRAPHICS;
+		memset( &transition, 0, sizeof( transition ) );
+		transition.texture = &shadow;
+		transition.aspects = RAL_TEXTURE_ASPECT_DEPTH | RAL_TEXTURE_ASPECT_STENCIL;
+		transition.mipLevelCount = 1u;
+		transition.arrayLayerCount = 4u;
+		transition.before.usage = RAL_RESOURCE_USAGE_DEPTH_STENCIL_WRITE;
+		transition.after.usage = RAL_RESOURCE_USAGE_SAMPLED_TEXTURE;
+		transition.after.shaderStages = RAL_STAGE_FRAGMENT;
+		transition.sourceQueue = RAL_QUEUE_GRAPHICS;
+		transition.destinationQueue = RAL_QUEUE_GRAPHICS;
+		memset( &transitionBatch, 0, sizeof( transitionBatch ) );
+		transitionBatch.textureTransitions = &transition;
+		transitionBatch.textureTransitionCount = 1u;
+		memset( &capture, 0, sizeof( capture ) );
+		CHECK( Ral_CmdTransitionResources( &command, &transitionBatch ) == ralSuccess );
+		CHECK( capture.calls == 1u
+			&& capture.srcStage == ( VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
+				| VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT )
+			&& capture.dstStage == VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+			&& capture.image.srcAccessMask
+				== ( VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+					| VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT )
+			&& capture.image.dstAccessMask == VK_ACCESS_SHADER_READ_BIT
+			&& capture.image.subresourceRange.aspectMask
+				== ( VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT )
+			&& capture.image.subresourceRange.layerCount == 4u
+			&& shadow.aspect == VK_IMAGE_ASPECT_DEPTH_BIT );
+
+		shadow.currentLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		shadow.portableStateKnown = qtrue;
+		shadow.portableState.usage = RAL_RESOURCE_USAGE_DEPTH_STENCIL_WRITE;
+		transition.aspects = RAL_TEXTURE_ASPECT_DEPTH;
+		memset( &capture, 0, sizeof( capture ) );
+		CHECK( Ral_CmdTransitionResources( &command, &transitionBatch )
+			== ralErrorInvalidArgument );
+		CHECK( capture.calls == 0u );
 	}
 
 	puts( "PASS portable transitions plus paired dedicated-queue ownership" );

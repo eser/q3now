@@ -388,8 +388,17 @@ int main( void ) {
 	memset( &vulkanHost, 0, sizeof( vulkanHost ) );
 	CHECK( SDL_Init( SDL_INIT_VIDEO ) );
 	vulkanHost.window = SDL_CreateWindow( "Wired RAL backend conformance",
-		64, 64, SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN );
+		1280, 720, SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN );
 	CHECK( vulkanHost.window != NULL );
+	{
+		int logicalWidth = 0, logicalHeight = 0;
+		int pixelWidth = 0, pixelHeight = 0;
+		CHECK( SDL_GetWindowSize( vulkanHost.window, &logicalWidth, &logicalHeight ) );
+		CHECK( SDL_GetWindowSizeInPixels( vulkanHost.window, &pixelWidth, &pixelHeight ) );
+		CHECK( logicalWidth == 1280 && logicalHeight == 720 );
+		CHECK( pixelWidth >= 1280 && pixelHeight >= 720 );
+		CHECK( (int64_t)pixelWidth * 9 == (int64_t)pixelHeight * 16 );
+	}
 	vulkanHost.backendGeneration = 11u;
 	CHECK( RunVulkanCopy( &vulkanHost, &vulkanFirst ) );
 	vulkanHost.backendGeneration = 12u;

@@ -49,11 +49,41 @@ function(require_count variable regex expected why)
 		message(FATAL_ERROR "H3c policy ${why}: expected ${expected}, got ${count}")
 	endif()
 endfunction()
+function(extract_between variable begin end output)
+	string(FIND "${${variable}}" "${begin}" begin_pos)
+	if(begin_pos EQUAL -1)
+		message(FATAL_ERROR "H3c policy cannot find span begin: ${begin}")
+	endif()
+	string(SUBSTRING "${${variable}}" ${begin_pos} -1 tail)
+	string(FIND "${tail}" "${end}" end_pos)
+	if(end_pos EQUAL -1)
+		message(FATAL_ERROR "H3c policy cannot find span end: ${end}")
+	endif()
+	string(SUBSTRING "${tail}" 0 ${end_pos} span)
+	set(${output} "${span}" PARENT_SCOPE)
+endfunction()
 
 require_text(RALTEX "temporal-resolve-arm" "explicit two-capture arm command")
 require_text(C "RAL_MEMORY_HOST_COHERENT" "same-slot coherent staging")
 require_text(H "VK_TEMPORAL_RESOLVE_READBACK_CORE_MAX 256u" "ratified bounded core")
+require_text(H "VK_TEMPORAL_RESOLVE_READBACK_APRON_MIN 4u" "minimum bilinear apron")
+require_text(H "VK_TEMPORAL_RESOLVE_READBACK_APRON_MAX 512u" "bounded diagnostic apron")
+require_text(H "VK_TEMPORAL_RESOLVE_READBACK_APRON_DIVISOR 4u" "extent-relative apron")
+require_text(C "apronW = width / VK_TEMPORAL_RESOLVE_READBACK_APRON_DIVISOR;" "horizontal motion footprint")
+require_text(C "apronH = height / VK_TEMPORAL_RESOLVE_READBACK_APRON_DIVISOR;" "vertical motion footprint")
+require_text(C "captureW = coreW + 2u * apronW;" "scaled horizontal capture")
+require_text(C "captureH = coreH + 2u * apronH;" "scaled vertical capture")
 require_text(C "RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_MAP_READ" "WebGPU-valid readback capability")
+require_text(C "copy.aspects = aspects;" "explicit portable copy plane publication")
+require_text(C "g.currentColorOffset, RAL_TEXTURE_ASPECT_COLOR, &g" "current color plane")
+require_text(C "g.previousColorOffset, RAL_TEXTURE_ASPECT_COLOR, &g" "previous color plane")
+require_text(C "g.previousDepthOffset, RAL_TEXTURE_ASPECT_COLOR, &g" "R32 history-depth color plane")
+require_text(C "g.velocityOffset, RAL_TEXTURE_ASPECT_COLOR, &g" "velocity color plane")
+require_text(C "g.validityOffset, RAL_TEXTURE_ASPECT_COLOR, &g" "validity color plane")
+require_text(C "g.resolvedOffset, RAL_TEXTURE_ASPECT_COLOR, &g" "resolved color plane")
+require_text(C "RestoreCopiedProducts( commandBuffer, products );" "checked-copy failure restore")
+require_text(TEST "failCopyAttempt = 3" "mid-copy rejection mutation")
+require_text(TEST "eventAspects[9 + i] == expectedAspects[i]" "copy plane mutation matrix")
 require_text(C "TransitionReadback( commandBuffer, slot->buffer, slot->bytes" "typed copy/host state transition")
 require_text(C "Ral_BufferMapBegin( slot->buffer, &mapRequest, &mapTicket )" "fence-bounded typed map")
 require_text(C "Ral_BufferMapUnmap( slot->buffer, &mapTicket )" "map closure before GPU reuse")
@@ -69,6 +99,7 @@ require_text(C "canonicalRecorded.content.submitted = qfalse" "exact submit-bit 
 require_text(C "ProductExact( &t->resolve.products, &slot->products )" "fence-time product provenance")
 require_text(C "r.validityOther == 0u" "canonical R8 validity gate")
 require_text(C "r.acceptedNonzeroVelocity > 0u" "nonzero reprojection witness")
+require_text(TEST "content.acceptedInfluence == 1" "synthetic nonzero blend influence")
 require_text(C "r.planesPopulated = qtrue" "submitted full-plane copy authority")
 require_text(TEST "creates == 1 && maps == 0" "no map during allocation/preparation")
 require_text(C "VK_TemporalResolveReadbackFloatToHalfRne" "software binary16 RNE")
@@ -106,10 +137,32 @@ forbid_text(C "VK_TemporalResolveTicket_t ) == 0" "whole-ticket padding comparis
 forbid_text(C "FLT_EPSILON" "float epsilon oracle")
 
 require_text(VKC "vk_temporal_resolve_readback.initialized\n\t\t\t&& vk_temporal_resolve_readback.capturesRemaining" "literal OFF hot-path gate")
-require_text(VKC "vk_temporal_resolve_readback_copy_depth" "raw device-depth copy")
-require_text(VKC "barrierAspects |= VK_IMAGE_ASPECT_STENCIL_BIT" "combined depth/stencil raw barriers")
-require_text(VKC "copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT" "depth-only copy plane")
-require_text(VKC "Ral_SetTextureLayout( depth, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL )" "RAL tracker resynchronisation")
+extract_between(VKC "static qboolean vk_temporal_resolve_readback_copy_depth("
+	"qboolean vk_temporal_resolve_prepare_authority( void )" DEPTH_COPY)
+foreach(step IN ITEMS
+		"ralTextureAspectFlags_t resourceAspects = RAL_TEXTURE_ASPECT_DEPTH"
+		"resourceAspects |= RAL_TEXTURE_ASPECT_STENCIL"
+		"Ral_TextureGetResourceState( depth, &priorState, &priorQueue )"
+		"Ral_PublishAdoptedTextureState( depth, &priorState, priorQueue )"
+		"priorQueue != RAL_QUEUE_GRAPHICS"
+		"priorState.usage == RAL_RESOURCE_USAGE_UNDEFINED"
+		"priorState.usage == RAL_RESOURCE_USAGE_COPY_SOURCE"
+		"transition.before = priorState"
+		"transition.after.usage = RAL_RESOURCE_USAGE_COPY_SOURCE"
+		"transition.sourceQueue = transition.destinationQueue = RAL_QUEUE_GRAPHICS"
+		"Ral_CmdTransitionResources( commandBuffer, &batch )"
+		"copy.aspects = RAL_TEXTURE_ASPECT_DEPTH"
+		"Ral_CmdCopyTextureToBuffer( commandBuffer, depth"
+		"transition.after = priorState"
+		"temporal resolve readback depth restore transition failed")
+	require_text(DEPTH_COPY "${step}" "portable device-depth copy")
+endforeach()
+foreach(raw IN ITEMS "VkImageMemoryBarrier" "VkBufferImageCopy"
+		"qvkCmdPipelineBarrier" "qvkCmdCopyImageToBuffer"
+		"Ral_SetTextureLayout" "Ral_GetCommandBufferHandle"
+		"Ral_GetTextureImageHandle" "Ral_GetBufferHandle")
+	forbid_text(DEPTH_COPY "${raw}" "raw device-depth copy authority")
+endforeach()
 require_text(VKC "depthEncoding !=\n\t\t\t\tvk_temporal_resolve_readback_depth_encoding( vk.depth_format )" "immutable depth encoding join")
 require_text(VKC "vk_temporal_resolve_frame.readbackRecorded" "record/submit lifecycle latch")
 require_order(VKC "VK_TemporalResolveReadbackReleaseAfterIdle(" "VK_TemporalResolveReleaseAfterIdle(" "child before H3 parent")
@@ -122,7 +175,7 @@ foreach(mapping IN ITEMS
 		"case VK_FORMAT_D32_SFLOAT_S8_UINT: return VK_TEMPORAL_RESOLVE_DEPTH_D32_S8;")
 	require_text(VKC "${mapping}" "exact Vulkan depth mapping")
 endforeach()
-require_text(VKC "depthEncoding == VK_TEMPORAL_RESOLVE_DEPTH_D16_S8\n\t\t\t|| depthEncoding == VK_TEMPORAL_RESOLVE_DEPTH_D24_S8\n\t\t\t|| depthEncoding == VK_TEMPORAL_RESOLVE_DEPTH_D32_S8" "exact combined depth/stencil barrier set")
+require_text(VKC "depthEncoding == VK_TEMPORAL_RESOLVE_DEPTH_D16_S8\n\t\t\t|| depthEncoding == VK_TEMPORAL_RESOLVE_DEPTH_D24_S8\n\t\t\t|| depthEncoding == VK_TEMPORAL_RESOLVE_DEPTH_D32_S8" "exact combined depth/stencil transition set")
 
 require_count(VKC "VK_TemporalResolveReadbackArm\\(" 1 "Arm call inventory")
 require_count(VKC "VK_TemporalResolveReadbackPrepareAfterFence\\(" 1 "Prepare call inventory")
@@ -153,7 +206,7 @@ string(SUBSTRING "${VKC}" ${end_start} -1 END_FRAME)
 require_text(BEGIN_FRAME "if ( !vk_slot_wait( vk.cmd_index, &wait_result, &reset_result ) )" "worker wait/reset receipt")
 require_order(BEGIN_FRAME "slotFenceCompleted = qtrue;" "vk_temporal_resolve_readback_collect_slot(" "completed slot before H3c collect")
 require_order(BEGIN_FRAME "vk_temporal_resolve_readback_collect_slot(" "vk_temporal_resolve_ensure_after_fence(" "collect before H3 ensure/prepare")
-require_order(BEGIN_FRAME "vk_temporal_resolve_ensure_after_fence(" "qvkBeginCommandBuffer" "H3 ensure/prepare before BeginCB")
+require_order(BEGIN_FRAME "vk_temporal_resolve_ensure_after_fence(" "vk_ral_begin_command_exact( vk.cmd->ral_cmd, \"vk_begin_frame\" );" "H3 ensure/prepare before exact RAL BeginCB")
 require_order(BACKEND "vk_temporal_recursive_record();" "if ( r_bloom->integer )" "UI H4/H3c before bloom")
 require_order(END_FRAME "vk_temporal_recursive_record();" "if ( r_bloom->integer && backEnd.doneSurfaces )" "no-2D H4/H3c before bloom")
 string(FIND "${END_FRAME}" "submitResult = Ral_Submit" submit_start)
@@ -232,7 +285,8 @@ require_text(HARNESS "FAIL temporal resolve/routed HDR join" "routed producer cr
 require_text(HARNESS "copied_hdr_pat" "exact fallback-copy receipt validation")
 require_text(HARNESS "PASS ral-temporal analyzer self-test" "runtime self-mutation gate")
 require_text(HARNESS "sv_fps 20; timescale 0.025; fixedtime 1; cl_run 1; print sv_fps; print timescale; print fixedtime; print cl_run; print g_spawnProtect; wait 512; noclip; wait 64; echo Q3_RAL_TEMPORAL_REQUESTED" "synthetic fixed-tick stationary authority")
-require_text(HARNESS "set g_spawnProtect 0\\nset activeAction" "spawn-shell exclusion before map")
+require_text(HARNESS "set sv_pure 0\\nset g_spawnProtect 0\\nset activeAction" "spawn-shell exclusion in map bootstrap")
+require_order(HARNESS "set g_spawnProtect 0" "set activeAction" "spawn-shell exclusion before map action")
 require_text(HARNESS "cvar_receipts(\"g_spawnProtect\",[\"0\"],\"2\")" "spawn-shell exclusion receipt")
 require_text(HARNESS "spawn-protect" "spawn-shell mutation gate")
 require_text(GAME_MAIN "{ &g_spawnProtect,            \"g_spawnProtect\",            \"2\", CVAR_SERVERINFO | CVAR_ARCHIVE, 0, qfalse }" "spawn-shell cvar registration/default")
@@ -248,7 +302,7 @@ require_text(HARNESS "iqm-texture" "fixture texture provenance")
 require_text(HARNESS "FAIL temporal IQM finite scene sample" "fixture scene sample gate")
 require_text(HARNESS "FAIL temporal IQM center depth" "fixture depth gate")
 require_text(HARNESS "FAIL temporal IQM center velocity" "fixture motion gate")
-require_text(IQM_FIXTURE "channel_scale = (0.0, 1.0, 0.0" "lateral root translation")
+require_text(IQM_FIXTURE "channel_scale = (0.0, 1.0, 0.0" "bounded lateral root translation")
 require_text(IQM_FIXTURE "struct.pack(\"<iI20f\", -1, 1 << 1" "root Y channel mask")
 require_text(IQM_FIXTURE "positions = (0.0, -64.0, -32.0," "camera-facing fixture plane minimum")
 require_text(IQM_FIXTURE "0.0, 64.0, -32.0," "camera-facing fixture plane maximum")

@@ -44,6 +44,7 @@ static qboolean Submit( void *opaque,const ralTransferRequest_t *request,ralBuff
 	*identity=(uintptr_t)&f->submissionToken;*generation=6u;return qtrue;
 }
 static qboolean Completed(void *opaque,uintptr_t identity,qboolean *out){Fake*f=(Fake*)opaque;if(identity!=(uintptr_t)&f->submissionToken)return qfalse;*out=f->completed;return qtrue;}
+static qboolean Wait(void *opaque,uintptr_t identity){Fake*f=(Fake*)opaque;if(identity!=(uintptr_t)&f->submissionToken)return qfalse;f->completed=qtrue;return qtrue;}
 static ralResult_t MapBegin(void *opaque,ralBuffer_t*buffer,const ralBufferMapRequest_t*request,ralBufferMapTicket_t*out){Fake*f=(Fake*)opaque;return Ral_BufferMapLifecyclePublishBegin(&f->map,buffer,sizeof(f->bytes),request,f->mapReady,f->mapReady?f->bytes:NULL,out);}
 static ralResult_t MapPoll(void *opaque,ralBuffer_t*buffer,const ralBufferMapTicket_t*authority,ralBufferMapTicket_t*out){Fake*f=(Fake*)opaque;(void)buffer;if(!f->mapReady)return Ral_BufferMapLifecyclePoll(&f->map,authority,out);if(authority->status==RAL_BUFFER_MAP_PENDING)return Ral_BufferMapLifecyclePublishReady(&f->map,authority,f->bytes,out);return Ral_BufferMapLifecyclePoll(&f->map,authority,out);}
 static ralResult_t Unmap(void *opaque,ralBuffer_t*buffer,const ralBufferMapTicket_t*ticket){Fake*f=(Fake*)opaque;(void)buffer;return Ral_BufferMapLifecycleUnmap(&f->map,ticket);}
@@ -52,9 +53,9 @@ static qboolean Allowed(void *opaque,ralReadbackOwnedRole_t role,uintptr_t ident
 static void RetireStaging(void*opaque,ralBuffer_t*buffer){Fake*f=(Fake*)opaque;if(buffer==Staging(f))f->retired[f->retiredCount++]='S';}
 static void RetireSubmission(void*opaque,uintptr_t identity){Fake*f=(Fake*)opaque;if(identity==(uintptr_t)&f->submissionToken)f->retired[f->retiredCount++]='F';}
 
-static const ralReadbackOps_t ops={CreateStaging,Submit,Completed,MapBegin,MapPoll,Unmap,Cancel,Allowed,RetireStaging,RetireSubmission,NULL};
+static const ralReadbackOps_t ops={CreateStaging,Submit,Completed,Wait,MapBegin,MapPoll,Unmap,Cancel,Allowed,RetireStaging,RetireSubmission,NULL};
 
-static ralReadbackCreateInfo_t Info(Fake*f){ralReadbackCreateInfo_t ci;memset(&ci,0,sizeof(ci));ci.transfer.backendType=f->managed?RAL_BACKEND_WEBGPU:RAL_BACKEND_VULKAN;ci.transfer.direction=RAL_TRANSFER_READBACK;ci.transfer.resourceKind=RAL_TRANSFER_TEXTURE;ci.transfer.resourceIdentity=(uintptr_t)0x1200u;ci.transfer.resourceGeneration=3u;ci.transfer.byteSize=sizeof(f->bytes);ci.transfer.byteBudget=sizeof(f->bytes);ci.transfer.width=8u;ci.transfer.height=8u;ci.transfer.depth=1u;ci.transfer.queue=RAL_QUEUE_GRAPHICS;ci.transferGeneration=5u;ci.context=f;ci.ops=&ops;return ci;}
+static ralReadbackCreateInfo_t Info(Fake*f){ralReadbackCreateInfo_t ci;memset(&ci,0,sizeof(ci));ci.transfer.backendType=f->managed?RAL_BACKEND_WEBGPU:RAL_BACKEND_VULKAN;ci.transfer.direction=RAL_TRANSFER_READBACK;ci.transfer.resourceKind=RAL_TRANSFER_TEXTURE;ci.transfer.resourceIdentity=(uintptr_t)0x1200u;ci.transfer.resourceGeneration=3u;ci.transfer.byteSize=sizeof(f->bytes);ci.transfer.byteBudget=sizeof(f->bytes);ci.transfer.width=8u;ci.transfer.height=1u;ci.transfer.depth=1u;ci.transfer.bytesPerRow=256u;ci.transfer.rowsPerImage=1u;ci.transfer.queue=RAL_QUEUE_GRAPHICS;ci.transferGeneration=5u;ci.context=f;ci.ops=&ops;return ci;}
 
 static void Init(Fake*f,qboolean managed){memset(f,0,sizeof(*f));f->managed=managed;Ral_BufferMapLifecycleInit(&f->map);}
 
@@ -65,6 +66,7 @@ int main(void){
 	f.mapReady=qtrue;CHECK(Ral_ReadbackMapBegin(owner,&ticket)==ralSuccess);CHECK(ticket.status==RAL_BUFFER_MAP_READY);CHECK(!Ral_ReadbackRelease(&owner));stale=ticket;stale.generation++;CHECK(Ral_ReadbackMapUnmap(owner,&stale)==ralErrorInvalidArgument);CHECK(Ral_ReadbackMapUnmap(owner,&ticket)==ralSuccess);CHECK(Ral_ReadbackRelease(&owner));CHECK(!owner);CHECK(f.retiredCount==2&&!memcmp(f.retired,"SF",2));CHECK(Ral_ReadbackRelease(&owner));
 
 	Init(&f,qtrue);ci=Info(&f);CHECK(Ral_ReadbackCreate(&ci,&owner));f.completed=qtrue;CHECK(Ral_ReadbackComplete(owner));CHECK(Ral_ReadbackMapBegin(owner,&ticket)==ralSuccess&&ticket.status==RAL_BUFFER_MAP_PENDING);CHECK(Ral_ReadbackMapPoll(owner,&ticket,&ready)==ralSuccess&&ready.status==RAL_BUFFER_MAP_PENDING);f.mapReady=qtrue;CHECK(Ral_ReadbackMapPoll(owner,&ticket,&ready)==ralSuccess&&ready.status==RAL_BUFFER_MAP_READY);CHECK(Ral_ReadbackMapUnmap(owner,&ready)==ralSuccess);CHECK(Ral_ReadbackRelease(&owner));
+	Init(&f,qfalse);ci=Info(&f);CHECK(Ral_ReadbackCreate(&ci,&owner));CHECK(Ral_ReadbackWait(owner));CHECK(f.completed);f.mapReady=qtrue;CHECK(Ral_ReadbackMapBegin(owner,&ticket)==ralSuccess);CHECK(Ral_ReadbackMapUnmap(owner,&ticket)==ralSuccess);CHECK(Ral_ReadbackRelease(&owner));
 	Init(&f,qtrue);ci=Info(&f);CHECK(Ral_ReadbackCreate(&ci,&owner));f.completed=qtrue;CHECK(Ral_ReadbackComplete(owner));CHECK(Ral_ReadbackMapBegin(owner,&ticket)==ralSuccess);CHECK(Ral_ReadbackMapCancel(owner,&ticket)==ralSuccess);CHECK(Ral_ReadbackRelease(&owner));
 
 	memset(&before,0x5a,sizeof(before));for(fail=1;fail<=4;fail++){Init(&f,qfalse);f.failAt=fail;ci=Info(&f);owner=NULL;CHECK(!Ral_ReadbackCreate(&ci,&owner));CHECK(!owner);} (void)before;

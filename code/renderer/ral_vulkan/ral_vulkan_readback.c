@@ -148,7 +148,10 @@ static qboolean SubmitCopy( void *opaque, const ralTransferRequest_t *request,
 		copy.imageRect.y = (int32_t)context->textureRegion.y;
 		copy.imageRect.width = context->textureRegion.width;
 		copy.imageRect.height = context->textureRegion.height;
-		Ral_CmdCopyTextureToBuffer( context->command, context->source.texture, staging, &copy );
+		copy.bytesPerRow = request->bytesPerRow;
+		copy.rowsPerImage = request->rowsPerImage;
+		if ( !Ral_CmdCopyTextureToBuffer( context->command,
+				context->source.texture, staging, &copy ) ) goto fail;
 	}
 	if ( !TransitionForCopy( context, staging, qtrue )
 			|| Ral_EndCommandBufferExact( context->command, &recording, &executable ) != ralSuccess )
@@ -179,6 +182,14 @@ static qboolean SubmissionCompleted( void *opaque, uintptr_t identity, qboolean 
 		return qfalse;
 	*out = Ral_FenceSignaled( context->fence );
 	return qtrue;
+}
+
+static qboolean SubmissionWait( void *opaque, uintptr_t identity ) {
+	ralVkReadbackContext_t *context = (ralVkReadbackContext_t *)opaque;
+	if ( !context || !context->submitted || identity != (uintptr_t)context->fence )
+		return qfalse;
+	Ral_WaitFence( context->fence, RAL_TIMEOUT_INFINITE );
+	return Ral_FenceSignaled( context->fence );
 }
 
 static ralResult_t MapBegin( void *opaque, ralBuffer_t *staging,
@@ -232,7 +243,7 @@ static void RetireSubmission( void *opaque, uintptr_t identity ) {
 static void DestroyContext( void *opaque ) { free( opaque ); }
 
 static const ralReadbackOps_t readbackOps = {
-	CreateStaging, SubmitCopy, SubmissionCompleted, MapBegin, MapPoll,
+	CreateStaging, SubmitCopy, SubmissionCompleted, SubmissionWait, MapBegin, MapPoll,
 	MapUnmap, MapCancel, CandidateAllowed, RetireStaging, RetireSubmission,
 	DestroyContext
 };
@@ -290,35 +301,39 @@ qboolean Ral_BufferReadbackBegin( ralBuffer_t *source, uint64_t offset,
 qboolean Ral_TextureReadbackBegin( ralTexture_t *source,
 		const ralTextureReadbackRegion_t *region, ralReadbackOwner_t **outOwner ) {
 	ralVkReadbackContext_t *context;
-	ralAllocationReceipt_t allocation;
+	ralTextureResourceReceipt_t resource;
 	ralTransferRequest_t request;
 	uint32_t mipWidth, mipHeight, bytesPerPixel;
-	uint64_t requiredBytes;
-	if ( !source || !region || !outOwner || *outOwner || !source->backend || !source->alloc
+	uint64_t tightBytesPerRow, paddedBytesPerRow, requiredBytes;
+	if ( !source || !region || !outOwner || *outOwner || !source->backend
 			|| !( source->usage & RAL_TEXTURE_USAGE_TRANSFER_SRC )
 			|| !source->portableStateKnown
 			|| source->portableState.usage == RAL_RESOURCE_USAGE_UNDEFINED
 			|| source->portableOwnerQueue != RAL_QUEUE_GRAPHICS
 			|| region->mipLevel >= source->mipLevels
-			|| region->arrayLayer >= source->arrayLayers || region->byteSize == 0
-			|| !Ral_TextureGetAllocationReceipt( source, &allocation ) ) return qfalse;
+			|| region->arrayLayer >= source->arrayLayers
+			|| !Ral_TextureGetResourceReceipt( source, &resource )
+			|| resource.textureIdentity != (uintptr_t)source
+			|| resource.usage != source->usage ) return qfalse;
 	mipWidth = source->width >> region->mipLevel; if ( mipWidth == 0 ) mipWidth = 1;
 	mipHeight = source->height >> region->mipLevel; if ( mipHeight == 0 ) mipHeight = 1;
 	bytesPerPixel = ralVk_FormatBPP( source->ralFormat );
 	if ( region->width == 0 || region->height == 0 || region->x > mipWidth
 			|| region->width > mipWidth - region->x || region->y > mipHeight
 			|| region->height > mipHeight - region->y || bytesPerPixel == 0
-			|| region->width > UINT64_MAX / bytesPerPixel
-			|| (uint64_t)region->width * bytesPerPixel > UINT64_MAX / region->height ) return qfalse;
-	requiredBytes = (uint64_t)region->width * region->height * bytesPerPixel;
-	if ( region->byteSize != requiredBytes ) return qfalse;
+			|| region->width > UINT64_MAX / bytesPerPixel ) return qfalse;
+	tightBytesPerRow = (uint64_t)region->width * bytesPerPixel;
+	if ( tightBytesPerRow > UINT32_MAX - 255u ) return qfalse;
+	paddedBytesPerRow = ( tightBytesPerRow + 255u ) & ~(uint64_t)255u;
+	if ( region->height > UINT64_MAX / paddedBytesPerRow ) return qfalse;
+	requiredBytes = paddedBytesPerRow * region->height;
 	context = (ralVkReadbackContext_t *)calloc( 1, sizeof( *context ) );
 	if ( !context ) return qfalse;
 	context->backend = source->backend;
 	context->kind = RAL_TRANSFER_TEXTURE;
 	context->source.texture = source;
 	context->textureRegion = *region;
-	context->bytes = region->byteSize;
+	context->bytes = requiredBytes;
 	context->sourceState = source->portableState;
 	context->sourceQueue = source->portableOwnerQueue;
 	RAL_ZERO( request );
@@ -326,9 +341,9 @@ qboolean Ral_TextureReadbackBegin( ralTexture_t *source,
 	request.direction = RAL_TRANSFER_READBACK;
 	request.resourceKind = RAL_TRANSFER_TEXTURE;
 	request.resourceIdentity = (uintptr_t)source;
-	request.resourceGeneration = allocation.allocationGeneration;
-	request.byteSize = region->byteSize;
-	request.byteBudget = allocation.committedSize;
+	request.resourceGeneration = resource.resourceGeneration;
+	request.byteSize = requiredBytes;
+	request.byteBudget = requiredBytes;
 	request.mipLevel = region->mipLevel;
 	request.arrayLayer = region->arrayLayer;
 	request.offsetX = region->x;
@@ -336,6 +351,8 @@ qboolean Ral_TextureReadbackBegin( ralTexture_t *source,
 	request.width = region->width;
 	request.height = region->height;
 	request.depth = 1;
+	request.bytesPerRow = (uint32_t)paddedBytesPerRow;
+	request.rowsPerImage = region->height;
 	request.queue = RAL_QUEUE_GRAPHICS;
 	return Begin( context, &request, outOwner );
 }

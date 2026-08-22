@@ -21,6 +21,7 @@ static ralTransferRequest_t TextureRequest( void ) {
 int main( void ) {
 	ralTransferRequest_t request=TextureRequest();
 	ralTransferReceipt_t prepared,submitted,completed,canceled,before,bad;
+	ralBufferUploadReceipt_t uploadReceipt, uploadBefore, uploadBad;
 	memset(&before,0x5a,sizeof(before));prepared=before;
 	CHECK(Ral_TransferPrepare(&request,11u,&prepared));CHECK(prepared.state==RAL_TRANSFER_PREPARED);
 	CHECK(Ral_TransferReceiptExact(&prepared,&prepared));
@@ -48,5 +49,20 @@ int main( void ) {
 	request.resourceIdentity=(uintptr_t)0x200u;request.resourceGeneration=9u;
 	request.byteOffset=128u;request.byteSize=512u;request.byteBudget=1024u;request.queue=RAL_QUEUE_GRAPHICS;
 	CHECK(Ral_TransferPrepare(&request,21u,&prepared));
+	request.direction=RAL_TRANSFER_UPLOAD;request.byteOffset=768u;request.byteSize=512u;
+	bad=before;CHECK(!Ral_TransferPrepare(&request,22u,&bad));CHECK(!memcmp(&bad,&before,sizeof(bad)));
+	request.byteOffset=512u;CHECK(Ral_TransferPrepare(&request,22u,&prepared));
+	CHECK(Ral_TransferPublish(&prepared,RAL_TRANSFER_OUTCOME_NATIVE_ASYNC,23u,&submitted));
+	CHECK(Ral_TransferComplete(&submitted,24u,qtrue,&completed));
+	memset(&uploadBefore,0x66,sizeof(uploadBefore));uploadReceipt=uploadBefore;
+	CHECK(Ral_BufferUploadReceiptBuild(&completed,24u,&uploadReceipt));
+	CHECK(Ral_BufferUploadReceiptExact(&uploadReceipt,&uploadReceipt));
+	uploadBad=uploadReceipt;uploadBad.graphicsVisibilityGeneration++;
+	CHECK(!Ral_BufferUploadReceiptExact(&uploadReceipt,&uploadBad));
+	uploadBad=uploadReceipt;uploadBad.transfer.request.byteOffset++;
+	CHECK(!Ral_BufferUploadReceiptExact(&uploadReceipt,&uploadBad));
+	uploadBad=uploadBefore;
+	CHECK(!Ral_BufferUploadReceiptBuild(&completed,23u,&uploadBad));
+	CHECK(!memcmp(&uploadBad,&uploadBefore,sizeof(uploadBad)));
 	puts("ral transfer lifecycle: PASS");return 0;
 }

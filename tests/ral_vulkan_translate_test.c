@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "ral_vulkan_translate.h"
+#include "ral_vulkan_internal.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -31,7 +32,11 @@ int main( void ) {
 		VK_FORMAT_BC6H_UFLOAT_BLOCK, VK_FORMAT_BC7_UNORM_BLOCK,
 		VK_FORMAT_BC7_SRGB_BLOCK, VK_FORMAT_ASTC_4x4_UNORM_BLOCK,
 		VK_FORMAT_ASTC_4x4_SRGB_BLOCK, VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK,
-		VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK
+		VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK,
+		VK_FORMAT_BC1_RGB_UNORM_BLOCK, VK_FORMAT_BC1_RGB_SRGB_BLOCK,
+		VK_FORMAT_BC2_UNORM_BLOCK, VK_FORMAT_BC2_SRGB_BLOCK,
+		VK_FORMAT_BC4_SNORM_BLOCK, VK_FORMAT_BC5_SNORM_BLOCK,
+		VK_FORMAT_BC6H_SFLOAT_BLOCK
 	};
 	static const VkColorSpaceKHR colorSpaces[] = {
 		VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
@@ -103,6 +108,8 @@ int main( void ) {
 			  VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
 			  VK_ACCESS_SHADER_WRITE_BIT,
 			  VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT },
+			{ VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			  VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT },
 			{ VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
 			  VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT },
 			{ VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -113,6 +120,10 @@ int main( void ) {
 			  VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 			  VK_ACCESS_TRANSFER_WRITE_BIT,
 			  VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_READ_BIT },
+			{ VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			  VK_ACCESS_SHADER_READ_BIT },
 			{ VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
 			  VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_INDIRECT_COMMAND_READ_BIT }
 		};
@@ -250,6 +261,109 @@ int main( void ) {
 		CHECK( out.stage == VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT );
 		CHECK( out.access == 0 );
 		CHECK( out.layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR );
+	}
+	{
+		VkImageAspectFlags out = 0, before;
+		const VkImageAspectFlags combined = VK_IMAGE_ASPECT_DEPTH_BIT
+			| VK_IMAGE_ASPECT_STENCIL_BIT;
+		CHECK( ralVk_TranslateTextureViewAspect(
+			RAL_TEXTURE_VIEW_ASPECT_ALL, combined, &out ) && out == combined );
+		CHECK( ralVk_TranslateTextureViewAspect(
+			RAL_TEXTURE_VIEW_ASPECT_DEPTH_ONLY, combined, &out )
+			&& out == VK_IMAGE_ASPECT_DEPTH_BIT );
+		CHECK( ralVk_TranslateTextureViewAspect(
+			RAL_TEXTURE_VIEW_ASPECT_STENCIL_ONLY, combined, &out )
+			&& out == VK_IMAGE_ASPECT_STENCIL_BIT );
+		before = out;
+		CHECK( !ralVk_TranslateTextureViewAspect(
+			RAL_TEXTURE_VIEW_ASPECT_DEPTH_ONLY, VK_IMAGE_ASPECT_COLOR_BIT, &out )
+			&& out == before );
+		CHECK( !ralVk_TranslateTextureViewAspect( 99, combined, &out )
+			&& out == before );
+	}
+	{
+		VkImageAspectFlags out = VK_IMAGE_ASPECT_COLOR_BIT, before;
+		const VkImageAspectFlags combined = VK_IMAGE_ASPECT_DEPTH_BIT
+			| VK_IMAGE_ASPECT_STENCIL_BIT;
+		CHECK( ralVk_TranslateTextureCopyAspect(
+			RAL_TEXTURE_ASPECT_DEPTH, combined, &out )
+			&& out == VK_IMAGE_ASPECT_DEPTH_BIT );
+		CHECK( ralVk_TranslateTextureCopyAspect(
+			RAL_TEXTURE_ASPECT_STENCIL, combined, &out )
+			&& out == VK_IMAGE_ASPECT_STENCIL_BIT );
+		CHECK( ralVk_TranslateTextureCopyAspect(
+			0u, VK_IMAGE_ASPECT_COLOR_BIT, &out )
+			&& out == VK_IMAGE_ASPECT_COLOR_BIT );
+		before = out;
+		CHECK( !ralVk_TranslateTextureCopyAspect( 0u, combined, &out )
+			&& out == before );
+		CHECK( !ralVk_TranslateTextureCopyAspect(
+			RAL_TEXTURE_ASPECT_DEPTH | RAL_TEXTURE_ASPECT_STENCIL,
+			combined, &out ) && out == before );
+		CHECK( !ralVk_TranslateTextureCopyAspect(
+			RAL_TEXTURE_ASPECT_COLOR, combined, &out ) && out == before );
+		CHECK( !ralVk_TranslateTextureCopyAspect( 1u << 7,
+			VK_IMAGE_ASPECT_COLOR_BIT, &out ) && out == before );
+	}
+	{
+		ralTexture_t texture, unchanged;
+		ralResourceState_t state = { RAL_RESOURCE_USAGE_UNDEFINED, 0 };
+		memset( &texture, 0, sizeof( texture ) );
+		texture.image = (VkImage)(uintptr_t)0x700u;
+		CHECK( ralVk_PublishAdoptedTextureResourceState(
+			&texture, &state, RAL_QUEUE_GRAPHICS ) );
+		CHECK( texture.portableStateKnown
+			&& texture.portableState.usage == RAL_RESOURCE_USAGE_UNDEFINED
+			&& texture.currentLayout == VK_IMAGE_LAYOUT_UNDEFINED
+			&& texture.portableOwnerQueue == RAL_QUEUE_GRAPHICS );
+		unchanged = texture;
+		CHECK( !ralVk_PublishAdoptedTextureResourceState(
+			&texture, &state, RAL_QUEUE_GRAPHICS )
+			&& memcmp( &texture, &unchanged, sizeof( texture ) ) == 0 );
+		texture = unchanged; texture.portableStateKnown = qfalse; texture.ownsImage = qtrue;
+		unchanged = texture;
+		CHECK( !ralVk_PublishAdoptedTextureResourceState(
+			&texture, &state, RAL_QUEUE_GRAPHICS )
+			&& memcmp( &texture, &unchanged, sizeof( texture ) ) == 0 );
+	}
+	{
+		ralBackend_t backend, otherBackend;
+		ralCommandBuffer_t command;
+		ralTexture_t texture, unchanged;
+		memset( &backend, 0, sizeof( backend ) );
+		memset( &otherBackend, 0, sizeof( otherBackend ) );
+		memset( &command, 0, sizeof( command ) );
+		memset( &texture, 0, sizeof( texture ) );
+		command.backend = &backend;
+		command.queue = RAL_QUEUE_GRAPHICS;
+		texture.backend = &backend;
+		texture.image = (VkImage)(uintptr_t)0x701u;
+		texture.currentLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		CHECK( ralVk_PublishAttachmentResourceState( &command, &texture,
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ) );
+		CHECK( texture.portableStateKnown
+			&& texture.portableState.usage == RAL_RESOURCE_USAGE_COLOR_ATTACHMENT
+			&& texture.portableState.shaderStages == 0u
+			&& texture.portableOwnerQueue == RAL_QUEUE_GRAPHICS );
+
+		texture.currentLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		CHECK( ralVk_PublishAttachmentResourceState( &command, &texture,
+			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL ) );
+		CHECK( texture.portableStateKnown
+			&& texture.portableState.usage == RAL_RESOURCE_USAGE_DEPTH_STENCIL_WRITE );
+
+		unchanged = texture;
+		CHECK( !ralVk_PublishAttachmentResourceState( &command, &texture,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL ) );
+		CHECK( memcmp( &texture, &unchanged, sizeof( texture ) ) == 0 );
+		command.queue = RAL_QUEUE_COMPUTE;
+		CHECK( !ralVk_PublishAttachmentResourceState( &command, &texture,
+			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL ) );
+		CHECK( memcmp( &texture, &unchanged, sizeof( texture ) ) == 0 );
+		command.queue = RAL_QUEUE_GRAPHICS;
+		texture.backend = &otherBackend;
+		CHECK( !ralVk_PublishAttachmentResourceState( &command, &texture,
+			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL ) );
 	}
 	{
 		ralResourceState_t invalid = { RAL_RESOURCE_USAGE_VERTEX_BUFFER, RAL_STAGE_VERTEX };

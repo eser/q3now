@@ -39,7 +39,8 @@ foreach(forbidden IN ITEMS "NSWindow" "SDL_Window" "VkSwapchain" "MoltenVK")
 	endif()
 endforeach()
 foreach(needle IN ITEMS
-	"createInfo.desiredWidth = 0u" "unsupportedFormat" "desiredImageCount = 4u"
+	"createInfo.desiredWidth = 0u" "unsupportedFormat" "fifo.desiredImageCount = 4u"
+	"fifo.unboundedImageCount = 4u" "selected.requestedImageCount"
 	"RAL_PRESENT_MAILBOX" "&exactDrawable, sdrClear"
 	"staleCore.generation++" "exactLayer.presentationGeneration++"
 	"!RalMetal_PresentAcquire" "!RalMetal_PresentReconfigure"

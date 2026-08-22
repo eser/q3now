@@ -37,6 +37,11 @@ assert.equal(splitCombined.bindings.find((binding) => binding.set === 0 && bindi
 assert.equal(splitCombined.bindings.find((binding) => binding.set === 0 && binding.binding === 34)
 	.bindingClass, 'RAL_SHADER_BIND_FILTERING_SAMPLER');
 
+const dynamicEffects = composeShaderManifest(reflection, overrides,
+	{ generation: 5, modules: ['beam_vert_spv', 'beam_frag_spv'] });
+assert.equal(dynamicEffects.bindings.find((binding) => binding.set === 1 && binding.binding === 0)
+	.dynamicOffset, true);
+
 assert.throws(() => composeShaderManifest(reflection, { ...overrides, entries: [] },
 	{ generation: 1, modules: ['color_vert_spv', 'color_frag_spv'] }), /unresolved lowering/);
 assert.throws(() => composeShaderManifest(reflection, overrides,
@@ -61,6 +66,11 @@ invalidFormat.entries.find((entry) => entry.symbol === 'color_vert_spv')
 	.vertexFormats[0].format = 'RAL_FORMAT_NOT_REAL';
 assert.throws(() => composeShaderManifest(reflection, invalidFormat,
 	{ generation: 1, modules: ['color_vert_spv', 'color_frag_spv'] }), /vertex format/);
+const invalidDynamic = structuredClone(overrides);
+invalidDynamic.entries.find((entry) => entry.symbol === 'ribbon_frag_spv')
+	.dynamicOffsets[0] = { set: 0, binding: 2 };
+assert.throws(() => composeShaderManifest(reflection, invalidDynamic,
+	{ generation: 1, modules: ['ribbon_vert_spv', 'ribbon_frag_spv'] }), /dynamic offset/);
 
 const syntheticDigest = { lane0: '1111111111111111', lane1: '2222222222222222' };
 const syntheticReflection = { schemaVersion: 1, sourceCount: 1, entries: [{

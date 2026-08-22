@@ -62,14 +62,40 @@ void *Ral_GetFenceHandle( const ralFence_t *fen ) {
 	return (void *)fen->fence;
 }
 
+static ralResult_t ralVk_FenceResult( VkResult result ) {
+	switch ( result ) {
+		case VK_SUCCESS: return ralSuccess;
+		case VK_TIMEOUT:
+		case VK_NOT_READY: return ralTimeout;
+		case VK_ERROR_DEVICE_LOST: return ralErrorDeviceLost;
+		default: return ralErrorUnknown;
+	}
+}
+
+ralResult_t Ral_WaitFenceExact( ralFence_t *f, uint64_t timeoutNs ) {
+	if ( !f || !f->backend ) return ralErrorInvalidArgument;
+	if ( f->preSignaled ) return ralSuccess;
+	if ( f->fence == VK_NULL_HANDLE || f->backend->device == VK_NULL_HANDLE
+			|| !f->backend->vk.WaitForFences ) return ralErrorInvalidArgument;
+	return ralVk_FenceResult( f->backend->vk.WaitForFences(
+		f->backend->device, 1u, &f->fence, VK_TRUE, timeoutNs ) );
+}
+
+ralResult_t Ral_ResetFenceExact( ralFence_t *f ) {
+	if ( !f || !f->backend ) return ralErrorInvalidArgument;
+	if ( f->preSignaled ) return ralSuccess;
+	if ( f->fence == VK_NULL_HANDLE || f->backend->device == VK_NULL_HANDLE
+			|| !f->backend->vk.ResetFences ) return ralErrorInvalidArgument;
+	return ralVk_FenceResult( f->backend->vk.ResetFences(
+		f->backend->device, 1u, &f->fence ) );
+}
+
 void Ral_WaitFence( ralFence_t *f, uint64_t timeoutNs ) {
-	if ( !f || f->preSignaled || f->fence == VK_NULL_HANDLE ) return;   // already done
-	f->backend->vk.WaitForFences( f->backend->device, 1, &f->fence, VK_TRUE, timeoutNs );
+	(void)Ral_WaitFenceExact( f, timeoutNs );
 }
 
 void Ral_ResetFence( ralFence_t *f ) {
-	if ( !f || f->preSignaled || f->fence == VK_NULL_HANDLE ) return;
-	f->backend->vk.ResetFences( f->backend->device, 1, &f->fence );
+	(void)Ral_ResetFenceExact( f );
 }
 
 qboolean Ral_FenceSignaled( ralFence_t *f ) {

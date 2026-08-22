@@ -169,7 +169,7 @@ with open(sys.argv[1],"w") as out:
 PYEOF
 python3 "$TIMEOUT_RUNNER" --timeout 40 --kill-after 5 --cwd "$ROOT/runtime" --stdout "$HOST_OUT" -- "$ROOT/runtime/wired_profile_host" --profile-listen "$PORT" --profile-token "$TOKEN" --frames 6 --profile-generations 2 --profile-wait-terminal & HOST_CTL=$!
 for _ in {1..100}; do grep -q 'telemetry=listening' "$HOST_OUT" 2>/dev/null && break; kill -0 "$HOST_CTL" 2>/dev/null || break; sleep 0.05; done
-python3 "$TIMEOUT_RUNNER" --timeout 35 --kill-after 5 --cwd "$ROOT/runtime" --stdout "$PRODUCT_OUT" -- "$ROOT/runtime/wired" +set fs_basepath "$ROOT/install" +set fs_installpath "$ROOT/install" +set fs_homepath "$ROOT/home" +set fs_game base +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set r_mode 3 +set cl_profileTelemetryPort "$PORT" +set cl_profileTelemetryToken "$TOKEN" +set r_gpuSpeeds 1 +set r_smaa 0 +exec profile-live.cfg
+python3 "$TIMEOUT_RUNNER" --timeout 35 --kill-after 5 --cwd "$ROOT/runtime" --stdout "$PRODUCT_OUT" -- "$ROOT/runtime/wired" +set fs_basepath "$ROOT/install" +set fs_installpath "$ROOT/install" +set fs_homepath "$ROOT/home" +set fs_game base +set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 +set cl_profileTelemetryPort "$PORT" +set cl_profileTelemetryToken "$TOKEN" +set r_gpuSpeeds 1 +set r_smaa 0 +exec profile-live.cfg
 PRODUCT_RC=$?; wait "$HOST_CTL"; HOST_RC=$?; TIMEOUT=false; { [ "$PRODUCT_RC" -eq 124 ] || [ "$HOST_RC" -eq 124 ]; } && TIMEOUT=true
 python3 - "$MANIFEST" "$$" "$HOST_RC" "$PRODUCT_RC" "$TIMEOUT" <<'PYEOF'
 import json,sys

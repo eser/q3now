@@ -88,6 +88,65 @@ static uint32_t ralVk_PickMemoryType( const VkPhysicalDeviceMemoryProperties *mp
 	return best;
 }
 
+qboolean RalVulkan_FindMemoryType( const ralBackend_t *b, uint32_t typeBits,
+		uint32_t requiredProperties, uint32_t *outTypeIndex,
+		uint32_t *outActualProperties ) {
+	const VkMemoryPropertyFlags supportedProperties =
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		| VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+		| VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		| VK_MEMORY_PROPERTY_HOST_CACHED_BIT
+		| VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT
+		| VK_MEMORY_PROPERTY_PROTECTED_BIT;
+	const VkMemoryPropertyFlags required = (VkMemoryPropertyFlags)requiredProperties;
+	uint32_t i;
+	uint32_t candidateIndex = UINT32_MAX;
+	uint32_t candidateProperties = 0u;
+
+	if ( !b || b->type != RAL_BACKEND_VULKAN || !outTypeIndex
+			|| typeBits == 0u || required == 0u
+			|| ( required & ~supportedProperties ) != 0u
+			|| b->memProps.memoryTypeCount == 0u
+			|| b->memProps.memoryTypeCount > VK_MAX_MEMORY_TYPES ) return qfalse;
+
+	// Preserve the renderer's legacy first-compatible ordering exactly. RAL's
+	// owned allocator may prefer a type with fewer extra properties; this bridge
+	// is only for resources that have not yet migrated to that allocator.
+	for ( i = 0u; i < b->memProps.memoryTypeCount; ++i ) {
+		const VkMemoryPropertyFlags actual = b->memProps.memoryTypes[i].propertyFlags;
+		if ( ( typeBits & ( 1u << i ) ) == 0u || ( actual & required ) != required ) continue;
+		candidateIndex = i;
+		candidateProperties = (uint32_t)actual;
+		break;
+	}
+	if ( candidateIndex == UINT32_MAX ) return qfalse;
+	*outTypeIndex = candidateIndex;
+	if ( outActualProperties ) *outActualProperties = candidateProperties;
+	return qtrue;
+}
+
+qboolean RalVulkan_GetImageMemoryRequirements( const ralBackend_t *b,
+		void *imageIdentity, ralVulkanMemoryRequirements_t *outRequirements ) {
+	VkMemoryRequirements nativeRequirements;
+	ralVulkanMemoryRequirements_t candidate;
+
+	if ( !b || b->type != RAL_BACKEND_VULKAN || !b->device
+			|| !b->vk.GetImageMemoryRequirements || !imageIdentity
+			|| !outRequirements ) return qfalse;
+
+	memset( &nativeRequirements, 0, sizeof( nativeRequirements ) );
+	b->vk.GetImageMemoryRequirements( b->device,
+		(VkImage)(uintptr_t)imageIdentity, &nativeRequirements );
+	if ( nativeRequirements.size == 0u || nativeRequirements.alignment == 0u
+			|| nativeRequirements.memoryTypeBits == 0u ) return qfalse;
+
+	candidate.size = (uint64_t)nativeRequirements.size;
+	candidate.alignment = (uint64_t)nativeRequirements.alignment;
+	candidate.memoryTypeBits = nativeRequirements.memoryTypeBits;
+	*outRequirements = candidate;
+	return qtrue;
+}
+
 static uint64_t ralVk_TrackedHeapBytes( const ralBackend_t *b, uint32_t heapIndex ) {
 	const ralVkAllocation_t *allocation;
 	uint64_t total = 0u;
@@ -264,14 +323,18 @@ ralVkAllocation_t *ralVk_Alloc( ralBackend_t *b, VkMemoryRequirements req,
 	uint32_t              typeIndex;
 	uint32_t              heapIndex;
 	uint64_t              generation;
+	VkDeviceSize          dedicatedBytes;
 	VkResult              allocationResult = VK_SUCCESS;
 	ralAllocationRequest_t request;
 	ralAllocationFacts_t facts;
 	VkMemoryPropertyFlags want = props;
 	if ( !b || ownerIdentity == (uintptr_t)0 || req.size == 0u || req.alignment == 0u
+			|| (req.alignment & (req.alignment - 1u)) != 0u
+			|| req.size > UINT64_MAX - (req.alignment - 1u)
 			|| resourceKind < RAL_VK_ALLOC_RESOURCE_BUFFER
 			|| resourceKind > RAL_VK_ALLOC_RESOURCE_TRANSIENT
 			|| b->nextAllocationGeneration >= UINT64_MAX - 1u ) return NULL;
+	dedicatedBytes = (req.size + req.alignment - 1u) & ~(req.alignment - 1u);
 
 	// LAZILY_ALLOCATED is a tile-GPU optimisation; fall back to DEVICE_LOCAL
 	// where it isn't offered.
@@ -319,15 +382,16 @@ ralVkAllocation_t *ralVk_Alloc( ralBackend_t *b, VkMemoryRequirements req,
 		}
 	}
 	if ( !a->block ) {
-		if ( !ralVk_AllocateDeviceMemory( b, req.size, typeIndex, &a->memory, &allocationResult ) ) {
+		if ( !ralVk_AllocateDeviceMemory( b, dedicatedBytes, typeIndex,
+				&a->memory, &allocationResult ) ) {
 			RAL_VK_LOG( SEV_WARN, "ralVk_Alloc: vkAllocateMemory failed (%llu bytes, type %u)\n",
-				(unsigned long long)req.size, typeIndex );
+				(unsigned long long)dedicatedBytes, typeIndex );
 			ralVk_PublishMemoryFailure( b, ralVk_FailureCause( allocationResult ),
-				memoryClass, residency, req.size, typeIndex );
+				memoryClass, residency, dedicatedBytes, typeIndex );
 			free( a );
 			return NULL;
 		}
-		a->size = req.size;
+		a->size = dedicatedBytes;
 		a->offset = 0u;
 		ralVk_AddPhysicalBytes( b, a->propertyFlags, a->size );
 	}

@@ -78,6 +78,13 @@ ralResult_t Ral_CommandLifecyclePublishEnd( ralCommandLifecycle_t *lifecycle,
 	                                        ralCommandReceipt_t *outReceipt );
 ralResult_t Ral_CommandLifecycleCancel( ralCommandLifecycle_t *lifecycle,
 	                                    const ralCommandReceipt_t *authority );
+// Publish the submitted -> idle handoff after the caller has independently
+// proven that the matching queue submission completed (normally by a fence).
+// The submitted receipt prevents a stale generation from recycling a newer
+// encoder. Backends perform their native reset/release before publishing this
+// pure lifecycle transition.
+ralResult_t Ral_CommandLifecycleRecycle( ralCommandLifecycle_t *lifecycle,
+	                                     const ralCommandReceipt_t *submitted );
 
 void Ral_SubmissionLifecycleInit( ralSubmissionLifecycle_t *lifecycle,
 	                              const ralBackend_t *backend,

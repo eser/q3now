@@ -78,6 +78,17 @@ static int RunQueue( ralQueueType_t queue, uintptr_t base ) {
 	    && !Ral_SubmissionReceiptExact( &output, &output ) );
 	CHECK( commands[0].state == RAL_COMMAND_SUBMITTED && commands[1].state == RAL_COMMAND_SUBMITTED );
 	CHECK( !Ral_SubmissionLifecycleCanPublish( &submission, commandPointers, executable, 2 ) );
+	stale = receipt.commands[0]; stale.generation++;
+	CHECK( Ral_CommandLifecycleRecycle( &commands[0], &stale ) == ralErrorInvalidArgument );
+	CHECK( commands[0].state == RAL_COMMAND_SUBMITTED );
+	CHECK( Ral_CommandLifecycleRecycle( &commands[0], &receipt.commands[0] ) == ralSuccess );
+	CHECK( commands[0].state == RAL_COMMAND_IDLE );
+	CHECK( Ral_CommandLifecycleRecycle( &commands[1], &receipt.commands[0] ) == ralErrorInvalidArgument );
+	CHECK( Ral_CommandLifecycleRecycle( &commands[1], &receipt.commands[1] ) == ralSuccess );
+	CHECK( commands[1].state == RAL_COMMAND_IDLE );
+	CHECK( Ral_CommandLifecyclePublishBegin( &commands[0], &recording[0] ) == ralSuccess );
+	CHECK( recording[0].generation == 2u );
+	CHECK( Ral_CommandLifecycleCancel( &commands[0], &recording[0] ) == ralSuccess );
 	output = receipt;
 	CHECK( Ral_SubmissionLifecyclePublish( &submission, commandPointers, executable, 2, &output ) == ralErrorInvalidArgument );
 	CHECK( Ral_SubmissionReceiptExact( &output, &receipt ) );

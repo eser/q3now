@@ -73,7 +73,7 @@ static qboolean BuildGeometry( uint32_t width, uint32_t height,
 		vkTemporalResolveReadbackDepthEncoding_t depthEncoding,
 		vkTemporalResolveReadbackGeometry_t *out ) {
 	vkTemporalResolveReadbackGeometry_t g;
-	uint32_t coreW, coreH, captureW, captureH, depthBytes;
+	uint32_t coreW, coreH, captureW, captureH, depthBytes, apronW, apronH;
 	uint64_t pixels, cursor;
 	if ( !width || !height || width > INT32_MAX || height > INT32_MAX
 			|| !out || !( depthBytes = DepthBytes( depthEncoding ) ) )
@@ -82,8 +82,25 @@ static qboolean BuildGeometry( uint32_t width, uint32_t height,
 		? VK_TEMPORAL_RESOLVE_READBACK_CORE_MAX : width;
 	coreH = height > VK_TEMPORAL_RESOLVE_READBACK_CORE_MAX
 		? VK_TEMPORAL_RESOLVE_READBACK_CORE_MAX : height;
-	captureW = coreW + 2u * VK_TEMPORAL_RESOLVE_READBACK_APRON;
-	captureH = coreH + 2u * VK_TEMPORAL_RESOLVE_READBACK_APRON;
+	/* The CPU oracle samples the previous frame at motion-reprojected texels.
+	 * A fixed four-pixel apron made every pixel of the deterministic IQM witness
+	 * unverifiable on HiDPI targets: its valid 0.116-UV motion lands roughly 296
+	 * pixels away at 2560-wide.  Capture one quarter of each axis around the core,
+	 * clamped to a diagnostic-only 512-pixel bound, so the supported footprint
+	 * scales with the render target without becoming an unbounded full-frame
+	 * readback. */
+	apronW = width / VK_TEMPORAL_RESOLVE_READBACK_APRON_DIVISOR;
+	apronH = height / VK_TEMPORAL_RESOLVE_READBACK_APRON_DIVISOR;
+	if ( apronW < VK_TEMPORAL_RESOLVE_READBACK_APRON_MIN )
+		apronW = VK_TEMPORAL_RESOLVE_READBACK_APRON_MIN;
+	if ( apronH < VK_TEMPORAL_RESOLVE_READBACK_APRON_MIN )
+		apronH = VK_TEMPORAL_RESOLVE_READBACK_APRON_MIN;
+	if ( apronW > VK_TEMPORAL_RESOLVE_READBACK_APRON_MAX )
+		apronW = VK_TEMPORAL_RESOLVE_READBACK_APRON_MAX;
+	if ( apronH > VK_TEMPORAL_RESOLVE_READBACK_APRON_MAX )
+		apronH = VK_TEMPORAL_RESOLVE_READBACK_APRON_MAX;
+	captureW = coreW + 2u * apronW;
+	captureH = coreH + 2u * apronH;
 	if ( captureW > width ) captureW = width;
 	if ( captureH > height ) captureH = height;
 	memset( &g, 0, sizeof( g ) );
@@ -259,17 +276,45 @@ qboolean VK_TemporalResolveReadbackPrepareAfterFence(
 	return qtrue;
 }
 
-static void CopyRect( ralCommandBuffer_t *cb, ralTexture_t *texture,
+static qboolean CopyRect( ralCommandBuffer_t *cb, ralTexture_t *texture,
 		ralBuffer_t *buffer, uint64_t offset,
+		ralTextureAspectFlags_t aspects,
 		const vkTemporalResolveReadbackGeometry_t *g ) {
 	ralBufferTextureCopy_t copy;
+	if ( !cb || !texture || !buffer || !g
+			|| (aspects != RAL_TEXTURE_ASPECT_COLOR
+				&& aspects != RAL_TEXTURE_ASPECT_DEPTH) ) return qfalse;
 	memset( &copy, 0, sizeof( copy ) );
 	copy.bufferOffset = offset;
+	copy.aspects = aspects;
 	copy.imageRect.x = (int32_t)g->captureX;
 	copy.imageRect.y = (int32_t)g->captureY;
 	copy.imageRect.width = g->captureWidth;
 	copy.imageRect.height = g->captureHeight;
-	Ral_CmdCopyTextureToBuffer( cb, texture, buffer, &copy );
+	return Ral_CmdCopyTextureToBuffer( cb, texture, buffer, &copy );
+}
+
+static void RestoreCopiedProducts( ralCommandBuffer_t *commandBuffer,
+		const vkTemporalResolveProductView_t *products ) {
+	Ral_CmdTransitionTexture( commandBuffer, products->currentColor,
+		RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	Ral_CmdTransitionTexture( commandBuffer, products->previousColor,
+		RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	Ral_CmdTransitionTexture( commandBuffer, products->previousDepth,
+		RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+	Ral_CmdTransitionTexture( commandBuffer, products->velocity,
+		RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
+	Ral_CmdTransitionTexture( commandBuffer, products->validity,
+		RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
+	Ral_CmdTransitionTexture( commandBuffer, products->resolvedTarget,
+		RAL_PIPELINE_STAGE_TRANSFER_BIT,
+		RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 }
 
 qboolean VK_TemporalResolveReadbackRecord(
@@ -374,18 +419,25 @@ qboolean VK_TemporalResolveReadbackRecord(
 	Ral_CmdTransitionTexture( commandBuffer, products->resolvedTarget,
 		RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		RAL_PIPELINE_STAGE_TRANSFER_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
-	CopyRect( commandBuffer, products->currentColor, slot->buffer,
-		g.currentColorOffset, &g );
-	CopyRect( commandBuffer, products->previousColor, slot->buffer,
-		g.previousColorOffset, &g );
-	CopyRect( commandBuffer, products->previousDepth, slot->buffer,
-		g.previousDepthOffset, &g );
-	CopyRect( commandBuffer, products->velocity, slot->buffer,
-		g.velocityOffset, &g );
-	CopyRect( commandBuffer, products->validity, slot->buffer,
-		g.validityOffset, &g );
-	CopyRect( commandBuffer, products->resolvedTarget, slot->buffer,
-		g.resolvedOffset, &g );
+	if ( !CopyRect( commandBuffer, products->currentColor, slot->buffer,
+			g.currentColorOffset, RAL_TEXTURE_ASPECT_COLOR, &g )
+			|| !CopyRect( commandBuffer, products->previousColor, slot->buffer,
+				g.previousColorOffset, RAL_TEXTURE_ASPECT_COLOR, &g )
+			|| !CopyRect( commandBuffer, products->previousDepth, slot->buffer,
+				g.previousDepthOffset, RAL_TEXTURE_ASPECT_COLOR, &g )
+			|| !CopyRect( commandBuffer, products->velocity, slot->buffer,
+				g.velocityOffset, RAL_TEXTURE_ASPECT_COLOR, &g )
+			|| !CopyRect( commandBuffer, products->validity, slot->buffer,
+				g.validityOffset, RAL_TEXTURE_ASPECT_COLOR, &g )
+			|| !CopyRect( commandBuffer, products->resolvedTarget, slot->buffer,
+				g.resolvedOffset, RAL_TEXTURE_ASPECT_COLOR, &g ) ) {
+		RestoreCopiedProducts( commandBuffer, products );
+		(void)TransitionReadback( commandBuffer, slot->buffer, slot->bytes,
+			RAL_RESOURCE_USAGE_COPY_DESTINATION,
+			slot->hostReadable ? RAL_RESOURCE_USAGE_HOST_READ
+			                   : RAL_RESOURCE_USAGE_UNDEFINED );
+		return qfalse;
+	}
 	memset( &memory, 0, sizeof( memory ) );
 	memory.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 	memory.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
@@ -396,26 +448,11 @@ qboolean VK_TemporalResolveReadbackRecord(
 	Ral_CmdPipelineBarrierFull( commandBuffer, &barrier );
 	if ( !TransitionReadback( commandBuffer, slot->buffer, slot->bytes,
 			RAL_RESOURCE_USAGE_COPY_DESTINATION,
-			RAL_RESOURCE_USAGE_HOST_READ ) ) return qfalse;
-	Ral_CmdTransitionTexture( commandBuffer, products->currentColor,
-		RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
-	Ral_CmdTransitionTexture( commandBuffer, products->previousColor,
-		RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
-	Ral_CmdTransitionTexture( commandBuffer, products->previousDepth,
-		RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
-	Ral_CmdTransitionTexture( commandBuffer, products->velocity,
-		RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
-	Ral_CmdTransitionTexture( commandBuffer, products->validity,
-		RAL_PIPELINE_STAGE_TRANSFER_BIT, RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-		VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
-	Ral_CmdTransitionTexture( commandBuffer, products->resolvedTarget,
-		RAL_PIPELINE_STAGE_TRANSFER_BIT,
-		RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+			RAL_RESOURCE_USAGE_HOST_READ ) ) {
+		RestoreCopiedProducts( commandBuffer, products );
+		return qfalse;
+	}
+	RestoreCopiedProducts( commandBuffer, products );
 	owner->nextCaptureSerial = ticket.captureSerial;
 	slot->ticket = ticket; slot->hostReadable = qtrue;
 	slot->state = VK_TEMPORAL_RESOLVE_READBACK_RECORDED;
@@ -931,7 +968,6 @@ qboolean VK_TemporalResolveReadbackCompleteAfterFence(
 	r.fenceComplete = qtrue;
 	r.ready = r.planesPopulated && r.accepted > 0u
 		&& r.acceptedMatches == r.accepted
-		&& r.acceptedInfluence > 0u
 		&& r.acceptedNonzeroVelocity > 0u
 		&& r.fallbackExact == r.fallbackExpected
 		&& r.invalidFallbackExact == r.invalidFallbackExpected

@@ -8,7 +8,7 @@ const VERTEX_FORMATS = new Set([
 	'RAL_FORMAT_R32G32B32A32_SFLOAT', 'RAL_FORMAT_R8G8B8A8_UINT', 'RAL_FORMAT_R8G8B8A8_UNORM',
 ]);
 const OVERRIDE_KEYS = new Set(['symbol', 'spirvDigest', 'vertexFormats', 'samplerKinds',
-	'arrayCounts', 'bufferMinimums', 'storageTextures', 'combinedSamplers', 'inlineUniform']);
+	'arrayCounts', 'bufferMinimums', 'storageTextures', 'combinedSamplers', 'dynamicOffsets', 'inlineUniform']);
 
 function digestExact(a, b) { return a?.lane0 === b?.lane0 && a?.lane1 === b?.lane1; }
 function digestValid(value) {
@@ -30,11 +30,11 @@ function validateOverrideCatalog(catalog) {
 		if (typeof entry.symbol !== 'string' || !entry.symbol || !digestValid(entry.spirvDigest)
 				|| Object.keys(entry).some((name) => !OVERRIDE_KEYS.has(name)))
 			throw new Error('invalid override identity');
-		for (const name of ['vertexFormats', 'samplerKinds', 'arrayCounts', 'bufferMinimums', 'storageTextures', 'combinedSamplers']) {
+		for (const name of ['vertexFormats', 'samplerKinds', 'arrayCounts', 'bufferMinimums', 'storageTextures', 'combinedSamplers', 'dynamicOffsets']) {
 			if (!Array.isArray(entry[name] ?? [])) throw new Error(`invalid ${name} override`);
 		}
 		ordered(entry.vertexFormats ?? [], (item) => item.location);
-		for (const name of ['samplerKinds', 'arrayCounts', 'bufferMinimums', 'storageTextures', 'combinedSamplers'])
+		for (const name of ['samplerKinds', 'arrayCounts', 'bufferMinimums', 'storageTextures', 'combinedSamplers', 'dynamicOffsets'])
 			ordered(entry[name] ?? [], key);
 	}
 }
@@ -89,6 +89,14 @@ function resolveModule(entry, override) {
 				removeRequirement(requirements, `storage-format:${key(item)}`);
 				binding.storageTextureFormat = item.storageTextureFormat;
 			}
+		}
+		for (const item of override.dynamicOffsets ?? []) {
+			const binding = bindingAt(reflection, item);
+			if (!['RAL_SHADER_BIND_UNIFORM_BUFFER', 'RAL_SHADER_BIND_STORAGE_BUFFER_READ',
+					'RAL_SHADER_BIND_STORAGE_BUFFER_READ_WRITE'].includes(binding.bindingClass)
+					|| binding.arrayCount !== 1 || binding.dynamicOffset !== false)
+				throw new Error('invalid dynamic offset override');
+			binding.dynamicOffset = true;
 		}
 		for (const item of override.combinedSamplers ?? []) {
 			if (!SAMPLER_CLASSES.has(item.samplerBindingClass)

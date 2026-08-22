@@ -79,6 +79,9 @@ SET(_bridge_symbols
 	Ral_GetQueueHandle
 	Ral_GetQueueFamily
 	Ral_GetEnabledDeviceExtensions
+	RalVulkan_FindMemoryType
+	RalVulkan_GetImageMemoryRequirements
+	RalVulkan_SetObjectName
 	Ral_GetCommandBufferHandle
 	Ral_AdoptFence
 	Ral_GetFenceHandle
@@ -86,7 +89,12 @@ SET(_bridge_symbols
 	Ral_GetSemaphoreHandle
 	Ral_GetSwapchainHandle
 	Ral_AdoptBuffer
+	Ral_AdoptBufferExact
 	Ral_GetBufferHandle
+	Ral_GetBufferSize
+	Ral_GetBufferUsage
+	Ral_GetBufferMemoryType
+	Ral_RegisterAdoptedBindGroupDynamicBuffer
 	Ral_AdoptTexture
 	Ral_AdoptArrayTexture
 	Ral_GetTextureImageHandle

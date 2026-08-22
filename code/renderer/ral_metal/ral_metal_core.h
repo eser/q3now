@@ -8,6 +8,7 @@
 #include "ral_capability.h"
 #include "ral_command_lifecycle.h"
 #include "ral_memory_recovery.h"
+#include "ral_resource.h"
 #include "ral_transfer.h"
 
 #ifdef __cplusplus
@@ -59,6 +60,8 @@ qboolean RalMetal_CoreCreate( const ralMetalCoreCreateInfo_t *createInfo,
 void RalMetal_CoreDestroy( ralMetalCore_t *core );
 qboolean RalMetal_CoreReceiptExact( const ralMetalCoreReceipt_t *a,
 	const ralMetalCoreReceipt_t *b );
+qboolean RalMetal_TextureFormatSupportsFeatures( const ralMetalCore_t *core,
+	ralFormat_t format, ralTextureFormatFeatures_t features );
 qboolean RalMetal_OffscreenConformance( ralMetalCore_t *core,
 	uint64_t byteCount, ralMetalOffscreenReceipt_t *outReceipt );
 qboolean RalMetal_OffscreenReceiptExact( const ralMetalOffscreenReceipt_t *a,

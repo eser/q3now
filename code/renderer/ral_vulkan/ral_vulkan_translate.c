@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
-#include "ral_vulkan_translate.h"
+#include "ral_vulkan_internal.h"
 
 static qboolean ralVk_TranslateShaderStages( uint32_t stages,
 	                                         VkPipelineStageFlags *out ) {
@@ -56,6 +56,13 @@ VkFormat ralVk_TranslateFormat( ralFormat_t f ) {
 	case RAL_FORMAT_BC6H_UFLOAT: return VK_FORMAT_BC6H_UFLOAT_BLOCK;
 	case RAL_FORMAT_BC7_UNORM: return VK_FORMAT_BC7_UNORM_BLOCK;
 	case RAL_FORMAT_BC7_SRGB: return VK_FORMAT_BC7_SRGB_BLOCK;
+	case RAL_FORMAT_BC1_RGB_UNORM: return VK_FORMAT_BC1_RGB_UNORM_BLOCK;
+	case RAL_FORMAT_BC1_RGB_SRGB: return VK_FORMAT_BC1_RGB_SRGB_BLOCK;
+	case RAL_FORMAT_BC2_UNORM: return VK_FORMAT_BC2_UNORM_BLOCK;
+	case RAL_FORMAT_BC2_SRGB: return VK_FORMAT_BC2_SRGB_BLOCK;
+	case RAL_FORMAT_BC4_SNORM: return VK_FORMAT_BC4_SNORM_BLOCK;
+	case RAL_FORMAT_BC5_SNORM: return VK_FORMAT_BC5_SNORM_BLOCK;
+	case RAL_FORMAT_BC6H_SFLOAT: return VK_FORMAT_BC6H_SFLOAT_BLOCK;
 	case RAL_FORMAT_ASTC_4x4_UNORM: return VK_FORMAT_ASTC_4x4_UNORM_BLOCK;
 	case RAL_FORMAT_ASTC_4x4_SRGB: return VK_FORMAT_ASTC_4x4_SRGB_BLOCK;
 	case RAL_FORMAT_ETC2_R8G8B8A8_UNORM: return VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK;
@@ -140,6 +147,12 @@ ralVkBarrierTranslation_t ralVk_TranslateBarrierScope( ralBarrierScope_t scope )
 		              | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_READ_BIT
 		              | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
 		break;
+	case RAL_BARRIER_COMPUTE_TO_COMPUTE:
+		out.srcStage  = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+		out.dstStage  = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+		out.srcAccess = VK_ACCESS_SHADER_WRITE_BIT;
+		out.dstAccess = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		break;
 	case RAL_BARRIER_COMPUTE_TO_TRANSFER:
 		out.srcStage  = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
 		out.dstStage  = VK_PIPELINE_STAGE_TRANSFER_BIT;
@@ -160,6 +173,12 @@ ralVkBarrierTranslation_t ralVk_TranslateBarrierScope( ralBarrierScope_t scope )
 		out.srcAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
 		out.dstAccess = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT
 		              | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+		break;
+	case RAL_BARRIER_COLOR_ATTACHMENT_TO_FRAGMENT:
+		out.srcStage  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		out.dstStage  = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+		out.srcAccess = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		out.dstAccess = VK_ACCESS_SHADER_READ_BIT;
 		break;
 	case RAL_BARRIER_INDIRECT:
 		out.srcStage  = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
@@ -344,5 +363,89 @@ qboolean ralVk_TranslateTextureResourceState( const ralResourceState_t *state,
 		return qfalse;
 	}
 	*out = candidate;
+	return qtrue;
+}
+
+qboolean ralVk_TranslateTextureViewAspect( int aspect,
+		VkImageAspectFlags available, VkImageAspectFlags *out ) {
+	VkImageAspectFlags candidate;
+	if ( !out || available == 0 ) return qfalse;
+	switch ( aspect ) {
+	case RAL_TEXTURE_VIEW_ASPECT_ALL:
+		candidate = available;
+		break;
+	case RAL_TEXTURE_VIEW_ASPECT_DEPTH_ONLY:
+		if ( !( available & VK_IMAGE_ASPECT_DEPTH_BIT ) ) return qfalse;
+		candidate = VK_IMAGE_ASPECT_DEPTH_BIT;
+		break;
+	case RAL_TEXTURE_VIEW_ASPECT_STENCIL_ONLY:
+		if ( !( available & VK_IMAGE_ASPECT_STENCIL_BIT ) ) return qfalse;
+		candidate = VK_IMAGE_ASPECT_STENCIL_BIT;
+		break;
+	default:
+		return qfalse;
+	}
+	*out = candidate;
+	return qtrue;
+}
+
+qboolean ralVk_TranslateTextureCopyAspect(
+		ralTextureAspectFlags_t requested, VkImageAspectFlags available,
+		VkImageAspectFlags *out ) {
+	const ralTextureAspectFlags_t known = RAL_TEXTURE_ASPECT_COLOR
+		| RAL_TEXTURE_ASPECT_DEPTH | RAL_TEXTURE_ASPECT_STENCIL;
+	VkImageAspectFlags candidate = 0;
+	if ( !out || available == 0u || ( requested & ~known ) != 0u )
+		return qfalse;
+	if ( requested == 0u ) {
+		candidate = available;
+	} else {
+		if ( requested & RAL_TEXTURE_ASPECT_COLOR )
+			candidate |= VK_IMAGE_ASPECT_COLOR_BIT;
+		if ( requested & RAL_TEXTURE_ASPECT_DEPTH )
+			candidate |= VK_IMAGE_ASPECT_DEPTH_BIT;
+		if ( requested & RAL_TEXTURE_ASPECT_STENCIL )
+			candidate |= VK_IMAGE_ASPECT_STENCIL_BIT;
+	}
+	// Vulkan and WebGPU buffer-texture copies both select exactly one plane.
+	if ( candidate == 0u || ( candidate & ~available ) != 0u
+			|| ( candidate & ( candidate - 1u ) ) != 0u ) return qfalse;
+	*out = candidate;
+	return qtrue;
+}
+
+qboolean ralVk_PublishAdoptedTextureResourceState( ralTexture_t *texture,
+		const ralResourceState_t *state, ralQueueType_t ownerQueue ) {
+	ralVkResourceStateTranslation_t native;
+	if ( !texture || !state || texture->ownsImage || texture->portableStateKnown
+	  || texture->queueTransfer.pending.ready
+	  || ownerQueue < RAL_QUEUE_GRAPHICS || ownerQueue > RAL_QUEUE_TRANSFER
+	  || !Ral_ResourceStateValidForTexture( state )
+	  || !ralVk_TranslateTextureResourceState( state, &native ) ) return qfalse;
+	texture->portableState = *state;
+	texture->portableOwnerQueue = ownerQueue;
+	texture->currentLayout = native.layout;
+	texture->portableStateKnown = qtrue;
+	return qtrue;
+}
+
+qboolean ralVk_PublishAttachmentResourceState( ralCommandBuffer_t *command,
+		                                             ralTexture_t *texture,
+		                                             VkImageLayout attachmentLayout ) {
+	ralResourceState_t candidate = { RAL_RESOURCE_USAGE_UNDEFINED, 0u };
+	if ( !command || !texture || !command->backend
+			|| texture->backend != command->backend
+			|| texture->image == VK_NULL_HANDLE
+			|| command->queue != RAL_QUEUE_GRAPHICS
+			|| texture->currentLayout != attachmentLayout ) return qfalse;
+	if ( attachmentLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL )
+		candidate.usage = RAL_RESOURCE_USAGE_COLOR_ATTACHMENT;
+	else if ( attachmentLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL )
+		candidate.usage = RAL_RESOURCE_USAGE_DEPTH_STENCIL_WRITE;
+	else
+		return qfalse;
+	texture->portableState = candidate;
+	texture->portableOwnerQueue = command->queue;
+	texture->portableStateKnown = qtrue;
 	return qtrue;
 }

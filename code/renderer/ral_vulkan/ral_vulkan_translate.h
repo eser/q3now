@@ -40,5 +40,16 @@ qboolean ralVk_TranslateBufferResourceState( const ralResourceState_t *state,
 	                                          ralVkResourceStateTranslation_t *out );
 qboolean ralVk_TranslateTextureResourceState( const ralResourceState_t *state,
 	                                           ralVkResourceStateTranslation_t *out );
+qboolean ralVk_TranslateTextureViewAspect( int aspect,
+	                                        VkImageAspectFlags available,
+	                                        VkImageAspectFlags *out );
+qboolean ralVk_TranslateTextureCopyAspect(
+	ralTextureAspectFlags_t requested, VkImageAspectFlags available,
+	VkImageAspectFlags *out );
+qboolean ralVk_PublishAdoptedTextureResourceState( ralTexture_t *texture,
+	const ralResourceState_t *state, ralQueueType_t ownerQueue );
+qboolean ralVk_PublishAttachmentResourceState( ralCommandBuffer_t *command,
+	                                             ralTexture_t *texture,
+	                                             VkImageLayout attachmentLayout );
 
 #endif

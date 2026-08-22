@@ -43,6 +43,7 @@ typedef struct {
 		uintptr_t *outSubmissionIdentity, uint64_t *outSubmissionGeneration );
 	qboolean (*submissionCompleted)( void *context, uintptr_t submissionIdentity,
 		qboolean *outCompleted );
+	qboolean (*submissionWait)( void *context, uintptr_t submissionIdentity );
 	ralResult_t (*mapBegin)( void *context, ralBuffer_t *staging,
 		const ralBufferMapRequest_t *request, ralBufferMapTicket_t *outTicket );
 	ralResult_t (*mapPoll)( void *context, ralBuffer_t *staging,
@@ -72,6 +73,7 @@ qboolean Ral_ReadbackCreate( const ralReadbackCreateInfo_t *createInfo,
 qboolean Ral_ReadbackGetReceipt( const ralReadbackOwner_t *owner,
 	ralReadbackReceipt_t *outReceipt );
 qboolean Ral_ReadbackComplete( ralReadbackOwner_t *owner );
+qboolean Ral_ReadbackWait( ralReadbackOwner_t *owner );
 ralResult_t Ral_ReadbackMapBegin( ralReadbackOwner_t *owner,
 	ralBufferMapTicket_t *outTicket );
 ralResult_t Ral_ReadbackMapPoll( ralReadbackOwner_t *owner,
@@ -89,7 +91,6 @@ typedef struct {
 	uint32_t y;
 	uint32_t width;
 	uint32_t height;
-	uint64_t byteSize;
 } ralTextureReadbackRegion_t;
 
 // Backend adapters. Both begin functions publish an asynchronous owner or

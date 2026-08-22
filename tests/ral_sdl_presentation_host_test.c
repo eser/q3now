@@ -16,7 +16,7 @@ int main( void ) {
 	ralPresentationHostReceipt_t receipt, resized, beforeReceipt, failedReceipt;
 	ralPresentationSurfaceBorrow_t borrow, beforeBorrow;
 
-	CHECK( WiredSdlRalPresentationHost_Create( 320u, 180u, qfalse, 901u,
+	CHECK( WiredSdlRalPresentationHost_Create( 1280u, 720u, qfalse, 901u,
 		&host, &imports ) );
 	memset( &info, 0, sizeof( info ) );
 	info.schemaVersion = RAL_PRESENTATION_HOST_SCHEMA_VERSION;
@@ -28,7 +28,7 @@ int main( void ) {
 	info.backendType = RAL_BACKEND_METAL;
 	CHECK( imports.open( imports.context, &info, &receipt )
 		&& Ral_PresentationHostReceiptExact( &receipt, &receipt )
-		&& receipt.logicalWidth == 320u && receipt.logicalHeight == 180u
+		&& receipt.logicalWidth == 1280u && receipt.logicalHeight == 720u
 		&& receipt.visible == qfalse );
 	memset( &borrow, 0x5a, sizeof( borrow ) );
 	CHECK( imports.borrow( imports.context, &receipt, &borrow )
@@ -38,9 +38,9 @@ int main( void ) {
 	failedReceipt = resized;
 	CHECK( !imports.refresh( imports.context, &beforeReceipt, &resized )
 		&& memcmp( &resized, &failedReceipt, sizeof( resized ) ) == 0 );
-	CHECK( WiredSdlRalPresentationHost_RequestResize( host, 640u, 360u )
+	CHECK( WiredSdlRalPresentationHost_RequestResize( host, 1600u, 900u )
 		&& imports.refresh( imports.context, &receipt, &resized )
-		&& resized.logicalWidth == 640u && resized.logicalHeight == 360u
+		&& resized.logicalWidth == 1600u && resized.logicalHeight == 900u
 		&& resized.surfaceGeneration > receipt.surfaceGeneration );
 	CHECK( imports.borrow( imports.context, &resized, &beforeBorrow )
 		&& beforeBorrow.surfaceIdentity == borrow.surfaceIdentity );

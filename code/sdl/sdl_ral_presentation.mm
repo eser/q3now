@@ -40,7 +40,11 @@ static qboolean BuildReceipt( wiredSdlRalPresentationHost_t *host,
 			|| !SDL_GetWindowSize( host->window, &logicalWidth, &logicalHeight )
 			|| !SDL_GetWindowSizeInPixels( host->window, &pixelWidth, &pixelHeight )
 			|| logicalWidth <= 0 || logicalHeight <= 0
-			|| pixelWidth <= 0 || pixelHeight <= 0 ) return qfalse;
+			|| !Ral_PresentationExtentValid( (uint32_t)logicalWidth,
+				(uint32_t)logicalHeight )
+			|| pixelWidth <= 0 || pixelHeight <= 0
+			|| !Ral_PresentationExtentValid( (uint32_t)pixelWidth,
+				(uint32_t)pixelHeight ) ) return qfalse;
 	flags = SDL_GetWindowFlags( host->window );
 	memset( &receipt, 0, sizeof( receipt ) );
 	receipt.schemaVersion = RAL_PRESENTATION_HOST_SCHEMA_VERSION;
@@ -196,6 +200,7 @@ qboolean WiredSdlRalPresentationHost_Create( uint32_t logicalWidth,
 	ralPresentationHostImports_t imports;
 	if ( !outHost || !outImports || logicalWidth == 0u || logicalHeight == 0u
 			|| logicalWidth > 16384u || logicalHeight > 16384u
+			|| !Ral_PresentationExtentValid( logicalWidth, logicalHeight )
 			|| ( allowVisible != qfalse && allowVisible != qtrue )
 			|| firstGeneration == 0u || firstGeneration >= UINT64_MAX - 2u ) {
 		return qfalse;
@@ -222,7 +227,8 @@ qboolean WiredSdlRalPresentationHost_RequestResize(
 		uint32_t logicalHeight ) {
 	if ( !host || !Ral_PresentationHostReceiptValid( &host->receipt )
 			|| logicalWidth == 0u || logicalHeight == 0u
-			|| logicalWidth > 16384u || logicalHeight > 16384u ) return qfalse;
+			|| logicalWidth > 16384u || logicalHeight > 16384u
+			|| !Ral_PresentationExtentValid( logicalWidth, logicalHeight ) ) return qfalse;
 	host->requestedWidth = logicalWidth;
 	host->requestedHeight = logicalHeight;
 	return qtrue;

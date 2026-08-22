@@ -35,6 +35,7 @@ foreach(forbidden IN ITEMS "SDL_Window" "SDL_MetalView" "CAMetalLayer" "MTLDevic
 endforeach()
 foreach(needle IN ITEMS
 	"RAL_PRESENTATION_HOST_SCHEMA_VERSION 1u"
+	"Ral_PresentationExtentValid"
 	"ralPresentationHostReceipt_t" "ralPresentationSurfaceBorrow_t"
 	"ownerGeneration" "surfaceGeneration" "ownerIdentity" "surfaceIdentity"
 	"logicalWidth" "logicalHeight" "pixelWidth" "pixelHeight"
@@ -47,7 +48,9 @@ foreach(needle IN ITEMS
 		message(FATAL_ERROR "presentation-host ABI lost field/callback: ${needle}")
 	endif()
 endforeach()
-foreach(needle IN ITEMS "Ral_PresentationHostReceiptValid"
+foreach(needle IN ITEMS "Ral_PresentationExtentValid"
+	"(uint64_t)width * 9u == (uint64_t)height * 16u"
+	"Ral_PresentationHostReceiptValid"
 	"Ral_PresentationHostReceiptExact" "Ral_PresentationSurfaceBorrowValid"
 	"Ral_PresentationSurfaceBorrowExact" "Ral_PresentationHostImportsValid")
 	string(FIND "${SOURCE}" "${needle}" pos)
@@ -55,7 +58,9 @@ foreach(needle IN ITEMS "Ral_PresentationHostReceiptValid"
 		message(FATAL_ERROR "presentation-host validation lost seam: ${needle}")
 	endif()
 endforeach()
-foreach(needle IN ITEMS "RAL_BACKEND_WEBGPU" "MUTATE_RECEIPT( ownerGeneration )"
+foreach(needle IN ITEMS "Ral_PresentationExtentValid( 1280u, 720u )"
+	"!Ral_PresentationExtentValid( 640u, 480u )"
+	"RAL_BACKEND_WEBGPU" "MUTATE_RECEIPT( ownerGeneration )"
 	"MUTATE_RECEIPT( surfaceGeneration )" "MUTATE_RECEIPT( contentScaleX )"
 	"MUTATE_RECEIPT( visible )" "MUTATE_BORROW( surfaceIdentity )"
 	"borrowExact.surfaceIdentity = borrow.ownerIdentity"

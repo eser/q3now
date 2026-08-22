@@ -6,12 +6,14 @@ if(NOT DEFINED SOURCE_ROOT OR NOT DEFINED PROBE_ROOT)
 endif()
 
 file(REMOVE_RECURSE "${PROBE_ROOT}")
-foreach(dir IN ITEMS code/renderercommon code/client code/sdl code/renderervk code/qcommon)
+foreach(dir IN ITEMS code/renderercommon code/renderer/ral_vulkan code/client code/sdl code/renderervk code/qcommon)
 	file(MAKE_DIRECTORY "${PROBE_ROOT}/${dir}")
 endforeach()
 file(COPY "${SOURCE_ROOT}/code/renderercommon/tr_public.h" DESTINATION "${PROBE_ROOT}/code/renderercommon")
 file(COPY "${SOURCE_ROOT}/code/client/client.h" DESTINATION "${PROBE_ROOT}/code/client")
 file(COPY "${SOURCE_ROOT}/code/sdl/sdl_glimp.c" DESTINATION "${PROBE_ROOT}/code/sdl")
+file(COPY "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_caps.c"
+	DESTINATION "${PROBE_ROOT}/code/renderer/ral_vulkan")
 file(COPY "${SOURCE_ROOT}/code/renderervk/vk_ral_textures.c" "${SOURCE_ROOT}/code/renderervk/vk.c"
 	DESTINATION "${PROBE_ROOT}/code/renderervk")
 string(CONCAT native_type "V" "kBuffer")

@@ -8,6 +8,92 @@
 // VkPhysicalDeviceLimits the renderer will need.
 
 #include "ral_vulkan_internal.h"
+
+static const char *ralVk_VendorName( uint32_t vendorId ) {
+	switch ( vendorId ) {
+		case 0x1002: return "Advanced Micro Devices, Inc.";
+		case 0x106B: return "Apple Inc.";
+		case 0x10DE: return "NVIDIA";
+		case 0x14E4: return "Broadcom Inc.";
+		case 0x1AE0: return "Google Inc.";
+		case 0x8086: return "Intel Corporation";
+		case VK_VENDOR_ID_MESA: return "MESA";
+		default: return NULL;
+	}
+}
+
+static ralAdapterType_t ralVk_AdapterType( VkPhysicalDeviceType type ) {
+	switch ( type ) {
+		case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return RAL_ADAPTER_TYPE_INTEGRATED;
+		case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: return RAL_ADAPTER_TYPE_DISCRETE;
+		case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: return RAL_ADAPTER_TYPE_VIRTUAL;
+		case VK_PHYSICAL_DEVICE_TYPE_CPU: return RAL_ADAPTER_TYPE_CPU;
+		default: return RAL_ADAPTER_TYPE_UNKNOWN;
+	}
+}
+
+static void ralVk_FillDriverIdentity( const VkPhysicalDeviceProperties *p,
+		ralCaps_t *c ) {
+	const char *vendorName = ralVk_VendorName( p->vendorID );
+	c->adapterType = ralVk_AdapterType( p->deviceType );
+	c->vendorId = p->vendorID;
+	c->deviceId = p->deviceID;
+	c->offscreenPresentation = p->vendorID == 0x10DE ? qfalse : qtrue;
+	if ( vendorName ) {
+		snprintf( c->vendorName, sizeof( c->vendorName ), "%s", vendorName );
+	} else {
+		snprintf( c->vendorName, sizeof( c->vendorName ),
+			"VendorID: %04x", p->vendorID );
+	}
+
+	if ( p->vendorID == 0x10DE ) {
+		c->driverVersionMajor = ( p->driverVersion >> 22 ) & 0x3FFu;
+		c->driverVersionMinor = ( p->driverVersion >> 14 ) & 0x0FFu;
+		c->driverVersionPatch = ( p->driverVersion >> 6 ) & 0x0FFu;
+		c->driverVersionBuild = p->driverVersion & 0x03Fu;
+		snprintf( c->driverVersion, sizeof( c->driverVersion ), "%u.%u.%u.%u",
+			c->driverVersionMajor, c->driverVersionMinor,
+			c->driverVersionPatch, c->driverVersionBuild );
+#ifdef _WIN32
+	} else if ( p->vendorID == 0x8086 ) {
+		c->driverVersionMajor = p->driverVersion >> 14;
+		c->driverVersionMinor = p->driverVersion & 0x3FFFu;
+		snprintf( c->driverVersion, sizeof( c->driverVersion ), "%u.%u",
+			c->driverVersionMajor, c->driverVersionMinor );
+#endif
+	} else {
+		c->driverVersionMajor = p->driverVersion >> 22;
+		c->driverVersionMinor = ( p->driverVersion >> 12 ) & 0x3FFu;
+		c->driverVersionPatch = p->driverVersion & 0xFFFu;
+		snprintf( c->driverVersion, sizeof( c->driverVersion ), "%u.%u.%u",
+			c->driverVersionMajor, c->driverVersionMinor,
+			c->driverVersionPatch );
+	}
+}
+
+static void ralVk_FillMemoryCapacity(
+		const VkPhysicalDeviceMemoryProperties *memory,
+		ralCaps_t *caps ) {
+	uint32_t i;
+	for ( i = 0u; i < memory->memoryTypeCount; i++ ) {
+		const VkMemoryPropertyFlags flags = memory->memoryTypes[i].propertyFlags;
+		const uint32_t heapIndex = memory->memoryTypes[i].heapIndex;
+		uint64_t bytes;
+		if ( heapIndex >= memory->memoryHeapCount ) continue;
+		bytes = (uint64_t)memory->memoryHeaps[heapIndex].size;
+		if ( ( flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT ) != 0u
+				&& bytes > caps->deviceLocalMemoryBytes ) {
+			caps->deviceLocalMemoryBytes = bytes;
+		}
+		if ( ( flags & ( VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+					| VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT ) )
+				== ( VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+					| VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT )
+				&& bytes > caps->hostVisibleDeviceLocalMemoryBytes ) {
+			caps->hostVisibleDeviceLocalMemoryBytes = bytes;
+		}
+	}
+}
 #include <string.h>
 
 static qboolean ralVk_SampledFormat( ralBackend_t *b, VkFormat format ) {
@@ -33,6 +119,8 @@ void ralVk_FillCaps( ralBackend_t *b ) {
 	snprintf( c->deviceName, sizeof( c->deviceName ), "%s", b->physProps.deviceName );
 	snprintf( c->apiVersion, sizeof( c->apiVersion ), "Vulkan %u.%u.%u",
 	             VK_API_VERSION_MAJOR( apiV ), VK_API_VERSION_MINOR( apiV ), VK_API_VERSION_PATCH( apiV ) );
+	ralVk_FillDriverIdentity( &b->physProps, c );
+	ralVk_FillMemoryCapacity( &b->memProps, c );
 
 	// ── limits straight from VkPhysicalDeviceLimits ────────────────────
 	c->maxColorAttachments       = L->maxColorAttachments;
@@ -44,8 +132,11 @@ void ralVk_FillCaps( ralBackend_t *b ) {
 	c->minUniformBufferAlignment = (uint64_t)L->minUniformBufferOffsetAlignment;
 	c->minStorageBufferAlignment = (uint64_t)L->minStorageBufferOffsetAlignment;
 	c->maxStorageBufferRange     = (uint64_t)L->maxStorageBufferRange;
-	c->timestampPeriodNs         = L->timestampPeriod;
+	c->timestampPeriodNs         = L->timestampComputeAndGraphics
+		? L->timestampPeriod : 0.0f;
 	c->maxSamplerAnisotropy      = b->haveSamplerAnisotropy ? L->maxSamplerAnisotropy : 1.0f;
+	c->maxSampledTexturesPerShaderStage = L->maxPerStageDescriptorSamplers;
+	c->maxBindGroups             = L->maxBoundDescriptorSets;
 
 	// ── device extensions (re-enumerated; cheap) ───────────────────────
 	b->vk.EnumerateDeviceExtensionProperties( b->physicalDevice, NULL, &nDevExt, NULL );

@@ -35,6 +35,8 @@ static uint32_t g_adoptCalls;
 static VkResult g_imageFillResult;
 static VkResult g_waitIdleResult;
 static VkResult g_presentResult;
+static uint32_t g_legacyFormatCalls;
+static uint32_t g_extendedFormatCalls;
 
 void ralVk_Logf( const ralBackend_t *b, ralLogSeverity_t severity, const char *fmt, ... ) {
 	(void)b; (void)severity; (void)fmt;
@@ -65,9 +67,10 @@ VkPresentModeKHR ralVk_TranslatePresentMode( ralPresentMode_t mode ) {
 	}
 }
 
-ralTexture_t *Ral_AdoptTexture( ralBackend_t *b, void *image, void *view,
+ralTexture_t *Ral_AdoptTextureExact( ralBackend_t *b, void *image, void *view,
 	                            ralFormat_t format, uint32_t width, uint32_t height,
-	                            uint32_t aspect, const char *debugName ) {
+	                            uint32_t aspect, ralTextureUsage_t usage,
+	                            const char *debugName ) {
 	ralTexture_t *texture;
 	(void)debugName;
 	if ( g_failAdoptAt >= 0 && (int32_t)g_adoptCalls++ == g_failAdoptAt ) return NULL;
@@ -77,11 +80,13 @@ ralTexture_t *Ral_AdoptTexture( ralBackend_t *b, void *image, void *view,
 	texture->image = (VkImage)image;
 	texture->defaultView = (VkImageView)view;
 	texture->ralFormat = format;
+	texture->usage = usage;
 	texture->width = width;
 	texture->height = height;
 	texture->aspect = aspect;
 	texture->mipLevels = 1;
 	texture->arrayLayers = 1;
+	texture->resourceGeneration = ++b->nextTextureGeneration;
 	return texture;
 }
 
@@ -99,8 +104,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL fakeGetCaps(
 static VKAPI_ATTR VkResult VKAPI_CALL fakeGetFormats(
 	VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t *count, VkSurfaceFormatKHR *formats ) {
 	(void)physicalDevice; (void)surface;
+	g_legacyFormatCalls++;
 	if ( !formats ) { *count = 2; return VK_SUCCESS; }
 	memcpy( formats, g_formats, sizeof( g_formats ) ); *count = 2; return VK_SUCCESS;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL fakeGetFormats2(
+	VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *surfaceInfo,
+	uint32_t *count, VkSurfaceFormat2KHR *formats ) {
+	uint32_t i;
+	(void)physicalDevice;
+	g_extendedFormatCalls++;
+	CHECK( surfaceInfo && surfaceInfo->surface == HANDLE( VkSurfaceKHR, 3 ) );
+	if ( !formats ) { *count = 2; return VK_SUCCESS; }
+	for ( i = 0u; i < 2u; ++i ) formats[i].surfaceFormat = g_formats[i];
+	*count = 2;
+	return VK_SUCCESS;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL fakeGetModes(
@@ -171,6 +190,7 @@ static void setupBackend( ralBackend_t *b ) {
 	b->queues[RAL_QUEUE_GRAPHICS] = HANDLE( VkQueue, 4 );
 	b->vk.GetPhysicalDeviceSurfaceCapabilitiesKHR = fakeGetCaps;
 	b->vk.GetPhysicalDeviceSurfaceFormatsKHR = fakeGetFormats;
+	b->vk.GetPhysicalDeviceSurfaceFormats2KHR = fakeGetFormats2;
 	b->vk.GetPhysicalDeviceSurfacePresentModesKHR = fakeGetModes;
 	b->vk.CreateSwapchainKHR = fakeCreateSwapchain;
 	b->vk.DestroySwapchainKHR = fakeDestroySwapchain;
@@ -210,6 +230,8 @@ static void setupBackend( ralBackend_t *b ) {
 	g_imageFillResult = VK_SUCCESS;
 	g_waitIdleResult = VK_SUCCESS;
 	g_presentResult = VK_SUCCESS;
+	g_legacyFormatCalls = 0u;
+	g_extendedFormatCalls = 0u;
 }
 
 int main( void ) {
@@ -219,9 +241,12 @@ int main( void ) {
 		{ RAL_FORMAT_A2B10G10R10_UNORM, RAL_COLORSPACE_HDR10_ST2084 },
 		{ RAL_FORMAT_B8G8R8A8_UNORM, RAL_COLORSPACE_SRGB_NONLINEAR }
 	};
-	ralPresentMode_t modePreferences[] = {
-		RAL_PRESENT_IMMEDIATE, RAL_PRESENT_MAILBOX, RAL_PRESENT_FIFO
+	ralPresentPreference_t modePreferences[] = {
+		{ RAL_PRESENT_IMMEDIATE, 2u, 2u },
+		{ RAL_PRESENT_MAILBOX, 10u, 10u },
+		{ RAL_PRESENT_FIFO, 3u, 3u }
 	};
+	ralPresentPreference_t fifoUnlimited = { RAL_PRESENT_FIFO, 6u, 7u };
 	ralSwapchainCreateInfo_t ci;
 	ralSwapchainInfo_t info;
 	ralTexture_t *image = NULL;
@@ -232,21 +257,62 @@ int main( void ) {
 	ralSwapchain_t *presentSwapchains[1];
 	uint32_t presentIndices[1];
 	uint32_t destroyedTextures, destroyedViews, destroyedSwapchains, createSerial;
+	ralSurfaceFormatSelectionInfo_t formatQuery;
+	ralSurfaceFormatSelection_t formatSelection, untouchedSelection;
 
+	setupBackend( &backend );
+	memset( &formatQuery, 0, sizeof( formatQuery ) );
+	formatQuery.preferences = formatPreferences;
+	formatQuery.preferenceCount = 2u;
+	memset( &formatSelection, 0xA5, sizeof( formatSelection ) );
+	untouchedSelection = formatSelection;
+	CHECK( Ral_SelectSurfaceFormat( &backend, &formatQuery, &formatSelection ) == ralSuccess );
+	CHECK( formatSelection.selectedPreference == 1u
+		&& formatSelection.selected.format == RAL_FORMAT_B8G8R8A8_UNORM
+		&& formatSelection.availableFormatCount == 2u
+		&& formatSelection.extendedQuery == qfalse );
+	formatQuery.useExtendedQuery = qtrue;
+	g_formats[0].format = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+	g_formats[0].colorSpace = VK_COLOR_SPACE_HDR10_ST2084_EXT;
+	CHECK( Ral_SelectSurfaceFormat( &backend, &formatQuery, &formatSelection ) == ralSuccess );
+	CHECK( formatSelection.selectedPreference == 0u
+		&& formatSelection.selected.colorSpace == RAL_COLORSPACE_HDR10_ST2084
+		&& formatSelection.extendedQuery == qtrue );
+	formatQuery.useExtendedQuery = (qboolean)2;
+	formatSelection = untouchedSelection;
+	CHECK( Ral_SelectSurfaceFormat( &backend, &formatQuery, &formatSelection ) == ralErrorInvalidArgument );
+	CHECK( !memcmp( &formatSelection, &untouchedSelection, sizeof( formatSelection ) ) );
+	formatQuery.useExtendedQuery = qfalse;
+	formatQuery.backendExtensionChain = (const void *)(uintptr_t)0xCAFE;
+	CHECK( Ral_SelectSurfaceFormat( &backend, &formatQuery, &formatSelection ) == ralErrorInvalidArgument );
+	formatQuery.backendExtensionChain = NULL;
+	formatQuery.preferences = &(ralSurfaceFormat_t){ RAL_FORMAT_UNDEFINED, RAL_COLORSPACE_SRGB_NONLINEAR };
+	formatQuery.preferenceCount = 1u;
+	formatSelection = untouchedSelection;
+	CHECK( Ral_SelectSurfaceFormat( &backend, &formatQuery, &formatSelection ) == ralUnsupported );
+	CHECK( !memcmp( &formatSelection, &untouchedSelection, sizeof( formatSelection ) ) );
 	setupBackend( &backend );
 	memset( &ci, 0, sizeof( ci ) );
 	ci.desiredWidth = 100;
 	ci.desiredHeight = 2000;
 	ci.formatPreferences = formatPreferences;
 	ci.formatPreferenceCount = 2;
-	ci.presentModePreferences = modePreferences;
-	ci.presentModePreferenceCount = 3;
-	ci.desiredImageCount = 10;
+	ci.presentPreferences = modePreferences;
+	ci.presentPreferenceCount = 3;
 	ci.requiredUsage = RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_TRANSFER_DST;
 	ci.backendExtensionChain = (const void *)(uintptr_t)0xCAFE;
 
+	modePreferences[1].desiredImageCount = RAL_SWAPCHAIN_MAX_REQUESTED_IMAGES + 1u;
+	CHECK( Ral_CreateOrRecreateSwapchain( &backend, &ci, &swapchain ) == ralErrorInvalidArgument );
+	CHECK( swapchain == NULL && g_createSerial == 0u );
+	modePreferences[1].desiredImageCount = 10u;
+	modePreferences[1].unboundedImageCount = RAL_SWAPCHAIN_MAX_REQUESTED_IMAGES + 1u;
+	CHECK( Ral_CreateOrRecreateSwapchain( &backend, &ci, &swapchain ) == ralErrorInvalidArgument );
+	CHECK( swapchain == NULL && g_createSerial == 0u );
+	modePreferences[1].unboundedImageCount = 10u;
 	CHECK( Ral_CreateOrRecreateSwapchain( &backend, &ci, &swapchain ) == ralSuccess );
 	CHECK( swapchain != NULL );
+	CHECK( g_extendedFormatCalls == 2u && g_legacyFormatCalls == 0u );
 	CHECK( g_lastCreate.imageFormat == VK_FORMAT_B8G8R8A8_UNORM );
 	CHECK( g_lastCreate.presentMode == VK_PRESENT_MODE_MAILBOX_KHR );
 	CHECK( g_lastCreate.imageExtent.width == 320 && g_lastCreate.imageExtent.height == 1080 );
@@ -257,8 +323,11 @@ int main( void ) {
 	CHECK( g_lastCreate.pNext == ci.backendExtensionChain );
 	CHECK( Ral_GetSwapchainInfo( swapchain, &info ) );
 	CHECK( info.generation == 1 );
+	CHECK( info.requestedImageCount == 4u );
 	CHECK( info.imageCount == 9 && info.width == 320 && info.height == 1080 );
 	CHECK( Ral_GetSwapchainImage( swapchain, 8 ) != NULL );
+	CHECK( Ral_GetSwapchainImage( swapchain, 8 )->usage == ci.requiredUsage );
+	CHECK( Ral_GetSwapchainImage( swapchain, 8 )->resourceGeneration == 9u );
 
 	memset( &acquireSemaphore, 0, sizeof( acquireSemaphore ) );
 	acquireSemaphore.backend = &backend;
@@ -332,8 +401,8 @@ int main( void ) {
 	CHECK( g_destroyTextureCalls == 9 && g_destroyViewCalls == 9 );
 
 	// VK_FORMAT_UNDEFINED is a wildcard for the caller's exact requested
-	// format, empty mode preferences select required FIFO, and maxImageCount=0
-	// means unlimited rather than zero.
+	// format. The selected FIFO preference carries a distinct image-count
+	// request for maxImageCount=0 (unlimited) rather than treating zero as a cap.
 	g_createResult = VK_SUCCESS;
 	g_caps.maxImageCount = 0;
 	g_formats[0].format = VK_FORMAT_UNDEFINED;
@@ -343,14 +412,14 @@ int main( void ) {
 	formatPreferences[0].format = RAL_FORMAT_A2B10G10R10_UNORM;
 	formatPreferences[0].colorSpace = RAL_COLORSPACE_SRGB_NONLINEAR;
 	ci.formatPreferenceCount = 1;
-	ci.presentModePreferences = NULL;
-	ci.presentModePreferenceCount = 0;
-	ci.desiredImageCount = 6;
+	ci.presentPreferences = &fifoUnlimited;
+	ci.presentPreferenceCount = 1;
 	CHECK( Ral_CreateOrRecreateSwapchain( &backend, &ci, &swapchain ) == ralSuccess );
 	CHECK( Ral_GetSwapchainInfo( swapchain, &info ) && info.generation == 2 );
 	CHECK( g_lastCreate.imageFormat == VK_FORMAT_A2B10G10R10_UNORM_PACK32 );
 	CHECK( g_lastCreate.presentMode == VK_PRESENT_MODE_FIFO_KHR );
-	CHECK( g_lastCreate.minImageCount == 6 );
+	CHECK( g_lastCreate.minImageCount == 7 );
+	CHECK( info.requestedImageCount == 7u );
 	Ral_DestroySwapchain( swapchain ); swapchain = NULL;
 
 	// Zero variable extent is a recoverable minimized-window state and never

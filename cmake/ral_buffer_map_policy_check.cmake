@@ -11,6 +11,7 @@ file(READ "${ROOT}/code/renderer/ral/ral_resource.h" RESOURCE_HEADER)
 file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_map.c" VULKAN)
 file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_transition.c" TRANSITION)
 file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_command.c" COMMAND)
+file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_dynamic_bind.c" DYNAMIC_BIND)
 file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_resource.c" RESOURCE)
 file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_internal.h" VULKAN_INTERNAL)
 file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_pipeline.c" PIPELINE)
@@ -38,12 +39,12 @@ endif()
 foreach(REQUIRED IN ITEMS
 	"bufferTrackingComplete = qtrue"
 	"bg->buffers[bg->bufferCount++] = val->buffer"
-	"cb->boundBindGroups[setIndex] = g"
+	"cb->boundBindGroups[setIndex] = group"
 	"cb->boundVertexBuffers[binding] = buf"
 	"cb->boundIndexBuffer = buf"
 	"ralVk_BindGroupBuffersGpuUseAllowed"
 	"ralVk_CommandBoundBuffersGpuUseAllowed")
-	string(FIND "${RESOURCE}${COMMAND}${VULKAN_INTERNAL}" "${REQUIRED}" POSITION)
+	string(FIND "${RESOURCE}${COMMAND}${DYNAMIC_BIND}${VULKAN_INTERNAL}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "bind/draw mapped-buffer exclusion lost seam: ${REQUIRED}")
 	endif()
@@ -61,14 +62,14 @@ endforeach()
 
 string(REGEX MATCHALL "ralVk_WriteStagingBuffer[(]" STAGING_CALLS "${RESOURCE}")
 list(LENGTH STAGING_CALLS STAGING_COUNT)
-if(NOT STAGING_COUNT EQUAL 5)
-	message(FATAL_ERROR "typed MAP_WRITE staging inventory drifted: expected definition + 4 calls, got ${STAGING_COUNT}")
+if(NOT STAGING_COUNT EQUAL 6)
+	message(FATAL_ERROR "typed MAP_WRITE staging inventory drifted: expected definition + 5 calls, got ${STAGING_COUNT}")
 endif()
 
 string(REGEX MATCHALL "RAL_BUFFER_TRANSFER_SRC [|] RAL_BUFFER_MAP_WRITE" MAP_WRITE_USAGES "${RESOURCE}")
 list(LENGTH MAP_WRITE_USAGES MAP_WRITE_USAGE_COUNT)
-if(NOT MAP_WRITE_USAGE_COUNT EQUAL 4)
-	message(FATAL_ERROR "typed MAP_WRITE staging creation inventory drifted: expected 4, got ${MAP_WRITE_USAGE_COUNT}")
+if(NOT MAP_WRITE_USAGE_COUNT EQUAL 5)
+	message(FATAL_ERROR "typed MAP_WRITE staging creation inventory drifted: expected 5, got ${MAP_WRITE_USAGE_COUNT}")
 endif()
 
 foreach(REQUIRED IN ITEMS
