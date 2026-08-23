@@ -7,6 +7,13 @@
 R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 
 static int s_anaglyph_mod = -1;
+static refPresentationChange_t s_pendingPresentationChange;
+
+void RE_PresentationChanged( const refPresentationChange_t *change ) {
+	if ( !change || change->schemaVersion != REF_PRESENTATION_CHANGE_SCHEMA_VERSION
+			|| change->generation <= s_pendingPresentationChange.generation ) return;
+	s_pendingPresentationChange = *change;
+}
 
 /*
 =====================
@@ -348,6 +355,17 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 
 	if ( !tr.registered ) {
 		return;
+	}
+	if ( (stereoFrame == STEREO_LEFT || stereoFrame == STEREO_CENTER)
+			&& s_pendingPresentationChange.generation != 0u ) {
+		glConfig.vidWidth = (int)s_pendingPresentationChange.presentationWidth;
+		glConfig.vidHeight = (int)s_pendingPresentationChange.presentationHeight;
+		glConfig.vidWidthLogical = (int)s_pendingPresentationChange.logicalWidth;
+		glConfig.vidHeightLogical = (int)s_pendingPresentationChange.logicalHeight;
+		if ( s_pendingPresentationChange.changeFlags & (1u << 3) )
+			R_SetColorMappings();
+		memset( &s_pendingPresentationChange, 0,
+			sizeof( s_pendingPresentationChange ) );
 	}
 	glState.finishCalled = qfalse;
 

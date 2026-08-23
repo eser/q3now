@@ -2426,7 +2426,7 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_ext_alpha_to_coverage, "Enables alpha-to-coverage multisampling, requires \\r_fbo 1." );
 #endif
 
-	// W-103: widescreen-only defaults. 1280x720 is the canonical 16:9 baseline;
+	// Modern render-target default. 1280x720 is the baseline;
 	// a 4:3 default makes screenshot evidence disagree with the player's framing.
 	r_renderWidth = ri.Cvar_Get( "r_renderWidth", "1280", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_renderWidth, "96", NULL, CV_INTEGER );
@@ -3385,6 +3385,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 
 	re.BeginFrame = RE_BeginFrame;
 	re.EndFrame = RE_EndFrame;
+	re.PresentationChanged = RE_PresentationChanged;
 	re.GetGpuProfileSample = vk_gpu_profile_sample;
 
 	re.MarkFragments = R_MarkFragments;

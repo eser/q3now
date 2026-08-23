@@ -106,6 +106,10 @@ ralBuffer_t *Ral_AdoptBuffer( ralBackend_t *b, void *externalBuffer,
 // the real renderer-owned bytes rather than a parallel allocation.
 ralBuffer_t *Ral_AdoptBufferExact( ralBackend_t *b, void *externalBuffer,
                               const ralBufferCreateInfo_t *createInfo );
+// One-time semantic handoff for a freshly adopted external buffer. Later
+// state changes must use Ral_CmdTransitionResources.
+qboolean Ral_PublishAdoptedBufferState( ralBuffer_t *buffer,
+	const ralResourceState_t *state, ralQueueType_t ownerQueue );
 void *Ral_GetBufferHandle( const ralBuffer_t *buffer );
 uint64_t Ral_GetBufferSize( const ralBuffer_t *buffer );
 ralBufferUsage_t Ral_GetBufferUsage( const ralBuffer_t *buffer );
@@ -122,6 +126,17 @@ ralTexture_t *Ral_AdoptTextureExact( ralBackend_t *b, void *externalImage,
                                 void *externalView, ralFormat_t format,
                                 uint32_t width, uint32_t height, uint32_t aspect,
                                 ralTextureUsage_t usage, const char *debugName );
+// Full-shape import used by renderer migration. The wrapper borrows the native
+// image/view but preserves type, format, extent, mip, sample and capability
+// facts required by portable buffer-to-texture validation.
+ralTexture_t *Ral_AdoptTextureResourceExact( ralBackend_t *b,
+		void *externalImage, void *externalView, uint32_t aspect,
+		const ralTextureCreateInfo_t *createInfo );
+// Renderer-migration import for an already-created native view. The returned
+// wrapper borrows both `texture` and `externalView`; destroying it releases
+// only the wrapper and never the caller-owned VkImageView.
+ralTextureView_t *Ral_AdoptTextureViewExact( ralBackend_t *b,
+		const ralTexture_t *texture, void *externalView );
 // One-time semantic handoff for a freshly adopted external image. The caller
 // owns proof of the external image's current state; later state changes must go
 // through portable Ral_CmdTransitionResources.

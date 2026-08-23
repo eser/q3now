@@ -56,7 +56,9 @@ uint32_t ralVk_FormatBPP( ralFormat_t f ) {   // uncompressed only; zero rejects
 	case RAL_FORMAT_R8_UNORM:                                  return 1;
 	case RAL_FORMAT_R8G8_UNORM: case RAL_FORMAT_R16_UNORM: case RAL_FORMAT_R16_SFLOAT: case RAL_FORMAT_D16_UNORM:
 	case RAL_FORMAT_B5G6R5_UNORM: case RAL_FORMAT_R5G6B5_UNORM:
+	case RAL_FORMAT_B4G4R4A4_UNORM: case RAL_FORMAT_A1R5G5B5_UNORM:
 		return 2;
+	case RAL_FORMAT_R8G8B8_UNORM:                            return 3;
 	case RAL_FORMAT_R8G8B8A8_UNORM: case RAL_FORMAT_R8G8B8A8_SRGB: case RAL_FORMAT_B8G8R8A8_UNORM:
 	case RAL_FORMAT_B8G8R8A8_SRGB: case RAL_FORMAT_A2B10G10R10_UNORM: case RAL_FORMAT_A2R10G10B10_UNORM: case RAL_FORMAT_R16G16_SFLOAT:
 	case RAL_FORMAT_R11G11B10_UFLOAT: case RAL_FORMAT_R32_SFLOAT: case RAL_FORMAT_D32_SFLOAT: case RAL_FORMAT_D24_UNORM_S8_UINT:
@@ -68,6 +70,48 @@ uint32_t ralVk_FormatBPP( ralFormat_t f ) {   // uncompressed only; zero rejects
 	case RAL_FORMAT_R32G32B32A32_SFLOAT:                       return 16;
 	default:                                                   return 0;
 	}
+}
+
+qboolean ralVk_FormatCopyFootprint( ralFormat_t format,
+		uint32_t *blockWidth, uint32_t *blockHeight,
+		uint32_t *bytesPerBlock ) {
+	uint32_t width = 1u, height = 1u, bytes = ralVk_FormatBPP( format );
+	if ( !blockWidth || !blockHeight || !bytesPerBlock ) return qfalse;
+	if ( bytes == 0u ) {
+		width = height = 4u;
+		switch ( format ) {
+		case RAL_FORMAT_BC1_RGBA_UNORM:
+		case RAL_FORMAT_BC1_RGBA_SRGB:
+		case RAL_FORMAT_BC1_RGB_UNORM:
+		case RAL_FORMAT_BC1_RGB_SRGB:
+		case RAL_FORMAT_BC4_UNORM:
+		case RAL_FORMAT_BC4_SNORM:
+			bytes = 8u;
+			break;
+		case RAL_FORMAT_BC2_UNORM:
+		case RAL_FORMAT_BC2_SRGB:
+		case RAL_FORMAT_BC3_UNORM:
+		case RAL_FORMAT_BC3_SRGB:
+		case RAL_FORMAT_BC5_UNORM:
+		case RAL_FORMAT_BC5_SNORM:
+		case RAL_FORMAT_BC6H_UFLOAT:
+		case RAL_FORMAT_BC6H_SFLOAT:
+		case RAL_FORMAT_BC7_UNORM:
+		case RAL_FORMAT_BC7_SRGB:
+		case RAL_FORMAT_ASTC_4x4_UNORM:
+		case RAL_FORMAT_ASTC_4x4_SRGB:
+		case RAL_FORMAT_ETC2_R8G8B8A8_UNORM:
+		case RAL_FORMAT_ETC2_R8G8B8A8_SRGB:
+			bytes = 16u;
+			break;
+		default:
+			return qfalse;
+		}
+	}
+	*blockWidth = width;
+	*blockHeight = height;
+	*bytesPerBlock = bytes;
+	return qtrue;
 }
 
 static VkBufferUsageFlags ralVk_BufferUsage( ralBufferUsage_t u ) {
@@ -513,6 +557,19 @@ ralBuffer_t *Ral_AdoptBufferExact( ralBackend_t *b, void *vkBuffer,
 	}
 	return ralVk_AdoptBuffer( b, vkBuffer, ci->size, ci->usage, ci->memory,
 		ci->debugName );
+}
+
+qboolean Ral_PublishAdoptedBufferState( ralBuffer_t *buffer,
+		const ralResourceState_t *state, ralQueueType_t ownerQueue ) {
+	if ( !buffer || !state || buffer->ownsBuffer || buffer->portableStateKnown
+			|| buffer->queueTransfer.pending.ready || buffer->legacyMapped
+			|| ownerQueue < RAL_QUEUE_GRAPHICS || ownerQueue > RAL_QUEUE_TRANSFER
+			|| !Ral_BufferMapLifecycleGpuUseAllowed( &buffer->mapLifecycle )
+			|| !Ral_ResourceStateValidForBuffer( state ) ) return qfalse;
+	buffer->portableState = *state;
+	buffer->portableOwnerQueue = ownerQueue;
+	buffer->portableStateKnown = qtrue;
+	return qtrue;
 }
 
 void *Ral_GetBufferHandle( const ralBuffer_t *buf ) {
@@ -1123,18 +1180,55 @@ void Ral_DestroyTexture( ralTexture_t *tex ) {
 // texture's format on tex->vkFormat / tex->ralFormat so pipelines + views built
 // from the wrapper carry the right format. currentLayout stays UNDEFINED — it is
 // runtime state, re-synced by the consumer via Ral_SetTextureLayout.
-ralTexture_t *Ral_AdoptTextureExact( ralBackend_t *b,
-                                void *externalImage,
-                                void *externalView,
-                                ralFormat_t fmt,
-                                uint32_t width, uint32_t height,
-                                uint32_t aspect,
-                                ralTextureUsage_t usage,
-                                const char *debugName )
-{
+ralTexture_t *Ral_AdoptTextureResourceExact( ralBackend_t *b,
+		void *externalImage, void *externalView, uint32_t aspect,
+		const ralTextureCreateInfo_t *ci ) {
 	ralTexture_t *tex;
 	uint64_t generation;
-	if ( !b || !externalImage || b->nextTextureGeneration >= UINT64_MAX - 1u ) return NULL;
+	uint32_t layers, depth, fullMips;
+	VkFormat vkFormat;
+	if ( !b || !externalImage || !ci || ci->width == 0u || ci->height == 0u
+			|| ci->mipLevels == 0u || ci->sampleCount == 0u || ci->usage == 0u
+			|| ci->format <= RAL_FORMAT_UNDEFINED || ci->format >= RAL_FORMAT_COUNT
+			|| ci->type < RAL_TEXTURE_1D || ci->type > RAL_TEXTURE_CUBE_ARRAY
+			|| b->nextTextureGeneration >= UINT64_MAX - 1u ) return NULL;
+	vkFormat = ralVk_TranslateFormat( ci->format );
+	if ( vkFormat == VK_FORMAT_UNDEFINED
+			|| aspect == 0u || (VkImageAspectFlags)aspect != ralVk_FormatAspect( ci->format ) )
+		return NULL;
+	switch ( ci->type ) {
+	case RAL_TEXTURE_1D:
+		if ( ci->height != 1u || ci->depthOrArrayLayers > 1u ) return NULL;
+		layers = 1u; depth = 1u;
+		break;
+	case RAL_TEXTURE_2D:
+		if ( ci->depthOrArrayLayers > 1u ) return NULL;
+		layers = 1u; depth = 1u;
+		break;
+	case RAL_TEXTURE_3D:
+		depth = ci->depthOrArrayLayers;
+		if ( depth == 0u ) return NULL;
+		layers = 1u;
+		break;
+	case RAL_TEXTURE_CUBE:
+		if ( ci->width != ci->height || ci->depthOrArrayLayers > 1u ) return NULL;
+		layers = 6u; depth = 1u;
+		break;
+	case RAL_TEXTURE_2D_ARRAY:
+		layers = ci->depthOrArrayLayers;
+		if ( layers == 0u ) return NULL;
+		depth = 1u;
+		break;
+	case RAL_TEXTURE_CUBE_ARRAY:
+		if ( ci->width != ci->height || ci->depthOrArrayLayers == 0u
+				|| ci->depthOrArrayLayers > UINT32_MAX / 6u ) return NULL;
+		layers = ci->depthOrArrayLayers * 6u; depth = 1u;
+		break;
+	default:
+		return NULL;
+	}
+	fullMips = ralVk_FullMipChain( ci->width, ci->height, depth );
+	if ( ci->mipLevels > fullMips ) return NULL;
 	generation = b->nextTextureGeneration + 1u;
 	tex = (ralTexture_t *)malloc( sizeof( *tex ) );
 	if ( !tex ) return NULL;
@@ -1144,16 +1238,16 @@ ralTexture_t *Ral_AdoptTextureExact( ralBackend_t *b,
 	tex->image           = (VkImage)externalImage;
 	tex->alloc           = NULL;
 	tex->defaultView     = (VkImageView)externalView;
-	tex->ralFormat       = fmt;
-	tex->vkFormat        = ( fmt != RAL_FORMAT_UNDEFINED ) ? ralVk_TranslateFormat( fmt ) : VK_FORMAT_UNDEFINED;
-	tex->type            = RAL_TEXTURE_2D;
-	tex->usage           = usage;
-	tex->width           = width;
-	tex->height          = height ? height : 1;
-	tex->depthOrArrayLayers = 1;
-	tex->mipLevels       = 1;
-	tex->arrayLayers     = 1;
-	tex->sampleCount     = 1;
+	tex->ralFormat       = ci->format;
+	tex->vkFormat        = vkFormat;
+	tex->type            = ci->type;
+	tex->usage           = ci->usage;
+	tex->width           = ci->width;
+	tex->height          = ci->height;
+	tex->depthOrArrayLayers = ci->depthOrArrayLayers ? ci->depthOrArrayLayers : 1u;
+	tex->mipLevels       = ci->mipLevels;
+	tex->arrayLayers     = layers;
+	tex->sampleCount     = ci->sampleCount;
 	tex->resourceGeneration = generation;
 	tex->aspect          = (VkImageAspectFlags)aspect;
 	tex->currentLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -1161,9 +1255,30 @@ ralTexture_t *Ral_AdoptTextureExact( ralBackend_t *b,
 	tex->portableStateKnown = qfalse;
 	tex->portableOwnerQueue = RAL_QUEUE_GRAPHICS;
 	Ral_QueueTransferLifecycleInit( &tex->queueTransfer );
-	if ( debugName ) ralVk_SetObjectName( b, (uint64_t)tex->image, VK_OBJECT_TYPE_IMAGE, debugName );
+	if ( ci->debugName ) ralVk_SetObjectName( b, (uint64_t)tex->image,
+		VK_OBJECT_TYPE_IMAGE, ci->debugName );
 	b->nextTextureGeneration = generation;
 	return tex;
+}
+
+ralTexture_t *Ral_AdoptTextureExact( ralBackend_t *b,
+		void *externalImage, void *externalView, ralFormat_t fmt,
+		uint32_t width, uint32_t height, uint32_t aspect,
+		ralTextureUsage_t usage, const char *debugName ) {
+	ralTextureCreateInfo_t ci;
+	RAL_ZERO( ci );
+	ci.type = RAL_TEXTURE_2D;
+	ci.format = fmt;
+	ci.width = width;
+	ci.height = height ? height : 1u;
+	ci.depthOrArrayLayers = 1u;
+	ci.mipLevels = 1u;
+	ci.sampleCount = 1u;
+	ci.usage = usage;
+	ci.memory = RAL_MEMORY_DEVICE_LOCAL;
+	ci.debugName = debugName;
+	return Ral_AdoptTextureResourceExact( b, externalImage, externalView,
+		aspect, &ci );
 }
 
 ralTexture_t *Ral_AdoptTexture( ralBackend_t *b,
@@ -1307,6 +1422,21 @@ void *Ral_GetTextureViewHandle( const ralTextureView_t *view ) {
 	return view ? (void *)view->view : NULL;
 }
 
+ralTextureView_t *Ral_AdoptTextureViewExact( ralBackend_t *b,
+		const ralTexture_t *texture, void *externalView ) {
+	ralTextureView_t *view;
+	if ( !b || !texture || texture->backend != b || !externalView ) return NULL;
+	view = (ralTextureView_t *)malloc( sizeof( *view ) );
+	if ( !view ) return NULL;
+	RAL_ZERO( *view );
+	view->header.refCount = 1;
+	view->backend = b;
+	view->view = (VkImageView)externalView;
+	view->texture = texture;
+	view->ownsView = qfalse;
+	return view;
+}
+
 void *Ral_GetSamplerHandle( const ralSampler_t *s ) {
 	return s ? (void *)s->sampler : NULL;
 }
@@ -1351,6 +1481,7 @@ ralTextureView_t *Ral_CreateTextureView( ralBackend_t *b, const ralTextureViewCr
 	view->header.refCount = 1;
 	view->backend         = b;
 	view->texture         = tex;
+	view->ownsView        = qtrue;
 
 	RAL_ZERO( vci );
 	vci.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -1374,7 +1505,9 @@ void Ral_DestroyTextureView( ralTextureView_t *view ) {
 	if ( !view ) return;
 	if ( view->header.refCount > 1 ) { view->header.refCount--; return; }
 	b = view->backend;
-	ralVk_DeferDestroy( b, RAL_RES_IMAGE_VIEW, RAL_VK_H2U( view->view ), 0, NULL );
+	if ( view->ownsView )
+		ralVk_DeferDestroy( b, RAL_RES_IMAGE_VIEW,
+			RAL_VK_H2U( view->view ), 0, NULL );
 	free( view );
 }
 
@@ -2238,7 +2371,7 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 	VkWriteDescriptorSet        writes[ RAL_VK_MAX_BG_WRITES ];
 	VkDescriptorImageInfo       imgs[ RAL_VK_MAX_BG_IMAGES ];
 	VkDescriptorBufferInfo      bufs[ RAL_VK_MAX_BG_BUFFERS ];
-	uint32_t                    nw = 0, ni = 0, nb = 0, v;
+	uint32_t                    nw = 0, ni = 0, nb = 0, v, imageValueCount = 0;
 	ralBindGroup_t             *bg;
 	VkResult                    r;
 	VkDescriptorPool           pool;
@@ -2285,20 +2418,35 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 			break;
 		case RAL_BIND_SAMPLER:
 			if ( val->sampler && val->sampler->backend != b ) return NULL;
+			if ( ++imageValueCount > RAL_VK_MAX_BG_IMAGES ) return NULL;
 			break;
 		case RAL_BIND_SAMPLED_TEXTURE:
 		case RAL_BIND_STORAGE_TEXTURE:
 			if ( val->textureView && val->textureView->backend != b ) return NULL;
+			if ( ++imageValueCount > RAL_VK_MAX_BG_IMAGES ) return NULL;
 			break;
 		case RAL_BIND_COMBINED_TEXTURE_SAMPLER:
 			if ( ( val->textureView && val->textureView->backend != b )
 			  || ( val->sampler && val->sampler->backend != b ) ) return NULL;
+			if ( ++imageValueCount > RAL_VK_MAX_BG_IMAGES ) return NULL;
 			break;
 		case RAL_BIND_TEXTURE_ARRAY:
+		{
+			const ralVkBindEntry_t *entry = ralVk_FindLayoutEntry( ci->layout, val->binding );
+			if ( !entry || !val->textureArray || val->textureArrayCount == 0u
+					|| val->textureArrayCount > entry->effectiveCount
+					|| val->textureArrayCount > RAL_VK_MAX_BG_IMAGES ) return NULL;
+			if ( val->textureArrayCount > RAL_VK_MAX_BG_IMAGES - imageValueCount )
+				return NULL;
+			imageValueCount += val->textureArrayCount;
+			if ( entry->vkType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ) {
+				if ( !val->sampler || val->sampler->backend != b ) return NULL;
+			} else if ( entry->vkType != VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ) return NULL;
 			for ( uint32_t k = 0; k < val->textureArrayCount; k++ )
-				if ( val->textureArray && val->textureArray[k]
-				  && val->textureArray[k]->backend != b ) return NULL;
+				if ( !val->textureArray[k]
+						|| val->textureArray[k]->backend != b ) return NULL;
 			break;
+		}
 		default: break;
 		}
 	}
@@ -2402,12 +2550,15 @@ ralBindGroup_t *Ral_CreateBindGroup( ralBackend_t *b, const ralBindGroupCreateIn
 			break;
 		case RAL_BIND_TEXTURE_ARRAY: {
 			uint32_t k, base = ni;
-			if ( !val->textureArray || val->textureArrayCount == 0 ) continue;
-			for ( k = 0; k < val->textureArrayCount && ni < RAL_VK_MAX_BG_IMAGES; k++ ) {
-				if ( !val->textureArray[k] ) break;
-				RAL_ZERO( imgs[ni] ); imgs[ni].imageView = val->textureArray[k]->view; imgs[ni].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; ni++;
+			const ralVkBindEntry_t *entry = ralVk_FindLayoutEntry( ci->layout, val->binding );
+			for ( k = 0; k < val->textureArrayCount; k++ ) {
+				RAL_ZERO( imgs[ni] );
+				imgs[ni].imageView = val->textureArray[k]->view;
+				imgs[ni].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				if ( entry && entry->vkType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER )
+					imgs[ni].sampler = val->sampler->sampler;
+				ni++;
 			}
-			if ( ni == base ) continue;
 			w->descriptorCount = ni - base; w->pImageInfo = &imgs[base];
 			break; }
 		default: continue;
@@ -2458,6 +2609,69 @@ void *Ral_GetBindGroupHandle( const ralBindGroup_t *g ) {
 // parallel-paths lifetime rationale. ownsHandle=qfalse on adopted wrappers;
 // destroy frees only the wrapper and leaves the renderer-owned handle intact.
 // ════════════════════════════════════════════════════════════════════════
+
+ralPipelineLayout_t *Ral_CreatePipelineLayout( ralBackend_t *b,
+		const ralPipelineLayoutCreateInfo_t *ci ) {
+	VkDescriptorSetLayout nativeLayouts[ RAL_MAX_PIPELINE_BIND_GROUP_LAYOUTS ];
+	VkPushConstantRange pushRange;
+	VkPipelineLayoutCreateInfo nativeInfo;
+	ralPipelineLayout_t *candidate;
+	uint32_t i;
+	if ( !b || !ci || !b->vk.CreatePipelineLayout || !b->vk.DestroyPipelineLayout
+			|| ci->numBindGroupLayouts > RAL_MAX_PIPELINE_BIND_GROUP_LAYOUTS
+			|| ( ci->numBindGroupLayouts > 0u && !ci->bindGroupLayouts )
+			|| ( b->caps.maxBindGroups > 0u
+				&& ci->numBindGroupLayouts > b->caps.maxBindGroups )
+			|| ( ci->pushConstantSize == 0u ) != ( ci->pushConstantStages == 0u )
+			|| ( ci->pushConstantSize & 3u ) != 0u
+			|| ( ci->pushConstantStages & ~RAL_STAGE_ALL ) != 0u
+			|| ci->pushConstantSize > b->caps.maxPushConstantSize ) return NULL;
+	for ( i = 0u; i < ci->numBindGroupLayouts; ++i ) {
+		const ralBindGroupLayout_t *layout = ci->bindGroupLayouts[i];
+		if ( !layout || layout->backend != b || layout->layout == VK_NULL_HANDLE )
+			return NULL;
+		nativeLayouts[i] = layout->layout;
+	}
+	candidate = (ralPipelineLayout_t *)malloc( sizeof( *candidate ) );
+	if ( !candidate ) return NULL;
+	RAL_ZERO( *candidate );
+	RAL_ZERO( pushRange );
+	pushRange.stageFlags = ralVk_StageFlags( ci->pushConstantStages );
+	pushRange.offset = 0u;
+	pushRange.size = ci->pushConstantSize;
+	RAL_ZERO( nativeInfo );
+	nativeInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	nativeInfo.setLayoutCount = ci->numBindGroupLayouts;
+	nativeInfo.pSetLayouts = ci->numBindGroupLayouts ? nativeLayouts : NULL;
+	nativeInfo.pushConstantRangeCount = ci->pushConstantSize ? 1u : 0u;
+	nativeInfo.pPushConstantRanges = ci->pushConstantSize ? &pushRange : NULL;
+	if ( b->vk.CreatePipelineLayout( b->device, &nativeInfo, NULL,
+			&candidate->vkHandle ) != VK_SUCCESS
+			|| candidate->vkHandle == VK_NULL_HANDLE ) {
+		if ( candidate->vkHandle != VK_NULL_HANDLE )
+			b->vk.DestroyPipelineLayout( b->device, candidate->vkHandle, NULL );
+		free( candidate );
+		return NULL;
+	}
+	candidate->backend = b;
+	candidate->ownsHandle = qtrue;
+	candidate->portableShapeKnown = qtrue;
+	candidate->numBindGroupLayouts = ci->numBindGroupLayouts;
+	if ( ci->numBindGroupLayouts > 0u )
+		memcpy( candidate->bindGroupLayouts, nativeLayouts,
+			ci->numBindGroupLayouts * sizeof( nativeLayouts[0] ) );
+	candidate->pushConstantSize = ci->pushConstantSize;
+	candidate->pushConstantStages = ci->pushConstantStages;
+	if ( ci->pushConstantSize > 0u ) {
+		candidate->externalPushRangeCount = 1u;
+		candidate->externalPushRanges[0].stageFlags = ci->pushConstantStages;
+		candidate->externalPushRanges[0].offset = 0u;
+		candidate->externalPushRanges[0].size = ci->pushConstantSize;
+	}
+	ralVk_SetObjectName( b, (uint64_t)candidate->vkHandle,
+		VK_OBJECT_TYPE_PIPELINE_LAYOUT, ci->debugName );
+	return candidate;
+}
 
 static ralPipelineLayout_t *AdoptPipelineLayoutExact( ralBackend_t *b,
 		void *externalLayout, qboolean ownsHandle, const char *debugName ) {
@@ -2574,16 +2788,24 @@ qboolean Ral_RegisterAdoptedBindGroupDynamicBuffer( ralBindGroup_t *group,
 // being unused. A real "evict + reuse slot" path lands later when the
 // renderer starts consuming the bindless set and needs slot-recycling
 // semantics.
-static void ralVk_BindGroupSetImageViewAt( ralBindGroup_t *g, uint32_t slot, VkImageView imageView, const char *caller ) {
+static int ralVk_BindGroupSetImageViewAt( ralBindGroup_t *g, uint32_t slot, VkImageView imageView, const char *caller ) {
 	VkWriteDescriptorSet  w;
 	VkDescriptorImageInfo img;
 	ralBackend_t         *b;
-	uint32_t              i, binding = 0xFFFFFFFFu;
-	if ( !g || imageView == VK_NULL_HANDLE || !ralVk_BindGroupArenaLive( g ) ) return;
+	uint32_t              i, binding = 0xFFFFFFFFu, capacity = 0u;
+	if ( !g || !ralVk_BindGroupArenaLive( g ) ) return 0;
 	b = g->backend;
 	for ( i = 0; g->layout && i < g->layout->numEntries; i++ )
-		if ( g->layout->entries[i].vkType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ) { binding = g->layout->entries[i].binding; break; }
-	if ( binding == 0xFFFFFFFFu ) { RAL_VK_LOG( SEV_WARN, "%s: layout has no SAMPLED_IMAGE binding\n", caller ); return; }
+		if ( g->layout->entries[i].vkType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ) {
+			binding = g->layout->entries[i].binding;
+			capacity = g->layout->entries[i].effectiveCount;
+			break;
+		}
+	if ( binding == 0xFFFFFFFFu ) { RAL_VK_LOG( SEV_WARN, "%s: layout has no SAMPLED_IMAGE binding\n", caller ); return 0; }
+	if ( slot >= capacity ) return 0;
+	// NULL is an intentional no-op clear for a PARTIALLY_BOUND table. The
+	// validated slot remains stale until the publication ledger tombstones it.
+	if ( imageView == VK_NULL_HANDLE ) return 1;
 	RAL_ZERO( img );
 	img.imageView   = imageView;
 	img.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -2596,18 +2818,54 @@ static void ralVk_BindGroupSetImageViewAt( ralBindGroup_t *g, uint32_t slot, VkI
 	w.descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 	w.pImageInfo      = &img;
 	b->vk.UpdateDescriptorSets( b->device, 1, &w, 0, NULL );
+	return 1;
 }
 
-void Ral_BindGroupSetTextureAt( ralBindGroup_t *g, uint32_t slot, ralTexture_t *tex ) {
-	// NULL tex: leave the slot stale (see comment above).
-	if ( !tex ) return;
-	ralVk_BindGroupSetImageViewAt( g, slot, tex->defaultView, "Ral_BindGroupSetTextureAt" );
+int Ral_BindGroupSetTextureAt( ralBindGroup_t *g, uint32_t slot, ralTexture_t *tex ) {
+	if ( tex && ( tex->backend != ( g ? g->backend : NULL )
+			|| tex->defaultView == VK_NULL_HANDLE ) ) return 0;
+	return ralVk_BindGroupSetImageViewAt( g, slot,
+		tex ? tex->defaultView : VK_NULL_HANDLE, "Ral_BindGroupSetTextureAt" );
 }
 
-void Ral_BindGroupSetTextureViewAt( ralBindGroup_t *g, uint32_t slot, ralTextureView_t *view ) {
-	// NULL view: leave the slot stale (see comment above).
-	if ( !view ) return;
-	ralVk_BindGroupSetImageViewAt( g, slot, view->view, "Ral_BindGroupSetTextureViewAt" );
+int Ral_BindGroupSetTextureViewAt( ralBindGroup_t *g, uint32_t slot, ralTextureView_t *view ) {
+	if ( view && ( view->backend != ( g ? g->backend : NULL )
+			|| view->view == VK_NULL_HANDLE ) ) return 0;
+	return ralVk_BindGroupSetImageViewAt( g, slot,
+		view ? view->view : VK_NULL_HANDLE, "Ral_BindGroupSetTextureViewAt" );
+}
+
+int Ral_BindGroupSetTextureViewAtBinding( ralBindGroup_t *g, uint32_t binding,
+		uint32_t slot, ralTextureView_t *view ) {
+	VkWriteDescriptorSet  write;
+	VkDescriptorImageInfo image;
+	ralBackend_t          *backend;
+	uint32_t               i;
+	const ralVkBindEntry_t *entry = NULL;
+	if ( !g || !view || !ralVk_BindGroupArenaLive( g )
+			|| view->backend != g->backend || view->view == VK_NULL_HANDLE ) return 0;
+	backend = g->backend;
+	for ( i = 0; g->layout && i < g->layout->numEntries; ++i ) {
+		if ( g->layout->entries[i].binding == binding ) {
+			entry = &g->layout->entries[i];
+			break;
+		}
+	}
+	if ( !entry || entry->vkType != VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+			|| slot >= entry->effectiveCount ) return 0;
+	RAL_ZERO( image );
+	image.imageView = view->view;
+	image.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	RAL_ZERO( write );
+	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	write.dstSet = g->set;
+	write.dstBinding = binding;
+	write.dstArrayElement = slot;
+	write.descriptorCount = 1u;
+	write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+	write.pImageInfo = &image;
+	backend->vk.UpdateDescriptorSets( backend->device, 1u, &write, 0u, NULL );
+	return 1;
 }
 
 int Ral_BindGroupSetTextureViewsAt( ralBindGroup_t *g, const uint32_t *slots,
@@ -2655,16 +2913,23 @@ int Ral_BindGroupSetTextureViewsAt( ralBindGroup_t *g, const uint32_t *slots,
 
 // Mirror of Ral_BindGroupSetTextureAt for the SAMPLER binding. NULL sampler
 // is a no-op (see the SAMPLED_IMAGE comment above for the rationale).
-void Ral_BindGroupSetSamplerAt( ralBindGroup_t *g, uint32_t slot, ralSampler_t *s ) {
+int Ral_BindGroupSetSamplerAt( ralBindGroup_t *g, uint32_t slot, ralSampler_t *s ) {
 	VkWriteDescriptorSet  w;
 	VkDescriptorImageInfo img;
 	ralBackend_t         *b;
-	uint32_t              i, binding = 0xFFFFFFFFu;
-	if ( !g || !s || !ralVk_BindGroupArenaLive( g ) ) return;
+	uint32_t              i, binding = 0xFFFFFFFFu, capacity = 0u;
+	if ( !g || !ralVk_BindGroupArenaLive( g ) ) return 0;
 	b = g->backend;
 	for ( i = 0; g->layout && i < g->layout->numEntries; i++ )
-		if ( g->layout->entries[i].vkType == VK_DESCRIPTOR_TYPE_SAMPLER ) { binding = g->layout->entries[i].binding; break; }
-	if ( binding == 0xFFFFFFFFu ) { RAL_VK_LOG( SEV_WARN, "Ral_BindGroupSetSamplerAt: layout has no SAMPLER binding\n" ); return; }
+		if ( g->layout->entries[i].vkType == VK_DESCRIPTOR_TYPE_SAMPLER ) {
+			binding = g->layout->entries[i].binding;
+			capacity = g->layout->entries[i].effectiveCount;
+			break;
+		}
+	if ( binding == 0xFFFFFFFFu ) { RAL_VK_LOG( SEV_WARN, "Ral_BindGroupSetSamplerAt: layout has no SAMPLER binding\n" ); return 0; }
+	if ( slot >= capacity ) return 0;
+	if ( !s ) return 1;
+	if ( s->backend != b || s->sampler == VK_NULL_HANDLE ) return 0;
 	RAL_ZERO( img );
 	img.sampler = s->sampler;
 	RAL_ZERO( w );
@@ -2676,6 +2941,7 @@ void Ral_BindGroupSetSamplerAt( ralBindGroup_t *g, uint32_t slot, ralSampler_t *
 	w.descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLER;
 	w.pImageInfo      = &img;
 	b->vk.UpdateDescriptorSets( b->device, 1, &w, 0, NULL );
+	return 1;
 }
 
 // interop bridge — renderervk needs raw VkImage / VkImageView /

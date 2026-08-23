@@ -2196,14 +2196,14 @@
       "symbol": "ribbon_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
-        "lane0": "7cb860f6f63fa9a2",
-        "lane1": "35762971798163e1"
+        "lane0": "0bf4f23f6900305e",
+        "lane1": "c3542c07b2aa476b"
       },
       "spirv": {
-        "byteCount": 3644,
+        "byteCount": 3780,
         "digest": {
-          "lane0": "6d44a97a83fdf639",
-          "lane1": "15db68f1cad801e0"
+          "lane0": "faf477a4a8ec2917",
+          "lane1": "4a07fac3b95071ac"
         }
       },
       "reflection": {
@@ -2225,9 +2225,9 @@
           },
           {
             "set": 0,
-            "binding": 34,
+            "binding": 3,
             "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER",
-            "arrayCount": 64,
+            "arrayCount": 1,
             "stageFlags": "RAL_STAGE_FRAGMENT",
             "minBufferBindingSize": 0,
             "viewDimension": 0,
@@ -2310,14 +2310,14 @@
       "symbol": "beam_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
-        "lane0": "5b3216b277bf9c15",
-        "lane1": "030ee0660f530d87"
+        "lane0": "66247d060e28254c",
+        "lane1": "a6f4614ea21c6441"
       },
       "spirv": {
-        "byteCount": 3660,
+        "byteCount": 3796,
         "digest": {
-          "lane0": "a00759c1c4504c56",
-          "lane1": "0b269b109f019acc"
+          "lane0": "7b8f54fc982432d0",
+          "lane1": "3b43286fdc2b5188"
         }
       },
       "reflection": {
@@ -2339,9 +2339,9 @@
           },
           {
             "set": 0,
-            "binding": 33,
+            "binding": 4,
             "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER",
-            "arrayCount": 64,
+            "arrayCount": 1,
             "stageFlags": "RAL_STAGE_FRAGMENT",
             "minBufferBindingSize": 0,
             "viewDimension": 0,

@@ -295,6 +295,7 @@ require_text(HARNESS "fixedtime 0; timescale 1; print fixedtime; print timescale
 require_text(HARNESS "camera-input" "stationary-camera provenance mutation")
 require_text(HARNESS "assets-log" "fixture asset-channel mutation")
 require_text(HARNESS "WIRED_RENDERER" "current renderer override")
+require_text(HARNESS "window-extent schema=3 requested=1280x720 logical=1280x720 pixels=" "deterministic harness extent receipt")
 require_text(HARNESS "iqm-generator" "fixture generator provenance")
 require_text(HARNESS "iqm-model" "fixture model provenance")
 require_text(HARNESS "iqm-character-manifest" "fixture character provenance")

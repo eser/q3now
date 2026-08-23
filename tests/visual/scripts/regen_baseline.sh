@@ -27,8 +27,8 @@ OUT_DOM="$ROOT/visual/baselines/${ARTBOARD}_${MODE}_${ACCENT}_dom.json"
 # 2026-08-16: briefly moved to 1280x720 on the false premise that the mockup was
 # resolution-independent; reverted. The artboard container is fixed pixels with
 # overflow:hidden (qw-screens.jsx:1043 `width:1440, height:900`), so a smaller
-# root crops the HUD rather than reflowing it. W-103's 16:9 rule governs the
-# engine; reconciling it with this 16:10 artboard is open — see TASK-70.
+# root crops the HUD rather than reflowing it. Reconciling this 16:10 artboard
+# with other capture targets remains open — see TASK-70.
 W="${WIDTH:-1440}"
 H="${HEIGHT:-900}"
 . "$(cd "$(dirname "$0")/../.." && pwd)/lib/wired_paths.sh"

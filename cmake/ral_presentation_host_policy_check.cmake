@@ -49,7 +49,7 @@ foreach(needle IN ITEMS
 	endif()
 endforeach()
 foreach(needle IN ITEMS "Ral_PresentationExtentValid"
-	"(uint64_t)width * 9u == (uint64_t)height * 16u"
+	"width > 0u && height > 0u"
 	"Ral_PresentationHostReceiptValid"
 	"Ral_PresentationHostReceiptExact" "Ral_PresentationSurfaceBorrowValid"
 	"Ral_PresentationSurfaceBorrowExact" "Ral_PresentationHostImportsValid")
@@ -59,7 +59,7 @@ foreach(needle IN ITEMS "Ral_PresentationExtentValid"
 	endif()
 endforeach()
 foreach(needle IN ITEMS "Ral_PresentationExtentValid( 1280u, 720u )"
-	"!Ral_PresentationExtentValid( 640u, 480u )"
+	"Ral_PresentationExtentValid( 640u, 480u )"
 	"RAL_BACKEND_WEBGPU" "MUTATE_RECEIPT( ownerGeneration )"
 	"MUTATE_RECEIPT( surfaceGeneration )" "MUTATE_RECEIPT( contentScaleX )"
 	"MUTATE_RECEIPT( visible )" "MUTATE_BORROW( surfaceIdentity )"
@@ -70,9 +70,10 @@ foreach(needle IN ITEMS "Ral_PresentationExtentValid( 1280u, 720u )"
 		message(FATAL_ERROR "presentation-host host test lost mutation/WebGPU coverage: ${needle}")
 	endif()
 endforeach()
-string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+21([^0-9]|$)" api21 "${ABI}")
-if(NOT api21 OR NOT ABI MATCHES "ralPresentationHostImports_t PresentationHost")
-	message(FATAL_ERROR "renderer ABI did not advance to native-free presentation host API 21")
+string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+22([^0-9]|$)" api22 "${ABI}")
+if(NOT api22 OR NOT ABI MATCHES "ralPresentationHostImports_t PresentationHost"
+		OR NOT ABI MATCHES "PresentationChanged")
+	message(FATAL_ERROR "renderer ABI did not advance to generation-bound presentation API 22")
 endif()
 foreach(needle IN ITEMS
 	"rimp.PresentationHost.schemaVersion = RAL_PRESENTATION_HOST_SCHEMA_VERSION"

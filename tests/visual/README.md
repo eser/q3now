@@ -188,7 +188,7 @@ committed here — `vendor/` is a reproducible local artifact, never a commit. I
 `vendor/` is missing or stale the harness renders an empty `#root`, which shows up
 as a PNG with a single distinct colour.
 
-Harness resolution follows the pipeline (W-103: 1280x720) and is not hardcoded;
+Harness resolution follows the pipeline (currently 1280x720) and is not hardcoded;
 pass `?w=&h=` to capture at another size.
 
 ## Adding an artboard

@@ -53,13 +53,13 @@ endforeach()
 
 string(REGEX MATCHALL "vk_create_ral_sampler[(]" CREATE_CALLS "${PRODUCT}")
 list(LENGTH CREATE_CALLS CREATE_COUNT)
-if(NOT CREATE_COUNT EQUAL 9)
-	message(FATAL_ERROR "renderer sampler create inventory drifted: expected definition + 8 owner sites, got ${CREATE_COUNT}")
+if(NOT CREATE_COUNT EQUAL 8)
+	message(FATAL_ERROR "renderer sampler create inventory drifted: expected definition + 7 raw-mirror owner sites, got ${CREATE_COUNT}")
 endif()
 string(REGEX MATCHALL "Ral_DestroySampler[(]" DESTROY_CALLS "${PRODUCT}")
 list(LENGTH DESTROY_CALLS DESTROY_COUNT)
-if(NOT DESTROY_COUNT EQUAL 16)
-	message(FATAL_ERROR "renderer RAL sampler destroy inventory drifted: expected 16 owned/rollback sites, got ${DESTROY_COUNT}")
+if(NOT DESTROY_COUNT EQUAL 17)
+	message(FATAL_ERROR "renderer RAL sampler destroy inventory drifted: expected 17 owned/rollback sites, got ${DESTROY_COUNT}")
 endif()
 
 foreach(REQUIRED IN ITEMS
@@ -70,7 +70,8 @@ foreach(REQUIRED IN ITEMS
 	"vk.shadowMap.ral_sampler"
 	"vk.dlightShadow.ral_sampler"
 	"vk.sceneDepth.ral_sampler"
-	"vk.blueNoise.ral_sampler")
+	"vk.blueNoise.ral_sampler"
+	"candidateSampler = Ral_CreateSampler( backend, &samplerInfo );")
 	string(FIND "${PRODUCT}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "renderer sampler owner lifecycle lost seam: ${REQUIRED}")
@@ -88,7 +89,7 @@ endforeach()
 foreach(REQUIRED IN ITEMS
 	"struct ralSampler_s *sampler"
 	"identity = Ral_GetSamplerHandle( sampler );"
-	"Ral_BindGroupSetSamplerAt( s_ral_bindless_set, slot, sampler );"
+	"if ( !Ral_BindGroupSetSamplerAt( s_ral_bindless_set, slot, sampler ) )"
 	"vk.samplers.ral_handle[smIdx]")
 	string(FIND "${BINDLESS_HEADER}${BINDLESS}${PRODUCT}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)

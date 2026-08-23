@@ -571,17 +571,26 @@ SET_TESTS_PROPERTIES(ral_feature_policy_contract PROPERTIES
 	TIMEOUT 30
 )
 
-# W-103: every DEFAULT resolution is 16:9. A 4:3 capture does not match the
-# player's framing, so HUD/FOV evidence read off one is false evidence. Scoped
-# to cvar defaults, the SDL headless fallback, and harness extent expectations
-# -- NOT the virtual 640x480 UI space or the user-selectable mode list.
-ADD_TEST(NAME widescreen_default_policy_contract
+# Keep the built-in mode list useful on current displays without constraining
+# explicit user choices. Window-opening harnesses retain deterministic modern
+# defaults for comparable evidence.
+ADD_TEST(NAME video_mode_default_policy_contract
 	COMMAND ${CMAKE_COMMAND}
 		-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
-		-P ${CMAKE_SOURCE_DIR}/cmake/widescreen_default_policy_check.cmake
+		-P ${CMAKE_SOURCE_DIR}/cmake/video_mode_default_policy_check.cmake
 )
-SET_TESTS_PROPERTIES(widescreen_default_policy_contract PROPERTIES
+SET_TESTS_PROPERTIES(video_mode_default_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.renderer;failure.contract"
+	TIMEOUT 30
+)
+
+ADD_TEST(NAME sdl_display_catalog_source_policy_contract
+	COMMAND ${CMAKE_COMMAND}
+		-DROOT=${CMAKE_SOURCE_DIR}
+		-P ${CMAKE_SOURCE_DIR}/cmake/sdl_display_catalog_policy_check.cmake
+)
+SET_TESTS_PROPERTIES(sdl_display_catalog_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.presentation;failure.contract;platform.sdl3;backend.webgpu"
 	TIMEOUT 30
 )
 
@@ -904,6 +913,34 @@ SET_TESTS_PROPERTIES(ral_bind_group_arena_source_policy_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.ral;owner.renderer;failure.contract;backend.vulkan;backend.webgpu;feature.always"
 	TIMEOUT 30
 )
+ADD_TEST(NAME ral_effect_bind_group_layout_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_effect_bind_group_layout_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_effect_bind_group_layout_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.effects"
+	TIMEOUT 30
+)
+ADD_TEST(NAME ral_effect_pipeline_layout_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_effect_pipeline_layout_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_effect_pipeline_layout_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.effects"
+	TIMEOUT 30
+)
+ADD_TEST(NAME ral_pool_effect_bind_group_layout_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_pool_effect_bind_group_layout_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_pool_effect_bind_group_layout_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.effects"
+	TIMEOUT 30
+)
+ADD_TEST(NAME ral_pool_effect_pipeline_layout_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_pool_effect_pipeline_layout_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_pool_effect_pipeline_layout_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.effects"
+	TIMEOUT 30
+)
 ADD_EXECUTABLE(ral_webgpu_command_lifecycle_test
 	tests/ral_webgpu_command_lifecycle_test.c
 	code/renderer/ral/ral_command_lifecycle.c
@@ -1085,6 +1122,65 @@ ADD_TEST(NAME ral_presentation_host_contract COMMAND ral_presentation_host_test)
 SET_TESTS_PROPERTIES(ral_presentation_host_contract PROPERTIES
 	LABELS "host-only;subsystem;owner.ral;failure.contract;feature.always" TIMEOUT 30)
 WIRED_CONFIGURE_HOST_TEST(ral_presentation_host_test ral_presentation_host_contract)
+ADD_EXECUTABLE(ral_presentation_policy_test
+	tests/ral_presentation_policy_test.c
+	code/renderer/ral/ral_presentation_policy.c)
+TARGET_INCLUDE_DIRECTORIES(ral_presentation_policy_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon)
+TARGET_COMPILE_OPTIONS(ral_presentation_policy_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_presentation_policy_contract COMMAND ral_presentation_policy_test)
+SET_TESTS_PROPERTIES(ral_presentation_policy_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.presentation;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_presentation_policy_test ral_presentation_policy_contract)
+ADD_TEST(NAME ral_presentation_policy_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_presentation_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_presentation_policy_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.presentation;failure.contract;backend.webgpu"
+	TIMEOUT 30)
+ADD_EXECUTABLE(ral_color_output_test
+	tests/ral_color_output_test.c code/renderer/ral/ral_color_output.c)
+TARGET_INCLUDE_DIRECTORIES(ral_color_output_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon)
+TARGET_COMPILE_OPTIONS(ral_color_output_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_color_output_contract COMMAND ral_color_output_test)
+SET_TESTS_PROPERTIES(ral_color_output_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.presentation;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_color_output_test ral_color_output_contract)
+ADD_TEST(NAME ral_color_output_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_color_output_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_color_output_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.presentation;failure.contract;backend.webgpu"
+	TIMEOUT 30)
+ADD_EXECUTABLE(ral_texture_asset_test
+	tests/ral_texture_asset_test.c code/renderer/ral/ral_texture_asset.c)
+TARGET_INCLUDE_DIRECTORIES(ral_texture_asset_test PRIVATE
+	code/qcommon code/renderer/ral code/renderercommon)
+TARGET_COMPILE_OPTIONS(ral_texture_asset_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME ral_texture_asset_contract COMMAND ral_texture_asset_test)
+SET_TESTS_PROPERTIES(ral_texture_asset_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.ral;owner.texture;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(ral_texture_asset_test ral_texture_asset_contract)
+ADD_TEST(NAME ral_texture_asset_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_texture_asset_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_texture_asset_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.ral;owner.texture;failure.contract;backend.webgpu"
+	TIMEOUT 30)
+ADD_EXECUTABLE(wired_display_catalog_test
+	tests/wired_display_catalog_test.c
+	code/client/cl_display_catalog.c)
+TARGET_INCLUDE_DIRECTORIES(wired_display_catalog_test PRIVATE code/client)
+TARGET_COMPILE_OPTIONS(wired_display_catalog_test PRIVATE -Wall -Wextra -Werror)
+ADD_TEST(NAME wired_display_catalog_contract COMMAND wired_display_catalog_test)
+SET_TESTS_PROPERTIES(wired_display_catalog_contract PROPERTIES
+	LABELS "host-only;subsystem;owner.presentation;failure.contract;backend.webgpu;feature.always"
+	TIMEOUT 30)
+WIRED_CONFIGURE_HOST_TEST(wired_display_catalog_test wired_display_catalog_contract)
 ADD_TEST(NAME ral_frame_shell_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_frame_shell_policy_check.cmake)
@@ -1170,10 +1266,13 @@ IF(APPLE)
 		code/renderer/ral/ral_backend_conformance.c
 		code/renderer/ral/ral_capability.c
 		code/renderer/ral/ral_command_lifecycle.c
+		code/renderer/ral/ral_color_output.c
 		code/renderer/ral/ral_frame_shell.c
 		code/renderer/ral/ral_presentation_host.c
+		code/renderer/ral/ral_presentation_policy.c
 		code/renderer/ral/ral_memory_recovery.c
 		code/renderer/ral/ral_shader_abi.c
+		code/renderer/ral/ral_texture_asset.c
 		code/renderer/ral/ral_transfer.c)
 	TARGET_INCLUDE_DIRECTORIES(ral_metal PUBLIC
 		code/qcommon code/renderer/ral code/renderer/ral_metal code/renderercommon)
@@ -1501,6 +1600,12 @@ ADD_TEST(NAME ral_buffer_copy_source_policy_contract
 	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_buffer_copy_policy_check.cmake)
 SET_TESTS_PROPERTIES(ral_buffer_copy_source_policy_contract PROPERTIES
+	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
+	TIMEOUT 30)
+ADD_TEST(NAME ral_buffer_texture_copy_source_policy_contract
+	COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ral_buffer_texture_copy_policy_check.cmake)
+SET_TESTS_PROPERTIES(ral_buffer_texture_copy_source_policy_contract PROPERTIES
 	LABELS "host-only;infrastructure;owner.renderer;owner.ral;failure.source-policy;backend.vulkan;backend.webgpu;feature.always"
 	TIMEOUT 30)
 ADD_TEST(NAME ral_readback_source_policy_contract
@@ -4573,6 +4678,7 @@ SET(RAL_VK_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_backend_conformance.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_capability.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_command_lifecycle.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_color_output.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_legacy_material.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_memory_recovery.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_shader_abi.c
@@ -4583,9 +4689,11 @@ SET(RAL_VK_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_readback.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_host.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_profile.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_presentation_policy.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_residency.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_sampler.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_temporal.c
+	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_texture_asset.c
 	${CMAKE_CURRENT_SOURCE_DIR}/code/renderer/ral/ral_transition.c
 	${RAL_VK_DIR}/ral_vulkan_backend.c
 	${RAL_VK_DIR}/ral_vulkan_bridge.c
@@ -4969,10 +5077,13 @@ IF(APPLE AND USE_RENDERER_DLOPEN)
 			code/renderer/ral/ral_backend_conformance.c
 			code/renderer/ral/ral_capability.c
 			code/renderer/ral/ral_command_lifecycle.c
+			code/renderer/ral/ral_color_output.c
 			code/renderer/ral/ral_frame_shell.c
 			code/renderer/ral/ral_presentation_host.c
+			code/renderer/ral/ral_presentation_policy.c
 			code/renderer/ral/ral_memory_recovery.c
 			code/renderer/ral/ral_shader_abi.c
+			code/renderer/ral/ral_texture_asset.c
 			code/renderer/ral/ral_transfer.c)
 		TARGET_INCLUDE_DIRECTORIES(ral_metal PUBLIC code/qcommon code/renderer/ral
 			code/renderer/ral_metal code/renderercommon)

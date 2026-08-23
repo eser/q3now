@@ -486,6 +486,23 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 	// allows the parallel buffer's vkCmdDraw to be layout-compatible with the
 	// renderer's vkCmdBindDescriptorSets recorded on the same buffer.
 	if ( ci->externalLayout != NULL ) {
+		if ( ci->externalLayout->backend != b
+				|| ci->externalLayout->vkHandle == VK_NULL_HANDLE ) return NULL;
+		if ( ci->externalLayout->portableShapeKnown ) {
+			if ( ci->externalLayout->pushConstantSize != ci->pushConstantSize
+					|| ci->externalLayout->pushConstantStages
+						!= ci->pushConstantStages ) return NULL;
+			if ( ci->numBindGroupLayouts > 0u ) {
+				if ( ci->numBindGroupLayouts
+						!= ci->externalLayout->numBindGroupLayouts ) return NULL;
+				for ( i = 0u; i < ci->numBindGroupLayouts; ++i ) {
+					if ( !ci->bindGroupLayouts[i]
+							|| ci->bindGroupLayouts[i]->backend != b
+							|| ci->bindGroupLayouts[i]->layout
+								!= ci->externalLayout->bindGroupLayouts[i] ) return NULL;
+				}
+			}
+		}
 		layout         = ci->externalLayout->vkHandle;
 		layoutCacheIdx = 0xFFFFFFFFu;
 		(void)nSetLayouts; (void)setLayouts;
@@ -696,6 +713,12 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 		p->numSetLayouts = nSetLayouts;
 		if ( nSetLayouts ) memcpy( p->setLayouts, setLayouts,
 			nSetLayouts * sizeof( setLayouts[0] ) );
+	} else if ( ci->externalLayout->portableShapeKnown ) {
+		p->bindGroupLayoutsRegistered = qtrue;
+		p->numSetLayouts = ci->externalLayout->numBindGroupLayouts;
+		if ( p->numSetLayouts ) memcpy( p->setLayouts,
+			ci->externalLayout->bindGroupLayouts,
+			p->numSetLayouts * sizeof( p->setLayouts[0] ) );
 	}
 	p->hasSemanticKey      = hasSemanticKey;
 	if ( hasSemanticKey ) p->semanticKey = semanticKey;
@@ -757,6 +780,24 @@ ralPipeline_t *Ral_CreateComputePipeline( ralBackend_t *b, const ralComputePipel
 
 	// same externalLayout opt-in as Ral_CreateGraphicsPipeline.
 	if ( ci->externalLayout != NULL ) {
+		if ( ci->externalLayout->backend != b
+				|| ci->externalLayout->vkHandle == VK_NULL_HANDLE ) return NULL;
+		if ( ci->externalLayout->portableShapeKnown ) {
+			if ( ci->externalLayout->pushConstantSize != ci->pushConstantSize
+					|| ci->externalLayout->pushConstantStages
+						!= ( ci->pushConstantSize ? RAL_STAGE_COMPUTE : 0u ) )
+				return NULL;
+			if ( ci->numBindGroupLayouts > 0u ) {
+				if ( ci->numBindGroupLayouts
+						!= ci->externalLayout->numBindGroupLayouts ) return NULL;
+				for ( i = 0u; i < ci->numBindGroupLayouts; ++i ) {
+					if ( !ci->bindGroupLayouts[i]
+							|| ci->bindGroupLayouts[i]->backend != b
+							|| ci->bindGroupLayouts[i]->layout
+								!= ci->externalLayout->bindGroupLayouts[i] ) return NULL;
+				}
+			}
+		}
 		layout         = ci->externalLayout->vkHandle;
 		layoutCacheIdx = 0xFFFFFFFFu;
 		(void)setLayouts;
@@ -807,6 +848,12 @@ ralPipeline_t *Ral_CreateComputePipeline( ralBackend_t *b, const ralComputePipel
 		p->numSetLayouts = ci->numBindGroupLayouts;
 		if ( ci->numBindGroupLayouts ) memcpy( p->setLayouts, setLayouts,
 			ci->numBindGroupLayouts * sizeof( setLayouts[0] ) );
+	} else if ( ci->externalLayout->portableShapeKnown ) {
+		p->bindGroupLayoutsRegistered = qtrue;
+		p->numSetLayouts = ci->externalLayout->numBindGroupLayouts;
+		if ( p->numSetLayouts ) memcpy( p->setLayouts,
+			ci->externalLayout->bindGroupLayouts,
+			p->numSetLayouts * sizeof( p->setLayouts[0] ) );
 	}
 	p->hasSemanticKey      = hasSemanticKey;
 	if ( hasSemanticKey ) p->semanticKey = semanticKey;

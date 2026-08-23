@@ -33,8 +33,8 @@ def exact(prefix,pattern,sev,cat,count=1):
  for _,row,value in found:
   if row["sev"].upper()!=sev or row["cat"].lower()!=cat or re.fullmatch(pattern,value) is None:raise SystemExit(f"FAIL temporal {prefix} body/metadata: {value}")
  return found
-window=exact("window-extent ",r"window-extent schema=2 requested=1280x720 logical=1280x720 pixels=([1-9][0-9]*)x([1-9][0-9]*) exact16x9=1 publish-ready=1","INFO","client")[0]
-wm=re.fullmatch(r"window-extent schema=2 requested=1280x720 logical=1280x720 pixels=([1-9][0-9]*)x([1-9][0-9]*) exact16x9=1 publish-ready=1",window[2])
+window=exact("window-extent ",r"window-extent schema=3 requested=1280x720 logical=1280x720 pixels=([1-9][0-9]*)x([1-9][0-9]*) publish-ready=1","INFO","client")[0]
+wm=re.fullmatch(r"window-extent schema=3 requested=1280x720 logical=1280x720 pixels=([1-9][0-9]*)x([1-9][0-9]*) publish-ready=1",window[2])
 pixel_w,pixel_h=map(int,wm.groups())
 if pixel_w<1280 or pixel_h<720 or pixel_w*9!=pixel_h*16:raise SystemExit("FAIL temporal actual window is not widescreen 16:9 at or above 1280x720")
 policy=exact("VM_Create policy module=gamecl ",r"VM_Create policy module=gamecl requested=0 effective=0 backend=native","DEBUG","system")[0]
@@ -331,7 +331,7 @@ def proj(frame,enabled,reset,history,read,write,phase,cam_prev):
 def cont(frame,n,enabled=True):
  cam="2"*352;ent=("%x"%(n+3))*184;pcam="2"*352;pent=("0"*184 if n==1 else ("%x"%(n+2))*184);prev=0 if n==1 else 1;pf=0 if n==1 else frame-1
  return row("INFO","renderer.temporal",f"temporal-continuity schema=1 world=0 frame={frame} committed=1 camera-valid=1 camera-previous={prev} camera-previous-frame={pf} camera-current={cam} camera-previous-fields={pcam} entity-valid={1 if enabled else 0} entity-owner=0 entity-generation=1 entity-role=3 entity-previous={prev if enabled else 0} entity-previous-frame={pf if enabled else 0} entity-current={ent if enabled else '0'*184} entity-previous-fields={pent if enabled else '0'*184} entity-committed={1 if enabled else 0} attempts=1 scans=1 drawsurfs=40 visible-temporal={3 if enabled else 0} accepted={2 if enabled else 0} rejected=0")
-R=[row("INFO","filesystem","Sys_LoadLibrary(gamesvarm64.dylib): loaded"),row("INFO","filesystem","Sys_LoadLibrary(gameclarm64.dylib): loaded"),row("INFO","system","VM_LoadDll(gamecl): loaded, vmMain @ 0x1234"),row("DEBUG","system","VM_Create policy module=gamecl requested=0 effective=0 backend=native"),row("INFO","client","window-extent schema=2 requested=1280x720 logical=1280x720 pixels=2560x1440 exact16x9=1 publish-ready=1"),row("INFO","cgame","IQM h5a_fixture: mapped 36/36 animations from embedded data"),row("DEBUG","cgame","CG_LoadCharacter: loaded profile=h5a_fixture parts=1 legs=77 torso=77 head=77 icon=0 skin=0"),row("DEBUG","renderer.assets","IQM GPU skinning VBO: 3 verts, 2 tris (characters/h5a_fixture/models/body.iqm)"),row("INFO","client","cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp serverTime=1 numEntities=2 framecount=3)"),row("INFO","cgame","temporal-entity-capability glconfig-generation=7 key=trap_R_AddRefEntityToSceneTemporal expected=232 discovered=232 route=native-syscall export=1"),row("INFO","cgame","temporal-entity-slot glconfig-generation=7 trap=232 owner=0 entity-generation=1 role=3 accepted=1 export=1"),row("INFO","system","Q3_RAL_TEMPORAL_REQUESTED"),row("INFO","renderer.ral","scene-depth live rebuild active=1 deferred-drained=1 attachments-rebound=1 temporal-store-reset=1")]
+R=[row("INFO","filesystem","Sys_LoadLibrary(gamesvarm64.dylib): loaded"),row("INFO","filesystem","Sys_LoadLibrary(gameclarm64.dylib): loaded"),row("INFO","system","VM_LoadDll(gamecl): loaded, vmMain @ 0x1234"),row("DEBUG","system","VM_Create policy module=gamecl requested=0 effective=0 backend=native"),row("INFO","client","window-extent schema=3 requested=1280x720 logical=1280x720 pixels=2560x1440 publish-ready=1"),row("INFO","cgame","IQM h5a_fixture: mapped 36/36 animations from embedded data"),row("DEBUG","cgame","CG_LoadCharacter: loaded profile=h5a_fixture parts=1 legs=77 torso=77 head=77 icon=0 skin=0"),row("DEBUG","renderer.assets","IQM GPU skinning VBO: 3 verts, 2 tris (characters/h5a_fixture/models/body.iqm)"),row("INFO","client","cls.state: -> CA_ACTIVE (FIRST GAMEPLAY FRAME mapname=maps/arena7.bsp serverTime=1 numEntities=2 framecount=3)"),row("INFO","cgame","temporal-entity-capability glconfig-generation=7 key=trap_R_AddRefEntityToSceneTemporal expected=232 discovered=232 route=native-syscall export=1"),row("INFO","cgame","temporal-entity-slot glconfig-generation=7 trap=232 owner=0 entity-generation=1 role=3 accepted=1 export=1"),row("INFO","system","Q3_RAL_TEMPORAL_REQUESTED"),row("INFO","renderer.ral","scene-depth live rebuild active=1 deferred-drained=1 attachments-rebound=1 temporal-store-reset=1")]
 R[7:7]=[row("INFO","system",'"sv_fps" is:"20^7" default:"20^7"'),row("INFO","system",'"timescale" is:"0.025^7" default:"1^7"'),row("INFO","system",'"fixedtime" is:"1^7" default:"0^7"'),row("INFO","system",'"cl_run" is:"1^7" default:"1^7"'),row("INFO","system",'"g_spawnProtect" is:"0^7" default:"2^7"')]
 for f,n in ((20,2),(21,3),(22,4)):R += [proj(f,1,0,1,n&1,(n+1)&1,n-1,1),cont(f,n)]
 R += [row("INFO","renderer.ral","temporal-resolved-hdr schema=2 token=98 frame=17 world=0 extent=1280x720 topology=3 plan=4 scene=5 target=8 slot=1 serial=498 producer=copy submit=1")]
@@ -568,15 +568,6 @@ WIRED="${1:-}";[ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "usage: $0 /absolute
 [ -f "$TIMEOUT_RUNNER" ] || { echo "SKIP: missing timeout runner";exit 77; }
 [ -f "$IQM_FIXTURE" ] || { echo "SKIP: missing temporal IQM fixture builder";exit 77; }
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")";WD="$(dirname "$WIRED")"
-# A stale client binary can accept the explicit 1280x720 arguments above yet
-# still fall through its legacy mode-3 recovery and publish a 640x480 SDL
-# window.  Refuse such artifacts before SDL/video initialization: native
-# evidence may run only with the hidden-until-validated runtime guard compiled
-# into the client.
-if ! grep -aFq "Automated window extent fell below 1280x720" "$WIRED";then
-	echo "SKIP: wired binary predates the mandatory widescreen runtime guard"
-	exit 77
-fi
 find_required(){ local name="$1" candidate;shift;for candidate in "$@";do [ -f "$candidate/$name" ] && { printf '%s\n' "$candidate/$name";return 0;};done;return 1;}
 RENDERER="${WIRED_RENDERER:-}";[ -f "$RENDERER" ] || RENDERER="$(find_required wired_vulkan_arm64.dylib "$WD" "$WD/Contents/MacOS" "$WD/q3now-preview.arm64.app/Contents/MacOS" "$WD/../MacOS")" || { echo "SKIP: set WIRED_RENDERER to the current Vulkan renderer";exit 77; }
 GAMECL="${WIRED_GAMECL:-}";[ -f "$GAMECL" ] || GAMECL="$(find_required gameclarm64.dylib "$WD/base" "$WD/Contents/Resources/base" "$WD/../Resources/base" "$WD/q3now-preview.arm64.app/Contents/Resources/base")" || { echo "SKIP: set WIRED_GAMECL to current native gameclarm64.dylib";exit 77; }

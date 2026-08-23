@@ -418,6 +418,23 @@ void                  Ral_DestroyBindGroupLayout( ralBindGroupLayout_t *layout )
 // ════════════════════════════════════════════════════════════════════════
 // ralPipelineLayout_t foundation.
 //
+#define RAL_MAX_PIPELINE_BIND_GROUP_LAYOUTS 8u
+
+// Standalone portable pipeline-layout ownership. The bind-group-layout vector
+// is ordered by set/group index. pushConstantSize==0 requires stages==0;
+// nonzero inline data is one offset-zero range, matching the existing graphics
+// and compute pipeline create-info contract and allowing WebGPU backends to
+// lower it to their reserved uniform-buffer emulation path.
+typedef struct {
+	const ralBindGroupLayout_t *const *bindGroupLayouts;
+	uint32_t                    numBindGroupLayouts;
+	uint32_t                    pushConstantSize;
+	uint32_t                    pushConstantStages;
+	const char                 *debugName;
+} ralPipelineLayoutCreateInfo_t;
+
+ralPipelineLayout_t *Ral_CreatePipelineLayout( ralBackend_t *backend,
+	const ralPipelineLayoutCreateInfo_t *createInfo );
 void                 Ral_DestroyPipelineLayout( ralPipelineLayout_t *pl );
 
 // One slot's value for Ral_CreateBindGroup. Read the fields that match `type`:
@@ -425,7 +442,8 @@ void                 Ral_DestroyPipelineLayout( ralPipelineLayout_t *pl );
 //   SAMPLED/STORAGE_TEXTURE → textureView
 //   SAMPLER           → sampler
 //   COMBINED_TEXTURE_SAMPLER → textureView + sampler
-//   TEXTURE_ARRAY     → textureArray[0..textureArrayCount)
+//   TEXTURE_ARRAY     → textureArray[0..textureArrayCount), plus sampler when
+//                       the selected layout binding is a combined array
 typedef struct {
 	uint32_t                       binding;
 	ralBindType_t                  type;
@@ -456,13 +474,18 @@ void            Ral_DestroyBindGroup( ralBindGroup_t *g );
 
 // Sparse update of a bindless table — per-frame, adds a newly-resident
 // texture without recreating the BindGroup.
-void Ral_BindGroupSetTextureAt( ralBindGroup_t *g, uint32_t slot, ralTexture_t *tex );
+int Ral_BindGroupSetTextureAt( ralBindGroup_t *g, uint32_t slot, ralTexture_t *tex );
 
 // View-aware sparse update for residency systems. Unlike the whole-texture
 // helper above, this preserves the caller's base-mip / mip-count restriction,
 // so a coarse parent view can remain bound while finer child pages stream.
 // NULL view is the same intentional no-op clear as NULL texture.
-void Ral_BindGroupSetTextureViewAt( ralBindGroup_t *g, uint32_t slot, ralTextureView_t *view );
+int Ral_BindGroupSetTextureViewAt( ralBindGroup_t *g, uint32_t slot, ralTextureView_t *view );
+// Binding-aware variant for layouts that expose more than one sampled-texture
+// array (for example bindless 2D + 2D-array tables). This keeps descriptor
+// publication backend-neutral instead of forcing callers to author Vk writes.
+int Ral_BindGroupSetTextureViewAtBinding( ralBindGroup_t *g, uint32_t binding,
+	uint32_t slot, ralTextureView_t *view );
 // Atomically publishes a coherence group into one sampled-image array with a
 // single backend descriptor update. All entries are validated before any write;
 // NULL inputs or an invalid slot reject the whole batch.
@@ -474,7 +497,7 @@ int Ral_BindGroupSetTextureViewsAt( ralBindGroup_t *g, const uint32_t *slots,
 // layout must declare a SAMPLER binding (any count) for the write to find
 // a destination. NULL sampler is a no-op clear (PARTIALLY_BOUND lets the
 // stale slot persist; explicit-null writes are invalid in Vulkan).
-void Ral_BindGroupSetSamplerAt( ralBindGroup_t *g, uint32_t slot, ralSampler_t *s );
+int Ral_BindGroupSetSamplerAt( ralBindGroup_t *g, uint32_t slot, ralSampler_t *s );
 
 #ifdef __cplusplus
 }

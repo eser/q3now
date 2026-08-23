@@ -361,6 +361,7 @@ struct ralTextureView_s {
 	ralBackend_t       *backend;
 	VkImageView         view;
 	const ralTexture_t *texture;
+	qboolean            ownsView;
 };
 
 struct ralSampler_s {
@@ -523,6 +524,11 @@ struct ralPipelineLayout_s {
 	ralBackend_t     *backend;
 	VkPipelineLayout  vkHandle;
 	qboolean          ownsHandle;
+	qboolean          portableShapeKnown;
+	uint32_t          numBindGroupLayouts;
+	VkDescriptorSetLayout bindGroupLayouts[ RAL_MAX_PIPELINE_BIND_GROUP_LAYOUTS ];
+	uint32_t          pushConstantSize;
+	uint32_t          pushConstantStages;
 	uint32_t          externalPushRangeCount;
 	struct {
 		uint32_t stageFlags; // portable RAL_STAGE_* authority
@@ -858,6 +864,8 @@ void     ralVk_ShutdownResourceLayer( ralBackend_t *b );
 void     ralVk_RunResourceTest      ( ralBackend_t *b );
 VkImageUsageFlags ralVk_TextureUsage( ralTextureUsage_t u );
 uint32_t ralVk_FormatBPP( ralFormat_t f );
+qboolean ralVk_FormatCopyFootprint( ralFormat_t format,
+	uint32_t *blockWidth, uint32_t *blockHeight, uint32_t *bytesPerBlock );
 VkFormatFeatureFlags ralVk_TextureUsageFormatFeatures( ralTextureUsage_t u );
 VkFormatFeatureFlags ralVk_TextureFormatFeatures( ralTextureFormatFeatures_t features );
 VkColorComponentFlags ralVk_ColorWriteMask( const ralColorBlendAttachment_t *blend );

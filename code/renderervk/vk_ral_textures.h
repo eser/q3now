@@ -73,26 +73,42 @@ qboolean vk_ral_boot_backend( void );
 // path in vk_shutdown can still see a live backend.
 void vk_ral_backend_shutdown( void );
 
-// Boot-time adoption of every allocate-once
-// VkDescriptorSet into a ralBindGroup_t with ownsSet=qfalse. Called from
-// vk_init_descriptors's tail after all qvkAllocateDescriptorSets +
-// vkUpdateDescriptorSets writes complete. Idempotent: re-init clears the
-// registry then re-adopts.
+// Boot-time publication of the static bind-group cohort. Remaining legacy
+// VkDescriptorSets are adopted with ownsSet=qfalse; arena-migrated groups are
+// created directly and verified here. Called from vk_init_descriptors's tail.
 void     vk_ral_adopt_static_bindgroups( void );
 // Release every wrapper whose underlying VkDescriptorSet belongs to the
-// renderer descriptor pool. Must run before qvkReset/DestroyDescriptorPool.
+// renderer descriptor arena. Must run before its exact reset/destruction.
 void     vk_ral_release_static_bindgroups( void );
-// Per-slot exact wrapper for the main dynamic UBO descriptor. Geometry-buffer
-// replacement destroys it before the registered buffer and refreshes it after
-// the native descriptor is rewritten.
+// Per-slot exact main dynamic UBO group. Geometry-buffer replacement destroys
+// it before the registered buffer and recreates it in the current arena.
 qboolean vk_ral_refresh_tess_uniform_bindgroup( uint32_t slot );
 void     vk_ral_release_tess_uniform_bindgroup( uint32_t slot );
+qboolean vk_ral_refresh_iqm_bone_bindgroup( uint32_t slot );
+void     vk_ral_release_iqm_bone_bindgroup( uint32_t slot );
+// Main entity-matrix set 3 is created directly from the current exact arena;
+// entMatDesc is only the native mirror of this retained RAL group.
 qboolean vk_ral_refresh_entmat_bindgroup( uint32_t slot );
 void     vk_ral_release_entmat_bindgroup( uint32_t slot );
+qboolean vk_ral_refresh_engine_resources_bindgroup( void );
+void     vk_ral_release_engine_resources_bindgroup( void );
+qboolean vk_ral_refresh_sprite_bindgroup( uint32_t slot );
+void     vk_ral_release_sprite_bindgroup( uint32_t slot );
+// Ribbon, rail-ribbon and beam share one atomic set-0 publication cohort.
+// Each group owns fixed sampled-texture arrays plus a single portable sampler.
+qboolean vk_ral_refresh_primitive_bindgroups( void );
+void     vk_ral_release_primitive_bindgroups( void );
+qboolean vk_ral_refresh_particle_compute_bindgroups( void );
+void     vk_ral_release_particle_compute_bindgroups( void );
+qboolean vk_ral_refresh_particle_render_bindgroups( uint32_t slotMask );
+void     vk_ral_release_particle_render_bindgroups( void );
+qboolean vk_ral_refresh_decal_render_bindgroups( uint32_t slotMask );
+void     vk_ral_release_decal_render_bindgroups( void );
 
-// Per-image legacy sampler-set interop. The native descriptor remains owned by
-// the renderer pool; the wrapper provides typed command authority only.
-qboolean vk_ral_adopt_image_descriptor( image_t *image );
+// Per-image combined-sampler group. RAL allocates/writes the descriptor from
+// the current exact arena; image->descriptor is only its native mirror.
+qboolean vk_ral_refresh_image_descriptor( image_t *image,
+	void *nativeSampler );
 void     vk_ral_release_image_descriptor( image_t *image );
 
 // VkDescriptorSet → ralBindGroup_t * reverse lookup
@@ -181,8 +197,6 @@ qboolean vk_ral_bindless_publish_texture( struct image_s *image,
 	vkBindlessPublicationKind_t kind );
 qboolean vk_ral_bindless_publish_sampler( uint32_t slot,
 	struct ralSampler_s *sampler, const Vk_Sampler_Def *definition );
-qboolean vk_ral_bindless_record_legacy_exact( struct image_s *image,
-	uint32_t slot, VkImageView view );
 qboolean vk_ral_bindless_record_raw_image( struct image_s *image,
 	uint32_t slot, VkImageView view, vkBindlessPublicationKind_t kind );
 qboolean vk_ral_bindless_record_reserved( uint32_t slot, VkImageView view,
@@ -303,13 +317,13 @@ void     vk_ral_upload_counts( uint32_t *syncOut, uint32_t *asyncOut );
 // Slot allocator for the parallel SAMPLED_IMAGE binding at
 // WIRED_BINDLESS_BIND_ARRAY_IMAGES (set 7, binding=2). Returns a slot in
 // the disjoint 2DArray slot-index space, or -1 when the bounded capacity
-// (WIRED_BINDLESS_ARRAY_TEX_SLOTS) is exhausted. The actual descriptor
-// write lives in vk.c::vk_ral_register_image_array — the raw
-// qvkUpdateDescriptorSets handle is static there. Callers store the
-// returned slot in image_t::ralBindlessSlot; the field is shared with the
-// 2D path, but the disjoint binding indices keep the spaces separate, and
-// the consuming shader's macro (WIRED_BINDLESS_TEX vs
-// WIRED_BINDLESS_TEX_ARRAY) picks which to read.
+// (WIRED_BINDLESS_ARRAY_TEX_SLOTS) is exhausted. Publication is routed
+// through the binding-aware RAL bind-group surface; this allocator owns no
+// raw descriptor writer. Callers store the returned slot in
+// image_t::ralBindlessSlot; the field is shared with the 2D path, but the
+// disjoint binding indices keep the spaces separate, and the consuming
+// shader's macro (WIRED_BINDLESS_TEX vs WIRED_BINDLESS_TEX_ARRAY) picks
+// which to read.
 int vk_ral_alloc_array_bindless_slot( const char *imgName );
 
 // Exact native-buffer adoption bridge. Each legacy vkCreateBuffer

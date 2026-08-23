@@ -208,7 +208,7 @@ typedef struct {
 #define WIRED_MAX_ITEMS_PER_MENU   128
 #define WIRED_MAX_MENUS            64
 #define WIRED_MAX_SCRIPT_LEN       1024
-#define WIRED_MAX_MULTI_CHOICES    32
+#define WIRED_MAX_MULTI_CHOICES    128
 
 /* ── 6-layer modality model ──────────────────────────
  * Per docs/wiredui-clay-design.md §10.1. Panel layer ordering:

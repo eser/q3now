@@ -55,7 +55,7 @@ ENGINE=""
 HOLD_FRAMES=1250         # 6 contained 200-frame buckets + a controlled tail;
                          # the analyzer drops the first as warm-up, so five
                          # steady-state buckets per arm survive into the median
-RENDER_WIDTH=1280        # W-103: 16:9 always
+RENDER_WIDTH=1280        # deterministic harness default
 RENDER_HEIGHT=720
 KEEP="${KEEP_ARTIFACTS:-0}"
 

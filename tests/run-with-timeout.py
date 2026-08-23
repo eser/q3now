@@ -19,107 +19,6 @@ from typing import List, Optional, Sequence
 
 TIMEOUT_EXIT_CODE = 124
 
-WIRED_WIDESCREEN_BINARY_MARKERS = (
-    b"Automated window request was not explicit 16:9; using 1280x720",
-    b"Window became non-16:9 (logical=%dx%d pixels=%dx%d); refusing it",
-    b"Automated window extent fell below 1280x720",
-    b"window-extent schema=2 requested=%dx%d logical=%dx%d pixels=%dx%d exact16x9=1 publish-ready=1",
-)
-
-WIRED_PROFILE_HOST_WIDESCREEN_BINARY_MARKER = (
-    b"RAL_PROFILE_HOST window-extent logical=%dx%d pixels=%dx%d "
-    b"exact16x9=1 publish-ready=1"
-)
-
-
-def _wired_client_widescreen_error(command: Sequence[str]) -> Optional[str]:
-    """Reject GUI harness launches that do not carry exact 16:9 authority."""
-    if not command:
-        return None
-
-    cvars = {}
-    index = 1
-    while index + 2 < len(command):
-        if command[index].lower() == "+set":
-            cvars[command[index + 1].lower()] = command[index + 2]
-            index += 3
-            continue
-        index += 1
-
-    executable = Path(command[0]).name.lower()
-    is_headless = "headless" in executable
-    is_profile_host = executable.startswith("wired_profile_host")
-    is_wired_gui = executable.startswith("wired") and not is_headless and not is_profile_host
-    is_automated_gui = cvars.get("com_automated") == "1" and not is_headless
-    if not is_wired_gui and not is_automated_gui:
-        return None
-
-    required = {
-        "r_fullscreen": "0",
-        "r_mode": "-1",
-    }
-    for name, expected in required.items():
-        if cvars.get(name) != expected:
-            return f"{name} must be {expected}"
-
-    try:
-        width = int(cvars["r_customwidth"])
-        height = int(cvars["r_customheight"])
-    except (KeyError, ValueError):
-        return "r_customwidth/r_customheight must be explicit integers"
-    if width <= 0 or height <= 0 or width * 9 != height * 16:
-        return f"requested window {width}x{height} is not exact 16:9"
-    if width < 1280 or height < 720:
-        return f"requested automated window {width}x{height} is below 1280x720"
-    return None
-
-
-def _wired_client_binary_guard_error(
-    command: Sequence[str], cwd: Optional[Path] = None
-) -> Optional[str]:
-    """Reject a stale GUI binary before it can publish a legacy 4:3 window."""
-    if not command:
-        return None
-
-    executable = Path(command[0])
-    if not executable.is_absolute() and cwd is not None:
-        executable = cwd / executable
-    executable_name = executable.name.lower()
-    is_headless = "headless" in executable_name
-
-    cvars = {}
-    index = 1
-    while index + 2 < len(command):
-        if command[index].lower() == "+set":
-            cvars[command[index + 1].lower()] = command[index + 2]
-            index += 3
-            continue
-        index += 1
-    is_profile_host = executable_name.startswith("wired_profile_host")
-    is_wired_gui = executable_name.startswith("wired") and not is_headless and not is_profile_host
-    is_automated_gui = cvars.get("com_automated") == "1" and not is_headless
-    if is_profile_host:
-        try:
-            binary = executable.read_bytes()
-        except (FileNotFoundError, IsADirectoryError, OSError):
-            return None
-        if WIRED_PROFILE_HOST_WIDESCREEN_BINARY_MARKER not in binary:
-            return "profile host lacks hidden-until-validated 16:9 publication guard"
-        return None
-    if not is_wired_gui and not is_automated_gui:
-        return None
-    try:
-        binary = executable.read_bytes()
-    except (FileNotFoundError, IsADirectoryError, OSError):
-        # Let subprocess report an absent executable. Existing launch wrappers
-        # are still covered by their explicit extent authority.
-        return None
-    missing = [marker for marker in WIRED_WIDESCREEN_BINARY_MARKERS
-               if marker not in binary]
-    if missing:
-        return "GUI binary lacks the current hidden-until-validated 16:9 guard"
-    return None
-
 
 def _posix_group_exists(pgid: int) -> bool:
     """Return true while any process still belongs to *pgid*."""
@@ -206,17 +105,6 @@ def run_command(
     timeout: float,
     kill_after: float,
 ) -> int:
-    widescreen_error = _wired_client_widescreen_error(command)
-    if widescreen_error is not None:
-        raise ValueError(
-            "refusing Wired GUI harness before spawn: " + widescreen_error
-        )
-    binary_guard_error = _wired_client_binary_guard_error(command, cwd)
-    if binary_guard_error is not None:
-        raise ValueError(
-            "refusing Wired GUI harness before spawn: " + binary_guard_error
-        )
-
     creationflags = 0
     start_new_session = False
     if os.name == "nt":
@@ -297,59 +185,10 @@ def _pid_is_live(pid: int) -> bool:
 
 def _self_test() -> int:
     failures: List[str] = []
-    good_gui = [
-        "/tmp/wired.arm64",
-        "+set", "r_fullscreen", "0",
-        "+set", "r_mode", "-1",
-        "+set", "r_customwidth", "1280",
-        "+set", "r_customheight", "720",
-    ]
-    bad_gui = list(good_gui)
-    bad_gui[-4] = "640"
-    bad_gui[-1] = "480"
-    if _wired_client_widescreen_error(good_gui) is not None:
-        failures.append("exact-16:9 Wired client launch was rejected")
-    if _wired_client_widescreen_error(bad_gui) is None:
-        failures.append("640x480-equivalent Wired client launch was accepted")
-    small_widescreen_gui = list(good_gui)
-    small_widescreen_gui[-4] = "640"
-    small_widescreen_gui[-1] = "360"
-    if _wired_client_widescreen_error(small_widescreen_gui) is None:
-        failures.append("sub-1280x720 automated Wired client launch was accepted")
-    renamed_bad_gui = list(bad_gui)
-    renamed_bad_gui[0] = "/tmp/client-under-test"
-    renamed_bad_gui[1:1] = ["+set", "com_automated", "1"]
-    if _wired_client_widescreen_error(renamed_bad_gui) is None:
-        failures.append("renamed automated 640x480 client launch was accepted")
-    if _wired_client_widescreen_error(["/tmp/wired", "+set", "r_fullscreen", "0"]) is None:
-        failures.append("incomplete Wired client extent authority was accepted")
-    if _wired_client_widescreen_error(["/tmp/wired-headless"]) is not None:
-        failures.append("headless Wired process was treated as a GUI client")
     with tempfile.TemporaryDirectory(prefix="wired-timeout-selftest-") as temp:
         root = Path(temp)
         pid_file = root / "descendant.pid"
         output = root / "timeout.stdout"
-
-        guarded_gui = root / "wired-guarded"
-        guarded_gui.write_bytes(b"\0".join(WIRED_WIDESCREEN_BINARY_MARKERS))
-        stale_gui = root / "wired-stale"
-        stale_gui.write_bytes(b"legacy mode-3 fallback")
-        profile_host = root / "wired_profile_host"
-        profile_host.write_bytes(WIRED_PROFILE_HOST_WIDESCREEN_BINARY_MARKER)
-        stale_profile_host = root / "wired_profile_host_stale"
-        stale_profile_host.write_bytes(b"legacy profile host window")
-        guarded_command = [str(guarded_gui), *good_gui[1:]]
-        stale_command = [str(stale_gui), *good_gui[1:]]
-        if _wired_client_binary_guard_error(guarded_command) is not None:
-            failures.append("current widescreen-guarded GUI binary was rejected")
-        if _wired_client_binary_guard_error(stale_command) is None:
-            failures.append("stale GUI binary without pre-show 16:9 guards was accepted")
-        if _wired_client_widescreen_error([str(profile_host), "--frames", "1"]) is not None:
-            failures.append("profile host was misclassified as a cvar-driven client")
-        if _wired_client_binary_guard_error([str(profile_host)]) is not None:
-            failures.append("current widescreen-guarded profile host was rejected")
-        if _wired_client_binary_guard_error([str(stale_profile_host)]) is None:
-            failures.append("stale profile host without pre-show guard was accepted")
 
         if os.name == "nt":
             child_code = "import time; time.sleep(60)"

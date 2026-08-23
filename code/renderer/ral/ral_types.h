@@ -150,6 +150,13 @@ typedef enum {
 	RAL_FORMAT_BC5_SNORM,
 	RAL_FORMAT_BC6H_SFLOAT,
 
+	// Native upload/source formats appended for ABI stability.  WebGPU does not
+	// expose all three as texture formats, so a WebGPU backend must reject the
+	// unsupported create capability rather than misrepresent an adopted image.
+	RAL_FORMAT_R8G8B8_UNORM,
+	RAL_FORMAT_B4G4R4A4_UNORM,
+	RAL_FORMAT_A1R5G5B5_UNORM,
+
 	RAL_FORMAT_COUNT
 } ralFormat_t;
 

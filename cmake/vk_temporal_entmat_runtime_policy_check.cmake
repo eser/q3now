@@ -7,6 +7,7 @@ file(READ "${ROOT}/code/renderervk/vk_temporal_entmat_runtime.c" RUNTIME)
 file(READ "${ROOT}/code/renderervk/vk_temporal_entmat_runtime.h" RUNTIME_H)
 file(READ "${ROOT}/code/renderervk/tr_temporal_batch_request.c" REQUEST)
 file(READ "${ROOT}/code/renderervk/vk.h" VKH)
+file(READ "${ROOT}/code/renderervk/vk_ral_textures.c" BINDINGS)
 file(READ "${ROOT}/CMakeLists.txt" BUILD)
 
 function(require_text text needle why)
@@ -41,8 +42,11 @@ require_text(CMDS "&& backEndData->commands.temporalRequest.token == 0" "no norm
 require_text(SCENE "R_TemporalCommandBatchReset();" "next-frame defensive reset")
 require_text(BACKEND "cmd->temporalRequestToken == temporalRequest->token" "matching draw-buffer delivery")
 require_text(VKC "R_TemporalBatchRequestValidateExact( temporalRequest )" "exact seam validation")
-require_text(VKC "if ( temporalCapacityRequested )\n\t\tvk_entmat_ensure_temporal_ring( temporalRequiredSlots );" "active ring-wide raw ensure")
+require_text(VKC "if ( temporalCapacityRequested\n\t\t\t&& !vk_entmat_ensure_temporal_ring( temporalRequiredSlots ) ) {\n\t\ttemporalCapacityRequested = qfalse;"
+	"active ring-wide fail-closed ensure")
 require_text(VKC "if ( !temporalCapacityRequested )\n\t\tvk_entmat_ensure_buffer( 1024u );" "ordinary OFF current-slot ensure")
+require_text(VKC "temporal entity-matrix cohort unavailable; using ordinary set-3 path"
+	"failed temporal cohort ordinary fallback receipt")
 require_text(VKC "if ( !ri.CL_IsMinimized() && !vk.cmd->swapchain_image_acquired )" "acquire follows ensure")
 require_text(VKC "vk_ral_begin_command_exact( vk.cmd->ral_cmd, \"vk_begin_frame\" );" "exact RAL command begin follows ensure")
 require_text(VKC "replacingRawParent" "first-slot retention guard")
@@ -71,7 +75,7 @@ require_text(FRAME_BODY "temporalCapacityRequested =\n\t\tR_TemporalBatchRequest
 require_text(FRAME_BODY "&& temporalRequest->enabled && temporalCapacityRequested\n\t\t\t&& vk_entmat_active()" "runtime requires exact requested capacity")
 require_text(FRAME_BODY "( (uint64_t)vk.cmd->entMatSize\n\t\t\t\t% (uint64_t)ENTITY_MATRIX_SLOT_BYTES ) == 0\n\t\t\t\t&& capacity64 > 0\n\t\t\t\t&& capacity64 <= TEMPORAL_MOTION_PAYLOAD_MAX_SLOTS" "exact slot modulo and portable ceiling gate")
 string(FIND "${FRAME_BODY}" "vk_frame_t_after_fence" frame_fence)
-string(FIND "${FRAME_BODY}" "vk_entmat_ensure_temporal_ring( temporalRequiredSlots );" frame_ensure)
+string(FIND "${FRAME_BODY}" "vk_entmat_ensure_temporal_ring( temporalRequiredSlots )" frame_ensure)
 string(FIND "${FRAME_BODY}" "VK_TemporalEntMatRuntimeEnsureAfterFence" frame_runtime)
 string(FIND "${FRAME_BODY}" "Ral_AcquireNextImage" frame_acquire)
 string(FIND "${FRAME_BODY}" "vk_ral_begin_command_exact( vk.cmd->ral_cmd, \"vk_begin_frame\" );" frame_begin_cb)
@@ -80,11 +84,11 @@ if(frame_fence LESS 0 OR frame_ensure LESS frame_fence
 		OR frame_begin_cb LESS frame_acquire)
 	message(FATAL_ERROR "A2a policy: post-fence < entMat/runtime < acquire < BeginCB order drift")
 endif()
-string(FIND "${VKC}" "static void vk_entmat_ensure_temporal_ring" ring_start)
+string(FIND "${VKC}" "static qboolean vk_entmat_ensure_temporal_ring" ring_start)
 string(SUBSTRING "${VKC}" ${ring_start} 6500 RING_BODY)
 string(FIND "${RING_BODY}" "vk_wait_idle();" grow_idle)
 string(FIND "${RING_BODY}" "vk_temporal_entmat_release_after_idle( \"raw-ring-materialize\" );" grow_release)
-string(FIND "${RING_BODY}" "vk_entmat_materialize_slot_after_idle( &vk.tess[i], bytes );" grow_materialize)
+string(FIND "${RING_BODY}" "if ( !vk_entmat_materialize_slot_after_idle(" grow_materialize)
 if(grow_idle LESS 0 OR grow_release LESS grow_idle OR grow_materialize LESS grow_release)
 	message(FATAL_ERROR "A2a policy: one ring idle < aggregate child release < slot materialization order drift")
 endif()
@@ -95,9 +99,18 @@ require_text(RING_BODY "temporal entMat ring identity drifted without a repairab
 require_text(RING_BODY "vk_temporal_entmat_ring.buffer[i] = vk.tess[i].entMatBuf;" "ring buffer identity publication")
 require_text(RING_BODY "vk_temporal_entmat_ring.descriptor[i] = vk.tess[i].entMatDesc;" "ring descriptor identity publication")
 require_text(RING_BODY "vk_temporal_entmat_ring.ready = qtrue;" "output-atomic ring ready publication")
-require_text(VKC "bi.buffer = slot->entMatBuf;\n\t\tbi.range = VK_WHOLE_SIZE;" "exact ring descriptor buffer authority")
-require_text(VKC "w.dstSet = slot->entMatDesc;\n\t\tw.dstBinding = 0;\n\t\tw.descriptorCount = 1;\n\t\tw.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;" "exact ring descriptor write ABI")
-require_text(VKC "if ( repair[i] )\n\t\t\tvk_entmat_materialize_slot_after_idle( &vk.tess[i], bytes );" "unchanged ring slots are not rewritten")
+require_text(BINDINGS "value.buffer = buffer;\n\tvalue.bufferRange = vk.tess[slot].entMatSize;"
+	"exact ring descriptor buffer authority")
+require_text(BINDINGS "value.binding = 0u;\n\tvalue.type = RAL_BIND_STORAGE_BUFFER;"
+	"exact ring portable binding ABI")
+require_text(BINDINGS "createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;\n\tcandidate = Ral_CreateBindGroup( s_ral_backend, &createInfo );"
+	"generation-bound direct group creation")
+require_text(BINDINGS "vk.tess[slot].entMatDesc = rawCandidate;\n\tif ( retired ) Ral_DestroyBindGroup( retired );"
+	"publish-before-retire native mirror")
+forbid_text(BINDINGS "Ral_AdoptBindGroup( s_ral_backend, vk.tess[slot].entMatDesc"
+	"entity-matrix adoption fallback")
+require_text(VKC "if ( repair[i] )\n\t\t\tif ( !vk_entmat_materialize_slot_after_idle("
+	"unchanged ring slots are not rewritten")
 require_text(VKC "vk_temporal_entmat_ring_invalidate();\n\t\t\tfor ( sl6d = 0; sl6d < NUM_COMMAND_BUFFERS; sl6d++ )" "descriptor-pool reset invalidates ring receipt")
 string(FIND "${VKC}" "void vk_shutdown(" shutdown_start)
 string(SUBSTRING "${VKC}" ${shutdown_start} 15000 SHUTDOWN_BODY)

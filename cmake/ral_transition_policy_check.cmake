@@ -506,16 +506,13 @@ foreach(REQUIRED IN ITEMS
 	endif()
 endforeach()
 foreach(REQUIRED IN ITEMS
-	"RETAIN_ADOPT( vk.smaa.ral_edges_descriptor"
-	"RETAIN_ADOPT( vk.smaa.ral_blend_descriptor"
-	"RETAIN_ADOPT( vk.smaa.ral_input_descriptor"
-	"RETAIN_ADOPT( vk.smaa.ral_area_descriptor"
-	"RETAIN_ADOPT( vk.smaa.ral_search_descriptor"
-	"RETAIN_ADOPT( vk.smaaRt.ral_descriptor[i]"
+	"vk_ral_refresh_smaa_sampler_cohorts"
+	"vk_ral_release_smaa_sampler_cohorts"
+	"Ral_CreateBindGroup( backend, &createInfo )"
 	"vk_ral_smaa_bindgroups_ready"
 	"vk_ral_destroy_smaa_bindgroups"
 	"void vk_ral_release_static_bindgroups( void )")
-	string(FIND "${PRODUCT_TEXTURE_TEXT}" "${REQUIRED}" POSITION)
+	string(FIND "${PRODUCT_TEXTURE_TEXT}${PRODUCT_TEXT}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "SMAA retained bind-group lifecycle lost: ${REQUIRED}")
 	endif()
@@ -563,58 +560,102 @@ endif()
 
 foreach(REQUIRED IN ITEMS
 	"struct ralBindGroup_s *ralDescriptor"
-	"qboolean vk_ral_adopt_image_descriptor( image_t *image )"
+	"struct ralTexture_s *ralDescriptorTexture"
+	"struct ralTextureView_s *ralDescriptorView"
+	"struct ralSampler_s *ralDescriptorSampler"
+	"qboolean vk_ral_refresh_image_descriptor( image_t *image,"
 	"void     vk_ral_release_image_descriptor( image_t *image )")
 	string(FIND "${PRODUCT_LOCAL_TEXT}${PRODUCT_TEXTURE_HEADER_TEXT}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "per-image retained descriptor surface lost: ${REQUIRED}")
 	endif()
 endforeach()
+extract_between("${PRODUCT_TEXTURE_TEXT}"
+	"qboolean vk_ral_refresh_image_descriptor"
+	"void vk_ral_release_image_descriptor" IMAGE_DESCRIPTOR_OWNER)
 foreach(REQUIRED IN ITEMS
-	"candidate = Ral_AdoptBindGroup( s_ral_backend, image->descriptor"
-	"Ral_GetBindGroupHandle( candidate ) != (void *)image->descriptor"
-	"Ral_DestroyBindGroup( candidate )"
-	"previous = image->ralDescriptor"
-	"image->ralDescriptor = candidate"
-	"Ral_DestroyBindGroup( previous )"
-	"Ral_DestroyBindGroup( image->ralDescriptor )"
-	"image->ralDescriptor = NULL"
-	"for ( i = 0; i < tr.numImages; i++ )\n\t\tvk_ral_release_image_descriptor( tr.images[i] );\n\tvk_ral_destroy_adopted_bindgroups();")
-	string(FIND "${PRODUCT_TEXTURE_TEXT}" "${REQUIRED}" POSITION)
+	"Ral_BindGroupArenaReceiptValid("
+	"vk_ral_lookup_sampler( nativeSampler )"
+	"Ral_AdoptTextureExact( s_ral_backend"
+	"Ral_AdoptTextureViewExact( s_ral_backend"
+	"value.type = RAL_BIND_COMBINED_TEXTURE_SAMPLER"
+	"createInfo.arena = vk.ral_descriptor_arena"
+	"createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt"
+	"groupCandidate = Ral_CreateBindGroup( s_ral_backend, &createInfo )"
+	"image->ralDescriptor = groupCandidate"
+	"image->descriptor = rawCandidate"
+	"groupCandidateOwned = qfalse"
+	"textureCandidateOwned = qfalse"
+	"viewCandidateOwned = qfalse"
+	"if ( groupRetired ) Ral_DestroyBindGroup( groupRetired )"
+	"if ( viewRetired ) Ral_DestroyTextureView( viewRetired )"
+	"if ( textureRetired ) Ral_DestroyTexture( textureRetired )")
+	string(FIND "${IMAGE_DESCRIPTOR_OWNER}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
-		message(FATAL_ERROR "per-image retained descriptor lifecycle lost: ${REQUIRED}")
+		message(FATAL_ERROR "per-image direct RAL descriptor lifecycle lost: ${REQUIRED}")
+	endif()
+endforeach()
+foreach(RETIRED IN ITEMS Ral_AdoptBindGroup qvkAllocateDescriptorSets
+	qvkUpdateDescriptorSets VkWriteDescriptorSet)
+	string(FIND "${IMAGE_DESCRIPTOR_OWNER}" "${RETIRED}" POSITION)
+	if(NOT POSITION EQUAL -1)
+		message(FATAL_ERROR "per-image direct owner regained retired authority: ${RETIRED}")
 	endif()
 endforeach()
 foreach(REQUIRED IN ITEMS
-	"vk_ral_release_image_descriptor( image );\n\t\timage->descriptor = VK_NULL_HANDLE"
-	"qvkAllocateDescriptorSets( vk.device, &imageAlloc, &image->descriptor )"
-	"vk_update_descriptor_set( image,"
-	"vk_ral_adopt_image_descriptor( image )"
-	"image sampler bind-group adoption failed after pool reset")
-	string(FIND "${PRODUCT_TEXT}" "${REQUIRED}" POSITION)
+	"for ( i = 0; i < (uint32_t)tr.numImages; i++ )"
+	"vk_ral_release_image_descriptor( image )"
+	"vk_update_descriptor_set( image,")
+	extract_between("${PRODUCT_TEXT}" "void vk_init_descriptors"
+		"static void vk_release_geometry_buffers" IMAGE_ARENA_RESET)
+	string(FIND "${IMAGE_ARENA_RESET}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "image descriptor pool-reset rebuild lost: ${REQUIRED}")
 	endif()
 endforeach()
+foreach(RETIRED IN ITEMS imageAlloc "&image->descriptor"
+	"vk_ral_adopt_image_descriptor")
+	string(FIND "${IMAGE_ARENA_RESET}" "${RETIRED}" POSITION)
+	if(NOT POSITION EQUAL -1)
+		message(FATAL_ERROR "image arena rebuild regained raw/adopt authority: ${RETIRED}")
+	endif()
+endforeach()
 foreach(REQUIRED IN ITEMS
 	"image->ralDescriptor = NULL"
+	"image->ralDescriptorTexture = NULL"
+	"image->ralDescriptorView = NULL"
+	"image->ralDescriptorSampler = NULL"
 	"vk_ral_release_image_descriptor( img );\n\t\t// tear down the parallel RAL texture")
 	string(FIND "${PRODUCT_IMAGE_TEXT}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "image descriptor init/teardown ordering lost: ${REQUIRED}")
 	endif()
 endforeach()
-string(REGEX MATCHALL "image->ralDescriptor = NULL" IMAGE_DESCRIPTOR_INITS "${PRODUCT_IMAGE_TEXT}")
-list(LENGTH IMAGE_DESCRIPTOR_INITS IMAGE_DESCRIPTOR_INIT_COUNT)
-if(NOT IMAGE_DESCRIPTOR_INIT_COUNT EQUAL 3)
-	message(FATAL_ERROR "all three Vulkan image constructors must initialize ralDescriptor, got ${IMAGE_DESCRIPTOR_INIT_COUNT}")
-endif()
+foreach(FIELD IN ITEMS ralDescriptor ralDescriptorTexture ralDescriptorView
+	ralDescriptorSampler)
+	string(REGEX MATCHALL "image->${FIELD} = NULL" IMAGE_DESCRIPTOR_INITS
+		"${PRODUCT_IMAGE_TEXT}")
+	list(LENGTH IMAGE_DESCRIPTOR_INITS IMAGE_DESCRIPTOR_INIT_COUNT)
+	if(NOT IMAGE_DESCRIPTOR_INIT_COUNT EQUAL 3)
+		message(FATAL_ERROR "all three Vulkan image constructors must initialize ${FIELD}, got ${IMAGE_DESCRIPTOR_INIT_COUNT}")
+	endif()
+endforeach()
+foreach(REQUIRED IN ITEMS
+	"ralTextureView_t *Ral_AdoptTextureViewExact"
+	"view->ownsView = qfalse"
+	"view->ownsView        = qtrue"
+	"if ( view->ownsView )")
+	string(FIND "${BRIDGE_TEXT}${RESOURCE_TEXT}" "${REQUIRED}" POSITION)
+	if(POSITION EQUAL -1)
+		message(FATAL_ERROR "borrowed native image-view bridge lost: ${REQUIRED}")
+	endif()
+endforeach()
 foreach(REQUIRED IN ITEMS
 	"Ral_PublishAdoptedTextureState( vk.smaa.ral_input_image"
 	"Ral_PublishAdoptedTextureState( vk.smaa.ral_edges_image"
 	"Ral_PublishAdoptedTextureState( vk.smaa.ral_blend_image"
 	"RAL_RESOURCE_USAGE_SAMPLED_TEXTURE, RAL_STAGE_FRAGMENT")
-	string(FIND "${PRODUCT_TEXTURE_TEXT}" "${REQUIRED}" POSITION)
+	string(FIND "${PRODUCT_TEXTURE_TEXT}${PRODUCT_TEXT}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "SMAA adopted-state publication lost: ${REQUIRED}")
 	endif()

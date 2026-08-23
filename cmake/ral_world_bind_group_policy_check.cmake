@@ -53,8 +53,10 @@ IF(BLOOM_POS EQUAL -1)
 	MESSAGE(FATAL_ERROR "missing vk_bloom")
 ENDIF()
 STRING(SUBSTRING "${VK}" ${BLOOM_POS} -1 BLOOM)
-EXTRACT_SPAN("${VK}" "static void vk_entmat_materialize_slot_after_idle("
-	"static void vk_entmat_ensure_temporal_ring(" ENTMAT)
+EXTRACT_SPAN("${VK}" "static qboolean vk_entmat_materialize_slot_after_idle("
+	"static qboolean vk_entmat_ensure_temporal_ring(" ENTMAT)
+EXTRACT_SPAN("${ADOPT}" "qboolean vk_ral_refresh_entmat_bindgroup( uint32_t slot )"
+	"void vk_ral_release_sprite_bindgroup( uint32_t slot )" ENTMAT_GROUP)
 
 # Main and MSDF pipelines must publish the same exact 0/1/2 parents and their
 # distinct overloaded set-3 layout before any exact bind can succeed.
@@ -71,15 +73,15 @@ FOREACH(NEEDLE IN ITEMS
 	REQUIRE_TEXT("${VK}${VK_H}" "${NEEDLE}" "world exact layout ABI")
 ENDFOREACH()
 
-# Retained descriptor children must be rebuilt from the current pool/buffer
-# identities and destroyed before their descriptor pool or raw buffer parents.
+# Retained descriptor children are direct current-arena groups. Native
+# descriptor fields are compatibility mirrors only; group children are
+# destroyed before their arena or raw buffer parents.
 FOREACH(NEEDLE IN ITEMS
 	"vk.engineResources.ral_descriptor"
 	"vk.msdf.ral_descriptor[i]"
-	"Ral_RegisterAdoptedBindGroupDynamicBuffer("
 	"vk_ral_refresh_entmat_bindgroup( uint32_t slot )"
 	"vk_ral_release_entmat_bindgroup( uint32_t slot )"
-	"DESTROY_RETAINED_BG( vk.tess[i].ral_entMatDesc );"
+	"vk_ral_release_entmat_bindgroup( i );"
 	"DESTROY_RETAINED_BG( vk.msdf.ral_descriptor[i] );")
 	REQUIRE_TEXT("${ADOPT}" "${NEEDLE}" "world retained bind-group lifecycle")
 ENDFOREACH()
@@ -89,6 +91,34 @@ STRING(FIND "${ENTMAT}" "vk_ral_refresh_entmat_bindgroup" REFRESH_POS)
 IF(RELEASE_POS EQUAL -1 OR DESTROY_POS EQUAL -1 OR REFRESH_POS EQUAL -1
 		OR NOT RELEASE_POS LESS DESTROY_POS OR NOT DESTROY_POS LESS REFRESH_POS)
 	MESSAGE(FATAL_ERROR "entity-matrix child/parent refresh order drifted")
+ENDIF()
+FOREACH(RETIRED IN ITEMS qvkAllocateDescriptorSets qvkUpdateDescriptorSets)
+	FORBID_TEXT("${ENTMAT}" "${RETIRED}" "entity-matrix raw descriptor authority")
+ENDFOREACH()
+FOREACH(NEEDLE IN ITEMS
+	"Ral_BindGroupArenaReceiptValid("
+	"vk.ral_descriptor_arena_receipt.backendIdentity"
+	"vk.ral_descriptor_arena_receipt.arenaIdentity"
+	"value.type = RAL_BIND_STORAGE_BUFFER;"
+	"value.bufferRange = vk.tess[slot].entMatSize;"
+	"createInfo.layout = vk.ral_bgl_entmat;"
+	"createInfo.arena = vk.ral_descriptor_arena;"
+	"createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;"
+	"candidate = Ral_CreateBindGroup( s_ral_backend, &createInfo );"
+	"vk.tess[slot].ral_entMatDesc = candidate;"
+	"vk.tess[slot].entMatDesc = rawCandidate;"
+	"if ( retired ) Ral_DestroyBindGroup( retired );")
+	REQUIRE_TEXT("${ENTMAT_GROUP}" "${NEEDLE}" "direct entity-matrix RAL cohort")
+ENDFOREACH()
+FOREACH(RETIRED IN ITEMS Ral_AdoptBindGroup qvkAllocateDescriptorSets qvkUpdateDescriptorSets)
+	FORBID_TEXT("${ENTMAT_GROUP}" "${RETIRED}" "entity-matrix adoption/raw fallback")
+ENDFOREACH()
+STRING(FIND "${ENTMAT_GROUP}" "vk.tess[slot].ral_entMatDesc = candidate;" PUBLISH_GROUP)
+STRING(FIND "${ENTMAT_GROUP}" "vk.tess[slot].entMatDesc = rawCandidate;" PUBLISH_RAW)
+STRING(FIND "${ENTMAT_GROUP}" "if ( retired ) Ral_DestroyBindGroup( retired );" RETIRE_GROUP)
+IF(PUBLISH_GROUP EQUAL -1 OR PUBLISH_RAW LESS PUBLISH_GROUP
+		OR RETIRE_GROUP LESS PUBLISH_RAW)
+	MESSAGE(FATAL_ERROR "entity-matrix candidate publication/retirement order drifted")
 ENDIF()
 
 # The central binder has no native descriptor command. Dirty-range semantics

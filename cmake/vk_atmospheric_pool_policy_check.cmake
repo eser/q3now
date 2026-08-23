@@ -121,22 +121,32 @@ FOREACH(_needle IN ITEMS "qvk" "VkBuffer" "VkDeviceMemory" "MapMemory"
 	forbid_text("${_pool_init}" "${_needle}" "raw atmospheric pool owner purge")
 ENDFOREACH()
 
-# Native buffers exist only as local descriptor operands derived from the
-# generation-bound owner receipt; no raw identities remain in vk.atm.
+# Direct RAL groups borrow only the exact generation-bound pool receipt; no raw
+# descriptor allocation/update/adoption authority remains in this product seam.
 require_call_count("${_descriptor}" "VK_AtmosphericPoolGetReceipt[(]" 1
 	"descriptor pool receipt")
+require_call_count("${_descriptor}" "VK_AtmosphericPoolReceiptExact[(]" 1
+	"descriptor pool exactness")
 require_text("${_descriptor}" "poolReceipt.byteSize != poolBytes"
 	"descriptor receipt byte-size join")
-require_call_count("${_descriptor}" "Ral_GetBufferHandle[(]" 2
-	"pool plus frame descriptor interop loops")
-require_text("${_descriptor}" "poolBuffers[i] = (VkBuffer)Ral_GetBufferHandle( poolReceipt.buffers[i] );"
-	"descriptor native identity")
-require_text("${_descriptor}" "bufInfos[1].buffer = poolBuffers[readPool];"
-	"compute read pool")
-require_text("${_descriptor}" "bufInfos[2].buffer = poolBuffers[writePool];"
-	"compute write pool")
-require_text("${_descriptor}" "bufInfos[1].buffer = poolBuffers[renderPool];"
-	"render pool")
+FOREACH(_needle IN ITEMS
+		"bufferIdentities[2] = poolReceipt.buffers[0];"
+		"bufferIdentities[3] = poolReceipt.buffers[1];"
+		"Ral_GetBufferSize( poolReceipt.buffers[i] ) != poolBytes"
+		"values[1].buffer = poolReceipt.buffers[i];"
+		"values[2].buffer = poolReceipt.buffers[writePool];"
+		"values[1].buffer = poolReceipt.buffers[renderPool];"
+		"createInfo.arena = vk.ral_descriptor_arena;"
+		"createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;"
+		"computeCandidates[i] = Ral_CreateBindGroup( backend, &createInfo );"
+		"renderCandidates[i] = Ral_CreateBindGroup( backend, &createInfo );")
+	require_text("${_descriptor}" "${_needle}" "direct atmospheric pool group")
+ENDFOREACH()
+FOREACH(_needle IN ITEMS qvkAllocateDescriptorSets qvkUpdateDescriptorSets
+		Ral_AdoptBindGroup VkDescriptorBufferInfo VkWriteDescriptorSet)
+	forbid_text("${_descriptor}" "${_needle}"
+		"atmospheric pool retained raw descriptor authority")
+ENDFOREACH()
 FOREACH(_needle IN ITEMS "pool_buffer" "pool_memory" "pool_ptr")
 	forbid_text("${_atm_struct}" "${_needle}" "legacy atmospheric pool fields")
 ENDFOREACH()

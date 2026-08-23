@@ -611,6 +611,7 @@ typedef struct image_s {
 	int			width, height;		// source image
 	int			uploadWidth;		// after power of two and picmip but not including clamp to MAX_TEXTURE_SIZE
 	int			uploadHeight;
+	uint32_t	mipLevelCount;		// exact VkImage/RAL wrapper mip count
 	imgFlags_t	flags;
 	colorDomain_t colorDomain;		// Block 5d: CD_SRGB (decode at sample) | CD_LINEAR (raw fetch)
 	uint32_t	layerCount;			/* 1 for 2D, 6 for cube, N for VK_IMAGE_VIEW_TYPE_2D_ARRAY */
@@ -625,12 +626,16 @@ typedef struct image_s {
 	VkImage		handle;
 	VkImageView	view;
 	// Descriptor set that contains single descriptor used to access the given image.
-	// It is updated only once during image initialization.
+	// Native mirror of the RAL-owned combined-sampler group below.
 	VkDescriptorSet descriptor;
-	// Non-owning RAL wrapper for `descriptor`. The renderer descriptor pool still
-	// owns the native set; this child must be released before every pool reset.
-	// Kept on image_t so command paths never need a native-set reverse lookup.
+	// Direct RAL ownership cohort for the exact renderer VkImage/VkImageView.
+	// The texture/view wrappers borrow the renderer-owned native objects; the
+	// group owns its arena descriptor. Teardown order is group -> view wrapper ->
+	// texture wrapper -> renderer VkImageView/VkImage.
 	struct ralBindGroup_s *ralDescriptor;
+	struct ralTexture_s *ralDescriptorTexture;
+	struct ralTextureView_s *ralDescriptorView;
+	struct ralSampler_s *ralDescriptorSampler;
 	// When r_useRALTextures=1, a parallel RAL
 	// texture is created alongside the legacy VkImage above. The legacy handle
 	// drives the renderer's descriptor binding / blits / screenshots; the RAL
@@ -2298,9 +2303,9 @@ void vk_init_decal_textures( void );
 // vk.c — phase 5: write one slot of the per-class sampler array
 // (binding 3 of the particle render descriptor set) on every per-
 // frame descriptor set. Called from RE_RegisterParticleClass once
-// the resolved image is in hand. Encapsulates the qvkUpdateDescriptorSets
-// call which would otherwise require exposing the static qvk*
-// function pointer from vk.c.
+// the resolved image is in hand. The call advances the RAL particle
+// texture-registry generation; the current
+// command slot replaces its immutable arena bind group before rendering.
 struct image_s;
 void vk_particle_set_class_image( int handle, struct image_s *image );
 void vk_particle_set_frame_image( int frameSlot, struct image_s *image );
@@ -2314,9 +2319,9 @@ qboolean vk_particle_shadow_write_class( uint32_t classIndex,
 // vk.c — write one slot of the projector's decal-texture sampler array
 // (binding 2 of the decal render descriptor set) on every per-frame descriptor
 // set. Called from RE_AddDecalToScene's find-or-add registry when a new decal
-// shader claims a slot. Encapsulates the qvkUpdateDescriptorSets call.
+// shader claims a slot. Publication rebuilds the current immutable RAL group.
 void vk_decal_set_texture_image( int slot, struct image_s *image );
-void vk_decal_flush_pending_images( void );
+qboolean vk_decal_flush_pending_images( void );
 qboolean vk_decal_shadow_write( uint32_t slot, const decalGPU_t *decal );
 
 // vk.c — phase 5: eager populate the per-class sampler array
@@ -2681,6 +2686,7 @@ void RE_RotatedPic( float x, float y, float w, float h,
 					  float s1, float t1, float s2, float t2, float angle, qhandle_t hShader );
 void RE_DrawLine( float x1, float y1, float x2, float y2, float width, qhandle_t hShader );
 void RE_BeginFrame( stereoFrame_t stereoFrame );
+void RE_PresentationChanged( const refPresentationChange_t *change );
 void RE_EndFrame( int *frontEndMsec, int *backEndMsec );
 void RE_TakeVideoFrame( int width, int height,
 		byte *captureBuffer, byte *encodeBuffer, qboolean motionJpeg );

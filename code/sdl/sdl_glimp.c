@@ -242,9 +242,32 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 	int colorBits, depthBits, stencilBits;
 	int i;
 	SDL_DisplayID displayID;
+	uint32_t semanticWidth = 0u;
+	uint32_t semanticHeight = 0u;
+	uint32_t semanticRefreshNumerator = 0u;
+	uint32_t semanticRefreshDenominator = 0u;
+	const char *semanticMode = Cvar_VariableString( "r_outputMode" );
+	const char *semanticRefresh = Cvar_VariableString( "r_outputRefresh" );
+	const char *windowPolicy = Cvar_VariableString( "r_windowPolicy" );
+	const char *outputSelector = Cvar_VariableString( "r_output" );
+	qboolean borderless = r_noborder->integer ? qtrue : qfalse;
+	qboolean exclusive = fullscreen;
 	int x;
 	int y;
 	SDL_WindowFlags flags = 0; // SDL3: windows are shown by default; SDL_WINDOW_SHOWN removed
+
+	if ( windowPolicy && windowPolicy[0] ) {
+		if ( !Q_stricmp( windowPolicy, "windowed" ) ) {
+			fullscreen = qfalse; borderless = qfalse; exclusive = qfalse;
+		} else if ( !Q_stricmp( windowPolicy, "borderless" ) ) {
+			fullscreen = qtrue; borderless = qtrue; exclusive = qfalse;
+		} else if ( !Q_stricmp( windowPolicy, "exclusive" ) ) {
+			fullscreen = qtrue; borderless = qfalse; exclusive = qtrue;
+		} else {
+			Com_Log( SEV_WARN, LOG_CH(ch_client),
+				"Unknown r_windowPolicy '%s'; using compatibility cvars\n", windowPolicy );
+		}
+	}
 
 	if ( windowApi == WIRED_WINDOW_API_VULKAN ) {
 #ifdef USE_VULKAN_API
@@ -273,29 +296,6 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 	// runs at full resolution. On a 1x display logical == pixel, so this is a no-op.
 	flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
-	// Create every window hidden and publish it only after the requested and
-	// actual logical/pixel extents pass the global exact-16:9 contract.  This is
-	// not merely an automated-test rule: no interactive, fallback, archived-mode,
-	// or platform-coerced path may flash a legacy 4:3 window before rejection.
-	flags |= SDL_WINDOW_HIDDEN;
-
-	// Automated (non-interactive) run: open the window in the BACKGROUND z-order,
-	// unactivated, so it does not pop over or steal focus from the user's work — but
-	// keep it a NORMAL, taskbar-visible window the user can alt-tab / click to the
-	// front when they want it. The mechanism is "show without activating": the window
-	// is created HIDDEN, then SDL_ShowWindow is called with the ACTIVATE_WHEN_SHOWN
-	// hint "0" (set just before the show, below), so on Windows it maps to
-	// ShowWindow(SW_SHOWNOACTIVATE) — shown in place, not raised, not focused, still in
-	// the taskbar.
-	//
-	// NOT SDL_WINDOW_NOT_FOCUSABLE: that flag only blocks input focus, but on Windows
-	// it realises as WS_EX_NOACTIVATE which ALSO drops the taskbar button and makes the
-	// window unreachable — the opposite of what is wanted here. NOT SDL_WINDOW_UTILITY
-	// (explicitly "not showing in the task bar"). The window stays SHOWN once
-	// SDL_ShowWindow runs (below) so the swapchain keeps rendering for capture — only a
-	// minimized/hidden window stalls the swapchain (gw_minimized gate), and this one is
-	// only momentarily hidden between validation and the immediate show. Interactive
-	// runs use the normal activation hints when they are shown.
 	// If a window exists, note its display
 	if ( SDL_window != NULL )
 	{
@@ -309,11 +309,18 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 	{
 		x = vid_xpos->integer;
 		y = vid_ypos->integer;
+		displayID = GLimp_ResolveConfiguredDisplay();
+		if ( displayID != 0 && outputSelector && outputSelector[0] ) {
+			SDL_Rect targetBounds;
+			if ( SDL_GetDisplayBounds( displayID, &targetBounds ) ) {
+				x = targetBounds.x + 32;
+				y = targetBounds.y + 32;
+			}
+		}
 
 		// find out to which display our window belongs to
 		// according to previously stored \vid_xpos and \vid_ypos coordinates
-		// W-103: probe with a 16:9 extent (1280x720), never a 4:3 one.
-		displayID = FindNearestDisplay( &x, &y, 1280, 720 );
+		if ( displayID == 0 ) displayID = FindNearestDisplay( &x, &y, 1280, 720 );
 
 		//Com_Log( SEV_INFO, LOG_CH(ch_client), "Selected display: %u\n", displayID );
 	}
@@ -328,16 +335,14 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 		}
 		else
 		{
-			// W-103: the desktop query fails exactly on the headless/CI path,
-			// so this fallback IS the resolution the evidence is captured at.
-			// It must be 16:9 (1280x720), never 4:3.
+			// Use a practical first-launch fallback when the desktop query fails.
 			glw_state.desktop_width = 1280;
 			glw_state.desktop_height = 720;
 		}
 	}
 	else
 	{
-		// W-103: 16:9 fallback, see above.
+		// No display was resolved; retain the same practical fallback.
 		glw_state.desktop_width = 1280;
 		glw_state.desktop_height = 720;
 	}
@@ -352,7 +357,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 	// + positioned at (vid_xpos,vid_ypos) leaves desktop visible at the edges.
 	// Bordered-windowed mode keeps the clamp — it still wants to stay inside
 	// the OS chrome.
-	if ( !fullscreen && !r_noborder->integer && displayID != 0 )
+	if ( !fullscreen && !borderless && displayID != 0 )
 	{
 		SDL_Rect bounds, usable;
 		if ( SDL_GetDisplayBounds( displayID, &bounds ) && SDL_GetDisplayUsableBounds( displayID, &usable ) )
@@ -375,21 +380,32 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "...setting mode %d:", mode );
 
-	if ( !CL_GetModeInfo( &config->vidWidth, &config->vidHeight, &config->windowAspect, mode, modeFS, glw_state.desktop_width, glw_state.desktop_height, fullscreen ) )
+	if ( semanticMode && !Q_stricmp( semanticMode, "desktop" ) ) {
+		mode = -2;
+		modeFS = "";
+	} else if ( semanticMode && !Q_stricmp( semanticMode, "custom" ) ) {
+		mode = -1;
+		modeFS = "";
+	}
+	if ( semanticMode && WiredDisplay_ParseModeValue( semanticMode,
+		&semanticWidth, &semanticHeight, &semanticRefreshNumerator,
+		&semanticRefreshDenominator ) ) {
+		config->vidWidth = (int)semanticWidth;
+		config->vidHeight = (int)semanticHeight;
+		config->windowAspect = (float)semanticWidth / (float)semanticHeight;
+	} else if ( !CL_GetModeInfo( &config->vidWidth, &config->vidHeight, &config->windowAspect, mode, modeFS, glw_state.desktop_width, glw_state.desktop_height, fullscreen ) )
 	{
 		Com_Log( SEV_INFO, LOG_CH(ch_client), " invalid mode\n" );
 		return RSERR_INVALID_MODE;
 	}
-	if ( config->vidWidth <= 0 || config->vidHeight <= 0
-		|| (int64_t)config->vidWidth * 9
-			!= (int64_t)config->vidHeight * 16 )
-	{
-		Com_Log( SEV_INFO, LOG_CH(ch_client),
-			" window mode %dx%d is not exact 16:9; refusing it\n",
-			config->vidWidth, config->vidHeight );
-		return RSERR_INVALID_MODE;
+	if ( semanticRefresh && semanticRefresh[0]
+			&& Q_stricmp( semanticRefresh, "auto" )
+			&& !WiredDisplay_ParseRefreshValue( semanticRefresh,
+				&semanticRefreshNumerator, &semanticRefreshDenominator ) ) {
+		Com_Log( SEV_WARN, LOG_CH(ch_client),
+			"Invalid r_outputRefresh '%s'; using automatic refresh\n", semanticRefresh );
+		semanticRefreshNumerator = semanticRefreshDenominator = 0u;
 	}
-
 	Com_Log( SEV_INFO, LOG_CH(ch_client), " %d %d\n", config->vidWidth, config->vidHeight );
 
 	// Destroy existing state if it exists
@@ -418,7 +434,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 		// Exclusive fullscreen is achieved by setting a mode with SDL_SetWindowFullscreenMode().
 		flags |= SDL_WINDOW_FULLSCREEN;
 	}
-	else if ( r_noborder->integer )
+	else if ( borderless )
 	{
 		flags |= SDL_WINDOW_BORDERLESS;
 	}
@@ -539,11 +555,8 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 				SDL_GL_SetAttribute( SDL_GL_ACCELERATED_VISUAL, 1 );
 		}
 
-		// SDL3: SDL_CreateWindow no longer takes x, y params.
-		// Create window first, then set position. Under com_automated the
-		// SDL_WINDOW_HIDDEN flag (set above) keeps the create from showing/activating
-		// the window; it is shown unactivated below once positioned (see SDL_ShowWindow
-		// with the ACTIVATE_WHEN_SHOWN hint).
+		// SDL3: SDL_CreateWindow no longer takes x, y params. Create the window
+		// first, then set its position below.
 		STALLTRACE( "SDL_CreateWindow",
 			SDL_window = SDL_CreateWindow( cl_title, config->vidWidth, config->vidHeight, flags ) );
 		if ( SDL_window == NULL )
@@ -561,7 +574,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 			// windows to clear the title bar — leaving them in place for
 			// borderless produces visible desktop strips at the top + left edges.
 			// Bordered-windowed mode keeps the saved (vid_xpos, vid_ypos).
-			if ( r_noborder->integer )
+			if ( borderless )
 				SDL_SetWindowPosition( SDL_window, 0, 0 );
 			else
 				SDL_SetWindowPosition( SDL_window, x, y );
@@ -578,7 +591,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 			// would re-introduce the size regression by shrinking the window.
 			// Skip the block entirely for borderless — the fake-fullscreen
 			// sizing is already exact.
-			if ( !r_noborder->integer )
+			if ( !borderless )
 			{
 				SDL_DisplayID winDisplay = SDL_GetDisplayForWindow( SDL_window );
 				SDL_Rect dBounds;
@@ -592,12 +605,13 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 					int overflow = ( winY + borderTop + contentH ) - screenBottom;
 					if ( overflow > 0 && contentH - overflow > 240 )
 					{
-						config->vidHeight = contentH - overflow;
-						/* Preserve the requested 16:9 contract while fitting a
-						 * decorated window below the display edge.  Height-only
-						 * shrinking silently produced non-widescreen harnesses. */
-						config->vidHeight = ( config->vidHeight / 9 ) * 9;
-						config->vidWidth = ( config->vidHeight / 9 ) * 16;
+						int fittedHeight = contentH - overflow;
+						/* Preserve the user's requested aspect ratio while fitting
+						 * the decorated window below the display edge. */
+						if ( config->vidHeight > 0 )
+							config->vidWidth = (int)( (int64_t)config->vidWidth
+								* (int64_t)fittedHeight / config->vidHeight );
+						config->vidHeight = fittedHeight;
 						SDL_SetWindowSize( SDL_window, config->vidWidth, config->vidHeight );
 					}
 				}
@@ -606,7 +620,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 
 		if ( fullscreen )
 		{
-			if ( windowApi != WIRED_WINDOW_API_OPENGL ) {
+			if ( !exclusive || windowApi != WIRED_WINDOW_API_OPENGL ) {
 				// Vulkan: desktop fullscreen (SDL_WINDOW_FULLSCREEN default) is sufficient —
 				// the swapchain handles resolution and format independently.
 				// Exclusive mode with SDL_SetWindowFullscreenMode fails on macOS/MoltenVK
@@ -627,15 +641,26 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 
 				fsMode.w = config->vidWidth;
 				fsMode.h = config->vidHeight;
-				// SDL3: refresh_rate is float
-				fsMode.refresh_rate = (float)Cvar_VariableIntegerValue( "r_displayRefresh" );
+				fsMode.displayID = displayID;
+				if ( semanticRefreshNumerator != 0u ) {
+					fsMode.refresh_rate_numerator = (int)semanticRefreshNumerator;
+					fsMode.refresh_rate_denominator = (int)semanticRefreshDenominator;
+					fsMode.refresh_rate = (float)semanticRefreshNumerator
+						/ (float)semanticRefreshDenominator;
+				} else {
+					// SDL3 retains the float field for compatibility with integer overrides.
+					fsMode.refresh_rate = (float)Cvar_VariableIntegerValue( "r_displayRefresh" );
+				}
 
 				if ( !SDL_SetWindowFullscreenMode( SDL_window, &fsMode ) )
 				{
-					Com_Log( SEV_DEBUG, LOG_CH(ch_client), "SDL_SetWindowFullscreenMode failed: %s\n", SDL_GetError() );
-					SDL_DestroyWindow( SDL_window );
-					SDL_window = NULL;
-					continue;
+					/* Preserve the requested exclusive policy, but atomically use
+					 * target-desktop borderless as the effective runtime fallback. */
+					Com_Log( SEV_WARN, LOG_CH(ch_client),
+						"exclusive mode unavailable (%s); using borderless desktop until next Apply\n",
+						SDL_GetError() );
+					exclusive = qfalse;
+					SDL_SetWindowFullscreenMode( SDL_window, NULL );
 				}
 			}
 
@@ -705,65 +730,15 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 			SDL_DestroySurface( icon );
 		}
 #endif
-		/* Validate every logical and physical window before it becomes visible.
-		 * Refuse platform/config coercion instead of ever showing 4:3. */
 		{
 			int logicalWidth = 0, logicalHeight = 0;
 			int pixelWidth = 0, pixelHeight = 0;
 			SDL_GetWindowSize( SDL_window, &logicalWidth, &logicalHeight );
 			SDL_GetWindowSizeInPixels( SDL_window, &pixelWidth, &pixelHeight );
-			if ( logicalWidth <= 0 || logicalHeight <= 0
-				|| pixelWidth <= 0 || pixelHeight <= 0
-				|| (int64_t)logicalWidth * 9 != (int64_t)logicalHeight * 16
-				|| (int64_t)pixelWidth * 9 != (int64_t)pixelHeight * 16
-				|| ( com_automated && com_automated->integer
-					&& ( logicalWidth < 1280 || logicalHeight < 720
-						|| pixelWidth < 1280 || pixelHeight < 720 ) ) )
-			{
-				if ( com_automated && com_automated->integer
-					&& ( logicalWidth < 1280 || logicalHeight < 720
-						|| pixelWidth < 1280 || pixelHeight < 720 ) )
-				{
-					Com_Log( SEV_INFO, LOG_CH(ch_client),
-						"Automated window extent fell below 1280x720 (logical=%dx%d pixels=%dx%d); refusing it\n",
-						logicalWidth, logicalHeight, pixelWidth, pixelHeight );
-				}
-				else
-				{
-					Com_Log( SEV_INFO, LOG_CH(ch_client),
-						"Window became non-16:9 (logical=%dx%d pixels=%dx%d); refusing it\n",
-						logicalWidth, logicalHeight, pixelWidth, pixelHeight );
-				}
-				SDL_DestroyWindow( SDL_window );
-				SDL_window = NULL;
-				return RSERR_INVALID_MODE;
-			}
 			Com_Log( SEV_INFO, LOG_CH(ch_client),
-				"window-extent schema=2 requested=%dx%d logical=%dx%d pixels=%dx%d exact16x9=1 publish-ready=1\n",
+				"window-extent schema=3 requested=%dx%d logical=%dx%d pixels=%dx%d publish-ready=1\n",
 				config->vidWidth, config->vidHeight,
 				logicalWidth, logicalHeight, pixelWidth, pixelHeight );
-		}
-
-		// Automated run: the window was created HIDDEN (flags above). Show it now
-		// WITHOUT activating it — ACTIVATE_WHEN_SHOWN "0" makes SDL_ShowWindow map to a
-		// no-activate show (ShowWindow(SW_SHOWNOACTIVATE) on Windows), so the window
-		// appears in the BACKGROUND z-order (the user's active window stays in front),
-		// does not take focus, and stays a normal taskbar window (reachable via
-		// alt-tab / click). After this the window is SHOWN, so the swapchain renders
-		// for capture (the #207 contract). Interactive runs retain the default SDL
-		// activation behavior when the common show below publishes the window.
-		if ( com_automated && com_automated->integer )
-		{
-			SDL_SetHint( SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, "0" );
-			SDL_SetHint( SDL_HINT_WINDOW_ACTIVATE_WHEN_RAISED, "0" );
-		}
-		if ( !SDL_ShowWindow( SDL_window ) )
-		{
-			Com_Log( SEV_INFO, LOG_CH(ch_client),
-				"SDL_ShowWindow failed: %s\n", SDL_GetError() );
-			SDL_DestroyWindow( SDL_window );
-			SDL_window = NULL;
-			return RSERR_INVALID_MODE;
 		}
 	}
 	else
@@ -772,7 +747,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 		return RSERR_INVALID_MODE;
 	}
 
-	if ( !fullscreen && r_noborder->integer )
+	if ( !fullscreen && borderless )
 		SDL_SetWindowHitTest( SDL_window, SDL_HitTestFunc, NULL );
 
 	// SDL3: SDL_GetWindowSizeInPixels replaces both SDL_GL_GetDrawableSize and SDL_Vulkan_GetDrawableSize
@@ -830,26 +805,6 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS,
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "Fullscreen not used with \\com_automated 1 (automated runs stay windowed + unfocused)\n");
 		Cvar_Set( "r_fullscreen", "0" );
 		fullscreen = qfalse;
-	}
-
-	/* W-103: an automated client must never create a sub-1280x720 or non-16:9 window, even
-	 * when an archived config or a malformed harness overrides the requested
-	 * mode. Preserve explicit exact-16:9 custom sizes at or above the canonical
-	 * minimum (visual gates use more than one), otherwise select the canonical
-	 * 1280x720 recovery mode before SDL sees the request. */
-	if ( automated
-		&& ( mode != -1
-			|| r_customwidth->integer <= 0
-			|| r_customheight->integer <= 0
-			|| r_customwidth->integer < 1280
-			|| r_customheight->integer < 720
-			|| (int64_t)r_customwidth->integer * 9
-				!= (int64_t)r_customheight->integer * 16 ) )
-	{
-		Com_Log( SEV_INFO, LOG_CH(ch_client),
-			"Automated window request was not explicit 16:9; using 1280x720\n" );
-		mode = 13;
-		modeFS = "";
 	}
 
 	if ( !SDL_WasInit( SDL_INIT_VIDEO ) )
@@ -911,7 +866,15 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS,
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "SDL using driver \"%s\"\n", driverName );
 	}
 
+	GLimp_DisplayCatalogMarkDirty( GLIMP_DISPLAY_DIRTY_TOPOLOGY );
+	GLimp_DisplayCatalogReconcile();
+
 	err = GLW_SetMode( mode, modeFS, fullscreen, windowApi );
+	if ( err == RSERR_OK ) {
+		GLimp_DisplayCatalogMarkDirty( GLIMP_DISPLAY_DIRTY_ACTIVE_OUTPUT
+			| GLIMP_DISPLAY_DIRTY_SCALE | GLIMP_DISPLAY_DIRTY_FULLSCREEN );
+		GLimp_DisplayCatalogReconcile();
+	}
 
 	switch ( err )
 	{
@@ -981,11 +944,9 @@ void GLimp_Init( glconfig_t *config )
 
 		if ( r_mode->integer != 13 || ( r_fullscreen->integer && atoi( r_modeFullscreen->string ) != 13 ) )
 		{
-			// W-103: a failed custom harness window must never silently open
-			// the legacy mode-3 640x480 window. Mode 13 is the canonical
-			// 1280x720 recovery extent; if it also fails, terminate instead of
-			// producing non-widescreen evidence.
-			Com_Log( SEV_INFO, LOG_CH(ch_client), "Setting \\r_mode %d failed, falling back on widescreen \\r_mode %d\n", r_mode->integer, 13 );
+			// Use the modern 1280x720 table entry when the requested mode cannot
+			// be created. Valid user-selected legacy/custom modes are not rejected.
+			Com_Log( SEV_INFO, LOG_CH(ch_client), "Setting \\r_mode %d failed, falling back on \\r_mode %d\n", r_mode->integer, 13 );
 			if ( GLimp_StartDriverAndSetMode( 13, "", r_fullscreen->integer,
 					WIRED_WINDOW_API_OPENGL ) != RSERR_OK )
 			{
@@ -1086,9 +1047,9 @@ void VKimp_Init( glconfig_t *config )
 			return;
 		}
 
-		// W-103: never turn a failed test/custom request into a 640x480
-		// window. Mode 13 is the canonical 1280x720 recovery extent.
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "Setting r_mode %d failed, falling back on widescreen r_mode %d\n", r_mode->integer, 13 );
+		// Use the modern 1280x720 table entry when the requested mode cannot
+		// be created. Valid user-selected legacy/custom modes are not rejected.
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "Setting r_mode %d failed, falling back on r_mode %d\n", r_mode->integer, 13 );
 
 		err = GLimp_StartDriverAndSetMode( 13, "", r_fullscreen->integer,
 			WIRED_WINDOW_API_VULKAN );

@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Wired Engine contributors
 # Native Vulkan proof that one RAL readback produces byte-identical TGA/PNG
-# screenshots without ever publishing a non-16:9 test window.
+# screenshots from a deterministic 1280x720 test window, while an explicit HDR
+# request resolves to either coherent HDR10/PQ or deterministic SDR/sRGB fallback.
 
 set -uo pipefail
 
@@ -14,12 +15,16 @@ python3 - "$1" "$2" "$3" "$4" <<'PYEOF'
 import binascii
 import hashlib
 import json
+import os
 import re
 import struct
 import sys
 import zlib
 
 qconsole_path, stdout_path, tga_path, png_path = sys.argv[1:]
+expected_hdr_request = int(os.environ.get("WIRED_HDR_DISPLAY_REQUEST", "1"))
+if expected_hdr_request not in (0, 1):
+    raise SystemExit("FAIL ral-readback-runtime invalid HDR request")
 
 rows = []
 with open(qconsole_path, encoding="utf-8", errors="strict") as source:
@@ -44,9 +49,26 @@ if any("VUID-" in message for message in messages):
 if messages.count("Q0_RAL_READBACK_COMPLETE") != 1:
     raise SystemExit("FAIL ral-readback-runtime completion cardinality")
 
+color_pattern = re.compile(
+    r"  color contract  : gen=([1-9][0-9]*) scene=([0-9]+) "
+    r"ui=linear/100nit presentTransfer=([0-9]+) screenshot=sRGB "
+    r"readback=sRGB tonemap=1 lut=([01]) fallback=([0-9]+)"
+)
+color_receipts = [color_pattern.fullmatch(message) for message in messages]
+color_receipts = [match for match in color_receipts if match is not None]
+if len(color_receipts) != 1:
+    raise SystemExit("FAIL ral-readback-runtime exact color-output receipt")
+_, _, present_transfer, _, fallback = map(int, color_receipts[0].groups())
+allowed_color_states = ((1, 3), (2, 0)) if expected_hdr_request else ((1, 1),)
+if (present_transfer, fallback) not in allowed_color_states:
+    raise SystemExit("FAIL ral-readback-runtime mixed HDR/SDR color state")
+hdr_rows = [message for message in messages if message.startswith("  HDR10 display    :")]
+if len(hdr_rows) != 1 or hdr_rows[0].endswith("off") == bool(expected_hdr_request):
+    raise SystemExit("FAIL ral-readback-runtime HDR request/fallback evidence")
+
 window_pattern = re.compile(
-    r"window-extent schema=2 requested=1280x720 logical=1280x720 "
-    r"pixels=([0-9]+)x([0-9]+) exact16x9=1 publish-ready=1"
+    r"window-extent schema=3 requested=1280x720 logical=1280x720 "
+    r"pixels=([0-9]+)x([0-9]+) publish-ready=1"
 )
 window_receipts = [window_pattern.fullmatch(message) for message in messages]
 window_receipts = [match for match in window_receipts if match is not None]
@@ -195,6 +217,12 @@ WIRED="${1:-}"
 [ -f "$TIMEOUT_RUNNER" ] || { echo "SKIP: missing timeout runner"; exit 77; }
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")"
 WD="$(dirname "$WIRED")"
+HDR_REQUEST="${WIRED_HDR_DISPLAY_REQUEST:-1}"
+[ "$HDR_REQUEST" = 0 ] || [ "$HDR_REQUEST" = 1 ] || {
+	echo "usage: WIRED_HDR_DISPLAY_REQUEST must be 0 or 1"
+	exit 64
+}
+TONEMAP_OPERATOR="${WIRED_TONEMAP_OPERATOR:-1}"
 
 find_required() {
 	local name="$1" candidate
@@ -240,7 +268,13 @@ else
 	done
 fi
 [ -n "$PACK" ] || { echo "SKIP: set WIRED_CONTENT_ROOT"; exit 77; }
-if [ -f "$PACK/base/pax01.sw3z" ]; then
+BASE="${WIRED_BASE_CONTENT:-}"
+if [ -n "$BASE" ] && [ ! -f "$BASE" ]; then
+	echo "SKIP: WIRED_BASE_CONTENT does not name a file"
+	exit 77
+elif [ -n "$BASE" ]; then
+	:
+elif [ -f "$PACK/base/pax01.sw3z" ]; then
 	BASE="$PACK/base/pax01.sw3z"
 elif [ -f "$PACK/base/pak0.pk3" ]; then
 	BASE="$PACK/base/pak0.pk3"
@@ -274,7 +308,9 @@ fi
 BOOT="$HOME_DIR/base/ral-readback-runtime.cfg"
 printf '%s\n' \
 	'log renderer.ral debug' \
-	'set activeAction "wait 120; screenshot ral_readback tga silent; screenshot ral_readback png silent; wait 30; echo Q0_RAL_READBACK_COMPLETE; quit"' \
+	'log renderer.init debug' \
+	'log renderer.hdr debug' \
+	'set activeAction "wait 120; gfxinfo; screenshot ral_readback tga silent; screenshot ral_readback png silent; wait 30; echo Q0_RAL_READBACK_COMPLETE; quit"' \
 	'map arena1' >"$BOOT"
 
 QCONSOLE="$HOME_DIR/qconsole.jsonl"
@@ -285,6 +321,7 @@ python3 "$TIMEOUT_RUNNER" --timeout 90 --kill-after 15 --cwd "$RUN" --stdout "$S
 	+set vm_game 0 +set vm_cgame 0 +set sv_cheats 1 +set sv_pure 0 \
 	+set com_automated 1 +set com_noHardReboot 1 +set s_initsound 0 \
 	+set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720 \
+	+set r_hdrDisplay "$HDR_REQUEST" +set r_tonemap "$TONEMAP_OPERATOR" \
 	+set r_vkValidate 1 +set r_bloom 0 +set r_ssao 0 +set r_smaa 0 \
 	+set r_forwardPlus 0 +set r_drawSunRays 0 +set r_shadows 0 \
 	+set log_severity DEBUG +set log_file_severity DEBUG +set log_file_mode overwrite_synced \

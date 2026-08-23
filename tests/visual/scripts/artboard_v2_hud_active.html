@@ -48,9 +48,7 @@
      measured at 1280x720 the health/armor panels, weapon carousel and ammo value
      all fall outside the frame. Fill the viewport rather than hardcoding, so the
      harness always agrees with the driving script's --window-size; the script
-     below pins an exact px box (default 1440x900, override via ?w=&h=).
-     W-103 (16:9) governs player-facing captures; cmake/widescreen_default_policy_check.cmake
-     explicitly exempts tests/visual/ for exactly this reason. */
+     below pins an exact px box (default 1440x900, override via ?w=&h=). */
   html, body { width:100%; height:100%; }
   #root { width:100vw; height:100vh; }
 </style>

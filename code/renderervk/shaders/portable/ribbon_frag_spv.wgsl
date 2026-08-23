@@ -10,8 +10,8 @@ struct EffectsUBO {
 var<private> fragShaderHandle_1: u32;
 @group(0) @binding(2) 
 var shaderImages: binding_array<texture_2d<f32>, 64>;
-@group(0) @binding(34) 
-var shaderImages_sampler: binding_array<sampler, 64>;
+@group(0) @binding(3)
+var shaderImageSampler: sampler;
 var<private> fragUV_1: vec2<f32>;
 var<private> outColor: vec4<f32>;
 var<private> fragColor_1: vec4<f32>;
@@ -76,7 +76,7 @@ fn main_1() {
     slot = select(0u, _e40, (_e38 < 64u));
     let _e42 = slot;
     let _e45 = fragUV_1;
-    let _e46 = textureSample(shaderImages[_e42], shaderImages_sampler[_e42], _e45);
+    let _e46 = textureSample(shaderImages[_e42], shaderImageSampler, _e45);
     param_1 = _e46;
     let _e47 = domain_1;
     param_2 = _e47;

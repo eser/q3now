@@ -447,38 +447,148 @@ void Ral_CmdCopyBuffer( ralCommandBuffer_t *cb, ralBuffer_t *src,
 	(void)Ral_CmdCopyBufferExact( cb, src, dst, region );
 }
 
-void Ral_CmdCopyBufferToTexture( ralCommandBuffer_t *cb, ralBuffer_t *src, ralTexture_t *dst, const ralBufferTextureCopy_t *region ) {
-	VkBufferImageCopy bic;
-	VkImageAspectFlags aspect;
-	uint32_t bpp;
-	if ( !cb || !src || !dst || !region || !ralVk_BufferGpuUseAllowed( src )
-			|| !ralVk_TranslateTextureCopyAspect( region->aspects,
-				dst->aspect, &aspect ) ) return;
-	bpp = ralVk_FormatBPP( dst->ralFormat );
-	if ( ( region->bytesPerRow == 0u ) != ( region->rowsPerImage == 0u )
-			|| ( region->bytesPerRow != 0u && ( bpp == 0u
-				|| region->bytesPerRow % bpp != 0u
-				|| (uint64_t)region->bytesPerRow < (uint64_t)region->imageRect.width * bpp
-				|| region->rowsPerImage < region->imageRect.height ) ) ) return;
-	RAL_ZERO( bic );
-	bic.bufferOffset                    = region->bufferOffset;
-	bic.bufferRowLength                 = region->bytesPerRow ? region->bytesPerRow / bpp : 0u;
-	bic.bufferImageHeight               = region->rowsPerImage;
-	bic.imageSubresource.aspectMask     = aspect;
-	bic.imageSubresource.mipLevel       = region->mipLevel;
-	bic.imageSubresource.baseArrayLayer = region->arrayLayer;
-	bic.imageSubresource.layerCount     = 1;
-	bic.imageOffset.x                   = region->imageRect.x;
-	bic.imageOffset.y                   = region->imageRect.y;
-	bic.imageExtent.width               = region->imageRect.width;
-	bic.imageExtent.height              = region->imageRect.height;
-	bic.imageExtent.depth               = 1;
-	// consumer must have transitioned `dst` to TRANSFER_DST_OPTIMAL via Ral_CmdPipelineBarrier first
-	cb->backend->vk.CmdCopyBufferToImage( cb->cb, src->buffer, dst->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bic );
-	if ( !src->portableStateKnown || src->portableState.usage != RAL_RESOURCE_USAGE_COPY_SOURCE )
-		src->portableStateKnown = qfalse;
-	if ( !dst->portableStateKnown || dst->portableState.usage != RAL_RESOURCE_USAGE_COPY_DESTINATION )
-		dst->portableStateKnown = qfalse;
+#define RAL_VK_BUFFER_TEXTURE_COPY_MAX_REGIONS 96u
+
+static qboolean ralVk_CopyMul( uint64_t a, uint64_t b, uint64_t *out ) {
+	if ( !out || ( a != 0u && b > UINT64_MAX / a ) ) return qfalse;
+	*out = a * b;
+	return qtrue;
+}
+
+qboolean Ral_CmdCopyBufferToTextureRegionsExact( ralCommandBuffer_t *cb,
+		ralBuffer_t *src, ralTexture_t *dst, uint32_t regionCount,
+		const ralBufferTextureCopy_t *regions ) {
+	VkBufferImageCopy nativeRegions[ RAL_VK_BUFFER_TEXTURE_COPY_MAX_REGIONS ];
+	uint32_t blockWidth, blockHeight, bytesPerBlock, i;
+	if ( !cb || !src || !dst || !regions || !cb->backend
+			|| regionCount == 0u
+			|| regionCount > RAL_VK_BUFFER_TEXTURE_COPY_MAX_REGIONS
+			|| src->backend != cb->backend || dst->backend != cb->backend
+			|| src->buffer == VK_NULL_HANDLE || dst->image == VK_NULL_HANDLE
+			|| !cb->backend->vk.CmdCopyBufferToImage
+			|| cb->state != RAL_VK_CMD_RECORDING
+			|| cb->lifecycle.state != RAL_COMMAND_RECORDING
+			|| cb->renderingActive
+			|| !( src->usage & RAL_BUFFER_TRANSFER_SRC )
+			|| !( dst->usage & RAL_TEXTURE_USAGE_TRANSFER_DST )
+			|| !ralVk_BufferGpuUseAllowed( src )
+			|| !src->portableStateKnown
+			|| src->portableState.usage != RAL_RESOURCE_USAGE_COPY_SOURCE
+			|| src->portableOwnerQueue != cb->queue
+			|| !dst->portableStateKnown
+			|| dst->portableState.usage != RAL_RESOURCE_USAGE_COPY_DESTINATION
+			|| dst->portableOwnerQueue != cb->queue
+			|| dst->queueTransfer.pending.ready
+			|| dst->currentLayout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+			|| dst->sampleCount != 1u
+			|| !ralVk_FormatCopyFootprint( dst->ralFormat, &blockWidth,
+				&blockHeight, &bytesPerBlock ) ) return qfalse;
+
+	for ( i = 0u; i < regionCount; ++i ) {
+		const ralBufferTextureCopy_t *region = &regions[i];
+		VkBufferImageCopy *native = &nativeRegions[i];
+		VkImageAspectFlags aspect;
+		uint32_t layerCount = region->arrayLayerCount
+			? region->arrayLayerCount : 1u;
+		uint32_t depth = region->imageDepth ? region->imageDepth : 1u;
+		uint32_t mipWidth, mipHeight, mipDepth;
+		uint64_t copyBlocksWide, copyBlockRows, rowBytes, imageStride;
+		uint64_t imageCount, requiredBytes, tailBytes;
+		if ( region->imageRect.x < 0 || region->imageRect.y < 0
+				|| region->imageRect.width == 0u || region->imageRect.height == 0u
+				|| region->imageZ > INT32_MAX
+				|| region->mipLevel >= dst->mipLevels
+				|| !ralVk_TranslateTextureCopyAspect( region->aspects,
+					dst->aspect, &aspect )
+				|| ( region->bytesPerRow == 0u ) != ( region->rowsPerImage == 0u )
+				|| region->bufferOffset % 4u != 0u
+				|| region->bufferOffset % bytesPerBlock != 0u ) return qfalse;
+		mipWidth = dst->width >> region->mipLevel;
+		mipHeight = dst->height >> region->mipLevel;
+		if ( mipWidth == 0u ) mipWidth = 1u;
+		if ( mipHeight == 0u ) mipHeight = 1u;
+		mipDepth = dst->type == RAL_TEXTURE_3D
+			? dst->depthOrArrayLayers >> region->mipLevel : 1u;
+		if ( mipDepth == 0u ) mipDepth = 1u;
+		if ( (uint64_t)(uint32_t)region->imageRect.x + region->imageRect.width
+				> mipWidth
+				|| (uint64_t)(uint32_t)region->imageRect.y
+					+ region->imageRect.height > mipHeight ) return qfalse;
+		if ( dst->type == RAL_TEXTURE_3D ) {
+			if ( region->arrayLayer != 0u || layerCount != 1u
+					|| region->imageZ >= mipDepth
+					|| depth > mipDepth - region->imageZ ) return qfalse;
+			imageCount = depth;
+		} else {
+			if ( region->imageZ != 0u || depth != 1u
+					|| region->arrayLayer >= dst->arrayLayers
+					|| layerCount > dst->arrayLayers - region->arrayLayer )
+				return qfalse;
+			imageCount = layerCount;
+		}
+		if ( dst->type == RAL_TEXTURE_1D
+				&& ( region->imageRect.y != 0 || region->imageRect.height != 1u ) )
+			return qfalse;
+		if ( (uint32_t)region->imageRect.x % blockWidth != 0u
+				|| (uint32_t)region->imageRect.y % blockHeight != 0u
+				|| ( region->imageRect.width % blockWidth != 0u
+					&& (uint32_t)region->imageRect.x
+						+ region->imageRect.width != mipWidth )
+				|| ( region->imageRect.height % blockHeight != 0u
+					&& (uint32_t)region->imageRect.y
+						+ region->imageRect.height != mipHeight ) ) return qfalse;
+		copyBlocksWide = ( region->imageRect.width + blockWidth - 1u ) / blockWidth;
+		copyBlockRows = ( region->imageRect.height + blockHeight - 1u ) / blockHeight;
+		if ( !ralVk_CopyMul( copyBlocksWide, bytesPerBlock, &tailBytes ) )
+			return qfalse;
+		if ( region->bytesPerRow != 0u ) {
+			uint64_t strideBlockRows;
+			if ( region->bytesPerRow % bytesPerBlock != 0u
+					|| region->bytesPerRow < tailBytes
+					|| region->rowsPerImage < region->imageRect.height ) return qfalse;
+			rowBytes = region->bytesPerRow;
+			strideBlockRows = ( region->rowsPerImage + blockHeight - 1u )
+				/ blockHeight;
+			if ( !ralVk_CopyMul( rowBytes, strideBlockRows, &imageStride ) )
+				return qfalse;
+		} else {
+			rowBytes = tailBytes;
+			if ( !ralVk_CopyMul( rowBytes, copyBlockRows, &imageStride ) )
+				return qfalse;
+		}
+		if ( !ralVk_CopyMul( imageCount - 1u, imageStride, &requiredBytes )
+				|| !ralVk_CopyMul( copyBlockRows - 1u, rowBytes, &imageStride )
+				|| requiredBytes > UINT64_MAX - imageStride
+				|| requiredBytes + imageStride > UINT64_MAX - tailBytes ) return qfalse;
+		requiredBytes += imageStride + tailBytes;
+		if ( region->bufferOffset > (uint64_t)src->size
+				|| requiredBytes > (uint64_t)src->size - region->bufferOffset )
+			return qfalse;
+
+		RAL_ZERO( *native );
+		native->bufferOffset = region->bufferOffset;
+		native->bufferRowLength = region->bytesPerRow
+			? ( region->bytesPerRow / bytesPerBlock ) * blockWidth : 0u;
+		native->bufferImageHeight = region->rowsPerImage;
+		native->imageSubresource.aspectMask = aspect;
+		native->imageSubresource.mipLevel = region->mipLevel;
+		native->imageSubresource.baseArrayLayer = region->arrayLayer;
+		native->imageSubresource.layerCount = layerCount;
+		native->imageOffset.x = region->imageRect.x;
+		native->imageOffset.y = region->imageRect.y;
+		native->imageOffset.z = (int32_t)region->imageZ;
+		native->imageExtent.width = region->imageRect.width;
+		native->imageExtent.height = region->imageRect.height;
+		native->imageExtent.depth = depth;
+	}
+	cb->backend->vk.CmdCopyBufferToImage( cb->cb, src->buffer, dst->image,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, regionCount, nativeRegions );
+	return qtrue;
+}
+
+void Ral_CmdCopyBufferToTexture( ralCommandBuffer_t *cb, ralBuffer_t *src,
+		ralTexture_t *dst, const ralBufferTextureCopy_t *region ) {
+	(void)Ral_CmdCopyBufferToTextureRegionsExact( cb, src, dst, 1u, region );
 }
 
 // Mirror of Ral_CmdCopyBufferToTexture for readback (the early
@@ -1132,21 +1242,6 @@ void Ral_CmdCopyImage( ralCommandBuffer_t *cb, ralTexture_t *src, ralTexture_t *
 	                               src->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 	                               dst->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	                               regionCount, (const VkImageCopy *)regions );
-	if ( !src->portableStateKnown || src->portableState.usage != RAL_RESOURCE_USAGE_COPY_SOURCE )
-		src->portableStateKnown = qfalse;
-	if ( !dst->portableStateKnown || dst->portableState.usage != RAL_RESOURCE_USAGE_COPY_DESTINATION )
-		dst->portableStateKnown = qfalse;
-}
-
-void Ral_CmdCopyBufferToImage( ralCommandBuffer_t *cb, ralBuffer_t *src, ralTexture_t *dst,
-                               uint32_t regionCount, const ralBufferImageCopy_t *regions )
-{
-	if ( !cb || !src || !dst || regionCount == 0 || !regions
-	  || !ralVk_BufferGpuUseAllowed( src ) ) return;
-	cb->backend->vk.CmdCopyBufferToImage( cb->cb,
-	                                       src->buffer,
-	                                       dst->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-	                                       regionCount, (const VkBufferImageCopy *)regions );
 	if ( !src->portableStateKnown || src->portableState.usage != RAL_RESOURCE_USAGE_COPY_SOURCE )
 		src->portableStateKnown = qfalse;
 	if ( !dst->portableStateKnown || dst->portableState.usage != RAL_RESOURCE_USAGE_COPY_DESTINATION )

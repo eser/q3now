@@ -44,16 +44,14 @@
     {
       "symbol": "beam_frag_spv",
       "spirvDigest": {
-        "lane0": "a00759c1c4504c56",
-        "lane1": "0b269b109f019acc"
+        "lane0": "7b8f54fc982432d0",
+        "lane1": "3b43286fdc2b5188"
       },
-      "combinedSamplers": [
+      "samplerKinds": [
         {
           "set": 0,
-          "binding": 1,
-          "samplerSet": 0,
-          "samplerBinding": 33,
-          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+          "binding": 4,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
       ],
       "dynamicOffsets": [
@@ -4152,16 +4150,14 @@
     {
       "symbol": "ribbon_frag_spv",
       "spirvDigest": {
-        "lane0": "6d44a97a83fdf639",
-        "lane1": "15db68f1cad801e0"
+        "lane0": "faf477a4a8ec2917",
+        "lane1": "4a07fac3b95071ac"
       },
-      "combinedSamplers": [
+      "samplerKinds": [
         {
           "set": 0,
-          "binding": 2,
-          "samplerSet": 0,
-          "samplerBinding": 34,
-          "samplerBindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
+          "binding": 3,
+          "bindingClass": "RAL_SHADER_BIND_FILTERING_SAMPLER"
         }
       ],
       "dynamicOffsets": [

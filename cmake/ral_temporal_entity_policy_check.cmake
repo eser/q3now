@@ -108,8 +108,12 @@ require_text(VK "vk_temporal_entmat_ring.buffer[i] != slot->entMatBuf"
 	"ring buffer identity revalidation")
 require_text(VK "vk_temporal_entmat_ring.descriptor[i] != slot->entMatDesc"
 	"ring descriptor identity revalidation")
-require_text(VK "if ( repair[i] )\n\t\t\tvk_entmat_materialize_slot_after_idle( &vk.tess[i], bytes );"
-	"only repaired command slots are mutated")
+require_text(VK "if ( repair[i] )\n\t\t\tif ( !vk_entmat_materialize_slot_after_idle(\n\t\t\t\t\t&vk.tess[i], bytes ) ) return qfalse;"
+	"only repaired command slots are mutated and failure stays unpublished")
+require_text(VK "|| !slot->entMatDesc || !slot->ral_entMatDesc"
+	"ring requires native mirror and direct RAL group")
+require_text(VK "Ral_GetBindGroupHandle( slot->ral_entMatDesc )\n\t\t\t\t\t!= (void *)slot->entMatDesc"
+	"ring revalidates exact RAL/native group identity")
 require_text(VK "backendQuery == TEMPORAL_BACKEND_SUBMIT_EXACT\n\t\t\t\t\t&& !backendAuthority.recorded\n\t\t\t\t\t&& ( havePendingWrite"
 	"disabled delivered-only product residue rejection")
 require_text(SUBMIT "pendingCount == 1u && backendPresent && authorityExact" "tri-state exact singleton classifier")

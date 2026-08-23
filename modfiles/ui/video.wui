@@ -144,6 +144,34 @@ menuDef {
 							itemDef { type 0 rect 0 0 1.2vw 2vh height FIT width PERCENT 1.2vw iconText "diamond" textalign 1 font $font_icon 10 forecolor $accent decoration visible 1 grow 0 }
 							itemDef { type 0 rect 0 0 20vw 2vh height FIT width PERCENT 20vw text "DISPLAY MODE" textalign 0 font $font_mono 10 forecolor $accent decoration visible 1 grow 0 } }
 						itemDef {
+							name "row_output"
+							type 12
+							height FIXED 38px
+							width PERCENT 1
+							text "Display"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_output"
+							populateCallback "display_outputs"
+							visible 1
+							grow 0
+						}
+						itemDef {
+							name "row_window_policy"
+							type 12
+							height FIXED 38px
+							width PERCENT 1
+							text "Window Mode"
+							textalign 0
+							font $font_sans 13
+							forecolor $bone
+							cvar "r_windowPolicy"
+							cvarStrList { Windowed windowed Borderless borderless Exclusive exclusive }
+							visible 1
+							grow 0
+						}
+						itemDef {
 							name "row_resolution"
 							type 12
 							height FIXED 38px
@@ -152,21 +180,22 @@ menuDef {
 							textalign 0
 							font $font_sans 13
 							forecolor $bone
-							cvar "r_mode"
-							cvarFloatList { "Native Desktop" -2 "Custom" -1 "640x480" 3 "800x600" 4 "1024x768" 6 "1280x720" 14 "1280x800" 16 "1280x1024" 17 "1600x900" 19 "1920x1080" 23 }
+							cvar "r_outputMode"
+							populateCallback "display_modes"
 							visible 1
 							grow 0
 						}
 						itemDef {
-							name "row_fullscreen"
-							type checkbox
+							name "row_refresh"
+							type 12
 							height FIXED 38px
 							width PERCENT 1
-							text "Fullscreen"
+							text "Refresh Rate"
 							textalign 0
 							font $font_sans 13
 							forecolor $bone
-							cvar "r_fullscreen"
+							cvar "r_outputRefresh"
+							populateCallback "display_refresh_rates"
 							visible 1
 							grow 0
 						}

@@ -91,6 +91,11 @@ void GL_TextureMode( const char *string ) {
 		return;
 	}
 	vk_wait_idle();
+	// Every direct per-image group borrows one sampler wrapper. Retire all
+	// children before rebuilding the sampler pool, then recreate every group —
+	// non-mipmapped images borrow the same pool too.
+	for ( i = 0; i < tr.numImages; i++ )
+		vk_ral_release_image_descriptor( tr.images[i] );
 	vk_destroy_samplers();
 
 	vk.samplers.filter_min = gl_filter_min;
@@ -98,9 +103,8 @@ void GL_TextureMode( const char *string ) {
 	vk_update_attachment_descriptors();
 	for ( i = 0; i < tr.numImages; i++ ) {
 		img = tr.images[i];
-		if ( img->flags & IMGFLAG_MIPMAP ) {
-			vk_update_descriptor_set( img, qtrue );
-		}
+		vk_update_descriptor_set( img,
+			(img->flags & IMGFLAG_MIPMAP) ? qtrue : qfalse );
 	}
 #else
 	// hack to prevent trilinear from being set on voodoo,
@@ -1063,6 +1067,9 @@ image_t *R_CreateImageArray( const char *name, byte **frames, int numFrames, int
 	image->view          = VK_NULL_HANDLE;
 	image->descriptor    = VK_NULL_HANDLE;
 	image->ralDescriptor = NULL;
+	image->ralDescriptorTexture = NULL;
+	image->ralDescriptorView = NULL;
+	image->ralDescriptorSampler = NULL;
 	image->ral           = NULL;
 	image->ralBindlessSlot     = -1;
 	image->bindlessSamplerSlot = -1;
@@ -1496,6 +1503,9 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 	image->view = VK_NULL_HANDLE;
 	image->descriptor = VK_NULL_HANDLE;
 	image->ralDescriptor = NULL;
+	image->ralDescriptorTexture = NULL;
+	image->ralDescriptorView = NULL;
+	image->ralDescriptorSampler = NULL;
 	image->ral = NULL;
 	image->ralResidencyMipCount = 0;
 	image->ralBindlessSlot = -1;
@@ -1832,6 +1842,9 @@ static image_t *R_CreateImageDDS( const char *name, byte *data, int width, int h
 	image->view       = VK_NULL_HANDLE;
 	image->descriptor = VK_NULL_HANDLE;
 	image->ralDescriptor = NULL;
+	image->ralDescriptorTexture = NULL;
+	image->ralDescriptorView = NULL;
+	image->ralDescriptorSampler = NULL;
 	image->ral        = NULL;
 	image->ralBindlessSlot     = -1;
 	image->bindlessSamplerSlot = -1;
@@ -3071,7 +3084,8 @@ void R_DeleteTextures( void ) {
 		vk_ral_unregister_image( img );
 		vk_destroy_image_resources( &img->handle, &img->view );
 
-		// img->descriptor will be released with pool reset
+		// The direct descriptor cohort was already released above; the native
+		// mirror owns no independent pool lifetime.
 	}
 	// The unregister loop above pushed every slot onto the bindless free-list.
 	// tr.numImages is about to reset to 0, so the next registration pass must

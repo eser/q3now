@@ -31,6 +31,13 @@ FUNCTION(REQUIRE_COUNT BODY NEEDLE EXPECTED MESSAGE_TEXT)
 	ENDIF()
 ENDFUNCTION()
 
+FUNCTION(FORBID_TEXT BODY NEEDLE MESSAGE_TEXT)
+	STRING(FIND "${BODY}" "${NEEDLE}" POS)
+	IF(NOT POS EQUAL -1)
+		MESSAGE(FATAL_ERROR "${MESSAGE_TEXT}: ${NEEDLE}")
+	ENDIF()
+ENDFUNCTION()
+
 FUNCTION(EXTRACT_SPAN BODY BEGIN END OUT)
 	STRING(FIND "${BODY}" "${BEGIN}" BEGIN_POS)
 	IF(BEGIN_POS EQUAL -1)
@@ -79,22 +86,79 @@ REQUIRE_TEXT("${VK_HEADER}" "ral_bone_descriptor[NUM_COMMAND_BUFFERS]"
 REQUIRE_TEXT("${VK_HEADER}" "struct ralBindGroup_s *textureGroup"
 	"ordinary IQM signature still exposes a native descriptor set")
 FOREACH(NEEDLE IN ITEMS
-	"ee.dynamicOffset = qtrue;"
-	"Ral_RegisterExternalPipelineBindGroupLayouts("
-	"vk.iqmGpu.ral_pipeline, 2u, layouts"
-	"vk.iqmGpu.ral_bgl_bones"
-	"vk.ral_bgl_sampler")
+	"boneEntry.dynamicOffset = qtrue;"
+	"vk_create_effect_bind_group_layout( &boneEntry, 1u,"
+	"layouts[0] = vk.iqmGpu.ral_bgl_bones;"
+	"layouts[1] = vk.ral_bgl_sampler;"
+	"candidate = Ral_CreatePipelineLayout( vk_ral_get_backend(), &createInfo );"
+	"vk.iqmGpu.ral_pipeline_layout = candidate;"
+	"vk.iqmGpu.pipeline_layout = native;")
 	REQUIRE_TEXT("${VK_SOURCE}" "${NEEDLE}"
-		"IQM pipeline set ABI publication missing")
+		"IQM direct layout ownership missing")
 ENDFOREACH()
+STRING(FIND "${VK_SOURCE}" "vk_ral_textures_init();" RAL_INIT_POS)
+STRING(FIND "${VK_SOURCE}"
+	"vk.ral_bgl_sampler = Ral_AdoptBindGroupLayout(" SAMPLER_ADOPT_POS)
+STRING(FIND "${VK_SOURCE}" "vk_init_iqm_gpu_skinning();" IQM_INIT_CALL_POS)
+IF(RAL_INIT_POS EQUAL -1 OR SAMPLER_ADOPT_POS EQUAL -1
+		OR IQM_INIT_CALL_POS EQUAL -1
+		OR NOT RAL_INIT_POS LESS SAMPLER_ADOPT_POS
+		OR NOT SAMPLER_ADOPT_POS LESS IQM_INIT_CALL_POS)
+	MESSAGE(FATAL_ERROR
+		"IQM init must follow RAL backend init and shared sampler-layout adoption")
+ENDIF()
+EXTRACT_SPAN("${VK_SOURCE}" "void vk_init_iqm_gpu_skinning( void )"
+	"void vk_shutdown_iqm_gpu_skinning( void )" IQM_INIT)
+FOREACH(RETIRED IN ITEMS qvkCreateDescriptorSetLayout qvkCreatePipelineLayout
+	Ral_AdoptBindGroupLayout vk_ral_adopt_one_pipeline_layout)
+	FORBID_TEXT("${IQM_INIT}" "${RETIRED}"
+		"IQM init regained create-then-adopt authority")
+ENDFOREACH()
+EXTRACT_SPAN("${VK_SOURCE}" "void vk_shutdown_iqm_gpu_skinning( void )"
+	"vk_create_iqm_vbo" IQM_SHUTDOWN)
+FOREACH(RETIRED IN ITEMS qvkDestroyDescriptorSetLayout qvkDestroyPipelineLayout)
+	FORBID_TEXT("${IQM_SHUTDOWN}" "${RETIRED}"
+		"IQM shutdown regained raw layout destruction")
+ENDFOREACH()
+STRING(FIND "${IQM_SHUTDOWN}" "Ral_DestroyPipeline(" IQM_PIPE_DESTROY)
+STRING(FIND "${IQM_SHUTDOWN}" "Ral_DestroyPipelineLayout(" IQM_LAYOUT_DESTROY)
+STRING(FIND "${IQM_SHUTDOWN}" "Ral_DestroyBindGroupLayout(" IQM_BGL_DESTROY)
+IF(IQM_PIPE_DESTROY EQUAL -1 OR IQM_LAYOUT_DESTROY EQUAL -1 OR IQM_BGL_DESTROY EQUAL -1
+		OR NOT IQM_PIPE_DESTROY LESS IQM_LAYOUT_DESTROY
+		OR NOT IQM_LAYOUT_DESTROY LESS IQM_BGL_DESTROY)
+	MESSAGE(FATAL_ERROR "IQM pipeline -> pipeline-layout -> bind-group-layout teardown drifted")
+ENDIF()
+FOREACH(RETIRED IN ITEMS
+	"ADOPT_PL( vk.iqmGpu.pipeline_layout"
+	"KILL_PL( vk.iqmGpu.ral_pipeline_layout"
+	"KILL_BGL( vk.iqmGpu.ral_bgl_bones"
+	"Ral_AdoptBindGroupLayout( backend, vk.iqmGpu.set_layout_bones")
+	FORBID_TEXT("${RAL_TEXTURES}${VK_SOURCE}" "${RETIRED}"
+		"IQM direct owner leaked into central adoption lifecycle")
+ENDFOREACH()
+REQUIRE_TEXT("${RAL_TEXTURES}" "vk_shutdown_iqm_gpu_skinning();"
+	"full shutdown does not retire IQM direct layout owners")
+EXTRACT_SPAN("${RAL_TEXTURES}" "qboolean vk_ral_refresh_iqm_bone_bindgroup"
+	"void vk_ral_release_entmat_bindgroup" IQM_BONE_OWNER)
 FOREACH(NEEDLE IN ITEMS
-	"vk.iqmGpu.ral_bone_descriptor[i]"
+	"vk.iqmGpu.ral_bone_descriptor[slot]"
 	"vk_ral_lookup_buffer("
-	"vk.iqmGpu.bone_buffer[i]"
-	"Ral_RegisterAdoptedBindGroupDynamicBuffer("
-	"group, 0u, buffer, 0u, item")
-	REQUIRE_TEXT("${RAL_TEXTURES}" "${NEEDLE}"
-		"IQM dynamic bone group adoption missing")
+	"vk.iqmGpu.bone_buffer[slot]"
+	"value.type = RAL_BIND_UNIFORM_BUFFER"
+	"value.bufferRange = item"
+	"createInfo.arena = vk.ral_descriptor_arena"
+	"createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt"
+	"Ral_CreateBindGroup(")
+	REQUIRE_TEXT("${IQM_BONE_OWNER}" "${NEEDLE}"
+		"IQM dynamic bone direct group missing")
+ENDFOREACH()
+FOREACH(RETIRED IN ITEMS Ral_AdoptBindGroup
+	Ral_RegisterAdoptedBindGroupDynamicBuffer qvkAllocateDescriptorSets
+	qvkUpdateDescriptorSets)
+	STRING(FIND "${IQM_BONE_OWNER}" "${RETIRED}" POS)
+	IF(NOT POS EQUAL -1)
+		MESSAGE(FATAL_ERROR "IQM bone owner regained retired authority: ${RETIRED}")
+	ENDIF()
 ENDFOREACH()
 
 EXTRACT_SPAN("${VK_SOURCE}" "void vk_draw_iqm_gpu("
@@ -130,8 +194,8 @@ ENDIF()
 
 REQUIRE_TEXT("${IQM_MODEL}" "ordinaryImage->ralDescriptor"
 	"ordinary IQM material did not pass the retained RAL group")
-REQUIRE_TEXT("${VK_SOURCE}"
-	"Ral_DestroyBindGroup( vk.iqmGpu.ral_bone_descriptor[i] );"
+REQUIRE_TEXT("${RAL_TEXTURES}"
+	"Ral_DestroyBindGroup( vk.iqmGpu.ral_bone_descriptor[slot] );"
 	"IQM descriptor child teardown missing")
 
 FOREACH(NEEDLE IN ITEMS

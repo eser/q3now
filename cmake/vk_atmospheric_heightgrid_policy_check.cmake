@@ -85,17 +85,28 @@ FOREACH(_needle IN ITEMS "qvk" "VkImage" "VkBuffer" "record_image_layout_transit
 	forbid_text("${_create}" "${_needle}" "heightgrid construction RAL-only boundary")
 ENDFOREACH()
 
-# Vulkan-native identities are derived only where the legacy descriptor is authored.
-require_call_count("${_descriptor}" "Ral_GetTextureDefaultViewHandle[(]" 1
-	"descriptor texture interop")
-require_call_count("${_descriptor}" "Ral_GetSamplerHandle[(]" 1
-	"descriptor sampler interop")
-require_text("${_descriptor}" "VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL"
-	"descriptor sampled layout")
-require_text("${_descriptor}" "vk_atmospheric_heightgrid.texture"
-	"descriptor retained texture")
-require_text("${_descriptor}" "vk_atmospheric_heightgrid.sampler"
-	"descriptor retained sampler")
+# The descriptor child is a retained RAL view and both compute groups borrow it
+# with the exact owner sampler. Raw image-view writes/adoption are forbidden.
+require_call_count("${_descriptor}" "VK_AtmosphericHeightgridGetReceipt[(]" 1
+	"heightgrid descriptor receipt")
+require_call_count("${_descriptor}" "VK_AtmosphericHeightgridReceiptExact[(]" 1
+	"heightgrid descriptor exactness")
+FOREACH(_needle IN ITEMS
+		"viewInfo.texture = heightgridReceipt.texture;"
+		"heightgridViewCandidate = Ral_CreateTextureView( backend, &viewInfo );"
+		"values[3].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;"
+		"values[3].textureView = heightgridViewCandidate;"
+		"values[3].sampler = heightgridReceipt.sampler;"
+		"vk.atm.ral_heightgrid_view = heightgridViewCandidate;"
+		"if ( oldHeightgridView ) Ral_DestroyTextureView( oldHeightgridView );")
+	require_text("${_descriptor}" "${_needle}" "direct heightgrid bind-group child")
+ENDFOREACH()
+FOREACH(_needle IN ITEMS Ral_GetTextureDefaultViewHandle VkDescriptorImageInfo
+		VkWriteDescriptorSet qvkAllocateDescriptorSets qvkUpdateDescriptorSets
+		Ral_AdoptBindGroup VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+	forbid_text("${_descriptor}" "${_needle}"
+		"heightgrid retained raw descriptor authority")
+ENDFOREACH()
 
 # The public update is a single completed RAL transfer transaction.
 require_call_count("${_upload}" "VK_AtmosphericHeightgridUpload[(]" 1
@@ -113,8 +124,19 @@ require_call_count("${_shutdown}" "VK_AtmosphericHeightgridRelease[(]" 1
 	"heightgrid owner release")
 require_text("${_shutdown}" "VK_AtmosphericHeightgridRelease( &vk_atmospheric_heightgrid );"
 	"heightgrid release identity")
-FOREACH(_needle IN ITEMS "heightgrid_image" "heightgrid_memory" "heightgrid_view"
-		"heightgrid_sampler")
+STRING(FIND "${_shutdown}" "Ral_DestroyTextureView( vk.atm.ral_heightgrid_view );"
+	_view_release)
+STRING(FIND "${_shutdown}" "VK_AtmosphericHeightgridRelease( &vk_atmospheric_heightgrid );"
+	_heightgrid_release)
+IF(_view_release EQUAL -1 OR _heightgrid_release EQUAL -1
+		OR NOT _view_release LESS _heightgrid_release)
+	MESSAGE(FATAL_ERROR "atmospheric heightgrid view child must precede owner release")
+ENDIF()
+require_text("${_vk_h}" "struct ralTextureView_s *ral_heightgrid_view;"
+	"retained heightgrid view inventory")
+FOREACH(_needle IN ITEMS "VkImage heightgrid_image"
+		"VkDeviceMemory heightgrid_memory" "VkImageView heightgrid_view"
+		"VkSampler heightgrid_sampler")
 	forbid_text("${_vk}" "${_needle}" "legacy heightgrid native owner retirement")
 	forbid_text("${_vk_h}" "${_needle}" "legacy heightgrid public owner retirement")
 ENDFOREACH()
