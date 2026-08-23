@@ -127,12 +127,23 @@ ENDFOREACH()
 
 require_call_count("${_descriptor}" "VK_AtmosphericFrameGetResources[(]" 1
 	"descriptor frame receipt")
+require_call_count("${_descriptor}" "VK_AtmosphericFrameResourcesReceiptExact[(]" 1
+	"descriptor frame exactness")
 require_text("${_descriptor}" "frameReceipt.byteSize != frameBytes"
 	"descriptor byte-size join")
-require_text("${_descriptor}" "frameBuffers[i] = (VkBuffer)Ral_GetBufferHandle("
-	"descriptor-only native buffer identity")
-require_text("${_descriptor}" "bufInfos[0].buffer = frameBuffers[i];"
-	"descriptor exact frame buffer")
+FOREACH(_needle IN ITEMS
+		"bufferIdentities[0] = frameReceipt.buffers[0];"
+		"bufferIdentities[1] = frameReceipt.buffers[1];"
+		"Ral_GetBufferSize( frameReceipt.buffers[i] ) != frameBytes"
+		"values[0].buffer = frameReceipt.buffers[i];"
+		"values[0].bufferRange = frameBytes;")
+	require_text("${_descriptor}" "${_needle}" "direct atmospheric frame group")
+ENDFOREACH()
+FOREACH(_needle IN ITEMS qvkAllocateDescriptorSets qvkUpdateDescriptorSets
+		Ral_AdoptBindGroup VkDescriptorBufferInfo VkWriteDescriptorSet)
+	forbid_text("${_descriptor}" "${_needle}"
+		"atmospheric frame retained raw descriptor authority")
+ENDFOREACH()
 require_call_count("${_shutdown}" "VK_AtmosphericFrameRelease[(]" 1
 	"frame owner release")
 STRING(FIND "${_shutdown}" "Ral_DestroyBindGroup( vk.atm.ral_render_descriptor[i] )" _child)

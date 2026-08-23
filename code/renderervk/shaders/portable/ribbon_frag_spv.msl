@@ -16,7 +16,7 @@ struct EffectsUBO
 struct spvDescriptorSetBuffer0
 {
     array<texture2d<float>, 64> shaderImages [[id(0)]];
-    array<sampler, 64> shaderImagesSmplr [[id(64)]];
+    sampler shaderImageSampler [[id(64)]];
 };
 
 struct main0_out
@@ -63,12 +63,11 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     uint domain = in.fragShaderHandle >> 31u;
     uint handle = in.fragShaderHandle & 2147483647u;
     uint slot = (handle < 64u) ? handle : 0u;
-    float4 param = spvDescriptorSet0.shaderImages[slot].sample(spvDescriptorSet0.shaderImagesSmplr[slot], in.fragUV);
+    float4 param = spvDescriptorSet0.shaderImages[slot].sample(spvDescriptorSet0.shaderImageSampler, in.fragUV);
     uint param_1 = domain;
     float4 texel = sampleColorTexBindless(param, param_1);
     float3 param_2 = in.fragColor.xyz;
-    float3 _128 = sRGBToLinear(param_2);
-    out.outColor = float4(texel.xyz * _128, texel.w * in.fragColor.w);
+    float3 _133 = sRGBToLinear(param_2);
+    out.outColor = float4(texel.xyz * _133, texel.w * in.fragColor.w);
     return out;
 }
-

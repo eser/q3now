@@ -6,6 +6,8 @@
 
 #include "ral_frame_shell.h"
 #include "ral_presentation_host.h"
+#include "ral_presentation_policy.h"
+#include "ral_color_output.h"
 #include "ral_metal_present.h"
 
 #ifdef __cplusplus

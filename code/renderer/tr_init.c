@@ -1849,7 +1849,7 @@ static void R_Register( void )
 	ri.Cvar_CheckRange( r_ext_supersample, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_ext_supersample, "Super-sample anti-aliasing, requires \\r_fbo 1." );
 
-	// W-103: widescreen-only defaults. 1280x720 is the canonical 16:9 baseline;
+	// Modern render-target default. 1280x720 is the baseline;
 	// a 4:3 default makes screenshot evidence disagree with the player's framing.
 	r_renderWidth = ri.Cvar_Get( "r_renderWidth", "1280", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_renderWidth, "96", NULL, CV_INTEGER );
@@ -2079,6 +2079,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 
 	re.BeginFrame = RE_BeginFrame;
 	re.EndFrame = RE_EndFrame;
+	re.PresentationChanged = RE_PresentationChanged;
 
 	re.MarkFragments = R_MarkFragments;
 	re.LerpTag = R_LerpTag;

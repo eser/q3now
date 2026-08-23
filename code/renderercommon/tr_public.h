@@ -19,7 +19,23 @@ typedef struct mapFile_s mapFile_t;
  * (wired.x64). The renderer DLL only sees the opaque pointer. */
 typedef struct arena_s arena_t;
 
-#define	REF_API_VERSION		21	/* native-free Vulkan platform interop callbacks */
+#define	REF_API_VERSION		22	/* generation-bound presentation change receipt */
+
+#define REF_PRESENTATION_CHANGE_SCHEMA_VERSION 1u
+typedef struct {
+	uint32_t schemaVersion;
+	uint64_t generation;
+	uint64_t catalogGeneration;
+	uint32_t changeFlags;
+	uint32_t logicalWidth;
+	uint32_t logicalHeight;
+	uint32_t presentationWidth;
+	uint32_t presentationHeight;
+	uint32_t renderWidth;
+	uint32_t renderHeight;
+	uint32_t uiWidth;
+	uint32_t uiHeight;
+} refPresentationChange_t;
 
 // Number of concurrent world slots the renderer holds — one per local client
 // app. Must be >= the engine's MAX_LOCAL_CGAME_VMS (the app-instance count); the
@@ -261,6 +277,9 @@ typedef struct {
 	// submission; clients lacking discovery support keep using AddRefEntityToScene.
 	void (*AddRefEntityToSceneTemporal)( const refEntity_t *re,
 		const refEntityMotion_t *motion );
+
+	/* One callback represents one coalesced platform event burst. */
+	void (*PresentationChanged)( const refPresentationChange_t *change );
 
 } refexport_t;
 

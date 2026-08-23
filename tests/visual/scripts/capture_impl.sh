@@ -26,8 +26,8 @@ ENGINE_BINARY="${ENGINE_BINARY:-$WIRED_BINARY}"
 # value fall outside the frame entirely (measured: ammo region drops from 741
 # distinct colours to 34, with zero accent pixels).
 #
-# W-103 (16:9 everywhere) still governs the ENGINE. Reconciling the 16:10
-# artboard with the 16:9 engine is an open design decision — see TASK-70.
+# Reconciling this 16:10 artboard with other capture targets remains an open
+# visual-test design decision — see TASK-70.
 W="${WIDTH:-1440}"
 H="${HEIGHT:-900}"
 

@@ -8,6 +8,7 @@
 #include "cl_demo_frame.h"
 #include "cl_info_challenge.h"
 #include "cl_ping_queue.h"
+#include "cl_display_catalog.h"
 #include "wired/ui/cl_wired_ui.h"
 #include "wired/ui/cl_wired_viewport.h"
 #include "wired/ui/cl_wired_compositor.h"
@@ -4854,86 +4855,24 @@ static void CL_CompleteVideoName(const char *args, int argNum )
 /*
 ** CL_GetModeInfo
 */
-typedef struct vidmode_s
-{
-	const char	*description;
-	int			width, height;
-	float		pixelAspect;		// pixel width / height
-} vidmode_t;
-
-static const vidmode_t cl_vidModes[] =
-{
-	{ "Mode  0: 320x240",			320,	240,	1 },
-	{ "Mode  1: 400x300",			400,	300,	1 },
-	{ "Mode  2: 512x384",			512,	384,	1 },
-	{ "Mode  3: 640x480",			640,	480,	1 },
-	{ "Mode  4: 800x600",			800,	600,	1 },
-	{ "Mode  5: 960x720",			960,	720,	1 },
-	{ "Mode  6: 1024x768",			1024,	768,	1 },
-	{ "Mode  7: 1152x864",			1152,	864,	1 },
-	{ "Mode  8: 1280x1024 (5:4)",	1280,	1024,	1 },
-	{ "Mode  9: 1600x1200",			1600,	1200,	1 },
-	{ "Mode 10: 2048x1536",			2048,	1536,	1 },
-	{ "Mode 11: 856x480 (wide)",	856,	480,	1 },
-	// extra modes:
-	{ "Mode 12: 1280x960",			1280,	960,	1 },
-	{ "Mode 13: 1280x720",			1280,	720,	1 },
-	{ "Mode 14: 1280x800 (16:10)",	1280,	800,	1 },
-	{ "Mode 15: 1366x768",			1366,	768,	1 },
-	{ "Mode 16: 1440x900 (16:10)",	1440,	900,	1 },
-	{ "Mode 17: 1600x900",			1600,	900,	1 },
-	{ "Mode 18: 1680x1050 (16:10)",	1680,	1050,	1 },
-	{ "Mode 19: 1920x1080",			1920,	1080,	1 },
-	{ "Mode 20: 1920x1200 (16:10)",	1920,	1200,	1 },
-	{ "Mode 21: 2560x1080 (21:9)",	2560,	1080,	1 },
-	{ "Mode 22: 3440x1440 (21:9)",	3440,	1440,	1 },
-	{ "Mode 23: 3840x2160",			3840,	2160,	1 },
-	{ "Mode 24: 4096x2160 (4K)",	4096,	2160,	1 }
-};
-static const int s_numVidModes = ARRAY_LEN( cl_vidModes );
-
 qboolean CL_GetModeInfo( int *width, int *height, float *windowAspect, int mode, const char *modeFS, int dw, int dh, qboolean fullscreen )
 {
+	uint32_t resolvedWidth;
+	uint32_t resolvedHeight;
+	float pixelAspect;
+
 	// set dedicated fullscreen mode
 	if ( fullscreen && *modeFS )
 		mode = atoi( modeFS );
 
-	if ( mode < -2 )
+	if ( !WiredDisplay_ResolveLegacyMode( mode, (uint32_t)MAX( dw, 0 ),
+		(uint32_t)MAX( dh, 0 ), (uint32_t)MAX( r_customwidth->integer, 0 ),
+		(uint32_t)MAX( r_customheight->integer, 0 ), r_customPixelAspect->value,
+		&resolvedWidth, &resolvedHeight, &pixelAspect ) )
 		return qfalse;
 
-	if ( mode >= s_numVidModes )
-		return qfalse;
-
-	// Fix an unknown desktop resolution without reviving the legacy mode-3
-	// 640x480 fallback. W-103 requires every automatic window decision to stay
-	// widescreen; mode 13 is the canonical 1280x720 recovery extent.
-	if ( mode == -2 && (dw == 0 || dh == 0) )
-		mode = 13;
-
-	float pixelAspect;
-	if ( mode == -2 ) { // desktop resolution
-		*width = dw;
-		*height = dh;
-		pixelAspect = r_customPixelAspect->value;
-	} else if ( mode == -1 ) { // custom resolution
-		*width = r_customwidth->integer;
-		*height = r_customheight->integer;
-		pixelAspect = r_customPixelAspect->value;
-	} else { // predefined resolution
-		const vidmode_t *vm = &cl_vidModes[ mode ];
-		*width  = vm->width;
-		*height = vm->height;
-		pixelAspect = vm->pixelAspect;
-	}
-
-	/* W-103: CL_GetModeInfo is the common authority for every engine window
-	 * request.  Reject legacy/table/config extents here as well as at the SDL
-	 * publication seam so no caller can carry a 4:3 mode as a valid candidate. */
-	if ( *width <= 0 || *height <= 0
-		|| (int64_t)*width * 9 != (int64_t)*height * 16 )
-	{
-		return qfalse;
-	}
+	*width = (int)resolvedWidth;
+	*height = (int)resolvedHeight;
 
 	*windowAspect = (float)*width / ( *height * pixelAspect );
 
@@ -4946,11 +4885,11 @@ qboolean CL_GetModeInfo( int *width, int *height, float *windowAspect, int mode,
 */
 static void CL_ModeList_f( void )
 {
+	size_t i;
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "\n" );
-	for ( int i = 0; i < s_numVidModes; i++ )
-	{
-		Com_Log( SEV_INFO, LOG_CH(ch_client), "%s\n", cl_vidModes[ i ].description );
-	}
+	for ( i = 0u; i < WiredDisplay_LegacyModeCount(); ++i )
+		Com_Log( SEV_INFO, LOG_CH(ch_client), "%s\n",
+			WiredDisplay_LegacyModeAt( i )->description );
 	Com_Log( SEV_INFO, LOG_CH(ch_client), "\n" );
 }
 
@@ -5014,10 +4953,25 @@ static void CL_InitGLimp_Cvars( void )
 	cl_depthbits        = glimpHandles[GLIMP_DEPTHBITS];
 	cl_drawBuffer       = glimpHandles[GLIMP_DRAWBUFFER];
 
-	// r_mode: runtime upper bound (s_numVidModes-1) prevents static descriptor
+	// r_mode: stable compatibility aliases backed by the internal fallback catalog.
 	r_mode = Cvar_Get( "r_mode", "-2", CVAR_ARCHIVE | CVAR_LATCH );
-	Cvar_CheckRange( r_mode, "-2", va( "%i", s_numVidModes-1 ), CV_INTEGER );
+	Cvar_CheckRange( r_mode, "-2", va( "%i",
+		(int)WiredDisplay_LegacyModeCount() - 1 ), CV_INTEGER );
 	Cvar_SetDescription( r_mode, "Set video mode:\n -2 - use current desktop resolution\n -1 - use \\r_customWidth and \\r_customHeight\n  0..N - enter \\modelist for details" );
+	{
+		cvar_t *output = Cvar_Get( "r_output", "", CVAR_ARCHIVE | CVAR_LATCH );
+		cvar_t *outputMode = Cvar_Get( "r_outputMode", "", CVAR_ARCHIVE | CVAR_LATCH );
+		cvar_t *outputRefresh = Cvar_Get( "r_outputRefresh", "auto", CVAR_ARCHIVE | CVAR_LATCH );
+		cvar_t *windowPolicy = Cvar_Get( "r_windowPolicy", "", CVAR_ARCHIVE | CVAR_LATCH );
+		Cvar_SetDescription( output,
+			"Persistent display selector. Empty follows the window/current display; provider session IDs and list indices are never serialized." );
+		Cvar_SetDescription( outputMode,
+			"Semantic output resolution (WIDTHxHEIGHT). Legacy WIDTHxHEIGHT@NUM/DEN values remain accepted. Empty delegates to r_mode; desktop and custom are supported." );
+		Cvar_SetDescription( outputRefresh,
+			"Semantic output refresh as NUM/DEN, or auto. Stored separately from display and resolution." );
+		Cvar_SetDescription( windowPolicy,
+			"Window policy: windowed, borderless or exclusive. Empty delegates to r_fullscreen/r_noborder compatibility cvars." );
+	}
 
 	{
 #ifdef _DEBUG

@@ -43,6 +43,12 @@ layout(constant_id = 11) const int srgb_swapchain = 0;
 // hdr_peak_norm * GRAPHICS_WHITE_NITS = r_hdrPeakLuminance nits.
 layout(constant_id = 12) const int   hdr_mode      = 0;
 layout(constant_id = 13) const float hdr_peak_norm = 10.0;
+// The capture target is always display-referred SDR/sRGB, even while the
+// presentation target is HDR10/PQ. In that case texture0 contains the
+// peak-extended linear HDR tonemap result, so apply an SDR shoulder before
+// the normal software sRGB encode. The post-gamma HUD overlay is replayed
+// afterwards and therefore remains at its authored SDR values.
+layout(constant_id = 14) const int capture_hdr_to_sdr = 0;
 
 const uint bayerSize = 8u;
 const float bayerMatrix[bayerSize * bayerSize] = {
@@ -124,8 +130,25 @@ vec3 sRGBEncode( vec3 linear ) {
 	return mix( hi, lo, lessThan( linear, vec3(0.0031308) ) );
 }
 
+vec3 tonemapPBRNeutralSDR( vec3 color ) {
+	const float startCompression = 0.8 - 0.04;
+	const float desaturation = 0.15;
+	float x = min( color.r, min( color.g, color.b ) );
+	float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+	color -= offset;
+	float peak = max( color.r, max( color.g, color.b ) );
+	if ( peak < startCompression ) return color;
+	const float d = 1.0 - startCompression;
+	float newPeak = 1.0 - d * d / ( peak + d - startCompression );
+	color *= newPeak / peak;
+	float g = 1.0 - 1.0 / ( desaturation * ( peak - newPeak ) + 1.0 );
+	return mix( color, newPeak * vec3( 1.0 ), g );
+}
+
 void main() {
 	vec3 base = texture(texture0, frag_tex_coord).rgb;
+	if ( capture_hdr_to_sdr == 1 )
+		base = tonemapPBRNeutralSDR( max( base, vec3( 0.0 ) ) );
 	vec3 gamma3;
 	gamma3.x = gamma;
 	gamma3.y = gamma;

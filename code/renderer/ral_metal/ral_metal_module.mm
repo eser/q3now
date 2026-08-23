@@ -18,6 +18,7 @@ typedef struct {
 	ralPresentationSurfaceBorrow_t surfaceBorrow;
 	ralMetalPresent_t *presentation;
 	ralMetalPresentLayerReceipt_t presentationReceipt;
+	ralColorOutputReceipt_t colorOutputReceipt;
 	ralFrameShell_t frameShell;
 	ralFrameShellReceipt_t frameReceipt;
 	ralMetalModuleFrameReceipt_t published;
@@ -191,20 +192,51 @@ static void NoopUpload( int width, int height, int columns, int rows,
 	(void)data; (void)client; (void)dirty;
 }
 
-static void BuildPresentationCreateInfo( uint32_t pixelWidth,
+static qboolean BuildPresentationCreateInfo( uint32_t pixelWidth,
 		uint32_t pixelHeight, ralSwapchainCreateInfo_t *createInfo,
-		ralSurfaceFormat_t *format, ralPresentPreference_t *preference ) {
+		ralSurfaceFormat_t *format, ralPresentationPolicy_t *policy ) {
+	ralPresentationPolicyRequest_t request;
 	memset( createInfo, 0, sizeof( *createInfo ) );
+	memset( &request, 0, sizeof( request ) );
+	request.schemaVersion = RAL_PRESENTATION_POLICY_SCHEMA_VERSION;
+	request.intent = RAL_PRESENTATION_INTENT_SYNCHRONIZED;
+	request.maxFramesInFlight = 2u;
+	request.allowTearingWhenLate = qfalse;
+	request.preferVrr = qtrue;
+	if ( !Ral_ResolvePresentationPolicy( &request, policy ) ) return qfalse;
 	format->format = RAL_FORMAT_B8G8R8A8_UNORM;
 	format->colorSpace = RAL_COLORSPACE_SRGB_NONLINEAR;
-	*preference = (ralPresentPreference_t){ RAL_PRESENT_FIFO, 3u, 3u };
 	createInfo->desiredWidth = pixelWidth;
 	createInfo->desiredHeight = pixelHeight;
 	createInfo->formatPreferences = format;
 	createInfo->formatPreferenceCount = 1u;
-	createInfo->presentPreferences = preference;
-	createInfo->presentPreferenceCount = 1u;
+	createInfo->presentPreferences = policy->preferences;
+	createInfo->presentPreferenceCount = policy->preferenceCount;
 	createInfo->requiredUsage = RAL_TEXTURE_USAGE_COLOR_ATTACHMENT;
+	return qtrue;
+}
+
+static qboolean BuildColorOutputReceipt(
+		const ralMetalPresentLayerReceipt_t *presentation,
+		ralColorOutputReceipt_t *outReceipt ) {
+	ralColorOutputRequest_t request;
+	qboolean hdr;
+	if ( !presentation || !outReceipt ) return qfalse;
+	hdr = presentation->selected.colorSpace != RAL_COLORSPACE_SRGB_NONLINEAR
+		? qtrue : qfalse;
+	memset( &request, 0, sizeof( request ) );
+	request.schemaVersion = RAL_COLOR_OUTPUT_SCHEMA_VERSION;
+	request.presentationGeneration = presentation->selected.generation;
+	request.sceneFormat = hdr ? RAL_FORMAT_R16G16B16A16_SFLOAT
+		: RAL_FORMAT_R8G8B8A8_UNORM;
+	request.requestHdrOutput = hdr;
+	request.selectedOutput.format = presentation->selected.format;
+	request.selectedOutput.colorSpace = presentation->selected.colorSpace;
+	request.toneMapOperator = RAL_TONEMAP_PBR_NEUTRAL;
+	request.lutEnabled = qfalse;
+	request.hdrPeakNits = 1000.0f;
+	request.hdrMinNits = 0.01f;
+	return Ral_ResolveColorOutput( &request, outReceipt );
 }
 
 static qboolean HostSurfaceJoinValid(
@@ -223,7 +255,7 @@ static qboolean InitializeOwners( void ) {
 	ralMetalCoreCreateInfo_t coreInfo;
 	ralPresentationHostOpenInfo_t openInfo;
 	ralSurfaceFormat_t format;
-	ralPresentPreference_t preference;
+	ralPresentationPolicy_t presentationPolicy;
 	ralSwapchainCreateInfo_t createInfo;
 	uint64_t coreGeneration = NextGeneration();
 	uint64_t presentationGeneration = NextGeneration();
@@ -249,12 +281,15 @@ static qboolean InitializeOwners( void ) {
 			&s_module.surfaceBorrow )
 			|| !HostSurfaceJoinValid( &s_module.hostReceipt,
 				&s_module.surfaceBorrow ) ) goto fail;
-	BuildPresentationCreateInfo( s_module.hostReceipt.pixelWidth,
-		s_module.hostReceipt.pixelHeight, &createInfo, &format, &preference );
+	if ( !BuildPresentationCreateInfo( s_module.hostReceipt.pixelWidth,
+			s_module.hostReceipt.pixelHeight, &createInfo, &format,
+			&presentationPolicy ) ) goto fail;
 	if ( !RalMetal_PresentAdoptBorrowedLayer( s_module.core,
 			&s_module.coreReceipt, &createInfo, presentationGeneration,
 			(void *)s_module.surfaceBorrow.surfaceIdentity,
 			&s_module.presentation, &s_module.presentationReceipt )
+			|| !BuildColorOutputReceipt( &s_module.presentationReceipt,
+				&s_module.colorOutputReceipt )
 			|| !Ral_FrameShellInit( &s_module.frameShell, RAL_BACKEND_METAL,
 				shellGeneration, &s_module.frameReceipt ) ) goto fail;
 	memset( &s_module.config, 0, sizeof( s_module.config ) );
@@ -319,7 +354,8 @@ static qboolean RefreshPresentation( void ) {
 	ralMetalPresentLayerReceipt_t presentation;
 	ralMetalPresent_t *candidate = NULL;
 	ralSurfaceFormat_t format;
-	ralPresentPreference_t preference;
+	ralPresentationPolicy_t presentationPolicy;
+	ralColorOutputReceipt_t colorOutput;
 	ralSwapchainCreateInfo_t createInfo;
 	uint64_t generation;
 	if ( !s_module.imports.PresentationHost.refresh(
@@ -333,8 +369,8 @@ static qboolean RefreshPresentation( void ) {
 				&s_module.surfaceBorrow ) ) return qtrue;
 	generation = NextGeneration();
 	if ( !generation ) return qfalse;
-	BuildPresentationCreateInfo( host.pixelWidth, host.pixelHeight,
-		&createInfo, &format, &preference );
+	if ( !BuildPresentationCreateInfo( host.pixelWidth, host.pixelHeight,
+			&createInfo, &format, &presentationPolicy ) ) return qfalse;
 	if ( surface.surfaceIdentity != s_module.surfaceBorrow.surfaceIdentity ) {
 		if ( !RalMetal_PresentAdoptBorrowedLayer( s_module.core,
 				&s_module.coreReceipt, &createInfo, generation,
@@ -352,9 +388,11 @@ static qboolean RefreshPresentation( void ) {
 	} else {
 		presentation = s_module.presentationReceipt;
 	}
+	if ( !BuildColorOutputReceipt( &presentation, &colorOutput ) ) return qfalse;
 	s_module.hostReceipt = host;
 	s_module.surfaceBorrow = surface;
 	s_module.presentationReceipt = presentation;
+	s_module.colorOutputReceipt = colorOutput;
 	s_module.config.vidWidth = (int)host.pixelWidth;
 	s_module.config.vidHeight = (int)host.pixelHeight;
 	s_module.config.vidWidthLogical = (int)host.logicalWidth;
@@ -509,6 +547,10 @@ static void NoLightstyle( int style, const char *pattern ) {
 static qboolean NoGpuProfile( refGpuProfileSample_t *sample ) {
 	if ( sample ) memset( sample, 0, sizeof( *sample ) ); return qfalse;
 }
+static void PresentationChanged( const refPresentationChange_t *change ) {
+	/* EndFrame already refreshes the presentation-host receipt transactionally. */
+	(void)change;
+}
 
 static void FillExports( refexport_t *exports ) {
 	memset( exports, 0, sizeof( *exports ) );
@@ -556,6 +598,7 @@ static void FillExports( refexport_t *exports ) {
 	exports->AddRailRibbonToScene = NoopRailRibbon;
 	exports->GetGpuProfileSample = NoGpuProfile;
 	exports->AddRefEntityToSceneTemporal = NoopEntityTemporal;
+	exports->PresentationChanged = PresentationChanged;
 }
 
 WIRED_METAL_MODULE_EXPORT refexport_t *QDECL GetRefAPI( int apiVersion,

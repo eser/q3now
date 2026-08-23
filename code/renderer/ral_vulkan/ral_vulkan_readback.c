@@ -84,8 +84,14 @@ static qboolean TransitionForCopy( ralVkReadbackContext_t *context,
 	ralResourceState_t copySource = { RAL_RESOURCE_USAGE_COPY_SOURCE, 0 };
 	ralResourceState_t copyDestination = { RAL_RESOURCE_USAGE_COPY_DESTINATION, 0 };
 	ralResourceState_t hostRead = { RAL_RESOURCE_USAGE_HOST_READ, 0 };
+	qboolean sourceAlreadyCopy = context->sourceState.usage == copySource.usage
+		&& context->sourceState.shaderStages == copySource.shaderStages;
 	RAL_ZERO( buffers ); RAL_ZERO( texture ); RAL_ZERO( batch );
-	if ( context->kind == RAL_TRANSFER_BUFFER ) {
+	/* A producer may publish a resource directly as COPY_SOURCE.  In that case
+	 * both halves of the readback transaction must leave it alone: strict RAL
+	 * transitions intentionally reject redundant COPY_SOURCE -> COPY_SOURCE
+	 * barriers. */
+	if ( !sourceAlreadyCopy && context->kind == RAL_TRANSFER_BUFFER ) {
 		buffers[0].buffer = context->source.buffer;
 		buffers[0].size = (uint64_t)context->source.buffer->size;
 		buffers[0].before = restore ? copySource : context->sourceState;
@@ -94,7 +100,7 @@ static qboolean TransitionForCopy( ralVkReadbackContext_t *context,
 		buffers[0].destinationQueue = RAL_QUEUE_GRAPHICS;
 		batch.bufferTransitions = buffers;
 		batch.bufferTransitionCount = 1;
-	} else {
+	} else if ( !sourceAlreadyCopy ) {
 		texture.texture = context->source.texture;
 		texture.aspects = ReadbackAspects( context->source.texture->aspect );
 		texture.mipLevelCount = context->source.texture->mipLevels;
@@ -106,7 +112,8 @@ static qboolean TransitionForCopy( ralVkReadbackContext_t *context,
 		batch.textureTransitions = &texture;
 		batch.textureTransitionCount = 1;
 	}
-	if ( Ral_CmdTransitionResources( context->command, &batch ) != ralSuccess ) return qfalse;
+	if ( !sourceAlreadyCopy
+			&& Ral_CmdTransitionResources( context->command, &batch ) != ralSuccess ) return qfalse;
 	RAL_ZERO( batch ); RAL_ZERO( buffers[1] );
 	buffers[1].buffer = staging;
 	buffers[1].size = (uint64_t)staging->size;

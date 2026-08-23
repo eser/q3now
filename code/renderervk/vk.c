@@ -164,10 +164,12 @@ static uint32_t vk_scene_color_attachment_generation_counter;
 static uint32_t vk_scene_color_attachment_generation;
 static qboolean vk_temporal_motion_seal_attempted;
 static qboolean vk_hdr_exposure_seed_valid( void );
+static ralSampler_t *vk_ral_sampler_for_definition( const Vk_Sampler_Def *definition );
 
 static void vk_temporal_iqm_resources_release_after_idle(
 	const char *reason );
 static void vk_forwardplus_lit_invalidate_sets( void );
+static qboolean vk_forwardplus_lit_refresh_set( uint32_t slot );
 
 static qboolean vk_frame_uniform_descriptor_buffers(
 		const vkRalFrameUniformOwner_t *owner,
@@ -218,6 +220,382 @@ static qboolean vk_shadow_storage_descriptor_buffers(
 	}
 	memcpy( outBuffers, candidate, sizeof( candidate ) );
 	return qtrue;
+}
+
+void vk_ral_release_particle_compute_bindgroups( void ) {
+	uint32_t i;
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.particle.ral_compute_descriptor[i] ) {
+			Ral_DestroyBindGroup( vk.particle.ral_compute_descriptor[i] );
+			vk.particle.ral_compute_descriptor[i] = NULL;
+		}
+		vk.particle.compute_descriptor[i] = VK_NULL_HANDLE;
+	}
+}
+
+qboolean vk_ral_refresh_particle_compute_bindgroups( void ) {
+	vkRalFrameUniformResourcesReceipt_t frameReceipt;
+	vkRalShadowStorageResourcesReceipt_t poolReceipt, classReceipt;
+	ralBackend_t *backend = vk_ral_get_backend();
+	ralBindGroup_t *candidates[NUM_COMMAND_BUFFERS] = { NULL, NULL };
+	void *rawCandidates[NUM_COMMAND_BUFFERS] = { NULL, NULL };
+	const ralBuffer_t *identities[5];
+	void *nativeIdentities[5];
+	const uint64_t poolBytes =
+		(uint64_t)PARTICLES_PER_POOL * PARTICLE_BYTES;
+	const uint64_t classBytes =
+		(uint64_t)MAX_PARTICLE_CLASSES * PARTICLE_CLASS_GPU_BYTES;
+	const uint64_t frameBytes = sizeof( particleFrame_t );
+	uint32_t i, j;
+
+	if ( NUM_COMMAND_BUFFERS != VK_RAL_FRAME_UNIFORM_SLOT_COUNT
+			|| NUM_COMMAND_BUFFERS != 2u || !backend
+			|| !vk.particle.ral_bgl_compute || !vk.ral_descriptor_arena
+			|| !Ral_BindGroupArenaReceiptValid(
+				&vk.ral_descriptor_arena_receipt )
+			|| vk.ral_descriptor_arena_receipt.backendIdentity != backend
+			|| vk.ral_descriptor_arena_receipt.arenaIdentity
+				!= vk.ral_descriptor_arena ) return qfalse;
+
+	if ( vk.particle.ral_compute_descriptor[0]
+			|| vk.particle.ral_compute_descriptor[1]
+			|| vk.particle.compute_descriptor[0] != VK_NULL_HANDLE
+			|| vk.particle.compute_descriptor[1] != VK_NULL_HANDLE ) {
+		for ( i = 0u; i < NUM_COMMAND_BUFFERS; i++ ) {
+			if ( !vk.particle.ral_compute_descriptor[i]
+					|| vk.particle.compute_descriptor[i] == VK_NULL_HANDLE
+					|| Ral_GetBindGroupHandle(
+						vk.particle.ral_compute_descriptor[i] )
+						!= (void *)vk.particle.compute_descriptor[i] ) return qfalse;
+		}
+		return vk.particle.compute_descriptor[0]
+			!= vk.particle.compute_descriptor[1];
+	}
+
+	if ( !VK_RalFrameUniformGetResources( &vk_particle_frame,
+			&frameReceipt )
+			|| !VK_RalFrameUniformResourcesReceiptExact(
+				&frameReceipt, &frameReceipt )
+			|| !VK_RalShadowStorageGetResources(
+				&vk_particle_pool_storage, &poolReceipt )
+			|| !VK_RalShadowStorageResourcesReceiptExact(
+				&poolReceipt, &poolReceipt )
+			|| !VK_RalShadowStorageGetResources(
+				&vk_particle_class_storage, &classReceipt )
+			|| !VK_RalShadowStorageResourcesReceiptExact(
+				&classReceipt, &classReceipt )
+			|| frameReceipt.backend != backend
+			|| poolReceipt.backend != backend || classReceipt.backend != backend
+			|| frameReceipt.byteSize != frameBytes
+			|| frameReceipt.partialOffset != vk_particle_frame_config.partialOffset
+			|| frameReceipt.partialSize != vk_particle_frame_config.partialSize
+			|| frameReceipt.partialRequired
+				!= vk_particle_frame_config.partialRequired
+			|| poolReceipt.byteSize != poolBytes
+			|| classReceipt.byteSize != classBytes
+			|| poolReceipt.bufferCount != 2u
+			|| poolReceipt.elementSize != PARTICLE_BYTES
+			|| poolReceipt.elementCount != PARTICLES_PER_POOL
+			|| classReceipt.bufferCount != 1u
+			|| classReceipt.elementSize != PARTICLE_CLASS_GPU_BYTES
+			|| classReceipt.elementCount != MAX_PARTICLE_CLASSES ) return qfalse;
+
+	identities[0] = frameReceipt.buffers[0];
+	identities[1] = frameReceipt.buffers[1];
+	identities[2] = poolReceipt.buffers[0];
+	identities[3] = poolReceipt.buffers[1];
+	identities[4] = classReceipt.buffers[0];
+	for ( i = 0u; i < ARRAY_LEN( identities ); i++ ) {
+		if ( !identities[i]
+				|| !( nativeIdentities[i] = Ral_GetBufferHandle(
+					identities[i] ) ) ) return qfalse;
+		for ( j = 0u; j < i; j++ ) {
+			if ( identities[i] == identities[j]
+					|| nativeIdentities[i] == nativeIdentities[j] ) return qfalse;
+		}
+	}
+	for ( i = 0u; i < VK_RAL_FRAME_UNIFORM_SLOT_COUNT; i++ )
+		if ( Ral_GetBufferSize( frameReceipt.buffers[i] ) != frameBytes )
+			return qfalse;
+	for ( i = 0u; i < poolReceipt.bufferCount; i++ )
+		if ( Ral_GetBufferSize( poolReceipt.buffers[i] ) != poolBytes )
+			return qfalse;
+	if ( Ral_GetBufferSize( classReceipt.buffers[0] ) != classBytes )
+		return qfalse;
+
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; i++ ) {
+		ralBindingValue_t values[4];
+		ralBindGroupCreateInfo_t createInfo;
+		const uint32_t writePool = 1u - i;
+		memset( values, 0, sizeof( values ) );
+		values[0].binding = 0u;
+		values[0].type = RAL_BIND_UNIFORM_BUFFER;
+		values[0].buffer = frameReceipt.buffers[i];
+		values[0].bufferRange = frameBytes;
+		values[1].binding = 1u;
+		values[1].type = RAL_BIND_STORAGE_BUFFER;
+		values[1].buffer = poolReceipt.buffers[i];
+		values[1].bufferRange = poolBytes;
+		values[2].binding = 2u;
+		values[2].type = RAL_BIND_STORAGE_BUFFER;
+		values[2].buffer = poolReceipt.buffers[writePool];
+		values[2].bufferRange = poolBytes;
+		values[3].binding = 3u;
+		values[3].type = RAL_BIND_STORAGE_BUFFER;
+		values[3].buffer = classReceipt.buffers[0];
+		values[3].bufferRange = classBytes;
+		memset( &createInfo, 0, sizeof( createInfo ) );
+		createInfo.layout = vk.particle.ral_bgl_compute;
+		createInfo.values = values;
+		createInfo.numValues = ARRAY_LEN( values );
+		createInfo.debugName = i == 0u
+			? "wired-particle-compute-bg-0"
+			: "wired-particle-compute-bg-1";
+		createInfo.arena = vk.ral_descriptor_arena;
+		createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+		candidates[i] = Ral_CreateBindGroup( backend, &createInfo );
+		if ( !candidates[i] ) goto fail;
+		rawCandidates[i] = Ral_GetBindGroupHandle( candidates[i] );
+		if ( rawCandidates[i] == NULL
+				|| ( i > 0u && rawCandidates[i] == rawCandidates[0] ) )
+			goto fail;
+	}
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; i++ ) {
+		vk.particle.ral_compute_descriptor[i] = candidates[i];
+		vk.particle.compute_descriptor[i] = rawCandidates[i];
+	}
+	return qtrue;
+
+fail:
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; i++ )
+		if ( candidates[i] ) Ral_DestroyBindGroup( candidates[i] );
+	return qfalse;
+}
+
+void vk_ral_release_particle_render_bindgroups( void ) {
+	uint32_t i;
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
+		if ( vk.particle.ral_render_descriptor[i] )
+			Ral_DestroyBindGroup( vk.particle.ral_render_descriptor[i] );
+		vk.particle.ral_render_descriptor[i] = NULL;
+		vk.particle.render_descriptor[i] = VK_NULL_HANDLE;
+		vk.particle.renderGroupTextureGeneration[i] = 0u;
+	}
+}
+
+qboolean vk_ral_refresh_particle_render_bindgroups( uint32_t slotMask ) {
+	vkRalFrameUniformResourcesReceipt_t frameReceipt;
+	vkRalShadowStorageResourcesReceipt_t poolReceipt, classReceipt;
+	ralBackend_t *backend = vk_ral_get_backend();
+	ralBindGroup_t *candidates[NUM_COMMAND_BUFFERS] = { NULL, NULL };
+	void *rawCandidates[NUM_COMMAND_BUFFERS] = { NULL, NULL };
+	ralTextureView_t *textureViews[PARTICLE_SAMPLER_COUNT];
+	const uint64_t frameBytes = sizeof( particleFrame_t );
+	const uint64_t poolBytes = (uint64_t)PARTICLES_PER_POOL * PARTICLE_BYTES;
+	const uint64_t classBytes = (uint64_t)MAX_PARTICLE_CLASSES * PARTICLE_CLASS_GPU_BYTES;
+	uint32_t i, k;
+	if ( slotMask == 0u || ( slotMask & ~(( 1u << NUM_COMMAND_BUFFERS ) - 1u) )
+			|| NUM_COMMAND_BUFFERS != 2u || !backend
+			|| !vk.particle.ral_bgl_render || !vk.particle.ral_sampler
+			|| !vk.sceneDepth.ral_view || !vk.sceneDepth.ral_sampler
+			|| Ral_GetBindGroupLayoutHandle( vk.particle.ral_bgl_render )
+				!= (void *)vk.particle.render_set_layout
+			|| Ral_GetSamplerHandle( vk.particle.ral_sampler )
+				!= (void *)vk.particle.sampler
+			|| Ral_GetTextureViewHandle( vk.sceneDepth.ral_view )
+				!= (void *)vk.sceneDepth.view
+			|| Ral_GetSamplerHandle( vk.sceneDepth.ral_sampler )
+				!= (void *)vk.sceneDepth.sampler
+			|| !tr.whiteImage || !tr.whiteImage->ralDescriptorView
+			|| vk.particle.textureGeneration == 0u
+			|| !vk.ral_descriptor_arena
+			|| !Ral_BindGroupArenaReceiptValid( &vk.ral_descriptor_arena_receipt )
+			|| vk.ral_descriptor_arena_receipt.backendIdentity != backend
+			|| vk.ral_descriptor_arena_receipt.arenaIdentity != vk.ral_descriptor_arena ) return qfalse;
+	if ( !VK_RalFrameUniformGetResources( &vk_particle_frame, &frameReceipt )
+			|| !VK_RalShadowStorageGetResources( &vk_particle_pool_storage, &poolReceipt )
+			|| !VK_RalShadowStorageGetResources( &vk_particle_class_storage, &classReceipt )
+			|| frameReceipt.backend != backend || poolReceipt.backend != backend
+			|| classReceipt.backend != backend || frameReceipt.byteSize != frameBytes
+			|| poolReceipt.byteSize != poolBytes || classReceipt.byteSize != classBytes
+			|| poolReceipt.bufferCount != 2u || classReceipt.bufferCount != 1u ) return qfalse;
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
+		if ( !frameReceipt.buffers[i]
+				|| !poolReceipt.buffers[i]
+				|| !Ral_GetBufferHandle( frameReceipt.buffers[i] )
+				|| !Ral_GetBufferHandle( poolReceipt.buffers[i] )
+				|| Ral_GetBufferSize( frameReceipt.buffers[i] ) != frameBytes
+				|| Ral_GetBufferSize( poolReceipt.buffers[i] ) != poolBytes ) return qfalse;
+	}
+	if ( !classReceipt.buffers[0]
+			|| !Ral_GetBufferHandle( classReceipt.buffers[0] )
+			|| Ral_GetBufferSize( classReceipt.buffers[0] ) != classBytes ) return qfalse;
+	for ( k = 0u; k < PARTICLE_SAMPLER_COUNT; ++k ) {
+		image_t *image = k < MAX_PARTICLE_CLASSES
+			? vk.particle.classImages[k]
+			: vk.particle.frameImages[k - MAX_PARTICLE_CLASSES];
+		if ( !image ) image = tr.whiteImage;
+		if ( !image->ralDescriptorView
+				|| Ral_GetTextureViewHandle( image->ralDescriptorView ) != (void *)image->view )
+			goto fail;
+		textureViews[k] = image->ralDescriptorView;
+	}
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
+		const uint32_t renderPool = 1u - i;
+		ralBindingValue_t values[5];
+		ralBindGroupCreateInfo_t createInfo;
+		if ( !( slotMask & ( 1u << i ) ) ) continue;
+		memset( values, 0, sizeof( values ) );
+		values[0] = (ralBindingValue_t){ .binding=0u, .type=RAL_BIND_UNIFORM_BUFFER,
+			.buffer=frameReceipt.buffers[i], .bufferRange=frameBytes };
+		values[1] = (ralBindingValue_t){ .binding=1u, .type=RAL_BIND_STORAGE_BUFFER,
+			.buffer=poolReceipt.buffers[renderPool], .bufferRange=poolBytes };
+		values[2] = (ralBindingValue_t){ .binding=2u, .type=RAL_BIND_STORAGE_BUFFER,
+			.buffer=classReceipt.buffers[0], .bufferRange=classBytes };
+		values[3] = (ralBindingValue_t){ .binding=3u, .type=RAL_BIND_TEXTURE_ARRAY,
+			.textureArray=(const ralTextureView_t *const *)textureViews,
+			.textureArrayCount=PARTICLE_SAMPLER_COUNT, .sampler=vk.particle.ral_sampler };
+		values[4] = (ralBindingValue_t){ .binding=4u,
+			.type=RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+			.textureView=vk.sceneDepth.ral_view, .sampler=vk.sceneDepth.ral_sampler };
+		memset( &createInfo, 0, sizeof( createInfo ) );
+		createInfo.layout = vk.particle.ral_bgl_render;
+		createInfo.values = values;
+		createInfo.numValues = ARRAY_LEN( values );
+		createInfo.debugName = i ? "wired-particle-render-bg-1" : "wired-particle-render-bg-0";
+		createInfo.arena = vk.ral_descriptor_arena;
+		createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+		candidates[i] = Ral_CreateBindGroup( backend, &createInfo );
+		if ( !candidates[i] || !( rawCandidates[i] = Ral_GetBindGroupHandle( candidates[i] ) ) )
+			goto fail;
+		for ( k = 0u; k < NUM_COMMAND_BUFFERS; ++k ) {
+			if ( rawCandidates[i] == (void *)vk.particle.render_descriptor[k]
+					|| candidates[i] == vk.particle.ral_render_descriptor[k]
+					|| ( k < i && rawCandidates[i] == rawCandidates[k] ) ) goto fail;
+		}
+	}
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
+		ralBindGroup_t *retired;
+		if ( !( slotMask & ( 1u << i ) ) ) continue;
+		retired = vk.particle.ral_render_descriptor[i];
+		vk.particle.ral_render_descriptor[i] = candidates[i];
+		vk.particle.render_descriptor[i] = (VkDescriptorSet)rawCandidates[i];
+		vk.particle.renderGroupTextureGeneration[i] = vk.particle.textureGeneration;
+		candidates[i] = NULL;
+		if ( retired ) Ral_DestroyBindGroup( retired );
+	}
+	return qtrue;
+fail:
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i )
+		if ( candidates[i] ) Ral_DestroyBindGroup( candidates[i] );
+	return qfalse;
+}
+
+void vk_ral_release_decal_render_bindgroups( void ) {
+	uint32_t i;
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
+		if ( vk.decal.ral_render_descriptor[i] )
+			Ral_DestroyBindGroup( vk.decal.ral_render_descriptor[i] );
+		vk.decal.ral_render_descriptor[i] = NULL;
+		vk.decal.render_descriptor[i] = VK_NULL_HANDLE;
+		vk.decal.renderGroupTextureGeneration[i] = 0u;
+	}
+}
+
+qboolean vk_ral_refresh_decal_render_bindgroups( uint32_t slotMask ) {
+	vkRalFrameUniformResourcesReceipt_t frameReceipt;
+	vkRalShadowStorageResourcesReceipt_t poolReceipt;
+	ralBackend_t *backend = vk_ral_get_backend();
+	ralBindGroup_t *candidates[NUM_COMMAND_BUFFERS] = { NULL, NULL };
+	void *rawCandidates[NUM_COMMAND_BUFFERS] = { NULL, NULL };
+	ralTextureView_t *textureViews[MAX_DECAL_TEXTURES];
+	const uint64_t frameBytes = sizeof( decalFrame_t );
+	const uint64_t poolBytes = (uint64_t)DECALS_PER_POOL * DECAL_BYTES;
+	uint32_t i, k;
+	if ( slotMask == 0u || ( slotMask & ~(( 1u << NUM_COMMAND_BUFFERS ) - 1u) )
+			|| NUM_COMMAND_BUFFERS != 2u || !backend
+			|| !vk.decal.ral_bgl_render || !vk.decal.ral_sampler
+			|| !vk.sceneDepth.ral_view || !vk.sceneDepth.ral_sampler
+			|| Ral_GetBindGroupLayoutHandle( vk.decal.ral_bgl_render )
+				!= (void *)vk.decal.render_set_layout
+			|| Ral_GetSamplerHandle( vk.decal.ral_sampler )
+				!= (void *)vk.decal.sampler
+			|| Ral_GetTextureViewHandle( vk.sceneDepth.ral_view )
+				!= (void *)vk.sceneDepth.view
+			|| Ral_GetSamplerHandle( vk.sceneDepth.ral_sampler )
+				!= (void *)vk.sceneDepth.sampler
+			|| !tr.whiteImage || !tr.whiteImage->ralDescriptorView
+			|| vk.decal.textureGeneration == 0u
+			|| !vk.ral_descriptor_arena
+			|| !Ral_BindGroupArenaReceiptValid( &vk.ral_descriptor_arena_receipt )
+			|| vk.ral_descriptor_arena_receipt.backendIdentity != backend
+			|| vk.ral_descriptor_arena_receipt.arenaIdentity != vk.ral_descriptor_arena ) return qfalse;
+	if ( !VK_RalFrameUniformGetResources( &vk_decal_frame, &frameReceipt )
+			|| !VK_RalShadowStorageGetResources( &vk_decal_pool_storage, &poolReceipt )
+			|| frameReceipt.backend != backend || poolReceipt.backend != backend
+			|| frameReceipt.byteSize != frameBytes || poolReceipt.byteSize != poolBytes
+			|| poolReceipt.bufferCount != 1u ) return qfalse;
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
+		if ( !frameReceipt.buffers[i]
+				|| !Ral_GetBufferHandle( frameReceipt.buffers[i] )
+				|| Ral_GetBufferSize( frameReceipt.buffers[i] ) != frameBytes ) return qfalse;
+	}
+	if ( !poolReceipt.buffers[0]
+			|| !Ral_GetBufferHandle( poolReceipt.buffers[0] )
+			|| Ral_GetBufferSize( poolReceipt.buffers[0] ) != poolBytes ) return qfalse;
+	for ( k = 0u; k < MAX_DECAL_TEXTURES; ++k ) {
+		image_t *image = vk.decal.images[k] ? vk.decal.images[k] : tr.whiteImage;
+		if ( !image->ralDescriptorView
+				|| Ral_GetTextureViewHandle( image->ralDescriptorView ) != (void *)image->view )
+			goto fail;
+		textureViews[k] = image->ralDescriptorView;
+	}
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
+		ralBindingValue_t values[4];
+		ralBindGroupCreateInfo_t createInfo;
+		if ( !( slotMask & ( 1u << i ) ) ) continue;
+		memset( values, 0, sizeof( values ) );
+		values[0] = (ralBindingValue_t){ .binding=0u, .type=RAL_BIND_UNIFORM_BUFFER,
+			.buffer=frameReceipt.buffers[i], .bufferRange=frameBytes };
+		values[1] = (ralBindingValue_t){ .binding=1u, .type=RAL_BIND_STORAGE_BUFFER,
+			.buffer=poolReceipt.buffers[0], .bufferRange=poolBytes };
+		values[2] = (ralBindingValue_t){ .binding=2u, .type=RAL_BIND_TEXTURE_ARRAY,
+			.textureArray=(const ralTextureView_t *const *)textureViews,
+			.textureArrayCount=MAX_DECAL_TEXTURES, .sampler=vk.decal.ral_sampler };
+		values[3] = (ralBindingValue_t){ .binding=3u,
+			.type=RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+			.textureView=vk.sceneDepth.ral_view, .sampler=vk.sceneDepth.ral_sampler };
+		memset( &createInfo, 0, sizeof( createInfo ) );
+		createInfo.layout = vk.decal.ral_bgl_render;
+		createInfo.values = values;
+		createInfo.numValues = ARRAY_LEN( values );
+		createInfo.debugName = i ? "wired-decal-render-bg-1" : "wired-decal-render-bg-0";
+		createInfo.arena = vk.ral_descriptor_arena;
+		createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+		candidates[i] = Ral_CreateBindGroup( backend, &createInfo );
+		if ( !candidates[i] || !( rawCandidates[i] = Ral_GetBindGroupHandle( candidates[i] ) ) )
+			goto fail;
+		for ( k = 0u; k < NUM_COMMAND_BUFFERS; ++k ) {
+			if ( rawCandidates[i] == (void *)vk.decal.render_descriptor[k]
+					|| candidates[i] == vk.decal.ral_render_descriptor[k]
+					|| ( k < i && rawCandidates[i] == rawCandidates[k] ) ) goto fail;
+		}
+	}
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
+		ralBindGroup_t *retired;
+		if ( !( slotMask & ( 1u << i ) ) ) continue;
+		retired = vk.decal.ral_render_descriptor[i];
+		vk.decal.ral_render_descriptor[i] = candidates[i];
+		vk.decal.render_descriptor[i] = (VkDescriptorSet)rawCandidates[i];
+		vk.decal.renderGroupTextureGeneration[i] = vk.decal.textureGeneration;
+		candidates[i] = NULL;
+		if ( retired ) Ral_DestroyBindGroup( retired );
+	}
+	return qtrue;
+fail:
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i )
+		if ( candidates[i] ) Ral_DestroyBindGroup( candidates[i] );
+	return qfalse;
 }
 
 qboolean vk_particle_shadow_get_class( uint32_t classIndex,
@@ -1299,8 +1677,11 @@ typedef struct {
 	uint64_t generation;
 	int present_mode;
 	int swap_interval;
+	int policy_intent;
 	uint32_t requested_images;
 	uint32_t actual_images;
+	uint32_t max_frames_in_flight;
+	qboolean vrr_preferred;
 	uint32_t width;
 	uint32_t height;
 } vk_diag_swapchain_identity_t;
@@ -1321,6 +1702,7 @@ typedef struct {
 
 static vk_diag_swapchain_identity_t vk_diag_swapchain_identity;
 static uint64_t vk_swapchain_receipt_pending_generation;
+static refPresentationChange_t vk_pending_presentation_change;
 static vk_diag_v2_t vk_diag_v2;
 static qboolean vk_diag_attempt_active;
 static qboolean vk_diag_attempt_acquired;
@@ -1477,11 +1859,9 @@ static qboolean vk_frame_present_done;
 // vkEnumeratePhysicalDevices / vkDestroySurfaceKHR / the debug-utils
 // messenger pair — RAL's phase 1 owns them.
 static PFN_vkGetDeviceProcAddr							qvkGetDeviceProcAddr;
-static PFN_vkAllocateDescriptorSets						qvkAllocateDescriptorSets;
 static PFN_vkAllocateMemory								qvkAllocateMemory;
 static PFN_vkBindBufferMemory							qvkBindBufferMemory;
 static PFN_vkBindImageMemory							qvkBindImageMemory;
-static PFN_vkCmdCopyBufferToImage						qvkCmdCopyBufferToImage;
 static PFN_vkCreateBuffer								qvkCreateBuffer;
 static PFN_vkCreateDescriptorSetLayout					qvkCreateDescriptorSetLayout;
 static PFN_vkCreateImage								qvkCreateImage;
@@ -1498,7 +1878,6 @@ static PFN_vkGetBufferMemoryRequirements				qvkGetBufferMemoryRequirements;
 // qvkGetDeviceQueue retired (RAL owns queues).
 static PFN_vkMapMemory									qvkMapMemory;
 static PFN_vkUnmapMemory								qvkUnmapMemory;
-static PFN_vkUpdateDescriptorSets						qvkUpdateDescriptorSets;
 // Swapchain create/enumerate/acquire/present + HDR metadata dispatch lives in
 // ral_vulkan. The renderer consumes only typed RAL swapchain operations.
 
@@ -1817,6 +2196,7 @@ typedef struct {
 } hdrPipelineState_t;
 
 static hdrPipelineState_t vk_hdr_state;
+static ralColorOutputReceipt_t vk_color_output_receipt;
 
 void vk_hdr_state_print( void )
 {
@@ -1863,6 +2243,17 @@ void vk_hdr_state_print( void )
 	R_LOG( rch_hdr, SEV_INFO, "  HDR10 display    : %s%s\n",
 		vk_hdr_state.hdr_display_active ? "active" : ( vk_hdr_state.hdr_display_requested ? "requested (SDR fallback — no HDR colorspace on surface)" : "off" ),
 		vk_hdr_state.hdr_display_active ? va( " — peak %.0f nits, min %.4f nits", vk_hdr_state.hdr_peak_nits, vk_hdr_state.hdr_min_nits ) : "" );
+	if ( Ral_ColorOutputReceiptValid( &vk_color_output_receipt ) ) {
+		R_LOG( rch_hdr, SEV_INFO,
+			"  color contract  : gen=%llu scene=%d ui=linear/%.0fnit presentTransfer=%d screenshot=sRGB readback=sRGB tonemap=%d lut=%d fallback=%d\n",
+			(unsigned long long)vk_color_output_receipt.presentationGeneration,
+			(int)vk_color_output_receipt.sceneFormat,
+			vk_color_output_receipt.uiReferenceWhiteNits,
+			(int)vk_color_output_receipt.presentationTransfer,
+			(int)vk_color_output_receipt.toneMapOperator,
+			vk_color_output_receipt.lutEnabled ? 1 : 0,
+			(int)vk_color_output_receipt.hdrFallback );
+	}
 	R_LOG( rch_hdr, SEV_INFO, "  depth            : %s\n", vk_format_string( vk_hdr_state.depth_format ) );
 	R_LOG( rch_hdr, SEV_INFO, "  bloom passes     : %d / %d max\n",
 		vk_hdr_state.bloom_passes_active, vk_hdr_state.bloom_mip_max );
@@ -2135,6 +2526,7 @@ ralFormat_t vk_attachment_format_to_ral( VkFormat f ) {
 	case VK_FORMAT_R16G16_SFLOAT:             return RAL_FORMAT_R16G16_SFLOAT;
 	case VK_FORMAT_R8_UNORM:                  return RAL_FORMAT_R8_UNORM;
 	case VK_FORMAT_R8G8_UNORM:               return RAL_FORMAT_R8G8_UNORM;
+	case VK_FORMAT_R8G8B8_UNORM:             return RAL_FORMAT_R8G8B8_UNORM;
 	case VK_FORMAT_D16_UNORM:                return RAL_FORMAT_D16_UNORM;
 	case VK_FORMAT_D24_UNORM_S8_UINT:        return RAL_FORMAT_D24_UNORM_S8_UINT;
 	case VK_FORMAT_D32_SFLOAT:               return RAL_FORMAT_D32_SFLOAT;
@@ -2147,6 +2539,24 @@ ralFormat_t vk_attachment_format_to_ral( VkFormat f ) {
 	// swapchain and would need a raw render-pass path.
 	case VK_FORMAT_B5G6R5_UNORM_PACK16:      return RAL_FORMAT_B5G6R5_UNORM;
 	case VK_FORMAT_R5G6B5_UNORM_PACK16:      return RAL_FORMAT_R5G6B5_UNORM;
+	case VK_FORMAT_B4G4R4A4_UNORM_PACK16:    return RAL_FORMAT_B4G4R4A4_UNORM;
+	case VK_FORMAT_A1R5G5B5_UNORM_PACK16:    return RAL_FORMAT_A1R5G5B5_UNORM;
+	case VK_FORMAT_BC1_RGB_UNORM_BLOCK:       return RAL_FORMAT_BC1_RGB_UNORM;
+	case VK_FORMAT_BC1_RGB_SRGB_BLOCK:        return RAL_FORMAT_BC1_RGB_SRGB;
+	case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:      return RAL_FORMAT_BC1_RGBA_UNORM;
+	case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:       return RAL_FORMAT_BC1_RGBA_SRGB;
+	case VK_FORMAT_BC2_UNORM_BLOCK:           return RAL_FORMAT_BC2_UNORM;
+	case VK_FORMAT_BC2_SRGB_BLOCK:            return RAL_FORMAT_BC2_SRGB;
+	case VK_FORMAT_BC3_UNORM_BLOCK:           return RAL_FORMAT_BC3_UNORM;
+	case VK_FORMAT_BC3_SRGB_BLOCK:            return RAL_FORMAT_BC3_SRGB;
+	case VK_FORMAT_BC4_UNORM_BLOCK:           return RAL_FORMAT_BC4_UNORM;
+	case VK_FORMAT_BC4_SNORM_BLOCK:           return RAL_FORMAT_BC4_SNORM;
+	case VK_FORMAT_BC5_UNORM_BLOCK:           return RAL_FORMAT_BC5_UNORM;
+	case VK_FORMAT_BC5_SNORM_BLOCK:           return RAL_FORMAT_BC5_SNORM;
+	case VK_FORMAT_BC6H_UFLOAT_BLOCK:         return RAL_FORMAT_BC6H_UFLOAT;
+	case VK_FORMAT_BC6H_SFLOAT_BLOCK:         return RAL_FORMAT_BC6H_SFLOAT;
+	case VK_FORMAT_BC7_UNORM_BLOCK:           return RAL_FORMAT_BC7_UNORM;
+	case VK_FORMAT_BC7_SRGB_BLOCK:            return RAL_FORMAT_BC7_SRGB;
 	default:                                 return RAL_FORMAT_UNDEFINED;
 	}
 }
@@ -2199,8 +2609,10 @@ static ralColorSpace_t Vk_to_RalColorSpace( VkColorSpaceKHR cs ) {
 static void vk_create_swapchain( VkSurfaceFormatKHR surface_format, qboolean verbose ) {
 	VkExtent2D image_extent;
 	VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
-	ralPresentPreference_t presentPreferences[5];
-	uint32_t preferenceCount = 0u;
+	ralPresentationPolicyRequest_t presentationRequest;
+	ralPresentationPolicy_t presentationPolicy;
+	ralPresentationPolicyReceipt_t presentationReceipt;
+	ralColorOutputRequest_t colorRequest;
 	uint32_t image_count = 0u;
 	uint32_t i;
 	int v = ri.Cvar_VariableIntegerValue( "r_swapInterval" );
@@ -2208,29 +2620,14 @@ static void vk_create_swapchain( VkSurfaceFormatKHR surface_format, qboolean ver
 	image_extent.width = (uint32_t)glConfig.vidWidth;
 	image_extent.height = (uint32_t)glConfig.vidHeight;
 	vk.clearAttachment = qtrue;
+	memset( &presentationReceipt, 0, sizeof( presentationReceipt ) );
 
-	// Ordered portable policy: RAL is the sole owner of surface capability and
-	// present-mode queries. Each preference carries the exact legacy image-count
-	// request for that selected mode; FIFO at swapInterval=0 retains the old
-	// four-image request only when the surface reports no maximum.
-	if ( v != 0 ) {
-		if ( v == 2 ) presentPreferences[preferenceCount++] =
-			(ralPresentPreference_t){ RAL_PRESENT_MAILBOX, MIN_SWAPCHAIN_IMAGES_MAILBOX, 0u };
-		presentPreferences[preferenceCount++] =
-			(ralPresentPreference_t){ RAL_PRESENT_FIFO_RELAXED, MIN_SWAPCHAIN_IMAGES_FIFO, 0u };
-		presentPreferences[preferenceCount++] =
-			(ralPresentPreference_t){ RAL_PRESENT_FIFO, MIN_SWAPCHAIN_IMAGES_FIFO, 0u };
-	} else {
-		presentPreferences[preferenceCount++] =
-			(ralPresentPreference_t){ RAL_PRESENT_IMMEDIATE, MIN_SWAPCHAIN_IMAGES_IMM, 0u };
-		presentPreferences[preferenceCount++] =
-			(ralPresentPreference_t){ RAL_PRESENT_MAILBOX, MIN_SWAPCHAIN_IMAGES_MAILBOX, 0u };
-		presentPreferences[preferenceCount++] =
-			(ralPresentPreference_t){ RAL_PRESENT_FIFO_LATEST_READY, MIN_SWAPCHAIN_IMAGES_FIFO_LATEST_READY, 0u };
-		presentPreferences[preferenceCount++] =
-			(ralPresentPreference_t){ RAL_PRESENT_FIFO_RELAXED, MIN_SWAPCHAIN_IMAGES_FIFO, 0u };
-		presentPreferences[preferenceCount++] =
-			(ralPresentPreference_t){ RAL_PRESENT_FIFO, MIN_SWAPCHAIN_IMAGES_FIFO, MIN_SWAPCHAIN_IMAGES_FIFO_0 };
+	if ( !Ral_PresentationPolicyRequestFromLegacySwapInterval( v,
+			NUM_COMMAND_BUFFERS, &presentationRequest )
+			|| !Ral_ResolvePresentationPolicy( &presentationRequest,
+				&presentationPolicy ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"vk_create_swapchain: invalid presentation policy for r_swapInterval %d", v );
 	}
 
 #if defined( _WIN32 )
@@ -2277,8 +2674,8 @@ static void vk_create_swapchain( VkSurfaceFormatKHR surface_format, qboolean ver
 		sci.desiredHeight           = image_extent.height;
 		sci.formatPreferences       = &formatPreference;
 		sci.formatPreferenceCount   = 1;
-		sci.presentPreferences      = presentPreferences;
-		sci.presentPreferenceCount  = preferenceCount;
+		sci.presentPreferences      = presentationPolicy.preferences;
+		sci.presentPreferenceCount  = presentationPolicy.preferenceCount;
 		// vk_read_pixels captures the presented image in every FBO mode, so
 		// transfer-source support is a hard product requirement rather than an
 		// optional bit RAL may silently add. Non-FBO mode additionally needs
@@ -2296,10 +2693,37 @@ static void vk_create_swapchain( VkSurfaceFormatKHR surface_format, qboolean ver
 		result = Ral_CreateOrRecreateSwapchain( vk_ral_get_backend(), &sci,
 		                                       &vk.ral_swapchain );
 		if ( result != ralSuccess || vk.ral_swapchain == NULL
-		  || !Ral_GetSwapchainInfo( vk.ral_swapchain, &actual ) ) {
+		  || !Ral_GetSwapchainInfo( vk.ral_swapchain, &actual )
+		  || !Ral_FinalizePresentationPolicy( &presentationPolicy, &actual,
+				&presentationReceipt ) ) {
 			ri.Terminate( TERM_UNRECOVERABLE,
 				"vk_create_swapchain: Ral_CreateOrRecreateSwapchain failed (%d)",
 				(int)result );
+		}
+		memset( &colorRequest, 0, sizeof( colorRequest ) );
+		colorRequest.schemaVersion = RAL_COLOR_OUTPUT_SCHEMA_VERSION;
+		colorRequest.presentationGeneration = actual.generation;
+		colorRequest.sceneFormat = Vk_to_RalFormat( vk_hdr_state.color_format );
+		colorRequest.requestHdrOutput = vk_hdr_state.hdr_display_requested;
+		colorRequest.selectedOutput.format = actual.format;
+		colorRequest.selectedOutput.colorSpace = actual.colorSpace;
+#if FEAT_TONEMAP
+		colorRequest.toneMapOperator = (ralToneMapOperator_t)r_tonemap->integer;
+#else
+		colorRequest.toneMapOperator = RAL_TONEMAP_IDENTITY;
+#endif
+#if FEAT_COLOR_GRADING
+		colorRequest.lutEnabled = r_colorGrading->integer ? qtrue : qfalse;
+#else
+		colorRequest.lutEnabled = qfalse;
+#endif
+		colorRequest.hdrPeakNits = vk_hdr_state.hdr_peak_nits > 0.0f
+			? vk_hdr_state.hdr_peak_nits : 1000.0f;
+		colorRequest.hdrMinNits = vk_hdr_state.hdr_min_nits > 0.0f
+			? vk_hdr_state.hdr_min_nits : 0.01f;
+		if ( !Ral_ResolveColorOutput( &colorRequest, &vk_color_output_receipt ) ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"vk_create_swapchain: invalid generation-bound color output contract" );
 		}
 		if ( actual.imageCount > MAX_SWAPCHAIN_IMAGES ) {
 			ri.Terminate( TERM_UNRECOVERABLE,
@@ -2335,20 +2759,26 @@ static void vk_create_swapchain( VkSurfaceFormatKHR surface_format, qboolean ver
 			(unsigned)actual.usage, renderableCount );
 		if ( verbose ) {
 			R_LOG( rch_ral, SEV_INFO,
-				"RAL swapchain policy: swapInterval=%d selectedMode=%d requested=%u actual=%u\n",
-				v, (int)actual.presentMode, actual.requestedImageCount,
-				actual.imageCount );
+				"RAL swapchain policy: swapInterval=%d intent=%d selectedMode=%d framesInFlight=%u vrrPreferred=%d requested=%u actual=%u generation=%llu\n",
+				v, (int)presentationReceipt.intent, (int)actual.presentMode,
+				presentationReceipt.maxFramesInFlight,
+				presentationReceipt.preferVrr ? 1 : 0,
+				actual.requestedImageCount, actual.imageCount,
+				(unsigned long long)presentationReceipt.presentationGeneration );
 		}
 	}
 
 	/* Diagnostic identity is updated only after a complete, queryable swapchain
 	 * exists.  A generation change inside a 200-attempt bucket makes that bucket
 	 * explicitly unstable instead of silently combining two present contracts. */
-	vk_diag_swapchain_identity.generation++;
+	vk_diag_swapchain_identity.generation = presentationReceipt.presentationGeneration;
 	vk_diag_swapchain_identity.present_mode = (int)present_mode;
 	vk_diag_swapchain_identity.swap_interval = v;
+	vk_diag_swapchain_identity.policy_intent = (int)presentationReceipt.intent;
 	vk_diag_swapchain_identity.requested_images = image_count;
 	vk_diag_swapchain_identity.actual_images = vk.swapchain_image_count;
+	vk_diag_swapchain_identity.max_frames_in_flight = presentationReceipt.maxFramesInFlight;
+	vk_diag_swapchain_identity.vrr_preferred = presentationReceipt.preferVrr;
 	vk_diag_swapchain_identity.width = image_extent.width;
 	vk_diag_swapchain_identity.height = image_extent.height;
 
@@ -3283,11 +3713,9 @@ static qboolean init_vulkan_library( void )
 	//
 	// Get device level functions.
 	//
-	INIT_DEVICE_FUNCTION(vkAllocateDescriptorSets)
 	INIT_DEVICE_FUNCTION(vkAllocateMemory)
 	INIT_DEVICE_FUNCTION(vkBindBufferMemory)
 	INIT_DEVICE_FUNCTION(vkBindImageMemory)
-INIT_DEVICE_FUNCTION(vkCmdCopyBufferToImage)
 	INIT_DEVICE_FUNCTION(vkCreateBuffer)
 	INIT_DEVICE_FUNCTION(vkCreateDescriptorSetLayout)
 	INIT_DEVICE_FUNCTION(vkCreateImage)
@@ -3302,7 +3730,6 @@ INIT_DEVICE_FUNCTION(vkCmdCopyBufferToImage)
 	INIT_DEVICE_FUNCTION(vkGetBufferMemoryRequirements)
 	INIT_DEVICE_FUNCTION(vkMapMemory)
 	INIT_DEVICE_FUNCTION(vkUnmapMemory)
-	INIT_DEVICE_FUNCTION(vkUpdateDescriptorSets)
 
 	// First pick the swapchain surface format on
 	// the RAL-owned surface (vk_select_surface_format
@@ -3394,11 +3821,9 @@ static void deinit_instance_functions( void )
 static void deinit_device_functions( void )
 {
 	// device functions:
-	qvkAllocateDescriptorSets					= NULL;
 	qvkAllocateMemory							= NULL;
 	qvkBindBufferMemory							= NULL;
 	qvkBindImageMemory							= NULL;
-	qvkCmdCopyBufferToImage						= NULL;
 	qvkCreateBuffer								= NULL;
 	qvkCreateDescriptorSetLayout				= NULL;
 	qvkCreateImage								= NULL;
@@ -3413,7 +3838,6 @@ static void deinit_device_functions( void )
 	qvkGetBufferMemoryRequirements				= NULL;
 	qvkMapMemory								= NULL;
 	qvkUnmapMemory								= NULL;
-	qvkUpdateDescriptorSets						= NULL;
 }
 
 
@@ -3513,30 +3937,6 @@ static void vk_create_layout_binding( int binding, VkDescriptorType type, VkShad
 	desc.pBindings = &bind;
 
 	VK_CHECK( qvkCreateDescriptorSetLayout(vk.device, &desc, NULL, layout ) );
-}
-
-
-void vk_update_uniform_descriptor( VkDescriptorSet descriptor, VkBuffer buffer )
-{
-	VkDescriptorBufferInfo info;
-	VkWriteDescriptorSet desc;
-
-	info.buffer = buffer;
-	info.offset = 0;
-	info.range = sizeof( vkUniform_t );
-
-	desc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	desc.dstSet = descriptor;
-	desc.dstBinding = 0;
-	desc.dstArrayElement = 0;
-	desc.descriptorCount = 1;
-	desc.pNext = NULL;
-	desc.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-	desc.pImageInfo = NULL;
-	desc.pBufferInfo = &info;
-	desc.pTexelBufferView = NULL;
-
-	qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
 }
 
 
@@ -3696,9 +4096,9 @@ void vk_destroy_samplers( void )
 
 // Bindless registration for content 2D-array textures
 // (R_CreateImageArray-built image_t's). Lives in vk.c (not vk_ral_textures.c)
-// because the raw qvkUpdateDescriptorSets handle is static-to-vk.c. Mirrors
-// vk_update_descriptor_set's bindless write (vk.c:14125-14144) byte-near,
-// modulo dstBinding=WIRED_BINDLESS_BIND_ARRAY_IMAGES. Slot allocation is
+// because image-array slot allocation remains renderer-owned. Publication is
+// binding-aware RAL at WIRED_BINDLESS_BIND_ARRAY_IMAGES rather than a Vulkan
+// descriptor write. Slot allocation is
 // delegated to vk_ral_alloc_array_bindless_slot — the index space is
 // disjoint from the 2D table at binding 0. The sampler-dedup-pool entry +
 // image->bindlessSamplerSlot were already populated by
@@ -3711,41 +4111,26 @@ void vk_destroy_samplers( void )
 // counter resets, R_CreateImageArray re-fires per image).
 void vk_ral_register_image_array( image_t *image ) {
 	ralBindGroup_t *ralSet;
-	VkDescriptorSet ralVkSet;
-	VkDescriptorImageInfo imgInfo;
-	VkWriteDescriptorSet  imgWrite;
 	int slot;
 
 	if ( !image )
 		return;
 	if ( image->ralBindlessSlot >= 0 )
 		return;
-	if ( image->view == VK_NULL_HANDLE )
+	if ( image->view == VK_NULL_HANDLE || !image->ralDescriptorView
+			|| Ral_GetTextureViewHandle( image->ralDescriptorView ) != (void *)image->view )
 		return;
 
 	ralSet = vk_ral_get_bindless_set();
 	if ( !ralSet )
 		return;
-	ralVkSet = (VkDescriptorSet)Ral_GetBindGroupHandle( ralSet );
-	if ( ralVkSet == VK_NULL_HANDLE )
-		return;
-
 	slot = vk_ral_alloc_array_bindless_slot( image->imgName );
 	if ( slot < 0 )
 		return;
-
-	memset( &imgInfo, 0, sizeof( imgInfo ) );
-	imgInfo.imageView   = image->view;
-	imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	memset( &imgWrite, 0, sizeof( imgWrite ) );
-	imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	imgWrite.dstSet          = ralVkSet;
-	imgWrite.dstBinding      = WIRED_BINDLESS_BIND_ARRAY_IMAGES;
-	imgWrite.dstArrayElement = (uint32_t)slot;
-	imgWrite.descriptorCount = 1;
-	imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-	imgWrite.pImageInfo      = &imgInfo;
-	qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+	if ( !Ral_BindGroupSetTextureViewAtBinding( ralSet,
+			WIRED_BINDLESS_BIND_ARRAY_IMAGES, (uint32_t)slot,
+			image->ralDescriptorView ) )
+		return;
 
 	image->ralBindlessSlot = slot;
 }
@@ -3759,17 +4144,14 @@ void vk_ral_register_image_array( image_t *image ) {
 // FBO resize, swapchain rebuild). The sampler slot is captured into
 // vk.bindless_screenmap_sampler_slot for vk_push_bindless_indices to read.
 //
-// The view goes into binding=0 (texture image-view array) as a raw
-// SAMPLED_IMAGE write — same pattern vk_ral_register_image_array uses for
-// 2DArray content. The sampler goes into binding=1 (sampler array) via the
+// The view goes into binding=0 (texture image-view array) through RAL's
+// binding-aware publication surface. The sampler goes into binding=1 via the
 // same Ral_BindGroupSetSamplerAt path image registration uses. No image_t
 // shim — the screenmap is not a content image.
 static void vk_ral_register_screenmap_view( VkImageView view, const Vk_Sampler_Def *sd ) {
 	ralBindGroup_t       *ralSet;
 	VkDescriptorSet       ralVkSet;
 	int                   smIdx;
-	VkDescriptorImageInfo imgInfo;
-	VkWriteDescriptorSet  imgWrite;
 
 	if ( view == VK_NULL_HANDLE || sd == NULL )
 		return;
@@ -3813,22 +4195,15 @@ static void vk_ral_register_screenmap_view( VkImageView view, const Vk_Sampler_D
 		vk.bindless_screenmap_sampler_slot = smIdx;
 	}
 
-	// Write the screenmap view into binding=0 at WIRED_BINDLESS_SCREENMAP_SLOT
-	// (raw SAMPLED_IMAGE — the sampler comes from binding=1 at sample time).
-	memset( &imgInfo, 0, sizeof( imgInfo ) );
-	imgInfo.imageView   = view;
-	imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	memset( &imgWrite, 0, sizeof( imgWrite ) );
-	imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	imgWrite.dstSet          = ralVkSet;
-	imgWrite.dstBinding      = WIRED_BINDLESS_BIND_IMAGES;
-	imgWrite.dstArrayElement = WIRED_BINDLESS_SCREENMAP_SLOT;
-	imgWrite.descriptorCount = 1;
-	imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-	imgWrite.pImageInfo      = &imgInfo;
-	qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
-	(void)vk_ral_bindless_record_reserved( WIRED_BINDLESS_SCREENMAP_SLOT,
-		view, &vk.screenMap, (const void *)ralVkSet );
+	// Publish through the binding-aware RAL surface; the sampler remains a
+	// separate bindless-table entry at binding 1.
+	if ( !vk.screenMap.ral_color_view
+			|| Ral_GetTextureViewHandle( vk.screenMap.ral_color_view ) != (void *)view
+			|| !Ral_BindGroupSetTextureViewAtBinding( ralSet,
+				WIRED_BINDLESS_BIND_IMAGES, WIRED_BINDLESS_SCREENMAP_SLOT,
+				vk.screenMap.ral_color_view ) ) return;
+	if ( !vk_ral_bindless_record_reserved( WIRED_BINDLESS_SCREENMAP_SLOT,
+			view, &vk.screenMap, (const void *)ralVkSet ) ) return;
 
 	R_LOG( rch_fbo, SEV_DEBUG, "screenmap view bound to bindless slot %u (sampler dedup slot %d)\n",
 	       (unsigned)WIRED_BINDLESS_SCREENMAP_SLOT, vk.bindless_screenmap_sampler_slot );
@@ -3848,7 +4223,12 @@ static void vk_ral_register_screenmap_view( VkImageView view, const Vk_Sampler_D
 // (cold boot, FBO rebuild, vid_restart, pendingRebuild). The captured sampler slot
 // (vk.sceneDepth.bindlessSamplerSlot) gates the role-4 override in
 // vk_push_bindless_indices.
-static void vk_ral_register_depthfade_view( void ) {
+static qboolean vk_ral_refresh_texture_sampler_group(
+		ralTexture_t *texture, ralTextureView_t **publishedView,
+		ralBindGroup_t **publishedGroup, ralSampler_t *sampler,
+		const char *debugName );
+
+static qboolean vk_ral_register_depthfade_view( void ) {
 	ralBindGroup_t *ralSet;
 	ralResourceState_t initialState = { RAL_RESOURCE_USAGE_UNDEFINED, 0 };
 	Vk_Sampler_Def  sd;
@@ -3856,32 +4236,57 @@ static void vk_ral_register_depthfade_view( void ) {
 	ralBackend_t   *ralBackend;
 
 	ralSet = vk_ral_get_bindless_set();
-	if ( !ralSet || vk.sceneDepth.view == VK_NULL_HANDLE )
-		return;
+	if ( vk.sceneDepth.view == VK_NULL_HANDLE )
+		return qfalse;
 	ralBackend = vk_ral_get_backend();
 	if ( !ralBackend )
-		return;
+		return qfalse;
 
 	// Re-adopt the depth copy so the RAL wrapper points at the current view (the
 	// FBO rebuild destroyed+recreated the image/view; the boot sweep that owns
 	// vk.sceneDepth.ral_image does not re-run here).
+	if ( vk.sceneDepth.ral_descriptor ) {
+		Ral_DestroyBindGroup( vk.sceneDepth.ral_descriptor );
+		vk.sceneDepth.ral_descriptor = NULL;
+	}
+	if ( vk.sceneDepth.ral_view ) {
+		Ral_DestroyTextureView( vk.sceneDepth.ral_view );
+		vk.sceneDepth.ral_view = NULL;
+	}
+	vk.sceneDepth.descriptor = VK_NULL_HANDLE;
 	if ( vk.sceneDepth.ral_image ) { Ral_DestroyTexture( vk.sceneDepth.ral_image ); vk.sceneDepth.ral_image = NULL; }
-	vk.sceneDepth.ral_image = Ral_AdoptTexture( ralBackend, vk.sceneDepth.image, vk.sceneDepth.view,
+	vk.sceneDepth.ral_image = Ral_AdoptTextureExact( ralBackend,
+		vk.sceneDepth.image, vk.sceneDepth.view,
 		vk_attachment_format_to_ral( vk.depth_format ), glConfig.vidWidth, glConfig.vidHeight,
 		( glConfig.stencilBits > 0 )
 			? ( VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT )
 			: VK_IMAGE_ASPECT_DEPTH_BIT,
+		RAL_TEXTURE_USAGE_SAMPLED | RAL_TEXTURE_USAGE_TRANSFER_SRC
+			| RAL_TEXTURE_USAGE_TRANSFER_DST,
 		"wired-img-scenedepth" );
 	if ( !vk.sceneDepth.ral_image )
-		return;
+		return qfalse;
 	if ( !Ral_PublishAdoptedTextureState( vk.sceneDepth.ral_image,
 			&initialState, RAL_QUEUE_GRAPHICS ) ) {
 		Ral_DestroyTexture( vk.sceneDepth.ral_image );
 		vk.sceneDepth.ral_image = NULL;
-		return;
+		return qfalse;
 	}
+	if ( !vk_ral_refresh_texture_sampler_group( vk.sceneDepth.ral_image,
+			&vk.sceneDepth.ral_view, &vk.sceneDepth.ral_descriptor,
+			vk.sceneDepth.ral_sampler, "wired-scenedepth-bg" ) ) {
+		Ral_DestroyTexture( vk.sceneDepth.ral_image );
+		vk.sceneDepth.ral_image = NULL;
+		return qfalse;
+	}
+	vk.sceneDepth.descriptor = Ral_GetBindGroupHandle(
+		vk.sceneDepth.ral_descriptor );
 	vk.sceneDepth.copied = qfalse;
 	vk.gtaoSnapshotValid = qfalse;
+	if ( !ralSet ) {
+		vk.sceneDepth.bindlessSamplerSlot = -1;
+		return qtrue;
+	}
 
 	// Ensure a NEAREST + CLAMP_TO_EDGE sampler def exists in the dedup pool and
 	// capture its slot (mirror the screenmap sampler-dedup recovery).
@@ -3901,19 +4306,27 @@ static void vk_ral_register_depthfade_view( void ) {
 	if ( smIdx < 0 || smIdx >= (int)WIRED_BINDLESS_SAMPLER_SLOTS ) {
 		R_LOG( rch_fbo, SEV_WARN, "depthfade NEAREST sampler dedup-slot lookup failed (count=%d) — role-4 override disabled\n", vk.samplers.count );
 		vk.sceneDepth.bindlessSamplerSlot = -1;
-		return;
+		return qtrue;
 	}
-	(void)vk_ral_bindless_publish_sampler( (uint32_t)smIdx,
-		vk.samplers.ral_handle[smIdx], &vk.samplers.def[smIdx] );
+	if ( !vk_ral_bindless_publish_sampler( (uint32_t)smIdx,
+			vk.samplers.ral_handle[smIdx], &vk.samplers.def[smIdx] ) ) {
+		vk.sceneDepth.bindlessSamplerSlot = -1;
+		return qfalse;
+	}
 	vk.sceneDepth.bindlessSamplerSlot = smIdx;
 
 	// RAL-native bindless image write — the depth view into the reserved slot.
-	Ral_BindGroupSetTextureAt( ralSet, WIRED_BINDLESS_SCENEDEPTH_SLOT, vk.sceneDepth.ral_image );
-	(void)vk_ral_bindless_record_reserved( WIRED_BINDLESS_SCENEDEPTH_SLOT,
-		vk.sceneDepth.view, &vk.sceneDepth, (const void *)ralSet );
+	if ( !Ral_BindGroupSetTextureAt( ralSet, WIRED_BINDLESS_SCENEDEPTH_SLOT,
+			vk.sceneDepth.ral_image )
+			|| !vk_ral_bindless_record_reserved( WIRED_BINDLESS_SCENEDEPTH_SLOT,
+				vk.sceneDepth.view, &vk.sceneDepth, (const void *)ralSet ) ) {
+		vk.sceneDepth.bindlessSamplerSlot = -1;
+		return qfalse;
+	}
 
 	R_LOG( rch_fbo, SEV_DEBUG, "depthfade view bound to bindless slot %u (sampler dedup slot %d)\n",
 	       (unsigned)WIRED_BINDLESS_SCENEDEPTH_SLOT, vk.sceneDepth.bindlessSamplerSlot );
+	return qtrue;
 }
 
 
@@ -3935,8 +4348,6 @@ static void vk_ral_register_depthfade_view( void ) {
 void vk_register_black_sentinel( void ) {
 	ralBindGroup_t       *ralSet;
 	VkDescriptorSet       ralVkSet;
-	VkDescriptorImageInfo imgInfo;
-	VkWriteDescriptorSet  imgWrite;
 
 	if ( !tr.blackImage || tr.blackImage->view == VK_NULL_HANDLE )
 		return;
@@ -3948,21 +4359,15 @@ void vk_register_black_sentinel( void ) {
 	if ( ralVkSet == VK_NULL_HANDLE )
 		return;
 
-	memset( &imgInfo, 0, sizeof( imgInfo ) );
-	imgInfo.imageView   = tr.blackImage->view;
-	imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	memset( &imgWrite, 0, sizeof( imgWrite ) );
-	imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	imgWrite.dstSet          = ralVkSet;
-	imgWrite.dstBinding      = WIRED_BINDLESS_BIND_IMAGES;
-	imgWrite.dstArrayElement = WIRED_BINDLESS_BLACK_TEX_SENTINEL;
-	imgWrite.descriptorCount = 1;
-	imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-	imgWrite.pImageInfo      = &imgInfo;
-	qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
-	(void)vk_ral_bindless_record_raw_image( tr.blackImage,
-		WIRED_BINDLESS_BLACK_TEX_SENTINEL, tr.blackImage->view,
-		VK_BINDLESS_PUBLICATION_RESERVED );
+	if ( !tr.blackImage->ralDescriptorView
+			|| Ral_GetTextureViewHandle( tr.blackImage->ralDescriptorView )
+				!= (void *)tr.blackImage->view
+			|| !Ral_BindGroupSetTextureViewAtBinding( ralSet,
+				WIRED_BINDLESS_BIND_IMAGES, WIRED_BINDLESS_BLACK_TEX_SENTINEL,
+				tr.blackImage->ralDescriptorView ) ) return;
+	if ( !vk_ral_bindless_record_raw_image( tr.blackImage,
+			WIRED_BINDLESS_BLACK_TEX_SENTINEL, tr.blackImage->view,
+			VK_BINDLESS_PUBLICATION_RESERVED ) ) return;
 
 	R_LOG( rch_fbo, SEV_DEBUG, "black sun-mask sentinel bound to bindless slot %u\n",
 	       (unsigned)WIRED_BINDLESS_BLACK_TEX_SENTINEL );
@@ -3984,8 +4389,6 @@ void vk_register_black_sentinel( void ) {
 void vk_register_white_sentinel( void ) {
 	ralBindGroup_t       *ralSet;
 	VkDescriptorSet       ralVkSet;
-	VkDescriptorImageInfo imgInfo;
-	VkWriteDescriptorSet  imgWrite;
 
 	if ( !tr.whiteImage || tr.whiteImage->view == VK_NULL_HANDLE )
 		return;
@@ -3997,24 +4400,264 @@ void vk_register_white_sentinel( void ) {
 	if ( ralVkSet == VK_NULL_HANDLE )
 		return;
 
-	memset( &imgInfo, 0, sizeof( imgInfo ) );
-	imgInfo.imageView   = tr.whiteImage->view;
-	imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	memset( &imgWrite, 0, sizeof( imgWrite ) );
-	imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	imgWrite.dstSet          = ralVkSet;
-	imgWrite.dstBinding      = WIRED_BINDLESS_BIND_IMAGES;
-	imgWrite.dstArrayElement = WIRED_BINDLESS_WHITE_TEX_SENTINEL;
-	imgWrite.descriptorCount = 1;
-	imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-	imgWrite.pImageInfo      = &imgInfo;
-	qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
-	(void)vk_ral_bindless_record_raw_image( tr.whiteImage,
-		WIRED_BINDLESS_WHITE_TEX_SENTINEL, tr.whiteImage->view,
-		VK_BINDLESS_PUBLICATION_RESERVED );
+	if ( !tr.whiteImage->ralDescriptorView
+			|| Ral_GetTextureViewHandle( tr.whiteImage->ralDescriptorView )
+				!= (void *)tr.whiteImage->view
+			|| !Ral_BindGroupSetTextureViewAtBinding( ralSet,
+				WIRED_BINDLESS_BIND_IMAGES, WIRED_BINDLESS_WHITE_TEX_SENTINEL,
+				tr.whiteImage->ralDescriptorView ) ) return;
+	if ( !vk_ral_bindless_record_raw_image( tr.whiteImage,
+			WIRED_BINDLESS_WHITE_TEX_SENTINEL, tr.whiteImage->view,
+			VK_BINDLESS_PUBLICATION_RESERVED ) ) return;
 
 	R_LOG( rch_fbo, SEV_DEBUG, "white texture sentinel bound to bindless slot %u\n",
 	       (unsigned)WIRED_BINDLESS_WHITE_TEX_SENTINEL );
+}
+
+
+static ralSampler_t *vk_ral_sampler_for_definition( const Vk_Sampler_Def *definition ) {
+	void *native;
+	int i;
+	if ( !definition ) return NULL;
+	native = (void *)vk_find_sampler( definition );
+	if ( native == NULL ) return NULL;
+	for ( i = 0; i < vk.samplers.count; ++i ) {
+		if ( memcmp( &vk.samplers.def[i], definition, sizeof( *definition ) ) == 0
+				&& (void *)vk.samplers.handle[i] == native
+				&& vk.samplers.ral_handle[i]
+				&& Ral_GetSamplerHandle( vk.samplers.ral_handle[i] ) == native )
+			return vk.samplers.ral_handle[i];
+	}
+	return NULL;
+}
+
+static qboolean vk_ral_refresh_texture_sampler_group(
+		ralTexture_t *texture, ralTextureView_t **publishedView,
+		ralBindGroup_t **publishedGroup, ralSampler_t *sampler,
+		const char *debugName ) {
+	ralBackend_t *backend = vk_ral_get_backend();
+	ralTextureView_t *candidateView = NULL;
+	ralBindGroup_t *candidateGroup = NULL;
+	ralTextureViewCreateInfo_t viewInfo;
+	ralBindingValue_t value;
+	ralBindGroupCreateInfo_t groupInfo;
+
+	if ( !backend || !texture || !publishedView || !publishedGroup || !sampler
+			|| Ral_GetSamplerHandle( sampler ) == NULL || !debugName
+			|| !vk.ral_bgl_sampler || !vk.ral_descriptor_arena ) {
+		R_LOG( rch_ral, SEV_ERROR,
+			"RAL texture/sampler cohort prerequisites missing: backend=%d texture=%d view-slot=%d group-slot=%d sampler=%d native-sampler=%d name=%d layout=%d arena=%d\n",
+			backend != NULL, texture != NULL, publishedView != NULL,
+			publishedGroup != NULL, sampler != NULL,
+			sampler && Ral_GetSamplerHandle( sampler ) != NULL,
+			debugName != NULL, vk.ral_bgl_sampler != NULL,
+			vk.ral_descriptor_arena != NULL );
+		return qfalse;
+	}
+	if ( *publishedView && *publishedGroup
+			&& Ral_GetTextureViewHandle( *publishedView ) != NULL
+			&& Ral_GetBindGroupHandle( *publishedGroup ) != NULL ) return qtrue;
+
+	memset( &viewInfo, 0, sizeof( viewInfo ) );
+	viewInfo.texture = texture;
+	viewInfo.viewType = RAL_TEXTURE_2D;
+	viewInfo.format = RAL_FORMAT_UNDEFINED;
+	candidateView = Ral_CreateTextureView( backend, &viewInfo );
+	if ( !candidateView ) {
+		R_LOG( rch_ral, SEV_ERROR,
+			"RAL texture/sampler cohort texture-view creation failed: %s\n",
+			debugName );
+		return qfalse;
+	}
+
+	memset( &value, 0, sizeof( value ) );
+	value.binding = 0u;
+	value.type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
+	value.textureView = candidateView;
+	value.sampler = sampler;
+	memset( &groupInfo, 0, sizeof( groupInfo ) );
+	groupInfo.layout = vk.ral_bgl_sampler;
+	groupInfo.values = &value;
+	groupInfo.numValues = 1u;
+	groupInfo.debugName = debugName;
+	groupInfo.arena = vk.ral_descriptor_arena;
+	groupInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+	candidateGroup = Ral_CreateBindGroup( backend, &groupInfo );
+	if ( !candidateGroup || Ral_GetBindGroupHandle( candidateGroup ) == NULL ) {
+		R_LOG( rch_ral, SEV_ERROR,
+			"RAL texture/sampler cohort bind-group creation failed: %s\n",
+			debugName );
+		if ( candidateGroup ) Ral_DestroyBindGroup( candidateGroup );
+		Ral_DestroyTextureView( candidateView );
+		return qfalse;
+	}
+
+	// Candidate-first publication keeps the previous complete cohort live if
+	// texture-view or arena allocation fails.
+	if ( *publishedGroup ) Ral_DestroyBindGroup( *publishedGroup );
+	if ( *publishedView ) Ral_DestroyTextureView( *publishedView );
+	*publishedView = candidateView;
+	*publishedGroup = candidateGroup;
+	return qtrue;
+}
+
+static qboolean vk_ral_refresh_attachment_sampler_group(
+		ralTexture_t *texture, ralTextureView_t **publishedView,
+		ralBindGroup_t **publishedGroup,
+		const Vk_Sampler_Def *samplerDefinition, const char *debugName ) {
+	ralSampler_t *sampler = vk_ral_sampler_for_definition( samplerDefinition );
+	return vk_ral_refresh_texture_sampler_group( texture, publishedView,
+		publishedGroup, sampler, debugName );
+}
+
+void vk_ral_release_attachment_sampler_cohorts( void ) {
+	uint32_t i;
+	#define RELEASE_ATTACHMENT_SAMPLE( group, view, native ) do { \
+		if ( (group) ) { Ral_DestroyBindGroup( (group) ); (group) = NULL; } \
+		if ( (view) ) { Ral_DestroyTextureView( (view) ); (view) = NULL; } \
+		(native) = VK_NULL_HANDLE; \
+	} while ( 0 )
+	RELEASE_ATTACHMENT_SAMPLE( vk.ral_color_descriptor,
+		vk.ral_color_view, vk.color_descriptor );
+	RELEASE_ATTACHMENT_SAMPLE( vk.ral_tonemapped_descriptor,
+		vk.ral_tonemapped_view, vk.tonemapped_descriptor );
+	RELEASE_ATTACHMENT_SAMPLE( vk.screenMap.ral_color_descriptor,
+		vk.screenMap.ral_color_view, vk.screenMap.color_descriptor );
+	RELEASE_ATTACHMENT_SAMPLE( vk.sceneDepth.ral_descriptor,
+		vk.sceneDepth.ral_view, vk.sceneDepth.descriptor );
+	for ( i = 0; i < ARRAY_LEN( vk.ral_bloom_image_descriptor ); ++i )
+		RELEASE_ATTACHMENT_SAMPLE( vk.ral_bloom_image_descriptor[i],
+			vk.ral_bloom_image_view[i], vk.bloom_image_descriptor[i] );
+	#undef RELEASE_ATTACHMENT_SAMPLE
+}
+
+void vk_ral_release_smaa_sampler_cohorts( void ) {
+	#define RELEASE_SMAA_SAMPLE( group, view, texture, native ) do { \
+		if ( (group) ) { Ral_DestroyBindGroup( (group) ); (group) = NULL; } \
+		if ( (view) ) { Ral_DestroyTextureView( (view) ); (view) = NULL; } \
+		if ( (texture) ) { Ral_DestroyTexture( (texture) ); (texture) = NULL; } \
+		(native) = VK_NULL_HANDLE; \
+	} while ( 0 )
+	RELEASE_SMAA_SAMPLE( vk.smaa.ral_edges_descriptor,
+		vk.smaa.ral_edges_view, vk.smaa.ral_edges_image,
+		vk.smaa.edges_descriptor );
+	RELEASE_SMAA_SAMPLE( vk.smaa.ral_blend_descriptor,
+		vk.smaa.ral_blend_view, vk.smaa.ral_blend_image,
+		vk.smaa.blend_descriptor );
+	RELEASE_SMAA_SAMPLE( vk.smaa.ral_input_descriptor,
+		vk.smaa.ral_input_view, vk.smaa.ral_input_image,
+		vk.smaa.input_descriptor );
+	RELEASE_SMAA_SAMPLE( vk.smaa.ral_area_descriptor,
+		vk.smaa.ral_area_view, vk.smaa.ral_area_image,
+		vk.smaa.area_descriptor );
+	RELEASE_SMAA_SAMPLE( vk.smaa.ral_search_descriptor,
+		vk.smaa.ral_search_view, vk.smaa.ral_search_image,
+		vk.smaa.search_descriptor );
+	#undef RELEASE_SMAA_SAMPLE
+}
+
+static qboolean vk_ral_refresh_smaa_sampler_cohorts( void ) {
+	const ralResourceState_t sampled = {
+		RAL_RESOURCE_USAGE_SAMPLED_TEXTURE, RAL_STAGE_FRAGMENT
+	};
+
+	if ( !vk.smaa.active ) return qtrue;
+	if ( vk.smaa.ral_edges_image && vk.smaa.ral_edges_view
+			&& vk.smaa.ral_edges_descriptor
+			&& vk.smaa.ral_blend_image && vk.smaa.ral_blend_view
+			&& vk.smaa.ral_blend_descriptor
+			&& vk.smaa.ral_input_image && vk.smaa.ral_input_view
+			&& vk.smaa.ral_input_descriptor
+			&& vk.smaa.ral_area_image && vk.smaa.ral_area_view
+			&& vk.smaa.ral_area_descriptor
+			&& vk.smaa.ral_search_image && vk.smaa.ral_search_view
+			&& vk.smaa.ral_search_descriptor
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_edges_view ) == (void *)vk.smaa.edges_view
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_blend_view ) == (void *)vk.smaa.blend_view
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_input_view ) == (void *)vk.smaa.input_view
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_area_view ) == (void *)vk.smaa.area_view
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_search_view ) == (void *)vk.smaa.search_view
+			&& Ral_GetBindGroupHandle( vk.smaa.ral_edges_descriptor ) == (void *)vk.smaa.edges_descriptor
+			&& Ral_GetBindGroupHandle( vk.smaa.ral_blend_descriptor ) == (void *)vk.smaa.blend_descriptor
+			&& Ral_GetBindGroupHandle( vk.smaa.ral_input_descriptor ) == (void *)vk.smaa.input_descriptor
+			&& Ral_GetBindGroupHandle( vk.smaa.ral_area_descriptor ) == (void *)vk.smaa.area_descriptor
+			&& Ral_GetBindGroupHandle( vk.smaa.ral_search_descriptor ) == (void *)vk.smaa.search_descriptor )
+		return qtrue;
+
+	// Arena resets and live r_smaa recreation both converge here. Retire every
+	// child before replacing an adopted texture wrapper; raw Vk images remain
+	// renderer-owned and outlive this portable sampling cohort.
+	vk_ral_release_smaa_sampler_cohorts();
+	vk_ral_adopt_one_texture( vk.smaa.edges_image, vk.smaa.edges_view,
+		VK_FORMAT_R8G8_UNORM, &vk.smaa.ral_edges_image,
+		glConfig.vidWidth, glConfig.vidHeight, VK_IMAGE_ASPECT_COLOR_BIT,
+		RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-edges" );
+	vk_ral_adopt_one_texture( vk.smaa.blend_image, vk.smaa.blend_view,
+		VK_FORMAT_R8G8B8A8_UNORM, &vk.smaa.ral_blend_image,
+		glConfig.vidWidth, glConfig.vidHeight, VK_IMAGE_ASPECT_COLOR_BIT,
+		RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-blend" );
+	vk_ral_adopt_one_texture( vk.smaa.input_image, vk.smaa.input_view,
+		vk.color_format, &vk.smaa.ral_input_image,
+		glConfig.vidWidth, glConfig.vidHeight, VK_IMAGE_ASPECT_COLOR_BIT,
+		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-input" );
+	vk_ral_adopt_one_texture( vk.smaa.area_image, vk.smaa.area_view,
+		VK_FORMAT_R8G8_UNORM, &vk.smaa.ral_area_image,
+		AREATEX_WIDTH, AREATEX_HEIGHT, VK_IMAGE_ASPECT_COLOR_BIT,
+		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-area" );
+	vk_ral_adopt_one_texture( vk.smaa.search_image, vk.smaa.search_view,
+		VK_FORMAT_R8_UNORM, &vk.smaa.ral_search_image,
+		SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT, VK_IMAGE_ASPECT_COLOR_BIT,
+		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-search" );
+	if ( !vk.smaa.ral_edges_image || !vk.smaa.ral_blend_image
+			|| !vk.smaa.ral_input_image || !vk.smaa.ral_area_image
+			|| !vk.smaa.ral_search_image
+			|| !Ral_PublishAdoptedTextureState( vk.smaa.ral_edges_image,
+				&sampled, RAL_QUEUE_GRAPHICS )
+			|| !Ral_PublishAdoptedTextureState( vk.smaa.ral_blend_image,
+				&sampled, RAL_QUEUE_GRAPHICS )
+			|| !Ral_PublishAdoptedTextureState( vk.smaa.ral_input_image,
+				&sampled, RAL_QUEUE_GRAPHICS )
+			|| !Ral_PublishAdoptedTextureState( vk.smaa.ral_area_image,
+				&sampled, RAL_QUEUE_GRAPHICS )
+			|| !Ral_PublishAdoptedTextureState( vk.smaa.ral_search_image,
+				&sampled, RAL_QUEUE_GRAPHICS ) ) goto fail;
+
+	if ( !vk_ral_refresh_texture_sampler_group( vk.smaa.ral_edges_image,
+			&vk.smaa.ral_edges_view, &vk.smaa.ral_edges_descriptor,
+			vk.smaa.ral_point_sampler, "wired-smaa-edges-bg" )
+			|| !vk_ral_refresh_texture_sampler_group( vk.smaa.ral_blend_image,
+				&vk.smaa.ral_blend_view, &vk.smaa.ral_blend_descriptor,
+				vk.smaa.ral_linear_sampler, "wired-smaa-blend-bg" )
+			|| !vk_ral_refresh_texture_sampler_group( vk.smaa.ral_input_image,
+				&vk.smaa.ral_input_view, &vk.smaa.ral_input_descriptor,
+				vk.smaa.ral_linear_sampler, "wired-smaa-input-bg" )
+			|| !vk_ral_refresh_texture_sampler_group( vk.smaa.ral_area_image,
+				&vk.smaa.ral_area_view, &vk.smaa.ral_area_descriptor,
+				vk.smaa.ral_linear_sampler, "wired-smaa-area-bg" )
+			|| !vk_ral_refresh_texture_sampler_group( vk.smaa.ral_search_image,
+				&vk.smaa.ral_search_view, &vk.smaa.ral_search_descriptor,
+				vk.smaa.ral_point_sampler, "wired-smaa-search-bg" ) ) goto fail;
+
+	vk.smaa.edges_descriptor = Ral_GetBindGroupHandle(
+		vk.smaa.ral_edges_descriptor );
+	vk.smaa.blend_descriptor = Ral_GetBindGroupHandle(
+		vk.smaa.ral_blend_descriptor );
+	vk.smaa.input_descriptor = Ral_GetBindGroupHandle(
+		vk.smaa.ral_input_descriptor );
+	vk.smaa.area_descriptor = Ral_GetBindGroupHandle(
+		vk.smaa.ral_area_descriptor );
+	vk.smaa.search_descriptor = Ral_GetBindGroupHandle(
+		vk.smaa.ral_search_descriptor );
+	return qtrue;
+
+fail:
+	vk_ral_release_smaa_sampler_cohorts();
+	return qfalse;
 }
 
 
@@ -4035,42 +4678,54 @@ void vk_update_attachment_descriptors( void ) {
 		sd.max_lod_1_0 = qtrue;
 		sd.noAnisotropy = qtrue;
 
-		info.sampler = vk_find_sampler( &sd );
-		info.imageView = vk.color_image_view;
-		info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		memset( &info, 0, sizeof( info ) );
+		memset( &desc, 0, sizeof( desc ) );
 		desc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		desc.dstSet = vk.color_descriptor;
 		desc.dstBinding = 0;
 		desc.dstArrayElement = 0;
 		desc.descriptorCount = 1;
-		desc.pNext = NULL;
 		desc.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		desc.pImageInfo = &info;
-		desc.pBufferInfo = NULL;
-		desc.pTexelBufferView = NULL;
 
-		qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
+		if ( vk.ral_color_image
+				&& !vk_ral_refresh_attachment_sampler_group(
+					vk.ral_color_image, &vk.ral_color_view,
+					&vk.ral_color_descriptor,
+					&sd, "wired-color-bg" ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to refresh color RAL sampler cohort" );
+		if ( vk.ral_color_descriptor )
+			vk.color_descriptor = Ral_GetBindGroupHandle( vk.ral_color_descriptor );
 
 		// tonemap output sampler used by gamma + capture
 		// passes downstream.
-		if ( vk.tonemapped_image_view != VK_NULL_HANDLE )
-		{
-			info.imageView = vk.tonemapped_image_view;
-			desc.dstSet = vk.tonemapped_descriptor;
-			qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
-		}
+		if ( vk.ral_tonemapped_image
+				&& !vk_ral_refresh_attachment_sampler_group(
+					vk.ral_tonemapped_image, &vk.ral_tonemapped_view,
+					&vk.ral_tonemapped_descriptor,
+					&sd, "wired-tonemapped-bg" ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to refresh tonemapped RAL sampler cohort" );
+		if ( vk.ral_tonemapped_descriptor )
+			vk.tonemapped_descriptor = Ral_GetBindGroupHandle(
+				vk.ral_tonemapped_descriptor );
 
 		// screenmap
 		sd.gl_mag_filter = sd.gl_min_filter = GL_LINEAR;
 		sd.max_lod_1_0 = qfalse;
 		sd.noAnisotropy = qtrue;
 
-		info.sampler = vk_find_sampler( &sd );
-
-		info.imageView = vk.screenMap.color_image_view;
-		desc.dstSet = vk.screenMap.color_descriptor;
-
-		qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
+		if ( vk.screenMap.ral_color_image
+				&& !vk_ral_refresh_attachment_sampler_group(
+					vk.screenMap.ral_color_image,
+					&vk.screenMap.ral_color_view,
+					&vk.screenMap.ral_color_descriptor,
+					&sd, "wired-screenmap-color-bg" ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to refresh screenmap RAL sampler cohort" );
+		if ( vk.screenMap.ral_color_descriptor )
+			vk.screenMap.color_descriptor = Ral_GetBindGroupHandle(
+				vk.screenMap.ral_color_descriptor );
 
 		// Relocate the screenmap onto the RAL bindless 2D table at
 		// WIRED_BINDLESS_SCREENMAP_SLOT and capture its sampler dedup slot
@@ -4087,34 +4742,27 @@ void vk_update_attachment_descriptors( void ) {
 			uint32_t i;
 			for ( i = 0; i < ARRAY_LEN( vk.bloom_image_descriptor ); i++ )
 			{
-				info.imageView = vk.bloom_image_view[i];
-				desc.dstSet = vk.bloom_image_descriptor[i];
-
-				qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
+				if ( vk.ral_bloom_image[i]
+						&& !vk_ral_refresh_attachment_sampler_group(
+							vk.ral_bloom_image[i],
+							&vk.ral_bloom_image_view[i],
+							&vk.ral_bloom_image_descriptor[i],
+							&sd, va( "wired-bloom-img-bg-%u", i ) ) )
+					ri.Terminate( TERM_UNRECOVERABLE,
+						"Vulkan: failed to refresh bloom RAL sampler cohort %u", i );
+				if ( vk.ral_bloom_image_descriptor[i] )
+					vk.bloom_image_descriptor[i] = Ral_GetBindGroupHandle(
+						vk.ral_bloom_image_descriptor[i] );
 			}
 		}
 
-		// depth fade copy image — the set-1 descriptor consumed by the SSAO/sunrays
-		// tonemap variants (unchanged shared-snapshot path).
+		// Depth-fade copy image. Re-adoption publishes both the bindless role and
+		// the set-1 post-process sampler group directly through RAL.
 		if ( vk.sceneDepth.active && vk.sceneDepth.image != VK_NULL_HANDLE )
 		{
-			info.sampler = vk.sceneDepth.sampler;
-			info.imageView = vk.sceneDepth.view;
-			info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			desc.dstSet = vk.sceneDepth.descriptor;
-			desc.dstBinding = 0;
-			desc.dstArrayElement = 0;
-			desc.descriptorCount = 1;
-
-			qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
-
-			// ADDITIVE: also register the depth copy into the RAL bindless table at
-			// the reserved depth-fade slot so the soft-particle dfade fragment can
-			// sample it via role 4. Re-runs on every attachment recreate (this
-			// function covers cold boot / FBO rebuild / vid_restart / pendingRebuild),
-			// re-adopting the live view so the slot never dangles. Disjoint from the
-			// set-1 write above — SSAO/sunrays sampling is untouched.
-			vk_ral_register_depthfade_view();
+			if ( !vk_ral_register_depthfade_view() )
+				ri.Terminate( TERM_UNRECOVERABLE,
+					"Vulkan: failed to refresh scene-depth RAL sampler cohort" );
 		}
 		else
 		{
@@ -4129,199 +4777,23 @@ void vk_update_attachment_descriptors( void ) {
 			}
 		}
 
-		// Scene-depth into the decal render set (binding 3) is NOT written here:
-		// vk_init_descriptors resets the descriptor pool and reallocates the decal
-		// sets AFTER this function runs (its vk_update_attachment_descriptors call
-		// precedes the decal-set realloc), so the decal handles are stale at this
-		// point. The binding-3 write therefore lives at every site that (re)allocates
-		// the decal sets — vk_init_decal (cold boot) and the vk_init_descriptors
-		// realloc loop (pool-reset / vid_restart) — where the depth view is already
-		// live (attachments are created before both). The depth resource is the same
-		// vk.sceneDepth the tonemap write above uses (no second copy).
+		// The decal render groups are not patched here. They are immutable direct
+		// RAL arena children and are rebuilt as a complete four-binding cohort by
+		// vk_init_decal_textures after attachment adoption. Binding 3 borrows this
+		// same vk.sceneDepth view/sampler pair (no second depth copy).
 
-#if FEAT_SHADOW_MAPPING
-		// shadow map depth image
-		if ( vk.shadowMap.active && vk.shadowMap.image != VK_NULL_HANDLE )
-		{
-			info.sampler = vk.shadowMap.sampler;
-			info.imageView = vk.shadowMap.view;
-			info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			desc.dstSet = vk.shadowMap.descriptor;
-			desc.dstBinding = 0;
-			desc.dstArrayElement = 0;
-			desc.descriptorCount = 1;
-			qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
+		// The renderer-global shadow/IBL/GTAO cohort is one generation-bound RAL
+		// group. Its native descriptor is a compatibility mirror only; sparse IBL
+		// availability and the white GTAO fallback are authored by the helper.
+		if ( !vk_ral_refresh_engine_resources_bindgroup() )
+			R_LOG( rch_ral, SEV_WARN,
+				"engine-resources: attachment refresh declined\n" );
 
-			// Also write the shadow-map view+sampler into the
-			// engine-resources set's binding 0. The view is a
-			// VK_IMAGE_VIEW_TYPE_2D_ARRAY (vk.c:10681), matching the
-			// sampler2DArray declaration in light_frag.tmpl's USE_SHADOWMAP
-			// variants — the exact descriptor-type / dimension match the
-			// dlight-shadowmap-rebind investigation flagged the legacy
-			// NULL-gap whiteImage fallback for missing. This replaces the
-			// per-draw vk_update_descriptor(3, vk.shadowMap.descriptor)
-			// bridge in VK_LightingPass; the engine-resources set is bound
-			// once per draw via the fold pattern.
-			if ( vk.engineResources.descriptor != VK_NULL_HANDLE )
-			{
-				VkDescriptorImageInfo erInfo;
-				VkWriteDescriptorSet  erWrite;
-				memset( &erInfo, 0, sizeof( erInfo ) );
-				erInfo.sampler     = vk.shadowMap.sampler;
-				erInfo.imageView   = vk.shadowMap.view;
-				erInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				memset( &erWrite, 0, sizeof( erWrite ) );
-				erWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				erWrite.dstSet          = vk.engineResources.descriptor;
-				erWrite.dstBinding      = WIRED_ENGINE_RES_BIND_SHADOWMAP;
-				erWrite.dstArrayElement = 0;
-				erWrite.descriptorCount = 1;
-				erWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				erWrite.pImageInfo      = &erInfo;
-				qvkUpdateDescriptorSets( vk.device, 1, &erWrite, 0, NULL );
-			}
-		}
-#endif
-
-		// IBL global scene resources → the engine-resources set's bindings 1/2/3
-		// (BRDF LUT 2D, irradiance cube, radiance cube). Written here once the RAL
-		// images/views exist (created in the adopt sweep's vk_ibl_probes_init +
-		// vk_brdf_lut_init, both of which run before this descriptor update). NOT
-		// gated on shadowMap — IBL is independent. Each is COMBINED_IMAGE_SAMPLER on
-		// a shared linear-clamp sampler; the layout is SHADER_READ_ONLY_OPTIMAL (the
-		// compute fills then COMPUTE→GRAPHICS-barriers them). DECLARED + written but
-		// not yet sampled by any shader (the IBL term lands later) — inert. Each
-		// write is guarded on its view existing so a probe-disabled run is safe.
-		if ( vk.engineResources.descriptor != VK_NULL_HANDLE )
-		{
-			VkDescriptorImageInfo iblInfo;
-			VkWriteDescriptorSet  iblWrite;
-			VkImageView           v;
-			VkSampler             iblSampler = (VkSampler)Ral_GetSamplerHandle( vk.ral_ibl_sampler );
-
-			memset( &iblInfo, 0, sizeof( iblInfo ) );
-			iblInfo.sampler     = iblSampler;   // IBL's OWN LINEAR + CLAMP + LINEAR-mipmap sampler
-			iblInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			memset( &iblWrite, 0, sizeof( iblWrite ) );
-			iblWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			iblWrite.dstSet          = vk.engineResources.descriptor;
-			iblWrite.dstArrayElement = 0;
-			iblWrite.descriptorCount = 1;
-			iblWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			iblWrite.pImageInfo      = &iblInfo;
-
-			// The IBL bindings use IBL's dedicated sampler (created with the probe
-			// images in vk_brdf_lut_init), NOT a borrowed one — so the binding is
-			// written whenever the probe images exist, with SMAA / FBO on OR off. The
-			// write gates only on its own image view; a missing sampler with a present
-			// view is a real lifecycle bug, so it is logged loudly rather than skipped
-			// silently (the prior borrowed-SMAA-sampler gate failed exactly that way).
-			if ( iblSampler == VK_NULL_HANDLE
-			  && ( vk.ral_brdf_lut_view || vk.ral_probe_irradiance_cube_view || vk.ral_probe_radiance_cube_view ) ) {
-				R_LOG( rch_ral, SEV_WARN, "ibl: probe views exist but the IBL sampler is NULL — set-2 bindings 1/2/3 NOT written (IBL will read zero)\n" );
-			}
-
-			// binding 1 — BRDF LUT (2D). Its sampled view is the same view created in
-			// vk_brdf_lut_init (a 2D storage+sampled image).
-			if ( iblSampler != VK_NULL_HANDLE && vk.ral_brdf_lut_view
-			  && ( v = (VkImageView)Ral_GetTextureViewHandle( vk.ral_brdf_lut_view ) ) != VK_NULL_HANDLE ) {
-				iblInfo.imageView  = v;
-				iblWrite.dstBinding = WIRED_ENGINE_RES_BIND_BRDF_LUT;
-				qvkUpdateDescriptorSets( vk.device, 1, &iblWrite, 0, NULL );
-			}
-
-			// binding 2 — irradiance cube (full-cube sampled view).
-			if ( iblSampler != VK_NULL_HANDLE && vk.ral_probe_irradiance_cube_view
-			  && ( v = (VkImageView)Ral_GetTextureViewHandle( vk.ral_probe_irradiance_cube_view ) ) != VK_NULL_HANDLE ) {
-				iblInfo.imageView  = v;
-				iblWrite.dstBinding = WIRED_ENGINE_RES_BIND_IRRADIANCE;
-				qvkUpdateDescriptorSets( vk.device, 1, &iblWrite, 0, NULL );
-			}
-
-			// binding 3 — radiance cube (full-cube sampled view, all mips).
-			if ( iblSampler != VK_NULL_HANDLE && vk.ral_probe_radiance_cube_view
-			  && ( v = (VkImageView)Ral_GetTextureViewHandle( vk.ral_probe_radiance_cube_view ) ) != VK_NULL_HANDLE ) {
-				iblInfo.imageView  = v;
-				iblWrite.dstBinding = WIRED_ENGINE_RES_BIND_RADIANCE;
-				qvkUpdateDescriptorSets( vk.device, 1, &iblWrite, 0, NULL );
-			}
-
-			// binding 4 — screen-space GTAO visibility (R16F). gen_frag samples this to
-			// modulate the additive IBL-specular indirect term. Always bound with a
-			// valid view so the shader never reads an unbound descriptor: the denoised
-			// GTAO view + its sampler when GTAO resources exist, otherwise tr.whiteImage
-			// (1.0 = full visibility = no occlusion) on the IBL sampler. The fallback
-			// covers cold start, r_ssao 0, and the no-SSAO build.
-			{
-				VkDescriptorImageInfo gtaoInfo;
-				VkWriteDescriptorSet  gtaoWrite;
-				VkSampler             gtaoSampler;
-				VkImageView           gtaoView;
-
-				if ( vk.ral_gtao_denoised_view && vk.ral_gtao_sampler
-				  && ( gtaoView = (VkImageView)Ral_GetTextureViewHandle( vk.ral_gtao_denoised_view ) ) != VK_NULL_HANDLE ) {
-					gtaoSampler = (VkSampler)Ral_GetSamplerHandle( vk.ral_gtao_sampler );
-				} else {
-					gtaoView    = ( tr.whiteImage ) ? tr.whiteImage->view : VK_NULL_HANDLE;
-					gtaoSampler = iblSampler;   // any valid linear sampler; the fallback view is a 1x1 white texel
-				}
-
-				if ( gtaoView != VK_NULL_HANDLE && gtaoSampler != VK_NULL_HANDLE ) {
-					memset( &gtaoInfo, 0, sizeof( gtaoInfo ) );
-					gtaoInfo.sampler     = gtaoSampler;
-					gtaoInfo.imageView   = gtaoView;
-					gtaoInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-					memset( &gtaoWrite, 0, sizeof( gtaoWrite ) );
-					gtaoWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-					gtaoWrite.dstSet          = vk.engineResources.descriptor;
-					gtaoWrite.dstBinding      = WIRED_ENGINE_RES_BIND_GTAO;
-					gtaoWrite.dstArrayElement = 0;
-					gtaoWrite.descriptorCount = 1;
-					gtaoWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-					gtaoWrite.pImageInfo      = &gtaoInfo;
-					qvkUpdateDescriptorSets( vk.device, 1, &gtaoWrite, 0, NULL );
-				}
-			}
-		}
-
-		// SMAA descriptors
-		if ( vk.smaa.active && vk.smaa.edges_image != VK_NULL_HANDLE )
-		{
-			info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			desc.dstBinding = 0;
-			desc.dstArrayElement = 0;
-			desc.descriptorCount = 1;
-
-			// edges: point sampler
-			info.sampler = vk.smaa.point_sampler;
-			info.imageView = vk.smaa.edges_view;
-			desc.dstSet = vk.smaa.edges_descriptor;
-			qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
-
-			// blend weights: linear sampler
-			info.sampler = vk.smaa.linear_sampler;
-			info.imageView = vk.smaa.blend_view;
-			desc.dstSet = vk.smaa.blend_descriptor;
-			qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
-
-			// input (color copy): linear sampler
-			info.sampler = vk.smaa.linear_sampler;
-			info.imageView = vk.smaa.input_view;
-			desc.dstSet = vk.smaa.input_descriptor;
-			qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
-
-			// area LUT: linear sampler
-			info.sampler = vk.smaa.linear_sampler;
-			info.imageView = vk.smaa.area_view;
-			desc.dstSet = vk.smaa.area_descriptor;
-			qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
-
-			// search LUT: point sampler
-			info.sampler = vk.smaa.point_sampler;
-			info.imageView = vk.smaa.search_view;
-			desc.dstSet = vk.smaa.search_descriptor;
-			qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
-		}
+		// SMAA's five combined texture/sampler groups are direct RAL arena
+		// children. The VkDescriptorSet fields are compatibility mirrors only.
+		if ( vk.smaa.active && !vk_ral_refresh_smaa_sampler_cohorts() )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create SMAA RAL sampler cohorts" );
 	}
 }
 
@@ -4336,49 +4808,25 @@ void vk_init_descriptors( void )
 	// allocated from the RAL backend's persistent descriptor pool (never reset
 	// on map-load), so the handle survives the renderer arena reset here.
 
-	// A renderer-pool reset invalidates every image_t sampler descriptor too.
-	// Rebuild them before any draw can observe the old handle, then publish a
-	// fresh non-owning RAL wrapper. On cold boot R_InitImages has not run yet and
-	// tr.numImages is zero, so this loop is a no-op.
+	// Rebuild every direct per-image RAL group from the newly published arena.
+	// On cold boot R_InitImages has not run yet and tr.numImages is zero.
 	for ( i = 0; i < (uint32_t)tr.numImages; i++ ) {
 		image_t *image = tr.images[i];
 		if ( !image )
 			continue;
 		vk_ral_release_image_descriptor( image );
-		image->descriptor = VK_NULL_HANDLE;
-		{
-			VkDescriptorSetAllocateInfo imageAlloc;
-			imageAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			imageAlloc.pNext = NULL;
-			imageAlloc.descriptorPool = vk.descriptor_pool;
-			imageAlloc.descriptorSetCount = 1;
-			imageAlloc.pSetLayouts = &vk.set_layout_sampler;
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &imageAlloc, &image->descriptor ) );
-		}
 		vk_update_descriptor_set( image,
 			(image->flags & IMGFLAG_MIPMAP) ? qtrue : qfalse );
-		SET_OBJECT_NAME( image->descriptor, image->imgName,
-			RAL_VULKAN_OBJECT_ROLE_DESCRIPTOR_SET );
-		if ( !vk_ral_adopt_image_descriptor( image ) )
-			R_LOG( rch_ral, SEV_WARN,
-				"image sampler bind-group adoption failed after pool reset: %s\n",
-				image->imgName );
 	}
 
-	// allocated and update descriptor set
+	// Recreate the set-0 dynamic uniform groups from the current exact arena
+	// generation. The raw field is only the mirror used by the transitional
+	// descriptor-slot collector.
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
 	{
-		alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		alloc.pNext = NULL;
-		alloc.descriptorPool = vk.descriptor_pool;
-		alloc.descriptorSetCount = 1;
-		alloc.pSetLayouts = &vk.set_layout_uniform;
-
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.tess[i].uniform_descriptor ) );
-
-		vk_update_uniform_descriptor( vk.tess[ i ].uniform_descriptor, vk.tess[ i ].vertex_buffer );
-
-		SET_OBJECT_NAME( vk.tess[ i ].uniform_descriptor, va( "uniform descriptor %i", i ), RAL_VULKAN_OBJECT_ROLE_DESCRIPTOR_SET );
+		if ( !vk_ral_refresh_tess_uniform_bindgroup( i ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create tess uniform RAL bind group %u", i );
 	}
 
 	// MSDF per-draw UBO ring. One host-coherent buffer per in-flight frame holding
@@ -4386,12 +4834,9 @@ void vk_init_descriptors( void )
 	// to vk.uniform_alignment) and binds set WIRED_MSDF_SET with that dynamic
 	// offset. Allocated unconditionally (text renders regardless of FBO/HDR state —
 	// unlike the FBO-gated exposure UBO below). The buffers are not pool-owned, so
-	// they survive the descriptor-pool reset that drives this re-alloc; the DYNAMIC
-	// descriptor SETS are re-allocated each pass. Separate from the set-0 main ring.
+	// they survive the arena reset; their DYNAMIC bind groups are recreated from
+	// the new generation. Separate from the set-0 main ring.
 	{
-		VkDescriptorSetAllocateInfo msdfAlloc;
-		VkWriteDescriptorSet        msdfWrite;
-		VkDescriptorBufferInfo      msdfBufInfo;
 		// Per-draw item stride PAD'd to the dynamic-offset alignment; the std140
 		// block is 144 B (132 rounded to a vec4 multiple).
 		const VkDeviceSize          msdfItem = PAD( (uint32_t)sizeof( vk_msdf_ubo_t ), vk.uniform_alignment );
@@ -4399,6 +4844,8 @@ void vk_init_descriptors( void )
 		// strings); 4096 items gives wide headroom. On overflow the per-draw writer
 		// drops the bind (leaves the previous item) — see vk_update_msdf_outline.
 		const VkDeviceSize          msdfBytes = msdfItem * 4096u;
+		ralBindingValue_t           msdfValue;
+		ralBindGroupCreateInfo_t    msdfCreate;
 
 		vk.msdf.size = msdfBytes;
 
@@ -4428,32 +4875,28 @@ void vk_init_descriptors( void )
 				qvkBindBufferMemory( vk.device, vk.msdf.buffer[i], vk.msdf.memory[i], 0 );
 			}
 
-			memset( &msdfAlloc, 0, sizeof( msdfAlloc ) );
-			msdfAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			msdfAlloc.descriptorPool     = vk.descriptor_pool;
-			msdfAlloc.descriptorSetCount = 1;
-			msdfAlloc.pSetLayouts        = &vk.set_layout_msdf;
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &msdfAlloc, &vk.msdf.descriptor[i] ) );
-
-			// DYNAMIC descriptor: static base offset 0, range = ONE item. The
-			// per-draw dynamic offset selects the item; range must cover a single
-			// item so dynOffset + range stays in bounds (VUID-...-pDynamicOffsets).
-			memset( &msdfBufInfo, 0, sizeof( msdfBufInfo ) );
-			msdfBufInfo.buffer = vk.msdf.buffer[i];
-			msdfBufInfo.offset = 0;
-			msdfBufInfo.range  = msdfItem;
-
-			memset( &msdfWrite, 0, sizeof( msdfWrite ) );
-			msdfWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			msdfWrite.dstSet          = vk.msdf.descriptor[i];
-			msdfWrite.dstBinding      = 0;
-			msdfWrite.dstArrayElement = 0;
-			msdfWrite.descriptorCount = 1;
-			msdfWrite.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-			msdfWrite.pBufferInfo     = &msdfBufInfo;
-			qvkUpdateDescriptorSets( vk.device, 1, &msdfWrite, 0, NULL );
-
-			SET_OBJECT_NAME( vk.msdf.descriptor[i], va( "msdf per-draw UBO set %u", i ), RAL_VULKAN_OBJECT_ROLE_DESCRIPTOR_SET );
+			vk.msdf.ral_buffer[i] = Ral_AdoptBuffer( vk_ral_get_backend(),
+				(void *)vk.msdf.buffer[i], (size_t)vk.msdf.size,
+				"wired-msdf-ubo" );
+			memset( &msdfValue, 0, sizeof( msdfValue ) );
+			msdfValue.binding = 0u;
+			msdfValue.type = RAL_BIND_UNIFORM_BUFFER;
+			msdfValue.buffer = vk.msdf.ral_buffer[i];
+			msdfValue.bufferRange = msdfItem;
+			memset( &msdfCreate, 0, sizeof( msdfCreate ) );
+			msdfCreate.layout = vk.ral_bgl_msdf;
+			msdfCreate.values = &msdfValue;
+			msdfCreate.numValues = 1u;
+			msdfCreate.debugName = va( "msdf per-draw UBO set %u", i );
+			msdfCreate.arena = vk.ral_descriptor_arena;
+			msdfCreate.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+			vk.msdf.ral_descriptor[i] = Ral_CreateBindGroup(
+				vk_ral_get_backend(), &msdfCreate );
+			if ( !vk.msdf.ral_buffer[i] || !vk.msdf.ral_descriptor[i] )
+				ri.Terminate( TERM_UNRECOVERABLE,
+					"Vulkan: failed to create MSDF RAL bind group %u", i );
+			vk.msdf.descriptor[i] = (VkDescriptorSet)Ral_GetBindGroupHandle(
+				vk.msdf.ral_descriptor[i] );
 		}
 	}
 
@@ -4533,10 +4976,9 @@ void vk_init_descriptors( void )
 	// Allocated unconditionally (the layout exists unconditionally; the buffer is
 	// tiny). Buffers survive the pool reset; descriptor SETS re-allocated each pass.
 	{
-		VkDescriptorSetAllocateInfo rtAlloc;
-		VkWriteDescriptorSet        rtWrite;
-		VkDescriptorBufferInfo      rtBufInfo;
-		const VkDeviceSize          rtBytes = 16; // vec4
+		ralBindingValue_t        rtValue;
+		ralBindGroupCreateInfo_t rtCreate;
+		const VkDeviceSize       rtBytes = 16; // vec4
 
 		for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
 		{
@@ -4564,31 +5006,31 @@ void vk_init_descriptors( void )
 				qvkBindBufferMemory( vk.device, vk.smaaRt.buffer[i], vk.smaaRt.memory[i], 0 );
 			}
 
-			memset( &rtAlloc, 0, sizeof( rtAlloc ) );
-			rtAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			rtAlloc.descriptorPool     = vk.descriptor_pool;
-			rtAlloc.descriptorSetCount = 1;
-			rtAlloc.pSetLayouts        = &vk.set_layout_smaa_rtmetrics;
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &rtAlloc, &vk.smaaRt.descriptor[i] ) );
-
-			memset( &rtBufInfo, 0, sizeof( rtBufInfo ) );
-			rtBufInfo.buffer = vk.smaaRt.buffer[i];
-			rtBufInfo.offset = 0;
-			rtBufInfo.range  = rtBytes;
-
-			memset( &rtWrite, 0, sizeof( rtWrite ) );
-			rtWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			rtWrite.dstSet          = vk.smaaRt.descriptor[i];
-			rtWrite.dstBinding      = 0;
-			rtWrite.dstArrayElement = 0;
-			rtWrite.descriptorCount = 1;
-			rtWrite.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			rtWrite.pBufferInfo     = &rtBufInfo;
-			qvkUpdateDescriptorSets( vk.device, 1, &rtWrite, 0, NULL );
-
-			SET_OBJECT_NAME( vk.smaaRt.descriptor[i], va( "smaa rtMetrics UBO set %u", i ), RAL_VULKAN_OBJECT_ROLE_DESCRIPTOR_SET );
+			vk.smaaRt.ral_buffer[i] = Ral_AdoptBuffer( vk_ral_get_backend(),
+				(void *)vk.smaaRt.buffer[i], (size_t)rtBytes,
+				"wired-smaa-rtmetrics-ubo" );
+			memset( &rtValue, 0, sizeof( rtValue ) );
+			rtValue.binding = 0u;
+			rtValue.type = RAL_BIND_UNIFORM_BUFFER;
+			rtValue.buffer = vk.smaaRt.ral_buffer[i];
+			rtValue.bufferRange = rtBytes;
+			memset( &rtCreate, 0, sizeof( rtCreate ) );
+			rtCreate.layout = vk.ral_bgl_smaa_rtmetrics;
+			rtCreate.values = &rtValue;
+			rtCreate.numValues = 1u;
+			rtCreate.debugName = va( "smaa rtMetrics UBO set %u", i );
+			rtCreate.arena = vk.ral_descriptor_arena;
+			rtCreate.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+			vk.smaaRt.ral_descriptor[i] = Ral_CreateBindGroup(
+				vk_ral_get_backend(), &rtCreate );
+			if ( !vk.smaaRt.ral_buffer[i] || !vk.smaaRt.ral_descriptor[i] )
+				ri.Terminate( TERM_UNRECOVERABLE,
+					"Vulkan: failed to create SMAA rtMetrics RAL bind group %u", i );
+			vk.smaaRt.descriptor[i] = (VkDescriptorSet)Ral_GetBindGroupHandle(
+				vk.smaaRt.ral_descriptor[i] );
 		}
 	}
+	// End arena-owned SMAA rtMetrics cohort.
 
 	if ( vk.color_image_view )
 	{
@@ -4598,19 +5040,9 @@ void vk_init_descriptors( void )
 		alloc.descriptorSetCount = 1;
 		alloc.pSetLayouts = &vk.set_layout_sampler;
 
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.color_descriptor ) );
-
-		// LDR-linear tonemap output, sampled by the
-		// gamma + capture passes downstream.
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.tonemapped_descriptor ) );
-
-		if ( r_bloom->integer )
-		{
-			for ( i = 0; i < ARRAY_LEN( vk.bloom_image_descriptor ); i++ )
-			{
-				VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.bloom_image_descriptor[i] ) );
-			}
-		}
+		// Color, tonemapped, screenmap and bloom sampler groups are created
+		// directly from the current RAL arena after their adopted textures are
+		// available. Their VkDescriptorSet fields remain native mirrors only.
 
 		// Per-frame scene-exposure UBO (set 2 of every post-process layout).
 		// The buffers are host-coherent and created once (they are not pool-
@@ -4620,9 +5052,8 @@ void vk_init_descriptors( void )
 		// here (only exposure_bias today); the CPU writes it each frame in
 		// vk_tonemap.
 		{
-			VkDescriptorSetAllocateInfo expAlloc;
-			VkWriteDescriptorSet        expWrite;
-			VkDescriptorBufferInfo      expBufInfo;
+			ralBindingValue_t           expValue;
+			ralBindGroupCreateInfo_t    expCreate;
 			// std140-rounded ExposureBlock size (vec4 multiple covering the
 			// 9 floats + 1 int + the 4 folded-in sunray floats + the 2 SSAO
 			// near/far floats = 16 fields = 64 B, already a vec4 multiple).
@@ -4668,29 +5099,29 @@ void vk_init_descriptors( void )
 					((vk_exposure_block_t *)vk.exposure.ptr[i])->brightness    = 1.0f;
 				}
 
-				memset( &expAlloc, 0, sizeof( expAlloc ) );
-				expAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-				expAlloc.descriptorPool     = vk.descriptor_pool;
-				expAlloc.descriptorSetCount = 1;
-				expAlloc.pSetLayouts        = &vk.exposureSetLayout;
-				VK_CHECK( qvkAllocateDescriptorSets( vk.device, &expAlloc, &vk.exposure.descriptor[i] ) );
-
-				memset( &expBufInfo, 0, sizeof( expBufInfo ) );
-				expBufInfo.buffer = vk.exposure.buffer[i];
-				expBufInfo.offset = 0;
-				expBufInfo.range  = expBytes;
-
-				memset( &expWrite, 0, sizeof( expWrite ) );
-				expWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				expWrite.dstSet          = vk.exposure.descriptor[i];
-				expWrite.dstBinding      = 0;
-				expWrite.dstArrayElement = 0;
-				expWrite.descriptorCount = 1;
-				expWrite.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-				expWrite.pBufferInfo     = &expBufInfo;
-				qvkUpdateDescriptorSets( vk.device, 1, &expWrite, 0, NULL );
-
-				SET_OBJECT_NAME( vk.exposure.descriptor[i], va( "scene-exposure set %u", i ), RAL_VULKAN_OBJECT_ROLE_DESCRIPTOR_SET );
+				vk.exposure.ral_buffer[i] = Ral_AdoptBuffer( vk_ral_get_backend(),
+					(void *)vk.exposure.buffer[i], (size_t)expBytes,
+					"wired-exposure-ubo" );
+				memset( &expValue, 0, sizeof( expValue ) );
+				expValue.binding = 0u;
+				expValue.type = RAL_BIND_UNIFORM_BUFFER;
+				expValue.buffer = vk.exposure.ral_buffer[i];
+				expValue.bufferRange = expBytes;
+				memset( &expCreate, 0, sizeof( expCreate ) );
+				expCreate.layout = vk.ral_bgl_exposure;
+				expCreate.values = &expValue;
+				expCreate.numValues = 1u;
+				expCreate.debugName = va( "scene-exposure set %u", i );
+				expCreate.arena = vk.ral_descriptor_arena;
+				expCreate.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+				vk.exposure.ral_descriptor[i] = Ral_CreateBindGroup(
+					vk_ral_get_backend(), &expCreate );
+				if ( !vk.exposure.ral_buffer[i]
+				  || !vk.exposure.ral_descriptor[i] )
+					ri.Terminate( TERM_UNRECOVERABLE,
+						"Vulkan: failed to create exposure RAL bind group %u", i );
+				vk.exposure.descriptor[i] = (VkDescriptorSet)Ral_GetBindGroupHandle(
+					vk.exposure.ral_descriptor[i] );
 			}
 		}
 
@@ -4702,9 +5133,8 @@ void vk_init_descriptors( void )
 		// re-alloc); the descriptor SETS are re-allocated every pass. Cloned from the
 		// exposure UBO block above but UNIFORM-only (no compute writer) and 32 bytes.
 		{
-			VkDescriptorSetAllocateInfo mbgAlloc;
-			VkWriteDescriptorSet        mbgWrite;
-			VkDescriptorBufferInfo      mbgBufInfo;
+			ralBindingValue_t           mbgValue;
+			ralBindGroupCreateInfo_t    mbgCreate;
 			const VkDeviceSize          mbgBytes = sizeof( vk_menubg_block_t );  // 32 B
 
 			for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
@@ -4737,345 +5167,65 @@ void vk_init_descriptors( void )
 					memset( vk.menubg.ptr[i], 0, (size_t)mbgBytes );
 				}
 
-				memset( &mbgAlloc, 0, sizeof( mbgAlloc ) );
-				mbgAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-				mbgAlloc.descriptorPool     = vk.descriptor_pool;
-				mbgAlloc.descriptorSetCount = 1;
-				mbgAlloc.pSetLayouts        = &vk.exposureSetLayout;
-				VK_CHECK( qvkAllocateDescriptorSets( vk.device, &mbgAlloc, &vk.menubg.descriptor[i] ) );
-
-				memset( &mbgBufInfo, 0, sizeof( mbgBufInfo ) );
-				mbgBufInfo.buffer = vk.menubg.buffer[i];
-				mbgBufInfo.offset = 0;
-				mbgBufInfo.range  = mbgBytes;
-
-				memset( &mbgWrite, 0, sizeof( mbgWrite ) );
-				mbgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				mbgWrite.dstSet          = vk.menubg.descriptor[i];
-				mbgWrite.dstBinding      = 0;
-				mbgWrite.dstArrayElement = 0;
-				mbgWrite.descriptorCount = 1;
-				mbgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-				mbgWrite.pBufferInfo     = &mbgBufInfo;
-				qvkUpdateDescriptorSets( vk.device, 1, &mbgWrite, 0, NULL );
-
-				SET_OBJECT_NAME( vk.menubg.descriptor[i], va( "menubg backdrop set %u", i ), RAL_VULKAN_OBJECT_ROLE_DESCRIPTOR_SET );
+				vk.menubg.ral_buffer[i] = Ral_AdoptBuffer( vk_ral_get_backend(),
+					(void *)vk.menubg.buffer[i], (size_t)mbgBytes,
+					"wired-menubg-ubo" );
+				memset( &mbgValue, 0, sizeof( mbgValue ) );
+				mbgValue.binding = 0u;
+				mbgValue.type = RAL_BIND_UNIFORM_BUFFER;
+				mbgValue.buffer = vk.menubg.ral_buffer[i];
+				mbgValue.bufferRange = mbgBytes;
+				memset( &mbgCreate, 0, sizeof( mbgCreate ) );
+				mbgCreate.layout = vk.ral_bgl_exposure;
+				mbgCreate.values = &mbgValue;
+				mbgCreate.numValues = 1u;
+				mbgCreate.debugName = va( "menubg backdrop set %u", i );
+				mbgCreate.arena = vk.ral_descriptor_arena;
+				mbgCreate.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+				vk.menubg.ral_descriptor[i] = Ral_CreateBindGroup(
+					vk_ral_get_backend(), &mbgCreate );
+				if ( !vk.menubg.ral_buffer[i]
+				  || !vk.menubg.ral_descriptor[i] )
+					ri.Terminate( TERM_UNRECOVERABLE,
+						"Vulkan: failed to create menubg RAL bind group %u", i );
+				vk.menubg.descriptor[i] = (VkDescriptorSet)Ral_GetBindGroupHandle(
+					vk.menubg.ral_descriptor[i] );
 			}
 		}
+		// End arena-owned per-frame non-dynamic UBO cohorts.
 
-		alloc.descriptorSetCount = 1;
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.screenMap.color_descriptor ) ); // screenmap
-
-		// Engine-resources set 8. Allocated unconditionally
-		// alongside the screenmap COMBINED_IMAGE_SAMPLER set above; the
-		// shadow-map binding inside it is written conditionally by
-		// vk_update_attachment_descriptors when vk.shadowMap is active,
-		// matching the lifecycle of the legacy vk.shadowMap.descriptor.
-		// Same pool as the other COMBINED_IMAGE_SAMPLER sets — the pool
-		// reservation in vk_initialize covers it (one descriptor set, two
-		// COMBINED_IMAGE_SAMPLER descriptors).
-		{
-			VkDescriptorSetAllocateInfo erAlloc;
-			memset( &erAlloc, 0, sizeof( erAlloc ) );
-			erAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			erAlloc.descriptorPool     = vk.descriptor_pool;
-			erAlloc.descriptorSetCount = 1;
-			erAlloc.pSetLayouts        = &vk.set_layout_engine_resources;
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &erAlloc, &vk.engineResources.descriptor ) );
-			SET_OBJECT_NAME( vk.engineResources.descriptor, "engine-resources set (shadowMap)", RAL_VULKAN_OBJECT_ROLE_DESCRIPTOR_SET );
-		}
-
-		// Reserve the scene-depth sampler set whenever the FBO exists, even when
-		// the consumer union is initially off.  A live 0->1 transition rebinds
-		// this persistent set after creating the depth-copy image; allocating it
-		// only under .active made the first isolated toggle update a NULL set.
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.sceneDepth.descriptor ) );
-
-#if FEAT_SHADOW_MAPPING
-		// vk.shadowMap.descriptor — the single alloc site for the shadow sampler
-		// SET (mirrors the SMAA block right below).
-		// Allocated whenever the FBO is on, not just when r_shadows is set,
-		// so a cold r_shadows 0 boot followed by a live 0->1 toggle already
-		// has a valid dstSet waiting (the +1 /* vk.shadowMap.descriptor */ pool
-		// reservation in vk_initialize covers it). The SET persists across
-		// vk_shadow_release_resources / vk_shadow_alloc_resources cycles (the FBO
-		// rebuild / r_shadows toggle don't re-run this function and don't
-		// reset the pool); vk_update_attachment_descriptors rebinds it to the
-		// fresh vk.shadowMap.view, and the dispatch gate (!vk.shadowMap.active in
-		// vk_render_shadow_map / the lit pass) keeps anything from reading it when
-		// the shadow image is gone. The pool itself is reset by vk_release_
-		// resources() (RE_Shutdown path, via the RAL arena reset,
-		// so a full reset is the only reclaim path); on REF_LEVEL_ONLY restarts
-		// vk_initialize is skipped, so this re-alloc is the post-reset
-		// repopulation, which is why it's unconditional under `if (vk.fboActive)`.
-		if ( vk.fboActive ) {
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.shadowMap.descriptor ) );
-		}
-#endif
-
-		// Allocate SMAA descriptor sets whenever
-		// the FBO is on, not just when SMAA is currently active. The pool
-		// slots are reserved up-front (see pool sizing in vk_initialize),
-		// and live r_smaa toggling re-binds these descriptors to fresh
-		// image views in vk_update_attachment_descriptors after each
-		// alloc cycle. Allocating eagerly avoids a "first 0->N toggle
-		// has no descriptors" startup race.
-		if ( vk.fboActive ) {
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.smaa.edges_descriptor ) );
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.smaa.blend_descriptor ) );
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.smaa.input_descriptor ) );
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.smaa.area_descriptor ) );
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.smaa.search_descriptor ) );
-		}
+		// Engine-resources set 2 is a direct child of the current RAL arena.
+		// At this early point a sparse/empty group is valid; the attachment sweep
+		// below republishes it after shadow, IBL and GTAO views become available.
+		if ( !vk_ral_refresh_engine_resources_bindgroup() )
+			R_LOG( rch_ral, SEV_WARN,
+				"engine-resources: initial RAL bind-group refresh declined\n" );
 
 		vk_update_attachment_descriptors();
 	}
 
 #if FEAT_IQM
-	// re-allocate IQM bone UBO descriptors after descriptor pool reset
+	// Recreate the IQM set-0 dynamic UBO groups directly from the current RAL
+	// arena generation. The raw VkDescriptorSet fields are compatibility mirrors,
+	// never independent descriptor-pool owners.
 	if ( vk.iqmGpu.available ) {
-		VkDescriptorSetAllocateInfo boneAlloc;
-		VkDescriptorBufferInfo boneBufDesc;
-		VkWriteDescriptorSet boneWriteDesc;
 		uint32_t j;
-
 		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-			memset( &boneAlloc, 0, sizeof( boneAlloc ) );
-			boneAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			boneAlloc.descriptorPool = vk.descriptor_pool;
-			boneAlloc.descriptorSetCount = 1;
-			boneAlloc.pSetLayouts = &vk.iqmGpu.set_layout_bones;
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &boneAlloc, &vk.iqmGpu.bone_descriptor[j] ) );
-
-			// DYNAMIC descriptor: base offset 0, range = ONE ring item
-			// (the per-draw dynamic offset selects the item).
-			memset( &boneBufDesc, 0, sizeof( boneBufDesc ) );
-			boneBufDesc.buffer = vk.iqmGpu.bone_buffer[j];
-			boneBufDesc.offset = 0;
-			boneBufDesc.range = PAD( (uint32_t)IQM_UBO_TOTAL_SIZE, vk.uniform_alignment );
-
-			memset( &boneWriteDesc, 0, sizeof( boneWriteDesc ) );
-			boneWriteDesc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			boneWriteDesc.dstSet = vk.iqmGpu.bone_descriptor[j];
-			boneWriteDesc.dstBinding = 0;
-			boneWriteDesc.dstArrayElement = 0;
-			boneWriteDesc.descriptorCount = 1;
-			boneWriteDesc.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-			boneWriteDesc.pBufferInfo = &boneBufDesc;
-
-			qvkUpdateDescriptorSets( vk.device, 1, &boneWriteDesc, 0, NULL );
+			if ( !vk_ral_refresh_iqm_bone_bindgroup( j ) )
+				ri.Terminate( TERM_UNRECOVERABLE,
+					"Vulkan: failed to create IQM bone RAL bind group %u", j );
 		}
 	}
 #endif
 
-	// re-allocate ribbon SSBO descriptors after descriptor pool reset.
-	// The buffers (points, headers) and the set/pipeline layouts survive
-	// the reset; only the descriptor sets need recreation + rewrite.
-	if ( vk.ribbon.available ) {
-		VkDescriptorSetAllocateInfo dsAlloc;
-		VkWriteDescriptorSet writes[2];
-		VkDescriptorBufferInfo bufInfos[2];
-		const uint32_t pointsBytes  = RIBBON_POINTS_PER_FRAME  * RIBBON_POINT_BYTES;
-		const uint32_t headersBytes = RIBBON_HEADERS_PER_FRAME * RIBBON_HEADER_BYTES;
-		uint32_t j;
+	// Sprite and primitive ribbon/rail/beam set 0 cohorts are recreated from
+	// the current RAL arena generation. Their raw VkDescriptorSet fields are
+	// compatibility mirrors, never independent descriptor-pool owners. Primitive
+	// groups wait until R_Init has rebuilt the shared image/stage registries.
 
-		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-			memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-			dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			dsAlloc.descriptorPool     = vk.descriptor_pool;
-			dsAlloc.descriptorSetCount = 1;
-			dsAlloc.pSetLayouts        = &vk.ribbon.set_layout;
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.ribbon.descriptor[j] ) );
-
-			memset( bufInfos, 0, sizeof( bufInfos ) );
-			bufInfos[0].buffer = vk.ribbon.points_buffer[j];
-			bufInfos[0].offset = 0;
-			bufInfos[0].range  = pointsBytes;
-			bufInfos[1].buffer = vk.ribbon.headers_buffer[j];
-			bufInfos[1].offset = 0;
-			bufInfos[1].range  = headersBytes;
-
-			memset( writes, 0, sizeof( writes ) );
-			writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[0].dstSet          = vk.ribbon.descriptor[j];
-			writes[0].dstBinding      = 0;
-			writes[0].descriptorCount = 1;
-			writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			writes[0].pBufferInfo     = &bufInfos[0];
-			writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[1].dstSet          = vk.ribbon.descriptor[j];
-			writes[1].dstBinding      = 1;
-			writes[1].descriptorCount = 1;
-			writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			writes[1].pBufferInfo     = &bufInfos[1];
-
-			qvkUpdateDescriptorSets( vk.device, 2, writes, 0, NULL );
-		}
-	}
-
-	// re-allocate rail-ribbon SSBO descriptors after descriptor pool reset.
-	// Mirrors the ribbon block above: the header buffer + set/pipeline layouts
-	// survive the reset, but the descriptor SETS were freed by the pool reset in
-	// vk_release_resources — so they must be re-allocated and re-written here, not
-	// merely re-written. Missing this made the first map transition write to a
-	// stale VkDescriptorSet handle in vk_init_primitive_shader_images (binding 2),
-	// which drivers happened to tolerate but validation + RenderDoc reject as
-	// VUID-VkWriteDescriptorSet-dstSet-00320 (invalid dstSet) — the "RenderDoc
-	// dies on map-load" crash. Binding 2 (the shared texture array) is filled by
-	// vk_init_primitive_shader_images against the freshly-allocated set below.
-	if ( vk.railRibbon.available ) {
-		VkDescriptorSetAllocateInfo dsAlloc;
-		VkWriteDescriptorSet writes[1];
-		VkDescriptorBufferInfo bufInfos[1];
-		const uint32_t headersBytes = RAIL_RIBBON_POOL_MAX * RAIL_RIBBON_HEADER_BYTES;
-		uint32_t j;
-
-		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-			memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-			dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			dsAlloc.descriptorPool     = vk.descriptor_pool;
-			dsAlloc.descriptorSetCount = 1;
-			dsAlloc.pSetLayouts        = &vk.railRibbon.set_layout;
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.railRibbon.descriptor[j] ) );
-
-			memset( bufInfos, 0, sizeof( bufInfos ) );
-			bufInfos[0].buffer = vk.railRibbon.header_buffer[j];
-			bufInfos[0].offset = 0;
-			bufInfos[0].range  = headersBytes;
-
-			memset( writes, 0, sizeof( writes ) );
-			writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[0].dstSet          = vk.railRibbon.descriptor[j];
-			writes[0].dstBinding      = 0;
-			writes[0].descriptorCount = 1;
-			writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			writes[0].pBufferInfo     = &bufInfos[0];
-
-			qvkUpdateDescriptorSets( vk.device, 1, writes, 0, NULL );
-		}
-	}
-
-	// re-allocate sprite SSBO descriptor after descriptor pool reset.
-	// The buffer (headers) and the set/pipeline layouts survive the
-	// reset; only the descriptor sets need recreation + rewrite.
-	if ( vk.sprite.available ) {
-		VkDescriptorSetAllocateInfo dsAlloc;
-		VkWriteDescriptorSet writes[1];
-		VkDescriptorBufferInfo bufInfos[1];
-		const uint32_t headersBytes = SPRITES_PER_FRAME * SPRITE_HEADER_BYTES;
-		uint32_t j;
-
-		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-			memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-			dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			dsAlloc.descriptorPool     = vk.descriptor_pool;
-			dsAlloc.descriptorSetCount = 1;
-			dsAlloc.pSetLayouts        = &vk.sprite.set_layout;
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.sprite.descriptor[j] ) );
-
-			memset( bufInfos, 0, sizeof( bufInfos ) );
-			bufInfos[0].buffer = vk.sprite.headers_buffer[j];
-			bufInfos[0].offset = 0;
-			bufInfos[0].range  = headersBytes;
-
-			memset( writes, 0, sizeof( writes ) );
-			writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[0].dstSet          = vk.sprite.descriptor[j];
-			writes[0].dstBinding      = 0;
-			writes[0].descriptorCount = 1;
-			writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			writes[0].pBufferInfo     = &bufInfos[0];
-
-			qvkUpdateDescriptorSets( vk.device, 1, writes, 0, NULL );
-		}
-	}
-
-	// re-allocate beam SSBO descriptor after descriptor pool reset.
-	// The header buffers and set/pipeline layouts survive the reset;
-	// only the descriptor sets need recreation + rewrite of the
-	// header SSBO binding (binding 0). Binding 1 (the sampler array)
-	// is rewritten later by vk_init_primitive_shader_images, which
-	// runs from R_Init AFTER this function. Without this block,
-	// vk.beam.descriptor[j] holds stale handles after vid_restart
-	// and the first call into the sampler-array write site fires
-	// "Invalid VkDescriptorSet Object" validation errors.
+	// Pool slots' active flags survive a descriptor-arena reset, but the beam
+	// cohort does not. Drop every old logical beam before the RAL group refresh.
 	if ( vk.beam.available ) {
-		VkDescriptorSetAllocateInfo dsAlloc;
-		VkWriteDescriptorSet writes[3];
-		VkDescriptorBufferInfo bufInfos[3];
-		const uint32_t headerBytes = BEAM_POOL_MAX * BEAM_HEADER_BYTES;
-		uint32_t j;
-
-		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-			uint32_t writeCount;
-
-			memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-			dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			dsAlloc.descriptorPool     = vk.descriptor_pool;
-			dsAlloc.descriptorSetCount = 1;
-			dsAlloc.pSetLayouts        = &vk.beam.set_layout;
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.beam.descriptor[j] ) );
-
-			memset( bufInfos, 0, sizeof( bufInfos ) );
-			bufInfos[0].buffer = vk.beam.header_buffer[j];
-			bufInfos[0].offset = 0;
-			bufInfos[0].range  = headerBytes;
-
-			memset( writes, 0, sizeof( writes ) );
-			writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[0].dstSet          = vk.beam.descriptor[j];
-			writes[0].dstBinding      = 0;
-			writes[0].descriptorCount = 1;
-			writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			writes[0].pBufferInfo     = &bufInfos[0];
-
-			writeCount = 1;
-
-			// bindings 2 (per-stage data) and 3 (stage counts)
-			// must be re-written here too. The buffers themselves
-			// survive vid_restart (allocated in
-			// vk_init_primitive_shader_stages, which runs after this
-			// from R_Init's R_InitImages → vk_init_primitive_shader_images
-			// path); skip their writes if the buffers don't exist yet
-			// — vk_init_primitive_shader_images will handle the late
-			// case via its own descriptor write or the sampler-array
-			// write site (which fires after R_Init).
-			if ( vk.primitive_stages_buffer != VK_NULL_HANDLE ) {
-				bufInfos[1].buffer = vk.primitive_stages_buffer;
-				bufInfos[1].offset = 0;
-				bufInfos[1].range  = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
-					* PRIMITIVE_STAGE_MAX * VK_PRIMITIVE_STAGE_BYTES;
-
-				writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				writes[1].dstSet          = vk.beam.descriptor[j];
-				writes[1].dstBinding      = 2;
-				writes[1].descriptorCount = 1;
-				writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-				writes[1].pBufferInfo     = &bufInfos[1];
-
-				bufInfos[2].buffer = vk.primitive_stage_counts_buffer;
-				bufInfos[2].offset = 0;
-				bufInfos[2].range  = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
-					* sizeof( uint32_t );
-
-				writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				writes[2].dstSet          = vk.beam.descriptor[j];
-				writes[2].dstBinding      = 3;
-				writes[2].descriptorCount = 1;
-				writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-				writes[2].pBufferInfo     = &bufInfos[2];
-
-				writeCount = 3;
-			}
-
-			qvkUpdateDescriptorSets( vk.device, writeCount, writes, 0, NULL );
-		}
-
-		// Pool slots' active flags survived the descriptor pool reset
-		// in host memory, but the underlying GPU resources (descriptor
-		// sets) got invalidated. Any in-flight transient or persistent
-		// beam from before vid_restart is now decoupled from valid
-		// state — drop them all so RB_DrawBeams starts fresh.
 		memset( vk.beam.active,    0, sizeof( vk.beam.active ) );
 		memset( vk.beam.spawnTime, 0, sizeof( vk.beam.spawnTime ) );
 		memset( vk.beam.duration,  0, sizeof( vk.beam.duration ) );
@@ -5092,162 +5242,19 @@ void vk_init_descriptors( void )
 	// vk_release_resources / vid_restart and validation fires every
 	// frame (Family 2 / Family 3).
 	if ( vk.particle.available ) {
-		VkDescriptorSetAllocateInfo dsAlloc;
-		VkWriteDescriptorSet writes[4];
-		VkDescriptorBufferInfo bufInfos[4];
-		const uint32_t poolBytes    = PARTICLES_PER_POOL * PARTICLE_BYTES;
-		const uint32_t classesBytes = MAX_PARTICLE_CLASSES * PARTICLE_CLASS_GPU_BYTES;
-		const uint32_t frameBytes   = sizeof( particleFrame_t );
-		VkBuffer frameBuffers[VK_RAL_FRAME_UNIFORM_SLOT_COUNT];
-		VkBuffer poolBuffers[VK_RAL_SHADOW_STORAGE_MAX_BUFFERS];
-		VkBuffer classBuffers[VK_RAL_SHADOW_STORAGE_MAX_BUFFERS];
-		uint32_t j;
-		if ( !vk_frame_uniform_descriptor_buffers( &vk_particle_frame,
-				&vk_particle_frame_config, frameBuffers )
-				|| !vk_shadow_storage_descriptor_buffers(
-					&vk_particle_pool_storage,
-					&vk_particle_pool_storage_config, poolBuffers )
-				|| !vk_shadow_storage_descriptor_buffers(
-					&vk_particle_class_storage,
-					&vk_particle_class_storage_config, classBuffers ) ) {
+		// The compute cohort is authored directly by RAL from exact frame/pool/
+		// class receipts and the current arena generation. The raw set handles are
+		// compatibility mirrors only; no native allocate/update authority remains.
+		if ( !vk_ral_refresh_particle_compute_bindgroups() ) {
 			ri.Terminate( TERM_UNRECOVERABLE,
-				"Particle RAL frame receipt unavailable during descriptor rebuild" );
+				"Particle RAL compute bind-group rebuild failed" );
 			return;
 		}
 
-		// compute descriptor sets — same layout as the freshly-init
-		// pattern in vk_init_particle: UBO at 0, read pool at 1,
-		// write pool at 2, class shadow at 3. Index i reads pool[i],
-		// writes pool[1-i].
-		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-			uint32_t readPool  = j;
-			uint32_t writePool = 1 - j;
-
-			memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-			dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			dsAlloc.descriptorPool     = vk.descriptor_pool;
-			dsAlloc.descriptorSetCount = 1;
-			dsAlloc.pSetLayouts        = &vk.particle.compute_set_layout;
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.particle.compute_descriptor[j] ) );
-
-			memset( bufInfos, 0, sizeof( bufInfos ) );
-			bufInfos[0].buffer = frameBuffers[j];
-			bufInfos[0].offset = 0;
-			bufInfos[0].range  = frameBytes;
-			bufInfos[1].buffer = poolBuffers[readPool];
-			bufInfos[1].offset = 0;
-			bufInfos[1].range  = poolBytes;
-			bufInfos[2].buffer = poolBuffers[writePool];
-			bufInfos[2].offset = 0;
-			bufInfos[2].range  = poolBytes;
-			bufInfos[3].buffer = classBuffers[0];
-			bufInfos[3].offset = 0;
-			bufInfos[3].range  = classesBytes;
-
-			memset( writes, 0, sizeof( writes ) );
-			writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[0].dstSet          = vk.particle.compute_descriptor[j];
-			writes[0].dstBinding      = 0;
-			writes[0].descriptorCount = 1;
-			writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			writes[0].pBufferInfo     = &bufInfos[0];
-			writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[1].dstSet          = vk.particle.compute_descriptor[j];
-			writes[1].dstBinding      = 1;
-			writes[1].descriptorCount = 1;
-			writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			writes[1].pBufferInfo     = &bufInfos[1];
-			writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[2].dstSet          = vk.particle.compute_descriptor[j];
-			writes[2].dstBinding      = 2;
-			writes[2].descriptorCount = 1;
-			writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			writes[2].pBufferInfo     = &bufInfos[2];
-			writes[3].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[3].dstSet          = vk.particle.compute_descriptor[j];
-			writes[3].dstBinding      = 3;
-			writes[3].descriptorCount = 1;
-			writes[3].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			writes[3].pBufferInfo     = &bufInfos[3];
-
-			qvkUpdateDescriptorSets( vk.device, 4, writes, 0, NULL );
-		}
-
-		// render descriptor sets — UBO at 0, read pool at 1, classes
-		// at 2. Index i reads pool[1-i] (the post-compute output when
-		// compute_descriptor[i] just ran).
-		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-			uint32_t renderPool = 1 - j;
-
-			memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-			dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			dsAlloc.descriptorPool     = vk.descriptor_pool;
-			dsAlloc.descriptorSetCount = 1;
-			dsAlloc.pSetLayouts        = &vk.particle.render_set_layout;
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.particle.render_descriptor[j] ) );
-
-			memset( bufInfos, 0, sizeof( bufInfos ) );
-			bufInfos[0].buffer = frameBuffers[j];
-			bufInfos[0].offset = 0;
-			bufInfos[0].range  = frameBytes;
-			bufInfos[1].buffer = poolBuffers[renderPool];
-			bufInfos[1].offset = 0;
-			bufInfos[1].range  = poolBytes;
-			bufInfos[2].buffer = classBuffers[0];
-			bufInfos[2].offset = 0;
-			bufInfos[2].range  = classesBytes;
-
-			memset( writes, 0, sizeof( writes ) );
-			writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[0].dstSet          = vk.particle.render_descriptor[j];
-			writes[0].dstBinding      = 0;
-			writes[0].descriptorCount = 1;
-			writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			writes[0].pBufferInfo     = &bufInfos[0];
-			writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[1].dstSet          = vk.particle.render_descriptor[j];
-			writes[1].dstBinding      = 1;
-			writes[1].descriptorCount = 1;
-			writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			writes[1].pBufferInfo     = &bufInfos[1];
-			writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[2].dstSet          = vk.particle.render_descriptor[j];
-			writes[2].dstBinding      = 2;
-			writes[2].descriptorCount = 1;
-			writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			writes[2].pBufferInfo     = &bufInfos[2];
-
-			qvkUpdateDescriptorSets( vk.device, 3, writes, 0, NULL );
-
-			// Binding 4 (shared scene-depth) for the soft-particle depth fade. The
-			// depth view is live here (vk_update_attachment_descriptors ran earlier
-			// in this vk_init_descriptors before the pool reset). Mirrors the decal
-			// realloc re-assert — same vk.sceneDepth resource.
-			if ( vk.sceneDepth.view != VK_NULL_HANDLE ) {
-				VkDescriptorImageInfo depthInfo;
-				VkWriteDescriptorSet  depthWrite;
-				memset( &depthInfo, 0, sizeof( depthInfo ) );
-				depthInfo.sampler     = vk.sceneDepth.sampler;
-				depthInfo.imageView   = vk.sceneDepth.view;
-				depthInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				memset( &depthWrite, 0, sizeof( depthWrite ) );
-				depthWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				depthWrite.dstSet          = vk.particle.render_descriptor[j];
-				depthWrite.dstBinding      = 4;
-				depthWrite.descriptorCount = 1;
-				depthWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				depthWrite.pImageInfo      = &depthInfo;
-				qvkUpdateDescriptorSets( vk.device, 1, &depthWrite, 0, NULL );
-			}
-
-			// Note on binding 3 (per-class sampler array): population
-			// is deferred — vk_init_descriptors runs from InitOpenGL
-			// BEFORE R_InitImages re-creates tr.whiteImage on a
-			// vid_restart, so we cannot read tr.whiteImage->view
-			// here. R_Init calls vk_init_particle_textures AFTER
-			// R_InitImages to populate this binding eagerly against
-			// the now-fresh tr.whiteImage.
-		}
+		// Image-backed render groups cannot survive the arena/image reset. Retire
+		// them now; vk_init_particle_textures rebuilds the complete five-binding
+		// cohort after R_InitImages publishes fresh RAL views.
+		vk_ral_release_particle_render_bindgroups();
 		// Pool reset invalidated the previously-populated sampler
 		// array; R_DeleteTextures + R_InitImages also invalidate the
 		// cached image_t pointers in classImages[] (the old image_t
@@ -5262,93 +5269,14 @@ void vk_init_descriptors( void )
 		vk.particle.frameNextSlot = 0;
 	}
 
-	// Decal render descriptor sets — same survives-the-reset story as the
-	// particle render sets above. The pool reset freed the previously-allocated
-	// sets; re-allocate + rewrite the buffer bindings (UBO at 0, pool SSBO at
-	// 1). Binding 2 (sampler array) population is deferred to
-	// vk_init_decal_textures from R_Init, against the freshly-recreated
-	// tr.whiteImage.
+	// Decal render groups borrow image views and the current descriptor arena.
+	// Retire them before the reset destroys either parent; R_InitImages later
+	// publishes fresh image views and vk_init_decal_textures atomically rebuilds
+	// the complete four-binding cohort.
 	if ( vk.decal.available ) {
-		VkDescriptorSetAllocateInfo dsAlloc;
-		VkWriteDescriptorSet writes[2];
-		VkDescriptorBufferInfo bufInfos[2];
-		const uint32_t poolBytes  = DECALS_PER_POOL * DECAL_BYTES;
-		const uint32_t frameBytes = sizeof( decalFrame_t );
-		VkBuffer frameBuffers[VK_RAL_FRAME_UNIFORM_SLOT_COUNT];
-		VkBuffer poolBuffers[VK_RAL_SHADOW_STORAGE_MAX_BUFFERS];
-		uint32_t j;
-		if ( !vk_frame_uniform_descriptor_buffers( &vk_decal_frame,
-				&vk_decal_frame_config, frameBuffers )
-				|| !vk_shadow_storage_descriptor_buffers(
-					&vk_decal_pool_storage, &vk_decal_pool_storage_config,
-					poolBuffers ) ) {
-			ri.Terminate( TERM_UNRECOVERABLE,
-				"Decal RAL frame receipt unavailable during descriptor rebuild" );
-			return;
-		}
-
-		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-			memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-			dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			dsAlloc.descriptorPool     = vk.descriptor_pool;
-			dsAlloc.descriptorSetCount = 1;
-			dsAlloc.pSetLayouts        = &vk.decal.render_set_layout;
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.decal.render_descriptor[j] ) );
-
-			memset( bufInfos, 0, sizeof( bufInfos ) );
-			bufInfos[0].buffer = frameBuffers[j];
-			bufInfos[0].offset = 0;
-			bufInfos[0].range  = frameBytes;
-			bufInfos[1].buffer = poolBuffers[0];
-			bufInfos[1].offset = 0;
-			bufInfos[1].range  = poolBytes;
-
-			memset( writes, 0, sizeof( writes ) );
-			writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[0].dstSet          = vk.decal.render_descriptor[j];
-			writes[0].dstBinding      = 0;
-			writes[0].descriptorCount = 1;
-			writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			writes[0].pBufferInfo     = &bufInfos[0];
-			writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[1].dstSet          = vk.decal.render_descriptor[j];
-			writes[1].dstBinding      = 1;
-			writes[1].descriptorCount = 1;
-			writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			writes[1].pBufferInfo     = &bufInfos[1];
-
-			qvkUpdateDescriptorSets( vk.device, 2, writes, 0, NULL );
-
-			// Binding 3 (shared scene-depth) for box-projection. The depth view is
-			// live here (vk_update_attachment_descriptors ran earlier in this same
-			// vk_init_descriptors before the pool reset, so the attachments exist).
-			// Same vk.sceneDepth resource the tonemap/gtao/lens consumers sample.
-			if ( vk.sceneDepth.view != VK_NULL_HANDLE ) {
-				VkDescriptorImageInfo depthInfo;
-				VkWriteDescriptorSet  depthWrite;
-				memset( &depthInfo, 0, sizeof( depthInfo ) );
-				depthInfo.sampler     = vk.sceneDepth.sampler;
-				depthInfo.imageView   = vk.sceneDepth.view;
-				depthInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				memset( &depthWrite, 0, sizeof( depthWrite ) );
-				depthWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				depthWrite.dstSet          = vk.decal.render_descriptor[j];
-				depthWrite.dstBinding      = 3;
-				depthWrite.descriptorCount = 1;
-				depthWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				depthWrite.pImageInfo      = &depthInfo;
-				qvkUpdateDescriptorSets( vk.device, 1, &depthWrite, 0, NULL );
-			}
-		}
-
-		// R_DeleteTextures + R_InitImages invalidate the cached image_t
-		// pointers in vk.decal.images[] (old structs freed, new ones at fresh
-		// addresses). Clear the registry; vk_init_decal_textures repopulates to
-		// tr.whiteImage, and later RE_AddDecalToScene re-resolves shaders.
+		vk_ral_release_decal_render_bindgroups();
 		memset( vk.decal.images, 0, sizeof( vk.decal.images ) );
 		vk.decal.numImages = 0;
-		vk.decal.imagesWritten[0] = 0;
-		vk.decal.imagesWritten[1] = 0;
 	}
 
 	// Atmospheric weather descriptor sets — same descriptor-pool-reset survival
@@ -5446,6 +5374,139 @@ static void vk_create_geometry_buffers( VkDeviceSize size )
 	memset( &vk.stats, 0, sizeof( vk.stats ) );
 }
 
+static qboolean vk_create_effect_bind_group_layout(
+		const ralBindEntry_t *entries, uint32_t entryCount,
+		const char *debugName, ralBindGroupLayout_t **outOwner,
+		VkDescriptorSetLayout *outNative ) {
+	ralBindGroupLayoutCreateInfo_t createInfo;
+	ralBindGroupLayout_t *candidate;
+	VkDescriptorSetLayout native;
+	if ( !entries || entryCount == 0u || !debugName || !outOwner || !outNative
+			|| *outOwner || *outNative != VK_NULL_HANDLE ) return qfalse;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.entries = entries;
+	createInfo.numEntries = entryCount;
+	createInfo.debugName = debugName;
+	candidate = Ral_CreateBindGroupLayout( vk_ral_get_backend(), &createInfo );
+	if ( !candidate ) return qfalse;
+	native = (VkDescriptorSetLayout)Ral_GetBindGroupLayoutHandle( candidate );
+	if ( native == VK_NULL_HANDLE ) {
+		Ral_DestroyBindGroupLayout( candidate );
+		return qfalse;
+	}
+	*outOwner = candidate;
+	*outNative = native;
+	return qtrue;
+}
+
+static qboolean vk_create_effect_pipeline_layout(
+		ralBindGroupLayout_t *effectLayout, const char *debugName,
+		ralPipelineLayout_t **outOwner, VkPipelineLayout *outNative ) {
+	const ralBindGroupLayout_t *layouts[2];
+	ralPipelineLayoutCreateInfo_t createInfo;
+	ralPipelineLayout_t *candidate;
+	VkPipelineLayout native;
+	if ( !effectLayout || !vk.ral_bgl_effects_ubo || !debugName
+			|| !outOwner || !outNative || *outOwner
+			|| *outNative != VK_NULL_HANDLE ) return qfalse;
+	layouts[0] = effectLayout;
+	layouts[1] = vk.ral_bgl_effects_ubo;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.bindGroupLayouts = layouts;
+	createInfo.numBindGroupLayouts = ARRAY_LEN( layouts );
+	createInfo.debugName = debugName;
+	candidate = Ral_CreatePipelineLayout( vk_ral_get_backend(), &createInfo );
+	if ( !candidate ) return qfalse;
+	native = (VkPipelineLayout)Ral_GetPipelineLayoutHandle( candidate );
+	if ( native == VK_NULL_HANDLE ) {
+		Ral_DestroyPipelineLayout( candidate );
+		return qfalse;
+	}
+	*outOwner = candidate;
+	*outNative = native;
+	return qtrue;
+}
+
+static qboolean vk_create_single_bind_group_pipeline_layout(
+		ralBindGroupLayout_t *bindGroupLayout, const char *debugName,
+		ralPipelineLayout_t **outOwner, VkPipelineLayout *outNative ) {
+	const ralBindGroupLayout_t *layouts[1];
+	ralPipelineLayoutCreateInfo_t createInfo;
+	ralPipelineLayout_t *candidate;
+	VkPipelineLayout native;
+	if ( !bindGroupLayout || !debugName || !outOwner || !outNative
+			|| *outOwner || *outNative != VK_NULL_HANDLE ) return qfalse;
+	layouts[0] = bindGroupLayout;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.bindGroupLayouts = layouts;
+	createInfo.numBindGroupLayouts = ARRAY_LEN( layouts );
+	createInfo.debugName = debugName;
+	candidate = Ral_CreatePipelineLayout( vk_ral_get_backend(), &createInfo );
+	if ( !candidate ) return qfalse;
+	native = (VkPipelineLayout)Ral_GetPipelineLayoutHandle( candidate );
+	if ( native == VK_NULL_HANDLE ) {
+		Ral_DestroyPipelineLayout( candidate );
+		return qfalse;
+	}
+	*outOwner = candidate;
+	*outNative = native;
+	return qtrue;
+}
+
+#if FEAT_IQM
+static qboolean vk_create_iqm_pipeline_layout( void ) {
+	const ralBindGroupLayout_t *layouts[2];
+	ralPipelineLayoutCreateInfo_t createInfo;
+	ralPipelineLayout_t *candidate;
+	VkPipelineLayout native;
+	if ( !vk.iqmGpu.ral_bgl_bones || !vk.ral_bgl_sampler
+			|| vk.iqmGpu.ral_pipeline_layout
+			|| vk.iqmGpu.pipeline_layout != VK_NULL_HANDLE ) return qfalse;
+	layouts[0] = vk.iqmGpu.ral_bgl_bones;
+	layouts[1] = vk.ral_bgl_sampler;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.bindGroupLayouts = layouts;
+	createInfo.numBindGroupLayouts = ARRAY_LEN( layouts );
+	createInfo.debugName = "wired-pl-iqm";
+	candidate = Ral_CreatePipelineLayout( vk_ral_get_backend(), &createInfo );
+	if ( !candidate ) return qfalse;
+	native = (VkPipelineLayout)Ral_GetPipelineLayoutHandle( candidate );
+	if ( native == VK_NULL_HANDLE ) {
+		Ral_DestroyPipelineLayout( candidate );
+		return qfalse;
+	}
+	vk.iqmGpu.ral_pipeline_layout = candidate;
+	vk.iqmGpu.pipeline_layout = native;
+	return qtrue;
+}
+#endif
+
+static qboolean vk_create_forwardplus_lit_pipeline_layout( void ) {
+	const ralBindGroupLayout_t *layouts[3];
+	ralPipelineLayoutCreateInfo_t createInfo;
+	ralPipelineLayout_t *candidate;
+	VkPipelineLayout native;
+	layouts[0] = vk.ral_bgl_uniform;
+	layouts[1] = vk_ral_get_bindless_layout();
+	layouts[2] = vk.ral_fpLitSetLayout;
+	if ( !layouts[0] || !layouts[1] || !layouts[2]
+			|| vk.ral_fpLitLayout || vk.fpLitLayout != VK_NULL_HANDLE ) return qfalse;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.bindGroupLayouts = layouts;
+	createInfo.numBindGroupLayouts = ARRAY_LEN( layouts );
+	createInfo.debugName = "wired-pl-fp-lit";
+	candidate = Ral_CreatePipelineLayout( vk_ral_get_backend(), &createInfo );
+	if ( !candidate ) return qfalse;
+	native = (VkPipelineLayout)Ral_GetPipelineLayoutHandle( candidate );
+	if ( native == VK_NULL_HANDLE ) {
+		Ral_DestroyPipelineLayout( candidate );
+		return qfalse;
+	}
+	vk.ral_fpLitLayout = candidate;
+	vk.fpLitLayout = native;
+	return qtrue;
+}
+
 
 /*
 ===============
@@ -5474,15 +5535,10 @@ from header.flags.
 
 void vk_init_ribbon( void )
 {
-	VkDescriptorSetLayoutBinding binds[3];
-	VkDescriptorSetLayoutCreateInfo layoutInfo;
-	VkPipelineLayoutCreateInfo pipeLayoutInfo;
+	ralBindEntry_t entries[4];
 	VkBufferCreateInfo bufInfo;
 	VkMemoryRequirements memReqs;
 	VkMemoryAllocateInfo allocInfo;
-	VkDescriptorSetAllocateInfo dsAlloc;
-	VkWriteDescriptorSet writes[2];
-	VkDescriptorBufferInfo bufInfos[2];
 	uint32_t pointsBytes;
 	uint32_t headersBytes;
 	int i;
@@ -5505,44 +5561,43 @@ void vk_init_ribbon( void )
 
 	memset( &vk.ribbon, 0, sizeof( vk.ribbon ) );
 
-	memset( binds, 0, sizeof( binds ) );
-	binds[0].binding         = 0;
-	binds[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[0].descriptorCount = 1;
-	binds[0].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
-	binds[1].binding         = 1;
-	binds[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[1].descriptorCount = 1;
-	binds[1].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+	memset( entries, 0, sizeof( entries ) );
+	entries[0] = (ralBindEntry_t){ 0u, RAL_BIND_STORAGE_BUFFER, 1u,
+		RAL_STAGE_VERTEX, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+	entries[1] = (ralBindEntry_t){ 1u, RAL_BIND_STORAGE_BUFFER, 1u,
+		RAL_STAGE_VERTEX, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
 	// binding 2: per-shader-handle texture array. Populated host-side
 	// from vk_primitive_shader_images[] by vk_init_primitive_shader_images
 	// (called from R_Init AFTER tr.whiteImage exists; deferred because
 	// vk_init_ribbon runs from InitOpenGL before R_InitImages). Fragment
 	// stage only — only ribbon.frag samples it.
-	binds[2].binding         = 2;
-	binds[2].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	binds[2].descriptorCount = PRIMITIVE_SHADER_IMAGE_MAX;
-	binds[2].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
-	layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	layoutInfo.bindingCount = 3;
-	layoutInfo.pBindings    = binds;
-	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.ribbon.set_layout ) );
+	entries[2] = (ralBindEntry_t){ 2u, RAL_BIND_TEXTURE_ARRAY,
+		PRIMITIVE_SHADER_IMAGE_MAX, RAL_STAGE_FRAGMENT,
+		RAL_BIND_TEXTURE_VIEW_2D, qfalse };
+	// binding 3: one common CLAMP sampler for the full texture array. Keeping
+	// sampler cardinality at one is the portable WebGPU contract.
+	entries[3] = (ralBindEntry_t){ 3u, RAL_BIND_SAMPLER, 1u,
+		RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+	if ( !vk_create_effect_bind_group_layout( entries, ARRAY_LEN( entries ),
+			"wired-ribbon-set-layout", &vk.ribbon.ral_bgl,
+			&vk.ribbon.set_layout ) ) {
+		R_LOG( rch_init, SEV_WARN,
+			"RAL ribbon bind-group layout unavailable; ribbon primitives disabled\n" );
+		return;
+	}
 
 	// ribbon push range retired. mvp/eyeWorld/frameParams now arrive via the
 	// shared effects per-draw UBO at set 1 (vk.set_layout_effects_ubo). Set 0 stays
 	// ribbon's own SSBO/texture set.
-	{
-		VkDescriptorSetLayout sets2[2] = { vk.ribbon.set_layout, vk.set_layout_effects_ubo };
-
-		memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
-		pipeLayoutInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		pipeLayoutInfo.setLayoutCount         = 2;
-		pipeLayoutInfo.pSetLayouts            = sets2;
-		pipeLayoutInfo.pushConstantRangeCount = 0;
-		pipeLayoutInfo.pPushConstantRanges    = NULL;
-		VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.ribbon.pipeline_layout ) );
+	if ( !vk_create_effect_pipeline_layout( vk.ribbon.ral_bgl,
+			"wired-pl-ribbon", &vk.ribbon.ral_pipeline_layout,
+			&vk.ribbon.pipeline_layout ) ) {
+		R_LOG( rch_init, SEV_WARN,
+			"RAL ribbon pipeline layout unavailable; ribbon primitives disabled\n" );
+		Ral_DestroyBindGroupLayout( vk.ribbon.ral_bgl );
+		vk.ribbon.ral_bgl = NULL;
+		vk.ribbon.set_layout = VK_NULL_HANDLE;
+		return;
 	}
 
 	pointsBytes  = RIBBON_POINTS_PER_FRAME  * RIBBON_POINT_BYTES;
@@ -5594,38 +5649,8 @@ void vk_init_ribbon( void )
 		                        "vk.ribbon.headers" );
 	}
 
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-		dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dsAlloc.descriptorPool     = vk.descriptor_pool;
-		dsAlloc.descriptorSetCount = 1;
-		dsAlloc.pSetLayouts        = &vk.ribbon.set_layout;
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.ribbon.descriptor[i] ) );
-
-		memset( bufInfos, 0, sizeof( bufInfos ) );
-		bufInfos[0].buffer = vk.ribbon.points_buffer[i];
-		bufInfos[0].offset = 0;
-		bufInfos[0].range  = pointsBytes;
-		bufInfos[1].buffer = vk.ribbon.headers_buffer[i];
-		bufInfos[1].offset = 0;
-		bufInfos[1].range  = headersBytes;
-
-		memset( writes, 0, sizeof( writes ) );
-		writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[0].dstSet          = vk.ribbon.descriptor[i];
-		writes[0].dstBinding      = 0;
-		writes[0].descriptorCount = 1;
-		writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[0].pBufferInfo     = &bufInfos[0];
-		writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[1].dstSet          = vk.ribbon.descriptor[i];
-		writes[1].dstBinding      = 1;
-		writes[1].descriptorCount = 1;
-		writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[1].pBufferInfo     = &bufInfos[1];
-
-		qvkUpdateDescriptorSets( vk.device, 2, writes, 0, NULL );
-	}
+	// Set 0 is created later, candidate-first, from the generation-bound RAL
+	// arena once images, the shared sampler and all buffer wrappers exist.
 
 	// Two graphics pipeline variants (alpha and additive). Everything
 	// matches the existing translucent pattern: depthTest=LESS_OR_EQUAL,
@@ -5728,10 +5753,6 @@ void vk_init_ribbon( void )
 		gpInfo.layout              = vk.ribbon.pipeline_layout;
 		gpInfo.subpass             = 0;
 
-		// Adopt the now-created legacy layout as the RAL externalLayout (the boot
-		// sweep ran before this layout existed). Once, before both variants.
-		vk_ral_adopt_one_pipeline_layout( vk.ribbon.pipeline_layout, &vk.ribbon.ral_pipeline_layout, "wired-pl-ribbon" );
-
 		// 0 = alpha (SRC_ALPHA / ONE_MINUS_SRC_ALPHA),
 		// 1 = additive (SRC_ALPHA / ONE).
 		for ( variant = 0; variant < 2; variant++ ) {
@@ -5773,6 +5794,11 @@ void vk_shutdown_ribbon( void )
 	if ( vk.ribbon.ral_pipeline_additive ) { Ral_DestroyPipeline( vk.ribbon.ral_pipeline_additive ); vk.ribbon.ral_pipeline_additive = NULL; }
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.ribbon.ral_descriptor[i] ) {
+			Ral_DestroyBindGroup( vk.ribbon.ral_descriptor[i] );
+			vk.ribbon.ral_descriptor[i] = NULL;
+		}
+		vk.ribbon.descriptor[i] = VK_NULL_HANDLE;
 		if ( vk.ribbon.points_buffer[i] != VK_NULL_HANDLE ) {
 			vk_ral_unregister_buffer( vk.ribbon.points_buffer[i] );
 			qvkDestroyBuffer( vk.device, vk.ribbon.points_buffer[i], NULL );
@@ -5795,15 +5821,13 @@ void vk_shutdown_ribbon( void )
 		}
 	}
 
-	if ( vk.ribbon.pipeline_layout != VK_NULL_HANDLE ) {
-		qvkDestroyPipelineLayout( vk.device, vk.ribbon.pipeline_layout, NULL );
-		vk.ribbon.pipeline_layout = VK_NULL_HANDLE;
+	if ( vk.ribbon.ral_pipeline_layout ) {
+		Ral_DestroyPipelineLayout( vk.ribbon.ral_pipeline_layout );
+		vk.ribbon.ral_pipeline_layout = NULL;
 	}
+	vk.ribbon.pipeline_layout = VK_NULL_HANDLE;
 	if ( vk.ribbon.ral_bgl ) { Ral_DestroyBindGroupLayout( vk.ribbon.ral_bgl ); vk.ribbon.ral_bgl = NULL; }
-	if ( vk.ribbon.set_layout != VK_NULL_HANDLE ) {
-		qvkDestroyDescriptorSetLayout( vk.device, vk.ribbon.set_layout, NULL );
-		vk.ribbon.set_layout = VK_NULL_HANDLE;
-	}
+	vk.ribbon.set_layout = VK_NULL_HANDLE;
 
 	vk.ribbon.available = qfalse;
 }
@@ -5824,51 +5848,45 @@ Only the alpha-blend variant is built (the helix is alpha-blended).
 */
 void vk_init_railribbon( void )
 {
-	VkDescriptorSetLayoutBinding binds[3];
-	VkDescriptorSetLayoutCreateInfo layoutInfo;
-	VkPipelineLayoutCreateInfo pipeLayoutInfo;
+	ralBindEntry_t entries[3];
 	VkBufferCreateInfo bufInfo;
 	VkMemoryRequirements memReqs;
 	VkMemoryAllocateInfo allocInfo;
-	VkDescriptorSetAllocateInfo dsAlloc;
-	VkWriteDescriptorSet writes[1];
-	VkDescriptorBufferInfo bufInfos[1];
 	uint32_t headersBytes;
 	int i;
 
 	memset( &vk.railRibbon, 0, sizeof( vk.railRibbon ) );
 
-	memset( binds, 0, sizeof( binds ) );
+	memset( entries, 0, sizeof( entries ) );
 	// binding 0: per-slot spawn-param SSBO (vertex reads it via gl_InstanceIndex)
-	binds[0].binding         = 0;
-	binds[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[0].descriptorCount = 1;
-	binds[0].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+	entries[0] = (ralBindEntry_t){ 0u, RAL_BIND_STORAGE_BUFFER, 1u,
+		RAL_STAGE_VERTEX, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
 	// binding 2: shared primitive texture array (fragment) — same slot ribbon.frag
 	// samples, populated by vk_init_primitive_shader_images. Binding 1 is skipped
 	// so the fragment-side binding index matches the ribbon set layout (frag
 	// samples binding 2).
-	binds[1].binding         = 2;
-	binds[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	binds[1].descriptorCount = PRIMITIVE_SHADER_IMAGE_MAX;
-	binds[1].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+	entries[1] = (ralBindEntry_t){ 2u, RAL_BIND_TEXTURE_ARRAY,
+		PRIMITIVE_SHADER_IMAGE_MAX, RAL_STAGE_FRAGMENT,
+		RAL_BIND_TEXTURE_VIEW_2D, qfalse };
+	entries[2] = (ralBindEntry_t){ 3u, RAL_BIND_SAMPLER, 1u,
+		RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+	if ( !vk_create_effect_bind_group_layout( entries, ARRAY_LEN( entries ),
+			"wired-rail-ribbon-set-layout", &vk.railRibbon.ral_bgl,
+			&vk.railRibbon.set_layout ) ) {
+		R_LOG( rch_init, SEV_WARN,
+			"RAL rail-ribbon bind-group layout unavailable; rail-ribbon primitives disabled\n" );
+		return;
+	}
 
-	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
-	layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	layoutInfo.bindingCount = 2;
-	layoutInfo.pBindings    = binds;
-	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.railRibbon.set_layout ) );
-
-	{
-		VkDescriptorSetLayout sets2[2] = { vk.railRibbon.set_layout, vk.set_layout_effects_ubo };
-
-		memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
-		pipeLayoutInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		pipeLayoutInfo.setLayoutCount         = 2;
-		pipeLayoutInfo.pSetLayouts            = sets2;
-		pipeLayoutInfo.pushConstantRangeCount = 0;
-		pipeLayoutInfo.pPushConstantRanges    = NULL;
-		VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.railRibbon.pipeline_layout ) );
+	if ( !vk_create_effect_pipeline_layout( vk.railRibbon.ral_bgl,
+			"wired-pl-railribbon", &vk.railRibbon.ral_pipeline_layout,
+			&vk.railRibbon.pipeline_layout ) ) {
+		R_LOG( rch_init, SEV_WARN,
+			"RAL rail-ribbon pipeline layout unavailable; rail-ribbon primitives disabled\n" );
+		Ral_DestroyBindGroupLayout( vk.railRibbon.ral_bgl );
+		vk.railRibbon.ral_bgl = NULL;
+		vk.railRibbon.set_layout = VK_NULL_HANDLE;
+		return;
 	}
 
 	headersBytes = RAIL_RIBBON_POOL_MAX * RAIL_RIBBON_HEADER_BYTES;
@@ -5897,31 +5915,7 @@ void vk_init_railribbon( void )
 		                        "vk.railRibbon.headers" );
 	}
 
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-		dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dsAlloc.descriptorPool     = vk.descriptor_pool;
-		dsAlloc.descriptorSetCount = 1;
-		dsAlloc.pSetLayouts        = &vk.railRibbon.set_layout;
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.railRibbon.descriptor[i] ) );
-
-		memset( bufInfos, 0, sizeof( bufInfos ) );
-		bufInfos[0].buffer = vk.railRibbon.header_buffer[i];
-		bufInfos[0].offset = 0;
-		bufInfos[0].range  = headersBytes;
-
-		memset( writes, 0, sizeof( writes ) );
-		writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[0].dstSet          = vk.railRibbon.descriptor[i];
-		writes[0].dstBinding      = 0;
-		writes[0].descriptorCount = 1;
-		writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[0].pBufferInfo     = &bufInfos[0];
-		// binding 2 (texture array) is filled by vk_init_primitive_shader_images,
-		// same as the ribbon set — see that function's per-set write loop.
-
-		qvkUpdateDescriptorSets( vk.device, 1, writes, 0, NULL );
-	}
+	// Set 0 is materialized later by the direct RAL primitive cohort.
 
 	{
 		VkGraphicsPipelineCreateInfo gpInfo;
@@ -6030,8 +6024,6 @@ void vk_init_railribbon( void )
 		gpInfo.layout              = vk.railRibbon.pipeline_layout;
 		gpInfo.subpass             = 0;
 
-		vk_ral_adopt_one_pipeline_layout( vk.railRibbon.pipeline_layout, &vk.railRibbon.ral_pipeline_layout, "wired-pl-railribbon" );
-
 		vk.railRibbon.ral_pipeline_alpha =
 			vk_ral_create_pipeline_from_gpinfo( &gpInfo, vk.railRibbon.ral_pipeline_layout,
 				vk_attachment_format_to_ral( vk.color_format ),
@@ -6052,6 +6044,11 @@ void vk_shutdown_railribbon( void )
 	if ( vk.railRibbon.ral_pipeline_alpha ) { Ral_DestroyPipeline( vk.railRibbon.ral_pipeline_alpha ); vk.railRibbon.ral_pipeline_alpha = NULL; }
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.railRibbon.ral_descriptor[i] ) {
+			Ral_DestroyBindGroup( vk.railRibbon.ral_descriptor[i] );
+			vk.railRibbon.ral_descriptor[i] = NULL;
+		}
+		vk.railRibbon.descriptor[i] = VK_NULL_HANDLE;
 		if ( vk.railRibbon.header_buffer[i] != VK_NULL_HANDLE ) {
 			vk_ral_unregister_buffer( vk.railRibbon.header_buffer[i] );
 			qvkDestroyBuffer( vk.device, vk.railRibbon.header_buffer[i], NULL );
@@ -6064,15 +6061,13 @@ void vk_shutdown_railribbon( void )
 		}
 	}
 
-	if ( vk.railRibbon.pipeline_layout != VK_NULL_HANDLE ) {
-		qvkDestroyPipelineLayout( vk.device, vk.railRibbon.pipeline_layout, NULL );
-		vk.railRibbon.pipeline_layout = VK_NULL_HANDLE;
+	if ( vk.railRibbon.ral_pipeline_layout ) {
+		Ral_DestroyPipelineLayout( vk.railRibbon.ral_pipeline_layout );
+		vk.railRibbon.ral_pipeline_layout = NULL;
 	}
+	vk.railRibbon.pipeline_layout = VK_NULL_HANDLE;
 	if ( vk.railRibbon.ral_bgl ) { Ral_DestroyBindGroupLayout( vk.railRibbon.ral_bgl ); vk.railRibbon.ral_bgl = NULL; }
-	if ( vk.railRibbon.set_layout != VK_NULL_HANDLE ) {
-		qvkDestroyDescriptorSetLayout( vk.device, vk.railRibbon.set_layout, NULL );
-		vk.railRibbon.set_layout = VK_NULL_HANDLE;
-	}
+	vk.railRibbon.set_layout = VK_NULL_HANDLE;
 
 	vk.railRibbon.available = qfalse;
 }
@@ -6537,8 +6532,11 @@ Push range layout (96 bytes):
     bytes 80..95   vec4  frameParams   — reserved (matches ribbon layout)
 
 Descriptor set 0:
-    binding 0  STORAGE_BUFFER          BeamHeader headers[]
-    binding 1  COMBINED_IMAGE_SAMPLER  shaderImages[PRIMITIVE_SHADER_IMAGE_MAX]
+    binding 0  STORAGE_BUFFER  BeamHeader headers[]
+    binding 1  SAMPLED_IMAGE   shaderImages[PRIMITIVE_SHADER_IMAGE_MAX]
+    binding 2  STORAGE_BUFFER  PrimitiveStage stages[]
+    binding 3  STORAGE_BUFFER  uint stageCounts[]
+    binding 4  SAMPLER         shaderImageSampler
 
 Lifetime semantics:
     desc.duration == 0  → transient. Drawn this frame; slot freed
@@ -6557,15 +6555,10 @@ sites that pass world coords directly with startEntityNum = -1).
 
 void vk_init_beam( void )
 {
-	VkDescriptorSetLayoutBinding binds[4];
-	VkDescriptorSetLayoutCreateInfo layoutInfo;
-	VkPipelineLayoutCreateInfo pipeLayoutInfo;
+	ralBindEntry_t entries[5];
 	VkBufferCreateInfo bufInfo;
 	VkMemoryRequirements memReqs;
 	VkMemoryAllocateInfo allocInfo;
-	VkDescriptorSetAllocateInfo dsAlloc;
-	VkWriteDescriptorSet writes[3];
-	VkDescriptorBufferInfo bufInfos[3];
 	uint32_t headerBytes;
 	int i;
 
@@ -6589,51 +6582,48 @@ void vk_init_beam( void )
 #endif
 
 	// ── Descriptor set layout ────────────────────────────────────
-	// 4 bindings.
+	// 5 bindings.
 	//   0: header SSBO (per-instance beam pool, vertex stage)
-	//   1: image array (sampler array, fragment stage)
+	//   1: sampled texture array (fragment stage)
 	//   2: per-stage SSBO (multi-stage shader data, vertex+fragment)
 	//   3: stage counts SSBO (PRIMITIVE_SHADER_IMAGE_MAX uints,
 	//      vertex stage — for cheap per-stage cull)
-	memset( binds, 0, sizeof( binds ) );
-	binds[0].binding         = 0;
-	binds[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[0].descriptorCount = 1;
-	binds[0].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
-	binds[1].binding         = 1;
-	binds[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	binds[1].descriptorCount = PRIMITIVE_SHADER_IMAGE_MAX;
-	binds[1].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
-	binds[2].binding         = 2;
-	binds[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[2].descriptorCount = 1;
-	binds[2].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-	binds[3].binding         = 3;
-	binds[3].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[3].descriptorCount = 1;
-	binds[3].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
-
-	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
-	layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	layoutInfo.bindingCount = 4;
-	layoutInfo.pBindings    = binds;
-	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.beam.set_layout ) );
+	//   4: one common REPEAT sampler (fragment stage)
+	memset( entries, 0, sizeof( entries ) );
+	entries[0] = (ralBindEntry_t){ 0u, RAL_BIND_STORAGE_BUFFER, 1u,
+		RAL_STAGE_VERTEX, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+	entries[1] = (ralBindEntry_t){ 1u, RAL_BIND_TEXTURE_ARRAY,
+		PRIMITIVE_SHADER_IMAGE_MAX, RAL_STAGE_FRAGMENT,
+		RAL_BIND_TEXTURE_VIEW_2D, qfalse };
+	entries[2] = (ralBindEntry_t){ 2u, RAL_BIND_STORAGE_BUFFER, 1u,
+		RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT,
+		RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+	entries[3] = (ralBindEntry_t){ 3u, RAL_BIND_STORAGE_BUFFER, 1u,
+		RAL_STAGE_VERTEX, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+	entries[4] = (ralBindEntry_t){ 4u, RAL_BIND_SAMPLER, 1u,
+		RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+	if ( !vk_create_effect_bind_group_layout( entries, ARRAY_LEN( entries ),
+			"wired-beam-set-layout", &vk.beam.ral_bgl,
+			&vk.beam.set_layout ) ) {
+		R_LOG( rch_init, SEV_WARN,
+			"RAL beam bind-group layout unavailable; beam primitives disabled\n" );
+		return;
+	}
 
 	// beam push range retired. mvp/eyeWorld/frameParams/stageParams now
 	// arrive via the shared effects per-draw UBO at set 1. stageParams.x (stageIdx)
 	// is written into a FRESH ring item per stage-loop iteration in RB_DrawBeams —
 	// this retires beam's push without firstInstance (which would collide with
 	// beam.vert's gl_InstanceIndex=beamIdx). Set 0 stays beam's own SSBO/texture set.
-	{
-		VkDescriptorSetLayout sets2[2] = { vk.beam.set_layout, vk.set_layout_effects_ubo };
-
-		memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
-		pipeLayoutInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		pipeLayoutInfo.setLayoutCount         = 2;
-		pipeLayoutInfo.pSetLayouts            = sets2;
-		pipeLayoutInfo.pushConstantRangeCount = 0;
-		pipeLayoutInfo.pPushConstantRanges    = NULL;
-		VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.beam.pipeline_layout ) );
+	if ( !vk_create_effect_pipeline_layout( vk.beam.ral_bgl,
+			"wired-pl-beam", &vk.beam.ral_pipeline_layout,
+			&vk.beam.pipeline_layout ) ) {
+		R_LOG( rch_init, SEV_WARN,
+			"RAL beam pipeline layout unavailable; beam primitives disabled\n" );
+		Ral_DestroyBindGroupLayout( vk.beam.ral_bgl );
+		vk.beam.ral_bgl = NULL;
+		vk.beam.set_layout = VK_NULL_HANDLE;
+		return;
 	}
 
 	// ── Per-frame header SSBOs (host-coherent, mapped) ──────────
@@ -6665,74 +6655,8 @@ void vk_init_beam( void )
 		                        "vk.beam.header" );
 	}
 
-	// ── Allocate descriptor sets and write bindings 0, 2, 3 ─────
-	// Binding 1 (sampler array) is left unwritten here; it's
-	// populated by vk_init_primitive_shader_images from R_Init,
-	// AFTER tr.whiteImage exists and vk_init_particle has created
-	// vk.particle.sampler.
-	//
-	// Bindings 2 and 3 (per-stage data, stage counts) come from
-	// vk.primitive_stages_buffer / vk.primitive_stage_counts_buffer
-	// allocated by vk_init_primitive_shader_stages, which is called
-	// from vk_init_primitive_shader_images. The buffers may not
-	// exist yet at vk_init_beam time (vk_init_beam runs before
-	// R_Init); skip the writes here and re-emit at vid_restart re-
-	// alloc once the buffers exist (vk_init_descriptors handles it).
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		uint32_t writeCount;
-
-		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-		dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dsAlloc.descriptorPool     = vk.descriptor_pool;
-		dsAlloc.descriptorSetCount = 1;
-		dsAlloc.pSetLayouts        = &vk.beam.set_layout;
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.beam.descriptor[i] ) );
-
-		memset( bufInfos, 0, sizeof( bufInfos ) );
-		bufInfos[0].buffer = vk.beam.header_buffer[i];
-		bufInfos[0].offset = 0;
-		bufInfos[0].range  = headerBytes;
-
-		memset( writes, 0, sizeof( writes ) );
-		writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[0].dstSet          = vk.beam.descriptor[i];
-		writes[0].dstBinding      = 0;
-		writes[0].descriptorCount = 1;
-		writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[0].pBufferInfo     = &bufInfos[0];
-
-		writeCount = 1;
-
-		if ( vk.primitive_stages_buffer != VK_NULL_HANDLE ) {
-			bufInfos[1].buffer = vk.primitive_stages_buffer;
-			bufInfos[1].offset = 0;
-			bufInfos[1].range  = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
-				* PRIMITIVE_STAGE_MAX * VK_PRIMITIVE_STAGE_BYTES;
-
-			writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[1].dstSet          = vk.beam.descriptor[i];
-			writes[1].dstBinding      = 2;
-			writes[1].descriptorCount = 1;
-			writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			writes[1].pBufferInfo     = &bufInfos[1];
-
-			bufInfos[2].buffer = vk.primitive_stage_counts_buffer;
-			bufInfos[2].offset = 0;
-			bufInfos[2].range  = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
-				* sizeof( uint32_t );
-
-			writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writes[2].dstSet          = vk.beam.descriptor[i];
-			writes[2].dstBinding      = 3;
-			writes[2].descriptorCount = 1;
-			writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			writes[2].pBufferInfo     = &bufInfos[2];
-
-			writeCount = 3;
-		}
-
-		qvkUpdateDescriptorSets( vk.device, writeCount, writes, 0, NULL );
-	}
+	// The complete set-0 cohort is created later through RAL after the shared
+	// stage buffers, texture views and dedicated repeat sampler all exist.
 
 	// ── dedicated REPEAT-mode sampler for binding 1 ───
 	// Beam UV scrolling can produce arbitrarily large out-of-range
@@ -6877,10 +6801,6 @@ void vk_init_beam( void )
 		gpInfo.layout              = vk.beam.pipeline_layout;
 		gpInfo.subpass             = 0;
 
-		// Adopt the legacy layout as the RAL externalLayout (boot sweep ran
-		// before this layout existed).
-		vk_ral_adopt_one_pipeline_layout( vk.beam.pipeline_layout, &vk.beam.ral_pipeline_layout, "wired-pl-beam" );
-
 		// Dynamic-rendering sibling, translated from the gpInfo above.
 		// Beam draws inside the main pass against the world depth.
 		vk.beam.ral_pipeline = vk_ral_create_pipeline_from_gpinfo( &gpInfo, vk.beam.ral_pipeline_layout,
@@ -6902,6 +6822,11 @@ void vk_shutdown_beam( void )
 	if ( vk.beam.ral_pipeline ) { Ral_DestroyPipeline( vk.beam.ral_pipeline ); vk.beam.ral_pipeline = NULL; }
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( vk.beam.ral_descriptor[i] ) {
+			Ral_DestroyBindGroup( vk.beam.ral_descriptor[i] );
+			vk.beam.ral_descriptor[i] = NULL;
+		}
+		vk.beam.descriptor[i] = VK_NULL_HANDLE;
 		if ( vk.beam.header_buffer[i] != VK_NULL_HANDLE ) {
 			vk_ral_unregister_buffer( vk.beam.header_buffer[i] );
 			qvkDestroyBuffer( vk.device, vk.beam.header_buffer[i], NULL );
@@ -6914,15 +6839,13 @@ void vk_shutdown_beam( void )
 		}
 	}
 
-	if ( vk.beam.pipeline_layout != VK_NULL_HANDLE ) {
-		qvkDestroyPipelineLayout( vk.device, vk.beam.pipeline_layout, NULL );
-		vk.beam.pipeline_layout = VK_NULL_HANDLE;
+	if ( vk.beam.ral_pipeline_layout ) {
+		Ral_DestroyPipelineLayout( vk.beam.ral_pipeline_layout );
+		vk.beam.ral_pipeline_layout = NULL;
 	}
-	if ( vk.beam.set_layout != VK_NULL_HANDLE ) {
-		if ( vk.beam.ral_bgl ) { Ral_DestroyBindGroupLayout( vk.beam.ral_bgl ); vk.beam.ral_bgl = NULL; }
-		qvkDestroyDescriptorSetLayout( vk.device, vk.beam.set_layout, NULL );
-		vk.beam.set_layout = VK_NULL_HANDLE;
-	}
+	vk.beam.pipeline_layout = VK_NULL_HANDLE;
+	if ( vk.beam.ral_bgl ) { Ral_DestroyBindGroupLayout( vk.beam.ral_bgl ); vk.beam.ral_bgl = NULL; }
+	vk.beam.set_layout = VK_NULL_HANDLE;
 	if ( vk.beam.ral_sampler_repeat ) {
 		Ral_DestroySampler( vk.beam.ral_sampler_repeat );
 		vk.beam.ral_sampler_repeat = NULL;
@@ -7203,44 +7126,37 @@ from header.flags.
 
 void vk_init_sprite( void )
 {
-	VkDescriptorSetLayoutBinding binds[1];
-	VkDescriptorSetLayoutCreateInfo layoutInfo;
-	VkPipelineLayoutCreateInfo pipeLayoutInfo;
+	ralBindEntry_t entries[1];
 	VkBufferCreateInfo bufInfo;
 	VkMemoryRequirements memReqs;
 	VkMemoryAllocateInfo allocInfo;
-	VkDescriptorSetAllocateInfo dsAlloc;
-	VkWriteDescriptorSet writes[1];
-	VkDescriptorBufferInfo bufInfos[1];
 	uint32_t headersBytes;
 	int i;
 
 	memset( &vk.sprite, 0, sizeof( vk.sprite ) );
 
-	memset( binds, 0, sizeof( binds ) );
-	binds[0].binding         = 0;
-	binds[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[0].descriptorCount = 1;
-	binds[0].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
-
-	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
-	layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	layoutInfo.bindingCount = 1;
-	layoutInfo.pBindings    = binds;
-	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.sprite.set_layout ) );
+	memset( entries, 0, sizeof( entries ) );
+	entries[0] = (ralBindEntry_t){ 0u, RAL_BIND_STORAGE_BUFFER, 1u,
+		RAL_STAGE_VERTEX, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+	if ( !vk_create_effect_bind_group_layout( entries, ARRAY_LEN( entries ),
+			"wired-sprite-set-layout", &vk.sprite.ral_bgl,
+			&vk.sprite.set_layout ) ) {
+		R_LOG( rch_init, SEV_WARN,
+			"RAL sprite bind-group layout unavailable; sprite primitives disabled\n" );
+		return;
+	}
 
 	// sprite push range retired. mvp/viewLeft/viewUp/frameParams now arrive
 	// via the shared effects per-draw UBO at set 1. Set 0 stays sprite's own SSBO set.
-	{
-		VkDescriptorSetLayout sets2[2] = { vk.sprite.set_layout, vk.set_layout_effects_ubo };
-
-		memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
-		pipeLayoutInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		pipeLayoutInfo.setLayoutCount         = 2;
-		pipeLayoutInfo.pSetLayouts            = sets2;
-		pipeLayoutInfo.pushConstantRangeCount = 0;
-		pipeLayoutInfo.pPushConstantRanges    = NULL;
-		VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.sprite.pipeline_layout ) );
+	if ( !vk_create_effect_pipeline_layout( vk.sprite.ral_bgl,
+			"wired-pl-sprite", &vk.sprite.ral_pipeline_layout,
+			&vk.sprite.pipeline_layout ) ) {
+		R_LOG( rch_init, SEV_WARN,
+			"RAL sprite pipeline layout unavailable; sprite primitives disabled\n" );
+		Ral_DestroyBindGroupLayout( vk.sprite.ral_bgl );
+		vk.sprite.ral_bgl = NULL;
+		vk.sprite.set_layout = VK_NULL_HANDLE;
+		return;
 	}
 
 	headersBytes = SPRITES_PER_FRAME * SPRITE_HEADER_BYTES;
@@ -7268,30 +7184,6 @@ void vk_init_sprite( void )
 		vk_ral_register_buffer( vk.sprite.headers_buffer[i], headersBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 		                        "vk.sprite.headers" );
-	}
-
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-		dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dsAlloc.descriptorPool     = vk.descriptor_pool;
-		dsAlloc.descriptorSetCount = 1;
-		dsAlloc.pSetLayouts        = &vk.sprite.set_layout;
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.sprite.descriptor[i] ) );
-
-		memset( bufInfos, 0, sizeof( bufInfos ) );
-		bufInfos[0].buffer = vk.sprite.headers_buffer[i];
-		bufInfos[0].offset = 0;
-		bufInfos[0].range  = headersBytes;
-
-		memset( writes, 0, sizeof( writes ) );
-		writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[0].dstSet          = vk.sprite.descriptor[i];
-		writes[0].dstBinding      = 0;
-		writes[0].descriptorCount = 1;
-		writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[0].pBufferInfo     = &bufInfos[0];
-
-		qvkUpdateDescriptorSets( vk.device, 1, writes, 0, NULL );
 	}
 
 	// Two graphics pipeline variants (alpha and additive). Same state
@@ -7394,10 +7286,6 @@ void vk_init_sprite( void )
 		gpInfo.layout              = vk.sprite.pipeline_layout;
 		gpInfo.subpass             = 0;
 
-		// Adopt the legacy layout as the RAL externalLayout (boot sweep ran
-		// before this layout existed). Once, before both variants.
-		vk_ral_adopt_one_pipeline_layout( vk.sprite.pipeline_layout, &vk.sprite.ral_pipeline_layout, "wired-pl-sprite" );
-
 		// 0 = alpha (SRC_ALPHA / ONE_MINUS_SRC_ALPHA),
 		// 1 = additive (SRC_ALPHA / ONE).
 		for ( variant = 0; variant < 2; variant++ ) {
@@ -7438,6 +7326,7 @@ void vk_shutdown_sprite( void )
 	if ( vk.sprite.ral_pipeline_additive ) { Ral_DestroyPipeline( vk.sprite.ral_pipeline_additive ); vk.sprite.ral_pipeline_additive = NULL; }
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		vk_ral_release_sprite_bindgroup( i );
 		if ( vk.sprite.headers_buffer[i] != VK_NULL_HANDLE ) {
 			vk_ral_unregister_buffer( vk.sprite.headers_buffer[i] );
 			qvkDestroyBuffer( vk.device, vk.sprite.headers_buffer[i], NULL );
@@ -7450,15 +7339,13 @@ void vk_shutdown_sprite( void )
 		}
 	}
 
-	if ( vk.sprite.pipeline_layout != VK_NULL_HANDLE ) {
-		qvkDestroyPipelineLayout( vk.device, vk.sprite.pipeline_layout, NULL );
-		vk.sprite.pipeline_layout = VK_NULL_HANDLE;
+	if ( vk.sprite.ral_pipeline_layout ) {
+		Ral_DestroyPipelineLayout( vk.sprite.ral_pipeline_layout );
+		vk.sprite.ral_pipeline_layout = NULL;
 	}
-	if ( vk.sprite.set_layout != VK_NULL_HANDLE ) {
-		if ( vk.sprite.ral_bgl ) { Ral_DestroyBindGroupLayout( vk.sprite.ral_bgl ); vk.sprite.ral_bgl = NULL; }
-		qvkDestroyDescriptorSetLayout( vk.device, vk.sprite.set_layout, NULL );
-		vk.sprite.set_layout = VK_NULL_HANDLE;
-	}
+	vk.sprite.pipeline_layout = VK_NULL_HANDLE;
+	if ( vk.sprite.ral_bgl ) { Ral_DestroyBindGroupLayout( vk.sprite.ral_bgl ); vk.sprite.ral_bgl = NULL; }
+	vk.sprite.set_layout = VK_NULL_HANDLE;
 
 	vk.sprite.available = qfalse;
 }
@@ -7621,12 +7508,6 @@ static void vk_init_particle_compute_ral_pipeline( void );
 
 void vk_init_particle( void )
 {
-	VkDescriptorSetLayoutBinding binds[5];
-	VkDescriptorSetLayoutCreateInfo layoutInfo;
-	VkPipelineLayoutCreateInfo pipeLayoutInfo;
-	VkDescriptorSetAllocateInfo dsAlloc;
-	VkWriteDescriptorSet writes[4];
-	VkDescriptorBufferInfo bufInfos[4];
 	VkBuffer frameBuffers[VK_RAL_FRAME_UNIFORM_SLOT_COUNT];
 	VkBuffer poolBuffers[VK_RAL_SHADOW_STORAGE_MAX_BUFFERS];
 	VkBuffer classBuffers[VK_RAL_SHADOW_STORAGE_MAX_BUFFERS];
@@ -7714,31 +7595,7 @@ void vk_init_particle( void )
 	}
 
 	// ── Compute descriptor set layout (4 bindings) ───────────────
-	memset( binds, 0, sizeof( binds ) );
-	binds[0].binding         = 0;
-	binds[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	binds[0].descriptorCount = 1;
-	binds[0].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
-	binds[1].binding         = 1;
-	binds[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[1].descriptorCount = 1;
-	binds[1].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
-	binds[2].binding         = 2;
-	binds[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[2].descriptorCount = 1;
-	binds[2].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
-	binds[3].binding         = 3;
-	binds[3].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[3].descriptorCount = 1;
-	binds[3].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
-
-	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
-	layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	layoutInfo.bindingCount = 4;
-	layoutInfo.pBindings    = binds;
-	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.particle.compute_set_layout ) );
 	{
-		ralBackend_t *backend = vk_ral_get_backend();
 		ralBindEntry_t entries[4];
 		memset( entries, 0, sizeof( entries ) );
 		entries[0].binding = 0; entries[0].count = 1;
@@ -7749,20 +7606,24 @@ void vk_init_particle( void )
 		entries[1].stageFlags = RAL_STAGE_COMPUTE;
 		entries[2] = entries[1]; entries[2].binding = 2;
 		entries[3] = entries[1]; entries[3].binding = 3;
-		if ( backend ) {
-			vk.particle.ral_bgl_compute = Ral_AdoptBindGroupLayout( backend,
-				vk.particle.compute_set_layout, 4u, entries,
-				"wired-particle-compute-set-layout-adopted" );
+		if ( !vk_create_effect_bind_group_layout( entries, ARRAY_LEN( entries ),
+				"wired-particle-compute-set-layout",
+				&vk.particle.ral_bgl_compute,
+				&vk.particle.compute_set_layout ) ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Particle RAL compute bind-group layout creation failed" );
+			return;
 		}
 	}
 
-	memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
-	pipeLayoutInfo.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	pipeLayoutInfo.setLayoutCount = 1;
-	pipeLayoutInfo.pSetLayouts    = &vk.particle.compute_set_layout;
-	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.particle.compute_pipeline_layout ) );
-	vk_ral_adopt_one_pipeline_layout( vk.particle.compute_pipeline_layout,
-		&vk.particle.ral_compute_pipeline_layout, "wired-pl-particle-compute" );
+	if ( !vk_create_single_bind_group_pipeline_layout(
+			vk.particle.ral_bgl_compute, "wired-pl-particle-compute",
+			&vk.particle.ral_compute_pipeline_layout,
+			&vk.particle.compute_pipeline_layout ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Particle RAL compute pipeline layout creation failed" );
+		return;
+	}
 
 	// ── Render descriptor set layout (5 bindings) ────────────────
 	// binding 0  UBO         — ParticleFrame (vertex + fragment: frag reads the
@@ -7776,35 +7637,27 @@ void vk_init_particle( void )
 	// binding 4  IMAGE_SAMPLER — the shared scene-depth copy (vk.sceneDepth),
 	//            sampled in the fragment for the soft-particle depth fade. Same
 	//            resource + per-set combined-sampler convention as the decal pass.
-	memset( binds, 0, sizeof( binds ) );
-	binds[0].binding         = 0;
-	binds[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	binds[0].descriptorCount = 1;
-	binds[0].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-	binds[1].binding         = 1;
-	binds[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[1].descriptorCount = 1;
-	binds[1].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
-	binds[2].binding         = 2;
-	binds[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[2].descriptorCount = 1;
-	binds[2].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
-	binds[3].binding         = 3;
-	binds[3].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	binds[3].descriptorCount = PARTICLE_SAMPLER_COUNT;
-	binds[3].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
-	binds[3].pImmutableSamplers = NULL;
-	binds[4].binding         = 4;
-	binds[4].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	binds[4].descriptorCount = 1;
-	binds[4].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
-	binds[4].pImmutableSamplers = NULL;
-
-	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
-	layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	layoutInfo.bindingCount = 5;
-	layoutInfo.pBindings    = binds;
-	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.particle.render_set_layout ) );
+	{
+		ralBindEntry_t entries[5];
+		memset( entries, 0, sizeof( entries ) );
+		entries[0] = (ralBindEntry_t){ 0u, RAL_BIND_UNIFORM_BUFFER, 1u,
+			RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+		entries[1] = (ralBindEntry_t){ 1u, RAL_BIND_STORAGE_BUFFER, 1u,
+			RAL_STAGE_VERTEX, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+		entries[2] = entries[1]; entries[2].binding = 2u;
+		entries[3] = (ralBindEntry_t){ 3u, RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+			PARTICLE_SAMPLER_COUNT, RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_2D, qfalse };
+		entries[4] = (ralBindEntry_t){ 4u, RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+			1u, RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_2D, qfalse };
+		if ( !vk_create_effect_bind_group_layout( entries, ARRAY_LEN( entries ),
+				"wired-particle-render-set-layout",
+				&vk.particle.ral_bgl_render,
+				&vk.particle.render_set_layout ) ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Particle RAL render bind-group layout creation failed" );
+			return;
+		}
+	}
 
 	// Shared sampler for the per-class texture array. Linear filter,
 	// clamp-to-edge, no anisotropy — appropriate for billboard
@@ -7819,13 +7672,17 @@ void vk_init_particle( void )
 		sd.gl_min_filter = GL_LINEAR;
 		sd.noAnisotropy  = qtrue;
 		vk.particle.sampler = vk_find_sampler( &sd );
+		vk.particle.ral_sampler = vk_ral_sampler_for_definition( &sd );
 	}
 
-	memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
-	pipeLayoutInfo.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	pipeLayoutInfo.setLayoutCount = 1;
-	pipeLayoutInfo.pSetLayouts    = &vk.particle.render_set_layout;
-	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.particle.render_pipeline_layout ) );
+	if ( !vk_create_single_bind_group_pipeline_layout(
+			vk.particle.ral_bgl_render, "wired-pl-particle-render",
+			&vk.particle.ral_render_pipeline_layout,
+			&vk.particle.render_pipeline_layout ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Particle RAL render pipeline layout creation failed" );
+		return;
+	}
 
 	// ── Particle pool buffers (RAL-owned shadow storage) ─────────
 	// the ping-pong index math at the readPool/writePool
@@ -7844,137 +7701,19 @@ void vk_init_particle( void )
 	// exact elements dirty, so flushing the ping-read pool cannot overwrite
 	// unrelated GPU-compute results.
 
-	// ── Allocate compute descriptor sets (NUM_COMMAND_BUFFERS slots) ─
-	// compute_descriptor[i] reads pool[i], writes pool[1-i].
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		uint32_t readPool  = (uint32_t)i;            // 0 or 1
-		uint32_t writePool = (uint32_t)(1 - i);      // 1 or 0
-
-		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-		dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dsAlloc.descriptorPool     = vk.descriptor_pool;
-		dsAlloc.descriptorSetCount = 1;
-		dsAlloc.pSetLayouts        = &vk.particle.compute_set_layout;
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.particle.compute_descriptor[i] ) );
-
-		memset( bufInfos, 0, sizeof( bufInfos ) );
-		bufInfos[0].buffer = frameBuffers[i];
-		bufInfos[0].offset = 0;
-		bufInfos[0].range  = frameBytes;
-		bufInfos[1].buffer = poolBuffers[readPool];
-		bufInfos[1].offset = 0;
-		bufInfos[1].range  = poolBytes;
-		bufInfos[2].buffer = poolBuffers[writePool];
-		bufInfos[2].offset = 0;
-		bufInfos[2].range  = poolBytes;
-		bufInfos[3].buffer = classBuffers[0];
-		bufInfos[3].offset = 0;
-		bufInfos[3].range  = classesBytes;
-
-		memset( writes, 0, sizeof( writes ) );
-		writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[0].dstSet          = vk.particle.compute_descriptor[i];
-		writes[0].dstBinding      = 0;
-		writes[0].descriptorCount = 1;
-		writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		writes[0].pBufferInfo     = &bufInfos[0];
-		writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[1].dstSet          = vk.particle.compute_descriptor[i];
-		writes[1].dstBinding      = 1;
-		writes[1].descriptorCount = 1;
-		writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[1].pBufferInfo     = &bufInfos[1];
-		writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[2].dstSet          = vk.particle.compute_descriptor[i];
-		writes[2].dstBinding      = 2;
-		writes[2].descriptorCount = 1;
-		writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[2].pBufferInfo     = &bufInfos[2];
-		writes[3].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[3].dstSet          = vk.particle.compute_descriptor[i];
-		writes[3].dstBinding      = 3;
-		writes[3].descriptorCount = 1;
-		writes[3].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[3].pBufferInfo     = &bufInfos[3];
-
-		qvkUpdateDescriptorSets( vk.device, 4, writes, 0, NULL );
+	// ── Create compute bind groups (NUM_COMMAND_BUFFERS slots) ───
+	// RAL owns allocation and writes against the exact frame/pool/class
+	// receipts. compute_descriptor[i] is only the borrowed native mirror.
+	if ( !vk_ral_refresh_particle_compute_bindgroups() ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Particle RAL compute bind-group creation failed" );
+		return;
 	}
 
-	// ── Allocate render descriptor sets (NUM_COMMAND_BUFFERS slots) ─
-	// render_descriptor[i] reads pool[1-i] (the post-compute output
-	// when compute_descriptor[i] just ran).
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		uint32_t renderPool = (uint32_t)(1 - i);     // 1 or 0
-
-		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-		dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dsAlloc.descriptorPool     = vk.descriptor_pool;
-		dsAlloc.descriptorSetCount = 1;
-		dsAlloc.pSetLayouts        = &vk.particle.render_set_layout;
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.particle.render_descriptor[i] ) );
-
-		memset( bufInfos, 0, sizeof( bufInfos ) );
-		bufInfos[0].buffer = frameBuffers[i];
-		bufInfos[0].offset = 0;
-		bufInfos[0].range  = frameBytes;
-		bufInfos[1].buffer = poolBuffers[renderPool];
-		bufInfos[1].offset = 0;
-		bufInfos[1].range  = poolBytes;
-		bufInfos[2].buffer = classBuffers[0];
-		bufInfos[2].offset = 0;
-		bufInfos[2].range  = classesBytes;
-
-		memset( writes, 0, sizeof( writes ) );
-		writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[0].dstSet          = vk.particle.render_descriptor[i];
-		writes[0].dstBinding      = 0;
-		writes[0].descriptorCount = 1;
-		writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		writes[0].pBufferInfo     = &bufInfos[0];
-		writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[1].dstSet          = vk.particle.render_descriptor[i];
-		writes[1].dstBinding      = 1;
-		writes[1].descriptorCount = 1;
-		writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[1].pBufferInfo     = &bufInfos[1];
-		writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[2].dstSet          = vk.particle.render_descriptor[i];
-		writes[2].dstBinding      = 2;
-		writes[2].descriptorCount = 1;
-		writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[2].pBufferInfo     = &bufInfos[2];
-
-		qvkUpdateDescriptorSets( vk.device, 3, writes, 0, NULL );
-
-		// Binding 4 (shared scene-depth) for the soft-particle depth fade. Written
-		// here if the depth view already exists at particle-init time (the
-		// attachments are created before this); re-asserted on every attachment
-		// recreate by the vk_init_descriptors realloc path. Same vk.sceneDepth
-		// resource + combined-sampler convention as the decal pass.
-		if ( vk.sceneDepth.view != VK_NULL_HANDLE ) {
-			VkDescriptorImageInfo depthInfo;
-			VkWriteDescriptorSet  depthWrite;
-			memset( &depthInfo, 0, sizeof( depthInfo ) );
-			depthInfo.sampler     = vk.sceneDepth.sampler;
-			depthInfo.imageView   = vk.sceneDepth.view;
-			depthInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			memset( &depthWrite, 0, sizeof( depthWrite ) );
-			depthWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			depthWrite.dstSet          = vk.particle.render_descriptor[i];
-			depthWrite.dstBinding      = 4;
-			depthWrite.descriptorCount = 1;
-			depthWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			depthWrite.pImageInfo      = &depthInfo;
-			qvkUpdateDescriptorSets( vk.device, 1, &depthWrite, 0, NULL );
-		}
-
-		// Note on binding 3 (per-class sampler array): population is
-		// deferred. vk_init_particle runs from InitOpenGL →
-		// vk_initialize, BEFORE R_InitImages creates tr.whiteImage.
-		// R_Init calls vk_init_particle_textures AFTER R_InitImages
-		// to populate this binding eagerly against a valid
-		// tr.whiteImage.
-	}
+	// Render groups require the complete 96-view array and are therefore
+	// created later by vk_init_particle_textures, after R_InitImages publishes
+	// the current white fallback and per-image RAL views.
+	vk.particle.textureGeneration = 1u;
 
 
 	// The embedded SPIR-V definitions are emitted later in this translation
@@ -8097,10 +7836,6 @@ void vk_init_particle( void )
 		gpInfo.layout              = vk.particle.render_pipeline_layout;
 		gpInfo.subpass             = 0;
 
-		// Adopt the legacy layout as the RAL externalLayout (boot sweep ran
-		// before this layout existed). Once, before both variants.
-		vk_ral_adopt_one_pipeline_layout( vk.particle.render_pipeline_layout, &vk.particle.ral_render_pipeline_layout, "wired-pl-particle-render" );
-
 		// 0 = alpha (SRC_ALPHA / ONE_MINUS_SRC_ALPHA),
 		// 1 = additive (SRC_ALPHA / ONE).
 		for ( variant = 0; variant < 2; variant++ ) {
@@ -8163,10 +7898,6 @@ void vk_init_particle( void )
 // startup failure rather than a silent unbound-texture issue.
 void vk_init_particle_textures( void )
 {
-	VkDescriptorImageInfo imgInfos[PARTICLE_SAMPLER_COUNT];
-	VkWriteDescriptorSet  imgWrite;
-	uint32_t j, k;
-
 	if ( !vk.particle.available ) return;
 	if ( tr.whiteImage == NULL ) {
 		ri.Terminate( TERM_UNRECOVERABLE,
@@ -8175,175 +7906,81 @@ void vk_init_particle_textures( void )
 		return;
 	}
 
-	for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-		// Slots [0..MAX_PARTICLE_CLASSES-1]: per-class textures.
-		// Slots [MAX_PARTICLE_CLASSES..PARTICLE_SAMPLER_COUNT-1]: the
-		// flipbook frame-texture pool. Both fall back to tr.whiteImage
-		// for any unregistered slot, so frameCount-0 builds are inert.
-		for ( k = 0; k < PARTICLE_SAMPLER_COUNT; k++ ) {
-			image_t *img;
-			if ( k < MAX_PARTICLE_CLASSES ) {
-				img = vk.particle.classImages[k]
-				    ? vk.particle.classImages[k] : tr.whiteImage;
-			} else {
-				image_t *frameImg = vk.particle.frameImages[k - MAX_PARTICLE_CLASSES];
-				img = frameImg ? frameImg : tr.whiteImage;
-			}
-			memset( &imgInfos[k], 0, sizeof( imgInfos[k] ) );
-			imgInfos[k].imageView   = img->view;
-			imgInfos[k].sampler     = vk.particle.sampler;
-			imgInfos[k].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		}
-		memset( &imgWrite, 0, sizeof( imgWrite ) );
-		imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		imgWrite.dstSet          = vk.particle.render_descriptor[j];
-		imgWrite.dstBinding      = 3;
-		imgWrite.dstArrayElement = 0;
-		imgWrite.descriptorCount = PARTICLE_SAMPLER_COUNT;
-		imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		imgWrite.pImageInfo      = imgInfos;
-		qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+	if ( !vk_ral_refresh_particle_render_bindgroups(
+			( 1u << NUM_COMMAND_BUFFERS ) - 1u ) ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"particle render RAL bind-group cohort unavailable; disabling particles\n" );
+		vk.particle.available = qfalse;
 	}
 }
 
 
 void vk_particle_set_class_image( int handle, image_t *image )
 {
-	VkDescriptorImageInfo imgInfo;
-	VkWriteDescriptorSet  imgWrite;
-	uint32_t              j;
-
-	// encapsulate the per-class sampler-array slot update
-	// so RE_RegisterParticleClass (in tr_scene.c) doesn't need
-	// access to the static qvk* function pointers in this TU.
-	// Writes the same (image->view, vk.particle.sampler) pair into
-	// slot (handle - 1) of binding 3 on every per-frame render
-	// descriptor set. The other 63 slots were populated with
-	// tr.whiteImage by vk_init_particle_textures (called from
-	// R_Init after R_InitImages); this function only touches the
-	// registered class's slot.
+	// The caller has already published classImages[handle-1]. Never mutate an
+	// in-flight descriptor set; advance the registry generation and let the
+	// current render slot replace its complete bind group before use.
 	if ( !vk.particle.available ) return;
 	if ( handle < 1 || handle > MAX_PARTICLE_CLASSES ) return;
 	if ( image == NULL ) return;
-
-	memset( &imgInfo, 0, sizeof( imgInfo ) );
-	imgInfo.imageView   = image->view;
-	imgInfo.sampler     = vk.particle.sampler;
-	imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-	for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-		memset( &imgWrite, 0, sizeof( imgWrite ) );
-		imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		imgWrite.dstSet          = vk.particle.render_descriptor[j];
-		imgWrite.dstBinding      = 3;
-		imgWrite.dstArrayElement = (uint32_t)( handle - 1 );
-		imgWrite.descriptorCount = 1;
-		imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		imgWrite.pImageInfo      = &imgInfo;
-		qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+	if ( vk.particle.textureGeneration >= UINT64_MAX - 1u ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"particle texture registry generation exhausted; disabling particles\n" );
+		vk.particle.available = qfalse;
+		return;
 	}
+	++vk.particle.textureGeneration;
 }
 
 
-// Flipbook frame-pool variant of vk_particle_set_class_image. Writes a
-// resolved frame texture into binding-3 slot (MAX_PARTICLE_CLASSES +
-// frameSlot) — the frame pool [64..95] — and caches it in frameImages[]
-// so the descriptor re-alloc after a pool reset can re-walk it. frameSlot
-// is [0..FRAME_POOL_SIZE-1]; the caller allocates it from frameNextSlot.
+// Flipbook frame-pool variant of vk_particle_set_class_image. Caches the
+// resolved view in frameImages[] and advances the same immutable-group
+// generation. frameSlot is [0..FRAME_POOL_SIZE-1].
 void vk_particle_set_frame_image( int frameSlot, image_t *image )
 {
-	VkDescriptorImageInfo imgInfo;
-	VkWriteDescriptorSet  imgWrite;
-	uint32_t              j;
-
 	if ( !vk.particle.available ) return;
 	if ( frameSlot < 0 || frameSlot >= FRAME_POOL_SIZE ) return;
 	if ( image == NULL ) return;
 
 	vk.particle.frameImages[ frameSlot ] = image;
-
-	memset( &imgInfo, 0, sizeof( imgInfo ) );
-	imgInfo.imageView   = image->view;
-	imgInfo.sampler     = vk.particle.sampler;
-	imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-	for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-		memset( &imgWrite, 0, sizeof( imgWrite ) );
-		imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		imgWrite.dstSet          = vk.particle.render_descriptor[j];
-		imgWrite.dstBinding      = 3;
-		imgWrite.dstArrayElement = (uint32_t)( MAX_PARTICLE_CLASSES + frameSlot );
-		imgWrite.descriptorCount = 1;
-		imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		imgWrite.pImageInfo      = &imgInfo;
-		qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+	if ( vk.particle.textureGeneration >= UINT64_MAX - 1u ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"particle frame texture registry generation exhausted; disabling particles\n" );
+		vk.particle.available = qfalse;
+		return;
 	}
-}
-
-
-// Write decal sampler-array slot `slot` (image) into ONE cmd-buffer set's
-// binding 2. Internal helper for the deferred-write scheme below; `setIdx`
-// must be a set that is NOT currently pending on the GPU (the caller
-// guarantees this — only ever the being-recorded cmd_index set).
-static void vk_decal_write_slot_to_set( int slot, image_t *image, uint32_t setIdx )
-{
-	VkDescriptorImageInfo imgInfo;
-	VkWriteDescriptorSet  imgWrite;
-
-	memset( &imgInfo, 0, sizeof( imgInfo ) );
-	imgInfo.imageView   = image->view;
-	imgInfo.sampler     = vk.decal.sampler;
-	imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-	memset( &imgWrite, 0, sizeof( imgWrite ) );
-	imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	imgWrite.dstSet          = vk.decal.render_descriptor[setIdx];
-	imgWrite.dstBinding      = 2;
-	imgWrite.dstArrayElement = (uint32_t)slot;
-	imgWrite.descriptorCount = 1;
-	imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	imgWrite.pImageInfo      = &imgInfo;
-	qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+	++vk.particle.textureGeneration;
 }
 
 
 void vk_decal_set_texture_image( int slot, image_t *image )
 {
-	// Called from RE_AddDecalToScene's find-or-add registry when a new decal
-	// shader first claims a slot. This runs during cgame scene-submission,
-	// BEFORE vk_begin_frame — so NEITHER cmd-buffer set is safe to touch here
-	// (vk.cmd_index still names last frame's set, which may be pending on the
-	// GPU). So write NOTHING now: the registry entry (vk.decal.images[slot])
-	// was already recorded by the caller, and the descriptor write is deferred
-	// to vk_decal_flush_pending_images, called from RB_DrawDecals AFTER
-	// vk_begin_frame where the current set is being recorded (never pending).
-	// This is the load-bearing fix for VUID-03047 (descriptor updated while a
-	// command buffer using it is in flight). A brand-new mark texture shows
-	// tr.whiteImage for at most one frame before the flush binds it.
-	(void)slot;
-	(void)image;
+	// The caller has already published images[slot]. Never update an in-flight
+	// native set here; advance the immutable registry generation and let the
+	// current fence-safe slot replace its complete RAL group before drawing.
+	if ( !vk.decal.available || slot < 0 || slot >= MAX_DECAL_TEXTURES || !image )
+		return;
+	if ( vk.decal.textureGeneration >= UINT64_MAX - 1u ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"decal texture registry generation exhausted; disabling decals\n" );
+		vk.decal.available = qfalse;
+		return;
+	}
+	++vk.decal.textureGeneration;
 }
 
 
-// Catch the current cmd-buffer set's binding-2 sampler array up to the full
-// texture registry. Called from RB_DrawDecals — AFTER vk_begin_frame, so the
-// vk.cmd_index set is being actively recorded (NOT pending on the GPU); writing
-// it here is safe. Any slots added (via vk_decal_set_texture_image, which only
-// records the registry) since this set was last caught up are written now.
-// Each per-cmd-buffer set converges independently as it comes around, within
-// NUM_COMMAND_BUFFERS frames of the last registry growth. No-op once caught up.
-void vk_decal_flush_pending_images( void )
+// Bring the current fence-safe slot to the immutable registry generation.
+// Other in-flight slots retain their old complete group and converge when
+// their own command slot becomes current; no descriptor is mutated in place.
+qboolean vk_decal_flush_pending_images( void )
 {
-	uint32_t idx, k;
-
-	if ( !vk.decal.available ) return;
-
-	idx = vk.cmd_index;
-	for ( k = vk.decal.imagesWritten[ idx ]; k < vk.decal.numImages; k++ ) {
-		image_t *img = vk.decal.images[k] ? vk.decal.images[k] : tr.whiteImage;
-		vk_decal_write_slot_to_set( (int)k, img, idx );
-	}
-	vk.decal.imagesWritten[ idx ] = vk.decal.numImages;
+	const uint32_t idx = vk.cmd_index;
+	if ( !vk.decal.available || idx >= NUM_COMMAND_BUFFERS ) return qfalse;
+	if ( vk.decal.renderGroupTextureGeneration[idx]
+			!= vk.decal.textureGeneration
+			&& !vk_ral_refresh_decal_render_bindgroups( 1u << idx ) ) return qfalse;
+	return vk.decal.ral_render_descriptor[idx] != NULL;
 }
 
 
@@ -8400,113 +8037,17 @@ void vk_init_primitive_shader_images( void )
 	// via RE_RegisterPrimitiveShader, which re-populates entries.
 	vk_init_primitive_shader_stages();
 
-	// Sampler reuse: vk.particle.sampler is a shared linear/clamp/
-	// no-anisotropy sampler created in vk_init_particle. Used by
-	// ribbon binding 2 (helix has uvScroll=0 so CLAMP_TO_EDGE is
-	// fine). Beam binding 1 uses vk.beam.sampler_repeat instead —
-	// scrolling lightning shaders need REPEAT to
-	// wrap large UVs without saturating to the texture edge.
-	{
-		VkDescriptorImageInfo imgInfosClamp[PRIMITIVE_SHADER_IMAGE_MAX];
-		VkDescriptorImageInfo imgInfosRepeat[PRIMITIVE_SHADER_IMAGE_MAX];
-		VkWriteDescriptorSet  imgWrite;
-		uint32_t              j, k;
-
-		// Build two parallel imageInfo arrays — same images, two
-		// samplers. Cheap (each is 16 entries × NUM_COMMAND_BUFFERS
-		// frames; rebuilt once per init/vid_restart, not per frame).
-		for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-			for ( k = 0; k < PRIMITIVE_SHADER_IMAGE_MAX; k++ ) {
-				image_t *img = vk_primitive_shader_images[k];
-				memset( &imgInfosClamp[k], 0, sizeof( imgInfosClamp[k] ) );
-				imgInfosClamp[k].imageView   = img->view;
-				imgInfosClamp[k].sampler     = vk.particle.sampler;
-				imgInfosClamp[k].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-				memset( &imgInfosRepeat[k], 0, sizeof( imgInfosRepeat[k] ) );
-				imgInfosRepeat[k].imageView   = img->view;
-				imgInfosRepeat[k].sampler     = vk.beam.sampler_repeat;
-				imgInfosRepeat[k].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			}
-
-			if ( vk.ribbon.available ) {
-				memset( &imgWrite, 0, sizeof( imgWrite ) );
-				imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				imgWrite.dstSet          = vk.ribbon.descriptor[j];
-				imgWrite.dstBinding      = 2;
-				imgWrite.dstArrayElement = 0;
-				imgWrite.descriptorCount = PRIMITIVE_SHADER_IMAGE_MAX;
-				imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				imgWrite.pImageInfo      = imgInfosClamp;
-				qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
-			}
-
-			// Rail-ribbon shares ribbon.frag → same binding-2 texture array,
-			// same CLAMP sampler.
-			if ( vk.railRibbon.available ) {
-				memset( &imgWrite, 0, sizeof( imgWrite ) );
-				imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				imgWrite.dstSet          = vk.railRibbon.descriptor[j];
-				imgWrite.dstBinding      = 2;
-				imgWrite.dstArrayElement = 0;
-				imgWrite.descriptorCount = PRIMITIVE_SHADER_IMAGE_MAX;
-				imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				imgWrite.pImageInfo      = imgInfosClamp;
-				qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
-			}
-
-			if ( vk.beam.available ) {
-				memset( &imgWrite, 0, sizeof( imgWrite ) );
-				imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				imgWrite.dstSet          = vk.beam.descriptor[j];
-				imgWrite.dstBinding      = 1;
-				imgWrite.dstArrayElement = 0;
-				imgWrite.descriptorCount = PRIMITIVE_SHADER_IMAGE_MAX;
-				imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				imgWrite.pImageInfo      = imgInfosRepeat;
-				qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
-			}
-
-			// bind the multi-stage SSBOs to the beam set's
-			// bindings 2 and 3. vk_init_primitive_shader_stages
-			// (called above) just allocated these buffers, so this
-			// is the earliest time the writes are valid. On vid_restart
-			// the descriptor pool reset has invalidated the previous
-			// writes; re-emitting here keeps the set healthy.
-			if ( vk.beam.available
-			  && vk.primitive_stages_buffer != VK_NULL_HANDLE ) {
-				VkDescriptorBufferInfo bufInfos[2];
-				VkWriteDescriptorSet   bufWrites[2];
-
-				memset( bufInfos, 0, sizeof( bufInfos ) );
-				bufInfos[0].buffer = vk.primitive_stages_buffer;
-				bufInfos[0].offset = 0;
-				bufInfos[0].range  = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
-					* PRIMITIVE_STAGE_MAX * VK_PRIMITIVE_STAGE_BYTES;
-
-				bufInfos[1].buffer = vk.primitive_stage_counts_buffer;
-				bufInfos[1].offset = 0;
-				bufInfos[1].range  = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
-					* sizeof( uint32_t );
-
-				memset( bufWrites, 0, sizeof( bufWrites ) );
-				bufWrites[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				bufWrites[0].dstSet          = vk.beam.descriptor[j];
-				bufWrites[0].dstBinding      = 2;
-				bufWrites[0].descriptorCount = 1;
-				bufWrites[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-				bufWrites[0].pBufferInfo     = &bufInfos[0];
-
-				bufWrites[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				bufWrites[1].dstSet          = vk.beam.descriptor[j];
-				bufWrites[1].dstBinding      = 3;
-				bufWrites[1].descriptorCount = 1;
-				bufWrites[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-				bufWrites[1].pBufferInfo     = &bufInfos[1];
-
-				qvkUpdateDescriptorSets( vk.device, 2, bufWrites, 0, NULL );
-			}
-		}
+	// Publish every per-frame primitive group atomically from the exact RAL arena.
+	// A failed candidate leaves the previous cohort untouched; on first init the
+	// three primitive families simply stay unavailable rather than terminating
+	// the renderer or reviving raw descriptor ownership.
+	if ( !vk_ral_refresh_primitive_bindgroups() ) {
+		R_LOG( rch_ral, SEV_ERROR,
+			"primitive RAL bind-group cohort publication failed; disabling ribbon/rail/beam\n" );
+		vk_ral_release_primitive_bindgroups();
+		vk.ribbon.available = qfalse;
+		vk.railRibbon.available = qfalse;
+		vk.beam.available = qfalse;
 	}
 }
 
@@ -8515,10 +8056,9 @@ void vk_init_primitive_shader_images( void )
 ================
 vk_register_primitive_shader_image
 
-Idempotently register an image_t at registry slot `handle` and push
-the change to every primitive descriptor set that consumes the
-registry. Today: ribbon only. Beam (turn 5B) will append a second
-update call here.
+Idempotently register an image_t at registry slot `slot` and publish
+the change to every ribbon, rail-ribbon and beam RAL bind group that
+consumes the registry.
 
 Out-of-range handles (>= PRIMITIVE_SHADER_IMAGE_MAX) are silently
 ignored — the shader-side slot clamp at the fragment shader
@@ -8529,55 +8069,40 @@ than crashing.
 */
 void vk_register_primitive_shader_image( int slot, image_t *image )
 {
-	VkDescriptorImageInfo imgInfoClamp;
-	VkDescriptorImageInfo imgInfoRepeat;
-	VkWriteDescriptorSet  imgWrite;
-	uint32_t              j;
+	uint32_t j;
 
 	// parameter is now a primitive registry SLOT, not a qhandle.
 	// Slot 0 reserved for tr.whiteImage; usable slots [1, PRIMITIVE_SHADER_IMAGE_MAX).
 	if ( slot <= 0 || slot >= PRIMITIVE_SHADER_IMAGE_MAX ) return;
 	if ( image == NULL ) return;
 	if ( vk_primitive_shader_images[slot] == image ) return; // idempotent
+	if ( !image->ralResidencyView
+	  || !Ral_GetTextureViewHandle( image->ralResidencyView ) ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"primitive image slot %d has no resident RAL view; keeping prior publication\n",
+			slot );
+		return;
+	}
+	for ( j = 0; j < NUM_COMMAND_BUFFERS; ++j ) {
+		if ( ( vk.ribbon.available && !vk.ribbon.ral_descriptor[j] )
+		  || ( vk.railRibbon.available && !vk.railRibbon.ral_descriptor[j] )
+		  || ( vk.beam.available && !vk.beam.ral_descriptor[j] ) ) {
+			R_LOG( rch_ral, SEV_WARN,
+				"primitive image slot %d found an incomplete RAL group cohort; keeping prior publication\n",
+				slot );
+			return;
+		}
+	}
 
 	vk_primitive_shader_images[slot] = image;
 
-	// ribbon binding 2 uses vk.particle.sampler (CLAMP_TO_EDGE);
-	// beam binding 1 uses vk.beam.sampler_repeat (REPEAT). Same image,
-	// different sampler.
-	memset( &imgInfoClamp, 0, sizeof( imgInfoClamp ) );
-	imgInfoClamp.imageView   = image->view;
-	imgInfoClamp.sampler     = vk.particle.sampler;
-	imgInfoClamp.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-	memset( &imgInfoRepeat, 0, sizeof( imgInfoRepeat ) );
-	imgInfoRepeat.imageView   = image->view;
-	imgInfoRepeat.sampler     = vk.beam.sampler_repeat;
-	imgInfoRepeat.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
 	for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-		if ( vk.ribbon.available ) {
-			memset( &imgWrite, 0, sizeof( imgWrite ) );
-			imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			imgWrite.dstSet          = vk.ribbon.descriptor[j];
-			imgWrite.dstBinding      = 2;
-			imgWrite.dstArrayElement = (uint32_t)slot;
-			imgWrite.descriptorCount = 1;
-			imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			imgWrite.pImageInfo      = &imgInfoClamp;
-			qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
-		}
-		if ( vk.beam.available ) {
-			memset( &imgWrite, 0, sizeof( imgWrite ) );
-			imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			imgWrite.dstSet          = vk.beam.descriptor[j];
-			imgWrite.dstBinding      = 1;
-			imgWrite.dstArrayElement = (uint32_t)slot;
-			imgWrite.descriptorCount = 1;
-			imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			imgWrite.pImageInfo      = &imgInfoRepeat;
-			qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
-		}
+		if ( vk.ribbon.available ) Ral_BindGroupSetTextureViewAt(
+			vk.ribbon.ral_descriptor[j], (uint32_t)slot, image->ralResidencyView );
+		if ( vk.railRibbon.available ) Ral_BindGroupSetTextureViewAt(
+			vk.railRibbon.ral_descriptor[j], (uint32_t)slot, image->ralResidencyView );
+		if ( vk.beam.available ) Ral_BindGroupSetTextureViewAt(
+			vk.beam.ral_descriptor[j], (uint32_t)slot, image->ralResidencyView );
 	}
 }
 
@@ -8822,45 +8347,33 @@ void vk_shutdown_primitive_stages( void )
 
 void vk_shutdown_particle( void )
 {
-	int i;
-
 	if ( vk.particle.ral_render_pipeline_alpha ) { Ral_DestroyPipeline( vk.particle.ral_render_pipeline_alpha ); vk.particle.ral_render_pipeline_alpha = NULL; }
 	if ( vk.particle.ral_render_pipeline_additive ) { Ral_DestroyPipeline( vk.particle.ral_render_pipeline_additive ); vk.particle.ral_render_pipeline_additive = NULL; }
 	if ( vk.particle.ral_compute_pipeline ) { Ral_DestroyPipeline( vk.particle.ral_compute_pipeline ); vk.particle.ral_compute_pipeline = NULL; }
 
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.particle.ral_compute_descriptor[i] ) {
-			Ral_DestroyBindGroup( vk.particle.ral_compute_descriptor[i] );
-			vk.particle.ral_compute_descriptor[i] = NULL;
-		}
-		if ( vk.particle.ral_render_descriptor[i] ) {
-			Ral_DestroyBindGroup( vk.particle.ral_render_descriptor[i] );
-			vk.particle.ral_render_descriptor[i] = NULL;
-		}
-	}
+	vk_ral_release_particle_compute_bindgroups();
+	vk_ral_release_particle_render_bindgroups();
 	VK_RalFrameUniformRelease( &vk_particle_frame );
 	VK_RalShadowStorageRelease( &vk_particle_class_storage );
 	VK_RalShadowStorageRelease( &vk_particle_pool_storage );
 
-	if ( vk.particle.render_pipeline_layout != VK_NULL_HANDLE ) {
-		qvkDestroyPipelineLayout( vk.device, vk.particle.render_pipeline_layout, NULL );
+	if ( vk.particle.ral_render_pipeline_layout ) {
+		Ral_DestroyPipelineLayout( vk.particle.ral_render_pipeline_layout );
+		vk.particle.ral_render_pipeline_layout = NULL;
 		vk.particle.render_pipeline_layout = VK_NULL_HANDLE;
 	}
-	if ( vk.particle.compute_pipeline_layout != VK_NULL_HANDLE ) {
-		qvkDestroyPipelineLayout( vk.device, vk.particle.compute_pipeline_layout, NULL );
+	if ( vk.particle.ral_compute_pipeline_layout ) {
+		Ral_DestroyPipelineLayout( vk.particle.ral_compute_pipeline_layout );
+		vk.particle.ral_compute_pipeline_layout = NULL;
 		vk.particle.compute_pipeline_layout = VK_NULL_HANDLE;
 	}
 	if ( vk.particle.ral_bgl_render  ) { Ral_DestroyBindGroupLayout( vk.particle.ral_bgl_render  ); vk.particle.ral_bgl_render  = NULL; }
 	if ( vk.particle.ral_bgl_compute ) { Ral_DestroyBindGroupLayout( vk.particle.ral_bgl_compute ); vk.particle.ral_bgl_compute = NULL; }
-	if ( vk.particle.render_set_layout != VK_NULL_HANDLE ) {
-		qvkDestroyDescriptorSetLayout( vk.device, vk.particle.render_set_layout, NULL );
-		vk.particle.render_set_layout = VK_NULL_HANDLE;
-	}
-	if ( vk.particle.compute_set_layout != VK_NULL_HANDLE ) {
-		qvkDestroyDescriptorSetLayout( vk.device, vk.particle.compute_set_layout, NULL );
-		vk.particle.compute_set_layout = VK_NULL_HANDLE;
-	}
+	vk.particle.render_set_layout = VK_NULL_HANDLE;
+	vk.particle.compute_set_layout = VK_NULL_HANDLE;
 
+	vk.particle.ral_sampler = NULL;
+	vk.particle.textureGeneration = 0u;
 	vk.particle.available = qfalse;
 }
 
@@ -8875,36 +8388,21 @@ void vk_shutdown_particle( void )
 // push-constants / bindless).
 void vk_init_decal( void )
 {
-	VkDescriptorSetLayoutBinding binds[4];
-	VkDescriptorSetLayoutCreateInfo layoutInfo;
-	VkPipelineLayoutCreateInfo pipeLayoutInfo;
-	VkDescriptorSetAllocateInfo dsAlloc;
-	VkWriteDescriptorSet writes[2];
-	VkDescriptorBufferInfo bufInfos[2];
-	VkBuffer frameBuffers[VK_RAL_FRAME_UNIFORM_SLOT_COUNT];
-	VkBuffer poolBuffers[VK_RAL_SHADOW_STORAGE_MAX_BUFFERS];
 	vkRalShadowStorageFlushReceipt_t storageFlush;
 	const uint32_t       poolBytes  = DECALS_PER_POOL * DECAL_BYTES;
-	const uint32_t       frameBytes = sizeof( decalFrame_t );
-	int i;
 
 	vk.decal.available = qfalse;
 	vk.decal.nextSlot  = 0;
 	vk.decal.numImages = 0;
-	vk.decal.imagesWritten[0] = 0;
-	vk.decal.imagesWritten[1] = 0;
+	vk.decal.textureGeneration = 1u;
 	VK_RalFrameUniformInit( &vk_decal_frame );
 	VK_RalShadowStorageInit( &vk_decal_pool_storage );
 	if ( !VK_RalFrameUniformEnsure( &vk_decal_frame,
 			vk_ral_get_backend(), &vk_decal_frame_config )
-			|| !vk_frame_uniform_descriptor_buffers( &vk_decal_frame,
-				&vk_decal_frame_config, frameBuffers )
 			|| !VK_RalShadowStorageEnsure( &vk_decal_pool_storage,
 				vk_ral_get_backend(), &vk_decal_pool_storage_config )
 			|| !VK_RalShadowStorageFlush( &vk_decal_pool_storage, 0u,
-				&storageFlush )
-			|| !vk_shadow_storage_descriptor_buffers( &vk_decal_pool_storage,
-				&vk_decal_pool_storage_config, poolBuffers ) ) {
+				&storageFlush ) ) {
 		ri.Terminate( TERM_UNRECOVERABLE,
 			"Decal RAL shadow/frame owners failed to materialize" );
 		return;
@@ -8942,33 +8440,27 @@ void vk_init_decal( void )
 	//            sampled in the fragment shader to reconstruct the surface world
 	//            position and box-project the decal onto it. Same resource and the
 	//            same per-set combined-sampler convention the GTAO/lens/tonemap
-	//            consumers use (NOT a second copy). Written in
-	//            vk_update_attachment_descriptors once the depth view exists.
-	memset( binds, 0, sizeof( binds ) );
-	binds[0].binding         = 0;
-	binds[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	binds[0].descriptorCount = 1;
-	binds[0].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-	binds[1].binding         = 1;
-	binds[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[1].descriptorCount = 1;
-	binds[1].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
-	binds[2].binding         = 2;
-	binds[2].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	binds[2].descriptorCount = MAX_DECAL_TEXTURES;
-	binds[2].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
-	binds[2].pImmutableSamplers = NULL;
-	binds[3].binding         = 3;
-	binds[3].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	binds[3].descriptorCount = 1;
-	binds[3].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
-	binds[3].pImmutableSamplers = NULL;
-
-	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
-	layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	layoutInfo.bindingCount = 4;
-	layoutInfo.pBindings    = binds;
-	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.decal.render_set_layout ) );
+	//            consumers use (NOT a second copy). The complete immutable group
+	//            is published by vk_init_decal_textures after this view exists.
+	{
+		ralBindEntry_t entries[4];
+		memset( entries, 0, sizeof( entries ) );
+		entries[0] = (ralBindEntry_t){ 0u, RAL_BIND_UNIFORM_BUFFER, 1u,
+			RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+		entries[1] = (ralBindEntry_t){ 1u, RAL_BIND_STORAGE_BUFFER, 1u,
+			RAL_STAGE_VERTEX, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+		entries[2] = (ralBindEntry_t){ 2u, RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+			MAX_DECAL_TEXTURES, RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_2D, qfalse };
+		entries[3] = (ralBindEntry_t){ 3u, RAL_BIND_COMBINED_TEXTURE_SAMPLER,
+			1u, RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_2D, qfalse };
+		if ( !vk_create_effect_bind_group_layout( entries, ARRAY_LEN( entries ),
+				"wired-decal-render-set-layout", &vk.decal.ral_bgl_render,
+				&vk.decal.render_set_layout ) ) {
+			R_LOG( rch_ral, SEV_WARN,
+				"decal RAL bind-group layout unavailable; decals remain disabled\n" );
+			return;
+		}
+	}
 
 	// Shared sampler for the texture array. Linear filter, clamp-to-edge,
 	// no anisotropy — a projected decal samples a single quad's worth of
@@ -8981,74 +8473,28 @@ void vk_init_decal( void )
 		sd.gl_min_filter = GL_LINEAR;
 		sd.noAnisotropy  = qtrue;
 		vk.decal.sampler = vk_find_sampler( &sd );
-	}
-
-	memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
-	pipeLayoutInfo.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	pipeLayoutInfo.setLayoutCount = 1;
-	pipeLayoutInfo.pSetLayouts    = &vk.decal.render_set_layout;
-	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.decal.render_pipeline_layout ) );
-
-	// ── Allocate render descriptor sets (NUM_COMMAND_BUFFERS slots) ─
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-		dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dsAlloc.descriptorPool     = vk.descriptor_pool;
-		dsAlloc.descriptorSetCount = 1;
-		dsAlloc.pSetLayouts        = &vk.decal.render_set_layout;
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.decal.render_descriptor[i] ) );
-
-		memset( bufInfos, 0, sizeof( bufInfos ) );
-		bufInfos[0].buffer = frameBuffers[i];
-		bufInfos[0].offset = 0;
-		bufInfos[0].range  = frameBytes;
-		bufInfos[1].buffer = poolBuffers[0];
-		bufInfos[1].offset = 0;
-		bufInfos[1].range  = poolBytes;
-
-		memset( writes, 0, sizeof( writes ) );
-		writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[0].dstSet          = vk.decal.render_descriptor[i];
-		writes[0].dstBinding      = 0;
-		writes[0].descriptorCount = 1;
-		writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		writes[0].pBufferInfo     = &bufInfos[0];
-		writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[1].dstSet          = vk.decal.render_descriptor[i];
-		writes[1].dstBinding      = 1;
-		writes[1].descriptorCount = 1;
-		writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[1].pBufferInfo     = &bufInfos[1];
-
-		qvkUpdateDescriptorSets( vk.device, 2, writes, 0, NULL );
-
-		// Binding 3 (shared scene-depth) — written here if the depth view already
-		// exists at decal-init time (the attachments are created before this), so
-		// the box-projection sampler is valid from the first frame. It is also
-		// re-asserted on every attachment recreate by vk_update_attachment_descriptors
-		// (vid_restart / FBO rebuild), which is the steady-state owner.
-		if ( vk.sceneDepth.view != VK_NULL_HANDLE ) {
-			VkDescriptorImageInfo depthInfo;
-			VkWriteDescriptorSet  depthWrite;
-			memset( &depthInfo, 0, sizeof( depthInfo ) );
-			depthInfo.sampler     = vk.sceneDepth.sampler;
-			depthInfo.imageView   = vk.sceneDepth.view;
-			depthInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			memset( &depthWrite, 0, sizeof( depthWrite ) );
-			depthWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			depthWrite.dstSet          = vk.decal.render_descriptor[i];
-			depthWrite.dstBinding      = 3;
-			depthWrite.descriptorCount = 1;
-			depthWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			depthWrite.pImageInfo      = &depthInfo;
-			qvkUpdateDescriptorSets( vk.device, 1, &depthWrite, 0, NULL );
+		vk.decal.ral_sampler = vk_ral_sampler_for_definition( &sd );
+		if ( vk.decal.sampler == VK_NULL_HANDLE || !vk.decal.ral_sampler
+				|| Ral_GetSamplerHandle( vk.decal.ral_sampler )
+					!= (void *)vk.decal.sampler ) {
+			R_LOG( rch_ral, SEV_WARN,
+				"decal RAL sampler cohort unavailable; decals remain disabled\n" );
+			return;
 		}
-
-		// Binding 2 (decal texture array) population is deferred to
-		// vk_init_decal_textures, called from R_Init AFTER R_InitImages
-		// creates tr.whiteImage — same phase constraint as the particle
-		// sampler array (vk_init_decal runs before R_InitImages).
 	}
+
+	if ( !vk_create_single_bind_group_pipeline_layout(
+			vk.decal.ral_bgl_render, "wired-pl-decal-render",
+			&vk.decal.ral_render_pipeline_layout,
+			&vk.decal.render_pipeline_layout ) ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"decal RAL pipeline layout unavailable; decals remain disabled\n" );
+		return;
+	}
+
+	// The complete four-binding render groups are created by
+	// vk_init_decal_textures after R_InitImages publishes tr.whiteImage and its
+	// generation-bound RAL view. No partially-written native set is published.
 
 	// ── Render pipelines (one per blend mode: alpha/additive/colour) ──
 	// Each mark shader's blend (resolved host-side into decalGPU_t.blendMode)
@@ -9159,10 +8605,6 @@ void vk_init_decal( void )
 		colorBlend.attachmentCount = 1;
 		colorBlend.pAttachments    = &blendAttach;
 
-		// Adopt the legacy layout as the RAL externalLayout (the boot sweep
-		// ran before this layout existed). Shared across all three pipelines.
-		vk_ral_adopt_one_pipeline_layout( vk.decal.render_pipeline_layout, &vk.decal.ral_render_pipeline_layout, "wired-pl-decal-render" );
-
 		for ( mode = 0; mode < 3; mode++ ) {
 			blendModeValue = (uint32_t)mode;
 
@@ -9224,19 +8666,12 @@ void vk_init_decal( void )
 }
 
 
-// Eager texture init: populate the projector's sampler array (binding 2) on
-// every per-frame render descriptor set. Walks vk.decal.images[] (mostly NULL
-// at engine init) and falls back to tr.whiteImage for unused slots. Mirrors
-// vk_init_particle_textures: called once from R_Init AFTER R_InitImages creates
-// tr.whiteImage (vk_init_decal runs from InitOpenGL, earlier). Re-runs on every
-// R_Init so vid_restart repopulates against the fresh tr.whiteImage; the FBO-
-// toggle pool-reset path also calls it after re-allocating the descriptor sets.
+// Eager texture init: publish both complete four-binding RAL groups after
+// R_InitImages creates the white fallback and every referenced image view.
+// Re-runs after arena or attachment replacement; candidate-first publication
+// leaves the previous complete cohort intact on failure.
 void vk_init_decal_textures( void )
 {
-	VkDescriptorImageInfo imgInfos[MAX_DECAL_TEXTURES];
-	VkWriteDescriptorSet  imgWrite;
-	uint32_t j, k;
-
 	if ( !vk.decal.available ) return;
 	if ( tr.whiteImage == NULL ) {
 		ri.Terminate( TERM_UNRECOVERABLE,
@@ -9244,32 +8679,12 @@ void vk_init_decal_textures( void )
 			"called before R_InitImages?" );
 		return;
 	}
-
-	for ( j = 0; j < NUM_COMMAND_BUFFERS; j++ ) {
-		for ( k = 0; k < MAX_DECAL_TEXTURES; k++ ) {
-			image_t *img = vk.decal.images[k]
-			             ? vk.decal.images[k]
-			             : tr.whiteImage;
-			memset( &imgInfos[k], 0, sizeof( imgInfos[k] ) );
-			imgInfos[k].imageView   = img->view;
-			imgInfos[k].sampler     = vk.decal.sampler;
-			imgInfos[k].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		}
-		memset( &imgWrite, 0, sizeof( imgWrite ) );
-		imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		imgWrite.dstSet          = vk.decal.render_descriptor[j];
-		imgWrite.dstBinding      = 2;
-		imgWrite.dstArrayElement = 0;
-		imgWrite.descriptorCount = MAX_DECAL_TEXTURES;
-		imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		imgWrite.pImageInfo      = imgInfos;
-		qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
+	if ( !vk_ral_refresh_decal_render_bindgroups(
+			( 1u << NUM_COMMAND_BUFFERS ) - 1u ) ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"decal render RAL bind-group cohort unavailable; disabling decals\n" );
+		vk.decal.available = qfalse;
 	}
-	// Both sets were just fully (re)written at this safe, no-frame-in-flight
-	// point (R_Init / pool-reset re-alloc), so the per-set watermarks are now
-	// current — the per-frame flush stays a no-op until new images are added.
-	vk.decal.imagesWritten[0] = vk.decal.numImages;
-	vk.decal.imagesWritten[1] = vk.decal.numImages;
 }
 
 
@@ -9281,25 +8696,20 @@ void vk_shutdown_decal( void )
 		if ( vk.decal.ral_render_pipeline[i] ) { Ral_DestroyPipeline( vk.decal.ral_render_pipeline[i] ); vk.decal.ral_render_pipeline[i] = NULL; }
 	}
 
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.decal.ral_render_descriptor[i] ) {
-			Ral_DestroyBindGroup( vk.decal.ral_render_descriptor[i] );
-			vk.decal.ral_render_descriptor[i] = NULL;
-		}
-	}
+	vk_ral_release_decal_render_bindgroups();
 	VK_RalFrameUniformRelease( &vk_decal_frame );
 	VK_RalShadowStorageRelease( &vk_decal_pool_storage );
 
-	if ( vk.decal.render_pipeline_layout != VK_NULL_HANDLE ) {
-		qvkDestroyPipelineLayout( vk.device, vk.decal.render_pipeline_layout, NULL );
+	if ( vk.decal.ral_render_pipeline_layout ) {
+		Ral_DestroyPipelineLayout( vk.decal.ral_render_pipeline_layout );
+		vk.decal.ral_render_pipeline_layout = NULL;
 		vk.decal.render_pipeline_layout = VK_NULL_HANDLE;
 	}
 	if ( vk.decal.ral_bgl_render ) { Ral_DestroyBindGroupLayout( vk.decal.ral_bgl_render ); vk.decal.ral_bgl_render = NULL; }
-	if ( vk.decal.render_set_layout != VK_NULL_HANDLE ) {
-		qvkDestroyDescriptorSetLayout( vk.device, vk.decal.render_set_layout, NULL );
-		vk.decal.render_set_layout = VK_NULL_HANDLE;
-	}
+	vk.decal.render_set_layout = VK_NULL_HANDLE;
 
+	vk.decal.ral_sampler = NULL;
+	vk.decal.textureGeneration = 0u;
 	vk.decal.available = qfalse;
 }
 
@@ -9346,207 +8756,275 @@ static void vk_atmospheric_create_heightgrid( void )
 	ri.Free( zeros );
 }
 
-// Write the compute (UBO + read SSBO + write SSBO + heightgrid sampler) and
-// render (UBO + post-compute pool SSBO) descriptor sets. Factored out so both
-// vk_init_atmospheric and vk_init_descriptors' vid-restart re-alloc path call
-// it. compute_descriptor[i] reads pool[i], writes pool[1-i]; render_descriptor[i]
-// reads pool[1-i] (the just-written pool).
+// Build the compute (UBO + read SSBO + write SSBO + heightgrid sampler) and
+// render (UBO + post-compute pool SSBO + scene-depth sampler) bind groups
+// directly through RAL. Factored out so both vk_init_atmospheric and
+// vk_init_descriptors' vid-restart re-alloc path call it. All four groups and
+// the heightgrid view are candidates until the exact parent cohort has been
+// validated and every allocation has succeeded; only then are the old children
+// retired. compute_descriptor[i] reads pool[i], writes pool[1-i];
+// render_descriptor[i] reads pool[1-i] (the just-written pool).
 void vk_atmospheric_write_descriptors( void )
 {
-	VkDescriptorSetAllocateInfo dsAlloc;
-	VkWriteDescriptorSet   writes[4];
-	VkDescriptorBufferInfo bufInfos[4];
-	VkDescriptorImageInfo  imgInfo;
-	const uint32_t poolBytes  = ATM_PARTICLES_PER_POOL * ATM_PARTICLE_BYTES;
-	const uint32_t frameBytes = sizeof( atmFrame_t );
+	ralBackend_t *backend = vk_ral_get_backend();
+	ralTextureView_t *heightgridViewCandidate = NULL;
+	ralTextureView_t *oldHeightgridView;
+	ralBindGroup_t *computeCandidates[NUM_COMMAND_BUFFERS] = { NULL, NULL };
+	ralBindGroup_t *renderCandidates[NUM_COMMAND_BUFFERS] = { NULL, NULL };
+	ralBindGroup_t *oldCompute[NUM_COMMAND_BUFFERS];
+	ralBindGroup_t *oldRender[NUM_COMMAND_BUFFERS];
+	VkDescriptorSet computeRaw[NUM_COMMAND_BUFFERS] = {
+		VK_NULL_HANDLE, VK_NULL_HANDLE };
+	VkDescriptorSet renderRaw[NUM_COMMAND_BUFFERS] = {
+		VK_NULL_HANDLE, VK_NULL_HANDLE };
+	const ralBuffer_t *bufferIdentities[4];
+	void *nativeBufferIdentities[4];
+	const uint64_t poolBytes =
+		(uint64_t)ATM_PARTICLES_PER_POOL * ATM_PARTICLE_BYTES;
+	const uint64_t frameBytes = sizeof( atmFrame_t );
 	vkAtmosphericPoolReceipt_t poolReceipt;
 	vkAtmosphericFrameResourcesReceipt_t frameReceipt;
-	VkBuffer poolBuffers[VK_ATMOSPHERIC_POOL_BUFFER_COUNT];
-	VkBuffer frameBuffers[VK_ATMOSPHERIC_FRAME_SLOT_COUNT];
-	int i;
+	vkAtmosphericHeightgridReceipt_t heightgridReceipt;
+	ralTextureViewCreateInfo_t viewInfo;
+	qboolean oldComplete = qtrue;
+	uint32_t i, j;
 
 	if ( !vk.atm.available ) return;
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; i++ ) {
+		oldCompute[i] = vk.atm.ral_compute_descriptor[i];
+		oldRender[i] = vk.atm.ral_render_descriptor[i];
+		if ( ( oldCompute[i] == NULL )
+				!= ( vk.atm.compute_descriptor[i] == VK_NULL_HANDLE )
+				|| ( oldRender[i] == NULL )
+				!= ( vk.atm.render_descriptor[i] == VK_NULL_HANDLE ) ) {
+			oldComplete = qfalse;
+			goto fail;
+		}
+		if ( !oldCompute[i] || !oldRender[i] ) oldComplete = qfalse;
+		if ( oldCompute[i]
+				&& Ral_GetBindGroupHandle( oldCompute[i] )
+					!= (void *)vk.atm.compute_descriptor[i] ) {
+			oldComplete = qfalse;
+			goto fail;
+		}
+		if ( oldRender[i]
+				&& Ral_GetBindGroupHandle( oldRender[i] )
+					!= (void *)vk.atm.render_descriptor[i] ) {
+			oldComplete = qfalse;
+			goto fail;
+		}
+	}
+	if ( !vk.atm.ral_heightgrid_view
+			|| Ral_GetTextureViewHandle( vk.atm.ral_heightgrid_view ) == NULL )
+		oldComplete = qfalse;
+	if ( NUM_COMMAND_BUFFERS != 2u
+			|| NUM_COMMAND_BUFFERS != VK_ATMOSPHERIC_POOL_BUFFER_COUNT
+			|| NUM_COMMAND_BUFFERS != VK_ATMOSPHERIC_FRAME_SLOT_COUNT
+			|| !backend || !vk.atm.ral_bgl_compute || !vk.atm.ral_bgl_render
+			|| !vk.ral_descriptor_arena
+			|| !Ral_BindGroupArenaReceiptValid(
+				&vk.ral_descriptor_arena_receipt )
+			|| vk.ral_descriptor_arena_receipt.backendIdentity != backend
+			|| vk.ral_descriptor_arena_receipt.arenaIdentity
+				!= vk.ral_descriptor_arena ) goto fail;
+
 	if ( !VK_AtmosphericPoolGetReceipt( &vk_atmospheric_pool, &poolReceipt )
-			|| poolReceipt.byteSize != poolBytes ) {
-		ri.Terminate( TERM_UNRECOVERABLE,
-			"Atmospheric RAL pool receipt is unavailable or has the wrong size" );
-		return;
-	}
-	for ( i = 0; i < (int)VK_ATMOSPHERIC_POOL_BUFFER_COUNT; i++ ) {
-		poolBuffers[i] = (VkBuffer)Ral_GetBufferHandle( poolReceipt.buffers[i] );
-		if ( poolBuffers[i] == VK_NULL_HANDLE ) {
-			ri.Terminate( TERM_UNRECOVERABLE,
-				"Atmospheric RAL pool interop identity is unavailable" );
-			return;
+			|| !VK_AtmosphericPoolReceiptExact( &poolReceipt, &poolReceipt )
+			|| !VK_AtmosphericFrameGetResources( &vk_atmospheric_frame,
+				&frameReceipt )
+			|| !VK_AtmosphericFrameResourcesReceiptExact(
+				&frameReceipt, &frameReceipt )
+			|| !VK_AtmosphericHeightgridGetReceipt(
+				&vk_atmospheric_heightgrid, &heightgridReceipt )
+			|| !VK_AtmosphericHeightgridReceiptExact(
+				&heightgridReceipt, &heightgridReceipt )
+			|| poolReceipt.backend != backend
+			|| frameReceipt.backend != backend
+			|| heightgridReceipt.backend != backend
+			|| poolReceipt.byteSize != poolBytes
+			|| frameReceipt.byteSize != frameBytes
+			|| heightgridReceipt.byteSize != VK_ATMOSPHERIC_HEIGHTGRID_BYTES
+			|| !vk.sceneDepth.ral_image || !vk.sceneDepth.ral_view
+			|| !vk.sceneDepth.ral_sampler
+			|| vk.sceneDepth.view == VK_NULL_HANDLE
+			|| vk.sceneDepth.sampler == VK_NULL_HANDLE
+			|| Ral_GetTextureViewHandle( vk.sceneDepth.ral_view )
+				!= (void *)vk.sceneDepth.view
+			|| Ral_GetSamplerHandle( vk.sceneDepth.ral_sampler )
+				!= (void *)vk.sceneDepth.sampler
+			|| heightgridReceipt.texture == vk.sceneDepth.ral_image
+			|| heightgridReceipt.sampler == vk.sceneDepth.ral_sampler ) goto fail;
+
+	bufferIdentities[0] = frameReceipt.buffers[0];
+	bufferIdentities[1] = frameReceipt.buffers[1];
+	bufferIdentities[2] = poolReceipt.buffers[0];
+	bufferIdentities[3] = poolReceipt.buffers[1];
+	for ( i = 0u; i < ARRAY_LEN( bufferIdentities ); i++ ) {
+		if ( !bufferIdentities[i]
+				|| !( nativeBufferIdentities[i] = Ral_GetBufferHandle(
+					bufferIdentities[i] ) ) ) goto fail;
+		for ( j = 0u; j < i; j++ ) {
+			if ( bufferIdentities[i] == bufferIdentities[j]
+					|| nativeBufferIdentities[i]
+						== nativeBufferIdentities[j] ) goto fail;
 		}
 	}
-	if ( !VK_AtmosphericFrameGetResources( &vk_atmospheric_frame,
-			&frameReceipt ) || frameReceipt.byteSize != frameBytes ) {
-		ri.Terminate( TERM_UNRECOVERABLE,
-			"Atmospheric RAL frame receipt is unavailable or has the wrong size" );
-		return;
-	}
-	for ( i = 0; i < (int)VK_ATMOSPHERIC_FRAME_SLOT_COUNT; i++ ) {
-		frameBuffers[i] = (VkBuffer)Ral_GetBufferHandle(
-			frameReceipt.buffers[i] );
-		if ( frameBuffers[i] == VK_NULL_HANDLE ) {
-			ri.Terminate( TERM_UNRECOVERABLE,
-				"Atmospheric RAL frame interop identity is unavailable" );
-			return;
-		}
-	}
+	for ( i = 0u; i < VK_ATMOSPHERIC_FRAME_SLOT_COUNT; i++ )
+		if ( Ral_GetBufferSize( frameReceipt.buffers[i] ) != frameBytes )
+			goto fail;
+	for ( i = 0u; i < VK_ATMOSPHERIC_POOL_BUFFER_COUNT; i++ )
+		if ( Ral_GetBufferSize( poolReceipt.buffers[i] ) != poolBytes )
+			goto fail;
 
-	memset( &imgInfo, 0, sizeof( imgInfo ) );
-	imgInfo.imageView   = (VkImageView)Ral_GetTextureDefaultViewHandle(
-		vk_atmospheric_heightgrid.texture );
-	imgInfo.sampler     = (VkSampler)Ral_GetSamplerHandle(
-		vk_atmospheric_heightgrid.sampler );
-	imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	if ( imgInfo.imageView == VK_NULL_HANDLE || imgInfo.sampler == VK_NULL_HANDLE )
-		ri.Terminate( TERM_UNRECOVERABLE,
-			"Atmospheric RAL heightgrid interop identities are unavailable" );
+	memset( &viewInfo, 0, sizeof( viewInfo ) );
+	viewInfo.texture = heightgridReceipt.texture;
+	viewInfo.viewType = RAL_TEXTURE_2D;
+	viewInfo.format = RAL_FORMAT_UNDEFINED;
+	heightgridViewCandidate = Ral_CreateTextureView( backend, &viewInfo );
+	if ( !heightgridViewCandidate
+			|| Ral_GetTextureViewHandle( heightgridViewCandidate ) == NULL
+			|| heightgridViewCandidate == vk.atm.ral_heightgrid_view
+			|| ( vk.atm.ral_heightgrid_view
+				&& Ral_GetTextureViewHandle( heightgridViewCandidate )
+					== Ral_GetTextureViewHandle(
+						vk.atm.ral_heightgrid_view ) )
+			|| Ral_GetTextureViewHandle( heightgridViewCandidate )
+				== Ral_GetTextureViewHandle( vk.sceneDepth.ral_view ) ) goto fail;
 
-	// compute descriptor sets — UBO@0, read pool@1, write pool@2, heightgrid@3.
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		uint32_t readPool  = (uint32_t)i;
-		uint32_t writePool = (uint32_t)(1 - i);
-		if ( vk.atm.ral_compute_descriptor[i] ) {
-			Ral_DestroyBindGroup( vk.atm.ral_compute_descriptor[i] );
-			vk.atm.ral_compute_descriptor[i] = NULL;
-		}
-
-		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-		dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dsAlloc.descriptorPool     = vk.descriptor_pool;
-		dsAlloc.descriptorSetCount = 1;
-		dsAlloc.pSetLayouts        = &vk.atm.compute_set_layout;
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.atm.compute_descriptor[i] ) );
-
-		memset( bufInfos, 0, sizeof( bufInfos ) );
-		bufInfos[0].buffer = frameBuffers[i];
-		bufInfos[0].offset = 0;
-		bufInfos[0].range  = frameBytes;
-		bufInfos[1].buffer = poolBuffers[readPool];
-		bufInfos[1].offset = 0;
-		bufInfos[1].range  = poolBytes;
-		bufInfos[2].buffer = poolBuffers[writePool];
-		bufInfos[2].offset = 0;
-		bufInfos[2].range  = poolBytes;
-
-		memset( writes, 0, sizeof( writes ) );
-		writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[0].dstSet          = vk.atm.compute_descriptor[i];
-		writes[0].dstBinding      = 0;
-		writes[0].descriptorCount = 1;
-		writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		writes[0].pBufferInfo     = &bufInfos[0];
-		writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[1].dstSet          = vk.atm.compute_descriptor[i];
-		writes[1].dstBinding      = 1;
-		writes[1].descriptorCount = 1;
-		writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[1].pBufferInfo     = &bufInfos[1];
-		writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[2].dstSet          = vk.atm.compute_descriptor[i];
-		writes[2].dstBinding      = 2;
-		writes[2].descriptorCount = 1;
-		writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[2].pBufferInfo     = &bufInfos[2];
-		writes[3].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[3].dstSet          = vk.atm.compute_descriptor[i];
-		writes[3].dstBinding      = 3;
-		writes[3].descriptorCount = 1;
-		writes[3].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		writes[3].pImageInfo      = &imgInfo;
-
-		qvkUpdateDescriptorSets( vk.device, 4, writes, 0, NULL );
-		vk.atm.ral_compute_descriptor[i] = Ral_AdoptBindGroup(
-			vk_ral_get_backend(), vk.atm.compute_descriptor[i],
-			vk.atm.ral_bgl_compute, "wired-atmospheric-compute-bg" );
-		if ( !vk.atm.ral_compute_descriptor[i] ) {
-			ri.Terminate( TERM_UNRECOVERABLE,
-				"Failed to adopt atmospheric compute bind group" );
-			return;
-		}
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; i++ ) {
+		ralBindingValue_t values[4];
+		ralBindGroupCreateInfo_t createInfo;
+		const uint32_t writePool = 1u - i;
+		memset( values, 0, sizeof( values ) );
+		values[0].binding = 0u;
+		values[0].type = RAL_BIND_UNIFORM_BUFFER;
+		values[0].buffer = frameReceipt.buffers[i];
+		values[0].bufferRange = frameBytes;
+		values[1].binding = 1u;
+		values[1].type = RAL_BIND_STORAGE_BUFFER;
+		values[1].buffer = poolReceipt.buffers[i];
+		values[1].bufferRange = poolBytes;
+		values[2].binding = 2u;
+		values[2].type = RAL_BIND_STORAGE_BUFFER;
+		values[2].buffer = poolReceipt.buffers[writePool];
+		values[2].bufferRange = poolBytes;
+		values[3].binding = 3u;
+		values[3].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
+		values[3].textureView = heightgridViewCandidate;
+		values[3].sampler = heightgridReceipt.sampler;
+		memset( &createInfo, 0, sizeof( createInfo ) );
+		createInfo.layout = vk.atm.ral_bgl_compute;
+		createInfo.values = values;
+		createInfo.numValues = ARRAY_LEN( values );
+		createInfo.debugName = i == 0u
+			? "wired-atmospheric-compute-bg-0"
+			: "wired-atmospheric-compute-bg-1";
+		createInfo.arena = vk.ral_descriptor_arena;
+		createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+		computeCandidates[i] = Ral_CreateBindGroup( backend, &createInfo );
+		computeRaw[i] = computeCandidates[i]
+			? (VkDescriptorSet)Ral_GetBindGroupHandle( computeCandidates[i] )
+			: VK_NULL_HANDLE;
+		if ( computeRaw[i] == VK_NULL_HANDLE ) goto fail;
 	}
 
-	// render descriptor sets — UBO@0, post-compute pool@1.
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		uint32_t renderPool = (uint32_t)(1 - i);
-		if ( vk.atm.ral_render_descriptor[i] ) {
-			Ral_DestroyBindGroup( vk.atm.ral_render_descriptor[i] );
-			vk.atm.ral_render_descriptor[i] = NULL;
-		}
-
-		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-		dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dsAlloc.descriptorPool     = vk.descriptor_pool;
-		dsAlloc.descriptorSetCount = 1;
-		dsAlloc.pSetLayouts        = &vk.atm.render_set_layout;
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.atm.render_descriptor[i] ) );
-
-		memset( bufInfos, 0, sizeof( bufInfos ) );
-		bufInfos[0].buffer = frameBuffers[i];
-		bufInfos[0].offset = 0;
-		bufInfos[0].range  = frameBytes;
-		bufInfos[1].buffer = poolBuffers[renderPool];
-		bufInfos[1].offset = 0;
-		bufInfos[1].range  = poolBytes;
-
-		memset( writes, 0, sizeof( writes ) );
-		writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[0].dstSet          = vk.atm.render_descriptor[i];
-		writes[0].dstBinding      = 0;
-		writes[0].descriptorCount = 1;
-		writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		writes[0].pBufferInfo     = &bufInfos[0];
-		writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[1].dstSet          = vk.atm.render_descriptor[i];
-		writes[1].dstBinding      = 1;
-		writes[1].descriptorCount = 1;
-		writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[1].pBufferInfo     = &bufInfos[1];
-
-		qvkUpdateDescriptorSets( vk.device, 2, writes, 0, NULL );
-
-		// Binding 2 (shared scene-depth) for the soft-particle depth fade. This
-		// factored writer runs from both init and the vid-restart recreate path;
-		// in both the depth view is live (attachments precede it). Same vk.sceneDepth
-		// resource + combined-sampler convention as the decal/particle consumers.
-		if ( vk.sceneDepth.view != VK_NULL_HANDLE ) {
-			VkDescriptorImageInfo depthInfo;
-			VkWriteDescriptorSet  depthWrite;
-			memset( &depthInfo, 0, sizeof( depthInfo ) );
-			depthInfo.sampler     = vk.sceneDepth.sampler;
-			depthInfo.imageView   = vk.sceneDepth.view;
-			depthInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			memset( &depthWrite, 0, sizeof( depthWrite ) );
-			depthWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			depthWrite.dstSet          = vk.atm.render_descriptor[i];
-			depthWrite.dstBinding      = 2;
-			depthWrite.descriptorCount = 1;
-			depthWrite.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			depthWrite.pImageInfo      = &depthInfo;
-			qvkUpdateDescriptorSets( vk.device, 1, &depthWrite, 0, NULL );
-		}
-		vk.atm.ral_render_descriptor[i] = Ral_AdoptBindGroup(
-			vk_ral_get_backend(), vk.atm.render_descriptor[i],
-			vk.atm.ral_bgl_render, "wired-atmospheric-render-bg" );
-		if ( !vk.atm.ral_render_descriptor[i] ) {
-			ri.Terminate( TERM_UNRECOVERABLE,
-				"Failed to adopt atmospheric render bind group" );
-			return;
-		}
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; i++ ) {
+		ralBindingValue_t values[3];
+		ralBindGroupCreateInfo_t createInfo;
+		const uint32_t renderPool = 1u - i;
+		memset( values, 0, sizeof( values ) );
+		values[0].binding = 0u;
+		values[0].type = RAL_BIND_UNIFORM_BUFFER;
+		values[0].buffer = frameReceipt.buffers[i];
+		values[0].bufferRange = frameBytes;
+		values[1].binding = 1u;
+		values[1].type = RAL_BIND_STORAGE_BUFFER;
+		values[1].buffer = poolReceipt.buffers[renderPool];
+		values[1].bufferRange = poolBytes;
+		values[2].binding = 2u;
+		values[2].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
+		values[2].textureView = vk.sceneDepth.ral_view;
+		values[2].sampler = vk.sceneDepth.ral_sampler;
+		memset( &createInfo, 0, sizeof( createInfo ) );
+		createInfo.layout = vk.atm.ral_bgl_render;
+		createInfo.values = values;
+		createInfo.numValues = ARRAY_LEN( values );
+		createInfo.debugName = i == 0u
+			? "wired-atmospheric-render-bg-0"
+			: "wired-atmospheric-render-bg-1";
+		createInfo.arena = vk.ral_descriptor_arena;
+		createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+		renderCandidates[i] = Ral_CreateBindGroup( backend, &createInfo );
+		renderRaw[i] = renderCandidates[i]
+			? (VkDescriptorSet)Ral_GetBindGroupHandle( renderCandidates[i] )
+			: VK_NULL_HANDLE;
+		if ( renderRaw[i] == VK_NULL_HANDLE ) goto fail;
 	}
+
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; i++ ) {
+		for ( j = 0u; j < NUM_COMMAND_BUFFERS; j++ ) {
+			if ( computeCandidates[i] == renderCandidates[j]
+					|| computeRaw[i] == renderRaw[j] ) goto fail;
+			if ( oldCompute[j]
+					&& ( computeCandidates[i] == oldCompute[j]
+						|| renderCandidates[i] == oldCompute[j]
+						|| computeRaw[i]
+							== (VkDescriptorSet)Ral_GetBindGroupHandle(
+								oldCompute[j] )
+						|| renderRaw[i]
+							== (VkDescriptorSet)Ral_GetBindGroupHandle(
+								oldCompute[j] ) ) ) goto fail;
+			if ( oldRender[j]
+					&& ( computeCandidates[i] == oldRender[j]
+						|| renderCandidates[i] == oldRender[j]
+						|| computeRaw[i]
+							== (VkDescriptorSet)Ral_GetBindGroupHandle(
+								oldRender[j] )
+						|| renderRaw[i]
+							== (VkDescriptorSet)Ral_GetBindGroupHandle(
+								oldRender[j] ) ) ) goto fail;
+		}
+		if ( i > 0u && ( computeCandidates[i] == computeCandidates[0]
+				|| renderCandidates[i] == renderCandidates[0]
+				|| computeRaw[i] == computeRaw[0]
+				|| renderRaw[i] == renderRaw[0] ) ) goto fail;
+	}
+
+	oldHeightgridView = vk.atm.ral_heightgrid_view;
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; i++ ) {
+		vk.atm.ral_compute_descriptor[i] = computeCandidates[i];
+		vk.atm.compute_descriptor[i] = computeRaw[i];
+		vk.atm.ral_render_descriptor[i] = renderCandidates[i];
+		vk.atm.render_descriptor[i] = renderRaw[i];
+	}
+	vk.atm.ral_heightgrid_view = heightgridViewCandidate;
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( oldCompute[i] ) Ral_DestroyBindGroup( oldCompute[i] );
+		if ( oldRender[i] ) Ral_DestroyBindGroup( oldRender[i] );
+	}
+	if ( oldHeightgridView ) Ral_DestroyTextureView( oldHeightgridView );
+	return;
+
+fail:
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; i++ ) {
+		if ( computeCandidates[i] )
+			Ral_DestroyBindGroup( computeCandidates[i] );
+		if ( renderCandidates[i] )
+			Ral_DestroyBindGroup( renderCandidates[i] );
+	}
+	if ( heightgridViewCandidate )
+		Ral_DestroyTextureView( heightgridViewCandidate );
+	if ( !oldComplete ) vk.atm.available = qfalse;
+	R_LOG( rch_ral, SEV_WARN,
+		"Atmospheric direct RAL bind-group cohort rejected; %s\n",
+		oldComplete ? "retaining the prior complete cohort"
+			: "weather rendering disabled until resource rebuild" );
 }
 
 static void vk_init_atmospheric_compute_ral_pipeline( void );
 
 void vk_init_atmospheric( void )
 {
-	VkDescriptorSetLayoutBinding binds[4];
-	VkDescriptorSetLayoutCreateInfo layoutInfo;
-	VkPipelineLayoutCreateInfo pipeLayoutInfo;
 	const uint32_t poolBytes  = ATM_PARTICLES_PER_POOL * ATM_PARTICLE_BYTES;
 
 #if defined( __STDC_VERSION__ ) && __STDC_VERSION__ >= 201112L
@@ -9573,29 +9051,6 @@ void vk_init_atmospheric( void )
 
 	// ── Compute descriptor set layout (4 bindings) ───────────────
 	// 0 UBO, 1 read SSBO, 2 write SSBO, 3 heightgrid sampler2D
-	memset( binds, 0, sizeof( binds ) );
-	binds[0].binding         = 0;
-	binds[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	binds[0].descriptorCount = 1;
-	binds[0].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
-	binds[1].binding         = 1;
-	binds[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[1].descriptorCount = 1;
-	binds[1].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
-	binds[2].binding         = 2;
-	binds[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[2].descriptorCount = 1;
-	binds[2].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
-	binds[3].binding         = 3;
-	binds[3].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	binds[3].descriptorCount = 1;
-	binds[3].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
-
-	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
-	layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	layoutInfo.bindingCount = 4;
-	layoutInfo.pBindings    = binds;
-	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.atm.compute_set_layout ) );
 	{
 		ralBindEntry_t entries[4];
 		memset( entries, 0, sizeof( entries ) );
@@ -9610,44 +9065,29 @@ void vk_init_atmospheric( void )
 		entries[3].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
 		entries[3].stageFlags = RAL_STAGE_COMPUTE;
 		entries[3].textureViewType = RAL_BIND_TEXTURE_VIEW_2D;
-		vk.atm.ral_bgl_compute = Ral_AdoptBindGroupLayout(
-			vk_ral_get_backend(), vk.atm.compute_set_layout, 4u, entries,
-			"wired-atmospheric-compute-set-layout-adopted" );
+		if ( !vk_create_effect_bind_group_layout( entries, ARRAY_LEN( entries ),
+				"wired-atmospheric-compute-set-layout",
+				&vk.atm.ral_bgl_compute, &vk.atm.compute_set_layout ) ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Atmospheric RAL compute bind-group layout creation failed" );
+			return;
+		}
 	}
 
-	memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
-	pipeLayoutInfo.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	pipeLayoutInfo.setLayoutCount = 1;
-	pipeLayoutInfo.pSetLayouts    = &vk.atm.compute_set_layout;
-	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.atm.compute_pipeline_layout ) );
-	vk_ral_adopt_one_pipeline_layout( vk.atm.compute_pipeline_layout,
-		&vk.atm.ral_compute_pipeline_layout, "wired-pl-atmospheric-compute" );
+	if ( !vk_create_single_bind_group_pipeline_layout(
+			vk.atm.ral_bgl_compute, "wired-pl-atmospheric-compute",
+			&vk.atm.ral_compute_pipeline_layout,
+			&vk.atm.compute_pipeline_layout ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Atmospheric RAL compute pipeline layout creation failed" );
+		return;
+	}
 
 	// ── Render descriptor set layout (3 bindings) ────────────────
 	// 0 UBO (vertex + fragment: frag reads the soft-particle depth-fade params),
 	// 1 post-compute pool SSBO (vertex),
 	// 2 shared scene-depth copy (fragment) — same vk.sceneDepth + combined-sampler
 	//   convention as the decal/particle consumers, for the depth fade.
-	memset( binds, 0, sizeof( binds ) );
-	binds[0].binding         = 0;
-	binds[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	binds[0].descriptorCount = 1;
-	binds[0].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-	binds[1].binding         = 1;
-	binds[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	binds[1].descriptorCount = 1;
-	binds[1].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
-	binds[2].binding         = 2;
-	binds[2].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	binds[2].descriptorCount = 1;
-	binds[2].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
-	binds[2].pImmutableSamplers = NULL;
-
-	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
-	layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	layoutInfo.bindingCount = 3;
-	layoutInfo.pBindings    = binds;
-	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.atm.render_set_layout ) );
 	{
 		ralBindEntry_t entries[3];
 		memset( entries, 0, sizeof( entries ) );
@@ -9661,16 +9101,23 @@ void vk_init_atmospheric( void )
 		entries[2].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
 		entries[2].stageFlags = RAL_STAGE_FRAGMENT;
 		entries[2].textureViewType = RAL_BIND_TEXTURE_VIEW_2D;
-		vk.atm.ral_bgl_render = Ral_AdoptBindGroupLayout(
-			vk_ral_get_backend(), vk.atm.render_set_layout, 3u, entries,
-			"wired-atmospheric-render-set-layout-adopted" );
+		if ( !vk_create_effect_bind_group_layout( entries, ARRAY_LEN( entries ),
+				"wired-atmospheric-render-set-layout",
+				&vk.atm.ral_bgl_render, &vk.atm.render_set_layout ) ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Atmospheric RAL render bind-group layout creation failed" );
+			return;
+		}
 	}
 
-	memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
-	pipeLayoutInfo.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	pipeLayoutInfo.setLayoutCount = 1;
-	pipeLayoutInfo.pSetLayouts    = &vk.atm.render_set_layout;
-	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.atm.render_pipeline_layout ) );
+	if ( !vk_create_single_bind_group_pipeline_layout(
+			vk.atm.ral_bgl_render, "wired-pl-atmospheric-render",
+			&vk.atm.ral_render_pipeline_layout,
+			&vk.atm.render_pipeline_layout ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Atmospheric RAL render pipeline layout creation failed" );
+		return;
+	}
 
 	// ── Heightgrid data texture ──────────────────────────────────
 	vk_atmospheric_create_heightgrid();
@@ -9810,8 +9257,6 @@ void vk_init_atmospheric( void )
 		gpInfo.layout              = vk.atm.render_pipeline_layout;
 		gpInfo.subpass             = 0;
 
-		vk_ral_adopt_one_pipeline_layout( vk.atm.render_pipeline_layout, &vk.atm.ral_render_pipeline_layout, "wired-pl-atmospheric-render" );
-
 		vk.atm.ral_render_pipeline =
 			vk_ral_create_pipeline_from_gpinfo( &gpInfo, vk.atm.ral_render_pipeline_layout,
 				vk_attachment_format_to_ral( vk.color_format ),
@@ -9851,6 +9296,12 @@ void vk_shutdown_atmospheric( void )
 			Ral_DestroyBindGroup( vk.atm.ral_render_descriptor[i] );
 			vk.atm.ral_render_descriptor[i] = NULL;
 		}
+		vk.atm.compute_descriptor[i] = VK_NULL_HANDLE;
+		vk.atm.render_descriptor[i] = VK_NULL_HANDLE;
+	}
+	if ( vk.atm.ral_heightgrid_view ) {
+		Ral_DestroyTextureView( vk.atm.ral_heightgrid_view );
+		vk.atm.ral_heightgrid_view = NULL;
 	}
 
 	VK_AtmosphericFrameRelease( &vk_atmospheric_frame );
@@ -9861,17 +9312,11 @@ void vk_shutdown_atmospheric( void )
 	if ( vk.atm.ral_compute_pipeline_layout ) {
 		Ral_DestroyPipelineLayout( vk.atm.ral_compute_pipeline_layout );
 		vk.atm.ral_compute_pipeline_layout = NULL;
+		vk.atm.compute_pipeline_layout = VK_NULL_HANDLE;
 	}
 	if ( vk.atm.ral_render_pipeline_layout ) {
 		Ral_DestroyPipelineLayout( vk.atm.ral_render_pipeline_layout );
 		vk.atm.ral_render_pipeline_layout = NULL;
-	}
-	if ( vk.atm.compute_pipeline_layout != VK_NULL_HANDLE ) {
-		qvkDestroyPipelineLayout( vk.device, vk.atm.compute_pipeline_layout, NULL );
-		vk.atm.compute_pipeline_layout = VK_NULL_HANDLE;
-	}
-	if ( vk.atm.render_pipeline_layout != VK_NULL_HANDLE ) {
-		qvkDestroyPipelineLayout( vk.device, vk.atm.render_pipeline_layout, NULL );
 		vk.atm.render_pipeline_layout = VK_NULL_HANDLE;
 	}
 	if ( vk.atm.ral_bgl_compute ) {
@@ -9882,14 +9327,8 @@ void vk_shutdown_atmospheric( void )
 		Ral_DestroyBindGroupLayout( vk.atm.ral_bgl_render );
 		vk.atm.ral_bgl_render = NULL;
 	}
-	if ( vk.atm.compute_set_layout != VK_NULL_HANDLE ) {
-		qvkDestroyDescriptorSetLayout( vk.device, vk.atm.compute_set_layout, NULL );
-		vk.atm.compute_set_layout = VK_NULL_HANDLE;
-	}
-	if ( vk.atm.render_set_layout != VK_NULL_HANDLE ) {
-		qvkDestroyDescriptorSetLayout( vk.device, vk.atm.render_set_layout, NULL );
-		vk.atm.render_set_layout = VK_NULL_HANDLE;
-	}
+	vk.atm.compute_set_layout = VK_NULL_HANDLE;
+	vk.atm.render_set_layout = VK_NULL_HANDLE;
 
 	vk.atm.available = qfalse;
 }
@@ -10144,7 +9583,11 @@ void RB_DrawDecals( void )
 	// registry before drawing. The set is being recorded (not pending), so
 	// any slots added while another cmd-buffer was current are written here
 	// safely — never while the GPU is reading this set (VUID-03047).
-	vk_decal_flush_pending_images();
+	if ( !vk_decal_flush_pending_images() ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"decal render bind-group refresh failed for slot %u\n", frameIdx );
+		return;
+	}
 
 	// MVP construction — same pattern as particles / ribbon / sprite (proj
 	// y-flip for Vulkan clip space; world.modelMatrix already bakes the q3
@@ -10416,6 +9859,13 @@ void RB_DrawParticles( void )
 	// PRE-flip value (= the index used by compute this frame) is
 	// (vk.particle.pingPongRead ^ 1).
 	renderIdx = vk.particle.pingPongRead ^ 1u;
+	if ( vk.particle.renderGroupTextureGeneration[renderIdx]
+			!= vk.particle.textureGeneration
+			&& !vk_ral_refresh_particle_render_bindgroups( 1u << renderIdx ) ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"particle render bind-group refresh failed for slot %u\n", renderIdx );
+		return;
+	}
 
 	// Two passes: alpha-blend particles, then additive. Each draw
 	// dispatches the full pool (16K instances of 6 vertices); the
@@ -10463,68 +9913,46 @@ IQM GPU skinning — self-contained pipeline for skeletal IQM models
 ===============
 */
 
-static qboolean vk_ral_register_iqm_pipeline_layout_abi( void )
-{
-	ralBindGroupLayout_t *layouts[2];
-	if ( !vk.iqmGpu.ral_pipeline || !vk.iqmGpu.ral_bgl_bones
-			|| !vk.ral_bgl_sampler ) return qfalse;
-	layouts[0] = vk.iqmGpu.ral_bgl_bones;
-	layouts[1] = vk.ral_bgl_sampler;
-	return Ral_RegisterExternalPipelineBindGroupLayouts(
-		vk.iqmGpu.ral_pipeline, 2u, layouts );
-}
-
 /*
 ===============
 vk_init_iqm_gpu_skinning — create descriptor set layout, pipeline layout,
-bone UBOs, descriptors, and the graphics pipeline
+bone UBOs, and the graphics pipeline. RAL creates the bind groups after its
+backend and imported layout cohort are live.
 ===============
 */
 void vk_init_iqm_gpu_skinning( void )
 {
-	VkDescriptorSetLayoutBinding binds[1];
-	VkDescriptorSetLayoutCreateInfo layoutInfo;
-	VkPipelineLayoutCreateInfo pipeLayoutInfo;
-	VkDescriptorSetLayout setLayouts[2];
+	ralBindEntry_t boneEntry;
 	VkMemoryRequirements memReqs;
 	VkMemoryAllocateInfo allocInfo;
 	VkBufferCreateInfo bufInfo;
-	VkDescriptorSetAllocateInfo allocDesc;
-	VkDescriptorBufferInfo bufDesc;
-	VkWriteDescriptorSet writeDesc;
 
 	vk.iqmGpu.available = qfalse;
 
 	// descriptor set layout for the bones+mvp ring (set 0, binding 0). DYNAMIC so
 	// each IQM surface draw binds its own ring item via a per-draw dynamic offset.
-	memset( binds, 0, sizeof( binds ) );
-	binds[0].binding = 0;
-	binds[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-	binds[0].descriptorCount = 1;
-	binds[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-	binds[0].pImmutableSamplers = NULL;
-
-	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
-	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	layoutInfo.bindingCount = 1;
-	layoutInfo.pBindings = binds;
-
-	VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &layoutInfo, NULL, &vk.iqmGpu.set_layout_bones ) );
+	memset( &boneEntry, 0, sizeof( boneEntry ) );
+	boneEntry.binding = 0u;
+	boneEntry.type = RAL_BIND_UNIFORM_BUFFER;
+	boneEntry.count = 1u;
+	boneEntry.stageFlags = RAL_STAGE_VERTEX;
+	boneEntry.dynamicOffset = qtrue;
+	if ( !vk_create_effect_bind_group_layout( &boneEntry, 1u,
+			"wired-iqm-bones-set-layout", &vk.iqmGpu.ral_bgl_bones,
+			&vk.iqmGpu.set_layout_bones ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"IQM RAL bind-group layout creation failed" );
+		return;
+	}
 
 	// pipeline layout: set 0 (bones + the appended mvp) + set 1 (texture sampler).
 	// mvp rides in the set-0 UBO after the bone array (see IQM_MVP_UBO_OFFSET), not a
 	// VS push. ZERO push ranges.
-	setLayouts[0] = vk.iqmGpu.set_layout_bones;
-	setLayouts[1] = vk.set_layout_sampler;
-
-	memset( &pipeLayoutInfo, 0, sizeof( pipeLayoutInfo ) );
-	pipeLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	pipeLayoutInfo.setLayoutCount = 2;
-	pipeLayoutInfo.pSetLayouts = setLayouts;
-	pipeLayoutInfo.pushConstantRangeCount = 0;
-	pipeLayoutInfo.pPushConstantRanges = NULL;
-
-	VK_CHECK( qvkCreatePipelineLayout( vk.device, &pipeLayoutInfo, NULL, &vk.iqmGpu.pipeline_layout ) );
+	if ( !vk_create_iqm_pipeline_layout() ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"IQM RAL pipeline layout creation failed" );
+		return;
+	}
 
 	// Per-frame bones+mvp RING (host-visible, persistently mapped). Each IQM surface
 	// draw sub-allocates a PAD-aligned IQM_UBO_TOTAL_SIZE item and binds it with a
@@ -10559,32 +9987,6 @@ void vk_init_iqm_gpu_skinning( void )
 			                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 			                        "vk.iqmGpu.bone" );
 
-			// allocate descriptor set
-			memset( &allocDesc, 0, sizeof( allocDesc ) );
-			allocDesc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			allocDesc.descriptorPool = vk.descriptor_pool;
-			allocDesc.descriptorSetCount = 1;
-			allocDesc.pSetLayouts = &vk.iqmGpu.set_layout_bones;
-
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &allocDesc, &vk.iqmGpu.bone_descriptor[i] ) );
-
-			// DYNAMIC descriptor: base offset 0, range = ONE item (the per-draw
-			// dynamic offset selects the item in the ring).
-			memset( &bufDesc, 0, sizeof( bufDesc ) );
-			bufDesc.buffer = vk.iqmGpu.bone_buffer[i];
-			bufDesc.offset = 0;
-			bufDesc.range = iqmItem;
-
-			memset( &writeDesc, 0, sizeof( writeDesc ) );
-			writeDesc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writeDesc.dstSet = vk.iqmGpu.bone_descriptor[i];
-			writeDesc.dstBinding = 0;
-			writeDesc.dstArrayElement = 0;
-			writeDesc.descriptorCount = 1;
-			writeDesc.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-			writeDesc.pBufferInfo = &bufDesc;
-
-			qvkUpdateDescriptorSets( vk.device, 1, &writeDesc, 0, NULL );
 		}
 	}
 
@@ -10746,16 +10148,12 @@ void vk_init_iqm_gpu_skinning( void )
 		gpInfo.layout = vk.iqmGpu.pipeline_layout;
 		gpInfo.subpass = 0;
 
-		// Adopt the legacy layout as the RAL externalLayout (boot sweep ran
-		// before this layout existed).
-		vk_ral_adopt_one_pipeline_layout( vk.iqmGpu.pipeline_layout, &vk.iqmGpu.ral_pipeline_layout, "wired-pl-iqm" );
 		// Dynamic-rendering sibling, translated from the legacy gpInfo above. IQM
 		// WRITES depth (depthWriteEnable carried from gpInfo); draws in the main pass.
 		vk.iqmGpu.ral_pipeline = vk_ral_create_pipeline_from_gpinfo( &gpInfo, vk.iqmGpu.ral_pipeline_layout,
 			vk_attachment_format_to_ral( vk.color_format ),
 			vk_attachment_format_to_ral( vk.depth_format ),
 			"ral-iqm-q3" );
-		(void)vk_ral_register_iqm_pipeline_layout_abi();
 	}
 
 	vk.iqmGpu.available = qtrue;
@@ -10775,10 +10173,7 @@ void vk_shutdown_iqm_gpu_skinning( void )
 	if ( vk.iqmGpu.ral_pipeline ) { Ral_DestroyPipeline( vk.iqmGpu.ral_pipeline ); vk.iqmGpu.ral_pipeline = NULL; }
 
 	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.iqmGpu.ral_bone_descriptor[i] ) {
-			Ral_DestroyBindGroup( vk.iqmGpu.ral_bone_descriptor[i] );
-			vk.iqmGpu.ral_bone_descriptor[i] = NULL;
-		}
+		vk_ral_release_iqm_bone_bindgroup( (uint32_t)i );
 		if ( vk.iqmGpu.bone_buffer[i] != VK_NULL_HANDLE ) {
 			vk_ral_unregister_buffer( vk.iqmGpu.bone_buffer[i] );
 			qvkDestroyBuffer( vk.device, vk.iqmGpu.bone_buffer[i], NULL );
@@ -10791,14 +10186,15 @@ void vk_shutdown_iqm_gpu_skinning( void )
 		}
 	}
 
-	if ( vk.iqmGpu.pipeline_layout != VK_NULL_HANDLE ) {
-		qvkDestroyPipelineLayout( vk.device, vk.iqmGpu.pipeline_layout, NULL );
+	if ( vk.iqmGpu.ral_pipeline_layout ) {
+		Ral_DestroyPipelineLayout( vk.iqmGpu.ral_pipeline_layout );
+		vk.iqmGpu.ral_pipeline_layout = NULL;
 		vk.iqmGpu.pipeline_layout = VK_NULL_HANDLE;
 	}
 
-	if ( vk.iqmGpu.set_layout_bones != VK_NULL_HANDLE ) {
-		if ( vk.iqmGpu.ral_bgl_bones ) { Ral_DestroyBindGroupLayout( vk.iqmGpu.ral_bgl_bones ); vk.iqmGpu.ral_bgl_bones = NULL; }
-		qvkDestroyDescriptorSetLayout( vk.device, vk.iqmGpu.set_layout_bones, NULL );
+	if ( vk.iqmGpu.ral_bgl_bones ) {
+		Ral_DestroyBindGroupLayout( vk.iqmGpu.ral_bgl_bones );
+		vk.iqmGpu.ral_bgl_bones = NULL;
 		vk.iqmGpu.set_layout_bones = VK_NULL_HANDLE;
 	}
 
@@ -13504,9 +12900,8 @@ static void vk_shutdown_entmat_buffers( void );
 // SMAA's. Bodies live near vk_create_attachments. Called from vk_create_
 // attachments / vk_destroy_attachments (cold start + r_fbo / r_hdr flip) and
 // from vk_update_post_process_pipelines for the live r_shadows /
-// r_shadowMapSize toggle. The shadow sampler descriptor SET is owned by
-// vk_init_descriptors (allocated whenever vk.fboActive, like the SMAA SETs),
-// not by these helpers.
+// r_shadowMapSize toggle. Sampling is owned by the engine-resources RAL bind
+// group; these helpers own only the shadow image/view/sampler parents.
 #if FEAT_SHADOW_MAPPING
 static void vk_shadow_alloc_resources( void );
 static void vk_shadow_release_resources( void );
@@ -13661,7 +13056,6 @@ static int vk_recreate_ribbon_pipelines( void )
 	gpInfo.layout              = vk.ribbon.pipeline_layout;
 	gpInfo.subpass             = 0;
 
-	vk_ral_adopt_one_pipeline_layout( vk.ribbon.pipeline_layout, &vk.ribbon.ral_pipeline_layout, "wired-pl-ribbon" );
 
 	for ( variant = 0; variant < 2; variant++ ) {
 		memset( &blendAttach, 0, sizeof( blendAttach ) );
@@ -13802,7 +13196,6 @@ static int vk_recreate_beam_pipeline( void )
 	gpInfo.layout              = vk.beam.pipeline_layout;
 	gpInfo.subpass             = 0;
 
-	vk_ral_adopt_one_pipeline_layout( vk.beam.pipeline_layout, &vk.beam.ral_pipeline_layout, "wired-pl-beam" );
 
 	// Dynamic-rendering sibling, translated from the gpInfo above.
 	vk.beam.ral_pipeline = vk_ral_create_pipeline_from_gpinfo( &gpInfo, vk.beam.ral_pipeline_layout,
@@ -13918,7 +13311,6 @@ static int vk_recreate_sprite_pipelines( void )
 	gpInfo.layout              = vk.sprite.pipeline_layout;
 	gpInfo.subpass             = 0;
 
-	vk_ral_adopt_one_pipeline_layout( vk.sprite.pipeline_layout, &vk.sprite.ral_pipeline_layout, "wired-pl-sprite" );
 
 	for ( variant = 0; variant < 2; variant++ ) {
 		memset( &blendAttach, 0, sizeof( blendAttach ) );
@@ -14063,8 +13455,6 @@ static int vk_recreate_particle_render_pipelines( void )
 	gpInfo.pDynamicState       = &dynamicState;
 	gpInfo.layout              = vk.particle.render_pipeline_layout;
 	gpInfo.subpass             = 0;
-
-	vk_ral_adopt_one_pipeline_layout( vk.particle.render_pipeline_layout, &vk.particle.ral_render_pipeline_layout, "wired-pl-particle-render" );
 
 	for ( variant = 0; variant < 2; variant++ ) {
 		blendMaskValue = (uint32_t)variant;
@@ -14247,14 +13637,11 @@ static int vk_recreate_iqm_gpu_pipeline( void )
 	gpInfo.layout = vk.iqmGpu.pipeline_layout;
 	gpInfo.subpass = 0;
 
-	vk_ral_adopt_one_pipeline_layout( vk.iqmGpu.pipeline_layout, &vk.iqmGpu.ral_pipeline_layout, "wired-pl-iqm" );
 	// Dynamic-rendering sibling, translated from the gpInfo above.
 	vk.iqmGpu.ral_pipeline = vk_ral_create_pipeline_from_gpinfo( &gpInfo, vk.iqmGpu.ral_pipeline_layout,
 		vk_attachment_format_to_ral( vk.color_format ),
 		vk_attachment_format_to_ral( vk.depth_format ),
 		"ral-iqm-q3" );
-	(void)vk_ral_register_iqm_pipeline_layout_abi();
-
 	return 1;
 }
 
@@ -14350,11 +13737,18 @@ static void vk_rebuild_fbo_for_hdr_change( void )
 #endif
 
 	vk_destroy_pipelines( qfalse );
+	// Particle/decal render groups borrow the scene-depth RAL view. Retire those
+	// children before the attachment rebuild destroys their parent view; both
+	// cohorts are recreated against the new attachment below.
+	vk_ral_release_particle_render_bindgroups();
+	vk_ral_release_decal_render_bindgroups();
 	vk_destroy_attachments();
 
 	vk_create_attachments();
 
-	vk_update_attachment_descriptors();
+	vk_ral_adopt_static_internal_textures();
+	vk_init_particle_textures();
+	vk_init_decal_textures();
 
 	// Standalone main-pass primitive pipelines aren't in vk.pipelines[] and
 	// aren't in the static post-process list. Rebuild them eagerly against the
@@ -14438,6 +13832,10 @@ static void vk_rebuild_for_fbo_change( void )
 #endif
 
 	vk_destroy_pipelines( qfalse );
+	// These groups borrow scene-depth; release them before the FBO rebuild
+	// destroys that parent and recreate them after the new views are adopted.
+	vk_ral_release_particle_render_bindgroups();
+	vk_ral_release_decal_render_bindgroups();
 	vk_destroy_attachments();
 	vk_destroy_swapchain( qtrue );   // keep typed old wrapper for RAL's one-way recreate handoff
 	vk_destroy_sync_primitives();
@@ -14471,17 +13869,11 @@ static void vk_rebuild_for_fbo_change( void )
 	vk_create_swapchain( vk.present_format, qfalse );
 	vk_create_attachments();
 
-	// vk_update_attachment_descriptors below only WRITES the FBO descriptor sets;
-	// it does not allocate them. They are allocated in vk_init_descriptors behind
-	// an `if(vk.color_image_view)` gate — so a session that BOOTED at r_fbo 0 (no
-	// color_image_view, FBO sets never allocated) and then toggles to r_fbo 1 would
-	// write VK_NULL_HANDLE dstSets here and crash. When toggling to FBO and the FBO
-	// sets are absent, repopulate the descriptor pool the same way the vid_restart
-	// path does (reset + vk_init_descriptors, which re-allocates every set and then
-	// updates them). Guarded on the missing-set case so the working toggle paths
-	// (1->0, and 0->1 in a session that booted with FBO) keep the light update-only
-	// path. vk_wait_idle() earlier in this function makes the pool reset safe.
-	if ( vk.fboActive && vk.color_image_view && vk.color_descriptor == VK_NULL_HANDLE ) {
+	// A session that booted at r_fbo 0 has no live engine-resources arena child.
+	// A first 0->1 transition must therefore reset and repopulate the arena.
+	// Direct RAL attachment/SMAA groups do not gate this test.
+	if ( vk.fboActive && vk.color_image_view
+			&& vk.engineResources.descriptor == VK_NULL_HANDLE ) {
 		vk_forwardplus_lit_invalidate_sets();
 		vk_ral_release_static_bindgroups();
 		{
@@ -14495,14 +13887,6 @@ static void vk_rebuild_for_fbo_change( void )
 #endif
 		vk_ral_reset_descriptor_arena( "vk_update_attachment_descriptors" );
 		vk_init_descriptors();   // re-allocates every set + calls vk_update_attachment_descriptors
-		// The pool reset re-allocated the particle render sets too, clearing their
-		// binding-3 sampler array (populated outside vk_init_descriptors). Repopulate
-		// it here as the vid_restart path does (vk_init_descriptors + this from R_Init),
-		// or the first particle draw hits an unwritten descriptor (VUID-vkCmdDraw-08114).
-		vk_init_particle_textures();
-		// Same for the decal projector's binding-2 sampler array, cleared by the
-		// pool reset; without this the first decal draw hits an unwritten descriptor.
-		vk_init_decal_textures();
 		// The pool reset also invalidated the Forward+ consumer's set-2 descriptors
 		// (the producer compute bind-groups are RAL-owned, not from this pool, so they
 		// survive). Null so vk_forwardplus_dispatch re-allocates them next frame. (The
@@ -14510,8 +13894,12 @@ static void vk_rebuild_for_fbo_change( void )
 		// too for symmetry; the dispatch re-creates on NULL.)
 		vk_forwardplus_lit_invalidate_sets();
 	} else {
-		vk_update_attachment_descriptors();
+		vk_ral_adopt_static_internal_textures();
 	}
+	// Both cohorts include scene-depth, so every attachment replacement must
+	// publish complete new groups even when the descriptor arena itself survives.
+	vk_init_particle_textures();
+	vk_init_decal_textures();
 
 	// The 8 standalone primitive pipelines (ribbon × 2, beam, sprite × 2,
 	// particle × 2, IQM) aren't tracked in vk.pipelines[] or
@@ -15140,6 +14528,75 @@ static void vk_smaa_create_image_dedicated( uint32_t width, uint32_t height, VkF
 	VK_CHECK( qvkCreateImageView( vk.device, &view_desc, NULL, view ) );
 }
 
+static qboolean vk_ral_copy_buffer_to_texture_exact(
+		ralCommandBuffer_t *command, VkBuffer nativeSource,
+		ralTexture_t *destination, qboolean destinationWasSampled,
+		uint32_t regionCount, const ralBufferTextureCopy_t *regions )
+{
+	ralBuffer_t *source = vk_ral_lookup_buffer( nativeSource );
+	ralTextureResourceReceipt_t textureReceipt;
+	const ralResourceState_t sourceState = {
+		RAL_RESOURCE_USAGE_COPY_SOURCE, 0u
+	};
+	ralResourceState_t beforeState = {
+		RAL_RESOURCE_USAGE_UNDEFINED, 0u
+	};
+	const ralResourceState_t copyState = {
+		RAL_RESOURCE_USAGE_COPY_DESTINATION, 0u
+	};
+	const ralResourceState_t sampledState = {
+		RAL_RESOURCE_USAGE_SAMPLED_TEXTURE, RAL_STAGE_FRAGMENT
+	};
+	ralResourceState_t currentState;
+	ralQueueType_t currentQueue;
+	ralTextureTransition_t transition;
+	ralResourceTransitionBatch_t batch;
+	if ( !command || nativeSource == VK_NULL_HANDLE || !source || !destination
+			|| !regions || regionCount == 0u
+			|| Ral_GetCommandBufferHandle( command ) == NULL
+			|| Ral_GetBufferHandle( source ) != (void *)nativeSource
+			|| Ral_GetTextureImageHandle( destination ) == NULL
+			|| !Ral_TextureGetResourceReceipt( destination, &textureReceipt )
+			|| !( Ral_GetBufferUsage( source ) & RAL_BUFFER_TRANSFER_SRC )
+			|| !( textureReceipt.usage & RAL_TEXTURE_USAGE_TRANSFER_DST ) )
+		return qfalse;
+	if ( destinationWasSampled ) beforeState = sampledState;
+	/* Idempotent registrations may already carry COPY_SOURCE; the exact copy
+	 * revalidates that state before any native emission. */
+	(void)Ral_PublishAdoptedBufferState( source, &sourceState,
+		RAL_QUEUE_GRAPHICS );
+	if ( Ral_TextureGetResourceState( destination, &currentState,
+			&currentQueue ) ) {
+		if ( currentQueue != RAL_QUEUE_GRAPHICS
+				|| currentState.usage != beforeState.usage
+				|| currentState.shaderStages != beforeState.shaderStages )
+			return qfalse;
+	} else if ( !Ral_PublishAdoptedTextureState( destination, &beforeState,
+			RAL_QUEUE_GRAPHICS ) ) {
+		return qfalse;
+	}
+	memset( &transition, 0, sizeof( transition ) );
+	transition.texture = destination;
+	transition.aspects = RAL_TEXTURE_ASPECT_COLOR;
+	transition.mipLevelCount = textureReceipt.mipLevels;
+	transition.arrayLayerCount = textureReceipt.arrayLayers;
+	transition.before = beforeState;
+	transition.after = copyState;
+	transition.sourceQueue = RAL_QUEUE_GRAPHICS;
+	transition.destinationQueue = RAL_QUEUE_GRAPHICS;
+	memset( &batch, 0, sizeof( batch ) );
+	batch.textureTransitions = &transition;
+	batch.textureTransitionCount = 1u;
+	if ( Ral_CmdTransitionResources( command, &batch ) != ralSuccess )
+		return qfalse;
+	if ( !Ral_CmdCopyBufferToTextureRegionsExact( command, source,
+			destination, regionCount, regions ) ) return qfalse;
+	transition.before = copyState;
+	transition.after = sampledState;
+	return Ral_CmdTransitionResources( command, &batch ) == ralSuccess
+		? qtrue : qfalse;
+}
+
 
 /*
 ================
@@ -15154,14 +14611,14 @@ Allocates every SMAA-owned Vulkan resource:
   - point_sampler / linear_sampler
   - one-shot LUT byte upload via a temporary staging buffer
 
-Idempotent (early-out if already allocated). Does not allocate
-descriptor sets — those live in vk_init_descriptors and are reused
-across release/realloc cycles (their pool slots are reserved up-front
-in the pool sizing).
+Idempotent (early-out if already allocated). The five sampled
+texture/view/bind-group cohorts are created directly through RAL after
+the raw images and samplers exist; their VkDescriptorSet fields are
+compatibility mirrors, not independent descriptor-pool owners.
 
-Sets vk.smaa.active = qtrue on success. Callers are responsible
-for invoking vk_update_attachment_descriptors() after this returns
-so the descriptor sets pick up the fresh image-view handles.
+Sets vk.smaa.active = qtrue on success. Callers invoke
+vk_update_attachment_descriptors() after this returns so the current
+RAL arena generation receives groups for the fresh image-view handles.
 
 Called from:
   - vk_create_attachments (cold start + r_fbo flip rebuild)
@@ -15178,8 +14635,9 @@ static void vk_smaa_alloc_resources( void )
 	VkBuffer staging_buf;
 	VkDeviceMemory staging_mem;
 	VkDeviceSize staging_size;
-	VkBufferImageCopy region;
+	ralBufferTextureCopy_t region;
 	byte *mapped;
+	qboolean lutUploadReady = qfalse;
 
 	if ( vk.smaa.area_image != VK_NULL_HANDLE ) {
 		// already allocated
@@ -15261,43 +14719,46 @@ static void vk_smaa_alloc_resources( void )
 	memcpy( mapped + AREATEX_SIZE, searchTexBytes, SEARCHTEX_SIZE );
 	qvkUnmapMemory( vk.device, staging_mem );
 
+	/* Adopt the renderer-owned LUT images before recording their upload so the
+	 * copy and both layout changes share one portable RAL authority. Sampling
+	 * groups are created later from these same native image/view identities. */
+	vk.smaa.ral_area_image = Ral_AdoptTextureExact( vk_ral_get_backend(),
+		(void *)vk.smaa.area_image, (void *)vk.smaa.area_view,
+		RAL_FORMAT_R8G8_UNORM, AREATEX_WIDTH, AREATEX_HEIGHT,
+		VK_IMAGE_ASPECT_COLOR_BIT,
+		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-area-upload" );
+	vk.smaa.ral_search_image = Ral_AdoptTextureExact( vk_ral_get_backend(),
+		(void *)vk.smaa.search_image, (void *)vk.smaa.search_view,
+		RAL_FORMAT_R8_UNORM, SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT,
+		VK_IMAGE_ASPECT_COLOR_BIT,
+		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-search-upload" );
+
 	{
-		ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
+		ralCommandBuffer_t *rcmd = NULL;
+		if ( vk.smaa.ral_area_image && vk.smaa.ral_search_image )
+			rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(),
+				RAL_QUEUE_GRAPHICS );
 		if ( rcmd == NULL ) {
 			R_LOG( rch_ral, SEV_ERROR, "%s: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping SMAA LUT upload + layout seeding\n", __func__ );
 		} else {
 			command_buffer = (VkCommandBuffer)Ral_GetCommandBufferHandle( rcmd );
 
-			record_image_layout_transition( command_buffer, vk.smaa.area_image,
-				VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 0 );
-			record_image_layout_transition( command_buffer, vk.smaa.search_image,
-				VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 0 );
-
 			memset( &region, 0, sizeof( region ) );
-			region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-			region.imageSubresource.layerCount = 1;
-			region.imageExtent.depth = 1;
-
+			region.aspects = RAL_TEXTURE_ASPECT_COLOR;
 			region.bufferOffset = 0;
-			region.imageExtent.width = AREATEX_WIDTH;
-			region.imageExtent.height = AREATEX_HEIGHT;
-			qvkCmdCopyBufferToImage( command_buffer, staging_buf, vk.smaa.area_image,
-				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region );
+			region.imageRect.width = AREATEX_WIDTH;
+			region.imageRect.height = AREATEX_HEIGHT;
+			lutUploadReady = vk_ral_copy_buffer_to_texture_exact( rcmd,
+				staging_buf, vk.smaa.ral_area_image, qfalse, 1u, &region );
 
 			region.bufferOffset = AREATEX_SIZE;
-			region.imageExtent.width = SEARCHTEX_WIDTH;
-			region.imageExtent.height = SEARCHTEX_HEIGHT;
-			qvkCmdCopyBufferToImage( command_buffer, staging_buf, vk.smaa.search_image,
-				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region );
-
-			record_image_layout_transition( command_buffer, vk.smaa.area_image,
-				VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
-			record_image_layout_transition( command_buffer, vk.smaa.search_image,
-				VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
+			region.imageRect.width = SEARCHTEX_WIDTH;
+			region.imageRect.height = SEARCHTEX_HEIGHT;
+			lutUploadReady = lutUploadReady
+				&& vk_ral_copy_buffer_to_texture_exact( rcmd, staging_buf,
+					vk.smaa.ral_search_image, qfalse, 1u, &region );
 
 			// the edges/blend/input
 			// intermediate images are created with VK_IMAGE_LAYOUT_UNDEFINED.
@@ -15325,6 +14786,13 @@ static void vk_smaa_alloc_resources( void )
 	vk_ral_unregister_buffer( staging_buf );
 	qvkDestroyBuffer( vk.device, staging_buf, NULL );
 	qvkFreeMemory( vk.device, staging_mem, NULL );
+	if ( !lutUploadReady ) {
+		R_LOG( rch_ral, SEV_ERROR,
+			"SMAA LUT portable upload declined; disabling SMAA resources\n" );
+		vk_wait_idle();
+		vk_smaa_release_resources();
+		return;
+	}
 
 	SET_OBJECT_NAME( vk.smaa.area_image,   "SMAA area LUT",        RAL_VULKAN_OBJECT_ROLE_IMAGE );
 	SET_OBJECT_NAME( vk.smaa.area_view,    "SMAA area LUT view",   RAL_VULKAN_OBJECT_ROLE_IMAGE_VIEW );
@@ -15338,150 +14806,133 @@ static void vk_smaa_alloc_resources( void )
 
 }
 
-// Create + upload the baked blue-noise dither tile (gamma.frag ditherMode 2) and
-// adopt the set-1 descriptor the gamma pass binds. Resolution-independent, so it
-// is created once and reused across vid_restart (idempotent early-out). Mirrors
-// the SMAA LUT upload: a dedicated R8 image, a staging copy, a layout seed to
-// SHADER_READ_ONLY. The descriptor sits at set 1 of the post-process layout (the
-// already-declared "second sampler" slot — no layout change). Inert unless
-// r_dither 2 selects the blue-noise threshold branch.
+// Create + upload the baked blue-noise dither tile (gamma.frag ditherMode 2).
+// The texture, view and sampler persist across vid_restart; the bind group is
+// recreated from the current generation-bound descriptor arena after every
+// arena reset.  No raw VkImage/VkDeviceMemory/staging/descriptor allocation is
+// allowed here: this cohort is the portable RAL/WebGPU ownership model.
 static void vk_create_bluenoise_texture( void )
 {
-	VkBufferCreateInfo     buf_desc;
-	VkMemoryRequirements   mem_req;
-	VkMemoryAllocateInfo   alloc_info;
-	VkBuffer               staging_buf;
-	VkDeviceMemory         staging_mem;
-	ralSamplerCreateInfo_t sampler_desc;
-	VkBufferImageCopy      region;
-	unsigned char         *mapped;
-	const VkDeviceSize     tex_size = (VkDeviceSize)BLUE_NOISE_TEX_SIZE * BLUE_NOISE_TEX_SIZE;
+	ralBackend_t *backend = vk_ral_get_backend();
+	ralTexture_t *candidateTexture = NULL;
+	ralTextureView_t *candidateView = NULL;
+	ralSampler_t *candidateSampler = NULL;
+	ralBindGroup_t *candidateGroup = NULL;
+	ralFence_t *upload = NULL;
+	ralTextureCreateInfo_t textureInfo;
+	ralTextureViewCreateInfo_t viewInfo;
+	ralSamplerCreateInfo_t samplerInfo;
+	ralTextureUploadDesc_t uploadInfo;
+	ralBindingValue_t value;
+	ralBindGroupCreateInfo_t groupInfo;
+	const uint64_t texSize = (uint64_t)BLUE_NOISE_TEX_SIZE * BLUE_NOISE_TEX_SIZE;
 
-	// The image/view/sampler are resolution-independent — created once and reused
-	// across vid_restart. The DESCRIPTOR, however, is pool-managed: vid_restart
-	// resets the descriptor pool, so it is (re)allocated unconditionally at the
-	// tail. Skip only the image upload when it already exists.
-	if ( vk.blueNoise.image != VK_NULL_HANDLE )
-		goto adopt_descriptor;
-
-	vk_smaa_create_image_dedicated( BLUE_NOISE_TEX_SIZE, BLUE_NOISE_TEX_SIZE,
-		VK_FORMAT_R8_UNORM,
-		VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-		&vk.blueNoise.image, &vk.blueNoise.view, &vk.blueNoise.memory );
-
-	// Nearest + REPEAT: the tile maps 1 texel : 1 pixel and wraps across the
-	// screen, so the threshold pattern is the unfiltered blue-noise value.
-	memset( &sampler_desc, 0, sizeof( sampler_desc ) );
-	sampler_desc.addressU = RAL_ADDRESS_REPEAT;
-	sampler_desc.addressV = RAL_ADDRESS_REPEAT;
-	sampler_desc.addressW = RAL_ADDRESS_REPEAT;
-	sampler_desc.magFilter = RAL_FILTER_NEAREST;
-	sampler_desc.minFilter = RAL_FILTER_NEAREST;
-	sampler_desc.mipmapMode = RAL_MIPMAP_NEAREST;
-	sampler_desc.maxAnisotropy = 1.0f;
-	sampler_desc.compareOp = RAL_COMPARE_ALWAYS;
-	sampler_desc.borderColor = RAL_BORDER_TRANSPARENT_BLACK;
-	sampler_desc.debugName = "blue-noise sampler";
-	vk.blueNoise.sampler = vk_create_ral_sampler( &sampler_desc,
-		&vk.blueNoise.ral_sampler );
-
-	memset( &buf_desc, 0, sizeof( buf_desc ) );
-	buf_desc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	buf_desc.size = tex_size;
-	buf_desc.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-	buf_desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	VK_CHECK( qvkCreateBuffer( vk.device, &buf_desc, NULL, &staging_buf ) );
-
-	qvkGetBufferMemoryRequirements( vk.device, staging_buf, &mem_req );
-	memset( &alloc_info, 0, sizeof( alloc_info ) );
-	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	alloc_info.allocationSize = mem_req.size;
-	alloc_info.memoryTypeIndex = find_memory_type( mem_req.memoryTypeBits,
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &staging_mem ) );
-	VK_CHECK( qvkBindBufferMemory( vk.device, staging_buf, staging_mem, 0 ) );
-	vk_ral_register_buffer( staging_buf, tex_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-		"vk.blueNoise.staging" );
-
-	VK_CHECK( qvkMapMemory( vk.device, staging_mem, 0, VK_WHOLE_SIZE, 0, (void **)&mapped ) );
-	memcpy( mapped, blue_noise_tex, (size_t)tex_size );
-	qvkUnmapMemory( vk.device, staging_mem );
-
-	{
-		ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
-		if ( rcmd == NULL ) {
-			R_LOG( rch_ral, SEV_ERROR, "%s: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; blue-noise upload skipped\n", __func__ );
-		} else {
-			VkCommandBuffer command_buffer = (VkCommandBuffer)Ral_GetCommandBufferHandle( rcmd );
-
-			record_image_layout_transition( command_buffer, vk.blueNoise.image,
-				VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 0 );
-
-			memset( &region, 0, sizeof( region ) );
-			region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-			region.imageSubresource.layerCount = 1;
-			region.imageExtent.width  = BLUE_NOISE_TEX_SIZE;
-			region.imageExtent.height = BLUE_NOISE_TEX_SIZE;
-			region.imageExtent.depth  = 1;
-			qvkCmdCopyBufferToImage( command_buffer, staging_buf, vk.blueNoise.image,
-				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region );
-
-			record_image_layout_transition( command_buffer, vk.blueNoise.image,
-				VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
-
-			Ral_SubmitAndDispose( rcmd );
-		}
+	if ( !backend || !vk.ral_bgl_sampler || !vk.ral_descriptor_arena ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: blue-noise RAL parents are unavailable" );
+		return;
+	}
+	if ( ( vk.blueNoise.ral_texture != NULL )
+			!= ( vk.blueNoise.ral_view != NULL )
+		|| ( vk.blueNoise.ral_texture != NULL )
+			!= ( vk.blueNoise.ral_sampler != NULL ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: partial blue-noise RAL resource cohort" );
+		return;
 	}
 
-	vk_ral_unregister_buffer( staging_buf );
-	qvkDestroyBuffer( vk.device, staging_buf, NULL );
-	qvkFreeMemory( vk.device, staging_mem, NULL );
+	if ( !vk.blueNoise.ral_texture ) {
+		memset( &textureInfo, 0, sizeof( textureInfo ) );
+		textureInfo.type = RAL_TEXTURE_2D;
+		textureInfo.format = RAL_FORMAT_R8_UNORM;
+		textureInfo.width = BLUE_NOISE_TEX_SIZE;
+		textureInfo.height = BLUE_NOISE_TEX_SIZE;
+		textureInfo.depthOrArrayLayers = 1u;
+		textureInfo.mipLevels = 1u;
+		textureInfo.sampleCount = 1u;
+		textureInfo.usage = RAL_TEXTURE_USAGE_SAMPLED
+			| RAL_TEXTURE_USAGE_TRANSFER_DST;
+		textureInfo.memory = RAL_MEMORY_DEVICE_LOCAL;
+		textureInfo.debugName = "wired-blue-noise-lut";
+		candidateTexture = Ral_CreateTexture( backend, &textureInfo );
+		if ( !candidateTexture ) goto resource_fail;
 
-	SET_OBJECT_NAME( vk.blueNoise.image, "blue-noise dither LUT",      RAL_VULKAN_OBJECT_ROLE_IMAGE );
-	SET_OBJECT_NAME( vk.blueNoise.view,  "blue-noise dither LUT view", RAL_VULKAN_OBJECT_ROLE_IMAGE_VIEW );
+		memset( &uploadInfo, 0, sizeof( uploadInfo ) );
+		uploadInfo.data = blue_noise_tex;
+		uploadInfo.dataSize = texSize;
+		upload = Ral_TextureUploadAsync( candidateTexture, &uploadInfo );
+		if ( !upload ) goto resource_fail;
+		Ral_WaitFence( upload, RAL_TIMEOUT_INFINITE );
+		Ral_DestroyFence( upload );
+		upload = NULL;
 
-adopt_descriptor:
-	// Combined-image-sampler descriptor from set_layout_sampler (the post-process
-	// "second sampler" set = set 1), adopted as the RAL bind-group the gamma draw
-	// binds at set 1. Same shape as the scene-sampler descriptors. (Re)created on
-	// every call because the descriptor pool resets across vid_restart — free the
-	// prior RAL wrapper first so it doesn't leak/dangle.
+		memset( &viewInfo, 0, sizeof( viewInfo ) );
+		viewInfo.texture = candidateTexture;
+		viewInfo.viewType = RAL_TEXTURE_2D;
+		viewInfo.format = RAL_FORMAT_UNDEFINED;
+		candidateView = Ral_CreateTextureView( backend, &viewInfo );
+		if ( !candidateView ) goto resource_fail;
+
+		// Nearest + REPEAT: one tile texel maps to one pixel and wraps.
+		memset( &samplerInfo, 0, sizeof( samplerInfo ) );
+		samplerInfo.addressU = RAL_ADDRESS_REPEAT;
+		samplerInfo.addressV = RAL_ADDRESS_REPEAT;
+		samplerInfo.addressW = RAL_ADDRESS_REPEAT;
+		samplerInfo.magFilter = RAL_FILTER_NEAREST;
+		samplerInfo.minFilter = RAL_FILTER_NEAREST;
+		samplerInfo.mipmapMode = RAL_MIPMAP_NEAREST;
+		samplerInfo.maxAnisotropy = 1.0f;
+		samplerInfo.compareOp = RAL_COMPARE_ALWAYS;
+		samplerInfo.borderColor = RAL_BORDER_TRANSPARENT_BLACK;
+		samplerInfo.debugName = "wired-blue-noise-sampler";
+		candidateSampler = Ral_CreateSampler( backend, &samplerInfo );
+		if ( !candidateSampler ) goto resource_fail;
+
+		vk.blueNoise.ral_texture = candidateTexture;
+		vk.blueNoise.ral_view = candidateView;
+		vk.blueNoise.ral_sampler = candidateSampler;
+		candidateTexture = NULL;
+		candidateView = NULL;
+		candidateSampler = NULL;
+	}
+
+	// Arena reset invalidates the previous native set cohort. Recreate the
+	// combined texture/sampler group and publish its Vulkan mirror atomically.
 	if ( vk.blueNoise.ral_descriptor ) {
 		Ral_DestroyBindGroup( vk.blueNoise.ral_descriptor );
 		vk.blueNoise.ral_descriptor = NULL;
 	}
-	{
-		VkDescriptorSetAllocateInfo aci;
-		VkDescriptorImageInfo       iinfo;
-		VkWriteDescriptorSet        wr;
-
-		memset( &aci, 0, sizeof( aci ) );
-		aci.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		aci.descriptorPool     = vk.descriptor_pool;
-		aci.descriptorSetCount = 1;
-		aci.pSetLayouts        = &vk.set_layout_sampler;
-		if ( qvkAllocateDescriptorSets( vk.device, &aci, &vk.blueNoise.descriptor ) == VK_SUCCESS
-		     && vk.blueNoise.descriptor != VK_NULL_HANDLE ) {
-			memset( &iinfo, 0, sizeof( iinfo ) );
-			iinfo.sampler     = vk.blueNoise.sampler;
-			iinfo.imageView   = vk.blueNoise.view;
-			iinfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			memset( &wr, 0, sizeof( wr ) );
-			wr.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			wr.dstSet          = vk.blueNoise.descriptor;
-			wr.dstBinding      = 0;
-			wr.descriptorCount = 1;
-			wr.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			wr.pImageInfo      = &iinfo;
-			qvkUpdateDescriptorSets( vk.device, 1, &wr, 0, NULL );
-			if ( vk.ral_bgl_sampler )
-				vk.blueNoise.ral_descriptor = Ral_AdoptBindGroup( vk_ral_get_backend(),
-					vk.blueNoise.descriptor, vk.ral_bgl_sampler, "wired-bluenoise-bg" );
-		}
+	vk.blueNoise.descriptor = VK_NULL_HANDLE;
+	memset( &value, 0, sizeof( value ) );
+	value.binding = 0u;
+	value.type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
+	value.textureView = vk.blueNoise.ral_view;
+	value.sampler = vk.blueNoise.ral_sampler;
+	memset( &groupInfo, 0, sizeof( groupInfo ) );
+	groupInfo.layout = vk.ral_bgl_sampler;
+	groupInfo.values = &value;
+	groupInfo.numValues = 1u;
+	groupInfo.debugName = "wired-blue-noise-bg";
+	groupInfo.arena = vk.ral_descriptor_arena;
+	groupInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+	candidateGroup = Ral_CreateBindGroup( backend, &groupInfo );
+	if ( !candidateGroup ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: failed to create blue-noise RAL bind group" );
+		return;
 	}
+	vk.blueNoise.ral_descriptor = candidateGroup;
+	vk.blueNoise.descriptor = (VkDescriptorSet)Ral_GetBindGroupHandle( candidateGroup );
+	return;
+
+resource_fail:
+	if ( upload ) Ral_DestroyFence( upload );
+	if ( candidateSampler ) Ral_DestroySampler( candidateSampler );
+	if ( candidateView ) Ral_DestroyTextureView( candidateView );
+	if ( candidateTexture ) Ral_DestroyTexture( candidateTexture );
+	ri.Terminate( TERM_UNRECOVERABLE,
+		"Vulkan: failed to create blue-noise RAL resource cohort" );
+	return;
 }
 
 
@@ -15489,14 +14940,10 @@ adopt_descriptor:
 ================
 vk_smaa_release_resources
 
-Inverse of vk_smaa_alloc_resources: destroys
-every SMAA-owned image, view, memory, and sampler. Idempotent.
-
-Does NOT free descriptor sets — those persist across release/realloc
-cycles and are rebound to fresh image views via
-vk_update_attachment_descriptors after the next alloc. Until then,
-the dispatch gate (!vk.smaa.active in RB_SMAA / the post-process
-chain) prevents any reference to the stale descriptors.
+Inverse of vk_smaa_alloc_resources: destroys the direct RAL sampling
+cohorts first, then every renderer-owned raw image/view/memory and the
+RAL samplers. Idempotent. No sampled child survives its texture wrapper,
+arena generation or raw Vulkan image parent.
 
 Callers must vk_wait_idle() before entering this function so no
 in-flight command buffer is still referencing the resources.
@@ -15508,31 +14955,27 @@ Called from:
 */
 static void vk_smaa_release_resources( void )
 {
-	if ( vk.smaa.area_image == VK_NULL_HANDLE ) {
-		// already released
-		return;
-	}
-
+	vk_ral_release_smaa_sampler_cohorts();
 
 	if ( vk.smaa.edges_image != VK_NULL_HANDLE ) {
-		qvkDestroyImage( vk.device, vk.smaa.edges_image, NULL );
 		qvkDestroyImageView( vk.device, vk.smaa.edges_view, NULL );
+		qvkDestroyImage( vk.device, vk.smaa.edges_image, NULL );
 		qvkFreeMemory( vk.device, vk.smaa.edges_memory, NULL );
 		vk.smaa.edges_image  = VK_NULL_HANDLE;
 		vk.smaa.edges_view   = VK_NULL_HANDLE;
 		vk.smaa.edges_memory = VK_NULL_HANDLE;
 	}
 	if ( vk.smaa.blend_image != VK_NULL_HANDLE ) {
-		qvkDestroyImage( vk.device, vk.smaa.blend_image, NULL );
 		qvkDestroyImageView( vk.device, vk.smaa.blend_view, NULL );
+		qvkDestroyImage( vk.device, vk.smaa.blend_image, NULL );
 		qvkFreeMemory( vk.device, vk.smaa.blend_memory, NULL );
 		vk.smaa.blend_image  = VK_NULL_HANDLE;
 		vk.smaa.blend_view   = VK_NULL_HANDLE;
 		vk.smaa.blend_memory = VK_NULL_HANDLE;
 	}
 	if ( vk.smaa.input_image != VK_NULL_HANDLE ) {
-		qvkDestroyImage( vk.device, vk.smaa.input_image, NULL );
 		qvkDestroyImageView( vk.device, vk.smaa.input_view, NULL );
+		qvkDestroyImage( vk.device, vk.smaa.input_image, NULL );
 		qvkFreeMemory( vk.device, vk.smaa.input_memory, NULL );
 		vk.smaa.input_image  = VK_NULL_HANDLE;
 		vk.smaa.input_view   = VK_NULL_HANDLE;
@@ -15540,16 +14983,16 @@ static void vk_smaa_release_resources( void )
 	}
 
 	if ( vk.smaa.area_image != VK_NULL_HANDLE ) {
-		qvkDestroyImage( vk.device, vk.smaa.area_image, NULL );
 		qvkDestroyImageView( vk.device, vk.smaa.area_view, NULL );
+		qvkDestroyImage( vk.device, vk.smaa.area_image, NULL );
 		qvkFreeMemory( vk.device, vk.smaa.area_memory, NULL );
 		vk.smaa.area_image  = VK_NULL_HANDLE;
 		vk.smaa.area_view   = VK_NULL_HANDLE;
 		vk.smaa.area_memory = VK_NULL_HANDLE;
 	}
 	if ( vk.smaa.search_image != VK_NULL_HANDLE ) {
-		qvkDestroyImage( vk.device, vk.smaa.search_image, NULL );
 		qvkDestroyImageView( vk.device, vk.smaa.search_view, NULL );
+		qvkDestroyImage( vk.device, vk.smaa.search_image, NULL );
 		qvkFreeMemory( vk.device, vk.smaa.search_memory, NULL );
 		vk.smaa.search_image  = VK_NULL_HANDLE;
 		vk.smaa.search_view   = VK_NULL_HANDLE;
@@ -15605,30 +15048,43 @@ static void vk_shadow_descriptor_pool_invalidate( void )
 	}
 }
 
-static qboolean vk_shadow_adopt_group( ralBindGroup_t **field,
-		VkDescriptorSet nativeSet, ralBindGroupLayout_t *layout,
-		VkBuffer dynamicBuffer, uint64_t dynamicRange, const char *label )
+static qboolean vk_shadow_refresh_buffer_group(
+		ralBindGroup_t **field, VkDescriptorSet *nativeMirror,
+		ralBindGroupLayout_t *layout, ralBindType_t type,
+		VkBuffer nativeBuffer, uint64_t bufferRange, const char *label )
 {
+	ralBuffer_t *buffer;
+	ralBindingValue_t value;
+	ralBindGroupCreateInfo_t createInfo;
 	ralBindGroup_t *candidate;
-	ralBuffer_t *buffer = NULL;
-	if ( !field || nativeSet == VK_NULL_HANDLE || !layout ) return qfalse;
-	if ( *field && Ral_GetBindGroupHandle( *field ) == (void *)nativeSet )
+	if ( !field || !nativeMirror || !layout || !vk.ral_descriptor_arena
+			|| ( type != RAL_BIND_UNIFORM_BUFFER
+				&& type != RAL_BIND_STORAGE_BUFFER )
+			|| nativeBuffer == VK_NULL_HANDLE || bufferRange == 0u ) return qfalse;
+	if ( *field && *nativeMirror != VK_NULL_HANDLE
+			&& Ral_GetBindGroupHandle( *field ) == (void *)*nativeMirror )
 		return qtrue;
 	vk_shadow_destroy_group( field );
-	if ( dynamicBuffer != VK_NULL_HANDLE ) {
-		buffer = vk_ral_lookup_buffer( dynamicBuffer );
-		if ( !buffer || Ral_GetBufferHandle( buffer ) != (void *)dynamicBuffer
-				|| dynamicRange == 0u || dynamicRange > Ral_GetBufferSize( buffer ) )
-			return qfalse;
-	}
-	candidate = Ral_AdoptBindGroup( vk_ral_get_backend(), nativeSet, layout, label );
+	*nativeMirror = VK_NULL_HANDLE;
+	buffer = vk_ral_lookup_buffer( nativeBuffer );
+	if ( !buffer || Ral_GetBufferHandle( buffer ) != (void *)nativeBuffer
+			|| bufferRange > Ral_GetBufferSize( buffer ) ) return qfalse;
+	memset( &value, 0, sizeof( value ) );
+	value.binding = 0u;
+	value.type = type;
+	value.buffer = buffer;
+	value.bufferRange = bufferRange;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.layout = layout;
+	createInfo.values = &value;
+	createInfo.numValues = 1u;
+	createInfo.debugName = label;
+	createInfo.arena = vk.ral_descriptor_arena;
+	createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+	candidate = Ral_CreateBindGroup( vk_ral_get_backend(), &createInfo );
 	if ( !candidate ) return qfalse;
-	if ( buffer && !Ral_RegisterAdoptedBindGroupDynamicBuffer(
-			candidate, 0u, buffer, 0u, dynamicRange ) ) {
-		Ral_DestroyBindGroup( candidate );
-		return qfalse;
-	}
 	*field = candidate;
+	*nativeMirror = (VkDescriptorSet)Ral_GetBindGroupHandle( candidate );
 	return qtrue;
 }
 
@@ -15670,11 +15126,9 @@ already live). Re-derives vk.shadowMap.active / .size from r_shadows /
 r_shadowMapSize at call time; if shadows are off or the FBO is inactive it
 leaves .active == qfalse and creates nothing (the if ( active ) gate below).
 
-The shadow sampler descriptor SET is NOT allocated here -- vk_init_descriptors
-owns it (allocated whenever vk.fboActive, like the SMAA SETs); this helper only
-creates the image / views / RP / FB / pipeline, and vk_update_attachment_
-descriptors binds the SET to vk.shadowMap.view afterwards. Mirrors
-vk_smaa_alloc_resources.
+The shadow sampler binding lives in the engine-resources RAL bind group; this
+helper creates only the image / views / RP / FB / pipeline, and
+vk_update_attachment_descriptors refreshes that shared binding afterwards.
 
 Callers must vk_wait_idle() before re-entry on a live toggle. Reached from
 vk_create_attachments (cold start + r_fbo / r_hdr rebuild) and from
@@ -15835,8 +15289,9 @@ static void vk_shadow_alloc_resources( void )
 		// with a dynamic offset. Created once (the if-NULL guard makes the lazy
 		// re-runs of this function idempotent; they survive the descriptor-pool reset
 		// — only the descriptor set is re-allocated, in vk_render_shadow_map). The
-		// descriptor itself is allocated lazily there (nulled on pool reset), mirroring
-		// the entity-matrix SSBO descriptor.
+		// bind group itself is created lazily there from the current RAL arena
+		// generation, mirroring the entity-matrix SSBO descriptor's timing without
+		// retaining raw descriptor allocation authority.
 		{
 			const VkDeviceSize slotStride = PAD( 64u, vk.uniform_alignment );
 			const VkDeviceSize cmBytes    = slotStride * SHADOWMAP_MAX_CASCADES;
@@ -16363,8 +15818,6 @@ static void vk_shadow_alloc_resources( void )
 		vk.shadowMap.casterBuiltSurfaces = NULL; // force lazy rebuild for the current world
 
 		SET_OBJECT_NAME( vk.shadowMap.image, "shadow map depth array (4 cascades)", RAL_VULKAN_OBJECT_ROLE_IMAGE );
-		SET_OBJECT_NAME( vk.shadowMap.descriptor, "descriptor - shadow map sampler2DArray", RAL_VULKAN_OBJECT_ROLE_DESCRIPTOR_SET );
-
 		// Adopt the 4-layer depth array as a dynamic-rendering sibling (K4
 		// Ral_AdoptArrayTexture): defaultView = the full-array sampling view
 		// (vk.shadowMap.view), layerViews = the per-cascade attachment views
@@ -16401,16 +15854,18 @@ every shadow-owned image / view / framebuffer / sampler / memory / render pass
 (NOT memset( &vk.shadowMap, 0, ... )). Idempotent (no-op if vk.shadowMap.image
 is already gone).
 
-Does NOT free vk.shadowMap.descriptor -- that SET is owned by vk_init_descriptors
-(allocated from a pool this teardown does not reset), persists across release /
-realloc cycles, and is rebound to the fresh view by vk_update_attachment_
-descriptors after the next alloc; the dispatch gate (!vk.shadowMap.active in
-vk_render_shadow_map / the lit pass) keeps anything from reading it meanwhile.
-Mirrors vk_smaa_release_resources. Callers must vk_wait_idle() first.
+The sampled shadow view is borrowed by the engine-resources group. Retire that
+group before its texture/view parents; the caller republishes one complete group
+after a replacement shadow cohort is available. Callers must vk_wait_idle() first.
 ================
 */
 static void vk_shadow_release_resources( void )
 {
+	// Forward+ set-2 falls back to the CSM texture/view/sampler when the
+	// point-light atlas is unavailable. Retire that arena child before either
+	// the engine-resources group or any CSM parent can be destroyed.
+	vk_forwardplus_lit_invalidate_sets();
+	vk_ral_release_engine_resources_bindgroup();
 	vk_shadow_descriptor_pool_invalidate();
 	if ( vk.shadowMap.image ) {
 		int casc;
@@ -16556,6 +16011,9 @@ faceMvp UBO + the 1-slot entity-matrix SSBO mirror the CSM cascadeMvp/entMat all
 static void vk_dlight_shadow_release_resources( void )
 {
 	int i, f;
+	// Forward+ set-2 groups borrow the atlas view/sampler and params UBOs.
+	// Retire every child before any of those parents are replaced or destroyed.
+	vk_forwardplus_lit_invalidate_sets();
 	if ( vk.dlightShadow.ral_image ) { Ral_DestroyTexture( vk.dlightShadow.ral_image ); vk.dlightShadow.ral_image = NULL; }
 	for ( f = 0; f < 6; f++ ) {
 		if ( vk.dlightShadow.faceView[f] ) { qvkDestroyImageView( vk.device, vk.dlightShadow.faceView[f], NULL ); vk.dlightShadow.faceView[f] = VK_NULL_HANDLE; }
@@ -16576,11 +16034,11 @@ static void vk_dlight_shadow_release_resources( void )
 		if ( vk.dlightShadow.faceMvpMem[i] ) { qvkFreeMemory( vk.device, vk.dlightShadow.faceMvpMem[i], NULL ); vk.dlightShadow.faceMvpMem[i] = VK_NULL_HANDLE; }
 		vk.dlightShadow.faceMvpDesc[i] = VK_NULL_HANDLE;
 		if ( vk.dlightShadow.entMatPtr[i] ) { qvkUnmapMemory( vk.device, vk.dlightShadow.entMatMem[i] ); vk.dlightShadow.entMatPtr[i] = NULL; }
-		if ( vk.dlightShadow.entMatBuf[i] ) { qvkDestroyBuffer( vk.device, vk.dlightShadow.entMatBuf[i], NULL ); vk.dlightShadow.entMatBuf[i] = VK_NULL_HANDLE; }
+		if ( vk.dlightShadow.entMatBuf[i] ) { vk_ral_unregister_buffer( vk.dlightShadow.entMatBuf[i] ); qvkDestroyBuffer( vk.device, vk.dlightShadow.entMatBuf[i], NULL ); vk.dlightShadow.entMatBuf[i] = VK_NULL_HANDLE; }
 		if ( vk.dlightShadow.entMatMem[i] ) { qvkFreeMemory( vk.device, vk.dlightShadow.entMatMem[i], NULL ); vk.dlightShadow.entMatMem[i] = VK_NULL_HANDLE; }
 		vk.dlightShadow.entMatDesc[i] = VK_NULL_HANDLE;
 		if ( vk.dlightShadow.paramsPtr[i] ) { qvkUnmapMemory( vk.device, vk.dlightShadow.paramsMem[i] ); vk.dlightShadow.paramsPtr[i] = NULL; }
-		if ( vk.dlightShadow.paramsBuf[i] ) { qvkDestroyBuffer( vk.device, vk.dlightShadow.paramsBuf[i], NULL ); vk.dlightShadow.paramsBuf[i] = VK_NULL_HANDLE; }
+		if ( vk.dlightShadow.paramsBuf[i] ) { vk_ral_unregister_buffer( vk.dlightShadow.paramsBuf[i] ); qvkDestroyBuffer( vk.device, vk.dlightShadow.paramsBuf[i], NULL ); vk.dlightShadow.paramsBuf[i] = VK_NULL_HANDLE; }
 		if ( vk.dlightShadow.paramsMem[i] ) { qvkFreeMemory( vk.device, vk.dlightShadow.paramsMem[i], NULL ); vk.dlightShadow.paramsMem[i] = VK_NULL_HANDLE; }
 	}
 	for ( i = 0; i < DLIGHT_SHADOW_K_MAX; i++ )
@@ -16633,6 +16091,10 @@ static void vk_dlight_shadow_alloc_resources( void )
 		VK_CHECK( qvkAllocateMemory( vk.device, &ma, NULL, &vk.dlightShadow.paramsMem[i] ) );
 		qvkBindBufferMemory( vk.device, vk.dlightShadow.paramsBuf[i], vk.dlightShadow.paramsMem[i], 0 );
 		VK_CHECK( qvkMapMemory( vk.device, vk.dlightShadow.paramsMem[i], 0, VK_WHOLE_SIZE, 0, &vk.dlightShadow.paramsPtr[i] ) );
+		vk_ral_register_buffer( vk.dlightShadow.paramsBuf[i], (uint64_t)sz,
+			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			"wired-dlight-shadow-params-ubo" );
 		// default: numShadowLights=0 / valid=0 (no shadow) → the lit sample is gated off.
 		memset( vk.dlightShadow.paramsPtr[i], 0, (size_t)sz );
 	}
@@ -16785,6 +16247,10 @@ static void vk_dlight_shadow_alloc_resources( void )
 		VK_CHECK( qvkAllocateMemory( vk.device, &ma, NULL, &vk.dlightShadow.entMatMem[i] ) );
 		qvkBindBufferMemory( vk.device, vk.dlightShadow.entMatBuf[i], vk.dlightShadow.entMatMem[i], 0 );
 		VK_CHECK( qvkMapMemory( vk.device, vk.dlightShadow.entMatMem[i], 0, VK_WHOLE_SIZE, 0, &vk.dlightShadow.entMatPtr[i] ) );
+		vk_ral_register_buffer( vk.dlightShadow.entMatBuf[i], 64u,
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			"vk.dlightShadow.entMatBuf" );
 		// fill the identity model→world (worldspawn verts are already world-space).
 		{
 			float idm[16]; memset( idm, 0, sizeof( idm ) ); idm[0]=idm[5]=idm[10]=idm[15]=1.0f;
@@ -16874,15 +16340,17 @@ static void vk_create_attachments( void )
 		// screenmap depth
 		create_depth_attachment( vk.screenMapWidth, vk.screenMapHeight, VK_SAMPLE_COUNT_1_BIT, &vk.screenMap.depth_image, &vk.screenMap.depth_image_view, qtrue );
 
-		if ( r_ext_supersample->integer ) {
-			// capture buffer
-			usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-			create_color_attachment( gls.captureWidth, gls.captureHeight, VK_SAMPLE_COUNT_1_BIT, vk.capture_format,
-				usage, &vk.capture.image, &vk.capture.image_view, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, qfalse );
-			// RAL sibling adoption happens AFTER vk_alloc_attachments (below), where
-			// the image VIEW is actually created — create_color_attachment only makes
-			// the image. Adopting here would capture a NULL view → VUID-08912.
-		}
+		// Stable display-referred screenshot/readback target. This cannot be
+		// supersample-only: HDR10/P3/scRGB swapchains are not byte-compatible
+		// with the public sRGB capture contract. Keeping one R8G8B8A8 UNORM target
+		// ready lets the screenshot frame run the explicit output conversion and
+		// prevents packed 10-bit/PQ swapchain bytes from escaping as RGB8.
+		usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+		create_color_attachment( gls.captureWidth, gls.captureHeight, VK_SAMPLE_COUNT_1_BIT, vk.capture_format,
+			usage, &vk.capture.image, &vk.capture.image_view, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, qfalse );
+		// RAL sibling adoption happens AFTER vk_alloc_attachments (below), where
+		// the image VIEW is actually created — create_color_attachment only makes
+		// the image. Adopting here would capture a NULL view → VUID-08912.
 	} // if ( vk.fboActive )
 
 	//vk_alloc_attachments();
@@ -17012,10 +16480,10 @@ static void vk_create_attachments( void )
 
 	// Adopt the capture RAL sibling now that vk_alloc_attachments has created the
 	// image VIEW (create_color_attachment above only made the image). Not in the
-	// boot static sweep: capture.image is supersample-gated + re-created on every
+	// boot static sweep: capture.image is re-created on every
 	// swapchain/r_hdr/r_fbo rebuild (this function), while the sweep runs once at
 	// boot — re-adopting here keeps the sibling in lockstep with the live VkImage.
-	// No-op when capture.image is NULL (supersample off).
+	// No-op only on the non-FBO path, where no post-process capture pass exists.
 	vk_ral_adopt_one_texture( vk.capture.image, vk.capture.image_view, vk.capture_format,
 		&vk.capture.ral_image, gls.captureWidth, gls.captureHeight,
 		VK_IMAGE_ASPECT_COLOR_BIT,
@@ -17268,9 +16736,35 @@ static void vk_restart_swapchain( const char *funcname, VkResult res )
 	vk_create_swapchain( vk.present_format, qfalse );
 	vk_create_attachments();
 
-	vk_update_attachment_descriptors();
+	vk_ral_adopt_static_internal_textures();
 
 	vk_update_post_process_pipelines();
+}
+
+void vk_request_presentation_change( const refPresentationChange_t *change ) {
+	if ( !change || change->schemaVersion != REF_PRESENTATION_CHANGE_SCHEMA_VERSION
+			|| change->generation <= vk_pending_presentation_change.generation ) return;
+	vk_pending_presentation_change = *change;
+}
+
+void vk_apply_pending_presentation_change( void ) {
+	refPresentationChange_t change = vk_pending_presentation_change;
+	if ( change.generation == 0u ) return;
+	memset( &vk_pending_presentation_change, 0,
+		sizeof( vk_pending_presentation_change ) );
+	gls.windowWidth = (int)change.presentationWidth;
+	gls.windowHeight = (int)change.presentationHeight;
+	glConfig.vidWidthLogical = (int)change.logicalWidth;
+	glConfig.vidHeightLogical = (int)change.logicalHeight;
+	if ( !vk.ral_swapchain ) return;
+	R_LOG( rch_ral, SEV_INFO,
+		"presentation-change generation=%llu catalog=%llu flags=0x%x logical=%ux%u presentation=%ux%u render=%ux%u ui=%ux%u action=rebuild\n",
+		(unsigned long long)change.generation,
+		(unsigned long long)change.catalogGeneration, change.changeFlags,
+		change.logicalWidth, change.logicalHeight,
+		change.presentationWidth, change.presentationHeight,
+		change.renderWidth, change.renderHeight, change.uiWidth, change.uiHeight );
+	vk_restart_swapchain( "presentation-change", VK_SUBOPTIMAL_KHR );
 }
 
 
@@ -19188,6 +18682,161 @@ void vk_forwardplus_capture_dlights( void )
 	// path is unchanged either way — the OFF path never had static lights here.)
 }
 
+static qboolean vk_forwardplus_lit_refresh_set( uint32_t slot )
+{
+#if FEAT_SHADOW_MAPPING
+	ralBackend_t *backend = vk_ral_get_backend();
+	ralBuffer_t *tileLights, *lights, *tileParams, *shadowParams;
+	ralBuffer_t *clusterLights, *clusterParams;
+	ralTexture_t *shadowTexture = NULL;
+	const ralSampler_t *shadowSampler = NULL;
+	ralTextureView_t *shadowViewCandidate = NULL, *shadowViewRetired;
+	ralBindGroup_t *groupCandidate = NULL, *groupRetired;
+	ralBindingValue_t values[8];
+	ralBindGroupCreateInfo_t createInfo;
+	void *nativeShadowView = NULL, *nativeShadowSampler = NULL;
+	void *rawCandidate;
+	const uint64_t tileParamsBytes = 4u * sizeof( float );
+	const uint64_t lightsBytes = (uint64_t)FP_MAX_LIGHTS
+		* FP_LIGHT_VEC4S * 4u * sizeof( float );
+	const uint64_t shadowParamsBytes = (uint64_t)( 6u * DLIGHT_SHADOW_K_MAX ) * 64u
+		+ (uint64_t)DLIGHT_SHADOW_K_MAX * 16u + 16u;
+	const uint64_t clusterParamsBytes = 8u * sizeof( float );
+	uint32_t i;
+
+	if ( slot >= NUM_COMMAND_BUFFERS || NUM_COMMAND_BUFFERS != 2u
+			|| !backend || !vk.ral_fpLitSetLayout
+			|| Ral_GetBindGroupLayoutHandle( vk.ral_fpLitSetLayout )
+				!= (void *)vk.fpLitSetLayout
+			|| !vk.ral_descriptor_arena
+			|| !Ral_BindGroupArenaReceiptValid( &vk.ral_descriptor_arena_receipt )
+			|| vk.ral_descriptor_arena_receipt.backendIdentity != backend
+			|| vk.ral_descriptor_arena_receipt.arenaIdentity
+				!= vk.ral_descriptor_arena ) return qfalse;
+
+	tileLights = vk.ral_fp_tilelights[slot];
+	lights = vk.ral_fp_lights[slot];
+	tileParams = vk_ral_lookup_buffer( vk.fpTileParamsBuf[slot] );
+	shadowParams = vk_ral_lookup_buffer( vk.dlightShadow.paramsBuf[slot] );
+	clusterLights = vk.ral_fp_clustergrid
+		? vk.ral_fp_clustergrid : vk.ral_fp_clusterfallback;
+	clusterParams = vk_ral_lookup_buffer( vk.fpClusterParamsBuf );
+	if ( !tileLights || !lights || !tileParams || !shadowParams
+			|| !clusterLights || !clusterParams
+			|| !Ral_GetBufferHandle( tileLights )
+			|| !Ral_GetBufferHandle( lights )
+			|| Ral_GetBufferHandle( tileParams ) != (void *)vk.fpTileParamsBuf[slot]
+			|| Ral_GetBufferHandle( shadowParams ) != (void *)vk.dlightShadow.paramsBuf[slot]
+			|| Ral_GetBufferHandle( clusterParams ) != (void *)vk.fpClusterParamsBuf
+			|| Ral_GetBufferSize( tileLights ) == 0u
+			|| Ral_GetBufferSize( lights ) != lightsBytes
+			|| Ral_GetBufferSize( tileParams ) != tileParamsBytes
+			|| Ral_GetBufferSize( shadowParams ) != shadowParamsBytes
+			|| Ral_GetBufferSize( clusterLights ) == 0u
+			|| Ral_GetBufferSize( clusterParams ) != clusterParamsBytes ) return qfalse;
+
+	if ( vk.dlightShadow.ral_image && vk.dlightShadow.view
+			&& vk.dlightShadow.ral_sampler
+			&& Ral_GetTextureImageHandle( vk.dlightShadow.ral_image )
+				== (void *)vk.dlightShadow.image
+			&& Ral_GetTextureDefaultViewHandle( vk.dlightShadow.ral_image )
+				== (void *)vk.dlightShadow.view
+			&& Ral_GetSamplerHandle( vk.dlightShadow.ral_sampler )
+				== (void *)vk.dlightShadow.sampler ) {
+		shadowTexture = vk.dlightShadow.ral_image;
+		shadowSampler = vk.dlightShadow.ral_sampler;
+		nativeShadowView = (void *)vk.dlightShadow.view;
+		nativeShadowSampler = (void *)vk.dlightShadow.sampler;
+	} else if ( vk.shadowMap.ral_image && vk.shadowMap.view
+			&& vk.shadowMap.ral_sampler
+			&& Ral_GetTextureImageHandle( vk.shadowMap.ral_image )
+				== (void *)vk.shadowMap.image
+			&& Ral_GetTextureDefaultViewHandle( vk.shadowMap.ral_image )
+				== (void *)vk.shadowMap.view
+			&& Ral_GetSamplerHandle( vk.shadowMap.ral_sampler )
+				== (void *)vk.shadowMap.sampler ) {
+		shadowTexture = vk.shadowMap.ral_image;
+		shadowSampler = vk.shadowMap.ral_sampler;
+		nativeShadowView = (void *)vk.shadowMap.view;
+		nativeShadowSampler = (void *)vk.shadowMap.sampler;
+	} else if ( tr.whiteImage && tr.whiteImage->ralDescriptorTexture
+			&& tr.whiteImage->ralDescriptorSampler
+			&& tr.whiteImage->view != VK_NULL_HANDLE
+			&& Ral_GetTextureDefaultViewHandle(
+				tr.whiteImage->ralDescriptorTexture ) == (void *)tr.whiteImage->view
+			&& Ral_GetSamplerHandle( tr.whiteImage->ralDescriptorSampler ) ) {
+		shadowTexture = tr.whiteImage->ralDescriptorTexture;
+		shadowSampler = tr.whiteImage->ralDescriptorSampler;
+		nativeShadowView = (void *)tr.whiteImage->view;
+		nativeShadowSampler = Ral_GetSamplerHandle(
+			tr.whiteImage->ralDescriptorSampler );
+	}
+	if ( !shadowTexture || !shadowSampler || !nativeShadowView
+			|| !nativeShadowSampler ) return qfalse;
+	shadowViewCandidate = Ral_AdoptTextureViewExact( backend,
+		shadowTexture, nativeShadowView );
+	if ( !shadowViewCandidate
+			|| Ral_GetTextureViewHandle( shadowViewCandidate )
+				!= nativeShadowView ) goto fail;
+
+	memset( values, 0, sizeof( values ) );
+	values[0] = (ralBindingValue_t){ .binding=4u,
+		.type=RAL_BIND_STORAGE_BUFFER, .buffer=tileLights,
+		.bufferRange=Ral_GetBufferSize( tileLights ) };
+	values[1] = (ralBindingValue_t){ .binding=5u,
+		.type=RAL_BIND_STORAGE_BUFFER, .buffer=lights,
+		.bufferRange=lightsBytes };
+	values[2] = (ralBindingValue_t){ .binding=6u,
+		.type=RAL_BIND_UNIFORM_BUFFER, .buffer=tileParams,
+		.bufferRange=tileParamsBytes };
+	values[3] = (ralBindingValue_t){ .binding=7u,
+		.type=RAL_BIND_SAMPLED_TEXTURE, .textureView=shadowViewCandidate };
+	values[4] = (ralBindingValue_t){ .binding=8u,
+		.type=RAL_BIND_SAMPLER, .sampler=shadowSampler };
+	values[5] = (ralBindingValue_t){ .binding=9u,
+		.type=RAL_BIND_UNIFORM_BUFFER, .buffer=shadowParams,
+		.bufferRange=shadowParamsBytes };
+	values[6] = (ralBindingValue_t){ .binding=10u,
+		.type=RAL_BIND_STORAGE_BUFFER, .buffer=clusterLights,
+		.bufferRange=Ral_GetBufferSize( clusterLights ) };
+	values[7] = (ralBindingValue_t){ .binding=11u,
+		.type=RAL_BIND_UNIFORM_BUFFER, .buffer=clusterParams,
+		.bufferRange=clusterParamsBytes };
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.layout = vk.ral_fpLitSetLayout;
+	createInfo.values = values;
+	createInfo.numValues = ARRAY_LEN( values );
+	createInfo.debugName = slot ? "wired-fp-lit-set2-1" : "wired-fp-lit-set2-0";
+	createInfo.arena = vk.ral_descriptor_arena;
+	createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+	groupCandidate = Ral_CreateBindGroup( backend, &createInfo );
+	if ( !groupCandidate
+			|| !( rawCandidate = Ral_GetBindGroupHandle( groupCandidate ) ) ) goto fail;
+	for ( i = 0u; i < NUM_COMMAND_BUFFERS; ++i ) {
+		if ( groupCandidate == vk.ral_fpLitSet[i]
+				|| rawCandidate == (void *)vk.fpLitSet[i]
+				|| shadowViewCandidate == vk.ral_fpLitShadowView[i] ) goto fail;
+	}
+
+	groupRetired = vk.ral_fpLitSet[slot];
+	shadowViewRetired = vk.ral_fpLitShadowView[slot];
+	vk.ral_fpLitSet[slot] = groupCandidate;
+	vk.ral_fpLitShadowView[slot] = shadowViewCandidate;
+	vk.fpLitSet[slot] = (VkDescriptorSet)rawCandidate;
+	if ( groupRetired ) Ral_DestroyBindGroup( groupRetired );
+	if ( shadowViewRetired ) Ral_DestroyTextureView( shadowViewRetired );
+	return qtrue;
+
+fail:
+	if ( groupCandidate ) Ral_DestroyBindGroup( groupCandidate );
+	if ( shadowViewCandidate ) Ral_DestroyTextureView( shadowViewCandidate );
+	return qfalse;
+#else
+	(void)slot;
+	return qfalse;
+#endif
+}
+
 void vk_forwardplus_dispatch( void )
 {
 	float viewProj[16], invVP[16];
@@ -19356,11 +19005,10 @@ void vk_forwardplus_dispatch( void )
 	Ral_CmdPipelineBarrier( vk.cmd->ral_cmd,
 		RAL_BARRIER_COMPUTE_TO_GRAPHICS );
 
-	// Prepare the CONSUMER's set-2 descriptor (fpLitSet) for this frame: write the
-	// tileParams UBO {screenW,H,tilesX,tilesY} (host-coherent) + (re)allocate +
-	// write the descriptor binding the 3 fp resources (tileLights@4 + dlightParams@5
-	// + tileParams@6). The lit draw (vk_draw_forwardplus) binds this as set 2. Only
-	// when the consumer pipeline is built.
+	// Prepare the consumer's exact set-2 group. The group is an immutable direct
+	// RAL arena child joining all eight bindings; the VkDescriptorSet field is only
+	// its native compatibility mirror. Resource rebuilds invalidate the child and
+	// this fence-safe command slot lazily publishes a fresh complete candidate.
 	if ( vk.ral_fpLitPipeline && vk.fpLitSetLayout != VK_NULL_HANDLE
 	     && vk.fpTileParamsBuf[ vk.cmd_index ] != VK_NULL_HANDLE ) {
 		const uint32_t fi = vk.cmd_index;
@@ -19371,77 +19019,11 @@ void vk_forwardplus_dispatch( void )
 			tp[2] = (float)tilesX;
 			tp[3] = (float)tilesY;
 		}
-		if ( vk.fpLitSet[ fi ] == VK_NULL_HANDLE ) {
-			VkDescriptorSetAllocateInfo da;
-			VkWriteDescriptorSet        w[8];
-			VkDescriptorBufferInfo      bi[6];
-			VkDescriptorImageInfo       ii_tex, ii_smp;
-			VkImageView                 atlasView;
-			VkSampler                   atlasSampler;
-			VkBuffer                    clusterBuf, clusterParamsBuf;
-			int                         nw = 3;
-			memset( &da, 0, sizeof( da ) );
-			da.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			da.descriptorPool     = vk.descriptor_pool;
-			da.descriptorSetCount = 1;
-			da.pSetLayouts        = &vk.fpLitSetLayout;
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &da, &vk.fpLitSet[ fi ] ) );
-			memset( bi, 0, sizeof( bi ) );
-			bi[0].buffer = (VkBuffer)Ral_GetBufferHandle( vk.ral_fp_tilelights[ fi ] ); bi[0].offset = 0; bi[0].range = VK_WHOLE_SIZE;
-			bi[1].buffer = (VkBuffer)Ral_GetBufferHandle( vk.ral_fp_lights[ fi ] );     bi[1].offset = 0; bi[1].range = VK_WHOLE_SIZE;
-			bi[2].buffer = vk.fpTileParamsBuf[ fi ];                                    bi[2].offset = 0; bi[2].range = VK_WHOLE_SIZE;
-			memset( w, 0, sizeof( w ) );
-			w[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[0].dstSet = vk.fpLitSet[fi]; w[0].dstBinding = 4; w[0].descriptorCount = 1; w[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; w[0].pBufferInfo = &bi[0];
-			w[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[1].dstSet = vk.fpLitSet[fi]; w[1].dstBinding = 5; w[1].descriptorCount = 1; w[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; w[1].pBufferInfo = &bi[1];
-			w[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[2].dstSet = vk.fpLitSet[fi]; w[2].dstBinding = 6; w[2].descriptorCount = 1; w[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;  w[2].pBufferInfo = &bi[2];
-#if FEAT_SHADOW_MAPPING
-			// dlight-shadow atlas (binding 7/8) + params UBO (binding 9). The shader always
-			// declares them; when r_dlightShadows is off the atlas isn't allocated → bind
-			// the CSM shadow map as a valid dummy (params.valid=0 gates the sample off).
-			atlasView    = vk.dlightShadow.view    ? vk.dlightShadow.view    : vk.shadowMap.view;
-			atlasSampler = vk.dlightShadow.sampler ? vk.dlightShadow.sampler : vk.shadowMap.sampler;
-			if ( atlasView != VK_NULL_HANDLE && atlasSampler != VK_NULL_HANDLE
-			     && vk.dlightShadow.paramsBuf[ fi ] != VK_NULL_HANDLE ) {
-				memset( &ii_tex, 0, sizeof( ii_tex ) );
-				ii_tex.imageView   = atlasView;
-				ii_tex.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				memset( &ii_smp, 0, sizeof( ii_smp ) );
-				ii_smp.sampler     = atlasSampler;
-				bi[3].buffer = vk.dlightShadow.paramsBuf[ fi ]; bi[3].offset = 0; bi[3].range = VK_WHOLE_SIZE;
-				w[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[3].dstSet = vk.fpLitSet[fi]; w[3].dstBinding = 7; w[3].descriptorCount = 1; w[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; w[3].pImageInfo = &ii_tex;
-				w[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[4].dstSet = vk.fpLitSet[fi]; w[4].dstBinding = 8; w[4].descriptorCount = 1; w[4].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;       w[4].pImageInfo = &ii_smp;
-				w[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[5].dstSet = vk.fpLitSet[fi]; w[5].dstBinding = 9; w[5].descriptorCount = 1; w[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; w[5].pBufferInfo = &bi[3];
-				nw = 6;
-			}
-#endif
-			// r_unbakeStaticLights: bind the world-cluster static-light grid (binding 10)
-			// + its grid-params UBO (binding 11). When the cvar is off / no static lights,
-			// the empty 1-cell fallback is bound so the fragment's cluster loop reads
-			// count=0 → zero iterations → byte-identical output (the descriptor is never
-			// dangling, so no validation error on the default path).
-			clusterBuf       = vk.ral_fp_clustergrid    ? (VkBuffer)Ral_GetBufferHandle( vk.ral_fp_clustergrid )
-			                 : ( vk.ral_fp_clusterfallback ? (VkBuffer)Ral_GetBufferHandle( vk.ral_fp_clusterfallback ) : VK_NULL_HANDLE );
-			clusterParamsBuf = vk.fpClusterParamsBuf;
-			if ( clusterBuf != VK_NULL_HANDLE && clusterParamsBuf != VK_NULL_HANDLE ) {
-				bi[4].buffer = clusterBuf;       bi[4].offset = 0; bi[4].range = VK_WHOLE_SIZE;
-				bi[5].buffer = clusterParamsBuf; bi[5].offset = 0; bi[5].range = VK_WHOLE_SIZE;
-				w[nw].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[nw].dstSet = vk.fpLitSet[fi]; w[nw].dstBinding = 10; w[nw].descriptorCount = 1; w[nw].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; w[nw].pBufferInfo = &bi[4]; nw++;
-				w[nw].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; w[nw].dstSet = vk.fpLitSet[fi]; w[nw].dstBinding = 11; w[nw].descriptorCount = 1; w[nw].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; w[nw].pBufferInfo = &bi[5]; nw++;
-			}
-			qvkUpdateDescriptorSets( vk.device, (uint32_t)nw, w, 0, NULL );
-		}
-		if ( vk.fpLitSet[fi] != VK_NULL_HANDLE && !vk.ral_fpLitSet[fi] ) {
-			vk.ral_fpLitSet[fi] = Ral_AdoptBindGroup(
-				vk_ral_get_backend(), (void *)vk.fpLitSet[fi],
-				vk.ral_fpLitSetLayout, "wired-fp-lit-set2" );
-			if ( !vk.ral_fpLitSet[fi] ) {
-				// The pool owns the native set; dropping its identity makes the next
-				// frame allocate a fresh candidate while this frame stays on PMLIGHT.
-				vk.fpLitSet[fi] = VK_NULL_HANDLE;
-				R_LOG( rch_ral, SEV_WARN,
-					"forward+: exact set-2 wrapper adoption failed; tiled lighting disabled for this frame\n" );
-				return;
-			}
+		if ( !vk.ral_fpLitSet[fi]
+				&& !vk_forwardplus_lit_refresh_set( fi ) ) {
+			R_LOG( rch_ral, SEV_WARN,
+				"forward+: direct set-2 RAL cohort unavailable; tiled lighting disabled for this frame\n" );
+			return;
 		}
 	}
 
@@ -19466,6 +19048,10 @@ static void vk_forwardplus_lit_invalidate_sets( void )
 			Ral_DestroyBindGroup( vk.ral_fpLitSet[i] );
 			vk.ral_fpLitSet[i] = NULL;
 		}
+		if ( vk.ral_fpLitShadowView[i] ) {
+			Ral_DestroyTextureView( vk.ral_fpLitShadowView[i] );
+			vk.ral_fpLitShadowView[i] = NULL;
+		}
 		vk.fpLitSet[i] = VK_NULL_HANDLE;
 	}
 }
@@ -19475,13 +19061,12 @@ void vk_forwardplus_lit_shutdown( void )
 	int i;
 	if ( vk.ral_fpLitPipeline )  { Ral_DestroyPipeline( vk.ral_fpLitPipeline );  vk.ral_fpLitPipeline = NULL; }
 	vk_forwardplus_lit_invalidate_sets();
-	if ( vk.ral_fpLitLayout )    { Ral_DestroyPipelineLayout( vk.ral_fpLitLayout ); vk.ral_fpLitLayout = NULL; }
-	if ( vk.ral_fpLitSetLayout ) { Ral_DestroyBindGroupLayout( vk.ral_fpLitSetLayout ); vk.ral_fpLitSetLayout = NULL; }
-	if ( vk.fpLitLayout )        { qvkDestroyPipelineLayout( vk.device, vk.fpLitLayout, NULL ); vk.fpLitLayout = VK_NULL_HANDLE; }
-	if ( vk.fpLitSetLayout )     { qvkDestroyDescriptorSetLayout( vk.device, vk.fpLitSetLayout, NULL ); vk.fpLitSetLayout = VK_NULL_HANDLE; }
+	if ( vk.ral_fpLitLayout )    { Ral_DestroyPipelineLayout( vk.ral_fpLitLayout ); vk.ral_fpLitLayout = NULL; vk.fpLitLayout = VK_NULL_HANDLE; }
+	if ( vk.ral_fpLitSetLayout ) { Ral_DestroyBindGroupLayout( vk.ral_fpLitSetLayout ); vk.ral_fpLitSetLayout = NULL; vk.fpLitSetLayout = VK_NULL_HANDLE; }
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		if ( vk.fpTileParamsBuf[i] != VK_NULL_HANDLE ) {
 			if ( vk.fpTileParamsPtr[i] ) { qvkUnmapMemory( vk.device, vk.fpTileParamsMem[i] ); vk.fpTileParamsPtr[i] = NULL; }
+			vk_ral_unregister_buffer( vk.fpTileParamsBuf[i] );
 			qvkDestroyBuffer( vk.device, vk.fpTileParamsBuf[i], NULL );
 			qvkFreeMemory( vk.device, vk.fpTileParamsMem[i], NULL );
 			vk.fpTileParamsBuf[i] = VK_NULL_HANDLE;
@@ -19493,6 +19078,7 @@ void vk_forwardplus_lit_shutdown( void )
 	if ( vk.ral_fp_clusterfallback ) { Ral_DestroyBuffer( vk.ral_fp_clusterfallback ); vk.ral_fp_clusterfallback = NULL; }
 	if ( vk.fpClusterParamsBuf != VK_NULL_HANDLE ) {
 		if ( vk.fpClusterParamsPtr ) { qvkUnmapMemory( vk.device, vk.fpClusterParamsMem ); vk.fpClusterParamsPtr = NULL; }
+		vk_ral_unregister_buffer( vk.fpClusterParamsBuf );
 		qvkDestroyBuffer( vk.device, vk.fpClusterParamsBuf, NULL );
 		qvkFreeMemory( vk.device, vk.fpClusterParamsMem, NULL );
 		vk.fpClusterParamsBuf = VK_NULL_HANDLE;
@@ -19519,34 +19105,10 @@ void vk_forwardplus_lit_init( ralBackend_t *backend )
 
 	// set 2 — the dedicated Forward+ resources.
 	{
-		VkDescriptorSetLayoutBinding b[8];
-		VkDescriptorSetLayoutCreateInfo ci;
 		ralBindEntry_t e[8];
-		memset( b, 0, sizeof( b ) );
-		b[0].binding = 4; b[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;  b[0].descriptorCount = 1; b[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; // tileLights
-		b[1].binding = 5; b[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;  b[1].descriptorCount = 1; b[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; // dlightParams
-		b[2].binding = 6; b[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;  b[2].descriptorCount = 1; b[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; // tileParams
-		// Point-light omni shadow: the atlas (sampled depth) + its sampler + the
-		// face-MVP/params UBO. Always present in the layout (the shader always declares
-		// them); when r_dlightShadows is off they bind a fallback + numShadowLights=0 gates
-		// the sample → no behavior change.
-		b[3].binding = 7; b[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;   b[3].descriptorCount = 1; b[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; // dlightShadowAtlas
-		b[4].binding = 8; b[4].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;         b[4].descriptorCount = 1; b[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; // dlightShadowSampler
-		b[5].binding = 9; b[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;  b[5].descriptorCount = 1; b[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; // DlightShadowParams
-		// r_unbakeStaticLights world-cluster grid (view-independent static lighting): the
-		// flat per-cell static-light-index SSBO + the grid-params UBO. Always in the layout
-		// (the shader always declares them); the empty fallback binds when the cvar is off.
-		b[6].binding = 10; b[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; b[6].descriptorCount = 1; b[6].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; // ClusterLights
-		b[7].binding = 11; b[7].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; b[7].descriptorCount = 1; b[7].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; // ClusterGridParams
-		memset( &ci, 0, sizeof( ci ) );
-		ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-		ci.bindingCount = 8;
-		ci.pBindings = b;
-		VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &ci, NULL, &vk.fpLitSetLayout ) );
-
 		memset( e, 0, sizeof( e ) );
 		for ( i = 0; i < 8; i++ ) {
-			e[i].binding = b[i].binding;
+			e[i].binding = 4u + (uint32_t)i;
 			e[i].count = 1u;
 			e[i].stageFlags = RAL_STAGE_FRAGMENT;
 		}
@@ -19559,32 +19121,23 @@ void vk_forwardplus_lit_init( ralBackend_t *backend )
 		e[5].type = RAL_BIND_UNIFORM_BUFFER;
 		e[6].type = RAL_BIND_STORAGE_BUFFER;
 		e[7].type = RAL_BIND_UNIFORM_BUFFER;
-		vk.ral_fpLitSetLayout = Ral_AdoptBindGroupLayout( backend,
-			(void *)vk.fpLitSetLayout, 8u, e, "wired-fp-lit-set2-layout" );
-		if ( !vk.ral_fpLitSetLayout ) {
+		if ( !vk_create_effect_bind_group_layout( e, ARRAY_LEN( e ),
+				"wired-fp-lit-set2-layout", &vk.ral_fpLitSetLayout,
+				&vk.fpLitSetLayout ) ) {
 			R_LOG( rch_ral, SEV_WARN,
-				"forward+: exact set-2 layout adoption failed; tiled lighting consumer disabled\n" );
+				"forward+: exact set-2 RAL layout creation failed; tiled lighting consumer disabled\n" );
 			vk_forwardplus_lit_shutdown();
 			return;
 		}
 	}
 
 	// pipeline layout: set0 per-draw UBO + set1 bindless + set2 fp resources.
-	{
-		VkDescriptorSetLayout sets[3];
-		VkPipelineLayoutCreateInfo pl;
-		sets[0] = vk.set_layout_uniform;
-		sets[1] = (VkDescriptorSetLayout)Ral_GetBindGroupLayoutHandle( vk_ral_get_bindless_layout() );
-		sets[2] = vk.fpLitSetLayout;
-		memset( &pl, 0, sizeof( pl ) );
-		pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		pl.setLayoutCount = 3;
-		pl.pSetLayouts = sets;
-		pl.pushConstantRangeCount = 0;
-		pl.pPushConstantRanges = NULL;
-		VK_CHECK( qvkCreatePipelineLayout( vk.device, &pl, NULL, &vk.fpLitLayout ) );
+	if ( !vk_create_forwardplus_lit_pipeline_layout() ) {
+		R_LOG( rch_ral, SEV_WARN,
+			"forward+: exact RAL pipeline layout creation failed; tiled lighting consumer disabled\n" );
+		vk_forwardplus_lit_shutdown();
+		return;
 	}
-	vk_ral_adopt_one_pipeline_layout( vk.fpLitLayout, &vk.ral_fpLitLayout, "wired-pl-fp-lit" );
 
 	// per-frame tileParams UBO {screenW, screenH, tilesX, tilesY} (host-coherent).
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
@@ -19606,6 +19159,9 @@ void vk_forwardplus_lit_init( ralBackend_t *backend )
 		VK_CHECK( qvkAllocateMemory( vk.device, &ma, NULL, &vk.fpTileParamsMem[i] ) );
 		qvkBindBufferMemory( vk.device, vk.fpTileParamsBuf[i], vk.fpTileParamsMem[i], 0 );
 		VK_CHECK( qvkMapMemory( vk.device, vk.fpTileParamsMem[i], 0, VK_WHOLE_SIZE, 0, &vk.fpTileParamsPtr[i] ) );
+		vk_ral_register_buffer( vk.fpTileParamsBuf[i], (uint64_t)bd.size,
+			bd.usage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			"wired-forwardplus-tile-params-ubo" );
 		SET_OBJECT_NAME( vk.fpTileParamsBuf[i], "forward+ tile params UBO", RAL_VULKAN_OBJECT_ROLE_BUFFER );
 		vk.fpLitSet[i] = VK_NULL_HANDLE; // lazy-allocated in the dispatch (after pool reset)
 	}
@@ -19634,6 +19190,9 @@ void vk_forwardplus_lit_init( ralBackend_t *backend )
 		VK_CHECK( qvkAllocateMemory( vk.device, &ma, NULL, &vk.fpClusterParamsMem ) );
 		qvkBindBufferMemory( vk.device, vk.fpClusterParamsBuf, vk.fpClusterParamsMem, 0 );
 		VK_CHECK( qvkMapMemory( vk.device, vk.fpClusterParamsMem, 0, VK_WHOLE_SIZE, 0, &vk.fpClusterParamsPtr ) );
+		vk_ral_register_buffer( vk.fpClusterParamsBuf, (uint64_t)bd.size,
+			bd.usage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			"wired-forwardplus-cluster-params-ubo" );
 		SET_OBJECT_NAME( vk.fpClusterParamsBuf, "forward+ cluster params UBO", RAL_VULKAN_OBJECT_ROLE_BUFFER );
 		// default = empty grid (dims 1x1x1, cellSize 1): every fragment maps to cell 0,
 		// whose count is 0 in the fallback SSBO → zero static-light iterations.
@@ -19784,20 +19343,6 @@ void vk_forwardplus_lit_init( ralBackend_t *backend )
 			R_LOG( rch_ral, SEV_WARN, "forward+: lit pipeline adoption failed; tiled lighting consumer disabled\n" );
 			vk_forwardplus_lit_shutdown();
 			return;
-		}
-		{
-			ralBindGroupLayout_t *layouts[3] = {
-				vk.ral_bgl_uniform,
-				vk_ral_get_bindless_layout(),
-				vk.ral_fpLitSetLayout
-			};
-			if ( !Ral_RegisterExternalPipelineBindGroupLayouts(
-					vk.ral_fpLitPipeline, 3u, layouts ) ) {
-				R_LOG( rch_ral, SEV_WARN,
-					"forward+: exact set-layout ABI registration failed; tiled lighting consumer disabled\n" );
-				vk_forwardplus_lit_shutdown();
-				return;
-			}
 		}
 	}
 
@@ -20889,40 +20434,31 @@ qboolean vk_initialize( void )
 	// Descriptor pool.
 	//
 	{
-		ralBindGroupArenaEntry_t pool_size[5];
+		ralBindGroupArenaEntry_t pool_size[7];
 		ralBindGroupArenaCreateInfo_t desc;
 		uint32_t i, maxSets;
 
 		pool_size[0].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
 		pool_size[0].dynamicOffset = qfalse;
-		// MAX_DRAWIMAGES per-image samplers + 9 post-process / FBO-side
-		// descriptors + 576 for the four primitive sampler arrays
-		// (ribbon binding 2 + beam binding 1 + rail-ribbon binding 2 = 64
-		// slots each; particle binding 3 = PARTICLE_SAMPLER_COUNT (96) slots
-		// — 64 class + 32 flipbook frame pool — each × NUM_COMMAND_BUFFERS
-		// (= 2) descriptor sets: ribbon 128 + beam 128 + rail 128 +
-		// particle 192 = 576). The rail-ribbon set reuses ribbon.frag, so it
-		// carries the same 64-slot primitive texture array. Without the
-		// explicit primitive budget those arrays would silently eat into
-		// MAX_DRAWIMAGES headroom and pool exhaustion could fire on heavy
-		// maps that load close to MAX_DRAWIMAGES images.
+		// MAX_DRAWIMAGES per-image samplers + post-process/FBO descriptors +
+		// particle's remaining 96-element combined array per command slot.
+		// Ribbon/rail/beam no longer consume combined descriptors: their portable
+		// ABI is a sampled texture array plus one common sampler (pool_size 5/6).
 		//
-		// The 9 post-process descriptors map to vkAllocateDescriptorSets
-		// calls in the post-process descriptor block (~line 2771): each
-		// `+ 1` term below corresponds to one sampler descriptor for one
-		// VkImageView, allocated unconditionally or under the matching
-		// FEAT_* / boolean guard at the alloc site.
+		// Post-process sampler budgets include both direct RAL groups and the
+		// remaining legacy allocations. Each term reserves one native descriptor
+		// within the RAL arena even when no renderer-local allocate call remains.
 		pool_size[0].count = MAX_DRAWIMAGES
 		                             + 1 /* vk.color_descriptor — main scene HDR sampler */
 		                             + 1 /* vk.tonemapped_descriptor — LDR-linear scene */
+		                             + 1 /* vk.blueNoise.descriptor — RAL-owned gamma dither LUT */
 		                             + 1 /* vk.screenMap.color_descriptor — screenmap (env capture) */
-		                             + 1 /* vk.sceneDepth.descriptor — depth-fade post pass */
+		                             + 1 /* vk.sceneDepth.descriptor — RAL-owned depth-fade sampler */
 		                             + VK_NUM_BLOOM_PASSES * 2 /* vk.bloom_image_descriptor[i] — ping-pong per pass */
-		                             + 1 /* vk.shadowMap.descriptor — FEAT_SHADOW_MAPPING */
-		                             + 5 /* vk.smaa.{edges,blend,input,area,search}_descriptor */
-		                             + 5 /* vk.engineResources.descriptor — 5 bindings: shadowMap + BRDF-LUT + irradiance + radiance cubes (IBL global resources) + screen-space GTAO visibility */
-		                             + 4 /* vk.atm heightgrid sampler — compute binding 3 × NUM_COMMAND_BUFFERS × 2 (init + vid-restart re-alloc) */
-		                             + 576;
+			                             + 5 /* direct RAL SMAA sampler groups: edges/blend/input/area/search */
+		                             + 5 /* direct RAL engine-resources group: shadowMap + BRDF-LUT + irradiance + radiance + GTAO */
+			                             + 8 /* vk.atm heightgrid + scene-depth samplers — 2 groups × NUM_COMMAND_BUFFERS × 2 (init + vid-restart re-alloc) */
+		                             + PARTICLE_SAMPLER_COUNT * NUM_COMMAND_BUFFERS;
 
 		pool_size[1].type = RAL_BIND_UNIFORM_BUFFER;
 		pool_size[1].dynamicOffset = qtrue;
@@ -20963,9 +20499,9 @@ qboolean vk_initialize( void )
 		// + NUM_COMMAND_BUFFERS for the shadow entity-matrix SSBO sets
 		// (vk.tess[i].shadowEntMatDesc, set 0 of vk.shadowMap.depthLayout — one per
 		// command-buffer slot, allocated lazily in vk_render_shadow_map).
-		// + NUM_COMMAND_BUFFERS for the main-path entity-matrix SSBO sets
-		// (vk.tess[i].entMatDesc, set 3 of vk.pipeline_layout — one per command-
-		// buffer slot, allocated lazily in vk_entmat_begin_frame on r_entitySSBO).
+		// + NUM_COMMAND_BUFFERS for the main-path entity-matrix SSBO groups
+		// (vk.tess[i].ral_entMatDesc, set 3 of vk.pipeline_layout — one direct
+		// current-arena group per command slot; entMatDesc is its native mirror).
 		// + the atmospheric weather SSBOs: compute reads+writes (2 pool bindings ×
 		// NUM_COMMAND_BUFFERS) + render reads (1 × NUM_COMMAND_BUFFERS), each
 		// double-allocated (vk_init_atmospheric + the vid-restart re-alloc) ≈ 12.
@@ -20989,6 +20525,15 @@ qboolean vk_initialize( void )
 		// (vk_init_atmospheric + vid-restart re-alloc) = NUM_COMMAND_BUFFERS * 4.
 		pool_size[4].count = NUM_COMMAND_BUFFERS + 8 + NUM_COMMAND_BUFFERS + NUM_COMMAND_BUFFERS + NUM_COMMAND_BUFFERS
 		                             + ( NUM_COMMAND_BUFFERS * 4 );
+
+		pool_size[5].type = RAL_BIND_TEXTURE_ARRAY;
+		pool_size[5].dynamicOffset = qfalse;
+		pool_size[5].count = PRIMITIVE_SHADER_IMAGE_MAX
+			* NUM_COMMAND_BUFFERS * 3; // ribbon + rail + beam
+
+		pool_size[6].type = RAL_BIND_SAMPLER;
+		pool_size[6].dynamicOffset = qfalse;
+		pool_size[6].count = NUM_COMMAND_BUFFERS * 3; // one sampler per group
 
 		// bindless-ral-consolidate — the bindless SAMPLED_IMAGE[WIRED_BINDLESS_TEX_SLOTS]
 		// + SAMPLER[WIRED_BINDLESS_SAMPLER_SLOTS] slice that used to live in this
@@ -21027,6 +20572,21 @@ qboolean vk_initialize( void )
 	// with a dynamic offset into the vk.effectsUbo ring (replaces the three effects'
 	// push ranges). The frag stages declare the block for layout match but read none.
 	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, &vk.set_layout_effects_ubo );
+	{
+		ralBindEntry_t entry;
+		memset( &entry, 0, sizeof( entry ) );
+		entry.binding = 0u;
+		entry.type = RAL_BIND_UNIFORM_BUFFER;
+		entry.count = 1u;
+		entry.stageFlags = RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT;
+		entry.dynamicOffset = qtrue;
+		vk.ral_bgl_effects_ubo = Ral_AdoptBindGroupLayout(
+			vk_ral_get_backend(), vk.set_layout_effects_ubo, 1u, &entry,
+			"wired-set-layout-effects-ubo-adopted" );
+		if ( !vk.ral_bgl_effects_ubo )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to publish effects UBO RAL bind-group layout" );
+	}
 	// SMAA rtMetrics per-frame UBO set layout — single UNIFORM_BUFFER binding, VS|FS.
 	// Set 3 of vk.pipeline_layout_smaa (shared by edge/blend/resolve); replaces the
 	// 16-byte rtMetrics push. Non-dynamic (per-frame screen size, one slot per frame).
@@ -21155,8 +20715,7 @@ qboolean vk_initialize( void )
 		//                                              so nothing samples it)
 		// msdf.frag uses vk.pipeline_layout_msdf which shares this shape.
 		// vk.set_layout_sampler stays in use for other layouts
-		// (vk.shadowMap.descriptor, vk.screenMap.color_descriptor, the legacy
-		// COMBINED_IMAGE_SAMPLER per-image sets, SMAA / post-process), but is
+		// (SMAA and per-image sets; screenMap is direct RAL), but is
 		// no longer referenced by vk.pipeline_layout itself.
 		set_layouts[0]                    = vk.set_layout_uniform;
 		set_layouts[WIRED_BINDLESS_SET]   = (VkDescriptorSetLayout)Ral_GetBindGroupLayoutHandle( vk_ral_get_bindless_layout() );
@@ -21357,12 +20916,6 @@ qboolean vk_initialize( void )
 	// for documentation rather than strict dependency.
 	vk_init_beam();
 
-#if FEAT_IQM
-	// IQM GPU skinning — must be after shader modules and descriptor pool.
-	// The pipeline declares exact dynamic-rendering formats through RAL.
-	vk_init_iqm_gpu_skinning();
-#endif
-
 	// preallocate staging buffer
 	if ( vk.defaults.staging_size == STAGING_BUFFER_SIZE_HI ) {
 		vk_alloc_staging_buffer( vk.defaults.staging_size );
@@ -21413,9 +20966,10 @@ qboolean vk_initialize( void )
 
 			e.stageFlags = RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT;
 			e.dynamicOffset = qtrue;
-			vk.ral_bgl_effects_ubo = Ral_AdoptBindGroupLayout( backend,
-				vk.set_layout_effects_ubo, 1, &e,
-				"wired-set-layout-effects-ubo-adopted" );
+			if ( !vk.ral_bgl_effects_ubo )
+				vk.ral_bgl_effects_ubo = Ral_AdoptBindGroupLayout( backend,
+					vk.set_layout_effects_ubo, 1, &e,
+					"wired-set-layout-effects-ubo-adopted" );
 			e.dynamicOffset = qfalse;
 			vk.ral_bgl_smaa_rtmetrics = Ral_AdoptBindGroupLayout( backend,
 				vk.set_layout_smaa_rtmetrics, 1, &e,
@@ -21470,44 +21024,61 @@ qboolean vk_initialize( void )
 					(void *)vk.ral_bgl_entmat, (void *)vk.ral_bgl_msdf );
 			}
 
-			// adopt the per-subsystem
-			// descriptor layouts so the 15 special-case pipeline sites can
+			// Complete the per-subsystem descriptor-layout cohort so the
+			// special-case pipeline sites can
 			// declare matching VkPipelineLayouts. Entries[] is informational
 			// (RAL pipeline-layout creation only needs the VkDescriptorSetLayout
-			// handle); most legacy layouts still carry a create-only placeholder.
+			// handle). Primitive ribbon/rail/beam/sprite layouts are already
+			// direct RAL owners; adoption remains only as an idempotent legacy
+			// fallback for a partially migrated initialization order.
 			// Particle compute is adopted earlier with its exact UBO+3 SSBO shape
 			// because it is now a live RAL command consumer.
 			{
+				ralBindEntry_t ribbonEntries[4];
+				ralBindEntry_t railEntries[3];
+				ralBindEntry_t beamEntries[5];
 				ralBindEntry_t ee;
+				memset( ribbonEntries, 0, sizeof( ribbonEntries ) );
+				ribbonEntries[0] = (ralBindEntry_t){ 0, RAL_BIND_STORAGE_BUFFER, 1, RAL_STAGE_VERTEX, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+				ribbonEntries[1] = (ralBindEntry_t){ 1, RAL_BIND_STORAGE_BUFFER, 1, RAL_STAGE_VERTEX, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+				ribbonEntries[2] = (ralBindEntry_t){ 2, RAL_BIND_TEXTURE_ARRAY, PRIMITIVE_SHADER_IMAGE_MAX, RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_2D, qfalse };
+				ribbonEntries[3] = (ralBindEntry_t){ 3, RAL_BIND_SAMPLER, 1, RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+				memset( railEntries, 0, sizeof( railEntries ) );
+				railEntries[0] = ribbonEntries[0];
+				railEntries[1] = ribbonEntries[2];
+				railEntries[2] = ribbonEntries[3];
+				memset( beamEntries, 0, sizeof( beamEntries ) );
+				beamEntries[0] = (ralBindEntry_t){ 0, RAL_BIND_STORAGE_BUFFER, 1, RAL_STAGE_VERTEX, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+				beamEntries[1] = (ralBindEntry_t){ 1, RAL_BIND_TEXTURE_ARRAY, PRIMITIVE_SHADER_IMAGE_MAX, RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_2D, qfalse };
+				beamEntries[2] = (ralBindEntry_t){ 2, RAL_BIND_STORAGE_BUFFER, 1, RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+				beamEntries[3] = (ralBindEntry_t){ 3, RAL_BIND_STORAGE_BUFFER, 1, RAL_STAGE_VERTEX, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+				beamEntries[4] = (ralBindEntry_t){ 4, RAL_BIND_SAMPLER, 1, RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
 				memset( &ee, 0, sizeof( ee ) );
 				ee.binding    = 0;
 				ee.count      = 1;
 				ee.type       = RAL_BIND_STORAGE_BUFFER;
 				ee.stageFlags = RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT;
 
-				if ( vk.ribbon.set_layout != VK_NULL_HANDLE )
-					vk.ribbon.ral_bgl = Ral_AdoptBindGroupLayout( backend, vk.ribbon.set_layout, 1, &ee, "wired-ribbon-set-layout-adopted" );
-				if ( vk.railRibbon.set_layout != VK_NULL_HANDLE )
-					vk.railRibbon.ral_bgl = Ral_AdoptBindGroupLayout( backend, vk.railRibbon.set_layout, 1, &ee, "wired-rail-ribbon-set-layout-adopted" );
-				if ( vk.beam.set_layout != VK_NULL_HANDLE )
-					vk.beam.ral_bgl = Ral_AdoptBindGroupLayout( backend, vk.beam.set_layout, 1, &ee, "wired-beam-set-layout-adopted" );
-				if ( vk.sprite.set_layout != VK_NULL_HANDLE )
+				if ( vk.ribbon.set_layout != VK_NULL_HANDLE
+						&& vk.ribbon.ral_bgl == NULL )
+					vk.ribbon.ral_bgl = Ral_AdoptBindGroupLayout( backend, vk.ribbon.set_layout, ARRAY_LEN( ribbonEntries ), ribbonEntries, "wired-ribbon-set-layout-adopted" );
+				if ( vk.railRibbon.set_layout != VK_NULL_HANDLE
+						&& vk.railRibbon.ral_bgl == NULL )
+					vk.railRibbon.ral_bgl = Ral_AdoptBindGroupLayout( backend, vk.railRibbon.set_layout, ARRAY_LEN( railEntries ), railEntries, "wired-rail-ribbon-set-layout-adopted" );
+				if ( vk.beam.set_layout != VK_NULL_HANDLE
+						&& vk.beam.ral_bgl == NULL )
+					vk.beam.ral_bgl = Ral_AdoptBindGroupLayout( backend, vk.beam.set_layout, ARRAY_LEN( beamEntries ), beamEntries, "wired-beam-set-layout-adopted" );
+				if ( vk.sprite.set_layout != VK_NULL_HANDLE
+						&& vk.sprite.ral_bgl == NULL )
 					vk.sprite.ral_bgl = Ral_AdoptBindGroupLayout( backend, vk.sprite.set_layout, 1, &ee, "wired-sprite-set-layout-adopted" );
 				if ( vk.particle.compute_set_layout != VK_NULL_HANDLE
 				  && vk.particle.ral_bgl_compute == NULL )
 					vk.particle.ral_bgl_compute = Ral_AdoptBindGroupLayout( backend, vk.particle.compute_set_layout, 1, &ee, "wired-particle-compute-set-layout-adopted" );
-				if ( vk.particle.render_set_layout != VK_NULL_HANDLE )
-					vk.particle.ral_bgl_render = Ral_AdoptBindGroupLayout( backend, vk.particle.render_set_layout, 1, &ee, "wired-particle-render-set-layout-adopted" );
-				if ( vk.decal.render_set_layout != VK_NULL_HANDLE )
-					vk.decal.ral_bgl_render = Ral_AdoptBindGroupLayout( backend, vk.decal.render_set_layout, 1, &ee, "wired-decal-render-set-layout-adopted" );
 #if FEAT_IQM
 				ee.type = RAL_BIND_UNIFORM_BUFFER;
 				ee.dynamicOffset = qtrue;
-				if ( vk.iqmGpu.set_layout_bones != VK_NULL_HANDLE )
-					vk.iqmGpu.ral_bgl_bones = Ral_AdoptBindGroupLayout( backend, vk.iqmGpu.set_layout_bones, 1, &ee, "wired-iqm-bones-set-layout-adopted" );
-				(void)vk_ral_register_iqm_pipeline_layout_abi();
 #endif
-				R_LOG( rch_ral, SEV_INFO, "adopted 7 per-subsystem descriptor set layouts (ribbon/rail/beam/sprite/particle/decal/iqm)\n" );
+				R_LOG( rch_ral, SEV_INFO, "published 5 per-subsystem RAL descriptor layouts (ribbon/rail/beam/sprite/particle)\n" );
 			}
 
 			// pipeline cache disk load.
@@ -21558,6 +21129,14 @@ qboolean vk_initialize( void )
 		}
 	}
 
+#if FEAT_IQM
+	// IQM's direct RAL pipeline layout consumes the shared sampler-layout
+	// wrapper. Initialize only after the imported backend has adopted that
+	// layout; doing this with the other primitive initializers above races the
+	// dependency and fails every cold native boot.
+	vk_init_iqm_gpu_skinning();
+#endif
+
 	return qtrue;
 }
 
@@ -21574,6 +21153,15 @@ static void vk_destroy_attachments( void )
 {
 	uint32_t i;
 	vk_scene_color_attachment_generation = 0;
+	// Every portable sampling view and attachment-dependent RAL child must be
+	// retired before its renderer-owned raw image. Centralizing the order here
+	// covers HDR/FBO/swapchain rebuilds as well as full shutdown.
+	if ( vk_ral_get_backend() ) {
+		vk_ral_destroy_adopted_internal_textures();
+		if ( Ral_WaitIdleAndDrainDeferred( vk_ral_get_backend() ) != ralSuccess )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"RAL attachment teardown: deferred drain failed" );
+	}
 
 	if ( vk.bloom_image[0] ) {
 		for ( i = 0; i < ARRAY_LEN( vk.bloom_image ); i++ ) {
@@ -22259,21 +21847,25 @@ void vk_shutdown( refShutdownCode_t code )
 	// vk_shutdown above (Ral_DestroyCommandBuffer of vk.ral_staging_cmd,
 	// Ral_DestroySwapchain inside vk_destroy_swapchain,
 	// vk_destroy_sync_primitives' Ral_DestroySemaphore wrappers) has run.
-	// Blue-noise dither LUT (resolution-independent — created once, not torn down
-	// per vid_restart). Free it at device shutdown, before the RAL backend frees
-	// the device. The RAL descriptor wrapper is freed per-vid_restart in the
-	// create path's re-adopt, but free any live one here too for a clean exit.
-	if ( vk.blueNoise.ral_descriptor ) { Ral_DestroyBindGroup( vk.blueNoise.ral_descriptor ); vk.blueNoise.ral_descriptor = NULL; }
+	// Resolution-independent blue-noise resources outlive arena resets but remain
+	// children of the RAL backend. Static bind-group release already retired the
+	// arena-owned group; destroy view/sampler before their texture parent.
+	if ( vk.blueNoise.ral_descriptor ) {
+		Ral_DestroyBindGroup( vk.blueNoise.ral_descriptor );
+		vk.blueNoise.ral_descriptor = NULL;
+	}
+	vk.blueNoise.descriptor = VK_NULL_HANDLE;
+	if ( vk.blueNoise.ral_view ) {
+		Ral_DestroyTextureView( vk.blueNoise.ral_view );
+		vk.blueNoise.ral_view = NULL;
+	}
 	if ( vk.blueNoise.ral_sampler ) {
 		Ral_DestroySampler( vk.blueNoise.ral_sampler );
 		vk.blueNoise.ral_sampler = NULL;
-		vk.blueNoise.sampler = VK_NULL_HANDLE;
 	}
-	if ( vk.blueNoise.image != VK_NULL_HANDLE ) {
-		qvkDestroyImageView( vk.device, vk.blueNoise.view, NULL );
-		qvkDestroyImage( vk.device, vk.blueNoise.image, NULL );
-		qvkFreeMemory( vk.device, vk.blueNoise.memory, NULL );
-		vk.blueNoise.image = VK_NULL_HANDLE; vk.blueNoise.view = VK_NULL_HANDLE; vk.blueNoise.memory = VK_NULL_HANDLE;
+	if ( vk.blueNoise.ral_texture ) {
+		Ral_DestroyTexture( vk.blueNoise.ral_texture );
+		vk.blueNoise.ral_texture = NULL;
 	}
 
 	vk_ral_backend_shutdown();
@@ -22483,6 +22075,8 @@ void vk_release_resources( void ) {
 void vk_create_image( image_t *image, int width, int height, int mip_levels ) {
 
 	VkFormat format = image->internalFormat;
+	image->mipLevelCount = (uint32_t)mip_levels;
+	vk_ral_release_image_descriptor( image );
 
 	if ( image->handle ) {
 		qvkDestroyImage( vk.device, image->handle, NULL );
@@ -22570,27 +22164,10 @@ void vk_create_image( image_t *image, int width, int height, int mip_levels ) {
 		VK_CHECK( qvkCreateImageView( vk.device, &desc, NULL, &image->view ) );
 	}
 
-	// create associated descriptor set
-	if ( image->descriptor == VK_NULL_HANDLE ) {
-		VkDescriptorSetAllocateInfo desc;
-
-		desc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		desc.pNext = NULL;
-		desc.descriptorPool = vk.descriptor_pool;
-		desc.descriptorSetCount = 1;
-		desc.pSetLayouts = &vk.set_layout_sampler;
-
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &desc, &image->descriptor ) );
-	}
-
 	vk_update_descriptor_set( image, mip_levels > 1 ? qtrue : qfalse );
 
 	SET_OBJECT_NAME( image->handle, image->imgName, RAL_VULKAN_OBJECT_ROLE_IMAGE );
 	SET_OBJECT_NAME( image->view, image->imgName, RAL_VULKAN_OBJECT_ROLE_IMAGE_VIEW );
-	SET_OBJECT_NAME( image->descriptor, image->imgName, RAL_VULKAN_OBJECT_ROLE_DESCRIPTOR_SET );
-	if ( !vk_ral_adopt_image_descriptor( image ) )
-		R_LOG( rch_ral, SEV_WARN, "image sampler bind-group adoption failed: %s\n",
-			image->imgName );
 
 	if ( image->descriptor == VK_NULL_HANDLE || image->view == VK_NULL_HANDLE || image->handle == VK_NULL_HANDLE ) {
 		R_LOG( rch_fbo, SEV_DEBUG, "INVALID image: '%s' handle=%p view=%p descriptor=%p\n",
@@ -22668,11 +22245,11 @@ static byte *resample_image_data( const int target_format, byte *data, const int
 
 void vk_upload_image_data( image_t *image, int x, int y, int width, int height, int mipmaps, byte *pixels, int size, qboolean update, uint32_t baseArrayLayer ) {
 
-	VkCommandBuffer   command_buffer;
-	VkBufferImageCopy regions[16];
-	VkBufferImageCopy region;
+	ralBufferTextureCopy_t regions[16];
+	ralBufferTextureCopy_t region;
 	byte *buf;
 	int n;
+	qboolean uploadRecorded = qfalse;
 
 	int num_regions = 0;
 	int buffer_size = 0;
@@ -22706,18 +22283,13 @@ void vk_upload_image_data( image_t *image, int x, int y, int width, int height, 
 
 		memset(&region, 0, sizeof(region));
 		region.bufferOffset = buffer_size;
-		region.bufferRowLength = 0;
-		region.bufferImageHeight = 0;
-		region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		region.imageSubresource.mipLevel = num_regions;
-		region.imageSubresource.baseArrayLayer = baseArrayLayer;
-		region.imageSubresource.layerCount = 1;
-		region.imageOffset.x = x;
-		region.imageOffset.y = y;
-		region.imageOffset.z = 0;
-		region.imageExtent.width = width;
-		region.imageExtent.height = height;
-		region.imageExtent.depth = 1;
+		region.mipLevel = (uint32_t)num_regions;
+		region.arrayLayer = baseArrayLayer;
+		region.aspects = RAL_TEXTURE_ASPECT_COLOR;
+		region.imageRect.x = x;
+		region.imageRect.y = y;
+		region.imageRect.width = (uint32_t)width;
+		region.imageRect.height = (uint32_t)height;
 
 		regions[num_regions] = region;
 		num_regions++;
@@ -22766,18 +22338,9 @@ void vk_upload_image_data( image_t *image, int x, int y, int width, int height, 
 	//R_LOG( rch_vk, SEV_WARN, "batch @%6i + %i %s \n", (int)vk_world.staging_buffer_offset, (int)buffer_size, image->imgName );
 	vk.staging_buffer.offset += buffer_size;
 
-	command_buffer = vk.staging_command_buffer;
-
-	if ( update ) {
-		record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 0 );
-	} else {
-		record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_HOST_BIT, 0 );
-	}
-
-	qvkCmdCopyBufferToImage( command_buffer, vk.staging_buffer.handle, image->handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, num_regions, regions );
-
-	// final transition after upload comleted
-	record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
+	uploadRecorded = vk_ral_copy_buffer_to_texture_exact( vk.ral_staging_cmd,
+		vk.staging_buffer.handle, image->ralDescriptorTexture, update,
+		(uint32_t)num_regions, regions );
 #else
 	if ( vk.staging_buffer.size < buffer_size ) {
 		vk_alloc_staging_buffer( buffer_size );
@@ -22790,19 +22353,20 @@ void vk_upload_image_data( image_t *image, int x, int y, int width, int height, 
 		if ( rcmd == NULL ) {
 			R_LOG( rch_ral, SEV_ERROR, "%s: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping image upload '%s'\n", __func__, image->imgName );
 		} else {
-			command_buffer = (VkCommandBuffer)Ral_GetCommandBufferHandle( rcmd );
-			// record_buffer_memory_barrier( command_buffer, vk_world.staging_buffer, VK_WHOLE_SIZE, 0, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT );
-			if ( update ) {
-				record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 0 );
-			} else {
-				record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_HOST_BIT, 0 );
-			}
-			qvkCmdCopyBufferToImage( command_buffer, vk.staging_buffer.handle, image->handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, num_regions, regions );
-			record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
+			uploadRecorded = vk_ral_copy_buffer_to_texture_exact( rcmd,
+				vk.staging_buffer.handle, image->ralDescriptorTexture, update,
+				(uint32_t)num_regions, regions );
 			Ral_SubmitAndDispose( rcmd );
 		}
 	}
 #endif
+	if ( !uploadRecorded ) {
+		R_LOG( rch_ral, SEV_ERROR,
+			"%s: portable upload transaction rejected image '%s'\n",
+			__func__, image->imgName );
+		if ( buf != pixels ) ri.Hunk_FreeTempMemory( buf );
+		return;
+	}
 
 	// Bindless mirror — propagate the same sub-region into the parallel RAL
 	// texture so the bindless image array stays byte-equivalent to the legacy
@@ -22909,20 +22473,20 @@ such mip chains laid out face-major (the DDS spec order +X,-X,+Y,
 -Y,+Z,-Z, which equals Vulkan cube array layers 0..5), and the
 upload writes all 6 array layers.
 
-Mirrors vk_upload_image_data's staging-buffer + vkCmdCopyBufferToImage
-flow, minus the resample_image_data step (compressed data has no
+Mirrors vk_upload_image_data's staging-buffer + portable multi-region
+buffer-to-texture flow, minus the resample_image_data step (compressed data has no
 per-pixel layout to convert) and minus the byte-per-pixel math.
 ================
 */
 void vk_upload_image_data_compressed( image_t *image, int width, int height, int mipLevels, byte *data, int dataSize ) {
-	VkCommandBuffer   command_buffer;
-	VkBufferImageCopy regions[6 * 16];
+	ralBufferTextureCopy_t regions[6 * 16];
 	int n;
 	int num_regions = 0;
 	int buffer_offset = 0;
 	int blockBytes;
 	int faces, face;
 	int mipsPerFace;
+	qboolean uploadRecorded = qfalse;
 
 	blockBytes = vk_bc_block_bytes( image->internalFormat );
 	if ( blockBytes == 0 ) {
@@ -22958,13 +22522,11 @@ void vk_upload_image_data_compressed( image_t *image, int width, int height, int
 
 			memset( &regions[num_regions], 0, sizeof( regions[num_regions] ) );
 			regions[num_regions].bufferOffset = buffer_offset;
-			regions[num_regions].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-			regions[num_regions].imageSubresource.mipLevel = n;
-			regions[num_regions].imageSubresource.baseArrayLayer = face;
-			regions[num_regions].imageSubresource.layerCount = 1;
-			regions[num_regions].imageExtent.width = mipW;
-			regions[num_regions].imageExtent.height = mipH;
-			regions[num_regions].imageExtent.depth = 1;
+			regions[num_regions].mipLevel = (uint32_t)n;
+			regions[num_regions].arrayLayer = (uint32_t)face;
+			regions[num_regions].aspects = RAL_TEXTURE_ASPECT_COLOR;
+			regions[num_regions].imageRect.width = (uint32_t)mipW;
+			regions[num_regions].imageRect.height = (uint32_t)mipH;
 			num_regions++;
 
 			buffer_offset += mipBytes;
@@ -23006,11 +22568,9 @@ void vk_upload_image_data_compressed( image_t *image, int width, int height, int
 
 	vk.staging_buffer.offset += buffer_offset;
 
-	command_buffer = vk.staging_command_buffer;
-
-	record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_HOST_BIT, 0 );
-	qvkCmdCopyBufferToImage( command_buffer, vk.staging_buffer.handle, image->handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, num_regions, regions );
-	record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
+	uploadRecorded = vk_ral_copy_buffer_to_texture_exact( vk.ral_staging_cmd,
+		vk.staging_buffer.handle, image->ralDescriptorTexture, qfalse,
+		(uint32_t)num_regions, regions );
 #else
 	if ( vk.staging_buffer.size < (uint32_t)buffer_offset ) {
 		vk_alloc_staging_buffer( buffer_offset );
@@ -23023,14 +22583,17 @@ void vk_upload_image_data_compressed( image_t *image, int width, int height, int
 		if ( rcmd == NULL ) {
 			R_LOG( rch_ral, SEV_ERROR, "%s: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping image upload '%s'\n", __func__, image->imgName );
 		} else {
-			command_buffer = (VkCommandBuffer)Ral_GetCommandBufferHandle( rcmd );
-			record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_HOST_BIT, 0 );
-			qvkCmdCopyBufferToImage( command_buffer, vk.staging_buffer.handle, image->handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, num_regions, regions );
-			record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
+			uploadRecorded = vk_ral_copy_buffer_to_texture_exact( rcmd,
+				vk.staging_buffer.handle, image->ralDescriptorTexture, qfalse,
+				(uint32_t)num_regions, regions );
 			Ral_SubmitAndDispose( rcmd );
 		}
 	}
 #endif
+	if ( !uploadRecorded )
+		R_LOG( rch_ral, SEV_ERROR,
+			"%s: portable compressed upload transaction rejected image '%s'\n",
+			__func__, image->imgName );
 }
 
 
@@ -23061,20 +22624,20 @@ vk_upload_image_data_3d
 Upload an uncompressed volume (3D) mip chain. The DDS
 file lays a 3D texture out as, per mip level, a contiguous slab of
 max(1, depth>>level) z-slices, each (width>>level) x (height>>level)
-pixels. One vkCmdCopyBufferToImage region per mip, extent.depth set
+pixels. One portable buffer-to-texture region per mip, imageDepth set
 to the slice count. image->internalFormat must be one of the formats
 vk_uncompressed_dds_bpp accepts; image->texType must be TEXTYPE_3D
 and image->depth the base slice count, set before vk_create_image.
 ================
 */
 void vk_upload_image_data_3d( image_t *image, int width, int height, int depth, int mipLevels, byte *data, int dataSize ) {
-	VkCommandBuffer   command_buffer;
-	VkBufferImageCopy regions[16];
+	ralBufferTextureCopy_t regions[16];
 	int n;
 	int num_regions = 0;
 	int buffer_offset = 0;
 	int bpp;
 	int mipW, mipH, mipD;
+	qboolean uploadRecorded = qfalse;
 
 	bpp = vk_uncompressed_dds_bpp( image->internalFormat );
 	if ( bpp == 0 ) {
@@ -23108,13 +22671,11 @@ void vk_upload_image_data_3d( image_t *image, int width, int height, int depth, 
 
 		memset( &regions[num_regions], 0, sizeof( regions[num_regions] ) );
 		regions[num_regions].bufferOffset = buffer_offset;
-		regions[num_regions].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		regions[num_regions].imageSubresource.mipLevel = n;
-		regions[num_regions].imageSubresource.baseArrayLayer = 0;
-		regions[num_regions].imageSubresource.layerCount = 1;
-		regions[num_regions].imageExtent.width = mipW;
-		regions[num_regions].imageExtent.height = mipH;
-		regions[num_regions].imageExtent.depth = mipD;
+		regions[num_regions].mipLevel = (uint32_t)n;
+		regions[num_regions].aspects = RAL_TEXTURE_ASPECT_COLOR;
+		regions[num_regions].imageRect.width = (uint32_t)mipW;
+		regions[num_regions].imageRect.height = (uint32_t)mipH;
+		regions[num_regions].imageDepth = (uint32_t)mipD;
 		num_regions++;
 
 		buffer_offset += mipBytes;
@@ -23156,11 +22717,9 @@ void vk_upload_image_data_3d( image_t *image, int width, int height, int depth, 
 
 	vk.staging_buffer.offset += buffer_offset;
 
-	command_buffer = vk.staging_command_buffer;
-
-	record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_HOST_BIT, 0 );
-	qvkCmdCopyBufferToImage( command_buffer, vk.staging_buffer.handle, image->handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, num_regions, regions );
-	record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
+	uploadRecorded = vk_ral_copy_buffer_to_texture_exact( vk.ral_staging_cmd,
+		vk.staging_buffer.handle, image->ralDescriptorTexture, qfalse,
+		(uint32_t)num_regions, regions );
 #else
 	if ( vk.staging_buffer.size < (uint32_t)buffer_offset ) {
 		vk_alloc_staging_buffer( buffer_offset );
@@ -23173,14 +22732,17 @@ void vk_upload_image_data_3d( image_t *image, int width, int height, int depth, 
 		if ( rcmd == NULL ) {
 			R_LOG( rch_ral, SEV_ERROR, "%s: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping image upload '%s'\n", __func__, image->imgName );
 		} else {
-			command_buffer = (VkCommandBuffer)Ral_GetCommandBufferHandle( rcmd );
-			record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_HOST_BIT, 0 );
-			qvkCmdCopyBufferToImage( command_buffer, vk.staging_buffer.handle, image->handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, num_regions, regions );
-			record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
+			uploadRecorded = vk_ral_copy_buffer_to_texture_exact( rcmd,
+				vk.staging_buffer.handle, image->ralDescriptorTexture, qfalse,
+				(uint32_t)num_regions, regions );
 			Ral_SubmitAndDispose( rcmd );
 		}
 	}
 #endif
+	if ( !uploadRecorded )
+		R_LOG( rch_ral, SEV_ERROR,
+			"%s: portable 3D upload transaction rejected image '%s'\n",
+			__func__, image->imgName );
 }
 
 
@@ -23218,8 +22780,7 @@ void vk_upload_dds_image_data( image_t *image, int width, int height, int depth,
 
 void vk_update_descriptor_set( image_t *image, qboolean mipmap ) {
 	Vk_Sampler_Def sampler_def;
-	VkDescriptorImageInfo image_info;
-	VkWriteDescriptorSet descriptor_write;
+	void *nativeSampler;
 
 	memset( &sampler_def, 0, sizeof( sampler_def ) );
 
@@ -23235,22 +22796,11 @@ void vk_update_descriptor_set( image_t *image, qboolean mipmap ) {
 		sampler_def.noAnisotropy = qtrue;
 	}
 
-	image_info.sampler = vk_find_sampler( &sampler_def );
-	image_info.imageView = image->view;
-	image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-	descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	descriptor_write.dstSet = image->descriptor;
-	descriptor_write.dstBinding = 0;
-	descriptor_write.dstArrayElement = 0;
-	descriptor_write.descriptorCount = 1;
-	descriptor_write.pNext = NULL;
-	descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	descriptor_write.pImageInfo = &image_info;
-	descriptor_write.pBufferInfo = NULL;
-	descriptor_write.pTexelBufferView = NULL;
-
-	qvkUpdateDescriptorSets( vk.device, 1, &descriptor_write, 0, NULL );
+	nativeSampler = (void *)vk_find_sampler( &sampler_def );
+	if ( !vk_ral_refresh_image_descriptor( image, nativeSampler ) )
+		R_LOG( rch_ral, SEV_WARN,
+			"direct image sampler bind-group creation failed: %s\n",
+			image->imgName );
 
 	// mirror the per-image VkImageView +
 	// VkSampler into the renderer-owned bindless set 7. The same VkImageView /
@@ -23288,27 +22838,18 @@ void vk_update_descriptor_set( image_t *image, qboolean mipmap ) {
 		// image->view may carry a packed format (R4G4B4A4 etc.); sampling
 		// image->ral on the bindless path would diverge from the legacy path
 		// on non-RGBA8 images. Bindless byte-near parity requires image->view.
-		if ( image->ralBindlessSlot >= 0 && image->ralBindlessSlot < (int)WIRED_BINDLESS_TEX_SLOTS ) {
-			ralBindGroup_t *ralSet = vk_ral_get_bindless_set();
-			VkDescriptorSet ralVkSet = ralSet ? (VkDescriptorSet)Ral_GetBindGroupHandle( ralSet ) : VK_NULL_HANDLE;
-			if ( ralVkSet != VK_NULL_HANDLE ) {
-				VkDescriptorImageInfo imgInfo;
-				VkWriteDescriptorSet  imgWrite;
-				memset( &imgInfo, 0, sizeof( imgInfo ) );
-				imgInfo.imageView   = image->view;
-				imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				memset( &imgWrite, 0, sizeof( imgWrite ) );
-				imgWrite.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				imgWrite.dstSet          = ralVkSet;
-				imgWrite.dstBinding      = WIRED_BINDLESS_BIND_IMAGES;
-				imgWrite.dstArrayElement = (uint32_t)image->ralBindlessSlot;
-				imgWrite.descriptorCount = 1;
-				imgWrite.descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-				imgWrite.pImageInfo      = &imgInfo;
-				qvkUpdateDescriptorSets( vk.device, 1, &imgWrite, 0, NULL );
-				(void)vk_ral_bindless_record_legacy_exact( image,
-					(uint32_t)image->ralBindlessSlot, image->view );
-			}
+		if ( image->ralBindlessSlot >= 0
+				&& image->ralBindlessSlot < (int)WIRED_BINDLESS_TEX_SLOTS
+				&& image->ralDescriptorView
+				&& Ral_GetTextureViewHandle( image->ralDescriptorView )
+					== (void *)image->view ) {
+			if ( !vk_ral_bindless_publish_texture_view( image,
+					(uint32_t)image->ralBindlessSlot,
+					image->ralDescriptorView,
+					VK_BINDLESS_PUBLICATION_LEGACY_EXACT ) )
+				R_LOG( rch_ral, SEV_WARN,
+					"bindless exact image publication failed: %s\n",
+					image->imgName );
 		}
 	}
 }
@@ -23426,7 +22967,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	VkGraphicsPipelineCreateInfo create_info;
 	VkViewport viewport;
 	VkRect2D scissor;
-	VkSpecializationMapEntry spec_entries[27];  // post-process: 12 gamma+tonemap (exposure_bias retired to the set-2 UBO) + 5 lottes + 1 srgb_swapchain + 5 colour grading + 2 HDR10 + 1 chromatic aberration + 1 reserved show_ao slot (module-selected diagnostic)
+	VkSpecializationMapEntry spec_entries[28];  // post-process: 12 gamma+tonemap (exposure_bias retired to the set-2 UBO) + 5 lottes + 1 srgb_swapchain + 5 colour grading + 2 HDR10 + 1 HDR-to-SDR capture + 1 chromatic aberration + 1 reserved show_ao slot (module-selected diagnostic)
 	VkSpecializationInfo frag_spec_info;
 	VkShaderModule fsmodule;
 	VkPipelineLayout layout;
@@ -23516,6 +23057,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 		// declare ids 12/13 ignore the entries.
 		int   hdr_mode;
 		float hdr_peak_norm;
+		int   capture_hdr_to_sdr;
 	} frag_spec_data;
 
 	// Zero the spec-data struct: the spec constants are baked into the pipeline by
@@ -23725,6 +23267,8 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	// above). hdr_peak_norm = display peak in graphics-white units.
 	frag_spec_data.hdr_mode      = ( vk_hdr_state.hdr_display_active && program_index != 3 ) ? 1 : 0;
 	frag_spec_data.hdr_peak_norm = (float)r_hdrPeakLuminance->integer / 100.0f;
+	frag_spec_data.capture_hdr_to_sdr =
+		( vk_hdr_state.hdr_display_active && program_index == 3 ) ? 1 : 0;
 
 	spec_entries[0].constantID = 0;
 	spec_entries[0].offset = offsetof( struct FragSpecData, gamma );
@@ -23861,7 +23405,13 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	spec_entries[26].offset = offsetof(struct FragSpecData, show_ao);
 	spec_entries[26].size = sizeof(frag_spec_data.show_ao);
 
-	frag_spec_info.mapEntryCount = 27;
+	// gamma.frag id 14: SDR capture shoulder while presentation is HDR10.
+	// Other post-process modules do not declare it and ignore the entry.
+	spec_entries[27].constantID = 14;
+	spec_entries[27].offset = offsetof(struct FragSpecData, capture_hdr_to_sdr);
+	spec_entries[27].size = sizeof(frag_spec_data.capture_hdr_to_sdr);
+
+	frag_spec_info.mapEntryCount = 28;
 	frag_spec_info.pMapEntries = spec_entries;
 	frag_spec_info.dataSize = sizeof( frag_spec_data );
 	frag_spec_info.pData = &frag_spec_data;
@@ -27666,7 +27216,10 @@ static qboolean vk_temporal_entmat_ring_ready_exact(
 		const vk_tess_t *slot = &vk.tess[i];
 		uint32_t j;
 		if ( !slot->entMatBuf || !slot->entMatMem || !slot->entMatMapped
-				|| !slot->entMatDesc || slot->entMatSize != bytes
+				|| !slot->entMatDesc || !slot->ral_entMatDesc
+				|| Ral_GetBindGroupHandle( slot->ral_entMatDesc )
+					!= (void *)slot->entMatDesc
+				|| slot->entMatSize != bytes
 				|| !slot->entMatAllocationGeneration
 				|| slot->entMatAllocationGeneration == UINT32_MAX
 				|| vk_temporal_entmat_ring.buffer[i] != slot->entMatBuf
@@ -27679,7 +27232,9 @@ static qboolean vk_temporal_entmat_ring_ready_exact(
 			if ( slot->entMatBuf == vk.tess[j].entMatBuf
 					|| slot->entMatMem == vk.tess[j].entMatMem
 					|| slot->entMatMapped == vk.tess[j].entMatMapped
-					|| slot->entMatDesc == vk.tess[j].entMatDesc ) return qfalse;
+					|| slot->entMatDesc == vk.tess[j].entMatDesc
+					|| slot->ral_entMatDesc
+						== vk.tess[j].ral_entMatDesc ) return qfalse;
 	}
 	return qtrue;
 }
@@ -27709,7 +27264,7 @@ static qboolean vk_temporal_diagnostic_arm_ready(
 	return qtrue;
 }
 
-static void vk_entmat_materialize_slot_after_idle(
+static qboolean vk_entmat_materialize_slot_after_idle(
 		vk_tess_t *slot, VkDeviceSize bytes ) {
 	const qboolean replace = !slot->entMatBuf || !slot->entMatMem
 		|| !slot->entMatMapped || slot->entMatSize != bytes
@@ -27761,38 +27316,11 @@ static void vk_entmat_materialize_slot_after_idle(
 			RAL_VULKAN_OBJECT_ROLE_BUFFER );
 		slot->entMatAllocationGeneration++;
 	}
-	if ( slot->entMatDesc == VK_NULL_HANDLE ) {
-		VkDescriptorSetAllocateInfo dsAlloc;
-		memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-		dsAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dsAlloc.descriptorPool = vk.descriptor_pool;
-		dsAlloc.descriptorSetCount = 1;
-		dsAlloc.pSetLayouts = &vk.set_layout_entmat;
-		VK_CHECK( qvkAllocateDescriptorSets(
-			vk.device, &dsAlloc, &slot->entMatDesc ) );
-	}
-	{
-		VkWriteDescriptorSet w;
-		VkDescriptorBufferInfo bi;
-		memset( &bi, 0, sizeof( bi ) );
-		bi.buffer = slot->entMatBuf;
-		bi.range = VK_WHOLE_SIZE;
-		memset( &w, 0, sizeof( w ) );
-		w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		w.dstSet = slot->entMatDesc;
-		w.dstBinding = 0;
-		w.descriptorCount = 1;
-		w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		w.pBufferInfo = &bi;
-		qvkUpdateDescriptorSets( vk.device, 1, &w, 0, NULL );
-	}
-	if ( !vk_ral_refresh_entmat_bindgroup(
-			(uint32_t)( slot - vk.tess ) ) )
-		ri.Terminate( TERM_UNRECOVERABLE,
-			"entity-matrix exact RAL bind-group publication failed" );
+	return vk_ral_refresh_entmat_bindgroup(
+		(uint32_t)( slot - vk.tess ) );
 }
 
-static void vk_entmat_ensure_temporal_ring( uint32_t requiredSlots ) {
+static qboolean vk_entmat_ensure_temporal_ring( uint32_t requiredSlots ) {
 	const VkDeviceSize bytes = vk_entmat_capacity_bytes( requiredSlots );
 	uint32_t i;
 	qboolean repair[NUM_COMMAND_BUFFERS] = { qfalse };
@@ -27802,17 +27330,20 @@ static void vk_entmat_ensure_temporal_ring( uint32_t requiredSlots ) {
 			|| requiredSlots > TEMPORAL_MOTION_PAYLOAD_MAX_SLOTS )
 		ri.Terminate( TERM_UNRECOVERABLE,
 			"temporal entMat ring capacity request was invalid" );
-	if ( vk_temporal_entmat_ring_ready_exact( requiredSlots ) ) return;
+	if ( vk_temporal_entmat_ring_ready_exact( requiredSlots ) ) return qtrue;
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
 		const vk_tess_t *slot = &vk.tess[i];
 		uint32_t j;
 		const qboolean replace = !slot->entMatBuf || !slot->entMatMem
 			|| !slot->entMatMapped || slot->entMatSize != bytes
 			|| !slot->entMatAllocationGeneration;
-		repair[i] = replace || !slot->entMatDesc ? qtrue : qfalse;
+		repair[i] = replace || !slot->entMatDesc || !slot->ral_entMatDesc
+			|| Ral_GetBindGroupHandle( slot->ral_entMatDesc )
+				!= (void *)slot->entMatDesc ? qtrue : qfalse;
 		if ( repair[i] ) anyRepair = qtrue;
 		if ( repair[i] && ( slot->entMatBuf || slot->entMatMem
-				|| slot->entMatMapped || slot->entMatDesc ) )
+				|| slot->entMatMapped || slot->entMatDesc
+				|| slot->ral_entMatDesc ) )
 			repairTouchesExisting = qtrue;
 		if ( slot->entMatAllocationGeneration == UINT32_MAX
 				|| ( replace && slot->entMatAllocationGeneration
@@ -27827,7 +27358,10 @@ static void vk_entmat_ensure_temporal_ring( uint32_t requiredSlots ) {
 					|| ( slot->entMatMapped
 						&& slot->entMatMapped == vk.tess[j].entMatMapped )
 					|| ( slot->entMatDesc
-						&& slot->entMatDesc == vk.tess[j].entMatDesc ) )
+						&& slot->entMatDesc == vk.tess[j].entMatDesc )
+					|| ( slot->ral_entMatDesc
+						&& slot->ral_entMatDesc
+							== vk.tess[j].ral_entMatDesc ) )
 				ri.Terminate( TERM_UNRECOVERABLE,
 					"temporal entMat ring contained aliased slot roles" );
 	}
@@ -27856,7 +27390,8 @@ static void vk_entmat_ensure_temporal_ring( uint32_t requiredSlots ) {
 	}
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i )
 		if ( repair[i] )
-			vk_entmat_materialize_slot_after_idle( &vk.tess[i], bytes );
+			if ( !vk_entmat_materialize_slot_after_idle(
+					&vk.tess[i], bytes ) ) return qfalse;
 	memset( &vk_temporal_entmat_ring, 0,
 		sizeof( vk_temporal_entmat_ring ) );
 	vk_temporal_entmat_ring.requiredCapacity = requiredSlots;
@@ -27871,9 +27406,11 @@ static void vk_entmat_ensure_temporal_ring( uint32_t requiredSlots ) {
 			vk.tess[i].entMatAllocationGeneration;
 	}
 	vk_temporal_entmat_ring.ready = qtrue;
-	if ( !vk_temporal_entmat_ring_ready_exact( requiredSlots ) )
-		ri.Terminate( TERM_UNRECOVERABLE,
-			"temporal entMat ring publication was not exact" );
+	if ( !vk_temporal_entmat_ring_ready_exact( requiredSlots ) ) {
+		vk_temporal_entmat_ring.ready = qfalse;
+		return qfalse;
+	}
+	return qtrue;
 }
 
 void vk_entmat_ensure_buffer( uint32_t requiredSlots )
@@ -27892,7 +27429,10 @@ void vk_entmat_ensure_buffer( uint32_t requiredSlots )
 	// binding an unread buffer changes no pixels).
 
 	if ( vk.cmd->entMatBuf == VK_NULL_HANDLE || vk.cmd->entMatSize < need
-	     || vk.cmd->entMatDesc == VK_NULL_HANDLE ) {
+	     || vk.cmd->entMatDesc == VK_NULL_HANDLE
+	     || vk.cmd->ral_entMatDesc == NULL
+	     || Ral_GetBindGroupHandle( vk.cmd->ral_entMatDesc )
+			!= (void *)vk.cmd->entMatDesc ) {
 		const qboolean grew = ( vk.cmd->entMatBuf == VK_NULL_HANDLE || vk.cmd->entMatSize < need ) ? qtrue : qfalse;
 		if ( grew ) {
 			VkBufferCreateInfo   bd;
@@ -27931,35 +27471,11 @@ void vk_entmat_ensure_buffer( uint32_t requiredSlots )
 				vk.cmd->entMatAllocationGeneration++;
 			}
 		}
-		{
-			VkDescriptorSetAllocateInfo dsAlloc;
-			VkWriteDescriptorSet        w;
-			VkDescriptorBufferInfo      bi;
-			if ( vk.cmd->entMatDesc == VK_NULL_HANDLE ) {
-				memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-				dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-				dsAlloc.descriptorPool     = vk.descriptor_pool;
-				dsAlloc.descriptorSetCount = 1;
-				dsAlloc.pSetLayouts        = &vk.set_layout_entmat;
-				VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.cmd->entMatDesc ) );
-			}
-			memset( &bi, 0, sizeof( bi ) );
-			bi.buffer = vk.cmd->entMatBuf;
-			bi.offset = 0;
-			bi.range  = VK_WHOLE_SIZE;
-			memset( &w, 0, sizeof( w ) );
-			w.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			w.dstSet          = vk.cmd->entMatDesc;
-			w.dstBinding      = 0;
-			w.descriptorCount = 1;
-			w.descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			w.pBufferInfo     = &bi;
-			qvkUpdateDescriptorSets( vk.device, 1, &w, 0, NULL );
-			if ( !vk_ral_refresh_entmat_bindgroup(
-					(uint32_t)vk.cmd_index ) )
-				ri.Terminate( TERM_UNRECOVERABLE,
-					"entity-matrix exact RAL bind-group refresh failed" );
-		}
+		if ( !vk_ral_refresh_entmat_bindgroup(
+				(uint32_t)vk.cmd_index ) )
+			R_LOG( rch_ral, SEV_WARN,
+				"entity-matrix RAL bind-group refresh deferred for slot %d\n",
+				vk.cmd_index );
 	}
 }
 
@@ -30804,8 +30320,11 @@ static qboolean vk_diag_identity_equal( const vk_diag_swapchain_identity_t *a,
 	return a->generation == b->generation &&
 		a->present_mode == b->present_mode &&
 		a->swap_interval == b->swap_interval &&
+		a->policy_intent == b->policy_intent &&
 		a->requested_images == b->requested_images &&
 		a->actual_images == b->actual_images &&
+		a->max_frames_in_flight == b->max_frames_in_flight &&
+		a->vrr_preferred == b->vrr_preferred &&
 		a->width == b->width && a->height == b->height;
 }
 
@@ -30880,7 +30399,7 @@ static void vk_diag_attempt_finish( qboolean presented )
 				(unsigned long long)( worker_count ? ( worker_wait_us + worker_reset_us ) / worker_count : 0 ),
 				worker_count, max_queue );
 			R_LOG( rch_timing, SEV_DEBUG,
-				"vk perf v2: epoch=%llu bucket=%u count=%u valid=%u acquire_total_us=%llu submit_total_us=%llu present_call_total_us=%llu main_slot_wait_total_us=%llu worker_queue_total_us=%llu worker_wait_total_us=%llu worker_reset_total_us=%llu worker_count=%u maxq=%u generation=%llu mode=%s r_swapInterval=%d requested_images=%u actual_images=%u slots=%u extent=%ux%u platform=%s worker_mode=%s draws_total=%llu image_hits=%s identity_stable=%d\n",
+				"vk perf v2: epoch=%llu bucket=%u count=%u valid=%u acquire_total_us=%llu submit_total_us=%llu present_call_total_us=%llu main_slot_wait_total_us=%llu worker_queue_total_us=%llu worker_wait_total_us=%llu worker_reset_total_us=%llu worker_count=%u maxq=%u generation=%llu mode=%s r_swapInterval=%d policy_intent=%d requested_images=%u actual_images=%u frames_in_flight=%u vrr_preferred=%d slots=%u extent=%ux%u platform=%s worker_mode=%s draws_total=%llu image_hits=%s identity_stable=%d\n",
 				(unsigned long long)vk_diag_v2_epoch,
 				vk_diag_pacing_bucket, vk_diag_v2.count, vk_diag_v2.valid,
 				(unsigned long long)vk_diag_v2.acquire_total_us,
@@ -30894,8 +30413,11 @@ static void vk_diag_attempt_finish( qboolean presented )
 				(unsigned long long)vk_diag_v2.identity.generation,
 				pmode_to_str( (VkPresentModeKHR)vk_diag_v2.identity.present_mode ),
 				vk_diag_v2.identity.swap_interval,
+				vk_diag_v2.identity.policy_intent,
 				vk_diag_v2.identity.requested_images,
 				vk_diag_v2.identity.actual_images,
+				vk_diag_v2.identity.max_frames_in_flight,
+				vk_diag_v2.identity.vrr_preferred ? 1 : 0,
 				(unsigned)NUM_COMMAND_BUFFERS,
 				vk_diag_v2.identity.width, vk_diag_v2.identity.height,
 				platform_name, worker_mode,
@@ -31477,15 +30999,6 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 		vk_wait_idle();
 		vk_temporal_resolved_hdr_release_after_idle(
 			"scene-depth-attachment-rebuild" );
-		// The attachment generation is about to be replaced. The resolved-HDR
-		// release above already closed and drained every temporal child.
-		vk_ral_destroy_adopted_internal_textures();
-		// RAL destroy calls above enqueue native image views/descriptors.  A GPU
-		// idle wait alone does not reclaim them; drain the complete deferred
-		// queue before destroying their parent raw VkImages below.
-		if ( Ral_WaitIdleAndDrainDeferred( vk_ral_get_backend() ) != ralSuccess )
-			ri.Terminate( TERM_UNRECOVERABLE,
-				"RAL attachment rebuild: idle-proven deferred drain failed" );
 		vk_destroy_attachments();
 		vk_create_attachments();        // (re)allocs the dlight-shadow atlas from the cvars
 		// Re-adopt the complete new attachment generation, then rebuild all
@@ -31563,8 +31076,12 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 		R_TemporalBatchRequestValidateExact( temporalRequest )
 		&& temporalRequest->enabled && vk_entmat_active()
 		&& temporalCapacityExact ? qtrue : qfalse;
-	if ( temporalCapacityRequested )
-		vk_entmat_ensure_temporal_ring( temporalRequiredSlots );
+	if ( temporalCapacityRequested
+			&& !vk_entmat_ensure_temporal_ring( temporalRequiredSlots ) ) {
+		temporalCapacityRequested = qfalse;
+		R_LOG( rch_ral, SEV_WARN,
+			"temporal entity-matrix cohort unavailable; using ordinary set-3 path\n" );
+	}
 	// H1 explicit-arm only. Materialize the exact previous-history sampler and
 	// this command slot's witness after the completed-fence/rebuild boundary and
 	// before acquire/BeginCB. Active-but-unarmed and default OFF do no work here.
@@ -31606,9 +31123,10 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 	}
 	if ( !temporalCapacityRequested )
 		vk_entmat_ensure_buffer( 1024u );
-	else if ( !vk_temporal_entmat_ring_ready_exact( temporalRequiredSlots ) )
-		ri.Terminate( TERM_UNRECOVERABLE,
-			"temporal entMat ring lost exactness before materialization" );
+	else if ( !vk_temporal_entmat_ring_ready_exact( temporalRequiredSlots ) ) {
+		temporalCapacityRequested = qfalse;
+		vk_entmat_ensure_buffer( 1024u );
+	}
 	// The scalar cursor belongs to the completed-fence/pre-command-buffer seam.
 	// Reset it before payload Begin so both owners publish the same absolute-slot
 	// epoch; the old post-render-pass reset is intentionally removed below.
@@ -31866,8 +31384,12 @@ _retry:
 				}
 				ri.Terminate( TERM_UNRECOVERABLE, "Ral_AcquireNextImage returned ralOutOfDate twice" );
 			}
-			if ( ralRes == ralSurfaceLost )
-				ri.Terminate( TERM_UNRECOVERABLE, "Ral_AcquireNextImage reported surface loss; backend rebuild required" );
+			if ( ralRes == ralSurfaceLost ) {
+				R_LOG( rch_vk, SEV_WARN,
+					"presentation surface lost; scheduling controlled renderer/device reselection\n" );
+				ri.Cmd_ExecuteText( EXEC_APPEND, "vid_restart\n" );
+				acquireTimedOut = qtrue;
+			}
 			// SUBOPTIMAL still returns an acquired image and signals the binary
 			// semaphore. Consume/present that image before the frame-boundary
 			// recreate; abandoning it would poison the semaphore lifecycle.
@@ -31882,7 +31404,8 @@ _retry:
 			if ( ralRes == ralTimeout ) {
 				R_LOG( rch_vk, SEV_WARN, "Ral_AcquireNextImage timed out (compositor/RDP/suspend stall) — skipping this frame\n" );
 				acquireTimedOut = qtrue;
-			} else if ( ralRes != ralSuccess && ralRes != ralSuboptimal ) {
+			} else if ( ralRes != ralSuccess && ralRes != ralSuboptimal
+					&& ralRes != ralSurfaceLost ) {
 				// Genuinely fatal device error (ralErrorDeviceLost / unknown).
 				ri.Terminate( TERM_UNRECOVERABLE, "Ral_AcquireNextImage returned %d", (int)ralRes );
 			}
@@ -32432,7 +31955,6 @@ static void vk_resize_geometry_buffer( void )
 	vk.geometry_buffer_size_new = 0;
 
 	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		vk_update_uniform_descriptor( vk.tess[ i ].uniform_descriptor, vk.tess[ i ].vertex_buffer );
 		if ( !vk_ral_refresh_tess_uniform_bindgroup( (uint32_t)i ) )
 			R_LOG( rch_ral, SEV_WARN,
 				"geometry resize: exact tess uniform bind-group refresh failed for slot %d\n", i );
@@ -32638,9 +32160,8 @@ void vk_end_frame( void )
 				Ral_CmdDraw( vk.cmd->ral_cmd, 4, 1, 0, 0 );
 				// Composite-overlay HUD quads: also drawn into the capture image, in
 				// the same display/sRGB space the capture pipeline (gamma.frag) just
-				// encoded. Without this the screenshot readback (which reads
-				// vk.capture.image under supersample, not the swapchain) would omit
-				// the overlay, so a supersample screenshot would not match the screen.
+				// encoded. Without this the stable capture target would omit the
+				// overlay, so a screenshot would not match the screen.
 				// Uses the capture-format overlay pipeline (RPFMT_CAPTURE =
 				// R8G8B8A8_UNORM); the present-format pipeline would trip VUID-
 				// vkCmdDraw-...-08910 (pipeline/attachment format mismatch).
@@ -33135,8 +32656,13 @@ void vk_present_frame( void )
 		vk_diag_v2.present_call_total_us += (uint64_t)( vk_frame_t_after_present - vk_frame_t_present_start );
 		vk_frame_present_done = qtrue;
 
-		if ( ralRes == ralSurfaceLost )
-			ri.Terminate( TERM_UNRECOVERABLE, "Ral_Present reported surface loss; backend rebuild required" );
+		if ( ralRes == ralSurfaceLost ) {
+			R_LOG( rch_vk, SEV_WARN,
+				"presentation surface lost; scheduling controlled renderer/device reselection\n" );
+			ri.Cmd_ExecuteText( EXEC_APPEND, "vid_restart\n" );
+			vk_diag_attempt_finish( qfalse );
+			return;
+		}
 		if ( ralRes == ralOutOfDate || ralRes == ralSuboptimal || vk.cmd->swapchain_recreate_after_present ) {
 			// swapchain re-creation needed
 			vk_restart_swapchain( __func__, ( ralRes == ralSuboptimal || vk.cmd->swapchain_recreate_after_present ) ? VK_SUBOPTIMAL_KHR : VK_ERROR_OUT_OF_DATE_KHR );
@@ -33229,10 +32755,9 @@ void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 	// image directly captures whatever is on screen in any state, which is
 	// the OS-like "screen never blank, capture works anywhere" contract.
 	//
-	// The supersample-mode `vk.capture.image` branch is preserved unchanged:
-	// when r_ext_supersample is set, vk_end_frame downsamples the tonemapped
-	// image into vk.capture.image at gls.captureWidth × gls.captureHeight
-	// and the readback continues to sample that dedicated target.
+	// The dedicated display-referred capture target is always present on the FBO
+	// path. Supersampling changes gls.captureWidth/Height; HDR/P3/scRGB changes the
+	// conversion performed while rendering into it, never the readback format.
 	//
 	// vk_end_frame has already run by this point (see swapBuffersCommand_t
 	// handling in tr_backend.c) — the gamma pass has written the final
@@ -34414,8 +33939,7 @@ void vk_render_shadow_map( void ) {
 		if ( maxSlots < 1 ) maxSlots = 1;
 		need = (VkDeviceSize)maxSlots * 64u; // 64 B per std430 mat4
 
-		if ( vk.cmd->shadowEntMatBuf == VK_NULL_HANDLE || vk.cmd->shadowEntMatSize < need
-		     || vk.cmd->shadowEntMatDesc == VK_NULL_HANDLE ) {
+		if ( vk.cmd->shadowEntMatBuf == VK_NULL_HANDLE || vk.cmd->shadowEntMatSize < need ) {
 			const qboolean grew = ( vk.cmd->shadowEntMatBuf == VK_NULL_HANDLE || vk.cmd->shadowEntMatSize < need ) ? qtrue : qfalse;
 			if ( grew ) {
 				VkBufferCreateInfo   bd;
@@ -34425,6 +33949,7 @@ void vk_render_shadow_map( void ) {
 				while ( sz < need ) sz <<= 1;
 				vk_wait_idle();
 				vk_shadow_destroy_group( &vk.cmd->ral_shadowEntMatDesc );
+				vk.cmd->shadowEntMatDesc = VK_NULL_HANDLE;
 				if ( vk.cmd->shadowEntMatMapped ) { qvkUnmapMemory( vk.device, vk.cmd->shadowEntMatMem ); vk.cmd->shadowEntMatMapped = NULL; }
 				if ( vk.cmd->shadowEntMatBuf )    { vk_ral_unregister_buffer( vk.cmd->shadowEntMatBuf ); qvkDestroyBuffer( vk.device, vk.cmd->shadowEntMatBuf, NULL ); vk.cmd->shadowEntMatBuf = VK_NULL_HANDLE; }
 				if ( vk.cmd->shadowEntMatMem )    { qvkFreeMemory( vk.device, vk.cmd->shadowEntMatMem, NULL );    vk.cmd->shadowEntMatMem = VK_NULL_HANDLE; }
@@ -34446,74 +33971,25 @@ void vk_render_shadow_map( void ) {
 				                        "vk.cmd.shadowEntMatBuf" );
 				SET_OBJECT_NAME( vk.cmd->shadowEntMatBuf, "shadow caster model matrices", RAL_VULKAN_OBJECT_ROLE_BUFFER );
 			}
-			// (Re)allocate (if nulled by a pool reset) + (re)write the descriptor to
-			// point at the whole current buffer.
-			{
-				VkDescriptorSetAllocateInfo dsAlloc;
-				VkWriteDescriptorSet        w;
-				VkDescriptorBufferInfo      bi;
-				if ( vk.cmd->shadowEntMatDesc == VK_NULL_HANDLE ) {
-					memset( &dsAlloc, 0, sizeof( dsAlloc ) );
-					dsAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-					dsAlloc.descriptorPool     = vk.descriptor_pool;
-					dsAlloc.descriptorSetCount = 1;
-					dsAlloc.pSetLayouts        = &vk.shadowMap.set_layout_entmat;
-					VK_CHECK( qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.cmd->shadowEntMatDesc ) );
-				}
-				memset( &bi, 0, sizeof( bi ) );
-				bi.buffer = vk.cmd->shadowEntMatBuf;
-				bi.offset = 0;
-				bi.range  = VK_WHOLE_SIZE;
-				memset( &w, 0, sizeof( w ) );
-				w.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				w.dstSet          = vk.cmd->shadowEntMatDesc;
-				w.dstBinding      = 0;
-				w.descriptorCount = 1;
-				w.descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-				w.pBufferInfo     = &bi;
-				qvkUpdateDescriptorSets( vk.device, 1, &w, 0, NULL );
-			}
 		}
 	}
-	if ( !vk_shadow_adopt_group( &vk.cmd->ral_shadowEntMatDesc,
-			vk.cmd->shadowEntMatDesc, vk.shadowMap.ral_bgl_entmat,
-			VK_NULL_HANDLE, 0u, "wired-shadow-entmat-bg" ) )
+	if ( !vk_shadow_refresh_buffer_group( &vk.cmd->ral_shadowEntMatDesc,
+			&vk.cmd->shadowEntMatDesc, vk.shadowMap.ral_bgl_entmat,
+			RAL_BIND_STORAGE_BUFFER, vk.cmd->shadowEntMatBuf,
+			vk.cmd->shadowEntMatSize, "wired-shadow-entmat-bg" ) )
 		return;
 
 	// GPU-skinned IQM bone ring — reset this frame's running offset, write each
 	// captured caster's bone matrices (3x4 affine per joint → vec4[3]) into its own
-	// ring slot, and (re)allocate the set-2 descriptor if a pool reset nulled it. The
+	// ring slot, and refresh the set-2 group from the current arena generation. The
 	// per-caster dynamic offset is computed + bound in the draw branch below. Only
 	// active when the skinned pipeline was built (vk.iqmGpu.available).
 	if ( vk.shadowMap.ral_depthPipelineSkinned && vk.shadowMap.boneBuf[vk.cmd_index] != VK_NULL_HANDLE ) {
 		const uint32_t fi = vk.cmd_index;
 		vk.shadowMap.boneOffset[fi] = 0;
-		if ( vk.shadowMap.boneDesc[fi] == VK_NULL_HANDLE ) {
-			VkDescriptorSetAllocateInfo ba;
-			VkWriteDescriptorSet        bw;
-			VkDescriptorBufferInfo      bbi;
-			memset( &ba, 0, sizeof( ba ) );
-			ba.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			ba.descriptorPool     = vk.descriptor_pool;
-			ba.descriptorSetCount = 1;
-			ba.pSetLayouts        = &vk.shadowMap.set_layout_bones;
-			VK_CHECK( qvkAllocateDescriptorSets( vk.device, &ba, &vk.shadowMap.boneDesc[fi] ) );
-			memset( &bbi, 0, sizeof( bbi ) );
-			bbi.buffer = vk.shadowMap.boneBuf[fi];
-			bbi.offset = 0;
-			bbi.range  = PAD( (uint32_t)IQM_BONE_UBO_SIZE, vk.uniform_alignment ); // one slot (dynamic offset selects the caster)
-			memset( &bw, 0, sizeof( bw ) );
-			bw.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			bw.dstSet          = vk.shadowMap.boneDesc[fi];
-			bw.dstBinding      = 0;
-			bw.descriptorCount = 1;
-			bw.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-			bw.pBufferInfo     = &bbi;
-			qvkUpdateDescriptorSets( vk.device, 1, &bw, 0, NULL );
-		}
-		if ( !vk_shadow_adopt_group( &vk.shadowMap.ral_boneDesc[fi],
-				vk.shadowMap.boneDesc[fi], vk.shadowMap.ral_bgl_bones,
-				vk.shadowMap.boneBuf[fi],
+		if ( !vk_shadow_refresh_buffer_group( &vk.shadowMap.ral_boneDesc[fi],
+				&vk.shadowMap.boneDesc[fi], vk.shadowMap.ral_bgl_bones,
+				RAL_BIND_UNIFORM_BUFFER, vk.shadowMap.boneBuf[fi],
 				PAD( (uint32_t)IQM_BONE_UBO_SIZE, vk.uniform_alignment ),
 				"wired-shadow-bones-bg" ) )
 			return;
@@ -34687,42 +34163,17 @@ void vk_render_shadow_map( void ) {
 		// cascadeMVP (no longer a push) → the set-1 per-cascade
 		// UBO. Write this cascade's matrix into its PAD-aligned slot; the bind (with the
 		// per-cascade dynamic offset) happens in the caster block below alongside the
-		// set-0 SSBO bind. The descriptor is (re)allocated lazily here (nulled on pool
-		// reset by vk_shadow_alloc_resources), mirroring the entity-matrix SSBO descriptor.
+		// set-0 SSBO bind. The group is (re)created lazily from the current RAL arena
+		// generation (nulled on arena reset by vk_shadow_alloc_resources).
 		{
 			const uint32_t cmd0 = vk.cmd_index;
 			const VkDeviceSize slotStride = PAD( 64u, vk.uniform_alignment );
 			if ( vk.shadowMap.cascadeMvpPtr[ cmd0 ] )
 				memcpy( (byte *)vk.shadowMap.cascadeMvpPtr[ cmd0 ] + (size_t)casc * slotStride, M, 64 );
-			if ( vk.shadowMap.cascadeMvpDesc[ cmd0 ] == VK_NULL_HANDLE && vk.shadowMap.cascadeMvpBuf[ cmd0 ] != VK_NULL_HANDLE ) {
-				VkDescriptorSetAllocateInfo da;
-				VkWriteDescriptorSet        dw;
-				VkDescriptorBufferInfo      dbi;
-				memset( &da, 0, sizeof( da ) );
-				da.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-				da.descriptorPool     = vk.descriptor_pool;
-				da.descriptorSetCount = 1;
-				da.pSetLayouts        = &vk.shadowMap.set_layout_cascademvp;
-				VK_CHECK( qvkAllocateDescriptorSets( vk.device, &da, &vk.shadowMap.cascadeMvpDesc[ cmd0 ] ) );
-				// DYNAMIC descriptor: base offset 0, range = ONE slot (the per-cascade
-				// dynamic offset selects the cascade).
-				memset( &dbi, 0, sizeof( dbi ) );
-				dbi.buffer = vk.shadowMap.cascadeMvpBuf[ cmd0 ];
-				dbi.offset = 0;
-				dbi.range  = slotStride;
-				memset( &dw, 0, sizeof( dw ) );
-				dw.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				dw.dstSet          = vk.shadowMap.cascadeMvpDesc[ cmd0 ];
-				dw.dstBinding      = 0;
-				dw.descriptorCount = 1;
-				dw.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-				dw.pBufferInfo     = &dbi;
-				qvkUpdateDescriptorSets( vk.device, 1, &dw, 0, NULL );
-			}
-			if ( !vk_shadow_adopt_group(
+			if ( !vk_shadow_refresh_buffer_group(
 					&vk.shadowMap.ral_cascadeMvpDesc[cmd0],
-					vk.shadowMap.cascadeMvpDesc[cmd0],
-					vk.shadowMap.ral_bgl_cascademvp,
+					&vk.shadowMap.cascadeMvpDesc[cmd0],
+					vk.shadowMap.ral_bgl_cascademvp, RAL_BIND_UNIFORM_BUFFER,
 					vk.shadowMap.cascadeMvpBuf[cmd0], slotStride,
 					"wired-shadow-cascade-mvp-bg" ) )
 				return;
@@ -35270,41 +34721,19 @@ void vk_render_dlight_shadow( void )
 		}
 	}
 
-	// (re)allocate the set-0 entity-matrix + set-1 faceMvp descriptors lazily (mirror CSM).
-	if ( vk.dlightShadow.entMatDesc[ vk.cmd_index ] == VK_NULL_HANDLE ) {
-		VkDescriptorSetAllocateInfo da; VkWriteDescriptorSet dw; VkDescriptorBufferInfo dbi;
-		memset( &da, 0, sizeof( da ) );
-		da.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO; da.descriptorPool = vk.descriptor_pool;
-		da.descriptorSetCount = 1; da.pSetLayouts = &vk.shadowMap.set_layout_entmat;
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &da, &vk.dlightShadow.entMatDesc[ vk.cmd_index ] ) );
-		memset( &dbi, 0, sizeof( dbi ) ); dbi.buffer = vk.dlightShadow.entMatBuf[ vk.cmd_index ]; dbi.offset = 0; dbi.range = 64u;
-		memset( &dw, 0, sizeof( dw ) );
-		dw.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; dw.dstSet = vk.dlightShadow.entMatDesc[ vk.cmd_index ];
-		dw.dstBinding = 0; dw.descriptorCount = 1; dw.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; dw.pBufferInfo = &dbi;
-		qvkUpdateDescriptorSets( vk.device, 1, &dw, 0, NULL );
-	}
-	if ( vk.dlightShadow.faceMvpDesc[ vk.cmd_index ] == VK_NULL_HANDLE ) {
-		VkDescriptorSetAllocateInfo da; VkWriteDescriptorSet dw; VkDescriptorBufferInfo dbi;
-		memset( &da, 0, sizeof( da ) );
-		da.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO; da.descriptorPool = vk.descriptor_pool;
-		da.descriptorSetCount = 1; da.pSetLayouts = &vk.shadowMap.set_layout_cascademvp;
-		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &da, &vk.dlightShadow.faceMvpDesc[ vk.cmd_index ] ) );
-		memset( &dbi, 0, sizeof( dbi ) ); dbi.buffer = vk.dlightShadow.faceMvpBuf[ vk.cmd_index ]; dbi.offset = 0; dbi.range = PAD( 64u, vk.uniform_alignment );
-		memset( &dw, 0, sizeof( dw ) );
-		dw.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; dw.dstSet = vk.dlightShadow.faceMvpDesc[ vk.cmd_index ];
-		dw.dstBinding = 0; dw.descriptorCount = 1; dw.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC; dw.pBufferInfo = &dbi;
-		qvkUpdateDescriptorSets( vk.device, 1, &dw, 0, NULL );
-	}
+	// Create set-0 entity-matrix and set-1 faceMvp groups from the current exact
+	// RAL arena generation (mirror CSM).
 	if ( !vk_shadow_register_pipeline_layout_abis()
-			|| !vk_shadow_adopt_group(
+			|| !vk_shadow_refresh_buffer_group(
 				&vk.dlightShadow.ral_entMatDesc[vk.cmd_index],
-				vk.dlightShadow.entMatDesc[vk.cmd_index],
-				vk.shadowMap.ral_bgl_entmat, VK_NULL_HANDLE, 0u,
+				&vk.dlightShadow.entMatDesc[vk.cmd_index],
+				vk.shadowMap.ral_bgl_entmat, RAL_BIND_STORAGE_BUFFER,
+				vk.dlightShadow.entMatBuf[vk.cmd_index], 64u,
 				"wired-dlight-shadow-entmat-bg" )
-			|| !vk_shadow_adopt_group(
+			|| !vk_shadow_refresh_buffer_group(
 				&vk.dlightShadow.ral_faceMvpDesc[vk.cmd_index],
-				vk.dlightShadow.faceMvpDesc[vk.cmd_index],
-				vk.shadowMap.ral_bgl_cascademvp,
+				&vk.dlightShadow.faceMvpDesc[vk.cmd_index],
+				vk.shadowMap.ral_bgl_cascademvp, RAL_BIND_UNIFORM_BUFFER,
 				vk.dlightShadow.faceMvpBuf[vk.cmd_index],
 				PAD( 64u, vk.uniform_alignment ),
 				"wired-dlight-shadow-face-mvp-bg" ) )

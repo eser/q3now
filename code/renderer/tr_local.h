@@ -2069,6 +2069,7 @@ void RE_RotatedPic( float x, float y, float w, float h,
 					  float s1, float t1, float s2, float t2, float angle, qhandle_t hShader );
 void RE_DrawLine( float x1, float y1, float x2, float y2, float width, qhandle_t hShader );
 void RE_BeginFrame( stereoFrame_t stereoFrame );
+void RE_PresentationChanged( const refPresentationChange_t *change );
 void RE_EndFrame( int *frontEndMsec, int *backEndMsec );
 void RE_TakeVideoFrame( int width, int height,
 		byte *captureBuffer, byte *encodeBuffer, qboolean motionJpeg );

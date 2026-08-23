@@ -39,7 +39,11 @@ layout(set = 1, binding = 0, std140) uniform EffectsUBO {
 	vec4 stageParams;
 };
 
-layout(set = 0, binding = 1) uniform sampler2D shaderImages[PRIMITIVE_SHADER_IMAGE_MAX];
+// WebGPU-facing ABI: the image array and the common REPEAT sampler are
+// independent bindings. This avoids a 64-element sampler binding array while
+// preserving the exact per-slot texture selection semantics.
+layout(set = 0, binding = 1) uniform texture2D shaderImages[PRIMITIVE_SHADER_IMAGE_MAX];
+layout(set = 0, binding = 4) uniform sampler shaderImageSampler;
 
 layout(location = 0) in vec2 fragUV;
 layout(location = 1) in vec4 fragColor;
@@ -96,7 +100,8 @@ void main() {
 	uint domain = fragImageSlot >> 31u;
 	uint handle = fragImageSlot & 0x7FFFFFFFu;
 	uint slot = handle < uint(PRIMITIVE_SHADER_IMAGE_MAX) ? handle : 0u;
-	vec4 texel = decodeColorTexel( texture( shaderImages[slot], fragUV ), domain );
+	vec4 texel = decodeColorTexel(
+		texture( sampler2D( shaderImages[slot], shaderImageSampler ), fragUV ), domain );
 
 	// per-vertex colour decoded to linear. Alpha stays
 	// raw. fragColor is beam.vert's linear interpolation of the

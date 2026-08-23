@@ -19,10 +19,10 @@ file(READ "${S}" SOURCE)
 file(READ "${T}" TEST)
 file(READ "${C}" CMAKE_SOURCE)
 file(READ "${P}" PUBLIC_ABI)
-string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+21([^0-9]|$)"
-	ref_api_21 "${PUBLIC_ABI}")
-if(NOT ref_api_21)
-	message(FATAL_ERROR "Metal renderer module no longer targets REF_API_VERSION 21")
+string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+22([^0-9]|$)"
+	ref_api_22 "${PUBLIC_ABI}")
+if(NOT ref_api_22)
+	message(FATAL_ERROR "Metal renderer module no longer targets REF_API_VERSION 22")
 endif()
 
 foreach(forbidden IN ITEMS "CAMetalLayer" "MTLDevice" "SDL_Window" "SDL_MetalView"

@@ -291,7 +291,7 @@ int main( void ) {
 	memset( projection, 0, sizeof( projection ) );
 	projection[8] = 0.125f;
 	projection[9] = -0.25f;
-	// W-103: the fixture extent is arbitrary, so it uses the canonical 16:9
+	// The fixture extent is arbitrary, so it uses the canonical 16:9
 	// baseline (1280x720) rather than a 4:3 one.
 	CHECK( R_TemporalProjectionApply( projection, 1280, 720,
 		(float[2]){ 0.25f, -0.5f }, ndc ) );

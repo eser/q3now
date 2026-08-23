@@ -73,9 +73,9 @@ slice_between(_ribbon "${_vk}" "void RB_DrawRibbons( void )" "void RB_DrawRailRi
 slice_between(_rail "${_vk}" "void RB_DrawRailRibbons( void )" "void vk_init_beam( void )")
 slice_between(_beam "${_vk}" "void RB_DrawBeams( void )" "void vk_init_sprite( void )")
 slice_between(_sprite "${_vk}" "void RB_DrawSprites( void )" "void vk_init_particle( void )")
-slice_between(_effects_adopt "${_adopt}"
-	"// Effects set 1 is a real dynamic UBO binding."
-	"RETAIN_ADOPT( vk.particle.ral_compute_descriptor[i]")
+slice_between(_effects_adopt "${_vk}"
+	"// Shared effects per-draw UBO ring."
+	"// SMAA rtMetrics per-frame UBO.")
 
 # One pipeline-authoritative portable bind transaction: set0 has no offsets;
 # set1 has exactly one uint32 dynamic offset. Both binds must be checked.
@@ -123,18 +123,21 @@ FOREACH(_needle IN ITEMS "arena1" "arena17" "ribbon" "rail-ribbon" "beam" "sprit
 	require_text("${_smoke}" "${_needle}" "effects native smoke analyzer")
 ENDFOREACH()
 
-# Product ownership must wrap the real renderer UBO and raw descriptor set,
-# then register one exact item range. Parallel/shadow buffers are forbidden.
+# Product ownership wraps the real renderer UBO and creates the dynamic group
+# directly from the generation-bound arena. Parallel/shadow groups are forbidden.
 require_text("${_vk_h}" "struct ralBindGroupLayout_s *ral_bgl_effects_ubo;" "effects layout owner")
 require_text("${_vk_h}" "struct ralBuffer_s    *ral_buffer[NUM_COMMAND_BUFFERS];" "effects buffer wrappers")
 require_text("${_vk_h}" "struct ralBindGroup_s *ral_descriptor[NUM_COMMAND_BUFFERS];" "effects group wrappers")
 require_text("${_vk}" "e.dynamicOffset = qtrue;" "effects dynamic layout metadata")
 require_text("${_vk}" "vk.set_layout_effects_ubo, 1, &e," "effects exact adopted layout")
 require_text("${_effects_adopt}" "vk.effectsUbo.ral_buffer[i] = Ral_AdoptBuffer(" "effects raw-buffer adoption")
-require_text("${_effects_adopt}" "vk.effectsUbo.ral_descriptor[i] = Ral_AdoptBindGroup(" "effects descriptor adoption")
-require_call_count("${_effects_adopt}" "Ral_RegisterAdoptedBindGroupDynamicBuffer[(]" 1 "effects range registration")
-require_text("${_effects_adopt}" "vk.effectsUbo.ral_descriptor[i], 0," "effects binding identity")
-require_text("${_effects_adopt}" "vk.effectsUbo.ral_buffer[i], 0, item" "effects base/range identity")
+require_text("${_effects_adopt}" "fxValue.bufferRange = fxItem;" "effects exact item range")
+require_text("${_effects_adopt}" "fxCreate.arena = vk.ral_descriptor_arena;" "effects arena authority")
+require_text("${_effects_adopt}" "fxCreate.arenaReceipt = &vk.ral_descriptor_arena_receipt;" "effects arena generation")
+require_text("${_effects_adopt}" "vk.effectsUbo.ral_descriptor[i] = Ral_CreateBindGroup(" "effects direct group creation")
+require_text("${_effects_adopt}" "vk.effectsUbo.descriptor[i] = (VkDescriptorSet)Ral_GetBindGroupHandle(" "effects raw mirror")
+forbid_text("${_effects_adopt}" "Ral_AdoptBindGroup" "effects retained adoption")
+forbid_text("${_effects_adopt}" "Ral_RegisterAdoptedBindGroupDynamicBuffer" "effects post-adopt registration")
 
 # Backend rejects every portable authority mutation before emission and only
 # publishes boundBindGroups after the Vulkan callback.

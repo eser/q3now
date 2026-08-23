@@ -17,6 +17,38 @@ static VkDescriptorPoolCreateInfo capturedInfo;
 static VkDescriptorPoolSize capturedSizes[ RAL_MAX_BIND_GROUP_ARENA_ENTRIES ];
 static VkDescriptorPool capturedAllocationPool;
 static VkDescriptorType capturedWriteType;
+static uint32_t capturedWriteBinding, capturedWriteElement;
+static uint32_t capturedDescriptorCount;
+static VkSampler capturedFirstSampler, capturedLastSampler;
+static uint32_t createLayoutCalls, destroyLayoutCalls;
+static VkResult createLayoutResult = VK_SUCCESS;
+static VkDescriptorSetLayoutCreateInfo capturedLayoutInfo;
+static VkDescriptorSetLayoutBinding capturedLayoutBindings[4];
+
+static VKAPI_ATTR VkResult VKAPI_CALL CaptureCreateDescriptorSetLayout(
+		VkDevice device, const VkDescriptorSetLayoutCreateInfo *info,
+		const VkAllocationCallbacks *allocator, VkDescriptorSetLayout *layout ) {
+	uint32_t i;
+	(void)device; (void)allocator;
+	createLayoutCalls++;
+	if ( !info || !layout || info->bindingCount > 4u )
+		return VK_ERROR_INITIALIZATION_FAILED;
+	capturedLayoutInfo = *info;
+	for ( i = 0u; i < info->bindingCount; ++i )
+		capturedLayoutBindings[i] = info->pBindings[i];
+	capturedLayoutInfo.pBindings = capturedLayoutBindings;
+	if ( createLayoutResult == VK_SUCCESS )
+		*layout = (VkDescriptorSetLayout)(uintptr_t)0x88u;
+	return createLayoutResult;
+}
+
+static VKAPI_ATTR void VKAPI_CALL CaptureDestroyDescriptorSetLayout(
+		VkDevice device, VkDescriptorSetLayout layout,
+		const VkAllocationCallbacks *allocator ) {
+	(void)device; (void)allocator;
+	if ( layout == (VkDescriptorSetLayout)(uintptr_t)0x88u )
+		destroyLayoutCalls++;
+}
 
 static VKAPI_ATTR VkResult VKAPI_CALL CaptureCreateDescriptorPool(
 		VkDevice device, const VkDescriptorPoolCreateInfo *info,
@@ -68,7 +100,16 @@ static VKAPI_ATTR void VKAPI_CALL CaptureUpdateDescriptorSets(
 		const VkCopyDescriptorSet *copies ) {
 	(void)device; (void)copyCount; (void)copies;
 	updateCalls += writeCount;
-	if ( writeCount == 1u && writes ) capturedWriteType = writes[0].descriptorType;
+	if ( writeCount == 1u && writes ) {
+		capturedWriteType = writes[0].descriptorType;
+		capturedWriteBinding = writes[0].dstBinding;
+		capturedWriteElement = writes[0].dstArrayElement;
+		capturedDescriptorCount = writes[0].descriptorCount;
+		if ( writes[0].pImageInfo && writes[0].descriptorCount > 0u ) {
+			capturedFirstSampler = writes[0].pImageInfo[0].sampler;
+			capturedLastSampler = writes[0].pImageInfo[writes[0].descriptorCount - 1u].sampler;
+		}
+	}
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CaptureFreeDescriptorSets(
@@ -90,6 +131,19 @@ int main( void ) {
 	ralBindingValue_t value;
 	ralBindGroupCreateInfo_t groupInfo;
 	ralBindGroup_t *group;
+	ralBindGroup_t imageGroup;
+	ralBindGroupLayout_t imageLayout;
+	ralTexture_t imageTexture;
+	ralTextureView_t imageView;
+	ralSampler_t imageSampler;
+	ralTextureView_t arrayViews[3];
+	const ralTextureView_t *arrayViewPtrs[3];
+	ralSampler_t arraySampler;
+	ralBindGroupLayout_t arrayLayout;
+	ralBindGroup_t *arrayGroup;
+	ralBindEntry_t effectEntries[4];
+	ralBindGroupLayoutCreateInfo_t effectInfo;
+	ralBindGroupLayout_t *effectLayout;
 
 	memset( &backend, 0, sizeof( backend ) );
 	memset( &otherBackend, 0, sizeof( otherBackend ) );
@@ -100,7 +154,53 @@ int main( void ) {
 	backend.vk.AllocateDescriptorSets = CaptureAllocateDescriptorSets;
 	backend.vk.UpdateDescriptorSets = CaptureUpdateDescriptorSets;
 	backend.vk.FreeDescriptorSets = CaptureFreeDescriptorSets;
+	backend.vk.CreateDescriptorSetLayout = CaptureCreateDescriptorSetLayout;
+	backend.vk.DestroyDescriptorSetLayout = CaptureDestroyDescriptorSetLayout;
 	backend.descriptorPool = (VkDescriptorPool)(uintptr_t)0x77u;
+	memset( effectEntries, 0, sizeof( effectEntries ) );
+	effectEntries[0] = (ralBindEntry_t){ 0u, RAL_BIND_STORAGE_BUFFER, 1u,
+		RAL_STAGE_VERTEX, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+	effectEntries[1] = (ralBindEntry_t){ 1u, RAL_BIND_STORAGE_BUFFER, 1u,
+		RAL_STAGE_VERTEX, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+	effectEntries[2] = (ralBindEntry_t){ 2u, RAL_BIND_TEXTURE_ARRAY, 64u,
+		RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_2D, qfalse };
+	effectEntries[3] = (ralBindEntry_t){ 3u, RAL_BIND_SAMPLER, 1u,
+		RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse };
+	effectInfo = (ralBindGroupLayoutCreateInfo_t){ effectEntries, 4u, qfalse,
+		"effect-layout-fixture" };
+	effectLayout = Ral_CreateBindGroupLayout( &backend, &effectInfo );
+	CHECK( effectLayout != NULL && createLayoutCalls == 1u
+		&& effectLayout->ownsLayout == qtrue
+		&& effectLayout->backend == &backend
+		&& Ral_GetBindGroupLayoutHandle( effectLayout )
+			== (void *)(uintptr_t)0x88u );
+	CHECK( capturedLayoutInfo.sType
+			== VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+		&& capturedLayoutInfo.bindingCount == 4u
+		&& capturedLayoutBindings[0].descriptorType
+			== VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+		&& capturedLayoutBindings[0].stageFlags == VK_SHADER_STAGE_VERTEX_BIT
+		&& capturedLayoutBindings[1].descriptorType
+			== VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+		&& capturedLayoutBindings[2].descriptorType
+			== VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+		&& capturedLayoutBindings[2].descriptorCount == 64u
+		&& capturedLayoutBindings[2].stageFlags == VK_SHADER_STAGE_FRAGMENT_BIT
+		&& capturedLayoutBindings[3].descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER );
+	Ral_DestroyBindGroupLayout( effectLayout );
+	CHECK( destroyLayoutCalls == 1u );
+	effectEntries[1].binding = 0u;
+	CHECK( Ral_CreateBindGroupLayout( &backend, &effectInfo ) == NULL
+		&& createLayoutCalls == 1u && destroyLayoutCalls == 1u );
+	effectEntries[1].binding = 1u;
+	effectEntries[2].dynamicOffset = qtrue;
+	CHECK( Ral_CreateBindGroupLayout( &backend, &effectInfo ) == NULL
+		&& createLayoutCalls == 1u && destroyLayoutCalls == 1u );
+	effectEntries[2].dynamicOffset = qfalse;
+	createLayoutResult = VK_ERROR_OUT_OF_HOST_MEMORY;
+	CHECK( Ral_CreateBindGroupLayout( &backend, &effectInfo ) == NULL
+		&& createLayoutCalls == 2u && destroyLayoutCalls == 1u );
+	createLayoutResult = VK_SUCCESS;
 	memset( entries, 0, sizeof( entries ) );
 	entries[0] = (ralBindGroupArenaEntry_t){ RAL_BIND_COMBINED_TEXTURE_SAMPLER, 100u, qfalse };
 	entries[1] = (ralBindGroupArenaEntry_t){ RAL_BIND_UNIFORM_BUFFER, 20u, qtrue };
@@ -159,17 +259,116 @@ int main( void ) {
 		&& capturedAllocationPool == (VkDescriptorPool)(uintptr_t)0x55u
 		&& allocateCalls == 1u && updateCalls == 1u
 		&& capturedWriteType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC );
+	memset( &imageLayout, 0, sizeof( imageLayout ) );
+	imageLayout.backend = &backend;
+	imageLayout.numEntries = 3u;
+	imageLayout.entries[0].binding = 0u;
+	imageLayout.entries[0].vkType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+	imageLayout.entries[0].effectiveCount = 4096u;
+	imageLayout.entries[1].binding = 2u;
+	imageLayout.entries[1].vkType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+	imageLayout.entries[1].effectiveCount = 256u;
+	imageLayout.entries[2].binding = 1u;
+	imageLayout.entries[2].vkType = VK_DESCRIPTOR_TYPE_SAMPLER;
+	imageLayout.entries[2].effectiveCount = 32u;
+	memset( &imageGroup, 0, sizeof( imageGroup ) );
+	imageGroup.backend = &backend;
+	imageGroup.layout = &imageLayout;
+	imageGroup.set = (VkDescriptorSet)(uintptr_t)0x68u;
+	imageGroup.arena = arena;
+	imageGroup.arenaReceipt = first;
+	memset( &imageView, 0, sizeof( imageView ) );
+	imageView.backend = &backend;
+	imageView.view = (VkImageView)(uintptr_t)0x69u;
+	memset( &imageTexture, 0, sizeof( imageTexture ) );
+	imageTexture.backend = &backend;
+	imageTexture.defaultView = imageView.view;
+	memset( &imageSampler, 0, sizeof( imageSampler ) );
+	imageSampler.backend = &backend;
+	imageSampler.sampler = (VkSampler)(uintptr_t)0x6au;
+	CHECK( Ral_BindGroupSetTextureViewAtBinding( &imageGroup, 2u, 17u, &imageView )
+		&& updateCalls == 2u && capturedWriteBinding == 2u
+		&& capturedWriteElement == 17u
+		&& capturedWriteType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
+	CHECK( !Ral_BindGroupSetTextureViewAtBinding( &imageGroup, 1u, 17u, &imageView )
+		&& !Ral_BindGroupSetTextureViewAtBinding( &imageGroup, 2u, 256u, &imageView )
+		&& updateCalls == 2u );
+	CHECK( Ral_BindGroupSetTextureViewAt( &imageGroup, 4095u, &imageView )
+		&& updateCalls == 3u && capturedWriteBinding == 0u
+		&& capturedWriteElement == 4095u );
+	CHECK( Ral_BindGroupSetTextureAt( &imageGroup, 23u, &imageTexture )
+		&& updateCalls == 4u && capturedWriteBinding == 0u
+		&& capturedWriteElement == 23u );
+	CHECK( Ral_BindGroupSetSamplerAt( &imageGroup, 31u, &imageSampler )
+		&& updateCalls == 5u && capturedWriteBinding == 1u
+		&& capturedWriteElement == 31u
+		&& capturedWriteType == VK_DESCRIPTOR_TYPE_SAMPLER );
+	CHECK( Ral_BindGroupSetTextureAt( &imageGroup, 24u, NULL )
+		&& Ral_BindGroupSetSamplerAt( &imageGroup, 24u, NULL )
+		&& updateCalls == 5u );
+	imageView.backend = &otherBackend;
+	imageTexture.backend = &otherBackend;
+	imageSampler.backend = &otherBackend;
+	CHECK( !Ral_BindGroupSetTextureViewAt( &imageGroup, 0u, &imageView )
+		&& !Ral_BindGroupSetTextureAt( &imageGroup, 0u, &imageTexture )
+		&& !Ral_BindGroupSetSamplerAt( &imageGroup, 0u, &imageSampler )
+		&& !Ral_BindGroupSetTextureViewAt( &imageGroup, 4096u, NULL )
+		&& !Ral_BindGroupSetTextureAt( &imageGroup, 4096u, NULL )
+		&& !Ral_BindGroupSetSamplerAt( &imageGroup, 32u, NULL )
+		&& updateCalls == 5u );
+	imageView.backend = &backend;
+	imageTexture.backend = &backend;
+	imageSampler.backend = &backend;
+	memset( &arrayLayout, 0, sizeof( arrayLayout ) );
+	arrayLayout.backend = &backend;
+	arrayLayout.layout = (VkDescriptorSetLayout)(uintptr_t)0x70u;
+	arrayLayout.numEntries = 1u;
+	arrayLayout.entries[0].binding = 3u;
+	arrayLayout.entries[0].vkType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	arrayLayout.entries[0].count = 3u;
+	arrayLayout.entries[0].effectiveCount = 3u;
+	memset( arrayViews, 0, sizeof( arrayViews ) );
+	for ( uint32_t arrayIndex = 0u; arrayIndex < 3u; ++arrayIndex ) {
+		arrayViews[arrayIndex].backend = &backend;
+		arrayViews[arrayIndex].view = (VkImageView)(uintptr_t)(0x71u + arrayIndex);
+		arrayViewPtrs[arrayIndex] = &arrayViews[arrayIndex];
+	}
+	memset( &arraySampler, 0, sizeof( arraySampler ) );
+	arraySampler.backend = &backend;
+	arraySampler.sampler = (VkSampler)(uintptr_t)0x75u;
+	memset( &value, 0, sizeof( value ) );
+	value.binding = 3u;
+	value.type = RAL_BIND_TEXTURE_ARRAY;
+	value.textureArray = arrayViewPtrs;
+	value.textureArrayCount = 3u;
+	value.sampler = &arraySampler;
+	groupInfo.layout = &arrayLayout;
+	groupInfo.values = &value;
+	groupInfo.numValues = 1u;
+	groupInfo.arena = arena;
+	groupInfo.arenaReceipt = &first;
+	arrayGroup = Ral_CreateBindGroup( &backend, &groupInfo );
+	CHECK( arrayGroup != NULL && updateCalls == 6u
+		&& capturedWriteBinding == 3u && capturedDescriptorCount == 3u
+		&& capturedWriteType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+		&& capturedFirstSampler == arraySampler.sampler
+		&& capturedLastSampler == arraySampler.sampler );
+	Ral_DestroyBindGroup( arrayGroup );
+	value.sampler = NULL;
+	CHECK( Ral_CreateBindGroup( &backend, &groupInfo ) == NULL
+		&& allocateCalls == 2u && updateCalls == 6u );
+	value.sampler = &arraySampler;
 	stale = first; stale.generation++;
 	groupInfo.arenaReceipt = &stale;
 	CHECK( Ral_CreateBindGroup( &backend, &groupInfo ) == NULL
-		&& allocateCalls == 1u );
+		&& allocateCalls == 2u );
 	groupInfo.arenaReceipt = NULL;
 	CHECK( Ral_CreateBindGroup( &backend, &groupInfo ) == NULL
-		&& allocateCalls == 1u );
+		&& allocateCalls == 2u );
 	groupInfo.arena = NULL;
 	groupInfo.arenaReceipt = &first;
 	CHECK( Ral_CreateBindGroup( &backend, &groupInfo ) == NULL
-		&& allocateCalls == 1u );
+		&& allocateCalls == 2u );
 
 	stale = first; stale.generation++;
 	CHECK( Ral_ResetBindGroupArenaExact( arena, &stale, &untouched )

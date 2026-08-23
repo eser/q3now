@@ -16,8 +16,7 @@ static qboolean BackendValid( ralBackendType_t backendType ) {
 }
 
 qboolean Ral_PresentationExtentValid( uint32_t width, uint32_t height ) {
-	return ( width > 0u && height > 0u
-		&& (uint64_t)width * 9u == (uint64_t)height * 16u ) ? qtrue : qfalse;
+	return ( width > 0u && height > 0u ) ? qtrue : qfalse;
 }
 
 qboolean Ral_PresentationHostOpenInfoValid(

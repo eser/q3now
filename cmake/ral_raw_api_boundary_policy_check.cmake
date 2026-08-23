@@ -230,6 +230,7 @@ endif()
 # lifecycle/command migrations.  Keep declaration-only loader debt from
 # silently returning: each native entry point must stay backend-owned or absent.
 foreach(retired_entry IN ITEMS
+	qvkAllocateDescriptorSets
 	qvkCreateDevice
 	qvkEnumerateDeviceExtensionProperties
 	qvkGetPhysicalDeviceFeatures
@@ -291,7 +292,8 @@ foreach(retired_entry IN ITEMS
 	qvkDebugMarkerSetObjectNameEXT
 	qvkInvalidateMappedMemoryRanges
 	qvkQueueWaitIdle
-	qvkQueueSubmit)
+	qvkQueueSubmit
+	qvkUpdateDescriptorSets)
 	forbid_regex("${vk_code}" "(^|[^A-Za-z0-9_])${retired_entry}([^A-Za-z0-9_]|$)"
 		"retired declaration-only entry point ${retired_entry}")
 endforeach()
@@ -349,9 +351,9 @@ foreach(path IN LISTS production_sources)
 	endforeach()
 endforeach()
 
-set(vk_type_cap 1544)
+set(vk_type_cap 1345)
 set(vk_macro_cap 1212)
-set(qvk_call_cap 589)
+set(qvk_call_cap 403)
 if(DEFINED RAL_RAW_PRINT_COUNTS AND RAL_RAW_PRINT_COUNTS)
 	message(WARNING
 		"renderervk raw debt measurement: types=${vk_type_count}, macros=${vk_macro_count}, calls=${qvk_call_count}")

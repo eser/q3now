@@ -312,10 +312,15 @@ qboolean vk_ral_bindless_publish_texture_view( image_t *image,
 		vkBindlessPublicationKind_t kind ) {
 	const void *nativeView;
 	image_t *images[1] = { image };
-	if ( !s_ral_bindless_set || !view ) return qfalse;
+	if ( !s_ral_bindless_set || !image || !view ) return qfalse;
 	nativeView = Ral_GetTextureViewHandle( view );
 	if ( !nativeView ) return qfalse;
-	Ral_BindGroupSetTextureViewAt( s_ral_bindless_set, slot, view );
+	if ( kind == VK_BINDLESS_PUBLICATION_LEGACY_EXACT
+			&& ( !image->descriptor || image->view == VK_NULL_HANDLE
+				|| image->ralDescriptorView != view
+				|| nativeView != (const void *)image->view ) ) return qfalse;
+	if ( !Ral_BindGroupSetTextureViewAt( s_ral_bindless_set, slot, view ) )
+		return qfalse;
 	return vk_ral_bindless_record_views( images, &slot, &nativeView, &kind, 1 );
 }
 
@@ -342,7 +347,8 @@ qboolean vk_ral_bindless_publish_texture( image_t *image, uint32_t slot,
 	if ( !s_ral_bindless_set || !texture ) return qfalse;
 	nativeView = Ral_GetTextureDefaultViewHandle( texture );
 	if ( !nativeView ) return qfalse;
-	Ral_BindGroupSetTextureAt( s_ral_bindless_set, slot, texture );
+	if ( !Ral_BindGroupSetTextureAt( s_ral_bindless_set, slot, texture ) )
+		return qfalse;
 	return vk_ral_bindless_record_views( images, &slot, &nativeView, &kind, 1 );
 }
 
@@ -354,7 +360,8 @@ qboolean vk_ral_bindless_publish_sampler( uint32_t slot, ralSampler_t *sampler,
 	identity = Ral_GetSamplerHandle( sampler );
 	if ( !identity ) return qfalse;
 	digest = vk_ral_bindless_sampler_digest( definition );
-	Ral_BindGroupSetSamplerAt( s_ral_bindless_set, slot, sampler );
+	if ( !Ral_BindGroupSetSamplerAt( s_ral_bindless_set, slot, sampler ) )
+		return qfalse;
 	if ( !vk_ral_bindless_ledger_activate()
 			|| !VK_BindlessPublicationSamplers( &s_bindless_publication,
 				s_ral_bindless_set, &vk.samplers, &slot, &identity, &digest, 1 ) ) {
@@ -370,15 +377,6 @@ qboolean vk_ral_bindless_record_raw_image( image_t *image, uint32_t slot,
 	image_t *images[1] = { image };
 	if ( !view ) { vk_ral_bindless_poison_active(); return qfalse; }
 	return vk_ral_bindless_record_views( images, &slot, &nativeView, &kind, 1 );
-}
-
-qboolean vk_ral_bindless_record_legacy_exact( image_t *image,
-		uint32_t slot, VkImageView view ) {
-	if ( !image || !image->descriptor ) {
-		vk_ral_bindless_poison_active(); return qfalse;
-	}
-	return vk_ral_bindless_record_raw_image( image, slot, view,
-		VK_BINDLESS_PUBLICATION_LEGACY_EXACT );
 }
 
 qboolean vk_ral_bindless_record_reserved( uint32_t slot, VkImageView view,
@@ -401,7 +399,8 @@ qboolean vk_ral_bindless_record_reserved( uint32_t slot, VkImageView view,
 
 qboolean vk_ral_bindless_tombstone( uint32_t slot ) {
 	if ( !vk_ral_bindless_ledger_activate() ) return qfalse;
-	Ral_BindGroupSetTextureAt( s_ral_bindless_set, slot, NULL );
+	if ( !Ral_BindGroupSetTextureAt( s_ral_bindless_set, slot, NULL ) )
+		return qfalse;
 	if ( VK_BindlessPublicationTombstoneImage(
 			&s_bindless_publication, s_ral_bindless_set, slot ) ) return qtrue;
 	(void)VK_BindlessPublicationPoisonSetAfterWrite(
@@ -886,16 +885,13 @@ void vk_ral_textures_init( void ) {
 }
 
 
-// adopt every allocate-once VkDescriptorSet
-// the renderer has stood up into a ralBindGroup_t wrapper. Called from
-// vk_init_descriptors's tail, AFTER all qvkAllocateDescriptorSets +
-// vkUpdateDescriptorSets writes have completed. Idempotent: subsequent
-// calls (vid_restart, REF_LEVEL_ONLY-then-re-init) clear the registry
-// first, so we always wrap the CURRENT descriptor set handles.
+// Rebuild every named renderer bind-group owner after the descriptor arena and
+// its current generation are available. Idempotent: subsequent calls
+// (vid_restart, REF_LEVEL_ONLY-then-re-init) clear the registry first, so every
+// owner and compatibility mirror belongs to the current arena cohort.
 //
-// The wrapper carries ownsSet=qfalse; teardown only frees the wrapper
-// struct, not the underlying VkDescriptorSet. The legacy
-// arena-reset path retains lifetime ownership.
+// Remaining adopted compatibility wrappers carry ownsSet=qfalse; teardown only
+// frees the wrapper struct, while direct RAL groups own their arena allocation.
 //
 // The main rotating set cohort is also retained here through its named owners:
 // set0 tess uniform, set2 engine resources and set3 MSDF/entMat. Set1 remains
@@ -906,24 +902,45 @@ static void vk_ral_destroy_smaa_bindgroups( void )
 	#define DESTROY_SMAA_BG( field ) do { \
 		if ( (field) ) { Ral_DestroyBindGroup( (field) ); (field) = NULL; } \
 	} while ( 0 )
-	DESTROY_SMAA_BG( vk.smaa.ral_edges_descriptor );
-	DESTROY_SMAA_BG( vk.smaa.ral_blend_descriptor );
-	DESTROY_SMAA_BG( vk.smaa.ral_input_descriptor );
-	DESTROY_SMAA_BG( vk.smaa.ral_area_descriptor );
-	DESTROY_SMAA_BG( vk.smaa.ral_search_descriptor );
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
+	vk_ral_release_smaa_sampler_cohorts();
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		DESTROY_SMAA_BG( vk.smaaRt.ral_descriptor[i] );
+		if ( vk.smaaRt.ral_buffer[i] ) {
+			Ral_DestroyBuffer( vk.smaaRt.ral_buffer[i] );
+			vk.smaaRt.ral_buffer[i] = NULL;
+		}
+	}
 	#undef DESTROY_SMAA_BG
 }
 
 static qboolean vk_ral_smaa_bindgroups_ready( void )
 {
 	uint32_t i;
-	if ( !vk.smaa.ral_edges_descriptor || !vk.smaa.ral_blend_descriptor
-			|| !vk.smaa.ral_input_descriptor || !vk.smaa.ral_area_descriptor
-			|| !vk.smaa.ral_search_descriptor ) return qfalse;
+	if ( vk.smaa.active
+			&& ( !vk.smaa.ral_edges_image || !vk.smaa.ral_edges_view
+				|| !vk.smaa.ral_edges_descriptor
+				|| !vk.smaa.ral_blend_image || !vk.smaa.ral_blend_view
+				|| !vk.smaa.ral_blend_descriptor
+				|| !vk.smaa.ral_input_image || !vk.smaa.ral_input_view
+				|| !vk.smaa.ral_input_descriptor
+				|| !vk.smaa.ral_area_image || !vk.smaa.ral_area_view
+				|| !vk.smaa.ral_area_descriptor
+				|| !vk.smaa.ral_search_image || !vk.smaa.ral_search_view
+				|| !vk.smaa.ral_search_descriptor
+				|| Ral_GetBindGroupHandle( vk.smaa.ral_edges_descriptor )
+					!= (void *)vk.smaa.edges_descriptor
+				|| Ral_GetBindGroupHandle( vk.smaa.ral_blend_descriptor )
+					!= (void *)vk.smaa.blend_descriptor
+				|| Ral_GetBindGroupHandle( vk.smaa.ral_input_descriptor )
+					!= (void *)vk.smaa.input_descriptor
+				|| Ral_GetBindGroupHandle( vk.smaa.ral_area_descriptor )
+					!= (void *)vk.smaa.area_descriptor
+				|| Ral_GetBindGroupHandle( vk.smaa.ral_search_descriptor )
+					!= (void *)vk.smaa.search_descriptor ) ) return qfalse;
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
-		if ( !vk.smaaRt.ral_descriptor[i] ) return qfalse;
+		if ( !vk.smaaRt.ral_descriptor[i] || !vk.smaaRt.ral_buffer[i]
+		  || Ral_GetBindGroupHandle( vk.smaaRt.ral_descriptor[i] )
+			!= (void *)vk.smaaRt.descriptor[i] ) return qfalse;
 	return qtrue;
 }
 
@@ -934,29 +951,103 @@ void vk_ral_release_tess_uniform_bindgroup( uint32_t slot )
 		Ral_DestroyBindGroup( vk.tess[slot].ral_uniform_descriptor );
 		vk.tess[slot].ral_uniform_descriptor = NULL;
 	}
+	vk.tess[slot].uniform_descriptor = VK_NULL_HANDLE;
 }
 
 qboolean vk_ral_refresh_tess_uniform_bindgroup( uint32_t slot )
 {
 	ralBuffer_t *buffer;
-	ralBindGroup_t *group;
+	ralBindingValue_t value;
+	ralBindGroupCreateInfo_t createInfo;
 	if ( slot >= ARRAY_LEN( vk.tess ) ) return qfalse;
-	vk_ral_release_tess_uniform_bindgroup( slot );
 	if ( !s_ral_backend || !vk.ral_bgl_uniform
-			|| vk.tess[slot].uniform_descriptor == VK_NULL_HANDLE
+			|| !vk.ral_descriptor_arena
 			|| vk.tess[slot].vertex_buffer == VK_NULL_HANDLE ) return qfalse;
+	if ( vk.tess[slot].ral_uniform_descriptor
+	  && Ral_GetBindGroupHandle( vk.tess[slot].ral_uniform_descriptor )
+		== (void *)vk.tess[slot].uniform_descriptor ) return qtrue;
+	vk_ral_release_tess_uniform_bindgroup( slot );
 	buffer = vk_ral_lookup_buffer( vk.tess[slot].vertex_buffer );
-	group = Ral_AdoptBindGroup( s_ral_backend,
-		vk.tess[slot].uniform_descriptor, vk.ral_bgl_uniform,
-		"wired-tess-uniform-bg" );
-	if ( !buffer || !group
-			|| !Ral_RegisterAdoptedBindGroupDynamicBuffer(
-				group, 0u, buffer, 0u, sizeof( vkUniform_t ) ) ) {
-		if ( group ) Ral_DestroyBindGroup( group );
-		return qfalse;
-	}
-	vk.tess[slot].ral_uniform_descriptor = group;
+	if ( !buffer || Ral_GetBufferHandle( buffer ) != (void *)vk.tess[slot].vertex_buffer
+	  || Ral_GetBufferSize( buffer ) < sizeof( vkUniform_t ) ) return qfalse;
+	memset( &value, 0, sizeof( value ) );
+	value.binding = 0u;
+	value.type = RAL_BIND_UNIFORM_BUFFER;
+	value.buffer = buffer;
+	value.bufferRange = sizeof( vkUniform_t );
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.layout = vk.ral_bgl_uniform;
+	createInfo.values = &value;
+	createInfo.numValues = 1u;
+	createInfo.debugName = "wired-tess-uniform-bg";
+	createInfo.arena = vk.ral_descriptor_arena;
+	createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+	vk.tess[slot].ral_uniform_descriptor = Ral_CreateBindGroup(
+		s_ral_backend, &createInfo );
+	if ( !vk.tess[slot].ral_uniform_descriptor ) return qfalse;
+	vk.tess[slot].uniform_descriptor = (VkDescriptorSet)Ral_GetBindGroupHandle(
+		vk.tess[slot].ral_uniform_descriptor );
 	return qtrue;
+}
+
+void vk_ral_release_iqm_bone_bindgroup( uint32_t slot )
+{
+#if FEAT_IQM
+	if ( slot >= ARRAY_LEN( vk.iqmGpu.ral_bone_descriptor ) ) return;
+	if ( vk.iqmGpu.ral_bone_descriptor[slot] ) {
+		Ral_DestroyBindGroup( vk.iqmGpu.ral_bone_descriptor[slot] );
+		vk.iqmGpu.ral_bone_descriptor[slot] = NULL;
+	}
+	vk.iqmGpu.bone_descriptor[slot] = VK_NULL_HANDLE;
+#else
+	(void)slot;
+#endif
+}
+
+qboolean vk_ral_refresh_iqm_bone_bindgroup( uint32_t slot )
+{
+#if FEAT_IQM
+	ralBuffer_t *buffer;
+	ralBindingValue_t value;
+	ralBindGroupCreateInfo_t createInfo;
+	const uint64_t item = PAD( (uint32_t)IQM_UBO_TOTAL_SIZE,
+		vk.uniform_alignment );
+	if ( slot >= ARRAY_LEN( vk.iqmGpu.ral_bone_descriptor ) ) return qfalse;
+	if ( !s_ral_backend || !vk.iqmGpu.ral_bgl_bones
+			|| !vk.ral_descriptor_arena
+			|| vk.iqmGpu.bone_buffer[slot] == VK_NULL_HANDLE
+			|| vk.iqmGpu.ring_size == 0u ) return qfalse;
+	if ( vk.iqmGpu.ral_bone_descriptor[slot]
+	  && Ral_GetBindGroupHandle( vk.iqmGpu.ral_bone_descriptor[slot] )
+		== (void *)vk.iqmGpu.bone_descriptor[slot] ) return qtrue;
+	vk_ral_release_iqm_bone_bindgroup( slot );
+	buffer = vk_ral_lookup_buffer( vk.iqmGpu.bone_buffer[slot] );
+	if ( !buffer
+	  || Ral_GetBufferHandle( buffer ) != (void *)vk.iqmGpu.bone_buffer[slot]
+	  || Ral_GetBufferSize( buffer ) != vk.iqmGpu.ring_size
+	  || item > vk.iqmGpu.ring_size ) return qfalse;
+	memset( &value, 0, sizeof( value ) );
+	value.binding = 0u;
+	value.type = RAL_BIND_UNIFORM_BUFFER;
+	value.buffer = buffer;
+	value.bufferRange = item;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.layout = vk.iqmGpu.ral_bgl_bones;
+	createInfo.values = &value;
+	createInfo.numValues = 1u;
+	createInfo.debugName = "wired-iqm-bones-bg";
+	createInfo.arena = vk.ral_descriptor_arena;
+	createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+	vk.iqmGpu.ral_bone_descriptor[slot] = Ral_CreateBindGroup(
+		s_ral_backend, &createInfo );
+	if ( !vk.iqmGpu.ral_bone_descriptor[slot] ) return qfalse;
+	vk.iqmGpu.bone_descriptor[slot] = (VkDescriptorSet)Ral_GetBindGroupHandle(
+		vk.iqmGpu.ral_bone_descriptor[slot] );
+	return qtrue;
+#else
+	(void)slot;
+	return qfalse;
+#endif
 }
 
 void vk_ral_release_entmat_bindgroup( uint32_t slot )
@@ -966,26 +1057,432 @@ void vk_ral_release_entmat_bindgroup( uint32_t slot )
 		Ral_DestroyBindGroup( vk.tess[slot].ral_entMatDesc );
 		vk.tess[slot].ral_entMatDesc = NULL;
 	}
+	vk.tess[slot].entMatDesc = VK_NULL_HANDLE;
 }
 
 qboolean vk_ral_refresh_entmat_bindgroup( uint32_t slot )
 {
 	ralBuffer_t *buffer;
-	ralBindGroup_t *group;
+	ralBindingValue_t value;
+	ralBindGroupCreateInfo_t createInfo;
+	ralBindGroup_t *candidate;
+	ralBindGroup_t *retired;
+	VkDescriptorSet rawCandidate;
+	uint32_t i;
 	if ( slot >= ARRAY_LEN( vk.tess ) ) return qfalse;
-	vk_ral_release_entmat_bindgroup( slot );
 	if ( !s_ral_backend || !vk.ral_bgl_entmat
-			|| vk.tess[slot].entMatDesc == VK_NULL_HANDLE
+			|| !vk.ral_descriptor_arena
+			|| !Ral_BindGroupArenaReceiptValid(
+				&vk.ral_descriptor_arena_receipt )
+			|| vk.ral_descriptor_arena_receipt.backendIdentity
+				!= s_ral_backend
+			|| vk.ral_descriptor_arena_receipt.arenaIdentity
+				!= vk.ral_descriptor_arena
 			|| vk.tess[slot].entMatBuf == VK_NULL_HANDLE
 			|| vk.tess[slot].entMatSize == 0u ) return qfalse;
+	if ( vk.tess[slot].ral_entMatDesc
+	  && Ral_GetBindGroupHandle( vk.tess[slot].ral_entMatDesc )
+		== (void *)vk.tess[slot].entMatDesc ) return qtrue;
 	buffer = vk_ral_lookup_buffer( vk.tess[slot].entMatBuf );
 	if ( !buffer || Ral_GetBufferHandle( buffer ) != (void *)vk.tess[slot].entMatBuf
 			|| Ral_GetBufferSize( buffer ) != vk.tess[slot].entMatSize ) return qfalse;
-	group = Ral_AdoptBindGroup( s_ral_backend, vk.tess[slot].entMatDesc,
-		vk.ral_bgl_entmat, "wired-entmat-bg" );
-	if ( !group ) return qfalse;
-	vk.tess[slot].ral_entMatDesc = group;
+	memset( &value, 0, sizeof( value ) );
+	value.binding = 0u;
+	value.type = RAL_BIND_STORAGE_BUFFER;
+	value.buffer = buffer;
+	value.bufferRange = vk.tess[slot].entMatSize;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.layout = vk.ral_bgl_entmat;
+	createInfo.values = &value;
+	createInfo.numValues = 1u;
+	createInfo.debugName = "wired-entmat-bg";
+	createInfo.arena = vk.ral_descriptor_arena;
+	createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+	candidate = Ral_CreateBindGroup( s_ral_backend, &createInfo );
+	if ( !candidate ) return qfalse;
+	rawCandidate = (VkDescriptorSet)Ral_GetBindGroupHandle( candidate );
+	if ( rawCandidate == VK_NULL_HANDLE
+			|| candidate == vk.tess[slot].ral_entMatDesc
+			|| rawCandidate == vk.tess[slot].entMatDesc ) goto fail;
+	for ( i = 0u; i < ARRAY_LEN( vk.tess ); ++i ) {
+		if ( i == slot ) continue;
+		if ( candidate == vk.tess[i].ral_entMatDesc
+				|| rawCandidate == vk.tess[i].entMatDesc ) goto fail;
+	}
+	retired = vk.tess[slot].ral_entMatDesc;
+	vk.tess[slot].ral_entMatDesc = candidate;
+	vk.tess[slot].entMatDesc = rawCandidate;
+	if ( retired ) Ral_DestroyBindGroup( retired );
 	return qtrue;
+
+fail:
+	Ral_DestroyBindGroup( candidate );
+	return qfalse;
+}
+
+void vk_ral_release_engine_resources_bindgroup( void )
+{
+	if ( vk.engineResources.ral_descriptor )
+		Ral_DestroyBindGroup( vk.engineResources.ral_descriptor );
+	if ( vk.engineResources.ral_shadow_view )
+		Ral_DestroyTextureView( vk.engineResources.ral_shadow_view );
+	vk.engineResources.ral_descriptor = NULL;
+	vk.engineResources.ral_shadow_view = NULL;
+	vk.engineResources.descriptor = VK_NULL_HANDLE;
+}
+
+qboolean vk_ral_refresh_engine_resources_bindgroup( void )
+{
+	ralBindingValue_t values[5];
+	ralBindGroupCreateInfo_t createInfo;
+	ralTextureView_t *shadowViewCandidate = NULL, *shadowViewRetired;
+	ralBindGroup_t *groupCandidate = NULL, *groupRetired;
+	VkDescriptorSet rawCandidate;
+	qboolean shadowViewOwned = qtrue, groupOwned = qtrue;
+	uint32_t valueCount = 0u, i, j;
+
+	if ( !s_ral_backend || !vk.ral_bgl_engine_resources
+			|| !vk.ral_descriptor_arena
+			|| !Ral_BindGroupArenaReceiptValid(
+				&vk.ral_descriptor_arena_receipt )
+			|| vk.ral_descriptor_arena_receipt.backendIdentity
+				!= s_ral_backend
+			|| vk.ral_descriptor_arena_receipt.arenaIdentity
+				!= vk.ral_descriptor_arena ) return qfalse;
+	memset( values, 0, sizeof( values ) );
+
+#define ADD_ENGINE_COMBINED(binding_, view_, sampler_) do { \
+	const ralTextureView_t *addView_ = (view_); \
+	const ralSampler_t *addSampler_ = (sampler_); \
+	if ( !addView_ || !addSampler_ \
+			|| !Ral_GetTextureViewHandle( addView_ ) \
+			|| !Ral_GetSamplerHandle( addSampler_ ) \
+			|| valueCount >= ARRAY_LEN( values ) ) goto fail; \
+	values[valueCount].binding = (binding_); \
+	values[valueCount].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER; \
+	values[valueCount].textureView = addView_; \
+	values[valueCount].sampler = addSampler_; \
+	++valueCount; \
+} while ( 0 )
+
+#if FEAT_SHADOW_MAPPING
+	if ( vk.shadowMap.active || vk.shadowMap.image != VK_NULL_HANDLE
+			|| vk.shadowMap.view != VK_NULL_HANDLE || vk.shadowMap.ral_image
+			|| vk.shadowMap.ral_sampler ) {
+		if ( !vk.shadowMap.active || vk.shadowMap.image == VK_NULL_HANDLE
+				|| vk.shadowMap.view == VK_NULL_HANDLE
+				|| !vk.shadowMap.ral_image || !vk.shadowMap.ral_sampler
+				|| Ral_GetTextureImageHandle( vk.shadowMap.ral_image )
+					!= (void *)vk.shadowMap.image
+				|| Ral_GetTextureDefaultViewHandle( vk.shadowMap.ral_image )
+					!= (void *)vk.shadowMap.view ) goto fail;
+		shadowViewCandidate = Ral_AdoptTextureViewExact( s_ral_backend,
+			vk.shadowMap.ral_image, (void *)vk.shadowMap.view );
+		if ( !shadowViewCandidate ) goto fail;
+		ADD_ENGINE_COMBINED( WIRED_ENGINE_RES_BIND_SHADOWMAP,
+			shadowViewCandidate, vk.shadowMap.ral_sampler );
+	}
+#endif
+
+	if ( vk.ral_brdf_lut_view || vk.ral_probe_irradiance_cube_view
+			|| vk.ral_probe_radiance_cube_view ) {
+		if ( !vk.ral_ibl_sampler ) goto fail;
+	}
+	if ( vk.ral_brdf_lut_view ) {
+		ADD_ENGINE_COMBINED( WIRED_ENGINE_RES_BIND_BRDF_LUT,
+			vk.ral_brdf_lut_view, vk.ral_ibl_sampler );
+	}
+	if ( vk.ral_probe_irradiance_cube_view ) {
+		ADD_ENGINE_COMBINED( WIRED_ENGINE_RES_BIND_IRRADIANCE,
+			vk.ral_probe_irradiance_cube_view, vk.ral_ibl_sampler );
+	}
+	if ( vk.ral_probe_radiance_cube_view ) {
+		ADD_ENGINE_COMBINED( WIRED_ENGINE_RES_BIND_RADIANCE,
+			vk.ral_probe_radiance_cube_view, vk.ral_ibl_sampler );
+	}
+
+	if ( vk.ral_gtao_denoised_view || vk.ral_gtao_sampler ) {
+		if ( !vk.ral_gtao_denoised_view || !vk.ral_gtao_sampler ) goto fail;
+		ADD_ENGINE_COMBINED( WIRED_ENGINE_RES_BIND_GTAO,
+			vk.ral_gtao_denoised_view, vk.ral_gtao_sampler );
+	} else if ( tr.whiteImage ) {
+		if ( !tr.whiteImage->ralDescriptorView
+				|| !tr.whiteImage->ralDescriptorSampler ) goto fail;
+		ADD_ENGINE_COMBINED( WIRED_ENGINE_RES_BIND_GTAO,
+			tr.whiteImage->ralDescriptorView,
+			tr.whiteImage->ralDescriptorSampler );
+	}
+#undef ADD_ENGINE_COMBINED
+
+	for ( i = 0u; i < valueCount; ++i )
+		for ( j = 0u; j < i; ++j )
+			if ( values[i].textureView == values[j].textureView
+					|| Ral_GetTextureViewHandle( values[i].textureView )
+						== Ral_GetTextureViewHandle(
+							values[j].textureView ) ) goto fail;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.layout = vk.ral_bgl_engine_resources;
+	createInfo.values = values;
+	createInfo.numValues = valueCount;
+	createInfo.debugName = "wired-engine-resources-bg";
+	createInfo.arena = vk.ral_descriptor_arena;
+	createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+	groupCandidate = Ral_CreateBindGroup( s_ral_backend, &createInfo );
+	if ( !groupCandidate ) goto fail;
+	rawCandidate = (VkDescriptorSet)Ral_GetBindGroupHandle( groupCandidate );
+	if ( rawCandidate == VK_NULL_HANDLE ) goto fail;
+	if ( groupCandidate == vk.engineResources.ral_descriptor ) {
+		groupOwned = qfalse;
+		goto fail;
+	}
+	if ( shadowViewCandidate == vk.engineResources.ral_shadow_view
+			&& shadowViewCandidate ) {
+		shadowViewOwned = qfalse;
+		goto fail;
+	}
+	if ( rawCandidate == vk.engineResources.descriptor ) goto fail;
+
+	groupRetired = vk.engineResources.ral_descriptor;
+	shadowViewRetired = vk.engineResources.ral_shadow_view;
+	vk.engineResources.ral_descriptor = groupCandidate;
+	vk.engineResources.ral_shadow_view = shadowViewCandidate;
+	vk.engineResources.descriptor = rawCandidate;
+	if ( groupRetired ) Ral_DestroyBindGroup( groupRetired );
+	if ( shadowViewRetired ) Ral_DestroyTextureView( shadowViewRetired );
+	return qtrue;
+
+fail:
+	if ( groupCandidate && groupOwned ) Ral_DestroyBindGroup( groupCandidate );
+	if ( shadowViewCandidate && shadowViewOwned )
+		Ral_DestroyTextureView( shadowViewCandidate );
+	return qfalse;
+}
+
+void vk_ral_release_sprite_bindgroup( uint32_t slot )
+{
+	if ( slot >= ARRAY_LEN( vk.sprite.ral_descriptor ) ) return;
+	if ( vk.sprite.ral_descriptor[slot] ) {
+		Ral_DestroyBindGroup( vk.sprite.ral_descriptor[slot] );
+		vk.sprite.ral_descriptor[slot] = NULL;
+	}
+	vk.sprite.descriptor[slot] = VK_NULL_HANDLE;
+}
+
+qboolean vk_ral_refresh_sprite_bindgroup( uint32_t slot )
+{
+	ralBuffer_t *buffer;
+	ralBindingValue_t value;
+	ralBindGroupCreateInfo_t createInfo;
+	const uint64_t bytes = (uint64_t)SPRITES_PER_FRAME * SPRITE_HEADER_BYTES;
+	if ( slot >= ARRAY_LEN( vk.sprite.ral_descriptor ) ) return qfalse;
+	if ( !s_ral_backend || !vk.sprite.ral_bgl || !vk.ral_descriptor_arena
+			|| vk.sprite.headers_buffer[slot] == VK_NULL_HANDLE ) return qfalse;
+	if ( vk.sprite.ral_descriptor[slot]
+	  && Ral_GetBindGroupHandle( vk.sprite.ral_descriptor[slot] )
+		== (void *)vk.sprite.descriptor[slot] ) return qtrue;
+	vk_ral_release_sprite_bindgroup( slot );
+	buffer = vk_ral_lookup_buffer( vk.sprite.headers_buffer[slot] );
+	if ( !buffer
+	  || Ral_GetBufferHandle( buffer ) != (void *)vk.sprite.headers_buffer[slot]
+	  || Ral_GetBufferSize( buffer ) != bytes ) return qfalse;
+	memset( &value, 0, sizeof( value ) );
+	value.binding = 0u;
+	value.type = RAL_BIND_STORAGE_BUFFER;
+	value.buffer = buffer;
+	value.bufferRange = bytes;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.layout = vk.sprite.ral_bgl;
+	createInfo.values = &value;
+	createInfo.numValues = 1u;
+	createInfo.debugName = "wired-sprite-bg";
+	createInfo.arena = vk.ral_descriptor_arena;
+	createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+	vk.sprite.ral_descriptor[slot] = Ral_CreateBindGroup(
+		s_ral_backend, &createInfo );
+	if ( !vk.sprite.ral_descriptor[slot] ) return qfalse;
+	vk.sprite.descriptor[slot] = (VkDescriptorSet)Ral_GetBindGroupHandle(
+		vk.sprite.ral_descriptor[slot] );
+	return vk.sprite.descriptor[slot] != VK_NULL_HANDLE;
+}
+
+static ralSampler_t *vk_ral_lookup_sampler( void *nativeSampler )
+{
+	int i;
+	if ( !nativeSampler ) return NULL;
+	for ( i = 0; i < vk.samplers.count; ++i ) {
+		if ( (void *)vk.samplers.handle[i] == nativeSampler
+				&& vk.samplers.ral_handle[i]
+		  && Ral_GetSamplerHandle( vk.samplers.ral_handle[i] )
+			== nativeSampler ) return vk.samplers.ral_handle[i];
+	}
+	return NULL;
+}
+
+void vk_ral_release_primitive_bindgroups( void )
+{
+	uint32_t i;
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
+		if ( vk.ribbon.ral_descriptor[i] )
+			Ral_DestroyBindGroup( vk.ribbon.ral_descriptor[i] );
+		if ( vk.railRibbon.ral_descriptor[i] )
+			Ral_DestroyBindGroup( vk.railRibbon.ral_descriptor[i] );
+		if ( vk.beam.ral_descriptor[i] )
+			Ral_DestroyBindGroup( vk.beam.ral_descriptor[i] );
+		vk.ribbon.ral_descriptor[i] = NULL;
+		vk.railRibbon.ral_descriptor[i] = NULL;
+		vk.beam.ral_descriptor[i] = NULL;
+		vk.ribbon.descriptor[i] = VK_NULL_HANDLE;
+		vk.railRibbon.descriptor[i] = VK_NULL_HANDLE;
+		vk.beam.descriptor[i] = VK_NULL_HANDLE;
+	}
+}
+
+qboolean vk_ral_refresh_primitive_bindgroups( void )
+{
+	ralBindGroup_t *ribbon[NUM_COMMAND_BUFFERS] = { NULL };
+	ralBindGroup_t *rail[NUM_COMMAND_BUFFERS] = { NULL };
+	ralBindGroup_t *beam[NUM_COMMAND_BUFFERS] = { NULL };
+	ralTextureView_t *views[PRIMITIVE_SHADER_IMAGE_MAX];
+	ralSampler_t *clampSampler, *repeatSampler;
+	ralBuffer_t *stageBuffer, *stageCountBuffer;
+	void *nativeGroups[NUM_COMMAND_BUFFERS * 3];
+	uint32_t nativeCount = 0u, i, j;
+	const uint64_t ribbonPointsBytes =
+		(uint64_t)RIBBON_POINTS_PER_FRAME * RIBBON_POINT_BYTES;
+	const uint64_t ribbonHeadersBytes =
+		(uint64_t)RIBBON_HEADERS_PER_FRAME * RIBBON_HEADER_BYTES;
+	const uint64_t railHeadersBytes =
+		(uint64_t)RAIL_RIBBON_POOL_MAX * RAIL_RIBBON_HEADER_BYTES;
+	const uint64_t beamHeadersBytes =
+		(uint64_t)BEAM_POOL_MAX * BEAM_HEADER_BYTES;
+	const uint64_t stageBytes = (uint64_t)PRIMITIVE_SHADER_IMAGE_MAX
+		* PRIMITIVE_STAGE_MAX * VK_PRIMITIVE_STAGE_BYTES;
+	const uint64_t stageCountBytes =
+		(uint64_t)PRIMITIVE_SHADER_IMAGE_MAX * sizeof( uint32_t );
+
+	if ( !s_ral_backend || !vk.ral_descriptor_arena
+			|| !Ral_BindGroupArenaReceiptExact( &vk.ral_descriptor_arena_receipt,
+				&vk.ral_descriptor_arena_receipt ) ) return qfalse;
+	for ( i = 0; i < PRIMITIVE_SHADER_IMAGE_MAX; ++i ) {
+		image_t *image = vk_primitive_shader_images[i];
+		if ( !image || !image->ralResidencyView
+		  || !Ral_GetTextureViewHandle( image->ralResidencyView ) ) return qfalse;
+		views[i] = image->ralResidencyView;
+	}
+	clampSampler = vk_ral_lookup_sampler( vk.particle.sampler );
+	repeatSampler = vk.beam.ral_sampler_repeat;
+	if ( !clampSampler || !repeatSampler
+	  || Ral_GetSamplerHandle( repeatSampler ) != (void *)vk.beam.sampler_repeat )
+		return qfalse;
+	stageBuffer = vk_ral_lookup_buffer( vk.primitive_stages_buffer );
+	stageCountBuffer = vk_ral_lookup_buffer( vk.primitive_stage_counts_buffer );
+	if ( vk.beam.available
+	  && ( !stageBuffer || !stageCountBuffer
+		|| Ral_GetBufferHandle( stageBuffer )
+			!= (void *)vk.primitive_stages_buffer
+		|| Ral_GetBufferHandle( stageCountBuffer )
+			!= (void *)vk.primitive_stage_counts_buffer
+		|| Ral_GetBufferSize( stageBuffer ) != stageBytes
+		|| Ral_GetBufferSize( stageCountBuffer ) != stageCountBytes ) ) return qfalse;
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
+		ralBindingValue_t values[5];
+		ralBindGroupCreateInfo_t createInfo;
+		uint32_t count;
+		memset( &createInfo, 0, sizeof( createInfo ) );
+		createInfo.arena = vk.ral_descriptor_arena;
+		createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+
+		if ( vk.ribbon.available ) {
+			ralBuffer_t *points = vk_ral_lookup_buffer( vk.ribbon.points_buffer[i] );
+			ralBuffer_t *headers = vk_ral_lookup_buffer( vk.ribbon.headers_buffer[i] );
+			if ( !vk.ribbon.ral_bgl || !points || !headers
+			  || Ral_GetBufferHandle( points )
+				!= (void *)vk.ribbon.points_buffer[i]
+			  || Ral_GetBufferHandle( headers )
+				!= (void *)vk.ribbon.headers_buffer[i]
+			  || Ral_GetBufferSize( points ) != ribbonPointsBytes
+			  || Ral_GetBufferSize( headers ) != ribbonHeadersBytes ) goto fail;
+			memset( values, 0, sizeof( values ) );
+			values[0] = (ralBindingValue_t){ .binding=0u, .type=RAL_BIND_STORAGE_BUFFER, .buffer=points, .bufferRange=ribbonPointsBytes };
+			values[1] = (ralBindingValue_t){ .binding=1u, .type=RAL_BIND_STORAGE_BUFFER, .buffer=headers, .bufferRange=ribbonHeadersBytes };
+			values[2] = (ralBindingValue_t){ .binding=2u, .type=RAL_BIND_TEXTURE_ARRAY, .textureArray=(const ralTextureView_t *const *)views, .textureArrayCount=PRIMITIVE_SHADER_IMAGE_MAX };
+			values[3] = (ralBindingValue_t){ .binding=3u, .type=RAL_BIND_SAMPLER, .sampler=clampSampler };
+			createInfo.layout = vk.ribbon.ral_bgl; createInfo.values = values;
+			createInfo.numValues = 4u; createInfo.debugName = "wired-ribbon-bg";
+			ribbon[i] = Ral_CreateBindGroup( s_ral_backend, &createInfo );
+			if ( !ribbon[i] ) goto fail;
+			nativeGroups[nativeCount++] = Ral_GetBindGroupHandle( ribbon[i] );
+		}
+
+		if ( vk.railRibbon.available ) {
+			ralBuffer_t *headers = vk_ral_lookup_buffer( vk.railRibbon.header_buffer[i] );
+			if ( !vk.railRibbon.ral_bgl || !headers
+			  || Ral_GetBufferHandle( headers )
+				!= (void *)vk.railRibbon.header_buffer[i]
+			  || Ral_GetBufferSize( headers ) != railHeadersBytes ) goto fail;
+			memset( values, 0, sizeof( values ) );
+			values[0] = (ralBindingValue_t){ .binding=0u, .type=RAL_BIND_STORAGE_BUFFER, .buffer=headers, .bufferRange=railHeadersBytes };
+			values[1] = (ralBindingValue_t){ .binding=2u, .type=RAL_BIND_TEXTURE_ARRAY, .textureArray=(const ralTextureView_t *const *)views, .textureArrayCount=PRIMITIVE_SHADER_IMAGE_MAX };
+			values[2] = (ralBindingValue_t){ .binding=3u, .type=RAL_BIND_SAMPLER, .sampler=clampSampler };
+			createInfo.layout = vk.railRibbon.ral_bgl; createInfo.values = values;
+			createInfo.numValues = 3u; createInfo.debugName = "wired-rail-ribbon-bg";
+			rail[i] = Ral_CreateBindGroup( s_ral_backend, &createInfo );
+			if ( !rail[i] ) goto fail;
+			nativeGroups[nativeCount++] = Ral_GetBindGroupHandle( rail[i] );
+		}
+
+		if ( vk.beam.available ) {
+			ralBuffer_t *headers = vk_ral_lookup_buffer( vk.beam.header_buffer[i] );
+			if ( !vk.beam.ral_bgl || !headers
+			  || Ral_GetBufferHandle( headers )
+				!= (void *)vk.beam.header_buffer[i]
+			  || Ral_GetBufferSize( headers ) != beamHeadersBytes ) goto fail;
+			memset( values, 0, sizeof( values ) ); count = 0u;
+			values[count++] = (ralBindingValue_t){ .binding=0u, .type=RAL_BIND_STORAGE_BUFFER, .buffer=headers, .bufferRange=beamHeadersBytes };
+			values[count++] = (ralBindingValue_t){ .binding=1u, .type=RAL_BIND_TEXTURE_ARRAY, .textureArray=(const ralTextureView_t *const *)views, .textureArrayCount=PRIMITIVE_SHADER_IMAGE_MAX };
+			values[count++] = (ralBindingValue_t){ .binding=2u, .type=RAL_BIND_STORAGE_BUFFER, .buffer=stageBuffer, .bufferRange=stageBytes };
+			values[count++] = (ralBindingValue_t){ .binding=3u, .type=RAL_BIND_STORAGE_BUFFER, .buffer=stageCountBuffer, .bufferRange=stageCountBytes };
+			values[count++] = (ralBindingValue_t){ .binding=4u, .type=RAL_BIND_SAMPLER, .sampler=repeatSampler };
+			createInfo.layout = vk.beam.ral_bgl; createInfo.values = values;
+			createInfo.numValues = count; createInfo.debugName = "wired-beam-bg";
+			beam[i] = Ral_CreateBindGroup( s_ral_backend, &createInfo );
+			if ( !beam[i] ) goto fail;
+			nativeGroups[nativeCount++] = Ral_GetBindGroupHandle( beam[i] );
+		}
+	}
+	for ( i = 0; i < nativeCount; ++i ) {
+		if ( !nativeGroups[i] ) goto fail;
+		for ( j = i + 1u; j < nativeCount; ++j )
+			if ( nativeGroups[i] == nativeGroups[j] ) goto fail;
+	}
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
+		ralBindGroup_t *oldRibbon = vk.ribbon.ral_descriptor[i];
+		ralBindGroup_t *oldRail = vk.railRibbon.ral_descriptor[i];
+		ralBindGroup_t *oldBeam = vk.beam.ral_descriptor[i];
+		vk.ribbon.ral_descriptor[i] = ribbon[i]; ribbon[i] = NULL;
+		vk.railRibbon.ral_descriptor[i] = rail[i]; rail[i] = NULL;
+		vk.beam.ral_descriptor[i] = beam[i]; beam[i] = NULL;
+		vk.ribbon.descriptor[i] = vk.ribbon.ral_descriptor[i]
+			? (VkDescriptorSet)Ral_GetBindGroupHandle( vk.ribbon.ral_descriptor[i] ) : VK_NULL_HANDLE;
+		vk.railRibbon.descriptor[i] = vk.railRibbon.ral_descriptor[i]
+			? (VkDescriptorSet)Ral_GetBindGroupHandle( vk.railRibbon.ral_descriptor[i] ) : VK_NULL_HANDLE;
+		vk.beam.descriptor[i] = vk.beam.ral_descriptor[i]
+			? (VkDescriptorSet)Ral_GetBindGroupHandle( vk.beam.ral_descriptor[i] ) : VK_NULL_HANDLE;
+		if ( oldRibbon ) Ral_DestroyBindGroup( oldRibbon );
+		if ( oldRail ) Ral_DestroyBindGroup( oldRail );
+		if ( oldBeam ) Ral_DestroyBindGroup( oldBeam );
+	}
+	return qtrue;
+
+fail:
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
+		if ( ribbon[i] ) Ral_DestroyBindGroup( ribbon[i] );
+		if ( rail[i] ) Ral_DestroyBindGroup( rail[i] );
+		if ( beam[i] ) Ral_DestroyBindGroup( beam[i] );
+	}
+	return qfalse;
 }
 
 void vk_ral_adopt_static_bindgroups( void )
@@ -1025,204 +1522,81 @@ void vk_ral_adopt_static_bindgroups( void )
 	} while ( 0 )
 
 	// ── core singletons ────────────────────────────────────────────────
-	RETAIN_ADOPT( vk.ral_color_descriptor,           vk.color_descriptor,           vk.ral_bgl_sampler, "wired-color-bg" );
-	RETAIN_ADOPT( vk.ral_tonemapped_descriptor,      vk.tonemapped_descriptor,      vk.ral_bgl_sampler, "wired-tonemapped-bg" );
-	RETAIN_ADOPT( vk.screenMap.ral_color_descriptor, vk.screenMap.color_descriptor, vk.ral_bgl_sampler, "wired-screenmap-color-bg" );
-	// Retained (not anonymous-ADOPT'd) so vk_tonemap can bind it as set 1 — the
-	// SSAO/sunrays tonemap variants sample this depth copy. sceneDepth.descriptor
-	// is written with the depth view + SHADER_READ_ONLY layout (vk_update_attachment_descriptors).
-	RETAIN_ADOPT( vk.sceneDepth.ral_descriptor, vk.sceneDepth.descriptor, vk.ral_bgl_sampler, "wired-scenedepth-bg" );
-	RETAIN_ADOPT( vk.engineResources.ral_descriptor,
-		vk.engineResources.descriptor, vk.ral_bgl_engine_resources,
-		"wired-engine-resources-bg" );
-#if FEAT_SHADOW_MAPPING
-	ADOPT( vk.shadowMap.descriptor,         vk.ral_bgl_sampler, "wired-shadowmap-bg" );
-#endif
-
-	// ── SMAA sampler sets (FBO-gated; same five descriptors the live
-	//    r_smaa toggle path keeps populated across cycles via
-	//    vk_update_attachment_descriptors) ───────────────────────────────
-	if ( vk.fboActive ) {
-		RETAIN_ADOPT( vk.smaa.ral_edges_descriptor, vk.smaa.edges_descriptor,
-			vk.ral_bgl_sampler, "wired-smaa-edges-bg" );
-		RETAIN_ADOPT( vk.smaa.ral_blend_descriptor, vk.smaa.blend_descriptor,
-			vk.ral_bgl_sampler, "wired-smaa-blend-bg" );
-		RETAIN_ADOPT( vk.smaa.ral_input_descriptor, vk.smaa.input_descriptor,
-			vk.ral_bgl_sampler, "wired-smaa-input-bg" );
-		RETAIN_ADOPT( vk.smaa.ral_area_descriptor, vk.smaa.area_descriptor,
-			vk.ral_bgl_sampler, "wired-smaa-area-bg" );
-		RETAIN_ADOPT( vk.smaa.ral_search_descriptor, vk.smaa.search_descriptor,
-			vk.ral_bgl_sampler, "wired-smaa-search-bg" );
-	}
-
-	// ── bloom_image_descriptor[] — one per bloom mip, 1 + VK_NUM_BLOOM_PASSES.
-	//    Retained so the bloom extract/downsample/upsample/composite passes bind
-	//    them via RAL. ──
-	for ( i = 0; i < ARRAY_LEN( vk.bloom_image_descriptor ); i++ ) {
-		RETAIN_ADOPT( vk.ral_bloom_image_descriptor[i], vk.bloom_image_descriptor[i], vk.ral_bgl_sampler, "wired-bloom-img-bg" );
-	}
-
+	// Engine resources is created directly from the generation-bound arena. The
+	// raw descriptor field is only its compatibility mirror; an unsuccessful
+	// refresh preserves the prior complete cohort and never adopts a second owner.
+	if ( !vk_ral_refresh_engine_resources_bindgroup() )
+		R_LOG( rch_ral, SEV_WARN,
+			"engine-resources: RAL bind-group refresh declined\n" );
 	// ── per-frame-ring uniform descriptors (vk.tess[NUM_COMMAND_BUFFERS]) ──
 	for ( i = 0; i < ARRAY_LEN( vk.tess ); i++ ) {
 		(void)vk_ral_refresh_tess_uniform_bindgroup( i );
-		if ( vk.tess[i].entMatDesc != VK_NULL_HANDLE )
+		if ( vk.tess[i].entMatBuf != VK_NULL_HANDLE )
 			(void)vk_ral_refresh_entmat_bindgroup( i );
 	}
 
-	// MSDF set 3 is a dynamic UBO ring. Retain both the non-owning buffer
-	// sibling and descriptor wrapper so exact binds can validate offset/range.
+	// MSDF set 3 is created directly from the generation-bound RAL arena. This
+	// sweep only verifies that the legacy raw field remains its exact mirror.
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.msdf.ral_descriptor[i] ) {
-			Ral_DestroyBindGroup( vk.msdf.ral_descriptor[i] );
-			vk.msdf.ral_descriptor[i] = NULL;
-		}
-		if ( vk.msdf.ral_buffer[i] ) {
-			Ral_DestroyBuffer( vk.msdf.ral_buffer[i] );
-			vk.msdf.ral_buffer[i] = NULL;
-		}
-		if ( vk.msdf.buffer[i] != VK_NULL_HANDLE && vk.msdf.size > 0u
-				&& vk.msdf.descriptor[i] != VK_NULL_HANDLE && vk.ral_bgl_msdf ) {
-			const uint64_t item = PAD( (uint32_t)sizeof( vk_msdf_ubo_t ),
-				vk.uniform_alignment );
-			vk.msdf.ral_buffer[i] = Ral_AdoptBuffer( s_ral_backend,
-				(void *)vk.msdf.buffer[i], (size_t)vk.msdf.size,
-				"wired-msdf-ubo" );
-			vk.msdf.ral_descriptor[i] = Ral_AdoptBindGroup( s_ral_backend,
-				vk.msdf.descriptor[i], vk.ral_bgl_msdf, "wired-msdf-bg" );
-			if ( !vk.msdf.ral_buffer[i] || !vk.msdf.ral_descriptor[i]
-					|| !Ral_RegisterAdoptedBindGroupDynamicBuffer(
-						vk.msdf.ral_descriptor[i], 0u, vk.msdf.ral_buffer[i],
-						0u, item ) ) {
-				if ( vk.msdf.ral_descriptor[i] ) {
-					Ral_DestroyBindGroup( vk.msdf.ral_descriptor[i] );
-					vk.msdf.ral_descriptor[i] = NULL;
-				}
-				if ( vk.msdf.ral_buffer[i] ) {
-					Ral_DestroyBuffer( vk.msdf.ral_buffer[i] );
-					vk.msdf.ral_buffer[i] = NULL;
-				}
-			}
+		if ( !vk.msdf.ral_descriptor[i] || !vk.msdf.ral_buffer[i]
+		  || Ral_GetBindGroupHandle( vk.msdf.ral_descriptor[i] )
+			!= (void *)vk.msdf.descriptor[i] )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: MSDF RAL bind-group cohort drifted at slot %u", i );
+	}
+
+	// Exposure and menu-backdrop bind groups are created directly from the
+	// generation-bound arena. This sweep only verifies their raw mirrors and
+	// non-owning buffer wrappers; it must never adopt a replacement set.
+	if ( vk.color_image_view ) {
+		for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+			if ( !vk.exposure.ral_descriptor[i] || !vk.exposure.ral_buffer[i]
+			  || Ral_GetBindGroupHandle( vk.exposure.ral_descriptor[i] )
+				!= (void *)vk.exposure.descriptor[i] )
+				ri.Terminate( TERM_UNRECOVERABLE,
+					"Vulkan: exposure RAL bind-group cohort drifted at slot %u", i );
+			if ( !vk.menubg.ral_descriptor[i] || !vk.menubg.ral_buffer[i]
+			  || Ral_GetBindGroupHandle( vk.menubg.ral_descriptor[i] )
+				!= (void *)vk.menubg.descriptor[i] )
+				ri.Terminate( TERM_UNRECOVERABLE,
+					"Vulkan: menubg RAL bind-group cohort drifted at slot %u", i );
 		}
 	}
 
-	// ── per-frame scene-exposure UBO ring: retain the wrappers (unlike the
-	//    teardown-only ADOPT pool above) so the post-process passes can bind
-	//    the exposure set via Ral_CmdBindBindGroup. The engine still owns the
-	//    VkBuffer/memory and writes ptr[] each frame; these are adopt-in-place.
-	//    Idempotent: free any prior session's wrappers before re-adopting the
-	//    fresh ring (mirrors the s_adopted_bgs teardown at the top). ──
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.exposure.ral_descriptor[i] ) { Ral_DestroyBindGroup( vk.exposure.ral_descriptor[i] ); vk.exposure.ral_descriptor[i] = NULL; }
-		if ( vk.exposure.ral_buffer[i] )     { Ral_DestroyBuffer( vk.exposure.ral_buffer[i] );        vk.exposure.ral_buffer[i] = NULL; }
-		if ( vk.exposure.buffer[i] != VK_NULL_HANDLE ) {
-			vk.exposure.ral_buffer[i] = Ral_AdoptBuffer( s_ral_backend, (void *)vk.exposure.buffer[i],
-				sizeof( vk_exposure_block_t ), "wired-exposure-ubo" );
-		}
-		if ( vk.exposure.descriptor[i] != VK_NULL_HANDLE && vk.ral_bgl_exposure ) {
-			vk.exposure.ral_descriptor[i] = Ral_AdoptBindGroup( s_ral_backend,
-				vk.exposure.descriptor[i], vk.ral_bgl_exposure, "wired-exposure-bg" );
-		}
-		// ── per-frame WiredUI SCENE backdrop UBO ring (menubg.frag set 2). Same
-		//    exposureSetLayout shape (binding 0 UNIFORM_BUFFER) → same exact wrapper.
-		//    The engine owns the VkBuffer/memory and writes ptr[] each frame; this
-		//    wrapper lets RB_MenuBackdrop bind the set via Ral_CmdBindBindGroup.
-		//    Idempotent: free any prior session's wrapper before re-adopting. ──
-		if ( vk.menubg.ral_descriptor[i] ) { Ral_DestroyBindGroup( vk.menubg.ral_descriptor[i] ); vk.menubg.ral_descriptor[i] = NULL; }
-		if ( vk.menubg.descriptor[i] != VK_NULL_HANDLE && vk.ral_bgl_exposure ) {
-			vk.menubg.ral_descriptor[i] = Ral_AdoptBindGroup( s_ral_backend,
-				vk.menubg.descriptor[i], vk.ral_bgl_exposure, "wired-menubg-bg" );
-		}
-	}
+	// Particle compute is one candidate-first two-slot cohort; verify it once,
+	// not once per slot like the remaining legacy ring adoption calls.
+	if ( vk.particle.available
+	  && !vk_ral_refresh_particle_compute_bindgroups() )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: particle compute RAL bind-group cohort drifted" );
 
 	// ── per-subsystem rings (each NUM_COMMAND_BUFFERS slots) ──
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		RETAIN_ADOPT( vk.smaaRt.ral_descriptor[i], vk.smaaRt.descriptor[i],
-			vk.ral_bgl_smaa_rtmetrics, "wired-smaa-rtmetrics-bg" );
-		RETAIN_ADOPT( vk.ribbon.ral_descriptor[i], vk.ribbon.descriptor[i],
-			vk.ribbon.ral_bgl, "wired-ribbon-bg" );
-		RETAIN_ADOPT( vk.railRibbon.ral_descriptor[i], vk.railRibbon.descriptor[i],
-			vk.railRibbon.ral_bgl, "wired-rail-ribbon-bg" );
-		RETAIN_ADOPT( vk.sprite.ral_descriptor[i], vk.sprite.descriptor[i],
-			vk.sprite.ral_bgl, "wired-sprite-bg" );
-		RETAIN_ADOPT( vk.beam.ral_descriptor[i], vk.beam.descriptor[i],
-			vk.beam.ral_bgl, "wired-beam-bg" );
+		if ( vk.sprite.available && !vk_ral_refresh_sprite_bindgroup( i ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: sprite RAL bind-group cohort drifted at slot %u", i );
 
 		// Effects set 1 is created directly from the renderer's generation-bound
 		// RAL arena. Keep that exact owner when this compatibility adoption sweep
 		// visits the remaining legacy sets; the raw VkDescriptorSet is only its
 		// borrowed mirror.
-		if ( vk.effectsUbo.ral_descriptor[i]
-		  && vk.effectsUbo.ral_buffer[i]
-		  && Ral_GetBindGroupHandle( vk.effectsUbo.ral_descriptor[i] )
-			== (void *)vk.effectsUbo.descriptor[i] ) {
-			// Already native-free and generation-bound.
-		} else {
-		if ( vk.effectsUbo.ral_descriptor[i] ) {
-			Ral_DestroyBindGroup( vk.effectsUbo.ral_descriptor[i] );
-			vk.effectsUbo.ral_descriptor[i] = NULL;
-		}
-		if ( vk.effectsUbo.ral_buffer[i] ) {
-			Ral_DestroyBuffer( vk.effectsUbo.ral_buffer[i] );
-			vk.effectsUbo.ral_buffer[i] = NULL;
-		}
-		if ( vk.effectsUbo.buffer[i] != VK_NULL_HANDLE && vk.effectsUbo.size > 0
-		  && vk.ral_bgl_effects_ubo && vk.effectsUbo.descriptor[i] != VK_NULL_HANDLE ) {
-			const uint64_t item = PAD( (uint32_t)sizeof( vk_effects_ubo_t ), vk.uniform_alignment );
-			vk.effectsUbo.ral_buffer[i] = Ral_AdoptBuffer( s_ral_backend,
-				(void *)vk.effectsUbo.buffer[i], (size_t)vk.effectsUbo.size,
-				"wired-effects-ubo" );
-			vk.effectsUbo.ral_descriptor[i] = Ral_AdoptBindGroup( s_ral_backend,
-				vk.effectsUbo.descriptor[i], vk.ral_bgl_effects_ubo,
-				"wired-effects-ubo-bg" );
-			if ( !vk.effectsUbo.ral_buffer[i] || !vk.effectsUbo.ral_descriptor[i]
-			  || !Ral_RegisterAdoptedBindGroupDynamicBuffer(
-				vk.effectsUbo.ral_descriptor[i], 0,
-				vk.effectsUbo.ral_buffer[i], 0, item ) ) {
-				if ( vk.effectsUbo.ral_descriptor[i] ) {
-					Ral_DestroyBindGroup( vk.effectsUbo.ral_descriptor[i] );
-					vk.effectsUbo.ral_descriptor[i] = NULL;
-				}
-				if ( vk.effectsUbo.ral_buffer[i] ) {
-					Ral_DestroyBuffer( vk.effectsUbo.ral_buffer[i] );
-					vk.effectsUbo.ral_buffer[i] = NULL;
-				}
-			}
-		}
-		}
-		RETAIN_ADOPT( vk.particle.ral_compute_descriptor[i], vk.particle.compute_descriptor[i],
-			vk.particle.ral_bgl_compute, "wired-particle-compute-bg" );
-		RETAIN_ADOPT( vk.particle.ral_render_descriptor[i], vk.particle.render_descriptor[i],
-			vk.particle.ral_bgl_render, "wired-particle-render-bg" );
-		RETAIN_ADOPT( vk.decal.ral_render_descriptor[i], vk.decal.render_descriptor[i],
-			vk.decal.ral_bgl_render, "wired-decal-render-bg" );
+		if ( !vk.effectsUbo.ral_descriptor[i]
+		  || !vk.effectsUbo.ral_buffer[i]
+		  || Ral_GetBindGroupHandle( vk.effectsUbo.ral_descriptor[i] )
+			!= (void *)vk.effectsUbo.descriptor[i] )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: effects RAL bind-group cohort drifted at slot %u", i );
 #if FEAT_IQM
-		if ( vk.iqmGpu.ral_bone_descriptor[i] ) {
-			Ral_DestroyBindGroup( vk.iqmGpu.ral_bone_descriptor[i] );
-			vk.iqmGpu.ral_bone_descriptor[i] = NULL;
-		}
-		if ( vk.iqmGpu.bone_descriptor[i] != VK_NULL_HANDLE
-				&& vk.iqmGpu.ral_bgl_bones ) {
-			ralBuffer_t *buffer = vk_ral_lookup_buffer(
-				vk.iqmGpu.bone_buffer[i] );
-			ralBindGroup_t *group = Ral_AdoptBindGroup( s_ral_backend,
-				vk.iqmGpu.bone_descriptor[i], vk.iqmGpu.ral_bgl_bones,
-				"wired-iqm-bones-bg" );
-			const uint64_t item = PAD( (uint32_t)IQM_UBO_TOTAL_SIZE,
-				vk.uniform_alignment );
-			if ( !buffer || !group
-					|| !Ral_RegisterAdoptedBindGroupDynamicBuffer(
-						group, 0u, buffer, 0u, item ) ) {
-				if ( group ) Ral_DestroyBindGroup( group );
-			} else {
-				vk.iqmGpu.ral_bone_descriptor[i] = group;
-			}
-		}
+		if ( vk.iqmGpu.available
+				&& !vk_ral_refresh_iqm_bone_bindgroup( i ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: IQM bone RAL bind-group cohort drifted at slot %u", i );
 #endif
 	}
 	if ( !vk.fboActive || !vk_ral_smaa_bindgroups_ready() ) {
 		if ( vk.fboActive )
 			R_LOG( rch_ral, SEV_WARN,
-				"SMAA retained bind-group cohort adoption failed; disabling typed SMAA command path\n" );
+				"SMAA direct RAL sampler cohort creation failed; disabling typed SMAA command path\n" );
 		vk_ral_destroy_smaa_bindgroups();
 	}
 
@@ -1230,7 +1604,7 @@ void vk_ral_adopt_static_bindgroups( void )
 	#undef RETAIN_ADOPT
 
 	R_LOG( rch_ral, SEV_INFO,
-		"adopted %u bind groups as ralBindGroup_t (core singletons + SMAA + bloom + per-frame rings)\n",
+		"adopted %u compatibility bind groups as ralBindGroup_t (legacy singletons + per-frame rings)\n",
 		s_adopted_bgs_count - before );
 
 	// also adopt every VkPipelineLayout into its
@@ -1246,42 +1620,194 @@ void vk_ral_adopt_static_bindgroups( void )
 	vk_ral_adopt_static_internal_textures();
 }
 
-qboolean vk_ral_adopt_image_descriptor( image_t *image )
-{
-	ralBindGroup_t *candidate, *previous;
-
-	if ( !image || image->descriptor == VK_NULL_HANDLE || !s_ral_backend
-			|| !vk.ral_bgl_sampler )
+static qboolean vk_ral_image_texture_info( const image_t *image,
+		ralTextureCreateInfo_t *out, uint32_t *outArrayLayers ) {
+	ralTextureCreateInfo_t candidate;
+	uint32_t layers = 1u;
+	if ( !image || !out || !outArrayLayers || image->uploadWidth <= 0
+			|| image->uploadHeight <= 0 || image->mipLevelCount == 0u )
 		return qfalse;
-	if ( image->ralDescriptor
-			&& Ral_GetBindGroupHandle( image->ralDescriptor ) == (void *)image->descriptor )
+	memset( &candidate, 0, sizeof( candidate ) );
+	candidate.format = vk_attachment_format_to_ral(
+		(VkFormat)image->internalFormat );
+	if ( candidate.format == RAL_FORMAT_UNDEFINED ) return qfalse;
+	candidate.width = (uint32_t)image->uploadWidth;
+	candidate.height = (uint32_t)image->uploadHeight;
+	candidate.mipLevels = image->mipLevelCount;
+	candidate.sampleCount = 1u;
+	candidate.usage = RAL_TEXTURE_USAGE_SAMPLED
+		| RAL_TEXTURE_USAGE_TRANSFER_DST;
+	candidate.memory = RAL_MEMORY_DEVICE_LOCAL;
+	candidate.debugName = image->imgName;
+	if ( image->texType == TEXTYPE_CUBE ) {
+		candidate.type = RAL_TEXTURE_CUBE;
+		candidate.depthOrArrayLayers = 1u;
+		layers = 6u;
+	} else if ( image->texType == TEXTYPE_3D ) {
+		candidate.type = RAL_TEXTURE_3D;
+		candidate.depthOrArrayLayers = image->depth > 0
+			? (uint32_t)image->depth : 1u;
+	} else if ( image->texType == TEXTYPE_CUBE_ARRAY ) {
+		if ( image->layerCount == 0u || image->layerCount % 6u != 0u )
+			return qfalse;
+		candidate.type = RAL_TEXTURE_CUBE_ARRAY;
+		candidate.depthOrArrayLayers = image->layerCount / 6u;
+		layers = image->layerCount;
+	} else if ( image->layerCount > 1u ) {
+		candidate.type = RAL_TEXTURE_2D_ARRAY;
+		candidate.depthOrArrayLayers = image->layerCount;
+		layers = image->layerCount;
+	} else {
+		candidate.type = RAL_TEXTURE_2D;
+		candidate.depthOrArrayLayers = 1u;
+	}
+	*out = candidate;
+	*outArrayLayers = layers;
+	return qtrue;
+}
+
+qboolean vk_ral_refresh_image_descriptor( image_t *image,
+		void *nativeSampler )
+{
+	ralTexture_t *textureCandidate = NULL, *textureRetired;
+	ralTextureView_t *viewCandidate = NULL, *viewRetired;
+	ralBindGroup_t *groupCandidate = NULL, *groupRetired;
+	ralSampler_t *sampler;
+	ralBindingValue_t value;
+	ralBindGroupCreateInfo_t createInfo;
+	VkDescriptorSet rawCandidate;
+	ralTextureCreateInfo_t textureInfo;
+	ralTextureResourceReceipt_t textureReceipt;
+	qboolean textureCandidateOwned = qtrue;
+	qboolean viewCandidateOwned = qtrue;
+	qboolean groupCandidateOwned = qtrue;
+	uint32_t i, expectedArrayLayers;
+
+	if ( !image || image->handle == VK_NULL_HANDLE
+			|| image->view == VK_NULL_HANDLE || !nativeSampler
+			|| image->uploadWidth <= 0 || image->uploadHeight <= 0
+			|| !s_ral_backend || !vk.ral_bgl_sampler
+			|| !vk.ral_descriptor_arena
+			|| !Ral_BindGroupArenaReceiptValid(
+				&vk.ral_descriptor_arena_receipt )
+			|| vk.ral_descriptor_arena_receipt.backendIdentity
+				!= s_ral_backend
+			|| vk.ral_descriptor_arena_receipt.arenaIdentity
+				!= vk.ral_descriptor_arena ) return qfalse;
+	if ( !vk_ral_image_texture_info( image, &textureInfo,
+			&expectedArrayLayers ) ) return qfalse;
+	sampler = vk_ral_lookup_sampler( nativeSampler );
+	if ( !sampler ) return qfalse;
+	if ( image->ralDescriptor && image->ralDescriptorTexture
+			&& image->ralDescriptorView
+			&& image->ralDescriptorSampler == sampler
+			&& image->descriptor != VK_NULL_HANDLE
+			&& Ral_GetBindGroupHandle( image->ralDescriptor )
+				== (void *)image->descriptor
+			&& Ral_GetTextureImageHandle( image->ralDescriptorTexture )
+				== (void *)image->handle
+			&& Ral_GetTextureDefaultViewHandle( image->ralDescriptorTexture )
+				== (void *)image->view
+			&& Ral_GetTextureViewHandle( image->ralDescriptorView )
+				== (void *)image->view
+			&& Ral_GetSamplerHandle( sampler ) == nativeSampler
+			&& Ral_TextureGetResourceReceipt( image->ralDescriptorTexture,
+				&textureReceipt )
+			&& textureReceipt.type == textureInfo.type
+			&& textureReceipt.format == textureInfo.format
+			&& textureReceipt.usage == textureInfo.usage
+			&& textureReceipt.width == textureInfo.width
+			&& textureReceipt.height == textureInfo.height
+			&& textureReceipt.mipLevels == textureInfo.mipLevels
+			&& textureReceipt.arrayLayers == expectedArrayLayers )
 		return qtrue;
 
-	candidate = Ral_AdoptBindGroup( s_ral_backend, image->descriptor,
-		vk.ral_bgl_sampler, image->imgName );
-	if ( !candidate )
-		return qfalse;
-	if ( Ral_GetBindGroupHandle( candidate ) != (void *)image->descriptor ) {
-		Ral_DestroyBindGroup( candidate );
-		return qfalse;
+	textureCandidate = Ral_AdoptTextureResourceExact( s_ral_backend,
+		(void *)image->handle, (void *)image->view,
+		VK_IMAGE_ASPECT_COLOR_BIT, &textureInfo );
+	if ( !textureCandidate ) goto fail;
+	viewCandidate = Ral_AdoptTextureViewExact( s_ral_backend,
+		textureCandidate, (void *)image->view );
+	if ( !viewCandidate ) goto fail;
+	memset( &value, 0, sizeof( value ) );
+	value.binding = 0u;
+	value.type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
+	value.textureView = viewCandidate;
+	value.sampler = sampler;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.layout = vk.ral_bgl_sampler;
+	createInfo.values = &value;
+	createInfo.numValues = 1u;
+	createInfo.debugName = image->imgName;
+	createInfo.arena = vk.ral_descriptor_arena;
+	createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
+	groupCandidate = Ral_CreateBindGroup( s_ral_backend, &createInfo );
+	if ( !groupCandidate ) goto fail;
+	rawCandidate = (VkDescriptorSet)Ral_GetBindGroupHandle( groupCandidate );
+	if ( rawCandidate == VK_NULL_HANDLE
+			|| Ral_GetTextureImageHandle( textureCandidate )
+				!= (void *)image->handle
+			|| Ral_GetTextureDefaultViewHandle( textureCandidate )
+				!= (void *)image->view
+			|| Ral_GetTextureViewHandle( viewCandidate ) != (void *)image->view
+			|| Ral_GetSamplerHandle( sampler ) != nativeSampler ) goto fail;
+	for ( i = 0u; i < (uint32_t)tr.numImages; ++i ) {
+		const image_t *live = tr.images[i];
+		if ( !live ) continue;
+		if ( groupCandidate == live->ralDescriptor ) {
+			groupCandidateOwned = qfalse;
+			goto fail;
+		}
+		if ( textureCandidate == live->ralDescriptorTexture
+				|| textureCandidate == live->ral ) {
+			textureCandidateOwned = qfalse;
+			goto fail;
+		}
+		if ( viewCandidate == live->ralDescriptorView
+				|| viewCandidate == live->ralResidencyView
+				|| viewCandidate == live->ralCoarseResidencyView ) {
+			viewCandidateOwned = qfalse;
+			goto fail;
+		}
+		if ( rawCandidate == live->descriptor ) goto fail;
 	}
-	// Descriptor-pool rebuilds and image recreation can replace the native set
-	// while image_t survives. Publish the proven fresh wrapper first, then retire
-	// the stale metadata wrapper; an adoption failure leaves the old authority
-	// untouched rather than publishing a partial replacement.
-	previous = image->ralDescriptor;
-	image->ralDescriptor = candidate;
-	if ( previous )
-		Ral_DestroyBindGroup( previous );
+
+	groupRetired = image->ralDescriptor;
+	viewRetired = image->ralDescriptorView;
+	textureRetired = image->ralDescriptorTexture;
+	image->ralDescriptor = groupCandidate;
+	image->ralDescriptorTexture = textureCandidate;
+	image->ralDescriptorView = viewCandidate;
+	image->ralDescriptorSampler = sampler;
+	image->descriptor = rawCandidate;
+	if ( groupRetired ) Ral_DestroyBindGroup( groupRetired );
+	if ( viewRetired ) Ral_DestroyTextureView( viewRetired );
+	if ( textureRetired ) Ral_DestroyTexture( textureRetired );
 	return qtrue;
+
+fail:
+	if ( groupCandidate && groupCandidateOwned )
+		Ral_DestroyBindGroup( groupCandidate );
+	if ( viewCandidate && viewCandidateOwned )
+		Ral_DestroyTextureView( viewCandidate );
+	if ( textureCandidate && textureCandidateOwned )
+		Ral_DestroyTexture( textureCandidate );
+	return qfalse;
 }
 
 void vk_ral_release_image_descriptor( image_t *image )
 {
-	if ( !image || !image->ralDescriptor )
-		return;
-	Ral_DestroyBindGroup( image->ralDescriptor );
+	if ( !image ) return;
+	if ( image->ralDescriptor ) Ral_DestroyBindGroup( image->ralDescriptor );
+	if ( image->ralDescriptorView )
+		Ral_DestroyTextureView( image->ralDescriptorView );
+	if ( image->ralDescriptorTexture )
+		Ral_DestroyTexture( image->ralDescriptorTexture );
 	image->ralDescriptor = NULL;
+	image->ralDescriptorTexture = NULL;
+	image->ralDescriptorView = NULL;
+	image->ralDescriptorSampler = NULL;
+	image->descriptor = VK_NULL_HANDLE;
 }
 
 
@@ -1309,32 +1835,29 @@ static void vk_ral_destroy_adopted_bindgroups( void )
 	#define DESTROY_RETAINED_BG( field ) do { \
 		if ( (field) ) { Ral_DestroyBindGroup( (field) ); (field) = NULL; } \
 	} while ( 0 )
-	DESTROY_RETAINED_BG( vk.ral_color_descriptor );
-	DESTROY_RETAINED_BG( vk.ral_tonemapped_descriptor );
-	DESTROY_RETAINED_BG( vk.screenMap.ral_color_descriptor );
-	DESTROY_RETAINED_BG( vk.sceneDepth.ral_descriptor );
-	DESTROY_RETAINED_BG( vk.engineResources.ral_descriptor );
+	vk_ral_release_attachment_sampler_cohorts();
+	vk_ral_release_engine_resources_bindgroup();
+	DESTROY_RETAINED_BG( vk.blueNoise.ral_descriptor );
+	vk.blueNoise.descriptor = VK_NULL_HANDLE;
 	vk_ral_destroy_smaa_bindgroups();
-	for ( i = 0; i < ARRAY_LEN( vk.ral_bloom_image_descriptor ); i++ )
-		DESTROY_RETAINED_BG( vk.ral_bloom_image_descriptor[i] );
+	vk_ral_release_particle_compute_bindgroups();
+	vk_ral_release_particle_render_bindgroups();
+	vk_ral_release_decal_render_bindgroups();
+	vk_ral_release_primitive_bindgroups();
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		DESTROY_RETAINED_BG( vk.tess[i].ral_uniform_descriptor );
-		DESTROY_RETAINED_BG( vk.tess[i].ral_entMatDesc );
+		vk_ral_release_entmat_bindgroup( i );
 		DESTROY_RETAINED_BG( vk.msdf.ral_descriptor[i] );
 		DESTROY_RETAINED_BG( vk.exposure.ral_descriptor[i] );
 		DESTROY_RETAINED_BG( vk.menubg.ral_descriptor[i] );
-		DESTROY_RETAINED_BG( vk.ribbon.ral_descriptor[i] );
-		DESTROY_RETAINED_BG( vk.railRibbon.ral_descriptor[i] );
-		DESTROY_RETAINED_BG( vk.sprite.ral_descriptor[i] );
-		DESTROY_RETAINED_BG( vk.beam.ral_descriptor[i] );
-		DESTROY_RETAINED_BG( vk.particle.ral_compute_descriptor[i] );
-		DESTROY_RETAINED_BG( vk.particle.ral_render_descriptor[i] );
-		DESTROY_RETAINED_BG( vk.decal.ral_render_descriptor[i] );
+		vk_ral_release_sprite_bindgroup( i );
 		DESTROY_RETAINED_BG( vk.atm.ral_compute_descriptor[i] );
 		DESTROY_RETAINED_BG( vk.atm.ral_render_descriptor[i] );
+		vk.atm.compute_descriptor[i] = VK_NULL_HANDLE;
+		vk.atm.render_descriptor[i] = VK_NULL_HANDLE;
 		DESTROY_RETAINED_BG( vk.effectsUbo.ral_descriptor[i] );
 #if FEAT_IQM
-		DESTROY_RETAINED_BG( vk.iqmGpu.ral_bone_descriptor[i] );
+		vk_ral_release_iqm_bone_bindgroup( i );
 #endif
 		if ( vk.effectsUbo.ral_buffer[i] ) {
 			Ral_DestroyBuffer( vk.effectsUbo.ral_buffer[i] );
@@ -1343,6 +1866,14 @@ static void vk_ral_destroy_adopted_bindgroups( void )
 		if ( vk.msdf.ral_buffer[i] ) {
 			Ral_DestroyBuffer( vk.msdf.ral_buffer[i] );
 			vk.msdf.ral_buffer[i] = NULL;
+		}
+		if ( vk.exposure.ral_buffer[i] ) {
+			Ral_DestroyBuffer( vk.exposure.ral_buffer[i] );
+			vk.exposure.ral_buffer[i] = NULL;
+		}
+		if ( vk.menubg.ral_buffer[i] ) {
+			Ral_DestroyBuffer( vk.menubg.ral_buffer[i] );
+			vk.menubg.ral_buffer[i] = NULL;
 		}
 	}
 	for ( i = 0; i < s_adopted_bgs_count; i++ ) {
@@ -1381,8 +1912,8 @@ void vk_ral_release_static_bindgroups( void )
 // lifetime.
 //
 // Logged count (always-on SEV_INFO): "adopted N pipeline layouts
-// as ralPipelineLayout_t". The 15 sibling fields cover every
-// qvkCreatePipelineLayout site in vk.c.
+// as ralPipelineLayout_t". Direct RAL-owned subsystem layouts are excluded;
+// this sweep covers only the remaining renderer-owned native layouts.
 // ════════════════════════════════════════════════════════════════════════
 static uint32_t s_ral_pipeline_layouts_adopted;
 
@@ -1407,14 +1938,6 @@ void vk_ral_adopt_static_pipeline_layouts( void )
 	ADOPT_PL( vk.pipeline_layout_ssao,           vk.ral_pipeline_layout_ssao,           "wired-pl-ssao" );
 	ADOPT_PL( vk.pipeline_layout_sunrays,        vk.ral_pipeline_layout_sunrays,        "wired-pl-sunrays" );
 
-	ADOPT_PL( vk.ribbon.pipeline_layout,             vk.ribbon.ral_pipeline_layout,             "wired-pl-ribbon" );
-	ADOPT_PL( vk.beam.pipeline_layout,               vk.beam.ral_pipeline_layout,               "wired-pl-beam" );
-	ADOPT_PL( vk.sprite.pipeline_layout,             vk.sprite.ral_pipeline_layout,             "wired-pl-sprite" );
-	ADOPT_PL( vk.particle.compute_pipeline_layout,   vk.particle.ral_compute_pipeline_layout,   "wired-pl-particle-compute" );
-	ADOPT_PL( vk.particle.render_pipeline_layout,    vk.particle.ral_render_pipeline_layout,    "wired-pl-particle-render" );
-#if FEAT_IQM
-	ADOPT_PL( vk.iqmGpu.pipeline_layout,             vk.iqmGpu.ral_pipeline_layout,             "wired-pl-iqm" );
-#endif
 #if FEAT_SHADOW_MAPPING
 	ADOPT_PL( vk.shadowMap.depthLayout,              vk.shadowMap.ral_depthLayout,              "wired-pl-shadow-depth" );
 #endif
@@ -1474,16 +1997,13 @@ void vk_ral_adopt_one_texture( VkImage vkImage, VkImageView vkView, VkFormat fmt
 // ════════════════════════════════════════════════════════════════════════
 // internal-texture adoption sweep.
 //
-// The 6 renderer-owned VkImage handles backing the parallel-paths cmd sites
-// (depth_image, color_image, tonemapped_image + 3 SMAA images) get wrapped
-// in ralTexture_t* siblings here. The wrappers carry ownsImage=qfalse —
+// Renderer-owned VkImage handles backing the attachment parallel paths get
+// wrapped in ralTexture_t* siblings here. The wrappers carry ownsImage=qfalse —
 // teardown frees only the wrapper struct, not the VkImage.
 //
-// SMAA siblings live behind vk.fboActive (same gate as the SMAA-image alloc
-// lifecycle in vk_smaa_alloc_resources / vk_smaa_release_resources). When
-// the user toggles r_smaa across maps the resource path recreates the SMAA
-// VkImages; re-running the adoption sweep at vid_restart picks up the fresh
-// handles via the idempotent destroy-then-adopt pattern below.
+// SMAA owns a separate live-toggle lifecycle and therefore adopts all five of
+// its images together with their sampling views/groups in vk.c rather than in
+// this boot/static attachment sweep.
 //
 // Logged count (always-on SEV_INFO): "adopted N internal textures
 // as ralTexture_t".
@@ -1494,14 +2014,19 @@ void vk_ral_adopt_static_internal_textures( void )
 {
 	uint32_t adopted = 0;
 	if ( !s_ral_backend ) return;
+	// This sweep is idempotent but replacement must remain child-before-parent:
+	// retire every attachment-dependent view/group/compute child before ADOPT_TEX
+	// replaces the adopted texture wrappers.
+	vk_ral_destroy_adopted_internal_textures();
 
 	// Each adopted texture carries its real VkImageView + format so it can serve
 	// as a dynamic-rendering attachment (Ral_BeginRendering reads defaultView).
-	#define ADOPT_TEX( vkfield, vkview, vkfmt, ralfield, w, h, asp, label ) do {                                 \
+	#define ADOPT_TEX( vkfield, vkview, vkfmt, ralfield, w, h, asp, use, label ) do {                            \
 		if ( ralfield ) { Ral_DestroyTexture( ralfield ); ralfield = NULL; }                                 \
 		if ( (vkfield) != VK_NULL_HANDLE ) {                                                                     \
-			ralfield = Ral_AdoptTexture( s_ral_backend, (vkfield), (vkview),                                  \
-			                             vk_attachment_format_to_ral( (vkfmt) ), (w), (h), (asp), (label) ); \
+			ralfield = Ral_AdoptTextureExact( s_ral_backend, (vkfield), (vkview),                             \
+			                             vk_attachment_format_to_ral( (vkfmt) ), (w), (h), (asp), (use),     \
+			                             (label) );                                                            \
 			if ( ralfield ) adopted++;                                                                           \
 		}                                                                                                        \
 	} while ( 0 )
@@ -1515,12 +2040,15 @@ void vk_ral_adopt_static_internal_textures( void )
 	ADOPT_TEX( vk.depth_image,       vk.depth_image_view,      vk.depth_format,  vk.ral_depth_image,
 	           glConfig.vidWidth, glConfig.vidHeight,
 	           ( glConfig.stencilBits > 0 ) ? ( VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT ) : VK_IMAGE_ASPECT_DEPTH_BIT,
+	           RAL_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT | RAL_TEXTURE_USAGE_TRANSFER_SRC,
 	           "wired-img-depth" );
 	ADOPT_TEX( vk.color_image,       vk.color_image_view,      vk.color_format,  vk.ral_color_image,
 	           glConfig.vidWidth, glConfig.vidHeight, VK_IMAGE_ASPECT_COLOR_BIT,
+	           RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED | RAL_TEXTURE_USAGE_TRANSFER_SRC,
 	           "wired-img-color" );
 	ADOPT_TEX( vk.tonemapped_image,  vk.tonemapped_image_view, vk.color_format,  vk.ral_tonemapped_image,
 	           glConfig.vidWidth, glConfig.vidHeight, VK_IMAGE_ASPECT_COLOR_BIT,
+	           RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED | RAL_TEXTURE_USAGE_TRANSFER_SRC,
 	           "wired-img-tonemapped" );
 
 	// screenMap color/depth — the mirror/portal pass's separate targets. Same
@@ -1529,10 +2057,12 @@ void vk_ral_adopt_static_internal_textures( void )
 	// can auto-bind the screenmap stencil attachment.
 	ADOPT_TEX( vk.screenMap.color_image, vk.screenMap.color_image_view, vk.color_format, vk.screenMap.ral_color_image,
 	           vk.screenMapWidth, vk.screenMapHeight, VK_IMAGE_ASPECT_COLOR_BIT,
+	           RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED,
 	           "wired-img-screenmap-color" );
 	ADOPT_TEX( vk.screenMap.depth_image, vk.screenMap.depth_image_view, vk.depth_format, vk.screenMap.ral_depth_image,
 	           vk.screenMapWidth, vk.screenMapHeight,
 	           ( glConfig.stencilBits > 0 ) ? ( VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT ) : VK_IMAGE_ASPECT_DEPTH_BIT,
+	           RAL_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT,
 	           "wired-img-screenmap-depth" );
 
 	// sceneDepth.image adoption. Created by
@@ -1549,6 +2079,8 @@ void vk_ral_adopt_static_internal_textures( void )
 		           ( glConfig.stencilBits > 0 )
 				? ( VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT )
 				: VK_IMAGE_ASPECT_DEPTH_BIT,
+		           RAL_TEXTURE_USAGE_SAMPLED | RAL_TEXTURE_USAGE_TRANSFER_SRC
+				| RAL_TEXTURE_USAGE_TRANSFER_DST,
 		           "wired-img-scenedepth" );
 		if ( vk.sceneDepth.ral_image
 				&& !Ral_PublishAdoptedTextureState( vk.sceneDepth.ral_image,
@@ -1566,42 +2098,6 @@ void vk_ral_adopt_static_internal_textures( void )
 	// lifecycle as the supersample-gated capture image.
 
 	if ( vk.fboActive ) {
-		ADOPT_TEX( vk.smaa.input_image, vk.smaa.input_view, vk.color_format, vk.smaa.ral_input_image,
-		           glConfig.vidWidth, glConfig.vidHeight, VK_IMAGE_ASPECT_COLOR_BIT,
-		           "wired-img-smaa-input" );
-		ADOPT_TEX( vk.smaa.edges_image, vk.smaa.edges_view, VK_FORMAT_R8G8_UNORM, vk.smaa.ral_edges_image,
-		           glConfig.vidWidth, glConfig.vidHeight, VK_IMAGE_ASPECT_COLOR_BIT,
-		           "wired-img-smaa-edges" );
-		ADOPT_TEX( vk.smaa.blend_image, vk.smaa.blend_view, VK_FORMAT_R8G8B8A8_UNORM, vk.smaa.ral_blend_image,
-		           glConfig.vidWidth, glConfig.vidHeight, VK_IMAGE_ASPECT_COLOR_BIT,
-		           "wired-img-smaa-blend" );
-		{
-			const ralResourceState_t sampled = {
-				RAL_RESOURCE_USAGE_SAMPLED_TEXTURE, RAL_STAGE_FRAGMENT
-			};
-			if ( !vk.smaa.ral_input_image || !vk.smaa.ral_edges_image
-					|| !vk.smaa.ral_blend_image
-					|| !Ral_PublishAdoptedTextureState( vk.smaa.ral_input_image,
-						&sampled, RAL_QUEUE_GRAPHICS )
-					|| !Ral_PublishAdoptedTextureState( vk.smaa.ral_edges_image,
-						&sampled, RAL_QUEUE_GRAPHICS )
-					|| !Ral_PublishAdoptedTextureState( vk.smaa.ral_blend_image,
-						&sampled, RAL_QUEUE_GRAPHICS ) ) {
-				if ( vk.smaa.ral_input_image ) {
-					Ral_DestroyTexture( vk.smaa.ral_input_image );
-					vk.smaa.ral_input_image = NULL;
-				}
-				if ( vk.smaa.ral_edges_image ) {
-					Ral_DestroyTexture( vk.smaa.ral_edges_image );
-					vk.smaa.ral_edges_image = NULL;
-				}
-				if ( vk.smaa.ral_blend_image ) {
-					Ral_DestroyTexture( vk.smaa.ral_blend_image );
-					vk.smaa.ral_blend_image = NULL;
-				}
-			}
-		}
-
 		// bloom extract/blur chain — the 9 bloom_image attachments (idx 0 extract
 		// target, idx k>=1 blur output). Created in vk_create_attachments under the
 		// same fboActive && r_bloom gate (vk.c bloom block); each is a single-layer
@@ -1614,14 +2110,20 @@ void vk_ral_adopt_static_internal_textures( void )
 			uint32_t bw = gls.captureWidth;
 			uint32_t bh = gls.captureHeight;
 			ADOPT_TEX( vk.bloom_image[0], vk.bloom_image_view[0], vk.bloom_format, vk.ral_bloom_image[0],
-			           bw, bh, VK_IMAGE_ASPECT_COLOR_BIT, "wired-img-bloom-0" );
+			           bw, bh, VK_IMAGE_ASPECT_COLOR_BIT,
+			           RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED,
+			           "wired-img-bloom-0" );
 			for ( bi = 1; bi < ARRAY_LEN( vk.bloom_image ); bi += 2 ) {
 				bw /= 2;
 				bh /= 2;
 				ADOPT_TEX( vk.bloom_image[bi+0], vk.bloom_image_view[bi+0], vk.bloom_format, vk.ral_bloom_image[bi+0],
-				           bw, bh, VK_IMAGE_ASPECT_COLOR_BIT, va( "wired-img-bloom-%u", bi+0 ) );
+				           bw, bh, VK_IMAGE_ASPECT_COLOR_BIT,
+				           RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED,
+				           va( "wired-img-bloom-%u", bi+0 ) );
 				ADOPT_TEX( vk.bloom_image[bi+1], vk.bloom_image_view[bi+1], vk.bloom_format, vk.ral_bloom_image[bi+1],
-				           bw, bh, VK_IMAGE_ASPECT_COLOR_BIT, va( "wired-img-bloom-%u", bi+1 ) );
+				           bw, bh, VK_IMAGE_ASPECT_COLOR_BIT,
+				           RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED,
+				           va( "wired-img-bloom-%u", bi+1 ) );
 			}
 		}
 	}
@@ -1697,6 +2199,10 @@ void vk_ral_adopt_static_internal_textures( void )
 
 void vk_ral_destroy_adopted_internal_textures( void )
 {
+	// Views/groups must not outlive their adopted texture wrappers or the raw
+	// renderer-owned VkImages those wrappers reference.
+	vk_ral_release_engine_resources_bindgroup();
+	vk_ral_release_attachment_sampler_cohorts();
 	// HDR histogram + exposure-reduce resources are brought up at the tail of the
 	// adopt sweep and reference the adopted color image / exposure UBO ring; tear
 	// them down symmetrically here, before the color image, so nothing outlives the
@@ -1704,10 +2210,6 @@ void vk_ral_destroy_adopted_internal_textures( void )
 	// buffer; free the dependent first).
 	vk_hdr_exposure_reduce_shutdown();
 	vk_hdr_histogram_shutdown();
-
-	// GPU cull resources are RAL-owned (AABB/reached/visible SSBOs +
-	// pipeline); free them with the device-lifetime compute siblings.
-	vk_cull_shutdown();
 
 	// BRDF LUT compute resources are RAL-owned (created, not adopted); free them
 	// here too so they don't outlive the device.
@@ -1738,9 +2240,6 @@ void vk_ral_destroy_adopted_internal_textures( void )
 	KILL_TEX( vk.screenMap.ral_color_image );
 	KILL_TEX( vk.screenMap.ral_depth_image );
 	KILL_TEX( vk.sceneDepth.ral_image );
-	KILL_TEX( vk.smaa.ral_input_image );
-	KILL_TEX( vk.smaa.ral_edges_image );
-	KILL_TEX( vk.smaa.ral_blend_image );
 	{
 		uint32_t bi;
 		for ( bi = 0; bi < ARRAY_LEN( vk.ral_bloom_image ); bi++ )
@@ -1762,6 +2261,8 @@ struct ralTexture_s *vk_ral_lookup_texture( VkImage vkImage )
 	MATCH( vk.smaa.input_image,  vk.smaa.ral_input_image );
 	MATCH( vk.smaa.edges_image,  vk.smaa.ral_edges_image );
 	MATCH( vk.smaa.blend_image,  vk.smaa.ral_blend_image );
+	MATCH( vk.smaa.area_image,   vk.smaa.ral_area_image );
+	MATCH( vk.smaa.search_image, vk.smaa.ral_search_image );
 	{
 		uint32_t bi;
 		for ( bi = 0; bi < ARRAY_LEN( vk.bloom_image ); bi++ )
@@ -1781,16 +2282,6 @@ static void vk_ral_destroy_adopted_pipeline_layouts( void )
 	KILL_PL( vk.ral_pipeline_layout_msdf );
 	KILL_PL( vk.ral_pipeline_layout_ssao );
 	KILL_PL( vk.ral_pipeline_layout_sunrays );
-	KILL_PL( vk.ribbon.ral_pipeline_layout );
-	KILL_PL( vk.beam.ral_pipeline_layout );
-	KILL_PL( vk.sprite.ral_pipeline_layout );
-	KILL_PL( vk.particle.ral_compute_pipeline_layout );
-	KILL_PL( vk.particle.ral_render_pipeline_layout );
-	KILL_PL( vk.atm.ral_compute_pipeline_layout );
-	KILL_PL( vk.atm.ral_render_pipeline_layout );
-#if FEAT_IQM
-	KILL_PL( vk.iqmGpu.ral_pipeline_layout );
-#endif
 #if FEAT_SHADOW_MAPPING
 	KILL_PL( vk.shadowMap.ral_depthLayout );
 #endif
@@ -1886,6 +2377,22 @@ void vk_ral_textures_shutdown( qboolean destroyWindow ) {
 		R_LOG( rch_ral, SEV_INFO, "saving pipeline cache to '%s'\n", cachePath );
 		Ral_SavePipelineCache( s_ral_backend, cachePath );
 	}
+	// The four portable effect families directly own their RAL pipelines,
+	// pipeline layouts, bind groups, and bind-group layouts. Retire each
+	// complete family before the generic adopted-wrapper sweeps below so the
+	// dependency order remains pipeline -> pipeline layout -> BGL on every
+	// full teardown path. vk_shutdown repeats these calls later, but each
+	// family shutdown is intentionally NULL-safe.
+	vk_shutdown_ribbon();
+	vk_shutdown_railribbon();
+	vk_shutdown_beam();
+	vk_shutdown_sprite();
+	vk_shutdown_particle();
+	vk_shutdown_decal();
+	vk_shutdown_atmospheric();
+#if FEAT_IQM
+	vk_shutdown_iqm_gpu_skinning();
+#endif
 	// destroy every adopted bind-group wrapper.
 	// ownsSet=qfalse on adopted wrappers means Ral_DestroyBindGroup only
 	// frees the wrapper struct, not the underlying VkDescriptorSet — the
@@ -1903,6 +2410,9 @@ void vk_ral_textures_shutdown( qboolean destroyWindow ) {
 
 	// Destroy every adopted internal-texture wrapper. ownsImage=qfalse means
 	// only wrappers are freed; underlying VkImages remain renderer-owned.
+	// GPU culling is world-owned rather than attachment-owned, so it is released
+	// only on this full backend teardown path, not on live HDR/FBO rebuilds.
+	vk_cull_shutdown();
 	vk_ral_destroy_adopted_internal_textures();
 
 	// renderer-side RAL pipeline +
@@ -1931,15 +2441,6 @@ void vk_ral_textures_shutdown( qboolean destroyWindow ) {
 		KILL_BGL( vk.ral_bgl_exposure );
 		KILL_BGL( vk.ral_bgl_effects_ubo );
 		KILL_BGL( vk.ral_bgl_smaa_rtmetrics );
-		KILL_BGL( vk.ribbon.ral_bgl );
-		KILL_BGL( vk.railRibbon.ral_bgl );
-		KILL_BGL( vk.beam.ral_bgl );
-		KILL_BGL( vk.sprite.ral_bgl );
-		KILL_BGL( vk.particle.ral_bgl_compute );
-		KILL_BGL( vk.particle.ral_bgl_render );
-		KILL_BGL( vk.atm.ral_bgl_compute );
-		KILL_BGL( vk.atm.ral_bgl_render );
-		KILL_BGL( vk.iqmGpu.ral_bgl_bones );
 		#undef KILL_PIPE
 		#undef KILL_BGL
 	}
@@ -2901,8 +3402,8 @@ void vk_ral_unregister_image( image_t *image ) {
 
 
 // slot allocator for the parallel 2DArray SAMPLED_IMAGE binding.
-// Used by vk_ral_register_image_array (defined in vk.c — the raw-write site
-// needs the static-to-vk.c qvkUpdateDescriptorSets handle). Bumps the slot
+// Used by vk_ral_register_image_array (defined in vk.c, where image_t slot
+// ownership lives). The binding-aware RAL writer consumes the result. Bumps the slot
 // counter when a slot is available, returns -1 when the bindless array
 // capacity is exhausted. The skipped counter feeds the diag dump.
 int vk_ral_alloc_array_bindless_slot( const char *imgName ) {

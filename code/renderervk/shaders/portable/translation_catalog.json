@@ -4,10 +4,10 @@
   "portableManifest": {
     "schemaVersion": 1,
     "generation": 1,
-    "byteCount": 830802,
+    "byteCount": 830798,
     "digest": {
-      "lane0": "3a88f2625ab544ce",
-      "lane1": "0179aa8277ec5082"
+      "lane0": "162b046ec96a80c3",
+      "lane1": "38b694e6ca584ce9"
     }
   },
   "requiredTargets": [
@@ -950,27 +950,27 @@
       "symbol": "ribbon_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 3644,
+        "byteCount": 3780,
         "digest": {
-          "lane0": "6d44a97a83fdf639",
-          "lane1": "15db68f1cad801e0"
+          "lane0": "faf477a4a8ec2917",
+          "lane1": "4a07fac3b95071ac"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 1996,
+          "byteCount": 1980,
           "digest": {
-            "lane0": "96efb493a30a062e",
-            "lane1": "50e1a0b65e09a5a1"
+            "lane0": "9bfc23f5a7df5e75",
+            "lane1": "0db0904bafaf839d"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 3004,
+          "byteCount": 2974,
           "digest": {
-            "lane0": "ca4961fb53f645cf",
-            "lane1": "3c35e4be37adad06"
+            "lane0": "b46fbaa42b09bfba",
+            "lane1": "63c7edef5e5560f1"
           }
         }
       ]
@@ -1010,27 +1010,27 @@
       "symbol": "beam_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "spirv": {
-        "byteCount": 3660,
+        "byteCount": 3796,
         "digest": {
-          "lane0": "a00759c1c4504c56",
-          "lane1": "0b269b109f019acc"
+          "lane0": "7b8f54fc982432d0",
+          "lane1": "3b43286fdc2b5188"
         }
       },
       "artifacts": [
         {
           "target": "msl",
-          "byteCount": 1971,
+          "byteCount": 1955,
           "digest": {
-            "lane0": "b24eb588513e9986",
-            "lane1": "cdd657645f6215da"
+            "lane0": "7054e961d537b527",
+            "lane1": "ba2e4f80012485c3"
           }
         },
         {
           "target": "wgsl",
-          "byteCount": 3064,
+          "byteCount": 3034,
           "digest": {
-            "lane0": "2e53c78608208d5d",
-            "lane1": "7218976c772ca1f8"
+            "lane0": "708ff98db890f6e7",
+            "lane1": "1dfaa9d51554e02e"
           }
         }
       ]

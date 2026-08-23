@@ -1341,9 +1341,8 @@ void RE_RegisterParticleClass( particleClassHandle_t handle, const particleClass
 		// Cache image pointer for re-alloc-after-pool-reset.
 		vk.particle.classImages[ handle - 1 ] = resolvedImage;
 
-		// Update slot (handle - 1) of the sampler array on every
-		// per-frame render descriptor set. Helper lives in vk.c
-		// because the qvk* function pointers are static there.
+		// Advance the RAL texture-registry generation. The actively recorded
+		// slot replaces its complete arena bind group before the next draw.
 		vk_particle_set_class_image( handle, resolvedImage );
 	}
 

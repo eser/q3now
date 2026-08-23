@@ -71,8 +71,9 @@ VK_PERF_V2_KEYS = {
     "epoch", "bucket", "count", "valid", "acquire_total_us", "submit_total_us",
     "present_call_total_us", "main_slot_wait_total_us", "worker_queue_total_us",
     "worker_wait_total_us", "worker_reset_total_us", "worker_count", "maxq",
-    "generation", "mode", "r_swapInterval", "requested_images", "actual_images",
-    "slots", "extent", "platform", "worker_mode", "draws_total", "image_hits",
+    "generation", "mode", "r_swapInterval", "policy_intent", "requested_images",
+    "actual_images", "frames_in_flight", "vrr_preferred", "slots", "extent",
+    "platform", "worker_mode", "draws_total", "image_hits",
     "identity_stable",
 }
 VK_PERF_V2_INTEGER_KEYS = VK_PERF_V2_KEYS - {
@@ -607,8 +608,9 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
         for block in raw_vk_v2
     )
     identity_keys = (
-        "generation", "mode", "r_swapInterval", "requested_images", "actual_images",
-        "slots", "extent", "platform", "worker_mode",
+        "generation", "mode", "r_swapInterval", "policy_intent", "requested_images",
+        "actual_images", "frames_in_flight", "vrr_preferred", "slots", "extent",
+        "platform", "worker_mode",
     )
     vk_v2_identity_ok = bool(raw_vk_v2) and all(
         block["identity_stable"] == 1
@@ -624,6 +626,9 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
         and block["extent"] == render_observed[2:4]
         and block["platform"] == expected_vk_platform
         and block["r_swapInterval"] == 0
+        and block["policy_intent"] == 0
+        and block["frames_in_flight"] == block["slots"]
+        and block["vrr_preferred"] == 0
         and block["mode"] in {
             "IMMEDIATE", "MAILBOX", "FIFO", "FIFO_RELAXED", "FIFO_LATEST_READY",
         }
@@ -902,7 +907,8 @@ def synthetic_fixture(samples: int = 650) -> list[str]:
                         f"worker_reset_total_us={0 if fixture_worker_mode == 'sync' else worker_reset_total} "
                         f"worker_count={0 if fixture_worker_mode == 'sync' else 200} "
                         f"maxq={0 if fixture_worker_mode == 'sync' else 1} generation=1 mode=IMMEDIATE "
-                        "r_swapInterval=0 requested_images=3 actual_images=3 slots=2 extent=2560x1440 "
+                        "r_swapInterval=0 policy_intent=0 requested_images=3 actual_images=3 "
+                        "frames_in_flight=2 vrr_preferred=0 slots=2 extent=2560x1440 "
                         f"platform={fixture_platform} worker_mode={fixture_worker_mode} draws_total={v2_draws * 200} "
                         "image_hits=0:67,1:67,2:66 identity_stable=1",
                         "renderer.timing",
@@ -1014,8 +1020,14 @@ def run_self_test() -> int:
         for line in clean
     ]
     cases.append(("mutated-v2-epoch", mutated_epoch, base_contract, False, "vk perf v2 blocks invalid"))
-    wrong_slots = [line.replace("actual_images=3 slots=2", "actual_images=3 slots=3") for line in clean]
+    wrong_slots = [line.replace("slots=2 extent=", "slots=3 extent=") for line in clean]
     cases.append(("wrong-current-slot-fixture", wrong_slots, base_contract, False, "vk perf v2 blocks invalid"))
+    wrong_intent = [line.replace("policy_intent=0", "policy_intent=2") for line in clean]
+    cases.append(("wrong-v2-policy-intent", wrong_intent, base_contract, False, "vk perf v2 blocks invalid"))
+    wrong_inflight = [line.replace("frames_in_flight=2", "frames_in_flight=3") for line in clean]
+    cases.append(("wrong-v2-frames-in-flight", wrong_inflight, base_contract, False, "vk perf v2 blocks invalid"))
+    wrong_vrr = [line.replace("vrr_preferred=0", "vrr_preferred=1") for line in clean]
+    cases.append(("wrong-v2-vrr-policy", wrong_vrr, base_contract, False, "vk perf v2 blocks invalid"))
     internal_as_swapchain = [
         line.replace("extent=2560x1440", "extent=1280x720")
         for line in clean

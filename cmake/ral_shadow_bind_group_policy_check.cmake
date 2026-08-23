@@ -47,6 +47,8 @@ ENDFUNCTION()
 
 EXTRACT_SPAN("${VK}" "static qboolean vk_shadow_register_pipeline_layout_abis( void )"
 	"vk_shadow_alloc_resources" ABI)
+EXTRACT_SPAN("${VK}" "static qboolean vk_shadow_refresh_buffer_group("
+	"static qboolean vk_shadow_register_pipeline_layout_abis( void )" MVP_HELPER)
 EXTRACT_SPAN("${VK}" "void vk_render_shadow_map( void )"
 	"vk_render_dlight_shadow —" CSM)
 EXTRACT_SPAN("${VK}" "void vk_render_dlight_shadow( void )"
@@ -56,6 +58,8 @@ EXTRACT_SPAN("${VK}" "static void vk_shadow_release_resources( void )"
 
 FORBID_TEXT("${VK}" "qvkCmdBindDescriptorSets" "renderer shadow/native bind ownership")
 FORBID_TEXT("${VK}" "vkCmdBindDescriptorSets" "renderer shadow/native entry-point ownership")
+FORBID_TEXT("${VK}${VK_H}" "shadowMap.descriptor"
+	"retired standalone shadow sampler descriptor")
 
 FOREACH(NEEDLE IN ITEMS
 	"ral_shadowEntMatDesc"
@@ -84,12 +88,54 @@ FOREACH(NEEDLE IN ITEMS
 	"vk.shadowMap.ral_bgl_entmat = Ral_AdoptBindGroupLayout("
 	"vk.shadowMap.ral_bgl_cascademvp = Ral_AdoptBindGroupLayout("
 	"vk.shadowMap.ral_bgl_bones = Ral_AdoptBindGroupLayout("
-	"Ral_RegisterAdoptedBindGroupDynamicBuffer("
 	"vk_ral_register_buffer( vk.shadowMap.cascadeMvpBuf[ci], cmBytes"
 	"vk_ral_register_buffer( vk.shadowMap.boneBuf[bi], ringBytes"
 	"vk_ral_register_buffer( vk.dlightShadow.faceMvpBuf[i], mvpSz"
+	"vk_ral_register_buffer( vk.dlightShadow.entMatBuf[i], 64u"
 	"vk_shadow_descriptor_pool_invalidate();")
 	REQUIRE_TEXT("${VK}" "${NEEDLE}" "shadow retained lifecycle")
+ENDFOREACH()
+REQUIRE_TEXT("${VK}" "vk_ral_unregister_buffer( vk.dlightShadow.entMatBuf[i] )"
+	"dlight entity buffer registry teardown")
+FORBID_TEXT("${VK}" "static qboolean vk_shadow_adopt_group("
+	"shadow bind-group adoption helper retirement")
+
+FOREACH(NEEDLE IN ITEMS
+	"Ral_GetBufferHandle( buffer ) != (void *)nativeBuffer"
+	"bufferRange > Ral_GetBufferSize( buffer )"
+	"type != RAL_BIND_UNIFORM_BUFFER"
+	"type != RAL_BIND_STORAGE_BUFFER"
+	"value.type = type;"
+	"value.bufferRange = bufferRange;"
+	"createInfo.arena = vk.ral_descriptor_arena;"
+	"createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;"
+	"candidate = Ral_CreateBindGroup( vk_ral_get_backend(), &createInfo );"
+	"*nativeMirror = (VkDescriptorSet)Ral_GetBindGroupHandle( candidate );")
+	REQUIRE_TEXT("${MVP_HELPER}" "${NEEDLE}" "shadow arena-owned MVP helper")
+ENDFOREACH()
+FOREACH(RETIRED IN ITEMS Ral_AdoptBindGroup Ral_RegisterAdoptedBindGroupDynamicBuffer)
+	FORBID_TEXT("${MVP_HELPER}" "${RETIRED}" "shadow MVP adoption fallback")
+ENDFOREACH()
+FOREACH(RETIRED IN ITEMS
+	"qvkAllocateDescriptorSets( vk.device, &da, &vk.shadowMap.cascadeMvpDesc"
+	"qvkAllocateDescriptorSets( vk.device, &da, &vk.dlightShadow.faceMvpDesc"
+	"qvkAllocateDescriptorSets( vk.device, &dsAlloc, &vk.cmd->shadowEntMatDesc"
+	"qvkAllocateDescriptorSets( vk.device, &ba, &vk.shadowMap.boneDesc"
+	"qvkAllocateDescriptorSets( vk.device, &da, &vk.dlightShadow.entMatDesc")
+	FORBID_TEXT("${VK}" "${RETIRED}" "shadow MVP raw/adoption authority")
+ENDFOREACH()
+FOREACH(NEEDLE IN ITEMS
+	"vk_shadow_refresh_buffer_group(\n\t\t\t\t\t&vk.shadowMap.ral_cascadeMvpDesc[cmd0]"
+	"&vk.shadowMap.cascadeMvpDesc[cmd0]"
+	"vk_shadow_refresh_buffer_group(\n\t\t\t\t&vk.dlightShadow.ral_faceMvpDesc[vk.cmd_index]"
+	"&vk.dlightShadow.faceMvpDesc[vk.cmd_index]"
+	"vk_shadow_refresh_buffer_group( &vk.cmd->ral_shadowEntMatDesc"
+	"RAL_BIND_STORAGE_BUFFER, vk.cmd->shadowEntMatBuf"
+	"vk_shadow_refresh_buffer_group( &vk.shadowMap.ral_boneDesc[fi]"
+	"RAL_BIND_UNIFORM_BUFFER, vk.shadowMap.boneBuf[fi]"
+	"vk_shadow_refresh_buffer_group(\n\t\t\t\t&vk.dlightShadow.ral_entMatDesc[vk.cmd_index]"
+	"RAL_BIND_STORAGE_BUFFER,\n\t\t\t\tvk.dlightShadow.entMatBuf[vk.cmd_index], 64u")
+	REQUIRE_TEXT("${VK}" "${NEEDLE}" "shadow arena-owned MVP callsite")
 ENDFOREACH()
 
 REQUIRE_COUNT("${CSM}" "Ral_CmdBindBindGroupDynamicExact[(]" 8
@@ -145,4 +191,4 @@ FOREACH(NEEDLE IN ITEMS
 	REQUIRE_TEXT("${HOST}" "${NEEDLE}" "owned pipeline-layout lifecycle host")
 ENDFOREACH()
 
-MESSAGE(STATUS "RAL shadow exact bind-group policy: CSM 8 + dlight 2 callsites, retained lifecycle PASS")
+MESSAGE(STATUS "RAL shadow exact bind-group policy: arena-owned buffer cohorts + CSM 8 + dlight 2 callsites, retained lifecycle PASS")

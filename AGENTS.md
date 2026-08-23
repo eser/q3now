@@ -69,19 +69,15 @@ Engine state lives under `<home>/wired/<basegame>/` (e.g. `~/wired/base/`).
 
 ## GUI and native-test windows
 
-- **Never open a 4:3 (or narrower) window**, including smoke tests, hidden SDL
-  hosts, visual harnesses, and temporary diagnostics. Test status does not make
-  a non-widescreen window acceptable.
-- Game/renderer harnesses must set `r_fullscreen 0`, `r_mode -1`, and an
-  explicit widescreen `r_customwidth`/`r_customheight` before any `+exec` or
-  `+map`. Use `1280x720` by default (`960x540` is the cheap 16:9 profile).
-- Do not rely on archived cvars, a built-in `r_mode`, or failed-mode fallback.
-  Native SDL hosts must likewise validate their requested extent before the
-  window is published.
-- A harness that accepts an external client artifact must verify that the
-  artifact contains the hidden-until-validated widescreen runtime guard before
-  starting it. Explicit 16:9 arguments do not authorize launching a stale
-  binary that can still recover to 640x480.
+- Game/renderer harnesses should request an explicit modern window size before
+  any `+exec` or `+map`; use `1280x720` by default (`960x540` is the cheap
+  profile).
+- This is a harness default, not an engine restriction. `r_mode -1` and the
+  predefined mode table must continue to accept user-selected positive extents
+  of any aspect ratio, including legacy modes such as `640x480`.
+- Do not add runtime aspect-ratio rejection, minimum-window-size enforcement,
+  binary marker inspection, or hidden-before-show machinery solely to police
+  resolution choice.
 
 ## Migration & maintenance
 

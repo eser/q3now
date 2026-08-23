@@ -958,8 +958,12 @@ else
 _RUN_VM_ARGS := +set sv_pure 0 +set vm_game 0 +set vm_cgame 0
 endif
 
-# Compose command-line arguments
-_RUN_GAME_ARGS := $(_RUN_VM_ARGS)
+# Compose command-line arguments.  Every run-game consumer, including test
+# harnesses that append +map or +exec through MAP/EXTRA_ARGS, must establish
+# the window authority first.  Do not rely on archived cvars, desktop probing,
+# or a stale mode fallback: those have historically published 640x480.
+_RUN_GAME_ARGS := +set r_fullscreen 0 +set r_mode -1 +set r_customwidth 1280 +set r_customheight 720
+_RUN_GAME_ARGS += $(_RUN_VM_ARGS)
 ifeq ($(DEV),1)
 _RUN_GAME_ARGS += +set sv_cheats 1
 endif
@@ -1579,10 +1583,10 @@ test-fs-dedup: build $(SW3Z_BIN)
 # health/armor panels, the 9-entry weapon carousel, the telemetry row and the
 # ammo value all fall outside the frame entirely.
 #
-# W-103 (16:9 everywhere) governs the ENGINE and is unaffected. Reconciling the
-# 16:10 artboard with the 16:9 engine is an open design decision tracked in
-# TASK-70: render baselines at 1440x900 and scale the engine capture, fit the
-# harness with a transform, or re-author the artboard for 16:9.
+# The engine accepts user-selected aspect ratios. Reconciling the 16:10
+# artboard with the capture harness remains an open visual-test decision tracked
+# in TASK-70: scale the engine capture, fit the harness with a transform, or
+# re-author the artboard for a different target.
 # What matters mechanically is that baseline and impl share ONE resolution.
 
 ARTBOARD     ?= v1_monolith

@@ -12,6 +12,9 @@ file(READ "${ROOT}/code/renderervk/vk_bindless_cohort.c" COHORT)
 file(READ "${ROOT}/code/renderervk/vk_bindless_cohort.h" COHORT_ABI)
 file(READ "${ROOT}/tests/vk_bindless_cohort_test.c" COHORT_HOST)
 file(READ "${ROOT}/code/renderervk/tr_local.h" TR_LOCAL)
+file(READ "${ROOT}/code/renderer/ral/ral_resource.h" RAL_HEADER)
+file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_resource.c" RAL_VULKAN)
+file(READ "${ROOT}/tests/ral_vulkan_bind_group_arena_test.c" RAL_HOST)
 file(GLOB RENDERER_VK_C "${ROOT}/code/renderervk/*.c")
 
 function(require_text haystack needle label)
@@ -28,7 +31,8 @@ foreach(source IN LISTS RENDERER_VK_C)
 	endif()
 	file(READ "${source}" source_text)
 	foreach(writer IN ITEMS Ral_BindGroupSetTextureAt Ral_BindGroupSetTextureViewAt
-			Ral_BindGroupSetTextureViewsAt Ral_BindGroupSetSamplerAt)
+			Ral_BindGroupSetTextureViewAtBinding Ral_BindGroupSetTextureViewsAt
+			Ral_BindGroupSetSamplerAt)
 		string(FIND "${source_text}" "${writer}" escaped_writer)
 		if(NOT escaped_writer EQUAL -1)
 			message(FATAL_ERROR "global bindless writer escaped allowlisted TUs: ${source}: ${writer}")
@@ -40,6 +44,16 @@ foreach(source IN LISTS RENDERER_VK_C)
 	if(NOT escaped_raw_update EQUAL -1 AND
 			(NOT escaped_raw_binding0 EQUAL -1 OR NOT escaped_raw_binding2 EQUAL -1))
 		message(FATAL_ERROR "raw bindless writer escaped vk.c allowlist: ${source}")
+	endif()
+endforeach()
+
+# Shipping descriptor publication is RAL-only. Native descriptor writes belong
+# to the backend implementation, never to renderervk product code.
+foreach(source IN LISTS RENDERER_VK_C)
+	file(READ "${source}" product_source)
+	string(FIND "${product_source}" "qvkUpdateDescriptorSets(" raw_update)
+	if(NOT raw_update EQUAL -1)
+		message(FATAL_ERROR "raw descriptor update escaped RAL backend: ${source}")
 	endif()
 endforeach()
 
@@ -135,6 +149,30 @@ list(LENGTH sampler_writes sampler_count)
 if(NOT sampler_count EQUAL 1)
 	message(FATAL_ERROR "SamplerAt writer inventory drifted: ${sampler_count}")
 endif()
+foreach(needle IN ITEMS
+	"if ( !Ral_BindGroupSetTextureViewAt( s_ral_bindless_set, slot, view ) )"
+	"if ( !Ral_BindGroupSetTextureViewsAt( s_ral_bindless_set, slots, views, count ) )"
+	"if ( !Ral_BindGroupSetTextureAt( s_ral_bindless_set, slot, texture ) )"
+	"if ( !Ral_BindGroupSetSamplerAt( s_ral_bindless_set, slot, sampler ) )"
+	"if ( !Ral_BindGroupSetTextureAt( s_ral_bindless_set, slot, NULL ) )")
+	require_text("${TEXTURES}" "${needle}" "write-before-ledger failure gate")
+endforeach()
+foreach(needle IN ITEMS
+	"int Ral_BindGroupSetTextureAt("
+	"int Ral_BindGroupSetTextureViewAt("
+	"int Ral_BindGroupSetSamplerAt(")
+	require_text("${RAL_HEADER}${RAL_VULKAN}" "${needle}" "observable sparse-write result")
+endforeach()
+foreach(needle IN ITEMS
+	"if ( slot >= capacity ) return 0;"
+	"tex->backend != ( g ? g->backend : NULL )"
+	"view->backend != ( g ? g->backend : NULL )"
+	"s->backend != b || s->sampler == VK_NULL_HANDLE"
+	"!Ral_BindGroupSetTextureViewAt( &imageGroup, 4096u, NULL )"
+	"!Ral_BindGroupSetTextureAt( &imageGroup, 4096u, NULL )"
+	"!Ral_BindGroupSetSamplerAt( &imageGroup, 32u, NULL )")
+	require_text("${RAL_VULKAN}${RAL_HOST}" "${needle}" "sparse-write mutation gate")
+endforeach()
 string(REGEX MATCHALL "Ral_BindGroupSetSamplerAt[(]" vk_sampler_writes "${VK}")
 list(LENGTH vk_sampler_writes vk_sampler_count)
 if(NOT vk_sampler_count EQUAL 0)
@@ -154,11 +192,6 @@ require_text("${VK}" "vk_ral_bindless_tombstone(\n\t\t\t\t\tWIRED_BINDLESS_SCENE
 	"scene-depth falling-edge tombstone")
 
 # Binding 2 is a separate 2D-array cohort and must never enter binding-0 ledger.
-string(REGEX MATCHALL "imgWrite\.dstBinding[ \t]*=[ \t]*WIRED_BINDLESS_BIND_ARRAY_IMAGES" array_writes "${VK}")
-list(LENGTH array_writes array_write_count)
-if(NOT array_write_count EQUAL 1)
-	message(FATAL_ERROR "binding-2 2D-array writer allowlist drifted")
-endif()
 string(FIND "${VK}" "void vk_ral_register_image_array( image_t *image )" array_begin)
 string(FIND "${VK}" "static void vk_ral_register_screenmap_view" array_end)
 if(array_begin EQUAL -1 OR array_end EQUAL -1 OR NOT array_begin LESS array_end)
@@ -166,31 +199,23 @@ if(array_begin EQUAL -1 OR array_end EQUAL -1 OR NOT array_begin LESS array_end)
 endif()
 math(EXPR array_len "${array_end}-${array_begin}")
 string(SUBSTRING "${VK}" ${array_begin} ${array_len} ARRAY_FN)
-string(REGEX MATCHALL "imgWrite\.dstBinding[ \t]*=[ \t]*WIRED_BINDLESS_BIND_ARRAY_IMAGES" array_fn_writes "${ARRAY_FN}")
-list(LENGTH array_fn_writes array_fn_write_count)
-if(NOT array_fn_write_count EQUAL 1)
-	message(FATAL_ERROR "binding-2 writer escaped vk_ral_register_image_array")
-endif()
+require_text("${ARRAY_FN}"
+	"Ral_BindGroupSetTextureViewAtBinding( ralSet,\n\t\t\tWIRED_BINDLESS_BIND_ARRAY_IMAGES"
+	"binding-2 RAL publication")
 string(FIND "${ARRAY_FN}" "vk_ral_bindless_record_" array_ledger_pos)
 if(NOT array_ledger_pos EQUAL -1)
 	message(FATAL_ERROR "binding-2 writer must not enter the binding-0 ledger")
-endif()
-string(REGEX MATCHALL "imgWrite\.dstBinding[ \t]*=[ \t]*WIRED_BINDLESS_BIND_IMAGES" raw_image_writes "${VK}")
-list(LENGTH raw_image_writes raw_image_write_count)
-if(NOT raw_image_write_count EQUAL 4)
-	message(FATAL_ERROR "raw binding-0 writer inventory drifted: ${raw_image_write_count}")
 endif()
 foreach(needle IN ITEMS
 	"vk_ral_bindless_record_reserved( WIRED_BINDLESS_SCREENMAP_SLOT"
 	"vk_ral_bindless_record_reserved( WIRED_BINDLESS_SCENEDEPTH_SLOT"
 	"vk_ral_bindless_record_raw_image( tr.blackImage"
-	"vk_ral_bindless_record_raw_image( tr.whiteImage"
-	"vk_ral_bindless_record_legacy_exact( image")
-	require_text("${VK}" "${needle}" "raw binding-0 publication join")
+	"vk_ral_bindless_record_raw_image( tr.whiteImage")
+	require_text("${VK}" "${needle}" "reserved binding-0 publication join")
 endforeach()
 
-# Ordinary authoring is legacy combined descriptor -> exact sampler -> raw
-# binding-0 view -> LEGACY_EXACT receipt, all in one function.
+# Ordinary authoring is direct per-image group -> exact sampler -> exact RAL
+# binding-0 view publication, all in one function.
 string(FIND "${VK}" "void vk_update_descriptor_set( image_t *image, qboolean mipmap )" ordinary_begin)
 string(FIND "${VK}" "void vk_destroy_image_resources" ordinary_end)
 if(ordinary_begin EQUAL -1 OR ordinary_end EQUAL -1 OR NOT ordinary_begin LESS ordinary_end)
@@ -198,14 +223,34 @@ if(ordinary_begin EQUAL -1 OR ordinary_end EQUAL -1 OR NOT ordinary_begin LESS o
 endif()
 math(EXPR ordinary_len "${ordinary_end}-${ordinary_begin}")
 string(SUBSTRING "${VK}" ${ordinary_begin} ${ordinary_len} ORDINARY)
-string(FIND "${ORDINARY}" "qvkUpdateDescriptorSets( vk.device, 1, &descriptor_write" combined_pos)
+string(FIND "${ORDINARY}" "vk_ral_refresh_image_descriptor( image, nativeSampler )" combined_pos)
 string(FIND "${ORDINARY}" "vk_ral_bindless_publish_sampler" sampler_pos)
-string(FIND "${ORDINARY}" "qvkUpdateDescriptorSets( vk.device, 1, &imgWrite" image_pos)
-string(FIND "${ORDINARY}" "vk_ral_bindless_record_legacy_exact" receipt_pos)
+string(FIND "${ORDINARY}" "vk_ral_bindless_publish_texture_view( image" image_pos)
+string(FIND "${ORDINARY}" "VK_BINDLESS_PUBLICATION_LEGACY_EXACT" receipt_pos)
 if(combined_pos EQUAL -1 OR sampler_pos EQUAL -1 OR image_pos EQUAL -1 OR receipt_pos EQUAL -1
 		OR NOT combined_pos LESS sampler_pos OR NOT sampler_pos LESS image_pos OR NOT image_pos LESS receipt_pos)
 	message(FATAL_ERROR "ordinary combined/sampler/image/receipt order drifted")
 endif()
+foreach(needle IN ITEMS
+	"image->ralDescriptorView"
+	"Ral_GetTextureViewHandle( image->ralDescriptorView )"
+	"== (void *)image->view")
+	require_text("${ORDINARY}" "${needle}" "ordinary exact native-view join")
+endforeach()
+foreach(retired IN ITEMS qvkUpdateDescriptorSets VkWriteDescriptorSet VkDescriptorImageInfo
+	vk_ral_bindless_record_legacy_exact)
+	string(FIND "${ORDINARY}" "${retired}" retired_pos)
+	if(NOT retired_pos EQUAL -1)
+		message(FATAL_ERROR "ordinary publication regained raw/legacy authority: ${retired}")
+	endif()
+endforeach()
+foreach(needle IN ITEMS
+	"kind == VK_BINDLESS_PUBLICATION_LEGACY_EXACT"
+	"!image->descriptor || image->view == VK_NULL_HANDLE"
+	"image->ralDescriptorView != view"
+	"nativeView != (const void *)image->view")
+	require_text("${TEXTURES}" "${needle}" "LEGACY_EXACT view identity gate")
+endforeach()
 
 string(FIND "${VK}" "void vk_destroy_samplers( void )" sampler_destroy_begin)
 string(SUBSTRING "${VK}" ${sampler_destroy_begin} 700 SAMPLER_DESTROY)

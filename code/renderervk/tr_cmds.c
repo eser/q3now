@@ -13,6 +13,10 @@ static float re_last_outline[10]        = { -1.0f };  // outlineW, outlineColor[
 static float re_last_shadow[6]          = { -1.0f };  // offsetX, offsetY, color[4]
 static uint64_t re_temporal_batch_token;
 
+void RE_PresentationChanged( const refPresentationChange_t *change ) {
+	vk_request_presentation_change( change );
+}
+
 void R_TemporalCommandBatchReset( void ) {
 	re_temporal_batch_token++;
 	if ( !re_temporal_batch_token ) re_temporal_batch_token = 1u;
@@ -417,6 +421,8 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 	if ( !tr.registered ) {
 		return;
 	}
+	if ( stereoFrame == STEREO_LEFT || stereoFrame == STEREO_CENTER )
+		vk_apply_pending_presentation_change();
 
 	glState.finishCalled = qfalse;
 

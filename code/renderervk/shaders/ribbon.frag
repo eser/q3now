@@ -42,7 +42,12 @@ layout(set = 1, binding = 0, std140) uniform EffectsUBO {
 // at R_Init time and updated per-shader by
 // vk_register_primitive_shader_image. Every slot is initialized to
 // tr.whiteImage so unregistered handles render through identity.
-layout(set = 0, binding = 2) uniform sampler2D shaderImages[PRIMITIVE_SHADER_IMAGE_MAX];
+// WebGPU-facing ABI: the image array and its common sampler are separate.
+// Every ribbon/rail slot uses the same CLAMP sampler, so publishing 64 sampler
+// descriptors would add no semantics and would require a sampler binding array
+// on portable backends.
+layout(set = 0, binding = 2) uniform texture2D shaderImages[PRIMITIVE_SHADER_IMAGE_MAX];
+layout(set = 0, binding = 3) uniform sampler shaderImageSampler;
 
 layout(location = 0) in vec2 fragUV;
 layout(location = 1) in vec4 fragColor;
@@ -95,7 +100,8 @@ void main() {
 	// Out-of-range handles clamp to slot 0 (tr.whiteImage) — keeps
 	// the shader robust against handles that exceed the registry size.
 	uint slot = handle < uint(PRIMITIVE_SHADER_IMAGE_MAX) ? handle : 0u;
-	vec4 texel = sampleColorTexBindless( texture( shaderImages[slot], fragUV ), domain );
+	vec4 texel = sampleColorTexBindless(
+		texture( sampler2D( shaderImages[slot], shaderImageSampler ), fragUV ), domain );
 
 	// Per-vertex colour decoded to linear (display
 	// domain); texel decoded per its colour domain. The rgb/a-separated

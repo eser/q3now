@@ -20,6 +20,15 @@ static VkClearAttachment capturedClearAttachment;
 static VkClearRect capturedClearRect;
 static uint32_t destroyPipelineLayoutCalls;
 static VkPipelineLayout capturedDestroyedPipelineLayout;
+static uint32_t createPipelineLayoutCalls, capturedLayoutCount,
+	capturedPushRangeCount;
+static VkDescriptorSetLayout capturedLayouts[ RAL_MAX_PIPELINE_BIND_GROUP_LAYOUTS ];
+static VkPushConstantRange capturedPushRange;
+static VkResult createPipelineLayoutResult = VK_SUCCESS;
+static VkPipelineLayout createPipelineLayoutHandle;
+static uint32_t createShaderModuleCalls, destroyShaderModuleCalls,
+	createGraphicsPipelineCalls, destroyPipelineCalls;
+static VkPipelineLayout capturedGraphicsPipelineLayout;
 
 static VKAPI_ATTR VkResult VKAPI_CALL CaptureBeginCommandBuffer(
 		VkCommandBuffer commandBuffer, const VkCommandBufferBeginInfo *beginInfo ) {
@@ -94,6 +103,72 @@ static VKAPI_ATTR void VKAPI_CALL CaptureDestroyPipelineLayout(
 	capturedDestroyedPipelineLayout = layout;
 }
 
+static VKAPI_ATTR VkResult VKAPI_CALL CaptureCreatePipelineLayout(
+		VkDevice device, const VkPipelineLayoutCreateInfo *createInfo,
+		const VkAllocationCallbacks *allocator, VkPipelineLayout *layout ) {
+	uint32_t i;
+	(void)device; (void)allocator;
+	createPipelineLayoutCalls++;
+	capturedLayoutCount = createInfo ? createInfo->setLayoutCount : 0u;
+	for ( i = 0u; createInfo && i < createInfo->setLayoutCount
+			&& i < RAL_MAX_PIPELINE_BIND_GROUP_LAYOUTS; ++i )
+		capturedLayouts[i] = createInfo->pSetLayouts[i];
+	capturedPushRangeCount = createInfo ? createInfo->pushConstantRangeCount : 0u;
+	memset( &capturedPushRange, 0, sizeof( capturedPushRange ) );
+	if ( createInfo && createInfo->pushConstantRangeCount > 0u )
+		capturedPushRange = createInfo->pPushConstantRanges[0];
+	*layout = createPipelineLayoutHandle;
+	return createPipelineLayoutResult;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL CaptureCreateShaderModule(
+		VkDevice device, const VkShaderModuleCreateInfo *createInfo,
+		const VkAllocationCallbacks *allocator, VkShaderModule *module ) {
+	(void)device; (void)allocator;
+	createShaderModuleCalls++;
+	if ( !createInfo || !createInfo->pCode || createInfo->codeSize == 0u )
+		return VK_ERROR_INITIALIZATION_FAILED;
+	*module = (VkShaderModule)(uintptr_t)( 0x90u + createShaderModuleCalls );
+	return VK_SUCCESS;
+}
+
+static VKAPI_ATTR void VKAPI_CALL CaptureDestroyShaderModule(
+		VkDevice device, VkShaderModule module,
+		const VkAllocationCallbacks *allocator ) {
+	(void)device; (void)module; (void)allocator;
+	destroyShaderModuleCalls++;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL CaptureCreateGraphicsPipelines(
+		VkDevice device, VkPipelineCache cache, uint32_t count,
+		const VkGraphicsPipelineCreateInfo *createInfos,
+		const VkAllocationCallbacks *allocator, VkPipeline *pipelines ) {
+	(void)device; (void)cache; (void)allocator;
+	createGraphicsPipelineCalls++;
+	if ( count != 1u || !createInfos || !pipelines )
+		return VK_ERROR_INITIALIZATION_FAILED;
+	capturedGraphicsPipelineLayout = createInfos[0].layout;
+	pipelines[0] = (VkPipeline)(uintptr_t)0x99u;
+	return VK_SUCCESS;
+}
+
+static VKAPI_ATTR void VKAPI_CALL CaptureDestroyPipeline(
+		VkDevice device, VkPipeline pipeline,
+		const VkAllocationCallbacks *allocator ) {
+	(void)device; (void)pipeline; (void)allocator;
+	destroyPipelineCalls++;
+}
+
+static void ResetPipelineLayoutCapture( void ) {
+	createPipelineLayoutCalls = capturedLayoutCount = capturedPushRangeCount = 0u;
+	destroyPipelineLayoutCalls = 0u;
+	capturedDestroyedPipelineLayout = VK_NULL_HANDLE;
+	memset( capturedLayouts, 0, sizeof( capturedLayouts ) );
+	memset( &capturedPushRange, 0, sizeof( capturedPushRange ) );
+	createPipelineLayoutResult = VK_SUCCESS;
+	createPipelineLayoutHandle = VK_NULL_HANDLE;
+}
+
 int main( void ) {
 	ralBackend_t backend, otherBackend;
 	ralCommandBuffer_t command;
@@ -111,7 +186,14 @@ int main( void ) {
 	ralBindGroup_t *adoptedGroup;
 	ralPipelineLayout_t *pushLayout;
 	ralPipelineLayout_t *ownedLayout;
+	ralPipelineLayout_t *portableLayout, *portablePushLayout;
 	ralPipelineLayout_t otherPushLayout;
+	ralBindGroupLayout_t portableLayouts[2], foreignPortableLayout;
+	const ralBindGroupLayout_t *portableLayoutVector[2];
+	ralPipelineLayoutCreateInfo_t pipelineLayoutInfo;
+	ralGraphicsPipelineCreateInfo_t graphicsInfo;
+	ralPipeline_t *portablePipeline;
+	uint32_t dummySpirv = 0x07230203u;
 	ralBuffer_t *adoptedBuffer;
 	ralBufferCreateInfo_t adoptedBufferInfo;
 	ralCommandReceipt_t commandRecording;
@@ -126,8 +208,14 @@ int main( void ) {
 	backend.vk.CmdPushConstants = CapturePushConstants;
 	backend.vk.CmdClearAttachments = CaptureClearAttachments;
 	backend.vk.DestroyPipelineLayout = CaptureDestroyPipelineLayout;
+	backend.vk.CreatePipelineLayout = CaptureCreatePipelineLayout;
+	backend.vk.CreateShaderModule = CaptureCreateShaderModule;
+	backend.vk.DestroyShaderModule = CaptureDestroyShaderModule;
+	backend.vk.CreateGraphicsPipelines = CaptureCreateGraphicsPipelines;
+	backend.vk.DestroyPipeline = CaptureDestroyPipeline;
 	backend.vk.BeginCommandBuffer = CaptureBeginCommandBuffer;
 	backend.device = (VkDevice)(uintptr_t)0x09u;
+	backend.caps.maxBindGroups = 4u;
 	memset( &pipeline, 0, sizeof( pipeline ) );
 	pipeline.backend = &backend;
 	pipeline.layout = (VkPipelineLayout)(uintptr_t)0x20u;
@@ -403,6 +491,119 @@ int main( void ) {
 	Ral_DestroyPipelineLayout( ownedLayout );
 	CHECK( destroyPipelineLayoutCalls == 1u
 		&& capturedDestroyedPipelineLayout == (VkPipelineLayout)(uintptr_t)0x71u );
+
+	// Standalone portable pipeline layouts publish the exact ordered group
+	// vector and optional offset-zero push range. Graphics pipelines that reuse
+	// such a layout inherit its group ABI automatically, so exact dynamic binds
+	// do not need a renderer-side native registration escape hatch.
+	memset( portableLayouts, 0, sizeof( portableLayouts ) );
+	portableLayouts[0].backend = portableLayouts[1].backend = &backend;
+	portableLayouts[0].layout = (VkDescriptorSetLayout)(uintptr_t)0x80u;
+	portableLayouts[1].layout = (VkDescriptorSetLayout)(uintptr_t)0x81u;
+	portableLayoutVector[0] = &portableLayouts[0];
+	portableLayoutVector[1] = &portableLayouts[1];
+	memset( &foreignPortableLayout, 0, sizeof( foreignPortableLayout ) );
+	foreignPortableLayout.backend = &otherBackend;
+	foreignPortableLayout.layout = (VkDescriptorSetLayout)(uintptr_t)0x82u;
+	memset( &pipelineLayoutInfo, 0, sizeof( pipelineLayoutInfo ) );
+	pipelineLayoutInfo.bindGroupLayouts = portableLayoutVector;
+	pipelineLayoutInfo.numBindGroupLayouts = 2u;
+	pipelineLayoutInfo.debugName = "portable-effect-layout";
+	ResetPipelineLayoutCapture();
+	createPipelineLayoutHandle = (VkPipelineLayout)(uintptr_t)0x72u;
+	portableLayout = Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo );
+	CHECK( portableLayout != NULL && portableLayout->ownsHandle
+		&& portableLayout->portableShapeKnown
+		&& portableLayout->numBindGroupLayouts == 2u
+		&& portableLayout->bindGroupLayouts[0] == portableLayouts[0].layout
+		&& portableLayout->bindGroupLayouts[1] == portableLayouts[1].layout
+		&& Ral_GetPipelineLayoutHandle( portableLayout )
+			== (void *)(uintptr_t)0x72u );
+	CHECK( createPipelineLayoutCalls == 1u && capturedLayoutCount == 2u
+		&& capturedLayouts[0] == portableLayouts[0].layout
+		&& capturedLayouts[1] == portableLayouts[1].layout
+		&& capturedPushRangeCount == 0u );
+
+	memset( &graphicsInfo, 0, sizeof( graphicsInfo ) );
+	graphicsInfo.vertexSpirv = &dummySpirv;
+	graphicsInfo.vertexSpirvSize = sizeof( dummySpirv );
+	graphicsInfo.fragmentSpirv = &dummySpirv;
+	graphicsInfo.fragmentSpirvSize = sizeof( dummySpirv );
+	graphicsInfo.sampleCount = 1u;
+	graphicsInfo.externalLayout = portableLayout;
+	createGraphicsPipelineCalls = createShaderModuleCalls = destroyShaderModuleCalls = 0u;
+	destroyPipelineCalls = 0u;
+	graphicsInfo.pushConstantSize = 4u;
+	graphicsInfo.pushConstantStages = RAL_STAGE_FRAGMENT;
+	CHECK( Ral_CreateGraphicsPipeline( &backend, &graphicsInfo ) == NULL );
+	CHECK( createGraphicsPipelineCalls == 0u && createShaderModuleCalls == 0u );
+	graphicsInfo.pushConstantSize = 0u;
+	graphicsInfo.pushConstantStages = 0u;
+	graphicsInfo.bindGroupLayouts = portableLayoutVector;
+	graphicsInfo.numBindGroupLayouts = 2u;
+	portableLayoutVector[1] = &foreignPortableLayout;
+	CHECK( Ral_CreateGraphicsPipeline( &backend, &graphicsInfo ) == NULL );
+	CHECK( createGraphicsPipelineCalls == 0u && createShaderModuleCalls == 0u );
+	portableLayoutVector[1] = &portableLayouts[1];
+	graphicsInfo.bindGroupLayouts = NULL;
+	graphicsInfo.numBindGroupLayouts = 0u;
+	portablePipeline = Ral_CreateGraphicsPipeline( &backend, &graphicsInfo );
+	CHECK( portablePipeline != NULL && createGraphicsPipelineCalls == 1u
+		&& createShaderModuleCalls == 2u && destroyShaderModuleCalls == 2u
+		&& capturedGraphicsPipelineLayout == portableLayout->vkHandle
+		&& portablePipeline->bindGroupLayoutsRegistered
+		&& portablePipeline->numSetLayouts == 2u
+		&& portablePipeline->setLayouts[0] == portableLayouts[0].layout
+		&& portablePipeline->setLayouts[1] == portableLayouts[1].layout );
+	Ral_DestroyPipeline( portablePipeline );
+	CHECK( destroyPipelineCalls == 1u );
+	Ral_DestroyPipelineLayout( portableLayout );
+	CHECK( destroyPipelineLayoutCalls == 1u
+		&& capturedDestroyedPipelineLayout == (VkPipelineLayout)(uintptr_t)0x72u );
+
+	ResetPipelineLayoutCapture();
+	pipelineLayoutInfo.pushConstantSize = 32u;
+	pipelineLayoutInfo.pushConstantStages = RAL_STAGE_FRAGMENT;
+	createPipelineLayoutHandle = (VkPipelineLayout)(uintptr_t)0x73u;
+	portablePushLayout = Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo );
+	CHECK( portablePushLayout != NULL && capturedPushRangeCount == 1u
+		&& capturedPushRange.stageFlags == VK_SHADER_STAGE_FRAGMENT_BIT
+		&& capturedPushRange.offset == 0u && capturedPushRange.size == 32u
+		&& portablePushLayout->externalPushRangeCount == 1u
+		&& portablePushLayout->externalPushRanges[0].stageFlags == RAL_STAGE_FRAGMENT );
+	Ral_DestroyPipelineLayout( portablePushLayout );
+	CHECK( destroyPipelineLayoutCalls == 1u );
+
+	// Invalid portable declarations and a backend failure that writes a
+	// candidate handle reject output-atomically. The latter candidate is still
+	// destroyed exactly once.
+	ResetPipelineLayoutCapture();
+	portableLayoutVector[1] = &foreignPortableLayout;
+	CHECK( Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo ) == NULL );
+	portableLayoutVector[1] = &portableLayouts[1];
+	pipelineLayoutInfo.numBindGroupLayouts = 5u;
+	CHECK( Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo ) == NULL );
+	pipelineLayoutInfo.numBindGroupLayouts = RAL_MAX_PIPELINE_BIND_GROUP_LAYOUTS + 1u;
+	CHECK( Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo ) == NULL );
+	pipelineLayoutInfo.numBindGroupLayouts = 2u;
+	pipelineLayoutInfo.pushConstantStages = 0u;
+	CHECK( Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo ) == NULL );
+	pipelineLayoutInfo.pushConstantStages = RAL_STAGE_FRAGMENT;
+	pipelineLayoutInfo.pushConstantSize = 30u;
+	CHECK( Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo ) == NULL );
+	pipelineLayoutInfo.pushConstantSize = 32u;
+	pipelineLayoutInfo.pushConstantStages = 1u << 7;
+	CHECK( Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo ) == NULL );
+	pipelineLayoutInfo.pushConstantStages = RAL_STAGE_FRAGMENT;
+	pipelineLayoutInfo.pushConstantSize = 132u;
+	CHECK( Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo ) == NULL );
+	CHECK( createPipelineLayoutCalls == 0u && destroyPipelineLayoutCalls == 0u );
+	pipelineLayoutInfo.pushConstantSize = 32u;
+	createPipelineLayoutResult = VK_ERROR_OUT_OF_HOST_MEMORY;
+	createPipelineLayoutHandle = (VkPipelineLayout)(uintptr_t)0x74u;
+	CHECK( Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo ) == NULL );
+	CHECK( createPipelineLayoutCalls == 1u && destroyPipelineLayoutCalls == 1u
+		&& capturedDestroyedPipelineLayout == (VkPipelineLayout)(uintptr_t)0x74u );
 	ResetPushCapture();
 	command.currentPipeline = &pipeline;
 

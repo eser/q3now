@@ -247,16 +247,6 @@ typedef struct {
 	ralExtentVk3D_t             extent;
 } ralImageCopy_t;
 
-// Buffer → image (or image → buffer) copy region. Same layout as VkBufferImageCopy.
-typedef struct {
-	uint64_t                    bufferOffset;
-	uint32_t                    bufferRowLength;
-	uint32_t                    bufferImageHeight;
-	ralImageSubresourceLayers_t imageSubresource;
-	ralOffset3D_t               imageOffset;
-	ralExtentVk3D_t             imageExtent;
-} ralBufferImageCopy_t;
-
 // Image blit region. Same layout as VkImageBlit (srcOffsets[2] + dstOffsets[2]).
 typedef struct {
 	ralImageSubresourceLayers_t srcSubresource;
@@ -397,6 +387,13 @@ typedef struct {
 	// depth-stencil resources must select DEPTH or STENCIL explicitly.
 	ralTextureAspectFlags_t aspects;
 	ralRect_t imageRect;     // x/y/width/height of the destination texel region
+	// Appended zero-default fields preserve existing initializers while mapping
+	// the complete GPUImageCopyTexture / GPUExtent3D vocabulary. A zero count or
+	// depth means one. Non-3D textures use array layers and require z=0/depth=1;
+	// 3D textures use z/depth and require arrayLayer=0/arrayLayerCount=1.
+	uint32_t  arrayLayerCount;
+	uint32_t  imageZ;
+	uint32_t  imageDepth;
 } ralBufferTextureCopy_t;
 
 // Exact form returns whether one copy command was emitted. It validates the
@@ -405,6 +402,14 @@ typedef struct {
 qboolean Ral_CmdCopyBufferExact( ralCommandBuffer_t *cb, ralBuffer_t *src,
 	                          ralBuffer_t *dst, const ralBufferCopy_t *region );
 void Ral_CmdCopyBuffer          ( ralCommandBuffer_t *cb, ralBuffer_t *src, ralBuffer_t *dst, const ralBufferCopy_t *region );
+// Validate the complete batch before emitting one native copy command. This
+// is the portable upload primitive: regions express texel/block layout rather
+// than VkBufferImageCopy, and zero row pitches select backend-managed tightly
+// packed input. No region is emitted when any member is invalid.
+qboolean Ral_CmdCopyBufferToTextureRegionsExact( ralCommandBuffer_t *cb,
+											  ralBuffer_t *src, ralTexture_t *dst,
+											  uint32_t regionCount,
+											  const ralBufferTextureCopy_t *regions );
 void Ral_CmdCopyBufferToTexture ( ralCommandBuffer_t *cb, ralBuffer_t *src, ralTexture_t *dst, const ralBufferTextureCopy_t *region );
 // Readback path — caller must first transition `src` to TRANSFER_SRC_OPTIMAL
 // via a barrier op (the RAL test does this directly today; the renderer
@@ -552,11 +557,10 @@ ralResult_t Ral_PrepareSwapchainImageForPresent( ralCommandBuffer_t *cb,
 	                                             ralSwapchain_t *swapchain,
 	                                             uint32_t imageIndex );
 
-// Image-to-image / blit / buffer-to-image multi-region transfers.
+// Image-to-image / blit transfers. Buffer-to-texture copies use the portable
+// ralBufferTextureCopy_t exact batch above, never a Vk-layout alias.
 void Ral_CmdCopyImage         ( ralCommandBuffer_t *cb, ralTexture_t *src, ralTexture_t *dst,
                                 uint32_t regionCount, const ralImageCopy_t *regions );
-void Ral_CmdCopyBufferToImage ( ralCommandBuffer_t *cb, ralBuffer_t *src, ralTexture_t *dst,
-                                uint32_t regionCount, const ralBufferImageCopy_t *regions );
 void Ral_CmdBlitImage         ( ralCommandBuffer_t *cb, ralTexture_t *src, ralTexture_t *dst,
                                 uint32_t regionCount, const ralImageBlit_t *regions,
                                 ralFilter_t filter );

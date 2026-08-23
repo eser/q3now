@@ -1140,6 +1140,20 @@ void HandleEvents( void )
 	{
 		switch( e.type )
 		{
+			case SDL_EVENT_DISPLAY_ADDED:
+			case SDL_EVENT_DISPLAY_REMOVED:
+			case SDL_EVENT_DISPLAY_MOVED:
+			case SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED:
+			case SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED:
+			case SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED:
+				GLimp_DisplayCatalogMarkDirty( GLIMP_DISPLAY_DIRTY_TOPOLOGY );
+				break;
+
+			case SDL_EVENT_DISPLAY_CONTENT_SCALE_CHANGED:
+				GLimp_DisplayCatalogMarkDirty( GLIMP_DISPLAY_DIRTY_TOPOLOGY
+					| GLIMP_DISPLAY_DIRTY_SCALE );
+				break;
+
 			// SDL3: SDL_KEYDOWN → SDL_EVENT_KEY_DOWN
 			case SDL_EVENT_KEY_DOWN:
 				if ( e.key.repeat && Key_GetCatcher() == 0 )
@@ -1335,10 +1349,34 @@ void HandleEvents( void )
 			//
 
 			case SDL_EVENT_WINDOW_MOVED:
+				GLimp_DisplayCatalogMarkDirty( GLIMP_DISPLAY_DIRTY_ACTIVE_OUTPUT );
 				if ( gw_active && !gw_minimized && !glw_state.isFullscreen ) {
 					Cvar_SetIntegerValue( "vid_xpos", e.window.data1 );
 					Cvar_SetIntegerValue( "vid_ypos", e.window.data2 );
 				}
+				break;
+
+			case SDL_EVENT_WINDOW_RESIZED:
+			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+			case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+				GLimp_DisplayCatalogMarkDirty( GLIMP_DISPLAY_DIRTY_ACTIVE_OUTPUT
+					| GLIMP_DISPLAY_DIRTY_EXTENT );
+				break;
+
+			case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+				GLimp_DisplayCatalogMarkDirty( GLIMP_DISPLAY_DIRTY_ACTIVE_OUTPUT
+					| GLIMP_DISPLAY_DIRTY_SCALE );
+				break;
+
+			case SDL_EVENT_WINDOW_ICCPROF_CHANGED:
+			case SDL_EVENT_WINDOW_HDR_STATE_CHANGED:
+				GLimp_DisplayCatalogMarkDirty( GLIMP_DISPLAY_DIRTY_COLOR );
+				break;
+
+			case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+			case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+				GLimp_DisplayCatalogMarkDirty( GLIMP_DISPLAY_DIRTY_FULLSCREEN
+					| GLIMP_DISPLAY_DIRTY_ACTIVE_OUTPUT );
 				break;
 
 			// window states:
@@ -1398,6 +1436,9 @@ void HandleEvents( void )
 				break;
 		}
 	}
+
+	/* One snapshot per polled event burst; individual events never rebuild. */
+	GLimp_DisplayCatalogReconcile();
 }
 
 
