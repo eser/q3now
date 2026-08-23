@@ -687,7 +687,7 @@ WD="$(dirname "$HEADLESS")"
 # Pack discovery mirrors the sibling headless gates: pax21 is build-produced,
 # pax01 carries the BSPs and comes from the launcher asset pipeline.
 PACK=""
-for candidate in "$WD" "$WD/../Resources" "$REPO_ROOT/build/release" "$REPO_ROOT/build/debug"; do
+for candidate in "$WD" "$WD/../Resources" "$REPO_ROOT/build"; do
     [ -f "$candidate/base/pax21.sw3z" ] && PACK="$(cd "$candidate" && pwd)" && break
 done
 [ -n "$PACK" ] || { echo "SKIP: current pax21 unavailable"; exit 77; }

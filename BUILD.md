@@ -34,7 +34,7 @@ Wired uses CMake as its build system, and **clang is the only compiler family ac
 make
 ```
 
-This wraps `cmake` + `ninja` and produces `wired.x64.exe` and `wired-headless.x64.exe` in `build/release/` along with renderer DLLs and game modules. Copy resulting binaries from the created `build` directory. This path is not the one CI seals — if your results differ from a release build, reproduce with the cross container before filing.
+This wraps `cmake` + `ninja` and produces `wired.x64.exe` and `wired-headless.x64.exe` in `build/` along with renderer DLLs and game modules. Copy resulting binaries from the created `build` directory. This path is not the one CI seals — if your results differ from a release build, reproduce with the cross container before filing.
 
 **Platform backend:** the window/input/surface backend is SDL3 (`code/sdl`) on every platform; SDL3 is a required build dependency. Audio is handled by miniaudio across all platforms.
 
@@ -171,18 +171,18 @@ make
 `make` wraps `cmake` + `ninja`. Invoking CMake directly is also supported via presets — `cmake --preset release && cmake --build --preset release` — which carry the same configuration `make` uses (a bare `cmake -B build` does **not**: it would silently configure without WASM). On macOS CMake assembles a single product bundle rather than loose binaries:
 
 ```
-build/release/q3now-preview.arm64.app/Contents/MacOS/{wired.arm64, wired-headless.arm64}
-build/release/wired_{opengl,vulkan}_arm64.dylib
-build/release/base/pax21.sw3z
+build/q3now-preview.arm64.app/Contents/MacOS/{wired.arm64, wired-headless.arm64}
+build/wired_{opengl,vulkan}_arm64.dylib
+build/base/pax21.sw3z
 ```
 
 **Verifying the build actually succeeded.** `make`'s exit status is not a reliable health signal — a failing `ninja` sub-command can still leave a zero exit at the top of a pipeline. Check for the artefacts instead:
 
 ```
-test -x build/release/q3now-preview.arm64.app/Contents/MacOS/wired.arm64 && echo OK
+test -x build/q3now-preview.arm64.app/Contents/MacOS/wired.arm64 && echo OK
 ```
 
-To collect *all* compile errors rather than stopping at the first, run `ninja -k 0` inside `build/release/`.
+To collect *all* compile errors rather than stopping at the first, run `ninja -k 0` inside `build/`.
 
 **Per-user state.** Config, screenshots and the `qconsole.jsonl` structured log live under `~/wired/<PRODUCT_NAME><CHANNEL_SUFFIX>/` — by default `~/wired/q3now-preview/`. The names come from `PRODUCT_NAME` / `CHANNEL_SUFFIX` at the top of `CMakeLists.txt`.
 

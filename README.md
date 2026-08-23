@@ -175,7 +175,7 @@ git submodule update --init --recursive
 | Command                    | What it does                                                   |
 |----------------------------|----------------------------------------------------------------|
 | `make`                     | Configure + build Release (native + VM modules)                |
-| `make build-debug`         | Configure + build Debug                                        |
+| `make build DEV=1`         | Reconfigure the shared build tree + build Debug                    |
 | `make create-launcher`     | Build the Go/Wails launcher                                    |
 | `make create-packs`        | Package modfiles/ + VM modules into mod pack                   |
 | `make run-launcher`        | Build + assemble + codesign + open launcher                    |

@@ -15,7 +15,7 @@
             "inherits": "base",
             "displayName": "Release",
             "description": "Matches `make` / `make build`: Ninja + Release + WASM modules. Product/channel identity defaults to q3now/-preview from CMakeLists; the Makefile passes them explicitly, so keep the two in step if defaults ever change.",
-            "binaryDir": "${sourceDir}/build/release",
+            "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
             }
@@ -24,8 +24,8 @@
             "name": "debug",
             "inherits": "base",
             "displayName": "Debug",
-            "description": "Matches `make build-debug`.",
-            "binaryDir": "${sourceDir}/build/debug",
+            "description": "Matches `make build DEV=1`; reconfigures the shared build tree.",
+            "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug"
             }

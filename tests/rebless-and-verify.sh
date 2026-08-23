@@ -10,7 +10,7 @@ set -u
 # delegating to smoke-map-transition.sh, which runs in its own isolated
 # home — so there is no reason for the deletion to land in the player's.
 PRODUCT_DIR="${PRODUCT_DIR:-$( wired_isolated_home rebless-and-verify-home )}"
-WIRED="build/debug/wired.x64.exe"
+WIRED="build/wired.x64.exe"
 
 echo "==== STEP 1: re-bless goldens (SMOKE_UPDATE_GOLDEN=1, cold cache) ===="
 rm -f "$PRODUCT_DIR/base/pipelinecache_v1_vulkan.bin"

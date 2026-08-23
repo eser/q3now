@@ -28,7 +28,7 @@
 #
 # Usage:
 #   WIRED_CONTENT_ROOT=/path/to/content \
-#     tests/fps-perf-gate.sh --engine build/release/wired.arm64 [--map arena1] [--bots 6] [--tag head]
+#     tests/fps-perf-gate.sh --engine build/wired.arm64 [--map arena1] [--bots 6] [--tag head]
 #
 # Re-run it on any build to compare; the before/after regression answer just
 # needs the same script run against a second (pre-regression) build.

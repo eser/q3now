@@ -191,8 +191,8 @@ WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")";WD="$(dirname "$
 find_required(){ local name="$1" candidate;shift;for candidate in "$@";do [ -f "$candidate/$name" ] && { printf '%s\n' "$candidate/$name";return 0;};done;return 1;}
 RENDERER="${WIRED_RENDERER:-}"
 [ -f "$RENDERER" ] || RENDERER="$(find_required wired_vulkan_arm64.dylib "$WD" "$WD/Contents/MacOS" "$WD/q3now-preview.arm64.app/Contents/MacOS")" || { echo "SKIP: current Vulkan renderer unavailable";exit 77; }
-GAMECL="${WIRED_GAMECL:-}";[ -f "$GAMECL" ] || GAMECL="$(find_required gameclarm64.dylib "$WD/base" "$WD/debug/base" "$WD/release/base" "$WD/Debug/base" "$WD/Release/base")" || { echo "SKIP: current gameclarm64.dylib unavailable";exit 77; }
-GAMESV="${WIRED_GAMESV:-}";[ -f "$GAMESV" ] || GAMESV="$(find_required gamesvarm64.dylib "$WD/base" "$WD/debug/base" "$WD/release/base" "$WD/Debug/base" "$WD/Release/base")" || { echo "SKIP: current gamesvarm64.dylib unavailable";exit 77; }
+GAMECL="${WIRED_GAMECL:-}";[ -f "$GAMECL" ] || GAMECL="$(find_required gameclarm64.dylib "$WD/base")" || { echo "SKIP: current gameclarm64.dylib unavailable";exit 77; }
+GAMESV="${WIRED_GAMESV:-}";[ -f "$GAMESV" ] || GAMESV="$(find_required gamesvarm64.dylib "$WD/base")" || { echo "SKIP: current gamesvarm64.dylib unavailable";exit 77; }
 MOLTEN="$(find_required libMoltenVK.dylib "$WD" "$WD/Contents/MacOS" /opt/homebrew/opt/molten-vk/lib /usr/local/lib)" || { echo "SKIP: current MoltenVK unavailable";exit 77; }
 CONTENT="${WIRED_CONTENT_ROOT:-$HOME/wired/q3now-preview}";[ -f "$CONTENT/base/pax21.sw3z" ] || { echo "SKIP: set WIRED_CONTENT_ROOT to a current content root";exit 77; }
 BASE="";for candidate in "$CONTENT/base/pax01.sw3z" "$CONTENT/base/pak0.pk3" "$HOME/wired/q3now-preview/base/pax01.sw3z" "$HOME/wired/q3now-preview/base/pak0.pk3";do [ -f "$candidate" ] && { BASE="$candidate";break; };done

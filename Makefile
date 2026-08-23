@@ -69,20 +69,17 @@ DEV        ?= 0
 VM         ?= 0
 NAV_UPDATE_GOLDEN ?= 0    # 1 = re-bless the nav-gate golden (make nav-gate)
 
-# Dual build directories — avoid cmake reconfigure thrash between Release/Debug.
-# BUILD_DIR / BUILD_CFG are DEV-driven aliases. Targets that should
-# follow DEV=1 use these; packaging / bundling targets stay on the explicit
-# *_RELEASE roots so distributions are never accidentally Debug.
+# One canonical build tree. DEV only selects CMAKE_BUILD_TYPE; switching it
+# reconfigures the same tree instead of retaining parallel Debug/Release trees.
+BUILD_DIR := build
 ifeq ($(DEV),1)
-  BUILD_DIR    := build/debug
-  BUILD_CFG    := Debug
+  BUILD_CFG := Debug
 
   ifeq ($(MAKECMDGOALS),release)
   	$(error 'make release' requires DEV=0 (Release build))
   endif
 else
-  BUILD_DIR    := build/release
-  BUILD_CFG    := Release
+  BUILD_CFG := Release
 endif
 
 # CPU count and architecture detection
@@ -146,8 +143,8 @@ else
   endif
 endif
 
-# cmake puts game modules at <build-dir>/<build-cfg>/base/
-MODULE_DIR := $(BUILD_DIR)/$(BUILD_CFG)/base
+# Native and WASM game modules share the canonical build/base output.
+MODULE_DIR := $(BUILD_DIR)/base
 
 ifeq ($(UNAME_S),Darwin)
   # macOS bundle conventions: code in Contents/MacOS/, data in Contents/Resources/.
@@ -190,7 +187,7 @@ endif
 CMAKE_EXTRA_FLAGS ?=
 CMAKE_CHANNEL_FLAG := -DCHANNEL_SUFFIX="$(CHANNEL_SUFFIX)"
 CMAKE_PRODUCT_FLAG := -DPRODUCT_NAME="$(PRODUCT_NAME)"
-CMAKE_CONFIGURE    := cmake -S . -B $(BUILD_DIR) $(GENERATOR) -DCMAKE_BUILD_TYPE=$(BUILD_CFG) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTING=ON $(CMAKE_WASM_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_PRODUCT_FLAG) $(CMAKE_EXTRA_FLAGS)
+CMAKE_CONFIGURE    := cmake -S . -B $(BUILD_DIR) $(GENERATOR) -DCMAKE_BUILD_TYPE=$(BUILD_CFG) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTING=ON -DBUILD_GAME_LIBRARIES=ON $(CMAKE_WASM_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_PRODUCT_FLAG) $(CMAKE_EXTRA_FLAGS)
 CMAKE_BUILD        := cmake --build $(BUILD_DIR) --parallel $(JOBS)
 
 # Code signing identity (default: ad-hoc).
@@ -292,6 +289,7 @@ SENTRY_HANDLER_BIN := $(BUILD_DIR)/src/libs/sentry-native/sentry-crash$(EXEEXT)
 		test-ping-owner-expired-offscreen test-ping-owner-expired-offscreen-self \
 		test-ping-owner-capacity test-ping-owner-capacity-self \
         test-lan-discovery-timeout test-lan-discovery-timeout-self \
+		test-ral-readback-runtime \
         test-vm test-quic-game test-fs-dedup bench diff-api lint help
 
 # Default target: a CONSISTENT DEPLOYABLE WORLD, not just compiled objects.
@@ -313,10 +311,8 @@ all: create-packs
 # FOUNDATION — configure, build, clean
 # ══════════════════════════════════════════════════════════════════════════════
 
-$(BUILD_DIR)/CMakeCache.txt: CMakeLists.txt
+configure:
 	$(CMAKE_CONFIGURE)
-
-configure: $(BUILD_DIR)/CMakeCache.txt
 
 # WIRED_PREBUILT=1: engine binaries were placed into $(BUILD_DIR) by an
 # external builder (CI downloads them from the cross-windows artifact) —
@@ -329,7 +325,7 @@ build:
 	@echo "==> WIRED_PREBUILT: using externally built engine binaries"
 	$(MAKE) $(PAK_OUT) VERSION="$(VERSION)" SOURCE_VERSION="$(SOURCE_VERSION)" BUILD_DATE_ISO="$(BUILD_DATE_ISO)"
 else
-build: _build-stamp $(BUILD_DIR)/CMakeCache.txt
+build: _build-stamp configure
 	$(CMAKE_BUILD)
 	# Native game modules must rebuild with the engine so the shared viewport
 	# ABI (qcommon/wired/ui_viewport_types.h, consumed by both the engine
@@ -632,8 +628,8 @@ define install_engine
 	@mkdir -p "$(1)" "$(2)"
 	cp "$(ENGINE_BIN)" "$(1)/$(INSTALLED_ENGINE)"
 	@test -f "$(BUILT_DED)" && cp "$(BUILT_DED)" "$(1)/$(INSTALLED_HEADLESS)" || true
-	cp "$(BUILD_DIR)/$(BUILD_CFG)/base/gamecl$(_GAME_MODULE_EXT)"  "$(2)/"
-	cp "$(BUILD_DIR)/$(BUILD_CFG)/base/gamesv$(_GAME_MODULE_EXT)" "$(2)/"
+	cp "$(MODULE_DIR)/gamecl$(_GAME_MODULE_EXT)"  "$(2)/"
+	cp "$(MODULE_DIR)/gamesv$(_GAME_MODULE_EXT)" "$(2)/"
 	$(call install_sentry_handler,$(1))
 endef
 
@@ -937,9 +933,8 @@ endif
 #   make run-game DEV=1 MAP=arena7   debug build, map arena7
 #   make run-game VM=1 MAP=arena7    VM modules, load arena7
 
-# DEV controls Release vs Debug throughout BUILD_DIR / BUILD_CFG
-# / BUILT_APP / BUILT_DED / MODULE_DIR / PAK_OUT — copy-all picks up the right
-# config automatically. No separate copy-all-debug.
+# DEV controls Release vs Debug through BUILD_CFG while every output remains
+# under the single BUILD_DIR. copy-all picks up the active configuration.
 #
 # macOS runs through bundle-codesign (which itself depends on copy-all): the
 # ARM64 JIT and the VM interpreter need the allow-jit entitlement, and the
@@ -983,12 +978,12 @@ endif
 _copy-vm:
 ifeq ($(UNAME_S),Darwin)
 	@mkdir -p "$(Q3DIR)/Contents/Resources/base/vm"
-	@for f in $(BUILD_DIR)/$(BUILD_CFG)/base/vm/*.wasm $(BUILD_DIR)/$(BUILD_CFG)/base/vm/*.aot; do \
+	@for f in $(MODULE_DIR)/vm/*.wasm $(MODULE_DIR)/vm/*.aot; do \
 		[ -f "$$f" ] && cp "$$f" "$(Q3DIR)/Contents/Resources/base/vm/" || true; \
 	done
 else
 	@mkdir -p "$(Q3DIR)/base/vm"
-	@for f in $(BUILD_DIR)/$(BUILD_CFG)/base/vm/*.wasm $(BUILD_DIR)/$(BUILD_CFG)/base/vm/*.aot; do \
+	@for f in $(MODULE_DIR)/vm/*.wasm $(MODULE_DIR)/vm/*.aot; do \
 		[ -f "$$f" ] && cp "$$f" "$(Q3DIR)/base/vm/" || true; \
 	done
 endif
@@ -1091,10 +1086,10 @@ test-sanitize-host:
 # macOS the engine resolves paks under Contents/Resources (qcommon.h:945-956),
 # so a flat build dir cannot satisfy it.
 #
-# The map-transition repeat gate (#11) is registered ONLY in a Debug tree: its
-# ZONEID assertion is _DEBUG-only (common.c:409-412), so a Release tree gets the
-# engine-free analyzer teeth check instead of a vacuous green. Build a debug
-# tree for the N-run gate.
+# The map-transition repeat gate (#11) is registered ONLY in Debug: its
+# ZONEID assertion is _DEBUG-only (common.c:409-412), so Release gets the
+# engine-free analyzer teeth check instead of a vacuous green. Reconfigure with
+# DEV=1 for the N-run gate.
 test-process: build copy-all
 	ctest --test-dir $(BUILD_DIR) --output-on-failure --no-tests=error -L process
 
@@ -1154,6 +1149,23 @@ else
 endif
 
 .PHONY: smoke nav-gate
+
+# Native Vulkan readback gate. Like run-game, DEV reconfigures the canonical
+# build tree; the harness must never configure an ad-hoc CMake build directory
+# of its own. pax21 comes from the current build,
+# while the licensed base archive stays external/read-only.
+test-ral-readback-runtime: build
+ifeq ($(UNAME_S),Darwin)
+	@WIRED_CONTENT_ROOT="$(BUILD_DIR)" \
+	WIRED_BASE_CONTENT="$${WIRED_BASE_CONTENT:-$(HOME)/wired/$(APP_NAME)/base/pax01.sw3z}" \
+	WIRED_RENDERER="$(BUILD_DIR)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dylib" \
+	WIRED_GAMECL="$(MODULE_DIR)/gamecl$(GAME_ARCH).dylib" \
+	WIRED_GAMESV="$(MODULE_DIR)/gamesv$(GAME_ARCH).dylib" \
+	bash tests/ral-readback-runtime-check.sh "$(BUILD_DIR)/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: native RAL readback harness currently requires macOS/MoltenVK"
+	@exit 77
+endif
 
 # Deterministic, pixel-free M1 menu transition gate. WIRED identifies the
 # current binary/pack; WIRED_CONTENT_ROOT may supply read-only licensed base
@@ -1794,24 +1806,11 @@ visual-shadow-atest: $(_RUN_GAME_DEP) $(PNG2RAW_BIN)
 #                     mid-arc pose, blesses it as a golden (only when the frame is
 #                     non-black real geometry AND moved off the player view), then
 #                     cold-re-verifies a fresh frame reproduces it.
-# sync-cgame-run-dir: place the freshly-built native game modules where the
-# harness engine actually scans for them. The harness launches the engine from
-# $(BUILD_DIR) (fs_installpath = build/debug), so FS_LoadLibrary scans
-# build/debug/base/ — but CMake writes the modules to $(MODULE_DIR) =
-# build/debug/$(BUILD_CFG)/base/. Those are different dirs, so build/debug/base/
-# can hold a STALE (or missing) cgame that the harness would load instead of HEAD.
-# Copy the fresh gamecl/gamesv modules into the scan dir so any cgame-dependent
-# visual mode tests the current build. This is a BUILD-TREE sync (Debug/base ->
-# base within build/debug), NOT a deploy to the install tree (that is copy-all /
-# install_engine, which the harness never reads). The WASM vm modules are synced
-# too so a vm_cgame 1 mode would also be fresh; harmless when a mode is native.
+# sync-cgame-run-dir is retained as a compatibility target. Native and WASM
+# modules now already land in $(MODULE_DIR), the same base directory the engine
+# scans when launched from $(BUILD_DIR), so no profile-directory copy is needed.
 sync-cgame-run-dir: build
-	@mkdir -p "$(BUILD_DIR)/base" "$(BUILD_DIR)/base/vm"
-	cp "$(MODULE_DIR)/gamecl$(_GAME_MODULE_EXT)" "$(BUILD_DIR)/base/"
-	cp "$(MODULE_DIR)/gamesv$(_GAME_MODULE_EXT)" "$(BUILD_DIR)/base/"
-	@for f in "$(MODULE_DIR)/vm/gamecl.wasm" "$(MODULE_DIR)/vm/gamesv.wasm"; do \
-		[ -f "$$f" ] && cp "$$f" "$(BUILD_DIR)/base/vm/" || true; \
-	done
+	@true
 
 visual-scene: $(_RUN_GAME_DEP) sync-cgame-run-dir $(PNG2RAW_BIN)
 	@SMOKE_UPDATE_GOLDEN=1 bash tests/visual-render-features.sh --mode scene \
@@ -1916,7 +1915,7 @@ help:
 	@echo "  Wired build targets"
 	@echo "  ───────────────────────────────────────────────────────────"
 	@echo "  make                 configure + build Release"
-	@echo "  make clean           remove build-release/ + build-debug/"
+	@echo "  make clean           remove build/"
 	@echo "  make clean-launcher  remove launcher/build/ (wails output)"
 	@echo "  make clean-all       clean + clean-launcher"
 	@echo "  make rebuild         clean + build"

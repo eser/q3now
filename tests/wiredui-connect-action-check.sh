@@ -305,9 +305,9 @@ fi
 WIRED="${1:-}"
 if [ -z "$WIRED" ]; then
     for candidate in \
-        "$SCRIPT_DIR/../build/release/q3now-preview.arm64.app/Contents/MacOS/wired.arm64" \
-        "$SCRIPT_DIR/../build/release/q3now-preview.x86_64.app/Contents/MacOS/wired.x86_64" \
-        "$SCRIPT_DIR/../build/release/wired"; do
+        "$SCRIPT_DIR/../build/q3now-preview.arm64.app/Contents/MacOS/wired.arm64" \
+        "$SCRIPT_DIR/../build/q3now-preview.x86_64.app/Contents/MacOS/wired.x86_64" \
+        "$SCRIPT_DIR/../build/wired"; do
         if [ -x "$candidate" ]; then WIRED="$candidate"; break; fi
     done
 fi

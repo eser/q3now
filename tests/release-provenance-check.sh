@@ -43,13 +43,13 @@ run_case() {
   [[ $(grep -Fc "$recursive_row" <<<"$output" || true) == 1 ]] \
     || fail "$uname_s recursive bundle did not receive the exact frozen tuple"
 
-  pack_recursive_row="build/release/base/pax21.sw3z VERSION=\"$PROBE_VERSION\" SOURCE_VERSION=\"$PROBE_SOURCE\" BUILD_DATE_ISO=\"$PROBE_DATE\""
+  pack_recursive_row="build/base/pax21.sw3z VERSION=\"$PROBE_VERSION\" SOURCE_VERSION=\"$PROBE_SOURCE\" BUILD_DATE_ISO=\"$PROBE_DATE\""
   [[ $(grep -Fc "$pack_recursive_row" <<<"$output" || true) -ge 1 ]] \
     || fail "$uname_s recursive pack did not receive the exact frozen tuple"
 
   description_rows=$(grep -F 'description.txt' <<<"$output" || true)
   [[ -n $description_rows ]] || fail "$uname_s emitted no pack description recipe"
-  if grep -Fv "echo \"q3now-preview $PROBE_SOURCE ($PROBE_DATE)\" > build/release/pak-staging/description.txt" \
+  if grep -Fv "echo \"q3now-preview $PROBE_SOURCE ($PROBE_DATE)\" > build/pak-staging/description.txt" \
       <<<"$description_rows" >/dev/null; then
     fail "$uname_s pack description recomputed or changed source provenance"
   fi
@@ -76,11 +76,11 @@ run_case() {
 
 run_contract() {
   run_case Darwin x86_64 bundle-dmg \
-    "build/release/q3now-preview-$PROBE_VERSION-x86_64.dmg" DMG
+    "build/q3now-preview-$PROBE_VERSION-x86_64.dmg" DMG
   run_case Linux x86_64 bundle-tar \
-    "build/release/q3now-preview-$PROBE_VERSION-linux-x86_64.tar.gz" TAR
+    "build/q3now-preview-$PROBE_VERSION-linux-x86_64.tar.gz" TAR
   run_case MINGW64_NT-10.0 x86_64 bundle-zip \
-    "build/release/q3now-preview-$PROBE_VERSION-windows-x86_64.zip" ZIP
+    "build/q3now-preview-$PROBE_VERSION-windows-x86_64.zip" ZIP
 }
 
 run_contract

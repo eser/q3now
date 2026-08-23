@@ -241,13 +241,13 @@ RENDERER="${WIRED_RENDERER:-}"
 }
 GAMECL="${WIRED_GAMECL:-}"
 [ -f "$GAMECL" ] || GAMECL="$(find_required gameclarm64.dylib \
-	"$WD/base" "$WD/Debug/base" "$WD/Release/base" "$WD/Contents/Resources/base")" || {
+	"$WD/base" "$WD/Contents/Resources/base")" || {
 	echo "SKIP: set WIRED_GAMECL to the current game module"
 	exit 77
 }
 GAMESV="${WIRED_GAMESV:-}"
 [ -f "$GAMESV" ] || GAMESV="$(find_required gamesvarm64.dylib \
-	"$WD/base" "$WD/Debug/base" "$WD/Release/base" "$WD/Contents/Resources/base")" || {
+	"$WD/base" "$WD/Contents/Resources/base")" || {
 	echo "SKIP: set WIRED_GAMESV to the current game module"
 	exit 77
 }

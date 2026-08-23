@@ -459,7 +459,7 @@ run_wired() {
     (
         cd "$WIRED_DIR"
         # NOTE: no +set fs_installpath here. Sys_Pwd → fs_installpath = $WIRED_DIR
-        # picks up the binary's adjacent base/ (e.g. build/debug/base/pax21.sw3z)
+        # picks up the binary's adjacent base/ (e.g. build/base/pax21.sw3z)
         # while fs_homepath ($PRODUCT_DIR) still contributes its own paks.
         # c2-golden-gate-rework: pin window resolution explicitly so captures
         # taken on different monitors compare correctly. Without this the

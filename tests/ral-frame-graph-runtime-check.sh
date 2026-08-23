@@ -123,8 +123,8 @@ WIRED="${1:-}";[ -n "$WIRED" ] && [ -x "$WIRED" ] || { echo "usage: $0 /absolute
 WIRED="$(cd "$(dirname "$WIRED")" && pwd)/$(basename "$WIRED")";WD="$(dirname "$WIRED")"
 find_required(){ local name="$1" candidate;shift;for candidate in "$@";do [ -f "$candidate/$name" ] && { printf '%s\n' "$candidate/$name";return 0;};done;return 1;}
 RENDERER="$(find_required wired_vulkan_arm64.dylib "$WD" "$WD/Contents/MacOS" "$WD/q3now-preview.arm64.app/Contents/MacOS" "$WD/../MacOS")" || { echo "SKIP: current Vulkan renderer unavailable";exit 77; }
-GAMECL="${WIRED_GAMECL:-}";[ -f "$GAMECL" ] || GAMECL="$(find_required gameclarm64.dylib "$WD/base" "$WD/Debug/base" "$WD/Release/base" "$WD/Contents/Resources/base" "$WD/q3now-preview.arm64.app/Contents/Resources/base")" || { echo "SKIP: set WIRED_GAMECL to current gameclarm64.dylib";exit 77; }
-GAMESV="${WIRED_GAMESV:-}";[ -f "$GAMESV" ] || GAMESV="$(find_required gamesvarm64.dylib "$WD/base" "$WD/Debug/base" "$WD/Release/base" "$WD/Contents/Resources/base" "$WD/q3now-preview.arm64.app/Contents/Resources/base")" || { echo "SKIP: set WIRED_GAMESV to current gamesvarm64.dylib";exit 77; }
+GAMECL="${WIRED_GAMECL:-}";[ -f "$GAMECL" ] || GAMECL="$(find_required gameclarm64.dylib "$WD/base" "$WD/Contents/Resources/base" "$WD/q3now-preview.arm64.app/Contents/Resources/base")" || { echo "SKIP: set WIRED_GAMECL to current gameclarm64.dylib";exit 77; }
+GAMESV="${WIRED_GAMESV:-}";[ -f "$GAMESV" ] || GAMESV="$(find_required gamesvarm64.dylib "$WD/base" "$WD/Contents/Resources/base" "$WD/q3now-preview.arm64.app/Contents/Resources/base")" || { echo "SKIP: set WIRED_GAMESV to current gamesvarm64.dylib";exit 77; }
 MOLTEN="$(find_required libMoltenVK.dylib "$WD" "$WD/Contents/MacOS" "$WD/q3now-preview.arm64.app/Contents/MacOS" "$WD/../MacOS" /opt/homebrew/opt/molten-vk/lib /usr/local/lib)" || { echo "SKIP: current MoltenVK unavailable";exit 77; }
 CONTENT="${WIRED_CONTENT_ROOT:-}";PACK=""
 if [ -n "$CONTENT" ] && [ -f "$CONTENT/base/pax21.sw3z" ];then PACK="$(cd "$CONTENT" && pwd)";else

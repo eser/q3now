@@ -48,8 +48,8 @@ int main( void ) {
 	ralMetalCore_t *core = NULL;
 	ralMetalCoreReceipt_t coreReceipt, staleCore;
 	ralBindEntry_t entries[2] = {
-		{ 0u, RAL_BIND_SAMPLED_TEXTURE, 1u, RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_2D },
-		{ 32u, RAL_BIND_SAMPLER, 1u, RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED }
+		{ 0u, RAL_BIND_SAMPLED_TEXTURE, 1u, RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_2D, qfalse },
+		{ 32u, RAL_BIND_SAMPLER, 1u, RAL_STAGE_FRAGMENT, RAL_BIND_TEXTURE_VIEW_UNSPECIFIED, qfalse }
 	};
 	ralBindGroupLayoutCreateInfo_t layoutInfo = { entries, 2u, qfalse, "overlay-draw" };
 	ralMetalBindLayout_t *layout = NULL;

@@ -2800,7 +2800,7 @@ static const void *RB_SwapBuffers( const void *data ) {
 			s_rdocState = 1;
 		}
 		if ( s_rdocState == 1 && s_rdoc != NULL && s_rdocFrame >= 120 ) {
-			s_rdoc->SetCaptureFilePathTemplate( "wn_capture" );  // relative to engine cwd (renderdoccmd -d sets it to build/debug)
+			s_rdoc->SetCaptureFilePathTemplate( "wn_capture" );  // relative to engine cwd (renderdoccmd -d sets it to build)
 			s_rdoc->TriggerCapture();
 			R_LOG( rch_rdoc, SEV_INFO, "TriggerCapture() at frame %d\n", s_rdocFrame );
 			s_rdocState = 2;

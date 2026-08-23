@@ -26,7 +26,7 @@
 # run the engine at all (see the WIRED_DEFAULT note below). To capture a menu
 # built from working-tree content:
 #
-#   WIRED_CONTENT_ROOT="$PWD/build/release" WIRED_KEEP_ARTIFACTS=1 \
+#   WIRED_CONTENT_ROOT="$PWD/build" WIRED_KEEP_ARTIFACTS=1 \
 #     CORNER_MENU=main tests/wiredui-corner-check.sh
 #
 # For attract panels use CORNER_ATTRACT=<n> instead of CORNER_MENU — pushing them
@@ -199,7 +199,7 @@ fi
 # configuration there dies with "Failed to load renderer wired_vulkan_arm64.dylib"
 # before reaching a menu, overriding fs_installpath included. Makefile:994 launches
 # the same way. Elsewhere the flat build dir IS the install layout, so it stands.
-WIRED_DEFAULT="$REPO_ROOT/build/debug/wired.x64.exe"
+WIRED_DEFAULT="$REPO_ROOT/build/wired.x64.exe"
 if [ "$(uname -s)" = "Darwin" ]; then
     for _app in /Applications/q3now-preview.app /Applications/q3now.app; do
         if [ -x "$_app/Contents/MacOS/wired.$(uname -m)" ]; then
@@ -240,7 +240,7 @@ mkdir -p "$HOME_DIR/base/screenshots"
 # CL_InitRef builds its path from FS_GetInstallBinaryPath(), which the engine
 # derives from argv[0] and which appends Contents/MacOS on macOS. Left alone
 # that self-detection is correct. Pinning fs_installpath to the flat build dir
-# makes it look for build/debug/Contents/MacOS/wired_vulkan_arm64.dylib, which
+# makes it look for build/Contents/MacOS/wired_vulkan_arm64.dylib, which
 # does not exist, and the engine dies before reaching the menu:
 #     Sys_Error: Failed to load renderer wired_vulkan_arm64.dylib
 # Measured both ways. Only the content path belongs in the sandbox.

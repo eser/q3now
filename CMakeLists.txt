@@ -4061,7 +4061,7 @@ WIRED_CONFIGURE_HOST_TEST(wn_identity_test wired_connection_identity_contract)
 # ZONEID zone-consistency assertion it needs is compiled only under _DEBUG
 # (code/qcommon/common.c:409-412), so pointing it at a release build would
 # manufacture a vacuous green and the script refuses with exit 1, not 77.
-# That means it can only be REGISTERED in a Debug tree. In a Release tree it
+# That means it can only be REGISTERED in Debug. In Release it
 # is registered in its engine-free `--self-test` form (the analyzer mutation
 # suite), which is where the gate's teeth live and which needs neither a
 # debug binary nor content.
@@ -4085,7 +4085,7 @@ SET_TESTS_PROPERTIES(launcher_process_smoke PROPERTIES
 # 🔴 NO $<TARGET_FILE:...> HERE, DELIBERATELY. The freshly linked binary in the
 # build tree is NOT a runnable install on macOS: FS_GetInstallResourcePath()
 # resolves paks under <root>/Contents/Resources (qcommon.h:945-956), so a flat
-# `build/release/base/pax21.sw3z` is never searched and the engine aborts with
+# `build/base/pax21.sw3z` is never searched and the engine aborts with
 # "Couldn't load default.cfg" before the transport initialises. Passing the
 # build-tree target therefore produces a red that says nothing about QUIC.
 # The scripts resolve the ASSEMBLED install through tests/lib/wired_paths.sh
@@ -4139,7 +4139,7 @@ IF(WIRED_MAP_TRANSITION_REPEATS LESS 10)
 ENDIF()
 
 IF(CMAKE_BUILD_TYPE STREQUAL "Debug")
-	# Debug tree only: the gate needs the _DEBUG-only ZONEID assertion.
+	# Debug only: the gate needs the _DEBUG-only ZONEID assertion.
 	# Each iteration loads 3 maps with +wait gating, so the budget scales
 	# with the repeat count rather than being a flat number.
 	MATH(EXPR WIRED_MAP_TRANSITION_TIMEOUT "${WIRED_MAP_TRANSITION_REPEATS} * 180")
@@ -4165,7 +4165,7 @@ IF(CMAKE_BUILD_TYPE STREQUAL "Debug")
 		RESOURCE_LOCK wired_net_port
 	)
 ELSE()
-	# Release tree: register the engine-free analyzer mutation suite under the
+	# Release: register the engine-free analyzer mutation suite under the
 	# `process` label so `ctest -L process` still reports on the map-transition
 	# gate here — as the teeth check it can honestly run, not as a vacuous
 	# pass of a gate whose assertion is compiled out.
@@ -4396,7 +4396,7 @@ FUNCTION(WIRED_APPLY_SUBMODULE_PATCHES _label _submodule_dir _patch_dir)
 						"local modifications that conflict with the patch hunks.\n"
 						"To recover:\n"
 						"  git -C ${_submodule_dir} reset --hard\n"
-						"  rm -rf build/release  # or build/debug\n"
+						"  rm -rf build\n"
 						"  re-run cmake / make")
 				ENDIF()
 				MESSAGE(STATUS "applied ${_label} patch: ${_patch_name}")
@@ -5121,8 +5121,8 @@ ENDFUNCTION()
 #
 # Default OFF in mainline builds (don't slow renderer-only iteration);
 # explicitly enabled when the offline translators are required:
-#   cmake -DWIRED_BUILD_SHADER_XLATE=ON -B build/debug
-#   ninja -C build/debug shader_xlate
+#   cmake -DWIRED_BUILD_SHADER_XLATE=ON -B build
+#   ninja -C build shader_xlate
 OPTION(WIRED_BUILD_SHADER_XLATE
 	"Build the offline GLSL → SPIR-V → {MSL, GLSL, GLSL ES, WGSL} translator (needs src/libs/SPIRV-Cross submodule; WGSL needs the `naga` CLI on PATH — see BUILD-RUST.md)"
 	OFF)

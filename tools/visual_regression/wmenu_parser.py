@@ -23,7 +23,7 @@ practice. If you need a widget-macro's embedded colour, add a plain
 first and point this parser at the expanded output.
 
 Default macros path: <repo>/modfiles/ui/wmenumacros.h (the .wmenu source
-tree lives in modfiles/ui/, *not* base/ui/ — build/debug/pak-staging/ui/
+tree lives in modfiles/ui/, *not* base/ui/ — build/pak-staging/ui/
 holds the post-build staged copies).
 
 CLI:

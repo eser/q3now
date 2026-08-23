@@ -14,7 +14,7 @@ set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib/wired_paths.sh"
 
 ROOT="$WIRED_SOURCE"
-WIRED_DIR="$ROOT/build/debug"
+WIRED_DIR="$ROOT/build"
 WIRED_NAME="wired.x64.exe"
 [ -x "$WIRED_DIR/$WIRED_NAME" ] || { echo "FAIL: $WIRED_DIR/$WIRED_NAME not found"; exit 1; }
 

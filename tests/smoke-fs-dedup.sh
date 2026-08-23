@@ -27,14 +27,14 @@ SW3Z_TOOL="${SW3Z_TOOL:-tools/sw3z-archiver/cmd/sw3z/sw3z}"
 if [ ! -x "$DED" ] && ! command -v "$DED" >/dev/null 2>&1; then
   # Try common build locations
   for candidate in \
-    "build/release/wired-headless.x64.exe" \
-    "build/release/wired-headless.x86_64" \
-    "build/release/wired-headless"; do
+    "build/wired-headless.x64.exe" \
+    "build/wired-headless.x86_64" \
+    "build/wired-headless"; do
     if [ -x "$candidate" ]; then DED="$candidate"; break; fi
   done
 fi
 if [ ! -x "$DED" ] && ! command -v "$DED" >/dev/null 2>&1; then
-  echo "SKIP: wired-headless binary not found (tried: $1, build/release/wired-headless*)"
+  echo "SKIP: wired-headless binary not found (tried: $1, build/wired-headless*)"
   exit 77
 fi
 
@@ -43,8 +43,8 @@ if [ ! -x "$SW3Z_TOOL" ]; then
   exit 77
 fi
 
-# ── build fixture under build/release/test-fixtures/dedup/ ──────────────────
-FIXTURE_ROOT="${FIXTURE_ROOT:-build/release/test-fixtures/dedup}"
+# ── build fixture under build/test-fixtures/dedup/ ──────────────────
+FIXTURE_ROOT="${FIXTURE_ROOT:-build/test-fixtures/dedup}"
 BASEPATH="$FIXTURE_ROOT/basepath"
 HOMEPATH="$FIXTURE_ROOT/homepath"
 SEED="$FIXTURE_ROOT/seed"

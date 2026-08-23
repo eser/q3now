@@ -89,12 +89,12 @@ if [ -n "$DED_OVERRIDE" ]; then
     DED="$DED_OVERRIDE"
 else
     for candidate in \
-        "${PROJECT_DIR}/build/release/wired-headless.arm64" \
-        "${PROJECT_DIR}/build/release/wired-headless.aarch64" \
-        "${PROJECT_DIR}/build/release/wired-headless.x86_64" \
-        "${PROJECT_DIR}/build/release/wired-headless.x64.exe" \
-        "${PROJECT_DIR}/build/release/wired-headless.exe" \
-        "${PROJECT_DIR}/build/release/wired-headless" \
+        "${PROJECT_DIR}/build/wired-headless.arm64" \
+        "${PROJECT_DIR}/build/wired-headless.aarch64" \
+        "${PROJECT_DIR}/build/wired-headless.x86_64" \
+        "${PROJECT_DIR}/build/wired-headless.x64.exe" \
+        "${PROJECT_DIR}/build/wired-headless.exe" \
+        "${PROJECT_DIR}/build/wired-headless" \
     ; do
         if [ -x "$candidate" ]; then DED="$candidate"; break; fi
     done
@@ -102,7 +102,7 @@ fi
 
 if [ -z "${DED:-}" ] || [ ! -x "$DED" ]; then
     echo "ERROR: headless server not found. Tried:"
-    echo "  build/release/wired-headless.{x86_64,x64.exe,arm64,aarch64}"
+    echo "  build/wired-headless.{x86_64,x64.exe,arm64,aarch64}"
     echo "Override: bash $0 path-to-ded [map] [basepath]"
     exit 1
 fi
@@ -112,13 +112,13 @@ fi
 CLIENT="${WIRED_CLIENT:-}"
 if [ -z "$CLIENT" ]; then
     for candidate in \
-        "${PROJECT_DIR}/build/release/q3now-preview.arm64.app/Contents/MacOS/wired.arm64" \
-        "${PROJECT_DIR}/build/release/wired.arm64" \
-        "${PROJECT_DIR}/build/release/wired.aarch64" \
-        "${PROJECT_DIR}/build/release/wired.x86_64" \
-        "${PROJECT_DIR}/build/release/wired.x64.exe" \
-        "${PROJECT_DIR}/build/release/wired.exe" \
-        "${PROJECT_DIR}/build/release/wired" \
+        "${PROJECT_DIR}/build/q3now-preview.arm64.app/Contents/MacOS/wired.arm64" \
+        "${PROJECT_DIR}/build/wired.arm64" \
+        "${PROJECT_DIR}/build/wired.aarch64" \
+        "${PROJECT_DIR}/build/wired.x86_64" \
+        "${PROJECT_DIR}/build/wired.x64.exe" \
+        "${PROJECT_DIR}/build/wired.exe" \
+        "${PROJECT_DIR}/build/wired" \
     ; do
         if [ -x "$candidate" ]; then CLIENT="$candidate"; break; fi
     done
@@ -223,8 +223,7 @@ echo "  -- Staged $content_staged read-only content pack(s) from $Q3DIR"
 
 WASM_BUILD_DIR=""
 for candidate in \
-    "${PROJECT_DIR}/build/release/Release/base/vm" \
-    "${PROJECT_DIR}/build/release/base/vm" \
+    "${PROJECT_DIR}/build/base/vm" \
 ; do
     if [ -f "${candidate}/gamesv.wasm" ]; then WASM_BUILD_DIR="$candidate"; break; fi
 done
@@ -245,8 +244,8 @@ fi
 
 MODPACK_BUILD=""
 for candidate in \
-    "${PROJECT_DIR}/build/release/base/pax21.sw3z" \
-    "${PROJECT_DIR}/build/release/base/pax21.pk3" \
+    "${PROJECT_DIR}/build/base/pax21.sw3z" \
+    "${PROJECT_DIR}/build/base/pax21.pk3" \
 ; do
     if [ -f "$candidate" ]; then MODPACK_BUILD="$candidate"; break; fi
 done
@@ -256,7 +255,7 @@ if [ -n "$MODPACK_BUILD" ]; then
     echo "  -- Staged mod pack: $(basename "$MODPACK_BUILD")"
 else
     echo "  -- ERROR: mod pack (pax21.sw3z) not found at"
-    echo "     ${PROJECT_DIR}/build/release/base/pax21.{sw3z,pk3}"
+    echo "     ${PROJECT_DIR}/build/base/pax21.{sw3z,pk3}"
     echo "     Build it first:  make create-packs"
     echo "     Without it, the engine fails at startup with"
     echo "     'Couldn't load default.cfg' — modfiles/default.cfg ships"

@@ -13,7 +13,11 @@ function(set_output_dirs TARGET)
     foreach(CONFIG ${CONFIGS})
         string(TOUPPER ${CONFIG} CONFIG_UPPER)
 
-        set(OUT_DIR ${CMAKE_BINARY_DIR}/${CONFIG}/${ARG_SUBDIRECTORY})
+        if(CMAKE_CONFIGURATION_TYPES)
+            set(OUT_DIR ${CMAKE_BINARY_DIR}/${CONFIG}/${ARG_SUBDIRECTORY})
+        else()
+            set(OUT_DIR ${CMAKE_BINARY_DIR}/${ARG_SUBDIRECTORY})
+        endif()
 
         set_target_properties(${TARGET} PROPERTIES
             LIBRARY_OUTPUT_DIRECTORY_${CONFIG_UPPER} ${OUT_DIR}
