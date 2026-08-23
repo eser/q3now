@@ -48,6 +48,11 @@ typedef struct {
 	// Legacy texture uploads may keep both 0 until their staging paths migrate.
 	uint32_t bytesPerRow;
 	uint32_t rowsPerImage;
+	// Appended portable texture-copy authority. offsetZ selects one 3D slice;
+	// textureAspects is one explicit RAL_TEXTURE_ASPECT_* plane. Legacy callers
+	// may leave both zero, but typed texture plans always publish them.
+	uint32_t offsetZ;
+	uint32_t textureAspects;
 	ralQueueType_t queue;
 } ralTransferRequest_t;
 

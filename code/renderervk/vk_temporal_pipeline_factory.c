@@ -193,55 +193,48 @@ void VK_TemporalPipelineLayoutInit( vkTemporalPipelineLayoutOwner_t *owner ) {
 }
 
 qboolean VK_TemporalPipelineLayoutEnsure( vkTemporalPipelineLayoutOwner_t *owner,
-		ralBackend_t *backend, VkDevice device, const VkDescriptorSetLayout borrowedSets[3],
+		ralBackend_t *backend, VkDevice device,
+		const ralBindGroupLayout_t *const borrowedLayouts[3],
 		const ralBindGroupLayout_t *payloadLayout, uint32_t payloadLayoutGeneration,
 		qboolean fog, const vkTemporalLayoutOps_t *ops ) {
-	VkDescriptorSetLayout sets[4];
-	VkPushConstantRange push;
-	VkPipelineLayoutCreateInfo ci;
+	const ralBindGroupLayout_t *layouts[4];
+	ralPipelineLayoutCreateInfo_t ci;
 	VkPipelineLayout candidateRaw = VK_NULL_HANDLE;
 	ralPipelineLayout_t *candidateAdopted = NULL;
 	uint32_t nextGeneration;
-	void *payloadRaw;
 	uint32_t i;
 
-	if ( !owner || !backend || device == VK_NULL_HANDLE || !borrowedSets
-			|| !payloadLayout || !payloadLayoutGeneration || !ops || !ops->createRaw
-			|| !ops->destroyRaw || !ops->getBindGroupLayoutHandle || !ops->adoptRaw
-			|| !ops->destroyAdopted ) return qfalse;
-	for ( i = 0; i < 3; ++i ) if ( borrowedSets[i] == VK_NULL_HANDLE ) return qfalse;
+	if ( !owner || !backend || device == VK_NULL_HANDLE || !borrowedLayouts
+			|| !payloadLayout || !payloadLayoutGeneration || !ops || !ops->create
+			|| !ops->getHandle || !ops->destroy ) return qfalse;
+	for ( i = 0; i < 3; ++i ) if ( !borrowedLayouts[i] ) return qfalse;
 	if ( owner->ready && owner->backend == backend && owner->device == device
 			&& owner->payloadLayout == payloadLayout
 			&& owner->payloadLayoutGeneration == payloadLayoutGeneration
 			&& owner->fog == fog
-			&& memcmp( owner->borrowedSets, borrowedSets, sizeof(owner->borrowedSets) ) == 0 ) return qtrue;
+			&& memcmp( owner->borrowedLayouts, borrowedLayouts,
+				sizeof(owner->borrowedLayouts) ) == 0 ) return qtrue;
 	if ( owner->ready && ( owner->leases || owner->backend != backend || owner->device != device ) ) return qfalse;
 	if ( owner->allocationGeneration == UINT32_MAX ) return qfalse;
-	payloadRaw = ops->getBindGroupLayoutHandle( payloadLayout );
-	if ( !payloadRaw ) return qfalse;
-	memcpy( sets, borrowedSets, sizeof(owner->borrowedSets) );
-	sets[3] = (VkDescriptorSetLayout)payloadRaw;
-	memset( &push, 0, sizeof( push ) );
-	push.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-	push.offset = VK_TEMPORAL_FOG_PUSH_OFFSET;
-	push.size = VK_TEMPORAL_FOG_PUSH_SIZE;
+	memcpy( layouts, borrowedLayouts, sizeof(owner->borrowedLayouts) );
+	layouts[3] = payloadLayout;
 	memset( &ci, 0, sizeof( ci ) );
-	ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	ci.setLayoutCount = 4;
-	ci.pSetLayouts = sets;
-	ci.pushConstantRangeCount = fog ? 1u : 0u;
-	ci.pPushConstantRanges = fog ? &push : NULL;
-	if ( ops->createRaw( device, &ci, &candidateRaw ) != VK_SUCCESS
-			|| candidateRaw == VK_NULL_HANDLE || candidateRaw == owner->raw ) goto fail;
-	candidateAdopted = ops->adoptRaw( backend, (void *)candidateRaw,
-		"wired-temporal-main-layout" );
+	ci.bindGroupLayouts = layouts;
+	ci.numBindGroupLayouts = 4u;
+	ci.pushConstantOffset = fog ? VK_TEMPORAL_FOG_PUSH_OFFSET : 0u;
+	ci.pushConstantSize = fog ? VK_TEMPORAL_FOG_PUSH_SIZE : 0u;
+	ci.pushConstantStages = fog ? RAL_STAGE_FRAGMENT : 0u;
+	ci.debugName = "wired-temporal-main-layout";
+	candidateAdopted = ops->create( backend, &ci );
 	if ( !candidateAdopted || candidateAdopted == owner->adopted ) goto fail;
+	candidateRaw = (VkPipelineLayout)ops->getHandle( candidateAdopted );
+	if ( candidateRaw == VK_NULL_HANDLE || candidateRaw == owner->raw ) goto fail;
 	nextGeneration = owner->allocationGeneration + 1u;
-	if ( owner->adopted ) ops->destroyAdopted( owner->adopted );
-	if ( owner->raw != VK_NULL_HANDLE ) ops->destroyRaw( owner->device, owner->raw );
+	if ( owner->adopted ) ops->destroy( owner->adopted );
 	owner->backend = backend;
 	owner->device = device;
-	memcpy( owner->borrowedSets, borrowedSets, sizeof(owner->borrowedSets) );
+	memcpy( owner->borrowedLayouts, borrowedLayouts,
+		sizeof(owner->borrowedLayouts) );
 	owner->payloadLayout = payloadLayout;
 	owner->payloadLayoutGeneration = payloadLayoutGeneration;
 	owner->raw = candidateRaw;
@@ -251,8 +244,8 @@ qboolean VK_TemporalPipelineLayoutEnsure( vkTemporalPipelineLayoutOwner_t *owner
 	owner->ready = qtrue;
 	return qtrue;
 fail:
-	if ( candidateAdopted && candidateAdopted != owner->adopted ) ops->destroyAdopted( candidateAdopted );
-	if ( candidateRaw != VK_NULL_HANDLE && candidateRaw != owner->raw ) ops->destroyRaw( device, candidateRaw );
+	if ( candidateAdopted && candidateAdopted != owner->adopted )
+		ops->destroy( candidateAdopted );
 	return qfalse;
 }
 
@@ -269,10 +262,9 @@ qboolean VK_TemporalPipelineLayoutReleaseLease( vkTemporalPipelineLayoutOwner_t 
 qboolean VK_TemporalPipelineLayoutRelease( vkTemporalPipelineLayoutOwner_t *owner,
 		const vkTemporalLayoutOps_t *ops ) {
 	uint32_t generation;
-	if ( !owner || !ops || !ops->destroyRaw || !ops->destroyAdopted || owner->leases ) return qfalse;
+	if ( !owner || !ops || !ops->destroy || owner->leases ) return qfalse;
 	generation = owner->allocationGeneration;
-	if ( owner->adopted ) ops->destroyAdopted( owner->adopted );
-	if ( owner->raw != VK_NULL_HANDLE ) ops->destroyRaw( owner->device, owner->raw );
+	if ( owner->adopted ) ops->destroy( owner->adopted );
 	memset( owner, 0, sizeof( *owner ) );
 	owner->allocationGeneration = generation;
 	return qtrue;
@@ -380,7 +372,7 @@ qboolean VK_TemporalPipelineFactoryEnsure( vkTemporalPipelineFactoryOwner_t *own
 	memset( &ri, 0, sizeof( ri ) );
 	ri.sceneFormat = input->sceneFormat;
 	ri.sceneBlend = sceneBlend;
-	for ( i = 0; i < 3; ++i ) ri.genericSetLayouts[i] = (const void *)(uintptr_t)layoutOwner->borrowedSets[i];
+	for ( i = 0; i < 3; ++i ) ri.genericSetLayouts[i] = layoutOwner->borrowedLayouts[i];
 	ri.genericSetLayouts[3] = layoutOwner->payloadLayout;
 	ri.iqmSetLayouts[0] = (const void *)1;
 	ri.iqmSetLayouts[1] = (const void *)2;
@@ -572,7 +564,7 @@ qboolean VK_TemporalGenericPipelineFactoryEnsure( vkTemporalGenericPipelineFacto
 	if(owner->allocationGeneration==UINT32_MAX)return qfalse;
 	memset(&sceneBlend,0,sizeof(sceneBlend));sceneBlend.writeMask=RAL_COLOR_WRITE_ALL;sceneBlend.writeMaskExplicit=qtrue;
 	memset(&ri,0,sizeof(ri));ri.sceneFormat=input->sceneFormat;ri.sceneBlend=sceneBlend;ri.fog=layoutOwner->fog;
-	for(i=0;i<3u;++i)ri.genericSetLayouts[i]=(const void*)(uintptr_t)layoutOwner->borrowedSets[i];
+	for(i=0;i<3u;++i)ri.genericSetLayouts[i]=layoutOwner->borrowedLayouts[i];
 	ri.genericSetLayouts[3]=layoutOwner->payloadLayout;
 	ri.ordinaryVertex=catalog.ordinaryVertex;ri.ordinaryFragment=catalog.ordinaryFragment;
 	ri.temporalVertex=catalog.temporalVertex;ri.temporalWriteFragment=catalog.temporalWriteFragment;

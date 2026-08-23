@@ -36,7 +36,7 @@ return a hash value for the filename
 */
 void R_GammaCorrect( byte *buffer, int bufSize ) {
 #ifdef USE_VULKAN
-	if ( vk.capture.image != VK_NULL_HANDLE )
+	if ( vk.capture.ral_image != NULL )
 		return;
 	if ( !gls.deviceSupportsGamma )
 		return;
@@ -324,7 +324,8 @@ void R_TestDDS_f( void ) {
 	R_LOG( rch_assets, SEV_INFO, "testdds: '%s' -> %dx%d depth=%d  texType=%s  arrayLayers=%u  VkFormat=%d  view=%s descriptor=%s\n",
 		image->imgName, image->width, image->height, image->depth,
 		texTypeName[tt], image->layerCount, (int)image->internalFormat,
-		( image->view != VK_NULL_HANDLE ) ? "ok" : "NULL",
+		( image->ralDescriptorView
+			&& Ral_GetTextureViewHandle( image->ralDescriptorView ) ) ? "ok" : "NULL",
 		( image->descriptor != VK_NULL_HANDLE ) ? "ok" : "NULL" );
 }
 
@@ -1018,6 +1019,7 @@ static void upload_vk_image( image_t *image, byte *pic ) {
 
 	vk_create_image( image, w, h, upload_data.mip_levels );
 	vk_upload_image_data( image, 0, 0, w, h, upload_data.mip_levels, upload_data.buffer, upload_data.buffer_size, qfalse, 0 );
+	vk_ral_register_image( image, upload_data.buffer, w, h );
 
 	ri.Hunk_FreeTempMemory( upload_data.buffer );
 }
@@ -1063,11 +1065,8 @@ image_t *R_CreateImageArray( const char *name, byte **frames, int numFrames, int
 	image->layerCount = (uint32_t)numFrames;
 
 	image->wrapClampMode = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	image->handle        = VK_NULL_HANDLE;
-	image->view          = VK_NULL_HANDLE;
 	image->descriptor    = VK_NULL_HANDLE;
 	image->ralDescriptor = NULL;
-	image->ralDescriptorTexture = NULL;
 	image->ralDescriptorView = NULL;
 	image->ralDescriptorSampler = NULL;
 	image->ral           = NULL;
@@ -1106,11 +1105,11 @@ image_t *R_CreateImageArray( const char *name, byte **frames, int numFrames, int
 		}
 	}
 
-	// register the 2D-array view into the parallel bindless
+// Register the direct 2D-array view into the bindless
 	// SAMPLED_IMAGE binding so q1_ls_array.frag's animArray (and any future
 	// content 2D-array consumer) can sample by role index. vk_create_image
 	// already populated image->bindlessSamplerSlot via vk_update_descriptor_set;
-	// this only allocates the array-binding slot + writes image->view there.
+// this only allocates the array-binding slot + writes the typed view there.
 	vk_ral_register_image_array( image );
 
 	return image;
@@ -1499,25 +1498,14 @@ image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int widt
 	else
 		image->wrapClampMode = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 
-	image->handle = VK_NULL_HANDLE;
-	image->view = VK_NULL_HANDLE;
 	image->descriptor = VK_NULL_HANDLE;
 	image->ralDescriptor = NULL;
-	image->ralDescriptorTexture = NULL;
 	image->ralDescriptorView = NULL;
 	image->ralDescriptorSampler = NULL;
 	image->ral = NULL;
 	image->ralResidencyMipCount = 0;
 	image->ralBindlessSlot = -1;
 	image->bindlessSamplerSlot = -1;
-
-	// parallel-paths migration. The RAL texture is registered
-	// BEFORE upload_vk_image because generate_image_upload_data may mutate
-	// `pic` in place (NPOT scaling, R_MipMap downsamples). Ral_TextureUpload-
-	// Async copies pic into a staging buffer + waits internally, so by the
-	// time it returns the pic data is safe to mutate again. Registration is
-	// a no-op when r_useRALTextures=0 or the RAL infra failed to init.
-	vk_ral_register_image( image, pic, width, height );
 
 	upload_vk_image( image, pic );
 #else
@@ -1838,11 +1826,8 @@ static image_t *R_CreateImageDDS( const char *name, byte *data, int width, int h
 	else
 		image->wrapClampMode = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 
-	image->handle     = VK_NULL_HANDLE;
-	image->view       = VK_NULL_HANDLE;
 	image->descriptor = VK_NULL_HANDLE;
 	image->ralDescriptor = NULL;
-	image->ralDescriptorTexture = NULL;
 	image->ralDescriptorView = NULL;
 	image->ralDescriptorSampler = NULL;
 	image->ral        = NULL;
@@ -1886,7 +1871,7 @@ static image_t *R_CreateImageDDS( const char *name, byte *data, int width, int h
 	// allocator + over-capacity bookkeeping as the main path, so there is one
 	// unified slot index (no raw tr.numImages-1 bypass that would collide with
 	// eviction's slot-recycle). Done BEFORE vk_create_image: vk_create_image →
-	// vk_update_descriptor_set then writes the real DDS-format image->view into
+	// vk_update_descriptor_set then writes the exact DDS-format RAL view into
 	// the assigned bindless slot (the SOLE main-path texture source). Over-capacity
 	// leaves ralBindlessSlot=-1 and the image renders as the slot-0 / sentinel
 	// fallback, same as the main path.
@@ -2042,11 +2027,9 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 vk_ral_reregister_image
 
 Phase 7.15.4-b — the reversibility leg of texture eviction. Restore an evicted-
-but-still-registered image_t: re-decode its source from disk and re-create BOTH the
-RAL bindless texture AND the legacy VkImage, mirroring R_CreateImage's pairing
-(vk_ral_register_image + upload_vk_image). The image_t survives eviction intact
-(imgName / width / height / flags / texType retained; only ral + ralBindlessSlot +
-handle/view were nulled), so re-creation needs nothing eviction discarded.
+but-still-registered image_t: re-decode its source from disk and recreate its sole
+exact RAL texture plus descriptor/residency views. The image_t survives eviction
+with source metadata intact; only the GPU cohort and bindless slot are retired.
 
 Idempotent: a no-op if the image is already resident (image->ral != NULL). Pinned
 images must never be evicted, so one must never reach here — defensively skip + warn
@@ -2090,12 +2073,7 @@ void vk_ral_reregister_image( image_t *image ) {
 		return;
 	}
 
-	// Re-create both halves, mirroring R_CreateImage's pairing (RAL first because
-	// generate_image_upload_data may mutate pic in place; the RAL upload copies into
-	// staging first). vk_ral_register_image is guarded on image->ral == NULL, which
-	// holds here, so it runs the normal registration (free-list slot + async/sync
-	// upload). upload_vk_image rebuilds the legacy VkImage + view.
-	vk_ral_register_image( image, pic, w, h );
+	// Recreate the single exact RAL texture and its descriptor/residency views.
 	upload_vk_image( image, pic );
 
 	ri.Free( pic );
@@ -2107,8 +2085,8 @@ R_TexEvictForce_f
 
 Phase 7.15.4-b TEST HARNESS — manual, render-thread, default-inert. Console command
 `r_texEvictForce <N>`: evict the N least-recently-used UNPINNED content images, on
-the render thread (command handlers run there), freeing BOTH the RAL texture (+ slot
-→ free-list) AND the legacy VkImage so device memory actually drops. This is NOT the
+the render thread (command handlers run there), freeing the RAL texture and returning
+its bindless slot to the free-list so device memory actually drops. This is NOT the
 eviction policy — there is no pressure hook, no poll thread, no hysteresis (step-c/d).
 Its only purpose is to produce a real non-resident state so vk_ral_reregister_image's
 round-trip is testable. Pinned images (R_ImageIsPinned) are skipped — proving the
@@ -2121,10 +2099,8 @@ the FIRST, MANUAL reader of both (the automatic pressure-driven reader is step-c
 R_EvictOneOldestUnpinned
 
 Phase 7.15.4-c shared eviction primitive (render-thread only). Finds the single
-oldest-frameUsed, unpinned, RAL-resident image in tr.images[] and frees BOTH its
-halves: vk_ral_unregister_image (RAL texture + bindless slot → free-list) AND
-vk_destroy_image_resources (legacy VkImage + view) — the load-bearing dual-free
-(without the legacy half the device memory does not drop). Returns the evicted
+oldest-frameUsed, unpinned, RAL-resident image in tr.images[] and retires its
+descriptor/residency children before the sole RAL texture owner. Returns the evicted
 image (for logging) or NULL when nothing evictable remains. The reader of frameUsed
 + R_ImageIsPinned. Shared by the manual r_texEvictForce harness AND the automatic
 vk_ral_drain_evictions pressure path — both run on the render thread, so the scan +
@@ -2173,7 +2149,8 @@ image_t *R_EvictOneOldestUnpinned( void ) {
 		image_t *im = tr.images[i];
 		ralResidencyCandidate_t candidate;
 		ralResidencyTier_t tier;
-		if ( im == NULL || im->ral == NULL ) continue;      // already evicted / never RAL-resident
+		if ( im == NULL || im->ral == NULL
+				|| im->ralResidencyView == NULL ) continue;
 		tier = im->frameUsed == tr.frameCount
 			? RAL_RESIDENCY_TIER_VISIBLE : RAL_RESIDENCY_TIER_BACKGROUND;
 		candidate = R_TextureResidencyCandidate( im, (uint32_t)i,
@@ -2202,13 +2179,9 @@ image_t *R_EvictOneOldestUnpinned( void ) {
 			(unsigned long long)score.total );
 	}
 
-	// free the RAL half (texture + bindless slot → free-list)
+	// Retire children before the single texture owner.
+	vk_ral_release_image_descriptor( victim );
 	vk_ral_unregister_image( victim );
-	// free the legacy VkImage half — the load-bearing free: without it the
-	// device memory does not drop and eviction would be a no-op.
-	vk_destroy_image_resources( &victim->handle, &victim->view );
-	victim->handle = VK_NULL_HANDLE;
-	victim->view   = VK_NULL_HANDLE;
 	victim->flags |= IMGFLAG_RESIDENCY_EVICTED;
 	return victim;
 }
@@ -2394,7 +2367,7 @@ void vk_ral_drain_reregisters( void ) {
 		// enqueue guard (ral==NULL) won't re-mark it.
 		im->flags &= ~IMGFLAG_REREGISTER_PENDING;
 
-		vk_ral_reregister_image( im );         // step-b: re-decode + re-create both halves
+		vk_ral_reregister_image( im );
 
 		if ( im->ral != NULL ) {
 			// Thrash guard: the texture was just sampled, so stamp it as freshly
@@ -3073,20 +3046,24 @@ void R_DeleteTextures( void ) {
 
 #ifdef USE_VULKAN
 	vk_wait_idle();
+	// Particle, decal, primitive and other arena bind groups borrow image views
+	// in addition to each image's own combined-sampler group. Retire the whole
+	// dependent cohort while every view is still live; vk_release_resources
+	// repeats this idempotently before resetting the descriptor arena.
+	vk_ral_release_static_bindgroups();
 
 	for ( i = 0; i < tr.numImages; i++ ) {
 		image_t *img = tr.images[ i ];
-		vk_ral_release_image_descriptor( img );
-		// tear down the parallel RAL texture (if any) FIRST so the
-		// bindless slot is cleared while the RAL texture is still alive. Order
-		// against the legacy VkImage destroy doesn't matter (different VkDevice)
-		// but conceptually pairs with the registration order in R_CreateImage.
+		// Clear the bindless slot and retire residency views before the sole
+		// exact RAL texture owner.
 		vk_ral_unregister_image( img );
-		vk_destroy_image_resources( &img->handle, &img->view );
-
-		// The direct descriptor cohort was already released above; the native
-		// mirror owns no independent pool lifetime.
 	}
+	// The 2D-array table cannot be tombstoned with the 2D white fallback, and
+	// every physical descriptor in both tables may now name a retired view.
+	// Publish a fresh empty set before any loading-screen draw can resume.
+	if ( !vk_ral_rebuild_bindless_set() )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"RAL: failed to rebuild bindless set after texture teardown" );
 	// The unregister loop above pushed every slot onto the bindless free-list.
 	// tr.numImages is about to reset to 0, so the next registration pass must
 	// restart at slot 0 — reset the allocator to keep the slot handout sequential

@@ -8,6 +8,18 @@ file(READ "${ROOT}/code/renderervk/vk_temporal_pipeline_factory.c" FACTORY)
 file(READ "${ROOT}/code/renderervk/vk_temporal_pipeline_factory.h" HEADER)
 file(READ "${ROOT}/CMakeLists.txt" CMAKE_TEXT)
 foreach(needle
+	"ralPipelineLayout_t *(*create)( ralBackend_t *,"
+	"const ralBindGroupLayout_t *borrowedLayouts[3]"
+	"ci.bindGroupLayouts = layouts;"
+	"ci.numBindGroupLayouts = 4u;"
+	"ci.pushConstantOffset = fog ? VK_TEMPORAL_FOG_PUSH_OFFSET : 0u;"
+	"ci.pushConstantStages = fog ? RAL_STAGE_FRAGMENT : 0u;"
+	"candidateAdopted = ops->create( backend, &ci );"
+	"candidateRaw = (VkPipelineLayout)ops->getHandle( candidateAdopted );"
+	"if ( owner->adopted ) ops->destroy( owner->adopted );"
+	"ops.create = Ral_CreatePipelineLayout;"
+	"ops.getHandle = Ral_GetPipelineLayoutHandle;"
+	"ops.destroy = Ral_DestroyPipelineLayout;"
     "vk_ral_create_pipeline_from_gpinfo_exact_core"
     "const vkTemporalSpirvOverrides_t *overrides"
     "vk_ral_create_pipeline_from_gpinfo_exact_core( ci_vk, layout, colorFormats,"
@@ -23,10 +35,15 @@ foreach(needle
     "colorBlend.attachmentCount = 3"
     "vkBlends[1].colorWriteMask = recipe.colorBlends[1].writeMask"
     "vkBlends[2].colorWriteMask = recipe.colorBlends[2].writeMask")
-  string(FIND "${VKC}\n${FACTORY}" "${needle}" pos)
+  string(FIND "${VKC}\n${FACTORY}\n${HEADER}" "${needle}" pos)
   if(pos EQUAL -1)
     message(FATAL_ERROR "factory authority missing: ${needle}")
   endif()
+endforeach()
+foreach(forbidden "qvkCreatePipelineLayout" "qvkDestroyPipelineLayout")
+	if(VKC MATCHES "${forbidden}" OR FACTORY MATCHES "${forbidden}")
+		message(FATAL_ERROR "temporal layout factory regained raw pipeline-layout authority: ${forbidden}")
+	endif()
 endforeach()
 string(REGEX MATCHALL "owner->allocationGeneration==UINT32_MAX" allocation_overflow_guards "${FACTORY}")
 list(LENGTH allocation_overflow_guards allocation_overflow_guard_count)

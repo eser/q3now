@@ -28,3 +28,6 @@
 [submodule "src/libs/sentry-native"]
 	path = src/libs/sentry-native
 	url = https://github.com/getsentry/sentry-native.git
+[submodule "src/libs/ktx-software"]
+	path = src/libs/ktx-software
+	url = https://github.com/KhronosGroup/KTX-Software.git

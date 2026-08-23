@@ -10,7 +10,7 @@ struct EffectsUBO {
 var<private> fragImageSlot_1: u32;
 @group(0) @binding(1) 
 var shaderImages: binding_array<texture_2d<f32>, 64>;
-@group(0) @binding(4)
+@group(0) @binding(4) 
 var shaderImageSampler: sampler;
 var<private> fragUV_1: vec2<f32>;
 var<private> outColor: vec4<f32>;
@@ -73,21 +73,21 @@ fn main_1() {
     let _e41 = handle;
     slot = select(0u, _e41, (_e39 < 64u));
     let _e43 = slot;
-    let _e46 = fragUV_1;
-    let _e47 = textureSample(shaderImages[_e43], shaderImageSampler, _e46);
-    param_1 = _e47;
-    let _e48 = domain_1;
-    param_2 = _e48;
-    let _e49 = decodeColorTexel_u0028_vf4_u003b_u1_u003b((&param_1), (&param_2));
-    texel = _e49;
-    let _e50 = texel;
-    let _e52 = fragColor_1;
-    param_3 = _e52.xyz;
-    let _e54 = sRGBToLinear_u0028_vf3_u003b((&param_3));
-    let _e55 = (_e50.xyz * _e54);
-    let _e57 = texel[3u];
-    let _e59 = fragColor_1[3u];
-    outColor = vec4<f32>(_e55.x, _e55.y, _e55.z, (_e57 * _e59));
+    let _e45 = fragUV_1;
+    let _e46 = textureSample(shaderImages[_e43], shaderImageSampler, _e45);
+    param_1 = _e46;
+    let _e47 = domain_1;
+    param_2 = _e47;
+    let _e48 = decodeColorTexel_u0028_vf4_u003b_u1_u003b((&param_1), (&param_2));
+    texel = _e48;
+    let _e49 = texel;
+    let _e51 = fragColor_1;
+    param_3 = _e51.xyz;
+    let _e53 = sRGBToLinear_u0028_vf3_u003b((&param_3));
+    let _e54 = (_e49.xyz * _e53);
+    let _e56 = texel[3u];
+    let _e58 = fragColor_1[3u];
+    outColor = vec4<f32>(_e54.x, _e54.y, _e54.z, (_e56 * _e58));
     return;
 }
 

@@ -1413,14 +1413,14 @@
       "symbol": "gamma_frag_spv",
       "stage": "RAL_STAGE_FRAGMENT",
       "sourceDigest": {
-        "lane0": "a42d75cc96b57409",
-        "lane1": "1e558e494f3b7073"
+        "lane0": "7d9c9e3ccdc48375",
+        "lane1": "fa046953855aa479"
       },
       "spirv": {
-        "byteCount": 8692,
+        "byteCount": 10616,
         "digest": {
-          "lane0": "80044d37bca7cd7f",
-          "lane1": "1a1d780a5240e53b"
+          "lane0": "6fecbab0e7e8e0fe",
+          "lane1": "1090bdfa2bb4ef3c"
         }
       },
       "reflection": {
@@ -1524,6 +1524,11 @@
             "constantId": 13,
             "stageFlags": "RAL_STAGE_FRAGMENT",
             "defaultValue": 1092616192
+          },
+          {
+            "constantId": 14,
+            "stageFlags": "RAL_STAGE_FRAGMENT",
+            "defaultValue": 0
           }
         ],
         "portable": true,

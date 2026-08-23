@@ -65,11 +65,10 @@ typedef struct {
 
 typedef struct {
 	void *(*getBindGroupLayoutHandle)( const ralBindGroupLayout_t * );
-	VkResult (*createRawLayout)( VkDevice,
-		const VkPipelineLayoutCreateInfo *, VkPipelineLayout * );
-	void (*destroyRawLayout)( VkDevice, VkPipelineLayout );
-	ralPipelineLayout_t *(*adoptRawLayout)( ralBackend_t *, void *, const char * );
-	void (*destroyAdoptedLayout)( ralPipelineLayout_t * );
+	ralPipelineLayout_t *(*createLayout)( ralBackend_t *,
+		const ralPipelineLayoutCreateInfo_t * );
+	void *(*getLayoutHandle)( const ralPipelineLayout_t * );
+	void (*destroyLayout)( ralPipelineLayout_t * );
 	ralPipeline_t *(*createPipeline)( ralBackend_t *,
 		const ralGraphicsPipelineCreateInfo_t * );
 	void (*destroyPipeline)( ralPipeline_t * );

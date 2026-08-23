@@ -343,6 +343,28 @@ All licenses in this section are **redistribution-permissive with attribution
 required** (BSD-2/3, MIT, Apache-2.0, Zlib variants). q3now's GPL-2.0-or-later
 binaries inherit obligations from each listed library.
 
+### 3.0 KTX-Software / libktx
+
+- **Upstream:** https://github.com/KhronosGroup/KTX-Software
+- **License:** Apache-2.0 (see Appendix E)
+- **Path:** `src/libs/ktx-software/`
+- **Pinned:** commit `4d6fc70eaf62ad0558e63e8d97eb9766118327a6` (`v4.4.2`)
+- **Build scope:** static read-only `ktx_read`; tools, tests, JNI/Python,
+  OpenGL upload and Vulkan upload are disabled. The KTX1 parser remains enabled
+  because libktx 4.4.2's read archive retains that internal constructor link.
+
+Copyright notice:
+
+```
+Copyright 2015-2023 The Khronos Group Inc.
+Copyright 2022-2023 RasterGrid Kft.
+```
+
+The Basis Universal transcoder sources bundled by KTX-Software retain their
+upstream Apache-2.0 notices. Test fixture bytes derived from KTX-Software's
+Apache-2.0 test corpus retain the same license and provenance in their source
+header.
+
 ### 3.1 zlib-ng
 
 - **Upstream:** https://github.com/zlib-ng/zlib-ng

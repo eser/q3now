@@ -431,7 +431,7 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 	VkSpecializationInfo                    specInfo_v;
 	uint32_t                                specData_v[ RAL_VK_MAX_SPEC_CONSTS ];
 	qboolean                                haveSpec;
-	uint32_t                                i, nSetLayouts;
+	uint32_t                                i, nSetLayouts, optionalMaskLayoutCount;
 	VkResult                                r;
 	VkPipeline                              vkPipe = VK_NULL_HANDLE;
 	ralShaderPipelineKey_t                  semanticKey;
@@ -466,6 +466,19 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 		        ci->pushConstantSize, b->caps.maxPushConstantSize, ci->debugName ? ci->debugName : "?" );
 		return NULL;
 	}
+	optionalMaskLayoutCount = ci->numBindGroupLayouts;
+	if ( optionalMaskLayoutCount == 0u && ci->externalLayout
+			&& ci->externalLayout->backend == b
+			&& ci->externalLayout->portableShapeKnown ) {
+		optionalMaskLayoutCount = ci->externalLayout->numBindGroupLayouts;
+	}
+	if ( ci->optionalBindGroupMask
+			& ~(( 1u << optionalMaskLayoutCount ) - 1u) ) {
+		RAL_VK_LOG( SEV_WARN,
+			"Ral_CreateGraphicsPipeline: optional bind-group mask exceeds layout count (%s)\n",
+			ci->debugName ? ci->debugName : "?" );
+		return NULL;
+	}
 	// Vulkan requires every VkPipelineColorBlendAttachmentState to be
 	// identical when independentBlend was not enabled (VUID 00605). Reject
 	// before layout or shader-module creation, using effective defaults and
@@ -491,7 +504,9 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 		if ( ci->externalLayout->portableShapeKnown ) {
 			if ( ci->externalLayout->pushConstantSize != ci->pushConstantSize
 					|| ci->externalLayout->pushConstantStages
-						!= ci->pushConstantStages ) return NULL;
+						!= ci->pushConstantStages
+					|| ci->externalLayout->externalPushRangeCount
+						!= ( ci->pushConstantSize ? 1u : 0u ) ) return NULL;
 			if ( ci->numBindGroupLayouts > 0u ) {
 				if ( ci->numBindGroupLayouts
 						!= ci->externalLayout->numBindGroupLayouts ) return NULL;
@@ -706,8 +721,12 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 	p->layout              = layout;
 	p->layoutCacheIndex    = layoutCacheIdx;
 	p->bindPoint           = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	p->pushConstantOffset  = ci->externalLayout
+		&& ci->externalLayout->portableShapeKnown && ci->pushConstantSize
+		? ci->externalLayout->externalPushRanges[0].offset : 0u;
 	p->pushConstantSize    = ci->pushConstantSize;
 	p->pushConstantStages  = ralVk_PushConstantStages( ci->pushConstantStages );
+	p->optionalBindGroupMask = ci->optionalBindGroupMask;
 	if ( ci->externalLayout == NULL ) {
 		p->bindGroupLayoutsRegistered = qtrue;
 		p->numSetLayouts = nSetLayouts;
@@ -722,6 +741,10 @@ ralPipeline_t *Ral_CreateGraphicsPipeline( ralBackend_t *b, const ralGraphicsPip
 	}
 	p->hasSemanticKey      = hasSemanticKey;
 	if ( hasSemanticKey ) p->semanticKey = semanticKey;
+	if ( ci->debugName ) {
+		strncpy( p->debugName, ci->debugName, sizeof( p->debugName ) - 1u );
+		p->debugName[ sizeof( p->debugName ) - 1u ] = '\0';
+	}
 	ralVk_SetObjectName( b, (uint64_t)vkPipe, VK_OBJECT_TYPE_PIPELINE, ci->debugName );
 	return p;
 
@@ -785,7 +808,9 @@ ralPipeline_t *Ral_CreateComputePipeline( ralBackend_t *b, const ralComputePipel
 		if ( ci->externalLayout->portableShapeKnown ) {
 			if ( ci->externalLayout->pushConstantSize != ci->pushConstantSize
 					|| ci->externalLayout->pushConstantStages
-						!= ( ci->pushConstantSize ? RAL_STAGE_COMPUTE : 0u ) )
+						!= ( ci->pushConstantSize ? RAL_STAGE_COMPUTE : 0u )
+					|| ci->externalLayout->externalPushRangeCount
+						!= ( ci->pushConstantSize ? 1u : 0u ) )
 				return NULL;
 			if ( ci->numBindGroupLayouts > 0u ) {
 				if ( ci->numBindGroupLayouts
@@ -841,6 +866,9 @@ ralPipeline_t *Ral_CreateComputePipeline( ralBackend_t *b, const ralComputePipel
 	p->layout              = layout;
 	p->layoutCacheIndex    = layoutCacheIdx;
 	p->bindPoint           = VK_PIPELINE_BIND_POINT_COMPUTE;
+	p->pushConstantOffset  = ci->externalLayout
+		&& ci->externalLayout->portableShapeKnown && ci->pushConstantSize
+		? ci->externalLayout->externalPushRanges[0].offset : 0u;
 	p->pushConstantSize    = ci->pushConstantSize;
 	p->pushConstantStages  = VK_SHADER_STAGE_COMPUTE_BIT;
 	if ( ci->externalLayout == NULL ) {
@@ -857,6 +885,10 @@ ralPipeline_t *Ral_CreateComputePipeline( ralBackend_t *b, const ralComputePipel
 	}
 	p->hasSemanticKey      = hasSemanticKey;
 	if ( hasSemanticKey ) p->semanticKey = semanticKey;
+	if ( ci->debugName ) {
+		strncpy( p->debugName, ci->debugName, sizeof( p->debugName ) - 1u );
+		p->debugName[ sizeof( p->debugName ) - 1u ] = '\0';
+	}
 	ralVk_SetObjectName( b, (uint64_t)vkPipe, VK_OBJECT_TYPE_PIPELINE, ci->debugName );
 	return p;
 }

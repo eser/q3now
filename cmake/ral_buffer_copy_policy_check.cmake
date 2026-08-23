@@ -78,35 +78,34 @@ require_text("${command}"
 	"(void)Ral_CmdCopyBufferExact( cb, src, dst, region );"
 	"compatibility forwarding")
 
-# Product calls only the central registry resolver and never loads or emits
-# vkCmdCopyBuffer itself. The nine former sites preserve their exact offsets,
-# sizes and native source/destination identities as bridge inputs.
+# Product owns one portable staging transaction. It maps and unmaps through a
+# generation-bound ticket, records explicit HOST_WRITE/COPY_SOURCE transitions,
+# and only then emits exact typed copies. No native registry or raw command
+# fallback is permitted.
 forbid_regex("${product}" "(^|[^A-Za-z0-9_])qvkCmdCopyBuffer([^A-Za-z0-9_]|$)"
 	"raw product command")
 forbid_regex("${product}" "PFN_vkCmdCopyBuffer([^A-Za-z0-9_]|$)"
 	"raw product PFN")
 foreach(needle IN ITEMS
-	"ralBuffer_t *src = vk_ral_lookup_buffer( srcNative );"
-	"ralBuffer_t *dst = vk_ral_lookup_buffer( dstNative );"
-	"Ral_GetBufferHandle( src ) != (void *)srcNative"
-	"Ral_GetBufferHandle( dst ) != (void *)dstNative"
-	"return Ral_CmdCopyBufferExact( command, src, dst, copy );"
-	"vk.staging_buffer.handle, *outVertBuf, &copyRegion"
-	"vk.staging_buffer.handle, *outIdxBuf, &copyRegion"
-	"vk.staging_buffer.handle, vk.vbo.vertex_buffer,"
-	"vk.staging_buffer.handle, vk.shadowMap.casterBmodelBuf,"
-	"vk.staging_buffer.handle, vk.shadowMap.casterBuf, &region"
-	"vk.shadowMap.casterAtestBuf, &aregion"
-	"copyRegion.srcOffset = vertSize;"
-	"copyRegion.dstOffset = uploadDone;"
-	"region.dstOffset = vBytes + uploadDone;"
-	"aregion.dstOffset = avBytes + aDone;")
-	require_text("${product}" "${needle}" "registered product operand seam")
+	"static qboolean vk_ral_stage_buffer_copy( ralBuffer_t *destination,"
+	"vk_ral_write_upload_buffer( vk.staging_buffer.ral_buffer,"
+	"RAL_RESOURCE_USAGE_HOST_WRITE,"
+	"RAL_RESOURCE_USAGE_COPY_SOURCE )"
+	"recorded = Ral_CmdCopyBufferExact( command,"
+	"recorded = vk_ral_stage_buffer_copy( vertCandidate, 0u, vertData,"
+	"vk_ral_stage_buffer_copy( idxCandidate, 0u,"
+	"vk_ral_stage_buffer_copy( candidate, uploadDone,"
+	"vk_ral_stage_buffer_copy( vk.shadowMap.ral_casterBmodelBuf,"
+	"vk_ral_stage_buffer_copy( vk.shadowMap.ral_casterBuf,"
+	"vk_ral_stage_buffer_copy( vk.shadowMap.ral_casterAtestBuf,")
+	require_text("${product}" "${needle}" "portable staging operand seam")
 endforeach()
-string(REGEX MATCHALL "if [(] !vk_ral_record_registered_buffer_copy[(]" product_calls "${product}")
+forbid_regex("${product}" "vk_ral_(lookup|register|unregister)_buffer"
+	"retired native buffer registry")
+string(REGEX MATCHALL "vk_ral_stage_buffer_copy[(]" product_calls "${product}")
 list(LENGTH product_calls product_call_count)
-if(NOT product_call_count EQUAL 9)
-	message(FATAL_ERROR "registered product copy inventory changed: ${product_call_count}/9")
+if(NOT product_call_count EQUAL 10)
+	message(FATAL_ERROR "portable staging buffer-copy inventory changed: ${product_call_count}/10")
 endif()
 
 foreach(needle IN ITEMS

@@ -1030,6 +1030,7 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 	VkImageViewCreateInfo vci;
 	VkMemoryRequirements  req;
 	ralTexture_t         *tex;
+	VkImageView          *layerViews = NULL;
 	uint32_t              layers, depth3d, mips;
 	uint32_t              qfamShare[3];   // concurrent-sharing family list (function-scoped for pQueueFamilyIndices validity)
 	uint32_t              qfamShareCount;
@@ -1143,11 +1144,45 @@ ralTexture_t *Ral_CreateTexture( ralBackend_t *b, const ralTextureCreateInfo_t *
 		RAL_VK_LOG( SEV_WARN, "Ral_CreateTexture: vkCreateImageView failed\n" );
 		ralVk_Free( b, tex->alloc ); b->vk.DestroyImage( b->device, tex->image, NULL ); free( tex ); return NULL;
 	}
+	// Dynamic rendering selects an array slice through the attachment view, not
+	// through VkRenderingInfo. Direct 2D-array attachment textures therefore own
+	// one single-layer 2D view per slice, matching adopted-array semantics.
+	if ( ci->type == RAL_TEXTURE_2D_ARRAY && layers > 1u
+			&& ( ci->usage & ( RAL_TEXTURE_USAGE_COLOR_ATTACHMENT
+				| RAL_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT ) ) ) {
+		uint32_t i;
+		layerViews = (VkImageView *)calloc( layers, sizeof( *layerViews ) );
+		if ( !layerViews ) goto layer_view_fail;
+		vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		vci.subresourceRange.levelCount = 1u;
+		vci.subresourceRange.layerCount = 1u;
+		for ( i = 0u; i < layers; ++i ) {
+			vci.subresourceRange.baseArrayLayer = i;
+			if ( b->vk.CreateImageView( b->device, &vci, NULL,
+					&layerViews[i] ) != VK_SUCCESS ) goto layer_view_fail;
+		}
+		tex->layerViews = layerViews;
+		tex->numLayerViews = layers;
+	}
 	if ( ci->debugName ) {
 		ralVk_SetObjectName( b, (uint64_t)tex->image,       VK_OBJECT_TYPE_IMAGE,      ci->debugName );
 		ralVk_SetObjectName( b, (uint64_t)tex->defaultView, VK_OBJECT_TYPE_IMAGE_VIEW, ci->debugName );
 	}
 	return tex;
+
+layer_view_fail:
+	if ( layerViews ) {
+		uint32_t i;
+		for ( i = 0u; i < layers; ++i )
+			if ( layerViews[i] )
+				b->vk.DestroyImageView( b->device, layerViews[i], NULL );
+		free( layerViews );
+	}
+	b->vk.DestroyImageView( b->device, tex->defaultView, NULL );
+	ralVk_Free( b, tex->alloc );
+	b->vk.DestroyImage( b->device, tex->image, NULL );
+	free( tex );
+	return NULL;
 }
 
 void Ral_DestroyTexture( ralTexture_t *tex ) {
@@ -1165,6 +1200,14 @@ void Ral_DestroyTexture( ralTexture_t *tex ) {
 	// Free only the wrapper struct; defer-destroy of the backend objects belongs
 	// to the caller's existing teardown path.
 	if ( tex->ownsImage ) {
+		if ( tex->layerViews ) {
+			uint32_t i;
+			for ( i = 0u; i < tex->numLayerViews; ++i )
+				if ( tex->layerViews[i] )
+					ralVk_DeferDestroy( b, RAL_RES_IMAGE_VIEW,
+						RAL_VK_H2U( tex->layerViews[i] ), 0u, NULL );
+			free( (void *)tex->layerViews );
+		}
 		ralVk_DeferDestroy( b, RAL_RES_IMAGE_AND_VIEW, RAL_VK_H2U( tex->image ), RAL_VK_H2U( tex->defaultView ), tex->alloc );
 	}
 	free( tex );
@@ -2623,9 +2666,13 @@ ralPipelineLayout_t *Ral_CreatePipelineLayout( ralBackend_t *b,
 			|| ( b->caps.maxBindGroups > 0u
 				&& ci->numBindGroupLayouts > b->caps.maxBindGroups )
 			|| ( ci->pushConstantSize == 0u ) != ( ci->pushConstantStages == 0u )
+			|| ( ci->pushConstantSize == 0u && ci->pushConstantOffset != 0u )
+			|| ( ci->pushConstantOffset & 3u ) != 0u
 			|| ( ci->pushConstantSize & 3u ) != 0u
 			|| ( ci->pushConstantStages & ~RAL_STAGE_ALL ) != 0u
-			|| ci->pushConstantSize > b->caps.maxPushConstantSize ) return NULL;
+			|| ci->pushConstantOffset > b->caps.maxPushConstantSize
+			|| ci->pushConstantSize > b->caps.maxPushConstantSize
+				- ci->pushConstantOffset ) return NULL;
 	for ( i = 0u; i < ci->numBindGroupLayouts; ++i ) {
 		const ralBindGroupLayout_t *layout = ci->bindGroupLayouts[i];
 		if ( !layout || layout->backend != b || layout->layout == VK_NULL_HANDLE )
@@ -2637,7 +2684,7 @@ ralPipelineLayout_t *Ral_CreatePipelineLayout( ralBackend_t *b,
 	RAL_ZERO( *candidate );
 	RAL_ZERO( pushRange );
 	pushRange.stageFlags = ralVk_StageFlags( ci->pushConstantStages );
-	pushRange.offset = 0u;
+	pushRange.offset = ci->pushConstantOffset;
 	pushRange.size = ci->pushConstantSize;
 	RAL_ZERO( nativeInfo );
 	nativeInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -2665,7 +2712,7 @@ ralPipelineLayout_t *Ral_CreatePipelineLayout( ralBackend_t *b,
 	if ( ci->pushConstantSize > 0u ) {
 		candidate->externalPushRangeCount = 1u;
 		candidate->externalPushRanges[0].stageFlags = ci->pushConstantStages;
-		candidate->externalPushRanges[0].offset = 0u;
+		candidate->externalPushRanges[0].offset = ci->pushConstantOffset;
 		candidate->externalPushRanges[0].size = ci->pushConstantSize;
 	}
 	ralVk_SetObjectName( b, (uint64_t)candidate->vkHandle,
@@ -2781,13 +2828,9 @@ qboolean Ral_RegisterAdoptedBindGroupDynamicBuffer( ralBindGroup_t *group,
 // `tex == NULL` is a no-op clear. Vulkan doesn't have an
 // "unwrite descriptor" operation; writing VK_NULL_HANDLE as the imageView is
 // invalid even with PARTIALLY_BOUND (which only protects UNINITIALIZED
-// descriptors, not explicit-null writes). The bind-group is destroyed on
-// teardown either way, and PARTIALLY_BOUND + UPDATE_AFTER_BIND mean a stale
-// descriptor (left pointing at a now-destroyed VkImageView) is OK provided
-// no shader accesses it — which is currently enforced by the bindless table
-// being unused. A real "evict + reuse slot" path lands later when the
-// renderer starts consuming the bindless set and needs slot-recycling
-// semantics.
+// descriptors, not explicit-null writes). Callers that can destroy a formerly
+// published view must overwrite its slot with a live, dimension-compatible
+// fallback or rebuild the bind group before destroying that view.
 static int ralVk_BindGroupSetImageViewAt( ralBindGroup_t *g, uint32_t slot, VkImageView imageView, const char *caller ) {
 	VkWriteDescriptorSet  w;
 	VkDescriptorImageInfo img;

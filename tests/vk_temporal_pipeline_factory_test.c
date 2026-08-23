@@ -11,7 +11,7 @@ static uintptr_t s_nextRaw=100, s_nextAdopt=200, s_nextPipe=300;
 static int s_failRaw, s_failAdopt, s_failPipeAt, s_createPipeCount, s_destroyCount;
 static int s_destroyOrder[128], s_destroyOrderCount, s_drainFails;
 static uint32_t s_lastPushCount,s_lastPushOffset,s_lastPushSize,s_lastPushStages;
-static VkDescriptorSetLayout s_expectedSets[4];
+static const ralBindGroupLayout_t *s_expectedLayouts[4];
 static vkTemporalPipelineBlobCatalog_t s_catalog;
 static ralPipelineLayout_t *s_genericLayout,*s_iqmLayout;
 static const VkPipelineInputAssemblyStateCreateInfo *s_expectedIa;
@@ -29,18 +29,19 @@ static const unsigned char b0[4]={0},b1[8]={1},b2[12]={2},b3[16]={3},b4[20]={4},
 #undef VK_TEMPORAL_PAIR
 #undef VK_TEMPORAL_BLOB
 
-static VkResult FakeCreateRaw(VkDevice d,const VkPipelineLayoutCreateInfo *ci,VkPipelineLayout *out){
-	uint32_t i;(void)d; if(s_failRaw)return VK_ERROR_INITIALIZATION_FAILED;
-	if(ci->setLayoutCount!=4)return VK_ERROR_INITIALIZATION_FAILED;
-	for(i=0;i<4;i++)if(ci->pSetLayouts[i]!=s_expectedSets[i])return VK_ERROR_INITIALIZATION_FAILED;
-	s_lastPushCount=ci->pushConstantRangeCount;
-	if(s_lastPushCount){s_lastPushOffset=ci->pPushConstantRanges[0].offset;s_lastPushSize=ci->pPushConstantRanges[0].size;s_lastPushStages=ci->pPushConstantRanges[0].stageFlags;}
-	*out=(VkPipelineLayout)(++s_nextRaw);return VK_SUCCESS;
+static ralPipelineLayout_t *FakeCreateLayout(ralBackend_t*b,const ralPipelineLayoutCreateInfo_t *ci){
+	uint32_t i;(void)b;if(s_failRaw)return NULL;
+	if(!ci||ci->numBindGroupLayouts!=4u||!ci->bindGroupLayouts)return NULL;
+	for(i=0;i<4u;i++)if(ci->bindGroupLayouts[i]!=s_expectedLayouts[i])return NULL;
+	s_lastPushCount=ci->pushConstantSize?1u:0u;
+	s_lastPushOffset=ci->pushConstantOffset;s_lastPushSize=ci->pushConstantSize;
+	s_lastPushStages=ci->pushConstantStages;
+	s_nextRaw++;return(ralPipelineLayout_t*)(++s_nextAdopt);
 }
-static void FakeDestroyRaw(VkDevice d,VkPipelineLayout h){(void)d;s_destroyOrder[s_destroyOrderCount++]=(int)(uintptr_t)h;}
-static void *FakeGetBgl(const ralBindGroupLayout_t *p){return (void*)p;}
-static ralPipelineLayout_t *FakeAdopt(ralBackend_t*b,void*h,const char*n){(void)b;(void)h;(void)n;if(s_failAdopt)return NULL;return(ralPipelineLayout_t*)(++s_nextAdopt);}
-static void FakeDestroyAdopt(ralPipelineLayout_t*p){s_destroyOrder[s_destroyOrderCount++]=(int)(uintptr_t)p;}
+static void *FakeGetLayoutHandle(const ralPipelineLayout_t *p){
+	(void)p;return s_failAdopt?NULL:(void*)s_nextRaw;
+}
+static void FakeDestroyLayout(ralPipelineLayout_t*p){s_destroyOrder[s_destroyOrderCount++]=(int)(uintptr_t)p;}
 static qboolean FakeDrain(ralBackend_t*b){(void)b;if(s_drainFails){s_drainFails--;return qfalse;}return qtrue;}
 static qboolean FakeLookup(VkShaderModule m,vkTemporalShaderBlob_t*out){
 	if(!out)return qfalse;
@@ -98,10 +99,10 @@ static vkTemporalShaderBlob_t B(const unsigned char*p,uint32_t n){vkTemporalShad
 
 int main(void){
 	vkTemporalPipelineLayoutOwner_t lo;vkTemporalPipelineFactoryOwner_t fo;
-	vkTemporalLayoutOps_t lops={FakeCreateRaw,FakeDestroyRaw,FakeGetBgl,FakeAdopt,FakeDestroyAdopt};
+	vkTemporalLayoutOps_t lops={FakeCreateLayout,FakeGetLayoutHandle,FakeDestroyLayout};
 	vkTemporalPipelineFactoryOps_t pops={FakeCreatePipe,FakeDestroyPipe,FakeDrain,FakeLookup};
-	VkDescriptorSetLayout sets[3]={(VkDescriptorSetLayout)11,(VkDescriptorSetLayout)12,(VkDescriptorSetLayout)13};
-	ralBindGroupLayout_t *payload=(ralBindGroupLayout_t*)14;
+	const ralBindGroupLayout_t *layouts[3]={(ralBindGroupLayout_t*)11,(ralBindGroupLayout_t*)12,(ralBindGroupLayout_t*)13};
+	const ralBindGroupLayout_t *payload=(ralBindGroupLayout_t*)14;
 	VkPipelineColorBlendAttachmentState att;VkPipelineColorBlendStateCreateInfo cb;
 	VkPipelineShaderStageCreateInfo stages[2];vkGenericSpecializationGraph_t specGraph;
 	uint32_t vertexSpecWord=1,fragmentSpecWords[VK_GENERIC_FRAGMENT_SPEC_COUNT]={0};
@@ -132,11 +133,11 @@ int main(void){
 	{ static VkPipelineShaderStageCreateInfo iqmStages[2]; iqmStages[0]=stages[0];iqmStages[1]=stages[1];iqmStages[0].module=(VkShaderModule)61;iqmStages[1].module=(VkShaderModule)62;iqm.pStages=iqmStages; }
 	memset(&in,0,sizeof(in));in.pipelineGeneration=1;in.topologyGeneration=1;in.iqmLayoutGeneration=1;in.sceneFormat=RAL_FORMAT_R16G16B16A16_SFLOAT;in.depthFormat=RAL_FORMAT_D32_SFLOAT;in.exactTx1=qtrue;
 	memset(&s_catalog,0,sizeof(s_catalog));s_catalog.ordinaryVertex=B(b0,sizeof(b0));s_catalog.ordinaryFragment=B(b1,sizeof(b1));s_catalog.temporalVertex=B(b2,sizeof(b2));s_catalog.temporalWriteFragment=B(b3,sizeof(b3));s_catalog.temporalInvalidateFragment=B(b4,sizeof(b4));s_catalog.iqmVertex=B(b5,sizeof(b5));s_catalog.iqmOrdinaryFragment=B(b6,sizeof(b6));s_catalog.iqmInvalidateFragment=B(b7,sizeof(b7));s_catalog.generation=1;
-	memcpy(s_expectedSets,sets,sizeof(sets));s_expectedSets[3]=(VkDescriptorSetLayout)payload;
+	memcpy(s_expectedLayouts,layouts,sizeof(layouts));s_expectedLayouts[3]=payload;
 	VK_TemporalPipelineLayoutInit(&lo);
-	CHECK(VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,sets,payload,1,qfalse,&lops));
+	CHECK(VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,layouts,payload,1,qfalse,&lops));
 	CHECK(lo.ready&&lo.leases==0&&lo.allocationGeneration==1&&s_lastPushCount==0);
-	oldGen=lo.allocationGeneration;CHECK(VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,sets,payload,1,qfalse,&lops));CHECK(lo.allocationGeneration==oldGen);
+	oldGen=lo.allocationGeneration;CHECK(VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,layouts,payload,1,qfalse,&lops));CHECK(lo.allocationGeneration==oldGen);
 	VK_TemporalPipelineFactoryInit(&fo);s_createPipeCount=0;
 	s_genericLayout=lo.adopted;s_iqmLayout=(ralPipelineLayout_t*)9;s_expectedIa=&ia;s_expectedRs=&rs;s_expectedDs=&ds;s_genericBase=&gp;s_iqmBase=&iqm;
 	CHECK(VK_TemporalPipelineFactoryEnsure(&fo,&lo,(ralPipelineLayout_t*)9,&gp,&iqm,&in,&s_catalog,&pops));
@@ -169,13 +170,13 @@ int main(void){
 	bind.inputRate=VK_VERTEX_INPUT_RATE_INSTANCE;CHECK(!VK_TemporalPipelineFactoryEnsure(&fo,&lo,(ralPipelineLayout_t*)9,&gp,&iqm,&in,&s_catalog,&pops));bind.inputRate=VK_VERTEX_INPUT_RATE_VERTEX;
 	ia.primitiveRestartEnable=VK_TRUE;CHECK(!VK_TemporalPipelineFactoryEnsure(&fo,&lo,(ralPipelineLayout_t*)9,&gp,&iqm,&in,&s_catalog,&pops));ia.primitiveRestartEnable=VK_FALSE;
 	ms.sampleShadingEnable=VK_TRUE;CHECK(!VK_TemporalPipelineFactoryEnsure(&fo,&lo,(ralPipelineLayout_t*)9,&gp,&iqm,&in,&s_catalog,&pops));ms.sampleShadingEnable=VK_FALSE;
-	CHECK(!VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,sets,payload,2,qfalse,&lops));
+	CHECK(!VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,layouts,payload,2,qfalse,&lops));
 	before=fo;s_failPipeAt=2;s_createPipeCount=0;in.pipelineGeneration=2;
 	CHECK(!VK_TemporalPipelineFactoryEnsure(&fo,&lo,(ralPipelineLayout_t*)9,&gp,&iqm,&in,&s_catalog,&pops));CHECK(memcmp(&fo,&before,sizeof(fo))==0);s_failPipeAt=0;
 	oldDestroy=s_destroyCount;s_createPipeCount=0;s_drainFails=1;
 	CHECK(VK_TemporalPipelineFactoryEnsure(&fo,&lo,(ralPipelineLayout_t*)9,&gp,&iqm,&in,&s_catalog,&pops));
 	CHECK(fo.ready&&fo.retiringLease&&lo.leases==2&&s_destroyCount==oldDestroy+4);
-	CHECK(!VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,sets,payload,2,qfalse,&lops));
+	CHECK(!VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,layouts,payload,2,qfalse,&lops));
 	CHECK(VK_TemporalPipelineFactoryEnsure(&fo,&lo,(ralPipelineLayout_t*)9,&gp,&iqm,&in,&s_catalog,&pops));CHECK(!fo.retiringLease&&lo.leases==1);
 	// Exact key includes formats, layout generation, IQM layout and full blob identity.
 	before=fo;in.sceneFormat=RAL_FORMAT_R8G8B8A8_UNORM;s_failPipeAt=1;s_createPipeCount=0;CHECK(!VK_TemporalPipelineFactoryEnsure(&fo,&lo,(ralPipelineLayout_t*)9,&gp,&iqm,&in,&s_catalog,&pops));CHECK(memcmp(&fo,&before,sizeof(fo))==0);in.sceneFormat=RAL_FORMAT_R16G16B16A16_SFLOAT;s_failPipeAt=0;
@@ -285,10 +286,10 @@ int main(void){
 		s_splitMode=0;
 	}
 	CHECK(VK_TemporalPipelineLayoutRelease(&lo,&lops));
-	CHECK(s_destroyOrderCount>=2&&s_destroyOrder[s_destroyOrderCount-2]>200&&s_destroyOrder[s_destroyOrderCount-1]>100);
+	CHECK(s_destroyOrderCount>=1&&s_destroyOrder[s_destroyOrderCount-1]>200);
 	// Build-level fog layout authors the exact sole FS 64/32 range.
-	VK_TemporalPipelineLayoutInit(&lo);CHECK(VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,sets,payload,3,qtrue,&lops));
-	CHECK(s_lastPushCount==1&&s_lastPushOffset==64&&s_lastPushSize==32&&s_lastPushStages==VK_SHADER_STAGE_FRAGMENT_BIT);
+	VK_TemporalPipelineLayoutInit(&lo);CHECK(VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,layouts,payload,3,qtrue,&lops));
+	CHECK(s_lastPushCount==1&&s_lastPushOffset==64&&s_lastPushSize==32&&s_lastPushStages==RAL_STAGE_FRAGMENT);
 	{ vkTemporalGenericPipelineFactoryOwner_t go;vkTemporalGenericPipelineFactoryInput_t gi;uint32_t shaderFog;
 		memset(&gi,0,sizeof(gi));gi.key=(vkTemporalGenericKey_t){2,VK_TEMPORAL_GENERIC_PLAIN,qfalse,qfalse};
 		gi.pipelineGeneration=gi.topologyGeneration=gi.catalogGeneration=1;gi.sceneFormat=RAL_FORMAT_R16G16B16A16_SFLOAT;gi.depthFormat=RAL_FORMAT_D32_SFLOAT;
@@ -302,6 +303,6 @@ int main(void){
 		CHECK(VK_TemporalPipelineLayoutReleaseLease(&lo));s_splitMode=0; }
 	CHECK(VK_TemporalPipelineLayoutRelease(&lo,&lops));
 	// Layout candidate failures are output-atomic.
-	VK_TemporalPipelineLayoutInit(&lo);before=fo;s_failRaw=1;CHECK(!VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,sets,payload,1,qfalse,&lops));CHECK(!lo.ready);s_failRaw=0;s_failAdopt=1;CHECK(!VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,sets,payload,1,qfalse,&lops));CHECK(!lo.ready);s_failAdopt=0;
+	VK_TemporalPipelineLayoutInit(&lo);before=fo;s_failRaw=1;CHECK(!VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,layouts,payload,1,qfalse,&lops));CHECK(!lo.ready);s_failRaw=0;s_failAdopt=1;CHECK(!VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,layouts,payload,1,qfalse,&lops));CHECK(!lo.ready);s_failAdopt=0;
 	puts("vk temporal pipeline factory contract: PASS");return 0;
 }

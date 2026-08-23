@@ -25,11 +25,16 @@ static qboolean RequestValid( const ralTransferRequest_t *request ) {
 		return request->mipLevel == 0u && request->arrayLayer == 0u
 			&& request->offsetX == 0u && request->offsetY == 0u
 			&& request->width == 0u && request->height == 0u && request->depth == 0u
-			&& request->bytesPerRow == 0u && request->rowsPerImage == 0u;
+			&& request->bytesPerRow == 0u && request->rowsPerImage == 0u
+			&& request->offsetZ == 0u && request->textureAspects == 0u;
 	if ( request->byteOffset != 0u || request->width == 0u
-			|| request->height == 0u || request->depth == 0u ) return qfalse;
+			|| request->height == 0u || request->depth == 0u
+			|| ( request->textureAspects != 0u
+				&& request->textureAspects != 1u
+				&& request->textureAspects != 2u
+				&& request->textureAspects != 4u ) ) return qfalse;
 	if ( request->direction == RAL_TRANSFER_READBACK ) {
-		if ( request->bytesPerRow == 0u
+		if ( request->depth != 1u || request->bytesPerRow == 0u
 				|| ( request->bytesPerRow & 255u ) != 0u
 				|| request->rowsPerImage < request->height
 				|| request->height > UINT64_MAX / request->bytesPerRow

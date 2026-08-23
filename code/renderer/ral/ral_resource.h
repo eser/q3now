@@ -422,12 +422,12 @@ void                  Ral_DestroyBindGroupLayout( ralBindGroupLayout_t *layout )
 
 // Standalone portable pipeline-layout ownership. The bind-group-layout vector
 // is ordered by set/group index. pushConstantSize==0 requires stages==0;
-// nonzero inline data is one offset-zero range, matching the existing graphics
-// and compute pipeline create-info contract and allowing WebGPU backends to
-// lower it to their reserved uniform-buffer emulation path.
+// nonzero inline data is one exact aligned range. WebGPU backends can lower the
+// same offset/size contract to their reserved uniform-buffer emulation path.
 typedef struct {
 	const ralBindGroupLayout_t *const *bindGroupLayouts;
 	uint32_t                    numBindGroupLayouts;
+	uint32_t                    pushConstantOffset;
 	uint32_t                    pushConstantSize;
 	uint32_t                    pushConstantStages;
 	const char                 *debugName;

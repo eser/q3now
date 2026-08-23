@@ -345,13 +345,10 @@ struct ralTexture_s {
 	ralResourceState_t  portableState;
 	ralQueueType_t      portableOwnerQueue;
 	ralQueueTransferLifecycle_t queueTransfer;
-	// Per-array-layer attachment views for an adopted 2D-array image (NULL for
-	// non-array / native textures). Supplied caller-owned by Ral_AdoptArrayTexture
-	// (the renderer's existing per-layer VkImageViews — e.g. the shadow cascade
-	// views); Ral_BeginRendering binds layerViews[depthAttachmentLayerIndex] as the
-	// depth imageView. defaultView stays the full-array sampling view. The pointer
-	// references caller memory; Ral_DestroyTexture never frees these (ownsImage
-	// already gates view destruction, and adopted = qfalse).
+	// Per-array-layer attachment views. Direct 2D-array attachment textures allocate
+	// and own this array; adopted arrays borrow caller views. Ral_BeginRendering
+	// selects layerViews[depthAttachmentLayerIndex], while defaultView remains the
+	// full-array sampling view.
 	const VkImageView  *layerViews;      // NULL = single-layer (bind defaultView)
 	uint32_t            numLayerViews;   // 0 = none; else == arrayLayers
 };
@@ -507,13 +504,16 @@ struct ralPipeline_s {
 	VkPipelineLayout    layout;             // borrowed from layoutCache[layoutCacheIndex] (don't destroy directly)
 	uint32_t            layoutCacheIndex;   // index into ralBackend_s.layoutCache[]; ~0u if no cache entry (shouldn't happen)
 	VkPipelineBindPoint bindPoint;          // VK_PIPELINE_BIND_POINT_GRAPHICS / _COMPUTE
+	uint32_t            pushConstantOffset; // exact portable range base
 	uint32_t            pushConstantSize;   // bytes (host-side, for validation in Ral_CmdPushConstants)
 	uint32_t            pushConstantStages; // VkShaderStageFlags
 	qboolean            bindGroupLayoutsRegistered;
 	uint32_t            numSetLayouts;
 	VkDescriptorSetLayout setLayouts[ RAL_VK_MAX_PIPELINE_SETS ];
+	uint32_t            optionalBindGroupMask;
 	qboolean            hasSemanticKey;
 	ralShaderPipelineKey_t semanticKey;
+	char                debugName[64];
 };
 
 // typed wrappers around renderer-owned VkPipelineLayout /

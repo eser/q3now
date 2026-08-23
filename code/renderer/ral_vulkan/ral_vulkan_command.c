@@ -911,10 +911,11 @@ void Ral_CmdPushConstants( ralCommandBuffer_t *cb, uint32_t stageFlags, uint32_t
 		return;
 	}
 	{
+		uint32_t base = cb->currentPipeline->pushConstantOffset;
 		uint32_t limit = cb->currentPipeline->pushConstantSize;
-		if ( size > limit || offset > limit - size ) {
-			RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_CmdPushConstants: range [offset=%u size=%u] exceeds pipeline's pushConstantSize %u\n",
-			        offset, size, limit );
+		if ( offset < base || size > limit || offset - base > limit - size ) {
+			RAL_VK_LOG_ON( cb->backend, SEV_WARN, "Ral_CmdPushConstants: range [offset=%u size=%u] exceeds pipeline range [offset=%u size=%u]\n",
+			        offset, size, base, limit );
 			return;
 		}
 	}
@@ -925,6 +926,29 @@ void Ral_CmdPushConstants( ralCommandBuffer_t *cb, uint32_t stageFlags, uint32_t
 	cb->backend->vk.CmdPushConstants( cb->cb, cb->currentLayout, vkStages, offset, size, data );
 }
 
+static qboolean ralVk_CommandBindGroupsExact( const ralCommandBuffer_t *cb ) {
+	static qboolean warned;
+	uint32_t i;
+	if ( !cb || !cb->currentPipeline ) return qfalse;
+	for ( i = 0u; i < cb->currentPipeline->numSetLayouts; ++i ) {
+		const ralBindGroup_t *group = cb->boundBindGroups[i];
+		if ( cb->currentPipeline->optionalBindGroupMask & ( 1u << i ) )
+			continue;
+		if ( !group || !group->layout
+				|| group->layout->layout != cb->currentPipeline->setLayouts[i] ) {
+			if ( !warned ) {
+				warned = qtrue;
+				RAL_VK_LOG_ON( cb->backend, SEV_WARN,
+					"Ral_CmdDraw: missing/incompatible bind group set=%u pipeline=%s; draw rejected\n",
+					i, cb->currentPipeline->debugName[0]
+						? cb->currentPipeline->debugName : "<unnamed>" );
+			}
+			return qfalse;
+		}
+	}
+	return qtrue;
+}
+
 void Ral_CmdDraw( ralCommandBuffer_t *cb, uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance ) {
 	if ( !cb ) return;
 	// Bail when no pipeline is currently bound. The
@@ -932,13 +956,15 @@ void Ral_CmdDraw( ralCommandBuffer_t *cb, uint32_t vertexCount, uint32_t instanc
 	// returned NULL for a VkPipeline that has no RAL sibling yet (the matching
 	// Ral_CmdBindPipeline cleared cb->currentPipeline). Legacy qvkCmdDraw on
 	// the renderer's own cmd buffer remains authoritative.
-	if ( !cb->currentPipeline || !ralVk_CommandBoundBuffersGpuUseAllowed( cb ) ) return;
+	if ( !cb->currentPipeline || !ralVk_CommandBoundBuffersGpuUseAllowed( cb )
+			|| !ralVk_CommandBindGroupsExact( cb ) ) return;
 	cb->backend->vk.CmdDraw( cb->cb, vertexCount, instanceCount ? instanceCount : 1, firstVertex, firstInstance );
 }
 
 void Ral_CmdDrawIndexed( ralCommandBuffer_t *cb, uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance ) {
 	if ( !cb ) return;
-	if ( !cb->currentPipeline || !ralVk_CommandBoundBuffersGpuUseAllowed( cb ) ) return;   // Same NULL-fallthrough rationale as Ral_CmdDraw above.
+	if ( !cb->currentPipeline || !ralVk_CommandBoundBuffersGpuUseAllowed( cb )
+			|| !ralVk_CommandBindGroupsExact( cb ) ) return;   // Same NULL-fallthrough rationale as Ral_CmdDraw above.
 	cb->backend->vk.CmdDrawIndexed( cb->cb, indexCount, instanceCount ? instanceCount : 1, firstIndex, vertexOffset, firstInstance );
 }
 
@@ -1441,7 +1467,7 @@ void Ral_BeginRendering( ralCommandBuffer_t *cb, const ralRenderingInfo_t *ri_ )
 	}
 	if ( ri_->depthAttachment ) {
 		const ralTexture_t *dtex = ri_->depthAttachment;
-		// Array depth image (adopted via Ral_AdoptArrayTexture): the layer offset
+		// Array depth image: the layer offset
 		// can only live in the bound attachment view (VkRenderingInfo has no
 		// baseArrayLayer), so pick the per-layer view for depthAttachmentLayerIndex.
 		// Single-layer textures (every current caller: no layerViews, index 0) bind

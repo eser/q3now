@@ -22,6 +22,14 @@ typedef struct arena_s arena_t;
 #define	REF_API_VERSION		22	/* generation-bound presentation change receipt */
 
 #define REF_PRESENTATION_CHANGE_SCHEMA_VERSION 1u
+enum {
+	REF_PRESENTATION_CHANGE_TOPOLOGY = 1u << 0,
+	REF_PRESENTATION_CHANGE_ACTIVE_OUTPUT = 1u << 1,
+	REF_PRESENTATION_CHANGE_SCALE = 1u << 2,
+	REF_PRESENTATION_CHANGE_COLOR = 1u << 3,
+	REF_PRESENTATION_CHANGE_FULLSCREEN = 1u << 4,
+	REF_PRESENTATION_CHANGE_EXTENT = 1u << 5
+};
 typedef struct {
 	uint32_t schemaVersion;
 	uint64_t generation;

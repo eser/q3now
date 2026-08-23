@@ -36,11 +36,12 @@ set(translate_path "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_translate
 set(product_path "${SOURCE_ROOT}/code/renderervk/vk.c")
 set(image_header_path "${SOURCE_ROOT}/code/renderervk/tr_local.h")
 set(image_owner_path "${SOURCE_ROOT}/code/renderervk/vk_ral_textures.c")
+set(image_lifecycle_path "${SOURCE_ROOT}/code/renderervk/tr_image.c")
 set(host_path "${SOURCE_ROOT}/tests/ral_vulkan_texture_copy_test.c")
 set(receipt_host_path "${SOURCE_ROOT}/tests/ral_texture_resource_receipt_test.c")
 foreach(path IN ITEMS ${header_path} ${types_path} ${bridge_path} ${command_path}
 		${resource_path} ${translate_path} ${product_path} ${image_header_path}
-		${image_owner_path} ${host_path} ${receipt_host_path})
+		${image_owner_path} ${image_lifecycle_path} ${host_path} ${receipt_host_path})
 	if(NOT EXISTS "${path}")
 		message(FATAL_ERROR "RAL buffer-texture copy input missing: ${path}")
 	endif()
@@ -54,6 +55,7 @@ file(READ "${translate_path}" translate)
 file(READ "${product_path}" product)
 file(READ "${image_header_path}" image_header)
 file(READ "${image_owner_path}" image_owner)
+file(READ "${image_lifecycle_path}" image_lifecycle)
 file(READ "${host_path}" host)
 file(READ "${receipt_host_path}" receipt_host)
 
@@ -126,14 +128,23 @@ endforeach()
 
 forbid_regex("${product}" "qvkCmdCopyBufferToImage|PFN_vkCmdCopyBufferToImage|VkBufferImageCopy"
 	"renderer-local raw buffer-image command authority")
-require_count("${product}" "vk_ral_copy_buffer_to_texture_exact[(]" 9
+require_count("${product}" "vk_ral_copy_buffer_to_texture_exact[(]" 2
 	"exact helper definition/call inventory drifted")
+require_count("${product}" "vk_ral_stage_texture_copy[(]" 6
+	"portable staging texture-copy inventory drifted")
 foreach(needle IN ITEMS
+		"static qboolean vk_ral_stage_texture_copy( ralTexture_t *destination,"
+		"vk_ral_write_upload_buffer( vk.staging_buffer.ral_buffer,"
+		"RAL_RESOURCE_USAGE_HOST_WRITE,"
+		"RAL_RESOURCE_USAGE_COPY_SOURCE )"
 		"Ral_CmdTransitionResources( command, &batch )"
 		"Ral_CmdCopyBufferToTextureRegionsExact( command, source,"
 		"destination, regionCount, regions )"
 		"transition.before = copyState;"
 		"transition.after = sampledState;"
+		"uploadRecorded = vk_ral_stage_texture_copy("
+		"vk_smaa_alloc_resources area LUT"
+		"vk_smaa_alloc_resources search LUT"
 		"portable compressed upload transaction rejected image"
 		"portable 3D upload transaction rejected image"
 		"SMAA LUT portable upload declined; disabling SMAA resources")
@@ -148,6 +159,22 @@ foreach(needle IN ITEMS
 	require_text("${product}" "${needle}" "product upload format mapping")
 endforeach()
 require_text("${image_header}" "uint32_t\tmipLevelCount;" "exact image mip inventory")
+require_text("${image_header}" "struct ralTexture_s *ral;"
+	"sole image_t texture owner")
+foreach(retired_image_field IN ITEMS
+	"VkImage[ \t]+handle;" "VkImageView[ \t]+view;" "ralDescriptorTexture")
+	forbid_regex("${image_header}" "${retired_image_field}"
+		"retired image_t parallel/native field")
+endforeach()
+foreach(retired_image_owner IN ITEMS
+	qvkAllocateMemory qvkBindImageMemory qvkCreateImage qvkCreateImageView
+	qvkDestroyImage qvkDestroyImageView qvkFreeMemory
+	PFN_vkAllocateMemory PFN_vkBindImageMemory PFN_vkCreateImage
+	PFN_vkCreateImageView PFN_vkDestroyImage PFN_vkDestroyImageView
+	PFN_vkFreeMemory image_chunks image_chunk_size ImageChunk)
+	forbid_regex("${product}" "(^|[^A-Za-z0-9_])${retired_image_owner}([^A-Za-z0-9_]|$)"
+		"retired renderer image allocation authority ${retired_image_owner}")
+endforeach()
 foreach(needle IN ITEMS
 		"vk_ral_image_texture_info"
 		"candidate.type = RAL_TEXTURE_3D;"
@@ -155,8 +182,23 @@ foreach(needle IN ITEMS
 		"candidate.type = RAL_TEXTURE_CUBE;"
 		"candidate.mipLevels = image->mipLevelCount;"
 		"candidate.usage = RAL_TEXTURE_USAGE_SAMPLED"
-		"Ral_AdoptTextureResourceExact( s_ral_backend,")
-	require_text("${image_owner}" "${needle}" "rich product texture adoption")
+		"candidate = Ral_CreateTexture( s_ral_backend, &createInfo );"
+		"textureReceipt.imported")
+	require_text("${image_owner}" "${needle}" "direct rich product texture ownership")
+endforeach()
+forbid_regex("${image_owner}" "Ral_AdoptTexture(ResourceExact|ViewExact)"
+	"image_t create-then-adopt ownership")
+foreach(needle IN ITEMS
+		"vk_ral_create_image_texture_candidate( image, &candidate )"
+		"Candidate-first replacement: the old descriptor/residency children"
+		"vk_ral_release_image_descriptor( image );"
+		"image->ral = candidate;"
+		"vk_ral_release_image_descriptor( victim );"
+		"vk_ral_unregister_image( victim );"
+		"vk_ral_release_static_bindgroups();"
+		"vk_ral_unregister_image( img );")
+	require_text("${product}${image_lifecycle}" "${needle}"
+		"candidate-first/child-before-parent image lifecycle")
 endforeach()
 
 foreach(needle IN ITEMS

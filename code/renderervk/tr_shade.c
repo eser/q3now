@@ -1384,6 +1384,10 @@ uint32_t VK_PushUniform( const vkUniform_t *uniform ) {
 	// draw's per-role images resolved — writing directly into this ring item at
 	// vk.cmd->uniform_read_offset. It is NOT copied here: a copy here would carry
 	// the previous draw's indices.)
+	if ( !vk_tess_publish_shadow_range( offset, vk.uniform_item_size ) ) {
+		vk.cmd->uniform_read_offset = ~0U;
+		return ~0U;
+	}
 	vk.cmd->vertex_buffer_offset = offset + vk.uniform_item_size;
 
 	vk_reset_descriptor( VK_DESC_UNIFORM );

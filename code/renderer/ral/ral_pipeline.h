@@ -182,6 +182,12 @@ typedef struct {
 	// resources
 	const ralBindGroupLayout_t *const *bindGroupLayouts;
 	uint32_t                    numBindGroupLayouts;
+	// Bit i marks a declared layout slot that the compiled shader does not
+	// statically consume. Zero keeps the conservative default: every declared
+	// group is required before draw. This models legal superset layouts without
+	// binding arbitrary placeholder resources and maps directly to WebGPU's
+	// pipeline-layout/bind-group completeness rules.
+	uint32_t                    optionalBindGroupMask;
 	uint32_t                    pushConstantSize;   // bytes
 	uint32_t                    pushConstantStages; // RAL_STAGE_*
 

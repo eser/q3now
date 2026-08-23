@@ -17,17 +17,16 @@ typedef struct {
 } vkTemporalSpirvOverrides_t;
 
 typedef struct {
-	VkResult (*createRaw)( VkDevice, const VkPipelineLayoutCreateInfo *, VkPipelineLayout * );
-	void (*destroyRaw)( VkDevice, VkPipelineLayout );
-	void *(*getBindGroupLayoutHandle)( const ralBindGroupLayout_t * );
-	ralPipelineLayout_t *(*adoptRaw)( ralBackend_t *, void *, const char * );
-	void (*destroyAdopted)( ralPipelineLayout_t * );
+	ralPipelineLayout_t *(*create)( ralBackend_t *,
+		const ralPipelineLayoutCreateInfo_t * );
+	void *(*getHandle)( const ralPipelineLayout_t * );
+	void (*destroy)( ralPipelineLayout_t * );
 } vkTemporalLayoutOps_t;
 
 typedef struct {
 	ralBackend_t *backend;
 	VkDevice device;
-	VkDescriptorSetLayout borrowedSets[3];
+	const ralBindGroupLayout_t *borrowedLayouts[3];
 	const ralBindGroupLayout_t *payloadLayout;
 	uint32_t payloadLayoutGeneration;
 	VkPipelineLayout raw;
@@ -40,7 +39,8 @@ typedef struct {
 
 void VK_TemporalPipelineLayoutInit( vkTemporalPipelineLayoutOwner_t *owner );
 qboolean VK_TemporalPipelineLayoutEnsure( vkTemporalPipelineLayoutOwner_t *owner,
-	ralBackend_t *backend, VkDevice device, const VkDescriptorSetLayout borrowedSets[3],
+	ralBackend_t *backend, VkDevice device,
+	const ralBindGroupLayout_t *const borrowedLayouts[3],
 	const ralBindGroupLayout_t *payloadLayout, uint32_t payloadLayoutGeneration,
 	qboolean fog, const vkTemporalLayoutOps_t *ops );
 qboolean VK_TemporalPipelineLayoutAcquire( vkTemporalPipelineLayoutOwner_t *owner );

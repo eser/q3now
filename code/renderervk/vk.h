@@ -61,10 +61,9 @@ typedef struct {
 #define STAGING_BUFFER_SIZE    (2 * 1024 * 1024)  /* by default */
 #define STAGING_BUFFER_SIZE_HI (24 * 1024 * 1024) /* enough for max.texture size upload with all mip levels at once */
 
-#define IMAGE_CHUNK_SIZE (32 * 1024 * 1024)
-#define MAX_IMAGE_CHUNKS 56
-
 #define NUM_COMMAND_BUFFERS 2	// double-buffered: paces CPU with GPU per-frame, prevents race-ahead bursting (matches MoltenVK's 3-drawable cap)
+
+qboolean vk_publish_menubg_shadow( uint32_t commandSlot );
 
 #define DLIGHT_SHADOW_K_MAX 4	// max simultaneous shadow-casting dynamic lights (top-K brightest); atlas = tileSize*6*K wide. 6*K_MAX mat4 = 1.5KB at K=4, well under the UBO limit (params kept a UBO).
 
@@ -91,7 +90,6 @@ typedef struct {
 // USE_DEDICATED_ALLOCATION retired (0 consumers; the dead #ifndef branch
 // at vk.c was deleted).
 //#define MIN_IMAGE_ALIGN (128*1024)
-#define MAX_ATTACHMENTS_IN_POOL (8+(VK_NUM_BLOOM_PASSES+1)+3) // bloom pyramid = 1 full + N mips; +3 for SMAA edges/blend/input when active
 
 // Sets 1-6 (TEXTURE0/1/2 / FOG_COLLAPSE /
 // DEPTH_FADE / NORMALMAP and their aliases) retired alongside the legacy
@@ -619,11 +617,11 @@ qboolean vk_initialize( void );
 void vk_init_descriptors( void );
 
 // HDR auto-exposure histogram compute bring-up. Called from the tail of
-// vk_ral_adopt_static_internal_textures (vk_ral_textures.c) once the color
+// vk_ral_refresh_internal_texture_dependents (vk_ral_textures.c) once the color
 // image has been adopted into vk.ral_color_image; lives in vk.c because it
 // references the embedded histogram SPIR-V. Idempotent across vid_restart.
 void vk_hdr_histogram_init( struct ralBackend_s *backend );
-// Symmetric teardown, called from vk_ral_destroy_adopted_internal_textures so
+// Symmetric teardown, called from vk_ral_release_internal_texture_dependents so
 // the RAL-owned histogram handles are freed before the device is destroyed.
 void vk_hdr_histogram_shutdown( void );
 
@@ -719,7 +717,8 @@ void vk_shadow_capture_mesh( int firstVert, int numVerts, int firstIdx, int numI
 // GPU-skinned IQM shadow caster capture: records the model's static VBO/IBO + draw
 // range, the per-entity bone matrices (reused from the main draw — same pose), and
 // the model->world transform, so the skinned shadow VS can skin it next frame.
-void vk_shadow_capture_iqm( VkBuffer vertBuffer, VkBuffer idxBuffer,
+void vk_shadow_capture_iqm( struct ralBuffer_s *vertBuffer,
+	struct ralBuffer_s *idxBuffer,
 	int firstIndex, int numIndexes, const float *boneMats, int numBones,
 	const float *modelMatrix, const float *modelBounds );
 #endif
@@ -759,7 +758,6 @@ qboolean vk_bc_format_supported( VkFormat format );
 // used by cube/volume DDS assets (RGBA8 UNORM/SRGB, RGBA16F).
 qboolean vk_dds_format_uploadable( VkFormat format );
 void vk_update_descriptor_set( image_t *image, qboolean mipmap );
-void vk_destroy_image_resources( VkImage *image, VkImageView *imageView );
 void vk_update_attachment_descriptors( void );
 // Releases the portable sampling-view + arena bind-group cohort before an
 // attachment generation or descriptor-arena generation is retired.
@@ -878,7 +876,8 @@ void vk_update_msdf_outline( float outlineWidth, const float *outlineColor,
                               const float *shadowOffset, const float *shadowColor );
 
 uint32_t vk_tess_index( uint32_t numIndexes, const void *src );
-void vk_bind_index_buffer( VkBuffer buffer, uint32_t offset );
+qboolean vk_tess_publish_shadow_range( uint32_t offset, uint32_t size );
+void vk_bind_index_buffer( struct ralBuffer_s *buffer, uint32_t offset );
 #ifdef USE_VBO
 void vk_draw_indexed( uint32_t indexCount, uint32_t firstIndex, uint32_t firstInstance );
 qboolean vk_entmat_active( void );
@@ -898,7 +897,7 @@ void vk_update_descriptor( int index, VkDescriptorSet descriptor );
 // WIRED_BINDLESS_INDEX_BLOCK_OFFSET. Both run
 // unconditionally now (the legacy main path that gated them is gone).
 void vk_bindless_track( int role, struct image_s *image );
-void vk_push_bindless_indices( void );
+qboolean vk_push_bindless_indices( void );
 
 // Content 2D-array textures (R_CreateImageArray-built image_t,
 // e.g. q1_ls_array.frag's animArray) get a slot in the parallel SAMPLED_IMAGE
@@ -966,13 +965,14 @@ qboolean vk_cull_host_derive_visible( const cplane_t frustum[4], const vec3_t vi
 struct drawSurf_s;
 void vk_init_iqm_gpu_skinning( void );
 void vk_shutdown_iqm_gpu_skinning( void );
-qboolean vk_create_iqm_vbo( VkBuffer *outVertBuf, VkDeviceMemory *outVertMem,
-	VkBuffer *outIdxBuf, VkDeviceMemory *outIdxMem,
+qboolean vk_create_iqm_vbo( struct ralBuffer_s **outVertBuf,
+	struct ralBuffer_s **outIdxBuf,
 	const byte *vertData, int vertSize,
 	const byte *idxData, int idxSize );
-void vk_destroy_iqm_vbo( VkBuffer *vertBuf, VkDeviceMemory *vertMem,
-	VkBuffer *idxBuf, VkDeviceMemory *idxMem );
-void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
+void vk_destroy_iqm_vbo( struct ralBuffer_s **vertBuf,
+	struct ralBuffer_s **idxBuf );
+void vk_draw_iqm_gpu( struct ralBuffer_s *vertBuffer,
+	struct ralBuffer_s *idxBuffer,
 	int firstIndex, int numIndexes,
 	const float *boneMats, int numBones,
 	struct ralBindGroup_s *textureGroup,
@@ -1016,8 +1016,8 @@ typedef struct vk_tess_s {
 	struct ralFence_s *ral_rendering_finished_fence;   // adopted sibling fed into ralSubmitInfo_t.signalFence at the per-frame Ral_Submit call site (qvkQueueSubmit retired)
 	qboolean waitForFence;
 
-	VkBuffer vertex_buffer;
-	byte *vertex_buffer_ptr; // pointer to mapped vertex buffer
+	struct ralBuffer_s *ral_vertex_buffer;
+	byte *vertex_buffer_ptr; // CPU shadow; bounded ranges publish through RAL
 	uint32_t vertex_buffer_offset; // VkDeviceSize
 
 	VkDescriptorSet uniform_descriptor;
@@ -1026,7 +1026,7 @@ typedef struct vk_tess_s {
 	VkDeviceSize	buf_offset[8];
 	VkDeviceSize	vbo_offset[8];
 
-	VkBuffer		curr_index_buffer;
+	struct ralBuffer_s *curr_index_buffer;
 	uint32_t		curr_index_offset;
 
 	struct {
@@ -1097,9 +1097,8 @@ typedef struct vk_tess_s {
 	// modelMatrix under FEAT_SHADOW_MAPPING) — see ENTITY_MATRIX_SLOT_BYTES.
 	// Lazily (re)created on growth; the descriptor re-allocated on grow OR after a
 	// pool reset. entMatSlot counts draws written this frame (reset at frame begin).
-	VkBuffer        entMatBuf;
-	VkDeviceMemory  entMatMem;
-	void           *entMatMapped;
+	struct ralBuffer_s *ral_entMatBuf;
+	void           *entMatMapped; // CPU shadow; never a persistent GPU mapping
 	VkDeviceSize    entMatSize;
 	VkDescriptorSet entMatDesc;
 	struct ralBindGroup_s *ral_entMatDesc;
@@ -1113,8 +1112,7 @@ typedef struct vk_tess_s {
 	// vk_render_shadow_map() (verts then 0-based indices); the per-cascade
 	// animated-mesh draw loop reads it (not yet drawn). Lazily
 	// (re)created on growth; destroyed in vk_shutdown.
-	VkBuffer        shadowSnapBuf;
-	VkDeviceMemory  shadowSnapMem;
+	struct ralBuffer_s *ral_shadowSnapBuf;
 	void           *shadowSnapMapped;
 	VkDeviceSize    shadowSnapSize;
 	// Per-frame host-coherent SSBO of caster model->world matrices (mat4[],
@@ -1123,8 +1121,7 @@ typedef struct vk_tess_s {
 	// Lazily (re)created on growth; the descriptor is re-allocated on a grow OR
 	// after a descriptor-pool reset (handle nulled). Destroyed in
 	// vk_shutdown_shadow_snap. Replaces the per-(entity x cascade) model-matrix push.
-	VkBuffer        shadowEntMatBuf;
-	VkDeviceMemory  shadowEntMatMem;
+	struct ralBuffer_s *ral_shadowEntMatBuf;
 	void           *shadowEntMatMapped;
 	VkDeviceSize    shadowEntMatSize;
 	VkDescriptorSet shadowEntMatDesc;
@@ -1668,8 +1665,6 @@ typedef struct {
 	struct ralCommandBuffer_s *ral_staging_cmd;     // persistent acquire-once-at-init staging cb (RAL-owned via Ral_AcquireCommandBuffer; ownsBuffer=qtrue); submitted via Ral_Submit at vk_flush_staging_buffer
 #endif
 
-	VkDeviceMemory image_memory[ MAX_ATTACHMENTS_IN_POOL ];
-	uint32_t image_memory_count;
 
 	ralBindGroupArena_t *ral_descriptor_arena;
 	ralBindGroupArenaReceipt_t ral_descriptor_arena_receipt;
@@ -1689,7 +1684,7 @@ typedef struct {
 	struct {
 		VkDescriptorSet descriptor;
 		struct ralBindGroup_s *ral_descriptor;
-		// Borrowed wrapper over shadowMap.view. It exists only while binding 0
+		// Typed sampling view over the shadow-map array. It exists only while binding 0
 		// participates and never destroys the renderer-owned native view.
 		struct ralTextureView_s *ral_shadow_view;
 	} engineResources;
@@ -1733,9 +1728,8 @@ typedef struct {
 	VkPipelineLayout pipeline_layout_post_process;	// post-processing
 	VkPipelineLayout pipeline_layout_smaa;		// SMAA (push constants + 3 samplers)
 	VkPipelineLayout pipeline_layout_msdf;		// MSDF text (112-byte push constant range)
-	// Typed RAL siblings (Ral_AdoptPipelineLayout wrappers).
-	// Populated at the matching qvkCreatePipelineLayout call site; consumed by
-	// the typed Ral_CmdPushConstants/Ral_CmdBind* surface via vk_ral_lookup_pipeline_layout.
+	// Typed RAL owners. Their native mirrors above are obtained from the direct
+	// RAL-created layouts and consumed by the legacy Vulkan command surface.
 	struct ralPipelineLayout_s *ral_pipeline_layout;
 	struct ralPipelineLayout_s *ral_pipeline_layout_post_process;
 	struct ralPipelineLayout_s *ral_pipeline_layout_smaa;
@@ -1771,11 +1765,9 @@ typedef struct {
 		struct ralPipeline_s	*ral_pipeline_alpha;     // dynamic-rendering pipeline (SRC_ALPHA / ONE_MINUS_SRC_ALPHA)
 		struct ralPipeline_s	*ral_pipeline_additive;  // dynamic-rendering pipeline (SRC_ALPHA / ONE)
 		// per-frame staging (host-coherent, mapped)
-		VkBuffer				points_buffer  [NUM_COMMAND_BUFFERS];
-		VkDeviceMemory			points_memory  [NUM_COMMAND_BUFFERS];
+		struct ralBuffer_s	*ral_points_buffer[NUM_COMMAND_BUFFERS];
 		byte					*points_ptr    [NUM_COMMAND_BUFFERS];
-		VkBuffer				headers_buffer [NUM_COMMAND_BUFFERS];
-		VkDeviceMemory			headers_memory [NUM_COMMAND_BUFFERS];
+		struct ralBuffer_s	*ral_headers_buffer[NUM_COMMAND_BUFFERS];
 		byte					*headers_ptr   [NUM_COMMAND_BUFFERS];
 		// Direct generation-bound RAL set-0 owner. descriptor[] is only the
 		// transitional Vulkan mirror used by the native pipeline layout.
@@ -1829,8 +1821,7 @@ typedef struct {
 		VkSampler				sampler_repeat;
 		struct ralSampler_s	*ral_sampler_repeat;
 		// per-frame staging (host-coherent, mapped)
-		VkBuffer				header_buffer  [NUM_COMMAND_BUFFERS];
-		VkDeviceMemory			header_memory  [NUM_COMMAND_BUFFERS];
+		struct ralBuffer_s	*ral_header_buffer[NUM_COMMAND_BUFFERS];
 		byte					*header_ptr    [NUM_COMMAND_BUFFERS];
 		VkDescriptorSet			descriptor     [NUM_COMMAND_BUFFERS];
 		struct ralBindGroup_s *ral_descriptor[NUM_COMMAND_BUFFERS];
@@ -1879,8 +1870,7 @@ typedef struct {
 		struct ralPipelineLayout_s *ral_pipeline_layout;
 		struct ralPipeline_s	*ral_pipeline_alpha;   // dynamic-rendering pipeline (SRC_ALPHA / ONE_MINUS_SRC_ALPHA)
 		// per-frame staging (host-coherent, mapped)
-		VkBuffer				header_buffer  [NUM_COMMAND_BUFFERS];
-		VkDeviceMemory			header_memory  [NUM_COMMAND_BUFFERS];
+		struct ralBuffer_s	*ral_header_buffer[NUM_COMMAND_BUFFERS];
 		byte					*header_ptr    [NUM_COMMAND_BUFFERS];
 		VkDescriptorSet			descriptor     [NUM_COMMAND_BUFFERS];
 		struct ralBindGroup_s *ral_descriptor[NUM_COMMAND_BUFFERS];
@@ -1907,8 +1897,7 @@ typedef struct {
 	// re-zeroed on every vk_init_primitive_shader_images call so
 	// vid_restart sees a clean slate before cgame re-registers
 	// shaders.
-	VkBuffer       primitive_stages_buffer;
-	VkDeviceMemory primitive_stages_memory;
+	struct ralBuffer_s *ral_primitive_stages_buffer;
 	void          *primitive_stages_mapped;
 	// Indexed by primitive registry SLOT (0..PRIMITIVE_SHADER_IMAGE_MAX-1),
 	// NOT by qhandle. The two were decoupled when the qhandle space
@@ -1940,8 +1929,7 @@ typedef struct {
 	// beam descriptor set binding 3 so the vertex shader can cull
 	// per-stage draws for shaders with fewer stages than the current
 	// loop index.
-	VkBuffer       primitive_stage_counts_buffer;
-	VkDeviceMemory primitive_stage_counts_memory;
+	struct ralBuffer_s *ral_primitive_stage_counts_buffer;
 	void          *primitive_stage_counts_mapped;
 
 	// ── primitive sprite (billboard quad) ────────────────────────────
@@ -1966,8 +1954,7 @@ typedef struct {
 		struct ralPipeline_s	*ral_pipeline_alpha;     // dynamic-rendering pipeline (SRC_ALPHA / ONE_MINUS_SRC_ALPHA)
 		struct ralPipeline_s	*ral_pipeline_additive;  // dynamic-rendering pipeline (SRC_ALPHA / ONE)
 		// per-frame staging (host-coherent, mapped)
-		VkBuffer				headers_buffer [NUM_COMMAND_BUFFERS];
-		VkDeviceMemory			headers_memory [NUM_COMMAND_BUFFERS];
+		struct ralBuffer_s	*ral_headers_buffer[NUM_COMMAND_BUFFERS];
 		byte					*headers_ptr   [NUM_COMMAND_BUFFERS];
 		VkDescriptorSet			descriptor     [NUM_COMMAND_BUFFERS];
 		struct ralBindGroup_s *ral_descriptor[NUM_COMMAND_BUFFERS];
@@ -2210,12 +2197,11 @@ typedef struct {
 		VkPipelineLayout		pipeline_layout;	// set0(bones+mvp ring) + set1(texture) — 0 push
 		struct ralPipelineLayout_s *ral_pipeline_layout;  // typed sibling
 		struct ralPipeline_s	*ral_pipeline;		// dynamic-rendering pipeline (IQM skinning)
-		VkBuffer				bone_buffer[NUM_COMMAND_BUFFERS]; // per-frame bones+mvp ring
-		VkDeviceMemory			bone_memory[NUM_COMMAND_BUFFERS];
+		struct ralBuffer_s	*ral_bone_buffer[NUM_COMMAND_BUFFERS]; // per-frame bones+mvp ring
 		byte					*bone_ptr[NUM_COMMAND_BUFFERS];   // mapped pointers
 		VkDescriptorSet			bone_descriptor[NUM_COMMAND_BUFFERS]; // UNIFORM_BUFFER_DYNAMIC, base offset 0
 		struct ralBindGroup_s	*ral_bone_descriptor[NUM_COMMAND_BUFFERS];
-		VkDeviceSize			ring_size;			// per-frame ring buffer size in bytes
+		uint64_t				ring_size;			// per-frame ring buffer size in bytes
 		uint32_t				offset[NUM_COMMAND_BUFFERS]; // running per-draw alloc cursor; reset at frame begin
 		qboolean				available;			// false if init failed
 	} iqmGpu;
@@ -2239,13 +2225,10 @@ typedef struct {
 	// color_image (created/destroyed in vk_init_descriptors under fboActive).
 	VkDescriptorSetLayout exposureSetLayout;
 	struct {
-		VkBuffer        buffer[NUM_COMMAND_BUFFERS];
-		VkDeviceMemory  memory[NUM_COMMAND_BUFFERS];
 		void           *ptr[NUM_COMMAND_BUFFERS];
 		VkDescriptorSet descriptor[NUM_COMMAND_BUFFERS];
-		// The raw buffer remains renderer-owned and is exposed through a non-owning
-		// RAL wrapper. The bind group itself is allocated directly from the current
-		// renderer arena generation; descriptor[] is only its native mirror.
+		// RAL owns the persistent mapped buffer; descriptor[] is only the native
+		// mirror of the current generation's arena-owned bind group.
 		struct ralBuffer_s    *ral_buffer[NUM_COMMAND_BUFFERS];
 		struct ralBindGroup_s *ral_descriptor[NUM_COMMAND_BUFFERS];
 	} exposure;
@@ -2254,8 +2237,6 @@ typedef struct {
 	// ring shape as exposure; written each frame by RE_DrawMenuBackdrop. Reuses
 	// exposureSetLayout (binding 0 UNIFORM_BUFFER FRAGMENT — layout-compatible).
 	struct {
-		VkBuffer         buffer[NUM_COMMAND_BUFFERS];
-		VkDeviceMemory   memory[NUM_COMMAND_BUFFERS];
 		void            *ptr[NUM_COMMAND_BUFFERS];
 		VkDescriptorSet  descriptor[NUM_COMMAND_BUFFERS];
 		struct ralBuffer_s    *ral_buffer[NUM_COMMAND_BUFFERS];
@@ -2273,8 +2254,6 @@ typedef struct {
 	// the adopted buffer before the backend emits the set-3 bind.
 	VkDescriptorSetLayout set_layout_msdf;
 	struct {
-		VkBuffer        buffer[NUM_COMMAND_BUFFERS];
-		VkDeviceMemory  memory[NUM_COMMAND_BUFFERS];
 		void           *ptr[NUM_COMMAND_BUFFERS];
 		VkDescriptorSet descriptor[NUM_COMMAND_BUFFERS]; // UNIFORM_BUFFER_DYNAMIC, base offset 0
 		struct ralBuffer_s *ral_buffer[NUM_COMMAND_BUFFERS];
@@ -2295,13 +2274,9 @@ typedef struct {
 	// binding (VS|FS), set 1 of each effect layout (set 0 stays the effect's own set).
 	VkDescriptorSetLayout set_layout_effects_ubo;
 	struct {
-		VkBuffer        buffer[NUM_COMMAND_BUFFERS];
-		VkDeviceMemory  memory[NUM_COMMAND_BUFFERS];
 		void           *ptr[NUM_COMMAND_BUFFERS];
 		VkDescriptorSet descriptor[NUM_COMMAND_BUFFERS]; // UNIFORM_BUFFER_DYNAMIC, base offset 0
-		// Non-owning wrappers over the same raw buffer and descriptor set. The
-		// buffer wrapper supplies exact base/range authority for dynamic-offset
-		// validation; renderer teardown remains the native owner.
+		// Persistent RAL-owned buffers supply exact base/range and mapping authority.
 		struct ralBuffer_s    *ral_buffer[NUM_COMMAND_BUFFERS];
 		struct ralBindGroup_s *ral_descriptor[NUM_COMMAND_BUFFERS];
 		VkDeviceSize    size;                            // per-frame buffer size in bytes
@@ -2314,8 +2289,6 @@ typedef struct {
 	// Non-dynamic UNIFORM_BUFFER (no per-draw offset) — exposure-style, not a ring.
 	VkDescriptorSetLayout set_layout_smaa_rtmetrics;
 	struct {
-		VkBuffer        buffer[NUM_COMMAND_BUFFERS];
-		VkDeviceMemory  memory[NUM_COMMAND_BUFFERS];
 		void           *ptr[NUM_COMMAND_BUFFERS];
 		VkDescriptorSet descriptor[NUM_COMMAND_BUFFERS];
 		struct ralBuffer_s *ral_buffer[NUM_COMMAND_BUFFERS];
@@ -2326,18 +2299,14 @@ typedef struct {
 	// sampled by the gamma/capture passes downstream. Format is
 	// R8G8B8A8_UNORM (sRGB encoding lives in gamma.frag; a later change may
 	// switch to an sRGB swapchain and drop manual encoding).
-	VkImage         tonemapped_image;
-	VkImageView     tonemapped_image_view;
 	VkDescriptorSet tonemapped_descriptor;
 	// Portable sampling view + arena-owned set 0. The raw descriptor is only
 	// the transitional Vulkan mirror used by the native pipeline layout.
 	struct ralTextureView_s *ral_tonemapped_view;
 	struct ralBindGroup_s *ral_tonemapped_descriptor;
-	struct ralTexture_s *ral_tonemapped_image;  // adopted typed sibling for typed Ral_Cmd{PipelineBarrierFull,CopyImage}
+	struct ralTexture_s *ral_tonemapped_image;
 
-	VkImage color_image;
-	VkImageView color_image_view;
-	struct ralTexture_s *ral_color_image;       // adopted typed sibling
+	struct ralTexture_s *ral_color_image;
 	struct ralTextureView_s *ral_color_view;    // portable sampling view
 
 	// HDR auto-exposure: a RAL compute pass reads color_image (the HDR scene)
@@ -2482,11 +2451,8 @@ typedef struct {
 	// seam by the reduce (a 1-frame lag — conservative: a stale-by-one-frame bound
 	// only loosens which lights a tile considers, never drops a valid light).
 	// r_forwardPlus-gated (no allocation when off → byte-identical OFF path).
-	VkImage                      fpDepthImage;           // depth copy (TRANSFER_DST|SAMPLED, vk.depth_format)
-	VkImageView                  fpDepthView;            // depth-only-aspect sampling view (raw vk, for adopt)
-	VkDeviceMemory               fpDepthMemory;
 	struct ralSampler_s         *ral_fpDepthSampler;    // nearest, clamp (reduce reads exact texels)
-	struct ralTexture_s         *ral_fpDepthImage;      // adopted RAL sibling (copy dst + transition tracking)
+	struct ralTexture_s         *ral_fpDepthImage;      // direct copy dst + transition owner
 	struct ralTextureView_s     *ral_fpDepthView;       // RAL sampling view for the reduce compute
 	struct ralBindGroupLayout_s *ral_fpReduceBgl;       // set 0: sceneDepth(0)+sampler(1)+tileDepth(2)
 	struct ralBindGroup_s       *ral_fpReduceDescriptor[NUM_COMMAND_BUFFERS];
@@ -2505,8 +2471,7 @@ typedef struct {
 	VkDescriptorSetLayout        fpLitSetLayout;         // set 2 — tileLights(4)+dlightParams(5)+tileParams(6)
 	struct ralBindGroupLayout_s *ral_fpLitSetLayout;    // direct RAL-owned set-2 layout authority
 	struct ralPipeline_s        *ral_fpLitPipeline;     // the additive world-space lit pipeline
-	VkBuffer                     fpTileParamsBuf[NUM_COMMAND_BUFFERS]; // per-frame {screenW,H,tilesX,tilesY}
-	VkDeviceMemory               fpTileParamsMem[NUM_COMMAND_BUFFERS];
+	struct ralBuffer_s          *ral_fpTileParams[NUM_COMMAND_BUFFERS]; // per-frame {screenW,H,tilesX,tilesY}
 	void                        *fpTileParamsPtr[NUM_COMMAND_BUFFERS];
 	VkDescriptorSet              fpLitSet[NUM_COMMAND_BUFFERS]; // set 2 bound per frame (the 3 fp-SSBOs)
 	struct ralBindGroup_s       *ral_fpLitSet[NUM_COMMAND_BUFFERS]; // direct current-arena owners
@@ -2520,8 +2485,7 @@ typedef struct {
 	struct ralBuffer_s          *ral_fp_clustergrid;    // flat cell lists (host-coherent, built once at load)
 	void                        *fpClusterGridPtr;      // persistent mapping (CPU memcpy of world->clusterFlat)
 	struct ralBuffer_s          *ral_fp_clusterfallback;// 1-cell empty (count=0) for the OFF path
-	VkBuffer                     fpClusterParamsBuf;    // grid-params UBO {origin.xyz, cellSize; dims.xyz}
-	VkDeviceMemory               fpClusterParamsMem;
+	struct ralBuffer_s          *ral_fpClusterParams;   // grid-params UBO {origin.xyz, cellSize; dims.xyz}
 	void                        *fpClusterParamsPtr;
 
 	// Lens-glow occlusion oracle — the unified visibility backbone (halo is the
@@ -2676,12 +2640,10 @@ typedef struct {
 	// extract output (full res); slot k+1 is the level-k mip at captureW/2^(k+1).
 	// The downsample writes each mip, the upsample additively reconstructs back
 	// down the chain, and the composite blends slot 1 into the scene.
-	VkImage bloom_image[1+VK_NUM_BLOOM_PASSES];
-	VkImageView bloom_image_view[1+VK_NUM_BLOOM_PASSES];
-	// Adopted dynamic-rendering siblings for the bloom extract/downsample/upsample
+	// Direct dynamic-rendering owners for the bloom extract/downsample/upsample
 	// chain. Index 0 is the extract target; index k (k>=1) is the mip written by
 	// downsample level k-1. Adopted (gated fboActive && r_bloom) in
-	// vk_ral_adopt_static_internal_textures; bound as Ral_BeginRendering color
+	// attachment creation; bound as Ral_BeginRendering color
 	// attachments by the extract/mip begins.
 	struct ralTexture_s *ral_bloom_image[1+VK_NUM_BLOOM_PASSES];
 
@@ -2691,28 +2653,23 @@ typedef struct {
 	struct ralTextureView_s *ral_bloom_image_view[1+VK_NUM_BLOOM_PASSES];
 	struct ralBindGroup_s *ral_bloom_image_descriptor[1+VK_NUM_BLOOM_PASSES];
 
-	VkImage depth_image;
-	VkImageView depth_image_view;
-	struct ralTexture_s *ral_depth_image;       // adopted typed sibling
+	struct ralTexture_s *ral_depth_image;
 
 	// Scene-depth copy: a sampled snapshot of the opaque-scene depth, shared by
 	// every consumer that needs to read depth in a later pass — soft-particle
 	// depth fade (r_depthFade), SSAO/GTAO, sunrays, and the lens-occlusion oracle.
 	struct {
-		VkImage         image;
-		VkImageView     view;
-		VkDeviceMemory  memory;
 		VkSampler       sampler;
 		struct ralSampler_s *ral_sampler;
 		VkDescriptorSet descriptor;
-		// Direct portable sampling view + current-arena bind group. The raw set is
-		// only a Vulkan pipeline-layout mirror; it has no allocation/update owner.
+		// Direct portable texture/view ownership + current-arena bind group. The
+		// raw sampler/set are Vulkan pipeline-layout mirrors only.
+		struct ralTexture_s *ral_image;
 		struct ralTextureView_s *ral_view;
 		struct ralBindGroup_s *ral_descriptor;
 		qboolean        active;
 		qboolean        copied;		// depth was copied this frame
 		qboolean        pendingRebuild;	// a live consumer toggle (e.g. r_drawSunRays) requested an attachment/render-pass rebuild; consumed at the next safe frame boundary in vk_begin_frame
-		struct ralTexture_s *ral_image;  // adopted typed sibling for typed Ral_Cmd{PipelineBarrierFull,CopyImage} (closes the lookup-miss gap at vk.c:18411/18448/...) AND the bindless slot read (Ral_BindGroupSetTextureAt) — re-adopted each vk_update_attachment_descriptors so it never wraps a freed view
 		int             bindlessSamplerSlot;  // dedup-pool slot of the NEAREST depth sampler in the bindless sampler array; -1 until resolved (gates the role-4 override)
 	} sceneDepth;
 
@@ -2724,20 +2681,13 @@ typedef struct {
 	// single-layer 2D view of one cascade. (SHADOWMAP_MAX_CASCADES is defined
 	// at file scope above — it also sizes vkUniform_t.cascadeMVP[].)
 	struct {
-		VkImage          image;
-		VkImageView      view;                                // 2D_ARRAY — sampled through engine-resources set 2
-		VkImageView      layerView[SHADOWMAP_MAX_CASCADES];   // per-cascade 2D views — framebuffer attachments
-		// Adopted dynamic-rendering sibling of the 4-layer depth array
-		// (Ral_AdoptArrayTexture): defaultView = `view` (full-array sampling),
-		// layerViews = `layerView[]` (per-cascade attachment). Ral_BeginRendering
-		// selects layerView[depthAttachmentLayerIndex] for each cascade.
+		// Direct 4-layer depth array. RAL owns the full-array sampling view and one
+		// per-layer attachment view selected by depthAttachmentLayerIndex.
 		struct ralTexture_s *ral_image;
-		VkDeviceMemory   memory;
 		VkSampler        sampler;
 		struct ralSampler_s *ral_sampler;
 		// renderPass / framebuffer[] / depthPipeline are gone — the cascaded shadow
-		// depth pass is dynamic-rendering only (per-cascade layerView[] adopted into
-		// ral_image, selected via depthAttachmentLayerIndex).
+		// depth pass is dynamic-rendering only.
 		struct ralPipeline_s *ral_depthPipeline;  // dynamic-rendering pipeline (gpInfo-derived, depth-only)
 		VkPipelineLayout depthLayout;     // set 0 = entity-matrix SSBO + set 1 = cascadeMVP UBO; ZERO push
 		struct ralPipelineLayout_s *ral_depthLayout;  // typed sibling
@@ -2750,8 +2700,7 @@ typedef struct {
 		// The shadow depthLayout has ZERO push ranges.
 		VkDescriptorSetLayout set_layout_cascademvp;
 		struct ralBindGroupLayout_s *ral_bgl_cascademvp;
-		VkBuffer         cascadeMvpBuf[NUM_COMMAND_BUFFERS];
-		VkDeviceMemory   cascadeMvpMem[NUM_COMMAND_BUFFERS];
+		struct ralBuffer_s *ral_cascadeMvpBuf[NUM_COMMAND_BUFFERS];
 		void            *cascadeMvpPtr[NUM_COMMAND_BUFFERS];
 		VkDescriptorSet  cascadeMvpDesc[NUM_COMMAND_BUFFERS]; // UNIFORM_BUFFER_DYNAMIC, base offset 0
 		struct ralBindGroup_s *ral_cascadeMvpDesc[NUM_COMMAND_BUFFERS];
@@ -2761,8 +2710,7 @@ typedef struct {
 		float            cascadeSplits[4];                        // view-space Z for splits 1..4 (split 0 = near is implicit)
 		// world caster geometry (worldspawn / model 0 only) — position-only,
 		// built lazily once per map load
-		VkBuffer         casterBuf;       // [vec4 positions][uint32 indices], device-local
-		VkDeviceMemory   casterMem;
+		struct ralBuffer_s *ral_casterBuf; // [vec4 positions][uint32 indices], device-local
 		uint32_t         casterVtxBytes;  // byte offset where the index data begins
 		uint32_t         casterIndexCount;
 		const void      *casterBuiltSurfaces; // tr.world->surfaces value the buffer was built for (NULL = none)
@@ -2774,8 +2722,7 @@ typedef struct {
 		// (WIRED_BINDLESS_PACK(diffuse) in the low 24 bits | alpha-test func in the
 		// high 8 bits) — so the alpha-test depth shader resolves the diffuse through
 		// the same bindless table the main pass uses and discards holed fragments.
-		VkBuffer         casterAtestBuf;       // [stride-32 verts][uint32 indices], device-local
-		VkDeviceMemory   casterAtestMem;
+		struct ralBuffer_s *ral_casterAtestBuf; // [stride-32 verts][uint32 indices], device-local
 		uint32_t         casterAtestVtxBytes;  // byte offset where the index data begins
 		uint32_t         casterAtestIndexCount;
 		// Inline-brush-model casters. One shared device-local
@@ -2785,8 +2732,7 @@ typedef struct {
 		// shadow pre-pass with that entity's [axis|origin] model matrix. Built /
 		// freed alongside casterBuf (same casterBuiltSurfaces gate — bmodels are
 		// static for a map's lifetime).
-		VkBuffer                casterBmodelBuf;     // shared bmodel geometry
-		VkDeviceMemory          casterBmodelMem;
+		struct ralBuffer_s      *ral_casterBmodelBuf; // shared bmodel geometry
 		uint32_t                casterBmodelVtxBytes;// byte offset where the index region begins
 		vkBmodelCasterRange_t  *bmodelRanges;        // ri.Malloc'd, length = numBmodelRanges (== tr.world->numBModels); NULL if none
 		int                     numBmodelRanges;
@@ -2797,7 +2743,7 @@ typedef struct {
 		// main IQM pass — reused at the capture seam, same pose). depthLayoutSkinned
 		// adds set 2 (bone UBO) on top of depthLayout's set 0 (entity SSBO) + set 1
 		// (cascadeMVP). One bone ring per in-flight frame (host-coherent, mirroring
-		// vk.iqmGpu.bone_buffer); each captured caster sub-allocates a PAD-aligned
+		// vk.iqmGpu.ral_bone_buffer); each captured caster sub-allocates a PAD-aligned
 		// IQM_BONE_UBO item and binds it with a dynamic offset.
 		struct ralPipeline_s   *ral_depthPipelineSkinned; // 3-set skinned-IQM caster pipeline
 		VkPipelineLayout        depthLayoutSkinned;        // set0 entSSBO + set1 cascadeMVP + set2 bone UBO
@@ -2813,8 +2759,7 @@ typedef struct {
 		struct ralPipelineLayout_s *ral_depthLayoutAtest;  // typed sibling
 		VkDescriptorSetLayout   set_layout_bones;          // set 2 — 1 UNIFORM_BUFFER_DYNAMIC binding, VS
 		struct ralBindGroupLayout_s *ral_bgl_bones;
-		VkBuffer                boneBuf[NUM_COMMAND_BUFFERS];   // per-frame bone ring
-		VkDeviceMemory          boneMem[NUM_COMMAND_BUFFERS];
+		struct ralBuffer_s      *ral_boneBuf[NUM_COMMAND_BUFFERS]; // per-frame bone ring
 		void                   *bonePtr[NUM_COMMAND_BUFFERS];
 		uint32_t                boneRingSize;                   // bytes per ring
 		uint32_t                boneOffset[NUM_COMMAND_BUFFERS];// running sub-alloc offset (reset per frame)
@@ -2834,11 +2779,7 @@ typedef struct {
 	// byte-identical to a single-light budget (columns 0-5, one sample, /6.0 UV divisor).
 	// Runtime dlights only — the BSP static lights stay baked (no extraction).
 	struct {
-		VkImage          image;        // 2D depth atlas (6*K face tiles wide), TRANSFER/SAMPLED depth-format
-		VkImageView      view;         // 2D sampling view (whole atlas) — bound for the lit-shader sample
-		VkImageView      faceView[6];  // per-face 2D views (one tile each) — render-target attachments
-		struct ralTexture_s *ral_image;// adopted array-of-faces sibling (per-face attachment + whole-atlas sample)
-		VkDeviceMemory   memory;
+		struct ralTexture_s *ral_image;// direct 2D depth atlas (6*K face tiles wide)
 		VkSampler        sampler;      // depth-compare sampler (or nearest + manual compare)
 		struct ralSampler_s *ral_sampler;
 		VkDescriptorSet  descriptor;   // bound to the lit pass for sampling
@@ -2846,13 +2787,11 @@ typedef struct {
 		// origin toward ±X/±Y/±Z, recomputed per frame for the budgeted lights. Written to
 		// the per-frame faceMvp UBO (set 1 of the SAME depthLayout shadow_depth.vert reads).
 		float            faceMVP[DLIGHT_SHADOW_K_MAX][6][16];
-		VkBuffer         faceMvpBuf[NUM_COMMAND_BUFFERS];
-		VkDeviceMemory   faceMvpMem[NUM_COMMAND_BUFFERS];
+		struct ralBuffer_s *ral_faceMvpBuf[NUM_COMMAND_BUFFERS];
 		void            *faceMvpPtr[NUM_COMMAND_BUFFERS];
 		VkDescriptorSet  faceMvpDesc[NUM_COMMAND_BUFFERS]; // UNIFORM_BUFFER_DYNAMIC, base 0 (per-face dyn offset)
 		struct ralBindGroup_s *ral_faceMvpDesc[NUM_COMMAND_BUFFERS];
-		VkBuffer         entMatBuf[NUM_COMMAND_BUFFERS];   // 1-slot identity model→world (worldspawn casters)
-		VkDeviceMemory   entMatMem[NUM_COMMAND_BUFFERS];
+		struct ralBuffer_s *ral_entMatBuf[NUM_COMMAND_BUFFERS]; // 1-slot identity model→world
 		void            *entMatPtr[NUM_COMMAND_BUFFERS];
 		VkDescriptorSet  entMatDesc[NUM_COMMAND_BUFFERS];
 		struct ralBindGroup_s *ral_entMatDesc[NUM_COMMAND_BUFFERS];
@@ -2862,8 +2801,7 @@ typedef struct {
 		// (lightIndex, valid, bias) + numShadowLights + the column count (6*atlasK). Per
 		// in-flight frame, host-coherent, written each frame the lit pass runs
 		// (numShadowLights=0 / valid=0 when no shadow light → the sample is gated off).
-		VkBuffer         paramsBuf[NUM_COMMAND_BUFFERS];
-		VkDeviceMemory   paramsMem[NUM_COMMAND_BUFFERS];
+		struct ralBuffer_s *ral_paramsBuf[NUM_COMMAND_BUFFERS];
 		void            *paramsPtr[NUM_COMMAND_BUFFERS];
 		int              lightIndex[DLIGHT_SHADOW_K_MAX]; // budgeted lights' dlights[] indices this frame (-1 = none)
 		int              numShadowLights;                 // how many lights were selected this frame (0..K)
@@ -2880,51 +2818,32 @@ typedef struct {
 		qboolean        active;
 		int             quality;        // 1-4
 
-		// LUT textures (static, created once)
-		VkImage         area_image;
-		VkImageView     area_view;
-		VkDeviceMemory  area_memory;
+		// LUT textures (static within the active SMAA cohort)
 		VkDescriptorSet area_descriptor;
 		struct ralBindGroup_s *ral_area_descriptor;
 		struct ralTexture_s *ral_area_image;
 		struct ralTextureView_s *ral_area_view;
 
-		VkImage         search_image;
-		VkImageView     search_view;
-		VkDeviceMemory  search_memory;
 		VkDescriptorSet search_descriptor;
 		struct ralBindGroup_s *ral_search_descriptor;
 		struct ralTexture_s *ral_search_image;
 		struct ralTextureView_s *ral_search_view;
 
-		// intermediate textures (resolution-dependent). Each image
-		// owns its VkDeviceMemory (was attachment
-		// pool). The dedicated layout is load-bearing for the live
-		// release path — see vk_smaa_release_resources. Do not move
-		// these back into the shared pool unless you also rebuild the
-		// pool on r_smaa toggle.
-		VkImage         edges_image;    // R8G8
-		VkImageView     edges_view;
-		VkDeviceMemory  edges_memory;
+		// Direct RAL intermediate textures (resolution-dependent). Their independent
+		// ownership is load-bearing for live r_smaa disable/re-enable.
 		VkDescriptorSet edges_descriptor;
 		struct ralBindGroup_s *ral_edges_descriptor;
-		struct ralTexture_s *ral_edges_image;  // adopted typed sibling
+		struct ralTexture_s *ral_edges_image;  // R8G8
 		struct ralTextureView_s *ral_edges_view;
 
-		VkImage         blend_image;    // RGBA8
-		VkImageView     blend_view;
-		VkDeviceMemory  blend_memory;
 		VkDescriptorSet blend_descriptor;
 		struct ralBindGroup_s *ral_blend_descriptor;
-		struct ralTexture_s *ral_blend_image;  // adopted typed sibling
+		struct ralTexture_s *ral_blend_image;  // RGBA8
 		struct ralTextureView_s *ral_blend_view;
 
-		VkImage         input_image;    // color_format (copy of color_image)
-		VkImageView     input_view;
-		VkDeviceMemory  input_memory;
 		VkDescriptorSet input_descriptor;
 		struct ralBindGroup_s *ral_input_descriptor;
-		struct ralTexture_s *ral_input_image;  // adopted typed sibling
+		struct ralTexture_s *ral_input_image;  // color_format copy of color_image
 		struct ralTextureView_s *ral_input_view;
 
 		VkSampler       point_sampler;
@@ -2950,20 +2869,13 @@ typedef struct {
 		VkDescriptorSet color_descriptor;
 		struct ralTextureView_s *ral_color_view;
 		struct ralBindGroup_s *ral_color_descriptor;  // arena-owned set 0; raw field is its mirror
-		VkImage color_image;
-		VkImageView color_image_view;
-		struct ralTexture_s *ral_color_image;   // adopted sibling — dynamic-rendering color attachment
-		struct ralTexture_s *ral_depth_image;   // adopted sibling — dynamic-rendering depth(+stencil) attachment
-
-		VkImage depth_image;
-		VkImageView depth_image_view;
+		struct ralTexture_s *ral_color_image;
+		struct ralTexture_s *ral_depth_image;
 
 	} screenMap;
 
 	struct {
-		VkImage image;
-		VkImageView image_view;
-		struct ralTexture_s *ral_image;   // adopted sibling — dynamic-rendering capture target (adopted at creation; supersample-gated)
+		struct ralTexture_s *ral_image;
 	} capture;
 
 #ifdef USE_UPLOAD_QUEUE
@@ -2985,12 +2897,10 @@ typedef struct {
 	qboolean timestampSupported;    // device supports CmdWriteTimestamp on graphics queue
 
 	struct {
-		VkBuffer vertex_buffer;
-		VkDeviceMemory	buffer_memory;
+		struct ralBuffer_s *ral_vertex_buffer;
 	} vbo;
 
-	// host visible memory that holds vertex, index and uniform data
-	VkDeviceMemory geometry_buffer_memory;
+	// Per-frame host-visible RAL buffers hold vertex, index and uniform data.
 	VkDeviceSize geometry_buffer_size;
 	VkDeviceSize geometry_buffer_size_new;
 
@@ -3317,8 +3227,6 @@ typedef struct {
 	uint32_t screenMapHeight;
 	uint32_t screenMapSamples;
 
-	uint32_t image_chunk_size;
-
 	uint32_t maxBoundDescriptorSets;
 
 #ifdef USE_UPLOAD_QUEUE
@@ -3328,10 +3236,8 @@ typedef struct {
 #endif
 
 	struct staging_buffer_s {
-		VkBuffer handle;
-		VkDeviceMemory memory;
+		struct ralBuffer_s *ral_buffer;
 		VkDeviceSize size;
-		byte *ptr; // pointer to mapped staging buffer
 #ifdef USE_UPLOAD_QUEUE
 		VkDeviceSize offset;
 #endif
@@ -3362,20 +3268,9 @@ typedef struct {
 
 } Vk_Instance;
 
-typedef struct {
-	VkDeviceMemory memory;
-	VkDeviceSize used;
-} ImageChunk;
-
 // Vk_World contains vulkan resources/state requested by the game code.
 // It is reinitialized on a map change.
 typedef struct {
-	//
-	// Memory allocations.
-	//
-	int num_image_chunks;
-	ImageChunk image_chunks[MAX_IMAGE_CHUNKS];
-
 	//
 	// State.
 	//

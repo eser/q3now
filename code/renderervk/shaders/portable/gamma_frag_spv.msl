@@ -52,16 +52,19 @@ constant int depth_b_tmp [[function_constant(10)]];
 constant int depth_b = is_function_constant_defined(depth_b_tmp) ? depth_b_tmp : 255;
 constant int ditherMode_tmp [[function_constant(7)]];
 constant int ditherMode = is_function_constant_defined(ditherMode_tmp) ? ditherMode_tmp : 0;
-constant bool _174 = (ditherMode == 2);
+constant bool _177 = (ditherMode == 2);
+constant int capture_hdr_to_sdr_tmp [[function_constant(14)]];
+constant int capture_hdr_to_sdr = is_function_constant_defined(capture_hdr_to_sdr_tmp) ? capture_hdr_to_sdr_tmp : 0;
+constant bool _348 = (capture_hdr_to_sdr == 1);
 constant float gamma_tmp [[function_constant(0)]];
 constant float gamma = is_function_constant_defined(gamma_tmp) ? gamma_tmp : 1.0;
 constant int hdr_mode_tmp [[function_constant(12)]];
 constant int hdr_mode = is_function_constant_defined(hdr_mode_tmp) ? hdr_mode_tmp : 0;
-constant bool _274 = (hdr_mode == 1);
+constant bool _361 = (hdr_mode == 1);
 constant int srgb_swapchain_tmp [[function_constant(11)]];
 constant int srgb_swapchain = is_function_constant_defined(srgb_swapchain_tmp) ? srgb_swapchain_tmp : 0;
-constant bool _324 = (srgb_swapchain == 1);
-constant bool _362 = (ditherMode != 0);
+constant bool _411 = (srgb_swapchain == 1);
+constant bool _449 = (ditherMode != 0);
 constant float hdr_peak_norm_tmp [[function_constant(13)]];
 constant float hdr_peak_norm = is_function_constant_defined(hdr_peak_norm_tmp) ? hdr_peak_norm_tmp : 10.0;
 
@@ -77,7 +80,7 @@ struct spvDescriptorSetBuffer1
     sampler blueNoiseTexSmplr [[id(1)]];
 };
 
-constant spvUnsafeArray<float, 64> _118 = spvUnsafeArray<float, 64>({ 0.0, 32.0, 8.0, 40.0, 2.0, 34.0, 10.0, 42.0, 48.0, 16.0, 56.0, 24.0, 50.0, 18.0, 58.0, 26.0, 12.0, 44.0, 4.0, 36.0, 14.0, 46.0, 6.0, 38.0, 60.0, 28.0, 52.0, 20.0, 62.0, 30.0, 54.0, 22.0, 3.0, 35.0, 11.0, 43.0, 1.0, 33.0, 9.0, 41.0, 51.0, 19.0, 59.0, 27.0, 49.0, 17.0, 57.0, 25.0, 15.0, 47.0, 7.0, 39.0, 13.0, 45.0, 5.0, 37.0, 63.0, 31.0, 55.0, 23.0, 61.0, 29.0, 53.0, 21.0 });
+constant spvUnsafeArray<float, 64> _121 = spvUnsafeArray<float, 64>({ 0.0, 32.0, 8.0, 40.0, 2.0, 34.0, 10.0, 42.0, 48.0, 16.0, 56.0, 24.0, 50.0, 18.0, 58.0, 26.0, 12.0, 44.0, 4.0, 36.0, 14.0, 46.0, 6.0, 38.0, 60.0, 28.0, 52.0, 20.0, 62.0, 30.0, 54.0, 22.0, 3.0, 35.0, 11.0, 43.0, 1.0, 33.0, 9.0, 41.0, 51.0, 19.0, 59.0, 27.0, 49.0, 17.0, 57.0, 25.0, 15.0, 47.0, 7.0, 39.0, 13.0, 45.0, 5.0, 37.0, 63.0, 31.0, 55.0, 23.0, 61.0, 29.0, 53.0, 21.0 });
 
 struct main0_out
 {
@@ -88,6 +91,32 @@ struct main0_in
 {
     float2 frag_tex_coord [[user(locn0)]];
 };
+
+static inline __attribute__((always_inline))
+float3 tonemapPBRNeutralSDR(thread float3& color)
+{
+    float x = fast::min(color.x, fast::min(color.y, color.z));
+    float _275;
+    if (x < 0.07999999821186065673828125)
+    {
+        _275 = x - ((6.25 * x) * x);
+    }
+    else
+    {
+        _275 = 0.039999999105930328369140625;
+    }
+    float offset = _275;
+    color -= float3(offset);
+    float peak = fast::max(color.x, fast::max(color.y, color.z));
+    if (peak < 0.7599999904632568359375)
+    {
+        return color;
+    }
+    float newPeak = 1.0 - (0.057599999010562896728515625 / ((peak + 0.23999999463558197021484375) - 0.7599999904632568359375));
+    color *= (newPeak / peak);
+    float g = 1.0 - (1.0 / ((0.1500000059604644775390625 * (peak - newPeak)) + 1.0));
+    return mix(color, float3(1.0) * newPeak, float3(g));
+}
 
 static inline __attribute__((always_inline))
 float3 pqEncode(thread float3& L)
@@ -120,7 +149,7 @@ float orderedThreshold(thread float4& gl_FragCoord)
     uint2 coordDenormalized = uint2(gl_FragCoord.xy);
     uint2 bayerCoord = coordDenormalized % uint2(8u);
     uint bayerIndex = bayerCoord.x + (bayerCoord.y * 8u);
-    float bayerSample = _118[bayerIndex];
+    float bayerSample = _121[bayerIndex];
     float threshold = (bayerSample + 0.5) / 64.0;
     return threshold;
 }
@@ -132,16 +161,16 @@ float3 dither(thread const float3& color, thread float4& gl_FragCoord, texture2d
     depth.x = depth_r;
     depth.y = depth_g;
     depth.z = depth_b;
-    float _175;
-    if (_174)
+    float _178;
+    if (_177)
     {
-        _175 = blueNoiseThreshold(gl_FragCoord, blueNoiseTex, blueNoiseTexSmplr);
+        _178 = blueNoiseThreshold(gl_FragCoord, blueNoiseTex, blueNoiseTexSmplr);
     }
     else
     {
-        _175 = orderedThreshold(gl_FragCoord);
+        _178 = orderedThreshold(gl_FragCoord);
     }
-    float t = _175;
+    float t = _178;
     float3 cDenormalized = color * float3(depth);
     float3 cLow = floor(cDenormalized);
     float3 cFractional = cDenormalized - cLow;
@@ -153,31 +182,37 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
 {
     main0_out out = {};
     float3 base = spvDescriptorSet0.texture0.sample(spvDescriptorSet0.texture0Smplr, in.frag_tex_coord).xyz;
+    if (_348)
+    {
+        float3 param = fast::max(base, float3(0.0));
+        float3 _354 = tonemapPBRNeutralSDR(param);
+        base = _354;
+    }
     float3 gamma3;
     gamma3.x = gamma;
     gamma3.y = gamma;
     gamma3.z = gamma;
-    if (_274)
+    if (_361)
     {
-        float3 _279;
+        float3 _366;
         if (gamma != 1.0)
         {
-            _279 = powr(fast::max(base, float3(0.0)), gamma3);
+            _366 = powr(fast::max(base, float3(0.0)), gamma3);
         }
         else
         {
-            _279 = fast::max(base, float3(0.0));
+            _366 = fast::max(base, float3(0.0));
         }
-        float3 lin = _279;
+        float3 lin = _366;
         float3 nits = lin * 100.0;
         nits = float3x3(float3(0.627403914928436279296875, 0.069097287952899932861328125, 0.01639143936336040496826171875), float3(0.3292830288410186767578125, 0.9195404052734375, 0.08801330626010894775390625), float3(0.0433130674064159393310546875, 0.011362315155565738677978515625, 0.895595252513885498046875)) * nits;
-        float3 param = nits / float3(10000.0);
-        float3 _317 = pqEncode(param);
-        out.out_color = float4(_317, 1.0);
+        float3 param_1 = nits / float3(10000.0);
+        float3 _404 = pqEncode(param_1);
+        out.out_color = float4(_404, 1.0);
     }
     else
     {
-        if (_324)
+        if (_411)
         {
             if (gamma != 1.0)
             {
@@ -190,28 +225,28 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
         }
         else
         {
-            float3 _346;
+            float3 _433;
             if (gamma != 1.0)
             {
-                _346 = powr(base, gamma3);
+                _433 = powr(base, gamma3);
             }
             else
             {
-                _346 = base;
+                _433 = base;
             }
-            float3 curved = _346;
-            float3 param_1 = curved;
-            float3 _357 = sRGBEncode(param_1);
-            out.out_color = float4(_357, 1.0);
+            float3 curved = _433;
+            float3 param_2 = curved;
+            float3 _444 = sRGBEncode(param_2);
+            out.out_color = float4(_444, 1.0);
         }
     }
-    if (_362)
+    if (_449)
     {
-        float3 param_2 = out.out_color.xyz;
-        float3 _368 = dither(param_2, gl_FragCoord, spvDescriptorSet1.blueNoiseTex, spvDescriptorSet1.blueNoiseTexSmplr);
-        out.out_color.x = _368.x;
-        out.out_color.y = _368.y;
-        out.out_color.z = _368.z;
+        float3 param_3 = out.out_color.xyz;
+        float3 _455 = dither(param_3, gl_FragCoord, spvDescriptorSet1.blueNoiseTex, spvDescriptorSet1.blueNoiseTexSmplr);
+        out.out_color.x = _455.x;
+        out.out_color.y = _455.y;
+        out.out_color.z = _455.z;
     }
     return out;
 }

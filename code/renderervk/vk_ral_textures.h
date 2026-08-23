@@ -2,24 +2,9 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
-// vk_ral_textures.h — texture migration support. Owns the
-// renderer-side RAL backend instance + the bindless SAMPLED_IMAGE
-// BindGroup that R_CreateImage populates as textures are registered.
-//
-// PARALLEL-PATHS MIGRATION MODEL:
-// The RAL backend has its own VkInstance / VkDevice (per the RAL design),
-// SEPARATE from code/renderervk/'s qvk* instance/device. RAL VkImage handles
-// therefore cannot be used in qvk* descriptor writes (cross-VkDevice handle
-// use is invalid per the Vulkan spec). When r_useRALTextures=1, the
-// renderer keeps its legacy VkImage on the qvk* VkDevice (driving descriptor
-// binding / blits / screenshots / readbacks) AND additionally creates a
-// parallel RAL texture on the RAL VkDevice. The parallel RAL texture is
-// registered into a renderer-owned bindless BindGroup that sits unused at
-// first — a later migration moves descriptor binding onto RAL and consumes the
-// bindless table at that point.
-//
-// Memory cost: ~2x texture allocation across the migration window; arena1
-// observed footprint <200 MiB, doubled <400 MiB — trivial on modern HW.
+// vk_ral_textures.h — direct image_t texture ownership, descriptor views and
+// bindless residency support. Every asset shape owns one exact RAL texture;
+// Vulkan handles exposed by accessors are borrowed diagnostic mirrors only.
 
 #ifndef WIRED_VK_RAL_TEXTURES_H
 #define WIRED_VK_RAL_TEXTURES_H
@@ -40,7 +25,7 @@ struct ralBindGroup_s;
 // vk_ral_textures_shutdown takes a destroyWindow flag mirroring vk_shutdown's
 // signature. When qfalse (REF_LEVEL_ONLY, map-scoped teardown for map
 // transitions) the function is a strict no-op past the diag dump — RAL
-// backend, sibling pipelines, BGLs, and the active-buffer tracker survive
+// backend, sibling pipelines, BGLs and direct RAL resources survive
 // across maps. When qtrue (REF_KEEP_WINDOW / REF_DESTROY_WINDOW /
 // REF_UNLOAD_DLL) the full invalidate-then-NULL + Ral_DestroyBackend path
 // runs.
@@ -89,6 +74,9 @@ void     vk_ral_release_iqm_bone_bindgroup( uint32_t slot );
 // Main entity-matrix set 3 is created directly from the current exact arena;
 // entMatDesc is only the native mirror of this retained RAL group.
 qboolean vk_ral_refresh_entmat_bindgroup( uint32_t slot );
+struct ralBindGroup_s *vk_ral_create_entmat_bindgroup_candidate(
+		uint32_t slot, struct ralBuffer_s *buffer, uint64_t bufferSize,
+		VkDescriptorSet *outNative );
 void     vk_ral_release_entmat_bindgroup( uint32_t slot );
 qboolean vk_ral_refresh_engine_resources_bindgroup( void );
 void     vk_ral_release_engine_resources_bindgroup( void );
@@ -108,8 +96,10 @@ void     vk_ral_release_decal_render_bindgroups( void );
 // Per-image combined-sampler group. RAL allocates/writes the descriptor from
 // the current exact arena; image->descriptor is only its native mirror.
 qboolean vk_ral_refresh_image_descriptor( image_t *image,
-	void *nativeSampler );
+		void *nativeSampler );
 void     vk_ral_release_image_descriptor( image_t *image );
+qboolean vk_ral_create_image_texture_candidate( image_t *image,
+	struct ralTexture_s **outTexture );
 
 // VkDescriptorSet → ralBindGroup_t * reverse lookup
 // over the adoption registry. Returns NULL when `vkSet` isn't adopted
@@ -119,23 +109,16 @@ void     vk_ral_release_image_descriptor( image_t *image );
 struct ralBindGroup_s;
 struct ralBindGroup_s *vk_ral_lookup_bindgroup( VkDescriptorSet vkSet );
 
-// Reverse-lookup helpers for the typed RAL cmd API.
-// Each scans the renderer's existing sibling-field / active-buffer
-// registry / vk.pipelines[].ral_handle[] arrays and returns NULL when no
-// wrapper exists for the given Vk handle. The typed Ral_Cmd* surface
-// null-guards every typed-pointer arg so a NULL return cleanly skips the
-// underlying vkCmd* call (parallel-paths-era invariant — legacy qvkCmd*
-// stays authoritative until a later migration retires it).
-struct ralBuffer_s;
+// Reverse-lookup helper retained for legacy pipeline identities while the
+// pipeline/image ownership tranches converge. Buffers are direct RAL resources
+// and have no native registry or reverse lookup.
 struct ralPipeline_s;
 struct ralPipelineLayout_s;
 struct ralTexture_s;
-struct ralBuffer_s         *vk_ral_lookup_buffer         ( VkBuffer         vkBuf    );
 struct ralPipeline_s       *vk_ral_lookup_pipeline       ( VkPipeline       vkPipe   );
 
 // VkImage → adopted-wrapper reverse lookup for the typed image command
 // migration. Query pools are native RAL resources and need no reverse lookup.
-struct ralTexture_s        *vk_ral_lookup_texture        ( VkImage          vkImage  );
 
 // Boot-time adoption of the renderer's 6 internal-image
 // VkImage handles (depth_image / color_image / tonemapped_image + 3 inside
@@ -146,34 +129,18 @@ struct ralTexture_s        *vk_ral_lookup_texture        ( VkImage          vkIm
 // The SMAA siblings are gated on vk.fboActive (matching the smaa-image
 // alloc lifecycle in vk_smaa_alloc_resources). The full-teardown destroy
 // helper mirrors vk_ral_destroy_adopted_render_passes_and_framebuffers.
-void vk_ral_adopt_static_internal_textures   ( void );
-void vk_ral_destroy_adopted_internal_textures( void );
+void vk_ral_refresh_internal_texture_dependents( void );
+void vk_ral_release_internal_texture_dependents( void );
 
 // Accessor for vk.c::create_pipeline + the 16 special-
-// case pipeline create sites. Returns the imported-mode RAL backend pointer
-// (shared VkDevice with vk.device) or NULL if RAL bringup didn't fire
-// (r_useRALTextures = 0 && r_useRALBuffers = 0 && r_useRALPipelines = 0, or
-// imported-mode init failed).
+// case pipeline create sites. Returns the RAL backend pointer (shared VkDevice
+// with vk.device) or NULL if unconditional RAL bringup failed.
 struct ralBackend_s *vk_ral_get_backend( void );
-
-// On-demand single pipeline-layout adoption. The boot-time
-// vk_ral_adopt_static_pipeline_layouts() sweep runs before the primitive
-// subsystems create their VkPipelineLayouts, so it skips them (NULL guard) and
-// their RAL siblings stay NULL. Each primitive calls this from its own init/
-// recreate, after its legacy layout exists and before it builds its RAL
-// dynamic-rendering pipeline, so externalLayout is a valid, matching layout
-// (not NULL → an empty backend-built layout → VUID-…-07987/07988/08600).
-// Idempotent: destroys any prior sibling and re-adopts. NULL vkLayout no-ops.
-void vk_ral_adopt_one_pipeline_layout( VkPipelineLayout vkLayout,
-		struct ralPipelineLayout_s **ralField, const char *label );
 
 // On-demand single texture adoption — for an attachment image created/re-created
 // outside the boot-time static-internal-texture sweep (e.g. the supersample-gated
 // capture image, re-created on swapchain/r_hdr/r_fbo rebuilds). Adopt at creation,
 // KILL the sibling before the VkImage destroy. Idempotent; NULL vkImage no-ops.
-void vk_ral_adopt_one_texture( VkImage vkImage, VkImageView vkView, VkFormat fmt,
-		struct ralTexture_s **ralField, uint32_t w, uint32_t h, uint32_t aspect,
-		ralTextureUsage_t usage, const char *label );
 
 // bindless-ral-consolidate — accessors for the RAL-owned bindless layout + set.
 // The layout's binding shape is image-array (binding=0, unbounded) + sampler
@@ -197,8 +164,6 @@ qboolean vk_ral_bindless_publish_texture( struct image_s *image,
 	vkBindlessPublicationKind_t kind );
 qboolean vk_ral_bindless_publish_sampler( uint32_t slot,
 	struct ralSampler_s *sampler, const Vk_Sampler_Def *definition );
-qboolean vk_ral_bindless_record_raw_image( struct image_s *image,
-	uint32_t slot, VkImageView view, vkBindlessPublicationKind_t kind );
 qboolean vk_ral_bindless_record_reserved( uint32_t slot, VkImageView view,
 	const void *ownerIdentity, const void *descriptorIdentity );
 qboolean vk_ral_bindless_tombstone( uint32_t slot );
@@ -206,35 +171,26 @@ qboolean vk_ral_bindless_query_ordinary( const struct image_s *image,
 	vkBindlessOrdinaryReceipt_t *outReceipt );
 void vk_ral_bindless_sampler_pool_invalidate( void );
 
-// Per-image registration. `pic` is the original RGBA8 source (after any
-// up-front resampling done by R_CreateImageArray's caller); a NULL pic
-// causes the RAL parallel texture to be skipped for that image (typical for
-// scratch / placeholder / dynamic update textures, which this migration
-// doesn't cover). `width`/`height` are the renderer's pre-upload_vk_image
-// dimensions — RAL receives original dimensions and runs its own GPU
-// mip-gen (visual output of the renderer is unaffected because rendering
-// still samples the legacy VkImage).
+// Post-upload registration for ordinary 2D assets. The exact texture already
+// exists and has been uploaded; this adds page records, a residency view and
+// the ordinary bindless slot. NULL `pic` denotes create-empty-then-fill assets.
 void vk_ral_register_image  ( struct image_s *image, byte *pic, int width, int height );
 void vk_ral_unregister_image( struct image_s *image );
 
 // Phase 7.15.4-b reversibility leg: restore an evicted-but-still-registered image
 // (image->ral == NULL) by re-decoding its source from disk (image->imgName) and
-// re-creating BOTH the RAL bindless texture and the legacy VkImage, mirroring
-// R_CreateImage's pairing. Idempotent (no-op if already resident); skips + warns on
+// re-creating the single exact RAL texture cohort. Idempotent (no-op if already resident); skips + warns on
 // a pinned image (must never be evicted); graceful on decode-fail (left non-resident
 // → bind sentinel-declines). Defined in tr_image.c (where the static R_LoadImage +
 // upload_vk_image live). Called by the step-b forced-evict round-trip test and,
 // later, step-c eviction / 7.15.3 bind-miss.
 void vk_ral_reregister_image( struct image_s *image );
 
-// Assign a bindless slot to a DDS (BC*/packed) image that cannot go through
-// vk_ral_register_image's RGBA8 path. Uses the SAME free-list allocator + the
+// Assign a bindless slot to a DDS (BC*/packed/cube/3D) image. Uses the SAME free-list allocator + the
 // SAME over-capacity bookkeeping as the main path, so there is genuinely ONE
-// slot-index source (eviction slot-recycle in 7.15.4 will not collide with a
-// raw tr.numImages-1 index). DDS keeps its own vk_create_image +
-// vk_upload_dds_image_data path; only the slot SOURCE is shared — the actual
-// descriptor write happens later via vk_update_descriptor_set with the real
-// DDS-format view. Call BEFORE vk_create_image (the descriptor write depends on
+// slot-index source. DDS keeps its specialized upload planner, while creation,
+// memory and the exact format/view identity are owned by RAL. Call BEFORE
+// vk_create_image (the descriptor write depends on
 // image->ralBindlessSlot already being set). Phase 7.15.2-fix.
 void vk_ral_assign_dds_slot( struct image_s *image );
 
@@ -246,6 +202,7 @@ void vk_ral_assign_dds_slot( struct image_s *image );
 // free-list and re-registration would pop recycled slots (reordering which
 // texture lands in which slot). Phase 7.15.2.
 void vk_ral_reset_bindless_slots( void );
+qboolean vk_ral_rebuild_bindless_set( void );
 
 // ── Phase 7.15.4-c automatic pressure-driven eviction (Option-A threading) ──
 // Tunables (modder-code-level #defines, not user cvars). Derived from the poller's
@@ -325,30 +282,6 @@ void     vk_ral_upload_counts( uint32_t *syncOut, uint32_t *asyncOut );
 // shader's macro (WIRED_BINDLESS_TEX vs WIRED_BINDLESS_TEX_ARRAY) picks
 // which to read.
 int vk_ral_alloc_array_bindless_slot( const char *imgName );
-
-// Exact native-buffer adoption bridge. Each legacy vkCreateBuffer
-// site in vk.c calls vk_ral_register_buffer right after qvkBindBufferMemory;
-// the matching qvkDestroyBuffer is preceded by vk_ral_unregister_buffer.
-// `key` is both the lookup key and the exact native identity borrowed by the
-// non-owning RAL wrapper; no second GPU buffer is allocated and raw parent
-// destruction remains renderer-owned.
-//
-// Backend-availability handling: register calls made before
-// vk_ral_textures_init has brought up the persistent RAL backend (which
-// runs from R_InitImages after ri.FreeAll) are queued in a static pending
-// list and flushed when the backend comes up. This covers the ~13
-// vk_initialize-time create sites (staging, tess, storage, ribbon, beam,
-// sprite, particle, primitive, IQM bone, world VBO) which all create
-// buffers before R_InitImages fires. Per-map / per-frame / lazy-growth
-// sites are registered after the backend is live and skip the queue.
-//
-// Helpers translate the legacy VkBufferUsageFlags + VkMemoryPropertyFlags
-// internally and retain those exact portable capabilities in the wrapper.
-void vk_ral_register_buffer  ( VkBuffer key, uint64_t size,
-                               VkBufferUsageFlags vkUsage,
-                               VkMemoryPropertyFlags vkMemProps,
-                               const char *debugName );
-void vk_ral_unregister_buffer( VkBuffer key );
 
 // Diagnostic — used by the \ral_resources developer command. Auto-fires
 // at vk_ral_textures_shutdown so the bindless texture + RAL buffer state
