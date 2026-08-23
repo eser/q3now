@@ -547,12 +547,17 @@ int main( void ) {
 	portableLayoutVector[1] = &portableLayouts[1];
 	graphicsInfo.bindGroupLayouts = NULL;
 	graphicsInfo.numBindGroupLayouts = 0u;
+	graphicsInfo.optionalBindGroupMask = 1u << 2;
+	CHECK( Ral_CreateGraphicsPipeline( &backend, &graphicsInfo ) == NULL );
+	CHECK( createGraphicsPipelineCalls == 0u && createShaderModuleCalls == 0u );
+	graphicsInfo.optionalBindGroupMask = 1u << 1;
 	portablePipeline = Ral_CreateGraphicsPipeline( &backend, &graphicsInfo );
 	CHECK( portablePipeline != NULL && createGraphicsPipelineCalls == 1u
 		&& createShaderModuleCalls == 2u && destroyShaderModuleCalls == 2u
 		&& capturedGraphicsPipelineLayout == portableLayout->vkHandle
 		&& portablePipeline->bindGroupLayoutsRegistered
 		&& portablePipeline->numSetLayouts == 2u
+		&& portablePipeline->optionalBindGroupMask == ( 1u << 1 )
 		&& portablePipeline->setLayouts[0] == portableLayouts[0].layout
 		&& portablePipeline->setLayouts[1] == portableLayouts[1].layout );
 	Ral_DestroyPipeline( portablePipeline );
@@ -562,15 +567,32 @@ int main( void ) {
 		&& capturedDestroyedPipelineLayout == (VkPipelineLayout)(uintptr_t)0x72u );
 
 	ResetPipelineLayoutCapture();
+	pipelineLayoutInfo.pushConstantOffset = 64u;
 	pipelineLayoutInfo.pushConstantSize = 32u;
 	pipelineLayoutInfo.pushConstantStages = RAL_STAGE_FRAGMENT;
 	createPipelineLayoutHandle = (VkPipelineLayout)(uintptr_t)0x73u;
 	portablePushLayout = Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo );
 	CHECK( portablePushLayout != NULL && capturedPushRangeCount == 1u
 		&& capturedPushRange.stageFlags == VK_SHADER_STAGE_FRAGMENT_BIT
-		&& capturedPushRange.offset == 0u && capturedPushRange.size == 32u
+		&& capturedPushRange.offset == 64u && capturedPushRange.size == 32u
 		&& portablePushLayout->externalPushRangeCount == 1u
-		&& portablePushLayout->externalPushRanges[0].stageFlags == RAL_STAGE_FRAGMENT );
+		&& portablePushLayout->externalPushRanges[0].stageFlags == RAL_STAGE_FRAGMENT
+		&& portablePushLayout->externalPushRanges[0].offset == 64u
+		&& portablePushLayout->externalPushRanges[0].size == 32u );
+	graphicsInfo.externalLayout = portablePushLayout;
+	graphicsInfo.pushConstantSize = 32u;
+	graphicsInfo.pushConstantStages = RAL_STAGE_FRAGMENT;
+	createGraphicsPipelineCalls = createShaderModuleCalls = destroyShaderModuleCalls = 0u;
+	portablePipeline = Ral_CreateGraphicsPipeline( &backend, &graphicsInfo );
+	CHECK( portablePipeline != NULL && portablePipeline->pushConstantOffset == 64u );
+	command.currentPipeline = portablePipeline;
+	command.currentLayout = portablePipeline->layout;
+	ResetPushCapture();
+	Ral_CmdPushConstants( &command, RAL_STAGE_FRAGMENT, 0u, 32u, pushPayload );
+	CHECK( pushCalls == 0u );
+	Ral_CmdPushConstants( &command, RAL_STAGE_FRAGMENT, 64u, 32u, pushPayload );
+	CHECK( pushCalls == 1u && capturedPushOffset == 64u && capturedPushSize == 32u );
+	Ral_DestroyPipeline( portablePipeline );
 	Ral_DestroyPipelineLayout( portablePushLayout );
 	CHECK( destroyPipelineLayoutCalls == 1u );
 
@@ -597,8 +619,19 @@ int main( void ) {
 	pipelineLayoutInfo.pushConstantStages = RAL_STAGE_FRAGMENT;
 	pipelineLayoutInfo.pushConstantSize = 132u;
 	CHECK( Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo ) == NULL );
-	CHECK( createPipelineLayoutCalls == 0u && destroyPipelineLayoutCalls == 0u );
 	pipelineLayoutInfo.pushConstantSize = 32u;
+	pipelineLayoutInfo.pushConstantOffset = 2u;
+	CHECK( Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo ) == NULL );
+	pipelineLayoutInfo.pushConstantOffset = 100u;
+	CHECK( Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo ) == NULL );
+	pipelineLayoutInfo.pushConstantOffset = 4u;
+	pipelineLayoutInfo.pushConstantSize = 0u;
+	pipelineLayoutInfo.pushConstantStages = 0u;
+	CHECK( Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo ) == NULL );
+	CHECK( createPipelineLayoutCalls == 0u && destroyPipelineLayoutCalls == 0u );
+	pipelineLayoutInfo.pushConstantOffset = 64u;
+	pipelineLayoutInfo.pushConstantSize = 32u;
+	pipelineLayoutInfo.pushConstantStages = RAL_STAGE_FRAGMENT;
 	createPipelineLayoutResult = VK_ERROR_OUT_OF_HOST_MEMORY;
 	createPipelineLayoutHandle = (VkPipelineLayout)(uintptr_t)0x74u;
 	CHECK( Ral_CreatePipelineLayout( &backend, &pipelineLayoutInfo ) == NULL );

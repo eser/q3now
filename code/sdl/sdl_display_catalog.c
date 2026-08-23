@@ -13,6 +13,19 @@
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 static wiredDisplayReconciler_t s_reconciler = { GLIMP_DISPLAY_DIRTY_TOPOLOGY };
+
+_Static_assert( REF_PRESENTATION_CHANGE_TOPOLOGY == WIRED_DISPLAY_CHANGE_TOPOLOGY,
+	"presentation topology flag drift" );
+_Static_assert( REF_PRESENTATION_CHANGE_ACTIVE_OUTPUT == WIRED_DISPLAY_CHANGE_ACTIVE_OUTPUT,
+	"presentation active-output flag drift" );
+_Static_assert( REF_PRESENTATION_CHANGE_SCALE == WIRED_DISPLAY_CHANGE_SCALE,
+	"presentation scale flag drift" );
+_Static_assert( REF_PRESENTATION_CHANGE_COLOR == WIRED_DISPLAY_CHANGE_COLOR,
+	"presentation color flag drift" );
+_Static_assert( REF_PRESENTATION_CHANGE_FULLSCREEN == WIRED_DISPLAY_CHANGE_FULLSCREEN,
+	"presentation fullscreen flag drift" );
+_Static_assert( REF_PRESENTATION_CHANGE_EXTENT == WIRED_DISPLAY_CHANGE_EXTENT,
+	"presentation extent flag drift" );
 static uint64_t s_presentationGeneration;
 
 static uint64_t HashBytes( uint64_t hash, const void *data, size_t size ) {

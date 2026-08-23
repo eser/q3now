@@ -15,6 +15,17 @@ static void Put32( unsigned char *p, uint32_t v ) {
 static void Put64( unsigned char *p, uint64_t v ) {
 	Put32( p, (uint32_t)v ); Put32( p + 4, (uint32_t)( v >> 32u ) );
 }
+static uint64_t ArtifactHash( const unsigned char *bytes, uint64_t length ) {
+	uint64_t i, hash = UINT64_C( 14695981039346656037 );
+	for ( i = 0u; i < length; i++ ) {
+		unsigned char value = i >= 24u && i < 32u ? 0u : bytes[i];
+		hash ^= value; hash *= UINT64_C( 1099511628211 );
+	}
+	return hash ? hash : 1u;
+}
+static void ResealArtifact( unsigned char *bytes, uint64_t length ) {
+	Put64( bytes + 24, ArtifactHash( bytes, length ) );
+}
 static uint64_t MakeKtx2( unsigned char *b, uint32_t model, uint32_t scheme ) {
 	static const unsigned char id[12] = { 0xAB, 0x4B, 0x54, 0x58, 0x20,
 		0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A };
@@ -69,9 +80,16 @@ static ralTextureAssetRequest_t Request( void ) {
 int main( void ) {
 	ralTextureAssetRequest_t request = Request();
 	ralTextureAssetReceipt_t receipt, exact, before;
+	ralTextureAssetRequest_t artifactRequest, staleRequest;
+	ralTextureAssetReceipt_t artifactAsset, staleAsset;
 	unsigned char ktx[256], corrupt[256];
 	ralKtx2Receipt_t ktxReceipt, ktxExact, ktxBefore;
 	uint64_t ktxBytes;
+	unsigned char artifact[512], transported[512], artifactBefore[512], payload[96];
+	uint64_t artifactLevels[3] = { 64u, 16u, 16u };
+	ralTextureArtifactReceipt_t artifactReceipt, decodedArtifact, artifactOutputBefore;
+	uint64_t artifactBytes;
+	uint32_t p;
 	CHECK( Ral_ResolveTextureAsset( &request, &receipt ) );
 	CHECK( receipt.assetGeneration == request.assetGeneration
 		&& receipt.provenanceHash == request.provenanceHash
@@ -186,5 +204,68 @@ int main( void ) {
 	CHECK( !Ral_ParseKtx2( corrupt, ktxBytes, 11u, 0xcdefu, &ktxReceipt ) );
 	ktxBytes = MakeKtx2( corrupt, 163u, RAL_KTX2_SUPERCOMPRESSION_ZSTD );
 	CHECK( !Ral_ParseKtx2( corrupt, ktxBytes, 11u, 0xcdefu, &ktxReceipt ) );
+
+	artifactRequest = Request(); artifactRequest.width = 4u; artifactRequest.height = 4u;
+	artifactRequest.sourceMipLevels = 3u; artifactRequest.mipPolicy = RAL_TEXTURE_MIPS_SOURCE;
+	CHECK( Ral_ResolveTextureAsset( &artifactRequest, &artifactAsset )
+		&& artifactAsset.targetMipLevels == 3u );
+	for ( p = 0u; p < sizeof( payload ); p++ ) payload[p] = (unsigned char)( p * 17u + 3u );
+	CHECK( Ral_EncodeTextureArtifact( &artifactAsset, artifactLevels, 3u,
+		payload, sizeof( payload ), artifact, sizeof( artifact ), &artifactReceipt ) );
+	artifactBytes = artifactReceipt.containerByteLength;
+	CHECK( artifactReceipt.schemaVersion == RAL_TEXTURE_ARTIFACT_SCHEMA_VERSION
+		&& artifactReceipt.levelCount == 3u
+		&& artifactReceipt.levels[0].payloadOffset == 0u
+		&& artifactReceipt.levels[1].payloadOffset == 64u
+		&& artifactReceipt.levels[2].payloadOffset == 80u
+		&& artifactReceipt.payloadByteLength == sizeof( payload )
+		&& !memcmp( artifact + artifactReceipt.payloadByteOffset,
+			payload, sizeof( payload ) ) );
+	CHECK( Ral_DecodeTextureArtifact( artifact, artifactBytes,
+		&artifactAsset, &decodedArtifact )
+		&& Ral_TextureArtifactReceiptExact( &artifactReceipt, &decodedArtifact ) );
+	memcpy( transported, artifact, (size_t)artifactBytes );
+	CHECK( Ral_DecodeTextureArtifact( transported, artifactBytes,
+		&artifactAsset, &decodedArtifact )
+		&& decodedArtifact.artifactHash == artifactReceipt.artifactHash );
+	memset( artifactBefore, 0xa5, sizeof( artifactBefore ) );
+	memcpy( transported, artifactBefore, sizeof( transported ) );
+	memset( &artifactOutputBefore, 0x5a, sizeof( artifactOutputBefore ) );
+	memcpy( &decodedArtifact, &artifactOutputBefore, sizeof( decodedArtifact ) );
+	CHECK( !Ral_EncodeTextureArtifact( &artifactAsset, artifactLevels, 3u,
+		payload, sizeof( payload ), transported, 32u, &decodedArtifact )
+		&& !memcmp( transported, artifactBefore, sizeof( transported ) )
+		&& !memcmp( &decodedArtifact, &artifactOutputBefore, sizeof( decodedArtifact ) ) );
+
+	memcpy( transported, artifact, (size_t)artifactBytes ); transported[artifactBytes - 1u] ^= 1u;
+	CHECK( !Ral_DecodeTextureArtifact( transported, artifactBytes,
+		&artifactAsset, &decodedArtifact ) );
+	CHECK( !Ral_DecodeTextureArtifact( artifact, artifactBytes - 1u,
+		&artifactAsset, &decodedArtifact ) );
+	memcpy( transported, artifact, (size_t)artifactBytes ); Put32( transported + 8, 2u );
+	ResealArtifact( transported, artifactBytes );
+	CHECK( !Ral_DecodeTextureArtifact( transported, artifactBytes,
+		&artifactAsset, &decodedArtifact ) );
+	memcpy( transported, artifact, (size_t)artifactBytes ); Put64( transported + 48,
+		artifactAsset.provenanceHash + 1u ); ResealArtifact( transported, artifactBytes );
+	CHECK( !Ral_DecodeTextureArtifact( transported, artifactBytes,
+		&artifactAsset, &decodedArtifact ) );
+	memcpy( transported, artifact, (size_t)artifactBytes ); Put32( transported + 112,
+		RAL_FORMAT_UNDEFINED ); ResealArtifact( transported, artifactBytes );
+	CHECK( !Ral_DecodeTextureArtifact( transported, artifactBytes,
+		&artifactAsset, &decodedArtifact ) );
+	memcpy( transported, artifact, (size_t)artifactBytes ); Put64( transported + 160, 63u );
+	ResealArtifact( transported, artifactBytes );
+	CHECK( !Ral_DecodeTextureArtifact( transported, artifactBytes,
+		&artifactAsset, &decodedArtifact ) );
+	staleRequest = artifactRequest; staleRequest.capabilities.bc = qfalse;
+	CHECK( Ral_ResolveTextureAsset( &staleRequest, &staleAsset )
+		&& staleAsset.targetFormat != artifactAsset.targetFormat
+		&& !Ral_DecodeTextureArtifact( artifact, artifactBytes,
+			&staleAsset, &decodedArtifact ) );
+	memcpy( &decodedArtifact, &artifactOutputBefore, sizeof( decodedArtifact ) );
+	CHECK( !Ral_DecodeTextureArtifact( artifact, artifactBytes - 1u,
+		&artifactAsset, &decodedArtifact )
+		&& !memcmp( &decodedArtifact, &artifactOutputBefore, sizeof( decodedArtifact ) ) );
 	puts( "RAL texture asset policy: PASS" ); return 0;
 }

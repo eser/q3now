@@ -17,8 +17,8 @@ static vkTemporalIqmExact3CandidateRole_t s_rejectRole;
 static vkTemporalIqmExact3CandidateRole_t s_aliasRole;
 static const void *s_aliasIdentity;
 static int s_destroyOrder[64], s_destroyCount;
-static VkDescriptorSetLayout s_rawSets[2];
-static VkPushConstantRange s_rawPush;
+static const ralBindGroupLayout_t *s_layoutSets[2];
+static uint32_t s_layoutPushOffset,s_layoutPushSize,s_layoutPushStages;
 static ralGraphicsPipelineCreateInfo_t s_pipelineCi[2];
 static ralVertexBinding_t s_pipelineBinding[2];
 static ralVertexAttribute_t s_pipelineAttributes[2][6];
@@ -73,24 +73,20 @@ static void *FactoryCandidate( vkTemporalIqmExact3CandidateRole_t role ) {
 	return Next();
 }
 
-static VkResult CreateRaw( VkDevice device,
-		const VkPipelineLayoutCreateInfo *ci, VkPipelineLayout *out ) {
-	(void)device;
-	CHECK(ci&&out&&ci->setLayoutCount==2u&&ci->pushConstantRangeCount==1u);
-	s_rawSets[0]=ci->pSetLayouts[0];s_rawSets[1]=ci->pSetLayouts[1];s_rawPush=ci->pPushConstantRanges[0];
-	*out=(VkPipelineLayout)FactoryCandidate(VK_TEMPORAL_IQM_EXACT3_CANDIDATE_RAW_LAYOUT);
-	return *out ? VK_SUCCESS : VK_ERROR_INITIALIZATION_FAILED;
-}
-static void DestroyRaw( VkDevice device, VkPipelineLayout layout ) {
-	(void)device;(void)layout;s_destroyOrder[s_destroyCount++]=4;
-}
-static ralPipelineLayout_t *AdoptRaw( ralBackend_t *backend, void *raw,
-		const char *name ) {
-	(void)backend;(void)raw;(void)name;
+static ralPipelineLayout_t *CreateLayout( ralBackend_t *backend,
+		const ralPipelineLayoutCreateInfo_t *ci ) {
+	(void)backend;
+	CHECK(ci&&ci->numBindGroupLayouts==2u&&ci->bindGroupLayouts);
+	s_layoutSets[0]=ci->bindGroupLayouts[0];s_layoutSets[1]=ci->bindGroupLayouts[1];
+	s_layoutPushOffset=ci->pushConstantOffset;s_layoutPushSize=ci->pushConstantSize;
+	s_layoutPushStages=ci->pushConstantStages;
 	return (ralPipelineLayout_t *)FactoryCandidate(
 		VK_TEMPORAL_IQM_EXACT3_CANDIDATE_ADOPTED_LAYOUT);
 }
-static void DestroyAdopted( ralPipelineLayout_t *layout ) {
+static void *GetPipelineLayoutHandle( const ralPipelineLayout_t *layout ) {
+	return (void *)((uintptr_t)layout + 1u);
+}
+static void DestroyLayout( ralPipelineLayout_t *layout ) {
 	(void)layout;s_destroyOrder[s_destroyCount++]=3;
 }
 static ralPipeline_t *CreatePipeline( ralBackend_t *backend,
@@ -124,7 +120,7 @@ static qboolean Allowed( vkTemporalIqmExact3CandidateRole_t role,
 }
 
 static const vkTemporalIqmExact3FactoryOps_t s_ops={
-	GetLayoutHandle,CreateRaw,DestroyRaw,AdoptRaw,DestroyAdopted,
+	GetLayoutHandle,CreateLayout,GetPipelineLayoutHandle,DestroyLayout,
 	CreatePipeline,DestroyPipeline,Drain,Allowed,NULL
 };
 
@@ -273,10 +269,9 @@ int main( void ) {
 		CHECK(!VK_TemporalIqmExact3FactoryEnsure(&owner,&payload,&input,&bad,&s_ops));CHECK(!memcmp(&owner,&before,sizeof(owner))&&s_factoryCreates==0);}
 	VK_TemporalIqmExact3FactoryInit(&owner);ResetFactoryFakes();
 	CHECK(VK_TemporalIqmExact3FactoryEnsure(&owner,&payload,&input,&catalog,&s_ops));
-	CHECK(owner.ready&&owner.payloadLease&&payload.layoutLeaseCount==1u&&s_factoryCreates==4);
-	CHECK(s_rawSets[0]==(VkDescriptorSetLayout)GetLayoutHandle(payload.layout));
-	CHECK(s_rawSets[1]==(VkDescriptorSetLayout)GetLayoutHandle(input.bindless.layout));
-	CHECK(s_rawPush.offset==0u&&s_rawPush.size==8u&&s_rawPush.stageFlags==VK_SHADER_STAGE_FRAGMENT_BIT);
+	CHECK(owner.ready&&owner.payloadLease&&payload.layoutLeaseCount==1u&&s_factoryCreates==3);
+	CHECK(s_layoutSets[0]==payload.layout&&s_layoutSets[1]==input.bindless.layout);
+	CHECK(s_layoutPushOffset==0u&&s_layoutPushSize==8u&&s_layoutPushStages==RAL_STAGE_FRAGMENT);
 	CheckPipeline(&s_pipelineCi[0],&input,&catalog,qfalse,&payload);
 	CheckPipeline(&s_pipelineCi[1],&input,&catalog,qtrue,&payload);
 	CHECK(VK_TemporalIqmExact3FactoryGetReceipt(&owner,&receipt));
@@ -289,19 +284,19 @@ int main( void ) {
 	s_drainFail=1;CHECK(!VK_TemporalIqmExact3FactoryRelease(&owner,&s_ops));
 	CHECK(owner.pendingDrain&&!owner.ready&&payload.layoutLeaseCount==1u);
 	CHECK(VK_TemporalIqmExact3FactoryRelease(&owner,&s_ops));
-	CHECK(payload.layoutLeaseCount==0u&&s_destroyCount>=6);
+	CHECK(payload.layoutLeaseCount==0u&&s_destroyCount>=5);
 	CHECK(s_destroyOrder[0]==2&&s_destroyOrder[1]==2&&s_destroyOrder[2]==1&&s_destroyOrder[3]==1);
-	CHECK(s_destroyOrder[4]==3&&s_destroyOrder[5]==4);
+	CHECK(s_destroyOrder[4]==3);
 
 	// Every create leg fails without publishing; a post-pipeline drain failure
 	// retains the exact parents/lease until retry.
-	for(int fail=1;fail<=4;fail++){
+	for(int fail=1;fail<=3;fail++){
 		ResetFactoryFakes();VK_TemporalIqmExact3FactoryInit(&owner);s_factoryFailAt=fail;
 		CHECK(!VK_TemporalIqmExact3FactoryEnsure(&owner,&payload,&input,&catalog,&s_ops));
 		CHECK(!owner.ready&&!VK_TemporalIqmExact3FactoryGetReceipt(&owner,&receipt));
 		CHECK(!owner.pendingDrain&&payload.layoutLeaseCount==0u);
 	}
-	ResetFactoryFakes();VK_TemporalIqmExact3FactoryInit(&owner);s_factoryFailAt=4;s_drainFail=1;
+	ResetFactoryFakes();VK_TemporalIqmExact3FactoryInit(&owner);s_factoryFailAt=3;s_drainFail=1;
 	CHECK(!VK_TemporalIqmExact3FactoryEnsure(&owner,&payload,&input,&catalog,&s_ops));
 	CHECK(owner.pendingDrain&&owner.payloadLease&&payload.layoutLeaseCount==1u);
 	CHECK(VK_TemporalIqmExact3FactoryRelease(&owner,&s_ops)&&payload.layoutLeaseCount==0u);
@@ -324,7 +319,7 @@ int main( void ) {
 	ResetFactoryFakes();VK_TemporalIqmExact3FactoryInit(&owner);
 	s_aliasRole=VK_TEMPORAL_IQM_EXACT3_CANDIDATE_INVALIDATE_PIPELINE;
 	// The deterministic fake returns the WRITE identity at this point.
-	s_aliasIdentity=(const void *)(s_next+0x300u);
+	s_aliasIdentity=(const void *)(s_next+0x200u);
 	CHECK(!VK_TemporalIqmExact3FactoryEnsure(&owner,&payload,&input,&catalog,&s_ops));
 	if(owner.pendingDrain)CHECK(VK_TemporalIqmExact3FactoryRelease(&owner,&s_ops));
 

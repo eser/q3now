@@ -1535,6 +1535,8 @@ static const void *RB_MenuBackdrop( const void *data ) {
 			ubo->resY       = cmd->h;
 			ubo->pad0       = 0.0f;
 			ubo->pad1       = 0.0f;
+			if ( !vk_publish_menubg_shadow( (uint32_t)vk.cmd_index ) )
+				return (const void *)(cmd + 1);
 
 			vp.x = cmd->x; vp.y = cmd->y;
 			vp.width = cmd->w; vp.height = cmd->h;
@@ -2694,8 +2696,8 @@ static const void *RB_SwapBuffers( const void *data ) {
 		// smaller swapchain image (VK_ERROR_DEVICE_LOST under an
 		// r_renderScale-decoupled config). Matches vk_read_pixels' own
 		// vk.capture.image branch so readback extent and file size agree.
-		int ssW = vk.capture.image ? gls.captureWidth : gls.windowWidth;
-		int ssH = vk.capture.image ? gls.captureHeight : gls.windowHeight;
+		int ssW = vk.capture.ral_image ? gls.captureWidth : gls.windowWidth;
+		int ssH = vk.capture.ral_image ? gls.captureHeight : gls.windowHeight;
 #else
 		int ssW = gls.captureWidth;
 		int ssH = gls.captureHeight;

@@ -1640,7 +1640,6 @@ static void VkInfo_f( void )
 
 	R_LOG( rch_init, SEV_INFO, "pipeline handles: %i\n", vk.pipeline_create_count );
 	R_LOG( rch_init, SEV_INFO, "pipeline descriptors: %i, base: %i\n", vk.pipelines_count, vk.pipelines_world_base );
-	R_LOG( rch_init, SEV_INFO, "image chunks: %i\n", vk_world.num_image_chunks );
 }
 #endif
 
@@ -1764,7 +1763,6 @@ static void R_Register( void )
 	r_textureBits = ri.Cvar_Get( "r_textureBits", "0", CVAR_ARCHIVE | CVAR_NODEFAULT | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_textureBits, "Number of texture bits per texture." );
 
-	// when 1 (default), R_CreateImage creates a parallel RAL
 	// r_useRALTextures / r_useRALBuffers /
 	// r_useRALPipelines retired; RAL backend is unconditional now
 	// (the swapchain itself is a RAL consumer).
@@ -3244,9 +3242,8 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	// them — they leaked until vkDestroyDevice
 	// (VUID-vkDestroyDevice-device-05137).
 	//
-	// Vulkan ordering: VkImages must be destroyed BEFORE their backing
-	// VkDeviceMemory (image_chunks) is freed; pair R_DeleteTextures with
-	// vk_release_resources so the order is always correct.
+	// RAL texture children are retired before their texture owners; pair
+	// R_DeleteTextures with vk_release_resources so the order stays exact.
 	//
 	// Teardown window: from here the renderer releases GPU resources (textures,
 	// then the RAL backend / adopted images / pipelines). Do NOT pump a render

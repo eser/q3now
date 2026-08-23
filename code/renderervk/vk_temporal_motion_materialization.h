@@ -11,7 +11,7 @@
 typedef struct {
 	ralBackend_t *backend;
 	VkDevice device;
-	VkDescriptorSetLayout borrowedSets[3];
+	const ralBindGroupLayout_t *borrowedLayouts[3];
 	const temporalMotionPayloadOwner_t *payload;
 	int32_t worldIndex;
 	uint32_t width;

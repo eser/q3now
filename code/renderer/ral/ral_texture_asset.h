@@ -14,6 +14,7 @@ extern "C" {
 #define RAL_TEXTURE_ASSET_MAX_PREFERENCES 4u
 #define RAL_KTX2_SCHEMA_VERSION 1u
 #define RAL_KTX2_MAX_LEVELS 32u
+#define RAL_TEXTURE_ARTIFACT_SCHEMA_VERSION 1u
 
 typedef enum { RAL_TEXTURE_ASSET_2D = 0, RAL_TEXTURE_ASSET_2D_ARRAY,
 	RAL_TEXTURE_ASSET_CUBE, RAL_TEXTURE_ASSET_3D } ralTextureAssetDimension_t;
@@ -96,6 +97,19 @@ typedef struct {
 	qboolean transcodeRequired, deterministicFallback;
 } ralTextureAssetReceipt_t;
 
+typedef struct {
+	uint64_t payloadOffset, payloadLength;
+} ralTextureArtifactLevelReceipt_t;
+
+typedef struct {
+	uint32_t schemaVersion;
+	uint64_t containerByteLength, artifactHash;
+	ralTextureAssetReceipt_t asset;
+	uint32_t levelCount;
+	uint64_t payloadByteOffset, payloadByteLength;
+	ralTextureArtifactLevelReceipt_t levels[RAL_KTX2_MAX_LEVELS];
+} ralTextureArtifactReceipt_t;
+
 qboolean Ral_ResolveTextureAsset( const ralTextureAssetRequest_t *request,
 	ralTextureAssetReceipt_t *outReceipt );
 qboolean Ral_TextureAssetReceiptValid( const ralTextureAssetReceipt_t *receipt );
@@ -107,6 +121,19 @@ qboolean Ral_ParseKtx2( const void *bytes, uint64_t byteLength,
 qboolean Ral_Ktx2ReceiptValid( const ralKtx2Receipt_t *receipt );
 qboolean Ral_Ktx2ReceiptExact( const ralKtx2Receipt_t *a,
 	const ralKtx2Receipt_t *b );
+qboolean Ral_EncodeTextureArtifact( const ralTextureAssetReceipt_t *asset,
+	const uint64_t *levelByteLengths, uint32_t levelCount,
+	const void *payload, uint64_t payloadByteLength,
+	void *outBytes, uint64_t outCapacity,
+	ralTextureArtifactReceipt_t *outReceipt );
+qboolean Ral_DecodeTextureArtifact( const void *bytes, uint64_t byteLength,
+	const ralTextureAssetReceipt_t *expectedAsset,
+	ralTextureArtifactReceipt_t *outReceipt );
+qboolean Ral_TextureArtifactReceiptValid(
+	const ralTextureArtifactReceipt_t *receipt );
+qboolean Ral_TextureArtifactReceiptExact(
+	const ralTextureArtifactReceipt_t *a,
+	const ralTextureArtifactReceipt_t *b );
 
 #ifdef __cplusplus
 }

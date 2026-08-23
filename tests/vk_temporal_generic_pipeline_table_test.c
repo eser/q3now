@@ -156,9 +156,9 @@ int main(void){
 		(VkShaderModule)(uintptr_t)2,(VkPipelineLayout)(uintptr_t)3,&view));
 	memset(&layout,0,sizeof(layout));layout.backend=(ralBackend_t*)(uintptr_t)7;
 	layout.adopted=(ralPipelineLayout_t*)(uintptr_t)8;layout.allocationGeneration=1;
-	layout.borrowedSets[0]=(VkDescriptorSetLayout)(uintptr_t)10;
-	layout.borrowedSets[1]=(VkDescriptorSetLayout)(uintptr_t)11;
-	layout.borrowedSets[2]=(VkDescriptorSetLayout)(uintptr_t)12;
+	layout.borrowedLayouts[0]=(ralBindGroupLayout_t*)(uintptr_t)10;
+	layout.borrowedLayouts[1]=(ralBindGroupLayout_t*)(uintptr_t)11;
+	layout.borrowedLayouts[2]=(ralBindGroupLayout_t*)(uintptr_t)12;
 	layout.payloadLayout=(ralBindGroupLayout_t*)(uintptr_t)13;
 	layout.ready=qtrue;
 	VK_TemporalGenericPipelineTableInit(&table);

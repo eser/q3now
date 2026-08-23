@@ -17,6 +17,13 @@ static uint32_t ReadLE32( const unsigned char *p ) {
 static uint64_t ReadLE64( const unsigned char *p ) {
 	return (uint64_t)ReadLE32( p ) | (uint64_t)ReadLE32( p + 4 ) << 32u;
 }
+static void WriteLE32( unsigned char *p, uint32_t v ) {
+	p[0] = (unsigned char)v; p[1] = (unsigned char)( v >> 8u );
+	p[2] = (unsigned char)( v >> 16u ); p[3] = (unsigned char)( v >> 24u );
+}
+static void WriteLE64( unsigned char *p, uint64_t v ) {
+	WriteLE32( p, (uint32_t)v ); WriteLE32( p + 4, (uint32_t)( v >> 32u ) );
+}
 static qboolean RangeValid( uint64_t offset, uint64_t length, uint64_t total ) {
 	return length && offset <= total && length <= total - offset;
 }
@@ -364,5 +371,177 @@ qboolean Ral_Ktx2ReceiptExact( const ralKtx2Receipt_t *a,
 				|| a->levels[i].byteLength != b->levels[i].byteLength
 				|| a->levels[i].uncompressedByteLength
 					!= b->levels[i].uncompressedByteLength ) return qfalse;
+	return qtrue;
+}
+
+#define RAL_TEXTURE_ARTIFACT_FIXED_HEADER 144u
+#define RAL_TEXTURE_ARTIFACT_HASH_OFFSET 24u
+static const unsigned char TextureArtifactMagic[8] = {
+	'W', 'R', 'T', 'X', 'A', 'R', 'T', 0
+};
+
+static uint64_t TextureArtifactHash( const unsigned char *bytes, uint64_t length ) {
+	uint64_t i, hash = UINT64_C( 14695981039346656037 );
+	for ( i = 0u; i < length; i++ ) {
+		unsigned char value = i >= RAL_TEXTURE_ARTIFACT_HASH_OFFSET
+			&& i < RAL_TEXTURE_ARTIFACT_HASH_OFFSET + 8u ? 0u : bytes[i];
+		hash ^= value; hash *= UINT64_C( 1099511628211 );
+	}
+	return hash ? hash : 1u;
+}
+
+qboolean Ral_TextureArtifactReceiptValid( const ralTextureArtifactReceipt_t *r ) {
+	uint32_t i; uint64_t cursor = 0u, headerBytes;
+	if ( !r || r->schemaVersion != RAL_TEXTURE_ARTIFACT_SCHEMA_VERSION
+			|| !r->artifactHash || !Ral_TextureAssetReceiptValid( &r->asset )
+			|| !r->levelCount || r->levelCount > RAL_KTX2_MAX_LEVELS
+			|| r->levelCount != r->asset.targetMipLevels ) return qfalse;
+	headerBytes = RAL_TEXTURE_ARTIFACT_FIXED_HEADER
+		+ (uint64_t)r->levelCount * 16u;
+	if ( r->payloadByteOffset != headerBytes || !r->payloadByteLength
+			|| r->payloadByteOffset > UINT64_MAX - r->payloadByteLength
+			|| r->containerByteLength
+				!= r->payloadByteOffset + r->payloadByteLength ) return qfalse;
+	for ( i = 0u; i < r->levelCount; i++ ) {
+		if ( !r->levels[i].payloadLength
+				|| r->levels[i].payloadOffset != cursor
+				|| cursor > UINT64_MAX - r->levels[i].payloadLength ) return qfalse;
+		cursor += r->levels[i].payloadLength;
+	}
+	return cursor == r->payloadByteLength;
+}
+
+qboolean Ral_EncodeTextureArtifact( const ralTextureAssetReceipt_t *asset,
+		const uint64_t *levelByteLengths, uint32_t levelCount,
+		const void *payload, uint64_t payloadByteLength,
+		void *outData, uint64_t outCapacity,
+		ralTextureArtifactReceipt_t *outReceipt ) {
+	ralTextureArtifactReceipt_t v;
+	unsigned char *out = (unsigned char *)outData;
+	uint64_t headerBytes, totalBytes, cursor = 0u;
+	uint32_t i;
+	if ( !asset || !levelByteLengths || !payload || !out || !outReceipt
+			|| !Ral_TextureAssetReceiptValid( asset ) || !levelCount
+			|| levelCount > RAL_KTX2_MAX_LEVELS
+			|| levelCount != asset->targetMipLevels || !payloadByteLength ) return qfalse;
+	headerBytes = RAL_TEXTURE_ARTIFACT_FIXED_HEADER + (uint64_t)levelCount * 16u;
+	if ( headerBytes > UINT64_MAX - payloadByteLength ) return qfalse;
+	totalBytes = headerBytes + payloadByteLength;
+	if ( totalBytes > outCapacity || totalBytes > (uint64_t)(size_t)-1 ) return qfalse;
+	memset( &v, 0, sizeof( v ) );
+	v.schemaVersion = RAL_TEXTURE_ARTIFACT_SCHEMA_VERSION;
+	v.containerByteLength = totalBytes; v.artifactHash = 1u; v.asset = *asset;
+	v.levelCount = levelCount; v.payloadByteOffset = headerBytes;
+	v.payloadByteLength = payloadByteLength;
+	for ( i = 0u; i < levelCount; i++ ) {
+		if ( !levelByteLengths[i] || cursor > UINT64_MAX - levelByteLengths[i] ) return qfalse;
+		v.levels[i].payloadOffset = cursor;
+		v.levels[i].payloadLength = levelByteLengths[i];
+		cursor += levelByteLengths[i];
+	}
+	if ( cursor != payloadByteLength || !Ral_TextureArtifactReceiptValid( &v ) ) return qfalse;
+	memset( out, 0, (size_t)totalBytes );
+	memcpy( out, TextureArtifactMagic, sizeof( TextureArtifactMagic ) );
+	WriteLE32( out + 8, RAL_TEXTURE_ARTIFACT_SCHEMA_VERSION );
+	WriteLE32( out + 12, (uint32_t)headerBytes ); WriteLE64( out + 16, totalBytes );
+	WriteLE32( out + 32, asset->schemaVersion );
+	WriteLE64( out + 40, asset->assetGeneration ); WriteLE64( out + 48, asset->provenanceHash );
+	WriteLE32( out + 56, (uint32_t)asset->dimension ); WriteLE32( out + 60, asset->width );
+	WriteLE32( out + 64, asset->height ); WriteLE32( out + 68, asset->depth );
+	WriteLE32( out + 72, asset->layers ); WriteLE32( out + 76, asset->sourceMipLevels );
+	WriteLE32( out + 80, asset->targetMipLevels );
+	WriteLE32( out + 84, (uint32_t)asset->colorEncoding );
+	WriteLE32( out + 88, (uint32_t)asset->channelSemantic );
+	WriteLE32( out + 92, (uint32_t)asset->sourceEncoding );
+	WriteLE32( out + 96, (uint32_t)asset->mipPolicy );
+	WriteLE32( out + 100, (uint32_t)asset->residency );
+	WriteLE32( out + 104, (uint32_t)asset->hasAlpha );
+	WriteLE32( out + 108, (uint32_t)asset->selectedCompression );
+	WriteLE32( out + 112, (uint32_t)asset->targetFormat );
+	WriteLE32( out + 116, (uint32_t)asset->transcodeRequired );
+	WriteLE32( out + 120, (uint32_t)asset->deterministicFallback );
+	WriteLE32( out + 124, levelCount ); WriteLE64( out + 128, headerBytes );
+	WriteLE64( out + 136, payloadByteLength );
+	for ( i = 0u; i < levelCount; i++ ) {
+		WriteLE64( out + RAL_TEXTURE_ARTIFACT_FIXED_HEADER + (uint64_t)i * 16u,
+			v.levels[i].payloadOffset );
+		WriteLE64( out + RAL_TEXTURE_ARTIFACT_FIXED_HEADER + (uint64_t)i * 16u + 8u,
+			v.levels[i].payloadLength );
+	}
+	memcpy( out + headerBytes, payload, (size_t)payloadByteLength );
+	v.artifactHash = TextureArtifactHash( out, totalBytes );
+	WriteLE64( out + RAL_TEXTURE_ARTIFACT_HASH_OFFSET, v.artifactHash );
+	*outReceipt = v; return qtrue;
+}
+
+qboolean Ral_DecodeTextureArtifact( const void *data, uint64_t byteLength,
+		const ralTextureAssetReceipt_t *expectedAsset,
+		ralTextureArtifactReceipt_t *out ) {
+	const unsigned char *bytes = (const unsigned char *)data;
+	ralTextureArtifactReceipt_t v;
+	uint64_t headerBytes, totalBytes, storedHash;
+	uint32_t i, levelCount;
+	if ( !bytes || !expectedAsset || !out
+			|| !Ral_TextureAssetReceiptValid( expectedAsset )
+			|| byteLength < RAL_TEXTURE_ARTIFACT_FIXED_HEADER + 16u
+			|| byteLength > (uint64_t)(size_t)-1
+			|| memcmp( bytes, TextureArtifactMagic, sizeof( TextureArtifactMagic ) )
+			|| ReadLE32( bytes + 8 ) != RAL_TEXTURE_ARTIFACT_SCHEMA_VERSION ) return qfalse;
+	headerBytes = ReadLE32( bytes + 12 ); totalBytes = ReadLE64( bytes + 16 );
+	storedHash = ReadLE64( bytes + RAL_TEXTURE_ARTIFACT_HASH_OFFSET );
+	levelCount = ReadLE32( bytes + 124 );
+	if ( !levelCount || levelCount > RAL_KTX2_MAX_LEVELS
+			|| headerBytes != RAL_TEXTURE_ARTIFACT_FIXED_HEADER
+				+ (uint64_t)levelCount * 16u
+			|| totalBytes != byteLength || headerBytes >= totalBytes
+			|| !storedHash || TextureArtifactHash( bytes, byteLength ) != storedHash ) return qfalse;
+	memset( &v, 0, sizeof( v ) );
+	v.schemaVersion = ReadLE32( bytes + 8 ); v.containerByteLength = totalBytes;
+	v.artifactHash = storedHash; v.asset.schemaVersion = ReadLE32( bytes + 32 );
+	v.asset.assetGeneration = ReadLE64( bytes + 40 );
+	v.asset.provenanceHash = ReadLE64( bytes + 48 );
+	v.asset.dimension = (ralTextureAssetDimension_t)ReadLE32( bytes + 56 );
+	v.asset.width = ReadLE32( bytes + 60 ); v.asset.height = ReadLE32( bytes + 64 );
+	v.asset.depth = ReadLE32( bytes + 68 ); v.asset.layers = ReadLE32( bytes + 72 );
+	v.asset.sourceMipLevels = ReadLE32( bytes + 76 );
+	v.asset.targetMipLevels = ReadLE32( bytes + 80 );
+	v.asset.colorEncoding = (ralTextureAssetColorEncoding_t)ReadLE32( bytes + 84 );
+	v.asset.channelSemantic = (ralTextureChannelSemantic_t)ReadLE32( bytes + 88 );
+	v.asset.sourceEncoding = (ralTextureSourceEncoding_t)ReadLE32( bytes + 92 );
+	v.asset.mipPolicy = (ralTextureMipPolicy_t)ReadLE32( bytes + 96 );
+	v.asset.residency = (ralTextureAssetResidency_t)ReadLE32( bytes + 100 );
+	v.asset.hasAlpha = (qboolean)ReadLE32( bytes + 104 );
+	v.asset.selectedCompression = (ralTextureCompressionFamily_t)ReadLE32( bytes + 108 );
+	v.asset.targetFormat = (ralFormat_t)ReadLE32( bytes + 112 );
+	v.asset.transcodeRequired = (qboolean)ReadLE32( bytes + 116 );
+	v.asset.deterministicFallback = (qboolean)ReadLE32( bytes + 120 );
+	v.levelCount = levelCount; v.payloadByteOffset = ReadLE64( bytes + 128 );
+	v.payloadByteLength = ReadLE64( bytes + 136 );
+	for ( i = 0u; i < levelCount; i++ ) {
+		v.levels[i].payloadOffset = ReadLE64( bytes
+			+ RAL_TEXTURE_ARTIFACT_FIXED_HEADER + (uint64_t)i * 16u );
+		v.levels[i].payloadLength = ReadLE64( bytes
+			+ RAL_TEXTURE_ARTIFACT_FIXED_HEADER + (uint64_t)i * 16u + 8u );
+	}
+	if ( !Ral_TextureArtifactReceiptValid( &v )
+			|| !Ral_TextureAssetReceiptExact( &v.asset, expectedAsset ) ) return qfalse;
+	*out = v; return qtrue;
+}
+
+qboolean Ral_TextureArtifactReceiptExact( const ralTextureArtifactReceipt_t *a,
+		const ralTextureArtifactReceipt_t *b ) {
+	uint32_t i;
+	if ( !Ral_TextureArtifactReceiptValid( a )
+			|| !Ral_TextureArtifactReceiptValid( b )
+			|| a->schemaVersion != b->schemaVersion
+			|| a->containerByteLength != b->containerByteLength
+			|| a->artifactHash != b->artifactHash
+			|| !Ral_TextureAssetReceiptExact( &a->asset, &b->asset )
+			|| a->levelCount != b->levelCount
+			|| a->payloadByteOffset != b->payloadByteOffset
+			|| a->payloadByteLength != b->payloadByteLength ) return qfalse;
+	for ( i = 0u; i < a->levelCount; i++ )
+		if ( a->levels[i].payloadOffset != b->levels[i].payloadOffset
+				|| a->levels[i].payloadLength != b->levels[i].payloadLength ) return qfalse;
 	return qtrue;
 }

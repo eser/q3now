@@ -395,6 +395,7 @@ ralResult_t Ral_GraphicsPipelineSemanticDigest(
 	for ( i = 0; i < ci->numColorFormats; ++i ) ralShaderHashU32( &hash, ci->colorFormats[i] );
 	ralShaderHashU32( &hash, ci->depthFormat ); ralShaderHashU32( &hash, ci->sampleCount );
 	ralShaderHashU32( &hash, ci->numBindGroupLayouts );
+	ralShaderHashU32( &hash, ci->optionalBindGroupMask );
 	ralShaderHashU32( &hash, ci->pushConstantSize ); ralShaderHashU32( &hash, ci->pushConstantStages );
 	ralShaderHashU32( &hash, ci->numSpecConstants );
 	for ( i = 0; i < ci->numSpecConstants; ++i ) {

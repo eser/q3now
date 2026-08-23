@@ -118,13 +118,10 @@ static qboolean FinishParentsAfterDrain(
 		owner->parentsDrained = qtrue;
 	}
 	if ( owner->adoptedLayout ) {
-		ops->destroyAdoptedLayout( owner->adoptedLayout );
+		ops->destroyLayout( owner->adoptedLayout );
 		owner->adoptedLayout = NULL;
 	}
-	if ( owner->rawLayout ) {
-		ops->destroyRawLayout( owner->device, owner->rawLayout );
-		owner->rawLayout = VK_NULL_HANDLE;
-	}
+	owner->rawLayout = VK_NULL_HANDLE;
 	if ( !VK_TemporalIqmPayloadReleaseLayoutLease( owner->payloadOwner,
 			owner->payloadLayout, owner->payloadLayoutGeneration ) ) return qfalse;
 	owner->payloadLease = qfalse;
@@ -256,24 +253,21 @@ qboolean VK_TemporalIqmExact3FactoryEnsure(
 		const vkTemporalIqmExact3FactoryInput_t *input,
 		const vkTemporalIqmExact3ShaderCatalog_t *shaders,
 		const vkTemporalIqmExact3FactoryOps_t *ops ) {
-	VkDescriptorSetLayout rawSets[2];
-	VkPushConstantRange rawPush;
-	VkPipelineLayoutCreateInfo rawInfo;
 	const ralBindGroupLayout_t *ralSets[2];
+	ralPipelineLayoutCreateInfo_t layoutInfo;
 	ralVertexBinding_t binding;
 	ralVertexAttribute_t attributes[6];
 	ralColorBlendAttachment_t blends[3];
 	ralGraphicsPipelineCreateInfo_t ci;
 	void *payloadRaw, *bindlessRaw;
-	qboolean rawOwned = qfalse, adoptedOwned = qfalse;
+	qboolean rawAllowed = qfalse, adoptedOwned = qfalse;
 	qboolean writeOwned = qfalse, invalidateOwned = qfalse;
 	uint32_t nextGeneration;
 
 	if ( !owner || owner->initialized != qtrue || !payloadOwner
 			|| !InputValid( input ) || !CatalogValid( shaders ) || !ops
-			|| !ops->getBindGroupLayoutHandle || !ops->createRawLayout
-			|| !ops->destroyRawLayout || !ops->adoptRawLayout
-			|| !ops->destroyAdoptedLayout || !ops->createPipeline
+			|| !ops->getBindGroupLayoutHandle || !ops->createLayout || !ops->getLayoutHandle
+			|| !ops->destroyLayout || !ops->createPipeline
 			|| !ops->destroyPipeline || !ops->drain
 			|| !ops->candidateAllowed ) return qfalse;
 	if ( owner->pendingDrain ) {
@@ -304,25 +298,16 @@ qboolean VK_TemporalIqmExact3FactoryEnsure(
 	owner->payloadRawLayout = payloadRaw;
 	owner->bindlessRawLayout = bindlessRaw;
 
-	memset( &rawPush, 0, sizeof( rawPush ) );
-	rawPush.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-	rawPush.offset = 0u; rawPush.size = VK_TEMPORAL_IQM_EXACT3_PUSH_SIZE;
-	rawSets[0] = (VkDescriptorSetLayout)payloadRaw;
-	rawSets[1] = (VkDescriptorSetLayout)bindlessRaw;
-	memset( &rawInfo, 0, sizeof( rawInfo ) );
-	rawInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	rawInfo.setLayoutCount = 2u; rawInfo.pSetLayouts = rawSets;
-	rawInfo.pushConstantRangeCount = 1u; rawInfo.pPushConstantRanges = &rawPush;
-	if ( ops->createRawLayout( input->device, &rawInfo,
-			&owner->rawLayout ) != VK_SUCCESS || !owner->rawLayout ) goto fail;
-	rawOwned = CandidateAllowed( ops,
-		VK_TEMPORAL_IQM_EXACT3_CANDIDATE_RAW_LAYOUT,
-		(const void *)owner->rawLayout );
-	if ( !rawOwned ) {
-		rawOwned = qfalse; goto fail;
-	}
-	owner->adoptedLayout = ops->adoptRawLayout( input->backend,
-		(void *)owner->rawLayout, "wired-temporal-iqm-exact3-layout" );
+	ralSets[0] = owner->payloadLayout;
+	ralSets[1] = input->bindless.layout;
+	memset( &layoutInfo, 0, sizeof( layoutInfo ) );
+	layoutInfo.bindGroupLayouts = ralSets;
+	layoutInfo.numBindGroupLayouts = 2u;
+	layoutInfo.pushConstantSize = VK_TEMPORAL_IQM_EXACT3_PUSH_SIZE;
+	layoutInfo.pushConstantStages = RAL_STAGE_FRAGMENT;
+	layoutInfo.debugName = "wired-temporal-iqm-exact3-layout";
+	owner->adoptedLayout = ops->createLayout( input->backend, &layoutInfo );
+	if ( !owner->adoptedLayout ) goto fail;
 	adoptedOwned = CandidateAllowed( ops,
 		VK_TEMPORAL_IQM_EXACT3_CANDIDATE_ADOPTED_LAYOUT,
 		owner->adoptedLayout );
@@ -330,6 +315,13 @@ qboolean VK_TemporalIqmExact3FactoryEnsure(
 			owner->adoptedLayout ) ) {
 		adoptedOwned = qfalse; goto fail;
 	}
+	owner->rawLayout = (VkPipelineLayout)ops->getLayoutHandle(
+		owner->adoptedLayout );
+	if ( !owner->rawLayout ) goto fail;
+	rawAllowed = CandidateAllowed( ops,
+		VK_TEMPORAL_IQM_EXACT3_CANDIDATE_RAW_LAYOUT,
+		(const void *)owner->rawLayout );
+	if ( !rawAllowed ) goto fail;
 
 	binding.binding = 0u;
 	binding.stride = VK_TEMPORAL_IQM_EXACT3_VERTEX_STRIDE;
@@ -394,7 +386,7 @@ fail:
 	owner->writePipeline = NULL;
 	if ( owner->payloadLease ) {
 		if ( !adoptedOwned ) owner->adoptedLayout = NULL;
-		if ( !rawOwned ) owner->rawLayout = VK_NULL_HANDLE;
+		if ( !rawAllowed ) owner->rawLayout = VK_NULL_HANDLE;
 		owner->pendingDrain = qtrue;
 		owner->parentsDrained = ( writeOwned || invalidateOwned )
 			? qfalse : qtrue;
@@ -502,7 +494,7 @@ qboolean VK_TemporalIqmExact3FactoryRelease(
 		const vkTemporalIqmExact3FactoryOps_t *ops ) {
 	if ( !owner || owner->initialized != qtrue || !ops
 			|| !ops->destroyPipeline || !ops->drain
-			|| !ops->destroyAdoptedLayout || !ops->destroyRawLayout ) return qfalse;
+			|| !ops->destroyLayout ) return qfalse;
 	if ( owner->pendingDrain ) return FinishParentsAfterDrain( owner, ops );
 	if ( !owner->ready ) return FreshOwner( owner );
 	if ( !OwnerValid( owner ) ) return qfalse;

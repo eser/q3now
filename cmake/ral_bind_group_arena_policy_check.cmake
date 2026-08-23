@@ -69,8 +69,13 @@ math(EXPR IMAGE_OWNER_LEN "${IMAGE_OWNER_END} - ${IMAGE_OWNER_BEGIN}")
 string(SUBSTRING "${PRODUCT_BINDINGS}" ${IMAGE_OWNER_BEGIN} ${IMAGE_OWNER_LEN} IMAGE_OWNER)
 foreach(NEEDLE IN ITEMS
 	"Ral_BindGroupArenaReceiptValid("
-	"Ral_AdoptTextureResourceExact( s_ral_backend"
-	"Ral_AdoptTextureViewExact( s_ral_backend"
+	"Ral_TextureGetResourceReceipt( image->ral, &textureReceipt )"
+	"|| textureReceipt.imported"
+	"|| textureReceipt.type != textureInfo.type"
+	"|| textureReceipt.format != textureInfo.format"
+	"|| textureReceipt.usage != textureInfo.usage"
+	"viewInfo.texture = image->ral"
+	"viewCandidate = Ral_CreateTextureView( s_ral_backend, &viewInfo )"
 	"value.type = RAL_BIND_COMBINED_TEXTURE_SAMPLER"
 	"value.sampler = sampler"
 	"createInfo.arena = vk.ral_descriptor_arena"
@@ -79,22 +84,22 @@ foreach(NEEDLE IN ITEMS
 	"image->ralDescriptor = groupCandidate"
 	"image->descriptor = rawCandidate"
 	"groupCandidateOwned = qfalse"
-	"textureCandidateOwned = qfalse"
 	"viewCandidateOwned = qfalse"
 	"if ( groupCandidate && groupCandidateOwned )"
+	"if ( viewCandidate && viewCandidateOwned )"
 	"if ( groupRetired ) Ral_DestroyBindGroup( groupRetired )"
-	"if ( viewRetired ) Ral_DestroyTextureView( viewRetired )"
-	"if ( textureRetired ) Ral_DestroyTexture( textureRetired )")
+	"if ( viewRetired ) Ral_DestroyTextureView( viewRetired )")
 	require_text(IMAGE_OWNER "${NEEDLE}" "per-image direct RAL owner")
 endforeach()
 require_count(IMAGE_OWNER "Ral_CreateBindGroup[(]" 1
 	"per-image bind-group create inventory")
-require_count(IMAGE_OWNER "Ral_AdoptTextureResourceExact[(]" 1
-	"per-image adopted texture inventory")
-require_count(IMAGE_OWNER "Ral_AdoptTextureViewExact[(]" 1
-	"per-image borrowed view inventory")
-foreach(RETIRED IN ITEMS Ral_AdoptBindGroup qvkAllocateDescriptorSets
-	qvkUpdateDescriptorSets VkWriteDescriptorSet)
+require_count(IMAGE_OWNER "Ral_CreateTextureView[(]" 1
+	"per-image direct texture-view inventory")
+require_count(IMAGE_OWNER "Ral_TextureGetResourceReceipt[(]" 1
+	"per-image texture receipt inventory")
+foreach(RETIRED IN ITEMS Ral_AdoptBindGroup Ral_AdoptTextureResourceExact
+	Ral_AdoptTextureViewExact qvkAllocateDescriptorSets qvkUpdateDescriptorSets
+	VkWriteDescriptorSet)
 	string(FIND "${IMAGE_OWNER}" "${RETIRED}" POS)
 	if(NOT POS EQUAL -1)
 		message(FATAL_ERROR "per-image direct owner regained retired authority: ${RETIRED}")
@@ -102,15 +107,15 @@ foreach(RETIRED IN ITEMS Ral_AdoptBindGroup qvkAllocateDescriptorSets
 endforeach()
 foreach(NEEDLE IN ITEMS
 	"struct ralBindGroup_s *ralDescriptor"
-	"struct ralTexture_s *ralDescriptorTexture"
 	"struct ralTextureView_s *ralDescriptorView"
-	"struct ralSampler_s *ralDescriptorSampler")
+	"struct ralSampler_s *ralDescriptorSampler"
+	"struct ralTexture_s *ral;")
 	require_text(PRODUCT_LOCAL "${NEEDLE}" "per-image ownership cohort")
 endforeach()
 
 # Bindless tables may expose more than one sampled-texture binding (2D at 0,
 # 2D-array at 2). Pin the portable binding-aware publication surface and the
-# renderer migration that removes four direct Vk descriptor writes.
+# three product call sites (array image, screenmap and shared scene depth).
 foreach(NEEDLE IN ITEMS
 	"int Ral_BindGroupSetTextureViewAtBinding( ralBindGroup_t *g, uint32_t binding,"
 	"g->layout->entries[i].binding == binding"
@@ -152,7 +157,7 @@ foreach(NEEDLE IN ITEMS
 	"Ral_CreateBindGroup( &backend, &groupInfo ) == NULL")
 	require_text(VULKAN_HOST "${NEEDLE}" "combined texture-array host")
 endforeach()
-require_count(PRODUCT "Ral_BindGroupSetTextureViewAtBinding[(]" 4
+require_count(PRODUCT "Ral_BindGroupSetTextureViewAtBinding[(]" 3
 	"product binding-aware bindless publication inventory")
 
 string(FIND "${PRODUCT}" "void vk_ral_register_image_array" BINDLESS_ARRAY_BEGIN)
@@ -182,9 +187,11 @@ math(EXPR BINDLESS_SENTINEL_LEN "${BINDLESS_SENTINEL_END} - ${BINDLESS_SENTINEL_
 string(SUBSTRING "${PRODUCT}" ${BINDLESS_SENTINEL_BEGIN}
 	${BINDLESS_SENTINEL_LEN} BINDLESS_SENTINELS)
 foreach(NEEDLE IN ITEMS
-	"WIRED_BINDLESS_BIND_IMAGES, WIRED_BINDLESS_BLACK_TEX_SENTINEL,"
+	"vk_ral_bindless_publish_texture_view( tr.blackImage,"
+	"WIRED_BINDLESS_BLACK_TEX_SENTINEL,"
 	"tr.blackImage->ralDescriptorView"
-	"WIRED_BINDLESS_BIND_IMAGES, WIRED_BINDLESS_WHITE_TEX_SENTINEL,"
+	"vk_ral_bindless_publish_texture_view( tr.whiteImage,"
+	"WIRED_BINDLESS_WHITE_TEX_SENTINEL,"
 	"tr.whiteImage->ralDescriptorView")
 	require_text(BINDLESS_SENTINELS "${NEEDLE}" "reserved sentinel RAL publication")
 endforeach()
@@ -194,7 +201,9 @@ if(NOT POS EQUAL -1)
 endif()
 
 string(FIND "${PRODUCT}" "void vk_update_descriptor_set" IMAGE_UPDATE_BEGIN)
-string(FIND "${PRODUCT}" "void vk_destroy_image_resources" IMAGE_UPDATE_END)
+string(FIND "${PRODUCT}"
+	"static void set_shader_stage_desc(VkPipelineShaderStageCreateInfo *desc, VkShaderStageFlagBits stage, VkShaderModule shader_module, const char *entry) {"
+	IMAGE_UPDATE_END)
 if(IMAGE_UPDATE_BEGIN EQUAL -1 OR IMAGE_UPDATE_END EQUAL -1
 		OR IMAGE_UPDATE_END LESS IMAGE_UPDATE_BEGIN)
 	message(FATAL_ERROR "cannot isolate per-image descriptor publication")
@@ -253,7 +262,8 @@ string(SUBSTRING "${PRODUCT_BINDINGS}" ${ENGINE_OWNER_BEGIN}
 foreach(NEEDLE IN ITEMS
 	"Ral_BindGroupArenaReceiptValid("
 	"ralBindingValue_t values[5];"
-	"Ral_AdoptTextureViewExact( s_ral_backend,"
+	"viewInfo.texture = vk.shadowMap.ral_image;"
+	"shadowViewCandidate = Ral_CreateTextureView( s_ral_backend, &viewInfo );"
 	"WIRED_ENGINE_RES_BIND_SHADOWMAP"
 	"WIRED_ENGINE_RES_BIND_BRDF_LUT"
 	"WIRED_ENGINE_RES_BIND_IRRADIANCE"
@@ -274,10 +284,11 @@ foreach(NEEDLE IN ITEMS
 endforeach()
 require_count(ENGINE_OWNER "Ral_CreateBindGroup[(]" 1
 	"engine-resources bind-group create inventory")
-require_count(ENGINE_OWNER "Ral_AdoptTextureViewExact[(]" 1
-	"engine-resources borrowed shadow-view inventory")
-foreach(RETIRED IN ITEMS Ral_AdoptBindGroup qvkAllocateDescriptorSets
-	qvkUpdateDescriptorSets VkWriteDescriptorSet VkDescriptorImageInfo)
+require_count(ENGINE_OWNER "Ral_CreateTextureView[(]" 1
+	"engine-resources direct shadow-view inventory")
+foreach(RETIRED IN ITEMS Ral_AdoptBindGroup Ral_AdoptTextureViewExact
+	qvkAllocateDescriptorSets qvkUpdateDescriptorSets VkWriteDescriptorSet
+	VkDescriptorImageInfo)
 	string(FIND "${ENGINE_OWNER}" "${RETIRED}" POS)
 	if(NOT POS EQUAL -1)
 		message(FATAL_ERROR
@@ -328,7 +339,13 @@ foreach(RETIRED IN ITEMS "erAlloc" "&vk.engineResources.descriptor"
 endforeach()
 
 string(FIND "${PRODUCT_BINDINGS}" "void vk_ral_adopt_static_bindgroups" ENGINE_ADOPT_BEGIN)
-string(FIND "${PRODUCT_BINDINGS}" "ralBuffer_t *vk_ral_lookup_buffer" ENGINE_ADOPT_END)
+string(FIND "${PRODUCT_BINDINGS}"
+	"static qboolean vk_ral_image_texture_info( const image_t *image,"
+	ENGINE_ADOPT_END)
+if(ENGINE_ADOPT_BEGIN EQUAL -1 OR ENGINE_ADOPT_END EQUAL -1
+		OR ENGINE_ADOPT_END LESS ENGINE_ADOPT_BEGIN)
+	message(FATAL_ERROR "cannot isolate static bind-group compatibility sweep")
+endif()
 math(EXPR ENGINE_ADOPT_LEN "${ENGINE_ADOPT_END} - ${ENGINE_ADOPT_BEGIN}")
 string(SUBSTRING "${PRODUCT_BINDINGS}" ${ENGINE_ADOPT_BEGIN}
 	${ENGINE_ADOPT_LEN} ENGINE_ADOPT)
@@ -353,9 +370,15 @@ if(ENGINE_CHILD_RELEASE EQUAL -1 OR SHADOW_PARENT_RELEASE EQUAL -1
 	message(FATAL_ERROR "shadow teardown lost engine-group -> texture-parent order")
 endif()
 string(FIND "${PRODUCT_BINDINGS}"
-	"void vk_ral_destroy_adopted_internal_textures" INTERNAL_RELEASE_BEGIN)
+	"void vk_ral_release_internal_texture_dependents( void )"
+	INTERNAL_RELEASE_BEGIN)
 string(FIND "${PRODUCT_BINDINGS}"
-	"struct ralTexture_s *vk_ral_lookup_texture" INTERNAL_RELEASE_END)
+	"static void vk_ral_destroy_adopted_pipeline_layouts( void )"
+	INTERNAL_RELEASE_END)
+if(INTERNAL_RELEASE_BEGIN EQUAL -1 OR INTERNAL_RELEASE_END EQUAL -1
+		OR INTERNAL_RELEASE_END LESS INTERNAL_RELEASE_BEGIN)
+	message(FATAL_ERROR "cannot isolate internal texture dependent teardown")
+endif()
 math(EXPR INTERNAL_RELEASE_LEN "${INTERNAL_RELEASE_END} - ${INTERNAL_RELEASE_BEGIN}")
 string(SUBSTRING "${PRODUCT_BINDINGS}" ${INTERNAL_RELEASE_BEGIN}
 	${INTERNAL_RELEASE_LEN} INTERNAL_RELEASE)
@@ -538,7 +561,7 @@ foreach(NEEDLE IN ITEMS
 	"vk.screenMap.color_descriptor = Ral_GetBindGroupHandle("
 	"vk.bloom_image_descriptor[i] = Ral_GetBindGroupHandle("
 	"vk.sceneDepth.descriptor = Ral_GetBindGroupHandle("
-	"vk_ral_adopt_static_internal_textures();")
+	"vk_ral_refresh_internal_texture_dependents();")
 	require_text(PRODUCT "${NEEDLE}" "attachment RAL sampler cohort")
 endforeach()
 foreach(NEEDLE IN ITEMS
@@ -546,54 +569,54 @@ foreach(NEEDLE IN ITEMS
 	"vk_update_attachment_descriptors();")
 	require_text(PRODUCT_BINDINGS "${NEEDLE}" "attachment child-before-parent lifecycle")
 endforeach()
-string(FIND "${PRODUCT_BINDINGS}" "void vk_ral_adopt_static_internal_textures( void )" ATTACH_ADOPT_BEGIN)
-string(FIND "${PRODUCT_BINDINGS}" "void vk_ral_destroy_adopted_internal_textures( void )" ATTACH_DESTROY_BEGIN)
-if(ATTACH_ADOPT_BEGIN EQUAL -1 OR ATTACH_DESTROY_BEGIN EQUAL -1
-		OR ATTACH_DESTROY_BEGIN LESS ATTACH_ADOPT_BEGIN)
-	message(FATAL_ERROR "cannot isolate attachment adoption lifecycle")
+string(FIND "${PRODUCT}"
+	"static ralTexture_t *vk_create_attachment_texture( uint32_t width,"
+	ATTACH_CREATE_BEGIN)
+string(FIND "${PRODUCT}"
+	"static ralTexture_t *vk_create_depth_attachment_texture( uint32_t width,"
+	ATTACH_CREATE_END)
+if(ATTACH_CREATE_BEGIN EQUAL -1 OR ATTACH_CREATE_END EQUAL -1
+		OR ATTACH_CREATE_END LESS ATTACH_CREATE_BEGIN)
+	message(FATAL_ERROR "cannot isolate direct attachment creation")
 endif()
-math(EXPR ATTACH_ADOPT_LEN "${ATTACH_DESTROY_BEGIN} - ${ATTACH_ADOPT_BEGIN}")
-string(SUBSTRING "${PRODUCT_BINDINGS}" ${ATTACH_ADOPT_BEGIN} ${ATTACH_ADOPT_LEN} ATTACH_ADOPT)
-require_text(ATTACH_ADOPT "Ral_AdoptTextureExact( s_ral_backend"
-	"attachment exact texture adoption")
+math(EXPR ATTACH_CREATE_LEN
+	"${ATTACH_CREATE_END} - ${ATTACH_CREATE_BEGIN}")
+string(SUBSTRING "${PRODUCT}" ${ATTACH_CREATE_BEGIN}
+	${ATTACH_CREATE_LEN} ATTACH_CREATE)
 foreach(NEEDLE IN ITEMS
-	"RAL_TEXTURE_USAGE_COLOR_ATTACHMENT"
-	"RAL_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT"
-	"RAL_TEXTURE_USAGE_SAMPLED"
-	"RAL_TEXTURE_USAGE_TRANSFER_SRC"
-	"RAL_TEXTURE_USAGE_TRANSFER_DST")
-	require_text(ATTACH_ADOPT "${NEEDLE}" "attachment exact usage publication")
+	"createInfo.type = RAL_TEXTURE_2D;"
+	"createInfo.usage = usage;"
+	"createInfo.memory = RAL_MEMORY_DEVICE_LOCAL;"
+	"texture = Ral_CreateTexture( vk_ral_get_backend(), &createInfo );")
+	require_text(ATTACH_CREATE "${NEEDLE}" "direct attachment texture owner")
 endforeach()
-string(FIND "${ATTACH_ADOPT}" "vk_ral_destroy_adopted_internal_textures();" ATTACH_CHILD_RELEASE)
-string(FIND "${ATTACH_ADOPT}" "#define ADOPT_TEX" ATTACH_PARENT_REPLACE)
-string(FIND "${ATTACH_ADOPT}" "vk_update_attachment_descriptors();" ATTACH_GROUP_REBUILD)
-if(ATTACH_CHILD_RELEASE EQUAL -1 OR ATTACH_PARENT_REPLACE EQUAL -1
-		OR ATTACH_GROUP_REBUILD EQUAL -1
-		OR NOT ATTACH_CHILD_RELEASE LESS ATTACH_PARENT_REPLACE
-		OR NOT ATTACH_PARENT_REPLACE LESS ATTACH_GROUP_REBUILD)
-	message(FATAL_ERROR
-		"attachment lifecycle lost child-release -> parent-adopt -> group-rebuild order")
-endif()
 string(FIND "${PRODUCT}" "static void vk_destroy_attachments( void )\n{" RAW_ATTACHMENT_DESTROY_BEGIN)
-string(FIND "${PRODUCT}" "static void vk_destroy_pipelines( qboolean resetCounter )" RAW_ATTACHMENT_DESTROY_END)
+string(FIND "${PRODUCT}" "static void vk_destroy_pipelines( qboolean resetCounter )\n{" RAW_ATTACHMENT_DESTROY_END)
 if(RAW_ATTACHMENT_DESTROY_BEGIN EQUAL -1 OR RAW_ATTACHMENT_DESTROY_END EQUAL -1
 		OR RAW_ATTACHMENT_DESTROY_END LESS RAW_ATTACHMENT_DESTROY_BEGIN)
-	message(FATAL_ERROR "cannot isolate raw attachment teardown")
+	message(FATAL_ERROR "cannot isolate direct attachment teardown")
 endif()
 math(EXPR RAW_ATTACHMENT_DESTROY_LEN
 	"${RAW_ATTACHMENT_DESTROY_END} - ${RAW_ATTACHMENT_DESTROY_BEGIN}")
 string(SUBSTRING "${PRODUCT}" ${RAW_ATTACHMENT_DESTROY_BEGIN}
 	${RAW_ATTACHMENT_DESTROY_LEN} RAW_ATTACHMENT_DESTROY)
 string(FIND "${RAW_ATTACHMENT_DESTROY}"
-	"vk_ral_destroy_adopted_internal_textures();" RAW_CHILD_RELEASE)
+	"vk_ral_release_internal_texture_dependents();" RAW_CHILD_RELEASE)
 string(FIND "${RAW_ATTACHMENT_DESTROY}"
-	"qvkDestroyImage( vk.device, vk.color_image, NULL );" RAW_PARENT_RELEASE)
+	"Ral_DestroyTexture( vk.ral_color_image );" RAW_PARENT_RELEASE)
+string(FIND "${RAW_ATTACHMENT_DESTROY}"
+	"Ral_DestroyTexture( vk.sceneDepth.ral_image );" RAW_DEPTH_PARENT_RELEASE)
 if(RAW_CHILD_RELEASE EQUAL -1 OR RAW_PARENT_RELEASE EQUAL -1
-		OR NOT RAW_CHILD_RELEASE LESS RAW_PARENT_RELEASE)
+		OR RAW_DEPTH_PARENT_RELEASE EQUAL -1
+		OR NOT RAW_CHILD_RELEASE LESS RAW_PARENT_RELEASE
+		OR NOT RAW_CHILD_RELEASE LESS RAW_DEPTH_PARENT_RELEASE)
 	message(FATAL_ERROR
-		"attachment raw image teardown lost portable-child-before-parent order")
+		"attachment teardown lost portable-child-before-parent order")
 endif()
 foreach(RETIRED IN ITEMS
+	"vk_ral_adopt_static_internal_textures"
+	"vk_ral_destroy_adopted_internal_textures"
+	"Ral_AdoptTextureExact( s_ral_backend"
 	"&vk.color_descriptor )"
 	"&vk.tonemapped_descriptor )"
 	"&vk.screenMap.color_descriptor )"
@@ -625,43 +648,19 @@ endif()
 math(EXPR DEPTH_GROUP_LEN "${DEPTH_GROUP_END} - ${DEPTH_GROUP_BEGIN}")
 string(SUBSTRING "${PRODUCT}" ${DEPTH_GROUP_BEGIN} ${DEPTH_GROUP_LEN} DEPTH_GROUP)
 foreach(NEEDLE IN ITEMS
-	"Ral_DestroyBindGroup( vk.sceneDepth.ral_descriptor );"
-	"Ral_DestroyTextureView( vk.sceneDepth.ral_view );"
-	"Ral_DestroyTexture( vk.sceneDepth.ral_image );"
-	"vk.sceneDepth.ral_image = Ral_AdoptTextureExact("
-	"RAL_TEXTURE_USAGE_SAMPLED | RAL_TEXTURE_USAGE_TRANSFER_SRC"
 	"vk_ral_refresh_texture_sampler_group( vk.sceneDepth.ral_image,"
 	"&vk.sceneDepth.ral_view, &vk.sceneDepth.ral_descriptor,"
 	"vk.sceneDepth.ral_sampler, \"wired-scenedepth-bg\" )"
 	"vk.sceneDepth.descriptor = Ral_GetBindGroupHandle(")
 	require_text(DEPTH_GROUP "${NEEDLE}" "scene-depth direct RAL sampler cohort")
 endforeach()
-foreach(RETIRED IN ITEMS qvkAllocateDescriptorSets qvkUpdateDescriptorSets Ral_AdoptBindGroup)
+foreach(RETIRED IN ITEMS qvkAllocateDescriptorSets qvkUpdateDescriptorSets
+	Ral_AdoptBindGroup Ral_AdoptTextureExact)
 	string(FIND "${DEPTH_GROUP}" "${RETIRED}" POS)
 	if(NOT POS EQUAL -1)
 		message(FATAL_ERROR "scene-depth sampler retained raw/adopted authority: ${RETIRED}")
 	endif()
 endforeach()
-string(FIND "${DEPTH_GROUP}"
-	"Ral_DestroyBindGroup( vk.sceneDepth.ral_descriptor );" DEPTH_GROUP_RELEASE)
-string(FIND "${DEPTH_GROUP}"
-	"Ral_DestroyTextureView( vk.sceneDepth.ral_view );" DEPTH_VIEW_RELEASE)
-string(FIND "${DEPTH_GROUP}"
-	"Ral_DestroyTexture( vk.sceneDepth.ral_image );" DEPTH_PARENT_RELEASE)
-string(FIND "${DEPTH_GROUP}"
-	"vk.sceneDepth.ral_image = Ral_AdoptTextureExact(" DEPTH_PARENT_ADOPT)
-string(FIND "${DEPTH_GROUP}"
-	"vk_ral_refresh_texture_sampler_group( vk.sceneDepth.ral_image," DEPTH_GROUP_CREATE)
-if(DEPTH_GROUP_RELEASE EQUAL -1 OR DEPTH_VIEW_RELEASE EQUAL -1
-		OR DEPTH_PARENT_RELEASE EQUAL -1 OR DEPTH_PARENT_ADOPT EQUAL -1
-		OR DEPTH_GROUP_CREATE EQUAL -1
-		OR NOT DEPTH_GROUP_RELEASE LESS DEPTH_VIEW_RELEASE
-		OR NOT DEPTH_VIEW_RELEASE LESS DEPTH_PARENT_RELEASE
-		OR NOT DEPTH_PARENT_RELEASE LESS DEPTH_PARENT_ADOPT
-		OR NOT DEPTH_PARENT_ADOPT LESS DEPTH_GROUP_CREATE)
-	message(FATAL_ERROR
-		"scene-depth sampler lost group -> view -> texture -> adopt -> group order")
-endif()
 
 string(FIND "${PRODUCT}" "// Shared effects per-draw UBO ring." EFFECTS_BEGIN)
 string(FIND "${PRODUCT}" "// SMAA rtMetrics per-frame UBO." EFFECTS_END)
@@ -760,7 +759,8 @@ string(SUBSTRING "${PRODUCT}" ${SPRITE_SHUTDOWN_BEGIN}
 string(FIND "${SPRITE_SHUTDOWN}"
 	"vk_ral_release_sprite_bindgroup( i );" SPRITE_GROUP_RELEASE)
 string(FIND "${SPRITE_SHUTDOWN}"
-	"vk_ral_unregister_buffer( vk.sprite.headers_buffer[i] );" SPRITE_BUFFER_RELEASE)
+	"VK_RalBufferShadowRelease( &vk_sprite_header_shadows[i] );"
+	SPRITE_BUFFER_RELEASE)
 if(SPRITE_GROUP_RELEASE EQUAL -1 OR SPRITE_BUFFER_RELEASE EQUAL -1
 		OR NOT SPRITE_GROUP_RELEASE LESS SPRITE_BUFFER_RELEASE)
 	message(FATAL_ERROR "sprite teardown lost bind group -> buffer order")
@@ -929,6 +929,51 @@ foreach(RETIRED IN ITEMS
 			"atmospheric cohort retained legacy adoption: ${RETIRED}")
 	endif()
 endforeach()
+
+# Cold boot must not materialize atmospheric render groups before the shared
+# scene-depth view exists. vk_init_descriptors first publishes attachment views,
+# then creates the four-group cohort from the current arena generation.
+string(FIND "${PRODUCT}" "void vk_init_atmospheric( void )" ATM_INIT_BEGIN)
+string(FIND "${PRODUCT}"
+	"static void vk_ral_release_atmospheric_render_bindgroups( void )"
+	ATM_INIT_END)
+if(ATM_INIT_BEGIN EQUAL -1 OR ATM_INIT_END EQUAL -1
+		OR ATM_INIT_END LESS ATM_INIT_BEGIN)
+	message(FATAL_ERROR "cannot isolate atmospheric resource initialization")
+endif()
+math(EXPR ATM_INIT_LEN "${ATM_INIT_END} - ${ATM_INIT_BEGIN}")
+string(SUBSTRING "${PRODUCT}" ${ATM_INIT_BEGIN} ${ATM_INIT_LEN} ATM_INIT)
+string(FIND "${ATM_INIT}" "vk_atmospheric_write_descriptors();"
+	ATM_EARLY_GROUP_CREATE)
+if(NOT ATM_EARLY_GROUP_CREATE EQUAL -1)
+	message(FATAL_ERROR
+		"atmospheric cohort materialized before scene-depth view publication")
+endif()
+require_text(ATM_INIT
+	"Defer the\n\t// four-group transaction to that descriptor-init boundary"
+	"atmospheric cold-boot deferral")
+
+string(FIND "${PRODUCT}" "void vk_init_descriptors( void )"
+	ATM_DESCRIPTOR_INIT_BEGIN)
+string(FIND "${PRODUCT}" "static void vk_release_geometry_buffers( void )"
+	ATM_DESCRIPTOR_INIT_END)
+if(ATM_DESCRIPTOR_INIT_BEGIN EQUAL -1 OR ATM_DESCRIPTOR_INIT_END EQUAL -1
+		OR ATM_DESCRIPTOR_INIT_END LESS ATM_DESCRIPTOR_INIT_BEGIN)
+	message(FATAL_ERROR "cannot isolate descriptor initialization")
+endif()
+math(EXPR ATM_DESCRIPTOR_INIT_LEN
+	"${ATM_DESCRIPTOR_INIT_END} - ${ATM_DESCRIPTOR_INIT_BEGIN}")
+string(SUBSTRING "${PRODUCT}" ${ATM_DESCRIPTOR_INIT_BEGIN}
+	${ATM_DESCRIPTOR_INIT_LEN} ATM_DESCRIPTOR_INIT)
+string(FIND "${ATM_DESCRIPTOR_INIT}" "vk_update_attachment_descriptors();"
+	ATM_DEPTH_VIEW_PUBLISH)
+string(FIND "${ATM_DESCRIPTOR_INIT}" "vk_atmospheric_write_descriptors();"
+	ATM_GROUP_CREATE)
+if(ATM_DEPTH_VIEW_PUBLISH EQUAL -1 OR ATM_GROUP_CREATE EQUAL -1
+		OR NOT ATM_DEPTH_VIEW_PUBLISH LESS ATM_GROUP_CREATE)
+	message(FATAL_ERROR
+		"atmospheric cohort must follow scene-depth view publication")
+endif()
 
 foreach(NEEDLE IN ITEMS
 	"Particle RAL compute bind-group rebuild failed"
@@ -1109,7 +1154,26 @@ string(FIND "${TESS_HELPER}" "Ral_AdoptBindGroup(" TESS_ADOPT)
 if(NOT TESS_ADOPT EQUAL -1)
 	message(FATAL_ERROR "tess helper retained bind-group adoption fallback")
 endif()
-string(FIND "${PRODUCT}" "void vk_resize_geometry_buffer" RESIZE_BEGIN)
+string(FIND "${PRODUCT}" "static void vk_create_geometry_buffers( VkDeviceSize size )" GEOMETRY_CREATE_BEGIN)
+string(FIND "${PRODUCT}" "static qboolean vk_create_effect_bind_group_layout" GEOMETRY_CREATE_END)
+if(GEOMETRY_CREATE_BEGIN EQUAL -1 OR GEOMETRY_CREATE_END EQUAL -1
+		OR GEOMETRY_CREATE_END LESS GEOMETRY_CREATE_BEGIN)
+	message(FATAL_ERROR "cannot isolate geometry replacement bind-group lifecycle")
+endif()
+math(EXPR GEOMETRY_CREATE_LEN "${GEOMETRY_CREATE_END} - ${GEOMETRY_CREATE_BEGIN}")
+string(SUBSTRING "${PRODUCT}" ${GEOMETRY_CREATE_BEGIN} ${GEOMETRY_CREATE_LEN} GEOMETRY_CREATE)
+foreach(NEEDLE IN ITEMS
+	"vk_ral_release_tess_uniform_bindgroup( (uint32_t)i );"
+	"vk_release_geometry_buffers();")
+	require_text(GEOMETRY_CREATE "${NEEDLE}" "tess geometry replacement lifecycle")
+endforeach()
+string(FIND "${GEOMETRY_CREATE}" "vk_ral_release_tess_uniform_bindgroup( (uint32_t)i );" GEOMETRY_GROUP_RELEASE)
+string(FIND "${GEOMETRY_CREATE}" "vk_release_geometry_buffers();" GEOMETRY_BUFFER_RELEASE)
+if(GEOMETRY_GROUP_RELEASE GREATER GEOMETRY_BUFFER_RELEASE)
+	message(FATAL_ERROR "tess bind groups must be released before their geometry buffers")
+endif()
+
+string(FIND "${PRODUCT}" "static void vk_resize_geometry_buffer( void )" RESIZE_BEGIN)
 string(FIND "${PRODUCT}" "qboolean vk_temporal_motion_seal_primary" RESIZE_END)
 if(RESIZE_BEGIN EQUAL -1 OR RESIZE_END EQUAL -1 OR RESIZE_END LESS RESIZE_BEGIN)
 	message(FATAL_ERROR "cannot isolate geometry resize bind-group lifecycle")
@@ -1117,14 +1181,17 @@ endif()
 math(EXPR RESIZE_LEN "${RESIZE_END} - ${RESIZE_BEGIN}")
 string(SUBSTRING "${PRODUCT}" ${RESIZE_BEGIN} ${RESIZE_LEN} RESIZE)
 foreach(NEEDLE IN ITEMS
-	"vk_ral_release_tess_uniform_bindgroup( (uint32_t)i );"
-	"vk_release_geometry_buffers();"
 	"vk_create_geometry_buffers( vk.geometry_buffer_size_new );"
 	"vk_ral_refresh_tess_uniform_bindgroup( (uint32_t)i )")
 	require_text(RESIZE "${NEEDLE}" "tess geometry-resize lifecycle")
 endforeach()
+string(FIND "${RESIZE}" "vk_create_geometry_buffers( vk.geometry_buffer_size_new );" GEOMETRY_CREATE_CALL)
+string(FIND "${RESIZE}" "vk_ral_refresh_tess_uniform_bindgroup( (uint32_t)i )" GEOMETRY_GROUP_REFRESH)
+if(GEOMETRY_CREATE_CALL GREATER GEOMETRY_GROUP_REFRESH)
+	message(FATAL_ERROR "tess bind groups must refresh after geometry replacement")
+endif()
 foreach(RETIRED IN ITEMS vk_update_uniform_descriptor qvkUpdateDescriptorSets)
-	string(FIND "${RESIZE}" "${RETIRED}" POS)
+	string(FIND "${GEOMETRY_CREATE}${RESIZE}" "${RETIRED}" POS)
 	if(NOT POS EQUAL -1)
 		message(FATAL_ERROR "geometry resize retained mutable raw descriptor path: ${RETIRED}")
 	endif()
@@ -1218,9 +1285,9 @@ string(SUBSTRING "${PRODUCT_BINDINGS}" ${ENTMAT_HELPER_BEGIN}
 	${ENTMAT_HELPER_LEN} ENTMAT_HELPER)
 foreach(NEEDLE IN ITEMS
 	"Ral_BindGroupArenaReceiptValid("
-	"Ral_GetBufferSize( buffer ) != vk.tess[slot].entMatSize"
+	"Ral_GetBufferSize( buffer ) != bufferSize"
 	"value.type = RAL_BIND_STORAGE_BUFFER;"
-	"value.bufferRange = vk.tess[slot].entMatSize;"
+	"value.bufferRange = bufferSize;"
 	"createInfo.arena = vk.ral_descriptor_arena;"
 	"createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;"
 	"candidate = Ral_CreateBindGroup( s_ral_backend, &createInfo );"
@@ -1264,8 +1331,8 @@ endforeach()
 
 # SMAA owns five sampled texture cohorts directly through RAL. Raw descriptor
 # fields are Vulkan compatibility mirrors only; allocation, update and retained
-# adoption may not return. The live toggle must retire group -> view -> adopted
-# texture before any raw image view/image parent.
+# adoption may not return. Arena refresh retires group -> view while the direct
+# texture parents survive until the SMAA resource owner tears them down.
 string(FIND "${PRODUCT}" "void vk_ral_release_smaa_sampler_cohorts" SMAA_SAMPLE_BEGIN)
 string(FIND "${PRODUCT}" "void vk_update_attachment_descriptors" SMAA_SAMPLE_END)
 if(SMAA_SAMPLE_BEGIN EQUAL -1 OR SMAA_SAMPLE_END EQUAL -1
@@ -1277,12 +1344,11 @@ string(SUBSTRING "${PRODUCT}" ${SMAA_SAMPLE_BEGIN} ${SMAA_SAMPLE_LEN} SMAA_SAMPL
 foreach(NEEDLE IN ITEMS
 	"Ral_DestroyBindGroup( (group) );"
 	"Ral_DestroyTextureView( (view) );"
-	"Ral_DestroyTexture( (texture) );"
-	"vk_ral_adopt_one_texture( vk.smaa.edges_image, vk.smaa.edges_view,"
-	"vk_ral_adopt_one_texture( vk.smaa.blend_image, vk.smaa.blend_view,"
-	"vk_ral_adopt_one_texture( vk.smaa.input_image, vk.smaa.input_view,"
-	"vk_ral_adopt_one_texture( vk.smaa.area_image, vk.smaa.area_view,"
-	"vk_ral_adopt_one_texture( vk.smaa.search_image, vk.smaa.search_view,"
+	"vk_ral_refresh_texture_sampler_group( vk.smaa.ral_edges_image,"
+	"vk_ral_refresh_texture_sampler_group( vk.smaa.ral_blend_image,"
+	"vk_ral_refresh_texture_sampler_group( vk.smaa.ral_input_image,"
+	"vk_ral_refresh_texture_sampler_group( vk.smaa.ral_area_image,"
+	"vk_ral_refresh_texture_sampler_group( vk.smaa.ral_search_image,"
 	"vk.smaa.ral_point_sampler, \"wired-smaa-edges-bg\""
 	"vk.smaa.ral_linear_sampler, \"wired-smaa-blend-bg\""
 	"vk.smaa.ral_linear_sampler, \"wired-smaa-input-bg\""
@@ -1326,18 +1392,26 @@ foreach(RETIRED IN ITEMS
 endforeach()
 string(FIND "${SMAA_SAMPLE}" "Ral_DestroyBindGroup( (group) );" SMAA_GROUP_RELEASE)
 string(FIND "${SMAA_SAMPLE}" "Ral_DestroyTextureView( (view) );" SMAA_VIEW_RELEASE)
-string(FIND "${SMAA_SAMPLE}" "Ral_DestroyTexture( (texture) );" SMAA_TEXTURE_RELEASE)
 if(SMAA_GROUP_RELEASE EQUAL -1 OR SMAA_VIEW_RELEASE EQUAL -1
-		OR SMAA_TEXTURE_RELEASE EQUAL -1
-		OR NOT SMAA_GROUP_RELEASE LESS SMAA_VIEW_RELEASE
-		OR NOT SMAA_VIEW_RELEASE LESS SMAA_TEXTURE_RELEASE)
-	message(FATAL_ERROR "SMAA sampler lost group -> view -> texture release order")
+		OR NOT SMAA_GROUP_RELEASE LESS SMAA_VIEW_RELEASE)
+	message(FATAL_ERROR "SMAA sampler lost group -> view release order")
 endif()
 string(FIND "${PRODUCT}" "static void vk_smaa_release_resources" SMAA_RELEASE_BEGIN)
 string(FIND "${PRODUCT}" "static void vk_shadow_destroy_group" SMAA_RELEASE_END)
 if(SMAA_RELEASE_BEGIN EQUAL -1 OR SMAA_RELEASE_END EQUAL -1
 		OR SMAA_RELEASE_END LESS SMAA_RELEASE_BEGIN)
-	message(FATAL_ERROR "cannot isolate SMAA raw-parent release")
+	message(FATAL_ERROR "cannot isolate SMAA texture-parent release")
+endif()
+math(EXPR SMAA_RELEASE_LEN "${SMAA_RELEASE_END} - ${SMAA_RELEASE_BEGIN}")
+string(SUBSTRING "${PRODUCT}" ${SMAA_RELEASE_BEGIN} ${SMAA_RELEASE_LEN} SMAA_RELEASE)
+require_text(SMAA_RELEASE "vk_ral_release_smaa_sampler_cohorts();"
+	"direct SMAA child release")
+require_text(SMAA_RELEASE "Ral_DestroyTexture( (texture) );"
+	"direct SMAA texture-parent release")
+string(FIND "${SMAA_RELEASE}" "vk_ral_release_smaa_sampler_cohorts();" SMAA_CHILD_RELEASE)
+string(FIND "${SMAA_RELEASE}" "Ral_DestroyTexture( (texture) );" SMAA_PARENT_RELEASE)
+if(SMAA_CHILD_RELEASE GREATER SMAA_PARENT_RELEASE)
+	message(FATAL_ERROR "SMAA texture parents must be released after bind-group/view children")
 endif()
 
 # Ribbon, rail-ribbon and beam share one WebGPU-shaped primitive sampling ABI:
@@ -1390,10 +1464,10 @@ foreach(NEEDLE IN ITEMS
 	".type=RAL_BIND_TEXTURE_ARRAY"
 	".textureArrayCount=PRIMITIVE_SHADER_IMAGE_MAX"
 	".type=RAL_BIND_SAMPLER"
-	"Ral_GetBufferHandle( stageBuffer )"
-	"Ral_GetBufferHandle( stageCountBuffer )"
-	"Ral_GetBufferHandle( points )"
-	"Ral_GetBufferHandle( headers )"
+	"Ral_GetBufferSize( stageBuffer ) != stageBytes"
+	"Ral_GetBufferSize( stageCountBuffer ) != stageCountBytes"
+	"Ral_GetBufferSize( points ) != ribbonPointsBytes"
+	"Ral_GetBufferSize( headers ) != ribbonHeadersBytes"
 	"ribbon[i] = Ral_CreateBindGroup("
 	"rail[i] = Ral_CreateBindGroup("
 	"beam[i] = Ral_CreateBindGroup("
@@ -1439,14 +1513,11 @@ endforeach()
 math(EXPR SMAA_RELEASE_LEN "${SMAA_RELEASE_END} - ${SMAA_RELEASE_BEGIN}")
 string(SUBSTRING "${PRODUCT}" ${SMAA_RELEASE_BEGIN} ${SMAA_RELEASE_LEN} SMAA_RELEASE)
 string(FIND "${SMAA_RELEASE}" "vk_ral_release_smaa_sampler_cohorts();" SMAA_CHILD_RELEASE)
-string(FIND "${SMAA_RELEASE}" "qvkDestroyImageView( vk.device, vk.smaa.edges_view" SMAA_RAW_VIEW_RELEASE)
-string(FIND "${SMAA_RELEASE}" "qvkDestroyImage( vk.device, vk.smaa.edges_image" SMAA_RAW_IMAGE_RELEASE)
-if(SMAA_CHILD_RELEASE EQUAL -1 OR SMAA_RAW_VIEW_RELEASE EQUAL -1
-		OR SMAA_RAW_IMAGE_RELEASE EQUAL -1
-		OR NOT SMAA_CHILD_RELEASE LESS SMAA_RAW_VIEW_RELEASE
-		OR NOT SMAA_RAW_VIEW_RELEASE LESS SMAA_RAW_IMAGE_RELEASE)
+string(FIND "${SMAA_RELEASE}" "Ral_DestroyTexture( (texture) );" SMAA_TEXTURE_RELEASE)
+if(SMAA_CHILD_RELEASE EQUAL -1 OR SMAA_TEXTURE_RELEASE EQUAL -1
+		OR NOT SMAA_CHILD_RELEASE LESS SMAA_TEXTURE_RELEASE)
 	message(FATAL_ERROR
-		"SMAA teardown lost RAL children -> raw view -> raw image order")
+		"SMAA teardown lost RAL children -> direct texture-parent order")
 endif()
 
 string(REGEX MATCHALL "Ral_CreateBindGroupArena[(]" PRODUCT_CREATE_CALLS "${PRODUCT}")

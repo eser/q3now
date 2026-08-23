@@ -151,6 +151,9 @@ static qboolean SubmitCopy( void *opaque, const ralTransferRequest_t *request,
 		RAL_ZERO( copy );
 		copy.mipLevel = context->textureRegion.mipLevel;
 		copy.arrayLayer = context->textureRegion.arrayLayer;
+		copy.imageZ = context->textureRegion.z;
+		copy.imageDepth = 1u;
+		copy.aspects = context->textureRegion.aspects;
 		copy.imageRect.x = (int32_t)context->textureRegion.x;
 		copy.imageRect.y = (int32_t)context->textureRegion.y;
 		copy.imageRect.width = context->textureRegion.width;
@@ -310,7 +313,8 @@ qboolean Ral_TextureReadbackBegin( ralTexture_t *source,
 	ralVkReadbackContext_t *context;
 	ralTextureResourceReceipt_t resource;
 	ralTransferRequest_t request;
-	uint32_t mipWidth, mipHeight, bytesPerPixel;
+	uint32_t mipWidth, mipHeight, mipDepth, bytesPerPixel;
+	ralTextureAspectFlags_t aspects;
 	uint64_t tightBytesPerRow, paddedBytesPerRow, requiredBytes;
 	if ( !source || !region || !outOwner || *outOwner || !source->backend
 			|| !( source->usage & RAL_TEXTURE_USAGE_TRANSFER_SRC )
@@ -318,14 +322,22 @@ qboolean Ral_TextureReadbackBegin( ralTexture_t *source,
 			|| source->portableState.usage == RAL_RESOURCE_USAGE_UNDEFINED
 			|| source->portableOwnerQueue != RAL_QUEUE_GRAPHICS
 			|| region->mipLevel >= source->mipLevels
-			|| region->arrayLayer >= source->arrayLayers
 			|| !Ral_TextureGetResourceReceipt( source, &resource )
 			|| resource.textureIdentity != (uintptr_t)source
 			|| resource.usage != source->usage ) return qfalse;
 	mipWidth = source->width >> region->mipLevel; if ( mipWidth == 0 ) mipWidth = 1;
 	mipHeight = source->height >> region->mipLevel; if ( mipHeight == 0 ) mipHeight = 1;
+	mipDepth = source->type == RAL_TEXTURE_3D
+		? source->depthOrArrayLayers >> region->mipLevel : 1u;
+	if ( mipDepth == 0u ) mipDepth = 1u;
+	aspects = region->aspects ? region->aspects : ReadbackAspects( source->aspect );
 	bytesPerPixel = ralVk_FormatBPP( source->ralFormat );
-	if ( region->width == 0 || region->height == 0 || region->x > mipWidth
+	if ( ( aspects != RAL_TEXTURE_ASPECT_COLOR && aspects != RAL_TEXTURE_ASPECT_DEPTH )
+			|| !( ReadbackAspects( source->aspect ) & aspects )
+			|| ( source->type == RAL_TEXTURE_3D
+				? ( region->arrayLayer != 0u || region->z >= mipDepth )
+				: ( region->arrayLayer >= source->arrayLayers || region->z != 0u ) )
+			|| region->width == 0 || region->height == 0 || region->x > mipWidth
 			|| region->width > mipWidth - region->x || region->y > mipHeight
 			|| region->height > mipHeight - region->y || bytesPerPixel == 0
 			|| region->width > UINT64_MAX / bytesPerPixel ) return qfalse;
@@ -340,6 +352,7 @@ qboolean Ral_TextureReadbackBegin( ralTexture_t *source,
 	context->kind = RAL_TRANSFER_TEXTURE;
 	context->source.texture = source;
 	context->textureRegion = *region;
+	context->textureRegion.aspects = aspects;
 	context->bytes = requiredBytes;
 	context->sourceState = source->portableState;
 	context->sourceQueue = source->portableOwnerQueue;
@@ -355,11 +368,13 @@ qboolean Ral_TextureReadbackBegin( ralTexture_t *source,
 	request.arrayLayer = region->arrayLayer;
 	request.offsetX = region->x;
 	request.offsetY = region->y;
+	request.offsetZ = region->z;
 	request.width = region->width;
 	request.height = region->height;
 	request.depth = 1;
 	request.bytesPerRow = (uint32_t)paddedBytesPerRow;
 	request.rowsPerImage = region->height;
+	request.textureAspects = aspects;
 	request.queue = RAL_QUEUE_GRAPHICS;
 	return Begin( context, &request, outOwner );
 }

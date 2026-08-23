@@ -87,6 +87,8 @@ qboolean Ral_ReadbackRelease( ralReadbackOwner_t **owner );
 typedef struct {
 	uint32_t mipLevel;
 	uint32_t arrayLayer;
+	uint32_t z;
+	uint32_t aspects; // one explicit RAL_TEXTURE_ASPECT_* plane, or zero for legacy inference
 	uint32_t x;
 	uint32_t y;
 	uint32_t width;

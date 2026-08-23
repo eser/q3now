@@ -27,7 +27,8 @@ int main( void ) {
 	CHECK(Ral_TransferReceiptExact(&prepared,&prepared));
 	MUTATE(request.resourceIdentity,(uintptr_t)0x101u);
 	MUTATE(request.resourceGeneration,8u);MUTATE(request.byteSize,2048u);
-	MUTATE(request.mipLevel,3u);MUTATE(request.arrayLayer,2u);MUTATE(request.queue,RAL_QUEUE_GRAPHICS);
+	MUTATE(request.mipLevel,3u);MUTATE(request.arrayLayer,2u);MUTATE(request.offsetZ,1u);
+	MUTATE(request.textureAspects,1u);MUTATE(request.queue,RAL_QUEUE_GRAPHICS);
 	MUTATE(transferGeneration,12u);
 	bad=before;CHECK(!Ral_TransferPublish(&prepared,RAL_TRANSFER_OUTCOME_NONE,12u,&bad));
 	CHECK(!memcmp(&bad,&before,sizeof(bad)));

@@ -19,7 +19,7 @@ static struct ralTextureView_s s_views[32];
 static int s_textureCreates, s_viewCreates, s_textureDestroys, s_viewDestroys;
 static int s_capsCalls, s_supportCalls, s_failTextureAt, s_failViewAt;
 static int s_layoutCreates, s_layoutDestroys, s_failLayout;
-static VkDescriptorSetLayout s_capturedSets[3];
+static const ralBindGroupLayout_t *s_capturedLayouts[3];
 static const ralBindGroupLayout_t *s_capturedPayloadLayout;
 static uint32_t s_capturedPayloadGeneration;
 static qboolean s_capturedFog;
@@ -81,26 +81,27 @@ void VK_TemporalPipelineLayoutInit( vkTemporalPipelineLayoutOwner_t *owner ) {
 
 qboolean VK_TemporalPipelineLayoutEnsure( vkTemporalPipelineLayoutOwner_t *owner,
 		ralBackend_t *backend, VkDevice device,
-		const VkDescriptorSetLayout borrowedSets[3],
+		const ralBindGroupLayout_t *const borrowedLayouts[3],
 		const ralBindGroupLayout_t *payloadLayout,
 		uint32_t payloadLayoutGeneration, qboolean fog,
 		const vkTemporalLayoutOps_t *ops ) {
 	uint32_t i;
 	(void)ops;
-	if ( !owner || !backend || device == VK_NULL_HANDLE || !borrowedSets
+	if ( !owner || !backend || device == VK_NULL_HANDLE || !borrowedLayouts
 			|| !payloadLayout || !payloadLayoutGeneration ) return qfalse;
-	for ( i = 0; i < 3; ++i ) if ( borrowedSets[i] == VK_NULL_HANDLE ) return qfalse;
+	for ( i = 0; i < 3; ++i ) if ( !borrowedLayouts[i] ) return qfalse;
 	if ( owner->ready && owner->backend == backend && owner->device == device
 			&& owner->payloadLayout == payloadLayout
 			&& owner->payloadLayoutGeneration == payloadLayoutGeneration
 			&& owner->fog == fog
-			&& memcmp( owner->borrowedSets, borrowedSets,
-				sizeof( owner->borrowedSets ) ) == 0 ) return qtrue;
+			&& memcmp( owner->borrowedLayouts, borrowedLayouts,
+				sizeof( owner->borrowedLayouts ) ) == 0 ) return qtrue;
 	if ( owner->allocationGeneration == UINT32_MAX || s_failLayout ) return qfalse;
 	s_layoutCreates++;
 	owner->backend = backend;
 	owner->device = device;
-	memcpy( owner->borrowedSets, borrowedSets, sizeof( owner->borrowedSets ) );
+	memcpy( owner->borrowedLayouts, borrowedLayouts,
+		sizeof( owner->borrowedLayouts ) );
 	owner->payloadLayout = payloadLayout;
 	owner->payloadLayoutGeneration = payloadLayoutGeneration;
 	owner->raw = (VkPipelineLayout)(uintptr_t)(0x100u + (uint32_t)s_layoutCreates);
@@ -108,7 +109,7 @@ qboolean VK_TemporalPipelineLayoutEnsure( vkTemporalPipelineLayoutOwner_t *owner
 	owner->allocationGeneration++;
 	owner->fog = fog;
 	owner->ready = qtrue;
-	memcpy( s_capturedSets, borrowedSets, sizeof( s_capturedSets ) );
+	memcpy( s_capturedLayouts, borrowedLayouts, sizeof( s_capturedLayouts ) );
 	s_capturedPayloadLayout = payloadLayout;
 	s_capturedPayloadGeneration = payloadLayoutGeneration;
 	s_capturedFog = fog;
@@ -133,9 +134,9 @@ static vkTemporalMotionMaterializationInput_t MakeInput(
 	memset( &input, 0, sizeof( input ) );
 	input.backend = backend;
 	input.device = (VkDevice)(uintptr_t)0x55;
-	input.borrowedSets[0] = (VkDescriptorSetLayout)(uintptr_t)0x10;
-	input.borrowedSets[1] = (VkDescriptorSetLayout)(uintptr_t)0x11;
-	input.borrowedSets[2] = (VkDescriptorSetLayout)(uintptr_t)0x12;
+	input.borrowedLayouts[0] = (ralBindGroupLayout_t *)(uintptr_t)0x10;
+	input.borrowedLayouts[1] = (ralBindGroupLayout_t *)(uintptr_t)0x11;
+	input.borrowedLayouts[2] = (ralBindGroupLayout_t *)(uintptr_t)0x12;
 	input.payload = payload;
 	input.worldIndex = 1;
 	input.width = 1280;
@@ -182,8 +183,8 @@ int main( void ) {
 		&& owner.allocationGeneration == 1 );
 	CHECK( s_capturedPayloadLayout == &payloadLayoutA
 		&& s_capturedPayloadGeneration == 1 && !s_capturedFog );
-	CHECK( memcmp( s_capturedSets, input.borrowedSets,
-		sizeof( s_capturedSets ) ) == 0 );
+	CHECK( memcmp( s_capturedLayouts, input.borrowedLayouts,
+		sizeof( s_capturedLayouts ) ) == 0 );
 	CHECK( VK_TemporalMotionMaterializationGetReceipt( &owner, &receipt ) );
 	CHECK( receipt.ready && receipt.width == 1280 && receipt.height == 720
 		&& receipt.payloadLayoutGeneration == 1

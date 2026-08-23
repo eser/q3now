@@ -623,24 +623,17 @@ typedef struct image_s {
 	int			internalFormat;
 
 	VkSamplerAddressMode wrapClampMode;
-	VkImage		handle;
-	VkImageView	view;
 	// Descriptor set that contains single descriptor used to access the given image.
 	// Native mirror of the RAL-owned combined-sampler group below.
 	VkDescriptorSet descriptor;
-	// Direct RAL ownership cohort for the exact renderer VkImage/VkImageView.
-	// The texture/view wrappers borrow the renderer-owned native objects; the
-	// group owns its arena descriptor. Teardown order is group -> view wrapper ->
-	// texture wrapper -> renderer VkImageView/VkImage.
+	// Direct RAL ownership cohort for the exact asset texture. The group owns its
+	// arena descriptor and the view is a child of `ral`; teardown order is
+	// group -> descriptor/residency views -> texture.
 	struct ralBindGroup_s *ralDescriptor;
-	struct ralTexture_s *ralDescriptorTexture;
 	struct ralTextureView_s *ralDescriptorView;
 	struct ralSampler_s *ralDescriptorSampler;
-	// When r_useRALTextures=1, a parallel RAL
-	// texture is created alongside the legacy VkImage above. The legacy handle
-	// drives the renderer's descriptor binding / blits / screenshots; the RAL
-	// texture populates the bindless BindGroup. NULL when
-	// r_useRALTextures=0 or when the RAL backend init failed.
+	// Sole GPU texture identity for ordinary, packed/compressed, cube, array and
+	// 3D image_t assets. Native handles are backend-private borrowed mirrors only.
 	struct ralTexture_s *ral;
 	// Portable sampling view used by the bindless residency path. It currently
 	// spans the full mip chain (behavior-preserving); future coarse-parent
@@ -974,16 +967,14 @@ typedef struct {
 	int		*animFlags;		// [num_anims]
 
 #ifdef USE_VULKAN
-	// GPU skinning Vulkan resources (created at load time)
-	VkBuffer	vk_vertex_buffer;
-	VkDeviceMemory	vk_vertex_memory;
-	VkBuffer	vk_index_buffer;
-	VkDeviceMemory	vk_index_memory;
+	// GPU skinning portable geometry resources (created at load time)
+	struct ralBuffer_s *ral_vertex_buffer;
+	struct ralBuffer_s *ral_index_buffer;
 	int		vk_total_vertexes;  // total vertex count across all surfaces
 	int		vk_total_indexes;   // total index count (num_triangles * 3)
 	qboolean	vk_gpu_skinning;    // qtrue if GPU skinning VBOs are ready
-	uint64_t	vk_vertex_bytes;
-	uint64_t	vk_index_bytes;
+	uint64_t	ral_vertex_bytes;
+	uint64_t	ral_index_bytes;
 	uint64_t	temporalContentDigest;
 	uint32_t	temporalTopologyGeneration;
 	uint32_t	temporalModelAllocationGeneration;

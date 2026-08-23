@@ -66,11 +66,13 @@ endforeach()
 foreach(needle IN ITEMS
 	"VK_TemporalIqmPayloadAcquireLayoutLease"
 	"VK_TemporalIqmPayloadReleaseLayoutLease"
-	"rawPush.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT"
-	"rawPush.offset = 0u"
-	"rawPush.size = VK_TEMPORAL_IQM_EXACT3_PUSH_SIZE"
-	"rawInfo.setLayoutCount = 2u"
-	"rawInfo.pushConstantRangeCount = 1u"
+	"layoutInfo.bindGroupLayouts = ralSets"
+	"layoutInfo.numBindGroupLayouts = 2u"
+	"layoutInfo.pushConstantSize = VK_TEMPORAL_IQM_EXACT3_PUSH_SIZE"
+	"layoutInfo.pushConstantStages = RAL_STAGE_FRAGMENT"
+	"owner->adoptedLayout = ops->createLayout( input->backend, &layoutInfo )"
+	"owner->rawLayout = (VkPipelineLayout)ops->getLayoutHandle("
+	"ops->destroyLayout( owner->adoptedLayout )"
 	"ci->pushConstantSize = VK_TEMPORAL_IQM_EXACT3_PUSH_SIZE"
 	"ci->pushConstantStages = RAL_STAGE_FRAGMENT"
 	"ci->numBindGroupLayouts = 2u"
@@ -95,7 +97,8 @@ foreach(needle IN ITEMS
 	require_text("${FACTORY}" "${needle}" "factory/layout invariant")
 endforeach()
 foreach(forbidden IN ITEMS samplerPoolGeneration vk_ral_lookup_buffer
-	Ral_Cmd vkCmdBind vkCmdDraw firstInstance instanceCount)
+	Ral_Cmd vkCmdBind vkCmdDraw firstInstance instanceCount
+	qvkCreatePipelineLayout qvkDestroyPipelineLayout VkPipelineLayoutCreateInfo)
 	string(FIND "${FACTORY}" "${forbidden}" forbidden_pos)
 	if(NOT forbidden_pos EQUAL -1)
 		message(FATAL_ERROR "definition-only factory gained forbidden authority: ${forbidden}")
@@ -134,8 +137,8 @@ foreach(needle IN ITEMS
 	"if ( !wiredTemporalFinite4( temporalCurrentClip )\n\t\t\t|| !wiredTemporalFinite4( temporalPreviousClip )\n\t\t\t|| temporalCurrentClip.w <= 1.0e-6\n\t\t\t|| temporalPreviousClip.w <= 1.0e-6 ) return;"
 	"vec2 currentNdc = temporalCurrentClip.xy / temporalCurrentClip.w;"
 	"vec2 previousNdc = temporalPreviousClip.xy / temporalPreviousClip.w;"
-	"if ( any( isnan( currentNdc ) ) || any( isinf( currentNdc ) )\n\t\t\t|| any( isnan( previousNdc ) ) || any( isinf( previousNdc ) ) ) return;"
-	"if ( any( isnan( velocity ) ) || any( isinf( velocity ) ) ) return;")
+	"if ( !wiredTemporalFinite2( currentNdc )\n\t\t\t|| !wiredTemporalFinite2( previousNdc ) ) return;"
+	"if ( !wiredTemporalFinite2( velocity ) ) return;")
 	require_text("${FRAG}" "${needle}" "exact finite/perspective motion guard")
 endforeach()
 if(FRAG MATCHES "gl_FragCoord|currentUv\\.y|previousUv\\.y")
@@ -157,13 +160,15 @@ extract_shader_function("${VERT}" "vec3 skinCurrentPosition(" SKIN_CURRENT)
 extract_shader_function("${VERT}" "vec3 skinPreviousPosition(" SKIN_PREVIOUS)
 extract_shader_function("${VERT}" "void main()" VERT_MAIN)
 extract_shader_function("${FRAG}" "bool wiredTemporalFinite4(" FINITE4)
+extract_shader_function("${FRAG}" "bool wiredTemporalFinite2(" FINITE2)
 require_body_hash("${CURRENT_BONE_ROW}" "100c1679fa0f653b56cc455a4c8f9eb5483d479825cbb6d6ef828c1c3dd6b1a3" "currentBoneRow")
 require_body_hash("${PREVIOUS_BONE_ROW}" "6074bd3b8be37b3b25355b2cd61012988835832644193b4855f9493d2e96e1cf" "previousBoneRow")
 require_body_hash("${TRANSFORM_CURRENT}" "8de9bbdb69d207f5d67eab435e9b595f5d270f67761ccca762df830748d4070c" "transformCurrentPosition")
 require_body_hash("${TRANSFORM_PREVIOUS}" "4b61f7c566fbf2d122414bc3aca74b9376419c4a07e078f37cefdd91286bacb9" "transformPreviousPosition")
 require_body_hash("${SKIN_CURRENT}" "7e923a8721bc3998bdf13ddfb5e598343d2618a0e1599a7f1fda91a3cdf2c34c" "skinCurrentPosition")
 require_body_hash("${SKIN_PREVIOUS}" "a02f4d5cb03e059099abbd3059bd7d7630f1daf3d99ddc7e26c8eb2223a05452" "skinPreviousPosition")
-require_body_hash("${FINITE4}" "b605448c67a1ffc767941be0e73a95e5657e5270746aadad0084359666becd63" "wiredTemporalFinite4")
+require_body_hash("${FINITE4}" "bdfe0840b088ae6065727f6f91fef3e05c137a35e18944cf046369d4efe9511f" "wiredTemporalFinite4")
+require_body_hash("${FINITE2}" "36a2363a628423e5fb755c882956d089c0ceab7cc3a1a73f2c7a99f09fc45c2c" "wiredTemporalFinite2")
 require_scoped_family("${CURRENT_BONE_ROW}" "currentBones\\[offset\\]" "previousBones" 1 "currentBoneRow")
 require_scoped_family("${PREVIOUS_BONE_ROW}" "previousBones\\[offset\\]" "currentBones" 1 "previousBoneRow")
 require_scoped_family("${TRANSFORM_CURRENT}" "currentBoneRow\\(" "previousBoneRow\\(" 3 "transformCurrentPosition")
@@ -386,8 +391,10 @@ foreach(needle IN ITEMS
 	require_text("${CMAKE_TEXT}" "${needle}" "CMake acceptance wiring")
 endforeach()
 foreach(needle IN ITEMS
-	"VK_SHADER_STAGE_FRAGMENT_BIT"
 	"RAL_STAGE_FRAGMENT"
+	"CreateLayout"
+	"GetPipelineLayoutHandle"
+	"s_layoutPushOffset==0u"
 	"s_rejectRole"
 	"input.bindless.setIdentity"
 	"SELF_BAD(m.bindless.setIdentity=m.backend)"

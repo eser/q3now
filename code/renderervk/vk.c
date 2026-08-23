@@ -10,6 +10,7 @@
 #include "vk_atmospheric_pool.h"
 #include "vk_atmospheric_frame.h"
 #include "vk_ral_frame_uniform.h"
+#include "vk_ral_buffer_shadow.h"
 #include "vk_ral_shadow_storage.h"
 #include "vk_generic_specialization_contract.h"
 #include "vk_temporal_pipeline_cohort.h"
@@ -402,8 +403,7 @@ qboolean vk_ral_refresh_particle_render_bindgroups( uint32_t slotMask ) {
 				!= (void *)vk.particle.render_set_layout
 			|| Ral_GetSamplerHandle( vk.particle.ral_sampler )
 				!= (void *)vk.particle.sampler
-			|| Ral_GetTextureViewHandle( vk.sceneDepth.ral_view )
-				!= (void *)vk.sceneDepth.view
+			|| Ral_GetTextureViewHandle( vk.sceneDepth.ral_view ) == NULL
 			|| Ral_GetSamplerHandle( vk.sceneDepth.ral_sampler )
 				!= (void *)vk.sceneDepth.sampler
 			|| !tr.whiteImage || !tr.whiteImage->ralDescriptorView
@@ -436,7 +436,7 @@ qboolean vk_ral_refresh_particle_render_bindgroups( uint32_t slotMask ) {
 			: vk.particle.frameImages[k - MAX_PARTICLE_CLASSES];
 		if ( !image ) image = tr.whiteImage;
 		if ( !image->ralDescriptorView
-				|| Ral_GetTextureViewHandle( image->ralDescriptorView ) != (void *)image->view )
+				|| !Ral_GetTextureViewHandle( image->ralDescriptorView ) )
 			goto fail;
 		textureViews[k] = image->ralDescriptorView;
 	}
@@ -520,8 +520,7 @@ qboolean vk_ral_refresh_decal_render_bindgroups( uint32_t slotMask ) {
 				!= (void *)vk.decal.render_set_layout
 			|| Ral_GetSamplerHandle( vk.decal.ral_sampler )
 				!= (void *)vk.decal.sampler
-			|| Ral_GetTextureViewHandle( vk.sceneDepth.ral_view )
-				!= (void *)vk.sceneDepth.view
+			|| Ral_GetTextureViewHandle( vk.sceneDepth.ral_view ) == NULL
 			|| Ral_GetSamplerHandle( vk.sceneDepth.ral_sampler )
 				!= (void *)vk.sceneDepth.sampler
 			|| !tr.whiteImage || !tr.whiteImage->ralDescriptorView
@@ -546,7 +545,7 @@ qboolean vk_ral_refresh_decal_render_bindgroups( uint32_t slotMask ) {
 	for ( k = 0u; k < MAX_DECAL_TEXTURES; ++k ) {
 		image_t *image = vk.decal.images[k] ? vk.decal.images[k] : tr.whiteImage;
 		if ( !image->ralDescriptorView
-				|| Ral_GetTextureViewHandle( image->ralDescriptorView ) != (void *)image->view )
+				|| !Ral_GetTextureViewHandle( image->ralDescriptorView ) )
 			goto fail;
 		textureViews[k] = image->ralDescriptorView;
 	}
@@ -1103,7 +1102,7 @@ void vk_temporal_scene_color_attachment_published( void ) {
 	// Publish the scene cohort only after the raw image has a live adopted RAL
 	// texture and both current-scene consumer groups have been rebuilt. A raw
 	// allocation alone is not usable H2 authority.
-	if ( !vk.color_image || !vk.color_image_view || !vk.ral_color_image
+	if ( !vk.ral_color_image
 			|| !vk.ral_color_descriptor || !vk.ral_bgl_sampler
 			|| !vk.ral_histogram_bgl || !vk.ral_histogram_buffer
 			|| !vk.ral_histogram_descriptor ) {
@@ -1858,57 +1857,17 @@ static qboolean vk_frame_present_done;
 // vkEnumerateInstanceExtensionProperties / vkDestroyInstance /
 // vkEnumeratePhysicalDevices / vkDestroySurfaceKHR / the debug-utils
 // messenger pair — RAL's phase 1 owns them.
-static PFN_vkGetDeviceProcAddr							qvkGetDeviceProcAddr;
-static PFN_vkAllocateMemory								qvkAllocateMemory;
-static PFN_vkBindBufferMemory							qvkBindBufferMemory;
-static PFN_vkBindImageMemory							qvkBindImageMemory;
-static PFN_vkCreateBuffer								qvkCreateBuffer;
-static PFN_vkCreateDescriptorSetLayout					qvkCreateDescriptorSetLayout;
-static PFN_vkCreateImage								qvkCreateImage;
-static PFN_vkCreateImageView							qvkCreateImageView;
-static PFN_vkCreatePipelineLayout						qvkCreatePipelineLayout;
-static PFN_vkDestroyBuffer								qvkDestroyBuffer;
-static PFN_vkDestroyDescriptorSetLayout					qvkDestroyDescriptorSetLayout;
 // qvkDestroyDevice retired (RAL owns device destroy).
-static PFN_vkDestroyImage								qvkDestroyImage;
-static PFN_vkDestroyImageView							qvkDestroyImageView;
-static PFN_vkDestroyPipelineLayout						qvkDestroyPipelineLayout;
-static PFN_vkFreeMemory									qvkFreeMemory;
-static PFN_vkGetBufferMemoryRequirements				qvkGetBufferMemoryRequirements;
 // qvkGetDeviceQueue retired (RAL owns queues).
-static PFN_vkMapMemory									qvkMapMemory;
-static PFN_vkUnmapMemory								qvkUnmapMemory;
 // Swapchain create/enumerate/acquire/present + HDR metadata dispatch lives in
 // ral_vulkan. The renderer consumes only typed RAL swapchain operations.
-
-static VkResult vk_temporal_layout_create_raw( VkDevice device,
-		const VkPipelineLayoutCreateInfo *ci, VkPipelineLayout *outLayout ) {
-	return qvkCreatePipelineLayout( device, ci, NULL, outLayout );
-}
-
-static void vk_temporal_layout_destroy_raw( VkDevice device,
-		VkPipelineLayout layout ) {
-	qvkDestroyPipelineLayout( device, layout, NULL );
-}
-
-static void *vk_temporal_layout_get_bgl(
-		const ralBindGroupLayout_t *layout ) {
-	return Ral_GetBindGroupLayoutHandle( layout );
-}
-
-static ralPipelineLayout_t *vk_temporal_layout_adopt( ralBackend_t *backend,
-		void *raw, const char *debugName ) {
-	return Ral_AdoptPipelineLayout( backend, raw, debugName );
-}
 
 static vkTemporalLayoutOps_t vk_temporal_layout_ops( void ) {
 	vkTemporalLayoutOps_t ops;
 	memset( &ops, 0, sizeof( ops ) );
-	ops.createRaw = vk_temporal_layout_create_raw;
-	ops.destroyRaw = vk_temporal_layout_destroy_raw;
-	ops.getBindGroupLayoutHandle = vk_temporal_layout_get_bgl;
-	ops.adoptRaw = vk_temporal_layout_adopt;
-	ops.destroyAdopted = Ral_DestroyPipelineLayout;
+	ops.create = Ral_CreatePipelineLayout;
+	ops.getHandle = Ral_GetPipelineLayoutHandle;
+	ops.destroy = Ral_DestroyPipelineLayout;
 	return ops;
 }
 
@@ -1917,8 +1876,6 @@ static vkTemporalLayoutOps_t vk_temporal_layout_ops( void ) {
 // forward declaration
 static void create_pipeline( const Vk_Pipeline_Def *def,
 	renderPass_t renderPassIndex, uint32_t def_index );
-static void vk_get_image_memory_requirements( VkImage image,
-	VkMemoryRequirements *memoryRequirements );
 
 // The MAIN + SCREENMAP passes are dynamic-rendering: they build only a RAL
 // pipeline (no legacy VkPipeline / VkRenderPass), and they share color/depth
@@ -1961,6 +1918,9 @@ struct vk_ral_special_pipeline_params_s {
 	uint32_t                    pushConstantStages;
 	const ralBindGroupLayout_t *bgls[ 8 ];
 	uint32_t                    numBgls;
+	// Bits for layout slots declared by the shared pipeline layout but not
+	// statically consumed by this pipeline's compiled shader variant.
+	uint32_t                    optionalBindGroupMask;
 
 	const ralVertexBinding_t   *vbinds;
 	uint32_t                    numVbinds;
@@ -2811,81 +2771,66 @@ static void vk_create_swapchain( VkSurfaceFormatKHR surface_format, qboolean ver
 
 
 
-static void allocate_and_bind_image_memory(VkImage image) {
-	VkMemoryRequirements memory_requirements;
-	VkDeviceSize alignment;
-	ImageChunk *chunk;
+static vkRalBufferShadow_t vk_tess_geometry_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_entmat_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_exposure_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_menubg_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_msdf_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_effects_ubo_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_smaa_rt_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_ribbon_points_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_ribbon_headers_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_rail_ribbon_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_beam_header_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_sprite_header_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_primitive_stages_shadow;
+static vkRalBufferShadow_t vk_primitive_stage_counts_shadow;
+static vkRalBufferShadow_t vk_iqm_bone_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_fp_tile_params_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_fp_cluster_params_shadow;
+static vkRalBufferShadow_t vk_shadow_cascade_mvp_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_shadow_bone_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_dlight_params_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_dlight_face_mvp_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_dlight_entmat_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_shadow_snap_shadows[NUM_COMMAND_BUFFERS];
+static vkRalBufferShadow_t vk_shadow_entmat_shadows[NUM_COMMAND_BUFFERS];
 
-	vk_get_image_memory_requirements( image, &memory_requirements );
-
-	if ( memory_requirements.size > vk.image_chunk_size ) {
-		ri.Terminate( TERM_UNRECOVERABLE, "Vulkan: could not allocate memory, image is too large (%ikbytes).",
-			(int)(memory_requirements.size/1024) );
+qboolean vk_tess_publish_shadow_range( uint32_t offset, uint32_t size ) {
+	vkRalBufferShadowWriteReceipt_t receipt;
+	vkRalBufferShadow_t *shadow;
+	if ( !vk.cmd || vk.cmd_index < 0 || vk.cmd_index >= NUM_COMMAND_BUFFERS
+			|| !size ) return qfalse;
+	shadow = &vk_tess_geometry_shadows[vk.cmd_index];
+	if ( shadow->buffer != vk.cmd->ral_vertex_buffer
+			|| shadow->bytes != vk.cmd->vertex_buffer_ptr
+			|| offset > shadow->byteSize
+			|| size > shadow->byteSize - offset
+			|| !VK_RalBufferShadowMarkWritten( shadow, offset, size )
+			|| !VK_RalBufferShadowPublish( shadow, offset, size,
+				&receipt ) ) {
+		if ( !vk.geometry_buffer_size_new )
+			vk.geometry_buffer_size_new = vk.geometry_buffer_size;
+		return qfalse;
 	}
-
-	chunk = NULL;
-
-	// Try to find an existing chunk of sufficient capacity.
-	alignment = memory_requirements.alignment;
-	for ( int i = 0; i < vk_world.num_image_chunks; i++ ) {
-		// ensure that memory region has proper alignment
-		VkDeviceSize offset = PAD( vk_world.image_chunks[i].used, alignment );
-
-		if ( offset + memory_requirements.size <= vk.image_chunk_size ) {
-			chunk = &vk_world.image_chunks[i];
-			chunk->used = offset + memory_requirements.size;
-			break;
-		}
-	}
-
-	// Allocate a new chunk in case we couldn't find suitable existing chunk.
-	if (chunk == NULL) {
-		VkMemoryAllocateInfo alloc_info;
-		VkDeviceMemory memory;
-
-		if (vk_world.num_image_chunks >= MAX_IMAGE_CHUNKS) {
-			ri.Terminate( TERM_UNRECOVERABLE, "Vulkan: image chunk limit has been reached" );
-		}
-
-		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		alloc_info.pNext = NULL;
-		alloc_info.allocationSize = vk.image_chunk_size;
-		alloc_info.memoryTypeIndex = find_memory_type( memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-
-		VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &memory ) );
-
-		chunk = &vk_world.image_chunks[vk_world.num_image_chunks];
-		chunk->memory = memory;
-		chunk->used = memory_requirements.size;
-
-		SET_OBJECT_NAME( memory, va( "image memory chunk %i", vk_world.num_image_chunks ), RAL_VULKAN_OBJECT_ROLE_DEVICE_MEMORY );
-
-		vk_world.num_image_chunks++;
-	}
-
-	VK_CHECK(qvkBindImageMemory(vk.device, image, chunk->memory, chunk->used - memory_requirements.size));
+	return qtrue;
 }
 
+qboolean vk_publish_menubg_shadow( uint32_t commandSlot ) {
+	vkRalBufferShadowWriteReceipt_t receipt;
+	if ( commandSlot >= NUM_COMMAND_BUFFERS
+			|| !vk.menubg.ptr[commandSlot] ) return qfalse;
+	return VK_RalBufferShadowMarkWritten( &vk_menubg_shadows[commandSlot],
+			0u, sizeof( vk_menubg_block_t ) )
+		&& VK_RalBufferShadowPublish( &vk_menubg_shadows[commandSlot],
+			0u, sizeof( vk_menubg_block_t ), &receipt );
+}
 
 static void vk_clean_staging_buffer( void )
 {
-	if ( vk.staging_buffer.handle != VK_NULL_HANDLE ) {
-		vk_ral_unregister_buffer( vk.staging_buffer.handle );
-		qvkDestroyBuffer( vk.device, vk.staging_buffer.handle, NULL );
-		vk.staging_buffer.handle = VK_NULL_HANDLE;
-	}
-
-	//if ( vk.staging_buffer.ptr != NULL )
-	//	qvkUnmapMemory( vk.device, vk.staging_buffer.memory ) {
-	//	vk.staging_buffer.ptr = NULL;
-	//}
-
-	if ( vk.staging_buffer.memory != VK_NULL_HANDLE ) {
-		qvkFreeMemory( vk.device, vk.staging_buffer.memory, NULL );
-		vk.staging_buffer.memory = VK_NULL_HANDLE;
-	}
-
-	vk.staging_buffer.ptr = NULL;
+	if ( vk.staging_buffer.ral_buffer )
+		Ral_DestroyBuffer( vk.staging_buffer.ral_buffer );
+	vk.staging_buffer.ral_buffer = NULL;
 	vk.staging_buffer.size = 0;
 #ifdef USE_UPLOAD_QUEUE
 	vk.staging_buffer.offset = 0;
@@ -2970,64 +2915,6 @@ static void vk_ral_reset_descriptor_arena( const char *where ) {
 	vk.descriptor_pool = (VkDescriptorPool)Ral_GetBindGroupArenaHandle(
 		vk.ral_descriptor_arena );
 }
-
-// Record one portable buffer copy against the registry's exact non-owning
-// wrappers. All identity/capability/range checks complete before the backend
-// emits a command; callers decide whether a failed batch may be submitted.
-static qboolean vk_ral_record_registered_buffer_copy(
-		ralCommandBuffer_t *command, VkBuffer srcNative, VkBuffer dstNative,
-		const ralBufferCopy_t *copy ) {
-	ralBuffer_t *src = vk_ral_lookup_buffer( srcNative );
-	ralBuffer_t *dst = vk_ral_lookup_buffer( dstNative );
-	if ( !command || !copy || !src || !dst
-			|| Ral_GetBufferHandle( src ) != (void *)srcNative
-			|| Ral_GetBufferHandle( dst ) != (void *)dstNative ) return qfalse;
-	return Ral_CmdCopyBufferExact( command, src, dst, copy );
-}
-
-// Resolve renderer-owned native buffers through the exact non-owning registry
-// before recording portable vertex/index bindings. No temporary wrapper is
-// created here: missing or stale registry authority rejects the bind.
-static qboolean vk_ral_bind_registered_vertex_buffers(
-		ralCommandBuffer_t *command, uint32_t firstBinding,
-		uint32_t bindingCount, const VkBuffer *nativeBuffers,
-		const VkDeviceSize *nativeOffsets ) {
-	ralBuffer_t *buffers[8];
-	uint64_t offsets[8];
-	uint32_t i;
-	if ( !command || bindingCount == 0u || bindingCount > ARRAY_LEN( buffers )
-			|| !nativeBuffers || !nativeOffsets ) goto reject;
-	for ( i = 0u; i < bindingCount; ++i ) {
-		buffers[i] = vk_ral_lookup_buffer( nativeBuffers[i] );
-		offsets[i] = (uint64_t)nativeOffsets[i];
-		if ( !buffers[i]
-				|| Ral_GetBufferHandle( buffers[i] ) != (void *)nativeBuffers[i] )
-			goto reject;
-	}
-	if ( Ral_CmdBindVertexBuffersExact( command, firstBinding, bindingCount,
-			buffers, offsets ) ) return qtrue;
-reject:
-	// A stale registry bind must not let the following draw reuse an older
-	// vertex/index cohort. Clearing only portable pipeline authority turns that
-	// draw into a no-op without emitting another native command.
-	if ( command ) Ral_CmdBindPipeline( command, NULL );
-	return qfalse;
-}
-
-static qboolean vk_ral_bind_registered_index_buffer(
-		ralCommandBuffer_t *command, VkBuffer nativeBuffer,
-		VkDeviceSize offset, ralIndexType_t type ) {
-	ralBuffer_t *buffer = vk_ral_lookup_buffer( nativeBuffer );
-	if ( !command || !buffer
-			|| Ral_GetBufferHandle( buffer ) != (void *)nativeBuffer
-			|| !Ral_CmdBindIndexBufferExact( command, buffer, (uint64_t)offset,
-				type ) ) {
-		if ( command ) Ral_CmdBindPipeline( command, NULL );
-		return qfalse;
-	}
-	return qtrue;
-}
-
 
 #ifdef USE_UPLOAD_QUEUE
 static void vk_check_staging_fence( const char *where, ralResult_t result )
@@ -3149,49 +3036,108 @@ static void vk_flush_staging_buffer( qboolean final )
 
 static void vk_alloc_staging_buffer( VkDeviceSize size )
 {
-	VkBufferCreateInfo buffer_desc;
-	VkMemoryRequirements memory_requirements;
-	VkMemoryAllocateInfo alloc_info;
-	uint32_t memory_type;
-	void *data;
-
+	ralBuffer_t *candidateBuffer = NULL;
+	ralBufferCreateInfo_t createInfo;
+	VkDeviceSize candidateSize = MAX( size, STAGING_BUFFER_SIZE );
+	candidateSize = PAD( candidateSize, 1024 * 1024 );
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.size = candidateSize;
+	createInfo.usage = (ralBufferUsage_t)( RAL_BUFFER_TRANSFER_SRC
+		| RAL_BUFFER_MAP_WRITE );
+	createInfo.memory = RAL_MEMORY_HOST_COHERENT;
+	createInfo.debugName = "vk.staging_buffer";
+	candidateBuffer = Ral_CreateBuffer( vk_ral_get_backend(), &createInfo );
+	if ( !candidateBuffer )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: failed to create RAL staging buffer" );
 	vk_clean_staging_buffer();
-
-	vk.staging_buffer.size = MAX( size, STAGING_BUFFER_SIZE );
-	vk.staging_buffer.size = PAD( vk.staging_buffer.size, 1024 * 1024 );
-
-	buffer_desc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	buffer_desc.pNext = NULL;
-	buffer_desc.flags = 0;
-	buffer_desc.size = vk.staging_buffer.size;
-	buffer_desc.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-	buffer_desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	buffer_desc.queueFamilyIndexCount = 0;
-	buffer_desc.pQueueFamilyIndices = NULL;
-	VK_CHECK(qvkCreateBuffer(vk.device, &buffer_desc, NULL, &vk.staging_buffer.handle));
-
-	qvkGetBufferMemoryRequirements( vk.device, vk.staging_buffer.handle, &memory_requirements );
-
-	memory_type = find_memory_type( memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-
-	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	alloc_info.pNext = NULL;
-	alloc_info.allocationSize = memory_requirements.size;
-	alloc_info.memoryTypeIndex = memory_type;
-
-	VK_CHECK(qvkAllocateMemory(vk.device, &alloc_info, NULL, &vk.staging_buffer.memory));
-	VK_CHECK(qvkBindBufferMemory(vk.device, vk.staging_buffer.handle, vk.staging_buffer.memory, 0));
-	vk_ral_register_buffer( vk.staging_buffer.handle, vk.staging_buffer.size, buffer_desc.usage,
-	                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-	                        "vk.staging_buffer" );
-
-	VK_CHECK(qvkMapMemory(vk.device, vk.staging_buffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
-	vk.staging_buffer.ptr = (byte*)data;
+	vk.staging_buffer.ral_buffer = candidateBuffer;
+	vk.staging_buffer.size = candidateSize;
 #ifdef USE_UPLOAD_QUEUE
 	vk.staging_buffer.offset = 0;
 #endif
-	SET_OBJECT_NAME( vk.staging_buffer.handle, "staging buffer", RAL_VULKAN_OBJECT_ROLE_BUFFER );
-	SET_OBJECT_NAME( vk.staging_buffer.memory, "staging buffer memory", RAL_VULKAN_OBJECT_ROLE_DEVICE_MEMORY );
+}
+
+static qboolean vk_ral_write_upload_buffer( ralBuffer_t *buffer,
+		uint64_t offset, const void *data, uint64_t size )
+{
+	ralBufferMapRequest_t request;
+	ralBufferMapTicket_t ticket;
+	if ( !buffer || !data || size == 0u
+			|| offset > Ral_GetBufferSize( buffer )
+			|| size > Ral_GetBufferSize( buffer ) - offset )
+		return qfalse;
+	memset( &request, 0, sizeof( request ) );
+	request.mode = RAL_MAP_WRITE;
+	request.offset = offset;
+	request.size = size;
+	if ( Ral_BufferMapBegin( buffer, &request, &ticket ) != ralSuccess )
+		return qfalse;
+	if ( ticket.status != RAL_BUFFER_MAP_READY || !ticket.mappedRange ) {
+		if ( ticket.status == RAL_BUFFER_MAP_PENDING )
+			(void)Ral_BufferMapCancel( buffer, &ticket );
+		return qfalse;
+	}
+	memcpy( ticket.mappedRange, data, (size_t)size );
+	return Ral_BufferMapUnmap( buffer, &ticket ) == ralSuccess
+		? qtrue : qfalse;
+}
+
+static qboolean vk_ral_transition_upload_buffer( ralCommandBuffer_t *command,
+		ralBuffer_t *buffer, ralResourceUsage_t beforeUsage,
+		ralResourceUsage_t afterUsage )
+{
+	ralBufferTransition_t transition;
+	ralResourceTransitionBatch_t batch;
+	if ( !command || !buffer ) return qfalse;
+	memset( &transition, 0, sizeof( transition ) );
+	transition.buffer = buffer;
+	transition.size = Ral_GetBufferSize( buffer );
+	transition.before.usage = beforeUsage;
+	transition.after.usage = afterUsage;
+	transition.sourceQueue = RAL_QUEUE_GRAPHICS;
+	transition.destinationQueue = RAL_QUEUE_GRAPHICS;
+	memset( &batch, 0, sizeof( batch ) );
+	batch.bufferTransitions = &transition;
+	batch.bufferTransitionCount = 1u;
+	return Ral_CmdTransitionResources( command, &batch ) == ralSuccess
+		? qtrue : qfalse;
+}
+
+static qboolean vk_ral_stage_buffer_copy( ralBuffer_t *destination,
+		uint64_t destinationOffset, const void *data, uint64_t size,
+		const char *where )
+{
+	ralCommandBuffer_t *command;
+	ralBufferCopy_t region;
+	qboolean recorded = qfalse;
+	qboolean restored = qfalse;
+	if ( !destination || !data || size == 0u ) return qfalse;
+	if ( !vk.staging_buffer.ral_buffer || vk.staging_buffer.size < size )
+		vk_alloc_staging_buffer( size );
+	if ( !vk_ral_write_upload_buffer( vk.staging_buffer.ral_buffer,
+			0u, data, size ) ) return qfalse;
+	command = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(),
+		RAL_QUEUE_GRAPHICS );
+	if ( !command ) {
+		R_LOG( rch_ral, SEV_ERROR,
+			"%s: portable staging command acquisition failed\n", where );
+		return qfalse;
+	}
+	if ( vk_ral_transition_upload_buffer( command,
+			vk.staging_buffer.ral_buffer, RAL_RESOURCE_USAGE_HOST_WRITE,
+			RAL_RESOURCE_USAGE_COPY_SOURCE ) ) {
+		memset( &region, 0, sizeof( region ) );
+		region.dstOffset = destinationOffset;
+		region.size = size;
+		recorded = Ral_CmdCopyBufferExact( command,
+			vk.staging_buffer.ral_buffer, destination, &region );
+		restored = vk_ral_transition_upload_buffer( command,
+			vk.staging_buffer.ral_buffer, RAL_RESOURCE_USAGE_COPY_SOURCE,
+			RAL_RESOURCE_USAGE_HOST_WRITE );
+	}
+	Ral_SubmitAndDispose( command );
+	return recorded && restored ? qtrue : qfalse;
 }
 
 
@@ -3651,24 +3597,6 @@ static const char *renderer_name( const ralCaps_t *caps ) {
 // vkCreateDevice) folded into Ral_CreateBackend's owned-device branch.
 // The renderer reads vk.device back via Ral_GetDeviceHandle at boot and
 // the 537 readers preserve transparently via alias.
-// RAL owns the VkInstance; vk.instance is the
-// alias-preserved read-back populated by vk_ral_boot_backend.
-#define INIT_INSTANCE_FUNCTION(func) \
-	q##func = /*(PFN_ ## func)*/ ri.VK_GetInstanceProcAddr((void *)vk.instance, #func); \
-	if (q##func == NULL) {											\
-		ri.Terminate( TERM_UNRECOVERABLE, "Failed to find entrypoint %s", #func);	\
-	}
-
-#define INIT_INSTANCE_FUNCTION_EXT(func) \
-	q##func = /*(PFN_ ## func)*/ ri.VK_GetInstanceProcAddr((void *)vk.instance, #func);
-
-
-#define INIT_DEVICE_FUNCTION(func) \
-	q##func = (PFN_ ## func) qvkGetDeviceProcAddr(vk.device, #func);\
-	if (q##func == NULL) {											\
-		ri.Terminate( TERM_UNRECOVERABLE, "Failed to find entrypoint %s", #func);	\
-	}
-
 static qboolean init_vulkan_library( void )
 {
 	memset( &vk, 0, sizeof( vk ) );
@@ -3703,33 +3631,6 @@ static qboolean init_vulkan_library( void )
 		R_DeclineInit();
 		return qfalse;
 	}
-
-	// Renderer-needed instance-level entry points. RAL's owned-instance
-	// branch loaded its own loader subset internally; the renderer keeps
-	// only the surface-format enumeration still needed for HDR policy. Surface
-	// capabilities and present modes belong exclusively to RAL swapchain.
-	INIT_INSTANCE_FUNCTION( vkGetDeviceProcAddr )
-
-	//
-	// Get device level functions.
-	//
-	INIT_DEVICE_FUNCTION(vkAllocateMemory)
-	INIT_DEVICE_FUNCTION(vkBindBufferMemory)
-	INIT_DEVICE_FUNCTION(vkBindImageMemory)
-	INIT_DEVICE_FUNCTION(vkCreateBuffer)
-	INIT_DEVICE_FUNCTION(vkCreateDescriptorSetLayout)
-	INIT_DEVICE_FUNCTION(vkCreateImage)
-	INIT_DEVICE_FUNCTION(vkCreateImageView)
-	INIT_DEVICE_FUNCTION(vkCreatePipelineLayout)
-	INIT_DEVICE_FUNCTION(vkDestroyBuffer)
-	INIT_DEVICE_FUNCTION(vkDestroyDescriptorSetLayout)
-	INIT_DEVICE_FUNCTION(vkDestroyImage)
-	INIT_DEVICE_FUNCTION(vkDestroyImageView)
-	INIT_DEVICE_FUNCTION(vkDestroyPipelineLayout)
-	INIT_DEVICE_FUNCTION(vkFreeMemory)
-	INIT_DEVICE_FUNCTION(vkGetBufferMemoryRequirements)
-	INIT_DEVICE_FUNCTION(vkMapMemory)
-	INIT_DEVICE_FUNCTION(vkUnmapMemory)
 
 	// First pick the swapchain surface format on
 	// the RAL-owned surface (vk_select_surface_format
@@ -3797,9 +3698,6 @@ static qboolean init_vulkan_library( void )
 	return qtrue;
 }
 
-#undef INIT_INSTANCE_FUNCTION
-#undef INIT_DEVICE_FUNCTION
-
 #if FEAT_DEPTH_CLAMP
 // Frontend accessor for the native depth-clamp capability (set from RAL caps at
 // device bringup). Lets R_SetupProjectionZ choose native-vs-projection-tweak
@@ -3811,33 +3709,13 @@ qboolean vk_depth_clamp_supported( void ) {
 
 static void deinit_instance_functions( void )
 {
-	// Drops for loader/instance-create entry
-	// points and debug-utils messenger removed; those PFNs live inside
-	// the RAL Vulkan backend now.
-	qvkGetDeviceProcAddr = NULL;
+	// Loader/instance entry points live exclusively inside the RAL backend.
 }
 
 
 static void deinit_device_functions( void )
 {
-	// device functions:
-	qvkAllocateMemory							= NULL;
-	qvkBindBufferMemory							= NULL;
-	qvkBindImageMemory							= NULL;
-	qvkCreateBuffer								= NULL;
-	qvkCreateDescriptorSetLayout				= NULL;
-	qvkCreateImage								= NULL;
-	qvkCreateImageView							= NULL;
-	qvkCreatePipelineLayout						= NULL;
-	qvkDestroyBuffer							= NULL;
-	qvkDestroyDescriptorSetLayout				= NULL;
-	qvkDestroyImage								= NULL;
-	qvkDestroyImageView							= NULL;
-	qvkDestroyPipelineLayout					= NULL;
-	qvkFreeMemory								= NULL;
-	qvkGetBufferMemoryRequirements				= NULL;
-	qvkMapMemory								= NULL;
-	qvkUnmapMemory								= NULL;
+	// Device entry points live exclusively inside the RAL backend.
 }
 
 
@@ -3919,24 +3797,78 @@ static void vk_destroy_shader_module( void *moduleIdentity ) {
 }
 
 
-static void vk_create_layout_binding( int binding, VkDescriptorType type, VkShaderStageFlags flags, VkDescriptorSetLayout *layout )
+static void vk_create_layout_binding( int binding, VkDescriptorType type,
+		VkShaderStageFlags flags, ralBindGroupLayout_t **owner,
+		VkDescriptorSetLayout *layout, const char *debugName )
 {
-	VkDescriptorSetLayoutBinding bind;
-	VkDescriptorSetLayoutCreateInfo desc;
+	ralBindEntry_t entry;
+	ralBindGroupLayoutCreateInfo_t desc;
+	if ( !owner || !layout || *owner || *layout != VK_NULL_HANDLE )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: invalid direct RAL bind-group-layout destination" );
+	memset( &entry, 0, sizeof( entry ) );
+	entry.binding = (uint32_t)binding;
+	entry.count = 1u;
+	if ( flags & VK_SHADER_STAGE_VERTEX_BIT ) entry.stageFlags |= RAL_STAGE_VERTEX;
+	if ( flags & VK_SHADER_STAGE_FRAGMENT_BIT ) entry.stageFlags |= RAL_STAGE_FRAGMENT;
+	if ( flags & VK_SHADER_STAGE_COMPUTE_BIT ) entry.stageFlags |= RAL_STAGE_COMPUTE;
+	switch ( type ) {
+	case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+		entry.type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
+		break;
+	case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+		entry.type = RAL_BIND_UNIFORM_BUFFER;
+		break;
+	case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+		entry.type = RAL_BIND_UNIFORM_BUFFER;
+		entry.dynamicOffset = qtrue;
+		break;
+	case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+		entry.type = RAL_BIND_STORAGE_BUFFER;
+		break;
+	default:
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: unsupported direct RAL layout binding type %u", (uint32_t)type );
+	}
+	memset( &desc, 0, sizeof( desc ) );
+	desc.entries = &entry;
+	desc.numEntries = 1u;
+	desc.debugName = debugName;
+	*owner = Ral_CreateBindGroupLayout( vk_ral_get_backend(), &desc );
+	if ( !*owner )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: failed to create direct RAL bind-group layout %s", debugName );
+	*layout = (VkDescriptorSetLayout)Ral_GetBindGroupLayoutHandle( *owner );
+	if ( *layout == VK_NULL_HANDLE )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: direct RAL bind-group layout has no native mirror %s", debugName );
+}
 
-	bind.binding = binding;
-	bind.descriptorType = type;
-	bind.descriptorCount = 1;
-	bind.stageFlags = flags;
-	bind.pImmutableSamplers = NULL;
-
-	desc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	desc.pNext = NULL;
-	desc.flags = 0;
-	desc.bindingCount = 1;
-	desc.pBindings = &bind;
-
-	VK_CHECK( qvkCreateDescriptorSetLayout(vk.device, &desc, NULL, layout ) );
+static void vk_create_direct_pipeline_layout(
+		const ralBindGroupLayout_t *const *layouts, uint32_t layoutCount,
+		uint32_t pushConstantSize, uint32_t pushConstantStages,
+		const char *debugName, ralPipelineLayout_t **owner,
+		VkPipelineLayout *nativeMirror )
+{
+	ralPipelineLayoutCreateInfo_t desc;
+	if ( !owner || !nativeMirror || *owner
+			|| *nativeMirror != VK_NULL_HANDLE )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: invalid direct RAL pipeline-layout destination" );
+	memset( &desc, 0, sizeof( desc ) );
+	desc.bindGroupLayouts = layouts;
+	desc.numBindGroupLayouts = layoutCount;
+	desc.pushConstantSize = pushConstantSize;
+	desc.pushConstantStages = pushConstantStages;
+	desc.debugName = debugName;
+	*owner = Ral_CreatePipelineLayout( vk_ral_get_backend(), &desc );
+	if ( !*owner )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: failed to create direct RAL pipeline layout %s", debugName );
+	*nativeMirror = (VkPipelineLayout)Ral_GetPipelineLayoutHandle( *owner );
+	if ( *nativeMirror == VK_NULL_HANDLE )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: direct RAL pipeline layout has no native mirror %s", debugName );
 }
 
 
@@ -4103,7 +4035,7 @@ void vk_destroy_samplers( void )
 // disjoint from the 2D table at binding 0. The sampler-dedup-pool entry +
 // image->bindlessSamplerSlot were already populated by
 // vk_update_descriptor_set when vk_create_image fired from
-// R_CreateImageArray; this helper only owns the parallel image-array write
+// R_CreateImageArray; this helper only owns the direct image-array write
 // + the slot record on image_t.
 //
 // Idempotent — returns early when image->ralBindlessSlot is already set.
@@ -4117,8 +4049,8 @@ void vk_ral_register_image_array( image_t *image ) {
 		return;
 	if ( image->ralBindlessSlot >= 0 )
 		return;
-	if ( image->view == VK_NULL_HANDLE || !image->ralDescriptorView
-			|| Ral_GetTextureViewHandle( image->ralDescriptorView ) != (void *)image->view )
+	if ( !image->ralDescriptorView
+			|| !Ral_GetTextureViewHandle( image->ralDescriptorView ) )
 		return;
 
 	ralSet = vk_ral_get_bindless_set();
@@ -4148,13 +4080,17 @@ void vk_ral_register_image_array( image_t *image ) {
 // binding-aware publication surface. The sampler goes into binding=1 via the
 // same Ral_BindGroupSetSamplerAt path image registration uses. No image_t
 // shim — the screenmap is not a content image.
-static void vk_ral_register_screenmap_view( VkImageView view, const Vk_Sampler_Def *sd ) {
+static void vk_ral_register_screenmap_view( ralTextureView_t *view,
+	const Vk_Sampler_Def *sd ) {
 	ralBindGroup_t       *ralSet;
 	VkDescriptorSet       ralVkSet;
+	VkImageView           nativeView;
 	int                   smIdx;
 
-	if ( view == VK_NULL_HANDLE || sd == NULL )
+	if ( view == NULL || sd == NULL )
 		return;
+	nativeView = (VkImageView)Ral_GetTextureViewHandle( view );
+	if ( nativeView == VK_NULL_HANDLE ) return;
 
 	ralSet = vk_ral_get_bindless_set();
 	if ( !ralSet )
@@ -4197,26 +4133,22 @@ static void vk_ral_register_screenmap_view( VkImageView view, const Vk_Sampler_D
 
 	// Publish through the binding-aware RAL surface; the sampler remains a
 	// separate bindless-table entry at binding 1.
-	if ( !vk.screenMap.ral_color_view
-			|| Ral_GetTextureViewHandle( vk.screenMap.ral_color_view ) != (void *)view
+	if ( vk.screenMap.ral_color_view != view
 			|| !Ral_BindGroupSetTextureViewAtBinding( ralSet,
 				WIRED_BINDLESS_BIND_IMAGES, WIRED_BINDLESS_SCREENMAP_SLOT,
 				vk.screenMap.ral_color_view ) ) return;
 	if ( !vk_ral_bindless_record_reserved( WIRED_BINDLESS_SCREENMAP_SLOT,
-			view, &vk.screenMap, (const void *)ralVkSet ) ) return;
+			nativeView, &vk.screenMap, (const void *)ralVkSet ) ) return;
 
 	R_LOG( rch_fbo, SEV_DEBUG, "screenmap view bound to bindless slot %u (sampler dedup slot %d)\n",
 	       (unsigned)WIRED_BINDLESS_SCREENMAP_SLOT, vk.bindless_screenmap_sampler_slot );
 }
 
 
-// Register the depth-fade scene-depth copy into the RAL bindless 2D table at the
+// Register the RAL-owned scene-depth copy into the bindless 2D table at the
 // reserved WIRED_BINDLESS_SCENEDEPTH_SLOT, so the soft-particle dfade fragment can
 // sample it via bindless role 4. Mirrors vk_ral_register_screenmap_view but:
-//   - the write goes through RAL (Ral_BindGroupSetTextureAt), not a raw descriptor
-//     write — the depth copy is re-adopted (vk.sceneDepth.ral_image) so the bound
-//     texture always wraps the LIVE view (the boot adopt-sweep does NOT re-run on a
-//     pendingRebuild, so re-adopting here is what keeps the slot from dangling);
+//   - texture, view, sampler group and bindless publication all stay typed;
 //   - the sampler is NEAREST (depth is point-sampled; not linear-filterable on
 //     WebGPU/WebGL2 anyway).
 // Called from vk_update_attachment_descriptors on every attachment recreate path
@@ -4230,53 +4162,16 @@ static qboolean vk_ral_refresh_texture_sampler_group(
 
 static qboolean vk_ral_register_depthfade_view( void ) {
 	ralBindGroup_t *ralSet;
-	ralResourceState_t initialState = { RAL_RESOURCE_USAGE_UNDEFINED, 0 };
 	Vk_Sampler_Def  sd;
 	int             smIdx;
-	ralBackend_t   *ralBackend;
 
 	ralSet = vk_ral_get_bindless_set();
-	if ( vk.sceneDepth.view == VK_NULL_HANDLE )
-		return qfalse;
-	ralBackend = vk_ral_get_backend();
-	if ( !ralBackend )
+	if ( !vk.sceneDepth.ral_image || !vk_ral_get_backend() )
 		return qfalse;
 
-	// Re-adopt the depth copy so the RAL wrapper points at the current view (the
-	// FBO rebuild destroyed+recreated the image/view; the boot sweep that owns
-	// vk.sceneDepth.ral_image does not re-run here).
-	if ( vk.sceneDepth.ral_descriptor ) {
-		Ral_DestroyBindGroup( vk.sceneDepth.ral_descriptor );
-		vk.sceneDepth.ral_descriptor = NULL;
-	}
-	if ( vk.sceneDepth.ral_view ) {
-		Ral_DestroyTextureView( vk.sceneDepth.ral_view );
-		vk.sceneDepth.ral_view = NULL;
-	}
-	vk.sceneDepth.descriptor = VK_NULL_HANDLE;
-	if ( vk.sceneDepth.ral_image ) { Ral_DestroyTexture( vk.sceneDepth.ral_image ); vk.sceneDepth.ral_image = NULL; }
-	vk.sceneDepth.ral_image = Ral_AdoptTextureExact( ralBackend,
-		vk.sceneDepth.image, vk.sceneDepth.view,
-		vk_attachment_format_to_ral( vk.depth_format ), glConfig.vidWidth, glConfig.vidHeight,
-		( glConfig.stencilBits > 0 )
-			? ( VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT )
-			: VK_IMAGE_ASPECT_DEPTH_BIT,
-		RAL_TEXTURE_USAGE_SAMPLED | RAL_TEXTURE_USAGE_TRANSFER_SRC
-			| RAL_TEXTURE_USAGE_TRANSFER_DST,
-		"wired-img-scenedepth" );
-	if ( !vk.sceneDepth.ral_image )
-		return qfalse;
-	if ( !Ral_PublishAdoptedTextureState( vk.sceneDepth.ral_image,
-			&initialState, RAL_QUEUE_GRAPHICS ) ) {
-		Ral_DestroyTexture( vk.sceneDepth.ral_image );
-		vk.sceneDepth.ral_image = NULL;
-		return qfalse;
-	}
 	if ( !vk_ral_refresh_texture_sampler_group( vk.sceneDepth.ral_image,
 			&vk.sceneDepth.ral_view, &vk.sceneDepth.ral_descriptor,
 			vk.sceneDepth.ral_sampler, "wired-scenedepth-bg" ) ) {
-		Ral_DestroyTexture( vk.sceneDepth.ral_image );
-		vk.sceneDepth.ral_image = NULL;
 		return qfalse;
 	}
 	vk.sceneDepth.descriptor = Ral_GetBindGroupHandle(
@@ -4315,11 +4210,13 @@ static qboolean vk_ral_register_depthfade_view( void ) {
 	}
 	vk.sceneDepth.bindlessSamplerSlot = smIdx;
 
-	// RAL-native bindless image write — the depth view into the reserved slot.
-	if ( !Ral_BindGroupSetTextureAt( ralSet, WIRED_BINDLESS_SCENEDEPTH_SLOT,
-			vk.sceneDepth.ral_image )
+	// RAL-native bindless image write — the cohort's depth-only sampling view.
+	if ( !Ral_BindGroupSetTextureViewAtBinding( ralSet,
+			WIRED_BINDLESS_BIND_IMAGES, WIRED_BINDLESS_SCENEDEPTH_SLOT,
+			vk.sceneDepth.ral_view )
 			|| !vk_ral_bindless_record_reserved( WIRED_BINDLESS_SCENEDEPTH_SLOT,
-				vk.sceneDepth.view, &vk.sceneDepth, (const void *)ralSet ) ) {
+				Ral_GetTextureViewHandle( vk.sceneDepth.ral_view ),
+				&vk.sceneDepth, (const void *)ralSet ) ) {
 		vk.sceneDepth.bindlessSamplerSlot = -1;
 		return qfalse;
 	}
@@ -4349,7 +4246,7 @@ void vk_register_black_sentinel( void ) {
 	ralBindGroup_t       *ralSet;
 	VkDescriptorSet       ralVkSet;
 
-	if ( !tr.blackImage || tr.blackImage->view == VK_NULL_HANDLE )
+	if ( !tr.blackImage || !tr.blackImage->ralDescriptorView )
 		return;
 
 	ralSet = vk_ral_get_bindless_set();
@@ -4359,14 +4256,9 @@ void vk_register_black_sentinel( void ) {
 	if ( ralVkSet == VK_NULL_HANDLE )
 		return;
 
-	if ( !tr.blackImage->ralDescriptorView
-			|| Ral_GetTextureViewHandle( tr.blackImage->ralDescriptorView )
-				!= (void *)tr.blackImage->view
-			|| !Ral_BindGroupSetTextureViewAtBinding( ralSet,
-				WIRED_BINDLESS_BIND_IMAGES, WIRED_BINDLESS_BLACK_TEX_SENTINEL,
-				tr.blackImage->ralDescriptorView ) ) return;
-	if ( !vk_ral_bindless_record_raw_image( tr.blackImage,
-			WIRED_BINDLESS_BLACK_TEX_SENTINEL, tr.blackImage->view,
+	if ( !vk_ral_bindless_publish_texture_view( tr.blackImage,
+			WIRED_BINDLESS_BLACK_TEX_SENTINEL,
+			tr.blackImage->ralDescriptorView,
 			VK_BINDLESS_PUBLICATION_RESERVED ) ) return;
 
 	R_LOG( rch_fbo, SEV_DEBUG, "black sun-mask sentinel bound to bindless slot %u\n",
@@ -4390,7 +4282,7 @@ void vk_register_white_sentinel( void ) {
 	ralBindGroup_t       *ralSet;
 	VkDescriptorSet       ralVkSet;
 
-	if ( !tr.whiteImage || tr.whiteImage->view == VK_NULL_HANDLE )
+	if ( !tr.whiteImage || !tr.whiteImage->ralDescriptorView )
 		return;
 
 	ralSet = vk_ral_get_bindless_set();
@@ -4400,14 +4292,9 @@ void vk_register_white_sentinel( void ) {
 	if ( ralVkSet == VK_NULL_HANDLE )
 		return;
 
-	if ( !tr.whiteImage->ralDescriptorView
-			|| Ral_GetTextureViewHandle( tr.whiteImage->ralDescriptorView )
-				!= (void *)tr.whiteImage->view
-			|| !Ral_BindGroupSetTextureViewAtBinding( ralSet,
-				WIRED_BINDLESS_BIND_IMAGES, WIRED_BINDLESS_WHITE_TEX_SENTINEL,
-				tr.whiteImage->ralDescriptorView ) ) return;
-	if ( !vk_ral_bindless_record_raw_image( tr.whiteImage,
-			WIRED_BINDLESS_WHITE_TEX_SENTINEL, tr.whiteImage->view,
+	if ( !vk_ral_bindless_publish_texture_view( tr.whiteImage,
+			WIRED_BINDLESS_WHITE_TEX_SENTINEL,
+			tr.whiteImage->ralDescriptorView,
 			VK_BINDLESS_PUBLICATION_RESERVED ) ) return;
 
 	R_LOG( rch_fbo, SEV_DEBUG, "white texture sentinel bound to bindless slot %u\n",
@@ -4523,6 +4410,10 @@ void vk_ral_release_attachment_sampler_cohorts( void ) {
 		vk.ral_tonemapped_view, vk.tonemapped_descriptor );
 	RELEASE_ATTACHMENT_SAMPLE( vk.screenMap.ral_color_descriptor,
 		vk.screenMap.ral_color_view, vk.screenMap.color_descriptor );
+	if ( vk.sceneDepth.bindlessSamplerSlot >= 0 ) {
+		(void)vk_ral_bindless_tombstone( WIRED_BINDLESS_SCENEDEPTH_SLOT );
+		vk.sceneDepth.bindlessSamplerSlot = -1;
+	}
 	RELEASE_ATTACHMENT_SAMPLE( vk.sceneDepth.ral_descriptor,
 		vk.sceneDepth.ral_view, vk.sceneDepth.descriptor );
 	for ( i = 0; i < ARRAY_LEN( vk.ral_bloom_image_descriptor ); ++i )
@@ -4532,35 +4423,25 @@ void vk_ral_release_attachment_sampler_cohorts( void ) {
 }
 
 void vk_ral_release_smaa_sampler_cohorts( void ) {
-	#define RELEASE_SMAA_SAMPLE( group, view, texture, native ) do { \
+	#define RELEASE_SMAA_SAMPLE( group, view, native ) do { \
 		if ( (group) ) { Ral_DestroyBindGroup( (group) ); (group) = NULL; } \
 		if ( (view) ) { Ral_DestroyTextureView( (view) ); (view) = NULL; } \
-		if ( (texture) ) { Ral_DestroyTexture( (texture) ); (texture) = NULL; } \
 		(native) = VK_NULL_HANDLE; \
 	} while ( 0 )
 	RELEASE_SMAA_SAMPLE( vk.smaa.ral_edges_descriptor,
-		vk.smaa.ral_edges_view, vk.smaa.ral_edges_image,
-		vk.smaa.edges_descriptor );
+		vk.smaa.ral_edges_view, vk.smaa.edges_descriptor );
 	RELEASE_SMAA_SAMPLE( vk.smaa.ral_blend_descriptor,
-		vk.smaa.ral_blend_view, vk.smaa.ral_blend_image,
-		vk.smaa.blend_descriptor );
+		vk.smaa.ral_blend_view, vk.smaa.blend_descriptor );
 	RELEASE_SMAA_SAMPLE( vk.smaa.ral_input_descriptor,
-		vk.smaa.ral_input_view, vk.smaa.ral_input_image,
-		vk.smaa.input_descriptor );
+		vk.smaa.ral_input_view, vk.smaa.input_descriptor );
 	RELEASE_SMAA_SAMPLE( vk.smaa.ral_area_descriptor,
-		vk.smaa.ral_area_view, vk.smaa.ral_area_image,
-		vk.smaa.area_descriptor );
+		vk.smaa.ral_area_view, vk.smaa.area_descriptor );
 	RELEASE_SMAA_SAMPLE( vk.smaa.ral_search_descriptor,
-		vk.smaa.ral_search_view, vk.smaa.ral_search_image,
-		vk.smaa.search_descriptor );
+		vk.smaa.ral_search_view, vk.smaa.search_descriptor );
 	#undef RELEASE_SMAA_SAMPLE
 }
 
 static qboolean vk_ral_refresh_smaa_sampler_cohorts( void ) {
-	const ralResourceState_t sampled = {
-		RAL_RESOURCE_USAGE_SAMPLED_TEXTURE, RAL_STAGE_FRAGMENT
-	};
-
 	if ( !vk.smaa.active ) return qtrue;
 	if ( vk.smaa.ral_edges_image && vk.smaa.ral_edges_view
 			&& vk.smaa.ral_edges_descriptor
@@ -4572,11 +4453,11 @@ static qboolean vk_ral_refresh_smaa_sampler_cohorts( void ) {
 			&& vk.smaa.ral_area_descriptor
 			&& vk.smaa.ral_search_image && vk.smaa.ral_search_view
 			&& vk.smaa.ral_search_descriptor
-			&& Ral_GetTextureViewHandle( vk.smaa.ral_edges_view ) == (void *)vk.smaa.edges_view
-			&& Ral_GetTextureViewHandle( vk.smaa.ral_blend_view ) == (void *)vk.smaa.blend_view
-			&& Ral_GetTextureViewHandle( vk.smaa.ral_input_view ) == (void *)vk.smaa.input_view
-			&& Ral_GetTextureViewHandle( vk.smaa.ral_area_view ) == (void *)vk.smaa.area_view
-			&& Ral_GetTextureViewHandle( vk.smaa.ral_search_view ) == (void *)vk.smaa.search_view
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_edges_view ) != NULL
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_blend_view ) != NULL
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_input_view ) != NULL
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_area_view ) != NULL
+			&& Ral_GetTextureViewHandle( vk.smaa.ral_search_view ) != NULL
 			&& Ral_GetBindGroupHandle( vk.smaa.ral_edges_descriptor ) == (void *)vk.smaa.edges_descriptor
 			&& Ral_GetBindGroupHandle( vk.smaa.ral_blend_descriptor ) == (void *)vk.smaa.blend_descriptor
 			&& Ral_GetBindGroupHandle( vk.smaa.ral_input_descriptor ) == (void *)vk.smaa.input_descriptor
@@ -4584,48 +4465,11 @@ static qboolean vk_ral_refresh_smaa_sampler_cohorts( void ) {
 			&& Ral_GetBindGroupHandle( vk.smaa.ral_search_descriptor ) == (void *)vk.smaa.search_descriptor )
 		return qtrue;
 
-	// Arena resets and live r_smaa recreation both converge here. Retire every
-	// child before replacing an adopted texture wrapper; raw Vk images remain
-	// renderer-owned and outlive this portable sampling cohort.
-	vk_ral_release_smaa_sampler_cohorts();
-	vk_ral_adopt_one_texture( vk.smaa.edges_image, vk.smaa.edges_view,
-		VK_FORMAT_R8G8_UNORM, &vk.smaa.ral_edges_image,
-		glConfig.vidWidth, glConfig.vidHeight, VK_IMAGE_ASPECT_COLOR_BIT,
-		RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED,
-		"wired-img-smaa-edges" );
-	vk_ral_adopt_one_texture( vk.smaa.blend_image, vk.smaa.blend_view,
-		VK_FORMAT_R8G8B8A8_UNORM, &vk.smaa.ral_blend_image,
-		glConfig.vidWidth, glConfig.vidHeight, VK_IMAGE_ASPECT_COLOR_BIT,
-		RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED,
-		"wired-img-smaa-blend" );
-	vk_ral_adopt_one_texture( vk.smaa.input_image, vk.smaa.input_view,
-		vk.color_format, &vk.smaa.ral_input_image,
-		glConfig.vidWidth, glConfig.vidHeight, VK_IMAGE_ASPECT_COLOR_BIT,
-		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
-		"wired-img-smaa-input" );
-	vk_ral_adopt_one_texture( vk.smaa.area_image, vk.smaa.area_view,
-		VK_FORMAT_R8G8_UNORM, &vk.smaa.ral_area_image,
-		AREATEX_WIDTH, AREATEX_HEIGHT, VK_IMAGE_ASPECT_COLOR_BIT,
-		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
-		"wired-img-smaa-area" );
-	vk_ral_adopt_one_texture( vk.smaa.search_image, vk.smaa.search_view,
-		VK_FORMAT_R8_UNORM, &vk.smaa.ral_search_image,
-		SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT, VK_IMAGE_ASPECT_COLOR_BIT,
-		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
-		"wired-img-smaa-search" );
+	// Arena resets and live r_smaa recreation converge here. Texture parents are
+	// direct RAL owners and survive arena-only child refreshes.
 	if ( !vk.smaa.ral_edges_image || !vk.smaa.ral_blend_image
 			|| !vk.smaa.ral_input_image || !vk.smaa.ral_area_image
-			|| !vk.smaa.ral_search_image
-			|| !Ral_PublishAdoptedTextureState( vk.smaa.ral_edges_image,
-				&sampled, RAL_QUEUE_GRAPHICS )
-			|| !Ral_PublishAdoptedTextureState( vk.smaa.ral_blend_image,
-				&sampled, RAL_QUEUE_GRAPHICS )
-			|| !Ral_PublishAdoptedTextureState( vk.smaa.ral_input_image,
-				&sampled, RAL_QUEUE_GRAPHICS )
-			|| !Ral_PublishAdoptedTextureState( vk.smaa.ral_area_image,
-				&sampled, RAL_QUEUE_GRAPHICS )
-			|| !Ral_PublishAdoptedTextureState( vk.smaa.ral_search_image,
-				&sampled, RAL_QUEUE_GRAPHICS ) ) goto fail;
+			|| !vk.smaa.ral_search_image ) goto fail;
 
 	if ( !vk_ral_refresh_texture_sampler_group( vk.smaa.ral_edges_image,
 			&vk.smaa.ral_edges_view, &vk.smaa.ral_edges_descriptor,
@@ -4663,10 +4507,10 @@ fail:
 
 void vk_update_attachment_descriptors( void ) {
 
-	R_LOG( rch_fbo, SEV_TRACE, "vk_update_attachment_descriptors: color_image_view=%p fboActive=%d\n",
-		(void*)vk.color_image_view, vk.fboActive );
+	R_LOG( rch_fbo, SEV_TRACE, "vk_update_attachment_descriptors: color_texture=%p fboActive=%d\n",
+		(void*)vk.ral_color_image, vk.fboActive );
 
-	if ( vk.color_image_view )
+	if ( vk.ral_color_image )
 	{
 		VkDescriptorImageInfo info;
 		VkWriteDescriptorSet desc;
@@ -4734,7 +4578,7 @@ void vk_update_attachment_descriptors( void ) {
 		// (binding retired). Persistent across vk_release_
 		// resources / vid_restart: this function fires again on every
 		// attachment rebuild and re-asserts the slot.
-		vk_ral_register_screenmap_view( vk.screenMap.color_image_view, &sd );
+		vk_ral_register_screenmap_view( vk.screenMap.ral_color_view, &sd );
 
 		// bloom images
 		if ( r_bloom->integer )
@@ -4758,7 +4602,7 @@ void vk_update_attachment_descriptors( void ) {
 
 		// Depth-fade copy image. Re-adoption publishes both the bindless role and
 		// the set-1 post-process sampler group directly through RAL.
-		if ( vk.sceneDepth.active && vk.sceneDepth.image != VK_NULL_HANDLE )
+		if ( vk.sceneDepth.active && vk.sceneDepth.ral_image )
 		{
 			if ( !vk_ral_register_depthfade_view() )
 				ri.Terminate( TERM_UNRECOVERABLE,
@@ -4777,10 +4621,27 @@ void vk_update_attachment_descriptors( void ) {
 			}
 		}
 
-		// The decal render groups are not patched here. They are immutable direct
-		// RAL arena children and are rebuilt as a complete four-binding cohort by
-		// vk_init_decal_textures after attachment adoption. Binding 3 borrows this
-		// same vk.sceneDepth view/sampler pair (no second depth copy).
+		// Every long-lived render cohort that borrows the shared depth view is
+		// rebuilt here, after the new view is published. This makes attachment
+		// rebuilds independent of which outer restart path triggered them.
+		if ( vk.sceneDepth.ral_view && tr.whiteImage
+				&& tr.whiteImage->ralDescriptorView ) {
+			const uint32_t allSlots = ( 1u << NUM_COMMAND_BUFFERS ) - 1u;
+			if ( vk.particle.available && vk.particle.textureGeneration != 0u
+					&& !vk_ral_refresh_particle_render_bindgroups( allSlots ) )
+				ri.Terminate( TERM_UNRECOVERABLE,
+					"Vulkan: failed to refresh particle scene-depth cohorts" );
+			if ( vk.decal.available && vk.decal.textureGeneration != 0u
+					&& !vk_ral_refresh_decal_render_bindgroups( allSlots ) )
+				ri.Terminate( TERM_UNRECOVERABLE,
+					"Vulkan: failed to refresh decal scene-depth cohorts" );
+			if ( vk.atm.available )
+				vk_atmospheric_write_descriptors();
+		}
+
+		// The decal render groups are immutable direct RAL arena children and are
+		// rebuilt as a complete four-binding cohort above.
+		// Binding 3 borrows this same vk.sceneDepth view/sampler pair (no second copy).
 
 		// The renderer-global shadow/IBL/GTAO cohort is one generation-bound RAL
 		// group. Its native descriptor is a compatibility mirror only; sparse IBL
@@ -4797,6 +4658,17 @@ void vk_update_attachment_descriptors( void ) {
 	}
 }
 
+
+static ralBuffer_t *vk_create_device_local_buffer( uint64_t size,
+		ralBufferUsage_t usage, const char *debugName ) {
+	ralBufferCreateInfo_t createInfo;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.size = size;
+	createInfo.usage = usage;
+	createInfo.memory = RAL_MEMORY_DEVICE_LOCAL;
+	createInfo.debugName = debugName;
+	return Ral_CreateBuffer( vk_ral_get_backend(), &createInfo );
+}
 
 void vk_init_descriptors( void )
 {
@@ -4851,33 +4723,18 @@ void vk_init_descriptors( void )
 
 		for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
 		{
-			if ( vk.msdf.buffer[i] == VK_NULL_HANDLE )
+			if ( !vk.msdf.ral_buffer[i] )
 			{
-				VkBufferCreateInfo   msdfBuf;
-				VkMemoryRequirements msdfReqs;
-				VkMemoryAllocateInfo msdfMem;
-
-				memset( &msdfBuf, 0, sizeof( msdfBuf ) );
-				msdfBuf.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-				msdfBuf.size        = msdfBytes;
-				msdfBuf.usage       = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-				msdfBuf.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-				VK_CHECK( qvkCreateBuffer( vk.device, &msdfBuf, NULL, &vk.msdf.buffer[i] ) );
-
-				qvkGetBufferMemoryRequirements( vk.device, vk.msdf.buffer[i], &msdfReqs );
-				memset( &msdfMem, 0, sizeof( msdfMem ) );
-				msdfMem.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-				msdfMem.allocationSize  = msdfReqs.size;
-				msdfMem.memoryTypeIndex = find_memory_type( msdfReqs.memoryTypeBits,
-					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-				VK_CHECK( qvkAllocateMemory( vk.device, &msdfMem, NULL, &vk.msdf.memory[i] ) );
-				VK_CHECK( qvkMapMemory( vk.device, vk.msdf.memory[i], 0, VK_WHOLE_SIZE, 0, &vk.msdf.ptr[i] ) );
-				qvkBindBufferMemory( vk.device, vk.msdf.buffer[i], vk.msdf.memory[i], 0 );
+				if ( vk_msdf_shadows[i].schemaVersion == 0u )
+					VK_RalBufferShadowInit( &vk_msdf_shadows[i] );
+				if ( !VK_RalBufferShadowEnsure( &vk_msdf_shadows[i],
+						vk_ral_get_backend(), msdfBytes, RAL_BUFFER_UNIFORM,
+						"wired-msdf-ubo" ) )
+					ri.Terminate( TERM_UNRECOVERABLE,
+						"Vulkan: failed to create MSDF RAL buffer %u", i );
+				vk.msdf.ral_buffer[i] = vk_msdf_shadows[i].buffer;
+				vk.msdf.ptr[i] = vk_msdf_shadows[i].bytes;
 			}
-
-			vk.msdf.ral_buffer[i] = Ral_AdoptBuffer( vk_ral_get_backend(),
-				(void *)vk.msdf.buffer[i], (size_t)vk.msdf.size,
-				"wired-msdf-ubo" );
 			memset( &msdfValue, 0, sizeof( msdfValue ) );
 			msdfValue.binding = 0u;
 			msdfValue.type = RAL_BIND_UNIFORM_BUFFER;
@@ -4921,33 +4778,18 @@ void vk_init_descriptors( void )
 
 		for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
 		{
-			if ( vk.effectsUbo.buffer[i] == VK_NULL_HANDLE )
+			if ( !vk.effectsUbo.ral_buffer[i] )
 			{
-				VkBufferCreateInfo   fxBuf;
-				VkMemoryRequirements fxReqs;
-				VkMemoryAllocateInfo fxMem;
-
-				memset( &fxBuf, 0, sizeof( fxBuf ) );
-				fxBuf.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-				fxBuf.size        = fxBytes;
-				fxBuf.usage       = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-				fxBuf.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-				VK_CHECK( qvkCreateBuffer( vk.device, &fxBuf, NULL, &vk.effectsUbo.buffer[i] ) );
-
-				qvkGetBufferMemoryRequirements( vk.device, vk.effectsUbo.buffer[i], &fxReqs );
-				memset( &fxMem, 0, sizeof( fxMem ) );
-				fxMem.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-				fxMem.allocationSize  = fxReqs.size;
-				fxMem.memoryTypeIndex = find_memory_type( fxReqs.memoryTypeBits,
-					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-				VK_CHECK( qvkAllocateMemory( vk.device, &fxMem, NULL, &vk.effectsUbo.memory[i] ) );
-				VK_CHECK( qvkMapMemory( vk.device, vk.effectsUbo.memory[i], 0, VK_WHOLE_SIZE, 0, &vk.effectsUbo.ptr[i] ) );
-				qvkBindBufferMemory( vk.device, vk.effectsUbo.buffer[i], vk.effectsUbo.memory[i], 0 );
+				if ( vk_effects_ubo_shadows[i].schemaVersion == 0u )
+					VK_RalBufferShadowInit( &vk_effects_ubo_shadows[i] );
+				if ( !VK_RalBufferShadowEnsure( &vk_effects_ubo_shadows[i],
+						vk_ral_get_backend(), fxBytes, RAL_BUFFER_UNIFORM,
+						"wired-effects-ubo" ) )
+					ri.Terminate( TERM_UNRECOVERABLE,
+						"Vulkan: failed to create effects RAL buffer %u", i );
+				vk.effectsUbo.ral_buffer[i] = vk_effects_ubo_shadows[i].buffer;
+				vk.effectsUbo.ptr[i] = vk_effects_ubo_shadows[i].bytes;
 			}
-
-			vk.effectsUbo.ral_buffer[i] = Ral_AdoptBuffer( vk_ral_get_backend(),
-				(void *)vk.effectsUbo.buffer[i], (size_t)vk.effectsUbo.size,
-				"wired-effects-ubo" );
 			memset( &fxValue, 0, sizeof( fxValue ) );
 			fxValue.binding = 0u;
 			fxValue.type = RAL_BIND_UNIFORM_BUFFER;
@@ -4982,33 +4824,18 @@ void vk_init_descriptors( void )
 
 		for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
 		{
-			if ( vk.smaaRt.buffer[i] == VK_NULL_HANDLE )
+			if ( !vk.smaaRt.ral_buffer[i] )
 			{
-				VkBufferCreateInfo   rtBuf;
-				VkMemoryRequirements rtReqs;
-				VkMemoryAllocateInfo rtMem;
-
-				memset( &rtBuf, 0, sizeof( rtBuf ) );
-				rtBuf.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-				rtBuf.size        = rtBytes;
-				rtBuf.usage       = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-				rtBuf.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-				VK_CHECK( qvkCreateBuffer( vk.device, &rtBuf, NULL, &vk.smaaRt.buffer[i] ) );
-
-				qvkGetBufferMemoryRequirements( vk.device, vk.smaaRt.buffer[i], &rtReqs );
-				memset( &rtMem, 0, sizeof( rtMem ) );
-				rtMem.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-				rtMem.allocationSize  = rtReqs.size;
-				rtMem.memoryTypeIndex = find_memory_type( rtReqs.memoryTypeBits,
-					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-				VK_CHECK( qvkAllocateMemory( vk.device, &rtMem, NULL, &vk.smaaRt.memory[i] ) );
-				VK_CHECK( qvkMapMemory( vk.device, vk.smaaRt.memory[i], 0, VK_WHOLE_SIZE, 0, &vk.smaaRt.ptr[i] ) );
-				qvkBindBufferMemory( vk.device, vk.smaaRt.buffer[i], vk.smaaRt.memory[i], 0 );
+				if ( vk_smaa_rt_shadows[i].schemaVersion == 0u )
+					VK_RalBufferShadowInit( &vk_smaa_rt_shadows[i] );
+				if ( !VK_RalBufferShadowEnsure( &vk_smaa_rt_shadows[i],
+						vk_ral_get_backend(), rtBytes, RAL_BUFFER_UNIFORM,
+						"wired-smaa-rtmetrics-ubo" ) )
+					ri.Terminate( TERM_UNRECOVERABLE,
+						"Vulkan: failed to create SMAA metrics RAL buffer %u", i );
+				vk.smaaRt.ral_buffer[i] = vk_smaa_rt_shadows[i].buffer;
+				vk.smaaRt.ptr[i] = vk_smaa_rt_shadows[i].bytes;
 			}
-
-			vk.smaaRt.ral_buffer[i] = Ral_AdoptBuffer( vk_ral_get_backend(),
-				(void *)vk.smaaRt.buffer[i], (size_t)rtBytes,
-				"wired-smaa-rtmetrics-ubo" );
 			memset( &rtValue, 0, sizeof( rtValue ) );
 			rtValue.binding = 0u;
 			rtValue.type = RAL_BIND_UNIFORM_BUFFER;
@@ -5032,7 +4859,7 @@ void vk_init_descriptors( void )
 	}
 	// End arena-owned SMAA rtMetrics cohort.
 
-	if ( vk.color_image_view )
+	if ( vk.ral_color_image )
 	{
 		alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 		alloc.pNext = NULL;
@@ -5061,32 +4888,20 @@ void vk_init_descriptors( void )
 
 			for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
 			{
-				if ( vk.exposure.buffer[i] == VK_NULL_HANDLE )
+				if ( !vk.exposure.ral_buffer[i] )
 				{
-					VkBufferCreateInfo   expBuf;
-					VkMemoryRequirements expReqs;
-					VkMemoryAllocateInfo expMem;
-
-					memset( &expBuf, 0, sizeof( expBuf ) );
-					expBuf.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-					expBuf.size        = expBytes;
-					// STORAGE in addition to UNIFORM: the exposure-reduce compute pass
-					// binds this same buffer as an SSBO to write exposure_bias (the
-					// fragment tonemap still reads it as a uniform). Host-coherent so
-					// the CPU keeps writing the tuning fields directly.
-					expBuf.usage       = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-					expBuf.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-					VK_CHECK( qvkCreateBuffer( vk.device, &expBuf, NULL, &vk.exposure.buffer[i] ) );
-
-					qvkGetBufferMemoryRequirements( vk.device, vk.exposure.buffer[i], &expReqs );
-					memset( &expMem, 0, sizeof( expMem ) );
-					expMem.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-					expMem.allocationSize  = expReqs.size;
-					expMem.memoryTypeIndex = find_memory_type( expReqs.memoryTypeBits,
-						VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-					VK_CHECK( qvkAllocateMemory( vk.device, &expMem, NULL, &vk.exposure.memory[i] ) );
-					VK_CHECK( qvkMapMemory( vk.device, vk.exposure.memory[i], 0, VK_WHOLE_SIZE, 0, &vk.exposure.ptr[i] ) );
-					qvkBindBufferMemory( vk.device, vk.exposure.buffer[i], vk.exposure.memory[i], 0 );
+					vk_exposure_block_t seed;
+					vkRalBufferShadowWriteReceipt_t seedReceipt;
+					if ( vk_exposure_shadows[i].schemaVersion == 0u )
+						VK_RalBufferShadowInit( &vk_exposure_shadows[i] );
+					if ( !VK_RalBufferShadowEnsure( &vk_exposure_shadows[i],
+							vk_ral_get_backend(), expBytes,
+							(ralBufferUsage_t)( RAL_BUFFER_UNIFORM | RAL_BUFFER_STORAGE ),
+							"wired-exposure-ubo" ) )
+						ri.Terminate( TERM_UNRECOVERABLE,
+							"Vulkan: failed to create exposure RAL buffer %u", i );
+					vk.exposure.ral_buffer[i] = vk_exposure_shadows[i].buffer;
+					vk.exposure.ptr[i] = vk_exposure_shadows[i].bytes;
 
 					// Seed identity so a frame that samples before the first
 					// vk_tonemap write multiplies the scene by 1.0 (no boost);
@@ -5094,14 +4909,17 @@ void vk_init_descriptors( void )
 					// garbage before the first per-frame write. brightness seeds
 					// to 1.0 as well so the reduce compute's FORK-1 multiply is
 					// identity before the first CPU tuning write.
-					memset( vk.exposure.ptr[i], 0, (size_t)expBytes );
-					((vk_exposure_block_t *)vk.exposure.ptr[i])->exposure_bias = 1.0f;
-					((vk_exposure_block_t *)vk.exposure.ptr[i])->brightness    = 1.0f;
+					memset( &seed, 0, sizeof( seed ) );
+					seed.exposure_bias = 1.0f;
+					seed.brightness = 1.0f;
+					if ( !VK_RalBufferShadowWrite( &vk_exposure_shadows[i],
+							0u, &seed, sizeof( seed ) )
+							|| !VK_RalBufferShadowPublish( &vk_exposure_shadows[i],
+								0u, expBytes, &seedReceipt ) )
+						ri.Terminate( TERM_UNRECOVERABLE,
+							"Vulkan: failed to seed exposure RAL buffer %u", i );
 				}
 
-				vk.exposure.ral_buffer[i] = Ral_AdoptBuffer( vk_ral_get_backend(),
-					(void *)vk.exposure.buffer[i], (size_t)expBytes,
-					"wired-exposure-ubo" );
 				memset( &expValue, 0, sizeof( expValue ) );
 				expValue.binding = 0u;
 				expValue.type = RAL_BIND_UNIFORM_BUFFER;
@@ -5139,37 +4957,30 @@ void vk_init_descriptors( void )
 
 			for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
 			{
-				if ( vk.menubg.buffer[i] == VK_NULL_HANDLE )
+				if ( !vk.menubg.ral_buffer[i] )
 				{
-					VkBufferCreateInfo   mbgBuf;
-					VkMemoryRequirements mbgReqs;
-					VkMemoryAllocateInfo mbgMem;
-
-					memset( &mbgBuf, 0, sizeof( mbgBuf ) );
-					mbgBuf.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-					mbgBuf.size        = mbgBytes;
-					mbgBuf.usage       = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-					mbgBuf.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-					VK_CHECK( qvkCreateBuffer( vk.device, &mbgBuf, NULL, &vk.menubg.buffer[i] ) );
-
-					qvkGetBufferMemoryRequirements( vk.device, vk.menubg.buffer[i], &mbgReqs );
-					memset( &mbgMem, 0, sizeof( mbgMem ) );
-					mbgMem.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-					mbgMem.allocationSize  = mbgReqs.size;
-					mbgMem.memoryTypeIndex = find_memory_type( mbgReqs.memoryTypeBits,
-						VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-					VK_CHECK( qvkAllocateMemory( vk.device, &mbgMem, NULL, &vk.menubg.memory[i] ) );
-					VK_CHECK( qvkMapMemory( vk.device, vk.menubg.memory[i], 0, VK_WHOLE_SIZE, 0, &vk.menubg.ptr[i] ) );
-					qvkBindBufferMemory( vk.device, vk.menubg.buffer[i], vk.menubg.memory[i], 0 );
+					vkRalBufferShadowWriteReceipt_t seedReceipt;
+					if ( vk_menubg_shadows[i].schemaVersion == 0u )
+						VK_RalBufferShadowInit( &vk_menubg_shadows[i] );
+					if ( !VK_RalBufferShadowEnsure( &vk_menubg_shadows[i],
+							vk_ral_get_backend(), mbgBytes, RAL_BUFFER_UNIFORM,
+							"wired-menubg-ubo" ) )
+						ri.Terminate( TERM_UNRECOVERABLE,
+							"Vulkan: failed to create menubg RAL buffer %u", i );
+					vk.menubg.ral_buffer[i] = vk_menubg_shadows[i].buffer;
+					vk.menubg.ptr[i] = vk_menubg_shadows[i].bytes;
 
 					// Zero the block so a frame that samples before the first
 					// RE_DrawMenuBackdrop write reads sane defaults, not garbage.
 					memset( vk.menubg.ptr[i], 0, (size_t)mbgBytes );
+					if ( !VK_RalBufferShadowMarkWritten( &vk_menubg_shadows[i],
+							0u, mbgBytes )
+							|| !VK_RalBufferShadowPublish( &vk_menubg_shadows[i],
+								0u, mbgBytes, &seedReceipt ) )
+						ri.Terminate( TERM_UNRECOVERABLE,
+							"Vulkan: failed to seed menubg RAL buffer %u", i );
 				}
 
-				vk.menubg.ral_buffer[i] = Ral_AdoptBuffer( vk_ral_get_backend(),
-					(void *)vk.menubg.buffer[i], (size_t)mbgBytes,
-					"wired-menubg-ubo" );
 				memset( &mbgValue, 0, sizeof( mbgValue ) );
 				mbgValue.binding = 0u;
 				mbgValue.type = RAL_BIND_UNIFORM_BUFFER;
@@ -5303,73 +5114,41 @@ void vk_init_descriptors( void )
 static void vk_release_geometry_buffers( void )
 {
 	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		vk_ral_unregister_buffer( vk.tess[i].vertex_buffer );
-		qvkDestroyBuffer( vk.device, vk.tess[i].vertex_buffer, NULL );
-		vk.tess[i].vertex_buffer = VK_NULL_HANDLE;
+		VK_RalBufferShadowRelease( &vk_tess_geometry_shadows[i] );
+		vk.tess[i].ral_vertex_buffer = NULL;
+		vk.tess[i].vertex_buffer_ptr = NULL;
+		vk.tess[i].vertex_buffer_offset = 0;
 	}
-
-	qvkFreeMemory( vk.device, vk.geometry_buffer_memory, NULL );
-	vk.geometry_buffer_memory = VK_NULL_HANDLE;
 }
 
 
 static void vk_create_geometry_buffers( VkDeviceSize size )
 {
-	VkMemoryRequirements vb_memory_requirements;
-	VkMemoryAllocateInfo alloc_info;
-	VkBufferCreateInfo desc;
-	VkDeviceSize vertex_buffer_offset;
-	uint32_t memory_type_bits;
-	uint32_t memory_type;
-	void *data;
+	vkRalBufferShadow_t candidate[NUM_COMMAND_BUFFERS];
 	int i;
-
-	desc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	desc.pNext = NULL;
-	desc.flags = 0;
-	desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	desc.queueFamilyIndexCount = 0;
-	desc.pQueueFamilyIndices = NULL;
-
-	memset( &vb_memory_requirements, 0, sizeof( vb_memory_requirements ) );
-
-	for ( i = 0 ; i < NUM_COMMAND_BUFFERS; i++ ) {
-		desc.size = size;
-		desc.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-		VK_CHECK( qvkCreateBuffer( vk.device, &desc, NULL, &vk.tess[i].vertex_buffer ) );
-
-		qvkGetBufferMemoryRequirements( vk.device, vk.tess[i].vertex_buffer, &vb_memory_requirements );
+	memset( candidate, 0, sizeof( candidate ) );
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
+		VK_RalBufferShadowInit( &candidate[i] );
+		candidate[i].generation = vk_tess_geometry_shadows[i].generation;
+		if ( !VK_RalBufferShadowEnsure( &candidate[i], vk_ral_get_backend(),
+				size, (ralBufferUsage_t)( RAL_BUFFER_VERTEX | RAL_BUFFER_INDEX
+					| RAL_BUFFER_UNIFORM ), "vk.tess.ral_vertex_buffer" ) ) {
+			for ( int j = 0; j <= i; ++j )
+				VK_RalBufferShadowRelease( &candidate[j] );
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create RAL tess geometry ring" );
+		}
 	}
-
-	memory_type_bits = vb_memory_requirements.memoryTypeBits;
-	memory_type = find_memory_type( memory_type_bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-
-	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	alloc_info.pNext = NULL;
-	alloc_info.allocationSize = vb_memory_requirements.size * NUM_COMMAND_BUFFERS;
-	alloc_info.memoryTypeIndex = memory_type;
-
-	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &vk.geometry_buffer_memory ) );
-	VK_CHECK( qvkMapMemory( vk.device, vk.geometry_buffer_memory, 0, VK_WHOLE_SIZE, 0, &data ) );
-
-	vertex_buffer_offset = 0;
-
-	for ( i = 0 ; i < NUM_COMMAND_BUFFERS; i++ ) {
-		qvkBindBufferMemory( vk.device, vk.tess[i].vertex_buffer, vk.geometry_buffer_memory, vertex_buffer_offset );
-		vk.tess[i].vertex_buffer_ptr = (byte*)data + vertex_buffer_offset;
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i )
+		vk_ral_release_tess_uniform_bindgroup( (uint32_t)i );
+	vk_release_geometry_buffers();
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
+		vk_tess_geometry_shadows[i] = candidate[i];
+		vk.tess[i].ral_vertex_buffer = candidate[i].buffer;
+		vk.tess[i].vertex_buffer_ptr = candidate[i].bytes;
 		vk.tess[i].vertex_buffer_offset = 0;
-		vertex_buffer_offset += vb_memory_requirements.size;
-		vk_ral_register_buffer( vk.tess[i].vertex_buffer, size,
-		                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-		                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-		                        "vk.tess.vertex_buffer" );
-
-		SET_OBJECT_NAME( vk.tess[i].vertex_buffer, va( "geometry buffer %i", i ), RAL_VULKAN_OBJECT_ROLE_BUFFER );
 	}
-
-	SET_OBJECT_NAME( vk.geometry_buffer_memory, "geometry buffer memory", RAL_VULKAN_OBJECT_ROLE_BUFFER );
-
-	vk.geometry_buffer_size = vb_memory_requirements.size;
+	vk.geometry_buffer_size = size;
 
 	memset( &vk.stats, 0, sizeof( vk.stats ) );
 }
@@ -5536,9 +5315,6 @@ from header.flags.
 void vk_init_ribbon( void )
 {
 	ralBindEntry_t entries[4];
-	VkBufferCreateInfo bufInfo;
-	VkMemoryRequirements memReqs;
-	VkMemoryAllocateInfo allocInfo;
 	uint32_t pointsBytes;
 	uint32_t headersBytes;
 	int i;
@@ -5604,49 +5380,20 @@ void vk_init_ribbon( void )
 	headersBytes = RIBBON_HEADERS_PER_FRAME * RIBBON_HEADER_BYTES;
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		uint32_t memType;
-
-		// points buffer (host-coherent, mapped)
-		memset( &bufInfo, 0, sizeof( bufInfo ) );
-		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufInfo.size        = pointsBytes;
-		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.ribbon.points_buffer[i] ) );
-		qvkGetBufferMemoryRequirements( vk.device, vk.ribbon.points_buffer[i], &memReqs );
-		memType = find_memory_type( memReqs.memoryTypeBits,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-		memset( &allocInfo, 0, sizeof( allocInfo ) );
-		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		allocInfo.allocationSize  = memReqs.size;
-		allocInfo.memoryTypeIndex = memType;
-		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.ribbon.points_memory[i] ) );
-		VK_CHECK( qvkMapMemory( vk.device, vk.ribbon.points_memory[i], 0, VK_WHOLE_SIZE, 0, (void**)&vk.ribbon.points_ptr[i] ) );
-		qvkBindBufferMemory( vk.device, vk.ribbon.points_buffer[i], vk.ribbon.points_memory[i], 0 );
-		vk_ral_register_buffer( vk.ribbon.points_buffer[i], pointsBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-		                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-		                        "vk.ribbon.points" );
-
-		// headers buffer (host-coherent, mapped)
-		memset( &bufInfo, 0, sizeof( bufInfo ) );
-		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufInfo.size        = headersBytes;
-		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.ribbon.headers_buffer[i] ) );
-		qvkGetBufferMemoryRequirements( vk.device, vk.ribbon.headers_buffer[i], &memReqs );
-		memType = find_memory_type( memReqs.memoryTypeBits,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-		memset( &allocInfo, 0, sizeof( allocInfo ) );
-		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		allocInfo.allocationSize  = memReqs.size;
-		allocInfo.memoryTypeIndex = memType;
-		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.ribbon.headers_memory[i] ) );
-		VK_CHECK( qvkMapMemory( vk.device, vk.ribbon.headers_memory[i], 0, VK_WHOLE_SIZE, 0, (void**)&vk.ribbon.headers_ptr[i] ) );
-		qvkBindBufferMemory( vk.device, vk.ribbon.headers_buffer[i], vk.ribbon.headers_memory[i], 0 );
-		vk_ral_register_buffer( vk.ribbon.headers_buffer[i], headersBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-		                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-		                        "vk.ribbon.headers" );
+		VK_RalBufferShadowInit( &vk_ribbon_points_shadows[i] );
+		VK_RalBufferShadowInit( &vk_ribbon_headers_shadows[i] );
+		if ( !VK_RalBufferShadowEnsure( &vk_ribbon_points_shadows[i],
+				vk_ral_get_backend(), pointsBytes, RAL_BUFFER_STORAGE,
+				"wired-ribbon-points" )
+		  || !VK_RalBufferShadowEnsure( &vk_ribbon_headers_shadows[i],
+				vk_ral_get_backend(), headersBytes, RAL_BUFFER_STORAGE,
+				"wired-ribbon-headers" ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create ribbon RAL buffer cohort %u", i );
+		vk.ribbon.ral_points_buffer[i] = vk_ribbon_points_shadows[i].buffer;
+		vk.ribbon.points_ptr[i] = vk_ribbon_points_shadows[i].bytes;
+		vk.ribbon.ral_headers_buffer[i] = vk_ribbon_headers_shadows[i].buffer;
+		vk.ribbon.headers_ptr[i] = vk_ribbon_headers_shadows[i].bytes;
 	}
 
 	// Set 0 is created later, candidate-first, from the generation-bound RAL
@@ -5799,26 +5546,12 @@ void vk_shutdown_ribbon( void )
 			vk.ribbon.ral_descriptor[i] = NULL;
 		}
 		vk.ribbon.descriptor[i] = VK_NULL_HANDLE;
-		if ( vk.ribbon.points_buffer[i] != VK_NULL_HANDLE ) {
-			vk_ral_unregister_buffer( vk.ribbon.points_buffer[i] );
-			qvkDestroyBuffer( vk.device, vk.ribbon.points_buffer[i], NULL );
-			vk.ribbon.points_buffer[i] = VK_NULL_HANDLE;
-		}
-		if ( vk.ribbon.points_memory[i] != VK_NULL_HANDLE ) {
-			qvkFreeMemory( vk.device, vk.ribbon.points_memory[i], NULL );
-			vk.ribbon.points_memory[i] = VK_NULL_HANDLE;
-			vk.ribbon.points_ptr[i] = NULL;
-		}
-		if ( vk.ribbon.headers_buffer[i] != VK_NULL_HANDLE ) {
-			vk_ral_unregister_buffer( vk.ribbon.headers_buffer[i] );
-			qvkDestroyBuffer( vk.device, vk.ribbon.headers_buffer[i], NULL );
-			vk.ribbon.headers_buffer[i] = VK_NULL_HANDLE;
-		}
-		if ( vk.ribbon.headers_memory[i] != VK_NULL_HANDLE ) {
-			qvkFreeMemory( vk.device, vk.ribbon.headers_memory[i], NULL );
-			vk.ribbon.headers_memory[i] = VK_NULL_HANDLE;
-			vk.ribbon.headers_ptr[i] = NULL;
-		}
+		VK_RalBufferShadowRelease( &vk_ribbon_points_shadows[i] );
+		VK_RalBufferShadowRelease( &vk_ribbon_headers_shadows[i] );
+		vk.ribbon.ral_points_buffer[i] = NULL;
+		vk.ribbon.ral_headers_buffer[i] = NULL;
+		vk.ribbon.points_ptr[i] = NULL;
+		vk.ribbon.headers_ptr[i] = NULL;
 	}
 
 	if ( vk.ribbon.ral_pipeline_layout ) {
@@ -5849,9 +5582,6 @@ Only the alpha-blend variant is built (the helix is alpha-blended).
 void vk_init_railribbon( void )
 {
 	ralBindEntry_t entries[3];
-	VkBufferCreateInfo bufInfo;
-	VkMemoryRequirements memReqs;
-	VkMemoryAllocateInfo allocInfo;
 	uint32_t headersBytes;
 	int i;
 
@@ -5892,27 +5622,14 @@ void vk_init_railribbon( void )
 	headersBytes = RAIL_RIBBON_POOL_MAX * RAIL_RIBBON_HEADER_BYTES;
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		uint32_t memType;
-
-		memset( &bufInfo, 0, sizeof( bufInfo ) );
-		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufInfo.size        = headersBytes;
-		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.railRibbon.header_buffer[i] ) );
-		qvkGetBufferMemoryRequirements( vk.device, vk.railRibbon.header_buffer[i], &memReqs );
-		memType = find_memory_type( memReqs.memoryTypeBits,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-		memset( &allocInfo, 0, sizeof( allocInfo ) );
-		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		allocInfo.allocationSize  = memReqs.size;
-		allocInfo.memoryTypeIndex = memType;
-		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.railRibbon.header_memory[i] ) );
-		VK_CHECK( qvkMapMemory( vk.device, vk.railRibbon.header_memory[i], 0, VK_WHOLE_SIZE, 0, (void**)&vk.railRibbon.header_ptr[i] ) );
-		qvkBindBufferMemory( vk.device, vk.railRibbon.header_buffer[i], vk.railRibbon.header_memory[i], 0 );
-		vk_ral_register_buffer( vk.railRibbon.header_buffer[i], headersBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-		                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-		                        "vk.railRibbon.headers" );
+		VK_RalBufferShadowInit( &vk_rail_ribbon_shadows[i] );
+		if ( !VK_RalBufferShadowEnsure( &vk_rail_ribbon_shadows[i],
+				vk_ral_get_backend(), headersBytes, RAL_BUFFER_STORAGE,
+				"wired-rail-ribbon-headers" ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create rail-ribbon RAL header buffer %u", i );
+		vk.railRibbon.ral_header_buffer[i] = vk_rail_ribbon_shadows[i].buffer;
+		vk.railRibbon.header_ptr[i] = vk_rail_ribbon_shadows[i].bytes;
 	}
 
 	// Set 0 is materialized later by the direct RAL primitive cohort.
@@ -6049,16 +5766,9 @@ void vk_shutdown_railribbon( void )
 			vk.railRibbon.ral_descriptor[i] = NULL;
 		}
 		vk.railRibbon.descriptor[i] = VK_NULL_HANDLE;
-		if ( vk.railRibbon.header_buffer[i] != VK_NULL_HANDLE ) {
-			vk_ral_unregister_buffer( vk.railRibbon.header_buffer[i] );
-			qvkDestroyBuffer( vk.device, vk.railRibbon.header_buffer[i], NULL );
-			vk.railRibbon.header_buffer[i] = VK_NULL_HANDLE;
-		}
-		if ( vk.railRibbon.header_memory[i] != VK_NULL_HANDLE ) {
-			qvkFreeMemory( vk.device, vk.railRibbon.header_memory[i], NULL );
-			vk.railRibbon.header_memory[i] = VK_NULL_HANDLE;
-			vk.railRibbon.header_ptr[i] = NULL;
-		}
+		VK_RalBufferShadowRelease( &vk_rail_ribbon_shadows[i] );
+		vk.railRibbon.ral_header_buffer[i] = NULL;
+		vk.railRibbon.header_ptr[i] = NULL;
 	}
 
 	if ( vk.railRibbon.ral_pipeline_layout ) {
@@ -6095,6 +5805,13 @@ static uint32_t vk_effects_ubo_write( const vk_effects_ubo_t *ubo )
 
 	memcpy( (byte *)vk.effectsUbo.ptr[ cmd ] + off, ubo, sizeof( *ubo ) );
 	vk.effectsUbo.offset[ cmd ] = off + item;
+	{
+		vkRalBufferShadowWriteReceipt_t writeReceipt;
+		if ( !VK_RalBufferShadowMarkWritten( &vk_effects_ubo_shadows[cmd],
+				off, sizeof( *ubo ) )
+				|| !VK_RalBufferShadowPublish( &vk_effects_ubo_shadows[cmd],
+					off, sizeof( *ubo ), &writeReceipt ) ) return UINT32_MAX;
+	}
 	return off;
 }
 
@@ -6308,6 +6025,24 @@ void RB_DrawRibbons( void )
 		return;
 
 	frameIdx = vk.cmd_index;
+	{
+		vkRalBufferShadowWriteReceipt_t pointsReceipt, headersReceipt;
+		const uint64_t pointsSize = (uint64_t)vk.ribbon.numPointsThisFrame
+			* RIBBON_POINT_BYTES;
+		const uint64_t headersSize = (uint64_t)vk.ribbon.numHeadersThisFrame
+			* RIBBON_HEADER_BYTES;
+		if ( pointsSize == 0u || headersSize == 0u
+				|| !VK_RalBufferShadowMarkWritten(
+					&vk_ribbon_points_shadows[frameIdx], 0u, pointsSize )
+				|| !VK_RalBufferShadowPublish(
+					&vk_ribbon_points_shadows[frameIdx], 0u, pointsSize,
+					&pointsReceipt )
+				|| !VK_RalBufferShadowMarkWritten(
+					&vk_ribbon_headers_shadows[frameIdx], 0u, headersSize )
+				|| !VK_RalBufferShadowPublish(
+					&vk_ribbon_headers_shadows[frameIdx], 0u, headersSize,
+					&headersReceipt ) ) return;
+	}
 
 	// World MVP — same construction the standard 3D path uses
 	// (get_mvp_transform): copy the projection, flip column 1
@@ -6466,6 +6201,15 @@ void RB_DrawRailRibbons( void )
 	}
 
 	if ( vk.railRibbon.drawCount == 0 ) return;
+	{
+		vkRalBufferShadowWriteReceipt_t writeReceipt;
+		const uint64_t writtenBytes =
+			(uint64_t)vk.railRibbon.drawCount * RAIL_RIBBON_HEADER_BYTES;
+		if ( !VK_RalBufferShadowMarkWritten( &vk_rail_ribbon_shadows[frameIdx],
+				0u, writtenBytes )
+		  || !VK_RalBufferShadowPublish( &vk_rail_ribbon_shadows[frameIdx],
+				0u, writtenBytes, &writeReceipt ) ) return;
+	}
 
 	// World MVP (same construction as RB_DrawRibbons).
 	p = backEnd.viewParms.projectionMatrix;
@@ -6556,9 +6300,6 @@ sites that pass world coords directly with startEntityNum = -1).
 void vk_init_beam( void )
 {
 	ralBindEntry_t entries[5];
-	VkBufferCreateInfo bufInfo;
-	VkMemoryRequirements memReqs;
-	VkMemoryAllocateInfo allocInfo;
 	uint32_t headerBytes;
 	int i;
 
@@ -6630,29 +6371,14 @@ void vk_init_beam( void )
 	headerBytes = BEAM_POOL_MAX * BEAM_HEADER_BYTES;
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		uint32_t memType;
-
-		memset( &bufInfo, 0, sizeof( bufInfo ) );
-		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufInfo.size        = headerBytes;
-		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.beam.header_buffer[i] ) );
-
-		qvkGetBufferMemoryRequirements( vk.device, vk.beam.header_buffer[i], &memReqs );
-		memType = find_memory_type( memReqs.memoryTypeBits,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-
-		memset( &allocInfo, 0, sizeof( allocInfo ) );
-		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		allocInfo.allocationSize  = memReqs.size;
-		allocInfo.memoryTypeIndex = memType;
-		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.beam.header_memory[i] ) );
-		VK_CHECK( qvkBindBufferMemory( vk.device, vk.beam.header_buffer[i], vk.beam.header_memory[i], 0 ) );
-		VK_CHECK( qvkMapMemory( vk.device, vk.beam.header_memory[i], 0, VK_WHOLE_SIZE, 0, (void**)&vk.beam.header_ptr[i] ) );
-		vk_ral_register_buffer( vk.beam.header_buffer[i], headerBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-		                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-		                        "vk.beam.header" );
+		VK_RalBufferShadowInit( &vk_beam_header_shadows[i] );
+		if ( !VK_RalBufferShadowEnsure( &vk_beam_header_shadows[i],
+				vk_ral_get_backend(), headerBytes, RAL_BUFFER_STORAGE,
+				"wired-beam-headers" ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create beam RAL header buffer %u", i );
+		vk.beam.ral_header_buffer[i] = vk_beam_header_shadows[i].buffer;
+		vk.beam.header_ptr[i] = vk_beam_header_shadows[i].bytes;
 	}
 
 	// The complete set-0 cohort is created later through RAL after the shared
@@ -6827,16 +6553,9 @@ void vk_shutdown_beam( void )
 			vk.beam.ral_descriptor[i] = NULL;
 		}
 		vk.beam.descriptor[i] = VK_NULL_HANDLE;
-		if ( vk.beam.header_buffer[i] != VK_NULL_HANDLE ) {
-			vk_ral_unregister_buffer( vk.beam.header_buffer[i] );
-			qvkDestroyBuffer( vk.device, vk.beam.header_buffer[i], NULL );
-			vk.beam.header_buffer[i] = VK_NULL_HANDLE;
-		}
-		if ( vk.beam.header_memory[i] != VK_NULL_HANDLE ) {
-			qvkFreeMemory( vk.device, vk.beam.header_memory[i], NULL );
-			vk.beam.header_memory[i] = VK_NULL_HANDLE;
-			vk.beam.header_ptr[i] = NULL;
-		}
+		VK_RalBufferShadowRelease( &vk_beam_header_shadows[i] );
+		vk.beam.ral_header_buffer[i] = NULL;
+		vk.beam.header_ptr[i] = NULL;
 	}
 
 	if ( vk.beam.ral_pipeline_layout ) {
@@ -7023,6 +6742,15 @@ void RB_DrawBeams( void )
 	}
 
 	if ( vk.beam.drawCount == 0 ) return;
+	{
+		vkRalBufferShadowWriteReceipt_t writeReceipt;
+		const uint64_t writtenBytes =
+			(uint64_t)vk.beam.drawCount * BEAM_HEADER_BYTES;
+		if ( !VK_RalBufferShadowMarkWritten( &vk_beam_header_shadows[frameIdx],
+				0u, writtenBytes )
+		  || !VK_RalBufferShadowPublish( &vk_beam_header_shadows[frameIdx],
+				0u, writtenBytes, &writeReceipt ) ) return;
+	}
 
 	// ── World MVP push (same construction as ribbon/sprite).
 	p = backEnd.viewParms.projectionMatrix;
@@ -7052,6 +6780,22 @@ void RB_DrawBeams( void )
 		for ( i = 0; i < PRIMITIVE_SHADER_IMAGE_MAX; i++ ) {
 			countDst[i] = (uint32_t)vk.primitive_shader_stage_counts[i];
 		}
+	}
+	{
+		vkRalBufferShadowWriteReceipt_t stagesReceipt;
+		vkRalBufferShadowWriteReceipt_t countsReceipt;
+		const uint64_t stagesBytes = (uint64_t)PRIMITIVE_SHADER_IMAGE_MAX
+			* PRIMITIVE_STAGE_MAX * VK_PRIMITIVE_STAGE_BYTES;
+		const uint64_t countsBytes = (uint64_t)PRIMITIVE_SHADER_IMAGE_MAX
+			* sizeof( uint32_t );
+		if ( !VK_RalBufferShadowMarkWritten( &vk_primitive_stages_shadow,
+				0u, stagesBytes )
+		  || !VK_RalBufferShadowPublish( &vk_primitive_stages_shadow,
+				0u, stagesBytes, &stagesReceipt )
+		  || !VK_RalBufferShadowMarkWritten( &vk_primitive_stage_counts_shadow,
+				0u, countsBytes )
+		  || !VK_RalBufferShadowPublish( &vk_primitive_stage_counts_shadow,
+				0u, countsBytes, &countsReceipt ) ) return;
 	}
 
 	vk_effects_set_viewport_scissor();
@@ -7127,9 +6871,6 @@ from header.flags.
 void vk_init_sprite( void )
 {
 	ralBindEntry_t entries[1];
-	VkBufferCreateInfo bufInfo;
-	VkMemoryRequirements memReqs;
-	VkMemoryAllocateInfo allocInfo;
 	uint32_t headersBytes;
 	int i;
 
@@ -7162,28 +6903,14 @@ void vk_init_sprite( void )
 	headersBytes = SPRITES_PER_FRAME * SPRITE_HEADER_BYTES;
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		uint32_t memType;
-
-		// headers buffer (host-coherent, mapped)
-		memset( &bufInfo, 0, sizeof( bufInfo ) );
-		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufInfo.size        = headersBytes;
-		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.sprite.headers_buffer[i] ) );
-		qvkGetBufferMemoryRequirements( vk.device, vk.sprite.headers_buffer[i], &memReqs );
-		memType = find_memory_type( memReqs.memoryTypeBits,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-		memset( &allocInfo, 0, sizeof( allocInfo ) );
-		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		allocInfo.allocationSize  = memReqs.size;
-		allocInfo.memoryTypeIndex = memType;
-		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.sprite.headers_memory[i] ) );
-		VK_CHECK( qvkMapMemory( vk.device, vk.sprite.headers_memory[i], 0, VK_WHOLE_SIZE, 0, (void**)&vk.sprite.headers_ptr[i] ) );
-		qvkBindBufferMemory( vk.device, vk.sprite.headers_buffer[i], vk.sprite.headers_memory[i], 0 );
-		vk_ral_register_buffer( vk.sprite.headers_buffer[i], headersBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-		                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-		                        "vk.sprite.headers" );
+		VK_RalBufferShadowInit( &vk_sprite_header_shadows[i] );
+		if ( !VK_RalBufferShadowEnsure( &vk_sprite_header_shadows[i],
+				vk_ral_get_backend(), headersBytes, RAL_BUFFER_STORAGE,
+				"wired-sprite-headers" ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create sprite RAL header buffer %u", i );
+		vk.sprite.ral_headers_buffer[i] = vk_sprite_header_shadows[i].buffer;
+		vk.sprite.headers_ptr[i] = vk_sprite_header_shadows[i].bytes;
 	}
 
 	// Two graphics pipeline variants (alpha and additive). Same state
@@ -7327,16 +7054,9 @@ void vk_shutdown_sprite( void )
 
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		vk_ral_release_sprite_bindgroup( i );
-		if ( vk.sprite.headers_buffer[i] != VK_NULL_HANDLE ) {
-			vk_ral_unregister_buffer( vk.sprite.headers_buffer[i] );
-			qvkDestroyBuffer( vk.device, vk.sprite.headers_buffer[i], NULL );
-			vk.sprite.headers_buffer[i] = VK_NULL_HANDLE;
-		}
-		if ( vk.sprite.headers_memory[i] != VK_NULL_HANDLE ) {
-			qvkFreeMemory( vk.device, vk.sprite.headers_memory[i], NULL );
-			vk.sprite.headers_memory[i] = VK_NULL_HANDLE;
-			vk.sprite.headers_ptr[i] = NULL;
-		}
+		VK_RalBufferShadowRelease( &vk_sprite_header_shadows[i] );
+		vk.sprite.ral_headers_buffer[i] = NULL;
+		vk.sprite.headers_ptr[i] = NULL;
 	}
 
 	if ( vk.sprite.ral_pipeline_layout ) {
@@ -7443,6 +7163,15 @@ void RB_DrawSprites( void )
 		alphaCount    = lo;
 		firstAdditive = lo;
 		additiveCount = vk.sprite.numThisFrame - lo;
+	}
+	{
+		vkRalBufferShadowWriteReceipt_t writeReceipt;
+		const uint64_t writtenBytes =
+			(uint64_t)vk.sprite.numThisFrame * SPRITE_HEADER_BYTES;
+		if ( !VK_RalBufferShadowMarkWritten( &vk_sprite_header_shadows[frameIdx],
+				0u, writtenBytes )
+		  || !VK_RalBufferShadowPublish( &vk_sprite_header_shadows[frameIdx],
+				0u, writtenBytes, &writeReceipt ) ) return;
 	}
 
 	if ( alphaCount > 0 ) {
@@ -8207,79 +7936,35 @@ Bound to the beam pipeline elsewhere (this function allocates only).
 */
 static void vk_init_primitive_shader_stages( void )
 {
-	const VkDeviceSize stagesSize = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
+	const uint64_t stagesSize = (uint64_t)PRIMITIVE_SHADER_IMAGE_MAX
 		* PRIMITIVE_STAGE_MAX * VK_PRIMITIVE_STAGE_BYTES;
-	const VkDeviceSize countsSize = (VkDeviceSize)PRIMITIVE_SHADER_IMAGE_MAX
+	const uint64_t countsSize = (uint64_t)PRIMITIVE_SHADER_IMAGE_MAX
 		* sizeof( uint32_t );
 
-	if ( vk.primitive_stages_buffer == VK_NULL_HANDLE ) {
-		VkBufferCreateInfo bufInfo;
-		VkMemoryRequirements memReqs;
-		VkMemoryAllocateInfo allocInfo;
-
-		memset( &bufInfo, 0, sizeof( bufInfo ) );
-		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufInfo.size        = stagesSize;
-		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL,
-			&vk.primitive_stages_buffer ) );
-
-		qvkGetBufferMemoryRequirements( vk.device,
-			vk.primitive_stages_buffer, &memReqs );
-
-		memset( &allocInfo, 0, sizeof( allocInfo ) );
-		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		allocInfo.allocationSize  = memReqs.size;
-		allocInfo.memoryTypeIndex = find_memory_type( memReqs.memoryTypeBits,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-			VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL,
-			&vk.primitive_stages_memory ) );
-		VK_CHECK( qvkBindBufferMemory( vk.device, vk.primitive_stages_buffer,
-			vk.primitive_stages_memory, 0 ) );
-		VK_CHECK( qvkMapMemory( vk.device, vk.primitive_stages_memory,
-			0, stagesSize, 0, &vk.primitive_stages_mapped ) );
-		vk_ral_register_buffer( vk.primitive_stages_buffer, stagesSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-		                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-		                        "vk.primitive_stages" );
+	if ( !vk.ral_primitive_stages_buffer ) {
+		VK_RalBufferShadowInit( &vk_primitive_stages_shadow );
+		if ( !VK_RalBufferShadowEnsure( &vk_primitive_stages_shadow,
+				vk_ral_get_backend(), stagesSize, RAL_BUFFER_STORAGE,
+				"wired-primitive-stages" ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create primitive stages RAL buffer" );
+		vk.ral_primitive_stages_buffer = vk_primitive_stages_shadow.buffer;
+		vk.primitive_stages_mapped = vk_primitive_stages_shadow.bytes;
 	}
 
 	// stage-counts companion buffer. 256 B; uploaded each
 	// frame in RB_DrawBeams from the host-side count array. Decoupled
 	// from the stages buffer so the vertex shader can cheaply cull
 	// per-stage draws without reading every stage entry.
-	if ( vk.primitive_stage_counts_buffer == VK_NULL_HANDLE ) {
-		VkBufferCreateInfo bufInfo;
-		VkMemoryRequirements memReqs;
-		VkMemoryAllocateInfo allocInfo;
-
-		memset( &bufInfo, 0, sizeof( bufInfo ) );
-		bufInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufInfo.size        = countsSize;
-		bufInfo.usage       = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL,
-			&vk.primitive_stage_counts_buffer ) );
-
-		qvkGetBufferMemoryRequirements( vk.device,
-			vk.primitive_stage_counts_buffer, &memReqs );
-
-		memset( &allocInfo, 0, sizeof( allocInfo ) );
-		allocInfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		allocInfo.allocationSize  = memReqs.size;
-		allocInfo.memoryTypeIndex = find_memory_type( memReqs.memoryTypeBits,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-			VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-		VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL,
-			&vk.primitive_stage_counts_memory ) );
-		VK_CHECK( qvkBindBufferMemory( vk.device, vk.primitive_stage_counts_buffer,
-			vk.primitive_stage_counts_memory, 0 ) );
-		VK_CHECK( qvkMapMemory( vk.device, vk.primitive_stage_counts_memory,
-			0, countsSize, 0, &vk.primitive_stage_counts_mapped ) );
-		vk_ral_register_buffer( vk.primitive_stage_counts_buffer, countsSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-		                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-		                        "vk.primitive_stage_counts" );
+	if ( !vk.ral_primitive_stage_counts_buffer ) {
+		VK_RalBufferShadowInit( &vk_primitive_stage_counts_shadow );
+		if ( !VK_RalBufferShadowEnsure( &vk_primitive_stage_counts_shadow,
+				vk_ral_get_backend(), countsSize, RAL_BUFFER_STORAGE,
+				"wired-primitive-stage-counts" ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create primitive stage-count RAL buffer" );
+		vk.ral_primitive_stage_counts_buffer = vk_primitive_stage_counts_shadow.buffer;
+		vk.primitive_stage_counts_mapped = vk_primitive_stage_counts_shadow.bytes;
 	}
 
 	// Zero-init: every call (vid_restart included). Trailing stages
@@ -8314,32 +7999,12 @@ those because it's outside the descriptor pool).
 */
 void vk_shutdown_primitive_stages( void )
 {
-	if ( vk.primitive_stages_buffer != VK_NULL_HANDLE ) {
-		if ( vk.primitive_stages_mapped != NULL ) {
-			qvkUnmapMemory( vk.device, vk.primitive_stages_memory );
-			vk.primitive_stages_mapped = NULL;
-		}
-		vk_ral_unregister_buffer( vk.primitive_stages_buffer );
-		qvkDestroyBuffer( vk.device, vk.primitive_stages_buffer, NULL );
-		vk.primitive_stages_buffer = VK_NULL_HANDLE;
-	}
-	if ( vk.primitive_stages_memory != VK_NULL_HANDLE ) {
-		qvkFreeMemory( vk.device, vk.primitive_stages_memory, NULL );
-		vk.primitive_stages_memory = VK_NULL_HANDLE;
-	}
-	if ( vk.primitive_stage_counts_buffer != VK_NULL_HANDLE ) {
-		if ( vk.primitive_stage_counts_mapped != NULL ) {
-			qvkUnmapMemory( vk.device, vk.primitive_stage_counts_memory );
-			vk.primitive_stage_counts_mapped = NULL;
-		}
-		vk_ral_unregister_buffer( vk.primitive_stage_counts_buffer );
-		qvkDestroyBuffer( vk.device, vk.primitive_stage_counts_buffer, NULL );
-		vk.primitive_stage_counts_buffer = VK_NULL_HANDLE;
-	}
-	if ( vk.primitive_stage_counts_memory != VK_NULL_HANDLE ) {
-		qvkFreeMemory( vk.device, vk.primitive_stage_counts_memory, NULL );
-		vk.primitive_stage_counts_memory = VK_NULL_HANDLE;
-	}
+	VK_RalBufferShadowRelease( &vk_primitive_stages_shadow );
+	VK_RalBufferShadowRelease( &vk_primitive_stage_counts_shadow );
+	vk.ral_primitive_stages_buffer = NULL;
+	vk.primitive_stages_mapped = NULL;
+	vk.ral_primitive_stage_counts_buffer = NULL;
+	vk.primitive_stage_counts_mapped = NULL;
 	memset( vk.primitive_shader_stage_counts, 0,
 		sizeof( vk.primitive_shader_stage_counts ) );
 }
@@ -8382,8 +8047,8 @@ void vk_shutdown_particle( void )
 // writes decalGPU_t into at emit, the per-frame UBO, the render descriptor set
 // (UBO + pool SSBO + sampler array), and the surface-aligned-quad render
 // pipeline (alpha-blended, depth-tested, depth-write off, cull NONE). Mirrors
-// vk_init_particle's render half. RAL-native (pool/frame registered via
-// vk_ral_register_buffer; pipeline via vk_ral_create_pipeline_from_gpinfo);
+// vk_init_particle's render half. RAL-native (direct pool/frame resources and
+// pipeline via vk_ral_create_pipeline_from_gpinfo);
 // WebGPU-portable (host-coherent SSBO + UBO + bounded sampler array, no
 // push-constants / bindless).
 void vk_init_decal( void )
@@ -8720,8 +8385,8 @@ void vk_shutdown_decal( void )
 // heightgrid data texture (R32F) for ground collision instead of the
 // per-class texture array. The compute self-spawns / integrates / collides /
 // distance-culls each frame; the render pass draws each live slot as a rain
-// streak or snow billboard. RAL-native (pool/frame registered via
-// vk_ral_register_buffer; render pipeline via vk_ral_create_pipeline_from_gpinfo);
+// streak or snow billboard. RAL-native (direct pool/frame resources and render
+// pipeline via vk_ral_create_pipeline_from_gpinfo);
 // WebGPU-portable (host-coherent SSBO + UBO + one sampler2D, bounded pool).
 
 // Create the heightgrid data texture (R32F, ATM_HEIGHTGRID_SIZE²) through the
@@ -8846,10 +8511,8 @@ void vk_atmospheric_write_descriptors( void )
 			|| heightgridReceipt.byteSize != VK_ATMOSPHERIC_HEIGHTGRID_BYTES
 			|| !vk.sceneDepth.ral_image || !vk.sceneDepth.ral_view
 			|| !vk.sceneDepth.ral_sampler
-			|| vk.sceneDepth.view == VK_NULL_HANDLE
 			|| vk.sceneDepth.sampler == VK_NULL_HANDLE
-			|| Ral_GetTextureViewHandle( vk.sceneDepth.ral_view )
-				!= (void *)vk.sceneDepth.view
+			|| Ral_GetTextureViewHandle( vk.sceneDepth.ral_view ) == NULL
 			|| Ral_GetSamplerHandle( vk.sceneDepth.ral_sampler )
 				!= (void *)vk.sceneDepth.sampler
 			|| heightgridReceipt.texture == vk.sceneDepth.ral_image
@@ -9270,13 +8933,28 @@ void vk_init_atmospheric( void )
 	vk.atm.gridSize      = (int)ATM_HEIGHTGRID_SIZE;
 	vk.atm.available     = qtrue;
 
-	// Allocate + write the descriptor sets.
-	vk_atmospheric_write_descriptors();
+	// The render cohort borrows the shared scene-depth view. Attachment creation
+	// has allocated its texture and sampler by now, but the view is not published
+	// until vk_init_descriptors calls vk_update_attachment_descriptors. Defer the
+	// four-group transaction to that descriptor-init boundary; attempting it here
+	// would correctly fail closed and permanently disable weather on cold boot.
 
 	R_LOG( rch_init, SEV_INFO, "Vulkan atmospheric subsystem initialized (pool=%u particles, heightgrid=%ux%u R32F, %u KB pool memory)\n",
 		(unsigned)ATM_PARTICLES_PER_POOL,
 		(unsigned)ATM_HEIGHTGRID_SIZE, (unsigned)ATM_HEIGHTGRID_SIZE,
 		(unsigned)( ( poolBytes * 2 ) / 1024 ) );
+}
+
+
+static void vk_ral_release_atmospheric_render_bindgroups( void )
+{
+	int i;
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
+		if ( vk.atm.ral_render_descriptor[i] )
+			Ral_DestroyBindGroup( vk.atm.ral_render_descriptor[i] );
+		vk.atm.ral_render_descriptor[i] = NULL;
+		vk.atm.render_descriptor[i] = VK_NULL_HANDLE;
+	}
 }
 
 
@@ -9508,7 +9186,7 @@ void RB_DrawAtmospheric( void )
 	frameDst->invResX    = ( glConfig.vidWidth  > 0 ) ? 1.0f / (float)glConfig.vidWidth  : 0.0f;
 	frameDst->invResY    = ( glConfig.vidHeight > 0 ) ? 1.0f / (float)glConfig.vidHeight : 0.0f;
 	frameDst->depthValid = ( vk.sceneDepth.active && vk.sceneDepth.copied
-	                         && vk.sceneDepth.view != VK_NULL_HANDLE ) ? 1.0f : 0.0f;
+	                         && vk.sceneDepth.ral_view ) ? 1.0f : 0.0f;
 	if ( !VK_AtmosphericFramePublishFinal( &vk_atmospheric_frame,
 			(uint32_t)frameIdx, &frameReceipt )
 			|| frameReceipt.commandSlot != (uint32_t)frameIdx
@@ -9620,7 +9298,7 @@ void RB_DrawDecals( void )
 	{
 		float    invMvp[16];
 		qboolean depthValid = ( vk.sceneDepth.active && vk.sceneDepth.copied
-		                        && vk.sceneDepth.view != VK_NULL_HANDLE ) ? qtrue : qfalse;
+		                        && vk.sceneDepth.ral_view ) ? qtrue : qfalse;
 		if ( depthValid && vk_mat4_inverse( mvp, invMvp ) ) {
 			memcpy( frameDst->invMvp, invMvp, 64 );
 		} else {
@@ -9831,7 +9509,7 @@ void RB_DrawParticles( void )
 	frameDst->invResX     = ( glConfig.vidWidth  > 0 ) ? 1.0f / (float)glConfig.vidWidth  : 0.0f;
 	frameDst->invResY     = ( glConfig.vidHeight > 0 ) ? 1.0f / (float)glConfig.vidHeight : 0.0f;
 	frameDst->depthValid  = ( vk.sceneDepth.active && vk.sceneDepth.copied
-	                          && vk.sceneDepth.view != VK_NULL_HANDLE ) ? 1.0f : 0.0f;
+	                          && vk.sceneDepth.ral_view ) ? 1.0f : 0.0f;
 
 	// Auto-exposure bias the tonemap will later multiply the HDR FBO by
 	// (tonemap.frag: base *= eb.exposure_bias). The additive flipbook fragment
@@ -9923,9 +9601,6 @@ backend and imported layout cohort are live.
 void vk_init_iqm_gpu_skinning( void )
 {
 	ralBindEntry_t boneEntry;
-	VkMemoryRequirements memReqs;
-	VkMemoryAllocateInfo allocInfo;
-	VkBufferCreateInfo bufInfo;
 
 	vk.iqmGpu.available = qfalse;
 
@@ -9959,34 +9634,19 @@ void vk_init_iqm_gpu_skinning( void )
 	// per-draw dynamic offset — a single per-frame slot would clobber across multiple
 	// GPU-skinned IQM entities. 256 items/frame is generous headroom.
 	{
-		const VkDeviceSize iqmItem  = PAD( (uint32_t)IQM_UBO_TOTAL_SIZE, vk.uniform_alignment );
-		const VkDeviceSize iqmBytes = iqmItem * 256u;
+		const uint64_t iqmItem  = PAD( (uint32_t)IQM_UBO_TOTAL_SIZE, vk.uniform_alignment );
+		const uint64_t iqmBytes = iqmItem * 256u;
 		vk.iqmGpu.ring_size = iqmBytes;
 
-		memset( &bufInfo, 0, sizeof( bufInfo ) );
-		bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufInfo.size = iqmBytes;
-		bufInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-		bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
 		for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-			VK_CHECK( qvkCreateBuffer( vk.device, &bufInfo, NULL, &vk.iqmGpu.bone_buffer[i] ) );
-
-			qvkGetBufferMemoryRequirements( vk.device, vk.iqmGpu.bone_buffer[i], &memReqs );
-
-			memset( &allocInfo, 0, sizeof( allocInfo ) );
-			allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-			allocInfo.allocationSize = memReqs.size;
-			allocInfo.memoryTypeIndex = find_memory_type( memReqs.memoryTypeBits,
-				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-
-			VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, &vk.iqmGpu.bone_memory[i] ) );
-			VK_CHECK( qvkBindBufferMemory( vk.device, vk.iqmGpu.bone_buffer[i], vk.iqmGpu.bone_memory[i], 0 ) );
-			VK_CHECK( qvkMapMemory( vk.device, vk.iqmGpu.bone_memory[i], 0, iqmBytes, 0, (void **)&vk.iqmGpu.bone_ptr[i] ) );
-			vk_ral_register_buffer( vk.iqmGpu.bone_buffer[i], (uint64_t)bufInfo.size, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			                        "vk.iqmGpu.bone" );
-
+			VK_RalBufferShadowInit( &vk_iqm_bone_shadows[i] );
+			if ( !VK_RalBufferShadowEnsure( &vk_iqm_bone_shadows[i],
+					vk_ral_get_backend(), iqmBytes, RAL_BUFFER_UNIFORM,
+					"wired-iqm-bone-ring" ) )
+				ri.Terminate( TERM_UNRECOVERABLE,
+					"Vulkan: failed to create IQM RAL bone ring %u", i );
+			vk.iqmGpu.ral_bone_buffer[i] = vk_iqm_bone_shadows[i].buffer;
+			vk.iqmGpu.bone_ptr[i] = vk_iqm_bone_shadows[i].bytes;
 		}
 	}
 
@@ -10174,16 +9834,9 @@ void vk_shutdown_iqm_gpu_skinning( void )
 
 	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		vk_ral_release_iqm_bone_bindgroup( (uint32_t)i );
-		if ( vk.iqmGpu.bone_buffer[i] != VK_NULL_HANDLE ) {
-			vk_ral_unregister_buffer( vk.iqmGpu.bone_buffer[i] );
-			qvkDestroyBuffer( vk.device, vk.iqmGpu.bone_buffer[i], NULL );
-			if ( vk.iqmGpu.bone_memory[i] != VK_NULL_HANDLE ) {
-				qvkFreeMemory( vk.device, vk.iqmGpu.bone_memory[i], NULL );
-			}
-			vk.iqmGpu.bone_buffer[i] = VK_NULL_HANDLE;
-			vk.iqmGpu.bone_memory[i] = VK_NULL_HANDLE;
-			vk.iqmGpu.bone_ptr[i] = NULL;
-		}
+		VK_RalBufferShadowRelease( &vk_iqm_bone_shadows[i] );
+		vk.iqmGpu.ral_bone_buffer[i] = NULL;
+		vk.iqmGpu.bone_ptr[i] = NULL;
 	}
 
 	if ( vk.iqmGpu.ral_pipeline_layout ) {
@@ -10208,101 +9861,51 @@ vk_create_iqm_vbo — create device-local vertex + index buffers for an IQM mode
 Uses the staging buffer to upload data.
 ===============
 */
-qboolean vk_create_iqm_vbo( VkBuffer *outVertBuf, VkDeviceMemory *outVertMem,
-	VkBuffer *outIdxBuf, VkDeviceMemory *outIdxMem,
+qboolean vk_create_iqm_vbo( ralBuffer_t **outVertBuf,
+	ralBuffer_t **outIdxBuf,
 	const byte *vertData, int vertSize,
 	const byte *idxData, int idxSize )
 {
-	VkBufferCreateInfo bufDesc;
-	VkMemoryRequirements memReqs;
-	VkMemoryAllocateInfo allocInfo;
-	ralBufferCopy_t copyRegion;
+	ralBuffer_t *vertCandidate = NULL;
+	ralBuffer_t *idxCandidate = NULL;
+	qboolean recorded;
 
-	if ( !vk.iqmGpu.available )
+	if ( !vk.iqmGpu.available || !outVertBuf || !outIdxBuf
+			|| *outVertBuf || *outIdxBuf || !vertData || !idxData
+			|| vertSize <= 0 || idxSize <= 0 )
 		return qfalse;
 
 	// check that the staging buffer can hold the data
 	// NOLINTNEXTLINE(bugprone-misplaced-widening-cast) — small int sum widened to VkDeviceSize for the comparison; both inputs are bounded, no precision loss
-	if ( (VkDeviceSize)(vertSize + idxSize) > vk.staging_buffer.size ) {
+	if ( (uint64_t)(uint32_t)vertSize + (uint64_t)(uint32_t)idxSize
+			> (uint64_t)vk.staging_buffer.size ) {
 		R_LOG( rch_vk, SEV_WARN, "vk_create_iqm_vbo: data too large for staging buffer (%d > %d)\n",
 			vertSize + idxSize, (int)vk.staging_buffer.size );
 		return qfalse;
 	}
 
-	// create device-local vertex buffer
-	memset( &bufDesc, 0, sizeof( bufDesc ) );
-	bufDesc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	bufDesc.size = vertSize;
-	bufDesc.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-	bufDesc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	VK_CHECK( qvkCreateBuffer( vk.device, &bufDesc, NULL, outVertBuf ) );
+	vertCandidate = vk_create_device_local_buffer( (uint64_t)vertSize,
+		(ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_VERTEX ),
+		"wired-iqm-vertex" );
+	idxCandidate = vk_create_device_local_buffer( (uint64_t)idxSize,
+		(ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_INDEX ),
+		"wired-iqm-index" );
+	if ( !vertCandidate || !idxCandidate ) goto fail;
 
-	qvkGetBufferMemoryRequirements( vk.device, *outVertBuf, &memReqs );
-	memset( &allocInfo, 0, sizeof( allocInfo ) );
-	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	allocInfo.allocationSize = memReqs.size;
-	allocInfo.memoryTypeIndex = find_memory_type( memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-	VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, outVertMem ) );
-	VK_CHECK( qvkBindBufferMemory( vk.device, *outVertBuf, *outVertMem, 0 ) );
-	vk_ral_register_buffer( *outVertBuf, (uint64_t)vertSize,
-	                        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-	                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "vk.iqm.vert" );
+	recorded = vk_ral_stage_buffer_copy( vertCandidate, 0u, vertData,
+		(uint64_t)vertSize, "vk_create_iqm_vbo vertices" );
+	recorded = recorded && vk_ral_stage_buffer_copy( idxCandidate, 0u,
+		idxData, (uint64_t)idxSize, "vk_create_iqm_vbo indices" );
+	if ( !recorded ) goto fail;
 
-	// create device-local index buffer
-	bufDesc.size = idxSize;
-	bufDesc.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-	VK_CHECK( qvkCreateBuffer( vk.device, &bufDesc, NULL, outIdxBuf ) );
-
-	qvkGetBufferMemoryRequirements( vk.device, *outIdxBuf, &memReqs );
-	allocInfo.allocationSize = memReqs.size;
-	allocInfo.memoryTypeIndex = find_memory_type( memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-	VK_CHECK( qvkAllocateMemory( vk.device, &allocInfo, NULL, outIdxMem ) );
-	VK_CHECK( qvkBindBufferMemory( vk.device, *outIdxBuf, *outIdxMem, 0 ) );
-	vk_ral_register_buffer( *outIdxBuf, (uint64_t)idxSize,
-	                        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-	                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "vk.iqm.idx" );
-
-	// upload vertex data via staging buffer
-	// Migrated from the inline native one-shot allocation/fence/submit/wait
-	// pattern to the
-	// Ral_AcquireBegunCommandBuffer(GRAPHICS) + Ral_SubmitAndDispose pair. An earlier
-	// sweep's grep missed this site because it bypassed the legacy one-shot helpers
-	// and inlined the same lifecycle directly. RAL_QUEUE_GRAPHICS matches
-	// the legacy submit semantics exactly.
-	{
-		ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
-		if ( rcmd == NULL ) {
-			R_LOG( rch_ral, SEV_ERROR, "%s: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping IQM VBO+IDX upload\n", __func__ );
-			vk_destroy_iqm_vbo( outVertBuf, outVertMem, outIdxBuf, outIdxMem );
-			return qfalse;
-		}
-		// copy vertex data to staging, then staging to device
-		memcpy( vk.staging_buffer.ptr, vertData, vertSize );
-		memset( &copyRegion, 0, sizeof( copyRegion ) );
-		copyRegion.size = vertSize;
-		if ( !vk_ral_record_registered_buffer_copy( rcmd,
-				vk.staging_buffer.handle, *outVertBuf, &copyRegion ) ) {
-			Ral_SubmitAndDispose( rcmd );
-			vk_destroy_iqm_vbo( outVertBuf, outVertMem, outIdxBuf, outIdxMem );
-			return qfalse;
-		}
-
-		// copy index data to staging, then staging to device
-		memcpy( vk.staging_buffer.ptr + vertSize, idxData, idxSize );
-		copyRegion.srcOffset = vertSize;
-		copyRegion.dstOffset = 0;
-		copyRegion.size = idxSize;
-		if ( !vk_ral_record_registered_buffer_copy( rcmd,
-				vk.staging_buffer.handle, *outIdxBuf, &copyRegion ) ) {
-			Ral_SubmitAndDispose( rcmd );
-			vk_destroy_iqm_vbo( outVertBuf, outVertMem, outIdxBuf, outIdxMem );
-			return qfalse;
-		}
-
-		Ral_SubmitAndDispose( rcmd );
-	}
-
+	*outVertBuf = vertCandidate;
+	*outIdxBuf = idxCandidate;
 	return qtrue;
+
+fail:
+	if ( idxCandidate ) Ral_DestroyBuffer( idxCandidate );
+	if ( vertCandidate ) Ral_DestroyBuffer( vertCandidate );
+	return qfalse;
 }
 
 
@@ -10311,27 +9914,12 @@ qboolean vk_create_iqm_vbo( VkBuffer *outVertBuf, VkDeviceMemory *outVertMem,
 vk_destroy_iqm_vbo — release per-model VBO resources
 ===============
 */
-void vk_destroy_iqm_vbo( VkBuffer *vertBuf, VkDeviceMemory *vertMem,
-	VkBuffer *idxBuf, VkDeviceMemory *idxMem )
+void vk_destroy_iqm_vbo( ralBuffer_t **vertBuf, ralBuffer_t **idxBuf )
 {
-	if ( *vertBuf != VK_NULL_HANDLE ) {
-		vk_ral_unregister_buffer( *vertBuf );
-		qvkDestroyBuffer( vk.device, *vertBuf, NULL );
-		*vertBuf = VK_NULL_HANDLE;
-	}
-	if ( *vertMem != VK_NULL_HANDLE ) {
-		qvkFreeMemory( vk.device, *vertMem, NULL );
-		*vertMem = VK_NULL_HANDLE;
-	}
-	if ( *idxBuf != VK_NULL_HANDLE ) {
-		vk_ral_unregister_buffer( *idxBuf );
-		qvkDestroyBuffer( vk.device, *idxBuf, NULL );
-		*idxBuf = VK_NULL_HANDLE;
-	}
-	if ( *idxMem != VK_NULL_HANDLE ) {
-		qvkFreeMemory( vk.device, *idxMem, NULL );
-		*idxMem = VK_NULL_HANDLE;
-	}
+	if ( vertBuf && *vertBuf ) Ral_DestroyBuffer( *vertBuf );
+	if ( idxBuf && *idxBuf ) Ral_DestroyBuffer( *idxBuf );
+	if ( vertBuf ) *vertBuf = NULL;
+	if ( idxBuf ) *idxBuf = NULL;
 }
 
 
@@ -10344,14 +9932,14 @@ binds the texture descriptor, and issues a drawIndexed call.
 Must be called during an active render pass.
 ===============
 */
-void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
+void vk_draw_iqm_gpu( ralBuffer_t *vertBuffer, ralBuffer_t *idxBuffer,
 	int firstIndex, int numIndexes,
 	const float *boneMats, int numBones,
 	ralBindGroup_t *textureGroup,
 	const float *mvp )
 {
 	int frameIdx;
-	VkDeviceSize vertOffset;
+	uint64_t vertOffset;
 	ralViewport_t viewport;
 	ralRect_t scissor;
 
@@ -10379,6 +9967,20 @@ void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
 		memcpy( (byte *)vk.iqmGpu.bone_ptr[frameIdx] + iqmOff, boneMats, numBones * 3 * sizeof( vec4_t ) );
 		memcpy( (byte *)vk.iqmGpu.bone_ptr[frameIdx] + iqmOff + IQM_MVP_UBO_OFFSET, mvp, 64 );
 		vk.iqmGpu.offset[ frameIdx ] = iqmOff + item;
+		{
+			vkRalBufferShadowWriteReceipt_t boneReceipt;
+			vkRalBufferShadowWriteReceipt_t mvpReceipt;
+			const uint64_t boneBytes =
+				(uint64_t)numBones * 3u * sizeof( vec4_t );
+			if ( !VK_RalBufferShadowMarkWritten( &vk_iqm_bone_shadows[frameIdx],
+					iqmOff, boneBytes )
+			  || !VK_RalBufferShadowPublish( &vk_iqm_bone_shadows[frameIdx],
+					iqmOff, boneBytes, &boneReceipt )
+			  || !VK_RalBufferShadowMarkWritten( &vk_iqm_bone_shadows[frameIdx],
+					iqmOff + IQM_MVP_UBO_OFFSET, 64u )
+			  || !VK_RalBufferShadowPublish( &vk_iqm_bone_shadows[frameIdx],
+					iqmOff + IQM_MVP_UBO_OFFSET, 64u, &mvpReceipt ) ) return;
+		}
 
 		// bind IQM skinning pipeline. IQM renders in the dynamic MAIN pass and in the
 		// (now also dynamic) mirror/portal SCREENMAP pass via RB_DrawSurfs — both use
@@ -10405,11 +10007,11 @@ void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
 
 	// bind vertex buffer
 	vertOffset = 0;
-	if ( !vk_ral_bind_registered_vertex_buffers( vk.cmd->ral_cmd, 0, 1,
+	if ( !Ral_CmdBindVertexBuffersExact( vk.cmd->ral_cmd, 0, 1,
 			&vertBuffer, &vertOffset ) ) return;
 
 	// bind index buffer
-	if ( !vk_ral_bind_registered_index_buffer( vk.cmd->ral_cmd, idxBuffer, 0,
+	if ( !Ral_CmdBindIndexBufferExact( vk.cmd->ral_cmd, idxBuffer, 0,
 			RAL_INDEX_UINT32 ) ) return;
 
 	// set viewport and scissor
@@ -10446,58 +10048,20 @@ void vk_draw_iqm_gpu( VkBuffer vertBuffer, VkBuffer idxBuffer,
 #ifdef USE_VBO
 void vk_release_vbo( void )
 {
-	if ( vk.vbo.vertex_buffer ) {
-		vk_ral_unregister_buffer( vk.vbo.vertex_buffer );
-		qvkDestroyBuffer( vk.device, vk.vbo.vertex_buffer, NULL );
-	}
-	vk.vbo.vertex_buffer = VK_NULL_HANDLE;
-
-	if ( vk.vbo.buffer_memory )
-		qvkFreeMemory( vk.device, vk.vbo.buffer_memory, NULL );
-	vk.vbo.buffer_memory = VK_NULL_HANDLE;
+	if ( vk.vbo.ral_vertex_buffer )
+		Ral_DestroyBuffer( vk.vbo.ral_vertex_buffer );
+	vk.vbo.ral_vertex_buffer = NULL;
 }
 
 
 qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size )
 {
-	VkMemoryRequirements vb_mem_reqs;
-	VkMemoryAllocateInfo alloc_info;
-	VkBufferCreateInfo desc;
-	VkDeviceSize vertex_buffer_offset;
-	VkDeviceSize allocationSize;
-	uint32_t memory_type_bits;
-	ralBufferCopy_t copyRegion;
+	ralBuffer_t *candidate;
 	VkDeviceSize uploadDone;
-
-	vk_release_vbo();
-
-	desc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	desc.pNext = NULL;
-	desc.flags = 0;
-	desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	desc.queueFamilyIndexCount = 0;
-	desc.pQueueFamilyIndices = NULL;
-
-	// device-local buffer
-	desc.size = vbo_size;
-	desc.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-	VK_CHECK( qvkCreateBuffer( vk.device, &desc, NULL, &vk.vbo.vertex_buffer ) );
-
-	// memory requirements
-	qvkGetBufferMemoryRequirements( vk.device, vk.vbo.vertex_buffer, &vb_mem_reqs );
-	vertex_buffer_offset = 0;
-	allocationSize = vertex_buffer_offset + vb_mem_reqs.size;
-	memory_type_bits = vb_mem_reqs.memoryTypeBits;
-
-	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	alloc_info.pNext = NULL;
-	alloc_info.allocationSize = allocationSize;
-	alloc_info.memoryTypeIndex = find_memory_type( memory_type_bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &vk.vbo.buffer_memory ) );
-	qvkBindBufferMemory( vk.device, vk.vbo.vertex_buffer, vk.vbo.buffer_memory, vertex_buffer_offset );
-	vk_ral_register_buffer( vk.vbo.vertex_buffer, vbo_size,
-	                        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-	                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "vk.vbo.vertex_buffer" );
+	candidate = vk_create_device_local_buffer( (uint64_t)vbo_size,
+		(ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_VERTEX
+			| RAL_BUFFER_INDEX ), "vk.vbo.ral_vertex_buffer" );
+	if ( !candidate ) return qfalse;
 
 	// staging buffers
 
@@ -10511,34 +10075,16 @@ qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size )
 		if ( uploadDone + uploadSize > vbo_size ) {
 			uploadSize = vbo_size - uploadDone;
 		}
-		memcpy(vk.staging_buffer.ptr + 0, vbo_data + uploadDone, uploadSize);
-		{
-			ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
-			if ( rcmd == NULL ) {
-				R_LOG( rch_ral, SEV_ERROR, "%s: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping VBO upload chunk (offset=%llu, size=%llu)\n",
-				        __func__, (unsigned long long)uploadDone, (unsigned long long)uploadSize );
-				vk_release_vbo();
-				return qfalse;
-			} else {
-				copyRegion.srcOffset = 0;
-				copyRegion.dstOffset = uploadDone;
-				copyRegion.size = uploadSize;
-				if ( !vk_ral_record_registered_buffer_copy( rcmd,
-						vk.staging_buffer.handle, vk.vbo.vertex_buffer,
-						&copyRegion ) ) {
-					Ral_SubmitAndDispose( rcmd );
-					vk_release_vbo();
-					return qfalse;
-				}
-				Ral_SubmitAndDispose( rcmd );
-			}
+		if ( !vk_ral_stage_buffer_copy( candidate, uploadDone,
+				vbo_data + uploadDone, uploadSize, "vk_alloc_vbo" ) ) {
+			Ral_DestroyBuffer( candidate );
+			return qfalse;
 		}
 		uploadDone += uploadSize;
 	}
 
-	SET_OBJECT_NAME( vk.vbo.vertex_buffer, "static VBO", RAL_VULKAN_OBJECT_ROLE_BUFFER );
-	SET_OBJECT_NAME( vk.vbo.buffer_memory, "static VBO memory", RAL_VULKAN_OBJECT_ROLE_DEVICE_MEMORY );
-
+	vk_release_vbo();
+	vk.vbo.ral_vertex_buffer = candidate;
 	return qtrue;
 }
 #endif
@@ -10578,17 +10124,17 @@ static qboolean vk_temporal_iqm_geometry_key( const iqmData_t *data,
 	vkTemporalIqmGeometryKey_t key;
 	if ( !data || !outKey || data->temporalH5Eligible != qtrue
 			|| data->vk_gpu_skinning != qtrue
-			|| !data->vk_vertex_buffer || !data->vk_index_buffer
-			|| !data->vk_vertex_bytes || !data->vk_index_bytes
+			|| !data->ral_vertex_buffer || !data->ral_index_buffer
+			|| !data->ral_vertex_bytes || !data->ral_index_bytes
 			|| !data->temporalModelAllocationGeneration
 			|| !data->temporalGeometryGeneration
 			|| !data->temporalContentDigest ) return qfalse;
 	memset( &key, 0, sizeof( key ) );
 	key.backend = vk_ral_get_backend();
-	key.nativeVertexBuffer = (void *)data->vk_vertex_buffer;
-	key.nativeIndexBuffer = (void *)data->vk_index_buffer;
-	key.vertexBytes = data->vk_vertex_bytes;
-	key.indexBytes = data->vk_index_bytes;
+	key.nativeVertexBuffer = Ral_GetBufferHandle( data->ral_vertex_buffer );
+	key.nativeIndexBuffer = Ral_GetBufferHandle( data->ral_index_buffer );
+	key.vertexBytes = data->ral_vertex_bytes;
+	key.indexBytes = data->ral_index_bytes;
 	key.modelAllocationGeneration = data->temporalModelAllocationGeneration;
 	key.geometryGeneration = data->temporalGeometryGeneration;
 	key.contentDigest = data->temporalContentDigest;
@@ -10775,11 +10321,11 @@ qboolean vk_temporal_iqm_prescan_primary_command(
 		admissionFacts.geometryExact = data
 			&& vk_temporal_iqm_geometry_get_receipt( data, &geometry )
 			&& geometry.key.nativeVertexBuffer
-				== (void *)data->vk_vertex_buffer
+				== Ral_GetBufferHandle( data->ral_vertex_buffer )
 			&& geometry.key.nativeIndexBuffer
-				== (void *)data->vk_index_buffer
-			&& geometry.key.vertexBytes == data->vk_vertex_bytes
-			&& geometry.key.indexBytes == data->vk_index_bytes
+				== Ral_GetBufferHandle( data->ral_index_buffer )
+			&& geometry.key.vertexBytes == data->ral_vertex_bytes
+			&& geometry.key.indexBytes == data->ral_index_bytes
 			&& geometry.key.modelAllocationGeneration
 				== data->temporalModelAllocationGeneration
 			&& geometry.key.geometryGeneration
@@ -11137,10 +10683,9 @@ static vkTemporalIqmExact3FactoryOps_t vk_temporal_iqm_exact3_factory_ops(
 	vkTemporalIqmExact3FactoryOps_t ops;
 	memset( &ops, 0, sizeof( ops ) );
 	ops.getBindGroupLayoutHandle = Ral_GetBindGroupLayoutHandle;
-	ops.createRawLayout = vk_temporal_layout_create_raw;
-	ops.destroyRawLayout = vk_temporal_layout_destroy_raw;
-	ops.adoptRawLayout = vk_temporal_layout_adopt;
-	ops.destroyAdoptedLayout = Ral_DestroyPipelineLayout;
+	ops.createLayout = Ral_CreatePipelineLayout;
+	ops.getLayoutHandle = Ral_GetPipelineLayoutHandle;
+	ops.destroyLayout = Ral_DestroyPipelineLayout;
 	ops.createPipeline = Ral_CreateGraphicsPipeline;
 	ops.destroyPipeline = Ral_DestroyPipeline;
 	ops.drain = vk_temporal_pipeline_drain;
@@ -11830,6 +11375,7 @@ static qboolean vk_temporal_resolve_readback_copy_depth(
 		vkTemporalResolveReadbackDepthEncoding_t depthEncoding, void *user ) {
 	ralTextureTransition_t transition;
 	ralResourceTransitionBatch_t batch;
+	qboolean copied;
 	ralBufferTextureCopy_t copy;
 	ralResourceState_t priorState;
 	ralQueueType_t priorQueue;
@@ -12753,11 +12299,9 @@ static void vk_create_smaa_pipelines( void )
 		edge_threshold = thresholds[q];
 	}
 	// SMAA cluster (shared RAL pipeline_layout_smaa).
-	// Binding contract per smaa_edge.{vert,frag}: push_constant `vec4 rtMetrics` =
-	// 16 bytes used in BOTH vertex + fragment stages. Set 0 binding 0 = sampler2D
-	// colorTex. The shared pipeline_layout_smaa declares 3 sampler sets to cover
-	// the larger blend/resolve variants; declaring extra sets is allowed (shader
-	// only consumes set 0 here).
+	// Binding contract per smaa_edge.{vert,frag}: set 0 is colorTex and set 3 is
+	// the per-frame rtMetrics UBO. The shared layout also declares sampler sets
+	// 1/2 for blend/resolve; this shader variant statically ignores them.
 	// The edge pipeline is dynamic-rendering only. Rebuilt here
 	// on every r_smaa / r_smaa_threshold change (the spec threshold is cvar-baked).
 	{
@@ -12776,13 +12320,13 @@ static void vk_create_smaa_pipelines( void )
 		p.depthTestEnable    = qfalse;
 		p.depthWriteEnable   = qfalse;
 		p.blendEnable        = qfalse;
-		p.pushConstantSize   = 16;
-		p.pushConstantStages = RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT;
-		if ( vk.ral_bgl_sampler ) {
+		if ( vk.ral_bgl_sampler && vk.ral_bgl_smaa_rtmetrics ) {
 			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
 			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
 			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_smaa_rtmetrics;
 		}
+		p.optionalBindGroupMask = ( 1u << 1 ) | ( 1u << 2 );
 		p.specConstants      = edgeSpec;
 		p.numSpecConstants   = 1;
 		p.colorFormat        = fmt->colorFormats[0];
@@ -12802,7 +12346,8 @@ static void vk_create_smaa_pipelines( void )
 	blend_frag_spec_data.corner_rounding = cornerRounding[q];
 
 	// SMAA blend (same pipeline_layout_smaa).
-	// Contract: 16B push V+F; 3 sampler sets (edges + area LUT + search LUT).
+	// Contract: sampler sets 0/1/2 (edges + area LUT + search LUT) and the
+	// per-frame rtMetrics UBO at set 3.
 	// RAL applies one spec list to both stages; id 0 carries the SAME value the
 	// vertex and fragment shaders both want (searchSteps[q]), so a single 3-entry
 	// list serves both — the vertex shader declares only id 0 and ignores 1/2.
@@ -12821,12 +12366,11 @@ static void vk_create_smaa_pipelines( void )
 		p.depthTestEnable    = qfalse;
 		p.depthWriteEnable   = qfalse;
 		p.blendEnable        = qfalse;
-		p.pushConstantSize   = 16;
-		p.pushConstantStages = RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT;
-		if ( vk.ral_bgl_sampler ) {
+		if ( vk.ral_bgl_sampler && vk.ral_bgl_smaa_rtmetrics ) {
 			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
 			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
 			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_smaa_rtmetrics;
 		}
 		p.specConstants      = blendSpec;
 		p.numSpecConstants   = 3;
@@ -12841,8 +12385,8 @@ static void vk_create_smaa_pipelines( void )
 
 	// --- Resolve (neighborhood blending) pipeline ---
 	// SMAA resolve (same pipeline_layout_smaa).
-	// Contract: 16B push V+F; 2 sampler sets used (colorTex + blendTex);
-	// layout declares 3 (allowed superset).
+	// Contract: sampler sets 0/1 plus the per-frame rtMetrics UBO at set 3;
+	// sampler set 2 is a statically-unused shared-layout slot.
 	// Dynamic-rendering resolve pipeline (no spec constants).
 	{
 		vk_ral_special_pipeline_params_t p;
@@ -12855,13 +12399,13 @@ static void vk_create_smaa_pipelines( void )
 		p.depthTestEnable    = qfalse;
 		p.depthWriteEnable   = qfalse;
 		p.blendEnable        = qfalse;
-		p.pushConstantSize   = 16;
-		p.pushConstantStages = RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT;
-		if ( vk.ral_bgl_sampler ) {
+		if ( vk.ral_bgl_sampler && vk.ral_bgl_smaa_rtmetrics ) {
 			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
 			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
 			p.bgls[ p.numBgls++ ] = vk.ral_bgl_sampler;
+			p.bgls[ p.numBgls++ ] = vk.ral_bgl_smaa_rtmetrics;
 		}
+		p.optionalBindGroupMask = 1u << 2;
 		p.colorFormat        = fmt->colorFormats[0];
 		p.numColorAttachments = fmt->numColorFormats;
 		p.depthFormat        = fmt->depthFormat;
@@ -12876,7 +12420,6 @@ static void vk_create_smaa_pipelines( void )
 // Forward declarations for the static helpers vk_rebuild_fbo_for_hdr_change
 // and vk_rebuild_for_fbo_change reach across. Definitions live further down
 // in this file; vk_initialize and vk_restart_swapchain use the same set.
-static void vk_alloc_attachments( void );
 static void vk_create_attachments( void );
 static void vk_destroy_attachments( void );
 static void vk_destroy_pipelines( qboolean resetCount );
@@ -13746,7 +13289,7 @@ static void vk_rebuild_fbo_for_hdr_change( void )
 
 	vk_create_attachments();
 
-	vk_ral_adopt_static_internal_textures();
+	vk_ral_refresh_internal_texture_dependents();
 	vk_init_particle_textures();
 	vk_init_decal_textures();
 
@@ -13872,7 +13415,7 @@ static void vk_rebuild_for_fbo_change( void )
 	// A session that booted at r_fbo 0 has no live engine-resources arena child.
 	// A first 0->1 transition must therefore reset and repopulate the arena.
 	// Direct RAL attachment/SMAA groups do not gate this test.
-	if ( vk.fboActive && vk.color_image_view
+	if ( vk.fboActive && vk.ral_color_image
 			&& vk.engineResources.descriptor == VK_NULL_HANDLE ) {
 		vk_forwardplus_lit_invalidate_sets();
 		vk_ral_release_static_bindgroups();
@@ -13894,7 +13437,7 @@ static void vk_rebuild_for_fbo_change( void )
 		// too for symmetry; the dispatch re-creates on NULL.)
 		vk_forwardplus_lit_invalidate_sets();
 	} else {
-		vk_ral_adopt_static_internal_textures();
+		vk_ral_refresh_internal_texture_dependents();
 	}
 	// Both cohorts include scene-depth, so every attachment replacement must
 	// publish complete new groups even when the descriptor arena itself survives.
@@ -13964,7 +13507,7 @@ void vk_update_post_process_pipelines( void )
 	// SET, so nothing in the main framebuffers / render passes / pipelines refers
 	// to them. The descriptor SET was allocated by vk_init_descriptors (whenever
 	// vk.fboActive) and persists across release/realloc; vk_update_attachment_
-	// descriptors rebinds it to the fresh vk.shadowMap.view. (Mirrors the r_smaa
+	// descriptors rebinds it to the fresh RAL array view. (Mirrors the r_smaa
 	// live hook below.)
 	{
 		cvar_t *c_size = ri.Cvar_Get( "r_shadowMapSize", "2048", 0 );
@@ -14123,7 +13666,7 @@ void vk_update_post_process_pipelines( void )
 		// active). The shader still applies exposure_bias and saturation,
 		// so r_brightness and r_saturation work even with r_tonemap == 0.
 		vk_create_post_process_pipeline( 6, 0, 0 );
-		if ( vk.capture.image ) {
+		if ( vk.capture.ral_image ) {
 			// update capture pipeline
 			vk_create_post_process_pipeline( 3, gls.captureWidth, gls.captureHeight );
 		}
@@ -14212,332 +13755,74 @@ void vk_update_post_process_pipelines( void )
 }
 
 
-// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding) — fields ordered by semantics, not packing
-typedef struct vk_attach_desc_s  {
-	VkImage descriptor;
-	VkImageView *image_view;
-	VkImageUsageFlags usage;
-	VkMemoryRequirements reqs;
-	uint32_t memoryTypeIndex;
-	VkDeviceSize  memory_offset;
-	// for layout transition:
-	VkImageAspectFlags aspect_flags;
-	VkImageLayout image_layout;
-	VkFormat image_format;
-} vk_attach_desc_t;
-
-static vk_attach_desc_t attachments[ MAX_ATTACHMENTS_IN_POOL ];
-static uint32_t num_attachments = 0;
-
-
-static void vk_clear_attachment_pool( void )
+static ralTexture_t *vk_create_attachment_texture( uint32_t width,
+	uint32_t height, VkFormat format, ralTextureUsage_t usage,
+	const char *debugName )
 {
-	num_attachments = 0;
-}
-
-
-static void vk_alloc_attachments( void )
-{
-	VkImageViewCreateInfo view_desc;
-	VkMemoryDedicatedAllocateInfoKHR alloc_info2;
-	VkMemoryAllocateInfo alloc_info;
-	VkCommandBuffer command_buffer;
-	VkDeviceMemory memory;
-	VkDeviceSize offset;
-	uint32_t memoryTypeBits;
-	uint32_t memoryTypeIndex;
-	uint32_t i;
-
-	if ( num_attachments == 0 ) {
-		return;
-	}
-
-	if ( vk.image_memory_count >= ARRAY_LEN( vk.image_memory ) ) {
-		ri.Terminate( TERM_CLIENT_DROP, "vk.image_memory_count == %i", (int)ARRAY_LEN( vk.image_memory ) );
-	}
-
-	memoryTypeBits = ~0U;
-	offset = 0;
-
-	for ( i = 0; i < num_attachments; i++ ) {
-#ifdef MIN_IMAGE_ALIGN
-		VkDeviceSize alignment = MAX( attachments[ i ].reqs.alignment, MIN_IMAGE_ALIGN );
-#else
-		VkDeviceSize alignment = attachments[ i ].reqs.alignment;
-#endif
-		memoryTypeBits &= attachments[ i ].reqs.memoryTypeBits;
-		offset = PAD( offset, alignment );
-		attachments[ i ].memory_offset = offset;
-		offset += attachments[ i ].reqs.size;
-#ifdef _DEBUG
-		R_LOG( rch_vk, SEV_INFO, "[%i] type %i, size %i, align %i\n", i,
-			attachments[ i ].reqs.memoryTypeBits,
-			(int)attachments[ i ].reqs.size,
-			(int)attachments[ i ].reqs.alignment );
-#endif
-	}
-
-	if ( num_attachments == 1 && attachments[ 0 ].usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT ) {
-		// try lazy memory
-		memoryTypeIndex = find_memory_type2( memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT, NULL );
-		if ( memoryTypeIndex == ~0U ) {
-			memoryTypeIndex = find_memory_type( memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-		}
-	} else {
-		memoryTypeIndex = find_memory_type( memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-	}
-
-#ifdef _DEBUG
-	R_LOG( rch_vk, SEV_INFO, "memory type bits: %04x\n", memoryTypeBits );
-	R_LOG( rch_vk, SEV_INFO, "memory type index: %04x\n", memoryTypeIndex );
-	R_LOG( rch_vk, SEV_INFO, "total size: %i\n", (int)offset );
-#endif
-
-	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	alloc_info.pNext = NULL;
-	alloc_info.allocationSize = offset;
-	alloc_info.memoryTypeIndex = memoryTypeIndex;
-
-	if ( num_attachments == 1 ) {
-		if ( vk.dedicatedAllocation ) {
-			memset( &alloc_info2, 0, sizeof( alloc_info2 ) );
-			alloc_info2.sType =  VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO_KHR;
-			alloc_info2.image = attachments[ 0 ].descriptor;
-			alloc_info.pNext = &alloc_info2;
-		}
-	}
-
-	// allocate and bind memory
-	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &memory ) );
-
-	vk.image_memory[ vk.image_memory_count++ ] = memory;
-
-	for ( i = 0; i < num_attachments; i++ ) {
-
-		VK_CHECK( qvkBindImageMemory( vk.device, attachments[i].descriptor, memory, attachments[i].memory_offset ) );
-
-		// create color image view
-		view_desc.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		view_desc.pNext = NULL;
-		view_desc.flags = 0;
-		view_desc.image = attachments[ i ].descriptor;
-		view_desc.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		view_desc.format = attachments[ i ].image_format;
-		view_desc.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-		view_desc.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-		view_desc.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-		view_desc.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-		view_desc.subresourceRange.aspectMask = attachments[ i ].aspect_flags;
-		view_desc.subresourceRange.baseMipLevel = 0;
-		view_desc.subresourceRange.levelCount = 1;
-		view_desc.subresourceRange.baseArrayLayer = 0;
-		view_desc.subresourceRange.layerCount = 1;
-
-		VK_CHECK( qvkCreateImageView( vk.device, &view_desc, NULL, attachments[ i ].image_view ) );
-	}
-
-	// perform layout transition
-	{
-		ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
-		if ( rcmd == NULL ) {
-			R_LOG( rch_ral, SEV_ERROR, "%s: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping attachment layout transition\n", __func__ );
-		} else {
-			command_buffer = (VkCommandBuffer)Ral_GetCommandBufferHandle( rcmd );
-			for ( i = 0; i < num_attachments; i++ ) {
-				record_image_layout_transition( command_buffer,
-					attachments[i].descriptor,
-					attachments[i].aspect_flags,
-					VK_IMAGE_LAYOUT_UNDEFINED, // old_layout
-					attachments[i].image_layout,
-					0, 0 );
-			}
-			Ral_SubmitAndDispose( rcmd );
-		}
-	}
-
-	num_attachments = 0;
-}
-
-
-static void vk_add_attachment_desc( VkImage desc, VkImageView *image_view, VkImageUsageFlags usage, VkMemoryRequirements *reqs, VkFormat image_format, VkImageAspectFlags aspect_flags, VkImageLayout image_layout )
-{
-	if ( num_attachments >= ARRAY_LEN( attachments ) ) {
-		ri.Terminate( TERM_UNRECOVERABLE, "Attachments array overflow" );
-	} else {
-		attachments[ num_attachments ].descriptor = desc;
-		attachments[ num_attachments ].image_view = image_view;
-		attachments[ num_attachments ].usage = usage;
-		attachments[ num_attachments ].reqs = *reqs;
-		attachments[ num_attachments ].aspect_flags = aspect_flags;
-		attachments[ num_attachments ].image_layout = image_layout;
-		attachments[ num_attachments ].image_format = image_format;
-		attachments[ num_attachments ].memory_offset = 0;
-		num_attachments++;
-	}
-}
-
-
-static void vk_get_image_memory_requirements( VkImage image, VkMemoryRequirements *memory_requirements )
-{
-	ralVulkanMemoryRequirements_t requirements;
-
-	if ( !memory_requirements || !RalVulkan_GetImageMemoryRequirements(
-			vk_ral_get_backend(), (void *)(uintptr_t)image, &requirements ) ) {
+	ralTextureCreateInfo_t createInfo;
+	ralTexture_t *texture;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.type = RAL_TEXTURE_2D;
+	createInfo.format = vk_attachment_format_to_ral( format );
+	createInfo.width = width;
+	createInfo.height = height;
+	createInfo.depthOrArrayLayers = 1u;
+	createInfo.mipLevels = 1u;
+	createInfo.sampleCount = 1u;
+	createInfo.usage = usage;
+	createInfo.memory = RAL_MEMORY_DEVICE_LOCAL;
+	createInfo.debugName = debugName;
+	texture = Ral_CreateTexture( vk_ral_get_backend(), &createInfo );
+	if ( !texture )
 		ri.Terminate( TERM_UNRECOVERABLE,
-			"Vulkan: RAL image memory-requirements query failed" );
-		return;
-	}
-	memory_requirements->size = requirements.size;
-	memory_requirements->alignment = requirements.alignment;
-	memory_requirements->memoryTypeBits = requirements.memoryTypeBits;
+			"Vulkan: failed to create RAL attachment %s", debugName );
+	return texture;
 }
 
-
-static void create_color_attachment( uint32_t width, uint32_t height, VkSampleCountFlagBits samples, VkFormat format,
-	VkImageUsageFlags usage, VkImage *image, VkImageView *image_view, VkImageLayout image_layout, qboolean multisample )
+static ralTexture_t *vk_create_depth_attachment_texture( uint32_t width,
+	uint32_t height, const char *debugName )
 {
-	VkImageCreateInfo create_desc;
-	VkMemoryRequirements memory_requirements;
-
-	if ( multisample && !( usage & VK_IMAGE_USAGE_SAMPLED_BIT ) )
-		usage |= VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
-
-	// create color image
-	create_desc.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-	create_desc.pNext = NULL;
-	create_desc.flags = 0;
-	create_desc.imageType = VK_IMAGE_TYPE_2D;
-	create_desc.format = format;
-	create_desc.extent.width = width;
-	create_desc.extent.height = height;
-	create_desc.extent.depth = 1;
-	create_desc.mipLevels = 1;
-	create_desc.arrayLayers = 1;
-	create_desc.samples = samples;
-	create_desc.tiling = VK_IMAGE_TILING_OPTIMAL;
-	create_desc.usage = usage;
-	create_desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	create_desc.queueFamilyIndexCount = 0;
-	create_desc.pQueueFamilyIndices = NULL;
-	create_desc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	VK_CHECK( qvkCreateImage( vk.device, &create_desc, NULL, image ) );
-
-	vk_get_image_memory_requirements( *image, &memory_requirements );
-
-	vk_add_attachment_desc( *image, image_view, usage, &memory_requirements, format, VK_IMAGE_ASPECT_COLOR_BIT, image_layout );
-}
-
-
-static void create_depth_attachment( uint32_t width, uint32_t height, VkSampleCountFlagBits samples, VkImage *image, VkImageView *image_view, qboolean allowTransient )
-{
-	VkImageCreateInfo create_desc;
-	VkMemoryRequirements memory_requirements;
-	VkImageAspectFlags image_aspect_flags;
-
-	// create depth image
-	create_desc.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-	create_desc.pNext = NULL;
-	create_desc.flags = 0;
-	create_desc.imageType = VK_IMAGE_TYPE_2D;
-	create_desc.format = vk.depth_format;
-	create_desc.extent.width = width;
-	create_desc.extent.height = height;
-	create_desc.extent.depth = 1;
-	create_desc.mipLevels = 1;
-	create_desc.arrayLayers = 1;
-	create_desc.samples = samples;
-	create_desc.tiling = VK_IMAGE_TILING_OPTIMAL;
-	create_desc.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-	// TRANSFER_SRC for the depth copy: depthFade copies depth→its sampled image, and
-	// Forward+ copies depth→the fp depth copy for the per-tile depth-cull (depthValid=1).
-	// Either consumer needs the live depth as a transfer source. (TRANSIENT is mutually
-	// exclusive with a copy source — only taken when neither copies.)
-	if ( vk.sceneDepth.active || ( r_forwardPlus && r_forwardPlus->integer ) ) {
-		create_desc.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-	} else if ( allowTransient ) {
-		create_desc.usage |= VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
-	}
-	create_desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	create_desc.queueFamilyIndexCount = 0;
-	create_desc.pQueueFamilyIndices = NULL;
-	create_desc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-	image_aspect_flags = VK_IMAGE_ASPECT_DEPTH_BIT;
-	if ( glConfig.stencilBits > 0 )
-		image_aspect_flags |= VK_IMAGE_ASPECT_STENCIL_BIT;
-
-	VK_CHECK( qvkCreateImage( vk.device, &create_desc, NULL, image ) );
-
-	vk_get_image_memory_requirements( *image, &memory_requirements );
-
-	vk_add_attachment_desc( *image, image_view, create_desc.usage, &memory_requirements, vk.depth_format, image_aspect_flags, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL );
+	ralTextureUsage_t usage = RAL_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT;
+	if ( vk.sceneDepth.active || ( r_forwardPlus && r_forwardPlus->integer ) )
+		usage |= RAL_TEXTURE_USAGE_TRANSFER_SRC;
+	return vk_create_attachment_texture( width, height, vk.depth_format, usage,
+		debugName );
 }
 
 
 /*
 ================
-vk_smaa_create_image_dedicated
+vk_smaa_create_texture
 
-Helper for vk_smaa_alloc_resources. Creates one SMAA intermediate
-image on dedicated VkDeviceMemory (not the attachment pool). The
-pool-based create_color_attachment() helper above is unsuitable
-because its memory is co-allocated with the rest of the FBO chain
-and cannot be selectively released on r_smaa toggle.
+Creates one independently owned SMAA texture through RAL so live r_smaa
+disable can retire the five-resource cohort without rebuilding the attachment
+pool. Views remain arena-generation children created by the sampler cohort.
 ================
 */
-static void vk_smaa_create_image_dedicated( uint32_t width, uint32_t height, VkFormat format,
-	VkImageUsageFlags usage, VkImage *image, VkImageView *view, VkDeviceMemory *memory )
+static ralTexture_t *vk_smaa_create_texture( uint32_t width, uint32_t height,
+	ralFormat_t format, ralTextureUsage_t usage, const char *debugName )
 {
-	VkImageCreateInfo create_desc;
-	VkMemoryRequirements memory_requirements;
-	VkMemoryAllocateInfo alloc_info;
-	VkImageViewCreateInfo view_desc;
-
-	memset( &create_desc, 0, sizeof( create_desc ) );
-	create_desc.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-	create_desc.imageType = VK_IMAGE_TYPE_2D;
-	create_desc.format = format;
-	create_desc.extent.width = width;
-	create_desc.extent.height = height;
-	create_desc.extent.depth = 1;
-	create_desc.mipLevels = 1;
-	create_desc.arrayLayers = 1;
-	create_desc.samples = VK_SAMPLE_COUNT_1_BIT;
-	create_desc.tiling = VK_IMAGE_TILING_OPTIMAL;
-	create_desc.usage = usage;
-	create_desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	create_desc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	VK_CHECK( qvkCreateImage( vk.device, &create_desc, NULL, image ) );
-
-	vk_get_image_memory_requirements( *image, &memory_requirements );
-	memset( &alloc_info, 0, sizeof( alloc_info ) );
-	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	alloc_info.allocationSize = memory_requirements.size;
-	alloc_info.memoryTypeIndex = find_memory_type( memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, memory ) );
-	VK_CHECK( qvkBindImageMemory( vk.device, *image, *memory, 0 ) );
-
-	memset( &view_desc, 0, sizeof( view_desc ) );
-	view_desc.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-	view_desc.image = *image;
-	view_desc.viewType = VK_IMAGE_VIEW_TYPE_2D;
-	view_desc.format = format;
-	view_desc.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	view_desc.subresourceRange.levelCount = 1;
-	view_desc.subresourceRange.layerCount = 1;
-	VK_CHECK( qvkCreateImageView( vk.device, &view_desc, NULL, view ) );
+	ralTextureCreateInfo_t createInfo;
+	memset( &createInfo, 0, sizeof( createInfo ) );
+	createInfo.type = RAL_TEXTURE_2D;
+	createInfo.format = format;
+	createInfo.width = width;
+	createInfo.height = height;
+	createInfo.depthOrArrayLayers = 1u;
+	createInfo.mipLevels = 1u;
+	createInfo.sampleCount = 1u;
+	createInfo.usage = usage;
+	createInfo.memory = RAL_MEMORY_DEVICE_LOCAL;
+	createInfo.debugName = debugName;
+	return Ral_CreateTexture( vk_ral_get_backend(), &createInfo );
 }
 
 static qboolean vk_ral_copy_buffer_to_texture_exact(
-		ralCommandBuffer_t *command, VkBuffer nativeSource,
+		ralCommandBuffer_t *command, ralBuffer_t *source,
 		ralTexture_t *destination, qboolean destinationWasSampled,
 		uint32_t regionCount, const ralBufferTextureCopy_t *regions )
 {
-	ralBuffer_t *source = vk_ral_lookup_buffer( nativeSource );
 	ralTextureResourceReceipt_t textureReceipt;
-	const ralResourceState_t sourceState = {
-		RAL_RESOURCE_USAGE_COPY_SOURCE, 0u
-	};
 	ralResourceState_t beforeState = {
 		RAL_RESOURCE_USAGE_UNDEFINED, 0u
 	};
@@ -14551,20 +13836,18 @@ static qboolean vk_ral_copy_buffer_to_texture_exact(
 	ralQueueType_t currentQueue;
 	ralTextureTransition_t transition;
 	ralResourceTransitionBatch_t batch;
-	if ( !command || nativeSource == VK_NULL_HANDLE || !source || !destination
+	qboolean copied;
+	qboolean restored;
+	if ( !command || !source || !destination
 			|| !regions || regionCount == 0u
 			|| Ral_GetCommandBufferHandle( command ) == NULL
-			|| Ral_GetBufferHandle( source ) != (void *)nativeSource
+			|| Ral_GetBufferHandle( source ) == NULL
 			|| Ral_GetTextureImageHandle( destination ) == NULL
 			|| !Ral_TextureGetResourceReceipt( destination, &textureReceipt )
 			|| !( Ral_GetBufferUsage( source ) & RAL_BUFFER_TRANSFER_SRC )
 			|| !( textureReceipt.usage & RAL_TEXTURE_USAGE_TRANSFER_DST ) )
 		return qfalse;
 	if ( destinationWasSampled ) beforeState = sampledState;
-	/* Idempotent registrations may already carry COPY_SOURCE; the exact copy
-	 * revalidates that state before any native emission. */
-	(void)Ral_PublishAdoptedBufferState( source, &sourceState,
-		RAL_QUEUE_GRAPHICS );
 	if ( Ral_TextureGetResourceState( destination, &currentState,
 			&currentQueue ) ) {
 		if ( currentQueue != RAL_QUEUE_GRAPHICS
@@ -14589,10 +13872,83 @@ static qboolean vk_ral_copy_buffer_to_texture_exact(
 	batch.textureTransitionCount = 1u;
 	if ( Ral_CmdTransitionResources( command, &batch ) != ralSuccess )
 		return qfalse;
-	if ( !Ral_CmdCopyBufferToTextureRegionsExact( command, source,
-			destination, regionCount, regions ) ) return qfalse;
+	copied = Ral_CmdCopyBufferToTextureRegionsExact( command, source,
+		destination, regionCount, regions );
 	transition.before = copyState;
 	transition.after = sampledState;
+	restored = Ral_CmdTransitionResources( command, &batch ) == ralSuccess
+		? qtrue : qfalse;
+	return copied && restored ? qtrue : qfalse;
+}
+
+static qboolean vk_ral_stage_texture_copy( ralTexture_t *destination,
+		qboolean destinationWasSampled, uint32_t regionCount,
+		const ralBufferTextureCopy_t *regions, const void *data,
+		uint64_t size, const char *where )
+{
+	ralCommandBuffer_t *command;
+	qboolean recorded = qfalse;
+	qboolean restored = qfalse;
+	if ( !destination || !regions || regionCount == 0u
+			|| !data || size == 0u ) return qfalse;
+	if ( !vk.staging_buffer.ral_buffer || vk.staging_buffer.size < size )
+		vk_alloc_staging_buffer( size );
+	if ( !vk_ral_write_upload_buffer( vk.staging_buffer.ral_buffer,
+			0u, data, size ) ) return qfalse;
+	command = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(),
+		RAL_QUEUE_GRAPHICS );
+	if ( !command ) {
+		R_LOG( rch_ral, SEV_ERROR,
+			"%s: portable staging command acquisition failed\n", where );
+		return qfalse;
+	}
+	if ( vk_ral_transition_upload_buffer( command,
+			vk.staging_buffer.ral_buffer, RAL_RESOURCE_USAGE_HOST_WRITE,
+			RAL_RESOURCE_USAGE_COPY_SOURCE ) ) {
+		recorded = vk_ral_copy_buffer_to_texture_exact( command,
+			vk.staging_buffer.ral_buffer, destination,
+			destinationWasSampled, regionCount, regions );
+		restored = vk_ral_transition_upload_buffer( command,
+			vk.staging_buffer.ral_buffer, RAL_RESOURCE_USAGE_COPY_SOURCE,
+			RAL_RESOURCE_USAGE_HOST_WRITE );
+	}
+	Ral_SubmitAndDispose( command );
+	return recorded && restored ? qtrue : qfalse;
+}
+
+static qboolean vk_ral_seed_smaa_intermediate_states(
+		ralCommandBuffer_t *command )
+{
+	ralTexture_t *textures[3] = {
+		vk.smaa.ral_edges_image,
+		vk.smaa.ral_blend_image,
+		vk.smaa.ral_input_image
+	};
+	ralTextureTransition_t transitions[3];
+	ralResourceTransitionBatch_t batch;
+	const ralResourceState_t undefinedState = {
+		RAL_RESOURCE_USAGE_UNDEFINED, 0u
+	};
+	const ralResourceState_t sampledState = {
+		RAL_RESOURCE_USAGE_SAMPLED_TEXTURE, RAL_STAGE_FRAGMENT
+	};
+	uint32_t i;
+	if ( !command ) return qfalse;
+	memset( transitions, 0, sizeof( transitions ) );
+	for ( i = 0u; i < ARRAY_LEN( transitions ); ++i ) {
+		if ( !textures[i] ) return qfalse;
+		transitions[i].texture = textures[i];
+		transitions[i].aspects = RAL_TEXTURE_ASPECT_COLOR;
+		transitions[i].mipLevelCount = 1u;
+		transitions[i].arrayLayerCount = 1u;
+		transitions[i].before = undefinedState;
+		transitions[i].after = sampledState;
+		transitions[i].sourceQueue = RAL_QUEUE_GRAPHICS;
+		transitions[i].destinationQueue = RAL_QUEUE_GRAPHICS;
+	}
+	memset( &batch, 0, sizeof( batch ) );
+	batch.textureTransitions = transitions;
+	batch.textureTransitionCount = ARRAY_LEN( transitions );
 	return Ral_CmdTransitionResources( command, &batch ) == ralSuccess
 		? qtrue : qfalse;
 }
@@ -14602,19 +13958,15 @@ static qboolean vk_ral_copy_buffer_to_texture_exact(
 ================
 vk_smaa_alloc_resources
 
-Allocates every SMAA-owned Vulkan resource:
-  - edges_image (R8G8) + dedicated memory + view
-  - blend_image (RGBA8) + dedicated memory + view
-  - input_image (vk.color_format) + dedicated memory + view
-  - area_image (R8G8 LUT 160x560) + dedicated memory + view
-  - search_image (R8 LUT 64x16) + dedicated memory + view
+Allocates every SMAA-owned RAL resource:
+  - edges (R8G8), blend (RGBA8), input (color_format)
+  - area (R8G8 LUT 160x560), search (R8 LUT 64x16)
   - point_sampler / linear_sampler
   - one-shot LUT byte upload via a temporary staging buffer
 
 Idempotent (early-out if already allocated). The five sampled
-texture/view/bind-group cohorts are created directly through RAL after
-the raw images and samplers exist; their VkDescriptorSet fields are
-compatibility mirrors, not independent descriptor-pool owners.
+Texture/view/bind-group cohorts are created directly through RAL; their
+VkDescriptorSet fields are compatibility mirrors only.
 
 Sets vk.smaa.active = qtrue on success. Callers invoke
 vk_update_attachment_descriptors() after this returns so the current
@@ -14628,50 +13980,46 @@ Called from:
 static void vk_smaa_alloc_resources( void )
 {
 	ralSamplerCreateInfo_t sampler_desc;
-	VkCommandBuffer command_buffer;
-	VkBufferCreateInfo buf_desc;
-	VkMemoryRequirements mem_req;
-	VkMemoryAllocateInfo alloc_info;
-	VkBuffer staging_buf;
-	VkDeviceMemory staging_mem;
-	VkDeviceSize staging_size;
 	ralBufferTextureCopy_t region;
-	byte *mapped;
 	qboolean lutUploadReady = qfalse;
 
-	if ( vk.smaa.area_image != VK_NULL_HANDLE ) {
+	if ( vk.smaa.ral_area_image ) {
 		// already allocated
 		return;
 	}
 
-	// ── Intermediate attachment images (resolution-dependent) ──────
-	// Dedicated memory per image (NOT the shared attachment pool) so
-	// the release helper can free them without rebuilding the pool.
-	vk_smaa_create_image_dedicated( glConfig.vidWidth, glConfig.vidHeight,
-		VK_FORMAT_R8G8_UNORM,
-		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-		&vk.smaa.edges_image, &vk.smaa.edges_view, &vk.smaa.edges_memory );
-
-	vk_smaa_create_image_dedicated( glConfig.vidWidth, glConfig.vidHeight,
-		VK_FORMAT_R8G8B8A8_UNORM,
-		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-		&vk.smaa.blend_image, &vk.smaa.blend_view, &vk.smaa.blend_memory );
-
-	vk_smaa_create_image_dedicated( glConfig.vidWidth, glConfig.vidHeight,
-		vk.color_format,
-		VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-		&vk.smaa.input_image, &vk.smaa.input_view, &vk.smaa.input_memory );
+	// ── Intermediate attachment textures (resolution-dependent) ────
+	vk.smaa.ral_edges_image = vk_smaa_create_texture(
+		glConfig.vidWidth, glConfig.vidHeight, RAL_FORMAT_R8G8_UNORM,
+		RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-edges" );
+	vk.smaa.ral_blend_image = vk_smaa_create_texture(
+		glConfig.vidWidth, glConfig.vidHeight, RAL_FORMAT_R8G8B8A8_UNORM,
+		RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-blend" );
+	vk.smaa.ral_input_image = vk_smaa_create_texture(
+		glConfig.vidWidth, glConfig.vidHeight,
+		vk_attachment_format_to_ral( vk.color_format ),
+		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-input" );
 
 	// ── LUT textures (resolution-independent, static once uploaded) ─
-	vk_smaa_create_image_dedicated( AREATEX_WIDTH, AREATEX_HEIGHT,
-		VK_FORMAT_R8G8_UNORM,
-		VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-		&vk.smaa.area_image, &vk.smaa.area_view, &vk.smaa.area_memory );
-
-	vk_smaa_create_image_dedicated( SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT,
-		VK_FORMAT_R8_UNORM,
-		VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-		&vk.smaa.search_image, &vk.smaa.search_view, &vk.smaa.search_memory );
+	vk.smaa.ral_area_image = vk_smaa_create_texture(
+		AREATEX_WIDTH, AREATEX_HEIGHT, RAL_FORMAT_R8G8_UNORM,
+		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-area" );
+	vk.smaa.ral_search_image = vk_smaa_create_texture(
+		SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT, RAL_FORMAT_R8_UNORM,
+		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
+		"wired-img-smaa-search" );
+	if ( !vk.smaa.ral_edges_image || !vk.smaa.ral_blend_image
+			|| !vk.smaa.ral_input_image || !vk.smaa.ral_area_image
+			|| !vk.smaa.ral_search_image ) {
+		vk_smaa_release_resources();
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: failed to create direct RAL SMAA texture cohort" );
+		return;
+	}
 
 	// ── Samplers ────────────────────────────────────────────────────
 	memset( &sampler_desc, 0, sizeof( sampler_desc ) );
@@ -14693,99 +14041,31 @@ static void vk_smaa_alloc_resources( void )
 	vk.smaa.linear_sampler = vk_create_ral_sampler( &sampler_desc,
 		&vk.smaa.ral_linear_sampler );
 
-	// ── LUT data upload via staging buffer ──────────────────────────
-	staging_size = AREATEX_SIZE + SEARCHTEX_SIZE;
-	memset( &buf_desc, 0, sizeof( buf_desc ) );
-	buf_desc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	buf_desc.size = staging_size;
-	buf_desc.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-	buf_desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	VK_CHECK( qvkCreateBuffer( vk.device, &buf_desc, NULL, &staging_buf ) );
+	// ── LUT data upload via the shared portable staging transaction ─
+	memset( &region, 0, sizeof( region ) );
+	region.aspects = RAL_TEXTURE_ASPECT_COLOR;
+	region.imageRect.width = AREATEX_WIDTH;
+	region.imageRect.height = AREATEX_HEIGHT;
+	lutUploadReady = vk_ral_stage_texture_copy( vk.smaa.ral_area_image,
+		qfalse, 1u, &region, areaTexBytes, AREATEX_SIZE,
+		"vk_smaa_alloc_resources area LUT" );
+	region.imageRect.width = SEARCHTEX_WIDTH;
+	region.imageRect.height = SEARCHTEX_HEIGHT;
+	lutUploadReady = lutUploadReady && vk_ral_stage_texture_copy(
+		vk.smaa.ral_search_image, qfalse, 1u, &region,
+		searchTexBytes, SEARCHTEX_SIZE,
+		"vk_smaa_alloc_resources search LUT" );
 
-	qvkGetBufferMemoryRequirements( vk.device, staging_buf, &mem_req );
-	memset( &alloc_info, 0, sizeof( alloc_info ) );
-	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	alloc_info.allocationSize = mem_req.size;
-	alloc_info.memoryTypeIndex = find_memory_type( mem_req.memoryTypeBits,
-		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &staging_mem ) );
-	VK_CHECK( qvkBindBufferMemory( vk.device, staging_buf, staging_mem, 0 ) );
-	vk_ral_register_buffer( staging_buf, staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-	                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-	                        "vk.smaa.staging" );
-
-	VK_CHECK( qvkMapMemory( vk.device, staging_mem, 0, VK_WHOLE_SIZE, 0, (void **)&mapped ) );
-	memcpy( mapped, areaTexBytes, AREATEX_SIZE );
-	memcpy( mapped + AREATEX_SIZE, searchTexBytes, SEARCHTEX_SIZE );
-	qvkUnmapMemory( vk.device, staging_mem );
-
-	/* Adopt the renderer-owned LUT images before recording their upload so the
-	 * copy and both layout changes share one portable RAL authority. Sampling
-	 * groups are created later from these same native image/view identities. */
-	vk.smaa.ral_area_image = Ral_AdoptTextureExact( vk_ral_get_backend(),
-		(void *)vk.smaa.area_image, (void *)vk.smaa.area_view,
-		RAL_FORMAT_R8G8_UNORM, AREATEX_WIDTH, AREATEX_HEIGHT,
-		VK_IMAGE_ASPECT_COLOR_BIT,
-		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
-		"wired-img-smaa-area-upload" );
-	vk.smaa.ral_search_image = Ral_AdoptTextureExact( vk_ral_get_backend(),
-		(void *)vk.smaa.search_image, (void *)vk.smaa.search_view,
-		RAL_FORMAT_R8_UNORM, SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT,
-		VK_IMAGE_ASPECT_COLOR_BIT,
-		RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED,
-		"wired-img-smaa-search-upload" );
-
-	{
-		ralCommandBuffer_t *rcmd = NULL;
-		if ( vk.smaa.ral_area_image && vk.smaa.ral_search_image )
-			rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(),
-				RAL_QUEUE_GRAPHICS );
-		if ( rcmd == NULL ) {
-			R_LOG( rch_ral, SEV_ERROR, "%s: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping SMAA LUT upload + layout seeding\n", __func__ );
+	if ( lutUploadReady ) {
+		ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer(
+			vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
+		if ( !rcmd ) {
+			lutUploadReady = qfalse;
 		} else {
-			command_buffer = (VkCommandBuffer)Ral_GetCommandBufferHandle( rcmd );
-
-			memset( &region, 0, sizeof( region ) );
-			region.aspects = RAL_TEXTURE_ASPECT_COLOR;
-			region.bufferOffset = 0;
-			region.imageRect.width = AREATEX_WIDTH;
-			region.imageRect.height = AREATEX_HEIGHT;
-			lutUploadReady = vk_ral_copy_buffer_to_texture_exact( rcmd,
-				staging_buf, vk.smaa.ral_area_image, qfalse, 1u, &region );
-
-			region.bufferOffset = AREATEX_SIZE;
-			region.imageRect.width = SEARCHTEX_WIDTH;
-			region.imageRect.height = SEARCHTEX_HEIGHT;
-			lutUploadReady = lutUploadReady
-				&& vk_ral_copy_buffer_to_texture_exact( rcmd, staging_buf,
-					vk.smaa.ral_search_image, qfalse, 1u, &region );
-
-			// the edges/blend/input
-			// intermediate images are created with VK_IMAGE_LAYOUT_UNDEFINED.
-			// The per-frame SMAA passes expect them already in
-			// SHADER_READ_ONLY_OPTIMAL on entry (each frame's barriers declare
-			// that as the old layout), so without seeding the layout here the
-			// first frame's vkQueueSubmit fires one validation error per image
-			// (UNDEFINED vs SHADER_READ_ONLY_OPTIMAL). Seed it once on alloc;
-			// this runs on the boot path, the r_fbo flip rebuild, and the
-			// r_smaa 0->N live realloc — all three reach vk_smaa_alloc_resources.
-			record_image_layout_transition( command_buffer, vk.smaa.edges_image,
-				VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
-			record_image_layout_transition( command_buffer, vk.smaa.blend_image,
-				VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
-			record_image_layout_transition( command_buffer, vk.smaa.input_image,
-				VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
-
+			lutUploadReady = vk_ral_seed_smaa_intermediate_states( rcmd );
 			Ral_SubmitAndDispose( rcmd );
 		}
 	}
-
-	vk_ral_unregister_buffer( staging_buf );
-	qvkDestroyBuffer( vk.device, staging_buf, NULL );
-	qvkFreeMemory( vk.device, staging_mem, NULL );
 	if ( !lutUploadReady ) {
 		R_LOG( rch_ral, SEV_ERROR,
 			"SMAA LUT portable upload declined; disabling SMAA resources\n" );
@@ -14793,14 +14073,6 @@ static void vk_smaa_alloc_resources( void )
 		vk_smaa_release_resources();
 		return;
 	}
-
-	SET_OBJECT_NAME( vk.smaa.area_image,   "SMAA area LUT",        RAL_VULKAN_OBJECT_ROLE_IMAGE );
-	SET_OBJECT_NAME( vk.smaa.area_view,    "SMAA area LUT view",   RAL_VULKAN_OBJECT_ROLE_IMAGE_VIEW );
-	SET_OBJECT_NAME( vk.smaa.search_image, "SMAA search LUT",      RAL_VULKAN_OBJECT_ROLE_IMAGE );
-	SET_OBJECT_NAME( vk.smaa.search_view,  "SMAA search LUT view", RAL_VULKAN_OBJECT_ROLE_IMAGE_VIEW );
-	SET_OBJECT_NAME( vk.smaa.edges_image,  "SMAA edges image",     RAL_VULKAN_OBJECT_ROLE_IMAGE );
-	SET_OBJECT_NAME( vk.smaa.blend_image,  "SMAA blend image",     RAL_VULKAN_OBJECT_ROLE_IMAGE );
-	SET_OBJECT_NAME( vk.smaa.input_image,  "SMAA input copy",      RAL_VULKAN_OBJECT_ROLE_IMAGE );
 
 	vk.smaa.active = qtrue;
 
@@ -14940,10 +14212,9 @@ resource_fail:
 ================
 vk_smaa_release_resources
 
-Inverse of vk_smaa_alloc_resources: destroys the direct RAL sampling
-cohorts first, then every renderer-owned raw image/view/memory and the
-RAL samplers. Idempotent. No sampled child survives its texture wrapper,
-arena generation or raw Vulkan image parent.
+Inverse of vk_smaa_alloc_resources: destroys bind groups/views first, then the
+five direct texture parents and RAL samplers. Idempotent; no sampled child
+survives its texture or arena generation.
 
 Callers must vk_wait_idle() before entering this function so no
 in-flight command buffer is still referencing the resources.
@@ -14957,47 +14228,16 @@ static void vk_smaa_release_resources( void )
 {
 	vk_ral_release_smaa_sampler_cohorts();
 
-	if ( vk.smaa.edges_image != VK_NULL_HANDLE ) {
-		qvkDestroyImageView( vk.device, vk.smaa.edges_view, NULL );
-		qvkDestroyImage( vk.device, vk.smaa.edges_image, NULL );
-		qvkFreeMemory( vk.device, vk.smaa.edges_memory, NULL );
-		vk.smaa.edges_image  = VK_NULL_HANDLE;
-		vk.smaa.edges_view   = VK_NULL_HANDLE;
-		vk.smaa.edges_memory = VK_NULL_HANDLE;
-	}
-	if ( vk.smaa.blend_image != VK_NULL_HANDLE ) {
-		qvkDestroyImageView( vk.device, vk.smaa.blend_view, NULL );
-		qvkDestroyImage( vk.device, vk.smaa.blend_image, NULL );
-		qvkFreeMemory( vk.device, vk.smaa.blend_memory, NULL );
-		vk.smaa.blend_image  = VK_NULL_HANDLE;
-		vk.smaa.blend_view   = VK_NULL_HANDLE;
-		vk.smaa.blend_memory = VK_NULL_HANDLE;
-	}
-	if ( vk.smaa.input_image != VK_NULL_HANDLE ) {
-		qvkDestroyImageView( vk.device, vk.smaa.input_view, NULL );
-		qvkDestroyImage( vk.device, vk.smaa.input_image, NULL );
-		qvkFreeMemory( vk.device, vk.smaa.input_memory, NULL );
-		vk.smaa.input_image  = VK_NULL_HANDLE;
-		vk.smaa.input_view   = VK_NULL_HANDLE;
-		vk.smaa.input_memory = VK_NULL_HANDLE;
-	}
-
-	if ( vk.smaa.area_image != VK_NULL_HANDLE ) {
-		qvkDestroyImageView( vk.device, vk.smaa.area_view, NULL );
-		qvkDestroyImage( vk.device, vk.smaa.area_image, NULL );
-		qvkFreeMemory( vk.device, vk.smaa.area_memory, NULL );
-		vk.smaa.area_image  = VK_NULL_HANDLE;
-		vk.smaa.area_view   = VK_NULL_HANDLE;
-		vk.smaa.area_memory = VK_NULL_HANDLE;
-	}
-	if ( vk.smaa.search_image != VK_NULL_HANDLE ) {
-		qvkDestroyImageView( vk.device, vk.smaa.search_view, NULL );
-		qvkDestroyImage( vk.device, vk.smaa.search_image, NULL );
-		qvkFreeMemory( vk.device, vk.smaa.search_memory, NULL );
-		vk.smaa.search_image  = VK_NULL_HANDLE;
-		vk.smaa.search_view   = VK_NULL_HANDLE;
-		vk.smaa.search_memory = VK_NULL_HANDLE;
-	}
+	#define RELEASE_SMAA_TEXTURE( texture ) do { \
+		if ( (texture) ) Ral_DestroyTexture( (texture) ); \
+		(texture) = NULL; \
+	} while ( 0 )
+	RELEASE_SMAA_TEXTURE( vk.smaa.ral_edges_image );
+	RELEASE_SMAA_TEXTURE( vk.smaa.ral_blend_image );
+	RELEASE_SMAA_TEXTURE( vk.smaa.ral_input_image );
+	RELEASE_SMAA_TEXTURE( vk.smaa.ral_area_image );
+	RELEASE_SMAA_TEXTURE( vk.smaa.ral_search_image );
+	#undef RELEASE_SMAA_TEXTURE
 
 	if ( vk.smaa.ral_point_sampler ) {
 		Ral_DestroySampler( vk.smaa.ral_point_sampler );
@@ -15048,27 +14288,23 @@ static void vk_shadow_descriptor_pool_invalidate( void )
 	}
 }
 
-static qboolean vk_shadow_refresh_buffer_group(
-		ralBindGroup_t **field, VkDescriptorSet *nativeMirror,
+static ralBindGroup_t *vk_shadow_create_ral_buffer_group_candidate(
 		ralBindGroupLayout_t *layout, ralBindType_t type,
-		VkBuffer nativeBuffer, uint64_t bufferRange, const char *label )
+		ralBuffer_t *buffer, uint64_t bufferRange, const char *label,
+		VkDescriptorSet *outNative )
 {
-	ralBuffer_t *buffer;
 	ralBindingValue_t value;
 	ralBindGroupCreateInfo_t createInfo;
 	ralBindGroup_t *candidate;
-	if ( !field || !nativeMirror || !layout || !vk.ral_descriptor_arena
+	if ( outNative ) *outNative = VK_NULL_HANDLE;
+	if ( !outNative || !layout || !vk.ral_descriptor_arena
+			|| !Ral_BindGroupArenaReceiptValid(
+				&vk.ral_descriptor_arena_receipt )
 			|| ( type != RAL_BIND_UNIFORM_BUFFER
 				&& type != RAL_BIND_STORAGE_BUFFER )
-			|| nativeBuffer == VK_NULL_HANDLE || bufferRange == 0u ) return qfalse;
-	if ( *field && *nativeMirror != VK_NULL_HANDLE
-			&& Ral_GetBindGroupHandle( *field ) == (void *)*nativeMirror )
-		return qtrue;
-	vk_shadow_destroy_group( field );
-	*nativeMirror = VK_NULL_HANDLE;
-	buffer = vk_ral_lookup_buffer( nativeBuffer );
-	if ( !buffer || Ral_GetBufferHandle( buffer ) != (void *)nativeBuffer
-			|| bufferRange > Ral_GetBufferSize( buffer ) ) return qfalse;
+			|| !buffer || bufferRange == 0u ) return NULL;
+	if ( !Ral_GetBufferHandle( buffer )
+			|| bufferRange > Ral_GetBufferSize( buffer ) ) return NULL;
 	memset( &value, 0, sizeof( value ) );
 	value.binding = 0u;
 	value.type = type;
@@ -15082,9 +14318,34 @@ static qboolean vk_shadow_refresh_buffer_group(
 	createInfo.arena = vk.ral_descriptor_arena;
 	createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;
 	candidate = Ral_CreateBindGroup( vk_ral_get_backend(), &createInfo );
+	if ( !candidate ) return NULL;
+	*outNative = (VkDescriptorSet)Ral_GetBindGroupHandle( candidate );
+	if ( *outNative == VK_NULL_HANDLE ) {
+		Ral_DestroyBindGroup( candidate );
+		return NULL;
+	}
+	return candidate;
+}
+
+static qboolean vk_shadow_refresh_ral_buffer_group(
+		ralBindGroup_t **field, VkDescriptorSet *nativeMirror,
+		ralBindGroupLayout_t *layout, ralBindType_t type,
+		ralBuffer_t *buffer, uint64_t bufferRange, const char *label )
+{
+	ralBindGroup_t *candidate;
+	ralBindGroup_t *retired;
+	VkDescriptorSet candidateNative;
+	if ( !field || !nativeMirror ) return qfalse;
+	if ( *field && *nativeMirror != VK_NULL_HANDLE
+			&& Ral_GetBindGroupHandle( *field ) == (void *)*nativeMirror )
+		return qtrue;
+	candidate = vk_shadow_create_ral_buffer_group_candidate( layout, type,
+		buffer, bufferRange, label, &candidateNative );
 	if ( !candidate ) return qfalse;
+	retired = *field;
 	*field = candidate;
-	*nativeMirror = (VkDescriptorSet)Ral_GetBindGroupHandle( candidate );
+	*nativeMirror = candidateNative;
+	if ( retired ) Ral_DestroyBindGroup( retired );
 	return qtrue;
 }
 
@@ -15121,7 +14382,7 @@ Creates the CSM depth target: a 4-layer 2D-array
 D32 image on dedicated memory, its 2D_ARRAY sampling view + 4 per-cascade 2D
 views, the border-clamp NEAREST sampler, the depth-only render pass, 4
 framebuffers (one per cascade layer), and the depth-only caster pipeline + its
-push-constant pipeline layout. Idempotent (no-op if vk.shadowMap.image is
+push-constant pipeline layout. Idempotent (no-op if vk.shadowMap.ral_image is
 already live). Re-derives vk.shadowMap.active / .size from r_shadows /
 r_shadowMapSize at call time; if shadows are off or the FBO is inactive it
 leaves .active == qfalse and creates nothing (the if ( active ) gate below).
@@ -15137,7 +14398,7 @@ vk_update_post_process_pipelines (live r_shadows / r_shadowMapSize).
 */
 static void vk_shadow_alloc_resources( void )
 {
-	if ( vk.shadowMap.image != VK_NULL_HANDLE )
+	if ( vk.shadowMap.ral_image )
 		return; // already allocated (idempotent)
 
 	{
@@ -15149,62 +14410,28 @@ static void vk_shadow_alloc_resources( void )
 		if ( vk.shadowMap.size > 4096 ) vk.shadowMap.size = 4096;
 	}
 	if ( vk.shadowMap.active ) {
-		VkImageCreateInfo img_desc;
-		VkImageViewCreateInfo view_desc;
+		ralTextureCreateInfo_t texture_desc;
 		ralSamplerCreateInfo_t sampler_desc;
-		VkMemoryRequirements mem_req;
-		VkMemoryAllocateInfo alloc_info;
-		VkPushConstantRange pushRange;
-		VkPipelineLayoutCreateInfo plDesc;
 		uint32_t mapSize = vk.shadowMap.size;
-		uint32_t mem_type;
-		int casc;
 
 		// depth image — 4-layer 2D array (one layer per CSM cascade)
-		memset( &img_desc, 0, sizeof( img_desc ) );
-		img_desc.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-		img_desc.imageType = VK_IMAGE_TYPE_2D;
-		img_desc.format = vk.depth_format;
-		img_desc.extent.width = mapSize;
-		img_desc.extent.height = mapSize;
-		img_desc.extent.depth = 1;
-		img_desc.mipLevels = 1;
-		img_desc.arrayLayers = SHADOWMAP_MAX_CASCADES;
-		img_desc.samples = VK_SAMPLE_COUNT_1_BIT;
-		img_desc.tiling = VK_IMAGE_TILING_OPTIMAL;
-		img_desc.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-		img_desc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-		VK_CHECK( qvkCreateImage( vk.device, &img_desc, NULL, &vk.shadowMap.image ) );
-		vk_get_image_memory_requirements( vk.shadowMap.image, &mem_req );
-
-		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		alloc_info.pNext = NULL;
-		alloc_info.allocationSize = mem_req.size;
-		mem_type = find_memory_type( mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-		alloc_info.memoryTypeIndex = mem_type;
-		VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &vk.shadowMap.memory ) );
-		VK_CHECK( qvkBindImageMemory( vk.device, vk.shadowMap.image, vk.shadowMap.memory, 0 ) );
-
-		// sampling view — 2D_ARRAY, all cascades (bound to descriptor set 3)
-		memset( &view_desc, 0, sizeof( view_desc ) );
-		view_desc.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		view_desc.image = vk.shadowMap.image;
-		view_desc.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-		view_desc.format = vk.depth_format;
-		view_desc.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-		view_desc.subresourceRange.levelCount = 1;
-		view_desc.subresourceRange.baseArrayLayer = 0;
-		view_desc.subresourceRange.layerCount = SHADOWMAP_MAX_CASCADES;
-		VK_CHECK( qvkCreateImageView( vk.device, &view_desc, NULL, &vk.shadowMap.view ) );
-
-		// per-cascade 2D views — framebuffer attachments
-		for ( casc = 0; casc < SHADOWMAP_MAX_CASCADES; casc++ ) {
-			view_desc.viewType = VK_IMAGE_VIEW_TYPE_2D;
-			view_desc.subresourceRange.baseArrayLayer = casc;
-			view_desc.subresourceRange.layerCount = 1;
-			VK_CHECK( qvkCreateImageView( vk.device, &view_desc, NULL, &vk.shadowMap.layerView[casc] ) );
-		}
+		memset( &texture_desc, 0, sizeof( texture_desc ) );
+		texture_desc.type = RAL_TEXTURE_2D_ARRAY;
+		texture_desc.format = vk_attachment_format_to_ral( vk.depth_format );
+		texture_desc.width = mapSize;
+		texture_desc.height = mapSize;
+		texture_desc.depthOrArrayLayers = SHADOWMAP_MAX_CASCADES;
+		texture_desc.mipLevels = 1u;
+		texture_desc.sampleCount = 1u;
+		texture_desc.usage = RAL_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT
+			| RAL_TEXTURE_USAGE_SAMPLED;
+		texture_desc.memory = RAL_MEMORY_DEVICE_LOCAL;
+		texture_desc.debugName = "ral-shadowmap";
+		vk.shadowMap.ral_image = Ral_CreateTexture( vk_ral_get_backend(),
+			&texture_desc );
+		if ( !vk.shadowMap.ral_image )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create direct RAL shadow array texture" );
 
 		// nearest sampler with border clamp (outside shadow map = lit)
 		memset( &sampler_desc, 0, sizeof( sampler_desc ) );
@@ -15222,8 +14449,7 @@ static void vk_shadow_alloc_resources( void )
 			&vk.shadowMap.ral_sampler );
 
 		// The cascaded shadow depth pass is RAL dynamic-rendering only (the K5
-		// migration): each cascade's layerView[casc] is adopted into the RAL array
-		// texture below (Ral_AdoptArrayTexture) and selected per-cascade via
+		// migration): each RAL-owned layer view is selected per-cascade via
 		// depthAttachmentLayerIndex — no legacy VkRenderPass / per-cascade
 		// VkFramebuffer is built anymore.
 
@@ -15235,54 +14461,22 @@ static void vk_shadow_alloc_resources( void )
 		// layouts are created here (not the boot sweep) because vk_shadow_alloc_resources
 		// re-runs on every live r_shadows / r_shadowMapSize toggle; the layout must
 		// carry both sets BEFORE the RAL adopt so the sibling reflects them (VUID-07987).
-		vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, &vk.shadowMap.set_layout_entmat );
-		vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_VERTEX_BIT, &vk.shadowMap.set_layout_cascademvp );
-		{
-			ralBindEntry_t entry;
-			memset( &entry, 0, sizeof( entry ) );
-			entry.binding = 0u;
-			entry.count = 1u;
-			entry.type = RAL_BIND_STORAGE_BUFFER;
-			entry.stageFlags = RAL_STAGE_VERTEX;
-			vk.shadowMap.ral_bgl_entmat = Ral_AdoptBindGroupLayout(
-				vk_ral_get_backend(), vk.shadowMap.set_layout_entmat, 1u, &entry,
-				"wired-shadow-entmat-set-layout" );
-			entry.type = RAL_BIND_UNIFORM_BUFFER;
-			entry.dynamicOffset = qtrue;
-			vk.shadowMap.ral_bgl_cascademvp = Ral_AdoptBindGroupLayout(
-				vk_ral_get_backend(), vk.shadowMap.set_layout_cascademvp, 1u, &entry,
-				"wired-shadow-cascade-mvp-set-layout" );
-			if ( !vk.shadowMap.ral_bgl_entmat || !vk.shadowMap.ral_bgl_cascademvp )
-				ri.Terminate( TERM_UNRECOVERABLE,
-					"Vulkan: shadow RAL bind-group-layout adoption failed" );
-		}
+		vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			VK_SHADER_STAGE_VERTEX_BIT, &vk.shadowMap.ral_bgl_entmat,
+			&vk.shadowMap.set_layout_entmat, "wired-shadow-entmat-set-layout" );
+		vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+			VK_SHADER_STAGE_VERTEX_BIT, &vk.shadowMap.ral_bgl_cascademvp,
+			&vk.shadowMap.set_layout_cascademvp, "wired-shadow-cascade-mvp-set-layout" );
 
 		{
-			VkDescriptorSetLayout shadowSets[2] = { vk.shadowMap.set_layout_entmat, vk.shadowMap.set_layout_cascademvp };
-
-			memset( &plDesc, 0, sizeof( plDesc ) );
-			plDesc.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-			plDesc.setLayoutCount = 2;
-			plDesc.pSetLayouts = shadowSets;
-			plDesc.pushConstantRangeCount = 0;
-			plDesc.pPushConstantRanges = NULL;
-			VK_CHECK( qvkCreatePipelineLayout( vk.device, &plDesc, NULL, &vk.shadowMap.depthLayout ) );
+			const ralBindGroupLayout_t *shadowSets[2] = {
+				vk.shadowMap.ral_bgl_entmat,
+				vk.shadowMap.ral_bgl_cascademvp
+			};
+			vk_create_direct_pipeline_layout( shadowSets, ARRAY_LEN( shadowSets ),
+				0u, 0u, "wired-pl-shadow-depth",
+				&vk.shadowMap.ral_depthLayout, &vk.shadowMap.depthLayout );
 		}
-
-		// Adopt the fresh layout as its RAL sibling HERE (not only the boot
-		// pipeline-layout sweep): vk_shadow_alloc_resources re-creates depthLayout
-		// on every live r_shadows / r_shadowMapSize toggle, so the boot-sweep
-		// sibling would be stale/NULL. The gpInfo-derive create below identity-shares
-		// this layout (externalLayout) — it MUST carry both sets (set 0 entity-matrix
-		// SSBO + set 1 cascadeMVP UBO) and zero push ranges, or the RAL shadow
-		// pipeline is built against a mismatched layout (VUID-07987).
-		// Idempotent: destroys + re-adopts.
-		vk.shadowMap.ral_depthLayout = Ral_AdoptOwnedPipelineLayout(
-			vk_ral_get_backend(), vk.shadowMap.depthLayout,
-			"wired-pl-shadow-depth" );
-		if ( !vk.shadowMap.ral_depthLayout )
-			ri.Terminate( TERM_UNRECOVERABLE,
-				"Vulkan: shadow depth pipeline-layout ownership transfer failed" );
 
 		// Per-frame cascadeMVP UBO buffers (set 1) — host-coherent, holding
 		// SHADOWMAP_MAX_CASCADES PAD-aligned mat4 slots, written + bound per cascade
@@ -15293,34 +14487,22 @@ static void vk_shadow_alloc_resources( void )
 		// generation, mirroring the entity-matrix SSBO descriptor's timing without
 		// retaining raw descriptor allocation authority.
 		{
-			const VkDeviceSize slotStride = PAD( 64u, vk.uniform_alignment );
-			const VkDeviceSize cmBytes    = slotStride * SHADOWMAP_MAX_CASCADES;
+			const uint64_t slotStride = PAD( 64u, vk.uniform_alignment );
+			const uint64_t cmBytes    = slotStride * SHADOWMAP_MAX_CASCADES;
 			int ci;
 			for ( ci = 0; ci < NUM_COMMAND_BUFFERS; ci++ ) {
-				if ( vk.shadowMap.cascadeMvpBuf[ci] == VK_NULL_HANDLE ) {
-					VkBufferCreateInfo   cmd0;
-					VkMemoryRequirements cmReqs;
-					VkMemoryAllocateInfo cmMem;
-					memset( &cmd0, 0, sizeof( cmd0 ) );
-					cmd0.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-					cmd0.size        = cmBytes;
-					cmd0.usage       = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-					cmd0.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-					VK_CHECK( qvkCreateBuffer( vk.device, &cmd0, NULL, &vk.shadowMap.cascadeMvpBuf[ci] ) );
-					qvkGetBufferMemoryRequirements( vk.device, vk.shadowMap.cascadeMvpBuf[ci], &cmReqs );
-					memset( &cmMem, 0, sizeof( cmMem ) );
-					cmMem.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-					cmMem.allocationSize  = cmReqs.size;
-					cmMem.memoryTypeIndex = find_memory_type( cmReqs.memoryTypeBits,
-						VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-					VK_CHECK( qvkAllocateMemory( vk.device, &cmMem, NULL, &vk.shadowMap.cascadeMvpMem[ci] ) );
-					VK_CHECK( qvkMapMemory( vk.device, vk.shadowMap.cascadeMvpMem[ci], 0, VK_WHOLE_SIZE, 0, &vk.shadowMap.cascadeMvpPtr[ci] ) );
-					qvkBindBufferMemory( vk.device, vk.shadowMap.cascadeMvpBuf[ci], vk.shadowMap.cascadeMvpMem[ci], 0 );
-					vk_ral_register_buffer( vk.shadowMap.cascadeMvpBuf[ci], cmBytes,
-						VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-						VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-						"vk.shadowMap.cascadeMvpBuf" );
-					SET_OBJECT_NAME( vk.shadowMap.cascadeMvpBuf[ci], "shadow cascadeMVP UBO", RAL_VULKAN_OBJECT_ROLE_BUFFER );
+				if ( !vk.shadowMap.ral_cascadeMvpBuf[ci] ) {
+					VK_RalBufferShadowInit( &vk_shadow_cascade_mvp_shadows[ci] );
+					if ( !VK_RalBufferShadowEnsure(
+							&vk_shadow_cascade_mvp_shadows[ci],
+							vk_ral_get_backend(), cmBytes,
+							RAL_BUFFER_UNIFORM, "wired-shadow-cascade-mvp" ) )
+						ri.Terminate( TERM_UNRECOVERABLE,
+							"Vulkan: failed to create shadow cascade-MVP RAL buffer %u", ci );
+					vk.shadowMap.ral_cascadeMvpBuf[ci] =
+						vk_shadow_cascade_mvp_shadows[ci].buffer;
+					vk.shadowMap.cascadeMvpPtr[ci] =
+						vk_shadow_cascade_mvp_shadows[ci].bytes;
 				}
 				// The pool was reset by the caller path that re-runs this; force the
 				// descriptor to re-allocate lazily in vk_render_shadow_map.
@@ -15475,77 +14657,40 @@ static void vk_shadow_alloc_resources( void )
 		if ( vk.iqmGpu.available ) {
 			// set 2 = bone matrices UBO (UNIFORM_BUFFER_DYNAMIC, VS). The skinned VS
 			// reads boneMats[128*3]; the host binds a per-caster ring slot.
-			vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_VERTEX_BIT, &vk.shadowMap.set_layout_bones );
+			vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+				VK_SHADER_STAGE_VERTEX_BIT, &vk.shadowMap.ral_bgl_bones,
+				&vk.shadowMap.set_layout_bones, "wired-shadow-bones-set-layout" );
 			{
-				ralBindEntry_t entry;
-				memset( &entry, 0, sizeof( entry ) );
-				entry.binding = 0u;
-				entry.count = 1u;
-				entry.type = RAL_BIND_UNIFORM_BUFFER;
-				entry.stageFlags = RAL_STAGE_VERTEX;
-				entry.dynamicOffset = qtrue;
-				vk.shadowMap.ral_bgl_bones = Ral_AdoptBindGroupLayout(
-					vk_ral_get_backend(), vk.shadowMap.set_layout_bones, 1u, &entry,
-					"wired-shadow-bones-set-layout" );
-				if ( !vk.shadowMap.ral_bgl_bones )
-					ri.Terminate( TERM_UNRECOVERABLE,
-						"Vulkan: shadow bone RAL bind-group-layout adoption failed" );
-			}
-			{
-				VkDescriptorSetLayout skinnedSets[3] = {
-					vk.shadowMap.set_layout_entmat,
-					vk.shadowMap.set_layout_cascademvp,
-					vk.shadowMap.set_layout_bones
+				const ralBindGroupLayout_t *skinnedSets[3] = {
+					vk.shadowMap.ral_bgl_entmat,
+					vk.shadowMap.ral_bgl_cascademvp,
+					vk.shadowMap.ral_bgl_bones
 				};
-				VkPipelineLayoutCreateInfo slpl;
-				memset( &slpl, 0, sizeof( slpl ) );
-				slpl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-				slpl.setLayoutCount = 3;
-				slpl.pSetLayouts = skinnedSets;
-				slpl.pushConstantRangeCount = 0;
-				slpl.pPushConstantRanges = NULL;
-				VK_CHECK( qvkCreatePipelineLayout( vk.device, &slpl, NULL, &vk.shadowMap.depthLayoutSkinned ) );
+				vk_create_direct_pipeline_layout( skinnedSets,
+					ARRAY_LEN( skinnedSets ), 0u, 0u,
+					"wired-pl-shadow-depth-skinned",
+					&vk.shadowMap.ral_depthLayoutSkinned,
+					&vk.shadowMap.depthLayoutSkinned );
 			}
-			vk.shadowMap.ral_depthLayoutSkinned = Ral_AdoptOwnedPipelineLayout(
-				vk_ral_get_backend(), vk.shadowMap.depthLayoutSkinned,
-				"wired-pl-shadow-depth-skinned" );
-			if ( !vk.shadowMap.ral_depthLayoutSkinned )
-				ri.Terminate( TERM_UNRECOVERABLE,
-					"Vulkan: skinned shadow pipeline-layout ownership transfer failed" );
 
-			// Per-frame bone ring (host-coherent), mirroring vk.iqmGpu.bone_buffer.
+			// Per-frame bone ring (host-coherent), mirroring the RAL-owned IQM bone ring.
 			// Each captured caster sub-allocates a PAD-aligned IQM_BONE_UBO_SIZE item
 			// and binds it with a dynamic offset. Sized generously (256 casters).
 			{
-				const VkDeviceSize boneItem = PAD( (uint32_t)IQM_BONE_UBO_SIZE, vk.uniform_alignment );
-				const VkDeviceSize ringBytes = boneItem * 256;
+				const uint64_t boneItem = PAD( (uint32_t)IQM_BONE_UBO_SIZE, vk.uniform_alignment );
+				const uint64_t ringBytes = boneItem * 256u;
 				int bi;
 				vk.shadowMap.boneRingSize = (uint32_t)ringBytes;
 				for ( bi = 0; bi < NUM_COMMAND_BUFFERS; bi++ ) {
-					if ( vk.shadowMap.boneBuf[bi] == VK_NULL_HANDLE ) {
-						VkBufferCreateInfo   bbd;
-						VkMemoryRequirements bbr;
-						VkMemoryAllocateInfo bbm;
-						memset( &bbd, 0, sizeof( bbd ) );
-						bbd.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-						bbd.size        = ringBytes;
-						bbd.usage       = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-						bbd.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-						VK_CHECK( qvkCreateBuffer( vk.device, &bbd, NULL, &vk.shadowMap.boneBuf[bi] ) );
-						qvkGetBufferMemoryRequirements( vk.device, vk.shadowMap.boneBuf[bi], &bbr );
-						memset( &bbm, 0, sizeof( bbm ) );
-						bbm.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-						bbm.allocationSize  = bbr.size;
-						bbm.memoryTypeIndex = find_memory_type( bbr.memoryTypeBits,
-							VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-						VK_CHECK( qvkAllocateMemory( vk.device, &bbm, NULL, &vk.shadowMap.boneMem[bi] ) );
-						qvkBindBufferMemory( vk.device, vk.shadowMap.boneBuf[bi], vk.shadowMap.boneMem[bi], 0 );
-						VK_CHECK( qvkMapMemory( vk.device, vk.shadowMap.boneMem[bi], 0, VK_WHOLE_SIZE, 0, &vk.shadowMap.bonePtr[bi] ) );
-						vk_ral_register_buffer( vk.shadowMap.boneBuf[bi], ringBytes,
-							VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-							VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-							"vk.shadowMap.boneBuf" );
-						SET_OBJECT_NAME( vk.shadowMap.boneBuf[bi], "shadow skinned-IQM bone ring", RAL_VULKAN_OBJECT_ROLE_BUFFER );
+					if ( !vk.shadowMap.ral_boneBuf[bi] ) {
+						VK_RalBufferShadowInit( &vk_shadow_bone_shadows[bi] );
+						if ( !VK_RalBufferShadowEnsure( &vk_shadow_bone_shadows[bi],
+								vk_ral_get_backend(), ringBytes, RAL_BUFFER_UNIFORM,
+								"wired-shadow-bone-ring" ) )
+							ri.Terminate( TERM_UNRECOVERABLE,
+								"Vulkan: failed to create shadow bone RAL buffer %u", bi );
+						vk.shadowMap.ral_boneBuf[bi] = vk_shadow_bone_shadows[bi].buffer;
+						vk.shadowMap.bonePtr[bi] = vk_shadow_bone_shadows[bi].bytes;
 					}
 					// Force lazy descriptor (re)alloc in vk_render_shadow_map (pool reset).
 					vk.shadowMap.boneDesc[bi] = VK_NULL_HANDLE;
@@ -15683,12 +14828,11 @@ static void vk_shadow_alloc_resources( void )
 		// resources can re-alloc before the bindless subsystem on some paths) skip the
 		// pipeline this cycle — the alpha-test draw self-gates on the pipeline existing.
 		if ( vk_ral_get_bindless_layout() != NULL ) {
-			VkDescriptorSetLayout atestSets[3] = {
-				vk.shadowMap.set_layout_entmat,
-				vk.shadowMap.set_layout_cascademvp,
-				(VkDescriptorSetLayout)Ral_GetBindGroupLayoutHandle( vk_ral_get_bindless_layout() )
+			const ralBindGroupLayout_t *atestSets[3] = {
+				vk.shadowMap.ral_bgl_entmat,
+				vk.shadowMap.ral_bgl_cascademvp,
+				vk_ral_get_bindless_layout()
 			};
-			VkPipelineLayoutCreateInfo aplDesc;
 			VkPipelineShaderStageCreateInfo            astages[2];
 			VkVertexInputBindingDescription            avb;
 			VkVertexInputAttributeDescription          ava[3];
@@ -15703,19 +14847,10 @@ static void vk_shadow_alloc_resources( void )
 			VkDynamicState                             adynStates[3];
 			VkGraphicsPipelineCreateInfo               agp;
 
-			memset( &aplDesc, 0, sizeof( aplDesc ) );
-			aplDesc.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-			aplDesc.setLayoutCount = 3;
-			aplDesc.pSetLayouts = atestSets;
-			aplDesc.pushConstantRangeCount = 0;
-			aplDesc.pPushConstantRanges = NULL;
-			VK_CHECK( qvkCreatePipelineLayout( vk.device, &aplDesc, NULL, &vk.shadowMap.depthLayoutAtest ) );
-			vk.shadowMap.ral_depthLayoutAtest = Ral_AdoptOwnedPipelineLayout(
-				vk_ral_get_backend(), vk.shadowMap.depthLayoutAtest,
-				"wired-pl-shadow-depth-atest" );
-			if ( !vk.shadowMap.ral_depthLayoutAtest )
-				ri.Terminate( TERM_UNRECOVERABLE,
-					"Vulkan: alpha-tested shadow pipeline-layout ownership transfer failed" );
+			vk_create_direct_pipeline_layout( atestSets, ARRAY_LEN( atestSets ),
+				0u, 0u, "wired-pl-shadow-depth-atest",
+				&vk.shadowMap.ral_depthLayoutAtest,
+				&vk.shadowMap.depthLayoutAtest );
 
 			memset( astages, 0, sizeof( astages ) );
 			astages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -15817,27 +14952,6 @@ static void vk_shadow_alloc_resources( void )
 
 		vk.shadowMap.casterBuiltSurfaces = NULL; // force lazy rebuild for the current world
 
-		SET_OBJECT_NAME( vk.shadowMap.image, "shadow map depth array (4 cascades)", RAL_VULKAN_OBJECT_ROLE_IMAGE );
-		// Adopt the 4-layer depth array as a dynamic-rendering sibling (K4
-		// Ral_AdoptArrayTexture): defaultView = the full-array sampling view
-		// (vk.shadowMap.view), layerViews = the per-cascade attachment views
-		// (vk.shadowMap.layerView[]). vk_render_shadow_map's per-cascade
-		// Ral_BeginRendering then selects layerView[casc] via
-		// depthAttachmentLayerIndex. Adopted HERE (not the static boot sweep)
-		// because the shadow map is created lazily on the r_shadows toggle /
-		// vid_restart — same adopt-at-creation lifecycle as the capture image.
-		// DEPTH-only aspect → the stencil auto-bind stays off.
-		if ( vk.shadowMap.ral_image ) { Ral_DestroyTexture( vk.shadowMap.ral_image ); vk.shadowMap.ral_image = NULL; }
-		vk.shadowMap.ral_image = Ral_AdoptArrayTexture( vk_ral_get_backend(),
-			(void*)vk.shadowMap.image, (void*)vk.shadowMap.view,
-			(const void *const *)vk.shadowMap.layerView, SHADOWMAP_MAX_CASCADES,
-			vk_attachment_format_to_ral( vk.depth_format ),
-			vk.shadowMap.size, vk.shadowMap.size, VK_IMAGE_ASPECT_DEPTH_BIT,
-			"ral-shadowmap" );
-		// Same invariant as ral_depthPipeline above — the RAL-only shadow pass
-		// needs a valid depth attachment to render into. Fatal on NULL.
-		if ( vk.shadowMap.ral_image == NULL )
-			ri.Terminate( TERM_UNRECOVERABLE, "Vulkan: shadow RAL array-texture adoption failed (Ral_AdoptArrayTexture returned NULL)" );
 	}
 }
 #endif
@@ -15851,7 +14965,7 @@ vk_shadow_release_resources
 Inverse of vk_shadow_alloc_resources: destroys
 every shadow-owned image / view / framebuffer / sampler / memory / render pass
 / pipeline / pipeline-layout / caster buffer, then nulls each field individually
-(NOT memset( &vk.shadowMap, 0, ... )). Idempotent (no-op if vk.shadowMap.image
+(NOT memset( &vk.shadowMap, 0, ... )). Idempotent (no-op if vk.shadowMap.ral_image
 is already gone).
 
 The sampled shadow view is borrowed by the engine-resources group. Retire that
@@ -15867,26 +14981,14 @@ static void vk_shadow_release_resources( void )
 	vk_forwardplus_lit_invalidate_sets();
 	vk_ral_release_engine_resources_bindgroup();
 	vk_shadow_descriptor_pool_invalidate();
-	if ( vk.shadowMap.image ) {
-		int casc;
-		// Adopted RAL sibling (ownsImage=qfalse) — free the wrapper before the
-		// underlying VkImage/views it references go away.
-		if ( vk.shadowMap.ral_image ) {
-			Ral_DestroyTexture( vk.shadowMap.ral_image );
-			vk.shadowMap.ral_image = NULL;
-		}
-		qvkDestroyImage( vk.device, vk.shadowMap.image, NULL );
-		qvkDestroyImageView( vk.device, vk.shadowMap.view, NULL );
-		for ( casc = 0; casc < SHADOWMAP_MAX_CASCADES; casc++ ) {
-			if ( vk.shadowMap.layerView[casc] )
-				qvkDestroyImageView( vk.device, vk.shadowMap.layerView[casc], NULL );
-		}
+	if ( vk.shadowMap.ral_image ) {
+		Ral_DestroyTexture( vk.shadowMap.ral_image );
+		vk.shadowMap.ral_image = NULL;
 		if ( vk.shadowMap.ral_sampler ) {
 			Ral_DestroySampler( vk.shadowMap.ral_sampler );
 			vk.shadowMap.ral_sampler = NULL;
 			vk.shadowMap.sampler = VK_NULL_HANDLE;
 		}
-		qvkFreeMemory( vk.device, vk.shadowMap.memory, NULL );
 		// Descriptor groups are already gone. Destroy pipeline children, the
 		// RAL-owned native pipeline layouts, adopted BGL wrappers and finally native
 		// set layouts in strict child-before-parent order.
@@ -15899,92 +15001,48 @@ static void vk_shadow_release_resources( void )
 		if ( vk.shadowMap.ral_bgl_bones ) { Ral_DestroyBindGroupLayout( vk.shadowMap.ral_bgl_bones ); vk.shadowMap.ral_bgl_bones = NULL; }
 		if ( vk.shadowMap.ral_bgl_cascademvp ) { Ral_DestroyBindGroupLayout( vk.shadowMap.ral_bgl_cascademvp ); vk.shadowMap.ral_bgl_cascademvp = NULL; }
 		if ( vk.shadowMap.ral_bgl_entmat ) { Ral_DestroyBindGroupLayout( vk.shadowMap.ral_bgl_entmat ); vk.shadowMap.ral_bgl_entmat = NULL; }
-		if ( vk.shadowMap.set_layout_bones ) {
-			qvkDestroyDescriptorSetLayout( vk.device, vk.shadowMap.set_layout_bones, NULL );
-			vk.shadowMap.set_layout_bones = VK_NULL_HANDLE;
-		}
-		if ( vk.shadowMap.set_layout_entmat ) {
-			qvkDestroyDescriptorSetLayout( vk.device, vk.shadowMap.set_layout_entmat, NULL );
-			vk.shadowMap.set_layout_entmat = VK_NULL_HANDLE;
-		}
+		vk.shadowMap.set_layout_bones = VK_NULL_HANDLE;
+		vk.shadowMap.set_layout_entmat = VK_NULL_HANDLE;
 		// cascadeMVP UBO set layout + per-frame buffers (descriptor sets freed
 		// by the pool). The buffers are destroyed here (not pool-owned).
-		if ( vk.shadowMap.set_layout_cascademvp ) {
-			qvkDestroyDescriptorSetLayout( vk.device, vk.shadowMap.set_layout_cascademvp, NULL );
-			vk.shadowMap.set_layout_cascademvp = VK_NULL_HANDLE;
-		}
+		vk.shadowMap.set_layout_cascademvp = VK_NULL_HANDLE;
 		{
 			int ci;
 			for ( ci = 0; ci < NUM_COMMAND_BUFFERS; ci++ ) {
-				if ( vk.shadowMap.cascadeMvpBuf[ci] != VK_NULL_HANDLE ) {
-					vk_ral_unregister_buffer( vk.shadowMap.cascadeMvpBuf[ci] );
-					if ( vk.shadowMap.cascadeMvpPtr[ci] ) {
-						qvkUnmapMemory( vk.device, vk.shadowMap.cascadeMvpMem[ci] );
-						vk.shadowMap.cascadeMvpPtr[ci] = NULL;
-					}
-					qvkDestroyBuffer( vk.device, vk.shadowMap.cascadeMvpBuf[ci], NULL );
-					qvkFreeMemory( vk.device, vk.shadowMap.cascadeMvpMem[ci], NULL );
-					vk.shadowMap.cascadeMvpBuf[ci] = VK_NULL_HANDLE;
-					vk.shadowMap.cascadeMvpMem[ci] = VK_NULL_HANDLE;
-					vk.shadowMap.cascadeMvpPtr[ci] = NULL;
-				}
+				VK_RalBufferShadowRelease( &vk_shadow_cascade_mvp_shadows[ci] );
+				vk.shadowMap.ral_cascadeMvpBuf[ci] = NULL;
+				vk.shadowMap.cascadeMvpPtr[ci] = NULL;
 				vk.shadowMap.cascadeMvpDesc[ci] = VK_NULL_HANDLE;
 			}
 		}
-		if ( vk.shadowMap.casterAtestBuf ) {
-			vk_ral_unregister_buffer( vk.shadowMap.casterAtestBuf );
-			qvkDestroyBuffer( vk.device, vk.shadowMap.casterAtestBuf, NULL );
-		}
-		if ( vk.shadowMap.casterAtestMem )
-			qvkFreeMemory( vk.device, vk.shadowMap.casterAtestMem, NULL );
+		if ( vk.shadowMap.ral_casterAtestBuf )
+			Ral_DestroyBuffer( vk.shadowMap.ral_casterAtestBuf );
 		{
 			int bi;
 			for ( bi = 0; bi < NUM_COMMAND_BUFFERS; bi++ ) {
-				if ( vk.shadowMap.boneBuf[bi] != VK_NULL_HANDLE ) {
-					vk_ral_unregister_buffer( vk.shadowMap.boneBuf[bi] );
-					if ( vk.shadowMap.bonePtr[bi] ) { qvkUnmapMemory( vk.device, vk.shadowMap.boneMem[bi] ); vk.shadowMap.bonePtr[bi] = NULL; }
-					qvkDestroyBuffer( vk.device, vk.shadowMap.boneBuf[bi], NULL );
-					qvkFreeMemory( vk.device, vk.shadowMap.boneMem[bi], NULL );
-					vk.shadowMap.boneBuf[bi] = VK_NULL_HANDLE;
-					vk.shadowMap.boneMem[bi] = VK_NULL_HANDLE;
-				}
+				VK_RalBufferShadowRelease( &vk_shadow_bone_shadows[bi] );
+				vk.shadowMap.ral_boneBuf[bi] = NULL;
+				vk.shadowMap.bonePtr[bi] = NULL;
 				vk.shadowMap.boneDesc[bi] = VK_NULL_HANDLE;
 			}
 		}
-		if ( vk.shadowMap.casterBuf ) {
-			vk_ral_unregister_buffer( vk.shadowMap.casterBuf );
-			qvkDestroyBuffer( vk.device, vk.shadowMap.casterBuf, NULL );
-		}
-		if ( vk.shadowMap.casterMem )
-			qvkFreeMemory( vk.device, vk.shadowMap.casterMem, NULL );
-		if ( vk.shadowMap.casterBmodelBuf ) {
-			vk_ral_unregister_buffer( vk.shadowMap.casterBmodelBuf );
-			qvkDestroyBuffer( vk.device, vk.shadowMap.casterBmodelBuf, NULL );
-		}
-		if ( vk.shadowMap.casterBmodelMem )
-			qvkFreeMemory( vk.device, vk.shadowMap.casterBmodelMem, NULL );
+		if ( vk.shadowMap.ral_casterBuf )
+			Ral_DestroyBuffer( vk.shadowMap.ral_casterBuf );
+		if ( vk.shadowMap.ral_casterBmodelBuf )
+			Ral_DestroyBuffer( vk.shadowMap.ral_casterBmodelBuf );
 		if ( vk.shadowMap.bmodelRanges )
 			ri.Free( vk.shadowMap.bmodelRanges );
-		vk.shadowMap.image            = VK_NULL_HANDLE;
-		vk.shadowMap.view             = VK_NULL_HANDLE;
-		for ( casc = 0; casc < SHADOWMAP_MAX_CASCADES; casc++ ) {
-			vk.shadowMap.layerView[casc]   = VK_NULL_HANDLE;
-		}
-		vk.shadowMap.memory           = VK_NULL_HANDLE;
 		vk.shadowMap.sampler          = VK_NULL_HANDLE;
 		vk.shadowMap.depthLayout      = VK_NULL_HANDLE;
 		vk.shadowMap.ral_depthPipeline = NULL;
 		vk.shadowMap.ral_image        = NULL;
 		vk.shadowMap.size             = 0;
-		vk.shadowMap.casterBuf        = VK_NULL_HANDLE;
-		vk.shadowMap.casterMem        = VK_NULL_HANDLE;
+		vk.shadowMap.ral_casterBuf    = NULL;
 		vk.shadowMap.casterVtxBytes   = 0;
 		vk.shadowMap.casterIndexCount = 0;
-		vk.shadowMap.casterBmodelBuf      = VK_NULL_HANDLE;
-		vk.shadowMap.casterBmodelMem      = VK_NULL_HANDLE;
+		vk.shadowMap.ral_casterBmodelBuf  = NULL;
 		vk.shadowMap.casterBmodelVtxBytes = 0;
-		vk.shadowMap.casterAtestBuf        = VK_NULL_HANDLE;
-		vk.shadowMap.casterAtestMem        = VK_NULL_HANDLE;
+		vk.shadowMap.ral_casterAtestBuf    = NULL;
 		vk.shadowMap.casterAtestVtxBytes   = 0;
 		vk.shadowMap.casterAtestIndexCount = 0;
 		vk.shadowMap.depthLayoutAtest      = VK_NULL_HANDLE;
@@ -16010,36 +15068,30 @@ faceMvp UBO + the 1-slot entity-matrix SSBO mirror the CSM cascadeMvp/entMat all
 */
 static void vk_dlight_shadow_release_resources( void )
 {
-	int i, f;
+	int i;
 	// Forward+ set-2 groups borrow the atlas view/sampler and params UBOs.
 	// Retire every child before any of those parents are replaced or destroyed.
 	vk_forwardplus_lit_invalidate_sets();
 	if ( vk.dlightShadow.ral_image ) { Ral_DestroyTexture( vk.dlightShadow.ral_image ); vk.dlightShadow.ral_image = NULL; }
-	for ( f = 0; f < 6; f++ ) {
-		if ( vk.dlightShadow.faceView[f] ) { qvkDestroyImageView( vk.device, vk.dlightShadow.faceView[f], NULL ); vk.dlightShadow.faceView[f] = VK_NULL_HANDLE; }
-	}
-	if ( vk.dlightShadow.view )    { qvkDestroyImageView( vk.device, vk.dlightShadow.view, NULL ); vk.dlightShadow.view = VK_NULL_HANDLE; }
 	if ( vk.dlightShadow.ral_sampler ) {
 		Ral_DestroySampler( vk.dlightShadow.ral_sampler );
 		vk.dlightShadow.ral_sampler = NULL;
 		vk.dlightShadow.sampler = VK_NULL_HANDLE;
 	}
-	if ( vk.dlightShadow.image )   { qvkDestroyImage( vk.device, vk.dlightShadow.image, NULL ); vk.dlightShadow.image = VK_NULL_HANDLE; }
-	if ( vk.dlightShadow.memory )  { qvkFreeMemory( vk.device, vk.dlightShadow.memory, NULL ); vk.dlightShadow.memory = VK_NULL_HANDLE; }
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		vk_shadow_destroy_group( &vk.dlightShadow.ral_faceMvpDesc[i] );
 		vk_shadow_destroy_group( &vk.dlightShadow.ral_entMatDesc[i] );
-		if ( vk.dlightShadow.faceMvpPtr[i] ) { qvkUnmapMemory( vk.device, vk.dlightShadow.faceMvpMem[i] ); vk.dlightShadow.faceMvpPtr[i] = NULL; }
-		if ( vk.dlightShadow.faceMvpBuf[i] ) { vk_ral_unregister_buffer( vk.dlightShadow.faceMvpBuf[i] ); qvkDestroyBuffer( vk.device, vk.dlightShadow.faceMvpBuf[i], NULL ); vk.dlightShadow.faceMvpBuf[i] = VK_NULL_HANDLE; }
-		if ( vk.dlightShadow.faceMvpMem[i] ) { qvkFreeMemory( vk.device, vk.dlightShadow.faceMvpMem[i], NULL ); vk.dlightShadow.faceMvpMem[i] = VK_NULL_HANDLE; }
+		VK_RalBufferShadowRelease( &vk_dlight_face_mvp_shadows[i] );
+		vk.dlightShadow.ral_faceMvpBuf[i] = NULL;
+		vk.dlightShadow.faceMvpPtr[i] = NULL;
 		vk.dlightShadow.faceMvpDesc[i] = VK_NULL_HANDLE;
-		if ( vk.dlightShadow.entMatPtr[i] ) { qvkUnmapMemory( vk.device, vk.dlightShadow.entMatMem[i] ); vk.dlightShadow.entMatPtr[i] = NULL; }
-		if ( vk.dlightShadow.entMatBuf[i] ) { vk_ral_unregister_buffer( vk.dlightShadow.entMatBuf[i] ); qvkDestroyBuffer( vk.device, vk.dlightShadow.entMatBuf[i], NULL ); vk.dlightShadow.entMatBuf[i] = VK_NULL_HANDLE; }
-		if ( vk.dlightShadow.entMatMem[i] ) { qvkFreeMemory( vk.device, vk.dlightShadow.entMatMem[i], NULL ); vk.dlightShadow.entMatMem[i] = VK_NULL_HANDLE; }
+		VK_RalBufferShadowRelease( &vk_dlight_entmat_shadows[i] );
+		vk.dlightShadow.ral_entMatBuf[i] = NULL;
+		vk.dlightShadow.entMatPtr[i] = NULL;
 		vk.dlightShadow.entMatDesc[i] = VK_NULL_HANDLE;
-		if ( vk.dlightShadow.paramsPtr[i] ) { qvkUnmapMemory( vk.device, vk.dlightShadow.paramsMem[i] ); vk.dlightShadow.paramsPtr[i] = NULL; }
-		if ( vk.dlightShadow.paramsBuf[i] ) { vk_ral_unregister_buffer( vk.dlightShadow.paramsBuf[i] ); qvkDestroyBuffer( vk.device, vk.dlightShadow.paramsBuf[i], NULL ); vk.dlightShadow.paramsBuf[i] = VK_NULL_HANDLE; }
-		if ( vk.dlightShadow.paramsMem[i] ) { qvkFreeMemory( vk.device, vk.dlightShadow.paramsMem[i], NULL ); vk.dlightShadow.paramsMem[i] = VK_NULL_HANDLE; }
+		VK_RalBufferShadowRelease( &vk_dlight_params_shadows[i] );
+		vk.dlightShadow.ral_paramsBuf[i] = NULL;
+		vk.dlightShadow.paramsPtr[i] = NULL;
 	}
 	for ( i = 0; i < DLIGHT_SHADOW_K_MAX; i++ )
 		vk.dlightShadow.lightIndex[i] = -1;
@@ -16053,12 +15105,9 @@ static void vk_dlight_shadow_release_resources( void )
 
 static void vk_dlight_shadow_alloc_resources( void )
 {
-	VkImageCreateInfo     img_desc;
-	VkMemoryRequirements  mem_req;
-	VkMemoryAllocateInfo  alloc_info;
-	VkImageViewCreateInfo view_desc;
+	ralTextureCreateInfo_t texture_desc;
 	ralSamplerCreateInfo_t sampler_desc;
-	uint32_t              mem_type, tileSize, atlasW, atlasH;
+	uint32_t              tileSize, atlasW, atlasH;
 	int i;
 
 	vk_dlight_shadow_release_resources();
@@ -16071,32 +15120,28 @@ static void vk_dlight_shadow_alloc_resources( void )
 	// shader always declares binding 9, so the descriptor must always be writable. When
 	// r_dlightShadows is off, params.valid=0 → the sample is gated off (byte-identical).
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		VkBufferCreateInfo   bd;
-		VkMemoryRequirements mr;
-		VkMemoryAllocateInfo ma;
 		// std140: 6*K_MAX mat4 (face MVPs) + K_MAX vec4 (light slots: x=lightIndex,
 		// y=valid, z=bias) + 1 vec4 (x=numShadowLights, y=column count 6*atlasK). Sized
 		// for K_MAX so the layout is fixed regardless of the live r_dlightShadowK value
 		// (K=1 only fills the first 6 mat4 + first vec4 → byte-identical to a single light).
-		VkDeviceSize         sz = (VkDeviceSize)( 6u * DLIGHT_SHADOW_K_MAX ) * 64u
-		                          + (VkDeviceSize)DLIGHT_SHADOW_K_MAX * 16u + 16u;
-		memset( &bd, 0, sizeof( bd ) );
-		bd.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO; bd.size = sz;
-		bd.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT; bd.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK( qvkCreateBuffer( vk.device, &bd, NULL, &vk.dlightShadow.paramsBuf[i] ) );
-		qvkGetBufferMemoryRequirements( vk.device, vk.dlightShadow.paramsBuf[i], &mr );
-		memset( &ma, 0, sizeof( ma ) );
-		ma.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; ma.allocationSize = mr.size;
-		ma.memoryTypeIndex = find_memory_type( mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-		VK_CHECK( qvkAllocateMemory( vk.device, &ma, NULL, &vk.dlightShadow.paramsMem[i] ) );
-		qvkBindBufferMemory( vk.device, vk.dlightShadow.paramsBuf[i], vk.dlightShadow.paramsMem[i], 0 );
-		VK_CHECK( qvkMapMemory( vk.device, vk.dlightShadow.paramsMem[i], 0, VK_WHOLE_SIZE, 0, &vk.dlightShadow.paramsPtr[i] ) );
-		vk_ral_register_buffer( vk.dlightShadow.paramsBuf[i], (uint64_t)sz,
-			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			"wired-dlight-shadow-params-ubo" );
+		const uint64_t sz = (uint64_t)( 6u * DLIGHT_SHADOW_K_MAX ) * 64u
+			+ (uint64_t)DLIGHT_SHADOW_K_MAX * 16u + 16u;
+		vkRalBufferShadowWriteReceipt_t writeReceipt;
+		VK_RalBufferShadowInit( &vk_dlight_params_shadows[i] );
+		if ( !VK_RalBufferShadowEnsure( &vk_dlight_params_shadows[i],
+				vk_ral_get_backend(), sz, RAL_BUFFER_UNIFORM,
+				"wired-dlight-shadow-params-ubo" ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create dlight-shadow params RAL buffer %u", i );
+		vk.dlightShadow.ral_paramsBuf[i] = vk_dlight_params_shadows[i].buffer;
+		vk.dlightShadow.paramsPtr[i] = vk_dlight_params_shadows[i].bytes;
 		// default: numShadowLights=0 / valid=0 (no shadow) → the lit sample is gated off.
 		memset( vk.dlightShadow.paramsPtr[i], 0, (size_t)sz );
+		if ( !VK_RalBufferShadowMarkWritten( &vk_dlight_params_shadows[i], 0u, sz )
+		  || !VK_RalBufferShadowPublish( &vk_dlight_params_shadows[i],
+				0u, sz, &writeReceipt ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to publish dlight-shadow params %u", i );
 	}
 	for ( i = 0; i < DLIGHT_SHADOW_K_MAX; i++ )
 		vk.dlightShadow.lightIndex[i] = -1;
@@ -16148,39 +15193,23 @@ static void vk_dlight_shadow_alloc_resources( void )
 	atlasW = tileSize * 6u * vk.dlightShadow.atlasK;
 	atlasH = tileSize;
 
-	memset( &img_desc, 0, sizeof( img_desc ) );
-	img_desc.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-	img_desc.imageType     = VK_IMAGE_TYPE_2D;
-	img_desc.format        = vk.depth_format;
-	img_desc.extent.width  = atlasW;
-	img_desc.extent.height = atlasH;
-	img_desc.extent.depth  = 1;
-	img_desc.mipLevels     = 1;
-	img_desc.arrayLayers   = 1;
-	img_desc.samples       = VK_SAMPLE_COUNT_1_BIT;
-	img_desc.tiling        = VK_IMAGE_TILING_OPTIMAL;
-	img_desc.usage         = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-	img_desc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	VK_CHECK( qvkCreateImage( vk.device, &img_desc, NULL, &vk.dlightShadow.image ) );
-	vk_get_image_memory_requirements( vk.dlightShadow.image, &mem_req );
-	memset( &alloc_info, 0, sizeof( alloc_info ) );
-	alloc_info.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	alloc_info.allocationSize  = mem_req.size;
-	mem_type                   = find_memory_type( mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-	alloc_info.memoryTypeIndex = mem_type;
-	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &vk.dlightShadow.memory ) );
-	VK_CHECK( qvkBindImageMemory( vk.device, vk.dlightShadow.image, vk.dlightShadow.memory, 0 ) );
-
-	// One 2D sampling view over the whole atlas (the lit shader reads face columns by UV).
-	memset( &view_desc, 0, sizeof( view_desc ) );
-	view_desc.sType                       = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-	view_desc.image                       = vk.dlightShadow.image;
-	view_desc.viewType                    = VK_IMAGE_VIEW_TYPE_2D;
-	view_desc.format                      = vk.depth_format;
-	view_desc.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-	view_desc.subresourceRange.levelCount = 1;
-	view_desc.subresourceRange.layerCount = 1;
-	VK_CHECK( qvkCreateImageView( vk.device, &view_desc, NULL, &vk.dlightShadow.view ) );
+	memset( &texture_desc, 0, sizeof( texture_desc ) );
+	texture_desc.type = RAL_TEXTURE_2D;
+	texture_desc.format = vk_attachment_format_to_ral( vk.depth_format );
+	texture_desc.width = atlasW;
+	texture_desc.height = atlasH;
+	texture_desc.depthOrArrayLayers = 1u;
+	texture_desc.mipLevels = 1u;
+	texture_desc.sampleCount = 1u;
+	texture_desc.usage = RAL_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT
+		| RAL_TEXTURE_USAGE_SAMPLED;
+	texture_desc.memory = RAL_MEMORY_DEVICE_LOCAL;
+	texture_desc.debugName = "wired-dlight-shadow-atlas";
+	vk.dlightShadow.ral_image = Ral_CreateTexture( vk_ral_get_backend(),
+		&texture_desc );
+	if ( !vk.dlightShadow.ral_image )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"Vulkan: failed to create dynamic-light RAL shadow atlas" );
 
 	// nearest + border-clamp (outside = far = lit), mirror the CSM shadow sampler.
 	memset( &sampler_desc, 0, sizeof( sampler_desc ) );
@@ -16197,65 +15226,40 @@ static void vk_dlight_shadow_alloc_resources( void )
 	vk.dlightShadow.sampler = vk_create_ral_sampler( &sampler_desc,
 		&vk.dlightShadow.ral_sampler );
 
-	SET_OBJECT_NAME( vk.dlightShadow.image, "dlight shadow atlas", RAL_VULKAN_OBJECT_ROLE_IMAGE );
-	SET_OBJECT_NAME( vk.dlightShadow.view,  "dlight shadow atlas view", RAL_VULKAN_OBJECT_ROLE_IMAGE_VIEW );
-
-	// Adopt the atlas as a RAL sibling (render-target attachment via Ral_BeginRendering +
-	// the sampled read). depth aspect (+ stencil if the format carries it).
-	vk_ral_adopt_one_texture( vk.dlightShadow.image, vk.dlightShadow.view, vk.depth_format,
-	                          &vk.dlightShadow.ral_image, atlasW, atlasH,
-	                          ( glConfig.stencilBits > 0 ) ? ( VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT ) : VK_IMAGE_ASPECT_DEPTH_BIT,
-	                          RAL_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED,
-	                          "wired-dlight-shadow-atlas" );
-
 	// Per-frame faceMvp UBO (6 PAD-aligned mat4 slots, per-face dyn-offset) + 1-slot
 	// entity-matrix SSBO (identity worldspawn model→world). Mirror the CSM cascadeMvp/
 	// entMat host-coherent alloc; reuse vk.shadowMap.set_layout_cascademvp / set_layout_entmat.
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		VkBufferCreateInfo   bd;
-		VkMemoryRequirements mr;
-		VkMemoryAllocateInfo ma;
 		// 6*K_MAX PAD-aligned mat4 slots (light L face f at slot L*6+f), per-face dyn-offset.
 		// Sized for K_MAX so the bake can index any selected light's face without realloc;
 		// 6*4*PAD(64)=6KB at K_MAX=4, well under the UBO size limit. K=1 uses slots 0-5.
-		VkDeviceSize         mvpSz = (VkDeviceSize)( 6u * DLIGHT_SHADOW_K_MAX ) * PAD( 64u, vk.uniform_alignment );
-
-		memset( &bd, 0, sizeof( bd ) );
-		bd.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO; bd.size = mvpSz;
-		bd.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT; bd.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK( qvkCreateBuffer( vk.device, &bd, NULL, &vk.dlightShadow.faceMvpBuf[i] ) );
-		qvkGetBufferMemoryRequirements( vk.device, vk.dlightShadow.faceMvpBuf[i], &mr );
-		memset( &ma, 0, sizeof( ma ) );
-		ma.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; ma.allocationSize = mr.size;
-		ma.memoryTypeIndex = find_memory_type( mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-		VK_CHECK( qvkAllocateMemory( vk.device, &ma, NULL, &vk.dlightShadow.faceMvpMem[i] ) );
-		qvkBindBufferMemory( vk.device, vk.dlightShadow.faceMvpBuf[i], vk.dlightShadow.faceMvpMem[i], 0 );
-		VK_CHECK( qvkMapMemory( vk.device, vk.dlightShadow.faceMvpMem[i], 0, VK_WHOLE_SIZE, 0, &vk.dlightShadow.faceMvpPtr[i] ) );
-		vk_ral_register_buffer( vk.dlightShadow.faceMvpBuf[i], mvpSz,
-			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			"vk.dlightShadow.faceMvpBuf" );
-
-		memset( &bd, 0, sizeof( bd ) );
-		bd.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO; bd.size = 64u;
-		bd.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT; bd.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK( qvkCreateBuffer( vk.device, &bd, NULL, &vk.dlightShadow.entMatBuf[i] ) );
-		qvkGetBufferMemoryRequirements( vk.device, vk.dlightShadow.entMatBuf[i], &mr );
-		memset( &ma, 0, sizeof( ma ) );
-		ma.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; ma.allocationSize = mr.size;
-		ma.memoryTypeIndex = find_memory_type( mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-		VK_CHECK( qvkAllocateMemory( vk.device, &ma, NULL, &vk.dlightShadow.entMatMem[i] ) );
-		qvkBindBufferMemory( vk.device, vk.dlightShadow.entMatBuf[i], vk.dlightShadow.entMatMem[i], 0 );
-		VK_CHECK( qvkMapMemory( vk.device, vk.dlightShadow.entMatMem[i], 0, VK_WHOLE_SIZE, 0, &vk.dlightShadow.entMatPtr[i] ) );
-		vk_ral_register_buffer( vk.dlightShadow.entMatBuf[i], 64u,
-			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			"vk.dlightShadow.entMatBuf" );
+		const uint64_t mvpSz = (uint64_t)( 6u * DLIGHT_SHADOW_K_MAX )
+			* PAD( 64u, vk.uniform_alignment );
+		vkRalBufferShadowWriteReceipt_t entmatReceipt;
+		VK_RalBufferShadowInit( &vk_dlight_face_mvp_shadows[i] );
+		VK_RalBufferShadowInit( &vk_dlight_entmat_shadows[i] );
+		if ( !VK_RalBufferShadowEnsure( &vk_dlight_face_mvp_shadows[i],
+				vk_ral_get_backend(), mvpSz, RAL_BUFFER_UNIFORM,
+				"wired-dlight-shadow-face-mvp" )
+		  || !VK_RalBufferShadowEnsure( &vk_dlight_entmat_shadows[i],
+				vk_ral_get_backend(), 64u, RAL_BUFFER_STORAGE,
+				"wired-dlight-shadow-entmat" ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create dlight-shadow RAL draw buffers %u", i );
+		vk.dlightShadow.ral_faceMvpBuf[i] = vk_dlight_face_mvp_shadows[i].buffer;
+		vk.dlightShadow.faceMvpPtr[i] = vk_dlight_face_mvp_shadows[i].bytes;
+		vk.dlightShadow.ral_entMatBuf[i] = vk_dlight_entmat_shadows[i].buffer;
+		vk.dlightShadow.entMatPtr[i] = vk_dlight_entmat_shadows[i].bytes;
 		// fill the identity model→world (worldspawn verts are already world-space).
 		{
 			float idm[16]; memset( idm, 0, sizeof( idm ) ); idm[0]=idm[5]=idm[10]=idm[15]=1.0f;
 			memcpy( vk.dlightShadow.entMatPtr[i], idm, 64u );
 		}
+		if ( !VK_RalBufferShadowMarkWritten( &vk_dlight_entmat_shadows[i], 0u, 64u )
+		  || !VK_RalBufferShadowPublish( &vk_dlight_entmat_shadows[i],
+				0u, 64u, &entmatReceipt ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to publish dlight-shadow entity matrix %u", i );
 	}
 
 	R_LOG( rch_ral, SEV_INFO, "dlight shadows: atlas ready (%u×%u, %u-px faces)\n", atlasW, atlasH, tileSize );
@@ -16269,9 +15273,8 @@ static void vk_create_attachments( void )
 
 	// A raw allocation is not a published scene cohort. The generation becomes
 	// nonzero only after the new image, RAL wrapper and both consumer groups have
-	// all been rebuilt by vk_ral_adopt_static_internal_textures.
+	// all been rebuilt by vk_ral_refresh_internal_texture_dependents.
 	vk_scene_color_attachment_generation = 0;
-	vk_clear_attachment_pool();
 
 	// It looks like resulting performance depends from order you're creating/allocating
 	// memory for attachments in vulkan i.e. similar images grouped together will provide best results
@@ -16281,15 +15284,16 @@ static void vk_create_attachments( void )
 	// TODO: preallocate first image chunk in attachment' memory pool?
 	if ( vk.fboActive ) {
 
-		VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+		ralTextureUsage_t usage = RAL_TEXTURE_USAGE_COLOR_ATTACHMENT
+			| RAL_TEXTURE_USAGE_SAMPLED;
 
 		// bloom
 		if ( r_bloom->integer ) {
 			uint32_t width = gls.captureWidth;
 			uint32_t height = gls.captureHeight;
 
-			create_color_attachment( width, height, VK_SAMPLE_COUNT_1_BIT, vk.bloom_format,
-				usage, &vk.bloom_image[0], &vk.bloom_image_view[0], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, qfalse );
+			vk.ral_bloom_image[0] = vk_create_attachment_texture( width, height,
+				vk.bloom_format, usage, "wired-img-bloom-0" );
 
 			// capture bloom-side state for the `gfxinfo`
 			// HDR pipeline report. Replaces the FBO_DEBUG per-restart
@@ -16299,17 +15303,19 @@ static void vk_create_attachments( void )
 			vk_hdr_state.bloom_mip_max       = VK_NUM_BLOOM_PASSES;
 
 			// One image per pyramid mip (dual-filtering): slot i = captureW/2^i.
-			for ( i = 1; i < ARRAY_LEN( vk.bloom_image ); i++ ) {
+			for ( i = 1; i < ARRAY_LEN( vk.ral_bloom_image ); i++ ) {
 				width /= 2;
 				height /= 2;
-				create_color_attachment( width, height, VK_SAMPLE_COUNT_1_BIT, vk.bloom_format,
-					usage, &vk.bloom_image[i], &vk.bloom_image_view[i], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, qfalse );
+				vk.ral_bloom_image[i] = vk_create_attachment_texture( width,
+					height, vk.bloom_format, usage,
+					va( "wired-img-bloom-%u", i ) );
 			}
 		}
 
 		// post-processing/msaa-resolve
-		create_color_attachment( glConfig.vidWidth, glConfig.vidHeight, VK_SAMPLE_COUNT_1_BIT, vk.color_format,
-			usage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, &vk.color_image, &vk.color_image_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, qfalse );
+		vk.ral_color_image = vk_create_attachment_texture( glConfig.vidWidth,
+			glConfig.vidHeight, vk.color_format,
+			usage | RAL_TEXTURE_USAGE_TRANSFER_SRC, "wired-img-color" );
 
 		// tonemap output (LDR-range, but still linear-light).
 		// Same dimensions as color_image (full vid resolution). The
@@ -16321,11 +15327,12 @@ static void vk_create_attachments( void )
 		// HDR10 prerequisite. Read by the gamma and capture passes
 		// downstream (sampling a wider format is transparent to them).
 		// Block 8: TRANSFER_SRC_BIT — vk_smaa() copies this image into
-		// vk.smaa.input_image before the RAL edge/blend/resolve passes write
+		// the RAL-owned SMAA input texture before edge/blend/resolve passes write
 		// the resolved result back through dynamic rendering.
-		create_color_attachment( glConfig.vidWidth, glConfig.vidHeight, VK_SAMPLE_COUNT_1_BIT, vk.color_format,
-			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-			&vk.tonemapped_image, &vk.tonemapped_image_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, qfalse );
+		vk.ral_tonemapped_image = vk_create_attachment_texture(
+			glConfig.vidWidth, glConfig.vidHeight, vk.color_format,
+			RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_SAMPLED
+				| RAL_TEXTURE_USAGE_TRANSFER_SRC, "wired-img-tonemapped" );
 
 		R_LOG( rch_fbo, SEV_TRACE, "FBO color attachment created:\n" );
 		R_LOG( rch_fbo, SEV_TRACE, "  size=%dx%d  format=%d  layout=SHADER_READ_ONLY\n",
@@ -16334,103 +15341,53 @@ static void vk_create_attachments( void )
 			(int)(usage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT) );
 
 		// screenmap color
-		create_color_attachment( vk.screenMapWidth, vk.screenMapHeight, VK_SAMPLE_COUNT_1_BIT, vk.color_format,
-			usage, &vk.screenMap.color_image, &vk.screenMap.color_image_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, qfalse );
+		vk.screenMap.ral_color_image = vk_create_attachment_texture(
+			vk.screenMapWidth, vk.screenMapHeight, vk.color_format, usage,
+			"wired-img-screenmap-color" );
 
 		// screenmap depth
-		create_depth_attachment( vk.screenMapWidth, vk.screenMapHeight, VK_SAMPLE_COUNT_1_BIT, &vk.screenMap.depth_image, &vk.screenMap.depth_image_view, qtrue );
+		vk.screenMap.ral_depth_image = vk_create_attachment_texture(
+			vk.screenMapWidth, vk.screenMapHeight, vk.depth_format,
+			RAL_TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT,
+			"wired-img-screenmap-depth" );
 
 		// Stable display-referred screenshot/readback target. This cannot be
 		// supersample-only: HDR10/P3/scRGB swapchains are not byte-compatible
 		// with the public sRGB capture contract. Keeping one R8G8B8A8 UNORM target
 		// ready lets the screenshot frame run the explicit output conversion and
 		// prevents packed 10-bit/PQ swapchain bytes from escaping as RGB8.
-		usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-		create_color_attachment( gls.captureWidth, gls.captureHeight, VK_SAMPLE_COUNT_1_BIT, vk.capture_format,
-			usage, &vk.capture.image, &vk.capture.image_view, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, qfalse );
-		// RAL sibling adoption happens AFTER vk_alloc_attachments (below), where
-		// the image VIEW is actually created — create_color_attachment only makes
-		// the image. Adopting here would capture a NULL view → VUID-08912.
+		usage = RAL_TEXTURE_USAGE_COLOR_ATTACHMENT
+			| RAL_TEXTURE_USAGE_TRANSFER_SRC;
+		vk.capture.ral_image = vk_create_attachment_texture( gls.captureWidth,
+			gls.captureHeight, vk.capture_format, usage, "wired-img-capture" );
 	} // if ( vk.fboActive )
 
-	//vk_alloc_attachments();
-
-	create_depth_attachment( glConfig.vidWidth, glConfig.vidHeight, VK_SAMPLE_COUNT_1_BIT, &vk.depth_image, &vk.depth_image_view,
-		(vk.fboActive && (r_bloom->integer || vk.sceneDepth.active)) ? qfalse : qtrue );
+	vk.ral_depth_image = vk_create_depth_attachment_texture(
+		glConfig.vidWidth, glConfig.vidHeight, "wired-img-depth" );
 
 	// depth fade: create a non-MSAA depth copy image for sampling in fragment shaders
 	if ( vk.sceneDepth.active ) {
-		VkImageCreateInfo img_desc;
-		VkMemoryRequirements mem_req;
-		VkMemoryAllocateInfo alloc_info;
-		VkImageViewCreateInfo view_desc;
+		ralTextureCreateInfo_t texture_desc;
 		ralSamplerCreateInfo_t sampler_desc;
-		uint32_t mem_type;
 
-		// depth copy image (transfer dst + sampled)
-		memset( &img_desc, 0, sizeof( img_desc ) );
-		img_desc.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-		img_desc.imageType = VK_IMAGE_TYPE_2D;
-		img_desc.format = vk.depth_format;
-		img_desc.extent.width = glConfig.vidWidth;
-		img_desc.extent.height = glConfig.vidHeight;
-		img_desc.extent.depth = 1;
-		img_desc.mipLevels = 1;
-		img_desc.arrayLayers = 1;
-		img_desc.samples = VK_SAMPLE_COUNT_1_BIT;
-		img_desc.tiling = VK_IMAGE_TILING_OPTIMAL;
-		// TRANSFER_SRC so the Forward+ frame-end copy can re-copy this populated depth
-		// into the fp reduce's sampled copy (vk_forwardplus_depth_copy). SAMPLED for the
-		// direct depth consumers (SSAO/GTAO/lens/depthfade); TRANSFER_DST for the copy
-		// that fills it.
-		img_desc.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-		img_desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		img_desc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-		// when GTAO may run on the dedicated compute queue
-		// (r_asyncCompute, FEAT_SSAO), it samples this snapshot from the compute
-		// family while the graphics family wrote it — concurrent sharing avoids a
-		// per-frame queue-ownership transfer. Only when the families actually differ
-		// (else EXCLUSIVE is required). The graphics copy into it is unaffected.
-		uint32_t dfQfams[2];
-		{
-			struct ralBackend_s *rb = vk_ral_get_backend();
-			uint32_t gFam = rb ? Ral_GetQueueFamily( rb, RAL_QUEUE_GRAPHICS ) : 0;
-			uint32_t cFam = rb ? Ral_GetQueueFamily( rb, RAL_QUEUE_COMPUTE )  : 0;
-			if ( rb && r_asyncCompute && r_asyncCompute->integer && cFam != gFam ) {
-				dfQfams[0] = gFam;
-				dfQfams[1] = cFam;
-				img_desc.sharingMode           = VK_SHARING_MODE_CONCURRENT;
-				img_desc.queueFamilyIndexCount = 2;
-				img_desc.pQueueFamilyIndices   = dfQfams;
-			}
-		}
-
-		VK_CHECK( qvkCreateImage( vk.device, &img_desc, NULL, &vk.sceneDepth.image ) );
-
-		vk_get_image_memory_requirements( vk.sceneDepth.image, &mem_req );
-
-		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		alloc_info.pNext = NULL;
-		alloc_info.allocationSize = mem_req.size;
-		mem_type = find_memory_type( mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-		alloc_info.memoryTypeIndex = mem_type;
-
-		// allocate dedicated memory for this image
-		VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &vk.sceneDepth.memory ) );
-		VK_CHECK( qvkBindImageMemory( vk.device, vk.sceneDepth.image, vk.sceneDepth.memory, 0 ) );
-
-		// image view (depth-only aspect)
-		memset( &view_desc, 0, sizeof( view_desc ) );
-		view_desc.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		view_desc.image = vk.sceneDepth.image;
-		view_desc.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		view_desc.format = vk.depth_format;
-		view_desc.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-		view_desc.subresourceRange.levelCount = 1;
-		view_desc.subresourceRange.layerCount = 1;
-
-		VK_CHECK( qvkCreateImageView( vk.device, &view_desc, NULL, &vk.sceneDepth.view ) );
+		memset( &texture_desc, 0, sizeof( texture_desc ) );
+		texture_desc.type = RAL_TEXTURE_2D;
+		texture_desc.format = vk_attachment_format_to_ral( vk.depth_format );
+		texture_desc.width = (uint32_t)glConfig.vidWidth;
+		texture_desc.height = (uint32_t)glConfig.vidHeight;
+		texture_desc.depthOrArrayLayers = 1u;
+		texture_desc.mipLevels = 1u;
+		texture_desc.sampleCount = 1u;
+		texture_desc.usage = RAL_TEXTURE_USAGE_TRANSFER_DST
+			| RAL_TEXTURE_USAGE_TRANSFER_SRC | RAL_TEXTURE_USAGE_SAMPLED;
+		texture_desc.memory = RAL_MEMORY_DEVICE_LOCAL;
+		texture_desc.concurrentGraphicsCompute = qtrue;
+		texture_desc.debugName = "wired-img-scenedepth";
+		vk.sceneDepth.ral_image = Ral_CreateTexture( vk_ral_get_backend(),
+			&texture_desc );
+		if ( !vk.sceneDepth.ral_image )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create shared scene-depth RAL texture" );
 
 		// nearest-neighbor sampler
 		memset( &sampler_desc, 0, sizeof( sampler_desc ) );
@@ -16447,9 +15404,6 @@ static void vk_create_attachments( void )
 
 		vk.sceneDepth.sampler = vk_create_ral_sampler( &sampler_desc,
 			&vk.sceneDepth.ral_sampler );
-
-		SET_OBJECT_NAME( vk.sceneDepth.image, "depth fade copy image", RAL_VULKAN_OBJECT_ROLE_IMAGE );
-		SET_OBJECT_NAME( vk.sceneDepth.view, "depth fade copy view", RAL_VULKAN_OBJECT_ROLE_IMAGE_VIEW );
 	}
 
 #if FEAT_SHADOW_MAPPING
@@ -16457,44 +15411,7 @@ static void vk_create_attachments( void )
 	vk_dlight_shadow_alloc_resources();
 #endif
 
-	// SMAA intermediates were here. They now live
-	// on dedicated VkDeviceMemory via vk_smaa_alloc_resources, called
-	// below after vk_alloc_attachments. Pulling them out of the
-	// attachment pool is what makes live r_smaa release possible.
-
-	vk_alloc_attachments();
-
-	for ( i = 0; i < vk.image_memory_count; i++ )
-	{
-		SET_OBJECT_NAME( vk.image_memory[i], va( "framebuffer memory chunk %i", i ), RAL_VULKAN_OBJECT_ROLE_DEVICE_MEMORY );
-	}
-
-	SET_OBJECT_NAME( vk.depth_image, "depth attachment", RAL_VULKAN_OBJECT_ROLE_IMAGE );
-	SET_OBJECT_NAME( vk.depth_image_view, "depth attachment", RAL_VULKAN_OBJECT_ROLE_IMAGE_VIEW );
-
-	SET_OBJECT_NAME( vk.color_image, "color attachment", RAL_VULKAN_OBJECT_ROLE_IMAGE );
-	SET_OBJECT_NAME( vk.color_image_view, "color attachment", RAL_VULKAN_OBJECT_ROLE_IMAGE_VIEW );
-
-	SET_OBJECT_NAME( vk.capture.image, "capture image", RAL_VULKAN_OBJECT_ROLE_IMAGE_VIEW );
-	SET_OBJECT_NAME( vk.capture.image_view, "capture image view", RAL_VULKAN_OBJECT_ROLE_IMAGE_VIEW );
-
-	// Adopt the capture RAL sibling now that vk_alloc_attachments has created the
-	// image VIEW (create_color_attachment above only made the image). Not in the
-	// boot static sweep: capture.image is re-created on every
-	// swapchain/r_hdr/r_fbo rebuild (this function), while the sweep runs once at
-	// boot — re-adopting here keeps the sibling in lockstep with the live VkImage.
-	// No-op only on the non-FBO path, where no post-process capture pass exists.
-	vk_ral_adopt_one_texture( vk.capture.image, vk.capture.image_view, vk.capture_format,
-		&vk.capture.ral_image, gls.captureWidth, gls.captureHeight,
-		VK_IMAGE_ASPECT_COLOR_BIT,
-		RAL_TEXTURE_USAGE_COLOR_ATTACHMENT | RAL_TEXTURE_USAGE_TRANSFER_SRC,
-		"wired-img-capture" );
-
-	for ( i = 0; i < ARRAY_LEN( vk.bloom_image ); i++ )
-	{
-		SET_OBJECT_NAME( vk.bloom_image[i], va( "bloom attachment %i", i ), RAL_VULKAN_OBJECT_ROLE_IMAGE );
-		SET_OBJECT_NAME( vk.bloom_image_view[i], va( "bloom attachment %i", i ), RAL_VULKAN_OBJECT_ROLE_IMAGE_VIEW );
-	}
+	// SMAA intermediates have a separate live-toggle RAL lifecycle.
 
 	// SMAA images / LUTs / samplers + LUT upload
 	// all live in vk_smaa_alloc_resources now. Allocate when the FBO is
@@ -16736,7 +15653,7 @@ static void vk_restart_swapchain( const char *funcname, VkResult res )
 	vk_create_swapchain( vk.present_format, qfalse );
 	vk_create_attachments();
 
-	vk_ral_adopt_static_internal_textures();
+	vk_ral_refresh_internal_texture_dependents();
 
 	vk_update_post_process_pipelines();
 }
@@ -16749,6 +15666,11 @@ void vk_request_presentation_change( const refPresentationChange_t *change ) {
 
 void vk_apply_pending_presentation_change( void ) {
 	refPresentationChange_t change = vk_pending_presentation_change;
+	const uint32_t rebuildMask = REF_PRESENTATION_CHANGE_TOPOLOGY
+		| REF_PRESENTATION_CHANGE_ACTIVE_OUTPUT
+		| REF_PRESENTATION_CHANGE_SCALE
+		| REF_PRESENTATION_CHANGE_FULLSCREEN
+		| REF_PRESENTATION_CHANGE_EXTENT;
 	if ( change.generation == 0u ) return;
 	memset( &vk_pending_presentation_change, 0,
 		sizeof( vk_pending_presentation_change ) );
@@ -16757,6 +15679,17 @@ void vk_apply_pending_presentation_change( void ) {
 	glConfig.vidWidthLogical = (int)change.logicalWidth;
 	glConfig.vidHeightLogical = (int)change.logicalHeight;
 	if ( !vk.ral_swapchain ) return;
+	if ( !( change.changeFlags & rebuildMask ) ) {
+		if ( change.changeFlags & REF_PRESENTATION_CHANGE_COLOR ) {
+			R_LOG( rch_ral, SEV_INFO,
+				"presentation-change generation=%llu catalog=%llu flags=0x%x action=refresh-metadata\n",
+				(unsigned long long)change.generation,
+				(unsigned long long)change.catalogGeneration,
+				change.changeFlags );
+			vk_apply_hdr_metadata();
+		}
+		return;
+	}
 	R_LOG( rch_ral, SEV_INFO,
 		"presentation-change generation=%llu catalog=%llu flags=0x%x logical=%ux%u presentation=%ux%u render=%ux%u ui=%ux%u action=rebuild\n",
 		(unsigned long long)change.generation,
@@ -16821,7 +15754,7 @@ static void vk_gpu_ts_write( const char *label );
 // nulls every field so a NULL ral_histogram_pipeline disables the dispatch.
 // Called at the top of vk_hdr_histogram_init (the adopted color_image is
 // re-created each vid_restart, so the sampling view must be re-minted), and
-// from the renderer texture-teardown path (vk_ral_destroy_adopted_internal_textures)
+// from the renderer texture-teardown path (vk_ral_release_internal_texture_dependents)
 // so the RAL-owned handles don't outlive the device (VUID-vkDestroyDevice-05137).
 void vk_hdr_histogram_shutdown( void )
 {
@@ -16852,7 +15785,7 @@ void vk_hdr_histogram_shutdown( void )
 // failure the partial handles are torn back down so a NULL ral_histogram_pipeline
 // cleanly disables the dispatch. Called (not from vk_initialize, which runs
 // before the color image is adopted) from the tail of
-// vk_ral_adopt_static_internal_textures once vk.ral_color_image is valid.
+// vk_ral_refresh_internal_texture_dependents once vk.ral_color_image is valid.
 void vk_hdr_histogram_init( ralBackend_t *backend )
 {
 	ralBufferCreateInfo_t       bci;
@@ -16994,7 +15927,7 @@ void vk_gtao_shutdown( void )
 // GTAO: bring up the ground-truth ambient-occlusion compute resources. Two RAL
 // compute passes (main horizon-search + depth-aware denoise) writing R16F storage
 // textures, dispatched per frame in the vk_tonemap compute seam. Inputs are the
-// device depth copy (vk.sceneDepth.image) reconstructed in-shader to view-space
+// RAL-owned device depth copy reconstructed in-shader to view-space
 // position + normal — no normal G-buffer needed. Gated on the depth copy
 // existing: the copy is allocated only when depthFade is active (r_ssao on), and
 // since r_ssao is CVAR_LATCH the toggle goes through vid_restart, which re-runs
@@ -17016,7 +15949,7 @@ void vk_gtao_init( ralBackend_t *backend )
 
 	vk_gtao_shutdown();
 
-	// No depth copy -> no source for AO. sceneDepth.ral_image is adopted only when
+	// No depth copy -> no source for AO. sceneDepth.ral_image is created only when
 	// depthFade is active (r_ssao / r_drawSunRays / r_depthFade). Leave everything NULL
 	// so the dispatch + composite are skipped; a later vid_restart with SSAO on
 	// re-runs this with a valid depth copy.
@@ -17062,7 +15995,7 @@ void vk_gtao_init( ralBackend_t *backend )
 	vci.texture  = vk.ral_gtao_denoised_image;
 	vk.ral_gtao_denoised_view = Ral_CreateTextureView( backend, &vci );
 
-	// Sampling view over the engine-owned depth copy (sceneDepth.image).
+	// Sampling view over the shared RAL-owned depth copy.
 	memset( &vci, 0, sizeof( vci ) );
 	vci.texture  = vk.sceneDepth.ral_image;
 	vci.viewType = RAL_TEXTURE_2D;
@@ -17486,7 +16419,7 @@ void vk_gtao_async_begin( void )
 // Tear down the lens oracle RAL resources (idempotent). Frees the sampling view
 // over the depth copy, the sampler, the bind-group layout + per-frame descriptors,
 // the pipeline, and the per-frame lens SSBOs. Called at the top of vk_lens_init
-// (re-mints the view over the re-adopted depth copy on vid_restart) and from the
+// (re-mints the view over the recreated depth copy on vid_restart) and from the
 // texture-teardown path so no RAL handle outlives the device.
 void vk_lens_shutdown( void )
 {
@@ -18305,9 +17238,8 @@ void vk_forwardplus_shutdown( void )
 		if ( vk.ral_fp_tilelights[i] ){ Ral_DestroyBuffer( vk.ral_fp_tilelights[i] );vk.ral_fp_tilelights[i] = NULL; }
 	}
 
-	// Depth-copy / reduce teardown (depthValid=1 source). Destroy the RAL siblings
-	// before the raw VkImage/view (the adopt wrappers carry ownsImage=qfalse, so they
-	// free only the wrapper struct). Idempotent: NULL-safe per handle.
+	// Depth-copy / reduce teardown (depthValid=1 source). Destroy the sampling
+	// view before its direct RAL texture owner. Idempotent: NULL-safe per handle.
 	if ( vk.ral_fpReducePipeline ) { Ral_DestroyPipeline( vk.ral_fpReducePipeline ); vk.ral_fpReducePipeline = NULL; }
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		if ( vk.ral_fpReduceDescriptor[i] ) { Ral_DestroyBindGroup( vk.ral_fpReduceDescriptor[i] ); vk.ral_fpReduceDescriptor[i] = NULL; }
@@ -18316,9 +17248,6 @@ void vk_forwardplus_shutdown( void )
 	if ( vk.ral_fpDepthSampler ) { Ral_DestroySampler( vk.ral_fpDepthSampler ); vk.ral_fpDepthSampler = NULL; }
 	if ( vk.ral_fpDepthView )  { Ral_DestroyTextureView( vk.ral_fpDepthView ); vk.ral_fpDepthView = NULL; }
 	if ( vk.ral_fpDepthImage ) { Ral_DestroyTexture( vk.ral_fpDepthImage ); vk.ral_fpDepthImage = NULL; }
-	if ( vk.fpDepthView )    { qvkDestroyImageView( vk.device, vk.fpDepthView, NULL );  vk.fpDepthView = VK_NULL_HANDLE; }
-	if ( vk.fpDepthImage )   { qvkDestroyImage( vk.device, vk.fpDepthImage, NULL );     vk.fpDepthImage = VK_NULL_HANDLE; }
-	if ( vk.fpDepthMemory )  { qvkFreeMemory( vk.device, vk.fpDepthMemory, NULL );      vk.fpDepthMemory = VK_NULL_HANDLE; }
 	vk.fpDepthRetained = qfalse;
 
 	vk.fpTileCapacity = 0;
@@ -18421,18 +17350,16 @@ static qboolean vk_forwardplus_alloc( ralBackend_t *backend, int tileCount )
 
 // Allocate the Forward+ depth-copy subsystem: a dedicated SAMPLED depth image
 // (the live attachment can't be sampled — no SAMPLED usage), a depth-only-aspect
-// view + nearest sampler, the RAL siblings (adopted image for the frame-end copy +
-// transitions, a RAL view for the reduce sampling), and the reduce compute pipeline
+// view + nearest sampler, the direct RAL image/view used by frame-end copy,
+// transitions and reduce sampling, and the reduce compute pipeline
 // (set 0: sceneDepth + sampler + tileDepth SSBO). Mirrors the depthFade copy-image
 // shape (vk.c:create_attachments) but Forward+-owned + r_forwardPlus-gated. Returns
 // qfalse on any failure → the depthValid=1 tightening stays off (the classify falls
 // back to the full slab, which is correct). The caller leaves fpDepthRetained false.
 static qboolean vk_forwardplus_depth_alloc( ralBackend_t *backend, int tileCount )
 {
-	VkImageCreateInfo              img_desc;
-	VkMemoryRequirements           mem_req;
-	VkMemoryAllocateInfo           alloc_info;
-	VkImageViewCreateInfo          view_desc;
+	ralTextureCreateInfo_t         tci;
+	ralTextureViewCreateInfo_t     vci;
 	ralSamplerCreateInfo_t         sci;
 	ralBindEntry_t                 bgle[3];
 	ralBindGroupLayoutCreateInfo_t bglci;
@@ -18440,51 +17367,35 @@ static qboolean vk_forwardplus_depth_alloc( ralBackend_t *backend, int tileCount
 	ralBindGroupCreateInfo_t       bgci;
 	ralComputePipelineCreateInfo_t cpci;
 	const ralBindGroupLayout_t    *layouts[1];
-	uint32_t                       depthAspect;
 	int i;
 
 	if ( !backend || tileCount <= 0 )
 		return qfalse;
 
 	// ── the depth copy image (TRANSFER_DST | SAMPLED, non-MSAA, full extent) ──
-	memset( &img_desc, 0, sizeof( img_desc ) );
-	img_desc.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-	img_desc.imageType     = VK_IMAGE_TYPE_2D;
-	img_desc.format        = vk.depth_format;
-	img_desc.extent.width  = glConfig.vidWidth;
-	img_desc.extent.height = glConfig.vidHeight;
-	img_desc.extent.depth  = 1;
-	img_desc.mipLevels     = 1;
-	img_desc.arrayLayers   = 1;
-	img_desc.samples       = VK_SAMPLE_COUNT_1_BIT;
-	img_desc.tiling        = VK_IMAGE_TILING_OPTIMAL;
-	img_desc.usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-	img_desc.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
-	img_desc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	VK_CHECK( qvkCreateImage( vk.device, &img_desc, NULL, &vk.fpDepthImage ) );
+	memset( &tci, 0, sizeof( tci ) );
+	tci.type = RAL_TEXTURE_2D;
+	tci.format = vk_attachment_format_to_ral( vk.depth_format );
+	tci.width = (uint32_t)glConfig.vidWidth;
+	tci.height = (uint32_t)glConfig.vidHeight;
+	tci.depthOrArrayLayers = 1u;
+	tci.mipLevels = 1u;
+	tci.sampleCount = 1u;
+	tci.usage = RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED;
+	tci.memory = RAL_MEMORY_DEVICE_LOCAL;
+	tci.debugName = "wired-fp-depth-copy";
+	vk.ral_fpDepthImage = Ral_CreateTexture( backend, &tci );
+	if ( !vk.ral_fpDepthImage ) return qfalse;
 
-	vk_get_image_memory_requirements( vk.fpDepthImage, &mem_req );
-	memset( &alloc_info, 0, sizeof( alloc_info ) );
-	alloc_info.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	alloc_info.allocationSize  = mem_req.size;
-	alloc_info.memoryTypeIndex = find_memory_type( mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &vk.fpDepthMemory ) );
-	VK_CHECK( qvkBindImageMemory( vk.device, vk.fpDepthImage, vk.fpDepthMemory, 0 ) );
-
-	// Depth-ONLY aspect view: a combined depth+stencil image (D24S8) can only be
-	// sampled through a single-aspect view (the reduce reads depth, never stencil).
-	memset( &view_desc, 0, sizeof( view_desc ) );
-	view_desc.sType                       = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-	view_desc.image                       = vk.fpDepthImage;
-	view_desc.viewType                    = VK_IMAGE_VIEW_TYPE_2D;
-	view_desc.format                      = vk.depth_format;
-	view_desc.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-	view_desc.subresourceRange.levelCount = 1;
-	view_desc.subresourceRange.layerCount = 1;
-	VK_CHECK( qvkCreateImageView( vk.device, &view_desc, NULL, &vk.fpDepthView ) );
-
-	SET_OBJECT_NAME( vk.fpDepthImage, "forward+ depth copy image", RAL_VULKAN_OBJECT_ROLE_IMAGE );
-	SET_OBJECT_NAME( vk.fpDepthView,  "forward+ depth copy view",  RAL_VULKAN_OBJECT_ROLE_IMAGE_VIEW );
+	// Depth-only sampling view; the owned texture keeps the full format aspects
+	// for portable copy/transition validation.
+	memset( &vci, 0, sizeof( vci ) );
+	vci.texture = vk.ral_fpDepthImage;
+	vci.viewType = RAL_TEXTURE_2D;
+	vci.format = RAL_FORMAT_UNDEFINED;
+	vci.aspect = RAL_TEXTURE_VIEW_ASPECT_DEPTH_ONLY;
+	vk.ral_fpDepthView = Ral_CreateTextureView( backend, &vci );
+	if ( !vk.ral_fpDepthView ) return qfalse;
 
 	// RAL-native nearest/clamp sampler (the reduce reads exact device-depth texels).
 	memset( &sci, 0, sizeof( sci ) );
@@ -18498,45 +17409,6 @@ static qboolean vk_forwardplus_depth_alloc( ralBackend_t *backend, int tileCount
 	sci.debugName     = "wired-fp-depth-sampler";
 	vk.ral_fpDepthSampler = Ral_CreateSampler( backend, &sci );
 	if ( !vk.ral_fpDepthSampler )
-		return qfalse;
-
-	// Adopt the VkImage as a RAL sibling with whole-resource depth/stencil aspects
-	// while the sampling view below selects only the depth plane. This lets the
-	// portable transition path satisfy combined-format whole-image layout rules.
-	// The frame-end copy +
-	// the transitions go through Ral_CmdCopyImage / Ral_CmdTransitionTexture (W-37
-	// RAL-native). The adopt carries ownsImage=false — teardown frees only the
-	// wrapper. The provided view (depth-only) becomes the adopt's defaultView.
-	depthAspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-	if ( glConfig.stencilBits > 0 ) depthAspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
-	vk_ral_adopt_one_texture( vk.fpDepthImage, vk.fpDepthView, vk.depth_format,
-	                          &vk.ral_fpDepthImage, glConfig.vidWidth, glConfig.vidHeight,
-	                          depthAspect, RAL_TEXTURE_USAGE_SAMPLED
-	                          | RAL_TEXTURE_USAGE_TRANSFER_SRC
-	                          | RAL_TEXTURE_USAGE_TRANSFER_DST,
-	                          "wired-fp-depth-copy" );
-	if ( !vk.ral_fpDepthImage ) {
-		R_LOG( rch_ral, SEV_WARN, "forward+: depth-copy adopt failed; depthValid stays 0 (full slab)\n" );
-		return qfalse;
-	}
-	{
-		const ralResourceState_t initialState = { RAL_RESOURCE_USAGE_UNDEFINED, 0 };
-		if ( !Ral_PublishAdoptedTextureState( vk.ral_fpDepthImage,
-				&initialState, RAL_QUEUE_GRAPHICS ) ) return qfalse;
-	}
-
-	// A RAL sampling view over the adopted depth copy for the reduce compute
-	// (RAL_TEXTURE_2D, depth aspect inherited from the adopted texture).
-	{
-		ralTextureViewCreateInfo_t vci;
-		memset( &vci, 0, sizeof( vci ) );
-		vci.texture  = vk.ral_fpDepthImage;
-		vci.viewType = RAL_TEXTURE_2D;
-		vci.format   = RAL_FORMAT_UNDEFINED;
-		vci.aspect   = RAL_TEXTURE_VIEW_ASPECT_DEPTH_ONLY;
-		vk.ral_fpDepthView = Ral_CreateTextureView( backend, &vci );
-	}
-	if ( !vk.ral_fpDepthView )
 		return qfalse;
 
 	// ── reduce compute: set 0 = sceneDepth(0, sampled) + sampler(1) + tileDepth(2) ──
@@ -18577,7 +17449,6 @@ static qboolean vk_forwardplus_depth_alloc( ralBackend_t *backend, int tileCount
 			return qfalse;
 	}
 
-	(void)depthAspect;
 	return qtrue;
 }
 
@@ -18625,9 +17496,6 @@ void vk_forwardplus_init( ralBackend_t *backend )
 		if ( vk.ral_fpDepthSampler ) { Ral_DestroySampler( vk.ral_fpDepthSampler ); vk.ral_fpDepthSampler = NULL; }
 		if ( vk.ral_fpDepthView )    { Ral_DestroyTextureView( vk.ral_fpDepthView ); vk.ral_fpDepthView = NULL; }
 		if ( vk.ral_fpDepthImage )   { Ral_DestroyTexture( vk.ral_fpDepthImage ); vk.ral_fpDepthImage = NULL; }
-		if ( vk.fpDepthView )        { qvkDestroyImageView( vk.device, vk.fpDepthView, NULL ); vk.fpDepthView = VK_NULL_HANDLE; }
-		if ( vk.fpDepthImage )       { qvkDestroyImage( vk.device, vk.fpDepthImage, NULL ); vk.fpDepthImage = VK_NULL_HANDLE; }
-		if ( vk.fpDepthMemory )      { qvkFreeMemory( vk.device, vk.fpDepthMemory, NULL ); vk.fpDepthMemory = VK_NULL_HANDLE; }
 	}
 	vk.fpDepthRetained = qfalse;   // no copy exists yet — first frame uses the full slab
 
@@ -18690,11 +17558,13 @@ static qboolean vk_forwardplus_lit_refresh_set( uint32_t slot )
 	ralBuffer_t *clusterLights, *clusterParams;
 	ralTexture_t *shadowTexture = NULL;
 	const ralSampler_t *shadowSampler = NULL;
+	ralTextureType_t shadowViewType = RAL_TEXTURE_2D;
+	qboolean shadowDepth = qfalse;
 	ralTextureView_t *shadowViewCandidate = NULL, *shadowViewRetired;
+	ralTextureViewCreateInfo_t shadowViewInfo;
 	ralBindGroup_t *groupCandidate = NULL, *groupRetired;
 	ralBindingValue_t values[8];
 	ralBindGroupCreateInfo_t createInfo;
-	void *nativeShadowView = NULL, *nativeShadowSampler = NULL;
 	void *rawCandidate;
 	const uint64_t tileParamsBytes = 4u * sizeof( float );
 	const uint64_t lightsBytes = (uint64_t)FP_MAX_LIGHTS
@@ -18716,18 +17586,15 @@ static qboolean vk_forwardplus_lit_refresh_set( uint32_t slot )
 
 	tileLights = vk.ral_fp_tilelights[slot];
 	lights = vk.ral_fp_lights[slot];
-	tileParams = vk_ral_lookup_buffer( vk.fpTileParamsBuf[slot] );
-	shadowParams = vk_ral_lookup_buffer( vk.dlightShadow.paramsBuf[slot] );
+	tileParams = vk.ral_fpTileParams[slot];
+	shadowParams = vk.dlightShadow.ral_paramsBuf[slot];
 	clusterLights = vk.ral_fp_clustergrid
 		? vk.ral_fp_clustergrid : vk.ral_fp_clusterfallback;
-	clusterParams = vk_ral_lookup_buffer( vk.fpClusterParamsBuf );
+	clusterParams = vk.ral_fpClusterParams;
 	if ( !tileLights || !lights || !tileParams || !shadowParams
 			|| !clusterLights || !clusterParams
 			|| !Ral_GetBufferHandle( tileLights )
 			|| !Ral_GetBufferHandle( lights )
-			|| Ral_GetBufferHandle( tileParams ) != (void *)vk.fpTileParamsBuf[slot]
-			|| Ral_GetBufferHandle( shadowParams ) != (void *)vk.dlightShadow.paramsBuf[slot]
-			|| Ral_GetBufferHandle( clusterParams ) != (void *)vk.fpClusterParamsBuf
 			|| Ral_GetBufferSize( tileLights ) == 0u
 			|| Ral_GetBufferSize( lights ) != lightsBytes
 			|| Ral_GetBufferSize( tileParams ) != tileParamsBytes
@@ -18735,49 +17602,41 @@ static qboolean vk_forwardplus_lit_refresh_set( uint32_t slot )
 			|| Ral_GetBufferSize( clusterLights ) == 0u
 			|| Ral_GetBufferSize( clusterParams ) != clusterParamsBytes ) return qfalse;
 
-	if ( vk.dlightShadow.ral_image && vk.dlightShadow.view
+	if ( vk.dlightShadow.ral_image
 			&& vk.dlightShadow.ral_sampler
 			&& Ral_GetTextureImageHandle( vk.dlightShadow.ral_image )
-				== (void *)vk.dlightShadow.image
-			&& Ral_GetTextureDefaultViewHandle( vk.dlightShadow.ral_image )
-				== (void *)vk.dlightShadow.view
 			&& Ral_GetSamplerHandle( vk.dlightShadow.ral_sampler )
 				== (void *)vk.dlightShadow.sampler ) {
 		shadowTexture = vk.dlightShadow.ral_image;
 		shadowSampler = vk.dlightShadow.ral_sampler;
-		nativeShadowView = (void *)vk.dlightShadow.view;
-		nativeShadowSampler = (void *)vk.dlightShadow.sampler;
-	} else if ( vk.shadowMap.ral_image && vk.shadowMap.view
+		shadowDepth = qtrue;
+	} else if ( vk.shadowMap.ral_image
 			&& vk.shadowMap.ral_sampler
 			&& Ral_GetTextureImageHandle( vk.shadowMap.ral_image )
-				== (void *)vk.shadowMap.image
-			&& Ral_GetTextureDefaultViewHandle( vk.shadowMap.ral_image )
-				== (void *)vk.shadowMap.view
 			&& Ral_GetSamplerHandle( vk.shadowMap.ral_sampler )
 				== (void *)vk.shadowMap.sampler ) {
 		shadowTexture = vk.shadowMap.ral_image;
 		shadowSampler = vk.shadowMap.ral_sampler;
-		nativeShadowView = (void *)vk.shadowMap.view;
-		nativeShadowSampler = (void *)vk.shadowMap.sampler;
-	} else if ( tr.whiteImage && tr.whiteImage->ralDescriptorTexture
+		shadowViewType = RAL_TEXTURE_2D_ARRAY;
+		shadowDepth = qtrue;
+	} else if ( tr.whiteImage && tr.whiteImage->ral
 			&& tr.whiteImage->ralDescriptorSampler
-			&& tr.whiteImage->view != VK_NULL_HANDLE
-			&& Ral_GetTextureDefaultViewHandle(
-				tr.whiteImage->ralDescriptorTexture ) == (void *)tr.whiteImage->view
+			&& Ral_GetTextureDefaultViewHandle( tr.whiteImage->ral )
 			&& Ral_GetSamplerHandle( tr.whiteImage->ralDescriptorSampler ) ) {
-		shadowTexture = tr.whiteImage->ralDescriptorTexture;
+		shadowTexture = tr.whiteImage->ral;
 		shadowSampler = tr.whiteImage->ralDescriptorSampler;
-		nativeShadowView = (void *)tr.whiteImage->view;
-		nativeShadowSampler = Ral_GetSamplerHandle(
-			tr.whiteImage->ralDescriptorSampler );
 	}
-	if ( !shadowTexture || !shadowSampler || !nativeShadowView
-			|| !nativeShadowSampler ) return qfalse;
-	shadowViewCandidate = Ral_AdoptTextureViewExact( backend,
-		shadowTexture, nativeShadowView );
+	if ( !shadowTexture || !shadowSampler
+			|| !Ral_GetSamplerHandle( shadowSampler ) ) return qfalse;
+	memset( &shadowViewInfo, 0, sizeof( shadowViewInfo ) );
+	shadowViewInfo.texture = shadowTexture;
+	shadowViewInfo.viewType = shadowViewType;
+	shadowViewInfo.format = RAL_FORMAT_UNDEFINED;
+	if ( shadowDepth )
+		shadowViewInfo.aspect = RAL_TEXTURE_VIEW_ASPECT_DEPTH_ONLY;
+	shadowViewCandidate = Ral_CreateTextureView( backend, &shadowViewInfo );
 	if ( !shadowViewCandidate
-			|| Ral_GetTextureViewHandle( shadowViewCandidate )
-				!= nativeShadowView ) goto fail;
+			|| !Ral_GetTextureViewHandle( shadowViewCandidate ) ) goto fail;
 
 	memset( values, 0, sizeof( values ) );
 	values[0] = (ralBindingValue_t){ .binding=4u,
@@ -19010,7 +17869,7 @@ void vk_forwardplus_dispatch( void )
 	// its native compatibility mirror. Resource rebuilds invalidate the child and
 	// this fence-safe command slot lazily publishes a fresh complete candidate.
 	if ( vk.ral_fpLitPipeline && vk.fpLitSetLayout != VK_NULL_HANDLE
-	     && vk.fpTileParamsBuf[ vk.cmd_index ] != VK_NULL_HANDLE ) {
+	     && vk.ral_fpTileParams[ vk.cmd_index ] ) {
 		const uint32_t fi = vk.cmd_index;
 		float *tp = (float *)vk.fpTileParamsPtr[ fi ];
 		if ( tp ) {
@@ -19018,6 +17877,13 @@ void vk_forwardplus_dispatch( void )
 			tp[1] = (float)glConfig.vidHeight;
 			tp[2] = (float)tilesX;
 			tp[3] = (float)tilesY;
+		}
+		{
+			vkRalBufferShadowWriteReceipt_t writeReceipt;
+			if ( !VK_RalBufferShadowMarkWritten( &vk_fp_tile_params_shadows[fi],
+					0u, 4u * sizeof( float ) )
+			  || !VK_RalBufferShadowPublish( &vk_fp_tile_params_shadows[fi],
+					0u, 4u * sizeof( float ), &writeReceipt ) ) return;
 		}
 		if ( !vk.ral_fpLitSet[fi]
 				&& !vk_forwardplus_lit_refresh_set( fi ) ) {
@@ -19064,26 +17930,16 @@ void vk_forwardplus_lit_shutdown( void )
 	if ( vk.ral_fpLitLayout )    { Ral_DestroyPipelineLayout( vk.ral_fpLitLayout ); vk.ral_fpLitLayout = NULL; vk.fpLitLayout = VK_NULL_HANDLE; }
 	if ( vk.ral_fpLitSetLayout ) { Ral_DestroyBindGroupLayout( vk.ral_fpLitSetLayout ); vk.ral_fpLitSetLayout = NULL; vk.fpLitSetLayout = VK_NULL_HANDLE; }
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.fpTileParamsBuf[i] != VK_NULL_HANDLE ) {
-			if ( vk.fpTileParamsPtr[i] ) { qvkUnmapMemory( vk.device, vk.fpTileParamsMem[i] ); vk.fpTileParamsPtr[i] = NULL; }
-			vk_ral_unregister_buffer( vk.fpTileParamsBuf[i] );
-			qvkDestroyBuffer( vk.device, vk.fpTileParamsBuf[i], NULL );
-			qvkFreeMemory( vk.device, vk.fpTileParamsMem[i], NULL );
-			vk.fpTileParamsBuf[i] = VK_NULL_HANDLE;
-			vk.fpTileParamsMem[i] = VK_NULL_HANDLE;
-		}
+		VK_RalBufferShadowRelease( &vk_fp_tile_params_shadows[i] );
+		vk.ral_fpTileParams[i] = NULL;
+		vk.fpTileParamsPtr[i] = NULL;
 	}
 	// r_unbakeStaticLights cluster resources (single instances, not a ring).
 	if ( vk.ral_fp_clustergrid )     { Ral_DestroyBuffer( vk.ral_fp_clustergrid );     vk.ral_fp_clustergrid = NULL; vk.fpClusterGridPtr = NULL; }
 	if ( vk.ral_fp_clusterfallback ) { Ral_DestroyBuffer( vk.ral_fp_clusterfallback ); vk.ral_fp_clusterfallback = NULL; }
-	if ( vk.fpClusterParamsBuf != VK_NULL_HANDLE ) {
-		if ( vk.fpClusterParamsPtr ) { qvkUnmapMemory( vk.device, vk.fpClusterParamsMem ); vk.fpClusterParamsPtr = NULL; }
-		vk_ral_unregister_buffer( vk.fpClusterParamsBuf );
-		qvkDestroyBuffer( vk.device, vk.fpClusterParamsBuf, NULL );
-		qvkFreeMemory( vk.device, vk.fpClusterParamsMem, NULL );
-		vk.fpClusterParamsBuf = VK_NULL_HANDLE;
-		vk.fpClusterParamsMem = VK_NULL_HANDLE;
-	}
+	VK_RalBufferShadowRelease( &vk_fp_cluster_params_shadow );
+	vk.ral_fpClusterParams = NULL;
+	vk.fpClusterParamsPtr = NULL;
 	s_fpClusterBuiltFor = NULL;
 }
 
@@ -19141,28 +17997,14 @@ void vk_forwardplus_lit_init( ralBackend_t *backend )
 
 	// per-frame tileParams UBO {screenW, screenH, tilesX, tilesY} (host-coherent).
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		VkBufferCreateInfo   bd;
-		VkMemoryRequirements mr;
-		VkMemoryAllocateInfo ma;
-		memset( &bd, 0, sizeof( bd ) );
-		bd.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bd.size  = 4 * sizeof( float );
-		bd.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-		bd.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK( qvkCreateBuffer( vk.device, &bd, NULL, &vk.fpTileParamsBuf[i] ) );
-		qvkGetBufferMemoryRequirements( vk.device, vk.fpTileParamsBuf[i], &mr );
-		memset( &ma, 0, sizeof( ma ) );
-		ma.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		ma.allocationSize = mr.size;
-		ma.memoryTypeIndex = find_memory_type( mr.memoryTypeBits,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-		VK_CHECK( qvkAllocateMemory( vk.device, &ma, NULL, &vk.fpTileParamsMem[i] ) );
-		qvkBindBufferMemory( vk.device, vk.fpTileParamsBuf[i], vk.fpTileParamsMem[i], 0 );
-		VK_CHECK( qvkMapMemory( vk.device, vk.fpTileParamsMem[i], 0, VK_WHOLE_SIZE, 0, &vk.fpTileParamsPtr[i] ) );
-		vk_ral_register_buffer( vk.fpTileParamsBuf[i], (uint64_t)bd.size,
-			bd.usage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			"wired-forwardplus-tile-params-ubo" );
-		SET_OBJECT_NAME( vk.fpTileParamsBuf[i], "forward+ tile params UBO", RAL_VULKAN_OBJECT_ROLE_BUFFER );
+		VK_RalBufferShadowInit( &vk_fp_tile_params_shadows[i] );
+		if ( !VK_RalBufferShadowEnsure( &vk_fp_tile_params_shadows[i],
+				vk_ral_get_backend(), 4u * sizeof( float ), RAL_BUFFER_UNIFORM,
+				"wired-forwardplus-tile-params-ubo" ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create Forward+ tile params RAL buffer %u", i );
+		vk.ral_fpTileParams[i] = vk_fp_tile_params_shadows[i].buffer;
+		vk.fpTileParamsPtr[i] = vk_fp_tile_params_shadows[i].bytes;
 		vk.fpLitSet[i] = VK_NULL_HANDLE; // lazy-allocated in the dispatch (after pool reset)
 	}
 
@@ -19171,29 +18013,16 @@ void vk_forwardplus_lit_init( ralBackend_t *backend )
 	// Filled at map load by vk_forwardplus_build_clusters; a valid buffer is bound even
 	// when the cvar is off (the fragment reads dims=(1,1,1)/count=0 from the fallback grid).
 	{
-		VkBufferCreateInfo   bd;
-		VkMemoryRequirements mr;
-		VkMemoryAllocateInfo ma;
 		float               *cp;
-		memset( &bd, 0, sizeof( bd ) );
-		bd.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bd.size  = 8 * sizeof( float );   // vec4 origin(+cellSize) + ivec4 dims
-		bd.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-		bd.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK( qvkCreateBuffer( vk.device, &bd, NULL, &vk.fpClusterParamsBuf ) );
-		qvkGetBufferMemoryRequirements( vk.device, vk.fpClusterParamsBuf, &mr );
-		memset( &ma, 0, sizeof( ma ) );
-		ma.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		ma.allocationSize = mr.size;
-		ma.memoryTypeIndex = find_memory_type( mr.memoryTypeBits,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-		VK_CHECK( qvkAllocateMemory( vk.device, &ma, NULL, &vk.fpClusterParamsMem ) );
-		qvkBindBufferMemory( vk.device, vk.fpClusterParamsBuf, vk.fpClusterParamsMem, 0 );
-		VK_CHECK( qvkMapMemory( vk.device, vk.fpClusterParamsMem, 0, VK_WHOLE_SIZE, 0, &vk.fpClusterParamsPtr ) );
-		vk_ral_register_buffer( vk.fpClusterParamsBuf, (uint64_t)bd.size,
-			bd.usage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			"wired-forwardplus-cluster-params-ubo" );
-		SET_OBJECT_NAME( vk.fpClusterParamsBuf, "forward+ cluster params UBO", RAL_VULKAN_OBJECT_ROLE_BUFFER );
+		vkRalBufferShadowWriteReceipt_t writeReceipt;
+		VK_RalBufferShadowInit( &vk_fp_cluster_params_shadow );
+		if ( !VK_RalBufferShadowEnsure( &vk_fp_cluster_params_shadow,
+				vk_ral_get_backend(), 8u * sizeof( float ), RAL_BUFFER_UNIFORM,
+				"wired-forwardplus-cluster-params-ubo" ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create Forward+ cluster params RAL buffer" );
+		vk.ral_fpClusterParams = vk_fp_cluster_params_shadow.buffer;
+		vk.fpClusterParamsPtr = vk_fp_cluster_params_shadow.bytes;
 		// default = empty grid (dims 1x1x1, cellSize 1): every fragment maps to cell 0,
 		// whose count is 0 in the fallback SSBO → zero static-light iterations.
 		cp = (float *)vk.fpClusterParamsPtr;
@@ -19201,6 +18030,12 @@ void vk_forwardplus_lit_init( ralBackend_t *backend )
 			cp[0] = 0.0f; cp[1] = 0.0f; cp[2] = 0.0f; cp[3] = 1.0f;              // origin.xyz, cellSize
 			((int32_t *)cp)[4] = 1; ((int32_t *)cp)[5] = 1; ((int32_t *)cp)[6] = 1; ((int32_t *)cp)[7] = 0; // dims.xyz, pad
 		}
+		if ( !VK_RalBufferShadowMarkWritten( &vk_fp_cluster_params_shadow,
+				0u, 8u * sizeof( float ) )
+		  || !VK_RalBufferShadowPublish( &vk_fp_cluster_params_shadow,
+				0u, 8u * sizeof( float ), &writeReceipt ) )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to publish Forward+ cluster params" );
 	}
 
 	// r_unbakeStaticLights empty-fallback cluster SSBO (1 cell, count=0) — bound to
@@ -19381,9 +18216,14 @@ void vk_forwardplus_build_clusters( void )
 			vk_forwardplus_lit_invalidate_sets();
 			if ( vk.ral_fp_clustergrid ) { Ral_DestroyBuffer( vk.ral_fp_clustergrid ); vk.ral_fp_clustergrid = NULL; vk.fpClusterGridPtr = NULL; }
 			if ( vk.fpClusterParamsPtr ) {
+				vkRalBufferShadowWriteReceipt_t writeReceipt;
 				float *cp = (float *)vk.fpClusterParamsPtr;
 				cp[0] = 0.0f; cp[1] = 0.0f; cp[2] = 0.0f; cp[3] = 1.0f;
 				((int32_t *)cp)[4] = 1; ((int32_t *)cp)[5] = 1; ((int32_t *)cp)[6] = 1; ((int32_t *)cp)[7] = 0;
+				if ( !VK_RalBufferShadowMarkWritten( &vk_fp_cluster_params_shadow,
+						0u, 8u * sizeof( float ) )
+				  || !VK_RalBufferShadowPublish( &vk_fp_cluster_params_shadow,
+						0u, 8u * sizeof( float ), &writeReceipt ) ) return;
 			}
 			s_fpClusterBuiltFor = NULL;
 		}
@@ -19449,6 +18289,7 @@ void vk_forwardplus_build_clusters( void )
 
 	// (3) Fill the grid-params UBO with the real grid (origin.xyz, cellSize; dims.xyz).
 	if ( vk.fpClusterParamsPtr ) {
+		vkRalBufferShadowWriteReceipt_t writeReceipt;
 		float *cp = (float *)vk.fpClusterParamsPtr;
 		cp[0] = w->clusterGridOrigin[0]; cp[1] = w->clusterGridOrigin[1]; cp[2] = w->clusterGridOrigin[2];
 		cp[3] = w->clusterCellSize;
@@ -19456,6 +18297,10 @@ void vk_forwardplus_build_clusters( void )
 		((int32_t *)cp)[5] = w->clusterGridDims[1];
 		((int32_t *)cp)[6] = w->clusterGridDims[2];
 		((int32_t *)cp)[7] = 0;
+		if ( !VK_RalBufferShadowMarkWritten( &vk_fp_cluster_params_shadow,
+				0u, 8u * sizeof( float ) )
+		  || !VK_RalBufferShadowPublish( &vk_fp_cluster_params_shadow,
+				0u, 8u * sizeof( float ), &writeReceipt ) ) return;
 	}
 
 	// (4) Invalidate the lazy lit descriptor sets so binding 10/11 re-point at the new
@@ -20071,7 +18916,7 @@ void vk_hdr_exposure_reduce_shutdown( void )
 // histogram, reduces to an exposure, temporally smooths into a persistent
 // accumulator, and writes exposure_bias into the per-frame exposure UBO. Depends
 // on the histogram pipeline (built just above) and the exposure UBO ring being
-// RAL-adopted (vk.exposure.ral_buffer[]). The bind-group is a per-frame ring so
+// RAL-owned (vk.exposure.ral_buffer[]). The bind-group is a per-frame ring so
 // each frame's reduce targets the same UBO slot the fragment tonemap binds.
 // Idempotent; tears its partial state back down on any sub-step failure so a NULL
 // ral_exposure_reduce_pipeline cleanly disables the reduce dispatch.
@@ -20157,7 +19002,6 @@ void vk_hdr_exposure_reduce_init( ralBackend_t *backend )
 qboolean vk_initialize( void )
 {
 	const ralCaps_t *caps;
-	uint32_t maxSize;
 	uint32_t i;
 
 	// propagate a recoverable RAL-bringup decline (R_DeclineInit set
@@ -20287,16 +19131,8 @@ qboolean vk_initialize( void )
 
 	// fill glConfig information
 
-	// maxTextureSize must not exceed IMAGE_CHUNK_SIZE
-	maxSize = sqrtf( IMAGE_CHUNK_SIZE / 4 );
-	// round down to next power of 2
-	glConfig.maxTextureSize = MIN( caps->maxTextureDimension2D, log2pad( maxSize, 0 ) );
-
-	if ( glConfig.maxTextureSize > MAX_TEXTURE_SIZE )
-		glConfig.maxTextureSize = MAX_TEXTURE_SIZE; // ResampleTexture() relies on that maximum
-
-	// default chunk size, may be doubled on demand
-	vk.image_chunk_size = IMAGE_CHUNK_SIZE;
+	glConfig.maxTextureSize = MIN( caps->maxTextureDimension2D,
+		MAX_TEXTURE_SIZE ); // ResampleTexture() relies on that maximum
 
 	vk.maxLod = 1 + Q_log2( glConfig.maxTextureSize );
 
@@ -20560,41 +19396,40 @@ qboolean vk_initialize( void )
 	//
 	// Descriptor set layout.
 	//
-	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, &vk.set_layout_sampler );
-	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, &vk.set_layout_uniform );
+	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		VK_SHADER_STAGE_FRAGMENT_BIT, &vk.ral_bgl_sampler,
+		&vk.set_layout_sampler, "wired-set-layout-sampler" );
+	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+		VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT,
+		&vk.ral_bgl_uniform, &vk.set_layout_uniform, "wired-set-layout-uniform" );
 	// MSDF per-draw UBO set layout — single UNIFORM_BUFFER_DYNAMIC binding, VS|FS
 	// (VS reads mvp, FS reads the outline/glow/shadow params + the atlas bindless
 	// slot). Set 3 of vk.pipeline_layout_msdf; bound per-draw with a dynamic offset
 	// into the vk.msdf ring (replaces the MSDF 132-byte push constant).
-	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, &vk.set_layout_msdf );
+	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+		VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT,
+		&vk.ral_bgl_msdf, &vk.set_layout_msdf, "wired-set-layout-msdf" );
 	// Shared effects per-draw UBO set layout — single UNIFORM_BUFFER_DYNAMIC binding,
 	// VS|FS. Set 1 of each effect pipeline layout (ribbon/beam/sprite); bound per-draw
 	// with a dynamic offset into the vk.effectsUbo ring (replaces the three effects'
 	// push ranges). The frag stages declare the block for layout match but read none.
-	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, &vk.set_layout_effects_ubo );
-	{
-		ralBindEntry_t entry;
-		memset( &entry, 0, sizeof( entry ) );
-		entry.binding = 0u;
-		entry.type = RAL_BIND_UNIFORM_BUFFER;
-		entry.count = 1u;
-		entry.stageFlags = RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT;
-		entry.dynamicOffset = qtrue;
-		vk.ral_bgl_effects_ubo = Ral_AdoptBindGroupLayout(
-			vk_ral_get_backend(), vk.set_layout_effects_ubo, 1u, &entry,
-			"wired-set-layout-effects-ubo-adopted" );
-		if ( !vk.ral_bgl_effects_ubo )
-			ri.Terminate( TERM_UNRECOVERABLE,
-				"Vulkan: failed to publish effects UBO RAL bind-group layout" );
-	}
+	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+		VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT,
+		&vk.ral_bgl_effects_ubo, &vk.set_layout_effects_ubo,
+		"wired-set-layout-effects-ubo" );
 	// SMAA rtMetrics per-frame UBO set layout — single UNIFORM_BUFFER binding, VS|FS.
 	// Set 3 of vk.pipeline_layout_smaa (shared by edge/blend/resolve); replaces the
 	// 16-byte rtMetrics push. Non-dynamic (per-frame screen size, one slot per frame).
-	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, &vk.set_layout_smaa_rtmetrics );
+	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT,
+		&vk.ral_bgl_smaa_rtmetrics, &vk.set_layout_smaa_rtmetrics,
+		"wired-set-layout-smaa-rtmetrics" );
 	// Scene-exposure uniform read by tonemap.frag (set 1, binding 0 of
 	// vk.pipeline_layout_post_process). Plain (non-dynamic) UNIFORM_BUFFER,
 	// FRAGMENT stage — one host-coherent buffer per in-flight frame.
-	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, &vk.exposureSetLayout );
+	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		VK_SHADER_STAGE_FRAGMENT_BIT, &vk.ral_bgl_exposure,
+		&vk.exposureSetLayout, "wired-set-layout-exposure" );
 
 	// engine-resources set layout: 1 COMBINED_IMAGE_SAMPLER
 	// binding, FRAGMENT stage. binding 0 carries the CSM 2DArray shadow
@@ -20612,22 +19447,27 @@ qboolean vk_initialize( void )
 		// is 5-binding-compatible — this is not a live layout mutation. binding 4 is
 		// always written with a valid view (denoised GTAO, or tr.whiteImage as a 1.0
 		// fallback) so no pipeline reads an unbound descriptor.
-		VkDescriptorSetLayoutBinding binds[ 5 ];
-		VkDescriptorSetLayoutCreateInfo desc;
+		ralBindEntry_t binds[ 5 ];
+		ralBindGroupLayoutCreateInfo_t desc;
 		int bi;
 		memset( binds, 0, sizeof( binds ) );
 		for ( bi = 0; bi < 5; bi++ ) {
-			binds[bi].binding         = (uint32_t)bi;
-			binds[bi].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			binds[bi].descriptorCount = 1;
-			binds[bi].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+			binds[bi].binding = (uint32_t)bi;
+			binds[bi].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
+			binds[bi].count = 1u;
+			binds[bi].stageFlags = RAL_STAGE_FRAGMENT;
 		}
 		memset( &desc, 0, sizeof( desc ) );
-		desc.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-		desc.bindingCount = 5;
-		desc.pBindings    = binds;
-		VK_CHECK( qvkCreateDescriptorSetLayout( vk.device, &desc, NULL, &vk.set_layout_engine_resources ) );
-		SET_OBJECT_NAME( vk.set_layout_engine_resources, "set layout: engine resources (shadowMap + IBL + GTAO)", RAL_VULKAN_OBJECT_ROLE_DESCRIPTOR_SET_LAYOUT );
+		desc.entries = binds;
+		desc.numEntries = ARRAY_LEN( binds );
+		desc.debugName = "wired-set-layout-engine-resources";
+		vk.ral_bgl_engine_resources = Ral_CreateBindGroupLayout(
+			vk_ral_get_backend(), &desc );
+		if ( !vk.ral_bgl_engine_resources )
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to create engine-resources RAL bind-group layout" );
+		vk.set_layout_engine_resources = (VkDescriptorSetLayout)
+			Ral_GetBindGroupLayoutHandle( vk.ral_bgl_engine_resources );
 	}
 	// Per-entity matrix storage-buffer layout — one STORAGE_BUFFER binding, VERTEX
 	// stage. Born here before any pipeline is built against vk.pipeline_layout, so
@@ -20635,7 +19475,9 @@ qboolean vk_initialize( void )
 	// r_entitySSBO — the shader only READS it on the variant path, but the layout
 	// is uniformly present, so this is not a live mutation. A clone of
 	// vk.shadowMap.set_layout_entmat.
-	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, &vk.set_layout_entmat );
+	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		VK_SHADER_STAGE_VERTEX_BIT, &vk.ral_bgl_entmat,
+		&vk.set_layout_entmat, "wired-set-layout-entmat" );
 	//vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, VK_SHADER_STAGE_FRAGMENT_BIT, &vk.set_layout_input );
 	// RAL adoption of these three layouts lives at
 	// the END of vk_initialize, AFTER vk_ral_textures_init brings up the
@@ -20666,6 +19508,7 @@ qboolean vk_initialize( void )
 		// Sized by VK_MAX_PIPELINE_LAYOUT_SETS (a layout-set-count constant)
 		// rather than the bloom-pass count it coincidentally equals — see vk.h.
 		VkDescriptorSetLayout set_layouts[ VK_MAX_PIPELINE_LAYOUT_SETS ];
+		const ralBindGroupLayout_t *ral_layouts[ VK_MAX_PIPELINE_LAYOUT_SETS ];
 		VkPipelineLayoutCreateInfo desc;
 		VkPushConstantRange push_ranges[2]; // main layout: optional FS fog block
 		uint32_t pushRangeCount;
@@ -20724,6 +19567,10 @@ qboolean vk_initialize( void )
 		// (born-with, so every main pipeline is 4-set-compatible); the descriptor is
 		// only bound + the shader only reads it on the r_entitySSBO path.
 		set_layouts[WIRED_ENTITY_MAT_SET] = vk.set_layout_entmat;
+		ral_layouts[0] = vk.ral_bgl_uniform;
+		ral_layouts[WIRED_BINDLESS_SET] = vk_ral_get_bindless_layout();
+		ral_layouts[WIRED_ENGINE_RES_SET] = vk.ral_bgl_engine_resources;
+		ral_layouts[WIRED_ENTITY_MAT_SET] = vk.ral_bgl_entmat;
 
 		desc.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		desc.pNext = NULL;
@@ -20733,7 +19580,11 @@ qboolean vk_initialize( void )
 		desc.pushConstantRangeCount = pushRangeCount;
 		desc.pPushConstantRanges    = push_ranges;
 
-		VK_CHECK(qvkCreatePipelineLayout(vk.device, &desc, NULL, &vk.pipeline_layout));
+		vk_create_direct_pipeline_layout( ral_layouts,
+			WIRED_ENTITY_MAT_SET + 1,
+			pushRangeCount ? WIRED_FOG_PUSH_OFFSET + WIRED_FOG_PUSH_SIZE : 0u,
+			pushRangeCount ? RAL_STAGE_FRAGMENT : 0u,
+			"wired-pl-main", &vk.ral_pipeline_layout, &vk.pipeline_layout );
 
 		// MSDF pipeline layout: 4 descriptor sets, no push constants. The MVP +
 		// outline/glow/shadow params + atlas bindless slot now live in a per-draw
@@ -20753,6 +19604,7 @@ qboolean vk_initialize( void )
 			// already has room (the post-process layout below writes set_layouts[3]).
 			VkPipelineLayoutCreateInfo msdfLayoutInfo;
 			set_layouts[WIRED_MSDF_SET] = vk.set_layout_msdf;
+			ral_layouts[WIRED_MSDF_SET] = vk.ral_bgl_msdf;
 
 			memset(&msdfLayoutInfo, 0, sizeof(msdfLayoutInfo));
 			msdfLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -20761,7 +19613,9 @@ qboolean vk_initialize( void )
 			msdfLayoutInfo.pushConstantRangeCount = 0;
 			msdfLayoutInfo.pPushConstantRanges = NULL;
 
-			VK_CHECK(qvkCreatePipelineLayout(vk.device, &msdfLayoutInfo, NULL, &vk.pipeline_layout_msdf));
+			vk_create_direct_pipeline_layout( ral_layouts,
+				WIRED_MSDF_SET + 1, 0u, 0u, "wired-pl-msdf",
+				&vk.ral_pipeline_layout_msdf, &vk.pipeline_layout_msdf );
 			SET_OBJECT_NAME(vk.pipeline_layout_msdf, "pipeline layout: MSDF text", RAL_VULKAN_OBJECT_ROLE_PIPELINE_LAYOUT);
 		}
 
@@ -20780,6 +19634,10 @@ qboolean vk_initialize( void )
 		set_layouts[1] = vk.set_layout_sampler;   // set 1: second sampler / depth
 		set_layouts[2] = vk.exposureSetLayout;    // set 2: exposure UBO
 		set_layouts[3] = vk.set_layout_sampler;
+		ral_layouts[0] = vk.ral_bgl_sampler;
+		ral_layouts[1] = vk.ral_bgl_sampler;
+		ral_layouts[2] = vk.ral_bgl_exposure;
+		ral_layouts[3] = vk.ral_bgl_sampler;
 
 		desc.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		desc.pNext = NULL;
@@ -20789,7 +19647,9 @@ qboolean vk_initialize( void )
 		desc.pushConstantRangeCount = 0;
 		desc.pPushConstantRanges = NULL;
 
-		VK_CHECK( qvkCreatePipelineLayout( vk.device, &desc, NULL, &vk.pipeline_layout_post_process ) );
+		vk_create_direct_pipeline_layout( ral_layouts, 3u, 0u, 0u,
+			"wired-pl-post-process", &vk.ral_pipeline_layout_post_process,
+			&vk.pipeline_layout_post_process );
 
 #if FEAT_SSAO
 		// SSAO pipeline layout: set 0 color, set 1 depth (unused by GTAO but kept
@@ -20800,7 +19660,9 @@ qboolean vk_initialize( void )
 		desc.setLayoutCount = 4;
 		desc.pushConstantRangeCount = 0;
 		desc.pPushConstantRanges = NULL;
-		VK_CHECK( qvkCreatePipelineLayout( vk.device, &desc, NULL, &vk.pipeline_layout_ssao ) );
+		vk_create_direct_pipeline_layout( ral_layouts, 4u, 0u, 0u,
+			"wired-pl-ssao", &vk.ral_pipeline_layout_ssao,
+			&vk.pipeline_layout_ssao );
 		set_layouts[2] = vk.set_layout_sampler;
 #endif
 
@@ -20819,7 +19681,9 @@ qboolean vk_initialize( void )
 			desc.setLayoutCount = 4;
 			desc.pushConstantRangeCount = 0;
 			desc.pPushConstantRanges = NULL;
-			VK_CHECK( qvkCreatePipelineLayout( vk.device, &desc, NULL, &vk.pipeline_layout_sunrays ) );
+			vk_create_direct_pipeline_layout( ral_layouts, 4u, 0u, 0u,
+				"wired-pl-sunrays", &vk.ral_pipeline_layout_sunrays,
+				&vk.pipeline_layout_sunrays );
 			set_layouts[2] = vk.set_layout_sampler;
 		}
 #endif
@@ -20840,6 +19704,10 @@ qboolean vk_initialize( void )
 			set_layouts[1] = vk.set_layout_sampler;
 			set_layouts[2] = vk.set_layout_sampler;
 			set_layouts[3] = vk.set_layout_smaa_rtmetrics;
+			ral_layouts[0] = vk.ral_bgl_sampler;
+			ral_layouts[1] = vk.ral_bgl_sampler;
+			ral_layouts[2] = vk.ral_bgl_sampler;
+			ral_layouts[3] = vk.ral_bgl_smaa_rtmetrics;
 
 			desc.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 			desc.pNext = NULL;
@@ -20849,7 +19717,9 @@ qboolean vk_initialize( void )
 			desc.pushConstantRangeCount = 0;
 			desc.pPushConstantRanges = NULL;
 
-			VK_CHECK( qvkCreatePipelineLayout( vk.device, &desc, NULL, &vk.pipeline_layout_smaa ) );
+			vk_create_direct_pipeline_layout( ral_layouts, 4u, 0u, 0u,
+				"wired-pl-smaa", &vk.ral_pipeline_layout_smaa,
+				&vk.pipeline_layout_smaa );
 			SET_OBJECT_NAME( vk.pipeline_layout_smaa, "pipeline layout - smaa", RAL_VULKAN_OBJECT_ROLE_PIPELINE_LAYOUT );
 		}
 
@@ -20931,9 +19801,9 @@ qboolean vk_initialize( void )
 	// RAL-allocated resources are usable in the same descriptor writes the
 	// renderer already issues. Backend internal allocations now use stdlib
 	// malloc/free, so R_InitImages's ri.FreeAll() can no longer
-	// wipe them — initialising here (END of vk_initialize) is safe.
-	// vk_ral_textures_init also flushes any vk_initialize-time buffer
-	// registrations queued in s_buf_pending earlier in this function.
+	// wipe them — initialising here (END of vk_initialize) is safe. Every buffer
+	// owner is already a direct RAL resource, so no pre-backend adoption queue
+	// remains to flush.
 	vk_ral_textures_init();
 
 	// adopt the three core descriptor-set
@@ -20944,78 +19814,16 @@ qboolean vk_initialize( void )
 	if ( qtrue ) {
 		ralBackend_t *backend = vk_ral_get_backend();
 		if ( backend ) {
-			ralBindEntry_t e;
-			memset( &e, 0, sizeof( e ) );
-			e.binding    = 0;
-			e.count      = 1;
-
-			e.type       = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
-			e.stageFlags = RAL_STAGE_FRAGMENT;
-			vk.ral_bgl_sampler = Ral_AdoptBindGroupLayout( backend, vk.set_layout_sampler, 1, &e, "wired-set-layout-sampler-adopted" );
-
-			e.type       = RAL_BIND_UNIFORM_BUFFER;
-			e.stageFlags = RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT;
-			e.dynamicOffset = qtrue;
-			vk.ral_bgl_uniform = Ral_AdoptBindGroupLayout( backend, vk.set_layout_uniform, 1, &e, "wired-set-layout-uniform-adopted" );
-
-			e.stageFlags = RAL_STAGE_FRAGMENT;
-			e.dynamicOffset = qfalse;
-			vk.ral_bgl_exposure = Ral_AdoptBindGroupLayout( backend,
-				vk.exposureSetLayout, 1, &e,
-				"wired-set-layout-exposure-adopted" );
-
-			e.stageFlags = RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT;
-			e.dynamicOffset = qtrue;
-			if ( !vk.ral_bgl_effects_ubo )
-				vk.ral_bgl_effects_ubo = Ral_AdoptBindGroupLayout( backend,
-					vk.set_layout_effects_ubo, 1, &e,
-					"wired-set-layout-effects-ubo-adopted" );
-			e.dynamicOffset = qfalse;
-			vk.ral_bgl_smaa_rtmetrics = Ral_AdoptBindGroupLayout( backend,
-				vk.set_layout_smaa_rtmetrics, 1, &e,
-				"wired-set-layout-smaa-rtmetrics-adopted" );
-
-			{
-				ralBindEntry_t engineEntries[5];
-				uint32_t bi;
-				memset( engineEntries, 0, sizeof( engineEntries ) );
-				for ( bi = 0u; bi < ARRAY_LEN( engineEntries ); bi++ ) {
-					engineEntries[bi].binding = bi;
-					engineEntries[bi].type = RAL_BIND_COMBINED_TEXTURE_SAMPLER;
-					engineEntries[bi].count = 1u;
-					engineEntries[bi].stageFlags = RAL_STAGE_FRAGMENT;
-				}
-				vk.ral_bgl_engine_resources = Ral_AdoptBindGroupLayout( backend,
-					vk.set_layout_engine_resources, ARRAY_LEN( engineEntries ),
-					engineEntries, "wired-set-layout-engine-resources-adopted" );
-			}
-
-			memset( &e, 0, sizeof( e ) );
-			e.binding = 0u;
-			e.count = 1u;
-			e.type = RAL_BIND_STORAGE_BUFFER;
-			e.stageFlags = RAL_STAGE_VERTEX;
-			vk.ral_bgl_entmat = Ral_AdoptBindGroupLayout( backend,
-				vk.set_layout_entmat, 1u, &e,
-				"wired-set-layout-entmat-adopted" );
-
-			e.type = RAL_BIND_UNIFORM_BUFFER;
-			e.stageFlags = RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT;
-			e.dynamicOffset = qtrue;
-			vk.ral_bgl_msdf = Ral_AdoptBindGroupLayout( backend,
-				vk.set_layout_msdf, 1u, &e,
-				"wired-set-layout-msdf-adopted" );
-
 			if ( vk.ral_bgl_sampler && vk.ral_bgl_uniform
 					&& vk.ral_bgl_exposure
 					&& vk.ral_bgl_effects_ubo && vk.ral_bgl_smaa_rtmetrics
 					&& vk.ral_bgl_engine_resources && vk.ral_bgl_entmat
 					&& vk.ral_bgl_msdf ) {
 				R_LOG( rch_ral, SEV_INFO,
-					"adopted 8 core descriptor set layouts as ralBindGroupLayout_t\n" );
+					"created 8 core descriptor layouts through RAL\n" );
 			} else {
 				R_LOG( rch_ral, SEV_WARN,
-					"Ral_AdoptBindGroupLayout partial failure (sampler=%p uniform=%p exposure=%p effects=%p smaa-rt=%p engine=%p entmat=%p msdf=%p)\n",
+					"direct RAL bind-group-layout cohort incomplete (sampler=%p uniform=%p exposure=%p effects=%p smaa-rt=%p engine=%p entmat=%p msdf=%p)\n",
 					(void *)vk.ral_bgl_sampler, (void *)vk.ral_bgl_uniform,
 					(void *)vk.ral_bgl_exposure,
 					(void *)vk.ral_bgl_effects_ubo,
@@ -21122,7 +19930,7 @@ qboolean vk_initialize( void )
 			}
 
 			// HDR auto-exposure compute resources are brought up later, from the
-			// tail of vk_ral_adopt_static_internal_textures (vk_ral_textures.c) —
+			// tail of vk_ral_refresh_internal_texture_dependents (vk_ral_textures.c) —
 			// that sweep runs AFTER vk_initialize and is where vk.ral_color_image
 			// is adopted, which the histogram's sampling view depends on. Re-running
 			// the sweep on vid_restart re-mints the view against the fresh image.
@@ -21154,57 +19962,48 @@ static void vk_destroy_attachments( void )
 	uint32_t i;
 	vk_scene_color_attachment_generation = 0;
 	// Every portable sampling view and attachment-dependent RAL child must be
-	// retired before its renderer-owned raw image. Centralizing the order here
+	// retired before its parent texture. Centralizing the order here
 	// covers HDR/FBO/swapchain rebuilds as well as full shutdown.
 	if ( vk_ral_get_backend() ) {
-		vk_ral_destroy_adopted_internal_textures();
-		if ( Ral_WaitIdleAndDrainDeferred( vk_ral_get_backend() ) != ralSuccess )
-			ri.Terminate( TERM_UNRECOVERABLE,
-				"RAL attachment teardown: deferred drain failed" );
+		vk_ral_release_particle_render_bindgroups();
+		vk_ral_release_decal_render_bindgroups();
+		vk_ral_release_atmospheric_render_bindgroups();
+		vk_ral_release_internal_texture_dependents();
 	}
 
-	if ( vk.bloom_image[0] ) {
-		for ( i = 0; i < ARRAY_LEN( vk.bloom_image ); i++ ) {
-			qvkDestroyImage( vk.device, vk.bloom_image[i], NULL );
-			qvkDestroyImageView( vk.device, vk.bloom_image_view[i], NULL );
-			vk.bloom_image[i] = VK_NULL_HANDLE;
-			vk.bloom_image_view[i] = VK_NULL_HANDLE;
+	if ( vk.ral_bloom_image[0] ) {
+		for ( i = 0; i < ARRAY_LEN( vk.ral_bloom_image ); i++ ) {
+			if ( vk.ral_bloom_image[i] ) {
+				Ral_DestroyTexture( vk.ral_bloom_image[i] );
+				vk.ral_bloom_image[i] = NULL;
+			}
 		}
 	}
 
-	if ( vk.color_image ) {
-		qvkDestroyImage( vk.device, vk.color_image, NULL );
-		qvkDestroyImageView( vk.device, vk.color_image_view, NULL );
-		vk.color_image = VK_NULL_HANDLE;
-		vk.color_image_view = VK_NULL_HANDLE;
+	if ( vk.ral_color_image ) {
+		Ral_DestroyTexture( vk.ral_color_image );
+		vk.ral_color_image = NULL;
 	}
 
-	if ( vk.tonemapped_image ) {
-		qvkDestroyImage( vk.device, vk.tonemapped_image, NULL );
-		qvkDestroyImageView( vk.device, vk.tonemapped_image_view, NULL );
-		vk.tonemapped_image = VK_NULL_HANDLE;
-		vk.tonemapped_image_view = VK_NULL_HANDLE;
+	if ( vk.ral_tonemapped_image ) {
+		Ral_DestroyTexture( vk.ral_tonemapped_image );
+		vk.ral_tonemapped_image = NULL;
 	}
 
-
-	qvkDestroyImage( vk.device, vk.depth_image, NULL );
-	qvkDestroyImageView( vk.device, vk.depth_image_view, NULL );
-	vk.depth_image = VK_NULL_HANDLE;
-	vk.depth_image_view = VK_NULL_HANDLE;
-
-	if ( vk.sceneDepth.image ) {
-		qvkDestroyImage( vk.device, vk.sceneDepth.image, NULL );
-		qvkDestroyImageView( vk.device, vk.sceneDepth.view, NULL );
-		if ( vk.sceneDepth.ral_sampler ) {
-			Ral_DestroySampler( vk.sceneDepth.ral_sampler );
-			vk.sceneDepth.ral_sampler = NULL;
-		}
-		qvkFreeMemory( vk.device, vk.sceneDepth.memory, NULL );
-		vk.sceneDepth.image = VK_NULL_HANDLE;
-		vk.sceneDepth.view = VK_NULL_HANDLE;
-		vk.sceneDepth.sampler = VK_NULL_HANDLE;
-		vk.sceneDepth.memory = VK_NULL_HANDLE;
+	if ( vk.ral_depth_image ) {
+		Ral_DestroyTexture( vk.ral_depth_image );
+		vk.ral_depth_image = NULL;
 	}
+
+	if ( vk.sceneDepth.ral_sampler ) {
+		Ral_DestroySampler( vk.sceneDepth.ral_sampler );
+		vk.sceneDepth.ral_sampler = NULL;
+	}
+	if ( vk.sceneDepth.ral_image ) {
+		Ral_DestroyTexture( vk.sceneDepth.ral_image );
+		vk.sceneDepth.ral_image = NULL;
+	}
+	vk.sceneDepth.sampler = VK_NULL_HANDLE;
 
 #if FEAT_SHADOW_MAPPING
 	vk_shadow_release_resources();
@@ -21217,37 +20016,25 @@ static void vk_destroy_attachments( void )
 	// and the live-path (r_smaa flips to 0) share this single call.
 	vk_smaa_release_resources();
 
-	if ( vk.screenMap.color_image ) {
-		qvkDestroyImage( vk.device, vk.screenMap.color_image, NULL );
-		qvkDestroyImageView( vk.device, vk.screenMap.color_image_view, NULL );
-		vk.screenMap.color_image = VK_NULL_HANDLE;
-		vk.screenMap.color_image_view = VK_NULL_HANDLE;
+	if ( vk.screenMap.ral_color_image ) {
+		Ral_DestroyTexture( vk.screenMap.ral_color_image );
+		vk.screenMap.ral_color_image = NULL;
 	}
 
-
-	if ( vk.screenMap.depth_image ) {
-		qvkDestroyImage( vk.device, vk.screenMap.depth_image, NULL );
-		qvkDestroyImageView( vk.device, vk.screenMap.depth_image_view, NULL );
-		vk.screenMap.depth_image = VK_NULL_HANDLE;
-		vk.screenMap.depth_image_view = VK_NULL_HANDLE;
+	if ( vk.screenMap.ral_depth_image ) {
+		Ral_DestroyTexture( vk.screenMap.ral_depth_image );
+		vk.screenMap.ral_depth_image = NULL;
 	}
 
 	if ( vk.capture.ral_image ) {
-		Ral_DestroyTexture( vk.capture.ral_image );   // before the VkImage it wraps
+		Ral_DestroyTexture( vk.capture.ral_image );
 		vk.capture.ral_image = NULL;
 	}
-	if ( vk.capture.image ) {
-		qvkDestroyImage( vk.device, vk.capture.image, NULL );
-		qvkDestroyImageView( vk.device, vk.capture.image_view, NULL );
-		vk.capture.image = VK_NULL_HANDLE;
-		vk.capture.image_view = VK_NULL_HANDLE;
-	}
 
-	for ( i = 0; i < vk.image_memory_count; i++ ) {
-		qvkFreeMemory( vk.device, vk.image_memory[i], NULL );
-	}
-
-	vk.image_memory_count = 0;
+	if ( vk_ral_get_backend()
+			&& Ral_WaitIdleAndDrainDeferred( vk_ral_get_backend() ) != ralSuccess )
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"RAL attachment teardown: deferred drain failed" );
 }
 
 
@@ -21468,92 +20255,46 @@ void vk_shutdown( refShutdownCode_t code )
 	if ( vk.ral_bgl_engine_resources ) { Ral_DestroyBindGroupLayout( vk.ral_bgl_engine_resources ); vk.ral_bgl_engine_resources = NULL; }
 	if ( vk.ral_bgl_entmat ) { Ral_DestroyBindGroupLayout( vk.ral_bgl_entmat ); vk.ral_bgl_entmat = NULL; }
 	if ( vk.ral_bgl_msdf ) { Ral_DestroyBindGroupLayout( vk.ral_bgl_msdf ); vk.ral_bgl_msdf = NULL; }
-
-	qvkDestroyDescriptorSetLayout(vk.device, vk.set_layout_sampler, NULL);
-	qvkDestroyDescriptorSetLayout(vk.device, vk.set_layout_uniform, NULL);
-	if ( vk.set_layout_msdf != VK_NULL_HANDLE ) {
-		qvkDestroyDescriptorSetLayout( vk.device, vk.set_layout_msdf, NULL );
-		vk.set_layout_msdf = VK_NULL_HANDLE;
-	}
-	if ( vk.set_layout_effects_ubo != VK_NULL_HANDLE ) {
-		qvkDestroyDescriptorSetLayout( vk.device, vk.set_layout_effects_ubo, NULL );
-		vk.set_layout_effects_ubo = VK_NULL_HANDLE;
-	}
-	if ( vk.set_layout_smaa_rtmetrics != VK_NULL_HANDLE ) {
-		qvkDestroyDescriptorSetLayout( vk.device, vk.set_layout_smaa_rtmetrics, NULL );
-		vk.set_layout_smaa_rtmetrics = VK_NULL_HANDLE;
-	}
-	if ( vk.exposureSetLayout != VK_NULL_HANDLE ) {
-		qvkDestroyDescriptorSetLayout( vk.device, vk.exposureSetLayout, NULL );
-		vk.exposureSetLayout = VK_NULL_HANDLE;
-	}
-	// Per-frame scene-exposure buffers (descriptor sets are freed by the
-	// descriptor-pool teardown; the buffers + mapped memory are not pool-owned).
+	vk.set_layout_sampler = VK_NULL_HANDLE;
+	vk.set_layout_uniform = VK_NULL_HANDLE;
+	vk.set_layout_msdf = VK_NULL_HANDLE;
+	vk.set_layout_effects_ubo = VK_NULL_HANDLE;
+	vk.set_layout_smaa_rtmetrics = VK_NULL_HANDLE;
+	vk.exposureSetLayout = VK_NULL_HANDLE;
+	vk.set_layout_engine_resources = VK_NULL_HANDLE;
+	vk.set_layout_entmat = VK_NULL_HANDLE;
+	// Persistent mapped UI/post-process buffers outlive descriptor-arena resets
+	// but are owned and released by RAL at final renderer teardown.
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.exposure.buffer[i] != VK_NULL_HANDLE ) {
-			qvkDestroyBuffer( vk.device, vk.exposure.buffer[i], NULL );
-			qvkFreeMemory( vk.device, vk.exposure.memory[i], NULL );
-			vk.exposure.buffer[i] = VK_NULL_HANDLE;
-			vk.exposure.memory[i] = VK_NULL_HANDLE;
-			vk.exposure.ptr[i]    = NULL;
-		}
+		VK_RalBufferShadowRelease( &vk_exposure_shadows[i] );
+		vk.exposure.ral_buffer[i] = NULL;
+		vk.exposure.ptr[i] = NULL;
 	}
-	// Per-frame WiredUI SCENE backdrop UBO buffers (descriptor sets freed by the
-	// descriptor-pool teardown; the buffers + mapped memory are not pool-owned).
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.menubg.buffer[i] != VK_NULL_HANDLE ) {
-			qvkDestroyBuffer( vk.device, vk.menubg.buffer[i], NULL );
-			qvkFreeMemory( vk.device, vk.menubg.memory[i], NULL );
-			vk.menubg.buffer[i] = VK_NULL_HANDLE;
-			vk.menubg.memory[i] = VK_NULL_HANDLE;
-			vk.menubg.ptr[i]    = NULL;
-		}
+		VK_RalBufferShadowRelease( &vk_menubg_shadows[i] );
+		vk.menubg.ral_buffer[i] = NULL;
+		vk.menubg.ptr[i] = NULL;
 	}
-	// MSDF per-draw UBO ring buffers (descriptor sets are freed by the descriptor-
-	// pool teardown; the buffers + mapped memory are not pool-owned).
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.msdf.buffer[i] != VK_NULL_HANDLE ) {
-			qvkDestroyBuffer( vk.device, vk.msdf.buffer[i], NULL );
-			qvkFreeMemory( vk.device, vk.msdf.memory[i], NULL );
-			vk.msdf.buffer[i] = VK_NULL_HANDLE;
-			vk.msdf.memory[i] = VK_NULL_HANDLE;
-			vk.msdf.ptr[i]    = NULL;
-		}
+		VK_RalBufferShadowRelease( &vk_msdf_shadows[i] );
+		vk.msdf.ral_buffer[i] = NULL;
+		vk.msdf.ptr[i] = NULL;
 	}
-	// Shared effects per-draw UBO ring buffers (same ownership note as MSDF).
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.effectsUbo.buffer[i] != VK_NULL_HANDLE ) {
-			qvkDestroyBuffer( vk.device, vk.effectsUbo.buffer[i], NULL );
-			qvkFreeMemory( vk.device, vk.effectsUbo.memory[i], NULL );
-			vk.effectsUbo.buffer[i] = VK_NULL_HANDLE;
-			vk.effectsUbo.memory[i] = VK_NULL_HANDLE;
-			vk.effectsUbo.ptr[i]    = NULL;
-		}
+		VK_RalBufferShadowRelease( &vk_effects_ubo_shadows[i] );
+		vk.effectsUbo.ral_buffer[i] = NULL;
+		vk.effectsUbo.ptr[i] = NULL;
 	}
-	// SMAA rtMetrics per-frame UBO buffers (same ownership note).
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.smaaRt.buffer[i] != VK_NULL_HANDLE ) {
-			qvkDestroyBuffer( vk.device, vk.smaaRt.buffer[i], NULL );
-			qvkFreeMemory( vk.device, vk.smaaRt.memory[i], NULL );
-			vk.smaaRt.buffer[i] = VK_NULL_HANDLE;
-			vk.smaaRt.memory[i] = VK_NULL_HANDLE;
-			vk.smaaRt.ptr[i]    = NULL;
-		}
-	}
-	if ( vk.set_layout_engine_resources != VK_NULL_HANDLE ) {
-		qvkDestroyDescriptorSetLayout(vk.device, vk.set_layout_engine_resources, NULL);
-		vk.set_layout_engine_resources = VK_NULL_HANDLE;
-	}
-	if ( vk.set_layout_entmat != VK_NULL_HANDLE ) {
-		qvkDestroyDescriptorSetLayout(vk.device, vk.set_layout_entmat, NULL);
-		vk.set_layout_entmat = VK_NULL_HANDLE;
+		VK_RalBufferShadowRelease( &vk_smaa_rt_shadows[i] );
+		vk.smaaRt.ral_buffer[i] = NULL;
+		vk.smaaRt.ptr[i] = NULL;
 	}
 	// bindless-ral-consolidate — set 7 layout + set live on the RAL backend now;
 	// vk_ral_textures_shutdown owns their teardown.
 
-	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout, NULL);
-	if ( vk.pipeline_layout_msdf != VK_NULL_HANDLE )
-		qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_msdf, NULL);
+	vk.pipeline_layout = VK_NULL_HANDLE;
+	vk.pipeline_layout_msdf = VK_NULL_HANDLE;
 	vk_shutdown_ribbon();
 	vk_shutdown_railribbon();
 	vk_shutdown_sprite();
@@ -21565,29 +20306,15 @@ void vk_shutdown( refShutdownCode_t code )
 #if FEAT_IQM
 	vk_shutdown_iqm_gpu_skinning();
 #endif
-	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_post_process, NULL);
-	if ( vk.pipeline_layout_smaa != VK_NULL_HANDLE ) {
-		qvkDestroyPipelineLayout( vk.device, vk.pipeline_layout_smaa, NULL );
-	}
+	vk.pipeline_layout_post_process = VK_NULL_HANDLE;
+	vk.pipeline_layout_smaa = VK_NULL_HANDLE;
 #if FEAT_SSAO
-	// GTAO is default-on, so the SSAO pipeline layout (created above under FEAT_SSAO,
-	// adopted as "wired-pl-ssao") is now always live and MUST be destroyed here or it
-	// leaks at device teardown (VUID-vkDestroyDevice-device-05137).
-	if ( vk.pipeline_layout_ssao != VK_NULL_HANDLE ) {
-		qvkDestroyPipelineLayout( vk.device, vk.pipeline_layout_ssao, NULL );
-		vk.pipeline_layout_ssao = VK_NULL_HANDLE;
-	}
+	// The direct RAL owner was released by the centralized core-layout sweep.
+	vk.pipeline_layout_ssao = VK_NULL_HANDLE;
 #endif
 #if FEAT_SUNRAYS
-	// Same teardown gap as the SSAO layout above: the sunrays pipeline layout
-	// ("wired-pl-sunrays", created under FEAT_SUNRAYS) is engine-owned — the RAL
-	// adoption (vk_ral_adopt_static_pipeline_layouts) is non-owning, so KILL_PL
-	// frees only the wrapper. The raw VkPipelineLayout must be destroyed here or
-	// it leaks at device teardown (VUID-vkDestroyDevice-device-05137).
-	if ( vk.pipeline_layout_sunrays != VK_NULL_HANDLE ) {
-		qvkDestroyPipelineLayout( vk.device, vk.pipeline_layout_sunrays, NULL );
-		vk.pipeline_layout_sunrays = VK_NULL_HANDLE;
-	}
+	// The direct RAL owner was released by the centralized core-layout sweep.
+	vk.pipeline_layout_sunrays = VK_NULL_HANDLE;
 #endif
 #ifdef USE_VBO
 	vk_release_vbo();
@@ -21914,7 +20641,7 @@ void vk_release_resources( void ) {
 
 	// half-init safety. RE_Shutdown calls this
 	// unconditionally; on a declined (caps-fail) renderer none of the per-
-	// resource state (image_chunks, pipelines, staging buffer, samplers) was
+	// resource state (pipelines, staging buffer, samplers) was
 	// ever created. vk_wait_idle on a never-submitted device works, but
 	// vk_destroy_samplers / the pipeline iteration / vk_clean_staging_buffer
 	// touch state the legacy path created which decline skipped.
@@ -21933,17 +20660,15 @@ void vk_release_resources( void ) {
 			if ( mod && mod->type == MOD_IQM && mod->modelData ) {
 				iqmData_t *data = (iqmData_t *)mod->modelData;
 				if ( data->vk_gpu_skinning ) {
-					vk_destroy_iqm_vbo( &data->vk_vertex_buffer, &data->vk_vertex_memory,
-						&data->vk_index_buffer, &data->vk_index_memory );
+					vk_destroy_iqm_vbo( &data->ral_vertex_buffer,
+						&data->ral_index_buffer );
 					data->vk_gpu_skinning = qfalse;
+					data->ral_vertex_bytes = data->ral_index_bytes = 0u;
 				}
 			}
 		}
 	}
 #endif
-
-	for (i = 0; i < vk_world.num_image_chunks; i++)
-		qvkFreeMemory(vk.device, vk_world.image_chunks[i].memory, NULL);
 
 	vk_clean_staging_buffer();
 
@@ -21995,11 +20720,6 @@ void vk_release_resources( void ) {
 	vk_shadow_descriptor_pool_invalidate();
 #endif
 	vk_ral_reset_descriptor_arena( "vk_release_resources" );
-
-	if ( vk_world.num_image_chunks > 1 ) {
-		// if we allocated more than 2 image chunks - use doubled default size
-		vk.image_chunk_size = (IMAGE_CHUNK_SIZE * 2);
-	}
 
 	memset( &vk_world, 0, sizeof( vk_world ) );
 
@@ -22073,105 +20793,33 @@ void vk_release_resources( void ) {
 
 
 void vk_create_image( image_t *image, int width, int height, int mip_levels ) {
-
-	VkFormat format = image->internalFormat;
+	ralTexture_t *candidate = NULL;
 	image->mipLevelCount = (uint32_t)mip_levels;
+	image->uploadWidth = width;
+	image->uploadHeight = height;
+	if ( !vk_ral_create_image_texture_candidate( image, &candidate ) ) {
+		ri.Terminate( TERM_UNRECOVERABLE,
+			"RAL: direct image texture creation failed for '%s' (%dx%d, %d mips, format %d)",
+			image->imgName, width, height, mip_levels, image->internalFormat );
+		return;
+	}
+	// Candidate-first replacement: the old descriptor/residency children and
+	// texture remain live until the complete exact texture allocation succeeds.
 	vk_ral_release_image_descriptor( image );
-
-	if ( image->handle ) {
-		qvkDestroyImage( vk.device, image->handle, NULL );
-		image->handle = VK_NULL_HANDLE;
-	}
-
-	if ( image->view ) {
-		qvkDestroyImageView( vk.device, image->view, NULL );
-		image->view = VK_NULL_HANDLE;
-	}
-
-	// dimensionality. CUBE → 2D image with 6 array layers and
-	// the cube-compatible flag (so a VK_IMAGE_VIEW_TYPE_CUBE view is legal);
-	// 3D → a true 3D image with extent.depth slices and arrayLayers 1; else
-	// the legacy 2D / 2D-array path. A zero-initialised image_t is TEXTYPE_2D
-	// with layerCount/depth 0, which the clamps below normalise to 1.
-	uint32_t cube_layers  = ( image->layerCount > 1 ) ? image->layerCount : 6;
-	uint32_t array_layers = ( image->layerCount > 1 ) ? image->layerCount : 1;
-	uint32_t vol_depth    = ( image->depth > 1 ) ? (uint32_t)image->depth : 1;
-
-	// create image
-	{
-		VkImageCreateInfo desc;
-
-		desc.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-		desc.pNext = NULL;
-		desc.flags = 0;
-		desc.imageType = VK_IMAGE_TYPE_2D;
-		desc.format = format;
-		desc.extent.width = width;
-		desc.extent.height = height;
-		desc.extent.depth = 1;
-		desc.mipLevels = mip_levels;
-		desc.arrayLayers = array_layers;
-		desc.samples = VK_SAMPLE_COUNT_1_BIT;
-		desc.tiling = VK_IMAGE_TILING_OPTIMAL;
-		desc.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-		desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		desc.queueFamilyIndexCount = 0;
-		desc.pQueueFamilyIndices = NULL;
-		desc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-		if ( image->texType == TEXTYPE_CUBE ) {
-			desc.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-			desc.arrayLayers = cube_layers;
-		} else if ( image->texType == TEXTYPE_3D ) {
-			desc.imageType = VK_IMAGE_TYPE_3D;
-			desc.extent.depth = vol_depth;
-			desc.arrayLayers = 1;
-		}
-
-		VK_CHECK( qvkCreateImage( vk.device, &desc, NULL, &image->handle ) );
-
-		allocate_and_bind_image_memory( image->handle );
-	}
-
-	// create image view
-	{
-		VkImageViewCreateInfo desc;
-
-		desc.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		desc.pNext = NULL;
-		desc.flags = 0;
-		desc.image = image->handle;
-		desc.viewType = ( array_layers > 1 ) ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
-		desc.format = format;
-		desc.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-		desc.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-		desc.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-		desc.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-		desc.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		desc.subresourceRange.baseMipLevel = 0;
-		desc.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
-		desc.subresourceRange.baseArrayLayer = 0;
-		desc.subresourceRange.layerCount = array_layers;
-
-		if ( image->texType == TEXTYPE_CUBE ) {
-			desc.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-			desc.subresourceRange.layerCount = cube_layers;
-		} else if ( image->texType == TEXTYPE_3D ) {
-			desc.viewType = VK_IMAGE_VIEW_TYPE_3D;
-			desc.subresourceRange.layerCount = 1;
-		}
-
-		VK_CHECK( qvkCreateImageView( vk.device, &desc, NULL, &image->view ) );
-	}
+	if ( image->ral ) vk_ral_unregister_image( image );
+	image->ral = candidate;
 
 	vk_update_descriptor_set( image, mip_levels > 1 ? qtrue : qfalse );
 
-	SET_OBJECT_NAME( image->handle, image->imgName, RAL_VULKAN_OBJECT_ROLE_IMAGE );
-	SET_OBJECT_NAME( image->view, image->imgName, RAL_VULKAN_OBJECT_ROLE_IMAGE_VIEW );
-
-	if ( image->descriptor == VK_NULL_HANDLE || image->view == VK_NULL_HANDLE || image->handle == VK_NULL_HANDLE ) {
-		R_LOG( rch_fbo, SEV_DEBUG, "INVALID image: '%s' handle=%p view=%p descriptor=%p\n",
-			image->imgName, (void*)image->handle, (void*)image->view, (void*)image->descriptor );
+	if ( image->descriptor == VK_NULL_HANDLE || !image->ralDescriptorView
+			|| !Ral_GetTextureImageHandle( image->ral )
+			|| !Ral_GetTextureViewHandle( image->ralDescriptorView ) ) {
+		R_LOG( rch_fbo, SEV_DEBUG,
+			"INVALID direct RAL image: '%s' texture=%p view=%p descriptor=%p\n",
+			image->imgName, (void *)image->ral,
+			image->ralDescriptorView
+				? Ral_GetTextureViewHandle( image->ralDescriptorView ) : NULL,
+			(void *)image->descriptor );
 	}
 }
 
@@ -22309,98 +20957,15 @@ void vk_upload_image_data( image_t *image, int x, int y, int width, int height, 
 		if (height < 1) height = 1;
 	}
 
-#ifdef USE_UPLOAD_QUEUE
-	if ( vk_wait_staging_buffer() ) {
-		// wait for vkQueueSubmit() completion before new upload
-	}
-
-	if ( vk.staging_buffer.size - vk.staging_buffer.offset < buffer_size ) {
-		// try to flush staging buffer and reset offset
-		vk_flush_staging_buffer( qfalse );
-	}
-
-	if ( vk.staging_buffer.size /* - vk_world.staging_buffer_offset */ < buffer_size ) {
-		// if still not enough - reallocate staging buffer
-		vk_alloc_staging_buffer( buffer_size );
-	}
-
-	for ( n = 0; n < num_regions; n++ ) {
-		regions[n].bufferOffset += vk.staging_buffer.offset;
-	}
-
-	memcpy( vk.staging_buffer.ptr + vk.staging_buffer.offset, buf, buffer_size );
-
-	if ( vk.staging_buffer.offset == 0 ) {
-		vk_ral_begin_command_exact( vk.ral_staging_cmd,
-			"vk_upload_image_data" );
-	}
-
-	//R_LOG( rch_vk, SEV_WARN, "batch @%6i + %i %s \n", (int)vk_world.staging_buffer_offset, (int)buffer_size, image->imgName );
-	vk.staging_buffer.offset += buffer_size;
-
-	uploadRecorded = vk_ral_copy_buffer_to_texture_exact( vk.ral_staging_cmd,
-		vk.staging_buffer.handle, image->ralDescriptorTexture, update,
-		(uint32_t)num_regions, regions );
-#else
-	if ( vk.staging_buffer.size < buffer_size ) {
-		vk_alloc_staging_buffer( buffer_size );
-	}
-
-	memcpy( vk.staging_buffer.ptr, buf, buffer_size );
-
-	{
-		ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
-		if ( rcmd == NULL ) {
-			R_LOG( rch_ral, SEV_ERROR, "%s: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping image upload '%s'\n", __func__, image->imgName );
-		} else {
-			uploadRecorded = vk_ral_copy_buffer_to_texture_exact( rcmd,
-				vk.staging_buffer.handle, image->ralDescriptorTexture, update,
-				(uint32_t)num_regions, regions );
-			Ral_SubmitAndDispose( rcmd );
-		}
-	}
-#endif
+	uploadRecorded = vk_ral_stage_texture_copy(
+		image->ral, update, (uint32_t)num_regions,
+		regions, buf, (uint64_t)buffer_size, "vk_upload_image_data" );
 	if ( !uploadRecorded ) {
 		R_LOG( rch_ral, SEV_ERROR,
 			"%s: portable upload transaction rejected image '%s'\n",
 			__func__, image->imgName );
 		if ( buf != pixels ) ri.Hunk_FreeTempMemory( buf );
 		return;
-	}
-
-	// Bindless mirror — propagate the same sub-region into the parallel RAL
-	// texture so the bindless image array stays byte-equivalent to the legacy
-	// VkImage. Critical for images registered with pic==NULL (the merged-
-	// lightmap atlas, etc.) whose data arrives via these sub-region uploads;
-	// for images that already had their initial RGBA8 data uploaded inside
-	// vk_ral_register_image, a subsequent vk_upload_image_data still mirrors,
-	// which keeps the two textures in sync at the cost of one re-upload.
-	// Gated on:
-	//   - image->ral set (skips legacy-only paths)
-	//   - pixels != NULL && size == width*height*4 (RAL is RGBA8; non-RGBA8
-	//     packed/compressed source bytes must not land in it)
-	//   - mipmaps == 1 (mipmapped happy-path uploads already populated mip0
-	//     plus RAL's GPU mip-gen inside vk_ral_register_image; re-mirroring
-	//     mip0 here would invalidate the higher mips)
-	// the vk.useBindlessMainPath gate (which
-	// kept the legacy build byte-identical) is gone — bindless is the sole
-	// main path post-retire, so the mirror writes unconditionally.
-	if ( image->ral != NULL
-	  && pixels != NULL && mipmaps == 1
-	  && (uint64_t)size == (uint64_t)width * (uint64_t)height * 4u ) {
-		ralTextureUploadDesc_t up;
-		ralFence_t            *rf;
-		memset( &up, 0, sizeof( up ) );
-		up.mipLevel     = 0;
-		up.arrayLayer   = baseArrayLayer;
-		up.data         = pixels;
-		up.dataSize     = (uint64_t)size;
-		up.offsetX      = (uint32_t)x;
-		up.offsetY      = (uint32_t)y;
-		up.regionWidth  = (uint32_t)width;
-		up.regionHeight = (uint32_t)height;
-		rf = Ral_TextureUploadAsync( image->ral, &up );
-		if ( rf ) { Ral_WaitFence( rf, ~0ull ); Ral_DestroyFence( rf ); }
 	}
 
 	if ( buf != pixels ) {
@@ -22462,7 +21027,7 @@ qboolean vk_bc_format_supported( VkFormat format ) {
 ================
 vk_upload_image_data_compressed
 
-Upload a BC* compressed mip chain to image->handle. The
+Upload a BC* compressed mip chain to image->ral. The
 data buffer is the contiguous concatenation of mip 0 through
 mip (mipLevels-1) as the DDS file format lays them out. Per-mip
 byte size is computed from the BC block byte count + block-padded
@@ -22542,54 +21107,10 @@ void vk_upload_image_data_compressed( image_t *image, int width, int height, int
 	if ( num_regions == 0 )
 		return;
 
-#ifdef USE_UPLOAD_QUEUE
-	if ( vk_wait_staging_buffer() ) {
-		// wait for vkQueueSubmit() completion before new upload
-	}
-
-	if ( vk.staging_buffer.size - vk.staging_buffer.offset < (uint32_t)buffer_offset ) {
-		vk_flush_staging_buffer( qfalse );
-	}
-
-	if ( vk.staging_buffer.size < (uint32_t)buffer_offset ) {
-		vk_alloc_staging_buffer( buffer_offset );
-	}
-
-	for ( n = 0; n < num_regions; n++ ) {
-		regions[n].bufferOffset += vk.staging_buffer.offset;
-	}
-
-	memcpy( vk.staging_buffer.ptr + vk.staging_buffer.offset, data, buffer_offset );
-
-	if ( vk.staging_buffer.offset == 0 ) {
-		vk_ral_begin_command_exact( vk.ral_staging_cmd,
-			"vk_upload_image_data_compressed" );
-	}
-
-	vk.staging_buffer.offset += buffer_offset;
-
-	uploadRecorded = vk_ral_copy_buffer_to_texture_exact( vk.ral_staging_cmd,
-		vk.staging_buffer.handle, image->ralDescriptorTexture, qfalse,
-		(uint32_t)num_regions, regions );
-#else
-	if ( vk.staging_buffer.size < (uint32_t)buffer_offset ) {
-		vk_alloc_staging_buffer( buffer_offset );
-	}
-
-	memcpy( vk.staging_buffer.ptr, data, buffer_offset );
-
-	{
-		ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
-		if ( rcmd == NULL ) {
-			R_LOG( rch_ral, SEV_ERROR, "%s: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping image upload '%s'\n", __func__, image->imgName );
-		} else {
-			uploadRecorded = vk_ral_copy_buffer_to_texture_exact( rcmd,
-				vk.staging_buffer.handle, image->ralDescriptorTexture, qfalse,
-				(uint32_t)num_regions, regions );
-			Ral_SubmitAndDispose( rcmd );
-		}
-	}
-#endif
+	uploadRecorded = vk_ral_stage_texture_copy(
+		image->ral, qfalse, (uint32_t)num_regions,
+		regions, data, (uint64_t)buffer_offset,
+		"vk_upload_image_data_compressed" );
 	if ( !uploadRecorded )
 		R_LOG( rch_ral, SEV_ERROR,
 			"%s: portable compressed upload transaction rejected image '%s'\n",
@@ -22691,54 +21212,10 @@ void vk_upload_image_data_3d( image_t *image, int width, int height, int depth, 
 	if ( num_regions == 0 )
 		return;
 
-#ifdef USE_UPLOAD_QUEUE
-	if ( vk_wait_staging_buffer() ) {
-		// wait for vkQueueSubmit() completion before new upload
-	}
-
-	if ( vk.staging_buffer.size - vk.staging_buffer.offset < (uint32_t)buffer_offset ) {
-		vk_flush_staging_buffer( qfalse );
-	}
-
-	if ( vk.staging_buffer.size < (uint32_t)buffer_offset ) {
-		vk_alloc_staging_buffer( buffer_offset );
-	}
-
-	for ( n = 0; n < num_regions; n++ ) {
-		regions[n].bufferOffset += vk.staging_buffer.offset;
-	}
-
-	memcpy( vk.staging_buffer.ptr + vk.staging_buffer.offset, data, buffer_offset );
-
-	if ( vk.staging_buffer.offset == 0 ) {
-		vk_ral_begin_command_exact( vk.ral_staging_cmd,
-			"vk_upload_image_data_3d" );
-	}
-
-	vk.staging_buffer.offset += buffer_offset;
-
-	uploadRecorded = vk_ral_copy_buffer_to_texture_exact( vk.ral_staging_cmd,
-		vk.staging_buffer.handle, image->ralDescriptorTexture, qfalse,
-		(uint32_t)num_regions, regions );
-#else
-	if ( vk.staging_buffer.size < (uint32_t)buffer_offset ) {
-		vk_alloc_staging_buffer( buffer_offset );
-	}
-
-	memcpy( vk.staging_buffer.ptr, data, buffer_offset );
-
-	{
-		ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
-		if ( rcmd == NULL ) {
-			R_LOG( rch_ral, SEV_ERROR, "%s: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping image upload '%s'\n", __func__, image->imgName );
-		} else {
-			uploadRecorded = vk_ral_copy_buffer_to_texture_exact( rcmd,
-				vk.staging_buffer.handle, image->ralDescriptorTexture, qfalse,
-				(uint32_t)num_regions, regions );
-			Ral_SubmitAndDispose( rcmd );
-		}
-	}
-#endif
+	uploadRecorded = vk_ral_stage_texture_copy(
+		image->ral, qfalse, (uint32_t)num_regions,
+		regions, data, (uint64_t)buffer_offset,
+		"vk_upload_image_data_3d" );
 	if ( !uploadRecorded )
 		R_LOG( rch_ral, SEV_ERROR,
 			"%s: portable 3D upload transaction rejected image '%s'\n",
@@ -22830,19 +21307,12 @@ void vk_update_descriptor_set( image_t *image, qboolean mipmap ) {
 			(void)vk_ral_bindless_publish_sampler( (uint32_t)smIdx,
 				vk.samplers.ral_handle[smIdx], &vk.samplers.def[smIdx] );
 		}
-		// bindless-ral-consolidate — write the renderer's VkImageView (the same
-		// one the legacy COMBINED_IMAGE_SAMPLER binds for sets 1..6) into the
-		// RAL bindless set's image-array binding. This LAST-writer wins over
-		// the parallel image->ral->defaultView write that vk_ral_register_image
-		// issues earlier, which is critical: image->ral is forced RGBA8 while
-		// image->view may carry a packed format (R4G4B4A4 etc.); sampling
-		// image->ral on the bindless path would diverge from the legacy path
-		// on non-RGBA8 images. Bindless byte-near parity requires image->view.
+		// Publish the exact descriptor view of the sole RAL texture when the
+		// caller pre-assigned a slot (DDS and other non-ordinary assets).
 		if ( image->ralBindlessSlot >= 0
 				&& image->ralBindlessSlot < (int)WIRED_BINDLESS_TEX_SLOTS
 				&& image->ralDescriptorView
-				&& Ral_GetTextureViewHandle( image->ralDescriptorView )
-					== (void *)image->view ) {
+				&& Ral_GetTextureViewHandle( image->ralDescriptorView ) ) {
 			if ( !vk_ral_bindless_publish_texture_view( image,
 					(uint32_t)image->ralBindlessSlot,
 					image->ralDescriptorView,
@@ -22850,36 +21320,6 @@ void vk_update_descriptor_set( image_t *image, qboolean mipmap ) {
 				R_LOG( rch_ral, SEV_WARN,
 					"bindless exact image publication failed: %s\n",
 					image->imgName );
-		}
-	}
-}
-
-
-void vk_destroy_image_resources( VkImage *image, VkImageView *imageView )
-{
-	if ( image != NULL ) {
-		if ( *image != VK_NULL_HANDLE ) {
-			// MoltenVK guard: swapchain images are owned by the swapchain and must
-			// not be passed to vkDestroyImage — doing so crashes via
-			// destroyPresentableSwapchainImage when handle aliasing occurs.
-			qboolean is_swapchain = qfalse;
-			uint32_t sci;
-			for ( sci = 0; sci < vk.swapchain_image_count; sci++ ) {
-				if ( *image == vk.swapchain_images[ sci ] ) {
-					is_swapchain = qtrue;
-					break;
-				}
-			}
-			if ( !is_swapchain ) {
-				qvkDestroyImage( vk.device, *image, NULL );
-			}
-			*image = VK_NULL_HANDLE;
-		}
-	}
-	if ( imageView != NULL ) {
-		if ( *imageView != VK_NULL_HANDLE ) {
-			qvkDestroyImageView( vk.device, *imageView, NULL );
-			*imageView = VK_NULL_HANDLE;
 		}
 	}
 }
@@ -22974,6 +21414,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	VkSampleCountFlagBits samples;
 	const char *pipeline_name;
 	qboolean blend;
+	uint32_t optionalBindGroupMask = 0u;
 	// Set non-NULL for the migrated post-process programs to also build the
 	// dynamic-rendering RAL sibling that the renderer binds (the legacy VkPipeline
 	// above stays for the unmigrated passes). NULL for every other program. Each
@@ -23077,6 +21518,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 			ralTarget = &vk.ral_bloom_extract_pipeline;
 			ralRpfmt  = RPFMT_BLOOM_EXTRACT;              // color-only (no depth)
 			ralLayout = vk.ral_pipeline_layout_post_process;
+			optionalBindGroupMask = ( 1u << 1 ) | ( 1u << 2 );
 			break;
 		case 3: // capture buffer extraction (RAL-only — no legacy pipeline/renderpass)
 			fsmodule = vk.modules.gamma_fs;
@@ -23087,6 +21529,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 			ralTarget = &vk.ral_capture_pipeline;
 			ralRpfmt  = RPFMT_CAPTURE;                    // color-only (no depth)
 			ralLayout = vk.ral_pipeline_layout_post_process;
+			optionalBindGroupMask = 1u << 2;
 			break;
 		case 6: // tonemap default (RAL-only — no legacy pipeline/renderpass)
 			fsmodule = vk.modules.tonemap_fs;
@@ -23095,6 +21538,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 			pipeline_name = "tonemap default pipeline";
 			blend = qfalse;
 			ralTarget = &vk.ral_tonemap_pipeline;
+			optionalBindGroupMask = 1u << 1;
 			break;
 		case 2: // WiredUI menubg (RAL-only) — blended fullscreen procedural backdrop
 			fsmodule = vk.modules.menubg_fs;
@@ -23105,6 +21549,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 			ralTarget = &vk.ral_menubg_pipeline;
 			ralRpfmt  = RPFMT_UI;      // UI pass target (img 265 / color_image format), NOT gamma/swapchain
 			ralLayout = vk.ral_pipeline_layout_post_process;
+			optionalBindGroupMask = ( 1u << 0 ) | ( 1u << 1 );
 			break;
 		default: // gamma correction (RAL-only — no legacy pipeline/renderpass)
 			fsmodule = vk.modules.gamma_fs;
@@ -23115,6 +21560,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 			ralTarget = &vk.ral_gamma_pipeline;
 			ralRpfmt  = RPFMT_GAMMA;                      // color-only, present format
 			ralLayout = vk.ral_pipeline_layout_post_process;
+			optionalBindGroupMask = 1u << 2;
 			break;
 		case 5: { // tonemap variant (AO-isolation or tonemap/colorgrade/sunrays combo)
 			int varIdx = 0;
@@ -23163,12 +21609,16 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 			// module is unbuilt), like the legacy array.
 			ralTarget = &vk.ral_tonemap_variants[ varIdx ];
 			ralRpfmt  = RPFMT_TONEMAP;
-			if ( varIdx & TONEMAP_VAR_SSAO )
+			if ( varIdx & TONEMAP_VAR_SSAO ) {
 				ralLayout = vk.ral_pipeline_layout_ssao;
-			else if ( varIdx & TONEMAP_VAR_SUNRAYS )
+				optionalBindGroupMask = 1u << 1;
+			} else if ( varIdx & TONEMAP_VAR_SUNRAYS ) {
 				ralLayout = vk.ral_pipeline_layout_sunrays;
-			else
+				optionalBindGroupMask = 1u << 3;
+			} else {
 				ralLayout = vk.ral_pipeline_layout_post_process;
+				optionalBindGroupMask = 1u << 1;
+			}
 			break;
 		}
 	}
@@ -23631,6 +22081,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 		pr.specConstants    = ralSpecs;
 		pr.numSpecConstants = frag_spec_info.mapEntryCount;
 		pr.externalLayout   = ralLayout;
+		pr.optionalBindGroupMask = optionalBindGroupMask;
 		pr.debugName        = pipeline_name;
 
 		if ( *ralTarget ) { Ral_DestroyPipeline( *ralTarget ); *ralTarget = NULL; }
@@ -23695,6 +22146,7 @@ void vk_create_downsample_pipeline( uint32_t level, uint32_t srcWidth, uint32_t 
 		pr.numSpecConstants = 3;
 		pr.debugName        = va( "ral-bloom-downsample-%u", level );
 		pr.externalLayout   = vk.ral_pipeline_layout_post_process;
+		pr.optionalBindGroupMask = ( 1u << 1 ) | ( 1u << 2 );
 		// Same low-frequency rationale as the blur pass: a downscaled HDR target.
 		pr.shadingRate      = ( r_vrs && r_vrs->integer ) ? RAL_SHADING_RATE_2x2 : RAL_SHADING_RATE_1x1;
 
@@ -23761,6 +22213,7 @@ void vk_create_upsample_pipeline( uint32_t level, uint32_t srcWidth, uint32_t sr
 		pr.numSpecConstants = 3;
 		pr.debugName        = va( "ral-bloom-upsample-%u", level );
 		pr.externalLayout   = vk.ral_pipeline_layout_post_process;
+		pr.optionalBindGroupMask = ( 1u << 1 ) | ( 1u << 2 );
 		pr.shadingRate      = ( r_vrs && r_vrs->integer ) ? RAL_SHADING_RATE_2x2 : RAL_SHADING_RATE_1x1;
 
 		if ( vk.ral_upsample_pipeline[ level ] ) { Ral_DestroyPipeline( vk.ral_upsample_pipeline[ level ] ); vk.ral_upsample_pipeline[ level ] = NULL; }
@@ -23834,6 +22287,7 @@ void vk_create_overlay_pipeline( void )
 		pr.vattrs             = vattrs;
 		pr.numVattrs          = 3;
 		pr.externalLayout     = vk.ral_pipeline_layout_post_process;  // set 0 = sampler (shared with gamma)
+		pr.optionalBindGroupMask = ( 1u << 1 ) | ( 1u << 2 );
 		pr.debugName          = "ral-hud-overlay";
 
 		if ( vk.ral_overlay_pipeline ) { Ral_DestroyPipeline( vk.ral_overlay_pipeline ); vk.ral_overlay_pipeline = NULL; }
@@ -23908,11 +22362,10 @@ static void vk_replay_overlay_quads( struct ralPipeline_s *pipeline )
 
 	Ral_CmdBindPipeline( vk.cmd->ral_cmd, pipeline );
 
-	// The registry wrapper borrows this exact persistently mapped native VBO and
-	// retains its VERTEX capability; no per-pass wrapper or shadow allocation is
-	// needed. One wrapper covers every quad and only the byte offset differs.
+	// The mapped tess RAL buffer retains VERTEX capability; one owner covers every
+	// quad and only the byte offset differs.
 	{
-		ralBuffer_t *vb = vk_ral_lookup_buffer( vk.cmd->vertex_buffer );
+		ralBuffer_t *vb = vk.cmd->ral_vertex_buffer;
 		if ( !vb )
 			return;
 
@@ -23961,6 +22414,8 @@ static void vk_replay_overlay_quads( struct ralPipeline_s *pipeline )
 			break;   // out of dynamic vertex space this frame — drop the rest
 		memcpy( vk.cmd->vertex_buffer_ptr + off, v, sizeof( v ) );
 		vk.cmd->vertex_buffer_offset = off + sizeof( v );
+		if ( !vk_tess_publish_shadow_range( off, sizeof( v ) ) )
+			break;
 
 		// The overlay pipeline shares the post-process sampler layout at set 0.
 		// image_t retains a non-owning wrapper around the renderer-pool set, so
@@ -24040,6 +22495,7 @@ void vk_create_bloom_dual_composite_pipeline( void )
 		pr.numSpecConstants = 1;
 		pr.debugName        = "ral-bloom-dual-composite";
 		pr.externalLayout   = vk.ral_pipeline_layout_post_process;
+		pr.optionalBindGroupMask = ( 1u << 1 ) | ( 1u << 2 );
 		pr.shadingRate      = RAL_SHADING_RATE_1x1;
 
 		if ( vk.ral_bloom_dual_composite_pipeline ) { Ral_DestroyPipeline( vk.ral_bloom_dual_composite_pipeline ); vk.ral_bloom_dual_composite_pipeline = NULL; }
@@ -24630,6 +23086,7 @@ static ralPipeline_t *vk_ral_create_special_pipeline( const vk_ral_special_pipel
 	if ( p->numBgls > 0 )
 		ci.bindGroupLayouts = p->bgls;
 	ci.numBindGroupLayouts = p->numBgls;
+	ci.optionalBindGroupMask = p->optionalBindGroupMask;
 	ci.pushConstantSize    = p->pushConstantSize;
 	ci.pushConstantStages  = p->pushConstantStages;
 
@@ -26534,6 +24991,13 @@ void vk_update_msdf_outline( float outlineWidth, const float *outlineColor,
 
 	memcpy( (byte *)vk.msdf.ptr[ cmd ] + off, &ubo, sizeof( ubo ) );
 	vk.msdf.offset[ cmd ] = off + item;
+	{
+		vkRalBufferShadowWriteReceipt_t writeReceipt;
+		if ( !VK_RalBufferShadowMarkWritten( &vk_msdf_shadows[cmd],
+				off, sizeof( ubo ) )
+				|| !VK_RalBufferShadowPublish( &vk_msdf_shadows[cmd],
+					off, sizeof( ubo ), &writeReceipt ) ) return;
+	}
 
 	// Register the set-3 bind for the next vk_bind_descriptor_sets. The dynamic
 	// offset selects this item; the descriptor's static base offset is 0.
@@ -26543,7 +25007,7 @@ void vk_update_msdf_outline( float outlineWidth, const float *outlineColor,
 }
 
 
-static VkBuffer shade_bufs[8];
+static ralBuffer_t *shade_bufs[8];
 static int bind_base;
 static int bind_count;
 
@@ -26569,6 +25033,7 @@ static void vk_bind_attr( int index, unsigned int item_size, const void *src ) {
 		vk.cmd->buf_offset[ index ] = offset;
 		memcpy( vk.cmd->vertex_buffer_ptr + offset, src, size );
 		vk.cmd->vertex_buffer_offset = (VkDeviceSize)offset + size;
+		(void)vk_tess_publish_shadow_range( offset, size );
 	}
 
 	vk_bind_index_attr( index );
@@ -26586,14 +25051,16 @@ uint32_t vk_tess_index( uint32_t numIndexes, const void *src ) {
 	}
 	memcpy( vk.cmd->vertex_buffer_ptr + offset, src, size );
 	vk.cmd->vertex_buffer_offset = (VkDeviceSize)offset + size;
+	if ( !vk_tess_publish_shadow_range( offset, size ) )
+		return ~0U;
 	return offset;
 }
 
 
-void vk_bind_index_buffer( VkBuffer buffer, uint32_t offset )
+void vk_bind_index_buffer( ralBuffer_t *buffer, uint32_t offset )
 {
 	if ( vk.cmd->curr_index_buffer != buffer || vk.cmd->curr_index_offset != offset ) {
-		if ( !vk_ral_bind_registered_index_buffer( vk.cmd->ral_cmd, buffer,
+		if ( !Ral_CmdBindIndexBufferExact( vk.cmd->ral_cmd, buffer,
 				offset, RAL_INDEX_UINT32 ) ) return;
 	}
 
@@ -26630,7 +25097,7 @@ void vk_bind_index_ext( const int numIndexes, const uint32_t *indexes )
 {
 	uint32_t offset	= vk_tess_index( numIndexes, indexes );
 	if ( offset != ~0U ) {
-		vk_bind_index_buffer( vk.cmd->vertex_buffer, offset );
+		vk_bind_index_buffer( vk.cmd->ral_vertex_buffer, offset );
 		vk.cmd->num_indexes = numIndexes;
 	} else {
 		// overflowed
@@ -26651,7 +25118,7 @@ void vk_bind_geometry( uint32_t flags )
 #ifdef USE_VBO
 	if ( tess.vboIndex ) {
 
-		shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = shade_bufs[3] = shade_bufs[4] = shade_bufs[5] = shade_bufs[6] = shade_bufs[7] = vk.vbo.vertex_buffer;
+		shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = shade_bufs[3] = shade_bufs[4] = shade_bufs[5] = shade_bufs[6] = shade_bufs[7] = vk.vbo.ral_vertex_buffer;
 
 		if ( flags & TESS_XYZ ) {  // 0
 			vk.cmd->vbo_offset[0] = tess.shader->vboOffset + 0;
@@ -26693,12 +25160,13 @@ void vk_bind_geometry( uint32_t flags )
 			vk_bind_index_attr( 7 );
 		}
 
-		(void)vk_ral_bind_registered_vertex_buffers( vk.cmd->ral_cmd,
-			bind_base, bind_count, shade_bufs, vk.cmd->vbo_offset + bind_base );
+		(void)Ral_CmdBindVertexBuffersExact( vk.cmd->ral_cmd,
+			bind_base, bind_count, shade_bufs,
+			(const uint64_t *)( vk.cmd->vbo_offset + bind_base ) );
 	} else
 #endif // USE_VBO
 	{
-		shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = shade_bufs[3] = shade_bufs[4] = shade_bufs[5] = shade_bufs[6] = shade_bufs[7] = vk.cmd->vertex_buffer;
+		shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = shade_bufs[3] = shade_bufs[4] = shade_bufs[5] = shade_bufs[6] = shade_bufs[7] = vk.cmd->ral_vertex_buffer;
 
 		if ( flags & TESS_XYZ ) {
 			vk_bind_attr(0, sizeof(tess.xyz[0]), &tess.xyz[0]);
@@ -26732,8 +25200,9 @@ void vk_bind_geometry( uint32_t flags )
 			vk_bind_attr(7, sizeof( color4ub_t ), tess.svars.colors[2][0].rgba);
 		}
 
-		(void)vk_ral_bind_registered_vertex_buffers( vk.cmd->ral_cmd,
-			bind_base, bind_count, shade_bufs, vk.cmd->buf_offset + bind_base );
+		(void)Ral_CmdBindVertexBuffersExact( vk.cmd->ral_cmd,
+			bind_base, bind_count, shade_bufs,
+			(const uint64_t *)( vk.cmd->buf_offset + bind_base ) );
 	}
 }
 
@@ -26746,26 +25215,27 @@ void vk_bind_lighting( int stage, int bundle )
 #ifdef USE_VBO
 	if ( tess.vboIndex ) {
 
-		shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = vk.vbo.vertex_buffer;
+		shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = vk.vbo.ral_vertex_buffer;
 
 		vk.cmd->vbo_offset[0] = tess.shader->vboOffset + 0;
 		vk.cmd->vbo_offset[1] = tess.shader->stages[ stage ]->tex_offset[ bundle ];
 		vk.cmd->vbo_offset[2] = tess.shader->normalOffset;
 
-		(void)vk_ral_bind_registered_vertex_buffers( vk.cmd->ral_cmd,
-			0, 3, shade_bufs, vk.cmd->vbo_offset );
+		(void)Ral_CmdBindVertexBuffersExact( vk.cmd->ral_cmd,
+			0, 3, shade_bufs, (const uint64_t *)vk.cmd->vbo_offset );
 	}
 	else
 #endif // USE_VBO
 	{
-		shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = vk.cmd->vertex_buffer;
+		shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = vk.cmd->ral_vertex_buffer;
 
 		vk_bind_attr( 0, sizeof( tess.xyz[0] ), &tess.xyz[0] );
 		vk_bind_attr( 1, sizeof( vec2_t ), tess.svars.texcoordPtr[ bundle ] );
 		vk_bind_attr( 2, sizeof( tess.normal[0] ), tess.normal );
 
-		(void)vk_ral_bind_registered_vertex_buffers( vk.cmd->ral_cmd,
-			bind_base, bind_count, shade_bufs, vk.cmd->buf_offset + bind_base );
+		(void)Ral_CmdBindVertexBuffersExact( vk.cmd->ral_cmd,
+			bind_base, bind_count, shade_bufs,
+			(const uint64_t *)( vk.cmd->buf_offset + bind_base ) );
 	}
 }
 
@@ -26838,7 +25308,7 @@ void vk_bindless_track( int role, struct image_s *image )
 }
 
 
-void vk_push_bindless_indices( void )
+qboolean vk_push_bindless_indices( void )
 {
 	// 12 entries: roles 0..7 are packed below; roles 8..11 are reserved capacity
 	// (8 = pbrMap for the base-pass IBL term) — zero-initialised here so the UBO
@@ -26918,9 +25388,13 @@ void vk_push_bindless_indices( void )
 	// ~0U guard skips a ring-overflow draw (VK_PushUniform sets the sentinel and
 	// wrote no item), where the offset would be out of bounds. 48 B copied
 	// (roles 0..7 + the reserved 8..11 tail).
-	if ( vk.cmd->uniform_read_offset != ~0U )
+	if ( vk.cmd->uniform_read_offset != ~0U ) {
 		memcpy( ( (vkUniform_t *)( vk.cmd->vertex_buffer_ptr + vk.cmd->uniform_read_offset ) )->packed_indices,
 			packed, sizeof( ( (vkUniform_t *)0 )->packed_indices ) );
+		return vk_tess_publish_shadow_range( vk.cmd->uniform_read_offset,
+			vk.uniform_item_size );
+	}
+	return qtrue;
 }
 
 
@@ -27183,9 +25657,8 @@ qboolean vk_entmat_active( void )
 typedef struct {
 	uint32_t requiredCapacity;
 	VkDeviceSize byteSize;
-	VkBuffer buffer[NUM_COMMAND_BUFFERS];
-	VkDeviceMemory memory[NUM_COMMAND_BUFFERS];
-	void *mapped[NUM_COMMAND_BUFFERS];
+	ralBuffer_t *buffer[NUM_COMMAND_BUFFERS];
+	void *shadowBytes[NUM_COMMAND_BUFFERS];
 	VkDescriptorSet descriptor[NUM_COMMAND_BUFFERS];
 	uint32_t allocationGeneration[NUM_COMMAND_BUFFERS];
 	qboolean ready;
@@ -27214,23 +25687,25 @@ static qboolean vk_temporal_entmat_ring_ready_exact(
 			|| vk_temporal_entmat_ring.byteSize != bytes ) return qfalse;
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
 		const vk_tess_t *slot = &vk.tess[i];
+		const vkRalBufferShadow_t *owner = &vk_entmat_shadows[i];
 		uint32_t j;
-		if ( !slot->entMatBuf || !slot->entMatMem || !slot->entMatMapped
+		if ( !slot->ral_entMatBuf || !slot->entMatMapped
+				|| owner->ready != qtrue || owner->buffer != slot->ral_entMatBuf
+				|| owner->bytes != slot->entMatMapped
+				|| owner->byteSize != bytes
 				|| !slot->entMatDesc || !slot->ral_entMatDesc
 				|| Ral_GetBindGroupHandle( slot->ral_entMatDesc )
 					!= (void *)slot->entMatDesc
 				|| slot->entMatSize != bytes
 				|| !slot->entMatAllocationGeneration
 				|| slot->entMatAllocationGeneration == UINT32_MAX
-				|| vk_temporal_entmat_ring.buffer[i] != slot->entMatBuf
-				|| vk_temporal_entmat_ring.memory[i] != slot->entMatMem
-				|| vk_temporal_entmat_ring.mapped[i] != slot->entMatMapped
+				|| vk_temporal_entmat_ring.buffer[i] != slot->ral_entMatBuf
+				|| vk_temporal_entmat_ring.shadowBytes[i] != slot->entMatMapped
 				|| vk_temporal_entmat_ring.descriptor[i] != slot->entMatDesc
 				|| vk_temporal_entmat_ring.allocationGeneration[i]
 					!= slot->entMatAllocationGeneration ) return qfalse;
 		for ( j = 0; j < i; ++j )
-			if ( slot->entMatBuf == vk.tess[j].entMatBuf
-					|| slot->entMatMem == vk.tess[j].entMatMem
+			if ( slot->ral_entMatBuf == vk.tess[j].ral_entMatBuf
 					|| slot->entMatMapped == vk.tess[j].entMatMapped
 					|| slot->entMatDesc == vk.tess[j].entMatDesc
 					|| slot->ral_entMatDesc
@@ -27266,55 +25741,50 @@ static qboolean vk_temporal_diagnostic_arm_ready(
 
 static qboolean vk_entmat_materialize_slot_after_idle(
 		vk_tess_t *slot, VkDeviceSize bytes ) {
-	const qboolean replace = !slot->entMatBuf || !slot->entMatMem
+	const uint32_t slotIndex = (uint32_t)( slot - vk.tess );
+	vkRalBufferShadow_t *owner = slotIndex < NUM_COMMAND_BUFFERS
+		? &vk_entmat_shadows[slotIndex] : NULL;
+	const qboolean replace = !owner || !slot->ral_entMatBuf
 		|| !slot->entMatMapped || slot->entMatSize != bytes
-		|| !slot->entMatAllocationGeneration;
+		|| !slot->entMatAllocationGeneration || owner->ready != qtrue
+		|| owner->buffer != slot->ral_entMatBuf
+		|| owner->bytes != slot->entMatMapped || owner->byteSize != bytes;
 	if ( replace ) {
-		VkBufferCreateInfo bd;
-		VkMemoryRequirements mr;
-		VkMemoryAllocateInfo ma;
-		const uint32_t slotIndex = (uint32_t)( slot - vk.tess );
-		vk_ral_release_entmat_bindgroup( slotIndex );
-		if ( slot->entMatMapped ) {
-			qvkUnmapMemory( vk.device, slot->entMatMem );
-			slot->entMatMapped = NULL;
+		vkRalBufferShadow_t candidateShadow;
+		vkRalBufferShadow_t retiredShadow;
+		vkRalBufferShadowWriteReceipt_t initialReceipt;
+		ralBindGroup_t *candidateGroup;
+		VkDescriptorSet candidateDesc;
+		ralBindGroup_t *retiredGroup;
+		if ( !owner ) return qfalse;
+		VK_RalBufferShadowInit( &candidateShadow );
+		candidateShadow.generation = owner->generation;
+		if ( !VK_RalBufferShadowEnsure( &candidateShadow,
+				vk_ral_get_backend(), bytes, RAL_BUFFER_STORAGE,
+				"vk.tess.entMatBuf" )
+				|| !VK_RalBufferShadowPublish( &candidateShadow, 0u, bytes,
+					&initialReceipt ) ) {
+			VK_RalBufferShadowRelease( &candidateShadow );
+			return qfalse;
 		}
-		if ( slot->entMatBuf ) {
-			vk_ral_unregister_buffer( slot->entMatBuf );
-			qvkDestroyBuffer( vk.device, slot->entMatBuf, NULL );
-			slot->entMatBuf = VK_NULL_HANDLE;
+		candidateGroup = vk_ral_create_entmat_bindgroup_candidate( slotIndex,
+			candidateShadow.buffer, bytes, &candidateDesc );
+		if ( !candidateGroup ) {
+			VK_RalBufferShadowRelease( &candidateShadow );
+			return qfalse;
 		}
-		if ( slot->entMatMem ) {
-			qvkFreeMemory( vk.device, slot->entMatMem, NULL );
-			slot->entMatMem = VK_NULL_HANDLE;
-		}
-		memset( &bd, 0, sizeof( bd ) );
-		bd.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bd.size = bytes;
-		bd.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-		bd.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		VK_CHECK( qvkCreateBuffer( vk.device, &bd, NULL, &slot->entMatBuf ) );
-		qvkGetBufferMemoryRequirements( vk.device, slot->entMatBuf, &mr );
-		memset( &ma, 0, sizeof( ma ) );
-		ma.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		ma.allocationSize = mr.size;
-		ma.memoryTypeIndex = find_memory_type( mr.memoryTypeBits,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-			| VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-		VK_CHECK( qvkAllocateMemory( vk.device, &ma, NULL, &slot->entMatMem ) );
-		VK_CHECK( qvkBindBufferMemory(
-			vk.device, slot->entMatBuf, slot->entMatMem, 0 ) );
-		VK_CHECK( qvkMapMemory( vk.device, slot->entMatMem, 0,
-			VK_WHOLE_SIZE, 0, &slot->entMatMapped ) );
+		retiredShadow = *owner;
+		retiredGroup = slot->ral_entMatDesc;
+		*owner = candidateShadow;
+		slot->ral_entMatBuf = candidateShadow.buffer;
+		slot->entMatMapped = candidateShadow.bytes;
 		slot->entMatSize = bytes;
-		vk_ral_register_buffer( slot->entMatBuf, bytes,
-			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-			| VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			"vk.tess.entMatBuf" );
-		SET_OBJECT_NAME( slot->entMatBuf, "entity model matrices",
-			RAL_VULKAN_OBJECT_ROLE_BUFFER );
+		slot->ral_entMatDesc = candidateGroup;
+		slot->entMatDesc = candidateDesc;
 		slot->entMatAllocationGeneration++;
+		if ( retiredGroup ) Ral_DestroyBindGroup( retiredGroup );
+		VK_RalBufferShadowRelease( &retiredShadow );
+		return qtrue;
 	}
 	return vk_ral_refresh_entmat_bindgroup(
 		(uint32_t)( slot - vk.tess ) );
@@ -27333,15 +25803,18 @@ static qboolean vk_entmat_ensure_temporal_ring( uint32_t requiredSlots ) {
 	if ( vk_temporal_entmat_ring_ready_exact( requiredSlots ) ) return qtrue;
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
 		const vk_tess_t *slot = &vk.tess[i];
+		const vkRalBufferShadow_t *owner = &vk_entmat_shadows[i];
 		uint32_t j;
-		const qboolean replace = !slot->entMatBuf || !slot->entMatMem
+		const qboolean replace = !slot->ral_entMatBuf
 			|| !slot->entMatMapped || slot->entMatSize != bytes
-			|| !slot->entMatAllocationGeneration;
+			|| !slot->entMatAllocationGeneration || owner->ready != qtrue
+			|| owner->buffer != slot->ral_entMatBuf
+			|| owner->bytes != slot->entMatMapped || owner->byteSize != bytes;
 		repair[i] = replace || !slot->entMatDesc || !slot->ral_entMatDesc
 			|| Ral_GetBindGroupHandle( slot->ral_entMatDesc )
 				!= (void *)slot->entMatDesc ? qtrue : qfalse;
 		if ( repair[i] ) anyRepair = qtrue;
-		if ( repair[i] && ( slot->entMatBuf || slot->entMatMem
+		if ( repair[i] && ( slot->ral_entMatBuf
 				|| slot->entMatMapped || slot->entMatDesc
 				|| slot->ral_entMatDesc ) )
 			repairTouchesExisting = qtrue;
@@ -27351,10 +25824,8 @@ static qboolean vk_entmat_ensure_temporal_ring( uint32_t requiredSlots ) {
 				ri.Terminate( TERM_UNRECOVERABLE,
 				"temporal entMat ring generation exhausted before replacement" );
 		for ( j = 0; j < i; ++j )
-			if ( ( slot->entMatBuf
-						&& slot->entMatBuf == vk.tess[j].entMatBuf )
-					|| ( slot->entMatMem
-						&& slot->entMatMem == vk.tess[j].entMatMem )
+			if ( ( slot->ral_entMatBuf
+						&& slot->ral_entMatBuf == vk.tess[j].ral_entMatBuf )
 					|| ( slot->entMatMapped
 						&& slot->entMatMapped == vk.tess[j].entMatMapped )
 					|| ( slot->entMatDesc
@@ -27371,9 +25842,8 @@ static qboolean vk_entmat_ensure_temporal_ring( uint32_t requiredSlots ) {
 			vk_temporal_entmat_ring.byteSize == bytes ? qtrue : qfalse;
 		for ( i = 0; i < NUM_COMMAND_BUFFERS && metadataExact; ++i ) {
 			const vk_tess_t *slot = &vk.tess[i];
-			if ( vk_temporal_entmat_ring.buffer[i] != slot->entMatBuf
-					|| vk_temporal_entmat_ring.memory[i] != slot->entMatMem
-					|| vk_temporal_entmat_ring.mapped[i] != slot->entMatMapped
+			if ( vk_temporal_entmat_ring.buffer[i] != slot->ral_entMatBuf
+					|| vk_temporal_entmat_ring.shadowBytes[i] != slot->entMatMapped
 					|| vk_temporal_entmat_ring.descriptor[i] != slot->entMatDesc
 					|| vk_temporal_entmat_ring.allocationGeneration[i]
 						!= slot->entMatAllocationGeneration )
@@ -27386,7 +25856,7 @@ static qboolean vk_entmat_ensure_temporal_ring( uint32_t requiredSlots ) {
 	vk_temporal_entmat_ring.ready = qfalse;
 	if ( repairTouchesExisting ) {
 		vk_wait_idle();
-		vk_temporal_entmat_release_after_idle( "raw-ring-materialize" );
+		vk_temporal_entmat_release_after_idle( "shadow-ring-materialize" );
 	}
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i )
 		if ( repair[i] )
@@ -27398,9 +25868,8 @@ static qboolean vk_entmat_ensure_temporal_ring( uint32_t requiredSlots ) {
 	vk_temporal_entmat_ring.byteSize = bytes;
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i )
 	{
-		vk_temporal_entmat_ring.buffer[i] = vk.tess[i].entMatBuf;
-		vk_temporal_entmat_ring.memory[i] = vk.tess[i].entMatMem;
-		vk_temporal_entmat_ring.mapped[i] = vk.tess[i].entMatMapped;
+		vk_temporal_entmat_ring.buffer[i] = vk.tess[i].ral_entMatBuf;
+		vk_temporal_entmat_ring.shadowBytes[i] = vk.tess[i].entMatMapped;
 		vk_temporal_entmat_ring.descriptor[i] = vk.tess[i].entMatDesc;
 		vk_temporal_entmat_ring.allocationGeneration[i] =
 			vk.tess[i].entMatAllocationGeneration;
@@ -27428,48 +25897,32 @@ void vk_entmat_ensure_buffer( uint32_t requiredSlots )
 	// descriptor. On the OFF path the shader simply never reads it (byte-identical;
 	// binding an unread buffer changes no pixels).
 
-	if ( vk.cmd->entMatBuf == VK_NULL_HANDLE || vk.cmd->entMatSize < need
+	if ( vk.cmd->ral_entMatBuf == NULL || vk.cmd->entMatSize < need
+	     || vk_entmat_shadows[vk.cmd_index].ready != qtrue
+	     || vk_entmat_shadows[vk.cmd_index].buffer != vk.cmd->ral_entMatBuf
+	     || vk_entmat_shadows[vk.cmd_index].bytes != vk.cmd->entMatMapped
 	     || vk.cmd->entMatDesc == VK_NULL_HANDLE
 	     || vk.cmd->ral_entMatDesc == NULL
 	     || Ral_GetBindGroupHandle( vk.cmd->ral_entMatDesc )
 			!= (void *)vk.cmd->entMatDesc ) {
-		const qboolean grew = ( vk.cmd->entMatBuf == VK_NULL_HANDLE || vk.cmd->entMatSize < need ) ? qtrue : qfalse;
+		const qboolean grew = ( vk.cmd->ral_entMatBuf == NULL
+			|| vk.cmd->entMatSize < need
+			|| vk_entmat_shadows[vk.cmd_index].ready != qtrue
+			|| vk_entmat_shadows[vk.cmd_index].buffer
+				!= vk.cmd->ral_entMatBuf
+			|| vk_entmat_shadows[vk.cmd_index].bytes
+				!= vk.cmd->entMatMapped ) ? qtrue : qfalse;
 		if ( grew ) {
-			VkBufferCreateInfo   bd;
-			VkMemoryRequirements mr;
-			VkMemoryAllocateInfo ma;
 			VkDeviceSize         sz = 65536; // 512-slot floor at 128 B/slot (64 KiB)
 			while ( sz < need ) sz <<= 1;
-			const qboolean replacingRawParent =
-				vk.cmd->entMatBuf != VK_NULL_HANDLE ? qtrue : qfalse;
+			const qboolean replacingOwner =
+				vk.cmd->ral_entMatBuf != NULL ? qtrue : qfalse;
 			vk_temporal_entmat_ring.ready = qfalse;
 			vk_wait_idle();
-			vk_ral_release_entmat_bindgroup( (uint32_t)vk.cmd_index );
-			if ( replacingRawParent )
-				vk_temporal_entmat_release_after_idle( "raw-buffer-grow" );
-			if ( vk.cmd->entMatMapped ) { qvkUnmapMemory( vk.device, vk.cmd->entMatMem ); vk.cmd->entMatMapped = NULL; }
-			if ( vk.cmd->entMatBuf )    { vk_ral_unregister_buffer( vk.cmd->entMatBuf ); qvkDestroyBuffer( vk.device, vk.cmd->entMatBuf, NULL ); vk.cmd->entMatBuf = VK_NULL_HANDLE; }
-			if ( vk.cmd->entMatMem )    { qvkFreeMemory( vk.device, vk.cmd->entMatMem, NULL );    vk.cmd->entMatMem = VK_NULL_HANDLE; }
-			memset( &bd, 0, sizeof( bd ) );
-			bd.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO; bd.size = sz;
-			bd.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT; bd.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-			VK_CHECK( qvkCreateBuffer( vk.device, &bd, NULL, &vk.cmd->entMatBuf ) );
-			qvkGetBufferMemoryRequirements( vk.device, vk.cmd->entMatBuf, &mr );
-			memset( &ma, 0, sizeof( ma ) );
-			ma.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; ma.allocationSize = mr.size;
-			ma.memoryTypeIndex = find_memory_type( mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-			VK_CHECK( qvkAllocateMemory( vk.device, &ma, NULL, &vk.cmd->entMatMem ) );
-			qvkBindBufferMemory( vk.device, vk.cmd->entMatBuf, vk.cmd->entMatMem, 0 );
-			VK_CHECK( qvkMapMemory( vk.device, vk.cmd->entMatMem, 0, VK_WHOLE_SIZE, 0, &vk.cmd->entMatMapped ) );
-			vk.cmd->entMatSize = sz;
-			vk_ral_register_buffer( vk.cmd->entMatBuf, sz,
-			                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-			                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			                        "vk.cmd.entMatBuf" );
-			SET_OBJECT_NAME( vk.cmd->entMatBuf, "entity model matrices", RAL_VULKAN_OBJECT_ROLE_BUFFER );
-			if ( vk.cmd->entMatAllocationGeneration != UINT32_MAX ) {
-				vk.cmd->entMatAllocationGeneration++;
-			}
+			if ( replacingOwner )
+				vk_temporal_entmat_release_after_idle( "shadow-buffer-grow" );
+			if ( !vk_entmat_materialize_slot_after_idle( vk.cmd, sz ) )
+				return;
 		}
 		if ( !vk_ral_refresh_entmat_bindgroup(
 				(uint32_t)vk.cmd_index ) )
@@ -27490,6 +25943,22 @@ void vk_entmat_begin_frame( void )
 {
 	vk.cmd->entMatSlot = 0;
 	vk.cmd->entMatLastUniformOffset = ~0U;
+}
+
+static qboolean vk_entmat_publish_shadow_range( uint32_t slotIndex,
+		uint64_t offset, uint64_t size ) {
+	vkRalBufferShadowWriteReceipt_t receipt;
+	vkRalBufferShadow_t *owner;
+	vk_tess_t *slot;
+	if ( slotIndex >= NUM_COMMAND_BUFFERS || !size ) return qfalse;
+	owner = &vk_entmat_shadows[slotIndex];
+	slot = &vk.tess[slotIndex];
+	return owner->ready == qtrue && owner->buffer == slot->ral_entMatBuf
+		&& owner->bytes == slot->entMatMapped
+		&& owner->byteSize == slot->entMatSize
+		&& offset <= owner->byteSize && size <= owner->byteSize - offset
+		&& VK_RalBufferShadowMarkWritten( owner, offset, size )
+		&& VK_RalBufferShadowPublish( owner, offset, size, &receipt );
 }
 
 qboolean vk_temporal_motion_begin_primary_command( void )
@@ -28132,7 +26601,10 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 	// paths via their real VK_PushUniform, the index-table-agnostic special paths
 	// (sky / beam / debug / shadow volumes) via VK_PushUniformScratch — so the
 	// write always lands in this draw's own item, never a still-in-flight one.
-	vk_push_bindless_indices();
+	if ( !vk_push_bindless_indices() ) {
+		VK_TemporalMotionRecordingPoison( &vk_temporal_motion_recording );
+		return;
+	}
 
 	// configure pipeline's dynamic state
 	vk_update_depth_range( depth_range );
@@ -28210,8 +26682,10 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 			if ( byteOff + ENTITY_MATRIX_SLOT_BYTES <= vk.cmd->entMatSize ) {
 			const vkUniform_t *item = (const vkUniform_t *)( vk.cmd->vertex_buffer_ptr + vk.cmd->uniform_read_offset );
 			byte *dst = (byte *)vk.cmd->entMatMapped + byteOff;
-			// Inert temporal payload is committed first. The following mapped raw
-			// copies cannot fail, so both buffers publish the same absolute slot.
+			// Commit the inert temporal payload first, then publish the matching
+			// transform slot from its CPU shadow through one bounded RAL write.
+			// A declined publication poisons the temporal transaction and keeps the
+			// ordinary draw on the already-zeroed fallback slot.
 			if ( temporalPrepared && !VK_TemporalMotionRecordingConsumeAt(
 					&vk_temporal_motion_recording, &vk_temporal_entmat_runtime,
 					slot ) ) {
@@ -28223,9 +26697,18 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 #if FEAT_SHADOW_MAPPING
 			memcpy( dst + 64, item->modelMatrix, 64 );
 #endif
-			firstInstance = slot;
-			vk.cmd->entMatLastUniformOffset = vk.cmd->uniform_read_offset;
-			vk.cmd->entMatSlot = slot + 1;
+			if ( vk_entmat_publish_shadow_range( (uint32_t)vk.cmd_index,
+					byteOff, ENTITY_MATRIX_SLOT_BYTES ) ) {
+				firstInstance = slot;
+				vk.cmd->entMatLastUniformOffset = vk.cmd->uniform_read_offset;
+				vk.cmd->entMatSlot = slot + 1;
+			} else {
+				VK_TemporalMotionRecordingPoison(
+					&vk_temporal_motion_recording );
+				VK_TemporalMainActivationPoison(
+					&vk_temporal_main_activation );
+				activationPlanned = qfalse;
+			}
 			} else if ( temporalPrepared ) {
 				VK_TemporalMotionRecordingPoison( &vk_temporal_motion_recording );
 				VK_TemporalMainActivationPoison( &vk_temporal_main_activation );
@@ -28280,7 +26763,8 @@ void vk_draw_forwardplus( Vk_Depth_Range depth_range )
 
 	// Write this draw's packed bindless indices (role 0 = the diffuse tracked by
 	// R_BindAnimatedImage) into its set-0 ring item — same as vk_draw_geometry.
-	vk_push_bindless_indices();
+	if ( !vk_push_bindless_indices() )
+		return;
 
 	// Bind the fp pipeline through RAL (records into the same command buffer).
 	Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.ral_fpLitPipeline );
@@ -28543,7 +27027,7 @@ void vk_tonemap( void )
 	}
 #endif
 
-	// Any active scene-depth consumer samples the depth copy (vk.sceneDepth.image).
+	// Any active scene-depth consumer samples the shared RAL depth copy.
 	// That copy is normally produced at the opaque->transparent sort boundary in
 	// RB_RenderDrawSurfList — but a frame with no transparent surfaces never
 	// crosses that boundary, so the copy would be stale/undefined while the
@@ -28595,6 +27079,7 @@ void vk_tonemap( void )
 	// Layout mirrors ExposureBlock in tonemap.frag (std140).
 	if ( vk.exposure.ptr[ vk.cmd_index ] ) {
 		vk_exposure_block_t *eb = (vk_exposure_block_t *)vk.exposure.ptr[ vk.cmd_index ];
+		vkRalBufferShadowWriteReceipt_t exposureWrite;
 		qboolean autoOn = ( vk.fboActive && r_hdrAutoExposure->integer
 			&& vk.ral_exposure_reduce_pipeline
 			&& vk_hdr_exposure_seed_valid() ) ? qtrue : qfalse;
@@ -28718,6 +27203,15 @@ void vk_tonemap( void )
 #endif
 		if ( !autoOn )
 			eb->exposure_bias = r_brightness->value;   // manual path owns exposure_bias
+		if ( !VK_RalBufferShadowMarkWritten(
+				&vk_exposure_shadows[vk.cmd_index], 0u, sizeof( *eb ) )
+				|| !VK_RalBufferShadowPublish(
+					&vk_exposure_shadows[vk.cmd_index], 0u, sizeof( *eb ),
+					&exposureWrite ) ) {
+			ri.Terminate( TERM_UNRECOVERABLE,
+				"Vulkan: failed to publish exposure RAL shadow" );
+			return;
+		}
 	}
 
 	// HDR auto-exposure: dispatch the log-luminance histogram compute pass over
@@ -28918,7 +27412,7 @@ void vk_tonemap( void )
 		// 1, so bind it ONLY for the sunrays variant — binding a set the bound
 		// layout does not declare is a VUID. The depth copy was produced above
 		// (forced when no transparent surface triggered the sort-boundary copy); the
-		// descriptor samples vk.sceneDepth.image in SHADER_READ_ONLY.
+		// descriptor samples vk.sceneDepth.ral_image in SHADER_READ_ONLY.
 		// AO isolation does not use set 1; its denoised GTAO input is set 3.
 		if ( varIdx & TONEMAP_VAR_SUNRAYS )
 			Ral_CmdBindBindGroup( vk.cmd->ral_cmd, 1, vk.sceneDepth.ral_descriptor );
@@ -29216,7 +27710,7 @@ static void vk_scene_depth_copy_internal( qboolean forceFinal,
 	// per-draw in vk_push_bindless_indices when vk.cmd->depthFadeDraw is set.
 
 	vk.sceneDepth.copied = qtrue;
-	// latch that a snapshot now exists in vk.sceneDepth.image
+	// latch that a snapshot now exists in vk.sceneDepth.ral_image
 	// so NEXT frame's vk_gtao_async_begin can read it (cross-frame source). Stays set
 	// for the device lifetime once the first copy lands.
 	vk.gtaoSnapshotValid = qtrue;
@@ -29238,7 +27732,7 @@ void vk_scene_depth_copy_final( void )
 vk_forwardplus_depth_copy
 
 Forward+ frame-END depth copy: snapshot the just-rendered scene depth into the
-dedicated SAMPLED depth copy (vk.fpDepthImage) so NEXT frame's no-render-pass-seam
+dedicated SAMPLED depth copy (vk.ral_fpDepthImage) so NEXT frame's no-render-pass-seam
 reduce (vk_forwardplus_dispatch) can sample it for the per-tile depth-cull (the
 live attachment vk.depth_image is attachment-only — no SAMPLED usage — so it can't
 be sampled; this is the depthFade copy-to-sampled idiom, Forward+-owned). A 1-frame
@@ -29280,10 +27774,10 @@ void vk_forwardplus_depth_copy( void )
 	// the populated scene depth, so the fp copy came out near-empty and the per-tile
 	// reduce read garbage → the tile-cull over-rejected → blocky dlights. Forward+ is
 	// now a registered vk.sceneDepth consumer (s_sceneDepthConsumers), so
-	// vk.sceneDepth.image is copied + populated whenever r_forwardPlus is on. Copying
+	// vk.sceneDepth.ral_image is copied + populated whenever r_forwardPlus is on. Copying
 	// THAT standalone depth-only sampled image (already SHADER_READ_ONLY) needs no
 	// render-pass end/reopen and no combined-aspect raw barriers — a plain RAL-native
-	// depth-only image copy between two adopted depth textures. Skip the frame it isn't
+	// depth-only image copy between two RAL textures. Skip the frame it isn't
 	// copied yet (cold start / no-op) so the reduce keeps the full-slab fallback.
 	if ( !vk.sceneDepth.ral_image || !vk.sceneDepth.copied )
 		return;
@@ -29514,8 +28008,15 @@ void vk_smaa( void )
 
 	// publish rtMetrics into this frame's UBO (set 3 of pipeline_layout_smaa),
 	// once per frame — replaces the per-pass 16-byte push. All 3 passes read it.
-	if ( vk.smaaRt.ptr[ vk.cmd_index ] )
+	if ( vk.smaaRt.ptr[ vk.cmd_index ] ) {
+		vkRalBufferShadowWriteReceipt_t writeReceipt;
 		memcpy( vk.smaaRt.ptr[ vk.cmd_index ], rtMetrics, sizeof( rtMetrics ) );
+		if ( !VK_RalBufferShadowMarkWritten(
+				&vk_smaa_rt_shadows[vk.cmd_index], 0u, sizeof( rtMetrics ) )
+				|| !VK_RalBufferShadowPublish(
+					&vk_smaa_rt_shadows[vk.cmd_index], 0u,
+					sizeof( rtMetrics ), &writeReceipt ) ) return;
+	}
 
 	// No render pass open here — vk_tonemap() ended render_pass.tonemap
 	// before the caller invoked us.
@@ -31004,7 +29505,7 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 		// Re-adopt the complete new attachment generation, then rebuild all
 		// attachment-dependent RAL views/descriptors/pipelines.  The adoption
 		// sweep finishes by refreshing legacy and RAL descriptor bindings.
-		vk_ral_adopt_static_internal_textures();
+		vk_ral_refresh_internal_texture_dependents();
 		// The post-process pipelines bind to the just-recreated render passes; rebuild
 		// them (and the variant) so none retain a freed render-pass reference.
 		vk_update_post_process_pipelines();
@@ -31145,7 +29646,7 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 	if ( R_TemporalBatchRequestValidateExact( temporalRequest )
 			&& temporalRequest->enabled && temporalCapacityRequested
 			&& vk_entmat_active()
-			&& vk.cmd->entMatBuf != VK_NULL_HANDLE
+			&& vk.cmd->ral_entMatBuf != NULL
 			&& vk.cmd->entMatAllocationGeneration
 			&& vk.cmd->entMatAllocationGeneration != UINT32_MAX ) {
 		const uint64_t capacity64 = (uint64_t)vk.cmd->entMatSize
@@ -31159,7 +29660,8 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 			if ( VK_TemporalEntMatRuntimeEnsureAfterFence(
 				&vk_temporal_entmat_runtime, vk_ral_get_backend(),
 				NUM_COMMAND_BUFFERS, (uint32_t)vk.cmd_index,
-				(void *)vk.cmd->entMatBuf, (size_t)vk.cmd->entMatSize,
+				Ral_GetBufferHandle( vk.cmd->ral_entMatBuf ),
+				(size_t)vk.cmd->entMatSize,
 				vk.cmd->entMatAllocationGeneration, temporalRequiredSlots )
 					&& temporalRequest->width == (uint32_t)vk.renderWidth
 					&& temporalRequest->height == (uint32_t)vk.renderHeight ) {
@@ -31169,10 +29671,9 @@ void vk_begin_frame( const temporalBatchRequest_t *temporalRequest )
 				memset( &input, 0, sizeof( input ) );
 				input.backend = vk_ral_get_backend();
 				input.device = vk.device;
-				input.borrowedSets[0] = vk.set_layout_uniform;
-				input.borrowedSets[1] = (VkDescriptorSetLayout)
-					Ral_GetBindGroupLayoutHandle( vk_ral_get_bindless_layout() );
-				input.borrowedSets[2] = vk.set_layout_engine_resources;
+				input.borrowedLayouts[0] = vk.ral_bgl_uniform;
+				input.borrowedLayouts[1] = vk_ral_get_bindless_layout();
+				input.borrowedLayouts[2] = vk.ral_bgl_engine_resources;
 				input.payload = &vk_temporal_entmat_runtime.payload;
 				input.worldIndex = temporalRequest->worldIndex;
 				input.width = temporalRequest->width;
@@ -31947,10 +30448,6 @@ static void vk_resize_geometry_buffer( void )
 	vk_ral_reset_command_after_idle( vk.cmd->ral_cmd,
 		"vk_resize_geometry_buffer" );
 
-	for ( int i = 0; i < NUM_COMMAND_BUFFERS; i++ )
-		vk_ral_release_tess_uniform_bindgroup( (uint32_t)i );
-	vk_release_geometry_buffers();
-
 	vk_create_geometry_buffers( vk.geometry_buffer_size_new );
 	vk.geometry_buffer_size_new = 0;
 
@@ -32113,7 +30610,7 @@ void vk_end_frame( void )
 		//   doneUIPass  → dynamic UI pass open on img 265
 		//   !doneUIPass → no render pass open (vk_tonemap left a clean state)
 
-		if ( backEnd.screenshotMask && vk.capture.image )
+		if ( backEnd.screenshotMask && vk.capture.ral_image )
 		{
 			if ( backEnd.doneUIPass )
 				vk_end_render_pass(); // end the ui / ui_clear pass
@@ -32174,7 +30671,7 @@ void vk_end_frame( void )
 			// End the capture pass (if it ran) or the ui / ui_clear pass
 			// (if doneUIPass and no capture). If !doneUIPass and no capture
 			// there is no pass open — skip.
-			if ( ( backEnd.screenshotMask && vk.capture.image ) || backEnd.doneUIPass )
+			if ( ( backEnd.screenshotMask && vk.capture.ral_image ) || backEnd.doneUIPass )
 				vk_end_render_pass();
 			vk.renderWidth = gls.windowWidth;
 			vk.renderHeight = gls.windowHeight;
@@ -32305,7 +30802,7 @@ void vk_end_frame( void )
 	//   (b) FBO + minimized + !doneUIPass + no capture pass — vk_tonemap()
 	//       above left a clean state, and minimized skips the gamma pass.
 	if ( !( vk.fboActive && !vk.cmd->swapchain_image_acquired && !ri.CL_IsMinimized() ) &&
-	     !( vk.fboActive && ri.CL_IsMinimized() && !backEnd.doneUIPass && !( backEnd.screenshotMask && vk.capture.image ) ) ) {
+	     !( vk.fboActive && ri.CL_IsMinimized() && !backEnd.doneUIPass && !( backEnd.screenshotMask && vk.capture.ral_image ) ) ) {
 		vk_end_render_pass();
 	}
 
@@ -32929,8 +31426,8 @@ static int  shadowMeshSnapSliceCount, shadowMeshSnapSliceCap;
 // frame's vk_render_shadow_map() skins each caster in the shadow pass via the
 // skinned shadow VS. 1-frame lag, composing with the existing cascade-fit lag.
 typedef struct {
-	VkBuffer vertBuffer;          // the model's static IQM VBO (positions + bones)
-	VkBuffer idxBuffer;           // the model's static IQM IBO
+	ralBuffer_t *vertBuffer;      // the model's static IQM VBO (positions + bones)
+	ralBuffer_t *idxBuffer;       // the model's static IQM IBO
 	int      firstIndex;          // surf->first_triangle * 3 (into idxBuffer)
 	int      numIndexes;          // surf->num_triangles * 3
 	float    boneMats[IQM_GPU_MAX_JOINTS * 12]; // this frame's pose (3x4 affine per joint)
@@ -33166,10 +31663,6 @@ static void vk_build_bmodel_casters( void ) {
 	vec4_t *verts = NULL;
 	uint32_t *idx = NULL;
 	VkDeviceSize vBytes, iBytes, bufSize, uploadDone;
-	VkBufferCreateInfo bdesc;
-	VkMemoryRequirements mreq;
-	VkMemoryAllocateInfo binfo;
-	ralBufferCopy_t region;
 
 	if ( !w || w->bmodels == NULL || w->numBModels < 2 )
 		return; // no inline submodels beyond worldspawn
@@ -33210,22 +31703,10 @@ static void vk_build_bmodel_casters( void ) {
 	bufSize = vBytes + iBytes;
 	vk.shadowMap.casterBmodelVtxBytes = (uint32_t)vBytes;
 
-	memset( &bdesc, 0, sizeof( bdesc ) );
-	bdesc.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	bdesc.size        = bufSize;
-	bdesc.usage       = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-	bdesc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	VK_CHECK( qvkCreateBuffer( vk.device, &bdesc, NULL, &vk.shadowMap.casterBmodelBuf ) );
-	qvkGetBufferMemoryRequirements( vk.device, vk.shadowMap.casterBmodelBuf, &mreq );
-	memset( &binfo, 0, sizeof( binfo ) );
-	binfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	binfo.allocationSize  = mreq.size;
-	binfo.memoryTypeIndex = find_memory_type( mreq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-	VK_CHECK( qvkAllocateMemory( vk.device, &binfo, NULL, &vk.shadowMap.casterBmodelMem ) );
-	qvkBindBufferMemory( vk.device, vk.shadowMap.casterBmodelBuf, vk.shadowMap.casterBmodelMem, 0 );
-	vk_ral_register_buffer( vk.shadowMap.casterBmodelBuf, bufSize,
-	                        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-	                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "vk.shadowMap.casterBmodelBuf" );
+	vk.shadowMap.ral_casterBmodelBuf = vk_create_device_local_buffer( bufSize,
+		(ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_VERTEX
+			| RAL_BUFFER_INDEX ), "vk.shadowMap.ral_casterBmodelBuf" );
+	if ( !vk.shadowMap.ral_casterBmodelBuf ) goto cleanup;
 
 #ifdef USE_UPLOAD_QUEUE
 	vk_flush_staging_buffer( qfalse );
@@ -33234,49 +31715,30 @@ static void vk_build_bmodel_casters( void ) {
 	while ( uploadDone < vBytes ) {
 		VkDeviceSize chunk = vk.staging_buffer.size;
 		if ( uploadDone + chunk > vBytes ) chunk = vBytes - uploadDone;
-		memcpy( vk.staging_buffer.ptr, (const byte *)verts + uploadDone, chunk );
-		{
-			ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
-			if ( rcmd == NULL ) {
-				R_LOG( rch_ral, SEV_ERROR, "bmodel shadow caster verts: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping vertex chunk\n" );
-			} else {
-				region.srcOffset = 0; region.dstOffset = uploadDone; region.size = chunk;
-				if ( !vk_ral_record_registered_buffer_copy( rcmd,
-						vk.staging_buffer.handle, vk.shadowMap.casterBmodelBuf,
-						&region ) )
-					R_LOG( rch_ral, SEV_ERROR,
-						"bmodel shadow caster verts: exact RAL copy rejected\n" );
-				Ral_SubmitAndDispose( rcmd );
-			}
-		}
+		if ( !vk_ral_stage_buffer_copy( vk.shadowMap.ral_casterBmodelBuf,
+				uploadDone, (const byte *)verts + uploadDone, chunk,
+				"bmodel shadow caster vertices" ) )
+			R_LOG( rch_ral, SEV_ERROR,
+				"bmodel shadow caster verts: portable staging copy rejected\n" );
 		uploadDone += chunk;
 	}
 	uploadDone = 0; // indices
 	while ( uploadDone < iBytes ) {
 		VkDeviceSize chunk = vk.staging_buffer.size;
 		if ( uploadDone + chunk > iBytes ) chunk = iBytes - uploadDone;
-		memcpy( vk.staging_buffer.ptr, (const byte *)idx + uploadDone, chunk );
-		{
-			ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
-			if ( rcmd == NULL ) {
-				R_LOG( rch_ral, SEV_ERROR, "bmodel shadow caster idx: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping index chunk\n" );
-			} else {
-				region.srcOffset = 0; region.dstOffset = vBytes + uploadDone; region.size = chunk;
-				if ( !vk_ral_record_registered_buffer_copy( rcmd,
-						vk.staging_buffer.handle, vk.shadowMap.casterBmodelBuf,
-						&region ) )
-					R_LOG( rch_ral, SEV_ERROR,
-						"bmodel shadow caster idx: exact RAL copy rejected\n" );
-				Ral_SubmitAndDispose( rcmd );
-			}
-		}
+		if ( !vk_ral_stage_buffer_copy( vk.shadowMap.ral_casterBmodelBuf,
+				vBytes + uploadDone, (const byte *)idx + uploadDone, chunk,
+				"bmodel shadow caster indices" ) )
+			R_LOG( rch_ral, SEV_ERROR,
+				"bmodel shadow caster idx: portable staging copy rejected\n" );
 		uploadDone += chunk;
 	}
 
+
+cleanup:
 	ri.Hunk_FreeTempMemory( idx );
 	ri.Hunk_FreeTempMemory( verts );
-
-	SET_OBJECT_NAME( vk.shadowMap.casterBmodelBuf, "shadow caster geometry (inline brush models)", RAL_VULKAN_OBJECT_ROLE_BUFFER );
+	if ( !vk.shadowMap.ral_casterBmodelBuf ) return;
 	R_LOG( rch_vk, SEV_INFO, "shadow caster: %u verts / %u tris from %d inline brush models\n", numVerts, numIdx/3, withGeom );
 }
 
@@ -33404,7 +31866,7 @@ RF_NOSHADOW); the shader gate (SHADOW_CASTER_OK) is checked by the caller agains
 the surface shader — a fully transparent/blended IQM shouldn't cast.
 ===================
 */
-void vk_shadow_capture_iqm( VkBuffer vertBuffer, VkBuffer idxBuffer,
+void vk_shadow_capture_iqm( ralBuffer_t *vertBuffer, ralBuffer_t *idxBuffer,
 	int firstIndex, int numIndexes, const float *boneMats, int numBones,
 	const float *modelMatrix, const float *modelBounds )
 {
@@ -33412,7 +31874,7 @@ void vk_shadow_capture_iqm( VkBuffer vertBuffer, VkBuffer idxBuffer,
 	shadowIqmCaster_t *c;
 
 	if ( !vk.shadowMap.active ) return;
-	if ( vertBuffer == VK_NULL_HANDLE || idxBuffer == VK_NULL_HANDLE ) return;
+	if ( !vertBuffer || !idxBuffer ) return;
 	if ( numIndexes <= 0 || numBones <= 0 || numBones > IQM_GPU_MAX_JOINTS ) return;
 	if ( ent == NULL || ent == &tr.worldEntity ) return;
 	if ( ent->e.renderfx & ( RF_FIRST_PERSON | RF_DEPTHHACK | RF_NOSHADOW ) ) return;
@@ -33491,19 +31953,9 @@ static void vk_shutdown_entmat_buffers( void ) {
 	vk_temporal_entmat_ring.ready = qfalse;
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; ++i ) {
 		vk_ral_release_entmat_bindgroup( (uint32_t)i );
-		if ( vk.tess[i].entMatMapped ) {
-			qvkUnmapMemory( vk.device, vk.tess[i].entMatMem );
-			vk.tess[i].entMatMapped = NULL;
-		}
-		if ( vk.tess[i].entMatBuf ) {
-			vk_ral_unregister_buffer( vk.tess[i].entMatBuf );
-			qvkDestroyBuffer( vk.device, vk.tess[i].entMatBuf, NULL );
-			vk.tess[i].entMatBuf = VK_NULL_HANDLE;
-		}
-		if ( vk.tess[i].entMatMem ) {
-			qvkFreeMemory( vk.device, vk.tess[i].entMatMem, NULL );
-			vk.tess[i].entMatMem = VK_NULL_HANDLE;
-		}
+		VK_RalBufferShadowRelease( &vk_entmat_shadows[i] );
+		vk.tess[i].ral_entMatBuf = NULL;
+		vk.tess[i].entMatMapped = NULL;
 		vk.tess[i].entMatSize = 0;
 		vk.tess[i].entMatDesc = VK_NULL_HANDLE;
 		vk.tess[i].entMatSlot = 0;
@@ -33514,15 +31966,15 @@ static void vk_shutdown_entmat_buffers( void ) {
 static void vk_shutdown_shadow_snap( void ) {
 	int i;
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		if ( vk.tess[i].shadowSnapMapped ) { qvkUnmapMemory( vk.device, vk.tess[i].shadowSnapMem ); vk.tess[i].shadowSnapMapped = NULL; }
-		if ( vk.tess[i].shadowSnapBuf )    { vk_ral_unregister_buffer( vk.tess[i].shadowSnapBuf ); qvkDestroyBuffer( vk.device, vk.tess[i].shadowSnapBuf, NULL ); vk.tess[i].shadowSnapBuf = VK_NULL_HANDLE; }
-		if ( vk.tess[i].shadowSnapMem )    { qvkFreeMemory( vk.device, vk.tess[i].shadowSnapMem, NULL );    vk.tess[i].shadowSnapMem = VK_NULL_HANDLE; }
+		VK_RalBufferShadowRelease( &vk_shadow_snap_shadows[i] );
+		vk.tess[i].ral_shadowSnapBuf = NULL;
+		vk.tess[i].shadowSnapMapped = NULL;
 		vk.tess[i].shadowSnapSize = 0;
 		// entity-matrix SSBO (the descriptor is freed by the pool, not here).
 		vk_shadow_destroy_group( &vk.tess[i].ral_shadowEntMatDesc );
-		if ( vk.tess[i].shadowEntMatMapped ) { qvkUnmapMemory( vk.device, vk.tess[i].shadowEntMatMem ); vk.tess[i].shadowEntMatMapped = NULL; }
-		if ( vk.tess[i].shadowEntMatBuf )    { vk_ral_unregister_buffer( vk.tess[i].shadowEntMatBuf ); qvkDestroyBuffer( vk.device, vk.tess[i].shadowEntMatBuf, NULL ); vk.tess[i].shadowEntMatBuf = VK_NULL_HANDLE; }
-		if ( vk.tess[i].shadowEntMatMem )    { qvkFreeMemory( vk.device, vk.tess[i].shadowEntMatMem, NULL );    vk.tess[i].shadowEntMatMem = VK_NULL_HANDLE; }
+		VK_RalBufferShadowRelease( &vk_shadow_entmat_shadows[i] );
+		vk.tess[i].ral_shadowEntMatBuf = NULL;
+		vk.tess[i].shadowEntMatMapped = NULL;
 		vk.tess[i].shadowEntMatSize = 0;
 		vk.tess[i].shadowEntMatDesc = VK_NULL_HANDLE;
 	}
@@ -33563,12 +32015,8 @@ void vk_build_shadow_caster( void ) {
 	const msurface_t *worldSurfs;
 	int worldNumSurfs;
 	VkDeviceSize vBytes, iBytes, bufSize, uploadDone;
-	VkBufferCreateInfo bdesc;
-	VkMemoryRequirements mreq;
-	VkMemoryAllocateInfo binfo;
-	ralBufferCopy_t region;
 
-	if ( !vk.shadowMap.active || vk.shadowMap.image == VK_NULL_HANDLE ) {
+	if ( !vk.shadowMap.active || !vk.shadowMap.ral_image ) {
 		vk.shadowMap.casterIndexCount = 0;
 		return; // shadow mapping off / not set up — nothing to build
 	}
@@ -33580,12 +32028,9 @@ void vk_build_shadow_caster( void ) {
 		return; // already built for this map
 
 	// drop any stale buffers from a previous map (worldspawn + per-bmodel)
-	if ( vk.shadowMap.casterBuf )       { vk_ral_unregister_buffer( vk.shadowMap.casterBuf );       qvkDestroyBuffer( vk.device, vk.shadowMap.casterBuf, NULL );       vk.shadowMap.casterBuf = VK_NULL_HANDLE; }
-	if ( vk.shadowMap.casterMem )       { qvkFreeMemory( vk.device, vk.shadowMap.casterMem, NULL );          vk.shadowMap.casterMem = VK_NULL_HANDLE; }
-	if ( vk.shadowMap.casterBmodelBuf ) { vk_ral_unregister_buffer( vk.shadowMap.casterBmodelBuf ); qvkDestroyBuffer( vk.device, vk.shadowMap.casterBmodelBuf, NULL ); vk.shadowMap.casterBmodelBuf = VK_NULL_HANDLE; }
-	if ( vk.shadowMap.casterBmodelMem ) { qvkFreeMemory( vk.device, vk.shadowMap.casterBmodelMem, NULL );    vk.shadowMap.casterBmodelMem = VK_NULL_HANDLE; }
-	if ( vk.shadowMap.casterAtestBuf )  { vk_ral_unregister_buffer( vk.shadowMap.casterAtestBuf );  qvkDestroyBuffer( vk.device, vk.shadowMap.casterAtestBuf, NULL );  vk.shadowMap.casterAtestBuf = VK_NULL_HANDLE; }
-	if ( vk.shadowMap.casterAtestMem )  { qvkFreeMemory( vk.device, vk.shadowMap.casterAtestMem, NULL );     vk.shadowMap.casterAtestMem = VK_NULL_HANDLE; }
+	if ( vk.shadowMap.ral_casterBuf )       { Ral_DestroyBuffer( vk.shadowMap.ral_casterBuf );       vk.shadowMap.ral_casterBuf = NULL; }
+	if ( vk.shadowMap.ral_casterBmodelBuf ) { Ral_DestroyBuffer( vk.shadowMap.ral_casterBmodelBuf ); vk.shadowMap.ral_casterBmodelBuf = NULL; }
+	if ( vk.shadowMap.ral_casterAtestBuf )  { Ral_DestroyBuffer( vk.shadowMap.ral_casterAtestBuf );  vk.shadowMap.ral_casterAtestBuf = NULL; }
 	if ( vk.shadowMap.bmodelRanges )    { ri.Free( vk.shadowMap.bmodelRanges );                              vk.shadowMap.bmodelRanges = NULL; }
 	vk.shadowMap.casterIndexCount = 0;
 	vk.shadowMap.casterVtxBytes = 0;
@@ -33632,22 +32077,10 @@ void vk_build_shadow_caster( void ) {
 	vk.shadowMap.casterVtxBytes   = (uint32_t)vBytes;
 	vk.shadowMap.casterIndexCount = numIdx;
 
-	memset( &bdesc, 0, sizeof( bdesc ) );
-	bdesc.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	bdesc.size        = bufSize;
-	bdesc.usage       = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-	bdesc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	VK_CHECK( qvkCreateBuffer( vk.device, &bdesc, NULL, &vk.shadowMap.casterBuf ) );
-	qvkGetBufferMemoryRequirements( vk.device, vk.shadowMap.casterBuf, &mreq );
-	memset( &binfo, 0, sizeof( binfo ) );
-	binfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	binfo.allocationSize  = mreq.size;
-	binfo.memoryTypeIndex = find_memory_type( mreq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-	VK_CHECK( qvkAllocateMemory( vk.device, &binfo, NULL, &vk.shadowMap.casterMem ) );
-	qvkBindBufferMemory( vk.device, vk.shadowMap.casterBuf, vk.shadowMap.casterMem, 0 );
-	vk_ral_register_buffer( vk.shadowMap.casterBuf, bufSize,
-	                        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-	                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "vk.shadowMap.casterBuf" );
+	vk.shadowMap.ral_casterBuf = vk_create_device_local_buffer( bufSize,
+		(ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST | RAL_BUFFER_VERTEX
+			| RAL_BUFFER_INDEX ), "vk.shadowMap.ral_casterBuf" );
+	if ( !vk.shadowMap.ral_casterBuf ) goto world_cleanup;
 
 #ifdef USE_UPLOAD_QUEUE
 	vk_flush_staging_buffer( qfalse );
@@ -33656,47 +32089,30 @@ void vk_build_shadow_caster( void ) {
 	while ( uploadDone < vBytes ) {
 		VkDeviceSize chunk = vk.staging_buffer.size;
 		if ( uploadDone + chunk > vBytes ) chunk = vBytes - uploadDone;
-		memcpy( vk.staging_buffer.ptr, (const byte *)verts + uploadDone, chunk );
-		{
-			ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
-			if ( rcmd == NULL ) {
-				R_LOG( rch_ral, SEV_ERROR, "shadow caster verts: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping vertex chunk\n" );
-			} else {
-				region.srcOffset = 0; region.dstOffset = uploadDone; region.size = chunk;
-				if ( !vk_ral_record_registered_buffer_copy( rcmd,
-						vk.staging_buffer.handle, vk.shadowMap.casterBuf, &region ) )
-					R_LOG( rch_ral, SEV_ERROR,
-						"shadow caster verts: exact RAL copy rejected\n" );
-				Ral_SubmitAndDispose( rcmd );
-			}
-		}
+		if ( !vk_ral_stage_buffer_copy( vk.shadowMap.ral_casterBuf,
+				uploadDone, (const byte *)verts + uploadDone, chunk,
+				"shadow caster vertices" ) )
+			R_LOG( rch_ral, SEV_ERROR,
+				"shadow caster verts: portable staging copy rejected\n" );
 		uploadDone += chunk;
 	}
 	uploadDone = 0; // indices
 	while ( uploadDone < iBytes ) {
 		VkDeviceSize chunk = vk.staging_buffer.size;
 		if ( uploadDone + chunk > iBytes ) chunk = iBytes - uploadDone;
-		memcpy( vk.staging_buffer.ptr, (const byte *)idx + uploadDone, chunk );
-		{
-			ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
-			if ( rcmd == NULL ) {
-				R_LOG( rch_ral, SEV_ERROR, "shadow caster idx: Ral_AcquireBegunCommandBuffer(GRAPHICS) returned NULL; skipping index chunk\n" );
-			} else {
-				region.srcOffset = 0; region.dstOffset = vBytes + uploadDone; region.size = chunk;
-				if ( !vk_ral_record_registered_buffer_copy( rcmd,
-						vk.staging_buffer.handle, vk.shadowMap.casterBuf, &region ) )
-					R_LOG( rch_ral, SEV_ERROR,
-						"shadow caster idx: exact RAL copy rejected\n" );
-				Ral_SubmitAndDispose( rcmd );
-			}
-		}
+		if ( !vk_ral_stage_buffer_copy( vk.shadowMap.ral_casterBuf,
+				vBytes + uploadDone, (const byte *)idx + uploadDone, chunk,
+				"shadow caster indices" ) )
+			R_LOG( rch_ral, SEV_ERROR,
+				"shadow caster idx: portable staging copy rejected\n" );
 		uploadDone += chunk;
 	}
 
+
+world_cleanup:
 	ri.Hunk_FreeTempMemory( idx );
 	ri.Hunk_FreeTempMemory( verts );
-
-	SET_OBJECT_NAME( vk.shadowMap.casterBuf, "shadow caster geometry", RAL_VULKAN_OBJECT_ROLE_BUFFER );
+	if ( !vk.shadowMap.ral_casterBuf ) return;
 	R_LOG( rch_vk, SEV_INFO, "shadow caster: %u verts / %u tris from %d world surfaces\n", numVerts, numIdx/3, numCasterSurfs );
 
 	// Alpha-tested (cut-out) caster sub-group — strictly additive: built from the
@@ -33714,32 +32130,21 @@ void vk_build_shadow_caster( void ) {
 			VkDeviceSize avBytes = (VkDeviceSize)aVerts * SHADOW_ATEST_VERT_FLOATS * sizeof( float );
 			VkDeviceSize aiBytes = (VkDeviceSize)aIdx   * sizeof( uint32_t );
 			VkDeviceSize aBufSize = avBytes + aiBytes;
-			VkBufferCreateInfo abdesc;
-			VkMemoryRequirements amreq;
-			VkMemoryAllocateInfo abinfo;
-			ralBufferCopy_t aregion;
 			VkDeviceSize aDone;
 
 			vk_shadow_atest_fill( worldSurfs, worldNumSurfs, averts, &avCap, aidx, &aiCap );
 			vk.shadowMap.casterAtestVtxBytes   = (uint32_t)avBytes;
 			vk.shadowMap.casterAtestIndexCount = aIdx;
 
-			memset( &abdesc, 0, sizeof( abdesc ) );
-			abdesc.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-			abdesc.size        = aBufSize;
-			abdesc.usage       = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-			abdesc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-			VK_CHECK( qvkCreateBuffer( vk.device, &abdesc, NULL, &vk.shadowMap.casterAtestBuf ) );
-			qvkGetBufferMemoryRequirements( vk.device, vk.shadowMap.casterAtestBuf, &amreq );
-			memset( &abinfo, 0, sizeof( abinfo ) );
-			abinfo.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-			abinfo.allocationSize  = amreq.size;
-			abinfo.memoryTypeIndex = find_memory_type( amreq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-			VK_CHECK( qvkAllocateMemory( vk.device, &abinfo, NULL, &vk.shadowMap.casterAtestMem ) );
-			qvkBindBufferMemory( vk.device, vk.shadowMap.casterAtestBuf, vk.shadowMap.casterAtestMem, 0 );
-			vk_ral_register_buffer( vk.shadowMap.casterAtestBuf, aBufSize,
-			                        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-			                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "vk.shadowMap.casterAtestBuf" );
+			vk.shadowMap.ral_casterAtestBuf = vk_create_device_local_buffer(
+				aBufSize, (ralBufferUsage_t)( RAL_BUFFER_TRANSFER_DST
+					| RAL_BUFFER_VERTEX | RAL_BUFFER_INDEX ),
+				"vk.shadowMap.ral_casterAtestBuf" );
+			if ( !vk.shadowMap.ral_casterAtestBuf ) {
+				ri.Hunk_FreeTempMemory( aidx );
+				ri.Hunk_FreeTempMemory( averts );
+				return;
+			}
 
 #ifdef USE_UPLOAD_QUEUE
 			vk_flush_staging_buffer( qfalse );
@@ -33748,44 +32153,27 @@ void vk_build_shadow_caster( void ) {
 			while ( aDone < avBytes ) {
 				VkDeviceSize chunk = vk.staging_buffer.size;
 				if ( aDone + chunk > avBytes ) chunk = avBytes - aDone;
-				memcpy( vk.staging_buffer.ptr, (const byte *)averts + aDone, chunk );
-				{
-					ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
-					if ( rcmd != NULL ) {
-						aregion.srcOffset = 0; aregion.dstOffset = aDone; aregion.size = chunk;
-						if ( !vk_ral_record_registered_buffer_copy( rcmd,
-								vk.staging_buffer.handle,
-								vk.shadowMap.casterAtestBuf, &aregion ) )
-							R_LOG( rch_ral, SEV_ERROR,
-								"shadow caster atest verts: exact RAL copy rejected\n" );
-						Ral_SubmitAndDispose( rcmd );
-					}
-				}
+				if ( !vk_ral_stage_buffer_copy( vk.shadowMap.ral_casterAtestBuf,
+						aDone, (const byte *)averts + aDone, chunk,
+						"shadow caster atest vertices" ) )
+					R_LOG( rch_ral, SEV_ERROR,
+						"shadow caster atest verts: portable staging copy rejected\n" );
 				aDone += chunk;
 			}
 			aDone = 0; // indices
 			while ( aDone < aiBytes ) {
 				VkDeviceSize chunk = vk.staging_buffer.size;
 				if ( aDone + chunk > aiBytes ) chunk = aiBytes - aDone;
-				memcpy( vk.staging_buffer.ptr, (const byte *)aidx + aDone, chunk );
-				{
-					ralCommandBuffer_t *rcmd = Ral_AcquireBegunCommandBuffer( vk_ral_get_backend(), RAL_QUEUE_GRAPHICS );
-					if ( rcmd != NULL ) {
-						aregion.srcOffset = 0; aregion.dstOffset = avBytes + aDone; aregion.size = chunk;
-						if ( !vk_ral_record_registered_buffer_copy( rcmd,
-								vk.staging_buffer.handle,
-								vk.shadowMap.casterAtestBuf, &aregion ) )
-							R_LOG( rch_ral, SEV_ERROR,
-								"shadow caster atest idx: exact RAL copy rejected\n" );
-						Ral_SubmitAndDispose( rcmd );
-					}
-				}
+				if ( !vk_ral_stage_buffer_copy( vk.shadowMap.ral_casterAtestBuf,
+						avBytes + aDone, (const byte *)aidx + aDone, chunk,
+						"shadow caster atest indices" ) )
+					R_LOG( rch_ral, SEV_ERROR,
+						"shadow caster atest idx: portable staging copy rejected\n" );
 				aDone += chunk;
 			}
 
 			ri.Hunk_FreeTempMemory( aidx );
 			ri.Hunk_FreeTempMemory( averts );
-			SET_OBJECT_NAME( vk.shadowMap.casterAtestBuf, "shadow caster geometry (alpha-tested)", RAL_VULKAN_OBJECT_ROLE_BUFFER );
 			R_LOG( rch_vk, SEV_INFO, "shadow caster (alpha-tested): %u verts / %u tris from %d world surfaces\n", aVerts, aIdx/3, numAtestSurfs );
 		}
 	}
@@ -33875,7 +32263,7 @@ void vk_render_shadow_map( void ) {
 	// stable) and was leaking ~1 DEBUG line/sec into the default log during
 	// gameplay.
 
-	if ( vk.shadowMap.image == VK_NULL_HANDLE )
+	if ( !vk.shadowMap.ral_image )
 		return;
 
 	// build the worldspawn + inline-bmodel caster geometry once per map (lazy)
@@ -33892,36 +32280,33 @@ void vk_render_shadow_map( void ) {
 		if ( need > 32u*1024u*1024u ) {
 			snapVerts = snapIdx = snapSlices = 0; // pathological — skip the mesh casters this frame
 		} else {
-			if ( vk.cmd->shadowSnapBuf == VK_NULL_HANDLE || vk.cmd->shadowSnapSize < need ) {
-				VkBufferCreateInfo   bd;
-				VkMemoryRequirements mr;
-				VkMemoryAllocateInfo ma;
+			if ( vk.cmd->ral_shadowSnapBuf == NULL || vk.cmd->shadowSnapSize < need ) {
 				VkDeviceSize         sz = 65536;
+				vkRalBufferShadow_t candidateShadow;
+				vkRalBufferShadow_t retiredShadow;
 				while ( sz < need ) sz <<= 1;
 				vk_wait_idle();
-				if ( vk.cmd->shadowSnapMapped ) { qvkUnmapMemory( vk.device, vk.cmd->shadowSnapMem ); vk.cmd->shadowSnapMapped = NULL; }
-				if ( vk.cmd->shadowSnapBuf )    { vk_ral_unregister_buffer( vk.cmd->shadowSnapBuf ); qvkDestroyBuffer( vk.device, vk.cmd->shadowSnapBuf, NULL ); vk.cmd->shadowSnapBuf = VK_NULL_HANDLE; }
-				if ( vk.cmd->shadowSnapMem )    { qvkFreeMemory( vk.device, vk.cmd->shadowSnapMem, NULL );    vk.cmd->shadowSnapMem = VK_NULL_HANDLE; }
-				memset( &bd, 0, sizeof( bd ) );
-				bd.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO; bd.size = sz;
-				bd.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT; bd.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-				VK_CHECK( qvkCreateBuffer( vk.device, &bd, NULL, &vk.cmd->shadowSnapBuf ) );
-				qvkGetBufferMemoryRequirements( vk.device, vk.cmd->shadowSnapBuf, &mr );
-				memset( &ma, 0, sizeof( ma ) );
-				ma.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; ma.allocationSize = mr.size;
-				ma.memoryTypeIndex = find_memory_type( mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-				VK_CHECK( qvkAllocateMemory( vk.device, &ma, NULL, &vk.cmd->shadowSnapMem ) );
-				qvkBindBufferMemory( vk.device, vk.cmd->shadowSnapBuf, vk.cmd->shadowSnapMem, 0 );
-				VK_CHECK( qvkMapMemory( vk.device, vk.cmd->shadowSnapMem, 0, VK_WHOLE_SIZE, 0, &vk.cmd->shadowSnapMapped ) );
+				VK_RalBufferShadowInit( &candidateShadow );
+				if ( !VK_RalBufferShadowEnsure( &candidateShadow,
+						vk_ral_get_backend(), sz,
+						(ralBufferUsage_t)( RAL_BUFFER_VERTEX | RAL_BUFFER_INDEX ),
+						"vk.cmd.ral_shadowSnapBuf" ) ) return;
+				retiredShadow = vk_shadow_snap_shadows[vk.cmd_index];
+				vk_shadow_snap_shadows[vk.cmd_index] = candidateShadow;
+				vk.cmd->ral_shadowSnapBuf = candidateShadow.buffer;
+				vk.cmd->shadowSnapMapped = candidateShadow.bytes;
 				vk.cmd->shadowSnapSize = sz;
-				vk_ral_register_buffer( vk.cmd->shadowSnapBuf, sz,
-				                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-				                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-				                        "vk.cmd.shadowSnapBuf" );
-				SET_OBJECT_NAME( vk.cmd->shadowSnapBuf, "shadow caster snapshot (animated meshes)", RAL_VULKAN_OBJECT_ROLE_BUFFER );
+				VK_RalBufferShadowRelease( &retiredShadow );
 			}
 			memcpy( (byte *)vk.cmd->shadowSnapMapped, shadowMeshSnapVerts, (size_t)snapVerts * sizeof( vec4_t ) );
 			memcpy( (byte *)vk.cmd->shadowSnapMapped + (size_t)snapVerts * sizeof( vec4_t ), shadowMeshSnapIndices, (size_t)snapIdx * sizeof( glIndex_t ) );
+			{
+				vkRalBufferShadowWriteReceipt_t writeReceipt;
+				if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_snap_shadows[vk.cmd_index],
+						0u, need )
+				  || !VK_RalBufferShadowPublish( &vk_shadow_snap_shadows[vk.cmd_index],
+						0u, need, &writeReceipt ) ) return;
+			}
 		}
 	} else {
 		snapSlices = 0; // nothing captured last frame
@@ -33939,43 +32324,45 @@ void vk_render_shadow_map( void ) {
 		if ( maxSlots < 1 ) maxSlots = 1;
 		need = (VkDeviceSize)maxSlots * 64u; // 64 B per std430 mat4
 
-		if ( vk.cmd->shadowEntMatBuf == VK_NULL_HANDLE || vk.cmd->shadowEntMatSize < need ) {
-			const qboolean grew = ( vk.cmd->shadowEntMatBuf == VK_NULL_HANDLE || vk.cmd->shadowEntMatSize < need ) ? qtrue : qfalse;
+		if ( vk.cmd->ral_shadowEntMatBuf == NULL || vk.cmd->shadowEntMatSize < need ) {
+			const qboolean grew = ( vk.cmd->ral_shadowEntMatBuf == NULL || vk.cmd->shadowEntMatSize < need ) ? qtrue : qfalse;
 			if ( grew ) {
-				VkBufferCreateInfo   bd;
-				VkMemoryRequirements mr;
-				VkMemoryAllocateInfo ma;
 				VkDeviceSize         sz = 65536; // 1024 mat4 floor (64 KiB)
+				vkRalBufferShadow_t candidateShadow;
+				vkRalBufferShadow_t retiredShadow;
+				ralBindGroup_t *candidateGroup;
+				VkDescriptorSet candidateDesc;
+				ralBindGroup_t *retiredGroup;
 				while ( sz < need ) sz <<= 1;
 				vk_wait_idle();
-				vk_shadow_destroy_group( &vk.cmd->ral_shadowEntMatDesc );
-				vk.cmd->shadowEntMatDesc = VK_NULL_HANDLE;
-				if ( vk.cmd->shadowEntMatMapped ) { qvkUnmapMemory( vk.device, vk.cmd->shadowEntMatMem ); vk.cmd->shadowEntMatMapped = NULL; }
-				if ( vk.cmd->shadowEntMatBuf )    { vk_ral_unregister_buffer( vk.cmd->shadowEntMatBuf ); qvkDestroyBuffer( vk.device, vk.cmd->shadowEntMatBuf, NULL ); vk.cmd->shadowEntMatBuf = VK_NULL_HANDLE; }
-				if ( vk.cmd->shadowEntMatMem )    { qvkFreeMemory( vk.device, vk.cmd->shadowEntMatMem, NULL );    vk.cmd->shadowEntMatMem = VK_NULL_HANDLE; }
-				memset( &bd, 0, sizeof( bd ) );
-				bd.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO; bd.size = sz;
-				bd.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT; bd.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-				VK_CHECK( qvkCreateBuffer( vk.device, &bd, NULL, &vk.cmd->shadowEntMatBuf ) );
-				qvkGetBufferMemoryRequirements( vk.device, vk.cmd->shadowEntMatBuf, &mr );
-				memset( &ma, 0, sizeof( ma ) );
-				ma.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; ma.allocationSize = mr.size;
-				ma.memoryTypeIndex = find_memory_type( mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
-				VK_CHECK( qvkAllocateMemory( vk.device, &ma, NULL, &vk.cmd->shadowEntMatMem ) );
-				qvkBindBufferMemory( vk.device, vk.cmd->shadowEntMatBuf, vk.cmd->shadowEntMatMem, 0 );
-				VK_CHECK( qvkMapMemory( vk.device, vk.cmd->shadowEntMatMem, 0, VK_WHOLE_SIZE, 0, &vk.cmd->shadowEntMatMapped ) );
+				VK_RalBufferShadowInit( &candidateShadow );
+				if ( !VK_RalBufferShadowEnsure( &candidateShadow,
+						vk_ral_get_backend(), sz, RAL_BUFFER_STORAGE,
+						"vk.cmd.ral_shadowEntMatBuf" ) ) return;
+				candidateGroup = vk_shadow_create_ral_buffer_group_candidate(
+					vk.shadowMap.ral_bgl_entmat, RAL_BIND_STORAGE_BUFFER,
+					candidateShadow.buffer, sz, "wired-shadow-entmat-bg",
+					&candidateDesc );
+				if ( !candidateGroup ) {
+					VK_RalBufferShadowRelease( &candidateShadow );
+					return;
+				}
+				retiredShadow = vk_shadow_entmat_shadows[vk.cmd_index];
+				retiredGroup = vk.cmd->ral_shadowEntMatDesc;
+				vk_shadow_entmat_shadows[vk.cmd_index] = candidateShadow;
+				vk.cmd->ral_shadowEntMatBuf = candidateShadow.buffer;
+				vk.cmd->shadowEntMatMapped = candidateShadow.bytes;
 				vk.cmd->shadowEntMatSize = sz;
-				vk_ral_register_buffer( vk.cmd->shadowEntMatBuf, sz,
-				                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-				                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-				                        "vk.cmd.shadowEntMatBuf" );
-				SET_OBJECT_NAME( vk.cmd->shadowEntMatBuf, "shadow caster model matrices", RAL_VULKAN_OBJECT_ROLE_BUFFER );
+				vk.cmd->ral_shadowEntMatDesc = candidateGroup;
+				vk.cmd->shadowEntMatDesc = candidateDesc;
+				if ( retiredGroup ) Ral_DestroyBindGroup( retiredGroup );
+				VK_RalBufferShadowRelease( &retiredShadow );
 			}
 		}
 	}
-	if ( !vk_shadow_refresh_buffer_group( &vk.cmd->ral_shadowEntMatDesc,
+	if ( !vk_shadow_refresh_ral_buffer_group( &vk.cmd->ral_shadowEntMatDesc,
 			&vk.cmd->shadowEntMatDesc, vk.shadowMap.ral_bgl_entmat,
-			RAL_BIND_STORAGE_BUFFER, vk.cmd->shadowEntMatBuf,
+			RAL_BIND_STORAGE_BUFFER, vk.cmd->ral_shadowEntMatBuf,
 			vk.cmd->shadowEntMatSize, "wired-shadow-entmat-bg" ) )
 		return;
 
@@ -33984,12 +32371,12 @@ void vk_render_shadow_map( void ) {
 	// ring slot, and refresh the set-2 group from the current arena generation. The
 	// per-caster dynamic offset is computed + bound in the draw branch below. Only
 	// active when the skinned pipeline was built (vk.iqmGpu.available).
-	if ( vk.shadowMap.ral_depthPipelineSkinned && vk.shadowMap.boneBuf[vk.cmd_index] != VK_NULL_HANDLE ) {
+	if ( vk.shadowMap.ral_depthPipelineSkinned && vk.shadowMap.ral_boneBuf[vk.cmd_index] ) {
 		const uint32_t fi = vk.cmd_index;
 		vk.shadowMap.boneOffset[fi] = 0;
-		if ( !vk_shadow_refresh_buffer_group( &vk.shadowMap.ral_boneDesc[fi],
+		if ( !vk_shadow_refresh_ral_buffer_group( &vk.shadowMap.ral_boneDesc[fi],
 				&vk.shadowMap.boneDesc[fi], vk.shadowMap.ral_bgl_bones,
-				RAL_BIND_UNIFORM_BUFFER, vk.shadowMap.boneBuf[fi],
+				RAL_BIND_UNIFORM_BUFFER, vk.shadowMap.ral_boneBuf[fi],
 				PAD( (uint32_t)IQM_BONE_UBO_SIZE, vk.uniform_alignment ),
 				"wired-shadow-bones-bg" ) )
 			return;
@@ -34132,7 +32519,7 @@ void vk_render_shadow_map( void ) {
 
 		// render casters into this cascade's layer. Dynamic-rendering depth-only
 		// pass into array layer `casc` — depthAttachmentLayerIndex selects
-		// vk.shadowMap.layerView[casc] (the K4 array path). CLEAR/STORE depth 1.0
+		// the RAL-owned layer view selected by `casc`. CLEAR/STORE depth 1.0
 		// (normal depth, LESS_OR_EQUAL — shadow does NOT use reversed depth);
 		// no color. Every cascade (incl. casc >= numCascades) is cleared so the
 		// inactive tail stays at 1.0 = fully lit (matches the legacy renderPass
@@ -34170,11 +32557,21 @@ void vk_render_shadow_map( void ) {
 			const VkDeviceSize slotStride = PAD( 64u, vk.uniform_alignment );
 			if ( vk.shadowMap.cascadeMvpPtr[ cmd0 ] )
 				memcpy( (byte *)vk.shadowMap.cascadeMvpPtr[ cmd0 ] + (size_t)casc * slotStride, M, 64 );
-			if ( !vk_shadow_refresh_buffer_group(
+			{
+				vkRalBufferShadowWriteReceipt_t writeReceipt;
+				if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_cascade_mvp_shadows[cmd0],
+						(uint64_t)casc * slotStride, 64u )
+				  || !VK_RalBufferShadowPublish( &vk_shadow_cascade_mvp_shadows[cmd0],
+						(uint64_t)casc * slotStride, 64u, &writeReceipt ) ) {
+					Ral_EndRendering( vk.cmd->ral_cmd );
+					return;
+				}
+			}
+			if ( !vk_shadow_refresh_ral_buffer_group(
 					&vk.shadowMap.ral_cascadeMvpDesc[cmd0],
 					&vk.shadowMap.cascadeMvpDesc[cmd0],
 					vk.shadowMap.ral_bgl_cascademvp, RAL_BIND_UNIFORM_BUFFER,
-					vk.shadowMap.cascadeMvpBuf[cmd0], slotStride,
+					vk.shadowMap.ral_cascadeMvpBuf[cmd0], slotStride,
 					"wired-shadow-cascade-mvp-bg" ) )
 				return;
 		}
@@ -34183,13 +32580,13 @@ void vk_render_shadow_map( void ) {
 		// the shader's step(receiverDepth-bias, 1.0) == 1 ⇒ fully lit). Only the
 		// enabled cascades carry caster geometry.
 		if ( casc < numCascades ) {
-			const qboolean haveWorld  = ( vk.shadowMap.casterBuf != VK_NULL_HANDLE && vk.shadowMap.casterIndexCount > 0 ) ? qtrue : qfalse;
-			const qboolean haveBmodel = ( vk.shadowMap.casterBmodelBuf != VK_NULL_HANDLE && vk.shadowMap.bmodelRanges != NULL ) ? qtrue : qfalse;
+			const qboolean haveWorld  = ( vk.shadowMap.ral_casterBuf != NULL && vk.shadowMap.casterIndexCount > 0 ) ? qtrue : qfalse;
+			const qboolean haveBmodel = ( vk.shadowMap.ral_casterBmodelBuf != NULL && vk.shadowMap.bmodelRanges != NULL ) ? qtrue : qfalse;
 			// prev-frame deformed-mesh casters,
 			// staged into vk.cmd->shadowSnapBuf at the top of this function
 			// (verts at offset 0, then 0-based indices). snapVerts / snapSlices
 			// are the locals claimed by the consume block at function start.
-			const qboolean haveSnap   = ( snapSlices > 0 && vk.cmd->shadowSnapBuf != VK_NULL_HANDLE ) ? qtrue : qfalse;
+			const qboolean haveSnap   = ( snapSlices > 0 && vk.cmd->ral_shadowSnapBuf != NULL ) ? qtrue : qfalse;
 			VkDeviceSize voff = 0;
 
 			if ( haveWorld || haveBmodel || haveSnap ) {
@@ -34224,13 +32621,21 @@ void vk_render_shadow_map( void ) {
 			// worldspawn casters — identity model->world (their verts are world-space)
 			if ( haveWorld ) {
 				if ( casc == 0 ) {
+					vkRalBufferShadowWriteReceipt_t writeReceipt;
 					memset( mm, 0, sizeof( mm ) ); mm[0] = mm[5] = mm[10] = mm[15] = 1.0f;
 					memcpy( (byte *)vk.cmd->shadowEntMatMapped + (size_t)slot * 64u, mm, 64u );
+					if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_entmat_shadows[vk.cmd_index],
+							(uint64_t)slot * 64u, 64u )
+					  || !VK_RalBufferShadowPublish( &vk_shadow_entmat_shadows[vk.cmd_index],
+							(uint64_t)slot * 64u, 64u, &writeReceipt ) ) {
+						Ral_EndRendering( vk.cmd->ral_cmd );
+						return;
+					}
 				}
-				(void)vk_ral_bind_registered_vertex_buffers( vk.cmd->ral_cmd, 0, 1,
-					&vk.shadowMap.casterBuf, &voff );
-				(void)vk_ral_bind_registered_index_buffer( vk.cmd->ral_cmd,
-					vk.shadowMap.casterBuf, vk.shadowMap.casterVtxBytes,
+				Ral_CmdBindVertexBuffer( vk.cmd->ral_cmd, 0,
+					vk.shadowMap.ral_casterBuf, voff );
+				Ral_CmdBindIndexBuffer( vk.cmd->ral_cmd,
+					vk.shadowMap.ral_casterBuf, vk.shadowMap.casterVtxBytes,
 					RAL_INDEX_UINT32 );
 				Ral_CmdDrawIndexed( vk.cmd->ral_cmd, vk.shadowMap.casterIndexCount, 1, 0, 0, slot );
 				slot++;
@@ -34243,11 +32648,11 @@ void vk_render_shadow_map( void ) {
 			// lag as the cascade fit above — imperceptible at frame motion scale.
 			if ( haveBmodel && backEnd.refdef.num_entities > 0 ) {
 				int ei;
-				(void)vk_ral_bind_registered_vertex_buffers( vk.cmd->ral_cmd, 0, 1,
-					&vk.shadowMap.casterBmodelBuf, &voff );
-				(void)vk_ral_bind_registered_index_buffer( vk.cmd->ral_cmd,
-					vk.shadowMap.casterBmodelBuf, vk.shadowMap.casterBmodelVtxBytes,
-					RAL_INDEX_UINT32 );
+				Ral_CmdBindVertexBuffer( vk.cmd->ral_cmd, 0,
+					vk.shadowMap.ral_casterBmodelBuf, voff );
+				Ral_CmdBindIndexBuffer( vk.cmd->ral_cmd,
+					vk.shadowMap.ral_casterBmodelBuf,
+					vk.shadowMap.casterBmodelVtxBytes, RAL_INDEX_UINT32 );
 				for ( ei = 0; ei < backEnd.refdef.num_entities; ei++ ) {
 					const trRefEntity_t *ent = &backEnd.refdef.entities[ei];
 					const model_t *mod;
@@ -34274,11 +32679,19 @@ void vk_render_shadow_map( void ) {
 					}
 					// model->world = [axis | origin] (column-major) — written to SSBO[slot]
 					if ( casc == 0 ) {
+						vkRalBufferShadowWriteReceipt_t writeReceipt;
 						mm[0] = ent->e.axis[0][0]; mm[4] = ent->e.axis[1][0]; mm[ 8] = ent->e.axis[2][0]; mm[12] = ent->e.origin[0];
 						mm[1] = ent->e.axis[0][1]; mm[5] = ent->e.axis[1][1]; mm[ 9] = ent->e.axis[2][1]; mm[13] = ent->e.origin[1];
 						mm[2] = ent->e.axis[0][2]; mm[6] = ent->e.axis[1][2]; mm[10] = ent->e.axis[2][2]; mm[14] = ent->e.origin[2];
 						mm[3] = 0.0f;              mm[7] = 0.0f;              mm[11] = 0.0f;              mm[15] = 1.0f;
 						memcpy( (byte *)vk.cmd->shadowEntMatMapped + (size_t)slot * 64u, mm, 64u );
+						if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_entmat_shadows[vk.cmd_index],
+								(uint64_t)slot * 64u, 64u )
+						  || !VK_RalBufferShadowPublish( &vk_shadow_entmat_shadows[vk.cmd_index],
+								(uint64_t)slot * 64u, 64u, &writeReceipt ) ) {
+							Ral_EndRendering( vk.cmd->ral_cmd );
+							return;
+						}
 					}
 					// Per-cascade cull — world sphere from the bmodel's local AABB
 					// (mins/maxs) transformed by [axis|origin]. slot ALWAYS advances
@@ -34321,10 +32734,10 @@ void vk_render_shadow_map( void ) {
 				VkDeviceSize snapVertOff = 0;
 				VkDeviceSize snapIdxOff  = (VkDeviceSize)snapVerts * sizeof( vec4_t );
 				int si;
-				(void)vk_ral_bind_registered_vertex_buffers( vk.cmd->ral_cmd, 0, 1,
-					&vk.cmd->shadowSnapBuf, &snapVertOff );
-				(void)vk_ral_bind_registered_index_buffer( vk.cmd->ral_cmd,
-					vk.cmd->shadowSnapBuf, snapIdxOff, RAL_INDEX_UINT32 );
+				Ral_CmdBindVertexBuffer( vk.cmd->ral_cmd, 0,
+					vk.cmd->ral_shadowSnapBuf, snapVertOff );
+				Ral_CmdBindIndexBuffer( vk.cmd->ral_cmd,
+					vk.cmd->ral_shadowSnapBuf, snapIdxOff, RAL_INDEX_UINT32 );
 				for ( si = 0; si < snapSlices; si++ ) {
 					const shadowMeshSlice_t *sl = &shadowMeshSnapSlices[si];
 					// defensive cap — see the bmodel loop above.
@@ -34334,8 +32747,17 @@ void vk_render_shadow_map( void ) {
 					}
 					// modelMatrix is already a full 16-float column-major model->world
 					// (vk_shadow_capture_mesh fills [axis|origin] + bottom row {0,0,0,1}).
-					if ( casc == 0 )
+					if ( casc == 0 ) {
+						vkRalBufferShadowWriteReceipt_t writeReceipt;
 						memcpy( (byte *)vk.cmd->shadowEntMatMapped + (size_t)slot * 64u, sl->modelMatrix, 64u );
+						if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_entmat_shadows[vk.cmd_index],
+								(uint64_t)slot * 64u, 64u )
+						  || !VK_RalBufferShadowPublish( &vk_shadow_entmat_shadows[vk.cmd_index],
+								(uint64_t)slot * 64u, 64u, &writeReceipt ) ) {
+							Ral_EndRendering( vk.cmd->ral_cmd );
+							return;
+						}
+					}
 					// per-cascade cull (world sphere captured with the slice). slot
 					// always advances; only the draw is skipped on a miss.
 					vk_shadow_draws_considered++;
@@ -34376,7 +32798,6 @@ void vk_render_shadow_map( void ) {
 				for ( ic = 0; ic < iqmCasters; ic++ ) {
 					const shadowIqmCaster_t *c = &shadowIqmCasters[ic];
 					const uint32_t boneOff = (uint32_t)ic * boneItem;
-					VkDeviceSize voff = 0;
 					// defensive caps — SSBO slot + bone ring capacity.
 					if ( (VkDeviceSize)( (size_t)slot + 1 ) * 64u > vk.cmd->shadowEntMatSize ) {
 						R_LOG( rch_vk, SEV_WARN, "shadow entity-matrix SSBO full at slot %d — dropping IQM caster\n", slot );
@@ -34387,11 +32808,31 @@ void vk_render_shadow_map( void ) {
 						continue;
 					}
 					if ( casc == 0 ) {
+						vkRalBufferShadowWriteReceipt_t boneReceipt;
+						const uint64_t boneBytes =
+							(uint64_t)c->numBones * 3u * sizeof( vec4_t );
 						// bone matrices → this caster's ring slot (3 vec4 rows/joint).
 						memcpy( (byte *)vk.shadowMap.bonePtr[fi] + boneOff,
 							c->boneMats, (size_t)c->numBones * 3 * sizeof( vec4_t ) );
+						if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_bone_shadows[fi],
+								boneOff, boneBytes )
+						  || !VK_RalBufferShadowPublish( &vk_shadow_bone_shadows[fi],
+								boneOff, boneBytes, &boneReceipt ) ) {
+							Ral_EndRendering( vk.cmd->ral_cmd );
+							return;
+						}
 						// model->world → SSBO slot.
 						memcpy( (byte *)vk.cmd->shadowEntMatMapped + (size_t)slot * 64u, c->modelMatrix, 64u );
+						{
+							vkRalBufferShadowWriteReceipt_t writeReceipt;
+							if ( !VK_RalBufferShadowMarkWritten( &vk_shadow_entmat_shadows[fi],
+									(uint64_t)slot * 64u, 64u )
+							  || !VK_RalBufferShadowPublish( &vk_shadow_entmat_shadows[fi],
+									(uint64_t)slot * 64u, 64u, &writeReceipt ) ) {
+								Ral_EndRendering( vk.cmd->ral_cmd );
+								return;
+							}
+						}
 					}
 					// per-cascade cull (world sphere captured with the caster). slot
 					// always advances; the casc==0 bone+SSBO writes above always run,
@@ -34409,9 +32850,9 @@ void vk_render_shadow_map( void ) {
 						Ral_EndRendering( vk.cmd->ral_cmd );
 						return;
 					}
-					(void)vk_ral_bind_registered_vertex_buffers( vk.cmd->ral_cmd, 0, 1,
-						&c->vertBuffer, &voff );
-					(void)vk_ral_bind_registered_index_buffer( vk.cmd->ral_cmd,
+					Ral_CmdBindVertexBuffer( vk.cmd->ral_cmd, 0,
+						c->vertBuffer, 0 );
+					Ral_CmdBindIndexBuffer( vk.cmd->ral_cmd,
 						c->idxBuffer, 0, RAL_INDEX_UINT32 );
 					Ral_CmdDrawIndexed( vk.cmd->ral_cmd, c->numIndexes, 1, c->firstIndex, 0, slot );
 					vk_shadow_draws_drawn++;
@@ -34446,11 +32887,12 @@ void vk_render_shadow_map( void ) {
 						return;
 					}
 					// real cut-out world casters (the map's alpha-tested surfaces).
-					if ( vk.shadowMap.casterAtestIndexCount > 0 ) {
-						(void)vk_ral_bind_registered_vertex_buffers( vk.cmd->ral_cmd, 0, 1,
-							&vk.shadowMap.casterAtestBuf, &avoff );
-						(void)vk_ral_bind_registered_index_buffer( vk.cmd->ral_cmd,
-							vk.shadowMap.casterAtestBuf,
+					if ( vk.shadowMap.casterAtestIndexCount > 0
+							&& vk.shadowMap.ral_casterAtestBuf ) {
+						Ral_CmdBindVertexBuffer( vk.cmd->ral_cmd, 0,
+							vk.shadowMap.ral_casterAtestBuf, avoff );
+						Ral_CmdBindIndexBuffer( vk.cmd->ral_cmd,
+							vk.shadowMap.ral_casterAtestBuf,
 							vk.shadowMap.casterAtestVtxBytes, RAL_INDEX_UINT32 );
 						Ral_CmdDrawIndexed( vk.cmd->ral_cmd, vk.shadowMap.casterAtestIndexCount, 1, 0, 0, 0 );
 					}
@@ -34618,18 +33060,24 @@ void vk_render_dlight_shadow( void )
 	// prior frame). The numShadowLights slot follows the 6*K_MAX mat4 + K_MAX vec4 light
 	// slots; zero them both.
 	if ( vk.dlightShadow.paramsPtr[ vk.cmd_index ] ) {
+		vkRalBufferShadowWriteReceipt_t writeReceipt;
 		byte *p = (byte *)vk.dlightShadow.paramsPtr[ vk.cmd_index ];
 		const size_t lightSlotBase = (size_t)( 6u * DLIGHT_SHADOW_K_MAX ) * 64u;
-		memset( p + lightSlotBase, 0, (size_t)DLIGHT_SHADOW_K_MAX * 16u + 16u );
+		const uint64_t tailBytes = (uint64_t)DLIGHT_SHADOW_K_MAX * 16u + 16u;
+		memset( p + lightSlotBase, 0, (size_t)tailBytes );
+		if ( !VK_RalBufferShadowMarkWritten( &vk_dlight_params_shadows[vk.cmd_index],
+				lightSlotBase, tailBytes )
+		  || !VK_RalBufferShadowPublish( &vk_dlight_params_shadows[vk.cmd_index],
+				lightSlotBase, tailBytes, &writeReceipt ) ) return;
 	}
 
 	if ( !R_ShadowDlightActive() )   /* level >= cast AND r_dlightShadows */
 		return;
-	if ( vk.dlightShadow.image == VK_NULL_HANDLE || !vk.dlightShadow.ral_image )
+	if ( !vk.dlightShadow.ral_image )
 		return;
-	if ( vk.shadowMap.casterBuf == VK_NULL_HANDLE || vk.shadowMap.casterIndexCount == 0 )
+	if ( vk.shadowMap.ral_casterBuf == NULL || vk.shadowMap.casterIndexCount == 0 )
 		return;            // worldspawn casters are the occluders; none → nothing to cast
-	if ( vk.dlightShadow.faceMvpBuf[ vk.cmd_index ] == VK_NULL_HANDLE )
+	if ( !vk.dlightShadow.ral_faceMvpBuf[ vk.cmd_index ] )
 		return;
 
 	// Use the lights CAPTURED from the live backend view last frame (the seam runs before
@@ -34691,6 +33139,15 @@ void vk_render_dlight_shadow( void )
 		byte *p = (byte *)vk.dlightShadow.faceMvpPtr[ vk.cmd_index ];
 		if ( p ) for ( L = 0; L < numLights; L++ ) for ( f = 0; f < 6; f++ )
 			memcpy( p + (size_t)( L * 6 + f ) * slotStride, vk.dlightShadow.faceMVP[L][f], 64u );
+		if ( p ) {
+			vkRalBufferShadowWriteReceipt_t writeReceipt;
+			const uint64_t writtenBytes = (uint64_t)numLights * 6u * slotStride;
+			if ( !VK_RalBufferShadowMarkWritten(
+					&vk_dlight_face_mvp_shadows[vk.cmd_index], 0u, writtenBytes )
+			  || !VK_RalBufferShadowPublish(
+					&vk_dlight_face_mvp_shadows[vk.cmd_index], 0u, writtenBytes,
+					&writeReceipt ) ) return;
+		}
 	}
 
 	// upload the lit-pass params UBO (set2 binding 9): 6*K_MAX face MVPs (tightly packed,
@@ -34701,6 +33158,10 @@ void vk_render_dlight_shadow( void )
 	{
 		byte *p = (byte *)vk.dlightShadow.paramsPtr[ vk.cmd_index ];
 		if ( p ) {
+			vkRalBufferShadowWriteReceipt_t writeReceipt;
+			const uint64_t paramsBytes =
+				(uint64_t)( 6u * DLIGHT_SHADOW_K_MAX ) * 64u
+				+ (uint64_t)DLIGHT_SHADOW_K_MAX * 16u + 16u;
 			const size_t lightSlotBase = (size_t)( 6u * DLIGHT_SHADOW_K_MAX ) * 64u;
 			float tail[4];
 			for ( L = 0; L < numLights; L++ ) {
@@ -34718,23 +33179,28 @@ void vk_render_dlight_shadow( void )
 			tail[2] = 0.0f;
 			tail[3] = 0.0f;
 			memcpy( p + lightSlotBase + (size_t)DLIGHT_SHADOW_K_MAX * 16u, tail, sizeof( tail ) );
+			if ( !VK_RalBufferShadowMarkWritten(
+					&vk_dlight_params_shadows[vk.cmd_index], 0u, paramsBytes )
+			  || !VK_RalBufferShadowPublish(
+					&vk_dlight_params_shadows[vk.cmd_index], 0u, paramsBytes,
+					&writeReceipt ) ) return;
 		}
 	}
 
 	// Create set-0 entity-matrix and set-1 faceMvp groups from the current exact
 	// RAL arena generation (mirror CSM).
 	if ( !vk_shadow_register_pipeline_layout_abis()
-			|| !vk_shadow_refresh_buffer_group(
+			|| !vk_shadow_refresh_ral_buffer_group(
 				&vk.dlightShadow.ral_entMatDesc[vk.cmd_index],
 				&vk.dlightShadow.entMatDesc[vk.cmd_index],
 				vk.shadowMap.ral_bgl_entmat, RAL_BIND_STORAGE_BUFFER,
-				vk.dlightShadow.entMatBuf[vk.cmd_index], 64u,
+				vk.dlightShadow.ral_entMatBuf[vk.cmd_index], 64u,
 				"wired-dlight-shadow-entmat-bg" )
-			|| !vk_shadow_refresh_buffer_group(
+			|| !vk_shadow_refresh_ral_buffer_group(
 				&vk.dlightShadow.ral_faceMvpDesc[vk.cmd_index],
 				&vk.dlightShadow.faceMvpDesc[vk.cmd_index],
 				vk.shadowMap.ral_bgl_cascademvp, RAL_BIND_UNIFORM_BUFFER,
-				vk.dlightShadow.faceMvpBuf[vk.cmd_index],
+				vk.dlightShadow.ral_faceMvpBuf[vk.cmd_index],
 				PAD( 64u, vk.uniform_alignment ),
 				"wired-dlight-shadow-face-mvp-bg" ) )
 		return;
@@ -34783,10 +33249,10 @@ void vk_render_dlight_shadow( void )
 			}
 
 			// worldspawn casters (identity model→world, slot 0).
-			(void)vk_ral_bind_registered_vertex_buffers( vk.cmd->ral_cmd, 0, 1,
-				&vk.shadowMap.casterBuf, &voff );
-			(void)vk_ral_bind_registered_index_buffer( vk.cmd->ral_cmd,
-				vk.shadowMap.casterBuf, vk.shadowMap.casterVtxBytes,
+			Ral_CmdBindVertexBuffer( vk.cmd->ral_cmd, 0,
+				vk.shadowMap.ral_casterBuf, voff );
+			Ral_CmdBindIndexBuffer( vk.cmd->ral_cmd,
+				vk.shadowMap.ral_casterBuf, vk.shadowMap.casterVtxBytes,
 				RAL_INDEX_UINT32 );
 			Ral_CmdDrawIndexed( vk.cmd->ral_cmd, vk.shadowMap.casterIndexCount, 1, 0, 0, 0 );
 

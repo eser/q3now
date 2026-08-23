@@ -12,14 +12,16 @@ struct ralBackend_s { int id; };
 struct ralBuffer_s { int id; void *native; byte *bytes; uint64_t size; qboolean adopted; };
 struct ralBindGroupLayout_s { int id; };
 struct ralBindGroup_s { int id; };
+struct ralFence_s { int id; };
 
 static struct ralBuffer_s buffers[32], adopted[16];
 static struct ralBindGroupLayout_s layouts[8];
 static struct ralBindGroup_s groups[32];
+static struct ralFence_s uploadFence;
 static ralBackend_t *lastBackend;
-static int creates, adopts, maps, groupsCreated, layoutsCreated;
-static int bufferDestroys, groupDestroys, layoutDestroys, unmaps;
-static int failCreateAt, failMapAt, failGroupAt, failAdoptAt;
+static int creates, adopts, groupsCreated, layoutsCreated;
+static int bufferDestroys, groupDestroys, layoutDestroys;
+static int failCreateAt, failGroupAt, failAdoptAt;
 static char events[128]; static int eventCount;
 
 ralBuffer_t *Ral_AdoptBuffer( ralBackend_t *backend, void *nativeBuffer,
@@ -46,12 +48,20 @@ void Ral_DestroyBuffer( ralBuffer_t *buffer ) {
 	bufferDestroys++; events[eventCount++] = b->adopted ? 'A' : 'B';
 	if ( !b->adopted ) { free( b->bytes ); b->bytes = NULL; }
 }
-void *Ral_MapBuffer( ralBuffer_t *buffer ) {
-	int call = ++maps;
-	return call == failMapAt ? NULL : ((struct ralBuffer_s *)buffer)->bytes;
-}
-void Ral_UnmapBuffer( ralBuffer_t *buffer ) { (void)buffer; unmaps++; events[eventCount++] = 'U'; }
 void Ral_FlushBuffer( ralBuffer_t *buffer, uint64_t offset, uint64_t size ) { (void)buffer; (void)offset; (void)size; }
+ralFence_t *Ral_BufferUploadAsync( ralBuffer_t *buffer, uint64_t offset,
+		const void *data, uint64_t size ) {
+	struct ralBuffer_s *b = (struct ralBuffer_s *)buffer;
+	if ( !b || !data || !size || offset > b->size || size > b->size - offset )
+		return NULL;
+	memcpy( b->bytes + offset, data, (size_t)size );
+	uploadFence.id++;
+	return &uploadFence;
+}
+void Ral_WaitFence( ralFence_t *fence, uint64_t timeoutNs ) {
+	(void)fence; (void)timeoutNs;
+}
+void Ral_DestroyFence( ralFence_t *fence ) { (void)fence; }
 ralBindGroupLayout_t *Ral_CreateBindGroupLayout( ralBackend_t *backend,
 		const ralBindGroupLayoutCreateInfo_t *ci ) {
 	int call = ++layoutsCreated; lastBackend = backend;
@@ -75,7 +85,7 @@ int main( void ) {
 	temporalMotionMatrices_t matrices;
 	uint32_t writtenSlot;
 	int native0, native1, native2;
-	int a, c, g, b, u, gd, ld, base;
+	int a, c, g, b, gd, ld, base;
 
 	VK_TemporalEntMatRuntimeInit( &runtime );
 	before = runtime;
@@ -104,14 +114,10 @@ int main( void ) {
 	CHECK( !VK_TemporalEntMatRuntimeEnsureAfterFence( &runtime, &backend, 4, 0,
 		&native0, 4096, 1, 32 ) );
 	CHECK( !runtime.adoption.slots[0].ready ); failCreateAt = 0;
-	failMapAt = maps + 1;
+	failGroupAt = groupsCreated + 1;
 	CHECK( !VK_TemporalEntMatRuntimeEnsureAfterFence( &runtime, &backend, 4, 0,
 		&native0, 4096, 1, 32 ) );
-	CHECK( !runtime.adoption.slots[0].ready ); failMapAt = 0;
-	failGroupAt = groupsCreated + 1; u = unmaps;
-	CHECK( !VK_TemporalEntMatRuntimeEnsureAfterFence( &runtime, &backend, 4, 0,
-		&native0, 4096, 1, 32 ) );
-	CHECK( !runtime.adoption.slots[0].ready && unmaps == u + 1 ); failGroupAt = 0;
+	CHECK( !runtime.adoption.slots[0].ready ); failGroupAt = 0;
 
 	CHECK( VK_TemporalEntMatRuntimeEnsureAfterFence( &runtime, &backend, 4, 0,
 		&native0, 4096, 1, 32 ) );
@@ -211,7 +217,7 @@ int main( void ) {
 	// groups before adopted wrappers, then releases temporal buffers/layout.
 	before = runtime; CHECK( !VK_TemporalEntMatRuntimeReleaseAfterIdle( &runtime, qfalse ) );
 	CHECK( memcmp( &runtime, &before, sizeof( runtime ) ) == 0 );
-	base = eventCount; b = bufferDestroys; u = unmaps;
+	base = eventCount; b = bufferDestroys;
 	gd = groupDestroys; ld = layoutDestroys;
 	{
 		ralBindGroup_t *saved = runtime.payload.frames[1].bindGroup;
@@ -226,7 +232,7 @@ int main( void ) {
 		CHECK( groupDestroys >= groupsBeforeRetry );
 	}
 	CHECK( !VK_TemporalEntMatRuntimeHasLive( &runtime ) );
-	CHECK( groupDestroys == gd + 4 && bufferDestroys == b + 8 && unmaps == u + 4
+	CHECK( groupDestroys == gd + 4 && bufferDestroys == b + 8
 		&& layoutDestroys == ld + 1 );
 	for ( int i = base; i < eventCount; ++i ) {
 		if ( events[i] == 'A' ) {

@@ -63,6 +63,7 @@ foreach(needle IN ITEMS
 		"#define RAL_MAX_PIPELINE_BIND_GROUP_LAYOUTS 8u"
 		"const ralBindGroupLayout_t *const *bindGroupLayouts;"
 		"uint32_t                    numBindGroupLayouts;"
+		"uint32_t                    pushConstantOffset;"
 		"uint32_t                    pushConstantSize;"
 		"uint32_t                    pushConstantStages;"
 		"ralPipelineLayout_t *Ral_CreatePipelineLayout( ralBackend_t *backend,")
@@ -70,9 +71,13 @@ foreach(needle IN ITEMS
 endforeach()
 foreach(needle IN ITEMS
 		"qboolean          portableShapeKnown;"
+		"uint32_t            pushConstantOffset; // exact portable range base"
 		"VkDescriptorSetLayout bindGroupLayouts[ RAL_MAX_PIPELINE_BIND_GROUP_LAYOUTS ];"
 		"candidate->ownsHandle = qtrue;"
 		"candidate->portableShapeKnown = qtrue;"
+		"pushRange.offset = ci->pushConstantOffset;"
+		"candidate->externalPushRanges[0].offset = ci->pushConstantOffset;"
+		"( ci->pushConstantOffset & 3u ) != 0u"
 		"b->vk.CreatePipelineLayout( b->device, &nativeInfo, NULL,"
 		"b->vk.DestroyPipelineLayout( b->device, candidate->vkHandle, NULL );")
 	require_text("${internal}${resource}" "${needle}" "owned backend lowering")
@@ -132,7 +137,7 @@ endforeach()
 
 slice_between(adopt_sweep "${boot}"
 	"void vk_ral_adopt_static_pipeline_layouts( void )"
-	"void vk_ral_adopt_one_pipeline_layout(")
+	"void vk_ral_refresh_internal_texture_dependents( void )")
 slice_between(kill_sweep "${boot}"
 	"static void vk_ral_destroy_adopted_pipeline_layouts( void )"
 	"ralBindGroup_t *vk_ral_lookup_bindgroup(")
@@ -159,7 +164,7 @@ foreach(needle IN ITEMS
 	require_text("${full_shutdown}" "${needle}" "full teardown family coverage")
 endforeach()
 
-string(FIND "${product}" "vk.ral_bgl_effects_ubo = Ral_AdoptBindGroupLayout(" early_shared)
+string(FIND "${product}" "&vk.ral_bgl_effects_ubo, &vk.set_layout_effects_ubo," early_shared)
 string(FIND "${product}" "vk_init_ribbon();" first_effect_init)
 if(early_shared EQUAL -1 OR first_effect_init EQUAL -1
 		OR NOT early_shared LESS first_effect_init)
@@ -171,11 +176,17 @@ foreach(needle IN ITEMS
 		"capturedLayoutCount == 2u"
 		"capturedLayouts[0] == portableLayouts[0].layout"
 		"capturedPushRange.stageFlags == VK_SHADER_STAGE_FRAGMENT_BIT"
+		"capturedPushRange.offset == 64u"
+		"portablePushLayout->externalPushRanges[0].offset == 64u"
+		"portablePipeline->pushConstantOffset == 64u"
+		"Ral_CmdPushConstants( &command, RAL_STAGE_FRAGMENT, 64u, 32u, pushPayload );"
 		"portablePipeline->bindGroupLayoutsRegistered"
 		"portablePipeline->numSetLayouts == 2u"
 		"portableLayoutVector[1] = &foreignPortableLayout;"
 		"pipelineLayoutInfo.numBindGroupLayouts = RAL_MAX_PIPELINE_BIND_GROUP_LAYOUTS + 1u;"
 		"pipelineLayoutInfo.pushConstantSize = 30u;"
+		"pipelineLayoutInfo.pushConstantOffset = 2u;"
+		"pipelineLayoutInfo.pushConstantOffset = 100u;"
 		"createPipelineLayoutResult = VK_ERROR_OUT_OF_HOST_MEMORY"
 		"capturedDestroyedPipelineLayout == (VkPipelineLayout)(uintptr_t)0x74u")
 	require_text("${host}" "${needle}" "host mutation coverage")

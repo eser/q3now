@@ -26,8 +26,8 @@ endforeach()
 
 string(REGEX MATCHALL "ralVk_BufferGpuUseAllowed[(]" COMMAND_GUARDS "${COMMAND}")
 list(LENGTH COMMAND_GUARDS COMMAND_GUARD_COUNT)
-if(NOT COMMAND_GUARD_COUNT EQUAL 13)
-	message(FATAL_ERROR "mapped-buffer command guard inventory drifted: expected 13 copy/bind/indirect/barrier operands, got ${COMMAND_GUARD_COUNT}")
+if(NOT COMMAND_GUARD_COUNT EQUAL 12)
+	message(FATAL_ERROR "mapped-buffer command guard inventory drifted: expected 12 copy/bind/indirect/barrier operands, got ${COMMAND_GUARD_COUNT}")
 endif()
 
 string(REGEX MATCHALL "ralVk_CommandBoundBuffersGpuUseAllowed[(] cb [)]" DRAW_REVALIDATIONS "${COMMAND}")
@@ -40,7 +40,7 @@ foreach(REQUIRED IN ITEMS
 	"bufferTrackingComplete = qtrue"
 	"bg->buffers[bg->bufferCount++] = val->buffer"
 	"cb->boundBindGroups[setIndex] = group"
-	"cb->boundVertexBuffers[binding] = buf"
+	"cb->boundVertexBuffers[firstBinding + i] = buffers[i]"
 	"cb->boundIndexBuffer = buf"
 	"ralVk_BindGroupBuffersGpuUseAllowed"
 	"ralVk_CommandBoundBuffersGpuUseAllowed")
@@ -97,11 +97,63 @@ foreach(FILE IN LISTS PRODUCT_C)
 	math(EXPR LEGACY_MAP_COUNT "${LEGACY_MAP_COUNT} + ${FILE_COUNT}")
 endforeach()
 if(NOT LEGACY_MAP_COUNT EQUAL 1)
-	message(FATAL_ERROR "legacy Ral_MapBuffer inventory changed: expected only the compatibility definition, got ${LEGACY_MAP_COUNT}; migrate downward deliberately and update the pin")
+	message(FATAL_ERROR "legacy Ral_MapBuffer inventory changed: expected only the compatibility API definition and no renderer consumer, got ${LEGACY_MAP_COUNT}; migrate downward deliberately and update the pin")
 endif()
 
 file(READ "${ROOT}/code/renderervk/vk.c" PRODUCT_VK)
 file(READ "${ROOT}/code/renderervk/vk.h" PRODUCT_VK_HEADER)
+file(READ "${ROOT}/code/renderervk/tr_shade.c" PRODUCT_SHADE)
+foreach(FORBIDDEN IN ITEMS
+	"vk_create_persistent_mapped_buffer"
+	"vk_destroy_persistent_mapped_buffer"
+	"Ral_MapBuffer("
+	"Ral_UnmapBuffer(")
+	string(FIND "${PRODUCT_VK}" "${FORBIDDEN}" POSITION)
+	if(NOT POSITION EQUAL -1)
+		message(FATAL_ERROR "renderer regained legacy persistent-map seam: ${FORBIDDEN}")
+	endif()
+endforeach()
+foreach(REQUIRED IN ITEMS
+	"qboolean vk_tess_publish_shadow_range( uint32_t offset, uint32_t size )"
+	"VK_RalBufferShadowMarkWritten( shadow, offset, size )"
+	"VK_RalBufferShadowPublish( shadow, offset, size,"
+	"vk_tess_publish_shadow_range( off, sizeof( v ) )"
+	"vk_tess_publish_shadow_range( offset, size )"
+	"vk_tess_publish_shadow_range( vk.cmd->uniform_read_offset,"
+	"vk_entmat_publish_shadow_range( (uint32_t)vk.cmd_index,")
+	string(FIND "${PRODUCT_VK}${PRODUCT_VK_HEADER}" "${REQUIRED}" POSITION)
+	if(POSITION EQUAL -1)
+		message(FATAL_ERROR "portable tess/entity shadow publication lost seam: ${REQUIRED}")
+	endif()
+endforeach()
+string(FIND "${PRODUCT_SHADE}"
+	"vk_tess_publish_shadow_range( offset, vk.uniform_item_size )" POSITION)
+if(POSITION EQUAL -1)
+	message(FATAL_ERROR "portable tess uniform shadow publication lost")
+endif()
+foreach(REQUIRED IN ITEMS
+	"static qboolean vk_ral_write_upload_buffer( ralBuffer_t *buffer,"
+	"request.mode = RAL_MAP_WRITE;"
+	"Ral_BufferMapBegin( buffer, &request, &ticket )"
+	"ticket.status != RAL_BUFFER_MAP_READY"
+	"Ral_BufferMapCancel( buffer, &ticket )"
+	"Ral_BufferMapUnmap( buffer, &ticket )"
+	"static qboolean vk_ral_transition_upload_buffer( ralCommandBuffer_t *command,"
+	"RAL_RESOURCE_USAGE_HOST_WRITE,"
+	"RAL_RESOURCE_USAGE_COPY_SOURCE )")
+	string(FIND "${PRODUCT_VK}" "${REQUIRED}" POSITION)
+	if(POSITION EQUAL -1)
+		message(FATAL_ERROR "portable renderer staging lifecycle lost seam: ${REQUIRED}")
+	endif()
+endforeach()
+foreach(FORBIDDEN IN ITEMS
+	"vk.staging_buffer.ptr"
+	"Ral_PublishAdoptedBufferState( source")
+	string(FIND "${PRODUCT_VK_HEADER}${PRODUCT_VK}" "${FORBIDDEN}" POSITION)
+	if(NOT POSITION EQUAL -1)
+		message(FATAL_ERROR "portable renderer staging lifecycle leaked forbidden seam: ${FORBIDDEN}")
+	endif()
+endforeach()
 foreach(REQUIRED IN ITEMS
 	"vk.cullAabbCpu = records"
 	"recs = (const vkCullSurf_t *)vk.cullAabbCpu"

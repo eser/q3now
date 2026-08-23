@@ -1278,10 +1278,8 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 	//   + tangent (vec4, 16B) + bone_weights (vec4, 16B) + bone_indices (byte4, 4B)
 	//   = 68 bytes per vertex
 	iqmData->vk_gpu_skinning = qfalse;
-	iqmData->vk_vertex_buffer = VK_NULL_HANDLE;
-	iqmData->vk_vertex_memory = VK_NULL_HANDLE;
-	iqmData->vk_index_buffer  = VK_NULL_HANDLE;
-	iqmData->vk_index_memory  = VK_NULL_HANDLE;
+	iqmData->ral_vertex_buffer = NULL;
+	iqmData->ral_index_buffer = NULL;
 	iqmData->temporalH5Eligible = qfalse;
 	VK_TemporalIqmGeometryInit( &iqmData->temporalGeometry );
 
@@ -1356,23 +1354,21 @@ qboolean R_LoadIQM( model_t *mod, void *buffer, int filesize, const char *mod_na
 			idxPtr[i] = (uint32_t)iqmData->triangles[i];
 		}
 
-		// upload to Vulkan device-local buffers
+		// upload to portable device-local buffers
 		if ( vk_create_iqm_vbo(
-			&iqmData->vk_vertex_buffer, &iqmData->vk_vertex_memory,
-			&iqmData->vk_index_buffer, &iqmData->vk_index_memory,
+			&iqmData->ral_vertex_buffer, &iqmData->ral_index_buffer,
 			vertBuf, vertBufSize,
 			idxBuf, idxBufSize ) ) {
 			iqmData->vk_total_vertexes = numVerts;
 			iqmData->vk_total_indexes = numTris * 3;
-			iqmData->vk_vertex_bytes = (uint64_t)vertBufSize;
-			iqmData->vk_index_bytes = (uint64_t)idxBufSize;
+			iqmData->ral_vertex_bytes = (uint64_t)vertBufSize;
+			iqmData->ral_index_bytes = (uint64_t)idxBufSize;
 			iqmData->vk_gpu_skinning =
 				iqmData->temporalStructuralValidated == qtrue ? qtrue : qfalse;
 			if ( !iqmData->vk_gpu_skinning ) {
-				vk_destroy_iqm_vbo( &iqmData->vk_vertex_buffer,
-					&iqmData->vk_vertex_memory, &iqmData->vk_index_buffer,
-					&iqmData->vk_index_memory );
-				iqmData->vk_vertex_bytes = iqmData->vk_index_bytes = 0u;
+				vk_destroy_iqm_vbo( &iqmData->ral_vertex_buffer,
+					&iqmData->ral_index_buffer );
+				iqmData->ral_vertex_bytes = iqmData->ral_index_bytes = 0u;
 			} else if ( iqmData->temporalContentDigest
 					&& iqmData->temporalModelAllocationGeneration ) {
 				iqmData->temporalGeometryGeneration =
@@ -1777,8 +1773,8 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 			ordinaryImage, (const float (*)[4])boneMatsGpu, mvp );
 		if ( !temporalExactDrawn ) {
 			vk_draw_iqm_gpu(
-				data->vk_vertex_buffer,
-				data->vk_index_buffer,
+				data->ral_vertex_buffer,
+				data->ral_index_buffer,
 				surf->first_triangle * 3,
 				surf->num_triangles * 3,
 				boneMatsGpu,
@@ -1796,8 +1792,8 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 		// skinned shadow VS. Skipped internally when shadow mapping is off / the
 		// entity is a viewmodel / depth-hacked / RF_NOSHADOW.
 		vk_shadow_capture_iqm(
-			data->vk_vertex_buffer,
-			data->vk_index_buffer,
+			data->ral_vertex_buffer,
+			data->ral_index_buffer,
 			surf->first_triangle * 3,
 			surf->num_triangles * 3,
 			boneMatsGpu,

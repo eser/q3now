@@ -1051,7 +1051,7 @@ void VBO_RenderIBOItems( uint32_t firstInstance )
 	// from device-local memory
 	if ( bl->runCount )
 	{
-		vk_bind_index_buffer( vk.vbo.vertex_buffer, tess.shader->iboOffset );
+		vk_bind_index_buffer( vk.vbo.ral_vertex_buffer, tess.shader->iboOffset );
 
 		for ( int i = 0; i < bl->runCount; i++ )
 		{
@@ -1062,7 +1062,7 @@ void VBO_RenderIBOItems( uint32_t firstInstance )
 	// from host-visible memory
 	if ( bl->softIndexes )
 	{
-		vk_bind_index_buffer( vk.cmd->vertex_buffer, bl->softOffset );
+		vk_bind_index_buffer( vk.cmd->ral_vertex_buffer, bl->softOffset );
 
 		vk_draw_indexed( bl->softIndexes, 0, firstInstance );
 	}

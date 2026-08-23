@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Wired Engine contributors
+
+if(NOT DEFINED ROOT)
+	message(FATAL_ERROR "ROOT is required")
+endif()
+file(READ "${ROOT}/code/renderer/ral/ral_texture_stream.h" HEADER)
+file(READ "${ROOT}/code/renderer/ral/ral_texture_stream.c" CORE)
+file(READ "${ROOT}/tests/ral_texture_stream_test.c" TEST)
+foreach(TEXT IN ITEMS "${HEADER}" "${CORE}" "${TEST}")
+	foreach(FORBIDDEN IN ITEMS "Vk" "WGPU" "MTL" "SDL_")
+		string(FIND "${TEXT}" "${FORBIDDEN}" POS)
+		if(NOT POS EQUAL -1)
+			message(FATAL_ERROR "texture stream leaked native type: ${FORBIDDEN}")
+		endif()
+	endforeach()
+endforeach()
+foreach(NEEDLE IN ITEMS "RAL_TEXTURE_STREAM_SCHEMA_VERSION"
+	"ralTextureStreamCohort_t" "ralTextureStreamUploadReceipt_t"
+	"Ral_TextureStreamApplyPressure" "Ral_TextureStreamInvalidateDevice")
+	string(FIND "${HEADER}" "${NEEDLE}" POS)
+	if(POS EQUAL -1)
+		message(FATAL_ERROR "texture stream contract lost: ${NEEDLE}")
+	endif()
+endforeach()
+foreach(NEEDLE IN ITEMS "mipCount - 1u - i" "RAL_RESIDENCY_RESIDENT"
+	"RAL_RESIDENCY_STALE" "RAL_RESIDENCY_REQUESTED" "ResourceMatchesPlan")
+	string(FIND "${CORE}" "${NEEDLE}" POS)
+	if(POS EQUAL -1)
+		message(FATAL_ERROR "texture stream lifecycle lost: ${NEEDLE}")
+	endif()
+endforeach()
+foreach(NEEDLE IN ITEMS "evicted == 320u" "hostile.resource.resourceGeneration++"
+	"&begun, 0u" "RAL_BACKEND_WEBGPU" "!memcmp( &cohort, &before")
+	string(FIND "${TEST}" "${NEEDLE}" POS)
+	if(POS EQUAL -1)
+		message(FATAL_ERROR "texture stream hostile fixture lost: ${NEEDLE}")
+	endif()
+endforeach()
+message(STATUS "RAL texture stream policy: PASS")

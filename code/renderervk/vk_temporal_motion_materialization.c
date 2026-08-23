@@ -15,7 +15,7 @@ static qboolean InputValid(
 			|| !input->height || !input->topologyEpoch || !input->planGeneration
 			|| !outPayloadLayout || !outPayloadGeneration ) return qfalse;
 	for ( i = 0; i < 3; ++i ) {
-		if ( input->borrowedSets[i] == VK_NULL_HANDLE ) return qfalse;
+		if ( !input->borrowedLayouts[i] ) return qfalse;
 	}
 	return R_TemporalMotionPayloadGetLayout( input->payload,
 		outPayloadLayout, outPayloadGeneration );
@@ -36,8 +36,8 @@ static qboolean ResourceKeyEqual(
 		&& owner->pipelineLayout.fog == input->fog
 		&& owner->pipelineLayout.payloadLayout == payloadLayout
 		&& owner->pipelineLayout.payloadLayoutGeneration == payloadGeneration
-		&& memcmp( owner->pipelineLayout.borrowedSets, input->borrowedSets,
-			sizeof( owner->pipelineLayout.borrowedSets ) ) == 0;
+		&& memcmp( owner->pipelineLayout.borrowedLayouts, input->borrowedLayouts,
+			sizeof( owner->pipelineLayout.borrowedLayouts ) ) == 0;
 }
 
 static qboolean AggregateKeyEqual(
@@ -107,7 +107,7 @@ qboolean VK_TemporalMotionMaterializationEnsureAfterFence(
 	if ( !R_TemporalMotionTargetsEnsure( &owner->targets, input->backend,
 			input->width, input->height, input->topologyEpoch ) ) return qfalse;
 	if ( !VK_TemporalPipelineLayoutEnsure( &owner->pipelineLayout, input->backend,
-			input->device, input->borrowedSets, payloadLayout,
+			input->device, input->borrowedLayouts, payloadLayout,
 			payloadGeneration, input->fog, layoutOps ) ) return qfalse;
 	owner->key = *input;
 	owner->payloadLayout = payloadLayout;

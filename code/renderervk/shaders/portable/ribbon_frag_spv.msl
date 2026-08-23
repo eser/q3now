@@ -71,3 +71,4 @@ fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSet
     out.outColor = float4(texel.xyz * _133, texel.w * in.fragColor.w);
     return out;
 }
+

@@ -153,8 +153,8 @@ typedef struct {
 	ralLoadOp_t     depthLoadOp;
 	ralStoreOp_t    depthStoreOp;
 	float           depthClear;
-	// Array layer to render into when depthAttachment is an array image (adopted
-	// via Ral_AdoptArrayTexture, which carries per-layer views); 0 for single-layer
+	// Array layer to render into when depthAttachment is a 2D-array texture with
+	// per-layer attachment views; 0 for single-layer
 	// (the default). VkRenderingInfo has no baseArrayLayer — the layer offset lives
 	// entirely in the bound attachment imageView's subresourceRange, so the backend
 	// selects depthAttachment->layerViews[depthAttachmentLayerIndex] as the depth

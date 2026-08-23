@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "ral_vulkan_internal.h"
+#include "ral_texture_upload.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -209,6 +210,62 @@ int main( void ) {
 		REJECT_UPLOAD( badUpload.imageZ = 7u; badUpload.imageDepth = 2u );
 		REJECT_UPLOAD( badUpload.imageZ = UINT32_MAX );
 #undef REJECT_UPLOAD
+	}
+
+	/* A decoded WRTXART plan uses the same portable copy vocabulary, including
+	 * WebGPU-compatible 256-byte rows, without a Vulkan-shaped planner branch. */
+	{
+		unsigned char payload[480], artifactBytes[1024], staging[5000];
+		uint64_t levelBytes[2] = { 384u, 96u };
+		ralTextureAssetRequest_t request;
+		ralTextureAssetReceipt_t asset;
+		ralTextureArtifactReceipt_t artifact;
+		ralTextureUploadPlan_t plan;
+		ralBufferTextureCopy_t regions[2];
+		memset( payload, 0x7B, sizeof( payload ) );
+		memset( &request, 0, sizeof( request ) );
+		request.schemaVersion = RAL_TEXTURE_ASSET_SCHEMA_VERSION;
+		request.assetGeneration = 41u; request.provenanceHash = 0xCAFEu;
+		request.dimension = RAL_TEXTURE_ASSET_2D_ARRAY;
+		request.width = 8u; request.height = 4u; request.depth = 1u;
+		request.layers = 3u; request.sourceMipLevels = 2u;
+		request.colorEncoding = RAL_TEXTURE_ENCODING_SRGB;
+		request.channelSemantic = RAL_TEXTURE_CHANNEL_COLOR;
+		request.sourceEncoding = RAL_TEXTURE_SOURCE_BASIS_UASTC;
+		request.mipPolicy = RAL_TEXTURE_MIPS_SOURCE;
+		request.residency = RAL_TEXTURE_RESIDENCY_STREAMED;
+		request.preferenceCount = 1u;
+		request.preferences[0] = RAL_TEXTURE_COMPRESSION_BC;
+		request.allowUncompressedFallback = qtrue;
+		CHECK( Ral_ResolveTextureAsset( &request, &asset ) );
+		CHECK( Ral_EncodeTextureArtifact( &asset, levelBytes, 2u, payload,
+			sizeof( payload ), artifactBytes, sizeof( artifactBytes ), &artifact ) );
+		CHECK( Ral_BuildTextureArtifactUploadPlan( artifactBytes,
+			artifact.containerByteLength, &asset, &plan ) );
+		CHECK( Ral_PackTextureArtifactUpload( artifactBytes,
+			artifact.containerByteLength, &plan, staging, sizeof( staging ) ) );
+		texture.type = plan.texture.type; texture.ralFormat = plan.texture.format;
+		texture.width = plan.texture.width; texture.height = plan.texture.height;
+		texture.depthOrArrayLayers = plan.texture.depthOrArrayLayers;
+		texture.arrayLayers = plan.texture.depthOrArrayLayers;
+		texture.mipLevels = plan.texture.mipLevels;
+		texture.sampleCount = 1u; texture.usage = RAL_TEXTURE_USAGE_TRANSFER_DST;
+		texture.currentLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		texture.portableStateKnown = qtrue;
+		texture.portableState.usage = RAL_RESOURCE_USAGE_COPY_DESTINATION;
+		texture.portableOwnerQueue = RAL_QUEUE_GRAPHICS;
+		buffer.size = plan.stagingByteLength;
+		buffer.portableState.usage = RAL_RESOURCE_USAGE_COPY_SOURCE;
+		regions[0] = plan.levels[0].region; regions[1] = plan.levels[1].region;
+		uploadCalls = 0u;
+		CHECK( Ral_CmdCopyBufferToTextureRegionsExact( &command, &buffer,
+			&texture, 2u, regions ) );
+		CHECK( uploadCalls == 1u && uploadRegionCount == 2u
+			&& capturedUpload[0].bufferRowLength == 64u
+			&& capturedUpload[0].bufferImageHeight == 4u
+			&& capturedUpload[0].imageSubresource.layerCount == 3u
+			&& capturedUpload[1].imageSubresource.mipLevel == 1u
+			&& capturedUpload[1].bufferOffset == plan.levels[1].stagingOffset );
 	}
 	puts( "ral Vulkan padded texture copy: PASS" );
 	return 0;

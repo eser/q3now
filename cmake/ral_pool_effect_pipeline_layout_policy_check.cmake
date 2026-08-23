@@ -117,7 +117,7 @@ endforeach()
 
 slice_between(adopt_sweep "${boot}"
 	"void vk_ral_adopt_static_pipeline_layouts( void )"
-	"void vk_ral_adopt_one_pipeline_layout(")
+	"void vk_ral_refresh_internal_texture_dependents( void )")
 foreach(field IN ITEMS
 		"vk.particle.ral_compute_pipeline_layout"
 		"vk.particle.ral_render_pipeline_layout"

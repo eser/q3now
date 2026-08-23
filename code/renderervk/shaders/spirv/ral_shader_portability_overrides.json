@@ -3666,8 +3666,8 @@
     {
       "symbol": "gamma_frag_spv",
       "spirvDigest": {
-        "lane0": "80044d37bca7cd7f",
-        "lane1": "1a1d780a5240e53b"
+        "lane0": "6fecbab0e7e8e0fe",
+        "lane1": "1090bdfa2bb4ef3c"
       },
       "combinedSamplers": [
         {
