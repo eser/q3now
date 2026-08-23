@@ -17,7 +17,7 @@ PRODUCT_DIR="${PRODUCT_DIR:-$( wired_isolated_home shadertime-pin-home )}"
 PRODUCT_DIR_NATIVE="$(cygpath -w "$PRODUCT_DIR" 2>/dev/null || echo "$PRODUCT_DIR")"
 JSONL="$PRODUCT_DIR/qconsole.jsonl"
 SS_DIR="$PRODUCT_DIR/base/screenshots"
-WIRED="build/debug/wired.x64.exe"
+WIRED="build/wired.x64.exe"
 
 # The engine writes PNG screenshots; decode to flat RGB via png2raw (the same
 # tool the smoke harness uses) before feeding the byte-mean / per-tile math.

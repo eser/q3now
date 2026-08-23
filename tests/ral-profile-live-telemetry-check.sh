@@ -132,7 +132,7 @@ for p in "$WD/wired_vulkan_arm64.dylib" "$WD/Contents/MacOS/wired_vulkan_arm64.d
 SDL3_PATH="$(otool -L "$TOOL" | awk '/libSDL3.*[.]dylib/{print $1; exit}')"; MOLTEN=""
 for p in "$WD/libMoltenVK.dylib" "$WD/Contents/MacOS/libMoltenVK.dylib" /opt/homebrew/opt/molten-vk/lib/libMoltenVK.dylib; do [ -f "$p" ] && { MOLTEN="$p"; break; }; done
 CONTENT="${WIRED_CONTENT_ROOT:-}"
-if [ -z "$CONTENT" ]; then for p in "$WD" "$WD/../Resources" "$SOURCE_ROOT/build/release/dmg-staging/q3now-preview.app/Contents/Resources"; do [ -f "$p/base/pax21.sw3z" ] && { CONTENT="$p"; break; }; done; fi
+if [ -z "$CONTENT" ]; then for p in "$WD" "$WD/../Resources" "$SOURCE_ROOT/build/dmg-staging/q3now-preview.app/Contents/Resources"; do [ -f "$p/base/pax21.sw3z" ] && { CONTENT="$p"; break; }; done; fi
 [ -f "$RENDERER" ] && [ -f "$SDL3_PATH" ] && [ -f "$MOLTEN" ] && [ -f "$CONTENT/base/pax21.sw3z" ] || { echo "SKIP missing renderer/SDL3/MoltenVK/content"; exit 77; }
 if [ -f "$CONTENT/base/pax01.sw3z" ]; then BASE="$CONTENT/base/pax01.sw3z"; else BASE="$CONTENT/base/pak0.pk3"; fi
 [ -f "$BASE" ] || { echo "SKIP missing base content"; exit 77; }

@@ -37,8 +37,8 @@ The tool is gated by the explicit `WIRED_BUILD_SHADER_XLATE` CMake option
 tooling remains an independent build-time choice.
 
 ```sh
-cmake -DWIRED_BUILD_SHADER_XLATE=ON -G Ninja -S . -B build/debug
-ninja -C build/debug shader_xlate
+cmake -DWIRED_BUILD_SHADER_XLATE=ON -G Ninja -S . -B build
+ninja -C build shader_xlate
 ```
 
 Pre-flight: vendor `src/libs/SPIRV-Cross/` (tag `vulkan-sdk-1.4.341.0`) as a
@@ -49,35 +49,35 @@ a clear warning + skips the target if the submodule is absent.
 
 ```sh
 # Single shader:
-build/debug/shader_xlate path/to/shader.spv path/to/output_dir/
+build/shader_xlate path/to/shader.spv path/to/output_dir/
 
 # fail closed instead of accepting a missing naga/WGSL artifact:
-build/debug/shader_xlate --require-wgsl path/to/shader.spv path/to/output_dir/
+build/shader_xlate --require-wgsl path/to/shader.spv path/to/output_dir/
 
 # build the exact translator identity consumed above:
 code/tools/shader_xlate/build_pinned_naga.sh build/tools/naga/naga
 
 # deterministic SPIRV-Cross JSON reflection (no target-language emission):
-build/debug/shader_xlate --reflect-only path/to/shader.spv path/to/reflection.json
+build/shader_xlate --reflect-only path/to/shader.spv path/to/reflection.json
 
 # All shaders in shader_data.c (the way compile.mjs emits the corpus):
 node code/tools/shader_xlate/extract_spv.mjs \
      code/renderervk/shaders/spirv/shader_data.c \
-     build/debug/spv_extracted/
-mkdir -p build/debug/translated_shaders/
-for f in build/debug/spv_extracted/*.spv; do
-    build/debug/shader_xlate "$f" build/debug/translated_shaders/
+     build/spv_extracted/
+mkdir -p build/translated_shaders/
+for f in build/spv_extracted/*.spv; do
+    build/shader_xlate "$f" build/translated_shaders/
 done
 
 # Deterministic manifest-driven corpus orchestration (one symbol shown):
 node code/renderervk/shaders/compile_xlate.mjs \
-  --translator build/debug/shader_xlate \
-  --output-dir build/debug/translated_shaders \
+  --translator build/shader_xlate \
+  --output-dir build/translated_shaders \
   --symbol color_vert_spv
 
 # Reflect the canonical 292-artifact corpus into the native-free ABI catalog:
 node code/renderervk/shaders/compile_reflect.mjs \
-  --translator build/debug/shader_xlate \
+  --translator build/shader_xlate \
   --output code/renderervk/shaders/spirv/ral_shader_reflection_catalog.json \
   --check
 
@@ -85,7 +85,7 @@ node code/renderervk/shaders/compile_reflect.mjs \
 node code/renderervk/shaders/compile_portable_manifest.mjs \
   --translation-dir code/renderervk/shaders/portable --check
 node code/renderervk/shaders/compile_xlate.mjs \
-  --translator build/debug/shader_xlate \
+  --translator build/shader_xlate \
   --output-dir code/renderervk/shaders/portable \
   --targets msl,wgsl --require-wgsl --check
 ```

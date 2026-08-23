@@ -291,7 +291,7 @@ jobs:
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'
       with:
         name: linux-x86_64
-        path: build/release/*.tar.gz
+        path: build/*.tar.gz
         if-no-files-found: error
         retention-days: 5
 
@@ -354,7 +354,7 @@ jobs:
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'
       with:
         name: macos-arm64-dmg
-        path: build/release/*.dmg
+        path: build/*.dmg
         if-no-files-found: error
         retention-days: 5
 
@@ -424,7 +424,7 @@ jobs:
       uses: actions/download-artifact@v8
       with:
         name: cross-windows-x86_64
-        path: build/release
+        path: build
 
     - name: Download test executables
       uses: actions/download-artifact@v8
@@ -507,7 +507,7 @@ jobs:
       if: github.event_name == 'push' || needs.prepare.outputs.is_release == 'true'
       with:
         name: windows-x86_64-zip
-        path: build/release/*.zip
+        path: build/*.zip
         if-no-files-found: error
         retention-days: 5
 

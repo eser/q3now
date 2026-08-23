@@ -370,15 +370,15 @@ echo "==> nav-trace gate [$NAV_MODE]: content packs from $CONTENT_BASE"
 if ! command -v "$DED" >/dev/null 2>&1 && [ ! -x "$DED" ]; then
   ded_found=""
   for ded_try in "$DED.x64.exe" "$DED.exe" \
-                 "$(dirname "$0")/../build/release/$DED.x64.exe" \
-                 "$(dirname "$0")/../build/release/$DED"; do
+                 "$(dirname "$0")/../build/$DED.x64.exe" \
+                 "$(dirname "$0")/../build/$DED"; do
     if [ -x "$ded_try" ]; then ded_found="$ded_try"; break; fi
     if command -v "$ded_try" >/dev/null 2>&1; then ded_found="$ded_try"; break; fi
   done
   if [ -n "$ded_found" ]; then
     DED="$ded_found"
   else
-    echo "FAIL: headless server not found: $DED (also tried .x64.exe/.exe and build/release)"
+    echo "FAIL: headless server not found: $DED (also tried .x64.exe/.exe and build)"
     exit 1
   fi
 fi

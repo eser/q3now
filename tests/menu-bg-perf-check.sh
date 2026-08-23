@@ -45,7 +45,7 @@
 #
 # Usage:
 #   WIRED_CONTENT_ROOT=/path/to/content \
-#     tests/menu-bg-perf-check.sh --engine build/release/<app>/Contents/MacOS/wired.arm64
+#     tests/menu-bg-perf-check.sh --engine build/<app>/Contents/MacOS/wired.arm64
 #
 #   tests/menu-bg-perf-check.sh --self-test     # analyzer mutation tests only
 
@@ -106,7 +106,7 @@ case "$HOLD_FRAMES" in ''|*[!0-9]*) echo "FAIL: --hold must be an integer" >&2; 
 # available. A menu-only run needs no map, but pax01 must still mount or the
 # arena roster the menus bind to comes up empty.
 PACK_ROOT=""
-for candidate in "$ENGINE_DIR" "$ENGINE_DIR/../Resources" "$PROJECT_ROOT/build/release"; do
+for candidate in "$ENGINE_DIR" "$ENGINE_DIR/../Resources" "$PROJECT_ROOT/build"; do
     if [ -f "$candidate/base/pax21.sw3z" ]; then
         PACK_ROOT="$(cd "$candidate" && pwd)"; break
     fi

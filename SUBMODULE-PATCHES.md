@@ -142,7 +142,7 @@ Behaviour:
   telling you to run `git submodule update --init --recursive`.
 
 Nothing needs to be run by hand. `make`, `make configure`, and a bare
-`cmake -S . -B build/release` all apply patches as part of configure.
+`cmake -S . -B build` all apply patches as part of configure.
 
 **Verified again at build time.** Applying is a configure-time step, and
 ninja's dependency graph has no edge from a submodule source file to the patch
@@ -189,7 +189,7 @@ sources, so the patched files are the ones that get compiled.
 
 ```bash
 git -C src/libs/<submodule> reset --hard      # back to the pinned commit
-rm -rf build/release
+rm -rf build
 make configure                                 # must print "applied <label> patch: ..."
 make build
 ```

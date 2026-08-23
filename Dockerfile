@@ -89,9 +89,8 @@ RUN ARCH=$(uname -m) && \
 
 # Pack pax21.sw3z — default.cfg, scripts and the VM modules.
 #
-# This step used to be missing, and the omission was invisible: the runtime stage
-# copies build/Release/base/, CMake never creates that directory, and COPY of a
-# non-existent directory is not an error. The image built and published happily,
+# This step used to be missing, and the omission was invisible: COPY of a
+# non-existent module directory is not an error. The image built and published happily,
 # then every `docker run` died with "Couldn't load default.cfg" (files.c) — a
 # message that reads like missing game data rather than a broken image.
 #
@@ -111,9 +110,7 @@ RUN ARCH=$(uname -m) && \
 # prerequisites are just the WASM modules the cmake step already built, modfiles/
 # and the archiver, so it still repacks whenever those change.
 #
-# The runtime stage copies build/Release/base/, which is where MODULE_DIR
-# (=$(BUILD_DIR)/$(BUILD_CFG)/base) puts things for this Release configuration;
-# the pak lands one level up in build/base/, hence the explicit copy.
+# Native modules, WASM modules and the pak now share build/base/.
 #
 # The test is the point: it converts "the pak silently did not appear" into a
 # build failure here rather than a runtime failure in the operator's terminal.
@@ -121,9 +118,7 @@ RUN ARCH=$(uname -m) && \
 # a non-existent directory is not an error in Docker, so the image published fine
 # and every run then died with "Couldn't load default.cfg".
 RUN make build/base/pax21.sw3z BUILD_DIR=build DEV=0 \
-    && test -f build/base/pax21.sw3z \
-    && mkdir -p build/Release/base \
-    && cp build/base/pax21.sw3z build/Release/base/
+    && test -f build/base/pax21.sw3z
 
 # ── Stage 2: Runtime ────────────────────────────────────────────────────────
 FROM debian:trixie-slim
@@ -140,7 +135,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /tmp/wired-headless /opt/wired/wired-headless
 
 # Install game modules (native .so + WASM .wasm)
-COPY --from=builder /src/build/Release/base/ /opt/wired/base/
+COPY --from=builder /src/build/base/ /opt/wired/base/
 
 # Install default server config
 COPY modfiles/config_server.cfg /opt/wired/base/config_server.cfg

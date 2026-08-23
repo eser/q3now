@@ -85,7 +85,7 @@ if [ "${1:-}" = "--self-test" ]; then
     exit $rc
 fi
 
-WIRED="${1:-$REPO_ROOT/build/debug/wired.x64.exe}"
+WIRED="${1:-$REPO_ROOT/build/wired.x64.exe}"
 if [ ! -x "$WIRED" ] && [ -x "$WIRED.exe" ]; then WIRED="$WIRED.exe"; fi
 if [ ! -x "$WIRED" ]; then echo "SKIP: wired binary not found: $WIRED"; exit 77; fi
 case "$WIRED" in /*) : ;; *) WIRED="$PWD/$WIRED" ;; esac

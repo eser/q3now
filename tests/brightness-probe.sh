@@ -16,7 +16,7 @@ wired_od_selftest || { echo "FAIL: byte readers unusable on this host — refusi
 # See wired_isolated_home in lib/wired_paths.sh.
 PRODUCT_DIR="${PRODUCT_DIR:-$( wired_isolated_home brightness-probe-home )}"
 PRODUCT_DIR_NATIVE="$(cygpath -w "$PRODUCT_DIR" 2>/dev/null || echo "$PRODUCT_DIR")"
-WIRED_DIR=$(pwd)/build/debug
+WIRED_DIR=$(pwd)/build
 RUN_LABEL="${1:-run}"
 
 # Engine screenshots are PNG; decode to flat RGB via png2raw for the byte-mean.

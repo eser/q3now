@@ -390,7 +390,7 @@ def main(argv=None) -> int:
     ap.add_argument("--tolerance", default=_TOLERANCE)
     ap.add_argument("--macros", default=None, help="path to wmenumacros.h (default: modfiles/ui/wmenumacros.h)")
     ap.add_argument("--binary", default=None, help="path to wired.x64.exe")
-    ap.add_argument("--workdir", default=None, help="engine working dir (default build/debug)")
+    ap.add_argument("--workdir", default=None, help="engine working dir (default build)")
     ap.add_argument("--qrenderdoc", default=None, help="path to qrenderdoc.exe")
     ap.add_argument("--renderdoccmd", default=None, help="path to renderdoccmd.exe")
     ap.add_argument("--timeout", type=int, default=90, help="seconds to wait for the engine to self-quit")

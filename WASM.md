@@ -98,7 +98,7 @@ values are rejected. The public, documented choices remain `0`, `1`, and `2`.
 
 ```bash
 # Build engine + WASM modules (USE_WASM=1 in Makefile, FEAT_WASM=1 in q_feats.h)
-make build-debug
+make build DEV=1
 
 # Run with the shipped WASM policy (mode 2: .aot then .wasm)
 make run-game VM=1

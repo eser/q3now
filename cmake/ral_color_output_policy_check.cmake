@@ -41,7 +41,8 @@ foreach(NEEDLE IN ITEMS "vk_color_output_receipt" "Ral_ResolveColorOutput"
 	require_text("${VULKAN}" "${NEEDLE}" "Vulkan color/presentation join")
 endforeach()
 foreach(NEEDLE IN ITEMS "Stable display-referred screenshot/readback target"
-	"VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT"
+	"RAL_TEXTURE_USAGE_COLOR_ATTACHMENT"
+	"RAL_TEXTURE_USAGE_TRANSFER_SRC"
 	"source = vk.capture.ral_image;")
 	require_text("${VULKAN}" "${NEEDLE}" "stable display-referred capture")
 endforeach()

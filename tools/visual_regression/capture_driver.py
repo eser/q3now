@@ -9,7 +9,7 @@ template `wn_capture` relative to its working directory, then self-quits a
 short while later. So this driver:
 
   1. clears <working-dir>/layoutdump.jsonl (the layout-dump file)
-  2. launches `renderdoccmd capture --working-dir <build/debug> -- <binary> <cvars> [+map ...]`
+  2. launches `renderdoccmd capture --working-dir <build> -- <binary> <cvars> [+map ...]`
      with `+set r_layoutDump 1` so the layout pass dumps coordinates
   3. waits for the engine to self-quit (or kills it after --timeout)
   4. returns (rdc_path, layoutdump_path)
@@ -18,7 +18,7 @@ REQUIREMENTS
   * wired.x64.exe built with WN_RDOC_CAPTURE != 0. In the current working
     tree tr_backend.c defaults it to 1, so a fresh `ninja` build has the
     trigger. If the trigger never fires (no .rdc, no "[WN_RDOC]" lines),
-    rebuild:  cmake -S . -B build/debug -DWN_RDOC_CAPTURE=1 && ninja -C build/debug
+    rebuild:  cmake -S . -B build -DWN_RDOC_CAPTURE=1 && ninja -C build
   * renderdoccmd.exe on PATH or at C:\\Program Files\\RenderDoc\\renderdoccmd.exe
     (override with --renderdoccmd or the RENDERDOCCMD env var).
 
@@ -124,7 +124,7 @@ def run_capture(scene_cfg, *, binary=None, workdir=None, renderdoccmd=None,
     binary = find_exe(binary, _DEFAULT_BINARY, "wired.x64")
     if not binary:
         raise RuntimeError(f"wired.x64.exe not found (looked at {_DEFAULT_BINARY} and PATH). "
-                           "Build it: ninja -C build/debug")
+                           "Build it: ninja -C build")
     rdcmd = find_exe(renderdoccmd, _DEFAULT_RENDERDOCCMD, "renderdoccmd")
     if not rdcmd:
         raise RuntimeError(f"renderdoccmd.exe not found (looked at {_DEFAULT_RENDERDOCCMD} and PATH). "
@@ -229,7 +229,7 @@ def main(argv=None) -> int:
     ap.add_argument("--cvar", action="append", default=[], metavar="NAME=VALUE",
                     help="extra cvar to set (repeatable)")
     ap.add_argument("--binary", default=None, help="path to wired.x64.exe")
-    ap.add_argument("--workdir", default=None, help="engine working dir (default build/debug)")
+    ap.add_argument("--workdir", default=None, help="engine working dir (default build)")
     ap.add_argument("--renderdoccmd", default=None, help="path to renderdoccmd.exe")
     ap.add_argument("--timeout", type=int, default=90)
     ap.add_argument("--keep", action="store_true", help="(reserved) keep artifacts")
