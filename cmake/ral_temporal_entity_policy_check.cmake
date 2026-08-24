@@ -2,15 +2,15 @@ if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
 
-file(READ "${ROOT}/code/renderercommon/tr_types.h" TYPES)
+file(READ "${ROOT}/code/render/frontend/tr_types.h" TYPES)
 file(READ "${ROOT}/code/cgame/cg_draw.c" CG_DRAW)
-file(READ "${ROOT}/code/renderervk/tr_temporal_input.c" INPUT)
-file(READ "${ROOT}/code/renderervk/tr_backend.c" BACKEND)
-file(READ "${ROOT}/code/renderervk/tr_model_iqm.c" IQM)
-file(READ "${ROOT}/code/renderervk/tr_scene.c" SCENE)
-file(READ "${ROOT}/code/renderervk/vk.c" VK)
-file(READ "${ROOT}/code/renderervk/tr_cmds.c" COMMANDS)
-file(READ "${ROOT}/code/renderervk/tr_temporal_submit.c" SUBMIT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_input.c" INPUT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_backend.c" BACKEND)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_model_iqm.c" IQM)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_scene.c" SCENE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VK)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_cmds.c" COMMANDS)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_submit.c" SUBMIT)
 file(READ "${ROOT}/tests/tr_temporal_submit_test.c" SUBMIT_TEST)
 file(READ "${ROOT}/code/renderer2/tr_extratypes.h" RENDERER2_TYPES)
 file(READ "${ROOT}/code/client/cl_cgame.c" CLIENT)
@@ -104,7 +104,7 @@ require_text(VK "if ( vk_temporal_diagnostic_arm_ready( qfalse )\n\t\t\t&& VK_Te
 	"motion arm requires exact live ring/materialization cohort")
 require_text(VK "if ( vk_temporal_diagnostic_arm_ready( qtrue )\n\t\t\t&& VK_TemporalResolveReadbackArm("
 	"H3c arm requires exact live ring/materialization/H2 cohort")
-require_text(VK "vk_temporal_entmat_ring.buffer[i] != slot->entMatBuf"
+require_text(VK "vk_temporal_entmat_ring.buffer[i] != slot->ral_entMatBuf"
 	"ring buffer identity revalidation")
 require_text(VK "vk_temporal_entmat_ring.descriptor[i] != slot->entMatDesc"
 	"ring descriptor identity revalidation")

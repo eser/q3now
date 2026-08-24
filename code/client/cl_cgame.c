@@ -102,7 +102,11 @@ static qboolean cl_viewportOwnerRenderable( const void *owner ) {
 }
 
 qboolean CL_AnyViewportAppRenderable( void ) {
+#if FEAT_WIRED_UI
 	return WiredUI_AnyViewportOwner( cl_viewportOwnerRenderable );
+#else
+	return qfalse;
+#endif
 }
 
 
@@ -2196,6 +2200,26 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		return 0;
 #endif
 
+#if !FEAT_WIRED_UI && defined(WASM_MODULE)
+	/* W0 browser builds intentionally omit the compositor while retaining the
+	 * production cgame ABI. These optional UI publications are advisory at that
+	 * boundary; accept and discard them instead of turning a feature-off host
+	 * into an ABI-fatal client. The browser screen path below still renders the
+	 * cgame directly through CG_DRAW_ACTIVE_FRAME. */
+	case CG_WIREDUI_PUSH_HUD_STATE:
+	case CG_WIREDUI_PUSH_EVENT:
+	case CG_REGISTER_VIEWPORT_PROVIDER:
+	case CG_UNREGISTER_VIEWPORT_PROVIDER:
+	case CG_R_DRAWTEXTNORM:
+	case CG_WUI_STORE_PUSH_BATCH:
+	case CG_WUI_STORE_PUSH_MARKERLIST:
+	case CG_WUI_STORE_DELETE:
+	case CG_WUI_STORE_CLEAR:
+		return 0;
+	case CG_R_MEASURETEXTNORM:
+		return FloatAsInt( 0.0f );
+#endif
+
 	case CG_R_SETLIGHTSTYLEPATTERN:
 		if ( re.SetLightstylePattern ) {
 			CL_RSND( &cl_desc_CG_R_SETLIGHTSTYLEPATTERN, 2 );
@@ -2245,7 +2269,11 @@ static void CL_CgameTeardown_Commands( void *owner ) {
 	Cmd_RemoveCgameCommandsByOwner( owner );
 }
 static void CL_CgameTeardown_Viewports( void *owner ) {
+#if FEAT_WIRED_UI
 	WiredUI_UnregisterViewportProvidersByOwner( owner );
+#else
+	(void)owner;
+#endif
 }
 // Close this app's cgame file handles. The H_CGAME file-VM key is shared across
 // concurrent apps, but the handles are now tagged with the owning app's slot at
@@ -2342,7 +2370,9 @@ void CL_InitCGame( clientApp_t *app ) {
 	if ( isFocused ) {
 		// state→named-UI: ensure the loading_screen backdrop is bound even if this
 		// CA_LOADING was reached without going through CL_DownloadsComplete.
+#if FEAT_WIRED_UI
 		WiredUI_SetLoadingMenu( "ui/loading_screen.wui" );
+#endif
 		cl_loadYieldLastTime = Sys_Milliseconds();
 	}
 
@@ -2592,8 +2622,11 @@ static void CL_FirstSnapshot( clientApp_t *app ) {
 	 * scripting/profiling — it only advances its own time/state below. */
 	qboolean isFocused = ( app == clientActiveApp );
 
-	if ( isFocused )
+	if ( isFocused ) {
+#if FEAT_WIRED_UI
 		WiredUI_SetLoadingMenu( NULL );  // loading over — clear the bound loading UI
+#endif
+	}
 
 	// clear old game so we will not switch back to old mod on disconnect
 	// (host-global fs_game bookkeeping — only the focused client owns it)

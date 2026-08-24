@@ -7,7 +7,7 @@
 #	include <SDL3/SDL_metal.h>
 #endif
 #ifdef USE_VULKAN_API
-#	include "../renderercommon/vulkan/vulkan.h"
+#	include "../render/ral/backends/vulkan/include/vulkan/vulkan.h"
 #	include <SDL3/SDL_vulkan.h>
 #endif
 #ifdef _WIN32
@@ -24,7 +24,7 @@
 #define MINSDL_MICRO 0
 
 #include "../client/client.h"
-#include "../renderercommon/tr_public.h"
+#include "../render/frontend/tr_public.h"
 #include "../qcommon/wired/stalltrace.h"
 #include "sdl_glw.h"
 #include "sdl_icon.h"
@@ -41,8 +41,13 @@ typedef enum {
 typedef enum {
 	WIRED_WINDOW_API_OPENGL = 1,
 	WIRED_WINDOW_API_VULKAN,
-	WIRED_WINDOW_API_METAL
+	WIRED_WINDOW_API_METAL,
+	WIRED_WINDOW_API_OPENGL46
 } wiredWindowApi_t;
+
+static qboolean WindowApiIsOpenGl( wiredWindowApi_t api ) {
+	return api == WIRED_WINDOW_API_OPENGL || api == WIRED_WINDOW_API_OPENGL46;
+}
 
 glwstate_t glw_state;
 
@@ -519,7 +524,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 		else
 			perChannelColorBits = 4;
 
-		if ( windowApi == WIRED_WINDOW_API_OPENGL ) {
+		if ( WindowApiIsOpenGl( windowApi ) ) {
 
 #ifdef __sgi /* Fix for SGIs grabbing too many bits of color */
 			if (perChannelColorBits == 4)
@@ -620,7 +625,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 
 		if ( fullscreen )
 		{
-			if ( !exclusive || windowApi != WIRED_WINDOW_API_OPENGL ) {
+			if ( !exclusive || !WindowApiIsOpenGl( windowApi ) ) {
 				// Vulkan: desktop fullscreen (SDL_WINDOW_FULLSCREEN default) is sufficient —
 				// the swapchain handles resolution and format independently.
 				// Exclusive mode with SDL_SetWindowFullscreenMode fails on macOS/MoltenVK
@@ -676,7 +681,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen,
 			}
 		}
 
-		if ( windowApi != WIRED_WINDOW_API_OPENGL ) {
+		if ( !WindowApiIsOpenGl( windowApi ) ) {
 			config->colorBits = testColorBits;
 			config->depthBits = testDepthBits;
 			config->stencilBits = testStencilBits;
@@ -865,6 +870,20 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS,
 		}
 		Com_Log( SEV_INFO, LOG_CH(ch_client), "SDL using driver \"%s\"\n", driverName );
 	}
+	if ( WindowApiIsOpenGl( windowApi ) ) {
+		SDL_GL_ResetAttributes();
+		if ( windowApi == WIRED_WINDOW_API_OPENGL46
+				&& ( !SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 4 )
+					|| !SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 6 )
+					|| !SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK,
+						SDL_GL_CONTEXT_PROFILE_CORE )
+					|| !SDL_GL_SetAttribute( SDL_GL_CONTEXT_FLAGS,
+						SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG ) ) ) {
+			Com_Log( SEV_WARN, LOG_CH(ch_client),
+				"SDL OpenGL 4.6 Core attributes rejected: %s\n", SDL_GetError() );
+			return RSERR_FATAL_ERROR;
+		}
+	}
 
 	GLimp_DisplayCatalogMarkDirty( GLIMP_DISPLAY_DIRTY_TOPOLOGY );
 	GLimp_DisplayCatalogReconcile();
@@ -900,7 +919,7 @@ This routine is responsible for initializing the OS specific portions
 of OpenGL
 ===============
 */
-void GLimp_Init( glconfig_t *config )
+static void GLimp_InitForApi( glconfig_t *config, wiredWindowApi_t windowApi )
 {
 	rserr_t err;
 
@@ -928,12 +947,12 @@ void GLimp_Init( glconfig_t *config )
 	{
 		static const cvarDesc_t d = CVAR_BOOL( "r_stereoEnabled", "0", CVAR_ARCHIVE | CVAR_LATCH,
 			"Enable stereo rendering for techniques like shutter glasses." );
-		r_stereoEnabled = Cvar_Register( &d );
+	r_stereoEnabled = Cvar_Register( &d );
 	}
 
 	// Create the window and set up the context
 	err = GLimp_StartDriverAndSetMode( r_mode->integer, r_modeFullscreen->string,
-		r_fullscreen->integer, WIRED_WINDOW_API_OPENGL );
+		r_fullscreen->integer, windowApi );
 	if ( err != RSERR_OK )
 	{
 		if ( err == RSERR_FATAL_ERROR )
@@ -948,7 +967,7 @@ void GLimp_Init( glconfig_t *config )
 			// be created. Valid user-selected legacy/custom modes are not rejected.
 			Com_Log( SEV_INFO, LOG_CH(ch_client), "Setting \\r_mode %d failed, falling back on \\r_mode %d\n", r_mode->integer, 13 );
 			if ( GLimp_StartDriverAndSetMode( 13, "", r_fullscreen->integer,
-					WIRED_WINDOW_API_OPENGL ) != RSERR_OK )
+					windowApi ) != RSERR_OK )
 			{
 				// Nothing worked, give up
 				Com_Terminate( TERM_UNRECOVERABLE, "GLimp_Init() - could not load OpenGL subsystem" );
@@ -967,6 +986,14 @@ void GLimp_Init( glconfig_t *config )
 	HandleEvents();
 
 	Key_ClearStates();
+}
+
+void GLimp_Init( glconfig_t *config ) {
+	GLimp_InitForApi( config, WIRED_WINDOW_API_OPENGL );
+}
+
+void GLimp_InitOpenGL46( glconfig_t *config ) {
+	GLimp_InitForApi( config, WIRED_WINDOW_API_OPENGL46 );
 }
 
 

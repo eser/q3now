@@ -2,10 +2,10 @@ cmake_minimum_required(VERSION 3.16)
 if(NOT DEFINED ROOT)
   message(FATAL_ERROR "ROOT required")
 endif()
-file(READ "${ROOT}/code/renderervk/vk.c" VKC)
-file(READ "${ROOT}/code/renderervk/vk_generic_specialization_contract.c" CONTRACT)
-file(READ "${ROOT}/code/renderervk/vk_generic_specialization_contract.h" HEADER)
-file(READ "${ROOT}/code/renderervk/vk_temporal_pipeline_factory.c" FACTORY)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_generic_specialization_contract.c" CONTRACT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_generic_specialization_contract.h" HEADER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_pipeline_factory.c" FACTORY)
 file(READ "${ROOT}/tests/vk_generic_specialization_contract_test.c" TEST)
 file(READ "${ROOT}/tests/vk_temporal_pipeline_factory_test.c" FACTORY_TEST)
 file(READ "${ROOT}/CMakeLists.txt" CMAKE_TEXT)
@@ -44,7 +44,7 @@ if(NOT author_count EQUAL 1)
   message(FATAL_ERROR "production create_pipeline must call the exact author once")
 endif()
 foreach(forbidden "vert_spec_entry.constantID" "spec_entries\\[1\\]\\.constantID" "frag_spec_info.mapEntryCount = 15")
-  string(FIND "${VKC}" "VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassIndex, uint32_t def_index ) {" create_start)
+  string(FIND "${VKC}" "static void create_pipeline( const Vk_Pipeline_Def *def,\n\t\trenderPass_t renderPassIndex, uint32_t def_index ) {" create_start)
   string(FIND "${VKC}" "static uint32_t vk_alloc_pipeline" create_end)
   if(create_start EQUAL -1 OR create_end EQUAL -1 OR create_end LESS create_start)
     message(FATAL_ERROR "cannot isolate production create_pipeline")
@@ -85,25 +85,25 @@ foreach(forbidden "Cvar" "BeginRendering" "vkCmd" "r_temporal")
     message(FATAL_ERROR "pure specialization contract gained runtime authority: ${forbidden}")
   endif()
 endforeach()
-file(GLOB PRODUCT_TUS "${ROOT}/code/renderervk/*.c")
+file(GLOB PRODUCT_TUS "${ROOT}/code/render/ral/backends/vulkan/renderer/*.c")
 foreach(tu IN LISTS PRODUCT_TUS)
   file(READ "${tu}" text)
-  if(NOT tu STREQUAL "${ROOT}/code/renderervk/vk.c" AND
-     NOT tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_generic_recipe_table.c" AND
-     NOT tu STREQUAL "${ROOT}/code/renderervk/vk_generic_specialization_contract.c" AND
+  if(NOT tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" AND
+     NOT tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_generic_recipe_table.c" AND
+     NOT tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_generic_specialization_contract.c" AND
      text MATCHES "VK_GenericSpecializationAuthor")
     message(FATAL_ERROR "author authority leaked outside vk.c: ${tu}")
   endif()
-  if(NOT tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_pipeline_factory.c" AND
-     NOT tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_generic_recipe_table.c" AND
-     NOT tu STREQUAL "${ROOT}/code/renderervk/vk_generic_specialization_contract.c" AND
+  if(NOT tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_pipeline_factory.c" AND
+     NOT tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_generic_recipe_table.c" AND
+     NOT tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_generic_specialization_contract.c" AND
      text MATCHES "VK_GenericTemporalSpecializationValidate")
 	message(FATAL_ERROR "validator authority leaked outside factory/recipe/definition: ${tu}")
   endif()
 endforeach()
 if(NOT CMAKE_TEXT MATCHES "vk_generic_specialization_contract_test" OR
    NOT CMAKE_TEXT MATCHES "vk_generic_specialization_contract.c" OR
-   NOT CMAKE_TEXT MATCHES "AUX_SOURCE_DIRECTORY\\(code/renderervk RENDERER_VK_SRCS\\)")
+   NOT CMAKE_TEXT MATCHES "AUX_SOURCE_DIRECTORY\\(code/render/ral/backends/vulkan/renderer RENDERER_VK_SRCS\\)")
   message(FATAL_ERROR "specialization contract product/test ownership missing")
 endif()
 message(STATUS "vk generic specialization source policy: PASS")

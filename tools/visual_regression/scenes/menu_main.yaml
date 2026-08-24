@@ -29,7 +29,7 @@ cvars:
 no_map: true            # stay on the main menu — no `+map`
 
 # Informational only: the WN_RDOC_CAPTURE build hard-codes the captured
-# frame (currently 600 — see code/renderervk/tr_backend.c). The menu is
+# frame (currently 600 — see code/render/ral/backends/vulkan/renderer/tr_backend.c). The menu is
 # static frame-to-frame, so the exact frame is immaterial.
 capture_frame: 600
 

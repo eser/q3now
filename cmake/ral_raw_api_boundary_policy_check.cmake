@@ -45,16 +45,16 @@ function(forbid_regex body pattern why)
 	endif()
 endfunction()
 
-set(public_abi_path "${SOURCE_ROOT}/code/renderercommon/tr_public.h")
+set(public_abi_path "${SOURCE_ROOT}/code/render/frontend/tr_public.h")
 set(client_path "${SOURCE_ROOT}/code/client/client.h")
 set(sdl_path "${SOURCE_ROOT}/code/sdl/sdl_glimp.c")
-set(vk_boot_path "${SOURCE_ROOT}/code/renderervk/vk_ral_textures.c")
-set(vk_buffer_shadow_path "${SOURCE_ROOT}/code/renderervk/vk_ral_buffer_shadow.c")
-set(vk_buffer_shadow_header_path "${SOURCE_ROOT}/code/renderervk/vk_ral_buffer_shadow.h")
-set(vk_path "${SOURCE_ROOT}/code/renderervk/vk.c")
-set(vk_header_path "${SOURCE_ROOT}/code/renderervk/vk.h")
-set(vk_caps_path "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_caps.c")
-set(vk_resource_path "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_resource.c")
+set(vk_boot_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c")
+set(vk_buffer_shadow_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_buffer_shadow.c")
+set(vk_buffer_shadow_header_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_buffer_shadow.h")
+set(vk_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c")
+set(vk_header_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.h")
+set(vk_caps_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_caps.c")
+set(vk_resource_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_resource.c")
 foreach(path IN ITEMS "${public_abi_path}" "${client_path}" "${sdl_path}"
 	"${vk_boot_path}" "${vk_path}" "${vk_header_path}" "${vk_caps_path}"
 	"${vk_resource_path}" "${vk_buffer_shadow_path}"
@@ -737,7 +737,7 @@ foreach(path IN LISTS production_sources)
 	file(READ "${path}" body)
 	strip_c_comments("${body}" code)
 
-	if(rel MATCHES "^code/renderervk/")
+	if(rel MATCHES "^code/render/ral/backends/vulkan/renderer/")
 		string(REGEX MATCHALL "(^|[^A-Za-z0-9_])Vk[A-Z][A-Za-z0-9_]*" matches "${code}")
 		list(LENGTH matches count)
 		math(EXPR vk_type_count "${vk_type_count} + ${count}")
@@ -754,12 +754,16 @@ foreach(path IN LISTS production_sources)
 		continue()
 	endif()
 
-	if(rel MATCHES "^code/renderer/ral_(vulkan|metal|webgpu)/"
-		OR rel MATCHES "^code/renderercommon/vulkan/"
+	if(rel MATCHES "^code/render/ral/backends/(vulkan|opengl|metal|webgpu)/"
+		OR rel MATCHES "^code/render/ral/backends/vulkan/include/vulkan/"
 		OR rel MATCHES "^code/renderer2/"
 		OR rel MATCHES "^code/renderer/[^/]+\\.(c|h|cpp|hpp|m|mm)$"
 		OR rel STREQUAL "code/sdl/sdl_glimp.c"
 		OR rel STREQUAL "code/sdl/sdl_ral_presentation.mm"
+		# Browser main is the Web platform adapter: it may adopt the abstract
+		# WebGPU backend module but owns no shared/frontend graphics ABI.
+		OR rel STREQUAL "code/web/web_main.c"
+		OR rel STREQUAL "code/web/web_presentation.c"
 		OR rel MATCHES "^code/tools/")
 		continue()
 	endif()

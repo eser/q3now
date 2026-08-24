@@ -4,8 +4,8 @@
 if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
-set(H "${ROOT}/code/renderer/ral/ral_frame_shell.h")
-set(S "${ROOT}/code/renderer/ral/ral_frame_shell.c")
+set(H "${ROOT}/code/render/ral/core/ral_frame_shell.h")
+set(S "${ROOT}/code/render/ral/core/ral_frame_shell.c")
 set(T "${ROOT}/tests/ral_frame_shell_test.c")
 foreach(path IN ITEMS "${H}" "${S}" "${T}")
 	if(NOT EXISTS "${path}")
@@ -27,8 +27,8 @@ foreach(needle IN ITEMS
 		message(FATAL_ERROR "RAL frame shell lost portable lifecycle surface: ${needle}")
 	endif()
 endforeach()
-foreach(backend IN ITEMS RAL_BACKEND_VULKAN RAL_BACKEND_METAL RAL_BACKEND_GL43
-	RAL_BACKEND_WEBGPU RAL_BACKEND_WEBGL2)
+foreach(backend IN ITEMS RAL_BACKEND_VULKAN RAL_BACKEND_METAL RAL_BACKEND_OPENGL
+	RAL_BACKEND_WEBGPU)
 	string(FIND "${SOURCE}" "${backend}" pos)
 	if(pos EQUAL -1)
 		message(FATAL_ERROR "RAL frame shell lost backend-neutral coverage: ${backend}")

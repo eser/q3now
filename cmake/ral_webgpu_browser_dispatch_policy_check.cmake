@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+if(NOT DEFINED ROOT)
+	message(FATAL_ERROR "ROOT is required")
+endif()
+set(BACKEND "${ROOT}/code/render/ral/backends/webgpu")
+set(FILES
+	"${BACKEND}/ral_webgpu_browser_dispatch.mjs"
+	"${BACKEND}/ral_webgpu_browser_emscripten.h"
+	"${BACKEND}/ral_webgpu_browser_emscripten.c"
+	"${ROOT}/tests/ral_webgpu_browser_dispatch_test.mjs")
+foreach(FILE IN LISTS FILES)
+	if(NOT EXISTS "${FILE}")
+		message(FATAL_ERROR "missing WebGPU browser dispatch contract file: ${FILE}")
+	endif()
+	file(READ "${FILE}" TEXT)
+	foreach(FORBIDDEN IN ITEMS "WebGL2" "webgl2" "getContext(\"webgl" "SDL_" "code/renderer" "code/renderer2")
+		string(FIND "${TEXT}" "${FORBIDDEN}" POSITION)
+		if(NOT POSITION EQUAL -1)
+			message(FATAL_ERROR "forbidden fallback/deprecated ownership in ${FILE}: ${FORBIDDEN}")
+		endif()
+	endforeach()
+endforeach()
+file(READ "${BACKEND}/ral_webgpu_browser_dispatch.mjs" SOURCE)
+foreach(NEEDLE IN ITEMS "DataView" "getBigUint64" "request.getUint32(8" "bytesAt(responseOffset" "BEGIN_ADAPTER" "POLL_DEVICE_LOSS" "CREATE_BUFFER" "BEGIN_ROUND_TRIP" "CREATE_SHADER_MODULE" "CREATE_PIPELINE" "RECORD_INDEXED_DRAW" "POLL_SUBMISSION" "installRalWebGpuBrowserDispatch")
+	string(FIND "${SOURCE}" "${NEEDLE}" POSITION)
+	if(POSITION EQUAL -1)
+		message(FATAL_ERROR "WebGPU browser dispatch misses required authority: ${NEEDLE}")
+	endif()
+endforeach()
+file(READ "${BACKEND}/ral_webgpu_browser_emscripten.c" EMSCRIPTEN_SOURCE)
+foreach(NEEDLE IN ITEMS "EM_JS" "wiredRalWebGpuDispatch" "RalWebGpu_BrowserBridgeCreate")
+	string(FIND "${EMSCRIPTEN_SOURCE}" "${NEEDLE}" POSITION)
+	if(POSITION EQUAL -1)
+		message(FATAL_ERROR "Emscripten bridge misses required import authority: ${NEEDLE}")
+	endif()
+endforeach()
+message(STATUS "RAL WebGPU browser linear-memory dispatch policy: PASS")

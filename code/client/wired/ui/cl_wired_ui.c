@@ -4231,7 +4231,7 @@ void WiredUI_TickFrame( int realtime ) {
 	 * (wiredHud_state_valid) keeps the tick a no-op when cgame hasn't
 	 * pushed its first state frame yet. */
 	if ( clientActiveApp->state == CA_ACTIVE && wiredHud_state_valid ) {
-		WiredUI_HudTick( realtime );
+		CL_PROF( whud, WiredUI_HudTick( realtime ) );
 	}
 
 	// live 'hud' cvar change: reload only when the value actually differs

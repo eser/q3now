@@ -5,9 +5,9 @@ if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
 file(READ "${ROOT}/code/tools/shader_xlate/main.cpp" TRANSLATOR)
-file(READ "${ROOT}/code/renderervk/shaders/compile_reflect.mjs" DRIVER)
-file(READ "${ROOT}/code/renderervk/shaders/shader_reflection_abi.mjs" NORMALIZER)
-file(READ "${ROOT}/code/renderervk/shaders/spirv/ral_shader_reflection_catalog.json" CATALOG)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/compile_reflect.mjs" DRIVER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/shader_reflection_abi.mjs" NORMALIZER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_reflection_catalog.json" CATALOG)
 file(READ "${ROOT}/tests/ral_shader_reflection_abi_test.mjs" ABI_HOST)
 file(READ "${ROOT}/tests/ral_shader_reflection_catalog_test.mjs" CATALOG_HOST)
 set(REFLECTION_POLICY_TEXT "${ABI_HOST}${NORMALIZER}")
@@ -52,14 +52,14 @@ foreach(NATIVE "VkDescriptor" "VkPipeline" "WGPU" "MTL")
 endforeach()
 
 require_text(CATALOG "\"schemaVersion\":1,\"toolchainIdentity\":\"wired-shader-xlate/2" "pinned reflection corpus header")
-require_text(CATALOG "\"sourceCount\":292" "full reflection corpus count")
+require_text(CATALOG "\"sourceCount\":294" "full reflection corpus count")
 string(REGEX MATCHALL "\"ordinal\":[0-9]+" CATALOG_ROWS "${CATALOG}")
 list(LENGTH CATALOG_ROWS CATALOG_ROW_COUNT)
-if(NOT CATALOG_ROW_COUNT EQUAL 292)
+if(NOT CATALOG_ROW_COUNT EQUAL 294)
 	message(FATAL_ERROR "reflection catalog row count drift: ${CATALOG_ROW_COUNT}")
 endif()
 foreach(NEEDLE
-	"assert.equal(committed.sourceCount, 292)"
+	"assert.equal(committed.sourceCount, 294)"
 	"entry.spirv.digest, provenanceRow.artifactDigest"
 	"color_vert_spv"
 	"brdf_lut_comp_spv"

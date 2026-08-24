@@ -1446,9 +1446,11 @@ int CIN_PlayCinematic( const char *arg, int x, int y, int w, int h, int systemBi
 
 	if (cinTable[currentHandle].alterGameState) {
 		// close the menu
+#if FEAT_WIRED_UI
 		if ( UI_VM_ACTIVE ) {
 			UI_CALL_SET_ACTIVE( UIMENU_NONE );
 		}
+#endif
 	} else {
 		cinTable[currentHandle].playonwalls = cl_inGameVideo->integer;
 	}

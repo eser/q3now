@@ -66,12 +66,14 @@ int main( void ) {
 	mapSucceeds = qtrue;
 	CHECK( ralVk_BufferGpuUseAllowed( &buffer ) );
 	CHECK( Ral_BufferMapBegin( &buffer, &request, &ticket ) == ralSuccess );
+	CHECK( backend.gpuExcludedBufferMapCount == 1u );
 	CHECK( !ralVk_BufferGpuUseAllowed( &buffer ) );
 	memset( &bindGroup, 0, sizeof( bindGroup ) );
 	bindGroup.bufferTrackingComplete = qtrue;
 	bindGroup.bufferCount = 1;
 	bindGroup.buffers[0] = &buffer;
 	memset( &commandBuffer, 0, sizeof( commandBuffer ) );
+	commandBuffer.backend = &backend;
 	commandBuffer.boundVertexBuffers[0] = &buffer;
 	commandBuffer.boundIndexBuffer = &buffer;
 	commandBuffer.boundBindGroups[0] = &bindGroup;
@@ -91,6 +93,7 @@ int main( void ) {
 	CHECK( Ral_BufferMapUnmap( &buffer, &stale ) == ralErrorInvalidArgument );
 	CHECK( flushCalls == 0 && unmapCalls == 0 );
 	CHECK( Ral_BufferMapUnmap( &buffer, &ticket ) == ralSuccess );
+	CHECK( backend.gpuExcludedBufferMapCount == 0u );
 	CHECK( flushCalls == 1 && unmapCalls == 1 );
 	CHECK( Ral_BufferMapLifecycleGpuUseAllowed( &buffer.mapLifecycle ) );
 	CHECK( ralVk_BufferGpuUseAllowed( &buffer ) );

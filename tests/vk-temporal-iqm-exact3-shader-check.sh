@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 root=${1:?source root required}
-shader_dir="$root/code/renderervk/shaders"
+shader_dir="$root/code/render/ral/backends/vulkan/renderer/shaders"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/wired-iqm-exact3-shader.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 command -v glslangValidator >/dev/null 2>&1 || exit 77

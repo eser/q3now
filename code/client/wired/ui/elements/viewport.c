@@ -74,8 +74,9 @@ void WiredUI_RenderViewport( float x, float y, float w, float h,
 		 * this engine file stays free of cgame headers. Route to the OWNING
 		 * app's cgame VM (the owner captured at register time) so each app's
 		 * viewport renders its own scene, not the focused app's. */
-		CL_RenderCGameViewport( (void *)WiredUI_FindViewportOwner( viewportId ), prov->vm_key,
-			(int)x, (int)y, (int)w, (int)h );
+		CL_PROF( cgr, CL_RenderCGameViewport(
+			(void *)WiredUI_FindViewportOwner( viewportId ), prov->vm_key,
+			(int)x, (int)y, (int)w, (int)h ) );
 	} else if ( prov->render ) {
 		/* host-side provider (attract-mode bg / demo viewer). */
 		prov->render( &rectNorm, prov->userdata );

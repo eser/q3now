@@ -1,0 +1,51 @@
+#version 460
+
+layout(constant_id = 16) const int ENTITY_SSBO = 0;
+const bool _15 = (ENTITY_SSBO != 0);
+
+layout(binding = 0, std430) readonly buffer EntityMatrices
+{
+    mat4 entMat[];
+} _22;
+
+layout(binding = 0, std140) uniform UBO
+{
+    vec4 eyePos;
+    vec4 lightPos;
+    vec4 lightColor;
+    vec4 lightVector;
+    vec4 _pad_to_mvp[26];
+    mat4 mvp;
+} ubo;
+
+layout(location = 0) in vec3 in_position;
+layout(location = 7) out vec4 shadowData;
+layout(location = 0) out vec4 frag_color0;
+layout(location = 1) in vec4 in_color0;
+layout(location = 1) out vec2 frag_tex_coord0;
+layout(location = 2) in vec2 in_tex_coord0;
+layout(location = 2) out vec2 frag_tex_coord1;
+layout(location = 3) in vec2 in_tex_coord1;
+layout(location = 3) out vec2 frag_tex_coord2;
+layout(location = 4) in vec2 in_tex_coord2;
+
+void main()
+{
+    mat4 _16;
+    if (_15)
+    {
+        _16 = _22.entMat[gl_InstanceIndex * 2];
+    }
+    else
+    {
+        _16 = ubo.mvp;
+    }
+    mat4 mvp = _16;
+    gl_Position = mvp * vec4(in_position, 1.0);
+    shadowData = vec4(in_position, gl_Position.w);
+    frag_color0 = in_color0;
+    frag_tex_coord0 = in_tex_coord0;
+    frag_tex_coord1 = in_tex_coord1;
+    frag_tex_coord2 = in_tex_coord2;
+}
+

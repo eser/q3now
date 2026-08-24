@@ -10,7 +10,7 @@
 #include <string.h>
 
 #include "../qcommon/q_shared.h"
-#include "../renderercommon/tr_types.h"
+#include "../render/frontend/tr_types.h"
 
 #define CG_REFENTITY_TEMPORAL_UNKNOWN (-2)
 #define CG_REFENTITY_TEMPORAL_ABSENT  (-1)

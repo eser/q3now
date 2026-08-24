@@ -1,0 +1,51 @@
+#version 460
+
+struct SpriteHeader
+{
+    vec4 originW;
+    vec4 rgba;
+    uint shaderHandle;
+    uint flags;
+    uint pad0;
+    uint pad1;
+};
+
+const float _55[6] = float[](1.0, 1.0, -1.0, -1.0, 1.0, -1.0);
+const float _62[6] = float[](-1.0, 1.0, -1.0, -1.0, 1.0, 1.0);
+const vec2 _121[6] = vec2[](vec2(0.0, 1.0), vec2(0.0), vec2(1.0), vec2(1.0), vec2(0.0), vec2(1.0, 0.0));
+
+layout(binding = 0, std430) readonly buffer Sprites
+{
+    SpriteHeader sprites[];
+} _16;
+
+layout(binding = 0, std140) uniform EffectsUBO
+{
+    mat4 mvp;
+    vec4 viewLeft;
+    vec4 viewUp;
+    vec4 frameParams;
+} _80;
+
+layout(location = 0) out vec2 fragUV;
+layout(location = 1) out vec4 fragColor;
+
+void main()
+{
+    SpriteHeader hdr;
+    hdr.originW = _16.sprites[gl_InstanceIndex].originW;
+    hdr.rgba = _16.sprites[gl_InstanceIndex].rgba;
+    hdr.shaderHandle = _16.sprites[gl_InstanceIndex].shaderHandle;
+    hdr.flags = _16.sprites[gl_InstanceIndex].flags;
+    hdr.pad0 = _16.sprites[gl_InstanceIndex].pad0;
+    hdr.pad1 = _16.sprites[gl_InstanceIndex].pad1;
+    uint vertInQuad = uint(gl_VertexIndex) % 6u;
+    float sx = _55[vertInQuad];
+    float uy = _62[vertInQuad];
+    float radius = hdr.originW.w;
+    vec3 worldPos = (hdr.originW.xyz + (_80.viewLeft.xyz * (sx * radius))) + (_80.viewUp.xyz * (uy * radius));
+    gl_Position = _80.mvp * vec4(worldPos, 1.0);
+    fragUV = _121[vertInQuad];
+    fragColor = hdr.rgba;
+}
+

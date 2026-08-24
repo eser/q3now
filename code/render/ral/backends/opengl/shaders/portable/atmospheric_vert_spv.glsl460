@@ -1,0 +1,102 @@
+#version 460
+
+struct AtmParticle
+{
+    vec3 pos;
+    float seed;
+    vec3 vel;
+    float flags;
+};
+
+const float _100[6] = float[](-1.0, -1.0, 1.0, 1.0, -1.0, 1.0);
+const float _107[6] = float[](1.0, -1.0, 1.0, 1.0, -1.0, -1.0);
+const vec2 _180[6] = vec2[](vec2(0.0), vec2(0.0, 1.0), vec2(1.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0));
+
+layout(binding = 0, std140) uniform AtmFrame
+{
+    mat4 mvp;
+    vec4 viewLeft;
+    vec4 viewUp;
+    vec4 eyeWorld;
+    float dt;
+    float time;
+    uint poolSize;
+    uint pingPongRead;
+    vec4 boundsMin;
+    vec4 boundsMax;
+    vec2 worldMins;
+    vec2 worldMaxs;
+    vec2 invGridStep;
+    uint gridSize;
+    uint atmType;
+    float _distance;
+    float invResX;
+    float invResY;
+    float depthValid;
+} _44;
+
+layout(binding = 0, std430) readonly buffer Pool
+{
+    AtmParticle particles[];
+} _71;
+
+layout(location = 0) out vec2 fragUV;
+layout(location = 1) out vec4 fragColor;
+
+void emitDegenerate()
+{
+    gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
+    fragUV = vec2(0.0);
+    fragColor = vec4(0.0);
+}
+
+void main()
+{
+    uint idx = uint(gl_InstanceIndex);
+    uint vertInQuad = uint(gl_VertexIndex) % 6u;
+    bool _49 = idx >= _44.poolSize;
+    bool _58;
+    if (!_49)
+    {
+        _58 = _44.atmType == 0u;
+    }
+    else
+    {
+        _58 = _49;
+    }
+    if (_58)
+    {
+        emitDegenerate();
+        return;
+    }
+    AtmParticle p;
+    p.pos = _71.particles[idx].pos;
+    p.seed = _71.particles[idx].seed;
+    p.vel = _71.particles[idx].vel;
+    p.flags = _71.particles[idx].flags;
+    if (p.flags < 0.5)
+    {
+        emitDegenerate();
+        return;
+    }
+    float sx = _100[vertInQuad];
+    float uy = _107[vertInQuad];
+    vec3 worldPos;
+    vec4 color;
+    if (_44.atmType == 1u)
+    {
+        vec3 right = _44.viewLeft.xyz * (sx * 0.60000002384185791015625);
+        vec3 down = (vec3(0.0, 0.0, 1.0) * ((uy * 0.5) - 0.5)) * 18.0;
+        worldPos = (p.pos + right) + down;
+        color = vec4(0.5, 0.5, 0.550000011920928955078125, 0.5);
+    }
+    else
+    {
+        worldPos = (p.pos + (_44.viewLeft.xyz * (sx * 1.5))) + (_44.viewUp.xyz * (uy * 1.5));
+        color = vec4(1.0, 1.0, 1.0, 0.800000011920928955078125);
+    }
+    gl_Position = _44.mvp * vec4(worldPos, 1.0);
+    fragUV = _180[vertInQuad];
+    fragColor = color;
+}
+

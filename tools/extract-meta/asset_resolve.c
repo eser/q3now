@@ -17,7 +17,7 @@ Copyright (C) 2024-2026 Wired engine contributors. GPLv2.
 
 // Sound/music availability is delegated to S_CodecResolves; texture
 // availability to R_ImageResolves. Both probes live in the engine
-// source tree (code/client + code/renderercommon) and walk the same
+// source tree (code/client + code/render/frontend) and walk the same
 // extension priority lists the engine uses at runtime, so the tool's
 // answer matches what the engine would render / play.
 

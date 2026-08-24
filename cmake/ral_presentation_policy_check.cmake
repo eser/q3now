@@ -5,10 +5,10 @@ if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
 
-file(READ "${ROOT}/code/renderer/ral/ral_presentation_policy.h" HEADER)
-file(READ "${ROOT}/code/renderer/ral/ral_presentation_policy.c" CORE)
-file(READ "${ROOT}/code/renderervk/vk.c" VULKAN)
-file(READ "${ROOT}/code/renderer/ral_metal/ral_metal_module.mm" METAL)
+file(READ "${ROOT}/code/render/ral/core/ral_presentation_policy.h" HEADER)
+file(READ "${ROOT}/code/render/ral/core/ral_presentation_policy.c" CORE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VULKAN)
+file(READ "${ROOT}/code/render/ral/backends/metal/ral_metal_module.mm" METAL)
 file(READ "${ROOT}/tests/ral_presentation_policy_test.c" TEST)
 file(READ "${ROOT}/tests/fps-perf-analyze.py" ANALYZER)
 file(READ "${ROOT}/CMakeLists.txt" BUILD)
@@ -61,7 +61,7 @@ foreach(NEEDLE IN ITEMS
 endforeach()
 foreach(NEEDLE IN ITEMS
 	"ADD_EXECUTABLE(ral_presentation_policy_test"
-	"code/renderer/ral/ral_presentation_policy.c")
+	"code/render/ral/core/ral_presentation_policy.c")
 	require_text("${BUILD}" "${NEEDLE}" "build authority")
 endforeach()
 

@@ -225,7 +225,7 @@ qboolean WiredMetalSdl_PresentClear( wiredMetalSdl_t *adapter,
 	if ( !RalMetal_PresentAcquire( adapter->present, coreReceipt,
 			&adapterReceipt->presentation, acquireGeneration, &drawable )
 			|| !RalMetal_PresentClearAndSubmit( adapter->present, coreReceipt,
-				&adapterReceipt->presentation, &drawable, clearColor,
+				&adapterReceipt->presentation, &drawable, NULL, clearColor,
 				presentGeneration, &presented ) ) return qfalse;
 	*outDrawable = drawable; *outPresent = presented;
 	return qtrue;

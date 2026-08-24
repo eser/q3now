@@ -33,12 +33,12 @@ function(slice_between out body begin_marker end_marker)
 	set(${out} "${span}" PARENT_SCOPE)
 endfunction()
 
-set(registry_path "${SOURCE_ROOT}/code/renderervk/vk_ral_textures.c")
-set(header_path "${SOURCE_ROOT}/code/renderervk/vk_ral_textures.h")
-set(resource_path "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_resource.c")
-set(bridge_path "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_bridge.h")
+set(registry_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c")
+set(header_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.h")
+set(resource_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_resource.c")
+set(bridge_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_bridge.h")
 set(host_path "${SOURCE_ROOT}/tests/ral_vulkan_dynamic_bind_test.c")
-set(product_path "${SOURCE_ROOT}/code/renderervk/vk.c")
+set(product_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c")
 foreach(path IN ITEMS "${registry_path}" "${header_path}" "${resource_path}"
 		"${bridge_path}" "${host_path}" "${product_path}")
 	if(NOT EXISTS "${path}")
@@ -52,63 +52,45 @@ file(READ "${bridge_path}" bridge)
 file(READ "${host_path}" host)
 file(READ "${product_path}" product)
 
-slice_between(adopt_helper "${registry}"
-	"static ralBuffer_t *vk_ral_adopt_registered_buffer("
-	"static void vk_ral_flush_pending_buffers( void )")
-slice_between(flush "${registry}"
-	"static void vk_ral_flush_pending_buffers( void )"
-	"static void vk_ral_destroy_all_active_buffers( void )")
-slice_between(register "${registry}"
-	"void vk_ral_register_buffer("
-	"void vk_ral_unregister_buffer(")
 slice_between(overlay "${product}"
 	"static void vk_replay_overlay_quads("
 	"#define DUAL_BLOOM_ENERGY_SCALE")
 
-# Registry authority is the renderer's native buffer itself, never a shadow
-# allocation. Both boot-pending and live paths use the same exact helper.
-require_text("${adopt_helper}"
-	"candidate = Ral_AdoptBufferExact( s_ral_backend, (void *)key, &ci );"
-	"exact native adoption")
-foreach(needle IN ITEMS
-	"Ral_GetBufferHandle( candidate ) != (void *)key"
-	"Ral_GetBufferSize( candidate ) != size"
-	"Ral_GetBufferUsage( candidate ) != usage"
-	"Ral_GetBufferMemoryType( candidate ) != memory")
-	require_text("${adopt_helper}" "${needle}" "candidate metadata validation")
+# TASK-202.5 retired the renderer's native-buffer registry. Product buffers
+# now carry their exact RAL owner next to the native compatibility mirror, and
+# command recording consumes that owner directly.
+file(GLOB product_sources
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/*.c"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/*.h")
+set(product_all "")
+foreach(path IN LISTS product_sources)
+	file(READ "${path}" body)
+	string(APPEND product_all "\n${body}")
 endforeach()
-
-# The first shipping consumer now binds the registered renderer bytes directly;
-# it may neither create a temporary wrapper nor destroy registry authority.
+foreach(retired IN ITEMS
+	"vk_ral_register_buffer("
+	"vk_ral_unregister_buffer("
+	"vk_ral_lookup_buffer("
+	"vk_ral_adopt_registered_buffer("
+	"Ral_AdoptBufferExact(")
+	forbid_text("${product_all}" "${retired}" "retired product buffer registry")
+endforeach()
+foreach(needle IN ITEMS
+	"Buffers are direct RAL resources"
+	"struct ralBuffer_s *ral_vertex_buffer;"
+	"struct ralBuffer_s *ral_entMatBuf;"
+	"vk.cmd->ral_vertex_buffer"
+	"data->ral_index_buffer")
+	require_text("${product_all}" "${needle}" "direct renderer buffer identity")
+endforeach()
 require_text("${overlay}"
-	"ralBuffer_t *vb = vk_ral_lookup_buffer( vk.cmd->vertex_buffer );"
-	"overlay registered-buffer lookup")
+	"ralBuffer_t *vb = vk.cmd->ral_vertex_buffer;"
+	"overlay direct RAL-buffer owner")
 require_text("${overlay}"
 	"Ral_CmdBindVertexBuffer( vk.cmd->ral_cmd, 0, vb, off );"
-	"overlay registered-buffer bind")
+	"overlay direct RAL-buffer bind")
 forbid_text("${overlay}" "Ral_AdoptBuffer" "overlay ad-hoc adoption")
 forbid_text("${overlay}" "Ral_DestroyBuffer" "overlay borrowed-wrapper destruction")
-forbid_text("${adopt_helper}" "Ral_CreateBuffer" "parallel GPU allocation")
-require_text("${flush}"
-	"rb = vk_ral_adopt_registered_buffer( p->key, p->size, p->usage,"
-	"pending adoption")
-forbid_text("${flush}" "Ral_CreateBuffer" "pending parallel GPU allocation")
-require_text("${register}"
-	"rb = vk_ral_adopt_registered_buffer( key, size, usage, memory,"
-	"live adoption")
-forbid_text("${register}" "Ral_CreateBuffer" "live parallel GPU allocation")
-
-# One wrapper per native identity; idempotent duplicates retain authority and
-# mismatched facts cannot replace the published node.
-foreach(needle IN ITEMS
-	"if ( active->key != key ) continue;"
-	"!vk_ral_registered_buffer_exact( active, key, size, usage, memory )"
-	"if ( pending->key != key ) continue;"
-	"pending->size != size || pending->usage != usage"
-	"|| pending->memory != memory"
-	"return;")
-	require_text("${register}" "${needle}" "duplicate fail-closed gate")
-endforeach()
 
 # The backend bridge retains portable capabilities but never grants mapping or
 # raw-parent destruction authority to an adopted wrapper.
@@ -141,9 +123,8 @@ foreach(needle IN ITEMS
 	require_text("${host}" "${needle}" "exact adoption host coverage")
 endforeach()
 
-# Exact adoption is a single centralized renderervk bridge. New product owners
-# consume lookup wrappers rather than creating scattered native aliases.
-file(GLOB product_sources "${SOURCE_ROOT}/code/renderervk/*.c")
+# Exact adoption remains backend-only; shipping renderervk must have zero calls.
+file(GLOB product_sources "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/*.c")
 set(exact_adopt_calls 0)
 foreach(path IN LISTS product_sources)
 	file(READ "${path}" body)
@@ -151,8 +132,8 @@ foreach(path IN LISTS product_sources)
 	list(LENGTH hits count)
 	math(EXPR exact_adopt_calls "${exact_adopt_calls} + ${count}")
 endforeach()
-if(NOT exact_adopt_calls EQUAL 1)
-	message(FATAL_ERROR "exact native buffer adoption inventory changed: ${exact_adopt_calls}/1")
+if(NOT exact_adopt_calls EQUAL 0)
+	message(FATAL_ERROR "exact native buffer adoption returned to product sources: ${exact_adopt_calls}")
 endif()
 
-message(STATUS "RAL exact native buffer registry policy: PASS")
+message(STATUS "RAL direct buffer ownership / registry retirement policy: PASS")

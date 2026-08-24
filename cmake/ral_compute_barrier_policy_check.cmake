@@ -5,10 +5,10 @@ if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT required")
 endif()
 
-file(READ "${ROOT}/code/renderer/ral/ral_command.h" API)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_translate.c" TRANSLATE)
+file(READ "${ROOT}/code/render/ral/core/ral_command.h" API)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_translate.c" TRANSLATE)
 file(READ "${ROOT}/tests/ral_vulkan_translate_test.c" HOST)
-file(READ "${ROOT}/code/renderervk/vk.c" PRODUCT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" PRODUCT)
 file(READ "${ROOT}/tests/ral-effects-dynamic-bind-smoke.sh" SMOKE)
 
 function(require_text body needle why)

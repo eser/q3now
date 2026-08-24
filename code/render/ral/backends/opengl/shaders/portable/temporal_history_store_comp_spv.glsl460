@@ -1,0 +1,35 @@
+#version 460
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(std140, binding = 5) uniform TemporalHistoryPush
+{
+    uvec2 extent;
+    float zNear;
+    float zFar;
+} pc;
+
+layout(binding = 0) uniform texture2D currentColor;
+layout(binding = 0) uniform sampler nearestSampler;
+layout(binding = 1) uniform texture2D currentDeviceDepth;
+layout(binding = 0, rgba16f) uniform writeonly image2D outputColor;
+layout(binding = 1, r32f) uniform writeonly image2D outputLinearDepth;
+
+float linearizeDepth(float z)
+{
+    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+}
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, ivec2(pc.extent))))
+    {
+        return;
+    }
+    vec4 color = texelFetch(sampler2D(currentColor, nearestSampler), pixel, 0);
+    float param = texelFetch(sampler2D(currentDeviceDepth, nearestSampler), pixel, 0).x;
+    float depth = linearizeDepth(param);
+    imageStore(outputColor, pixel, color);
+    imageStore(outputLinearDepth, pixel, vec4(depth));
+}
+

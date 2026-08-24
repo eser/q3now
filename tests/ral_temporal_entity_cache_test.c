@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "../code/renderervk/tr_temporal_entity_cache.h"
+#include "../code/render/ral/backends/vulkan/renderer/tr_temporal_entity_cache.h"
 
 #include <math.h>
 #include <stdio.h>

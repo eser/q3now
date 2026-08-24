@@ -78,8 +78,8 @@ int main( void ) {
 
 	in = Valid( VK_TEMPORAL_SHADER_WRITE ); in.fog = qtrue;
 	CHECK( VK_TemporalShaderRecipeBuild( &in, &out ) );
-	CHECK( out.numPushRanges == 1u && out.pushOffset == 64u && out.pushSize == 32u );
-	CHECK( out.pushStages == RAL_STAGE_FRAGMENT );
+	CHECK( out.numPushRanges == 0u && out.pushOffset == 0u && out.pushSize == 0u );
+	CHECK( out.pushStages == 0u );
 	in = Valid( VK_TEMPORAL_SHADER_IQM_INVALIDATE ); in.fog = qtrue;
 	memset(&out,0x5A,sizeof(out)); before=out;
 	CHECK( !VK_TemporalShaderRecipeBuild(&in,&out) && memcmp(&out,&before,sizeof(out)) == 0 );

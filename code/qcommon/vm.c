@@ -543,7 +543,14 @@ static void * QDECL VM_LoadDll( const char *name, vmMainFunc_t *entryPoint, dllS
 	}
 
 	Com_Log( SEV_INFO, LOG_CH(ch_system), "VM_LoadDll(%s): loaded, vmMain @ %p\n", name, *entryPoint );
+#if defined(__EMSCRIPTEN__)
+	// Emscripten owns the typed WebAssembly function table. Calling a dlsym
+	// result with a C call_indirect can reject an otherwise ABI-compatible side
+	// module because the main and side modules use distinct type identities.
+	Sys_CallDllEntry( (void *)dllEntry, systemcalls );
+#else
 	dllEntry( systemcalls );
+#endif
 
 	return libHandle;
 }
@@ -938,7 +945,11 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 		s_activeNativeVM = vm;
 
 		// add more arguments if you're changed MAX_VMMAIN_CALL_ARGS:
+#if defined(__EMSCRIPTEN__)
+		r = Sys_CallVmMain( vm->entryPoint, callnum, args[0], args[1], args[2] );
+#else
 		r = vm->entryPoint( callnum, args[0], args[1], args[2] );
+#endif
 
 		s_activeNativeVM = savedNativeVM;
 	} else {

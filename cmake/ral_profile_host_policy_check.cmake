@@ -16,7 +16,7 @@ SET(_sources
 	"${SOURCE_ROOT}/code/tools/profile_imgui/wired_profile_host_lifecycle.cpp"
 	"${SOURCE_ROOT}/code/tools/profile_imgui/wired_profile_host_main.cpp"
 	"${SOURCE_ROOT}/code/tools/profile_imgui/wired_profile_telemetry_udp.cpp"
-	"${SOURCE_ROOT}/code/renderercommon/r_profile_telemetry.c")
+	"${SOURCE_ROOT}/code/render/frontend/r_profile_telemetry.c")
 STRING(JSON _count LENGTH "${_commands}")
 SET(_seen_host)
 SET(_host_target_sources)
@@ -33,7 +33,7 @@ FOREACH(_index RANGE 0 ${_last})
 		LIST(APPEND _telemetry_sender_owners "${_owner}")
 	ELSEIF(_file STREQUAL "${SOURCE_ROOT}/code/tools/profile_imgui/wired_profile_telemetry_udp.cpp")
 		LIST(APPEND _telemetry_receiver_owners "${_owner}")
-	ELSEIF(_file STREQUAL "${SOURCE_ROOT}/code/renderercommon/r_profile_telemetry.c")
+	ELSEIF(_file STREQUAL "${SOURCE_ROOT}/code/render/frontend/r_profile_telemetry.c")
 		LIST(APPEND _telemetry_codec_owners "${_owner}")
 	ENDIF()
 	IF(_output MATCHES "CMakeFiles/wired_profile_host\\.dir/")

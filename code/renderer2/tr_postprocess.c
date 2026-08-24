@@ -3,7 +3,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "tr_local.h"
-#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.fbo
+#include "../render/frontend/r_log.h"  // rilog-channel-mechanism Turn C — renderer.fbo
 
 R_LOG_DECLARE_CHANNEL( rch_fbo, "renderer.fbo" );
 

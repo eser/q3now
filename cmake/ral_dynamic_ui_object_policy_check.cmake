@@ -8,8 +8,8 @@ IF(NOT DEFINED SOURCE_ROOT OR NOT IS_DIRECTORY "${SOURCE_ROOT}")
 	MESSAGE(FATAL_ERROR "SOURCE_ROOT must name the q3now source tree")
 ENDIF()
 
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk.c" VK)
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk.h" VK_H)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VK)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" VK_H)
 
 FUNCTION(REQUIRE_TEXT BODY NEEDLE LABEL)
 	STRING(FIND "${BODY}" "${NEEDLE}" POS)

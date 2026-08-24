@@ -1,0 +1,104 @@
+#include <metal_stdlib>
+
+using namespace metal;
+
+struct UiVertexIn {
+    float2 position [[attribute(0)]];
+    float4 color [[attribute(1)]];
+    float2 uv [[attribute(2)]];
+};
+
+struct UiVertexOut {
+    float4 position [[position]];
+    float4 color;
+    float2 uv;
+};
+
+vertex UiVertexOut wired_ui_vertex(UiVertexIn in [[stage_in]]) {
+    UiVertexOut out;
+    out.position = float4(in.position, 0.0, 1.0);
+    out.color = in.color;
+    out.uv = in.uv;
+    return out;
+}
+
+fragment float4 wired_ui_fragment(UiVertexOut in [[stage_in]],
+                                  texture2d<float> image [[texture(0)]],
+                                  sampler imageSampler [[sampler(0)]]) {
+    return image.sample(imageSampler, in.uv) * in.color;
+}
+
+static float median3(float3 value) {
+    return max(min(value.r, value.g), min(max(value.r, value.g), value.b));
+}
+
+fragment float4 wired_ui_msdf_fragment(UiVertexOut in [[stage_in]],
+                                       texture2d<float> image [[texture(0)]],
+                                       sampler imageSampler [[sampler(0)]]) {
+    float3 sampleValue = image.sample(imageSampler, in.uv).rgb;
+    float signedDistance = median3(sampleValue) - 0.5;
+    float screenWidth = max(fwidth(signedDistance), 1.0 / 1024.0);
+    float coverage = saturate(signedDistance / screenWidth + 0.5);
+    return float4(in.color.rgb, in.color.a * coverage);
+}
+
+struct WorldVertexIn {
+    float4 worldPosition [[attribute(0)]];
+    float4 color [[attribute(1)]];
+    float2 texCoord [[attribute(2)]];
+    float2 lightmapCoord [[attribute(3)]];
+};
+
+struct WorldViewParams {
+    float4 viewOrigin;
+    float4 forward;
+    float4 left;
+    float4 up;
+    float4 projection;
+};
+
+struct WorldVertexOut {
+    float4 position [[position]];
+    float4 color;
+    float2 texCoord;
+    float2 lightmapCoord;
+};
+
+vertex WorldVertexOut wired_world_vertex(WorldVertexIn in [[stage_in]],
+                                          constant WorldViewParams &view [[buffer(1)]]) {
+    WorldVertexOut out;
+    float3 delta = in.worldPosition.xyz - view.viewOrigin.xyz;
+    float forward = dot(delta, view.forward.xyz);
+    float left = dot(delta, view.left.xyz);
+    float up = dot(delta, view.up.xyz);
+    out.position = float4(-left * view.projection.x,
+                          up * view.projection.y,
+                          forward - view.projection.z,
+                          forward);
+    out.color = in.color;
+    out.texCoord = in.texCoord;
+    out.lightmapCoord = in.lightmapCoord;
+    return out;
+}
+
+struct WorldMaterialParams {
+    uint hasLightmap;
+    uint alphaMode;
+    float alphaCutoff;
+};
+
+fragment float4 wired_world_fragment(WorldVertexOut in [[stage_in]],
+                                     texture2d<float> baseImage [[texture(0)]],
+                                     texture2d<float> lightmapImage [[texture(1)]],
+                                     sampler baseSampler [[sampler(0)]],
+                                     sampler lightmapSampler [[sampler(1)]],
+                                     constant WorldMaterialParams &material [[buffer(0)]]) {
+    float4 base = baseImage.sample(baseSampler, in.texCoord);
+    if (material.alphaMode == 1 && base.a < material.alphaCutoff) {
+        discard_fragment();
+    }
+    float3 lighting = material.hasLightmap != 0
+        ? min(lightmapImage.sample(lightmapSampler, in.lightmapCoord).rgb * 2.0, 1.0)
+        : float3(1.0);
+    return float4(base.rgb * lighting * in.color.rgb, base.a * in.color.a);
+}

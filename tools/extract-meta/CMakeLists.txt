@@ -111,7 +111,7 @@ set(QCOMMON_TOOL_SRCS
 	# Image availability probe — same role as snd_codec.c above but
 	# for textures. Mirrors R_FindImageFile's extension fallback
 	# without dragging the renderer's image loaders (tr_image_*.c).
-	${CMAKE_SOURCE_DIR}/code/renderercommon/r_image_probe.c
+	${CMAKE_SOURCE_DIR}/code/render/frontend/r_image_probe.c
 
 	# LZ4 (used by sw3z + frame compression)
 	${CMAKE_SOURCE_DIR}/src/libs/lz4/lz4.c
@@ -196,7 +196,7 @@ TARGET_INCLUDE_DIRECTORIES(extract-meta PRIVATE
 	${CMAKE_SOURCE_DIR}/code/qcommon
 	${CMAKE_SOURCE_DIR}/code/qcommon/util
 	${CMAKE_SOURCE_DIR}/code/client          # snd_codec.h (S_CodecResolves)
-	${CMAKE_SOURCE_DIR}/code/renderercommon  # r_image_probe.h (R_ImageResolves)
+	${CMAKE_SOURCE_DIR}/code/render/frontend  # r_image_probe.h (R_ImageResolves)
 )
 
 # Platform OS link surface (the tool ships its own minimal Sys_*

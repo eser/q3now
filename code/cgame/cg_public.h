@@ -5,7 +5,7 @@
 #define CG_PUBLIC_H
 
 #include "../game/bg_public.h"
-#include "../renderercommon/tr_types.h"
+#include "../render/frontend/tr_types.h"
 //
 
 

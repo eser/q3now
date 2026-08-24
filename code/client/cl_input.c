@@ -340,9 +340,12 @@ CL_MouseEvent
 =================
 */
 void CL_MouseEvent( float dx, float dy /*, int time*/ ) {
+#if FEAT_WIRED_UI
 	if ( Key_GetCatcher() & KEYCATCH_UI ) {
 		UI_CALL_MOUSE_EVENT( dx, dy );
-	} else if ( Key_GetCatcher() & KEYCATCH_CGAME ) {
+	} else
+#endif
+	if ( Key_GetCatcher() & KEYCATCH_CGAME ) {
 		// Float dx/dy cross the VM boundary bit-cast to int (4 bytes on wasm32
 		// and x64 alike); the cgame decodes them back to float. This preserves
 		// sub-pixel precision end-to-end.

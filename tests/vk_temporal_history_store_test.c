@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "../code/renderercommon/vulkan/vulkan.h"
+#include "../code/render/ral/backends/vulkan/include/vulkan/vulkan.h"
 
 #define CHECK(x) do { if(!(x)){fprintf(stderr,"FAIL Store %d: %s\n",__LINE__,#x);return 1;} }while(0)
 static uintptr_t nextHandle=0x100000;

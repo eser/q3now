@@ -5,16 +5,16 @@ if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
 
-file(READ "${ROOT}/code/renderer/ral/ral_buffer_map.h" HEADER)
-file(READ "${ROOT}/code/renderer/ral/ral_buffer_map.c" CORE)
-file(READ "${ROOT}/code/renderer/ral/ral_resource.h" RESOURCE_HEADER)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_map.c" VULKAN)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_transition.c" TRANSITION)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_command.c" COMMAND)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_dynamic_bind.c" DYNAMIC_BIND)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_resource.c" RESOURCE)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_internal.h" VULKAN_INTERNAL)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_pipeline.c" PIPELINE)
+file(READ "${ROOT}/code/render/ral/core/ral_buffer_map.h" HEADER)
+file(READ "${ROOT}/code/render/ral/core/ral_buffer_map.c" CORE)
+file(READ "${ROOT}/code/render/ral/core/ral_resource.h" RESOURCE_HEADER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_map.c" VULKAN)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_transition.c" TRANSITION)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_command.c" COMMAND)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_dynamic_bind.c" DYNAMIC_BIND)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_resource.c" RESOURCE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_internal.h" VULKAN_INTERNAL)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_pipeline.c" PIPELINE)
 file(READ "${ROOT}/tests/ral_webgpu_buffer_map_contract_test.c" WEBGPU_TEST)
 
 foreach(FORBIDDEN IN ITEMS "Vk" "WGPU" "MTL" "queueFamily" "MapMemory")
@@ -47,6 +47,17 @@ foreach(REQUIRED IN ITEMS
 	string(FIND "${RESOURCE}${COMMAND}${DYNAMIC_BIND}${VULKAN_INTERNAL}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "bind/draw mapped-buffer exclusion lost seam: ${REQUIRED}")
+	endif()
+endforeach()
+
+foreach(REQUIRED IN ITEMS
+	"gpuExcludedBufferMapCount"
+	"ralVk_BackendHasGpuExcludedBufferMaps"
+	"buf->backend->gpuExcludedBufferMapCount++"
+	"buf->backend->gpuExcludedBufferMapCount--")
+	string(FIND "${VULKAN}${RESOURCE}${VULKAN_INTERNAL}" "${REQUIRED}" POSITION)
+	if(POSITION EQUAL -1)
+		message(FATAL_ERROR "mapped-buffer O(1) exclusion fast path lost seam: ${REQUIRED}")
 	endif()
 endforeach()
 
@@ -88,7 +99,7 @@ endforeach()
 file(GLOB_RECURSE PRODUCT_C
 	"${ROOT}/code/renderer/*.c"
 	"${ROOT}/code/renderer2/*.c"
-	"${ROOT}/code/renderervk/*.c")
+	"${ROOT}/code/render/ral/backends/vulkan/renderer/*.c")
 set(LEGACY_MAP_COUNT 0)
 foreach(FILE IN LISTS PRODUCT_C)
 	file(READ "${FILE}" FILE_TEXT)
@@ -96,13 +107,13 @@ foreach(FILE IN LISTS PRODUCT_C)
 	list(LENGTH FILE_CALLS FILE_COUNT)
 	math(EXPR LEGACY_MAP_COUNT "${LEGACY_MAP_COUNT} + ${FILE_COUNT}")
 endforeach()
-if(NOT LEGACY_MAP_COUNT EQUAL 1)
-	message(FATAL_ERROR "legacy Ral_MapBuffer inventory changed: expected only the compatibility API definition and no renderer consumer, got ${LEGACY_MAP_COUNT}; migrate downward deliberately and update the pin")
+if(NOT LEGACY_MAP_COUNT EQUAL 0)
+	message(FATAL_ERROR "legacy Ral_MapBuffer inventory changed: expected no Vulkan product-renderer C consumer, got ${LEGACY_MAP_COUNT}; migrate downward deliberately and update the pin")
 endif()
 
-file(READ "${ROOT}/code/renderervk/vk.c" PRODUCT_VK)
-file(READ "${ROOT}/code/renderervk/vk.h" PRODUCT_VK_HEADER)
-file(READ "${ROOT}/code/renderervk/tr_shade.c" PRODUCT_SHADE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" PRODUCT_VK)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" PRODUCT_VK_HEADER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_shade.c" PRODUCT_SHADE)
 foreach(FORBIDDEN IN ITEMS
 	"vk_create_persistent_mapped_buffer"
 	"vk_destroy_persistent_mapped_buffer"
@@ -158,7 +169,8 @@ foreach(REQUIRED IN ITEMS
 	"vk.cullAabbCpu = records"
 	"recs = (const vkCullSurf_t *)vk.cullAabbCpu"
 	"Ral_BufferUploadAsync( vk.ral_cull_aabb"
-	"Ral_BufferUploadAsync( vk.ral_cull_reached[ vk.cmd_index ]")
+	"bci.memory    = RAL_MEMORY_HOST_COHERENT"
+	"Ral_BufferWriteImmediate( vk.ral_cull_reached[ vk.cmd_index ]")
 	string(FIND "${PRODUCT_VK}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "WebGPU-valid cull upload migration lost seam: ${REQUIRED}")
@@ -214,7 +226,7 @@ foreach(REQUIRED IN ITEMS
 	"transition.after.usage = RAL_RESOURCE_USAGE_HOST_READ")
 	string(FIND "${RESOURCE_HEADER}${PRODUCT_VK}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
-		file(READ "${ROOT}/code/renderervk/vk.h" PRODUCT_VK_HEADER)
+		file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" PRODUCT_VK_HEADER)
 		string(FIND "${PRODUCT_VK_HEADER}${PRODUCT_VK}" "${REQUIRED}" POSITION)
 	endif()
 	if(POSITION EQUAL -1)

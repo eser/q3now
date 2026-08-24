@@ -5,9 +5,9 @@ IF(NOT DEFINED SOURCE_ROOT OR NOT IS_DIRECTORY "${SOURCE_ROOT}")
 	MESSAGE(FATAL_ERROR "SOURCE_ROOT must name the q3now source tree")
 ENDIF()
 
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk.c" VK)
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk.h" VK_H)
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk_ral_textures.c" ADOPT)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VK)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" VK_H)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c" ADOPT)
 FILE(READ "${SOURCE_ROOT}/tests/ral_vulkan_dynamic_bind_test.c" HOST)
 
 FUNCTION(REQUIRE_TEXT BODY NEEDLE LABEL)
@@ -55,7 +55,7 @@ ENDIF()
 STRING(SUBSTRING "${VK}" ${BLOOM_POS} -1 BLOOM)
 EXTRACT_SPAN("${VK}" "static qboolean vk_entmat_materialize_slot_after_idle("
 	"static qboolean vk_entmat_ensure_temporal_ring(" ENTMAT)
-EXTRACT_SPAN("${ADOPT}" "qboolean vk_ral_refresh_entmat_bindgroup( uint32_t slot )"
+EXTRACT_SPAN("${ADOPT}" "ralBindGroup_t *vk_ral_create_entmat_bindgroup_candidate("
 	"void vk_ral_release_sprite_bindgroup( uint32_t slot )" ENTMAT_GROUP)
 
 # Main and MSDF pipelines must publish the same exact 0/1/2 parents and their
@@ -85,12 +85,15 @@ FOREACH(NEEDLE IN ITEMS
 	"DESTROY_RETAINED_BG( vk.msdf.ral_descriptor[i] );")
 	REQUIRE_TEXT("${ADOPT}" "${NEEDLE}" "world retained bind-group lifecycle")
 ENDFOREACH()
-STRING(FIND "${ENTMAT}" "vk_ral_release_entmat_bindgroup" RELEASE_POS)
-STRING(FIND "${ENTMAT}" "qvkDestroyBuffer" DESTROY_POS)
-STRING(FIND "${ENTMAT}" "vk_ral_refresh_entmat_bindgroup" REFRESH_POS)
-IF(RELEASE_POS EQUAL -1 OR DESTROY_POS EQUAL -1 OR REFRESH_POS EQUAL -1
-		OR NOT RELEASE_POS LESS DESTROY_POS OR NOT DESTROY_POS LESS REFRESH_POS)
-	MESSAGE(FATAL_ERROR "entity-matrix child/parent refresh order drifted")
+STRING(FIND "${ENTMAT}" "candidateGroup = vk_ral_create_entmat_bindgroup_candidate" CREATE_POS)
+STRING(FIND "${ENTMAT}" "*owner = candidateShadow;" PUBLISH_POS)
+STRING(FIND "${ENTMAT}" "if ( retiredGroup ) Ral_DestroyBindGroup( retiredGroup );" GROUP_DESTROY_POS)
+STRING(FIND "${ENTMAT}" "VK_RalBufferShadowRelease( &retiredShadow );" BUFFER_DESTROY_POS)
+IF(CREATE_POS EQUAL -1 OR PUBLISH_POS EQUAL -1 OR GROUP_DESTROY_POS EQUAL -1
+		OR BUFFER_DESTROY_POS EQUAL -1 OR NOT CREATE_POS LESS PUBLISH_POS
+		OR NOT PUBLISH_POS LESS GROUP_DESTROY_POS
+		OR NOT GROUP_DESTROY_POS LESS BUFFER_DESTROY_POS)
+	MESSAGE(FATAL_ERROR "entity-matrix candidate-first child-before-parent refresh order drifted")
 ENDIF()
 FOREACH(RETIRED IN ITEMS qvkAllocateDescriptorSets qvkUpdateDescriptorSets)
 	FORBID_TEXT("${ENTMAT}" "${RETIRED}" "entity-matrix raw descriptor authority")
@@ -100,7 +103,7 @@ FOREACH(NEEDLE IN ITEMS
 	"vk.ral_descriptor_arena_receipt.backendIdentity"
 	"vk.ral_descriptor_arena_receipt.arenaIdentity"
 	"value.type = RAL_BIND_STORAGE_BUFFER;"
-	"value.bufferRange = vk.tess[slot].entMatSize;"
+	"value.bufferRange = bufferSize;"
 	"createInfo.layout = vk.ral_bgl_entmat;"
 	"createInfo.arena = vk.ral_descriptor_arena;"
 	"createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt;"

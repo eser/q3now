@@ -6,21 +6,21 @@ if(NOT DEFINED SOURCE_ROOT OR NOT DEFINED PROBE_ROOT)
 endif()
 
 file(REMOVE_RECURSE "${PROBE_ROOT}")
-foreach(dir IN ITEMS code/renderercommon code/renderer/ral_vulkan code/client code/sdl code/renderervk code/qcommon)
+foreach(dir IN ITEMS code/render/frontend code/render/ral/backends/vulkan code/client code/sdl code/render/ral/backends/vulkan/renderer code/qcommon)
 	file(MAKE_DIRECTORY "${PROBE_ROOT}/${dir}")
 endforeach()
-file(COPY "${SOURCE_ROOT}/code/renderercommon/tr_public.h" DESTINATION "${PROBE_ROOT}/code/renderercommon")
+file(COPY "${SOURCE_ROOT}/code/render/frontend/tr_public.h" DESTINATION "${PROBE_ROOT}/code/render/frontend")
 file(COPY "${SOURCE_ROOT}/code/client/client.h" DESTINATION "${PROBE_ROOT}/code/client")
 file(COPY "${SOURCE_ROOT}/code/sdl/sdl_glimp.c" DESTINATION "${PROBE_ROOT}/code/sdl")
-file(COPY "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_caps.c"
-	DESTINATION "${PROBE_ROOT}/code/renderer/ral_vulkan")
-file(COPY "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_resource.c"
-	DESTINATION "${PROBE_ROOT}/code/renderer/ral_vulkan")
-file(COPY "${SOURCE_ROOT}/code/renderervk/vk_ral_textures.c"
-	"${SOURCE_ROOT}/code/renderervk/vk_ral_buffer_shadow.c"
-	"${SOURCE_ROOT}/code/renderervk/vk_ral_buffer_shadow.h"
-	"${SOURCE_ROOT}/code/renderervk/vk.c" "${SOURCE_ROOT}/code/renderervk/vk.h"
-	DESTINATION "${PROBE_ROOT}/code/renderervk")
+file(COPY "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_caps.c"
+	DESTINATION "${PROBE_ROOT}/code/render/ral/backends/vulkan")
+file(COPY "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_resource.c"
+	DESTINATION "${PROBE_ROOT}/code/render/ral/backends/vulkan")
+file(COPY "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_buffer_shadow.c"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_buffer_shadow.h"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.h"
+	DESTINATION "${PROBE_ROOT}/code/render/ral/backends/vulkan/renderer")
 string(CONCAT native_type "V" "kBuffer")
 file(WRITE "${PROBE_ROOT}/code/qcommon/native_leak.c" "${native_type} escapedBuffer;\n")
 
@@ -39,22 +39,22 @@ endif()
 
 # The explicit Vulkan renderer adapter may retain native value vocabulary, but
 # it may not reacquire loader/PFN/call ownership from the RAL backend.
-foreach(dir IN ITEMS code/renderercommon code/renderer/ral_vulkan code/client code/sdl code/renderervk code/qcommon)
+foreach(dir IN ITEMS code/render/frontend code/render/ral/backends/vulkan code/client code/sdl code/render/ral/backends/vulkan/renderer code/qcommon)
 	file(MAKE_DIRECTORY "${PROBE_ROOT}/${dir}")
 endforeach()
-file(COPY "${SOURCE_ROOT}/code/renderercommon/tr_public.h" DESTINATION "${PROBE_ROOT}/code/renderercommon")
+file(COPY "${SOURCE_ROOT}/code/render/frontend/tr_public.h" DESTINATION "${PROBE_ROOT}/code/render/frontend")
 file(COPY "${SOURCE_ROOT}/code/client/client.h" DESTINATION "${PROBE_ROOT}/code/client")
 file(COPY "${SOURCE_ROOT}/code/sdl/sdl_glimp.c" DESTINATION "${PROBE_ROOT}/code/sdl")
-file(COPY "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_caps.c"
-	DESTINATION "${PROBE_ROOT}/code/renderer/ral_vulkan")
-file(COPY "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_resource.c"
-	DESTINATION "${PROBE_ROOT}/code/renderer/ral_vulkan")
-file(COPY "${SOURCE_ROOT}/code/renderervk/vk_ral_textures.c"
-	"${SOURCE_ROOT}/code/renderervk/vk_ral_buffer_shadow.c"
-	"${SOURCE_ROOT}/code/renderervk/vk_ral_buffer_shadow.h"
-	"${SOURCE_ROOT}/code/renderervk/vk.c" "${SOURCE_ROOT}/code/renderervk/vk.h"
-	DESTINATION "${PROBE_ROOT}/code/renderervk")
-file(APPEND "${PROBE_ROOT}/code/renderervk/vk.c"
+file(COPY "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_caps.c"
+	DESTINATION "${PROBE_ROOT}/code/render/ral/backends/vulkan")
+file(COPY "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_resource.c"
+	DESTINATION "${PROBE_ROOT}/code/render/ral/backends/vulkan")
+file(COPY "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_buffer_shadow.c"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_buffer_shadow.h"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.h"
+	DESTINATION "${PROBE_ROOT}/code/render/ral/backends/vulkan/renderer")
+file(APPEND "${PROBE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c"
 	"\nvoid ral_raw_boundary_mutation(void) { qvkMapMemory(); }\n")
 execute_process(COMMAND "${CMAKE_COMMAND}"
 	-DSOURCE_ROOT=${PROBE_ROOT}

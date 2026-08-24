@@ -4,13 +4,13 @@
 if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
-set(H "${ROOT}/code/renderer/ral/ral_presentation_host.h")
-set(S "${ROOT}/code/renderer/ral/ral_presentation_host.c")
+set(H "${ROOT}/code/render/ral/core/ral_presentation_host.h")
+set(S "${ROOT}/code/render/ral/core/ral_presentation_host.c")
 set(T "${ROOT}/tests/ral_presentation_host_test.c")
-set(P "${ROOT}/code/renderercommon/tr_public.h")
+set(P "${ROOT}/code/render/frontend/tr_public.h")
 set(E "${ROOT}/code/client/cl_main.c")
 set(SDL "${ROOT}/code/sdl/sdl_glimp.c")
-set(M "${ROOT}/code/renderer/ral_metal/ral_metal_module.mm")
+set(M "${ROOT}/code/render/ral/backends/metal/ral_metal_module.mm")
 set(C "${ROOT}/CMakeLists.txt")
 foreach(path IN ITEMS "${H}" "${S}" "${T}" "${P}" "${E}" "${SDL}" "${M}" "${C}")
 	if(NOT EXISTS "${path}")
@@ -113,9 +113,9 @@ foreach(forbidden IN ITEMS "WiredMetalSdl_Create" "SDL_CreateWindow" "SDL_Metal_
 	endif()
 endforeach()
 foreach(needle IN ITEMS "ADD_EXECUTABLE(ral_presentation_host_test"
-	"code/renderer/ral/ral_presentation_host.c"
+	"code/render/ral/core/ral_presentation_host.c"
 	"LIST(FILTER WINDOW_SYSTEM_SRCS EXCLUDE REGEX"
-	"TARGET_LINK_LIBRARIES(\${RENDERER_PREFIX}_metal\${RENDEXT} PRIVATE ral_metal)")
+	"TARGET_LINK_LIBRARIES(\${RENDERER_PREFIX}_metal\${RENDEXT} PRIVATE ral_metal")
 	string(FIND "${CMAKE_SOURCE}" "${needle}" pos)
 	if(pos EQUAL -1)
 		message(FATAL_ERROR "presentation host lost narrow build seam: ${needle}")

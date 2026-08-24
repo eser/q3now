@@ -1,0 +1,66 @@
+#version 460
+
+layout(binding = 0, std140) uniform AtmFrame
+{
+    mat4 mvp;
+    vec4 viewLeft;
+    vec4 viewUp;
+    vec4 eyeWorld;
+    float dt;
+    float time;
+    uint poolSize;
+    uint pingPongRead;
+    vec4 boundsMin;
+    vec4 boundsMax;
+    vec2 worldMins;
+    vec2 worldMaxs;
+    vec2 invGridStep;
+    uint gridSize;
+    uint atmType;
+    float _distance;
+    float invResX;
+    float invResY;
+    float depthValid;
+} _59;
+
+layout(binding = 0) uniform sampler2D sceneDepthTex;
+
+layout(location = 0) in vec2 fragUV;
+layout(location = 1) in vec4 fragColor;
+layout(location = 0) out vec4 outColor;
+
+float softParticleFade()
+{
+    if (_59.depthValid < 0.5)
+    {
+        return 1.0;
+    }
+    vec2 screenUV = gl_FragCoord.xy * vec2(_59.invResX, _59.invResY);
+    float sceneDepth = texture(sceneDepthTex, screenUV).x;
+    if (sceneDepth <= 0.0)
+    {
+        return 1.0;
+    }
+    float depthDiff = gl_FragCoord.z - sceneDepth;
+    return smoothstep(0.0, 0.001000000047497451305389404296875, depthDiff);
+}
+
+vec3 sRGBToLinear(inout vec3 c)
+{
+    c = max(c, vec3(0.0));
+    bvec3 cutoff = lessThanEqual(c, vec3(0.040449999272823333740234375));
+    vec3 lo = c / vec3(12.9200000762939453125);
+    vec3 hi = pow((c + vec3(0.054999999701976776123046875)) / vec3(1.05499994754791259765625), vec3(2.400000095367431640625));
+    return mix(hi, lo, vec3(cutoff));
+}
+
+void main()
+{
+    float edge = 1.0 - smoothstep(0.0, 0.5, abs(fragUV.x - 0.5));
+    float alpha = (fragColor.w * edge) * softParticleFade();
+    vec3 param = fragColor.xyz;
+    vec3 _134 = sRGBToLinear(param);
+    vec3 rgb = _134;
+    outColor = vec4(rgb, alpha);
+}
+

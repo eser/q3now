@@ -1,0 +1,38 @@
+#version 460
+
+layout(constant_id = 5) const int extract_mode = 0;
+const bool _26 = (extract_mode == 1);
+layout(constant_id = 3) const float threshold = 0.319999992847442626953125;
+const bool _51 = (extract_mode == 2);
+
+layout(binding = 0) uniform sampler2D texture0;
+
+layout(location = 0) in vec2 frag_tex_coord;
+layout(location = 0) out vec4 out_color;
+
+void main()
+{
+    vec3 base = texture(texture0, frag_tex_coord).xyz;
+    vec3 excess;
+    if (_26)
+    {
+        float m = dot(base, vec3(0.3333333432674407958984375));
+        float over = max(m - threshold, 0.0);
+        excess = base * (over / max(m, 9.9999997473787516355514526367188e-06));
+    }
+    else
+    {
+        if (_51)
+        {
+            float m_1 = dot(vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875), base);
+            float over_1 = max(m_1 - threshold, 0.0);
+            excess = base * (over_1 / max(m_1, 9.9999997473787516355514526367188e-06));
+        }
+        else
+        {
+            excess = max(base - vec3(threshold), vec3(0.0));
+        }
+    }
+    out_color = vec4(excess, 1.0);
+}
+

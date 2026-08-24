@@ -29,7 +29,7 @@
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SRC="$REPO_ROOT/code/renderervk/tr_backend.c"
+SRC="$REPO_ROOT/code/render/ral/backends/vulkan/renderer/tr_backend.c"
 
 # Count, in tr_backend.c, the Forward+ XOR-split sites:
 #   union-render sites: a call to RB_RenderForwardPlusUnion() guarded by a predicate

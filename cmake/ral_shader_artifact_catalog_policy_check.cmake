@@ -4,8 +4,8 @@
 if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
-file(READ "${ROOT}/code/renderervk/shaders/compile.mjs" COMPILER)
-file(READ "${ROOT}/code/renderervk/shaders/shader_artifact_catalog.mjs" CATALOG)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/compile.mjs" COMPILER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/shader_artifact_catalog.mjs" CATALOG)
 file(READ "${ROOT}/tests/ral_shader_artifact_catalog_test.mjs" HOST)
 file(READ "${ROOT}/tests/ral_shader_abi_test.c" C_HOST)
 

@@ -116,7 +116,7 @@ int main( void ) {
 		0u,1u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,15u,14u,26u
 	};
 	fixture_t f;
-	vkGenericSpecializationFacts_t facts = { 1u, qfalse };
+	vkGenericSpecializationFacts_t facts = { 1u, qfalse, qfalse };
 	vkGenericSpecializationReceipt_t receipt, before;
 	vkGenericSpecializationGraph_t graph, graphBefore;
 	uint32_t vertexBefore, fragmentBefore[VK_GENERIC_FRAGMENT_SPEC_COUNT];
@@ -215,6 +215,14 @@ int main( void ) {
 	f.fragmentWords[13]=1u;REJECT_CURRENT();f.fragmentWords[13]=0u;
 	f.fragmentWords[14]=3u;REJECT_CURRENT();f.fragmentWords[14]=2u;
 	facts.textureCount=0u;f.fragmentWords[4]=1u;f.fragmentWords[6]=0u;f.fragmentWords[14]=1u;CHECK(VK_GenericTemporalSpecializationValidate(&f.pipeline,&facts,NULL));
+	facts.alphaTested=qtrue;f.fragmentWords[0]=1u;
+	CHECK(VK_GenericTemporalSpecializationValidate(&f.pipeline,&facts,NULL));
+	f.fragmentWords[1]=FloatBits(0.5f);REJECT_CURRENT();
+	f.fragmentWords[0]=2u;CHECK(VK_GenericTemporalSpecializationValidate(&f.pipeline,&facts,NULL));
+	facts.textureCount=1u;REJECT_CURRENT();facts.textureCount=0u;
+	facts.alphaTested=qfalse;REJECT_CURRENT();
+	f.fragmentWords[0]=0u;f.fragmentWords[1]=0u;
+	CHECK(VK_GenericTemporalSpecializationValidate(&f.pipeline,&facts,NULL));
 	for(i=1u;i<=7u;++i){f.fragmentWords[6]=i;REJECT_CURRENT();}f.fragmentWords[6]=0u;f.fragmentWords[4]=2u;REJECT_CURRENT();
 	facts.textureCount=2u;f.fragmentWords[4]=7u;f.fragmentWords[14]=3u;
 	for(i=0u;i<=7u;++i){f.fragmentWords[6]=i;CHECK(VK_GenericTemporalSpecializationValidate(&f.pipeline,&facts,NULL));}f.fragmentWords[6]=7u;

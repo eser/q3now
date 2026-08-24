@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
 #include "client.h"
-#include "../renderercommon/r_profile_telemetry.h"
+#include "../render/frontend/r_profile_telemetry.h"
 LOG_DECLARE_CHANNEL( ch_client, "client" );
 
 #ifdef _WIN32

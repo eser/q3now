@@ -3,22 +3,22 @@ if(NOT DEFINED ROOT)
   message(FATAL_ERROR "ROOT required")
 endif()
 
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph.h" HEADER)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph.c" CORE)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_execution.h" EXEC_HEADER)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_execution.c" EXEC_CORE)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_transient.h" TRANSIENT_HEADER)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_transient.c" TRANSIENT_CORE)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_transient_ral.c" RAL_TRANSIENT)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_record.h" RECORD_HEADER)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_record.c" RECORD_CORE)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_record_ral.c" RAL_RECORD)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_submit.h" SUBMIT_HEADER)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_submit.c" SUBMIT_CORE)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_submit_ral.c" RAL_SUBMIT)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_native.h" NATIVE_HEADER)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_native.c" NATIVE_CORE)
-file(READ "${ROOT}/code/renderer/ral_frame_graph/ral_frame_graph_native_receipt.c" NATIVE_RECEIPT)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph.h" HEADER)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph.c" CORE)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph_execution.h" EXEC_HEADER)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph_execution.c" EXEC_CORE)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph_transient.h" TRANSIENT_HEADER)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph_transient.c" TRANSIENT_CORE)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph_transient_ral.c" RAL_TRANSIENT)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph_record.h" RECORD_HEADER)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph_record.c" RECORD_CORE)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph_record_ral.c" RAL_RECORD)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph_submit.h" SUBMIT_HEADER)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph_submit.c" SUBMIT_CORE)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph_submit_ral.c" RAL_SUBMIT)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph_native.h" NATIVE_HEADER)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph_native.c" NATIVE_CORE)
+file(READ "${ROOT}/code/render/ral/core/frame_graph/ral_frame_graph_native_receipt.c" NATIVE_RECEIPT)
 file(READ "${ROOT}/tests/ral_frame_graph_test.c" TEST)
 file(READ "${ROOT}/tests/ral_frame_graph_execution_test.c" EXEC_TEST)
 file(READ "${ROOT}/tests/ral_frame_graph_transient_test.c" TRANSIENT_TEST)
@@ -26,7 +26,7 @@ file(READ "${ROOT}/tests/ral_frame_graph_record_test.c" RECORD_TEST)
 file(READ "${ROOT}/tests/ral_frame_graph_submit_test.c" SUBMIT_TEST)
 file(READ "${ROOT}/tests/ral_frame_graph_native_receipt_test.c" NATIVE_TEST)
 file(READ "${ROOT}/tests/ral-frame-graph-runtime-check.sh" NATIVE_RUNTIME)
-file(READ "${ROOT}/code/renderervk/vk_ral_textures.c" PRODUCT_ADAPTER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c" PRODUCT_ADAPTER)
 file(READ "${ROOT}/CMakeLists.txt" CMAKE_TEXT)
 file(READ "${ROOT}/Makefile" MAKE_TEXT)
 file(READ "${ROOT}/tests/README.md" README_TEXT)
@@ -486,16 +486,16 @@ foreach(needle IN ITEMS
   "ral_frame_graph_transient_test"
   "ral_frame_graph_record_test"
   "ral_frame_graph_submit_test"
-  "code/renderer/ral_frame_graph/ral_frame_graph.c"
-  "code/renderer/ral_frame_graph/ral_frame_graph_execution.c"
-  "code/renderer/ral_frame_graph/ral_frame_graph_transient.c"
-  "code/renderer/ral_frame_graph/ral_frame_graph_transient_ral.c"
-  "code/renderer/ral_frame_graph/ral_frame_graph_record.c"
-  "code/renderer/ral_frame_graph/ral_frame_graph_record_ral.c"
-  "code/renderer/ral_frame_graph/ral_frame_graph_submit.c"
-  "code/renderer/ral_frame_graph/ral_frame_graph_submit_ral.c"
-  "code/renderer/ral_frame_graph/ral_frame_graph_native.c"
-  "code/renderer/ral_frame_graph/ral_frame_graph_native_receipt.c"
+  "code/render/ral/core/frame_graph/ral_frame_graph.c"
+  "code/render/ral/core/frame_graph/ral_frame_graph_execution.c"
+  "code/render/ral/core/frame_graph/ral_frame_graph_transient.c"
+  "code/render/ral/core/frame_graph/ral_frame_graph_transient_ral.c"
+  "code/render/ral/core/frame_graph/ral_frame_graph_record.c"
+  "code/render/ral/core/frame_graph/ral_frame_graph_record_ral.c"
+  "code/render/ral/core/frame_graph/ral_frame_graph_submit.c"
+  "code/render/ral/core/frame_graph/ral_frame_graph_submit_ral.c"
+  "code/render/ral/core/frame_graph/ral_frame_graph_native.c"
+  "code/render/ral/core/frame_graph/ral_frame_graph_native_receipt.c"
   "ral_frame_graph_contract"
   "ral_frame_graph_execution_contract"
   "ral_frame_graph_transient_contract"
@@ -513,19 +513,19 @@ file(GLOB_RECURSE PRODUCT_SOURCES
   "${ROOT}/code/client/*.c" "${ROOT}/code/client/*.h"
   "${ROOT}/code/renderer/*.c" "${ROOT}/code/renderer/*.h"
   "${ROOT}/code/renderer2/*.c" "${ROOT}/code/renderer2/*.h"
-  "${ROOT}/code/renderervk/*.c" "${ROOT}/code/renderervk/*.h"
-  "${ROOT}/code/renderercommon/*.c" "${ROOT}/code/renderercommon/*.h"
-  "${ROOT}/code/renderercommon/*.cpp" "${ROOT}/code/renderercommon/*.mm")
+  "${ROOT}/code/render/ral/backends/vulkan/renderer/*.c" "${ROOT}/code/render/ral/backends/vulkan/renderer/*.h"
+  "${ROOT}/code/render/frontend/*.c" "${ROOT}/code/render/frontend/*.h"
+  "${ROOT}/code/render/frontend/*.cpp" "${ROOT}/code/render/frontend/*.mm")
 set(NATIVE_PRODUCT_CALL_COUNT 0)
 foreach(path IN LISTS PRODUCT_SOURCES)
-  if(path MATCHES "/code/renderer/ral_frame_graph/")
+  if(path MATCHES "/code/render/ral/core/frame_graph/")
     continue()
   endif()
   file(READ "${path}" text)
   string(REGEX MATCHALL "RalFrameGraphNative_Run[(]" native_calls "${text}")
   list(LENGTH native_calls native_call_count)
   if(native_call_count GREATER 0)
-    if(NOT path STREQUAL "${ROOT}/code/renderervk/vk_ral_textures.c")
+    if(NOT path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c")
       message(FATAL_ERROR "native frame-graph diagnostic escaped sole product adapter: ${path}")
     endif()
     math(EXPR NATIVE_PRODUCT_CALL_COUNT

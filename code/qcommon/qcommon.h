@@ -1605,6 +1605,11 @@ int Sys_MonkeyShouldBeSpanked( void );
 void *Sys_LoadLibrary( const char *name );
 void *Sys_LoadFunction( void *handle, const char *name );
 int   Sys_LoadFunctionErrors( void );
+#if defined(__EMSCRIPTEN__)
+void  Sys_CallDllEntry( void *symbol, dllSyscall_t syscall );
+intptr_t Sys_CallVmMain( vmMainFunc_t symbol, int command,
+	int arg0, int arg1, int arg2 );
+#endif
 void  Sys_UnloadLibrary( void *handle );
 
 // adaptive huffman functions

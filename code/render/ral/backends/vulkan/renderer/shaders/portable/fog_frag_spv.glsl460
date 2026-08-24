@@ -1,0 +1,30 @@
+#version 460
+
+layout(binding = 0, std140) uniform UBO
+{
+    vec4 eyePos;
+    vec4 lightPos;
+    vec4 lightColor;
+    vec4 lightVector;
+    vec4 fogDistanceVector;
+    vec4 fogDepthVector;
+    vec4 fogEyeT;
+    vec4 fogColor;
+    vec4 _pad_to_packed_indices[26];
+    uvec4 packed_indices[3];
+} _22;
+
+layout(binding = 0) uniform texture2D wired_bindless_images[64];
+layout(binding = 0) uniform sampler wired_bindless_samplers[32];
+
+layout(location = 4) in vec2 fog_tex_coord;
+layout(location = 0) out vec4 out_color;
+
+void main()
+{
+    uint _31 = _22.packed_indices[0].w & 4095u;
+    uint _45 = (_22.packed_indices[0].w >> uint(12)) & 255u;
+    vec4 fog = texture(sampler2D(wired_bindless_images[_31], wired_bindless_samplers[_45]), fog_tex_coord);
+    out_color = fog * _22.fogColor;
+}
+

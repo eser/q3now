@@ -4,7 +4,7 @@
 // tr_shade_calc.c
 
 #include "tr_local.h"
-#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.cmd
+#include "../render/frontend/r_log.h"  // rilog-channel-mechanism Turn C — renderer.cmd
 
 R_LOG_DECLARE_CHANNEL( rch_cmd, "renderer.cmd" );
 

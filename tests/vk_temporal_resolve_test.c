@@ -392,7 +392,7 @@ int main( void ) {
 		bad = ticket; bad.products.velocityView = H( 0xe03 );
 		CHECK( !VK_TemporalResolveTicketEqualExact( &ticket, &bad ) );
 	}
-	CHECK( commandCount == baseCommands + 14 );
+	CHECK( commandCount == baseCommands + 13 );
 	CHECK( capturedPush.extent[0] == 1280 && capturedPush.extent[1] == 720
 		&& capturedPush.currentEffectiveJitterUv[0] ==
 			f.authority.currentEffectiveJitterUv[0]
@@ -409,67 +409,62 @@ int main( void ) {
 		&& commands[baseCommands + 0].b == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
 		&& commands[baseCommands + 0].c == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 	CHECK( commands[baseCommands + 1].kind == 'T'
-		&& commands[baseCommands + 1].object == f.key.currentDepth
+		&& commands[baseCommands + 1].object == f.key.historyColor[0]
 		&& commands[baseCommands + 1].a == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
 		&& commands[baseCommands + 1].b == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
 		&& commands[baseCommands + 1].c == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 	CHECK( commands[baseCommands + 2].kind == 'T'
-		&& commands[baseCommands + 2].object == f.key.historyColor[0]
+		&& commands[baseCommands + 2].object == f.key.historyDepth[0]
 		&& commands[baseCommands + 2].a == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
 		&& commands[baseCommands + 2].b == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
 		&& commands[baseCommands + 2].c == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 	CHECK( commands[baseCommands + 3].kind == 'T'
-		&& commands[baseCommands + 3].object == f.key.historyDepth[0]
-		&& commands[baseCommands + 3].a == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+		&& commands[baseCommands + 3].object == f.key.velocity
+		&& commands[baseCommands + 3].a == RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
 		&& commands[baseCommands + 3].b == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
 		&& commands[baseCommands + 3].c == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 	CHECK( commands[baseCommands + 4].kind == 'T'
-		&& commands[baseCommands + 4].object == f.key.velocity
+		&& commands[baseCommands + 4].object == f.key.validity
 		&& commands[baseCommands + 4].a == RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
 		&& commands[baseCommands + 4].b == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
 		&& commands[baseCommands + 4].c == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
-	CHECK( commands[baseCommands + 5].kind == 'T'
-		&& commands[baseCommands + 5].object == f.key.validity
-		&& commands[baseCommands + 5].a == RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+	CHECK( commands[baseCommands + 5].object == f.key.resolvedTarget
+		&& commands[baseCommands + 5].kind == 'T'
+		&& commands[baseCommands + 5].a == RAL_PIPELINE_STAGE_ALL_COMMANDS_BIT
 		&& commands[baseCommands + 5].b == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-		&& commands[baseCommands + 5].c == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
-	CHECK( commands[baseCommands + 6].object == f.key.resolvedTarget
-		&& commands[baseCommands + 6].kind == 'T'
-		&& commands[baseCommands + 6].a == RAL_PIPELINE_STAGE_ALL_COMMANDS_BIT
-		&& commands[baseCommands + 6].b == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-		&& commands[baseCommands + 6].c == VK_IMAGE_LAYOUT_GENERAL );
-	CHECK( commands[baseCommands + 7].kind == 'P'
-		&& commands[baseCommands + 7].object == owner.pipeline );
-	CHECK( commands[baseCommands + 8].kind == 'G'
-		&& commands[baseCommands + 8].object == owner.groups[0]
-		&& commands[baseCommands + 8].a == 0 );
-	CHECK( commands[baseCommands + 9].kind == 'U'
-		&& commands[baseCommands + 9].a == RAL_STAGE_COMPUTE
-		&& commands[baseCommands + 9].b == sizeof( vkTemporalResolvePush_t ) );
-	CHECK( commands[baseCommands + 10].kind == 'D'
-		&& commands[baseCommands + 10].a == 160
-		&& commands[baseCommands + 10].b == 90
-		&& commands[baseCommands + 10].c == 1 );
+		&& commands[baseCommands + 5].c == VK_IMAGE_LAYOUT_GENERAL );
+	CHECK( commands[baseCommands + 6].kind == 'P'
+		&& commands[baseCommands + 6].object == owner.pipeline );
+	CHECK( commands[baseCommands + 7].kind == 'G'
+		&& commands[baseCommands + 7].object == owner.groups[0]
+		&& commands[baseCommands + 7].a == 0 );
+	CHECK( commands[baseCommands + 8].kind == 'U'
+		&& commands[baseCommands + 8].a == RAL_STAGE_COMPUTE
+		&& commands[baseCommands + 8].b == sizeof( vkTemporalResolvePush_t ) );
+	CHECK( commands[baseCommands + 9].kind == 'D'
+		&& commands[baseCommands + 9].a == 160
+		&& commands[baseCommands + 9].b == 90
+		&& commands[baseCommands + 9].c == 1 );
+	CHECK( commands[baseCommands + 10].kind == 'T'
+		&& commands[baseCommands + 10].object == f.key.velocity
+		&& commands[baseCommands + 10].a == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+		&& commands[baseCommands + 10].b ==
+			RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+		&& commands[baseCommands + 10].c ==
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
 	CHECK( commands[baseCommands + 11].kind == 'T'
-		&& commands[baseCommands + 11].object == f.key.velocity
+		&& commands[baseCommands + 11].object == f.key.validity
 		&& commands[baseCommands + 11].a == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
 		&& commands[baseCommands + 11].b ==
 			RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
 		&& commands[baseCommands + 11].c ==
 			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
 	CHECK( commands[baseCommands + 12].kind == 'T'
-		&& commands[baseCommands + 12].object == f.key.validity
+		&& commands[baseCommands + 12].object == f.key.resolvedTarget
 		&& commands[baseCommands + 12].a == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-		&& commands[baseCommands + 12].b ==
-			RAL_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-		&& commands[baseCommands + 12].c ==
-			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
-	CHECK( commands[baseCommands + 13].kind == 'T'
-		&& commands[baseCommands + 13].object == f.key.resolvedTarget
-		&& commands[baseCommands + 13].a == RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-		&& commands[baseCommands + 13].b == ( RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+		&& commands[baseCommands + 12].b == ( RAL_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
 			| RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT )
-		&& commands[baseCommands + 13].c ==
+		&& commands[baseCommands + 12].c ==
 			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
 
 	memset( &submitted, 0x5a, sizeof( submitted ) ); ticketBefore = submitted;

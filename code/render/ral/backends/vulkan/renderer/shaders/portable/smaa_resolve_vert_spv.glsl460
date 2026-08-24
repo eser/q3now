@@ -1,0 +1,18 @@
+#version 460
+
+layout(binding = 0, std140) uniform RtMetrics
+{
+    vec4 rtMetrics;
+} _48;
+
+layout(location = 0) out vec2 texcoord;
+layout(location = 1) out vec4 offset;
+
+void main()
+{
+    vec2 pos = vec2(float((gl_VertexIndex << 1) & 2), float(gl_VertexIndex & 2));
+    gl_Position = vec4((pos * 2.0) - vec2(1.0), 0.0, 1.0);
+    texcoord = pos;
+    offset = texcoord.xyxy + (_48.rtMetrics.xyxy * vec4(1.0, 0.0, 0.0, 1.0));
+}
+

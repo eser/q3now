@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
-file(READ "${ROOT}/code/renderervk/vk_temporal_resolved_hdr.h" HDR_H)
-file(READ "${ROOT}/code/renderervk/vk_temporal_resolved_hdr.c" HDR)
-file(READ "${ROOT}/code/renderervk/vk.c" VKC)
-file(READ "${ROOT}/code/renderervk/vk_ral_textures.c" RAL_TEX)
-file(READ "${ROOT}/code/renderervk/tr_backend.c" BACKEND)
-file(READ "${ROOT}/code/renderervk/tr_init.c" TR_INIT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolved_hdr.h" HDR_H)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolved_hdr.c" HDR)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c" RAL_TEX)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_backend.c" BACKEND)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_init.c" TR_INIT)
 file(READ "${ROOT}/tests/vk_temporal_resolved_hdr_test.c" TEST)
 file(READ "${ROOT}/CMakeLists.txt" BUILD)
 
@@ -117,16 +117,16 @@ require_count(VKC "vk_scene_color_attachment_generation = 0" 3
 	"publish-decline plus raw create/destroy invalidation authorities")
 require_count_in_span(VKC
 	"static void vk_create_attachments( void )\n{"
-	"static void vk_create_framebuffers( void )\n{"
+	"void vk_create_pipelines( void )\n{"
 	"vk_scene_color_attachment_generation = 0" 1
 	"single raw-create invalidation")
 require_count_in_span(VKC
 	"static void vk_destroy_attachments( void )\n{"
-	"static void vk_destroy_render_passes( void )\n{"
+	"void vk_shutdown( refShutdownCode_t code )\n{"
 	"vk_scene_color_attachment_generation = 0" 1
 	"single raw-destroy invalidation")
-require_text(VKC "!vk.color_image || !vk.color_image_view || !vk.ral_color_image"
-	"raw/adopted scene identity gate")
+require_text(VKC "if ( !vk.ral_color_image\n\t\t\t|| !vk.ral_color_descriptor || !vk.ral_bgl_sampler"
+	"adopted scene identity gate")
 require_text(VKC "!vk.ral_histogram_bgl || !vk.ral_histogram_buffer"
 	"histogram cohort gate")
 string(FIND "${RAL_TEX}" "vk_hdr_histogram_init( s_ral_backend );" histogram_init)
@@ -228,16 +228,22 @@ require_order_in_span(VKC
 	"swapchain rebuild child-before-parent")
 require_order_in_span(VKC
 	"static void vk_create_attachments( void )\n{"
-	"static void vk_create_framebuffers( void )\n{"
+	"void vk_create_pipelines( void )\n{"
 	"vk_scene_color_attachment_generation = 0;"
-	"vk_clear_attachment_pool();"
+	"if ( vk.fboActive ) {"
 	"raw scene create invalidates publication first")
 require_order_in_span(VKC
 	"static void vk_destroy_attachments( void )\n{"
-	"static void vk_destroy_render_passes( void )\n{"
+	"void vk_shutdown( refShutdownCode_t code )\n{"
 	"vk_scene_color_attachment_generation = 0;"
-	"if ( vk.bloom_image[0] )"
+	"if ( vk_ral_get_backend() )"
 	"raw scene destroy invalidates publication first")
+require_order_in_span(VKC
+	"static void vk_destroy_attachments( void )\n{"
+	"void vk_shutdown( refShutdownCode_t code )\n{"
+	"vk_ral_release_internal_texture_dependents();"
+	"if ( vk.ral_color_image ) {"
+	"adopted attachment children retire before raw scene parent")
 require_order_in_span(VKC
 	"void vk_shutdown( refShutdownCode_t code )"
 	"void vk_wait_idle( void )"
@@ -259,12 +265,10 @@ require_order_in_span(TR_INIT
 
 string(FIND "${FRAME}" "vk_wait_idle();" depth_idle)
 string(FIND "${FRAME}" "vk_temporal_resolved_hdr_release_after_idle(\n\t\t\t\"scene-depth-attachment-rebuild\" );" depth_release)
-string(FIND "${FRAME}" "vk_ral_destroy_adopted_internal_textures();" depth_static)
 string(FIND "${FRAME}" "vk_destroy_attachments();" depth_parent)
 if(depth_idle LESS 0 OR depth_release LESS depth_idle
-		OR depth_static LESS depth_release
-		OR depth_parent LESS depth_static)
-	message(FATAL_ERROR "H2a policy: idle < H3/H1/Store/H2 release+drain < adopted children < raw parent drift")
+		OR depth_parent LESS depth_release)
+	message(FATAL_ERROR "H2a policy: idle < H3/H1/Store/H2 release+drain < centralized attachment child/parent teardown drift")
 endif()
 
 # H2b chooses one command-local cohort and every downstream HDR consumer uses
@@ -325,7 +329,7 @@ foreach(member IN ITEMS target targetView postprocessGroup histogramGroup)
 		"direct owner-member consumer ${member}")
 endforeach()
 
-file(GLOB PRODUCT_C "${ROOT}/code/renderervk/*.c")
+file(GLOB PRODUCT_C "${ROOT}/code/render/ral/backends/vulkan/renderer/*.c")
 foreach(path IN LISTS PRODUCT_C)
 	get_filename_component(name "${path}" NAME)
 	file(READ "${path}" SRC)
@@ -390,6 +394,6 @@ require_text(TEST "VK_TemporalResolvedHdrResolveContentSubmit("
 	"submit promotion/cancel contract")
 require_text(BUILD "ADD_EXECUTABLE(vk_temporal_resolved_hdr_test"
 	"host test registration")
-require_text(BUILD "AUX_SOURCE_DIRECTORY(code/renderervk RENDERER_VK_SRCS)"
+require_text(BUILD "AUX_SOURCE_DIRECTORY(code/render/ral/backends/vulkan/renderer RENDERER_VK_SRCS)"
 	"product source ownership")
 message(STATUS "H2 resolved-HDR target/copy/router policy: PASS")

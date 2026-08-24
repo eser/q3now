@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
-#include "../code/renderervk/vk_temporal_iqm_payload.h"
+#include "../code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload.h"
 
 #include <stdio.h>
 #include <stdlib.h>

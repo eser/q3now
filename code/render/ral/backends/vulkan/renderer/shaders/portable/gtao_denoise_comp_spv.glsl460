@@ -1,0 +1,79 @@
+#version 460
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(std140, binding = 4) uniform DenoisePush
+{
+    vec2 viewportSize;
+    float zNear;
+    float zFar;
+} pc;
+
+layout(binding = 0) uniform texture2D depthTex;
+layout(binding = 0) uniform sampler depthSampler;
+layout(binding = 0, r16f) uniform readonly image2D aoIn;
+layout(binding = 1, r16f) uniform writeonly image2D aoOut;
+
+float linearizeDepth(float z)
+{
+    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+}
+
+float linearAt(ivec2 p)
+{
+    vec2 uv = (vec2(p) + vec2(0.5)) / pc.viewportSize;
+    float param = textureLod(sampler2D(depthTex, depthSampler), uv, 0.0).x;
+    return linearizeDepth(param);
+}
+
+void main()
+{
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = ivec2(pc.viewportSize);
+    bool _95 = pix.x >= dim.x;
+    bool _105;
+    if (!_95)
+    {
+        _105 = pix.y >= dim.y;
+    }
+    else
+    {
+        _105 = _95;
+    }
+    if (_105)
+    {
+        return;
+    }
+    ivec2 param = pix;
+    float centerLin = linearAt(param);
+    float depthScale = 1.0 / max(centerLin * 0.0500000007450580596923828125, 0.001000000047497451305389404296875);
+    float sum = 0.0;
+    float wsum = 0.0;
+    for (int dy = -2; dy <= 2; dy++)
+    {
+        for (int dx = -2; dx <= 2; dx++)
+        {
+            ivec2 q = clamp(pix + ivec2(dx, dy), ivec2(0), dim - ivec2(1));
+            float ao = imageLoad(aoIn, q).x;
+            ivec2 param_1 = q;
+            float dl = linearAt(param_1);
+            float wd = exp((-float((dx * dx) + (dy * dy))) * 0.5);
+            float ddiff = abs(dl - centerLin) * depthScale;
+            float we = exp((-ddiff) * ddiff);
+            float w = wd * we;
+            sum += (ao * w);
+            wsum += w;
+        }
+    }
+    float _208;
+    if (wsum > 9.9999997473787516355514526367188e-06)
+    {
+        _208 = sum / wsum;
+    }
+    else
+    {
+        _208 = imageLoad(aoIn, pix).x;
+    }
+    float result = _208;
+    imageStore(aoOut, pix, vec4(result));
+}
+

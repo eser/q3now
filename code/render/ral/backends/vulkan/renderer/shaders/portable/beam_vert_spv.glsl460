@@ -1,0 +1,220 @@
+#version 460
+
+struct BeamHeader
+{
+    vec4 start;
+    vec4 end;
+    vec4 startColor;
+    vec4 endColor;
+    vec2 uvScroll;
+    float startWidth;
+    float endWidth;
+    float spawnTime;
+    uint shaderHandle;
+    uint axialCopies;
+    uint flags;
+};
+
+struct PrimitiveStageGPU
+{
+    uint imageSlot;
+    uint blendPacked;
+    uint rgbGen;
+    uint alphaGen;
+    vec2 uvScale;
+    vec2 uvScroll;
+};
+
+layout(binding = 0, std430) readonly buffer Headers
+{
+    BeamHeader beams[];
+} _56;
+
+layout(binding = 0, std140) uniform EffectsUBO
+{
+    mat4 mvp;
+    vec4 eyeWorld;
+    vec4 frameParams;
+    vec4 stageParams;
+} _100;
+
+layout(binding = 2, std430) readonly buffer StageCounts
+{
+    uint stageCounts[];
+} _109;
+
+layout(binding = 1, std430) readonly buffer Stages
+{
+    PrimitiveStageGPU stages[];
+} _130;
+
+layout(location = 0) out vec2 fragUV;
+layout(location = 1) out vec4 fragColor;
+layout(location = 2) flat out uint fragShaderHandle;
+layout(location = 3) flat out uint fragImageSlot;
+
+void emitDegenerate()
+{
+    gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+    fragUV = vec2(0.0);
+    fragColor = vec4(0.0);
+    fragShaderHandle = 0u;
+    fragImageSlot = 0u;
+}
+
+void main()
+{
+    uint beamIdx = uint(gl_InstanceIndex);
+    uint vertexIdx = uint(gl_VertexIndex);
+    uint copyIdx = vertexIdx / 6u;
+    uint localIdx = vertexIdx % 6u;
+    BeamHeader hdr;
+    hdr.start = _56.beams[beamIdx].start;
+    hdr.end = _56.beams[beamIdx].end;
+    hdr.startColor = _56.beams[beamIdx].startColor;
+    hdr.endColor = _56.beams[beamIdx].endColor;
+    hdr.uvScroll = _56.beams[beamIdx].uvScroll;
+    hdr.startWidth = _56.beams[beamIdx].startWidth;
+    hdr.endWidth = _56.beams[beamIdx].endWidth;
+    hdr.spawnTime = _56.beams[beamIdx].spawnTime;
+    hdr.shaderHandle = _56.beams[beamIdx].shaderHandle;
+    hdr.axialCopies = _56.beams[beamIdx].axialCopies;
+    hdr.flags = _56.beams[beamIdx].flags;
+    uint stageIdx = uint(_100.stageParams.x);
+    uint stageCount = _109.stageCounts[hdr.shaderHandle];
+    if (stageIdx >= stageCount)
+    {
+        emitDegenerate();
+        return;
+    }
+    uint _136 = (hdr.shaderHandle * 4u) + stageIdx;
+    PrimitiveStageGPU stage;
+    stage.imageSlot = _130.stages[_136].imageSlot;
+    stage.blendPacked = _130.stages[_136].blendPacked;
+    stage.rgbGen = _130.stages[_136].rgbGen;
+    stage.alphaGen = _130.stages[_136].alphaGen;
+    stage.uvScale = _130.stages[_136].uvScale;
+    stage.uvScroll = _130.stages[_136].uvScroll;
+    if (copyIdx >= hdr.axialCopies)
+    {
+        emitDegenerate();
+        return;
+    }
+    vec3 startW = hdr.start.xyz;
+    vec3 endW = hdr.end.xyz;
+    vec3 axis = endW - startW;
+    float len = length(axis);
+    if (len < 9.9999997473787516355514526367188e-05)
+    {
+        emitDegenerate();
+        return;
+    }
+    vec3 axisN = axis / vec3(len);
+    vec3 center = (startW + endW) * 0.5;
+    vec3 toEye = _100.eyeWorld.xyz - center;
+    vec3 sideRaw = cross(axisN, toEye);
+    float sideLen = length(sideRaw);
+    vec3 side;
+    if (sideLen < 9.9999997473787516355514526367188e-05)
+    {
+        vec3 ad = abs(axisN);
+        bool _222 = ad.x <= ad.y;
+        bool _231;
+        if (_222)
+        {
+            _231 = ad.x <= ad.z;
+        }
+        else
+        {
+            _231 = _222;
+        }
+        vec3 _232;
+        if (_231)
+        {
+            _232 = vec3(1.0, 0.0, 0.0);
+        }
+        else
+        {
+            _232 = mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 0.0), bvec3(ad.y <= ad.z));
+        }
+        vec3 fb = _232;
+        side = normalize(cross(axisN, fb));
+    }
+    else
+    {
+        side = sideRaw / vec3(sideLen);
+    }
+    float angle = (float(copyIdx) * 3.1415927410125732421875) / float(hdr.axialCopies);
+    float c = cos(angle);
+    float s = sin(angle);
+    vec3 rotSide = ((side * c) + (cross(axisN, side) * s)) + ((axisN * dot(axisN, side)) * (1.0 - c));
+    vec3 v0 = startW - (rotSide * hdr.startWidth);
+    vec3 v1 = startW + (rotSide * hdr.startWidth);
+    vec3 v2 = endW - (rotSide * hdr.endWidth);
+    vec3 v3 = endW + (rotSide * hdr.endWidth);
+    vec3 worldPos;
+    vec4 vertColor;
+    vec2 uv;
+    switch (localIdx)
+    {
+        case 0u:
+        {
+            worldPos = v0;
+            vertColor = hdr.startColor;
+            uv = vec2(0.0);
+            break;
+        }
+        case 1u:
+        {
+            worldPos = v1;
+            vertColor = hdr.startColor;
+            uv = vec2(0.0, 1.0);
+            break;
+        }
+        case 2u:
+        {
+            worldPos = v2;
+            vertColor = hdr.endColor;
+            uv = vec2(1.0, 0.0);
+            break;
+        }
+        case 3u:
+        {
+            worldPos = v1;
+            vertColor = hdr.startColor;
+            uv = vec2(0.0, 1.0);
+            break;
+        }
+        case 4u:
+        {
+            worldPos = v3;
+            vertColor = hdr.endColor;
+            uv = vec2(1.0);
+            break;
+        }
+        default:
+        {
+            worldPos = v2;
+            vertColor = hdr.endColor;
+            uv = vec2(1.0, 0.0);
+            break;
+        }
+    }
+    gl_Position = _100.mvp * vec4(worldPos, 1.0);
+    float scrollT;
+    if ((hdr.flags & 32u) != 0u)
+    {
+        scrollT = _100.frameParams.y;
+    }
+    else
+    {
+        scrollT = max(_100.frameParams.y - hdr.spawnTime, 0.0);
+    }
+    vec2 baseUV = uv * stage.uvScale;
+    vec2 totalScroll = stage.uvScroll + hdr.uvScroll;
+    fragUV = baseUV + (totalScroll * scrollT);
+    fragColor = vertColor;
+    fragShaderHandle = hdr.shaderHandle;
+    fragImageSlot = stage.imageSlot;
+}
+

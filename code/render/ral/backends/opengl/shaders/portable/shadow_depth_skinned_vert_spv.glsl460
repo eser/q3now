@@ -1,0 +1,55 @@
+#version 460
+
+layout(binding = 1, std140) uniform BoneMatrices
+{
+    vec4 boneMats[384];
+} _21;
+
+layout(binding = 0, std140) uniform CascadeMVP
+{
+    mat4 cascadeMVP;
+} _141;
+
+layout(binding = 0, std430) readonly buffer EntityMatrices
+{
+    mat4 matrices[];
+} _148;
+
+layout(location = 4) in vec4 in_bone_weights;
+layout(location = 5) in uvec4 in_bone_indices;
+layout(location = 0) in vec3 in_position;
+layout(location = 1) in vec3 in_normal;
+layout(location = 2) in vec2 in_tex_coord;
+layout(location = 3) in vec4 in_tangent;
+
+vec3 transformByBone(uint idx, vec3 v)
+{
+    return vec3(dot(_21.boneMats[(idx * 3u) + 0u], vec4(v, 1.0)), dot(_21.boneMats[(idx * 3u) + 1u], vec4(v, 1.0)), dot(_21.boneMats[(idx * 3u) + 2u], vec4(v, 1.0)));
+}
+
+void main()
+{
+    uint param = in_bone_indices.x;
+    vec3 param_1 = in_position;
+    vec3 pos = transformByBone(param, param_1) * in_bone_weights.x;
+    if (in_bone_weights.y > 0.0)
+    {
+        uint param_2 = in_bone_indices.y;
+        vec3 param_3 = in_position;
+        pos += (transformByBone(param_2, param_3) * in_bone_weights.y);
+    }
+    if (in_bone_weights.z > 0.0)
+    {
+        uint param_4 = in_bone_indices.z;
+        vec3 param_5 = in_position;
+        pos += (transformByBone(param_4, param_5) * in_bone_weights.z);
+    }
+    if (in_bone_weights.w > 0.0)
+    {
+        uint param_6 = in_bone_indices.w;
+        vec3 param_7 = in_position;
+        pos += (transformByBone(param_6, param_7) * in_bone_weights.w);
+    }
+    gl_Position = (_141.cascadeMVP * _148.matrices[gl_InstanceIndex]) * vec4(pos, 1.0);
+}
+

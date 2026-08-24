@@ -6,9 +6,9 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseProvenanceCatalog } from '../code/renderervk/shaders/compile_xlate.mjs';
-import { runReflectionCorpus } from '../code/renderervk/shaders/compile_reflect.mjs';
-import { ralShaderArtifactDigest } from '../code/renderervk/shaders/shader_artifact_catalog.mjs';
+import { parseProvenanceCatalog } from '../code/render/ral/backends/vulkan/renderer/shaders/compile_xlate.mjs';
+import { runReflectionCorpus } from '../code/render/ral/backends/vulkan/renderer/shaders/compile_reflect.mjs';
+import { ralShaderArtifactDigest } from '../code/render/ral/backends/vulkan/renderer/shaders/shader_artifact_catalog.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'wired-reflection-host-'));
 const shaderData = join(dir, 'shader_data.c');
@@ -21,12 +21,12 @@ const hex = (value) => value.toString(16).padStart(16, '0');
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const committed = JSON.parse(readFileSync(join(root,
-	'code/renderervk/shaders/spirv/ral_shader_reflection_catalog.json'), 'utf8'));
+	'code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_reflection_catalog.json'), 'utf8'));
 const committedProvenance = parseProvenanceCatalog(readFileSync(join(root,
-	'code/renderervk/shaders/spirv/ral_shader_artifact_catalog.inc'), 'utf8'));
+	'code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_artifact_catalog.inc'), 'utf8'));
 assert.equal(committed.schemaVersion, 1);
 assert.match(committed.toolchainIdentity, /naga\/30\.0\.0\+wired-portable-v1$/);
-assert.equal(committed.sourceCount, 292);
+assert.equal(committed.sourceCount, 294);
 assert.equal(committed.entries.length, committedProvenance.length);
 for (let i = 0; i < committed.entries.length; ++i) {
 	const entry = committed.entries[i]; const provenanceRow = committedProvenance[i];

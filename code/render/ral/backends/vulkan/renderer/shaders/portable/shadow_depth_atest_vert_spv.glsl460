@@ -1,0 +1,25 @@
+#version 460
+
+layout(binding = 0, std140) uniform CascadeMVP
+{
+    mat4 cascadeMVP;
+} _29;
+
+layout(binding = 0, std430) readonly buffer EntityMatrices
+{
+    mat4 matrices[];
+} _36;
+
+layout(location = 0) out vec2 out_texcoord;
+layout(location = 1) in vec2 in_texcoord;
+layout(location = 1) flat out uint out_packed;
+layout(location = 2) in float in_packed;
+layout(location = 0) in vec3 in_position;
+
+void main()
+{
+    out_texcoord = in_texcoord;
+    out_packed = floatBitsToUint(in_packed);
+    gl_Position = (_29.cascadeMVP * _36.matrices[gl_InstanceIndex]) * vec4(in_position, 1.0);
+}
+

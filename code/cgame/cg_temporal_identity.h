@@ -5,7 +5,7 @@
 #define CG_TEMPORAL_IDENTITY_H
 
 #include "../qcommon/q_shared.h"
-#include "../renderercommon/tr_types.h"
+#include "../render/frontend/tr_types.h"
 
 typedef refEntityMotionRole_t cgTemporalRole_t;
 

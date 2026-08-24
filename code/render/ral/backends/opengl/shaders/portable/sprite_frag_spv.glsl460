@@ -1,0 +1,30 @@
+#version 460
+
+layout(binding = 0, std140) uniform EffectsUBO
+{
+    mat4 mvp;
+    vec4 viewLeft;
+    vec4 viewUp;
+    vec4 frameParams;
+} _71;
+
+layout(location = 0) out vec4 outColor;
+layout(location = 1) in vec4 fragColor;
+layout(location = 0) in vec2 fragUV;
+
+vec3 sRGBToLinear(inout vec3 c)
+{
+    c = max(c, vec3(0.0));
+    bvec3 cutoff = lessThanEqual(c, vec3(0.040449999272823333740234375));
+    vec3 lo = c / vec3(12.9200000762939453125);
+    vec3 hi = pow((c + vec3(0.054999999701976776123046875)) / vec3(1.05499994754791259765625), vec3(2.400000095367431640625));
+    return mix(hi, lo, vec3(cutoff));
+}
+
+void main()
+{
+    vec3 param = fragColor.xyz;
+    vec3 _58 = sRGBToLinear(param);
+    outColor = vec4(_58, fragColor.w);
+}
+

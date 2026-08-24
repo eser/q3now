@@ -7,16 +7,16 @@ ENDIF()
 
 FILE(REMOVE_RECURSE "${PROBE_ROOT}")
 FILE(MAKE_DIRECTORY
-	"${PROBE_ROOT}/code/renderer/ral"
-	"${PROBE_ROOT}/code/renderer/ral_vulkan"
-	"${PROBE_ROOT}/code/renderervk"
+	"${PROBE_ROOT}/code/render/ral/core"
+	"${PROBE_ROOT}/code/render/ral/backends/vulkan"
+	"${PROBE_ROOT}/code/render/ral/backends/vulkan/renderer"
 )
 FILE(COPY
-	"${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_pipeline.c"
-	DESTINATION "${PROBE_ROOT}/code/renderer/ral_vulkan"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_pipeline.c"
+	DESTINATION "${PROBE_ROOT}/code/render/ral/backends/vulkan"
 )
 STRING(CONCAT _retired "Ral_" "AdoptFramebuffer")
-FILE(WRITE "${PROBE_ROOT}/code/renderer/ral/reintroduced.h" "void ${_retired}(void);\n")
+FILE(WRITE "${PROBE_ROOT}/code/render/ral/core/reintroduced.h" "void ${_retired}(void);\n")
 
 EXECUTE_PROCESS(
 	COMMAND "${CMAKE_COMMAND}"
@@ -39,18 +39,18 @@ MESSAGE(STATUS "RAL public surface mutation: retired-symbol reintroduction rejec
 
 FILE(REMOVE_RECURSE "${PROBE_ROOT}")
 FILE(MAKE_DIRECTORY
-	"${PROBE_ROOT}/code/renderer/ral"
-	"${PROBE_ROOT}/code/renderer/ral_vulkan"
-	"${PROBE_ROOT}/code/renderervk"
+	"${PROBE_ROOT}/code/render/ral/core"
+	"${PROBE_ROOT}/code/render/ral/backends/vulkan"
+	"${PROBE_ROOT}/code/render/ral/backends/vulkan/renderer"
 )
 FILE(COPY
-	"${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_pipeline.c"
-	"${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_bridge.h"
-	DESTINATION "${PROBE_ROOT}/code/renderer/ral_vulkan"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_pipeline.c"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_bridge.h"
+	DESTINATION "${PROBE_ROOT}/code/render/ral/backends/vulkan"
 )
-FILE(WRITE "${PROBE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_internal.h" "#include \"ral_vulkan_bridge.h\"\n")
-FILE(WRITE "${PROBE_ROOT}/code/renderervk/vk_ral_textures.h" "#include \"../renderer/ral_vulkan/ral_vulkan_bridge.h\"\n")
-FILE(WRITE "${PROBE_ROOT}/code/renderer/ral/native-leak.h" "void *Ral_GetBufferHandle(const ralBuffer_t *buffer);\n")
+FILE(WRITE "${PROBE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_internal.h" "#include \"ral_vulkan_bridge.h\"\n")
+FILE(WRITE "${PROBE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.h" "#include \"../render/ral/backends/vulkan/ral_vulkan_bridge.h\"\n")
+FILE(WRITE "${PROBE_ROOT}/code/render/ral/core/native-leak.h" "void *Ral_GetBufferHandle(const ralBuffer_t *buffer);\n")
 
 EXECUTE_PROCESS(
 	COMMAND "${CMAKE_COMMAND}"

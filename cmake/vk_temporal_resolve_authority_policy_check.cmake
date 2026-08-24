@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
-file(READ "${ROOT}/code/renderervk/vk_temporal_resolve_authority.h" H)
-file(READ "${ROOT}/code/renderervk/vk_temporal_resolve_authority.c" C)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolve_authority.h" H)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolve_authority.c" C)
 file(READ "${ROOT}/tests/vk_temporal_resolve_authority_test.c" TEST)
 
 function(require_text var needle why)

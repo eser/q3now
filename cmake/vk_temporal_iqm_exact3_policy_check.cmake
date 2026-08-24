@@ -4,14 +4,14 @@
 if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
-file(READ "${ROOT}/code/renderervk/vk_temporal_iqm_exact3_factory.h" ABI)
-file(READ "${ROOT}/code/renderervk/vk_temporal_iqm_exact3_factory.c" FACTORY)
-file(READ "${ROOT}/code/renderervk/shaders/iqm_temporal_exact3.vert" VERT)
-file(READ "${ROOT}/code/renderervk/shaders/iqm_temporal_exact3.frag" FRAG)
-file(READ "${ROOT}/code/renderervk/shaders/iqm_skinning.frag" ORDINARY_FRAG)
-file(READ "${ROOT}/code/renderervk/shaders/colorspace.glsl" COLORSPACE)
-file(READ "${ROOT}/code/renderervk/shaders/shaders.manifest.mjs" MANIFEST)
-file(READ "${ROOT}/code/renderervk/shaders/spirv/shader_data.c" BLOBS)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_exact3_factory.h" ABI)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_exact3_factory.c" FACTORY)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/iqm_temporal_exact3.vert" VERT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/iqm_temporal_exact3.frag" FRAG)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/iqm_skinning.frag" ORDINARY_FRAG)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/colorspace.glsl" COLORSPACE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/shaders.manifest.mjs" MANIFEST)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/spirv/shader_data.c" BLOBS)
 file(READ "${ROOT}/tests/vk_temporal_iqm_exact3_factory_test.c" HOST)
 file(READ "${ROOT}/CMakeLists.txt" CMAKE_TEXT)
 
@@ -308,13 +308,13 @@ endforeach()
 # bind and draw authority; no shipping TU may instantiate/call this owner yet.
 file(GLOB_RECURSE PRODUCT_SURFACE "${ROOT}/code/*.c" "${ROOT}/code/*.h")
 foreach(source IN LISTS PRODUCT_SURFACE)
-	if(source STREQUAL "${ROOT}/code/renderervk/vk_temporal_iqm_exact3_factory.c" OR
-			source STREQUAL "${ROOT}/code/renderervk/vk_temporal_iqm_exact3_factory.h")
+	if(source STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_exact3_factory.c" OR
+			source STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_exact3_factory.h")
 		continue()
 	endif()
 	file(READ "${source}" source_text)
-	if(source STREQUAL "${ROOT}/code/renderervk/vk_temporal_main_activation.c" OR
-			source STREQUAL "${ROOT}/code/renderervk/vk_temporal_main_activation.h")
+	if(source STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_main_activation.c" OR
+			source STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_main_activation.h")
 		require_text("${source_text}" "vkTemporalIqmExact3FactoryReceipt_t"
 			"central activation immutable factory receipt")
 		if(source MATCHES "\\.c$")
@@ -335,8 +335,8 @@ foreach(source IN LISTS PRODUCT_SURFACE)
 		endif()
 		continue()
 	endif()
-	if(source STREQUAL "${ROOT}/code/renderervk/vk_temporal_iqm_command.c" OR
-			source STREQUAL "${ROOT}/code/renderervk/vk_temporal_iqm_command.h")
+	if(source STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_command.c" OR
+			source STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_command.h")
 		if(source MATCHES "[.]c$")
 			require_text("${source_text}" "VK_TemporalIqmExact3FactoryReceiptExact"
 				"IQM command exact current factory join")
@@ -354,7 +354,7 @@ foreach(source IN LISTS PRODUCT_SURFACE)
 		endforeach()
 		continue()
 	endif()
-	if(source STREQUAL "${ROOT}/code/renderervk/vk.c")
+	if(source STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c")
 		string(REGEX MATCHALL
 			"vkTemporalIqmExact3FactoryOwner_t[ 	]+vk_temporal_iqm_exact3_factory"
 			product_owners "${source_text}")

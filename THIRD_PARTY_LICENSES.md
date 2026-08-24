@@ -113,13 +113,13 @@ Other in-tree files are third-party code under **non-GPL** licenses; see
 - `code/qcommon/bg_lib.c` — minimal libc replacement, BSD-derived
   (BSD-3-Clause — see Appendix B).
 - `code/qcommon/util/md5.c` — MD5 implementation (see §4.6 for its license).
-- `code/renderer/iqm.h`, `code/renderervk/iqm.h` — Inter-Quake Model format
+- `code/renderer/iqm.h`, `code/render/ral/backends/vulkan/renderer/iqm.h` — Inter-Quake Model format
   header, by Lee Salzman (public domain — see §4.5).
 - `code/renderer2/glext.h` — OpenGL extension header from the Khronos OpenGL
   registry (MIT — see §4.7).
-- `code/renderervk/smaa_area_texture.h`, `code/renderervk/smaa_search_texture.h`
+- `code/render/ral/backends/vulkan/renderer/smaa_area_texture.h`, `code/render/ral/backends/vulkan/renderer/smaa_search_texture.h`
   — precomputed SMAA lookup textures (MIT, see §4.4).
-- `code/renderercommon/vulkan/*.h` — Khronos Vulkan headers (Apache-2.0 —
+- `code/render/ral/backends/vulkan/include/vulkan/*.h` — Khronos Vulkan headers (Apache-2.0 —
   see §4.2).
 
 ---
@@ -706,7 +706,7 @@ reproduces both as shipped.
 
 - **Upstream:** https://github.com/KhronosGroup/Vulkan-Headers
 - **License:** Apache License 2.0 (see Appendix E)
-- **Path:** `code/renderercommon/vulkan/`
+- **Path:** `code/render/ral/backends/vulkan/include/vulkan/`
 
 Header copyright (verbatim from `vulkan_core.h`):
 
@@ -716,7 +716,7 @@ Copyright 2015-2022 The Khronos Group Inc.
 SPDX-License-Identifier: Apache-2.0
 ```
 
-Per Apache-2.0 §4, this notice is preserved. Each `code/renderercommon/vulkan/*.h`
+Per Apache-2.0 §4, this notice is preserved. Each `code/render/ral/backends/vulkan/include/vulkan/*.h`
 file carries `SPDX-License-Identifier: Apache-2.0` and the Khronos copyright
 line (plus, where applicable, a short note recording a backported definition).
 
@@ -737,7 +737,7 @@ copyright / permission notice.
 - **Upstream:** https://github.com/iryoku/smaa
 - **License:** MIT (with an explicit clarification that the notice need not be
   reproduced in binary distributions)
-- **Path:** `code/renderervk/smaa_area_texture.h`, `code/renderervk/smaa_search_texture.h`
+- **Path:** `code/render/ral/backends/vulkan/renderer/smaa_area_texture.h`, `code/render/ral/backends/vulkan/renderer/smaa_search_texture.h`
 - **Copyright (2013):** Jorge Jimenez, Jose I. Echevarria, Belen Masia,
   Fernando Navarro, Diego Gutierrez
 
@@ -782,7 +782,7 @@ The file carries `SPDX-License-Identifier: MIT` and the Khronos copyright line.
 - **Upstream:** http://sauerbraten.org/iqm/ — by Lee Salzman
 - **License:** public domain (the format and reference header are released into
   the public domain by the author)
-- **Path:** `code/renderer/iqm.h`, `code/renderervk/iqm.h`
+- **Path:** `code/renderer/iqm.h`, `code/render/ral/backends/vulkan/renderer/iqm.h`
 - The IQM model *loaders* (`tr_model_iqm.c` in each renderer) were backported
   from ioquake3 and remain under the engine's GPL terms; only the format
   *header* `iqm.h` is the public-domain upstream artifact.
@@ -1108,7 +1108,7 @@ For q3now's distribution, that obligation is satisfied by:
 
 - shipping `src/libs/wamr/LICENSE` (and the `NOTICE` content within
   WAMR's tree) inside the q3now source archive;
-- preserving the Khronos copyright header inside `code/renderercommon/vulkan/vulkan_core.h`;
+- preserving the Khronos copyright header inside `code/render/ral/backends/vulkan/include/vulkan/vulkan_core.h`;
 - preserving the Cobra `NOTICE` and copyright text in the Go module cache
   during build (and in any redistributed source archive).
 

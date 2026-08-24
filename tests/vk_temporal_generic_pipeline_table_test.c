@@ -8,7 +8,7 @@
 #define CHECK(x) do { if(!(x)){fprintf(stderr,"FAIL pipeline table %d: %s\n",__LINE__,#x);return 1;} } while(0)
 #define VK_TEMPORAL_BLOB(name, size) const unsigned char name[size] = { 0 };
 #define VK_TEMPORAL_PAIR(tx, family, env, fog, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS)
-#include "../code/renderervk/shaders/spirv/temporal_generic_catalog.inc"
+#include "../code/render/ral/backends/vulkan/renderer/shaders/spirv/temporal_generic_catalog.inc"
 #undef VK_TEMPORAL_PAIR
 #undef VK_TEMPORAL_BLOB
 

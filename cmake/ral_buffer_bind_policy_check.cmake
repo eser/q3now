@@ -5,9 +5,9 @@ IF(NOT DEFINED SOURCE_ROOT OR NOT IS_DIRECTORY "${SOURCE_ROOT}")
 	MESSAGE(FATAL_ERROR "SOURCE_ROOT must name the q3now source tree")
 ENDIF()
 
-FILE(READ "${SOURCE_ROOT}/code/renderer/ral/ral_command.h" RAL_HEADER)
-FILE(READ "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_command.c" RAL_CORE)
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk.c" VK_SOURCE)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/core/ral_command.h" RAL_HEADER)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_command.c" RAL_CORE)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VK_SOURCE)
 FILE(READ "${SOURCE_ROOT}/tests/ral_vulkan_buffer_bind_test.c" HOST)
 
 FUNCTION(REQUIRE_TEXT BODY NEEDLE MESSAGE_TEXT)
@@ -59,19 +59,19 @@ FOREACH(FORBIDDEN IN ITEMS qvkCmdBindVertexBuffers qvkCmdBindIndexBuffer
 ENDFOREACH()
 
 FOREACH(NEEDLE IN ITEMS
-	"vk_ral_lookup_buffer( nativeBuffers[i] )"
-	"Ral_GetBufferHandle( buffers[i] ) != (void *)nativeBuffers[i]"
-	"Ral_CmdBindVertexBuffersExact( command, firstBinding, bindingCount,"
-	"vk_ral_lookup_buffer( nativeBuffer )"
-	"Ral_CmdBindIndexBufferExact( command, buffer, (uint64_t)offset,"
-	"Ral_CmdBindPipeline( command, NULL )")
+	"shade_bufs[0] = shade_bufs[1]"
+	"vk.cmd->ral_vertex_buffer"
+	"Ral_CmdBindVertexBuffersExact( vk.cmd->ral_cmd,"
+	"void vk_bind_index_buffer( ralBuffer_t *buffer, uint32_t offset )"
+	"Ral_CmdBindIndexBufferExact( vk.cmd->ral_cmd, buffer,"
+	"Ral_CmdBindPipeline( vk.cmd->ral_cmd, NULL )")
 	REQUIRE_TEXT("${VK_SOURCE}" "${NEEDLE}"
-		"registry-backed fail-closed product binding seam missing")
+		"canonical RAL-handle fail-closed product binding seam missing")
 ENDFOREACH()
-REQUIRE_COUNT("${VK_SOURCE}" "vk_ral_bind_registered_vertex_buffers(" 12
-	"shipping vertex bind inventory drifted")
-REQUIRE_COUNT("${VK_SOURCE}" "vk_ral_bind_registered_index_buffer(" 9
-	"shipping index bind inventory drifted")
+REQUIRE_COUNT("${VK_SOURCE}" "Ral_CmdBindVertexBuffersExact(" 5
+	"shipping exact vertex bind inventory drifted")
+REQUIRE_COUNT("${VK_SOURCE}" "Ral_CmdBindIndexBufferExact(" 2
+	"shipping exact index bind inventory drifted")
 
 FOREACH(NEEDLE IN ITEMS
 	"REJECT_VERTEX( vertex0.backend = &otherBackend )"
@@ -93,4 +93,4 @@ FOREACH(NEEDLE IN ITEMS
 		"buffer-binding mutation coverage missing")
 ENDFOREACH()
 
-MESSAGE(STATUS "RAL exact buffer binding policy: portable validation and 19 shipping binds pinned")
+MESSAGE(STATUS "RAL exact buffer binding policy: portable validation and canonical product binds pinned")

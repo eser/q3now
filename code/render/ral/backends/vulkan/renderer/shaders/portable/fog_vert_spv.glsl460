@@ -1,0 +1,49 @@
+#version 460
+
+layout(binding = 0, std140) uniform UBO
+{
+    vec4 eyePos;
+    vec4 lightPos;
+    vec4 lightColor;
+    vec4 lightVector;
+    vec4 fogDistanceVector;
+    vec4 fogDepthVector;
+    vec4 fogEyeT;
+    vec4 fogColor;
+    vec4 _pad_to_mvp[22];
+    mat4 mvp;
+} _19;
+
+layout(location = 0) in vec3 in_position;
+layout(location = 4) out vec2 fog_tex_coord;
+
+void main()
+{
+    gl_Position = _19.mvp * vec4(in_position, 1.0);
+    float s = dot(in_position, _19.fogDistanceVector.xyz) + _19.fogDistanceVector.w;
+    float t = dot(in_position, _19.fogDepthVector.xyz) + _19.fogDepthVector.w;
+    if (_19.fogEyeT.y == 1.0)
+    {
+        if (t < 0.0)
+        {
+            t = 0.03125;
+        }
+        else
+        {
+            t = 0.96875;
+        }
+    }
+    else
+    {
+        if (t < 1.0)
+        {
+            t = 0.03125;
+        }
+        else
+        {
+            t = 0.03125 + ((0.9375 * t) / (t - _19.fogEyeT.x));
+        }
+    }
+    fog_tex_coord = vec2(s, t);
+}
+

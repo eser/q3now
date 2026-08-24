@@ -27,7 +27,11 @@ This is the only way control passes into the module.
 This must be the very first function compiled into the .q3vm file
 ================
 */
-Q_EXPORT intptr_t vmMain( int command, int arg0, int arg1, int arg2, int arg3, int arg4, int arg5, int arg6, int arg7, int arg8, int arg9, int arg10, int arg11  ) {
+#if defined(__EMSCRIPTEN__)
+Q_EXPORT intptr_t vmMain( int command, int arg0, int arg1, int arg2 ) {
+#else
+Q_EXPORT intptr_t vmMain( int command, int arg0, int arg1, int arg2, int arg3, int arg4, int arg5, int arg6, int arg7, int arg8, int arg9, int arg10, int arg11 ) {
+#endif
 
 	switch ( command ) {
 	case CG_INIT:
@@ -1525,6 +1529,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 
 	trap_S_ClearLoopingSounds( qtrue );
 
+#if FEAT_WIRED_UI
 	/* Register the cgame's "main_scene" viewport
 	 * provider with the WiredUI compositor. The .wui WUI_LAYER_WORLD_
 	 * VIEWPORT panel (modfiles/ui/world_main.wui) carries a `type
@@ -1586,6 +1591,7 @@ void CG_Init( int serverMessageNum, int serverCommandSequence, int clientNum ) {
 			cg_camera_provider.lifetime, cg_camera_provider.input_mode,
 			cg_camera_provider.is_vm_routed, cg_camera_provider.vm_key );
 	}
+#endif
 
 }
 
@@ -1605,9 +1611,11 @@ void CG_Shutdown( void ) {
 	 * are the matching teardown for the CG_Init registrations and run first.
 	 * The two main-scene ids share one provider but each owns a registry
 	 * slot, so both are torn down. */
+#if FEAT_WIRED_UI
 	trap_UnregisterViewportProvider( "main_scene_full" );
 	trap_UnregisterViewportProvider( "main_scene_split" );
 	trap_UnregisterViewportProvider( "camera" );
+#endif
 }
 
 

@@ -128,7 +128,7 @@ typedef int particleClassHandle_t;
 // ribbon.vert: the host (vec3 pos + float width) lands on GPU
 // posW.xyz/.w, the host (vec3 normal + float _pad) lands on GPU
 // normal.xyz/.w. Total stride is 48 B (= 3 × vec4); see
-// RIBBON_POINT_BYTES in renderervk/vk.h. Memcpy is layout-correct.
+// RIBBON_POINT_BYTES in code/render/ral/backends/vulkan/renderer/vk.h. Memcpy is layout-correct.
 typedef struct {
 	vec3_t pos;
 	float  width;     // half-width perpendicular to ribbon direction
@@ -440,7 +440,7 @@ typedef struct {
 // regular pass.
 //
 // Layout chosen to be std430-friendly when serialized to SSBO (see
-// VkPrimitiveStageGPU in renderervk/vk.h).
+// VkPrimitiveStageGPU in code/render/ral/backends/vulkan/renderer/vk.h).
 
 #define PRIMITIVE_STAGE_MAX 4
 

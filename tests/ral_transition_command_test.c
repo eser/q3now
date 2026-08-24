@@ -56,6 +56,7 @@ static void SetupCommand( ralCommandBuffer_t *command, ralBackend_t *backend,
 	command->cb = (VkCommandBuffer)(uintptr_t)0x100u;
 	command->queue = queue;
 	command->state = RAL_VK_CMD_RECORDING;
+	command->lifecycle.state = RAL_COMMAND_RECORDING;
 }
 
 static void SetupBuffer( ralBuffer_t *buffer, ralBackend_t *backend,

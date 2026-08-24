@@ -1,7 +1,7 @@
 """hdr_math — Phase 6B3'-d8 HDR10 colour-space helpers for the visual-regression kit.
 
-Mirrors the host-side math in code/renderervk/shaders/gamma.frag (the HDR10
-output branch) and code/renderervk/shaders/tonemap.frag (the HDR tonemap
+Mirrors the host-side math in code/render/ral/backends/vulkan/renderer/shaders/gamma.frag (the HDR10
+output branch) and code/render/ral/backends/vulkan/renderer/shaders/tonemap.frag (the HDR tonemap
 shoulder).  expected_calc.py and readback.py both consume these so the
 "expected" side and the "captured" side share one source of truth.
 

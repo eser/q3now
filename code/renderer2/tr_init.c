@@ -4,7 +4,7 @@
 // tr_init.c -- functions that are not called every frame
 
 #include "tr_local.h"
-#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.init / .gl / .cmd
+#include "../render/frontend/r_log.h"  // rilog-channel-mechanism Turn C — renderer.init / .gl / .cmd
 
 R_LOG_DECLARE_CHANNEL( rch_init, "renderer.init" );
 R_LOG_DECLARE_CHANNEL( rch_gl,   "renderer.gl"   );
@@ -373,7 +373,7 @@ some thoughts about the screenshots system:
 screenshots get written in fs_homepath + fs_gamedir
 q3now .. base/screenshots/ *.png
 
-one command: "screenshot" (see renderercommon/tr_screenshot.c for the
+one command: "screenshot" (see code/render/frontend/tr_screenshot.c for the
 token grammar — png|jpg|bmp|tga|clipboard|silent|levelshot|<filename>)
 we use statics to store a count and start writing the first screenshot/screenshot????.tga (.jpg) available
 (with FS_FileExists / FS_FOpenFileWrite calls)
@@ -552,7 +552,7 @@ RB_TakeScreenshotBMP
 
 GL2 variant. RB_ReadPixels here takes no lineAlign argument, so the BMP
 4-byte scanline padding is materialised into a freshly allocated buffer
-(rather than the in-place rearrange the renderervk/GL1 path uses).
+(rather than the in-place rearrange the Vulkan renderer/GL1 path uses).
 ==================
 */
 static void RB_TakeScreenshotBMP( int x, int y, int width, int height, const char *fileName, int clipboardOnly )
@@ -608,7 +608,7 @@ static void RB_TakeScreenshotBMP( int x, int y, int width, int height, const cha
 ==================
 RB_TakeScreenshotPNG
 
-PNG encoder via renderercommon/tr_image_png_write.c. Input follows the
+PNG encoder via code/render/frontend/tr_image_png_write.c. Input follows the
 RB_ReadPixels convention (bottom-up RGB); padding, if any, is compacted
 in place before encoding.
 ==================
@@ -720,7 +720,7 @@ R_LevelShot
 levelshots are specialized 128*128 thumbnails for
 the menu system, sampled down from full screen distorted images
 
-Non-static — called by the shared screenshot grammar (renderercommon/
+Non-static — called by the shared screenshot grammar (code/render/frontend/
 tr_screenshot.c) via the R_LevelShot hook.
 ====================
 */
@@ -787,7 +787,7 @@ void R_LevelShot( void ) {
 ==================
 RB_ScheduleScreenshot
 
-Screenshot grammar hook (see renderercommon/tr_screenshot.h). The shared
+Screenshot grammar hook (see code/render/frontend/tr_screenshot.h). The shared
 grammar resolves (typeMask, fileName, silent); GL2 schedules the capture
 through its render-command queue (RC_SCREENSHOT). Always succeeds — GL2
 has no minimized/FBO restriction here.
@@ -1756,7 +1756,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.GetIQMAnimations = R_GetIQMAnimations;
 #endif // FEAT_IQM
 
-	// `screenshot` grammar (renderercommon/tr_screenshot.c) is registered
+	// `screenshot` grammar (code/render/frontend/tr_screenshot.c) is registered
 	// once per DLL load so it persists across map transitions — R_Register
 	// commands are torn down on every REF_LEVEL_ONLY shutdown.
 	R_ScreenshotRegisterCommands();

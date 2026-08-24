@@ -4566,6 +4566,15 @@ static void CL_InitRef( void ) {
 				log_channels[ rchss ].overrideSev = (int)SEV_INFO;
 			}
 		}
+		// Renderer conformance receipts are sparse, machine-readable proof of
+		// successful registration/content submission. Keep them visible even
+		// while the noisy renderer hierarchy retains its WARN default.
+		{
+			int rchReceipt = Log_GetChannel( "renderer.receipt" );
+			if ( rchReceipt >= 0 && rchReceipt < log_channelCount ) {
+				log_channels[ rchReceipt ].overrideSev = (int)SEV_INFO;
+			}
+		}
 		Log_ResolveAllChannels();
 		// Pre-register the renderer sub-channels so they appear in
 		// `log channels` output even before any R_LOG call hits them.
@@ -4584,6 +4593,7 @@ static void CL_InitRef( void ) {
 		(void)Log_GetChannel( "renderer.cmd"     );
 		(void)Log_GetChannel( "renderer.temporal" );
 		(void)Log_GetChannel( "renderer.screenshot" );
+		(void)Log_GetChannel( "renderer.receipt" );
 	}
 	rimp.Terminate = Com_Terminate;
 	rimp.Milliseconds = CL_ScaledMilliseconds;
@@ -4667,6 +4677,7 @@ static void CL_InitRef( void ) {
 	// OpenGL API
 #ifdef USE_OPENGL_API
 	rimp.GLimp_Init = GLimp_Init;
+	rimp.GLimp_InitOpenGL46 = GLimp_InitOpenGL46;
 	rimp.GLimp_Shutdown = GLimp_Shutdown;
 	rimp.GL_GetProcAddress = GL_GetProcAddress;
 	rimp.GLimp_EndFrame = GLimp_EndFrame;

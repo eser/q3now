@@ -1,8 +1,8 @@
-file(READ "${ROOT}/code/renderervk/vk_temporal_generic_recipe_table.h" HEADER)
-file(READ "${ROOT}/code/renderervk/vk_temporal_generic_recipe_table.c" CORE)
-file(READ "${ROOT}/code/renderervk/vk_temporal_generic_catalog.c" CATALOG)
-file(READ "${ROOT}/code/renderervk/vk.c" VKC)
-file(READ "${ROOT}/code/renderervk/vk.h" VKH)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_generic_recipe_table.h" HEADER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_generic_recipe_table.c" CORE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_generic_catalog.c" CATALOG)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" VKH)
 file(READ "${ROOT}/CMakeLists.txt" BUILD)
 file(READ "${ROOT}/tests/README.md" README)
 
@@ -139,25 +139,25 @@ foreach(token IN ITEMS "PipelineFactoryEnsure" "Ral_CreateGraphicsPipeline"
 		"Ral_Cmd" "PayloadAppendAt" "PayloadGetBindGroup" "Cvar")
 	forbid_text(CORE "${token}" "GPU/runtime authority in recipe core")
 endforeach()
-require_text(VKH "_Static_assert( sizeof( vkUniform_t ) == 608" "W-41 payload size")
+require_text(VKH "_Static_assert( sizeof( vkUniform_t ) == 640" "ordinary draw UBO size")
 forbid_text(VKH "vkTemporalGenericRecipeTable" "recipe owner in VK_Pipeline/vk state")
 
 # Only the owner implementation/header and the single vk.c product adapter may
 # mention this authority. Bare-token scanning catches whitespace/function-pointer
 # call bypasses as well as storage smuggled into another product header.
-file(GLOB PRODUCT_C "${ROOT}/code/renderervk/*.c")
-file(GLOB PRODUCT_H "${ROOT}/code/renderervk/*.h")
+file(GLOB PRODUCT_C "${ROOT}/code/render/ral/backends/vulkan/renderer/*.c")
+file(GLOB PRODUCT_H "${ROOT}/code/render/ral/backends/vulkan/renderer/*.h")
 foreach(path IN LISTS PRODUCT_C PRODUCT_H)
-	if(path STREQUAL "${ROOT}/code/renderervk/vk_temporal_generic_recipe_table.c"
-			OR path STREQUAL "${ROOT}/code/renderervk/vk_temporal_generic_recipe_table.h"
-			OR path STREQUAL "${ROOT}/code/renderervk/vk.c")
+	if(path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_generic_recipe_table.c"
+			OR path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_generic_recipe_table.h"
+			OR path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c")
 		continue()
 	endif()
 	file(READ "${path}" product_source)
 	forbid_text(product_source "VK_TemporalGenericRecipeTable" "recipe call authority outside vk.c")
 	forbid_text(product_source "vkTemporalGenericRecipeTable" "recipe owner storage outside vk.c")
 endforeach()
-require_text(BUILD "AUX_SOURCE_DIRECTORY(code/renderervk RENDERER_VK_SRCS)" "product source ownership")
+require_text(BUILD "AUX_SOURCE_DIRECTORY(code/render/ral/backends/vulkan/renderer RENDERER_VK_SRCS)" "product source ownership")
 require_text(BUILD "ADD_EXECUTABLE(vk_temporal_generic_recipe_table_test" "host target")
 require_text(README "vk_temporal_generic_recipe_table_contract" "README registration")
 message(STATUS "A2c1 active-only generic recipe capture policy: PASS")

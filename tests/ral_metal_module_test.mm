@@ -40,7 +40,7 @@ int main( void ) {
 	ralPresentationHostOpenFn realOpen;
 	glconfig_t config;
 	ralMetalModuleFrameReceipt_t receipt, first, before, exact;
-	int frontEnd = -1, backEnd = -1;
+	int frontEnd = -1, backEnd = -1, i;
 
 	library = dlopen( RAL_METAL_TEST_MODULE, RTLD_NOW | RTLD_LOCAL );
 	CHECK( library != NULL );
@@ -86,13 +86,28 @@ int main( void ) {
 	CHECK( config.vidWidth > 0 && config.vidHeight > 0 );
 	CHECK( strstr( config.renderer_string, "native Metal RAL" ) != NULL );
 	CHECK( exports->GetConfig() != NULL );
+	CHECK( exports->RegisterModel( "models/players/visor/lower.md3" ) > 0
+		&& exports->RegisterSkin( "models/players/visor/default.skin" ) > 0
+		&& exports->RegisterShader( "gfx/2d/bigchars" ) > 0
+		&& exports->RegisterModel( "" ) == 0 );
 	exports->EndRegistration(); exports->BeginFrame( STEREO_CENTER );
 	exports->EndFrame( &frontEnd, &backEnd );
 	CHECK( exports->initFailed == qfalse && frontEnd == 0 && backEnd == 0 );
-	CHECK( getFrameReceipt( &receipt )
-		&& frameReceiptExact( &receipt, &receipt )
-		&& receipt.presentation.presented == qtrue
-		&& receipt.frame.state == RAL_FRAME_SHELL_PRESENTED );
+	CHECK( getFrameReceipt( &receipt ) );
+	CHECK( frameReceiptExact( &receipt, &receipt ) );
+	CHECK( receipt.presentation.presented == qtrue );
+	CHECK( receipt.frontend.ready == qtrue );
+	CHECK( receipt.frontend.registeredAssetCount == 3u );
+	CHECK( receipt.frontend.registeredMaterialCount == 1u );
+	CHECK( receipt.frame.state == RAL_FRAME_SHELL_PRESENTED );
+	/* Cross the 16-slot backend command-identity ring and prove completed
+	 * product frames recycle identities by generation rather than saturating. */
+	for ( i = 0; i < 24; ++i ) {
+		exact = receipt;
+		exports->BeginFrame( STEREO_CENTER ); exports->EndFrame( NULL, NULL );
+		CHECK( exports->initFailed == qfalse && getFrameReceipt( &receipt )
+			&& receipt.frameGeneration > exact.frameGeneration );
+	}
 	first = receipt; exact = receipt;
 #define MUTATE(field) do { exact = receipt; exact.field++; \
 	CHECK( !frameReceiptExact( &receipt, &exact ) ); } while (0)
@@ -100,14 +115,22 @@ int main( void ) {
 	MUTATE( frame.ownerGeneration ); MUTATE( host.surfaceGeneration );
 	MUTATE( surface.surfaceIdentity );
 	MUTATE( drawable.acquireGeneration ); MUTATE( presentation.presentGeneration );
+	MUTATE( frontend.frameDigest );
 #undef MUTATE
 
 	exports->Shutdown( REF_LEVEL_ONLY );
+	/* The engine draws its loading compositor after level teardown and before
+	 * the next BeginRegistration.  REF_LEVEL_ONLY must preserve that frame
+	 * authority rather than tripping recoverable renderer fallback. */
+	exports->BeginFrame( STEREO_CENTER ); exports->EndFrame( NULL, NULL );
+	CHECK( exports->initFailed == qfalse && getFrameReceipt( &exact )
+		&& exact.frameGeneration > first.frameGeneration
+		&& exact.moduleGeneration == first.moduleGeneration );
 	CHECK( WiredSdlRalPresentationHost_RequestResize( presentationHost,
 		800u, 450u ) );
 	memset( &config, 0, sizeof( config ) ); exports->BeginRegistration( &config );
 	exports->BeginFrame( STEREO_CENTER ); exports->EndFrame( NULL, NULL );
-	CHECK( getFrameReceipt( &receipt ) && receipt.frameGeneration > first.frameGeneration
+	CHECK( getFrameReceipt( &receipt ) && receipt.frameGeneration > exact.frameGeneration
 		&& receipt.moduleGeneration == first.moduleGeneration
 		&& receipt.host.surfaceGeneration > first.host.surfaceGeneration
 		&& receipt.host.logicalWidth == 800u && receipt.host.logicalHeight == 450u

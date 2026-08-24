@@ -1,0 +1,13 @@
+#version 460
+
+const vec2 _23[4] = vec2[](vec2(-1.0, 1.0), vec2(-1.0), vec2(1.0), vec2(1.0, -1.0));
+const vec2 _43[4] = vec2[](vec2(0.0, 1.0), vec2(0.0), vec2(1.0), vec2(1.0, 0.0));
+
+layout(location = 0) out vec2 frag_tex_coord;
+
+void main()
+{
+    gl_Position = vec4(_23[gl_VertexIndex], 0.0, 1.0);
+    frag_tex_coord = _43[gl_VertexIndex];
+}
+

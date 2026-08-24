@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../code/renderervk/vk_ral_buffer_shadow.h"
+#include "../code/render/ral/backends/vulkan/renderer/vk_ral_buffer_shadow.h"
 
 struct ralBackend_s { int id; };
 struct ralBuffer_s { int id; };

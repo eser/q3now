@@ -4,7 +4,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 #include "tr_common.h"
-#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.assets
+#include "../render/frontend/r_log.h"  // rilog-channel-mechanism Turn C — renderer.assets
 
 R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 

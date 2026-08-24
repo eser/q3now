@@ -1,0 +1,250 @@
+#version 460
+
+layout(constant_id = 4) const int tex_domain = 0;
+layout(constant_id = 26) const int lightmap_slot = 0;
+layout(constant_id = 0) const int alpha_test_func = 0;
+const bool _288 = (alpha_test_func == 1);
+layout(constant_id = 1) const float alpha_test_value = 0.0;
+const bool _299 = (alpha_test_func == 2);
+const bool _309 = (alpha_test_func == 3);
+layout(constant_id = 10) const int acff = 0;
+const bool _325 = (acff == 1);
+const bool _340 = (acff == 2);
+const bool _348 = (acff == 3);
+const bool _374 = (acff == 1);
+const bool _390 = (acff == 2);
+const bool _399 = (acff == 3);
+layout(constant_id = 7) const int discard_mode = 0;
+const bool _421 = (discard_mode == 1);
+const bool _431 = (discard_mode == 2);
+layout(constant_id = 11) const float depth_fade_scale = 2.0;
+layout(constant_id = 3) const int alpha_to_coverage = 0;
+
+layout(binding = 0, std140) uniform UBO
+{
+    vec4 eyePos;
+    vec4 lightPos;
+    vec4 lightColor;
+    vec4 lightVector;
+    vec4 fogDistanceVector;
+    vec4 fogDepthVector;
+    vec4 fogEyeT;
+    vec4 fogColor;
+    vec4 _pad_to_packed_indices[26];
+    uvec4 packed_indices[3];
+    vec4 worldLightParams;
+    vec4 advancedFogColorDensity;
+    vec4 advancedFogTypeFarEnabled;
+} _77;
+
+layout(binding = 0) uniform texture2D wired_bindless_images[64];
+layout(binding = 0) uniform sampler wired_bindless_samplers[32];
+
+layout(location = 4) in vec2 fog_tex_coord;
+layout(location = 0) in vec4 frag_color0In;
+layout(location = 1) centroid in vec2 frag_tex_coord0;
+layout(location = 0) out vec4 out_color;
+
+vec3 sRGBToLinear(inout vec3 c)
+{
+    c = max(c, vec3(0.0));
+    bvec3 cutoff = lessThanEqual(c, vec3(0.040449999272823333740234375));
+    vec3 lo = c / vec3(12.9200000762939453125);
+    vec3 hi = pow((c + vec3(0.054999999701976776123046875)) / vec3(1.05499994754791259765625), vec3(2.400000095367431640625));
+    return mix(hi, lo, vec3(cutoff));
+}
+
+vec4 wired_bl_sample_domain(uint role, vec2 uv, int slot)
+{
+    uint _181 = _77.packed_indices[role / 4u][role % 4u] & 4095u;
+    uint _198 = (_77.packed_indices[role / 4u][role % 4u] >> uint(12)) & 255u;
+    vec4 c = texture(sampler2D(wired_bindless_images[_181], wired_bindless_samplers[_198]), uv);
+    if ((tex_domain & (1 << slot)) == 0)
+    {
+        vec3 param = c.xyz;
+        vec3 _217 = sRGBToLinear(param);
+        c.x = _217.x;
+        c.y = _217.y;
+        c.z = _217.z;
+    }
+    if (lightmap_slot == (slot + 1))
+    {
+        vec4 _233 = c;
+        vec3 _235 = _233.xyz * _77.worldLightParams.x;
+        c.x = _235.x;
+        c.y = _235.y;
+        c.z = _235.z;
+    }
+    return c;
+}
+
+bool wired_advanced_fog_enabled()
+{
+    int fogType = int(_77.advancedFogTypeFarEnabled.x + 0.5);
+    return ((_77.advancedFogTypeFarEnabled.z > 0.5) && (fogType >= 1)) && (fogType <= 3);
+}
+
+float wired_advanced_fog_amount()
+{
+    if (!wired_advanced_fog_enabled())
+    {
+        return 0.0;
+    }
+    float viewDepth = 1.0 / max(gl_FragCoord.w, 9.9999999747524270787835121154785e-07);
+    int fogType = int(_77.advancedFogTypeFarEnabled.x + 0.5);
+    if (fogType == 1)
+    {
+        if (_77.advancedFogTypeFarEnabled.y <= 0.0)
+        {
+            return 0.0;
+        }
+        return clamp(viewDepth / _77.advancedFogTypeFarEnabled.y, 0.0, 1.0);
+    }
+    float opticalDepth = max(_77.advancedFogColorDensity.w, 0.0) * viewDepth;
+    if (fogType == 2)
+    {
+        return clamp(1.0 - exp(-opticalDepth), 0.0, 1.0);
+    }
+    return clamp(1.0 - exp(-(opticalDepth * opticalDepth)), 0.0, 1.0);
+}
+
+void main()
+{
+    uint _249 = _77.packed_indices[0].w & 4095u;
+    uint _256 = (_77.packed_indices[0].w >> uint(12)) & 255u;
+    vec4 fog = texture(sampler2D(wired_bindless_images[_249], wired_bindless_samplers[_256]), fog_tex_coord);
+    vec3 param = frag_color0In.xyz;
+    vec3 _269 = sRGBToLinear(param);
+    vec4 frag_color0 = vec4(_269, frag_color0In.w);
+    uint param_1 = 0u;
+    vec2 param_2 = frag_tex_coord0;
+    int param_3 = 0;
+    vec4 color0 = wired_bl_sample_domain(param_1, param_2, param_3) * frag_color0;
+    vec4 base = color0;
+    if (_288)
+    {
+        if (color0.w == alpha_test_value)
+        {
+            discard;
+        }
+    }
+    else
+    {
+        if (_299)
+        {
+            if (color0.w >= alpha_test_value)
+            {
+                discard;
+            }
+        }
+        else
+        {
+            if (_309)
+            {
+                if (color0.w < alpha_test_value)
+                {
+                    discard;
+                }
+            }
+        }
+    }
+    base = color0;
+    if (wired_advanced_fog_enabled())
+    {
+        float fogAmount = wired_advanced_fog_amount();
+        if (_325)
+        {
+            vec4 _330 = base;
+            vec3 _332 = _330.xyz * (1.0 - fogAmount);
+            base.x = _332.x;
+            base.y = _332.y;
+            base.z = _332.z;
+        }
+        else
+        {
+            if (_340)
+            {
+                base *= (1.0 - fogAmount);
+            }
+            else
+            {
+                if (_348)
+                {
+                    base.w *= (1.0 - fogAmount);
+                }
+                else
+                {
+                    vec4 _358 = base;
+                    vec3 _366 = mix(_358.xyz, _77.advancedFogColorDensity.xyz, vec3(fogAmount));
+                    base.x = _366.x;
+                    base.y = _366.y;
+                    base.z = _366.z;
+                }
+            }
+        }
+    }
+    else
+    {
+        if (_374)
+        {
+            vec4 _377 = base;
+            vec3 _382 = _377.xyz * (1.0 - fog.w);
+            base.x = _382.x;
+            base.y = _382.y;
+            base.z = _382.z;
+        }
+        else
+        {
+            if (_390)
+            {
+                base *= (1.0 - fog.w);
+            }
+            else
+            {
+                if (_399)
+                {
+                    base.w *= (1.0 - fog.w);
+                }
+                else
+                {
+                    base = mix(base, fog * _77.fogColor, vec4(fog.w));
+                }
+            }
+        }
+    }
+    if (_421)
+    {
+        if (base.w == 0.0)
+        {
+            discard;
+        }
+    }
+    else
+    {
+        if (_431)
+        {
+            if (dot(base.xyz, base.xyz) == 0.0)
+            {
+                discard;
+            }
+        }
+    }
+    uint _449 = _77.packed_indices[1].x & 4095u;
+    uint _456 = (_77.packed_indices[1].x >> uint(12)) & 255u;
+    vec2 screenUV = gl_FragCoord.xy / vec2(textureSize(sampler2D(wired_bindless_images[_449], wired_bindless_samplers[_456]), 0));
+    uint _469 = _77.packed_indices[1].x & 4095u;
+    uint _476 = (_77.packed_indices[1].x >> uint(12)) & 255u;
+    float sceneDepth = texture(sampler2D(wired_bindless_images[_469], wired_bindless_samplers[_476]), screenUV).x;
+    float fragDepth = gl_FragCoord.z;
+    float depthDiff = fragDepth - sceneDepth;
+    float _493 = depth_fade_scale * 0.0005000000237487256526947021484375;
+    float fadeFactor = smoothstep(0.0, _493, depthDiff);
+    base.w *= fadeFactor;
+    vec4 _502 = base;
+    vec3 _504 = _502.xyz * fadeFactor;
+    base.x = _504.x;
+    base.y = _504.y;
+    base.z = _504.z;
+    out_color = base;
+}
+

@@ -301,7 +301,7 @@ int main( void ) {
 		   from the build tree — a mirror check that does not run is exactly
 		   the hole it was written to close. */
 #ifndef SHADER_DIR
-#error "SHADER_DIR must be defined (absolute path to code/renderervk/shaders)"
+#error "SHADER_DIR must be defined (absolute path to code/render/ral/backends/vulkan/renderer/shaders)"
 #endif
 		static const char *shaders[] = {
 			SHADER_DIR "/particle.vert",

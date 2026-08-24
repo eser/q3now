@@ -160,7 +160,7 @@ jobs:
         base="${{ github.base_ref }}"
         git fetch origin "$base" --depth=1
         all=$(git diff --name-only --diff-filter=ACMR "origin/$base"...HEAD \
-          | grep -E '^code/(cgame|game|qcommon|server|client|botlib|renderer|renderer2|renderercommon|renderervk|sdl|unix|win32)/.*\.(c|h)$' || true)
+          | grep -E '^code/(cgame|game|qcommon|server|client|botlib|render|renderer|renderer2|sdl|unix|win32)/.*\.(c|h)$' || true)
         c_only=$(echo "$all" | grep -E '\.c$' || true)
         # Use $'\n' delimiter so multiline outputs survive GHA's parser.
         {
@@ -199,7 +199,7 @@ jobs:
         # processed — the complete finding list survives, same as the old
         # fail-accumulator loop.
         find code/cgame code/game code/qcommon code/server code/client code/sdl \
-             code/botlib code/renderer code/renderer2 code/renderervk code/renderercommon \
+             code/botlib code/renderer code/renderer2 code/render/ral/backends/vulkan/renderer code/render/frontend \
              -name '*.c' | grep -vE 'sv_rankings\.c|g_rankings\.c' \
           | xargs -P "$(nproc)" -n 1 clang-tidy -p .
 

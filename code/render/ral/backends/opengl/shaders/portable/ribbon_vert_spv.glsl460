@@ -1,0 +1,137 @@
+#version 460
+
+struct RibbonHeader
+{
+    uint pointOffset;
+    uint pointCount;
+    uint shaderHandle;
+    uint flags;
+    vec2 uvScroll;
+};
+
+const uint _59[6] = uint[](0u, 1u, 0u, 0u, 1u, 1u);
+const float _71[6] = float[](-1.0, -1.0, 1.0, 1.0, -1.0, 1.0);
+
+struct RibbonPoint
+{
+    vec4 posW;
+    vec4 rgba;
+    vec4 normal;
+};
+
+layout(binding = 1, std430) readonly buffer Headers
+{
+    RibbonHeader headers[];
+} _16;
+
+layout(binding = 0, std430) readonly buffer Points
+{
+    RibbonPoint points[];
+} _85;
+
+layout(binding = 0, std140) uniform EffectsUBO
+{
+    mat4 mvp;
+    vec4 eyeWorld;
+    vec4 frameParams;
+    vec4 _v2;
+} _164;
+
+layout(location = 0) out vec2 fragUV;
+layout(location = 1) out vec4 fragColor;
+layout(location = 2) flat out uint fragShaderHandle;
+
+void main()
+{
+    RibbonHeader hdr;
+    hdr.pointOffset = _16.headers[gl_InstanceIndex].pointOffset;
+    hdr.pointCount = _16.headers[gl_InstanceIndex].pointCount;
+    hdr.shaderHandle = _16.headers[gl_InstanceIndex].shaderHandle;
+    hdr.flags = _16.headers[gl_InstanceIndex].flags;
+    hdr.uvScroll = _16.headers[gl_InstanceIndex].uvScroll;
+    uint vertInQuad = uint(gl_VertexIndex) % 6u;
+    uint segIdx = uint(gl_VertexIndex) / 6u;
+    uint pi = (hdr.pointOffset + segIdx) + _59[vertInQuad];
+    float sgn = _71[vertInQuad];
+    RibbonPoint p;
+    p.posW = _85.points[pi].posW;
+    p.rgba = _85.points[pi].rgba;
+    p.normal = _85.points[pi].normal;
+    float halfW = p.posW.w;
+    vec3 normal;
+    if ((hdr.flags & 16u) != 0u)
+    {
+        normal = p.normal.xyz;
+    }
+    else
+    {
+        vec3 a = _85.points[hdr.pointOffset + segIdx].posW.xyz;
+        vec3 b = _85.points[(hdr.pointOffset + segIdx) + 1u].posW.xyz;
+        vec3 segAxis = b - a;
+        bool _144 = (hdr.flags & 8u) != 0u;
+        bool _151;
+        if (_144)
+        {
+            _151 = (hdr.flags & 1u) == 0u;
+        }
+        else
+        {
+            _151 = _144;
+        }
+        bool wantUp = _151;
+        vec3 _154;
+        if (wantUp)
+        {
+            _154 = vec3(0.0, 0.0, 1.0);
+        }
+        else
+        {
+            _154 = a - _164.eyeWorld.xyz;
+        }
+        vec3 ref = _154;
+        normal = cross(segAxis, ref);
+        if (dot(normal, normal) < 9.9999999600419720025001879548654e-13)
+        {
+            vec3 ad = abs(segAxis);
+            bool _188 = ad.x <= ad.y;
+            bool _197;
+            if (_188)
+            {
+                _197 = ad.x <= ad.z;
+            }
+            else
+            {
+                _197 = _188;
+            }
+            vec3 _198;
+            if (_197)
+            {
+                _198 = vec3(1.0, 0.0, 0.0);
+            }
+            else
+            {
+                _198 = mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 0.0), bvec3(ad.y <= ad.z));
+            }
+            vec3 fb = _198;
+            normal = cross(segAxis, fb);
+        }
+        normal = normalize(normal);
+    }
+    vec3 worldPos = p.posW.xyz + (normal * (halfW * sgn));
+    gl_Position = _164.mvp * vec4(worldPos, 1.0);
+    float _246;
+    if (hdr.pointCount > 1u)
+    {
+        _246 = float(hdr.pointCount - 1u);
+    }
+    else
+    {
+        _246 = 1.0;
+    }
+    float denom = _246;
+    vec2 baseUV = vec2(float(pi - hdr.pointOffset) / denom, float(sgn > 0.0));
+    fragUV = fract(baseUV + (hdr.uvScroll * _164.frameParams.y));
+    fragColor = p.rgba;
+    fragShaderHandle = hdr.shaderHandle;
+}
+

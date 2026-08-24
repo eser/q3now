@@ -1,10 +1,10 @@
-file(READ "${ROOT}/code/renderervk/tr_temporal_motion_payload.h" PAYLOAD_H)
-file(READ "${ROOT}/code/renderervk/tr_temporal_motion_payload.c" PAYLOAD_C)
-file(READ "${ROOT}/code/renderervk/vk.h" VKH)
-file(READ "${ROOT}/code/renderervk/vk.c" VKC)
-file(READ "${ROOT}/code/renderervk/tr_init.c" INIT)
-file(READ "${ROOT}/code/renderervk/shaders/gen_vert.tmpl" GEN_VERT)
-file(READ "${ROOT}/code/renderervk/shaders/gen_frag.tmpl" GEN_FRAG)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_motion_payload.h" PAYLOAD_H)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_motion_payload.c" PAYLOAD_C)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" VKH)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_init.c" INIT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/gen_vert.tmpl" GEN_VERT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/gen_frag.tmpl" GEN_FRAG)
 file(READ "${ROOT}/CMakeLists.txt" BUILD)
 
 function(require_text haystack needle why)
@@ -70,18 +70,18 @@ require_text(PAYLOAD_C "if ( owner->frames[i].bindGroup )" "all groups destroyed
 # The ordinary product ABI/layout remains byte-for-byte authoritative. This
 # owner is callable in production only through the bounded A2a runtime seam;
 # it still has no draw, bind, pass, or payload-recording authority there.
-require_text(VKH "float    worldLightParams[4];                    // offset 592, 16 B\n} vkUniform_t;" "unchanged 608-byte vkUniform tail")
+require_text(VKH "vec4_t advancedFogColorDensity;                   // offset 608, 16 B\n\tvec4_t advancedFogTypeFarEnabled;                 // offset 624, 16 B\n} vkUniform_t;" "intentional 640-byte vkUniform fog tail")
 forbid_text(VKH "temporalMotionPayload" "payload owner in ordinary renderer state")
-require_text(VKC "vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, &vk.set_layout_entmat );" "ordinary set3 entity layout")
+require_text(VKC "vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,\n\t\tVK_SHADER_STAGE_VERTEX_BIT, &vk.ral_bgl_entmat,\n\t\t&vk.set_layout_entmat, \"wired-set-layout-entmat\" );" "ordinary portable set3 entity layout with adopted native layout")
 require_text(VKC "set_layouts[WIRED_ENTITY_MAT_SET] = vk.set_layout_entmat;" "ordinary pipeline set3")
-require_text(VKC "layout, WIRED_ENTITY_MAT_SET, 1,\n\t\t\t\t&vk.cmd->entMatDesc, 0, NULL );" "ordinary entity descriptor bind")
+require_text(VKC "Ral_CmdBindBindGroupDynamicExact( vk.cmd->ral_cmd,\n\t\t\t\t\t\tWIRED_ENTITY_MAT_SET, vk.cmd->ral_entMatDesc,\n\t\t\t\t\t\tNULL, 0u )" "ordinary portable entity descriptor bind")
 forbid_text(INIT "r_temporalMotionTest" "runtime payload cvar")
 # Representative embedded shader interfaces are permitted; this payload owner
 # remains inert because the temporal shader policy forbids module/call authority.
 forbid_text(PAYLOAD_C "Ral_CmdBindBindGroup" "runtime payload bind")
 forbid_text(PAYLOAD_C "Ral_BeginRendering" "runtime temporal pass")
 
-file(GLOB PRODUCT_C "${ROOT}/code/renderervk/*.c")
+file(GLOB PRODUCT_C "${ROOT}/code/render/ral/backends/vulkan/renderer/*.c")
 foreach(path IN LISTS PRODUCT_C)
 	get_filename_component(name "${path}" NAME)
 	file(READ "${path}" PRODUCT_SOURCE)
@@ -105,7 +105,7 @@ foreach(path IN LISTS PRODUCT_C)
 	endif()
 endforeach()
 
-require_text(BUILD "AUX_SOURCE_DIRECTORY(code/renderervk RENDERER_VK_SRCS)" "renderer product source ownership")
+require_text(BUILD "AUX_SOURCE_DIRECTORY(code/render/ral/backends/vulkan/renderer RENDERER_VK_SRCS)" "renderer product source ownership")
 require_text(BUILD "ADD_EXECUTABLE(tr_temporal_motion_payload_test" "compiled payload owner contract")
 require_text(BUILD "tr_temporal_motion_payload_source_policy_contract" "payload policy registration")
 

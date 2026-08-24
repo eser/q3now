@@ -1,0 +1,23 @@
+{
+  "width": 1280,
+  "height": 720,
+  "tolerance_basis": "Caps are bounded immediately above the 2026-08-24 deterministic native-Metal versus Vulkan/MoltenVK corpus (MAE/p90/changed64); they preserve room for driver-level raster variation without treating a missing cohort or gross output drift as parity.",
+  "scenes": {
+    "arena1": {
+      "camera": [1052, 1432, 50, 135],
+      "regions": [
+        {"name": "sky", "rect": [0.00, 0.10, 1.00, 0.36], "mae": 0.11, "p90": 0.29, "changed64": 0.11},
+        {"name": "world", "rect": [0.06, 0.30, 0.94, 0.78], "mae": 0.11, "p90": 0.29, "changed64": 0.11},
+        {"name": "wired-ui", "rect": [0.00, 0.78, 1.00, 1.00], "mae": 0.13, "p90": 0.34, "changed64": 0.15}
+      ]
+    },
+    "arena17": {
+      "camera": [488, 1096, 378, -90],
+      "regions": [
+        {"name": "sky", "rect": [0.00, 0.10, 1.00, 0.39], "mae": 0.09, "p90": 0.27, "changed64": 0.10},
+        {"name": "world-and-models", "rect": [0.06, 0.38, 0.94, 0.80], "mae": 0.055, "p90": 0.14, "changed64": 0.04},
+        {"name": "wired-ui", "rect": [0.00, 0.80, 1.00, 1.00], "mae": 0.14, "p90": 0.34, "changed64": 0.15}
+      ]
+    }
+  }
+}

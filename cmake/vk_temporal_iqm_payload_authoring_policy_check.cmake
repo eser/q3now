@@ -4,13 +4,13 @@
 if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
-file(READ "${ROOT}/code/renderervk/vk_temporal_iqm_payload_authoring.h" ABI)
-file(READ "${ROOT}/code/renderervk/vk_temporal_iqm_payload_authoring.c" CORE)
-file(READ "${ROOT}/code/renderervk/tr_temporal_iqm_motion.h" SEQUENCE_ABI)
-file(READ "${ROOT}/code/renderervk/tr_temporal_iqm_motion.c" SEQUENCE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload_authoring.h" ABI)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload_authoring.c" CORE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_iqm_motion.h" SEQUENCE_ABI)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_iqm_motion.c" SEQUENCE)
 file(READ "${ROOT}/tests/vk_temporal_iqm_payload_authoring_test.c" HOST)
 file(READ "${ROOT}/CMakeLists.txt" CMAKE_TEXT)
-file(READ "${ROOT}/code/renderervk/vk.c" VK)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VK)
 
 function(require_text haystack needle label)
 	string(FIND "${haystack}" "${needle}" pos)
@@ -79,11 +79,11 @@ endforeach()
 # instantiate or author the payload transaction before the Stage4 pre-scan.
 file(GLOB_RECURSE PRODUCT_SURFACE "${ROOT}/code/*.c" "${ROOT}/code/*.h")
 foreach(source IN LISTS PRODUCT_SURFACE)
-	if(source STREQUAL "${ROOT}/code/renderervk/vk_temporal_iqm_payload_authoring.c" OR
-			source STREQUAL "${ROOT}/code/renderervk/vk_temporal_iqm_payload_authoring.h" OR
-			source STREQUAL "${ROOT}/code/renderervk/vk_temporal_main_activation.c" OR
-			source STREQUAL "${ROOT}/code/renderervk/vk_temporal_main_activation.h" OR
-			source STREQUAL "${ROOT}/code/renderervk/vk.c")
+	if(source STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload_authoring.c" OR
+			source STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload_authoring.h" OR
+			source STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_main_activation.c" OR
+			source STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_main_activation.h" OR
+			source STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c")
 		continue()
 	endif()
 	file(READ "${source}" source_text)
@@ -130,7 +130,7 @@ foreach(forbidden IN ITEMS VK_TemporalMainActivationBindIqm
 		message(FATAL_ERROR "pre-scan checkpoint gained command/bind authority: ${forbidden}")
 	endif()
 endforeach()
-file(READ "${ROOT}/code/renderervk/vk_temporal_main_activation.c" MAIN)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_main_activation.c" MAIN)
 require_text("${MAIN}" "VK_TemporalIqmPayloadContentReceiptExact" "central content receipt exact join")
 require_text("${MAIN}" "VK_TemporalIqmPayloadContentRevalidate" "central owner-aware content revalidation")
 foreach(needle IN ITEMS vk_temporal_iqm_payload_authoring_test

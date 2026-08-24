@@ -5,14 +5,14 @@ IF(NOT DEFINED SOURCE_ROOT OR NOT IS_DIRECTORY "${SOURCE_ROOT}")
 	MESSAGE(FATAL_ERROR "SOURCE_ROOT must name the q3now source tree")
 ENDIF()
 
-FILE(READ "${SOURCE_ROOT}/code/renderer/ral/ral_command.h" RAL_HEADER)
-FILE(READ "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_bridge.h" BRIDGE_HEADER)
-FILE(READ "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_dynamic_bind.c" BIND_CORE)
-FILE(READ "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_pipeline.c" PIPELINE_CORE)
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk.c" VK_SOURCE)
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk.h" VK_HEADER)
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk_ral_textures.c" RAL_TEXTURES)
-FILE(READ "${SOURCE_ROOT}/code/renderervk/tr_model_iqm.c" IQM_MODEL)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/core/ral_command.h" RAL_HEADER)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_bridge.h" BRIDGE_HEADER)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_dynamic_bind.c" BIND_CORE)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_pipeline.c" PIPELINE_CORE)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VK_SOURCE)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" VK_HEADER)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c" RAL_TEXTURES)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/tr_model_iqm.c" IQM_MODEL)
 FILE(READ "${SOURCE_ROOT}/tests/ral_vulkan_dynamic_bind_test.c" HOST)
 
 FUNCTION(REQUIRE_TEXT BODY NEEDLE MESSAGE_TEXT)
@@ -98,14 +98,14 @@ FOREACH(NEEDLE IN ITEMS
 ENDFOREACH()
 STRING(FIND "${VK_SOURCE}" "vk_ral_textures_init();" RAL_INIT_POS)
 STRING(FIND "${VK_SOURCE}"
-	"vk.ral_bgl_sampler = Ral_AdoptBindGroupLayout(" SAMPLER_ADOPT_POS)
+	"&vk.ral_bgl_sampler,\n\t\t&vk.set_layout_sampler, \"wired-set-layout-sampler\" );" SAMPLER_CREATE_POS)
 STRING(FIND "${VK_SOURCE}" "vk_init_iqm_gpu_skinning();" IQM_INIT_CALL_POS)
-IF(RAL_INIT_POS EQUAL -1 OR SAMPLER_ADOPT_POS EQUAL -1
+IF(RAL_INIT_POS EQUAL -1 OR SAMPLER_CREATE_POS EQUAL -1
 		OR IQM_INIT_CALL_POS EQUAL -1
-		OR NOT RAL_INIT_POS LESS SAMPLER_ADOPT_POS
-		OR NOT SAMPLER_ADOPT_POS LESS IQM_INIT_CALL_POS)
+		OR NOT SAMPLER_CREATE_POS LESS RAL_INIT_POS
+		OR NOT RAL_INIT_POS LESS IQM_INIT_CALL_POS)
 	MESSAGE(FATAL_ERROR
-		"IQM init must follow RAL backend init and shared sampler-layout adoption")
+		"IQM init must follow RAL backend init and direct shared sampler-layout creation")
 ENDIF()
 EXTRACT_SPAN("${VK_SOURCE}" "void vk_init_iqm_gpu_skinning( void )"
 	"void vk_shutdown_iqm_gpu_skinning( void )" IQM_INIT)
@@ -142,8 +142,8 @@ EXTRACT_SPAN("${RAL_TEXTURES}" "qboolean vk_ral_refresh_iqm_bone_bindgroup"
 	"void vk_ral_release_entmat_bindgroup" IQM_BONE_OWNER)
 FOREACH(NEEDLE IN ITEMS
 	"vk.iqmGpu.ral_bone_descriptor[slot]"
-	"vk_ral_lookup_buffer("
-	"vk.iqmGpu.bone_buffer[slot]"
+	"buffer = vk.iqmGpu.ral_bone_buffer[slot];"
+	"Ral_GetBufferSize( buffer ) != vk.iqmGpu.ring_size"
 	"value.type = RAL_BIND_UNIFORM_BUFFER"
 	"value.bufferRange = item"
 	"createInfo.arena = vk.ral_descriptor_arena"
@@ -174,8 +174,8 @@ REQUIRE_COUNT("${IQM_DRAW}" "Ral_CmdBindPipeline( vk.cmd->ral_cmd, NULL )" 2
 FOREACH(NEEDLE IN ITEMS
 	"vk.iqmGpu.ral_bone_descriptor[frameIdx], &iqmOff, 1u"
 	"textureGroup, NULL, 0u"
-	"vk_ral_bind_registered_vertex_buffers("
-	"vk_ral_bind_registered_index_buffer("
+	"Ral_CmdBindVertexBuffersExact( vk.cmd->ral_cmd, 0, 1,"
+	"Ral_CmdBindIndexBufferExact( vk.cmd->ral_cmd, idxBuffer, 0,"
 	"Ral_CmdDrawIndexed( vk.cmd->ral_cmd")
 	REQUIRE_TEXT("${IQM_DRAW}" "${NEEDLE}"
 		"ordinary IQM exact command operand missing")
@@ -183,7 +183,7 @@ ENDFOREACH()
 STRING(FIND "${IQM_DRAW}" "Ral_CmdBindPipeline( vk.cmd->ral_cmd, vk.iqmGpu.ral_pipeline )" PIPE_POS)
 STRING(FIND "${IQM_DRAW}" "vk.iqmGpu.ral_bone_descriptor[frameIdx], &iqmOff, 1u" BONE_POS)
 STRING(FIND "${IQM_DRAW}" "textureGroup, NULL, 0u" TEXTURE_POS)
-STRING(FIND "${IQM_DRAW}" "vk_ral_bind_registered_vertex_buffers(" VERTEX_POS)
+STRING(FIND "${IQM_DRAW}" "Ral_CmdBindVertexBuffersExact( vk.cmd->ral_cmd" VERTEX_POS)
 STRING(FIND "${IQM_DRAW}" "Ral_CmdDrawIndexed( vk.cmd->ral_cmd" DRAW_POS)
 IF(PIPE_POS EQUAL -1 OR BONE_POS EQUAL -1 OR TEXTURE_POS EQUAL -1
 		OR VERTEX_POS EQUAL -1 OR DRAW_POS EQUAL -1

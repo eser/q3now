@@ -1,0 +1,118 @@
+#version 460
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(binding = 0, rg16f) uniform writeonly image2D brdfLut;
+
+float radicalInverse_VdC(inout uint bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 1431655765u) << 1u) | ((bits & 2863311530u) >> 1u);
+    bits = ((bits & 858993459u) << 2u) | ((bits & 3435973836u) >> 2u);
+    bits = ((bits & 252645135u) << 4u) | ((bits & 4042322160u) >> 4u);
+    bits = ((bits & 16711935u) << 8u) | ((bits & 4278255360u) >> 8u);
+    return float(bits) * 2.3283064365386962890625e-10;
+}
+
+vec2 hammersley(uint i, uint n)
+{
+    uint param = i;
+    float _104 = radicalInverse_VdC(param);
+    return vec2(float(i) / float(n), _104);
+}
+
+vec3 importanceSampleGGX(vec2 xi, float roughness, vec3 N)
+{
+    float a = roughness * roughness;
+    float phi = 6.283185482025146484375 * xi.x;
+    float cosTheta = sqrt((1.0 - xi.y) / (1.0 + (((a * a) - 1.0) * xi.y)));
+    float sinTheta = sqrt(1.0 - (cosTheta * cosTheta));
+    vec3 H;
+    H.x = cos(phi) * sinTheta;
+    H.y = sin(phi) * sinTheta;
+    H.z = cosTheta;
+    vec3 up = mix(vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), bvec3(abs(N.z) < 0.999000012874603271484375));
+    vec3 tangent = normalize(cross(up, N));
+    vec3 bitangent = cross(N, tangent);
+    return normalize(((tangent * H.x) + (bitangent * H.y)) + (N * H.z));
+}
+
+float geometrySchlickGGX_IBL(float NdotV, float roughness)
+{
+    float a = roughness;
+    float k = (a * a) / 2.0;
+    return NdotV / ((NdotV * (1.0 - k)) + k);
+}
+
+float geometrySmith_IBL(float NdotV, float NdotL, float roughness)
+{
+    float param = NdotV;
+    float param_1 = roughness;
+    float param_2 = NdotL;
+    float param_3 = roughness;
+    return geometrySchlickGGX_IBL(param, param_1) * geometrySchlickGGX_IBL(param_2, param_3);
+}
+
+vec2 integrateBRDF(float NdotV, float roughness)
+{
+    vec3 V;
+    V.x = sqrt(1.0 - (NdotV * NdotV));
+    V.y = 0.0;
+    V.z = NdotV;
+    float A = 0.0;
+    float B = 0.0;
+    vec3 N = vec3(0.0, 0.0, 1.0);
+    for (uint i = 0u; i < 1024u; i++)
+    {
+        uint param = i;
+        uint param_1 = 1024u;
+        vec2 xi = hammersley(param, param_1);
+        vec2 param_2 = xi;
+        float param_3 = roughness;
+        vec3 param_4 = N;
+        vec3 H = importanceSampleGGX(param_2, param_3, param_4);
+        vec3 L = normalize((H * (2.0 * dot(V, H))) - V);
+        float NdotL = max(L.z, 0.0);
+        float NdotH = max(H.z, 0.0);
+        float VdotH = max(dot(V, H), 0.0);
+        if (NdotL > 0.0)
+        {
+            float param_5 = NdotV;
+            float param_6 = NdotL;
+            float param_7 = roughness;
+            float G = geometrySmith_IBL(param_5, param_6, param_7);
+            float G_Vis = (G * VdotH) / (NdotH * NdotV);
+            float Fc = pow(1.0 - VdotH, 5.0);
+            A += ((1.0 - Fc) * G_Vis);
+            B += (Fc * G_Vis);
+        }
+    }
+    return vec2(A, B) / vec2(1024.0);
+}
+
+void main()
+{
+    ivec2 size = imageSize(brdfLut);
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    bool _349 = coord.x >= size.x;
+    bool _358;
+    if (!_349)
+    {
+        _358 = coord.y >= size.y;
+    }
+    else
+    {
+        _358 = _349;
+    }
+    if (_358)
+    {
+        return;
+    }
+    float NdotV = (float(coord.x) + 0.5) / float(size.x);
+    float roughness = (float(coord.y) + 0.5) / float(size.y);
+    NdotV = max(NdotV, 9.9999997473787516355514526367188e-05);
+    float param = NdotV;
+    float param_1 = roughness;
+    vec2 ab = integrateBRDF(param, param_1);
+    imageStore(brdfLut, coord, vec4(ab, 0.0, 0.0));
+}
+

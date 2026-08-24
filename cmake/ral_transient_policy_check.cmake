@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 if(NOT DEFINED ROOT)
   message(FATAL_ERROR "ROOT required")
 endif()
-file(READ "${ROOT}/code/renderer/ral/ral_transient.h" HEADER)
-file(READ "${ROOT}/code/renderer/ral/ral_transient.c" CORE)
+file(READ "${ROOT}/code/render/ral/core/ral_transient.h" HEADER)
+file(READ "${ROOT}/code/render/ral/core/ral_transient.c" CORE)
 file(READ "${ROOT}/tests/ral_transient_plan_test.c" TEST)
 file(READ "${ROOT}/tests/ral_webgpu_transient_plan_test.c" WEBGPU_TEST)
 file(READ "${ROOT}/CMakeLists.txt" CMAKE_TEXT)
@@ -18,7 +18,7 @@ foreach(needle
     "RAL_TRANSIENT_PLAN_EXPLICIT_ALIAS"
     "RAL_TRANSIENT_PLAN_MANAGED_DISJOINT"
 	"policy->backendType == RAL_BACKEND_WEBGPU"
-	"policy->backendType == RAL_BACKEND_WEBGL2"
+	"policy->backendType == RAL_BACKEND_WEBGPU"
     "slot->lastPass < request->firstPass"
     "slot->compatibilityKey==request->compatibilityKey"
     "delta>policy->budgetBytes-candidate->peakBytes"

@@ -43,7 +43,7 @@ BOTS=6
 TAG="head"
 VIEWPOS="1052 1432 90 135"   # interior lit spot in arena1, action in frustum
 SEED="12345"
-HOLD_FRAMES=650             # fresh V2 epoch yields exactly 3x200 contained attempts (+50 tail frames)
+HOLD_FRAMES="${FPS_PERF_HOLD_FRAMES:-650}" # default: 3x200 contained attempts (+50 tail frames)
 TARGET_FPS="${FPS_TARGET_FPS:-250}"
 RENDER_WIDTH=1280
 RENDER_HEIGHT=720
@@ -117,6 +117,11 @@ ENGINE="$(shell_path "$ENGINE")"
 [ -x "$ENGINE" ] || { echo "FAIL: engine not found or not executable: $ENGINE" >&2; exit 2; }
 case "$ENGINE" in /*) : ;; *) ENGINE="$PWD/$ENGINE" ;; esac
 case "$BOTS" in ''|*[!0-9]*) echo "FAIL: --bots must be a non-negative integer" >&2; exit 2 ;; esac
+case "$HOLD_FRAMES" in ''|*[!0-9]*) echo "FAIL: FPS_PERF_HOLD_FRAMES must be a positive integer" >&2; exit 2 ;; esac
+if [ "$HOLD_FRAMES" -lt 200 ]; then
+    echo "FAIL: FPS_PERF_HOLD_FRAMES must cover at least one 200-frame diagnostic epoch" >&2
+    exit 2
+fi
 case "$TAG" in ''|*[!A-Za-z0-9_.-]*) echo "FAIL: --tag must use only letters, numbers, dot, underscore, or dash" >&2; exit 2 ;; esac
 case "$MAP" in ''|*[!A-Za-z0-9_.-]*) echo "FAIL: --map must use only letters, numbers, dot, underscore, or dash" >&2; exit 2 ;; esac
 case "$SEED" in ''|*[!0-9-]*|-) echo "FAIL: --seed must be an integer" >&2; exit 2 ;; esac
@@ -196,6 +201,60 @@ fi
 
 RUN_PARENT="$(mktemp -d -t wired-fpsgate-XXXXXX 2>/dev/null || mktemp -d)"
 HOME_DIR="$RUN_PARENT/q3now-preview"
+RUN_ENGINE="$ENGINE"
+
+# A macOS product binary normally lives inside an .app bundle, but invoking it
+# directly from Contents/MacOS is not equivalent to the flat test-runtime shape
+# used by the native renderer harnesses. Normalize the measured client to that
+# proven shape: executable at runtime/wired, renderer/MoltenVK under
+# runtime/Contents/MacOS, and @executable_path dependencies beside the binary.
+# Source artifacts remain read-only and continue to identify the build receipt.
+if [ "$(uname -s)" = "Darwin" ]; then
+    RUN_DIR="$RUN_PARENT/runtime"
+    mkdir -p "$RUN_DIR/Contents/MacOS"
+    cp "$ENGINE" "$RUN_DIR/wired"
+    chmod +x "$RUN_DIR/wired"
+    RUN_ENGINE="$RUN_DIR/wired"
+
+    dylib_count=0
+    for dylib in "$ENGINE_DIR"/*.dylib; do
+        [ -f "$dylib" ] || continue
+        cp "$dylib" "$RUN_DIR/Contents/MacOS/"
+        dylib_count=$((dylib_count + 1))
+    done
+    if [ "$dylib_count" -eq 0 ]; then
+        echo "FAIL: no renderer/runtime dylibs found beside macOS engine: $ENGINE_DIR"
+        exit 1
+    fi
+
+    molten_source="${WIRED_MOLTENVK:-}"
+    if [ ! -f "$molten_source" ]; then
+        molten_source=""
+        for candidate in \
+            "$ENGINE_DIR/libMoltenVK.dylib" \
+            /opt/homebrew/opt/molten-vk/lib/libMoltenVK.dylib \
+            /usr/local/lib/libMoltenVK.dylib; do
+            if [ -f "$candidate" ]; then
+                molten_source="$candidate"
+                break
+            fi
+        done
+    fi
+    if [ -z "$molten_source" ]; then
+        echo "FAIL: MoltenVK unavailable; set WIRED_MOLTENVK to libMoltenVK.dylib"
+        exit 1
+    fi
+    cp "$molten_source" "$RUN_DIR/Contents/MacOS/libMoltenVK.dylib"
+
+    if command -v otool >/dev/null 2>&1; then
+        otool -L "$ENGINE" 2>/dev/null \
+            | sed -n 's|^[[:space:]]*@executable_path/\([^ ]*\).*|\1|p' \
+            | while read -r dependency; do
+                [ -n "$dependency" ] || continue
+                [ -f "$ENGINE_DIR/$dependency" ] && cp "$ENGINE_DIR/$dependency" "$RUN_DIR/"
+            done
+    fi
+fi
 
 cleanup_runtime() {
     if [ "${KEEP_ARTIFACTS:-0}" = "1" ]; then
@@ -209,6 +268,24 @@ trap cleanup_runtime EXIT INT TERM
 mkdir -p "$HOME_DIR/base"
 if ! cp "$PACK_ROOT/base/pax21.sw3z" "$HOME_DIR/base/pax21.sw3z"; then
     echo "FAIL: could not stage current pax21.sw3z into isolated home"
+    exit 1
+fi
+
+# Match the normal `make run-game` product policy: native game/cgame modules
+# are the default path, while VM=1 is an explicit WASM/AOT launch mode. The
+# isolated benchmark must stage those loose modules itself because pax21 owns
+# portable VM artifacts, not platform dylibs/DLLs.
+native_module_count=0
+for native_module in \
+    "$PACK_ROOT"/base/gamecl*.dylib "$PACK_ROOT"/base/gamesv*.dylib \
+    "$PACK_ROOT"/base/gamecl*.so "$PACK_ROOT"/base/gamesv*.so \
+    "$PACK_ROOT"/base/gamecl*.dll "$PACK_ROOT"/base/gamesv*.dll; do
+    [ -f "$native_module" ] || continue
+    cp "$native_module" "$HOME_DIR/base/"
+    native_module_count=$((native_module_count + 1))
+done
+if [ "$native_module_count" -lt 2 ]; then
+    echo "FAIL: default native game/cgame modules missing under $PACK_ROOT/base"
     exit 1
 fi
 content_staged=0
@@ -430,11 +507,15 @@ fi
 set +e
 "${PYTHON[@]}" "$(python_path "$SCRIPT_DIR/run-with-timeout.py")" \
     --timeout 200 --kill-after 15 \
-    --cwd "$(python_path "$ENGINE_DIR")" \
+    --cwd "$(python_path "$(dirname "$RUN_ENGINE")")" \
     --stdout "$(python_path "$STDOUT")" -- \
-    "$(python_path "$ENGINE")" \
+    "$(python_path "$RUN_ENGINE")" \
     +set fs_homepath "$HOME_NATIVE" \
     +set com_noHardReboot 1 \
+    +set vm_game 0 \
+    +set vm_cgame 0 \
+    +set log_severity DEBUG \
+    +set log_file_severity DEBUG \
     +set r_mode -1 \
     +set r_customwidth "$RENDER_WIDTH" \
     +set r_customheight "$RENDER_HEIGHT" \

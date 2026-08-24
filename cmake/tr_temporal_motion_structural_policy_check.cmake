@@ -1,7 +1,7 @@
-file(READ "${ROOT}/code/renderervk/tr_temporal_motion_targets.c" TARGETS)
-file(READ "${ROOT}/code/renderervk/vk_temporal_pipeline_cohort.c" COHORT)
-file(READ "${ROOT}/code/renderervk/vk.h" VKH)
-file(READ "${ROOT}/code/renderervk/vk.c" VKC)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_motion_targets.c" TARGETS)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_pipeline_cohort.c" COHORT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" VKH)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
 file(READ "${ROOT}/CMakeLists.txt" BUILD)
 
 function(require_text haystack needle why)
@@ -67,7 +67,7 @@ require_text(VKH "VK_TEMPORAL_PIPELINE_PRESERVE = 0" "append-only preserve slot"
 require_text(VKH "VK_TEMPORAL_PIPELINE_WRITE" "reserved write slot")
 require_text(VKH "VK_TEMPORAL_PIPELINE_INVALIDATE" "reserved invalidate slot")
 require_text(VKH "ral_temporal_handle[ VK_TEMPORAL_PIPELINE_COHORT_COUNT ]" "distinct cohort ownership")
-require_text(VKH "float    worldLightParams[4];                    // offset 592, 16 B\n} vkUniform_t;" "unchanged 608-byte draw-uniform tail")
+require_text(VKH "vec4_t advancedFogColorDensity;                   // offset 608, 16 B\n\tvec4_t advancedFogTypeFarEnabled;                 // offset 624, 16 B\n} vkUniform_t;" "intentional 640-byte draw-uniform fog tail")
 forbid_text(VKH "temporalCurrentMvp" "unconditional temporal uniform payload")
 forbid_text(VKH "temporalPreviousMvp" "unconditional temporal uniform payload")
 require_text(VKC "VK_TemporalPreservePipelineCreate( backend, base, layout," "shipping wrapper delegates to tested factory")
@@ -79,13 +79,14 @@ require_text(VKC "vk_ral_create_pipeline_from_gpinfo_exact, outPipeline" "shippi
 require_text(VKC "for ( j = 0; j < VK_TEMPORAL_PIPELINE_COHORT_COUNT; j++ )\n\t\tpipeline->ral_temporal_handle[j] = NULL;" "all-slot allocation initialization")
 require_text(VKC "for ( k = 0; k < VK_TEMPORAL_PIPELINE_COHORT_COUNT; k++ ) {\n\t\t\tif ( vk.pipelines[i].ral_temporal_handle[k] != NULL ) {\n\t\t\t\tRal_DestroyPipeline( vk.pipelines[i].ral_temporal_handle[k] );\n\t\t\t\tvk.pipelines[i].ral_temporal_handle[k] = NULL;" "all-slot full destroy")
 require_text(VKC "for ( j = 0; j < VK_TEMPORAL_PIPELINE_COHORT_COUNT; j++ ) {\n\t\t\tif ( vk.pipelines[i].ral_temporal_handle[j] != NULL ) {\n\t\t\t\tRal_DestroyPipeline( vk.pipelines[i].ral_temporal_handle[j] );\n\t\t\t\tvk.pipelines[i].ral_temporal_handle[j] = NULL;" "all-slot dynamic rewind")
-require_text(VKC "const qboolean built = worldPass ? ( pipeline->ral_handle[ pass ] != NULL )" "ordinary-only generation predicate")
-require_text(VKC "ralpipe = vk.pipelines[ pipeline ].ral_handle[ vk.renderPassIndex ];" "ordinary-only bind selection")
+require_text(VKC "if ( !vk_is_world_render_pass( pass ) )" "ordinary pipeline rejects non-world render passes")
+require_text(VKC "if ( !pipeline->ral_handle[ pass ] )\n\t\t\tcreate_pipeline( &pipeline->def, pass, index );\n\t\treturn pipeline->ral_handle[ pass ];" "ordinary-only lazy generation and selection")
+require_text(VKC "ralpipe = vk_gen_pipeline( pipeline );" "ordinary-only bind selection through guarded generator")
 require_count(VKC "ral_temporal_handle" 7 "cohort handles occur only in inert lifecycle sites")
 
 # Token authority is global: whitespace or function-pointer indirection must not
 # create a hidden allocation, factory call, or bind path in another product TU.
-file(GLOB PRODUCT_C "${ROOT}/code/renderervk/*.c")
+file(GLOB PRODUCT_C "${ROOT}/code/render/ral/backends/vulkan/renderer/*.c")
 foreach(path IN LISTS PRODUCT_C)
 	get_filename_component(name "${path}" NAME)
 	file(READ "${path}" PRODUCT_SOURCE)
@@ -126,7 +127,7 @@ require_text(VKC "VK_TemporalMainRenderingBuildResume" "ordinary LOAD resume rec
 forbid_text(VKC "USE_TEMPORAL_MOTION" "temporal shader product mapping")
 forbid_text(VKC "temporalCurrentMvp" "unconditional temporal uniform payload")
 forbid_text(VKC "temporalPreviousMvp" "unconditional temporal uniform payload")
-require_text(BUILD "AUX_SOURCE_DIRECTORY(code/renderervk RENDERER_VK_SRCS)" "renderer product source ownership")
+require_text(BUILD "AUX_SOURCE_DIRECTORY(code/render/ral/backends/vulkan/renderer RENDERER_VK_SRCS)" "renderer product source ownership")
 require_text(BUILD "ADD_EXECUTABLE(tr_temporal_motion_targets_test" "target owner host test")
 require_text(BUILD "ADD_EXECUTABLE(vk_temporal_pipeline_cohort_test" "pipeline cohort host test")
 

@@ -63,7 +63,7 @@ probing is unavailable; only an address-sensitive consumer would notice, and
 Arena_IsLowAddress lets it check rather than assume.
 ===========================================================================
 */
-#if defined( _WIN32 )
+#if defined( _WIN32 ) || defined( __EMSCRIPTEN__ )
 #	define ARENA_HAS_MMAP 0
 #else
 #	define ARENA_HAS_MMAP 1
@@ -82,8 +82,14 @@ Arena_IsLowAddress lets it check rather than assume.
 static qboolean Arena_AddrFits( const void *p, size_t size )
 {
     uintptr_t a = (uintptr_t)p;
+#if UINTPTR_MAX <= UINT32_MAX
+    /* wasm32 already lies wholly below LuaJIT's 47-bit ceiling.  Avoid an
+       oversized shift, which is undefined in C and traps in WebAssembly. */
+    return size <= (size_t)( UINTPTR_MAX - a ) ? qtrue : qfalse;
+#else
     return ( ( a >> ARENA_ADDR_BITS ) == 0
           && ( ( a + size ) >> ARENA_ADDR_BITS ) == 0 ) ? qtrue : qfalse;
+#endif
 }
 
 /* Returns a block whose whole extent fits below 2^ARENA_ADDR_BITS when it can,

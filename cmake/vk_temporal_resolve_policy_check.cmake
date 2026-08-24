@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
 get_filename_component(ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
-file(READ "${ROOT}/code/renderervk/vk_temporal_resolve.h" H)
-file(READ "${ROOT}/code/renderervk/vk_temporal_resolve.c" C)
-file(READ "${ROOT}/code/renderervk/shaders/temporal_resolve.comp" SHADER)
-file(READ "${ROOT}/code/renderervk/shaders/shaders.manifest.mjs" MANIFEST)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolve.h" H)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolve.c" C)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/temporal_resolve.comp" SHADER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/shaders.manifest.mjs" MANIFEST)
 file(READ "${ROOT}/tests/vk_temporal_resolve_test.c" TEST)
-file(READ "${ROOT}/code/renderervk/vk_temporal_history_store.c" STORE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_history_store.c" STORE)
 file(READ "${ROOT}/tests/vk_temporal_history_store_test.c" STORE_TEST)
 
 function(require_text haystack needle why)
@@ -159,8 +159,8 @@ require_text(TEST "for ( j = 0; j < 7; ++j )"
 	"host must exercise every candidate role against protected identities")
 require_text(TEST "ticket.committedWriteExpected"
 	"host must exercise durable history-write promotion")
-require_text(TEST "commands[baseCommands + 13]"
-	"host must pin the exact 14-command resolve and auxiliary-restore trace")
+require_text(TEST "commands[baseCommands + 12]"
+"host must pin the exact 13-command resolve and auxiliary-restore trace")
 require_text(TEST "bad.allocationGeneration = 0;"
 	"host must reject a forged zero-generation live owner")
 require_text(TEST "bad.groups[f.authority.historyReadIndex] = NULL;"
@@ -170,8 +170,8 @@ require_text(C "sizeof( vkTemporalResolvePush_t ) == 48u"
 require_text(C "historyReadIndex ) == 44u"
 	"host ABI must pin the final reflected push member offset")
 
-file(READ "${ROOT}/code/renderervk/vk.c" VKC)
-file(READ "${ROOT}/code/renderervk/tr_backend.c" BACKEND)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_backend.c" BACKEND)
 require_count(VKC "VK_TemporalResolveInit\\(" 1 "sole H3 Init")
 require_count(VKC "VK_TemporalResolveNeedsIdle\\(" 1 "sole H3 idle query")
 require_count(VKC "VK_TemporalResolveEnsureAfterFence\\(" 1 "sole H3 Ensure")
@@ -313,15 +313,15 @@ require_order(A2B_REPLACE
 	"VK_TemporalResolvedHdrEnsureAfterFence("
 	"resolve child must release before H2 target replacement")
 
-file(GLOB PRODUCT_C "${ROOT}/code/renderervk/*.c")
+file(GLOB PRODUCT_C "${ROOT}/code/render/ral/backends/vulkan/renderer/*.c")
 foreach(path IN LISTS PRODUCT_C)
-	if(path STREQUAL "${ROOT}/code/renderervk/vk_temporal_resolve.c"
-			OR path STREQUAL "${ROOT}/code/renderervk/vk_temporal_resolve_authority.c"
-			OR path STREQUAL "${ROOT}/code/renderervk/vk.c")
+	if(path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolve.c"
+			OR path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolve_authority.c"
+			OR path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c")
 		continue()
 	endif()
 	file(READ "${path}" body)
-	if(NOT path STREQUAL "${ROOT}/code/renderervk/tr_backend.c")
+	if(NOT path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_backend.c")
 		foreach(wrapper IN ITEMS
 			"vk_temporal_resolve_prepare_authority"
 			"vk_temporal_resolve_record_or_copy")
@@ -345,9 +345,9 @@ foreach(path IN LISTS PRODUCT_C)
 	endforeach()
 endforeach()
 
-file(GLOB PRODUCT_H "${ROOT}/code/renderervk/*.h")
+file(GLOB PRODUCT_H "${ROOT}/code/render/ral/backends/vulkan/renderer/*.h")
 foreach(path IN LISTS PRODUCT_H)
-	if(path STREQUAL "${ROOT}/code/renderervk/vk.h")
+	if(path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.h")
 		continue()
 	endif()
 	file(READ "${path}" body)

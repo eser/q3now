@@ -160,7 +160,7 @@ Two related traps, both of which have cost real debugging time:
   reading a truncated `ls | head` as an empty directory and concluding the
   write had failed, and treating the "saved" line as proof a file exists — it
   is printed without checking `FS_WriteFile`'s result
-  (`renderervk/tr_init.c:1164`), so it says the write was *attempted*, not that
+  (`code/render/ral/backends/vulkan/renderer/tr_init.c:1164`), so it says the write was *attempted*, not that
   it landed. Stat the file.
 - **Never put two quoted strings next to each other in a `.wui`.** botlib
   concatenates adjacent quoted strings the way C concatenates string literals

@@ -1,0 +1,1353 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#include "tr_local.h"
+#include "../../../../frontend/r_log.h"   // rilog-channel-mechanism Turn B — renderer.vk
+#include "vk.h"
+
+R_LOG_DECLARE_CHANNEL( rch_vk, "renderer.vk" );
+
+#ifdef USE_VBO
+
+/*
+
+General concept of this VBO implementation is to store all possible static data
+(vertexes,colors,tex.coords[0..1],normals) in device-local memory
+and accessing it via indexes ONLY.
+
+Static data in current meaning is a world surfaces whose shader data
+can be evaluated at map load time.
+
+Every static surface gets unique item index which will be added to queue
+instead of tesselation like for regular surfaces. Using items queue also
+eleminates run-time tesselation limits.
+
+When it is time to render - we sort queued items to get longest possible
+index sequence run to check if it is long enough i.e. worth issuing a draw call.
+So long device-local index runs are rendered via multiple draw calls,
+all remaining short index sequences are grouped together into single
+host-visible index buffer which is finally rendered via single draw call.
+
+*/
+
+#define MAX_VBO_STAGES MAX_SHADER_STAGES
+
+#define MIN_IBO_RUN 320
+
+//[ibo]: [index0][index1][index2]
+//[vbo]: [index0][vertex0...][index1][vertex1...][index2][vertex2...]
+
+typedef struct vbo_item_s {
+	int			index_offset;    // device-local, relative to current shader
+	int			soft_offset;     // host-visible, absolute
+	int			num_indexes;
+	int			num_vertexes;
+	uint32_t	lightStylesPacked;  // lightstyle indices for this surface (4 bytes packed); 0xFFFFFFFF if unused
+} vbo_item_t;
+
+typedef struct ibo_item_s {
+	int offset;
+	int length;
+} ibo_item_t;
+
+typedef struct vbo_s {
+	byte *vbo_buffer;
+	int vbo_offset;
+	int vbo_size;
+
+	byte *ibo_buffer;
+	int ibo_offset;
+	int ibo_size;
+
+	uint32_t soft_buffer_indexes;
+	uint32_t soft_buffer_offset;
+
+	ibo_item_t *ibo_items;
+	int ibo_items_count;
+
+	vbo_item_t *items;
+	int items_count;
+
+	int *items_queue;
+	int items_queue_count;
+
+} vbo_t;
+
+static vbo_t world_vbo;
+
+// ── world batch-list contract (pre-pass decomposition seam) ─────────
+//
+// The producer/consumer seam between the surface→batch decomposition stage
+// (VBO_PrepareQueues — sorts the queued items and run-detects them into
+// device-local merged index runs + a host-visible soft-buffer remainder) and the
+// draw stage (VBO_RenderIBOItems). Today the decomposition runs in-pass and the
+// draw consumes its output directly; this struct names that output as an
+// engine-owned contract so the decomposition can later be hoisted to a pre-pass
+// (and ultimately a GPU compute) stage without the draw stage changing how it
+// reads the batch list. Execution order is untouched here — only the data
+// hand-off is explicit.
+//
+// The contract is a per-VIEW ARRAY, not a single scalar. The producer
+// APPENDS one entry per publish (one per shader batch, sub-split per unique
+// lightstyle signature); the consumer reads the LAST-published entry (which is
+// always its own, since publish→consume is paired within each batch before the
+// next publish). This removes the "single reused struct" blocker so a later pass can
+// pre-fill the whole view's batch list up front, before the in-pass walk. The
+// reset is per-view (VBO_BeginView at RB_DrawSurfs entry).
+//
+// The run array aliases world_vbo.ibo_items (same Hunk allocation, sized
+// (numStaticIndexes / MIN_IBO_RUN) + 1), which VBO_PrepareQueues OVERWRITES each
+// batch — so today every entry's `runs` pointer aliases the same live buffer,
+// valid only at its own consume (parity-exact for the read-last access pattern).
+// A future change will give each pre-built batch its own runs storage.
+typedef struct worldBatchList_s {
+	const ibo_item_t *runs;        // device-local merged index runs (== world_vbo.ibo_items)
+	int               runCount;    // number of valid runs
+	uint32_t          softIndexes; // host-visible remainder: total indexes
+	uint32_t          softOffset;  // host-visible remainder: first-index offset
+} worldBatchList_t;
+
+// Generous fixed bound: observed ~76 VBO shader batches per view; lightstyle
+// sub-splits multiply that modestly. 4096 is >50× headroom (~128 KB static). On
+// overflow the last slot is reused (never OOB) — see VBO_PublishBatchList.
+#define MAX_WORLD_BATCHES 4096
+
+static worldBatchList_t world_batches[ MAX_WORLD_BATCHES ];
+static int              world_batch_count;   // entries published this view
+
+// Reset the per-view batch-list contract. Called at RB_DrawSurfs entry (once per
+// view: main + each portal/mirror + the screenmap duplicate each get their own).
+// Clears the count so the producer appends from 0; the draw consumes the last-
+// published entry per batch.
+void VBO_BeginView( void )
+{
+	world_batch_count = 0;
+}
+
+// Publish one decomposition output into the batch-list array. Called at the tail
+// of every decomposition pass (VBO_PrepareQueues / VBO_PrepareSubqueue): the draw
+// stage reads the last-appended entry rather than reaching into world_vbo
+// internals. Appends; on overflow reuses the final slot (clamped, never OOB).
+static void VBO_PublishBatchList( void )
+{
+	const vbo_t      *vbo = &world_vbo;
+	worldBatchList_t *bl;
+	int               idx = world_batch_count;
+
+	if ( idx >= MAX_WORLD_BATCHES ) {
+		idx = MAX_WORLD_BATCHES - 1;   // clamp — never index out of range
+	} else {
+		world_batch_count = idx + 1;
+	}
+
+	bl = &world_batches[ idx ];
+	bl->runs        = vbo->ibo_items;
+	bl->runCount    = vbo->ibo_items_count;
+	bl->softIndexes = vbo->soft_buffer_indexes;
+	bl->softOffset  = vbo->soft_buffer_offset;
+}
+
+void VBO_Cleanup( void );
+
+static qboolean isStaticRGBgen( colorGen_t cgen )
+{
+	switch ( cgen )
+	{
+		case CGEN_BAD:
+		case CGEN_IDENTITY_LIGHTING:	// full white (linear pipeline)
+		case CGEN_IDENTITY:				// always (1,1,1,1)
+		case CGEN_ENTITY:				// grabbed from entity's modulate field
+		case CGEN_ONE_MINUS_ENTITY:		// grabbed from 1 - entity.modulate
+		case CGEN_EXACT_VERTEX:			// tess.vertexColors
+		case CGEN_VERTEX:				// tess.vertexColors (verbatim)
+		case CGEN_ONE_MINUS_VERTEX:
+		// case CGEN_WAVEFORM:			// programmatically generated
+		case CGEN_LIGHTING_DIFFUSE:
+		//case CGEN_FOG:				// standard fog
+		case CGEN_CONST:				// fixed color
+			return qtrue;
+		default:
+			return qfalse;
+	}
+}
+
+
+static qboolean isStaticTCgen( const shaderStage_t *stage, int bundle )
+{
+	switch ( stage->bundle[bundle].tcGen )
+	{
+		case TCGEN_BAD:
+		case TCGEN_IDENTITY:	// clear to 0,0
+		case TCGEN_LIGHTMAP:
+		case TCGEN_TEXTURE:
+		//case TCGEN_ENVIRONMENT_MAPPED:
+		//case TCGEN_ENVIRONMENT_MAPPED_FP:
+		//case TCGEN_FOG:
+		case TCGEN_VECTOR:		// S and T from world coordinates
+			return qtrue;
+		case TCGEN_ENVIRONMENT_MAPPED:
+			if ( bundle == 0 && (stage->tessFlags & TESS_ENV) )
+				return qtrue;
+			else
+				return qfalse;
+		default:
+			return qfalse;
+	}
+}
+
+
+static qboolean isStaticTCmod( const textureBundle_t *bundle )
+{
+	for ( int i = 0; i < bundle->numTexMods; i++ ) {
+		switch ( bundle->texMods[i].type ) {
+			case TMOD_NONE:
+			case TMOD_SCALE:
+			case TMOD_TRANSFORM:
+			case TMOD_OFFSET:
+			case TMOD_SCALE_OFFSET:
+			case TMOD_OFFSET_SCALE:
+				break;
+			default:
+				return qfalse;
+		}
+	}
+
+	return qtrue;
+}
+
+
+static qboolean isStaticAgen( alphaGen_t agen )
+{
+	switch ( agen )
+	{
+		case AGEN_IDENTITY:
+		case AGEN_SKIP:
+		case AGEN_ENTITY:
+		case AGEN_ONE_MINUS_ENTITY:
+		case AGEN_VERTEX:
+		case AGEN_ONE_MINUS_VERTEX:
+		//case AGEN_LIGHTING_SPECULAR:
+		//case AGEN_WAVEFORM:
+		//case AGEN_PORTAL:
+		case AGEN_CONST:
+			return qtrue;
+		default:
+			return qfalse;
+	}
+}
+
+
+/*
+=============
+isStaticShader
+
+Decide if we can put surface in static vbo
+=============
+*/
+static qboolean isStaticShader( shader_t *shader )
+{
+	const shaderStage_t* stage;
+	int i, b, svarsSize;
+
+	if ( shader->isStaticShader )
+		return qtrue;
+
+	if ( shader->isSky || shader->remappedShader )
+		return qfalse;
+
+	if ( shader->numDeforms || shader->numUnfoggedPasses > MAX_VBO_STAGES )
+		return qfalse;
+
+	svarsSize = 0;
+
+	for ( i = 0; i < shader->numUnfoggedPasses; i++ )
+	{
+		stage = shader->stages[ i ];
+		if ( !stage || !stage->active )
+			break;
+		if ( stage->depthFragment )
+			return qfalse;
+		for ( b = 0; b < NUM_TEXTURE_BUNDLES; b++ ) {
+			if ( !isStaticTCmod( &stage->bundle[b] ) )
+				return qfalse;
+			if ( !isStaticTCgen( stage, b ) )
+				return qfalse;
+			if ( stage->bundle[b].adjustColorsForFog != ACFF_NONE )
+				return qfalse;
+			if ( !isStaticRGBgen( stage->bundle[b].rgbGen ) )
+				return qfalse;
+			if ( !isStaticAgen( stage->bundle[b].alphaGen ) )
+				return qfalse;
+		}
+		if ( stage->tessFlags & TESS_RGBA0 )
+			svarsSize += sizeof( color4ub_t );
+		if ( stage->tessFlags & TESS_RGBA1 )
+			svarsSize += sizeof( color4ub_t );
+		if ( stage->tessFlags & TESS_RGBA2 )
+			svarsSize += sizeof( color4ub_t );
+		if ( stage->tessFlags & TESS_ST0 )
+			svarsSize += sizeof( vec2_t );
+		if ( stage->tessFlags & TESS_ST1 )
+			svarsSize += sizeof( vec2_t );
+		if ( stage->tessFlags & TESS_ST2 )
+			svarsSize += sizeof( vec2_t );
+	}
+
+	if ( i == 0 )
+		return qfalse;
+
+	shader->isStaticShader = qtrue;
+
+	// TODO: alloc separate structure?
+	shader->svarsSize = svarsSize;
+	shader->iboOffset = -1;
+	shader->vboOffset = -1;
+	shader->curIndexes = 0;
+	shader->curVertexes = 0;
+	shader->numIndexes = 0;
+	shader->numVertexes = 0;
+
+	return qtrue;
+}
+
+
+static void VBO_AddGeometry( vbo_t *vbo, vbo_item_t *vi, shaderCommands_t *input )
+{
+	uint32_t size, offs;
+	uint32_t offs_st[NUM_TEXTURE_BUNDLES];
+	uint32_t offs_cl[NUM_TEXTURE_BUNDLES];
+	int i;
+
+	offs_st[0] = offs_st[1] = offs_st[2] = 0;
+	offs_cl[0] = offs_cl[1] = offs_cl[2] = 0;
+
+	if ( input->shader->iboOffset == -1 || input->shader->vboOffset == -1 ) {
+
+		// allocate indexes
+		input->shader->iboOffset = vbo->vbo_offset;
+		vbo->vbo_offset += input->shader->numIndexes * sizeof( input->indexes[0] );
+
+		// allocate xyz + normals + svars
+		input->shader->vboOffset = vbo->vbo_offset;
+		vbo->vbo_offset += input->shader->numVertexes * ( sizeof( input->xyz[0] ) + sizeof( input->normal[0] ) + input->shader->svarsSize );
+
+		// go to normals offset
+		input->shader->normalOffset = input->shader->vboOffset + input->shader->numVertexes * sizeof( input->xyz[0] );
+
+		// go to first color offset
+		offs = input->shader->normalOffset + input->shader->numVertexes * sizeof( input->normal[0] );
+
+		for ( i = 0; i < MAX_VBO_STAGES; i++ )
+		{
+			shaderStage_t *pStage = input->xstages[ i ];
+			if ( !pStage )
+				break;
+
+			if ( pStage->tessFlags & TESS_RGBA0 ) {
+				offs_cl[0] = offs;
+				pStage->rgb_offset[0] = offs; offs += input->shader->numVertexes * sizeof( color4ub_t );
+			} else {
+				pStage->rgb_offset[0] = offs_cl[0];
+			}
+
+			if ( pStage->tessFlags & TESS_RGBA1 ) {
+				offs_cl[1] = offs;
+				pStage->rgb_offset[1] = offs; offs += input->shader->numVertexes * sizeof( color4ub_t );
+			} else {
+				pStage->rgb_offset[1] = offs_cl[1];
+			}
+
+			if ( pStage->tessFlags & TESS_RGBA2 ) {
+				offs_cl[2] = offs;
+				pStage->rgb_offset[2] = offs; offs += input->shader->numVertexes * sizeof( color4ub_t );
+			} else {
+				pStage->rgb_offset[2] = offs_cl[2];
+			}
+
+			if ( pStage->tessFlags & TESS_ST0 )	{
+				offs_st[0] = offs;
+				pStage->tex_offset[0] = offs; offs += input->shader->numVertexes * sizeof( vec2_t );
+			} else {
+				pStage->tex_offset[0] = offs_st[0];
+			}
+			if ( pStage->tessFlags & TESS_ST1 ) {
+				offs_st[1] = offs;
+				pStage->tex_offset[1] = offs; offs += input->shader->numVertexes * sizeof( vec2_t );
+			} else {
+				pStage->tex_offset[1] = offs_st[1];
+			}
+			if ( pStage->tessFlags & TESS_ST2 ) {
+				offs_st[2] = offs;
+				pStage->tex_offset[2] = offs; offs += input->shader->numVertexes * sizeof( vec2_t );
+			} else {
+				pStage->tex_offset[2] = offs_st[2];
+			}
+		}
+
+		input->shader->curVertexes = 0;
+		input->shader->curIndexes = 0;
+	}
+
+	// shift indexes relative to current shader
+	for ( i = 0; i < input->numIndexes; i++ )
+		input->indexes[ i ] += input->shader->curVertexes;
+
+	if ( vi->index_offset == -1 ) // one-time initialization
+	{
+		// initialize geometry offsets relative to current shader
+		vi->index_offset = input->shader->curIndexes;
+		vi->soft_offset = vbo->ibo_offset;
+	}
+
+	offs = input->shader->iboOffset + input->shader->curIndexes * sizeof( input->indexes[0] );
+	size = input->numIndexes * sizeof( input->indexes[ 0 ] );
+	if ( offs + size > vbo->vbo_size ) {
+		ri.Terminate( TERM_CLIENT_DROP, "Index0 overflow" );
+	}
+	memcpy( vbo->vbo_buffer + offs, input->indexes, size );
+
+	// fill soft buffer too
+	if ( vbo->ibo_offset + size > vbo->ibo_size ) {
+		ri.Terminate( TERM_CLIENT_DROP, "Index1 overflow" );
+	}
+	memcpy( vbo->ibo_buffer + vbo->ibo_offset, input->indexes, size );
+	vbo->ibo_offset += size;
+	//Com_Log( SEV_INFO, LOG_CH(ch_renderer), "i offs=%i size=%i\n", offs, size );
+
+	// vertexes
+	offs = input->shader->vboOffset + input->shader->curVertexes * sizeof( input->xyz[0] );
+	size = input->numVertexes * sizeof( input->xyz[ 0 ] );
+	if ( offs + size > vbo->vbo_size ) {
+		ri.Terminate( TERM_CLIENT_DROP, "Vertex overflow" );
+	}
+	//Com_Log( SEV_INFO, LOG_CH(ch_renderer), "v offs=%i size=%i\n", offs, size );
+	memcpy( vbo->vbo_buffer + offs, input->xyz, size );
+
+	// normals
+	offs = input->shader->normalOffset + input->shader->curVertexes * sizeof( input->normal[0] );
+	size = input->numVertexes * sizeof( input->normal[ 0 ] );
+	if ( offs + size > vbo->vbo_size ) {
+		ri.Terminate( TERM_CLIENT_DROP, "Normals overflow" );
+	}
+	//Com_Log( SEV_INFO, LOG_CH(ch_renderer), "v offs=%i size=%i\n", offs, size );
+	memcpy( vbo->vbo_buffer + offs, input->normal, size );
+
+	vi->num_indexes += input->numIndexes;
+	vi->num_vertexes += input->numVertexes;
+}
+
+
+static void VBO_AddStageColors( vbo_t *vbo, const int stage, const shaderCommands_t *input, const int bundle )
+{
+	const int offs = input->xstages[ stage ]->rgb_offset[ bundle ] + input->shader->curVertexes * sizeof( color4ub_t );
+	const int size = input->numVertexes * sizeof( color4ub_t );
+
+	memcpy( vbo->vbo_buffer + offs, input->svars.colors[bundle], size );
+}
+
+
+static void VBO_AddStageTxCoords( vbo_t *vbo, const int stage, const shaderCommands_t *input, const int bundle )
+{
+	const int offs = input->xstages[ stage ]->tex_offset[ bundle ] + input->shader->curVertexes * sizeof( vec2_t );
+	const int size = input->numVertexes * sizeof( vec2_t );
+
+	memcpy( vbo->vbo_buffer + offs, input->svars.texcoordPtr[ bundle ], size );
+}
+
+
+void VBO_PushData( int itemIndex, shaderCommands_t *input )
+{
+	const shaderStage_t *pStage;
+	vbo_t *vbo = &world_vbo;
+	vbo_item_t *vi = vbo->items + itemIndex;
+
+	VBO_AddGeometry( vbo, vi, input );
+
+	for ( int i = 0; i < MAX_VBO_STAGES; i++ )
+	{
+		pStage = input->xstages[ i ];
+		if ( !pStage )
+			break;
+
+		if ( pStage->tessFlags & TESS_RGBA0 )
+		{
+			R_ComputeColors( 0, tess.svars.colors[0], pStage );
+			VBO_AddStageColors( vbo, i, input, 0 );
+		}
+		if ( pStage->tessFlags & TESS_RGBA1 )
+		{
+			R_ComputeColors( 1, tess.svars.colors[1], pStage );
+			VBO_AddStageColors( vbo, i, input, 1 );
+		}
+		if ( pStage->tessFlags & TESS_RGBA2 )
+		{
+			R_ComputeColors( 2, tess.svars.colors[2], pStage );
+			VBO_AddStageColors( vbo, i, input, 2 );
+		}
+
+		if ( pStage->tessFlags & TESS_ST0 )
+		{
+			R_ComputeTexCoords( 0, &pStage->bundle[0] );
+			VBO_AddStageTxCoords( vbo, i, input, 0 );
+		}
+		if ( pStage->tessFlags & TESS_ST1 )
+		{
+			R_ComputeTexCoords( 1, &pStage->bundle[1] );
+			VBO_AddStageTxCoords( vbo, i, input, 1 );
+		}
+		if ( pStage->tessFlags & TESS_ST2 )
+		{
+			R_ComputeTexCoords( 2, &pStage->bundle[2] );
+			VBO_AddStageTxCoords( vbo, i, input, 2 );
+		}
+	}
+
+	input->shader->curVertexes += input->numVertexes;
+	input->shader->curIndexes += input->numIndexes;
+
+	//Com_Log( SEV_INFO, LOG_CH(ch_renderer), "%s: vert %i (of %i), ind %i (of %i)\n", input->shader->name,
+	//	input->shader->curVertexes, input->shader->numVertexes,
+	//	input->shader->curIndexes, input->shader->numIndexes );
+}
+
+
+void VBO_UnBind( void )
+{
+	tess.vboIndex = 0;
+}
+
+
+static uint32_t surfLightStylesPacked( const msurface_t *sf )
+{
+	// surfaceType is always the first field in all surface data structs
+	if ( *(const surfaceType_t *)sf->data == SF_FACE ) {
+		uint32_t packed;
+		memcpy( &packed, ((const srfSurfaceFace_t *)sf->data)->lightStyles, 4 );
+		return packed;
+	}
+	return 0xFFFFFFFFu;
+}
+
+static int surfSortFunc( const void *a, const void *b )
+{
+	const msurface_t *sa = *(const msurface_t **)a;
+	const msurface_t *sb = *(const msurface_t **)b;
+	if ( sa->shader != sb->shader )
+		return ( sa->shader > sb->shader ) ? 1 : -1;
+	// secondary: group by lightstyle signature so VBO batches are homogeneous
+	uint32_t pa = surfLightStylesPacked( sa );
+	uint32_t pb = surfLightStylesPacked( sb );
+	return ( pa > pb ) ? 1 : ( pa < pb ) ? -1 : 0;
+}
+
+
+static void initItem( vbo_item_t *item )
+{
+	item->num_vertexes = 0;
+	item->num_indexes = 0;
+
+	item->index_offset = -1;
+	item->soft_offset = -1;
+	item->lightStylesPacked = 0xFFFFFFFFu;
+}
+
+
+// Read a surface's vboItemIndex (0 if not a static VBO item).
+// vboItemIndex sits at a different struct offset per surface type, so dispatch on
+// the leading surfaceType (always the first field of every surf data struct).
+static int VBO_SurfItemIndex( const msurface_t *sf )
+{
+	switch ( *(const surfaceType_t *)sf->data ) {
+		case SF_FACE:      return ((const srfSurfaceFace_t *)sf->data)->vboItemIndex;
+		case SF_TRIANGLES: return ((const srfTriangles_t   *)sf->data)->vboItemIndex;
+#ifdef USE_VBO_GRID
+		case SF_GRID:      return ((const srfGridMesh_t    *)sf->data)->vboItemIndex;
+#endif
+		default:           return 0;
+	}
+}
+
+
+// Bake the static surfaceIndex↔vboItemIndex map + per-vboItem
+// static sort-key data into vk.* host tables, map-load lifetime (ri.Hunk_Alloc,
+// h_low). Called at the tail of R_BuildWorldVBO where every static surface carries
+// its final vboItemIndex. PURE DATA: nobody consumes these yet; this
+// only builds + self-verifies (_DEBUG round-trip identity). The forward map is a
+// direct per-surface read (vboItemIndex is stored on the surface struct regardless
+// of the build-time shader sort), so there is NO index-space hazard.
+void VBO_BuildSurfaceMap( const msurface_t *surf, int surfCount, int numStaticSurfaces )
+{
+	int i, item;
+
+	// Free any prior map (vid_restart / map reload rebuilds via fresh Hunk).
+	vk.cullSurfToItem  = NULL;
+	vk.cullItemToSurf  = NULL;
+	vk.cullItemSortKey = NULL;
+	vk.cullVboItemCount = 0;
+
+	if ( surfCount <= 0 || numStaticSurfaces <= 0 )
+		return;
+
+	// Forward: surfaceIndex (0-based into surfaces[]) → vboItemIndex (0 = not a VBO item).
+	vk.cullSurfToItem  = ri.Hunk_Alloc( surfCount * sizeof( uint32_t ), h_low );
+	// Inverse + per-item static key: indexed by vboItemIndex (1-based; slot 0 unused).
+	vk.cullItemToSurf  = ri.Hunk_Alloc( ( numStaticSurfaces + 1 ) * sizeof( uint32_t ), h_low );
+	vk.cullItemSortKey = ri.Hunk_Alloc( ( numStaticSurfaces + 1 ) * sizeof( uint32_t ), h_low );
+	vk.cullVboItemCount = numStaticSurfaces;
+
+	for ( i = 0; i < surfCount; i++ ) {
+		item = VBO_SurfItemIndex( &surf[i] );
+		vk.cullSurfToItem[i] = (uint32_t)item;
+		if ( item > 0 && item <= numStaticSurfaces ) {
+			vk.cullItemToSurf[item] = (uint32_t)i;
+			// Static sort-key components: (sortedIndex<<16)|fogIndex. The per-frame
+			// entity + dlight bits are NOT baked (the batch build adds them at
+			// runtime — under USE_PMLIGHT they collapse to entity=WORLD, dlight=0).
+			vk.cullItemSortKey[item] =
+				( (uint32_t)( surf[i].shader->sortedIndex & 0xFFFF ) << 16 ) |
+				( (uint32_t)( surf[i].fogIndex & 0xFFFF ) );
+		}
+	}
+
+	R_LOG( rch_vk, SEV_INFO, "VBO: baked surface map (%d surfaces, %d VBO items)\n",
+		surfCount, numStaticSurfaces );
+
+#if defined(_DEBUG)
+	// Round-trip identity self-check: every static surface's
+	// forward map round-trips through the inverse, and the per-item key matches a
+	// fresh read. Data-identity only — no render path to diff.
+	{
+		int mismatch = 0, firstBad = -1, items = 0;
+		for ( i = 0; i < surfCount; i++ ) {
+			uint32_t it = vk.cullSurfToItem[i];
+			if ( it == 0 )
+				continue;   // non-VBO surface — sentinel, correct
+			items++;
+			if ( it > (uint32_t)numStaticSurfaces || vk.cullItemToSurf[it] != (uint32_t)i ) {
+				mismatch++;
+				if ( firstBad < 0 ) firstBad = i;
+			}
+		}
+		if ( mismatch ) {
+			R_LOG( rch_vk, SEV_WARN,
+				"VBO map identity FAIL: %d/%d items mismatch (first surf=%d)\n",
+				mismatch, items, firstBad );
+		} else {
+			R_LOG( rch_vk, SEV_INFO,
+				"VBO map identity OK: %d VBO items round-trip (of %d surfaces), 0 mismatch\n",
+				items, surfCount );
+		}
+	}
+#endif
+}
+
+
+void R_BuildWorldVBO( msurface_t *surf, int surfCount )
+{
+	vbo_t *vbo = &world_vbo;
+	msurface_t **surfList;
+	srfSurfaceFace_t *face;
+	srfTriangles_t *tris;
+#ifdef USE_VBO_GRID
+	srfGridMesh_t *grid;
+#endif
+	msurface_t *sf;
+	int ibo_size;
+	int vbo_size;
+	int i, n;
+
+	int numStaticSurfaces = 0;
+	int numStaticIndexes = 0;
+	int numStaticVertexes = 0;
+
+	if ( !r_vbo->integer )
+		return;
+
+	// Sort key includes lightStylesPacked so surfaces with the same shader but different
+	// lightstyle signatures form separate VBO sub-groups, each drawn with its own UBO.
+
+	if ( glConfig.numTextureUnits < 3 ) {
+		R_LOG( rch_vk, SEV_WARN, "... not enough texture units for VBO\n" );
+		return;
+	}
+
+	VBO_Cleanup();
+
+	vbo_size = 0;
+
+	// initial scan to count surfaces/indexes/vertexes for memory allocation
+	for ( i = 0, sf = surf; i < surfCount; i++, sf++ ) {
+		face = (srfSurfaceFace_t *) sf->data;
+		if ( face->surfaceType == SF_FACE && isStaticShader( sf->shader ) ) {
+			face->vboItemIndex = ++numStaticSurfaces;
+			numStaticVertexes += face->numPoints;
+			numStaticIndexes += face->numIndices;
+
+			vbo_size += face->numPoints * (sf->shader->svarsSize + sizeof( tess.xyz[0] ) + sizeof( tess.normal[0] ) );
+			sf->shader->numVertexes += face->numPoints;
+			sf->shader->numIndexes += face->numIndices;
+			continue;
+		}
+		tris = (srfTriangles_t *) sf->data;
+		if ( tris->surfaceType == SF_TRIANGLES && isStaticShader( sf->shader ) ) {
+			tris->vboItemIndex = ++numStaticSurfaces;
+			numStaticVertexes += tris->numVerts;
+			numStaticIndexes += tris->numIndexes;
+
+			vbo_size += tris->numVerts * (sf->shader->svarsSize + sizeof( tess.xyz[0] ) + sizeof( tess.normal[0] ) );
+			sf->shader->numVertexes += tris->numVerts;
+			sf->shader->numIndexes += tris->numIndexes;
+			continue;
+		}
+#ifdef USE_VBO_GRID
+		grid = (srfGridMesh_t *) sf->data;
+		if ( grid->surfaceType == SF_GRID && isStaticShader( sf->shader ) ) {
+			grid->vboItemIndex = ++numStaticSurfaces;
+			RB_SurfaceGridEstimate( grid, &grid->vboExpectVertices, &grid->vboExpectIndices );
+			numStaticVertexes += grid->vboExpectVertices;
+			numStaticIndexes += grid->vboExpectIndices;
+
+			vbo_size += grid->vboExpectVertices * (sf->shader->svarsSize + sizeof( tess.xyz[0] ) + sizeof( tess.normal[0] ) );
+			sf->shader->numVertexes += grid->vboExpectVertices;
+			sf->shader->numIndexes += grid->vboExpectIndices;
+			continue;
+		}
+#endif // USE_VBO_GRID
+	}
+	if ( numStaticSurfaces == 0 ) {
+		R_LOG( rch_vk, SEV_INFO, "...no static surfaces for VBO\n" );
+		return;
+	}
+
+	vbo_size = PAD( vbo_size, 32 );
+
+	ibo_size = numStaticIndexes * sizeof( tess.indexes[0] );
+	ibo_size = PAD( ibo_size, 32 );
+
+	// 0 item is unused
+	vbo->items = ri.Hunk_Alloc( ( numStaticSurfaces + 1 ) * sizeof( vbo_item_t ), h_low );
+	vbo->items_count = numStaticSurfaces;
+
+	// last item will be used for run length termination
+	vbo->items_queue = ri.Hunk_Alloc( ( numStaticSurfaces + 1 ) * sizeof( int ), h_low );
+	vbo->items_queue_count = 0;
+
+	//Com_Log( SEV_INFO, S_COLOR_CYAN "VBO size: %i\n", vbo_size );
+	//Com_Log( SEV_INFO, S_COLOR_CYAN "IBO size: %i\n", ibo_size );
+
+	// vertex buffer
+	vbo_size += ibo_size;
+	vbo->vbo_buffer = ri.Hunk_AllocateTempMemory( vbo_size );
+	vbo->vbo_offset = 0;
+	vbo->vbo_size = vbo_size;
+
+	// index buffer
+	vbo->ibo_buffer = ri.Hunk_Alloc( ibo_size, h_low );
+	vbo->ibo_offset = 0;
+	vbo->ibo_size = ibo_size;
+
+	// ibo runs buffer
+	vbo->ibo_items = ri.Hunk_Alloc( ( (numStaticIndexes / MIN_IBO_RUN) + 1 ) * sizeof( ibo_item_t ), h_low );
+	vbo->ibo_items_count = 0;
+
+	surfList = ri.Hunk_AllocateTempMemory( numStaticSurfaces * sizeof( msurface_t* ) );
+
+	for ( i = 0, n = 0, sf = surf; i < surfCount; i++, sf++ ) {
+		face = (srfSurfaceFace_t *) sf->data;
+		if ( face->surfaceType == SF_FACE && face->vboItemIndex ) {
+			surfList[ n++ ] = sf;
+			continue;
+		}
+		tris = (srfTriangles_t *) sf->data;
+		if ( tris->surfaceType == SF_TRIANGLES && tris->vboItemIndex ) {
+			surfList[ n++ ] = sf;
+			continue;
+		}
+#ifdef USE_VBO_GRID
+		grid = (srfGridMesh_t *) sf->data;
+		if ( grid->surfaceType == SF_GRID && grid->vboItemIndex ) {
+			surfList[ n++ ] = sf;
+			continue;
+		}
+#endif // USE_VBO_GRID
+	}
+
+	if ( n != numStaticSurfaces ) {
+		ri.Terminate( TERM_CLIENT_DROP, "Invalid VBO surface count" );
+	}
+
+	// sort surfaces by shader
+	qsort( surfList, numStaticSurfaces, sizeof( surfList[0] ), surfSortFunc );
+
+	tess.numIndexes = 0;
+	tess.numVertexes = 0;
+
+	memset( &backEnd.viewParms, 0, sizeof( backEnd.viewParms ) );
+	backEnd.currentEntity = &tr.worldEntity;
+
+	for ( i = 0; i < numStaticSurfaces; i++ )
+	{
+		sf = surfList[ i ];
+		face = (srfSurfaceFace_t *) sf->data;
+		tris = (srfTriangles_t *) sf->data;
+#ifdef USE_VBO_GRID
+		grid = (srfGridMesh_t *) sf->data;
+#endif
+		if ( face->surfaceType == SF_FACE )
+			face->vboItemIndex = i + 1;
+		else if (tris->surfaceType == SF_TRIANGLES) {
+			tris->vboItemIndex = i + 1;
+#ifdef USE_VBO_GRID
+		} else if (grid->surfaceType == SF_GRID) {
+			grid->vboItemIndex = i + 1;
+#endif
+		} else {
+			ri.Terminate( TERM_CLIENT_DROP, "Unexpected surface type" );
+		}
+		initItem( vbo->items + i + 1 );
+		// store lightstyle signature; surfSortFunc already grouped these contiguously
+		vbo->items[i + 1].lightStylesPacked = surfLightStylesPacked( sf );
+		RB_BeginSurface( sf->shader, 0 );
+		tess.allowVBO = qfalse; // block execution of VBO path as we need to tesselate geometry
+#ifdef USE_TESS_NEEDS_NORMAL
+		tess.needsNormal = qtrue;
+#endif
+#ifdef USE_TESS_NEEDS_ST2
+		tess.needsST2 = qtrue;
+#endif
+		// tesselate
+		rb_surfaceTable[ *sf->data ]( sf->data ); // VBO_PushData() may be called multiple times there
+		// setup colors and texture coordinates
+		VBO_PushData( i + 1, &tess );
+#ifdef USE_VBO_GRID
+		if ( grid->surfaceType == SF_GRID ) {
+			vbo_item_t *vi = vbo->items + i + 1;
+			if ( vi->num_vertexes != grid->vboExpectVertices || vi->num_indexes != grid->vboExpectIndices ) {
+				ri.Terminate( TERM_CLIENT_DROP, "Unexpected grid vertexes/indexes count" );
+			}
+		}
+#endif // USE_VBO_GRID
+		tess.numIndexes = 0;
+		tess.numVertexes = 0;
+	}
+
+	ri.Hunk_FreeTempMemory( surfList );
+
+//__fail:
+	vk_alloc_vbo( vbo->vbo_buffer, vbo->vbo_size );
+
+	//if ( err == GL_OUT_OF_MEMORY )
+	//	R_LOG( rch_vk, SEV_WARN, "%s: out of memory\n", __func__ );
+	//else
+	//	R_LOG( rch_vk, SEV_ERROR, "%s: error %i\n", __func__, err );
+#if 0
+	// reset vbo markers
+	for ( i = 0, sf = surf; i < surfCount; i++, sf++ ) {
+		face = (srfSurfaceFace_t *) sf->data;
+		if ( face->surfaceType == SF_FACE ) {
+			face->vboItemIndex = 0;
+			continue;
+		}
+		tris = (srfTriangles_t *) sf->data;
+		if ( tris->surfaceType == SF_TRIANGLES ) {
+			tris->vboItemIndex = 0;
+			continue;
+		}
+		grid = (srfGridMesh_t *) sf->data;
+		if ( grid->surfaceType == SF_GRID ) {
+			grid->vboItemIndex = 0;
+			continue;
+		}
+	}
+#endif
+
+	// release host memory
+	ri.Hunk_FreeTempMemory( vbo->vbo_buffer );
+	vbo->vbo_buffer = NULL;
+
+	// release GPU resources
+	//VBO_Cleanup();
+
+	// Bake the static surfaceIndex↔vboItemIndex map + per-vboItem
+	// static sort-key data, now that every static surface carries its final
+	// vboItemIndex and vbo->items[] holds the run extents. Pure data, map-load
+	// lifetime; consumed by a later stage, not by any current render path.
+	VBO_BuildSurfaceMap( surf, surfCount, numStaticSurfaces );
+}
+
+
+void VBO_Cleanup( void )
+{
+	memset( &world_vbo, 0, sizeof( world_vbo ) );
+
+	for ( int i = 0; i < tr.numShaders; i++ )
+	{
+		tr.shaders[ i ]->isStaticShader = qfalse;
+		tr.shaders[ i ]->iboOffset = -1;
+		tr.shaders[ i ]->vboOffset = -1;
+	}
+}
+
+
+/*
+=============
+qsort_int
+=============
+*/
+static void qsort_int( int *a, const int n ) {
+	int temp, m;
+	int i, j;
+
+	if ( n < 32 ) { // CUTOFF
+		for ( i = 1 ; i < n + 1 ; i++ ) {
+			j = i;
+			while ( j > 0 && a[j] < a[j-1] ) {
+				temp = a[j];
+				a[j] = a[j-1];
+				a[j-1] = temp;
+				j--;
+			}
+		}
+		return;
+	}
+
+	i = 0;
+	j = n;
+	m = a[ n>>1 ];
+
+	do {
+		while ( a[i] < m ) i++;
+		while ( a[j] > m ) j--;
+		if ( i <= j ) {
+			temp = a[i];
+			a[i] = a[j];
+			a[j] = temp;
+			i++;
+			j--;
+		}
+	} while ( i <= j );
+
+	if ( j > 0 ) qsort_int( a, j );
+	if ( n > i ) qsort_int( a+i, n-i );
+}
+
+
+static int run_length( const int *a, int from, int to, int *count )
+{
+	vbo_t *vbo = &world_vbo;
+	int i, n, cnt;
+	for ( cnt = 0, n = 1, i = from; i < to; i++, n++ )
+	{
+		cnt += vbo->items[a[i]].num_indexes;
+		if ( a[i]+1 != a[i+1] )
+			break;
+	}
+	*count = cnt;
+	return n;
+}
+
+
+void VBO_QueueItem( int itemIndex )
+{
+	vbo_t *vbo = &world_vbo;
+
+	if ( vbo->items_queue_count < vbo->items_count )
+	{
+		vbo->items_queue[vbo->items_queue_count++] = itemIndex;
+	}
+	else
+	{
+		ri.Terminate( TERM_CLIENT_DROP, "VBO queue overflow" );
+	}
+}
+
+
+void VBO_ClearQueue( void )
+{
+	vbo_t *vbo = &world_vbo;
+	vbo->items_queue_count = 0;
+	// NB: do NOT reset the per-view batch-list array here — VBO_ClearQueue fires
+	// per shader batch (at each VBO surface-run start), but the contract array
+	// accumulates across the whole view. The array resets per-view in
+	// VBO_BeginView (RB_DrawSurfs entry).
+}
+
+
+void VBO_Flush( void )
+{
+	if ( tess.vboIndex )
+	{
+		RB_EndSurface();
+		tess.vboIndex = 0;
+		RB_BeginSurface( tess.shader, tess.fogNum );
+	}
+}
+
+
+static void VBO_AddItemDataToSoftBuffer( int itemIndex )
+{
+	vbo_t *vbo = &world_vbo;
+	const vbo_item_t *vi = vbo->items + itemIndex;
+
+	const uint32_t offset = vk_tess_index( vi->num_indexes, vbo->ibo_buffer + vi->soft_offset );
+
+	if ( vbo->soft_buffer_indexes == 0 )
+	{
+		// start recording into host-visible memory
+		vbo->soft_buffer_offset = offset;
+	}
+
+	vbo->soft_buffer_indexes += vi->num_indexes;
+}
+
+
+static void VBO_AddItemRangeToIBOBuffer( int offset, int length )
+{
+	vbo_t *vbo = &world_vbo;
+	ibo_item_t *it;
+
+	it = vbo->ibo_items + vbo->ibo_items_count++;
+
+	it->offset = offset;
+	it->length = length;
+}
+
+
+void VBO_RenderIBOItems( uint32_t firstInstance )
+{
+	// firstInstance selects the per-entity matrix storage-buffer slot on the
+	// r_entitySSBO path (== gl_InstanceIndex; 0 on the OFF path, where it is
+	// ignored — the world VBO surfaces read ubo.mvp). Threaded into every per-run
+	// and the soft draw so one batch's runs share its slot.
+	//
+	// Consume the batch-list contract published by the decomposition stage
+	// (VBO_PrepareQueues / VBO_PrepareSubqueue). The draw stage reads the last-
+	// appended entry of the per-view array (publish→consume is paired
+	// within each batch before the next publish, so the last entry is always this
+	// draw's own).
+	const worldBatchList_t *bl;
+
+	if ( world_batch_count == 0 )
+		return;
+
+	bl = &world_batches[ world_batch_count - 1 ];
+
+#if defined(_DEBUG)
+	// Parity self-check: the last-published entry must still match world_vbo's live
+	// decomposition output at consume time.
+	if ( bl->runs != world_vbo.ibo_items ||
+	     bl->runCount != world_vbo.ibo_items_count ||
+	     bl->softIndexes != world_vbo.soft_buffer_indexes ||
+	     bl->softOffset != world_vbo.soft_buffer_offset )
+	{
+		R_LOG( rch_vk, SEV_WARN,
+			"world batch-list parity drift: contract(runs=%p n=%d soft=%u@%u) vs live(n=%d soft=%u@%u)\n",
+			(const void *)bl->runs, bl->runCount, bl->softIndexes, bl->softOffset,
+			world_vbo.ibo_items_count, world_vbo.soft_buffer_indexes, world_vbo.soft_buffer_offset );
+	}
+#endif
+
+	// from device-local memory
+	if ( bl->runCount )
+	{
+		vk_bind_index_buffer( vk.vbo.ral_vertex_buffer, tess.shader->iboOffset );
+
+		for ( int i = 0; i < bl->runCount; i++ )
+		{
+			vk_draw_indexed( bl->runs[ i ].length, bl->runs[ i ].offset, firstInstance );
+		}
+	}
+
+	// from host-visible memory
+	if ( bl->softIndexes )
+	{
+		vk_bind_index_buffer( vk.cmd->ral_vertex_buffer, bl->softOffset );
+
+		vk_draw_indexed( bl->softIndexes, 0, firstInstance );
+	}
+}
+
+
+#if defined(_DEBUG)
+static void VBO_ShadowVerifyDecompose( void );   // defined below
+#endif
+
+void VBO_PrepareQueues( void )
+{
+	vbo_t *vbo = &world_vbo;
+	int i, item_run, index_run, n;
+	const int *a;
+
+	vbo->items_queue[ vbo->items_queue_count ] = 0; // terminate run
+
+	// sort items so we can scan for longest runs
+	if ( vbo->items_queue_count > 1 )
+		qsort_int( vbo->items_queue, vbo->items_queue_count-1 );
+
+	vbo->soft_buffer_indexes = 0;
+	vbo->ibo_items_count = 0;
+
+	a = vbo->items_queue;
+	i = 0;
+	while ( i < vbo->items_queue_count )
+	{
+		item_run = run_length( a, i, vbo->items_queue_count, &index_run );
+		if ( index_run < MIN_IBO_RUN )
+		{
+			for ( n = 0; n < item_run; n++ )
+				VBO_AddItemDataToSoftBuffer( a[ i + n ] );
+		}
+		else
+		{
+			vbo_item_t *start = vbo->items + a[ i ];
+			vbo_item_t *end = vbo->items + a[ i + item_run - 1 ];
+			n = (end->index_offset - start->index_offset) + end->num_indexes;
+			VBO_AddItemRangeToIBOBuffer( start->index_offset, n );
+		}
+		i += item_run;
+	}
+
+	VBO_PublishBatchList();
+
+#if defined(_DEBUG)
+	// Shadow-verify the decomposition. After the live decompose
+	// above published the authoritative entry, re-run an INDEPENDENT copy of the
+	// decomposition over the SAME queue and diff-assert byte-identical. Read-only:
+	// the shadow writes nothing live. This proves the standalone decompose
+	// (VBO_DecomposeShadow) — the function a later stage will feed a GPU-derived queue into —
+	// reproduces the live runs exactly. softOffset is EXCLUDED (a per-frame ring-
+	// allocator artifact, not a decomposition property).
+	VBO_ShadowVerifyDecompose();
+#endif
+}
+
+
+#if defined(_DEBUG)
+// Standalone, side-effect-free decomposition. Re-runs the
+// EXACT VBO_PrepareQueues logic (qsort_int → run_length / MIN_IBO_RUN run-merge →
+// device runs + soft accounting) over a caller-supplied queue, writing ONLY into
+// the caller's shadow output. Reads world_vbo.items[] (static, read-only). This is
+// the reusable decompose a later stage drives from the GPU visible-id list. Mirrors
+// vk_vbo.c VBO_PrepareQueues byte-for-byte; keep them in lockstep.
+//
+// out_runs must hold at least (count) ibo_item_t (worst case: every item its own
+// short run routes to soft, OR alternating → at most count device runs). The
+// caller sizes it; we clamp defensively.
+typedef struct vboShadowResult_s {
+	ibo_item_t *runs;        // caller-owned device-run array
+	int         runCap;      // capacity of runs[]
+	int         runCount;    // device runs produced
+	uint32_t    softIndexes; // soft-buffer total indexes (offset is a live-ring artifact, not reproduced)
+	qboolean    overflow;    // runs[] capacity exceeded (shadow inconclusive)
+} vboShadowResult_t;
+
+static void VBO_DecomposeShadow( int *queue, int count, vboShadowResult_t *out )
+{
+	const vbo_t *vbo = &world_vbo;
+	int i, item_run, index_run, n;
+
+	out->runCount    = 0;
+	out->softIndexes = 0;
+	out->overflow    = qfalse;
+
+	if ( count <= 0 )
+		return;
+
+	// Mirror VBO_PrepareQueues: terminate run + numeric sort by vboItemIndex.
+	queue[ count ] = 0;
+	if ( count > 1 )
+		qsort_int( queue, count - 1 );
+
+	i = 0;
+	while ( i < count )
+	{
+		// run_length over the SAME queue + the SAME static items[] num_indexes.
+		int cnt = 0, run = 1, j;
+		for ( j = i; j < count; j++, run++ ) {
+			cnt += vbo->items[ queue[j] ].num_indexes;
+			if ( queue[j] + 1 != queue[j + 1] )
+				break;
+		}
+		item_run = run;
+		index_run = cnt;
+
+		if ( index_run < MIN_IBO_RUN ) {
+			for ( n = 0; n < item_run; n++ )
+				out->softIndexes += (uint32_t)vbo->items[ queue[ i + n ] ].num_indexes;
+		} else {
+			const vbo_item_t *start = vbo->items + queue[ i ];
+			const vbo_item_t *end   = vbo->items + queue[ i + item_run - 1 ];
+			if ( out->runCount >= out->runCap ) { out->overflow = qtrue; return; }
+			out->runs[ out->runCount ].offset = start->index_offset;
+			out->runs[ out->runCount ].length = ( end->index_offset - start->index_offset ) + end->num_indexes;
+			out->runCount++;
+		}
+		i += item_run;
+	}
+}
+
+// Diff the shadow decomposition against the live one just
+// published. Re-runs VBO_DecomposeShadow over a COPY of the live queue (so the
+// shadow sort can't perturb the live queue) and asserts runCount + each run
+// {offset,length} + softIndexes match. softOffset excluded (ring artifact). Logs
+// the first divergence precisely. Throttled-quiet on success.
+// Scratch for VBO_ShadowVerifyDecompose. File-scope (not function-local) so
+// VBO_ReleaseShadowVerifyStatics can NULL them on renderer teardown.
+static int         s_svd_capacity  = 0;
+static int        *s_queueCopy     = NULL;   // count+1 (terminator)
+static ibo_item_t *s_runs          = NULL;   // device-run scratch
+
+static void VBO_ShadowVerifyDecompose( void )
+{
+	static int        s_okLogged = 0;
+	vboShadowResult_t  res;
+	const worldBatchList_t *live;
+	int                count = world_vbo.items_queue_count;
+	int                i;
+
+	if ( world_batch_count == 0 )
+		return;   // nothing published this batch
+	live = &world_batches[ world_batch_count - 1 ];
+
+	// Grow scratch to the queue size (worst case device runs <= count). ri.Malloc
+	// (persistent heap), NOT Hunk_AllocateTempMemory: stashing a temp-hunk pointer in
+	// a static and never freeing it breaks the hunk's LIFO invariant — a later
+	// Hunk_FreeTempMemory (R_BuildWorldVBO on a map reload) rewinds past it and the
+	// next free corrupts the zone (Z_Free without ZONEID at the map transition).
+	// The ri.Malloc block is TAG_RENDERER, so it is freed on renderer teardown by
+	// Z_FreeTags(TAG_RENDERER) (map-transition / vid_restart / shutdown); the statics
+	// holding it are NULL'd there by VBO_ReleaseShadowVerifyStatics so the lazy-grow
+	// below never re-frees a stale pointer. Grow-only between teardowns (freed-on-grow).
+	if ( count + 1 > s_svd_capacity ) {
+		if ( s_queueCopy ) ri.Free( s_queueCopy );
+		if ( s_runs )      ri.Free( s_runs );
+		s_svd_capacity = count + 1;
+		s_queueCopy = ri.Malloc( s_svd_capacity * sizeof( int ) );
+		s_runs      = ri.Malloc( s_svd_capacity * sizeof( ibo_item_t ) );
+	}
+
+	// Copy the live (already-decomposed, so still sorted) queue. Re-running the
+	// shadow sort over a copy yields the identical order and proves the sort too.
+	for ( i = 0; i < count; i++ )
+		s_queueCopy[i] = world_vbo.items_queue[i];
+
+	res.runs   = s_runs;
+	res.runCap = s_svd_capacity;
+	VBO_DecomposeShadow( s_queueCopy, count, &res );
+
+	if ( res.overflow ) {
+		R_LOG( rch_vk, SEV_WARN, "shadow: run scratch overflow (count=%d) — inconclusive\n", count );
+		return;
+	}
+
+	// Diff vs live: runCount, each run {offset,length}, softIndexes. (softOffset
+	// excluded — live-ring artifact.)
+	if ( res.runCount != live->runCount ) {
+		R_LOG( rch_vk, SEV_WARN,
+			"shadow DRIFT: runCount shadow=%d live=%d (queue=%d soft s=%u/l=%u)\n",
+			res.runCount, live->runCount, count, res.softIndexes, live->softIndexes );
+		return;
+	}
+	if ( res.softIndexes != live->softIndexes ) {
+		R_LOG( rch_vk, SEV_WARN,
+			"shadow DRIFT: softIndexes shadow=%u live=%u (queue=%d runCount=%d)\n",
+			res.softIndexes, live->softIndexes, count, res.runCount );
+		return;
+	}
+	for ( i = 0; i < res.runCount; i++ ) {
+		if ( res.runs[i].offset != live->runs[i].offset ||
+		     res.runs[i].length != live->runs[i].length ) {
+			R_LOG( rch_vk, SEV_WARN,
+				"shadow DRIFT: run[%d] shadow={off=%d len=%d} live={off=%d len=%d} (queue=%d)\n",
+				i, res.runs[i].offset, res.runs[i].length,
+				live->runs[i].offset, live->runs[i].length, count );
+			return;
+		}
+	}
+
+	// Log the first few OK batches AND, separately, the first OK batch that actually
+	// exercised the device-run (MIN_IBO_RUN coalescing) path, so the verify proves
+	// both the all-soft and the device-run cases match (not just the first 5 small
+	// batches, which tend to be all-soft).
+	{
+		static qboolean s_deviceRunLogged = qfalse;
+		if ( res.runCount > 0 && !s_deviceRunLogged ) {
+			R_LOG( rch_vk, SEV_INFO,
+				"shadow decompose OK (device-run path): runCount=%d softIndexes=%u (queue=%d), byte-identical\n",
+				res.runCount, res.softIndexes, count );
+			s_deviceRunLogged = qtrue;
+		} else if ( s_okLogged < 5 ) {
+			R_LOG( rch_vk, SEV_INFO,
+				"shadow decompose OK: runCount=%d softIndexes=%u (queue=%d), byte-identical\n",
+				res.runCount, res.softIndexes, count );
+			s_okLogged++;
+		}
+	}
+}
+
+// Free + NULL the shadow-verify scratch statics (TAG_RENDERER via ri.Malloc) and zero
+// the cap, on renderer teardown — same lifetime fix as R_ReleaseWorldCullStatics /
+// vk_shadow_snap_release_cpu. Z_FreeTags(TAG_RENDERER) reclaims the block on teardown;
+// nulling the statics here stops the next map's lazy-grow re-freeing the stale pointer.
+// Idempotent. _DEBUG-only (so are the statics + VBO_ShadowVerifyDecompose).
+void VBO_ReleaseShadowVerifyStatics( void )
+{
+	if ( s_queueCopy ) { ri.Free( s_queueCopy ); s_queueCopy = NULL; }
+	if ( s_runs )      { ri.Free( s_runs );      s_runs      = NULL; }
+	s_svd_capacity = 0;
+}
+#endif // _DEBUG
+
+
+// Process a sub-range of the sorted queue into IBO/soft buffers.
+// Used by the lightstyle sub-group dispatch to give each unique lightStyles
+// signature its own draw call (and thus its own q1StyleIntensities UBO push).
+void VBO_PrepareSubqueue( int start, int count )
+{
+	vbo_t *vbo = &world_vbo;
+	const int *a = vbo->items_queue + start;
+	int i = 0;
+
+	vbo->soft_buffer_indexes = 0;
+	vbo->ibo_items_count = 0;
+
+	while ( i < count ) {
+		// run detection with explicit sub-range boundary
+		int index_run = 0, item_run = 1;
+		int j;
+		for ( j = i; j < count; j++, item_run++ ) {
+			index_run += vbo->items[ a[j] ].num_indexes;
+			if ( j + 1 >= count || a[j] + 1 != a[j + 1] )
+				break;
+		}
+
+		if ( index_run < MIN_IBO_RUN ) {
+			for ( int k = 0; k < item_run; k++ )
+				VBO_AddItemDataToSoftBuffer( a[ i + k ] );
+		} else {
+			vbo_item_t *s = vbo->items + a[ i ];
+			vbo_item_t *e = vbo->items + a[ i + item_run - 1 ];
+			int len = ( e->index_offset - s->index_offset ) + e->num_indexes;
+			VBO_AddItemRangeToIBOBuffer( s->index_offset, len );
+		}
+		i += item_run;
+	}
+
+	VBO_PublishBatchList();
+}
+
+
+int VBO_GetQueueCount( void )
+{
+	return world_vbo.items_queue_count;
+}
+
+
+uint32_t VBO_GetQueueItemStylesPacked( int pos )
+{
+	const vbo_t *vbo = &world_vbo;
+	return vbo->items[ vbo->items_queue[pos] ].lightStylesPacked;
+}
+
+#endif // USE_VBO

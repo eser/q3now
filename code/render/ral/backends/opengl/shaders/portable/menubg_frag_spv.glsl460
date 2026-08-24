@@ -1,0 +1,178 @@
+#version 460
+
+layout(binding = 0, std140) uniform MenuBgBlock
+{
+    float time;
+    float mouseX;
+    float mouseY;
+    float transition;
+    float resX;
+    float resY;
+    float pad0;
+    float pad1;
+} u;
+
+layout(location = 0) in vec2 frag_tex_coord;
+layout(location = 0) out vec4 out_color;
+
+vec3 srgbToLinear(vec3 c)
+{
+    return mix(c * 0.077399380505084991455078125, pow((c + vec3(0.054999999701976776123046875)) * 0.94786727428436279296875, vec3(2.400000095367431640625)), step(vec3(0.040449999272823333740234375), c));
+}
+
+vec2 hash22(inout vec2 p)
+{
+    p = vec2(dot(p, vec2(127.09999847412109375, 311.70001220703125)), dot(p, vec2(269.5, 183.3000030517578125)));
+    return fract(sin(p) * 43758.546875);
+}
+
+vec2 cellPoint(vec2 cell)
+{
+    vec2 param = cell;
+    vec2 _84 = hash22(param);
+    vec2 h = _84;
+    float sp = 0.20000000298023223876953125 + (0.3499999940395355224609375 * h.x);
+    vec2 ph = h * 6.283185482025146484375;
+    return vec2(0.5 + (0.3400000035762786865234375 * sin((u.time * sp) + ph.x)), 0.5 + (0.3400000035762786865234375 * cos(((u.time * sp) * 0.87000000476837158203125) + ph.y)));
+}
+
+float sdTriangle(inout vec2 p, float r)
+{
+    p.x = abs(p.x) - r;
+    p.y += (r / 1.73205077648162841796875);
+    if ((p.x + (1.73205077648162841796875 * p.y)) > 0.0)
+    {
+        p = vec2(p.x - (1.73205077648162841796875 * p.y), ((-1.73205077648162841796875) * p.x) - p.y) / vec2(2.0);
+    }
+    p.x -= clamp(p.x, (-2.0) * r, 0.0);
+    return (-length(p)) * sign(p.y);
+}
+
+float segDist(vec2 p, vec2 a, vec2 b)
+{
+    vec2 pa = p - a;
+    vec2 ba = b - a;
+    float t = clamp(dot(pa, ba) / max(dot(ba, ba), 9.9999999747524270787835121154785e-07), 0.0, 1.0);
+    return length(pa - (ba * t));
+}
+
+float hash11(float n)
+{
+    return fract(sin(n) * 43758.546875);
+}
+
+void main()
+{
+    vec3 param = vec3(0.2269999980926513671875, 0.09399999678134918212890625, 0.0309999994933605194091796875);
+    vec3 SKY_TOP = srgbToLinear(param);
+    vec3 param_1 = vec3(0.1019999980926513671875, 0.0350000001490116119384765625, 0.0199999995529651641845703125);
+    vec3 SKY_LOW = srgbToLinear(param_1);
+    vec3 param_2 = vec3(0.054999999701976776123046875, 0.026000000536441802978515625, 0.01600000075995922088623046875);
+    vec3 FLOOR_COL = srgbToLinear(param_2);
+    vec3 param_3 = vec3(0.9570000171661376953125, 0.62699997425079345703125, 0.2269999980926513671875);
+    vec3 EMBER = srgbToLinear(param_3);
+    vec3 param_4 = vec3(0.783999979496002197265625, 0.250999987125396728515625, 0.1879999935626983642578125);
+    vec3 STAR_COL = srgbToLinear(param_4);
+    vec2 res = vec2(u.resX, u.resY);
+    bool _263 = res.x < 1.0;
+    bool _270;
+    if (!_263)
+    {
+        _270 = res.y < 1.0;
+    }
+    else
+    {
+        _270 = _263;
+    }
+    if (_270)
+    {
+        res = vec2(1280.0, 720.0);
+    }
+    float aspect = res.x / res.y;
+    vec2 uv = frag_tex_coord;
+    vec2 asp = vec2(aspect, 1.0);
+    vec2 par = vec2((u.mouseX * 0.0199999995529651641845703125) + (u.transition * 0.02999999932944774627685546875), u.mouseY * 0.01400000043213367462158203125);
+    float skyY = uv.y + (par.y * 0.100000001490116119384765625);
+    float g = smoothstep(0.0, 0.62000000476837158203125, skyY);
+    vec3 col = mix(SKY_TOP, SKY_LOW, vec3(g));
+    float floorMix = smoothstep(0.60000002384185791015625, 1.0, skyY);
+    col = mix(col, FLOOR_COL, vec3(floorMix));
+    vec2 guv = uv + (par * 0.4199999868869781494140625);
+    vec2 gp = (guv - vec2(0.5, 0.660000026226043701171875)) * asp;
+    float glow = exp((-dot(gp, gp)) * 6.5);
+    glow += (0.3499999940395355224609375 * exp((-dot((guv - vec2(0.5, 0.300000011920928955078125)) * asp, (guv - vec2(0.5, 0.300000011920928955078125)) * asp)) * 9.0));
+    glow *= (0.85000002384185791015625 + (0.1500000059604644775390625 * sin(u.time * 0.60000002384185791015625)));
+    col += ((EMBER * glow) * 0.10999999940395355224609375);
+    vec2 suv = ((uv + (par * 1.0)) * asp) * 7.0;
+    vec2 cell = floor(suv);
+    vec2 f = fract(suv);
+    float lineAcc = 0.0;
+    float dotAcc = 0.0;
+    for (int oy = -1; oy <= 1; oy++)
+    {
+        for (int ox = -1; ox <= 1; ox++)
+        {
+            vec2 nCell = cell + vec2(float(ox), float(oy));
+            vec2 param_5 = nCell;
+            vec2 pN = vec2(float(ox), float(oy)) + cellPoint(param_5);
+            vec2 d = pN - f;
+            float dist = length(d);
+            vec2 param_6 = nCell + vec2(3.1700000762939453125);
+            vec2 _455 = hash22(param_6);
+            vec2 hh = _455;
+            float ptype = floor(hh.x * 3.0);
+            float palpha = 0.3499999940395355224609375 + (0.449999988079071044921875 * hh.y);
+            float aa = fwidth(dist) + 9.9999997473787516355514526367188e-05;
+            if (ptype < 0.5)
+            {
+                float r = 0.04500000178813934326171875;
+                dotAcc += (palpha * (1.0 - smoothstep(r - aa, r + aa, dist)));
+            }
+            else
+            {
+                if (ptype < 1.5)
+                {
+                    vec2 param_7 = d;
+                    float param_8 = 0.07500000298023223876953125;
+                    float _503 = sdTriangle(param_7, param_8);
+                    float td = abs(_503) - 0.006000000052154064178466796875;
+                    dotAcc += (palpha * (1.0 - smoothstep(-aa, aa, td)));
+                }
+                else
+                {
+                    float bar = min(max(abs(d.x) - 0.00999999977648258209228515625, abs(d.y) - 0.0599999986588954925537109375), max(abs(d.y) - 0.00999999977648258209228515625, abs(d.x) - 0.0599999986588954925537109375));
+                    dotAcc += (palpha * (1.0 - smoothstep(-aa, aa, bar)));
+                }
+            }
+            if (!((ox == 0) && (oy == 0)))
+            {
+                vec2 param_9 = cell;
+                vec2 pCenter = cellPoint(param_9);
+                vec2 param_10 = nCell;
+                vec2 pNbr = vec2(float(ox), float(oy)) + cellPoint(param_10);
+                float sep = length(pNbr - pCenter);
+                float fade = 1.0 - smoothstep(0.550000011920928955078125, 1.14999997615814208984375, sep);
+                if (fade > 0.001000000047497451305389404296875)
+                {
+                    vec2 param_11 = f;
+                    vec2 param_12 = pCenter;
+                    vec2 param_13 = pNbr;
+                    float ld = segDist(param_11, param_12, param_13);
+                    float law = fwidth(ld) + 9.9999997473787516355514526367188e-05;
+                    float line = 1.0 - smoothstep(0.0, 0.006000000052154064178466796875 + law, ld);
+                    lineAcc += ((line * fade) * 0.5);
+                }
+            }
+        }
+    }
+    col += ((STAR_COL * clamp(lineAcc, 0.0, 1.0)) * 0.2199999988079071044921875);
+    col += ((STAR_COL * clamp(dotAcc, 0.0, 1.0)) * 0.550000011920928955078125);
+    vec2 vp = (uv - vec2(0.5)) * asp;
+    float vig = smoothstep(1.0499999523162841796875, 0.3499999940395355224609375, length(vp));
+    col *= mix(0.550000011920928955078125, 1.0, vig);
+    float param_14 = dot(gl_FragCoord.xy, vec2(12.98980045318603515625, 78.233001708984375));
+    float dnoise = hash11(param_14);
+    col += vec3((dnoise - 0.5) * 0.0039215688593685626983642578125);
+    out_color = vec4(max(col, vec3(0.0)), 1.0);
+}
+
