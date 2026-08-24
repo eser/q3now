@@ -1,0 +1,52 @@
+#version 460
+
+layout(constant_id = 0) const float SMAA_THRESHOLD = 0.100000001490116119384765625;
+
+layout(binding = 0, std140) uniform RtMetrics
+{
+    vec4 rtMetrics;
+} _171;
+
+layout(binding = 0) uniform sampler2D colorTex;
+
+layout(location = 0) in vec2 texcoord;
+layout(location = 1) in vec4 offset0;
+layout(location = 2) in vec4 offset1;
+layout(location = 3) in vec4 offset2;
+layout(location = 0) out vec2 out_edges;
+
+void main()
+{
+    vec2 threshold;
+    threshold.x = SMAA_THRESHOLD;
+    threshold.y = SMAA_THRESHOLD;
+    float L = dot(texture(colorTex, texcoord).xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float Lleft = dot(texture(colorTex, offset0.xy).xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float Ltop = dot(texture(colorTex, offset0.zw).xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    vec2 _59 = abs(vec2(L) - vec2(Lleft, Ltop));
+    vec4 delta;
+    delta.x = _59.x;
+    delta.y = _59.y;
+    vec2 relDelta = delta.xy / vec2(max(L, 9.9999997473787516355514526367188e-05));
+    vec2 edges = step(threshold, relDelta);
+    if (dot(edges, vec2(1.0)) == 0.0)
+    {
+        discard;
+    }
+    float Lright = dot(texture(colorTex, offset1.xy).xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float Lbottom = dot(texture(colorTex, offset1.zw).xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    vec2 _107 = abs(vec2(L) - vec2(Lright, Lbottom));
+    delta.z = _107.x;
+    delta.w = _107.y;
+    vec2 maxDelta = max(delta.xy, delta.zw);
+    float Lleftleft = dot(texture(colorTex, offset2.xy).xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    float Ltoptop = dot(texture(colorTex, offset2.zw).xyz, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    vec2 _142 = abs(vec2(Lleft, Ltop) - vec2(Lleftleft, Ltoptop));
+    delta.z = _142.x;
+    delta.w = _142.y;
+    maxDelta = max(maxDelta, delta.zw);
+    float finalDelta = max(maxDelta.x, maxDelta.y);
+    edges *= step(vec2(finalDelta), delta.xy * 2.0);
+    out_edges = edges;
+}
+

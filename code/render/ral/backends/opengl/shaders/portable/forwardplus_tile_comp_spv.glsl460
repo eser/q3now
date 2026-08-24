@@ -1,0 +1,180 @@
+#version 460
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+struct Light
+{
+    vec4 posRadius;
+    vec4 color;
+    vec4 posRadius2;
+};
+
+layout(binding = 1, std430) readonly buffer TileDepth
+{
+    float tileDepth[];
+} _198;
+
+layout(binding = 0, std430) readonly buffer Lights
+{
+    Light lights[];
+} _419;
+
+layout(binding = 2, std430) buffer TileLights
+{
+    uint tileLights[];
+} _497;
+
+layout(std140, binding = 3) uniform Push
+{
+    mat4 invViewProj;
+    vec4 params0;
+    vec4 params1;
+} _30;
+
+vec3 unproject(vec3 ndc)
+{
+    vec4 w = _30.invViewProj * vec4(ndc, 1.0);
+    return w.xyz / vec3(w.w);
+}
+
+vec4 planeFromPoints(vec3 a, vec3 b, vec3 c)
+{
+    vec3 n = normalize(cross(b - a, c - a));
+    return vec4(n, -dot(n, a));
+}
+
+float planeDist(vec4 pl, vec3 p)
+{
+    return dot(pl.xyz, p) + pl.w;
+}
+
+void main()
+{
+    uint tx = gl_GlobalInvocationID.x;
+    uint ty = gl_GlobalInvocationID.y;
+    uint tilesX = uint(_30.params0.z);
+    uint tilesY = uint(_30.params0.w);
+    if ((tx >= tilesX) || (ty >= tilesY))
+    {
+        return;
+    }
+    uint tileIndex = (ty * tilesX) + tx;
+    uint outBase = tileIndex * 33u;
+    float screenW = _30.params0.x;
+    float screenH = _30.params0.y;
+    uint numLights = uint(_30.params1.x);
+    bool depthValid = _30.params1.y != 0.0;
+    float x0 = float(tx * 16u);
+    float y0 = float(ty * 16u);
+    float x1 = min(x0 + 16.0, screenW);
+    float y1 = min(y0 + 16.0, screenH);
+    float ndcX0 = ((x0 / screenW) * 2.0) - 1.0;
+    float ndcX1 = ((x1 / screenW) * 2.0) - 1.0;
+    float ndcY0 = ((y0 / screenH) * 2.0) - 1.0;
+    float ndcY1 = ((y1 / screenH) * 2.0) - 1.0;
+    float dMin = 0.0;
+    float dMax = 1.0;
+    if (depthValid)
+    {
+        dMin = _198.tileDepth[(2u * tileIndex) + 0u];
+        dMax = _198.tileDepth[(2u * tileIndex) + 1u];
+        if (dMax < dMin)
+        {
+            dMin = 0.0;
+            dMax = 1.0;
+        }
+    }
+    vec3 param = vec3(ndcX0, ndcY0, dMax);
+    vec3 c[8];
+    c[0] = unproject(param);
+    vec3 param_1 = vec3(ndcX1, ndcY0, dMax);
+    c[1] = unproject(param_1);
+    vec3 param_2 = vec3(ndcX1, ndcY1, dMax);
+    c[2] = unproject(param_2);
+    vec3 param_3 = vec3(ndcX0, ndcY1, dMax);
+    c[3] = unproject(param_3);
+    vec3 param_4 = vec3(ndcX0, ndcY0, dMin);
+    c[4] = unproject(param_4);
+    vec3 param_5 = vec3(ndcX1, ndcY0, dMin);
+    c[5] = unproject(param_5);
+    vec3 param_6 = vec3(ndcX1, ndcY1, dMin);
+    c[6] = unproject(param_6);
+    vec3 param_7 = vec3(ndcX0, ndcY1, dMin);
+    c[7] = unproject(param_7);
+    vec3 tileCentroid = vec3(0.0);
+    for (int i = 0; i < 8; i++)
+    {
+        tileCentroid += c[i];
+    }
+    tileCentroid *= 0.125;
+    vec3 param_8 = c[0];
+    vec3 param_9 = c[3];
+    vec3 param_10 = c[4];
+    vec4 planes[6];
+    planes[0] = planeFromPoints(param_8, param_9, param_10);
+    vec3 param_11 = c[1];
+    vec3 param_12 = c[5];
+    vec3 param_13 = c[2];
+    planes[1] = planeFromPoints(param_11, param_12, param_13);
+    vec3 param_14 = c[0];
+    vec3 param_15 = c[4];
+    vec3 param_16 = c[1];
+    planes[2] = planeFromPoints(param_14, param_15, param_16);
+    vec3 param_17 = c[3];
+    vec3 param_18 = c[2];
+    vec3 param_19 = c[7];
+    planes[3] = planeFromPoints(param_17, param_18, param_19);
+    vec3 param_20 = c[0];
+    vec3 param_21 = c[1];
+    vec3 param_22 = c[3];
+    planes[4] = planeFromPoints(param_20, param_21, param_22);
+    vec3 param_23 = c[4];
+    vec3 param_24 = c[7];
+    vec3 param_25 = c[5];
+    planes[5] = planeFromPoints(param_23, param_24, param_25);
+    for (int i_1 = 0; i_1 < 6; i_1++)
+    {
+        vec4 param_26 = planes[i_1];
+        vec3 param_27 = tileCentroid;
+        if (planeDist(param_26, param_27) < 0.0)
+        {
+            planes[i_1] = -planes[i_1];
+        }
+    }
+    uint count = 0u;
+    uint cap = 32u;
+    for (uint li = 0u; (li < numLights) && (li < 256u); li++)
+    {
+        vec3 lp = _419.lights[li].posRadius.xyz;
+        float lr = _419.lights[li].posRadius.w;
+        if (lr <= 0.0)
+        {
+            continue;
+        }
+        vec3 center = lp;
+        float radius = lr;
+        if (_419.lights[li].posRadius2.w != 0.0)
+        {
+            vec3 lp2 = _419.lights[li].posRadius2.xyz;
+            center = (lp + lp2) * 0.5;
+            radius = lr + (0.5 * length(lp2 - lp));
+        }
+        bool inside = true;
+        for (int p = 0; p < 6; p++)
+        {
+            vec4 param_28 = planes[p];
+            vec3 param_29 = center;
+            if (planeDist(param_28, param_29) < (-radius))
+            {
+                inside = false;
+                break;
+            }
+        }
+        if (inside && (count < cap))
+        {
+            _497.tileLights[(outBase + 1u) + count] = li;
+            count++;
+        }
+    }
+    _497.tileLights[outBase] = count;
+}
+

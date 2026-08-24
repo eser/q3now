@@ -4,12 +4,15 @@
 if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
-set(H "${ROOT}/code/renderer/ral_metal/ral_metal_module.h")
-set(S "${ROOT}/code/renderer/ral_metal/ral_metal_module.mm")
+set(H "${ROOT}/code/render/ral/backends/metal/ral_metal_module.h")
+set(S "${ROOT}/code/render/ral/backends/metal/ral_metal_module.mm")
 set(T "${ROOT}/tests/ral_metal_module_test.mm")
 set(C "${ROOT}/CMakeLists.txt")
-set(P "${ROOT}/code/renderercommon/tr_public.h")
-foreach(path IN ITEMS "${H}" "${S}" "${T}" "${C}" "${P}")
+set(P "${ROOT}/code/render/frontend/tr_public.h")
+set(I "${ROOT}/code/render/ral/backends/metal/ral_metal_image_decode.mm")
+set(M "${ROOT}/code/render/frontend/render_submission_model.h")
+set(MS "${ROOT}/code/render/frontend/render_submission_model.c")
+foreach(path IN ITEMS "${H}" "${S}" "${T}" "${C}" "${P}" "${I}" "${M}" "${MS}")
 	if(NOT EXISTS "${path}")
 		message(FATAL_ERROR "missing Metal renderer-module contract file: ${path}")
 	endif()
@@ -19,6 +22,9 @@ file(READ "${S}" SOURCE)
 file(READ "${T}" TEST)
 file(READ "${C}" CMAKE_SOURCE)
 file(READ "${P}" PUBLIC_ABI)
+file(READ "${I}" IMAGE_SOURCE)
+file(READ "${M}" MODEL_HEADER)
+file(READ "${MS}" MODEL_SOURCE)
 string(REGEX MATCH "#[ \t]*define[ \t]+REF_API_VERSION[ \t]+22([^0-9]|$)"
 	ref_api_22 "${PUBLIC_ABI}")
 if(NOT ref_api_22)
@@ -41,6 +47,14 @@ foreach(needle IN ITEMS
 	"Ral_FrameShellBegin" "RefreshPresentation"
 	"s_module.imports.PresentationHost.refresh"
 	"RalMetal_PresentAcquire" "RalMetal_PresentClearAndSubmit"
+	"RenderSubmission_LoadWorld" "RenderSubmission_AddEntity"
+	"RenderSubmission_AddPoly" "RenderSubmission_RenderScene"
+	"RenderSubmission_AddUiQuad" "RenderSubmission_EndFrame"
+	"RenderImage_DecodeRgba8" "RenderSubmission_RegisterMaterialImage"
+	"PrepareWorldMaterials" "RenderSubmission_LightmapMaterialName"
+	"RenderSubmission_RegisterModelData" "RenderSubmission_RegisterInlineModel"
+	"RenderSubmission_SetModelBatchMaterial" "RenderSubmission_ModelSnapshot"
+	"RENDER_ASSET_LIGHTMAP" "_atlas" ".png"
 	"Ral_FrameShellComplete"
 	"Ral_FrameShellCancel" "Ral_FrameShellShutdown"
 	"RalMetal_PresentDestroy( s_module.presentation )"
@@ -49,6 +63,29 @@ foreach(needle IN ITEMS
 	string(FIND "${SOURCE}" "${needle}" pos)
 	if(pos EQUAL -1)
 		message(FATAL_ERROR "Metal renderer module lost ABI/frame lifecycle seam: ${needle}")
+	endif()
+endforeach()
+foreach(needle IN ITEMS "RENDER_SUBMISSION_MAX_MODELS"
+	"RENDER_SUBMISSION_MAX_MODEL_VERTICES" "RENDER_SUBMISSION_MAX_MODEL_BYTES"
+	"renderModelSnapshot_t" "renderEntityCommand_t" "RENDER_MODEL_MD3"
+	"RENDER_MODEL_IQM" "DecodeMd3" "DecodeIqm" "ModelRange")
+	string(FIND "${MODEL_HEADER}${MODEL_SOURCE}" "${needle}" pos)
+	if(pos EQUAL -1)
+		message(FATAL_ERROR "neutral model/entity payload lost bounded seam: ${needle}")
+	endif()
+endforeach()
+foreach(forbidden IN ITEMS "<Metal/" "CAMetalLayer" "MTLBuffer" "VkBuffer"
+	"WGPUBuffer" "renderer/tr_local.h" "renderer2/tr_local.h")
+	string(FIND "${MODEL_HEADER}${MODEL_SOURCE}" "${forbidden}" pos)
+	if(NOT pos EQUAL -1)
+		message(FATAL_ERROR "neutral model/entity payload leaked backend/legacy ownership: ${forbidden}")
+	endif()
+endforeach()
+foreach(needle IN ITEMS "CGImageSourceCreateWithData" "CGBitmapContextCreate"
+	"ri.FS_ReadFile" "ri.FS_FreeFile" "RENDER_SUBMISSION_MAX_MATERIAL_BYTES")
+	string(FIND "${IMAGE_SOURCE}" "${needle}" pos)
+	if(pos EQUAL -1)
+		message(FATAL_ERROR "Metal VFS image adapter lost decode/bound seam: ${needle}")
 	endif()
 endforeach()
 string(FIND "${SOURCE}" "RalMetal_PresentDestroy( s_module.presentation );" destroy_pos)
@@ -68,6 +105,7 @@ foreach(needle IN ITEMS
 	"memcmp( &receipt, &before, sizeof( receipt ) ) == 0"
 	"MUTATE( moduleGeneration )" "MUTATE( frameGeneration )"
 	"MUTATE( host.surfaceGeneration )" "MUTATE( surface.surfaceIdentity )"
+	"MUTATE( frontend.frameDigest )"
 	"WiredSdlRalPresentationHost_RequestResize"
 	"Shutdown( REF_LEVEL_ONLY )" "Shutdown( REF_KEEP_WINDOW )"
 	"Shutdown( REF_UNLOAD_DLL )"
@@ -80,7 +118,11 @@ foreach(needle IN ITEMS
 endforeach()
 foreach(needle IN ITEMS
 	"ADD_LIBRARY(\${RENDERER_PREFIX}_metal\${RENDEXT} SHARED"
-	"code/renderer/ral_metal/ral_metal_module.mm"
+	"code/render/ral/backends/metal/ral_metal_module.mm"
+	"code/render/ral/backends/metal/ral_metal_image_decode.mm"
+	"code/render/frontend/render_submission.c"
+	"code/render/frontend/render_submission_model.c"
+	"WIRED_IMAGEIO_FRAMEWORK"
 	"PROPERTIES LANGUAGE C" "PREFIX \"\""
 	"ADD_EXECUTABLE(ral_metal_module_test tests/ral_metal_module_test.mm)"
 	"ral_sdl_presentation_host"

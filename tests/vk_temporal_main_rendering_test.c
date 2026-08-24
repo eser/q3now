@@ -4,7 +4,7 @@
 
 #include <stdio.h>
 #include <string.h>
-#include "../code/renderercommon/vulkan/vulkan.h"
+#include "../code/render/ral/backends/vulkan/include/vulkan/vulkan.h"
 
 #define CHECK(x) do { if ( !(x) ) { \
 	fprintf( stderr, "CHECK failed at %s:%d: %s\n", __FILE__, __LINE__, #x ); \

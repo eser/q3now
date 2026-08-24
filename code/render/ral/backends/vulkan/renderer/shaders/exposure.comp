@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+
+#version 450
+
+/*
+exposure.comp — wired-render HDR auto-exposure reduce.
+
+Reads the 256-bin log2-luminance histogram (built by hdr_histogram.comp over the
+HDR scene), reduces it to a target exposure, smooths that target temporally into
+a persistent accumulator, multiplies by r_brightness, and writes the result into
+the exposure UBO's exposure_bias field — which tonemap.frag reads as its
+pre-tonemap multiplier. This is the step that makes the scene auto-expose.
+
+Single invocation (dispatch 1,1,1): the reduction over 256 bins is trivially
+serial.
+
+Reduction:
+  - The histogram bin axis is log2 luminance over a fixed EV window [-10, +2]
+    (matches hdr_histogram.comp). Bin i covers EV = EV_MIN + (i/255)*(EV_MAX-EV_MIN).
+  - Percentile clip: discard the darkest `pctLow` fraction and the brightest
+    `pctHigh` fraction of the total weight, average the EVs of the bins in the
+    surviving [pctLow, 1-pctHigh] cumulative band, weighted by clipped bin weight.
+  - avgEV -> avgLuma = exp2(avgEV); target exposure = key / avgLuma (expose the
+    average to land on the middle-grey key, default 0.18). Clamp to [minExp, maxExp].
+
+Temporal smoothing (split rate): rate = (target > accum) ? rateUp : rateDown
+(raise exposure/output brightness faster than lowering it). accum = mix(accum, target,
+1 - exp(-dt * rate)); written back to the persistent accumulator SSBO so next
+frame reads it.
+
+exposure_bias = accum * brightness — r_brightness is a manual multiply on top of
+the auto-computed exposure (default 1.0 = pure auto).
+
+Bindings (set 0, all COMPUTE):
+  0: histogram SSBO (read)        — uint bins[256], fixed-point center-weighted counts
+  1: accumulator SSBO (read+write) — float accum[1], persistent across frames
+  2: exposure UBO as SSBO (rw)    — vk_exposure_block_t mirror; reads tuning +
+                                     brightness, writes exposure_bias
+
+Push constant: float dt (seconds since last frame).
+*/
+
+#define HISTOGRAM_BINS 256
+
+// EV metering window — must match hdr_histogram.comp.
+const float EV_MIN = -10.0;
+const float EV_MAX =  2.0;
+
+// Bin 0 is the "true black" bucket (luma <= epsilon in the histogram shader); it
+// carries no usable luminance information, so exclude it from the metered average
+// to avoid large black regions dragging the exposure to the ceiling.
+const uint  FIRST_METER_BIN = 1u;
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Histogram {
+	uint bins[HISTOGRAM_BINS];
+};
+
+layout(std430, set = 0, binding = 1) buffer Accumulator {
+	float accum;
+};
+
+// Same field order/offsets as vk_exposure_block_t (std140 scalars == std430 here,
+// all 4-byte scalars). The compute writes exposure_bias; everything else is read.
+layout(std430, set = 0, binding = 2) buffer ExposureBlock {
+	float exposure_bias;
+	float key;
+	float pctLow;
+	float pctHigh;
+	float rateUp;
+	float rateDown;
+	float minExp;
+	float maxExp;
+	int   autoEnabled;
+	float brightness;
+	// Sunray sun-screen params — folded into the shared block for buffer-size parity
+	// with the host vk_exposure_block_t + tonemap.frag. The reduce compute does not
+	// read these; declared so the std430 block size matches the 56-byte buffer.
+	float sunScreenX;
+	float sunScreenY;
+	float sunrayIntensity;
+	float sunrayDecay;
+};
+
+layout(push_constant) uniform Push {
+	float dt;
+};
+
+float binEV(uint i) {
+	return EV_MIN + (float(i) / float(HISTOGRAM_BINS - 1)) * (EV_MAX - EV_MIN);
+}
+
+void main() {
+	// Total metered weight (excluding the black bucket).
+	float total = 0.0;
+	for (uint i = FIRST_METER_BIN; i < HISTOGRAM_BINS; i++)
+		total += float(bins[i]);
+
+	float target;
+	if (total <= 0.0) {
+		// No metered pixels (fully black / degenerate). Keep the accumulator put.
+		target = accum;
+	} else {
+		// Cumulative percentile band [pctLow, 1 - pctHigh] of the metered weight.
+		float loW = pctLow * total;
+		float hiW = (1.0 - pctHigh) * total;
+		if (hiW <= loW) { loW = 0.0; hiW = total; }   // degenerate band -> meter all
+
+		float cum = 0.0;
+		float wSum = 0.0;
+		float evSum = 0.0;
+		for (uint i = FIRST_METER_BIN; i < HISTOGRAM_BINS; i++) {
+			float w = float(bins[i]);
+			if (w <= 0.0) continue;
+			float lo = cum;
+			float hi = cum + w;
+			cum = hi;
+			// Clip this bin's contribution to the [loW, hiW] band.
+			float a = max(lo, loW);
+			float b = min(hi, hiW);
+			if (b > a) {
+				float clipped = b - a;
+				evSum += binEV(i) * clipped;
+				wSum  += clipped;
+			}
+		}
+
+		float avgEV   = (wSum > 0.0) ? (evSum / wSum) : binEV(HISTOGRAM_BINS / 2u);
+		float avgLuma = exp2(avgEV);
+		target = key / max(avgLuma, 1e-4);
+		target = clamp(target, minExp, maxExp);
+	}
+
+	// Temporal exponential smoothing with split up/down rates.
+	float rate = (target > accum) ? rateUp : rateDown;
+	float a    = 1.0 - exp(-max(dt, 0.0) * rate);
+	float smoothed = mix(accum, target, a);
+	accum = smoothed;
+
+	// r_brightness trims on top of the auto-computed exposure (FORK-1 multiply).
+	exposure_bias = smoothed * brightness;
+}

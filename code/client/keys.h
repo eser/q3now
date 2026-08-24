@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+#ifndef WIRED_CLIENT_KEYS_H
+#define WIRED_CLIENT_KEYS_H
+
 #include "keycodes.h"
 
 typedef struct {
@@ -33,3 +36,5 @@ qboolean Key_GetOverstrikeMode( void );
 void Key_SetOverstrikeMode( qboolean state );
 
 void Com_InitKeyCommands( void );
+
+#endif

@@ -1,0 +1,30 @@
+#version 460
+
+layout(constant_id = 0) const float texel_x = 0.0;
+layout(constant_id = 1) const float texel_y = 0.0;
+layout(constant_id = 2) const float filter_radius = 1.0;
+
+layout(binding = 0) uniform sampler2D texture0;
+
+layout(location = 0) in vec2 frag_tex_coord;
+layout(location = 0) out vec4 out_color;
+
+void main()
+{
+    vec2 uv = frag_tex_coord;
+    vec2 r;
+    r.x = texel_x;
+    r.y = texel_y;
+    r *= filter_radius;
+    vec3 s = texture(texture0, uv + (r * vec2(-1.0))).xyz;
+    s += (texture(texture0, uv + (r * vec2(0.0, -1.0))).xyz * 2.0);
+    s += texture(texture0, uv + (r * vec2(1.0, -1.0))).xyz;
+    s += (texture(texture0, uv + (r * vec2(-1.0, 0.0))).xyz * 2.0);
+    s += (texture(texture0, uv).xyz * 4.0);
+    s += (texture(texture0, uv + (r * vec2(1.0, 0.0))).xyz * 2.0);
+    s += texture(texture0, uv + (r * vec2(-1.0, 1.0))).xyz;
+    s += (texture(texture0, uv + (r * vec2(0.0, 1.0))).xyz * 2.0);
+    s += texture(texture0, uv + (r * vec2(1.0))).xyz;
+    out_color = vec4(s * 0.0625, 1.0);
+}
+

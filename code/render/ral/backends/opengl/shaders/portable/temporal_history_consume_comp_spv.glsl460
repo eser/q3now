@@ -1,0 +1,70 @@
+#version 460
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(binding = 0, std430) buffer HistoryWitness
+{
+    uint words[20];
+} witness;
+
+layout(std140, binding = 6) uniform HistoryConsumePush
+{
+    uvec2 extent;
+    uint frameLo;
+    uint frameHi;
+    uint worldIndex;
+    uint planGeneration;
+    uint allocationGeneration;
+    uint historyValid;
+    uint readIndex;
+    uint writeIndex;
+    float zNear;
+    float zFar;
+} pc;
+
+layout(binding = 0) uniform texture2D currentColor;
+layout(binding = 0) uniform sampler nearestSampler;
+layout(binding = 1) uniform texture2D currentDeviceDepth;
+layout(binding = 2) uniform texture2D previousColor;
+layout(binding = 3) uniform texture2D previousLinearDepth;
+
+float linearizeDepth(float z)
+{
+    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+}
+
+void main()
+{
+    vec2 uv = (vec2(pc.extent / uvec2(2u)) + vec2(0.5)) / vec2(pc.extent);
+    vec4 current = textureLod(sampler2D(currentColor, nearestSampler), uv, 0.0);
+    float param = textureLod(sampler2D(currentDeviceDepth, nearestSampler), uv, 0.0).x;
+    float currentDepth = linearizeDepth(param);
+    witness.words[0] = 1213420593u;
+    witness.words[1] = pc.historyValid;
+    witness.words[2] = pc.frameLo;
+    witness.words[3] = pc.frameHi;
+    witness.words[4] = pc.worldIndex;
+    witness.words[5] = pc.planGeneration;
+    witness.words[6] = pc.allocationGeneration;
+    witness.words[7] = pc.readIndex;
+    witness.words[8] = pc.writeIndex;
+    witness.words[9] = pc.extent.x;
+    witness.words[10] = pc.extent.y;
+    witness.words[11] = packHalf2x16(current.xy);
+    witness.words[12] = packHalf2x16(current.zw);
+    witness.words[13] = floatBitsToUint(currentDepth);
+    if (pc.historyValid != 0u)
+    {
+        vec4 previous = textureLod(sampler2D(previousColor, nearestSampler), uv, 0.0);
+        float previousDepth = textureLod(sampler2D(previousLinearDepth, nearestSampler), uv, 0.0).x;
+        witness.words[14] = packHalf2x16(previous.xy);
+        witness.words[15] = packHalf2x16(previous.zw);
+        witness.words[16] = floatBitsToUint(previousDepth);
+    }
+    else
+    {
+        witness.words[14] = 0u;
+        witness.words[15] = 0u;
+        witness.words[16] = 0u;
+    }
+}
+

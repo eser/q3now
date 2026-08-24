@@ -6,7 +6,7 @@ import {
 	buildShaderArtifactRow,
 	ralShaderArtifactDigest,
 	renderShaderArtifactCatalog,
-} from '../code/renderervk/shaders/shader_artifact_catalog.mjs';
+} from '../code/render/ral/backends/vulkan/renderer/shaders/shader_artifact_catalog.mjs';
 
 const source = new TextEncoder().encode('#version 450\nvoid main() {}\n');
 const spirv = Uint8Array.of(3, 2, 35, 7, 1, 0, 0, 0);

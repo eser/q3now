@@ -23,24 +23,24 @@ echo "  screenshot dir: cleared"
 echo
 echo "=== Source-grep gates ==="
 echo "SHADER_MODULE_BL active refs (want 0):"
-grep -rn "SHADER_MODULE_BL" code/renderervk/ 2>&1 \
+grep -rn "SHADER_MODULE_BL" code/render/ral/backends/vulkan/renderer/ 2>&1 \
   | grep -v "// \|retired\|retire" \
   | grep -c "SHADER_MODULE_BL" || true
 echo "vk.useBindlessMainPath active refs (want 0):"
-grep -rn "vk\.useBindlessMainPath" code/renderervk/ 2>&1 \
+grep -rn "vk\.useBindlessMainPath" code/render/ral/backends/vulkan/renderer/ 2>&1 \
   | grep -vE "^[^:]+: *//|^[^:]+: *\* |legacy-mainpath-retire" \
   | grep -c useBindlessMainPath || true
 echo "r_bindlessMainPath active refs in source (want 0):"
-grep -rn "r_bindlessMainPath" code/renderervk/ 2>&1 \
+grep -rn "r_bindlessMainPath" code/render/ral/backends/vulkan/renderer/ 2>&1 \
   | grep -vE "^[^:]+: *//|legacy-mainpath-retire" \
   | grep -c r_bindlessMainPath || true
 echo "qboolean useBindlessMainPath field (want 0):"
-grep -c "qboolean useBindlessMainPath" code/renderervk/ -r 2>&1 || true
+grep -c "qboolean useBindlessMainPath" code/render/ral/backends/vulkan/renderer/ -r 2>&1 || true
 echo "USE_BINDLESS in templates (want 0):"
-grep -c USE_BINDLESS code/renderervk/shaders/gen_frag.tmpl code/renderervk/shaders/light_frag.tmpl 2>&1 || true
+grep -c USE_BINDLESS code/render/ral/backends/vulkan/renderer/shaders/gen_frag.tmpl code/render/ral/backends/vulkan/renderer/shaders/light_frag.tmpl 2>&1 || true
 echo "Legacy non-_bindless gen_frag/light_frag manifest entries (want 0):"
 grep -nE "stage: 'frag', source: '(gen_frag|light_frag)\.tmpl'" \
-  code/renderervk/shaders/shaders.manifest.mjs \
+  code/render/ral/backends/vulkan/renderer/shaders/shaders.manifest.mjs \
   | grep -vc _bindless || true
 
 echo

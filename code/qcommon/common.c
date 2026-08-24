@@ -3177,7 +3177,7 @@ void Com_Init( char *commandLine ) {
 	}
 	{
 		static const cvarDesc_t d = CVAR_BOOL( "com_perfTrace", "0", CVAR_CHEAT,
-			"Emit aggregate-only 200-frame CPU/SCR pacing diagnostics without per-frame logging." );
+			"Emit aggregate-only 200-frame CPU/SCR pacing and bounded frame-work distributions without per-frame logging." );
 		com_perfTrace = Cvar_Register( &d );
 	}
 	{
@@ -3466,8 +3466,14 @@ Com_Frame
 void Com_Frame( qboolean noDelay ) {
 	static uint64_t diagWorkUsec;
 	static uint64_t diagScrUsec;
+	static uint64_t diagServerUsec;
+	static uint64_t diagEventsUsec;
+	static uint64_t diagClientUsec;
+	static clProfile_t diagClientProfile;
 	static uint32_t diagFrameCount;
 	static uint32_t diagBucket;
+	static uint32_t diagWorkHistogram[10];
+	static uint64_t diagMaxWorkUsec;
 	static qboolean diagActive;
 
 #ifndef HEADLESS
@@ -3491,6 +3497,8 @@ void Com_Frame( qboolean noDelay ) {
 	int timeBeforeClient = 0;
 	int timeAfter = 0;
 	int64_t timeBeforeServerNsec = 0;
+	int64_t timeAfterServerNsec = 0;
+	int64_t timeBeforeClientNsec = 0;
 	int64_t timeAfterNsec = 0;
 	memset( &cl_prof, 0, sizeof( cl_prof ) );
 
@@ -3633,6 +3641,8 @@ void Com_Frame( qboolean noDelay ) {
 	SV_SpawnServer_Tick();
 
 	SV_Frame( msec );
+	if ( com_perfTrace->integer )
+		timeAfterServerNsec = Sys_NanoTime();
 
 #ifdef HEADLESS
 	if ( com_speeds->integer ) {
@@ -3641,7 +3651,7 @@ void Com_Frame( qboolean noDelay ) {
 		timeBeforeClient = timeAfter;
 	}
 	if ( com_perfTrace->integer )
-		timeAfterNsec = Sys_NanoTime();
+		timeBeforeClientNsec = timeAfterNsec = timeAfterServerNsec;
 #else
 	//
 	// client system — a non-headless build always runs its client; the server
@@ -3669,6 +3679,8 @@ void Com_Frame( qboolean noDelay ) {
 		if ( com_speeds->integer ) {
 			timeBeforeClient = Sys_Milliseconds();
 		}
+		if ( com_perfTrace->integer )
+			timeBeforeClientNsec = Sys_NanoTime();
 
 		// Per-app recovery for the focused app. Arm the
 		// focused app's per-frame setjmp here so a recoverable error (Com_Terminate
@@ -3747,13 +3759,50 @@ void Com_Frame( qboolean noDelay ) {
 	// performance-dependent observer overhead of com_speeds' thresholded
 	// per-frame JSON rows.
 	if ( com_perfTrace->integer && timeAfterNsec >= timeBeforeServerNsec ) {
+		static const uint32_t workUpperUsec[9] = {
+			1000u, 2000u, 4000u, 8000u, 12000u,
+			16667u, 24000u, 33334u, 50000u
+		};
+		uint64_t frameWorkUsec;
+		uint32_t workBin = 0u;
 		if ( !diagActive ) {
 			diagWorkUsec = diagScrUsec = 0;
+			diagServerUsec = diagEventsUsec = diagClientUsec = 0;
+			memset( &diagClientProfile, 0, sizeof( diagClientProfile ) );
+			memset( diagWorkHistogram, 0, sizeof( diagWorkHistogram ) );
+			diagMaxWorkUsec = 0u;
 			diagFrameCount = 0;
 			diagActive = qtrue;
 		}
-		diagWorkUsec += (uint64_t)( timeAfterNsec - timeBeforeServerNsec ) / 1000;
+		frameWorkUsec = (uint64_t)( timeAfterNsec - timeBeforeServerNsec ) / 1000;
+		diagWorkUsec += frameWorkUsec;
+		while ( workBin < ARRAY_LEN( workUpperUsec )
+				&& frameWorkUsec >= workUpperUsec[workBin] ) workBin++;
+		diagWorkHistogram[workBin]++;
+		if ( frameWorkUsec > diagMaxWorkUsec ) diagMaxWorkUsec = frameWorkUsec;
 		diagScrUsec += (uint64_t)cl_prof.endframe;
+		diagServerUsec += (uint64_t)( timeAfterServerNsec - timeBeforeServerNsec ) / 1000;
+		diagEventsUsec += (uint64_t)( timeBeforeClientNsec - timeAfterServerNsec ) / 1000;
+		diagClientUsec += (uint64_t)( timeAfterNsec - timeBeforeClientNsec ) / 1000;
+#define DIAG_CLIENT_ACCUM( field ) diagClientProfile.field += cl_prof.field
+		DIAG_CLIENT_ACCUM( store );
+		DIAG_CLIENT_ACCUM( send );
+		DIAG_CLIENT_ACCUM( resend );
+		DIAG_CLIENT_ACCUM( cgtime );
+		DIAG_CLIENT_ACCUM( cgr );
+		DIAG_CLIENT_ACCUM( whud );
+		DIAG_CLIENT_ACCUM( wui );
+		DIAG_CLIENT_ACCUM( cons );
+		DIAG_CLIENT_ACCUM( sound );
+		DIAG_CLIENT_ACCUM( scrextra );
+		DIAG_CLIENT_ACCUM( endframe );
+		DIAG_CLIENT_ACCUM( userinfo );
+		DIAG_CLIENT_ACCUM( misc );
+		DIAG_CLIENT_ACCUM( wnframe );
+		DIAG_CLIENT_ACCUM( relstr );
+		DIAG_CLIENT_ACCUM( snapdg );
+		DIAG_CLIENT_ACCUM( chkpkt );
+#undef DIAG_CLIENT_ACCUM
 		diagFrameCount++;
 		if ( diagFrameCount == 200 ) {
 			diagBucket++;
@@ -3763,11 +3812,46 @@ void Com_Frame( qboolean noDelay ) {
 				diagFrameCount, diagFrameCount,
 				(unsigned long long)diagWorkUsec,
 				(unsigned long long)diagScrUsec );
+			Com_Log( SEV_INFO, LOG_CH(ch_system),
+				"frame phase trace (200f): bucket=%u server_total=%lluus events_total=%lluus client_total=%lluus\n",
+				diagBucket,
+				(unsigned long long)diagServerUsec,
+				(unsigned long long)diagEventsUsec,
+				(unsigned long long)diagClientUsec );
+			Com_Log( SEV_INFO, LOG_CH(ch_system),
+				"frame work distribution (200f): bucket=%u lt1ms=%u lt2ms=%u lt4ms=%u lt8ms=%u lt12ms=%u lt16_667ms=%u lt24ms=%u lt33_334ms=%u lt50ms=%u ge50ms=%u max_us=%llu\n",
+				diagBucket,
+				diagWorkHistogram[0], diagWorkHistogram[1],
+				diagWorkHistogram[2], diagWorkHistogram[3],
+				diagWorkHistogram[4], diagWorkHistogram[5],
+				diagWorkHistogram[6], diagWorkHistogram[7],
+				diagWorkHistogram[8], diagWorkHistogram[9],
+				(unsigned long long)diagMaxWorkUsec );
+			Com_Log( SEV_INFO, LOG_CH(ch_system),
+				"client component trace (200f): bucket=%u store=%d send=%d resend=%d cgtime=%d cgr=%d whud=%d wui=%d cons=%d sound=%d scrextra=%d endframe=%d userinfo=%d misc=%d wnframe=%d relstr=%d snapdg=%d chkpkt=%d\n",
+				diagBucket,
+				diagClientProfile.store, diagClientProfile.send,
+				diagClientProfile.resend, diagClientProfile.cgtime,
+				diagClientProfile.cgr, diagClientProfile.whud,
+				diagClientProfile.wui, diagClientProfile.cons,
+				diagClientProfile.sound, diagClientProfile.scrextra,
+				diagClientProfile.endframe, diagClientProfile.userinfo,
+				diagClientProfile.misc, diagClientProfile.wnframe,
+				diagClientProfile.relstr, diagClientProfile.snapdg,
+				diagClientProfile.chkpkt );
 			diagWorkUsec = diagScrUsec = 0;
+			diagServerUsec = diagEventsUsec = diagClientUsec = 0;
+			memset( &diagClientProfile, 0, sizeof( diagClientProfile ) );
+			memset( diagWorkHistogram, 0, sizeof( diagWorkHistogram ) );
+			diagMaxWorkUsec = 0u;
 			diagFrameCount = 0;
 		}
 	} else if ( diagActive ) {
 		diagWorkUsec = diagScrUsec = 0;
+		diagServerUsec = diagEventsUsec = diagClientUsec = 0;
+		memset( &diagClientProfile, 0, sizeof( diagClientProfile ) );
+		memset( diagWorkHistogram, 0, sizeof( diagWorkHistogram ) );
+		diagMaxWorkUsec = 0u;
 		diagFrameCount = 0;
 		diagActive = qfalse;
 	}

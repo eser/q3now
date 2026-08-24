@@ -1,0 +1,50 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct ProductDraw
+{
+    float4 viewOriginDrawSpace;
+    float4 viewForward;
+    float4 viewLeft;
+    float4 viewUp;
+    float4 projectionLightmap;
+    float4 viewportAlpha;
+};
+
+struct main0_out
+{
+    float2 texCoord [[user(locn0)]];
+    float2 lightmapCoord [[user(locn1)]];
+    float4 color [[user(locn2)]];
+    float4 gl_Position [[position]];
+};
+
+struct main0_in
+{
+    float3 in_position [[attribute(0)]];
+    float2 in_tex_coord [[attribute(1)]];
+    float2 in_lightmap_coord [[attribute(2)]];
+    float4 in_color [[attribute(3)]];
+};
+
+vertex main0_out main0(main0_in in [[stage_in]], constant ProductDraw& productDraw [[buffer(0)]])
+{
+    main0_out out = {};
+    if (productDraw.viewOriginDrawSpace.w >= 0.5)
+    {
+        out.gl_Position = float4(((in.in_position.x / productDraw.viewportAlpha.x) * 2.0) - 1.0, 1.0 - ((in.in_position.y / productDraw.viewportAlpha.y) * 2.0), 0.0, 1.0);
+    }
+    else
+    {
+        float3 delta = in.in_position - productDraw.viewOriginDrawSpace.xyz;
+        float forward = dot(delta, productDraw.viewForward.xyz);
+        out.gl_Position = float4((-dot(delta, productDraw.viewLeft.xyz)) * productDraw.projectionLightmap.x, dot(delta, productDraw.viewUp.xyz) * productDraw.projectionLightmap.y, forward - productDraw.projectionLightmap.z, forward);
+    }
+    out.texCoord = in.in_tex_coord;
+    out.lightmapCoord = in.in_lightmap_coord;
+    out.color = in.in_color;
+    return out;
+}
+

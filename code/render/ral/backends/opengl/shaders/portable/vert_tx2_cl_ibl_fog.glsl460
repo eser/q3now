@@ -1,0 +1,90 @@
+#version 460
+
+layout(constant_id = 16) const int ENTITY_SSBO = 0;
+const bool _15 = (ENTITY_SSBO != 0);
+
+layout(binding = 0, std430) readonly buffer EntityMatrices
+{
+    mat4 entMat[];
+} _22;
+
+layout(binding = 0, std140) uniform UBO
+{
+    vec4 eyePos;
+    vec4 lightPos;
+    vec4 lightColor;
+    vec4 lightVector;
+    vec4 fogDistanceVector;
+    vec4 fogDepthVector;
+    vec4 fogEyeT;
+    vec4 fogColor;
+    vec4 _pad_to_mvp[22];
+    mat4 mvp;
+} ubo;
+
+layout(location = 0) in vec3 in_position;
+layout(location = 8) out vec3 ibl_N;
+layout(location = 5) in vec3 in_normal;
+layout(location = 9) out vec3 ibl_V;
+layout(location = 0) out vec4 frag_color0;
+layout(location = 1) in vec4 in_color0;
+layout(location = 5) out vec4 frag_color1;
+layout(location = 6) in vec4 in_color1;
+layout(location = 6) out vec4 frag_color2;
+layout(location = 7) in vec4 in_color2;
+layout(location = 1) out vec2 frag_tex_coord0;
+layout(location = 2) in vec2 in_tex_coord0;
+layout(location = 2) out vec2 frag_tex_coord1;
+layout(location = 3) in vec2 in_tex_coord1;
+layout(location = 3) out vec2 frag_tex_coord2;
+layout(location = 4) in vec2 in_tex_coord2;
+layout(location = 4) out vec2 fog_tex_coord;
+
+void main()
+{
+    mat4 _16;
+    if (_15)
+    {
+        _16 = _22.entMat[gl_InstanceIndex * 2];
+    }
+    else
+    {
+        _16 = ubo.mvp;
+    }
+    mat4 mvp = _16;
+    gl_Position = mvp * vec4(in_position, 1.0);
+    ibl_N = in_normal;
+    ibl_V = normalize(ubo.eyePos.xyz - in_position);
+    frag_color0 = in_color0;
+    frag_color1 = in_color1;
+    frag_color2 = in_color2;
+    frag_tex_coord0 = in_tex_coord0;
+    frag_tex_coord1 = in_tex_coord1;
+    frag_tex_coord2 = in_tex_coord2;
+    float s = dot(in_position, ubo.fogDistanceVector.xyz) + ubo.fogDistanceVector.w;
+    float t = dot(in_position, ubo.fogDepthVector.xyz) + ubo.fogDepthVector.w;
+    if (ubo.fogEyeT.y == 1.0)
+    {
+        if (t < 0.0)
+        {
+            t = 0.03125;
+        }
+        else
+        {
+            t = 0.96875;
+        }
+    }
+    else
+    {
+        if (t < 1.0)
+        {
+            t = 0.03125;
+        }
+        else
+        {
+            t = 0.03125 + ((0.9375 * t) / (t - ubo.fogEyeT.x));
+        }
+    }
+    fog_tex_coord = vec2(s, t);
+}
+

@@ -1,0 +1,33 @@
+#version 460
+
+layout(binding = 0, std140) uniform UBO
+{
+    vec4 eyePos;
+    vec4 _pad_light[3];
+    vec4 fogDistanceVector;
+    vec4 fogDepthVector;
+    vec4 fogEyeT;
+    vec4 fogColor;
+    vec4 _pad_to_modelMatrix[18];
+    mat4 modelMatrix;
+    mat4 mvp;
+} _21;
+
+layout(location = 0) in vec3 in_position;
+layout(location = 0) out vec2 frag_tex_coord;
+layout(location = 1) in vec2 in_tex_coord;
+layout(location = 1) out vec3 world_pos;
+layout(location = 2) out vec3 world_normal;
+layout(location = 2) in vec3 in_normal;
+layout(location = 3) out vec3 world_view;
+
+void main()
+{
+    gl_Position = _21.mvp * vec4(in_position, 1.0);
+    frag_tex_coord = in_tex_coord;
+    vec3 wp = (_21.modelMatrix * vec4(in_position, 1.0)).xyz;
+    world_pos = wp;
+    world_normal = mat3(_21.modelMatrix[0].xyz, _21.modelMatrix[1].xyz, _21.modelMatrix[2].xyz) * in_normal;
+    world_view = _21.eyePos.xyz - wp;
+}
+

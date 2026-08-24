@@ -1,0 +1,41 @@
+#version 460
+
+layout(std140, binding = 0) uniform TemporalIqmSurfacePush
+{
+    uint imageSlot;
+    uint samplerSlot;
+} surfacePush;
+
+layout(binding = 0) uniform texture2D wired_bindless_images[64];
+layout(binding = 0) uniform sampler wired_bindless_samplers[32];
+
+layout(location = 0) in vec2 frag_tex_coord;
+layout(location = 0) out vec4 out_color;
+layout(location = 1) out vec2 out_temporal_velocity;
+layout(location = 2) out float out_temporal_validity;
+layout(location = 1) in vec3 frag_normal;
+layout(location = 2) in vec4 frag_tangent;
+layout(location = 10) in vec4 temporalCurrentClip;
+layout(location = 11) in vec4 temporalPreviousClip;
+
+vec3 sRGBToLinear(inout vec3 c)
+{
+    c = max(c, vec3(0.0));
+    bvec3 cutoff = lessThanEqual(c, vec3(0.040449999272823333740234375));
+    vec3 lo = c / vec3(12.9200000762939453125);
+    vec3 hi = pow((c + vec3(0.054999999701976776123046875)) / vec3(1.05499994754791259765625), vec3(2.400000095367431640625));
+    return mix(hi, lo, vec3(cutoff));
+}
+
+void main()
+{
+    uint _66 = surfacePush.imageSlot;
+    uint _77 = surfacePush.samplerSlot;
+    vec4 sampled = texture(sampler2D(wired_bindless_images[_66], wired_bindless_samplers[_77]), frag_tex_coord);
+    vec3 param = sampled.xyz;
+    vec3 _93 = sRGBToLinear(param);
+    out_color = vec4(_93, sampled.w);
+    out_temporal_velocity = vec2(0.0);
+    out_temporal_validity = 0.0;
+}
+

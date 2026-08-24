@@ -1,0 +1,12 @@
+{
+  "measurement_frames": 1200,
+  "repetitions": 1,
+  "native_to_moltenvk_ratio_limit": 1.15,
+  "fixed_allowance_us": 0.0,
+  "max_hitch_ratio_delta": 0.01,
+  "statistic": "Geometric mean of arena1 and arena17 aggregate CPU-work microseconds/frame from a counterbalanced Metal/Vulkan/Vulkan/Metal scene order and 1200-frame windows; native Metal must be <= 1.15 * MoltenVK. Per-scene >=24ms hitch ratio may not regress by more than one percentage point.",
+  "scenes": {
+    "arena1": {"camera": [1052, 1432, 50, 135]},
+    "arena17": {"camera": [488, 1096, 378, -90]}
+  }
+}

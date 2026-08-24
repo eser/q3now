@@ -3,7 +3,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // tr_glsl.c
 #include "tr_local.h"
-#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.shaders
+#include "../render/frontend/r_log.h"  // rilog-channel-mechanism Turn C — renderer.shaders
 
 R_LOG_DECLARE_CHANNEL( rch_shaders, "renderer.shaders" );
 

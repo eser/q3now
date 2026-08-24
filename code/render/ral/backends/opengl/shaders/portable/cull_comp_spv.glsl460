@@ -1,0 +1,155 @@
+#version 460
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct SurfAABB
+{
+    vec4 mins;
+    vec4 maxs;
+    vec4 plane;
+    uvec4 meta;
+};
+
+layout(binding = 1, std430) readonly buffer Reached
+{
+    uint reached[];
+} _85;
+
+layout(binding = 0, std430) readonly buffer Aabb
+{
+    SurfAABB surfaces[];
+} _148;
+
+layout(binding = 2, std430) buffer Visible
+{
+    uint visible[];
+} _238;
+
+layout(std140, binding = 3) uniform Push
+{
+    vec4 frustum[4];
+    vec4 viewOrigin;
+    uvec4 params;
+} _115;
+
+bool reachedBit(uint i)
+{
+    return (_85.reached[i >> 5u] & (1u << (i & 31u))) != 0u;
+}
+
+bool boxFullyBehind(vec3 mins, vec3 maxs, vec4 plane)
+{
+    vec3 n = plane.xyz;
+    float _34;
+    if (n.x >= 0.0)
+    {
+        _34 = maxs.x;
+    }
+    else
+    {
+        _34 = mins.x;
+    }
+    vec3 p;
+    p.x = _34;
+    float _48;
+    if (n.y >= 0.0)
+    {
+        _48 = maxs.y;
+    }
+    else
+    {
+        _48 = mins.y;
+    }
+    p.y = _48;
+    float _62;
+    if (n.z >= 0.0)
+    {
+        _62 = maxs.z;
+    }
+    else
+    {
+        _62 = mins.z;
+    }
+    p.z = _62;
+    return (dot(n, p) - plane.w) < 0.0;
+}
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    uint count = _115.params.x;
+    if (i >= count)
+    {
+        return;
+    }
+    uint flagBase = count + 1u;
+    uint param = i;
+    bool vis = reachedBit(param);
+    bool _140;
+    if (vis)
+    {
+        _140 = _115.params.z != 0u;
+    }
+    else
+    {
+        _140 = vis;
+    }
+    if (_140)
+    {
+        vec3 mn = _148.surfaces[i].mins.xyz;
+        vec3 mx = _148.surfaces[i].maxs.xyz;
+        for (int p = 0; p < 4; p++)
+        {
+            vec3 param_1 = mn;
+            vec3 param_2 = mx;
+            vec4 param_3 = _115.frustum[p];
+            if (boxFullyBehind(param_1, param_2, param_3))
+            {
+                vis = false;
+                break;
+            }
+        }
+    }
+    bool _192;
+    if (vis)
+    {
+        _192 = _115.params.y != 0u;
+    }
+    else
+    {
+        _192 = vis;
+    }
+    if (_192)
+    {
+        uint ct = _148.surfaces[i].meta.x;
+        if (ct != 2u)
+        {
+            vec4 pl = _148.surfaces[i].plane;
+            float d = dot(_115.viewOrigin.xyz, pl.xyz);
+            if (ct == 0u)
+            {
+                if (d < (pl.w - 8.0))
+                {
+                    vis = false;
+                }
+            }
+            else
+            {
+                if (d > (pl.w + 8.0))
+                {
+                    vis = false;
+                }
+            }
+        }
+    }
+    _238.visible[flagBase + i] = uint(vis);
+    if (vis)
+    {
+        uint _250 = atomicAdd(_238.visible[0], 1u);
+        uint slot = _250;
+        if ((slot + 1u) <= count)
+        {
+            _238.visible[1u + slot] = i;
+        }
+    }
+}
+

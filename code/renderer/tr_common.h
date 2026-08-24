@@ -5,7 +5,7 @@
 #define TR_COMMON_H
 
 #include "../qcommon/q_shared.h"
-#include "../renderercommon/tr_public.h"
+#include "../render/frontend/tr_public.h"
 #include "../qcommon/q_feats.h"
 
 #define MAX_TEXTURE_UNITS 8
@@ -113,7 +113,7 @@ IMAGE LOADERS
 
 void R_LoadJPG( const char *name, byte **pic, int *width, int *height );
 void R_LoadPNG( const char *name, byte **pic, int *width, int *height );
-// PNG encoder (renderercommon/tr_image_png_write.c). Input is bottom-up
+// PNG encoder (code/render/frontend/tr_image_png_write.c). Input is bottom-up
 // RGB (the RB_ReadPixels output convention); R_EncodePNG returns the bytes
 // via a Z_Malloc buffer the caller must ri.Free.
 qboolean R_EncodePNG( const byte *rgb_bottomup, int width, int height,

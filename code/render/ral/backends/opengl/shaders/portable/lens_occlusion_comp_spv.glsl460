@@ -1,0 +1,91 @@
+#version 460
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct LensSource
+{
+    vec4 screenPosDepth;
+    vec4 colorVis;
+};
+
+const vec2 _132[9] = vec2[](vec2(0.0), vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0), vec2(0.699999988079071044921875), vec2(-0.699999988079071044921875, 0.699999988079071044921875), vec2(0.699999988079071044921875, -0.699999988079071044921875), vec2(-0.699999988079071044921875));
+
+layout(binding = 0, std430) buffer LensSources
+{
+    LensSource lensSources[];
+} _40;
+
+layout(std140, binding = 3) uniform LensPush
+{
+    vec2 viewport;
+    int count;
+    float radiusPx;
+} _22;
+
+layout(binding = 0) uniform texture2D depthTex;
+layout(binding = 0) uniform sampler depthSampler;
+
+void main()
+{
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= uint(_22.count))
+    {
+        return;
+    }
+    vec2 uv = _40.lensSources[idx].screenPosDepth.xy;
+    float compareZ = _40.lensSources[idx].screenPosDepth.z;
+    bool _57 = uv.x < 0.0;
+    bool _65;
+    if (!_57)
+    {
+        _65 = uv.x > 1.0;
+    }
+    else
+    {
+        _65 = _57;
+    }
+    bool _73;
+    if (!_65)
+    {
+        _73 = uv.y < 0.0;
+    }
+    else
+    {
+        _73 = _65;
+    }
+    bool _80;
+    if (!_73)
+    {
+        _80 = uv.y > 1.0;
+    }
+    else
+    {
+        _80 = _73;
+    }
+    if (_80)
+    {
+        _40.lensSources[idx].colorVis.w = 0.0;
+        return;
+    }
+    vec2 _92;
+    if (_22.viewport.x > 0.0)
+    {
+        _92 = vec2(_22.radiusPx) / _22.viewport;
+    }
+    else
+    {
+        _92 = vec2(0.0);
+    }
+    vec2 texel = _92;
+    int visible = 0;
+    for (int t = 0; t < 9; t++)
+    {
+        vec2 suv = clamp(uv + (_132[t] * texel), vec2(0.0), vec2(1.0));
+        float scene = textureLod(sampler2D(depthTex, depthSampler), suv, 0.0).x;
+        if (scene <= (compareZ + 0.0007999999797903001308441162109375))
+        {
+            visible++;
+        }
+    }
+    _40.lensSources[idx].colorVis.w = float(visible) / 9.0;
+}
+

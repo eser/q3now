@@ -1,0 +1,201 @@
+#version 460
+
+struct RailRibbonHeader
+{
+    vec4 startBeamLen;
+    vec4 beamAxisAge;
+    vec4 colorDuration;
+    vec4 misc;
+    vec4 perpAxis[36];
+};
+
+const uint _369[6] = uint[](0u, 1u, 0u, 0u, 1u, 1u);
+const float _380[6] = float[](-1.0, -1.0, 1.0, 1.0, -1.0, 1.0);
+
+layout(binding = 0, std430) readonly buffer Headers
+{
+    RailRibbonHeader headers[];
+} _141;
+
+layout(binding = 0, std140) uniform EffectsUBO
+{
+    mat4 mvp;
+    vec4 eyeWorld;
+    vec4 frameParams;
+    vec4 _v2;
+} _437;
+
+layout(location = 0) out vec2 fragUV;
+layout(location = 1) out vec4 fragColor;
+layout(location = 2) flat out uint fragShaderHandle;
+
+void emitDegenerate()
+{
+    gl_Position = vec4(0.0, 0.0, -2.0, 1.0);
+    fragUV = vec2(0.0);
+    fragColor = vec4(0.0);
+    fragShaderHandle = 0u;
+}
+
+bool helixPoint(int j, int numSegs, vec3 start, vec3 beamAxis, float beamLen, float curRadius, float curSpacing, float curWidth, float frac, float trailAlpha, RailRibbonHeader hdr, inout vec3 pos, inout vec3 normal, inout float halfW, inout float alpha)
+{
+    if (j > (numSegs - 1))
+    {
+        return false;
+    }
+    float d = beamLen - (float(j) * curSpacing);
+    if (d < 0.0)
+    {
+        return false;
+    }
+    int ring = (j * 2) % 36;
+    if (ring < 0)
+    {
+        ring += 36;
+    }
+    vec3 perp = hdr.perpAxis[ring].xyz;
+    pos = (start + (beamAxis * d)) + (perp * curRadius);
+    normal = normalize(cross(beamAxis, perp));
+    halfW = curWidth;
+    float segPos = float(j) / float(numSegs - 1);
+    float unwindFade = 1.0 - (frac * (1.0 + segPos));
+    if (unwindFade < 0.0)
+    {
+        unwindFade = 0.0;
+    }
+    alpha = trailAlpha * unwindFade;
+    return true;
+}
+
+void main()
+{
+    RailRibbonHeader hdr;
+    hdr.startBeamLen = _141.headers[gl_InstanceIndex].startBeamLen;
+    hdr.beamAxisAge = _141.headers[gl_InstanceIndex].beamAxisAge;
+    hdr.colorDuration = _141.headers[gl_InstanceIndex].colorDuration;
+    hdr.misc = _141.headers[gl_InstanceIndex].misc;
+    hdr.perpAxis[0] = _141.headers[gl_InstanceIndex].perpAxis[0];
+    hdr.perpAxis[1] = _141.headers[gl_InstanceIndex].perpAxis[1];
+    hdr.perpAxis[2] = _141.headers[gl_InstanceIndex].perpAxis[2];
+    hdr.perpAxis[3] = _141.headers[gl_InstanceIndex].perpAxis[3];
+    hdr.perpAxis[4] = _141.headers[gl_InstanceIndex].perpAxis[4];
+    hdr.perpAxis[5] = _141.headers[gl_InstanceIndex].perpAxis[5];
+    hdr.perpAxis[6] = _141.headers[gl_InstanceIndex].perpAxis[6];
+    hdr.perpAxis[7] = _141.headers[gl_InstanceIndex].perpAxis[7];
+    hdr.perpAxis[8] = _141.headers[gl_InstanceIndex].perpAxis[8];
+    hdr.perpAxis[9] = _141.headers[gl_InstanceIndex].perpAxis[9];
+    hdr.perpAxis[10] = _141.headers[gl_InstanceIndex].perpAxis[10];
+    hdr.perpAxis[11] = _141.headers[gl_InstanceIndex].perpAxis[11];
+    hdr.perpAxis[12] = _141.headers[gl_InstanceIndex].perpAxis[12];
+    hdr.perpAxis[13] = _141.headers[gl_InstanceIndex].perpAxis[13];
+    hdr.perpAxis[14] = _141.headers[gl_InstanceIndex].perpAxis[14];
+    hdr.perpAxis[15] = _141.headers[gl_InstanceIndex].perpAxis[15];
+    hdr.perpAxis[16] = _141.headers[gl_InstanceIndex].perpAxis[16];
+    hdr.perpAxis[17] = _141.headers[gl_InstanceIndex].perpAxis[17];
+    hdr.perpAxis[18] = _141.headers[gl_InstanceIndex].perpAxis[18];
+    hdr.perpAxis[19] = _141.headers[gl_InstanceIndex].perpAxis[19];
+    hdr.perpAxis[20] = _141.headers[gl_InstanceIndex].perpAxis[20];
+    hdr.perpAxis[21] = _141.headers[gl_InstanceIndex].perpAxis[21];
+    hdr.perpAxis[22] = _141.headers[gl_InstanceIndex].perpAxis[22];
+    hdr.perpAxis[23] = _141.headers[gl_InstanceIndex].perpAxis[23];
+    hdr.perpAxis[24] = _141.headers[gl_InstanceIndex].perpAxis[24];
+    hdr.perpAxis[25] = _141.headers[gl_InstanceIndex].perpAxis[25];
+    hdr.perpAxis[26] = _141.headers[gl_InstanceIndex].perpAxis[26];
+    hdr.perpAxis[27] = _141.headers[gl_InstanceIndex].perpAxis[27];
+    hdr.perpAxis[28] = _141.headers[gl_InstanceIndex].perpAxis[28];
+    hdr.perpAxis[29] = _141.headers[gl_InstanceIndex].perpAxis[29];
+    hdr.perpAxis[30] = _141.headers[gl_InstanceIndex].perpAxis[30];
+    hdr.perpAxis[31] = _141.headers[gl_InstanceIndex].perpAxis[31];
+    hdr.perpAxis[32] = _141.headers[gl_InstanceIndex].perpAxis[32];
+    hdr.perpAxis[33] = _141.headers[gl_InstanceIndex].perpAxis[33];
+    hdr.perpAxis[34] = _141.headers[gl_InstanceIndex].perpAxis[34];
+    hdr.perpAxis[35] = _141.headers[gl_InstanceIndex].perpAxis[35];
+    uint vertInQuad = uint(gl_VertexIndex) % 6u;
+    int segIdx = int(uint(gl_VertexIndex) / 6u);
+    vec3 start = hdr.startBeamLen.xyz;
+    float beamLen = hdr.startBeamLen.w;
+    vec3 beamAxis = hdr.beamAxisAge.xyz;
+    float age = hdr.beamAxisAge.w;
+    float duration = hdr.colorDuration.w;
+    float baseAlpha = hdr.misc.x;
+    float _299;
+    if (duration > 0.0)
+    {
+        _299 = age / duration;
+    }
+    else
+    {
+        _299 = 1.0;
+    }
+    float frac = _299;
+    if (frac < 0.0)
+    {
+        frac = 0.0;
+    }
+    if (frac > 1.0)
+    {
+        frac = 1.0;
+    }
+    float trailAlpha = 1.0 - frac;
+    float easedFrac = 1.0 - ((1.0 - frac) * (1.0 - frac));
+    float curRadius = 2.0 + (easedFrac * 2.0);
+    float curSpacing = 3.0 * (1.0 - (easedFrac * 0.666999995708465576171875));
+    float curWidth = 1.5 * (1.0 + (easedFrac * 1.5));
+    int numSegs = int(beamLen / curSpacing);
+    if (numSegs > 2048)
+    {
+        numSegs = 2048;
+    }
+    if (numSegs < 2)
+    {
+        numSegs = 2;
+    }
+    if (segIdx > (numSegs - 2))
+    {
+        emitDegenerate();
+        return;
+    }
+    int pi = segIdx + int(_369[vertInQuad]);
+    float sgn = _380[vertInQuad];
+    int param = pi;
+    int param_1 = numSegs;
+    vec3 param_2 = start;
+    vec3 param_3 = beamAxis;
+    float param_4 = beamLen;
+    float param_5 = curRadius;
+    float param_6 = curSpacing;
+    float param_7 = curWidth;
+    float param_8 = frac;
+    float param_9 = trailAlpha;
+    RailRibbonHeader param_10 = hdr;
+    vec3 param_11;
+    vec3 param_12;
+    float param_13;
+    float param_14;
+    bool _416 = helixPoint(param, param_1, param_2, param_3, param_4, param_5, param_6, param_7, param_8, param_9, param_10, param_11, param_12, param_13, param_14);
+    vec3 pos = param_11;
+    vec3 normal = param_12;
+    float halfW = param_13;
+    float alpha = param_14;
+    if (!_416)
+    {
+        emitDegenerate();
+        return;
+    }
+    vec3 worldPos = pos + (normal * (halfW * sgn));
+    gl_Position = _437.mvp * vec4(worldPos, 1.0);
+    float _451;
+    if (numSegs > 1)
+    {
+        _451 = float(numSegs - 1);
+    }
+    else
+    {
+        _451 = 1.0;
+    }
+    float denom = _451;
+    fragUV = vec2(float(pi) / denom, float(sgn > 0.0));
+    fragColor = vec4(hdr.colorDuration.xyz, baseAlpha * alpha);
+    fragShaderHandle = 0u;
+}
+

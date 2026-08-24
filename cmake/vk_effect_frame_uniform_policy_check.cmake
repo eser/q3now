@@ -3,8 +3,8 @@ IF(NOT DEFINED SOURCE_ROOT)
 	MESSAGE(FATAL_ERROR "SOURCE_ROOT required")
 ENDIF()
 
-SET(_vk_path "${SOURCE_ROOT}/code/renderervk/vk.c")
-SET(_header_path "${SOURCE_ROOT}/code/renderervk/vk.h")
+SET(_vk_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c")
+SET(_header_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.h")
 SET(_smoke_path "${SOURCE_ROOT}/tests/ral-effects-dynamic-bind-smoke.sh")
 SET(_cmake_path "${SOURCE_ROOT}/CMakeLists.txt")
 FOREACH(_path IN ITEMS ${_vk_path} ${_header_path} ${_smoke_path} ${_cmake_path})
@@ -89,16 +89,19 @@ FOREACH(_needle IN ITEMS
 	require_text("${_vk}" "${_needle}" "effect frame config")
 ENDFOREACH()
 
-# Native handles may cross only at the descriptor authoring boundary, derived
-# output-atomically from a complete RAL resource receipt.
+# Descriptor authoring consumes complete RAL receipts and creates RAL bind
+# groups; frame-uniform resources no longer need a native VkBuffer extraction
+# helper in the product renderer.
 FOREACH(_needle IN ITEMS
-		"VK_RalFrameUniformGetResources( owner, &receipt )"
-		"VK_RalFrameUniformResourcesReceiptExact( &receipt, &receipt )"
-		"Ral_GetBufferSize( receipt.buffers[i] ) != config->byteSize"
-		"candidate[i] = (VkBuffer)Ral_GetBufferHandle( receipt.buffers[i] );"
-		"memcpy( outBuffers, candidate, sizeof( candidate ) );")
-	require_text("${_vk}" "${_needle}" "descriptor receipt boundary")
+		"qboolean vk_ral_refresh_particle_compute_bindgroups( void )"
+		"VK_RalFrameUniformGetResources( &vk_particle_frame,"
+		"VK_RalFrameUniformResourcesReceiptExact("
+		".buffer=frameReceipt.buffers[i]"
+		"candidates[i] = Ral_CreateBindGroup( backend, &createInfo );")
+	require_text("${_vk}" "${_needle}" "RAL-native descriptor receipt boundary")
 ENDFOREACH()
+forbid_text("${_vk}" "vk_frame_uniform_descriptor_buffers"
+	"retired native frame-uniform extraction helper")
 
 FOREACH(_needle IN ITEMS
 		"frame_buffer [NUM_COMMAND_BUFFERS]"
@@ -122,13 +125,16 @@ FOREACH(_slice IN ITEMS _particle_init _decal_init)
 		"effect frame init")
 	require_call_count("${${_slice}}" "VK_RalFrameUniformEnsure[(]" 1
 		"effect frame ensure")
-	require_call_count("${${_slice}}" "vk_frame_uniform_descriptor_buffers[(]" 1
-		"effect descriptor receipt")
 ENDFOREACH()
-require_text("${_particle_init}" "bufInfos[0].buffer = frameBuffers[i];"
-	"particle descriptor identity")
-require_text("${_decal_init}" "bufInfos[0].buffer = frameBuffers[i];"
-	"decal descriptor identity")
+require_call_count("${_particle_init}" "vk_ral_refresh_particle_compute_bindgroups[(]" 1
+	"particle RAL descriptor publication")
+FOREACH(_needle IN ITEMS
+		"qboolean vk_ral_refresh_decal_render_bindgroups( uint32_t slotMask )"
+		"VK_RalFrameUniformGetResources( &vk_decal_frame, &frameReceipt )"
+		".buffer=frameReceipt.buffers[i], .bufferRange=frameBytes"
+		"candidates[i] = Ral_CreateBindGroup( backend, &createInfo );")
+	require_text("${_vk}" "${_needle}" "decal RAL-native descriptor identity")
+ENDFOREACH()
 
 # Every active owner joins the exact post-fence slot boundary.
 require_order("${_begin_frame}" "Ral_DrainDeferred( vk_ral_get_backend() );"
@@ -170,12 +176,12 @@ require_order("${_decal_draw}" "VK_RalPoolRenderExecute( &plan )"
 	"decal receipt after draw")
 
 # Adopted descriptor children are gone before their RAL buffer parents.
-require_order("${_particle_shutdown}" "Ral_DestroyBindGroup( vk.particle.ral_render_descriptor[i] );"
+require_order("${_particle_shutdown}" "vk_ral_release_particle_render_bindgroups();"
 	"VK_RalFrameUniformRelease( &vk_particle_frame );"
-	"particle child-before-parent")
-require_order("${_decal_shutdown}" "Ral_DestroyBindGroup( vk.decal.ral_render_descriptor[i] );"
+	"particle release helper before frame parent")
+require_order("${_decal_shutdown}" "vk_ral_release_decal_render_bindgroups();"
 	"VK_RalFrameUniformRelease( &vk_decal_frame );"
-	"decal child-before-parent")
+	"decal release helper before frame parent")
 
 FOREACH(_needle IN ITEMS
 		"ral-frame-uniform schema=1 map=%s family=%s slot=%u"

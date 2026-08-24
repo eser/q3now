@@ -88,7 +88,8 @@ int main( void ) {
 	memset( &receipt, 0, sizeof( receipt ) );
 	CHECK( Ral_BufferWriteImmediate( &buffer, 8u, first, sizeof( first ),
 		&receipt ) );
-	CHECK( mapCalls == 1u && unmapCalls == 1u );
+	CHECK( mapCalls == 1u && unmapCalls == 0u
+		&& buffer.immediateMapped == storage );
 	CHECK( memcmp( storage + 8u, first, sizeof( first ) ) == 0 );
 	CHECK( receipt.ready == qtrue
 		&& receipt.transfer.state == RAL_TRANSFER_COMPLETED
@@ -110,7 +111,8 @@ int main( void ) {
 		&out ) );
 	CHECK( backend.nextTransferGeneration == 2u
 		&& out.transfer.transferGeneration == 2u
-		&& memcmp( storage + 32u, second, sizeof( second ) ) == 0 );
+		&& memcmp( storage + 32u, second, sizeof( second ) ) == 0
+		&& mapCalls == 1u && unmapCalls == 0u );
 
 	// Every invalid request is output-atomic and consumes neither a generation
 	// nor a native map call.
@@ -120,7 +122,7 @@ int main( void ) {
 	CHECK( !Ral_BufferWriteImmediate( &buffer, sizeof( storage ) - 1u,
 		first, sizeof( first ), &out ) );
 	CHECK( Ral_BufferUploadReceiptExact( &out, &sentinel )
-		&& backend.nextTransferGeneration == generation && mapCalls == 2u );
+		&& backend.nextTransferGeneration == generation && mapCalls == 1u );
 	buffer.usage = RAL_BUFFER_UNIFORM;
 	CHECK( !Ral_BufferWriteImmediate( &buffer, 0u, first, sizeof( first ), &out ) );
 	buffer.usage |= RAL_BUFFER_TRANSFER_DST;
@@ -135,7 +137,13 @@ int main( void ) {
 	buffer.portableStateKnown = qtrue;
 	backend.nextTransferGeneration = UINT64_MAX - 1u;
 	CHECK( !Ral_BufferWriteImmediate( &buffer, 0u, first, sizeof( first ), &out ) );
-	CHECK( Ral_BufferUploadReceiptExact( &out, &sentinel ) && mapCalls == 2u );
+	CHECK( Ral_BufferUploadReceiptExact( &out, &sentinel ) && mapCalls == 1u );
+
+	// The backend owns the cached mapping until buffer destruction. Model that
+	// teardown explicitly because this fixture uses a stack-allocated handle.
+	ralVk_Unmap( &allocation );
+	buffer.immediateMapped = NULL;
+	CHECK( unmapCalls == 1u && allocation.mapped == NULL );
 
 	puts( "PASS Vulkan immediate buffer write receipt" );
 	return 0;

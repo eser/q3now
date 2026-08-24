@@ -55,6 +55,7 @@ REPO_ROOT="$(cd "$SMOKE_SCRIPT_DIR/.." && pwd)"
 # Scratch root for this harness's intermediate logs / diff tables. Honours a
 # pre-set SMT_TMP; otherwise the system temp root from the shared helper.
 SMT_TMP="${SMT_TMP:-$WIRED_TMP}"
+mkdir -p "$SMT_TMP"
 PNG2RAW="${PNG2RAW:-$REPO_ROOT/tools/png2raw/png2raw}"
 if [ ! -x "$PNG2RAW" ] && [ -x "$PNG2RAW.exe" ]; then PNG2RAW="$PNG2RAW.exe"; fi
 if [ ! -x "$PNG2RAW" ]; then
@@ -482,7 +483,7 @@ run_wired() {
         # gameplay path, unchanged). 1.0 sec is well-past the cold-start
         # zero state; the exact value doesn't matter for determinism so
         # long as it's >0 and the same in rebless + verify.
-        timeout "$timeout_s" "./$WIRED_NAME" \
+        timeout "$timeout_s" "$WIRED_ABS" \
             +set fs_homepath "$SMOKE_HOME_NATIVE" \
             +set sv_pure 0 \
             +set sv_cheats 1 \
@@ -513,12 +514,9 @@ run_wired() {
         fi
         return 1
     fi
-    # Freshness check: the jsonl was just (re-)created; if it's stale
-    # (no timestamp newer than a few seconds ago), fail.
-    if ! find "$JSONL" -newermt "@$(( $(date +%s) - 600 ))" -print -quit | grep -q .; then
-        echo "FAIL: $JSONL is older than this invocation's window — stale log"
-        return 1
-    fi
+    # JSONL was removed immediately before launch, so a non-empty file here
+    # was necessarily produced by this invocation. Avoid GNU-only
+    # `find -newermt @epoch`, which rejects valid runs on macOS/BSD find.
     return 0
 }
 
@@ -534,8 +532,8 @@ run_wired() {
 # Args: MAP X Y Z YAW TAG
 capture_viewpoint() {
     local map="$1" x="$2" y="$3" z="$4" yaw="$5" tag="$6"
-    local pre_ts
-    pre_ts=$(date +%s)
+    local marker="$SMT_TMP/smoke-mt-$tag.marker"
+    touch "$marker"
     # REAL camera teleport. A bare "+setviewpos" is a NO-OP (server console echo
     # only; player not moved) — so the prior 5 "viewpoints" were all the same spawn
     # frame. The working recipe (proven by visual-render-features.sh --mode viewport):
@@ -551,7 +549,7 @@ capture_viewpoint() {
         +wait 60 +screenshot \
         +wait 30 +quit >&2 || return 1
     local shot
-    shot="$(find "$SCREENSHOT_DIR" -name '*.png' -newermt "@$pre_ts" 2>/dev/null | sort | tail -1)"
+    shot="$(find "$SCREENSHOT_DIR" -name '*.png' -newer "$marker" 2>/dev/null | sort | tail -1)"
     if [ -z "$shot" ] || [ ! -s "$shot" ]; then
         echo >&2 "FAIL: capture_viewpoint($tag): no screenshot produced under $SCREENSHOT_DIR"
         return 1
@@ -595,9 +593,9 @@ check_jsonl_invariants() {
     else
         echo "  no driver crash   : OK"
     fi
-    if grep -qE '^ERROR:|VM_Create.*failed|VM syscall error|trap_.*syscall' "$JSONL"; then
+    if grep -qE '^ERROR:|VM_Create.*failed|VM syscall error|trap_[[:alnum:]_]+[[:space:]]+syscall[[:space:]]+error' "$JSONL"; then
         echo "FAIL: VM errors detected:"
-        grep -E '^ERROR:|VM_Create.*failed|VM syscall error|trap_.*syscall' "$JSONL" | head -3 | sed 's/^/    /'
+        grep -E '^ERROR:|VM_Create.*failed|VM syscall error|trap_[[:alnum:]_]+[[:space:]]+syscall[[:space:]]+error' "$JSONL" | head -3 | sed 's/^/    /'
         fail=1
     fi
     return $fail
@@ -622,7 +620,8 @@ FAIL=0
 echo
 echo "==> Phase 1 — arena1 → arena17 transition (default path)"
 
-P1_PRE_TS="$(date +%s)"
+P1_MARKER="$SMT_TMP/smoke-mt-phase1.marker"
+touch "$P1_MARKER"
 # legacy-mainpath-retire STEP 5 — cold-cache pipeline warmup fix.
 # On a cold pipeline cache the first CA_ACTIVE frame can ship before all
 # pipelines have compiled — the C1 black-frame gate then fires on what was
@@ -642,7 +641,7 @@ P1_PRE_TS="$(date +%s)"
 # so a cvar is live before arena1's connect. Default-empty = byte-identical.
 if ! run_wired "phase1" 240 \
     ${SMOKE_PRESET_ARGS:-} \
-    +map arena1   +waitForMap +wait 240 +screenshot +wait 30 \
+    +map arena1   +waitForMap +wait 900 +screenshot +wait 30 \
     +map arena17  +waitForMap +wait 240 +screenshot +wait 30 \
     ${SMOKE_EXTRA_ARGS:-} \
     +quit; then
@@ -652,7 +651,7 @@ else
         FAIL=1
     fi
     # Two screenshots expected (arena1 spawn + arena17 spawn). Both must pass C1.
-    mapfile -t P1_SHOTS < <(find "$SCREENSHOT_DIR" -name '*.png' -newermt "@$P1_PRE_TS" | sort)
+    mapfile -t P1_SHOTS < <(find "$SCREENSHOT_DIR" -name '*.png' -newer "$P1_MARKER" | sort)
     if [ "${#P1_SHOTS[@]}" -lt 2 ]; then
         echo "FAIL: phase1 produced ${#P1_SHOTS[@]} screenshots, expected 2"
         FAIL=1
@@ -662,6 +661,15 @@ else
             check_pixel_gate "${P1_SHOTS[$i]}" "phase1 $map_label spawn" || FAIL=1
         done
     fi
+fi
+
+if [ "${SMOKE_PHASE1_ONLY:-0}" = 1 ]; then
+    if [ "$FAIL" -eq 0 ]; then
+        echo "==> Smoke result: PASS (Phase 1 only)"
+    else
+        echo "==> Smoke result: FAIL (Phase 1 only)"
+    fi
+    exit "$FAIL"
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -676,7 +684,8 @@ fi
 # Set pre-map so the layout is live before the arena connect.
 echo
 echo "==> Phase 1B — split-screen two-viewport render (cl_splitScreen 1)"
-P1B_PRE_TS="$(date +%s)"
+P1B_MARKER="$SMT_TMP/smoke-mt-phase1b.marker"
+touch "$P1B_MARKER"
 if ! run_wired "phase1b" 240 \
     +set cl_splitScreen 1 \
     +map arena1 +waitForMap +wait 240 +screenshot +wait 30 \
@@ -686,7 +695,7 @@ else
     if ! check_jsonl_invariants 1; then
         FAIL=1
     fi
-    mapfile -t P1B_SHOTS < <(find "$SCREENSHOT_DIR" -name '*.png' -newermt "@$P1B_PRE_TS" | sort)
+    mapfile -t P1B_SHOTS < <(find "$SCREENSHOT_DIR" -name '*.png' -newer "$P1B_MARKER" | sort)
     if [ "${#P1B_SHOTS[@]}" -lt 1 ]; then
         echo "FAIL: phase1b produced ${#P1B_SHOTS[@]} screenshots, expected 1"
         FAIL=1

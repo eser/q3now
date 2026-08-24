@@ -1,0 +1,56 @@
+#version 460
+
+layout(binding = 0, std140) uniform EffectsUBO
+{
+    mat4 mvp;
+    vec4 eyeWorld;
+    vec4 frameParams;
+    vec4 stageParams;
+} _147;
+
+layout(binding = 0) uniform texture2D shaderImages[64];
+layout(binding = 0) uniform sampler shaderImageSampler;
+
+layout(location = 3) flat in uint fragImageSlot;
+layout(location = 0) in vec2 fragUV;
+layout(location = 0) out vec4 outColor;
+layout(location = 1) in vec4 fragColor;
+layout(location = 2) flat in uint fragShaderHandle;
+
+vec3 sRGBToLinear(inout vec3 c)
+{
+    c = max(c, vec3(0.0));
+    bvec3 cutoff = lessThanEqual(c, vec3(0.040449999272823333740234375));
+    vec3 lo = c / vec3(12.9200000762939453125);
+    vec3 hi = pow((c + vec3(0.054999999701976776123046875)) / vec3(1.05499994754791259765625), vec3(2.400000095367431640625));
+    return mix(hi, lo, vec3(cutoff));
+}
+
+vec4 decodeColorTexel(inout vec4 c, uint domain)
+{
+    if (domain != 0u)
+    {
+        return c;
+    }
+    vec3 param = c.xyz;
+    vec3 _69 = sRGBToLinear(param);
+    c.x = _69.x;
+    c.y = _69.y;
+    c.z = _69.z;
+    return c;
+}
+
+void main()
+{
+    uint domain = fragImageSlot >> 31u;
+    uint handle = fragImageSlot & 2147483647u;
+    uint slot = (handle < 64u) ? handle : 0u;
+    vec4 param = texture(sampler2D(shaderImages[slot], shaderImageSampler), fragUV);
+    uint param_1 = domain;
+    vec4 _121 = decodeColorTexel(param, param_1);
+    vec4 texel = _121;
+    vec3 param_2 = fragColor.xyz;
+    vec3 _131 = sRGBToLinear(param_2);
+    outColor = vec4(texel.xyz * _131, texel.w * fragColor.w);
+}
+

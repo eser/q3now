@@ -16,7 +16,7 @@
 // alias table (Q1's lettered pain/death/attack variants collapse to one code).
 
 #include "cg_local.h"
-#include "../renderercommon/tr_model_mdl.h"   // mdlAnimRange_t
+#include "../render/frontend/tr_model_mdl.h"   // mdlAnimRange_t
 
 LOG_DECLARE_CHANNEL( ch_cgame, "cgame" );
 

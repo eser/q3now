@@ -5,23 +5,23 @@ if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
 
-set(HEADER "${ROOT}/code/renderer/ral/ral_transition.h")
+set(HEADER "${ROOT}/code/render/ral/core/ral_transition.h")
 file(READ "${HEADER}" TEXT)
-file(READ "${ROOT}/code/renderer/ral/ral_command.h" COMMAND_TEXT)
-file(READ "${ROOT}/code/renderer/ral/ral_resource.h" RESOURCE_HEADER_TEXT)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_transition.c" VULKAN_TEXT)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_command.c" LEGACY_COMMAND_TEXT)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_resource.c" RESOURCE_TEXT)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_internal.h" INTERNAL_TEXT)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_translate.h" TRANSLATE_HEADER_TEXT)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_bridge.h" BRIDGE_TEXT)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_translate.c" TRANSLATE_TEXT)
-file(READ "${ROOT}/code/renderervk/vk.c" PRODUCT_TEXT)
-file(READ "${ROOT}/code/renderervk/vk.h" PRODUCT_HEADER_TEXT)
-file(READ "${ROOT}/code/renderervk/vk_ral_textures.c" PRODUCT_TEXTURE_TEXT)
-file(READ "${ROOT}/code/renderervk/vk_ral_textures.h" PRODUCT_TEXTURE_HEADER_TEXT)
-file(READ "${ROOT}/code/renderervk/tr_image.c" PRODUCT_IMAGE_TEXT)
-file(READ "${ROOT}/code/renderervk/tr_local.h" PRODUCT_LOCAL_TEXT)
+file(READ "${ROOT}/code/render/ral/core/ral_command.h" COMMAND_TEXT)
+file(READ "${ROOT}/code/render/ral/core/ral_resource.h" RESOURCE_HEADER_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_transition.c" VULKAN_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_command.c" LEGACY_COMMAND_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_resource.c" RESOURCE_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_internal.h" INTERNAL_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_translate.h" TRANSLATE_HEADER_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_bridge.h" BRIDGE_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_translate.c" TRANSLATE_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" PRODUCT_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" PRODUCT_HEADER_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c" PRODUCT_TEXTURE_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.h" PRODUCT_TEXTURE_HEADER_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_image.c" PRODUCT_IMAGE_TEXT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_local.h" PRODUCT_LOCAL_TEXT)
 file(READ "${ROOT}/tests/ral_vulkan_translate_test.c" TRANSLATE_TEST_TEXT)
 file(READ "${ROOT}/tests/ral_transition_command_test.c" TRANSITION_COMMAND_TEST_TEXT)
 
@@ -518,8 +518,8 @@ foreach(REQUIRED IN ITEMS
 	endif()
 endforeach()
 foreach(REQUIRED IN ITEMS
-	"vk.ral_bgl_smaa_rtmetrics = Ral_AdoptBindGroupLayout"
-	"vk.set_layout_smaa_rtmetrics, 1, &e"
+	"&vk.ral_bgl_smaa_rtmetrics, &vk.set_layout_smaa_rtmetrics,"
+	"\"wired-set-layout-smaa-rtmetrics\" );"
 	"vk_ral_release_static_bindgroups();\n\t\t{\n\t\t\tint sl6d;"
 	"vk_ral_release_static_bindgroups();\n\tRal_DestroyBindGroupArena"
 	"vk_ral_release_static_bindgroups();\n\t{\n\t\tint sl6d;"
@@ -560,7 +560,7 @@ endif()
 
 foreach(REQUIRED IN ITEMS
 	"struct ralBindGroup_s *ralDescriptor"
-	"struct ralTexture_s *ralDescriptorTexture"
+	"struct ralTexture_s *ral"
 	"struct ralTextureView_s *ralDescriptorView"
 	"struct ralSampler_s *ralDescriptorSampler"
 	"qboolean vk_ral_refresh_image_descriptor( image_t *image,"
@@ -576,8 +576,8 @@ extract_between("${PRODUCT_TEXTURE_TEXT}"
 foreach(REQUIRED IN ITEMS
 	"Ral_BindGroupArenaReceiptValid("
 	"vk_ral_lookup_sampler( nativeSampler )"
-	"Ral_AdoptTextureExact( s_ral_backend"
-	"Ral_AdoptTextureViewExact( s_ral_backend"
+	"Ral_TextureGetResourceReceipt( image->ral, &textureReceipt )"
+	"viewCandidate = Ral_CreateTextureView( s_ral_backend, &viewInfo )"
 	"value.type = RAL_BIND_COMBINED_TEXTURE_SAMPLER"
 	"createInfo.arena = vk.ral_descriptor_arena"
 	"createInfo.arenaReceipt = &vk.ral_descriptor_arena_receipt"
@@ -585,11 +585,9 @@ foreach(REQUIRED IN ITEMS
 	"image->ralDescriptor = groupCandidate"
 	"image->descriptor = rawCandidate"
 	"groupCandidateOwned = qfalse"
-	"textureCandidateOwned = qfalse"
 	"viewCandidateOwned = qfalse"
 	"if ( groupRetired ) Ral_DestroyBindGroup( groupRetired )"
-	"if ( viewRetired ) Ral_DestroyTextureView( viewRetired )"
-	"if ( textureRetired ) Ral_DestroyTexture( textureRetired )")
+	"if ( viewRetired ) Ral_DestroyTextureView( viewRetired )")
 	string(FIND "${IMAGE_DESCRIPTOR_OWNER}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "per-image direct RAL descriptor lifecycle lost: ${REQUIRED}")
@@ -622,16 +620,15 @@ foreach(RETIRED IN ITEMS imageAlloc "&image->descriptor"
 endforeach()
 foreach(REQUIRED IN ITEMS
 	"image->ralDescriptor = NULL"
-	"image->ralDescriptorTexture = NULL"
 	"image->ralDescriptorView = NULL"
 	"image->ralDescriptorSampler = NULL"
-	"vk_ral_release_image_descriptor( img );\n\t\t// tear down the parallel RAL texture")
+	"image->ral = NULL")
 	string(FIND "${PRODUCT_IMAGE_TEXT}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
 		message(FATAL_ERROR "image descriptor init/teardown ordering lost: ${REQUIRED}")
 	endif()
 endforeach()
-foreach(FIELD IN ITEMS ralDescriptor ralDescriptorTexture ralDescriptorView
+foreach(FIELD IN ITEMS ralDescriptor ralDescriptorView
 	ralDescriptorSampler)
 	string(REGEX MATCHALL "image->${FIELD} = NULL" IMAGE_DESCRIPTOR_INITS
 		"${PRODUCT_IMAGE_TEXT}")
@@ -640,6 +637,12 @@ foreach(FIELD IN ITEMS ralDescriptor ralDescriptorTexture ralDescriptorView
 		message(FATAL_ERROR "all three Vulkan image constructors must initialize ${FIELD}, got ${IMAGE_DESCRIPTOR_INIT_COUNT}")
 	endif()
 endforeach()
+string(REGEX MATCHALL "image->ral = NULL" IMAGE_TEXTURE_INITS
+	"${PRODUCT_IMAGE_TEXT}")
+list(LENGTH IMAGE_TEXTURE_INITS IMAGE_TEXTURE_INIT_COUNT)
+if(NOT IMAGE_TEXTURE_INIT_COUNT EQUAL 1)
+	message(FATAL_ERROR "canonical direct image texture initialization drifted: ${IMAGE_TEXTURE_INIT_COUNT}/1")
+endif()
 foreach(REQUIRED IN ITEMS
 	"ralTextureView_t *Ral_AdoptTextureViewExact"
 	"view->ownsView = qfalse"
@@ -651,13 +654,13 @@ foreach(REQUIRED IN ITEMS
 	endif()
 endforeach()
 foreach(REQUIRED IN ITEMS
-	"Ral_PublishAdoptedTextureState( vk.smaa.ral_input_image"
-	"Ral_PublishAdoptedTextureState( vk.smaa.ral_edges_image"
-	"Ral_PublishAdoptedTextureState( vk.smaa.ral_blend_image"
-	"RAL_RESOURCE_USAGE_SAMPLED_TEXTURE, RAL_STAGE_FRAGMENT")
+	"vk.smaa.ral_input_image = vk_smaa_create_texture("
+	"vk.smaa.ral_edges_image = vk_smaa_create_texture("
+	"vk.smaa.ral_blend_image = vk_smaa_create_texture("
+	"RAL_TEXTURE_USAGE_TRANSFER_DST | RAL_TEXTURE_USAGE_SAMPLED")
 	string(FIND "${PRODUCT_TEXTURE_TEXT}${PRODUCT_TEXT}" "${REQUIRED}" POSITION)
 	if(POSITION EQUAL -1)
-		message(FATAL_ERROR "SMAA adopted-state publication lost: ${REQUIRED}")
+		message(FATAL_ERROR "SMAA direct texture ownership lost: ${REQUIRED}")
 	endif()
 endforeach()
 

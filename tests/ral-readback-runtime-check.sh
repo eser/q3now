@@ -289,6 +289,12 @@ RUN="$ROOT/runtime"
 mkdir -p "$HOME_DIR/base" "$RUN/Contents/MacOS"
 cp "$PACK/base/pax21.sw3z" "$HOME_DIR/base/" || exit 1
 cp "$BASE" "$HOME_DIR/base/" || exit 1
+# This gate owns renderer readback, not the evolving product menu grammar.
+# Override only the main-menu document with a parser-stable fixture so an
+# unrelated WiredUI reload cannot prevent the native 1280x720 RAL proof.
+mkdir -p "$HOME_DIR/base/ui"
+cp "$SCRIPT_DIR/fixtures/primitive_arena_thumb.wui" \
+	"$HOME_DIR/base/ui/main.wui" || exit 1
 cp "$GAMECL" "$HOME_DIR/base/gameclarm64.dylib" || exit 1
 cp "$GAMESV" "$HOME_DIR/base/gamesvarm64.dylib" || exit 1
 cp "$WIRED" "$RUN/wired" || exit 1

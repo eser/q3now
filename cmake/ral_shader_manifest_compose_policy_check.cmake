@@ -4,8 +4,8 @@
 if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
-file(READ "${ROOT}/code/renderervk/shaders/shader_manifest_compose.mjs" COMPOSER)
-file(READ "${ROOT}/code/renderervk/shaders/spirv/ral_shader_portability_overrides.json" OVERRIDES)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/shader_manifest_compose.mjs" COMPOSER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_portability_overrides.json" OVERRIDES)
 file(READ "${ROOT}/tests/ral_shader_manifest_compose_test.mjs" HOST)
 file(READ "${ROOT}/tests/ral_shader_manifest_schema_test.c" C_HOST)
 

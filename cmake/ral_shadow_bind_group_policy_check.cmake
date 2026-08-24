@@ -5,8 +5,8 @@ IF(NOT DEFINED SOURCE_ROOT OR NOT IS_DIRECTORY "${SOURCE_ROOT}")
 	MESSAGE(FATAL_ERROR "SOURCE_ROOT must name the q3now source tree")
 ENDIF()
 
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk.c" VK)
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk.h" VK_H)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VK)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" VK_H)
 FILE(READ "${SOURCE_ROOT}/tests/ral_vulkan_dynamic_bind_test.c" HOST)
 
 FUNCTION(REQUIRE_TEXT BODY NEEDLE LABEL)
@@ -90,10 +90,10 @@ FOREACH(NEEDLE IN ITEMS
 	"&vk.shadowMap.ral_bgl_entmat"
 	"&vk.shadowMap.ral_bgl_cascademvp"
 	"&vk.shadowMap.ral_bgl_bones"
-	"&vk.shadowMap.ral_cascadeMvpBuf[ci]"
-	"&vk.shadowMap.ral_boneBuf[bi]"
-	"&vk.dlightShadow.ral_faceMvpBuf[i]"
-	"&vk.dlightShadow.ral_entMatBuf[i]"
+	"vk.shadowMap.ral_cascadeMvpBuf[ci] ="
+	"vk.shadowMap.ral_boneBuf[bi] ="
+	"vk.dlightShadow.ral_faceMvpBuf[i] ="
+	"vk.dlightShadow.ral_entMatBuf[i] ="
 	"vk_shadow_descriptor_pool_invalidate();")
 	REQUIRE_TEXT("${VK}" "${NEEDLE}" "shadow retained lifecycle")
 ENDFOREACH()

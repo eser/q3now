@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 root=${1:?source root required}
-shader_dir="$root/code/renderervk/shaders"
+shader_dir="$root/code/render/ral/backends/vulkan/renderer/shaders"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/wired-temporal-shader.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 command -v glslangValidator >/dev/null 2>&1 || exit 77
@@ -126,9 +126,9 @@ while IFS='|' read -r stage output defines ordinary_output ordinary_defines; do
 		frag_tx0*_bindless)
 			grep -Eq 'SpecId 0$' "$tmp/ordinary.spec"
 			grep -Eq 'SpecId 1$' "$tmp/ordinary.spec"
-			! grep -Eq 'SpecId [01]$' "$tmp/current.spec"
-			grep --color=never -Ev 'SpecId [01]$' "$tmp/ordinary.spec" > "$tmp/ordinary.spec.passive" || true
-			cmp "$tmp/current.spec" "$tmp/ordinary.spec.passive";;
+			grep -Eq 'SpecId 0$' "$tmp/current.spec"
+			grep -Eq 'SpecId 1$' "$tmp/current.spec"
+			cmp "$tmp/current.spec" "$tmp/ordinary.spec";;
 		*) cmp "$tmp/current.spec" "$tmp/ordinary.spec";;
 	esac
 	if [ "$stage" = frag ]; then

@@ -9,7 +9,7 @@
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"FAIL recipe table %d: %s\n",__LINE__,#x); return 1; } } while (0)
 #define VK_TEMPORAL_BLOB(name, size) const unsigned char name[size] = { 0 };
 #define VK_TEMPORAL_PAIR(tx, family, env, fog, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS)
-#include "../code/renderervk/shaders/spirv/temporal_generic_catalog.inc"
+#include "../code/render/ral/backends/vulkan/renderer/shaders/spirv/temporal_generic_catalog.inc"
 #undef VK_TEMPORAL_PAIR
 #undef VK_TEMPORAL_BLOB
 
@@ -113,6 +113,7 @@ static qboolean RecipeSemanticsEqual( const vkTemporalGenericRecipe_t *a,
 			|| a->key.family != b->key.family
 			|| a->key.environment != b->key.environment
 			|| a->key.shaderFog != b->key.shaderFog
+			|| a->alphaTested != b->alphaTested
 			|| a->numBindings != b->numBindings || a->numAttributes != b->numAttributes
 			|| a->topology != b->topology || a->primitiveRestart != b->primitiveRestart
 			|| a->depthClampEnable != b->depthClampEnable
@@ -288,7 +289,8 @@ int main( void ) {
 		&&view.stages[0].module==(VkShaderModule)(uintptr_t)101
 		&&view.stages[1].module==(VkShaderModule)(uintptr_t)102
 		&&view.gp.layout==(VkPipelineLayout)(uintptr_t)103);
-	{ vkGenericSpecializationFacts_t facts={got.key.textureCount,got.key.shaderFog};
+	{ vkGenericSpecializationFacts_t facts={got.key.textureCount,got.key.shaderFog,
+		got.alphaTested};
 		CHECK(VK_GenericTemporalSpecializationValidate(&view.gp,&facts,NULL)); }
 	badRecipe=got;badRecipe.valid=qfalse;memset(&view,0xA5,sizeof(view));viewBefore=view;
 	CHECK(!VK_TemporalGenericRecipeBuildView(&badRecipe,

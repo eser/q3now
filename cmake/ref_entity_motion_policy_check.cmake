@@ -13,8 +13,8 @@ function(require_text path needle)
   endif()
 endfunction()
 
-require_text("code/renderercommon/tr_public.h" "#define\tREF_API_VERSION\t\t19")
-require_text("code/renderercommon/tr_public.h" "AddRefEntityToSceneTemporal")
+require_text("code/render/frontend/tr_public.h" "#define\tREF_API_VERSION\t\t22")
+require_text("code/render/frontend/tr_public.h" "AddRefEntityToSceneTemporal")
 require_text("code/cgame/cg_public.h" "CG_R_ADDREFENTITYTOSCENETEMPORAL = 232")
 require_text("code/client/cl_cgame.c" "&& re.AddRefEntityToSceneTemporal")
 require_text("code/client/cl_cgame.c" "VM_CHECKBOUNDS( VM_ActiveNativeVM(), args[1], sizeof( refEntity_t ) )")
@@ -34,11 +34,14 @@ if(entity_bounds LESS 0 OR motion_bounds LESS 0 OR motion_assign LESS 0
   message(FATAL_ERROR "client temporal syscall must bounds-check both raw VM pointers before dereferencing motion")
 endif()
 
-foreach(renderer IN ITEMS renderer renderer2 renderervk)
-  require_text("code/${renderer}/tr_scene.c" "RefEntityMotion_ClearOwned")
-  require_text("code/${renderer}/tr_scene.c" "if ( r_numentities == before + 1 )")
-  require_text("code/${renderer}/tr_scene.c" "RefEntityMotion_CopyOwned")
-  require_text("code/${renderer}/tr_init.c" "AddRefEntityToSceneTemporal = RE_AddRefEntityToSceneTemporal")
+foreach(renderer_dir IN ITEMS
+    "code/renderer"
+    "code/renderer2"
+    "code/render/ral/backends/vulkan/renderer")
+  require_text("${renderer_dir}/tr_scene.c" "RefEntityMotion_ClearOwned")
+  require_text("${renderer_dir}/tr_scene.c" "if ( r_numentities == before + 1 )")
+  require_text("${renderer_dir}/tr_scene.c" "RefEntityMotion_CopyOwned")
+  require_text("${renderer_dir}/tr_init.c" "AddRefEntityToSceneTemporal = RE_AddRefEntityToSceneTemporal")
 endforeach()
 
 message(STATUS "temporal entity identity ABI/source policy: PASS")

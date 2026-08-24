@@ -1,0 +1,95 @@
+#version 460
+
+layout(binding = 0, std140) uniform UBO
+{
+    vec4 _eyePos;
+    vec4 _animPad;
+    vec4 _pad1;
+    vec4 _pad2;
+    vec4 _fogDist;
+    vec4 _fogDepth;
+    vec4 _fogEyeT;
+    vec4 _fogColor;
+    vec4 q1StyleIntensities;
+    vec4 _pad_to_packed_indices[25];
+    uvec4 packed_indices[3];
+} _61;
+
+layout(binding = 1) uniform texture2DArray wired_bindless_image_arrays[64];
+layout(binding = 0) uniform sampler wired_bindless_samplers[32];
+layout(binding = 0) uniform texture2D wired_bindless_images[64];
+
+layout(location = 1) centroid in vec2 frag_tex_coord0;
+layout(location = 2) centroid in vec2 frag_tex_coord1;
+layout(location = 0) out vec4 out_color;
+
+vec3 sRGBToLinear(inout vec3 c)
+{
+    c = max(c, vec3(0.0));
+    bvec3 cutoff = lessThanEqual(c, vec3(0.040449999272823333740234375));
+    vec3 lo = c / vec3(12.9200000762939453125);
+    vec3 hi = pow((c + vec3(0.054999999701976776123046875)) / vec3(1.05499994754791259765625), vec3(2.400000095367431640625));
+    return mix(hi, lo, vec3(cutoff));
+}
+
+void main()
+{
+    float t = _61._animPad.x * 0.00999999977648258209228515625;
+    float nf = max(1.0, _61._animPad.y);
+    float animPos = mod(t, nf);
+    int frame = int(animPos);
+    int nextFr = int(mod(float(frame) + 1.0, nf));
+    float blend = fract(animPos);
+    uint _106 = _61.packed_indices[0].x & 4095u;
+    uint _120 = (_61.packed_indices[0].x >> uint(12)) & 255u;
+    vec4 diffuseA = texture(sampler2DArray(wired_bindless_image_arrays[_106], wired_bindless_samplers[_120]), vec3(frag_tex_coord0, float(frame)));
+    uint _140 = _61.packed_indices[0].x & 4095u;
+    uint _147 = (_61.packed_indices[0].x >> uint(12)) & 255u;
+    vec4 diffuseB = texture(sampler2DArray(wired_bindless_image_arrays[_140], wired_bindless_samplers[_147]), vec3(frag_tex_coord0, float(nextFr)));
+    vec3 param = diffuseA.xyz;
+    vec3 _161 = sRGBToLinear(param);
+    diffuseA.x = _161.x;
+    diffuseA.y = _161.y;
+    diffuseA.z = _161.z;
+    vec3 param_1 = diffuseB.xyz;
+    vec3 _172 = sRGBToLinear(param_1);
+    diffuseB.x = _172.x;
+    diffuseB.y = _172.y;
+    diffuseB.z = _172.z;
+    vec4 diffuse = mix(diffuseA, diffuseB, vec4(blend));
+    uint _193 = _61.packed_indices[0].z & 4095u;
+    uint _201 = (_61.packed_indices[0].z >> uint(12)) & 255u;
+    vec4 t0 = texture(sampler2D(wired_bindless_images[_193], wired_bindless_samplers[_201]), frag_tex_coord1);
+    vec3 param_2 = t0.xyz;
+    vec3 _212 = sRGBToLinear(param_2);
+    t0.x = _212.x;
+    t0.y = _212.y;
+    t0.z = _212.z;
+    uint _223 = _61.packed_indices[0].w & 4095u;
+    uint _230 = (_61.packed_indices[0].w >> uint(12)) & 255u;
+    vec4 t1 = texture(sampler2D(wired_bindless_images[_223], wired_bindless_samplers[_230]), frag_tex_coord1);
+    vec3 param_3 = t1.xyz;
+    vec3 _239 = sRGBToLinear(param_3);
+    t1.x = _239.x;
+    t1.y = _239.y;
+    t1.z = _239.z;
+    uint _250 = _61.packed_indices[1].x & 4095u;
+    uint _257 = (_61.packed_indices[1].x >> uint(12)) & 255u;
+    vec4 t2 = texture(sampler2D(wired_bindless_images[_250], wired_bindless_samplers[_257]), frag_tex_coord1);
+    vec3 param_4 = t2.xyz;
+    vec3 _266 = sRGBToLinear(param_4);
+    t2.x = _266.x;
+    t2.y = _266.y;
+    t2.z = _266.z;
+    uint _277 = _61.packed_indices[1].y & 4095u;
+    uint _284 = (_61.packed_indices[1].y >> uint(12)) & 255u;
+    vec4 t3 = texture(sampler2D(wired_bindless_images[_277], wired_bindless_samplers[_284]), frag_tex_coord1);
+    vec3 param_5 = t3.xyz;
+    vec3 _293 = sRGBToLinear(param_5);
+    t3.x = _293.x;
+    t3.y = _293.y;
+    t3.z = _293.z;
+    vec4 lm = (((t0 * _61.q1StyleIntensities.x) + (t1 * _61.q1StyleIntensities.y)) + (t2 * _61.q1StyleIntensities.z)) + (t3 * _61.q1StyleIntensities.w);
+    out_color = diffuse * lm;
+}
+

@@ -1,0 +1,116 @@
+#version 460
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(binding = 0, std430) readonly buffer Histogram
+{
+    uint bins[256];
+} _40;
+
+layout(binding = 1, std430) buffer Accumulator
+{
+    float accum;
+} _60;
+
+layout(binding = 2, std430) buffer ExposureBlock
+{
+    float exposure_bias;
+    float key;
+    float pctLow;
+    float pctHigh;
+    float rateUp;
+    float rateDown;
+    float minExp;
+    float maxExp;
+    int autoEnabled;
+    float brightness;
+    float sunScreenX;
+    float sunScreenY;
+    float sunrayIntensity;
+    float sunrayDecay;
+} _68;
+
+layout(std140, binding = 3) uniform Push
+{
+    float dt;
+} _195;
+
+float binEV(uint i)
+{
+    return (-10.0) + ((float(i) / 255.0) * 12.0);
+}
+
+void main()
+{
+    float total = 0.0;
+    for (uint i = 1u; i < 256u; i++)
+    {
+        total += float(_40.bins[i]);
+    }
+    float target;
+    if (total <= 0.0)
+    {
+        target = _60.accum;
+    }
+    else
+    {
+        float loW = _68.pctLow * total;
+        float hiW = (1.0 - _68.pctHigh) * total;
+        if (hiW <= loW)
+        {
+            loW = 0.0;
+            hiW = total;
+        }
+        float cum = 0.0;
+        float wSum = 0.0;
+        float evSum = 0.0;
+        for (uint i_1 = 1u; i_1 < 256u; i_1++)
+        {
+            float w = float(_40.bins[i_1]);
+            if (w <= 0.0)
+            {
+                continue;
+            }
+            float lo = cum;
+            float hi = cum + w;
+            cum = hi;
+            float a = max(lo, loW);
+            float b = min(hi, hiW);
+            if (b > a)
+            {
+                float clipped = b - a;
+                uint param = i_1;
+                evSum += (binEV(param) * clipped);
+                wSum += clipped;
+            }
+        }
+        float _148;
+        if (wSum > 0.0)
+        {
+            _148 = evSum / wSum;
+        }
+        else
+        {
+            uint param_1 = 128u;
+            _148 = binEV(param_1);
+        }
+        float avgEV = _148;
+        float avgLuma = exp2(avgEV);
+        target = _68.key / max(avgLuma, 9.9999997473787516355514526367188e-05);
+        target = clamp(target, _68.minExp, _68.maxExp);
+    }
+    float _181;
+    if (target > _60.accum)
+    {
+        _181 = _68.rateUp;
+    }
+    else
+    {
+        _181 = _68.rateDown;
+    }
+    float rate = _181;
+    float a_1 = 1.0 - exp((-max(_195.dt, 0.0)) * rate);
+    float smoothed = mix(_60.accum, target, a_1);
+    _60.accum = smoothed;
+    _68.exposure_bias = smoothed * _68.brightness;
+}
+

@@ -1,0 +1,232 @@
+#version 460
+
+layout(constant_id = 28) const float lottes_contrast = 1.60000002384185791015625;
+layout(constant_id = 29) const float lottes_shoulder = 0.9769999980926513671875;
+layout(constant_id = 32) const float lottes_hdr_max = 8.0;
+layout(constant_id = 30) const float lottes_mid_in = 0.180000007152557373046875;
+layout(constant_id = 31) const float lottes_mid_out = 0.2669999897480010986328125;
+layout(constant_id = 18) const float tonemap_exposure = 1.0;
+layout(constant_id = 17) const int tonemap_mode = 1;
+const bool _414 = (tonemap_mode == 1);
+layout(constant_id = 12) const int hdr_mode = 0;
+const bool _418 = (hdr_mode == 1);
+layout(constant_id = 13) const float hdr_peak_norm = 10.0;
+const bool _435 = (tonemap_mode == 2);
+const bool _444 = (tonemap_mode == 3);
+const bool _453 = (tonemap_mode == 4);
+layout(constant_id = 24) const float chromatic_strength = 0.0;
+layout(constant_id = 2) const float saturation = 1.0;
+
+layout(binding = 0, std140) uniform ExposureBlock
+{
+    float exposure_bias;
+    float key;
+    float pctLow;
+    float pctHigh;
+    float rateUp;
+    float rateDown;
+    float minExp;
+    float maxExp;
+    int autoEnabled;
+    float brightness;
+    float sunScreenX;
+    float sunScreenY;
+    float sunrayIntensity;
+    float sunrayDecay;
+} eb;
+
+layout(binding = 0) uniform sampler2D texture0;
+
+layout(location = 0) in vec2 frag_tex_coord;
+layout(location = 0) out vec4 out_color;
+
+vec3 sampleChromatic(vec2 uv)
+{
+    vec2 dir = uv - vec2(0.5);
+    float radial = length(dir);
+    vec2 offset = dir * ((chromatic_strength * radial) * 0.014999999664723873138427734375);
+    float r = texture(texture0, clamp(uv + offset, vec2(0.0), vec2(1.0))).x;
+    float g = texture(texture0, uv).y;
+    float b = texture(texture0, clamp(uv - offset, vec2(0.0), vec2(1.0))).z;
+    return vec3(r, g, b);
+}
+
+vec3 tonemapPBRNeutralHDR(inout vec3 color, float peak)
+{
+    float startCompression = 0.7599999904632568359375 * peak;
+    float x = min(color.x, min(color.y, color.z));
+    float _340;
+    if (x < 0.07999999821186065673828125)
+    {
+        _340 = x - ((6.25 * x) * x);
+    }
+    else
+    {
+        _340 = 0.039999999105930328369140625;
+    }
+    float offset = _340;
+    color -= vec3(offset);
+    float pk = max(color.x, max(color.y, color.z));
+    if (pk < startCompression)
+    {
+        return color;
+    }
+    float d = peak - startCompression;
+    float newPeak = peak - ((d * d) / ((pk + d) - startCompression));
+    color *= (newPeak / pk);
+    float g = 1.0 - (1.0 / ((0.1500000059604644775390625 * (pk - newPeak)) + 1.0));
+    return mix(color, vec3(1.0) * newPeak, vec3(g));
+}
+
+vec3 tonemapPBRNeutral(inout vec3 color)
+{
+    float x = min(color.x, min(color.y, color.z));
+    float _58;
+    if (x < 0.07999999821186065673828125)
+    {
+        _58 = x - ((6.25 * x) * x);
+    }
+    else
+    {
+        _58 = 0.039999999105930328369140625;
+    }
+    float offset = _58;
+    color -= vec3(offset);
+    float peak = max(color.x, max(color.y, color.z));
+    if (peak < 0.7599999904632568359375)
+    {
+        return color;
+    }
+    float newPeak = 1.0 - (0.057599999010562896728515625 / ((peak + 0.23999999463558197021484375) - 0.7599999904632568359375));
+    color *= (newPeak / peak);
+    float g = 1.0 - (1.0 / ((0.1500000059604644775390625 * (peak - newPeak)) + 1.0));
+    return mix(color, vec3(1.0) * newPeak, vec3(g));
+}
+
+vec3 agxSigmoid(vec3 x)
+{
+    vec3 x2 = x * x;
+    vec3 x4 = x2 * x2;
+    return (((((((x4 * 15.5) * x2) - ((x4 * 40.1399993896484375) * x)) + (x4 * 31.95999908447265625)) - ((x2 * 6.868000030517578125) * x)) + (x2 * 0.4298000037670135498046875)) + (x * 0.119099996984004974365234375)) - vec3(0.002319999970495700836181640625);
+}
+
+vec3 tonemapAgX(inout vec3 color)
+{
+    color = mat3(vec3(0.856627166271209716796875, 0.095121242105960845947265625, 0.048251606523990631103515625), vec3(0.13731896877288818359375, 0.761241972446441650390625, 0.101439036428928375244140625), vec3(0.1118982136249542236328125, 0.076799415051937103271484375, 0.811302363872528076171875)) * color;
+    color = log2(max(color, vec3(1.0000000133514319600180897396058e-10)));
+    color = clamp((color - vec3(-12.47393035888671875)) / vec3(16.4999980926513671875), vec3(0.0), vec3(1.0));
+    vec3 param = color;
+    color = agxSigmoid(param);
+    color = mat3(vec3(1.12710058689117431640625, -0.1106066405773162841796875, -0.016493938863277435302734375), vec3(-0.14132976531982421875, 1.15782368183135986328125, -0.016493938863277435302734375), vec3(-0.14132976531982421875, -0.1106066405773162841796875, 1.251936435699462890625)) * color;
+    return max(color, vec3(0.0));
+}
+
+vec3 tonemapLottes(vec3 color)
+{
+    vec3 a;
+    a.x = lottes_contrast;
+    a.y = lottes_contrast;
+    a.z = lottes_contrast;
+    vec3 d;
+    d.x = lottes_shoulder;
+    d.y = lottes_shoulder;
+    d.z = lottes_shoulder;
+    vec3 hdrMax;
+    hdrMax.x = lottes_hdr_max;
+    hdrMax.y = lottes_hdr_max;
+    hdrMax.z = lottes_hdr_max;
+    vec3 midIn;
+    midIn.x = lottes_mid_in;
+    midIn.y = lottes_mid_in;
+    midIn.z = lottes_mid_in;
+    vec3 midOut;
+    midOut.x = lottes_mid_out;
+    midOut.y = lottes_mid_out;
+    midOut.z = lottes_mid_out;
+    vec3 b = ((-pow(midIn, a)) + (pow(hdrMax, a) * midOut)) / ((pow(hdrMax, a * d) - pow(midIn, a * d)) * midOut);
+    vec3 c = ((pow(hdrMax, a * d) * pow(midIn, a)) - ((pow(hdrMax, a) * pow(midIn, a * d)) * midOut)) / ((pow(hdrMax, a * d) - pow(midIn, a * d)) * midOut);
+    return pow(color, a) / ((pow(color, a * d) * b) + c);
+}
+
+vec3 tonemapReinhard(vec3 color)
+{
+    return color / (vec3(1.0) + color);
+}
+
+vec3 applyTonemap(inout vec3 color)
+{
+    color *= tonemap_exposure;
+    if (_414)
+    {
+        vec3 _419;
+        if (_418)
+        {
+            vec3 param = color;
+            float param_1 = hdr_peak_norm;
+            vec3 _426 = tonemapPBRNeutralHDR(param, param_1);
+            _419 = _426;
+        }
+        else
+        {
+            vec3 param_2 = color;
+            vec3 _430 = tonemapPBRNeutral(param_2);
+            _419 = _430;
+        }
+        return _419;
+    }
+    else
+    {
+        if (_435)
+        {
+            vec3 param_3 = color;
+            vec3 _440 = tonemapAgX(param_3);
+            return _440;
+        }
+        else
+        {
+            if (_444)
+            {
+                vec3 param_4 = color;
+                return tonemapLottes(param_4);
+            }
+            else
+            {
+                if (_453)
+                {
+                    vec3 param_5 = color;
+                    return tonemapReinhard(param_5);
+                }
+                else
+                {
+                    return color;
+                }
+            }
+        }
+    }
+}
+
+void main()
+{
+    vec3 _518;
+    if (chromatic_strength > 0.0)
+    {
+        vec2 param = frag_tex_coord;
+        _518 = sampleChromatic(param);
+    }
+    else
+    {
+        _518 = texture(texture0, frag_tex_coord).xyz;
+    }
+    vec3 base = _518;
+    base *= eb.exposure_bias;
+    vec3 param_1 = base;
+    vec3 _543 = applyTonemap(param_1);
+    base = _543;
+    if (saturation != 1.0)
+    {
+        vec3 luma = vec3(dot(base, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875)));
+        base = mix(luma, base, vec3(saturation));
+    }
+    out_color = vec4(base, 1.0);
+}
+

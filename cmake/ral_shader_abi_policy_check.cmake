@@ -4,9 +4,9 @@
 if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
-file(READ "${ROOT}/code/renderer/ral/ral_shader_abi.h" HEADER)
-file(READ "${ROOT}/code/renderer/ral/ral_shader_abi.c" CORE)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_pipeline.c" VULKAN)
+file(READ "${ROOT}/code/render/ral/core/ral_shader_abi.h" HEADER)
+file(READ "${ROOT}/code/render/ral/core/ral_shader_abi.c" CORE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_pipeline.c" VULKAN)
 file(READ "${ROOT}/tests/ral_shader_abi_test.c" HOST)
 file(READ "${ROOT}/tests/ral_webgpu_shader_abi_test.c" WEBGPU_HOST)
 

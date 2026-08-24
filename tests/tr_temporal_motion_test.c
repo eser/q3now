@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
-#include "../code/renderervk/tr_temporal_motion.h"
+#include "../code/render/ral/backends/vulkan/renderer/tr_temporal_motion.h"
 
 #include <float.h>
 #include <math.h>
@@ -130,6 +130,19 @@ static int TestClassification( void ) {
 
 	facts = WritableFacts( TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC );
 	facts.alphaTested = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_WRITE_VALID );
+	facts.deferAlphaTested = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_DEFER_ATEST );
+	facts.deferAlphaTested = qfalse;
+	facts.geometry = TEMPORAL_MOTION_GEOMETRY_MOD_BRUSH_RIGID;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_WRITE_VALID );
+	facts.geometry = TEMPORAL_MOTION_GEOMETRY_UNSUPPORTED;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_DEFER_ATEST );
+	facts = WritableFacts( TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC );
+	facts.alphaTested = facts.vertexDeformed = qtrue;
+	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_DEFER_ATEST );
+	facts = WritableFacts( TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC );
+	facts.alphaTested = facts.sky = qtrue;
 	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_DEFER_ATEST );
 
 #define EXPECT_PRESERVE(field) do { \
@@ -161,7 +174,7 @@ static int TestClassification( void ) {
 	facts.alphaTested = qtrue;
 	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_PRESERVE );
 
-	// Blending takes precedence over the ATEST-only deferred lane.
+	// Blending takes precedence over ATEST admission.
 	facts = WritableFacts( TEMPORAL_MOTION_GEOMETRY_WORLD_STATIC );
 	facts.alphaTested = facts.blended = qtrue;
 	CHECK( R_TemporalMotionClassify( &facts ) == TEMPORAL_MOTION_PRESERVE );

@@ -1,0 +1,23 @@
+{
+  "width": 1280,
+  "height": 720,
+  "tolerance_basis": "Initial fail-closed OpenGL 4.6 versus Vulkan bring-up bounds. They permit backend raster and shader variation while rejecting blank, missing-cohort, stale, grossly divergent or fallback evidence; capable-host evidence must tighten these values before TASK-213.5 closes.",
+  "scenes": {
+    "arena1": {
+      "camera": [1052, 1432, 50, 135],
+      "regions": [
+        {"name": "sky", "rect": [0.00, 0.10, 1.00, 0.36], "mae": 0.20, "p90": 0.55, "changed64": 0.42},
+        {"name": "world", "rect": [0.06, 0.30, 0.94, 0.78], "mae": 0.20, "p90": 0.55, "changed64": 0.42},
+        {"name": "wired-ui", "rect": [0.00, 0.78, 1.00, 1.00], "mae": 0.22, "p90": 0.60, "changed64": 0.46}
+      ]
+    },
+    "arena17": {
+      "camera": [488, 1096, 378, -90],
+      "regions": [
+        {"name": "sky", "rect": [0.00, 0.10, 1.00, 0.39], "mae": 0.20, "p90": 0.55, "changed64": 0.42},
+        {"name": "world-and-models", "rect": [0.06, 0.38, 0.94, 0.80], "mae": 0.20, "p90": 0.55, "changed64": 0.42},
+        {"name": "wired-ui", "rect": [0.00, 0.80, 1.00, 1.00], "mae": 0.22, "p90": 0.60, "changed64": 0.46}
+      ]
+    }
+  }
+}

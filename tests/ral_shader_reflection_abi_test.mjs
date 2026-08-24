@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 
 import assert from 'node:assert/strict';
-import { normalizeSpirvReflection } from '../code/renderervk/shaders/shader_reflection_abi.mjs';
+import { normalizeSpirvReflection } from '../code/render/ral/backends/vulkan/renderer/shaders/shader_reflection_abi.mjs';
 
 const vertex = {
 	entryPoints: [{ name: 'main', mode: 'vert' }],

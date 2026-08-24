@@ -1,0 +1,19 @@
+#version 460
+
+layout(binding = 0, std140) uniform CascadeMVP
+{
+    mat4 cascadeMVP;
+} _16;
+
+layout(binding = 0, std430) readonly buffer EntityMatrices
+{
+    mat4 matrices[];
+} _23;
+
+layout(location = 0) in vec3 in_position;
+
+void main()
+{
+    gl_Position = (_16.cascadeMVP * _23.matrices[gl_InstanceIndex]) * vec4(in_position, 1.0);
+}
+

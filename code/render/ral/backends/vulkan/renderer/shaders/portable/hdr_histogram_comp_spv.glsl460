@@ -1,0 +1,57 @@
+#version 460
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(binding = 0, std430) buffer Histogram
+{
+    uint bins[256];
+} _136;
+
+layout(std140, binding = 3) uniform Dims
+{
+    uvec2 _imageSize;
+} _22;
+
+layout(binding = 0) uniform texture2D colorImage;
+layout(binding = 0) uniform sampler colorSampler;
+
+void main()
+{
+    uvec2 coord = gl_GlobalInvocationID.xy;
+    bool _28 = coord.x >= _22._imageSize.x;
+    bool _38;
+    if (!_28)
+    {
+        _38 = coord.y >= _22._imageSize.y;
+    }
+    else
+    {
+        _38 = _28;
+    }
+    if (_38)
+    {
+        return;
+    }
+    vec3 hdr = texelFetch(sampler2D(colorImage, colorSampler), ivec2(coord), 0).xyz;
+    float luma = dot(hdr, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+    vec2 uv = (vec2(coord) + vec2(0.5)) / vec2(_22._imageSize);
+    vec2 fromC = uv - vec2(0.5);
+    float dist2 = dot(fromC, fromC);
+    float weight = clamp(1.0 - (2.0 * dist2), 0.0, 1.0);
+    uint bin;
+    if (luma <= 9.9999997473787516355514526367188e-06)
+    {
+        bin = 0u;
+    }
+    else
+    {
+        float ev = log2(luma);
+        float norm = clamp((ev - (-10.0)) / 12.0, 0.0, 1.0);
+        bin = uint((norm * 255.0) + 0.5);
+    }
+    uint fixedWeight = uint((weight * 1024.0) + 0.5);
+    if (fixedWeight > 0u)
+    {
+        uint _141 = atomicAdd(_136.bins[bin], fixedWeight);
+    }
+}
+

@@ -1,0 +1,630 @@
+enable wgpu_binding_array;
+
+struct UBO {
+    eyePos: vec4<f32>,
+    lightPos: vec4<f32>,
+    lightColor: vec4<f32>,
+    lightVector: vec4<f32>,
+    fogDistanceVector: vec4<f32>,
+    fogDepthVector: vec4<f32>,
+    fogEyeT: vec4<f32>,
+    fogColor: vec4<f32>,
+    _pad_to_cascadeMVP: array<vec4<f32>, 1>,
+    cascadeMVP: array<mat4x4<f32>, 4>,
+    cascadeSplits: vec4<f32>,
+    _pad_to_packed_indices: array<vec4<f32>, 8>,
+    packed_indices: array<vec4<u32>, 3>,
+    worldLightParams: vec4<f32>,
+    advancedFogColorDensity: vec4<f32>,
+    advancedFogTypeFarEnabled: vec4<f32>,
+}
+
+@id(4) override tex_domain: i32 = 0i;
+@id(26) override lightmap_slot: i32 = 0i;
+@id(29) override shadow_bias: f32 = 0.005f;
+@id(28) override shadow_pcf: i32 = 5i;
+override override_type_3_: bool = (shadow_pcf <= 1i);
+override override_type_3_1: bool = (shadow_pcf <= 5i);
+override override_type_3_2: bool = (lightmap_slot == 1i);
+override override_type_3_3: bool = (lightmap_slot == 2i);
+@id(8) override identity_color: f32 = 1f;
+@id(9) override identity_alpha: f32 = 1f;
+@id(6) override tex_mode: i32 = 0i;
+override override_type_3_4: bool = (tex_mode == 1i);
+override override_type_3_5: bool = (tex_mode == 2i);
+@id(10) override acff: i32 = 0i;
+override override_type_3_6: bool = (acff == 1i);
+override override_type_3_7: bool = (acff == 2i);
+override override_type_3_8: bool = (acff == 3i);
+override override_type_3_9: bool = (acff == 1i);
+override override_type_3_10: bool = (acff == 2i);
+override override_type_3_11: bool = (acff == 3i);
+@id(7) override discard_mode: i32 = 0i;
+override override_type_3_12: bool = (discard_mode == 1i);
+override override_type_3_13: bool = (discard_mode == 2i);
+@id(3) override alpha_to_coverage: i32 = 0i;
+
+@group(0) @binding(0)
+var<uniform> unnamed: UBO;
+var<private> gl_FragCoord_1: vec4<f32>;
+@group(1) @binding(0)
+var wired_bindless_images: binding_array<texture_2d<f32>>;
+@group(1) @binding(1)
+var wired_bindless_samplers: binding_array<sampler>;
+@group(2) @binding(0)
+var shadowMap: texture_2d_array<f32>;
+@group(2) @binding(32)
+var shadowMap_sampler: sampler;
+var<private> shadowData_1: vec4<f32>;
+var<private> frag_tex_coord0_1: vec2<f32>;
+var<private> frag_tex_coord1_1: vec2<f32>;
+var<private> fog_tex_coord_1: vec2<f32>;
+var<private> out_color: vec4<f32>;
+
+fn wired_advanced_fog_enabled_u0028_() -> bool {
+    var fogType: i32;
+
+    let _e77 = unnamed.advancedFogTypeFarEnabled[0u];
+    fogType = i32((_e77 + 0.5f));
+    let _e82 = unnamed.advancedFogTypeFarEnabled[2u];
+    let _e84 = fogType;
+    let _e87 = fogType;
+    return (((_e82 > 0.5f) && (_e84 >= 1i)) && (_e87 <= 3i));
+}
+
+fn wired_advanced_fog_amount_u0028_() -> f32 {
+    var viewDepth: f32;
+    var fogType_1: i32;
+    var opticalDepth: f32;
+
+    let _e77 = wired_advanced_fog_enabled_u0028_();
+    if !(_e77) {
+        return 0f;
+    }
+    let _e80 = gl_FragCoord_1[3u];
+    viewDepth = (1f / max(_e80, 0.000001f));
+    let _e85 = unnamed.advancedFogTypeFarEnabled[0u];
+    fogType_1 = i32((_e85 + 0.5f));
+    let _e88 = fogType_1;
+    if (_e88 == 1i) {
+        let _e92 = unnamed.advancedFogTypeFarEnabled[1u];
+        if (_e92 <= 0f) {
+            return 0f;
+        }
+        let _e94 = viewDepth;
+        let _e97 = unnamed.advancedFogTypeFarEnabled[1u];
+        return clamp((_e94 / _e97), 0f, 1f);
+    }
+    let _e102 = unnamed.advancedFogColorDensity[3u];
+    let _e104 = viewDepth;
+    opticalDepth = (max(_e102, 0f) * _e104);
+    let _e106 = fogType_1;
+    if (_e106 == 2i) {
+        let _e108 = opticalDepth;
+        return clamp((1f - exp(-(_e108))), 0f, 1f);
+    }
+    let _e113 = opticalDepth;
+    let _e114 = opticalDepth;
+    return clamp((1f - exp(-((_e113 * _e114)))), 0f, 1f);
+}
+
+fn sampleCascade_u0028_i1_u003b_vf3_u003b(c: ptr<function, i32>, worldPos: ptr<function, vec3<f32>>) -> f32 {
+    var sc4_: vec4<f32>;
+    var sc: vec3<f32>;
+    var layer: f32;
+    var texelSize: vec2<f32>;
+    var currentDepth: f32;
+    var shadow: f32;
+    var x: i32;
+    var y: i32;
+    var phi_304_: bool;
+    var phi_311_: bool;
+    var phi_318_: bool;
+    var phi_325_: bool;
+
+    let _e84 = (*c);
+    let _e87 = unnamed.cascadeMVP[_e84];
+    let _e88 = (*worldPos);
+    sc4_ = (_e87 * vec4<f32>(_e88.x, _e88.y, _e88.z, 1f));
+    let _e94 = sc4_;
+    let _e97 = sc4_[3u];
+    sc = (_e94.xyz / vec3(_e97));
+    let _e100 = sc;
+    let _e104 = ((_e100.xy * 0.5f) + vec2(0.5f));
+    sc[0u] = _e104.x;
+    sc[1u] = _e104.y;
+    let _e110 = sc[0u];
+    let _e111 = (_e110 < 0f);
+    phi_304_ = _e111;
+    if !(_e111) {
+        let _e114 = sc[0u];
+        phi_304_ = (_e114 > 1f);
+    }
+    let _e117 = phi_304_;
+    phi_311_ = _e117;
+    if !(_e117) {
+        let _e120 = sc[1u];
+        phi_311_ = (_e120 < 0f);
+    }
+    let _e123 = phi_311_;
+    phi_318_ = _e123;
+    if !(_e123) {
+        let _e126 = sc[1u];
+        phi_318_ = (_e126 > 1f);
+    }
+    let _e129 = phi_318_;
+    phi_325_ = _e129;
+    if !(_e129) {
+        let _e132 = sc[2u];
+        phi_325_ = (_e132 > 1f);
+    }
+    let _e135 = phi_325_;
+    if _e135 {
+        return 1f;
+    }
+    let _e136 = (*c);
+    layer = f32(_e136);
+    let _e138 = textureDimensions(shadowMap, 0i);
+    texelSize = (vec2(1f) / vec2<f32>(vec2<i32>(_e138).xy));
+    let _e145 = sc[2u];
+    currentDepth = (_e145 - shadow_bias);
+    shadow = 0f;
+    if override_type_3_ {
+        let _e147 = currentDepth;
+        let _e148 = sc;
+        let _e149 = _e148.xy;
+        let _e150 = layer;
+        let _e153 = vec3<f32>(_e149.x, _e149.y, _e150);
+        let _e159 = textureSample(shadowMap, shadowMap_sampler, vec2<f32>(_e153.x, _e153.y), i32(_e153.z));
+        shadow = step(_e147, _e159.x);
+    } else {
+        if override_type_3_1 {
+            let _e162 = currentDepth;
+            let _e163 = sc;
+            let _e164 = _e163.xy;
+            let _e165 = layer;
+            let _e168 = vec3<f32>(_e164.x, _e164.y, _e165);
+            let _e174 = textureSample(shadowMap, shadowMap_sampler, vec2<f32>(_e168.x, _e168.y), i32(_e168.z));
+            let _e177 = shadow;
+            shadow = (_e177 + step(_e162, _e174.x));
+            let _e179 = currentDepth;
+            let _e180 = sc;
+            let _e183 = texelSize[0u];
+            let _e185 = (_e180.xy + vec2<f32>(_e183, 0f));
+            let _e186 = layer;
+            let _e189 = vec3<f32>(_e185.x, _e185.y, _e186);
+            let _e195 = textureSample(shadowMap, shadowMap_sampler, vec2<f32>(_e189.x, _e189.y), i32(_e189.z));
+            let _e198 = shadow;
+            shadow = (_e198 + step(_e179, _e195.x));
+            let _e200 = currentDepth;
+            let _e201 = sc;
+            let _e204 = texelSize[0u];
+            let _e206 = (_e201.xy - vec2<f32>(_e204, 0f));
+            let _e207 = layer;
+            let _e210 = vec3<f32>(_e206.x, _e206.y, _e207);
+            let _e216 = textureSample(shadowMap, shadowMap_sampler, vec2<f32>(_e210.x, _e210.y), i32(_e210.z));
+            let _e219 = shadow;
+            shadow = (_e219 + step(_e200, _e216.x));
+            let _e221 = currentDepth;
+            let _e222 = sc;
+            let _e225 = texelSize[1u];
+            let _e227 = (_e222.xy + vec2<f32>(0f, _e225));
+            let _e228 = layer;
+            let _e231 = vec3<f32>(_e227.x, _e227.y, _e228);
+            let _e237 = textureSample(shadowMap, shadowMap_sampler, vec2<f32>(_e231.x, _e231.y), i32(_e231.z));
+            let _e240 = shadow;
+            shadow = (_e240 + step(_e221, _e237.x));
+            let _e242 = currentDepth;
+            let _e243 = sc;
+            let _e246 = texelSize[1u];
+            let _e248 = (_e243.xy - vec2<f32>(0f, _e246));
+            let _e249 = layer;
+            let _e252 = vec3<f32>(_e248.x, _e248.y, _e249);
+            let _e258 = textureSample(shadowMap, shadowMap_sampler, vec2<f32>(_e252.x, _e252.y), i32(_e252.z));
+            let _e261 = shadow;
+            shadow = (_e261 + step(_e242, _e258.x));
+            let _e263 = shadow;
+            shadow = (_e263 / 5f);
+        } else {
+            x = -1i;
+            loop {
+                let _e265 = x;
+                if (_e265 <= 1i) {
+                    y = -1i;
+                    loop {
+                        let _e267 = y;
+                        if (_e267 <= 1i) {
+                            let _e269 = currentDepth;
+                            let _e270 = sc;
+                            let _e272 = x;
+                            let _e274 = y;
+                            let _e277 = texelSize;
+                            let _e279 = (_e270.xy + (vec2<f32>(f32(_e272), f32(_e274)) * _e277));
+                            let _e280 = layer;
+                            let _e283 = vec3<f32>(_e279.x, _e279.y, _e280);
+                            let _e289 = textureSample(shadowMap, shadowMap_sampler, vec2<f32>(_e283.x, _e283.y), i32(_e283.z));
+                            let _e292 = shadow;
+                            shadow = (_e292 + step(_e269, _e289.x));
+                            continue;
+                        } else {
+                            break;
+                        }
+                        continuing {
+                            let _e294 = y;
+                            y = (_e294 + 1i);
+                        }
+                    }
+                    continue;
+                } else {
+                    break;
+                }
+                continuing {
+                    let _e296 = x;
+                    x = (_e296 + 1i);
+                }
+            }
+            let _e298 = shadow;
+            shadow = (_e298 / 9f);
+        }
+    }
+    let _e300 = shadow;
+    return _e300;
+}
+
+fn sampleShadow_u0028_vf3_u003b_f1_u003b_i1_u003b(worldPos_1: ptr<function, vec3<f32>>, viewDepth_1: ptr<function, f32>, outCascade: ptr<function, i32>) -> f32 {
+    var cmp: vec4<f32>;
+    var cascade: i32;
+    var prevSplit: f32;
+    var local: f32;
+    var farSplit: f32;
+    var blendRange: f32;
+    var blendT: f32;
+    var s0_: f32;
+    var param: i32;
+    var param_1: vec3<f32>;
+    var s1_: f32;
+    var param_2: i32;
+    var param_3: vec3<f32>;
+
+    let _e91 = unnamed.cascadeSplits;
+    let _e92 = (*viewDepth_1);
+    cmp = step(_e91, vec4(_e92));
+    let _e96 = cmp[0u];
+    let _e98 = cmp[1u];
+    let _e101 = cmp[2u];
+    let _e104 = cmp[3u];
+    cascade = min(i32((((_e96 + _e98) + _e101) + _e104)), 3i);
+    let _e108 = cascade;
+    (*outCascade) = _e108;
+    let _e109 = cascade;
+    if (_e109 == 0i) {
+        local = 0f;
+    } else {
+        let _e111 = cascade;
+        let _e116 = unnamed.cascadeSplits[max((_e111 - 1i), 0i)];
+        local = _e116;
+    }
+    let _e117 = local;
+    prevSplit = _e117;
+    let _e118 = cascade;
+    let _e121 = unnamed.cascadeSplits[_e118];
+    farSplit = _e121;
+    let _e122 = farSplit;
+    let _e123 = prevSplit;
+    blendRange = max((0.1f * (_e122 - _e123)), 1f);
+    let _e127 = farSplit;
+    let _e128 = (*viewDepth_1);
+    let _e130 = blendRange;
+    blendT = clamp(((_e127 - _e128) / _e130), 0f, 1f);
+    let _e133 = cascade;
+    param = _e133;
+    let _e134 = (*worldPos_1);
+    param_1 = _e134;
+    let _e135 = sampleCascade_u0028_i1_u003b_vf3_u003b((&param), (&param_1));
+    s0_ = _e135;
+    let _e136 = cascade;
+    param_2 = min((_e136 + 1i), 3i);
+    let _e139 = (*worldPos_1);
+    param_3 = _e139;
+    let _e140 = sampleCascade_u0028_i1_u003b_vf3_u003b((&param_2), (&param_3));
+    s1_ = _e140;
+    let _e141 = s1_;
+    let _e142 = s0_;
+    let _e143 = blendT;
+    return mix(_e141, _e142, _e143);
+}
+
+fn wired_apply_sun_shadow_u0028_vf3_u003b_vf2_u003b(rgb: ptr<function, vec3<f32>>, lm_uv: ptr<function, vec2<f32>>) -> vec3<f32> {
+    var sun_mask: f32;
+    var shadow_1: f32;
+    var ignoredCascade: i32;
+    var param_4: vec3<f32>;
+    var param_5: f32;
+    var param_6: i32;
+
+    let _e85 = unnamed.packed_indices[1i][3u];
+    let _e91 = unnamed.packed_indices[1i][3u];
+    let _e96 = (*lm_uv);
+    let _e97 = textureSample(wired_bindless_images[(_e85 & 4095u)], wired_bindless_samplers[((_e91 >> bitcast<u32>(12i)) & 255u)], _e96);
+    sun_mask = _e97.x;
+    let _e99 = sun_mask;
+    if (_e99 > 0.001f) {
+        let _e101 = shadowData_1;
+        param_4 = _e101.xyz;
+        let _e104 = shadowData_1[3u];
+        param_5 = _e104;
+        let _e105 = sampleShadow_u0028_vf3_u003b_f1_u003b_i1_u003b((&param_4), (&param_5), (&param_6));
+        let _e106 = param_6;
+        ignoredCascade = _e106;
+        shadow_1 = _e105;
+        let _e107 = shadow_1;
+        let _e108 = sun_mask;
+        let _e110 = (*rgb);
+        (*rgb) = (_e110 * mix(1f, _e107, _e108));
+    }
+    let _e112 = (*rgb);
+    return _e112;
+}
+
+fn wired_apply_sun_shadow_operand_u0028_vf3_u003b(rgb_1: ptr<function, vec3<f32>>) -> vec3<f32> {
+    var param_7: vec3<f32>;
+    var param_8: vec2<f32>;
+    var param_9: vec3<f32>;
+    var param_10: vec2<f32>;
+
+    if override_type_3_2 {
+        let _e79 = (*rgb_1);
+        param_7 = _e79;
+        let _e80 = frag_tex_coord0_1;
+        param_8 = _e80;
+        let _e81 = wired_apply_sun_shadow_u0028_vf3_u003b_vf2_u003b((&param_7), (&param_8));
+        return _e81;
+    }
+    if override_type_3_3 {
+        let _e82 = (*rgb_1);
+        param_9 = _e82;
+        let _e83 = frag_tex_coord1_1;
+        param_10 = _e83;
+        let _e84 = wired_apply_sun_shadow_u0028_vf3_u003b_vf2_u003b((&param_9), (&param_10));
+        return _e84;
+    }
+    let _e85 = (*rgb_1);
+    return _e85;
+}
+
+fn sRGBToLinear_u0028_vf3_u003b(c_1: ptr<function, vec3<f32>>) -> vec3<f32> {
+    var cutoff: vec3<bool>;
+    var lo: vec3<f32>;
+    var hi: vec3<f32>;
+
+    let _e78 = (*c_1);
+    (*c_1) = max(_e78, vec3<f32>(0f, 0f, 0f));
+    let _e80 = (*c_1);
+    cutoff = (_e80 <= vec3<f32>(0.04045f, 0.04045f, 0.04045f));
+    let _e82 = (*c_1);
+    lo = (_e82 / vec3(12.92f));
+    let _e85 = (*c_1);
+    hi = pow(((_e85 + vec3<f32>(0.055f, 0.055f, 0.055f)) / vec3(1.055f)), vec3<f32>(2.4f, 2.4f, 2.4f));
+    let _e90 = hi;
+    let _e91 = lo;
+    let _e92 = cutoff;
+    return mix(_e90, _e91, select(vec3<f32>(0f, 0f, 0f), vec3<f32>(1f, 1f, 1f), _e92));
+}
+
+fn wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b(role: ptr<function, u32>, uv: ptr<function, vec2<f32>>, slot: ptr<function, i32>) -> vec4<f32> {
+    var c_2: vec4<f32>;
+    var param_11: vec3<f32>;
+
+    let _e79 = (*role);
+    let _e81 = (*role);
+    let _e86 = unnamed.packed_indices[(_e79 / 4u)][(_e81 % 4u)];
+    let _e89 = (*role);
+    let _e91 = (*role);
+    let _e96 = unnamed.packed_indices[(_e89 / 4u)][(_e91 % 4u)];
+    let _e101 = (*uv);
+    let _e102 = textureSample(wired_bindless_images[(_e86 & 4095u)], wired_bindless_samplers[((_e96 >> bitcast<u32>(12i)) & 255u)], _e101);
+    c_2 = _e102;
+    let _e103 = (*slot);
+    if ((tex_domain & (1i << bitcast<u32>(_e103))) == 0i) {
+        let _e108 = c_2;
+        param_11 = _e108.xyz;
+        let _e110 = sRGBToLinear_u0028_vf3_u003b((&param_11));
+        c_2[0u] = _e110.x;
+        c_2[1u] = _e110.y;
+        c_2[2u] = _e110.z;
+    }
+    let _e117 = (*slot);
+    if (lightmap_slot == (_e117 + 1i)) {
+        let _e122 = unnamed.worldLightParams[0u];
+        let _e123 = c_2;
+        let _e125 = (_e123.xyz * _e122);
+        c_2[0u] = _e125.x;
+        c_2[1u] = _e125.y;
+        c_2[2u] = _e125.z;
+    }
+    let _e132 = c_2;
+    return _e132;
+}
+
+fn main_1() {
+    var fog: vec4<f32>;
+    var frag_color: vec4<f32>;
+    var color0_: vec4<f32>;
+    var param_12: u32;
+    var param_13: vec2<f32>;
+    var param_14: i32;
+    var color1_: vec4<f32>;
+    var param_15: u32;
+    var param_16: vec2<f32>;
+    var param_17: i32;
+    var base: vec4<f32>;
+    var color1_1: vec4<f32>;
+    var param_18: u32;
+    var param_19: vec2<f32>;
+    var param_20: i32;
+    var color1_2: vec4<f32>;
+    var param_21: u32;
+    var param_22: vec2<f32>;
+    var param_23: i32;
+    var param_24: vec3<f32>;
+    var fogAmount: f32;
+
+    let _e98 = unnamed.packed_indices[0i][3u];
+    let _e104 = unnamed.packed_indices[0i][3u];
+    let _e109 = fog_tex_coord_1;
+    let _e110 = textureSample(wired_bindless_images[(_e98 & 4095u)], wired_bindless_samplers[((_e104 >> bitcast<u32>(12i)) & 255u)], _e109);
+    fog = _e110;
+    frag_color[0u] = identity_color;
+    frag_color[1u] = identity_color;
+    frag_color[2u] = identity_color;
+    frag_color[3u] = identity_alpha;
+    param_12 = 0u;
+    let _e115 = frag_tex_coord0_1;
+    param_13 = _e115;
+    param_14 = 0i;
+    let _e116 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_12), (&param_13), (&param_14));
+    let _e117 = frag_color;
+    color0_ = (_e116 * _e117);
+    if override_type_3_4 {
+        param_15 = 1u;
+        let _e119 = frag_tex_coord1_1;
+        param_16 = _e119;
+        param_17 = 1i;
+        let _e120 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_15), (&param_16), (&param_17));
+        color1_ = _e120;
+        let _e121 = color0_;
+        let _e123 = color1_;
+        let _e125 = (_e121.xyz + _e123.xyz);
+        let _e127 = color0_[3u];
+        let _e129 = color1_[3u];
+        base = vec4<f32>(_e125.x, _e125.y, _e125.z, (_e127 * _e129));
+    } else {
+        if override_type_3_5 {
+            param_18 = 1u;
+            let _e135 = frag_tex_coord1_1;
+            param_19 = _e135;
+            param_20 = 1i;
+            let _e136 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_18), (&param_19), (&param_20));
+            let _e137 = frag_color;
+            color1_1 = (_e136 * _e137);
+            let _e139 = color0_;
+            let _e141 = color1_1;
+            let _e143 = (_e139.xyz + _e141.xyz);
+            let _e145 = color0_[3u];
+            let _e147 = color1_1[3u];
+            base = vec4<f32>(_e143.x, _e143.y, _e143.z, (_e145 * _e147));
+        } else {
+            param_21 = 1u;
+            let _e153 = frag_tex_coord1_1;
+            param_22 = _e153;
+            param_23 = 1i;
+            let _e154 = wired_bl_sample_domain_u0028_u1_u003b_vf2_u003b_i1_u003b((&param_21), (&param_22), (&param_23));
+            let _e155 = frag_color;
+            color1_2 = (_e154 * _e155);
+            let _e157 = color0_;
+            let _e159 = color1_2;
+            let _e161 = (_e157.xyz * _e159.xyz);
+            base[0u] = _e161.x;
+            base[1u] = _e161.y;
+            base[2u] = _e161.z;
+            let _e169 = color0_[3u];
+            let _e171 = color1_2[3u];
+            base[3u] = (_e169 * _e171);
+        }
+    }
+    let _e174 = base;
+    param_24 = _e174.xyz;
+    let _e176 = wired_apply_sun_shadow_operand_u0028_vf3_u003b((&param_24));
+    base[0u] = _e176.x;
+    base[1u] = _e176.y;
+    base[2u] = _e176.z;
+    let _e183 = wired_advanced_fog_enabled_u0028_();
+    if _e183 {
+        let _e184 = wired_advanced_fog_amount_u0028_();
+        fogAmount = _e184;
+        if override_type_3_6 {
+            let _e185 = fogAmount;
+            let _e187 = base;
+            let _e189 = (_e187.xyz * (1f - _e185));
+            base[0u] = _e189.x;
+            base[1u] = _e189.y;
+            base[2u] = _e189.z;
+        } else {
+            if override_type_3_7 {
+                let _e196 = fogAmount;
+                let _e198 = base;
+                base = (_e198 * (1f - _e196));
+            } else {
+                if override_type_3_8 {
+                    let _e200 = fogAmount;
+                    let _e203 = base[3u];
+                    base[3u] = (_e203 * (1f - _e200));
+                } else {
+                    let _e206 = base;
+                    let _e209 = unnamed.advancedFogColorDensity;
+                    let _e211 = fogAmount;
+                    let _e213 = mix(_e206.xyz, _e209.xyz, vec3(_e211));
+                    base[0u] = _e213.x;
+                    base[1u] = _e213.y;
+                    base[2u] = _e213.z;
+                }
+            }
+        }
+    } else {
+        if override_type_3_9 {
+            let _e220 = base;
+            let _e223 = fog[3u];
+            let _e225 = (_e220.xyz * (1f - _e223));
+            base[0u] = _e225.x;
+            base[1u] = _e225.y;
+            base[2u] = _e225.z;
+        } else {
+            if override_type_3_10 {
+                let _e232 = base;
+                let _e234 = fog[3u];
+                base = (_e232 * (1f - _e234));
+            } else {
+                if override_type_3_11 {
+                    let _e238 = base[3u];
+                    let _e240 = fog[3u];
+                    base[3u] = (_e238 * (1f - _e240));
+                } else {
+                    let _e244 = base;
+                    let _e245 = fog;
+                    let _e247 = unnamed.fogColor;
+                    let _e250 = fog[3u];
+                    base = mix(_e244, (_e245 * _e247), vec4(_e250));
+                }
+            }
+        }
+    }
+    if override_type_3_12 {
+        let _e254 = base[3u];
+        if (_e254 == 0f) {
+            discard;
+        }
+    } else {
+        if override_type_3_13 {
+            let _e256 = base;
+            let _e258 = base;
+            if (dot(_e256.xyz, _e258.xyz) == 0f) {
+                discard;
+            }
+        }
+    }
+    let _e262 = base;
+    out_color = _e262;
+    return;
+}
+
+@fragment
+fn main(@builtin(position) gl_FragCoord: vec4<f32>, @location(7) shadowData: vec4<f32>, @location(1) frag_tex_coord0_: vec2<f32>, @location(2) frag_tex_coord1_: vec2<f32>, @location(4) fog_tex_coord: vec2<f32>) -> @location(0) vec4<f32> {
+    gl_FragCoord_1 = gl_FragCoord;
+    shadowData_1 = shadowData;
+    frag_tex_coord0_1 = frag_tex_coord0_;
+    frag_tex_coord1_1 = frag_tex_coord1_;
+    fog_tex_coord_1 = fog_tex_coord;
+    main_1();
+    let _e11 = out_color;
+    return _e11;
+}

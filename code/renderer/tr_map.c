@@ -4,9 +4,9 @@
 // tr_map.c
 
 #include "tr_local.h"
-#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.assets
+#include "../render/frontend/r_log.h"  // rilog-channel-mechanism Turn C — renderer.assets
 #include "../qcommon/maps/map_format_registry.h"
-#include "../renderercommon/r_q1_texture.h"
+#include "../render/frontend/r_q1_texture.h"
 
 R_LOG_DECLARE_CHANNEL( rch_assets, "renderer.assets" );
 

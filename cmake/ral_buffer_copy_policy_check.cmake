@@ -33,9 +33,9 @@ function(slice_between out body begin_marker end_marker)
 	set(${out} "${span}" PARENT_SCOPE)
 endfunction()
 
-set(command_header_path "${SOURCE_ROOT}/code/renderer/ral/ral_command.h")
-set(command_path "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_command.c")
-set(product_path "${SOURCE_ROOT}/code/renderervk/vk.c")
+set(command_header_path "${SOURCE_ROOT}/code/render/ral/core/ral_command.h")
+set(command_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_command.c")
+set(product_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c")
 set(host_path "${SOURCE_ROOT}/tests/ral_vulkan_buffer_copy_test.c")
 foreach(path IN ITEMS "${command_header_path}" "${command_path}"
 		"${product_path}" "${host_path}")

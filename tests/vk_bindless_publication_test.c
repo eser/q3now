@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Wired Engine contributors
 
-#include "../code/renderervk/vk_bindless_publication.h"
+#include "../code/render/ral/backends/vulkan/renderer/vk_bindless_publication.h"
 
 #include <stdio.h>
 #include <string.h>

@@ -1,5 +1,5 @@
-FILE(READ "${ROOT}/code/renderervk/vk.c" VKC)
-FILE(READ "${ROOT}/code/renderervk/vk_ral_textures.c" TEXTURES)
+FILE(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
+FILE(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c" TEXTURES)
 
 FOREACH(needle
     "VK_RalAttachmentContractFromVk( colorFormats, numColorFormats,"

@@ -1,0 +1,68 @@
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct ProductDraw
+{
+    float4 viewOriginDrawSpace;
+    float4 viewForward;
+    float4 viewLeft;
+    float4 viewUp;
+    float4 projectionLightmap;
+    float4 viewportAlpha;
+};
+
+struct spvDescriptorSetBuffer1
+{
+    texture2d<float> baseTexture [[id(0)]];
+    sampler baseSampler [[id(1)]];
+    texture2d<float> lightmapTexture [[id(2)]];
+    sampler lightmapSampler [[id(3)]];
+};
+
+struct main0_out
+{
+    float4 outColor [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 texCoord [[user(locn0)]];
+    float2 lightmapCoord [[user(locn1)]];
+    float4 color [[user(locn2)]];
+};
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], constant ProductDraw& productDraw [[buffer(2)]])
+{
+    main0_out out = {};
+    float4 base = spvDescriptorSet1.baseTexture.sample(spvDescriptorSet1.baseSampler, in.texCoord);
+    int alphaMode = int(productDraw.viewportAlpha.z + 0.5);
+    bool _43 = alphaMode == 1;
+    bool _53;
+    if (_43)
+    {
+        _53 = base.w < productDraw.viewportAlpha.w;
+    }
+    else
+    {
+        _53 = _43;
+    }
+    if (_53)
+    {
+        discard_fragment();
+    }
+    float3 _64;
+    if (productDraw.projectionLightmap.w >= 0.5)
+    {
+        _64 = fast::min(spvDescriptorSet1.lightmapTexture.sample(spvDescriptorSet1.lightmapSampler, in.lightmapCoord).xyz * 2.0, float3(1.0));
+    }
+    else
+    {
+        _64 = float3(1.0);
+    }
+    float3 lighting = _64;
+    out.outColor = float4((base.xyz * lighting) * in.color.xyz, base.w * in.color.w);
+    return out;
+}
+

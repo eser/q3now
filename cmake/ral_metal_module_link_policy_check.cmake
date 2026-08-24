@@ -9,7 +9,8 @@ execute_process(COMMAND /usr/bin/otool -L "${BINARY}"
 if(NOT OTOOL_RESULT EQUAL 0)
 	message(FATAL_ERROR "otool failed: ${OTOOL_ERROR}")
 endif()
-foreach(required "Metal.framework" "QuartzCore.framework" "CoreGraphics.framework")
+foreach(required "Metal.framework" "QuartzCore.framework" "CoreGraphics.framework"
+		"ImageIO.framework")
 	string(FIND "${LINKS}" "${required}" pos)
 	if(pos EQUAL -1)
 		message(FATAL_ERROR "wired_metal renderer missing linkage: ${required}")

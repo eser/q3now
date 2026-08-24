@@ -189,7 +189,7 @@ static int ExternalResourceFixture( void ) {
 	ralFrameGraphPlan_t plan;
 	memset(&description,0,sizeof(description));
 	description.schemaVersion=RAL_FRAME_GRAPH_SCHEMA_VERSION;
-	description.generation=31u;description.backendType=RAL_BACKEND_GL43;
+	description.generation=31u;description.backendType=RAL_BACKEND_OPENGL;
 	description.resourceCount=1u;
 	description.resources[0]=(ralFrameGraphResource_t){
 		9u,41u,(uintptr_t)900u,RAL_FRAME_GRAPH_RESOURCE_BUFFER,

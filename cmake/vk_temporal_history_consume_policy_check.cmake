@@ -1,11 +1,11 @@
 if(NOT DEFINED ROOT)
   message(FATAL_ERROR "ROOT required")
 endif()
-file(READ "${ROOT}/code/renderervk/vk_temporal_history_consume.c" CONSUMER)
-file(READ "${ROOT}/code/renderervk/vk_temporal_history_consume.h" HEADER)
-file(READ "${ROOT}/code/renderervk/vk.c" VKC)
-file(READ "${ROOT}/code/renderervk/tr_temporal_input.c" INPUT)
-file(READ "${ROOT}/code/renderervk/shaders/temporal_history_consume.comp" SHADER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_history_consume.c" CONSUMER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_history_consume.h" HEADER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_input.c" INPUT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/temporal_history_consume.comp" SHADER)
 
 foreach(needle
     "!plan->historyValid" "!view->committed.valid"
@@ -61,12 +61,11 @@ endif()
 string(FIND "${RECORD_BODY}" "if ( VK_TemporalHistoryConsumeIsArmed" armed_pos)
 string(FIND "${RECORD_BODY}"
   "Ral_CmdTransitionTexture( vk.cmd->ral_cmd, vk.ral_color_image" color_acquire_pos)
-string(FIND "${RECORD_BODY}"
-  "Ral_CmdTransitionTexture( vk.cmd->ral_cmd, vk.sceneDepth.ral_image" depth_acquire_pos)
+string(FIND "${RECORD_BODY}" "vk_scene_depth_copy_final();" depth_acquire_pos)
 if(armed_pos EQUAL -1 OR color_acquire_pos EQUAL -1 OR depth_acquire_pos EQUAL -1
     OR NOT color_acquire_pos LESS armed_pos OR NOT depth_acquire_pos LESS armed_pos)
   message(FATAL_ERROR
-    "current color/depth COMPUTE acquires must precede the diagnostic arm branch")
+    "current color transition and portable scene-depth copy must precede the diagnostic arm branch")
 endif()
 string(FIND "${RECORD_BODY}"
   "RAL_PIPELINE_STAGE_TOP_OF_PIPE_BIT, RAL_PIPELINE_STAGE_COMPUTE_SHADER_BIT"

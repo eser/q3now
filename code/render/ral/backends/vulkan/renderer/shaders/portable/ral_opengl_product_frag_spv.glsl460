@@ -1,0 +1,51 @@
+#version 460
+
+layout(std140, binding = 0) uniform ProductDraw
+{
+    vec4 viewOriginDrawSpace;
+    vec4 viewForward;
+    vec4 viewLeft;
+    vec4 viewUp;
+    vec4 projectionLightmap;
+    vec4 viewportAlpha;
+} productDraw;
+
+layout(binding = 0) uniform sampler2D baseTexture;
+layout(binding = 1) uniform sampler2D lightmapTexture;
+
+layout(location = 0) in vec2 texCoord;
+layout(location = 1) in vec2 lightmapCoord;
+layout(location = 0) out vec4 outColor;
+layout(location = 2) in vec4 color;
+
+void main()
+{
+    vec4 base = texture(baseTexture, texCoord);
+    int alphaMode = int(productDraw.viewportAlpha.z + 0.5);
+    bool _43 = alphaMode == 1;
+    bool _53;
+    if (_43)
+    {
+        _53 = base.w < productDraw.viewportAlpha.w;
+    }
+    else
+    {
+        _53 = _43;
+    }
+    if (_53)
+    {
+        discard;
+    }
+    vec3 _64;
+    if (productDraw.projectionLightmap.w >= 0.5)
+    {
+        _64 = min(texture(lightmapTexture, lightmapCoord).xyz * 2.0, vec3(1.0));
+    }
+    else
+    {
+        _64 = vec3(1.0);
+    }
+    vec3 lighting = _64;
+    outColor = vec4((base.xyz * lighting) * color.xyz, base.w * color.w);
+}
+

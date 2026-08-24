@@ -65,7 +65,9 @@
 #define FEAT_FOLLOW_KILLER                0   // auto-follow killer on death
 #define FEAT_CHAT_FILTER                  0   // /ignore and /unignore player commands
 #define FEAT_MOVEMENT_KEYS                0   // show followed player's movement keys (spectator HUD)
+#ifndef FEAT_WIRED_UI
 #define FEAT_WIRED_UI                     1   // Wired UI: unified .menu/.hud/.gui system (replaces q3_ui + ModernHUD)
+#endif
 #define FEAT_LEGACY_UI                    0   // legacy TA menu/HUD code paths (compile-time hard cut)
 #define FEAT_MUSIC_PLAYLIST               0   // playlist.cfg background music engine
 #define FEAT_SCREENSHOT_TOOLS             1   // spectator bullet-time freeze + timescale select
@@ -90,7 +92,9 @@
 #define FEAT_IQM                          1   // IQM (Inter-Quake Model) skeletal mesh format
 
 // ── renderer ───────────────────────────────────────────────────────────
-#define FEAT_FOG_SYSTEM                   0   // Enhanced fog types (linear, exp, exp2)
+#ifndef FEAT_FOG_SYSTEM
+#define FEAT_FOG_SYSTEM                   0   // Enhanced fog types (linear, exp, exp2); CMake owns verification ON/OFF.
+#endif
 #define FEAT_HALO                         1   // Halo/lens flare entities via flare pipeline
 #define FEAT_HEADLESS_RENDERER            0   // Dedicated server renderer stub (sv_ref.c)
 #define FEAT_DEPTH_CLAMP                  1   // disable near-plane vertex clipping at high FOV
@@ -103,7 +107,7 @@
 #define FEAT_COLOR_GRADING                0   // color tint, saturation, contrast
 #define FEAT_SUNRAYS                      1   // screen-space crepuscular rays (depth-based sky detection)
 #define FEAT_ADVANCED_WATER               0   // screen-space refraction + Fresnel + ripple noise for water
-#define FEAT_SHADOW_MAPPING               1   // directional-sun shadow map (single map; CSM cascades land later). Renderer-DLL-only flag — no ABI impact (not referenced outside code/renderervk/).
+#define FEAT_SHADOW_MAPPING               1   // directional-sun shadow map (single map; CSM cascades land later). Renderer-DLL-only flag — no ABI impact (not referenced outside code/render/ral/backends/vulkan/renderer/).
 #define FEAT_PBR                          1   // physically based rendering (GGX/Schlick/Smith BRDF)
 #define FEAT_FORCE_ENTITY_VERTEX_ALPHA    0   // per-entity alpha override + dynamic pipeline swap
 

@@ -2,15 +2,15 @@ cmake_minimum_required(VERSION 3.16)
 if(NOT DEFINED ROOT)
   message(FATAL_ERROR "ROOT is required")
 endif()
-file(READ "${ROOT}/code/renderervk/shaders/gen_vert.tmpl" VERT)
-file(READ "${ROOT}/code/renderervk/shaders/gen_frag.tmpl" FRAG)
-file(READ "${ROOT}/code/renderervk/shaders/shaders.manifest.mjs" MANIFEST)
-file(READ "${ROOT}/code/renderervk/shaders/compile.mjs" COMPILE)
-file(READ "${ROOT}/code/renderervk/shaders/spirv/temporal_generic_catalog.inc" GENERATED_CATALOG)
-file(READ "${ROOT}/code/renderervk/vk.c" VKC)
-file(READ "${ROOT}/code/renderervk/vk.h" VKH)
-file(READ "${ROOT}/code/renderervk/vk_temporal_shader_cohort.c" COHORT)
-file(READ "${ROOT}/code/renderervk/vk_temporal_generic_catalog.c" GENERIC_CATALOG)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/gen_vert.tmpl" VERT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/gen_frag.tmpl" FRAG)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/shaders.manifest.mjs" MANIFEST)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/compile.mjs" COMPILE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/shaders/spirv/temporal_generic_catalog.inc" GENERATED_CATALOG)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" VKH)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_shader_cohort.c" COHORT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_generic_catalog.c" GENERIC_CATALOG)
 file(READ "${ROOT}/CMakeLists.txt" CMAKE_TEXT)
 foreach(needle
     "layout(std430, set = 3, binding = 1) readonly buffer TemporalPayloads"
@@ -33,7 +33,7 @@ endforeach()
 if(FRAG MATCHES "gl_FragCoord[^\n]*(velocity|currentUv|currentNdc)")
   message(FATAL_ERROR "raster coordinates must not author temporal motion")
 endif()
-string(FIND "${FRAG}" "void wiredTemporalWriteAux()" helper_start)
+string(FIND "${FRAG}" "void wiredTemporalWriteAux( float coverageConfidence )" helper_start)
 if(helper_start EQUAL -1)
   message(FATAL_ERROR "temporal helper missing")
 endif()
@@ -60,7 +60,7 @@ if(FRAG MATCHES "out_color[ \t]*(\\.|\\+=|-=|\\*=|/=|\\+\\+|--)")
   message(FATAL_ERROR "out_color gained component, compound or increment authority")
 endif()
 string(FIND "${FRAG}" "out_color = base;" scene_write_pos)
-string(FIND "${FRAG}" "wiredTemporalWriteAux();" temporal_call_pos)
+string(FIND "${FRAG}" "wiredTemporalWriteAux( wiredTemporalAtestConfidence( color0.a ) );" temporal_call_pos)
 if(scene_write_pos EQUAL -1 OR temporal_call_pos EQUAL -1 OR NOT scene_write_pos LESS temporal_call_pos)
   message(FATAL_ERROR "temporal auxiliary write must follow the shared scene result")
 endif()
@@ -70,6 +70,18 @@ endif()
 if(HELPER MATCHES "layout[ \t]*\\([^)]*(set|binding)")
   message(FATAL_ERROR "temporal fragment helper gained descriptor-layout authority")
 endif()
+foreach(needle
+    "wiredTemporalAtestConfidence( float alpha )"
+    "abs( alpha - alpha_test_value ) / span"
+    "( alpha_test_value - alpha )"
+    "( alpha - alpha_test_value )"
+    "out_temporal_validity = clamp( coverageConfidence, 0.0, 1.0 )"
+    "wiredTemporalWriteAux( 1.0 )")
+  string(FIND "${FRAG}" "${needle}" atest_confidence_pos)
+  if(atest_confidence_pos EQUAL -1)
+    message(FATAL_ERROR "ATEST temporal confidence gate missing: ${needle}")
+  endif()
+endforeach()
 string(REGEX MATCHALL "layout\\(std430, set = 3, binding = 1\\) readonly buffer TemporalPayloads" temporal_payload_decls "${VERT}")
 list(LENGTH temporal_payload_decls temporal_payload_decl_count)
 if(NOT temporal_payload_decl_count EQUAL 1)
@@ -81,12 +93,9 @@ foreach(needle
     "!wiredTemporalFinite4( temporalPreviousClip )"
     "temporalCurrentClip.w <= 1.0e-6"
     "temporalPreviousClip.w <= 1.0e-6"
-    "any( isnan( currentNdc ) )"
-    "any( isinf( currentNdc ) )"
-    "any( isnan( previousNdc ) )"
-    "any( isinf( previousNdc ) )"
-    "any( isnan( velocity ) )"
-    "any( isinf( velocity ) )"
+    "!wiredTemporalFinite2( currentNdc )"
+    "!wiredTemporalFinite2( previousNdc )"
+    "!wiredTemporalFinite2( velocity )"
     "currentNdc * 0.5 + vec2( 0.5 )"
     "previousNdc * 0.5 + vec2( 0.5 )"
     "currentUv - previousUv")
@@ -143,19 +152,22 @@ endif()
 if(NOT COMPILE MATCHES "generated shader outputs are stale" OR NOT COMPILE MATCHES "temporal_generic_catalog.inc")
   message(FATAL_ERROR "--check freshness authority missing")
 endif()
-if(NOT VKH MATCHES "WIRED_FOG_PUSH_OFFSET[ \t]+64" OR NOT VKH MATCHES "WIRED_FOG_PUSH_SIZE[ \t]+32")
-  message(FATAL_ERROR "fog recipe constants drifted")
+if(NOT VKH MATCHES "WIRED_ADVANCED_FOG_UBO_OFFSET[ \t]+608u" OR NOT VKH MATCHES "WIRED_ADVANCED_FOG_UBO_SIZE[ \t]+32u")
+  message(FATAL_ERROR "fog UBO constants drifted")
+endif()
+if(COHORT MATCHES "VK_TEMPORAL_FOG_PUSH" OR COHORT MATCHES "candidate[.]numPushRanges[ \t]*=[ \t]*1u")
+  message(FATAL_ERROR "temporal generic cohort regained fog push ownership")
 endif()
 if(NOT COHORT MATCHES "candidate.numSetLayouts = 4u" OR NOT COHORT MATCHES "candidate.numSetLayouts = 2u")
   message(FATAL_ERROR "generic/IQM recipe shape missing")
 endif()
-if(NOT CMAKE_TEXT MATCHES "code/renderervk/vk_temporal_shader_cohort.c")
+if(NOT CMAKE_TEXT MATCHES "code/render/ral/backends/vulkan/renderer/vk_temporal_shader_cohort.c")
   message(FATAL_ERROR "cohort TU not product-linked")
 endif()
-file(GLOB PRODUCT_TUS "${ROOT}/code/renderervk/*.c")
+file(GLOB PRODUCT_TUS "${ROOT}/code/render/ral/backends/vulkan/renderer/*.c")
 foreach(tu IN LISTS PRODUCT_TUS)
-  if(tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_shader_cohort.c" OR
-     tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_pipeline_factory.c")
+  if(tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_shader_cohort.c" OR
+     tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_pipeline_factory.c")
     continue()
   endif()
   file(READ "${tu}" text)
@@ -169,13 +181,13 @@ foreach(runtime_token "Ral_Create" "Ral_Cmd" "BeginRendering" "Cvar" "R_Temporal
   endif()
 endforeach()
 foreach(tu IN LISTS PRODUCT_TUS)
-  if(tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_generic_catalog.c" OR
-     tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_pipeline_factory.c" OR
-     tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_generic_recipe_table.c")
+  if(tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_generic_catalog.c" OR
+     tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_pipeline_factory.c" OR
+     tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_generic_recipe_table.c")
     continue()
   endif()
   file(READ "${tu}" text)
-  if(tu STREQUAL "${ROOT}/code/renderervk/vk.c")
+  if(tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c")
     string(REGEX MATCHALL "VK_TemporalGenericCatalogSelect" product_selects "${text}")
     list(LENGTH product_selects product_select_count)
     if(NOT product_select_count EQUAL 1)
@@ -187,9 +199,9 @@ foreach(tu IN LISTS PRODUCT_TUS)
     message(FATAL_ERROR "temporal generic selector gained a product caller in ${tu}")
   endif()
 endforeach()
-file(GLOB_RECURSE ALL_PRODUCT_C "${ROOT}/code/renderervk/*.c")
+file(GLOB_RECURSE ALL_PRODUCT_C "${ROOT}/code/render/ral/backends/vulkan/renderer/*.c")
 foreach(tu IN LISTS ALL_PRODUCT_C)
-  if(tu MATCHES "/shaders/spirv/shader_data.c$" OR tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_generic_catalog.c")
+  if(tu MATCHES "/shaders/spirv/shader_data.c$" OR tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_generic_catalog.c")
     continue()
   endif()
   file(READ "${tu}" text)

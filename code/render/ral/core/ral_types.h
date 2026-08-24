@@ -1,0 +1,255 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2024-present Wired Engine contributors
+//
+// ral_types.h — shared enums, plain structs and opaque-handle forward
+// declarations for the Wired Renderer Abstraction Layer (RAL).
+//
+// This is the v1 surface frozen by docs/phase-7-ral-design.md §3. Backend
+// implementations (Vulkan, Metal, OpenGL 4.6 Core and WebGPU) live under
+// code/render/ral/backends/<backend>/ and provide the bodies. Renderer code
+// only ever touches the Ral_* functions and these types — never a VkFoo.
+//
+// Naming: Ral_* for functions, ral*_t for types, RAL_* for enum constants and
+// flag macros.
+
+#ifndef WIRED_RAL_TYPES_H
+#define WIRED_RAL_TYPES_H
+
+#include <stdint.h>
+#include "../../../qcommon/q_shared.h"   // qboolean, byte, vec4_t, Q_EXPORT, ...
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// ── result codes ────────────────────────────────────────────────────────
+// Every Ral_* call that can fail without returning a handle reports via
+// ralResult_t. Stubbed-but-not-yet-implemented paths return ralUnsupported.
+typedef enum {
+	ralSuccess = 0,
+	ralUnsupported,             // valid call, backend doesn't implement it (yet)
+	ralErrorOutOfMemory,
+	ralErrorInvalidArgument,
+	ralErrorDeviceLost,
+	ralErrorInitFailed,
+	ralOutOfDate,               // swapchain out of date (surface size/format mismatch); recreate needed. Returned by Ral_AcquireNextImage / Ral_Present.
+	ralSuboptimal,              // swapchain still functional but no longer optimal; renderer SHOULD recreate at frame boundary. Returned by Ral_Present.
+	ralSurfaceLost,             // presentation surface is no longer usable; recreate the surface/backend, not only the swapchain.
+	ralTimeout,                 // Ral_AcquireNextImage: VK_TIMEOUT / VK_NOT_READY. RECOVERABLE: no image was available within the timeout (compositor / RDP / suspend stall), NOT a device error. Caller skips/retries the frame; the swapchain is still valid. Distinct from ralErrorDeviceLost / ralErrorUnknown (genuinely fatal).
+	ralErrorUnknown
+} ralResult_t;
+
+// ── opaque handles ──────────────────────────────────────────────────────
+// Full definitions live in each backend's ral_<backend>_internal.h. Renderer
+// code holds pointers, never dereferences.
+typedef struct ralBackend_s          ralBackend_t;
+typedef struct ralBuffer_s           ralBuffer_t;
+typedef struct ralTexture_s          ralTexture_t;
+typedef struct ralTextureView_s      ralTextureView_t;
+typedef struct ralSampler_s          ralSampler_t;
+typedef struct ralBindGroupLayout_s  ralBindGroupLayout_t;
+typedef struct ralBindGroup_s        ralBindGroup_t;
+typedef struct ralBindGroupArena_s   ralBindGroupArena_t;
+typedef struct ralPipeline_s         ralPipeline_t;
+typedef struct ralPipelineLayout_s   ralPipelineLayout_t;   // typed cmd API
+typedef struct ralCommandBuffer_s    ralCommandBuffer_t;
+typedef struct ralFence_s            ralFence_t;
+typedef struct ralSemaphore_s        ralSemaphore_t;
+typedef struct ralSwapchain_s        ralSwapchain_t;
+typedef struct ralQueryPool_s        ralQueryPool_t;
+
+// ── backend identity ────────────────────────────────────────────────────
+typedef enum {
+	RAL_BACKEND_VULKAN,
+	RAL_BACKEND_METAL,
+	RAL_BACKEND_OPENGL,
+	RAL_BACKEND_WEBGPU,
+	RAL_BACKEND_COUNT
+} ralBackendType_t;
+
+// ralBackendCreateInfo_t::flags
+// RAL_FLAG_VALIDATION retired
+// (superseded by ralBackendCreateInfo_t::enableValidation field).
+#define RAL_FLAG_DEBUG_LABELS  (1u << 1)   // enable debug labels / object names (VK_EXT_debug_utils etc.)
+
+// ── queues ──────────────────────────────────────────────────────────────
+typedef enum {
+	RAL_QUEUE_GRAPHICS,
+	RAL_QUEUE_COMPUTE,          // async compute
+	RAL_QUEUE_TRANSFER          // async transfer
+} ralQueueType_t;
+
+// ── shader stage flags (bitmask) ────────────────────────────────────────
+#define RAL_STAGE_VERTEX         (1u << 0)
+#define RAL_STAGE_FRAGMENT       (1u << 1)
+#define RAL_STAGE_COMPUTE        (1u << 2)
+#define RAL_STAGE_ALL_GRAPHICS   (RAL_STAGE_VERTEX | RAL_STAGE_FRAGMENT)
+#define RAL_STAGE_ALL            (RAL_STAGE_ALL_GRAPHICS | RAL_STAGE_COMPUTE)
+
+// ── formats ─────────────────────────────────────────────────────────────
+// v1 set: covers the renderer's current needs plus the HDR / BC / mobile
+// formats §3.3 requires. Backends map to their native enum.
+typedef enum {
+	RAL_FORMAT_UNDEFINED = 0,
+
+	// uncompressed colour
+	RAL_FORMAT_R8_UNORM,
+	RAL_FORMAT_R8G8_UNORM,
+	RAL_FORMAT_R8G8B8A8_UNORM,
+	RAL_FORMAT_R8G8B8A8_SRGB,
+	RAL_FORMAT_B8G8R8A8_UNORM,
+	RAL_FORMAT_B8G8R8A8_SRGB,
+	RAL_FORMAT_A2B10G10R10_UNORM,        // 10:10:10:2 — HDR10 swapchain candidate
+	RAL_FORMAT_A2R10G10B10_UNORM,        // 10:10:10:2, RGB channel order — 30-bit present variant
+	RAL_FORMAT_B5G6R5_UNORM,             // 16-bit 5:6:5 — low-bit present fallback (r_presentBits <= 16)
+	RAL_FORMAT_R5G6B5_UNORM,             // 16-bit 5:6:5, swapped channel order — RGB present variant
+	RAL_FORMAT_R16_UNORM,
+	RAL_FORMAT_R16_SFLOAT,
+	RAL_FORMAT_R16G16_SFLOAT,
+	RAL_FORMAT_R16G16B16A16_SFLOAT,      // FP16 — scRGB swapchain / HDR offscreen
+	RAL_FORMAT_R16G16B16A16_UNORM,       // 16-bit UNORM — clamped HDR offscreen (r_hdr 2 fallback)
+	RAL_FORMAT_R11G11B10_UFLOAT,         // packed HDR offscreen
+	RAL_FORMAT_R32_SFLOAT,
+	RAL_FORMAT_R32G32_SFLOAT,            // vec2 texcoord vertex attribute
+	RAL_FORMAT_R32G32B32_SFLOAT,         // vec3 position vertex attribute — 7.4 BSP/MD3/MDL surface vertex layouts use this
+	RAL_FORMAT_R32G32B32A32_SFLOAT,
+	RAL_FORMAT_R8G8B8A8_UINT,            // packed integer vertex attribute (IQM bone indices)
+
+	// depth / stencil
+	RAL_FORMAT_D16_UNORM,
+	RAL_FORMAT_D24_UNORM_S8_UINT,
+	RAL_FORMAT_D32_SFLOAT,
+	RAL_FORMAT_D32_SFLOAT_S8_UINT,
+	RAL_FORMAT_D16_UNORM_S8_UINT,   // combined depth+stencil (aspect DEPTH|STENCIL; carries stencilAttachmentFormat)
+	RAL_FORMAT_X8_D24_UNORM,        // depth-only (X8 = unused padding, NOT stencil; stencil stays UNDEFINED)
+
+	// BC (desktop)
+	RAL_FORMAT_BC1_RGBA_UNORM,
+	RAL_FORMAT_BC1_RGBA_SRGB,
+	RAL_FORMAT_BC3_UNORM,
+	RAL_FORMAT_BC3_SRGB,
+	RAL_FORMAT_BC4_UNORM,
+	RAL_FORMAT_BC5_UNORM,
+	RAL_FORMAT_BC6H_UFLOAT,
+	RAL_FORMAT_BC7_UNORM,
+	RAL_FORMAT_BC7_SRGB,
+
+	// ASTC / ETC2 (mobile)
+	RAL_FORMAT_ASTC_4x4_UNORM,
+	RAL_FORMAT_ASTC_4x4_SRGB,
+	RAL_FORMAT_ETC2_R8G8B8A8_UNORM,
+	RAL_FORMAT_ETC2_R8G8B8A8_SRGB,
+
+	// Extended BC variants are appended to preserve the numeric identity of the
+	// original public format enum. DDS distinguishes these exact encodings.
+	RAL_FORMAT_BC1_RGB_UNORM,
+	RAL_FORMAT_BC1_RGB_SRGB,
+	RAL_FORMAT_BC2_UNORM,
+	RAL_FORMAT_BC2_SRGB,
+	RAL_FORMAT_BC4_SNORM,
+	RAL_FORMAT_BC5_SNORM,
+	RAL_FORMAT_BC6H_SFLOAT,
+
+	// Native upload/source formats appended for ABI stability.  WebGPU does not
+	// expose all three as texture formats, so a WebGPU backend must reject the
+	// unsupported create capability rather than misrepresent an adopted image.
+	RAL_FORMAT_R8G8B8_UNORM,
+	RAL_FORMAT_B4G4R4A4_UNORM,
+	RAL_FORMAT_A1R5G5B5_UNORM,
+
+	RAL_FORMAT_COUNT
+} ralFormat_t;
+
+// ── swapchain colour spaces ─────────────────────────────────────────────
+typedef enum {
+	RAL_COLORSPACE_SRGB_NONLINEAR,        // SDR, default
+	RAL_COLORSPACE_EXTENDED_SRGB_LINEAR,  // scRGB, FP16 HDR (Windows)
+	RAL_COLORSPACE_HDR10_ST2084,          // BT.2020 + PQ
+	RAL_COLORSPACE_HDR10_HLG,             // BT.2020 + HLG
+	RAL_COLORSPACE_DISPLAY_P3             // macOS HDR
+} ralColorSpace_t;
+
+// ── present modes ───────────────────────────────────────────────────────
+typedef enum {
+	RAL_PRESENT_FIFO,                // vsync, always available
+	RAL_PRESENT_MAILBOX,             // low-latency triple buffer
+	RAL_PRESENT_IMMEDIATE,           // no vsync (tearing)
+	// these were previously collapsed to RAL_PRESENT_FIFO, which turned a
+	// late frame into a hard 16ms vblank stall (the very thing the legacy
+	// swapchain code chose FIFO_RELAXED / FIFO_LATEST_READY to avoid, esp. on
+	// MoltenVK at r_swapInterval 0). Modelled faithfully now; the backend falls
+	// back to plain FIFO only when the device does not offer the requested mode.
+	RAL_PRESENT_FIFO_RELAXED,        // vsync, but tears (catches up) after a missed vblank — VK_PRESENT_MODE_FIFO_RELAXED_KHR
+	RAL_PRESENT_FIFO_LATEST_READY    // presents the most-recently-completed frame at vblank — VK_PRESENT_MODE_FIFO_LATEST_READY_EXT
+} ralPresentMode_t;
+
+// ── variable-rate shading (per-pipeline coarse shading) ──────────────────
+// The shading rate a pipeline runs its fragment shader at: 1x1 = one shader
+// invocation per pixel (the default, no-op — every existing pipeline stays at
+// 1x1 and is byte-identical). 2x2/2x4/4x2/4x4 run one invocation per NxM-pixel
+// block, reducing fragment cost on passes where the extra resolution is wasted
+// (low-frequency post-process). The backend maps each to a VkExtent2D fragment
+// size; on hardware without VRS (caps.variableRateShading false) the consumer
+// gates on the cap and every pipeline stays 1x1. NEVER apply a coarse rate to
+// readability-critical passes (HUD / world primary / crosshair / text).
+typedef enum {
+	RAL_SHADING_RATE_1x1 = 0,        // 1 invocation / pixel — default, no-op
+	RAL_SHADING_RATE_2x2,            // 1 invocation / 2x2 block
+	RAL_SHADING_RATE_2x4,
+	RAL_SHADING_RATE_4x2,
+	RAL_SHADING_RATE_4x4
+} ralFragmentShadingRate_t;
+
+// ── attachment load / store ─────────────────────────────────────────────
+typedef enum {
+	RAL_LOAD_OP_LOAD,
+	RAL_LOAD_OP_CLEAR,
+	RAL_LOAD_OP_DONT_CARE
+} ralLoadOp_t;
+
+typedef enum {
+	RAL_STORE_OP_STORE,
+	RAL_STORE_OP_DONT_CARE
+} ralStoreOp_t;
+
+// ── compare op (shared: sampler compare, depth test) ────────────────────
+typedef enum {
+	RAL_COMPARE_NEVER,
+	RAL_COMPARE_LESS,
+	RAL_COMPARE_EQUAL,
+	RAL_COMPARE_LESS_EQUAL,
+	RAL_COMPARE_GREATER,
+	RAL_COMPARE_NOT_EQUAL,
+	RAL_COMPARE_GREATER_EQUAL,
+	RAL_COMPARE_ALWAYS
+} ralCompareOp_t;
+
+// ── small geometry helpers ──────────────────────────────────────────────
+#define RAL_MAX_COLOR_ATTACHMENTS 8
+
+typedef struct {
+	int32_t  x, y;
+	uint32_t width, height;
+} ralRect_t;
+
+typedef struct {
+	float x, y, width, height;
+	float minDepth, maxDepth;
+} ralViewport_t;
+
+typedef struct {
+	uint32_t width, height, depthOrLayers;
+} ralExtent3D_t;
+
+// Either a colour clear (rgba float) or a depth/stencil clear — caller picks
+// the active member to match the attachment.
+typedef union {
+	float color[4];
+	struct { float depth; uint32_t stencil; } depthStencil;
+} ralClearValue_t;
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // WIRED_RAL_TYPES_H

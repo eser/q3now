@@ -2,18 +2,17 @@ cmake_minimum_required(VERSION 3.16)
 if(NOT DEFINED ROOT)
   message(FATAL_ERROR "ROOT required")
 endif()
-file(READ "${ROOT}/code/renderervk/vk.c" VKC)
-file(READ "${ROOT}/code/renderervk/vk.h" VKH)
-file(READ "${ROOT}/code/renderervk/vk_temporal_pipeline_factory.c" FACTORY)
-file(READ "${ROOT}/code/renderervk/vk_temporal_pipeline_factory.h" HEADER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" VKH)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_pipeline_factory.c" FACTORY)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_pipeline_factory.h" HEADER)
 file(READ "${ROOT}/CMakeLists.txt" CMAKE_TEXT)
 foreach(needle
 	"ralPipelineLayout_t *(*create)( ralBackend_t *,"
 	"const ralBindGroupLayout_t *borrowedLayouts[3]"
 	"ci.bindGroupLayouts = layouts;"
 	"ci.numBindGroupLayouts = 4u;"
-	"ci.pushConstantOffset = fog ? VK_TEMPORAL_FOG_PUSH_OFFSET : 0u;"
-	"ci.pushConstantStages = fog ? RAL_STAGE_FRAGMENT : 0u;"
+	"Fog state is part of the ordinary set-0 UBO; temporal layouts are push-free."
 	"candidateAdopted = ops->create( backend, &ci );"
 	"candidateRaw = (VkPipelineLayout)ops->getHandle( candidateAdopted );"
 	"if ( owner->adopted ) ops->destroy( owner->adopted );"
@@ -40,6 +39,9 @@ foreach(needle
     message(FATAL_ERROR "factory authority missing: ${needle}")
   endif()
 endforeach()
+if(FACTORY MATCHES "VK_TEMPORAL_FOG_PUSH" OR FACTORY MATCHES "ci[.]pushConstant")
+	message(FATAL_ERROR "temporal layout factory regained fog push ownership")
+endif()
 foreach(forbidden "qvkCreatePipelineLayout" "qvkDestroyPipelineLayout")
 	if(VKC MATCHES "${forbidden}" OR FACTORY MATCHES "${forbidden}")
 		message(FATAL_ERROR "temporal layout factory regained raw pipeline-layout authority: ${forbidden}")
@@ -109,29 +111,29 @@ foreach(forbidden "vkDestroyPipeline" "qvkDestroyPipeline" "memcmp\\(&base" "mem
     message(FATAL_ERROR "factory lifecycle/key bypass: ${forbidden}")
   endif()
 endforeach()
-if(NOT VKH MATCHES "sizeof\\( vkUniform_t \\) == 608")
-  message(FATAL_ERROR "ordinary vkUniform_t 608-byte ABI drift")
+if(NOT VKH MATCHES "sizeof\\( vkUniform_t \\) == 640")
+  message(FATAL_ERROR "ordinary vkUniform_t 640-byte ABI drift")
 endif()
 foreach(forbidden "Cvar" "Ral_Cmd" "BeginRendering" "vkCmd" "R_TemporalMotionPayloadEnsure" "r_temporal")
   if(FACTORY MATCHES "${forbidden}")
     message(FATAL_ERROR "definition-only factory gained runtime authority: ${forbidden}")
   endif()
 endforeach()
-file(GLOB PRODUCT_TUS "${ROOT}/code/renderervk/*.c")
+file(GLOB PRODUCT_TUS "${ROOT}/code/render/ral/backends/vulkan/renderer/*.c")
 foreach(tu IN LISTS PRODUCT_TUS)
-  if(tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_pipeline_factory.c" OR
-     tu STREQUAL "${ROOT}/code/renderervk/vk.c")
+  if(tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_pipeline_factory.c" OR
+     tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c")
     continue()
   endif()
   file(READ "${tu}" text)
-  if(tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_generic_pipeline_table.c")
+  if(tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_generic_pipeline_table.c")
     if(NOT text MATCHES "VK_TemporalGenericPipelineFactoryEnsure" OR
        text MATCHES "VK_TemporalPipelineFactoryEnsure|VK_TemporalIqmPipelineFactoryEnsure|vk_ral_create_pipeline_from_gpinfo_exact_spirv")
       message(FATAL_ERROR "A2c2b table may own only the split generic exact3 factory")
     endif()
     continue()
   endif()
-  if(tu STREQUAL "${ROOT}/code/renderervk/vk_temporal_motion_materialization.c")
+  if(tu STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_motion_materialization.c")
     if(NOT text MATCHES "VK_TemporalPipelineLayoutEnsure" OR
        text MATCHES "VK_TemporalPipelineFactoryEnsure|VK_TemporalGenericPipelineFactoryEnsure|VK_TemporalIqmPipelineFactoryEnsure|vk_ral_create_pipeline_from_gpinfo_exact_spirv")
       message(FATAL_ERROR "A2b may materialize only the pipeline layout owner")
@@ -154,7 +156,7 @@ foreach(token VK_TemporalPipelineLayoutEnsure VK_TemporalPipelineFactoryEnsure
 endforeach()
 if(NOT CMAKE_TEXT MATCHES "vk_temporal_pipeline_factory_test" OR
    NOT CMAKE_TEXT MATCHES "vk_temporal_pipeline_factory.c" OR
-   NOT CMAKE_TEXT MATCHES "AUX_SOURCE_DIRECTORY\\(code/renderervk RENDERER_VK_SRCS\\)")
+   NOT CMAKE_TEXT MATCHES "AUX_SOURCE_DIRECTORY\\(code/render/ral/backends/vulkan/renderer RENDERER_VK_SRCS\\)")
   message(FATAL_ERROR "factory product/test ownership missing")
 endif()
 message(STATUS "vk temporal pipeline factory source policy: PASS")

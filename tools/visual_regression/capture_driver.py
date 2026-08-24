@@ -2,7 +2,7 @@
 """capture_driver.py — launch wired.x64.exe under RenderDoc and grab a frame.
 
 Uses the engine's in-app capture trigger (`WN_RDOC_CAPTURE`, see
-code/renderervk/tr_backend.c): when the engine is launched with
+code/render/ral/backends/vulkan/renderer/tr_backend.c): when the engine is launched with
 renderdoc.dll injected, it acquires the in-app API and TriggerCapture()s
 on a fixed frame (currently frame 600), writing the .rdc with the path
 template `wn_capture` relative to its working directory, then self-quits a

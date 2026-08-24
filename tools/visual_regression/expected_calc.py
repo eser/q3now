@@ -13,7 +13,7 @@ colour traverses on its way to the swapchain:
       -> byte = round(clamp01 * 255)
 
 The sRGB transfer functions and the four tonemap operators are ports of
-`code/renderervk/shaders/tonemap.frag` (PBR Neutral / AgX / Lottes /
+`code/render/ral/backends/vulkan/renderer/shaders/tonemap.frag` (PBR Neutral / AgX / Lottes /
 Reinhard) and `gen_frag.tmpl` (sRGBToLinear / linearToSRGB) — kept in
 sync by hand. If those shaders change, update this file.
 

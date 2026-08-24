@@ -11,7 +11,7 @@ trap 'rm -rf "$tmp"' EXIT
 spv="$tmp/temporal-resolve.spv"
 dis="$tmp/temporal-resolve.spv.dis"
 glslangValidator -S comp -V -o "$spv" \
-	"$root/code/renderervk/shaders/temporal_resolve.comp" >/dev/null
+	"$root/code/render/ral/backends/vulkan/renderer/shaders/temporal_resolve.comp" >/dev/null
 spirv-val "$spv"
 spirv-dis "$spv" -o "$dis"
 

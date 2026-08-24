@@ -1,0 +1,84 @@
+#version 460
+
+layout(binding = 0, std140) uniform BoneMatrices
+{
+    vec4 boneMats[384];
+    mat4 mvp;
+} _26;
+
+layout(location = 4) in vec4 in_bone_weights;
+layout(location = 5) in uvec4 in_bone_indices;
+layout(location = 0) in vec3 in_position;
+layout(location = 1) in vec3 in_normal;
+layout(location = 3) in vec4 in_tangent;
+layout(location = 0) out vec2 frag_tex_coord;
+layout(location = 2) in vec2 in_tex_coord;
+layout(location = 1) out vec3 frag_normal;
+layout(location = 2) out vec4 frag_tangent;
+
+vec3 transformByBone(uint idx, vec3 v)
+{
+    return vec3(dot(_26.boneMats[(idx * 3u) + 0u], vec4(v, 1.0)), dot(_26.boneMats[(idx * 3u) + 1u], vec4(v, 1.0)), dot(_26.boneMats[(idx * 3u) + 2u], vec4(v, 1.0)));
+}
+
+vec3 transformNormalByBone(uint idx, vec3 n)
+{
+    return vec3(dot(_26.boneMats[(idx * 3u) + 0u].xyz, n), dot(_26.boneMats[(idx * 3u) + 1u].xyz, n), dot(_26.boneMats[(idx * 3u) + 2u].xyz, n));
+}
+
+void main()
+{
+    vec3 pos = vec3(0.0);
+    vec3 nrm = vec3(0.0);
+    vec3 _tan = vec3(0.0);
+    uint param = in_bone_indices.x;
+    vec3 param_1 = in_position;
+    pos += (transformByBone(param, param_1) * in_bone_weights.x);
+    uint param_2 = in_bone_indices.x;
+    vec3 param_3 = in_normal;
+    nrm += (transformNormalByBone(param_2, param_3) * in_bone_weights.x);
+    uint param_4 = in_bone_indices.x;
+    vec3 param_5 = in_tangent.xyz;
+    _tan += (transformNormalByBone(param_4, param_5) * in_bone_weights.x);
+    if (in_bone_weights.y > 0.0)
+    {
+        uint param_6 = in_bone_indices.y;
+        vec3 param_7 = in_position;
+        pos += (transformByBone(param_6, param_7) * in_bone_weights.y);
+        uint param_8 = in_bone_indices.y;
+        vec3 param_9 = in_normal;
+        nrm += (transformNormalByBone(param_8, param_9) * in_bone_weights.y);
+        uint param_10 = in_bone_indices.y;
+        vec3 param_11 = in_tangent.xyz;
+        _tan += (transformNormalByBone(param_10, param_11) * in_bone_weights.y);
+    }
+    if (in_bone_weights.z > 0.0)
+    {
+        uint param_12 = in_bone_indices.z;
+        vec3 param_13 = in_position;
+        pos += (transformByBone(param_12, param_13) * in_bone_weights.z);
+        uint param_14 = in_bone_indices.z;
+        vec3 param_15 = in_normal;
+        nrm += (transformNormalByBone(param_14, param_15) * in_bone_weights.z);
+        uint param_16 = in_bone_indices.z;
+        vec3 param_17 = in_tangent.xyz;
+        _tan += (transformNormalByBone(param_16, param_17) * in_bone_weights.z);
+    }
+    if (in_bone_weights.w > 0.0)
+    {
+        uint param_18 = in_bone_indices.w;
+        vec3 param_19 = in_position;
+        pos += (transformByBone(param_18, param_19) * in_bone_weights.w);
+        uint param_20 = in_bone_indices.w;
+        vec3 param_21 = in_normal;
+        nrm += (transformNormalByBone(param_20, param_21) * in_bone_weights.w);
+        uint param_22 = in_bone_indices.w;
+        vec3 param_23 = in_tangent.xyz;
+        _tan += (transformNormalByBone(param_22, param_23) * in_bone_weights.w);
+    }
+    gl_Position = _26.mvp * vec4(pos, 1.0);
+    frag_tex_coord = in_tex_coord;
+    frag_normal = normalize(nrm);
+    frag_tangent = vec4(normalize(_tan), in_tangent.w);
+}
+

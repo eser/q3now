@@ -1,0 +1,124 @@
+#version 460
+
+layout(binding = 0, std140) uniform ParticleFrame
+{
+    mat4 mvp;
+    vec4 viewLeft;
+    vec4 viewUp;
+    vec4 eyeWorld;
+    float dt;
+    uint poolSize;
+    uint numClasses;
+    uint pingPongRead;
+    float invResX;
+    float invResY;
+    float depthValid;
+    float exposureBias;
+} _28;
+
+layout(binding = 1) uniform sampler2D sceneDepthTex;
+layout(binding = 0) uniform sampler2D particleSamplers[64];
+
+layout(location = 2) flat in uint particleClassHandle;
+layout(location = 3) flat in uint frameSlot0;
+layout(location = 0) in vec2 fragUV;
+layout(location = 5) in float frameBlend;
+layout(location = 4) flat in uint frameSlot1;
+layout(location = 0) out vec4 outColor;
+layout(location = 1) in vec4 fragColor;
+
+vec3 sRGBToLinear(inout vec3 c)
+{
+    c = max(c, vec3(0.0));
+    bvec3 cutoff = lessThanEqual(c, vec3(0.040449999272823333740234375));
+    vec3 lo = c / vec3(12.9200000762939453125);
+    vec3 hi = pow((c + vec3(0.054999999701976776123046875)) / vec3(1.05499994754791259765625), vec3(2.400000095367431640625));
+    return mix(hi, lo, vec3(cutoff));
+}
+
+vec4 decodeColorTexel(inout vec4 c, uint domain)
+{
+    if (domain != 0u)
+    {
+        return c;
+    }
+    vec3 param = c.xyz;
+    vec3 _128 = sRGBToLinear(param);
+    c.x = _128.x;
+    c.y = _128.y;
+    c.z = _128.z;
+    return c;
+}
+
+float softParticleFade()
+{
+    if (_28.depthValid < 0.5)
+    {
+        return 1.0;
+    }
+    vec2 screenUV = gl_FragCoord.xy * vec2(_28.invResX, _28.invResY);
+    float sceneDepth = texture(sceneDepthTex, screenUV).x;
+    if (sceneDepth <= 0.0)
+    {
+        return 1.0;
+    }
+    float depthDiff = gl_FragCoord.z - sceneDepth;
+    return smoothstep(0.0, 0.001000000047497451305389404296875, depthDiff);
+}
+
+void main()
+{
+    uint domain = particleClassHandle >> 31u;
+    vec4 texel;
+    if (frameSlot0 == 4294967295u)
+    {
+        uint idx = (particleClassHandle & 2147483647u) - 1u;
+        vec4 param = texture(particleSamplers[idx], fragUV);
+        uint param_1 = domain;
+        vec4 _171 = decodeColorTexel(param, param_1);
+        texel = _171;
+    }
+    else
+    {
+        vec4 param_2 = texture(particleSamplers[frameSlot0], fragUV);
+        uint param_3 = domain;
+        vec4 _182 = decodeColorTexel(param_2, param_3);
+        vec4 t0 = _182;
+        if (frameBlend > 0.0)
+        {
+            vec4 param_4 = texture(particleSamplers[frameSlot1], fragUV);
+            uint param_5 = domain;
+            vec4 _198 = decodeColorTexel(param_4, param_5);
+            vec4 t1 = _198;
+            texel = mix(t0, t1, vec4(frameBlend));
+        }
+        else
+        {
+            texel = t0;
+        }
+    }
+    float _209;
+    if (frameSlot0 != 4294967295u)
+    {
+        _209 = 1.0;
+    }
+    else
+    {
+        _209 = softParticleFade();
+    }
+    float fade = _209;
+    float _218;
+    if (frameSlot0 != 4294967295u)
+    {
+        _218 = 0.699999988079071044921875 / max(_28.exposureBias, 0.001000000047497451305389404296875);
+    }
+    else
+    {
+        _218 = 1.0;
+    }
+    float rgbScale = _218;
+    vec3 param_6 = fragColor.xyz;
+    vec3 _237 = sRGBToLinear(param_6);
+    outColor = vec4((texel.xyz * _237) * rgbScale, (texel.w * fragColor.w) * fade);
+}
+

@@ -151,11 +151,18 @@ if [ "${1:-}" = --self-test ]; then
 		write_self "$ROOT/$defect.log" "$ROOT/$defect.manifest" "$defect" || exit 1
 		if analyze_contract "$ROOT/$defect.log" "$ROOT/$defect.manifest" >/dev/null 2>&1; then echo "FAIL accepted $defect"; exit 1; fi
 	done
+	set +e
+	"$0" "$ROOT/missing-wired-profile-host" >"$ROOT/missing-tool.log" 2>&1
+	missing_rc=$?
+	set -e
+	[ "$missing_rc" -eq 77 ] || { echo "FAIL missing tool returned $missing_rc instead of SKIP"; exit 1; }
+	grep -Fxq "SKIP: wired_profile_host tool build unavailable (configure WIRED_BUILD_IMGUI_TOOLS=ON)" "$ROOT/missing-tool.log" || { echo "FAIL missing tool diagnostic"; exit 1; }
 	echo "PASS ral-profile-host lifecycle analyzer self-test (${#defects[@]} mutations)"; exit 0
 fi
 
 TOOL="${1:-}"
-[ -n "$TOOL" ] && [ -x "$TOOL" ] || { echo "usage: $0 /absolute/path/to/wired_profile_host"; exit 64; }
+[ -n "$TOOL" ] && [ -e "$TOOL" ] || { echo "SKIP: wired_profile_host tool build unavailable (configure WIRED_BUILD_IMGUI_TOOLS=ON)"; exit 77; }
+[ -x "$TOOL" ] || { echo "FAIL wired_profile_host is not executable: $TOOL"; exit 1; }
 [ "$(uname -s)" = Darwin ] || { echo "SKIP real profile-host lifecycle requires macOS/MoltenVK"; exit 77; }
 [ -f "$TIMEOUT_RUNNER" ] || { echo "FAIL missing timeout runner"; exit 1; }
 TOOL="$(cd "$(dirname "$TOOL")" && pwd)/$(basename "$TOOL")"

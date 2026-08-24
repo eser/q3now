@@ -1,0 +1,380 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T>
+struct spvDescriptor
+{
+    T value;
+};
+
+template<typename T>
+struct spvDescriptorArray
+{
+    spvDescriptorArray(const device spvDescriptor<T>* ptr_) : ptr(&ptr_->value) {}
+    spvDescriptorArray(const device void *ptr_) : spvDescriptorArray(static_cast<const device spvDescriptor<T>*>(ptr_)) {}
+    const device T& operator [] (size_t i) const { return ptr[i]; }
+    const device T* ptr;
+};
+
+struct DlightShadowParams
+{
+    float4x4 shadowFaceMVP[24];
+    float4 shadowLights[4];
+    float4 shadowMeta;
+};
+
+struct UBO
+{
+    float4 eyePos;
+    float4 _pad_light[3];
+    float4 fogDistanceVector;
+    float4 fogDepthVector;
+    float4 fogEyeT;
+    float4 fogColor;
+    float4 _pad_to_packed_indices[26];
+    uint4 packed_indices[3];
+    float4 _pad_worldLightParams;
+    float4 advancedFogColorDensity;
+    float4 advancedFogTypeFarEnabled;
+};
+
+struct Light
+{
+    float4 posRadius;
+    float4 color;
+    float4 posRadius2;
+};
+
+struct Light_1
+{
+    float4 posRadius;
+    float4 color;
+    float4 posRadius2;
+};
+
+struct DLightParams
+{
+    Light_1 dlights[1];
+};
+
+struct TileParams
+{
+    float4 tileParams;
+};
+
+struct TileLights
+{
+    uint tileLights[1];
+};
+
+struct ClusterGridParams
+{
+    float4 gridOrigin;
+    int4 gridDims;
+};
+
+struct ClusterLights
+{
+    uint clusterLights[1];
+};
+
+struct spvDescriptorSetBuffer0
+{
+    constant UBO* m_261 [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    spvDescriptor<texture2d<float>> wired_bindless_images [[id(0)]][1] /* unsized array hack */;
+    // Overlapping binding: spvDescriptor<sampler> wired_bindless_samplers [[id(0)]][1] /* unsized array hack */;
+};
+
+struct spvDescriptorSetBuffer2
+{
+    constant DlightShadowParams* m_105 [[id(0)]];
+    texture2d<float> dlightShadowAtlas [[id(1)]];
+    sampler dlightShadowSampler [[id(2)]];
+    const device DLightParams* m_346 [[id(3)]];
+    constant TileParams* m_520 [[id(4)]];
+    const device TileLights* m_558 [[id(5)]];
+    constant ClusterGridParams* m_611 [[id(6)]];
+    const device ClusterLights* m_672 [[id(7)]];
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord [[user(locn0)]];
+    float3 world_pos [[user(locn1)]];
+    float3 world_normal [[user(locn2)]];
+    float3 world_view [[user(locn3)]];
+};
+
+static inline __attribute__((always_inline))
+float3 sRGBToLinear(thread float3& c)
+{
+    c = fast::max(c, float3(0.0));
+    bool3 cutoff = c <= float3(0.040449999272823333740234375);
+    float3 lo = c / float3(12.9200000762939453125);
+    float3 hi = powr((c + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return mix(hi, lo, float3(cutoff));
+}
+
+static inline __attribute__((always_inline))
+float dlightShadowOcclusion(thread const float3& worldPos, thread const float3& lightToFrag, thread const int& lightSlot, constant DlightShadowParams& _105, texture2d<float> dlightShadowAtlas, sampler dlightShadowSampler)
+{
+    float3 a = abs(lightToFrag);
+    bool _50 = a.x >= a.y;
+    bool _59;
+    if (_50)
+    {
+        _59 = a.x >= a.z;
+    }
+    else
+    {
+        _59 = _50;
+    }
+    int face;
+    if (_59)
+    {
+        face = (lightToFrag.x >= 0.0) ? 0 : 1;
+    }
+    else
+    {
+        if (a.y >= a.z)
+        {
+            face = (lightToFrag.y >= 0.0) ? 2 : 3;
+        }
+        else
+        {
+            face = (lightToFrag.z >= 0.0) ? 4 : 5;
+        }
+    }
+    int col = (lightSlot * 6) + face;
+    float4 clip = _105.shadowFaceMVP[col] * float4(worldPos, 1.0);
+    if (clip.w <= 0.0)
+    {
+        return 1.0;
+    }
+    float3 ndc = clip.xyz / float3(clip.w);
+    bool _134 = ndc.x < (-1.0);
+    bool _141;
+    if (!_134)
+    {
+        _141 = ndc.x > 1.0;
+    }
+    else
+    {
+        _141 = _134;
+    }
+    bool _148;
+    if (!_141)
+    {
+        _148 = ndc.y < (-1.0);
+    }
+    else
+    {
+        _148 = _141;
+    }
+    bool _155;
+    if (!_148)
+    {
+        _155 = ndc.y > 1.0;
+    }
+    else
+    {
+        _155 = _148;
+    }
+    bool _162;
+    if (!_155)
+    {
+        _162 = ndc.z > 1.0;
+    }
+    else
+    {
+        _162 = _155;
+    }
+    if (_162)
+    {
+        return 1.0;
+    }
+    float2 faceUV = (ndc.xy * 0.5) + float2(0.5);
+    float cols = fast::max(_105.shadowMeta.y, 6.0);
+    float2 atlasUV = float2((float(col) + faceUV.x) / cols, faceUV.y);
+    float storedDepth = dlightShadowAtlas.sample(dlightShadowSampler, atlasUV).x;
+    float receiverDepth = ndc.z;
+    return ((receiverDepth - _105.shadowLights[lightSlot].z) > storedDepth) ? 0.0 : 1.0;
+}
+
+static inline __attribute__((always_inline))
+float3 fp_light_contrib(thread const uint& li, thread const float3& Np, thread const float3& nV, thread const float4& base, thread const float3& world_pos, constant DlightShadowParams& _105, texture2d<float> dlightShadowAtlas, sampler dlightShadowSampler, const device DLightParams& _346)
+{
+    Light L;
+    L.posRadius = _346.dlights[li].posRadius;
+    L.color = _346.dlights[li].color;
+    L.posRadius2 = _346.dlights[li].posRadius2;
+    float3 Lvec = L.posRadius.xyz - world_pos;
+    float falloff = L.color.w;
+    float intensFactor = 1.0 - (dot(Lvec, Lvec) * falloff);
+    if (intensFactor <= 0.0)
+    {
+        return float3(0.0);
+    }
+    float3 intens = L.color.xyz * intensFactor;
+    float3 nL = fast::normalize(Lvec);
+    float diffuse = fast::max(dot(Np, nL), 0.0);
+    float specFactor = fast::max(dot(Np, fast::normalize(nL + nV)), 0.0);
+    float4 spec = (float4(powr(specFactor, 10.0) * 0.25) * base) * 0.800000011920928955078125;
+    float occ = 1.0;
+    int numShadowLights = int(_105.shadowMeta.x + 0.5);
+    for (int s = 0; s < numShadowLights; s++)
+    {
+        bool _429 = _105.shadowLights[s].y > 0.5;
+        bool _439;
+        if (_429)
+        {
+            _439 = uint(_105.shadowLights[s].x + 0.5) == li;
+        }
+        else
+        {
+            _439 = _429;
+        }
+        if (_439)
+        {
+            float3 param = world_pos;
+            float3 param_1 = -Lvec;
+            int param_2 = s;
+            occ = dlightShadowOcclusion(param, param_1, param_2, _105, dlightShadowAtlas, dlightShadowSampler);
+            break;
+        }
+    }
+    return (((base.xyz * diffuse) + spec.xyz) * intens) * occ;
+}
+
+static inline __attribute__((always_inline))
+bool wired_advanced_fog_enabled(constant UBO& _261)
+{
+    int fogType = int(_261.advancedFogTypeFarEnabled.x + 0.5);
+    return ((_261.advancedFogTypeFarEnabled.z > 0.5) && (fogType >= 1)) && (fogType <= 3);
+}
+
+static inline __attribute__((always_inline))
+float wired_advanced_fog_amount(constant UBO& _261, thread float4& gl_FragCoord)
+{
+    if (!wired_advanced_fog_enabled(_261))
+    {
+        return 0.0;
+    }
+    float viewDepth = 1.0 / fast::max(gl_FragCoord.w, 9.9999999747524270787835121154785e-07);
+    int fogType = int(_261.advancedFogTypeFarEnabled.x + 0.5);
+    if (fogType == 1)
+    {
+        if (_261.advancedFogTypeFarEnabled.y <= 0.0)
+        {
+            return 0.0;
+        }
+        return fast::clamp(viewDepth / _261.advancedFogTypeFarEnabled.y, 0.0, 1.0);
+    }
+    float opticalDepth = fast::max(_261.advancedFogColorDensity.w, 0.0) * viewDepth;
+    if (fogType == 2)
+    {
+        return fast::clamp(1.0 - exp(-opticalDepth), 0.0, 1.0);
+    }
+    return fast::clamp(1.0 - exp(-(opticalDepth * opticalDepth)), 0.0, 1.0);
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], const device spvDescriptorSetBuffer2& spvDescriptorSet2 [[buffer(2)]], float4 gl_FragCoord [[position]])
+{
+    spvDescriptorArray<texture2d<float>> wired_bindless_images {spvDescriptorSet1.wired_bindless_images};
+    spvDescriptorArray<sampler> wired_bindless_samplers {reinterpret_cast<const device spvDescriptor<sampler>*>(&spvDescriptorSet1.wired_bindless_images)};
+
+    main0_out out = {};
+    uint _476 = (*spvDescriptorSet0.m_261).packed_indices[0].x & 4095u;
+    uint _488 = ((*spvDescriptorSet0.m_261).packed_indices[0].x >> uint(12)) & 255u;
+    float4 base = wired_bindless_images[_476].sample(wired_bindless_samplers[_488], in.frag_tex_coord);
+    float3 param = base.xyz;
+    float3 _499 = sRGBToLinear(param);
+    base.x = _499.x;
+    base.y = _499.y;
+    base.z = _499.z;
+    uint tx = uint(gl_FragCoord.x) / 16u;
+    uint ty = uint(gl_FragCoord.y) / 16u;
+    uint tilesX = uint((*spvDescriptorSet2.m_520).tileParams.z);
+    uint tilesY = uint((*spvDescriptorSet2.m_520).tileParams.w);
+    if (tilesX == 0u)
+    {
+        tilesX = 1u;
+    }
+    if (tx >= tilesX)
+    {
+        tx = tilesX - 1u;
+    }
+    if (ty >= tilesY)
+    {
+        ty = tilesY - 1u;
+    }
+    uint tileBase = ((ty * tilesX) + tx) * 33u;
+    uint count = (*spvDescriptorSet2.m_558).tileLights[tileBase];
+    if (count > 32u)
+    {
+        count = 32u;
+    }
+    float3 Np = fast::normalize(in.world_normal);
+    float3 nV = fast::normalize(in.world_view);
+    float3 lit = float3(0.0);
+    for (uint k = 0u; k < count; k++)
+    {
+        uint param_1 = (*spvDescriptorSet2.m_558).tileLights[(tileBase + 1u) + k];
+        float3 param_2 = Np;
+        float3 param_3 = nV;
+        float4 param_4 = base;
+        float3 param_5 = in.world_pos;
+        lit += fp_light_contrib(param_1, param_2, param_3, param_4, param_5, (*spvDescriptorSet2.m_105), spvDescriptorSet2.dlightShadowAtlas, spvDescriptorSet2.dlightShadowSampler, (*spvDescriptorSet2.m_346));
+    }
+    float cs = (*spvDescriptorSet2.m_611).gridOrigin.w;
+    if (cs > 0.0)
+    {
+        int3 cell = int3(floor((in.world_pos - (*spvDescriptorSet2.m_611).gridOrigin.xyz) / float3(cs)));
+        bool _635 = all(cell >= int3(0));
+        bool _645;
+        if (_635)
+        {
+            _645 = all(cell < (*spvDescriptorSet2.m_611).gridDims.xyz);
+        }
+        else
+        {
+            _645 = _635;
+        }
+        if (_645)
+        {
+            int ci = (((cell.z * (*spvDescriptorSet2.m_611).gridDims.y) + cell.y) * (*spvDescriptorSet2.m_611).gridDims.x) + cell.x;
+            uint cBase = uint(ci) * 33u;
+            uint cN = (*spvDescriptorSet2.m_672).clusterLights[cBase];
+            if (cN > 32u)
+            {
+                cN = 32u;
+            }
+            for (uint k_1 = 0u; k_1 < cN; k_1++)
+            {
+                uint param_6 = (*spvDescriptorSet2.m_672).clusterLights[(cBase + 1u) + k_1];
+                float3 param_7 = Np;
+                float3 param_8 = nV;
+                float4 param_9 = base;
+                float3 param_10 = in.world_pos;
+                lit += fp_light_contrib(param_6, param_7, param_8, param_9, param_10, (*spvDescriptorSet2.m_105), spvDescriptorSet2.dlightShadowAtlas, spvDescriptorSet2.dlightShadowSampler, (*spvDescriptorSet2.m_346));
+            }
+        }
+    }
+    lit *= (1.0 - wired_advanced_fog_amount((*spvDescriptorSet0.m_261), gl_FragCoord));
+    out.out_color = float4(lit, base.w);
+    return out;
+}
+

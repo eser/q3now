@@ -1,0 +1,124 @@
+#version 460
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(std140, binding = 3) uniform Push
+{
+    uint pad;
+} _340;
+
+layout(binding = 0, rgba16f) uniform writeonly image2DArray dstIrradiance;
+layout(binding = 0) uniform textureCube srcTex;
+layout(binding = 0) uniform sampler srcSamp;
+
+vec3 cubeFaceDir(uint face, vec2 uv)
+{
+    float u = uv.x;
+    float v = uv.y;
+    vec3 dir;
+    if (face == 0u)
+    {
+        dir = vec3(1.0, -v, -u);
+    }
+    else
+    {
+        if (face == 1u)
+        {
+            dir = vec3(-1.0, -v, u);
+        }
+        else
+        {
+            if (face == 2u)
+            {
+                dir = vec3(u, 1.0, v);
+            }
+            else
+            {
+                if (face == 3u)
+                {
+                    dir = vec3(u, -1.0, -v);
+                }
+                else
+                {
+                    if (face == 4u)
+                    {
+                        dir = vec3(u, -v, 1.0);
+                    }
+                    else
+                    {
+                        dir = vec3(-u, -v, -1.0);
+                    }
+                }
+            }
+        }
+    }
+    return normalize(dir);
+}
+
+float radicalInverse_VdC(inout uint bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 1431655765u) << 1u) | ((bits & 2863311530u) >> 1u);
+    bits = ((bits & 858993459u) << 2u) | ((bits & 3435973836u) >> 2u);
+    bits = ((bits & 252645135u) << 4u) | ((bits & 4042322160u) >> 4u);
+    bits = ((bits & 16711935u) << 8u) | ((bits & 4278255360u) >> 8u);
+    return float(bits) * 2.3283064365386962890625e-10;
+}
+
+vec2 hammersley(uint i, uint n)
+{
+    uint param = i;
+    float _85 = radicalInverse_VdC(param);
+    return vec2(float(i) / float(n), _85);
+}
+
+void main()
+{
+    uvec2 size = uvec2(imageSize(dstIrradiance).xy);
+    ivec3 coord = ivec3(gl_GlobalInvocationID);
+    bool _183 = uint(coord.x) >= size.x;
+    bool _193;
+    if (!_183)
+    {
+        _193 = uint(coord.y) >= size.y;
+    }
+    else
+    {
+        _193 = _183;
+    }
+    bool _202;
+    if (!_193)
+    {
+        _202 = uint(coord.z) >= 6u;
+    }
+    else
+    {
+        _202 = _193;
+    }
+    if (_202)
+    {
+        return;
+    }
+    vec2 uv = (((vec2(coord.xy) + vec2(0.5)) / vec2(size)) * 2.0) - vec2(1.0);
+    uint param = uint(coord.z);
+    vec2 param_1 = uv;
+    vec3 N = cubeFaceDir(param, param_1);
+    vec3 up = mix(vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), bvec3(abs(N.z) < 0.999000012874603271484375));
+    vec3 tangent = normalize(cross(up, N));
+    vec3 bitangent = cross(N, tangent);
+    vec3 irradiance = vec3(0.0);
+    for (uint i = 0u; i < 256u; i++)
+    {
+        uint param_2 = i;
+        uint param_3 = 256u;
+        vec2 xi = hammersley(param_2, param_3);
+        float phi = 6.283185482025146484375 * xi.x;
+        float cosTheta = sqrt(1.0 - xi.y);
+        float sinTheta = sqrt(xi.y);
+        vec3 s = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+        vec3 sampleDir = ((tangent * s.x) + (bitangent * s.y)) + (N * s.z);
+        irradiance += textureLod(samplerCube(srcTex, srcSamp), sampleDir, 0.0).xyz;
+    }
+    irradiance = (irradiance * 3.1415927410125732421875) / vec3(256.0);
+    imageStore(dstIrradiance, coord, vec4(irradiance, 1.0));
+}
+

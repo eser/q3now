@@ -25,7 +25,7 @@ static vkTemporalIqmPipelineCatalog_t s_iqmCatalog;
 static const unsigned char b0[4]={0},b1[8]={1},b2[12]={2},b3[16]={3},b4[20]={4},b5[24]={5},b6[28]={6},b7[32]={7};
 #define VK_TEMPORAL_BLOB(name, size) const unsigned char name[size] = { 0 };
 #define VK_TEMPORAL_PAIR(tx, family, env, fog, ordinaryVS, ordinaryFS, temporalVS, writeFS, invalidateFS)
-#include "../code/renderervk/shaders/spirv/temporal_generic_catalog.inc"
+#include "../code/render/ral/backends/vulkan/renderer/shaders/spirv/temporal_generic_catalog.inc"
 #undef VK_TEMPORAL_PAIR
 #undef VK_TEMPORAL_BLOB
 
@@ -231,9 +231,24 @@ int main(void){
 		SPLIT_REJECT_SLOT(14,3u);
 #undef SPLIT_REJECT_SLOT
 		creates=s_createPipeCount;CHECK(VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops));CHECK(s_createPipeCount==creates);
-		// Active ATEST is excluded even though every ordinary source module was
-		// compiled from the historical ATEST-capable generic template.
-		gi.alphaTested=qtrue;before=fo;CHECK(!VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops));gi.alphaTested=qfalse;
+		// ATEST is specialization state in the tx0 module, not a second catalog
+		// identity. Multi-texture keys remain outside that exact admission.
+		gi.key=(vkTemporalGenericKey_t){0,VK_TEMPORAL_GENERIC_PLAIN,qfalse,qfalse};
+		gi.pipelineGeneration++;CHECK(VK_TemporalGenericCatalogSelect(&gi.key,&s_splitEntry));
+		fragmentSpecWords[0]=3u;specFloat.f=0.5f;fragmentSpecWords[1]=specFloat.u;
+		s_createPipeCount=0;gi.alphaTested=qtrue;
+		CHECK(VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops));
+		CHECK(go.ready&&s_createPipeCount==3);
+		gi.alphaTested=qfalse;creates=s_createPipeCount;
+		CHECK(!VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops));
+		CHECK(s_createPipeCount==creates);gi.alphaTested=qtrue;
+		gi.key=(vkTemporalGenericKey_t){1,VK_TEMPORAL_GENERIC_PLAIN,qfalse,qfalse};
+		gi.pipelineGeneration++;CHECK(VK_TemporalGenericCatalogSelect(&gi.key,&s_splitEntry));
+		creates=s_createPipeCount;CHECK(!VK_TemporalGenericPipelineFactoryEnsure(&go,&lo,&gp,&gi,&pops));
+		CHECK(s_createPipeCount==creates);gi.alphaTested=qfalse;
+		fragmentSpecWords[0]=0u;fragmentSpecWords[1]=0u;
+		gi.key=(vkTemporalGenericKey_t){1,VK_TEMPORAL_GENERIC_PLAIN,qfalse,qfalse};
+		CHECK(VK_TemporalGenericCatalogSelect(&gi.key,&s_splitEntry));
 		// USE_FOG shader variants read their authored UBO and are independent of
 		// the build-level FEAT_FOG_SYSTEM push range. A no-push layout admits both.
 		{ gi.key.shaderFog=qtrue;gi.pipelineGeneration++;fragmentSpecWords[10]=1u;
@@ -287,9 +302,9 @@ int main(void){
 	}
 	CHECK(VK_TemporalPipelineLayoutRelease(&lo,&lops));
 	CHECK(s_destroyOrderCount>=1&&s_destroyOrder[s_destroyOrderCount-1]>200);
-	// Build-level fog layout authors the exact sole FS 64/32 range.
+	// Build-level enhanced fog changes no layout shape: state is set-0 UBO data.
 	VK_TemporalPipelineLayoutInit(&lo);CHECK(VK_TemporalPipelineLayoutEnsure(&lo,(ralBackend_t*)1,(VkDevice)2,layouts,payload,3,qtrue,&lops));
-	CHECK(s_lastPushCount==1&&s_lastPushOffset==64&&s_lastPushSize==32&&s_lastPushStages==RAL_STAGE_FRAGMENT);
+	CHECK(s_lastPushCount==0&&s_lastPushOffset==0&&s_lastPushSize==0&&s_lastPushStages==0);
 	{ vkTemporalGenericPipelineFactoryOwner_t go;vkTemporalGenericPipelineFactoryInput_t gi;uint32_t shaderFog;
 		memset(&gi,0,sizeof(gi));gi.key=(vkTemporalGenericKey_t){2,VK_TEMPORAL_GENERIC_PLAIN,qfalse,qfalse};
 		gi.pipelineGeneration=gi.topologyGeneration=gi.catalogGeneration=1;gi.sceneFormat=RAL_FORMAT_R16G16B16A16_SFLOAT;gi.depthFormat=RAL_FORMAT_D32_SFLOAT;

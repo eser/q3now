@@ -5,13 +5,13 @@ if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
 
-file(READ "${ROOT}/code/renderer/ral/ral_resource.h" HEADER)
-file(READ "${ROOT}/code/renderer/ral/ral_sampler.c" CORE)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_resource.c" VULKAN)
-file(READ "${ROOT}/code/renderervk/vk.h" PRODUCT_HEADER)
-file(READ "${ROOT}/code/renderervk/vk.c" PRODUCT)
-file(READ "${ROOT}/code/renderervk/vk_ral_textures.h" BINDLESS_HEADER)
-file(READ "${ROOT}/code/renderervk/vk_ral_textures.c" BINDLESS)
+file(READ "${ROOT}/code/render/ral/core/ral_resource.h" HEADER)
+file(READ "${ROOT}/code/render/ral/core/ral_sampler.c" CORE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_resource.c" VULKAN)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" PRODUCT_HEADER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" PRODUCT)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.h" BINDLESS_HEADER)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c" BINDLESS)
 file(READ "${ROOT}/tests/ral_sampler_policy_test.c" HOST)
 file(READ "${ROOT}/CMakeLists.txt" CMAKE_SOURCE)
 
@@ -114,7 +114,7 @@ foreach(REQUIRED IN ITEMS
 endforeach()
 
 foreach(REQUIRED IN ITEMS
-	"code/renderer/ral/ral_sampler.c"
+	"code/render/ral/core/ral_sampler.c"
 	"ral_sampler_policy_test"
 	"ral_sampler_source_policy_contract")
 	string(FIND "${CMAKE_SOURCE}" "${REQUIRED}" POSITION)

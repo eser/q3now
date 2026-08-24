@@ -5,7 +5,7 @@
 #define CG_LOCAL_H
 //
 #include "../qcommon/q_shared.h"
-#include "../renderercommon/tr_types.h"
+#include "../render/frontend/tr_types.h"
 #include "../game/bg_public.h"
 #include "cg_public.h"
 #include "cg_temporal_identity.h"

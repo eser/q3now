@@ -7,7 +7,7 @@
 #define SDL_GL_GetProcAddress( a ) ri.GL_GetProcAddress( a )
 
 #include "tr_local.h"
-#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.gl
+#include "../render/frontend/r_log.h"  // rilog-channel-mechanism Turn C — renderer.gl
 
 R_LOG_DECLARE_CHANNEL( rch_gl, "renderer.gl" );
 

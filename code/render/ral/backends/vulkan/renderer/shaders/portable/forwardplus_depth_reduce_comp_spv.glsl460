@@ -1,0 +1,64 @@
+#version 460
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(binding = 0, std430) buffer TileDepth
+{
+    float tileDepth[];
+} _165;
+
+layout(std140, binding = 3) uniform Push
+{
+    vec4 params;
+} _25;
+
+layout(binding = 0) uniform texture2D sceneDepth;
+layout(binding = 0) uniform sampler depthSampler;
+
+void main()
+{
+    uint tx = gl_GlobalInvocationID.x;
+    uint ty = gl_GlobalInvocationID.y;
+    uint tilesX = uint(_25.params.z);
+    uint tilesY = uint(_25.params.w);
+    if ((tx >= tilesX) || (ty >= tilesY))
+    {
+        return;
+    }
+    uint tileIndex = (ty * tilesX) + tx;
+    float screenW = _25.params.x;
+    float screenH = _25.params.y;
+    float x0 = float(tx * 16u);
+    float y0 = float(ty * 16u);
+    float dMin = 1.0;
+    float dMax = 0.0;
+    bool _any = false;
+    for (uint j = 0u; j < 16u; j++)
+    {
+        for (uint i = 0u; i < 16u; i++)
+        {
+            float px = x0 + float(i);
+            float py = y0 + float(j);
+            if ((px >= screenW) || (py >= screenH))
+            {
+                continue;
+            }
+            vec2 uv = (vec2(px, py) + vec2(0.5)) / vec2(screenW, screenH);
+            float d = textureLod(sampler2D(sceneDepth, depthSampler), uv, 0.0).x;
+            if (d <= 0.0)
+            {
+                continue;
+            }
+            dMin = min(dMin, d);
+            dMax = max(dMax, d);
+            _any = true;
+        }
+    }
+    if (!_any)
+    {
+        dMin = 0.0;
+        dMax = 1.0;
+    }
+    _165.tileDepth[(2u * tileIndex) + 0u] = dMin;
+    _165.tileDepth[(2u * tileIndex) + 1u] = dMax;
+}
+

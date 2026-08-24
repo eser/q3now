@@ -1,0 +1,52 @@
+#version 460
+
+layout(constant_id = 4) const int color_mode = 0;
+const bool _53 = (color_mode == 1);
+const bool _67 = (color_mode == 2);
+const bool _80 = (color_mode == 3);
+
+layout(location = 0) out vec4 out_color;
+
+vec3 sRGBToLinear(inout vec3 c)
+{
+    c = max(c, vec3(0.0));
+    bvec3 cutoff = lessThanEqual(c, vec3(0.040449999272823333740234375));
+    vec3 lo = c / vec3(12.9200000762939453125);
+    vec3 hi = pow((c + vec3(0.054999999701976776123046875)) / vec3(1.05499994754791259765625), vec3(2.400000095367431640625));
+    return mix(hi, lo, vec3(cutoff));
+}
+
+void main()
+{
+    if (_53)
+    {
+        vec3 param = vec3(1.0);
+        vec3 _60 = sRGBToLinear(param);
+        out_color = vec4(_60, 1.0);
+    }
+    else
+    {
+        if (_67)
+        {
+            vec3 param_1 = vec3(0.20000000298023223876953125, 1.0, 0.20000000298023223876953125);
+            vec3 _73 = sRGBToLinear(param_1);
+            out_color = vec4(_73, 1.0);
+        }
+        else
+        {
+            if (_80)
+            {
+                vec3 param_2 = vec3(1.0, 0.3300000131130218505859375, 0.20000000298023223876953125);
+                vec3 _86 = sRGBToLinear(param_2);
+                out_color = vec4(_86, 1.0);
+            }
+            else
+            {
+                vec3 param_3 = vec3(0.0);
+                vec3 _93 = sRGBToLinear(param_3);
+                out_color = vec4(_93, 1.0);
+            }
+        }
+    }
+}
+

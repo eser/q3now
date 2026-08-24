@@ -1,0 +1,90 @@
+#version 460
+
+layout(constant_id = 0) const float texel_x = 0.0;
+layout(constant_id = 1) const float texel_y = 0.0;
+layout(constant_id = 2) const int first_level = 0;
+const bool _224 = (first_level != 0);
+
+layout(binding = 0) uniform sampler2D texture0;
+
+layout(location = 0) in vec2 frag_tex_coord;
+layout(location = 0) out vec4 out_color;
+
+float karis_luma(vec3 c)
+{
+    return dot(c, vec3(0.2125999927520751953125, 0.715200006961822509765625, 0.072200000286102294921875));
+}
+
+vec3 karis_avg(vec3 a, vec3 b, vec3 c, vec3 d)
+{
+    vec3 param = a;
+    float wa = 1.0 / (1.0 + karis_luma(param));
+    vec3 param_1 = b;
+    float wb = 1.0 / (1.0 + karis_luma(param_1));
+    vec3 param_2 = c;
+    float wc = 1.0 / (1.0 + karis_luma(param_2));
+    vec3 param_3 = d;
+    float wd = 1.0 / (1.0 + karis_luma(param_3));
+    float ws = ((wa + wb) + wc) + wd;
+    return ((((a * wa) + (b * wb)) + (c * wc)) + (d * wd)) / vec3(max(ws, 9.9999997473787516355514526367188e-06));
+}
+
+void main()
+{
+    vec2 uv = frag_tex_coord;
+    vec2 tx;
+    tx.x = texel_x;
+    tx.y = texel_y;
+    vec3 a = texture(texture0, uv + (tx * vec2(-1.0))).xyz;
+    vec3 b = texture(texture0, uv + (tx * vec2(1.0, -1.0))).xyz;
+    vec3 c = texture(texture0, uv + (tx * vec2(-1.0, 1.0))).xyz;
+    vec3 d = texture(texture0, uv + (tx * vec2(1.0))).xyz;
+    vec3 e = texture(texture0, uv + (tx * vec2(-2.0))).xyz;
+    vec3 f = texture(texture0, uv + (tx * vec2(0.0, -2.0))).xyz;
+    vec3 g = texture(texture0, uv + (tx * vec2(2.0, -2.0))).xyz;
+    vec3 h = texture(texture0, uv + (tx * vec2(-2.0, 0.0))).xyz;
+    vec3 i = texture(texture0, uv).xyz;
+    vec3 j = texture(texture0, uv + (tx * vec2(2.0, 0.0))).xyz;
+    vec3 k = texture(texture0, uv + (tx * vec2(-2.0, 2.0))).xyz;
+    vec3 l = texture(texture0, uv + (tx * vec2(0.0, 2.0))).xyz;
+    vec3 m = texture(texture0, uv + (tx * vec2(2.0))).xyz;
+    vec3 result;
+    if (_224)
+    {
+        vec3 param = a;
+        vec3 param_1 = b;
+        vec3 param_2 = c;
+        vec3 param_3 = d;
+        vec3 group_inner = karis_avg(param, param_1, param_2, param_3);
+        vec3 param_4 = e;
+        vec3 param_5 = f;
+        vec3 param_6 = h;
+        vec3 param_7 = i;
+        vec3 group_tl = karis_avg(param_4, param_5, param_6, param_7);
+        vec3 param_8 = f;
+        vec3 param_9 = g;
+        vec3 param_10 = i;
+        vec3 param_11 = j;
+        vec3 group_tr = karis_avg(param_8, param_9, param_10, param_11);
+        vec3 param_12 = h;
+        vec3 param_13 = i;
+        vec3 param_14 = k;
+        vec3 param_15 = l;
+        vec3 group_bl = karis_avg(param_12, param_13, param_14, param_15);
+        vec3 param_16 = i;
+        vec3 param_17 = j;
+        vec3 param_18 = l;
+        vec3 param_19 = m;
+        vec3 group_br = karis_avg(param_16, param_17, param_18, param_19);
+        result = (group_inner * 0.5) + ((((group_tl + group_tr) + group_bl) + group_br) * 0.125);
+    }
+    else
+    {
+        result = (((a + b) + c) + d) * 0.125;
+        result += ((((e + g) + k) + m) * 0.03125);
+        result += ((((f + h) + j) + l) * 0.0625);
+        result += (i * 0.125);
+    }
+    out_color = vec4(result, 1.0);
+}
+

@@ -1,0 +1,194 @@
+#version 460
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct AtmParticle
+{
+    vec3 pos;
+    float seed;
+    vec3 vel;
+    float flags;
+};
+
+layout(binding = 0, std140) uniform AtmFrame
+{
+    mat4 mvp;
+    vec4 viewLeft;
+    vec4 viewUp;
+    vec4 eyeWorld;
+    float dt;
+    float time;
+    uint poolSize;
+    uint pingPongRead;
+    vec4 boundsMin;
+    vec4 boundsMax;
+    vec2 worldMins;
+    vec2 worldMaxs;
+    vec2 invGridStep;
+    uint gridSize;
+    uint atmType;
+    float _distance;
+    float pad0;
+    float pad1;
+    float pad2;
+} _63;
+
+layout(binding = 1, std430) writeonly buffer WritePool
+{
+    AtmParticle writeParticles[];
+} _165;
+
+layout(binding = 0, std430) readonly buffer ReadPool
+{
+    AtmParticle readParticles[];
+} _184;
+
+layout(binding = 0) uniform sampler2D heightgrid;
+
+AtmParticle deadParticle()
+{
+    AtmParticle p;
+    p.pos = vec3(0.0);
+    p.seed = 0.0;
+    p.vel = vec3(0.0);
+    p.flags = 0.0;
+    return p;
+}
+
+float hash11(inout uint x)
+{
+    x ^= (x >> uint(16));
+    x *= 2146121005u;
+    x ^= (x >> uint(15));
+    x *= 2221713035u;
+    x ^= (x >> uint(16));
+    return float(x) * 2.3283064365386962890625e-10;
+}
+
+float rand01(uint idx, uint salt, float seed)
+{
+    uint t = uint(_63.time * 1000.0) + uint(seed * 4096.0);
+    uint param = ((idx * 747796405u) + (salt * 2891336453u)) + t;
+    float _86 = hash11(param);
+    return _86;
+}
+
+float groundHeightAt(vec2 worldXY)
+{
+    vec2 cell = (worldXY - _63.worldMins) * _63.invGridStep;
+    vec2 uv = (cell + vec2(0.5)) / vec2(float(_63.gridSize));
+    return textureLod(heightgrid, uv, 0.0).x;
+}
+
+void main()
+{
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= _63.poolSize)
+    {
+        return;
+    }
+    if (_63.atmType == 0u)
+    {
+        AtmParticle _167 = deadParticle();
+        _165.writeParticles[idx].pos = _167.pos;
+        _165.writeParticles[idx].seed = _167.seed;
+        _165.writeParticles[idx].vel = _167.vel;
+        _165.writeParticles[idx].flags = _167.flags;
+        return;
+    }
+    AtmParticle p;
+    p.pos = _184.readParticles[idx].pos;
+    p.seed = _184.readParticles[idx].seed;
+    p.vel = _184.readParticles[idx].vel;
+    p.flags = _184.readParticles[idx].flags;
+    if (p.flags < 0.5)
+    {
+        uint param = idx;
+        uint param_1 = 11u;
+        float param_2 = p.seed;
+        float rx = rand01(param, param_1, param_2);
+        uint param_3 = idx;
+        uint param_4 = 23u;
+        float param_5 = p.seed;
+        float ry = rand01(param_3, param_4, param_5);
+        uint param_6 = idx;
+        uint param_7 = 31u;
+        float param_8 = p.seed;
+        float rz = rand01(param_6, param_7, param_8);
+        float spread = _63._distance;
+        p.pos.x = clamp(_63.eyeWorld.x + (((rx * 2.0) - 1.0) * spread), _63.boundsMin.x, _63.boundsMax.x);
+        p.pos.y = clamp(_63.eyeWorld.y + (((ry * 2.0) - 1.0) * spread), _63.boundsMin.y, _63.boundsMax.y);
+        p.pos.z = min(_63.eyeWorld.z + (rz * 800.0), _63.boundsMax.z);
+        p.seed = (rx + ry) + rz;
+        if (_63.atmType == 1u)
+        {
+            uint param_9 = idx;
+            uint param_10 = 41u;
+            float param_11 = p.seed;
+            p.vel.x = ((rand01(param_9, param_10, param_11) * 2.0) - 1.0) * 30.0;
+            uint param_12 = idx;
+            uint param_13 = 53u;
+            float param_14 = p.seed;
+            p.vel.y = ((rand01(param_12, param_13, param_14) * 2.0) - 1.0) * 30.0;
+            p.vel.z = -880.0;
+        }
+        else
+        {
+            uint param_15 = idx;
+            uint param_16 = 41u;
+            float param_17 = p.seed;
+            p.vel.x = ((rand01(param_15, param_16, param_17) * 2.0) - 1.0) * 20.0;
+            uint param_18 = idx;
+            uint param_19 = 53u;
+            float param_20 = p.seed;
+            p.vel.y = ((rand01(param_18, param_19, param_20) * 2.0) - 1.0) * 20.0;
+            p.vel.z = -160.0;
+        }
+        p.flags = 1.0;
+        _165.writeParticles[idx].pos = p.pos;
+        _165.writeParticles[idx].seed = p.seed;
+        _165.writeParticles[idx].vel = p.vel;
+        _165.writeParticles[idx].flags = p.flags;
+        return;
+    }
+    p.pos += (p.vel * _63.dt);
+    if (_63.atmType == 2u)
+    {
+        p.pos.x += (sin(_63.time + float(idx)) * 0.5);
+        p.pos.y += (cos((_63.time * 1.2999999523162841796875) + float(idx)) * 0.5);
+    }
+    vec2 param_21 = p.pos.xy;
+    float ground = groundHeightAt(param_21);
+    if (p.pos.z < ground)
+    {
+        AtmParticle _404 = deadParticle();
+        _165.writeParticles[idx].pos = _404.pos;
+        _165.writeParticles[idx].seed = _404.seed;
+        _165.writeParticles[idx].vel = _404.vel;
+        _165.writeParticles[idx].flags = _404.flags;
+        return;
+    }
+    vec2 d = p.pos.xy - _63.eyeWorld.xy;
+    if (dot(d, d) > (_63._distance * _63._distance))
+    {
+        AtmParticle _436 = deadParticle();
+        _165.writeParticles[idx].pos = _436.pos;
+        _165.writeParticles[idx].seed = _436.seed;
+        _165.writeParticles[idx].vel = _436.vel;
+        _165.writeParticles[idx].flags = _436.flags;
+        return;
+    }
+    if (p.pos.z < (_63.eyeWorld.z - 500.0))
+    {
+        AtmParticle _457 = deadParticle();
+        _165.writeParticles[idx].pos = _457.pos;
+        _165.writeParticles[idx].seed = _457.seed;
+        _165.writeParticles[idx].vel = _457.vel;
+        _165.writeParticles[idx].flags = _457.flags;
+        return;
+    }
+    _165.writeParticles[idx].pos = p.pos;
+    _165.writeParticles[idx].seed = p.seed;
+    _165.writeParticles[idx].vel = p.vel;
+    _165.writeParticles[idx].flags = p.flags;
+}
+

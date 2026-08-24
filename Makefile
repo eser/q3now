@@ -37,6 +37,7 @@
 #   DEV                debug build              (default: 0; 1 = debug build)
 #   VM                 VM game modules           (default: 0; 1=VM + sv_pure 1)
 #   USE_WASM           VM backend via WAMR       (0=off, 1=on; default: 1)
+#   USE_FOG_SYSTEM     enhanced fog compile gate (0=off, 1=on; default: 0)
 #   CHANNEL            release channel           (default: preview; "public" omits suffix)
 #   CODESIGN_IDENTITY  signing identity         (default: - = ad-hoc)
 #   UPSTREAM_REF       fork point for diff-api  (default: ecd5fa41)
@@ -57,7 +58,7 @@ endif
 #                    Override via PRODUCT_NAME=othergame for builds targeting
 #                    a different game on the wired engine.
 #   CMAKE_APP_NAME — engine binary name (matches CMakeLists.txt CNAME = wired).
-#                    Used for build-output paths inside build/<cfg>/ and for
+#                    Used for build-output paths inside build/ and for
 #                    binary filenames inside installed bundles.
 #   APP_NAME       — channel-suffixed product name. Used for install paths,
 #                    DMG/tar/zip filenames, and the .app display name on macOS.
@@ -125,7 +126,7 @@ GAME_ARCH := $(patsubst _%,%,$(RENDEXT))
 ifeq ($(UNAME_S),Darwin)
   JOBS      ?= $(shell sysctl -n hw.ncpu)
   # CMake assembles a single product bundle on macOS:
-  #   build/<cfg>/$(APP_NAME)$(BINEXT).app/Contents/MacOS/{wired$(BINEXT), wired-headless$(BINEXT)}
+  #   build/$(APP_NAME)$(BINEXT).app/Contents/MacOS/{wired$(BINEXT), wired-headless$(BINEXT)}
   # Bundle directory is product+channel branded; engine binaries inside keep
   # their wired/wired-headless names. See "Combined macOS bundle assembly" in CMakeLists.txt.
   BUILT_APP  := $(BUILD_DIR)/$(APP_NAME)$(BINEXT).app
@@ -173,6 +174,7 @@ endif
 
 # VM backend toggle: 1 = enable WAMR, 0 = legacy QVM only
 USE_WASM ?= 1
+USE_FOG_SYSTEM ?= 0
 
 ifeq ($(USE_WASM),1)
   CMAKE_WASM_FLAG := -DUSE_WASM=ON
@@ -184,10 +186,16 @@ else
   CMAKE_WASM_FLAG := -DUSE_WASM=OFF
 endif
 
+ifeq ($(USE_FOG_SYSTEM),1)
+  CMAKE_FOG_FLAG := -DUSE_FOG_SYSTEM=ON
+else
+  CMAKE_FOG_FLAG := -DUSE_FOG_SYSTEM=OFF
+endif
+
 CMAKE_EXTRA_FLAGS ?=
 CMAKE_CHANNEL_FLAG := -DCHANNEL_SUFFIX="$(CHANNEL_SUFFIX)"
 CMAKE_PRODUCT_FLAG := -DPRODUCT_NAME="$(PRODUCT_NAME)"
-CMAKE_CONFIGURE    := cmake -S . -B $(BUILD_DIR) $(GENERATOR) -DCMAKE_BUILD_TYPE=$(BUILD_CFG) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTING=ON -DBUILD_GAME_LIBRARIES=ON $(CMAKE_WASM_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_PRODUCT_FLAG) $(CMAKE_EXTRA_FLAGS)
+CMAKE_CONFIGURE    := cmake -S . -B $(BUILD_DIR) $(GENERATOR) -DCMAKE_BUILD_TYPE=$(BUILD_CFG) -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTING=ON -DBUILD_GAME_LIBRARIES=ON $(CMAKE_WASM_FLAG) $(CMAKE_FOG_FLAG) $(CMAKE_CHANNEL_FLAG) $(CMAKE_PRODUCT_FLAG) $(CMAKE_EXTRA_FLAGS)
 CMAKE_BUILD        := cmake --build $(BUILD_DIR) --parallel $(JOBS)
 
 # Code signing identity (default: ad-hoc).
@@ -254,6 +262,10 @@ SW3Z_BIN := $(SW3Z_DIR)/cmd/sw3z/sw3z
 # Pak output (always from Release build — VM modules are always Release)
 PAK_STAGING := $(BUILD_DIR)/pak-staging
 PAK_OUT := $(BUILD_DIR)/base/pax21.sw3z
+WEB_CONTENT_OUT := $(BUILD_DIR)/browser-content
+WEB_BASE_CONTENT ?= $(HOME)/wired/$(APP_NAME)/base/pax01.sw3z
+WEB_VISOR_ANIMATION := code/web/content/characters/visor/models/animation.cfg
+WEB_AUTHORED_CONTENT := $(WEB_CONTENT_OUT)/authored-content.wac
 
 # Out-of-process crash handler (USE_SENTRY_CRASH=ON only). Path is the same on
 # every platform because it comes from the vendored library's build tree, not
@@ -263,7 +275,9 @@ SENTRY_HANDLER_BIN := $(BUILD_DIR)/src/libs/sentry-native/sentry-crash$(EXEEXT)
 
 # ── Phony targets ─────────────────────────────────────────────────────────────
 
-.PHONY: all configure build _build-stamp clean clean-launcher clean-all rebuild shaders \
+.PHONY: all configure build build-webgpu-browser test-webgpu-browser-module \
+		build-web-client test-web-client \
+        _build-stamp clean clean-launcher clean-all rebuild shaders \
         create-launcher create-packs build-fonts \
         _wails-build \
         copy-libs copy-build copy-packs copy-all \
@@ -289,14 +303,16 @@ SENTRY_HANDLER_BIN := $(BUILD_DIR)/src/libs/sentry-native/sentry-crash$(EXEEXT)
 		test-ping-owner-expired-offscreen test-ping-owner-expired-offscreen-self \
 		test-ping-owner-capacity test-ping-owner-capacity-self \
         test-lan-discovery-timeout test-lan-discovery-timeout-self \
-		test-ral-readback-runtime \
+		test-ral-readback-runtime test-ral-auto-exposure-runtime test-ral-metal-runtime \
+		test-ral-opengl-runtime test-ral-opengl-vulkan-visual-parity \
+		test-ral-metal-vulkan-visual-parity test-ral-metal-vulkan-performance \
         test-vm test-quic-game test-fs-dedup bench diff-api lint help
 
 # Default target: a CONSISTENT DEPLOYABLE WORLD, not just compiled objects.
 # `build` compiles the engine + native game DLLs + the WASM VM modules (the
 # gamecl_wasm/gamesv_wasm custom targets are ALL-targets, so they rebuild
 # whenever their sources change) into $(MODULE_DIR)/vm — but leaves the
-# deployed mod pack ($(PAK_OUT), i.e. build/<cfg>/base/pax21.sw3z) untouched.
+# deployed mod pack ($(PAK_OUT), i.e. build/base/pax21.sw3z) untouched.
 # A bare `make build` therefore ships a FRESH engine over a STALE pak: the
 # server loads gamesv.wasm FROM the pak (sv_pure + vm_game=2), so game-side
 # edits silently do not take effect and measurements interrogate a stale
@@ -313,6 +329,42 @@ all: create-packs
 
 configure:
 	$(CMAKE_CONFIGURE)
+
+# Browser RAL artifacts use the canonical build/ tree as well. DEV=1 selects
+# Debug through the same configure target; the default remains Release.
+build-webgpu-browser: configure
+	$(CMAKE_BUILD) --target ral_webgpu_browser_wasm_module wired_web_platform_wasm_probe
+
+test-webgpu-browser-module: build-webgpu-browser
+	ctest --test-dir $(BUILD_DIR) --output-on-failure \
+		-R 'ral_webgpu_browser_(host|dispatch|module).*_contract|ral_webgpu_browser_wasm_module_contract|wired_web_(client|platform).*_contract'
+
+# Production browser client: keep pax01 read-only/external, build pax21 and the
+# Emscripten game modules from this checkout, then publish one integrity-bound
+# manifest. Browser runtime receives only URLs and MEMFS mount paths.
+build-web-client: create-packs
+	@test -f "$(WEB_BASE_CONTENT)" || { \
+		echo "ERROR: browser base content missing: $(WEB_BASE_CONTENT)"; \
+		echo "       set WEB_BASE_CONTENT=/absolute/path/to/pax01.sw3z"; exit 1; }
+	$(CMAKE_BUILD) --target wired_web_full_client_wasm_module
+	node tools/web-authored-compiler.mjs \
+		--output "$(abspath $(WEB_AUTHORED_CONTENT))" \
+		--menu "$(abspath modfiles/ui/main.wui)" \
+		--l10n "$(abspath modfiles/scripts/l10n/en.lua)" \
+		--scene "$(abspath modfiles/scripts/scene/arena1.lua)"
+	cmake -DOUT_DIR="$(abspath $(WEB_CONTENT_OUT))" \
+		-DPAX01="$(abspath $(WEB_BASE_CONTENT))" \
+		-DPAX21="$(abspath $(PAK_OUT))" \
+		-DGAMECL="$(abspath $(WEB_CONTENT_OUT))/gameclwasm32.wasm" \
+		-DGAMESV="$(abspath $(WEB_CONTENT_OUT))/gamesvwasm32.wasm" \
+		-DCONFIG="$(abspath $(PAK_STAGING))/default.cfg" \
+		-DVISOR_ANIMATION="$(abspath $(WEB_VISOR_ANIMATION))" \
+		-DAUTHORED_CONTENT="$(abspath $(WEB_AUTHORED_CONTENT))" \
+		-P cmake/wired_web_content_manifest.cmake
+
+test-web-client: build-web-client
+	ctest --test-dir $(BUILD_DIR) --output-on-failure \
+		-R 'wired_web_(client|content|platform).*_contract'
 
 # WIRED_PREBUILT=1: engine binaries were placed into $(BUILD_DIR) by an
 # external builder (CI downloads them from the cross-windows artifact) —
@@ -393,7 +445,7 @@ clean-launcher:
 
 clean-all: clean clean-launcher
 
-# Regenerate the committed shader SPIR-V (code/renderervk/shaders/spirv/shader_data.c)
+# Regenerate the committed shader SPIR-V (code/render/ral/backends/vulkan/renderer/shaders/spirv/shader_data.c)
 # from the GLSL sources via compile.mjs. The build COMPILES this file but never
 # regenerates it, so a GLSL/manifest change without a re-run ships stale bytecode.
 # Best-effort: if node/glslang is absent the committed file is kept so SDK-less /
@@ -401,7 +453,7 @@ clean-all: clean clean-launcher
 shaders:
 	@if command -v node >/dev/null 2>&1; then \
 	  echo "==> Regenerating shaders (compile.mjs)..."; \
-	  node code/renderervk/shaders/compile.mjs \
+	  node code/render/ral/backends/vulkan/renderer/shaders/compile.mjs \
 	    || echo "WARNING: shader regen failed — keeping committed shader_data.c"; \
 	else \
 	  echo "WARNING: node not found — skipping shader regen (committed shader_data.c)"; \
@@ -713,6 +765,7 @@ define install_libs
 	cp "$(BUILD_DIR)/$(CMAKE_APP_NAME)_opengl$(RENDEXT).dylib" "$(1)/"
 	@test -f "$(BUILD_DIR)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dylib" && \
 	  cp "$(BUILD_DIR)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dylib" "$(1)/" || true
+	cp "$(BUILD_DIR)/$(CMAKE_APP_NAME)_metal$(RENDEXT).dylib" "$(1)/"
 	@# libcrypto is in this list because picoquic's TLS links it: without the
 	@# copy+rewrite the shipped bundle references the absolute Homebrew path
 	@# and cannot launch on a machine without `brew install openssl@3`.
@@ -728,7 +781,8 @@ define install_libs
 	              "$(1)/$(CMAKE_APP_NAME)-headless" \
 	              "$(1)/$(CMAKE_APP_NAME)-headless$(BINEXT)" \
 	              "$(1)/$(CMAKE_APP_NAME)_opengl$(RENDEXT).dylib" \
-	              "$(1)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dylib"; do \
+	              "$(1)/$(CMAKE_APP_NAME)_vulkan$(RENDEXT).dylib" \
+	              "$(1)/$(CMAKE_APP_NAME)_metal$(RENDEXT).dylib"; do \
 	      [ -f "$$BIN" ] || continue; \
 	      LINKED=$$(otool -L "$$BIN" 2>/dev/null | grep --color=never "$$LIBNAME" | awk '{print $$1}'); \
 	      if [ -n "$$LINKED" ] && [ "$$LINKED" != "@executable_path/$$BASENAME" ]; then \
@@ -1167,6 +1221,114 @@ else
 	@exit 77
 endif
 
+# Debug-only GPU-readback acceptance for the RAL histogram/reduce chain.
+# Use the canonical build tree: `DEV=1 make test-ral-auto-exposure-runtime`.
+test-ral-auto-exposure-runtime: copy-all
+ifeq ($(UNAME_S),Darwin)
+	@if [ "$(DEV)" != "1" ]; then echo "FAIL: use DEV=1 make test-ral-auto-exposure-runtime"; exit 2; fi
+	@WIRED_CONTENT_ROOT="$(HOME)/wired/$(APP_NAME)" \
+	bash tests/ral-auto-exposure-check.sh \
+		"$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: native auto-exposure runtime requires macOS/MoltenVK"
+	@exit 77
+endif
+
+# Real-map advanced-fog acceptance. This deliberately uses the canonical
+# build/ tree and an explicit 1280x720 window; the harness creates isolated
+# homes and never writes the player's config or licensed pax01 archive.
+test-advanced-fog-runtime: copy-all $(PNG2RAW_BIN)
+ifeq ($(UNAME_S),Darwin)
+	@if [ "$(DEV)" != "1" ] || [ "$(USE_FOG_SYSTEM)" != "1" ]; then \
+		echo "FAIL: use DEV=1 USE_FOG_SYSTEM=1 make test-advanced-fog-runtime"; exit 2; \
+	fi
+	@WIRED_CONTENT_ROOT="$${WIRED_CONTENT_ROOT:-$(HOME)/wired/$(APP_NAME)}" \
+	bash tests/advanced-fog-runtime-check.sh \
+		"$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: advanced-fog visual runtime currently requires macOS Vulkan"
+	@exit 77
+endif
+
+.PHONY: test-advanced-fog-runtime
+
+# Native Metal product proof: use the assembled/codesigned application, select
+# the Metal renderer explicitly, and boot both parent-acceptance arenas in
+# separate 1280x720 processes. The gate requires a native-free world/asset/UI
+# submission receipt, build-time metallib-backed indexed BSP, patch/material/
+# lightmap/model lowering, textured/MSDF WiredUI triangles and an in-drawable
+# readback. Cross-backend pixel tolerances are owned by the parity gate below.
+test-ral-metal-runtime: bundle-codesign
+ifeq ($(UNAME_S),Darwin)
+	@Q3DIR="$(Q3DIR)" \
+	bash tests/ral-metal-runtime-check.sh \
+	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: native Metal product runtime requires macOS"
+endif
+
+# Exact OpenGL 4.6 product proof. macOS skips fail-closed because its system
+# implementation tops out at 4.1; a capable Linux/Windows host runs both arena
+# maps through the canonical wired_opengl_<arch> RAL module at 1280x720.
+test-ral-opengl-runtime: build
+ifeq ($(UNAME_S),Darwin)
+	@echo "SKIP: macOS system OpenGL is 4.1; canonical adapter requires exact 4.6 Core"
+else
+	@Q3DIR="$(Q3DIR)" \
+	bash tests/ral-opengl-runtime-check.sh "$(ENGINE_BIN)"
+endif
+
+# Release-only exact OpenGL 4.6 versus Vulkan arena parity. Both backends use
+# one engine SHA, camera/time/presentation inputs and semantic content receipts;
+# the analyzer refuses stale, blank, fallback, missing-cohort and drift evidence.
+test-ral-opengl-vulkan-visual-parity: build png2raw
+ifeq ($(UNAME_S),Darwin)
+	@echo "SKIP: macOS system OpenGL is 4.1; OpenGL/Vulkan parity requires exact 4.6 Core"
+else
+	@if [ "$(DEV)" = "1" ]; then \
+		echo "FAIL: test-ral-opengl-vulkan-visual-parity is Release-only; omit DEV=1"; exit 2; \
+	fi
+	@grep -q '^CMAKE_BUILD_TYPE:STRING=Release$$' "$(BUILD_DIR)/CMakeCache.txt" || { \
+		echo "FAIL: canonical build/ tree is not configured Release"; exit 2; \
+	}
+	@Q3DIR="$(Q3DIR)" PNG2RAW="$(abspath $(PNG2RAW_BIN))" \
+	bash tests/ral-opengl-vulkan-visual-parity.sh "$(ENGINE_BIN)"
+endif
+
+# Deterministic native Metal versus Vulkan/MoltenVK content-parity proof. Each
+# backend receives the same signed binary, arena cameras, 1280x720 SDR/sRGB
+# presentation policy and pinned renderer times. The analyzer also requires
+# semantic receipts so a visually convenient missing cohort cannot pass.
+test-ral-metal-vulkan-visual-parity: bundle-codesign png2raw
+ifeq ($(UNAME_S),Darwin)
+	@Q3DIR="$(Q3DIR)" \
+	PNG2RAW="$(abspath $(PNG2RAW_BIN))" \
+	bash tests/ral-metal-vulkan-visual-parity.sh \
+	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: native Metal/Vulkan visual parity requires macOS"
+	@exit 77
+endif
+
+# Release-only native Metal versus MoltenVK ceiling comparison. Aggregate
+# telemetry records every measured frame in bounded 200-frame histograms, so
+# p95/hitch evidence does not pay the observer cost of one JSON line per frame.
+test-ral-metal-vulkan-performance: bundle-codesign
+ifeq ($(UNAME_S),Darwin)
+	@if [ "$(DEV)" = "1" ]; then \
+		echo "FAIL: test-ral-metal-vulkan-performance is Release-only; omit DEV=1"; exit 2; \
+	fi
+	@grep -q '^CMAKE_BUILD_TYPE:STRING=Release$$' "$(BUILD_DIR)/CMakeCache.txt" || { \
+		echo "FAIL: canonical build/ tree is not configured Release"; exit 2; \
+	}
+	@Q3DIR="$(Q3DIR)" \
+	bash tests/ral-metal-vulkan-performance.sh \
+	  "$(Q3DIR)/Contents/MacOS/$(CMAKE_APP_NAME)$(BINEXT)"
+else
+	@echo "SKIP: native Metal/MoltenVK performance gate requires macOS"
+	@exit 77
+endif
+
 # Deterministic, pixel-free M1 menu transition gate. WIRED identifies the
 # current binary/pack; WIRED_CONTENT_ROOT may supply read-only licensed base
 # content for a staging build. --self-test remains pack- and engine-free.
@@ -1450,8 +1612,12 @@ test-ral-frame-graph-runtime-self:
 .PHONY: test-ral-frame-graph-runtime test-ral-frame-graph-runtime-self
 
 test-ral-profile-host:
-	@test -n "$${WIRED_PROFILE_HOST}" || { echo "usage: make test-ral-profile-host WIRED_PROFILE_HOST=/absolute/path/to/wired_profile_host"; exit 64; }
-	@bash tests/ral-profile-host-lifecycle-check.sh "$${WIRED_PROFILE_HOST}"
+	@tool="$${WIRED_PROFILE_HOST:-$(abspath $(BUILD_DIR))/wired_profile_host}"; \
+	if [ ! -x "$$tool" ]; then \
+		echo "SKIP: wired_profile_host tool build unavailable (configure WIRED_BUILD_IMGUI_TOOLS=ON)"; \
+		exit 0; \
+	fi; \
+	bash tests/ral-profile-host-lifecycle-check.sh "$$tool"
 
 test-ral-profile-host-self:
 	@bash tests/ral-profile-host-lifecycle-check.sh --self-test
@@ -1622,7 +1788,9 @@ $(PNG2RAW_BIN):
 $(PNG_PERTURB_BIN):
 	cd tools/png-perturb && go build -o png-perturb$(EXEEXT) .
 
-png2raw: $(PNG2RAW_BIN)
+.PHONY: png2raw
+png2raw:
+	cd tools/png2raw && go build -o png2raw$(EXEEXT) ./cmd/png2raw
 png-perturb: $(PNG_PERTURB_BIN)
 
 $(VCOMPARE_BIN):

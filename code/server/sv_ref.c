@@ -38,7 +38,7 @@ LOG_DECLARE_CHANNEL( ch_server, "server" );
 
 #if FEAT_HEADLESS_RENDERER
 
-#include "../renderercommon/tr_public.h"
+#include "../render/frontend/tr_public.h"
 #include "../qcommon/qfiles.h"
 #include "../qcommon/cm_public.h"
 

@@ -5,10 +5,10 @@ IF(NOT DEFINED SOURCE_ROOT OR NOT IS_DIRECTORY "${SOURCE_ROOT}")
 	MESSAGE(FATAL_ERROR "SOURCE_ROOT must name the q3now source tree")
 ENDIF()
 
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk.c" VK)
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk.h" VK_H)
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk_ral_textures.c" ADOPT)
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk_ral_textures.h" ADOPT_H)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VK)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" VK_H)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.c" ADOPT)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk_ral_textures.h" ADOPT_H)
 FILE(READ "${SOURCE_ROOT}/tests/ral_vulkan_dynamic_bind_test.c" HOST)
 FILE(READ "${SOURCE_ROOT}/tests/ral_vulkan_bind_group_arena_test.c" ARENA_HOST)
 
@@ -77,6 +77,8 @@ EXTRACT_SPAN("${VK}" "void vk_draw_forwardplus( Vk_Depth_Range depth_range )"
 	"void vk_begin_main_render_pass( void )" DRAW)
 EXTRACT_SPAN("${VK}" "static void vk_resize_geometry_buffer( void )"
 	"qboolean vk_temporal_motion_seal_primary( void )" RESIZE)
+EXTRACT_SPAN("${VK}" "static void vk_create_geometry_buffers( VkDeviceSize size )"
+	"static qboolean vk_create_effect_bind_group_layout(" GEOMETRY_CREATE)
 
 # Exact portable layout inventory: set0 dynamic UBO, set1 central bindless,
 # set2 eight fragment resources. The pipeline must publish this exact vector.
@@ -89,7 +91,7 @@ FOREACH(NEEDLE IN ITEMS
 ENDFOREACH()
 FOREACH(NEEDLE IN ITEMS
 	"e.dynamicOffset = qtrue;"
-	"vk.ral_bgl_uniform = Ral_AdoptBindGroupLayout( backend, vk.set_layout_uniform"
+	"&vk.ral_bgl_uniform, &vk.set_layout_uniform, \"wired-set-layout-uniform\" );"
 	"vk_create_effect_bind_group_layout( e, ARRAY_LEN( e ),"
 	"e[0].type = RAL_BIND_STORAGE_BUFFER;"
 	"e[1].type = RAL_BIND_STORAGE_BUFFER;"
@@ -126,13 +128,13 @@ FOREACH(NEEDLE IN ITEMS
 	"Ral_BindGroupArenaReceiptValid( &vk.ral_descriptor_arena_receipt )"
 	"vk.ral_descriptor_arena_receipt.backendIdentity != backend"
 	"vk.ral_descriptor_arena_receipt.arenaIdentity"
-	"tileParams = vk_ral_lookup_buffer( vk.fpTileParamsBuf[slot] );"
-	"shadowParams = vk_ral_lookup_buffer( vk.dlightShadow.paramsBuf[slot] );"
-	"clusterParams = vk_ral_lookup_buffer( vk.fpClusterParamsBuf );"
-	"vk.dlightShadow.ral_image && vk.dlightShadow.view"
-	"vk.shadowMap.ral_image && vk.shadowMap.view"
-	"tr.whiteImage && tr.whiteImage->ralDescriptorTexture"
-	"shadowViewCandidate = Ral_AdoptTextureViewExact( backend,"
+	"tileParams = vk.ral_fpTileParams[slot];"
+	"shadowParams = vk.dlightShadow.ral_paramsBuf[slot];"
+	"clusterParams = vk.ral_fpClusterParams;"
+	"vk.dlightShadow.ral_image"
+	"vk.shadowMap.ral_image"
+	"tr.whiteImage && tr.whiteImage->ral"
+	"shadowViewCandidate = Ral_CreateTextureView( backend, &shadowViewInfo );"
 	".binding=4u,"
 	".binding=5u,"
 	".binding=6u,"
@@ -207,19 +209,19 @@ IF(DLIGHT_CHILD_POS EQUAL -1 OR DLIGHT_PARENT_POS EQUAL -1
 	MESSAGE(FATAL_ERROR "Forward+ set-2 no longer precedes dlight-atlas parent teardown")
 ENDIF()
 FOREACH(NEEDLE IN ITEMS
-	"vk_ral_register_buffer( vk.fpTileParamsBuf[i]"
-	"vk_ral_register_buffer( vk.fpClusterParamsBuf")
-	REQUIRE_TEXT("${INIT}" "${NEEDLE}" "Forward+ raw UBO registry publication")
+	"vk.ral_fpTileParams[i] = vk_fp_tile_params_shadows[i].buffer;"
+	"vk.ral_fpClusterParams = vk_fp_cluster_params_shadow.buffer;")
+	REQUIRE_TEXT("${INIT}" "${NEEDLE}" "Forward+ direct UBO owner publication")
 ENDFOREACH()
-REQUIRE_TEXT("${DLIGHT_ALLOC}" "vk_ral_register_buffer( vk.dlightShadow.paramsBuf[i]"
-	"Forward+ shadow UBO registry publication")
+REQUIRE_TEXT("${DLIGHT_ALLOC}" "vk.dlightShadow.ral_paramsBuf[i] = vk_dlight_params_shadows[i].buffer;"
+	"Forward+ shadow UBO direct publication")
 FOREACH(NEEDLE IN ITEMS
-	"vk_ral_unregister_buffer( vk.fpTileParamsBuf[i] );"
-	"vk_ral_unregister_buffer( vk.fpClusterParamsBuf );")
-	REQUIRE_TEXT("${SHUTDOWN}" "${NEEDLE}" "Forward+ raw UBO registry teardown")
+	"VK_RalBufferShadowRelease( &vk_fp_tile_params_shadows[i] );"
+	"VK_RalBufferShadowRelease( &vk_fp_cluster_params_shadow );")
+	REQUIRE_TEXT("${SHUTDOWN}" "${NEEDLE}" "Forward+ direct UBO owner teardown")
 ENDFOREACH()
-REQUIRE_TEXT("${DLIGHT_RELEASE}" "vk_ral_unregister_buffer( vk.dlightShadow.paramsBuf[i] );"
-	"Forward+ shadow UBO registry teardown")
+REQUIRE_TEXT("${DLIGHT_RELEASE}" "VK_RalBufferShadowRelease( &vk_dlight_params_shadows[i] );"
+	"Forward+ shadow UBO direct teardown")
 
 REQUIRE_TEXT("${SHUTDOWN}" "vk_forwardplus_lit_invalidate_sets();"
 	"Forward+ shutdown child release")
@@ -268,14 +270,21 @@ FOREACH(NEEDLE IN ITEMS
 ENDFOREACH()
 REQUIRE_TEXT("${ADOPT_H}" "vk_ral_release_tess_uniform_bindgroup( uint32_t slot );"
 	"geometry replacement release API")
-STRING(FIND "${RESIZE}" "vk_ral_release_tess_uniform_bindgroup" RELEASE_POS)
-STRING(FIND "${RESIZE}" "vk_release_geometry_buffers();" RAW_RELEASE_POS)
-STRING(FIND "${RESIZE}" "vk_create_geometry_buffers" CREATE_POS)
-STRING(FIND "${RESIZE}" "vk_ral_refresh_tess_uniform_bindgroup" REFRESH_POS)
+STRING(FIND "${GEOMETRY_CREATE}" "VK_RalBufferShadowEnsure( &candidate[i]" CREATE_POS)
+STRING(FIND "${GEOMETRY_CREATE}" "vk_ral_release_tess_uniform_bindgroup" RELEASE_POS)
+STRING(FIND "${GEOMETRY_CREATE}" "vk_release_geometry_buffers();" RAW_RELEASE_POS)
+STRING(FIND "${GEOMETRY_CREATE}" "vk_tess_geometry_shadows[i] = candidate[i];" PUBLISH_POS)
 IF(RELEASE_POS EQUAL -1 OR RAW_RELEASE_POS EQUAL -1 OR CREATE_POS EQUAL -1
-		OR REFRESH_POS EQUAL -1 OR NOT RELEASE_POS LESS RAW_RELEASE_POS
-		OR NOT RAW_RELEASE_POS LESS CREATE_POS OR NOT CREATE_POS LESS REFRESH_POS)
-	MESSAGE(FATAL_ERROR "geometry replacement lost exact uniform child/parent order")
+		OR PUBLISH_POS EQUAL -1 OR NOT CREATE_POS LESS RELEASE_POS
+		OR NOT RELEASE_POS LESS RAW_RELEASE_POS
+		OR NOT RAW_RELEASE_POS LESS PUBLISH_POS)
+	MESSAGE(FATAL_ERROR "geometry replacement lost candidate-first uniform child/parent order")
+ENDIF()
+STRING(FIND "${RESIZE}" "vk_create_geometry_buffers( vk.geometry_buffer_size_new );" RESIZE_CREATE_POS)
+STRING(FIND "${RESIZE}" "vk_ral_refresh_tess_uniform_bindgroup" RESIZE_REFRESH_POS)
+IF(RESIZE_CREATE_POS EQUAL -1 OR RESIZE_REFRESH_POS EQUAL -1
+		OR NOT RESIZE_CREATE_POS LESS RESIZE_REFRESH_POS)
+	MESSAGE(FATAL_ERROR "geometry resize lost direct-buffer-before-bind-group refresh order")
 ENDIF()
 
 # The draw contains no native descriptor bind. Exactly three checked set binds

@@ -3,11 +3,14 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 // client.h -- primary header for client
 
+#ifndef WIRED_CLIENT_CLIENT_H
+#define WIRED_CLIENT_CLIENT_H
+
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
 #include "../qcommon/net_transport.h"
 #include "../qcommon/maps/map_format_registry.h"
-#include "../renderercommon/tr_public.h"
+#include "../render/frontend/tr_public.h"
 #include "../qcommon/vm_local.h"
 #include "../cgame/cg_public.h"
 #include "../qcommon/wired/protocol.h"
@@ -929,6 +932,7 @@ void	GLimp_SetGamma(unsigned char red[256], unsigned char green[256], unsigned c
 // OpenGL
 #ifdef USE_OPENGL_API
 void	GLimp_Init( glconfig_t *config );
+void	GLimp_InitOpenGL46( glconfig_t *config );
 void	GLimp_Shutdown( qboolean unloadDLL );
 void	GLimp_EndFrame( void );
 void	*GL_GetProcAddress( const char *name );
@@ -955,3 +959,5 @@ qboolean RALimp_PresentationBorrow( void *context,
 qboolean RALimp_PresentationClose( void *context,
 	const ralPresentationHostReceipt_t *currentReceipt,
 	ralPresentationHostCloseMode_t mode );
+
+#endif

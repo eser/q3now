@@ -40,7 +40,7 @@
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
 #include "../qcommon/crash.h"
-#include "../renderercommon/tr_public.h"
+#include "../render/frontend/tr_public.h"
 
 #include "linux_local.h" // bk001204
 

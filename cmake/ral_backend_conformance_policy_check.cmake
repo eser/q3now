@@ -2,11 +2,11 @@ if(NOT DEFINED ROOT)
   message(FATAL_ERROR "ROOT is required")
 endif()
 
-file(READ "${ROOT}/code/renderer/ral/ral_backend_conformance.h" HEADER)
-file(READ "${ROOT}/code/renderer/ral/ral_backend_conformance.c" SOURCE)
-file(READ "${ROOT}/code/renderer/ral/ral_capability.c" CAPABILITY_SOURCE)
+file(READ "${ROOT}/code/render/ral/core/ral_backend_conformance.h" HEADER)
+file(READ "${ROOT}/code/render/ral/core/ral_backend_conformance.c" SOURCE)
+file(READ "${ROOT}/code/render/ral/core/ral_capability.c" CAPABILITY_SOURCE)
 file(READ "${ROOT}/tests/ral_backend_conformance_test.mm" HOST)
-file(READ "${ROOT}/code/renderer/ral_vulkan/ral_vulkan_bridge.h" VULKAN_BRIDGE)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/ral_vulkan_bridge.h" VULKAN_BRIDGE)
 
 foreach(forbidden IN ITEMS "Vk" "MTL" "SDL_" "WGPU")
   if(HEADER MATCHES "${forbidden}" OR SOURCE MATCHES "${forbidden}")
@@ -89,7 +89,7 @@ endforeach()
 
 foreach(needle IN ITEMS
   "Vulkan migration bridge."
-  "deliberately NOT part of code/renderer/ral/'s portable public surface"
+  "deliberately NOT part of code/render/ral/core/'s portable public surface"
   "Only the Vulkan backend and renderervk integration may include this header.")
   string(FIND "${VULKAN_BRIDGE}" "${needle}" found)
   if(found EQUAL -1)
@@ -101,7 +101,7 @@ file(GLOB PORTABLE_FRONTEND
   "${ROOT}/code/client/*.c" "${ROOT}/code/client/*.h"
   "${ROOT}/code/renderer/*.c" "${ROOT}/code/renderer/*.h"
   "${ROOT}/code/renderer2/*.c" "${ROOT}/code/renderer2/*.h"
-  "${ROOT}/code/renderercommon/*.c" "${ROOT}/code/renderercommon/*.h")
+  "${ROOT}/code/render/frontend/*.c" "${ROOT}/code/render/frontend/*.h")
 foreach(path IN LISTS PORTABLE_FRONTEND)
   file(READ "${path}" text)
   if(text MATCHES "ral_vulkan_bridge[.]h|ral_metal_internal[.]h")

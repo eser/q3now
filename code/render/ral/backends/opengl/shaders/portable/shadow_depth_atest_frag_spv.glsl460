@@ -1,0 +1,45 @@
+#version 460
+
+layout(binding = 0) uniform texture2D wired_bindless_images[64];
+layout(binding = 0) uniform sampler wired_bindless_samplers[32];
+
+layout(location = 1) flat in uint in_packed;
+layout(location = 0) in vec2 in_texcoord;
+
+void main()
+{
+    uint atFunc = (in_packed >> uint(24)) & 255u;
+    uint imgSlot = in_packed & 4095u;
+    uint smpSlot = (in_packed >> uint(12)) & 255u;
+    uint _34 = imgSlot;
+    uint _43 = smpSlot;
+    float a = texture(sampler2D(wired_bindless_images[_34], wired_bindless_samplers[_43]), in_texcoord).w;
+    if (atFunc == 1u)
+    {
+        if (a == 0.0)
+        {
+            discard;
+        }
+    }
+    else
+    {
+        if (atFunc == 2u)
+        {
+            if (a >= 0.5)
+            {
+                discard;
+            }
+        }
+        else
+        {
+            if (atFunc == 3u)
+            {
+                if (a < 0.5)
+                {
+                    discard;
+                }
+            }
+        }
+    }
+}
+

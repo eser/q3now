@@ -551,10 +551,10 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
         failures.append(
             f"render extent mismatch (expected={expected_render}, observed={render_observations})"
         )
-    elif contract.particle_pixels != render_observed[2] * render_observed[3]:
+    elif contract.particle_pixels != render_observed[0] * render_observed[1]:
         failures.append(
-            "capture extent does not match renderer window "
-            f"(pixels={contract.particle_pixels}, window={render_observed[2]}x{render_observed[3]})"
+            "capture extent does not match render resolution "
+            f"(pixels={contract.particle_pixels}, render={render_observed[0]}x{render_observed[1]})"
         )
     if not weather_rain:
         failures.append("representative rain effect is not configured")
@@ -709,6 +709,9 @@ def analyze(path: Path, contract: Contract, *, emit: bool = True) -> dict:
         "render_height": contract.render_height,
         "render_extent_observations": [list(value) for value in render_observations],
         "capture_resolution": (
+            f"{render_observed[0]}x{render_observed[1]}" if render_observed else None
+        ),
+        "output_resolution": (
             f"{render_observed[2]}x{render_observed[3]}" if render_observed else None
         ),
         "target_fps": contract.target_fps,
@@ -923,7 +926,7 @@ def synthetic_fixture(samples: int = 650) -> list[str]:
 def run_self_test() -> int:
     base_contract = Contract(
         "self", "arena1", 2, 90.0, 650, (1052, 1432, 117, 135, 0),
-        particle_pixels=2560 * 1440,
+        particle_pixels=1280 * 720,
     )
     cases: list[tuple[str, list[str], Contract, bool, str | None]] = []
     clean = synthetic_fixture()

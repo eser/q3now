@@ -1,0 +1,107 @@
+#version 460
+
+layout(binding = 0, std140) uniform DecalFrame
+{
+    mat4 mvp;
+    vec4 timeCount;
+    mat4 invMvp;
+    vec4 reconParams;
+} _60;
+
+layout(binding = 1) uniform sampler2D sceneDepthTex;
+layout(binding = 0) uniform sampler2D decalTextures[64];
+
+layout(location = 0) in vec2 fragUV;
+layout(location = 8) flat in uint fragNoProject;
+layout(location = 3) flat in vec3 fragDecalOrigin;
+layout(location = 7) flat in float fragDecalRadius;
+layout(location = 4) flat in vec3 fragDecalTangent;
+layout(location = 5) flat in vec3 fragDecalBitangent;
+layout(location = 6) flat in vec3 fragDecalNormal;
+layout(location = 2) flat in uint fragTextureIndex;
+layout(location = 1) in vec4 fragColor;
+layout(location = 0) out vec4 outColor;
+
+vec3 sRGBToLinear(inout vec3 c)
+{
+    c = max(c, vec3(0.0));
+    bvec3 cutoff = lessThanEqual(c, vec3(0.040449999272823333740234375));
+    vec3 lo = c / vec3(12.9200000762939453125);
+    vec3 hi = pow((c + vec3(0.054999999701976776123046875)) / vec3(1.05499994754791259765625), vec3(2.400000095367431640625));
+    return mix(hi, lo, vec3(cutoff));
+}
+
+void main()
+{
+    vec2 decalUV = fragUV;
+    bool _69 = _60.reconParams.z > 0.5;
+    bool _77;
+    if (_69)
+    {
+        _77 = fragNoProject == 0u;
+    }
+    else
+    {
+        _77 = _69;
+    }
+    if (_77)
+    {
+        vec2 screenUV = gl_FragCoord.xy * _60.reconParams.xy;
+        float sceneDepth = texture(sceneDepthTex, screenUV).x;
+        if (sceneDepth <= 0.0)
+        {
+            discard;
+        }
+        vec3 ndc = vec3((screenUV * 2.0) - vec2(1.0), sceneDepth);
+        vec4 worldH = _60.invMvp * vec4(ndc, 1.0);
+        vec3 worldPos = worldH.xyz / vec3(worldH.w);
+        vec3 local = worldPos - fragDecalOrigin;
+        float _146;
+        if (fragDecalRadius > 0.0)
+        {
+            _146 = 1.0 / fragDecalRadius;
+        }
+        else
+        {
+            _146 = 0.0;
+        }
+        float invR = _146;
+        float u = dot(local, fragDecalTangent) * invR;
+        float v = dot(local, fragDecalBitangent) * invR;
+        float w = dot(local, fragDecalNormal);
+        float halfThickness = fragDecalRadius * 0.5;
+        bool _177 = abs(u) > 1.0;
+        bool _184;
+        if (!_177)
+        {
+            _184 = abs(v) > 1.0;
+        }
+        else
+        {
+            _184 = _177;
+        }
+        bool _192;
+        if (!_184)
+        {
+            _192 = abs(w) > halfThickness;
+        }
+        else
+        {
+            _192 = _184;
+        }
+        if (_192)
+        {
+            discard;
+        }
+        decalUV = (vec2(u, v) * 0.5) + vec2(0.5);
+    }
+    vec4 texel = texture(decalTextures[fragTextureIndex], decalUV);
+    vec3 param = texel.xyz;
+    vec3 _217 = sRGBToLinear(param);
+    vec3 param_1 = fragColor.xyz;
+    vec3 _222 = sRGBToLinear(param_1);
+    vec3 rgb = _217 * _222;
+    float alpha = texel.w * fragColor.w;
+    outColor = vec4(rgb, alpha);
+}
+

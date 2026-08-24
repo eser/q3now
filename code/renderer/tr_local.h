@@ -24,9 +24,9 @@
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qfiles.h"
 #include "../qcommon/qcommon.h"
-#include "../renderercommon/tr_public.h"
+#include "../render/frontend/tr_public.h"
 #include "tr_common.h"
-#include "../renderercommon/tr_screenshot.h"
+#include "../render/frontend/tr_screenshot.h"
 #if FEAT_IQM
 #include "iqm.h"
 #endif // FEAT_IQM
@@ -1086,7 +1086,7 @@ typedef struct videoFrameCommand_s {
 } videoFrameCommand_t;
 
 // SCREENSHOT_* type/destination mask now lives in
-// renderercommon/tr_screenshot.h (included via the top of this header).
+// code/render/frontend/tr_screenshot.h (included via the top of this header).
 
 // all state modified by the back end is separated
 // from the front end state

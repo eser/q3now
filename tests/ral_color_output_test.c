@@ -71,6 +71,16 @@ int main( void ) {
 		RAL_FORMAT_B8G8R8A8_UNORM, RAL_COLORSPACE_SRGB_NONLINEAR };
 	CHECK( Ral_ResolveColorOutput( &request, &receipt )
 		&& receipt.hdrFallback == RAL_HDR_FALLBACK_SCENE_NOT_HDR );
+	/* Native SDR scene attachments are valid in either channel order and may
+	 * carry an sRGB image format while retaining linear scene semantics. */
+	request.requestHdrOutput = qfalse;
+	request.sceneFormat = RAL_FORMAT_B8G8R8A8_SRGB;
+	CHECK( Ral_ResolveColorOutput( &request, &receipt )
+		&& receipt.sceneTransfer == RAL_COLOR_TRANSFER_LINEAR );
+	request.sceneFormat = RAL_FORMAT_R8G8B8A8_SRGB;
+	CHECK( Ral_ResolveColorOutput( &request, &receipt ) );
+	request.sceneFormat = RAL_FORMAT_B8G8R8A8_UNORM;
+	CHECK( Ral_ResolveColorOutput( &request, &receipt ) );
 	request.hdrPeakNits = 50.0f;
 	before = receipt;
 	CHECK( !Ral_ResolveColorOutput( &request, &receipt ) );

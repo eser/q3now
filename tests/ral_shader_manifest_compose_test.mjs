@@ -5,11 +5,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { composeShaderManifest } from '../code/renderervk/shaders/shader_manifest_compose.mjs';
+import { composeShaderManifest } from '../code/render/ral/backends/vulkan/renderer/shaders/shader_manifest_compose.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const reflection = JSON.parse(readFileSync(join(root, 'code/renderervk/shaders/spirv/ral_shader_reflection_catalog.json')));
-const overrides = JSON.parse(readFileSync(join(root, 'code/renderervk/shaders/spirv/ral_shader_portability_overrides.json')));
+const reflection = JSON.parse(readFileSync(join(root, 'code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_reflection_catalog.json')));
+const overrides = JSON.parse(readFileSync(join(root, 'code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_portability_overrides.json')));
 
 const graphics = composeShaderManifest(reflection, overrides,
 	{ generation: 1, modules: ['color_vert_spv', 'color_frag_spv'] });

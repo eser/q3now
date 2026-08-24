@@ -2,18 +2,17 @@
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 //
 // shader_xlate — offline shader-translation tool. Reads a SPIR-V
-// blob, emits MSL / GLSL 430 / GLSL ES 300 / WGSL alongside, per
+// blob, emits MSL / GLSL 460 / WGSL alongside, per
 // docs/phase-7-hal-design.md §16.2:
 //
-//   SPIRV-Cross (C++ API, vendored at src/libs/SPIRV-Cross/) → MSL, GLSL, GLSL ES
+//   SPIRV-Cross (C++ API, vendored at src/libs/SPIRV-Cross/) → MSL, GLSL 4.60
 //   naga CLI    (direct child process — build-time tool, no Rust at runtime) → WGSL
 //
 // Usage:
 //   shader_xlate <input.spv> <output_dir>
 //     produces:
 //       <output_dir>/<base>.msl
-//       <output_dir>/<base>.glsl430
-//       <output_dir>/<base>.glsles300
+//       <output_dir>/<base>.glsl460
 //       <output_dir>/<base>.wgsl    (only if `naga` is on PATH)
 //
 // Per-target status is logged in a parseable form:
@@ -129,18 +128,19 @@ void lower_wgsl_immediate_to_uniform( const std::string &path ) {
 
 // SPIRV-Cross Compiler instances are single-shot (compile() mutates state).
 // A fresh instance per backend keeps failures isolated.
-bool xlate_glsl( const std::vector<uint32_t> &words, uint32_t version, bool es,
+bool xlate_glsl( const std::vector<uint32_t> &words, uint32_t version,
                  const std::string &base, const std::string &out_path, const char *targetTag ) {
 	try {
 		spirv_cross::CompilerGLSL c( words );
-		// GLSL ES compute shaders need ESSL 3.10+. Auto-bump for compute models.
-		if ( es && c.get_execution_model() == spv::ExecutionModelGLCompute && version < 310 )
-			version = 310;
 		spirv_cross::CompilerGLSL::Options o = c.get_common_options();
 		o.version          = version;
-		o.es               = es;
-		o.vulkan_semantics = false;        // emit non-Vulkan GLSL — push constants → uniform block (§8.3)
-		o.enable_420pack_extension = !es;  // GL 4.30 supports layout(binding=); ESSL 3.0 doesn't (3.1+ does)
+		o.es               = false;
+		// The 4.60 path keeps descriptor-set metadata long enough for the
+		// deterministic catalog driver to compact it into OpenGL binding spaces.
+		// Earlier direct non-Vulkan emission cannot represent runtime descriptor
+		// arrays and fails before the WebGPU-shaped bounded lowering can run.
+		o.vulkan_semantics = version == 460;
+		o.enable_420pack_extension = true;
 		c.set_common_options( o );
 		std::string src = c.compile();
 		write_file( out_path, src );
@@ -259,8 +259,7 @@ int main( int argc, char **argv ) {
 	bool require_wgsl = false;
 	bool reflect_only = false;
 	bool emit_msl = true;
-	bool emit_glsl430 = true;
-	bool emit_glsles300 = true;
+	bool emit_glsl460 = true;
 	bool emit_wgsl = true;
 	while ( arg < argc ) {
 		if ( std::strcmp( argv[arg], "--require-wgsl" ) == 0 ) require_wgsl = true;
@@ -274,10 +273,9 @@ int main( int argc, char **argv ) {
 			if ( ++arg >= argc ) { std::fprintf( stderr, "[xlate] ERROR: --targets needs a value\n" ); return 1; }
 			const std::string targets = "," + std::string( argv[arg] ) + ",";
 			emit_msl = targets.find( ",msl," ) != std::string::npos;
-			emit_glsl430 = targets.find( ",glsl430," ) != std::string::npos;
-			emit_glsles300 = targets.find( ",glsles300," ) != std::string::npos;
+			emit_glsl460 = targets.find( ",glsl460," ) != std::string::npos;
 			emit_wgsl = targets.find( ",wgsl," ) != std::string::npos;
-			if ( !emit_msl && !emit_glsl430 && !emit_glsles300 && !emit_wgsl ) {
+			if ( !emit_msl && !emit_glsl460 && !emit_wgsl ) {
 				std::fprintf( stderr, "[xlate] ERROR: --targets selected no known target\n" ); return 1;
 			}
 		}
@@ -290,8 +288,8 @@ int main( int argc, char **argv ) {
 	}
 	if ( argc - arg < 2 ) {
 		std::fprintf( stderr,
-			"shader_xlate — offline SPIR-V → MSL / GLSL / GLSL ES / WGSL translator (Phase 7.3b)\n"
-			"usage: %s [--require-wgsl] [--targets msl,glsl430,glsles300,wgsl] [--reflect-only] <input.spv> <output-dir|reflection.json>\n", argv[0] );
+			"shader_xlate — offline SPIR-V → MSL / GLSL 4.60 / WGSL translator (Phase 7.3b)\n"
+			"usage: %s [--require-wgsl] [--targets msl,glsl460,wgsl] [--reflect-only] <input.spv> <output-dir|reflection.json>\n", argv[0] );
 		return 1;
 	}
 	const std::string in_path = argv[arg];
@@ -315,10 +313,8 @@ int main( int argc, char **argv ) {
 
 	int failed = 0;
 	if ( emit_msl && !xlate_msl( words, base, out_dir + "/" + base + ".msl" ) ) failed++;
-	if ( emit_glsl430 && !xlate_glsl( words, 430, false, base,
-			out_dir + "/" + base + ".glsl430", "glsl430" ) ) failed++;
-	if ( emit_glsles300 && !xlate_glsl( words, 300, true, base,
-			out_dir + "/" + base + ".glsles300", "glsles300" ) ) failed++;
+	if ( emit_glsl460 && !xlate_glsl( words, 460, base,
+			out_dir + "/" + base + ".glsl460", "glsl460" ) ) failed++;
 	if ( emit_wgsl ) {
 		const int wgsl = xlate_wgsl_via_naga( in_path, base,
 			out_dir + "/" + base + ".wgsl" );

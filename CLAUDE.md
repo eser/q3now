@@ -2,7 +2,7 @@
 
 ## Engine vs. game boundary
 
-- The **engine is "Wired"**. Engine code lives in `code/qcommon`, `code/client`, `code/server`, `code/renderer*`, `code/renderercommon`, `code/sdl`, `code/unix`, `code/win32`, `code/botlib`. Built into `wired` (client) and `wired-headless` (headless server) binaries; renderer DLLs ship as `wired_<api>.{dll,so,dylib}`. Display name is `Wired`; version macro is `WIRED_ENGINE_VERSION`.
+- The **engine is "Wired"**. Engine code lives in `code/qcommon`, `code/client`, `code/server`, `code/render`, deprecated `code/renderer*`, `code/sdl`, `code/unix`, `code/win32`, `code/botlib`. Built into `wired` (client) and `wired-headless` (headless server) binaries; renderer DLLs ship as `wired_<api>.{dll,so,dylib}`. Display name is `Wired`; version macro is `WIRED_ENGINE_VERSION`.
 - **q3now is the game** that runs on Wired. Game code lives in `code/game`, `code/cgame`. Game assets under `base/`.
 
 ## Hard architectural rule

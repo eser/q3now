@@ -167,6 +167,16 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 	 * modfiles/ui/debug_graph.wui + debug_netstats.wui. This body is now just
 	 * re.BeginFrame + WiredUI_RenderFrame + the profiling bookkeeping. */
 	CL_PROF(wui, WiredUI_RenderFrame());
+#else
+	/* wasm32 retains direct cgame rendering and adds the portable authored UI
+	 * catalog as the browser compositor. Native feature-off builds stay inert. */
+	if ( clientActiveApp && clientActiveApp->cgvm
+			&& clientActiveApp->state == CA_ACTIVE ) {
+		CL_PROF(cgr, CL_CGameRendering( stereoFrame ));
+	}
+#if defined(WASM_MODULE)
+	CL_PROF(wui, WiredUI_RenderFrame());
+#endif
 #endif
 
 	cl_prof.scrextra += (int)(Sys_Microseconds() - scr_t0)

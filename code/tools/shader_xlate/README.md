@@ -1,8 +1,8 @@
-# shader_xlate — offline SPIR-V → MSL / GLSL / GLSL ES / WGSL translator
+# shader_xlate — offline SPIR-V → MSL / GLSL 4.60 / WGSL translator
 
 The real Phase 7.3b shader-translation tool. Reads a `.spv` produced by
 `glslangValidator` (the same pipeline `compile.mjs` already uses to emit
-`shader_data.c`) and emits the four backend forms next to it.
+`shader_data.c`) and emits the three backend forms next to it.
 
 The Phase 7 pre-flight version lived at `code/tools/shader_xlate_spike/`; that
 spike validated the *toolchain shape*. This one is the integrated
@@ -14,15 +14,14 @@ backend translated-shader corpus.
 | Output            | Backend (SPIRV-Cross / naga)            | Target              |
 |-------------------|------------------------------------------|---------------------|
 | `<base>.msl`      | `CompilerMSL` (`platform = macOS`)       | Metal Shading Lang. |
-| `<base>.glsl430`  | `CompilerGLSL` (`version=430, es=false, vulkan_semantics=false`) | Desktop OpenGL 4.3 |
-| `<base>.glsles300`| `CompilerGLSL` (`version=300, es=true`)  | WebGL 2 (GLSL ES 3) |
+| `<base>.glsl460`  | `CompilerGLSL` (`version=460, es=false, vulkan_semantics=true`) | Portable GLSL 4.60 input for deterministic OpenGL lowering |
 | `<base>.wgsl`     | pinned `naga` CLI (direct child process)  | WebGPU (WGSL)       |
 
-Push constants → uniform blocks for the GLSL paths (`vulkan_semantics=false`
-in SPIRV-Cross gives this automatically); MSL keeps them as argument-buffer
-push constants; the pinned translator rewrites Naga's non-WebGPU `immediate`
-address space to the first free group-0 uniform binding, exactly matching the
-resolved portable manifest. See
+The corpus driver deterministically lowers Vulkan-only GLSL syntax and push
+constants into desktop OpenGL 4.6 binding/uniform forms after translation; MSL
+keeps push constants as argument-buffer data. The pinned translator rewrites
+Naga's non-WebGPU `immediate` address space to the first free group-0 uniform
+binding, exactly matching the resolved portable manifest. See
 `docs/phase-7-ral-design.md §8.3`.
 
 Canonical WGSL generation requires Wired's pinned
@@ -62,7 +61,7 @@ build/shader_xlate --reflect-only path/to/shader.spv path/to/reflection.json
 
 # All shaders in shader_data.c (the way compile.mjs emits the corpus):
 node code/tools/shader_xlate/extract_spv.mjs \
-     code/renderervk/shaders/spirv/shader_data.c \
+     code/render/ral/backends/vulkan/renderer/shaders/spirv/shader_data.c \
      build/spv_extracted/
 mkdir -p build/translated_shaders/
 for f in build/spv_extracted/*.spv; do
@@ -70,23 +69,23 @@ for f in build/spv_extracted/*.spv; do
 done
 
 # Deterministic manifest-driven corpus orchestration (one symbol shown):
-node code/renderervk/shaders/compile_xlate.mjs \
+node code/render/ral/backends/vulkan/renderer/shaders/compile_xlate.mjs \
   --translator build/shader_xlate \
   --output-dir build/translated_shaders \
   --symbol color_vert_spv
 
-# Reflect the canonical 292-artifact corpus into the native-free ABI catalog:
-node code/renderervk/shaders/compile_reflect.mjs \
+# Reflect the canonical 294-artifact corpus into the native-free ABI catalog:
+node code/render/ral/backends/vulkan/renderer/shaders/compile_reflect.mjs \
   --translator build/shader_xlate \
-  --output code/renderervk/shaders/spirv/ral_shader_reflection_catalog.json \
+  --output code/render/ral/backends/vulkan/renderer/shaders/spirv/ral_shader_reflection_catalog.json \
   --check
 
 # Resolve every explicit portability decision and verify the committed corpus:
-node code/renderervk/shaders/compile_portable_manifest.mjs \
-  --translation-dir code/renderervk/shaders/portable --check
-node code/renderervk/shaders/compile_xlate.mjs \
+node code/render/ral/backends/vulkan/renderer/shaders/compile_portable_manifest.mjs \
+  --translation-dir code/render/ral/backends/vulkan/renderer/shaders/portable --check
+node code/render/ral/backends/vulkan/renderer/shaders/compile_xlate.mjs \
   --translator build/shader_xlate \
-  --output-dir code/renderervk/shaders/portable \
+  --output-dir code/render/ral/backends/vulkan/renderer/shaders/portable \
   --targets msl,wgsl --require-wgsl --check
 ```
 
@@ -94,8 +93,7 @@ Output per shader is a parseable one-liner per backend:
 
 ```
 [xlate] <base> msl=ok
-[xlate] <base> glsl430=ok
-[xlate] <base> glsles300=ok
+[xlate] <base> glsl460=ok
 [xlate] <base> wgsl=ok                          # or wgsl=skip(naga unavailable) or wgsl=FAIL: <msg>
 [xlate] <base> <target>=FAIL: <error message>
 ```

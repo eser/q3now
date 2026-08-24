@@ -1,0 +1,335 @@
+#version 460
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(std140, binding = 3) uniform GtaoPush
+{
+    vec2 viewportSize;
+    vec2 ndcToViewMul;
+    vec2 ndcToViewAdd;
+    float zNear;
+    float zFar;
+    float effectRadius;
+    float falloffRange;
+    int sliceCount;
+    int stepsPerSlice;
+    float finalPower;
+    float intensity;
+    vec4 sscsSunDirVS;
+    float sscsRadius;
+    int sscsSteps;
+    float sscsStrength;
+    int sscsEnabled;
+} pc;
+
+layout(binding = 0) uniform texture2D depthTex;
+layout(binding = 0) uniform sampler depthSampler;
+layout(binding = 0, r16f) uniform writeonly image2D aoImage;
+
+float sampleDeviceDepth(vec2 uv)
+{
+    return textureLod(sampler2D(depthTex, depthSampler), uv, 0.0).x;
+}
+
+float linearizeDepth(float z)
+{
+    return (pc.zNear * pc.zFar) / (pc.zNear + (z * (pc.zFar - pc.zNear)));
+}
+
+vec3 viewPosFromUV(vec2 uv, float deviceZ)
+{
+    float param = deviceZ;
+    float vz = linearizeDepth(param);
+    vec2 ndc = (uv * 2.0) - vec2(1.0);
+    vec2 vxy = ((ndc * pc.ndcToViewMul) + pc.ndcToViewAdd) * vz;
+    return vec3(vxy, vz);
+}
+
+vec3 normalFromDepth(vec2 uv, vec3 P, vec2 texel)
+{
+    vec2 param = uv - vec2(texel.x, 0.0);
+    float zL = sampleDeviceDepth(param);
+    vec2 param_1 = uv + vec2(texel.x, 0.0);
+    float zR = sampleDeviceDepth(param_1);
+    vec2 param_2 = uv - vec2(0.0, texel.y);
+    float zU = sampleDeviceDepth(param_2);
+    vec2 param_3 = uv + vec2(0.0, texel.y);
+    float zD = sampleDeviceDepth(param_3);
+    vec2 param_4 = uv - vec2(texel.x, 0.0);
+    float param_5 = zL;
+    vec3 Pl = viewPosFromUV(param_4, param_5);
+    vec2 param_6 = uv + vec2(texel.x, 0.0);
+    float param_7 = zR;
+    vec3 Pr = viewPosFromUV(param_6, param_7);
+    vec2 param_8 = uv - vec2(0.0, texel.y);
+    float param_9 = zU;
+    vec3 Pu = viewPosFromUV(param_8, param_9);
+    vec2 param_10 = uv + vec2(0.0, texel.y);
+    float param_11 = zD;
+    vec3 Pd = viewPosFromUV(param_10, param_11);
+    vec3 _233;
+    if (abs(Pr.z - P.z) < abs(P.z - Pl.z))
+    {
+        _233 = Pr - P;
+    }
+    else
+    {
+        _233 = P - Pl;
+    }
+    vec3 dPdx = _233;
+    vec3 _258;
+    if (abs(Pd.z - P.z) < abs(P.z - Pu.z))
+    {
+        _258 = Pd - P;
+    }
+    else
+    {
+        _258 = P - Pu;
+    }
+    vec3 dPdy = _258;
+    vec3 n = cross(dPdx, dPdy);
+    float len = length(n);
+    vec3 _279;
+    if (len > 9.9999999392252902907785028219223e-09)
+    {
+        _279 = n / vec3(len);
+    }
+    else
+    {
+        _279 = vec3(0.0, 0.0, 1.0);
+    }
+    return _279;
+}
+
+float ign(vec2 pix)
+{
+    return fract(52.98291778564453125 * fract(dot(pix, vec2(0.067110560834407806396484375, 0.005837149918079376220703125))));
+}
+
+float fastAcos(float x)
+{
+    float xa = abs(x);
+    float r = (((-0.15658299624919891357421875) * xa) + 1.57079637050628662109375) * sqrt(1.0 - xa);
+    float _134;
+    if (x >= 0.0)
+    {
+        _134 = r;
+    }
+    else
+    {
+        _134 = 3.1415927410125732421875 - r;
+    }
+    return _134;
+}
+
+float sscsContact(vec3 P, vec2 texel, float _noise)
+{
+    bool _307 = pc.sscsEnabled == 0;
+    bool _315;
+    if (!_307)
+    {
+        _315 = pc.sscsStrength <= 0.0;
+    }
+    else
+    {
+        _315 = _307;
+    }
+    if (_315)
+    {
+        return 1.0;
+    }
+    vec3 L = pc.sscsSunDirVS.xyz;
+    float stepLen = pc.sscsRadius / float(max(pc.sscsSteps, 1));
+    float occluded = 0.0;
+    for (int i = 1; i <= pc.sscsSteps; i++)
+    {
+        float t = ((float(i) - 0.5) + _noise) * stepLen;
+        vec3 sp = P + (L * t);
+        if (sp.z <= 0.001000000047497451305389404296875)
+        {
+            break;
+        }
+        vec2 ndc = ((sp.xy / vec2(sp.z)) - pc.ndcToViewAdd) / pc.ndcToViewMul;
+        vec2 uvS = (ndc * 0.5) + vec2(0.5);
+        bool _389 = uvS.x < 0.0;
+        bool _396;
+        if (!_389)
+        {
+            _396 = uvS.x > 1.0;
+        }
+        else
+        {
+            _396 = _389;
+        }
+        bool _403;
+        if (!_396)
+        {
+            _403 = uvS.y < 0.0;
+        }
+        else
+        {
+            _403 = _396;
+        }
+        bool _410;
+        if (!_403)
+        {
+            _410 = uvS.y > 1.0;
+        }
+        else
+        {
+            _410 = _403;
+        }
+        if (_410)
+        {
+            break;
+        }
+        vec2 param = uvS;
+        float zScene = sampleDeviceDepth(param);
+        if (zScene <= 0.0)
+        {
+            continue;
+        }
+        float param_1 = zScene;
+        float sceneVz = linearizeDepth(param_1);
+        float diff = sp.z - sceneVz;
+        bool _435 = diff > (stepLen * 0.5);
+        bool _442;
+        if (_435)
+        {
+            _442 = diff < pc.sscsRadius;
+        }
+        else
+        {
+            _442 = _435;
+        }
+        if (_442)
+        {
+            occluded = 1.0;
+            break;
+        }
+    }
+    return mix(1.0, 1.0 - pc.sscsStrength, occluded);
+}
+
+void main()
+{
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dim = ivec2(pc.viewportSize);
+    bool _473 = pix.x >= dim.x;
+    bool _482;
+    if (!_473)
+    {
+        _482 = pix.y >= dim.y;
+    }
+    else
+    {
+        _482 = _473;
+    }
+    if (_482)
+    {
+        return;
+    }
+    vec2 texel = vec2(1.0) / pc.viewportSize;
+    vec2 uv = (vec2(pix) + vec2(0.5)) * texel;
+    vec2 param = uv;
+    float centerZ = sampleDeviceDepth(param);
+    if (centerZ <= 0.0)
+    {
+        imageStore(aoImage, pix, vec4(1.0));
+        return;
+    }
+    vec2 param_1 = uv;
+    float param_2 = centerZ;
+    vec3 P = viewPosFromUV(param_1, param_2);
+    vec2 param_3 = uv;
+    vec3 param_4 = P;
+    vec2 param_5 = texel;
+    vec3 N = normalFromDepth(param_3, param_4, param_5);
+    vec3 V = normalize(-P);
+    float tanHalfFovX = 0.5 * abs(pc.ndcToViewMul.x);
+    float screenRadiusUV = clamp(pc.effectRadius / (P.z * max(tanHalfFovX, 9.9999997473787516355514526367188e-05)), texel.x, 0.5);
+    vec2 param_6 = vec2(pix);
+    float _noise = ign(param_6);
+    float visibility = 0.0;
+    float falloffMul = 1.0 / max(pc.effectRadius * pc.falloffRange, 9.9999997473787516355514526367188e-05);
+    float falloffAdd = ((-pc.effectRadius) * (1.0 - pc.falloffRange)) * falloffMul;
+    for (int slice = 0; slice < pc.sliceCount; slice++)
+    {
+        float sliceK = (float(slice) + _noise) / float(pc.sliceCount);
+        float phi = sliceK * 3.1415927410125732421875;
+        vec2 dir = vec2(cos(phi), sin(phi));
+        vec3 dirVec = vec3(dir, 0.0);
+        vec3 orthoDir = dirVec - (V * dot(dirVec, V));
+        vec3 axis = normalize(cross(orthoDir, V));
+        vec3 projN = N - (axis * dot(N, axis));
+        float projLen = length(projN);
+        if (projLen < 9.9999997473787516355514526367188e-06)
+        {
+            continue;
+        }
+        float signN = sign(dot(orthoDir, projN));
+        float cosN = clamp(dot(projN, V) / projLen, -1.0, 1.0);
+        float param_7 = cosN;
+        float n = signN * fastAcos(param_7);
+        float horizonCos0 = cos(n + 1.57079637050628662109375);
+        float horizonCos1 = cos(n - 1.57079637050628662109375);
+        float minS = (1.5 * texel.x) / max(screenRadiusUV, 9.9999997473787516355514526367188e-06);
+        for (int _step = 0; _step < pc.stepsPerSlice; _step++)
+        {
+            float stepNoise = fract(_noise + (float((slice * pc.stepsPerSlice) + _step) * 0.61803400516510009765625));
+            float s = (float(_step) + stepNoise) / float(pc.stepsPerSlice);
+            s = pow(s, 2.0);
+            s += minS;
+            vec2 off = (dir * s) * screenRadiusUV;
+            vec2 uv0 = uv + off;
+            vec2 uv1 = uv - off;
+            vec2 param_8 = uv0;
+            float z0 = sampleDeviceDepth(param_8);
+            vec2 param_9 = uv1;
+            float z1 = sampleDeviceDepth(param_9);
+            vec2 param_10 = uv0;
+            float param_11 = z0;
+            vec3 s0 = viewPosFromUV(param_10, param_11);
+            vec2 param_12 = uv1;
+            float param_13 = z1;
+            vec3 s1 = viewPosFromUV(param_12, param_13);
+            vec3 d0 = s0 - P;
+            vec3 d1 = s1 - P;
+            float dist0 = length(d0);
+            float dist1 = length(d1);
+            float w0 = clamp((dist0 * falloffMul) + falloffAdd, 0.0, 1.0);
+            float w1 = clamp((dist1 * falloffMul) + falloffAdd, 0.0, 1.0);
+            w0 = 1.0 - w0;
+            w1 = 1.0 - w1;
+            float shc0 = dot(d0 / vec3(max(dist0, 9.9999997473787516355514526367188e-06)), V);
+            float shc1 = dot(d1 / vec3(max(dist1, 9.9999997473787516355514526367188e-06)), V);
+            if (z0 <= 0.0)
+            {
+                shc0 = horizonCos0;
+            }
+            if (z1 <= 0.0)
+            {
+                shc1 = horizonCos1;
+            }
+            horizonCos0 = max(horizonCos0, mix(horizonCos0, shc0, w0));
+            horizonCos1 = max(horizonCos1, mix(horizonCos1, shc1, w1));
+        }
+        float param_14 = clamp(horizonCos1, -1.0, 1.0);
+        float h0 = -fastAcos(param_14);
+        float param_15 = clamp(horizonCos0, -1.0, 1.0);
+        float h1 = fastAcos(param_15);
+        float iarc0 = ((cosN + ((2.0 * h0) * sin(n))) - cos((2.0 * h0) - n)) * 0.25;
+        float iarc1 = ((cosN + ((2.0 * h1) * sin(n))) - cos((2.0 * h1) - n)) * 0.25;
+        visibility += (projLen * (iarc0 + iarc1));
+    }
+    visibility /= float(pc.sliceCount);
+    visibility = clamp(visibility, 0.0, 1.0);
+    visibility = pow(visibility, pc.finalPower);
+    visibility = mix(1.0, visibility, clamp(pc.intensity, 0.0, 1.0));
+    visibility = max(visibility, 0.0);
+    vec3 param_16 = P;
+    vec2 param_17 = texel;
+    float param_18 = _noise;
+    visibility *= sscsContact(param_16, param_17, param_18);
+    imageStore(aoImage, pix, vec4(visibility));
+}
+

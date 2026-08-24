@@ -1,7 +1,7 @@
-file(READ "${ROOT}/code/renderervk/vk_temporal_entmat_adoption.h" OWNER_H)
-file(READ "${ROOT}/code/renderervk/vk_temporal_entmat_adoption.c" OWNER_C)
-file(READ "${ROOT}/code/renderervk/vk.h" VKH)
-file(READ "${ROOT}/code/renderervk/vk.c" VKC)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_entmat_adoption.h" OWNER_H)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_entmat_adoption.c" OWNER_C)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.h" VKH)
+file(READ "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VKC)
 file(READ "${ROOT}/CMakeLists.txt" BUILD)
 
 function(require_text haystack needle why)
@@ -75,7 +75,7 @@ endforeach()
 
 # Product ownership is source-glob based. Only the A2a runtime seam may call or
 # store this owner; draw/bind/pass code remains outside its authority.
-file(GLOB PRODUCT_C "${ROOT}/code/renderervk/*.c")
+file(GLOB PRODUCT_C "${ROOT}/code/render/ral/backends/vulkan/renderer/*.c")
 foreach(path IN LISTS PRODUCT_C)
 	get_filename_component(name "${path}" NAME)
 	file(READ "${path}" PRODUCT_SOURCE)
@@ -91,7 +91,7 @@ foreach(path IN LISTS PRODUCT_C)
 		forbid_text(PRODUCT_SOURCE "vkTemporalEntMatAdoption" "production type/storage authority in ${name}")
 	endif()
 endforeach()
-file(GLOB PRODUCT_H "${ROOT}/code/renderervk/*.h")
+file(GLOB PRODUCT_H "${ROOT}/code/render/ral/backends/vulkan/renderer/*.h")
 foreach(path IN LISTS PRODUCT_H)
 	get_filename_component(name "${path}" NAME)
 	if(NOT name STREQUAL "vk_temporal_entmat_adoption.h"
@@ -103,10 +103,10 @@ foreach(path IN LISTS PRODUCT_H)
 endforeach()
 
 # W-41: ordinary draw payload and the existing raw entMat lifecycle stay exact.
-require_text(VKH "float    worldLightParams[4];                    // offset 592, 16 B\n} vkUniform_t;" "unchanged 608-byte ordinary draw UBO")
+require_text(VKH "vec4_t advancedFogColorDensity;                   // offset 608, 16 B\n\tvec4_t advancedFogTypeFarEnabled;                 // offset 624, 16 B\n} vkUniform_t;" "intentional 640-byte ordinary draw UBO fog tail")
 require_text(VKC "void vk_entmat_ensure_buffer( uint32_t requiredSlots )" "raw entMat bounded-capacity owner")
 
-require_text(BUILD "AUX_SOURCE_DIRECTORY(code/renderervk RENDERER_VK_SRCS)" "renderer product source ownership")
+require_text(BUILD "AUX_SOURCE_DIRECTORY(code/render/ral/backends/vulkan/renderer RENDERER_VK_SRCS)" "renderer product source ownership")
 require_text(BUILD "ADD_EXECUTABLE(vk_temporal_entmat_adoption_test" "compiled owner contract")
 require_text(BUILD "vk_temporal_entmat_adoption_source_policy_contract" "source-policy registration")
 

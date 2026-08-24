@@ -4,18 +4,18 @@ if(NOT DEFINED ROOT)
 	message(FATAL_ERROR "ROOT is required")
 endif()
 
-set(H "${ROOT}/code/renderervk/vk_temporal_main_activation.h")
-set(C "${ROOT}/code/renderervk/vk_temporal_main_activation.c")
-set(VK "${ROOT}/code/renderervk/vk.c")
-set(BACKEND "${ROOT}/code/renderervk/tr_backend.c")
-set(SEQUENCE_H "${ROOT}/code/renderervk/vk_temporal_motion_sequence.h")
-set(SEQUENCE_C "${ROOT}/code/renderervk/vk_temporal_motion_sequence.c")
-set(READBACK_H "${ROOT}/code/renderervk/vk_temporal_motion_readback.h")
-set(READBACK_C "${ROOT}/code/renderervk/vk_temporal_motion_readback.c")
-set(RESOLVE_H "${ROOT}/code/renderervk/vk_temporal_resolve.h")
-set(RESOLVE_C "${ROOT}/code/renderervk/vk_temporal_resolve.c")
-set(RESOLVE_AUTH_H "${ROOT}/code/renderervk/vk_temporal_resolve_authority.h")
-set(RESOLVE_AUTH_C "${ROOT}/code/renderervk/vk_temporal_resolve_authority.c")
+set(H "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_main_activation.h")
+set(C "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_main_activation.c")
+set(VK "${ROOT}/code/render/ral/backends/vulkan/renderer/vk.c")
+set(BACKEND "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_backend.c")
+set(SEQUENCE_H "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_motion_sequence.h")
+set(SEQUENCE_C "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_motion_sequence.c")
+set(READBACK_H "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_motion_readback.h")
+set(READBACK_C "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_motion_readback.c")
+set(RESOLVE_H "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolve.h")
+set(RESOLVE_C "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolve.c")
+set(RESOLVE_AUTH_H "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolve_authority.h")
+set(RESOLVE_AUTH_C "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_resolve_authority.c")
 set(TEST "${ROOT}/tests/vk_temporal_main_activation_test.c")
 foreach(path IN ITEMS "${H}" "${C}" "${VK}" "${SEQUENCE_H}" "${SEQUENCE_C}")
 	if(NOT EXISTS "${path}")
@@ -180,8 +180,8 @@ require_text("${READBACK_CT}" "VK_TemporalMainActivationReceiptExact(" "readback
 require_text("${RESOLVE_AUTH_CT}" "receipt.activation = *activation" "resolve authority carries full activation receipt")
 require_text("${RESOLVE_AUTH_CT}" "VK_TemporalMainActivationReceiptExact( activation, activation )" "resolve authority full self-validation")
 require_text("${RESOLVE_CT}" "VK_TemporalMainActivationReceiptExact(" "resolve submit full activation join")
-file(GLOB PRODUCT_C "${ROOT}/code/renderervk/*.c")
-file(GLOB PRODUCT_H "${ROOT}/code/renderervk/*.h")
+file(GLOB PRODUCT_C "${ROOT}/code/render/ral/backends/vulkan/renderer/*.c")
+file(GLOB PRODUCT_H "${ROOT}/code/render/ral/backends/vulkan/renderer/*.h")
 foreach(path IN LISTS PRODUCT_C PRODUCT_H)
 	if(path STREQUAL C OR path STREQUAL H OR path STREQUAL VK
 			OR path STREQUAL READBACK_C OR path STREQUAL READBACK_H
@@ -219,10 +219,10 @@ require_text("${VKT}" "if ( !VK_TemporalMainActivationCommitIqmDraw("
 # central-definition-only until the atomic IQM command slice lands.
 file(GLOB_RECURSE SHIPPING_SURFACE "${ROOT}/code/*.c" "${ROOT}/code/*.h")
 foreach(path IN LISTS SHIPPING_SURFACE)
-	if(path STREQUAL "${ROOT}/code/renderervk/tr_temporal_iqm_motion.c"
-			OR path STREQUAL "${ROOT}/code/renderervk/tr_temporal_iqm_motion.h"
-			OR path STREQUAL "${ROOT}/code/renderervk/vk_temporal_iqm_payload_authoring.c"
-			OR path STREQUAL "${ROOT}/code/renderervk/vk_temporal_iqm_payload_authoring.h"
+	if(path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_iqm_motion.c"
+			OR path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/tr_temporal_iqm_motion.h"
+			OR path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload_authoring.c"
+			OR path STREQUAL "${ROOT}/code/render/ral/backends/vulkan/renderer/vk_temporal_iqm_payload_authoring.h"
 			OR path STREQUAL VK
 			OR path STREQUAL C OR path STREQUAL H)
 		continue()

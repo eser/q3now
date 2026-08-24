@@ -1971,6 +1971,27 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 			byte *vmBase = (gvm && !gvm->entryPoint) ? (byte *)gvm->dataBase : NULL;
 			return Nav_HandleTrap( args[0], args, vmBase );
 		}
+#else
+	// Game modules keep one stable trap ABI across hosts. A host built without
+	// Recast must therefore report the documented not-ready/error values instead
+	// of treating those optional calls as an ABI violation.
+	case G_NAV_FIND_PATH:
+	case G_NAV_GET_POLY_AREA_FLAGS:
+	case G_NAV_ADD_CROWD_AGENT:
+		return -1;
+	case G_NAV_RAYCAST:
+	case G_NAV_FIND_NEAREST_POLY:
+	case G_NAV_TRIGGER_OFF_MESH_LINK:
+	case G_NAV_GET_RANDOM_POINT:
+	case G_NAV_GET_WALKABLE_CENTER:
+	case G_NAV_UPDATE_CROWD_AGENT:
+	case G_NAV_REMOVE_CROWD_AGENT:
+	case G_NAV_UPDATE_CROWD:
+	case G_NAV_IS_READY:
+	case G_NAV_IS_BAKING:
+	case G_NAV_SET_POLY_FLAGS_FOR_DOOR:
+	case G_NAV_PREDICT_ENEMY_POSITION:
+		return 0;
 #endif /* FEAT_RECAST_NAVMESH */
 
 	default:

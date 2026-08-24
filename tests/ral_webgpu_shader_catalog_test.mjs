@@ -6,12 +6,12 @@ import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openWebGpuShaderCatalog } from '../code/renderer/ral/ral_webgpu_shader_catalog.mjs';
+import { openWebGpuShaderCatalog } from '../code/render/ral/core/ral_webgpu_shader_catalog.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const source = join(root, 'code/renderervk/shaders/portable');
+const source = join(root, 'code/render/ral/backends/vulkan/renderer/shaders/portable');
 const catalog = openWebGpuShaderCatalog(source);
-assert.equal(catalog.moduleCount, 292);
+assert.equal(catalog.moduleCount, 294);
 assert.match(catalog.toolchainIdentity, /naga\/30\.0\.0\+wired-portable-v1$/);
 const color = catalog.get('color_vert_spv');
 assert.equal(color.stage, 'RAL_STAGE_VERTEX');
@@ -24,7 +24,7 @@ assert.throws(() => catalog.get('missing_spv'), /unknown WGSL module/);
 
 const tempRoot = mkdtempSync(join(tmpdir(), 'wired-webgpu-catalog-'));
 const temp = join(tempRoot, 'portable'); cpSync(source, temp, { recursive: true });
-cpSync(join(root, 'code/renderervk/shaders/spirv'), join(tempRoot, 'spirv'), { recursive: true });
+cpSync(join(root, 'code/render/ral/backends/vulkan/renderer/shaders/spirv'), join(tempRoot, 'spirv'), { recursive: true });
 writeFileSync(join(temp, 'color_vert_spv.wgsl'), `${readFileSync(join(temp, 'color_vert_spv.wgsl'))} `);
 assert.throws(() => openWebGpuShaderCatalog(temp), /stale WGSL artifact/);
 console.log('RAL WebGPU shader catalog: PASS');

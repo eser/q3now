@@ -185,6 +185,21 @@
 
 // ================================ WASM ===================================
 
+#if defined(__EMSCRIPTEN__) && !defined(WASM_MODULE)
+
+/* Emscripten side modules use the native dllEntry/vmMain ABI, not the WASI
+ * syscall import selected by WASM_MODULE. They are nevertheless wasm32
+ * libraries and must use the browser module suffix understood by dlopen. */
+#define OS_STRING "web"
+#define ID_INLINE inline
+#define ARCH_STRING "wasm32"
+#define PATH_SEP '/'
+#define PATH_SEP_FOREIGN '\\'
+#undef DLL_EXT
+#define DLL_EXT ".wasm"
+
+#endif
+
 #ifdef WASM_MODULE
 
 #define OS_STRING "wasm"

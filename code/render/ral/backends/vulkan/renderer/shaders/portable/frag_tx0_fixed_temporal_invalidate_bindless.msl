@@ -1,0 +1,264 @@
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T>
+struct spvDescriptor
+{
+    T value;
+};
+
+template<typename T>
+struct spvDescriptorArray
+{
+    spvDescriptorArray(const device spvDescriptor<T>* ptr_) : ptr(&ptr_->value) {}
+    spvDescriptorArray(const device void *ptr_) : spvDescriptorArray(static_cast<const device spvDescriptor<T>*>(ptr_)) {}
+    const device T& operator [] (size_t i) const { return ptr[i]; }
+    const device T* ptr;
+};
+
+constant int alpha_test_func_tmp [[function_constant(0)]];
+constant int alpha_test_func = is_function_constant_defined(alpha_test_func_tmp) ? alpha_test_func_tmp : 0;
+constant bool _50 = (alpha_test_func == 1);
+constant float alpha_test_value_tmp [[function_constant(1)]];
+constant float alpha_test_value = is_function_constant_defined(alpha_test_value_tmp) ? alpha_test_value_tmp : 0.0;
+constant bool _69 = (alpha_test_func == 2);
+constant bool _80 = (alpha_test_func == 3);
+
+struct UBO
+{
+    float4 eyePos;
+    float4 lightPos;
+    float4 lightColor;
+    float4 lightVector;
+    float4 fogDistanceVector;
+    float4 fogDepthVector;
+    float4 fogEyeT;
+    float4 fogColor;
+    float4 _pad_to_packed_indices[26];
+    uint4 packed_indices[3];
+    float4 worldLightParams;
+    float4 advancedFogColorDensity;
+    float4 advancedFogTypeFarEnabled;
+};
+
+constant int tex_domain_tmp [[function_constant(4)]];
+constant int tex_domain = is_function_constant_defined(tex_domain_tmp) ? tex_domain_tmp : 0;
+constant int lightmap_slot_tmp [[function_constant(26)]];
+constant int lightmap_slot = is_function_constant_defined(lightmap_slot_tmp) ? lightmap_slot_tmp : 0;
+constant float identity_color_tmp [[function_constant(8)]];
+constant float identity_color = is_function_constant_defined(identity_color_tmp) ? identity_color_tmp : 1.0;
+constant float identity_alpha_tmp [[function_constant(9)]];
+constant float identity_alpha = is_function_constant_defined(identity_alpha_tmp) ? identity_alpha_tmp : 1.0;
+constant bool _316 = (alpha_test_func == 1);
+constant bool _326 = (alpha_test_func == 2);
+constant bool _336 = (alpha_test_func == 3);
+constant int discard_mode_tmp [[function_constant(7)]];
+constant int discard_mode = is_function_constant_defined(discard_mode_tmp) ? discard_mode_tmp : 0;
+constant bool _367 = (discard_mode == 1);
+constant bool _377 = (discard_mode == 2);
+constant int alpha_to_coverage_tmp [[function_constant(3)]];
+constant int alpha_to_coverage = is_function_constant_defined(alpha_to_coverage_tmp) ? alpha_to_coverage_tmp : 0;
+
+struct spvDescriptorSetBuffer0
+{
+    constant UBO* m_134 [[id(0)]];
+};
+
+struct spvDescriptorSetBuffer1
+{
+    spvDescriptor<texture2d<float>> wired_bindless_images [[id(0)]][1] /* unsized array hack */;
+    // Overlapping binding: spvDescriptor<sampler> wired_bindless_samplers [[id(0)]][1] /* unsized array hack */;
+};
+
+struct main0_out
+{
+    float4 out_color [[color(0)]];
+    float2 out_temporal_velocity [[color(1)]];
+    float out_temporal_validity [[color(2)]];
+};
+
+struct main0_in
+{
+    float2 frag_tex_coord0 [[user(locn1), centroid_perspective]];
+};
+
+static inline __attribute__((always_inline))
+float3 sRGBToLinear(thread float3& c)
+{
+    c = fast::max(c, float3(0.0));
+    bool3 cutoff = c <= float3(0.040449999272823333740234375);
+    float3 lo = c / float3(12.9200000762939453125);
+    float3 hi = powr((c + float3(0.054999999701976776123046875)) / float3(1.05499994754791259765625), float3(2.400000095367431640625));
+    return mix(hi, lo, float3(cutoff));
+}
+
+static inline __attribute__((always_inline))
+float4 wired_bl_sample_domain(thread const uint& role, thread const float2& uv, thread const int& slot, constant UBO& _134, const spvDescriptorArray<texture2d<float>> wired_bindless_images, const spvDescriptorArray<sampler> wired_bindless_samplers)
+{
+    uint _233 = _134.packed_indices[role / 4u][role % 4u] & 4095u;
+    uint _250 = (_134.packed_indices[role / 4u][role % 4u] >> uint(12)) & 255u;
+    float4 c = wired_bindless_images[_233].sample(wired_bindless_samplers[_250], uv);
+    if ((tex_domain & (1 << slot)) == 0)
+    {
+        float3 param = c.xyz;
+        float3 _269 = sRGBToLinear(param);
+        c.x = _269.x;
+        c.y = _269.y;
+        c.z = _269.z;
+    }
+    if (lightmap_slot == (slot + 1))
+    {
+        float4 _285 = c;
+        float3 _287 = _285.xyz * _134.worldLightParams.x;
+        c.x = _287.x;
+        c.y = _287.y;
+        c.z = _287.z;
+    }
+    return c;
+}
+
+static inline __attribute__((always_inline))
+bool wired_advanced_fog_enabled(constant UBO& _134)
+{
+    int fogType = int(_134.advancedFogTypeFarEnabled.x + 0.5);
+    return ((_134.advancedFogTypeFarEnabled.z > 0.5) && (fogType >= 1)) && (fogType <= 3);
+}
+
+static inline __attribute__((always_inline))
+float wired_advanced_fog_amount(constant UBO& _134, thread float4& gl_FragCoord)
+{
+    if (!wired_advanced_fog_enabled(_134))
+    {
+        return 0.0;
+    }
+    float viewDepth = 1.0 / fast::max(gl_FragCoord.w, 9.9999999747524270787835121154785e-07);
+    int fogType = int(_134.advancedFogTypeFarEnabled.x + 0.5);
+    if (fogType == 1)
+    {
+        if (_134.advancedFogTypeFarEnabled.y <= 0.0)
+        {
+            return 0.0;
+        }
+        return fast::clamp(viewDepth / _134.advancedFogTypeFarEnabled.y, 0.0, 1.0);
+    }
+    float opticalDepth = fast::max(_134.advancedFogColorDensity.w, 0.0) * viewDepth;
+    if (fogType == 2)
+    {
+        return fast::clamp(1.0 - exp(-opticalDepth), 0.0, 1.0);
+    }
+    return fast::clamp(1.0 - exp(-(opticalDepth * opticalDepth)), 0.0, 1.0);
+}
+
+static inline __attribute__((always_inline))
+float wiredTemporalAtestConfidence(thread const float& alpha)
+{
+    if (_50)
+    {
+        float span = fast::max(fast::max(alpha_test_value, 1.0 - alpha_test_value), 9.9999999747524270787835121154785e-07);
+        return fast::clamp(abs(alpha - alpha_test_value) / span, 0.0, 1.0);
+    }
+    else
+    {
+        if (_69)
+        {
+            return fast::clamp((alpha_test_value - alpha) / fast::max(alpha_test_value, 9.9999999747524270787835121154785e-07), 0.0, 1.0);
+        }
+        else
+        {
+            if (_80)
+            {
+                return fast::clamp((alpha - alpha_test_value) / fast::max(1.0 - alpha_test_value, 9.9999999747524270787835121154785e-07), 0.0, 1.0);
+            }
+        }
+    }
+    return 1.0;
+}
+
+static inline __attribute__((always_inline))
+void wiredTemporalWriteAux(thread const float& coverageConfidence, thread float2& out_temporal_velocity, thread float& out_temporal_validity)
+{
+    out_temporal_velocity = float2(0.0);
+    out_temporal_validity = 0.0;
+}
+
+fragment main0_out main0(main0_in in [[stage_in]], const device spvDescriptorSetBuffer0& spvDescriptorSet0 [[buffer(0)]], const device spvDescriptorSetBuffer1& spvDescriptorSet1 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    spvDescriptorArray<texture2d<float>> wired_bindless_images {spvDescriptorSet1.wired_bindless_images};
+    spvDescriptorArray<sampler> wired_bindless_samplers {reinterpret_cast<const device spvDescriptor<sampler>*>(&spvDescriptorSet1.wired_bindless_images)};
+
+    main0_out out = {};
+    float4 frag_color;
+    frag_color.x = identity_color;
+    frag_color.y = identity_color;
+    frag_color.z = identity_color;
+    frag_color.w = identity_alpha;
+    uint param = 0u;
+    float2 param_1 = in.frag_tex_coord0;
+    int param_2 = 0;
+    float4 color0 = wired_bl_sample_domain(param, param_1, param_2, (*spvDescriptorSet0.m_134), wired_bindless_images, wired_bindless_samplers) * frag_color;
+    float4 base = color0;
+    if (_316)
+    {
+        if (color0.w == alpha_test_value)
+        {
+            discard_fragment();
+        }
+    }
+    else
+    {
+        if (_326)
+        {
+            if (color0.w >= alpha_test_value)
+            {
+                discard_fragment();
+            }
+        }
+        else
+        {
+            if (_336)
+            {
+                if (color0.w < alpha_test_value)
+                {
+                    discard_fragment();
+                }
+            }
+        }
+    }
+    base = color0;
+    if (wired_advanced_fog_enabled((*spvDescriptorSet0.m_134)))
+    {
+        float fogAmount = wired_advanced_fog_amount((*spvDescriptorSet0.m_134), gl_FragCoord);
+        float4 _351 = base;
+        float3 _359 = mix(_351.xyz, (*spvDescriptorSet0.m_134).advancedFogColorDensity.xyz, float3(fogAmount));
+        base.x = _359.x;
+        base.y = _359.y;
+        base.z = _359.z;
+    }
+    if (_367)
+    {
+        if (base.w == 0.0)
+        {
+            discard_fragment();
+        }
+    }
+    else
+    {
+        if (_377)
+        {
+            if (dot(base.xyz, base.xyz) == 0.0)
+            {
+                discard_fragment();
+            }
+        }
+    }
+    out.out_color = base;
+    float param_3 = color0.w;
+    float param_4 = wiredTemporalAtestConfidence(param_3);
+    wiredTemporalWriteAux(param_4, out.out_temporal_velocity, out.out_temporal_validity);
+    return out;
+}
+

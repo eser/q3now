@@ -37,12 +37,12 @@ SET(_forbidden
 )
 
 FILE(GLOB_RECURSE _surface_files
-	"${SOURCE_ROOT}/code/renderer/ral/*.c"
-	"${SOURCE_ROOT}/code/renderer/ral/*.h"
-	"${SOURCE_ROOT}/code/renderer/ral_vulkan/*.c"
-	"${SOURCE_ROOT}/code/renderer/ral_vulkan/*.h"
-	"${SOURCE_ROOT}/code/renderervk/*.c"
-	"${SOURCE_ROOT}/code/renderervk/*.h"
+	"${SOURCE_ROOT}/code/render/ral/core/*.c"
+	"${SOURCE_ROOT}/code/render/ral/core/*.h"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/*.c"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/*.h"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/*.c"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/*.h"
 )
 FOREACH(_path IN LISTS _surface_files)
 	FILE(READ "${_path}" _body)
@@ -55,7 +55,7 @@ FOREACH(_path IN LISTS _surface_files)
 	ENDFOREACH()
 ENDFOREACH()
 
-SET(_pipeline_path "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_pipeline.c")
+SET(_pipeline_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_pipeline.c")
 FILE(READ "${_pipeline_path}" _pipeline)
 FOREACH(_required
 	"gpci.pNext = &dynRendering;"
@@ -70,7 +70,7 @@ ENDFOREACH()
 
 # Backend-native adoption/getter functions are a Vulkan migration bridge, not
 # portable RAL. Their declarations must live in exactly the backend bridge
-# header and must never leak back into code/renderer/ral/*.h.
+# header and must never leak back into code/render/ral/core/*.h.
 SET(_bridge_symbols
 	Ral_GetInstanceHandle
 	Ral_GetPhysicalDeviceHandle
@@ -109,9 +109,9 @@ SET(_bridge_symbols
 	Ral_AdoptBindGroup
 	Ral_GetBindGroupHandle
 )
-SET(_bridge_path "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_bridge.h")
+SET(_bridge_path "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_bridge.h")
 FILE(READ "${_bridge_path}" _bridge)
-FILE(GLOB _public_headers "${SOURCE_ROOT}/code/renderer/ral/*.h")
+FILE(GLOB _public_headers "${SOURCE_ROOT}/code/render/ral/core/*.h")
 FOREACH(_symbol IN LISTS _bridge_symbols)
 	STRING(FIND "${_bridge}" "${_symbol}(" _bridge_hit)
 	IF(_bridge_hit EQUAL -1)
@@ -130,8 +130,10 @@ ENDFOREACH()
 FILE(GLOB_RECURSE _all_sources
 	"${SOURCE_ROOT}/code/renderer/*.c"
 	"${SOURCE_ROOT}/code/renderer/*.h"
-	"${SOURCE_ROOT}/code/renderervk/*.c"
-	"${SOURCE_ROOT}/code/renderervk/*.h"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/*.c"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/*.h"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/*.c"
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/*.h"
 )
 SET(_bridge_include_owners)
 FOREACH(_path IN LISTS _all_sources)
@@ -144,10 +146,10 @@ FOREACH(_path IN LISTS _all_sources)
 ENDFOREACH()
 LIST(SORT _bridge_include_owners)
 SET(_expected_bridge_include_owners
-	"code/renderer/ral_vulkan/ral_vulkan_internal.h"
-	"code/renderervk/vk.c"
-	"code/renderervk/vk_ral_textures.h"
-	"code/renderervk/vk_temporal_entmat_runtime.c"
+	"code/render/ral/backends/vulkan/ral_vulkan_internal.h"
+	"code/render/ral/backends/vulkan/renderer/vk.c"
+	"code/render/ral/backends/vulkan/renderer/vk_ral_textures.h"
+	"code/render/ral/backends/vulkan/renderer/vk_temporal_entmat_runtime.c"
 )
 LIST(SORT _expected_bridge_include_owners)
 IF(NOT _bridge_include_owners STREQUAL _expected_bridge_include_owners)

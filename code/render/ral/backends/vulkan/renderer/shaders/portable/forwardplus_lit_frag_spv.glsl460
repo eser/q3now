@@ -1,0 +1,318 @@
+#version 460
+
+struct Light
+{
+    vec4 posRadius;
+    vec4 color;
+    vec4 posRadius2;
+};
+
+layout(binding = 2, std140) uniform DlightShadowParams
+{
+    mat4 shadowFaceMVP[24];
+    vec4 shadowLights[4];
+    vec4 shadowMeta;
+} _105;
+
+layout(binding = 0, std140) uniform UBO
+{
+    vec4 eyePos;
+    vec4 _pad_light[3];
+    vec4 fogDistanceVector;
+    vec4 fogDepthVector;
+    vec4 fogEyeT;
+    vec4 fogColor;
+    vec4 _pad_to_packed_indices[26];
+    uvec4 packed_indices[3];
+    vec4 _pad_worldLightParams;
+    vec4 advancedFogColorDensity;
+    vec4 advancedFogTypeFarEnabled;
+} _261;
+
+layout(binding = 1, std430) readonly buffer DLightParams
+{
+    Light dlights[];
+} _346;
+
+layout(binding = 1, std140) uniform TileParams
+{
+    vec4 tileParams;
+} _520;
+
+layout(binding = 0, std430) readonly buffer TileLights
+{
+    uint tileLights[];
+} _558;
+
+layout(binding = 3, std140) uniform ClusterGridParams
+{
+    vec4 gridOrigin;
+    ivec4 gridDims;
+} _611;
+
+layout(binding = 2, std430) readonly buffer ClusterLights
+{
+    uint clusterLights[];
+} _672;
+
+layout(binding = 1) uniform texture2D dlightShadowAtlas;
+layout(binding = 1) uniform sampler dlightShadowSampler;
+layout(binding = 0) uniform texture2D wired_bindless_images[64];
+layout(binding = 0) uniform sampler wired_bindless_samplers[32];
+
+layout(location = 0) in vec2 frag_tex_coord;
+layout(location = 2) in vec3 world_normal;
+layout(location = 3) in vec3 world_view;
+layout(location = 1) in vec3 world_pos;
+layout(location = 0) out vec4 out_color;
+
+vec3 sRGBToLinear(inout vec3 c)
+{
+    c = max(c, vec3(0.0));
+    bvec3 cutoff = lessThanEqual(c, vec3(0.040449999272823333740234375));
+    vec3 lo = c / vec3(12.9200000762939453125);
+    vec3 hi = pow((c + vec3(0.054999999701976776123046875)) / vec3(1.05499994754791259765625), vec3(2.400000095367431640625));
+    return mix(hi, lo, vec3(cutoff));
+}
+
+float dlightShadowOcclusion(vec3 worldPos, vec3 lightToFrag, int lightSlot)
+{
+    vec3 a = abs(lightToFrag);
+    bool _50 = a.x >= a.y;
+    bool _59;
+    if (_50)
+    {
+        _59 = a.x >= a.z;
+    }
+    else
+    {
+        _59 = _50;
+    }
+    int face;
+    if (_59)
+    {
+        face = (lightToFrag.x >= 0.0) ? 0 : 1;
+    }
+    else
+    {
+        if (a.y >= a.z)
+        {
+            face = (lightToFrag.y >= 0.0) ? 2 : 3;
+        }
+        else
+        {
+            face = (lightToFrag.z >= 0.0) ? 4 : 5;
+        }
+    }
+    int col = (lightSlot * 6) + face;
+    vec4 clip = _105.shadowFaceMVP[col] * vec4(worldPos, 1.0);
+    if (clip.w <= 0.0)
+    {
+        return 1.0;
+    }
+    vec3 ndc = clip.xyz / vec3(clip.w);
+    bool _134 = ndc.x < (-1.0);
+    bool _141;
+    if (!_134)
+    {
+        _141 = ndc.x > 1.0;
+    }
+    else
+    {
+        _141 = _134;
+    }
+    bool _148;
+    if (!_141)
+    {
+        _148 = ndc.y < (-1.0);
+    }
+    else
+    {
+        _148 = _141;
+    }
+    bool _155;
+    if (!_148)
+    {
+        _155 = ndc.y > 1.0;
+    }
+    else
+    {
+        _155 = _148;
+    }
+    bool _162;
+    if (!_155)
+    {
+        _162 = ndc.z > 1.0;
+    }
+    else
+    {
+        _162 = _155;
+    }
+    if (_162)
+    {
+        return 1.0;
+    }
+    vec2 faceUV = (ndc.xy * 0.5) + vec2(0.5);
+    float cols = max(_105.shadowMeta.y, 6.0);
+    vec2 atlasUV = vec2((float(col) + faceUV.x) / cols, faceUV.y);
+    float storedDepth = texture(sampler2D(dlightShadowAtlas, dlightShadowSampler), atlasUV).x;
+    float receiverDepth = ndc.z;
+    return ((receiverDepth - _105.shadowLights[lightSlot].z) > storedDepth) ? 0.0 : 1.0;
+}
+
+vec3 fp_light_contrib(uint li, vec3 Np, vec3 nV, vec4 base, vec3 world_pos_1)
+{
+    Light L;
+    L.posRadius = _346.dlights[li].posRadius;
+    L.color = _346.dlights[li].color;
+    L.posRadius2 = _346.dlights[li].posRadius2;
+    vec3 Lvec = L.posRadius.xyz - world_pos_1;
+    float falloff = L.color.w;
+    float intensFactor = 1.0 - (dot(Lvec, Lvec) * falloff);
+    if (intensFactor <= 0.0)
+    {
+        return vec3(0.0);
+    }
+    vec3 intens = L.color.xyz * intensFactor;
+    vec3 nL = normalize(Lvec);
+    float diffuse = max(dot(Np, nL), 0.0);
+    float specFactor = max(dot(Np, normalize(nL + nV)), 0.0);
+    vec4 spec = (vec4(pow(specFactor, 10.0) * 0.25) * base) * 0.800000011920928955078125;
+    float occ = 1.0;
+    int numShadowLights = int(_105.shadowMeta.x + 0.5);
+    for (int s = 0; s < numShadowLights; s++)
+    {
+        bool _429 = _105.shadowLights[s].y > 0.5;
+        bool _439;
+        if (_429)
+        {
+            _439 = uint(_105.shadowLights[s].x + 0.5) == li;
+        }
+        else
+        {
+            _439 = _429;
+        }
+        if (_439)
+        {
+            vec3 param = world_pos_1;
+            vec3 param_1 = -Lvec;
+            int param_2 = s;
+            occ = dlightShadowOcclusion(param, param_1, param_2);
+            break;
+        }
+    }
+    return (((base.xyz * diffuse) + spec.xyz) * intens) * occ;
+}
+
+bool wired_advanced_fog_enabled()
+{
+    int fogType = int(_261.advancedFogTypeFarEnabled.x + 0.5);
+    return ((_261.advancedFogTypeFarEnabled.z > 0.5) && (fogType >= 1)) && (fogType <= 3);
+}
+
+float wired_advanced_fog_amount()
+{
+    if (!wired_advanced_fog_enabled())
+    {
+        return 0.0;
+    }
+    float viewDepth = 1.0 / max(gl_FragCoord.w, 9.9999999747524270787835121154785e-07);
+    int fogType = int(_261.advancedFogTypeFarEnabled.x + 0.5);
+    if (fogType == 1)
+    {
+        if (_261.advancedFogTypeFarEnabled.y <= 0.0)
+        {
+            return 0.0;
+        }
+        return clamp(viewDepth / _261.advancedFogTypeFarEnabled.y, 0.0, 1.0);
+    }
+    float opticalDepth = max(_261.advancedFogColorDensity.w, 0.0) * viewDepth;
+    if (fogType == 2)
+    {
+        return clamp(1.0 - exp(-opticalDepth), 0.0, 1.0);
+    }
+    return clamp(1.0 - exp(-(opticalDepth * opticalDepth)), 0.0, 1.0);
+}
+
+void main()
+{
+    uint _476 = _261.packed_indices[0].x & 4095u;
+    uint _488 = (_261.packed_indices[0].x >> uint(12)) & 255u;
+    vec4 base = texture(sampler2D(wired_bindless_images[_476], wired_bindless_samplers[_488]), frag_tex_coord);
+    vec3 param = base.xyz;
+    vec3 _499 = sRGBToLinear(param);
+    base.x = _499.x;
+    base.y = _499.y;
+    base.z = _499.z;
+    uint tx = uint(gl_FragCoord.x) / 16u;
+    uint ty = uint(gl_FragCoord.y) / 16u;
+    uint tilesX = uint(_520.tileParams.z);
+    uint tilesY = uint(_520.tileParams.w);
+    if (tilesX == 0u)
+    {
+        tilesX = 1u;
+    }
+    if (tx >= tilesX)
+    {
+        tx = tilesX - 1u;
+    }
+    if (ty >= tilesY)
+    {
+        ty = tilesY - 1u;
+    }
+    uint tileBase = ((ty * tilesX) + tx) * 33u;
+    uint count = _558.tileLights[tileBase];
+    if (count > 32u)
+    {
+        count = 32u;
+    }
+    vec3 Np = normalize(world_normal);
+    vec3 nV = normalize(world_view);
+    vec3 lit = vec3(0.0);
+    for (uint k = 0u; k < count; k++)
+    {
+        uint param_1 = _558.tileLights[(tileBase + 1u) + k];
+        vec3 param_2 = Np;
+        vec3 param_3 = nV;
+        vec4 param_4 = base;
+        vec3 param_5 = world_pos;
+        lit += fp_light_contrib(param_1, param_2, param_3, param_4, param_5);
+    }
+    float cs = _611.gridOrigin.w;
+    if (cs > 0.0)
+    {
+        ivec3 cell = ivec3(floor((world_pos - _611.gridOrigin.xyz) / vec3(cs)));
+        bool _635 = all(greaterThanEqual(cell, ivec3(0)));
+        bool _645;
+        if (_635)
+        {
+            _645 = all(lessThan(cell, _611.gridDims.xyz));
+        }
+        else
+        {
+            _645 = _635;
+        }
+        if (_645)
+        {
+            int ci = (((cell.z * _611.gridDims.y) + cell.y) * _611.gridDims.x) + cell.x;
+            uint cBase = uint(ci) * 33u;
+            uint cN = _672.clusterLights[cBase];
+            if (cN > 32u)
+            {
+                cN = 32u;
+            }
+            for (uint k_1 = 0u; k_1 < cN; k_1++)
+            {
+                uint param_6 = _672.clusterLights[(cBase + 1u) + k_1];
+                vec3 param_7 = Np;
+                vec3 param_8 = nV;
+                vec4 param_9 = base;
+                vec3 param_10 = world_pos;
+                lit += fp_light_contrib(param_6, param_7, param_8, param_9, param_10);
+            }
+        }
+    }
+    lit *= (1.0 - wired_advanced_fog_amount());
+    out_color = vec4(lit, base.w);
+}
+

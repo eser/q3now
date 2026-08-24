@@ -60,12 +60,12 @@ git).
 ```sh
 # extract a few real q3now SPIR-V blobs from the generated shader_data.c:
 node code/tools/shader_xlate_spike/extract_spv.mjs \
-     code/renderervk/shaders/spirv/shader_data.c /tmp/spvtest \
+     code/render/ral/backends/vulkan/renderer/shaders/spirv/shader_data.c /tmp/spvtest \
      shadow_depth_vert_spv tonemap_frag_spv q1_ls_frag_spv
 # (or just use the .spv files that already exist:
-#   code/renderervk/shaders/spirv/iqm_skinning_{vert,frag}.spv
+#   code/render/ral/backends/vulkan/renderer/shaders/spirv/iqm_skinning_{vert,frag}.spv
 #  or compile a shader fresh:
-#   "$VULKAN_SDK/bin/glslangValidator" -V code/renderervk/shaders/tonemap.frag -o /tmp/tonemap.spv )
+#   "$VULKAN_SDK/bin/glslangValidator" -V code/render/ral/backends/vulkan/renderer/shaders/tonemap.frag -o /tmp/tonemap.spv )
 
 build/shader_xlate_spike/shader_xlate_spike.exe /tmp/spvtest/tonemap_frag_spv.spv /tmp/spvtest
 ```

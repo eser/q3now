@@ -37,7 +37,7 @@ _Static_assert( WN_MAX_LOCAL_CLIENTS == MAX_LOCAL_CGAME_VMS,
 LOG_DECLARE_CHANNEL( ch_network, "network" );
 LOG_DECLARE_CHANNEL( ch_network_common, "network.common" );
 
-#if !defined(HEADLESS)
+#if !defined(HEADLESS) && !defined(__EMSCRIPTEN__)
 #include "picotls/openssl.h"    /* ptls_openssl_verify_certificate_t, override callback */
 #include <openssl/sha.h>        /* SHA256 */
 #include <openssl/evp.h>        /* X509_get_pubkey, i2d_PUBKEY, EVP_PKEY_free */
@@ -870,7 +870,9 @@ static void WN_GameSendAdmission( wn_connection_t *conn, wn_game_conn_t *gc,
 		Com_Log( SEV_WARN, LOG_CH(ch_network),
 			"QUIC game: duplicate admission send terminal_close=1\n" );
 		conn->session_failed = qtrue;
+#if !defined(__EMSCRIPTEN__)
 		picoquic_close( conn->cnx, 1 );
+#endif
 		return;
 	}
 	if ( accepted ) {
@@ -897,7 +899,9 @@ static void WN_GameSendAdmission( wn_connection_t *conn, wn_game_conn_t *gc,
 			"QUIC game: admission send failed result=%d terminal_close=1\n",
 			sendResult );
 		conn->session_failed = qtrue;
+#if !defined(__EMSCRIPTEN__)
 		picoquic_close( conn->cnx, 1 );
+#endif
 		if ( !accepted && gc )
 			WN_GameFreeConn( gc );
 		return;
@@ -923,7 +927,9 @@ static void WN_GameSessionFail( wn_connection_t *conn, int failureClass ) {
 	Com_Log( SEV_WARN, LOG_CH(ch_network),
 		"QUIC game: malformed session stream class=%d terminal_close=1\n",
 		failureClass );
+#if !defined(__EMSCRIPTEN__)
 	if ( conn->cnx ) picoquic_close( conn->cnx, 1 );
+#endif
 }
 
 static void WN_GameHandleHandshakeMessage( wn_connection_t *conn,
@@ -1078,6 +1084,10 @@ void WN_GameHandleReliable( wn_connection_t *conn, uint64_t stream_id,
 
 void WN_SendGamePacketToAddr( const netadr_t *to, const void *data, int length )
 {
+#if defined(__EMSCRIPTEN__)
+	(void)to; (void)data; (void)length;
+	return;
+#else
 	wn_game_conn_t *gc;
 
 	if ( !wn.initialized || !wn.quic ) {
@@ -1102,6 +1112,7 @@ try_client:
 #else
 	Com_Log( SEV_DEBUG, LOG_CH(ch_network), "WN_SendGamePacketToAddr: no game conn for %s\n",
 		NET_AdrToStringwPort( to ) );
+#endif
 #endif
 }
 
@@ -1672,6 +1683,9 @@ static int WN_ClientCallback(
 
 static void WN_ClientFlushOutbound( void )
 {
+#if defined(__EMSCRIPTEN__)
+	return;
+#else
 	byte                     send_buf[WN_PACKET_BUF_SIZE];
 	size_t                   send_len;
 	size_t                   send_msg_size;
@@ -1745,6 +1759,7 @@ static void WN_ClientFlushOutbound( void )
 		wtcl_array[0].pending_disconnect = qfalse;
 		WN_ClientDisconnect();
 	}
+#endif
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -1756,6 +1771,7 @@ static void WN_ClientFlushOutbound( void )
  * cvar wn_cert_verify=0 disables TOFU (dev / offline mode).
  * ═══════════════════════════════════════════════════════════════════════ */
 
+#if !defined(__EMSCRIPTEN__)
 typedef struct {
 	ptls_openssl_override_verify_certificate_t base;
 	char addr[128];    /* "ip:port" key in known_servers.txt */
@@ -2056,6 +2072,7 @@ void WN_ClientConnect( const netadr_t *serverAddr,
 	Com_Log( SEV_INFO, LOG_CH(ch_network), "QUIC client: connecting to %s...\n",
 		NET_AdrToStringwPort( serverAddr ) );
 }
+#endif
 
 qboolean WN_ClientHasError( char *out, int outSize,
 	netConnectErrorKind_t *kind )
@@ -2085,6 +2102,9 @@ void WN_ClientFrame( void )
 
 void WN_ClientDisconnect( void )
 {
+#if defined(__EMSCRIPTEN__)
+	Q_SecureZeroMemory( &wtcl_array[0], sizeof( wtcl_array[0] ) );
+#else
 	picoquic_cnx_t  *cnx;
 	picoquic_quic_t *quic;
 	char connectError[sizeof( wtcl_array[0].connect_error )];
@@ -2122,6 +2142,7 @@ void WN_ClientDisconnect( void )
 			sizeof( wtcl_array[0].connect_error ) );
 	}
 	Q_SecureZeroMemory( connectError, sizeof( connectError ) );
+#endif
 }
 
 qboolean WN_ClientIsConnecting( void )
@@ -2131,6 +2152,10 @@ qboolean WN_ClientIsConnecting( void )
 
 qboolean WN_ClientCheckPacket( const netadr_t *from, byte *buf, int len )
 {
+#if defined(__EMSCRIPTEN__)
+	(void)from; (void)buf; (void)len;
+	return qfalse;
+#else
 	uint64_t               current_time;
 	struct sockaddr_storage ss_from;
 	struct sockaddr_in      ss_to;
@@ -2176,10 +2201,14 @@ qboolean WN_ClientCheckPacket( const netadr_t *from, byte *buf, int len )
 
 	WN_ClientFlushOutbound();
 	return qtrue;
+#endif
 }
 
 void WN_ClientSendPacket( const netadr_t *to, const void *data, int length )
 {
+#if defined(__EMSCRIPTEN__)
+	(void)to; (void)data; (void)length;
+#else
 	if ( !wtcl_array[0].initialized || !wtcl_array[0].cnx ) {
 		Com_Log( SEV_DEBUG, LOG_CH(ch_network), "WN_ClientSendPacket: no client connection\n" );
 		return;
@@ -2198,6 +2227,7 @@ void WN_ClientSendPacket( const netadr_t *to, const void *data, int length )
 		}
 	}
 	picoquic_queue_datagram_frame( wtcl_array[0].cnx, (size_t)length, (const uint8_t *)data );
+#endif
 }
 
 #endif /* !HEADLESS */
@@ -2633,6 +2663,7 @@ static void wn_get_address_string( conn_handle_t conn, char *buf, int buflen )
 	}
 }
 
+#if !defined(__EMSCRIPTEN__)
 transport_t quic_transport = {
 	/* Lifecycle */
 	wn_shutdown,
@@ -2676,3 +2707,4 @@ transport_t quic_transport = {
 	wn_get_bandwidth,
 	wn_get_address_string,
 };
+#endif

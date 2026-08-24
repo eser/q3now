@@ -5,9 +5,9 @@ IF(NOT DEFINED SOURCE_ROOT OR NOT IS_DIRECTORY "${SOURCE_ROOT}")
 	MESSAGE(FATAL_ERROR "SOURCE_ROOT must name the q3now source tree")
 ENDIF()
 
-FILE(READ "${SOURCE_ROOT}/code/renderer/ral/ral_command.h" RAL_HEADER)
-FILE(READ "${SOURCE_ROOT}/code/renderer/ral_vulkan/ral_vulkan_command.c" COMMAND)
-FILE(READ "${SOURCE_ROOT}/code/renderervk/vk.c" VK_SOURCE)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/core/ral_command.h" RAL_HEADER)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/ral_vulkan_command.c" COMMAND)
+FILE(READ "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/vk.c" VK_SOURCE)
 FILE(READ "${SOURCE_ROOT}/tests/ral_vulkan_dynamic_bind_test.c" HOST)
 
 FUNCTION(REQUIRE_TEXT BODY NEEDLE MESSAGE_TEXT)
@@ -105,7 +105,7 @@ REQUIRE_COUNT("${VK_SOURCE}" "Ral_CmdClearAttachmentsExact( vk.cmd->ral_cmd" 2
 	"product exact clear inventory changed")
 
 FILE(GLOB_RECURSE PRODUCT_SOURCES
-	"${SOURCE_ROOT}/code/renderervk/*.c" "${SOURCE_ROOT}/code/renderervk/*.h")
+	"${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/*.c" "${SOURCE_ROOT}/code/render/ral/backends/vulkan/renderer/*.h")
 FOREACH(PATH IN LISTS PRODUCT_SOURCES)
 	FILE(READ "${PATH}" BODY)
 	FORBID_TEXT("${BODY}" "qvkCmdClearAttachments"

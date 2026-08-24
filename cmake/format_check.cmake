@@ -20,8 +20,8 @@ SET(_dirs
     code/qcommon
     code/renderer
     code/renderer2
-    code/renderercommon
-    code/renderervk
+    code/render/frontend
+    code/render/ral/backends/vulkan/renderer
     code/sdl
     code/server
     code/unix

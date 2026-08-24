@@ -1,0 +1,133 @@
+#version 460
+
+layout(std140, binding = 0) uniform TemporalIqmSurfacePush
+{
+    uint imageSlot;
+    uint samplerSlot;
+} surfacePush;
+
+layout(binding = 0) uniform texture2D wired_bindless_images[64];
+layout(binding = 0) uniform sampler wired_bindless_samplers[32];
+
+layout(location = 0) in vec2 frag_tex_coord;
+layout(location = 0) out vec4 out_color;
+layout(location = 1) out vec2 out_temporal_velocity;
+layout(location = 2) out float out_temporal_validity;
+layout(location = 10) in vec4 temporalCurrentClip;
+layout(location = 11) in vec4 temporalPreviousClip;
+layout(location = 1) in vec3 frag_normal;
+layout(location = 2) in vec4 frag_tangent;
+
+vec3 sRGBToLinear(inout vec3 c)
+{
+    c = max(c, vec3(0.0));
+    bvec3 cutoff = lessThanEqual(c, vec3(0.040449999272823333740234375));
+    vec3 lo = c / vec3(12.9200000762939453125);
+    vec3 hi = pow((c + vec3(0.054999999701976776123046875)) / vec3(1.05499994754791259765625), vec3(2.400000095367431640625));
+    return mix(hi, lo, vec3(cutoff));
+}
+
+bool wiredTemporalFinite4(vec4 value)
+{
+    bool _66 = all(equal(value, value));
+    bool _75;
+    if (_66)
+    {
+        _75 = all(lessThanEqual(abs(value), vec4(3.4028234663852885981170418348452e+38)));
+    }
+    else
+    {
+        _75 = _66;
+    }
+    return _75;
+}
+
+bool wiredTemporalFinite2(vec2 value)
+{
+    bool _82 = all(equal(value, value));
+    bool _90;
+    if (_82)
+    {
+        _90 = all(lessThanEqual(abs(value), vec2(3.4028234663852885981170418348452e+38)));
+    }
+    else
+    {
+        _90 = _82;
+    }
+    return _90;
+}
+
+void main()
+{
+    uint _107 = surfacePush.imageSlot;
+    uint _118 = surfacePush.samplerSlot;
+    vec4 sampled = texture(sampler2D(wired_bindless_images[_107], wired_bindless_samplers[_118]), frag_tex_coord);
+    vec3 param = sampled.xyz;
+    vec3 _133 = sRGBToLinear(param);
+    out_color = vec4(_133, sampled.w);
+    out_temporal_velocity = vec2(0.0);
+    out_temporal_validity = 0.0;
+    vec4 param_1 = temporalCurrentClip;
+    bool _152 = !wiredTemporalFinite4(param_1);
+    bool _161;
+    if (!_152)
+    {
+        vec4 param_2 = temporalPreviousClip;
+        _161 = !wiredTemporalFinite4(param_2);
+    }
+    else
+    {
+        _161 = _152;
+    }
+    bool _170;
+    if (!_161)
+    {
+        _170 = temporalCurrentClip.w <= 9.9999999747524270787835121154785e-07;
+    }
+    else
+    {
+        _170 = _161;
+    }
+    bool _177;
+    if (!_170)
+    {
+        _177 = temporalPreviousClip.w <= 9.9999999747524270787835121154785e-07;
+    }
+    else
+    {
+        _177 = _170;
+    }
+    if (_177)
+    {
+        return;
+    }
+    vec2 currentNdc = temporalCurrentClip.xy / vec2(temporalCurrentClip.w);
+    vec2 previousNdc = temporalPreviousClip.xy / vec2(temporalPreviousClip.w);
+    vec2 param_3 = currentNdc;
+    bool _198 = !wiredTemporalFinite2(param_3);
+    bool _206;
+    if (!_198)
+    {
+        vec2 param_4 = previousNdc;
+        _206 = !wiredTemporalFinite2(param_4);
+    }
+    else
+    {
+        _206 = _198;
+    }
+    if (_206)
+    {
+        return;
+    }
+    vec2 currentUv = (currentNdc * 0.5) + vec2(0.5);
+    vec2 previousUv = (previousNdc * 0.5) + vec2(0.5);
+    vec2 velocity = currentUv - previousUv;
+    vec2 param_5 = velocity;
+    if (!wiredTemporalFinite2(param_5))
+    {
+        return;
+    }
+    out_temporal_velocity = velocity;
+    out_temporal_validity = 1.0;
+}
+

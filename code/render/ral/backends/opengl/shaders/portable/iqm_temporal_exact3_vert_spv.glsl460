@@ -1,0 +1,203 @@
+#version 460
+
+struct TemporalIqmRecord
+{
+    vec4 currentBones[384];
+    vec4 previousBones[384];
+    mat4 rasterMvp;
+    mat4 temporalCurrentMvp;
+    mat4 temporalPreviousMvp;
+};
+
+layout(binding = 0, std430) readonly buffer TemporalIqmPayload
+{
+    TemporalIqmRecord records[];
+} temporalIqmPayload;
+
+layout(location = 4) in vec4 in_bone_weights;
+layout(location = 5) in uvec4 in_bone_indices;
+layout(location = 0) in vec3 in_position;
+layout(location = 0) out vec2 frag_tex_coord;
+layout(location = 1) out vec3 frag_normal;
+layout(location = 2) out vec4 frag_tangent;
+layout(location = 10) out vec4 temporalCurrentClip;
+layout(location = 11) out vec4 temporalPreviousClip;
+layout(location = 1) in vec3 in_normal;
+layout(location = 3) in vec4 in_tangent;
+layout(location = 2) in vec2 in_tex_coord;
+
+vec4 currentBoneRow(uint recordIndex, uint index, uint row)
+{
+    uint offset = (index * 3u) + row;
+    return temporalIqmPayload.records[recordIndex].currentBones[offset];
+}
+
+vec3 transformCurrentPosition(uint recordIndex, uint index, vec3 position)
+{
+    uint param = recordIndex;
+    uint param_1 = index;
+    uint param_2 = 0u;
+    uint param_3 = recordIndex;
+    uint param_4 = index;
+    uint param_5 = 1u;
+    uint param_6 = recordIndex;
+    uint param_7 = index;
+    uint param_8 = 2u;
+    return vec3(dot(currentBoneRow(param, param_1, param_2), vec4(position, 1.0)), dot(currentBoneRow(param_3, param_4, param_5), vec4(position, 1.0)), dot(currentBoneRow(param_6, param_7, param_8), vec4(position, 1.0)));
+}
+
+vec3 skinCurrentPosition(uint recordIndex)
+{
+    uint param = recordIndex;
+    uint param_1 = in_bone_indices.x;
+    vec3 param_2 = in_position;
+    vec3 value = transformCurrentPosition(param, param_1, param_2) * in_bone_weights.x;
+    if (in_bone_weights.y > 0.0)
+    {
+        uint param_3 = recordIndex;
+        uint param_4 = in_bone_indices.y;
+        vec3 param_5 = in_position;
+        value += (transformCurrentPosition(param_3, param_4, param_5) * in_bone_weights.y);
+    }
+    if (in_bone_weights.z > 0.0)
+    {
+        uint param_6 = recordIndex;
+        uint param_7 = in_bone_indices.z;
+        vec3 param_8 = in_position;
+        value += (transformCurrentPosition(param_6, param_7, param_8) * in_bone_weights.z);
+    }
+    if (in_bone_weights.w > 0.0)
+    {
+        uint param_9 = recordIndex;
+        uint param_10 = in_bone_indices.w;
+        vec3 param_11 = in_position;
+        value += (transformCurrentPosition(param_9, param_10, param_11) * in_bone_weights.w);
+    }
+    return value;
+}
+
+vec4 previousBoneRow(uint recordIndex, uint index, uint row)
+{
+    uint offset = (index * 3u) + row;
+    return temporalIqmPayload.records[recordIndex].previousBones[offset];
+}
+
+vec3 transformPreviousPosition(uint recordIndex, uint index, vec3 position)
+{
+    uint param = recordIndex;
+    uint param_1 = index;
+    uint param_2 = 0u;
+    uint param_3 = recordIndex;
+    uint param_4 = index;
+    uint param_5 = 1u;
+    uint param_6 = recordIndex;
+    uint param_7 = index;
+    uint param_8 = 2u;
+    return vec3(dot(previousBoneRow(param, param_1, param_2), vec4(position, 1.0)), dot(previousBoneRow(param_3, param_4, param_5), vec4(position, 1.0)), dot(previousBoneRow(param_6, param_7, param_8), vec4(position, 1.0)));
+}
+
+vec3 skinPreviousPosition(uint recordIndex)
+{
+    uint param = recordIndex;
+    uint param_1 = in_bone_indices.x;
+    vec3 param_2 = in_position;
+    vec3 value = transformPreviousPosition(param, param_1, param_2) * in_bone_weights.x;
+    if (in_bone_weights.y > 0.0)
+    {
+        uint param_3 = recordIndex;
+        uint param_4 = in_bone_indices.y;
+        vec3 param_5 = in_position;
+        value += (transformPreviousPosition(param_3, param_4, param_5) * in_bone_weights.y);
+    }
+    if (in_bone_weights.z > 0.0)
+    {
+        uint param_6 = recordIndex;
+        uint param_7 = in_bone_indices.z;
+        vec3 param_8 = in_position;
+        value += (transformPreviousPosition(param_6, param_7, param_8) * in_bone_weights.z);
+    }
+    if (in_bone_weights.w > 0.0)
+    {
+        uint param_9 = recordIndex;
+        uint param_10 = in_bone_indices.w;
+        vec3 param_11 = in_position;
+        value += (transformPreviousPosition(param_9, param_10, param_11) * in_bone_weights.w);
+    }
+    return value;
+}
+
+vec3 transformDirection(uint recordIndex, uint index, vec3 direction)
+{
+    uint param = recordIndex;
+    uint param_1 = index;
+    uint param_2 = 0u;
+    uint param_3 = recordIndex;
+    uint param_4 = index;
+    uint param_5 = 1u;
+    uint param_6 = recordIndex;
+    uint param_7 = index;
+    uint param_8 = 2u;
+    return vec3(dot(currentBoneRow(param, param_1, param_2).xyz, direction), dot(currentBoneRow(param_3, param_4, param_5).xyz, direction), dot(currentBoneRow(param_6, param_7, param_8).xyz, direction));
+}
+
+vec3 skinDirection(uint recordIndex, vec3 direction)
+{
+    uint param = recordIndex;
+    uint param_1 = in_bone_indices.x;
+    vec3 param_2 = direction;
+    vec3 value = transformDirection(param, param_1, param_2) * in_bone_weights.x;
+    if (in_bone_weights.y > 0.0)
+    {
+        uint param_3 = recordIndex;
+        uint param_4 = in_bone_indices.y;
+        vec3 param_5 = direction;
+        value += (transformDirection(param_3, param_4, param_5) * in_bone_weights.y);
+    }
+    if (in_bone_weights.z > 0.0)
+    {
+        uint param_6 = recordIndex;
+        uint param_7 = in_bone_indices.z;
+        vec3 param_8 = direction;
+        value += (transformDirection(param_6, param_7, param_8) * in_bone_weights.z);
+    }
+    if (in_bone_weights.w > 0.0)
+    {
+        uint param_9 = recordIndex;
+        uint param_10 = in_bone_indices.w;
+        vec3 param_11 = direction;
+        value += (transformDirection(param_9, param_10, param_11) * in_bone_weights.w);
+    }
+    return value;
+}
+
+void main()
+{
+    uint recordIndex = uint(gl_InstanceIndex);
+    if (recordIndex >= 256u)
+    {
+        gl_Position = vec4(0.0, 0.0, -2.0, 1.0);
+        frag_tex_coord = vec2(0.0);
+        frag_normal = vec3(0.0);
+        frag_tangent = vec4(0.0);
+        temporalCurrentClip = vec4(0.0);
+        temporalPreviousClip = vec4(0.0);
+        return;
+    }
+    uint param = recordIndex;
+    vec3 currentPosition = skinCurrentPosition(param);
+    uint param_1 = recordIndex;
+    vec3 previousPosition = skinPreviousPosition(param_1);
+    uint param_2 = recordIndex;
+    vec3 param_3 = in_normal;
+    vec3 currentNormal = skinDirection(param_2, param_3);
+    uint param_4 = recordIndex;
+    vec3 param_5 = in_tangent.xyz;
+    vec3 currentTangent = skinDirection(param_4, param_5);
+    gl_Position = temporalIqmPayload.records[recordIndex].rasterMvp * vec4(currentPosition, 1.0);
+    temporalCurrentClip = temporalIqmPayload.records[recordIndex].temporalCurrentMvp * vec4(currentPosition, 1.0);
+    temporalPreviousClip = temporalIqmPayload.records[recordIndex].temporalPreviousMvp * vec4(previousPosition, 1.0);
+    frag_tex_coord = in_tex_coord;
+    frag_normal = normalize(currentNormal);
+    frag_tangent = vec4(normalize(currentTangent), in_tangent.w);
+}
+

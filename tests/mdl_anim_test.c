@@ -6,7 +6,7 @@
 // The Q1-monster animation path derives frame ranges by prefix-grouping the .mdl
 // frame names (carried into md3Frame_t.name by the loader): strip trailing digits
 // -> label; a contiguous run of same-label frames is one range. This test drives
-// the REAL derivation (MDL_DeriveAnimRanges, code/renderercommon/tr_model_mdl.c)
+// the REAL derivation (MDL_DeriveAnimRanges, code/render/frontend/tr_model_mdl.c)
 // with the REAL soldier.mdl frame-name prefixes and asserts the ranges come out
 // correct — including the id convention that variant letters precede the digits
 // ("painb1", "deathc1") so the parse separates pain/painb/painc cleanly and never
@@ -35,7 +35,7 @@
 // test the REAL MDL_DeriveAnimRanges (+ a local mdlAnimRange_t matching tr_types.h)
 // with no renderer link — so a derivation bug shows here, not only at runtime.
 #define MDL_ANIM_TEST_STANDALONE 1
-#include "../code/renderercommon/tr_model_mdl_anim.h"
+#include "../code/render/frontend/tr_model_mdl_anim.h"
 
 static int failures = 0;
 #define CHECK( cond, msg ) do { \

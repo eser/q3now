@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 1999-2005 Id Software, Inc.
 // SPDX-FileCopyrightText: 2024-present Wired Engine contributors
 #include "tr_local.h"
-#include "../renderercommon/r_log.h"  // rilog-channel-mechanism Turn C — renderer.shaders
+#include "../render/frontend/r_log.h"  // rilog-channel-mechanism Turn C — renderer.shaders
 #include "../qcommon/maps/meta.h"
 
 R_LOG_DECLARE_CHANNEL( rch_shaders, "renderer.shaders" );
@@ -3340,7 +3340,7 @@ shader_t *R_FindShaderByName( const char *name ) {
 }
 
 
-#include "../renderercommon/r_q1_shaderbuild.inc"
+#include "../render/frontend/r_q1_shaderbuild.inc"
 
 /*
 ===============

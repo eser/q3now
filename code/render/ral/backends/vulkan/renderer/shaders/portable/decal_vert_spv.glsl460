@@ -1,0 +1,154 @@
+#version 460
+
+struct Decal
+{
+    vec4 originRadius;
+    vec4 normalOrient;
+    vec4 rgba;
+    uint textureIndex;
+    float spawnTime;
+    float lifetimeInv;
+    uint blendMode;
+};
+
+layout(constant_id = 0) const uint DECAL_BLEND_MODE = 0u;
+const vec2 _235[6] = vec2[](vec2(-1.0), vec2(-1.0, 1.0), vec2(1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0), vec2(1.0));
+const vec2 _279[6] = vec2[](vec2(0.0), vec2(0.0, 1.0), vec2(1.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0));
+const bool _286 = (DECAL_BLEND_MODE == 0u);
+
+layout(binding = 0, std140) uniform DecalFrame
+{
+    mat4 mvp;
+    vec4 timeCount;
+    mat4 invMvp;
+    vec4 reconParams;
+} _57;
+
+layout(binding = 0, std430) readonly buffer Pool
+{
+    Decal decals[];
+} _76;
+
+layout(location = 0) out vec2 fragUV;
+layout(location = 1) out vec4 fragColor;
+layout(location = 2) flat out uint fragTextureIndex;
+layout(location = 3) flat out vec3 fragDecalOrigin;
+layout(location = 4) flat out vec3 fragDecalTangent;
+layout(location = 5) flat out vec3 fragDecalBitangent;
+layout(location = 6) flat out vec3 fragDecalNormal;
+layout(location = 7) flat out float fragDecalRadius;
+layout(location = 8) flat out uint fragNoProject;
+
+void emitDegenerate()
+{
+    gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
+    fragUV = vec2(0.0);
+    fragColor = vec4(0.0);
+    fragTextureIndex = 0u;
+    fragDecalOrigin = vec3(0.0);
+    fragDecalTangent = vec3(0.0);
+    fragDecalBitangent = vec3(0.0);
+    fragDecalNormal = vec3(0.0);
+    fragDecalRadius = 0.0;
+    fragNoProject = 0u;
+}
+
+void main()
+{
+    uint decalIdx = uint(gl_InstanceIndex);
+    uint vertInQuad = uint(gl_VertexIndex) % 6u;
+    if (float(decalIdx) >= _57.timeCount.y)
+    {
+        emitDegenerate();
+        return;
+    }
+    Decal d;
+    d.originRadius = _76.decals[decalIdx].originRadius;
+    d.normalOrient = _76.decals[decalIdx].normalOrient;
+    d.rgba = _76.decals[decalIdx].rgba;
+    d.textureIndex = _76.decals[decalIdx].textureIndex;
+    d.spawnTime = _76.decals[decalIdx].spawnTime;
+    d.lifetimeInv = _76.decals[decalIdx].lifetimeInv;
+    d.blendMode = _76.decals[decalIdx].blendMode;
+    bool _104 = d.spawnTime == 0.0;
+    bool _110;
+    if (_104)
+    {
+        _110 = d.lifetimeInv == 0.0;
+    }
+    else
+    {
+        _110 = _104;
+    }
+    if (_110)
+    {
+        emitDegenerate();
+        return;
+    }
+    if (d.blendMode != DECAL_BLEND_MODE)
+    {
+        emitDegenerate();
+        return;
+    }
+    float fadeAlpha = 1.0;
+    if (d.lifetimeInv > 0.0)
+    {
+        float age = _57.timeCount.x - d.spawnTime;
+        float frac = age * d.lifetimeInv;
+        if (frac >= 1.0)
+        {
+            emitDegenerate();
+            return;
+        }
+        fadeAlpha = clamp((1.0 - frac) / 0.100000001490116119384765625, 0.0, 1.0);
+    }
+    vec3 origin = d.originRadius.xyz;
+    float radius = d.originRadius.w;
+    vec3 normal = d.normalOrient.xyz;
+    float roll = d.normalOrient.w;
+    float nlen = length(normal);
+    if (nlen < 9.9999997473787516355514526367188e-05)
+    {
+        emitDegenerate();
+        return;
+    }
+    normal /= vec3(nlen);
+    vec3 up = vec3(0.0, 0.0, 1.0);
+    vec3 tangent = cross(normal, up);
+    if (dot(tangent, tangent) < 9.9999999747524270787835121154785e-07)
+    {
+        tangent = cross(normal, vec3(1.0, 0.0, 0.0));
+    }
+    tangent = normalize(tangent);
+    vec3 bitangent = normalize(cross(normal, tangent));
+    float cs = cos(roll);
+    float sn = sin(roll);
+    vec3 rTangent = (tangent * cs) + (bitangent * sn);
+    vec3 rBitangent = (tangent * (-sn)) + (bitangent * cs);
+    vec2 c = _235[vertInQuad];
+    float zbias = max(radius * 0.0199999995529651641845703125, 0.5);
+    vec3 worldPos = ((origin + (rTangent * (c.x * radius))) + (rBitangent * (c.y * radius))) + (normal * zbias);
+    gl_Position = _57.mvp * vec4(worldPos, 1.0);
+    fragUV = _279[vertInQuad];
+    fragColor = d.rgba;
+    if (_286)
+    {
+        fragColor.w *= fadeAlpha;
+    }
+    else
+    {
+        vec4 _296 = fragColor;
+        vec3 _298 = _296.xyz * fadeAlpha;
+        fragColor.x = _298.x;
+        fragColor.y = _298.y;
+        fragColor.z = _298.z;
+    }
+    fragTextureIndex = d.textureIndex & 2147483647u;
+    fragNoProject = (d.textureIndex >> 31u) & 1u;
+    fragDecalOrigin = origin;
+    fragDecalTangent = rTangent;
+    fragDecalBitangent = rBitangent;
+    fragDecalNormal = normal;
+    fragDecalRadius = radius;
+}
+
